@@ -1,0 +1,26 @@
+{
+  "name": "artibot",
+  "version": "1.0.0",
+  "description": "Intelligent orchestration framework with expert agent teams, domain skills, and workflow automation for Claude Code",
+  "author": {
+    "name": "Artience"
+  },
+  "repository": "https://github.com/artience/artibot",
+  "license": "MIT",
+  "keywords": [
+    "orchestration",
+    "agent-teams",
+    "personas",
+    "workflow",
+    "tdd",
+    "code-review",
+    "security",
+    "quality",
+    "mcp"
+  ],
+  "agents": "./agents",
+  "commands": "./commands",
+  "hooks": "./hooks/hooks.json",
+  "mcpServers": "./.mcp.json",
+  "outputStyles": "./output-styles/"
+}

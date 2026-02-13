@@ -1,0 +1,115 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-hooks.json",
+  "description": "Artibot v1.0.0 - Claude Code Plugin Hooks",
+  "hooks": {
+    "SessionStart": [
+      {
+        "once": true,
+        "hooks": [{
+          "type": "command",
+          "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/session-start.js",
+          "timeout": 5000
+        }]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [{
+          "type": "command",
+          "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-write.js",
+          "timeout": 5000
+        }]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [{
+          "type": "command",
+          "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-bash.js",
+          "timeout": 5000
+        }]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit",
+        "hooks": [{
+          "type": "command",
+          "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/post-edit-format.js",
+          "timeout": 10000
+        }]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [{
+          "type": "command",
+          "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/post-bash.js",
+          "timeout": 5000
+        }]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [{
+          "type": "command",
+          "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-compact.js",
+          "timeout": 5000
+        }]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [{
+          "type": "command",
+          "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/check-console-log.js",
+          "timeout": 10000
+        }]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [{
+          "type": "command",
+          "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/user-prompt-handler.js",
+          "timeout": 3000
+        }]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [{
+          "type": "command",
+          "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/subagent-handler.js start",
+          "timeout": 5000
+        }]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [{
+          "type": "command",
+          "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/subagent-handler.js stop",
+          "timeout": 5000
+        }]
+      }
+    ],
+    "TeammateIdle": [
+      {
+        "hooks": [{
+          "type": "command",
+          "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/team-idle-handler.js",
+          "timeout": 5000
+        }]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [{
+          "type": "command",
+          "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/session-end.js",
+          "timeout": 10000
+        }]
+      }
+    ]
+  }
+}

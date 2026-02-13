@@ -1,0 +1,12 @@
+node_modules/
+.DS_Store
+*.log
+.env
+.env.*
+temp-repos/
+_reference_repos/
+_refs/
+_analysis/
+repos/
+refs/
+nul

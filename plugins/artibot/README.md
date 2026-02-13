@@ -1,0 +1,602 @@
+# Artibot
+
+Claude Code를 위한 **Agent Teams 기반** 지능형 오케스트레이션 플러그인. Claude의 네이티브 Agent Teams API를 핵심 엔진으로 사용하여 전문 에이전트 팀 구성, P2P 통신, 공유 태스크 관리를 통해 개발 생산성을 극대화합니다.
+
+## 목차
+
+- [핵심 특징](#핵심-특징)
+- [설치](#설치)
+- [빠른 시작](#빠른-시작)
+- [Agent Teams 아키텍처](#agent-teams-아키텍처)
+- [커맨드 레퍼런스](#커맨드-레퍼런스)
+- [에이전트 시스템](#에이전트-시스템)
+- [스킬 시스템](#스킬-시스템)
+- [훅 시스템](#훅-시스템)
+- [MCP 통합](#mcp-통합)
+- [설정](#설정)
+- [디렉토리 구조](#디렉토리-구조)
+
+---
+
+## 핵심 특징
+
+### Claude Agent Teams API 네이티브 통합
+
+Artibot의 핵심 엔진은 Claude Code의 **Agent Teams API**입니다. 단순한 서브에이전트(Task) 패턴이 아닌, 진정한 팀 오케스트레이션을 제공합니다.
+
+| 기능 | 서브에이전트 (기존) | Agent Teams (Artibot) |
+|------|---------------------|----------------------|
+| 통신 | 부모에게만 결과 반환 | P2P 양방향 메시징 (SendMessage) |
+| 태스크 관리 | 부모가 전체 관리 | 공유 태스크 리스트 (TaskCreate/TaskList) |
+| 자기 할당 | 불가 | 팀원이 스스로 태스크 선택 (TaskUpdate) |
+| 팀원간 소통 | 불가 | 직접 DM + 브로드캐스트 |
+| 계획 승인 | 불가 | plan_approval_response |
+| 생명주기 | 일회성 | 생성 → 작업 → 종료 → 정리 |
+
+**사용하는 Agent Teams API 도구:**
+- `TeamCreate` - 팀 생성
+- `SendMessage` - DM, 브로드캐스트, 셧다운 요청/응답, 계획 승인
+- `TaskCreate` / `TaskUpdate` / `TaskList` / `TaskGet` - 공유 태스크 관리
+- `Task(type, team_name, name)` - 팀원 스폰
+- `TeamDelete` - 팀 리소스 정리
+
+### CTO-Led 팀 오케스트레이션
+
+- **orchestrator** 에이전트가 팀 리더(CTO)로서 17개 전문 에이전트를 팀으로 구성
+- Delegation 모드: 리더는 조율만 담당, 직접 코드 작성 안함
+- 5가지 오케스트레이션 패턴: Leader, Council, Swarm, Pipeline, Watchdog
+- 3단계 팀 규모: Solo(0명), Squad(3명), Platoon(5명)
+- 4가지 플레이북: feature, bugfix, refactor, security
+
+### 지능형 위임 모드 선택
+
+복잡도에 따라 **Sub-Agent** vs **Agent Team** 자동 선택:
+- **Sub-Agent Mode** (score < 0.6): 단순 작업. Task() 단방향 위임
+- **Agent Team Mode** (score >= 0.6): 복잡 작업. TeamCreate → P2P 협업
+
+### 27개 슬래시 커맨드
+
+- `/sc`로 자연어 의도를 분석하여 최적 커맨드로 자동 라우팅
+- 개발, 분석, 품질, 테스트, 문서화, 배포 전 영역 커버
+
+### 25개 도메인 스킬
+
+- 11개 페르소나 스킬 (architect, frontend, backend, security 등)
+- 6개 코어 스킬 (orchestration, principles, coding/security/testing standards)
+- 8개 유틸리티 스킬 (git-workflow, tdd, delegation, MCP 연동 등)
+
+### 지능형 훅 시스템
+
+- 10개 이벤트에 11개 자동화 스크립트
+- 위험 명령 차단, 민감 파일 보호, 자동 포맷, PR 감지, 팀원 생명주기 추적
+
+### Zero External Dependencies
+
+- Node.js 내장 모듈만 사용 (`node:fs`, `node:path`, `node:os`)
+
+---
+
+## 설치
+
+### 사전 요구사항
+
+**Agent Teams 활성화** (필수):
+```json
+// ~/.claude/settings.json
+{
+  "env": {
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
+  }
+}
+```
+
+### Claude Code Marketplace (권장)
+```bash
+claude plugin install artibot
+```
+
+### 수동 설치
+```bash
+git clone https://github.com/artience/artibot.git
+cp -r artibot/plugins/artibot ~/.claude/plugins/artibot
+```
+
+### 요구사항
+- Claude Code CLI
+- Node.js >= 18.0.0
+- `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` 환경 변수
+
+---
+
+## 빠른 시작
+
+### 1. 자동 라우팅
+
+```
+/sc 로그인 기능을 구현해줘
+→ /implement로 라우팅 → TeamCreate → planner + architect + developer + reviewer 팀 구성
+```
+
+```
+/sc 이 코드의 보안 취약점을 분석해줘
+→ /analyze --focus security → security-reviewer 서브에이전트 위임 (단순 작업)
+```
+
+### 2. 직접 커맨드
+
+```
+/implement 사용자 인증 API --type api --tdd
+/code-review @src/auth/
+/test --coverage
+/git commit
+```
+
+### 3. 팀 오케스트레이션
+
+복잡한 작업에는 Agent Teams를 활용합니다:
+
+```
+/orchestrate 결제 시스템 구현 --pattern feature
+→ TeamCreate("payment-feature")
+→ Task(planner, team_name, "planner") + Task(architect, team_name, "architect") + ...
+→ TaskCreate per phase (plan → design → implement → review)
+→ TaskUpdate로 의존성 설정 + 팀원 할당
+→ SendMessage로 팀원간 조율
+→ shutdown_request → TeamDelete
+```
+
+### 4. 팀 스폰 (병렬 작업)
+
+```
+/spawn 전체 코드베이스 보안 감사 --mode parallel --agents 5
+→ TeamCreate("security-audit")
+→ 5명 팀원 스폰 (각 디렉토리 담당)
+→ 팀원이 TaskList에서 자기 할당 (self-claim)
+→ SendMessage로 발견 사항 공유
+→ 리더가 결과 종합
+```
+
+---
+
+## Agent Teams 아키텍처
+
+```
+┌──────────────────────────────────────────────────────┐
+│                     사용자 요청                         │
+└──────────────┬───────────────────────────────────────┘
+               ▼
+┌──────────────────────────────────────────────────────┐
+│            /sc 라우터 (의도 분석)                        │
+│     keyword 40% + context 40% + flags 20%            │
+└──────────────┬───────────────────────────────────────┘
+               ▼
+┌──────────────────────────────────────────────────────┐
+│        위임 모드 선택 (complexity scoring)               │
+│   score < 0.6 → Sub-Agent    score >= 0.6 → Team     │
+└──────┬───────────────────────────────┬───────────────┘
+       ▼                               ▼
+┌──────────────┐            ┌──────────────────────────┐
+│  Sub-Agent   │            │   Agent Teams Engine      │
+│  Task() 위임  │            │                          │
+│  결과 반환     │            │  TeamCreate              │
+│              │            │    ↓                      │
+│              │            │  Task(type, team, name)   │
+│              │            │    ↓                      │
+│              │            │  TaskCreate + TaskUpdate  │
+│              │            │    ↓                      │
+│              │            │  SendMessage (P2P)        │
+│              │            │    ↓                      │
+│              │            │  shutdown + TeamDelete    │
+└──────────────┘            └──────────────────────────┘
+                                       ▼
+                            ┌──────────────────────────┐
+                            │   orchestrator (CTO)      │
+                            │  Leader|Council|Swarm|    │
+                            │  Pipeline|Watchdog        │
+                            └──────────┬───────────────┘
+                                       ▼
+                            ┌──────────────────────────┐
+                            │   17개 전문 에이전트 (팀원)   │
+                            │  TaskList → 자기할당        │
+                            │  SendMessage → P2P 소통    │
+                            │  TaskUpdate → 완료 보고     │
+                            └──────────────────────────┘
+```
+
+### 역할 분리 원칙
+
+| 계층 | 역할 | Agent Teams API |
+|------|------|----------------|
+| **Commands** | 인터페이스 (사용자 진입점) | TeamCreate 트리거 |
+| **Agents** | 행동 (자율 실행 단위) | 팀원: SendMessage + TaskUpdate |
+| **Skills** | 지식 (도메인 전문성) | 위임 모드 결정 기준 |
+| **Hooks** | 자동화 (이벤트 반응) | SubagentStart/Stop, TeammateIdle |
+
+### 팀 생명주기
+
+```
+1. TeamCreate(team_name, description)
+2. Task(subagent_type, team_name, name) × N  -- 팀원 스폰
+3. TaskCreate(subject, description, activeForm) × M  -- 태스크 생성
+4. TaskUpdate(taskId, addBlockedBy)  -- 의존성 설정
+5. TaskUpdate(taskId, owner)  -- 팀원 할당 (또는 self-claim)
+6. [팀원 작업 수행]
+   - TaskGet → 태스크 상세 확인
+   - TaskUpdate(status: "in_progress") → 작업 시작
+   - SendMessage(type: "message") → 리더/동료에게 보고
+   - TaskUpdate(status: "completed") → 완료
+7. SendMessage(type: "shutdown_request") × N  -- 종료 요청
+8. TeamDelete  -- 팀 리소스 정리
+```
+
+### 오케스트레이션 패턴
+
+| 패턴 | 용도 | Team API 구현 |
+|------|------|---------------|
+| **Leader** | 계획, 의사결정 | TaskCreate → TaskUpdate(owner) → collect results |
+| **Council** | 설계, 검증 | 복수 팀원 → SendMessage로 토론 → 리더 결정 |
+| **Swarm** | 대규모 구현 | TaskCreate(no blockedBy) → 팀원 self-claim from TaskList |
+| **Pipeline** | 순차 의존성 | TaskCreate(addBlockedBy) → 자동 언블로킹 |
+| **Watchdog** | 지속 모니터링 | 별도 팀원이 주기적 TaskList 확인 + SendMessage 알림 |
+
+### 팀 레벨
+
+| 레벨 | 모드 | 에이전트 수 | 적용 상황 |
+|------|------|------------|-----------|
+| **Solo** | Sub-Agent | 0 | 단일 파일 수정, 간단한 질문 |
+| **Squad** | Agent Team | 최대 3 | 기능 구현, 버그 수정, 리팩토링 |
+| **Platoon** | Agent Team | 최대 5 | 대규모 기능, 아키텍처 변경, 보안 감사 |
+
+### 플레이북
+
+#### Feature (기능 구현)
+```
+TeamCreate → [Leader] plan → [Council] design → [Swarm] implement → [Council] review → [Leader] merge → TeamDelete
+```
+
+#### Bugfix (버그 수정)
+```
+TeamCreate → [Leader] analyze → [Pipeline] fix → [Council] verify → TeamDelete
+```
+
+#### Refactor (리팩토링)
+```
+TeamCreate → [Council] assess → [Pipeline] refactor → [Swarm] test → [Council] review → TeamDelete
+```
+
+#### Security (보안 감사)
+```
+TeamCreate → [Leader] scan → [Council] assess → [Pipeline] fix → [Council] verify → TeamDelete
+```
+
+### 품질 게이트
+
+| 게이트 | 위치 | 통과 기준 | 검증 방법 |
+|--------|------|-----------|-----------|
+| Scope Lock | 분석 → 계획 | 요구사항 명확, 범위 문서화 | TaskGet으로 deliverable 확인 |
+| Design Approval | 계획 → 구현 | 아키텍처 리뷰 완료 | plan_approval_response |
+| Build Pass | 구현 → 리뷰 | 컴파일 성공, 타입 오류 없음 | 팀원 Bash 실행 결과 |
+| Review Clear | 리뷰 → 테스트 | CRITICAL/HIGH 이슈 해결 | SendMessage 보고 확인 |
+| Test Pass | 테스트 → 배포 | 커버리지 >= 80%, 회귀 없음 | 팀원 결과 TaskUpdate |
+
+---
+
+## 커맨드 레퍼런스
+
+### 개발 커맨드
+
+| 커맨드 | 설명 | 주요 옵션 |
+|--------|------|-----------|
+| `/sc [request]` | 자동 라우팅 엔트리포인트 | `--plan`, `--force [cmd]` |
+| `/build [target]` | 프로젝트 빌드 (프레임워크 자동 감지) | `--optimize` |
+| `/build-fix` | 빌드 오류 자동 진단/수정 | `--max-retries [n]` |
+| `/implement [feature]` | 기능 구현 파이프라인 | `--type`, `--tdd`, `--framework` |
+| `/improve [target]` | 증거 기반 코드 개선 | `--focus`, `--loop` |
+| `/design [domain]` | 시스템 설계 | `--adr` |
+
+### 분석/디버깅 커맨드
+
+| 커맨드 | 설명 | 주요 옵션 |
+|--------|------|-----------|
+| `/analyze [target]` | 다차원 코드/시스템 분석 | `--focus [domain]`, `--scope` |
+| `/troubleshoot [symptoms]` | 근본 원인 분석 | `--hypothesis` |
+| `/explain [topic]` | 교육적 설명 | `--depth`, `--examples` |
+
+### 품질 커맨드
+
+| 커맨드 | 설명 | 주요 옵션 |
+|--------|------|-----------|
+| `/code-review [target]` | 코드 리뷰 (CRITICAL/HIGH/MEDIUM/LOW) | `--strict` |
+| `/test [type]` | 테스트 실행 (러너 자동 감지) | `--coverage`, `--e2e` |
+| `/tdd [feature]` | TDD 워크플로우 (RED→GREEN→REFACTOR) | `--coverage [n]` |
+| `/verify` | 검증 파이프라인 (lint→type→test→build) | `--quick`, `--fix` |
+| `/refactor-clean [target]` | 리팩토링/데드 코드 제거 | `--type [kind]` |
+
+### 팀 오케스트레이션 커맨드
+
+| 커맨드 | 설명 | 주요 옵션 |
+|--------|------|-----------|
+| `/orchestrate [workflow]` | Agent Teams 기반 멀티 에이전트 워크플로우 | `--pattern`, `--parallel` |
+| `/spawn [mode]` | 팀 스폰 및 병렬 태스크 실행 | `--agents [n]`, `--mode` |
+
+### 워크플로우 커맨드
+
+| 커맨드 | 설명 | 주요 옵션 |
+|--------|------|-----------|
+| `/plan [feature]` | 구현 계획 수립 | `--phases`, `--risks` |
+| `/task [operation]` | 태스크 관리 (CRUD) | `create`, `list`, `update` |
+| `/git [operation]` | Git 워크플로우 | `commit`, `pr`, `branch` |
+| `/checkpoint` | 상태 스냅샷 저장/복원 | `save`, `restore`, `list` |
+
+### 문서/콘텐츠 커맨드
+
+| 커맨드 | 설명 | 주요 옵션 |
+|--------|------|-----------|
+| `/document [target]` | 문서 생성 | `--type [api\|guide\|readme]` |
+| `/content [type]` | 콘텐츠 마케팅 | `--blog`, `--social`, `--seo` |
+| `/learn [pattern]` | 패턴 학습 및 메모리 저장 | `--scan`, `--category` |
+
+### 유틸리티 커맨드
+
+| 커맨드 | 설명 | 주요 옵션 |
+|--------|------|-----------|
+| `/cleanup [target]` | 기술 부채 정리 | `--scope` |
+| `/estimate [target]` | 증거 기반 작업 추정 | `--breakdown` |
+| `/index [query]` | 커맨드 카탈로그 검색 | -- |
+| `/load [path]` | 프로젝트 컨텍스트 로딩 | `--deep` |
+
+---
+
+## 에이전트 시스템
+
+### orchestrator (팀 리더 / CTO)
+
+| 에이전트 | 모델 | 역할 | Team API 도구 |
+|----------|------|------|--------------|
+| **orchestrator** | opus | CTO급 팀 리더. 조율 전용 (delegation mode) | TeamCreate, SendMessage, TaskCreate, TaskUpdate, TaskList, TaskGet, TeamDelete, Task() |
+
+orchestrator는 **코드를 직접 작성하지 않습니다**. 팀을 구성하고, 태스크를 분배하고, 팀원간 조율하고, 결과를 종합하는 역할만 수행합니다.
+
+### 전문 에이전트 (17개 팀원)
+
+모든 팀원은 자신의 전문 도구 + 팀 협업 도구를 가집니다:
+- `SendMessage` - 리더/동료에게 DM, 셧다운 응답
+- `TaskList` / `TaskGet` - 할당된 태스크 확인
+- `TaskUpdate` - 태스크 자기 할당 + 완료 보고
+
+#### 설계/분석
+
+| 에이전트 | 모델 | 역할 |
+|----------|------|------|
+| **architect** | opus | 시스템 아키텍처, ADR, 트레이드오프 분석 |
+| **planner** | opus | 구현 계획, 위험 평가, 단계 분해 |
+| **llm-architect** | opus | LLM 아키텍처, 프롬프트 설계, RAG |
+
+#### 품질/보안
+
+| 에이전트 | 모델 | 역할 |
+|----------|------|------|
+| **code-reviewer** | opus | 코드 리뷰 (4단계 심각도, 5개 차원) |
+| **security-reviewer** | opus | OWASP Top 10, 위협 모델링 |
+| **tdd-guide** | opus | TDD (RED→GREEN→REFACTOR), 80%+ 커버리지 |
+| **e2e-runner** | opus | Playwright E2E 테스트 |
+
+#### 개발
+
+| 에이전트 | 모델 | 역할 |
+|----------|------|------|
+| **frontend-developer** | sonnet | UI/UX, WCAG 접근성, Core Web Vitals |
+| **backend-developer** | sonnet | API, 데이터베이스, 서비스 |
+| **database-reviewer** | opus | SQL 최적화, 스키마 설계 |
+| **typescript-pro** | sonnet | 고급 타입, strict mode, 마이그레이션 |
+| **build-error-resolver** | opus | 빌드 오류 자동 진단/수정 |
+
+#### 유틸리티
+
+| 에이전트 | 모델 | 역할 |
+|----------|------|------|
+| **refactor-cleaner** | opus | 데드 코드 제거, 리팩토링 |
+| **doc-updater** | haiku | 문서 동기화, 변경 이력 |
+| **content-marketer** | sonnet | 블로그, SEO, 소셜 미디어 |
+| **devops-engineer** | sonnet | CI/CD, Docker, 모니터링 |
+| **mcp-developer** | sonnet | MCP 서버 개발, 도구 오케스트레이션 |
+
+### 모델 선택 기준
+
+| 모델 | 용도 | 에이전트 수 |
+|------|------|------------|
+| **opus** | 깊은 추론, 아키텍처 결정, 보안 분석 | 9개 |
+| **sonnet** | 일반 코딩, 밸런스형 작업 | 8개 |
+| **haiku** | 경량 작업 (문서 동기화) | 1개 |
+
+### 팀원 행동 프로토콜
+
+모든 17개 팀원은 팀으로 실행될 때 다음 프로토콜을 따릅니다:
+
+```
+1. TaskList → 할당된 태스크 확인
+2. TaskGet(taskId) → 상세 요구사항 확인
+3. TaskUpdate(taskId, status: "in_progress") → 작업 시작
+4. [전문 역할 수행]
+5. SendMessage(type: "message", recipient: "team-lead") → 진행 보고
+6. TaskUpdate(taskId, status: "completed") → 완료
+7. TaskList → 다음 태스크 확인 (self-claim)
+8. shutdown_request 수신 → shutdown_response(approve: true)
+```
+
+---
+
+## 스킬 시스템
+
+스킬은 에이전트에게 도메인 전문성을 부여하는 지식 계층입니다. 트리거 키워드가 감지되면 자동으로 활성화됩니다.
+
+### 코어 스킬 (6개)
+
+| 스킬 | 설명 |
+|------|------|
+| `orchestration` | 라우팅 인텔리전스, 위임 모드 선택 (Sub-Agent vs Team), 팀 편성 |
+| `token-efficiency` | 5단계 압축, 심볼 시스템, 토큰 최적화 |
+| `principles` | SOLID, DRY/KISS/YAGNI, 의사결정 프레임워크 |
+| `coding-standards` | 불변성, 네이밍, 에러 핸들링, 파일 구조 |
+| `security-standards` | 시크릿 관리, OWASP 체크리스트, 인증 패턴 |
+| `testing-standards` | TDD, 테스트 피라미드, 커버리지 매트릭스 |
+
+### 페르소나 스킬 (11개)
+
+| 스킬 | 전문 영역 | 우선순위 |
+|------|-----------|----------|
+| `persona-architect` | 시스템 설계, 확장성 | 유지보수성 > 확장성 > 성능 |
+| `persona-frontend` | UI/UX, 접근성 | 사용자 > 접근성 > 성능 |
+| `persona-backend` | API, 신뢰성 | 신뢰성 > 보안 > 성능 |
+| `persona-security` | 위협 모델링, 컴플라이언스 | 보안 > 컴플라이언스 > 신뢰성 |
+| `persona-analyzer` | 근본 원인 분석 | 증거 > 체계성 > 철저함 |
+| `persona-performance` | 최적화, 병목 제거 | 측정 > 크리티컬 패스 > UX |
+| `persona-qa` | 품질, 테스팅 | 예방 > 탐지 > 교정 |
+| `persona-refactorer` | 코드 품질, 기술 부채 | 단순성 > 유지보수성 > 가독성 |
+| `persona-devops` | 인프라, CI/CD | 자동화 > 관측성 > 신뢰성 |
+| `persona-mentor` | 지식 전달, 교육 | 이해 > 전달 > 교육 |
+| `persona-scribe` | 문서화, 로컬라이제이션 | 명확성 > 독자 > 문화적 감수성 |
+
+### 유틸리티 스킬 (8개)
+
+| 스킬 | 설명 |
+|------|------|
+| `git-workflow` | Conventional Commits, PR 워크플로우, 브랜치 전략 |
+| `tdd-workflow` | Red-Green-Refactor 사이클, 커버리지 목표 |
+| `delegation` | Sub-Agent/Team 위임 전략, 모드 선택 매트릭스 |
+| `mcp-context7` | Context7 라이브러리 문서 조회 |
+| `mcp-playwright` | Playwright E2E 테스트, 크로스 브라우저 |
+| `mcp-coordination` | MCP 서버 선택, 폴백, 캐싱 전략 |
+| `continuous-learning` | 세션 간 패턴 추출 및 메모리 저장 |
+| `strategic-compact` | 컨텍스트 압축 시 핵심 상태 보존 |
+
+---
+
+## 훅 시스템
+
+10개 이벤트에 11개 자동화 스크립트가 연결되어 있습니다.
+
+### 이벤트별 훅
+
+| 이벤트 | 스크립트 | 동작 |
+|--------|----------|------|
+| **SessionStart** | `session-start.js` | 환경 감지, 설정 로드, 세션 상태 복원 |
+| **PreToolUse** (Write/Edit) | `pre-write.js` | `.env`, `.pem`, `.key` 등 민감 파일 쓰기 차단 |
+| **PreToolUse** (Bash) | `pre-bash.js` | `rm -rf`, `git push --force` 등 위험 명령 차단 |
+| **PostToolUse** (Edit) | `post-edit-format.js` | JS/TS 파일 편집 후 Prettier 포맷 제안 |
+| **PostToolUse** (Bash) | `post-bash.js` | git push 후 PR URL 자동 감지 |
+| **PreCompact** | `pre-compact.js` | 컨텍스트 압축 전 상태 스냅샷 저장 |
+| **Stop** | `check-console-log.js` | 세션 종료 시 `console.log` 잔여 검사 |
+| **UserPromptSubmit** | `user-prompt-handler.js` | 사용자 의도 감지, 관련 에이전트 제안 |
+| **SubagentStart/Stop** | `subagent-handler.js` | 서브에이전트/팀원 등록/해제 추적 |
+| **TeammateIdle** | `team-idle-handler.js` | 유휴 팀원에게 대기 태스크 할당 알림 |
+| **SessionEnd** | `session-end.js` | 세션 상태 저장 |
+
+---
+
+## MCP 통합
+
+### Context7
+
+라이브러리/프레임워크 공식 문서 조회 및 코드 패턴 추출.
+
+```json
+{
+  "context7": {
+    "command": "npx",
+    "args": ["-y", "@upstash/context7-mcp@latest"]
+  }
+}
+```
+
+### Playwright
+
+크로스 브라우저 E2E 테스트, 성능 측정, 시각적 검증.
+
+```json
+{
+  "playwright": {
+    "command": "npx",
+    "args": ["-y", "@executeautomation/playwright-mcp-server"]
+  }
+}
+```
+
+---
+
+## 설정
+
+### artibot.config.json 주요 항목
+
+| 항목 | 설명 | 기본값 |
+|------|------|--------|
+| `team.engine` | 팀 엔진 | `claude-agent-teams` |
+| `team.envVar` | 활성화 환경변수 | `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` |
+| `team.delegationMode` | 리더 조율 전용 모드 | `true` |
+| `team.maxTeammates` | 최대 동시 팀원 수 | `7` |
+| `team.ctoAgent` | CTO 역할 에이전트 | `orchestrator` |
+| `team.delegationModeSelection` | Sub-Agent/Team 자동 선택 | complexity 기반 |
+| `automation.intentDetection` | 의도 자동 감지 | `true` |
+| `automation.supportedLanguages` | 지원 언어 | `en, ko, ja` |
+
+### 팀 저장소
+
+| 경로 | 용도 |
+|------|------|
+| `~/.claude/teams/{team-name}/config.json` | 팀 구성 (멤버 목록) |
+| `~/.claude/tasks/{team-name}/` | 공유 태스크 리스트 |
+
+---
+
+## 디렉토리 구조
+
+```
+plugins/artibot/
+├── .claude-plugin/
+│   └── plugin.json              # 플러그인 매니페스트
+├── agents/                      # 18개 에이전트 정의
+│   ├── orchestrator.md          #   CTO / 팀 리더 (Agent Teams API)
+│   └── [17개 전문 에이전트].md    #   팀원 (SendMessage + TaskUpdate)
+├── commands/                    # 27개 슬래시 커맨드
+│   ├── sc.md                    #   메인 라우터
+│   ├── orchestrate.md           #   팀 오케스트레이션 (TeamCreate)
+│   ├── spawn.md                 #   팀 스폰 (병렬 실행)
+│   └── [24개 커맨드].md
+├── skills/                      # 25개 스킬 디렉토리
+│   ├── orchestration/           #   위임 모드 선택 + 팀 라우팅
+│   ├── delegation/              #   Sub-Agent/Team 위임 전략
+│   └── [23개 스킬]/
+├── hooks/
+│   └── hooks.json               # 훅 이벤트 매핑
+├── scripts/
+│   ├── hooks/                   # 11개 훅 스크립트 (ESM)
+│   ├── ci/                      # 4개 CI 검증 스크립트
+│   └── utils/
+├── lib/
+│   ├── core/                    # 코어 모듈 (platform, config, cache, io, debug, file)
+│   ├── intent/                  # 의도 감지 (language, trigger, ambiguity)
+│   └── context/                 # 컨텍스트 관리 (hierarchy, session)
+├── output-styles/               # 3개 출력 스타일
+├── templates/                   # 3개 작성 템플릿
+├── artibot.config.json          # 플러그인 설정 (Agent Teams 포함)
+├── package.json                 # Node.js ESM 런타임
+└── .mcp.json                    # MCP 서버 설정
+```
+
+---
+
+## 검증
+
+```bash
+node scripts/validate.js              # 통합 검증
+node scripts/ci/validate-agents.js    # 에이전트 검증
+node scripts/ci/validate-skills.js    # 스킬 검증
+node scripts/ci/validate-commands.js  # 커맨드 검증
+node scripts/ci/validate-hooks.js     # 훅 검증
+```
+
+---
+
+## 라이선스
+
+MIT License - Artience

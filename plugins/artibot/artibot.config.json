@@ -1,0 +1,107 @@
+{
+  "version": "1.0.0",
+
+  "agents": {
+    "taskBased": {
+      "code review": "code-reviewer",
+      "security review": "security-reviewer",
+      "architecture": "architect",
+      "frontend": "frontend-developer",
+      "backend": "backend-developer",
+      "database": "database-reviewer",
+      "build error": "build-error-resolver",
+      "e2e test": "e2e-runner",
+      "tdd": "tdd-guide",
+      "plan": "planner",
+      "refactor": "refactor-cleaner",
+      "documentation": "doc-updater",
+      "content": "content-marketer",
+      "devops": "devops-engineer",
+      "llm": "llm-architect",
+      "mcp": "mcp-developer",
+      "typescript": "typescript-pro",
+      "team": "orchestrator"
+    }
+  },
+
+  "team": {
+    "enabled": true,
+    "engine": "claude-agent-teams",
+    "envVar": "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS",
+    "maxTeammates": 7,
+    "ctoAgent": "orchestrator",
+    "delegationMode": true,
+    "displayMode": "auto",
+    "api": {
+      "lifecycle": ["TeamCreate", "TeamDelete"],
+      "communication": ["SendMessage"],
+      "taskManagement": ["TaskCreate", "TaskUpdate", "TaskList", "TaskGet"],
+      "spawning": "Task(subagent_type, team_name, name)"
+    },
+    "delegationModeSelection": {
+      "subAgent": {
+        "condition": "complexity < 0.6 AND files < 20 AND single domain",
+        "tools": ["Task"],
+        "communication": "one-way (result return only)"
+      },
+      "agentTeam": {
+        "condition": "complexity >= 0.6 OR files >= 20 OR multi-domain",
+        "tools": ["TeamCreate", "SendMessage", "TaskCreate", "TaskUpdate", "TaskList", "TeamDelete"],
+        "communication": "P2P bidirectional + shared task list"
+      }
+    },
+    "levels": {
+      "solo": {
+        "teammates": 0,
+        "mode": "subAgent",
+        "trigger": "single file edit, simple question, quick fix"
+      },
+      "squad": {
+        "teammates": 3,
+        "mode": "agentTeam",
+        "trigger": "feature implementation, bugfix, refactoring",
+        "roles": ["developer", "reviewer", "tester"]
+      },
+      "platoon": {
+        "teammates": 5,
+        "mode": "agentTeam",
+        "trigger": "large feature, architecture change, security audit",
+        "roles": ["architect", "developer", "reviewer", "tester", "security"]
+      }
+    },
+    "orchestrationPatterns": {
+      "plan": "leader",
+      "design": "council",
+      "do": "swarm",
+      "check": "council",
+      "act": "leader"
+    },
+    "playbooks": {
+      "feature": "[leader] plan -> [council] design -> [swarm] implement -> [council] review -> [leader] merge",
+      "bugfix": "[leader] analyze -> [pipeline] fix -> [council] verify",
+      "refactor": "[council] assess -> [pipeline] refactor -> [swarm] test -> [council] review",
+      "security": "[leader] scan -> [council] assess -> [pipeline] fix -> [council] verify"
+    },
+    "messageTypes": ["message", "broadcast", "shutdown_request", "shutdown_response", "plan_approval_response"],
+    "teamStorage": {
+      "config": "~/.claude/teams/{team-name}/config.json",
+      "tasks": "~/.claude/tasks/{team-name}/"
+    }
+  },
+
+  "automation": {
+    "intentDetection": true,
+    "ambiguityThreshold": 50,
+    "supportedLanguages": ["en", "ko", "ja"]
+  },
+
+  "context": {
+    "importCacheTTL": 30000,
+    "hierarchyCacheTTL": 5000
+  },
+
+  "output": {
+    "maxContextLength": 500,
+    "defaultStyle": "artibot-default"
+  }
+}
