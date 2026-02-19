@@ -1,6 +1,6 @@
 # Artibot
 
-![Tests](https://img.shields.io/badge/tests-872%20passed-brightgreen) ![Coverage](https://img.shields.io/badge/coverage-90.92%25-brightgreen) ![Dependencies](https://img.shields.io/badge/dependencies-0-blue) ![Node](https://img.shields.io/badge/node-%3E%3D18-green) ![License](https://img.shields.io/badge/license-MIT-blue)
+![Tests](https://img.shields.io/badge/tests-874%20passed-brightgreen) ![Coverage](https://img.shields.io/badge/coverage-90.92%25-brightgreen) ![Dependencies](https://img.shields.io/badge/dependencies-0-blue) ![Node](https://img.shields.io/badge/node-%3E%3D18-green) ![License](https://img.shields.io/badge/license-MIT-blue)
 
 Claude Code를 위한 **Agent Teams 기반** 지능형 오케스트레이션 플러그인. Claude의 네이티브 Agent Teams API를 핵심 엔진으로 사용하여 전문 에이전트 팀 구성, P2P 통신, 공유 태스크 관리를 통해 개발 생산성을 극대화합니다.
 
@@ -709,7 +709,7 @@ orchestrator는 **코드를 직접 작성하지 않습니다**. 팀을 구성하
 | `team.engine` | 팀 엔진 | `claude-agent-teams` |
 | `team.envVar` | 활성화 환경변수 | `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` |
 | `team.delegationMode` | 리더 조율 전용 모드 | `true` |
-| `team.maxTeammates` | 최대 동시 팀원 수 | `7` |
+| `team.maxTeammates` | 최대 동시 팀원 수 | `null` (무제한) |
 | `team.ctoAgent` | CTO 역할 에이전트 | `orchestrator` |
 | `team.delegationModeSelection` | Sub-Agent/Team 자동 선택 | complexity 기반 |
 | `automation.intentDetection` | 의도 자동 감지 | `true` |

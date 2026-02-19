@@ -4,9 +4,8 @@
  * Saves current session state to ~/.claude/artibot-state.json.
  */
 
-import { readStdin, parseJSON } from '../utils/index.js';
+import { readStdin, parseJSON, atomicWriteSync } from '../utils/index.js';
 import path from 'node:path';
-import { writeFileSync, mkdirSync } from 'node:fs';
 
 async function main() {
   const raw = await readStdin();
@@ -28,8 +27,7 @@ async function main() {
   };
 
   try {
-    mkdirSync(claudeDir, { recursive: true });
-    writeFileSync(statePath, JSON.stringify(state, null, 2), 'utf-8');
+    atomicWriteSync(statePath, state);
   } catch (err) {
     process.stderr.write(`[artibot:session-end] Failed to save state: ${err.message}\n`);
   }
