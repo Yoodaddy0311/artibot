@@ -6,11 +6,11 @@
 ![Node.js](https://img.shields.io/badge/Node.js-18%2B-brightgreen?style=flat-square)
 ![Agent Teams](https://img.shields.io/badge/Agent_Teams-Native-orange?style=flat-square)
 
-<p align="center">
-  <img src="assets/artibot-mascot.jpeg" alt="Artibot Mascot" width="200" />
-</p>
-
 A cognitive orchestration plugin for [Claude Code](https://github.com/anthropics/claude-code) powered by **dual-process routing**, **lifelong learning**, and the **native Agent Teams API**. Artibot uses a System 1/2 cognitive architecture to classify every request, assembles specialized agent teams with P2P communication, and continuously learns from session outcomes to improve routing accuracy over time.
+
+<p align="center">
+  <img src="assets/artibot-mascot.jpeg" alt="Artibot Mascot" width="400" />
+</p>
 
 ## Overview
 
