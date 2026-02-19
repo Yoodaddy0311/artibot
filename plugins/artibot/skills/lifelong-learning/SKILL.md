@@ -15,7 +15,7 @@ triggers:
   - "growth"
   - "continuous improvement"
 agents:
-  - "persona-mentor"
+  - "planner"
 tokens: "~2K"
 category: "learning"
 ---

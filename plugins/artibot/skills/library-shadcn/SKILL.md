@@ -3,7 +3,7 @@ name: library-shadcn
 description: "shadcn/ui component patterns for React including installation, theming, composition, and accessibility."
 level: 2
 triggers: ["shadcn", "shadcn/ui", "radix", "tailwind components", "ui library", "component library", "dark mode"]
-agents: ["persona-frontend", "persona-architect"]
+agents: ["frontend-developer", "architect"]
 tokens: "~4K"
 category: "library"
 platforms: [claude-code, gemini-cli, codex-cli, cursor]

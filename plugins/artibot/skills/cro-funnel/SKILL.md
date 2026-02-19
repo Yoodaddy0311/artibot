@@ -13,8 +13,8 @@ triggers:
   - "CRO"
   - "conversion rate"
 agents:
-  - "persona-performance"
-  - "persona-analyzer"
+  - "performance-engineer"
+  - "code-reviewer"
 tokens: "~4K"
 category: "testing"
 ---

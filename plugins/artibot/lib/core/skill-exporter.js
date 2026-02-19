@@ -1,6 +1,6 @@
 /**
  * Skill exporter module.
- * Reads Artibot skills from skills/*/SKILL.md and exports them
+ * Reads Artibot skills from skills/<name>/SKILL.md and exports them
  * to platform-specific formats using the adapter system.
  *
  * @module lib/core/skill-exporter

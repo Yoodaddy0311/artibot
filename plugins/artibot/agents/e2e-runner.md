@@ -11,7 +11,7 @@ description: |
   테스트, 사용자 흐름, 브라우저 테스트, 시각적 회귀
 
   Do NOT use for: unit tests, integration tests without browser, API-only testing
-model: haiku
+model: sonnet
 tools:
   - Read
   - Write

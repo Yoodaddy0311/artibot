@@ -14,7 +14,7 @@ triggers:
   - "OWASP"
   - "security"
 agents:
-  - "persona-security"
+  - "security-reviewer"
 tokens: "~3K"
 category: "persona"
 ---

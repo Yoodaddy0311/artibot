@@ -14,7 +14,7 @@ triggers:
   - "troubleshoot"
   - "diagnose"
 agents:
-  - "persona-analyzer"
+  - "code-reviewer"
 tokens: "~3K"
 category: "persona"
 ---

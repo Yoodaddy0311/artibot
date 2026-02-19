@@ -8,12 +8,16 @@
  * Events: teammate-update | task-complete | task-error | workflow-advance
  */
 
-import { readStdin, writeStdout, parseJSON, getPluginRoot } from '../utils/index.js';
+import { readStdin, writeStdout, parseJSON, getPluginRoot, atomicWriteSync } from '../utils/index.js';
 import path from 'node:path';
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 
-// Dynamic import of TUI module (ESM)
-const tuiPath = path.join(getPluginRoot(), 'lib', 'core', 'tui.js');
+const PHASE_NAMES = {
+  feature: ['Plan', 'Design', 'Implement', 'Review', 'Test', 'Merge'],
+  bugfix: ['Triage', 'Reproduce', 'Fix', 'Test', 'Review', 'Merge'],
+  refactor: ['Analyze', 'Plan', 'Refactor', 'Test', 'Review', 'Merge'],
+  security: ['Scan', 'Assess', 'Fix', 'Verify', 'Audit', 'Merge'],
+};
 
 function getStatePath() {
   const home = process.env.USERPROFILE || process.env.HOME || '';
@@ -34,9 +38,7 @@ function loadState() {
 
 function saveState(state) {
   const statePath = getStatePath();
-  const dir = path.dirname(statePath);
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(statePath, JSON.stringify(state, null, 2), 'utf-8');
+  atomicWriteSync(statePath, state);
 }
 
 function addEvent(state, type, agent, message) {
@@ -152,13 +154,7 @@ async function main() {
         updatedAt: new Date().toISOString(),
       };
 
-      const phaseNames = {
-        feature: ['Plan', 'Design', 'Implement', 'Review', 'Test', 'Merge'],
-        bugfix: ['Triage', 'Reproduce', 'Fix', 'Test', 'Review', 'Merge'],
-        refactor: ['Analyze', 'Plan', 'Refactor', 'Test', 'Review', 'Merge'],
-        security: ['Scan', 'Assess', 'Fix', 'Verify', 'Audit', 'Merge'],
-      };
-      const phases = phaseNames[playbook] || phaseNames.feature;
+      const phases = PHASE_NAMES[playbook] || PHASE_NAMES.feature;
       const phaseName = phases[phase] || `Phase ${phase}`;
 
       addEvent(state, 'action', agentId || 'orchestrator', `Workflow advanced to: ${phaseName}`);
@@ -193,13 +189,7 @@ async function main() {
   if (errorCnt > 0) parts.push(`ERRORS: ${errorCnt}`);
 
   if (state.workflow) {
-    const phaseNames = {
-      feature: ['Plan', 'Design', 'Implement', 'Review', 'Test', 'Merge'],
-      bugfix: ['Triage', 'Reproduce', 'Fix', 'Test', 'Review', 'Merge'],
-      refactor: ['Analyze', 'Plan', 'Refactor', 'Test', 'Review', 'Merge'],
-      security: ['Scan', 'Assess', 'Fix', 'Verify', 'Audit', 'Merge'],
-    };
-    const phases = phaseNames[state.workflow.playbook] || phaseNames.feature;
+    const phases = PHASE_NAMES[state.workflow.playbook] || PHASE_NAMES.feature;
     const currentName = phases[state.workflow.currentPhase] || '?';
     parts.push(`Phase: ${currentName} (${state.workflow.currentPhase + 1}/${phases.length})`);
   }
@@ -209,4 +199,5 @@ async function main() {
 
 main().catch((err) => {
   process.stderr.write(`[artibot:workflow-status] ${err.message}\n`);
+  process.exit(0);
 });

@@ -15,14 +15,13 @@
 
 import { createHash } from 'node:crypto';
 import path from 'node:path';
-import os from 'node:os';
 import { readJsonFile } from '../core/file.js';
+import { ARTIBOT_DIR, round } from '../core/index.js';
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-const ARTIBOT_DIR = path.join(os.homedir(), '.claude', 'artibot');
 const PATTERNS_DIR = path.join(ARTIBOT_DIR, 'patterns');
 
 /** Pattern types to package */
@@ -487,12 +486,3 @@ function clamp01(value) {
   return Math.max(0, Math.min(1, value));
 }
 
-/**
- * Round to 3 decimal places.
- *
- * @param {number} n
- * @returns {number}
- */
-function round(n) {
-  return Math.round(n * 1000) / 1000;
-}

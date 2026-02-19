@@ -15,8 +15,8 @@ triggers:
   - "data viz"
   - "report visualization"
 agents:
-  - "persona-frontend"
-  - "persona-analyzer"
+  - "frontend-developer"
+  - "code-reviewer"
 tokens: "~3K"
 category: "analysis"
 ---

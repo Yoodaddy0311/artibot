@@ -17,8 +17,8 @@ triggers:
   - "erlang"
   - "beam"
 agents:
-  - "persona-backend"
-  - "persona-architect"
+  - "backend-developer"
+  - "architect"
 tokens: "~4K"
 category: "language"
 platforms: [claude-code, gemini-cli, codex-cli, cursor]

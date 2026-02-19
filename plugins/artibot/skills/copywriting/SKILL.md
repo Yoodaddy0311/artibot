@@ -16,7 +16,7 @@ triggers:
   - "conversion copy"
   - "value proposition"
 agents:
-  - "persona-scribe"
+  - "doc-updater"
 tokens: "~3K"
 category: "marketing"
 ---

@@ -14,8 +14,8 @@ triggers:
   - "competitive intelligence"
   - "landscape"
 agents:
-  - "persona-analyzer"
-  - "persona-architect"
+  - "code-reviewer"
+  - "architect"
 tokens: "~4K"
 category: "marketing"
 ---

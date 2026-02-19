@@ -17,8 +17,8 @@ triggers:
   - "Maven"
   - "Gradle"
 agents:
-  - "persona-backend"
-  - "persona-qa"
+  - "backend-developer"
+  - "tdd-guide"
 tokens: "~4K"
 category: "language"
 platforms: [claude-code, gemini-cli, codex-cli, cursor]

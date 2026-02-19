@@ -15,8 +15,8 @@ triggers:
   - "data insights"
   - "data patterns"
 agents:
-  - "persona-analyzer"
-  - "persona-performance"
+  - "code-reviewer"
+  - "performance-engineer"
 tokens: "~4K"
 category: "analysis"
 ---

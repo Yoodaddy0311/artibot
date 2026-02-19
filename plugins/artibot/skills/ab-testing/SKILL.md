@@ -16,8 +16,8 @@ triggers:
   - "statistical significance"
   - "sample size"
 agents:
-  - "persona-analyzer"
-  - "persona-performance"
+  - "code-reviewer"
+  - "performance-engineer"
 tokens: "~4K"
 category: "testing"
 ---

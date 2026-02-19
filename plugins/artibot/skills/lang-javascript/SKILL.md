@@ -17,8 +17,8 @@ triggers:
   - "async/await"
   - "ES2024"
 agents:
-  - "persona-backend"
-  - "persona-frontend"
+  - "backend-developer"
+  - "frontend-developer"
 tokens: "~4K"
 category: "language"
 platforms: [claude-code, gemini-cli, codex-cli, cursor]

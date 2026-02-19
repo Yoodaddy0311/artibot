@@ -14,8 +14,8 @@ triggers:
   - "unit test"
   - "RED GREEN REFACTOR"
 agents:
-  - "persona-qa"
-  - "persona-backend"
+  - "tdd-guide"
+  - "backend-developer"
 tokens: "~3K"
 category: "testing"
 ---

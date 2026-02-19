@@ -7,7 +7,7 @@ const home = process.env.HOME || process.env.USERPROFILE;
 const teamsDir = join(home, '.claude', 'teams');
 
 // Check for active teams
-let status = 'Artibot v1.3.0';
+let status = 'Artibot v1.4.0';
 try {
   // Find active team configs
   if (existsSync(teamsDir)) {

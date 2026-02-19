@@ -14,7 +14,7 @@ triggers:
   - "screenshot"
   - "web testing"
 agents:
-  - "persona-qa"
+  - "tdd-guide"
 tokens: "~2K"
 category: "tooling"
 ---

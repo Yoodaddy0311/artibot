@@ -15,7 +15,7 @@
  * Stdout: JSON { message } — informational only, never blocks
  */
 
-import { readStdin, writeStdout, parseJSON } from '../utils/index.js';
+import { readStdin, writeStdout, parseJSON, toFileUrl } from '../utils/index.js';
 import path from 'node:path';
 
 // ---------------------------------------------------------------------------
@@ -184,7 +184,7 @@ async function main() {
   // Feed into lifelong learning pipeline
   try {
     const lifelongPath = path.join(PLUGIN_ROOT, 'lib', 'learning', 'lifelong-learner.js');
-    const { collectExperience } = await import(`file://${lifelongPath.replace(/\\/g, '/')}`);
+    const { collectExperience } = await import(toFileUrl(lifelongPath));
     await collectExperience({
       type: 'agent',
       category: agentRole,

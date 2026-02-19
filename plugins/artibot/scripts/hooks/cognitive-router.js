@@ -7,7 +7,7 @@
  * Fallback: if router module import fails, uses simple keyword-based detection.
  */
 
-import { readStdin, writeStdout, parseJSON, getPluginRoot } from '../utils/index.js';
+import { readStdin, writeStdout, parseJSON, getPluginRoot, toFileUrl } from '../utils/index.js';
 import path from 'node:path';
 import { readFileSync } from 'node:fs';
 
@@ -54,7 +54,7 @@ async function main() {
   try {
     const routerPath = path.join(pluginRoot, 'lib', 'cognitive', 'router.js');
     const { configure, classifyComplexity } = await import(
-      `file://${routerPath.replace(/\\/g, '/')}`
+      toFileUrl(routerPath)
     );
 
     // Sync config values (threshold, adaptRate) from artibot.config.json
@@ -72,7 +72,7 @@ async function main() {
     try {
       const intentPath = path.join(pluginRoot, 'lib', 'intent', 'index.js');
       const { detectIntent } = await import(
-        `file://${intentPath.replace(/\\/g, '/')}`
+        toFileUrl(intentPath)
       );
 
       const configPath = path.join(pluginRoot, 'artibot.config.json');

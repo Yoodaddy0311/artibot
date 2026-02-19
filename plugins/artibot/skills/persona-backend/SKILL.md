@@ -15,7 +15,7 @@ triggers:
   - "backend"
   - "reliability"
 agents:
-  - "persona-backend"
+  - "backend-developer"
 tokens: "~3K"
 category: "persona"
 ---

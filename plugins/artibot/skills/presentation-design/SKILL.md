@@ -15,8 +15,8 @@ triggers:
   - "pitch deck"
   - "presentation design"
 agents:
-  - "persona-frontend"
-  - "persona-scribe"
+  - "presentation-designer"
+  - "doc-updater"
 tokens: "~3K"
 category: "marketing"
 ---

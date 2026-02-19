@@ -15,7 +15,7 @@ triggers:
   - "pipeline"
   - "monitoring"
 agents:
-  - "persona-devops"
+  - "devops-engineer"
 tokens: "~3K"
 category: "persona"
 ---

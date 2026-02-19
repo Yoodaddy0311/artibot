@@ -7,6 +7,7 @@
 
 import path from 'node:path';
 import { readJsonFile, writeJsonFile, ensureDir } from '../core/file.js';
+import { ARTIBOT_DIR } from '../core/config.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -41,8 +42,7 @@ const MAX_SUMMARY_LENGTH = 500;
  * @returns {string}
  */
 function getMemoryDir() {
-  const home = process.env.USERPROFILE || process.env.HOME || '';
-  return path.join(home, '.claude', 'artibot', MEMORY_DIR_NAME);
+  return path.join(ARTIBOT_DIR, MEMORY_DIR_NAME);
 }
 
 /**

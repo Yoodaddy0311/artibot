@@ -18,8 +18,8 @@ triggers:
   - "E2E"
   - "test quality"
 agents:
-  - "persona-qa"
-  - "persona-backend"
+  - "tdd-guide"
+  - "backend-developer"
 tokens: "~3K"
 category: "testing"
 ---

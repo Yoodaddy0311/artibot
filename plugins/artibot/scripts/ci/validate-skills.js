@@ -7,25 +7,9 @@
 
 import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
 import path from 'node:path';
+import { getPluginRoot, extractFrontmatter } from './ci-utils.js';
 
 const REQUIRED_FIELDS = ['name', 'description'];
-
-function getPluginRoot() {
-  if (process.env.CLAUDE_PLUGIN_ROOT) return path.resolve(process.env.CLAUDE_PLUGIN_ROOT);
-  const thisDir = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/i, '$1'));
-  return path.resolve(thisDir, '..', '..');
-}
-
-function extractFrontmatter(content) {
-  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
-  if (!match) return null;
-  const fields = {};
-  for (const line of match[1].split('\n')) {
-    const kv = line.match(/^(\w[\w-]*):\s*(.+)$/);
-    if (kv) fields[kv[1].trim()] = kv[2].trim();
-  }
-  return fields;
-}
 
 function main() {
   const skillsDir = path.join(getPluginRoot(), 'skills');

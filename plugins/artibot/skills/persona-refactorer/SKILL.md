@@ -13,7 +13,7 @@ triggers:
   - "simplify"
   - "maintainability"
 agents:
-  - "persona-refactorer"
+  - "refactor-cleaner"
 tokens: "~3K"
 category: "persona"
 ---

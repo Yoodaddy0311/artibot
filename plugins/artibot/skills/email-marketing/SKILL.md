@@ -15,7 +15,7 @@ triggers:
   - "drip campaign"
   - "email sequence"
 agents:
-  - "persona-scribe"
+  - "doc-updater"
 tokens: "~3K"
 category: "marketing"
 ---

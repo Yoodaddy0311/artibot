@@ -21,10 +21,10 @@ Parse $ARGUMENTS:
 
 | Pattern | Pipeline | Teammates |
 |---------|----------|-----------|
-| feature | plan -> design -> implement -> review -> merge | planner, architect, developer, code-reviewer |
-| bugfix | analyze -> fix -> verify | analyzer, developer, tdd-guide |
+| feature | plan -> design -> implement -> review -> merge | planner, architect, backend-developer, code-reviewer |
+| bugfix | analyze -> fix -> verify | analyzer, backend-developer, tdd-guide |
 | refactor | assess -> refactor -> test -> review | code-reviewer, refactor-cleaner, tdd-guide |
-| security | scan -> assess -> fix -> verify | security-reviewer, developer, code-reviewer |
+| security | scan -> assess -> fix -> verify | security-reviewer, backend-developer, code-reviewer |
 
 ## Execution Flow
 
@@ -116,7 +116,7 @@ SendMessage(
 |-------|----------------|---------|
 | Plan | `Task(planner, team_name="orchestrate-*", name="planner")` | Implementation breakdown |
 | Design | `Task(architect, team_name="orchestrate-*", name="architect")` | System design decisions |
-| Implement | `Task(developer, team_name="orchestrate-*", name="developer")` | Code creation/modification |
+| Implement | `Task(backend-developer, team_name="orchestrate-*", name="developer")` | Code creation/modification |
 | Test | `Task(tdd-guide, team_name="orchestrate-*", name="tester")` | Test writing and execution |
 | Review | `Task(code-reviewer, team_name="orchestrate-*", name="reviewer")` | Code quality validation |
 | Security | `Task(security-reviewer, team_name="orchestrate-*", name="security")` | Security assessment |

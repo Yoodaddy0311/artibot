@@ -16,7 +16,7 @@ triggers:
   - "ultracompressed"
 agents:
   - "orchestrator"
-  - "persona-performance"
+  - "performance-engineer"
 tokens: "~2K"
 category: "tooling"
 ---

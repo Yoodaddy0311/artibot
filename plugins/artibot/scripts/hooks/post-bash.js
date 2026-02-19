@@ -40,4 +40,5 @@ async function main() {
 
 main().catch((err) => {
   process.stderr.write(`[artibot:post-bash] ${err.message}\n`);
+  process.exit(0);
 });

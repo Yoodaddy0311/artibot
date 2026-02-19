@@ -17,7 +17,7 @@ triggers:
   - "bloc"
   - "cross-platform"
 agents:
-  - "persona-frontend"
+  - "frontend-developer"
 tokens: "~4K"
 category: "language"
 platforms: [claude-code, gemini-cli, codex-cli, cursor]

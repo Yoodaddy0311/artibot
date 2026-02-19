@@ -1,12 +1,12 @@
 ---
-description: SuperClaude router - analyzes intent and routes to optimal command/agent/skill
+description: Artibot router - analyzes intent and routes to optimal command/agent/skill
 argument-hint: [request] [--flags]
 allowed-tools: [Read, Glob, Grep, Bash, Task, TodoWrite]
 ---
 
 # /sc
 
-Main entry point for SuperClaude framework. Analyzes $ARGUMENTS to determine intent, complexity, and domain, then routes to the optimal command, agent, or skill.
+Main entry point for Artibot framework. Analyzes $ARGUMENTS to determine intent, complexity, and domain, then routes to the optimal command, agent, or skill.
 
 ## Arguments
 

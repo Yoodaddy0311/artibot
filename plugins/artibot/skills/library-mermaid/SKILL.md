@@ -3,7 +3,7 @@ name: library-mermaid
 description: "Mermaid diagramming patterns for technical documentation including flowcharts, sequence diagrams, ERDs, and more."
 level: 2
 triggers: ["mermaid", "diagram", "flowchart", "sequence diagram", "ERD", "class diagram", "Gantt", "mindmap"]
-agents: ["persona-architect", "persona-scribe"]
+agents: ["architect", "doc-updater"]
 tokens: "~3K"
 category: "library"
 platforms: [claude-code, gemini-cli, codex-cli, cursor]

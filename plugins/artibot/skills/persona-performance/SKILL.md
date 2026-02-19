@@ -14,7 +14,7 @@ triggers:
   - "benchmark"
   - "profiling"
 agents:
-  - "persona-performance"
+  - "performance-engineer"
 tokens: "~3K"
 category: "persona"
 ---

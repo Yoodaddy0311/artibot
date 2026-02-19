@@ -20,6 +20,15 @@ const SENSITIVE_PATTERNS = [
   /id_ed25519/i,
   /token\.json$/i,
   /service.account\.json$/i,
+  /\.npmrc$/i,
+  /\.netrc$/i,
+  /_netrc$/i,
+  /\.htpasswd$/i,
+  /\.jks$/i,
+  /kubeconfig/i,
+  /\.docker\/config\.json$/i,
+  /wp-config\.php$/i,
+  /database\.yml$/i,
 ];
 
 const SENSITIVE_FILENAMES = new Set([
@@ -30,7 +39,20 @@ const SENSITIVE_FILENAMES = new Set([
   'credentials.json',
   'secrets.json',
   'serviceAccountKey.json',
+  '.npmrc',
+  '.netrc',
+  '_netrc',
+  '.htpasswd',
+  'kubeconfig',
 ]);
+
+const SECRET_CONTENT_PATTERNS = [
+  /(?:api[_-]?key|secret[_-]?key|auth[_-]?token|access[_-]?token|private[_-]?key|password|passwd)\s*[=:]\s*["'][^"']{8,}["']/gi,
+  /\bAKIA[0-9A-Z]{16}\b/g,
+  /\bghp_[A-Za-z0-9]{36}\b/g,
+  /\bsk-ant-[A-Za-z0-9\-]{20,}\b/g,
+  /\bsk-[A-Za-z0-9]{20,}\b/g,
+];
 
 async function main() {
   const raw = await readStdin();
@@ -55,11 +77,29 @@ async function main() {
     return;
   }
 
+  // Check content for hardcoded secrets (H3)
+  const content = hookData?.tool_input?.content || hookData?.tool_input?.new_string || '';
+  if (content) {
+    const nonCommentLines = content
+      .split('\n')
+      .filter((line) => !/^\s*(\/\/|#|\/\*)/.test(line))
+      .join('\n');
+    for (const secretPattern of SECRET_CONTENT_PATTERNS) {
+      secretPattern.lastIndex = 0;
+      if (secretPattern.test(nonCommentLines)) {
+        writeStdout({
+          decision: 'block',
+          reason: `SECURITY WARNING: The content being written appears to contain a hardcoded secret or credential. Writing hardcoded secrets is blocked by default. Remove the secret and use environment variables or a secrets manager instead.`,
+        });
+        return;
+      }
+    }
+  }
+
   writeStdout({ decision: 'approve' });
 }
 
 main().catch((err) => {
   process.stderr.write(`[artibot:pre-write] ${err.message}\n`);
-  // On error, don't block the operation
-  writeStdout({ decision: 'approve' });
+  writeStdout({ decision: 'block', reason: 'Safety check failed due to hook error. Blocking by default.' });
 });

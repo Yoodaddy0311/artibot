@@ -10,6 +10,11 @@
  * @module lib/cognitive/router
  */
 
+import { round as _coreRound } from '../core/index.js';
+
+// Router uses 2 decimal precision for display values
+const round = (n) => _coreRound(n, 2);
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -512,15 +517,6 @@ function estimateNovelty(lower, context) {
 // ---------------------------------------------------------------------------
 // Internal: Helpers
 // ---------------------------------------------------------------------------
-
-/**
- * Round a number to 2 decimal places.
- * @param {number} n
- * @returns {number}
- */
-function round(n) {
-  return Math.round(n * 100) / 100;
-}
 
 /**
  * Find the most recent history entry for a given system.

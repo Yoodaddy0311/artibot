@@ -3,7 +3,7 @@ name: spec-format
 description: "SPEC format for structured requirements, acceptance criteria, and technical specifications."
 level: 2
 triggers: ["spec", "requirements", "specification", "acceptance criteria", "EARS", "user story"]
-agents: ["persona-architect"]
+agents: ["architect"]
 tokens: "~3K"
 category: "workflow"
 platforms: [claude-code, gemini-cli, codex-cli, cursor]

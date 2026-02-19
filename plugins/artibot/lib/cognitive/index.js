@@ -83,6 +83,6 @@ export async function process(input, context = {}) {
     domain: context.domain || 'general',
     context,
   };
-  const result = solveTask(task);
+  const result = await solveTask(task);
   return { system: 'system2', result, complexity: routing };
 }

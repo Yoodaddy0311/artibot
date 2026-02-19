@@ -3,7 +3,7 @@ name: platform-deployment
 description: "Deployment patterns for modern applications including cloud platforms, containers, and CI/CD pipelines."
 level: 2
 triggers: ["deploy", "deployment", "Vercel", "Railway", "Docker", "Kubernetes", "CI/CD", "blue-green", "zero-downtime"]
-agents: ["persona-devops", "persona-backend"]
+agents: ["devops-engineer", "backend-developer"]
 tokens: "~4K"
 category: "platform"
 platforms: [claude-code, gemini-cli, codex-cli, cursor]

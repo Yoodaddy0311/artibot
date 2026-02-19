@@ -16,8 +16,8 @@ triggers:
   - "vapor"
   - "swift package"
 agents:
-  - "persona-frontend"
-  - "persona-backend"
+  - "frontend-developer"
+  - "backend-developer"
 tokens: "~4K"
 category: "language"
 platforms: [claude-code, gemini-cli, codex-cli, cursor]

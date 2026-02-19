@@ -12,6 +12,10 @@ import { readStdin, writeStdout, parseJSON } from '../utils/index.js';
 const DANGEROUS_PATTERNS = [
   { pattern: /rm\s+(-\w*r\w*f|--recursive).*\//i, label: 'rm -rf with path' },
   { pattern: /rm\s+-\w*f\w*r.*\//i, label: 'rm -fr with path' },
+  { pattern: /rm\s+-\w*[rf]\w*\s+\*/i, label: 'rm with wildcard' },
+  { pattern: /sudo\s+rm\s/i, label: 'sudo rm' },
+  { pattern: /curl\s+.*\|\s*(sh|bash|zsh)/i, label: 'curl pipe to shell' },
+  { pattern: /wget\s+.*\|\s*(sh|bash|zsh)/i, label: 'wget pipe to shell' },
   { pattern: /git\s+push\s+.*--force/i, label: 'git push --force' },
   { pattern: /git\s+push\s+-f\b/i, label: 'git push -f' },
   { pattern: /git\s+reset\s+--hard/i, label: 'git reset --hard' },
@@ -19,12 +23,16 @@ const DANGEROUS_PATTERNS = [
   { pattern: /git\s+checkout\s+\.\s*$/i, label: 'git checkout . (discard all changes)' },
   { pattern: /git\s+restore\s+\.\s*$/i, label: 'git restore . (discard all changes)' },
   { pattern: /git\s+branch\s+-D\b/i, label: 'git branch -D (force delete)' },
+  { pattern: /git\s+stash\s+drop/i, label: 'git stash drop' },
   { pattern: /:\s*>\s*\//i, label: 'truncate file' },
   { pattern: /mkfs\./i, label: 'format filesystem' },
   { pattern: /dd\s+if=/i, label: 'dd raw disk write' },
   { pattern: />\s*\/dev\/sd/i, label: 'write to disk device' },
   { pattern: /chmod\s+-R\s+777/i, label: 'chmod 777 recursive' },
   { pattern: /npm\s+publish/i, label: 'npm publish (public registry)' },
+  { pattern: /\b(DROP|TRUNCATE)\s+(TABLE|DATABASE)/i, label: 'SQL destructive operation' },
+  { pattern: /del\s+\/s/i, label: 'Windows recursive delete' },
+  { pattern: /rmdir\s+\/s/i, label: 'Windows recursive rmdir' },
 ];
 
 async function main() {
@@ -52,5 +60,5 @@ async function main() {
 
 main().catch((err) => {
   process.stderr.write(`[artibot:pre-bash] ${err.message}\n`);
-  writeStdout({ decision: 'approve' });
+  writeStdout({ decision: 'block', reason: 'Safety check failed due to hook error. Blocking by default.' });
 });

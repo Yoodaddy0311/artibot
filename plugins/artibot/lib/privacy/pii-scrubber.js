@@ -7,7 +7,6 @@
  * @module lib/privacy/pii-scrubber
  */
 
-import path from 'node:path';
 import { getPlatform } from '../core/platform.js';
 
 // ---------------------------------------------------------------------------
