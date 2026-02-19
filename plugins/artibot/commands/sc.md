@@ -32,6 +32,7 @@ Parse $ARGUMENTS:
 | implement, create feature, develop | /implement | 88% |
 | improve, optimize, enhance | /improve | 85% |
 | plan, breakdown, scope | /plan | 90% |
+| estimate, effort, sizing, complexity scoring | /estimate | 88% |
 | design, architect, system design | /design | 90% |
 | task, todo, track, progress | /task | 85% |
 | git, commit, branch, PR | /git | 95% |
@@ -39,13 +40,29 @@ Parse $ARGUMENTS:
 | tdd, red-green, test-first | /tdd | 95% |
 | review code, code review | /code-review | 92% |
 | refactor, cleanup, dead code | /refactor-clean | 88% |
+| clean up, unused imports, technical debt, dead code elimination | /cleanup | 88% |
 | verify, validate, check | /verify | 90% |
 | checkpoint, snapshot, save state | /checkpoint | 90% |
 | troubleshoot, debug, why broken | /troubleshoot | 88% |
+| explain, how does, what is, teach, understand | /explain | 90% |
 | document, docs, readme | /document | 90% |
-| content, blog, social, seo | /content | 90% |
+| content, blog, landing page copy | /content | 90% |
+| marketing strategy, go-to-market, GTM, market analysis | /mkt | 92% |
+| email campaign, newsletter, drip, email marketing | /email | 90% |
+| presentation, slides, pitch deck, ppt, keynote | /ppt | 92% |
+| data analysis, report, excel, spreadsheet, dashboard | /excel | 88% |
+| social media, social post, twitter, linkedin, instagram | /social | 90% |
+| ad copy, advertising, PPC, paid media, Google Ads | /ad | 88% |
+| SEO, keyword research, search engine, ranking | /seo | 92% |
+| CRM, customer journey, lead scoring, pipeline | /crm | 88% |
+| marketing analytics, KPI dashboard, attribution, ROAS | /analytics | 88% |
+| CRO, conversion rate, landing page optimization, funnel | /cro | 90% |
 | orchestrate, team, coordinate | /orchestrate | 92% |
+| spawn, multi-agent, parallel tasks, pipeline execution | /spawn | 92% |
+| swarm, collective, federated, sync patterns | /swarm | 90% |
 | learn, remember, pattern | /learn | 85% |
+| index, browse, catalog, discover commands | /index | 85% |
+| load, context, project scan, framework detect | /load | 88% |
 
 ## Execution Flow
 

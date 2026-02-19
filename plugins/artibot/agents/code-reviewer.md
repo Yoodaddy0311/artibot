@@ -12,7 +12,7 @@ description: |
   리뷰, 코드 품질, 풀 리퀘스트, 코드 리뷰
 
   Do NOT use for: implementation, writing new code, security audits (use security-reviewer), testing
-model: opus
+model: sonnet
 tools:
   - Read
   - Grep
@@ -23,8 +23,14 @@ tools:
   - TaskUpdate
   - TaskList
   - TaskGet
+permissionMode: acceptEdits
+maxTurns: 25
 skills:
   - coding-standards
+  - testing-standards
+memory:
+  scope: project
+category: builder
 ---
 
 ## Core Responsibilities

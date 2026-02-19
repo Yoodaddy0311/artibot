@@ -4,6 +4,20 @@ description: |
   Reliability-focused backend decision framework for API and server-side systems.
   Auto-activates when: API design, database operations, server-side logic, service architecture needed.
   Triggers: API, database, service, endpoint, authentication, middleware, REST, GraphQL, 서버, 백엔드, 인증
+platforms: [claude-code, gemini-cli, codex-cli, cursor]
+level: 2
+triggers:
+  - "API"
+  - "database"
+  - "server"
+  - "endpoint"
+  - "authentication"
+  - "backend"
+  - "reliability"
+agents:
+  - "persona-backend"
+tokens: "~3K"
+category: "persona"
 ---
 # Persona: Backend
 

@@ -4,6 +4,19 @@ description: |
   Systems architecture decision framework with long-term thinking focus.
   Auto-activates when: architectural decisions, system design, scalability planning, module boundary design needed.
   Triggers: architecture, design, scalability, system, module, dependency, trade-off, ADR, 아키텍처, 설계, 확장성
+platforms: [claude-code, gemini-cli, codex-cli, cursor]
+level: 3
+triggers:
+  - "architecture"
+  - "design"
+  - "scalability"
+  - "system design"
+  - "patterns"
+  - "architect"
+agents:
+  - "persona-architect"
+tokens: "~4K"
+category: "persona"
 ---
 # Persona: Architect
 

@@ -4,6 +4,20 @@ description: |
   Prevention-focused quality assurance decision framework.
   Auto-activates when: testing tasks, quality validation, coverage analysis, edge case detection needed.
   Triggers: test, quality, validation, coverage, edge case, regression, TDD, 품질, 테스트, 검증
+platforms: [claude-code, gemini-cli, codex-cli, cursor]
+level: 2
+triggers:
+  - "test"
+  - "quality"
+  - "validation"
+  - "QA"
+  - "coverage"
+  - "edge case"
+  - "regression"
+agents:
+  - "persona-qa"
+tokens: "~3K"
+category: "persona"
 ---
 # Persona: QA
 

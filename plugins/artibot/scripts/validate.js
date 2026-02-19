@@ -6,9 +6,11 @@
  */
 
 import { readdir, readFile, stat } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { join, resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const PLUGIN_ROOT = resolve(import.meta.dirname, '..');
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const PLUGIN_ROOT = resolve(__dirname, '..');
 const errors = [];
 const warnings = [];
 
@@ -92,6 +94,10 @@ async function validateAgents() {
     if (!content.match(/^---\s*\n[\s\S]*?name:/m)) {
       warn(`[agents] ${file} missing "name" in frontmatter`);
     }
+    // Validate modelTier field presence
+    if (!content.match(/modelTier\s*:/)) {
+      warn(`[agents] ${file} missing "modelTier" field in frontmatter`);
+    }
   }
 
   console.log(`  [agents] ${mdFiles.length} agent(s) validated`);
@@ -118,6 +124,20 @@ async function validateSkills() {
     const content = await readFile(skillMd, 'utf-8');
     if (!content.includes('---')) {
       error(`[skills] ${dir.name}/SKILL.md missing YAML frontmatter`);
+    } else {
+      // Validate Progressive Disclosure frontmatter block (opening --- block)
+      const frontmatterMatch = content.match(/^---\s*\n([\s\S]*?)\n---/);
+      if (!frontmatterMatch) {
+        warn(`[skills] ${dir.name}/SKILL.md frontmatter block not properly closed`);
+      } else {
+        const frontmatter = frontmatterMatch[1];
+        if (!frontmatter.includes('name:')) {
+          warn(`[skills] ${dir.name}/SKILL.md missing "name" in frontmatter`);
+        }
+        if (!frontmatter.includes('description:') && !frontmatter.includes('purpose:')) {
+          warn(`[skills] ${dir.name}/SKILL.md missing "description" or "purpose" in frontmatter`);
+        }
+      }
     }
     valid++;
   }
@@ -155,10 +175,28 @@ async function validateHooks() {
   try {
     const config = await readJson(hooksPath);
     const validEvents = [
-      'SessionStart', 'PreToolUse', 'PostToolUse',
-      'PreCompact', 'Stop', 'UserPromptSubmit',
-      'SubagentStart', 'SubagentStop', 'TeammateIdle', 'SessionEnd'
+      'SessionStart', 'SessionEnd',
+      'PreToolUse', 'PostToolUse', 'PostToolUseFailure',
+      'PreCompact', 'PostCompact',
+      'Stop', 'UserPromptSubmit',
+      'SubagentStart', 'SubagentStop', 'SubAgentTurn',
+      'TeammateIdle', 'Notification',
+      'TaskCompleted', 'PermissionRequest'
     ];
+    const validHookTypes = ['command', 'prompt', 'agent'];
+
+    // Validate hookTypes metadata field if present
+    if (config.hookTypes) {
+      if (!Array.isArray(config.hookTypes)) {
+        error('[hooks] hookTypes must be an array');
+      } else {
+        for (const ht of config.hookTypes) {
+          if (!validHookTypes.includes(ht)) {
+            warn(`[hooks] Unknown hookType: "${ht}"`);
+          }
+        }
+      }
+    }
 
     const events = Object.keys(config.hooks || {});
     for (const event of events) {
@@ -167,7 +205,25 @@ async function validateHooks() {
       }
     }
 
-    console.log(`  [hooks] ${events.length} hook event(s) validated`);
+    // Validate hook type field on individual hooks
+    let hookCount = 0;
+    for (const [eventName, groups] of Object.entries(config.hooks || {})) {
+      if (!Array.isArray(groups)) continue;
+      for (const group of groups) {
+        if (!Array.isArray(group.hooks)) continue;
+        for (const hook of group.hooks) {
+          hookCount++;
+          if (hook.type && !validHookTypes.includes(hook.type)) {
+            warn(`[hooks] ${eventName}: unknown hook type "${hook.type}"`);
+          }
+          if (!hook.command) {
+            warn(`[hooks] ${eventName}: hook missing "command" field`);
+          }
+        }
+      }
+    }
+
+    console.log(`  [hooks] ${events.length} hook event(s), ${hookCount} hook(s) validated`);
   } catch (e) {
     error(`[hooks] Invalid JSON: ${e.message}`);
   }

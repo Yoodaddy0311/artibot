@@ -1,7 +1,7 @@
 {
   "name": "artibot",
-  "version": "1.0.0",
-  "description": "Intelligent orchestration framework with expert agent teams, domain skills, and workflow automation for Claude Code",
+  "version": "1.4.0",
+  "description": "Cognitive orchestration framework with dual-process routing, lifelong learning, expert agent teams, and workflow automation for Claude Code",
   "author": {
     "name": "Artience"
   },
@@ -16,11 +16,43 @@
     "code-review",
     "security",
     "quality",
-    "mcp"
+    "mcp",
+    "marketing",
+    "seo",
+    "analytics",
+    "cross-platform",
+    "cognitive-architecture",
+    "dual-process",
+    "lifelong-learning"
   ],
-  "agents": "./agents",
+  "agents": [
+    "./agents/orchestrator.md",
+    "./agents/architect.md",
+    "./agents/planner.md",
+    "./agents/backend-developer.md",
+    "./agents/build-error-resolver.md",
+    "./agents/frontend-developer.md",
+    "./agents/code-reviewer.md",
+    "./agents/content-marketer.md",
+    "./agents/security-reviewer.md",
+    "./agents/database-reviewer.md",
+    "./agents/devops-engineer.md",
+    "./agents/doc-updater.md",
+    "./agents/e2e-runner.md",
+    "./agents/llm-architect.md",
+    "./agents/mcp-developer.md",
+    "./agents/performance-engineer.md",
+    "./agents/refactor-cleaner.md",
+    "./agents/typescript-pro.md",
+    "./agents/tdd-guide.md",
+    "./agents/repo-benchmarker.md",
+    "./agents/marketing-strategist.md",
+    "./agents/data-analyst.md",
+    "./agents/presentation-designer.md",
+    "./agents/seo-specialist.md",
+    "./agents/cro-specialist.md",
+    "./agents/ad-specialist.md"
+  ],
   "commands": "./commands",
-  "hooks": "./hooks/hooks.json",
-  "mcpServers": "./.mcp.json",
-  "outputStyles": "./output-styles/"
+  "skills": "./skills"
 }

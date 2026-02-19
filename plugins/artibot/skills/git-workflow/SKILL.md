@@ -4,6 +4,22 @@ description: |
   Git workflow with conventional commits, branch strategy, and PR best practices.
   Auto-activates when: git operations, commit creation, branch management, PR workflows needed.
   Triggers: git, commit, branch, merge, PR, pull request, push, release, 커밋, 브랜치, 머지
+platforms: [claude-code, gemini-cli, codex-cli, cursor]
+level: 3
+triggers:
+  - "git"
+  - "commit"
+  - "branch"
+  - "PR"
+  - "pull request"
+  - "merge"
+  - "rebase"
+  - "workflow"
+agents:
+  - "persona-devops"
+  - "persona-scribe"
+tokens: "~3K"
+category: "devops"
 ---
 # Git Workflow
 

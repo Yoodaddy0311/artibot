@@ -1,0 +1,33 @@
+{
+  "extraction": {
+    "minSessionActions": 5,
+    "minConfidence": 0.7,
+    "maxPatternsPerSession": 5
+  },
+  "patterns": {
+    "types": [
+      "code_pattern",
+      "workflow_pattern",
+      "anti_pattern",
+      "convention",
+      "decision"
+    ],
+    "requiredFields": ["type", "description", "context", "confidence"],
+    "maxAge": "90d"
+  },
+  "memory": {
+    "maxMemoryFileLines": 200,
+    "topicFiles": [
+      "patterns.md",
+      "debugging.md",
+      "conventions.md"
+    ],
+    "cleanupThreshold": 50
+  },
+  "evaluation": {
+    "triggerOn": ["Stop", "SessionEnd"],
+    "skipIfActionsBelow": 3,
+    "includeToolUsageStats": true,
+    "includeErrorAnalysis": true
+  }
+}

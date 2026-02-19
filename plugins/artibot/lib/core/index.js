@@ -9,3 +9,9 @@ export { Cache, defaultCache } from './cache.js';
 export { readStdinJSON, readStdin, writeJSON, writeText, writeError, writeHookResult } from './io.js';
 export { debug, createDebugger, isDebugEnabled } from './debug.js';
 export { exists, readJsonFile, writeJsonFile, readTextFile, ensureDir, listFiles, listDirs } from './file.js';
+export { parseFrontmatter, loadSkills, exportForGemini, exportForCodex, exportForCursor, exportForAll } from './skill-exporter.js';
+export {
+  progressBar, statusLight, teamDashboard, workflowVisualizer, playbookVisualizer,
+  taskBoard, timeline, fullDashboard, sectionHeader,
+  color, supportsColor, getTermWidth, stripAnsi, BOX, BLOCK, SYMBOLS, COLORS, STATUS_MAP,
+} from './tui.js';

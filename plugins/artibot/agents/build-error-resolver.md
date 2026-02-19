@@ -11,7 +11,7 @@ description: |
   빌드 오류, 타입 에러, 컴파일 실패, 빌드 실패
 
   Do NOT use for: runtime bugs, logic errors, performance issues, feature implementation
-model: opus
+model: sonnet
 tools:
   - Read
   - Write
@@ -24,8 +24,13 @@ tools:
   - TaskUpdate
   - TaskList
   - TaskGet
+permissionMode: acceptEdits
+maxTurns: 25
 skills:
   - coding-standards
+memory:
+  scope: project
+category: builder
 ---
 
 ## Core Responsibilities

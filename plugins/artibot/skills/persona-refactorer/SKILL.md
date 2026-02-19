@@ -4,6 +4,18 @@ description: |
   Code quality and technical debt management decision framework.
   Auto-activates when: refactoring, code cleanup, technical debt reduction, code smell detection needed.
   Triggers: refactor, cleanup, technical debt, code smell, complexity, duplication, DRY, 리팩토링, 코드 품질
+platforms: [claude-code, gemini-cli, codex-cli, cursor]
+level: 2
+triggers:
+  - "refactor"
+  - "cleanup"
+  - "technical debt"
+  - "simplify"
+  - "maintainability"
+agents:
+  - "persona-refactorer"
+tokens: "~3K"
+category: "persona"
 ---
 # Persona: Refactorer
 

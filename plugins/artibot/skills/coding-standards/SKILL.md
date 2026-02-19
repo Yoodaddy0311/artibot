@@ -4,6 +4,26 @@ description: |
   Coding standards and style guide enforcing immutability, error handling, file organization, and naming conventions.
   Auto-activates when: writing or modifying code, code review, creating new files or components.
   Triggers: code, write, edit, implement, component, function, class, style
+platforms: [claude-code, gemini-cli, codex-cli, cursor]
+level: 3
+progressive_disclosure:
+  enabled: true
+  level1_tokens: 100
+  level2_tokens: 4000
+triggers:
+  - "code"
+  - "write"
+  - "implement"
+  - "component"
+  - "function"
+  - "class"
+  - "style"
+  - "standards"
+agents:
+  - "persona-refactorer"
+  - "persona-backend"
+tokens: "~3K"
+category: "code-quality"
 ---
 
 # Coding Standards

@@ -11,7 +11,7 @@ description: |
   테스트, 사용자 흐름, 브라우저 테스트, 시각적 회귀
 
   Do NOT use for: unit tests, integration tests without browser, API-only testing
-model: opus
+model: haiku
 tools:
   - Read
   - Write
@@ -24,9 +24,14 @@ tools:
   - TaskUpdate
   - TaskList
   - TaskGet
+permissionMode: default
+maxTurns: 25
 skills:
   - testing-standards
   - mcp-playwright
+memory:
+  scope: user
+category: support
 ---
 
 ## Core Responsibilities

@@ -4,6 +4,20 @@ description: |
   Educational and knowledge transfer decision framework.
   Auto-activates when: explanation requests, learning guidance, concept clarification, tutorial creation needed.
   Triggers: explain, learn, understand, teach, guide, how does, why does, concept, tutorial, 설명, 배우기, 이해
+platforms: [claude-code, gemini-cli, codex-cli, cursor]
+level: 2
+triggers:
+  - "explain"
+  - "learn"
+  - "understand"
+  - "guide"
+  - "teach"
+  - "mentor"
+  - "educate"
+agents:
+  - "persona-mentor"
+tokens: "~3K"
+category: "persona"
 ---
 # Persona: Mentor
 

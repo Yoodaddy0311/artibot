@@ -23,9 +23,15 @@ tools:
   - TaskUpdate
   - TaskList
   - TaskGet
+permissionMode: plan
+maxTurns: 25
 skills:
   - principles
   - persona-architect
+  - coding-standards
+memory:
+  scope: project
+category: manager
 ---
 
 ## Core Responsibilities

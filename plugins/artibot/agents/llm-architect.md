@@ -11,7 +11,7 @@ description: |
   프롬프트, 임베딩, AI 아키텍처, 벡터 DB
 
   Do NOT use for: traditional backend logic, CSS styling, database schema without AI context
-model: opus
+model: sonnet
 tools:
   - Read
   - Write
@@ -24,8 +24,13 @@ tools:
   - TaskUpdate
   - TaskList
   - TaskGet
+permissionMode: acceptEdits
+maxTurns: 25
 skills:
   - persona-architect
+memory:
+  scope: project
+category: expert
 ---
 
 ## Core Responsibilities

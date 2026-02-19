@@ -4,6 +4,21 @@ description: |
   UX/accessibility-focused frontend decision framework.
   Auto-activates when: UI/UX work, component creation, responsive design, accessibility tasks needed.
   Triggers: component, UI, responsive, accessibility, CSS, React, Vue, WCAG, design system, 컴포넌트, 반응형, 접근성
+platforms: [claude-code, gemini-cli, codex-cli, cursor]
+level: 3
+triggers:
+  - "UI"
+  - "component"
+  - "React"
+  - "CSS"
+  - "responsive"
+  - "accessibility"
+  - "frontend"
+  - "UX"
+agents:
+  - "persona-frontend"
+tokens: "~4K"
+category: "persona"
 ---
 # Persona: Frontend
 

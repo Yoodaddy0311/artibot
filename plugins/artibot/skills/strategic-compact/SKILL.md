@@ -4,6 +4,19 @@ description: |
   Context compaction strategy for preserving critical information during PreCompact events.
   Auto-activates when: context >75%, PreCompact triggered, long sessions, multi-phase tasks.
   Triggers: compact, context, compress, long session, context window, memory pressure
+platforms: [claude-code, gemini-cli, codex-cli, cursor]
+level: 2
+triggers:
+  - "strategy"
+  - "compact"
+  - "executive summary"
+  - "strategic plan"
+  - "priorities"
+  - "OKR"
+agents:
+  - "persona-architect"
+tokens: "~2K"
+category: "analysis"
 ---
 # Strategic Compaction
 

@@ -24,8 +24,14 @@ tools:
   - TaskUpdate
   - TaskList
   - TaskGet
+permissionMode: acceptEdits
+maxTurns: 25
 skills:
   - persona-backend
+  - mcp-coordination
+memory:
+  scope: project
+category: expert
 ---
 
 ## Core Responsibilities
