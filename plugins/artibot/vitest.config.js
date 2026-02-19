@@ -1,6 +1,19 @@
 import { defineConfig } from 'vitest/config';
 
+/** Strip shebang lines so hook scripts can be imported in tests on Windows. */
+function stripShebangPlugin() {
+  return {
+    name: 'strip-shebang',
+    transform(code, id) {
+      if (id.includes('scripts/hooks') && code.startsWith('#!')) {
+        return { code: code.replace(/^#![^\n]*\n/, ''), map: null };
+      }
+    },
+  };
+}
+
 export default defineConfig({
+  plugins: [stripShebangPlugin()],
   test: {
     root: '.',
     include: ['tests/**/*.test.js'],

@@ -18,6 +18,13 @@ description: Default Artibot output style - clean, structured, concise
 2. **Evidence/code** supporting the answer
 3. **Next steps** if applicable (brief bullet list)
 
+## Reports
+
+- All completion/evaluation/patch reports use `artibot-report` style
+- Use markdown tables (pipe `|` syntax), never ASCII box-drawing
+- Summary line with bold metrics before the table
+- Blockquote footer for supplementary notes
+
 ## Token Efficiency
 
 - Prefer tables over prose for comparisons
