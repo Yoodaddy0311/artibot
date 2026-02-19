@@ -31,6 +31,9 @@ async function main() {
     // Use defaults if config missing
   }
 
+  // Resolve home directory once for use throughout
+  const home = process.env.USERPROFILE || process.env.HOME || '';
+
   // Restore previous session state via lib/context/session module
   let previousState = null;
   try {
@@ -44,7 +47,6 @@ async function main() {
     }
   } catch {
     // Fallback: manual state loading if session module fails
-    const home = process.env.USERPROFILE || process.env.HOME || '';
     const statePath = path.join(home, '.claude', 'artibot-state.json');
     if (existsSync(statePath)) {
       try {

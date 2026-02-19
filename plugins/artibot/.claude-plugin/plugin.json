@@ -5,7 +5,7 @@
   "author": {
     "name": "Artience"
   },
-  "repository": "https://github.com/artience/artibot",
+  "repository": "https://github.com/Yoodaddy0311/artibot",
   "license": "MIT",
   "keywords": [
     "orchestration",
@@ -53,6 +53,6 @@
     "./agents/cro-specialist.md",
     "./agents/ad-specialist.md"
   ],
-  "commands": "./commands",
-  "skills": "./skills"
+  "commands": ["./commands/"],
+  "skills": ["./skills/"]
 }

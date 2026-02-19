@@ -817,4 +817,4 @@ PRs are reviewed for:
 
 ---
 
-*Questions? / 질문이 있으시면?* Open an issue at https://github.com/artience/artibot/issues
+*Questions? / 질문이 있으시면?* Open an issue at https://github.com/Yoodaddy0311/artibot/issues
