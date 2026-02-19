@@ -16,7 +16,7 @@ triggers:
   - "PPC"
   - "creative brief"
 agents:
-  - "persona-frontend"
+  - "ad-specialist"
 tokens: "~3K"
 category: "marketing"
 ---

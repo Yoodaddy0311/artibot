@@ -14,7 +14,7 @@ triggers:
   - "documentation"
   - "localization"
 agents:
-  - "persona-scribe"
+  - "doc-updater"
 tokens: "~4K"
 category: "persona"
 ---

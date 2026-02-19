@@ -13,8 +13,8 @@ triggers:
   - "conversion page"
   - "page design"
 agents:
-  - "persona-frontend"
-  - "persona-performance"
+  - "frontend-developer"
+  - "performance-engineer"
 tokens: "~3K"
 category: "testing"
 ---

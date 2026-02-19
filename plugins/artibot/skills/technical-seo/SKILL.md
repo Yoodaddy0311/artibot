@@ -15,8 +15,8 @@ triggers:
   - "schema markup"
   - "sitemap"
 agents:
-  - "persona-backend"
-  - "persona-performance"
+  - "backend-developer"
+  - "performance-engineer"
 tokens: "~4K"
 category: "marketing"
 ---

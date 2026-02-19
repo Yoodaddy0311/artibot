@@ -192,5 +192,10 @@
   "output": {
     "maxContextLength": 500,
     "defaultStyle": "artibot-default"
+  },
+
+  "telemetry": {
+    "enabled": false,
+    "anonymize": true
   }
 }

@@ -12,7 +12,7 @@
  * Data directory: ~/.claude/artibot/ (shared with all lib modules)
  */
 
-import { readStdin, parseJSON, getPluginRoot } from '../utils/index.js';
+import { readStdin, parseJSON, getPluginRoot, toFileUrl } from '../utils/index.js';
 import path from 'node:path';
 
 async function main() {
@@ -39,7 +39,7 @@ async function main() {
 
   try {
     const { shutdownLearning, collectExperience } = await import(
-      `file://${learningPath.replace(/\\/g, '/')}`
+      toFileUrl(learningPath)
     );
 
     // Collect any raw experiences first (backward compat with old hook data format)

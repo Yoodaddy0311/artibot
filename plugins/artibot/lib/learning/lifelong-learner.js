@@ -10,14 +10,13 @@
  */
 
 import path from 'node:path';
-import os from 'node:os';
 import { readJsonFile, writeJsonFile, ensureDir } from '../core/file.js';
+import { ARTIBOT_DIR, round } from '../core/index.js';
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-const ARTIBOT_DIR = path.join(os.homedir(), '.claude', 'artibot');
 const EXPERIENCES_PATH = path.join(ARTIBOT_DIR, 'daily-experiences.json');
 const PATTERNS_DIR = path.join(ARTIBOT_DIR, 'patterns');
 const LEARNING_LOG_PATH = path.join(ARTIBOT_DIR, 'learning-log.json');
@@ -640,8 +639,4 @@ async function appendLearningLog(entry) {
 function clamp01(value) {
   if (typeof value !== 'number' || Number.isNaN(value)) return 0;
   return Math.max(0, Math.min(1, value));
-}
-
-function round(n) {
-  return Math.round(n * 1000) / 1000;
 }

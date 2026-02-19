@@ -14,7 +14,7 @@ triggers:
   - "keyword content"
   - "SEO content"
 agents:
-  - "persona-scribe"
+  - "doc-updater"
 tokens: "~3K"
 category: "marketing"
 ---

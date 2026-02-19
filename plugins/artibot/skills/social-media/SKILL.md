@@ -16,7 +16,7 @@ triggers:
   - "social strategy"
   - "engagement"
 agents:
-  - "persona-scribe"
+  - "doc-updater"
 tokens: "~3K"
 category: "marketing"
 ---

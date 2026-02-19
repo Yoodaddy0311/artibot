@@ -13,8 +13,8 @@ triggers:
   - "form UX"
   - "form design"
 agents:
-  - "persona-frontend"
-  - "persona-qa"
+  - "frontend-developer"
+  - "tdd-guide"
 tokens: "~3K"
 category: "testing"
 ---

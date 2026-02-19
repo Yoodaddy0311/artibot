@@ -31,4 +31,5 @@ async function main() {
 
 main().catch((err) => {
   process.stderr.write(`[artibot:post-edit-format] ${err.message}\n`);
+  process.exit(0);
 });

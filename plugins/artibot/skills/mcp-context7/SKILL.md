@@ -15,8 +15,8 @@ triggers:
   - "Context7"
   - "official docs"
 agents:
-  - "persona-backend"
-  - "persona-frontend"
+  - "backend-developer"
+  - "frontend-developer"
 tokens: "~2K"
 category: "tooling"
 ---

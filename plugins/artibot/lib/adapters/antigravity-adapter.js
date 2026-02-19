@@ -26,6 +26,7 @@
 
 import path from 'node:path';
 import { BaseAdapter } from './base-adapter.js';
+import { buildFrontmatter, cleanDescription } from './adapter-utils.js';
 
 export class AntigravityAdapter extends BaseAdapter {
   get platformId() {
@@ -132,33 +133,6 @@ export class AntigravityAdapter extends BaseAdapter {
       content: rules.join('\n'),
     };
   }
-}
-
-function buildFrontmatter(fields) {
-  const lines = ['---'];
-  for (const [key, value] of Object.entries(fields)) {
-    if (typeof value === 'string' && value.includes('\n')) {
-      lines.push(`${key}: |`);
-      for (const line of value.split('\n')) {
-        lines.push(`  ${line}`);
-      }
-    } else if (Array.isArray(value)) {
-      lines.push(`${key}: [${value.join(', ')}]`);
-    } else {
-      lines.push(`${key}: ${value}`);
-    }
-  }
-  lines.push('---');
-  return lines.join('\n');
-}
-
-function cleanDescription(desc) {
-  if (!desc) return '';
-  return desc
-    .split('\n')
-    .map((l) => l.trimEnd())
-    .join('\n')
-    .trim();
 }
 
 function stripClaudeSpecificRefs(content) {

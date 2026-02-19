@@ -9,7 +9,7 @@
  */
 
 import path from 'node:path';
-import { readStdin, parseJSON } from '../utils/index.js';
+import { readStdin, parseJSON, toFileUrl } from '../utils/index.js';
 
 // Dynamic import for tool-learner (ESM, relative to plugin root)
 const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT
@@ -61,12 +61,12 @@ async function main() {
   // Dynamically import tool-learner and record
   try {
     const learnerPath = path.join(PLUGIN_ROOT, 'lib', 'learning', 'tool-learner.js');
-    const { recordUsage } = await import(`file://${learnerPath.replace(/\\/g, '/')}`);
+    const { recordUsage } = await import(toFileUrl(learnerPath));
     await recordUsage(toolName, context, score, meta);
 
     // Bridge: feed tool usage into the lifelong learning pipeline
     const lifelongPath = path.join(PLUGIN_ROOT, 'lib', 'learning', 'lifelong-learner.js');
-    const { collectExperience } = await import(`file://${lifelongPath.replace(/\\/g, '/')}`);
+    const { collectExperience } = await import(toFileUrl(lifelongPath));
     await collectExperience({
       type: 'tool',
       category: toolName,
@@ -251,7 +251,7 @@ function extractExt(filePath) {
 }
 
 /**
- * Extract extension hint from a glob pattern like "*.ts" or "**/*.md".
+ * Extract extension hint from a glob pattern (e.g. "*.ts", "**​\/*.md").
  * @param {string} [pattern]
  * @returns {string|null}
  */

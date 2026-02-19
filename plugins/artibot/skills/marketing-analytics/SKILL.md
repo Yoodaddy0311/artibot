@@ -14,8 +14,8 @@ triggers:
   - "conversion tracking"
   - "marketing metrics"
 agents:
-  - "persona-analyzer"
-  - "persona-performance"
+  - "code-reviewer"
+  - "performance-engineer"
 tokens: "~4K"
 category: "marketing"
 ---

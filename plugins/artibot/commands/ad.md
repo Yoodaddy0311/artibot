@@ -31,7 +31,7 @@ Parse $ARGUMENTS:
 
 ## Agent Delegation
 
-- Primary: `content-marketer` - Ad copy creation
+- Primary: `ad-specialist` - Ad copy creation
 - Supporting: `data-analyst` - Performance prediction and optimization
 
 ## Skills Required

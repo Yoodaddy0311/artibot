@@ -15,8 +15,8 @@ triggers:
   - "prospect"
   - "lead nurture"
 agents:
-  - "persona-backend"
-  - "persona-analyzer"
+  - "backend-developer"
+  - "code-reviewer"
 tokens: "~4K"
 category: "marketing"
 ---

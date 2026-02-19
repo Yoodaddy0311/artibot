@@ -12,15 +12,14 @@
  */
 
 import path from 'node:path';
-import os from 'node:os';
 import fs from 'node:fs/promises';
 import { readJsonFile, writeJsonFile, ensureDir } from '../core/file.js';
+import { ARTIBOT_DIR, round } from '../core/index.js';
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-const ARTIBOT_DIR = path.join(os.homedir(), '.claude', 'artibot');
 const PATTERNS_DIR = path.join(ARTIBOT_DIR, 'patterns');
 const TRANSFER_LOG_PATH = path.join(ARTIBOT_DIR, 'transfer-log.json');
 const SYSTEM1_PATH = path.join(ARTIBOT_DIR, 'system1-patterns.json');
@@ -602,10 +601,3 @@ export function clearCache() {
   _system1Cache = null;
 }
 
-// ---------------------------------------------------------------------------
-// Utilities
-// ---------------------------------------------------------------------------
-
-function round(n) {
-  return Math.round(n * 1000) / 1000;
-}

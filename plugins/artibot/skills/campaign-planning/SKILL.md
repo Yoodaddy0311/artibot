@@ -14,7 +14,7 @@ triggers:
   - "campaign strategy"
   - "launch"
 agents:
-  - "persona-architect"
+  - "architect"
 tokens: "~4K"
 category: "marketing"
 ---

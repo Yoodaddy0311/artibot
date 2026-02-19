@@ -15,7 +15,7 @@ triggers:
   - "mentor"
   - "educate"
 agents:
-  - "persona-mentor"
+  - "planner"
 tokens: "~3K"
 category: "persona"
 ---

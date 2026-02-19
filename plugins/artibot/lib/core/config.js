@@ -4,8 +4,15 @@
  */
 
 import path from 'node:path';
+import os from 'node:os';
 import { readJsonFile } from './file.js';
 import { getPluginRoot } from './platform.js';
+
+/**
+ * Base directory for all artibot runtime data.
+ * Shared across swarm, learning, and privacy modules.
+ */
+export const ARTIBOT_DIR = path.join(os.homedir(), '.claude', 'artibot');
 
 const DEFAULTS = {
   version: '1.0.0',

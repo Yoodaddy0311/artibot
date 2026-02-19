@@ -3,7 +3,7 @@ name: platform-database-cloud
 description: "Cloud database patterns for serverless PostgreSQL, real-time databases, and edge-compatible data access."
 level: 2
 triggers: ["Neon", "Supabase", "Firebase", "Firestore", "PlanetScale", "serverless database", "connection pooling", "edge functions", "real-time"]
-agents: ["persona-backend", "persona-architect"]
+agents: ["backend-developer", "architect"]
 tokens: "~4K"
 category: "platform"
 platforms: [claude-code, gemini-cli, codex-cli, cursor]

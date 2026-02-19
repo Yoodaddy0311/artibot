@@ -15,7 +15,7 @@ triggers:
   - "edge case"
   - "regression"
 agents:
-  - "persona-qa"
+  - "tdd-guide"
 tokens: "~3K"
 category: "persona"
 ---

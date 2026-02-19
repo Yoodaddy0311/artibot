@@ -10,8 +10,8 @@
  */
 
 import path from 'node:path';
-import os from 'node:os';
 import { readJsonFile, writeJsonFile, ensureDir } from '../core/file.js';
+import { ARTIBOT_DIR } from '../core/config.js';
 import { uploadWeights, downloadLatestWeights, flushOfflineQueue } from './swarm-client.js';
 import { packagePatterns, unpackWeights, mergeWeights } from './pattern-packager.js';
 
@@ -19,7 +19,6 @@ import { packagePatterns, unpackWeights, mergeWeights } from './pattern-packager
 // Constants
 // ---------------------------------------------------------------------------
 
-const ARTIBOT_DIR = path.join(os.homedir(), '.claude', 'artibot');
 const SYNC_STATE_PATH = path.join(ARTIBOT_DIR, 'swarm-sync-state.json');
 const MERGED_WEIGHTS_PATH = path.join(ARTIBOT_DIR, 'swarm-merged-weights.json');
 

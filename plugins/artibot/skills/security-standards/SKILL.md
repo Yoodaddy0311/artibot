@@ -18,8 +18,8 @@ triggers:
   - "sanitize"
   - "encrypt"
 agents:
-  - "persona-security"
-  - "persona-backend"
+  - "security-reviewer"
+  - "backend-developer"
 tokens: "~3K"
 category: "security"
 ---

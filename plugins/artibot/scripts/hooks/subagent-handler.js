@@ -5,9 +5,9 @@
  * Usage: node subagent-handler.js start|stop
  */
 
-import { readStdin, writeStdout, parseJSON } from '../utils/index.js';
+import { readStdin, writeStdout, parseJSON, atomicWriteSync } from '../utils/index.js';
 import path from 'node:path';
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 
 function getStatePath() {
   const home = process.env.USERPROFILE || process.env.HOME || '';
@@ -26,9 +26,7 @@ function loadState() {
 
 function saveState(state) {
   const statePath = getStatePath();
-  const dir = path.dirname(statePath);
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(statePath, JSON.stringify(state, null, 2), 'utf-8');
+  atomicWriteSync(statePath, state);
 }
 
 async function main() {
@@ -69,4 +67,5 @@ async function main() {
 
 main().catch((err) => {
   process.stderr.write(`[artibot:subagent-handler] ${err.message}\n`);
+  process.exit(0);
 });

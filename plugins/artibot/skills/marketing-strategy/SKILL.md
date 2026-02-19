@@ -14,7 +14,7 @@ triggers:
   - "market positioning"
   - "growth strategy"
 agents:
-  - "persona-architect"
+  - "architect"
 tokens: "~4K"
 category: "marketing"
 ---

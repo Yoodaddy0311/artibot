@@ -112,12 +112,12 @@ SendMessage(type="message", recipient="tester", content="{lint results and conte
 | Domain | Teammate Spawn | Focus |
 |--------|----------------|-------|
 | Security | `Task(security-reviewer, team_name="spawn-*", name="security")` | Vulnerabilities, compliance |
-| Performance | `Task(performance, team_name="spawn-*", name="perf-analyst")` | Bottlenecks, optimization |
+| Performance | `Task(performance-engineer, team_name="spawn-*", name="perf-analyst")` | Bottlenecks, optimization |
 | Quality | `Task(code-reviewer, team_name="spawn-*", name="quality")` | Code quality, patterns |
 | Architecture | `Task(architect, team_name="spawn-*", name="architect")` | Structure, design |
 | Testing | `Task(tdd-guide, team_name="spawn-*", name="tester")` | Coverage, test quality |
-| Frontend | `Task(frontend, team_name="spawn-*", name="frontend-dev")` | UI, accessibility |
-| Backend | `Task(backend, team_name="spawn-*", name="backend-dev")` | API, data, reliability |
+| Frontend | `Task(frontend-developer, team_name="spawn-*", name="frontend-dev")` | UI, accessibility |
+| Backend | `Task(backend-developer, team_name="spawn-*", name="backend-dev")` | API, data, reliability |
 
 ## Output Format
 

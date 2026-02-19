@@ -16,7 +16,7 @@ triggers:
   - "pest"
   - "phpstan"
 agents:
-  - "persona-backend"
+  - "backend-developer"
 tokens: "~4K"
 category: "language"
 platforms: [claude-code, gemini-cli, codex-cli, cursor]

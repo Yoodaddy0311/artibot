@@ -20,8 +20,8 @@ triggers:
   - "style"
   - "standards"
 agents:
-  - "persona-refactorer"
-  - "persona-backend"
+  - "refactor-cleaner"
+  - "backend-developer"
 tokens: "~3K"
 category: "code-quality"
 ---

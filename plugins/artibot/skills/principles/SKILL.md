@@ -16,8 +16,8 @@ triggers:
   - "clean code"
   - "DRY"
 agents:
-  - "persona-architect"
-  - "persona-refactorer"
+  - "architect"
+  - "refactor-cleaner"
 tokens: "~3K"
 category: "code-quality"
 ---

@@ -3,7 +3,7 @@ name: platform-auth
 description: "Authentication and authorization patterns for modern web applications."
 level: 2
 triggers: ["authentication", "auth", "OAuth", "JWT", "RBAC", "session", "Auth0", "Clerk"]
-agents: ["persona-backend", "persona-security"]
+agents: ["backend-developer", "security-reviewer"]
 tokens: "~4K"
 category: "platform"
 platforms: [claude-code, gemini-cli, codex-cli, cursor]

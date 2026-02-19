@@ -16,8 +16,8 @@ triggers:
   - "link building"
   - "technical SEO"
 agents:
-  - "persona-analyzer"
-  - "persona-backend"
+  - "code-reviewer"
+  - "backend-developer"
 tokens: "~4K"
 category: "marketing"
 ---

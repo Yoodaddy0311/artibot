@@ -16,7 +16,7 @@ triggers:
   - "frontend"
   - "UX"
 agents:
-  - "persona-frontend"
+  - "frontend-developer"
 tokens: "~4K"
 category: "persona"
 ---

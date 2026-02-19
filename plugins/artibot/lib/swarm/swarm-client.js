@@ -12,14 +12,14 @@
 
 import { createHash } from 'node:crypto';
 import path from 'node:path';
-import os from 'node:os';
 import { readJsonFile, writeJsonFile, ensureDir } from '../core/file.js';
+import { ARTIBOT_DIR } from '../core/config.js';
+import { scrubPattern as defaultScrubPii } from '../privacy/pii-scrubber.js';
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-const ARTIBOT_DIR = path.join(os.homedir(), '.claude', 'artibot');
 const OFFLINE_QUEUE_PATH = path.join(ARTIBOT_DIR, 'swarm-offline-queue.json');
 
 /** Maximum retry attempts for failed requests */
@@ -230,11 +230,9 @@ export async function uploadWeights(weights, metadata = {}, options = {}) {
     return { success: false, error: `Payload exceeds ${MAX_UPLOAD_BYTES / 1024 / 1024}MB limit` };
   }
 
-  // Step 1: PII scrubbing
-  let processedWeights = weights;
-  if (typeof options.scrubPii === 'function') {
-    processedWeights = options.scrubPii(weights);
-  }
+  // Step 1: PII scrubbing (default-on: always applied unless caller overrides)
+  const scrubber = typeof options.scrubPii === 'function' ? options.scrubPii : defaultScrubPii;
+  let processedWeights = scrubber(weights);
 
   // Step 2: Differential privacy noise
   if (typeof options.addNoise === 'function') {

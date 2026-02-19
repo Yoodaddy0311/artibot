@@ -14,8 +14,8 @@ triggers:
   - "summary"
   - "insights report"
 agents:
-  - "persona-analyzer"
-  - "persona-scribe"
+  - "code-reviewer"
+  - "doc-updater"
 tokens: "~3K"
 category: "analysis"
 ---

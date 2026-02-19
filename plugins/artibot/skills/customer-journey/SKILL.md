@@ -14,8 +14,8 @@ triggers:
   - "customer experience"
   - "journey map"
 agents:
-  - "persona-architect"
-  - "persona-frontend"
+  - "architect"
+  - "frontend-developer"
 tokens: "~4K"
 category: "marketing"
 ---

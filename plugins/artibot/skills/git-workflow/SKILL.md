@@ -16,8 +16,8 @@ triggers:
   - "rebase"
   - "workflow"
 agents:
-  - "persona-devops"
-  - "persona-scribe"
+  - "devops-engineer"
+  - "doc-updater"
 tokens: "~3K"
 category: "devops"
 ---

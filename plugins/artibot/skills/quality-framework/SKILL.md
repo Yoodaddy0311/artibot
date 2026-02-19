@@ -16,10 +16,10 @@ triggers:
   - "performance standards"
   - "quality metrics"
 agents:
-  - "persona-qa"
-  - "persona-security"
-  - "persona-performance"
-  - "persona-refactorer"
+  - "tdd-guide"
+  - "security-reviewer"
+  - "performance-engineer"
+  - "refactor-cleaner"
 tokens: "~5K"
 category: "code-quality"
 platforms: [claude-code, gemini-cli, codex-cli, cursor]

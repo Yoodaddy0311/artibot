@@ -1,3 +1,5 @@
+# NOTE: This CI is the primary workflow. The duplicate at plugins/artibot/.github/workflows/ci.yml
+# is kept for standalone plugin development but may be removed in a future cleanup.
 name: CI
 
 on:

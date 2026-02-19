@@ -14,7 +14,7 @@ triggers:
   - "priorities"
   - "OKR"
 agents:
-  - "persona-architect"
+  - "architect"
 tokens: "~2K"
 category: "analysis"
 ---

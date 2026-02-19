@@ -12,9 +12,9 @@
 
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import os from 'node:os';
+import { ARTIBOT_DIR, round } from '../core/index.js';
 
-const HISTORY_DIR = path.join(os.homedir(), '.claude', 'artibot');
+const HISTORY_DIR = ARTIBOT_DIR;
 const HISTORY_PATH = path.join(HISTORY_DIR, 'tool-history.json');
 
 /** Maximum records kept per context key to prevent unbounded growth */
@@ -755,11 +755,6 @@ function rebuildAggregates(history) {
 /** @param {number} n */
 function clampScore(n) {
   return Math.max(0, Math.min(1, Number(n) || 0));
-}
-
-/** @param {number} n */
-function round(n) {
-  return Math.round(n * 1000) / 1000;
 }
 
 /** @param {number} count @returns {"low"|"medium"|"high"} */

@@ -4,6 +4,9 @@
  */
 
 import path from 'node:path';
+import { writeFileSync, renameSync, mkdirSync } from 'node:fs';
+import { dirname } from 'node:path';
+
 
 /**
  * Read all of stdin as a string.
@@ -61,4 +64,35 @@ export function getPluginRoot() {
  */
 export function resolveConfigPath(...segments) {
   return path.join(getPluginRoot(), ...segments);
+}
+
+/**
+ * Atomically write data to a file by writing to a temp file and renaming.
+ * Prevents partial-write corruption of state files on crash or concurrent access.
+ * @param {string} filePath - Destination file path
+ * @param {string|object} data - String content or object to serialize as JSON
+ */
+export function atomicWriteSync(filePath, data) {
+  const dir = dirname(filePath);
+  mkdirSync(dir, { recursive: true });
+  const tmpPath = filePath + '.tmp.' + process.pid;
+  writeFileSync(tmpPath, typeof data === 'string' ? data : JSON.stringify(data, null, 2), 'utf-8');
+  renameSync(tmpPath, filePath);
+}
+
+/**
+ * Convert a filesystem path to a file:// URL string for dynamic import().
+ * Uses manual construction instead of pathToFileURL() because the latter
+ * percent-encodes non-ASCII characters (e.g., Korean 바탕 화면 → %EB%B0%94...),
+ * which Node.js import() on Windows cannot resolve back to filesystem paths.
+ * @param {string} filePath - Absolute filesystem path
+ * @returns {string} file:// URL string
+ */
+export function toFileUrl(filePath) {
+  const forward = filePath.replace(/\\/g, '/');
+  // Windows absolute paths need file:///C:/... (empty authority)
+  if (/^[A-Z]:/i.test(forward)) {
+    return `file:///${forward}`;
+  }
+  return `file://${forward}`;
 }

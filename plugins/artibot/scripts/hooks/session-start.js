@@ -5,7 +5,7 @@
  * Outputs a welcome message to stdout.
  */
 
-import { readStdin, writeStdout, getPluginRoot, resolveConfigPath, parseJSON } from '../utils/index.js';
+import { readStdin, writeStdout, getPluginRoot, resolveConfigPath, parseJSON, toFileUrl } from '../utils/index.js';
 import { readFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -39,7 +39,7 @@ async function main() {
   try {
     const sessionModPath = path.join(env.pluginRoot, 'lib', 'context', 'session.js');
     const { loadSessionState } = await import(
-      `file://${sessionModPath.replace(/\\/g, '/')}`
+      toFileUrl(sessionModPath)
     );
     const state = await loadSessionState();
     if (state && state.sessionId) {

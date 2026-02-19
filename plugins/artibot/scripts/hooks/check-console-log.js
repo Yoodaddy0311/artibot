@@ -58,4 +58,5 @@ async function main() {
 
 main().catch((err) => {
   process.stderr.write(`[artibot:check-console-log] ${err.message}\n`);
+  process.exit(0);
 });

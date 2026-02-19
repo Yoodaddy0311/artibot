@@ -14,6 +14,7 @@
 
 import path from 'node:path';
 import { BaseAdapter } from './base-adapter.js';
+import { buildFrontmatter, cleanDescription, stripAgentTeamsRefs } from './adapter-utils.js';
 
 export class GeminiAdapter extends BaseAdapter {
   get platformId() {
@@ -97,39 +98,6 @@ export class GeminiAdapter extends BaseAdapter {
 }
 
 /**
- * Build YAML frontmatter string from key-value pairs.
- */
-function buildFrontmatter(fields) {
-  const lines = ['---'];
-  for (const [key, value] of Object.entries(fields)) {
-    if (typeof value === 'string' && value.includes('\n')) {
-      lines.push(`${key}: |`);
-      for (const line of value.split('\n')) {
-        lines.push(`  ${line}`);
-      }
-    } else if (Array.isArray(value)) {
-      lines.push(`${key}: [${value.join(', ')}]`);
-    } else {
-      lines.push(`${key}: ${value}`);
-    }
-  }
-  lines.push('---');
-  return lines.join('\n');
-}
-
-/**
- * Clean description text (trim trailing whitespace per line).
- */
-function cleanDescription(desc) {
-  if (!desc) return '';
-  return desc
-    .split('\n')
-    .map((l) => l.trimEnd())
-    .join('\n')
-    .trim();
-}
-
-/**
  * Remove Claude Code-specific references from skill content.
  * Keeps the content portable across platforms.
  */
@@ -141,23 +109,15 @@ function stripClaudeSpecificRefs(content) {
 }
 
 /**
- * Remove Agent Teams API-specific content from agent definitions.
- * Team orchestration is Claude-exclusive; other platforms use single-agent mode.
- */
-function stripAgentTeamsRefs(content) {
-  return content
-    .replace(/TeamCreate|TeamDelete/g, '(team coordination)')
-    .replace(/SendMessage\(type: "(?:broadcast|shutdown_request|shutdown_response|plan_approval_response)"\)/g, '(agent communication)')
-    .replace(/CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS/g, '(platform agent teams)')
-    .replace(/Claude Code/g, 'AI Agent Platform');
-}
-
-/**
  * Convert a Markdown command definition to TOML format for Gemini CLI.
  */
 function markdownCommandToToml(command) {
   const name = command.name;
   const desc = extractFirstParagraph(command.content);
+
+  // Before writing to TOML body, escape triple quotes
+  const body = command.content.trim();
+  const safeBody = body.replace(/"""/g, '\\"\\"\\"');
 
   const lines = [
     `# ${name} command`,
@@ -169,7 +129,7 @@ function markdownCommandToToml(command) {
     '',
     `[command.prompt]`,
     `text = """`,
-    command.content.trim(),
+    safeBody,
     `"""`,
   ];
 

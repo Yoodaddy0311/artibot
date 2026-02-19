@@ -14,8 +14,8 @@ triggers:
   - "brand consistency"
   - "tone"
 agents:
-  - "persona-scribe"
-  - "persona-frontend"
+  - "doc-updater"
+  - "frontend-developer"
 tokens: "~3K"
 category: "marketing"
 ---

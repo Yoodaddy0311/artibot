@@ -160,7 +160,7 @@ Spawns 5 teammates that self-claim tasks from the shared task list and report fi
                    v
 +-------------------------------------------------+
 |       Delegation Mode (Complexity Scoring)        |
-|    score < 0.6 -> Sub-Agent  |  >= 0.6 -> Team   |
+|    score < 0.4 -> Sub-Agent  |  >= 0.4 -> Team   |
 +-------+---------------------------------+-------+
         |                                 |
         v                                 v
@@ -201,8 +201,8 @@ User Request
       v
 +-------------+
 |  Cognitive   |    Complexity Score = weighted sum of:
-|   Router     |      token estimate (0.25) + domain count (0.20)
-| (hook-based) |      + step count (0.20) + ambiguity (0.20) + risk (0.15)
+|   Router     |      steps (0.25) + domains (0.20)
+| (hook-based) |      + uncertainty (0.20) + risk (0.20) + novelty (0.15)
 +------+------+
        |
        +--- score < 0.4 ---> System 1 (Fast / Intuitive)
@@ -234,8 +234,7 @@ The cognitive router feeds directly into the orchestration delegation mode:
 | Complexity Score | System | Delegation Mode |
 |-----------------|--------|-----------------|
 | < 0.4 | System 1 | Sub-Agent (Task tool) |
-| 0.4 - 0.6 | System 2 | Sub-Agent + deep analysis |
-| >= 0.6 | System 2 | Agent Team (Teams API) |
+| >= 0.4 | System 2 | Agent Team (Teams API) |
 
 ## Lifelong Learning
 
@@ -689,7 +688,7 @@ node scripts/ci/validate-hooks.js     # Hook validation
 **Issue**: Team orchestration consuming too many tokens
 
 **Solution**:
-- Use Sub-Agent mode for simpler tasks (score < 0.6)
+- Use Sub-Agent mode for simpler tasks (score < 0.4)
 - Reduce team size with `--agents` flag
 - Enable token efficiency with `--uc` flag
 

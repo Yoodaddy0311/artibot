@@ -17,8 +17,8 @@ triggers:
   - "constexpr"
   - "move semantics"
 agents:
-  - "persona-backend"
-  - "persona-performance"
+  - "backend-developer"
+  - "performance-engineer"
 tokens: "~4K"
 category: "language"
 platforms: [claude-code, gemini-cli, codex-cli, cursor]

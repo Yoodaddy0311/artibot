@@ -14,7 +14,7 @@ triggers:
   - "patterns"
   - "architect"
 agents:
-  - "persona-architect"
+  - "architect"
 tokens: "~4K"
 category: "persona"
 ---
