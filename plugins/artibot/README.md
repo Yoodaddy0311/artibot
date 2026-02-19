@@ -103,8 +103,9 @@ claude plugin install artibot
 
 ### 수동 설치
 ```bash
-git clone https://github.com/artience/artibot.git
-cp -r artibot/plugins/artibot ~/.claude/plugins/artibot
+git clone https://github.com/Yoodaddy0311/artibot.git
+cd artibot
+claude plugin install ./plugins/artibot
 ```
 
 ### 요구사항
@@ -782,7 +783,7 @@ node scripts/ci/validate-hooks.js     # 훅 검증
 
 기여를 환영합니다! [CONTRIBUTING.md](CONTRIBUTING.md)에서 에이전트, 스킬, 커맨드 추가 방법과 코드 스타일 가이드를 확인하세요.
 
-- 버그 리포트 / Bug reports: [GitHub Issues](https://github.com/artience/artibot/issues)
+- 버그 리포트 / Bug reports: [GitHub Issues](https://github.com/Yoodaddy0311/artibot/issues)
 - 보안 취약점 / Security vulnerabilities: [SECURITY.md](SECURITY.md)
 - 변경 이력 / Changelog: [CHANGELOG.md](CHANGELOG.md)
 

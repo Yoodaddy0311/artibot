@@ -21,7 +21,7 @@
 
 1. **Preferred method**: Open a **private** security advisory at:
    ```
-   https://github.com/artience/artibot/security/advisories/new
+   https://github.com/Yoodaddy0311/artibot/security/advisories/new
    ```
 
 2. **Alternative**: Send an email to **security@artience.dev** with subject line:

@@ -57,15 +57,16 @@ Add to `~/.claude/settings.json`:
 
 ### Installation
 
-**From Claude Code Marketplace (recommended):**
-```bash
-claude plugin install artibot
-```
-
-**Manual installation:**
+**Local installation (recommended):**
 ```bash
 git clone https://github.com/Yoodaddy0311/artibot.git
-cp -r artibot/plugins/artibot ~/.claude/plugins/artibot
+claude plugin install ./artibot/plugins/artibot
+```
+
+**Self-hosted marketplace:**
+```bash
+claude plugin marketplace add https://github.com/Yoodaddy0311/artibot
+claude plugin install artibot@artibot
 ```
 
 ### Requirements

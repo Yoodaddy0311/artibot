@@ -98,23 +98,27 @@ Kahneman의 이중 처리 이론에서 영감을 받은 지능형 라우팅 시�
 }
 ```
 
-### Claude Code Marketplace (권장)
+### Marketplace 등록 후 설치 (권장)
 
 ```bash
-claude plugin install artibot
+# 마켓플레이스 등록 (최초 1회)
+claude plugin marketplace add https://github.com/Yoodaddy0311/artibot
+
+# 플러그인 설치
+claude plugin install artibot@artibot
 ```
 
-### 수동 설치
+### 로컬 경로 설치
 
 ```bash
-git clone https://github.com/artience/artibot.git
-cp -r artibot/plugins/artibot ~/.claude/plugins/artibot
+git clone https://github.com/Yoodaddy0311/artibot.git
+claude plugin install ./artibot/plugins/artibot
 ```
 
 ### 검증
 
 ```bash
-node ~/.claude/plugins/artibot/scripts/validate.js
+node plugins/artibot/scripts/validate.js
 ```
 
 ---
@@ -127,11 +131,12 @@ node ~/.claude/plugins/artibot/scripts/validate.js
 # Step 1: Agent Teams 활성화
 echo '{"env":{"CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS":"1"}}' > ~/.claude/settings.json
 
-# Step 2: 플러그인 설치
-claude plugin install artibot
+# Step 2: 마켓플레이스 등록 + 플러그인 설치
+claude plugin marketplace add https://github.com/Yoodaddy0311/artibot
+claude plugin install artibot@artibot
 
 # Step 3: 검증
-node ~/.claude/plugins/artibot/scripts/validate.js
+node plugins/artibot/scripts/validate.js
 
 # Step 4: 첫 번째 명령 실행
 /sc 로그인 기능 구현해줘
@@ -331,7 +336,7 @@ plugins/artibot/
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) -- 시스템 아키텍처 상세
 - [docs/INNOVATION.md](docs/INNOVATION.md) -- 혁신 아키텍처 상세
 
-버그 리포트: [GitHub Issues](https://github.com/artience/artibot/issues)
+버그 리포트: [GitHub Issues](https://github.com/Yoodaddy0311/artibot/issues)
 
 ---
 
