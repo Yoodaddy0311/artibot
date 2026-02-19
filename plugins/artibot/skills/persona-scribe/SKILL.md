@@ -4,6 +4,19 @@ description: |
   Professional documentation and localization decision framework.
   Auto-activates when: documentation creation, technical writing, localization, content adaptation needed.
   Triggers: document, write, guide, README, wiki, API docs, changelog, localization, 문서, 작성, 가이드
+platforms: [claude-code, gemini-cli, codex-cli, cursor]
+level: 3
+triggers:
+  - "document"
+  - "write"
+  - "guide"
+  - "README"
+  - "documentation"
+  - "localization"
+agents:
+  - "persona-scribe"
+tokens: "~4K"
+category: "persona"
 ---
 # Persona: Scribe
 

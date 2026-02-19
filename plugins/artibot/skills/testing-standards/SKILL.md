@@ -4,6 +4,24 @@ description: |
   Testing standards enforcing 80% coverage, Testing Pyramid, and TDD workflow.
   Auto-activates when: writing tests, implementing features, fixing bugs, refactoring code.
   Triggers: test, coverage, TDD, unit test, integration, e2e, jest, vitest, playwright
+platforms: [claude-code, gemini-cli, codex-cli, cursor]
+level: 3
+progressive_disclosure:
+  enabled: true
+  level1_tokens: 100
+  level2_tokens: 4000
+triggers:
+  - "testing"
+  - "test coverage"
+  - "unit test"
+  - "integration test"
+  - "E2E"
+  - "test quality"
+agents:
+  - "persona-qa"
+  - "persona-backend"
+tokens: "~3K"
+category: "testing"
 ---
 
 # Testing Standards

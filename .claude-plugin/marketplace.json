@@ -1,0 +1,21 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "artibot",
+  "description": "Intelligent orchestration framework with expert agent teams, domain skills, and workflow automation for Claude Code",
+  "owner": {
+    "name": "Artience"
+  },
+  "plugins": [
+    {
+      "name": "artibot",
+      "description": "Intelligent orchestration framework with expert agent teams, domain skills, and workflow automation for Claude Code",
+      "version": "1.1.0",
+      "author": {
+        "name": "Artience"
+      },
+      "source": "./plugins/artibot",
+      "category": "development",
+      "homepage": "https://github.com/artience/artibot"
+    }
+  ]
+}

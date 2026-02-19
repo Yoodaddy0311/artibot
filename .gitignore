@@ -10,3 +10,6 @@ _analysis/
 repos/
 refs/
 nul
+_benchmarks/Agent-Skills-for-Context-Engineering/
+_benchmarks/moai-adk/
+plugins/artibot/coverage/

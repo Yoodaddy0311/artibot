@@ -4,6 +4,21 @@ description: |
   Context7 MCP server workflow for library documentation and framework patterns.
   Auto-activates when: external library docs needed, framework patterns, API reference lookup.
   Triggers: documentation, library, framework, import, package, Context7, official docs, 라이브러리, 프레임워크
+platforms: [claude-code, gemini-cli, codex-cli, cursor]
+level: 2
+triggers:
+  - "documentation"
+  - "library"
+  - "framework"
+  - "import"
+  - "package"
+  - "Context7"
+  - "official docs"
+agents:
+  - "persona-backend"
+  - "persona-frontend"
+tokens: "~2K"
+category: "tooling"
 ---
 # MCP: Context7
 

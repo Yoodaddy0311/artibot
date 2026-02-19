@@ -12,7 +12,7 @@ description: |
   테스트, TDD, 커버리지, 단위 테스트, 통합 테스트
 
   Do NOT use for: E2E tests (use e2e-runner), architecture design, code review, documentation
-model: opus
+model: sonnet
 tools:
   - Read
   - Write
@@ -24,9 +24,14 @@ tools:
   - TaskUpdate
   - TaskList
   - TaskGet
+permissionMode: acceptEdits
+maxTurns: 25
 skills:
   - tdd-workflow
   - testing-standards
+memory:
+  scope: project
+category: builder
 ---
 
 ## Core Responsibilities

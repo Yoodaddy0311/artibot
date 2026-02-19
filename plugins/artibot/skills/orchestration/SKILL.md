@@ -5,6 +5,27 @@ description: |
   Supports two delegation modes: Sub-Agent (Task tool) for focused tasks and Team Mode (Agent Teams API) for complex multi-domain coordination.
   Auto-activates when: complex multi-step requests, team composition needed, multi-domain tasks, ambiguous intent.
   Triggers: analyze, build, implement, design, route, orchestrate, complex, multi-step, team, coordinate
+platforms: [claude-code, gemini-cli, codex-cli, cursor]
+level: 3
+progressive_disclosure:
+  enabled: true
+  level1_tokens: 100
+  level2_tokens: 4000
+triggers:
+  - "analyze"
+  - "build"
+  - "implement"
+  - "design"
+  - "route"
+  - "orchestrate"
+  - "complex"
+  - "multi-step"
+  - "team"
+  - "coordinate"
+agents:
+  - "orchestrator"
+tokens: "~5K"
+category: "orchestration"
 ---
 
 # Orchestration & Routing Intelligence
@@ -129,9 +150,77 @@ TeamCreate -> TaskCreate(task1) -> TaskCreate(task2, blockedBy: [task1]) -> ... 
 | `SendMessage` | DM, broadcast, shutdown request/response, plan approval |
 | `TeamDelete` | Cleanup team after completion |
 
+## Token Budget Management
+
+### Phase-Based Token Budgets
+
+| Phase | Budget | Purpose |
+|-------|--------|---------|
+| Plan | 30K tokens | Intent analysis, task decomposition, delegation mode selection |
+| Execute | 180K tokens | Implementation, code generation, tool operations |
+| Review | 40K tokens | Validation, quality gates, result aggregation |
+
+**Total budget per operation**: ~250K tokens (with 10% reserve for error recovery)
+
+### /clear Strategy
+
+Issue `/clear` to reset context and reclaim tokens in these situations:
+
+| Trigger | When | Rationale |
+|---------|------|-----------|
+| Plan completion | After plan is finalized and tasks created | Plan context no longer needed for execution |
+| Context > 150K | When token usage crosses 150K threshold | Prevent degradation in output quality |
+| Major phase transition | Between Plan -> Execute, Execute -> Review | Fresh context for each phase improves focus |
+| Long-running team ops | After each wave or team iteration completes | Prevent context saturation in multi-wave work |
+
+### Context Window Zones
+
+| Zone | Usage | Action |
+|------|-------|--------|
+| Green | 0-60% | Full operations, all features enabled |
+| Yellow | 60-75% | Enable `--uc` mode, cache aggressively, defer non-critical ops |
+| Orange | 75-85% | Compress outputs, skip optional enhancements, batch operations |
+| Red | 85-95% | Force `--uc`, essential operations only, suggest `/clear` |
+| Critical | 95%+ | Emergency: `/clear` required, preserve only active task context |
+
+**Auto-Escalation**: When context enters Yellow zone, the orchestrator should proactively:
+1. Activate token efficiency mode (`--uc`)
+2. Summarize completed work before continuing
+3. Suggest `/clear` if transitioning between phases
+4. Defer reference documentation loading
+
 **Decision Flow**:
 ```
-Request -> Classify complexity -> Score delegation factors
-  -> Score < 0.6: Sub-Agent (Task tool)
-  -> Score >= 0.6: Team Mode (TeamCreate -> spawn -> TaskCreate -> coordinate -> cleanup)
+Request -> Detect available tools -> Select orchestration mode -> Classify complexity -> Route
+
+Mode Detection:
+  TeamCreate available?  -> agent-teams mode (full team orchestration)
+  Task() available?      -> sub-agent mode (fire-and-forget delegation)
+  Neither available?     -> direct mode (orchestrator executes everything)
+
+Routing (agent-teams mode):
+  Score < 0.6: Sub-Agent (Task tool, no team)
+  Score >= 0.6: Team Mode (TeamCreate -> spawn -> TaskCreate -> coordinate -> cleanup)
+
+Routing (sub-agent mode):
+  All tasks: Task(subagent_type) in parallel, orchestrator aggregates results
+
+Routing (direct mode):
+  All tasks: Sequential execution by orchestrator using Read/Write/Edit/Bash
+```
+
+### 8. Platform Compatibility
+
+| Platform | Mode | Orchestration | Team Features |
+|----------|------|---------------|---------------|
+| Claude Code + env var | agent-teams | Full PDCA with teams | P2P messaging, shared tasks, plan approval |
+| Claude Code (no env) | sub-agent | Parallel Task() delegation | Fire-and-forget, result aggregation |
+| Gemini CLI | direct | Sequential self-execution | Skills as context, adapted commands |
+| Codex CLI | direct | Sequential self-execution | Skills as context, adapted commands |
+| Cursor / Others | direct | Sequential self-execution | Rules-based instruction |
+
+**Enabling Agent Teams** (Claude Code):
+```json
+// ~/.claude/settings.json
+{ "env": { "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1" } }
 ```

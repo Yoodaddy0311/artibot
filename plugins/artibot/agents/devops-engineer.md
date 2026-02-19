@@ -24,8 +24,13 @@ tools:
   - TaskUpdate
   - TaskList
   - TaskGet
+permissionMode: acceptEdits
+maxTurns: 25
 skills:
   - persona-devops
+memory:
+  scope: project
+category: expert
 ---
 
 ## Core Responsibilities

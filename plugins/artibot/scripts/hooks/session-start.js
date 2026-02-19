@@ -31,25 +31,66 @@ async function main() {
     // Use defaults if config missing
   }
 
-  // Restore previous session state
-  const home = process.env.USERPROFILE || process.env.HOME || '';
-  const statePath = path.join(home, '.claude', 'artibot-state.json');
+  // Restore previous session state via lib/context/session module
   let previousState = null;
-  if (existsSync(statePath)) {
-    try {
-      previousState = JSON.parse(readFileSync(statePath, 'utf-8'));
-    } catch {
-      // Ignore corrupted state
+  try {
+    const sessionModPath = path.join(env.pluginRoot, 'lib', 'context', 'session.js');
+    const { loadSessionState } = await import(
+      `file://${sessionModPath.replace(/\\/g, '/')}`
+    );
+    const state = await loadSessionState();
+    if (state && state.sessionId) {
+      previousState = state;
+    }
+  } catch {
+    // Fallback: manual state loading if session module fails
+    const home = process.env.USERPROFILE || process.env.HOME || '';
+    const statePath = path.join(home, '.claude', 'artibot-state.json');
+    if (existsSync(statePath)) {
+      try {
+        previousState = JSON.parse(readFileSync(statePath, 'utf-8'));
+      } catch {
+        // Ignore corrupted state
+      }
     }
   }
 
   const version = config.version || '1.0.0';
-  const teamEnabled = config.team?.enabled ? 'ON' : 'OFF';
   const restored = previousState ? ` | Session restored from ${previousState.startedAt || 'unknown'}` : '';
+
+  // Detect Agent Teams capability
+  const agentTeamsEnv = process.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS;
+  const hasAgentTeams = agentTeamsEnv === '1' || agentTeamsEnv === 'true';
+
+  // Check settings.json for Agent Teams env configuration
+  let settingsHasTeamEnv = false;
+  const settingsPath = path.join(home, '.claude', 'settings.json');
+  if (existsSync(settingsPath)) {
+    try {
+      const settings = JSON.parse(readFileSync(settingsPath, 'utf-8'));
+      const envSetting = settings?.env?.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS;
+      settingsHasTeamEnv = envSetting === '1' || envSetting === 'true';
+    } catch {
+      // Ignore parse errors
+    }
+  }
+
+  // Determine orchestration mode
+  let teamMode;
+  let setupHint = '';
+  if (hasAgentTeams) {
+    teamMode = 'agent-teams (full)';
+  } else if (settingsHasTeamEnv) {
+    teamMode = 'agent-teams (restart required)';
+    setupHint = '\n  Restart Claude Code to activate Agent Teams.';
+  } else {
+    teamMode = 'sub-agent (fallback)';
+    setupHint = '\n  Enable full team mode: Add {"env":{"CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS":"1"}} to ~/.claude/settings.json';
+  }
 
   const message = [
     `Artibot v${version} initialized`,
-    `Platform: ${env.platform}/${env.arch} | Node ${env.nodeVersion} | Team: ${teamEnabled}${restored}`,
+    `Platform: ${env.platform}/${env.arch} | Node ${env.nodeVersion} | Mode: ${teamMode}${restored}${setupHint}`,
   ].join('\n');
 
   writeStdout({ message });

@@ -4,6 +4,20 @@ description: |
   Infrastructure automation and reliability engineering decision framework.
   Auto-activates when: deployment, CI/CD, Docker, monitoring, infrastructure automation needed.
   Triggers: deploy, infrastructure, CI/CD, Docker, Kubernetes, monitoring, pipeline, automation, 배포, 인프라
+platforms: [claude-code, gemini-cli, codex-cli, cursor]
+level: 2
+triggers:
+  - "deploy"
+  - "infrastructure"
+  - "CI/CD"
+  - "automation"
+  - "DevOps"
+  - "pipeline"
+  - "monitoring"
+agents:
+  - "persona-devops"
+tokens: "~3K"
+category: "persona"
 ---
 # Persona: DevOps
 

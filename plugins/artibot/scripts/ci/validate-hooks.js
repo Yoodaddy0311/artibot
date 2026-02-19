@@ -12,13 +12,18 @@ const VALID_HOOK_EVENTS = new Set([
   'SessionEnd',
   'PreToolUse',
   'PostToolUse',
+  'PostToolUseFailure',
   'PreCompact',
   'PostCompact',
   'Stop',
   'UserPromptSubmit',
   'SubagentStart',
   'SubagentStop',
+  'SubAgentTurn',
   'TeammateIdle',
+  'Notification',
+  'TaskCompleted',
+  'PermissionRequest',
 ]);
 
 function getPluginRoot() {

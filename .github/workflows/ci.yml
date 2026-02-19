@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate (Node ${{ matrix.node-version }})
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        node-version: [18, 20]
+
+    defaults:
+      run:
+        working-directory: plugins/artibot
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+          cache-dependency-path: plugins/artibot/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts || npm install
+
+      - name: Validate agents
+        run: node scripts/ci/validate-agents.js
+
+      - name: Validate skills
+        run: node scripts/ci/validate-skills.js
+
+      - name: Validate commands
+        run: node scripts/ci/validate-commands.js
+
+      - name: Validate hooks
+        run: node scripts/ci/validate-hooks.js
+
+      - name: Run tests
+        run: |
+          if [ -d "tests" ] || [ -d "__tests__" ] || [ -d "test" ]; then
+            npx vitest run --reporter=verbose
+          else
+            echo "No test directory found. Skipping tests."
+          fi
+
+      - name: Run ESLint
+        run: |
+          if [ -f ".eslintrc.json" ] || [ -f ".eslintrc.js" ] || [ -f ".eslintrc.yml" ] || [ -f "eslint.config.js" ] || [ -f "eslint.config.mjs" ]; then
+            npx eslint . --max-warnings=0
+          else
+            echo "No ESLint config found. Skipping lint."
+          fi

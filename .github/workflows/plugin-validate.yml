@@ -1,0 +1,182 @@
+name: Plugin Validation
+
+on:
+  push:
+    paths:
+      - "plugins/artibot/.claude-plugin/plugin.json"
+      - "plugins/artibot/agents/**"
+      - "plugins/artibot/skills/**"
+      - "plugins/artibot/commands/**"
+  pull_request:
+    paths:
+      - "plugins/artibot/.claude-plugin/plugin.json"
+      - "plugins/artibot/agents/**"
+      - "plugins/artibot/skills/**"
+      - "plugins/artibot/commands/**"
+
+permissions:
+  contents: read
+
+jobs:
+  plugin-structure:
+    name: Validate plugin.json structure
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: plugins/artibot
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Validate plugin.json schema
+        run: |
+          node -e "
+          const fs = require('fs');
+          const path = require('path');
+
+          const pluginPath = '.claude-plugin/plugin.json';
+          if (!fs.existsSync(pluginPath)) {
+            console.error('FAIL: .claude-plugin/plugin.json not found');
+            process.exit(1);
+          }
+
+          let plugin;
+          try {
+            plugin = JSON.parse(fs.readFileSync(pluginPath, 'utf-8'));
+          } catch (e) {
+            console.error('FAIL: plugin.json is not valid JSON:', e.message);
+            process.exit(1);
+          }
+
+          const required = ['name', 'version', 'description'];
+          let errors = 0;
+
+          for (const field of required) {
+            if (!plugin[field]) {
+              console.error('FAIL: Missing required field:', field);
+              errors++;
+            }
+          }
+
+          // Validate version format (semver)
+          const semverRegex = /^\d+\.\d+\.\d+(-[\w.]+)?$/;
+          if (plugin.version && !semverRegex.test(plugin.version)) {
+            console.error('FAIL: Invalid version format:', plugin.version);
+            errors++;
+          }
+
+          if (errors > 0) {
+            process.exit(1);
+          }
+          console.log('PASS: plugin.json schema is valid');
+          console.log('  name:', plugin.name);
+          console.log('  version:', plugin.version);
+          "
+
+      - name: Validate agent file references
+        run: |
+          node -e "
+          const fs = require('fs');
+          const plugin = JSON.parse(fs.readFileSync('.claude-plugin/plugin.json', 'utf-8'));
+
+          if (!plugin.agents || !Array.isArray(plugin.agents)) {
+            console.log('No agents array in plugin.json. Skipping.');
+            process.exit(0);
+          }
+
+          let errors = 0;
+          for (const agentRef of plugin.agents) {
+            const agentPath = agentRef.replace(/^\.\//, '');
+            if (!fs.existsSync(agentPath)) {
+              console.error('FAIL: Agent file not found:', agentRef, '->', agentPath);
+              errors++;
+            } else {
+              console.log('PASS:', agentRef);
+            }
+          }
+
+          if (errors > 0) {
+            console.error('\n' + errors + ' agent reference(s) broken.');
+            process.exit(1);
+          }
+          console.log('\nAll ' + plugin.agents.length + ' agent reference(s) valid.');
+          "
+
+      - name: Validate skills directory structure
+        run: |
+          node -e "
+          const fs = require('fs');
+          const path = require('path');
+
+          const plugin = JSON.parse(fs.readFileSync('.claude-plugin/plugin.json', 'utf-8'));
+          const skillsDir = (plugin.skills || './skills').replace(/^\.\//, '');
+
+          if (!fs.existsSync(skillsDir)) {
+            console.log('Skills directory not found:', skillsDir, '- Skipping.');
+            process.exit(0);
+          }
+
+          const entries = fs.readdirSync(skillsDir).filter(e =>
+            fs.statSync(path.join(skillsDir, e)).isDirectory()
+          );
+
+          let errors = 0;
+          for (const dir of entries) {
+            const skillMd = path.join(skillsDir, dir, 'SKILL.md');
+            if (!fs.existsSync(skillMd)) {
+              console.error('FAIL: skills/' + dir + '/ missing SKILL.md');
+              errors++;
+            } else {
+              console.log('PASS: skills/' + dir + '/SKILL.md exists');
+            }
+          }
+
+          if (errors > 0) {
+            console.error('\n' + errors + ' skill directory structure error(s).');
+            process.exit(1);
+          }
+          console.log('\nAll ' + entries.length + ' skill directories valid.');
+          "
+
+      - name: Validate commands directory
+        run: |
+          node -e "
+          const fs = require('fs');
+          const path = require('path');
+
+          const plugin = JSON.parse(fs.readFileSync('.claude-plugin/plugin.json', 'utf-8'));
+          const cmdsDir = (plugin.commands || './commands').replace(/^\.\//, '');
+
+          if (!fs.existsSync(cmdsDir)) {
+            console.log('Commands directory not found:', cmdsDir, '- Skipping.');
+            process.exit(0);
+          }
+
+          const files = fs.readdirSync(cmdsDir).filter(f => f.endsWith('.md'));
+          let errors = 0;
+
+          for (const file of files) {
+            const content = fs.readFileSync(path.join(cmdsDir, file), 'utf-8');
+            const hasFrontmatter = /^---\r?\n[\s\S]*?\r?\n---/.test(content);
+
+            if (!hasFrontmatter) {
+              console.error('FAIL: commands/' + file + ' missing YAML frontmatter');
+              errors++;
+            } else {
+              console.log('PASS: commands/' + file);
+            }
+          }
+
+          if (errors > 0) {
+            console.error('\n' + errors + ' command file error(s).');
+            process.exit(1);
+          }
+          console.log('\nAll ' + files.length + ' command files valid.');
+          "

@@ -4,6 +4,19 @@ description: |
   Measurement-driven optimization decision framework.
   Auto-activates when: performance issues, optimization requests, bottleneck analysis, benchmarking needed.
   Triggers: optimize, bottleneck, slow, latency, throughput, memory, CPU, benchmark, profiling, 성능, 최적화, 병목
+platforms: [claude-code, gemini-cli, codex-cli, cursor]
+level: 2
+triggers:
+  - "optimize"
+  - "performance"
+  - "bottleneck"
+  - "speed"
+  - "benchmark"
+  - "profiling"
+agents:
+  - "persona-performance"
+tokens: "~3K"
+category: "persona"
 ---
 # Persona: Performance
 

@@ -1,0 +1,107 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    name: Validate before release
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: plugins/artibot
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: plugins/artibot/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts || npm install
+
+      - name: Verify version matches tag
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          PLUGIN_VERSION=$(node -e "console.log(JSON.parse(require('fs').readFileSync('.claude-plugin/plugin.json','utf-8')).version)")
+          if [ "$TAG_VERSION" != "$PLUGIN_VERSION" ]; then
+            echo "::error::Tag version ($TAG_VERSION) does not match plugin.json version ($PLUGIN_VERSION)"
+            exit 1
+          fi
+          echo "Version verified: $TAG_VERSION"
+
+      - name: Validate agents
+        run: node scripts/ci/validate-agents.js
+
+      - name: Validate skills
+        run: node scripts/ci/validate-skills.js
+
+      - name: Validate commands
+        run: node scripts/ci/validate-commands.js
+
+      - name: Validate hooks
+        run: node scripts/ci/validate-hooks.js
+
+      - name: Run tests
+        run: |
+          if [ -d "tests" ] || [ -d "__tests__" ] || [ -d "test" ]; then
+            npx vitest run --reporter=verbose
+          else
+            echo "No test directory found. Skipping tests."
+          fi
+
+  release:
+    name: Create GitHub Release
+    needs: validate
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          PREV_TAG=$(git tag --sort=-v:refname | head -n 2 | tail -n 1)
+          if [ -z "$PREV_TAG" ] || [ "$PREV_TAG" = "$GITHUB_REF_NAME" ]; then
+            CHANGES=$(git log --pretty=format:"- %s (%h)" --no-merges HEAD~20..HEAD)
+          else
+            CHANGES=$(git log --pretty=format:"- %s (%h)" --no-merges "${PREV_TAG}..${GITHUB_REF_NAME}")
+          fi
+
+          {
+            echo "changes<<CHANGES_EOF"
+            echo "$CHANGES"
+            echo "CHANGES_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Artibot ${{ github.ref_name }}
+          body: |
+            ## Artibot ${{ github.ref_name }}
+
+            ### Changes
+            ${{ steps.changelog.outputs.changes }}
+
+            ---
+            *Claude Code Agent Teams Orchestration Plugin*
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-rc') || contains(github.ref_name, '-beta') || contains(github.ref_name, '-alpha') }}
+          generate_release_notes: true

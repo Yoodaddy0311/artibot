@@ -6,6 +6,24 @@ description: |
   Team Mode: Agent Teams API for complex multi-domain coordination with peer communication.
   Auto-activates when: >7 directories, >50 files, multi-domain operations, high complexity tasks, team coordination needed.
   Triggers: delegate, parallel, sub-agent, team, concurrent, large-scale, orchestrate, coordinate, 위임, 병렬, 대규모, 팀
+platforms: [claude-code, gemini-cli, codex-cli, cursor]
+level: 3
+progressive_disclosure:
+  enabled: true
+  level1_tokens: 100
+  level2_tokens: 4000
+triggers:
+  - "delegate"
+  - "parallel"
+  - "sub-agent"
+  - "team"
+  - "concurrent"
+  - "large-scale"
+  - "orchestrate"
+agents:
+  - "orchestrator"
+tokens: "~5K"
+category: "orchestration"
 ---
 
 # Delegation Strategies

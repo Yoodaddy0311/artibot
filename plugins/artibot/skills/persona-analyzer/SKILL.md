@@ -4,6 +4,19 @@ description: |
   Evidence-based root cause analysis decision framework.
   Auto-activates when: debugging, troubleshooting, investigation, systematic analysis needed.
   Triggers: analyze, investigate, root cause, debug, troubleshoot, diagnose, 분석, 조사, 근본 원인
+platforms: [claude-code, gemini-cli, codex-cli, cursor]
+level: 2
+triggers:
+  - "analyze"
+  - "investigate"
+  - "root cause"
+  - "debug"
+  - "troubleshoot"
+  - "diagnose"
+agents:
+  - "persona-analyzer"
+tokens: "~3K"
+category: "persona"
 ---
 # Persona: Analyzer
 

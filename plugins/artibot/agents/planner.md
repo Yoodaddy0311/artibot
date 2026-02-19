@@ -11,7 +11,7 @@ description: |
   계획, 구현, 기능, 마이그레이션, 리팩토링, 전략
 
   Do NOT use for: simple single-file edits, bug fixes with obvious solutions, documentation-only tasks
-model: opus
+model: sonnet
 tools:
   - Read
   - Grep
@@ -21,8 +21,14 @@ tools:
   - TaskUpdate
   - TaskList
   - TaskGet
+permissionMode: plan
+maxTurns: 25
 skills:
   - principles
+  - persona-architect
+memory:
+  scope: project
+category: manager
 ---
 
 ## Core Responsibilities

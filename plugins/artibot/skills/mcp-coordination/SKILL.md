@@ -4,6 +4,18 @@ description: |
   MCP server selection and multi-server orchestration strategy.
   Auto-activates when: multi-server coordination needed, server selection decisions, complex multi-domain tasks.
   Triggers: MCP, server coordination, multi-server, Context7+Playwright, fallback, orchestration, MCP 조율
+platforms: [claude-code, gemini-cli, codex-cli, cursor]
+level: 3
+triggers:
+  - "MCP"
+  - "server coordination"
+  - "multi-server"
+  - "MCP orchestration"
+  - "tool coordination"
+agents:
+  - "orchestrator"
+tokens: "~3K"
+category: "tooling"
 ---
 # MCP: Coordination
 

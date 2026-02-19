@@ -4,6 +4,24 @@ description: |
   Security standards and checklist enforcing OWASP Top 10, secret management, and input validation.
   Auto-activates when: API endpoints, authentication, user input handling, data storage, deployment.
   Triggers: security, auth, password, token, secret, API key, input, validate, sanitize, encrypt
+platforms: [claude-code, gemini-cli, codex-cli, cursor]
+level: 3
+triggers:
+  - "security"
+  - "auth"
+  - "password"
+  - "token"
+  - "secret"
+  - "API key"
+  - "input"
+  - "validate"
+  - "sanitize"
+  - "encrypt"
+agents:
+  - "persona-security"
+  - "persona-backend"
+tokens: "~3K"
+category: "security"
 ---
 
 # Security Standards

@@ -11,7 +11,7 @@ description: |
   리팩토링, 정리, 불필요한 코드, 중복, 기술 부채
 
   Do NOT use for: active feature development, pre-release code freezes, code with no test coverage
-model: opus
+model: sonnet
 tools:
   - Read
   - Write
@@ -24,8 +24,14 @@ tools:
   - TaskUpdate
   - TaskList
   - TaskGet
+permissionMode: acceptEdits
+maxTurns: 25
 skills:
   - coding-standards
+  - persona-refactorer
+memory:
+  scope: project
+category: builder
 ---
 
 ## Core Responsibilities

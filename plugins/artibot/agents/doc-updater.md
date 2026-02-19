@@ -23,8 +23,13 @@ tools:
   - TaskUpdate
   - TaskList
   - TaskGet
+permissionMode: default
+maxTurns: 25
 skills:
   - persona-scribe
+memory:
+  scope: user
+category: support
 ---
 
 ## Core Responsibilities

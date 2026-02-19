@@ -1,6 +1,7 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-hooks.json",
-  "description": "Artibot v1.0.0 - Claude Code Plugin Hooks",
+  "description": "Artibot v1.3.0 - Claude Code Plugin Hooks",
+  "hookTypes": ["command", "prompt", "agent"],
   "hooks": {
     "SessionStart": [
       {
@@ -8,6 +9,14 @@
         "hooks": [{
           "type": "command",
           "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/session-start.js",
+          "timeout": 5000
+        }]
+      },
+      {
+        "once": true,
+        "hooks": [{
+          "type": "command",
+          "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/memory-tracker.js",
           "timeout": 5000
         }]
       }
@@ -32,6 +41,14 @@
     ],
     "PostToolUse": [
       {
+        "matcher": "Edit|Write",
+        "hooks": [{
+          "type": "command",
+          "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/quality-gate.js",
+          "timeout": 8000
+        }]
+      },
+      {
         "matcher": "Edit",
         "hooks": [{
           "type": "command",
@@ -45,6 +62,13 @@
           "type": "command",
           "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/post-bash.js",
           "timeout": 5000
+        }]
+      },
+      {
+        "hooks": [{
+          "type": "command",
+          "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/tool-tracker.js",
+          "timeout": 3000
         }]
       }
     ],
@@ -69,35 +93,86 @@
     "UserPromptSubmit": [
       {
         "hooks": [{
-          "type": "command",
+          "type": "prompt",
           "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/user-prompt-handler.js",
+          "timeout": 3000
+        }]
+      },
+      {
+        "hooks": [{
+          "type": "prompt",
+          "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/cognitive-router.js",
           "timeout": 3000
         }]
       }
     ],
     "SubagentStart": [
       {
-        "hooks": [{
-          "type": "command",
-          "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/subagent-handler.js start",
-          "timeout": 5000
-        }]
+        "hooks": [
+          {
+            "type": "agent",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/subagent-handler.js start",
+            "timeout": 5000
+          },
+          {
+            "type": "agent",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/workflow-status.js teammate-update",
+            "timeout": 5000
+          }
+        ]
       }
     ],
     "SubagentStop": [
       {
-        "hooks": [{
-          "type": "command",
-          "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/subagent-handler.js stop",
-          "timeout": 5000
-        }]
+        "hooks": [
+          {
+            "type": "agent",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/subagent-handler.js stop",
+            "timeout": 5000
+          },
+          {
+            "type": "agent",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/agent-evaluator.js",
+            "timeout": 8000
+          },
+          {
+            "type": "agent",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/workflow-status.js teammate-update",
+            "timeout": 5000
+          }
+        ]
       }
     ],
     "TeammateIdle": [
       {
+        "hooks": [
+          {
+            "type": "agent",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/team-idle-handler.js",
+            "timeout": 5000
+          },
+          {
+            "type": "agent",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/workflow-status.js teammate-update",
+            "timeout": 5000
+          }
+        ]
+      }
+    ],
+    "TaskCompleted": [
+      {
+        "hooks": [{
+          "type": "agent",
+          "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/tool-tracker.js",
+          "timeout": 5000
+        }]
+      }
+    ],
+    "PermissionRequest": [
+      {
         "hooks": [{
           "type": "command",
-          "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/team-idle-handler.js",
+          "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-bash.js",
           "timeout": 5000
         }]
       }
@@ -108,6 +183,45 @@
           "type": "command",
           "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/session-end.js",
           "timeout": 10000
+        }]
+      },
+      {
+        "hooks": [{
+          "type": "command",
+          "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/nightly-learner.js",
+          "timeout": 15000
+        }]
+      },
+      {
+        "hooks": [{
+          "type": "command",
+          "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/memory-tracker.js",
+          "timeout": 8000
+        }]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "hooks": [{
+          "type": "command",
+          "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/tool-tracker.js failure",
+          "timeout": 5000
+        }]
+      },
+      {
+        "hooks": [{
+          "type": "command",
+          "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/memory-tracker.js",
+          "timeout": 5000
+        }]
+      }
+    ],
+    "Notification": [
+      {
+        "hooks": [{
+          "type": "command",
+          "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/workflow-status.js notification",
+          "timeout": 3000
         }]
       }
     ]

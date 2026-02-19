@@ -11,7 +11,7 @@ description: |
   콘텐츠, 블로그, 소셜미디어, SEO, 캠페인, 이메일 마케팅
 
   Do NOT use for: code implementation, testing, infrastructure, database design
-model: sonnet
+model: haiku
 tools:
   - Read
   - Write
@@ -24,8 +24,14 @@ tools:
   - TaskUpdate
   - TaskList
   - TaskGet
+permissionMode: default
+maxTurns: 25
 skills:
   - persona-scribe
+  - copywriting
+memory:
+  scope: user
+category: support
 ---
 
 ## Core Responsibilities
