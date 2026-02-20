@@ -5,9 +5,9 @@
  *   name, description
  */
 
-import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
-import { getPluginRoot, extractFrontmatter } from './ci-utils.js';
+import { extractFrontmatter, getPluginRoot } from './ci-utils.js';
 
 const REQUIRED_FIELDS = ['name', 'description'];
 

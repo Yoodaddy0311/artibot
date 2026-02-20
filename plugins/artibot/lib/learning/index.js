@@ -91,14 +91,11 @@ export async function initLearning() {
     import('./memory-manager.js').then((m) => m.pruneOldMemories()),
   ]);
 
-  const errors = results.filter((r) => r.status === 'rejected');
-  if (errors.length > 0) {
-    for (const err of errors) {
-      console.error('[learning] init error:', err.reason?.message ?? err.reason);
-    }
-  }
+  const errors = results
+    .filter((r) => r.status === 'rejected')
+    .map((r) => r.reason?.message ?? String(r.reason));
 
-  return { initialized: true, errors: errors.length };
+  return { initialized: true, errors: errors.length, errorMessages: errors };
 }
 
 /**

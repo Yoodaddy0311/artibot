@@ -15,8 +15,9 @@
  * Stdout: JSON { message } — informational only, never blocks
  */
 
-import { readStdin, writeStdout, parseJSON, toFileUrl } from '../utils/index.js';
+import { parseJSON, readStdin, toFileUrl, writeStdout } from '../utils/index.js';
 import path from 'node:path';
+import { createErrorHandler, extractAgentId, extractAgentRole, logHookError } from '../../lib/core/hook-utils.js';
 
 // ---------------------------------------------------------------------------
 // Plugin root resolution (mirrors tool-tracker.js pattern)
@@ -176,8 +177,8 @@ async function main() {
 
   if (!hookData) return;
 
-  const agentId   = hookData?.agent_id || hookData?.subagent_id || hookData?.name || 'unknown';
-  const agentRole = hookData?.role || hookData?.agent_type || 'teammate';
+  const agentId   = extractAgentId(hookData);
+  const agentRole = extractAgentRole(hookData);
 
   const { score, breakdown, summary } = evaluateAgent(hookData);
 
@@ -196,7 +197,7 @@ async function main() {
       },
     });
   } catch (err) {
-    process.stderr.write(`[artibot:agent-evaluator] learning pipeline unavailable: ${err.message}\n`);
+    logHookError('agent-evaluator', 'learning pipeline unavailable', err);
   }
 
   writeStdout({
@@ -204,7 +205,4 @@ async function main() {
   });
 }
 
-main().catch((err) => {
-  process.stderr.write(`[artibot:agent-evaluator] ${err.message}\n`);
-  process.exit(0); // Never block on evaluator errors
-});
+main().catch(createErrorHandler('agent-evaluator', { exit: true }));

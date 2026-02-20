@@ -46,6 +46,10 @@ const { isWindows } = getPlatform();
 /**
  * Build home directory patterns for the current platform.
  * @returns {RegExp[]}
+ * @example
+ * const patterns = buildHomePathPatterns();
+ * // On Windows: patterns match C:\Users\<username>\...
+ * // On Unix: patterns match /home/<username>/...
  */
 export function buildHomePathPatterns() {
   const patterns = [];
@@ -81,6 +85,10 @@ export function buildHomePathPatterns() {
  * @property {RegExp} regex - Detection pattern
  * @property {string} replacement - Replacement token
  * @property {number} priority - Lower = applied first (0-100)
+ * @property {string|string[]|null} [hint] - Fast pre-test: literal substring(s) that must
+ *   be present in the input for the regex to possibly match. When set, `includes()` is
+ *   checked before running the expensive regex. Use lowercase strings for case-insensitive
+ *   regexes. `null` means always run the regex (no viable fast hint).
  */
 
 /**
@@ -96,6 +104,7 @@ const BUILTIN_PATTERNS = [
     regex: /-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----/g,
     replacement: TOKENS.PRIVATE_KEY,
     priority: 0,
+    hint: 'PRIVATE KEY-----',
   },
   {
     name: 'pgp_private_key',
@@ -103,6 +112,7 @@ const BUILTIN_PATTERNS = [
     regex: /-----BEGIN PGP PRIVATE KEY BLOCK-----[\s\S]*?-----END PGP PRIVATE KEY BLOCK-----/g,
     replacement: TOKENS.PRIVATE_KEY,
     priority: 1,
+    hint: 'PGP PRIVATE KEY',
   },
 
   // ----- API Keys & Tokens (Priority 10-29) -----
@@ -112,6 +122,7 @@ const BUILTIN_PATTERNS = [
     regex: /sk-[a-zA-Z0-9_-]{20,}/g,
     replacement: TOKENS.REDACTED_KEY,
     priority: 10,
+    hint: 'sk-',
   },
   {
     name: 'github_pat',
@@ -119,6 +130,7 @@ const BUILTIN_PATTERNS = [
     regex: /ghp_[a-zA-Z0-9]{36,}/g,
     replacement: TOKENS.REDACTED_KEY,
     priority: 11,
+    hint: 'ghp_',
   },
   {
     name: 'github_oauth',
@@ -126,6 +138,7 @@ const BUILTIN_PATTERNS = [
     regex: /gho_[a-zA-Z0-9]{36,}/g,
     replacement: TOKENS.REDACTED_KEY,
     priority: 12,
+    hint: 'gho_',
   },
   {
     name: 'github_user_to_server',
@@ -133,6 +146,7 @@ const BUILTIN_PATTERNS = [
     regex: /ghu_[a-zA-Z0-9]{36,}/g,
     replacement: TOKENS.REDACTED_KEY,
     priority: 13,
+    hint: 'ghu_',
   },
   {
     name: 'github_server_to_server',
@@ -140,6 +154,7 @@ const BUILTIN_PATTERNS = [
     regex: /ghs_[a-zA-Z0-9]{36,}/g,
     replacement: TOKENS.REDACTED_KEY,
     priority: 14,
+    hint: 'ghs_',
   },
   {
     name: 'github_refresh',
@@ -147,6 +162,7 @@ const BUILTIN_PATTERNS = [
     regex: /ghr_[a-zA-Z0-9]{36,}/g,
     replacement: TOKENS.REDACTED_KEY,
     priority: 15,
+    hint: 'ghr_',
   },
   {
     name: 'aws_access_key',
@@ -154,6 +170,7 @@ const BUILTIN_PATTERNS = [
     regex: /AKIA[A-Z0-9]{16}/g,
     replacement: TOKENS.REDACTED_KEY,
     priority: 16,
+    hint: 'AKIA',
   },
   {
     name: 'aws_secret_key',
@@ -161,6 +178,7 @@ const BUILTIN_PATTERNS = [
     regex: /(?:aws_secret_access_key|AWS_SECRET_ACCESS_KEY)\s*[=:]\s*[A-Za-z0-9/+=]{40}/g,
     replacement: TOKENS.REDACTED_KEY,
     priority: 17,
+    hint: 'secret_access_key',
   },
   {
     name: 'azure_key',
@@ -168,6 +186,7 @@ const BUILTIN_PATTERNS = [
     regex: /[a-zA-Z0-9]{32,}==\s*$/gm,
     replacement: TOKENS.REDACTED_KEY,
     priority: 18,
+    hint: '==',
   },
   {
     name: 'gcp_api_key',
@@ -175,6 +194,7 @@ const BUILTIN_PATTERNS = [
     regex: /AIza[a-zA-Z0-9_-]{35}/g,
     replacement: TOKENS.REDACTED_KEY,
     priority: 19,
+    hint: 'AIza',
   },
   {
     name: 'slack_token',
@@ -182,6 +202,7 @@ const BUILTIN_PATTERNS = [
     regex: /xox[bporas]-[a-zA-Z0-9-]{10,}/g,
     replacement: TOKENS.REDACTED_KEY,
     priority: 20,
+    hint: 'xox',
   },
   {
     name: 'stripe_key',
@@ -189,6 +210,7 @@ const BUILTIN_PATTERNS = [
     regex: /(?:sk|pk|rk)_(?:test|live)_[a-zA-Z0-9]{20,}/g,
     replacement: TOKENS.REDACTED_KEY,
     priority: 21,
+    hint: ['_test_', '_live_'],
   },
   {
     name: 'twilio_key',
@@ -196,6 +218,7 @@ const BUILTIN_PATTERNS = [
     regex: /SK[a-f0-9]{32}/g,
     replacement: TOKENS.REDACTED_KEY,
     priority: 22,
+    hint: 'SK',
   },
   {
     name: 'sendgrid_key',
@@ -203,6 +226,7 @@ const BUILTIN_PATTERNS = [
     regex: /SG\.[a-zA-Z0-9_-]{22,}\.[a-zA-Z0-9_-]{43}/g,
     replacement: TOKENS.REDACTED_KEY,
     priority: 23,
+    hint: 'SG.',
   },
   {
     name: 'npm_token',
@@ -210,6 +234,7 @@ const BUILTIN_PATTERNS = [
     regex: /npm_[a-zA-Z0-9]{36,}/g,
     replacement: TOKENS.REDACTED_KEY,
     priority: 24,
+    hint: 'npm_',
   },
   {
     name: 'bearer_token',
@@ -217,6 +242,7 @@ const BUILTIN_PATTERNS = [
     regex: /Bearer\s+[a-zA-Z0-9._\-/+=]{20,}/g,
     replacement: `Bearer ${TOKENS.REDACTED_TOKEN}`,
     priority: 25,
+    hint: 'Bearer',
   },
   {
     name: 'basic_auth',
@@ -224,6 +250,7 @@ const BUILTIN_PATTERNS = [
     regex: /Basic\s+[A-Za-z0-9+/=]{10,}/g,
     replacement: `Basic ${TOKENS.REDACTED_TOKEN}`,
     priority: 26,
+    hint: 'Basic',
   },
   {
     name: 'jwt_token',
@@ -231,6 +258,7 @@ const BUILTIN_PATTERNS = [
     regex: /eyJ[a-zA-Z0-9_-]{10,}\.eyJ[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}/g,
     replacement: TOKENS.REDACTED_TOKEN,
     priority: 27,
+    hint: 'eyJ',
   },
   {
     name: 'generic_api_key_assignment',
@@ -238,6 +266,7 @@ const BUILTIN_PATTERNS = [
     regex: /(?:api[_-]?key|apikey|api[_-]?secret)\s*[=:]\s*['"]?[a-zA-Z0-9_\-/+=]{16,}['"]?/gi,
     replacement: `api_key=${TOKENS.REDACTED_KEY}`,
     priority: 28,
+    hint: 'api',
   },
 
   // ----- Passwords & Secrets (Priority 30-39) -----
@@ -247,6 +276,7 @@ const BUILTIN_PATTERNS = [
     regex: /(?:password|passwd|pwd)\s*[=:]\s*['"]?[^\s'"]{4,}['"]?/gi,
     replacement: `password=${TOKENS.REDACTED_SECRET}`,
     priority: 30,
+    hint: ['password', 'passwd', 'pwd'],
   },
   {
     name: 'secret_assignment',
@@ -254,6 +284,7 @@ const BUILTIN_PATTERNS = [
     regex: /(?:secret|client_secret|app_secret)\s*[=:]\s*['"]?[^\s'"]{8,}['"]?/gi,
     replacement: `secret=${TOKENS.REDACTED_SECRET}`,
     priority: 31,
+    hint: 'secret',
   },
   {
     name: 'credential_assignment',
@@ -261,6 +292,7 @@ const BUILTIN_PATTERNS = [
     regex: /(?:credential|credentials)\s*[=:]\s*['"]?[^\s'"]{8,}['"]?/gi,
     replacement: `credential=${TOKENS.REDACTED_SECRET}`,
     priority: 32,
+    hint: 'credential',
   },
   {
     name: 'private_key_assignment',
@@ -268,6 +300,7 @@ const BUILTIN_PATTERNS = [
     regex: /(?:private[_-]?key)\s*[=:]\s*['"]?[^\s'"]{16,}['"]?/gi,
     replacement: `private_key=${TOKENS.REDACTED_SECRET}`,
     priority: 33,
+    hint: 'private',
   },
   {
     name: 'access_token_assignment',
@@ -275,6 +308,7 @@ const BUILTIN_PATTERNS = [
     regex: /(?:access[_-]?token|auth[_-]?token|refresh[_-]?token)\s*[=:]\s*['"]?[^\s'"]{10,}['"]?/gi,
     replacement: `token=${TOKENS.REDACTED_TOKEN}`,
     priority: 34,
+    hint: 'token',
   },
   {
     name: 'connection_string',
@@ -282,6 +316,7 @@ const BUILTIN_PATTERNS = [
     regex: /(?:mongodb(?:\+srv)?|postgres(?:ql)?|mysql|redis|amqp|mssql):\/\/[^\s'"]+/gi,
     replacement: TOKENS.CONNECTION_STRING,
     priority: 35,
+    hint: '://',
   },
   {
     name: 'dsn_string',
@@ -289,6 +324,7 @@ const BUILTIN_PATTERNS = [
     regex: /(?:sentry|bugsnag|rollbar)_dsn\s*[=:]\s*['"]?https?:\/\/[^\s'"]+['"]?/gi,
     replacement: `dsn=${TOKENS.CONNECTION_STRING}`,
     priority: 36,
+    hint: '_dsn',
   },
 
   // ----- Environment Variables (Priority 40-44) -----
@@ -298,6 +334,7 @@ const BUILTIN_PATTERNS = [
     regex: /^(?:export\s+)?(?:[A-Z_]+(?:KEY|SECRET|TOKEN|PASSWORD|CREDENTIAL|AUTH|DSN|PRIVATE))\s*=\s*.*$/gm,
     replacement: TOKENS.ENV_VAR,
     priority: 40,
+    hint: null,
   },
   {
     name: 'process_env_access',
@@ -305,6 +342,7 @@ const BUILTIN_PATTERNS = [
     regex: /process\.env\.([A-Z_]+(?:KEY|SECRET|TOKEN|PASSWORD|AUTH))/g,
     replacement: `process.env.${TOKENS.ENV_VAR}`,
     priority: 41,
+    hint: 'process.env.',
   },
   {
     name: 'env_interpolation',
@@ -312,6 +350,7 @@ const BUILTIN_PATTERNS = [
     regex: /\$\{([A-Z_]+(?:KEY|SECRET|TOKEN|PASSWORD|AUTH))\}/g,
     replacement: `\${${TOKENS.ENV_VAR}}`,
     priority: 42,
+    hint: '${',
   },
 
   // ----- Network: IP Addresses (Priority 45-49) -----
@@ -321,6 +360,7 @@ const BUILTIN_PATTERNS = [
     regex: /\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b/g,
     replacement: TOKENS.IP,
     priority: 45,
+    hint: null,
   },
   {
     name: 'ipv6_address',
@@ -328,6 +368,7 @@ const BUILTIN_PATTERNS = [
     regex: /\b(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}\b/g,
     replacement: TOKENS.IP,
     priority: 46,
+    hint: null,
   },
   {
     name: 'ipv6_compressed',
@@ -335,6 +376,7 @@ const BUILTIN_PATTERNS = [
     regex: /\b(?:[0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}\b/g,
     replacement: TOKENS.IP,
     priority: 47,
+    hint: null,
   },
   {
     name: 'mac_address',
@@ -342,6 +384,7 @@ const BUILTIN_PATTERNS = [
     regex: /\b(?:[0-9a-fA-F]{2}[:-]){5}[0-9a-fA-F]{2}\b/g,
     replacement: TOKENS.MAC_ADDR,
     priority: 48,
+    hint: null,
   },
 
   // ----- Network: URLs & Domains (Priority 50-54) -----
@@ -351,6 +394,7 @@ const BUILTIN_PATTERNS = [
     regex: /https?:\/\/[^:]+:[^@]+@[^\s'"]+/g,
     replacement: TOKENS.CONNECTION_STRING,
     priority: 50,
+    hint: '://',
   },
   {
     name: 'url_query_params',
@@ -358,6 +402,7 @@ const BUILTIN_PATTERNS = [
     regex: /(\bhttps?:\/\/[^\s?'"]+)\?[^\s'"]+/g,
     replacement: `$1?${TOKENS.PARAMS}`,
     priority: 51,
+    hint: '://',
   },
   {
     name: 'internal_hostname',
@@ -365,6 +410,7 @@ const BUILTIN_PATTERNS = [
     regex: /\b[a-z0-9-]+\.(?:internal|local|corp|intranet|private)\b/gi,
     replacement: TOKENS.HOST,
     priority: 52,
+    hint: ['.internal', '.local', '.corp', '.intranet', '.private'],
   },
   {
     name: 'ip_with_port',
@@ -372,6 +418,7 @@ const BUILTIN_PATTERNS = [
     regex: /\b(?:\d{1,3}\.){3}\d{1,3}:\d{1,5}\b/g,
     replacement: `${TOKENS.IP}:PORT`,
     priority: 53,
+    hint: null,
   },
 
   // ----- Personal Information (Priority 55-64) -----
@@ -381,6 +428,7 @@ const BUILTIN_PATTERNS = [
     regex: /\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\b/g,
     replacement: TOKENS.EMAIL,
     priority: 55,
+    hint: '@',
   },
   {
     name: 'phone_international',
@@ -388,6 +436,7 @@ const BUILTIN_PATTERNS = [
     regex: /\+\d{1,3}[-.\s]?\(?\d{1,4}\)?[-.\s]?\d{1,4}[-.\s]?\d{1,9}/g,
     replacement: TOKENS.PHONE,
     priority: 56,
+    hint: '+',
   },
   {
     name: 'phone_us',
@@ -395,6 +444,7 @@ const BUILTIN_PATTERNS = [
     regex: /\b\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b/g,
     replacement: TOKENS.PHONE,
     priority: 57,
+    hint: null,
   },
   {
     name: 'ssn_us',
@@ -402,6 +452,7 @@ const BUILTIN_PATTERNS = [
     regex: /\b\d{3}-\d{2}-\d{4}\b/g,
     replacement: TOKENS.SSN,
     priority: 58,
+    hint: null,
   },
   {
     name: 'credit_card_visa_mc',
@@ -409,6 +460,7 @@ const BUILTIN_PATTERNS = [
     regex: /\b(?:4\d{3}|5[1-5]\d{2})[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}\b/g,
     replacement: TOKENS.CREDIT_CARD,
     priority: 59,
+    hint: null,
   },
   {
     name: 'credit_card_amex',
@@ -416,6 +468,7 @@ const BUILTIN_PATTERNS = [
     regex: /\b3[47]\d{2}[-\s]?\d{6}[-\s]?\d{5}\b/g,
     replacement: TOKENS.CREDIT_CARD,
     priority: 60,
+    hint: null,
   },
 
   // ----- UUIDs (Priority 65) -----
@@ -425,6 +478,7 @@ const BUILTIN_PATTERNS = [
     regex: /\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}\b/g,
     replacement: TOKENS.UUID,
     priority: 65,
+    hint: '-4',
   },
 
   // ----- Paths (Priority 70-74) -----
@@ -436,6 +490,7 @@ const BUILTIN_PATTERNS = [
     regex: /[A-Z]:\\Users\\[^\\:*?"<>|\s]+\\[^\s'"]+/gi,
     replacement: `${TOKENS.USER_HOME}\\${TOKENS.PATH}`,
     priority: 70,
+    hint: ':\\users\\',
   },
   {
     name: 'unix_home_path',
@@ -443,6 +498,7 @@ const BUILTIN_PATTERNS = [
     regex: /\/(?:home|Users)\/[a-zA-Z0-9._-]+\/[^\s'"]+/g,
     replacement: `${TOKENS.USER_HOME}/${TOKENS.PATH}`,
     priority: 71,
+    hint: ['/home/', '/Users/'],
   },
   {
     name: 'tilde_home_path',
@@ -450,6 +506,7 @@ const BUILTIN_PATTERNS = [
     regex: /~\/[^\s'"]+/g,
     replacement: `${TOKENS.USER_HOME}/${TOKENS.PATH}`,
     priority: 72,
+    hint: '~/',
   },
 
   // ----- Hashes & Encoded Data (Priority 75-79) -----
@@ -459,6 +516,7 @@ const BUILTIN_PATTERNS = [
     regex: /\b[a-fA-F0-9]{64}\b/g,
     replacement: TOKENS.HASH,
     priority: 75,
+    hint: null,
   },
   {
     name: 'base64_long_block',
@@ -466,6 +524,7 @@ const BUILTIN_PATTERNS = [
     regex: /\b[A-Za-z0-9+/]{80,}={0,2}\b/g,
     replacement: TOKENS.STRING,
     priority: 76,
+    hint: null,
   },
 
   // ----- Git (Priority 80-84) -----
@@ -476,6 +535,7 @@ const BUILTIN_PATTERNS = [
     regex: /git@[a-zA-Z0-9.-]+:[a-zA-Z0-9._/-]+\.git/g,
     replacement: `git@${TOKENS.HOST}:${TOKENS.PATH}.git`,
     priority: 80,
+    hint: 'git@',
   },
   {
     name: 'git_remote_url_https',
@@ -483,6 +543,7 @@ const BUILTIN_PATTERNS = [
     regex: /https:\/\/[a-zA-Z0-9.-]+\/[a-zA-Z0-9._/-]+\.git/g,
     replacement: `https://${TOKENS.HOST}/${TOKENS.PATH}.git`,
     priority: 81,
+    hint: '.git',
   },
 
   // ----- Code String Literals with Secrets (Priority 85-89) -----
@@ -492,6 +553,7 @@ const BUILTIN_PATTERNS = [
     regex: /(['"])(?:password|secret|token|apiKey|api_key|private_key)\1\s*:\s*(['"])[^'"]{8,}\2/g,
     replacement: `$1password$1: $2${TOKENS.REDACTED_SECRET}$2`,
     priority: 85,
+    hint: null,
   },
   {
     name: 'config_sensitive_value',
@@ -499,6 +561,7 @@ const BUILTIN_PATTERNS = [
     regex: /(?:password|secret|token|key|credential|auth)['"]?\s*[=:]\s*['"][^'"]{8,}['"]/gi,
     replacement: `key: '${TOKENS.REDACTED_SECRET}'`,
     priority: 86,
+    hint: null,
   },
 ];
 
@@ -529,22 +592,60 @@ function createEmptyStats() {
 }
 
 // ---------------------------------------------------------------------------
+// Hint Pre-Test Helper
+// ---------------------------------------------------------------------------
+
+/**
+ * Fast pre-test: check if at least one hint substring is present in the text.
+ * Returns true if the pattern should be tested (hint matches or no hint defined).
+ *
+ * For case-insensitive regexes, hints must be stored in lowercase and
+ * the caller must pass a lowercased version of the text.
+ *
+ * @param {string|string[]|null|undefined} hint - Literal hint(s) from the pattern
+ * @param {string} text - The current text to search (original case)
+ * @param {string} lower - The lowercased text (for case-insensitive hints)
+ * @param {boolean} caseInsensitive - Whether the regex has the 'i' flag
+ * @returns {boolean} true if the regex should be executed
+ */
+function hintMatches(hint, text, lower, caseInsensitive) {
+  if (hint === null || hint === undefined) return true;
+  const haystack = caseInsensitive ? lower : text;
+  if (typeof hint === 'string') return haystack.includes(hint);
+  for (let i = 0; i < hint.length; i++) {
+    if (haystack.includes(hint[i])) return true;
+  }
+  return false;
+}
+
+// ---------------------------------------------------------------------------
 // Core Scrubbing Functions
 // ---------------------------------------------------------------------------
 
 /**
  * Scrub all PII from a text string.
  * Applies patterns in priority order (lowest number first).
+ * Uses indexOf/includes pre-tests to skip expensive regex when possible.
  *
  * @param {string} text - Input text to scrub
  * @returns {string} Scrubbed text with PII replaced by tokens
+ * @example
+ * const cleaned = scrub('Contact: user@example.com');
+ * // cleaned: 'Contact: [EMAIL]'
+ *
+ * const safe = scrub('Server at 192.168.1.100:3000');
+ * // safe: 'Server at [IP]:PORT'
  */
 export function scrub(text) {
   if (!text || typeof text !== 'string') return text ?? '';
 
   let result = text;
+  let lower = text.toLowerCase();
 
   for (const pat of sortedPatterns) {
+    // Fast path: skip regex if hint substring is not present
+    if (!hintMatches(pat.hint, result, lower, pat.regex.ignoreCase)) continue;
+
     // Reset regex lastIndex for global patterns
     if (pat.regex.global) {
       pat.regex.lastIndex = 0;
@@ -557,6 +658,8 @@ export function scrub(text) {
       stats.totalScrubs += 1;
       stats.byCategory[pat.category] = (stats.byCategory[pat.category] || 0) + 1;
       stats.byPattern[pat.name] = (stats.byPattern[pat.name] || 0) + 1;
+      // Update lowercased copy after replacement
+      lower = result.toLowerCase();
     }
   }
 
@@ -569,6 +672,9 @@ export function scrub(text) {
  *
  * @param {object} pattern - Object that may contain PII in string values
  * @returns {object} New object with PII scrubbed (immutable)
+ * @example
+ * const result = scrubPattern({ email: 'user@example.com', score: 0.9 });
+ * // result: { email: '[EMAIL]', score: 0.9 }
  */
 export function scrubPattern(pattern) {
   if (pattern === null || pattern === undefined) return pattern;
@@ -598,6 +704,13 @@ export function scrubPattern(pattern) {
  *
  * @param {object[]} patterns - Array of objects to scrub
  * @returns {object[]} New array with all PII scrubbed
+ * @example
+ * const results = scrubPatterns([
+ *   { author: 'user@example.com', content: 'hello' },
+ *   { author: 'admin@corp.io', content: 'world' },
+ * ]);
+ * // results[0].author === '[EMAIL]'
+ * // results[1].author === '[EMAIL]'
  */
 export function scrubPatterns(patterns) {
   if (!Array.isArray(patterns)) return [];
@@ -614,6 +727,9 @@ export function scrubPatterns(patterns) {
  * @param {string} [options.category='custom'] - Category grouping
  * @param {number} [options.priority=90] - Application priority (0-100)
  * @returns {{ name: string, added: boolean }}
+ * @example
+ * const result = addCustomPattern('internal_id', /PROJ-\d{6}/g, '[INTERNAL_ID]', { category: 'identifiers' });
+ * // result: { name: 'internal_id', added: true }
  */
 export function addCustomPattern(name, regex, replacement, options = {}) {
   if (!name || !(regex instanceof RegExp) || typeof replacement !== 'string') {
@@ -641,6 +757,9 @@ export function addCustomPattern(name, regex, replacement, options = {}) {
  *
  * @param {string} name - Pattern identifier
  * @returns {{ name: string, removed: boolean }}
+ * @example
+ * const result = removeCustomPattern('internal_id');
+ * // result: { name: 'internal_id', removed: true }
  */
 export function removeCustomPattern(name) {
   const before = activePatterns.length;
@@ -653,6 +772,11 @@ export function removeCustomPattern(name) {
  * Get current scrubbing statistics.
  *
  * @returns {{ totalScrubs: number, byCategory: Record<string, number>, byPattern: Record<string, number>, patternCount: number }}
+ * @example
+ * const stats = getScrubStats();
+ * // stats.totalScrubs === 15
+ * // stats.byCategory === { auth: 8, personal: 5, paths: 2 }
+ * // stats.patternCount === 43
  */
 export function getScrubStats() {
   return {
@@ -663,6 +787,10 @@ export function getScrubStats() {
 
 /**
  * Reset scrubbing statistics.
+ *
+ * @example
+ * resetStats();
+ * // getScrubStats().totalScrubs === 0
  */
 export function resetStats() {
   stats = createEmptyStats();
@@ -674,6 +802,12 @@ export function resetStats() {
  *
  * @param {string} text - Previously scrubbed text to validate
  * @returns {{ clean: boolean, residual: string[] }}
+ * @example
+ * const result = validateScrubbed('All clean, key=[REDACTED_KEY]');
+ * // result: { clean: true, residual: [] }
+ *
+ * const bad = validateScrubbed('Leaked: user@company.com');
+ * // bad: { clean: false, residual: ['email'] }
  */
 export function validateScrubbed(text) {
   if (!text || typeof text !== 'string') return { clean: true, residual: [] };
@@ -708,6 +842,9 @@ export function validateScrubbed(text) {
  * List all active patterns with metadata.
  *
  * @returns {Array<{ name: string, category: string, priority: number }>}
+ * @example
+ * const patterns = listPatterns();
+ * // patterns[0]: { name: 'pem_private_key', category: 'credentials', priority: 0 }
  */
 export function listPatterns() {
   return activePatterns
@@ -718,6 +855,11 @@ export function listPatterns() {
 /**
  * Restore active patterns to built-in defaults.
  * Removes all custom patterns.
+ *
+ * @example
+ * addCustomPattern('my-pattern', /test/g, '[TEST]');
+ * resetPatterns();
+ * // Custom pattern removed, only built-in patterns active
  */
 export function resetPatterns() {
   activePatterns = [...BUILTIN_PATTERNS];
@@ -730,6 +872,10 @@ export function resetPatterns() {
  *
  * @param {string[]} categories - Categories to include (e.g. ['auth', 'secrets'])
  * @returns {{ scrub: (text: string) => string }}
+ * @example
+ * const personalScrubber = createScopedScrubber(['personal']);
+ * const result = personalScrubber.scrub('Email: user@example.com');
+ * // result: 'Email: [EMAIL]'
  */
 export function createScopedScrubber(categories) {
   const categorySet = new Set(categories);
@@ -741,9 +887,13 @@ export function createScopedScrubber(categories) {
     scrub(text) {
       if (!text || typeof text !== 'string') return text ?? '';
       let result = text;
+      let lower = text.toLowerCase();
       for (const pat of scoped) {
+        if (!hintMatches(pat.hint, result, lower, pat.regex.ignoreCase)) continue;
         if (pat.regex.global) pat.regex.lastIndex = 0;
+        const before = result;
         result = result.replace(pat.regex, pat.replacement);
+        if (result !== before) lower = result.toLowerCase();
       }
       return result;
     },

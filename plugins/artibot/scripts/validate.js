@@ -6,7 +6,7 @@
  */
 
 import { readdir, readFile, stat } from 'node:fs/promises';
-import { join, resolve, dirname } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -24,6 +24,31 @@ async function exists(path) {
 async function readJson(path) {
   const content = await readFile(path, 'utf-8');
   return JSON.parse(content);
+}
+
+function collectHooks(hooksObj) {
+  const result = [];
+  for (const [eventName, groups] of Object.entries(hooksObj)) {
+    if (!Array.isArray(groups)) continue;
+    for (const group of groups) {
+      if (!Array.isArray(group.hooks)) continue;
+      for (const hook of group.hooks) result.push({ eventName, hook });
+    }
+  }
+  return result;
+}
+
+function validatePathPrefix(field, value) {
+  if (typeof value === 'string' && !value.startsWith('./')) {
+    error(`[manifest] ${field} path must start with "./" (got "${value}")`);
+  }
+  if (Array.isArray(value)) {
+    for (const v of value) {
+      if (typeof v === 'string' && !v.startsWith('./')) {
+        error(`[manifest] ${field} path must start with "./" (got "${v}")`);
+      }
+    }
+  }
 }
 
 // --- Validators ---
@@ -52,17 +77,7 @@ async function validateManifest() {
 
     // Validate path fields use ./ prefix
     for (const field of ['agents', 'commands', 'hooks', 'mcpServers', 'outputStyles']) {
-      const value = manifest[field];
-      if (typeof value === 'string' && !value.startsWith('./')) {
-        error(`[manifest] ${field} path must start with "./" (got "${value}")`);
-      }
-      if (Array.isArray(value)) {
-        for (const v of value) {
-          if (typeof v === 'string' && !v.startsWith('./')) {
-            error(`[manifest] ${field} path must start with "./" (got "${v}")`);
-          }
-        }
-      }
+      validatePathPrefix(field, manifest[field]);
     }
 
     console.log('  [manifest] plugin.json validated');
@@ -186,44 +201,32 @@ async function validateHooks() {
     const validHookTypes = ['command', 'prompt', 'agent'];
 
     // Validate hookTypes metadata field if present
-    if (config.hookTypes) {
-      if (!Array.isArray(config.hookTypes)) {
-        error('[hooks] hookTypes must be an array');
-      } else {
-        for (const ht of config.hookTypes) {
-          if (!validHookTypes.includes(ht)) {
-            warn(`[hooks] Unknown hookType: "${ht}"`);
-          }
-        }
+    if (config.hookTypes && !Array.isArray(config.hookTypes)) {
+      error('[hooks] hookTypes must be an array');
+    }
+    if (Array.isArray(config.hookTypes)) {
+      for (const ht of config.hookTypes) {
+        if (!validHookTypes.includes(ht)) warn(`[hooks] Unknown hookType: "${ht}"`);
       }
     }
 
     const events = Object.keys(config.hooks || {});
     for (const event of events) {
-      if (!validEvents.includes(event)) {
-        warn(`[hooks] Unknown hook event: "${event}"`);
-      }
+      if (!validEvents.includes(event)) warn(`[hooks] Unknown hook event: "${event}"`);
     }
 
     // Validate hook type field on individual hooks
-    let hookCount = 0;
-    for (const [eventName, groups] of Object.entries(config.hooks || {})) {
-      if (!Array.isArray(groups)) continue;
-      for (const group of groups) {
-        if (!Array.isArray(group.hooks)) continue;
-        for (const hook of group.hooks) {
-          hookCount++;
-          if (hook.type && !validHookTypes.includes(hook.type)) {
-            warn(`[hooks] ${eventName}: unknown hook type "${hook.type}"`);
-          }
-          if (!hook.command) {
-            warn(`[hooks] ${eventName}: hook missing "command" field`);
-          }
-        }
+    const allHooks = collectHooks(config.hooks || {});
+    for (const { eventName, hook } of allHooks) {
+      if (hook.type && !validHookTypes.includes(hook.type)) {
+        warn(`[hooks] ${eventName}: unknown hook type "${hook.type}"`);
+      }
+      if (!hook.command) {
+        warn(`[hooks] ${eventName}: hook missing "command" field`);
       }
     }
 
-    console.log(`  [hooks] ${events.length} hook event(s), ${hookCount} hook(s) validated`);
+    console.log(`  [hooks] ${events.length} hook event(s), ${allHooks.length} hook(s) validated`);
   } catch (e) {
     error(`[hooks] Invalid JSON: ${e.message}`);
   }

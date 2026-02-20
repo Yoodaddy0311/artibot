@@ -7,7 +7,7 @@
  */
 
 import path from 'node:path';
-import { readTextFile, listDirs, listFiles } from './file.js';
+import { listDirs, listFiles, readTextFile } from './file.js';
 import { getPluginRoot } from './platform.js';
 import { loadConfig } from './config.js';
 import { GeminiAdapter } from '../adapters/gemini-adapter.js';

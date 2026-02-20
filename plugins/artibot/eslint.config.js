@@ -34,6 +34,13 @@ export default [
     },
   },
   {
+    files: ['scripts/**/*.js'],
+    rules: {
+      'no-console': 'off',
+      'complexity': 'off',
+    },
+  },
+  {
     files: ['tests/**/*.js'],
     rules: {
       'no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],

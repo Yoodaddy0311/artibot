@@ -4,20 +4,19 @@
  * Notifies when a teammate becomes idle and can accept new tasks.
  */
 
-import { readStdin, writeStdout, parseJSON } from '../utils/index.js';
-import path from 'node:path';
-import { readFileSync, existsSync } from 'node:fs';
+import { parseJSON, readStdin, writeStdout } from '../utils/index.js';
+import { existsSync, readFileSync } from 'node:fs';
+import { createErrorHandler, extractAgentId, extractAgentRole, getStatePath } from '../../lib/core/hook-utils.js';
 
 async function main() {
   const raw = await readStdin();
   const hookData = parseJSON(raw);
 
-  const agentId = hookData?.agent_id || hookData?.teammate_id || hookData?.name || 'unknown';
-  const agentRole = hookData?.role || '';
+  const agentId = extractAgentId(hookData);
+  const agentRole = extractAgentRole(hookData, '');
 
   // Check if there are pending tasks in state
-  const home = process.env.USERPROFILE || process.env.HOME || '';
-  const statePath = path.join(home, '.claude', 'artibot-state.json');
+  const statePath = getStatePath();
   let pendingTasks = [];
 
   if (existsSync(statePath)) {
@@ -41,7 +40,4 @@ async function main() {
   writeStdout({ message: parts.join(' | ') });
 }
 
-main().catch((err) => {
-  process.stderr.write(`[artibot:team-idle-handler] ${err.message}\n`);
-  process.exit(0);
-});
+main().catch(createErrorHandler('team-idle-handler', { exit: true }));

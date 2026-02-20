@@ -13,7 +13,7 @@
  * Zero dependencies. Node 18+ built-ins only. ESM module format.
  */
 
-import { readFileSync, rmSync, mkdirSync, writeFileSync, existsSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import path from 'node:path';
 import os from 'node:os';

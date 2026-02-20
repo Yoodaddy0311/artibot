@@ -10,8 +10,9 @@
  *   3. [sequential] hotSwap(learned) -- depends on batch learning result
  */
 
-import { readStdin, parseJSON, atomicWriteSync, getPluginRoot, toFileUrl } from '../utils/index.js';
+import { atomicWriteSync, getPluginRoot, parseJSON, readStdin, toFileUrl } from '../utils/index.js';
 import path from 'node:path';
+import { logHookError, getStatePath, createErrorHandler } from '../../lib/core/hook-utils.js';
 
 /**
  * Run the learning pipeline with parallelized independent operations.
@@ -40,10 +41,10 @@ export async function runLearningPipeline(sessionData, learningModule) {
   const experiences = experiencesSettled.status === 'fulfilled' ? experiencesSettled.value : null;
 
   if (evalSettled.status === 'rejected') {
-    process.stderr.write(`[artibot:session-end] selfEvaluate failed: ${evalSettled.reason?.message ?? evalSettled.reason}\n`);
+    logHookError('session-end', 'selfEvaluate failed', evalSettled.reason);
   }
   if (experiencesSettled.status === 'rejected') {
-    process.stderr.write(`[artibot:session-end] collectExperiences failed: ${experiencesSettled.reason?.message ?? experiencesSettled.reason}\n`);
+    logHookError('session-end', 'collectExperiences failed', experiencesSettled.reason);
   }
 
   // Stage 2: batchLearn depends on experiences being collected
@@ -51,7 +52,7 @@ export async function runLearningPipeline(sessionData, learningModule) {
   try {
     learned = await batchLearn(experiences);
   } catch (err) {
-    process.stderr.write(`[artibot:session-end] batchLearn failed: ${err?.message ?? err}\n`);
+    logHookError('session-end', 'batchLearn failed', err);
   }
 
   // Stage 3: hotSwap depends on learning results
@@ -59,7 +60,7 @@ export async function runLearningPipeline(sessionData, learningModule) {
   try {
     hotSwapped = await hotSwap(learned);
   } catch (err) {
-    process.stderr.write(`[artibot:session-end] hotSwap failed: ${err?.message ?? err}\n`);
+    logHookError('session-end', 'hotSwap failed', err);
   }
 
   return { evalResult, experiences, learned, hotSwapped };
@@ -69,9 +70,7 @@ async function main() {
   const raw = await readStdin();
   const hookData = parseJSON(raw);
 
-  const home = process.env.USERPROFILE || process.env.HOME || '';
-  const claudeDir = path.join(home, '.claude');
-  const statePath = path.join(claudeDir, 'artibot-state.json');
+  const statePath = getStatePath();
 
   const state = {
     sessionId: hookData?.session_id || null,
@@ -87,7 +86,7 @@ async function main() {
   try {
     atomicWriteSync(statePath, state);
   } catch (err) {
-    process.stderr.write(`[artibot:session-end] Failed to save state: ${err.message}\n`);
+    logHookError('session-end', 'Failed to save state', err);
   }
 
   // Run learning pipeline if session data is available
@@ -120,12 +119,9 @@ async function main() {
       }
       process.stderr.write(`${parts.join(' | ')}\n`);
     } catch (err) {
-      process.stderr.write(`[artibot:session-end] learning pipeline failed: ${err?.message ?? err}\n`);
+      logHookError('session-end', 'learning pipeline failed', err);
     }
   }
 }
 
-main().catch((err) => {
-  process.stderr.write(`[artibot:session-end] ${err.message}\n`);
-  process.exit(0);
-});
+main().catch(createErrorHandler('session-end', { exit: true }));

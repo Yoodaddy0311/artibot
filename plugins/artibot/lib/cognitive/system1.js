@@ -17,10 +17,10 @@
 
 import path from 'node:path';
 import { Cache } from '../core/cache.js';
-import { readJsonFile, writeJsonFile, listFiles, ensureDir } from '../core/file.js';
+import { ensureDir, listFiles, readJsonFile, writeJsonFile } from '../core/file.js';
 import { getHomeDir } from '../core/platform.js';
 import { searchMemory } from '../learning/memory-manager.js';
-import { suggestTool, buildContextKey } from '../learning/tool-learner.js';
+import { buildContextKey, suggestTool } from '../learning/tool-learner.js';
 
 // ---------------------------------------------------------------------------
 // Constants

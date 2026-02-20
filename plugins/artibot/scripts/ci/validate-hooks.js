@@ -4,7 +4,7 @@
  * Checks that the file is valid JSON and has the expected structure.
  */
 
-import { readFileSync, existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { getPluginRoot } from './ci-utils.js';
 
@@ -26,6 +26,19 @@ const VALID_HOOK_EVENTS = new Set([
   'TaskCompleted',
   'PermissionRequest',
 ]);
+
+function validateHookFields(hook, eventName, entryIdx, hookIdx) {
+  let errors = 0;
+  if (!hook.type) {
+    console.error(`FAIL: hooks.${eventName}[${entryIdx}].hooks[${hookIdx}] missing "type".`);
+    errors++;
+  }
+  if (!hook.command) {
+    console.error(`FAIL: hooks.${eventName}[${entryIdx}].hooks[${hookIdx}] missing "command".`);
+    errors++;
+  }
+  return errors;
+}
 
 function main() {
   const hooksPath = path.join(getPluginRoot(), 'hooks', 'hooks.json');
@@ -71,15 +84,7 @@ function main() {
         }
 
         for (let j = 0; j < entry.hooks.length; j++) {
-          const hook = entry.hooks[j];
-          if (!hook.type) {
-            console.error(`FAIL: hooks.${eventName}[${i}].hooks[${j}] missing "type".`);
-            errors++;
-          }
-          if (!hook.command) {
-            console.error(`FAIL: hooks.${eventName}[${i}].hooks[${j}] missing "command".`);
-            errors++;
-          }
+          errors += validateHookFields(entry.hooks[j], eventName, i, j);
         }
       }
 

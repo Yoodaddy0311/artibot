@@ -185,6 +185,12 @@ function validateProperty(value, schemaProp, propPath, errors) {
  *
  * @param {*} config - The configuration object to validate
  * @returns {{ valid: boolean, errors: string[] }}
+ * @example
+ * const { valid, errors } = validateConfig({ version: '1.4.0', team: { enabled: true } });
+ * // valid: true, errors: []
+ *
+ * const bad = validateConfig({ version: 123 });
+ * // bad.valid: false, bad.errors: ['version: expected string, got number']
  */
 export function validateConfig(config) {
   const errors = [];

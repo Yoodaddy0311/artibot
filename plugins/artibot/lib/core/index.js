@@ -26,3 +26,5 @@ export {
   taskBoard, timeline, fullDashboard, sectionHeader,
   color, supportsColor, getTermWidth, stripAnsi, BOX, BLOCK, SYMBOLS, COLORS, STATUS_MAP,
 } from './tui.js';
+export { STATES, createLifecycle, getCurrentState, defaultLifecycle } from './lifecycle.js';
+export { createExtensionRegistry, defaultRegistry } from './extension.js';

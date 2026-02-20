@@ -5,11 +5,12 @@
  * Outputs a welcome message to stdout.
  */
 
-import { readStdin, writeStdout, getPluginRoot, resolveConfigPath, parseJSON, toFileUrl } from '../utils/index.js';
-import { readFileSync, existsSync } from 'node:fs';
+import { getPluginRoot, parseJSON, readStdin, resolveConfigPath, toFileUrl, writeStdout } from '../utils/index.js';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { checkForUpdate } from '../../lib/core/version-checker.js';
+import { createErrorHandler } from '../../lib/core/hook-utils.js';
 
 async function main() {
   const raw = await readStdin();
@@ -121,7 +122,4 @@ async function main() {
   writeStdout({ message });
 }
 
-main().catch((err) => {
-  process.stderr.write(`[artibot:session-start] ${err.message}\n`);
-  process.exit(0); // Don't block session start on errors
-});
+main().catch(createErrorHandler('session-start', { exit: true }));

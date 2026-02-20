@@ -8,9 +8,9 @@
  * Events: teammate-update | task-complete | task-error | workflow-advance
  */
 
-import { readStdin, writeStdout, parseJSON, atomicWriteSync } from '../utils/index.js';
-import path from 'node:path';
-import { readFileSync, existsSync } from 'node:fs';
+import { atomicWriteSync, parseJSON, readStdin, writeStdout } from '../utils/index.js';
+import { existsSync, readFileSync } from 'node:fs';
+import { createErrorHandler, extractAgentId, extractAgentRole, getStatePath as getStateFilePath } from '../../lib/core/hook-utils.js';
 
 const PHASE_NAMES = {
   feature: ['Plan', 'Design', 'Implement', 'Review', 'Test', 'Merge'],
@@ -19,13 +19,8 @@ const PHASE_NAMES = {
   security: ['Scan', 'Assess', 'Fix', 'Verify', 'Audit', 'Merge'],
 };
 
-function getStatePath() {
-  const home = process.env.USERPROFILE || process.env.HOME || '';
-  return path.join(home, '.claude', 'artibot-state.json');
-}
-
 function loadState() {
-  const statePath = getStatePath();
+  const statePath = getStateFilePath();
   if (!existsSync(statePath)) {
     return { agents: {}, tasks: [], events: [], workflow: null };
   }
@@ -37,8 +32,7 @@ function loadState() {
 }
 
 function saveState(state) {
-  const statePath = getStatePath();
-  atomicWriteSync(statePath, state);
+  atomicWriteSync(getStateFilePath(), state);
 }
 
 function addEvent(state, type, agent, message) {
@@ -84,8 +78,8 @@ async function main() {
   if (!state.agents) state.agents = {};
   if (!state.events) state.events = [];
 
-  const agentId = hookData?.agent_id || hookData?.teammate_id || hookData?.name || 'unknown';
-  const agentRole = hookData?.role || hookData?.agent_type || '';
+  const agentId = extractAgentId(hookData);
+  const agentRole = extractAgentRole(hookData, '');
 
   switch (eventType) {
     case 'teammate-update': {
@@ -190,7 +184,4 @@ async function main() {
   writeStdout({ message: parts.join(' | ') });
 }
 
-main().catch((err) => {
-  process.stderr.write(`[artibot:workflow-status] ${err.message}\n`);
-  process.exit(0);
-});
+main().catch(createErrorHandler('workflow-status', { exit: true }));

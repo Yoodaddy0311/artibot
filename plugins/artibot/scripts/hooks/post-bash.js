@@ -4,7 +4,8 @@
  * Detects PR URLs from git push output and logs them.
  */
 
-import { readStdin, writeStdout, parseJSON } from '../utils/index.js';
+import { parseJSON, readStdin, writeStdout } from '../utils/index.js';
+import { createErrorHandler } from '../../lib/core/hook-utils.js';
 
 const PR_URL_PATTERNS = [
   /https:\/\/github\.com\/[^\s]+\/pull\/\d+/g,
@@ -38,7 +39,4 @@ async function main() {
   // No PR URLs found, nothing to report
 }
 
-main().catch((err) => {
-  process.stderr.write(`[artibot:post-bash] ${err.message}\n`);
-  process.exit(0);
-});
+main().catch(createErrorHandler('post-bash', { exit: true }));

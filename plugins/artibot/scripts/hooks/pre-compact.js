@@ -4,17 +4,17 @@
  * Saves current in-progress task state to a temporary file before compaction.
  */
 
-import { readStdin, writeStdout, parseJSON } from '../utils/index.js';
+import { parseJSON, readStdin, writeStdout } from '../utils/index.js';
 import path from 'node:path';
-import { writeFileSync, mkdirSync, readFileSync, existsSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { createErrorHandler, getClaudeDir, getStatePath, logHookError } from '../../lib/core/hook-utils.js';
 
 async function main() {
   const raw = await readStdin();
   const hookData = parseJSON(raw);
 
-  const home = process.env.USERPROFILE || process.env.HOME || '';
-  const claudeDir = path.join(home, '.claude');
-  const statePath = path.join(claudeDir, 'artibot-state.json');
+  const claudeDir = getClaudeDir();
+  const statePath = getStatePath();
   const compactBackupPath = path.join(claudeDir, 'artibot-pre-compact.json');
 
   // Load current state
@@ -42,10 +42,8 @@ async function main() {
       message: '[compact] Task state saved before compaction.',
     });
   } catch (err) {
-    process.stderr.write(`[artibot:pre-compact] Failed to save snapshot: ${err.message}\n`);
+    logHookError('pre-compact', 'Failed to save snapshot', err);
   }
 }
 
-main().catch((err) => {
-  process.stderr.write(`[artibot:pre-compact] ${err.message}\n`);
-});
+main().catch(createErrorHandler('pre-compact'));

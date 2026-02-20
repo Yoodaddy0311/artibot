@@ -9,7 +9,7 @@
  */
 
 import path from 'node:path';
-import { writeFileSync, renameSync, mkdirSync } from 'node:fs';
+import { mkdirSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 
 // Canonical getPluginRoot from lib/core/platform.js (single source of truth)

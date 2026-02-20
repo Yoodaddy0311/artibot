@@ -4,7 +4,7 @@
  */
 
 import { matchKeywords, uniqueIntents } from './language.js';
-import { getRecommendations, getBestRecommendation } from './trigger.js';
+import { getBestRecommendation, getRecommendations } from './trigger.js';
 import { detectAmbiguity } from './ambiguity.js';
 
 /**

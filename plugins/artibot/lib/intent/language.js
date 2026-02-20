@@ -107,6 +107,15 @@ const KEYWORD_MAP = {
  * @param {string} text - User input text
  * @param {string[]} [languages=['en','ko','ja']] - Languages to scan
  * @returns {{ intent: string, keyword: string, lang: string }[]}
+ * @example
+ * const matches = matchKeywords('build and test the project');
+ * // matches: [
+ * //   { intent: 'action:build', keyword: 'build', lang: 'en' },
+ * //   { intent: 'action:test', keyword: 'test', lang: 'en' }
+ * // ]
+ *
+ * const koMatches = matchKeywords('코드 리뷰 해줘', ['ko']);
+ * // koMatches: [{ intent: 'action:review', keyword: '리뷰', lang: 'ko' }]
  */
 export function matchKeywords(text, languages = ['en', 'ko', 'ja']) {
   const lower = text.toLowerCase();
@@ -134,6 +143,14 @@ export function matchKeywords(text, languages = ['en', 'ko', 'ja']) {
  * Get unique intents from keyword matches.
  * @param {{ intent: string }[]} matches
  * @returns {string[]}
+ * @example
+ * const matches = [
+ *   { intent: 'action:build', keyword: 'build', lang: 'en' },
+ *   { intent: 'action:build', keyword: '빌드', lang: 'ko' },
+ *   { intent: 'action:test', keyword: 'test', lang: 'en' },
+ * ];
+ * const intents = uniqueIntents(matches);
+ * // intents: ['action:build', 'action:test']
  */
 export function uniqueIntents(matches) {
   return [...new Set(matches.map((m) => m.intent))];

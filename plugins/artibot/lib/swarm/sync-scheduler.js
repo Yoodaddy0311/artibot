@@ -10,10 +10,10 @@
  */
 
 import path from 'node:path';
-import { readJsonFile, writeJsonFile, ensureDir } from '../core/file.js';
+import { ensureDir, readJsonFile, writeJsonFile } from '../core/file.js';
 import { ARTIBOT_DIR } from '../core/config.js';
-import { uploadWeights, downloadLatestWeights, flushOfflineQueue } from './swarm-client.js';
-import { packagePatterns, unpackWeights, mergeWeights } from './pattern-packager.js';
+import { downloadLatestWeights, flushOfflineQueue, uploadWeights } from './swarm-client.js';
+import { mergeWeights, packagePatterns, unpackWeights } from './pattern-packager.js';
 
 // ---------------------------------------------------------------------------
 // Constants

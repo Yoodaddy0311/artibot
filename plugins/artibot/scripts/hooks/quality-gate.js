@@ -15,9 +15,10 @@
  * Stdout: JSON { decision?, message? } — decision "block" to abort, omit to allow
  */
 
-import { readStdin, writeStdout, parseJSON } from '../utils/index.js';
-import { readFileSync, existsSync } from 'node:fs';
+import { parseJSON, readStdin, writeStdout } from '../utils/index.js';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
+import { createErrorHandler, extractFilePath, extractToolName, isSkippablePath } from '../../lib/core/hook-utils.js';
 
 // ---------------------------------------------------------------------------
 // Pattern definitions
@@ -120,22 +121,19 @@ async function main() {
 
   if (!hookData) return;
 
-  const toolName = hookData?.tool_name || hookData?.tool;
-  const toolInput = hookData?.tool_input || {};
+  const toolName = extractToolName(hookData);
 
   // Only inspect Edit and Write tool results
   if (toolName !== 'Edit' && toolName !== 'Write') return;
 
-  const filePath = toolInput.file_path || toolInput.path || '';
+  const filePath = extractFilePath(hookData);
   if (!filePath) return;
 
   const ext = path.extname(filePath).replace('.', '').toLowerCase();
   if (!INSPECTABLE_EXTS.has(ext)) return;
 
   // Skip node_modules, .git, lock files
-  const normalised = filePath.replace(/\\/g, '/');
-  if (normalised.includes('/node_modules/') || normalised.includes('/.git/')) return;
-  if (normalised.endsWith('.lock') || normalised.endsWith('-lock.json')) return;
+  if (isSkippablePath(filePath)) return;
 
   // Read the file from disk (tool already wrote it)
   if (!existsSync(filePath)) return;
@@ -207,7 +205,4 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  process.stderr.write(`[artibot:quality-gate] ${err.message}\n`);
-  process.exit(0); // Never block the tool pipeline on hook errors
-});
+main().catch(createErrorHandler('quality-gate', { exit: true }));

@@ -12,8 +12,9 @@
  * Data directory: ~/.claude/artibot/ (shared with all lib modules)
  */
 
-import { readStdin, parseJSON, getPluginRoot, toFileUrl } from '../utils/index.js';
+import { getPluginRoot, parseJSON, readStdin, toFileUrl } from '../utils/index.js';
 import path from 'node:path';
+import { logHookError, createErrorHandler } from '../../lib/core/hook-utils.js';
 
 async function main() {
   const raw = await readStdin();
@@ -70,11 +71,8 @@ async function main() {
 
     process.stderr.write(`${parts.join(' | ')}\n`);
   } catch (err) {
-    process.stderr.write(`[artibot:nightly-learner] ${err.message}\n`);
+    logHookError('nightly-learner', 'learning pipeline failed', err);
   }
 }
 
-main().catch((err) => {
-  process.stderr.write(`[artibot:nightly-learner] ${err.message}\n`);
-  process.exit(0);
-});
+main().catch(createErrorHandler('nightly-learner', { exit: true }));

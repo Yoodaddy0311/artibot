@@ -10,7 +10,7 @@
  */
 
 import path from 'node:path';
-import { readJsonFile, writeJsonFile, ensureDir } from '../core/file.js';
+import { ensureDir, readJsonFile, writeJsonFile } from '../core/file.js';
 import { ARTIBOT_DIR, round } from '../core/index.js';
 
 // ---------------------------------------------------------------------------

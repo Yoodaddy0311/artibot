@@ -4,7 +4,8 @@
  * Detects dangerous commands and warns before execution.
  */
 
-import { readStdin, writeStdout, parseJSON } from '../utils/index.js';
+import { parseJSON, readStdin, writeStdout } from '../utils/index.js';
+import { createErrorHandler } from '../../lib/core/hook-utils.js';
 
 /**
  * Dangerous command patterns with descriptions.
@@ -106,7 +107,7 @@ async function main() {
   writeStdout({ decision: 'approve' });
 }
 
-main().catch((err) => {
-  process.stderr.write(`[artibot:pre-bash] ${err.message}\n`);
-  writeStdout({ decision: 'block', reason: 'Safety check failed due to hook error. Blocking by default.' });
-});
+main().catch(createErrorHandler('pre-bash', {
+  writeStdout,
+  blockReason: 'Safety check failed due to hook error. Blocking by default.',
+}));

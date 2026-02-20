@@ -4,9 +4,10 @@
  * Scans modified files for console.log statements and warns.
  */
 
-import { readStdin, writeStdout, parseJSON } from '../utils/index.js';
-import { readFileSync, existsSync } from 'node:fs';
+import { parseJSON, readStdin, writeStdout } from '../utils/index.js';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
+import { createErrorHandler, hasExtension } from '../../lib/core/hook-utils.js';
 
 const SCANNABLE_EXTENSIONS = new Set(['.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs']);
 const CONSOLE_PATTERN = /\bconsole\.(log|debug|info)\s*\(/g;
@@ -23,8 +24,7 @@ async function main() {
   const warnings = [];
 
   for (const filePath of modifiedFiles) {
-    const ext = path.extname(filePath).toLowerCase();
-    if (!SCANNABLE_EXTENSIONS.has(ext)) continue;
+    if (!hasExtension(filePath, SCANNABLE_EXTENSIONS)) continue;
     if (!existsSync(filePath)) continue;
 
     try {
@@ -56,7 +56,4 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  process.stderr.write(`[artibot:check-console-log] ${err.message}\n`);
-  process.exit(0);
-});
+main().catch(createErrorHandler('check-console-log', { exit: true }));

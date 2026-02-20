@@ -12,7 +12,7 @@
 
 import { createHash } from 'node:crypto';
 import path from 'node:path';
-import { readJsonFile, writeJsonFile, ensureDir } from '../core/file.js';
+import { ensureDir, readJsonFile, writeJsonFile } from '../core/file.js';
 import { ARTIBOT_DIR } from '../core/config.js';
 import { scrubPattern as defaultScrubPii } from '../privacy/pii-scrubber.js';
 

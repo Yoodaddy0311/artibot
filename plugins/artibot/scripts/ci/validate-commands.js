@@ -5,9 +5,9 @@
  *   description, argument-hint
  */
 
-import { readFileSync, readdirSync, existsSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { getPluginRoot, extractFrontmatter } from './ci-utils.js';
+import { extractFrontmatter, getPluginRoot } from './ci-utils.js';
 
 const REQUIRED_FIELDS = ['description', 'argument-hint'];
 

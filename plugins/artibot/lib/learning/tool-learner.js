@@ -229,6 +229,9 @@ function createEmptyHistory() {
  * @param {string} [meta.command] - Originating slash command
  * @param {string} [meta.domain] - Domain classification
  * @returns {Promise<void>}
+ * @example
+ * await recordUsage('Grep', 'search:typescript', 0.9, { command: '/analyze', domain: 'backend' });
+ * // Records that Grep scored 0.9 in a typescript search context
  */
 export async function recordUsage(tool, context, score, meta = {}) {
   const history = await loadHistory();
@@ -270,6 +273,9 @@ export async function recordUsage(tool, context, score, meta = {}) {
  * @param {number} [options.limit=3] - Max suggestions
  * @param {number} [options.minScore=0.4] - Minimum weighted score
  * @returns {Promise<ToolSuggestion[]>}
+ * @example
+ * const suggestions = await suggestTool('search:typescript', { limit: 2 });
+ * // [{ tool: 'Grep', weightedScore: 0.92, rawAvg: 0.88, samples: 15, confidence: 'medium' }, ...]
  */
 export async function suggestTool(context, options = {}) {
   const { limit = 3, minScore = 0.4 } = options;
@@ -678,6 +684,12 @@ function gatherRelatedTools(history, context) {
  * @param {string} target - What is being targeted (e.g. "typescript", "config", "tests")
  * @param {string} [scope] - Scope qualifier (e.g. "file", "module", "project")
  * @returns {string} Normalized context key like "search:typescript:file"
+ * @example
+ * const key = buildContextKey('search', 'TypeScript', 'file');
+ * // key: 'search:typescript:file'
+ *
+ * const key2 = buildContextKey('edit', 'config');
+ * // key2: 'edit:config'
  */
 export function buildContextKey(operation, target, scope) {
   const parts = [operation, target];

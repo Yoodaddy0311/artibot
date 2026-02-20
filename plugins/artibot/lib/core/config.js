@@ -41,6 +41,11 @@ let _cachedMtime = null;
  * Uses mtime-based cache invalidation: returns cached config if the file has
  * not changed on disk since the last load. Pass force=true to bypass mtime
  * check and always reload from disk.
+ *
+ * @example
+ * const config = await loadConfig();
+ * console.log(config.team.engine); // 'claude-agent-teams'
+ * console.log(config.automation.supportedLanguages); // ['en', 'ko', 'ja']
  */
 export async function loadConfig(force = false) {
   const configPath = path.join(getPluginRoot(), 'artibot.config.json');
@@ -77,13 +82,26 @@ export async function loadConfig(force = false) {
   return _cached;
 }
 
-/** Get cached config synchronously (throws if not yet loaded). */
+/**
+ * Get cached config synchronously (throws if not yet loaded).
+ *
+ * @example
+ * await loadConfig();
+ * const config = getConfig();
+ * // config.output.defaultStyle === 'artibot-default'
+ */
 export function getConfig() {
   if (!_cached) throw new Error('Config not loaded. Call loadConfig() first.');
   return _cached;
 }
 
-/** Clear cached config and recorded mtime. */
+/**
+ * Clear cached config and recorded mtime.
+ *
+ * @example
+ * resetConfig();
+ * // Next loadConfig() call will re-read from disk
+ */
 export function resetConfig() {
   _cached = null;
   _cachedMtime = null;

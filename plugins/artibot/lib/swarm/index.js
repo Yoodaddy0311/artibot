@@ -1,10 +1,11 @@
 /**
  * Swarm Intelligence Module - Public API.
  *
- * Re-exports the three core swarm components:
+ * Re-exports the four core swarm components:
  * - SwarmClient: HTTP client for server communication
  * - PatternPackager: Local pattern <-> shareable weight conversion
  * - SyncScheduler: Synchronization timing and lifecycle hooks
+ * - SwarmPersistence: File-based persistence layer for swarm data
  *
  * @module lib/swarm
  */
@@ -34,3 +35,23 @@ export {
   onSessionEnd,
   getSyncStatus,
 } from './sync-scheduler.js';
+
+export {
+  loadFromDisk,
+  saveToDisk,
+  clearPersistence,
+  getPattern,
+  setPattern,
+  removePattern,
+  getAllPatterns,
+  setWeights,
+  getWeights,
+  updateMetadata,
+  getMetadata,
+  isDirty,
+  isLoaded,
+  getDbPath,
+  setDebounceDelay,
+  scheduleSave,
+  _resetForTesting,
+} from './swarm-persistence.js';

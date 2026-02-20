@@ -219,7 +219,7 @@ export function route(input, context = {}) {
     durationMs,
   };
 
-  history.push(entry);
+  history = [...history, entry];
   if (history.length > MAX_HISTORY) {
     history = history.slice(-MAX_HISTORY);
   }
@@ -278,10 +278,12 @@ export function adaptThreshold(feedback) {
     }
   }
 
-  // Mark the most recent matching history entry
-  const recent = findRecentEntry(feedback.system);
-  if (recent) {
-    recent.success = feedback.success;
+  // Mark the most recent matching history entry (immutable replacement)
+  const recentIdx = findRecentEntryIndex(feedback.system);
+  if (recentIdx >= 0) {
+    history = history.map((h, i) =>
+      i === recentIdx ? { ...h, success: feedback.success } : h,
+    );
   }
 
   return {
@@ -311,6 +313,12 @@ export function adaptThreshold(feedback) {
  *   successRate: { system1: number, system2: number },
  *   recentTrend: 'stable'|'shifting_to_s2'|'shifting_to_s1',
  * }}
+ * @example
+ * const stats = getRoutingStats();
+ * // stats.totalRouted === 42
+ * // stats.system1Ratio === 0.65
+ * // stats.successRate.system1 === 0.9
+ * // stats.recentTrend === 'stable'
  */
 export function getRoutingStats() {
   const total = history.length;
@@ -553,17 +561,17 @@ function estimateNovelty(lower, context) {
 // ---------------------------------------------------------------------------
 
 /**
- * Find the most recent history entry for a given system.
+ * Find the index of the most recent history entry for a given system.
  * @param {1|2} system
- * @returns {object|undefined}
+ * @returns {number} Index or -1 if not found
  */
-function findRecentEntry(system) {
+function findRecentEntryIndex(system) {
   for (let i = history.length - 1; i >= 0; i--) {
     if (history[i].system === system && history[i].success === undefined) {
-      return history[i];
+      return i;
     }
   }
-  return undefined;
+  return -1;
 }
 
 /**

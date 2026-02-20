@@ -9,9 +9,10 @@
  * Designed to be invoked by the hook system with event data on stdin.
  */
 
-import { readStdin, writeStdout, parseJSON } from '../utils/index.js';
+import { parseJSON, readStdin, writeStdout } from '../utils/index.js';
 import path from 'node:path';
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { logHookError, createErrorHandler } from '../../lib/core/hook-utils.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -280,11 +281,8 @@ async function main() {
         break;
     }
   } catch (err) {
-    process.stderr.write(`[artibot:memory-tracker] ${err.message}\n`);
+    logHookError('memory-tracker', 'event processing failed', err);
   }
 }
 
-main().catch((err) => {
-  process.stderr.write(`[artibot:memory-tracker] ${err.message}\n`);
-  process.exit(0); // Don't block on errors
-});
+main().catch(createErrorHandler('memory-tracker', { exit: true }));

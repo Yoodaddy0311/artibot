@@ -4,9 +4,10 @@
  * Detects user intent from the prompt text (team summon, build, review, etc.).
  */
 
-import { readStdin, writeStdout, parseJSON, getPluginRoot } from '../utils/index.js';
+import { getPluginRoot, parseJSON, readStdin, writeStdout } from '../utils/index.js';
 import path from 'node:path';
 import { readFileSync } from 'node:fs';
+import { createErrorHandler } from '../../lib/core/hook-utils.js';
 
 // Inline lightweight intent detection to avoid heavy module imports for speed.
 const KEYWORDS = {
@@ -84,7 +85,4 @@ async function main() {
   writeStdout({ message: parts.join(' | ') });
 }
 
-main().catch((err) => {
-  process.stderr.write(`[artibot:user-prompt-handler] ${err.message}\n`);
-  process.exit(0);
-});
+main().catch(createErrorHandler('user-prompt-handler', { exit: true }));

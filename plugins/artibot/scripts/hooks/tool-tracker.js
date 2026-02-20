@@ -9,7 +9,8 @@
  */
 
 import path from 'node:path';
-import { readStdin, parseJSON, toFileUrl } from '../utils/index.js';
+import { parseJSON, readStdin, toFileUrl } from '../utils/index.js';
+import { logHookError, createErrorHandler } from '../../lib/core/hook-utils.js';
 
 // Dynamic import for tool-learner (ESM, relative to plugin root)
 const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT
@@ -74,7 +75,7 @@ async function main() {
     });
   } catch (err) {
     // Silently fail - tracker should never break the tool pipeline
-    process.stderr.write(`[artibot:tool-tracker] ${err.message}\n`);
+    logHookError('tool-tracker', 'recording failed', err);
   }
 }
 
@@ -301,6 +302,4 @@ function getResultContent(result) {
   );
 }
 
-main().catch((err) => {
-  process.stderr.write(`[artibot:tool-tracker] ${err.message}\n`);
-});
+main().catch(createErrorHandler('tool-tracker'));

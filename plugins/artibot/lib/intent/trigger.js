@@ -93,6 +93,10 @@ const TRIGGER_MAP = {
  * Get recommendations for a list of detected intents.
  * @param {string[]} intents - Array of intent strings
  * @returns {{ intent: string, type: string, description: string, agents: string[], commands: string[] }[]}
+ * @example
+ * const recs = getRecommendations(['action:build', 'action:test']);
+ * // recs[0]: { intent: 'action:build', type: 'action', agents: ['planner'], commands: ['/build'] }
+ * // recs[1]: { intent: 'action:test', type: 'action', agents: ['tdd-guide', 'e2e-runner'], commands: ['/test'] }
  */
 export function getRecommendations(intents) {
   const results = [];
@@ -109,6 +113,10 @@ export function getRecommendations(intents) {
  * Get a single best recommendation (first match by priority).
  * @param {string[]} intents
  * @returns {{ intent: string, type: string, description: string, agents: string[], commands: string[] }|null}
+ * @example
+ * const best = getBestRecommendation(['action:fix', 'team:summon']);
+ * // best: { intent: 'team:summon', type: 'team', agents: ['orchestrator'], commands: ['/spawn'] }
+ * // Team intents take priority over action intents
  */
 export function getBestRecommendation(intents) {
   // team intents take priority

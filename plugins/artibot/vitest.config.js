@@ -24,7 +24,6 @@ export default defineConfig({
       include: ['lib/**/*.js'],
       exclude: [
         'lib/**/index.js',
-        'lib/adapters/**',
         'lib/core/tui.js',
         'lib/core/skill-exporter.js',
         'scripts/hooks/**',

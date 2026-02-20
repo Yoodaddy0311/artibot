@@ -7,9 +7,10 @@
  * Fallback: if router module import fails, uses simple keyword-based detection.
  */
 
-import { readStdin, writeStdout, parseJSON, getPluginRoot, toFileUrl } from '../utils/index.js';
+import { getPluginRoot, parseJSON, readStdin, toFileUrl, writeStdout } from '../utils/index.js';
 import path from 'node:path';
 import { readFileSync } from 'node:fs';
+import { createErrorHandler } from '../../lib/core/hook-utils.js';
 
 // Fallback System 2 keywords (used only when router.js import fails)
 const SYSTEM2_KEYWORDS = [
@@ -108,6 +109,4 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  process.stderr.write(`[artibot:cognitive-router] ${err.message}\n`);
-});
+main().catch(createErrorHandler('cognitive-router'));

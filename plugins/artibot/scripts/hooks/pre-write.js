@@ -4,8 +4,9 @@
  * Warns if the target file is a sensitive file (.env, credentials, keys, etc.).
  */
 
-import { readStdin, writeStdout, parseJSON } from '../utils/index.js';
+import { parseJSON, readStdin, writeStdout } from '../utils/index.js';
 import path from 'node:path';
+import { createErrorHandler, extractFilePath, matchesPathPattern } from '../../lib/core/hook-utils.js';
 
 const SENSITIVE_PATTERNS = [
   /\.env($|\.)/i,
@@ -58,7 +59,7 @@ async function main() {
   const raw = await readStdin();
   const hookData = parseJSON(raw);
 
-  const filePath = hookData?.tool_input?.file_path || hookData?.tool_input?.path || '';
+  const filePath = extractFilePath(hookData);
   if (!filePath) {
     writeStdout({ decision: 'approve' });
     return;
@@ -67,7 +68,7 @@ async function main() {
   const basename = path.basename(filePath);
   const isSensitive =
     SENSITIVE_FILENAMES.has(basename) ||
-    SENSITIVE_PATTERNS.some((pattern) => pattern.test(basename));
+    matchesPathPattern(basename, SENSITIVE_PATTERNS);
 
   if (isSensitive) {
     writeStdout({
@@ -99,7 +100,7 @@ async function main() {
   writeStdout({ decision: 'approve' });
 }
 
-main().catch((err) => {
-  process.stderr.write(`[artibot:pre-write] ${err.message}\n`);
-  writeStdout({ decision: 'block', reason: 'Safety check failed due to hook error. Blocking by default.' });
-});
+main().catch(createErrorHandler('pre-write', {
+  writeStdout,
+  blockReason: 'Safety check failed due to hook error. Blocking by default.',
+}));

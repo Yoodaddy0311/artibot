@@ -6,7 +6,7 @@
  * @module lib/core/version-checker
  */
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 const CACHE_FILE = 'update-check.json';

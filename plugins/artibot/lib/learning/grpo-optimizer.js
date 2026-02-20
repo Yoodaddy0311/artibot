@@ -11,7 +11,7 @@
  */
 
 import path from 'node:path';
-import { readJsonFile, writeJsonFile, ensureDir } from '../core/file.js';
+import { ensureDir, readJsonFile, writeJsonFile } from '../core/file.js';
 import { getHomeDir } from '../core/platform.js';
 
 const GRPO_FILENAME = 'grpo-history.json';

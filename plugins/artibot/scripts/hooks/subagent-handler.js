@@ -5,14 +5,9 @@
  * Usage: node subagent-handler.js start|stop
  */
 
-import { readStdin, writeStdout, parseJSON, atomicWriteSync } from '../utils/index.js';
-import path from 'node:path';
-import { readFileSync, existsSync } from 'node:fs';
-
-function getStatePath() {
-  const home = process.env.USERPROFILE || process.env.HOME || '';
-  return path.join(home, '.claude', 'artibot-state.json');
-}
+import { atomicWriteSync, parseJSON, readStdin, writeStdout } from '../utils/index.js';
+import { existsSync, readFileSync } from 'node:fs';
+import { createErrorHandler, extractAgentId, extractAgentRole, getStatePath } from '../../lib/core/hook-utils.js';
 
 function loadState() {
   const statePath = getStatePath();
@@ -34,8 +29,8 @@ async function main() {
   const raw = await readStdin();
   const hookData = parseJSON(raw);
 
-  const agentId = hookData?.agent_id || hookData?.subagent_id || hookData?.name || 'unknown';
-  const agentRole = hookData?.role || hookData?.agent_type || 'teammate';
+  const agentId = extractAgentId(hookData);
+  const agentRole = extractAgentRole(hookData);
 
   const state = loadState();
   if (!state.agents) state.agents = {};
@@ -65,7 +60,4 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  process.stderr.write(`[artibot:subagent-handler] ${err.message}\n`);
-  process.exit(0);
-});
+main().catch(createErrorHandler('subagent-handler', { exit: true }));
