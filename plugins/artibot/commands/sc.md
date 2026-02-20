@@ -71,14 +71,55 @@ Parse $ARGUMENTS:
 1. **Parse**: Tokenize request, extract intent verbs, target nouns, flag modifiers
 2. **Classify**: Score each candidate route using keyword match (40%) + context analysis (40%) + flag hints (20%)
 3. **Resolve Ambiguity**: If top two scores within 10%, check for explicit `--force` or ask user
-4. **Route**: Invoke selected command with passthrough arguments
-5. **Report**: Display routing decision with confidence score
+4. **Assess Complexity**: Count domains and steps FROM THE REQUEST TEXT ONLY to determine delegation mode (see below). Do NOT read files to assess.
+5. **Route & Delegate**: Execute based on complexity level
+6. **Report**: Display routing decision with confidence score
 
-## Complexity Assessment
+## Complexity-Based Delegation
 
-- **Simple** (1 route): Direct delegation, no sub-agents
-- **Moderate** (2-3 domains): Select primary route, suggest follow-up commands
-- **Complex** (4+ domains): Recommend /orchestrate for multi-agent coordination
+### CRITICAL: Complex tasks MUST be delegated to keep the user's session responsive.
+
+| Complexity | Domains | Steps | Delegation Mode |
+|------------|---------|-------|-----------------|
+| **Simple** | 1 | <3 | Direct execution by current agent (invoke the command inline) |
+| **Moderate** | 2-3 | 3-10 | `Task(subagent_type)` - fire-and-forget sub-agent for the matched route |
+| **Complex** | 4+ | >10 | `Task(orchestrator, run_in_background=true)` - background team orchestration |
+
+### Delegation Flow for Complex Requests
+
+When complexity is "Complex" (4+ domains OR explicit team/orchestrate/spawn keywords):
+
+```
+1. Tell the user: "복잡한 요청으로 판단됩니다. 팀장(orchestrator)에게 위임합니다."
+2. Task(
+     subagent_type="artibot:orchestrator",
+     prompt="[user's original request with full context]",
+     run_in_background=true,
+     description="Team orchestration: [brief summary]"
+   )
+3. Return control to user immediately
+4. User can continue giving other commands while orchestrator works
+```
+
+### Delegation Flow for Moderate Requests
+
+When complexity is "Moderate" (2-3 domains):
+
+```
+1. Identify the primary route from the routing table
+2. Task(
+     subagent_type=[matched agent type],
+     prompt="[user's request with context]",
+     description="[brief summary]"
+   )
+3. Report result to user when sub-agent returns
+```
+
+## Anti-Patterns
+
+- ❌ Do NOT analyze the codebase (Read/Glob/Grep) to determine complexity - classify from request keywords only
+- ❌ Do NOT execute complex tasks directly - delegate to orchestrator via `Task(orchestrator, run_in_background=true)`
+- ❌ Do NOT block the user's session with long-running operations - use background delegation
 
 ## Fallback
 
