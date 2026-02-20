@@ -33,7 +33,7 @@ Most Claude Code plugins use simple sub-agent (`Task()`) delegation -- fire-and-
 - **Intelligent Delegation** -- Auto-selects Sub-Agent (simple) vs Agent Team (complex) based on cognitive complexity scoring
 - **5 Orchestration Patterns** -- Leader, Council, Swarm, Pipeline, Watchdog
 - **8 Playbooks** -- Feature, Bugfix, Refactor, Security + Marketing Campaign, Marketing Audit, Content Launch, Competitive Analysis
-- **38 Slash Commands** -- `/sc` smart router, `/orchestrate`, `/spawn`, `/implement`, `/campaign`, `/seo`, and more
+- **39 Slash Commands** -- `/sc` smart router, `/orchestrate`, `/spawn`, `/implement`, `/campaign`, `/seo`, and more
 - **26 Specialized Agents** -- Architecture, security, frontend, backend, testing, DevOps, marketing, SEO, analytics, and more
 - **77 Domain Skills** -- 11 persona skills, 8 core skills (incl. cognitive-routing, lifelong-learning), 16 language skills, 8 utility skills, 34 marketing skills
 - **18 Event Hooks** -- Cognitive routing, lifelong learning, session lifecycle, dangerous command blocking, auto-formatting, team tracking
@@ -235,6 +235,19 @@ The cognitive router feeds directly into the orchestration delegation mode:
 |-----------------|--------|-----------------|
 | < 0.4 | System 1 | Sub-Agent (Task tool) |
 | >= 0.4 | System 2 | Agent Team (Teams API) |
+
+#### Sub-Agent vs Agent Teams
+
+| Aspect | Sub-Agent | Agent Teams |
+|--------|-----------|-------------|
+| **Delegation** | Task() single call | TeamCreate → Task(team_name) |
+| **UI Visibility** | Hidden (background) | Teammates shown below prompt |
+| **Communication** | One-way (result only) | P2P bidirectional (SendMessage) |
+| **Task Management** | None | Shared task list (TaskCreate/Update/List) |
+| **Persistence** | One-shot | Session-persistent |
+| **Speed** | Fast (low overhead) | Slower (9+ API calls) |
+| **Token Cost** | 1x | ~5x |
+| **Best For** | Single file analysis, search | Complex features, multi-agent collaboration |
 
 ## Lifelong Learning
 
@@ -518,6 +531,25 @@ All teammates have their specialist tools + team collaboration tools (`SendMessa
 | SessionEnd | `session-end.js` | Persist session state |
 | SessionEnd | `nightly-learner.js` | Batch learning (GRPO) + knowledge transfer |
 
+## Auto-Update
+
+Artibot checks for new versions on session start via GitHub Releases API (24h cached).
+
+```
+Session start:
+  Artibot v1.4.0 initialized
+  ⬆️ New version available: v1.5.0 (current: v1.4.0)
+     Update: /artibot:update --force
+```
+
+**`/artibot:update` command:**
+
+| Flag | Behavior |
+|------|----------|
+| `--check` | Check version only (default) |
+| `--force` | Clear cache and force reinstall |
+| `--dry-run` | Show plan without executing |
+
 ## MCP Integration
 
 Artibot integrates with MCP servers for extended capabilities:
@@ -565,11 +597,11 @@ plugins/artibot/
 |   +-- orchestrator.md          #   CTO / Team leader (Agent Teams API)
 |   +-- [17 dev specialists].md  #   Development teammates
 |   +-- [8 marketing agents].md  #   Marketing specialists
-+-- commands/                    # 38 slash commands
++-- commands/                    # 39 slash commands
 |   +-- sc.md                    #   Smart router
 |   +-- orchestrate.md           #   Team orchestration (TeamCreate)
 |   +-- spawn.md                 #   Team spawn (parallel execution)
-|   +-- [24 dev commands].md
+|   +-- [25 dev commands].md
 |   +-- [10 marketing commands].md
 +-- skills/                      # 77 skill directories
 |   +-- orchestration/           #   Delegation mode + team routing
