@@ -46,6 +46,14 @@ const FEDAVG_WINDOW = parseInt(process.env.FEDAVG_WINDOW ?? '50', 10);
 const RATE_LIMIT = parseInt(process.env.RATE_LIMIT ?? '60', 10);
 const rateLimitMap = new Map();
 
+// CORS: restrict to allowed origins (comma-separated) or localhost-only fallback
+const CORS_ALLOWED_ORIGINS = process.env.CORS_ALLOWED_ORIGINS
+  ? process.env.CORS_ALLOWED_ORIGINS.split(',').map((o) => o.trim())
+  : null;
+
+// Authentication: shared-secret bearer token. If not set, only localhost connections are allowed.
+const AUTH_TOKEN = process.env.ARTIBOT_SERVER_TOKEN ?? null;
+
 // ---------------------------------------------------------------------------
 // HTTP Helpers
 // ---------------------------------------------------------------------------
@@ -90,14 +98,16 @@ function readBody(req) {
  * @param {import('node:http').ServerResponse} res
  * @param {number} status
  * @param {object} data
+ * @param {import('node:http').IncomingMessage} [req] - Used to resolve CORS origin
  */
-function json(res, status, data) {
+function json(res, status, data, req) {
+  const origin = req ? resolveAllowedOrigin(req.headers['origin']) : resolveAllowedOrigin(undefined);
   const body = JSON.stringify(data);
   res.writeHead(status, {
     'Content-Type': 'application/json',
-    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Origin': origin,
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Accept',
+    'Access-Control-Allow-Headers': 'Content-Type, Accept, Authorization',
     'Cache-Control': 'no-store',
   });
   res.end(body);
@@ -155,6 +165,54 @@ setInterval(() => {
   }
 }, 60000);
 
+/**
+ * Resolve the CORS origin for the given request.
+ * Returns the matched origin or null if not allowed.
+ *
+ * @param {string|undefined} origin - Request Origin header
+ * @returns {string} Allowed origin value
+ */
+function resolveAllowedOrigin(origin) {
+  // If an explicit allowlist is configured, check against it
+  if (CORS_ALLOWED_ORIGINS) {
+    if (origin && CORS_ALLOWED_ORIGINS.includes(origin)) return origin;
+    return CORS_ALLOWED_ORIGINS[0]; // fallback to first configured origin
+  }
+  // Default: allow only localhost origins
+  if (origin && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
+    return origin;
+  }
+  return 'http://localhost';
+}
+
+/**
+ * Check whether the request is from localhost.
+ *
+ * @param {import('node:http').IncomingMessage} req
+ * @returns {boolean}
+ */
+function isLocalhost(req) {
+  const addr = req.socket.remoteAddress ?? '';
+  return addr === '127.0.0.1' || addr === '::1' || addr === '::ffff:127.0.0.1';
+}
+
+/**
+ * Authenticate the request via Bearer token or localhost check.
+ * When AUTH_TOKEN is set, a matching Authorization header is required.
+ * When AUTH_TOKEN is not set, only localhost connections are permitted.
+ *
+ * @param {import('node:http').IncomingMessage} req
+ * @returns {boolean}
+ */
+function authenticate(req) {
+  if (AUTH_TOKEN) {
+    const authHeader = req.headers['authorization'] ?? '';
+    return authHeader === `Bearer ${AUTH_TOKEN}`;
+  }
+  // No token configured: restrict to localhost only
+  return isLocalhost(req);
+}
+
 // ---------------------------------------------------------------------------
 // Route Handlers
 // ---------------------------------------------------------------------------
@@ -166,7 +224,7 @@ async function handleUploadWeights(req, res) {
   const body = await readBody(req);
 
   if (!body.weights || typeof body.weights !== 'object') {
-    return json(res, 400, { error: 'Missing or invalid weights field' });
+    return json(res, 400, { error: 'Missing or invalid weights field' }, req);
   }
 
   const metadata = body.metadata ?? {};
@@ -177,7 +235,7 @@ async function handleUploadWeights(req, res) {
       .update(JSON.stringify(body.weights))
       .digest('hex');
     if (computed !== metadata.checksum) {
-      return json(res, 400, { error: 'Checksum verification failed' });
+      return json(res, 400, { error: 'Checksum verification failed' }, req);
     }
   }
 
@@ -191,7 +249,7 @@ async function handleUploadWeights(req, res) {
     setGlobalWeights(merged);
   }
 
-  json(res, 200, { success: true, version, timestamp });
+  json(res, 200, { success: true, version, timestamp }, req);
 }
 
 /**
@@ -213,10 +271,10 @@ function handleDownloadWeights(req, res) {
       weights: null,
       version: null,
       message: 'No weights available yet',
-    });
+    }, req);
   }
 
-  json(res, 200, result);
+  json(res, 200, result, req);
 }
 
 /**
@@ -226,23 +284,23 @@ async function handleTelemetry(req, res) {
   const body = await readBody(req);
 
   if (!body.stats || typeof body.stats !== 'object') {
-    return json(res, 400, { error: 'Missing or invalid stats field' });
+    return json(res, 400, { error: 'Missing or invalid stats field' }, req);
   }
 
   storeTelemetry(body.stats);
-  json(res, 200, { success: true });
+  json(res, 200, { success: true }, req);
 }
 
 /**
  * GET /api/v1/health - Server health check.
  */
-function handleHealth(_req, res) {
+function handleHealth(req, res) {
   const info = getServerInfo();
   json(res, 200, {
     status: 'healthy',
     uptime: Math.round(process.uptime()),
     ...info,
-  });
+  }, req);
 }
 
 /**
@@ -252,7 +310,7 @@ function handleStats(req, res, params) {
   const { clientId } = params;
 
   if (!clientId) {
-    return json(res, 400, { error: 'Client ID required' });
+    return json(res, 400, { error: 'Client ID required' }, req);
   }
 
   const stats = getClientStats(clientId);
@@ -263,10 +321,10 @@ function handleStats(req, res, params) {
       downloads: 0,
       rank: null,
       message: 'No contributions found for this client',
-    });
+    }, req);
   }
 
-  json(res, 200, stats);
+  json(res, 200, stats, req);
 }
 
 // ---------------------------------------------------------------------------
@@ -282,19 +340,25 @@ function handleStats(req, res, params) {
 async function handleRequest(req, res) {
   // CORS preflight
   if (req.method === 'OPTIONS') {
+    const origin = resolveAllowedOrigin(req.headers['origin']);
     res.writeHead(204, {
-      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Origin': origin,
       'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Accept',
+      'Access-Control-Allow-Headers': 'Content-Type, Accept, Authorization',
       'Access-Control-Max-Age': '86400',
     });
     return res.end();
   }
 
+  // Authentication
+  if (!authenticate(req)) {
+    return json(res, 401, { error: 'Unauthorized' }, req);
+  }
+
   // Rate limiting
   const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() ?? req.socket.remoteAddress;
   if (!checkRateLimit(ip)) {
-    return json(res, 429, { error: 'Rate limit exceeded' });
+    return json(res, 429, { error: 'Rate limit exceeded' }, req);
   }
 
   const url = new URL(req.url, `http://${req.headers.host}`);
@@ -333,19 +397,19 @@ async function handleRequest(req, res) {
     }
 
     // 404
-    json(res, 404, { error: 'Not found' });
+    json(res, 404, { error: 'Not found' }, req);
   } catch (err) {
     console.error(`[ERROR] ${req.method} ${pathname}:`, err.message);
 
     if (err.message === 'Invalid JSON') {
-      return json(res, 400, { error: 'Invalid JSON in request body' });
+      return json(res, 400, { error: 'Invalid JSON in request body' }, req);
     }
 
     if (err.message?.includes('exceeds')) {
-      return json(res, 413, { error: err.message });
+      return json(res, 413, { error: err.message }, req);
     }
 
-    json(res, 500, { error: 'Internal server error' });
+    json(res, 500, { error: 'Internal server error' }, req);
   }
 }
 
@@ -360,6 +424,8 @@ server.listen(PORT, () => {
   console.log(`[Artibot Swarm Server] FedAvg window: ${FEDAVG_WINDOW} snapshots`);
   console.log(`[Artibot Swarm Server] Max upload: ${(MAX_UPLOAD_BYTES / 1024 / 1024).toFixed(1)}MB`);
   console.log(`[Artibot Swarm Server] Rate limit: ${RATE_LIMIT} req/min per IP`);
+  console.log(`[Artibot Swarm Server] Auth: ${AUTH_TOKEN ? 'Bearer token' : 'localhost-only'}`);
+  console.log(`[Artibot Swarm Server] CORS: ${CORS_ALLOWED_ORIGINS ? CORS_ALLOWED_ORIGINS.join(', ') : 'localhost-only'}`);
 });
 
 // Graceful shutdown for Cloud Run

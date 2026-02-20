@@ -142,8 +142,9 @@ export async function shutdownLearning(sessionData) {
           : evalResult.overallTrend === 'declining' ? 0.3
           : 0.6,
       });
-    } catch {
+    } catch (err) {
       // Non-critical: evaluation failure doesn't block shutdown
+      process.stderr.write(`[learning] self-evaluation failed: ${err?.message ?? err}\n`);
     }
 
     // Run lifelong learning pipeline
@@ -151,16 +152,18 @@ export async function shutdownLearning(sessionData) {
       const { collectDailyExperiences: collect, batchLearn: learn } = await import('./lifelong-learner.js');
       await collect(sessionData);
       learned = await learn();
-    } catch {
+    } catch (err) {
       // Non-critical: learning failure doesn't block shutdown
+      process.stderr.write(`[learning] lifelong learning pipeline failed: ${err?.message ?? err}\n`);
     }
 
     // Hot-swap: promote/demote patterns based on latest learning
     try {
       const { hotSwap: swap } = await import('./knowledge-transfer.js');
       hotSwapped = await swap();
-    } catch {
-      // Non-critical
+    } catch (err) {
+      // Non-critical: hot-swap failure doesn't block shutdown
+      process.stderr.write(`[learning] knowledge hot-swap failed: ${err?.message ?? err}\n`);
     }
   }
 
@@ -215,8 +218,9 @@ export async function runLearningCycle(task, candidateResults, options = {}) {
       evaluation: evaluation ? { overall: evaluation.overall, grade: evaluation.grade } : null,
     });
     memorySaved = true;
-  } catch {
+  } catch (err) {
     // Non-critical: memory save failure doesn't block the cycle
+    process.stderr.write(`[learning] memory save failed for task ${task?.id ?? 'unknown'}: ${err?.message ?? err}\n`);
   }
 
   return {

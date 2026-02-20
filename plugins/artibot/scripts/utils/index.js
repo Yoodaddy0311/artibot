@@ -1,5 +1,10 @@
 /**
  * Common utilities for hook scripts.
+ *
+ * I/O functions (readStdin, writeStdout, parseJSON) delegate to lib/core/io.js
+ * to eliminate duplication. The hook-specific names (e.g., writeStdout vs writeJSON)
+ * are preserved for backward compatibility with existing hook scripts.
+ *
  * @module scripts/utils
  */
 
@@ -7,27 +12,21 @@ import path from 'node:path';
 import { writeFileSync, renameSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 
+// Canonical getPluginRoot from lib/core/platform.js (single source of truth)
+import { getPluginRoot } from '../../lib/core/platform.js';
+export { getPluginRoot };
 
-/**
- * Read all of stdin as a string.
- * @returns {Promise<string>}
- */
-export function readStdin() {
-  return new Promise((resolve) => {
-    const chunks = [];
-    process.stdin.setEncoding('utf-8');
-    process.stdin.on('data', (chunk) => chunks.push(chunk));
-    process.stdin.on('end', () => resolve(chunks.join('')));
-    process.stdin.resume();
-  });
-}
+// Delegate I/O to lib/core/io.js (single source of truth)
+import { readStdin, writeJSON } from '../../lib/core/io.js';
+export { readStdin };
 
 /**
  * Write a JSON object to stdout.
+ * Alias for lib/core/io.js writeJSON, kept for backward compatibility with hook scripts.
  * @param {object} data
  */
 export function writeStdout(data) {
-  process.stdout.write(JSON.stringify(data));
+  writeJSON(data);
 }
 
 /**
@@ -41,20 +40,6 @@ export function parseJSON(str) {
   } catch {
     return null;
   }
-}
-
-/**
- * Get the plugin root directory.
- * Uses CLAUDE_PLUGIN_ROOT env var, or resolves from this file's location.
- * @returns {string}
- */
-export function getPluginRoot() {
-  if (process.env.CLAUDE_PLUGIN_ROOT) {
-    return path.resolve(process.env.CLAUDE_PLUGIN_ROOT);
-  }
-  // This file is at <root>/scripts/utils/index.js -> go up 2 levels
-  const thisDir = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/i, '$1'));
-  return path.resolve(thisDir, '..', '..');
 }
 
 /**
@@ -83,7 +68,7 @@ export function atomicWriteSync(filePath, data) {
 /**
  * Convert a filesystem path to a file:// URL string for dynamic import().
  * Uses manual construction instead of pathToFileURL() because the latter
- * percent-encodes non-ASCII characters (e.g., Korean 바탕 화면 → %EB%B0%94...),
+ * percent-encodes non-ASCII characters (e.g., Korean 바탕 화면 -> %EB%B0%94...),
  * which Node.js import() on Windows cannot resolve back to filesystem paths.
  * @param {string} filePath - Absolute filesystem path
  * @returns {string} file:// URL string

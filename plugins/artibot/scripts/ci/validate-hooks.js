@@ -6,6 +6,7 @@
 
 import { readFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
+import { getPluginRoot } from './ci-utils.js';
 
 const VALID_HOOK_EVENTS = new Set([
   'SessionStart',
@@ -25,12 +26,6 @@ const VALID_HOOK_EVENTS = new Set([
   'TaskCompleted',
   'PermissionRequest',
 ]);
-
-function getPluginRoot() {
-  if (process.env.CLAUDE_PLUGIN_ROOT) return path.resolve(process.env.CLAUDE_PLUGIN_ROOT);
-  const thisDir = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/i, '$1'));
-  return path.resolve(thisDir, '..', '..');
-}
 
 function main() {
   const hooksPath = path.join(getPluginRoot(), 'hooks', 'hooks.json');

@@ -6,17 +6,8 @@
 import path from 'node:path';
 import { readFileSync } from 'node:fs';
 
-/**
- * Get the plugin root directory.
- * Uses CLAUDE_PLUGIN_ROOT env var, or resolves from this file's location.
- * @returns {string}
- */
-export function getPluginRoot() {
-  if (process.env.CLAUDE_PLUGIN_ROOT) return path.resolve(process.env.CLAUDE_PLUGIN_ROOT);
-  const thisDir = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/i, '$1'));
-  // This file is at <root>/scripts/ci/ci-utils.js -> go up 2 levels
-  return path.resolve(thisDir, '..', '..');
-}
+// Canonical getPluginRoot from lib/core/platform.js (single source of truth)
+export { getPluginRoot } from '../../lib/core/platform.js';
 
 /**
  * Extract YAML frontmatter fields from a Markdown file's content.

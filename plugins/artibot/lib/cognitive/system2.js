@@ -185,12 +185,16 @@ export function execute(plan, sandbox, options = {}) {
         ? 'success'
         : 'failed';
 
-    step.status = status === 'success' ? 'completed' : 'failed';
+    // Create updated step without mutating the original (immutability)
+    const updatedStep = {
+      ...step,
+      status: status === 'success' ? 'completed' : 'failed',
+    };
 
     const stepResult = {
-      stepId: step.id,
-      order: step.order,
-      action: step.action,
+      stepId: updatedStep.id,
+      order: updatedStep.order,
+      action: updatedStep.action,
       execution,
       validation,
       status,
@@ -199,7 +203,7 @@ export function execute(plan, sandbox, options = {}) {
     results.push(stepResult);
 
     if (onStepComplete) {
-      onStepComplete(step, stepResult);
+      onStepComplete(updatedStep, stepResult);
     }
 
     if (status !== 'success' && stopOnFailure) {

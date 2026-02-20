@@ -25,7 +25,6 @@ const DEFAULTS = {
   },
   context: {
     importCacheTTL: 30000,
-    hierarchyCacheTTL: 5000,
   },
   output: {
     maxContextLength: 500,
@@ -59,9 +58,13 @@ export function resetConfig() {
   _cached = null;
 }
 
+/** Keys that must never be merged to prevent prototype pollution. */
+const UNSAFE_MERGE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
 function deepMerge(target, source) {
   const result = { ...target };
   for (const key of Object.keys(source)) {
+    if (UNSAFE_MERGE_KEYS.has(key)) continue;
     if (
       source[key] &&
       typeof source[key] === 'object' &&

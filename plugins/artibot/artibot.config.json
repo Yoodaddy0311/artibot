@@ -154,8 +154,7 @@
   },
 
   "context": {
-    "importCacheTTL": 30000,
-    "hierarchyCacheTTL": 5000
+    "importCacheTTL": 30000
   },
 
   "cognitive": {
@@ -192,10 +191,5 @@
   "output": {
     "maxContextLength": 500,
     "defaultStyle": "artibot-default"
-  },
-
-  "telemetry": {
-    "enabled": false,
-    "anonymize": true
   }
 }

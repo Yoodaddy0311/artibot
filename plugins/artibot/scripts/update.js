@@ -18,6 +18,7 @@ import { execSync } from 'node:child_process';
 import path from 'node:path';
 import os from 'node:os';
 import { isNewerVersion } from '../lib/core/version-checker.js';
+import { getPluginRoot } from '../lib/core/platform.js';
 
 // ---------------------------------------------------------------------------
 // Argument parsing
@@ -31,18 +32,6 @@ const DRY_RUN = args.includes('--dry-run');
 // ---------------------------------------------------------------------------
 // Path helpers
 // ---------------------------------------------------------------------------
-
-/**
- * Resolve the plugin root directory.
- * Prefers CLAUDE_PLUGIN_ROOT env var; falls back to two directories above this
- * script (scripts/update.js -> scripts/ -> plugin root).
- */
-function resolvePluginRoot() {
-  if (process.env.CLAUDE_PLUGIN_ROOT) {
-    return path.resolve(process.env.CLAUDE_PLUGIN_ROOT);
-  }
-  return path.resolve(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/i, '$1')), '..');
-}
 
 /**
  * Resolve the user home directory cross-platform.
@@ -160,7 +149,7 @@ function runInstall() {
 // ---------------------------------------------------------------------------
 
 async function main() {
-  const pluginRoot = resolvePluginRoot();
+  const pluginRoot = getPluginRoot();
   const home = resolveHome();
 
   const currentVersion = readCurrentVersion(pluginRoot);

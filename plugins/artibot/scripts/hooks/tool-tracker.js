@@ -20,6 +20,32 @@ const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT
       '..'
     );
 
+// ---------------------------------------------------------------------------
+// Lazy-loaded module caches (imported once, reused across calls)
+// ---------------------------------------------------------------------------
+
+/** @type {Promise<{ recordUsage: Function }>|null} */
+let _toolLearnerModule = null;
+
+/** @type {Promise<{ collectExperience: Function }>|null} */
+let _lifelongLearnerModule = null;
+
+function getToolLearner() {
+  if (!_toolLearnerModule) {
+    const learnerPath = path.join(PLUGIN_ROOT, 'lib', 'learning', 'tool-learner.js');
+    _toolLearnerModule = import(toFileUrl(learnerPath));
+  }
+  return _toolLearnerModule;
+}
+
+function getLifelongLearner() {
+  if (!_lifelongLearnerModule) {
+    const lifelongPath = path.join(PLUGIN_ROOT, 'lib', 'learning', 'lifelong-learner.js');
+    _lifelongLearnerModule = import(toFileUrl(lifelongPath));
+  }
+  return _lifelongLearnerModule;
+}
+
 /** Tools to skip tracking (too frequent / trivial) */
 const SKIP_TOOLS = new Set([
   'TodoRead',

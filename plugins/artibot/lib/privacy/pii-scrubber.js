@@ -509,6 +509,14 @@ const BUILTIN_PATTERNS = [
 /** @type {ScrubPattern[]} */
 let activePatterns = [...BUILTIN_PATTERNS];
 
+/** Patterns pre-sorted by priority for scrub(). Rebuilt when activePatterns changes. */
+let sortedPatterns = [...activePatterns].sort((a, b) => a.priority - b.priority);
+
+/** Rebuild the cached sorted array after any mutation to activePatterns. */
+function rebuildSortedPatterns() {
+  sortedPatterns = [...activePatterns].sort((a, b) => a.priority - b.priority);
+}
+
 /** @type {{ totalScrubs: number, byCategory: Record<string, number>, byPattern: Record<string, number> }} */
 let stats = createEmptyStats();
 
@@ -534,10 +542,9 @@ function createEmptyStats() {
 export function scrub(text) {
   if (!text || typeof text !== 'string') return text ?? '';
 
-  const sorted = [...activePatterns].sort((a, b) => a.priority - b.priority);
   let result = text;
 
-  for (const pat of sorted) {
+  for (const pat of sortedPatterns) {
     // Reset regex lastIndex for global patterns
     if (pat.regex.global) {
       pat.regex.lastIndex = 0;
@@ -624,6 +631,7 @@ export function addCustomPattern(name, regex, replacement, options = {}) {
     priority: options.priority ?? 90,
   });
 
+  rebuildSortedPatterns();
   return { name, added: true };
 }
 
@@ -637,6 +645,7 @@ export function addCustomPattern(name, regex, replacement, options = {}) {
 export function removeCustomPattern(name) {
   const before = activePatterns.length;
   activePatterns = activePatterns.filter((p) => p.name !== name);
+  if (activePatterns.length < before) rebuildSortedPatterns();
   return { name, removed: activePatterns.length < before };
 }
 
@@ -712,6 +721,7 @@ export function listPatterns() {
  */
 export function resetPatterns() {
   activePatterns = [...BUILTIN_PATTERNS];
+  rebuildSortedPatterns();
 }
 
 /**
