@@ -16,12 +16,11 @@
  */
 
 import {
+  cleanup,
   createSandbox,
   execute as sandboxExecute,
-  recordResult,
-  validate,
-  cleanup,
   getStats,
+  validate,
 } from './sandbox.js';
 
 /** Maximum retry attempts for the solve loop */
@@ -261,7 +260,7 @@ export function execute(plan, sandbox, options = {}) {
  *   }
  * }}
  */
-export function reflect(executionResult, originalTask) {
+export function reflect(executionResult, _originalTask) {
   const failedSteps = [];
   const blockedSteps = [];
   const patterns = [];
@@ -553,11 +552,10 @@ export function assessComplexity(task) {
  */
 function decomposeTask(task, maxSteps) {
   const steps = [];
-  const desc = task.description.toLowerCase();
 
   // Extract explicit steps from description (numbered lists, bullet points)
   const stepPatterns = [
-    /(?:^|\n)\s*(?:\d+[\.\)]\s*|[-*]\s+)(.+)/gm,
+    /(?:^|\n)\s*(?:\d+[.)]\s*|[-*]\s+)(.+)/gm,
     /(?:first|then|next|after that|finally)[,:]?\s*(.+?)(?:\.|$)/gim,
   ];
 
@@ -634,7 +632,7 @@ function analyzeDependencies(steps) {
  * @param {object} task
  * @returns {Array<object>}
  */
-function assessRisks(steps, task) {
+function assessRisks(steps, _task) {
   const risks = [];
 
   for (const step of steps) {

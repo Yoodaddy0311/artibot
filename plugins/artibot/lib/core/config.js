@@ -5,7 +5,8 @@
 
 import path from 'node:path';
 import { readJsonFile } from './file.js';
-import { getPluginRoot, getHomeDir } from './platform.js';
+import { getHomeDir, getPluginRoot } from './platform.js';
+import { validateConfig } from './config-schema.js';
 
 /**
  * Base directory for all artibot runtime data.
@@ -43,6 +44,15 @@ export async function loadConfig(force = false) {
   const configPath = path.join(getPluginRoot(), 'artibot.config.json');
   const loaded = await readJsonFile(configPath);
   _cached = deepMerge(DEFAULTS, loaded ?? {});
+
+  // Validate merged config and log warnings for invalid fields
+  const { valid, errors } = validateConfig(_cached);
+  if (!valid) {
+    for (const err of errors) {
+      process.stderr.write(`[artibot] config warning: ${err}\n`);
+    }
+  }
+
   return _cached;
 }
 

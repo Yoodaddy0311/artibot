@@ -240,4 +240,196 @@ describe('mergeWeights()', () => {
     expect(merged).toHaveProperty('commands');
     expect(merged).toHaveProperty('teams');
   });
+
+  it('handles mergeEntries where local has value but global does not', () => {
+    const local = {
+      tools: { Read: { successRate: 0.8, customField: 'localOnly', sampleSize: 10 } },
+      errors: {},
+      commands: {},
+      teams: {},
+    };
+    const global_ = {
+      tools: { Read: { successRate: 0.9 } },
+      errors: {},
+      commands: {},
+      teams: {},
+    };
+    const merged = mergeWeights(local, global_);
+    // customField exists only in local, should be preserved
+    expect(merged.tools.Read.customField).toBe('localOnly');
+  });
+
+  it('handles mergeEntries where global has value but local does not', () => {
+    const local = {
+      tools: { Read: { successRate: 0.8 } },
+      errors: {},
+      commands: {},
+      teams: {},
+    };
+    const global_ = {
+      tools: { Read: { successRate: 0.9, globalOnly: 'fromGlobal' } },
+      errors: {},
+      commands: {},
+      teams: {},
+    };
+    const merged = mergeWeights(local, global_);
+    // globalOnly exists only in global, should be preserved
+    expect(merged.tools.Read.globalOnly).toBe('fromGlobal');
+  });
+
+  it('handles mergeEntries where both have non-numeric values (local takes precedence)', () => {
+    const local = {
+      tools: { Read: { label: 'local-label', successRate: 0.8 } },
+      errors: {},
+      commands: {},
+      teams: {},
+    };
+    const global_ = {
+      tools: { Read: { label: 'global-label', successRate: 0.9 } },
+      errors: {},
+      commands: {},
+      teams: {},
+    };
+    const merged = mergeWeights(local, global_);
+    // Non-numeric: localVal !== undefined, so local takes precedence
+    expect(merged.tools.Read.label).toBe('local-label');
+  });
+
+  it('handles mergeEntries where localVal is undefined and globalVal is non-numeric', () => {
+    const local = {
+      tools: { Read: { successRate: 0.8 } },
+      errors: {},
+      commands: {},
+      teams: {},
+    };
+    const global_ = {
+      tools: { Read: { successRate: 0.9, tag: 'global-tag' } },
+      errors: {},
+      commands: {},
+      teams: {},
+    };
+    const merged = mergeWeights(local, global_);
+    // tag only in global, localVal is undefined -> falls to else branch
+    expect(merged.tools.Read.tag).toBe('global-tag');
+  });
+});
+
+describe('packagePatterns() additional branches', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    readJsonFile.mockResolvedValue(null);
+  });
+
+  it('skips patterns without a key', async () => {
+    const pattern = { sampleSize: 10, confidence: 0.8, bestData: {} };
+    const result = await packagePatterns([pattern]);
+    expect(result.metadata.packagedCount).toBe(0);
+  });
+
+  it('handles error pattern with recoverable=false', async () => {
+    const pattern = makePattern('error', 'NetworkError', {
+      bestData: { recoverable: false, message: 'Connection refused to server at port 5432' },
+    });
+    const result = await packagePatterns([pattern]);
+    const keys = Object.keys(result.weights.errors);
+    expect(keys).toHaveLength(1);
+    const errorWeight = result.weights.errors[keys[0]];
+    expect(errorWeight.recoverable).toBe(0.0);
+  });
+
+  it('handles error pattern with recoverable=undefined (neutral 0.5)', async () => {
+    const pattern = makePattern('error', 'UnknownError', {
+      bestData: { message: 'Something went wrong' },
+    });
+    const result = await packagePatterns([pattern]);
+    const keys = Object.keys(result.weights.errors);
+    const errorWeight = result.weights.errors[keys[0]];
+    expect(errorWeight.recoverable).toBe(0.5);
+  });
+
+  it('handles error pattern with empty/missing message', async () => {
+    const pattern = makePattern('error', 'EmptyMsg', {
+      bestData: {},
+    });
+    const result = await packagePatterns([pattern]);
+    const keys = Object.keys(result.weights.errors);
+    expect(keys).toHaveLength(1);
+    // signature should anonymize the category since message is missing
+    expect(result.weights.errors[keys[0]].signature).toMatch(/^[a-f0-9]{12}$/);
+  });
+
+  it('handles command pattern with testsPass=false', async () => {
+    const pattern = makePattern('success', 'deploy', {
+      bestData: { duration: 10000, filesModified: 2, testsPass: false },
+    });
+    const result = await packagePatterns([pattern]);
+    expect(result.weights.commands.deploy.testsPass).toBe(0.0);
+  });
+
+  it('handles command pattern with testsPass=undefined (neutral 0.5)', async () => {
+    const pattern = makePattern('success', 'deploy', {
+      bestData: { duration: 10000, filesModified: 2 },
+    });
+    const result = await packagePatterns([pattern]);
+    expect(result.weights.commands.deploy.testsPass).toBe(0.5);
+  });
+
+  it('only includes non-empty categories in metadata.categories', async () => {
+    const pattern = makePattern('tool', 'Read', {
+      bestData: { successRate: 0.9, avgMs: 100 },
+    });
+    const result = await packagePatterns([pattern]);
+    expect(result.metadata.categories).toContain('tools');
+    expect(result.metadata.categories).not.toContain('errors');
+    expect(result.metadata.categories).not.toContain('commands');
+    expect(result.metadata.categories).not.toContain('teams');
+  });
+
+  it('handles unknown pattern type (not tool/error/success/team)', async () => {
+    const pattern = makePattern('unknown', 'something', {});
+    const result = await packagePatterns([pattern]);
+    expect(result.metadata.packagedCount).toBe(0);
+  });
+});
+
+describe('unpackWeights() additional branches', () => {
+  it('handles error weight with recoverable < 0.5 (maps to false)', () => {
+    const globalWeights = {
+      errors: { sig123: { frequency: 0.3, recoverable: 0.3, sampleSize: 10 } },
+    };
+    const patterns = unpackWeights(globalWeights);
+    expect(patterns[0].bestData.recoverable).toBe(false);
+  });
+
+  it('handles command weight with testsPass < 0.5 (maps to false)', () => {
+    const globalWeights = {
+      commands: { test: { effectiveness: 0.9, avgDuration: 0.8, filesModified: 0.7, testsPass: 0.3, sampleSize: 5 } },
+    };
+    const patterns = unpackWeights(globalWeights);
+    expect(patterns[0].bestData.testsPass).toBe(false);
+  });
+
+  it('handles empty weights object (no categories)', () => {
+    const patterns = unpackWeights({});
+    expect(patterns).toEqual([]);
+  });
+
+  it('handles weights with only errors section', () => {
+    const globalWeights = {
+      errors: { sig1: { frequency: 0.5, recoverable: 0.8, sampleSize: 3 } },
+    };
+    const patterns = unpackWeights(globalWeights);
+    expect(patterns).toHaveLength(1);
+    expect(patterns[0].type).toBe('error');
+  });
+
+  it('handles weights with only teams section', () => {
+    const globalWeights = {
+      teams: { pipeline: { effectiveness: 0.7, optimalSize: 4, avgDuration: 0.5, sampleSize: 8 } },
+    };
+    const patterns = unpackWeights(globalWeights);
+    expect(patterns).toHaveLength(1);
+    expect(patterns[0].type).toBe('team');
+    expect(patterns[0].bestData.pattern).toBe('pipeline');
+  });
 });

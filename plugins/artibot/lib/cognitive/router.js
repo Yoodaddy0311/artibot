@@ -55,9 +55,12 @@ const WEIGHTS = Object.freeze({
  * Configure router parameters from external config (artibot.config.json).
  * Call before routing to sync with plugin configuration.
  *
- * @param {object} [config]
- * @param {number} [config.threshold] - Initial routing threshold (0.2-0.7)
- * @param {number} [config.adaptRate] - Threshold adaptation step size
+ * @param {object} [config] - Configuration options.
+ * @param {number} [config.threshold] - Initial routing threshold (0.2-0.7).
+ * @param {number} [config.adaptRate] - Threshold adaptation step size (0.001-0.2).
+ * @returns {void}
+ * @example
+ * configure({ threshold: 0.5, adaptRate: 0.03 });
  */
 export function configure(config = {}) {
   if (typeof config.threshold === 'number') {
@@ -135,12 +138,22 @@ let s1SuccessStreak = 0;
 /**
  * Classify the complexity of an input string.
  *
- * @param {string} input - Raw user input text
- * @param {object} [context] - Optional context from prior routing
- * @param {string[]} [context.recentDomains] - Domains touched recently
- * @param {number} [context.sessionDepth] - How deep into a session (0-based)
- * @param {Record<string, number>} [context.domainSuccessRates] - Per-domain System 1 success rates
+ * @param {string} input - Raw user input text.
+ * @param {object} [context] - Optional context from prior routing.
+ * @param {string[]} [context.recentDomains] - Domains touched recently.
+ * @param {number} [context.sessionDepth] - How deep into a session (0-based).
+ * @param {Record<string, number>} [context.domainSuccessRates] - Per-domain System 1 success rates.
  * @returns {{ score: number, system: 1|2, confidence: number, factors: Record<string, number>, threshold: number }}
+ *   Classification result with complexity score, target system, confidence, factor breakdown, and current threshold.
+ * @example
+ * const result = classifyComplexity('implement login feature with OAuth');
+ * // { score: 0.45, system: 2, confidence: 0.6, factors: { steps: 0.2, domains: 0.4, ... }, threshold: 0.4 }
+ *
+ * if (result.system === 1) {
+ *   // fast path: sub-agent delegation
+ * } else {
+ *   // deep path: agent team creation
+ * }
  */
 export function classifyComplexity(input, context = {}) {
   const lower = input.toLowerCase();
@@ -182,9 +195,15 @@ export function classifyComplexity(input, context = {}) {
 /**
  * Route an input to System 1 or System 2 and record the decision.
  *
- * @param {string} input - Raw user input
- * @param {object} [context] - Routing context (forwarded to classifyComplexity)
+ * @param {string} input - Raw user input.
+ * @param {object} [context] - Routing context (forwarded to classifyComplexity).
  * @returns {{ system: 1|2, classification: ReturnType<typeof classifyComplexity>, metadata: { routedAt: number, historySize: number } }}
+ *   Routing result with system assignment, full classification details, and metadata.
+ * @example
+ * const result = route('analyze security vulnerabilities in auth module');
+ * console.log(result.system);          // 2 (deep analysis)
+ * console.log(result.classification);  // { score, confidence, factors, ... }
+ * console.log(result.metadata);        // { routedAt: 1708000000000, historySize: 42 }
  */
 export function route(input, context = {}) {
   const start = Date.now();
@@ -227,8 +246,16 @@ export function route(input, context = {}) {
  * (streak >= SUCCESS_STREAK_TRIGGER), the threshold is raised so more
  * inputs stay in System 1.
  *
- * @param {{ system: 1|2, success: boolean }} feedback
+ * @param {{ system: 1|2, success: boolean }} feedback - Outcome feedback for a previous routing decision.
  * @returns {{ previousThreshold: number, newThreshold: number, direction: 'lowered'|'raised'|'unchanged', streak: number }}
+ *   Object describing threshold change, including previous/new values and current success streak.
+ * @example
+ * // Report that System 1 produced a bad result
+ * const result = adaptThreshold({ system: 1, success: false });
+ * // { previousThreshold: 0.4, newThreshold: 0.35, direction: 'lowered', streak: 0 }
+ *
+ * // Report System 1 success
+ * adaptThreshold({ system: 1, success: true });
  */
 export function adaptThreshold(feedback) {
   const prev = threshold;
@@ -346,6 +373,10 @@ export function getRoutingStats() {
 /**
  * Reset all router state to defaults.
  * Intended for testing or session teardown.
+ *
+ * @returns {void}
+ * @example
+ * resetRouter(); // threshold back to 0.4, history cleared
  */
 export function resetRouter() {
   threshold = DEFAULT_THRESHOLD;
@@ -355,7 +386,10 @@ export function resetRouter() {
 
 /**
  * Get the current adaptive threshold value.
- * @returns {number}
+ *
+ * @returns {number} Current threshold (between 0.2 and 0.7).
+ * @example
+ * const t = getThreshold(); // 0.4 (default)
  */
 export function getThreshold() {
   return round(threshold);

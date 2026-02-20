@@ -78,7 +78,7 @@ export class BaseAdapter {
    * @param {SkillDefinition} skill
    * @returns {{ path: string, content: string }} Converted file
    */
-  convertSkill(skill) {
+  convertSkill(_skill) {
     throw new Error(`${this.constructor.name} must implement convertSkill()`);
   }
 
@@ -87,7 +87,7 @@ export class BaseAdapter {
    * @param {AgentDefinition} agent
    * @returns {{ path: string, content: string }|null} Converted file or null if unsupported
    */
-  convertAgent(agent) {
+  convertAgent(_agent) {
     throw new Error(`${this.constructor.name} must implement convertAgent()`);
   }
 
@@ -96,7 +96,7 @@ export class BaseAdapter {
    * @param {CommandDefinition} command
    * @returns {{ path: string, content: string }|null} Converted file or null if unsupported
    */
-  convertCommand(command) {
+  convertCommand(_command) {
     throw new Error(`${this.constructor.name} must implement convertCommand()`);
   }
 

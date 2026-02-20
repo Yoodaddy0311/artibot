@@ -399,7 +399,6 @@ export function taskBoard(tasks, opts = {}) {
 
       const id = `#${task.id}`;
       const subject = truncate(task.subject, colWidth - id.length - 3);
-      const ownerTag = task.owner ? color(`@${truncate(task.owner, 6)}`, 'cyan') : '';
       const line1 = ` ${color(id, 'dim')} ${subject}`;
       const pad = Math.max(0, colWidth - stripAnsi(line1).length);
       return `${line1}${' '.repeat(pad)}`;
@@ -462,7 +461,6 @@ export function timeline(events, opts = {}) {
 
     const ts = formatTimestamp(evt.timestamp);
     const connector = isLast ? BOX.bottomLeft : BOX.teeRight;
-    const vline = isLast ? ' ' : BOX.vertical;
 
     const icon = color(style.icon, style.color);
     const timeStr = color(ts, 'gray');

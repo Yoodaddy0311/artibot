@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
-import { getPlatform, getNodeInfo, checkNodeVersion, getPluginRoot, resolveFromRoot } from '../../lib/core/platform.js';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
+import { getPlatform, getNodeInfo, checkNodeVersion, getPluginRoot, getHomeDir, resolveFromRoot } from '../../lib/core/platform.js';
 import path from 'node:path';
 
 describe('platform', () => {
@@ -72,6 +72,29 @@ describe('platform', () => {
       const root = getPluginRoot();
       expect(typeof root).toBe('string');
       expect(root.length).toBeGreaterThan(0);
+    });
+  });
+
+  describe('getHomeDir()', () => {
+    it('returns USERPROFILE when set', () => {
+      vi.stubEnv('USERPROFILE', 'C:\\Users\\TestUser');
+      vi.stubEnv('HOME', '/home/testuser');
+      const home = getHomeDir();
+      expect(home).toBe('C:\\Users\\TestUser');
+    });
+
+    it('falls back to HOME when USERPROFILE is not set', () => {
+      vi.stubEnv('USERPROFILE', '');
+      vi.stubEnv('HOME', '/home/fallback');
+      const home = getHomeDir();
+      expect(home).toBe('/home/fallback');
+    });
+
+    it('returns a non-empty string regardless of env configuration', () => {
+      // Just verify the function always returns a usable path
+      const home = getHomeDir();
+      expect(typeof home).toBe('string');
+      expect(home.length).toBeGreaterThan(0);
     });
   });
 

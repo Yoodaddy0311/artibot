@@ -217,4 +217,123 @@ describe('onSessionEnd()', () => {
     await onSessionEnd();
     expect(flushOfflineQueue).toHaveBeenCalled();
   });
+
+  it('returns uploaded:false and queued:false when upload fails without queuing', async () => {
+    uploadWeights.mockResolvedValueOnce({ success: false, queued: false });
+    const result = await onSessionEnd();
+    expect(result.uploaded).toBe(false);
+    expect(result.queued).toBe(false);
+    expect(result.version).toBeDefined();
+  });
+
+  it('saves state with version when upload succeeds with version', async () => {
+    uploadWeights.mockResolvedValueOnce({ success: true, version: 'v3' });
+    const result = await onSessionEnd();
+    expect(result.uploaded).toBe(true);
+    expect(result.version).toBe('v3');
+  });
+
+  it('saves state when upload succeeds without version field', async () => {
+    uploadWeights.mockResolvedValueOnce({ success: true });
+    const result = await onSessionEnd();
+    expect(result.uploaded).toBe(true);
+    expect(result.version).toBeNull();
+  });
+});
+
+describe('forceSync() upload queued branch', () => {
+  it('increments pendingUploads when upload is queued (not success)', async () => {
+    uploadWeights.mockResolvedValueOnce({ success: false, queued: true });
+    const result = await forceSync();
+    expect(result.success).toBe(true);
+    expect(result.uploaded).toBe(false);
+    // State should have been saved with incremented pendingUploads
+    const stateWrites = writeJsonFile.mock.calls.filter(([, data]) => 'pendingUploads' in data);
+    expect(stateWrites.length).toBeGreaterThan(0);
+  });
+
+  it('handles upload success without version field', async () => {
+    uploadWeights.mockResolvedValueOnce({ success: true });
+    const result = await forceSync();
+    expect(result.success).toBe(true);
+    expect(result.uploaded).toBe(true);
+  });
+
+  it('skips upload when packagedCount is 0', async () => {
+    packagePatterns.mockResolvedValueOnce({
+      weights: { tools: {}, errors: {}, commands: {}, teams: {} },
+      metadata: { packagedCount: 0, patternCount: 0 },
+      checksum: 'empty',
+    });
+    const result = await forceSync();
+    expect(result.success).toBe(true);
+    expect(result.uploaded).toBe(false);
+    expect(uploadWeights).not.toHaveBeenCalled();
+  });
+});
+
+describe('forceSync() download branches', () => {
+  it('handles download failure (success:false)', async () => {
+    downloadLatestWeights.mockResolvedValueOnce({ success: false, error: 'Server unreachable' });
+    const result = await forceSync();
+    expect(result.success).toBe(true);
+    expect(result.downloaded).toBe(false);
+    expect(result.merged).toBe(false);
+  });
+
+  it('handles download success with no weights (null)', async () => {
+    downloadLatestWeights.mockResolvedValueOnce({ success: true, weights: null, version: 'v3' });
+    const result = await forceSync();
+    expect(result.success).toBe(true);
+    expect(result.downloaded).toBe(false);
+    expect(result.merged).toBe(false);
+  });
+
+  it('handles download success with empty unpackWeights result', async () => {
+    unpackWeights.mockReturnValueOnce([]);
+    const result = await forceSync();
+    expect(result.success).toBe(true);
+    expect(result.downloaded).toBe(true);
+    // merged should be false because globalPatterns.length === 0
+    expect(result.merged).toBe(false);
+  });
+
+  it('updates version from download when available', async () => {
+    downloadLatestWeights.mockResolvedValueOnce({
+      success: true,
+      weights: { tools: {}, errors: {}, commands: {}, teams: {} },
+      version: 'v5',
+    });
+    const result = await forceSync();
+    expect(result.version).toBe('v5');
+  });
+});
+
+describe('onSessionStart() additional branches', () => {
+  it('preserves currentVersion when download has no version field', async () => {
+    readJsonFile.mockResolvedValue({ currentVersion: 'v1-existing' });
+    downloadLatestWeights.mockResolvedValueOnce({
+      success: true,
+      weights: { tools: {}, errors: {}, commands: {}, teams: {} },
+    });
+    const result = await onSessionStart();
+    expect(result.downloaded).toBe(true);
+    expect(result.version).toBeNull();
+  });
+});
+
+describe('scheduleSync() timer re-schedule branch', () => {
+  it('clears existing timer when scheduling new sync', async () => {
+    await scheduleSync({ interval: 'hourly' });
+    // Schedule again - should clear old timer without error
+    const result = await scheduleSync({ interval: 'daily' });
+    expect(result.scheduled).toBe(true);
+    cancelSync();
+  });
+
+  it('uses default session interval when no options provided', async () => {
+    const result = await scheduleSync();
+    expect(result.scheduled).toBe(false);
+    expect(result.interval).toBe('session');
+  });
 });

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Artibot StatusLine - Shows current team/agent status
-import { readFileSync, existsSync, readdirSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 const home = process.env.HOME || process.env.USERPROFILE;

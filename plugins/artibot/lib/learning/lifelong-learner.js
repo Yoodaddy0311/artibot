@@ -309,7 +309,7 @@ function scoreExperience(exp) {
     case 'tool':
       return {
         success: clamp01(data.successRate ?? 0),
-        speed: data.avgMs != null ? clamp01(1.0 / (1 + data.avgMs / 5000)) : 0.5,
+        speed: data.avgMs !== null && data.avgMs !== undefined ? clamp01(1.0 / (1 + data.avgMs / 5000)) : 0.5,
         errorRate: clamp01(1.0 - (data.calls > 0 ? (data.calls - (data.successes ?? 0)) / data.calls : 0)),
         resourceEfficiency: clamp01(data.calls > 0 ? Math.min(1, 10 / data.calls) : 0.5),
       };
@@ -325,7 +325,7 @@ function scoreExperience(exp) {
     case 'success':
       return {
         success: 1.0,
-        speed: data.duration != null ? clamp01(1.0 / (1 + data.duration / 60000)) : 0.5,
+        speed: data.duration !== null && data.duration !== undefined ? clamp01(1.0 / (1 + data.duration / 60000)) : 0.5,
         errorRate: data.testsPass === true ? 1.0 : data.testsPass === false ? 0.3 : 0.5,
         resourceEfficiency: clamp01(1.0 / (1 + (data.filesModified ?? 0) / 20)),
       };
@@ -333,7 +333,7 @@ function scoreExperience(exp) {
     case 'team':
       return {
         success: clamp01(data.successRate ?? 0),
-        speed: data.duration != null ? clamp01(1.0 / (1 + data.duration / 120000)) : 0.5,
+        speed: data.duration !== null && data.duration !== undefined ? clamp01(1.0 / (1 + data.duration / 120000)) : 0.5,
         errorRate: clamp01(data.successRate ?? 0.5),
         resourceEfficiency: clamp01(1.0 / (1 + (data.size ?? 1) / 5)),
       };

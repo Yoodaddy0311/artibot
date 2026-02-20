@@ -74,7 +74,7 @@ function main() {
   for (const [metric, threshold] of Object.entries(THRESHOLDS)) {
     const actual = totals[metric]?.pct;
 
-    if (actual == null) {
+    if (actual === null || actual === undefined) {
       console.error(`FAIL: ${metric} - metric not found in coverage report`);
       failures++;
       continue;

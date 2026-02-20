@@ -50,7 +50,7 @@ function parseSimpleYaml(yaml) {
   for (const line of lines) {
     if (isMultiLine) {
       if (line.startsWith('  ') || line.startsWith('\t')) {
-        currentValue += (currentValue ? '\n' : '') + line.replace(/^  |\t/, '');
+        currentValue += (currentValue ? '\n' : '') + line.replace(/^ {2}|\t/, '');
         continue;
       } else {
         result[currentKey] = currentValue;

@@ -3,9 +3,6 @@
  * @module scripts/ci/ci-utils
  */
 
-import path from 'node:path';
-import { readFileSync } from 'node:fs';
-
 // Canonical getPluginRoot from lib/core/platform.js (single source of truth)
 export { getPluginRoot } from '../../lib/core/platform.js';
 

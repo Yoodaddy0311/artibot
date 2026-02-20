@@ -8,6 +8,8 @@ import {
   flushOfflineQueue,
   computeChecksum,
   verifyChecksum,
+  validateUrl,
+  ALLOWED_HOSTS,
 } from '../../lib/swarm/swarm-client.js';
 
 // Mock file module
@@ -143,10 +145,11 @@ describe('uploadWeights()', () => {
   });
 
   it('uses ARTIBOT_SWARM_SERVER env var when set', async () => {
-    process.env.ARTIBOT_SWARM_SERVER = 'https://custom-server.example.com';
+    // Use the default allowed host to test env var override
+    process.env.ARTIBOT_SWARM_SERVER = 'https://artibot-swarm-249539591811.asia-northeast3.run.app';
     await uploadWeights({ tools: {} }, {});
     expect(mockFetch).toHaveBeenCalledWith(
-      expect.stringContaining('custom-server.example.com'),
+      expect.stringContaining('artibot-swarm-249539591811.asia-northeast3.run.app'),
       expect.anything(),
     );
     delete process.env.ARTIBOT_SWARM_SERVER;
@@ -154,11 +157,20 @@ describe('uploadWeights()', () => {
 
   it('uses config.serverUrl when env not set', async () => {
     delete process.env.ARTIBOT_SWARM_SERVER;
-    await uploadWeights({ tools: {} }, {}, { config: { serverUrl: 'https://config-server.example.com' } });
+    // Use an allowed host to test config override
+    await uploadWeights({ tools: {} }, {}, { config: { serverUrl: 'https://localhost:9090' } });
     expect(mockFetch).toHaveBeenCalledWith(
-      expect.stringContaining('config-server.example.com'),
+      expect.stringContaining('localhost'),
       expect.anything(),
     );
+  });
+
+  it('rejects config.serverUrl pointing to non-allowed host', async () => {
+    delete process.env.ARTIBOT_SWARM_SERVER;
+    const result = await uploadWeights({ tools: {} }, {}, { config: { serverUrl: 'https://evil.example.com' } });
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/SSRF blocked/);
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 });
 
@@ -342,5 +354,105 @@ describe('flushOfflineQueue()', () => {
     const result = await promise;
     expect(result.flushed).toBe(0);
     vi.useRealTimers();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// SSRF Protection Tests
+// ---------------------------------------------------------------------------
+
+describe('SSRF Protection - validateUrl()', () => {
+  it('allows localhost URLs', () => {
+    const url = validateUrl('https://localhost/api/v1/health');
+    expect(url.hostname).toBe('localhost');
+  });
+
+  it('allows 127.0.0.1 URLs', () => {
+    const url = validateUrl('http://127.0.0.1:8080/api/v1/health');
+    expect(url.hostname).toBe('127.0.0.1');
+  });
+
+  it('allows ::1 URLs', () => {
+    const url = validateUrl('http://[::1]:8080/api/v1/health');
+    // URL parser stores IPv6 as [::1] in hostname
+    expect(url.hostname).toBe('[::1]');
+  });
+
+  it('allows the default swarm server host', () => {
+    const url = validateUrl('https://artibot-swarm-249539591811.asia-northeast3.run.app/api/v1/weights');
+    expect(url.hostname).toBe('artibot-swarm-249539591811.asia-northeast3.run.app');
+  });
+
+  it('blocks hosts not in the allowlist', () => {
+    expect(() => validateUrl('https://evil.example.com/steal-data')).toThrow('SSRF blocked');
+    expect(() => validateUrl('https://evil.example.com/steal-data')).toThrow('not in allowlist');
+  });
+
+  it('blocks file:// protocol', () => {
+    expect(() => validateUrl('file:///etc/passwd')).toThrow('SSRF blocked');
+    expect(() => validateUrl('file:///etc/passwd')).toThrow('not allowed');
+  });
+
+  it('blocks ftp:// protocol', () => {
+    expect(() => validateUrl('ftp://localhost/data')).toThrow('SSRF blocked');
+  });
+
+  it('throws on completely invalid URLs', () => {
+    expect(() => validateUrl('not-a-url')).toThrow('Invalid URL');
+  });
+
+  it('throws on empty string', () => {
+    expect(() => validateUrl('')).toThrow('Invalid URL');
+  });
+
+  it('ALLOWED_HOSTS contains expected entries', () => {
+    expect(ALLOWED_HOSTS.has('localhost')).toBe(true);
+    expect(ALLOWED_HOSTS.has('127.0.0.1')).toBe(true);
+    expect(ALLOWED_HOSTS.has('::1')).toBe(true);
+    expect(ALLOWED_HOSTS.has('artibot-swarm-249539591811.asia-northeast3.run.app')).toBe(true);
+  });
+});
+
+describe('SSRF Protection - integration with API functions', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockFetch.mockResolvedValue(makeOkResponse({ version: 'v1' }));
+  });
+
+  it('uploadWeights rejects SSRF attempts via config.serverUrl', async () => {
+    const result = await uploadWeights(
+      { tools: {} },
+      {},
+      { config: { serverUrl: 'https://evil.example.com' } },
+    );
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/SSRF blocked/);
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('downloadLatestWeights rejects SSRF attempts via config.serverUrl', async () => {
+    const result = await downloadLatestWeights(null, {
+      config: { serverUrl: 'https://internal.corp.net' },
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/SSRF blocked/);
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('checkHealth rejects SSRF attempts via config.serverUrl', async () => {
+    const result = await checkHealth({
+      config: { serverUrl: 'file:///etc/passwd' },
+    });
+    expect(result.status).toBe('unreachable');
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('getContributionStats rejects SSRF attempts via config.serverUrl', async () => {
+    const result = await getContributionStats('client-1', {
+      config: { serverUrl: 'https://malicious.attacker.io' },
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/SSRF blocked/);
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 });

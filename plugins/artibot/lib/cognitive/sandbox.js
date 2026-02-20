@@ -5,8 +5,7 @@
  * @module lib/cognitive/sandbox
  */
 
-import path from 'node:path';
-import { getPlatform } from '../core/platform.js';
+// path and getPlatform reserved for future sandbox CWD/platform-specific logic
 
 /**
  * Dangerous command patterns that are always blocked.

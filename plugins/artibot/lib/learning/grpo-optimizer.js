@@ -25,6 +25,14 @@ const DEFAULT_CANDIDATE_COUNT = 5;
 /**
  * Built-in rules for CLI task evaluation.
  * Each rule takes a result object and returns a score in [0, 1].
+ *
+ * @type {Record<string, (result: object) => number>}
+ * @example
+ * // Each rule scores a specific aspect:
+ * DEFAULT_RULES.exitCode({ exitCode: 0 });    // => 1.0
+ * DEFAULT_RULES.errorFree({ errors: 2 });      // => 0.0
+ * DEFAULT_RULES.speed({ duration: 1000 });      // => 0.5
+ * DEFAULT_RULES.brevity({ commandLength: 50 }); // => 0.5
  */
 const DEFAULT_RULES = {
   exitCode: (result) => (result.exitCode === 0 ? 1.0 : 0.0),
@@ -37,6 +45,13 @@ const DEFAULT_RULES = {
 /**
  * Team composition rule evaluators.
  * Score how well a team configuration performed.
+ *
+ * @type {Record<string, (result: object) => number>}
+ * @example
+ * // Evaluate team results:
+ * TEAM_RULES.successRate({ taskCount: 10, successCount: 8 }); // => 0.8
+ * TEAM_RULES.efficiency({ duration: 60000 });                 // => 0.5
+ * TEAM_RULES.resourceUse({ teamSize: 5 });                    // => 0.5
  */
 const TEAM_RULES = {
   successRate: (r) => (r.taskCount > 0 ? r.successCount / r.taskCount : 0),
@@ -87,9 +102,20 @@ async function saveHistory(history) {
  * In a CLI agent context, candidates represent different approaches/strategies
  * rather than actual code generation (which the LLM handles).
  *
- * @param {object} task - { id, type, description, domain }
- * @param {number} [count=5] - Number of candidates to generate
- * @returns {object[]} Array of candidate descriptors with strategy metadata
+ * @param {object} task - Task descriptor with `{ id, type, description, domain }`.
+ * @param {number} [count=5] - Number of candidates to generate.
+ * @returns {object[]} Array of candidate descriptors with strategy metadata.
+ * @example
+ * const candidates = generateCandidates({
+ *   id: 'task-1',
+ *   type: 'bugfix',
+ *   domain: 'backend',
+ * });
+ * // => [
+ * //   { id: 'cand-...', strategy: 'balanced', params: { depth: 'moderate' }, ... },
+ * //   { id: 'cand-...', strategy: 'thorough', params: { depth: 'deep' }, ... },
+ * //   ...
+ * // ]
  */
 export function generateCandidates(task, count = DEFAULT_CANDIDATE_COUNT) {
   const strategies = getStrategiesForDomain(task.domain ?? 'general', task.type ?? 'unknown');
@@ -117,14 +143,23 @@ export function generateCandidates(task, count = DEFAULT_CANDIDATE_COUNT) {
  * Each candidate's result is scored against every rule, then a weighted
  * composite score determines the relative ranking within the group.
  *
- * @param {object[]} candidates - Array of { id, result: { exitCode, errors, duration, commandLength, sideEffects, ... } }
- * @param {object} [rules] - Custom rules object; defaults to DEFAULT_RULES
+ * @param {object[]} candidates - Array of candidate objects, each with a `result`
+ *   property: `{ exitCode, errors, duration, commandLength, sideEffects }`.
+ * @param {Record<string, (result: object) => number>} [rules] - Custom rules object;
+ *   defaults to `DEFAULT_RULES`.
  * @returns {{
  *   rankings: { candidateId: string, strategy: string, scores: object, composite: number, rank: number }[],
  *   best: object,
  *   worst: object,
  *   spread: number
- * }}
+ * }} Ranked evaluation results with best/worst candidates and score spread.
+ * @example
+ * const result = evaluateGroup([
+ *   { id: 'c1', strategy: 'balanced', result: { exitCode: 0, errors: 0, duration: 500 } },
+ *   { id: 'c2', strategy: 'rapid', result: { exitCode: 1, errors: 2, duration: 100 } },
+ * ]);
+ * console.log(result.best.strategy);  // 'balanced'
+ * console.log(result.spread);         // score difference between best and worst
  */
 export function evaluateGroup(candidates, rules) {
   const activeRules = rules ?? DEFAULT_RULES;
@@ -168,11 +203,15 @@ export function evaluateGroup(candidates, rules) {
  * Higher-ranked candidates boost their strategy's weight;
  * lower-ranked candidates reduce it. Uses exponential moving average.
  *
- * @param {{ rankings: object[] }} groupResult - Output from evaluateGroup
- * @param {object} [options]
- * @param {number} [options.learningRate=0.1] - How fast weights adapt
- * @param {boolean} [options.persist=true] - Save to disk
- * @returns {Promise<object>} Updated weights map { strategy: weight }
+ * @param {{ rankings: object[] }} groupResult - Output from `evaluateGroup()`.
+ * @param {object} [options] - Configuration options.
+ * @param {number} [options.learningRate=0.1] - How fast weights adapt (0-1).
+ * @param {boolean} [options.persist=true] - Whether to save updated weights to disk.
+ * @returns {Promise<object>} Updated weights map `{ strategy: weight }`.
+ * @example
+ * const group = evaluateGroup(candidates);
+ * const weights = await updateWeights(group, { learningRate: 0.05 });
+ * // => { balanced: 1.05, rapid: 0.95, thorough: 1.02, ... }
  */
 export async function updateWeights(groupResult, options = {}) {
   const { learningRate = 0.1, persist = true } = options;
@@ -222,10 +261,20 @@ export async function updateWeights(groupResult, options = {}) {
  * Simulates different team configurations (Solo, Squad, Platoon, etc.)
  * to find the optimal setup.
  *
- * @param {object} task - { id, type, description, domain }
- * @param {object} [options]
- * @param {string[]} [options.patterns] - Patterns to compare; defaults to all
- * @returns {object[]} Array of team composition candidates
+ * @param {object} task - Task descriptor with `{ id, type, description, domain }`.
+ * @param {object} [options] - Generation options.
+ * @param {string[]} [options.patterns] - Patterns to compare; defaults to all five patterns.
+ * @returns {object[]} Array of team composition candidates with agents and pattern metadata.
+ * @example
+ * const teams = generateTeamCandidates(
+ *   { id: 'task-1', domain: 'frontend' },
+ *   { patterns: ['solo', 'leader', 'swarm'] },
+ * );
+ * // => [
+ * //   { id: 'team-cand-...', pattern: 'solo', size: 0, agents: [], ... },
+ * //   { id: 'team-cand-...', pattern: 'leader', size: 3, agents: ['frontend-developer', ...], ... },
+ * //   { id: 'team-cand-...', pattern: 'swarm', size: 5, agents: [...], ... },
+ * // ]
  */
 export function generateTeamCandidates(task, options = {}) {
   const domain = task.domain ?? 'general';
@@ -272,10 +321,22 @@ export function generateTeamCandidates(task, options = {}) {
 /**
  * Evaluate team composition candidates after execution and rank them.
  *
- * @param {object[]} teamCandidates - Each must have a `result` with:
- *   { taskCount, successCount, completedCount, duration, teamSize }
- * @param {object} [rules] - Custom team rules; defaults to TEAM_RULES
- * @returns {{ rankings: object[], best: object, worst: object, spread: number }}
+ * @param {object[]} teamCandidates - Each must have a `result` property with
+ *   `{ taskCount, successCount, completedCount, duration, teamSize }`.
+ * @param {Record<string, (result: object) => number>} [rules] - Custom team rules;
+ *   defaults to `TEAM_RULES`.
+ * @returns {{
+ *   rankings: object[],
+ *   best: object,
+ *   worst: object,
+ *   spread: number
+ * }} Ranked team evaluation with best/worst compositions and score spread.
+ * @example
+ * const ranked = evaluateTeamGroup([
+ *   { id: 't1', pattern: 'leader', size: 3, result: { taskCount: 5, successCount: 5, completedCount: 5, duration: 30000, teamSize: 3 } },
+ *   { id: 't2', pattern: 'swarm', size: 5, result: { taskCount: 5, successCount: 4, completedCount: 4, duration: 15000, teamSize: 5 } },
+ * ]);
+ * console.log(ranked.best.pattern); // 'leader' or 'swarm' depending on composite
  */
 export function evaluateTeamGroup(teamCandidates, rules) {
   const activeRules = rules ?? TEAM_RULES;
@@ -317,13 +378,17 @@ export function evaluateTeamGroup(teamCandidates, rules) {
 
 /**
  * Update team composition weights based on group evaluation.
- * Keys are "pattern|size|domain" for specific composition tracking.
+ * Keys are formatted as `"pattern|size|domain"` for specific composition tracking.
  *
- * @param {{ rankings: object[] }} groupResult - Output from evaluateTeamGroup
- * @param {object} [options]
- * @param {number} [options.learningRate=0.1]
- * @param {boolean} [options.persist=true]
- * @returns {Promise<object>} Updated teamWeights map
+ * @param {{ rankings: object[] }} groupResult - Output from `evaluateTeamGroup()`.
+ * @param {object} [options] - Configuration options.
+ * @param {number} [options.learningRate=0.1] - How fast weights adapt (0-1).
+ * @param {boolean} [options.persist=true] - Whether to save updated weights to disk.
+ * @returns {Promise<object>} Updated teamWeights map `{ "pattern|size|domain": weight }`.
+ * @example
+ * const group = evaluateTeamGroup(teamCandidates);
+ * const weights = await updateTeamWeights(group);
+ * // => { 'leader|3|frontend': 1.08, 'swarm|5|frontend': 0.95, ... }
  */
 export async function updateTeamWeights(groupResult, options = {}) {
   const { learningRate = 0.1, persist = true } = options;
@@ -369,9 +434,20 @@ export async function updateTeamWeights(groupResult, options = {}) {
  * Recommend the best strategy or team composition for a given context
  * based on accumulated GRPO weights.
  *
- * @param {'task'|'team'} type - Recommendation type
- * @param {object} [context] - { domain, taskType }
+ * @param {'task'|'team'} type - Recommendation type: `'task'` for strategy, `'team'` for composition.
+ * @param {object} [context] - Context for filtering recommendations.
+ * @param {string} [context.domain] - Domain to filter by (e.g. `'frontend'`, `'backend'`).
+ * @param {string} [context.taskType] - Task type for strategy filtering.
  * @returns {Promise<{ recommendation: string, weight: number, alternatives: object[] }>}
+ *   The top recommendation with its weight and up to 3 alternatives.
+ * @example
+ * // Get best task strategy:
+ * const strat = await getRecommendation('task');
+ * // => { recommendation: 'balanced', weight: 1.15, alternatives: [...] }
+ *
+ * // Get best team for frontend:
+ * const team = await getRecommendation('team', { domain: 'frontend' });
+ * // => { recommendation: 'leader|3', weight: 1.08, alternatives: [...] }
  */
 export async function getRecommendation(type, context = {}) {
   const history = await loadHistory();
@@ -415,8 +491,8 @@ export async function getRecommendation(type, context = {}) {
 /**
  * Get GRPO optimization history and statistics.
  *
- * @param {object} [options]
- * @param {number} [options.lookback=50]
+ * @param {object} [options] - Query options.
+ * @param {number} [options.lookback=50] - Number of recent rounds to include.
  * @returns {Promise<{
  *   totalRounds: number,
  *   taskRounds: number,
@@ -424,7 +500,11 @@ export async function getRecommendation(type, context = {}) {
  *   weights: object,
  *   teamWeights: object,
  *   recentRounds: object[]
- * }>}
+ * }>} Aggregated statistics with recent round history.
+ * @example
+ * const stats = await getGrpoStats({ lookback: 20 });
+ * console.log(`Total rounds: ${stats.totalRounds}`);
+ * console.log(`Best task strategy weight:`, stats.weights);
  */
 export async function getGrpoStats(options = {}) {
   const { lookback = 50 } = options;
@@ -445,7 +525,7 @@ export async function getGrpoStats(options = {}) {
 // Strategy catalog
 // ---------------------------------------------------------------------------
 
-function getStrategiesForDomain(domain, taskType) {
+function getStrategiesForDomain(domain, _taskType) {
   const base = [
     { name: 'balanced', description: 'Balanced approach with moderate depth', params: { depth: 'moderate', parallel: false } },
     { name: 'thorough', description: 'Deep analysis with comprehensive coverage', params: { depth: 'deep', parallel: false } },
@@ -496,6 +576,26 @@ function clamp01(value) {
   return Math.max(0, Math.min(1, value));
 }
 
-/** Exported rule sets for external use and customization */
+/**
+ * Exported CLI rule set for external use and customization.
+ * Shallow copy of the internal `DEFAULT_RULES` so consumers can extend
+ * without mutating the originals.
+ *
+ * @type {Record<string, (result: object) => number>}
+ * @example
+ * import { CLI_RULES } from './grpo-optimizer.js';
+ * const customRules = { ...CLI_RULES, myRule: (r) => r.custom ? 1 : 0 };
+ */
 export const CLI_RULES = { ...DEFAULT_RULES };
+
+/**
+ * Exported team evaluation rule set for external use and customization.
+ * Shallow copy of the internal `TEAM_RULES` so consumers can extend
+ * without mutating the originals.
+ *
+ * @type {Record<string, (result: object) => number>}
+ * @example
+ * import { TEAM_EVALUATION_RULES } from './grpo-optimizer.js';
+ * const customRules = { ...TEAM_EVALUATION_RULES, coverage: (r) => r.coverage ?? 0 };
+ */
 export const TEAM_EVALUATION_RULES = { ...TEAM_RULES };

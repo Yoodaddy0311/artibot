@@ -38,6 +38,93 @@ const MAX_QUEUE_SIZE = 100;
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 
 // ---------------------------------------------------------------------------
+// SSRF Protection - Allowlisted Hosts
+// ---------------------------------------------------------------------------
+
+/**
+ * Set of hosts allowed for outbound HTTP requests.
+ * Only these hosts can be contacted by the swarm client.
+ * Additional hosts can be added via ARTIBOT_SWARM_ALLOWED_HOSTS env var.
+ */
+const ALLOWED_HOSTS = new Set([
+  'localhost',
+  '127.0.0.1',
+  '::1',
+  '[::1]', // URL-parsed form of IPv6 localhost
+  'artibot-swarm-249539591811.asia-northeast3.run.app',
+]);
+
+// Allow extending the allowlist via environment variable (comma-separated)
+if (process.env.ARTIBOT_SWARM_ALLOWED_HOSTS) {
+  for (const host of process.env.ARTIBOT_SWARM_ALLOWED_HOSTS.split(',')) {
+    const trimmed = host.trim();
+    if (trimmed) ALLOWED_HOSTS.add(trimmed);
+  }
+}
+
+/** RFC 1918 / RFC 6598 private IPv4 ranges (excluding explicit localhost) */
+const PRIVATE_IP_PATTERNS = [
+  /^10\./, // 10.0.0.0/8
+  /^172\.(1[6-9]|2\d|3[01])\./, // 172.16.0.0/12
+  /^192\.168\./, // 192.168.0.0/16
+  /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./, // 100.64.0.0/10 (CGNAT)
+  /^169\.254\./, // 169.254.0.0/16 (link-local)
+  /^0\./, // 0.0.0.0/8
+];
+
+/**
+ * Check whether an IP address falls in a private/reserved range.
+ * Localhost IPs (127.0.0.1, ::1) are excluded from this check
+ * because they are explicitly in the allowlist.
+ *
+ * @param {string} hostname
+ * @returns {boolean}
+ */
+function isPrivateIp(hostname) {
+  // Allow explicit localhost entries
+  if (hostname === '127.0.0.1' || hostname === '::1') return false;
+  return PRIVATE_IP_PATTERNS.some((pattern) => pattern.test(hostname));
+}
+
+/**
+ * Validate a URL against the SSRF allowlist.
+ *
+ * Blocks:
+ *  - Hosts not in the allowlist
+ *  - Private/reserved IP ranges (except localhost)
+ *  - file:// protocol and other non-HTTP protocols
+ *
+ * @param {string} urlString - URL to validate
+ * @returns {URL} Validated URL object
+ * @throws {Error} If the URL is blocked by SSRF protection
+ */
+function validateUrl(urlString) {
+  let url;
+  try {
+    url = new URL(urlString);
+  } catch {
+    throw new Error(`Invalid URL: ${urlString}`);
+  }
+
+  // Block file:// and other dangerous protocols
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new Error(`SSRF blocked: protocol '${url.protocol}' not allowed`);
+  }
+
+  // Check allowlist
+  if (!ALLOWED_HOSTS.has(url.hostname)) {
+    throw new Error(`SSRF blocked: host '${url.hostname}' not in allowlist`);
+  }
+
+  // Block private IP ranges (except explicit localhost)
+  if (isPrivateIp(url.hostname)) {
+    throw new Error(`SSRF blocked: private IP '${url.hostname}' not allowed`);
+  }
+
+  return url;
+}
+
+// ---------------------------------------------------------------------------
 // Server URL Resolution
 // ---------------------------------------------------------------------------
 
@@ -61,18 +148,23 @@ function resolveServerUrl(config) {
 
 /**
  * Make an HTTP request with timeout using native fetch.
+ * Validates the URL against the SSRF allowlist before making the request.
  *
  * @param {string} url - Full URL
  * @param {object} options - Fetch options
  * @param {number} [timeoutMs] - Timeout in milliseconds
  * @returns {Promise<Response>}
+ * @throws {Error} If the URL is blocked by SSRF protection
  */
 async function fetchWithTimeout(url, options = {}, timeoutMs = REQUEST_TIMEOUT_MS) {
+  // SSRF protection: validate URL before making any outbound request
+  const validatedUrl = validateUrl(url);
+
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const response = await fetch(url, {
+    const response = await fetch(validatedUrl.toString(), {
       ...options,
       signal: controller.signal,
     });
@@ -114,6 +206,11 @@ async function withRetry(requestFn, maxRetries = MAX_RETRIES) {
 
       // Don't retry non-retryable errors
       if (err.status && err.status >= 400 && err.status < 500 && err.status !== 429) {
+        throw err;
+      }
+
+      // Don't retry SSRF or URL validation errors
+      if (err.message?.startsWith('SSRF blocked') || err.message?.startsWith('Invalid URL')) {
         throw err;
       }
     }
@@ -460,4 +557,4 @@ export async function flushOfflineQueue(options = {}) {
 // Exports for testing
 // ---------------------------------------------------------------------------
 
-export { computeChecksum, verifyChecksum };
+export { computeChecksum, verifyChecksum, validateUrl, ALLOWED_HOSTS };

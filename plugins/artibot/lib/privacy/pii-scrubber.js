@@ -47,7 +47,7 @@ const { isWindows } = getPlatform();
  * Build home directory patterns for the current platform.
  * @returns {RegExp[]}
  */
-function buildHomePathPatterns() {
+export function buildHomePathPatterns() {
   const patterns = [];
 
   if (isWindows) {
@@ -686,7 +686,7 @@ export function validateScrubbed(text) {
     { name: 'github_token', regex: /gh[pours]_[a-zA-Z0-9]{36,}/g },
     { name: 'aws_key', regex: /AKIA[A-Z0-9]{16}/g },
     { name: 'email', regex: /\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\b/g },
-    { name: 'bearer_token_raw', regex: /Bearer\s+(?![\[{])[a-zA-Z0-9._\-/+=]{20,}/g },
+    { name: 'bearer_token_raw', regex: /Bearer\s+(?![[{])[a-zA-Z0-9._/+=-]{20,}/g },
     { name: 'jwt', regex: /eyJ[a-zA-Z0-9_-]{10,}\.eyJ[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}/g },
     { name: 'connection_string', regex: /(?:mongodb|postgres|mysql|redis):\/\/[^[\s]+/gi },
     { name: 'pem_key', regex: /-----BEGIN (?:RSA |EC )?PRIVATE KEY-----/g },

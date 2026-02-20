@@ -42,9 +42,10 @@ const PORT = parseInt(process.env.PORT ?? '8080', 10);
 const MAX_UPLOAD_BYTES = parseInt(process.env.MAX_UPLOAD_BYTES ?? String(5 * 1024 * 1024), 10);
 const FEDAVG_WINDOW = parseInt(process.env.FEDAVG_WINDOW ?? '50', 10);
 
-// Simple rate limiter: max requests per minute per IP
+// Sliding window rate limiter: max requests per window per IP
 const RATE_LIMIT = parseInt(process.env.RATE_LIMIT ?? '60', 10);
-const rateLimitMap = new Map();
+const RATE_LIMIT_WINDOW_MS = parseInt(process.env.RATE_LIMIT_WINDOW_MS ?? '60000', 10);
+const rateLimitStore = new Map(); // IP -> { timestamps: number[] }
 
 // CORS: restrict to allowed origins (comma-separated) or localhost-only fallback
 const CORS_ALLOWED_ORIGINS = process.env.CORS_ALLOWED_ORIGINS
@@ -106,6 +107,7 @@ function json(res, status, data, req) {
   res.writeHead(status, {
     'Content-Type': 'application/json',
     'Content-Security-Policy': "default-src 'none'; frame-ancestors 'none'",
+    'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
     'X-Content-Type-Options': 'nosniff',
     'Access-Control-Allow-Origin': origin,
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
@@ -141,31 +143,45 @@ function matchRoute(pattern, pathname) {
 }
 
 /**
- * Simple per-IP rate limiter.
+ * Sliding window rate limiter per IP.
  *
- * @param {string} ip
- * @returns {boolean} true if allowed
+ * Maintains an array of request timestamps per IP.
+ * On each request, expired timestamps (older than the window) are pruned.
+ * If the remaining count exceeds the limit, the request is denied.
+ *
+ * @param {string} ip - Client IP address
+ * @param {number} [limit] - Per-endpoint override (defaults to RATE_LIMIT)
+ * @returns {boolean} true if allowed, false if rate limited
  */
-function checkRateLimit(ip) {
+function checkRateLimit(ip, limit = RATE_LIMIT) {
   const now = Date.now();
-  const window = rateLimitMap.get(ip);
+  const entry = rateLimitStore.get(ip) || { timestamps: [] };
 
-  if (!window || now - window.start > 60000) {
-    rateLimitMap.set(ip, { start: now, count: 1 });
-    return true;
+  // Remove expired timestamps outside the sliding window
+  entry.timestamps = entry.timestamps.filter((t) => now - t < RATE_LIMIT_WINDOW_MS);
+
+  if (entry.timestamps.length >= limit) {
+    rateLimitStore.set(ip, entry);
+    return false; // Rate limited
   }
 
-  window.count++;
-  return window.count <= RATE_LIMIT;
+  entry.timestamps.push(now);
+  rateLimitStore.set(ip, entry);
+  return true;
 }
 
-// Periodically clean rate limit map
-setInterval(() => {
+// Periodically clean stale entries from the rate limit store
+const _rateLimitCleanupInterval = setInterval(() => {
   const now = Date.now();
-  for (const [ip, window] of rateLimitMap) {
-    if (now - window.start > 120000) rateLimitMap.delete(ip);
+  for (const [ip, entry] of rateLimitStore) {
+    // Remove entries with no recent timestamps
+    if (entry.timestamps.length === 0 || now - entry.timestamps[entry.timestamps.length - 1] > RATE_LIMIT_WINDOW_MS * 2) {
+      rateLimitStore.delete(ip);
+    }
   }
 }, 60000);
+// Allow the process to exit without waiting for the cleanup timer
+if (_rateLimitCleanupInterval.unref) _rateLimitCleanupInterval.unref();
 
 /**
  * Resolve the CORS origin for the given request.
@@ -438,3 +454,19 @@ process.on('SIGTERM', () => {
     process.exit(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Exports for testing
+// ---------------------------------------------------------------------------
+
+export {
+  handleRequest,
+  checkRateLimit,
+  rateLimitStore,
+  authenticate,
+  resolveAllowedOrigin,
+  isLocalhost,
+  readBody,
+  matchRoute,
+  RATE_LIMIT_WINDOW_MS,
+};

@@ -7,6 +7,10 @@
  * Storage: ~/.claude/artibot/tool-history.json
  * Zero dependencies - uses node:fs, node:path, node:os only.
  *
+ * Write-back buffer: recordUsage() and recordGroupComparison() do NOT
+ * write to disk immediately. Changes are batched and flushed after
+ * FLUSH_INTERVAL_MS (5 seconds) or on explicit flushToDisk() call.
+ *
  * @module lib/learning/tool-learner
  */
 
@@ -50,6 +54,15 @@ const GRPO_WEIGHTS = {
 
 /** @type {ToolHistory|null} */
 let _history = null;
+
+/** Whether in-memory history has unsaved changes */
+let _dirty = false;
+
+/** Pending flush timer reference */
+let _flushTimer = null;
+
+/** Debounce interval for batched writes (ms) */
+const FLUSH_INTERVAL_MS = 5000;
 
 /**
  * @typedef {Object} UsageRecord
@@ -147,6 +160,46 @@ async function saveHistory() {
   await fs.writeFile(HISTORY_PATH, content, 'utf-8');
 }
 
+/**
+ * Mark history as dirty and schedule a debounced flush.
+ * Does not write to disk immediately; batches writes for efficiency.
+ */
+function markDirty() {
+  _dirty = true;
+  if (!_flushTimer) {
+    _flushTimer = setTimeout(flushToDisk, FLUSH_INTERVAL_MS);
+  }
+}
+
+/**
+ * Flush pending changes to disk immediately.
+ * No-op if there are no unsaved changes.
+ * @returns {Promise<void>}
+ */
+export async function flushToDisk() {
+  if (_flushTimer) {
+    clearTimeout(_flushTimer);
+    _flushTimer = null;
+  }
+  if (!_dirty || !_history) return;
+  _dirty = false;
+  await saveHistory();
+}
+
+/**
+ * Graceful shutdown: flush any pending writes to disk.
+ * Call at plugin teardown to ensure no data is lost.
+ * @returns {Promise<void>}
+ */
+export async function shutdownToolLearner() {
+  await flushToDisk();
+}
+
+// Register process exit handler to persist pending changes
+process.on('beforeExit', () => {
+  flushToDisk();
+});
+
 /** @returns {ToolHistory} */
 function createEmptyHistory() {
   return {
@@ -202,7 +255,7 @@ export async function recordUsage(tool, context, score, meta = {}) {
   // Update aggregates
   updateAggregate(history, tool, record);
 
-  await saveHistory();
+  markDirty();
 }
 
 /**
@@ -302,7 +355,7 @@ export async function pruneOldRecords(retentionMs = 90 * 24 * 60 * 60 * 1000) {
   // Rebuild aggregates from remaining data
   if (pruned > 0) {
     rebuildAggregates(history);
-    await saveHistory();
+    markDirty();
   }
 
   return pruned;
@@ -485,7 +538,7 @@ export async function recordGroupComparison(context, results) {
     history.grpoScores[grpoKey] = clampScore(updated);
   }
 
-  await saveHistory();
+  markDirty();
   return group;
 }
 
@@ -767,4 +820,17 @@ function getConfidence(count) {
 /** Clear in-memory cache (useful for testing). */
 export function _clearCache() {
   _history = null;
+  _dirty = false;
+  if (_flushTimer) {
+    clearTimeout(_flushTimer);
+    _flushTimer = null;
+  }
+}
+
+/**
+ * Expose internal dirty/timer state for testing.
+ * @returns {{ dirty: boolean, hasTimer: boolean }}
+ */
+export function _getBufferState() {
+  return { dirty: _dirty, hasTimer: _flushTimer !== null };
 }
