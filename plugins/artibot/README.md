@@ -1,6 +1,6 @@
 # Artibot
 
-![Tests](https://img.shields.io/badge/tests-1940%20passed-brightgreen) ![Coverage](https://img.shields.io/badge/coverage-96.76%25-brightgreen) ![License](https://img.shields.io/badge/license-MIT-blue) ![Version](https://img.shields.io/badge/version-1.4.0-blue) ![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen)
+![Tests](https://img.shields.io/badge/tests-2643%20passed-brightgreen) ![Coverage](https://img.shields.io/badge/coverage-96.95%25-brightgreen) ![License](https://img.shields.io/badge/license-MIT-blue) ![Version](https://img.shields.io/badge/version-1.5.0-blue) ![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen)
 
 Claude Code를 위한 **Agent Teams 기반** 지능형 오케스트레이션 플러그인. Claude의 네이티브 Agent Teams API를 핵심 엔진으로 사용하여 전문 에이전트 팀 구성, P2P 통신, 공유 태스크 관리를 통해 개발 생산성을 극대화합니다.
 
@@ -72,23 +72,23 @@ Artibot의 핵심 엔진은 Claude Code의 **Agent Teams API**입니다. 단순�
 | **토큰 비용** | 1x | ~5x |
 | **적합 작업** | 단일 파일 분석, 검색, 빠른 위임 | 복잡한 기능 구현, 멀티 에이전트 협업 |
 
-### 39개 슬래시 커맨드
+### 41개 슬래시 커맨드
 
 - `/sc`로 자연어 의도를 분석하여 최적 커맨드로 자동 라우팅
 - 개발, 분석, 품질, 테스트, 문서화, 배포, 마케팅 전 영역 커버
 
-### 77개 도메인 스킬
+### 78개 도메인 스킬
 
 - 11개 페르소나 스킬 (architect, frontend, backend, security 등)
 - 6개 코어 스킬 (orchestration, principles, coding/security/testing standards)
 - 8개 유틸리티 스킬 (git-workflow, tdd, delegation, MCP 연동 등)
 - 16개 언어 스킬 (TypeScript, Python, Go, Rust, Java 등)
 - 23개 마케팅 스킬 (SEO, CRO, A/B 테스트, 이메일 마케팅 등)
-- 13개 기타 스킬 (cognitive-routing, platform, library, quality 등)
+- 14개 기타 스킬 (cognitive-routing, platform, library, quality 등)
 
 ### 지능형 훅 시스템
 
-- 14개 이벤트에 16개 자동화 스크립트
+- 14개 이벤트에 27개 훅 등록
 - 위험 명령 차단, 민감 파일 보호, 자동 포맷, PR 감지, 팀원 생명주기 추적
 
 ### Zero External Dependencies
@@ -636,7 +636,7 @@ Memory Manager
 ```
 학습 데이터
     ↓
-PII Scrubber (50+ 정규식 패턴)
+PII Scrubber (43 정규식 패턴, indexOf 사전 필터 최적화)
     → 경로, API 키, 이메일, IP, 신용카드 등 자동 마스킹
     ↓
 차분 프라이버시 노이즈 추가
@@ -738,8 +738,8 @@ Federated Swarm 서버 (옵트인 필요)
 Artibot은 매 세션 시작 시 자동으로 최신 버전을 확인합니다. 새 버전이 있으면 다음과 같이 알림이 표시됩니다:
 
 ```
-Artibot v1.4.0 initialized
-⬆️ New version available: v1.5.0 (current: v1.4.0)
+Artibot v1.5.0 initialized
+⬆️ New version available: v1.6.0 (current: v1.5.0)
    Update: /artibot:update --force
 ```
 
@@ -984,7 +984,7 @@ orchestrator는 **코드를 직접 작성하지 않습니다**. 팀을 구성하
 
 ## 훅 시스템
 
-14개 이벤트에 16개 자동화 스크립트가 연결되어 있습니다.
+14개 이벤트에 27개 훅이 등록되어 있습니다.
 
 ### 이벤트별 훅
 
@@ -1067,31 +1067,31 @@ plugins/artibot/
 ├── agents/                      # 26개 에이전트 정의 (orchestrator 1 + 팀원 25)
 │   ├── orchestrator.md          #   CTO / 팀 리더 (Agent Teams API)
 │   └── [25개 전문 에이전트].md    #   팀원 (SendMessage + TaskUpdate)
-├── commands/                    # 39개 슬래시 커맨드
+├── commands/                    # 41개 슬래시 커맨드
 │   ├── sc.md                    #   메인 라우터
 │   ├── orchestrate.md           #   팀 오케스트레이션 (TeamCreate)
 │   ├── spawn.md                 #   팀 스폰 (병렬 실행)
-│   └── [36개 커맨드].md
-├── skills/                      # 77개 스킬 디렉토리
+│   └── [38개 커맨드].md
+├── skills/                      # 78개 스킬 디렉토리
 │   ├── orchestration/           #   위임 모드 선택 + 팀 라우팅
 │   ├── delegation/              #   Sub-Agent/Team 위임 전략
-│   └── [75개 스킬]/
+│   └── [76개 스킬]/
 ├── hooks/
 │   └── hooks.json               # 훅 이벤트 매핑
 ├── scripts/
 │   ├── hooks/                   # 18개 훅 스크립트 (ESM)
 │   ├── ci/                      # 4개 CI 검증 스크립트
 │   └── utils/
-├── lib/                         # 40개 모듈
-│   ├── core/                    # 코어 모듈 (platform, config, cache, io, debug, file, tui, skill-exporter)
-│   ├── intent/                  # 의도 감지 (language, trigger, ambiguity)
-│   ├── context/                 # 컨텍스트 관리 (hierarchy, session)
-│   ├── cognitive/               # 인지 엔진 (router, system1, system2, sandbox)
-│   ├── learning/                # 학습 (memory, grpo, knowledge-transfer, lifelong, tool-learner, self-evaluator)
-│   ├── privacy/                 # 프라이버시 (pii-scrubber)
-│   ├── swarm/                   # 연합 지능 (swarm-client, pattern-packager, sync-scheduler)
-│   ├── system/                  # 시스템 (telemetry-collector, context-injector)
-│   └── adapters/                # 멀티모델 어댑터 (gemini, codex, cursor, antigravity)
+├── lib/                         # 54개 모듈
+│   ├── core/                    # 코어 (19): platform, config, cache, lifecycle, extension, auto-fixer, error-codes, hook-utils, quickstart, style-registry 등
+│   ├── cognitive/               # 인지 엔진 (7): router, system1, system2 (core+strategies), sandbox
+│   ├── learning/                # 학습 (7): memory, grpo, knowledge-transfer, lifelong, tool-learner, self-evaluator
+│   ├── adapters/                # 멀티모델 어댑터 (7): base, gemini, codex, cursor, antigravity, adapter-utils
+│   ├── swarm/                   # 연합 지능 (5): swarm-client, pattern-packager, sync-scheduler, swarm-persistence
+│   ├── intent/                  # 의도 감지 (4): language, trigger, ambiguity
+│   ├── privacy/                 # 프라이버시 (3): pii-scrubber, homoglyph-detector, token-rotation
+│   ├── system/                  # 시스템 (1): lsp-client
+│   └── context/                 # 컨텍스트 (1): session
 ├── output-styles/               # 4개 출력 스타일
 ├── templates/                   # 3개 작성 템플릿
 ├── artibot.config.json          # 플러그인 설정 (Agent Teams 포함)
