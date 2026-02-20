@@ -8,6 +8,7 @@ Claude Code를 위한 **Agent Teams 기반** 지능형 오케스트레이션 플
 
 - [핵심 특징](#핵심-특징)
 - [설치](#설치)
+- [크로스 플랫폼 설치 가이드](#크로스-플랫폼-설치-가이드)
 - [빠른 시작](#빠른-시작)
 - [Agent Teams 아키텍처](#agent-teams-아키텍처)
 - [인지 아키텍처 (Cognitive + Learning)](#인지-아키텍처-cognitive--learning)
@@ -73,7 +74,7 @@ Artibot의 핵심 엔진은 Claude Code의 **Agent Teams API**입니다. 단순�
 
 ### 지능형 훅 시스템
 
-- 12개 이벤트에 18개 자동화 스크립트
+- 14개 이벤트에 16개 자동화 스크립트
 - 위험 명령 차단, 민감 파일 보호, 자동 포맷, PR 감지, 팀원 생명주기 추적
 
 ### Zero External Dependencies
@@ -112,6 +113,278 @@ claude plugin install ./plugins/artibot
 - Claude Code CLI
 - Node.js >= 18.0.0
 - `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` 환경 변수
+
+---
+
+## 크로스 플랫폼 설치 가이드
+
+Artibot은 Claude Code 외에도 **Gemini CLI**, **OpenAI Codex CLI**, **Cursor IDE**, **Google Antigravity**를 지원합니다. 내장 어댑터가 스킬/에이전트/커맨드를 각 플랫폼 형식으로 자동 변환합니다.
+
+> 아래 예제에서 `<your-project>`는 Artibot을 적용할 대상 프로젝트의 루트 디렉토리 경로입니다.
+
+### 플랫폼별 기능 지원 현황
+
+| 기능 | Claude Code | Gemini CLI | Codex CLI | Cursor IDE | Antigravity |
+|------|:-----------:|:----------:|:---------:|:----------:|:-----------:|
+| **호환성 점수** | 10/10 | 9/10 | 8/10 | 6/10 | 8/10 |
+| Agent Teams (P2P 메시징) | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Sub-Agent (단방향 위임) | ✅ | ✅ | ✅ | ⚠️ 제한적 | ✅ |
+| 25개 전문 에이전트 | ✅ | ✅ 자동변환 | ✅ 자동변환 | ✅ 자동변환 | ✅ 자동변환 |
+| 77개 스킬 (SKILL.md) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| 슬래시 커맨드 | ✅ 38개 | ✅ TOML | → Workflows | → Prompts | → Workflows |
+| Hooks 자동작동 | ✅ 14이벤트 | ✅ 동일패턴 | ⚠️ 제한적 | ❌ | ✅ Agent Manager |
+| 인지 라우터 (System 1/2) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| 자가학습 (GRPO) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| 메모리 (3-scope) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| 집단지성 (Swarm) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| MCP: Context7 | ✅ 자동 | ⚠️ 수동설정 | ⚠️ 제한적 | ⚠️ 수동설정 | ⚠️ 수동설정 |
+| MCP: Playwright | ✅ 자동 | ⚠️ 수동설정 | ⚠️ 제한적 | ⚠️ 수동설정 | ⚠️ 수동설정 |
+
+> **참고**: Agent Teams API는 Claude Code 전용 실험적 기능입니다. 다른 플랫폼에서는 Sub-Agent 모드(단방향 위임)로 자동 폴백됩니다. 학습/메모리/집단지성은 Node.js 내장 모듈만 사용하므로 모든 플랫폼에서 동일하게 작동합니다.
+
+### Gemini CLI 설치 (호환성: 9/10)
+
+Gemini CLI는 Claude Code와 가장 유사한 구조를 가집니다.
+
+**변환 매핑:**
+| Artibot 원본 | Gemini CLI 변환 결과 |
+|---|---|
+| `CLAUDE.md` | `GEMINI.md` |
+| `plugin.json` | `gemini-extension.json` |
+| `commands/*.md` | `commands/*.toml` (TOML 형식) |
+| `skills/*/SKILL.md` | `.agent/skills/*/SKILL.md` (직접 호환) |
+| `agents/*.md` | `agents/*.md` (Agent Teams 참조 제거) |
+| `hooks/hooks.json` | `hooks/hooks.json` (동일 패턴) |
+
+**설치 단계:**
+
+```bash
+# 1. Artibot 저장소 클론
+git clone https://github.com/Yoodaddy0311/artibot.git
+cd artibot
+
+# 2. Gemini CLI용 내보내기 (Node.js >= 18 필요)
+node --input-type=module -e "
+  import { exportForGemini } from './plugins/artibot/lib/core/skill-exporter.js';
+  const result = await exportForGemini({ pluginRoot: './plugins/artibot' });
+  console.log('Files:', result.files.length, '| Warnings:', result.warnings.length);
+  // result.files 배열의 각 { path, content }를 프로젝트에 저장
+"
+
+# 3. 내보낸 파일을 프로젝트에 복사
+# - GEMINI.md → 프로젝트 루트 또는 ~/.gemini/
+# - gemini-extension.json → 프로젝트 루트
+# - .agent/skills/ → 내보낸 .agent/skills/ 내용을 프로젝트 루트의 .agent/skills/에 복사
+# - agents/ → 에이전트 정의
+# - commands/*.toml → 커맨드 정의
+
+# 4. lib/ 디렉토리 복사 (인지/학습/스웜 엔진)
+cp -r plugins/artibot/lib/ <your-project>/.agent/lib/
+cp plugins/artibot/artibot.config.json <your-project>/.agent/
+```
+
+**Gemini CLI 환경에서의 차이점:**
+- **슬래시 커맨드**: Markdown 대신 TOML 형식으로 변환됨
+- **Agent Teams**: 사용 불가 → Sub-Agent 모드로 자동 폴백
+- **Hooks**: 동일한 JSON 패턴 지원, 이벤트명도 호환
+- **MCP 서버**: Gemini CLI 설정에서 별도로 Context7/Playwright 구성 필요
+
+### OpenAI Codex CLI 설치 (호환성: 8/10)
+
+Codex CLI는 SKILL.md 형식의 원조 플랫폼으로, 스킬 호환성이 높습니다.
+
+**변환 매핑:**
+| Artibot 원본 | Codex CLI 변환 결과 |
+|---|---|
+| `CLAUDE.md` | `AGENTS.md` (통합 인스트럭션) |
+| `plugin.json` | `agents/openai.yaml` |
+| `commands/*.md` | `.agents/skills/cmd-*/SKILL.md` (Workflow) |
+| `skills/*/SKILL.md` | `.agents/skills/*/SKILL.md` (직접 호환) |
+| `agents/*.md` | `AGENTS.md` 내 섹션으로 통합 |
+
+**설치 단계:**
+
+```bash
+# 1. Artibot 저장소 클론
+git clone https://github.com/Yoodaddy0311/artibot.git
+cd artibot
+
+# 2. Codex CLI용 내보내기
+node --input-type=module -e "
+  import { exportForCodex } from './plugins/artibot/lib/core/skill-exporter.js';
+  const result = await exportForCodex({ pluginRoot: './plugins/artibot' });
+  console.log('Files:', result.files.length, '| Warnings:', result.warnings.length);
+"
+
+# 3. 내보낸 파일을 프로젝트에 복사
+# - AGENTS.md → 프로젝트 루트
+# - agents/openai.yaml → 에이전트 메타데이터
+# - .agents/skills/ → 스킬 + 커맨드 워크플로우
+
+# 4. lib/ 디렉토리 복사
+cp -r plugins/artibot/lib/ <your-project>/.agents/lib/
+cp plugins/artibot/artibot.config.json <your-project>/.agents/
+```
+
+**Codex CLI 환경에서의 차이점:**
+- **에이전트**: 개별 `.md` 파일 대신 `AGENTS.md` 하나로 통합
+- **슬래시 커맨드**: 없음 → SKILL.md 기반 Workflow로 변환
+- **Agent Teams**: 사용 불가 → Sub-Agent 모드로 자동 폴백
+- **MCP 서버**: 제한적 지원, 수동 구성 필요
+
+### Cursor IDE 설치 (호환성: 6/10)
+
+Cursor IDE는 구조적 차이가 크지만, 스킬과 인지 엔진은 완전히 작동합니다.
+
+**변환 매핑:**
+| Artibot 원본 | Cursor IDE 변환 결과 |
+|---|---|
+| `CLAUDE.md` | `.cursorrules` (플레인 텍스트 룰) |
+| `agents/*.md` | `.cursor/modes.json` (JSON 모드 엔트리) |
+| `commands/*.md` | `.cursor/prompts/*.md` (커스텀 프롬프트) |
+| `skills/*/SKILL.md` | `.cursor/skills/*/SKILL.md` |
+
+**설치 단계:**
+
+```bash
+# 1. Artibot 저장소 클론
+git clone https://github.com/Yoodaddy0311/artibot.git
+cd artibot
+
+# 2. Cursor용 내보내기
+node --input-type=module -e "
+  import { exportForCursor } from './plugins/artibot/lib/core/skill-exporter.js';
+  const result = await exportForCursor({ pluginRoot: './plugins/artibot' });
+  console.log('Files:', result.files.length, '| Warnings:', result.warnings.length);
+"
+
+# 3. 내보낸 파일을 프로젝트에 복사
+# - .cursorrules → 프로젝트 루트
+# - .cursor/modes.json → 에이전트를 Cursor 모드로
+# - .cursor/prompts/*.md → 커맨드를 커스텀 프롬프트로
+# - .cursor/skills/ → 스킬 디렉토리
+
+# 4. lib/ 디렉토리 복사
+cp -r plugins/artibot/lib/ <your-project>/.cursor/lib/
+cp plugins/artibot/artibot.config.json <your-project>/.cursor/
+```
+
+**Cursor IDE 환경에서의 차이점:**
+- **슬래시 커맨드**: 없음 → `.cursor/prompts/` 커스텀 프롬프트로 변환
+- **에이전트**: `modes.json`으로 변환, 각 에이전트가 Cursor "모드"가 됨
+- **Hooks**: 지원 안 됨 → 인지 라우터가 프롬프트 내에서 인라인 동작
+- **Agent Teams**: 사용 불가, Sub-Agent도 제한적 → 주로 직접 실행 모드
+
+### Google Antigravity 설치 (호환성: 8/10)
+
+Antigravity는 Gemini CLI 생태계를 공유하며, Agent Manager를 통한 병렬 오케스트레이션이 특징입니다.
+
+**변환 매핑:**
+| Artibot 원본 | Antigravity 변환 결과 |
+|---|---|
+| `CLAUDE.md` | `.antigravity/rules.md` + `~/.gemini/GEMINI.md` |
+| `agents/*.md` | `.antigravity/agents/*.md` (Agent Manager용) |
+| `commands/*.md` | `.antigravity/workflows/*.md` (워크플로우) |
+| `skills/*/SKILL.md` | `.antigravity/skills/*/SKILL.md` (직접 호환) |
+
+**설치 단계:**
+
+```bash
+# 1. Artibot 저장소 클론
+git clone https://github.com/Yoodaddy0311/artibot.git
+cd artibot
+
+# 2. Antigravity용 내보내기 (현재 수동 변환)
+# Antigravity 어댑터는 skill-exporter에 아직 통합되지 않았습니다.
+# Gemini CLI 내보내기를 기반으로 수동 조정하세요:
+node --input-type=module -e "
+  import { exportForGemini } from './plugins/artibot/lib/core/skill-exporter.js';
+  const result = await exportForGemini({ pluginRoot: './plugins/artibot' });
+  console.log('Files:', result.files.length, '| Warnings:', result.warnings.length);
+"
+
+# 3. 디렉토리 구조 변환
+mkdir -p <your-project>/.antigravity/{agents,skills,workflows}
+
+# Gemini 내보내기 결과를 Antigravity 구조로 이동:
+# - .agent/skills/ → .antigravity/skills/
+# - agents/ → .antigravity/agents/
+# - GEMINI.md → .antigravity/rules.md (+ ~/.gemini/GEMINI.md 글로벌 룰)
+
+# 4. lib/ 디렉토리 복사
+cp -r plugins/artibot/lib/ <your-project>/.antigravity/lib/
+cp plugins/artibot/artibot.config.json <your-project>/.antigravity/
+```
+
+**Antigravity 환경에서의 차이점:**
+- **Agent Manager**: Agent Teams API 대신 Antigravity의 Agent Manager로 병렬 오케스트레이션
+- **글로벌 룰**: `~/.gemini/GEMINI.md`와 `.antigravity/rules.md` 이중 룰 시스템
+- **Cursor 호환**: `.cursorrules`도 읽을 수 있음 (크로스 호환)
+- **다중 모델**: Gemini 3 Pro, Claude, GPT 등 여러 AI 모델 지원
+
+### 모든 플랫폼 일괄 내보내기
+
+4개 플랫폼(gemini-cli, codex-cli, cursor, antigravity) 형식으로 일괄 변환합니다.
+
+```bash
+node --input-type=module -e "
+  import { exportForAll } from './plugins/artibot/lib/core/skill-exporter.js';
+  const results = await exportForAll({ pluginRoot: './plugins/artibot' });
+  for (const [platform, result] of Object.entries(results)) {
+    console.log(platform + ':', result.files.length, 'files,', result.warnings.length, 'warnings');
+  }
+"
+```
+
+### MCP 서버 수동 설정 (Claude Code 외 플랫폼)
+
+Claude Code에서는 `.mcp.json`으로 자동 구성되지만, 다른 플랫폼에서는 수동 설정이 필요합니다.
+
+**Context7** (라이브러리 문서 조회):
+```bash
+# 전역 설치
+npm install -g @upstash/context7-mcp@latest
+
+# 또는 프로젝트별 npx 사용
+npx -y @upstash/context7-mcp@latest
+```
+
+**Playwright** (E2E 테스트):
+```bash
+npm install -g @executeautomation/playwright-mcp-server
+
+# Playwright 브라우저도 설치 필요
+npx playwright install
+```
+
+**Gemini CLI MCP 설정 예시:**
+```json
+// ~/.gemini/settings.json 또는 프로젝트 .gemini/settings.json
+{
+  "mcpServers": {
+    "context7": {
+      "command": "npx",
+      "args": ["-y", "@upstash/context7-mcp@latest"]
+    }
+  }
+}
+```
+
+Cursor, Codex CLI 등은 각 플랫폼의 MCP 설정 문서를 참고하세요.
+
+### Graceful Degradation (단계적 기능 축소)
+
+Artibot은 환경에 따라 자동으로 최적의 모드를 선택합니다:
+
+```
+Agent Teams (Full P2P)  →  Sub-Agent (단방향)  →  Direct (직접 실행)
+  Claude Code + env var       모든 플랫폼            도구 제한 환경
+
+감지 순서:
+1. CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 → Agent Teams 모드
+2. Task() 도구 사용 가능 → Sub-Agent 모드
+3. 도구 없음 → Direct 모드 (오케스트레이터가 직접 실행)
+```
 
 ---
 
@@ -650,7 +923,7 @@ orchestrator는 **코드를 직접 작성하지 않습니다**. 팀을 구성하
 
 ## 훅 시스템
 
-12개 이벤트에 18개 자동화 스크립트가 연결되어 있습니다.
+14개 이벤트에 16개 자동화 스크립트가 연결되어 있습니다.
 
 ### 이벤트별 훅
 
@@ -730,7 +1003,7 @@ orchestrator는 **코드를 직접 작성하지 않습니다**. 팀을 구성하
 plugins/artibot/
 ├── .claude-plugin/
 │   └── plugin.json              # 플러그인 매니페스트
-├── agents/                      # 26개 에이전트 정의
+├── agents/                      # 26개 에이전트 정의 (orchestrator 1 + 팀원 25)
 │   ├── orchestrator.md          #   CTO / 팀 리더 (Agent Teams API)
 │   └── [25개 전문 에이전트].md    #   팀원 (SendMessage + TaskUpdate)
 ├── commands/                    # 38개 슬래시 커맨드

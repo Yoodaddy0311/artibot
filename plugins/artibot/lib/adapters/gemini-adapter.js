@@ -14,7 +14,7 @@
 
 import path from 'node:path';
 import { BaseAdapter } from './base-adapter.js';
-import { buildFrontmatter, cleanDescription, stripAgentTeamsRefs } from './adapter-utils.js';
+import { buildFrontmatter, cleanDescription, stripAgentTeamsRefs, stripClaudeSpecificRefs } from './adapter-utils.js';
 
 export class GeminiAdapter extends BaseAdapter {
   get platformId() {
@@ -44,7 +44,11 @@ export class GeminiAdapter extends BaseAdapter {
       description: cleanDescription(skill.description),
     });
 
-    const body = stripClaudeSpecificRefs(skill.content);
+    const body = stripClaudeSpecificRefs(skill.content, {
+      skillsPath: '.agent/skills/',
+      platformName: 'AI Agent',
+      instructionFile: 'GEMINI.md',
+    });
 
     return {
       path: path.join(this.skillsDir, skill.dirName, 'SKILL.md'),
@@ -95,17 +99,6 @@ export class GeminiAdapter extends BaseAdapter {
       content: JSON.stringify(manifest, null, 2) + '\n',
     };
   }
-}
-
-/**
- * Remove Claude Code-specific references from skill content.
- * Keeps the content portable across platforms.
- */
-function stripClaudeSpecificRefs(content) {
-  return content
-    .replace(/\.claude\/skills\//g, '.agent/skills/')
-    .replace(/Claude Code/g, 'AI Agent')
-    .replace(/CLAUDE\.md/g, 'GEMINI.md');
 }
 
 /**

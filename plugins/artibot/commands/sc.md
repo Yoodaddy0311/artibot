@@ -63,6 +63,7 @@ Parse $ARGUMENTS:
 | learn, remember, pattern | /learn | 85% |
 | index, browse, catalog, discover commands | /index | 85% |
 | load, context, project scan, framework detect | /load | 88% |
+| update, upgrade, version check, 업데이트 | /artibot:update | 95% |
 
 ## Execution Flow
 
