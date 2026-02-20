@@ -13,6 +13,7 @@ Claude Code를 위한 **Agent Teams 기반** 지능형 오케스트레이션 플
 - [Agent Teams 아키텍처](#agent-teams-아키텍처)
 - [인지 아키텍처 (Cognitive + Learning)](#인지-아키텍처-cognitive--learning)
 - [커맨드 레퍼런스](#커맨드-레퍼런스)
+- [자동 업데이트](#자동-업데이트)
 - [에이전트 시스템](#에이전트-시스템)
 - [스킬 시스템](#스킬-시스템)
 - [훅 시스템](#훅-시스템)
@@ -713,6 +714,53 @@ Federated Swarm 서버 (옵트인 필요)
 | `/estimate [target]` | 증거 기반 작업 추정 | `--breakdown` |
 | `/index [query]` | 커맨드 카탈로그 검색 | -- |
 | `/load [path]` | 프로젝트 컨텍스트 로딩 | `--deep` |
+| `/artibot:update` | 자동 업데이트 관리 | `--check`, `--force`, `--dry-run` |
+
+---
+
+## 자동 업데이트
+
+### 세션 시작 알림
+
+Artibot은 매 세션 시작 시 자동으로 최신 버전을 확인합니다. 새 버전이 있으면 다음과 같이 알림이 표시됩니다:
+
+```
+Artibot v1.4.0 initialized
+⬆️ New version available: v1.5.0 (current: v1.4.0)
+   Update: /artibot:update --force
+```
+
+### `/artibot:update` 커맨드
+
+버전 확인 및 업데이트를 관리합니다.
+
+**플래그 옵션:**
+
+| 플래그 | 동작 |
+|--------|------|
+| `--check` | 버전 확인만 수행 (기본값) |
+| `--force` | 캐시 삭제 후 강제 재설치 |
+| `--dry-run` | 실행 없이 업데이트 계획만 표시 |
+
+**동작 방식:**
+
+- **GitHub Releases API** 를 통해 최신 버전 확인
+- **24시간 캐싱** 으로 불필요한 API 호출 방지
+- **네트워크 오류/오프라인** 시 세션 시작 차단 안 함 (graceful degradation)
+- **Windows, macOS, Linux** 크로스 플랫폼 지원
+
+**사용 예:**
+
+```bash
+# 버전 확인만
+/artibot:update --check
+
+# 강제 업데이트 (캐시 무효화)
+/artibot:update --force
+
+# 계획 확인 후 수동 실행
+/artibot:update --dry-run
+```
 
 ---
 

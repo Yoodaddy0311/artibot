@@ -12,7 +12,7 @@ import path from 'node:path';
 const CACHE_FILE = 'update-check.json';
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 const GITHUB_API_URL =
-  'https://api.github.com/repos/Artience-co/artibot/releases/latest';
+  'https://api.github.com/repos/Yoodaddy0311/artibot/releases/latest';
 const FETCH_TIMEOUT_MS = 3000;
 
 /**

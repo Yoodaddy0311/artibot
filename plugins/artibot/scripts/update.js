@@ -75,7 +75,7 @@ function readCurrentVersion(pluginRoot) {
 // GitHub API fetch (Node 18+ native fetch)
 // ---------------------------------------------------------------------------
 
-const GITHUB_API_URL = 'https://api.github.com/repos/Artience-co/artibot/releases/latest';
+const GITHUB_API_URL = 'https://api.github.com/repos/Yoodaddy0311/artibot/releases/latest';
 const FETCH_TIMEOUT_MS = 5000;
 
 async function fetchLatestRelease() {
@@ -112,7 +112,7 @@ function printManualInstructions() {
   console.log('  claude plugin install artibot');
   console.log('');
   console.log('Or download the latest release from:');
-  console.log('  https://github.com/Artience-co/artibot/releases/latest');
+  console.log('  https://github.com/Yoodaddy0311/artibot/releases/latest');
 }
 
 // ---------------------------------------------------------------------------
