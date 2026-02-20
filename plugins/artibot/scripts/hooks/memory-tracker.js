@@ -73,7 +73,7 @@ function saveStoreSync(storeKey, store) {
  * @param {object} hookData
  * @returns {object} Message for stdout
  */
-function handleSessionStart(hookData) {
+function handleSessionStart(_hookData) {
   const memDir = getMemoryDir();
   if (!existsSync(memDir)) {
     return { message: 'Memory system: no previous memories found.' };

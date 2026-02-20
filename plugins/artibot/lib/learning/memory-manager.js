@@ -41,6 +41,10 @@ const MAX_SUMMARY_LENGTH = 500;
  * Get the base memory directory: ~/.claude/artibot/memory/
  * @returns {string}
  */
+/**
+ * Get the base memory directory path.
+ * @returns {string}
+ */
 function getMemoryDir() {
   return path.join(ARTIBOT_DIR, MEMORY_DIR_NAME);
 }
@@ -483,8 +487,8 @@ export async function getMemoryStats() {
 // ---------------------------------------------------------------------------
 
 /**
- * Map a memory type to its store key.
- * @param {string} type
+ * Map a memory type string to its corresponding store key.
+ * @param {string} type - Memory type
  * @returns {string}
  */
 function typeToStoreKey(type) {

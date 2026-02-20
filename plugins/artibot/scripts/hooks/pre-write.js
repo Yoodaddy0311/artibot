@@ -50,7 +50,7 @@ const SECRET_CONTENT_PATTERNS = [
   /(?:api[_-]?key|secret[_-]?key|auth[_-]?token|access[_-]?token|private[_-]?key|password|passwd)\s*[=:]\s*["'][^"']{8,}["']/gi,
   /\bAKIA[0-9A-Z]{16}\b/g,
   /\bghp_[A-Za-z0-9]{36}\b/g,
-  /\bsk-ant-[A-Za-z0-9\-]{20,}\b/g,
+  /\bsk-ant-[A-Za-z0-9-]{20,}\b/g,
   /\bsk-[A-Za-z0-9]{20,}\b/g,
 ];
 

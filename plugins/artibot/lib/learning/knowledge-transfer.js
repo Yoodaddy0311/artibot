@@ -596,6 +596,7 @@ async function appendTransferLog(entry) {
 /**
  * Clear the in-memory System 1 cache.
  * Forces a reload from disk on next access.
+ * @returns {void}
  */
 export function clearCache() {
   _system1Cache = null;

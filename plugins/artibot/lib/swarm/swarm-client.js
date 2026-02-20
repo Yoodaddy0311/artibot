@@ -73,11 +73,11 @@ const PRIVATE_IP_PATTERNS = [
 ];
 
 /**
- * Check whether an IP address falls in a private/reserved range.
+ * Check whether an IP address falls in a private or reserved range.
  * Localhost IPs (127.0.0.1, ::1) are excluded from this check
  * because they are explicitly in the allowlist.
  *
- * @param {string} hostname
+ * @param {string} hostname - Hostname or IP address
  * @returns {boolean}
  */
 function isPrivateIp(hostname) {
@@ -129,10 +129,10 @@ function validateUrl(urlString) {
 // ---------------------------------------------------------------------------
 
 /**
- * Resolve the swarm server URL from environment or config.
+ * Resolve the swarm server URL from environment variables or config.
  *
  * @param {object} [config] - Optional swarm config section
- * @returns {string} Server URL
+ * @returns {string}
  */
 function resolveServerUrl(config) {
   return (
@@ -150,8 +150,8 @@ function resolveServerUrl(config) {
  * Make an HTTP request with timeout using native fetch.
  * Validates the URL against the SSRF allowlist before making the request.
  *
- * @param {string} url - Full URL
- * @param {object} options - Fetch options
+ * @param {string} url - Full URL to fetch
+ * @param {object} [options] - Fetch options (method, headers, body, etc.)
  * @param {number} [timeoutMs] - Timeout in milliseconds
  * @returns {Promise<Response>}
  * @throws {Error} If the URL is blocked by SSRF protection
@@ -178,7 +178,7 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = REQUEST_TIMEOUT_M
  * Execute a request with exponential backoff retry logic.
  *
  * @param {() => Promise<Response>} requestFn - Function that returns a fetch promise
- * @param {number} [maxRetries] - Maximum retries
+ * @param {number} [maxRetries] - Maximum retry attempts
  * @returns {Promise<object>} Parsed JSON response
  */
 async function withRetry(requestFn, maxRetries = MAX_RETRIES) {
@@ -232,7 +232,7 @@ async function withRetry(requestFn, maxRetries = MAX_RETRIES) {
  * Compute SHA-256 checksum of data.
  *
  * @param {object|string} data - Data to hash
- * @returns {string} Hex-encoded SHA-256 hash
+ * @returns {string}
  */
 function computeChecksum(data) {
   const serialized = typeof data === 'string' ? data : JSON.stringify(data);
@@ -255,7 +255,7 @@ function verifyChecksum(data, expectedChecksum) {
 // ---------------------------------------------------------------------------
 
 /**
- * Load the offline queue from disk.
+ * Load the offline queue from disk storage.
  *
  * @returns {Promise<object[]>}
  */
@@ -265,9 +265,9 @@ async function loadOfflineQueue() {
 }
 
 /**
- * Save the offline queue to disk.
+ * Save the offline queue to disk storage.
  *
- * @param {object[]} queue
+ * @param {object[]} queue - Queue items to save
  * @returns {Promise<void>}
  */
 async function saveOfflineQueue(queue) {
@@ -279,9 +279,9 @@ async function saveOfflineQueue(queue) {
 }
 
 /**
- * Enqueue an upload for later when offline.
+ * Enqueue weights for upload when network is offline.
  *
- * @param {object} weights - Weight data
+ * @param {object} weights - Weight data to upload
  * @param {object} metadata - Upload metadata
  * @returns {Promise<void>}
  */

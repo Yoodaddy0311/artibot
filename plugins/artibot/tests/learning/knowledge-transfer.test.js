@@ -556,7 +556,7 @@ describe('knowledge-transfer', () => {
       readJsonFile.mockResolvedValue(null);
       await hotSwap();
       // No transfer-log write for hot-swap action (no changes)
-      const hotSwapLogWrite = writeJsonFile.mock.calls.filter(([p, data]) =>
+      const _hotSwapLogWrite = writeJsonFile.mock.calls.filter(([p, data]) =>
         p.includes('transfer-log') && Array.isArray(data) &&
         data.some((e) => e.action === 'hot-swap')
       );

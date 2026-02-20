@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Cache, defaultCache } from '../../lib/core/cache.js';
 
 describe('Cache', () => {

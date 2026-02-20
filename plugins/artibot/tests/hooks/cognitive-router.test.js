@@ -1,5 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import path from 'node:path';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // ---------------------------------------------------------------------------
 // Mock: ../utils/index.js — stdin/stdout helpers
@@ -24,7 +23,7 @@ vi.mock('node:fs', async () => {
   };
 });
 
-const { readStdin, writeStdout, parseJSON, getPluginRoot } = await import(
+const { readStdin, writeStdout } = await import(
   '../../scripts/utils/index.js'
 );
 const { readFileSync } = await import('node:fs');
@@ -47,7 +46,7 @@ describe('cognitive-router hook', () => {
 
       // Dynamic import fails for router module → fallback used
       // That's fine; we verify defaults via fallback path
-      const mod = await import('../../scripts/hooks/cognitive-router.js');
+      await import('../../scripts/hooks/cognitive-router.js');
       // The module auto-runs main(). Since it uses fallback, writeStdout is called
       // We wait a tick for the async main() to complete.
       await new Promise((r) => setTimeout(r, 50));

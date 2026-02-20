@@ -13,7 +13,7 @@ import { checkForUpdate } from '../../lib/core/version-checker.js';
 
 async function main() {
   const raw = await readStdin();
-  const hookData = parseJSON(raw);
+  parseJSON(raw);
 
   // Environment detection
   const env = {

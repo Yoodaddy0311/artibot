@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 
 /**
  * tool-tracker.js uses dynamic imports (import(`file://...`)) to load
@@ -105,7 +105,7 @@ function getResultContent(result) {
   return result.content || result.output || result.stdout || result.text || result.message || '';
 }
 
-function scoreResult(toolName, result, input) {
+function scoreResult(toolName, result, _input) {
   if (result.error || result.is_error) return 0.0;
   const output = getResultContent(result);
 

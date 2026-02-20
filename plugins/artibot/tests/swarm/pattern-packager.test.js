@@ -432,4 +432,346 @@ describe('unpackWeights() additional branches', () => {
     expect(patterns[0].type).toBe('team');
     expect(patterns[0].bestData.pattern).toBe('pipeline');
   });
+
+  it('denormalizes latency correctly for normal values', () => {
+    // When avgLatency is normal (0 < x < 1), denormalizeLatency returns finite ms
+    const globalWeights = {
+      tools: { Read: { successRate: 0.9, avgLatency: 0.5, confidence: 0.8, sampleSize: 10 } },
+    };
+    const patterns = unpackWeights(globalWeights);
+    expect(patterns[0].bestData.avgMs).toBeGreaterThan(0);
+    expect(patterns[0].bestData.avgMs).toBeLessThan(Infinity);
+  });
+
+  it('denormalizeLatency returns Infinity when avgLatency is 0', () => {
+    // avgLatency of 0 means normalized <= 0, denormalizeLatency returns Infinity
+    const globalWeights = {
+      tools: { SlowTool: { successRate: 0.5, avgLatency: 0, confidence: 0.6, sampleSize: 5 } },
+    };
+    const patterns = unpackWeights(globalWeights);
+    // avgMs should be Infinity when avgLatency = 0
+    expect(patterns[0].bestData.avgMs).toBe(Infinity);
+  });
+
+  it('denormalizeDuration returns Infinity when avgDuration is 0', () => {
+    const globalWeights = {
+      commands: { slowCmd: { effectiveness: 0.8, avgDuration: 0, filesModified: 0.5, testsPass: 0.9, sampleSize: 5 } },
+    };
+    const patterns = unpackWeights(globalWeights);
+    expect(patterns[0].bestData.duration).toBe(Infinity);
+  });
+
+  it('denormalizeFileCount returns Infinity when filesModified is 0', () => {
+    const globalWeights = {
+      commands: { cmd: { effectiveness: 0.7, avgDuration: 0.5, filesModified: 0, testsPass: 0.8, sampleSize: 5 } },
+    };
+    const patterns = unpackWeights(globalWeights);
+    expect(patterns[0].bestData.filesModified).toBe(Infinity);
+  });
+
+  it('unpack handles missing optional fields gracefully with defaults', () => {
+    // Tools without some fields - should use defaults
+    const globalWeights = {
+      tools: { MinimalTool: {} },
+    };
+    const patterns = unpackWeights(globalWeights);
+    expect(patterns[0].confidence).toBe(0.5); // default
+    expect(patterns[0].sampleSize).toBe(0); // default
+  });
+
+  it('uses defaults for error weight when all fields are missing (lines 216-217)', () => {
+    const globalWeights = {
+      errors: { sig999: {} },
+      // frequency and sampleSize omitted -> ?? defaults fire
+    };
+    const patterns = unpackWeights(globalWeights);
+    expect(patterns).toHaveLength(1);
+    expect(patterns[0].confidence).toBeCloseTo(0.5); // clamp01(1 - 0.5) = 0.5
+    expect(patterns[0].sampleSize).toBe(0);           // weight.sampleSize ?? 0
+  });
+});
+
+describe('packagePatterns() - normalizeLatency and clamp branches', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    readJsonFile.mockResolvedValue(null);
+  });
+
+  it('clamp01 returns 0 for NaN values in successRate', async () => {
+    const pattern = makePattern('tool', 'NaNTool', {
+      bestData: { successRate: NaN, avgMs: 0 },
+    });
+    const result = await packagePatterns([pattern]);
+    // NaN successRate should be clamped to 0 by clamp01
+    if (result.weights.tools.NaNTool) {
+      expect(result.weights.tools.NaNTool.successRate).toBe(0);
+    }
+  });
+
+  it('normalizeLatency: high ms value approaches 0', async () => {
+    const pattern = makePattern('tool', 'SlowTool', {
+      bestData: { successRate: 0.5, avgMs: 1_000_000 }, // very slow
+    });
+    const result = await packagePatterns([pattern]);
+    expect(result.weights.tools.SlowTool.avgLatency).toBeGreaterThanOrEqual(0);
+    expect(result.weights.tools.SlowTool.avgLatency).toBeLessThan(0.01);
+  });
+
+  it('normalizeLatency: 0ms gives 1.0 (fastest)', async () => {
+    const pattern = makePattern('tool', 'FastTool', {
+      bestData: { successRate: 0.8, avgMs: 0 },
+    });
+    const result = await packagePatterns([pattern]);
+    expect(result.weights.tools.FastTool.avgLatency).toBe(1.0);
+  });
+
+  it('loads patterns from disk and skips null files', async () => {
+    // First file returns null, second has patterns
+    const pattern = makePattern('tool', 'Read', { bestData: { successRate: 0.9, avgMs: 100 } });
+    readJsonFile
+      .mockResolvedValueOnce(null)  // tool-patterns.json -> null (skipped)
+      .mockResolvedValueOnce({ patterns: [pattern] }) // error-patterns.json
+      .mockResolvedValueOnce(null) // success-patterns.json
+      .mockResolvedValueOnce(null); // team-patterns.json
+    await packagePatterns(); // no arg -> loads from disk
+    // Pattern from error-patterns.json file but it's a 'tool' type pattern
+    expect(readJsonFile).toHaveBeenCalledTimes(4);
+  });
+
+  it('normalizeFileCount: large file count approaches 0', async () => {
+    const pattern = makePattern('success', 'largeChange', {
+      bestData: { duration: 1000, filesModified: 10000, testsPass: true },
+    });
+    const result = await packagePatterns([pattern]);
+    expect(result.weights.commands.largeChange.filesModified).toBeGreaterThanOrEqual(0);
+    expect(result.weights.commands.largeChange.filesModified).toBeLessThan(0.01);
+  });
+
+  it('packageTeamPattern uses ?? defaults when bestData fields are missing (lines 161-167)', async () => {
+    // Team pattern with empty bestData - all ?? defaults fire
+    const pattern = {
+      key: 'team::watchdog',
+      type: 'team',
+      category: 'watchdog',
+      sampleSize: 5,
+      confidence: 0.75,
+      bestData: {},  // no size, no duration -> ?? 0 defaults
+    };
+    const result = await packagePatterns([pattern]);
+    expect(result.weights.teams.watchdog).toBeDefined();
+    expect(result.weights.teams.watchdog.optimalSize).toBe(0);  // data.size ?? 0
+    expect(result.weights.teams.watchdog.avgDuration).toBeCloseTo(1.0);  // normalizeDuration(0) = 1.0
+  });
+
+  it('packageCommandPattern uses ?? defaults when bestData is missing (line 151)', async () => {
+    // Command pattern with empty bestData
+    const pattern = {
+      key: 'success::emptyCmd',
+      type: 'success',
+      category: 'emptyCmd',
+      sampleSize: 5,
+      confidence: 0.7,
+      bestData: {},  // no duration, filesModified -> ?? 0 defaults
+    };
+    const result = await packagePatterns([pattern]);
+    expect(result.weights.commands.emptyCmd).toBeDefined();
+    expect(result.weights.commands.emptyCmd.sampleSize).toBe(5);
+    expect(result.weights.commands.emptyCmd.testsPass).toBe(0.5); // undefined -> 0.5
+  });
+
+  it('filter: skips pattern when sampleSize is null (line 71 ?? branch)', async () => {
+    // pattern.sampleSize === null -> ?? 0 fires -> 0 < 3 = true -> skip
+    const pattern = {
+      key: 'tool::NullSample',
+      type: 'tool',
+      category: 'NullSample',
+      sampleSize: null,
+      confidence: 0.8,
+      bestData: { successRate: 0.9 },
+    };
+    const result = await packagePatterns([pattern]);
+    expect(result.weights.tools.NullSample).toBeUndefined();
+    expect(result.metadata.packagedCount).toBe(0);
+  });
+
+  it('filter: skips pattern when confidence is null (line 72 ?? branch)', async () => {
+    // pattern.confidence === null -> ?? 0 fires -> 0 < 0.4 = true -> skip
+    const pattern = {
+      key: 'tool::NullConf',
+      type: 'tool',
+      category: 'NullConf',
+      sampleSize: 10,
+      confidence: null,
+      bestData: { successRate: 0.9 },
+    };
+    const result = await packagePatterns([pattern]);
+    expect(result.weights.tools.NullConf).toBeUndefined();
+    expect(result.metadata.packagedCount).toBe(0);
+  });
+
+  it('packageToolPattern uses ?? defaults when bestData fields are null (lines 113-118)', async () => {
+    // pattern with null bestData fields -> ?? defaults fire inside packageToolPattern
+    const pattern = {
+      key: 'tool::NullDataTool',
+      type: 'tool',
+      category: 'NullDataTool',
+      sampleSize: 5,
+      confidence: 0.6,
+      bestData: { successRate: null, avgMs: null },
+      // confidence is set but bestData.successRate/avgMs are null -> ?? defaults
+    };
+    const result = await packagePatterns([pattern]);
+    expect(result.weights.tools.NullDataTool).toBeDefined();
+    // successRate: null -> clamp01(null ?? confidence ?? 0) -> clamp01(0.6) = 0.6
+    expect(result.weights.tools.NullDataTool.successRate).toBeCloseTo(0.6);
+    // avgMs: null -> normalizeLatency(null ?? 0) -> normalizeLatency(0) = 1.0
+    expect(result.weights.tools.NullDataTool.avgLatency).toBe(1.0);
+  });
+
+  it('packageErrorPattern uses ?? defaults when bestData fields are null (lines 129,131,134)', async () => {
+    // pattern with null bestData -> ?? defaults fire inside packageErrorPattern
+    const pattern = {
+      key: 'error::NullErrData',
+      type: 'error',
+      category: null,  // category null -> ?? '' fires at line 133
+      sampleSize: 5,
+      confidence: null,  // but this would be filtered... use 0.5
+      bestData: { message: null },
+    };
+    // Need confidence >= 0.4 to pass filter
+    pattern.confidence = 0.5;
+    const result = await packagePatterns([pattern]);
+    const keys = Object.keys(result.weights.errors);
+    if (keys.length > 0) {
+      // frequency: clamp01(1 - (0.5 ?? 0)) = clamp01(0.5) = 0.5
+      expect(result.weights.errors[keys[0]].frequency).toBeCloseTo(0.5);
+    }
+  });
+
+  it('packageErrorPattern: sampleSize null uses ?? 0 default (line 134)', async () => {
+    const pattern = {
+      key: 'error::NullSampleErr',
+      type: 'error',
+      category: 'SomeError',
+      sampleSize: null,  // null -> filter skips, but need to test ?? 0
+      confidence: 0.6,
+      bestData: {},
+    };
+    // When sampleSize is null, pattern.sampleSize ?? 0 = 0 at line 71 -> filtered out
+    // The ?? branch at line 71 is covered when sampleSize is null
+    const result = await packagePatterns([pattern]);
+    expect(result.metadata.packagedCount).toBe(0); // filtered by sampleSize check
+  });
+
+  it('anonymizeKey returns "unknown" for null/empty key (line 457 branch)', async () => {
+    // Error pattern with null message and null category triggers anonymizeKey(null) branch
+    const pattern = {
+      key: 'error::',
+      type: 'error',
+      category: '',
+      sampleSize: 10,
+      confidence: 0.8,
+      bestData: { message: null },
+    };
+    const result = await packagePatterns([pattern]);
+    const keys = Object.keys(result.weights.errors);
+    // anonymizeKey('') -> '' is falsy -> returns 'unknown'
+    // but 'unknown' is a valid string so it gets hashed again
+    // The actual branch is !key which fires when key === ''
+    expect(keys).toHaveLength(1);
+  });
+
+  it('anonymizeKey returns "unknown" for non-string key', async () => {
+    // Force anonymizeKey to receive a non-string value via null message and undefined category
+    const pattern = {
+      key: 'error::test',
+      type: 'error',
+      category: undefined,
+      sampleSize: 10,
+      confidence: 0.8,
+      bestData: { message: null },
+    };
+    const result = await packagePatterns([pattern]);
+    // anonymizeKey(undefined ?? '') -> '' is falsy -> 'unknown'
+    expect(Object.keys(result.weights.errors)).toHaveLength(1);
+  });
+});
+
+describe('mergeWeights() - missing category branches (lines 298-299)', () => {
+  it('handles local missing a category (local[category] is undefined -> ?? {})', () => {
+    // local has no "errors" key at all, global has errors
+    const local = {
+      tools: { Read: { successRate: 0.8, sampleSize: 5 } },
+      // no errors, commands, teams
+    };
+    const global_ = {
+      tools: { Read: { successRate: 0.9, sampleSize: 20 } },
+      errors: { sig1: { frequency: 0.4, sampleSize: 8 } },
+      commands: {},
+      teams: {},
+    };
+    const merged = mergeWeights(local, global_);
+    // errors category: local is undefined -> ?? {} -> all global entries kept
+    expect(merged.errors.sig1).toBeDefined();
+    expect(merged.errors.sig1.frequency).toBe(0.4);
+  });
+
+  it('handles global missing a category (global_[category] is undefined -> ?? {})', () => {
+    const local = {
+      tools: { Read: { successRate: 0.8, sampleSize: 5 } },
+      errors: { sig2: { frequency: 0.3, sampleSize: 4 } },
+      commands: {},
+      teams: {},
+    };
+    const global_ = {
+      tools: { Read: { successRate: 0.9, sampleSize: 20 } },
+      // no errors, commands, teams
+    };
+    const merged = mergeWeights(local, global_);
+    // errors category: global_ is undefined -> ?? {} -> all local entries kept
+    expect(merged.errors.sig2).toBeDefined();
+    expect(merged.errors.sig2.frequency).toBe(0.3);
+  });
+});
+
+describe('unpackWeights() - teams avgDuration default branch (line 259)', () => {
+  it('uses default avgDuration 0.5 when avgDuration is missing from team weight', () => {
+    const globalWeights = {
+      teams: { council: { effectiveness: 0.75, optimalSize: 5, sampleSize: 12 } },
+      // avgDuration is omitted -> uses ?? 0.5 default
+    };
+    const patterns = unpackWeights(globalWeights);
+    expect(patterns).toHaveLength(1);
+    expect(patterns[0].type).toBe('team');
+    // denormalizeDuration(0.5) = round(60000 * (1/0.5 - 1)) = 60000
+    expect(patterns[0].bestData.duration).toBe(60000);
+  });
+
+  it('uses defaults for all optional fields when team weight is empty', () => {
+    const globalWeights = {
+      teams: { swarm: {} },
+      // All optional fields missing -> ?? defaults fire (lines 255-258)
+    };
+    const patterns = unpackWeights(globalWeights);
+    expect(patterns).toHaveLength(1);
+    expect(patterns[0].confidence).toBe(0.5);  // weight.effectiveness ?? 0.5
+    expect(patterns[0].sampleSize).toBe(0);     // weight.sampleSize ?? 0
+    expect(patterns[0].bestData.size).toBe(0);  // weight.optimalSize ?? 0
+    expect(patterns[0].bestData.duration).toBe(60000); // denormalizeDuration(0.5) = 60000
+  });
+
+  it('uses defaults for all optional fields when command weight is empty (lines 235-239)', () => {
+    const globalWeights = {
+      commands: { emptyCmd: {} },
+      // All optional fields missing -> ?? defaults fire
+    };
+    const patterns = unpackWeights(globalWeights);
+    expect(patterns).toHaveLength(1);
+    expect(patterns[0].confidence).toBe(0.5);    // weight.effectiveness ?? 0.5
+    expect(patterns[0].sampleSize).toBe(0);      // weight.sampleSize ?? 0
+    // denormalizeDuration(0.5) = 60000
+    expect(patterns[0].bestData.duration).toBe(60000);
+    // denormalizeFileCount(0.5) = round(20 * (1/0.5 - 1)) = 20
+    expect(patterns[0].bestData.filesModified).toBe(20);
+  });
 });

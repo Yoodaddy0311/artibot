@@ -8,7 +8,7 @@
  * Events: teammate-update | task-complete | task-error | workflow-advance
  */
 
-import { readStdin, writeStdout, parseJSON, getPluginRoot, atomicWriteSync } from '../utils/index.js';
+import { readStdin, writeStdout, parseJSON, atomicWriteSync } from '../utils/index.js';
 import path from 'node:path';
 import { readFileSync, existsSync } from 'node:fs';
 
@@ -170,13 +170,6 @@ async function main() {
 
   // Build dashboard message
   const teammates = buildTeammateList(state.agents);
-  const tasks = (state.tasks || []).map((t) => ({
-    id: t.id,
-    subject: t.subject || t.name || '',
-    status: t.status || 'pending',
-    owner: t.owner || '',
-  }));
-
   // Construct a summary message
   const activeCnt = teammates.filter((t) => t.status === 'in_progress').length;
   const blockedCnt = teammates.filter((t) => t.status === 'blocked').length;

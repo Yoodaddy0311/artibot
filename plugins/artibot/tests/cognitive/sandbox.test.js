@@ -375,6 +375,148 @@ describe('sandbox', () => {
   });
 
   // -------------------------------------------------------------------------
+  describe('getStats() - additional branch coverage', () => {
+    it('counts failed executions with non-zero exitCode and adds duration', () => {
+      const sbx = createSandbox();
+      const record = execute('failing-command', sbx);
+      // Simulate a failed execution with duration
+      const updated = recordResult(record, { stdout: '', stderr: 'error', exitCode: 1, duration: 200 });
+      // Replace the executionLog entry with the updated record
+      sbx.executionLog[0] = updated;
+      const stats = getStats(sbx);
+      expect(stats.failed).toBe(1);
+      expect(stats.totalDuration).toBe(200);
+    });
+
+    it('accumulates duration from multiple succeeded executions', () => {
+      const sbx = createSandbox();
+      const r1 = execute('cmd1', sbx);
+      const r2 = execute('cmd2', sbx);
+      const u1 = recordResult(r1, { stdout: 'ok', stderr: '', exitCode: 0, duration: 100 });
+      const u2 = recordResult(r2, { stdout: 'ok', stderr: '', exitCode: 0, duration: 150 });
+      sbx.executionLog[0] = u1;
+      sbx.executionLog[1] = u2;
+      const stats = getStats(sbx);
+      expect(stats.succeeded).toBe(2);
+      expect(stats.totalDuration).toBe(250);
+    });
+
+    it('duration defaults to 0 when entry.duration is undefined', () => {
+      const sbx = createSandbox();
+      const record = execute('cmd', sbx);
+      // Manually set an executed record with no duration field
+      sbx.executionLog[0] = { ...record, executed: true, exitCode: 0 };
+      const stats = getStats(sbx);
+      expect(stats.succeeded).toBe(1);
+      expect(stats.totalDuration).toBe(0);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  describe('execute() - expiration branch', () => {
+    it('marks sandbox as expired when expiresAt is in the past', () => {
+      const sbx = createSandbox({ maxLifetimeMs: 1 });
+      // Manually set expiresAt to past
+      sbx.expiresAt = new Date(Date.now() - 1000).toISOString();
+      const result = execute('echo hello', sbx);
+      expect(result.blocked).toBe(true);
+      expect(sbx.status).toBe('expired');
+    });
+
+    it('logs expired command in executionLog', () => {
+      const sbx = createSandbox();
+      sbx.expiresAt = new Date(Date.now() - 1000).toISOString();
+      execute('echo hello', sbx);
+      expect(sbx.executionLog.length).toBe(1);
+      expect(sbx.executionLog[0].blocked).toBe(true);
+    });
+
+    it('returns blocked result for null sandbox', () => {
+      const result = execute('echo hello', null);
+      expect(result.blocked).toBe(true);
+      expect(result.sandboxId).toBe('unknown');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  describe('validate() - additional severity branches', () => {
+    it('high severity when both error and timeout issues', () => {
+      const sbx = createSandbox({ timeoutMs: 100 });
+      const record = execute('slow', sbx);
+      const updated = recordResult(record, { stdout: '', stderr: 'error: timeout', exitCode: 1, duration: 100 });
+      const v = validate(updated);
+      // has both error (in stderr) and timeout -> high severity
+      expect(['high', 'critical']).toContain(v.severity);
+    });
+
+    it('low severity for timeout-only without error/fatal', () => {
+      const sbx = createSandbox({ timeoutMs: 100 });
+      const record = execute('slow-cmd', sbx);
+      // exitCode 0 but timed out - only timeout issue, no exit code issue, no stderr errors
+      const updated = recordResult(record, { stdout: 'partial', stderr: '', exitCode: 0, duration: 100 });
+      const v = validate(updated);
+      expect(v.issues.some((i) => i.includes('timed out'))).toBe(true);
+      // timeout-only without error or fatal -> low severity
+      expect(v.severity).toBe('low');
+    });
+
+    it('medium severity for non-zero exit code without fatal or timeout', () => {
+      const sbx = createSandbox();
+      const record = execute('failing', sbx);
+      const updated = recordResult(record, { stdout: '', stderr: 'something went wrong', exitCode: 2, duration: 10 });
+      const v = validate(updated);
+      expect(['medium', 'high']).toContain(v.severity);
+    });
+
+    it('flags segmentation fault in stderr', () => {
+      const sbx = createSandbox();
+      const record = execute('crash', sbx);
+      const updated = recordResult(record, { stdout: '', stderr: 'segmentation fault', exitCode: 139, duration: 5 });
+      const v = validate(updated);
+      expect(v.issues.some((i) => i.includes('Segmentation fault'))).toBe(true);
+      expect(v.severity).toBe('critical');
+    });
+
+    it('flags "fatal" keyword in stderr', () => {
+      const sbx = createSandbox();
+      const record = execute('fatal-cmd', sbx);
+      const updated = recordResult(record, { stdout: '', stderr: 'fatal: could not write to repository', exitCode: 1, duration: 5 });
+      const v = validate(updated);
+      expect(v.issues.some((i) => i.includes('fatal'))).toBe(true);
+      expect(v.severity).toBe('critical');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  describe('recordResult() - truncateOutput branch', () => {
+    it('truncates large stdout output exceeding maxOutputBytes', () => {
+      const sbx = createSandbox();
+      const record = execute('large-output', sbx);
+      // Create output just over 1MB (1048576 bytes)
+      const largeOutput = 'A'.repeat(1_100_000);
+      const updated = recordResult(record, { stdout: largeOutput, stderr: '', exitCode: 0, duration: 5 });
+      expect(updated.stdout.includes('[truncated]')).toBe(true);
+      expect(updated.stdout.length).toBeLessThan(largeOutput.length);
+    });
+
+    it('does not truncate stdout within maxOutputBytes', () => {
+      const sbx = createSandbox();
+      const record = execute('small-output', sbx);
+      const smallOutput = 'Hello World';
+      const updated = recordResult(record, { stdout: smallOutput, stderr: '', exitCode: 0, duration: 5 });
+      expect(updated.stdout).toBe(smallOutput);
+    });
+
+    it('handles non-string stdout gracefully', () => {
+      const sbx = createSandbox();
+      const record = execute('test', sbx);
+      // Pass null/undefined stdout
+      const updated = recordResult(record, { stdout: null, stderr: '', exitCode: 0, duration: 5 });
+      expect(typeof updated.stdout).toBe('string');
+    });
+  });
+
+  // -------------------------------------------------------------------------
   describe('cleanup()', () => {
     it('marks sandbox as cleaned', () => {
       const sbx = createSandbox();

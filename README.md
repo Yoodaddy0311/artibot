@@ -1,5 +1,11 @@
 # Artibot
 
+[![CI](https://github.com/Artience/Artibot/actions/workflows/ci.yml/badge.svg)](https://github.com/Artience/Artibot/actions/workflows/ci.yml)
+[![Coverage](https://img.shields.io/badge/coverage-94.64%25-brightgreen)](plugins/artibot/tests/)
+[![Tests](https://img.shields.io/badge/tests-1690%20passed-brightgreen)](plugins/artibot/tests/)
+[![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![Node](https://img.shields.io/badge/node-%3E%3D18-green)](package.json)
+
 ![Claude Code Plugin](https://img.shields.io/badge/Claude_Code-Plugin-7C3AED?style=flat-square&logo=data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cGF0aCBkPSJNMTIgMkM2LjQ4IDIgMiA2LjQ4IDIgMTJzNC40OCAxMCAxMCAxMCAxMC00LjQ4IDEwLTEwUzE3LjUyIDIgMTIgMnoiIGZpbGw9IndoaXRlIi8+PC9zdmc+)
 ![Version](https://img.shields.io/badge/version-1.4.0-blue?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)

@@ -40,7 +40,7 @@ function makeFetchResponse(body, ok = true, status = 200) {
 
 const CURRENT_VERSION = '1.4.0';
 const CACHE_DIR = '/fake/cache';
-const CACHE_FILE_PATH =
+const _CACHE_FILE_PATH =
   process.platform === 'win32'
     ? `${CACHE_DIR}\\update-check.json`
     : `${CACHE_DIR}/update-check.json`;
@@ -365,7 +365,7 @@ describe('version-checker', () => {
         makeFetchResponse({ tag_name: 'v1.4.0' }),
       );
 
-      const result = await checkForUpdate(CURRENT_VERSION, CACHE_DIR);
+      await checkForUpdate(CURRENT_VERSION, CACHE_DIR);
 
       expect(globalThis.fetch).toHaveBeenCalledTimes(1);
     });
@@ -379,7 +379,7 @@ describe('version-checker', () => {
         makeFetchResponse({ tag_name: 'v1.4.0' }),
       );
 
-      const result = await checkForUpdate(CURRENT_VERSION, CACHE_DIR);
+      await checkForUpdate(CURRENT_VERSION, CACHE_DIR);
 
       expect(globalThis.fetch).toHaveBeenCalledTimes(1);
     });
@@ -393,7 +393,7 @@ describe('version-checker', () => {
         makeFetchResponse({ tag_name: 'v1.4.0' }),
       );
 
-      const result = await checkForUpdate(CURRENT_VERSION, CACHE_DIR);
+      await checkForUpdate(CURRENT_VERSION, CACHE_DIR);
 
       expect(globalThis.fetch).toHaveBeenCalledTimes(1);
     });

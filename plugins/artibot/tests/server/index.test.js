@@ -48,7 +48,7 @@ const {
   handleRequest,
   checkRateLimit,
   rateLimitStore,
-  authenticate,
+  authenticate: _authenticate,
   resolveAllowedOrigin,
   matchRoute,
   RATE_LIMIT_WINDOW_MS,
@@ -201,7 +201,7 @@ describe('Sliding Window Rate Limiter - checkRateLimit()', () => {
 
   it('allows requests after the sliding window expires', () => {
     vi.useFakeTimers();
-    const now = Date.now();
+    const _now = Date.now();
 
     // Fill to the limit
     for (let i = 0; i < 60; i++) {

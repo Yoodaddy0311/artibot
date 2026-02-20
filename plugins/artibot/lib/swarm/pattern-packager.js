@@ -104,10 +104,10 @@ export async function packagePatterns(localPatterns) {
 }
 
 /**
- * Convert a tool pattern into normalized weight vector.
+ * Convert a tool pattern into a normalized weight vector.
  *
- * @param {object} pattern
- * @returns {object} Normalized weight
+ * @param {object} pattern - Tool pattern to package
+ * @returns {object}
  */
 function packageToolPattern(pattern) {
   const data = pattern.bestData ?? {};
@@ -120,10 +120,10 @@ function packageToolPattern(pattern) {
 }
 
 /**
- * Convert an error pattern into an anonymized signature.
+ * Convert an error pattern into an anonymized weight signature.
  *
- * @param {object} pattern
- * @returns {object} Anonymized error weight
+ * @param {object} pattern - Error pattern to package
+ * @returns {object}
  */
 function packageErrorPattern(pattern) {
   const data = pattern.bestData ?? {};
@@ -138,8 +138,8 @@ function packageErrorPattern(pattern) {
 /**
  * Convert a command/success pattern into usage frequency weight.
  *
- * @param {object} pattern
- * @returns {object} Command weight
+ * @param {object} pattern - Command pattern to package
+ * @returns {object}
  */
 function packageCommandPattern(pattern) {
   const data = pattern.bestData ?? {};
@@ -153,10 +153,10 @@ function packageCommandPattern(pattern) {
 }
 
 /**
- * Convert a team composition pattern into effectiveness score.
+ * Convert a team composition pattern into effectiveness weight.
  *
- * @param {object} pattern
- * @returns {object} Team weight
+ * @param {object} pattern - Team pattern to package
+ * @returns {object}
  */
 function packageTeamPattern(pattern) {
   const data = pattern.bestData ?? {};
@@ -324,10 +324,10 @@ export function mergeWeights(local, global_, ratio) {
 /**
  * Merge two weight entries by blending numeric values.
  *
- * @param {object} localEntry
- * @param {object} globalEntry
- * @param {number} localRatio
- * @param {number} globalRatio
+ * @param {object} localEntry - Local weight entry
+ * @param {object} globalEntry - Global weight entry
+ * @param {number} localRatio - Weight ratio for local values
+ * @param {number} globalRatio - Weight ratio for global values
  * @returns {object}
  */
 function mergeEntries(localEntry, globalEntry, localRatio, globalRatio) {
@@ -338,12 +338,12 @@ function mergeEntries(localEntry, globalEntry, localRatio, globalRatio) {
     const localVal = localEntry[key];
     const globalVal = globalEntry[key];
 
-    if (typeof localVal === 'number' && typeof globalVal === 'number') {
-      // Weighted average for numeric values
-      merged[key] = round(localVal * localRatio + globalVal * globalRatio);
-    } else if (key === 'sampleSize' && typeof localVal === 'number' && typeof globalVal === 'number') {
+    if (key === 'sampleSize' && typeof localVal === 'number' && typeof globalVal === 'number') {
       // Sum sample sizes
       merged[key] = localVal + globalVal;
+    } else if (typeof localVal === 'number' && typeof globalVal === 'number') {
+      // Weighted average for numeric values
+      merged[key] = round(localVal * localRatio + globalVal * globalRatio);
     } else if (localVal !== undefined) {
       merged[key] = localVal;
     } else {
@@ -359,7 +359,7 @@ function mergeEntries(localEntry, globalEntry, localRatio, globalRatio) {
 // ---------------------------------------------------------------------------
 
 /**
- * Load all patterns from disk.
+ * Load all patterns from disk storage.
  *
  * @returns {Promise<object[]>}
  */
@@ -385,7 +385,7 @@ async function loadAllPatterns() {
  * Normalize latency (ms) to 0-1 scale.
  * 0ms -> 1.0 (fast), 10000ms -> ~0.0 (slow)
  *
- * @param {number} ms
+ * @param {number} ms - Latency in milliseconds
  * @returns {number}
  */
 function normalizeLatency(ms) {
@@ -393,9 +393,9 @@ function normalizeLatency(ms) {
 }
 
 /**
- * Denormalize latency from 0-1 back to ms.
+ * Denormalize latency from 0-1 back to milliseconds.
  *
- * @param {number} normalized
+ * @param {number} normalized - Normalized value 0-1
  * @returns {number}
  */
 function denormalizeLatency(normalized) {
@@ -407,7 +407,7 @@ function denormalizeLatency(normalized) {
  * Normalize duration (ms) to 0-1 scale.
  * 0ms -> 1.0 (fast), 120000ms -> ~0.0 (slow)
  *
- * @param {number} ms
+ * @param {number} ms - Duration in milliseconds
  * @returns {number}
  */
 function normalizeDuration(ms) {
@@ -415,9 +415,9 @@ function normalizeDuration(ms) {
 }
 
 /**
- * Denormalize duration from 0-1 back to ms.
+ * Denormalize duration from 0-1 back to milliseconds.
  *
- * @param {number} normalized
+ * @param {number} normalized - Normalized value 0-1
  * @returns {number}
  */
 function denormalizeDuration(normalized) {
@@ -428,7 +428,7 @@ function denormalizeDuration(normalized) {
 /**
  * Normalize file count to 0-1 scale.
  *
- * @param {number} count
+ * @param {number} count - File count
  * @returns {number}
  */
 function normalizeFileCount(count) {
@@ -438,7 +438,7 @@ function normalizeFileCount(count) {
 /**
  * Denormalize file count from 0-1 back to integer.
  *
- * @param {number} normalized
+ * @param {number} normalized - Normalized value 0-1
  * @returns {number}
  */
 function denormalizeFileCount(normalized) {
@@ -465,7 +465,7 @@ function anonymizeKey(key) {
 /**
  * Count total entries across all weight categories.
  *
- * @param {object} weights
+ * @param {object} weights - Weight object with categories
  * @returns {number}
  */
 function countWeightEntries(weights) {
@@ -478,7 +478,7 @@ function countWeightEntries(weights) {
 /**
  * Clamp a value between 0 and 1.
  *
- * @param {number} value
+ * @param {number} value - Value to clamp
  * @returns {number}
  */
 function clamp01(value) {

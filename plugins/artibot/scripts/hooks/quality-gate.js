@@ -41,7 +41,7 @@ const SECRET_PATTERNS = [
   // GitHub personal access tokens
   /\bghp_[A-Za-z0-9]{36}\b/g,
   // Anthropic API keys
-  /\bsk-ant-[A-Za-z0-9\-]{20,}\b/g,
+  /\bsk-ant-[A-Za-z0-9-]{20,}\b/g,
   // OpenAI API keys
   /\bsk-[A-Za-z0-9]{20,}\b/g,
 ];
@@ -122,7 +122,6 @@ async function main() {
 
   const toolName = hookData?.tool_name || hookData?.tool;
   const toolInput = hookData?.tool_input || {};
-  const toolResult = hookData?.tool_result || {};
 
   // Only inspect Edit and Write tool results
   if (toolName !== 'Edit' && toolName !== 'Write') return;

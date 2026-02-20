@@ -106,6 +106,30 @@ describe('AntigravityAdapter', () => {
       expect(result.content).toContain('  Line A');
       expect(result.content).toContain('  Line B');
     });
+
+    it('passes through content with no Claude-specific refs unchanged', () => {
+      const skill = { ...baseSkill, content: 'Pure generic content only.' };
+      const result = adapter.convertSkill(skill);
+      expect(result.content).toContain('Pure generic content only.');
+    });
+
+    it('replaces multiple .claude/skills/ occurrences', () => {
+      const skill = {
+        ...baseSkill,
+        content: 'See .claude/skills/a and .claude/skills/b.',
+      };
+      const result = adapter.convertSkill(skill);
+      expect(result.content).not.toContain('.claude/skills/');
+      expect(result.content).toContain('.antigravity/skills/a');
+      expect(result.content).toContain('.antigravity/skills/b');
+    });
+
+    it('handles description with trailing whitespace trimmed', () => {
+      const skill = { ...baseSkill, description: 'Trimmed desc   ' };
+      const result = adapter.convertSkill(skill);
+      expect(result.content).toContain('Trimmed desc');
+      expect(result.content).not.toContain('Trimmed desc   ');
+    });
   });
 
   describe('convertAgent()', () => {
@@ -120,6 +144,27 @@ describe('AntigravityAdapter', () => {
       const agent = { name: 'test', content: 'Simple agent content without API references' };
       const result = adapter.convertAgent(agent);
       expect(result.content).toContain('Simple agent content');
+    });
+
+    it('returns content as a string', () => {
+      const agent = { name: 'test', content: 'Some content' };
+      const result = adapter.convertAgent(agent);
+      expect(typeof result.content).toBe('string');
+    });
+
+    it('handles agent with empty content', () => {
+      const agent = { name: 'empty', content: '' };
+      const result = adapter.convertAgent(agent);
+      const normalized = result.path.replace(/\\/g, '/');
+      expect(normalized).toBe('.antigravity/agents/empty.md');
+      expect(result.content).toBe('');
+    });
+
+    it('handles agent name with hyphens in path', () => {
+      const agent = { name: 'senior-architect', content: 'Senior architect content' };
+      const result = adapter.convertAgent(agent);
+      const normalized = result.path.replace(/\\/g, '/');
+      expect(normalized).toBe('.antigravity/agents/senior-architect.md');
     });
   });
 
@@ -206,6 +251,34 @@ describe('AntigravityAdapter', () => {
       expect(result.content).toContain('Google Antigravity');
     });
 
+    it('handles content with no API references - returns content unchanged', () => {
+      const plain = 'No API references here. Just plain text instructions.';
+      const agent = { name: 'plain', content: plain };
+      const result = adapter.convertAgent(agent);
+      expect(result.content).toBe(plain);
+    });
+
+    it('handles multiple TaskCreate calls in content', () => {
+      const agent = {
+        name: 'test',
+        content: 'TaskCreate(title: "task1") and TaskCreate(title: "task2")',
+      };
+      const result = adapter.convertAgent(agent);
+      expect(result.content).not.toContain('TaskCreate(');
+      // Both should be converted
+      const count = (result.content.match(/Create task in Agent Manager/g) || []).length;
+      expect(count).toBe(2);
+    });
+
+    it('handles multiple TaskGet calls in content', () => {
+      const agent = {
+        name: 'test',
+        content: 'TaskGet(task_id: "1") and TaskGet(task_id: "2")',
+      };
+      const result = adapter.convertAgent(agent);
+      expect(result.content).not.toContain('TaskGet(');
+    });
+
     it('handles content with multiple API references combined', () => {
       const agent = {
         name: 'orchestrator',
@@ -228,6 +301,19 @@ describe('AntigravityAdapter', () => {
       expect(result.content).not.toContain('Claude Code');
       expect(result.content).not.toContain('CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS');
     });
+
+    it('replacements are applied in order without cross-contamination', () => {
+      // TeamCreate(...) should match specific regex first, then bare TeamCreate
+      const agent = {
+        name: 'test',
+        content: 'TeamCreate(id: "t1") is first, then bare TeamCreate reference.',
+      };
+      const result = adapter.convertAgent(agent);
+      // The specific match converts to "Spawn agents via Agent Manager"
+      expect(result.content).toContain('Spawn agents via Agent Manager');
+      // Any remaining bare "TeamCreate" becomes "(Agent Manager)"
+      expect(result.content).not.toContain('TeamCreate');
+    });
   });
 
   describe('convertCommand()', () => {
@@ -242,6 +328,41 @@ describe('AntigravityAdapter', () => {
     it('preserves original command content as-is', () => {
       const result = adapter.convertCommand(baseCommand);
       expect(result.content).toBe(baseCommand.content);
+    });
+
+    it('handles command names with hyphens', () => {
+      const command = { name: 'run-tests', content: 'Run the test suite.' };
+      const result = adapter.convertCommand(command);
+      const normalized = result.path.replace(/\\/g, '/');
+      expect(normalized).toBe('.antigravity/workflows/run-tests.md');
+    });
+
+    it('handles command with empty content', () => {
+      const command = { name: 'noop', content: '' };
+      const result = adapter.convertCommand(command);
+      expect(result.content).toBe('');
+      const normalized = result.path.replace(/\\/g, '/');
+      expect(normalized).toBe('.antigravity/workflows/noop.md');
+    });
+
+    it('handles command with multiline content', () => {
+      const command = {
+        name: 'deploy',
+        content: '## Deploy\n\nStep 1: Build\nStep 2: Test\nStep 3: Ship',
+      };
+      const result = adapter.convertCommand(command);
+      expect(result.content).toContain('Step 1: Build');
+      expect(result.content).toContain('Step 3: Ship');
+    });
+
+    it('does not transform content (passthrough)', () => {
+      // Unlike convertAgent, convertCommand is a pure passthrough
+      const command = {
+        name: 'test',
+        content: 'Claude Code specific content should NOT be changed here.',
+      };
+      const result = adapter.convertCommand(command);
+      expect(result.content).toBe(command.content);
     });
   });
 
@@ -259,6 +380,15 @@ describe('AntigravityAdapter', () => {
     it('defaults version to 1.1.0 when not in config', () => {
       const noVersionAdapter = new AntigravityAdapter({ pluginRoot: '/root', config: {} });
       const manifest = noVersionAdapter.generateManifest();
+      expect(manifest.content).toContain('Version: 1.1.0');
+    });
+
+    it('defaults version to 1.1.0 when config has agents but no version', () => {
+      const agentsNoVersionAdapter = new AntigravityAdapter({
+        pluginRoot: '/root',
+        config: { agents: { taskBased: { qa: 'qa-engineer' } } },
+      });
+      const manifest = agentsNoVersionAdapter.generateManifest();
       expect(manifest.content).toContain('Version: 1.1.0');
     });
 
@@ -288,6 +418,26 @@ describe('AntigravityAdapter', () => {
       expect(manifest.content).not.toContain('**frontend-developer**');
     });
 
+    it('handles null agents config gracefully', () => {
+      const nullAgentsAdapter = new AntigravityAdapter({
+        pluginRoot: '/root',
+        config: { version: '1.0.0', agents: null },
+      });
+      const manifest = nullAgentsAdapter.generateManifest();
+      expect(manifest.content).toContain('### Available Agents');
+      expect(manifest.content).not.toContain('**frontend-developer**');
+    });
+
+    it('handles config with agents but no taskBased key', () => {
+      const noTaskBasedAdapter = new AntigravityAdapter({
+        pluginRoot: '/root',
+        config: { version: '2.0.0', agents: { patterns: ['swarm'] } },
+      });
+      const manifest = noTaskBasedAdapter.generateManifest();
+      expect(manifest.content).toContain('Version: 2.0.0');
+      expect(manifest.content).not.toContain('**');
+    });
+
     it('includes core principles section', () => {
       const manifest = adapter.generateManifest();
       expect(manifest.content).toContain('## Core Principles');
@@ -299,6 +449,28 @@ describe('AntigravityAdapter', () => {
       expect(manifest.content).toContain('## Delegation Strategy');
       expect(manifest.content).toContain('Spawn specialized agents');
       expect(manifest.content).toContain('Artifacts');
+    });
+
+    it('includes async execution detail in orchestration mode', () => {
+      const manifest = adapter.generateManifest();
+      expect(manifest.content).toContain('async execution');
+    });
+
+    it('includes artifact-based workflow in delegation strategy', () => {
+      const manifest = adapter.generateManifest();
+      expect(manifest.content).toContain('Artifacts (diffs, test results, screenshots)');
+    });
+
+    it('includes five-step delegation process', () => {
+      const manifest = adapter.generateManifest();
+      expect(manifest.content).toContain('1. Spawn specialized agents');
+      expect(manifest.content).toContain('5. Use feedback');
+    });
+
+    it('content is a non-empty string', () => {
+      const manifest = adapter.generateManifest();
+      expect(typeof manifest.content).toBe('string');
+      expect(manifest.content.length).toBeGreaterThan(0);
     });
   });
 
@@ -337,7 +509,70 @@ describe('AntigravityAdapter', () => {
       expect(errors.some((e) => e.includes('content must be a string'))).toBe(true);
     });
 
-    it('validates properly generated output end-to-end', () => {
+    it('fails when file is missing path', () => {
+      const result = {
+        platform: 'antigravity',
+        files: [{ content: 'content without path' }],
+        warnings: [],
+      };
+      const { valid, errors } = adapter.validate(result);
+      expect(valid).toBe(false);
+      expect(errors.some((e) => e.includes('missing path'))).toBe(true);
+    });
+
+    it('validates properly generated manifest output end-to-end', () => {
+      const manifest = adapter.generateManifest();
+      const result = {
+        platform: adapter.platformId,
+        files: [manifest],
+        warnings: [],
+      };
+      const { valid } = adapter.validate(result);
+      expect(valid).toBe(true);
+    });
+
+    it('validates properly generated skill output end-to-end', () => {
+      const skill = adapter.convertSkill({
+        name: 'test',
+        description: 'Test skill',
+        dirName: 'test',
+        content: 'Test content',
+      });
+      const result = {
+        platform: adapter.platformId,
+        files: [skill],
+        warnings: [],
+      };
+      const { valid } = adapter.validate(result);
+      expect(valid).toBe(true);
+    });
+
+    it('validates properly generated command output end-to-end', () => {
+      const cmd = adapter.convertCommand({ name: 'analyze', content: '## Analyze' });
+      const result = {
+        platform: adapter.platformId,
+        files: [cmd],
+        warnings: [],
+      };
+      const { valid } = adapter.validate(result);
+      expect(valid).toBe(true);
+    });
+
+    it('validates properly generated agent output end-to-end', () => {
+      const agent = adapter.convertAgent({
+        name: 'architect',
+        content: 'Architect agent for system design.',
+      });
+      const result = {
+        platform: adapter.platformId,
+        files: [agent],
+        warnings: [],
+      };
+      const { valid } = adapter.validate(result);
+      expect(valid).toBe(true);
+    });
+
+    it('validates combined output end-to-end', () => {
       const manifest = adapter.generateManifest();
       const skill = adapter.convertSkill({
         name: 'test',

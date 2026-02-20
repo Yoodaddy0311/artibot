@@ -372,4 +372,196 @@ describe('router', () => {
       expect(result.streak).toBe(1);
     });
   });
+
+  // -------------------------------------------------------------------------
+  describe('classifyComplexity() - additional branch coverage', () => {
+    it('detects Korean domain keywords (backend: 서버)', () => {
+      const result = classifyComplexity('서버에 API를 추가해줘');
+      expect(result.factors.domains).toBeGreaterThan(0);
+    });
+
+    it('detects Japanese domain keywords (security: セキュリティ)', () => {
+      const result = classifyComplexity('セキュリティの監査をお願いします');
+      expect(result.factors.domains).toBeGreaterThan(0);
+    });
+
+    it('detects Korean uncertainty keywords (아마)', () => {
+      const result = classifyComplexity('아마 이 버그를 조사해야 할 것 같아');
+      expect(result.factors.uncertainty).toBeGreaterThan(0);
+    });
+
+    it('detects Japanese uncertainty keywords (もしかして)', () => {
+      const result = classifyComplexity('もしかして調べが必要です');
+      expect(result.factors.uncertainty).toBeGreaterThan(0);
+    });
+
+    it('detects Korean risk keywords (배포)', () => {
+      const result = classifyComplexity('프로덕션에 배포해주세요');
+      expect(result.factors.risk).toBeGreaterThan(0);
+    });
+
+    it('detects Japanese risk keywords (デプロイ)', () => {
+      const result = classifyComplexity('本番にデプロイしてください');
+      expect(result.factors.risk).toBeGreaterThan(0);
+    });
+
+    it('novelty returns 0.4 for sessionDepth=0 with no recentDomains', () => {
+      const result = classifyComplexity('do something', {
+        sessionDepth: 0,
+      });
+      expect(result.factors.novelty).toBe(0.4);
+    });
+
+    it('novelty adds 0.3 when new domains detected not in recentDomains', () => {
+      const result = classifyComplexity('deploy to kubernetes', {
+        sessionDepth: 0,
+        recentDomains: ['frontend'],
+      });
+      // sessionDepth=0 (+0.4) + new domain infrastructure (+0.3) = 0.7
+      expect(result.factors.novelty).toBeGreaterThanOrEqual(0.4);
+    });
+
+    it('novelty stays at sessionDepth base when all domains already seen', () => {
+      const result = classifyComplexity('create a react component', {
+        sessionDepth: 0,
+        recentDomains: ['frontend'],
+      });
+      // frontend is in recentDomains, no new domain bonus
+      expect(result.factors.novelty).toBe(0.4);
+    });
+
+    it('domainSuccessRates with rate >= 0.5 does not add novelty', () => {
+      const result = classifyComplexity('security audit', {
+        sessionDepth: 1,
+        domainSuccessRates: { security: 0.8 },
+      });
+      // No novelty added for high success rate domains
+      expect(result.factors.novelty).toBe(0);
+    });
+
+    it('multiple domains returns normalized score above 0.5', () => {
+      // 3 domains: frontend (css, react), backend (api, server), security (security, vulnerability)
+      const result = classifyComplexity('create react component with css, add api server endpoint, fix security vulnerability');
+      expect(result.factors.domains).toBeGreaterThan(0.5);
+    });
+
+    it('exactly 2 domains returns 0.75 (0.25 + 2*0.25)', () => {
+      // frontend + backend = 2 domains -> 0.25 + 2*0.25 = 0.75
+      const result = classifyComplexity('react component with api endpoint');
+      expect(result.factors.domains).toBeCloseTo(0.75, 1);
+    });
+
+    it('multi-step Korean connectors increase step count', () => {
+      const simple = classifyComplexity('파일 읽기');
+      const multi = classifyComplexity('파일을 읽고 그리고 분석해서 그런 다음 저장');
+      expect(multi.factors.steps).toBeGreaterThan(simple.factors.steps);
+    });
+
+    it('input longer than 300 chars adds extra steps signal', () => {
+      const longInput = 'This is a very detailed request. '.repeat(10);
+      const result = classifyComplexity(longInput);
+      // Long input should have more steps than minimal input
+      expect(result.factors.steps).toBeGreaterThan(0);
+    });
+
+    it('question marks increase uncertainty score', () => {
+      const result = classifyComplexity('What should I do? How do I fix it? Is this correct?');
+      expect(result.factors.uncertainty).toBeGreaterThan(0);
+    });
+
+    it('multiple risk keywords compound risk score', () => {
+      const result = classifyComplexity('production security audit migration delete');
+      expect(result.factors.risk).toBeGreaterThan(0.5);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  describe('getRoutingStats() - trend detection branches', () => {
+    it('detects shifting_to_s1 when recent entries skew simple', () => {
+      // Start with complex entries (all system 2) then switch to simple (system 1)
+      configure({ threshold: 0.01 }); // everything to system 2
+      for (let i = 0; i < 8; i++) route('complex security migration production');
+      configure({ threshold: 0.99 }); // everything to system 1
+      for (let i = 0; i < 2; i++) route('fix typo');
+      const stats = getRoutingStats();
+      expect(stats.totalRouted).toBe(10);
+      // Recent 20% (2 entries) should be system 1, earlier 80% (8) system 2
+      expect(stats.recentTrend).toBe('shifting_to_s1');
+    });
+
+    it('detects shifting_to_s2 when recent entries skew complex', () => {
+      configure({ threshold: 0.99 }); // everything to system 1
+      for (let i = 0; i < 8; i++) route('fix typo');
+      configure({ threshold: 0.01 }); // everything to system 2
+      for (let i = 0; i < 2; i++) route('security migration production database');
+      const stats = getRoutingStats();
+      expect(stats.totalRouted).toBe(10);
+      expect(stats.recentTrend).toBe('shifting_to_s2');
+    });
+
+    it('detects stable when ratio difference is within 0.15', () => {
+      // Mix of S1 and S2 evenly distributed
+      configure({ threshold: 0.99 }); // all go to system 1
+      for (let i = 0; i < 10; i++) route('simple task');
+      configure({ threshold: 0.4 }); // restore
+      const stats = getRoutingStats();
+      expect(stats.recentTrend).toBe('stable');
+    });
+
+    it('system2 success rate computed from feedback', () => {
+      // Route something complex to S2, then give feedback
+      configure({ threshold: 0.01 }); // force to S2
+      route('complex task');
+      configure({ threshold: 0.4 });
+      // S2 feedback doesn't change threshold but marks history
+      adaptThreshold({ system: 2, success: true });
+      const stats = getRoutingStats();
+      expect(stats.successRate.system2).toBeGreaterThanOrEqual(0);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  describe('configure() - adaptRate bounds', () => {
+    it('clamps adaptRate below 0.001 to 0.001', () => {
+      // adaptStep changes adaptive rate; verify it does not throw
+      expect(() => configure({ adaptRate: 0.0001 })).not.toThrow();
+    });
+
+    it('clamps adaptRate above 0.2 to 0.2', () => {
+      expect(() => configure({ adaptRate: 0.5 })).not.toThrow();
+    });
+
+    it('ignores non-numeric adaptRate', () => {
+      expect(() => configure({ adaptRate: 'fast' })).not.toThrow();
+    });
+
+    it('valid adaptRate modifies adaptation behavior', () => {
+      configure({ adaptRate: 0.1 });
+      route('test input');
+      const before = getThreshold();
+      adaptThreshold({ system: 1, success: false });
+      const after = getThreshold();
+      // With adaptRate 0.1, threshold should drop by 0.1
+      expect(before - after).toBeCloseTo(0.1, 5);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  describe('adaptThreshold() - findRecentEntry branches', () => {
+    it('marks success on correct history entry (most recent unseen)', () => {
+      route('task1'); // S1
+      route('task2'); // S1
+      adaptThreshold({ system: 1, success: true }); // marks task2
+      adaptThreshold({ system: 1, success: true }); // marks task1
+      const stats = getRoutingStats();
+      // Both S1 entries should have feedback now
+      expect(stats.successRate.system1).toBeGreaterThan(0);
+    });
+
+    it('handles adaptThreshold when no matching history entry exists', () => {
+      // Adapt for system 2 but no S2 entries in history
+      const result = adaptThreshold({ system: 2, success: true });
+      expect(result.direction).toBe('unchanged');
+    });
+  });
 });

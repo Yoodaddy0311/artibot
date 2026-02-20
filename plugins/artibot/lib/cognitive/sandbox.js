@@ -427,10 +427,10 @@ export function cleanup(sandbox) {
 // --- Internal helpers ---
 
 /**
- * Create a blocked execution result.
- * @param {string} command
- * @param {string} sandboxId
- * @param {string} reason
+ * Create a blocked execution result record.
+ * @param {string} command - Command that was blocked
+ * @param {string} sandboxId - Sandbox identifier
+ * @param {string} reason - Reason for blocking
  * @returns {object}
  */
 function createBlockedResult(command, sandboxId, reason) {
@@ -451,9 +451,9 @@ function createBlockedResult(command, sandboxId, reason) {
 }
 
 /**
- * Truncate output string if it exceeds max bytes.
- * @param {string} output
- * @param {number} maxBytes
+ * Truncate output string if it exceeds max bytes limit.
+ * @param {string} output - Output string to truncate
+ * @param {number} maxBytes - Maximum byte size
  * @returns {string}
  */
 function truncateOutput(output, maxBytes) {

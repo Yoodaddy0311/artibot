@@ -200,7 +200,10 @@ process.on('beforeExit', () => {
   flushToDisk();
 });
 
-/** @returns {ToolHistory} */
+/**
+ * Create an empty tool history object.
+ * @returns {ToolHistory}
+ */
 function createEmptyHistory() {
   return {
     version: 2,
@@ -805,19 +808,30 @@ function rebuildAggregates(history) {
 // Utilities
 // ---------------------------------------------------------------------------
 
-/** @param {number} n */
+/**
+ * Clamp a numeric score between 0 and 1.
+ * @param {number} n - Score to clamp
+ * @returns {number}
+ */
 function clampScore(n) {
   return Math.max(0, Math.min(1, Number(n) || 0));
 }
 
-/** @param {number} count @returns {"low"|"medium"|"high"} */
+/**
+ * Determine confidence level from sample count.
+ * @param {number} count - Number of samples
+ * @returns {"low"|"medium"|"high"}
+ */
 function getConfidence(count) {
   if (count >= 20) return 'high';
   if (count >= MIN_SAMPLES) return 'medium';
   return 'low';
 }
 
-/** Clear in-memory cache (useful for testing). */
+/**
+ * Clear in-memory cache. Useful for testing.
+ * @returns {void}
+ */
 export function _clearCache() {
   _history = null;
   _dirty = false;

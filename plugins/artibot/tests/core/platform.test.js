@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { getPlatform, getNodeInfo, checkNodeVersion, getPluginRoot, getHomeDir, resolveFromRoot } from '../../lib/core/platform.js';
 import path from 'node:path';
 

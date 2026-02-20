@@ -545,9 +545,9 @@ export function assessComplexity(task) {
 // --- Internal helpers ---
 
 /**
- * Decompose a task into ordered steps.
- * @param {object} task
- * @param {number} maxSteps
+ * Decompose a task into ordered execution steps.
+ * @param {object} task - Task to decompose
+ * @param {number} maxSteps - Maximum number of steps
  * @returns {Array<object>}
  */
 function decomposeTask(task, maxSteps) {
@@ -578,9 +578,9 @@ function decomposeTask(task, maxSteps) {
 }
 
 /**
- * Create a plan step.
- * @param {number} order
- * @param {string} action
+ * Create a single plan step object.
+ * @param {number} order - Step order/sequence
+ * @param {string} action - Action description
  * @returns {object}
  */
 function createStep(order, action) {
@@ -597,8 +597,8 @@ function createStep(order, action) {
 }
 
 /**
- * Estimate a single step's complexity.
- * @param {string} action
+ * Estimate a single step's complexity level.
+ * @param {string} action - Action description
  * @returns {'low' | 'medium' | 'high'}
  */
 function estimateStepComplexity(action) {
@@ -612,8 +612,8 @@ function estimateStepComplexity(action) {
 }
 
 /**
- * Analyze dependencies between steps.
- * @param {Array<object>} steps
+ * Analyze and extract dependencies between steps.
+ * @param {Array<object>} steps - Steps to analyze
  * @returns {Array<{ from: string, to: string }>}
  */
 function analyzeDependencies(steps) {
@@ -627,9 +627,9 @@ function analyzeDependencies(steps) {
 }
 
 /**
- * Assess risks for plan steps.
- * @param {Array<object>} steps
- * @param {object} task
+ * Assess risks for each plan step.
+ * @param {Array<object>} steps - Steps to assess
+ * @param {object} task - Original task context
  * @returns {Array<object>}
  */
 function assessRisks(steps, _task) {
@@ -680,9 +680,9 @@ function assessRisks(steps, _task) {
 
 /**
  * Estimate overall plan complexity as a 0-1 score.
- * @param {Array<object>} steps
- * @param {Array<object>} dependencies
- * @param {Array<object>} risks
+ * @param {Array<object>} steps - Plan steps
+ * @param {Array<object>} dependencies - Step dependencies
+ * @param {Array<object>} risks - Identified risks
  * @returns {number}
  */
 function estimateComplexity(steps, dependencies, risks) {
@@ -701,9 +701,9 @@ function estimateComplexity(steps, dependencies, risks) {
 }
 
 /**
- * Recommend team composition based on complexity.
+ * Recommend team composition based on complexity score.
  * @param {number} complexity - 0-1 complexity score
- * @param {object} task
+ * @param {object} task - Task to recommend team for
  * @returns {object|null}
  */
 function recommendTeam(complexity, task) {
@@ -729,8 +729,8 @@ function recommendTeam(complexity, task) {
 
 /**
  * Select appropriate teammates based on domain and team level.
- * @param {string} domain
- * @param {'squad' | 'platoon'} level
+ * @param {string} domain - Domain classification
+ * @param {'squad' | 'platoon'} level - Team level
  * @returns {string[]}
  */
 function selectTeammates(domain, level) {
@@ -754,8 +754,8 @@ function selectTeammates(domain, level) {
 /**
  * Resolve execution order considering dependencies.
  * Returns steps in topological order.
- * @param {Array<object>} steps
- * @param {Array<object>} dependencies
+ * @param {Array<object>} steps - Plan steps
+ * @param {Array<object>} dependencies - Step dependencies
  * @returns {Array<object>}
  */
 function resolveExecutionOrder(steps, dependencies) {
@@ -809,9 +809,9 @@ function resolveExecutionOrder(steps, dependencies) {
 
 /**
  * Check if step dependencies are satisfied.
- * @param {object} step
- * @param {Array<object>} completedResults
- * @param {Array<object>} dependencies
+ * @param {object} step - Step to check
+ * @param {Array<object>} completedResults - Completed step results
+ * @param {Array<object>} dependencies - Dependency graph
  * @returns {{ satisfied: boolean, unmet: string[] }}
  */
 function checkDependencies(step, completedResults, dependencies) {
@@ -829,7 +829,7 @@ function checkDependencies(step, completedResults, dependencies) {
 
 /**
  * Extract a human-readable failure reason from a step result.
- * @param {object} stepResult
+ * @param {object} stepResult - Step execution result
  * @returns {string}
  */
 function extractFailureReason(stepResult) {
@@ -847,7 +847,7 @@ function extractFailureReason(stepResult) {
 
 /**
  * Suggest a correction for a failed step.
- * @param {object} failedStep - { stepId, action, reason }
+ * @param {object} failedStep - Failed step with { stepId, action, reason }
  * @returns {string}
  */
 function suggestCorrection(failedStep) {
@@ -871,8 +871,8 @@ function suggestCorrection(failedStep) {
 
 /**
  * Build an adjusted plan from reflection corrections.
- * @param {object} executionResult
- * @param {Array<object>} corrections
+ * @param {object} executionResult - Result of plan execution
+ * @param {Array<object>} corrections - Suggested corrections
  * @returns {object}
  */
 function buildAdjustedPlan(executionResult, corrections) {

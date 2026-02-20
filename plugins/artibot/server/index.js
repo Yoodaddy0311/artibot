@@ -84,7 +84,7 @@ function readBody(req) {
       try {
         const body = Buffer.concat(chunks).toString('utf-8');
         resolve(body ? JSON.parse(body) : {});
-      } catch (err) {
+      } catch {
         reject(new Error('Invalid JSON'));
       }
     });
@@ -267,7 +267,7 @@ async function handleUploadWeights(req, res) {
     setGlobalWeights(merged);
   }
 
-  json(res, 200, { success: true, version, timestamp }, req);
+  return json(res, 200, { success: true, version, timestamp }, req);
 }
 
 /**
@@ -292,7 +292,7 @@ function handleDownloadWeights(req, res) {
     }, req);
   }
 
-  json(res, 200, result, req);
+  return json(res, 200, result, req);
 }
 
 /**
@@ -306,7 +306,7 @@ async function handleTelemetry(req, res) {
   }
 
   storeTelemetry(body.stats);
-  json(res, 200, { success: true }, req);
+  return json(res, 200, { success: true }, req);
 }
 
 /**
@@ -342,7 +342,7 @@ function handleStats(req, res, params) {
     }, req);
   }
 
-  json(res, 200, stats, req);
+  return json(res, 200, stats, req);
 }
 
 // ---------------------------------------------------------------------------
@@ -415,7 +415,7 @@ async function handleRequest(req, res) {
     }
 
     // 404
-    json(res, 404, { error: 'Not found' }, req);
+    return json(res, 404, { error: 'Not found' }, req);
   } catch (err) {
     console.error(`[ERROR] ${req.method} ${pathname}:`, err.message);
 
@@ -427,7 +427,7 @@ async function handleRequest(req, res) {
       return json(res, 413, { error: err.message }, req);
     }
 
-    json(res, 500, { error: 'Internal server error' }, req);
+    return json(res, 500, { error: 'Internal server error' }, req);
   }
 }
 

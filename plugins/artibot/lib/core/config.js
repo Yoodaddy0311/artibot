@@ -4,6 +4,7 @@
  */
 
 import path from 'node:path';
+import { statSync } from 'node:fs';
 import { readJsonFile } from './file.js';
 import { getHomeDir, getPluginRoot } from './platform.js';
 import { validateConfig } from './config-schema.js';
@@ -33,17 +34,37 @@ const DEFAULTS = {
 };
 
 let _cached = null;
+let _cachedMtime = null;
 
 /**
  * Load artibot.config.json with defaults.
- * Caches on first load; pass force=true to reload.
+ * Uses mtime-based cache invalidation: returns cached config if the file has
+ * not changed on disk since the last load. Pass force=true to bypass mtime
+ * check and always reload from disk.
  */
 export async function loadConfig(force = false) {
-  if (_cached && !force) return _cached;
-
   const configPath = path.join(getPluginRoot(), 'artibot.config.json');
+
+  if (_cached && !force) {
+    let currentMtime = null;
+    try {
+      currentMtime = statSync(configPath).mtimeMs;
+    } catch {
+      // File missing or unreadable — fall through to reload
+    }
+    if (currentMtime !== null && currentMtime === _cachedMtime) {
+      return _cached;
+    }
+  }
   const loaded = await readJsonFile(configPath);
   _cached = deepMerge(DEFAULTS, loaded ?? {});
+
+  // Record mtime after successful load so next call can skip the file read
+  try {
+    _cachedMtime = statSync(configPath).mtimeMs;
+  } catch {
+    _cachedMtime = null;
+  }
 
   // Validate merged config and log warnings for invalid fields
   const { valid, errors } = validateConfig(_cached);
@@ -62,9 +83,10 @@ export function getConfig() {
   return _cached;
 }
 
-/** Clear cached config. */
+/** Clear cached config and recorded mtime. */
 export function resetConfig() {
   _cached = null;
+  _cachedMtime = null;
 }
 
 /** Keys that must never be merged to prevent prototype pollution. */

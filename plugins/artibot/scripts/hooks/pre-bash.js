@@ -50,7 +50,8 @@ function normalizeCommand(raw) {
   let cmd = raw;
 
   // Strip ANSI escape codes
-  cmd = cmd.replace(/\x1b\[[0-9;]*m/g, '');
+  // eslint-disable-next-line no-control-regex
+  cmd = cmd.replace(/\u001b\[[0-9;]*m/g, '');
 
   // Replace backtick subshells with their content: `rm` -> rm
   cmd = cmd.replace(/`([^`]*)`/g, '$1');

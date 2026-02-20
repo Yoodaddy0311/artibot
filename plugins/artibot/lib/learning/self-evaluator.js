@@ -31,7 +31,7 @@ function getEvaluationsPath() {
 }
 
 /**
- * Load persisted evaluations from disk.
+ * Load persisted evaluations from disk storage.
  * @returns {Promise<object[]>}
  */
 async function loadEvaluations() {
@@ -41,7 +41,8 @@ async function loadEvaluations() {
 
 /**
  * Save evaluations to disk, pruning old entries beyond MAX_EVALUATIONS.
- * @param {object[]} evaluations
+ * @param {object[]} evaluations - Evaluations to save
+ * @returns {Promise<void>}
  */
 async function saveEvaluations(evaluations) {
   const pruned = evaluations.length > MAX_EVALUATIONS
@@ -258,6 +259,11 @@ export async function getLearningTrends(options = {}) {
 
 // --- Scoring functions ---
 
+/**
+ * Score result accuracy on a scale of 1-5.
+ * @param {object} result - Task result
+ * @returns {number}
+ */
 function scoreAccuracy(result) {
   let score = result.success ? 4 : 1;
   if (result.testsPass === true) score = Math.min(5, score + 1);
@@ -265,6 +271,12 @@ function scoreAccuracy(result) {
   return score;
 }
 
+/**
+ * Score result completeness on a scale of 1-5.
+ * @param {object} task - Task metadata
+ * @param {object} result - Task result
+ * @returns {number}
+ */
 function scoreCompleteness(task, result) {
   let score = 3; // base: average
   if (result.success) score += 1;
@@ -275,6 +287,11 @@ function scoreCompleteness(task, result) {
   return Math.min(5, Math.max(1, Math.round(score * 10) / 10));
 }
 
+/**
+ * Score result efficiency on a scale of 1-5 based on duration.
+ * @param {object} result - Task result
+ * @returns {number}
+ */
 function scoreEfficiency(result) {
   if (result.duration === undefined) return 3;
   // Faster is better: <30s = 5, <60s = 4, <120s = 3, <300s = 2, else 1
@@ -285,6 +302,11 @@ function scoreEfficiency(result) {
   return 1;
 }
 
+/**
+ * Score result user satisfaction on a scale of 1-5.
+ * @param {object} result - Task result
+ * @returns {number}
+ */
 function scoreSatisfaction(result) {
   let score = result.success ? 4 : 2;
   if (result.metrics?.userFeedback === 'positive') score = 5;
@@ -293,6 +315,11 @@ function scoreSatisfaction(result) {
   return score;
 }
 
+/**
+ * Convert overall score to letter grade.
+ * @param {number} overall - Overall score 0-5
+ * @returns {string}
+ */
 function scoreToGrade(overall) {
   if (overall >= 4.5) return 'A';
   if (overall >= 3.5) return 'B';
@@ -301,6 +328,12 @@ function scoreToGrade(overall) {
   return 'F';
 }
 
+/**
+ * Generate human-readable feedback from evaluation dimensions.
+ * @param {object} dimensions - Evaluation dimensions with scores
+ * @param {number} overall - Overall score
+ * @returns {string}
+ */
 function generateFeedback(dimensions, overall) {
   const parts = [];
 
@@ -324,6 +357,12 @@ function generateFeedback(dimensions, overall) {
 
 // --- Analysis helpers ---
 
+/**
+ * Identify dimensions with below-threshold performance.
+ * @param {object[]} evaluations - Evaluation records
+ * @param {number} threshold - Score threshold
+ * @returns {object[]}
+ */
 function findWeakDimensions(evaluations, threshold) {
   const dimSums = {};
   const dimCounts = {};
@@ -360,6 +399,12 @@ function findWeakDimensions(evaluations, threshold) {
   return results.sort((a, b) => a.avgScore - b.avgScore);
 }
 
+/**
+ * Identify task types with below-threshold performance.
+ * @param {object[]} evaluations - Evaluation records
+ * @param {number} threshold - Score threshold
+ * @returns {object[]}
+ */
 function findWeakTaskTypes(evaluations, threshold) {
   const typeSums = {};
   const typeCounts = {};
@@ -385,6 +430,12 @@ function findWeakTaskTypes(evaluations, threshold) {
   return results.sort((a, b) => a.avgScore - b.avgScore);
 }
 
+/**
+ * Calculate average score for a dimension across evaluations.
+ * @param {object[]} evaluations - Evaluation records
+ * @param {string} dim - Dimension name
+ * @returns {number}
+ */
 function avgDimScore(evaluations, dim) {
   if (evaluations.length === 0) return 0;
   let sum = 0;
@@ -398,6 +449,11 @@ function avgDimScore(evaluations, dim) {
   return count > 0 ? sum / count : 0;
 }
 
+/**
+ * Determine trend direction from evaluation history.
+ * @param {object[]} evaluations - Evaluation records
+ * @returns {string}
+ */
 function computeTrend(evaluations) {
   if (evaluations.length < 4) return 'insufficient_data';
   const half = Math.floor(evaluations.length / 2);
@@ -408,6 +464,13 @@ function computeTrend(evaluations) {
   return 'stable';
 }
 
+/**
+ * Build actionable improvement suggestions from analysis.
+ * @param {object[]} weakDimensions - Weak evaluation dimensions
+ * @param {object[]} weakTaskTypes - Weak task types
+ * @param {string} trend - Overall trend direction
+ * @returns {string[]}
+ */
 function buildSuggestions(weakDimensions, weakTaskTypes, trend) {
   const suggestions = [];
 

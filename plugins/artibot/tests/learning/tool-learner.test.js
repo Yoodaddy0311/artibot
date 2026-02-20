@@ -5,8 +5,6 @@ import {
   pruneOldRecords,
   buildContextKey,
   getToolStats,
-  getContextMap,
-  resetHistory,
   recordGroupComparison,
   suggestToolCandidates,
   getGrpoHistory,

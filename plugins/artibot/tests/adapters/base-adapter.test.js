@@ -1,5 +1,4 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import path from 'node:path';
 import { BaseAdapter } from '../../lib/adapters/base-adapter.js';
 import { GeminiAdapter } from '../../lib/adapters/gemini-adapter.js';
 
@@ -22,6 +21,10 @@ class ConcreteAdapter extends BaseAdapter {
     return { path: 'manifest.json', content: '{}' };
   }
 }
+
+// Partial subclass that does NOT override abstract getters/methods
+// Used to verify the base class throws for unimplemented members
+class PartialAdapter extends BaseAdapter {}
 
 describe('BaseAdapter (abstract)', () => {
   it('throws when instantiated directly', () => {
@@ -57,6 +60,52 @@ describe('BaseAdapter (abstract)', () => {
   });
 });
 
+describe('BaseAdapter unimplemented abstract members', () => {
+  // PartialAdapter can be instantiated (new.target !== BaseAdapter),
+  // but accessing any unimplemented getter/method throws.
+  let partial;
+
+  beforeEach(() => {
+    partial = new PartialAdapter({ pluginRoot: '/root', config: {} });
+  });
+
+  it('throws on platformId when not implemented', () => {
+    expect(() => partial.platformId).toThrow('must implement platformId');
+  });
+
+  it('throws on platformName when not implemented', () => {
+    expect(() => partial.platformName).toThrow('must implement platformName');
+  });
+
+  it('throws on instructionFileName when not implemented', () => {
+    expect(() => partial.instructionFileName).toThrow('must implement instructionFileName');
+  });
+
+  it('throws on skillsDir when not implemented', () => {
+    expect(() => partial.skillsDir).toThrow('must implement skillsDir');
+  });
+
+  it('throws on convertSkill() when not implemented', () => {
+    expect(() => partial.convertSkill({})).toThrow('must implement convertSkill()');
+  });
+
+  it('throws on convertAgent() when not implemented', () => {
+    expect(() => partial.convertAgent({})).toThrow('must implement convertAgent()');
+  });
+
+  it('throws on convertCommand() when not implemented', () => {
+    expect(() => partial.convertCommand({})).toThrow('must implement convertCommand()');
+  });
+
+  it('throws on generateManifest() when not implemented', () => {
+    expect(() => partial.generateManifest()).toThrow('must implement generateManifest()');
+  });
+
+  it('error messages include the subclass constructor name', () => {
+    expect(() => partial.platformId).toThrow('PartialAdapter');
+  });
+});
+
 describe('BaseAdapter.validate()', () => {
   let adapter;
   beforeEach(() => {
@@ -81,6 +130,13 @@ describe('BaseAdapter.validate()', () => {
     expect(errors).toContain('Missing platform identifier');
   });
 
+  it('fails when platform is empty string', () => {
+    const result = { platform: '', files: [{ path: 'f.md', content: '' }], warnings: [] };
+    const { valid, errors } = adapter.validate(result);
+    expect(valid).toBe(false);
+    expect(errors).toContain('Missing platform identifier');
+  });
+
   it('fails when files array is empty', () => {
     const result = { platform: 'test', files: [], warnings: [] };
     const { valid, errors } = adapter.validate(result);
@@ -90,8 +146,15 @@ describe('BaseAdapter.validate()', () => {
 
   it('fails when files is undefined', () => {
     const result = { platform: 'test', warnings: [] };
+    const { valid, errors: _errors } = adapter.validate(result);
+    expect(valid).toBe(false);
+  });
+
+  it('fails when files is null (treated as no files)', () => {
+    const result = { platform: 'test', files: null, warnings: [] };
     const { valid, errors } = adapter.validate(result);
     expect(valid).toBe(false);
+    expect(errors.some((e) => e.includes('No files'))).toBe(true);
   });
 
   it('fails when a file entry is missing path', () => {
@@ -116,11 +179,87 @@ describe('BaseAdapter.validate()', () => {
     expect(errors.some((e) => e.includes('content must be a string'))).toBe(true);
   });
 
+  it('fails when a file entry has null content', () => {
+    const result = {
+      platform: 'test',
+      files: [{ path: 'file.md', content: null }],
+      warnings: [],
+    };
+    const { valid, errors } = adapter.validate(result);
+    expect(valid).toBe(false);
+    expect(errors.some((e) => e.includes('content must be a string'))).toBe(true);
+  });
+
+  it('fails when a file entry has object content', () => {
+    const result = {
+      platform: 'test',
+      files: [{ path: 'file.md', content: { data: true } }],
+      warnings: [],
+    };
+    const { valid, errors } = adapter.validate(result);
+    expect(valid).toBe(false);
+    expect(errors.some((e) => e.includes('content must be a string'))).toBe(true);
+  });
+
   it('returns multiple errors when multiple issues exist', () => {
     const result = { files: [], warnings: [] };
     const { valid, errors } = adapter.validate(result);
     expect(valid).toBe(false);
     expect(errors.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('accumulates errors for multiple bad file entries', () => {
+    const result = {
+      platform: 'test',
+      files: [
+        { content: 'missing path' },
+        { path: 'ok.md', content: 123 },
+      ],
+      warnings: [],
+    };
+    const { valid, errors } = adapter.validate(result);
+    expect(valid).toBe(false);
+    expect(errors.some((e) => e.includes('missing path'))).toBe(true);
+    expect(errors.some((e) => e.includes('content must be a string'))).toBe(true);
+  });
+
+  it('passes when file content is empty string', () => {
+    const result = {
+      platform: 'test',
+      files: [{ path: 'empty.md', content: '' }],
+      warnings: [],
+    };
+    const { valid, errors } = adapter.validate(result);
+    expect(valid).toBe(true);
+    expect(errors).toEqual([]);
+  });
+
+  it('passes when multiple valid files are provided', () => {
+    const result = {
+      platform: 'test',
+      files: [
+        { path: 'file1.md', content: 'content one' },
+        { path: 'file2.md', content: 'content two' },
+        { path: 'file3.yaml', content: 'name: test\n' },
+      ],
+      warnings: [],
+    };
+    const { valid, errors } = adapter.validate(result);
+    expect(valid).toBe(true);
+    expect(errors).toEqual([]);
+  });
+
+  it('valid field is false when any errors present', () => {
+    const result = { platform: 'test', files: [], warnings: [] };
+    const { valid } = adapter.validate(result);
+    expect(valid).toBe(false);
+  });
+
+  it('valid field is boolean true on success', () => {
+    const result = { platform: 'test', files: [{ path: 'a.md', content: 'ok' }], warnings: [] };
+    const { valid } = adapter.validate(result);
+    expect(typeof valid).toBe('boolean');
+    expect(valid).toBe(true);
   });
 });
 

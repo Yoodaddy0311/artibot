@@ -74,7 +74,7 @@ let _warmed = false;
 // ---------------------------------------------------------------------------
 
 /**
- * Get the patterns directory: ~/.claude/artibot/patterns/
+ * Get the patterns directory path.
  * @returns {string}
  */
 function getPatternsDir() {
@@ -87,7 +87,7 @@ function getPatternsDir() {
 
 /**
  * Tokenize input text into normalized lowercase tokens.
- * @param {string} text
+ * @param {string} text - Text to tokenize
  * @returns {string[]}
  */
 function tokenize(text) {
@@ -100,9 +100,9 @@ function tokenize(text) {
 }
 
 /**
- * Build a cache key from input and optional context fields.
- * @param {string} input
- * @param {object} [context]
+ * Build a cache key from input and context fields.
+ * @param {string} input - Input string
+ * @param {object} [context] - Optional context object
  * @returns {string}
  */
 function buildCacheKey(input, context) {
@@ -133,11 +133,11 @@ function buildCacheKey(input, context) {
 
 /**
  * Score a pattern against tokenized input.
- * Uses keyword overlap ratio + bonus for domain/command match.
+ * Uses keyword overlap ratio plus bonuses for domain/command match.
  *
- * @param {PatternRecord} pattern
- * @param {string[]} inputTokens
- * @param {object} [context]
+ * @param {PatternRecord} pattern - Pattern to score
+ * @param {string[]} inputTokens - Tokenized input
+ * @param {object} [context] - Optional context
  * @returns {{ score: number, matchedKeywords: string[] }}
  */
 function scorePattern(pattern, inputTokens, context) {
@@ -375,8 +375,8 @@ export function escalateToSystem2(input, reason) {
 
 /**
  * Determine escalation reason based on confidence and source.
- * @param {number} confidence
- * @param {string} source
+ * @param {number} confidence - Confidence score
+ * @param {string} source - Response source
  * @returns {string}
  */
 function _getEscalationReason(confidence, source) {
@@ -502,8 +502,8 @@ export async function recordPatternOutcome(patternId, success) {
 
 /**
  * Search memory with caching to avoid repeated disk I/O.
- * @param {string} input
- * @param {object} context
+ * @param {string} input - Search query
+ * @param {object} context - Context for search
  * @returns {Promise<Array<{entry: object, score: number}>>}
  */
 async function _searchMemoryCached(input, context) {
@@ -524,9 +524,9 @@ async function _searchMemoryCached(input, context) {
 }
 
 /**
- * Get tool suggestions with caching.
- * @param {string} input
- * @param {object} context
+ * Get tool suggestions with caching to avoid repeated lookups.
+ * @param {string} input - Input string for tool detection
+ * @param {object} context - Context for tool selection
  * @returns {Promise<Array>}
  */
 async function _suggestToolCached(input, context) {
@@ -581,8 +581,8 @@ const TARGET_MAP = {
 };
 
 /**
- * Detect the primary operation from tokens.
- * @param {string[]} tokens
+ * Detect the primary operation from input tokens.
+ * @param {string[]} tokens - Input tokens
  * @returns {string}
  */
 function _detectOperation(tokens) {
@@ -595,8 +595,8 @@ function _detectOperation(tokens) {
 
 /**
  * Detect the primary target from tokens and context.
- * @param {string[]} tokens
- * @param {object} [context]
+ * @param {string[]} tokens - Input tokens
+ * @param {object} [context] - Optional context
  * @returns {string}
  */
 function _detectTarget(tokens, context) {

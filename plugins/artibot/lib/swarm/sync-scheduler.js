@@ -59,7 +59,7 @@ let _syncInProgress = false;
  */
 
 /**
- * Load sync state from disk.
+ * Load sync state from disk storage.
  *
  * @returns {Promise<SyncState>}
  */
@@ -78,9 +78,9 @@ async function loadSyncState() {
 }
 
 /**
- * Save sync state to disk.
+ * Save sync state to disk storage.
  *
- * @param {SyncState} state
+ * @param {SyncState} state - Sync state to save
  * @returns {Promise<void>}
  */
 async function saveSyncState(state) {
@@ -186,9 +186,9 @@ export async function forceSync(options = {}) {
 }
 
 /**
- * Internal sync execution.
+ * Internal implementation of sync execution.
  *
- * @param {object} options
+ * @param {object} [options] - Sync options
  * @returns {Promise<object>}
  */
 async function performSync(options = {}) {

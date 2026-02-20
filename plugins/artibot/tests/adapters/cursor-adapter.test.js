@@ -105,6 +105,30 @@ describe('CursorAdapter', () => {
       expect(result.content).toContain('  First line');
       expect(result.content).toContain('  Second line');
     });
+
+    it('passes through content with no Claude refs unchanged', () => {
+      const skill = { ...baseSkill, content: 'Generic content with no platform references.' };
+      const result = adapter.convertSkill(skill);
+      expect(result.content).toContain('Generic content with no platform references.');
+    });
+
+    it('replaces multiple .claude/skills/ occurrences', () => {
+      const skill = {
+        ...baseSkill,
+        content: 'See .claude/skills/foo and .claude/skills/bar.',
+      };
+      const result = adapter.convertSkill(skill);
+      expect(result.content).not.toContain('.claude/skills/');
+      expect(result.content).toContain('.cursor/skills/foo');
+      expect(result.content).toContain('.cursor/skills/bar');
+    });
+
+    it('handles description with trailing whitespace trimmed per line', () => {
+      const skill = { ...baseSkill, description: 'Clean description   ' };
+      const result = adapter.convertSkill(skill);
+      expect(result.content).toContain('Clean description');
+      expect(result.content).not.toContain('Clean description   ');
+    });
   });
 
   describe('convertAgent()', () => {
@@ -151,11 +175,32 @@ describe('CursorAdapter', () => {
       expect(result.mode.customPrompt).not.toContain('SendMessage(type: "broadcast")');
     });
 
+    it('strips SendMessage shutdown_request reference', () => {
+      const agent = { name: 'test', content: 'SendMessage(type: "shutdown_request") on done' };
+      const result = adapter.convertAgent(agent);
+      expect(result.mode.customPrompt).not.toContain('SendMessage(type: "shutdown_request")');
+      expect(result.mode.customPrompt).toContain('(agent communication)');
+    });
+
     it('replaces "Claude Code" with "AI Agent Platform"', () => {
       const agent = { name: 'test', content: 'Claude Code is the engine' };
       const result = adapter.convertAgent(agent);
       expect(result.mode.customPrompt).not.toContain('Claude Code');
       expect(result.mode.customPrompt).toContain('AI Agent Platform');
+    });
+
+    it('customPrompt is trimmed', () => {
+      const agent = { name: 'test', content: '  padded content  ' };
+      const result = adapter.convertAgent(agent);
+      expect(result.mode.customPrompt).toBe(result.mode.customPrompt.trim());
+    });
+
+    it('handles agent with empty content', () => {
+      const agent = { name: 'empty', content: '' };
+      const result = adapter.convertAgent(agent);
+      expect(result.path).toBe('_mode_empty');
+      expect(result.mode.name).toBe('empty');
+      expect(result.mode.customPrompt).toBe('');
     });
   });
 
@@ -227,11 +272,44 @@ describe('CursorAdapter', () => {
       expect(result.mode.tools).toContain('mcp');
     });
 
+    it('does not include "terminal" when no matching keywords', () => {
+      const agent = { name: 'test', content: 'Read and write files only.' };
+      const result = adapter.convertAgent(agent);
+      expect(result.mode.tools).not.toContain('terminal');
+    });
+
+    it('does not include "search" when no matching keywords', () => {
+      const agent = { name: 'test', content: 'Read and edit source code.' };
+      const result = adapter.convertAgent(agent);
+      expect(result.mode.tools).not.toContain('search');
+    });
+
+    it('does not include "web" when no matching keywords', () => {
+      const agent = { name: 'test', content: 'Read and edit local files only.' };
+      const result = adapter.convertAgent(agent);
+      expect(result.mode.tools).not.toContain('web');
+    });
+
+    it('does not include "mcp" when no matching keywords', () => {
+      const agent = { name: 'test', content: 'Basic file operations.' };
+      const result = adapter.convertAgent(agent);
+      expect(result.mode.tools).not.toContain('mcp');
+    });
+
     it('does not duplicate tools when multiple matching keywords exist', () => {
       const agent = { name: 'test', content: 'Search and grep and find all patterns.' };
       const result = adapter.convertAgent(agent);
       const searchCount = result.mode.tools.filter((t) => t === 'search').length;
       expect(searchCount).toBe(1);
+    });
+
+    it('does not duplicate "read" or "edit" base tools even if mentioned in content', () => {
+      const agent = { name: 'test', content: 'Read and edit files using read and edit.' };
+      const result = adapter.convertAgent(agent);
+      const readCount = result.mode.tools.filter((t) => t === 'read').length;
+      const editCount = result.mode.tools.filter((t) => t === 'edit').length;
+      expect(readCount).toBe(1);
+      expect(editCount).toBe(1);
     });
 
     it('infers multiple tools from content with many keywords', () => {
@@ -254,6 +332,24 @@ describe('CursorAdapter', () => {
       expect(result.mode.tools).toContain('terminal');
       expect(result.mode.tools).toContain('search');
     });
+
+    it('performs case-insensitive matching for "web" keyword', () => {
+      const agent = { name: 'test', content: 'Access WEB endpoints via FETCH requests at URL.' };
+      const result = adapter.convertAgent(agent);
+      expect(result.mode.tools).toContain('web');
+    });
+
+    it('performs case-insensitive matching for "mcp" keyword', () => {
+      const agent = { name: 'test', content: 'Use MCP protocol servers.' };
+      const result = adapter.convertAgent(agent);
+      expect(result.mode.tools).toContain('mcp');
+    });
+
+    it('returns tools as an array with at least 2 elements (read + edit)', () => {
+      const agent = { name: 'minimal', content: 'Simple.' };
+      const result = adapter.convertAgent(agent);
+      expect(result.mode.tools.length).toBeGreaterThanOrEqual(2);
+    });
   });
 
   describe('convertCommand()', () => {
@@ -268,6 +364,31 @@ describe('CursorAdapter', () => {
     it('preserves original command content as-is', () => {
       const result = adapter.convertCommand(baseCommand);
       expect(result.content).toBe(baseCommand.content);
+    });
+
+    it('handles command names with hyphens', () => {
+      const command = { name: 'run-tests', content: 'Run test suite.' };
+      const result = adapter.convertCommand(command);
+      const normalized = result.path.replace(/\\/g, '/');
+      expect(normalized).toBe('.cursor/prompts/run-tests.md');
+    });
+
+    it('handles command with empty content', () => {
+      const command = { name: 'noop', content: '' };
+      const result = adapter.convertCommand(command);
+      expect(result.content).toBe('');
+      const normalized = result.path.replace(/\\/g, '/');
+      expect(normalized).toBe('.cursor/prompts/noop.md');
+    });
+
+    it('handles command with multiline content', () => {
+      const command = {
+        name: 'build',
+        content: '## Build\n\nStep 1: Compile\nStep 2: Link\nStep 3: Package',
+      };
+      const result = adapter.convertCommand(command);
+      expect(result.content).toContain('Step 1: Compile');
+      expect(result.content).toContain('Step 3: Package');
     });
   });
 
@@ -305,6 +426,28 @@ describe('CursorAdapter', () => {
       expect(parsed.modes[0].name).toBe('valid');
     });
 
+    it('filters out entries with undefined mode property', () => {
+      const modeEntries = [
+        { mode: { name: 'good', customPrompt: 'Good', tools: [] } },
+        { mode: undefined },
+        {},
+      ];
+      const result = adapter.generateModesJson(modeEntries);
+      const parsed = JSON.parse(result.content);
+      expect(parsed.modes).toHaveLength(1);
+      expect(parsed.modes[0].name).toBe('good');
+    });
+
+    it('filters out entries with false mode property', () => {
+      const modeEntries = [
+        { mode: { name: 'real', customPrompt: 'Real', tools: [] } },
+        { mode: false },
+      ];
+      const result = adapter.generateModesJson(modeEntries);
+      const parsed = JSON.parse(result.content);
+      expect(parsed.modes).toHaveLength(1);
+    });
+
     it('content is pretty-printed JSON ending with newline', () => {
       const modeEntries = [
         { mode: { name: 'x', customPrompt: 'X', tools: [] } },
@@ -320,6 +463,29 @@ describe('CursorAdapter', () => {
       const result = adapter.generateModesJson([]);
       const parsed = JSON.parse(result.content);
       expect(parsed.modes).toEqual([]);
+    });
+
+    it('preserves tool arrays in each mode', () => {
+      const modeEntries = [
+        { mode: { name: 'full', customPrompt: 'Full', tools: ['read', 'edit', 'terminal', 'search'] } },
+      ];
+      const result = adapter.generateModesJson(modeEntries);
+      const parsed = JSON.parse(result.content);
+      expect(parsed.modes[0].tools).toEqual(['read', 'edit', 'terminal', 'search']);
+    });
+
+    it('preserves multiple modes in output order', () => {
+      const modeEntries = [
+        { mode: { name: 'alpha', customPrompt: 'Alpha', tools: [] } },
+        { mode: { name: 'beta', customPrompt: 'Beta', tools: [] } },
+        { mode: { name: 'gamma', customPrompt: 'Gamma', tools: [] } },
+      ];
+      const result = adapter.generateModesJson(modeEntries);
+      const parsed = JSON.parse(result.content);
+      expect(parsed.modes).toHaveLength(3);
+      expect(parsed.modes[0].name).toBe('alpha');
+      expect(parsed.modes[1].name).toBe('beta');
+      expect(parsed.modes[2].name).toBe('gamma');
     });
   });
 
@@ -340,6 +506,15 @@ describe('CursorAdapter', () => {
       expect(manifest.content).toContain('Version: 1.1.0');
     });
 
+    it('defaults version to 1.1.0 when config has agents but no version', () => {
+      const agentsNoVersionAdapter = new CursorAdapter({
+        pluginRoot: '/root',
+        config: { agents: { taskBased: { qa: 'qa-engineer' } } },
+      });
+      const manifest = agentsNoVersionAdapter.generateManifest();
+      expect(manifest.content).toContain('Version: 1.1.0');
+    });
+
     it('includes core principles section', () => {
       const manifest = adapter.generateManifest();
       expect(manifest.content).toContain('## Core Principles');
@@ -357,6 +532,32 @@ describe('CursorAdapter', () => {
       expect(manifest.content).toContain('## Project Structure');
       expect(manifest.content).toContain('agents/');
       expect(manifest.content).toContain('skills/');
+    });
+
+    it('includes immutability principle', () => {
+      const manifest = adapter.generateManifest();
+      expect(manifest.content).toContain('Immutability');
+    });
+
+    it('includes test-driven development principle', () => {
+      const manifest = adapter.generateManifest();
+      expect(manifest.content).toContain('Test-driven development');
+    });
+
+    it('includes no-deep-nesting coding standard', () => {
+      const manifest = adapter.generateManifest();
+      expect(manifest.content).toContain('No deep nesting');
+    });
+
+    it('includes error handling coding standard', () => {
+      const manifest = adapter.generateManifest();
+      expect(manifest.content).toContain('error handling');
+    });
+
+    it('content is a non-empty string', () => {
+      const manifest = adapter.generateManifest();
+      expect(typeof manifest.content).toBe('string');
+      expect(manifest.content.length).toBeGreaterThan(0);
     });
   });
 
@@ -384,11 +585,50 @@ describe('CursorAdapter', () => {
       expect(valid).toBe(false);
     });
 
-    it('validates properly generated output end-to-end', () => {
+    it('validates properly generated manifest output end-to-end', () => {
       const manifest = adapter.generateManifest();
       const result = {
         platform: adapter.platformId,
         files: [manifest],
+        warnings: [],
+      };
+      const { valid } = adapter.validate(result);
+      expect(valid).toBe(true);
+    });
+
+    it('validates properly generated skill output end-to-end', () => {
+      const skill = adapter.convertSkill({
+        name: 'test',
+        description: 'Test skill',
+        dirName: 'test',
+        content: 'Test content.',
+      });
+      const result = {
+        platform: adapter.platformId,
+        files: [skill],
+        warnings: [],
+      };
+      const { valid } = adapter.validate(result);
+      expect(valid).toBe(true);
+    });
+
+    it('validates properly generated command output end-to-end', () => {
+      const cmd = adapter.convertCommand({ name: 'build', content: '## Build the project.' });
+      const result = {
+        platform: adapter.platformId,
+        files: [cmd],
+        warnings: [],
+      };
+      const { valid } = adapter.validate(result);
+      expect(valid).toBe(true);
+    });
+
+    it('validates modes.json output end-to-end', () => {
+      const agentEntry = adapter.convertAgent({ name: 'frontend', content: 'Frontend content.' });
+      const modeFile = adapter.generateModesJson([agentEntry]);
+      const result = {
+        platform: adapter.platformId,
+        files: [modeFile],
         warnings: [],
       };
       const { valid } = adapter.validate(result);

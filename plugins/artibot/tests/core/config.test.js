@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { loadConfig, getConfig, resetConfig } from '../../lib/core/config.js';
 
 // Mock the file module
@@ -12,7 +12,14 @@ vi.mock('../../lib/core/platform.js', () => ({
   getHomeDir: vi.fn(() => '/fake/home'),
 }));
 
+// Mock node:fs so statSync is controllable in tests.
+// Default: file exists with mtime 1000.
+vi.mock('node:fs', () => ({
+  statSync: vi.fn(() => ({ mtimeMs: 1000 })),
+}));
+
 const { readJsonFile } = await import('../../lib/core/file.js');
+const { statSync } = await import('node:fs');
 
 describe('config', () => {
   beforeEach(() => {
@@ -76,6 +83,75 @@ describe('config', () => {
       });
       const config = await loadConfig();
       expect(config.automation.supportedLanguages).toEqual(['en']);
+    });
+  });
+
+  describe('mtime-based cache invalidation', () => {
+    it('returns cached config when mtime is unchanged', async () => {
+      statSync.mockReturnValue({ mtimeMs: 1000 });
+      readJsonFile.mockResolvedValue({ version: '1.5.0' });
+
+      const first = await loadConfig();
+      // mtime unchanged — second call must skip readJsonFile
+      const second = await loadConfig();
+
+      expect(first).toBe(second);
+      expect(readJsonFile).toHaveBeenCalledTimes(1);
+    });
+
+    it('reloads when mtime has changed', async () => {
+      statSync.mockReturnValue({ mtimeMs: 1000 });
+      readJsonFile.mockResolvedValue({ version: '1.5.0' });
+      await loadConfig();
+
+      // Simulate file change: new mtime
+      statSync.mockReturnValue({ mtimeMs: 2000 });
+      readJsonFile.mockResolvedValue({ version: '2.0.0' });
+      const reloaded = await loadConfig();
+
+      expect(reloaded.version).toBe('2.0.0');
+      expect(readJsonFile).toHaveBeenCalledTimes(2);
+    });
+
+    it('reloads when statSync throws (file missing after first load)', async () => {
+      statSync.mockReturnValue({ mtimeMs: 1000 });
+      readJsonFile.mockResolvedValue({ version: '1.5.0' });
+      await loadConfig();
+
+      // File disappears
+      statSync.mockImplementation(() => { throw new Error('ENOENT'); });
+      readJsonFile.mockResolvedValue(null);
+      const reloaded = await loadConfig();
+
+      // Falls back to defaults when file is missing
+      expect(reloaded.version).toBe('1.0.0');
+      expect(readJsonFile).toHaveBeenCalledTimes(2);
+    });
+
+    it('force=true reloads even when mtime is unchanged', async () => {
+      statSync.mockReturnValue({ mtimeMs: 1000 });
+      readJsonFile.mockResolvedValue({ version: '1.5.0' });
+      await loadConfig();
+
+      readJsonFile.mockResolvedValue({ version: '3.0.0' });
+      const forced = await loadConfig(true);
+
+      expect(forced.version).toBe('3.0.0');
+      expect(readJsonFile).toHaveBeenCalledTimes(2);
+    });
+
+    it('resetConfig clears cached mtime so next load always reads file', async () => {
+      statSync.mockReturnValue({ mtimeMs: 1000 });
+      readJsonFile.mockResolvedValue({ version: '1.5.0' });
+      await loadConfig();
+
+      resetConfig();
+
+      readJsonFile.mockResolvedValue({ version: '2.0.0' });
+      const fresh = await loadConfig();
+
+      expect(fresh.version).toBe('2.0.0');
+      expect(readJsonFile).toHaveBeenCalledTimes(2);
     });
   });
 

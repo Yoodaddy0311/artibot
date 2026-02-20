@@ -247,8 +247,8 @@ export async function batchLearn(experiences) {
 }
 
 /**
- * Group experiences by "type::category" key.
- * @param {Experience[]} experiences
+ * Group experiences by "type::category" composite key.
+ * @param {Experience[]} experiences - Array of experience objects
  * @returns {Object<string, Experience[]>}
  */
 function groupExperiences(experiences) {
@@ -298,8 +298,8 @@ function grpoRankGroup(group) {
 }
 
 /**
- * Score a single experience using rule-based evaluators.
- * @param {Experience} exp
+ * Score a single experience using rule-based evaluators for each dimension.
+ * @param {Experience} exp - Experience to score
  * @returns {object} Scores per dimension
  */
 function scoreExperience(exp) {
@@ -379,11 +379,11 @@ function extractPattern(groupKey, ranked) {
 }
 
 /**
- * Generate a human-readable insight from pattern extraction.
- * @param {string} type
- * @param {string} category
- * @param {object} bestEntry
- * @param {number} groupMean
+ * Generate a human-readable insight from pattern extraction data.
+ * @param {string} type - Pattern type
+ * @param {string} category - Pattern category
+ * @param {object} bestEntry - Best performing entry from group
+ * @param {number} groupMean - Mean score of the group
  * @returns {string}
  */
 function generateInsight(type, category, bestEntry, groupMean) {
@@ -601,7 +601,7 @@ export function scheduleLearning(sessionContext = {}) {
 // ---------------------------------------------------------------------------
 
 /**
- * Load experiences from disk.
+ * Load all experiences from disk storage.
  * @returns {Promise<Experience[]>}
  */
 async function loadExperiences() {
@@ -610,7 +610,7 @@ async function loadExperiences() {
 }
 
 /**
- * Load learning log from disk.
+ * Load the learning log from disk storage.
  * @returns {Promise<object[]>}
  */
 async function loadLearningLog() {
@@ -619,8 +619,8 @@ async function loadLearningLog() {
 }
 
 /**
- * Append a learning log entry.
- * @param {object} entry
+ * Append an entry to the learning log and persist to disk.
+ * @param {object} entry - Log entry to append
  * @returns {Promise<void>}
  */
 async function appendLearningLog(entry) {
@@ -636,6 +636,11 @@ async function appendLearningLog(entry) {
 // Utilities
 // ---------------------------------------------------------------------------
 
+/**
+ * Clamp a value between 0 and 1.
+ * @param {number} value - Value to clamp
+ * @returns {number}
+ */
 function clamp01(value) {
   if (typeof value !== 'number' || Number.isNaN(value)) return 0;
   return Math.max(0, Math.min(1, value));

@@ -107,6 +107,41 @@ describe('CodexAdapter', () => {
       expect(result.content).toContain('  Line one');
       expect(result.content).toContain('  Line two');
     });
+
+    it('passes through content with no Claude-specific references unchanged', () => {
+      const skill = {
+        ...baseSkill,
+        content: 'Generic content with no platform-specific references.',
+      };
+      const result = adapter.convertSkill(skill);
+      expect(result.content).toContain('Generic content with no platform-specific references.');
+    });
+
+    it('replaces multiple occurrences of Claude Code in content', () => {
+      const skill = {
+        ...baseSkill,
+        content: 'Claude Code is great. Use Claude Code for this.',
+      };
+      const result = adapter.convertSkill(skill);
+      expect(result.content).not.toContain('Claude Code');
+    });
+
+    it('replaces multiple occurrences of .claude/skills/ in content', () => {
+      const skill = {
+        ...baseSkill,
+        content: 'See .claude/skills/a and .claude/skills/b for details.',
+      };
+      const result = adapter.convertSkill(skill);
+      expect(result.content).not.toContain('.claude/skills/');
+    });
+
+    it('handles description with trailing whitespace per line', () => {
+      const skill = { ...baseSkill, description: 'Description with trailing   ' };
+      const result = adapter.convertSkill(skill);
+      // cleanDescription trims trailing whitespace per line
+      expect(result.content).toContain('Description with trailing');
+      expect(result.content).not.toContain('trailing   ');
+    });
   });
 
   describe('convertAgent()', () => {
@@ -126,6 +161,19 @@ describe('CodexAdapter', () => {
       const agent = { name: 'devops', content: 'DevOps content' };
       const result = adapter.convertAgent(agent);
       expect(result.content).toContain('## Agent: devops');
+    });
+
+    it('falls back to name when role is undefined', () => {
+      const agent = { name: 'qa', content: 'QA content', role: undefined };
+      const result = adapter.convertAgent(agent);
+      expect(result.content).toContain('## Agent: qa');
+    });
+
+    it('falls back to name when role is empty string', () => {
+      // falsy role -> falls back to name
+      const agent = { name: 'security', content: 'Security content', role: '' };
+      const result = adapter.convertAgent(agent);
+      expect(result.content).toContain('## Agent: security');
     });
 
     it('strips TeamCreate and TeamDelete references', () => {
@@ -150,10 +198,59 @@ describe('CodexAdapter', () => {
       expect(result.content).toContain('(agent communication)');
     });
 
+    it('strips SendMessage shutdown_request references', () => {
+      const agent = { name: 'test', content: 'SendMessage(type: "shutdown_request") to agent' };
+      const result = adapter.convertAgent(agent);
+      expect(result.content).not.toContain('SendMessage(type: "shutdown_request")');
+      expect(result.content).toContain('(agent communication)');
+    });
+
+    it('strips SendMessage shutdown_response references', () => {
+      const agent = { name: 'test', content: 'SendMessage(type: "shutdown_response") from agent' };
+      const result = adapter.convertAgent(agent);
+      expect(result.content).not.toContain('SendMessage(type: "shutdown_response")');
+      expect(result.content).toContain('(agent communication)');
+    });
+
     it('replaces "Claude Code" with "AI Agent Platform"', () => {
       const agent = { name: 'test', content: 'Claude Code is the platform' };
       const result = adapter.convertAgent(agent);
       expect(result.content).not.toContain('Claude Code');
+      expect(result.content).toContain('AI Agent Platform');
+    });
+
+    it('content wraps in section with newlines', () => {
+      const agent = { name: 'backend', content: 'Backend content', role: 'Backend Dev' };
+      const result = adapter.convertAgent(agent);
+      // Should start and end with newlines for clean concatenation
+      expect(result.content).toMatch(/^\n/);
+      expect(result.content).toMatch(/\n$/);
+    });
+
+    it('handles agent with empty content', () => {
+      const agent = { name: 'empty', content: '', role: 'Empty Role' };
+      const result = adapter.convertAgent(agent);
+      expect(result.path).toBe('_agents_section_empty');
+      expect(result.content).toContain('## Agent: Empty Role');
+    });
+
+    it('handles combined API references in one content block', () => {
+      const agent = {
+        name: 'orchestrator',
+        content: [
+          'TeamCreate and TeamDelete are used.',
+          'SendMessage(type: "broadcast") all agents.',
+          'CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 required.',
+          'Claude Code orchestrates the workflow.',
+        ].join('\n'),
+        role: 'Orchestrator',
+      };
+      const result = adapter.convertAgent(agent);
+      expect(result.content).not.toContain('TeamCreate');
+      expect(result.content).not.toContain('CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS');
+      expect(result.content).not.toContain('Claude Code');
+      expect(result.content).toContain('(team coordination)');
+      expect(result.content).toContain('(platform agent configuration)');
       expect(result.content).toContain('AI Agent Platform');
     });
   });
@@ -181,6 +278,38 @@ describe('CodexAdapter', () => {
       const result = adapter.convertCommand(baseCommand);
       expect(result.content).toContain('## Build');
       expect(result.content).toContain('Builds the project.');
+    });
+
+    it('handles command names with hyphens', () => {
+      const command = { name: 'run-tests', content: 'Run test suite.' };
+      const result = adapter.convertCommand(command);
+      const normalized = result.path.replace(/\\/g, '/');
+      expect(normalized).toBe('.agents/skills/cmd-run-tests/SKILL.md');
+      expect(result.content).toContain('name: cmd-run-tests');
+      expect(result.content).toContain('Workflow for /run-tests command');
+    });
+
+    it('handles command with empty content', () => {
+      const command = { name: 'noop', content: '' };
+      const result = adapter.convertCommand(command);
+      expect(result.content).toContain('name: cmd-noop');
+      expect(result.content).toContain('Workflow for /noop command');
+    });
+
+    it('includes YAML frontmatter delimiters', () => {
+      const result = adapter.convertCommand(baseCommand);
+      expect(result.content).toMatch(/^---/);
+      expect(result.content).toMatch(/---\n/);
+    });
+
+    it('handles command with multiline content', () => {
+      const command = {
+        name: 'deploy',
+        content: '## Deploy\n\nStep 1: Build\nStep 2: Test\nStep 3: Deploy',
+      };
+      const result = adapter.convertCommand(command);
+      expect(result.content).toContain('Step 1: Build');
+      expect(result.content).toContain('Step 3: Deploy');
     });
   });
 
@@ -215,6 +344,12 @@ describe('CodexAdapter', () => {
       expect(manifest.content).toContain('task: "backend"');
     });
 
+    it('lists all three agents from config', () => {
+      const manifest = adapter.generateManifest();
+      expect(manifest.content).toContain('name: "security-reviewer"');
+      expect(manifest.content).toContain('task: "security"');
+    });
+
     it('handles empty agents config gracefully', () => {
       const emptyAdapter = new CodexAdapter({ pluginRoot: '/root', config: { version: '1.0.0' } });
       const manifest = emptyAdapter.generateManifest();
@@ -222,9 +357,41 @@ describe('CodexAdapter', () => {
       expect(manifest.content).not.toContain('name: "');
     });
 
+    it('handles null agents config gracefully (no taskBased)', () => {
+      const nullAgentsAdapter = new CodexAdapter({
+        pluginRoot: '/root',
+        config: { version: '1.0.0', agents: null },
+      });
+      const manifest = nullAgentsAdapter.generateManifest();
+      expect(manifest.content).toContain('agents:');
+      // Should not throw and should not list any agents
+      expect(manifest.content).not.toContain('name: "frontend');
+    });
+
+    it('handles config with agents but no taskBased key', () => {
+      const noTaskBasedAdapter = new CodexAdapter({
+        pluginRoot: '/root',
+        config: { version: '2.0.0', agents: { patterns: ['leader'] } },
+      });
+      const manifest = noTaskBasedAdapter.generateManifest();
+      expect(manifest.content).toContain('version: "2.0.0"');
+      expect(manifest.content).not.toContain('name: "');
+    });
+
     it('content ends with newline', () => {
       const manifest = adapter.generateManifest();
       expect(manifest.content.endsWith('\n')).toBe(true);
+    });
+
+    it('content includes header comment', () => {
+      const manifest = adapter.generateManifest();
+      expect(manifest.content).toContain('# Artibot - AI Agent Teams Orchestration for Codex CLI');
+    });
+
+    it('content includes auto-generated comment with version', () => {
+      const manifest = adapter.generateManifest();
+      expect(manifest.content).toContain('# Auto-generated from artibot.config.json');
+      expect(manifest.content).toContain('1.3.0');
     });
   });
 
@@ -246,6 +413,12 @@ describe('CodexAdapter', () => {
       expect(result.content).toContain('Version: 1.3.0');
     });
 
+    it('uses default version 1.1.0 when config has no version', () => {
+      const noVersionAdapter = new CodexAdapter({ pluginRoot: '/root', config: {} });
+      const result = noVersionAdapter.generateAgentsMd([]);
+      expect(result.content).toContain('Version: 1.1.0');
+    });
+
     it('filters out non-agent section entries', () => {
       const sections = [
         { path: '_agents_section_test', content: '\n## Agent: Test\n\nTest\n' },
@@ -263,6 +436,41 @@ describe('CodexAdapter', () => {
       ];
       const result = adapter.generateAgentsMd(sections);
       expect(result.content).toContain('---');
+    });
+
+    it('returns AGENTS.md path', () => {
+      const result = adapter.generateAgentsMd([]);
+      expect(result.path).toBe('AGENTS.md');
+    });
+
+    it('includes header even when no sections provided', () => {
+      const result = adapter.generateAgentsMd([]);
+      expect(result.content).toContain('# Artibot Agent Instructions');
+      expect(result.content).toContain('Auto-generated from Artibot agent definitions.');
+    });
+
+    it('includes horizontal rule in header', () => {
+      const result = adapter.generateAgentsMd([]);
+      expect(result.content).toContain('---');
+    });
+
+    it('handles single agent section without separator issue', () => {
+      const sections = [
+        { path: '_agents_section_solo', content: '\n## Agent: Solo\n\nOnly one.\n' },
+      ];
+      const result = adapter.generateAgentsMd(sections);
+      expect(result.content).toContain('## Agent: Solo');
+      expect(result.content).toContain('Only one.');
+    });
+
+    it('filters all entries when none start with _agents_section_', () => {
+      const sections = [
+        { path: 'AGENTS.md', content: 'Main file' },
+        { path: 'agents/openai.yaml', content: 'Manifest' },
+      ];
+      const result = adapter.generateAgentsMd(sections);
+      expect(result.content).not.toContain('Main file');
+      expect(result.content).not.toContain('Manifest');
     });
   });
 
@@ -301,6 +509,45 @@ describe('CodexAdapter', () => {
       const { valid, errors } = adapter.validate(result);
       expect(valid).toBe(false);
       expect(errors.some((e) => e.includes('content must be a string'))).toBe(true);
+    });
+
+    it('validates end-to-end generated manifest output', () => {
+      const manifest = adapter.generateManifest();
+      const result = {
+        platform: adapter.platformId,
+        files: [manifest],
+        warnings: [],
+      };
+      const { valid } = adapter.validate(result);
+      expect(valid).toBe(true);
+    });
+
+    it('validates end-to-end generated skill output', () => {
+      const skill = adapter.convertSkill({
+        name: 'test',
+        description: 'Test',
+        dirName: 'test',
+        content: 'Some content',
+      });
+      const result = {
+        platform: adapter.platformId,
+        files: [skill],
+        warnings: [],
+      };
+      const { valid } = adapter.validate(result);
+      expect(valid).toBe(true);
+    });
+
+    it('validates end-to-end generated AGENTS.md output', () => {
+      const agentSection = adapter.convertAgent({ name: 'frontend', content: 'Content', role: 'Frontend' });
+      const agentsMd = adapter.generateAgentsMd([agentSection]);
+      const result = {
+        platform: adapter.platformId,
+        files: [agentsMd],
+        warnings: [],
+      };
+      const { valid } = adapter.validate(result);
+      expect(valid).toBe(true);
     });
   });
 });
