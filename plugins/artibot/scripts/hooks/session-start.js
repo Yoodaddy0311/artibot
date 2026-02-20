@@ -9,6 +9,7 @@ import { readStdin, writeStdout, getPluginRoot, resolveConfigPath, parseJSON, to
 import { readFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { checkForUpdate } from '../../lib/core/version-checker.js';
 
 async function main() {
   const raw = await readStdin();
@@ -90,10 +91,32 @@ async function main() {
     setupHint = '\n  Enable full team mode: Add {"env":{"CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS":"1"}} to ~/.claude/settings.json';
   }
 
-  const message = [
+  const lines = [
     `Artibot v${version} initialized`,
     `Platform: ${env.platform}/${env.arch} | Node ${env.nodeVersion} | Mode: ${teamMode}${restored}${setupHint}`,
-  ].join('\n');
+  ];
+
+  // Non-blocking update notification — any error is swallowed.
+  // Wrapped with a 2000ms outer timeout so the update check never consumes
+  // more than 2 seconds, leaving ample headroom within the 5000ms hook limit.
+  try {
+    const cacheDir = path.join(home, '.claude', 'artibot');
+    const updatePromise = checkForUpdate(version, cacheDir);
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('timeout')), 2000)
+    );
+    const updateInfo = await Promise.race([updatePromise, timeoutPromise]);
+    if (updateInfo.hasUpdate) {
+      lines.push(
+        `\u2b06\ufe0f New version available: v${updateInfo.latestVersion} (current: v${version})`,
+        `   Update: /artibot:update --force`
+      );
+    }
+  } catch {
+    // Never block session start on version-check failures
+  }
+
+  const message = lines.join('\n');
 
   writeStdout({ message });
 }

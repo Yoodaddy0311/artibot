@@ -62,12 +62,38 @@ export function cleanDescription(desc) {
  * Team orchestration is Claude-exclusive; other platforms use single-agent mode.
  *
  * @param {string} content
+ * @param {{ envLabel?: string }} [mapping] - Platform-specific replacement labels
+ * @param {string} [mapping.envLabel] - Replacement for CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS
+ *   (default: '(platform agent teams)')
  * @returns {string}
  */
-export function stripAgentTeamsRefs(content) {
+export function stripAgentTeamsRefs(content, mapping = {}) {
+  const envLabel = mapping.envLabel ?? '(platform agent teams)';
   return content
     .replace(/TeamCreate|TeamDelete/g, '(team coordination)')
     .replace(/SendMessage\(type: "(?:broadcast|shutdown_request|shutdown_response|plan_approval_response)"\)/g, '(agent communication)')
-    .replace(/CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS/g, '(platform agent teams)')
+    .replace(/CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS/g, envLabel)
     .replace(/Claude Code/g, 'AI Agent Platform');
+}
+
+// ---------------------------------------------------------------------------
+// Claude-Specific Reference Stripping
+// ---------------------------------------------------------------------------
+
+/**
+ * Remove Claude Code-specific references from skill content.
+ * Replaces Claude-specific paths and names with platform-appropriate equivalents.
+ *
+ * @param {string} content
+ * @param {{ skillsPath: string, platformName: string, instructionFile: string }} mapping
+ * @param {string} mapping.skillsPath - Replacement for '.claude/skills/' (e.g. '.agent/skills/')
+ * @param {string} mapping.platformName - Replacement for 'Claude Code' (e.g. 'AI Agent')
+ * @param {string} mapping.instructionFile - Replacement for 'CLAUDE.md' (e.g. 'GEMINI.md')
+ * @returns {string}
+ */
+export function stripClaudeSpecificRefs(content, mapping) {
+  return content
+    .replace(/\.claude\/skills\//g, mapping.skillsPath)
+    .replace(/Claude Code/g, mapping.platformName)
+    .replace(/CLAUDE\.md/g, mapping.instructionFile);
 }

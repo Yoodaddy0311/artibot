@@ -14,7 +14,7 @@
 
 import path from 'node:path';
 import { BaseAdapter } from './base-adapter.js';
-import { buildFrontmatter, cleanDescription } from './adapter-utils.js';
+import { buildFrontmatter, cleanDescription, stripAgentTeamsRefs, stripClaudeSpecificRefs } from './adapter-utils.js';
 
 export class CodexAdapter extends BaseAdapter {
   get platformId() {
@@ -44,7 +44,11 @@ export class CodexAdapter extends BaseAdapter {
       description: cleanDescription(skill.description),
     });
 
-    const body = stripClaudeSpecificRefs(skill.content);
+    const body = stripClaudeSpecificRefs(skill.content, {
+      skillsPath: '.agents/skills/',
+      platformName: 'AI Agent',
+      instructionFile: 'AGENTS.md',
+    });
 
     return {
       path: path.join(this.skillsDir, skill.dirName, 'SKILL.md'),
@@ -58,7 +62,7 @@ export class CodexAdapter extends BaseAdapter {
    * Returns a content block to be concatenated into the final AGENTS.md.
    */
   convertAgent(agent) {
-    const content = stripAgentTeamsRefs(agent.content);
+    const content = stripAgentTeamsRefs(agent.content, { envLabel: '(platform agent configuration)' });
     return {
       path: `_agents_section_${agent.name}`,
       content: `\n## Agent: ${agent.role || agent.name}\n\n${content}\n`,
@@ -138,19 +142,4 @@ export class CodexAdapter extends BaseAdapter {
       content: header + body,
     };
   }
-}
-
-function stripClaudeSpecificRefs(content) {
-  return content
-    .replace(/\.claude\/skills\//g, '.agents/skills/')
-    .replace(/Claude Code/g, 'AI Agent')
-    .replace(/CLAUDE\.md/g, 'AGENTS.md');
-}
-
-function stripAgentTeamsRefs(content) {
-  return content
-    .replace(/TeamCreate|TeamDelete/g, '(team coordination)')
-    .replace(/SendMessage\(type: "(?:broadcast|shutdown_request|shutdown_response|plan_approval_response)"\)/g, '(agent communication)')
-    .replace(/CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS/g, '(platform agent configuration)')
-    .replace(/Claude Code/g, 'AI Agent Platform');
 }

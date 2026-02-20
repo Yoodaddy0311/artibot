@@ -13,6 +13,7 @@ import { loadConfig } from './config.js';
 import { GeminiAdapter } from '../adapters/gemini-adapter.js';
 import { CodexAdapter } from '../adapters/codex-adapter.js';
 import { CursorAdapter } from '../adapters/cursor-adapter.js';
+import { AntigravityAdapter } from '../adapters/antigravity-adapter.js';
 
 /**
  * Parse YAML frontmatter from a SKILL.md file content.
@@ -142,8 +143,10 @@ async function createAdapter(platform, options = {}) {
       return new CodexAdapter(adapterOptions);
     case 'cursor':
       return new CursorAdapter(adapterOptions);
+    case 'antigravity':
+      return new AntigravityAdapter(adapterOptions);
     default:
-      throw new Error(`Unknown platform: ${platform}. Supported: gemini-cli, codex-cli, cursor`);
+      throw new Error(`Unknown platform: ${platform}. Supported: gemini-cli, codex-cli, cursor, antigravity`);
   }
 }
 
@@ -174,6 +177,16 @@ export async function exportForCodex(options = {}) {
  */
 export async function exportForCursor(options = {}) {
   const adapter = await createAdapter('cursor', options);
+  return exportForPlatform(adapter, options);
+}
+
+/**
+ * Export all skills for Google Antigravity format.
+ * @param {object} [options] - Override pluginRoot and config
+ * @returns {Promise<import('../adapters/base-adapter.js').AdapterResult>}
+ */
+export async function exportForAntigravity(options = {}) {
+  const adapter = await createAdapter('antigravity', options);
   return exportForPlatform(adapter, options);
 }
 
@@ -228,15 +241,17 @@ async function exportForPlatform(adapter, options = {}) {
  * @returns {Promise<Record<string, import('../adapters/base-adapter.js').AdapterResult>>}
  */
 export async function exportForAll(options = {}) {
-  const [gemini, codex, cursor] = await Promise.all([
+  const [gemini, codex, cursor, antigravity] = await Promise.all([
     exportForGemini(options),
     exportForCodex(options),
     exportForCursor(options),
+    exportForAntigravity(options),
   ]);
 
   return {
     'gemini-cli': gemini,
     'codex-cli': codex,
     cursor,
+    antigravity,
   };
 }

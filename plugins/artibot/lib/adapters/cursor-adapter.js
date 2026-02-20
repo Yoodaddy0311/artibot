@@ -14,7 +14,7 @@
 
 import path from 'node:path';
 import { BaseAdapter } from './base-adapter.js';
-import { buildFrontmatter, cleanDescription } from './adapter-utils.js';
+import { buildFrontmatter, cleanDescription, stripAgentTeamsRefs, stripClaudeSpecificRefs } from './adapter-utils.js';
 
 export class CursorAdapter extends BaseAdapter {
   get platformId() {
@@ -43,7 +43,11 @@ export class CursorAdapter extends BaseAdapter {
       description: cleanDescription(skill.description),
     });
 
-    const body = stripClaudeSpecificRefs(skill.content);
+    const body = stripClaudeSpecificRefs(skill.content, {
+      skillsPath: '.cursor/skills/',
+      platformName: 'AI Agent',
+      instructionFile: '.cursorrules',
+    });
 
     return {
       path: path.join(this.skillsDir, skill.dirName, 'SKILL.md'),
@@ -56,7 +60,7 @@ export class CursorAdapter extends BaseAdapter {
    * Returns a mode object for inclusion in .cursor/modes.json.
    */
   convertAgent(agent) {
-    const prompt = stripAgentTeamsRefs(agent.content);
+    const prompt = stripAgentTeamsRefs(agent.content, { envLabel: '(platform agent configuration)' });
 
     const mode = {
       name: agent.name,
@@ -134,21 +138,6 @@ export class CursorAdapter extends BaseAdapter {
       content: rules,
     };
   }
-}
-
-function stripClaudeSpecificRefs(content) {
-  return content
-    .replace(/\.claude\/skills\//g, '.cursor/skills/')
-    .replace(/Claude Code/g, 'AI Agent')
-    .replace(/CLAUDE\.md/g, '.cursorrules');
-}
-
-function stripAgentTeamsRefs(content) {
-  return content
-    .replace(/TeamCreate|TeamDelete/g, '(team coordination)')
-    .replace(/SendMessage\(type: "(?:broadcast|shutdown_request|shutdown_response|plan_approval_response)"\)/g, '(agent communication)')
-    .replace(/CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS/g, '(platform agent configuration)')
-    .replace(/Claude Code/g, 'AI Agent Platform');
 }
 
 /**

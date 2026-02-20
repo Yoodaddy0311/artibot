@@ -26,7 +26,7 @@
 
 import path from 'node:path';
 import { BaseAdapter } from './base-adapter.js';
-import { buildFrontmatter, cleanDescription } from './adapter-utils.js';
+import { buildFrontmatter, cleanDescription, stripClaudeSpecificRefs } from './adapter-utils.js';
 
 export class AntigravityAdapter extends BaseAdapter {
   get platformId() {
@@ -55,7 +55,11 @@ export class AntigravityAdapter extends BaseAdapter {
       description: cleanDescription(skill.description),
     });
 
-    const body = stripClaudeSpecificRefs(skill.content);
+    const body = stripClaudeSpecificRefs(skill.content, {
+      skillsPath: '.antigravity/skills/',
+      platformName: 'AI Agent',
+      instructionFile: '.antigravity/rules.md',
+    });
 
     return {
       path: path.join(this.skillsDir, skill.dirName, 'SKILL.md'),
@@ -133,13 +137,6 @@ export class AntigravityAdapter extends BaseAdapter {
       content: rules.join('\n'),
     };
   }
-}
-
-function stripClaudeSpecificRefs(content) {
-  return content
-    .replace(/\.claude\/skills\//g, '.antigravity/skills/')
-    .replace(/Claude Code/g, 'AI Agent')
-    .replace(/CLAUDE\.md/g, '.antigravity/rules.md');
 }
 
 /**
