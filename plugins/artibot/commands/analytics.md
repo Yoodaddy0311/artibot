@@ -1,6 +1,6 @@
 ---
 description: Marketing analytics dashboards, KPI tracking, performance reports, and attribution analysis
-argument-hint: [report-type] [--kpi metrics] [--period] [--channel]
+argument-hint: '[report-type] e.g. "캠페인 ROI 리포트"'
 allowed-tools: [Read, Write, Glob, Grep, Bash, Task, WebSearch, TodoWrite]
 ---
 

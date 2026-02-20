@@ -1,6 +1,6 @@
 ---
 description: Code review with severity classification using code-reviewer agent
-argument-hint: [target] [--focus security|quality|performance]
+argument-hint: '[target] e.g. "src/ 코드 리뷰해줘"'
 allowed-tools: [Read, Glob, Grep, Bash, Task, TodoWrite]
 ---
 

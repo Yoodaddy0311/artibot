@@ -1,6 +1,6 @@
 ---
 description: Marketing strategy planning with market analysis, competitive intelligence, and campaign architecture
-argument-hint: [strategy-type] [--market] [--competitor] [--campaign] [--budget]
+argument-hint: '[topic] e.g. "GTM 전략 수립"'
 allowed-tools: [Read, Write, Glob, Grep, Task, WebSearch, TodoWrite]
 ---
 

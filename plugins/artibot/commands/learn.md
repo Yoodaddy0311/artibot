@@ -1,6 +1,6 @@
 ---
 description: Extract and persist reusable patterns from the current codebase
-argument-hint: [pattern-or-topic] [--from file|session|project]
+argument-hint: '[topic] e.g. "에러 처리 패턴 학습"'
 allowed-tools: [Read, Write, Edit, Glob, Grep, TodoWrite]
 ---
 

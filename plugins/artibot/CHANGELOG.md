@@ -9,39 +9,114 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [1.5.0] - Unreleased
+
+_Next planned release. No changes yet._
 
 ---
 
 ## [1.4.0] - 2026-02-19
 
-### Quality Boost / 품질 향상
+### Summary / 요약
 
-**English**: Major quality and infrastructure release. 874 tests passing at 91% coverage. Full CI/CD pipeline with ESLint v9 flat config. Progressive Disclosure skill system and Language Skills added.
+**English**: Largest release to date. Comprehensive quality audit achieving 8.2/10 evaluation score. Security hardening (prototype pollution, CORS, shell evasion), performance optimization (lazy-load, pattern caching), 2,050 lines of dead code removed. Intent system integration, marketing vertical expansion (8 agents, 11 commands, 34 skills), cross-platform adapters, auto-update system, and 1,226 tests passing at 100%.
 
-**한국어**: 주요 품질 및 인프라 릴리즈. 874개 테스트 통과, 91% 커버리지. ESLint v9 flat config를 포함한 완전한 CI/CD 파이프라인. Progressive Disclosure 스킬 시스템 및 Language Skills 추가.
+**한국어**: 역대 최대 규모 릴리즈. 종합 품질 감사를 통해 평가 점수 8.2/10 달성. 보안 강화(프로토타입 오염, CORS, 셸 우회 방지), 성능 최적화(지연 로딩, 패턴 캐싱), 2,050줄의 불필요 코드 제거. 인텐트 시스템 통합, 마케팅 버티컬 확장(에이전트 8, 커맨드 11, 스킬 34), 크로스 플랫폼 어댑터, 자동 업데이트 시스템, 그리고 1,226개 테스트 100% 통과.
 
 ### Added / 추가됨
-- **Test suite**: 874 tests passing with 91% coverage (statements, branches, functions, lines)
-- **CI/CD pipeline**: `npm run ci` executes validate + lint + test in sequence
-- **ESLint v9**: Flat config (`eslint.config.js`) for `lib/`, `scripts/`, `tests/`
-- **ESLint scripts**: `npm run lint` and `npm run lint:fix`
+
+- **Marketing agents** (8 new): `content-marketer`, `marketing-strategist`, `data-analyst`, `presentation-designer`, `seo-specialist`, `cro-specialist`, `ad-specialist`, `repo-benchmarker`
+- **Marketing commands** (11 new): `/mkt`, `/email`, `/social`, `/ppt`, `/excel`, `/ad`, `/seo`, `/crm`, `/analytics`, `/cro`, `/content`
+- **Marketing skills** (34 new): Full content marketing, SEO, CRO, and advertising skill trees
+- **Marketing playbooks** (4 new): `marketing-campaign`, `marketing-audit`, `content-launch`, `competitive-analysis`
+- **Language Skills** (16 new): TypeScript, Python, Go, Rust, Java, and more with cultural adaptation
 - **Progressive Disclosure skill**: Complexity-tiered information delivery (Quick/Standard/Expert modes)
-- **Language Skills**: Multi-language support framework for en/ko/ja with cultural adaptation
+- **Cross-platform adapters**: Gemini CLI, Codex, Cursor, Antigravity support via `lib/adapters/`
+- **Auto-update system**: `version-checker.js` with GitHub Releases API, 24h cache, `/artibot:update` command (`--check`, `--force`, `--dry-run`)
+- **`/artibot:assemble`**: Easter egg command that summons the full agent team via Agent Teams API
+- **Intent integration**: `lib/intent/` integrated into cognitive-router for intent detection enrichment
+- **Session context**: `lib/context/session` integrated into `session-start.js` for state management
+- **`performance-engineer` agent**: Registered in `plugin.json` manifest
+- **`memory-tracker.js` hook**: Registered in `hooks.json` (SessionStart, SessionEnd, PostToolUseFailure)
+- **Security hook tests**: `pre-bash.test.js` (48 tests), `pre-write.test.js` (54 tests)
+- **ESLint v9**: Flat config with 14 rules (up from 4) including complexity, no-eval, prefer-const
+- **ESLint scripts**: `npm run lint` and `npm run lint:fix`
+- **CI/CD pipeline**: `npm run ci` executes validate + lint + test in sequence
+- **`artibot-report` output style**: Markdown table format for reports
+- **Vitest shebang plugin**: Fixes Windows hook test failures (+150 tests recovered)
+- **Test suite**: 1,226 tests passing at 100% (37 test files) -- 874에서 시작, 1,232까지 확장 후 데드코드 정리로 1,226 확정
 - **CONTRIBUTING.md**: Bilingual (en/ko) contributor guide
 - **SECURITY.md**: Security policy with PII scrubber and privacy protection documentation
 - **CHANGELOG.md**: Keep a Changelog format with bilingual entries
+- **Blog post**: Artibot introduction for non-developers (비개발자용 소개글)
 
-### Improved / 개선됨
-- Test coverage increased from ~70% to 91%
-- PII scrubber: added Windows-specific path patterns (Documents and Settings)
-- Hook system: improved TeammateIdle detection latency
-- CI validation scripts: stricter agent/skill/command MD structure checks
+### Changed / 변경됨
+
+- **Evaluation score**: 6.9/10 --> 8.2/10 (종합 품질 감사 결과)
+- **`/sc` routing table**: Completed with 6 previously missing commands
+- **`artibot.config.json`**: taskBased command-to-agent mapping completed, orphaned config keys removed
+- **`validate.js`**: Node.js 18+ compatibility fix (`import.meta.dirname` --> `fileURLToPath`)
+- **Event types**: Synchronized across `validate.js` and CI `validate-hooks.js` (16 events)
+- **Model policy**: Marketing agents assigned to `haiku` tier for cost efficiency
+- **Agent categories**: New `support` category for marketing and utility agents
+- **README stats**: Updated to match actual file counts (agents 25, skills 60, commands 38+)
+- **`assemble.md`**: Hero titles replaced with plain role descriptions
+- **Adapter deduplication**: Shared `stripClaudeSpecificRefs` in `adapter-utils.js`
+- **`parseFrontmatter`**: Deduplicated into shared `adapter-utils.js`
+- **Root artifacts**: 11 files moved to `docs/archive/`
 
 ### Fixed / 수정됨
-- `pii-scrubber.js`: false positive on Windows drive letter paths
-- `memory-manager.js`: race condition in concurrent write operations
-- `config.js`: environment variable override not propagating to sub-modules
+
+#### Security / 보안
+
+- **`config.js`**: Block `__proto__`/`constructor`/`prototype` in `deepMerge` (prototype pollution prevention / 프로토타입 오염 차단)
+- **`server/index.js`**: CORS restricted to localhost (was wildcard `*`)
+- **`server/index.js`**: Bearer token authentication + localhost-only fallback added
+- **`pre-bash.js`**: `normalizeCommand()` strips shell evasion (quotes, backticks, `$()`, ANSI escape sequences)
+- **`pre-bash.js`**: Extended curl/wget pipe blocking to python/perl/ruby/node interpreters
+- **`pre-write.js`**: Fail-closed security mode + secret content detection patterns added
+- **`pre-bash.js`**: Fail-closed security mode + expanded dangerous command patterns (curl|sh, SQL DROP, Windows del/rmdir)
+
+#### Performance / 성능
+
+- **`pii-scrubber.js`**: Cache sorted patterns at module level instead of sorting per call
+- **`tool-tracker.js`**: Lazy-load modules with singleton cache instead of dynamic import per event
+
+#### Bugs / 버그
+
+- **`pii-scrubber.js`**: False positive on Windows drive letter paths
+- **`memory-manager.js`**: Race condition in concurrent write operations
+- **`config.js`**: Environment variable override not propagating to sub-modules
+- **`plugin.json`**: `commands`/`skills` fields changed from string to array format
+- **`hooks.json`**: Matcher format changed to expression syntax; hook types corrected from `prompt`/`agent` to `command`
+- **`session-start.js`**: Hoist `home` variable to function scope (was undefined)
+- **`marketplace.json`**: Version updated to 1.4.0, homepage URL corrected
+- **`tool-tracker.js`**: JSDoc `*/` syntax error broke PostToolUse hooks
+- **`skill-exporter.js`**: JSDoc `*/` syntax error broke PostToolUse hooks
+- **Korean path handling**: `pathToFileURL` replaced with manual `file://` URL for paths containing Korean characters (바탕 화면)
+- **`session-end.js`**: Use `atomicWriteSync` instead of `writeFileSync`
+- **Hook catch handlers**: Added `process.exit(0)` to 7 handlers to prevent zombie processes
+- **GitHub URLs**: Unified from `artience/artibot` to `Yoodaddy0311/artibot` across 10 files
+- **SKILL.md references**: Agent references corrected from `persona-*` to real agent types
+
+#### Code Quality / 코드 품질
+
+- **`system2.js`**: Immutable step update via spread operator (mutation 제거)
+- **`learning/index.js`**: 4 silent catches now log to stderr
+- **`getPluginRoot`**: Consolidated from 4 implementations to 1 canonical source
+- **`scripts/utils`**: I/O functions deduplicated via re-export from `lib/core/io.js`
+- **`atomicWriteSync`** / **`toFileUrl`**: Added to `scripts/utils/index.js`
+- **`ARTIBOT_DIR` export**: Added with telemetry opt-out config support
+
+### Removed / 제거됨
+
+- **`telemetry-collector.js`** (`lib/system/`): Dead code -- removed with tests (-2,050 lines total)
+- **`context-injector.js`** (`lib/system/`): Dead code -- removed with tests
+- **`hierarchy.js`** (`lib/context/`): Dead code -- removed with tests
+- **`lib/system/` directory**: Empty after dead code removal
+- **`tests/system/` directory**: Empty after dead code removal
+- **Legacy duplicate directories**: `agents/`, `artibot/skills/` shadowing plugin paths removed
+- **`maxTeammates` doc mismatch**: Corrected from `7` to `null`
 
 ---
 
@@ -194,7 +269,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[Unreleased]: https://github.com/Yoodaddy0311/artibot/compare/v1.4.0...HEAD
+[1.5.0]: https://github.com/Yoodaddy0311/artibot/compare/v1.4.0...HEAD
 [1.4.0]: https://github.com/Yoodaddy0311/artibot/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/Yoodaddy0311/artibot/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/Yoodaddy0311/artibot/compare/v1.1.0...v1.2.0

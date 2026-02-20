@@ -7,6 +7,7 @@
 
 import path from 'node:path';
 import { readJsonFile, writeJsonFile } from '../core/file.js';
+import { getHomeDir } from '../core/platform.js';
 
 const EVALUATIONS_FILENAME = 'evaluations.json';
 const MAX_EVALUATIONS = 500;
@@ -26,8 +27,7 @@ const DIMENSIONS = {
  * @returns {string}
  */
 function getEvaluationsPath() {
-  const home = process.env.USERPROFILE || process.env.HOME || '';
-  return path.join(home, '.claude', 'artibot', EVALUATIONS_FILENAME);
+  return path.join(getHomeDir(), '.claude', 'artibot', EVALUATIONS_FILENAME);
 }
 
 /**

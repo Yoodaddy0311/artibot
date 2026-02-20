@@ -1,6 +1,6 @@
 ---
 description: Federated Swarm Intelligence - manage collective learning participation
-argument-hint: [status|sync|opt-in|opt-out|stats] [--flags]
+argument-hint: '[action] e.g. "스웜 동기화 상태 확인"'
 allowed-tools: [Read, Bash, TodoWrite]
 ---
 

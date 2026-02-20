@@ -1,6 +1,6 @@
 ---
 description: Test-driven development workflow (RED -> GREEN -> REFACTOR)
-argument-hint: [feature-or-function] [--framework jest|vitest|pytest]
+argument-hint: '[feature] e.g. "TDD로 유틸 함수 개발"'
 allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, Task, TodoWrite]
 ---
 

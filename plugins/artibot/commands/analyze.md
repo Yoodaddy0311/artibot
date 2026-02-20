@@ -1,6 +1,6 @@
 ---
 description: Multi-dimensional code and system analysis with agent delegation
-argument-hint: [target] [--focus performance|security|quality|architecture]
+argument-hint: '[target] e.g. "보안 취약점 분석해줘"'
 allowed-tools: [Read, Glob, Grep, Bash, Task, TodoWrite]
 ---
 

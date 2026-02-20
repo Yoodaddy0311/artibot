@@ -1,6 +1,6 @@
 ---
 description: Ad copy creation, creative briefs, campaign structure, and A/B variant generation for paid channels
-argument-hint: [ad-type] [--channel google|meta|linkedin|twitter] [--variants n] [--brief]
+argument-hint: '[ad-type] e.g. "구글 검색광고 카피 작성"'
 allowed-tools: [Read, Write, Task, WebSearch, TodoWrite]
 ---
 

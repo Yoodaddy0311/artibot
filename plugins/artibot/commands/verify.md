@@ -1,6 +1,6 @@
 ---
 description: Sequential verification pipeline - lint, typecheck, test, build
-argument-hint: [target] [--quick] [--fix]
+argument-hint: '[target] e.g. "린트+타입+테스트 전체 검증"'
 allowed-tools: [Read, Bash, Glob, Grep, TodoWrite]
 ---
 

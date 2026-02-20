@@ -9,6 +9,7 @@ vi.mock('../../lib/core/file.js', () => ({
 // Mock the platform module
 vi.mock('../../lib/core/platform.js', () => ({
   getPluginRoot: vi.fn(() => '/fake/plugin/root'),
+  getHomeDir: vi.fn(() => '/fake/home'),
 }));
 
 const { readJsonFile } = await import('../../lib/core/file.js');

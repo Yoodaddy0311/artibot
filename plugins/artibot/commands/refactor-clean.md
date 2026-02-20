@@ -1,6 +1,6 @@
 ---
 description: Refactoring and dead code cleanup using refactor-cleaner agent
-argument-hint: [target] [--type dead-code|duplication|complexity|all]
+argument-hint: '[target] e.g. "중복 코드 제거 및 정리"'
 allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, Task, TodoWrite]
 ---
 

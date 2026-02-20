@@ -11,8 +11,8 @@
  */
 
 import path from 'node:path';
-import os from 'node:os';
 import { readJsonFile, writeJsonFile, ensureDir } from '../core/file.js';
+import { getHomeDir } from '../core/platform.js';
 
 const GRPO_FILENAME = 'grpo-history.json';
 const MAX_HISTORY = 300;
@@ -50,7 +50,7 @@ const TEAM_RULES = {
 // ---------------------------------------------------------------------------
 
 function getStorageDir() {
-  return path.join(os.homedir(), '.claude', 'artibot');
+  return path.join(getHomeDir(), '.claude', 'artibot');
 }
 
 function getHistoryPath() {

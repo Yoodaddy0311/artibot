@@ -1,6 +1,6 @@
 ---
 description: System design with architect agent and ADR generation
-argument-hint: [system-or-module] [--type api|data|infra|ui]
+argument-hint: '[module] e.g. "인증 시스템 아키텍처 설계"'
 allowed-tools: [Read, Glob, Grep, Bash, Task, TodoWrite]
 ---
 

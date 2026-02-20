@@ -1,6 +1,6 @@
 ---
 description: Data analysis, report generation, dashboard design, and spreadsheet automation
-argument-hint: [analysis-type] [--data source] [--format table|chart|dashboard] [--export]
+argument-hint: '[type] e.g. "매출 데이터 대시보드 생성"'
 allowed-tools: [Read, Write, Glob, Grep, Bash, Task, WebSearch, TodoWrite]
 ---
 

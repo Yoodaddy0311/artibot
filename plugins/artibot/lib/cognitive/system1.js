@@ -18,6 +18,7 @@
 import path from 'node:path';
 import { Cache } from '../core/cache.js';
 import { readJsonFile, writeJsonFile, listFiles, ensureDir } from '../core/file.js';
+import { getHomeDir } from '../core/platform.js';
 import { searchMemory } from '../learning/memory-manager.js';
 import { suggestTool, buildContextKey } from '../learning/tool-learner.js';
 
@@ -77,8 +78,7 @@ let _warmed = false;
  * @returns {string}
  */
 function getPatternsDir() {
-  const home = process.env.USERPROFILE || process.env.HOME || '';
-  return path.join(home, '.claude', 'artibot', PATTERNS_DIR_NAME);
+  return path.join(getHomeDir(), '.claude', 'artibot', PATTERNS_DIR_NAME);
 }
 
 // ---------------------------------------------------------------------------

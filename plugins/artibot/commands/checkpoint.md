@@ -1,6 +1,6 @@
 ---
 description: Create state checkpoint snapshots saved to auto memory
-argument-hint: [label] [--include-diff] [--restore]
+argument-hint: '[label] e.g. "리팩토링 전 스냅샷"'
 allowed-tools: [Read, Write, Bash, Glob, Grep, TodoWrite]
 ---
 

@@ -1,6 +1,6 @@
 ---
 description: Project build with framework auto-detection and optimization
-argument-hint: [target] [--framework next|fastapi|vite|...] [--optimize]
+argument-hint: '[target] e.g. "React 프로젝트 빌드"'
 allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, Task, TodoWrite]
 ---
 

@@ -1,6 +1,6 @@
 ---
 description: Social media content creation, scheduling strategy, and platform-specific optimization
-argument-hint: [content-type] [--platform twitter|linkedin|instagram|tiktok|all] [--campaign]
+argument-hint: '[type] e.g. "링크드인 시리즈 포스트"'
 allowed-tools: [Read, Write, Task, WebSearch, TodoWrite]
 ---
 

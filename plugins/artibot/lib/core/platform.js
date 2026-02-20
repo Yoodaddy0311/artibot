@@ -3,7 +3,7 @@
  * @module lib/core/platform
  */
 
-import { platform, arch, version } from 'node:os';
+import { platform, arch, version, homedir } from 'node:os';
 import { versions } from 'node:process';
 import path from 'node:path';
 
@@ -43,6 +43,15 @@ export function getPluginRoot() {
   if (envRoot) return path.resolve(envRoot);
   // Fallback: this file lives in <root>/lib/core/platform.js
   return path.resolve(new URL('..', new URL('..', import.meta.url)).pathname.replace(/^\/([A-Z]:)/i, '$1'));
+}
+
+/**
+ * Resolve the user home directory cross-platform.
+ * Prefers USERPROFILE (Windows) then HOME (Unix), falling back to os.homedir().
+ * @returns {string}
+ */
+export function getHomeDir() {
+  return process.env.USERPROFILE || process.env.HOME || homedir();
 }
 
 /**

@@ -1,6 +1,6 @@
 ---
 description: Educational explanations of code, concepts, and systems with progressive depth
-argument-hint: [topic-or-path] [--depth shallow|medium|deep]
+argument-hint: '[topic] e.g. "이벤트 루프 동작 원리"'
 allowed-tools: [Read, Glob, Grep, Bash, Task]
 ---
 

@@ -1,6 +1,6 @@
 ---
 description: Documentation generation and maintenance with doc-updater agent
-argument-hint: [target] [--type readme|api|guide|changelog]
+argument-hint: '[target] e.g. "API 문서 자동 생성"'
 allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, Task, TodoWrite]
 ---
 

@@ -84,7 +84,10 @@ describe('session-start hook', () => {
 
   async function importAndWait() {
     await import('../../scripts/hooks/session-start.js');
-    await new Promise((r) => setTimeout(r, 100));
+    // Allow enough time for the async main() pipeline to complete,
+    // including the dynamic import attempt and Promise.race timeout.
+    // 100ms is insufficient under parallel test load; 500ms is safe.
+    await new Promise((r) => setTimeout(r, 500));
   }
 
   describe('successful initialization', () => {
@@ -221,9 +224,9 @@ describe('session-start hook', () => {
       mockState.readStdinResult = Promise.resolve(JSON.stringify({}));
 
       await import('../../scripts/hooks/session-start.js');
-      // Wait 2200ms: enough for the 2000ms race timeout to fire and writeStdout
-      // to be called, while remaining within the extended test timeout below.
-      await new Promise((r) => setTimeout(r, 2200));
+      // Wait 3000ms: the 2000ms race timeout fires, then writeStdout is called.
+      // Extra headroom accounts for parallel test load slowing timers.
+      await new Promise((r) => setTimeout(r, 3000));
 
       expect(mockState.writeStdoutCalls.length).toBeGreaterThan(0);
     }, 10000);

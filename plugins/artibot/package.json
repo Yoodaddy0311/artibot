@@ -12,14 +12,17 @@
     "lint": "eslint lib/ scripts/ tests/",
     "lint:fix": "eslint --fix lib/ scripts/ tests/",
     "ci": "node scripts/validate.js && npm run lint && npm test",
+    "ci:coverage": "node scripts/validate.js && npm run lint && node scripts/ci/validate-coverage.js",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "test:coverage:check": "node scripts/ci/validate-coverage.js --check"
   },
   "devDependencies": {
-    "vitest": "^3.0.0",
-    "@vitest/coverage-v8": "^3.0.0",
-    "@eslint/js": "^9.0.0",
-    "eslint": "^9.0.0"
+    "@eslint/js": "^10.0.1",
+    "@vitest/coverage-v8": "^4.0.18",
+    "eslint": "^10.0.0",
+    "globals": "^17.3.0",
+    "vitest": "^4.0.18"
   }
 }

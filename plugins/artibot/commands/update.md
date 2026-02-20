@@ -1,6 +1,6 @@
 ---
 description: Artibot 플러그인 버전 확인 및 업데이트
-argument-hint: [--check | --force | --dry-run]
+argument-hint: 'e.g. "최신 버전 확인 및 업데이트"'
 allowed-tools: [Bash, Read]
 ---
 

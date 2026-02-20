@@ -1,6 +1,6 @@
 ---
 description: Content marketing and SEO specialist using content-marketer subagent
-argument-hint: [content-type] [--seo] [--campaign] [--social]
+argument-hint: '[type] e.g. "블로그 글 SEO 최적화"'
 allowed-tools: [Read, Write, Task, WebSearch, TodoWrite]
 ---
 

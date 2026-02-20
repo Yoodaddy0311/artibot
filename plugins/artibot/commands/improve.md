@@ -1,6 +1,6 @@
 ---
 description: Evidence-based code improvement with iterative refinement support
-argument-hint: [target] [--focus performance|security|quality|architecture]
+argument-hint: '[target] e.g. "성능 최적화 개선"'
 allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, Task, TodoWrite]
 ---
 
