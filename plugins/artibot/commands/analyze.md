@@ -1,7 +1,7 @@
 ---
 description: Multi-dimensional code and system analysis with agent delegation
 argument-hint: '[target] e.g. "보안 취약점 분석해줘"'
-allowed-tools: [Read, Glob, Grep, Bash, Task, TodoWrite]
+allowed-tools: [Read, Glob, Grep, Bash, Task, TaskCreate]
 ---
 
 # /analyze
@@ -43,22 +43,25 @@ When `--delegate` is active or auto-triggered (>50 files or >7 directories):
 
 ## Output Format
 
-```
-ANALYSIS REPORT
-===============
-Target:    [path/module]
-Scope:     [file|module|project]
-Focus:     [domain]
-Severity:  [CRITICAL: n | HIGH: n | MEDIUM: n | LOW: n]
+Use GFM markdown tables:
 
-FINDINGS
---------
-[SEV] [category] [location]
-  Issue: [description]
-  Impact: [what breaks or degrades]
-  Fix: [actionable recommendation]
+**Summary**
 
-METRICS
--------
-[metric]: [value] ([trend])
-```
+| 항목 | 값 |
+|------|-----|
+| Target | [path/module] |
+| Scope | [file/module/project] |
+| Focus | [domain] |
+| Severity | CRITICAL: n, HIGH: n, MEDIUM: n, LOW: n |
+
+**Findings**
+
+| Severity | Category | Location | Issue | Impact | Fix |
+|----------|----------|----------|-------|--------|-----|
+| [SEV] | [category] | [file:line] | [description] | [impact] | [recommendation] |
+
+**Metrics**
+
+| Metric | Value | Trend |
+|--------|-------|-------|
+| [metric] | [value] | [trend] |

@@ -24,12 +24,15 @@
 
 ## Delegation Mode Decision
 
+Target ratio: **Simple ~25% | Sub-Agent ~35% | Team ~40%**
+
 | Scope | Mode | Tools | Orchestration |
 |-------|------|-------|---------------|
-| Single file edit | Direct | Edit, Write | No delegation |
-| Focused task (<20 files, 1 domain) | Sub-Agent | Task(subagent_type) | One-way, fire-and-forget |
-| Multi-file feature (20+ files, 1-2 domains) | Sub-Agent or Team | Task or TeamCreate | Score-based decision |
+| Single file edit, <3 steps | Direct | Edit, Write | No delegation |
+| Focused task (1-2 domains, 3-5 steps) | Sub-Agent | Task(subagent_type, run_in_background=true) | Background, non-blocking |
+| Multi-step feature (2+ domains, >5 steps) | Team | TeamCreate, TaskCreate, SendMessage | Full coordination |
 | Multi-domain operation (3+ domains) | Team | TeamCreate, TaskCreate, SendMessage | Full coordination |
+| Scope/audit keywords present | Team | TeamCreate, TaskCreate, SendMessage | Full coordination |
 | Enterprise operation (100+ files) | Team | Full Agent Teams API | Wave + team orchestration |
 
 ## Team Mode API Tools

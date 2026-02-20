@@ -59,16 +59,23 @@ const EXPERIENCE_WEIGHTS = {
  * @param {string} experience.category - Sub-category for grouping
  * @param {object} experience.data - Event payload
  * @param {string} [experience.sessionId] - Current session ID
+ * @param {number} [experience.score] - Optional top-level score (merged into data)
  * @returns {Promise<Experience>} The stored experience
  */
 export async function collectExperience(experience) {
   await ensureDir(ARTIBOT_DIR);
 
+  // Merge top-level score into data if provided and not already present
+  const data = { ...(experience.data ?? {}) };
+  if (typeof experience.score === 'number' && data.score === undefined) {
+    data.score = experience.score;
+  }
+
   const entry = {
     id: `exp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     type: experience.type,
     category: experience.category ?? 'general',
-    data: experience.data ?? {},
+    data,
     timestamp: Date.now(),
     sessionId: experience.sessionId ?? null,
   };
@@ -299,20 +306,39 @@ function grpoRankGroup(group) {
 
 /**
  * Score a single experience using rule-based evaluators for each dimension.
+ * Supports both structured fields (successRate, avgMs, calls) from
+ * collectDailyExperiences and flat score field from tool-tracker bridge.
  * @param {Experience} exp - Experience to score
  * @returns {object} Scores per dimension
  */
 function scoreExperience(exp) {
   const data = exp.data ?? {};
 
+  // If data.score exists (from tool-tracker bridge), use it as primary signal.
+  // This ensures individual tool experiences with varying scores produce
+  // different composite values, enabling pattern extraction via variance.
+  const directScore = typeof data.score === 'number' ? data.score : null;
+
   switch (exp.type) {
-    case 'tool':
+    case 'tool': {
+      // Prefer direct score from tool-tracker when available
+      if (directScore !== null) {
+        return {
+          success: clamp01(directScore),
+          speed: data.avgMs !== null && data.avgMs !== undefined
+            ? clamp01(1.0 / (1 + data.avgMs / 5000))
+            : clamp01(0.3 + directScore * 0.4),
+          errorRate: clamp01(directScore > 0.5 ? 0.8 + directScore * 0.2 : directScore),
+          resourceEfficiency: 0.5,
+        };
+      }
       return {
         success: clamp01(data.successRate ?? 0),
         speed: data.avgMs !== null && data.avgMs !== undefined ? clamp01(1.0 / (1 + data.avgMs / 5000)) : 0.5,
         errorRate: clamp01(1.0 - (data.calls > 0 ? (data.calls - (data.successes ?? 0)) / data.calls : 0)),
         resourceEfficiency: clamp01(data.calls > 0 ? Math.min(1, 10 / data.calls) : 0.5),
       };
+    }
 
     case 'error':
       return {
@@ -338,14 +364,31 @@ function scoreExperience(exp) {
         resourceEfficiency: clamp01(1.0 / (1 + (data.size ?? 1) / 5)),
       };
 
-    default:
+    default: {
+      // For unknown types (e.g. 'agent', 'self-evaluation'), use direct score if available
+      if (directScore !== null) {
+        return {
+          success: clamp01(directScore),
+          speed: 0.5,
+          errorRate: clamp01(directScore),
+          resourceEfficiency: 0.5,
+        };
+      }
       return { success: 0.5, speed: 0.5, errorRate: 0.5, resourceEfficiency: 0.5 };
+    }
   }
 }
 
 /**
  * Extract an optimal pattern from ranked group entries.
  * The best-performing entry's characteristics become the pattern.
+ *
+ * Supports two modes:
+ *   1. Variance mode: when scores vary within a group, extracts best-vs-mean pattern
+ *   2. Consensus mode: when all scores are similar (low variance), extracts
+ *      a "consistent usage" pattern if the group has enough samples.
+ *      This ensures groups with uniform scores (e.g., all Read tools scoring 0.2)
+ *      still produce patterns that describe the tool's reliable behavior.
  *
  * @param {string} groupKey - "type::category"
  * @param {{ entries: object[], groupMean: number, bestEntry: object | null }} ranked
@@ -355,27 +398,80 @@ function extractPattern(groupKey, ranked) {
   const { bestEntry, groupMean, entries } = ranked;
   if (!bestEntry || entries.length < MIN_GROUP_SIZE) return null;
 
-  // Only extract pattern if the best clearly outperforms the mean
-  if (bestEntry.composite <= groupMean + 0.05) return null;
-
   const [type, category] = groupKey.split('::');
-  const topEntries = entries.filter((e) => e.composite > groupMean);
-  const confidence = round(
-    Math.min(1.0, (topEntries.length / entries.length) * bestEntry.composite),
-  );
 
-  return {
-    key: groupKey,
-    type,
-    category,
-    confidence,
-    bestComposite: bestEntry.composite,
-    groupMean,
-    sampleSize: entries.length,
-    insight: generateInsight(type, category, bestEntry, groupMean),
-    bestData: bestEntry.experience.data,
-    extractedAt: new Date().toISOString(),
-  };
+  // Check if best outperforms the mean (variance mode)
+  if (bestEntry.composite > groupMean + 0.02) {
+    const topEntries = entries.filter((e) => e.composite > groupMean);
+    const confidence = round(
+      Math.min(1.0, (topEntries.length / entries.length) * bestEntry.composite),
+    );
+
+    return {
+      key: groupKey,
+      type,
+      category,
+      confidence,
+      bestComposite: bestEntry.composite,
+      groupMean,
+      sampleSize: entries.length,
+      insight: generateInsight(type, category, bestEntry, groupMean),
+      bestData: bestEntry.experience.data,
+      extractedAt: new Date().toISOString(),
+    };
+  }
+
+  // Consensus mode: low variance but sufficient samples.
+  // A consistent tool usage pattern is valuable learning data.
+  // Require at least 3 samples for consensus patterns.
+  const MIN_CONSENSUS_SAMPLES = 3;
+  if (entries.length >= MIN_CONSENSUS_SAMPLES) {
+    // Confidence based on sample size and mean score
+    const sampleBonus = Math.min(0.3, entries.length * 0.02);
+    const confidence = round(
+      Math.min(1.0, groupMean + sampleBonus),
+    );
+
+    return {
+      key: groupKey,
+      type,
+      category,
+      confidence,
+      bestComposite: bestEntry.composite,
+      groupMean,
+      sampleSize: entries.length,
+      insight: generateConsensusInsight(type, category, entries.length, groupMean),
+      bestData: bestEntry.experience.data,
+      extractedAt: new Date().toISOString(),
+    };
+  }
+
+  return null;
+}
+
+/**
+ * Generate a human-readable insight for consensus patterns (low variance groups).
+ * @param {string} type - Pattern type
+ * @param {string} category - Pattern category
+ * @param {number} sampleSize - Number of samples in the group
+ * @param {number} groupMean - Mean composite score
+ * @returns {string}
+ */
+function generateConsensusInsight(type, category, sampleSize, groupMean) {
+  const scorePercent = round(groupMean * 100);
+
+  switch (type) {
+    case 'tool':
+      return `Tool "${category}" shows consistent performance at ${scorePercent}% across ${sampleSize} uses. Reliable for its context.`;
+    case 'error':
+      return `Error pattern "${category}" occurs consistently (${sampleSize} occurrences). Consider automated handling.`;
+    case 'success':
+      return `Task type "${category}" consistently scores ${scorePercent}% across ${sampleSize} completions.`;
+    case 'team':
+      return `Team pattern "${category}" scores ${scorePercent}% consistently across ${sampleSize} sessions.`;
+    default:
+      return `Pattern "${category}" shows stable ${scorePercent}% performance across ${sampleSize} observations.`;
+  }
 }
 
 /**
@@ -405,6 +501,41 @@ function generateInsight(type, category, bestEntry, groupMean) {
     default:
       return `Pattern "${category}" shows ${advantage}% advantage over group mean.`;
   }
+}
+
+/**
+ * Bootstrap learning from all accumulated experiences on disk.
+ * Runs batchLearn() on existing daily-experiences.json without needing
+ * a session context. Useful for initial pattern extraction from
+ * historical data that was collected before the learning pipeline was active.
+ *
+ * @returns {Promise<{
+ *   experienceCount: number,
+ *   groupsProcessed: number,
+ *   patternsExtracted: number,
+ *   patterns: object[],
+ *   summary: object
+ * }>}
+ */
+export async function bootstrapLearn() {
+  const experiences = await loadExperiences();
+
+  if (experiences.length === 0) {
+    return {
+      experienceCount: 0,
+      groupsProcessed: 0,
+      patternsExtracted: 0,
+      patterns: [],
+      summary: { message: 'No experiences found for bootstrap learning' },
+    };
+  }
+
+  const result = await batchLearn(experiences);
+
+  return {
+    experienceCount: experiences.length,
+    ...result,
+  };
 }
 
 // ---------------------------------------------------------------------------

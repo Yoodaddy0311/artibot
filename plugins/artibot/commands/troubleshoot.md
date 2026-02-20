@@ -1,7 +1,7 @@
 ---
 description: Systematic problem investigation with root cause analysis
 argument-hint: '[symptoms] e.g. "타임아웃 에러 원인 분석"'
-allowed-tools: [Read, Glob, Grep, Bash, Task, TodoWrite]
+allowed-tools: [Read, Glob, Grep, Bash, Task, TaskCreate]
 ---
 
 # /troubleshoot
@@ -66,32 +66,41 @@ Symptom: [what user observes]
 
 ## Output Format
 
-```
-INVESTIGATION REPORT
-====================
-Symptom:    [description]
-Scope:      [file|module|project]
-Status:     [ROOT_CAUSE_FOUND|INVESTIGATING|NEEDS_MORE_INFO]
+Use GFM markdown tables:
 
-EVIDENCE
---------
-1. [evidence description] ([source: file:line | command output])
-2. [evidence description] ([source])
+**Summary**
 
-HYPOTHESES
-----------
-[CONFIRMED] [hypothesis] - [evidence supporting]
-[ELIMINATED] [hypothesis] - [evidence against]
+| 항목 | 값 |
+|------|-----|
+| Symptom | [description] |
+| Scope | [file/module/project] |
+| Status | ROOT_CAUSE_FOUND / INVESTIGATING / NEEDS_MORE_INFO |
 
-ROOT CAUSE
-----------
-[description of underlying issue]
-Location: [file:line]
-Trigger: [what causes the issue]
+**Evidence**
 
-FIX
----
-[specific code change or action to resolve]
-Confidence: [HIGH|MEDIUM|LOW]
-Regression Risk: [HIGH|MEDIUM|LOW]
-```
+| # | Description | Source |
+|---|-------------|--------|
+| 1 | [evidence] | [file:line or command output] |
+
+**Hypotheses**
+
+| Status | Hypothesis | Evidence |
+|--------|-----------|----------|
+| CONFIRMED | [hypothesis] | [supporting evidence] |
+| ELIMINATED | [hypothesis] | [against evidence] |
+
+**Root Cause**
+
+| 항목 | 값 |
+|------|-----|
+| Description | [underlying issue] |
+| Location | [file:line] |
+| Trigger | [what causes the issue] |
+
+**Fix**
+
+| 항목 | 값 |
+|------|-----|
+| Action | [specific code change] |
+| Confidence | HIGH/MEDIUM/LOW |
+| Regression Risk | HIGH/MEDIUM/LOW |

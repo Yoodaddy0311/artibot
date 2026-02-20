@@ -1,7 +1,7 @@
 ---
 description: System design with architect agent and ADR generation
 argument-hint: '[module] e.g. "인증 시스템 아키텍처 설계"'
-allowed-tools: [Read, Glob, Grep, Bash, Task, TodoWrite]
+allowed-tools: [Read, Glob, Grep, Bash, Task, TaskCreate]
 ---
 
 # /design
@@ -47,30 +47,27 @@ Parse $ARGUMENTS:
 
 ## Output Format
 
-```
-SYSTEM DESIGN
-=============
-Target:    [system/module]
-Domain:    [api|data|infra|ui]
-Status:    [PROPOSED|ACCEPTED]
+Use GFM markdown tables:
 
-OPTION A: [name]
-  Description: [summary]
-  + [advantage]
-  - [disadvantage]
-  Score: [weighted total]
+**Summary**
 
-OPTION B: [name]
-  Description: [summary]
-  + [advantage]
-  - [disadvantage]
-  Score: [weighted total]
+| 항목 | 값 |
+|------|-----|
+| Target | [system/module] |
+| Domain | [api/data/infra/ui] |
+| Status | PROPOSED/ACCEPTED |
 
-RECOMMENDATION
---------------
-Preferred: [A|B] because [rationale]
+**Design Options**
 
-DEPENDENCY MAP
---------------
-[module] -> [module] (coupling: [tight|loose])
-```
+| Option | Description | Advantages | Disadvantages | Score |
+|--------|-------------|------------|---------------|-------|
+| A: [name] | [summary] | [advantages] | [disadvantages] | [score] |
+| B: [name] | [summary] | [advantages] | [disadvantages] | [score] |
+
+**Recommendation**: [A/B] — [rationale]
+
+**Dependency Map**
+
+| From | To | Coupling |
+|------|----|----------|
+| [module] | [module] | tight/loose |

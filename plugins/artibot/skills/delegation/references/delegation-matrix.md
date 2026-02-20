@@ -9,8 +9,10 @@
 | Communication need | 0.2 | One-way reporting | P2P coordination, consensus |
 | File/scope scale | 0.2 | <20 files | 20+ files |
 
-**Score < 0.6**: Use Sub-Agent Mode (Task tool)
-**Score >= 0.6**: Use Team Mode (Agent Teams API)
+**Score < 0.5**: Use Sub-Agent Mode (Task tool)
+**Score >= 0.5**: Use Team Mode (Agent Teams API)
+
+Target ratio: **Sub-Agent ~35% | Team ~40%** (remaining ~25% is direct execution).
 
 ## Sub-Agent Strategy Selection
 

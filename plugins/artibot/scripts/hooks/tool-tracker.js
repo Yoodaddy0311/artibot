@@ -59,6 +59,10 @@ async function main() {
   // Extract metadata
   const meta = extractMeta(toolInput);
 
+  // Extract session ID and project context from hook data
+  const sessionId = hookData?.session_id ?? null;
+  const project = hookData?.cwd ? path.basename(hookData.cwd) : (process.cwd() ? path.basename(process.cwd()) : null);
+
   // Dynamically import tool-learner and record
   try {
     const learnerPath = path.join(PLUGIN_ROOT, 'lib', 'learning', 'tool-learner.js');
@@ -71,7 +75,8 @@ async function main() {
     await collectExperience({
       type: 'tool',
       category: toolName,
-      data: { context, score, ...meta },
+      data: { context, score, project, ...meta },
+      sessionId,
     });
   } catch (err) {
     // Silently fail - tracker should never break the tool pipeline

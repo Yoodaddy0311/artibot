@@ -1,7 +1,7 @@
 ---
 description: Marketing strategy planning with market analysis, competitive intelligence, and campaign architecture
 argument-hint: '[topic] e.g. "GTM 전략 수립"'
-allowed-tools: [Read, Write, Glob, Grep, Task, WebSearch, TodoWrite]
+allowed-tools: [Read, Write, Glob, Grep, Task, WebSearch, TaskCreate]
 ---
 
 # /mkt
@@ -65,43 +65,55 @@ Parse $ARGUMENTS:
 
 ## Output Format
 
-```
-MARKETING STRATEGY
-==================
-Type:       [go-to-market|content|growth|brand|product-launch|repositioning]
-Market:     [target segment]
-Budget:     [tier and allocation]
-Timeline:   [period]
+Use GFM markdown tables:
 
-MARKET ANALYSIS
----------------
-Market Size:   [TAM/SAM/SOM]
-Growth Rate:   [YoY%]
-Key Trends:    [trend list]
+**Summary**
 
-COMPETITIVE LANDSCAPE
----------------------
-[Competitor]: [positioning] | [strengths] | [weaknesses]
+| 항목 | 값 |
+|------|-----|
+| Type | [strategy type] |
+| Market | [target segment] |
+| Budget | [tier and allocation] |
+| Timeline | [period] |
 
-STRATEGY
---------
-Positioning: [statement]
-Value Props:  [1-3 key value propositions]
+**Market Analysis**
 
-CHANNEL PLAN
-------------
-Channel       | Budget % | Expected ROI | Priority
---------------|----------|-------------|----------
-[channel]     | [%]      | [ROI]       | [P1-P3]
+| Metric | Value |
+|--------|-------|
+| Market Size | [TAM/SAM/SOM] |
+| Growth Rate | [YoY%] |
+| Key Trends | [trend list] |
 
-CAMPAIGN CALENDAR
------------------
-[Month]: [campaign/initiative] -> [channel] -> [KPI target]
+**Competitive Landscape**
 
-KPI FRAMEWORK
--------------
-Metric:    [KPI]  | Target: [value] | Tracking: [method]
-```
+| Competitor | Positioning | Strengths | Weaknesses |
+|-----------|-------------|-----------|------------|
+| [name] | [positioning] | [strengths] | [weaknesses] |
+
+**Strategy**
+
+| 항목 | 내용 |
+|------|------|
+| Positioning | [statement] |
+| Value Props | [1-3 key value propositions] |
+
+**Channel Plan**
+
+| Channel | Budget % | Expected ROI | Priority |
+|---------|----------|-------------|----------|
+| [channel] | [%] | [ROI] | [P1-P3] |
+
+**Campaign Calendar**
+
+| Month | Campaign | Channel | KPI Target |
+|-------|----------|---------|------------|
+| [month] | [initiative] | [channel] | [target] |
+
+**KPI Framework**
+
+| Metric | Target | Tracking |
+|--------|--------|----------|
+| [KPI] | [value] | [method] |
 
 ## Example Usage
 

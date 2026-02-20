@@ -1,12 +1,12 @@
 ---
 description: Task management with creation, assignment, tracking, and completion
 argument-hint: '[op] e.g. "할 일 목록 생성 및 추적"'
-allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, TodoWrite]
+allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, TaskCreate]
 ---
 
 # /task
 
-Structured task management using TodoWrite. Create, track, update, and complete tasks within the current session.
+Structured task management using TaskCreate. Create, track, update, and complete tasks within the current session.
 
 ## Arguments
 
@@ -43,7 +43,7 @@ Remove all completed tasks from the list.
 1. **Parse**: Identify operation and extract parameters
 2. **Context**: TodoRead to get current task state
 3. **Execute**:
-   - `create`: Decompose into atomic tasks, assign priorities, write with TodoWrite
+   - `create`: Decompose into atomic tasks, assign priorities, write with TaskCreate
    - `list`: Read and format current tasks by status
    - `update`: Modify specified task, re-validate dependencies
    - `complete`: Verify task output, mark done, check if unblocks other tasks

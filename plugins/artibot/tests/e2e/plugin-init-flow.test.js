@@ -17,9 +17,13 @@ import { readFileSync, readdirSync } from 'node:fs';
  * to validate the full initialization contract.
  */
 
-// Resolve the actual plugin root from this test file's location
+// Resolve the actual plugin root from this test file's location.
+// decodeURIComponent is needed because import.meta.url percent-encodes
+// non-ASCII characters (e.g. Korean "바탕 화면") which breaks fs operations.
 const PLUGIN_ROOT = path.resolve(
-  path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/i, '$1')),
+  decodeURIComponent(
+    path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/i, '$1')),
+  ),
   '..', '..',
 );
 

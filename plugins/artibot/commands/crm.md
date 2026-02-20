@@ -1,7 +1,7 @@
 ---
 description: CRM workflow design, customer journey mapping, segmentation strategy, and lifecycle automation
 argument-hint: '[type] e.g. "고객 여정맵 설계"'
-allowed-tools: [Read, Write, Task, WebSearch, TodoWrite]
+allowed-tools: [Read, Write, Task, WebSearch, TaskCreate]
 ---
 
 # /crm

@@ -1,7 +1,7 @@
 ---
 description: Feature implementation with planner/tdd-guide/code-reviewer pipeline
 argument-hint: '[feature] e.g. "로그인 기능 구현"'
-allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, Task, TodoWrite]
+allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, Task, TaskCreate]
 ---
 
 # /implement
@@ -59,23 +59,29 @@ If `--type` not specified, detect from feature description:
 
 ## Output Format
 
-```
-IMPLEMENTATION SUMMARY
-======================
-Feature:    [description]
-Type:       [component|api|service|feature]
-Framework:  [detected]
-Files:      [created: n, modified: n]
+Use GFM markdown tables:
 
-PIPELINE STATUS
----------------
-Plan .............. [DONE]
-Design ............ [DONE|SKIPPED]
-Implement ......... [DONE]
-Test .............. [PASS|FAIL] (coverage: n%)
-Review ............ [PASS|n issues]
+**Summary**
 
-ARTIFACTS
----------
-- [file path] ([created|modified])
-```
+| 항목 | 값 |
+|------|-----|
+| Feature | [description] |
+| Type | [component/api/service/feature] |
+| Framework | [detected] |
+| Files | created: n, modified: n |
+
+**Pipeline Status**
+
+| Phase | Status | Details |
+|-------|--------|---------|
+| Plan | DONE | [summary] |
+| Design | DONE/SKIPPED | [summary] |
+| Implement | DONE | [files changed] |
+| Test | PASS/FAIL | coverage: n% |
+| Review | PASS/n issues | [summary] |
+
+**Artifacts**
+
+| File | Action |
+|------|--------|
+| [file path] | created/modified |

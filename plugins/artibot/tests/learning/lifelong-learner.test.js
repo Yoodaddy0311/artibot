@@ -371,11 +371,25 @@ describe('lifelong-learner', () => {
       expect(Array.isArray(result.patterns)).toBe(true);
     });
 
-    it('does not extract pattern when best composite is not above mean + 0.05', async () => {
+    it('extracts consensus pattern when all composites are equal but group has enough samples', async () => {
       const experiences = Array.from({ length: 5 }, (_, i) => ({
         id: `e-${i}`,
         type: 'tool',
         category: 'Same',
+        data: { successRate: 0.8, avgMs: 500, calls: 10, successes: 8 },
+        timestamp: Date.now() - i * 1000,
+      }));
+      const result = await batchLearn(experiences);
+      // Consensus mode: uniform scores with >= 3 samples produce a pattern
+      expect(result.patternsExtracted).toBe(1);
+      expect(result.patterns[0].key).toBe('tool::Same');
+    });
+
+    it('does not extract pattern when group has fewer than 3 samples and no variance', async () => {
+      const experiences = Array.from({ length: 2 }, (_, i) => ({
+        id: `e-${i}`,
+        type: 'tool',
+        category: 'Tiny',
         data: { successRate: 0.8, avgMs: 500, calls: 10, successes: 8 },
         timestamp: Date.now() - i * 1000,
       }));

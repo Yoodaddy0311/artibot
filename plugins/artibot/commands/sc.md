@@ -1,7 +1,7 @@
 ---
 description: Artibot router - analyzes intent and routes to optimal command/agent/skill
 argument-hint: '[request] e.g. "이 버그 분석해줘"'
-allowed-tools: [Read, Glob, Grep, Bash, Task, TodoWrite]
+allowed-tools: [Read, Glob, Grep, Bash, Task, TaskCreate]
 ---
 
 # /sc
@@ -14,6 +14,8 @@ Parse $ARGUMENTS:
 - `request`: Natural language description of the task
 - `--plan`: Show routing decision before execution
 - `--force [command]`: Override auto-routing to specific command
+- `--team`: Force team orchestration mode (bypass complexity assessment)
+- `--solo`: Force single sub-agent mode (bypass complexity assessment)
 
 ## Routing Algorithm
 
@@ -77,20 +79,36 @@ Parse $ARGUMENTS:
 
 ## Complexity-Based Delegation
 
-### CRITICAL: Complex tasks MUST be delegated to keep the user's session responsive.
+### CRITICAL: Non-simple tasks MUST be delegated to keep the user's session responsive.
 
-| Complexity | Domains | Steps | Delegation Mode |
-|------------|---------|-------|-----------------|
-| **Simple** | 1 | <3 | Direct execution by current agent (invoke the command inline) |
-| **Moderate** | 2-3 | 3-10 | `Task(subagent_type)` - fire-and-forget sub-agent for the matched route |
-| **Complex** | 4+ | >10 | `Task(orchestrator, run_in_background=true)` - background team orchestration |
+Target delegation ratio: **Simple ~25% | Sub-Agent ~35% | Team ~40%**
 
-### Delegation Flow for Complex Requests
+| Complexity | Conditions | Delegation Mode |
+|------------|-----------|-----------------|
+| **Simple** | 1 domain AND <3 steps AND no team hints | Direct execution by current agent |
+| **Moderate** | 1-2 domains AND 3-5 steps AND no team hints | `Task(subagent_type, run_in_background=true)` — background sub-agent |
+| **Team** | ANY of the team triggers below | `Task(orchestrator, run_in_background=true)` — background team orchestration |
 
-When complexity is "Complex" (4+ domains OR explicit team/orchestrate/spawn keywords):
+### Team Mode Triggers (ANY one is sufficient)
+
+| Trigger | Examples |
+|---------|---------|
+| `--team` flag present | `/sc --team 보안 점검해줘` |
+| 3+ domains detected | 코드 + 테스트 + 문서 + 보안 |
+| 2 domains AND >5 steps | 구현 + 테스트 (여러 파일) |
+| Multi-target keywords | "전체", "모든", "전부", "all", "every", "across", "comprehensive" |
+| Pipeline keywords | "파이프라인", "pipeline", "순차", "단계별", "phase" |
+| Team/parallel keywords | "팀", "team", "병렬", "parallel", "동시에", "coordinate", "orchestrate", "spawn" |
+| Scope keywords | "프로젝트 전체", "project-wide", "codebase", "전수", "일괄" |
+| Evaluation/audit keywords | "평가", "감사", "audit", "evaluate", "점검", "검증", "verify" |
+| Multi-file hints | "여러 파일", "multiple files", "모듈별", "디렉토리별" |
+
+### Delegation Flow for Team Requests
+
+When ANY team trigger matches:
 
 ```
-1. Tell the user: "복잡한 요청으로 판단됩니다. 팀장(orchestrator)에게 위임합니다."
+1. Tell the user: "팀 오케스트레이션으로 처리합니다. 백그라운드에서 진행됩니다."
 2. Task(
      subagent_type="artibot:orchestrator",
      prompt="[user's original request with full context]",
@@ -98,28 +116,49 @@ When complexity is "Complex" (4+ domains OR explicit team/orchestrate/spawn keyw
      description="Team orchestration: [brief summary]"
    )
 3. Return control to user immediately
-4. User can continue giving other commands while orchestrator works
+4. User can continue giving other commands while team works
 ```
 
 ### Delegation Flow for Moderate Requests
 
-When complexity is "Moderate" (2-3 domains):
+When no team trigger matches AND complexity is Moderate (1-2 domains, 3-5 steps):
 
 ```
-1. Identify the primary route from the routing table
+1. Tell the user: "서브 에이전트에게 위임합니다. 백그라운드에서 진행됩니다."
 2. Task(
      subagent_type=[matched agent type],
      prompt="[user's request with context]",
+     run_in_background=true,
      description="[brief summary]"
    )
-3. Report result to user when sub-agent returns
+3. Return control to user immediately
+4. User can continue giving other commands while sub-agent works
+5. When sub-agent completes, summarize result to user
 ```
+
+### Delegation Flow for Simple Requests
+
+When 1 domain, <3 steps, no team hints, and no `--team` flag:
+
+```
+1. Execute the matched command inline (direct execution)
+2. No background delegation needed (fast enough)
+```
+
+### Flag Overrides
+
+| Flag | Effect |
+|------|--------|
+| `--team` | Force team mode regardless of complexity assessment |
+| `--solo` | Force single sub-agent mode even if team triggers match |
 
 ## Anti-Patterns
 
 - ❌ Do NOT analyze the codebase (Read/Glob/Grep) to determine complexity - classify from request keywords only
-- ❌ Do NOT execute complex tasks directly - delegate to orchestrator via `Task(orchestrator, run_in_background=true)`
+- ❌ Do NOT execute team-level tasks directly - delegate to orchestrator via `Task(orchestrator, run_in_background=true)`
 - ❌ Do NOT block the user's session with long-running operations - use background delegation
+- ❌ Do NOT default to sub-agent when team triggers are present - prefer team mode (target ~40%)
+- ❌ Do NOT ignore `--team` / `--solo` flag overrides
 
 ## Fallback
 

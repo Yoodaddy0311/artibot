@@ -125,37 +125,44 @@ SendMessage(
 
 ## Output Format
 
-```
-ORCHESTRATION SUMMARY
-=====================
-Workflow:   {description}
-Pattern:    {feature|bugfix|refactor|security}
-Team:       {team-name}
-Teammates:  {list of spawned teammates}
-Duration:   {total phases completed}
+Use GFM markdown tables:
 
-PIPELINE STATUS
----------------
-{phase 1} .......... {DONE|FAIL} ({teammate})  [Task #{id}]
-{phase 2} .......... {DONE|FAIL} ({teammate})  [Task #{id}]
-{phase n} .......... {DONE|FAIL} ({teammate})  [Task #{id}]
+**Summary**
 
-QUALITY GATES
--------------
-Tests:    {PASS|FAIL}
-Review:   {APPROVE|REQUEST_CHANGES}
-Security: {CLEAN|ISSUES_FOUND}
-Coverage: {n}%
+| 항목 | 값 |
+|------|-----|
+| Workflow | {description} |
+| Pattern | {feature/bugfix/refactor/security} |
+| Team | {team-name} |
+| Teammates | {list} |
 
-TEAM METRICS
-------------
-Teammates Spawned: {n}
-Messages Exchanged: {n}
-Tasks Created:      {n}
-Tasks Completed:    {n}
-Tasks Failed:       {n}
+**Pipeline Status**
 
-ARTIFACTS
----------
-- {file path} ({action})
-```
+| Phase | Status | Teammate | Task ID |
+|-------|--------|----------|---------|
+| {phase} | DONE/FAIL | {teammate} | #{id} |
+
+**Quality Gates**
+
+| Gate | Status |
+|------|--------|
+| Tests | PASS/FAIL |
+| Review | APPROVE/REQUEST_CHANGES |
+| Security | CLEAN/ISSUES_FOUND |
+| Coverage | {n}% |
+
+**Team Metrics**
+
+| Metric | Value |
+|--------|-------|
+| Teammates Spawned | {n} |
+| Messages Exchanged | {n} |
+| Tasks Created | {n} |
+| Tasks Completed | {n} |
+| Tasks Failed | {n} |
+
+**Artifacts**
+
+| File | Action |
+|------|--------|
+| {file path} | {action} |

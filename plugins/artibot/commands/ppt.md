@@ -1,7 +1,7 @@
 ---
 description: Presentation structure design with narrative flow, slide layouts, speaker notes, and visual recommendations
 argument-hint: '[topic] e.g. "투자 피치덱 20장 구성"'
-allowed-tools: [Read, Write, Glob, Grep, Task, WebSearch, TodoWrite]
+allowed-tools: [Read, Write, Glob, Grep, Task, WebSearch, TaskCreate]
 ---
 
 # /ppt

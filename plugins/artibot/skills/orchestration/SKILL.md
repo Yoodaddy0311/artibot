@@ -67,19 +67,26 @@ Choose between Sub-Agent and Team Mode based on a weighted score:
 
 | Factor | Weight | Sub-Agent Range | Team Range |
 |--------|--------|----------------|------------|
-| Complexity | 0.3 | < 0.6 | >= 0.6 |
+| Complexity | 0.3 | < 0.5 | >= 0.5 |
 | Parallelizable ops | 0.3 | 1-2 tasks | 3+ tasks |
 | Communication need | 0.2 | One-way reporting | P2P coordination |
 | File/scope scale | 0.2 | < 20 files | 20+ files |
 
-**Score >= 0.6 -> Team Mode** (Agent Teams API)
-**Score < 0.6 -> Sub-Agent Mode** (Task tool only)
+**Score >= 0.5 -> Team Mode** (Agent Teams API)
+**Score < 0.5 -> Sub-Agent Mode** (Task tool only)
+
+Target ratio: **Sub-Agent ~35% | Team ~40%** (remaining ~25% is direct execution).
+
+Team mode boost keywords (auto-upgrade to Team when detected):
+"전체", "모든", "all", "comprehensive", "평가", "점검", "audit", "pipeline", "병렬", "parallel", "프로젝트 전체", "codebase", "전수", "일괄", "여러 파일", "모듈별"
 
 #### Sub-Agent Mode (Task Tool)
-- Single-session, fire-and-forget delegation
+- Single-session delegation for focused tasks
 - One-way reporting: agent completes and returns result
 - Best for: focused single-domain tasks, file analysis, code generation
-- Tools: `Task(subagent_type)`
+- Tools:
+  - `Task(subagent_type)` — blocking (for command pipelines where next step depends on result)
+  - `Task(subagent_type, run_in_background=true)` — non-blocking (for /sc routing, keeping user session responsive)
 
 #### Team Mode (Agent Teams API)
 - Persistent team with shared task list and peer messaging
@@ -195,7 +202,7 @@ Request -> Detect available tools -> Select orchestration mode -> Classify compl
 
 Mode Detection:
   TeamCreate available?  -> agent-teams mode (full team orchestration)
-  Task() available?      -> sub-agent mode (fire-and-forget delegation)
+  Task() available?      -> sub-agent mode (background delegation via run_in_background=true)
   Neither available?     -> direct mode (orchestrator executes everything)
 
 Routing (agent-teams mode):
@@ -203,7 +210,7 @@ Routing (agent-teams mode):
   Score >= 0.6: Team Mode (TeamCreate -> spawn -> TaskCreate -> coordinate -> cleanup)
 
 Routing (sub-agent mode):
-  All tasks: Task(subagent_type) in parallel, orchestrator aggregates results
+  All tasks: Task(subagent_type, run_in_background=true) in parallel, orchestrator aggregates results
 
 Routing (direct mode):
   All tasks: Sequential execution by orchestrator using Read/Write/Edit/Bash
@@ -214,7 +221,7 @@ Routing (direct mode):
 | Platform | Mode | Orchestration | Team Features |
 |----------|------|---------------|---------------|
 | Claude Code + env var | agent-teams | Full PDCA with teams | P2P messaging, shared tasks, plan approval |
-| Claude Code (no env) | sub-agent | Parallel Task() delegation | Fire-and-forget, result aggregation |
+| Claude Code (no env) | sub-agent | Parallel Task(run_in_background=true) delegation | Background delegation, result aggregation |
 | Gemini CLI | direct | Sequential self-execution | Skills as context, adapted commands |
 | Codex CLI | direct | Sequential self-execution | Skills as context, adapted commands |
 | Cursor / Others | direct | Sequential self-execution | Rules-based instruction |

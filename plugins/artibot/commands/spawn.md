@@ -121,45 +121,46 @@ SendMessage(type="message", recipient="tester", content="{lint results and conte
 
 ## Output Format
 
-```
-ORCHESTRATION SUMMARY
-=====================
-Task:     {description}
-Mode:     {parallel|sequential|pipeline}
-Strategy: {by-directory|by-domain|by-task|auto}
-Team:     {team-name}
+Use GFM markdown tables:
 
-TEAM LIFECYCLE
---------------
-Created:    {timestamp}
-Teammates:  {n} spawned
-  - {name} ({subagent_type}) ... {ACTIVE|SHUTDOWN}
-  - {name} ({subagent_type}) ... {ACTIVE|SHUTDOWN}
+**Summary**
 
-EXECUTION
----------
-Task #{id}: {subject} -> {teammate}
-  Status: {DONE|FAIL}
-  Key findings: {summary}
+| 항목 | 값 |
+|------|-----|
+| Task | {description} |
+| Mode | {parallel/sequential/pipeline} |
+| Strategy | {by-directory/by-domain/by-task/auto} |
+| Team | {team-name} |
 
-Task #{id}: {subject} -> {teammate}
-  Status: {DONE|FAIL}
-  Key findings: {summary}
+**Team Lifecycle**
 
-AGGREGATED RESULTS
-------------------
+| Teammate | Type | Status |
+|----------|------|--------|
+| {name} | {subagent_type} | ACTIVE/SHUTDOWN |
+
+**Execution**
+
+| Task ID | Subject | Teammate | Status | Key Findings |
+|---------|---------|----------|--------|-------------|
+| #{id} | {subject} | {teammate} | DONE/FAIL | {summary} |
+
+**Aggregated Results**
+
 {Combined findings, prioritized by severity}
 
-TEAM METRICS
-------------
-Teammates Spawned:   {n}
-Messages Exchanged:  {n}
-Tasks Created:       {n}
-Tasks Completed:     {n}
-Tasks Failed:        {n}
-Shutdowns Confirmed: {n}/{n}
+**Team Metrics**
 
-ACTIONS TAKEN
--------------
-- {action description}
-```
+| Metric | Value |
+|--------|-------|
+| Teammates Spawned | {n} |
+| Messages Exchanged | {n} |
+| Tasks Created | {n} |
+| Tasks Completed | {n} |
+| Tasks Failed | {n} |
+| Shutdowns Confirmed | {n}/{n} |
+
+**Actions Taken**
+
+| Action |
+|--------|
+| {action description} |

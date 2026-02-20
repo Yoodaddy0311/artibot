@@ -57,7 +57,7 @@ Session Experiences
          v
 +------------------+
 | Persistence      |  Save updated caches to disk
-| Layer            |  ~/.claude/artibot-learning/
+| Layer            |  ~/.claude/artibot/
 +------------------+
 ```
 
@@ -128,16 +128,18 @@ System 2 Cache                              System 1 Cache
 
 ### 6. Persistence
 
-Learning state is saved to `~/.claude/artibot-learning/`:
+Learning state is saved to `~/.claude/artibot/`:
 
-```
-~/.claude/artibot-learning/
-  +-- experiences.jsonl      # Raw experience log (append-only)
-  +-- system1-cache.json     # Promoted fast patterns
-  +-- system2-cache.json     # Complex pattern registry
-  +-- thresholds.json        # Adaptive threshold state
-  +-- transfer-log.json      # Promotion/demotion history
-```
+| 파일 | 용도 |
+|------|------|
+| `~/.claude/artibot/daily-experiences.json` | 일일 경험 로그 (JSON array) |
+| `~/.claude/artibot/learning-log.json` | 배치 학습 라운드 기록 |
+| `~/.claude/artibot/system1-patterns.json` | 승격된 System 1 패턴 |
+| `~/.claude/artibot/transfer-log.json` | 승격/강등 이력 |
+| `~/.claude/artibot/evaluations.json` | Self-Rewarding 평가 결과 |
+| `~/.claude/artibot/tool-history.json` | 도구 사용 학습 기록 |
+| `~/.claude/artibot/patterns/` | 추출된 패턴 디렉토리 |
+| `~/.claude/artibot/memory/` | 메모리 저장소 (에러, 컨텍스트, 선호) |
 
 ### 7. Integration with Cognitive Routing
 
@@ -165,4 +167,4 @@ Settings in `artibot.config.json` under `learning.lifelong` and `learning.knowle
 **Learning Cycle**: Collect -> Batch (GRPO) -> Transfer -> Persist
 **Promotion**: 3 consecutive System 2 successes -> System 1 cache
 **Demotion**: 2 consecutive System 1 failures -> System 2 re-analysis
-**Storage**: `~/.claude/artibot-learning/`
+**Storage**: `~/.claude/artibot/`

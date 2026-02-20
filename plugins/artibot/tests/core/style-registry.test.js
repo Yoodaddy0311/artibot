@@ -1,5 +1,20 @@
-import { describe, it, expect, beforeEach } from 'vitest';
-import {
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import path from 'node:path';
+
+// Mock platform.js so getPluginRoot returns a decoded path even when
+// import.meta.url percent-encodes non-ASCII characters (e.g. Korean "바탕 화면").
+const DECODED_PLUGIN_ROOT = path.resolve(
+  decodeURIComponent(
+    path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/i, '$1')),
+  ),
+  '..', '..',
+);
+vi.mock('../../lib/core/platform.js', () => ({
+  getPluginRoot: vi.fn(() => DECODED_PLUGIN_ROOT),
+  getHomeDir: vi.fn(() => '/fake/home'),
+}));
+
+const {
   registerStyle,
   getStyle,
   listStyles,
@@ -9,7 +24,7 @@ import {
   resetRegistry,
   parseFrontmatter,
   MAX_STYLES,
-} from '../../lib/core/style-registry.js';
+} = await import('../../lib/core/style-registry.js');
 
 beforeEach(() => {
   resetRegistry();

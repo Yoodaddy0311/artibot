@@ -62,6 +62,7 @@ export {
   collectExperience,
   collectDailyExperiences,
   batchLearn,
+  bootstrapLearn,
   updatePatterns,
   getLearningSummary,
   scheduleLearning,
@@ -70,6 +71,7 @@ export {
 // Knowledge Transfer (System 2 -> System 1 promotion/demotion)
 export {
   promoteToSystem1,
+  bootstrapPromote,
   demoteFromSystem1,
   recordSystem1Usage,
   getPromotionCandidates,
@@ -117,9 +119,25 @@ export async function shutdownLearning(sessionData) {
     await summarize(sessionData);
     summarized = true;
 
-    // Self-evaluation: assess session quality and collect as experience
+    // Self-evaluation: evaluate session result + get improvement suggestions
     try {
-      const { getImprovementSuggestions } = await import('./self-evaluator.js');
+      const { evaluateResult: selfEvaluate, getImprovementSuggestions } = await import('./self-evaluator.js');
+
+      // Evaluate this session as a task result to populate evaluations.json
+      const sessionTask = {
+        id: sessionData.sessionId ?? `session-${Date.now()}`,
+        type: 'session',
+        description: `Session in ${sessionData.project ?? 'unknown'}`,
+      };
+      const sessionResult = {
+        success: (sessionData.errors?.length ?? 0) === 0,
+        duration: sessionData.duration ?? undefined,
+        testsPass: sessionData.completedTasks?.length > 0 ? true : undefined,
+        filesModified: sessionData.filesModified,
+      };
+      await selfEvaluate(sessionTask, sessionResult);
+
+      // Get improvement suggestions from evaluation history
       const evalResult = await getImprovementSuggestions();
       evaluated = evalResult;
 
@@ -135,6 +153,7 @@ export async function shutdownLearning(sessionData) {
           sessionId: sessionData.sessionId,
           project: sessionData.project,
         },
+        sessionId: sessionData.sessionId,
         score: evalResult.overallTrend === 'improving' ? 0.8
           : evalResult.overallTrend === 'declining' ? 0.3
           : 0.6,
@@ -149,6 +168,31 @@ export async function shutdownLearning(sessionData) {
       const { collectDailyExperiences: collect, batchLearn: learn } = await import('./lifelong-learner.js');
       await collect(sessionData);
       learned = await learn();
+
+      // Record GRPO round if patterns were extracted (ensures grpo-history.json is populated)
+      if (learned && learned.patternsExtracted > 0) {
+        try {
+          const { evaluateGroup: grpoEval, updateWeights: grpoUpdate } = await import('./grpo-optimizer.js');
+          // Build candidates from learned patterns for GRPO recording
+          const candidates = learned.patterns.map((p, i) => ({
+            id: `learn-cand-${Date.now()}-${i}`,
+            strategy: p.category ?? 'default',
+            result: {
+              exitCode: p.bestComposite > 0.5 ? 0 : 1,
+              errors: p.bestComposite > 0.5 ? 0 : 1,
+              duration: 1000,
+              commandLength: 10,
+              sideEffects: 0,
+            },
+          }));
+          if (candidates.length >= 2) {
+            const groupResult = grpoEval(candidates);
+            await grpoUpdate(groupResult);
+          }
+        } catch (grpoErr) {
+          process.stderr.write(`[learning] GRPO recording failed: ${grpoErr?.message ?? grpoErr}\n`);
+        }
+      }
     } catch (err) {
       // Non-critical: learning failure doesn't block shutdown
       process.stderr.write(`[learning] lifelong learning pipeline failed: ${err?.message ?? err}\n`);

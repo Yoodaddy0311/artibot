@@ -224,6 +224,69 @@ export async function promoteToSystem1(pattern) {
   return { promoted: true, reason: 'Meets all promotion criteria', pattern: system1Pattern };
 }
 
+/**
+ * Bootstrap promotion with relaxed criteria for initial pattern seeding.
+ * Uses lower thresholds (confidence >= 0.3, no consecutive success requirement)
+ * to ensure newly extracted patterns from historical data get promoted
+ * to System 1 and can start accumulating real usage feedback.
+ *
+ * @param {object} pattern - Pattern to promote
+ * @param {string} pattern.key - Unique pattern key
+ * @param {number} pattern.confidence - Pattern confidence score
+ * @param {string} [pattern.insight] - Human-readable insight
+ * @param {object} [pattern.bestData] - Best-performing data snapshot
+ * @returns {Promise<{ promoted: boolean, reason: string, pattern: object | null }>}
+ */
+export async function bootstrapPromote(pattern) {
+  if (!pattern?.key) {
+    return { promoted: false, reason: 'Pattern missing key', pattern: null };
+  }
+
+  const confidence = pattern.confidence ?? 0;
+
+  // Relaxed criteria for bootstrap: confidence >= 0.3, no success streak required
+  if (confidence < 0.3) {
+    return {
+      promoted: false,
+      reason: `Bootstrap confidence too low: ${round(confidence)}/0.3`,
+      pattern: null,
+    };
+  }
+
+  const cache = await loadSystem1Cache();
+  const existing = cache.get(pattern.key);
+
+  const system1Pattern = {
+    key: pattern.key,
+    type: pattern.type ?? pattern.key.split('::')[0] ?? 'general',
+    category: pattern.category ?? pattern.key.split('::')[1] ?? 'unknown',
+    confidence,
+    insight: pattern.insight ?? null,
+    bestData: pattern.bestData ?? null,
+    promotedAt: new Date().toISOString(),
+    promotionCount: (existing?.promotionCount ?? 0) + 1,
+    lastSuccessStreak: pattern.consecutiveSuccesses ?? 0,
+    usageCount: existing?.usageCount ?? 0,
+    failureCount: existing?.failureCount ?? 0,
+    consecutiveFailures: 0,
+    source: 'bootstrap',
+    status: 'active',
+  };
+
+  cache.set(pattern.key, system1Pattern);
+  await persistSystem1Cache();
+
+  await appendTransferLog({
+    action: 'promote',
+    patternKey: pattern.key,
+    confidence,
+    source: 'bootstrap',
+    timestamp: new Date().toISOString(),
+  });
+
+  return { promoted: true, reason: 'Bootstrap promotion (relaxed criteria)', pattern: system1Pattern };
+}
+
 // ---------------------------------------------------------------------------
 // Demotion: System 1 -> System 2
 // ---------------------------------------------------------------------------

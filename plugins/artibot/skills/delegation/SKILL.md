@@ -49,7 +49,11 @@ Two modes are available. Select based on weighted scoring:
 | Communication need | 0.2 | 0 (one-way report) to 1.0 (continuous P2P) |
 | File/scope scale | 0.2 | 0 (<10 files) to 1.0 (100+ files) |
 
-**Score < 0.6 -> Sub-Agent Mode** | **Score >= 0.6 -> Team Mode**
+**Score < 0.5 -> Sub-Agent Mode** | **Score >= 0.5 -> Team Mode**
+
+Target ratio: **Sub-Agent ~35% | Team ~40%** (remaining ~25% is direct/simple execution).
+
+Team mode is preferred when any of: 3+ domains, 2 domains with >5 steps, multi-target scope keywords ("전체", "all", "comprehensive"), pipeline/parallel keywords, or explicit `--team` flag.
 
 ---
 
@@ -59,8 +63,12 @@ Use the `Task` tool to spawn focused sub-agents for bounded work.
 
 **When to use**:
 - Complexity < 0.6, single domain, < 20 files
-- One-way delegation: assign, wait, receive result
+- One-way delegation: assign task, agent works independently
 - No inter-agent communication needed
+
+**Blocking modes**:
+- `Task(subagent_type)` — blocks caller until result (use inside command pipelines)
+- `Task(subagent_type, run_in_background=true)` — non-blocking (use when routing from /sc or keeping user session responsive)
 
 **Strategies** (see `references/delegation-matrix.md`):
 | Condition | Strategy | Gain |
@@ -160,7 +168,8 @@ Use the Agent Teams API for complex, multi-domain tasks requiring coordination.
 **Delegation matrix**: `references/delegation-matrix.md`
 **Auto-trigger**: >7 dirs OR >50 files OR complexity >0.8 OR multi-domain + communication need
 
-**Sub-Agent Flow**: `Task(subagent_type)` -> receive result
+**Sub-Agent Flow (pipeline)**: `Task(subagent_type)` -> receive result (blocking, for internal pipelines)
+**Sub-Agent Flow (routing)**: `Task(subagent_type, run_in_background=true)` -> return control to user (non-blocking, for /sc delegation)
 **Team Flow**: `TeamCreate` -> `Task(type, team, name)` -> `TaskCreate` -> coordinate -> `TeamDelete`
 
 Always aggregate and cross-reference results from both modes.

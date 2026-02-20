@@ -1,7 +1,7 @@
 ---
 description: Create state checkpoint snapshots saved to auto memory
 argument-hint: '[label] e.g. "리팩토링 전 스냅샷"'
-allowed-tools: [Read, Write, Bash, Glob, Grep, TodoWrite]
+allowed-tools: [Read, Write, Bash, Glob, Grep, TaskCreate]
 ---
 
 # /checkpoint
@@ -23,7 +23,7 @@ Parse $ARGUMENTS:
 2. **Capture State**:
    - Current branch and commit hash
    - Modified/staged/untracked files list
-   - Active TodoWrite tasks and their status
+   - Active TaskCreate tasks and their status
    - Key metrics: test count, lint errors, build status
    - Git diff summary (if `--include-diff`)
 3. **Save**: Write checkpoint to auto memory:
@@ -45,7 +45,7 @@ Staged: [list]
 Untracked: [list]
 
 ## Task State
-[TodoWrite task snapshot]
+[TaskCreate task snapshot]
 
 ## Metrics
 Tests: [pass/total]

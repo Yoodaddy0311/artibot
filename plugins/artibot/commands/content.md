@@ -1,7 +1,7 @@
 ---
 description: Content marketing and SEO specialist using content-marketer subagent
 argument-hint: '[type] e.g. "블로그 글 SEO 최적화"'
-allowed-tools: [Read, Write, Task, WebSearch, TodoWrite]
+allowed-tools: [Read, Write, Task, WebSearch, TaskCreate]
 ---
 
 # /content
@@ -56,21 +56,25 @@ Parse $ARGUMENTS:
 
 ## Output Format
 
-```
-CONTENT GENERATED
-=================
-Type:       [blog|social|email|seo|strategy|landing]
-Topic:      [topic description]
-Campaign:   [campaign name or N/A]
+Use GFM markdown tables:
 
-CONTENT
--------
+**Summary**
+
+| 항목 | 값 |
+|------|-----|
+| Type | [blog/social/email/seo/strategy/landing] |
+| Topic | [topic description] |
+| Campaign | [campaign name or N/A] |
+
+**Content**
+
 [generated content]
 
-METRICS
--------
-Word Count:      [n]
-SEO Score:       [n/100] (if --seo)
-Readability:     [grade level]
-Keywords:        [primary], [secondary]
-```
+**Metrics**
+
+| Metric | Value |
+|--------|-------|
+| Word Count | [n] |
+| SEO Score | [n/100] |
+| Readability | [grade level] |
+| Keywords | [primary], [secondary] |

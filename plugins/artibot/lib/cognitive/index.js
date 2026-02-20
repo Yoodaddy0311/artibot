@@ -68,7 +68,7 @@ export async function process(input, context = {}) {
   const { route: routeInput } = await import('./router.js');
   const routing = routeInput(input, context);
 
-  if (routing.system === 'system1') {
+  if (routing.system === 1) {
     const { fastResponse } = await import('./system1.js');
     const result = await fastResponse(input, context);
     return { system: 'system1', result, complexity: routing };

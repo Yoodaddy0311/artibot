@@ -1,7 +1,7 @@
 ---
 description: Project cleanup and technical debt reduction with systematic dead code elimination
 argument-hint: '[target] e.g. "사용하지 않는 코드 정리"'
-allowed-tools: [Read, Write, Edit, Glob, Grep, Bash, Task, TodoWrite]
+allowed-tools: [Read, Write, Edit, Glob, Grep, Bash, Task, TaskCreate]
 ---
 
 # /cleanup

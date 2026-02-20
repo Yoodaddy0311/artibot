@@ -395,6 +395,11 @@ function _getEscalationReason(confidence, source) {
  * Called automatically on first fastResponse(), or can be called
  * explicitly at startup for better first-query latency.
  *
+ * Loads from two sources:
+ *   1. Pattern files in patterns/ directory (keyword-based patterns with id+keywords)
+ *   2. System 1 patterns from system1-patterns.json (promoted from lifelong learning)
+ *      These use key-based matching with auto-generated keywords from category/insight.
+ *
  * @returns {Promise<{ loaded: number, dir: string }>}
  */
 export async function warmCache() {
@@ -409,9 +414,57 @@ export async function warmCache() {
     if (data && data.id && data.keywords) {
       patterns.push(data);
     } else if (data && Array.isArray(data.patterns)) {
-      // Support pattern collection files
+      // Support pattern collection files (lifelong-learner format)
       for (const p of data.patterns) {
-        if (p.id && p.keywords) patterns.push(p);
+        if (p.id && p.keywords) {
+          patterns.push(p);
+        } else if (p.key && !p.keywords) {
+          // Convert lifelong-learner patterns to System 1 format
+          // Generate keywords from key, category, and insight
+          const keywords = _extractKeywords(p);
+          if (keywords.length > 0) {
+            patterns.push({
+              id: p.key,
+              keywords,
+              intent: p.type ?? 'learned',
+              domain: p.type,
+              confidence: p.confidence ?? 0.5,
+              response: { type: 'learned_pattern', data: p.bestData, insight: p.insight },
+              useCount: p.sampleSize ?? 0,
+              successRate: p.confidence ?? 0.5,
+              lastUsed: p.extractedAt ? new Date(p.extractedAt).getTime() : Date.now(),
+              source: 'lifelong-learner',
+            });
+          }
+        }
+      }
+    }
+  }
+
+  // Also load System 1 promoted patterns (from knowledge-transfer)
+  const homeDir = getHomeDir();
+  const s1Path = path.join(homeDir, '.claude', 'artibot', 'system1-patterns.json');
+  const s1Data = await readJsonFile(s1Path);
+  if (s1Data && Array.isArray(s1Data.patterns)) {
+    for (const p of s1Data.patterns) {
+      if (p.status !== 'active') continue;
+      // Skip if already loaded by key
+      if (patterns.some(existing => existing.id === p.key)) continue;
+
+      const keywords = _extractKeywords(p);
+      if (keywords.length > 0) {
+        patterns.push({
+          id: p.key,
+          keywords,
+          intent: p.type ?? 'promoted',
+          domain: p.type,
+          confidence: p.confidence ?? 0.5,
+          response: { type: 'system1_pattern', data: p.bestData, insight: p.insight },
+          useCount: p.usageCount ?? 0,
+          successRate: p.confidence ?? 0.5,
+          lastUsed: p.promotedAt ? new Date(p.promotedAt).getTime() : Date.now(),
+          source: p.source ?? 'system2',
+        });
       }
     }
   }
@@ -423,6 +476,43 @@ export async function warmCache() {
   _warmed = true;
 
   return { loaded: _loadedPatterns.length, dir };
+}
+
+/**
+ * Extract keywords from a lifelong-learner or knowledge-transfer pattern.
+ * Generates searchable keywords from key, category, insight, and bestData fields.
+ * @param {object} pattern - Pattern with key, category, insight, bestData
+ * @returns {string[]} Extracted keywords
+ */
+function _extractKeywords(pattern) {
+  const parts = [];
+
+  // Key format is "type::category" (e.g., "tool::Read")
+  if (pattern.key) {
+    const segments = pattern.key.split('::');
+    parts.push(...segments);
+  }
+  if (pattern.category) parts.push(pattern.category);
+  if (pattern.type) parts.push(pattern.type);
+
+  // Extract meaningful words from insight
+  if (pattern.insight && typeof pattern.insight === 'string') {
+    const words = pattern.insight
+      .toLowerCase()
+      .split(/[\s,./\\:;|_\-@#()[\]{}"'`!?=<>+*&^%$~]+/)
+      .filter(w => w.length >= 3 && w.length <= 30);
+    parts.push(...words);
+  }
+
+  // Extract context from bestData
+  if (pattern.bestData?.context) {
+    const ctxParts = pattern.bestData.context.split(/[:]/);
+    parts.push(...ctxParts);
+  }
+
+  // Deduplicate and normalize
+  const unique = [...new Set(parts.map(p => p.toLowerCase()).filter(p => p.length >= 2))];
+  return unique;
 }
 
 // ---------------------------------------------------------------------------

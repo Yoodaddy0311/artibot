@@ -1,7 +1,7 @@
 ---
 description: Conversion rate optimization for landing pages, signup flows, forms, onboarding, and pricing pages
 argument-hint: '[target] e.g. "랜딩페이지 전환율 개선"'
-allowed-tools: [Read, Write, Glob, Grep, Bash, Task, WebSearch, TodoWrite]
+allowed-tools: [Read, Write, Glob, Grep, Bash, Task, WebSearch, TaskCreate]
 ---
 
 # /cro

@@ -1,7 +1,7 @@
 ---
 description: Project build with framework auto-detection and optimization
 argument-hint: '[target] e.g. "React 프로젝트 빌드"'
-allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, Task, TodoWrite]
+allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, Task, TaskCreate]
 ---
 
 # /build

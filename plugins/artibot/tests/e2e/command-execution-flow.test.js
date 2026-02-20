@@ -18,8 +18,12 @@ import { readFileSync } from 'node:fs';
  * (no mocks for core logic, only platform-level mocks).
  */
 
+// decodeURIComponent is needed because import.meta.url percent-encodes
+// non-ASCII characters (e.g. Korean "바탕 화면") which breaks fs operations.
 const PLUGIN_ROOT = path.resolve(
-  path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/i, '$1')),
+  decodeURIComponent(
+    path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/i, '$1')),
+  ),
   '..', '..',
 );
 

@@ -1,7 +1,7 @@
 ---
 description: Automatic build error diagnosis and repair using build-error-resolver agent
 argument-hint: '[error] e.g. "빌드 에러 자동 수정"'
-allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, Task, TodoWrite]
+allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, Task, TaskCreate]
 ---
 
 # /build-fix

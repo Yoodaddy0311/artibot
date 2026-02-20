@@ -4,10 +4,11 @@
  * Saves current session state to ~/.claude/artibot-state.json
  * and runs the learning pipeline with parallelized independent stages.
  *
- * Pipeline stages:
- *   1. [parallel] selfEvaluate(session) + collectExperiences(session)
- *   2. [sequential] batchLearn(experiences) -- depends on collected experiences
- *   3. [sequential] hotSwap(learned) -- depends on batch learning result
+ * Pipeline: delegates to shutdownLearning() which handles the full cycle:
+ *   1. summarizeSession (memory)
+ *   2. self-evaluation (evaluateResult + collectExperience)
+ *   3. experience collection + batch learning
+ *   4. knowledge transfer hot-swap
  */
 
 import { atomicWriteSync, getPluginRoot, parseJSON, readStdin, toFileUrl } from '../utils/index.js';
@@ -15,55 +16,19 @@ import path from 'node:path';
 import { logHookError, getStatePath, createErrorHandler } from '../../lib/core/hook-utils.js';
 
 /**
- * Run the learning pipeline with parallelized independent operations.
- * selfEvaluate and collectExperiences are independent and run concurrently.
- * batchLearn depends on experiences; hotSwap depends on learned results.
+ * Run the learning pipeline using shutdownLearning() which includes:
+ *   1. Session summarization (memory)
+ *   2. Self-evaluation (evaluateResult via getImprovementSuggestions + collectExperience)
+ *   3. Experience collection + batch learning (collectDailyExperiences + batchLearn)
+ *   4. Knowledge transfer hot-swap (hotSwap - no args, reads patterns internally)
  *
  * @param {object} sessionData - Session context data
  * @param {object} learningModule - The imported learning module
- * @returns {Promise<{ evalResult: object|null, experiences: object[]|null, learned: object|null, hotSwapped: object|null }>}
+ * @returns {Promise<{ summarized: boolean, evaluated: object|null, learned: object|null, hotSwapped: object|null }>}
  */
 export async function runLearningPipeline(sessionData, learningModule) {
-  const {
-    getImprovementSuggestions,
-    collectDailyExperiences,
-    batchLearn,
-    hotSwap,
-  } = learningModule;
-
-  // Stage 1: Run independent operations in parallel
-  const [evalSettled, experiencesSettled] = await Promise.allSettled([
-    getImprovementSuggestions(),
-    collectDailyExperiences(sessionData),
-  ]);
-
-  const evalResult = evalSettled.status === 'fulfilled' ? evalSettled.value : null;
-  const experiences = experiencesSettled.status === 'fulfilled' ? experiencesSettled.value : null;
-
-  if (evalSettled.status === 'rejected') {
-    logHookError('session-end', 'selfEvaluate failed', evalSettled.reason);
-  }
-  if (experiencesSettled.status === 'rejected') {
-    logHookError('session-end', 'collectExperiences failed', experiencesSettled.reason);
-  }
-
-  // Stage 2: batchLearn depends on experiences being collected
-  let learned = null;
-  try {
-    learned = await batchLearn(experiences);
-  } catch (err) {
-    logHookError('session-end', 'batchLearn failed', err);
-  }
-
-  // Stage 3: hotSwap depends on learning results
-  let hotSwapped = null;
-  try {
-    hotSwapped = await hotSwap(learned);
-  } catch (err) {
-    logHookError('session-end', 'hotSwap failed', err);
-  }
-
-  return { evalResult, experiences, learned, hotSwapped };
+  const { shutdownLearning } = learningModule;
+  return shutdownLearning(sessionData);
 }
 
 async function main() {
@@ -107,8 +72,9 @@ async function main() {
       const result = await runLearningPipeline(sessionData, learningModule);
 
       // Summary log
-      const parts = ['[learning] SessionEnd pipeline complete (parallel)'];
-      if (result.evalResult) parts.push('evaluated');
+      const parts = ['[learning] SessionEnd pipeline complete (shutdownLearning)'];
+      if (result.summarized) parts.push('summarized');
+      if (result.evaluated) parts.push('evaluated');
       if (result.learned) {
         parts.push(`groups: ${result.learned.groupsProcessed ?? 0}`);
         parts.push(`patterns: ${result.learned.patternsExtracted ?? 0}`);
