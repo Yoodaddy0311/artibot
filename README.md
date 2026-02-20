@@ -75,6 +75,48 @@ claude plugin install artibot@artibot
 - Node.js >= 18.0.0
 - `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` environment variable
 
+### Cross-Platform Installation
+
+Artibot works beyond Claude Code. Built-in adapters auto-convert agents, skills, and commands for each platform.
+
+> Replace `<your-project>` with the root directory path of the target project.
+
+| Platform | Compatibility | Agent Teams | Sub-Agent | Skills |
+|----------|:------------:|:-----------:|:---------:|:------:|
+| Claude Code | 10/10 | ✅ | ✅ | ✅ |
+| Gemini CLI | 9/10 | ❌ | ✅ | ✅ |
+| Codex CLI | 8/10 | ❌ | ✅ | ✅ |
+| Antigravity | 8/10 | ❌ | ✅ | ✅ |
+| Cursor IDE | 6/10 | ❌ | ⚠️ | ✅ |
+
+#### Gemini CLI
+
+```bash
+git clone https://github.com/Yoodaddy0311/artibot.git
+cd artibot
+node --input-type=module -e "import { exportForGemini } from './plugins/artibot/lib/core/skill-exporter.js'; const r = await exportForGemini({ pluginRoot: './plugins/artibot' }); console.log(r.summary);"
+```
+
+#### OpenAI Codex CLI
+
+```bash
+git clone https://github.com/Yoodaddy0311/artibot.git
+cd artibot
+node --input-type=module -e "import { exportForCodex } from './plugins/artibot/lib/core/skill-exporter.js'; const r = await exportForCodex({ pluginRoot: './plugins/artibot' }); console.log(r.summary);"
+```
+
+#### Google Antigravity
+
+```bash
+git clone https://github.com/Yoodaddy0311/artibot.git
+cd artibot
+node --input-type=module -e "import { exportForGemini } from './plugins/artibot/lib/core/skill-exporter.js'; const r = await exportForGemini({ pluginRoot: './plugins/artibot' }); console.log(r.summary);"
+```
+
+> **Note:** Agent Teams API is exclusive to Claude Code. Other platforms automatically fall back to Sub-Agent mode (one-way delegation). Learning, memory, and swarm intelligence work identically across all platforms.
+>
+> For the full cross-platform guide including Cursor IDE and batch export, see [plugins/artibot/README.md](plugins/artibot/README.md).
+
 ## Usage
 
 ### Smart Routing
