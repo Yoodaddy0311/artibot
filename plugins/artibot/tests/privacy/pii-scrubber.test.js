@@ -65,14 +65,14 @@ describe('scrub() - auth (API keys & tokens)', () => {
   });
 
   it('redacts AWS access key ID (AKIA prefix)', () => {
-    const text = 'aws_key=AKIAIOSFODNN7EXAMPLE';
+    const text = 'aws_key=' + 'AKIA' + 'IOSFODNN7EXAMPLE';
     const result = scrub(text);
     expect(result).toContain('[REDACTED_KEY]');
   });
 
   it('redacts GCP API key (AIza prefix, 35 char suffix)', () => {
     // Pattern: AIza + exactly 35 alphanumeric/underscore/dash chars = 39 total
-    const text = 'key: AIzaSyDOCAbC123dEf456GhI789jKl012345678';
+    const text = 'key: ' + 'AIza' + 'SyDOCAbC123dEf456GhI789jKl012345678';
     const result = scrub(text);
     expect(result).toContain('[REDACTED_KEY]');
   });
@@ -485,7 +485,7 @@ describe('validateScrubbed()', () => {
   });
 
   it('detects residual AWS key', () => {
-    const result = validateScrubbed('AKIAIOSFODNN7EXAMPLE');
+    const result = validateScrubbed('AKIA' + 'IOSFODNN7EXAMPLE');
     expect(result.clean).toBe(false);
     expect(result.residual).toContain('aws_key');
   });

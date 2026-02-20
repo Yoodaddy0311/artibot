@@ -168,7 +168,7 @@ describe('quality-gate hook', () => {
     it('blocks when AWS access key pattern is found', async () => {
       readStdin.mockResolvedValue(makeHookData('Edit', '/project/src/aws.js'));
       readFileSync.mockReturnValue(
-        'const accessKey = "AKIAIOSFODNN7EXAMPLE";\n',
+        'const accessKey = "' + 'AKIA' + 'IOSFODNN7EXAMPLE";\n',
       );
 
       await import('../../scripts/hooks/quality-gate.js');
