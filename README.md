@@ -1,14 +1,13 @@
 # Artibot
 
-[![CI](https://github.com/Artience/Artibot/actions/workflows/ci.yml/badge.svg)](https://github.com/Artience/Artibot/actions/workflows/ci.yml)
-[![Coverage](https://img.shields.io/badge/coverage-94.64%25-brightgreen)](plugins/artibot/tests/)
-[![Tests](https://img.shields.io/badge/tests-1690%20passed-brightgreen)](plugins/artibot/tests/)
-[![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![Coverage](https://img.shields.io/badge/coverage-96.95%25-brightgreen)](plugins/artibot/tests/)
+[![Tests](https://img.shields.io/badge/tests-2643%20passed-brightgreen)](plugins/artibot/tests/)
+[![License](https://img.shields.io/badge/license-BSL--1.1-blue)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D18-green)](package.json)
 
-![Claude Code Plugin](https://img.shields.io/badge/Claude_Code-Plugin-7C3AED?style=flat-square&logo=data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cGF0aCBkPSJNMTIgMkM2LjQ4IDIgMiA2LjQ4IDIgMTJzNC40OCAxMCAxMCAxMCAxMC00LjQ4IDEwLTEwUzE3LjUyIDIgMTIgMnoiIGZpbGw9IndoaXRlIi8+PC9zdmc+)
-![Version](https://img.shields.io/badge/version-1.4.0-blue?style=flat-square)
-![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)
+![Claude Code Plugin](https://img.shields.io/badge/Claude_Code-Plugin-7C3AED?style=flat-square)
+![Version](https://img.shields.io/badge/version-1.5.0-blue?style=flat-square)
+![License](https://img.shields.io/badge/license-BSL--1.1-green?style=flat-square)
 ![Node.js](https://img.shields.io/badge/Node.js-18%2B-brightgreen?style=flat-square)
 ![Agent Teams](https://img.shields.io/badge/Agent_Teams-Native-orange?style=flat-square)
 
@@ -39,10 +38,10 @@ Most Claude Code plugins use simple sub-agent (`Task()`) delegation -- fire-and-
 - **Intelligent Delegation** -- Auto-selects Sub-Agent (simple) vs Agent Team (complex) based on cognitive complexity scoring
 - **5 Orchestration Patterns** -- Leader, Council, Swarm, Pipeline, Watchdog
 - **8 Playbooks** -- Feature, Bugfix, Refactor, Security + Marketing Campaign, Marketing Audit, Content Launch, Competitive Analysis
-- **39 Slash Commands** -- `/sc` smart router, `/orchestrate`, `/spawn`, `/implement`, `/campaign`, `/seo`, and more
+- **41 Slash Commands** -- `/sc` smart router, `/orchestrate`, `/spawn`, `/implement`, `/campaign`, `/seo`, and more
 - **26 Specialized Agents** -- Architecture, security, frontend, backend, testing, DevOps, marketing, SEO, analytics, and more
-- **77 Domain Skills** -- 11 persona skills, 8 core skills (incl. cognitive-routing, lifelong-learning), 16 language skills, 8 utility skills, 34 marketing skills
-- **18 Event Hooks** -- Cognitive routing, lifelong learning, session lifecycle, dangerous command blocking, auto-formatting, team tracking
+- **78 Domain Skills** -- 11 persona skills, 8 core skills (incl. cognitive-routing, lifelong-learning), 16 language skills, 8 utility skills, 35 marketing skills
+- **27 Event Hook Registrations** -- Cognitive routing, lifelong learning, session lifecycle, dangerous command blocking, auto-formatting, team tracking
 - **Cross-Platform Compatible** -- Works with Gemini CLI, OpenAI Codex, and Cursor via platform adapters
 - **Zero Dependencies** -- Pure Node.js built-in modules only (`node:fs`, `node:path`, `node:os`)
 
@@ -547,7 +546,7 @@ All teammates have their specialist tools + team collaboration tools (`SendMessa
 
 ## Skills
 
-77 auto-activating domain skills organized in five categories:
+78 auto-activating domain skills organized in five categories:
 
 **Core Skills (8):** orchestration, cognitive-routing, lifelong-learning, token-efficiency, principles, coding-standards, security-standards, testing-standards
 
@@ -561,7 +560,7 @@ All teammates have their specialist tools + team collaboration tools (`SendMessa
 
 ## Hooks
 
-18 automation scripts across 14 event types:
+27 hook registrations across 14 event types:
 
 | Event | Script | Purpose |
 |-------|--------|---------|
@@ -585,9 +584,8 @@ Artibot checks for new versions on session start via GitHub Releases API (24h ca
 
 ```
 Session start:
-  Artibot v1.4.0 initialized
-  ⬆️ New version available: v1.5.0 (current: v1.4.0)
-     Update: /artibot:update --force
+  Artibot v1.5.0 initialized
+  ✅ You are running the latest version
 ```
 
 **`/artibot:update` command:**
@@ -645,13 +643,13 @@ plugins/artibot/
 |   +-- orchestrator.md          #   CTO / Team leader (Agent Teams API)
 |   +-- [17 dev specialists].md  #   Development teammates
 |   +-- [8 marketing agents].md  #   Marketing specialists
-+-- commands/                    # 39 slash commands
++-- commands/                    # 41 slash commands
 |   +-- sc.md                    #   Smart router
 |   +-- orchestrate.md           #   Team orchestration (TeamCreate)
 |   +-- spawn.md                 #   Team spawn (parallel execution)
 |   +-- [25 dev commands].md
 |   +-- [10 marketing commands].md
-+-- skills/                      # 77 skill directories
++-- skills/                      # 78 skill directories
 |   +-- orchestration/           #   Delegation mode + team routing
 |   +-- cognitive-routing/       #   System 1/2 dual-process routing
 |   +-- lifelong-learning/       #   GRPO batch learning + knowledge transfer
@@ -682,7 +680,7 @@ Key settings in `artibot.config.json`:
 
 | Setting | Description | Default |
 |---------|-------------|---------|
-| `version` | Plugin version | `1.4.0` |
+| `version` | Plugin version | `1.5.0` |
 | `cognitive.router.threshold` | System 1/2 boundary | `0.4` |
 | `cognitive.router.adaptRate` | Per-feedback adjustment step | `0.05` |
 | `cognitive.system1.maxLatency` | System 1 max response time (ms) | `100` |
@@ -786,8 +784,8 @@ node scripts/ci/validate-hooks.js     # Hook validation
 
 ## Version
 
-1.4.0 -- Intent Detection + Context Integration + Marketing Vertical + 16 Language Skills
+1.5.0 -- Cognitive Architecture + Lifelong Learning + Marketing Vertical + Performance Benchmarks
 
 ## License
 
-MIT License -- See [LICENSE](LICENSE) for details.
+Business Source License 1.1 -- See [LICENSE](LICENSE) for details.

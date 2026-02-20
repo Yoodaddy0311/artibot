@@ -20,4 +20,5 @@ plugins/artibot/coverage/
 plugins/artibot/image.png
 *.jpeg
 *.png
-!assets/
+!assets/*.jpeg
+!assets/*.png
