@@ -64,17 +64,13 @@ Add to `~/.claude/settings.json`:
 
 ### Installation
 
-**Local installation (recommended):**
 ```bash
 git clone https://github.com/Yoodaddy0311/artibot.git
-claude plugin install ./artibot/plugins/artibot
+cd artibot/plugins/artibot
+bash install.sh
 ```
 
-**Self-hosted marketplace:**
-```bash
-claude plugin marketplace add https://github.com/Yoodaddy0311/artibot
-claude plugin install artibot@artibot
-```
+This copies agents, commands, skills, hooks, and MCP config to `~/.claude/`. To uninstall: `bash install.sh uninstall`
 
 ### Requirements
 

@@ -111,17 +111,14 @@ Artibot의 핵심 엔진은 Claude Code의 **Agent Teams API**입니다. 단순�
 }
 ```
 
-### Claude Code Marketplace (권장)
-```bash
-claude plugin install artibot
-```
-
-### 수동 설치
+### 설치
 ```bash
 git clone https://github.com/Yoodaddy0311/artibot.git
-cd artibot
-claude plugin install ./plugins/artibot
+cd artibot/plugins/artibot
+bash install.sh
 ```
+
+에이전트, 커맨드, 스킬, 훅, MCP 설정을 `~/.claude/`에 복사합니다. 제거: `bash install.sh uninstall`
 
 ### 요구사항
 - Claude Code CLI
@@ -407,16 +404,13 @@ Agent Teams (Full P2P)  →  Sub-Agent (단방향)  →  Direct (직접 실행)
 ### 0. 5분 시작 가이드
 
 ```bash
-# Step 1: Agent Teams 활성화 (~/.claude/settings.json)
-echo '{"env":{"CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS":"1"}}' > ~/.claude/settings.json
+# Step 1: Clone
+git clone https://github.com/Yoodaddy0311/artibot.git
 
-# Step 2: 플러그인 설치
-claude plugin install artibot
+# Step 2: Install (agents, commands, skills, hooks → ~/.claude/)
+cd artibot/plugins/artibot && bash install.sh
 
-# Step 3: 검증
-node ~/.claude/plugins/artibot/scripts/validate.js
-
-# Step 4: 첫 번째 명령 실행
+# Step 3: 첫 번째 명령 실행 (Claude Code 실행 후)
 /sc 로그인 기능 구현해줘
 ```
 

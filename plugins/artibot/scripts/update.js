@@ -98,7 +98,9 @@ async function fetchLatestRelease() {
 function printManualInstructions() {
   console.log('');
   console.log('To update manually:');
-  console.log('  claude plugin install artibot');
+  console.log('  cd <artibot-repo>/plugins/artibot');
+  console.log('  git pull origin master');
+  console.log('  bash install.sh');
   console.log('');
   console.log('Or download the latest release from:');
   console.log('  https://github.com/Yoodaddy0311/artibot/releases/latest');
@@ -141,7 +143,13 @@ function clearCache(home) {
 // ---------------------------------------------------------------------------
 
 function runInstall() {
-  execSync('claude plugin install artibot', { stdio: 'inherit', timeout: 300_000 });
+  const pluginRoot = getPluginRoot();
+  const installScript = path.join(pluginRoot, 'install.sh');
+  if (existsSync(installScript)) {
+    execSync(`bash "${installScript}"`, { stdio: 'inherit', timeout: 300_000 });
+  } else {
+    throw new Error(`install.sh not found at ${installScript}. Run from the artibot plugin directory.`);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -207,7 +215,7 @@ async function main() {
   console.log('-----------');
   console.log(`  1. Save backup metadata to ~/.claude/artibot/update-backup.json`);
   console.log(`  2. Clear plugin cache at ~/.claude/plugins/cache/artibot/`);
-  console.log(`  3. Run: claude plugin install artibot`);
+  console.log(`  3. Run: bash install.sh`);
 
   if (DRY_RUN) {
     console.log('\n[dry-run] No changes made. Remove --dry-run to execute.');
@@ -226,7 +234,7 @@ async function main() {
   clearCache(home);
 
   // Step 3: Install
-  console.log('  Installing via: claude plugin install artibot');
+  console.log('  Installing via: bash install.sh');
   try {
     runInstall();
   } catch (err) {
