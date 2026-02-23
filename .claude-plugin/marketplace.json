@@ -1,21 +1,37 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "artibot",
-  "description": "Intelligent orchestration framework with expert agent teams, domain skills, and workflow automation for Claude Code",
   "owner": {
     "name": "Artience"
+  },
+  "metadata": {
+    "description": "Intelligent orchestration framework with 26 expert agent teams, 79 domain skills, and cognitive routing for Claude Code"
   },
   "plugins": [
     {
       "name": "artibot",
-      "description": "Intelligent orchestration framework with expert agent teams, domain skills, and workflow automation for Claude Code",
-      "version": "1.4.0",
+      "description": "Cognitive orchestration framework with dual-process routing, lifelong learning, expert agent teams, and workflow automation for Claude Code",
+      "version": "1.6.0",
       "author": {
         "name": "Artience"
       },
       "source": "./plugins/artibot",
       "category": "development",
-      "homepage": "https://github.com/Yoodaddy0311/artibot"
+      "homepage": "https://github.com/Yoodaddy0311/artibot",
+      "repository": "https://github.com/Yoodaddy0311/artibot",
+      "license": "BSL-1.1",
+      "keywords": [
+        "orchestration",
+        "agent-teams",
+        "cognitive-routing",
+        "dual-process",
+        "lifelong-learning",
+        "marketing",
+        "seo",
+        "tdd",
+        "code-review",
+        "security"
+      ]
     }
   ]
 }
