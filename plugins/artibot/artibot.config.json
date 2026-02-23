@@ -198,6 +198,13 @@
     }
   },
 
+  "visual": {
+    "maxIterations": 3,
+    "threshold": 0.95,
+    "disableAnimations": true,
+    "excludeSelectors": []
+  },
+
   "output": {
     "maxContextLength": 500,
     "defaultStyle": "artibot-default"

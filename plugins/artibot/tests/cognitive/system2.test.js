@@ -21,7 +21,7 @@ vi.mock('../../lib/cognitive/sandbox.js', () => {
     blockedPatterns: [],
   }));
 
-  const execute = vi.fn((action, sandbox) => ({
+  const executeMock = vi.fn((action, sandbox) => ({
     executed: false,
     command: action,
     sandboxId: sandbox?.id || 'mock',
@@ -62,7 +62,7 @@ vi.mock('../../lib/cognitive/sandbox.js', () => {
     status: 'active',
   }));
 
-  return { createSandbox, execute, validate, recordResult, cleanup, getStats };
+  return { createSandbox, execute: executeMock, validate, recordResult, cleanup, getStats };
 });
 
 const sandboxMocks = await import('../../lib/cognitive/sandbox.js');

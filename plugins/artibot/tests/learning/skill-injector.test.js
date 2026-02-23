@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // ---------------------------------------------------------------------------
 // Mocks (hoisted)
@@ -40,9 +40,9 @@ vi.mock('node:fs/promises', () => ({
 // ---------------------------------------------------------------------------
 
 import {
-  injectRules,
-  getInjectedRules,
   clearInjections,
+  getInjectedRules,
+  injectRules,
 } from '../../lib/learning/skill-injector.js';
 
 // ---------------------------------------------------------------------------

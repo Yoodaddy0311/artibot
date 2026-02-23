@@ -28,7 +28,7 @@ vi.mock('../../scripts/utils/index.js', () => ({
 vi.mock('../../lib/core/hook-utils.js', () => ({
   logHookError: vi.fn(),
   getStatePath: vi.fn(() => '/fake/.claude/artibot-state.json'),
-  createErrorHandler: vi.fn(() => (err) => {}),
+  createErrorHandler: vi.fn(() => (_err) => {}),
   hasExtension: vi.fn(() => false),
   extractFilePath: vi.fn(() => ''),
   extractToolName: vi.fn(() => ''),

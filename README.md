@@ -1,7 +1,7 @@
 # Artibot
 
-[![Coverage](https://img.shields.io/badge/coverage-96.95%25-brightgreen)](plugins/artibot/tests/)
-[![Tests](https://img.shields.io/badge/tests-2879%20passed-brightgreen)](plugins/artibot/tests/)
+[![Coverage](https://img.shields.io/badge/coverage-97.06%25-brightgreen)](plugins/artibot/tests/)
+[![Tests](https://img.shields.io/badge/tests-2933%20passed-brightgreen)](plugins/artibot/tests/)
 [![License](https://img.shields.io/badge/license-BSL--1.1-blue)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D18-green)](package.json)
 

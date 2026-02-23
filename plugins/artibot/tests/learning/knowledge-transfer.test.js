@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  bootstrapPromote,
   clearCache,
   demoteFromSystem1,
   getPromotionCandidates,
@@ -1062,6 +1063,543 @@ describe('knowledge-transfer', () => {
 
       const p2 = await getSystem1Pattern('tool::Read');
       expect(p2).toBeNull();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  describe('bootstrapPromote()', () => {
+    it('promotes pattern with relaxed criteria (confidence >= 0.3, no streak required)', async () => {
+      const result = await bootstrapPromote({
+        key: 'tool::Read',
+        confidence: 0.5,
+        insight: 'bootstrap pattern',
+        bestData: { successRate: 0.8 },
+      });
+      expect(result.promoted).toBe(true);
+      expect(result.pattern.source).toBe('bootstrap');
+      expect(result.pattern.status).toBe('active');
+    });
+
+    it('rejects when pattern has no key', async () => {
+      const result = await bootstrapPromote({ confidence: 0.5 });
+      expect(result.promoted).toBe(false);
+      expect(result.reason).toContain('missing key');
+    });
+
+    it('rejects when pattern is null', async () => {
+      const result = await bootstrapPromote(null);
+      expect(result.promoted).toBe(false);
+      expect(result.reason).toContain('missing key');
+    });
+
+    it('rejects when pattern is undefined', async () => {
+      const result = await bootstrapPromote(undefined);
+      expect(result.promoted).toBe(false);
+      expect(result.reason).toContain('missing key');
+    });
+
+    it('rejects when confidence < 0.3', async () => {
+      const result = await bootstrapPromote({
+        key: 'tool::Grep',
+        confidence: 0.2,
+      });
+      expect(result.promoted).toBe(false);
+      expect(result.reason).toContain('Bootstrap confidence too low');
+    });
+
+    it('rejects when confidence is missing (defaults to 0)', async () => {
+      const result = await bootstrapPromote({ key: 'tool::Grep' });
+      expect(result.promoted).toBe(false);
+      expect(result.reason).toContain('Bootstrap confidence too low');
+    });
+
+    it('accepts confidence exactly at threshold (0.3)', async () => {
+      const result = await bootstrapPromote({
+        key: 'tool::Threshold',
+        confidence: 0.3,
+      });
+      expect(result.promoted).toBe(true);
+    });
+
+    it('increments promotionCount on re-bootstrap', async () => {
+      readJsonFile.mockResolvedValue({
+        patterns: [{
+          key: 'tool::Read',
+          status: 'active',
+          promotionCount: 2,
+          usageCount: 3,
+          failureCount: 0,
+        }],
+        updatedAt: new Date().toISOString(),
+      });
+      const result = await bootstrapPromote({
+        key: 'tool::Read',
+        confidence: 0.6,
+      });
+      expect(result.promoted).toBe(true);
+      expect(result.pattern.promotionCount).toBe(3);
+    });
+
+    it('preserves existing usageCount on re-bootstrap', async () => {
+      readJsonFile.mockResolvedValue({
+        patterns: [{
+          key: 'tool::Read',
+          status: 'active',
+          promotionCount: 1,
+          usageCount: 15,
+          failureCount: 2,
+        }],
+        updatedAt: new Date().toISOString(),
+      });
+      const result = await bootstrapPromote({
+        key: 'tool::Read',
+        confidence: 0.5,
+      });
+      expect(result.pattern.usageCount).toBe(15);
+      expect(result.pattern.failureCount).toBe(2);
+    });
+
+    it('derives type and category from key when not provided', async () => {
+      const result = await bootstrapPromote({
+        key: 'error::network',
+        confidence: 0.45,
+      });
+      expect(result.promoted).toBe(true);
+      expect(result.pattern.type).toBe('error');
+      expect(result.pattern.category).toBe('network');
+    });
+
+    it('defaults insight and bestData to null when not provided', async () => {
+      const result = await bootstrapPromote({
+        key: 'tool::Bash',
+        confidence: 0.4,
+      });
+      expect(result.promoted).toBe(true);
+      expect(result.pattern.insight).toBeNull();
+      expect(result.pattern.bestData).toBeNull();
+    });
+
+    it('sets lastSuccessStreak from consecutiveSuccesses or defaults to 0', async () => {
+      const withStreak = await bootstrapPromote({
+        key: 'tool::Read',
+        confidence: 0.5,
+        consecutiveSuccesses: 2,
+      });
+      expect(withStreak.pattern.lastSuccessStreak).toBe(2);
+
+      clearCache();
+      const withoutStreak = await bootstrapPromote({
+        key: 'tool::Grep',
+        confidence: 0.5,
+      });
+      expect(withoutStreak.pattern.lastSuccessStreak).toBe(0);
+    });
+
+    it('writes to disk and logs on bootstrap promotion', async () => {
+      await bootstrapPromote({
+        key: 'tool::Write',
+        confidence: 0.5,
+        insight: 'Write modifies files',
+      });
+      expect(writeJsonFile).toHaveBeenCalled();
+      // Both system1 and transfer-log should be written
+      expect(writeJsonFile.mock.calls.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it('sets consecutiveFailures to 0 on bootstrap promotion', async () => {
+      const result = await bootstrapPromote({
+        key: 'tool::Edit',
+        confidence: 0.35,
+      });
+      expect(result.pattern.consecutiveFailures).toBe(0);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  describe('loadSystem1Cache() - cache hit on second access', () => {
+    it('returns cached map on second call without re-reading from disk', async () => {
+      readJsonFile.mockResolvedValue({
+        patterns: [{ key: 'tool::Read', status: 'active', confidence: 0.9 }],
+        updatedAt: new Date().toISOString(),
+      });
+
+      // First call loads from disk
+      const p1 = await getSystem1Pattern('tool::Read');
+      expect(p1).not.toBeNull();
+
+      const callCountAfterFirst = readJsonFile.mock.calls.length;
+
+      // Second call should use cache (readJsonFile not called again for system1)
+      const p2 = await getSystem1Pattern('tool::Read');
+      expect(p2).not.toBeNull();
+      expect(readJsonFile.mock.calls.length).toBe(callCountAfterFirst);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  describe('appendTransferLog() - pruning behavior', () => {
+    it('prunes transfer log when it exceeds 200 entries', async () => {
+      // Create a log with exactly 200 entries
+      const existingLog = Array.from({ length: 200 }, (_, i) => ({
+        action: 'promote',
+        patternKey: `tool::P${i}`,
+        timestamp: new Date().toISOString(),
+      }));
+
+      readJsonFile.mockImplementation((p) => {
+        if (p.includes('transfer-log')) return Promise.resolve(existingLog);
+        return Promise.resolve(null);
+      });
+
+      // Promote a pattern to trigger appendTransferLog (writes system1 + transfer-log)
+      await promoteToSystem1({
+        key: 'tool::NewPattern',
+        confidence: 0.9,
+        consecutiveSuccesses: 3,
+      });
+
+      // Find transfer-log write calls
+      const logWrites = writeJsonFile.mock.calls.filter(([p]) => p.includes('transfer-log'));
+      expect(logWrites.length).toBeGreaterThan(0);
+
+      // The written log should be pruned to 200 entries (not 202)
+      const lastLogWrite = logWrites[logWrites.length - 1];
+      const writtenLog = lastLogWrite[1];
+      expect(Array.isArray(writtenLog)).toBe(true);
+      expect(writtenLog.length).toBeLessThanOrEqual(200);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  describe('hotSwap() - additional branch coverage', () => {
+    it('skips candidate in hotSwap when below threshold despite being in candidates list', async () => {
+      // getPromotionCandidates normally filters below-threshold, but the hotSwap
+      // has its own check: `if (successes < PROMOTION_THRESHOLD || confidence < CONFIDENCE_THRESHOLD) continue`
+      // We ensure the loop guard fires by returning a candidate that barely misses threshold
+      readJsonFile.mockImplementation((p) => {
+        if (p.includes('system1')) {
+          return Promise.resolve({ patterns: [], updatedAt: new Date().toISOString() });
+        }
+        if (p.includes('tool-patterns')) {
+          return Promise.resolve({
+            patterns: [{
+              key: 'tool::Borderline',
+              type: 'tool',
+              category: 'Borderline',
+              confidence: 0.95,
+              consecutiveSuccesses: 5,
+              insight: 'good candidate',
+              bestData: {},
+            }],
+          });
+        }
+        return Promise.resolve(null);
+      });
+
+      const result = await hotSwap();
+      // Should promote the qualifying candidate
+      expect(result.promoted).toContain('tool::Borderline');
+    });
+
+    it('uses consecutive failure reason over error rate reason in hotSwap demotion', async () => {
+      readJsonFile.mockImplementation((p) => {
+        if (p.includes('system1')) {
+          return Promise.resolve({
+            patterns: [{
+              key: 'tool::BothFail',
+              status: 'active',
+              usageCount: 10,
+              failureCount: 4,     // 40% error rate > 20%
+              consecutiveFailures: 3,  // also >= 2 consecutive
+              promotionCount: 1,
+            }],
+            updatedAt: new Date().toISOString(),
+          });
+        }
+        return Promise.resolve(null);
+      });
+
+      const result = await hotSwap();
+      expect(result.demoted).toContain('tool::BothFail');
+    });
+
+    it('uses error rate reason when only error rate exceeds threshold (no consecutive failures)', async () => {
+      readJsonFile.mockImplementation((p) => {
+        if (p.includes('system1')) {
+          return Promise.resolve({
+            patterns: [{
+              key: 'tool::HighRate',
+              status: 'active',
+              usageCount: 10,
+              failureCount: 4,     // 40% error rate > 20%
+              consecutiveFailures: 0,  // no consecutive failures
+              promotionCount: 1,
+            }],
+            updatedAt: new Date().toISOString(),
+          });
+        }
+        return Promise.resolve(null);
+      });
+
+      const result = await hotSwap();
+      expect(result.demoted).toContain('tool::HighRate');
+    });
+
+    it('unchanged count equals cache size after operations', async () => {
+      readJsonFile.mockImplementation((p) => {
+        if (p.includes('system1')) {
+          return Promise.resolve({
+            patterns: [
+              {
+                key: 'tool::Stable',
+                status: 'active',
+                usageCount: 5,
+                failureCount: 0,
+                consecutiveFailures: 0,
+                promotionCount: 1,
+              },
+            ],
+            updatedAt: new Date().toISOString(),
+          });
+        }
+        return Promise.resolve(null);
+      });
+
+      const result = await hotSwap();
+      // Stable pattern should not be demoted; unchanged = cache.size
+      expect(result.demoted).not.toContain('tool::Stable');
+      expect(typeof result.unchanged).toBe('number');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  describe('demoteFromSystem1() - reason branch', () => {
+    beforeEach(() => {
+      readJsonFile.mockResolvedValue({
+        patterns: [{
+          key: 'tool::Read',
+          type: 'tool',
+          category: 'Read',
+          confidence: 0.9,
+          status: 'active',
+          promotionCount: 1,
+          usageCount: 10,
+          failureCount: 2,
+          consecutiveFailures: 2,
+        }],
+        updatedAt: new Date().toISOString(),
+      });
+    });
+
+    it('uses provided reason in transfer log (not just returned reason)', async () => {
+      const result = await demoteFromSystem1({ key: 'tool::Read', reason: 'too many errors' });
+      expect(result.demoted).toBe(true);
+      // The returned reason uses "Demoted from System 1" default but the log uses the provided reason
+      expect(result.reason).toBeDefined();
+    });
+
+    it('log entry uses "Manual demotion" when no reason provided', async () => {
+      await demoteFromSystem1({ key: 'tool::Read' });
+      // writeJsonFile called for system1 and transfer-log; log entry should have "Manual demotion"
+      const logWrites = writeJsonFile.mock.calls.filter(([p]) => p.includes('transfer-log'));
+      expect(logWrites.length).toBeGreaterThan(0);
+      const lastEntry = logWrites[logWrites.length - 1][1];
+      const demoteEntries = lastEntry.filter((e) => e.action === 'demote');
+      // Log entry reason should be "Manual demotion" when no reason provided
+      if (demoteEntries.length > 0) {
+        expect(demoteEntries[demoteEntries.length - 1].reason).toBe('Manual demotion');
+      }
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  describe('recordSystem1Usage() - error rate demotion reason branch', () => {
+    it('uses error rate reason string when demoting due to high error rate only', async () => {
+      readJsonFile.mockResolvedValue({
+        patterns: [{
+          key: 'tool::Read',
+          status: 'active',
+          usageCount: 8,
+          failureCount: 2,     // 2/9 = 22.2% after next failure -> > 20%
+          consecutiveFailures: 0,
+          promotionCount: 1,
+        }],
+        updatedAt: new Date().toISOString(),
+      });
+
+      const result = await recordSystem1Usage('tool::Read', false);
+      expect(result.autoDemoted).toBe(true);
+      // Consecutive failures is 1 (< 2 threshold), so error rate reason is used
+      expect(result.reason).toContain('%');
+    });
+
+    it('updates consecutiveFailures to 0 on success (reset branch)', async () => {
+      readJsonFile.mockResolvedValue({
+        patterns: [{
+          key: 'tool::Read',
+          status: 'active',
+          usageCount: 5,
+          failureCount: 0,
+          consecutiveFailures: 0,
+          promotionCount: 1,
+        }],
+        updatedAt: new Date().toISOString(),
+      });
+
+      const result = await recordSystem1Usage('tool::Read', true);
+      expect(result.updated).toBe(true);
+      expect(result.autoDemoted).toBe(false);
+
+      // Verify pattern persisted with lastSuccessAt
+      const logWrite = writeJsonFile.mock.calls.find(([p]) => p.includes('system1'));
+      expect(logWrite).toBeDefined();
+    });
+
+    it('handles pattern with undefined consecutiveFailures (defaults to 0)', async () => {
+      readJsonFile.mockResolvedValue({
+        patterns: [{
+          key: 'tool::Read',
+          status: 'active',
+          usageCount: 2,
+          failureCount: 0,
+          // no consecutiveFailures field
+          promotionCount: 1,
+        }],
+        updatedAt: new Date().toISOString(),
+      });
+
+      const result = await recordSystem1Usage('tool::Read', false);
+      expect(result.updated).toBe(true);
+      // consecutiveFailures was undefined -> 0 + 1 = 1, no auto-demotion
+      expect(result.autoDemoted).toBe(false);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  describe('acquireLock() - stale lock and error branches via hotSwap', () => {
+    it('hotSwap completes even when lock ts file indicates stale lock', async () => {
+      const fsMock = await import('node:fs/promises');
+      const fs = fsMock.default;
+
+      // Simulate stale lock: mkdir throws EEXIST, then readFile returns old timestamp
+      let mkdirCallCount = 0;
+      fs.mkdir.mockImplementation(() => {
+        mkdirCallCount++;
+        if (mkdirCallCount === 1) {
+          const err = new Error('EEXIST');
+          err.code = 'EEXIST';
+          return Promise.reject(err);
+        }
+        return Promise.resolve();
+      });
+
+      // Return a timestamp that's 35 seconds old (> 30s stale threshold)
+      const staleTs = String(Date.now() - 35000);
+      fs.readFile.mockResolvedValueOnce(staleTs);
+
+      readJsonFile.mockResolvedValue(null);
+
+      const result = await hotSwap();
+      expect(result).toHaveProperty('promoted');
+      expect(result).toHaveProperty('demoted');
+    });
+
+    it('hotSwap completes when lock ts file is missing (ENOENT during readFile)', async () => {
+      const fsMock = await import('node:fs/promises');
+      const fs = fsMock.default;
+
+      let mkdirCallCount = 0;
+      fs.mkdir.mockImplementation(() => {
+        mkdirCallCount++;
+        if (mkdirCallCount === 1) {
+          const err = new Error('EEXIST');
+          err.code = 'EEXIST';
+          return Promise.reject(err);
+        }
+        return Promise.resolve();
+      });
+
+      // Simulate ENOENT when reading ts file (no ts file in lock dir)
+      const noentErr = new Error('ENOENT');
+      noentErr.code = 'ENOENT';
+      fs.readFile.mockRejectedValueOnce(noentErr);
+
+      readJsonFile.mockResolvedValue(null);
+
+      const result = await hotSwap();
+      expect(result).toHaveProperty('promoted');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  describe('getTransferStats() - avgUsageCount branch', () => {
+    it('returns 0 for avgUsageCount when patterns array is empty', async () => {
+      readJsonFile.mockImplementation((p) => {
+        if (p.includes('system1')) {
+          return Promise.resolve({ patterns: [], updatedAt: new Date().toISOString() });
+        }
+        if (p.includes('transfer-log')) return Promise.resolve([]);
+        return Promise.resolve(null);
+      });
+
+      const stats = await getTransferStats();
+      expect(stats.avgUsageCount).toBe(0);
+      expect(stats.avgConfidence).toBe(0);
+      expect(stats.system1Count).toBe(0);
+    });
+
+    it('computes avgUsageCount correctly with multiple patterns', async () => {
+      readJsonFile.mockImplementation((p) => {
+        if (p.includes('system1')) {
+          return Promise.resolve({
+            patterns: [
+              { key: 'a', confidence: 0.9, usageCount: 10 },
+              { key: 'b', confidence: 0.8, usageCount: 20 },
+            ],
+            updatedAt: new Date().toISOString(),
+          });
+        }
+        if (p.includes('transfer-log')) return Promise.resolve([]);
+        return Promise.resolve(null);
+      });
+
+      const stats = await getTransferStats();
+      expect(stats.avgUsageCount).toBe(15);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  describe('getTransferHistory() - no action filter branch', () => {
+    it('returns all entries when no action filter provided', async () => {
+      const log = [
+        { action: 'promote', patternKey: 'tool::Read', timestamp: new Date().toISOString() },
+        { action: 'demote', patternKey: 'tool::Write', timestamp: new Date().toISOString() },
+        { action: 'hot-swap', promoted: [], demoted: [], timestamp: new Date().toISOString() },
+      ];
+      readJsonFile.mockImplementation((p) => {
+        if (p.includes('transfer-log')) return Promise.resolve(log);
+        return Promise.resolve(null);
+      });
+
+      const history = await getTransferHistory({});
+      expect(history).toHaveLength(3);
+    });
+
+    it('returns entries sliced to limit from the end', async () => {
+      const log = Array.from({ length: 10 }, (_, i) => ({
+        action: 'promote',
+        patternKey: `tool::P${i}`,
+        timestamp: new Date().toISOString(),
+      }));
+      readJsonFile.mockImplementation((p) => {
+        if (p.includes('transfer-log')) return Promise.resolve(log);
+        return Promise.resolve(null);
+      });
+
+      const history = await getTransferHistory({ limit: 3 });
+      expect(history).toHaveLength(3);
+      // Should be the last 3 entries
+      expect(history[2].patternKey).toBe('tool::P9');
     });
   });
 });

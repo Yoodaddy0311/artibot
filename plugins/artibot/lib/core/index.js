@@ -28,3 +28,5 @@ export {
 } from './tui.js';
 export { STATES, createLifecycle, getCurrentState, defaultLifecycle } from './lifecycle.js';
 export { createExtensionRegistry, defaultRegistry } from './extension.js';
+export { parsePlaybook, validatePlaybook, serializePlaybook, KNOWN_PATTERNS, KNOWN_ACTIONS } from './playbook-parser.js';
+export { loadSystemPlaybooks, loadUserPlaybooks, saveUserPlaybook, listPlaybooks, getPlaybook } from './playbook-registry.js';

@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { extractRules, classifyRule, RULE_PATTERNS } from '../../lib/learning/rule-extractor.js';
+import { describe, expect, it } from 'vitest';
+import { classifyRule, extractRules, RULE_PATTERNS } from '../../lib/learning/rule-extractor.js';
 
 // ---------------------------------------------------------------------------
 // RULE_PATTERNS export

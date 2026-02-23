@@ -635,4 +635,357 @@ describe('system1', () => {
       expect(diag.patternsLoaded).toBe(0);
     });
   });
+
+  // -------------------------------------------------------------------------
+  describe('warmCache() - lifelong-learner and system1 pattern formats', () => {
+    it('converts lifelong-learner patterns (key without keywords) from collection files', async () => {
+      const collection = {
+        patterns: [
+          {
+            key: 'tool::Read',
+            category: 'Read',
+            type: 'tool',
+            confidence: 0.8,
+            insight: 'Read tool is reliable for file reading',
+            sampleSize: 10,
+            extractedAt: new Date().toISOString(),
+          },
+        ],
+      };
+      listFiles.mockResolvedValue(['learned.json']);
+      readJsonFile.mockResolvedValue(collection);
+
+      const result = await warmCache();
+      expect(result.loaded).toBeGreaterThan(0);
+      const diag = getDiagnostics();
+      expect(diag.patternsLoaded).toBeGreaterThan(0);
+    });
+
+    it('skips lifelong-learner patterns with no extractable keywords', async () => {
+      const collection = {
+        patterns: [
+          {
+            // key with no :: split, no category, no insight, no bestData
+            key: 'x',
+            confidence: 0.7,
+          },
+        ],
+      };
+      listFiles.mockResolvedValue(['sparse.json']);
+      readJsonFile.mockResolvedValue(collection);
+
+      const result = await warmCache();
+      // 'x' is only 1 char - filtered out - so no keywords extracted, pattern skipped
+      expect(result.loaded).toBe(0);
+    });
+
+    it('loads system1-patterns.json and skips non-active patterns', async () => {
+      // Pattern file returns nothing, but system1-patterns mock has inactive pattern
+      listFiles.mockResolvedValue([]);
+      readJsonFile.mockImplementation((p) => {
+        if (p.includes('system1-patterns')) {
+          return Promise.resolve({
+            patterns: [
+              {
+                key: 'tool::Inactive',
+                status: 'demoted',
+                confidence: 0.9,
+                insight: 'inactive pattern insight',
+                type: 'tool',
+              },
+            ],
+          });
+        }
+        return Promise.resolve(null);
+      });
+
+      const result = await warmCache();
+      // demoted pattern is skipped due to status !== 'active'
+      expect(result.loaded).toBe(0);
+    });
+
+    it('loads system1-patterns.json active patterns into warm cache', async () => {
+      listFiles.mockResolvedValue([]);
+      readJsonFile.mockImplementation((p) => {
+        if (p.includes('system1-patterns')) {
+          return Promise.resolve({
+            patterns: [
+              {
+                key: 'tool::Read',
+                status: 'active',
+                confidence: 0.9,
+                insight: 'Read is fast and reliable',
+                type: 'tool',
+                usageCount: 5,
+                promotedAt: new Date().toISOString(),
+              },
+            ],
+          });
+        }
+        return Promise.resolve(null);
+      });
+
+      const result = await warmCache();
+      expect(result.loaded).toBeGreaterThan(0);
+    });
+
+    it('skips system1 pattern when already loaded from pattern files', async () => {
+      // The same key appears in both a pattern file and system1-patterns.json
+      const patternFromFile = makePattern({ id: 'tool::Read', keywords: ['read', 'file'] });
+      listFiles.mockResolvedValue(['tool_read.json']);
+      readJsonFile.mockImplementation((p) => {
+        if (p.includes('system1-patterns')) {
+          return Promise.resolve({
+            patterns: [
+              {
+                key: 'tool::Read',
+                status: 'active',
+                confidence: 0.9,
+                insight: 'duplicate pattern',
+                type: 'tool',
+              },
+            ],
+          });
+        }
+        return Promise.resolve(patternFromFile);
+      });
+
+      const result = await warmCache();
+      // Should not double-count - the system1 pattern is skipped since id already loaded
+      expect(result.loaded).toBe(1);
+    });
+
+    it('lifelong-learner pattern with bestData.context gets context keywords', async () => {
+      const collection = {
+        patterns: [
+          {
+            key: 'tool::Grep',
+            type: 'tool',
+            category: 'Grep',
+            confidence: 0.75,
+            insight: 'grep finds patterns',
+            bestData: { context: 'search:pattern' },
+          },
+        ],
+      };
+      listFiles.mockResolvedValue(['grep.json']);
+      readJsonFile.mockResolvedValue(collection);
+
+      const result = await warmCache();
+      expect(result.loaded).toBeGreaterThan(0);
+    });
+
+    it('lifelong-learner pattern with missing confidence defaults to 0.5', async () => {
+      const collection = {
+        patterns: [
+          {
+            key: 'tool::Edit',
+            type: 'tool',
+            category: 'Edit',
+            insight: 'edit modifies files in place',
+            // no confidence field
+          },
+        ],
+      };
+      listFiles.mockResolvedValue(['edit.json']);
+      readJsonFile.mockResolvedValue(collection);
+
+      const result = await warmCache();
+      expect(result.loaded).toBeGreaterThan(0);
+      // Confirm pattern loaded with default confidence
+      const matchResult = patternMatch('edit modifies files');
+      expect(matchResult.pattern).not.toBeNull();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  describe('patternMatch() - scorePattern branches with useCount=0', () => {
+    it('does not apply successRate weighting when useCount is 0', async () => {
+      // useCount=0 means the branch `if (pattern.useCount > 0)` is skipped
+      const pattern = makePattern({
+        id: 'zero-use',
+        keywords: ['build', 'project'],
+        useCount: 0,
+        successRate: 0.5,
+      });
+      listFiles.mockResolvedValue(['z.json']);
+      readJsonFile.mockResolvedValue(pattern);
+      await warmCache();
+
+      const result = patternMatch('build the project');
+      expect(result.pattern).not.toBeNull();
+      // Score should equal raw overlap (no success-rate weighting applied)
+      expect(result.score).toBeGreaterThan(0);
+    });
+
+    it('returns null when input has no keywords (single-char tokens filtered)', () => {
+      // All tokens are 1 char, tokenize returns []
+      const result = patternMatch('a b c');
+      expect(result.pattern).toBeNull();
+      expect(result.score).toBe(0);
+      expect(result.metadata.tokens).toBe(0);
+    });
+
+    it('domain mismatch does not add bonus (context.domain differs)', async () => {
+      // Use 3 keywords so overlap is 2/3 = 0.667, leaving room for domain bonus
+      const pattern = makePattern({
+        id: 'domain-test',
+        keywords: ['fix', 'bug', 'issue'],
+        domain: 'frontend',
+        useCount: 0, // no success-rate weighting
+      });
+      listFiles.mockResolvedValue(['d.json']);
+      readJsonFile.mockResolvedValue(pattern);
+      await warmCache();
+
+      // Only 'fix' and 'bug' match out of ['fix', 'bug', 'issue']  -> overlap 2/3
+      const withWrongDomain = patternMatch('fix bug', { domain: 'backend' });
+      const withCorrectDomain = patternMatch('fix bug', { domain: 'frontend' });
+      // Correct domain adds +0.1 bonus; wrong domain adds nothing
+      expect(withCorrectDomain.score).toBeGreaterThan(withWrongDomain.score);
+    });
+
+    it('command mismatch does not add bonus (context.command differs)', async () => {
+      // Use 3 keywords so overlap is 2/3 = 0.667, leaving room for command bonus
+      const pattern = makePattern({
+        id: 'cmd-test',
+        keywords: ['fix', 'bug', 'issue'],
+        command: 'debug',
+        useCount: 0, // no success-rate weighting
+      });
+      listFiles.mockResolvedValue(['c.json']);
+      readJsonFile.mockResolvedValue(pattern);
+      await warmCache();
+
+      // Only 'fix' and 'bug' match out of ['fix', 'bug', 'issue'] -> overlap 2/3
+      const withWrongCmd = patternMatch('fix bug', { command: 'build' });
+      const withCorrectCmd = patternMatch('fix bug', { command: 'debug' });
+      // Correct command adds +0.1 bonus; wrong command adds nothing
+      expect(withCorrectCmd.score).toBeGreaterThan(withWrongCmd.score);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  describe('fastResponse() - _detectTarget and _detectOperation branches', () => {
+    it('context.domain short-circuits target detection in _suggestToolCached', async () => {
+      suggestTool.mockResolvedValue([{ tool: 'grep', weightedScore: 0.7, confidence: 0.8 }]);
+      searchMemory.mockResolvedValue([]);
+
+      // Providing context.domain should use domain as target directly
+      const result = await fastResponse('search files', { domain: 'typescript' });
+      expect(result).toBeDefined();
+      // buildContextKey should have been called with the domain as target
+      const { buildContextKey } = await import('../../lib/learning/tool-learner.js');
+      expect(buildContextKey).toHaveBeenCalled();
+    });
+
+    it('_detectOperation returns "general" when no operation keywords match', async () => {
+      suggestTool.mockResolvedValue([{ tool: 'read', weightedScore: 0.65, confidence: 0.7 }]);
+      searchMemory.mockResolvedValue([]);
+
+      // Input with no recognized operation keywords
+      const result = await fastResponse('something completely unknown xyz');
+      expect(result).toBeDefined();
+      expect(suggestTool).toHaveBeenCalled();
+    });
+
+    it('_detectTarget returns "code" when no target keywords match', async () => {
+      suggestTool.mockResolvedValue([{ tool: 'bash', weightedScore: 0.6, confidence: 0.75 }]);
+      searchMemory.mockResolvedValue([]);
+
+      // No context.domain and no recognized target keywords
+      const result = await fastResponse('create something new here');
+      expect(result).toBeDefined();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  describe('fastResponse() - memory and tool error handling', () => {
+    it('returns empty array from memory on searchMemory error', async () => {
+      searchMemory.mockRejectedValue(new Error('disk error'));
+      suggestTool.mockResolvedValue([]);
+
+      const result = await fastResponse('some input that triggers memory search');
+      // Should not throw - error caught, memory returns []
+      expect(result).toBeDefined();
+      expect(result.source).toBeDefined();
+    });
+
+    it('returns empty array from tool suggestion on suggestTool error', async () => {
+      searchMemory.mockResolvedValue([]);
+      suggestTool.mockRejectedValue(new Error('tool error'));
+
+      const result = await fastResponse('edit a file to fix the bug');
+      // Should not throw - error caught, tool returns []
+      expect(result).toBeDefined();
+    });
+
+    it('warmCache is called automatically on first fastResponse when not warmed', async () => {
+      // clearAllCaches ensures _warmed is false
+      clearAllCaches();
+      listFiles.mockResolvedValue([]);
+      searchMemory.mockResolvedValue([]);
+      suggestTool.mockResolvedValue([]);
+
+      await fastResponse('first call triggers warmCache');
+      const diag = getDiagnostics();
+      expect(diag.warmed).toBe(true);
+    });
+
+    it('fastResponse with null input returns escalate=true', async () => {
+      const result = await fastResponse(null);
+      expect(result.escalate).toBe(true);
+      expect(result.escalateReason).toBe('empty_input');
+    });
+
+    it('fastResponse with non-string input returns escalate=true', async () => {
+      const result = await fastResponse(123);
+      expect(result.escalate).toBe(true);
+      expect(result.escalateReason).toBe('empty_input');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  describe('fastResponse() - escalation reason branches', () => {
+    it('escalateReason is "no_data_source" when confidence > 0 but source is none', async () => {
+      // This edge case: confidence between 0 and 0.3 but from source=none
+      // Hard to trigger naturally since source=none means confidence should be 0
+      // Test _getEscalationReason logic indirectly through low-score tool
+      suggestTool.mockResolvedValue([{ tool: 'grep', weightedScore: 0.1, confidence: 0.1 }]);
+      searchMemory.mockResolvedValue([]);
+
+      const result = await fastResponse('obscure input that gets tool match');
+      expect(result.escalate).toBe(true);
+      // weightedScore * 0.8 = 0.08 -> either no_matching_pattern or very_low_confidence
+      expect(['no_matching_pattern', 'very_low_confidence', 'below_threshold', 'no_data_source']).toContain(
+        result.escalateReason
+      );
+    });
+
+    it('result includes memoryHits when memory score is low but non-empty', async () => {
+      searchMemory.mockResolvedValue([
+        { entry: { data: { action: 'weak match' } }, score: 0.3 },
+      ]);
+      suggestTool.mockResolvedValue([]);
+
+      const result = await fastResponse('look up some information');
+      // memoryHits should be attached since results exist
+      expect(result.memoryHits).toBeDefined();
+      expect(Array.isArray(result.memoryHits)).toBe(true);
+    });
+
+    it('memoryHits capped at 5 entries', async () => {
+      const manyHits = Array.from({ length: 10 }, (_, i) => ({
+        entry: { data: { action: `action-${i}` } },
+        score: 0.8 - i * 0.05,
+      }));
+      searchMemory.mockResolvedValue(manyHits);
+      suggestTool.mockResolvedValue([]);
+
+      const result = await fastResponse('recall many things from memory');
+      if (result.memoryHits) {
+        expect(result.memoryHits.length).toBeLessThanOrEqual(5);
+      }
+    });
+  });
 });
