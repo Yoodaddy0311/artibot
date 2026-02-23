@@ -177,6 +177,3 @@ Thresholds:
 **RFM Model**: Recency x Frequency x Monetary (1-5 each)
 **Lead Score**: Demographic (25%) + Behavioral (40%) + Engagement (20%) + Negative (15%)
 **Validation**: Size, Measurable, Accessible, Differentiable, Actionable
-
-See `references/scoring-models.md` for lead scoring model templates.
-See `references/persona-templates.md` for industry-specific persona examples.

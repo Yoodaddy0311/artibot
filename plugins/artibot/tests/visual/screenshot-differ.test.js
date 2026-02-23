@@ -47,8 +47,16 @@ function noiseImage(width, height, seed = 1) {
 
 /**
  * Copy pixel array and flip a patch of pixels to a different color.
+ * @param {object} opts
+ * @param {Uint8Array} opts.base - Source pixel array to copy
+ * @param {number} opts.width - Image width in pixels
+ * @param {number} opts.patchX - Patch top-left column
+ * @param {number} opts.patchY - Patch top-left row
+ * @param {number} opts.patchW - Patch width
+ * @param {number} opts.patchH - Patch height
+ * @param {[number,number,number]} opts.color - RGB replacement color
  */
-function withPatch(base, width, patchX, patchY, patchW, patchH, [r, g, b]) {
+function withPatch({ base, width, patchX, patchY, patchW, patchH, color: [r, g, b] }) {
   const patched = new Uint8Array(base);
   for (let y = patchY; y < patchY + patchH; y++) {
     for (let x = patchX; x < patchX + patchW; x++) {
@@ -93,7 +101,7 @@ describe('calculateSSIM()', () => {
 
   it('returns high similarity (> 0.85) for images with a small patch difference', () => {
     const base = solidColor(32, 32, [200, 200, 200, 255]);
-    const patched = withPatch(base, 32, 10, 10, 4, 4, [0, 0, 0]);
+    const patched = withPatch({ base, width: 32, patchX: 10, patchY: 10, patchW: 4, patchH: 4, color: [0, 0, 0] });
     const score = calculateSSIM(base, patched, 32, 32);
     expect(score).toBeGreaterThan(0.85);
     expect(score).toBeLessThan(1.0);
@@ -101,7 +109,7 @@ describe('calculateSSIM()', () => {
 
   it('returns moderate similarity (0.3-0.85) for images with a medium patch difference', () => {
     const base = solidColor(32, 32, [200, 200, 200, 255]);
-    const patched = withPatch(base, 32, 4, 4, 16, 16, [0, 0, 0]);
+    const patched = withPatch({ base, width: 32, patchX: 4, patchY: 4, patchW: 16, patchH: 16, color: [0, 0, 0] });
     const score = calculateSSIM(base, patched, 32, 32);
     expect(score).toBeGreaterThan(0.3);
     expect(score).toBeLessThan(0.95);
@@ -134,14 +142,14 @@ describe('generateDiffMap()', () => {
 
   it('detects a region when images differ', () => {
     const base = solidColor(32, 32, [200, 200, 200, 255]);
-    const patched = withPatch(base, 32, 5, 5, 8, 8, [0, 0, 0]);
+    const patched = withPatch({ base, width: 32, patchX: 5, patchY: 5, patchW: 8, patchH: 8, color: [0, 0, 0] });
     const { diffRegions } = generateDiffMap(base, patched, 32, 32);
     expect(diffRegions.length).toBeGreaterThan(0);
   });
 
   it('assigns severity to each region', () => {
     const base = solidColor(32, 32, [200, 200, 200, 255]);
-    const patched = withPatch(base, 32, 0, 0, 32, 32, [0, 0, 0]);
+    const patched = withPatch({ base, width: 32, patchX: 0, patchY: 0, patchW: 32, patchH: 32, color: [0, 0, 0] });
     const { diffRegions } = generateDiffMap(base, patched, 32, 32);
     expect(diffRegions.length).toBeGreaterThan(0);
     diffRegions.forEach((r) => {
@@ -160,8 +168,8 @@ describe('generateDiffMap()', () => {
   it('merges nearby diff regions into one', () => {
     const base = solidColor(64, 64, [200, 200, 200, 255]);
     // Two small patches 5px apart — should be merged
-    let patched = withPatch(base, 64, 10, 10, 4, 4, [0, 0, 0]);
-    patched = withPatch(patched, 64, 16, 10, 4, 4, [0, 0, 0]);
+    let patched = withPatch({ base, width: 64, patchX: 10, patchY: 10, patchW: 4, patchH: 4, color: [0, 0, 0] });
+    patched = withPatch({ base: patched, width: 64, patchX: 16, patchY: 10, patchW: 4, patchH: 4, color: [0, 0, 0] });
     const { diffRegions } = generateDiffMap(base, patched, 64, 64);
     // Merged into at most 1 region
     expect(diffRegions.length).toBeLessThanOrEqual(2);
@@ -214,7 +222,7 @@ describe('generateDiffMap()', () => {
 
   it('each region has x, y, width, height, pixelCount fields', () => {
     const base = solidColor(32, 32, [100, 100, 100, 255]);
-    const patched = withPatch(base, 32, 5, 5, 6, 6, [255, 0, 0]);
+    const patched = withPatch({ base, width: 32, patchX: 5, patchY: 5, patchW: 6, patchH: 6, color: [255, 0, 0] });
     const { diffRegions } = generateDiffMap(base, patched, 32, 32);
     diffRegions.forEach((r) => {
       expect(r).toHaveProperty('x');
@@ -259,7 +267,7 @@ describe('compareScreenshots()', () => {
 
   it('returns high similarity and small diffPixelCount for tiny patch change', () => {
     const base = solidColor(64, 64, [180, 180, 180, 255]);
-    const patched = withPatch(base, 64, 30, 30, 3, 3, [255, 0, 0]);
+    const patched = withPatch({ base, width: 64, patchX: 30, patchY: 30, patchW: 3, patchH: 3, color: [255, 0, 0] });
     const result = compareScreenshots(
       makeDescriptor(base, 64, 64),
       makeDescriptor(patched, 64, 64),

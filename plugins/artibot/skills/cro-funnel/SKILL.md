@@ -170,6 +170,3 @@ P1       | [stage] | [specific action] | +[X]%    | [A/B test]
 **Optimization Strategies**: Reduce steps, progressive disclosure, social login, progress indicators
 **Prioritization**: ICE framework (Impact x Confidence x Ease)
 **Key Insight**: Focus on the biggest drop-off stage first for maximum impact
-
-See `references/funnel-benchmarks.md` for industry-specific funnel benchmarks.
-See `references/optimization-playbook.md` for step-by-step funnel optimization guides.

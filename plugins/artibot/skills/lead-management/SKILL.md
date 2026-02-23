@@ -211,6 +211,3 @@ Metric              | Target  | Current
 **SLA**: Respond to MQLs <5 minutes (80% conversion drop after)
 **Qualification**: BANT (Budget, Authority, Need, Timeline)
 **Key Metric**: Pipeline Velocity = (Opps * Win% * ACV) / Cycle Days
-
-See `references/scoring-templates.md` for lead scoring model templates.
-See `references/nurture-sequences.md` for nurture sequence blueprints.

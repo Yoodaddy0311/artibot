@@ -488,45 +488,106 @@ export async function hotSwap() {
 }
 
 /**
- * Internal hot-swap implementation (runs within lock).
- * @returns {Promise<object>}
+ * Compute the error rate for a pattern.
+ * @param {object} pattern - System 1 pattern
+ * @returns {number}
  */
-async function _hotSwapImpl() {
-  const cache = await loadSystem1Cache();
-  const promotedKeys = [];
+function _computePatternErrorRate(pattern) {
+  return pattern.usageCount > 0
+    ? (pattern.failureCount ?? 0) / pattern.usageCount
+    : 0;
+}
+
+/**
+ * Determine whether a pattern should be demoted.
+ * @param {object} pattern - System 1 pattern
+ * @param {number} errorRate - Pre-computed error rate
+ * @returns {boolean}
+ */
+function _shouldDemotePattern(pattern, errorRate) {
+  return (
+    (pattern.consecutiveFailures ?? 0) >= DEMOTION_FAILURE_THRESHOLD ||
+    (pattern.usageCount >= 5 && errorRate > DEMOTION_ERROR_RATE_THRESHOLD)
+  );
+}
+
+/**
+ * Build the demotion reason string.
+ * @param {object} pattern - System 1 pattern
+ * @param {number} errorRate - Pre-computed error rate
+ * @returns {string}
+ */
+function _buildDemotionReason(pattern, errorRate) {
+  return (pattern.consecutiveFailures ?? 0) >= DEMOTION_FAILURE_THRESHOLD
+    ? `${pattern.consecutiveFailures} consecutive failures`
+    : `Error rate ${round(errorRate * 100)}% too high`;
+}
+
+/**
+ * Build a System 1 pattern object from a promotion candidate.
+ * @param {object} candidate - Promotion candidate
+ * @param {object|undefined} existing - Existing cache entry (if any)
+ * @param {number} confidence - Candidate confidence
+ * @param {number} successes - Candidate consecutive successes
+ * @returns {object}
+ */
+function _buildSystem1Pattern(candidate, existing, confidence, successes) {
+  return {
+    key: candidate.key,
+    type: candidate.type ?? candidate.key.split('::')[0] ?? 'general',
+    category: candidate.category ?? candidate.key.split('::')[1] ?? 'unknown',
+    confidence,
+    insight: candidate.insight ?? null,
+    bestData: candidate.bestData ?? null,
+    promotedAt: new Date().toISOString(),
+    promotionCount: (existing?.promotionCount ?? 0) + 1,
+    lastSuccessStreak: successes,
+    usageCount: existing?.usageCount ?? 0,
+    failureCount: existing?.failureCount ?? 0,
+    consecutiveFailures: 0,
+    source: 'system2',
+    status: 'active',
+  };
+}
+
+/**
+ * Process demotion of failing patterns from the cache.
+ * @param {Map<string, object>} cache - System 1 cache
+ * @returns {Promise<string[]>} Demoted keys
+ */
+async function _processDemotions(cache) {
   const demotedKeys = [];
 
-  // 1. Auto-demote failing patterns
   for (const [key, pattern] of cache) {
-    const errorRate = pattern.usageCount > 0
-      ? (pattern.failureCount ?? 0) / pattern.usageCount
-      : 0;
+    const errorRate = _computePatternErrorRate(pattern);
+    if (!_shouldDemotePattern(pattern, errorRate)) continue;
 
-    const shouldDemote =
-      (pattern.consecutiveFailures ?? 0) >= DEMOTION_FAILURE_THRESHOLD ||
-      (pattern.usageCount >= 5 && errorRate > DEMOTION_ERROR_RATE_THRESHOLD);
+    const reason = _buildDemotionReason(pattern, errorRate);
+    cache.delete(key);
+    demotedKeys.push(key);
 
-    if (shouldDemote) {
-      const reason = (pattern.consecutiveFailures ?? 0) >= DEMOTION_FAILURE_THRESHOLD
-        ? `${pattern.consecutiveFailures} consecutive failures`
-        : `Error rate ${round(errorRate * 100)}% too high`;
-
-      cache.delete(key);
-      demotedKeys.push(key);
-
-      await appendTransferLog({
-        action: 'demote',
-        patternKey: key,
-        reason,
-        source: 'hot-swap',
-        timestamp: new Date().toISOString(),
-      });
-    }
+    await appendTransferLog({
+      action: 'demote',
+      patternKey: key,
+      reason,
+      source: 'hot-swap',
+      timestamp: new Date().toISOString(),
+    });
   }
 
-  // 2. Auto-promote eligible patterns (batch: update cache once, persist once)
+  return demotedKeys;
+}
+
+/**
+ * Process promotion of eligible candidates into the cache.
+ * @param {Map<string, object>} cache - System 1 cache
+ * @returns {Promise<string[]>} Promoted keys
+ */
+async function _processPromotions(cache) {
   const { candidates } = await getPromotionCandidates();
+  const promotedKeys = [];
   const promotionLogEntries = [];
+
   for (const candidate of candidates) {
     const successes = candidate.consecutiveSuccesses ?? 0;
     const confidence = candidate.confidence ?? 0;
@@ -534,22 +595,7 @@ async function _hotSwapImpl() {
     if (successes < PROMOTION_THRESHOLD || confidence < CONFIDENCE_THRESHOLD) continue;
 
     const existing = cache.get(candidate.key);
-    const system1Pattern = {
-      key: candidate.key,
-      type: candidate.type ?? candidate.key.split('::')[0] ?? 'general',
-      category: candidate.category ?? candidate.key.split('::')[1] ?? 'unknown',
-      confidence,
-      insight: candidate.insight ?? null,
-      bestData: candidate.bestData ?? null,
-      promotedAt: new Date().toISOString(),
-      promotionCount: (existing?.promotionCount ?? 0) + 1,
-      lastSuccessStreak: successes,
-      usageCount: existing?.usageCount ?? 0,
-      failureCount: existing?.failureCount ?? 0,
-      consecutiveFailures: 0,
-      source: 'system2',
-      status: 'active',
-    };
+    const system1Pattern = _buildSystem1Pattern(candidate, existing, confidence, successes);
 
     cache.set(candidate.key, system1Pattern);
     promotedKeys.push(candidate.key);
@@ -562,7 +608,6 @@ async function _hotSwapImpl() {
     });
   }
 
-  // Persist cache once for all promotions
   if (promotedKeys.length > 0) {
     await persistSystem1Cache();
     for (const logEntry of promotionLogEntries) {
@@ -570,9 +615,21 @@ async function _hotSwapImpl() {
     }
   }
 
+  return promotedKeys;
+}
+
+/**
+ * Internal hot-swap implementation (runs within lock).
+ * @returns {Promise<object>}
+ */
+async function _hotSwapImpl() {
+  const cache = await loadSystem1Cache();
+
+  const demotedKeys = await _processDemotions(cache);
+  const promotedKeys = await _processPromotions(cache);
+
   const timestamp = new Date().toISOString();
 
-  // Log the hot-swap event
   if (promotedKeys.length > 0 || demotedKeys.length > 0) {
     await appendTransferLog({
       action: 'hot-swap',

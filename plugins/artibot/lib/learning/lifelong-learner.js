@@ -91,6 +91,107 @@ export async function collectExperience(experience) {
 }
 
 /**
+ * Generate a unique experience ID.
+ * @returns {string}
+ */
+function _expId() {
+  return `exp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/**
+ * Build a tool experience entry from a tool usage record.
+ * @param {string} toolName
+ * @param {object} usage
+ * @param {string|null} sessionId
+ * @returns {object}
+ */
+function _buildToolEntry(toolName, usage, sessionId) {
+  return {
+    id: _expId(),
+    type: 'tool',
+    category: toolName,
+    data: {
+      calls: usage.calls ?? 0,
+      successes: usage.successes ?? 0,
+      totalMs: usage.totalMs ?? 0,
+      avgMs: usage.calls > 0 ? Math.round((usage.totalMs ?? 0) / usage.calls) : 0,
+      successRate: usage.calls > 0 ? (usage.successes ?? 0) / usage.calls : 0,
+    },
+    timestamp: Date.now(),
+    sessionId: sessionId ?? null,
+  };
+}
+
+/**
+ * Build an error experience entry from an error object.
+ * @param {object} error
+ * @param {string|null} sessionId
+ * @returns {object}
+ */
+function _buildErrorEntry(error, sessionId) {
+  return {
+    id: _expId(),
+    type: 'error',
+    category: error.type ?? error.code ?? 'unknown',
+    data: {
+      message: error.message ?? String(error),
+      code: error.code ?? null,
+      tool: error.tool ?? null,
+      recoverable: error.recoverable ?? null,
+    },
+    timestamp: Date.now(),
+    sessionId: sessionId ?? null,
+  };
+}
+
+/**
+ * Build a success experience entry from a completed task.
+ * @param {object} task
+ * @param {string|null} sessionId
+ * @returns {object}
+ */
+function _buildSuccessEntry(task, sessionId) {
+  return {
+    id: _expId(),
+    type: 'success',
+    category: task.type ?? task.taskType ?? 'task',
+    data: {
+      taskId: task.id ?? null,
+      duration: task.duration ?? null,
+      strategy: task.strategy ?? null,
+      filesModified: task.filesModified?.length ?? 0,
+      testsPass: task.testsPass ?? null,
+    },
+    timestamp: Date.now(),
+    sessionId: sessionId ?? null,
+  };
+}
+
+/**
+ * Build a team composition experience entry from a team config.
+ * @param {object} teamConfig
+ * @param {string|null} sessionId
+ * @returns {object}
+ */
+function _buildTeamEntry(teamConfig, sessionId) {
+  return {
+    id: _expId(),
+    type: 'team',
+    category: teamConfig.pattern ?? 'unknown',
+    data: {
+      pattern: teamConfig.pattern ?? null,
+      size: teamConfig.size ?? 0,
+      agents: teamConfig.agents ?? [],
+      domain: teamConfig.domain ?? 'general',
+      successRate: teamConfig.successRate ?? null,
+      duration: teamConfig.duration ?? null,
+    },
+    timestamp: Date.now(),
+    sessionId: sessionId ?? null,
+  };
+}
+
+/**
  * Collect all notable experiences from a completed session.
  * Aggregates tool usage, errors, successes, and team compositions
  * from the provided session data.
@@ -108,79 +209,25 @@ export async function collectDailyExperiences(sessionData = {}) {
   const { sessionId, toolUsage = {}, errors = [], completedTasks = [], teamConfig } = sessionData;
   await ensureDir(ARTIBOT_DIR);
 
+  const sid = sessionId ?? null;
+
   // Build all new entries in memory first (no disk I/O per entry)
   const newEntries = [];
 
-  // Tool usage experiences
   for (const [toolName, usage] of Object.entries(toolUsage)) {
-    newEntries.push({
-      id: `exp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      type: 'tool',
-      category: toolName,
-      data: {
-        calls: usage.calls ?? 0,
-        successes: usage.successes ?? 0,
-        totalMs: usage.totalMs ?? 0,
-        avgMs: usage.calls > 0 ? Math.round((usage.totalMs ?? 0) / usage.calls) : 0,
-        successRate: usage.calls > 0 ? (usage.successes ?? 0) / usage.calls : 0,
-      },
-      timestamp: Date.now(),
-      sessionId: sessionId ?? null,
-    });
+    newEntries.push(_buildToolEntry(toolName, usage, sid));
   }
 
-  // Error experiences
   for (const error of errors) {
-    newEntries.push({
-      id: `exp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      type: 'error',
-      category: error.type ?? error.code ?? 'unknown',
-      data: {
-        message: error.message ?? String(error),
-        code: error.code ?? null,
-        tool: error.tool ?? null,
-        recoverable: error.recoverable ?? null,
-      },
-      timestamp: Date.now(),
-      sessionId: sessionId ?? null,
-    });
+    newEntries.push(_buildErrorEntry(error, sid));
   }
 
-  // Success experiences
   for (const task of completedTasks) {
-    newEntries.push({
-      id: `exp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      type: 'success',
-      category: task.type ?? task.taskType ?? 'task',
-      data: {
-        taskId: task.id ?? null,
-        duration: task.duration ?? null,
-        strategy: task.strategy ?? null,
-        filesModified: task.filesModified?.length ?? 0,
-        testsPass: task.testsPass ?? null,
-      },
-      timestamp: Date.now(),
-      sessionId: sessionId ?? null,
-    });
+    newEntries.push(_buildSuccessEntry(task, sid));
   }
 
-  // Team composition experience
   if (teamConfig) {
-    newEntries.push({
-      id: `exp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      type: 'team',
-      category: teamConfig.pattern ?? 'unknown',
-      data: {
-        pattern: teamConfig.pattern ?? null,
-        size: teamConfig.size ?? 0,
-        agents: teamConfig.agents ?? [],
-        domain: teamConfig.domain ?? 'general',
-        successRate: teamConfig.successRate ?? null,
-        duration: teamConfig.duration ?? null,
-      },
-      timestamp: Date.now(),
-      sessionId: sessionId ?? null,
-    });
+    newEntries.push(_buildTeamEntry(teamConfig, sid));
   }
 
   // Read existing once, merge all new entries, write once
@@ -320,6 +367,68 @@ function grpoRankGroup(group) {
 }
 
 /**
+ * Score a 'tool' type experience.
+ * @param {object} data - Experience data payload
+ * @param {number|null} directScore - Direct score from tool-tracker bridge (or null)
+ * @returns {object}
+ */
+function _scoreToolExperience(data, directScore) {
+  const hasAvgMs = data.avgMs !== null && data.avgMs !== undefined;
+  const speedFromMs = hasAvgMs ? clamp01(1.0 / (1 + data.avgMs / 5000)) : null;
+
+  if (directScore !== null) {
+    return {
+      success: clamp01(directScore),
+      speed: speedFromMs ?? clamp01(0.3 + directScore * 0.4),
+      errorRate: clamp01(directScore > 0.5 ? 0.8 + directScore * 0.2 : directScore),
+      resourceEfficiency: 0.5,
+    };
+  }
+
+  return {
+    success: clamp01(data.successRate ?? 0),
+    speed: speedFromMs ?? 0.5,
+    errorRate: clamp01(1.0 - (data.calls > 0 ? (data.calls - (data.successes ?? 0)) / data.calls : 0)),
+    resourceEfficiency: clamp01(data.calls > 0 ? Math.min(1, 10 / data.calls) : 0.5),
+  };
+}
+
+/**
+ * Score a 'success' type experience.
+ * @param {object} data - Experience data payload
+ * @returns {object}
+ */
+function _scoreSuccessExperience(data) {
+  const hasDuration = data.duration !== null && data.duration !== undefined;
+  const speedScore = hasDuration ? clamp01(1.0 / (1 + data.duration / 60000)) : 0.5;
+  const testsPassScore = data.testsPass === true ? 1.0 : data.testsPass === false ? 0.3 : 0.5;
+
+  return {
+    success: 1.0,
+    speed: speedScore,
+    errorRate: testsPassScore,
+    resourceEfficiency: clamp01(1.0 / (1 + (data.filesModified ?? 0) / 20)),
+  };
+}
+
+/**
+ * Score a 'team' type experience.
+ * @param {object} data - Experience data payload
+ * @returns {object}
+ */
+function _scoreTeamExperience(data) {
+  const hasDuration = data.duration !== null && data.duration !== undefined;
+  const speedScore = hasDuration ? clamp01(1.0 / (1 + data.duration / 120000)) : 0.5;
+
+  return {
+    success: clamp01(data.successRate ?? 0),
+    speed: speedScore,
+    errorRate: clamp01(data.successRate ?? 0.5),
+    resourceEfficiency: clamp01(1.0 / (1 + (data.size ?? 1) / 5)),
+  };
+}
+
+/**
  * Score a single experience using rule-based evaluators for each dimension.
  * Supports both structured fields (successRate, avgMs, calls) from
  * collectDailyExperiences and flat score field from tool-tracker bridge.
@@ -335,25 +444,8 @@ function scoreExperience(exp) {
   const directScore = typeof data.score === 'number' ? data.score : null;
 
   switch (exp.type) {
-    case 'tool': {
-      // Prefer direct score from tool-tracker when available
-      if (directScore !== null) {
-        return {
-          success: clamp01(directScore),
-          speed: data.avgMs !== null && data.avgMs !== undefined
-            ? clamp01(1.0 / (1 + data.avgMs / 5000))
-            : clamp01(0.3 + directScore * 0.4),
-          errorRate: clamp01(directScore > 0.5 ? 0.8 + directScore * 0.2 : directScore),
-          resourceEfficiency: 0.5,
-        };
-      }
-      return {
-        success: clamp01(data.successRate ?? 0),
-        speed: data.avgMs !== null && data.avgMs !== undefined ? clamp01(1.0 / (1 + data.avgMs / 5000)) : 0.5,
-        errorRate: clamp01(1.0 - (data.calls > 0 ? (data.calls - (data.successes ?? 0)) / data.calls : 0)),
-        resourceEfficiency: clamp01(data.calls > 0 ? Math.min(1, 10 / data.calls) : 0.5),
-      };
-    }
+    case 'tool':
+      return _scoreToolExperience(data, directScore);
 
     case 'error':
       return {
@@ -364,22 +456,12 @@ function scoreExperience(exp) {
       };
 
     case 'success':
-      return {
-        success: 1.0,
-        speed: data.duration !== null && data.duration !== undefined ? clamp01(1.0 / (1 + data.duration / 60000)) : 0.5,
-        errorRate: data.testsPass === true ? 1.0 : data.testsPass === false ? 0.3 : 0.5,
-        resourceEfficiency: clamp01(1.0 / (1 + (data.filesModified ?? 0) / 20)),
-      };
+      return _scoreSuccessExperience(data);
 
     case 'team':
-      return {
-        success: clamp01(data.successRate ?? 0),
-        speed: data.duration !== null && data.duration !== undefined ? clamp01(1.0 / (1 + data.duration / 120000)) : 0.5,
-        errorRate: clamp01(data.successRate ?? 0.5),
-        resourceEfficiency: clamp01(1.0 / (1 + (data.size ?? 1) / 5)),
-      };
+      return _scoreTeamExperience(data);
 
-    default: {
+    default:
       // For unknown types (e.g. 'agent', 'self-evaluation'), use direct score if available
       if (directScore !== null) {
         return {
@@ -390,7 +472,6 @@ function scoreExperience(exp) {
         };
       }
       return { success: 0.5, speed: 0.5, errorRate: 0.5, resourceEfficiency: 0.5 };
-    }
   }
 }
 

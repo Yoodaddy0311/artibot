@@ -182,6 +182,3 @@ P1       | [action]        | [expected lift] | [team]
 **Report Structure**: Executive Summary -> KPI Scorecard -> Analysis -> Insights -> Recommendations -> Appendix
 **"So What?" Test**: Every data point must explain business impact
 **Status Rules**: ABOVE (>10% above), ON TRACK (+/-10%), AT RISK (10-20% below), BELOW (>20% below)
-
-See `references/report-templates.md` for ready-to-use report templates by type.
-See `references/narrative-examples.md` for data narrative writing examples.

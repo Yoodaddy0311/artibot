@@ -262,23 +262,15 @@ export function execute(executionPlan, sandbox, options = {}) {
  *   }
  * }}
  */
-export function reflect(executionResult, _originalTask) {
-  const failedSteps = [];
-  const blockedSteps = [];
+/**
+ * Detect failure patterns from failed and blocked steps.
+ * @param {Array<object>} failedSteps - Steps that failed
+ * @param {Array<object>} blockedSteps - Steps that were blocked
+ * @param {object} executionResult - Full execution result
+ * @returns {string[]} Detected pattern names
+ */
+function detectReflectionPatterns(failedSteps, blockedSteps, executionResult) {
   const patterns = [];
-
-  for (const r of executionResult.results) {
-    if (r.status === 'failed') {
-      const reason = extractFailureReason(r);
-      failedSteps.push({ stepId: r.stepId, action: r.action, reason });
-    }
-    if (r.status === 'blocked') {
-      const reason = r.execution?.blockedBy || 'Unknown blocked reason';
-      blockedSteps.push({ stepId: r.stepId, action: r.action, reason });
-    }
-  }
-
-  // Pattern detection
   if (failedSteps.length > 0 && failedSteps.length === executionResult.stepsTotal) {
     patterns.push('all_steps_failed');
   }
@@ -294,6 +286,50 @@ export function reflect(executionResult, _originalTask) {
   if (executionResult.stepsCompleted > 0 && !executionResult.success) {
     patterns.push('partial_success');
   }
+  return patterns;
+}
+
+/**
+ * Determine the human-readable reason for retry or no-retry.
+ * @param {boolean} shouldRetry - Whether retry is recommended
+ * @param {Array<object>} failedSteps - Steps that failed
+ * @param {Array<object>} blockedSteps - Steps that were blocked
+ * @param {string[]} patterns - Detected patterns
+ * @param {boolean} overallSuccess - Whether execution succeeded
+ * @returns {string}
+ */
+function buildRetryReason(shouldRetry, failedSteps, blockedSteps, patterns, overallSuccess) {
+  if (shouldRetry) {
+    return `${failedSteps.length} step(s) failed with correctable issues`;
+  }
+  if (blockedSteps.length > 0) {
+    return 'Blocked by safety rules - manual intervention required';
+  }
+  if (patterns.includes('all_steps_failed')) {
+    return 'All steps failed - task may need fundamental re-planning';
+  }
+  if (overallSuccess) {
+    return 'All steps succeeded - no retry needed';
+  }
+  return 'Cannot determine retry strategy';
+}
+
+export function reflect(executionResult, _originalTask) {
+  const failedSteps = [];
+  const blockedSteps = [];
+
+  for (const r of executionResult.results) {
+    if (r.status === 'failed') {
+      const reason = extractFailureReason(r);
+      failedSteps.push({ stepId: r.stepId, action: r.action, reason });
+    }
+    if (r.status === 'blocked') {
+      const reason = r.execution?.blockedBy || 'Unknown blocked reason';
+      blockedSteps.push({ stepId: r.stepId, action: r.action, reason });
+    }
+  }
+
+  const patterns = detectReflectionPatterns(failedSteps, blockedSteps, executionResult);
 
   const completionRate = executionResult.stepsTotal > 0
     ? executionResult.stepsCompleted / executionResult.stepsTotal
@@ -313,15 +349,9 @@ export function reflect(executionResult, _originalTask) {
     && completionRate < 1.0
     && !patterns.includes('all_steps_failed');
 
-  const retryReason = shouldRetry
-    ? `${failedSteps.length} step(s) failed with correctable issues`
-    : blockedSteps.length > 0
-      ? 'Blocked by safety rules - manual intervention required'
-      : patterns.includes('all_steps_failed')
-        ? 'All steps failed - task may need fundamental re-planning'
-        : executionResult.success
-          ? 'All steps succeeded - no retry needed'
-          : 'Cannot determine retry strategy';
+  const retryReason = buildRetryReason(
+    shouldRetry, failedSteps, blockedSteps, patterns, executionResult.success
+  );
 
   return {
     reflectedAt: new Date().toISOString(),

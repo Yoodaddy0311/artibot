@@ -158,6 +158,3 @@ P1       | [cat]    | [specific action]   | [expected improvement]
 **Crawl Depth**: Target <4 clicks from homepage
 **Schema Priority**: BreadcrumbList, FAQ, Article, Product
 **Score Formula**: 7 categories weighted to 100 points
-
-See `references/audit-checklist.md` for complete technical SEO audit checklist.
-See `references/schema-templates.md` for JSON-LD schema markup templates.

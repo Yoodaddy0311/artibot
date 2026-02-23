@@ -160,6 +160,3 @@ P1       | [stage]     | [pain point]     | [improvement]
 **Stages**: Awareness, Consideration, Decision, Onboarding, Adoption, Retention, Expansion, Advocacy
 **Moments of Truth**: First Impression, Aha Moment, Habit Moment, Pain Moment, Delight Moment
 **Journey Metrics**: Stage-specific KPIs from reach to referral rate
-
-See `references/journey-templates.md` for industry-specific journey map templates.
-See `references/automation-triggers.md` for journey-based automation patterns.

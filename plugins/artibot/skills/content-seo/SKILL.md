@@ -169,6 +169,3 @@ Missing Topic   | Volume | Difficulty | Priority
 **H1**: One per page, keyword-rich
 **Content Quality**: Comprehensive, unique, accurate, readable
 **E-E-A-T**: Experience, Expertise, Authoritativeness, Trustworthiness
-
-See `references/optimization-checklist.md` for detailed on-page SEO checklist.
-See `references/content-templates.md` for SEO content structure templates.

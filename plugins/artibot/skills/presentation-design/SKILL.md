@@ -157,6 +157,3 @@ Font Pairing:  [headline] / [body]
 **Pacing**: 60-90 seconds per slide for standard presentations
 **Visual Ratio**: 60% visual, 40% text
 **Types**: pitch, report, workshop, keynote, sales, training, status
-
-See `references/slide-templates.md` for slide structure templates by type.
-See `references/chart-patterns.md` for data visualization in presentations.

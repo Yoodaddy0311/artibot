@@ -23,7 +23,17 @@ function solidDescriptor(width, height, [r, g, b, a = 255]) {
   return { pixels, width, height };
 }
 
-function withPatch(descriptor, patchX, patchY, patchW, patchH, [r, g, b]) {
+/**
+ * Copy a descriptor's pixels and flip a patch region to a different color.
+ * @param {object} opts
+ * @param {object} opts.descriptor - Image descriptor with pixels, width, height
+ * @param {number} opts.patchX - Patch top-left column
+ * @param {number} opts.patchY - Patch top-left row
+ * @param {number} opts.patchW - Patch width
+ * @param {number} opts.patchH - Patch height
+ * @param {[number,number,number]} opts.color - RGB replacement color
+ */
+function withPatch({ descriptor, patchX, patchY, patchW, patchH, color: [r, g, b] }) {
   const { pixels, width, height } = descriptor;
   const patched = new Uint8Array(pixels);
   for (let y = patchY; y < patchY + patchH; y++) {
@@ -139,7 +149,7 @@ describe('validateComponent() — with pixel images', () => {
 
   it('passes with lower threshold on slightly different images', () => {
     const baseline = solidDescriptor(32, 32, [200, 200, 200, 255]);
-    const actual = withPatch(baseline, 5, 5, 3, 3, [0, 0, 0]);
+    const actual = withPatch({ descriptor: baseline, patchX: 5, patchY: 5, patchW: 3, patchH: 3, color: [0, 0, 0] });
     const result = validateComponent({
       baselineImage: baseline,
       actualImage: actual,
@@ -150,7 +160,7 @@ describe('validateComponent() — with pixel images', () => {
 
   it('fails with high threshold on slightly different images', () => {
     const baseline = solidDescriptor(32, 32, [200, 200, 200, 255]);
-    const actual = withPatch(baseline, 5, 5, 10, 10, [0, 0, 0]);
+    const actual = withPatch({ descriptor: baseline, patchX: 5, patchY: 5, patchW: 10, patchH: 10, color: [0, 0, 0] });
     const result = validateComponent({
       baselineImage: baseline,
       actualImage: actual,

@@ -583,6 +583,114 @@ export function overallProgress(data) {
 // ─────────────────────────────────────────────
 
 /**
+ * Append the orchestration mode indicator section to sections array.
+ * @param {object[]} sections - Accumulator
+ * @param {object} meta - Dashboard meta object
+ */
+function appendModeSection(sections, meta) {
+  if (meta?.mode) {
+    sections.push(modeIndicator(meta.mode, {
+      platform: meta.platform,
+      envConfigured: meta.envConfigured,
+    }));
+  }
+}
+
+/**
+ * Append the team dashboard section to sections array.
+ * @param {object[]} sections - Accumulator
+ * @param {TeammateInfo[]} teammates
+ * @param {object} meta - Dashboard meta object
+ */
+function appendTeamSection(sections, teammates, meta) {
+  if (teammates && teammates.length > 0) {
+    sections.push(teamDashboard(teammates, {
+      teamName: meta?.teamName,
+      pattern: meta?.pattern,
+    }));
+  }
+}
+
+/**
+ * Build the phase label string for overallProgress, if applicable.
+ * @param {object} meta - Dashboard meta object
+ * @returns {string|undefined}
+ */
+function buildPhaseLabel(meta) {
+  if (!meta?.playbook) return undefined;
+  const phaseIndex = meta.playbookPhase || 0;
+  const phaseName = ['Plan', 'Design', 'Implement', 'Review', 'Test', 'Merge'][phaseIndex] || 'Unknown';
+  return `Phase ${phaseIndex + 1}: ${phaseName}`;
+}
+
+/**
+ * Append the overall progress section to sections array.
+ * @param {object[]} sections - Accumulator
+ * @param {TaskItem[]} tasks
+ * @param {object} meta - Dashboard meta object
+ */
+function appendProgressSection(sections, tasks, meta) {
+  if (!tasks || tasks.length === 0) return;
+  const completed = tasks.filter((t) => t.status === 'completed').length;
+  const total = tasks.length;
+  const inProgress = tasks.filter((t) => t.status === 'in_progress').length;
+  const blocked = tasks.filter((t) => t.status === 'blocked').length;
+  const pending = tasks.filter((t) => t.status === 'pending').length;
+
+  sections.push('');
+  sections.push(overallProgress({
+    completed,
+    total,
+    phase: buildPhaseLabel(meta),
+    breakdown: { in_progress: inProgress, blocked, pending },
+  }));
+}
+
+/**
+ * Append the workflow section to sections array.
+ * @param {object[]} sections - Accumulator
+ * @param {WorkflowStep[]|undefined} workflow
+ * @param {object} meta - Dashboard meta object
+ */
+function appendWorkflowSection(sections, workflow, meta) {
+  if (workflow && workflow.length > 0) {
+    sections.push('');
+    sections.push(color(' Workflow', 'white', 'bold'));
+    sections.push(` ${workflowVisualizer(workflow)}`);
+  } else if (meta?.playbook) {
+    sections.push('');
+    sections.push(color(' Workflow', 'white', 'bold'));
+    sections.push(` ${playbookVisualizer(meta.playbook, meta.playbookPhase || 0)}`);
+  }
+}
+
+/**
+ * Append the task board section to sections array.
+ * @param {object[]} sections - Accumulator
+ * @param {TaskItem[]|undefined} tasks
+ */
+function appendTasksSection(sections, tasks) {
+  if (tasks && tasks.length > 0) {
+    sections.push('');
+    sections.push(color(' Tasks', 'white', 'bold'));
+    sections.push(taskBoard(tasks));
+  }
+}
+
+/**
+ * Append the timeline section to sections array.
+ * @param {object[]} sections - Accumulator
+ * @param {TimelineEvent[]|undefined} events
+ */
+function appendTimelineSection(sections, events) {
+  if (events && events.length > 0) {
+    sections.push('');
+    sections.push(color(' Timeline', 'white', 'bold'));
+    sections.push(timeline(events));
+  }
+}
+
+/**
  * Render a full team status view combining dashboard, workflow, and task board.
  * @param {object} data
  * @param {TeammateInfo[]} data.teammates
@@ -602,65 +710,12 @@ export function overallProgress(data) {
 export function fullDashboard(data) {
   const sections = [];
 
-  // Orchestration mode indicator
-  if (data.meta?.mode) {
-    sections.push(modeIndicator(data.meta.mode, {
-      platform: data.meta.platform,
-      envConfigured: data.meta.envConfigured,
-    }));
-  }
-
-  // Team dashboard
-  if (data.teammates && data.teammates.length > 0) {
-    sections.push(teamDashboard(data.teammates, {
-      teamName: data.meta?.teamName,
-      pattern: data.meta?.pattern,
-    }));
-  }
-
-  // Overall progress bar
-  if (data.tasks && data.tasks.length > 0) {
-    const completed = data.tasks.filter((t) => t.status === 'completed').length;
-    const total = data.tasks.length;
-    const inProgress = data.tasks.filter((t) => t.status === 'in_progress').length;
-    const blocked = data.tasks.filter((t) => t.status === 'blocked').length;
-    const pending = data.tasks.filter((t) => t.status === 'pending').length;
-
-    sections.push('');
-    sections.push(overallProgress({
-      completed,
-      total,
-      phase: data.meta?.playbook
-        ? `Phase ${(data.meta.playbookPhase || 0) + 1}: ${['Plan', 'Design', 'Implement', 'Review', 'Test', 'Merge'][data.meta.playbookPhase || 0] || 'Unknown'}`
-        : undefined,
-      breakdown: { in_progress: inProgress, blocked, pending },
-    }));
-  }
-
-  // Workflow
-  if (data.workflow && data.workflow.length > 0) {
-    sections.push('');
-    sections.push(color(' Workflow', 'white', 'bold'));
-    sections.push(` ${workflowVisualizer(data.workflow)}`);
-  } else if (data.meta?.playbook) {
-    sections.push('');
-    sections.push(color(' Workflow', 'white', 'bold'));
-    sections.push(` ${playbookVisualizer(data.meta.playbook, data.meta.playbookPhase || 0)}`);
-  }
-
-  // Task board
-  if (data.tasks && data.tasks.length > 0) {
-    sections.push('');
-    sections.push(color(' Tasks', 'white', 'bold'));
-    sections.push(taskBoard(data.tasks));
-  }
-
-  // Timeline
-  if (data.events && data.events.length > 0) {
-    sections.push('');
-    sections.push(color(' Timeline', 'white', 'bold'));
-    sections.push(timeline(data.events));
-  }
+  appendModeSection(sections, data.meta);
+  appendTeamSection(sections, data.teammates, data.meta);
+  appendProgressSection(sections, data.tasks, data.meta);
+  appendWorkflowSection(sections, data.workflow, data.meta);
+  appendTasksSection(sections, data.tasks);
+  appendTimelineSection(sections, data.events);
 
   return sections.join('\n');
 }

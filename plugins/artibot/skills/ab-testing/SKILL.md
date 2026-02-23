@@ -168,5 +168,3 @@ SECONDARY METRICS
 **Confidence Level**: 95% standard, 99% for high-stakes
 **Power**: 80% standard, 90% for critical tests
 **Duration**: 7-28 days, minimum 1 full week
-
-See `references/test-catalog.md` for proven test ideas by category.

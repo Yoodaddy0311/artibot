@@ -172,6 +172,3 @@ Filters:    [interactive filter needs]
 **Dashboard Density**: 5-9 widgets, most important top-left
 **Color Max**: 7 categorical colors, use sequential for ordered data
 **Accessibility**: Contrast, patterns, labels beyond just color
-
-See `references/chart-patterns.md` for detailed chart configuration examples.
-See `references/dashboard-templates.md` for dashboard layout blueprints.

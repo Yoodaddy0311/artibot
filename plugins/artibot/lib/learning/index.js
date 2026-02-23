@@ -180,6 +180,127 @@ export async function initLearning() {
 }
 
 /**
+ * Build a self-evaluation experience score from the evaluation trend.
+ * @param {string} trend - 'improving' | 'declining' | other
+ * @returns {number}
+ */
+function _evalTrendScore(trend) {
+  if (trend === 'improving') return 0.8;
+  if (trend === 'declining') return 0.3;
+  return 0.6;
+}
+
+/**
+ * Run self-evaluation for the session and collect the experience.
+ * @param {object} sessionData - Session context
+ * @returns {Promise<object | null>} evaluated result or null on failure
+ */
+async function _runSelfEvaluation(sessionData) {
+  try {
+    const { evaluateResult: selfEvaluate, getImprovementSuggestions } = await import('./self-evaluator.js');
+
+    const sessionTask = {
+      id: sessionData.sessionId ?? `session-${Date.now()}`,
+      type: 'session',
+      description: `Session in ${sessionData.project ?? 'unknown'}`,
+    };
+    const sessionResult = {
+      success: (sessionData.errors?.length ?? 0) === 0,
+      duration: sessionData.duration ?? undefined,
+      testsPass: sessionData.completedTasks?.length > 0 ? true : undefined,
+      filesModified: sessionData.filesModified,
+    };
+    await selfEvaluate(sessionTask, sessionResult);
+
+    const evalResult = await getImprovementSuggestions();
+
+    const { collectExperience } = await import('./lifelong-learner.js');
+    await collectExperience({
+      type: 'self-evaluation',
+      category: 'session',
+      data: {
+        overallTrend: evalResult.overallTrend,
+        weakDimensions: evalResult.weakDimensions,
+        suggestions: evalResult.suggestions,
+        sessionId: sessionData.sessionId,
+        project: sessionData.project,
+      },
+      sessionId: sessionData.sessionId,
+      score: _evalTrendScore(evalResult.overallTrend),
+    });
+
+    return evalResult;
+  } catch (err) {
+    process.stderr.write(`[learning] self-evaluation failed: ${err?.message ?? err}\n`);
+    return null;
+  }
+}
+
+/**
+ * Record a GRPO round from learned patterns.
+ * @param {object} learned - Result from batchLearn
+ * @returns {Promise<void>}
+ */
+async function _recordGrpoRound(learned) {
+  try {
+    const { evaluateGroup: grpoEval, updateWeights: grpoUpdate } = await import('./grpo-optimizer.js');
+    const candidates = learned.patterns.map((p, i) => ({
+      id: `learn-cand-${Date.now()}-${i}`,
+      strategy: p.category ?? 'default',
+      result: {
+        exitCode: p.bestComposite > 0.5 ? 0 : 1,
+        errors: p.bestComposite > 0.5 ? 0 : 1,
+        duration: 1000,
+        commandLength: 10,
+        sideEffects: 0,
+      },
+    }));
+    if (candidates.length >= 2) {
+      const groupResult = grpoEval(candidates);
+      await grpoUpdate(groupResult);
+    }
+  } catch (grpoErr) {
+    process.stderr.write(`[learning] GRPO recording failed: ${grpoErr?.message ?? grpoErr}\n`);
+  }
+}
+
+/**
+ * Run the lifelong learning pipeline for the session.
+ * @param {object} sessionData - Session context
+ * @returns {Promise<object | null>} learned result or null on failure
+ */
+async function _runLifelongLearning(sessionData) {
+  try {
+    const { collectDailyExperiences: collect, batchLearn: learn } = await import('./lifelong-learner.js');
+    await collect(sessionData);
+    const learned = await learn();
+
+    if (learned && learned.patternsExtracted > 0) {
+      await _recordGrpoRound(learned);
+    }
+
+    return learned;
+  } catch (err) {
+    process.stderr.write(`[learning] lifelong learning pipeline failed: ${err?.message ?? err}\n`);
+    return null;
+  }
+}
+
+/**
+ * Run the knowledge hot-swap step.
+ * @returns {Promise<object | null>} hot-swap result or null on failure
+ */
+async function _runHotSwap() {
+  try {
+    const { hotSwap: swap } = await import('./knowledge-transfer.js');
+    return await swap();
+  } catch (err) {
+    process.stderr.write(`[learning] knowledge hot-swap failed: ${err?.message ?? err}\n`);
+    return null;
+  }
+}
+
+/**
  * Graceful shutdown: persist any pending state, summarize session,
  * run self-evaluation, run lifelong learning, and promote eligible patterns to System 1.
  * Call at plugin teardown.
@@ -193,98 +314,13 @@ export async function shutdownLearning(sessionData) {
   let hotSwapped = null;
 
   if (sessionData) {
-    // Summarize session in memory
     const { summarizeSession: summarize } = await import('./memory-manager.js');
     await summarize(sessionData);
     summarized = true;
 
-    // Self-evaluation: evaluate session result + get improvement suggestions
-    try {
-      const { evaluateResult: selfEvaluate, getImprovementSuggestions } = await import('./self-evaluator.js');
-
-      // Evaluate this session as a task result to populate evaluations.json
-      const sessionTask = {
-        id: sessionData.sessionId ?? `session-${Date.now()}`,
-        type: 'session',
-        description: `Session in ${sessionData.project ?? 'unknown'}`,
-      };
-      const sessionResult = {
-        success: (sessionData.errors?.length ?? 0) === 0,
-        duration: sessionData.duration ?? undefined,
-        testsPass: sessionData.completedTasks?.length > 0 ? true : undefined,
-        filesModified: sessionData.filesModified,
-      };
-      await selfEvaluate(sessionTask, sessionResult);
-
-      // Get improvement suggestions from evaluation history
-      const evalResult = await getImprovementSuggestions();
-      evaluated = evalResult;
-
-      // Feed evaluation result into lifelong learning as a self-evaluation experience
-      const { collectExperience } = await import('./lifelong-learner.js');
-      await collectExperience({
-        type: 'self-evaluation',
-        category: 'session',
-        data: {
-          overallTrend: evalResult.overallTrend,
-          weakDimensions: evalResult.weakDimensions,
-          suggestions: evalResult.suggestions,
-          sessionId: sessionData.sessionId,
-          project: sessionData.project,
-        },
-        sessionId: sessionData.sessionId,
-        score: evalResult.overallTrend === 'improving' ? 0.8
-          : evalResult.overallTrend === 'declining' ? 0.3
-          : 0.6,
-      });
-    } catch (err) {
-      // Non-critical: evaluation failure doesn't block shutdown
-      process.stderr.write(`[learning] self-evaluation failed: ${err?.message ?? err}\n`);
-    }
-
-    // Run lifelong learning pipeline
-    try {
-      const { collectDailyExperiences: collect, batchLearn: learn } = await import('./lifelong-learner.js');
-      await collect(sessionData);
-      learned = await learn();
-
-      // Record GRPO round if patterns were extracted (ensures grpo-history.json is populated)
-      if (learned && learned.patternsExtracted > 0) {
-        try {
-          const { evaluateGroup: grpoEval, updateWeights: grpoUpdate } = await import('./grpo-optimizer.js');
-          // Build candidates from learned patterns for GRPO recording
-          const candidates = learned.patterns.map((p, i) => ({
-            id: `learn-cand-${Date.now()}-${i}`,
-            strategy: p.category ?? 'default',
-            result: {
-              exitCode: p.bestComposite > 0.5 ? 0 : 1,
-              errors: p.bestComposite > 0.5 ? 0 : 1,
-              duration: 1000,
-              commandLength: 10,
-              sideEffects: 0,
-            },
-          }));
-          if (candidates.length >= 2) {
-            const groupResult = grpoEval(candidates);
-            await grpoUpdate(groupResult);
-          }
-        } catch (grpoErr) {
-          process.stderr.write(`[learning] GRPO recording failed: ${grpoErr?.message ?? grpoErr}\n`);
-        }
-      }
-    } catch (err) {
-      // Non-critical: learning failure doesn't block shutdown
-      process.stderr.write(`[learning] lifelong learning pipeline failed: ${err?.message ?? err}\n`);
-    }
-
-    // Hot-swap: promote/demote patterns based on latest learning
-    try {
-      const { hotSwap: swap } = await import('./knowledge-transfer.js');
-      hotSwapped = await swap();
-    } catch (err) {
-      // Non-critical: hot-swap failure doesn't block shutdown
-      process.stderr.write(`[learning] knowledge hot-swap failed: ${err?.message ?? err}\n`);
-    }
+    evaluated = await _runSelfEvaluation(sessionData);
+    learned = await _runLifelongLearning(sessionData);
+    hotSwapped = await _runHotSwap();
   }
 
   return { summarized, evaluated, learned, hotSwapped };

@@ -153,6 +153,3 @@ P1       | [cat]    | [action]      | +[X]%
 **CTA Rules**: Contrast color, action verb, above fold, benefit-oriented
 **Value Prop Score**: Clarity + Relevance + Uniqueness + Specificity + Urgency (25 max)
 **Page Speed**: Every second over 2s costs ~7% conversions
-
-See `references/page-audit-checklist.md` for comprehensive page audit template.
-See `references/cta-formulas.md` for high-converting CTA patterns.

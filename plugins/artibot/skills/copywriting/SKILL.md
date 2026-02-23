@@ -152,5 +152,3 @@ CTA OPTIONS
 **Frameworks**: AIDA, PAS, BAB, 4Ps
 **Key Elements**: Headlines, CTAs, subject lines, body copy, taglines
 **Tone Options**: professional, casual, urgent, educational, witty, provocative
-
-See `references/content-frameworks.md` for detailed framework examples and templates.

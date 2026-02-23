@@ -111,6 +111,88 @@ export const configSchema = {
 };
 
 /**
+ * Check whether a null value is permitted by a schema property definition.
+ * Returns true if null is allowed, false and pushes an error if not.
+ * @param {object} schemaProp - The schema property definition
+ * @param {string} propPath - Dot-separated path for error messages
+ * @param {string[]} errors - Accumulator for error messages
+ * @returns {boolean} Whether null is permitted
+ */
+function isNullAllowed(schemaProp, propPath, errors) {
+  const typeAllowsNull = Array.isArray(schemaProp.type)
+    ? schemaProp.type.includes('null')
+    : schemaProp.type === 'null';
+  if (!typeAllowsNull) {
+    errors.push(`${propPath}: expected ${schemaProp.type}, got null`);
+  }
+  return typeAllowsNull;
+}
+
+/**
+ * Validate string-specific constraints (pattern).
+ * @param {string} value
+ * @param {object} schemaProp
+ * @param {string} propPath
+ * @param {string[]} errors
+ */
+function validateStringConstraints(value, schemaProp, propPath, errors) {
+  if (schemaProp.pattern) {
+    const regex = new RegExp(schemaProp.pattern);
+    if (!regex.test(value)) {
+      errors.push(`${propPath}: value "${value}" does not match pattern ${schemaProp.pattern}`);
+    }
+  }
+}
+
+/**
+ * Validate number-specific constraints (minimum, maximum).
+ * @param {number} value
+ * @param {object} schemaProp
+ * @param {string} propPath
+ * @param {string[]} errors
+ */
+function validateNumberConstraints(value, schemaProp, propPath, errors) {
+  if (schemaProp.minimum !== undefined && value < schemaProp.minimum) {
+    errors.push(`${propPath}: value ${value} is below minimum ${schemaProp.minimum}`);
+  }
+  if (schemaProp.maximum !== undefined && value > schemaProp.maximum) {
+    errors.push(`${propPath}: value ${value} exceeds maximum ${schemaProp.maximum}`);
+  }
+}
+
+/**
+ * Validate array items against a schema.
+ * @param {Array} value
+ * @param {object} schemaProp
+ * @param {string} propPath
+ * @param {string[]} errors
+ */
+function validateArrayItems(value, schemaProp, propPath, errors) {
+  if (schemaProp.items) {
+    for (let i = 0; i < value.length; i++) {
+      validateProperty(value[i], schemaProp.items, `${propPath}[${i}]`, errors);
+    }
+  }
+}
+
+/**
+ * Validate nested object properties against a schema.
+ * @param {object} value
+ * @param {object} schemaProp
+ * @param {string} propPath
+ * @param {string[]} errors
+ */
+function validateObjectProperties(value, schemaProp, propPath, errors) {
+  if (schemaProp.properties) {
+    for (const [key, propSchema] of Object.entries(schemaProp.properties)) {
+      if (value[key] !== undefined) {
+        validateProperty(value[key], propSchema, `${propPath}.${key}`, errors);
+      }
+    }
+  }
+}
+
+/**
  * Validate a config value against a schema property definition.
  * @param {*} value - The value to validate
  * @param {object} schemaProp - The schema property definition
@@ -118,17 +200,10 @@ export const configSchema = {
  * @param {string[]} errors - Accumulator for error messages
  */
 function validateProperty(value, schemaProp, propPath, errors) {
-  if (value === undefined || value === null) {
-    // null is allowed when type includes 'null'
-    if (value === null && Array.isArray(schemaProp.type) && schemaProp.type.includes('null')) {
-      return;
-    }
-    if (value === null && schemaProp.type !== 'null') {
-      // null is only valid if type explicitly allows it
-      if (!Array.isArray(schemaProp.type) || !schemaProp.type.includes('null')) {
-        errors.push(`${propPath}: expected ${schemaProp.type}, got null`);
-      }
-    }
+  if (value === undefined) return;
+
+  if (value === null) {
+    isNullAllowed(schemaProp, propPath, errors);
     return;
   }
 
@@ -143,39 +218,10 @@ function validateProperty(value, schemaProp, propPath, errors) {
     return; // Skip further checks if type is wrong
   }
 
-  // String pattern check
-  if (actualType === 'string' && schemaProp.pattern) {
-    const regex = new RegExp(schemaProp.pattern);
-    if (!regex.test(value)) {
-      errors.push(`${propPath}: value "${value}" does not match pattern ${schemaProp.pattern}`);
-    }
-  }
-
-  // Number range checks
-  if (actualType === 'number') {
-    if (schemaProp.minimum !== undefined && value < schemaProp.minimum) {
-      errors.push(`${propPath}: value ${value} is below minimum ${schemaProp.minimum}`);
-    }
-    if (schemaProp.maximum !== undefined && value > schemaProp.maximum) {
-      errors.push(`${propPath}: value ${value} exceeds maximum ${schemaProp.maximum}`);
-    }
-  }
-
-  // Array items check
-  if (actualType === 'array' && schemaProp.items) {
-    for (let i = 0; i < value.length; i++) {
-      validateProperty(value[i], schemaProp.items, `${propPath}[${i}]`, errors);
-    }
-  }
-
-  // Nested object properties check
-  if (actualType === 'object' && schemaProp.properties) {
-    for (const [key, propSchema] of Object.entries(schemaProp.properties)) {
-      if (value[key] !== undefined) {
-        validateProperty(value[key], propSchema, `${propPath}.${key}`, errors);
-      }
-    }
-  }
+  if (actualType === 'string') validateStringConstraints(value, schemaProp, propPath, errors);
+  if (actualType === 'number') validateNumberConstraints(value, schemaProp, propPath, errors);
+  if (actualType === 'array') validateArrayItems(value, schemaProp, propPath, errors);
+  if (actualType === 'object') validateObjectProperties(value, schemaProp, propPath, errors);
 }
 
 /**

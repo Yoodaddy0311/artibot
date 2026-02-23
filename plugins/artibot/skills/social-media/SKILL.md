@@ -157,6 +157,3 @@ CALENDAR (if applicable)
 **Platforms**: Twitter/X, LinkedIn, Instagram, TikTok, YouTube
 **Content Pillars**: Educational (40%), Engaging (25%), Promotional (20%), Entertaining (10%), UGC (5%)
 **Key Metrics**: Engagement rate, reach, impressions, click-through rate, follower growth
-
-See `references/platform-specs.md` for detailed format specifications.
-See `references/engagement-benchmarks.md` for platform-specific benchmark data.

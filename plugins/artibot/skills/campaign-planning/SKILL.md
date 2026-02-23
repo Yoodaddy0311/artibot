@@ -159,6 +159,3 @@ KPI            | Target  | Tracking Method
 **Campaign Types**: product-launch, seasonal, evergreen, re-engagement, brand-awareness, lead-gen
 **Phases**: planning, pre-launch, launch, sustain, wind-down, analysis
 **UTM Format**: lowercase, hyphenated, source/medium/campaign/content/term
-
-See `references/campaign-playbooks.md` for type-specific execution playbooks.
-See `references/budget-templates.md` for budget allocation templates by tier.

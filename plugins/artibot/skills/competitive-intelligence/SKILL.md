@@ -145,5 +145,3 @@ P1       | [strategic action]        | [competitor]
 **Frameworks**: SWOT, Porter's Five Forces, Positioning Maps, Feature Matrix
 **Data Sources**: G2, Capterra, Crunchbase, SimilarWeb, LinkedIn, Ahrefs
 **Competitor Tiers**: Direct, Indirect, Aspirational, Emerging
-
-See `references/analysis-templates.md` for detailed competitor analysis templates.

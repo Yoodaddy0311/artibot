@@ -158,6 +158,3 @@ Phase        | Timeframe  | Actions              | Target
 **Intent Types**: informational, navigational, commercial, transactional
 **Priority Score**: volume (25%) + (100-difficulty) (25%) + relevance (30%) + intent (20%)
 **Cluster Rule**: One primary keyword per page, pillar links to all clusters
-
-See `references/keyword-templates.md` for keyword research and clustering templates.
-See `references/ranking-factors.md` for detailed ranking factor analysis.

@@ -184,6 +184,37 @@ function buildDiffPixelMap(img1Data, img2Data, width, height, pixelThreshold = 1
 }
 
 /**
+ * BFS context bundled for neighbor-enqueuing.
+ * @typedef {object} BfsContext
+ * @property {number} width - Image width
+ * @property {number} height - Image height
+ * @property {boolean[][]} diffMap - 2D diff pixel map
+ * @property {boolean[][]} visited - 2D visited map (mutated in place)
+ * @property {number[][]} queue - BFS queue (mutated in place)
+ */
+
+/**
+ * Enqueue unvisited diff neighbors of a pixel into the BFS queue.
+ * @param {number} cx - Current pixel column
+ * @param {number} cy - Current pixel row
+ * @param {BfsContext} ctx - BFS state context
+ */
+function enqueueNeighbors(cx, cy, ctx) {
+  const { width, height, diffMap, visited, queue } = ctx;
+  const neighbors = [
+    [cx - 1, cy], [cx + 1, cy],
+    [cx, cy - 1], [cx, cy + 1],
+  ];
+  for (const [nx, ny] of neighbors) {
+    if (nx >= 0 && nx < width && ny >= 0 && ny < height
+      && diffMap[ny][nx] && !visited[ny][nx]) {
+      visited[ny][nx] = true;
+      queue.push([nx, ny]);
+    }
+  }
+}
+
+/**
  * Find connected regions of differing pixels using flood-fill BFS.
  * @param {boolean[][]} diffMap - 2D boolean diff pixel map
  * @param {number} width - Image width
@@ -201,6 +232,7 @@ function findConnectedRegions(diffMap, width, height) {
       // BFS flood fill
       const queue = [[startX, startY]];
       visited[startY][startX] = true;
+      const ctx = { width, height, diffMap, visited, queue };
       let minX = startX, maxX = startX, minY = startY, maxY = startY;
       let pixelCount = 0;
 
@@ -212,18 +244,7 @@ function findConnectedRegions(diffMap, width, height) {
         minY = Math.min(minY, cy);
         maxY = Math.max(maxY, cy);
 
-        // 4-connected neighbors
-        const neighbors = [
-          [cx - 1, cy], [cx + 1, cy],
-          [cx, cy - 1], [cx, cy + 1],
-        ];
-        for (const [nx, ny] of neighbors) {
-          if (nx >= 0 && nx < width && ny >= 0 && ny < height
-            && diffMap[ny][nx] && !visited[ny][nx]) {
-            visited[ny][nx] = true;
-            queue.push([nx, ny]);
-          }
-        }
+        enqueueNeighbors(cx, cy, ctx);
       }
 
       regions.push({

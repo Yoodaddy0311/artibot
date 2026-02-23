@@ -152,6 +152,3 @@ FORMAT COMPLIANCE
 **Channels**: Google Ads, Meta Ads, LinkedIn Ads, Twitter Ads, TikTok Ads
 **Objectives**: awareness, traffic, leads, conversions, sales
 **Ad Angles**: benefit, urgency, social proof, curiosity, problem
-
-See `references/platform-specs.md` for detailed ad format specifications.
-See `references/bidding-strategies.md` for bid optimization guides.

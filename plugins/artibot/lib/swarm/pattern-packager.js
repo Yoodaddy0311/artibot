@@ -185,87 +185,121 @@ export function unpackWeights(globalWeights) {
   if (!globalWeights || typeof globalWeights !== 'object') return [];
 
   const patterns = [];
+  const ts = new Date().toISOString();
 
-  // Unpack tool weights
-  if (globalWeights.tools) {
-    for (const [category, weight] of Object.entries(globalWeights.tools)) {
-      patterns.push({
-        key: `tool::${category}`,
-        type: 'tool',
-        category,
-        confidence: weight.confidence ?? 0.5,
-        bestComposite: weight.successRate ?? 0.5,
-        sampleSize: weight.sampleSize ?? 0,
-        bestData: {
-          successRate: weight.successRate ?? 0,
-          avgMs: denormalizeLatency(weight.avgLatency ?? 0.5),
-        },
-        source: 'swarm-global',
-        extractedAt: new Date().toISOString(),
-      });
-    }
-  }
-
-  // Unpack error weights
-  if (globalWeights.errors) {
-    for (const [signature, weight] of Object.entries(globalWeights.errors)) {
-      patterns.push({
-        key: `error::${signature}`,
-        type: 'error',
-        category: signature,
-        confidence: clamp01(1 - (weight.frequency ?? 0.5)),
-        sampleSize: weight.sampleSize ?? 0,
-        bestData: {
-          recoverable: weight.recoverable >= 0.5,
-          message: null, // Anonymized, no original message
-        },
-        source: 'swarm-global',
-        extractedAt: new Date().toISOString(),
-      });
-    }
-  }
-
-  // Unpack command weights
-  if (globalWeights.commands) {
-    for (const [category, weight] of Object.entries(globalWeights.commands)) {
-      patterns.push({
-        key: `success::${category}`,
-        type: 'success',
-        category,
-        confidence: weight.effectiveness ?? 0.5,
-        sampleSize: weight.sampleSize ?? 0,
-        bestData: {
-          duration: denormalizeDuration(weight.avgDuration ?? 0.5),
-          filesModified: denormalizeFileCount(weight.filesModified ?? 0.5),
-          testsPass: weight.testsPass >= 0.5,
-        },
-        source: 'swarm-global',
-        extractedAt: new Date().toISOString(),
-      });
-    }
-  }
-
-  // Unpack team weights
-  if (globalWeights.teams) {
-    for (const [pattern, weight] of Object.entries(globalWeights.teams)) {
-      patterns.push({
-        key: `team::${pattern}`,
-        type: 'team',
-        category: pattern,
-        confidence: weight.effectiveness ?? 0.5,
-        sampleSize: weight.sampleSize ?? 0,
-        bestData: {
-          size: weight.optimalSize ?? 0,
-          duration: denormalizeDuration(weight.avgDuration ?? 0.5),
-          pattern,
-        },
-        source: 'swarm-global',
-        extractedAt: new Date().toISOString(),
-      });
-    }
-  }
+  unpackToolWeights(globalWeights.tools, patterns, ts);
+  unpackErrorWeights(globalWeights.errors, patterns, ts);
+  unpackCommandWeights(globalWeights.commands, patterns, ts);
+  unpackTeamWeights(globalWeights.teams, patterns, ts);
 
   return patterns;
+}
+
+/**
+ * Unpack tool weight entries into the patterns array.
+ *
+ * @param {object|undefined} tools - Tool weight map from global weights
+ * @param {object[]} patterns - Target patterns array to push into
+ * @param {string} extractedAt - ISO timestamp string
+ */
+function unpackToolWeights(tools, patterns, extractedAt) {
+  if (!tools) return;
+  for (const [category, weight] of Object.entries(tools)) {
+    patterns.push({
+      key: `tool::${category}`,
+      type: 'tool',
+      category,
+      confidence: weight.confidence ?? 0.5,
+      bestComposite: weight.successRate ?? 0.5,
+      sampleSize: weight.sampleSize ?? 0,
+      bestData: {
+        successRate: weight.successRate ?? 0,
+        avgMs: denormalizeLatency(weight.avgLatency ?? 0.5),
+      },
+      source: 'swarm-global',
+      extractedAt,
+    });
+  }
+}
+
+/**
+ * Unpack error weight entries into the patterns array.
+ *
+ * @param {object|undefined} errors - Error weight map from global weights
+ * @param {object[]} patterns - Target patterns array to push into
+ * @param {string} extractedAt - ISO timestamp string
+ */
+function unpackErrorWeights(errors, patterns, extractedAt) {
+  if (!errors) return;
+  for (const [signature, weight] of Object.entries(errors)) {
+    patterns.push({
+      key: `error::${signature}`,
+      type: 'error',
+      category: signature,
+      confidence: clamp01(1 - (weight.frequency ?? 0.5)),
+      sampleSize: weight.sampleSize ?? 0,
+      bestData: {
+        recoverable: weight.recoverable >= 0.5,
+        message: null, // Anonymized, no original message
+      },
+      source: 'swarm-global',
+      extractedAt,
+    });
+  }
+}
+
+/**
+ * Unpack command weight entries into the patterns array.
+ *
+ * @param {object|undefined} commands - Command weight map from global weights
+ * @param {object[]} patterns - Target patterns array to push into
+ * @param {string} extractedAt - ISO timestamp string
+ */
+function unpackCommandWeights(commands, patterns, extractedAt) {
+  if (!commands) return;
+  for (const [category, weight] of Object.entries(commands)) {
+    patterns.push({
+      key: `success::${category}`,
+      type: 'success',
+      category,
+      confidence: weight.effectiveness ?? 0.5,
+      sampleSize: weight.sampleSize ?? 0,
+      bestData: {
+        duration: denormalizeDuration(weight.avgDuration ?? 0.5),
+        filesModified: denormalizeFileCount(weight.filesModified ?? 0.5),
+        testsPass: weight.testsPass >= 0.5,
+      },
+      source: 'swarm-global',
+      extractedAt,
+    });
+  }
+}
+
+/**
+ * Unpack team weight entries into the patterns array.
+ *
+ * @param {object|undefined} teams - Team weight map from global weights
+ * @param {object[]} patterns - Target patterns array to push into
+ * @param {string} extractedAt - ISO timestamp string
+ */
+function unpackTeamWeights(teams, patterns, extractedAt) {
+  if (!teams) return;
+  for (const [pattern, weight] of Object.entries(teams)) {
+    patterns.push({
+      key: `team::${pattern}`,
+      type: 'team',
+      category: pattern,
+      confidence: weight.effectiveness ?? 0.5,
+      sampleSize: weight.sampleSize ?? 0,
+      bestData: {
+        size: weight.optimalSize ?? 0,
+        duration: denormalizeDuration(weight.avgDuration ?? 0.5),
+        pattern,
+      },
+      source: 'swarm-global',
+      extractedAt,
+    });
+  }
 }
 
 // ---------------------------------------------------------------------------

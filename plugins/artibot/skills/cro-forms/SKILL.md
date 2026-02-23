@@ -174,6 +174,3 @@ P1       | [change]          | +[X]%
 **Field Order**: Easy first, hard last, single column
 **Validation**: Inline, descriptive errors, preserve input on failure
 **Progressive Profiling**: 1-3 new fields per interaction, match to intent level
-
-See `references/form-patterns.md` for form design pattern examples.
-See `references/field-optimization.md` for field-by-field optimization guide.

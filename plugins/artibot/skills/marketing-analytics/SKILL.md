@@ -173,6 +173,3 @@ P1       | [action]       | [metric lift]
 **Attribution**: Position-based (B2B), Last-touch (B2C short cycle), Data-driven (high volume)
 **Forecasting**: Trend, Seasonal, Cohort, Regression, Scenario
 **Maturity**: Basic (L1) -> Standard (L2) -> Advanced (L3) -> Predictive (L4) -> Prescriptive (L5)
-
-See `references/kpi-definitions.md` for marketing KPI formula reference.
-See `references/attribution-guide.md` for attribution model implementation guides.

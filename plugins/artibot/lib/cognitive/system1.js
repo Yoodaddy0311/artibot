@@ -391,6 +391,89 @@ function _getEscalationReason(confidence, source) {
 // ---------------------------------------------------------------------------
 
 /**
+ * Convert a lifelong-learner pattern record to System 1 format.
+ * @param {object} p - Lifelong-learner pattern
+ * @returns {object|null} Converted pattern or null if no keywords
+ */
+function _convertLonglivedPattern(p) {
+  const keywords = _extractKeywords(p);
+  if (keywords.length === 0) return null;
+  return {
+    id: p.key,
+    keywords,
+    intent: p.type ?? 'learned',
+    domain: p.type,
+    confidence: p.confidence ?? 0.5,
+    response: { type: 'learned_pattern', data: p.bestData, insight: p.insight },
+    useCount: p.sampleSize ?? 0,
+    successRate: p.confidence ?? 0.5,
+    lastUsed: p.extractedAt ? new Date(p.extractedAt).getTime() : Date.now(),
+    source: 'lifelong-learner',
+  };
+}
+
+/**
+ * Load patterns from a single file into the accumulator array.
+ * Handles both single-pattern files and pattern collection files.
+ * @param {string} file - File path
+ * @param {object[]} patterns - Accumulator array (mutated in place)
+ * @returns {Promise<void>}
+ */
+async function _loadPatternsFromFile(file, patterns) {
+  const data = await readJsonFile(file);
+  if (!data) return;
+
+  if (data.id && data.keywords) {
+    patterns.push(data);
+    return;
+  }
+
+  if (!Array.isArray(data.patterns)) return;
+
+  for (const p of data.patterns) {
+    if (p.id && p.keywords) {
+      patterns.push(p);
+    } else if (p.key && !p.keywords) {
+      const converted = _convertLonglivedPattern(p);
+      if (converted) patterns.push(converted);
+    }
+  }
+}
+
+/**
+ * Load promoted System 1 patterns from knowledge-transfer file.
+ * @param {object[]} patterns - Accumulator array (mutated in place)
+ * @returns {Promise<void>}
+ */
+async function _loadPromotedPatterns(patterns) {
+  const homeDir = getHomeDir();
+  const s1Path = path.join(homeDir, '.claude', 'artibot', 'system1-patterns.json');
+  const s1Data = await readJsonFile(s1Path);
+  if (!s1Data || !Array.isArray(s1Data.patterns)) return;
+
+  for (const p of s1Data.patterns) {
+    if (p.status !== 'active') continue;
+    if (patterns.some((existing) => existing.id === p.key)) continue;
+
+    const keywords = _extractKeywords(p);
+    if (keywords.length > 0) {
+      patterns.push({
+        id: p.key,
+        keywords,
+        intent: p.type ?? 'promoted',
+        domain: p.type,
+        confidence: p.confidence ?? 0.5,
+        response: { type: 'system1_pattern', data: p.bestData, insight: p.insight },
+        useCount: p.usageCount ?? 0,
+        successRate: p.confidence ?? 0.5,
+        lastUsed: p.promotedAt ? new Date(p.promotedAt).getTime() : Date.now(),
+        source: p.source ?? 'system2',
+      });
+    }
+  }
+}
+
+/**
  * Pre-load frequently used patterns from disk into memory.
  * Called automatically on first fastResponse(), or can be called
  * explicitly at startup for better first-query latency.
@@ -410,64 +493,11 @@ export async function warmCache() {
   const patterns = [];
 
   for (const file of files.slice(0, MAX_WARM_CACHE_PATTERNS)) {
-    const data = await readJsonFile(file);
-    if (data && data.id && data.keywords) {
-      patterns.push(data);
-    } else if (data && Array.isArray(data.patterns)) {
-      // Support pattern collection files (lifelong-learner format)
-      for (const p of data.patterns) {
-        if (p.id && p.keywords) {
-          patterns.push(p);
-        } else if (p.key && !p.keywords) {
-          // Convert lifelong-learner patterns to System 1 format
-          // Generate keywords from key, category, and insight
-          const keywords = _extractKeywords(p);
-          if (keywords.length > 0) {
-            patterns.push({
-              id: p.key,
-              keywords,
-              intent: p.type ?? 'learned',
-              domain: p.type,
-              confidence: p.confidence ?? 0.5,
-              response: { type: 'learned_pattern', data: p.bestData, insight: p.insight },
-              useCount: p.sampleSize ?? 0,
-              successRate: p.confidence ?? 0.5,
-              lastUsed: p.extractedAt ? new Date(p.extractedAt).getTime() : Date.now(),
-              source: 'lifelong-learner',
-            });
-          }
-        }
-      }
-    }
+    await _loadPatternsFromFile(file, patterns);
   }
 
   // Also load System 1 promoted patterns (from knowledge-transfer)
-  const homeDir = getHomeDir();
-  const s1Path = path.join(homeDir, '.claude', 'artibot', 'system1-patterns.json');
-  const s1Data = await readJsonFile(s1Path);
-  if (s1Data && Array.isArray(s1Data.patterns)) {
-    for (const p of s1Data.patterns) {
-      if (p.status !== 'active') continue;
-      // Skip if already loaded by key
-      if (patterns.some(existing => existing.id === p.key)) continue;
-
-      const keywords = _extractKeywords(p);
-      if (keywords.length > 0) {
-        patterns.push({
-          id: p.key,
-          keywords,
-          intent: p.type ?? 'promoted',
-          domain: p.type,
-          confidence: p.confidence ?? 0.5,
-          response: { type: 'system1_pattern', data: p.bestData, insight: p.insight },
-          useCount: p.usageCount ?? 0,
-          successRate: p.confidence ?? 0.5,
-          lastUsed: p.promotedAt ? new Date(p.promotedAt).getTime() : Date.now(),
-          source: p.source ?? 'system2',
-        });
-      }
-    }
-  }
+  await _loadPromotedPatterns(patterns);
 
   // Sort by useCount descending so most popular patterns are checked first
   patterns.sort((a, b) => (b.useCount || 0) - (a.useCount || 0));
