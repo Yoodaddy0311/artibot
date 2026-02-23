@@ -41,6 +41,8 @@ vi.mock('node:fs', async () => {
     ...actual,
     readFileSync: vi.fn((...args) => mockState.readFileSyncImpl(...args)),
     existsSync: vi.fn(() => mockState.existsSyncResult),
+    writeFileSync: vi.fn(() => {}),
+    mkdirSync: vi.fn(() => {}),
   };
 });
 
@@ -131,13 +133,13 @@ describe('session-start hook', () => {
       expect(output.message).toContain('agent-teams (full)');
     });
 
-    it('reports sub-agent (fallback) mode when env var is absent', async () => {
+    it('auto-enables agent-teams in settings.json when env var is absent', async () => {
       mockState.readStdinResult = Promise.resolve(JSON.stringify({}));
 
       await importAndWait();
 
       const output = mockState.writeStdoutCalls[0][0];
-      expect(output.message).toContain('sub-agent (fallback)');
+      expect(output.message).toContain('agent-teams (auto-enabled');
     });
   });
 

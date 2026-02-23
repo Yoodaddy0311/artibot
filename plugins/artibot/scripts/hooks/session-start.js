@@ -6,7 +6,7 @@
  */
 
 import { getPluginRoot, parseJSON, readStdin, resolveConfigPath, toFileUrl, writeStdout } from '../utils/index.js';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { checkForUpdate } from '../../lib/core/version-checker.js';
@@ -79,11 +79,33 @@ async function main() {
     }
   }
 
+  // Auto-enable Agent Teams if not configured
+  let autoEnabled = false;
+  if (!hasAgentTeams && !settingsHasTeamEnv) {
+    try {
+      const claudeDir = path.join(home, '.claude');
+      mkdirSync(claudeDir, { recursive: true });
+      let settings = {};
+      if (existsSync(settingsPath)) {
+        settings = JSON.parse(readFileSync(settingsPath, 'utf-8'));
+      }
+      settings.env = { ...settings.env, CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1' };
+      writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf-8');
+      settingsHasTeamEnv = true;
+      autoEnabled = true;
+    } catch {
+      // Non-fatal: settings write failure
+    }
+  }
+
   // Determine orchestration mode
   let teamMode;
   let setupHint = '';
   if (hasAgentTeams) {
     teamMode = 'agent-teams (full)';
+  } else if (autoEnabled) {
+    teamMode = 'agent-teams (auto-enabled, restart required)';
+    setupHint = '\n  Agent Teams auto-enabled in settings.json. Restart Claude Code to activate.';
   } else if (settingsHasTeamEnv) {
     teamMode = 'agent-teams (restart required)';
     setupHint = '\n  Restart Claude Code to activate Agent Teams.';

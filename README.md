@@ -51,32 +51,30 @@ Most Claude Code plugins use simple sub-agent (`Task()`) delegation -- fire-and-
 
 ### Prerequisites
 
-**Enable Agent Teams** (required):
-
-Add to `~/.claude/settings.json`:
-```json
-{
-  "env": {
-    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
-  }
-}
-```
+**Agent Teams** is auto-enabled by Artibot on first session start. No manual setup needed.
 
 ### Installation
 
+**Option A: Plugin Marketplace (Recommended)**
+```bash
+claude plugin marketplace add https://github.com/Yoodaddy0311/artibot
+claude plugin install artibot@artibot
+```
+
+**Option B: Manual Install**
 ```bash
 git clone https://github.com/Yoodaddy0311/artibot.git
 cd artibot/plugins/artibot
 bash install.sh
 ```
 
-This copies agents, commands, skills, hooks, and MCP config to `~/.claude/`. To uninstall: `bash install.sh uninstall`
+Both methods copy agents, commands, skills, hooks, and MCP config to `~/.claude/`. Agent Teams is auto-enabled on first session start. To uninstall: `bash install.sh uninstall`
 
 ### Requirements
 
 - [Claude Code](https://github.com/anthropics/claude-code) CLI
 - Node.js >= 18.0.0
-- `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` environment variable
+- Agent Teams (auto-enabled by Artibot, or manually set `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`)
 
 ### Cross-Platform Installation
 
