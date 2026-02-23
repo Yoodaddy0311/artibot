@@ -1,11 +1,11 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  collectExperience,
-  collectDailyExperiences,
   batchLearn,
-  updatePatterns,
+  collectDailyExperiences,
+  collectExperience,
   getLearningSummary,
   scheduleLearning,
+  updatePatterns,
 } from '../../lib/learning/lifelong-learner.js';
 
 vi.mock('../../lib/core/file.js', () => ({

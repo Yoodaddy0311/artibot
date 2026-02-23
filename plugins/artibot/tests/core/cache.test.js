@@ -1,6 +1,6 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Cache, defaultCache } from '../../lib/core/cache.js';
-import { writeFileSync, unlinkSync, mkdirSync } from 'node:fs';
+import { mkdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -259,7 +259,7 @@ describe('Cache', () => {
       expect(cache.get('cfg')).toEqual({ v: 1 });
     });
 
-    it('invalidates when file mtime changes', (ctx) => {
+    it('invalidates when file mtime changes', (_ctx) => {
       cache.setWithMtime('cfg', { v: 1 }, tmpFile);
       // Modify file to change mtime
       writeFileSync(tmpFile, '{"v":2}');

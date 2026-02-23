@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { AntigravityAdapter } from '../../lib/adapters/antigravity-adapter.js';
 import { BaseAdapter } from '../../lib/adapters/base-adapter.js';
 

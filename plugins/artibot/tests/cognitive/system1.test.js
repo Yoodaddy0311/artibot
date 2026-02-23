@@ -1,13 +1,13 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  patternMatch,
-  fastResponse,
-  escalateToSystem2,
-  warmCache,
-  savePattern,
-  recordPatternOutcome,
-  getDiagnostics,
   clearAllCaches,
+  escalateToSystem2,
+  fastResponse,
+  getDiagnostics,
+  patternMatch,
+  recordPatternOutcome,
+  savePattern,
+  warmCache,
 } from '../../lib/cognitive/system1.js';
 
 // Mock file I/O module

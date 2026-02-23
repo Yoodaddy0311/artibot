@@ -1,22 +1,21 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  loadFromDisk,
-  saveToDisk,
+  _resetForTesting,
   clearPersistence,
-  getPattern,
-  setPattern,
-  removePattern,
   getAllPatterns,
-  setWeights,
-  getWeights,
-  updateMetadata,
+  getDbPath,
   getMetadata,
+  getPattern,
+  getWeights,
   isDirty,
   isLoaded,
-  getDbPath,
+  loadFromDisk,
+  removePattern,
+  saveToDisk,
   setDebounceDelay,
-  scheduleSave,
-  _resetForTesting,
+  setPattern,
+  setWeights,
+  updateMetadata,
 } from '../../lib/swarm/swarm-persistence.js';
 
 vi.mock('../../lib/core/file.js', () => ({

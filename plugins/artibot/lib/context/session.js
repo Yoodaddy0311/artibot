@@ -6,15 +6,15 @@
 
 import path from 'node:path';
 import { readJsonFile, writeJsonFile } from '../core/file.js';
-import { getHomeDir } from '../core/platform.js';
+import { ARTIBOT_DIR } from '../core/config.js';
 
 const STATE_FILENAME = 'artibot-state.json';
 
 /**
- * Get the state file path (~/.claude/artibot-state.json).
+ * Get the state file path (~/.claude/artibot/artibot-state.json).
  */
 function getStatePath() {
-  return path.join(getHomeDir(), '.claude', STATE_FILENAME);
+  return path.join(ARTIBOT_DIR, STATE_FILENAME);
 }
 
 /**

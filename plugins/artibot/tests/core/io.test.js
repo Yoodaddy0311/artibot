@@ -1,6 +1,6 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
-import { writeJSON, writeText, writeError, writeHookResult, readStdinJSON, readStdin } from '../../lib/core/io.js';
+import { readStdin, readStdinJSON, writeError, writeHookResult, writeJSON, writeText } from '../../lib/core/io.js';
 
 describe('io', () => {
   let stdoutSpy;

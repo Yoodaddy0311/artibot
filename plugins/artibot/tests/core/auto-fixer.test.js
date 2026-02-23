@@ -7,7 +7,7 @@
  *
  * child_process.execSync is fully mocked.
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Mock child_process before importing the module
 vi.mock('node:child_process', () => ({
@@ -17,11 +17,11 @@ vi.mock('node:child_process', () => ({
 import { execSync } from 'node:child_process';
 import {
   autoFix,
-  runFixLoop,
-  parseEslintOutput,
-  parseVitestOutput,
   checkConvergence,
   DEFAULT_OPTIONS,
+  parseEslintOutput,
+  parseVitestOutput,
+  runFixLoop,
 } from '../../lib/core/auto-fixer.js';
 
 // ---------------------------------------------------------------------------

@@ -82,6 +82,85 @@ export {
   getTransferStats,
 } from './knowledge-transfer.js';
 
+// Rule Extractor (Conversation-to-Memory pipeline)
+export {
+  extractRules,
+  classifyRule,
+  RULE_PATTERNS,
+} from './rule-extractor.js';
+
+// Skill Injector (Rule injection into skill SKILL.md files)
+export {
+  injectRules,
+  getInjectedRules,
+  clearInjections,
+} from './skill-injector.js';
+
+/**
+ * Process a user message through the conversation-to-memory pipeline.
+ * Extracts rules, persists them to memory, and optionally injects
+ * them into relevant skill files.
+ *
+ * @param {string} message - Raw user message text
+ * @param {object} [options]
+ * @param {string[]} [options.targetSkills] - Skill names to inject into (default: none)
+ * @param {string} [options.sessionId] - Current session ID
+ * @returns {Promise<{
+ *   rulesExtracted: number,
+ *   rules: object[],
+ *   memorySaved: boolean,
+ *   injections: object[]
+ * }>}
+ */
+export async function processUserMessage(message, options = {}) {
+  const { targetSkills = [], sessionId } = options;
+
+  const { extractRules: extract } = await import('./rule-extractor.js');
+  const rules = extract(message);
+
+  if (rules.length === 0) {
+    return { rulesExtracted: 0, rules: [], memorySaved: false, injections: [] };
+  }
+
+  // Persist all rules to memory store
+  const { saveMemory } = await import('./memory-manager.js');
+  let memorySaved = false;
+  try {
+    for (const rule of rules) {
+      await saveMemory('preference', {
+        ruleType: rule.type,
+        content: rule.content,
+        lang: rule.lang,
+        confidence: rule.confidence,
+        sessionId: sessionId ?? null,
+        rawMatch: rule.rawMatch,
+      }, {
+        tags: [rule.type, rule.lang, 'user-rule', ...rule.content.toLowerCase().split(/\s+/).slice(0, 5)],
+        source: 'conversation',
+      });
+    }
+    memorySaved = true;
+  } catch (err) {
+    process.stderr.write(`[learning] processUserMessage memory save failed: ${err?.message ?? err}\n`);
+  }
+
+  // Inject into target skills
+  const injections = [];
+  if (targetSkills.length > 0) {
+    const { injectRules } = await import('./skill-injector.js');
+    for (const skillName of targetSkills) {
+      try {
+        const result = await injectRules(rules, skillName);
+        injections.push(result);
+      } catch (err) {
+        process.stderr.write(`[learning] skill injection failed for ${skillName}: ${err?.message ?? err}\n`);
+      }
+    }
+  }
+
+  return { rulesExtracted: rules.length, rules, memorySaved, injections };
+}
+
 /**
  * Initialize all learning subsystems.
  * Prunes stale data from tool history and memory stores.

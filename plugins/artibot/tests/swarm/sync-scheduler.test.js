@@ -1,11 +1,11 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  scheduleSync,
   cancelSync,
   forceSync,
-  onSessionStart,
-  onSessionEnd,
   getSyncStatus,
+  onSessionEnd,
+  onSessionStart,
+  scheduleSync,
 } from '../../lib/swarm/sync-scheduler.js';
 
 vi.mock('../../lib/core/file.js', () => ({

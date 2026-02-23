@@ -1,15 +1,15 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  uploadWeights,
-  downloadLatestWeights,
-  reportTelemetry,
-  checkHealth,
-  getContributionStats,
-  flushOfflineQueue,
-  computeChecksum,
-  verifyChecksum,
-  validateUrl,
   ALLOWED_HOSTS,
+  checkHealth,
+  computeChecksum,
+  downloadLatestWeights,
+  flushOfflineQueue,
+  getContributionStats,
+  reportTelemetry,
+  uploadWeights,
+  validateUrl,
+  verifyChecksum,
 } from '../../lib/swarm/swarm-client.js';
 
 // Mock file module

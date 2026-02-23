@@ -1,19 +1,19 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import {
-  generateToken,
-  rotateToken,
-  isTokenValid,
-  revokeToken,
-  getTokenInfo,
-  listTokens,
   cleanup,
-  getTokenStats,
   configure,
-  restoreFromPersistence,
-  resetTokenStore,
   DEFAULT_ROTATION_MS,
-  MIN_ROTATION_MS,
+  generateToken,
+  getTokenInfo,
+  getTokenStats,
+  isTokenValid,
+  listTokens,
   MAX_TOKENS,
+  MIN_ROTATION_MS,
+  resetTokenStore,
+  restoreFromPersistence,
+  revokeToken,
+  rotateToken,
   TOKEN_PREFIX,
 } from '../../lib/privacy/token-rotation.js';
 

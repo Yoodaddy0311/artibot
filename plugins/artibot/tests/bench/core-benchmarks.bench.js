@@ -9,14 +9,14 @@
 import { bench, describe } from 'vitest';
 import {
   classifyComplexity,
-  route,
   resetRouter,
+  route,
 } from '../../lib/cognitive/router.js';
 import {
+  resetStats,
   scrub,
   scrubPattern,
   validateScrubbed,
-  resetStats,
 } from '../../lib/privacy/pii-scrubber.js';
 import { Cache } from '../../lib/core/cache.js';
 import { detectIntent } from '../../lib/intent/index.js';

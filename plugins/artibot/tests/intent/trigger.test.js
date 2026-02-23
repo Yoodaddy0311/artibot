@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { getRecommendations, getBestRecommendation } from '../../lib/intent/trigger.js';
+import { describe, expect, it } from 'vitest';
+import { getBestRecommendation, getRecommendations } from '../../lib/intent/trigger.js';
 
 describe('trigger', () => {
   describe('getRecommendations()', () => {

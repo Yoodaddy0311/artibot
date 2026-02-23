@@ -1,12 +1,12 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
-  createSandbox,
   checkCommandSafety,
+  cleanup,
+  createSandbox,
   execute,
+  getStats,
   recordResult,
   validate,
-  getStats,
-  cleanup,
 } from '../../lib/cognitive/sandbox.js';
 
 describe('sandbox', () => {

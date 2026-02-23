@@ -1,15 +1,15 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  generateCandidates,
-  evaluateGroup,
-  updateWeights,
-  evaluateTeamGroup,
-  getRecommendation,
-  generateTeamCandidates,
-  updateTeamWeights,
-  getGrpoStats,
   CLI_RULES,
+  evaluateGroup,
+  evaluateTeamGroup,
+  generateCandidates,
+  generateTeamCandidates,
+  getGrpoStats,
+  getRecommendation,
   TEAM_EVALUATION_RULES,
+  updateTeamWeights,
+  updateWeights,
 } from '../../lib/learning/grpo-optimizer.js';
 
 vi.mock('../../lib/core/file.js', () => ({

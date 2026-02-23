@@ -1,10 +1,10 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
   ErrorCodes,
-  getErrorMessage,
-  isError,
   getErrorCategory,
+  getErrorMessage,
   getErrorsByCategory,
+  isError,
   listAllErrors,
 } from '../../lib/core/error-codes.js';
 

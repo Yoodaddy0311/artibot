@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { GeminiAdapter } from '../../lib/adapters/gemini-adapter.js';
 import { BaseAdapter } from '../../lib/adapters/base-adapter.js';
 

@@ -1,18 +1,18 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  recordUsage,
-  suggestTool,
-  pruneOldRecords,
-  buildContextKey,
-  getToolStats,
-  recordGroupComparison,
-  suggestToolCandidates,
-  getGrpoHistory,
-  getGrpoScores,
-  flushToDisk,
-  shutdownToolLearner,
   _clearCache,
   _getBufferState,
+  buildContextKey,
+  flushToDisk,
+  getGrpoHistory,
+  getGrpoScores,
+  getToolStats,
+  pruneOldRecords,
+  recordGroupComparison,
+  recordUsage,
+  shutdownToolLearner,
+  suggestTool,
+  suggestToolCandidates,
 } from '../../lib/learning/tool-learner.js';
 
 // tool-learner uses node:fs/promises directly, so mock it

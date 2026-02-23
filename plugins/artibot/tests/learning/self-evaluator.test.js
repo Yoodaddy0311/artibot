@@ -1,9 +1,9 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   evaluateResult,
   getImprovementSuggestions,
-  getTeamPerformance,
   getLearningTrends,
+  getTeamPerformance,
 } from '../../lib/learning/self-evaluator.js';
 
 // Mock file module

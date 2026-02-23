@@ -10,7 +10,7 @@
 
 import path from 'node:path';
 import { parseJSON, readStdin, toFileUrl } from '../utils/index.js';
-import { logHookError, createErrorHandler } from '../../lib/core/hook-utils.js';
+import { createErrorHandler, logHookError } from '../../lib/core/hook-utils.js';
 
 // Dynamic import for tool-learner (ESM, relative to plugin root)
 const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT

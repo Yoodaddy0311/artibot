@@ -14,7 +14,7 @@
 
 import { getPluginRoot, parseJSON, readStdin, toFileUrl } from '../utils/index.js';
 import path from 'node:path';
-import { logHookError, createErrorHandler } from '../../lib/core/hook-utils.js';
+import { createErrorHandler, logHookError } from '../../lib/core/hook-utils.js';
 
 async function main() {
   const raw = await readStdin();

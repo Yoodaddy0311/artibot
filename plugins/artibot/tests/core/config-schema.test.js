@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { configSchema, validateConfig } from '../../lib/core/config-schema.js';
 
 describe('config-schema', () => {

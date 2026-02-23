@@ -13,7 +13,7 @@
 
 import { atomicWriteSync, getPluginRoot, parseJSON, readStdin, toFileUrl } from '../utils/index.js';
 import path from 'node:path';
-import { logHookError, getStatePath, createErrorHandler } from '../../lib/core/hook-utils.js';
+import { createErrorHandler, getStatePath, logHookError } from '../../lib/core/hook-utils.js';
 
 /**
  * Run the learning pipeline using shutdownLearning() which includes:

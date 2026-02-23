@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 /**
  * tool-tracker.js uses dynamic imports (import(`file://...`)) to load

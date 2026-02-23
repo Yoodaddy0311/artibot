@@ -1,15 +1,15 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  promoteToSystem1,
+  clearCache,
   demoteFromSystem1,
-  recordSystem1Usage,
-  hotSwap,
   getPromotionCandidates,
-  getSystem1Patterns,
   getSystem1Pattern,
+  getSystem1Patterns,
   getTransferHistory,
   getTransferStats,
-  clearCache,
+  hotSwap,
+  promoteToSystem1,
+  recordSystem1Usage,
 } from '../../lib/learning/knowledge-transfer.js';
 
 vi.mock('../../lib/core/file.js', () => ({

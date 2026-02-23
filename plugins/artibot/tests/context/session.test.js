@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // ---------------------------------------------------------------------------
 // Mocks for I/O dependencies (hoisted by vitest)
@@ -12,8 +12,8 @@ vi.mock('../../lib/core/file.js', () => ({
   writeJsonFile: (...args) => mockWriteJsonFile(...args),
 }));
 
-vi.mock('../../lib/core/platform.js', () => ({
-  getHomeDir: vi.fn(() => '/fake/home'),
+vi.mock('../../lib/core/config.js', () => ({
+  ARTIBOT_DIR: '/fake/home/.claude/artibot',
 }));
 
 // ---------------------------------------------------------------------------
@@ -21,15 +21,15 @@ vi.mock('../../lib/core/platform.js', () => ({
 // ---------------------------------------------------------------------------
 
 import {
-  registerAgent,
-  unregisterAgent,
-  addTask,
-  updateTaskStatus,
   addHistory,
+  addTask,
   getActiveAgents,
   getInProgressTasks,
   loadSessionState,
+  registerAgent,
   saveSessionState,
+  unregisterAgent,
+  updateTaskStatus,
 } from '../../lib/context/session.js';
 
 describe('session', () => {
@@ -263,7 +263,7 @@ describe('session', () => {
       expect(mockReadJsonFile).toHaveBeenCalledTimes(1);
       const calledPath = mockReadJsonFile.mock.calls[0][0];
       expect(calledPath.replace(/\\/g, '/')).toContain(
-        '.claude/artibot-state.json',
+        '.claude/artibot/artibot-state.json',
       );
     });
 
@@ -315,7 +315,7 @@ describe('session', () => {
 
       const calledPath = mockWriteJsonFile.mock.calls[0][0];
       expect(calledPath.replace(/\\/g, '/')).toContain(
-        '.claude/artibot-state.json',
+        '.claude/artibot/artibot-state.json',
       );
     });
 

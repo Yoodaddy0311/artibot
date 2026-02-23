@@ -1,8 +1,8 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  mergeWeights,
   packagePatterns,
   unpackWeights,
-  mergeWeights,
 } from '../../lib/swarm/pattern-packager.js';
 
 vi.mock('../../lib/core/file.js', () => ({

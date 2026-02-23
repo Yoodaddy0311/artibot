@@ -1,12 +1,12 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import {
-  classifyComplexity,
-  route,
   adaptThreshold,
+  classifyComplexity,
   configure,
   getRoutingStats,
-  resetRouter,
   getThreshold,
+  resetRouter,
+  route,
 } from '../../lib/cognitive/router.js';
 
 describe('router', () => {

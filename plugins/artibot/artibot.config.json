@@ -1,5 +1,5 @@
 {
-  "version": "1.4.0",
+  "version": "1.6.0",
 
   "agents": {
     "modelPolicy": {
@@ -139,6 +139,16 @@
       "marketing-audit": "[leader] scan -> [council] assess -> [pipeline] optimize -> [council] verify",
       "content-launch": "[leader] plan -> [swarm] create -> [council] review -> [leader] publish",
       "competitive-analysis": "[council] research -> [swarm] analyze -> [council] synthesize -> [leader] report"
+    },
+    "playbookMeta": {
+      "feature": { "description": "End-to-end feature implementation", "domain": "development", "tags": ["feature", "implementation"] },
+      "bugfix": { "description": "Bug analysis and fix workflow", "domain": "development", "tags": ["bugfix", "debug"] },
+      "refactor": { "description": "Code refactoring and quality improvement", "domain": "development", "tags": ["refactor", "quality"] },
+      "security": { "description": "Security audit and vulnerability remediation", "domain": "security", "tags": ["security", "audit"] },
+      "marketing-campaign": { "description": "Full marketing campaign execution", "domain": "marketing", "tags": ["marketing", "campaign", "launch"] },
+      "marketing-audit": { "description": "Marketing performance audit and optimization", "domain": "marketing", "tags": ["marketing", "audit", "optimize"] },
+      "content-launch": { "description": "Content creation and publication workflow", "domain": "marketing", "tags": ["content", "publish", "launch"] },
+      "competitive-analysis": { "description": "Competitive landscape research and reporting", "domain": "marketing", "tags": ["research", "competitive", "analysis"] }
     },
     "messageTypes": ["message", "broadcast", "shutdown_request", "shutdown_response", "plan_approval_response"],
     "teamStorage": {

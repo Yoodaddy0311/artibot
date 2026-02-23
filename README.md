@@ -1,12 +1,12 @@
 # Artibot
 
 [![Coverage](https://img.shields.io/badge/coverage-96.95%25-brightgreen)](plugins/artibot/tests/)
-[![Tests](https://img.shields.io/badge/tests-2643%20passed-brightgreen)](plugins/artibot/tests/)
+[![Tests](https://img.shields.io/badge/tests-2879%20passed-brightgreen)](plugins/artibot/tests/)
 [![License](https://img.shields.io/badge/license-BSL--1.1-blue)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D18-green)](package.json)
 
 ![Claude Code Plugin](https://img.shields.io/badge/Claude_Code-Plugin-7C3AED?style=flat-square)
-![Version](https://img.shields.io/badge/version-1.5.0-blue?style=flat-square)
+![Version](https://img.shields.io/badge/version-1.6.0-blue?style=flat-square)
 ![License](https://img.shields.io/badge/license-BSL--1.1-green?style=flat-square)
 ![Node.js](https://img.shields.io/badge/Node.js-18%2B-brightgreen?style=flat-square)
 ![Agent Teams](https://img.shields.io/badge/Agent_Teams-Native-orange?style=flat-square)
@@ -37,11 +37,13 @@ Most Claude Code plugins use simple sub-agent (`Task()`) delegation -- fire-and-
 - **CTO-Led Orchestration** -- `orchestrator` agent leads 25 specialist agents as a team coordinator (delegation mode: no direct coding)
 - **Intelligent Delegation** -- Auto-selects Sub-Agent (simple) vs Agent Team (complex) based on cognitive complexity scoring
 - **5 Orchestration Patterns** -- Leader, Council, Swarm, Pipeline, Watchdog
-- **8 Playbooks** -- Feature, Bugfix, Refactor, Security + Marketing Campaign, Marketing Audit, Content Launch, Competitive Analysis
-- **41 Slash Commands** -- `/sc` smart router, `/orchestrate`, `/spawn`, `/implement`, `/campaign`, `/seo`, and more
+- **8 Playbooks** -- Feature, Bugfix, Refactor, Security + Marketing Campaign, Marketing Audit, Content Launch, Competitive Analysis (now with executable parser and registry)
+- **43 Slash Commands** -- `/sc` smart router, `/orchestrate`, `/spawn`, `/implement`, `/visual-check`, `/sc playbook`, and more
 - **26 Specialized Agents** -- Architecture, security, frontend, backend, testing, DevOps, marketing, SEO, analytics, and more
-- **78 Domain Skills** -- 11 persona skills, 8 core skills (incl. cognitive-routing, lifelong-learning), 16 language skills, 8 utility skills, 35 marketing skills
+- **79 Domain Skills** -- 11 persona skills, 8 core skills (incl. cognitive-routing, lifelong-learning), 16 language skills, 8 utility skills, 35 marketing skills, visual-validation
 - **27 Event Hook Registrations** -- Cognitive routing, lifelong learning, session lifecycle, dangerous command blocking, auto-formatting, team tracking
+- **Visual Validation Pipeline** -- SSIM-based screenshot comparison, auto-fix suggestion, iterative correction loop via Playwright MCP
+- **Conversation-to-Memory** -- Auto-extracts rules and decisions from user messages (Korean/English), injects into skills dynamically
 - **Cross-Platform Compatible** -- Works with Gemini CLI, OpenAI Codex, and Cursor via platform adapters
 - **Zero Dependencies** -- Pure Node.js built-in modules only (`node:fs`, `node:path`, `node:os`)
 
@@ -503,6 +505,14 @@ All teammates have their specialist tools + team collaboration tools (`SendMessa
 | `/orchestrate [workflow]` | Agent Teams multi-agent workflow |
 | `/spawn [mode]` | Team spawn with parallel task execution |
 
+### Visual & Validation
+
+| Command | Description |
+|---------|-------------|
+| `/visual-check [url]` | Visual validation with SSIM screenshot comparison |
+| `/sc playbook list` | Browse and discover playbooks |
+| `/sc playbook info [name]` | Show playbook details and phase diagram |
+
 ### Workflow
 
 | Command | Description |
@@ -584,7 +594,7 @@ Artibot checks for new versions on session start via GitHub Releases API (24h ca
 
 ```
 Session start:
-  Artibot v1.5.0 initialized
+  Artibot v1.6.0 initialized
   ✅ You are running the latest version
 ```
 
@@ -643,13 +653,13 @@ plugins/artibot/
 |   +-- orchestrator.md          #   CTO / Team leader (Agent Teams API)
 |   +-- [17 dev specialists].md  #   Development teammates
 |   +-- [8 marketing agents].md  #   Marketing specialists
-+-- commands/                    # 41 slash commands
++-- commands/                    # 43 slash commands
 |   +-- sc.md                    #   Smart router
 |   +-- orchestrate.md           #   Team orchestration (TeamCreate)
 |   +-- spawn.md                 #   Team spawn (parallel execution)
 |   +-- [25 dev commands].md
 |   +-- [10 marketing commands].md
-+-- skills/                      # 78 skill directories
++-- skills/                      # 79 skill directories
 |   +-- orchestration/           #   Delegation mode + team routing
 |   +-- cognitive-routing/       #   System 1/2 dual-process routing
 |   +-- lifelong-learning/       #   GRPO batch learning + knowledge transfer
@@ -663,9 +673,11 @@ plugins/artibot/
 |   +-- ci/                      # 4 CI validation scripts
 |   +-- utils/
 +-- lib/
-|   +-- core/                    # Core modules (platform, config, cache)
+|   +-- core/                    # Core modules (platform, config, cache, playbook-parser, playbook-registry)
+|   +-- visual/                  # Visual validation (SSIM differ, style-fixer, validator)
 |   +-- intent/                  # Intent detection (language, trigger)
-|   +-- context/                 # Context management (hierarchy, session)
+|   +-- context/                 # Context management (session)
+|   +-- learning/                # Lifelong learning (memory, GRPO, rule-extractor, skill-injector)
 |   +-- adapters/                # Cross-platform adapters
 +-- output-styles/               # 3 output styles
 +-- templates/                   # 3 writing templates
@@ -680,7 +692,7 @@ Key settings in `artibot.config.json`:
 
 | Setting | Description | Default |
 |---------|-------------|---------|
-| `version` | Plugin version | `1.5.0` |
+| `version` | Plugin version | `1.6.0` |
 | `cognitive.router.threshold` | System 1/2 boundary | `0.4` |
 | `cognitive.router.adaptRate` | Per-feedback adjustment step | `0.05` |
 | `cognitive.system1.maxLatency` | System 1 max response time (ms) | `100` |
@@ -784,7 +796,7 @@ node scripts/ci/validate-hooks.js     # Hook validation
 
 ## Version
 
-1.5.0 -- Cognitive Architecture + Lifelong Learning + Marketing Vertical + Performance Benchmarks
+1.6.0 -- Visual Validation Pipeline + Conversation-to-Memory + Playbook System Activation + Learning Bug Fixes
 
 ## License
 

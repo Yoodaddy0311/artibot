@@ -12,7 +12,7 @@
 import { parseJSON, readStdin, writeStdout } from '../utils/index.js';
 import path from 'node:path';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { logHookError, createErrorHandler } from '../../lib/core/hook-utils.js';
+import { createErrorHandler, logHookError } from '../../lib/core/hook-utils.js';
 
 // ---------------------------------------------------------------------------
 // Constants

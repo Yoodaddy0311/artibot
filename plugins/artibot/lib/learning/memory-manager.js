@@ -31,6 +31,8 @@ const TTL = {
 
 const MAX_COMMAND_HISTORY = 500;
 const MAX_ERROR_PATTERNS = 200;
+const MAX_PREFERENCE_ENTRIES = 500;
+const MAX_CONTEXT_ENTRIES = 1000;
 const MAX_SUMMARY_LENGTH = 500;
 
 // ---------------------------------------------------------------------------
@@ -224,8 +226,10 @@ function scoreEntry(entry, queryTokens, allDocTags = []) {
   // Access frequency bonus (0-0.2)
   const accessBonus = Math.min(0.2, (entry.accessCount || 0) * 0.02);
 
-  // Weighted combination: TF-IDF 60%, recency 25%, access bonus up to 15%
-  return tfidfScore * 0.6 + recencyScore * 0.25 + accessBonus + 0.15 * (tfidfScore > 0 ? 1 : 0);
+  // Weighted combination: TF-IDF 50%, recency 25%, access bonus 15%, relevance bonus 10%
+  // Weights sum to 1.0 (0.5 + 0.25 + 0.15 + 0.1 = 1.0), result capped at 1.0
+  const relevanceBonus = tfidfScore > 0 ? 0.1 : 0;
+  return Math.min(1.0, tfidfScore * 0.5 + recencyScore * 0.25 + accessBonus * 0.15 + relevanceBonus);
 }
 
 /**
@@ -264,9 +268,15 @@ export async function saveMemory(type, data, options = {}) {
     entries = entries.filter((e) => e.data.key !== data.key);
   }
 
-  // Enforce size limits for history-type stores
-  const maxEntries = type === 'command' ? MAX_COMMAND_HISTORY : MAX_ERROR_PATTERNS;
-  if (type === 'command' || type === 'error') {
+  // Enforce size limits for all store types (slice oldest entries when limit exceeded)
+  const maxEntriesMap = {
+    command: MAX_COMMAND_HISTORY,
+    error: MAX_ERROR_PATTERNS,
+    preference: MAX_PREFERENCE_ENTRIES,
+    context: MAX_CONTEXT_ENTRIES,
+  };
+  const maxEntries = maxEntriesMap[type];
+  if (maxEntries !== undefined) {
     entries = entries.slice(-(maxEntries - 1));
   }
 
@@ -275,7 +285,11 @@ export async function saveMemory(type, data, options = {}) {
     entries: [...entries, entry],
   };
 
-  await persistStore(storeKey, updatedStore);
+  try {
+    await persistStore(storeKey, updatedStore);
+  } catch {
+    return { ...entry, persisted: false };
+  }
   return entry;
 }
 
@@ -316,7 +330,37 @@ export async function searchMemory(query, options = {}) {
 
   // Sort by score descending, take top N
   results.sort((a, b) => b.score - a.score);
-  return results.slice(0, limit);
+  const topResults = results.slice(0, limit);
+
+  // Increment accessCount and update lastAccessedAt for returned entries, then persist
+  const now = new Date().toISOString();
+  const storeUpdates = new Map(); // storeKey -> updated store
+
+  for (const result of topResults) {
+    const { store: storeKey } = result;
+    let updatedStore = storeUpdates.get(storeKey);
+    if (!updatedStore) {
+      updatedStore = await loadStore(storeKey);
+    }
+    updatedStore = {
+      ...updatedStore,
+      entries: updatedStore.entries.map((e) =>
+        e.id === result.entry.id
+          ? { ...e, accessCount: (e.accessCount || 0) + 1, lastAccessedAt: now }
+          : e,
+      ),
+    };
+    storeUpdates.set(storeKey, updatedStore);
+    // Update the entry reference in result to reflect new accessCount
+    result.entry = { ...result.entry, accessCount: (result.entry.accessCount || 0) + 1, lastAccessedAt: now };
+  }
+
+  // Persist all updated stores
+  for (const [storeKey, updatedStore] of storeUpdates) {
+    await persistStore(storeKey, updatedStore);
+  }
+
+  return topResults;
 }
 
 /**

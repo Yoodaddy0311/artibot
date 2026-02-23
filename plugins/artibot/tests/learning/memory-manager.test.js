@@ -1,13 +1,13 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  saveMemory,
-  searchMemory,
-  getRelevantContext,
-  summarizeSession,
-  pruneOldMemories,
-  loadMemories,
   clearMemories,
   getMemoryStats,
+  getRelevantContext,
+  loadMemories,
+  pruneOldMemories,
+  saveMemory,
+  searchMemory,
+  summarizeSession,
 } from '../../lib/learning/memory-manager.js';
 
 vi.mock('../../lib/core/file.js', () => ({

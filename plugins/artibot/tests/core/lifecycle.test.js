@@ -1,9 +1,9 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  STATES,
   createLifecycle,
-  getCurrentState,
   defaultLifecycle,
+  getCurrentState,
+  STATES,
 } from '../../lib/core/lifecycle.js';
 
 describe('lifecycle', () => {

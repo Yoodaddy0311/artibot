@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
-import { getPlatform, getNodeInfo, checkNodeVersion, getPluginRoot, getHomeDir, resolveFromRoot } from '../../lib/core/platform.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { checkNodeVersion, getHomeDir, getNodeInfo, getPlatform, getPluginRoot, resolveFromRoot } from '../../lib/core/platform.js';
 import path from 'node:path';
 
 describe('platform', () => {

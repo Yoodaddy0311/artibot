@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { loadConfig, getConfig, resetConfig } from '../../lib/core/config.js';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { getConfig, loadConfig, resetConfig } from '../../lib/core/config.js';
 
 // Mock the file module
 vi.mock('../../lib/core/file.js', () => ({

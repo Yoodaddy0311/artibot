@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import path from 'node:path';
 
 // Mock platform.js so getPluginRoot returns a decoded path even when
@@ -15,15 +15,15 @@ vi.mock('../../lib/core/platform.js', () => ({
 }));
 
 const {
-  registerStyle,
-  getStyle,
-  listStyles,
-  removeStyle,
   formatWithStyle,
+  getStyle,
   hasStyle,
-  resetRegistry,
-  parseFrontmatter,
+  listStyles,
   MAX_STYLES,
+  parseFrontmatter,
+  registerStyle,
+  removeStyle,
+  resetRegistry,
 } = await import('../../lib/core/style-registry.js');
 
 beforeEach(() => {

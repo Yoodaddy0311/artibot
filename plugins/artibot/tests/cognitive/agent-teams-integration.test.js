@@ -8,14 +8,14 @@
  * Tests the cognitive layer (system2-strategies) team recommendation logic
  * integrated with a simulated team lifecycle manager.
  */
-import { describe, it, expect, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import {
+  analyzeDependencies,
+  assessRisks,
+  estimateComplexity,
+  estimateStepComplexity,
   recommendTeam,
   selectTeammates,
-  estimateComplexity,
-  assessRisks,
-  analyzeDependencies,
-  estimateStepComplexity,
   TEAM_THRESHOLDS,
 } from '../../lib/cognitive/system2-strategies.js';
 

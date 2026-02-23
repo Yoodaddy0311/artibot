@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import path from 'node:path';
 import { readFileSync } from 'node:fs';
 
@@ -333,7 +333,8 @@ describe('E2E: Command Execution Flow', () => {
     it('handles input with no recognized keywords', () => {
       const input = 'the quick brown fox jumps over the lazy dog';
 
-      const intentResult = detectIntent(input, {
+      // detectIntent should handle input with no keywords gracefully
+      detectIntent(input, {
         languages: config.automation.supportedLanguages,
       });
 

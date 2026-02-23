@@ -106,11 +106,15 @@ export async function collectExperience(experience) {
  */
 export async function collectDailyExperiences(sessionData = {}) {
   const { sessionId, toolUsage = {}, errors = [], completedTasks = [], teamConfig } = sessionData;
-  const collected = [];
+  await ensureDir(ARTIBOT_DIR);
+
+  // Build all new entries in memory first (no disk I/O per entry)
+  const newEntries = [];
 
   // Tool usage experiences
   for (const [toolName, usage] of Object.entries(toolUsage)) {
-    const exp = await collectExperience({
+    newEntries.push({
+      id: `exp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       type: 'tool',
       category: toolName,
       data: {
@@ -120,14 +124,15 @@ export async function collectDailyExperiences(sessionData = {}) {
         avgMs: usage.calls > 0 ? Math.round((usage.totalMs ?? 0) / usage.calls) : 0,
         successRate: usage.calls > 0 ? (usage.successes ?? 0) / usage.calls : 0,
       },
-      sessionId,
+      timestamp: Date.now(),
+      sessionId: sessionId ?? null,
     });
-    collected.push(exp);
   }
 
   // Error experiences
   for (const error of errors) {
-    const exp = await collectExperience({
+    newEntries.push({
+      id: `exp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       type: 'error',
       category: error.type ?? error.code ?? 'unknown',
       data: {
@@ -136,14 +141,15 @@ export async function collectDailyExperiences(sessionData = {}) {
         tool: error.tool ?? null,
         recoverable: error.recoverable ?? null,
       },
-      sessionId,
+      timestamp: Date.now(),
+      sessionId: sessionId ?? null,
     });
-    collected.push(exp);
   }
 
   // Success experiences
   for (const task of completedTasks) {
-    const exp = await collectExperience({
+    newEntries.push({
+      id: `exp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       type: 'success',
       category: task.type ?? task.taskType ?? 'task',
       data: {
@@ -153,14 +159,15 @@ export async function collectDailyExperiences(sessionData = {}) {
         filesModified: task.filesModified?.length ?? 0,
         testsPass: task.testsPass ?? null,
       },
-      sessionId,
+      timestamp: Date.now(),
+      sessionId: sessionId ?? null,
     });
-    collected.push(exp);
   }
 
   // Team composition experience
   if (teamConfig) {
-    const exp = await collectExperience({
+    newEntries.push({
+      id: `exp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       type: 'team',
       category: teamConfig.pattern ?? 'unknown',
       data: {
@@ -171,12 +178,20 @@ export async function collectDailyExperiences(sessionData = {}) {
         successRate: teamConfig.successRate ?? null,
         duration: teamConfig.duration ?? null,
       },
-      sessionId,
+      timestamp: Date.now(),
+      sessionId: sessionId ?? null,
     });
-    collected.push(exp);
   }
 
-  return collected;
+  // Read existing once, merge all new entries, write once
+  const existing = await loadExperiences();
+  const merged = [...existing, ...newEntries];
+  const pruned = merged.length > MAX_EXPERIENCES
+    ? merged.slice(merged.length - MAX_EXPERIENCES)
+    : merged;
+
+  await writeJsonFile(EXPERIENCES_PATH, pruned);
+  return newEntries;
 }
 
 // ---------------------------------------------------------------------------

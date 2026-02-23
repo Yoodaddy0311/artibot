@@ -1,16 +1,16 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
+  addCustomPattern,
+  createScopedScrubber,
+  getScrubStats,
+  listPatterns,
+  removeCustomPattern,
+  resetPatterns,
+  resetStats,
   scrub,
   scrubPattern,
   scrubPatterns,
-  addCustomPattern,
-  removeCustomPattern,
-  getScrubStats,
-  resetStats,
   validateScrubbed,
-  listPatterns,
-  resetPatterns,
-  createScopedScrubber,
 } from '../../lib/privacy/pii-scrubber.js';
 
 beforeEach(() => {

@@ -1,15 +1,15 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import {
-  parseTscOutput,
-  parseEslintOutput,
   addDiagnosticContext,
-  parseDiagnostic,
-  getLastDiagnostics,
-  resetDiagnostics,
   collectDiagnostics,
+  getLastDiagnostics,
+  MAX_DIAGNOSTICS_PER_SOURCE,
+  parseDiagnostic,
+  parseEslintOutput,
+  parseTscOutput,
+  resetDiagnostics,
   SEVERITY,
   SEVERITY_LABEL,
-  MAX_DIAGNOSTICS_PER_SOURCE,
 } from '../../lib/system/lsp-client.js';
 
 beforeEach(() => {

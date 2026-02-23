@@ -79,13 +79,16 @@ async function acquireLock(maxWait = LOCK_MAX_WAIT_MS) {
         const tsRaw = await fs.readFile(tsFile, 'utf-8');
         const lockAge = Date.now() - Number(tsRaw);
         if (lockAge > LOCK_STALE_AGE_MS) {
-          // Stale lock: force release
+          // Stale lock: force release, then retry mkdir on next iteration
           await releaseLock();
           continue;
         }
-      } catch {
+      } catch (readErr) {
         // Lock dir exists but no ts file or unreadable: treat as stale
-        await releaseLock().catch(() => {});
+        if (readErr.code === 'ENOENT' || readErr.code === 'EACCES' || readErr.code === 'EISDIR') {
+          await releaseLock().catch(() => {});
+        }
+        // For unexpected errors, still continue to retry
         continue;
       }
 
@@ -521,12 +524,49 @@ async function _hotSwapImpl() {
     }
   }
 
-  // 2. Auto-promote eligible patterns
+  // 2. Auto-promote eligible patterns (batch: update cache once, persist once)
   const { candidates } = await getPromotionCandidates();
+  const promotionLogEntries = [];
   for (const candidate of candidates) {
-    const result = await promoteToSystem1(candidate);
-    if (result.promoted) {
-      promotedKeys.push(candidate.key);
+    const successes = candidate.consecutiveSuccesses ?? 0;
+    const confidence = candidate.confidence ?? 0;
+
+    if (successes < PROMOTION_THRESHOLD || confidence < CONFIDENCE_THRESHOLD) continue;
+
+    const existing = cache.get(candidate.key);
+    const system1Pattern = {
+      key: candidate.key,
+      type: candidate.type ?? candidate.key.split('::')[0] ?? 'general',
+      category: candidate.category ?? candidate.key.split('::')[1] ?? 'unknown',
+      confidence,
+      insight: candidate.insight ?? null,
+      bestData: candidate.bestData ?? null,
+      promotedAt: new Date().toISOString(),
+      promotionCount: (existing?.promotionCount ?? 0) + 1,
+      lastSuccessStreak: successes,
+      usageCount: existing?.usageCount ?? 0,
+      failureCount: existing?.failureCount ?? 0,
+      consecutiveFailures: 0,
+      source: 'system2',
+      status: 'active',
+    };
+
+    cache.set(candidate.key, system1Pattern);
+    promotedKeys.push(candidate.key);
+    promotionLogEntries.push({
+      action: 'promote',
+      patternKey: candidate.key,
+      confidence,
+      consecutiveSuccesses: successes,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  // Persist cache once for all promotions
+  if (promotedKeys.length > 0) {
+    await persistSystem1Cache();
+    for (const logEntry of promotionLogEntries) {
+      await appendTransferLog(logEntry);
     }
   }
 
