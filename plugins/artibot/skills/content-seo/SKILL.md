@@ -169,3 +169,10 @@ Missing Topic   | Volume | Difficulty | Priority
 **H1**: One per page, keyword-rich
 **Content Quality**: Comprehensive, unique, accurate, readable
 **E-E-A-T**: Experience, Expertise, Authoritativeness, Trustworthiness
+
+---
+
+## References
+
+- See `references/on-page-checklist.md` for on-page SEO checklist
+- See `references/content-quality-scoring.md` for content quality scoring matrix

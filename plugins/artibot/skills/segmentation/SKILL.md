@@ -177,3 +177,10 @@ Thresholds:
 **RFM Model**: Recency x Frequency x Monetary (1-5 each)
 **Lead Score**: Demographic (25%) + Behavioral (40%) + Engagement (20%) + Negative (15%)
 **Validation**: Size, Measurable, Accessible, Differentiable, Actionable
+
+---
+
+## References
+
+- See `references/segmentation-dimensions.md` for segmentation dimensions
+- See `references/segment-activation-matrix.md` for segment activation matrix

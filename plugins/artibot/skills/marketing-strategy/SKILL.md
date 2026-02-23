@@ -143,3 +143,10 @@ Metric:    [KPI]  | Target: [value] | Tracking: [method]
 **Frameworks**: TAM/SAM/SOM, Porter's Five Forces, SWOT, Value Proposition Canvas
 **Strategy Types**: go-to-market, content, growth, brand, product-launch, repositioning
 **Budget Tiers**: bootstrap (<$5K), growth ($5K-$50K), scale ($50K-$500K), enterprise ($500K+)
+
+---
+
+## References
+
+- See `references/market-sizing-framework.md` for market sizing framework
+- See `references/positioning-template.md` for positioning template

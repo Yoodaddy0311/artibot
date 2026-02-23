@@ -163,3 +163,10 @@ P1       | [action]        | [metric improvement]
 **KPI Categories**: Acquisition (CAC, CPC, ROAS), Engagement (CTR, Bounce), Revenue (LTV, MRR, Churn), Conversion (CVR, MQL-SQL)
 **Analysis Types**: Descriptive, Diagnostic, Predictive, Prescriptive
 **Attribution Models**: First-touch, Last-touch, Linear, Time-decay, Position-based
+
+---
+
+## References
+
+- See `references/kpi-formula-library.md` for KPI formula library
+- See `references/analysis-types-guide.md` for analysis types guide

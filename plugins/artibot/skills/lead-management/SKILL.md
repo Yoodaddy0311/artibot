@@ -211,3 +211,10 @@ Metric              | Target  | Current
 **SLA**: Respond to MQLs <5 minutes (80% conversion drop after)
 **Qualification**: BANT (Budget, Authority, Need, Timeline)
 **Key Metric**: Pipeline Velocity = (Opps * Win% * ACV) / Cycle Days
+
+---
+
+## References
+
+- See `references/lead-lifecycle-stages.md` for lead lifecycle stages and BANT qualification framework
+- See `references/lead-scoring-model.md` for lead scoring model and pipeline metrics

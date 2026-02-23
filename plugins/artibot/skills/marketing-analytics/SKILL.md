@@ -173,3 +173,10 @@ P1       | [action]       | [metric lift]
 **Attribution**: Position-based (B2B), Last-touch (B2C short cycle), Data-driven (high volume)
 **Forecasting**: Trend, Seasonal, Cohort, Regression, Scenario
 **Maturity**: Basic (L1) -> Standard (L2) -> Advanced (L3) -> Predictive (L4) -> Prescriptive (L5)
+
+---
+
+## References
+
+- See `references/metrics-hierarchy.md` for metrics hierarchy
+- See `references/attribution-models-selection.md` for attribution models selection guide

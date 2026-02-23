@@ -168,3 +168,10 @@ SECONDARY METRICS
 **Confidence Level**: 95% standard, 99% for high-stakes
 **Power**: 80% standard, 90% for critical tests
 **Duration**: 7-28 days, minimum 1 full week
+
+---
+
+## References
+
+- See `references/statistical-foundations.md` for statistical foundations for A/B testing
+- See `references/test-design-framework.md` for test design framework and experiment roadmap

@@ -150,3 +150,10 @@ GDPR:     [PASS|ISSUE]
 **Campaign Types**: newsletter, drip, onboarding, launch, re-engagement, transactional, cold-outreach
 **Key Metrics**: open rate, click rate, conversion rate, unsubscribe rate, deliverability
 **Compliance**: CAN-SPAM, GDPR, CASL, CCPA
+
+---
+
+## References
+
+- See `references/campaign-types-guide.md` for campaign types guide
+- See `references/deliverability-checklist.md` for deliverability checklist

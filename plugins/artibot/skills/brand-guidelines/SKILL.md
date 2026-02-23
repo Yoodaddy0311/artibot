@@ -182,3 +182,10 @@ Logo:       [usage rules and restrictions]
 **Messaging Layers**: Brand Promise -> Value Props -> Audience Messages -> Tagline
 **Tone Adaptation**: Varies by channel (website=full brand, social=casual, docs=instructive)
 **Consistency**: Same terms, same voice, adapted tone per context
+
+---
+
+## References
+
+- See `references/voice-definition-framework.md` for voice definition framework
+- See `references/messaging-architecture.md` for messaging architecture

@@ -128,3 +128,9 @@ These instructions should be dispatched via the Playwright MCP server at runtime
   --selector <css>        Scope screenshot to element
   --exclude <css-list>    Hide dynamic elements before capture
 ```
+
+---
+
+## References
+
+- See `references/validation-thresholds.md` for validation thresholds

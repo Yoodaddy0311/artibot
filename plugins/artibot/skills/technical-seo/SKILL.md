@@ -158,3 +158,11 @@ P1       | [cat]    | [specific action]   | [expected improvement]
 **Crawl Depth**: Target <4 clicks from homepage
 **Schema Priority**: BreadcrumbList, FAQ, Article, Product
 **Score Formula**: 7 categories weighted to 100 points
+
+---
+
+## References
+
+- See `references/core-web-vitals.md` for Core Web Vitals optimization guide
+- See `references/audit-scoring-matrix.md` for technical SEO audit scoring matrix
+- See `references/schema-markup-types.md` for schema markup types reference

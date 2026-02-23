@@ -174,3 +174,10 @@ P1       | [change]          | +[X]%
 **Field Order**: Easy first, hard last, single column
 **Validation**: Inline, descriptive errors, preserve input on failure
 **Progressive Profiling**: 1-3 new fields per interaction, match to intent level
+
+---
+
+## References
+
+- See `references/field-optimization-guide.md` for field optimization and completion rate guide
+- See `references/validation-ux-patterns.md` for validation UX patterns and error handling

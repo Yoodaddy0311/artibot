@@ -158,3 +158,11 @@ Phase        | Timeframe  | Actions              | Target
 **Intent Types**: informational, navigational, commercial, transactional
 **Priority Score**: volume (25%) + (100-difficulty) (25%) + relevance (30%) + intent (20%)
 **Cluster Rule**: One primary keyword per page, pillar links to all clusters
+
+---
+
+## References
+
+- See `references/search-intent-classification.md` for search intent classification framework
+- See `references/keyword-priority-formula.md` for keyword priority formula
+- See `references/geo-optimization-guide.md` for GEO (Generative Engine Optimization) principles

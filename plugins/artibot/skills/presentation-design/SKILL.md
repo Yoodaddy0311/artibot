@@ -157,3 +157,10 @@ Font Pairing:  [headline] / [body]
 **Pacing**: 60-90 seconds per slide for standard presentations
 **Visual Ratio**: 60% visual, 40% text
 **Types**: pitch, report, workshop, keynote, sales, training, status
+
+---
+
+## References
+
+- See `references/narrative-arc-templates.md` for narrative arc templates
+- See `references/slide-design-principles.md` for slide design principles

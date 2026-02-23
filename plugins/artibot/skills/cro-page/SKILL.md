@@ -153,3 +153,10 @@ P1       | [cat]    | [action]      | +[X]%
 **CTA Rules**: Contrast color, action verb, above fold, benefit-oriented
 **Value Prop Score**: Clarity + Relevance + Uniqueness + Specificity + Urgency (25 max)
 **Page Speed**: Every second over 2s costs ~7% conversions
+
+---
+
+## References
+
+- See `references/heuristic-evaluation.md` for heuristic page evaluation framework
+- See `references/trust-signals-inventory.md` for trust signal placement and impact inventory

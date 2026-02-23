@@ -152,3 +152,10 @@ CTA OPTIONS
 **Frameworks**: AIDA, PAS, BAB, 4Ps
 **Key Elements**: Headlines, CTAs, subject lines, body copy, taglines
 **Tone Options**: professional, casual, urgent, educational, witty, provocative
+
+---
+
+## References
+
+- See `references/persuasion-frameworks.md` for persuasion frameworks
+- See `references/cta-best-practices.md` for CTA best practices
