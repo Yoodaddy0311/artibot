@@ -35,6 +35,12 @@ Parse $ARGUMENTS:
 - **Each teammate works independently** on their assigned scope
 - After main work: cross-check another teammate's output
 
+### Token Conservation Rule (CRITICAL)
+- **작업 완료 후 팀원을 임의로 셧다운하지 마라** — 재소환 시 토큰이 발생한다
+- 다음 작업에서 해당 팀원의 전문성이 **확실히 불필요**할 때만 교체
+- 애매하면 유지 — idle 상태 팀원은 토큰을 소비하지 않는다
+- 셧다운 판단 기준: 다음 작업의 도메인이 완전히 달라져서 해당 전문성이 0% 필요할 때만
+
 ## Execution Flow
 
 ### Phase 1: DECOMPOSE (Leader only)
@@ -176,24 +182,25 @@ By default, `/team` operates in **persistent mode** — the team stays alive aft
 When the user gives a new task to a persistent team:
 
 1. **Leader re-enters Phase 1: DECOMPOSE** with the new task
-2. **Reuse existing teammates** whose expertise matches the new work units
-3. **Spawn NEW teammates** if the new task requires expertise not currently on the team:
+2. **기존 팀원 우선 재활용** — 전문성이 조금이라도 겹치면 유지하고 새 작업 배정
+3. **신규 팀원은 기존 팀에 없는 전문성이 필요할 때만** 추가:
    ```
    Task(subagent_type="artibot:{new-agent-type}", team_name="team-*", name="{role}", model="opus",
         prompt="[DEV Protocol 준수]\n\n작업:\n{new work unit}\n\n완료 후 결과를 리더에게 보고해주세요.")
    ```
-4. **Release specific teammates** no longer needed (see below)
+4. **팀원 교체는 다음 작업 배정 시에만** — 현재 작업 완료 후 임의 셧다운 금지 (Token Conservation Rule)
 5. Proceed through Phase 3 → 4 → 5 as normal
 
 ### Releasing Specific Teammates
-If a teammate's expertise is no longer needed for upcoming work:
+**다음 작업의 도메인이 완전히 달라져서 해당 전문성이 0% 필요할 때만** 해제:
 ```
 SendMessage(type="shutdown_request", recipient="{teammate-to-release}")
 ```
-- Only release teammates you are confident won't be needed
-- Announce the change in the waiting prompt:
+- **업무 완료만으로는 셧다운 사유가 안 됨** — 재소환 비용(토큰) > idle 유지 비용
+- 애매하면 유지 — 다음 작업에서 다시 활용 가능
+- 해제 시 팀에 공지:
   ```
-  ℹ️ {teammate} ({agent-type}) 해제됨 — 더 이상 필요하지 않음
+  ℹ️ {teammate} ({agent-type}) 해제됨 — 다음 작업에 해당 전문성 불필요
   ```
 
 ### Disbanding the Team
@@ -219,3 +226,5 @@ This runs the original flow: Phase 1 through 6, with automatic shutdown after re
 - Using sonnet/haiku for teammates (always opus)
 - Single teammate for multi-domain work
 - Cross-checker reviewing their own work
+- **작업 완료 후 팀원을 임의로 셧다운** — 재소환 토큰 낭비 (idle 유지가 더 저렴)
+- **"혹시 모르니까" 셧다운** — 애매하면 유지가 정답
