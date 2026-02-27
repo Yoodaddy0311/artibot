@@ -1,5 +1,5 @@
 ---
-description: Artibot router - analyzes intent and routes to optimal command/agent/skill
+description: (Artibot) Artibot router - analyzes intent and routes to optimal command/agent/skill
 argument-hint: '[request] e.g. "이 버그 분석해줘"'
 allowed-tools: [Read, Glob, Grep, Bash, Task, TaskCreate]
 ---

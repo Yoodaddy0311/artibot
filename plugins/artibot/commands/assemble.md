@@ -1,5 +1,5 @@
 ---
-description: "Avengers Assemble! - Easter egg that summons the full Artibot agent team using real Agent Teams API"
+description: "(Artibot) Avengers Assemble! - Easter egg that summons the full Artibot agent team using real Agent Teams API"
 argument-hint: '"어벤저스 어셈블!"'
 allowed-tools: [Read, Glob, Grep, TeamCreate, SendMessage, TaskCreate, TaskUpdate, TaskList, TaskGet, Task, TeamDelete]
 ---

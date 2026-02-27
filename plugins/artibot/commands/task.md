@@ -1,5 +1,5 @@
 ---
-description: Task management with creation, assignment, tracking, and completion
+description: (Artibot) Task management with creation, assignment, tracking, and completion
 argument-hint: '[op] e.g. "할 일 목록 생성 및 추적"'
 allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, TaskCreate]
 ---

@@ -1,5 +1,5 @@
 ---
-description: Multi-agent task orchestration with parallel and sequential coordination using Agent Teams
+description: (Artibot) Multi-agent task orchestration with parallel and sequential coordination using Agent Teams
 argument-hint: '[task] e.g. "병렬로 분석+테스트 실행"'
 allowed-tools: [Read, Glob, Grep, Bash, TeamCreate, SendMessage, TaskCreate, TaskUpdate, TaskList, TaskGet, Task, TeamDelete]
 ---

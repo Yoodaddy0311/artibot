@@ -1,5 +1,5 @@
 ---
-description: Interactive quickstart guide with project detection and command suggestions
+description: (Artibot) Interactive quickstart guide with project detection and command suggestions
 argument-hint: '[--type node|python|rust|go]'
 allowed-tools: [Read, Glob, Bash]
 ---

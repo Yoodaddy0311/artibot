@@ -1,5 +1,5 @@
 ---
-description: Browse, inspect, and manage orchestration playbooks
+description: (Artibot) Browse, inspect, and manage orchestration playbooks
 argument-hint: 'list|info <name> [--domain development|marketing|security|quality]'
 allowed-tools: [Read]
 ---

@@ -1,5 +1,5 @@
 ---
-description: Git workflow assistant with commit conventions, PR creation, and branch management
+description: (Artibot) Git workflow assistant with commit conventions, PR creation, and branch management
 argument-hint: '[operation] e.g. "커밋 후 PR 생성"'
 allowed-tools: [Read, Bash, Glob, Grep, TaskCreate]
 ---

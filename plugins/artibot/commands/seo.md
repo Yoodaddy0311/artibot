@@ -1,5 +1,5 @@
 ---
-description: SEO audit, keyword strategy, technical SEO analysis, and content optimization recommendations
+description: (Artibot) SEO audit, keyword strategy, technical SEO analysis, and content optimization recommendations
 argument-hint: '[type] e.g. "기술 SEO 감사 실행"'
 allowed-tools: [Read, Write, Glob, Grep, Bash, Task, WebSearch, TaskCreate]
 ---

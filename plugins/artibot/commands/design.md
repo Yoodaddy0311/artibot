@@ -1,5 +1,5 @@
 ---
-description: System design with architect agent and ADR generation
+description: (Artibot) System design with architect agent and ADR generation
 argument-hint: '[module] e.g. "인증 시스템 아키텍처 설계"'
 allowed-tools: [Read, Glob, Grep, Bash, Task, TaskCreate]
 ---

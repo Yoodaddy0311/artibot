@@ -1,5 +1,5 @@
 ---
-description: Test execution, analysis, and coverage reporting
+description: (Artibot) Test execution, analysis, and coverage reporting
 argument-hint: '[type] e.g. "단위 테스트 실행"'
 allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, Task, TaskCreate]
 ---

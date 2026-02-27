@@ -1,5 +1,5 @@
 ---
-description: Data analysis, report generation, dashboard design, and spreadsheet automation
+description: (Artibot) Data analysis, report generation, dashboard design, and spreadsheet automation
 argument-hint: '[type] e.g. "매출 데이터 대시보드 생성"'
 allowed-tools: [Read, Write, Glob, Grep, Bash, Task, WebSearch, TaskCreate]
 ---

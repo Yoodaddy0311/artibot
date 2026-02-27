@@ -1,5 +1,5 @@
 ---
-description: Content marketing and SEO specialist using content-marketer subagent
+description: (Artibot) Content marketing and SEO specialist using content-marketer subagent
 argument-hint: '[type] e.g. "블로그 글 SEO 최적화"'
 allowed-tools: [Read, Write, Task, WebSearch, TaskCreate]
 ---

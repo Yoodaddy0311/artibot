@@ -1,5 +1,5 @@
 ---
-description: 일일 회고 리포트 - 오늘의 작업/결정/다음 단계를 구조화된 대시보드로 출력
+description: (Artibot) 일일 회고 리포트 - 오늘의 작업/결정/다음 단계를 구조화된 대시보드로 출력
 argument-hint: '[--save] [--date 2026-02-27] [--quick]'
 allowed-tools: [Read, Bash, Glob, Grep, TaskList, TaskGet, Write]
 ---
