@@ -63,6 +63,40 @@ describe('categorizeIssue()', () => {
     const result = categorizeIssue(region);
     expect(typeof result).toBe('string');
   });
+
+  it('returns spacing for zero-height region (Infinity aspect ratio)', () => {
+    const region = makeRegion({ width: 100, height: 0, pixelCount: 0 });
+    expect(categorizeIssue(region)).toBe('spacing');
+  });
+
+  it('returns alignment for zero-width region (Infinity inverse ratio)', () => {
+    const region = makeRegion({ width: 0, height: 100, pixelCount: 0 });
+    expect(categorizeIssue(region)).toBe('alignment');
+  });
+
+  it('returns size for mid-area region not near edges', () => {
+    // Area > 500, pixelCount > 200, not a strip, not dense, not edge
+    const region = makeRegion({ x: 200, y: 200, width: 80, height: 40, pixelCount: 500 });
+    expect(categorizeIssue(region)).toBe('size');
+  });
+
+  it('returns color only when pixel density is above 0.6', () => {
+    // Large area but sparse — should NOT be color
+    const region = makeRegion({ x: 200, y: 200, width: 200, height: 200, pixelCount: 100 });
+    // pixelCount/area = 100/40000 = 0.0025 < 0.6
+    expect(categorizeIssue(region)).not.toBe('color');
+  });
+
+  it('returns alignment for edge region on left border (x < 20)', () => {
+    // Not thin, not large block, not small scattered, edge at x=15
+    const region = makeRegion({ x: 15, y: 200, width: 60, height: 60, pixelCount: 800 });
+    expect(categorizeIssue(region)).toBe('alignment');
+  });
+
+  it('returns alignment for edge region on top border (y < 20)', () => {
+    const region = makeRegion({ x: 200, y: 15, width: 60, height: 60, pixelCount: 800 });
+    expect(categorizeIssue(region)).toBe('alignment');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -171,6 +205,19 @@ describe('analyzeDiffRegions()', () => {
     const regions = [makeRegion()];
     expect(() => analyzeDiffRegions(regions, null)).not.toThrow();
   });
+
+  it('defaults severity to low when region has no severity', () => {
+    const region = { x: 100, y: 100, width: 50, height: 50, pixelCount: 500 };
+    const [suggestion] = analyzeDiffRegions([region]);
+    expect(suggestion.severity).toBe('low');
+  });
+
+  it('uses default viewport dimensions when metadata has no viewport info', () => {
+    // Region in center - should infer main selector with default viewport
+    const region = makeRegion({ x: 400, y: 400, width: 40, height: 40 });
+    const [suggestion] = analyzeDiffRegions([region], {});
+    expect(suggestion.selector).toMatch(/main/i);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -251,5 +298,31 @@ describe('generateFixTasks()', () => {
     ];
     const [task] = generateFixTasks(suggestions);
     expect(task.regions).toHaveLength(3);
+  });
+
+  it('defaults priority to 3 for unknown severity', () => {
+    const suggestions = [
+      { selector: '.foo', category: 'size', description: 'D', severity: 'unknown', region: { x: 0, y: 0, width: 5, height: 5 } },
+    ];
+    const [task] = generateFixTasks(suggestions);
+    expect(task.priority).toBe(3);
+  });
+
+  it('creates separate tasks for same category but different selectors', () => {
+    const suggestions = [
+      { selector: '.foo', category: 'spacing', description: 'A', severity: 'high', region: { x: 0, y: 0, width: 10, height: 10 } },
+      { selector: '.bar', category: 'spacing', description: 'A', severity: 'high', region: { x: 5, y: 5, width: 10, height: 10 } },
+    ];
+    const tasks = generateFixTasks(suggestions);
+    expect(tasks).toHaveLength(2);
+  });
+
+  it('creates separate tasks for same category and selector but different severity', () => {
+    const suggestions = [
+      { selector: '.foo', category: 'color', description: 'A', severity: 'high', region: { x: 0, y: 0, width: 10, height: 10 } },
+      { selector: '.foo', category: 'color', description: 'A', severity: 'low', region: { x: 5, y: 5, width: 10, height: 10 } },
+    ];
+    const tasks = generateFixTasks(suggestions);
+    expect(tasks).toHaveLength(2);
   });
 });

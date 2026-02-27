@@ -58,6 +58,47 @@ describe('debug', () => {
       const { isDebugEnabled } = await import('../../lib/core/debug.js');
       expect(isDebugEnabled()).toBe(true);
     });
+
+    it('debug() handles circular objects gracefully (formatArg catch branch)', async () => {
+      vi.stubEnv('ARTIBOT_DEBUG', '1');
+      const { debug } = await import('../../lib/core/debug.js');
+      const circular = {};
+      circular.self = circular;
+      debug('test', circular);
+      expect(stderrSpy).toHaveBeenCalled();
+      const output = stderrSpy.mock.calls[0][0];
+      expect(output).toContain('[object Object]');
+    });
+
+    it('debug() formats multiple args separated by spaces', async () => {
+      vi.stubEnv('ARTIBOT_DEBUG', '1');
+      const { debug } = await import('../../lib/core/debug.js');
+      debug('test', 'arg1', 42, 'arg3');
+      expect(stderrSpy).toHaveBeenCalled();
+      const output = stderrSpy.mock.calls[0][0];
+      expect(output).toContain('arg1');
+      expect(output).toContain('42');
+      expect(output).toContain('arg3');
+    });
+
+    it('debug() formats string args via String()', async () => {
+      vi.stubEnv('ARTIBOT_DEBUG', '1');
+      const { debug } = await import('../../lib/core/debug.js');
+      debug('test', 'hello', true, 123);
+      const output = stderrSpy.mock.calls[0][0];
+      expect(output).toContain('hello');
+      expect(output).toContain('true');
+      expect(output).toContain('123');
+    });
+
+    it('debug() includes timestamp in ISO format', async () => {
+      vi.stubEnv('ARTIBOT_DEBUG', '1');
+      const { debug } = await import('../../lib/core/debug.js');
+      debug('test', 'msg');
+      const output = stderrSpy.mock.calls[0][0];
+      // ISO timestamp pattern: YYYY-MM-DDTHH:MM:SS
+      expect(output).toMatch(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
+    });
   });
 
   describe('when ARTIBOT_DEBUG is not set', () => {

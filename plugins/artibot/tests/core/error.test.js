@@ -61,6 +61,31 @@ describe('error', () => {
       const output = stderrSpy.mock.calls[0][0];
       expect(output).toMatch(/\n$/);
     });
+
+    it('omits detail when cause is null explicitly', () => {
+      logError('mod', 'null cause', null);
+      const output = stderrSpy.mock.calls[0][0];
+      expect(output).toBe('[artibot:mod] null cause\n');
+    });
+
+    it('handles cause object without message property', () => {
+      logError('mod', 'object cause', { code: 'ENOENT' });
+      const output = stderrSpy.mock.calls[0][0];
+      expect(output).toContain('object cause');
+      expect(output).toContain('[object Object]');
+    });
+
+    it('handles cause as boolean false', () => {
+      logError('mod', 'falsy cause', false);
+      const output = stderrSpy.mock.calls[0][0];
+      expect(output).toBe('[artibot:mod] falsy cause: false\n');
+    });
+
+    it('handles cause as zero', () => {
+      logError('mod', 'zero cause', 0);
+      const output = stderrSpy.mock.calls[0][0];
+      expect(output).toBe('[artibot:mod] zero cause: 0\n');
+    });
   });
 
   describe('withErrorBoundary()', () => {

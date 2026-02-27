@@ -186,6 +186,22 @@ describe('Cache', () => {
       expect(lru.maxSize).toBe(3);
     });
 
+    it('evicts oldest when setting existing key at full capacity', () => {
+      lru.set('a', 1);
+      lru.set('b', 2);
+      lru.set('c', 3);
+      // Re-set 'a' (existing key) — delete+re-insert moves it to end
+      // Order becomes: b, c, a
+      lru.set('a', 10);
+      expect(lru.size).toBe(3);
+      // Now add 'd' — evicts 'b' (oldest in iteration order)
+      lru.set('d', 4);
+      expect(lru.size).toBe(3);
+      // 'b' was evicted (oldest), 'a' was re-inserted at end so survives
+      expect(lru.get('a')).toBe(10);
+      expect(lru.get('d')).toBe(4);
+    });
+
     it('evicts oldest entry when cache exceeds maxSize', () => {
       lru.set('a', 1);
       lru.set('b', 2);
@@ -299,6 +315,93 @@ describe('Cache', () => {
     it('returns this for chaining', () => {
       const result = cache.setWithMtime('k', 'v', tmpFile);
       expect(result).toBe(cache);
+    });
+
+    it('re-sets existing key without increasing size via setWithMtime', () => {
+      cache.setWithMtime('cfg', { v: 1 }, tmpFile);
+      cache.setWithMtime('cfg', { v: 2 }, tmpFile);
+      expect(cache.size).toBe(1);
+      expect(cache.get('cfg')).toEqual({ v: 2 });
+    });
+
+    it('evicts oldest when setWithMtime at maxSize with existing key', () => {
+      const lru = new Cache(60000, { maxSize: 2 });
+      lru.setWithMtime('a', 1, tmpFile);
+      lru.set('b', 2);
+      // Re-set 'a' via setWithMtime (delete+re-insert), no eviction needed
+      lru.setWithMtime('a', 10, tmpFile);
+      expect(lru.size).toBe(2);
+      expect(lru.get('a')).toBe(10);
+      expect(lru.get('b')).toBe(2);
+    });
+
+    it('evicts oldest when setWithMtime at maxSize with new key', () => {
+      const lru = new Cache(60000, { maxSize: 2 });
+      lru.set('a', 1);
+      lru.set('b', 2);
+      // 'c' is new, should evict 'a'
+      lru.setWithMtime('c', 3, tmpFile);
+      expect(lru.get('a')).toBeUndefined();
+      expect(lru.size).toBe(2);
+    });
+
+    it('uses default TTL when ttl parameter is not provided', () => {
+      vi.useFakeTimers();
+      const shortCache = new Cache(200);
+      shortCache.setWithMtime('k', 'v', tmpFile);
+      vi.advanceTimersByTime(201);
+      expect(shortCache.get('k')).toBeUndefined();
+      vi.useRealTimers();
+    });
+
+    it('uses custom ttl override in setWithMtime', () => {
+      vi.useFakeTimers();
+      cache.setWithMtime('k', 'v', tmpFile, 50);
+      vi.advanceTimersByTime(51);
+      expect(cache.get('k')).toBeUndefined();
+      vi.useRealTimers();
+    });
+  });
+
+  describe('prune() edge cases', () => {
+    it('handles empty cache', () => {
+      cache.prune();
+      expect(cache.size).toBe(0);
+    });
+
+    it('removes all entries when all are expired', () => {
+      vi.useFakeTimers();
+      cache.set('a', 1, 100);
+      cache.set('b', 2, 100);
+      cache.set('c', 3, 100);
+      vi.advanceTimersByTime(200);
+      cache.prune();
+      expect(cache.size).toBe(0);
+      vi.useRealTimers();
+    });
+
+    it('keeps entries that are exactly at expiry boundary', () => {
+      vi.useFakeTimers();
+      cache.set('a', 1, 100);
+      // Advance to exactly 100ms — entry expires at Date.now() + 100
+      // but Date.now() > entry.expiresAt must be true to prune
+      vi.advanceTimersByTime(100);
+      cache.prune();
+      // At exactly 100ms, Date.now() === expiresAt, not >, so entry survives
+      expect(cache.size).toBe(1);
+      vi.useRealTimers();
+    });
+  });
+
+  describe('maxSize getter edge cases', () => {
+    it('returns 0 for unlimited cache', () => {
+      expect(cache.maxSize).toBe(0);
+    });
+
+    it('returns maxSize even when cache is empty', () => {
+      const lru = new Cache(1000, { maxSize: 5 });
+      expect(lru.maxSize).toBe(5);
+      expect(lru.size).toBe(0);
     });
   });
 });

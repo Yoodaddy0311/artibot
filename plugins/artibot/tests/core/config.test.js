@@ -155,6 +155,35 @@ describe('config', () => {
     });
   });
 
+  describe('prototype pollution prevention', () => {
+    it('ignores __proto__ key in loaded config', async () => {
+      readJsonFile.mockResolvedValue(
+        JSON.parse('{"__proto__": {"polluted": true}, "version": "3.0.0"}'),
+      );
+      const config = await loadConfig();
+      expect(config.version).toBe('3.0.0');
+      expect(config.polluted).toBeUndefined();
+    });
+
+    it('ignores constructor key in loaded config', async () => {
+      readJsonFile.mockResolvedValue({
+        constructor: { prototype: { polluted: true } },
+        version: '3.0.0',
+      });
+      const config = await loadConfig();
+      expect(config.version).toBe('3.0.0');
+    });
+
+    it('ignores prototype key in loaded config', async () => {
+      readJsonFile.mockResolvedValue({
+        prototype: { polluted: true },
+        version: '3.0.0',
+      });
+      const config = await loadConfig();
+      expect(config.version).toBe('3.0.0');
+    });
+  });
+
   describe('getConfig()', () => {
     it('throws when config is not yet loaded', () => {
       expect(() => getConfig()).toThrow('Config not loaded');

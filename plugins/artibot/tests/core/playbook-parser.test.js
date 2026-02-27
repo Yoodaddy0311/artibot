@@ -224,6 +224,88 @@ describe('validatePlaybook()', () => {
     expect(valid).toBe(false);
     expect(errors.length).toBeGreaterThanOrEqual(2);
   });
+
+  it('rejects phase with null pattern', () => {
+    const pb = {
+      phases: [{ order: 0, pattern: null, action: 'plan', label: 'plan' }],
+    };
+    const { valid, errors } = validatePlaybook(pb);
+    expect(valid).toBe(false);
+    expect(errors.some((e) => e.includes('pattern is required'))).toBe(true);
+  });
+
+  it('rejects phase with undefined pattern', () => {
+    const pb = {
+      phases: [{ order: 0, action: 'plan', label: 'plan' }],
+    };
+    const { valid, errors } = validatePlaybook(pb);
+    expect(valid).toBe(false);
+    expect(errors.some((e) => e.includes('pattern is required'))).toBe(true);
+  });
+
+  it('rejects phase with numeric pattern (non-string)', () => {
+    const pb = {
+      phases: [{ order: 0, pattern: 42, action: 'plan', label: 'plan' }],
+    };
+    const { valid, errors } = validatePlaybook(pb);
+    expect(valid).toBe(false);
+    expect(errors.some((e) => e.includes('pattern is required'))).toBe(true);
+  });
+
+  it('rejects phase with null action', () => {
+    const pb = {
+      phases: [{ order: 0, pattern: 'leader', action: null, label: 'plan' }],
+    };
+    const { valid, errors } = validatePlaybook(pb);
+    expect(valid).toBe(false);
+    expect(errors.some((e) => e.includes('action must be a non-empty string'))).toBe(true);
+  });
+
+  it('rejects phase with undefined action', () => {
+    const pb = {
+      phases: [{ order: 0, pattern: 'leader', label: 'plan' }],
+    };
+    const { valid, errors } = validatePlaybook(pb);
+    expect(valid).toBe(false);
+    expect(errors.some((e) => e.includes('action must be a non-empty string'))).toBe(true);
+  });
+
+  it('rejects phase with numeric action (non-string)', () => {
+    const pb = {
+      phases: [{ order: 0, pattern: 'leader', action: 123, label: 'plan' }],
+    };
+    const { valid, errors } = validatePlaybook(pb);
+    expect(valid).toBe(false);
+    expect(errors.some((e) => e.includes('action must be a non-empty string'))).toBe(true);
+  });
+
+  it('rejects phase with whitespace-only action', () => {
+    const pb = {
+      phases: [{ order: 0, pattern: 'leader', action: '   ', label: '' }],
+    };
+    const { valid, errors } = validatePlaybook(pb);
+    expect(valid).toBe(false);
+    expect(errors.some((e) => e.includes('action must be a non-empty string'))).toBe(true);
+  });
+
+  it('uses "?" for order when phase has no order property', () => {
+    const pb = {
+      phases: [{ pattern: null, action: null }],
+    };
+    const { valid, errors } = validatePlaybook(pb);
+    expect(valid).toBe(false);
+    expect(errors.some((e) => e.includes('Phase ?'))).toBe(true);
+  });
+
+  it('reports both pattern and action errors for same phase', () => {
+    const pb = {
+      phases: [{ order: 0, pattern: null, action: null }],
+    };
+    const { valid, errors } = validatePlaybook(pb);
+    expect(valid).toBe(false);
+    expect(errors.some((e) => e.includes('pattern is required'))).toBe(true);
+    expect(errors.some((e) => e.includes('action must be a non-empty string'))).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -272,5 +354,17 @@ describe('serializePlaybook()', () => {
 
   it('returns empty string for empty phases array', () => {
     expect(serializePlaybook({ phases: [] })).toBe('');
+  });
+
+  it('returns empty string when phases is not an array', () => {
+    expect(serializePlaybook({ phases: 'not-an-array' })).toBe('');
+  });
+
+  it('returns empty string for boolean false input', () => {
+    expect(serializePlaybook(false)).toBe('');
+  });
+
+  it('returns empty string for number input', () => {
+    expect(serializePlaybook(42)).toBe('');
   });
 });

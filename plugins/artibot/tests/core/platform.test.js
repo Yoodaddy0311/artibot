@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { checkNodeVersion, getHomeDir, getNodeInfo, getPlatform, getPluginRoot, resolveFromRoot } from '../../lib/core/platform.js';
 import path from 'node:path';
 
@@ -73,6 +73,16 @@ describe('platform', () => {
       expect(typeof root).toBe('string');
       expect(root.length).toBeGreaterThan(0);
     });
+
+    it('falls back to computed path when env var is undefined', () => {
+      // Delete the env var entirely so the if(envRoot) branch is false
+      delete process.env.CLAUDE_PLUGIN_ROOT;
+      const root = getPluginRoot();
+      expect(typeof root).toBe('string');
+      expect(root.length).toBeGreaterThan(0);
+      // The computed path should end roughly at the lib directory parent
+      // Since platform.js is at lib/core/platform.js, going up 2 levels reaches plugin root
+    });
   });
 
   describe('getHomeDir()', () => {
@@ -96,6 +106,21 @@ describe('platform', () => {
       expect(typeof home).toBe('string');
       expect(home.length).toBeGreaterThan(0);
     });
+
+    it('prefers USERPROFILE over HOME', () => {
+      vi.stubEnv('USERPROFILE', 'C:\\Users\\First');
+      vi.stubEnv('HOME', '/home/second');
+      const home = getHomeDir();
+      expect(home).toBe('C:\\Users\\First');
+    });
+
+    it('uses HOME when USERPROFILE is falsy', () => {
+      // Force re-import to test the || chain properly
+      vi.stubEnv('USERPROFILE', '');
+      vi.stubEnv('HOME', '/home/testuser');
+      const home = getHomeDir();
+      expect(home).toBe('/home/testuser');
+    });
   });
 
   describe('resolveFromRoot()', () => {
@@ -110,6 +135,14 @@ describe('platform', () => {
       vi.stubEnv('CLAUDE_PLUGIN_ROOT', '/test/root');
       const resolved = resolveFromRoot('package.json');
       expect(resolved).toBe(path.resolve('/test/root', 'package.json'));
+    });
+
+    it('resolves from computed root when env is not set', () => {
+      delete process.env.CLAUDE_PLUGIN_ROOT;
+      const resolved = resolveFromRoot('agents', 'test.md');
+      expect(typeof resolved).toBe('string');
+      expect(resolved).toContain('agents');
+      expect(resolved.endsWith(path.join('agents', 'test.md'))).toBe(true);
     });
   });
 });

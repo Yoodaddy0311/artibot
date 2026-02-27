@@ -51,4 +51,26 @@ describe('detectIntent() - integration', () => {
     expect(result.best).toBeNull();
     expect(result.ambiguity.ambiguous).toBe(false);
   });
+
+  it('works with no options argument (uses defaults)', () => {
+    const result = detectIntent('implement a feature');
+    expect(result).toHaveProperty('intents');
+    expect(result).toHaveProperty('matches');
+    expect(result).toHaveProperty('recommendations');
+    expect(result).toHaveProperty('best');
+    expect(result).toHaveProperty('ambiguity');
+    expect(result.intents.length).toBeGreaterThan(0);
+  });
+
+  it('works with empty options object', () => {
+    const result = detectIntent('test the code', {});
+    expect(result.intents).toContain('action:test');
+    expect(result.ambiguity).toHaveProperty('ambiguous');
+  });
+
+  it('works with only languages option set', () => {
+    const result = detectIntent('deploy it', { languages: ['en'] });
+    expect(result).toHaveProperty('ambiguity');
+    expect(result.ambiguity).toHaveProperty('score');
+  });
 });
