@@ -102,8 +102,37 @@ Each cross-checker:
 3. Run relevant tests if applicable
 4. Report: APPROVE or REQUEST_CHANGES with specifics
 
+### Phase 4.5: INSPECTION (code-reviewer)
+Cross-check 완료 후, **code-reviewer 에이전트(opus)가 전체 작업물을 최종 검수**한다.
+
+팀에 code-reviewer가 없으면 이 단계에서 소환:
+```
+Task(subagent_type="artibot:code-reviewer", team_name="team-*", name="inspector", model="opus",
+     prompt="[Inspection Mode 활성화]\n\n원본 요청: {original user request}\n\n
+각 팀원의 작업물을 검수해주세요:
+1. {teammate-1}: {작업 내용} — 변경 파일: {files}
+2. {teammate-2}: {작업 내용} — 변경 파일: {files}
+
+검수 체크리스트 5개 항목 전부 확인 후 INSPECTION REPORT 제출.")
+```
+
+**검수 체크리스트 (5개 항목 — 하나도 건너뛰지 마라):**
+
+| # | 항목 | 검증 내용 |
+|---|------|----------|
+| 1 | 요청 일치 | 원본 요청 vs 실제 변경 1:1 대조 |
+| 2 | 범위 준수 | 요청 범위 밖 파일 변경 없는지 |
+| 3 | 무결성 | 기존 기능 파손 없는지 (테스트 통과) |
+| 4 | 품질 | 프로젝트 패턴/컨벤션 준수 |
+| 5 | 부작용 | 불필요한 추가/변경 없는지 |
+
+**판정:**
+- **APPROVE** → Phase 5 진행
+- **REQUEST_CHANGES** → 해당 팀원에게 수정 지시 후 재검수
+- **REJECT** → 리더가 유저에게 보고, 재작업 또는 방향 전환
+
 ### Phase 5: REPORT (Leader only)
-Collect all results and cross-check findings, then report:
+Collect all results, cross-check findings, and **inspection report**, then report:
 
 **작업 결과**
 
@@ -116,6 +145,12 @@ Collect all results and cross-check findings, then report:
 | 검토자 | 대상 | 결과 | 피드백 |
 |--------|------|------|--------|
 | {checker} | {teammate}'s work | APPROVE/CHANGES | {details} |
+
+**검수 결과 (Inspection)**
+
+| 대상 | 요청일치 | 범위준수 | 무결성 | 품질 | 부작용 | 판정 |
+|------|:-------:|:-------:|:-----:|:----:|:-----:|------|
+| {teammate-1} | ✅/❌ | ✅/❌ | ✅/❌ | ✅/❌ | ✅/❌ | APPROVE/CHANGES |
 
 **수정된 파일**
 
