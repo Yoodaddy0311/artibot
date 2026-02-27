@@ -142,13 +142,50 @@ function clearCache(home) {
 // Plugin install
 // ---------------------------------------------------------------------------
 
-function runInstall() {
-  const pluginRoot = getPluginRoot();
-  const installScript = path.join(pluginRoot, 'install.sh');
-  if (existsSync(installScript)) {
+/**
+ * Find install.sh by searching multiple candidate paths.
+ * CLAUDE_PLUGIN_ROOT may point to a deleted cache directory after clearCache(),
+ * so we check the source repo path first, then the installed copy, then the env var.
+ */
+function findInstallScript() {
+  const candidates = [];
+
+  // 1. Source repo: this file lives in <repo>/plugins/artibot/scripts/update.js
+  //    install.sh is at <repo>/plugins/artibot/install.sh
+  const scriptDir = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/i, '$1'));
+  const repoRoot = path.resolve(scriptDir, '..');
+  candidates.push(path.join(repoRoot, 'install.sh'));
+
+  // 2. Installed copy in ~/.claude/artibot/
+  const home = resolveHome();
+  candidates.push(path.join(home, '.claude', 'artibot', 'install.sh'));
+
+  // 3. CLAUDE_PLUGIN_ROOT (may be stale after cache clear, checked last)
+  try {
+    const envRoot = getPluginRoot();
+    candidates.push(path.join(envRoot, 'install.sh'));
+  } catch {
+    // getPluginRoot may fail if env var points to deleted dir
+  }
+
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
+function runInstall(preResolvedPath) {
+  const installScript = preResolvedPath || findInstallScript();
+  if (installScript) {
     execSync(`bash "${installScript}"`, { stdio: 'inherit', timeout: 300_000 });
   } else {
-    throw new Error(`install.sh not found at ${installScript}. Run from the artibot plugin directory.`);
+    throw new Error(
+      'install.sh not found. Searched: source repo, ~/.claude/artibot/, CLAUDE_PLUGIN_ROOT.\n' +
+      'Run manually: cd <artibot-repo>/plugins/artibot && bash install.sh'
+    );
   }
 }
 
@@ -226,6 +263,16 @@ async function main() {
   console.log('');
   console.log('Applying update...');
 
+  // Step 0: Pre-resolve install.sh path BEFORE clearing cache
+  //         (CLAUDE_PLUGIN_ROOT may point to cache, which gets deleted)
+  const installScriptPath = findInstallScript();
+  if (!installScriptPath) {
+    console.error('\nCannot find install.sh before cache clear. Aborting to avoid broken state.');
+    printManualInstructions();
+    process.exit(1);
+  }
+  console.log(`  install.sh found: ${installScriptPath}`);
+
   // Step 1: Save backup metadata
   saveBackupInfo(home, currentVersion);
   console.log('  Backup metadata saved.');
@@ -233,10 +280,10 @@ async function main() {
   // Step 2: Clear cache
   clearCache(home);
 
-  // Step 3: Install
+  // Step 3: Install (using pre-resolved path, safe from cache deletion)
   console.log('  Installing via: bash install.sh');
   try {
-    runInstall();
+    runInstall(installScriptPath);
   } catch (err) {
     console.error(`\nInstall command failed: ${err.message}`);
     console.error('The cache has already been cleared. Please complete the update manually:');

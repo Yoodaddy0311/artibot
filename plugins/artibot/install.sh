@@ -104,6 +104,9 @@ install_hooks() {
   cp "${SCRIPT_DIR}/artibot.config.json" "${ARTIBOT_DIR}/"
   [ -f "${SCRIPT_DIR}/package.json" ] && cp "${SCRIPT_DIR}/package.json" "${ARTIBOT_DIR}/"
 
+  # Copy install.sh itself so update.js can find it after cache clear
+  cp "${SCRIPT_DIR}/install.sh" "${ARTIBOT_DIR}/"
+
   log "Hooks & scripts installed → ~/.claude/artibot/"
 }
 
@@ -382,7 +385,7 @@ uninstall() {
 # Main
 # ──────────────────────────────────────────────
 main() {
-  echo -e "${BLUE}━━━ Artibot Installer v1.6.0 ━━━${NC}"
+  echo -e "${BLUE}━━━ Artibot Installer v1.7.1 ━━━${NC}"
   echo ""
 
   case "${1:-install}" in
