@@ -1,6 +1,6 @@
 ---
 name: spec-format
-description: "SPEC format for structured requirements, acceptance criteria, and technical specifications."
+description: "SPEC format for structured requirements, acceptance criteria, and technical specifications. Use when writing requirements, defining acceptance criteria, or creating technical specs."
 level: 2
 triggers: ["spec", "requirements", "specification", "acceptance criteria", "EARS", "user story"]
 agents: ["architect"]
@@ -10,6 +10,15 @@ platforms: [claude-code, gemini-cli, codex-cli, cursor]
 ---
 
 # SPEC Format: Structured Requirements & Specifications
+
+## Contents
+- [When This Skill Applies](#when-this-skill-applies)
+- [Core Guidance](#core-guidance)
+- [Feature: [Name]](#feature-name)
+- [Quick Reference](#quick-reference)
+- [Workflow Checklist](#workflow-checklist)
+- [Human Checkpoints](#human-checkpoints)
+- [Freedom Levels](#freedom-levels)
 
 ## When This Skill Applies
 - Writing requirements for new features or systems
@@ -208,3 +217,39 @@ Combined:    While + When, Where + When, etc.
 **Acceptance Criteria**: `GIVEN [context] WHEN [action] THEN [outcome]`
 
 **Quality Gates**: Atomic, Testable, Unambiguous, Complete, Consistent, Traceable
+
+## Workflow Checklist
+
+Copy this checklist and track progress:
+
+```
+Progress:
+- [ ] Step 1: Gather business requirements and user stories
+- [ ] Step 2: Select EARS pattern(s) for each requirement
+- [ ] Step 3: Write requirements using EARS templates
+- [ ] Step 4: Write acceptance criteria (Given-When-Then)
+- [ ] Step 5: Apply quality checklist (atomic, testable, unambiguous, complete)
+- [ ] Step 6: Classify priority (P0-P3)
+- [ ] Step 7: Review with stakeholders
+```
+
+## Human Checkpoints
+
+| After Step | Checkpoint | Type | Options |
+|-----------|-----------|------|---------|
+| Step 3 | Requirements capture intent correctly? | Approval | Approve / Revise wording |
+| Step 4 | Acceptance criteria testable and complete? | Go-No-Go | Proceed / Add missing scenarios |
+| Step 6 | Priority classification agreed? | Selection | Confirm priorities / Reprioritize |
+| Step 7 | Stakeholder sign-off? | Approval | Approved / Changes requested |
+
+## Freedom Levels
+
+| Step | Freedom | Guidance |
+|------|:-------:|----------|
+| Gather requirements | HIGH | Elicitation approach depends on context |
+| Select EARS pattern | MEDIUM | 5 patterns defined, but choosing the right one requires judgment |
+| Write requirements | LOW | Must follow EARS template syntax exactly |
+| Write acceptance criteria | LOW | Given-When-Then format mandatory |
+| Quality checklist | LOW | All 6 quality attributes must be verified |
+| Classify priority | MEDIUM | P0-P3 framework defined, but business context drives decisions |
+| Stakeholder review | HIGH | Review format and cadence are flexible |

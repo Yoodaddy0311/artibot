@@ -1,10 +1,6 @@
 ---
 name: content-seo
-description: |
-  On-page content optimization for search engines including meta tags, heading structure, content quality, and topical authority.
-  Covers content gap analysis, content refresh strategies, and E-E-A-T signal optimization.
-  Auto-activates when: on-page SEO optimization, content audit, content gap analysis, meta tag optimization, E-E-A-T.
-  Triggers: content SEO, on-page SEO, meta tags, heading structure, content optimization, content gap, topical authority, E-E-A-T, content audit, 콘텐츠 SEO, 온페이지 최적화, 콘텐츠 갭
+description: "Optimizes on-page content for search engines including meta tags, heading structure, content quality, topical authority, and E-E-A-T signals. Use when user asks about content SEO, on-page SEO, meta tags, content optimization, content gap analysis, topical authority, E-E-A-T, 콘텐츠 SEO, 온페이지 최적화, or 콘텐츠 갭."
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 3
 triggers:

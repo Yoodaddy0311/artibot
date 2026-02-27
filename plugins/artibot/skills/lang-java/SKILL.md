@@ -1,6 +1,6 @@
 ---
 name: lang-java
-description: "Java patterns, generics, streams, records, sealed classes, and framework-specific best practices for Spring Boot and Quarkus."
+description: "Provides Java patterns including generics, streams, records, sealed classes, and framework-specific best practices for Spring Boot and Quarkus. Use when writing Java code, configuring Maven or Gradle builds, working with JUnit 5 or Mockito, debugging Spring Boot errors, or asking about .java files, pattern matching, or Quarkus."
 level: 2
 triggers:
   - "java"
@@ -25,6 +25,11 @@ platforms: [claude-code, gemini-cli, codex-cli, cursor]
 ---
 
 # Java Patterns & Best Practices
+
+## Contents
+- [When This Skill Applies](#when-this-skill-applies)
+- [Core Guidance](#core-guidance)
+- [Quick Reference](#quick-reference)
 
 ## When This Skill Applies
 - Writing or reviewing Java code (Java 17+)

@@ -1,6 +1,6 @@
 ---
 name: lang-rust
-description: "Rust patterns, ownership, lifetimes, traits, error handling, and framework-specific best practices for Axum and Actix-web."
+description: "Provides Rust patterns including ownership, lifetimes, traits, error handling with thiserror, and framework-specific best practices for Axum and Actix-web. Use when writing Rust code, debugging borrow checker errors, working with Tokio async runtime, configuring Cargo workspaces, or asking about .rs files, Result/Option types, or trait bounds."
 level: 2
 triggers:
   - "rust"
@@ -26,6 +26,11 @@ platforms: [claude-code, gemini-cli, codex-cli, cursor]
 ---
 
 # Rust Patterns & Best Practices
+
+## Contents
+- [When This Skill Applies](#when-this-skill-applies)
+- [Core Guidance](#core-guidance)
+- [Quick Reference](#quick-reference)
 
 ## When This Skill Applies
 - Writing or reviewing Rust code

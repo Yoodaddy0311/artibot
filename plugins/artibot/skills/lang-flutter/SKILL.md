@@ -1,6 +1,6 @@
 ---
 name: lang-flutter
-description: "Flutter/Dart patterns, Riverpod state management, go_router navigation, and Material 3 best practices for cross-platform apps."
+description: "Provides Flutter and Dart patterns including Riverpod state management, go_router navigation, sealed classes, and Material 3 best practices for cross-platform apps. Use when writing Dart or Flutter code, configuring pubspec.yaml, working with widgets or Bloc, debugging Flutter build errors, or asking about .dart files or Riverpod."
 level: 2
 triggers:
   - "flutter"
@@ -24,6 +24,12 @@ platforms: [claude-code, gemini-cli, codex-cli, cursor]
 ---
 
 # Flutter/Dart Patterns & Best Practices
+
+## Contents
+- [When This Skill Applies](#when-this-skill-applies)
+- [Core Guidance](#core-guidance)
+- [Anti-Patterns](#anti-patterns)
+- [Framework Integration](#framework-integration)
 
 ## When This Skill Applies
 - Writing or reviewing Flutter 3.24+/Dart 3.5+ code

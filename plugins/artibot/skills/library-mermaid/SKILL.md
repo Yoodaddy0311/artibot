@@ -1,6 +1,6 @@
 ---
 name: library-mermaid
-description: "Mermaid diagramming patterns for technical documentation including flowcharts, sequence diagrams, ERDs, and more."
+description: "Provides Mermaid diagramming patterns for technical documentation including flowcharts, sequence diagrams, ERDs, class diagrams, state diagrams, Gantt charts, and mindmaps. Use when creating architecture diagrams, documenting API sequences, illustrating database schemas, building project timelines, or asking about Mermaid syntax."
 level: 2
 triggers: ["mermaid", "diagram", "flowchart", "sequence diagram", "ERD", "class diagram", "Gantt", "mindmap"]
 agents: ["architect", "doc-updater"]
@@ -10,6 +10,11 @@ platforms: [claude-code, gemini-cli, codex-cli, cursor]
 ---
 
 # Mermaid Diagramming Patterns
+
+## Contents
+- [When This Skill Applies](#when-this-skill-applies)
+- [Core Guidance](#core-guidance)
+- [Quick Reference](#quick-reference)
 
 ## When This Skill Applies
 - Creating technical documentation with visual diagrams

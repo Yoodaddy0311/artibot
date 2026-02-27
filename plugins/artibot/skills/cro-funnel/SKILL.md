@@ -1,10 +1,6 @@
 ---
 name: cro-funnel
-description: |
-  Multi-step funnel analysis, conversion drop-off identification, and funnel optimization strategies.
-  Covers signup flows, onboarding funnels, checkout processes, and lead qualification pipelines.
-  Auto-activates when: funnel analysis, conversion funnel, drop-off analysis, signup flow optimization, checkout optimization.
-  Triggers: funnel, conversion funnel, drop-off, signup flow, checkout flow, onboarding funnel, pipeline, multi-step, funnel optimization, 퍼널, 전환 퍼널, 이탈 분석
+description: "Analyzes multi-step conversion funnels to identify drop-offs and optimize signup flows, onboarding, checkout processes, and lead qualification pipelines. Use when user asks about funnel analysis, conversion funnel, drop-off analysis, signup flow, checkout optimization, onboarding funnel, funnel optimization, 퍼널, 전환 퍼널, or 이탈 분석."
 level: 3
 triggers:
   - "funnel"

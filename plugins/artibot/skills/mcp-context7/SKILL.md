@@ -1,9 +1,6 @@
 ---
 name: mcp-context7
-description: |
-  Context7 MCP server workflow for library documentation and framework patterns.
-  Auto-activates when: external library docs needed, framework patterns, API reference lookup.
-  Triggers: documentation, library, framework, import, package, Context7, official docs, 라이브러리, 프레임워크
+description: "Provides Context7 MCP server workflow for looking up library documentation, framework patterns, and API references with caching and fallback strategies. Use when user asks about documentation lookup, library usage, framework patterns, import questions, package API, Context7, 라이브러리, or 프레임워크."
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 2
 triggers:

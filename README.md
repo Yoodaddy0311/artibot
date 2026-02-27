@@ -6,7 +6,7 @@
 [![Node](https://img.shields.io/badge/node-%3E%3D18-green)](package.json)
 
 ![Claude Code Plugin](https://img.shields.io/badge/Claude_Code-Plugin-7C3AED?style=flat-square)
-![Version](https://img.shields.io/badge/version-1.7.0-blue?style=flat-square)
+![Version](https://img.shields.io/badge/version-1.7.1-blue?style=flat-square)
 ![License](https://img.shields.io/badge/license-BSL--1.1-green?style=flat-square)
 ![Node.js](https://img.shields.io/badge/Node.js-18%2B-brightgreen?style=flat-square)
 ![Agent Teams](https://img.shields.io/badge/Agent_Teams-Native-orange?style=flat-square)
@@ -40,7 +40,7 @@ Most Claude Code plugins use simple sub-agent (`Task()`) delegation -- fire-and-
 - **8 Playbooks** -- Feature, Bugfix, Refactor, Security + Marketing Campaign, Marketing Audit, Content Launch, Competitive Analysis (now with executable parser and registry)
 - **45 Slash Commands** -- `/sc` smart router, `/daily`, `/team`, `/orchestrate`, `/spawn`, `/implement`, `/visual-check`, `/sc playbook`, and more
 - **26 Specialized Agents** -- Architecture, security, frontend, backend, testing, DevOps, marketing, SEO, analytics, and more (opus 73%, sonnet 27%)
-- **83 Domain Skills** -- 11 persona skills, 8 core skills, 16 language skills, 8 utility skills, 35 marketing skills, visual-validation, daily, team, session-worklog, vibe-coding
+- **83 Domain Skills** -- 11 persona skills, 8 core skills, 16 language skills, 8 utility skills, 35 marketing skills, visual-validation, daily, team, session-worklog, vibe-coding (all enhanced with Anthropic best-practice descriptions, workflow checklists, HITL checkpoints, and freedom levels)
 - **7 Auto-Activating Rules** -- DEV protocol, quality gates, agent coordination, config safety, frontend/backend/test patterns
 - **27 Event Hook Registrations** -- Cognitive routing, lifelong learning, session lifecycle, dangerous command blocking, auto-formatting, team tracking
 - **DEV Protocol** -- Mandatory Decompose-Execute-Verify workflow with zero-skip policy for all code changes
@@ -596,7 +596,7 @@ Artibot checks for new versions on session start via GitHub Releases API (24h ca
 
 ```
 Session start:
-  Artibot v1.7.0 initialized
+  Artibot v1.7.1 initialized
   ✅ You are running the latest version
 ```
 
@@ -702,7 +702,7 @@ Key settings in `artibot.config.json`:
 
 | Setting | Description | Default |
 |---------|-------------|---------|
-| `version` | Plugin version | `1.7.0` |
+| `version` | Plugin version | `1.7.1` |
 | `cognitive.router.threshold` | System 1/2 boundary | `0.4` |
 | `cognitive.router.adaptRate` | Per-feedback adjustment step | `0.05` |
 | `cognitive.system1.maxLatency` | System 1 max response time (ms) | `100` |
@@ -806,7 +806,7 @@ node scripts/ci/validate-hooks.js     # Hook validation
 
 ## Version
 
-1.7.0 -- DEV Protocol + Vibe Coding + Daily/Team Commands + Rules System + Agent Model Upgrade + CLAUDE.md Seeding
+1.7.1 -- Skill Quality Enhancement: Anthropic best-practice descriptions, workflow checklists, HITL checkpoints, freedom levels, TOC for long files, process-design template
 
 ## License
 

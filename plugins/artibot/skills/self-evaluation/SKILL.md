@@ -153,6 +153,41 @@ const cycle = await runLearningCycle(task, candidatesWithResults);
 - GRPO history: `~/.claude/artibot/grpo-history.json` (max 300 rounds)
 - Zero external dependencies
 
+## Workflow Checklist
+
+Copy this checklist and track progress:
+
+```
+Progress:
+- [ ] Step 1: Evaluate completed task across 4 dimensions (accuracy, completeness, efficiency, satisfaction)
+- [ ] Step 2: Generate N candidate strategies (GRPO) if comparing approaches
+- [ ] Step 3: Score each candidate against rule-based evaluators
+- [ ] Step 4: Rank within group — compute relative advantage
+- [ ] Step 5: Update strategy weights (boost winners, reduce losers)
+- [ ] Step 6: Persist evaluation + weights to storage
+- [ ] Step 7: Review improvement suggestions if score < 3.0
+```
+
+## Human Checkpoints
+
+| After Step | Checkpoint | Type | Options |
+|-----------|-----------|------|---------|
+| Step 1 | Evaluation scores reasonable? | Approval | Accept scores / Override specific dimension |
+| Step 4 | GRPO ranking reflects actual quality? | Go-No-Go | Accept ranking / Discard this comparison |
+| Step 7 | Improvement suggestions actionable? | Selection | Implement now / Defer / Dismiss |
+
+## Freedom Levels
+
+| Step | Freedom | Guidance |
+|------|:-------:|----------|
+| Evaluate task | LOW | 4 dimensions and weights are defined |
+| Generate candidates | MEDIUM | Number of candidates (N) is configurable |
+| Score candidates | LOW | Rule-based evaluators are deterministic |
+| Rank within group | LOW | Relative ranking formula is defined |
+| Update weights | LOW | Learning rate (0.1) and formula are fixed |
+| Persist to storage | LOW | File paths and max entries are configured |
+| Review suggestions | HIGH | Acting on suggestions is a judgment call |
+
 ## Quick Reference
 - Evaluate after every significant task completion
 - Use GRPO when comparing multiple approaches to the same problem

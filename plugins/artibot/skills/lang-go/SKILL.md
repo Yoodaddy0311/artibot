@@ -1,6 +1,6 @@
 ---
 name: lang-go
-description: "Go patterns, interfaces, error handling, goroutines, channels, and framework-specific best practices for Echo, Fiber, and Gin."
+description: "Provides Go patterns including interfaces, error handling, goroutines, channels, and framework-specific best practices for Echo, Fiber, and Gin. Use when writing Go code, designing interfaces or goroutine patterns, debugging concurrency issues, writing table-driven tests, or asking about go modules, .go files, or Go error wrapping."
 level: 2
 triggers:
   - "go"
@@ -25,6 +25,11 @@ platforms: [claude-code, gemini-cli, codex-cli, cursor]
 ---
 
 # Go Patterns & Best Practices
+
+## Contents
+- [When This Skill Applies](#when-this-skill-applies)
+- [Core Guidance](#core-guidance)
+- [Quick Reference](#quick-reference)
 
 ## When This Skill Applies
 - Writing or reviewing Go code

@@ -1,9 +1,6 @@
 ---
 name: mcp-coordination
-description: |
-  MCP server selection and multi-server orchestration strategy.
-  Auto-activates when: multi-server coordination needed, server selection decisions, complex multi-domain tasks.
-  Triggers: MCP, server coordination, multi-server, Context7+Playwright, fallback, orchestration, MCP 조율
+description: "Coordinates MCP server selection and multi-server orchestration with parallel/sequential modes and fallback strategies for complex multi-domain tasks. Use when user asks about MCP coordination, server selection, multi-server orchestration, tool coordination, fallback strategy, or MCP 조율."
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 3
 triggers:

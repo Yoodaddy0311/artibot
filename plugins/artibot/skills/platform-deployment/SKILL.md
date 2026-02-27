@@ -1,6 +1,6 @@
 ---
 name: platform-deployment
-description: "Deployment patterns for modern applications including cloud platforms, containers, and CI/CD pipelines."
+description: "Provides deployment patterns for modern applications including cloud platforms, Docker containers, Kubernetes orchestration, and CI/CD pipelines. Use when setting up deployment pipelines, configuring Vercel or Railway, writing Dockerfiles, designing zero-downtime strategies, or asking about blue-green deployments, GitHub Actions, or container security."
 level: 2
 triggers: ["deploy", "deployment", "Vercel", "Railway", "Docker", "Kubernetes", "CI/CD", "blue-green", "zero-downtime"]
 agents: ["devops-engineer", "backend-developer"]
@@ -10,6 +10,12 @@ platforms: [claude-code, gemini-cli, codex-cli, cursor]
 ---
 
 # Deployment Patterns
+
+## Contents
+- [When This Skill Applies](#when-this-skill-applies)
+- [Core Guidance](#core-guidance)
+- [Anti-Patterns](#anti-patterns)
+- [Quick Reference](#quick-reference)
 
 ## When This Skill Applies
 - Setting up deployment pipelines for new projects

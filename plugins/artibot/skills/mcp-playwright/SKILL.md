@@ -1,9 +1,6 @@
 ---
 name: mcp-playwright
-description: |
-  Playwright MCP server for E2E testing, visual validation, and performance measurement.
-  Auto-activates when: E2E testing, browser automation, visual regression, performance profiling needed.
-  Triggers: playwright, e2e, end-to-end, browser, screenshot, visual test, cross-browser, E2E 테스트, 브라우저
+description: "Provides Playwright MCP server workflow for E2E testing, visual validation, cross-browser automation, and performance measurement with error recovery strategies. Use when user asks about Playwright, E2E testing, browser automation, screenshot testing, visual regression, cross-browser testing, E2E 테스트, or 브라우저."
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 2
 triggers:

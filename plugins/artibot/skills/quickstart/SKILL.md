@@ -1,9 +1,6 @@
 ---
 name: quickstart
-description: |
-  Interactive first-run quickstart guide with project type detection and command suggestions.
-  Auto-activates when: new project onboarding, first-time user setup, getting started requests.
-  Triggers: quickstart, getting started, first run, new project, onboarding, welcome, setup
+description: "Interactive first-run quickstart guide with project type detection and command suggestions for new user onboarding. Use when user says quickstart, getting started, first run, new project, onboarding, welcome, or setup, or needs help navigating available commands for the first time."
 platforms: [claude-code]
 level: 1
 triggers:

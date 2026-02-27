@@ -25,6 +25,20 @@ category: "learning"
 
 # Self-Learning Tool Selection (Toolformer + GRPO)
 
+## Contents
+- [When This Skill Applies](#when-this-skill-applies)
+- [Core Concept: Meta Toolformer](#core-concept-meta-toolformer)
+- [Architecture](#architecture)
+- [API Reference](#api-reference)
+- [GRPO Scoring Criteria](#grpo-scoring-criteria)
+- [Data Storage](#data-storage)
+- [Integration Points](#integration-points)
+- [Workflow Checklist](#workflow-checklist)
+- [Human Checkpoints](#human-checkpoints)
+- [Freedom Levels](#freedom-levels)
+- [Anti-Patterns](#anti-patterns)
+- [Quick Reference](#quick-reference)
+
 ## When This Skill Applies
 
 - Ambiguous tool selection: multiple tools could serve the same purpose
@@ -217,6 +231,39 @@ Cleans up records and GRPO groups older than retention period (default: 90 days)
 - **SC Router** (`/sc`): Can query suggestTool() to inform routing decisions
 - **Orchestrator**: Can use getToolStats() for delegation intelligence
 - **Session hooks**: pruneOldRecords() called on SessionStart for maintenance
+
+## Workflow Checklist
+
+Copy this checklist and track progress:
+
+```
+Progress:
+- [ ] Step 1: Record tool usage via PostToolUse hook (tool, context, score)
+- [ ] Step 2: Build context key (operation:target:scope)
+- [ ] Step 3: Query suggestTool() for ranked recommendations
+- [ ] Step 4: If comparing tools — record group comparison via GRPO
+- [ ] Step 5: Update GRPO scores (learning rate 0.1, relative advantage)
+- [ ] Step 6: Prune old records (90-day retention, 200 records/context cap)
+```
+
+## Human Checkpoints
+
+| After Step | Checkpoint | Type | Options |
+|-----------|-----------|------|---------|
+| Step 3 | Tool recommendation reasonable for this context? | Approval | Accept / Override with different tool |
+| Step 4 | Group comparison fair (same task, controlled conditions)? | Go-No-Go | Record comparison / Discard |
+| Step 6 | Pruning removed only obsolete data? | Approval | Confirm / Adjust retention period |
+
+## Freedom Levels
+
+| Step | Freedom | Guidance |
+|------|:-------:|----------|
+| Record tool usage | LOW | Automatic via hook, schema is fixed |
+| Build context key | LOW | Format is defined (operation:target:scope) |
+| Query suggestions | MEDIUM | Recommendations are advisory, not mandatory |
+| Record GRPO comparison | MEDIUM | Comparison setup requires judgment on fairness |
+| Update scores | LOW | Formula and learning rate are defined |
+| Prune old records | LOW | Retention period and caps are configured |
 
 ## Anti-Patterns
 

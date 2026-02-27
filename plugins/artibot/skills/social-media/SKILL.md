@@ -1,10 +1,6 @@
 ---
 name: social-media
-description: |
-  Multi-platform social media content creation, scheduling strategy, and engagement optimization.
-  Covers platform-specific formats, algorithms, hashtag strategies, and content calendars.
-  Auto-activates when: social media content creation, platform optimization, content calendar, hashtag strategy.
-  Triggers: social media, twitter, linkedin, instagram, tiktok, youtube, social post, content calendar, hashtag, engagement, social strategy, 소셜 미디어, 소셜 콘텐츠, 콘텐츠 캘린더
+description: "Creates multi-platform social media content with scheduling strategy, engagement optimization, platform-specific formats, and content calendars. Use when user asks about social media, Twitter, LinkedIn, Instagram, TikTok, YouTube, content calendar, hashtag strategy, social engagement, 소셜 미디어, 소셜 콘텐츠, or 콘텐츠 캘린더."
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 3
 triggers:

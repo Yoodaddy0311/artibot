@@ -1,6 +1,6 @@
 ---
 name: lang-elixir
-description: "Elixir patterns, OTP supervision, GenServer, and framework-specific best practices for Phoenix 1.7, LiveView, and Ecto."
+description: "Provides Elixir patterns including OTP supervision trees, GenServer, and framework-specific best practices for Phoenix 1.7, LiveView, and Ecto. Use when writing Elixir code, designing GenServer or Supervisor processes, working with Phoenix or LiveView, debugging BEAM/OTP issues, or asking about .ex/.exs files or mix projects."
 level: 2
 triggers:
   - "elixir"
@@ -25,6 +25,12 @@ platforms: [claude-code, gemini-cli, codex-cli, cursor]
 ---
 
 # Elixir Patterns & Best Practices
+
+## Contents
+- [When This Skill Applies](#when-this-skill-applies)
+- [Core Guidance](#core-guidance)
+- [Anti-Patterns](#anti-patterns)
+- [Framework Integration](#framework-integration)
 
 ## When This Skill Applies
 - Writing or reviewing Elixir 1.17+ code

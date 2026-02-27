@@ -1,10 +1,6 @@
 ---
 name: competitive-intelligence
-description: |
-  Competitive analysis and market intelligence for positioning, differentiation, and strategic advantage.
-  Provides frameworks for competitor monitoring, SWOT analysis, and market trend identification.
-  Auto-activates when: competitor analysis, market positioning, differentiation strategy, market intelligence.
-  Triggers: competitor, competitive analysis, SWOT, differentiation, market intelligence, positioning, benchmark, 경쟁 분석, 시장 정보, 포지셔닝
+description: "Conducts competitive analysis and market intelligence for positioning, differentiation, and strategic advantage using SWOT analysis and competitor monitoring frameworks. Use when user asks about competitor analysis, competitive intelligence, SWOT, differentiation, market positioning, benchmark, 경쟁 분석, 시장 정보, or 포지셔닝."
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 3
 triggers:

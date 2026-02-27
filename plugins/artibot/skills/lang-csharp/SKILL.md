@@ -1,6 +1,6 @@
 ---
 name: lang-csharp
-description: "C# patterns, pattern matching, primary constructors, and framework-specific best practices for .NET 8, ASP.NET Core, and Blazor."
+description: "Provides C# patterns including pattern matching, primary constructors, records, and framework-specific best practices for .NET 8, ASP.NET Core, and Blazor. Use when writing C# code, working with Entity Framework Core, designing Minimal APIs, debugging .NET errors, or asking about LINQ, NuGet, or .cs/.csproj files."
 level: 2
 triggers:
   - "csharp"
@@ -25,6 +25,12 @@ platforms: [claude-code, gemini-cli, codex-cli, cursor]
 ---
 
 # C# Patterns & Best Practices
+
+## Contents
+- [When This Skill Applies](#when-this-skill-applies)
+- [Core Guidance](#core-guidance)
+- [Anti-Patterns](#anti-patterns)
+- [Framework Integration](#framework-integration)
 
 ## When This Skill Applies
 - Writing or reviewing C# 12/.NET 8 code

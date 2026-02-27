@@ -1,6 +1,6 @@
 ---
 name: vibe-coding
-description: "Quality enforcement for casual/natural language coding requests. Ensures every part of the user's request is decomposed, executed, verified, and reported. Prevents silent skips, partial execution, and unverified claims."
+description: "Quality enforcement for casual/natural language coding requests. Ensures every part of the user's request is decomposed, executed, verified, and reported. Use when handling natural language coding requests, multi-part instructions, or casual Korean/English coding commands."
 level: 1
 triggers:
   - "해줘"
@@ -73,3 +73,38 @@ Before reporting completion:
 - [ ] Evidence provided for each completed item
 - [ ] No silent skips or deferrals
 - [ ] No unasked-for changes introduced
+
+## Workflow Checklist
+
+Copy this checklist and track progress:
+
+```
+Progress:
+- [ ] Step 1: Parse request — identify all sub-requests and action items
+- [ ] Step 2: DECOMPOSE — number each atomic item
+- [ ] Step 3: Read target files BEFORE any modification
+- [ ] Step 4: EXECUTE — apply changes for each item
+- [ ] Step 5: Re-read modified files AFTER each modification
+- [ ] Step 6: VERIFY — report evidence (file:line) per item
+- [ ] Step 7: Zero-skip audit — confirm no items were dropped
+```
+
+## Human Checkpoints
+
+| After Step | Checkpoint | Type | Options |
+|-----------|-----------|------|---------|
+| Step 2 | All sub-requests captured in decomposition? | Approval | Complete / Missing items identified |
+| Step 4 | Ambiguous request — clarify intent? | Selection | Interpretation A / Interpretation B / Ask user |
+| Step 7 | All items addressed with evidence? | Go-No-Go | Complete / Items missing — address now |
+
+## Freedom Levels
+
+| Step | Freedom | Guidance |
+|------|:-------:|----------|
+| Parse request | MEDIUM | Conjunction markers defined, but intent can be ambiguous |
+| Decompose into items | LOW | Every sub-request must be captured, no skipping |
+| Read before modify | LOW | Mandatory, no exceptions |
+| Execute changes | MEDIUM | Implementation approach flexible, scope must match request exactly |
+| Re-read after modify | LOW | Mandatory, no exceptions |
+| Report evidence | LOW | file:line format required |
+| Zero-skip audit | LOW | Every item must be addressed or explicitly blocked with reason |

@@ -1,10 +1,6 @@
 ---
 name: customer-journey
-description: |
-  Customer journey mapping, touchpoint analysis, lifecycle stage management, and experience optimization.
-  Provides frameworks for mapping customer journeys from awareness through advocacy.
-  Auto-activates when: customer journey mapping, touchpoint analysis, lifecycle management, experience optimization.
-  Triggers: customer journey, journey map, touchpoint, lifecycle, customer experience, onboarding, retention, advocacy, CX, 고객 여정, 터치포인트, 라이프사이클
+description: "Maps customer journeys with touchpoint analysis, lifecycle stage management, and experience optimization from awareness through advocacy. Use when user asks about customer journey, journey map, touchpoint analysis, lifecycle management, customer experience, onboarding, retention, CX, 고객 여정, 터치포인트, or 라이프사이클."
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 3
 triggers:

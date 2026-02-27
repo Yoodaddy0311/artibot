@@ -1,10 +1,6 @@
 ---
 name: campaign-planning
-description: |
-  Campaign architecture, timeline planning, cross-channel coordination, and budget allocation for marketing campaigns.
-  Provides frameworks for campaign lifecycle management from planning through execution and measurement.
-  Auto-activates when: campaign planning, launch coordination, cross-channel marketing, campaign timelines.
-  Triggers: campaign, launch, cross-channel, multi-channel, campaign timeline, campaign calendar, budget allocation, UTM, campaign architecture, 캠페인 기획, 캠페인 런칭, 멀티채널
+description: "Designs campaign architecture, timelines, cross-channel coordination, and budget allocation for marketing campaigns from planning through measurement. Use when user asks about campaign planning, launch coordination, cross-channel marketing, campaign calendar, UTM tracking, budget allocation, 캠페인 기획, 캠페인 런칭, or 멀티채널."
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 3
 triggers:

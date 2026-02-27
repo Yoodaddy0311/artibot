@@ -1,6 +1,6 @@
 ---
 name: quality-framework
-description: "ATLAS Quality Framework for Artibot: Automated, Tested, Learned, Adaptive, Secure. Defines 8-step validation cycle, coverage targets, and GRPO-driven continuous quality improvement."
+description: "ATLAS Quality Framework for Artibot: Automated, Tested, Learned, Adaptive, Secure. Defines 8-step validation cycle, coverage targets, and GRPO-driven continuous quality improvement. Use when performing code review, setting quality gates, running validation cycles, or assessing coverage."
 level: 3
 triggers:
   - "quality"
@@ -26,6 +26,19 @@ platforms: [claude-code, gemini-cli, codex-cli, cursor]
 ---
 
 # ATLAS Quality Framework
+
+## Contents
+- [When This Skill Applies](#when-this-skill-applies)
+- [ATLAS Dimensions](#atlas-dimensions)
+- [8-Step Validation Cycle](#8-step-validation-cycle)
+- [Quality Metrics Dashboard](#quality-metrics-dashboard)
+- [GRPO Quality Improvement Loop](#grpo-quality-improvement-loop)
+- [Knowledge Transfer Protocol](#knowledge-transfer-protocol)
+- [Quality Gate Integration](#quality-gate-integration)
+- [Quick Reference](#quick-reference)
+- [Workflow Checklist](#workflow-checklist)
+- [Human Checkpoints](#human-checkpoints)
+- [Freedom Levels](#freedom-levels)
 
 **Automated | Tested | Learned | Adaptive | Secure**
 
@@ -227,3 +240,41 @@ Coverage Target = Base(70%) + (Priority Weight × 30%)
 - Any critical security vulnerability -> Stop, fix immediately
 - Coverage drops > 5% from baseline -> Require test additions
 - Performance regression > 20% -> Block and investigate
+
+## Workflow Checklist
+
+Copy this checklist and track progress:
+
+```
+Progress:
+- [ ] Step 1: SYNTAX — Run parser and formatter checks
+- [ ] Step 2: TYPES — Run type checker (tsc, mypy, etc.)
+- [ ] Step 3: LINT — Run linter with complexity thresholds
+- [ ] Step 4: SECURITY — OWASP scan, secret detection, dep audit
+- [ ] Step 5: TESTS — Unit (>=80%), integration (>=70%), E2E critical paths
+- [ ] Step 6: PERFORMANCE — Response time, bundle size, memory checks
+- [ ] Step 7: DOCUMENTATION — API docs, README, CHANGELOG updated
+- [ ] Step 8: INTEGRATION — No breaking changes, feature flags, rollback ready
+```
+
+## Human Checkpoints
+
+| After Step | Checkpoint | Type | Options |
+|-----------|-----------|------|---------|
+| Step 4 | Security vulnerabilities found? | Go-No-Go | Clean — proceed / Vulnerabilities — STOP and fix |
+| Step 5 | Coverage below thresholds? | Selection | Add tests / Accept with justification / Block merge |
+| Step 6 | Performance regression detected? | Go-No-Go | Within budget / Regression — investigate before proceeding |
+| Step 8 | Breaking changes introduced? | Selection | Version bump / Feature flag / Revert change |
+
+## Freedom Levels
+
+| Step | Freedom | Guidance |
+|------|:-------:|----------|
+| Syntax validation | LOW | Must pass, blocking gate |
+| Type checking | LOW | Must pass, blocking gate |
+| Lint rules | MEDIUM | Complexity thresholds defined, warnings reviewable |
+| Security scan | LOW | Must pass, blocking gate — zero tolerance for critical |
+| Test execution | LOW | Coverage thresholds are non-negotiable |
+| Performance check | MEDIUM | Budgets defined, warning-level (review, don't block) |
+| Documentation | MEDIUM | Required for public API, depth flexible |
+| Integration check | MEDIUM | Breaking change policy defined, rollback approach flexible |

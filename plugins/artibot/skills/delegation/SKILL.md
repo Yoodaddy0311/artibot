@@ -28,6 +28,17 @@ category: "orchestration"
 
 # Delegation Strategies
 
+## Contents
+- [When This Skill Applies](#when-this-skill-applies)
+- [Core Guidance](#core-guidance)
+- [Sub-Agent Mode (Lightweight)](#sub-agent-mode-lightweight)
+- [Team Mode (Agent Teams API)](#team-mode-agent-teams-api)
+- [Workflow Checklist](#workflow-checklist)
+- [Human Checkpoints](#human-checkpoints)
+- [Freedom Levels](#freedom-levels)
+- [Anti-Patterns](#anti-patterns)
+- [Quick Reference](#quick-reference)
+
 ## When This Skill Applies
 - Operations spanning >7 directories or >50 files
 - Multi-domain analysis (security + performance + quality)
@@ -149,6 +160,42 @@ Use the Agent Teams API for complex, multi-domain tasks requiring coordination.
 | Battalion | 7+ | Enterprise operations, large-scale migration |
 
 ---
+
+## Workflow Checklist
+
+Copy this checklist and track progress:
+
+```
+Progress:
+- [ ] Step 1: Score task (complexity, parallelism, communication, scale)
+- [ ] Step 2: Select mode — Sub-Agent (<0.5) or Team (>=0.5)
+- [ ] Step 3: Define scope and success criteria per agent/task
+- [ ] Step 4: Spawn agents or create team with appropriate pattern
+- [ ] Step 5: Monitor execution and handle blockers
+- [ ] Step 6: Collect and aggregate results (dedup, cross-ref, prioritize)
+- [ ] Step 7: Cleanup — TeamDelete or confirm sub-agent completion
+```
+
+## Human Checkpoints
+
+| After Step | Checkpoint | Type | Options |
+|-----------|-----------|------|---------|
+| Step 2 | Mode selection correct for this task? | Selection | Sub-Agent / Team / Direct execution |
+| Step 3 | Scope boundaries clear and complete? | Approval | Approve scopes / Refine boundaries |
+| Step 4 | Team pattern appropriate? | Selection | Leader / Council / Swarm / Pipeline |
+| Step 6 | Aggregated results meet requirements? | Go-No-Go | Accept / Request additional work / Retry |
+
+## Freedom Levels
+
+| Step | Freedom | Guidance |
+|------|:-------:|----------|
+| Score task | MEDIUM | Weighted formula defined, but factor estimation requires judgment |
+| Select mode | MEDIUM | Thresholds defined, edge cases need interpretation |
+| Define scope | HIGH | Scope boundaries are design decisions |
+| Spawn agents/team | MEDIUM | Patterns defined, team sizing flexible |
+| Monitor execution | HIGH | Intervention timing and strategy are situational |
+| Aggregate results | MEDIUM | Process defined, synthesis requires judgment |
+| Cleanup | LOW | TeamDelete and resource cleanup mandatory |
 
 ## Anti-Patterns
 

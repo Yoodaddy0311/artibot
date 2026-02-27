@@ -1,6 +1,6 @@
 ---
 name: lang-ruby
-description: "Ruby patterns, pattern matching, Ractor concurrency, and framework-specific best practices for Rails 7.2 and Hotwire/Turbo."
+description: "Provides Ruby patterns including pattern matching, Ractor concurrency, Data classes, and framework-specific best practices for Rails 7.2 and Hotwire/Turbo. Use when writing Ruby code, working with ActiveRecord or RSpec, configuring Bundler or Gemfile, debugging Rails errors, or asking about .rb files, Sidekiq, or Turbo Streams."
 level: 2
 triggers:
   - "ruby"
@@ -23,6 +23,12 @@ platforms: [claude-code, gemini-cli, codex-cli, cursor]
 ---
 
 # Ruby Patterns & Best Practices
+
+## Contents
+- [When This Skill Applies](#when-this-skill-applies)
+- [Core Guidance](#core-guidance)
+- [Anti-Patterns](#anti-patterns)
+- [Framework Integration](#framework-integration)
 
 ## When This Skill Applies
 - Writing or reviewing Ruby 3.3+ code

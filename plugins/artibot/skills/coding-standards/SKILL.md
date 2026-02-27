@@ -79,6 +79,41 @@ See `references/file-organization.md` for rules.
 - [ ] Immutable patterns used throughout
 - [ ] Input validation on all external data
 
+## Workflow Checklist
+
+Copy this checklist and track progress:
+
+```
+Progress:
+- [ ] Step 1: Read existing code and identify patterns in use
+- [ ] Step 2: Apply immutability — no mutations, spread/create new
+- [ ] Step 3: Validate error handling — fail fast, explicit, contextual
+- [ ] Step 4: Check file organization — <800 lines, feature-grouped
+- [ ] Step 5: Enforce naming conventions — verbs, prefixes, casing
+- [ ] Step 6: Run code quality checklist (functions <50 lines, no console.log)
+- [ ] Step 7: Validate input on all external data boundaries
+```
+
+## Human Checkpoints
+
+| After Step | Checkpoint | Type | Options |
+|-----------|-----------|------|---------|
+| Step 1 | Existing patterns identified correctly? | Approval | Confirm patterns / Clarify conventions |
+| Step 4 | File split strategy acceptable? | Selection | Split by feature / Split by type / Keep as-is |
+| Step 6 | Quality violations found — fix now or defer? | Go-No-Go | Fix all / Fix critical only / Defer with ticket |
+
+## Freedom Levels
+
+| Step | Freedom | Guidance |
+|------|:-------:|----------|
+| Read existing patterns | HIGH | Exploratory, use judgment |
+| Apply immutability | LOW | Zero mutations allowed, follow exactly |
+| Error handling | MEDIUM | Patterns preferred, implementation details flexible |
+| File organization | MEDIUM | 800-line limit strict, grouping strategy flexible |
+| Naming conventions | LOW | Follow the convention table exactly |
+| Quality checklist | LOW | All items must pass |
+| Input validation | MEDIUM | Zod preferred, other schema libs acceptable |
+
 ## Quick Reference
 
 | Rule | Limit | Action on Violation |

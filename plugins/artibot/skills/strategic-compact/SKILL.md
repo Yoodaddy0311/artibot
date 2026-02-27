@@ -55,6 +55,39 @@ category: "analysis"
 - Abbreviate repeated technical terms
 - Tables and bullets over prose
 
+## Workflow Checklist
+
+Copy this checklist and track progress:
+
+```
+Progress:
+- [ ] Step 1: Detect context zone (green/yellow/orange/red/critical)
+- [ ] Step 2: Checkpoint — save current task state before compaction
+- [ ] Step 3: Classify context into preserve / summarize / drop
+- [ ] Step 4: Compress preserved content with token-efficient formatting
+- [ ] Step 5: Validate essential context survives compaction
+- [ ] Step 6: Resume work with compressed context
+```
+
+## Human Checkpoints
+
+| After Step | Checkpoint | Type | Options |
+|-----------|-----------|------|---------|
+| Step 1 | Context zone assessment correct? | Approval | Confirm zone / Override assessment |
+| Step 3 | Classification of preserve/summarize/drop correct? | Selection | Approve / Move items between categories |
+| Step 5 | Essential context intact after compression? | Go-No-Go | Resume / Re-expand critical context |
+
+## Freedom Levels
+
+| Step | Freedom | Guidance |
+|------|:-------:|----------|
+| Detect zone | LOW | Thresholds are defined (60/75/85/95%) |
+| Checkpoint | LOW | Must always checkpoint before compaction |
+| Classify context | HIGH | Judgment call on what to preserve vs summarize vs drop |
+| Compress content | MEDIUM | Techniques defined (symbols, tables), application is flexible |
+| Validate survival | LOW | Essential context must be verified present |
+| Resume work | MEDIUM | Re-orientation approach depends on task state |
+
 **Anti-Patterns**: Waiting until critical zone, compacting without preserving task state, dropping context needed for in-progress decisions
 
 ## Quick Reference

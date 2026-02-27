@@ -1,6 +1,6 @@
 ---
 name: lang-kotlin
-description: "Kotlin patterns, coroutines, sealed classes, and framework-specific best practices for Ktor, Compose Multiplatform, and Spring Boot."
+description: "Provides Kotlin patterns including coroutines, sealed classes, value classes, and framework-specific best practices for Ktor, Compose Multiplatform, and Spring Boot. Use when writing Kotlin code, designing coroutine-based concurrency, working with Jetpack Compose or Ktor, debugging Flow issues, or asking about .kt/.kts files or Gradle Kotlin DSL."
 level: 2
 triggers:
   - "kotlin"
@@ -24,6 +24,12 @@ platforms: [claude-code, gemini-cli, codex-cli, cursor]
 ---
 
 # Kotlin Patterns & Best Practices
+
+## Contents
+- [When This Skill Applies](#when-this-skill-applies)
+- [Core Guidance](#core-guidance)
+- [Anti-Patterns](#anti-patterns)
+- [Framework Integration](#framework-integration)
 
 ## When This Skill Applies
 - Writing or reviewing Kotlin code (2.0+)

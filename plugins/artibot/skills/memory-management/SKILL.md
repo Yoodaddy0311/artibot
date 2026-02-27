@@ -4,6 +4,7 @@ description: |
   BlenderBot-inspired long-term memory and RAG search system for persisting
   user preferences, project contexts, command patterns, and error resolutions
   across sessions.
+  Auto-activates when: session start/end, error resolution, user preferences stated, context retrieval needed.
   Triggers: memory, remember, recall, context, preferences, history, patterns,
   메모리, 기억, 컨텍스트, 선호, 패턴, 히스토리
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
@@ -83,6 +84,39 @@ Relevance score (0-1) combines:
 | SessionEnd | Summarize session, persist learnings |
 | Error | Save error pattern + resolution to error-patterns.json |
 | Command | Track command usage in command-history.json |
+
+## Workflow Checklist
+
+Copy this checklist and track progress:
+
+```
+Progress:
+- [ ] Step 1: SessionStart — load previous memories and inject relevant context
+- [ ] Step 2: During session — save memories as they arise (type + data + tags)
+- [ ] Step 3: Search memories via RAG when context needed (keyword + recency + frequency)
+- [ ] Step 4: SessionEnd — summarize session and persist learnings
+- [ ] Step 5: Save error patterns when errors are resolved
+- [ ] Step 6: Prune expired entries across all stores
+```
+
+## Human Checkpoints
+
+| After Step | Checkpoint | Type | Options |
+|-----------|-----------|------|---------|
+| Step 2 | Memory worth persisting? | Go-No-Go | Save / Skip (session-specific only) |
+| Step 4 | Session summary accurate? | Approval | Persist / Edit summary / Skip |
+| Step 6 | Pruning safe — no important memories lost? | Go-No-Go | Prune / Extend TTL on specific entries |
+
+## Freedom Levels
+
+| Step | Freedom | Guidance |
+|------|:-------:|----------|
+| Load previous memories | LOW | Automatic at session start |
+| Save memories | MEDIUM | Type classification requires judgment, format is defined |
+| RAG search | MEDIUM | Query formulation flexible, scoring formula is fixed |
+| Summarize session | HIGH | Summary content and depth are judgment calls |
+| Save error patterns | MEDIUM | Error + resolution pair format defined, selection flexible |
+| Prune expired | LOW | TTL rules are defined, follow exactly |
 
 ## Anti-Patterns
 - Do NOT store sensitive data (API keys, passwords, tokens) in memory

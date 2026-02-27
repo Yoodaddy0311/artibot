@@ -1,6 +1,6 @@
 ---
 name: platform-database-cloud
-description: "Cloud database patterns for serverless PostgreSQL, real-time databases, and edge-compatible data access."
+description: "Provides cloud database patterns for serverless PostgreSQL, real-time databases, and edge-compatible data access with Neon, Supabase, Firebase, and PlanetScale. Use when selecting a cloud database, configuring connection pooling, implementing real-time subscriptions, optimizing edge function database access, or asking about serverless databases."
 level: 2
 triggers: ["Neon", "Supabase", "Firebase", "Firestore", "PlanetScale", "serverless database", "connection pooling", "edge functions", "real-time"]
 agents: ["backend-developer", "architect"]
@@ -10,6 +10,12 @@ platforms: [claude-code, gemini-cli, codex-cli, cursor]
 ---
 
 # Cloud Database Patterns
+
+## Contents
+- [When This Skill Applies](#when-this-skill-applies)
+- [Core Guidance](#core-guidance)
+- [Anti-Patterns](#anti-patterns)
+- [Quick Reference](#quick-reference)
 
 ## When This Skill Applies
 - Selecting a cloud database for new projects

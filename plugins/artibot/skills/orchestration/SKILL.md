@@ -30,6 +30,15 @@ category: "orchestration"
 
 # Orchestration & Routing Intelligence
 
+## Contents
+- [When This Skill Applies](#when-this-skill-applies)
+- [Core Guidance](#core-guidance)
+- [Quick Reference](#quick-reference)
+- [Token Budget Management](#token-budget-management)
+- [Workflow Checklist](#workflow-checklist)
+- [Human Checkpoints](#human-checkpoints)
+- [Freedom Levels](#freedom-levels)
+
 ## When This Skill Applies
 - Multi-step requests requiring coordination across domains
 - Ambiguous requests needing intent classification
@@ -231,3 +240,41 @@ Routing (direct mode):
 // ~/.claude/settings.json
 { "env": { "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1" } }
 ```
+
+## Workflow Checklist
+
+Copy this checklist and track progress:
+
+```
+Progress:
+- [ ] Step 1: Parse request — extract keywords, match domain
+- [ ] Step 2: Score complexity (simple / moderate / complex)
+- [ ] Step 3: Identify delegation mode (direct / sub-agent / team)
+- [ ] Step 4: Select personas and MCP servers to activate
+- [ ] Step 5: Compose team or spawn sub-agents as needed
+- [ ] Step 6: Execute with token budget monitoring
+- [ ] Step 7: Aggregate results and validate quality gates
+- [ ] Step 8: Report outcomes with evidence
+```
+
+## Human Checkpoints
+
+| After Step | Checkpoint | Type | Options |
+|-----------|-----------|------|---------|
+| Step 2 | Complexity classification correct? | Approval | Confirm / Override level |
+| Step 3 | Delegation mode appropriate for this task? | Selection | Direct / Sub-Agent / Team Mode |
+| Step 5 | Team composition acceptable? | Approval | Approve team / Adjust members / Reduce scope |
+| Step 7 | Results meet quality expectations? | Go-No-Go | Accept / Request revision / Escalate |
+
+## Freedom Levels
+
+| Step | Freedom | Guidance |
+|------|:-------:|----------|
+| Parse request | MEDIUM | Keyword matching is defined, but intent interpretation requires judgment |
+| Score complexity | MEDIUM | Scoring formula exists, but edge cases need interpretation |
+| Select delegation mode | HIGH | Multiple valid approaches depending on context |
+| Activate personas/MCP | MEDIUM | Auto-activation rules apply, manual override allowed |
+| Compose team | HIGH | Team size, pattern (leader/council/swarm) are context-dependent |
+| Execute with budget | LOW | Token budgets must be respected, /clear strategy mandatory |
+| Aggregate results | MEDIUM | Dedup and cross-reference, but synthesis requires judgment |
+| Report outcomes | LOW | Evidence-based reporting required, no claims without proof |

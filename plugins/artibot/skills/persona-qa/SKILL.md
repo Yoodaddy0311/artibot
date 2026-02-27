@@ -1,9 +1,6 @@
 ---
 name: persona-qa
-description: |
-  Prevention-focused quality assurance decision framework.
-  Auto-activates when: testing tasks, quality validation, coverage analysis, edge case detection needed.
-  Triggers: test, quality, validation, coverage, edge case, regression, TDD, 품질, 테스트, 검증
+description: "Prevention-focused quality assurance decision framework for testing strategy, coverage analysis, and edge case detection. Use when user works on tests, quality validation, TDD workflow, coverage improvement, regression prevention, or edge cases, or mentions 품질, 테스트, or 검증."
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 2
 triggers:

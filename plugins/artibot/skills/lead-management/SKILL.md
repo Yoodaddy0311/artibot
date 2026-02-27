@@ -1,10 +1,6 @@
 ---
 name: lead-management
-description: |
-  Lead lifecycle management including lead scoring, qualification, nurture sequences, and CRM workflow design.
-  Covers MQL/SQL handoff, lead routing, pipeline optimization, and lead-to-customer conversion.
-  Auto-activates when: lead management, lead scoring, lead qualification, nurture workflows, MQL/SQL process.
-  Triggers: lead management, lead scoring, lead qualification, MQL, SQL, lead nurture, pipeline, lead routing, CRM workflow, lead lifecycle, 리드 관리, 리드 스코어링, 리드 육성
+description: "Manages lead lifecycle including lead scoring, qualification, nurture sequences, CRM workflows, MQL/SQL handoff, and pipeline optimization. Use when user asks about lead management, lead scoring, lead qualification, MQL, SQL, lead nurture, pipeline, CRM workflow, 리드 관리, 리드 스코어링, or 리드 육성."
 level: 3
 triggers:
   - "lead"
@@ -22,6 +18,13 @@ category: "marketing"
 ---
 
 # Lead Management
+
+## Contents
+- [When This Skill Applies](#when-this-skill-applies)
+- [Core Guidance](#core-guidance)
+- [Output Format](#output-format)
+- [Quick Reference](#quick-reference)
+- [References](#references)
 
 ## When This Skill Applies
 - Designing lead scoring and qualification models

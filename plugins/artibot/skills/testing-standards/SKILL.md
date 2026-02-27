@@ -72,6 +72,42 @@ category: "testing"
 
 See `references/coverage-requirements.md` for detailed metrics.
 
+## Workflow Checklist
+
+Copy this checklist and track progress:
+
+```
+Progress:
+- [ ] Step 1: RED — Write a failing test defining expected behavior
+- [ ] Step 2: RUN — Execute test, confirm it fails correctly
+- [ ] Step 3: GREEN — Write minimal code to make the test pass
+- [ ] Step 4: RUN — Execute test, confirm it passes
+- [ ] Step 5: REFACTOR — Clean up code while tests remain green
+- [ ] Step 6: VERIFY — Check coverage meets 80% threshold
+- [ ] Step 7: Review test quality (isolation, naming, single assertion)
+```
+
+## Human Checkpoints
+
+| After Step | Checkpoint | Type | Options |
+|-----------|-----------|------|---------|
+| Step 1 | Does the test capture the right behavior? | Go-No-Go | Proceed / Rewrite test |
+| Step 5 | Refactored code acceptable? | Approval | Approve / More refactoring needed |
+| Step 6 | Coverage below threshold — add more tests? | Selection | Add unit tests / Add integration tests / Accept with justification |
+| Step 7 | Test quality review | Go-No-Go | Tests meet quality standards / Revise |
+
+## Freedom Levels
+
+| Step | Freedom | Guidance |
+|------|:-------:|----------|
+| Write failing test | MEDIUM | Behavior focus mandatory, assertion style flexible |
+| Run test (fail) | LOW | Must fail for the right reason |
+| Write minimal code | LOW | Minimum implementation only |
+| Run test (pass) | LOW | Must pass, no exceptions |
+| Refactor | HIGH | Creative cleanup, maintain green |
+| Verify coverage | LOW | 80% threshold is non-negotiable |
+| Test quality review | MEDIUM | Rules exist, apply with judgment on edge cases |
+
 ## Quick Reference
 
 | Test Type | Count | Speed | Scope | Coverage Target |

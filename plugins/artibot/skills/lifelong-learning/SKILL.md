@@ -3,7 +3,7 @@ name: lifelong-learning
 description: |
   Continuous learning pipeline that captures session experiences, performs batch learning via GRPO,
   and transfers validated knowledge between System 1 and System 2 caches.
-  Runs automatically at session end via the nightly-learner hook.
+  Auto-activates when: session end, pattern discovery during routing, knowledge transfer triggers, manual /learn command.
   Triggers: learn, experience, knowledge, transfer, promote, demote, grpo, batch, pattern, memory
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 2
@@ -21,6 +21,15 @@ category: "learning"
 ---
 
 # Lifelong Learning
+
+## Contents
+- [When This Skill Applies](#when-this-skill-applies)
+- [Core Guidance](#core-guidance)
+- [Configuration](#configuration)
+- [Workflow Checklist](#workflow-checklist)
+- [Human Checkpoints](#human-checkpoints)
+- [Freedom Levels](#freedom-levels)
+- [Quick Reference](#quick-reference)
 
 ## When This Skill Applies
 - Session end (automatic via nightly-learner hook)
@@ -161,6 +170,41 @@ Settings in `artibot.config.json` under `learning.lifelong` and `learning.knowle
   }
 }
 ```
+
+## Workflow Checklist
+
+Copy this checklist and track progress:
+
+```
+Progress:
+- [ ] Step 1: Collect routing experiences during session
+- [ ] Step 2: Batch experiences (size: 50) for GRPO processing
+- [ ] Step 3: Group by domain + complexity range (group size: 5)
+- [ ] Step 4: Compare System 1 vs System 2 outcomes per group
+- [ ] Step 5: Update routing threshold (adaptRate * advantage)
+- [ ] Step 6: Transfer knowledge — promote/demote between caches
+- [ ] Step 7: Persist updated caches to disk
+```
+
+## Human Checkpoints
+
+| After Step | Checkpoint | Type | Options |
+|-----------|-----------|------|---------|
+| Step 4 | GRPO comparison results reasonable? | Approval | Accept / Reset group data |
+| Step 5 | Threshold adjustment direction correct? | Go-No-Go | Apply / Revert adjustment |
+| Step 6 | Promotion/demotion decisions valid? | Selection | Promote / Demote / Hold |
+
+## Freedom Levels
+
+| Step | Freedom | Guidance |
+|------|:-------:|----------|
+| Collect experiences | LOW | Schema is fixed, record all fields |
+| Batch processing | LOW | Batch size (50) and group size (5) are configured |
+| Group by domain | MEDIUM | Domain classification may require interpretation |
+| Compare outcomes | LOW | Success rate calculation is deterministic |
+| Update threshold | LOW | Formula is defined, clamped to [-0.1, 0.1] |
+| Knowledge transfer | LOW | Promotion (3x) and demotion (2x) thresholds are fixed |
+| Persist to disk | LOW | File paths and formats are defined |
 
 ## Quick Reference
 

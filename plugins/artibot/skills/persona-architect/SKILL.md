@@ -1,9 +1,6 @@
 ---
 name: persona-architect
-description: |
-  Systems architecture decision framework with long-term thinking focus.
-  Auto-activates when: architectural decisions, system design, scalability planning, module boundary design needed.
-  Triggers: architecture, design, scalability, system, module, dependency, trade-off, ADR, 아키텍처, 설계, 확장성
+description: "Systems architecture decision framework with long-term thinking focus on scalability, modularity, and dependency management. Use when user discusses architecture, system design, scalability, module boundaries, trade-off analysis, dependency graphs, or ADR decisions, or mentions 아키텍처, 설계, or 확장성."
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 3
 triggers:

@@ -1,6 +1,6 @@
 ---
 name: lang-php
-description: "PHP patterns, typed properties, enums, fibers, and framework-specific best practices for Laravel 11 and Symfony 7."
+description: "Provides PHP patterns including typed properties, enums, readonly classes, and framework-specific best practices for Laravel 11 and Symfony 7. Use when writing PHP code, working with Eloquent or Doctrine, configuring Composer, running Pest or PHPUnit tests, or asking about .php files, Blade templates, or PHPStan."
 level: 2
 triggers:
   - "php"
@@ -23,6 +23,12 @@ platforms: [claude-code, gemini-cli, codex-cli, cursor]
 ---
 
 # PHP Patterns & Best Practices
+
+## Contents
+- [When This Skill Applies](#when-this-skill-applies)
+- [Core Guidance](#core-guidance)
+- [Anti-Patterns](#anti-patterns)
+- [Framework Integration](#framework-integration)
 
 ## When This Skill Applies
 - Writing or reviewing PHP 8.3+ code

@@ -1,9 +1,6 @@
 ---
 name: persona-security
-description: |
-  Security-first decision framework for threat modeling and vulnerability assessment.
-  Auto-activates when: security concerns, authentication design, vulnerability assessment, compliance review needed.
-  Triggers: vulnerability, threat, compliance, authentication, encryption, OWASP, XSS, CSRF, 취약점, 보안, 위협
+description: "Security-first decision framework for threat modeling, vulnerability assessment, and compliance review. Use when user discusses security concerns, authentication design, encryption, OWASP compliance, XSS or CSRF prevention, or vulnerability remediation, or mentions 취약점, 보안, or 위협."
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 2
 triggers:

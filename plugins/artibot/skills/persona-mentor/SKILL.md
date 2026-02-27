@@ -1,9 +1,6 @@
 ---
 name: persona-mentor
-description: |
-  Educational and knowledge transfer decision framework.
-  Auto-activates when: explanation requests, learning guidance, concept clarification, tutorial creation needed.
-  Triggers: explain, learn, understand, teach, guide, how does, why does, concept, tutorial, 설명, 배우기, 이해
+description: "Educational and knowledge transfer decision framework for explanations, tutorials, and learning guidance. Use when user asks to explain, learn, understand, or teach concepts, requests step-by-step guidance, asks how or why something works, or mentions 설명, 배우기, or 이해."
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 2
 triggers:

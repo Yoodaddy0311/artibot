@@ -1,6 +1,6 @@
 ---
 name: lang-javascript
-description: "JavaScript patterns, ES2024+ features, async/await, and framework-specific best practices for Node.js 22, Bun, and Deno 2."
+description: "Provides JavaScript patterns including ES2024+ features, async/await, and framework-specific best practices for Node.js 22, Bun, and Deno 2. Use when writing JavaScript code, configuring ESM modules, working with Vitest or Express, debugging async errors, or asking about .js/.mjs files, promises, or AbortController."
 level: 2
 triggers:
   - "javascript"
@@ -25,6 +25,12 @@ platforms: [claude-code, gemini-cli, codex-cli, cursor]
 ---
 
 # JavaScript Patterns & Best Practices
+
+## Contents
+- [When This Skill Applies](#when-this-skill-applies)
+- [Core Guidance](#core-guidance)
+- [Anti-Patterns](#anti-patterns)
+- [Framework Integration](#framework-integration)
 
 ## When This Skill Applies
 - Writing or reviewing JavaScript code (ES2024+)

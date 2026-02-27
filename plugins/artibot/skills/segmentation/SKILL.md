@@ -1,10 +1,6 @@
 ---
 name: segmentation
-description: |
-  Audience segmentation strategies, lead scoring models, behavioral triggers, and persona development.
-  Covers demographic, firmographic, behavioral, and psychographic segmentation approaches.
-  Auto-activates when: audience segmentation, lead scoring, persona creation, behavioral targeting, customer grouping.
-  Triggers: segmentation, audience segment, lead scoring, persona, behavioral trigger, targeting, customer group, cohort, RFM, 세그먼테이션, 타겟팅, 리드 스코어링, 페르소나
+description: "Develops audience segmentation strategies with lead scoring models, behavioral triggers, persona development, and RFM analysis across demographic, firmographic, and psychographic dimensions. Use when user asks about segmentation, audience segment, lead scoring, persona, behavioral targeting, cohort, RFM, 세그먼테이션, 타겟팅, 리드 스코어링, or 페르소나."
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 3
 triggers:

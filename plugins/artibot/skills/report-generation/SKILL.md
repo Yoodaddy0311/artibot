@@ -1,10 +1,6 @@
 ---
 name: report-generation
-description: |
-  Structured report creation for marketing analytics including executive summaries, performance reports, and data narratives.
-  Provides templates for weekly, monthly, and quarterly marketing reports.
-  Auto-activates when: report creation, executive summary, performance report, data narrative, marketing report.
-  Triggers: report, executive summary, performance report, weekly report, monthly report, quarterly report, dashboard report, marketing report, 리포트, 성과 보고서, 주간 보고서, 월간 보고서
+description: "Creates structured marketing reports including executive summaries, performance reports, and data narratives with templates for weekly, monthly, and quarterly cadences. Use when user asks about report generation, executive summary, performance report, weekly report, monthly report, marketing report, 리포트, 성과 보고서, 주간 보고서, or 월간 보고서."
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 3
 triggers:

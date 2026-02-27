@@ -56,6 +56,42 @@ category: "devops"
 
 **PR Workflow**: Create branch -> conventional commits -> push with `-u` -> PR with summary + test plan -> address feedback -> squash-merge
 
+## Workflow Checklist
+
+Copy this checklist and track progress:
+
+```
+Progress:
+- [ ] Step 1: Create feature branch from main (feat/*, fix/*, etc.)
+- [ ] Step 2: Make changes with conventional commits
+- [ ] Step 3: Run `git diff --staged` before each commit
+- [ ] Step 4: Push branch with `-u` flag
+- [ ] Step 5: Create PR with summary + test plan
+- [ ] Step 6: Address review feedback with new commits
+- [ ] Step 7: Squash-merge after approval
+```
+
+## Human Checkpoints
+
+| After Step | Checkpoint | Type | Options |
+|-----------|-----------|------|---------|
+| Step 2 | Commit message follows conventions? | Approval | Approve / Rewrite message |
+| Step 3 | Staged changes look correct? | Go-No-Go | Commit / Unstage and revise |
+| Step 5 | PR summary accurate and complete? | Approval | Submit PR / Edit description |
+| Step 7 | Ready to merge? | Go-No-Go | Merge / Request more changes |
+
+## Freedom Levels
+
+| Step | Freedom | Guidance |
+|------|:-------:|----------|
+| Create branch | LOW | Naming convention must be followed exactly |
+| Write commits | MEDIUM | Type and format strict, scope and body flexible |
+| Review staged diff | LOW | Must review every time, no skipping |
+| Push branch | LOW | Use -u flag, never force push to main |
+| Create PR | MEDIUM | Format defined, content depth flexible |
+| Address feedback | HIGH | Implementation approach is up to developer |
+| Merge strategy | LOW | Squash-merge is the standard |
+
 ## Quick Reference
 - Commit conventions: `references/commit-conventions.md`
 - Always `git diff --staged` before commit

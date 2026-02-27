@@ -1,6 +1,6 @@
 ---
 name: session-worklog
-description: "Automatic session work journal maintained in auto-memory. Records tasks, decisions, and pending items at session end or after significant work blocks. Auto-trims to keep only recent 10 sessions within 200-line limit."
+description: "Automatic session work journal maintained in auto-memory. Records tasks, decisions, and pending items at session end or after significant work blocks. Use when logging completed work, recording decisions, or preserving session context for recovery."
 level: 2
 triggers:
   - "worklog"
@@ -123,6 +123,38 @@ Append a worklog entry when ANY of these occur:
 - **continuous-learning**: Worklog entries can feed pattern extraction
 - **vibe-coding**: After DEV protocol completion, auto-append worklog if significant work done
 - **git-workflow**: Commit/push triggers worklog append
+
+## Workflow Checklist
+
+Copy this checklist and track progress:
+
+```
+Progress:
+- [ ] Step 1: Detect trigger (commit, feature complete, session end, explicit request)
+- [ ] Step 2: Read existing worklog.md
+- [ ] Step 3: Compose entry (작업/결정/보류 sections, ~10-15 lines)
+- [ ] Step 4: Check size limit (max 200 lines, 10 entries)
+- [ ] Step 5: Auto-trim oldest entry if limit exceeded
+- [ ] Step 6: Append new entry to worklog.md
+```
+
+## Human Checkpoints
+
+| After Step | Checkpoint | Type | Options |
+|-----------|-----------|------|---------|
+| Step 3 | Entry captures session accurately? | Approval | Append / Edit entry / Skip this log |
+| Step 5 | Oldest entry safe to remove? | Go-No-Go | Trim / Archive to separate file first |
+
+## Freedom Levels
+
+| Step | Freedom | Guidance |
+|------|:-------:|----------|
+| Detect trigger | LOW | Trigger conditions are defined (commit, feature, session end) |
+| Read worklog | LOW | Fixed file location |
+| Compose entry | MEDIUM | Format is strict (작업/결정/보류), but content is judgment call |
+| Check size limit | LOW | 200-line / 10-entry limits are non-negotiable |
+| Auto-trim | LOW | Remove oldest entry, preserve header |
+| Append entry | LOW | Append at end, format exactly as specified |
 
 ## Recovery Protocol
 

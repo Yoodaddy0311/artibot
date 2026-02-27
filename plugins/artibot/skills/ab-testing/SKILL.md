@@ -1,10 +1,6 @@
 ---
 name: ab-testing
-description: |
-  A/B test design, statistical methodology, sample sizing, and significance analysis for marketing experiments.
-  Covers hypothesis formulation, variant design, test duration, and result interpretation.
-  Auto-activates when: A/B test design, experiment planning, statistical significance, variant testing, conversion optimization.
-  Triggers: A/B test, split test, experiment, hypothesis, variant, statistical significance, sample size, conversion test, multivariate, AB 테스트, 실험 설계, 통계적 유의성
+description: "Designs A/B tests with statistical methodology, sample sizing, and significance analysis covering hypothesis formulation, variant design, and result interpretation. Use when user asks about A/B test, split test, experiment design, hypothesis, statistical significance, sample size, multivariate test, AB 테스트, 실험 설계, or 통계적 유의성."
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 3
 triggers:

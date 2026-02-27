@@ -1,6 +1,6 @@
 ---
 name: lang-r
-description: "R patterns, tidyverse workflows, ggplot2 visualization, and framework-specific best practices for Shiny and statistical modeling."
+description: "Provides R patterns including tidyverse workflows, ggplot2 visualization, pipe operators, and framework-specific best practices for Shiny and statistical modeling. Use when writing R code, creating data visualizations, building Shiny dashboards, working with dplyr or tibble, or asking about .R/.Rmd files, CRAN packages, or Quarto."
 level: 2
 triggers:
   - "r language"
@@ -25,6 +25,12 @@ platforms: [claude-code, gemini-cli, codex-cli, cursor]
 ---
 
 # R Patterns & Best Practices
+
+## Contents
+- [When This Skill Applies](#when-this-skill-applies)
+- [Core Guidance](#core-guidance)
+- [Anti-Patterns](#anti-patterns)
+- [Framework Integration](#framework-integration)
 
 ## When This Skill Applies
 - Writing or reviewing R 4.4+ code

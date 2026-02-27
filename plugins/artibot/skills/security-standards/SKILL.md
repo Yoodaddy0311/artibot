@@ -75,6 +75,44 @@ const validated = schema.parse(untrustedInput)
 
 See `references/owasp-checklist.md` for OWASP Top 10 coverage.
 
+## Workflow Checklist
+
+Copy this checklist and track progress:
+
+```
+Progress:
+- [ ] Step 1: Run pre-commit security checks (secrets, inputs, injections)
+- [ ] Step 2: Validate all user inputs with schema (Zod, Joi)
+- [ ] Step 3: Verify parameterized queries — no string concatenation in SQL
+- [ ] Step 4: Check XSS prevention — output encoding, CSP headers
+- [ ] Step 5: Verify CSRF protection on state-changing operations
+- [ ] Step 6: Confirm auth/authz on all endpoints
+- [ ] Step 7: Verify error messages do not leak internal details
+- [ ] Step 8: Run dependency vulnerability audit
+```
+
+## Human Checkpoints
+
+| After Step | Checkpoint | Type | Options |
+|-----------|-----------|------|---------|
+| Step 1 | Any secrets detected in code? | Go-No-Go | Clean / STOP and rotate secrets |
+| Step 3 | SQL injection vectors eliminated? | Approval | Verified safe / Needs remediation |
+| Step 6 | Auth coverage complete for all endpoints? | Go-No-Go | All covered / Gaps found — fix first |
+| Step 8 | Critical vulnerabilities in dependencies? | Selection | Update deps / Accept risk / Block release |
+
+## Freedom Levels
+
+| Step | Freedom | Guidance |
+|------|:-------:|----------|
+| Pre-commit checks | LOW | Follow checklist exactly, no skipping |
+| Input validation | LOW | Must validate all external input, schema required |
+| SQL injection prevention | LOW | Parameterized queries only, zero tolerance |
+| XSS prevention | LOW | Output encoding mandatory |
+| CSRF protection | LOW | Required on all state-changing ops |
+| Auth/authz verification | LOW | Every endpoint must be covered |
+| Error message review | MEDIUM | Balance user-friendliness with security |
+| Dependency audit | MEDIUM | Severity threshold configurable per project |
+
 ## Quick Reference
 
 | Threat | Prevention | Priority |

@@ -1,6 +1,6 @@
 ---
 name: lang-python
-description: "Python patterns, type hints, async/await, dataclasses, and framework-specific best practices for FastAPI and Django."
+description: "Provides Python patterns including type hints, async/await, dataclasses, and framework-specific best practices for FastAPI, Django, and Flask. Use when writing Python code, debugging Python errors, configuring pyproject.toml or uv/poetry, working with pytest or Pydantic, or asking about .py files, asyncio, or decorators."
 level: 2
 triggers:
   - "python"
@@ -25,6 +25,11 @@ platforms: [claude-code, gemini-cli, codex-cli, cursor]
 ---
 
 # Python Patterns & Best Practices
+
+## Contents
+- [When This Skill Applies](#when-this-skill-applies)
+- [Core Guidance](#core-guidance)
+- [Quick Reference](#quick-reference)
 
 ## When This Skill Applies
 - Writing or reviewing Python code

@@ -1,6 +1,6 @@
 ---
 name: lang-swift
-description: "Swift patterns, structured concurrency, actors, and framework-specific best practices for SwiftUI, Combine, and server-side Swift."
+description: "Provides Swift patterns including structured concurrency, actors, async/await, and framework-specific best practices for SwiftUI, Combine, and Vapor. Use when writing Swift code, designing actor-based concurrency, working with SwiftUI views or Xcode projects, debugging iOS/macOS issues, or asking about .swift files or Swift Package Manager."
 level: 2
 triggers:
   - "swift"
@@ -24,6 +24,12 @@ platforms: [claude-code, gemini-cli, codex-cli, cursor]
 ---
 
 # Swift Patterns & Best Practices
+
+## Contents
+- [When This Skill Applies](#when-this-skill-applies)
+- [Core Guidance](#core-guidance)
+- [Anti-Patterns](#anti-patterns)
+- [Framework Integration](#framework-integration)
 
 ## When This Skill Applies
 - Writing or reviewing Swift 6+ code

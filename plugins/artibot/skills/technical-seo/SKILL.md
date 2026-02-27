@@ -1,10 +1,6 @@
 ---
 name: technical-seo
-description: |
-  Technical SEO audit and optimization covering site structure, crawlability, Core Web Vitals, schema markup, and indexation.
-  Provides checklists and scoring for technical health assessment.
-  Auto-activates when: technical SEO audit, site speed optimization, schema markup, crawlability analysis, Core Web Vitals.
-  Triggers: technical SEO, site speed, Core Web Vitals, schema markup, crawlability, robots.txt, sitemap, indexation, page speed, mobile SEO, 테크니컬 SEO, 사이트 속도, 크롤링
+description: "Audits and optimizes technical SEO covering site structure, crawlability, Core Web Vitals, schema markup, and indexation with scoring checklists. Use when user asks about technical SEO audit, site speed, Core Web Vitals, schema markup, crawlability, robots.txt, sitemap, page speed, 테크니컬 SEO, 사이트 속도, or 크롤링."
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 3
 triggers:

@@ -1,10 +1,6 @@
 ---
 name: seo-strategy
-description: |
-  SEO strategy development including keyword research, search intent classification, ranking factor analysis, and GEO (Generative Engine Optimization).
-  Provides frameworks for keyword clustering, content mapping, and SEO roadmap planning.
-  Auto-activates when: keyword research, SEO strategy, search intent analysis, SEO planning, GEO optimization.
-  Triggers: SEO strategy, keyword research, search intent, ranking factors, keyword cluster, content gap, SEO roadmap, GEO, generative engine, 검색엔진최적화, 키워드 리서치, 검색 의도
+description: "Develops SEO strategy including keyword research, search intent classification, ranking factor analysis, keyword clustering, and GEO (Generative Engine Optimization). Use when user asks about SEO strategy, keyword research, search intent, ranking factors, content gap analysis, SEO roadmap, GEO, 검색엔진최적화, 키워드 리서치, or 검색 의도."
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 3
 triggers:

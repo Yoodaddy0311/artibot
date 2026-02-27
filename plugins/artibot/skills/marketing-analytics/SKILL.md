@@ -1,10 +1,6 @@
 ---
 name: marketing-analytics
-description: |
-  Marketing-specific analytics including KPI dashboards, channel performance, attribution analysis, and campaign ROI measurement.
-  Provides frameworks for marketing measurement, forecasting, and performance benchmarking.
-  Auto-activates when: marketing analytics, KPI tracking, attribution analysis, campaign performance, marketing dashboard.
-  Triggers: marketing analytics, KPI dashboard, attribution, ROAS, CAC, LTV, channel performance, campaign ROI, marketing measurement, 마케팅 분석, KPI 대시보드, 어트리뷰션, ROAS
+description: "Analyzes marketing performance with KPI dashboards, channel attribution, campaign ROI measurement, forecasting, and industry benchmarking. Use when user asks about marketing analytics, KPI dashboard, attribution, ROAS, CAC, LTV, channel performance, campaign ROI, 마케팅 분석, KPI 대시보드, 어트리뷰션, or ROAS."
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 3
 triggers:

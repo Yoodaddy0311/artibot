@@ -64,3 +64,35 @@ category: "tooling"
 `[ok]` passed | `[x]` failed | `[!]` warning | `[i]` info | `[~]` in progress
 
 See `references/symbol-system.md` for the complete symbol table.
+
+## Workflow Checklist
+
+Copy this checklist and track progress:
+
+```
+Progress:
+- [ ] Step 1: Detect context usage level (0-40% / 40-70% / 70-85% / 85-95% / 95%+)
+- [ ] Step 2: Select compression level (minimal / efficient / compressed / critical / emergency)
+- [ ] Step 3: Apply symbol substitution for verbose phrases
+- [ ] Step 4: Apply abbreviation system for repeated terms
+- [ ] Step 5: Optimize structure — tables over prose, bullets over paragraphs
+- [ ] Step 6: Validate >=95% information preservation
+```
+
+## Human Checkpoints
+
+| After Step | Checkpoint | Type | Options |
+|-----------|-----------|------|---------|
+| Step 2 | Compression level appropriate? | Selection | Minimal / Efficient / Compressed / Critical |
+| Step 6 | Compressed output still clear and complete? | Go-No-Go | Accept / Decompress specific sections |
+
+## Freedom Levels
+
+| Step | Freedom | Guidance |
+|------|:-------:|----------|
+| Detect context level | LOW | Thresholds are defined (40/70/85/95%) |
+| Select compression | LOW | Level maps directly to context percentage |
+| Symbol substitution | MEDIUM | Symbol table defined, application context varies |
+| Abbreviation system | MEDIUM | Abbreviations defined, audience familiarity varies |
+| Structural optimization | HIGH | Many valid approaches to restructure content |
+| Validate preservation | LOW | >=95% information preservation is non-negotiable |

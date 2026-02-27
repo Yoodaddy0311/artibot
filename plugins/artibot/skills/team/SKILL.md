@@ -1,5 +1,5 @@
 ---
-description: Parallel team execution with cross-check — leader delegates, all opus teammates work independently then verify each other
+description: "Parallel team execution with cross-check — leader delegates, all opus teammates work independently then verify each other. Use when parallel independent work with cross-verification is needed."
 triggers:
   - team
   - 팀
@@ -54,6 +54,42 @@ Each cross-checker verifies:
 
 ### 5. Leader Reports Results
 Present combined results with cross-check outcomes to user.
+
+## Workflow Checklist
+
+Copy this checklist and track progress:
+
+```
+Progress:
+- [ ] Step 1: Leader decomposes request into work units + agent types
+- [ ] Step 2: TeamCreate — set up named team
+- [ ] Step 3: Spawn ALL teammates in parallel (opus model)
+- [ ] Step 4: Teammates work independently (DEV protocol)
+- [ ] Step 5: Cross-check phase — circular peer review
+- [ ] Step 6: Leader aggregates results + cross-check outcomes
+- [ ] Step 7: Report combined results to user
+```
+
+## Human Checkpoints
+
+| After Step | Checkpoint | Type | Options |
+|-----------|-----------|------|---------|
+| Step 1 | Work decomposition correct? | Approval | Approve / Add missing units / Reassign agents |
+| Step 4 | Teammate outputs acceptable? | Go-No-Go | Proceed to cross-check / Request rework |
+| Step 5 | Cross-check found issues? | Selection | Fix issues / Accept as-is / Escalate to user |
+| Step 7 | Final results meet requirements? | Approval | Accept / Request revisions |
+
+## Freedom Levels
+
+| Step | Freedom | Guidance |
+|------|:-------:|----------|
+| Decompose request | HIGH | Work unit boundaries and agent assignment are design decisions |
+| TeamCreate | LOW | Must create team, naming convention defined |
+| Spawn teammates | LOW | All opus, all parallel — constraints are strict |
+| Teammates work | MEDIUM | Each follows DEV protocol, but implementation approach is flexible |
+| Cross-check | LOW | Circular review mandatory, cannot review own work |
+| Aggregate results | HIGH | Synthesis and conflict resolution require judgment |
+| Report to user | MEDIUM | Must include cross-check outcomes, format flexible |
 
 ## Key Constraints
 - Leader = delegation ONLY (never implements)

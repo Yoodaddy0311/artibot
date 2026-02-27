@@ -1,6 +1,6 @@
 ---
 name: lang-typescript
-description: "TypeScript patterns, strict configuration, utility types, and framework-specific best practices for Next.js, Astro, and Remix."
+description: "Provides TypeScript patterns including strict configuration, utility types, discriminated unions, branded types, and framework-specific best practices for Next.js, Astro, and Remix. Use when writing TypeScript code, configuring tsconfig.json, designing type-safe APIs, debugging type errors, or asking about .ts/.tsx files, generics, or interfaces."
 level: 2
 triggers:
   - "typescript"
@@ -25,6 +25,11 @@ platforms: [claude-code, gemini-cli, codex-cli, cursor]
 ---
 
 # TypeScript Patterns & Best Practices
+
+## Contents
+- [When This Skill Applies](#when-this-skill-applies)
+- [Core Guidance](#core-guidance)
+- [Quick Reference](#quick-reference)
 
 ## When This Skill Applies
 - Writing or reviewing TypeScript code

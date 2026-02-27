@@ -1,6 +1,6 @@
 ---
 name: lang-scala
-description: "Scala patterns, given/using, opaque types, and framework-specific best practices for Akka, Cats Effect, ZIO, and Spark."
+description: "Provides Scala 3 patterns including given/using, opaque types, enums, and framework-specific best practices for Cats Effect, ZIO, Akka, and Apache Spark. Use when writing Scala code, designing functional effect systems, working with SBT builds, debugging type-level programming, or asking about .scala files, case classes, or Play Framework."
 level: 2
 triggers:
   - "scala"
@@ -25,6 +25,12 @@ platforms: [claude-code, gemini-cli, codex-cli, cursor]
 ---
 
 # Scala Patterns & Best Practices
+
+## Contents
+- [When This Skill Applies](#when-this-skill-applies)
+- [Core Guidance](#core-guidance)
+- [Anti-Patterns](#anti-patterns)
+- [Framework Integration](#framework-integration)
 
 ## When This Skill Applies
 - Writing or reviewing Scala 3.4+ code

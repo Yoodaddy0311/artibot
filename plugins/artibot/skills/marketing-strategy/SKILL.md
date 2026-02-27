@@ -1,10 +1,6 @@
 ---
 name: marketing-strategy
-description: |
-  Marketing strategy frameworks for market analysis, positioning, segmentation, and go-to-market planning.
-  Provides structured approaches to TAM/SAM/SOM analysis, Porter's Five Forces, and channel strategy.
-  Auto-activates when: marketing strategy planning, market analysis, go-to-market design, growth planning.
-  Triggers: marketing strategy, market analysis, go-to-market, GTM, positioning, segmentation, growth strategy, value proposition, channel strategy, 마케팅 전략, 시장 분석, GTM 전략
+description: "Provides marketing strategy frameworks for market analysis, positioning, segmentation, and go-to-market planning using TAM/SAM/SOM and Porter's Five Forces. Use when user asks about marketing strategy, market analysis, go-to-market, GTM, positioning, growth strategy, value proposition, channel strategy, 마케팅 전략, 시장 분석, or GTM 전략."
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 3
 triggers:

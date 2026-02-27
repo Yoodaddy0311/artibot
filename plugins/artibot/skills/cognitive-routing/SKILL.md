@@ -156,3 +156,38 @@ Request -> Score complexity -> Below threshold? -> System 1 (fast)
 ```
 
 **Escalation Signals**: low confidence, pattern miss, high risk, multi-domain, explicit flag, latency exceeded
+
+## Workflow Checklist
+
+Copy this checklist and track progress:
+
+```
+Progress:
+- [ ] Step 1: Receive user request via UserPromptSubmit hook
+- [ ] Step 2: Score complexity (token estimate, domains, steps, ambiguity, risk)
+- [ ] Step 3: Route to System 1 (below threshold) or System 2 (above threshold)
+- [ ] Step 4: Execute via selected system with confidence monitoring
+- [ ] Step 5: Check escalation rules — escalate if confidence drops
+- [ ] Step 6: Record experience (input, complexity, route, outcome, latency)
+- [ ] Step 7: Feed outcome into adaptive learning loop
+```
+
+## Human Checkpoints
+
+| After Step | Checkpoint | Type | Options |
+|-----------|-----------|------|---------|
+| Step 3 | Routing decision appropriate? | Approval | Confirm / Force System 2 / Force System 1 |
+| Step 5 | Escalation triggered — proceed with deeper analysis? | Go-No-Go | Proceed / Override with quick answer |
+| Step 7 | Threshold adjustment direction correct? | Approval | Accept adjustment / Reset threshold |
+
+## Freedom Levels
+
+| Step | Freedom | Guidance |
+|------|:-------:|----------|
+| Receive request | LOW | Hook-driven, automatic |
+| Score complexity | LOW | Weighted formula is defined, follow exactly |
+| Route to system | LOW | Threshold-based, deterministic |
+| Execute | MEDIUM | System 1 uses heuristics (flexible), System 2 uses structured analysis |
+| Check escalation | LOW | Escalation rules are defined, follow exactly |
+| Record experience | LOW | Schema is fixed, record all fields |
+| Adaptive learning | MEDIUM | Adjustment step clamped, but direction requires interpretation |

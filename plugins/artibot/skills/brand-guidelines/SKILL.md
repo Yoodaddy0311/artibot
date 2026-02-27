@@ -1,10 +1,6 @@
 ---
 name: brand-guidelines
-description: |
-  Brand identity management including voice guidelines, visual standards, messaging consistency, and brand governance.
-  Provides frameworks for brand voice definition, style guides, and cross-channel brand consistency.
-  Auto-activates when: brand voice definition, brand guidelines, style guide creation, brand consistency, messaging framework.
-  Triggers: brand guidelines, brand voice, style guide, brand identity, brand consistency, tone of voice, brand standards, messaging framework, visual identity, 브랜드 가이드라인, 브랜드 보이스, 스타일 가이드
+description: "Manages brand identity including voice guidelines, visual standards, messaging consistency, and brand governance with frameworks for style guides and cross-channel consistency. Use when user asks about brand guidelines, brand voice, style guide, brand identity, tone of voice, messaging framework, visual identity, 브랜드 가이드라인, 브랜드 보이스, or 스타일 가이드."
 level: 3
 triggers:
   - "brand"

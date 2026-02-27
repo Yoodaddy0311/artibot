@@ -60,6 +60,39 @@ category: "learning"
 
 **Anti-Patterns**: Saving session-specific state, speculative single-observation conclusions, duplicating CLAUDE.md content
 
+## Workflow Checklist
+
+Copy this checklist and track progress:
+
+```
+Progress:
+- [ ] Step 1: Detect pattern or learning worth persisting
+- [ ] Step 2: Verify pattern across 2+ interactions (not single observation)
+- [ ] Step 3: Classify: preference / pattern / debugging / decision
+- [ ] Step 4: Check MEMORY.md size — under 200 lines?
+- [ ] Step 5: Save to appropriate topic file or MEMORY.md
+- [ ] Step 6: Prune outdated entries if near limit
+```
+
+## Human Checkpoints
+
+| After Step | Checkpoint | Type | Options |
+|-----------|-----------|------|---------|
+| Step 2 | Is this pattern confirmed across multiple interactions? | Go-No-Go | Save / Wait for more evidence |
+| Step 3 | Correct classification for this learning? | Selection | Preference / Pattern / Debug insight / Decision |
+| Step 6 | Which outdated entries to prune? | Selection | Remove specific entries / Keep all / Archive |
+
+## Freedom Levels
+
+| Step | Freedom | Guidance |
+|------|:-------:|----------|
+| Detect pattern | HIGH | Observation and judgment-driven |
+| Verify across interactions | LOW | Minimum 2 confirmations required, no exceptions |
+| Classify type | MEDIUM | Categories defined, but some learnings are ambiguous |
+| Check MEMORY.md size | LOW | 200-line limit is strict |
+| Save to file | LOW | File structure and format are defined |
+| Prune outdated | HIGH | Relevance judgment is subjective |
+
 ## Quick Reference
 - Confirm pattern 2+ times before saving
 - MEMORY.md < 200 lines (always loaded)

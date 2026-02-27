@@ -1,9 +1,6 @@
 ---
 name: persona-scribe
-description: |
-  Professional documentation and localization decision framework.
-  Auto-activates when: documentation creation, technical writing, localization, content adaptation needed.
-  Triggers: document, write, guide, README, wiki, API docs, changelog, localization, 문서, 작성, 가이드
+description: "Professional documentation and localization decision framework for technical writing, API docs, and multilingual content. Use when user creates documentation, writes guides or READMEs, drafts changelogs or PR descriptions, needs localization, or mentions 문서, 작성, or 가이드."
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 3
 triggers:

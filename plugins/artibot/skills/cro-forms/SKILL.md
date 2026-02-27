@@ -1,10 +1,6 @@
 ---
 name: cro-forms
-description: |
-  Form optimization for lead generation, signups, and data collection with friction reduction and UX best practices.
-  Covers field optimization, validation UX, progressive profiling, and form analytics.
-  Auto-activates when: form optimization, lead capture form, signup form, form field reduction, form UX.
-  Triggers: form optimization, form fields, lead form, signup form, contact form, form completion, form friction, progressive profiling, form UX, 폼 최적화, 양식, 리드 폼
+description: "Optimizes forms for lead generation, signups, and data collection with friction reduction, field optimization, validation UX, and progressive profiling strategies. Use when user asks about form optimization, form fields, lead form, signup form, form completion, progressive profiling, form UX, 폼 최적화, 양식, or 리드 폼."
 level: 3
 triggers:
   - "form optimization"

@@ -88,3 +88,36 @@ See `references/quality-gates.md` for the validation framework.
 | YAGNI | Is this needed now? | Speculative features, unused code |
 | DEV | Was every request item decomposed, executed, verified? | Silent skips, no evidence |
 | Zero-Skip | Was any part of the request dropped? | Missing items in completion report |
+
+## Workflow Checklist
+
+Copy this checklist and track progress:
+
+```
+Progress:
+- [ ] Step 1: DECOMPOSE — Break request into numbered atomic items
+- [ ] Step 2: Read target files BEFORE any modifications
+- [ ] Step 3: EXECUTE — Apply changes following SOLID, DRY, KISS, YAGNI
+- [ ] Step 4: Re-read modified files to confirm correctness
+- [ ] Step 5: VERIFY — Report evidence (file:line) for each item
+- [ ] Step 6: Check for zero-skip — no items silently dropped
+```
+
+## Human Checkpoints
+
+| After Step | Checkpoint | Type | Options |
+|-----------|-----------|------|---------|
+| Step 1 | Decomposition complete and correct? | Approval | Approve items / Add missing items |
+| Step 3 | Design trade-offs acceptable? | Selection | KISS approach / More abstraction / Different pattern |
+| Step 5 | Evidence satisfactory for each item? | Go-No-Go | Accept / Request more evidence |
+
+## Freedom Levels
+
+| Step | Freedom | Guidance |
+|------|:-------:|----------|
+| Decompose request | MEDIUM | Must capture all items, granularity is judgment call |
+| Read target files | LOW | Mandatory before any modification |
+| Apply principles | HIGH | SOLID/DRY/KISS/YAGNI provide direction, specific implementation varies |
+| Re-read files | LOW | Mandatory after every modification |
+| Report evidence | LOW | file:line format required, no vague claims |
+| Zero-skip check | LOW | Every item must be addressed or explicitly blocked |

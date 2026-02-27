@@ -1,5 +1,5 @@
 ---
-description: 일일 회고 리포트 — 오늘의 커밋, 품질, 작업 현황, 다음 단계를 구조화된 대시보드로 출력
+description: "일일 회고 리포트 — 오늘의 커밋, 품질, 작업 현황, 다음 단계를 구조화된 대시보드로 출력. Use when reviewing daily progress, generating retrospective reports, or planning next actions."
 triggers:
   - daily
   - recap
@@ -47,3 +47,38 @@ Auto-activates when user mentions: "daily", "recap", "회고", "오늘 작업", 
 | TaskList | TaskList tool | 작업 현황, 다음 단계 |
 | worklog.md | Read | 세션 기록, 다음 단계 |
 | git status | Bash | 다음 단계 |
+
+## Workflow Checklist
+
+Copy this checklist and track progress:
+
+```
+Progress:
+- [ ] Step 1: Collect today's git log (commits, file changes)
+- [ ] Step 2: Run quality checks (npm test, lint, coverage)
+- [ ] Step 3: Gather task status (completed/in-progress/pending)
+- [ ] Step 4: Read worklog for session entries
+- [ ] Step 5: Compile 7-section dashboard
+- [ ] Step 6: Generate prioritized next actions
+- [ ] Step 7: Save report if --save flag (memory/daily/YYYY-MM-DD.md)
+```
+
+## Human Checkpoints
+
+| After Step | Checkpoint | Type | Options |
+|-----------|-----------|------|---------|
+| Step 2 | Quality issues found — address now? | Go-No-Go | Fix issues / Note and proceed |
+| Step 6 | Next actions prioritized correctly? | Selection | Accept priorities / Reorder / Add items |
+| Step 7 | Save report for the record? | Approval | Save / Skip |
+
+## Freedom Levels
+
+| Step | Freedom | Guidance |
+|------|:-------:|----------|
+| Collect git log | LOW | Standard git commands, date-filtered |
+| Run quality checks | LOW | npm test and lint — run as defined |
+| Gather task status | MEDIUM | TaskList query, interpretation of status flexible |
+| Read worklog | LOW | Fixed file location, read as-is |
+| Compile dashboard | LOW | 7-section format is defined |
+| Generate next actions | HIGH | Prioritization requires judgment across sources |
+| Save report | LOW | Path format and content defined |

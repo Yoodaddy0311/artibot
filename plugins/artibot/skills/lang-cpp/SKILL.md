@@ -1,6 +1,6 @@
 ---
 name: lang-cpp
-description: "C++ patterns, RAII, smart pointers, concepts, ranges, and build system best practices for C++23 and CMake."
+description: "Provides C++ patterns including RAII, smart pointers, concepts, ranges, and build system best practices for C++20/C++23 and CMake. Use when writing C++ code, debugging memory management issues, working with templates or concepts, configuring CMake, or asking about move semantics, constexpr, or .cpp/.hpp files."
 level: 2
 triggers:
   - "c++"
@@ -25,6 +25,12 @@ platforms: [claude-code, gemini-cli, codex-cli, cursor]
 ---
 
 # C++ Patterns & Best Practices
+
+## Contents
+- [When This Skill Applies](#when-this-skill-applies)
+- [Core Guidance](#core-guidance)
+- [Anti-Patterns](#anti-patterns)
+- [Framework Integration](#framework-integration)
 
 ## When This Skill Applies
 - Writing or reviewing C++20/C++23 code
