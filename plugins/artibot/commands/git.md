@@ -46,7 +46,7 @@ Show recent commit history with conventional commit formatting.
 Show changes with context-aware summary.
 
 ### release
-**Automated release workflow** -- version bump + README update + MEMORY.md update + commit + push in one step.
+**Automated release workflow** -- version bump + README update + MEMORY.md update + commit + push + tag + GitHub Release in one step.
 
 **Steps executed automatically:**
 1. **Analyze changes**: `git diff --stat` + `git status` to understand all modifications
@@ -59,6 +59,8 @@ Show changes with context-aware summary.
 4. **MEMORY.md update**: Update project structure, version, sprint info, file counts
 5. **Commit**: Stage all changes, generate conventional commit message based on diff analysis
 6. **Push**: `git push origin [current-branch]`
+7. **Tag**: `git tag v[version]` + `git push origin v[version]`
+8. **GitHub Release**: `gh release create v[version]` with auto-generated release notes from commit history
 
 **Flags:**
 - `--minor`: Minor version bump (default)
@@ -66,13 +68,15 @@ Show changes with context-aware summary.
 - `--patch`: Patch version bump
 - `--version [x.y.z]`: Set explicit version
 - `--dry-run`: Show plan without executing
-- `--no-push`: Commit only, skip push
+- `--no-push`: Commit only, skip push/tag/release
+- `--no-release`: Push but skip tag and GitHub Release
 
 **Example:**
 ```bash
-/git release --minor          # 1.6.0 → 1.7.0, update READMEs, commit, push
+/git release --minor          # 1.6.0 → 1.7.0, update READMEs, commit, push, tag, release
 /git release --version 2.0.0  # explicit version
 /git release --dry-run        # preview only
+/git release --no-release     # commit+push only, no tag/release
 ```
 
 ## Execution Flow
