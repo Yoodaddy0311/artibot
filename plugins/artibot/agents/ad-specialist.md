@@ -14,7 +14,7 @@ description: |
 
   Do NOT use for: code implementation, organic content, SEO, infrastructure,
   CRM workflows, data analysis
-model: haiku
+model: sonnet
 tools:
   - Read
   - Write

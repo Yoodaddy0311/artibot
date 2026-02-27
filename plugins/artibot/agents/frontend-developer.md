@@ -11,7 +11,7 @@ description: |
   컴포넌트, 프론트엔드, 반응형, 접근성
 
   Do NOT use for: backend API logic, database queries, infrastructure, DevOps
-model: sonnet
+model: opus
 tools:
   - Read
   - Write

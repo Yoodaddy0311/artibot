@@ -27,26 +27,38 @@ If `--type` not specified, detect from feature description:
 
 ## Execution Flow
 
-1. **Parse**: Extract feature requirements, detect type and framework
-2. **Plan**: Delegate to Task(planner) for implementation breakdown:
+1. **Decompose**: Break user request into numbered atomic requirements. EVERY requirement MUST be tracked.
+2. **Parse**: Extract feature requirements, detect type and framework
+3. **Read Context**: Read ALL files that will be modified BEFORE making any changes. Understand existing patterns.
+4. **Plan**: Delegate to Task(planner) for implementation breakdown:
    - File list (create/modify)
    - Dependency identification
    - Risk assessment
    - Phase ordering
-3. **Design** (for `api` and `service` types): Delegate to Task(architect) for:
+5. **Design** (for `api` and `service` types): Delegate to Task(architect) for:
    - Interface/contract definition
    - Data model design
    - Error handling strategy
-4. **Implement**: Execute plan phase by phase:
+6. **Implement**: Execute plan phase by phase:
    - Write tests first if `--tdd` (delegate to Task(tdd-guide))
    - Create/modify files following plan
    - Use framework conventions and existing patterns
-5. **Test**: Run tests, verify coverage >= 80%
-6. **Review**: Delegate to Task(code-reviewer) for:
+   - Re-read EVERY modified file to verify changes are correct
+7. **Test**: Run tests, verify coverage >= 80%
+8. **Review**: Delegate to Task(code-reviewer) for:
    - CRITICAL/HIGH issue detection
    - Pattern consistency check
    - Security scan
-7. **Report**: Output implementation summary
+9. **Verify Completion**: Check EVERY requirement from step 1. Evidence required per item.
+10. **Report**: Output implementation summary with completion checklist
+
+## Quality Rules (MANDATORY)
+
+- **Read-First**: ALWAYS read a file before modifying it. No blind writes.
+- **Verify-After**: Re-read modified files to confirm changes are correct.
+- **Zero-Skip**: Every requirement from decomposition MUST be addressed. No silent drops.
+- **Evidence-Based**: Completion claims require file paths, line numbers, or test results.
+- **Ask-When-Unclear**: If any requirement is ambiguous, ask the user BEFORE implementing.
 
 ## Pipeline by Type
 

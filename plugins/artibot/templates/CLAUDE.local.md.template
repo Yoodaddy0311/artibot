@@ -1,0 +1,40 @@
+# Artibot Local Configuration
+
+This file is for YOUR personal preferences. It's auto-added to .gitignore.
+Uncomment and customize the sections you need.
+
+## Communication Language
+<!-- Uncomment ONE: -->
+<!-- Respond in Korean (한국어로 응답해주세요) -->
+<!-- Respond in English -->
+<!-- Respond in Japanese (日本語で応答してください) -->
+
+## Development Environment
+<!-- Uncomment and fill in: -->
+<!-- Local dev server: http://localhost:3000 -->
+<!-- API sandbox: https://api-staging.example.com -->
+<!-- Database: postgresql://localhost:5432/mydb -->
+
+## Personal Workflow Preferences
+<!-- Uncomment what applies: -->
+<!-- Always run tests before committing -->
+<!-- Auto-format with prettier on save -->
+<!-- Use verbose output for debugging sessions -->
+<!-- Prefer parallel agent execution for complex tasks -->
+
+## API Keys (Reference Only - use env vars, not actual values)
+<!-- These remind Claude which env vars to use: -->
+<!-- OPENAI_API_KEY is in .env for LLM testing -->
+<!-- SUPABASE_URL and SUPABASE_ANON_KEY are in .env.local -->
+
+## Editor Integration
+<!-- Uncomment your editor: -->
+<!-- Using VS Code with ESLint + Prettier extensions -->
+<!-- Using Cursor with built-in AI features -->
+<!-- Using Zed with Claude integration -->
+
+## Custom Agent Preferences
+<!-- Override default agent behavior: -->
+<!-- For code review: focus on security over style -->
+<!-- For implementation: always start with tests (TDD strict) -->
+<!-- For documentation: use Korean for comments, English for API docs -->

@@ -19,8 +19,9 @@ Parse $ARGUMENTS:
 
 ## Execution Flow
 
-1. **Parse**: Resolve target directory. Check for `--clean` flag
-2. **Detect Framework**: Scan for framework indicators:
+1. **Decompose**: Break user request into numbered items. If multiple build targets or options, track each.
+2. **Parse**: Resolve target directory. Check for `--clean` flag
+3. **Detect Framework**: Scan for framework indicators:
    - `next.config.*` -> Next.js
    - `vite.config.*` -> Vite
    - `pyproject.toml` with `[tool.fastapi]` or `uvicorn` -> FastAPI
@@ -32,9 +33,9 @@ Parse $ARGUMENTS:
    - `package.json` scripts -> fallback detection
 3. **Resolve Dependencies**: Check lock files, validate versions, install if missing
 4. **Build**: Execute framework-specific build command
-5. **Optimize** (if `--optimize`): Analyze bundle size, check for unused dependencies, suggest code splitting
-6. **Verify**: Confirm build output exists, check for errors/warnings, validate build artifacts
-7. **Report**: Output build summary with metrics
+6. **Optimize** (if `--optimize`): Analyze bundle size, check for unused dependencies, suggest code splitting
+7. **Verify**: Confirm build output exists, check for errors/warnings, validate build artifacts. Check every item from step 1.
+8. **Report**: Output build summary with metrics and per-item completion evidence
 
 ## Framework Build Matrix
 

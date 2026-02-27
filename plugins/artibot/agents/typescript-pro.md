@@ -11,7 +11,7 @@ description: |
   타입스크립트, 타입 에러, 제네릭, 타입 안전, 타입 추론
 
   Do NOT use for: runtime logic without type concerns, CSS styling, infrastructure, content creation
-model: sonnet
+model: opus
 tools:
   - Read
   - Write

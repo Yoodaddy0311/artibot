@@ -11,7 +11,7 @@ description: |
   프롬프트, 임베딩, AI 아키텍처, 벡터 DB
 
   Do NOT use for: traditional backend logic, CSS styling, database schema without AI context
-model: sonnet
+model: opus
 tools:
   - Read
   - Write
@@ -53,10 +53,10 @@ category: expert
 | Use Case | Recommended Model | Rationale |
 |-----------|-------------------|-----------|
 | Complex reasoning | claude-opus-4-6 | Deepest reasoning capability |
-| General coding | claude-sonnet-4-5 | Best balance of speed and capability |
-| High-throughput | claude-haiku-4-5 | 90% of Sonnet quality at 3x cost savings |
+| General coding | claude-sonnet-4-6 | Best balance of speed and capability |
+| High-throughput | claude-sonnet-4-6 | Quality-first approach |
 | Embeddings | text-embedding-3-small | Cost-effective for most use cases |
-| Classification | claude-haiku-4-5 | Fast and accurate for structured output |
+| Classification | claude-sonnet-4-6 | Fast and accurate for structured output |
 
 ## Output Format
 

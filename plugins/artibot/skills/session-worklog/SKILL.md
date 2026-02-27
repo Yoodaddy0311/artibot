@@ -1,0 +1,133 @@
+---
+name: session-worklog
+description: "Automatic session work journal maintained in auto-memory. Records tasks, decisions, and pending items at session end or after significant work blocks. Auto-trims to keep only recent 10 sessions within 200-line limit."
+level: 2
+triggers:
+  - "worklog"
+  - "session log"
+  - "작업 기록"
+  - "세션 로그"
+  - "기록"
+tokens: "~500"
+category: "workflow"
+platforms: [claude-code, gemini-cli, codex-cli, cursor]
+---
+
+# Session Worklog
+
+Lightweight, auto-maintained work journal that persists across sessions.
+
+## When This Skill Applies
+- After completing a significant block of work (commit, feature, fix, config change)
+- Before a session ends or context compresses
+- When the user explicitly asks to log work
+- Automatically triggered by commit/push operations
+
+## Worklog Location
+
+```
+~/.claude/projects/<project-slug>/memory/worklog.md
+```
+
+This file is in the auto-memory directory, so it:
+- Persists across sessions
+- Is automatically loaded at session start
+- Provides immediate context recovery
+
+## Entry Format (STRICT)
+
+Each session entry follows this exact format. Keep entries concise — goal is ~10-15 lines per session.
+
+```markdown
+## YYYY-MM-DD | [1-line summary of main work]
+
+### 작업
+- [completed task 1]
+- [completed task 2]
+
+### 결정
+- [decision]: [rationale in 1 phrase]
+
+### 보류
+- [pending item or blocker, if any]
+- (없음) if nothing pending
+
+---
+```
+
+## Rules
+
+### Auto-Append Trigger
+Append a worklog entry when ANY of these occur:
+1. User requests a commit or push
+2. A major feature/fix/change is completed
+3. The session is ending (context approaching limit)
+4. User explicitly says "기록해" or "log this"
+
+### Size Management
+- **Max entries**: 10 sessions
+- **Max lines**: 200 lines total
+- **Auto-trim**: When appending would exceed 200 lines, remove the OLDEST entry (top of file) first
+- **Header preserved**: The `# Session Worklog` header and description line are NEVER deleted
+
+### Content Rules
+- **Concise**: Each bullet = 1 line, no paragraphs
+- **Factual**: What was done, not how or why in detail
+- **Decisions with rationale**: Brief "because" after each decision
+- **File counts, not file lists**: "23 agent files updated" not listing all 23
+- **Korean preferred**: Match user's communication language
+
+### Token Budget
+- **Writing entry**: ~300-500 tokens (reading file + appending)
+- **Reading at session start**: ~200 tokens (file is small)
+- **Total per session**: ~500-700 tokens maximum
+
+## Example Entries
+
+```markdown
+## 2026-02-27 | 모델 정책 opus 중심 재편 + 워크플로우 개선
+
+### 작업
+- 모델 정책: haiku 제거, opus 73%(19개) / sonnet 27%(7개)
+- DEV 프로토콜 도입 (sc, implement, improve, build)
+- vibe-coding 스킬 신규 생성
+
+### 결정
+- e2e-runner opus 승격: 테스트 품질 중요
+- 문서화 방식: Session Worklog 채택 (자동+경량)
+
+### 보류
+- (없음)
+
+---
+
+## 2026-02-26 | Sprint 7 마무리 + 스킬 레퍼런스
+
+### 작업
+- 49 professional reference files 추가 (24 marketing skills)
+- 깨진 스킬 참조 45개 제거, 23 빈 디렉토리 삭제
+- ESLint 0 errors 0 warnings 달성
+
+### 결정
+- 레퍼런스 아키텍처: 45-75줄 3티어 구조 (원칙→테이블→체크리스트)
+
+### 보류
+- (없음)
+
+---
+```
+
+## Integration with Other Skills
+
+- **checkpoint**: `/checkpoint` creates a detailed snapshot; worklog creates a lightweight summary
+- **continuous-learning**: Worklog entries can feed pattern extraction
+- **vibe-coding**: After DEV protocol completion, auto-append worklog if significant work done
+- **git-workflow**: Commit/push triggers worklog append
+
+## Recovery Protocol
+
+When starting a new session:
+1. Read `memory/worklog.md` automatically (it's in auto-memory)
+2. Check the most recent entry for context
+3. Check "보류" section for pending items
+4. Resume work with full awareness of previous session

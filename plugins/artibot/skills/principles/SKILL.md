@@ -60,6 +60,24 @@ See `references/solid.md` for detailed examples.
 All code changes pass through a 3-step validation cycle.
 See `references/quality-gates.md` for the validation framework.
 
+### Execution Discipline (MANDATORY for ALL agents)
+
+**Decompose-Execute-Verify (DEV) Protocol**:
+1. **Decompose**: Break every request into numbered atomic items BEFORE starting
+2. **Execute**: Read target files FIRST, make changes, re-read to confirm
+3. **Verify**: Report completion with evidence (file:line) for each item
+
+**Zero-Skip Policy**:
+- NEVER silently skip or defer any part of a request
+- NEVER claim "done" without re-reading modified files
+- NEVER modify a file without reading it first
+- If blocked, explain WHY with specific error/reason
+
+**Evidence-Based Completion**:
+- ✅ requires: file path + line number + what changed
+- "Updated the file" = NOT acceptable evidence
+- "Updated src/auth.ts:45-52, added validateToken() null check" = acceptable
+
 ## Quick Reference
 
 | Principle | Check | Violation Signal |
@@ -68,3 +86,5 @@ See `references/quality-gates.md` for the validation framework.
 | DRY | Is this duplicated elsewhere? | Copy-paste patterns |
 | KISS | Is there a simpler way? | Over-engineering, unnecessary abstraction |
 | YAGNI | Is this needed now? | Speculative features, unused code |
+| DEV | Was every request item decomposed, executed, verified? | Silent skips, no evidence |
+| Zero-Skip | Was any part of the request dropped? | Missing items in completion report |

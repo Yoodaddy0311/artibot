@@ -1,11 +1,10 @@
 {
-  "version": "1.6.0",
+  "version": "1.7.0",
 
   "agents": {
     "modelPolicy": {
-      "high": { "model": "opus", "agents": ["orchestrator", "architect", "security-reviewer"] },
-      "medium": { "model": "sonnet", "agents": ["frontend-developer", "backend-developer", "code-reviewer", "tdd-guide", "database-reviewer", "mcp-developer", "typescript-pro", "planner", "refactor-cleaner", "build-error-resolver", "llm-architect", "devops-engineer", "performance-engineer"] },
-      "low": { "model": "haiku", "agents": ["doc-updater", "content-marketer", "e2e-runner", "marketing-strategist", "data-analyst", "presentation-designer", "seo-specialist", "cro-specialist", "ad-specialist", "repo-benchmarker"] }
+      "high": { "model": "opus", "agents": ["orchestrator", "architect", "security-reviewer", "frontend-developer", "backend-developer", "code-reviewer", "tdd-guide", "database-reviewer", "mcp-developer", "typescript-pro", "planner", "refactor-cleaner", "build-error-resolver", "llm-architect", "devops-engineer", "performance-engineer", "e2e-runner", "marketing-strategist", "repo-benchmarker"] },
+      "medium": { "model": "sonnet", "agents": ["doc-updater", "content-marketer", "data-analyst", "presentation-designer", "seo-specialist", "cro-specialist", "ad-specialist"] }
     },
     "categories": {
       "manager": ["orchestrator", "planner", "architect"],

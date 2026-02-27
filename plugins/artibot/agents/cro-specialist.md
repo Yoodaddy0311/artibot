@@ -14,7 +14,7 @@ description: |
 
   Do NOT use for: code implementation, content creation, SEO audits, paid ads,
   email campaigns, marketing strategy
-model: haiku
+model: sonnet
 tools:
   - Read
   - Write

@@ -73,6 +73,14 @@ Show all checkpoints with dates and labels.
 ### Prune (`--prune`)
 Remove old checkpoints to manage storage.
 
+## Worklog Integration
+
+When creating a checkpoint, also append a summary entry to `memory/worklog.md`:
+1. Read current worklog.md
+2. If line count > 190, remove oldest entry (between first `---` and second `---`)
+3. Append new entry in worklog format (작업/결정/보류)
+4. This ensures both detailed checkpoint AND lightweight worklog exist
+
 ## Output Format
 
 ```
@@ -84,4 +92,5 @@ Branch:   [branch] @ [short-hash]
 Files:    [modified: n, staged: n, untracked: n]
 Tasks:    [active: n, completed: n]
 Saved to: [file path]
+Worklog:  [appended to memory/worklog.md]
 ```

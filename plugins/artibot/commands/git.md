@@ -11,7 +11,7 @@ Git workflow management enforcing conventional commits, branch naming, and PR be
 ## Arguments
 
 Parse $ARGUMENTS:
-- `operation`: `commit` | `pr` | `branch` | `status` | `log` | `diff`
+- `operation`: `commit` | `pr` | `branch` | `status` | `log` | `diff` | `release`
 - `--type [kind]`: Commit type - `feat` | `fix` | `refactor` | `docs` | `test` | `chore` | `perf` | `ci`
 - `--scope [module]`: Commit scope (e.g., `auth`, `ui`, `api`)
 - `--message [text]`: Commit message body (auto-generated if omitted)
@@ -44,6 +44,36 @@ Show recent commit history with conventional commit formatting.
 
 ### diff
 Show changes with context-aware summary.
+
+### release
+**Automated release workflow** -- version bump + README update + MEMORY.md update + commit + push in one step.
+
+**Steps executed automatically:**
+1. **Analyze changes**: `git diff --stat` + `git status` to understand all modifications
+2. **Version bump**: Increment version in `package.json`, `artibot.config.json`, `plugin.json`
+   - Default: patch bump (1.6.0 → 1.6.1)
+   - `--minor`: minor bump (1.6.0 → 1.7.0)
+   - `--major`: major bump (1.6.0 → 2.0.0)
+   - `--version [x.y.z]`: explicit version
+3. **README update**: Update badges (version, test count, coverage), feature list, agent tables, file counts, version line
+4. **MEMORY.md update**: Update project structure, version, sprint info, file counts
+5. **Commit**: Stage all changes, generate conventional commit message based on diff analysis
+6. **Push**: `git push origin [current-branch]`
+
+**Flags:**
+- `--minor`: Minor version bump (default)
+- `--major`: Major version bump
+- `--patch`: Patch version bump
+- `--version [x.y.z]`: Set explicit version
+- `--dry-run`: Show plan without executing
+- `--no-push`: Commit only, skip push
+
+**Example:**
+```bash
+/git release --minor          # 1.6.0 → 1.7.0, update READMEs, commit, push
+/git release --version 2.0.0  # explicit version
+/git release --dry-run        # preview only
+```
 
 ## Execution Flow
 

@@ -11,7 +11,7 @@ description: |
   백엔드, 서버, 인증, 데이터베이스
 
   Do NOT use for: UI components, CSS styling, frontend state management, DevOps pipelines
-model: sonnet
+model: opus
 tools:
   - Read
   - Write

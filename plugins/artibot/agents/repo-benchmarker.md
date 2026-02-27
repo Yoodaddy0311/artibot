@@ -12,7 +12,7 @@ description: |
   벤치마크, 레포 비교, 레포 분석, 점수, 평가, 참고
 
   Do NOT use for: implementation, code writing, bug fixes, security audits, testing
-model: haiku
+model: opus
 tools:
   - Read
   - Glob

@@ -20,8 +20,10 @@ Parse $ARGUMENTS:
 
 ## Execution Flow
 
-1. **Parse**: Resolve target, determine scope and focus domain
-2. **Baseline**: Measure current state metrics before any changes:
+1. **Decompose**: Break user request into numbered atomic improvement items. Every item MUST be tracked.
+2. **Parse**: Resolve target, determine scope and focus domain
+3. **Read Context**: Read ALL target files BEFORE making any changes. Understand existing code first.
+4. **Baseline**: Measure current state metrics before any changes:
    - **performance**: Response times, bundle size, complexity scores
    - **security**: Vulnerability count, dependency audit results
    - **quality**: Cyclomatic complexity, duplication %, lint errors, test coverage
@@ -34,9 +36,10 @@ Parse $ARGUMENTS:
    - Use immutable patterns (never mutate existing objects)
    - Preserve existing test coverage
    - Follow project conventions
-5. **Measure**: Re-run baseline metrics, calculate delta
-6. **Iterate** (if `--loop`): Repeat steps 3-5 for remaining iterations
-7. **Report**: Output improvement summary with before/after comparison
+7. **Measure**: Re-run baseline metrics, calculate delta
+8. **Verify**: Re-read ALL modified files. Confirm each change is correct. Check every item from step 1.
+9. **Iterate** (if `--loop`): Repeat steps 5-8 for remaining iterations
+10. **Report**: Output improvement summary with before/after comparison and per-item completion evidence
 
 ## Focus-Specific Strategies
 

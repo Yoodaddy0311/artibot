@@ -11,7 +11,7 @@ description: |
   MCP 서버, 도구 통합, MCP 개발, 프로토콜
 
   Do NOT use for: UI components, general API design, database queries, content creation
-model: sonnet
+model: opus
 tools:
   - Read
   - Write

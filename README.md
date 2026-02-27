@@ -6,7 +6,7 @@
 [![Node](https://img.shields.io/badge/node-%3E%3D18-green)](package.json)
 
 ![Claude Code Plugin](https://img.shields.io/badge/Claude_Code-Plugin-7C3AED?style=flat-square)
-![Version](https://img.shields.io/badge/version-1.6.0-blue?style=flat-square)
+![Version](https://img.shields.io/badge/version-1.7.0-blue?style=flat-square)
 ![License](https://img.shields.io/badge/license-BSL--1.1-green?style=flat-square)
 ![Node.js](https://img.shields.io/badge/Node.js-18%2B-brightgreen?style=flat-square)
 ![Agent Teams](https://img.shields.io/badge/Agent_Teams-Native-orange?style=flat-square)
@@ -38,12 +38,16 @@ Most Claude Code plugins use simple sub-agent (`Task()`) delegation -- fire-and-
 - **Intelligent Delegation** -- Auto-selects Sub-Agent (simple) vs Agent Team (complex) based on cognitive complexity scoring
 - **5 Orchestration Patterns** -- Leader, Council, Swarm, Pipeline, Watchdog
 - **8 Playbooks** -- Feature, Bugfix, Refactor, Security + Marketing Campaign, Marketing Audit, Content Launch, Competitive Analysis (now with executable parser and registry)
-- **43 Slash Commands** -- `/sc` smart router, `/orchestrate`, `/spawn`, `/implement`, `/visual-check`, `/sc playbook`, and more
-- **26 Specialized Agents** -- Architecture, security, frontend, backend, testing, DevOps, marketing, SEO, analytics, and more
-- **79 Domain Skills** -- 11 persona skills, 8 core skills (incl. cognitive-routing, lifelong-learning), 16 language skills, 8 utility skills, 35 marketing skills, visual-validation
+- **45 Slash Commands** -- `/sc` smart router, `/daily`, `/team`, `/orchestrate`, `/spawn`, `/implement`, `/visual-check`, `/sc playbook`, and more
+- **26 Specialized Agents** -- Architecture, security, frontend, backend, testing, DevOps, marketing, SEO, analytics, and more (opus 73%, sonnet 27%)
+- **83 Domain Skills** -- 11 persona skills, 8 core skills, 16 language skills, 8 utility skills, 35 marketing skills, visual-validation, daily, team, session-worklog, vibe-coding
+- **7 Auto-Activating Rules** -- DEV protocol, quality gates, agent coordination, config safety, frontend/backend/test patterns
 - **27 Event Hook Registrations** -- Cognitive routing, lifelong learning, session lifecycle, dangerous command blocking, auto-formatting, team tracking
+- **DEV Protocol** -- Mandatory Decompose-Execute-Verify workflow with zero-skip policy for all code changes
+- **Vibe Coding Support** -- Natural language request handling with read-first, verify-after, evidence-based completion
 - **Visual Validation Pipeline** -- SSIM-based screenshot comparison, auto-fix suggestion, iterative correction loop via Playwright MCP
 - **Conversation-to-Memory** -- Auto-extracts rules and decisions from user messages (Korean/English), injects into skills dynamically
+- **Project CLAUDE.md Seeding** -- `install.sh` auto-generates project-level CLAUDE.md with Artibot methodology and DEV protocol
 - **Cross-Platform Compatible** -- Works with Gemini CLI, OpenAI Codex, and Cursor via platform adapters
 - **Zero Dependencies** -- Pure Node.js built-in modules only (`node:fs`, `node:path`, `node:os`)
 
@@ -427,10 +431,10 @@ All teammates have their specialist tools + team collaboration tools (`SendMessa
 
 | Agent | Model | Specialty |
 |-------|-------|-----------|
-| frontend-developer | sonnet | UI/UX, WCAG accessibility, Core Web Vitals |
-| backend-developer | sonnet | API, database, services |
+| frontend-developer | opus | UI/UX, WCAG accessibility, Core Web Vitals |
+| backend-developer | opus | API, database, services |
 | database-reviewer | opus | SQL optimization, schema design |
-| typescript-pro | sonnet | Advanced types, strict mode |
+| typescript-pro | opus | Advanced types, strict mode |
 | build-error-resolver | opus | Build error diagnosis and auto-fix |
 
 **Utilities:**
@@ -438,28 +442,28 @@ All teammates have their specialist tools + team collaboration tools (`SendMessa
 | Agent | Model | Specialty |
 |-------|-------|-----------|
 | refactor-cleaner | opus | Dead code removal, refactoring |
-| doc-updater | haiku | Documentation sync, changelog |
+| doc-updater | sonnet | Documentation sync, changelog |
 | content-marketer | sonnet | Blog, SEO, social media |
-| devops-engineer | sonnet | CI/CD, Docker, monitoring |
-| mcp-developer | sonnet | MCP server development |
+| devops-engineer | opus | CI/CD, Docker, monitoring |
+| mcp-developer | opus | MCP server development |
 
 **Marketing:**
 
 | Agent | Model | Specialty |
 |-------|-------|-----------|
 | marketing-strategist | opus | Campaign strategy, market positioning, brand architecture |
-| data-analyst | opus | Marketing analytics, attribution modeling, KPI dashboards |
+| data-analyst | sonnet | Marketing analytics, attribution modeling, KPI dashboards |
 | presentation-designer | sonnet | Pitch decks, marketing collateral, visual storytelling |
 | seo-specialist | sonnet | Technical SEO, keyword strategy, SERP optimization |
 | cro-specialist | sonnet | Conversion optimization, A/B testing, funnel analysis |
 | ad-specialist | sonnet | PPC campaigns, ad creative, ROAS optimization |
-| repo-benchmarker | haiku | Repository analysis, competitive benchmarking |
+| repo-benchmarker | opus | Repository analysis, competitive benchmarking |
 
 **Performance & Infrastructure:**
 
 | Agent | Model | Specialty |
 |-------|-------|-----------|
-| performance-engineer | sonnet | Performance profiling, bottleneck analysis |
+| performance-engineer | opus | Performance profiling, bottleneck analysis |
 
 ## Commands
 
@@ -515,6 +519,8 @@ All teammates have their specialist tools + team collaboration tools (`SendMessa
 | `/task [operation]` | Task management (CRUD) |
 | `/git [operation]` | Git workflow automation |
 | `/checkpoint` | State snapshot save/restore |
+| `/daily` | Daily work recap and retrospective |
+| `/team [task]` | Parallel team orchestration with cross-check |
 
 ### Documentation & Content
 
@@ -550,7 +556,7 @@ All teammates have their specialist tools + team collaboration tools (`SendMessa
 
 ## Skills
 
-78 auto-activating domain skills organized in five categories:
+83 auto-activating domain skills organized in six categories:
 
 **Core Skills (8):** orchestration, cognitive-routing, lifelong-learning, token-efficiency, principles, coding-standards, security-standards, testing-standards
 
@@ -561,6 +567,8 @@ All teammates have their specialist tools + team collaboration tools (`SendMessa
 **Language Skills (16):** TypeScript, JavaScript, Python, Go, Rust, Java, Kotlin, Swift, C++, C#, Ruby, PHP, Scala, Elixir, R, Flutter/Dart
 
 **Marketing Skills (34):** marketing-strategy, campaign-planning, seo-strategy, technical-seo, content-seo, social-media, email-marketing, competitive-intelligence, advertising, ab-testing, brand-guidelines, copywriting, customer-journey, data-analysis, data-visualization, lead-management, marketing-analytics, presentation-design, report-generation, segmentation, cro-page, cro-funnel, cro-forms, and more
+
+**Workflow Skills (4):** daily (work recap/retrospective), team (parallel orchestration), session-worklog (auto session tracking), vibe-coding (natural language coding protocol)
 
 ## Hooks
 
@@ -588,7 +596,7 @@ Artibot checks for new versions on session start via GitHub Releases API (24h ca
 
 ```
 Session start:
-  Artibot v1.6.0 initialized
+  Artibot v1.7.0 initialized
   ✅ You are running the latest version
 ```
 
@@ -647,19 +655,27 @@ plugins/artibot/
 |   +-- orchestrator.md          #   CTO / Team leader (Agent Teams API)
 |   +-- [17 dev specialists].md  #   Development teammates
 |   +-- [8 marketing agents].md  #   Marketing specialists
-+-- commands/                    # 43 slash commands
++-- commands/                    # 45 slash commands
 |   +-- sc.md                    #   Smart router
+|   +-- daily.md                 #   Daily work recap and retrospective
+|   +-- team.md                  #   Parallel team orchestration
 |   +-- orchestrate.md           #   Team orchestration (TeamCreate)
 |   +-- spawn.md                 #   Team spawn (parallel execution)
 |   +-- [25 dev commands].md
 |   +-- [10 marketing commands].md
-+-- skills/                      # 79 skill directories
++-- skills/                      # 83 skill directories
 |   +-- orchestration/           #   Delegation mode + team routing
 |   +-- cognitive-routing/       #   System 1/2 dual-process routing
 |   +-- lifelong-learning/       #   GRPO batch learning + knowledge transfer
 |   +-- delegation/              #   Sub-Agent/Team strategies
 |   +-- [23 dev skills]/
 |   +-- [23 marketing skills]/
+|   +-- [4 workflow skills]/
++-- rules/                       # 7 auto-activating rules
+|   +-- dev-protocol.md          #   DEV (Decompose-Execute-Verify) protocol
+|   +-- quality-gates.md         #   Quality enforcement gates
+|   +-- agent-coordination.md    #   Agent collaboration patterns
+|   +-- [4 domain rules].md
 +-- hooks/
 |   +-- hooks.json               # Hook event mappings
 +-- scripts/
@@ -686,7 +702,7 @@ Key settings in `artibot.config.json`:
 
 | Setting | Description | Default |
 |---------|-------------|---------|
-| `version` | Plugin version | `1.6.0` |
+| `version` | Plugin version | `1.7.0` |
 | `cognitive.router.threshold` | System 1/2 boundary | `0.4` |
 | `cognitive.router.adaptRate` | Per-feedback adjustment step | `0.05` |
 | `cognitive.system1.maxLatency` | System 1 max response time (ms) | `100` |
@@ -790,7 +806,7 @@ node scripts/ci/validate-hooks.js     # Hook validation
 
 ## Version
 
-1.6.0 -- Visual Validation Pipeline + Conversation-to-Memory + Playbook System Activation + Learning Bug Fixes
+1.7.0 -- DEV Protocol + Vibe Coding + Daily/Team Commands + Rules System + Agent Model Upgrade + CLAUDE.md Seeding
 
 ## License
 

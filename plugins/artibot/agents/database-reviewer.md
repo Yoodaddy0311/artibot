@@ -11,7 +11,7 @@ description: |
   쿼리, 인덱스, 스키마, 데이터베이스, 마이그레이션
 
   Do NOT use for: frontend components, CI/CD pipelines, application-level business logic
-model: sonnet
+model: opus
 tools:
   - Read
   - Write

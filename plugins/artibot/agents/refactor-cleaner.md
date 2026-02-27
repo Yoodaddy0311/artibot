@@ -11,7 +11,7 @@ description: |
   리팩토링, 정리, 불필요한 코드, 중복, 기술 부채
 
   Do NOT use for: active feature development, pre-release code freezes, code with no test coverage
-model: sonnet
+model: opus
 tools:
   - Read
   - Write

@@ -45,6 +45,7 @@ Parse $ARGUMENTS:
 | clean up, unused imports, technical debt, dead code elimination | /cleanup | 88% |
 | verify, validate, check | /verify | 90% |
 | checkpoint, snapshot, save state | /checkpoint | 90% |
+| daily, recap, 회고, 일일 보고, 오늘 작업, 오늘 뭐 했지, 복기 | /daily | 92% |
 | troubleshoot, debug, why broken | /troubleshoot | 88% |
 | explain, how does, what is, teach, understand | /explain | 90% |
 | document, docs, readme | /document | 90% |
@@ -59,7 +60,8 @@ Parse $ARGUMENTS:
 | CRM, customer journey, lead scoring, pipeline | /crm | 88% |
 | marketing analytics, KPI dashboard, attribution, ROAS | /analytics | 88% |
 | CRO, conversion rate, landing page optimization, funnel | /cro | 90% |
-| orchestrate, team, coordinate | /orchestrate | 92% |
+| team, 팀, parallel team, 병렬 팀, cross-check, 크로스체크 | /team | 95% |
+| orchestrate, coordinate, pipeline | /orchestrate | 92% |
 | spawn, multi-agent, parallel tasks, pipeline execution | /spawn | 92% |
 | swarm, collective, federated, sync patterns | /swarm | 90% |
 | learn, remember, pattern | /learn | 85% |
@@ -70,12 +72,14 @@ Parse $ARGUMENTS:
 
 ## Execution Flow
 
-1. **Parse**: Tokenize request, extract intent verbs, target nouns, flag modifiers
-2. **Classify**: Score each candidate route using keyword match (40%) + context analysis (40%) + flag hints (20%)
-3. **Resolve Ambiguity**: If top two scores within 10%, check for explicit `--force` or ask user
-4. **Assess Complexity**: Count domains and steps FROM THE REQUEST TEXT ONLY to determine delegation mode (see below). Do NOT read files to assess.
-5. **Route & Delegate**: Execute based on complexity level
-6. **Report**: Display routing decision with confidence score
+1. **Decompose Request**: Break user request into discrete action items. If the user asks for A, B, and C, all three MUST be tracked separately. Never silently drop any part.
+2. **Parse**: Tokenize request, extract intent verbs, target nouns, flag modifiers
+3. **Classify**: Score each candidate route using keyword match (40%) + context analysis (40%) + flag hints (20%)
+4. **Resolve Ambiguity**: If top two scores within 10%, check for explicit `--force` or ask user
+5. **Assess Complexity**: Count domains and steps FROM THE REQUEST TEXT ONLY to determine delegation mode (see below). Do NOT read files to assess.
+6. **Route & Delegate**: Execute based on complexity level
+7. **Verify Completion**: After execution, check EVERY action item from step 1. Report status per item.
+8. **Report**: Display routing decision with confidence score and completion checklist
 
 ## Complexity-Based Delegation
 
@@ -152,6 +156,43 @@ When 1 domain, <3 steps, no team hints, and no `--team` flag:
 | `--team` | Force team mode regardless of complexity assessment |
 | `--solo` | Force single sub-agent mode even if team triggers match |
 
+## Quality Enforcement Rules (MANDATORY)
+
+### Request Decomposition Protocol
+Before ANY routing, decompose the user's request into numbered action items:
+```
+요청 분해:
+1. [action item 1]
+2. [action item 2]
+3. [action item 3]
+```
+Every item MUST be addressed. No silent drops. No partial execution.
+
+### Completion Verification Protocol
+After execution completes, verify EVERY action item:
+```
+완료 검증:
+1. ✅ [action item 1] - [evidence: file changed / test passed / output shown]
+2. ✅ [action item 2] - [evidence]
+3. ❌ [action item 3] - [reason for failure, next steps]
+```
+If ANY item is ❌, continue working until resolved or explicitly report the blocker to the user.
+
+### Vibe Coding Quality Rules
+When the user gives casual/natural language requests WITHOUT explicit commands:
+1. **Treat every sentence as a requirement** - "이것도 해주고 저것도 해줘" = TWO separate requirements
+2. **Read before writing** - ALWAYS read the target file before making changes
+3. **Verify after writing** - Re-read the file after changes to confirm correctness
+4. **Show evidence** - Never claim "done" without showing what changed
+5. **Ask when unclear** - If the request is ambiguous, ask BEFORE guessing
+
+### Zero-Skip Policy
+- ❌ NEVER say "I'll skip this for now" or "this can be done later"
+- ❌ NEVER silently ignore part of a multi-part request
+- ❌ NEVER claim completion without verifiable evidence
+- ❌ NEVER assume a file's contents without reading it first
+- ✅ If truly blocked, explain WHY and propose alternatives
+
 ## Anti-Patterns
 
 - ❌ Do NOT analyze the codebase (Read/Glob/Grep) to determine complexity - classify from request keywords only
@@ -159,6 +200,8 @@ When 1 domain, <3 steps, no team hints, and no `--team` flag:
 - ❌ Do NOT block the user's session with long-running operations - use background delegation
 - ❌ Do NOT default to sub-agent when team triggers are present - prefer team mode (target ~40%)
 - ❌ Do NOT ignore `--team` / `--solo` flag overrides
+- ❌ Do NOT claim work is "done" without re-reading changed files to verify
+- ❌ Do NOT make changes without reading the file first
 
 ## Fallback
 

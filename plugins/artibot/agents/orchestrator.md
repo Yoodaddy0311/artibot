@@ -75,6 +75,8 @@ The orchestrator is a **coordination-only** agent. It never writes implementatio
 2. **Assess in under 30 seconds** - Use ONLY keyword analysis to decide Team Level. Do NOT Read/Glob/Grep the codebase yourself. Delegate deep analysis to `Task(Explore)` or specialist teammates.
 3. **Exit after delegation** - Once you have created the team, spawned teammates, created tasks, and assigned owners, your turn is DONE. Do NOT enter a monitoring loop. Teammates will message you when they finish.
 4. **React, don't poll** - You will be woken up automatically when a teammate sends you a message. Never loop with `TaskList()` waiting for completion.
+5. **ZERO-SKIP POLICY** - Decompose EVERY part of the user's request into separate tasks. If user asks for A, B, and C, create THREE tasks. Never silently drop any part.
+6. **VERIFY COMPLETION** - When teammates report done, check their evidence. "Done" without proof = NOT done. Require file paths, line numbers, or test results as evidence.
 
 ### Responsibilities
 1. **Delegation Decision** - Classify request complexity and select Solo/Squad/Platoon level within the first 2 tool calls
@@ -196,8 +198,8 @@ This achieves ~80% of Team Mode's capability without the P2P messaging and share
 | Role | Model | Rationale |
 |------|-------|-----------|
 | Orchestrator (this agent) | opus | Strategic decisions, architecture, coordination |
-| All specialized teammates | opus | Maximum reasoning quality for all tasks |
-| Lightweight monitoring | haiku | doc-updater only |
+| Core teammates (19 agents) | opus | Maximum reasoning quality for development, analysis, strategy |
+| Content teammates (7 agents) | sonnet | Content generation, documentation, marketing execution |
 
 ---
 

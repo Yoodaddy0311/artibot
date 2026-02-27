@@ -14,7 +14,7 @@ description: |
 
   Do NOT use for: code implementation, email campaigns, social media, infrastructure,
   data analysis (use data-analyst), marketing strategy (use marketing-strategist)
-model: haiku
+model: sonnet
 tools:
   - Read
   - Write

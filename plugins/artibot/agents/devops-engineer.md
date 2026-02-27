@@ -11,7 +11,7 @@ description: |
   배포, 파이프라인, 도커, 모니터링, 인프라
 
   Do NOT use for: UI components, business logic, database schema design, content creation
-model: sonnet
+model: opus
 tools:
   - Read
   - Write

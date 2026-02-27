@@ -11,7 +11,7 @@ description: |
   계획, 구현, 기능, 마이그레이션, 리팩토링, 전략
 
   Do NOT use for: simple single-file edits, bug fixes with obvious solutions, documentation-only tasks
-model: sonnet
+model: opus
 tools:
   - Read
   - Grep
