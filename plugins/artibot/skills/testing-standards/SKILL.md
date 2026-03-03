@@ -1,4 +1,5 @@
 ---
+context: forked
 name: testing-standards
 description: |
   Testing standards enforcing 80% coverage, Testing Pyramid, and TDD workflow.

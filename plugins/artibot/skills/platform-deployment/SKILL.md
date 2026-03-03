@@ -1,4 +1,5 @@
 ---
+context: forked
 name: platform-deployment
 description: "Provides deployment patterns for modern applications including cloud platforms, Docker containers, Kubernetes orchestration, and CI/CD pipelines. Use when setting up deployment pipelines, configuring Vercel or Railway, writing Dockerfiles, designing zero-downtime strategies, or asking about blue-green deployments, GitHub Actions, or container security."
 level: 2

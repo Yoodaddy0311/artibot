@@ -229,6 +229,14 @@
           "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/memory-tracker.js",
           "timeout": 8000
         }]
+      },
+      {
+        "matcher": "*",
+        "hooks": [{
+          "type": "command",
+          "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/http-notify.js",
+          "timeout": 8000
+        }]
       }
     ],
     "PostToolUseFailure": [

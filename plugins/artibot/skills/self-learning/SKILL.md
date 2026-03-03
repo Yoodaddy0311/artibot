@@ -1,4 +1,5 @@
 ---
+context: forked
 name: self-learning
 description: |
   Toolformer + GRPO self-learning tool selection system. Tracks tool usage

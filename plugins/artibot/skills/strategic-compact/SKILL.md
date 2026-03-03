@@ -1,4 +1,5 @@
 ---
+context: forked
 name: strategic-compact
 description: |
   Context compaction strategy for preserving critical information during PreCompact events.

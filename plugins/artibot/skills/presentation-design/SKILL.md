@@ -1,4 +1,5 @@
 ---
+context: forked
 name: presentation-design
 description: "Designs presentation structures with narrative arcs, slide layouts, visual hierarchy, and speaker notes for pitch decks, reports, and keynotes. Use when user asks about presentation design, slides, pitch deck, keynote, PowerPoint, slide layout, speaker notes, 프레젠테이션, 슬라이드, 발표자료, or 피치덱."
 platforms: [claude-code, gemini-cli, codex-cli, cursor]

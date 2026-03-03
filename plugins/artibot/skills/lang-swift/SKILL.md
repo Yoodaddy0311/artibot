@@ -1,4 +1,5 @@
 ---
+context: forked
 name: lang-swift
 description: "Provides Swift patterns including structured concurrency, actors, async/await, and framework-specific best practices for SwiftUI, Combine, and Vapor. Use when writing Swift code, designing actor-based concurrency, working with SwiftUI views or Xcode projects, debugging iOS/macOS issues, or asking about .swift files or Swift Package Manager."
 level: 2

@@ -1,4 +1,5 @@
 ---
+context: forked
 name: spec-format
 description: "SPEC format for structured requirements, acceptance criteria, and technical specifications. Use when writing requirements, defining acceptance criteria, or creating technical specs."
 level: 2

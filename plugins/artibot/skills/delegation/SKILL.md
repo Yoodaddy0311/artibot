@@ -1,4 +1,5 @@
 ---
+context: forked
 name: delegation
 description: |
   Delegation strategies for parallel and complex multi-file operations using Sub-Agent or Team Mode.

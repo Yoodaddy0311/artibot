@@ -9,7 +9,7 @@
 
 import path from 'node:path';
 import { ARTIBOT_DIR } from '../core/config.js';
-import { readJsonFile, writeJsonFile, ensureDir } from '../core/file.js';
+import { ensureDir, readJsonFile, writeJsonFile } from '../core/file.js';
 
 /** Path to the local opt-in consent file */
 const CONSENT_PATH = path.join(ARTIBOT_DIR, 'swarm-consent.json');

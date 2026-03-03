@@ -1,4 +1,5 @@
 ---
+context: forked
 name: ab-testing
 description: "Designs A/B tests with statistical methodology, sample sizing, and significance analysis covering hypothesis formulation, variant design, and result interpretation. Use when user asks about A/B test, split test, experiment design, hypothesis, statistical significance, sample size, multivariate test, AB 테스트, 실험 설계, or 통계적 유의성."
 platforms: [claude-code, gemini-cli, codex-cli, cursor]

@@ -1,4 +1,5 @@
 ---
+context: forked
 name: memory-management
 description: |
   BlenderBot-inspired long-term memory and RAG search system for persisting

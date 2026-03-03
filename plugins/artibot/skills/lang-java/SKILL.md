@@ -1,4 +1,5 @@
 ---
+context: forked
 name: lang-java
 description: "Provides Java patterns including generics, streams, records, sealed classes, and framework-specific best practices for Spring Boot and Quarkus. Use when writing Java code, configuring Maven or Gradle builds, working with JUnit 5 or Mockito, debugging Spring Boot errors, or asking about .java files, pattern matching, or Quarkus."
 level: 2

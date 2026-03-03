@@ -1,4 +1,5 @@
 ---
+context: forked
 name: mcp-context7
 description: "Provides Context7 MCP server workflow for looking up library documentation, framework patterns, and API references with caching and fallback strategies. Use when user asks about documentation lookup, library usage, framework patterns, import questions, package API, Context7, 라이브러리, or 프레임워크."
 platforms: [claude-code, gemini-cli, codex-cli, cursor]

@@ -1,4 +1,5 @@
 ---
+context: forked
 name: visual-validation
 description: |
   Visual regression testing using SSIM-based screenshot comparison.

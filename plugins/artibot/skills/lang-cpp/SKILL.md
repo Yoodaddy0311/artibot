@@ -1,4 +1,5 @@
 ---
+context: forked
 name: lang-cpp
 description: "Provides C++ patterns including RAII, smart pointers, concepts, ranges, and build system best practices for C++20/C++23 and CMake. Use when writing C++ code, debugging memory management issues, working with templates or concepts, configuring CMake, or asking about move semantics, constexpr, or .cpp/.hpp files."
 level: 2

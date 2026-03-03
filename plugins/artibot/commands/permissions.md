@@ -153,9 +153,113 @@ memory_path = ~/.claude/projects/{project-hash}/memory/MEMORY.md
 | Agent | MEDIUM | 서브에이전트 실행 |
 | Bash | HIGH | 셸 명령 실행 |
 
+## Wildcard Permission Patterns
+
+Claude Code는 도구별 와일드카드 패턴을 지원합니다. `allowedTools` 배열에 `Tool:pattern` 형식으로 세밀한 권한 제어가 가능합니다.
+
+### 형식
+
+```
+"Tool:glob-pattern"
+```
+
+- `Tool` — 도구 이름 (Edit, Bash, Write 등)
+- `glob-pattern` — 파일 경로 또는 명령어 매칭 패턴
+
+### 파일 경로 와일드카드 (Edit, Write, Read)
+
+```json
+{
+  "allowedTools": [
+    "Edit:src/**",
+    "Edit:tests/**",
+    "Write:src/**/*.ts",
+    "Read:*"
+  ]
+}
+```
+
+| 패턴 | 의미 |
+|------|------|
+| `Edit:src/**` | src/ 하위 모든 파일 편집 허용 |
+| `Edit:tests/**` | tests/ 하위 모든 파일 편집 허용 |
+| `Write:src/**/*.ts` | src/ 하위 .ts 파일만 생성 허용 |
+| `Read:*` | 모든 파일 읽기 허용 |
+| `Edit:!node_modules/**` | node_modules 제외 |
+
+### 명령어 와일드카드 (Bash)
+
+```json
+{
+  "allowedTools": [
+    "Bash:npm *",
+    "Bash:node *",
+    "Bash:git *",
+    "Bash:npx vitest*"
+  ]
+}
+```
+
+| 패턴 | 의미 |
+|------|------|
+| `Bash:npm *` | npm 명령만 허용 |
+| `Bash:node *` | node 실행만 허용 |
+| `Bash:git *` | git 명령만 허용 |
+| `Bash:npx vitest*` | vitest 실행만 허용 |
+
+### 일반적인 조합 예시
+
+**개발 환경 (권장)**:
+```json
+{
+  "allowedTools": [
+    "Read:*",
+    "Edit:src/**",
+    "Edit:tests/**",
+    "Write:src/**",
+    "Bash:npm *",
+    "Bash:node *",
+    "Bash:git status",
+    "Bash:git diff*",
+    "Glob",
+    "Grep"
+  ]
+}
+```
+
+**읽기 전용 분석**:
+```json
+{
+  "allowedTools": [
+    "Read:*",
+    "Glob",
+    "Grep",
+    "Bash:git log*",
+    "Bash:git diff*"
+  ]
+}
+```
+
+**CI/CD 환경**:
+```json
+{
+  "allowedTools": [
+    "Read:*",
+    "Bash:npm test",
+    "Bash:npm run lint",
+    "Bash:npm run build",
+    "Glob",
+    "Grep"
+  ]
+}
+```
+
+> **참고**: 와일드카드 패턴은 Claude Code가 네이티브로 처리합니다. Artibot은 패턴을 설정 파일에 기록할 뿐, 실제 매칭은 Claude Code 런타임이 수행합니다.
+
 ## Safety Notes
 
 - `auto-yes`는 **Bash 포함** — 신뢰할 수 있는 환경에서만 사용
 - `selective`는 읽기 전용 도구만 승인 — 안전한 기본 선택
 - 프로덕션 환경에서는 `manual` 또는 `selective` 권장
 - 설정은 `~/.claude/settings.json`에 저장되어 모든 세션에 적용
+- 와일드카드 패턴으로 최소 권한 원칙(Principle of Least Privilege) 적용 권장

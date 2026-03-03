@@ -1,6 +1,6 @@
 # Artibot
 
-![Tests](https://img.shields.io/badge/tests-2643%20passed-brightgreen) ![Coverage](https://img.shields.io/badge/coverage-96.95%25-brightgreen) ![License](https://img.shields.io/badge/license-BSL--1.1-blue) ![Version](https://img.shields.io/badge/version-1.5.0-blue) ![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen)
+![Tests](https://img.shields.io/badge/tests-3302%20passed-brightgreen) ![Coverage](https://img.shields.io/badge/coverage-97.5%25-brightgreen) ![License](https://img.shields.io/badge/license-MIT-blue) ![Version](https://img.shields.io/badge/version-1.8.0-blue) ![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen)
 
 Claude Code를 위한 **Agent Teams 기반** 지능형 오케스트레이션 플러그인. Claude의 네이티브 Agent Teams API를 핵심 엔진으로 사용하여 전문 에이전트 팀 구성, P2P 통신, 공유 태스크 관리를 통해 개발 생산성을 극대화합니다.
 
@@ -72,12 +72,12 @@ Artibot의 핵심 엔진은 Claude Code의 **Agent Teams API**입니다. 단순�
 | **토큰 비용** | 1x | ~5x |
 | **적합 작업** | 단일 파일 분석, 검색, 빠른 위임 | 복잡한 기능 구현, 멀티 에이전트 협업 |
 
-### 41개 슬래시 커맨드
+### 47개 슬래시 커맨드
 
 - `/sc`로 자연어 의도를 분석하여 최적 커맨드로 자동 라우팅
 - 개발, 분석, 품질, 테스트, 문서화, 배포, 마케팅 전 영역 커버
 
-### 78개 도메인 스킬
+### 83개 도메인 스킬
 
 - 11개 페르소나 스킬 (architect, frontend, backend, security 등)
 - 6개 코어 스킬 (orchestration, principles, coding/security/testing standards)
@@ -88,8 +88,9 @@ Artibot의 핵심 엔진은 Claude Code의 **Agent Teams API**입니다. 단순�
 
 ### 지능형 훅 시스템
 
-- 14개 이벤트에 27개 훅 등록
+- 14개 이벤트에 29개 훅 등록 (HTTP webhook 알림 포함)
 - 위험 명령 차단, 민감 파일 보호, 자동 포맷, PR 감지, 팀원 생명주기 추적
+- HTTP webhook 지원: Slack/Discord/generic 형식으로 세션 이벤트 외부 알림
 
 ### Zero External Dependencies
 
@@ -805,10 +806,10 @@ orchestrator는 **코드를 직접 작성하지 않습니다**. 팀을 구성하
 
 | 에이전트 | 모델 | 역할 |
 |----------|------|------|
-| **frontend-developer** | sonnet | UI/UX, WCAG 접근성, Core Web Vitals |
-| **backend-developer** | sonnet | API, 데이터베이스, 서비스 |
+| **frontend-developer** | opus | UI/UX, WCAG 접근성, Core Web Vitals |
+| **backend-developer** | opus | API, 데이터베이스, 서비스 |
 | **database-reviewer** | opus | SQL 최적화, 스키마 설계 |
-| **typescript-pro** | sonnet | 고급 타입, strict mode, 마이그레이션 |
+| **typescript-pro** | opus | 고급 타입, strict mode, 마이그레이션 |
 | **build-error-resolver** | opus | 빌드 오류 자동 진단/수정 |
 | **performance-engineer** | opus | 성능 분석, 병목 제거, 최적화 |
 
@@ -817,30 +818,29 @@ orchestrator는 **코드를 직접 작성하지 않습니다**. 팀을 구성하
 | 에이전트 | 모델 | 역할 |
 |----------|------|------|
 | **refactor-cleaner** | opus | 데드 코드 제거, 리팩토링 |
-| **doc-updater** | haiku | 문서 동기화, 변경 이력 |
+| **doc-updater** | sonnet | 문서 동기화, 변경 이력 |
 | **content-marketer** | sonnet | 블로그, SEO, 소셜 미디어 |
-| **devops-engineer** | sonnet | CI/CD, Docker, 모니터링 |
-| **mcp-developer** | sonnet | MCP 서버 개발, 도구 오케스트레이션 |
+| **devops-engineer** | opus | CI/CD, Docker, 모니터링 |
+| **mcp-developer** | opus | MCP 서버 개발, 도구 오케스트레이션 |
 
 #### 마케팅 (7개)
 
 | 에이전트 | 모델 | 역할 |
 |----------|------|------|
-| **marketing-strategist** | sonnet | 마케팅 전략, 캠페인 기획 |
+| **marketing-strategist** | opus | 마케팅 전략, 캠페인 기획 |
 | **data-analyst** | sonnet | 데이터 분석, 시각화, KPI 추적 |
 | **seo-specialist** | sonnet | SEO 전략, 키워드 분석, 기술 SEO |
 | **cro-specialist** | sonnet | 전환율 최적화, A/B 테스트 |
 | **ad-specialist** | sonnet | 광고 캠페인, 예산 최적화 |
 | **presentation-designer** | sonnet | 프레젠테이션 디자인, 시각 자료 |
-| **repo-benchmarker** | sonnet | 레포지토리 벤치마크, 비교 분석 |
+| **repo-benchmarker** | opus | 레포지토리 벤치마크, 비교 분석 |
 
 ### 모델 선택 기준
 
 | 모델 | 용도 | 에이전트 수 |
 |------|------|------------|
-| **opus** | 깊은 추론, 아키텍처 결정, 보안 분석 | 11개 |
-| **sonnet** | 일반 코딩, 밸런스형 작업 | 14개 |
-| **haiku** | 경량 작업 (문서 동기화) | 1개 |
+| **opus** | 깊은 추론, 아키텍처 결정, 보안 분석 | 19개 (73%) |
+| **sonnet** | 콘텐츠, 분석, 디자인 | 7개 (27%) |
 
 ### 팀원 행동 프로토콜
 
@@ -991,6 +991,7 @@ orchestrator는 **코드를 직접 작성하지 않습니다**. 팀을 구성하
 | **SubagentStart/Stop** | `subagent-handler.js` | 서브에이전트/팀원 등록/해제 추적 |
 | **TeammateIdle** | `team-idle-handler.js` | 유휴 팀원에게 대기 태스크 할당 알림 |
 | **SessionEnd** | `session-end.js` | 세션 상태 저장 |
+| **SessionEnd** | `http-notify.js` | HTTP webhook 알림 (Slack/Discord/generic, opt-in) |
 
 ---
 
@@ -1057,12 +1058,12 @@ plugins/artibot/
 ├── agents/                      # 26개 에이전트 정의 (orchestrator 1 + 팀원 25)
 │   ├── orchestrator.md          #   CTO / 팀 리더 (Agent Teams API)
 │   └── [25개 전문 에이전트].md    #   팀원 (SendMessage + TaskUpdate)
-├── commands/                    # 41개 슬래시 커맨드
+├── commands/                    # 47개 슬래시 커맨드
 │   ├── sc.md                    #   메인 라우터
 │   ├── orchestrate.md           #   팀 오케스트레이션 (TeamCreate)
 │   ├── spawn.md                 #   팀 스폰 (병렬 실행)
 │   └── [38개 커맨드].md
-├── skills/                      # 78개 스킬 디렉토리
+├── skills/                      # 83개 스킬 디렉토리 (forked context 격리)
 │   ├── orchestration/           #   위임 모드 선택 + 팀 라우팅
 │   ├── delegation/              #   Sub-Agent/Team 위임 전략
 │   └── [76개 스킬]/
@@ -1079,7 +1080,7 @@ plugins/artibot/
 │   ├── adapters/                # 멀티모델 어댑터 (7): base, gemini, codex, cursor, antigravity, adapter-utils
 │   ├── swarm/                   # 연합 지능 (5): swarm-client, pattern-packager, sync-scheduler, swarm-persistence
 │   ├── intent/                  # 의도 감지 (4): language, trigger, ambiguity
-│   ├── privacy/                 # 프라이버시 (3): pii-scrubber, homoglyph-detector, token-rotation
+│   ├── privacy/                 # 프라이버시 (5): pii-scrubber, pii-detector, homoglyph-detector, token-rotation, differential-privacy
 │   ├── system/                  # 시스템 (1): lsp-client
 │   └── context/                 # 컨텍스트 (1): session
 ├── output-styles/               # 4개 출력 스타일

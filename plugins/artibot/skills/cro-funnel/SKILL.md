@@ -1,4 +1,5 @@
 ---
+context: forked
 name: cro-funnel
 description: "Analyzes multi-step conversion funnels to identify drop-offs and optimize signup flows, onboarding, checkout processes, and lead qualification pipelines. Use when user asks about funnel analysis, conversion funnel, drop-off analysis, signup flow, checkout optimization, onboarding funnel, funnel optimization, 퍼널, 전환 퍼널, or 이탈 분석."
 level: 3

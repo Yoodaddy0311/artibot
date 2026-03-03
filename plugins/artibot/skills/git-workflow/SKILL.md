@@ -1,4 +1,5 @@
 ---
+context: forked
 name: git-workflow
 description: |
   Git workflow with conventional commits, branch strategy, and PR best practices.

@@ -1,4 +1,5 @@
 ---
+context: forked
 name: lang-rust
 description: "Provides Rust patterns including ownership, lifetimes, traits, error handling with thiserror, and framework-specific best practices for Axum and Actix-web. Use when writing Rust code, debugging borrow checker errors, working with Tokio async runtime, configuring Cargo workspaces, or asking about .rs files, Result/Option types, or trait bounds."
 level: 2

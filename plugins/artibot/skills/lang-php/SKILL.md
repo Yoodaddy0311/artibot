@@ -1,4 +1,5 @@
 ---
+context: forked
 name: lang-php
 description: "Provides PHP patterns including typed properties, enums, readonly classes, and framework-specific best practices for Laravel 11 and Symfony 7. Use when writing PHP code, working with Eloquent or Doctrine, configuring Composer, running Pest or PHPUnit tests, or asking about .php files, Blade templates, or PHPStan."
 level: 2

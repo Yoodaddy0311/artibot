@@ -1,4 +1,5 @@
 ---
+context: forked
 name: data-analysis
 description: "Performs statistical data analysis, data cleaning, and insight extraction covering KPI calculation, trend analysis, cohort analysis, funnel analysis, and attribution modeling. Use when user asks about data analysis, statistics, KPI, metrics, trend analysis, cohort, funnel analysis, attribution, forecast, 데이터 분석, 지표, 통계, 코호트, or 퍼널."
 platforms: [claude-code, gemini-cli, codex-cli, cursor]

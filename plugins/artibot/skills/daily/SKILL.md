@@ -1,4 +1,5 @@
 ---
+context: forked
 description: "일일 회고 리포트 — 오늘의 커밋, 품질, 작업 현황, 다음 단계를 구조화된 대시보드로 출력. Use when reviewing daily progress, generating retrospective reports, or planning next actions."
 triggers:
   - daily

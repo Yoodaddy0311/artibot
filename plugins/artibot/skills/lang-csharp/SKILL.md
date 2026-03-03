@@ -1,4 +1,5 @@
 ---
+context: forked
 name: lang-csharp
 description: "Provides C# patterns including pattern matching, primary constructors, records, and framework-specific best practices for .NET 8, ASP.NET Core, and Blazor. Use when writing C# code, working with Entity Framework Core, designing Minimal APIs, debugging .NET errors, or asking about LINQ, NuGet, or .cs/.csproj files."
 level: 2

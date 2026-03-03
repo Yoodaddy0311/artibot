@@ -1,4 +1,5 @@
 ---
+context: forked
 name: lang-go
 description: "Provides Go patterns including interfaces, error handling, goroutines, channels, and framework-specific best practices for Echo, Fiber, and Gin. Use when writing Go code, designing interfaces or goroutine patterns, debugging concurrency issues, writing table-driven tests, or asking about go modules, .go files, or Go error wrapping."
 level: 2

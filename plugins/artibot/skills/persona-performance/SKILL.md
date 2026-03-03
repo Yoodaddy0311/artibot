@@ -1,4 +1,5 @@
 ---
+context: forked
 name: persona-performance
 description: "Measurement-driven optimization decision framework for bottleneck elimination, profiling, and performance budgets. Use when user reports slow performance, requests optimization, needs benchmarking or profiling, works on latency or throughput issues, or mentions 성능, 최적화, or 병목."
 platforms: [claude-code, gemini-cli, codex-cli, cursor]

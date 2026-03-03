@@ -1,4 +1,5 @@
 ---
+context: forked
 name: lang-flutter
 description: "Provides Flutter and Dart patterns including Riverpod state management, go_router navigation, sealed classes, and Material 3 best practices for cross-platform apps. Use when writing Dart or Flutter code, configuring pubspec.yaml, working with widgets or Bloc, debugging Flutter build errors, or asking about .dart files or Riverpod."
 level: 2

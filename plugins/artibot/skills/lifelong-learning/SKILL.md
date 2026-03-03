@@ -1,4 +1,5 @@
 ---
+context: forked
 name: lifelong-learning
 description: |
   Continuous learning pipeline that captures session experiences, performs batch learning via GRPO,

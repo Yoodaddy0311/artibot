@@ -1,4 +1,5 @@
 ---
+context: forked
 name: principles
 description: |
   Core development principles enforcing SOLID, DRY, KISS, YAGNI, and quality-first design.

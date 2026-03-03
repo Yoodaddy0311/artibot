@@ -1,4 +1,5 @@
 ---
+context: forked
 name: lang-python
 description: "Provides Python patterns including type hints, async/await, dataclasses, and framework-specific best practices for FastAPI, Django, and Flask. Use when writing Python code, debugging Python errors, configuring pyproject.toml or uv/poetry, working with pytest or Pydantic, or asking about .py files, asyncio, or decorators."
 level: 2

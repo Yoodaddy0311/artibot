@@ -1,4 +1,5 @@
 ---
+context: forked
 name: swarm-intelligence
 description: |
   Federated Swarm Intelligence for collective learning across Artibot instances.

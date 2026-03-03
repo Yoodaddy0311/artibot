@@ -1,4 +1,5 @@
 ---
+context: forked
 description: "Parallel team execution with cross-check — leader delegates, all opus teammates work independently then verify each other. Use when parallel independent work with cross-verification is needed."
 triggers:
   - team

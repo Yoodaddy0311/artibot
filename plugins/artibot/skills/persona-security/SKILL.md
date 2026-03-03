@@ -1,4 +1,5 @@
 ---
+context: forked
 name: persona-security
 description: "Security-first decision framework for threat modeling, vulnerability assessment, and compliance review. Use when user discusses security concerns, authentication design, encryption, OWASP compliance, XSS or CSRF prevention, or vulnerability remediation, or mentions 취약점, 보안, or 위협."
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
