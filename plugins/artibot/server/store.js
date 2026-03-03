@@ -9,13 +9,21 @@
  */
 
 import { createHash } from 'node:crypto';
+import {
+  flushAll,
+  initDataDir,
+  mapToObject,
+  objectToMap,
+  readData,
+  scheduleSave,
+} from './file-store.js';
 
 // ---------------------------------------------------------------------------
 // In-Memory Store
 // ---------------------------------------------------------------------------
 
 /** @type {Map<string, object>} Version -> weight snapshot */
-const weightVersions = new Map();
+let weightVersions = new Map();
 
 /** @type {object|null} Current merged global weights */
 let currentGlobalWeights = null;
@@ -24,7 +32,7 @@ let currentGlobalWeights = null;
 let versionCounter = 0;
 
 /** @type {Map<string, object>} clientId -> stats */
-const clientStats = new Map();
+let clientStats = new Map();
 
 /** @type {object[]} Telemetry records (capped) */
 const telemetryRecords = [];
@@ -34,6 +42,93 @@ const MAX_TELEMETRY = 10000;
 
 /** Max weight versions to keep */
 const MAX_VERSIONS = 100;
+
+/** Whether file persistence is available */
+let persistenceEnabled = false;
+
+// ---------------------------------------------------------------------------
+// File Persistence Layer
+// ---------------------------------------------------------------------------
+
+const DATA_FILES = {
+  WEIGHTS: 'weights.json',
+  STATS: 'client-stats.json',
+  TELEMETRY: 'telemetry.json',
+  GLOBAL: 'global-weights.json',
+};
+
+/** Data providers for flushAll (graceful shutdown) */
+const dataProviders = new Map([
+  [DATA_FILES.WEIGHTS, () => ({
+    versionCounter,
+    snapshots: mapToObject(weightVersions),
+  })],
+  [DATA_FILES.STATS, () => mapToObject(clientStats)],
+  [DATA_FILES.TELEMETRY, () => telemetryRecords],
+  [DATA_FILES.GLOBAL, () => currentGlobalWeights],
+]);
+
+/**
+ * Schedule a debounced save for a data file.
+ * @param {string} filename
+ */
+function persist(filename) {
+  if (!persistenceEnabled) return;
+  const provider = dataProviders.get(filename);
+  if (provider) scheduleSave(filename, provider);
+}
+
+/**
+ * Initialize the store, loading persisted data from disk if available.
+ * Call once at server startup.
+ *
+ * @returns {boolean} true if persistence is available
+ */
+export function initStore() {
+  persistenceEnabled = initDataDir();
+
+  if (!persistenceEnabled) return false;
+
+  // Restore weights
+  const savedWeights = readData(DATA_FILES.WEIGHTS);
+  if (savedWeights && typeof savedWeights === 'object') {
+    versionCounter = savedWeights.versionCounter ?? 0;
+    if (savedWeights.snapshots) {
+      weightVersions = objectToMap(savedWeights.snapshots);
+    }
+  }
+
+  // Restore client stats
+  const savedStats = readData(DATA_FILES.STATS);
+  if (savedStats && typeof savedStats === 'object') {
+    clientStats = objectToMap(savedStats);
+  }
+
+  // Restore telemetry
+  const savedTelemetry = readData(DATA_FILES.TELEMETRY);
+  if (Array.isArray(savedTelemetry)) {
+    telemetryRecords.push(...savedTelemetry.slice(-MAX_TELEMETRY));
+  }
+
+  // Restore global weights
+  const savedGlobal = readData(DATA_FILES.GLOBAL);
+  if (savedGlobal && typeof savedGlobal === 'object') {
+    currentGlobalWeights = savedGlobal;
+  }
+
+  return true;
+}
+
+/**
+ * Flush all pending saves to disk synchronously.
+ * Call during graceful shutdown.
+ *
+ * @returns {number} Number of files flushed
+ */
+export function flushStore() {
+  if (!persistenceEnabled) return 0;
+  return flushAll(dataProviders);
+}
 
 // ---------------------------------------------------------------------------
 // Weight Storage
@@ -73,6 +168,9 @@ export function storeWeights(weights, metadata) {
   stats.lastUpload = timestamp;
   clientStats.set(clientId, stats);
 
+  persist(DATA_FILES.WEIGHTS);
+  persist(DATA_FILES.STATS);
+
   return { version, timestamp };
 }
 
@@ -92,6 +190,7 @@ export function getGlobalWeights() {
  */
 export function setGlobalWeights(weights) {
   currentGlobalWeights = weights;
+  persist(DATA_FILES.GLOBAL);
 }
 
 /**
@@ -168,6 +267,8 @@ export function storeTelemetry(stats) {
   if (telemetryRecords.length > MAX_TELEMETRY) {
     telemetryRecords.splice(0, telemetryRecords.length - MAX_TELEMETRY);
   }
+
+  persist(DATA_FILES.TELEMETRY);
 }
 
 /**
@@ -222,6 +323,7 @@ export function recordDownload(clientId) {
   stats.downloads++;
   stats.lastDownload = new Date().toISOString();
   clientStats.set(clientId, stats);
+  persist(DATA_FILES.STATS);
 }
 
 // ---------------------------------------------------------------------------

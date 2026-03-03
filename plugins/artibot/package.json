@@ -1,6 +1,6 @@
 {
   "name": "artibot",
-  "version": "1.7.2",
+  "version": "1.7.3",
   "description": "Artibot - Claude Code orchestration plugin runtime",
   "private": true,
   "type": "module",

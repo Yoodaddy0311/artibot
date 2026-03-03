@@ -92,6 +92,45 @@ async function fetchLatestRelease() {
 }
 
 // ---------------------------------------------------------------------------
+// Source update (git pull)
+// ---------------------------------------------------------------------------
+
+/**
+ * Pull latest source from the remote repository.
+ *
+ * Resolves the git repo root from the script location and runs `git pull`.
+ * Non-fatal: if the repo is not a git checkout (tarball install) or the pull
+ * fails (network, dirty tree), we log a warning and continue with local files.
+ *
+ * @param {string} repoPluginRoot - Path to plugins/artibot/ in the source repo
+ * @returns {boolean} true if pull succeeded
+ */
+function pullLatestSource(repoPluginRoot) {
+  const gitRoot = path.resolve(repoPluginRoot, '..', '..');
+  const gitDir = path.join(gitRoot, '.git');
+
+  if (!existsSync(gitDir)) {
+    console.log('  Source repo not found (tarball install?). Skipping git pull.');
+    return false;
+  }
+
+  try {
+    console.log('  Pulling latest source...');
+    execSync('git pull origin master', {
+      cwd: gitRoot,
+      stdio: 'inherit',
+      timeout: 30_000,
+    });
+    console.log('  Source updated.');
+    return true;
+  } catch (err) {
+    console.warn(`  Warning: git pull failed: ${err.message}`);
+    console.warn('  Continuing with current local files.');
+    return false;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Manual instructions (shown when automated update fails)
 // ---------------------------------------------------------------------------
 
@@ -251,8 +290,9 @@ async function main() {
   console.log('Update Plan');
   console.log('-----------');
   console.log(`  1. Save backup metadata to ~/.claude/artibot/update-backup.json`);
-  console.log(`  2. Clear plugin cache at ~/.claude/plugins/cache/artibot/`);
-  console.log(`  3. Run: bash install.sh`);
+  console.log(`  2. Pull latest source from git (if available)`);
+  console.log(`  3. Clear plugin cache at ~/.claude/plugins/cache/artibot/`);
+  console.log(`  4. Run: bash install.sh`);
 
   if (DRY_RUN) {
     console.log('\n[dry-run] No changes made. Remove --dry-run to execute.');
@@ -277,10 +317,15 @@ async function main() {
   saveBackupInfo(home, currentVersion);
   console.log('  Backup metadata saved.');
 
-  // Step 2: Clear cache
+  // Step 2: Pull latest source (git pull)
+  //         Resolve source repo root from install.sh location
+  const repoPluginRoot = path.resolve(path.dirname(installScriptPath));
+  pullLatestSource(repoPluginRoot);
+
+  // Step 3: Clear cache
   clearCache(home);
 
-  // Step 3: Install (using pre-resolved path, safe from cache deletion)
+  // Step 4: Install (using pre-resolved path, safe from cache deletion)
   console.log('  Installing via: bash install.sh');
   try {
     runInstall(installScriptPath);

@@ -38,6 +38,8 @@ vi.mock('../../server/store.js', () => ({
     totalTelemetry: 0,
     memoryUsageMB: 10,
   })),
+  initStore: vi.fn(() => true),
+  flushStore: vi.fn(() => 0),
 }));
 
 vi.mock('../../server/merge.js', () => ({

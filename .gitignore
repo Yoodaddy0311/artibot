@@ -19,6 +19,7 @@ plugins/artibot/_Benchmarks/
 plugins/artibot/docs/
 plugins/artibot/coverage/
 plugins/artibot/image.png
+NVIDIA Corporation/
 *.jpeg
 *.png
 !assets/*.jpeg

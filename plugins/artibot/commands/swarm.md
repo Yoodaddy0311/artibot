@@ -16,6 +16,7 @@ Parse $ARGUMENTS:
 - `opt-in`: Enable swarm participation (requires explicit user consent)
 - `opt-out`: Disable swarm participation and stop all sync activity
 - `stats`: Show contribution statistics (uploads, downloads, rank)
+- `health`: Check swarm server health and latency
 
 ## Subcommands
 
@@ -97,6 +98,18 @@ All swarm operations enforce:
 - **Anonymization**: All keys hashed with SHA-256 (only first 12 chars used)
 - **Size Limit**: Maximum 5MB per upload
 - **Opt-in Only**: Never syncs without explicit user consent
+
+### `/sc swarm health`
+
+Check swarm server health:
+
+1. Call server health endpoint
+2. Report:
+   - **Status**: healthy / degraded / unreachable
+   - **Latency**: round-trip time in milliseconds
+   - **Server Version**: if available
+   - **Total Clients**: participating instances
+3. Show connectivity diagnosis if unreachable
 
 ## Error Handling
 

@@ -314,6 +314,50 @@ SETTINGS
 }
 
 # ──────────────────────────────────────────────
+# Swarm Intelligence Opt-In
+# ──────────────────────────────────────────────
+setup_swarm_consent() {
+  echo ""
+  echo -e "${BLUE}━━━ Swarm Intelligence ━━━${NC}"
+  echo "Share anonymized learning patterns with the Artibot community."
+  echo "  • Tool usage success rates (anonymized)"
+  echo "  • Error pattern signatures (SHA-256 hashed)"
+  echo "  • Differential privacy noise applied (ε=1.0)"
+  echo "  • No source code, file paths, or PII shared"
+  echo ""
+  read -p "Enable Swarm Intelligence? [y/N] " swarm_choice
+
+  if [[ "$swarm_choice" =~ ^[Yy]$ ]]; then
+    local consent_dir="${ARTIBOT_DIR}"
+    mkdir -p "$consent_dir"
+    local timestamp
+    timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+    cat > "${consent_dir}/swarm-consent.json" <<SWARMEOF
+{
+  "optedIn": true,
+  "optedInAt": "$timestamp",
+  "optedOutAt": null
+}
+SWARMEOF
+
+    # Enable swarm in installed config so isSwarmActive() returns true
+    local config_file="${ARTIBOT_DIR}/artibot.config.json"
+    if [ -f "$config_file" ] && command -v node &>/dev/null; then
+      node -e "
+        const fs = require('fs');
+        const cfg = JSON.parse(fs.readFileSync('$config_file', 'utf8'));
+        if (cfg.swarm) { cfg.swarm.enabled = true; cfg.swarm.optIn = true; }
+        fs.writeFileSync('$config_file', JSON.stringify(cfg, null, 2) + '\n');
+      "
+    fi
+
+    log "Swarm Intelligence enabled. Use '/sc swarm opt-out' to disable."
+  else
+    echo -e "  ${GREEN}✓${NC} Swarm Intelligence skipped. Use '/sc swarm opt-in' to enable later."
+  fi
+}
+
+# ──────────────────────────────────────────────
 # Verify Installation
 # ──────────────────────────────────────────────
 verify_install() {
@@ -402,6 +446,7 @@ main() {
       seed_project_claude_md
       seed_local_config
       seed_auto_memory
+      setup_swarm_consent
       verify_install
       ;;
     uninstall)

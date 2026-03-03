@@ -1,5 +1,5 @@
 {
-  "version": "1.7.2",
+  "version": "1.7.3",
 
   "agents": {
     "modelPolicy": {
@@ -153,6 +153,19 @@
     "teamStorage": {
       "config": "~/.claude/teams/{team-name}/config.json",
       "tasks": "~/.claude/tasks/{team-name}/"
+    }
+  },
+
+  "swarm": {
+    "enabled": false,
+    "optIn": false,
+    "serverUrl": "https://artibot-swarm-249539591811.asia-northeast3.run.app",
+    "syncInterval": "session",
+    "localGlobalRatio": [0.3, 0.7],
+    "differentialPrivacy": {
+      "enabled": true,
+      "epsilon": 1.0,
+      "delta": 1e-5
     }
   },
 

@@ -61,7 +61,7 @@ steps:
       - '--timeout'
       - '60'
       - '--set-env-vars'
-      - 'FEDAVG_WINDOW=50,RATE_LIMIT=60,MAX_UPLOAD_BYTES=5242880'
+      - 'FEDAVG_WINDOW=50,RATE_LIMIT=60,MAX_UPLOAD_BYTES=5242880,DATA_DIR=/app/data'
 
 images:
   - 'gcr.io/$PROJECT_ID/artibot-swarm:$COMMIT_SHA'

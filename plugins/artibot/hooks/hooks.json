@@ -20,6 +20,15 @@
           "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/memory-tracker.js",
           "timeout": 5000
         }]
+      },
+      {
+        "matcher": "*",
+        "once": true,
+        "hooks": [{
+          "type": "command",
+          "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/swarm-download.js",
+          "timeout": 15000
+        }]
       }
     ],
     "PreToolUse": [
@@ -202,6 +211,14 @@
         "hooks": [{
           "type": "command",
           "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/nightly-learner.js",
+          "timeout": 15000
+        }]
+      },
+      {
+        "matcher": "*",
+        "hooks": [{
+          "type": "command",
+          "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/swarm-sync.js",
           "timeout": 15000
         }]
       },

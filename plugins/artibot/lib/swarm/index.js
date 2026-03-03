@@ -55,3 +55,12 @@ export {
   scheduleSave,
   _resetForTesting,
 } from './swarm-persistence.js';
+
+export {
+  isSwarmActive,
+  getSwarmConfig,
+  optIn,
+  optOut,
+  loadConsent,
+  SWARM_DEFAULTS,
+} from './swarm-config.js';

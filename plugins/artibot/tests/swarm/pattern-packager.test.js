@@ -385,10 +385,21 @@ describe('packagePatterns() additional branches', () => {
     expect(result.metadata.categories).not.toContain('teams');
   });
 
-  it('handles unknown pattern type (not tool/error/success/team)', async () => {
+  it('handles unknown pattern type (not tool/error/success/team/agent)', async () => {
     const pattern = makePattern('unknown', 'something', {});
     const result = await packagePatterns([pattern]);
     expect(result.metadata.packagedCount).toBe(0);
+  });
+
+  it('packages agent patterns into weights.tools (mapped to tools category)', async () => {
+    const pattern = makePattern('agent', 'orchestrator', {
+      bestData: { successRate: 0.92, avgMs: 200 },
+    });
+    const result = await packagePatterns([pattern]);
+    expect(result.weights.tools.orchestrator).toBeDefined();
+    expect(result.weights.tools.orchestrator.successRate).toBeGreaterThan(0);
+    expect(result.weights.tools.orchestrator.confidence).toBe(0.8);
+    expect(result.weights.tools.orchestrator.sampleSize).toBe(10);
   });
 });
 
@@ -530,12 +541,14 @@ describe('packagePatterns() - normalizeLatency and clamp branches', () => {
     const pattern = makePattern('tool', 'Read', { bestData: { successRate: 0.9, avgMs: 100 } });
     readJsonFile
       .mockResolvedValueOnce(null)  // tool-patterns.json -> null (skipped)
-      .mockResolvedValueOnce({ patterns: [pattern] }) // error-patterns.json
+      .mockResolvedValueOnce(null)  // error-patterns.json -> null (primary)
+      .mockResolvedValueOnce({ patterns: [pattern] }) // error-patterns.json fallback (memory/)
       .mockResolvedValueOnce(null) // success-patterns.json
-      .mockResolvedValueOnce(null); // team-patterns.json
+      .mockResolvedValueOnce(null) // team-patterns.json
+      .mockResolvedValueOnce(null); // agent-patterns.json
     await packagePatterns(); // no arg -> loads from disk
-    // Pattern from error-patterns.json file but it's a 'tool' type pattern
-    expect(readJsonFile).toHaveBeenCalledTimes(4);
+    // 5 primary reads + 1 error fallback = 6
+    expect(readJsonFile).toHaveBeenCalledTimes(6);
   });
 
   it('normalizeFileCount: large file count approaches 0', async () => {
@@ -694,6 +707,74 @@ describe('packagePatterns() - normalizeLatency and clamp branches', () => {
     const result = await packagePatterns([pattern]);
     // anonymizeKey(undefined ?? '') -> '' is falsy -> 'unknown'
     expect(Object.keys(result.weights.errors)).toHaveLength(1);
+  });
+});
+
+describe('loadAllPatterns() - error fallback + agent type', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    readJsonFile.mockResolvedValue(null);
+  });
+
+  it('falls back to memory/ dir for error-patterns when patterns/ has none', async () => {
+    const errPattern = makePattern('error', 'ENOENT', {
+      bestData: { recoverable: true, message: 'file not found' },
+    });
+    // tool=null, error(primary)=null, error(fallback)=data, success=null, team=null, agent=null
+    readJsonFile
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ patterns: [errPattern] })
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null);
+    const result = await packagePatterns();
+    expect(readJsonFile).toHaveBeenCalledTimes(6);
+    const errorKeys = Object.keys(result.weights.errors);
+    expect(errorKeys).toHaveLength(1);
+  });
+
+  it('does not fall back for non-error types', async () => {
+    // All return null -> no fallback attempted for tool/success/team/agent
+    readJsonFile.mockResolvedValue(null);
+    const result = await packagePatterns();
+    // 5 primary + 1 error fallback = 6 total calls
+    expect(readJsonFile).toHaveBeenCalledTimes(6);
+    expect(result.metadata.packagedCount).toBe(0);
+  });
+
+  it('skips fallback when error-patterns.json found in primary location', async () => {
+    const errPattern = makePattern('error', 'TypeError', {
+      bestData: { recoverable: false },
+    });
+    // tool=null, error(primary)=data (found!), success=null, team=null, agent=null
+    readJsonFile
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ patterns: [errPattern] })
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null);
+    const result = await packagePatterns();
+    // 5 primary reads, NO fallback since error was found
+    expect(readJsonFile).toHaveBeenCalledTimes(5);
+    expect(Object.keys(result.weights.errors)).toHaveLength(1);
+  });
+
+  it('loads agent-patterns.json from patterns/ directory', async () => {
+    const agentPattern = makePattern('agent', 'planner', {
+      bestData: { successRate: 0.88, avgMs: 150 },
+    });
+    // tool=null, error=null, error(fallback)=null, success=null, team=null, agent=data
+    readJsonFile
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ patterns: [agentPattern] });
+    const result = await packagePatterns();
+    expect(result.weights.tools.planner).toBeDefined();
+    expect(result.weights.tools.planner.confidence).toBe(0.8);
   });
 });
 

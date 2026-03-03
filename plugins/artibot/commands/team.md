@@ -1,12 +1,12 @@
 ---
-description: (Artibot) Parallel team execution with cross-check — persistent team mode, leader delegates only, all teammates work independently on opus 4.6
+description: (Artibot) Parallel team execution with cross-check — persistent team mode, leader delegates only, implementation on opus 4.6, review phases on sonnet 4.6
 argument-hint: '[task] e.g. "이 기능 구현하고 테스트도 작성해줘"'
 allowed-tools: [Read, Glob, Grep, Bash, TeamCreate, SendMessage, TaskCreate, TaskUpdate, TaskList, TaskGet, Task, TeamDelete]
 ---
 
 # /team
 
-Parallel team execution with mandatory cross-check and **persistent team mode**. The leader (YOU) delegates work and receives results ONLY — never does the work yourself. All teammates run on opus 4.6 in parallel, then cross-check each other's output. By default, the team **persists** after task completion and awaits the next assignment. Use `--one-shot` to revert to single-task-then-shutdown behavior.
+Parallel team execution with mandatory cross-check and **persistent team mode**. The leader (YOU) delegates work and receives results ONLY — never does the work yourself. Implementation teammates (Phase 3) run on **opus 4.6** for maximum code quality. Review teammates (Phase 4 cross-check, Phase 4.5 inspection) run on **sonnet 4.6** for faster turnaround. By default, the team **persists** after task completion and awaits the next assignment. Use `--one-shot` to revert to single-task-then-shutdown behavior.
 
 ## Arguments
 
@@ -29,11 +29,12 @@ Parse $ARGUMENTS:
 - Collect results and present to user
 - You are the CTO — teammates are your engineers
 
-### Teammate Rules
-- **ALL teammates use opus model** (model: "opus" or subagent_type with opus)
+### Teammate Rules & Model Policy
+- **Implementation teammates (Phase 3)**: `model="opus"` — 코드 작성/구현은 최고 품질 필수
+- **Review teammates (Phase 4, 4.5)**: `model="sonnet"` — 읽기+검증은 sonnet으로 충분, 속도 우선
 - **ALL work in parallel** (no blockedBy unless truly sequential dependency)
 - **Each teammate works independently** on their assigned scope
-- After main work: cross-check another teammate's output
+- After main work: cross-check another teammate's output (on sonnet)
 
 ### Token Conservation Rule (CRITICAL)
 - **작업 완료 후 팀원을 임의로 셧다운하지 마라** — 재소환 시 토큰이 발생한다
@@ -81,17 +82,14 @@ TaskUpdate(taskId="{id}", owner="{teammate-name}", status="in_progress")
 - Teammates work independently
 - Leader monitors via TaskList but does NOT intervene unless blocked
 
-### Phase 4: CROSS-CHECK (Teammates)
-After ALL main tasks complete, create cross-check tasks:
+### Phase 4: CROSS-CHECK (Sonnet 4.6)
+After ALL main tasks complete, spawn cross-check agents on **sonnet** for fast review:
 
 ```
-TaskCreate(
-  subject="Cross-check: {teammate-A's work}",
-  description="Review {teammate-A}'s output for correctness, completeness, and quality.
-    Files modified: {list}
-    Requirements: {original requirements for that unit}
-    Verify: code works, tests pass, no regressions, follows project patterns"
-)
+Task(subagent_type="code-reviewer", team_name="team-*", name="checker-{n}", model="sonnet",
+     prompt="[Cross-check Mode]\n\n{teammate-A}의 작업물을 검증해주세요.
+     변경 파일: {list}\n요구사항: {original requirements}\n
+     코드 동작, 테스트 통과, 리그레션 없음, 프로젝트 패턴 준수 여부 확인 후 APPROVE 또는 REQUEST_CHANGES 보고.")
 ```
 
 **Cross-check assignment rule**: Teammate A checks Teammate B's work, B checks C's, C checks A's (circular).
@@ -102,12 +100,12 @@ Each cross-checker:
 3. Run relevant tests if applicable
 4. Report: APPROVE or REQUEST_CHANGES with specifics
 
-### Phase 4.5: INSPECTION (code-reviewer)
-Cross-check 완료 후, **code-reviewer 에이전트(opus)가 전체 작업물을 최종 검수**한다.
+### Phase 4.5: INSPECTION (Sonnet 4.6)
+Cross-check 완료 후, **code-reviewer 에이전트(sonnet)가 전체 작업물을 최종 검수**한다.
 
 팀에 code-reviewer가 없으면 이 단계에서 소환:
 ```
-Task(subagent_type="artibot:code-reviewer", team_name="team-*", name="inspector", model="opus",
+Task(subagent_type="artibot:code-reviewer", team_name="team-*", name="inspector", model="sonnet",
      prompt="[Inspection Mode 활성화]\n\n원본 요청: {original user request}\n\n
 각 팀원의 작업물을 검수해주세요:
 1. {teammate-1}: {작업 내용} — 변경 파일: {files}
@@ -157,6 +155,43 @@ Collect all results, cross-check findings, and **inspection report**, then repor
 | 파일 | 작업 | 담당 |
 |------|------|------|
 | {file path} | {created/modified} | {teammate} |
+
+### Phase 5.5: FOLLOW-UP (Leader only)
+Phase 5 리포트를 유저에게 보여준 직후, `AskUserQuestion` 도구를 사용해 인터랙티브 후속 액션을 제안한다.
+
+> `--one-shot` 모드에서는 Phase 5.5를 **스킵**하고 바로 Phase 6 SHUTDOWN으로 진행한다.
+
+**AskUserQuestion 호출:**
+```
+AskUserQuestion(
+  question="작업이 완료되었습니다. 다음 단계를 선택해주세요.",
+  options=[
+    "관련 작업 이어서 (Recommended) — 방금 작업과 관련된 추가 구현/테스트/개선을 이어서 진행",
+    "커밋 & 푸시 — 변경사항을 커밋하고 원격에 푸시 (버전 업데이트 포함)",
+    "메모리 & 문서화 — 작업 내용을 메모리에 저장하고 문서를 업데이트",
+    "새로운 작업 — 현재 작업과 무관한 새 작업을 팀에 배정"
+  ]
+)
+```
+
+**터미널에 표시되는 형태:**
+```
+? 작업이 완료되었습니다. 다음 단계를 선택해주세요.
+  1. 관련 작업 이어서 (Recommended) — 방금 작업과 관련된 추가 구현/테스트/개선을 이어서 진행
+  2. 커밋 & 푸시 — 변경사항을 커밋하고 원격에 푸시 (버전 업데이트 포함)
+  3. 메모리 & 문서화 — 작업 내용을 메모리에 저장하고 문서를 업데이트
+  4. 새로운 작업 — 현재 작업과 무관한 새 작업을 팀에 배정
+  Chat about this
+```
+
+**유저 선택에 따른 동작:**
+
+| # | 선택 | 동작 |
+|---|------|------|
+| 1 | **관련 작업 이어서** | 리더가 방금 완료한 작업 컨텍스트를 기반으로 관련 후속 작업을 추천 → 유저 확인 후 Phase 1 DECOMPOSE로 돌아감 (팀원 재활용) |
+| 2 | **커밋 & 푸시** | 리더가 git 워크플로우 수행: stage → commit → push (버전 업데이트 포함) → 완료 후 persistent mode 대기 |
+| 3 | **메모리 & 문서화** | 작업 내용을 MEMORY.md에 저장하고 관련 문서(README 등) 업데이트 → 완료 후 persistent mode 대기 |
+| 4 | **새로운 작업** | Phase 1 DECOMPOSE로 돌아감 (팀원 재활용, 새 컨텍스트) |
 
 **Persistent mode (default):** After reporting, do NOT shutdown. Display:
 ```
@@ -258,7 +293,8 @@ This runs the original flow: Phase 1 through 6, with automatic shutdown after re
 - Leader doing implementation work directly
 - Sequential execution when parallel is possible
 - Skipping cross-check phase
-- Using sonnet/haiku for teammates (always opus)
+- Using sonnet/haiku for **implementation** teammates (Phase 3 must be opus)
+- Using opus for review-only phases (Phase 4/4.5 — sonnet is faster and sufficient)
 - Single teammate for multi-domain work
 - Cross-checker reviewing their own work
 - **작업 완료 후 팀원을 임의로 셧다운** — 재소환 토큰 낭비 (idle 유지가 더 저렴)

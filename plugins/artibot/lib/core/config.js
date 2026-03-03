@@ -19,6 +19,14 @@ const DEFAULTS = {
   version: '1.0.0',
   agents: { taskBased: {} },
   team: { enabled: false, maxTeammates: 7 },
+  swarm: {
+    enabled: false,
+    optIn: false,
+    serverUrl: 'https://artibot-swarm-249539591811.asia-northeast3.run.app',
+    syncInterval: 'session',
+    localGlobalRatio: [0.3, 0.7],
+    differentialPrivacy: { enabled: true, epsilon: 1.0, delta: 1e-5 },
+  },
   automation: {
     intentDetection: true,
     ambiguityThreshold: 50,

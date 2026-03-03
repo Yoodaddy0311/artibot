@@ -142,6 +142,21 @@ function resolveServerUrl(config) {
   );
 }
 
+/**
+ * Build request headers including auth token if available.
+ *
+ * @param {object} [extraHeaders] - Additional headers to merge
+ * @returns {object} Headers object
+ */
+function buildHeaders(extraHeaders = {}) {
+  const headers = { ...extraHeaders };
+  const token = process.env.ARTIBOT_SERVER_TOKEN;
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  return headers;
+}
+
 // ---------------------------------------------------------------------------
 // HTTP Helpers
 // ---------------------------------------------------------------------------
@@ -352,7 +367,7 @@ export async function uploadWeights(weights, metadata = {}, options = {}) {
     const result = await withRetry(() =>
       fetchWithTimeout(`${serverUrl}/api/v1/weights`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: buildHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(payload),
       }),
     );
@@ -397,7 +412,7 @@ export async function downloadLatestWeights(currentVersion, options = {}) {
     const result = await withRetry(() =>
       fetchWithTimeout(url, {
         method: 'GET',
-        headers: { 'Accept': 'application/json' },
+        headers: buildHeaders({ 'Accept': 'application/json' }),
       }),
     );
 
@@ -440,7 +455,7 @@ export async function reportTelemetry(stats, options = {}) {
     await withRetry(() =>
       fetchWithTimeout(`${serverUrl}/api/v1/telemetry`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: buildHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
           stats,
           reportedAt: new Date().toISOString(),
@@ -466,7 +481,7 @@ export async function checkHealth(options = {}) {
   try {
     const response = await fetchWithTimeout(
       `${serverUrl}/api/v1/health`,
-      { method: 'GET' },
+      { method: 'GET', headers: buildHeaders() },
       10000,
     );
 
@@ -502,7 +517,7 @@ export async function getContributionStats(clientId, options = {}) {
     const result = await withRetry(() =>
       fetchWithTimeout(`${serverUrl}/api/v1/stats/${clientId}`, {
         method: 'GET',
-        headers: { 'Accept': 'application/json' },
+        headers: buildHeaders({ 'Accept': 'application/json' }),
       }),
     );
 
@@ -557,4 +572,4 @@ export async function flushOfflineQueue(options = {}) {
 // Exports for testing
 // ---------------------------------------------------------------------------
 
-export { computeChecksum, verifyChecksum, validateUrl, ALLOWED_HOSTS };
+export { computeChecksum, verifyChecksum, validateUrl, ALLOWED_HOSTS, buildHeaders };

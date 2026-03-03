@@ -31,6 +31,8 @@ import {
   getClientStats,
   recordDownload,
   getServerInfo,
+  initStore,
+  flushStore,
 } from './store.js';
 import { federatedAverage } from './merge.js';
 
@@ -435,6 +437,12 @@ async function handleRequest(req, res) {
 // Server Startup
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Store Initialization
+// ---------------------------------------------------------------------------
+
+const hasPersistence = initStore();
+
 const server = createServer(handleRequest);
 
 server.listen(PORT, () => {
@@ -444,11 +452,16 @@ server.listen(PORT, () => {
   console.log(`[Artibot Swarm Server] Rate limit: ${RATE_LIMIT} req/min per IP`);
   console.log(`[Artibot Swarm Server] Auth: ${AUTH_TOKEN ? 'Bearer token' : 'localhost-only'}`);
   console.log(`[Artibot Swarm Server] CORS: ${CORS_ALLOWED_ORIGINS ? CORS_ALLOWED_ORIGINS.join(', ') : 'localhost-only'}`);
+  console.log(`[Artibot Swarm Server] Persistence: ${hasPersistence ? 'file-based' : 'in-memory only'}`);
 });
 
 // Graceful shutdown for Cloud Run
 process.on('SIGTERM', () => {
   console.log('[Artibot Swarm Server] SIGTERM received, shutting down...');
+  const flushed = flushStore();
+  if (flushed > 0) {
+    console.log(`[Artibot Swarm Server] Flushed ${flushed} data files to disk`);
+  }
   server.close(() => {
     console.log('[Artibot Swarm Server] Server closed');
     process.exit(0);
@@ -469,4 +482,5 @@ export {
   readBody,
   matchRoute,
   RATE_LIMIT_WINDOW_MS,
+  hasPersistence,
 };

@@ -25,7 +25,10 @@ import { ARTIBOT_DIR, round } from '../core/index.js';
 const PATTERNS_DIR = path.join(ARTIBOT_DIR, 'patterns');
 
 /** Pattern types to package */
-const PATTERN_TYPES = ['tool', 'error', 'success', 'team'];
+const PATTERN_TYPES = ['tool', 'error', 'success', 'team', 'agent'];
+
+/** Fallback directory for patterns stored by memory-manager */
+const MEMORY_DIR = path.join(ARTIBOT_DIR, 'memory');
 
 /** Default local:global merge ratio */
 const DEFAULT_LOCAL_RATIO = 0.3;
@@ -85,6 +88,9 @@ export async function packagePatterns(localPatterns) {
         break;
       case 'team':
         weights.teams[category] = packageTeamPattern(pattern);
+        break;
+      case 'agent':
+        weights.tools[category] = packageToolPattern(pattern);
         break;
     }
   }
@@ -402,7 +408,12 @@ async function loadAllPatterns() {
 
   for (const type of PATTERN_TYPES) {
     const filePath = path.join(PATTERNS_DIR, `${type}-patterns.json`);
-    const data = await readJsonFile(filePath);
+    let data = await readJsonFile(filePath);
+    // Fallback: error patterns may live in memory/ (written by memory-manager)
+    if (!data && type === 'error') {
+      const fallbackPath = path.join(MEMORY_DIR, 'error-patterns.json');
+      data = await readJsonFile(fallbackPath);
+    }
     if (data?.patterns && Array.isArray(data.patterns)) {
       allPatterns.push(...data.patterns);
     }

@@ -37,6 +37,27 @@ export const configSchema = {
         spawnStrategy: { type: 'string' },
       },
     },
+    swarm: {
+      type: 'object',
+      properties: {
+        enabled: { type: 'boolean' },
+        optIn: { type: 'boolean' },
+        serverUrl: { type: 'string' },
+        syncInterval: { type: 'string' },
+        localGlobalRatio: {
+          type: 'array',
+          items: { type: 'number', minimum: 0, maximum: 1 },
+        },
+        differentialPrivacy: {
+          type: 'object',
+          properties: {
+            enabled: { type: 'boolean' },
+            epsilon: { type: 'number', minimum: 0 },
+            delta: { type: 'number', minimum: 0 },
+          },
+        },
+      },
+    },
     automation: {
       type: 'object',
       properties: {
