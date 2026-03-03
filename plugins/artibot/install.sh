@@ -358,6 +358,30 @@ SWARMEOF
 }
 
 # ──────────────────────────────────────────────
+# Save Source Repo Path (for auto-update git pull)
+# ──────────────────────────────────────────────
+save_source_path() {
+  local source_json="${ARTIBOT_DIR}/source-repo.json"
+  local git_root
+  git_root="$(cd "$SCRIPT_DIR" && git rev-parse --show-toplevel 2>/dev/null)" || true
+
+  if [ -n "$git_root" ]; then
+    local timestamp
+    timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+    cat > "$source_json" <<SRCEOF
+{
+  "repoRoot": "$git_root",
+  "pluginDir": "$SCRIPT_DIR",
+  "savedAt": "$timestamp"
+}
+SRCEOF
+    log "Source repo path saved for auto-updates: ${git_root}"
+  else
+    warn "Not a git repo — source path not saved (manual git pull needed for updates)"
+  fi
+}
+
+# ──────────────────────────────────────────────
 # Verify Installation
 # ──────────────────────────────────────────────
 verify_install() {
@@ -447,6 +471,7 @@ main() {
       seed_local_config
       seed_auto_memory
       setup_swarm_consent
+      save_source_path
       verify_install
       ;;
     uninstall)

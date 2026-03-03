@@ -96,37 +96,75 @@ async function fetchLatestRelease() {
 // ---------------------------------------------------------------------------
 
 /**
+ * Find the git source repo root.
+ *
+ * Strategy (ordered by priority):
+ *   1. source-repo.json — saved by install.sh during initial install
+ *   2. installScriptPath — walk up from install.sh looking for .git
+ *   3. give up — return null (tarball install or deleted repo)
+ *
+ * @param {string} [installScriptDir] - Directory containing install.sh
+ * @returns {{ gitRoot: string, pluginDir: string } | null}
+ */
+function findSourceRepo(installScriptDir) {
+  // 1. Saved source-repo.json (most reliable)
+  const home = resolveHome();
+  const sourceJson = path.join(home, '.claude', 'artibot', 'source-repo.json');
+  try {
+    const data = JSON.parse(readFileSync(sourceJson, 'utf-8'));
+    if (data.repoRoot && existsSync(path.join(data.repoRoot, '.git'))) {
+      return { gitRoot: data.repoRoot, pluginDir: data.pluginDir || path.join(data.repoRoot, 'plugins', 'artibot') };
+    }
+  } catch {
+    // source-repo.json not found or invalid — fall through
+  }
+
+  // 2. Walk up from install.sh location
+  if (installScriptDir) {
+    let dir = path.resolve(installScriptDir);
+    for (let i = 0; i < 5; i++) {
+      if (existsSync(path.join(dir, '.git'))) {
+        return { gitRoot: dir, pluginDir: installScriptDir };
+      }
+      const parent = path.dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+    }
+  }
+
+  return null;
+}
+
+/**
  * Pull latest source from the remote repository.
  *
- * Resolves the git repo root from the script location and runs `git pull`.
- * Non-fatal: if the repo is not a git checkout (tarball install) or the pull
- * fails (network, dirty tree), we log a warning and continue with local files.
+ * Uses findSourceRepo() to locate the git repo, then runs `git pull`.
+ * Non-fatal: if the repo is not found or pull fails, we log and continue.
  *
- * @param {string} repoPluginRoot - Path to plugins/artibot/ in the source repo
- * @returns {boolean} true if pull succeeded
+ * @param {string} [installScriptDir] - Directory containing install.sh
+ * @returns {{ pulled: boolean, pluginDir: string | null }}
  */
-function pullLatestSource(repoPluginRoot) {
-  const gitRoot = path.resolve(repoPluginRoot, '..', '..');
-  const gitDir = path.join(gitRoot, '.git');
+function pullLatestSource(installScriptDir) {
+  const repo = findSourceRepo(installScriptDir);
 
-  if (!existsSync(gitDir)) {
+  if (!repo) {
     console.log('  Source repo not found (tarball install?). Skipping git pull.');
-    return false;
+    return { pulled: false, pluginDir: null };
   }
 
   try {
-    console.log('  Pulling latest source...');
+    console.log(`  Pulling latest source from ${repo.gitRoot}...`);
     execSync('git pull origin master', {
-      cwd: gitRoot,
+      cwd: repo.gitRoot,
       stdio: 'inherit',
       timeout: 30_000,
     });
     console.log('  Source updated.');
-    return true;
+    return { pulled: true, pluginDir: repo.pluginDir };
   } catch (err) {
     console.warn(`  Warning: git pull failed: ${err.message}`);
     console.warn('  Continuing with current local files.');
-    return false;
+    return { pulled: false, pluginDir: repo.pluginDir };
   }
 }
 
@@ -318,17 +356,24 @@ async function main() {
   console.log('  Backup metadata saved.');
 
   // Step 2: Pull latest source (git pull)
-  //         Resolve source repo root from install.sh location
-  const repoPluginRoot = path.resolve(path.dirname(installScriptPath));
-  pullLatestSource(repoPluginRoot);
+  //         Find source repo via source-repo.json or install.sh location
+  const { pulled, pluginDir } = pullLatestSource(path.dirname(installScriptPath));
+
+  // If pull succeeded and source repo has install.sh, prefer that (freshly updated)
+  let finalInstallPath = installScriptPath;
+  if (pulled && pluginDir) {
+    const freshInstall = path.join(pluginDir, 'install.sh');
+    if (existsSync(freshInstall)) {
+      console.log(`  Using updated install.sh: ${freshInstall}`);
+      finalInstallPath = freshInstall;
+    }
+  }
 
   // Step 3: Clear cache
   clearCache(home);
-
-  // Step 4: Install (using pre-resolved path, safe from cache deletion)
-  console.log('  Installing via: bash install.sh');
+  console.log(`  Installing via: ${finalInstallPath}`);
   try {
-    runInstall(installScriptPath);
+    runInstall(finalInstallPath);
   } catch (err) {
     console.error(`\nInstall command failed: ${err.message}`);
     console.error('The cache has already been cleared. Please complete the update manually:');
