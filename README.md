@@ -1,12 +1,12 @@
 # Artibot
 
-[![Coverage](https://img.shields.io/badge/coverage-97.28%25-brightgreen)](plugins/artibot/tests/)
-[![Tests](https://img.shields.io/badge/tests-3090%20passed-brightgreen)](plugins/artibot/tests/)
+[![Coverage](https://img.shields.io/badge/coverage-97.5%25-brightgreen)](plugins/artibot/tests/)
+[![Tests](https://img.shields.io/badge/tests-3302%20passed-brightgreen)](plugins/artibot/tests/)
 [![License](https://img.shields.io/badge/license-BSL--1.1-blue)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D18-green)](package.json)
 
 ![Claude Code Plugin](https://img.shields.io/badge/Claude_Code-Plugin-7C3AED?style=flat-square)
-![Version](https://img.shields.io/badge/version-1.7.3-blue?style=flat-square)
+![Version](https://img.shields.io/badge/version-1.8.0-blue?style=flat-square)
 ![License](https://img.shields.io/badge/license-BSL--1.1-green?style=flat-square)
 ![Node.js](https://img.shields.io/badge/Node.js-18%2B-brightgreen?style=flat-square)
 ![Agent Teams](https://img.shields.io/badge/Agent_Teams-Native-orange?style=flat-square)
@@ -38,16 +38,18 @@ Most Claude Code plugins use simple sub-agent (`Task()`) delegation -- fire-and-
 - **Intelligent Delegation** -- Auto-selects Sub-Agent (simple) vs Agent Team (complex) based on cognitive complexity scoring
 - **5 Orchestration Patterns** -- Leader, Council, Swarm, Pipeline, Watchdog
 - **8 Playbooks** -- Feature, Bugfix, Refactor, Security + Marketing Campaign, Marketing Audit, Content Launch, Competitive Analysis (now with executable parser and registry)
-- **45 Slash Commands** -- `/sc` smart router, `/daily`, `/team`, `/orchestrate`, `/spawn`, `/implement`, `/visual-check`, `/sc playbook`, and more
+- **47 Slash Commands** -- `/sc` smart router, `/daily`, `/team`, `/orchestrate`, `/spawn`, `/implement`, `/visual-check`, `/sc playbook`, and more
 - **26 Specialized Agents** -- Architecture, security, frontend, backend, testing, DevOps, marketing, SEO, analytics, and more (opus 73%, sonnet 27%)
 - **83 Domain Skills** -- 11 persona skills, 8 core skills, 16 language skills, 8 utility skills, 35 marketing skills, visual-validation, daily, team, session-worklog, vibe-coding (all enhanced with Anthropic best-practice descriptions, workflow checklists, HITL checkpoints, and freedom levels)
 - **7 Auto-Activating Rules** -- DEV protocol, quality gates, agent coordination, config safety, frontend/backend/test patterns
-- **27 Event Hook Registrations** -- Cognitive routing, lifelong learning, session lifecycle, dangerous command blocking, auto-formatting, team tracking
+- **29 Event Hook Registrations** -- Cognitive routing, lifelong learning, session lifecycle, dangerous command blocking, auto-formatting, team tracking, HTTP webhook notifications
 - **DEV Protocol** -- Mandatory Decompose-Execute-Verify workflow with zero-skip policy for all code changes
 - **Vibe Coding Support** -- Natural language request handling with read-first, verify-after, evidence-based completion
 - **Visual Validation Pipeline** -- SSIM-based screenshot comparison, auto-fix suggestion, iterative correction loop via Playwright MCP
 - **Conversation-to-Memory** -- Auto-extracts rules and decisions from user messages (Korean/English), injects into skills dynamically
 - **Project CLAUDE.md Seeding** -- `install.sh` auto-generates project-level CLAUDE.md with Artibot methodology and DEV protocol
+- **Forked Context Skills** -- All 83 skills run in isolated forked context for clean execution without cross-contamination
+- **HTTP Webhook Notifications** -- Session events sent to Slack, Discord, or custom endpoints via configurable webhooks
 - **Cross-Platform Compatible** -- Works with Gemini CLI, OpenAI Codex, and Cursor via platform adapters
 - **Zero Dependencies** -- Pure Node.js built-in modules only (`node:fs`, `node:path`, `node:os`)
 
@@ -572,7 +574,7 @@ All teammates have their specialist tools + team collaboration tools (`SendMessa
 
 ## Hooks
 
-27 hook registrations across 14 event types:
+29 hook registrations across 14 event types:
 
 | Event | Script | Purpose |
 |-------|--------|---------|
@@ -589,6 +591,7 @@ All teammates have their specialist tools + team collaboration tools (`SendMessa
 | TeammateIdle | `team-idle-handler.js` | Alert idle teammates about pending tasks |
 | SessionEnd | `session-end.js` | Persist session state |
 | SessionEnd | `nightly-learner.js` | Batch learning (GRPO) + knowledge transfer |
+| SessionEnd | `http-notify.js` | HTTP webhook notifications (Slack/Discord/generic) |
 
 ## Auto-Update
 
@@ -596,7 +599,7 @@ Artibot checks for new versions on session start via GitHub Releases API (24h ca
 
 ```
 Session start:
-  Artibot v1.7.3 initialized
+  Artibot v1.8.0 initialized
   ✅ You are running the latest version
 ```
 
@@ -655,7 +658,7 @@ plugins/artibot/
 |   +-- orchestrator.md          #   CTO / Team leader (Agent Teams API)
 |   +-- [17 dev specialists].md  #   Development teammates
 |   +-- [8 marketing agents].md  #   Marketing specialists
-+-- commands/                    # 45 slash commands
++-- commands/                    # 47 slash commands
 |   +-- sc.md                    #   Smart router
 |   +-- daily.md                 #   Daily work recap and retrospective
 |   +-- team.md                  #   Parallel team orchestration
@@ -679,7 +682,7 @@ plugins/artibot/
 +-- hooks/
 |   +-- hooks.json               # Hook event mappings
 +-- scripts/
-|   +-- hooks/                   # 18 hook scripts (ESM)
+|   +-- hooks/                   # 20 hook scripts (ESM)
 |   +-- ci/                      # 4 CI validation scripts
 |   +-- utils/
 +-- lib/
@@ -687,7 +690,8 @@ plugins/artibot/
 |   +-- visual/                  # Visual validation (SSIM differ, style-fixer, validator)
 |   +-- intent/                  # Intent detection (language, trigger)
 |   +-- context/                 # Context management (session)
-|   +-- learning/                # Lifelong learning (memory, GRPO, rule-extractor, skill-injector)
+|   +-- privacy/                 # PII protection (pii-detector, pii-scrubber, homoglyph, token-rotation, differential-privacy)
+|   +-- learning/                # Lifelong learning (memory, GRPO, pattern-analyzer, tool-history, rule-extractor, skill-injector)
 |   +-- adapters/                # Cross-platform adapters
 +-- output-styles/               # 3 output styles
 +-- templates/                   # 3 writing templates
@@ -702,7 +706,7 @@ Key settings in `artibot.config.json`:
 
 | Setting | Description | Default |
 |---------|-------------|---------|
-| `version` | Plugin version | `1.7.3` |
+| `version` | Plugin version | `1.8.0` |
 | `cognitive.router.threshold` | System 1/2 boundary | `0.4` |
 | `cognitive.router.adaptRate` | Per-feedback adjustment step | `0.05` |
 | `cognitive.system1.maxLatency` | System 1 max response time (ms) | `100` |
@@ -806,7 +810,7 @@ node scripts/ci/validate-hooks.js     # Hook validation
 
 ## Version
 
-1.7.3 -- Swarm Federated Learning (server persistence, differential privacy, opt-in/out, auto-sync hook, /swarm command), update script fix (git pull for stale source), team follow-up (interactive post-task action selection)
+1.8.0 -- Code quality cleanup (4 file splits, 3 barrel files), forked context for 83 skills, HTTP webhook notifications, wildcard permission patterns, 212 new tests (3,302 total)
 
 ## License
 
