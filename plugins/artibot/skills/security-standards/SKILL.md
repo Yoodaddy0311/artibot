@@ -74,7 +74,7 @@ const validated = schema.parse(untrustedInput)
 4. **Rotate** any exposed secrets
 5. **Search** entire codebase for similar issues
 
-See `references/owasp-checklist.md` for OWASP Top 10 coverage.
+See `${CLAUDE_SKILL_DIR}/references/owasp-checklist.md` for OWASP Top 10 coverage.
 
 ## Workflow Checklist
 

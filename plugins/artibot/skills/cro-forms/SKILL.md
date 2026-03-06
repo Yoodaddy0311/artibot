@@ -176,5 +176,5 @@ P1       | [change]          | +[X]%
 
 ## References
 
-- See `references/field-optimization-guide.md` for field optimization and completion rate guide
-- See `references/validation-ux-patterns.md` for validation UX patterns and error handling
+- See `${CLAUDE_SKILL_DIR}/references/field-optimization-guide.md` for field optimization and completion rate guide
+- See `${CLAUDE_SKILL_DIR}/references/validation-ux-patterns.md` for validation UX patterns and error handling

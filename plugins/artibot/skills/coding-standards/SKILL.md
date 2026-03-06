@@ -46,7 +46,7 @@ user.name = newName
 // CORRECT
 const updated = { ...user, name: newName }
 ```
-See `references/immutability.md` for comprehensive patterns.
+See `${CLAUDE_SKILL_DIR}/references/immutability.md` for comprehensive patterns.
 
 ### Error Handling
 - Fail fast with explicit, meaningful errors
@@ -54,7 +54,7 @@ See `references/immutability.md` for comprehensive patterns.
 - Preserve full error context for debugging
 - Use typed errors and structured error responses
 
-See `references/error-handling.md` for patterns.
+See `${CLAUDE_SKILL_DIR}/references/error-handling.md` for patterns.
 
 ### File Organization
 - **Many small files > few large files**
@@ -62,7 +62,7 @@ See `references/error-handling.md` for patterns.
 - Organize by feature/domain, not by type
 - High cohesion within files, low coupling between files
 
-See `references/file-organization.md` for rules.
+See `${CLAUDE_SKILL_DIR}/references/file-organization.md` for rules.
 
 ### Naming Conventions
 - Functions: verb + noun (`getUserById`, `validateInput`)

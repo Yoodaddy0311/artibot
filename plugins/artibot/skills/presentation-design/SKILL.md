@@ -159,5 +159,5 @@ Font Pairing:  [headline] / [body]
 
 ## References
 
-- See `references/narrative-arc-templates.md` for narrative arc templates
-- See `references/slide-design-principles.md` for slide design principles
+- See `${CLAUDE_SKILL_DIR}/references/narrative-arc-templates.md` for narrative arc templates
+- See `${CLAUDE_SKILL_DIR}/references/slide-design-principles.md` for slide design principles

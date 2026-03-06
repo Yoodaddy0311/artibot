@@ -134,4 +134,4 @@ These instructions should be dispatched via the Playwright MCP server at runtime
 
 ## References
 
-- See `references/validation-thresholds.md` for validation thresholds
+- See `${CLAUDE_SKILL_DIR}/references/validation-thresholds.md` for validation thresholds

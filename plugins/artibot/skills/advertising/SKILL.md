@@ -154,5 +154,5 @@ FORMAT COMPLIANCE
 
 ## References
 
-- See `references/platform-specs.md` for platform specifications and ad format requirements
-- See `references/bidding-strategy-guide.md` for bidding strategy and audience targeting guide
+- See `${CLAUDE_SKILL_DIR}/references/platform-specs.md` for platform specifications and ad format requirements
+- See `${CLAUDE_SKILL_DIR}/references/bidding-strategy-guide.md` for bidding strategy and audience targeting guide

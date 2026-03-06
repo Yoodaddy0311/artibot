@@ -54,12 +54,17 @@ export function resolveConfigPath(...segments) {
 /**
  * Atomically write data to a file by writing to a temp file and renaming.
  * Prevents partial-write corruption of state files on crash or concurrent access.
+ * Catches EEXIST on mkdir for Windows + OneDrive race conditions.
  * @param {string} filePath - Destination file path
  * @param {string|object} data - String content or object to serialize as JSON
  */
 export function atomicWriteSync(filePath, data) {
   const dir = dirname(filePath);
-  mkdirSync(dir, { recursive: true });
+  try {
+    mkdirSync(dir, { recursive: true });
+  } catch (err) {
+    if (err.code !== 'EEXIST') throw err;
+  }
   const tmpPath = filePath + '.tmp.' + process.pid;
   writeFileSync(tmpPath, typeof data === 'string' ? data : JSON.stringify(data, null, 2), 'utf-8');
   renameSync(tmpPath, filePath);

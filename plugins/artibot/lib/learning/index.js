@@ -96,6 +96,27 @@ export {
   clearInjections,
 } from './skill-injector.js';
 
+// Drift Detector (Alignment drift monitoring)
+export {
+  recordScore,
+  checkDrift,
+  getHistory as getDriftHistory,
+  resetAgent,
+  resetAll as resetDrift,
+  getSummary as getDriftSummary,
+} from './drift-detector.js';
+
+// Self-Knowledge Vault (Categorized knowledge persistence)
+export {
+  addEntry,
+  getEntries,
+  search as searchVault,
+  decay as decayVault,
+  getVaultStats,
+  resetVault,
+  CATEGORIES as VAULT_CATEGORIES,
+} from './vault.js';
+
 /**
  * Process a user message through the conversation-to-memory pipeline.
  * Extracts rules, persists them to memory, and optionally injects

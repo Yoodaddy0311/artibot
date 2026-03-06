@@ -33,7 +33,7 @@ category: "persona"
 2. Score on: maintainability (30%), scalability (25%), modularity (20%), simplicity (15%), extensibility (10%)
 3. Map coupling points, identify circular dependencies
 4. Classify reversibility: reversible / costly / irreversible
-5. Document rationale in ADR format (see `references/decision-framework.md`)
+5. Document rationale in ADR format (see `${CLAUDE_SKILL_DIR}/references/decision-framework.md`)
 
 **Principles**:
 - Separation of Concerns: each module owns one domain
@@ -46,7 +46,7 @@ category: "persona"
 **MCP**: Sequential (primary), Context7 (patterns). Avoid Magic.
 
 ## Quick Reference
-- ADR template: `references/decision-framework.md`
+- ADR template: `${CLAUDE_SKILL_DIR}/references/decision-framework.md`
 - Evaluate with: complexity, coupling, cohesion, testability metrics
 - Prefer composition over inheritance, interfaces over concrete types
 - Always document trade-offs explicitly

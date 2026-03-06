@@ -4,6 +4,7 @@
  */
 
 import fs from 'node:fs/promises';
+import fsSync from 'node:fs';
 import path from 'node:path';
 
 /**
@@ -85,6 +86,8 @@ export async function readTextFile(filePath) {
 
 /**
  * Ensure a directory exists, creating it recursively if needed.
+ * Catches EEXIST errors that can occur on Windows + OneDrive due to
+ * filesystem sync race conditions even with `recursive: true`.
  *
  * @param {string} dirPath - Absolute directory path to create.
  * @returns {Promise<void>}
@@ -92,7 +95,28 @@ export async function readTextFile(filePath) {
  * await ensureDir('/home/user/.claude/artibot/patterns');
  */
 export async function ensureDir(dirPath) {
-  await fs.mkdir(dirPath, { recursive: true });
+  try {
+    await fs.mkdir(dirPath, { recursive: true });
+  } catch (err) {
+    if (err.code !== 'EEXIST') throw err;
+  }
+}
+
+/**
+ * Synchronous version of ensureDir for use in hooks and sync contexts.
+ * Catches EEXIST errors from Windows + OneDrive race conditions.
+ *
+ * @param {string} dirPath - Absolute directory path to create.
+ * @returns {void}
+ * @example
+ * ensureDirSync('/home/user/.claude/artibot/patterns');
+ */
+export function ensureDirSync(dirPath) {
+  try {
+    fsSync.mkdirSync(dirPath, { recursive: true });
+  } catch (err) {
+    if (err.code !== 'EEXIST') throw err;
+  }
 }
 
 /**

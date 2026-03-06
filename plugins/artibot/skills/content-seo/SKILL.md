@@ -171,5 +171,5 @@ Missing Topic   | Volume | Difficulty | Priority
 
 ## References
 
-- See `references/on-page-checklist.md` for on-page SEO checklist
-- See `references/content-quality-scoring.md` for content quality scoring matrix
+- See `${CLAUDE_SKILL_DIR}/references/on-page-checklist.md` for on-page SEO checklist
+- See `${CLAUDE_SKILL_DIR}/references/content-quality-scoring.md` for content quality scoring matrix

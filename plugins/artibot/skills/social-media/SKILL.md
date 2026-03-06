@@ -159,5 +159,5 @@ CALENDAR (if applicable)
 
 ## References
 
-- See `references/platform-specifications.md` for platform specifications
-- See `references/content-pillar-strategy.md` for content pillar strategy
+- See `${CLAUDE_SKILL_DIR}/references/platform-specifications.md` for platform specifications
+- See `${CLAUDE_SKILL_DIR}/references/content-pillar-strategy.md` for content pillar strategy

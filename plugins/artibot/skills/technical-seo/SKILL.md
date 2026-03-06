@@ -160,6 +160,6 @@ P1       | [cat]    | [specific action]   | [expected improvement]
 
 ## References
 
-- See `references/core-web-vitals.md` for Core Web Vitals optimization guide
-- See `references/audit-scoring-matrix.md` for technical SEO audit scoring matrix
-- See `references/schema-markup-types.md` for schema markup types reference
+- See `${CLAUDE_SKILL_DIR}/references/core-web-vitals.md` for Core Web Vitals optimization guide
+- See `${CLAUDE_SKILL_DIR}/references/audit-scoring-matrix.md` for technical SEO audit scoring matrix
+- See `${CLAUDE_SKILL_DIR}/references/schema-markup-types.md` for schema markup types reference

@@ -185,6 +185,14 @@
           "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/tool-tracker.js",
           "timeout": 5000
         }]
+      },
+      {
+        "matcher": "*",
+        "hooks": [{
+          "type": "command",
+          "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/team-idle-handler.js",
+          "timeout": 5000
+        }]
       }
     ],
     "PermissionRequest": [
@@ -264,6 +272,17 @@
           "type": "command",
           "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/workflow-status.js notification",
           "timeout": 3000
+        }]
+      }
+    ],
+    "InstructionsLoaded": [
+      {
+        "matcher": "*",
+        "once": true,
+        "hooks": [{
+          "type": "command",
+          "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/instructions-loaded.js",
+          "timeout": 5000
         }]
       }
     ]

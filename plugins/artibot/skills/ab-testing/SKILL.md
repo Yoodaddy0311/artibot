@@ -170,5 +170,5 @@ SECONDARY METRICS
 
 ## References
 
-- See `references/statistical-foundations.md` for statistical foundations for A/B testing
-- See `references/test-design-framework.md` for test design framework and experiment roadmap
+- See `${CLAUDE_SKILL_DIR}/references/statistical-foundations.md` for statistical foundations for A/B testing
+- See `${CLAUDE_SKILL_DIR}/references/test-design-framework.md` for test design framework and experiment roadmap

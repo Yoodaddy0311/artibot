@@ -25,7 +25,7 @@ category: "tooling"
 
 ## Core Guidance
 
-**Server Selection** (see `references/server-selection.md`):
+**Server Selection** (see `${CLAUDE_SKILL_DIR}/references/server-selection.md`):
 | Server | Primary Use | Activation Signals |
 |--------|------------|-------------------|
 | Context7 | Library docs, framework patterns | import/require, framework keywords |
@@ -46,7 +46,7 @@ category: "tooling"
 - **Parallel**: Independent aspects of same task (Context7 docs + Playwright testing)
 - **Sequential**: Output feeds next (Context7 patterns -> Magic generate -> Playwright test)
 
-**Fallback Strategies** (see `references/fallback-strategies.md`):
+**Fallback Strategies** (see `${CLAUDE_SKILL_DIR}/references/fallback-strategies.md`):
 | Server Down | Fallback |
 |-------------|----------|
 | Context7 | WebSearch for documentation |
@@ -57,7 +57,7 @@ category: "tooling"
 **Anti-Patterns**: All servers for simple tasks, ignoring failures without fallback, sequential when parallel works, repeating identical queries
 
 ## Quick Reference
-- Server selection: `references/server-selection.md`
-- Fallback strategies: `references/fallback-strategies.md`
+- Server selection: `${CLAUDE_SKILL_DIR}/references/server-selection.md`
+- Fallback strategies: `${CLAUDE_SKILL_DIR}/references/fallback-strategies.md`
 - Activate only servers scoring >0.6 relevance
 - Cache Context7 lookups (2-5K tokens saved per query)

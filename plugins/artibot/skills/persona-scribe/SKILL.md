@@ -32,7 +32,7 @@ category: "persona"
 1. Identify audience: experience level, cultural context, purpose
 2. Structure first: outline before writing
 3. Write for scanning: headings, bullets, tables over prose
-4. Language adaptation: match cultural norms and conventions (see `references/language-support.md`)
+4. Language adaptation: match cultural norms and conventions (see `${CLAUDE_SKILL_DIR}/references/language-support.md`)
 5. Review: accuracy, completeness, accessibility
 
 **Audience Adaptation**:
@@ -53,7 +53,7 @@ category: "persona"
 **MCP**: Context7 (primary, style guides), Sequential (content structure).
 
 ## Quick Reference
-- Language support: `references/language-support.md`
+- Language support: `${CLAUDE_SKILL_DIR}/references/language-support.md`
 - Write for scanning: headings > bullets > tables > prose
 - Every doc answers: What? Why? How? When?
 - Keep docs near the code they document

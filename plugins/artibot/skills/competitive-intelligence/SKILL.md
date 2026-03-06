@@ -147,5 +147,5 @@ P1       | [strategic action]        | [competitor]
 
 ## References
 
-- See `references/competitor-analysis-framework.md` for competitor analysis framework
-- See `references/feature-comparison-matrix.md` for feature comparison matrix
+- See `${CLAUDE_SKILL_DIR}/references/competitor-analysis-framework.md` for competitor analysis framework
+- See `${CLAUDE_SKILL_DIR}/references/feature-comparison-matrix.md` for feature comparison matrix

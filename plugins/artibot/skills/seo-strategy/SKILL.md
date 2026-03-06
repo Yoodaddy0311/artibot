@@ -160,6 +160,6 @@ Phase        | Timeframe  | Actions              | Target
 
 ## References
 
-- See `references/search-intent-classification.md` for search intent classification framework
-- See `references/keyword-priority-formula.md` for keyword priority formula
-- See `references/geo-optimization-guide.md` for GEO (Generative Engine Optimization) principles
+- See `${CLAUDE_SKILL_DIR}/references/search-intent-classification.md` for search intent classification framework
+- See `${CLAUDE_SKILL_DIR}/references/keyword-priority-formula.md` for keyword priority formula
+- See `${CLAUDE_SKILL_DIR}/references/geo-optimization-guide.md` for GEO (Generative Engine Optimization) principles

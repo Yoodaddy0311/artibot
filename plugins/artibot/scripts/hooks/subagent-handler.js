@@ -31,6 +31,7 @@ async function main() {
 
   const agentId = extractAgentId(hookData);
   const agentRole = extractAgentRole(hookData);
+  const agentType = hookData?.agent_type || agentRole;
 
   const state = loadState();
   if (!state.agents) state.agents = {};
@@ -38,6 +39,7 @@ async function main() {
   if (action === 'start') {
     state.agents[agentId] = {
       role: agentRole,
+      agentType,
       active: true,
       startedAt: new Date().toISOString(),
     };

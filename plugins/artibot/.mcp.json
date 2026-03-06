@@ -1,4 +1,5 @@
 {
+  "$comment": "WARNING: Do not set defer_loading and cache_control simultaneously — Claude Code v2.1.69 bug (#30989) causes MCP to fail when both are present on the same server entry.",
   "mcpServers": {
     "context7": {
       "command": "npx",

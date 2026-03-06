@@ -57,7 +57,7 @@ function loadStoreSync(storeKey) {
 
 function saveStoreSync(storeKey, store) {
   const memDir = getMemoryDir();
-  mkdirSync(memDir, { recursive: true });
+  try { mkdirSync(memDir, { recursive: true }); } catch (e) { if (e.code !== 'EEXIST') throw e; }
   const updated = {
     ...store,
     metadata: { ...store.metadata, updatedAt: new Date().toISOString() },

@@ -82,7 +82,7 @@ Use the `Task` tool to spawn focused sub-agents for bounded work.
 - `Task(subagent_type)` — blocks caller until result (use inside command pipelines)
 - `Task(subagent_type, run_in_background=true)` — non-blocking (use when routing from /sc or keeping user session responsive)
 
-**Strategies** (see `references/delegation-matrix.md`):
+**Strategies** (see `${CLAUDE_SKILL_DIR}/references/delegation-matrix.md`):
 | Condition | Strategy | Gain |
 |-----------|----------|------|
 | >7 dirs | Parallel by directory | ~65% |
@@ -213,7 +213,7 @@ Progress:
 ## Quick Reference
 
 **Decision**: Score complexity/parallelism/communication/scale -> Sub-Agent (<0.6) or Team (>=0.6)
-**Delegation matrix**: `references/delegation-matrix.md`
+**Delegation matrix**: `${CLAUDE_SKILL_DIR}/references/delegation-matrix.md`
 **Auto-trigger**: >7 dirs OR >50 files OR complexity >0.8 OR multi-domain + communication need
 
 **Sub-Agent Flow (pipeline)**: `Task(subagent_type)` -> receive result (blocking, for internal pipelines)

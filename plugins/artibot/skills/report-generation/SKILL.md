@@ -184,5 +184,5 @@ P1       | [action]        | [expected lift] | [team]
 
 ## References
 
-- See `references/report-structure-template.md` for report structure template
-- See `references/kpi-scorecard-design.md` for KPI scorecard design
+- See `${CLAUDE_SKILL_DIR}/references/report-structure-template.md` for report structure template
+- See `${CLAUDE_SKILL_DIR}/references/kpi-scorecard-design.md` for KPI scorecard design

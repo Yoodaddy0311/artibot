@@ -172,5 +172,5 @@ P1       | [stage] | [specific action] | +[X]%    | [A/B test]
 
 ## References
 
-- See `references/funnel-diagnostics.md` for funnel diagnostics and stage analysis framework
-- See `references/micro-conversion-tracking.md` for micro-conversion tracking and analysis
+- See `${CLAUDE_SKILL_DIR}/references/funnel-diagnostics.md` for funnel diagnostics and stage analysis framework
+- See `${CLAUDE_SKILL_DIR}/references/micro-conversion-tracking.md` for micro-conversion tracking and analysis

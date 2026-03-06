@@ -34,6 +34,8 @@ tools:
   - Task(backend-developer)
   - Task(security-reviewer)
   - Task(code-reviewer)
+  - Task(spec-reviewer)
+  - Task(quality-reviewer)
   - Task(database-reviewer)
   - Task(tdd-guide)
   - Task(e2e-runner)

@@ -37,7 +37,7 @@ category: "persona"
 4. Single responsibility per component
 5. Measure Core Web Vitals impact before shipping
 
-**Performance Budgets** (see `references/performance-budgets.md`):
+**Performance Budgets** (see `${CLAUDE_SKILL_DIR}/references/performance-budgets.md`):
 - LCP < 2.5s | FID < 100ms | CLS < 0.1
 - Initial bundle < 500KB | Total < 2MB
 - Load < 3s on 3G | < 1s on WiFi
@@ -52,7 +52,7 @@ category: "persona"
 **MCP**: Magic (primary), Playwright (testing), Context7 (framework patterns).
 
 ## Quick Reference
-- Performance budgets: `references/performance-budgets.md`
+- Performance budgets: `${CLAUDE_SKILL_DIR}/references/performance-budgets.md`
 - Always test keyboard navigation and screen reader
 - Use `rem`/`em` over `px`, CSS Grid/Flexbox over floats
 - Lazy-load below-fold content, code-split routes

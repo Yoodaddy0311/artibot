@@ -32,7 +32,7 @@ category: "devops"
 
 ## Core Guidance
 
-**Commit Format**: `type(scope): subject` (see `references/commit-conventions.md`)
+**Commit Format**: `type(scope): subject` (see `${CLAUDE_SKILL_DIR}/references/commit-conventions.md`)
 
 **Types**: feat, fix, refactor, docs, test, chore, perf, ci, style
 
@@ -94,7 +94,7 @@ Progress:
 | Merge strategy | LOW | Squash-merge is the standard |
 
 ## Quick Reference
-- Commit conventions: `references/commit-conventions.md`
+- Commit conventions: `${CLAUDE_SKILL_DIR}/references/commit-conventions.md`
 - Always `git diff --staged` before commit
 - New commits over amending when hooks fail
 - PR body: Summary (bullets) + Test Plan (checklist)

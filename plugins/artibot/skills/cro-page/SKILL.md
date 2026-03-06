@@ -155,5 +155,5 @@ P1       | [cat]    | [action]      | +[X]%
 
 ## References
 
-- See `references/heuristic-evaluation.md` for heuristic page evaluation framework
-- See `references/trust-signals-inventory.md` for trust signal placement and impact inventory
+- See `${CLAUDE_SKILL_DIR}/references/heuristic-evaluation.md` for heuristic page evaluation framework
+- See `${CLAUDE_SKILL_DIR}/references/trust-signals-inventory.md` for trust signal placement and impact inventory

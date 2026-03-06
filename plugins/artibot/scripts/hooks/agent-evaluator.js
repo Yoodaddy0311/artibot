@@ -182,6 +182,9 @@ async function main() {
 
   const { score, breakdown, summary } = evaluateAgent(hookData);
 
+  // Extract the explicit agent_type field (v2.1.69+) for finer classification
+  const agentType = hookData?.agent_type || agentRole;
+
   // Feed into lifelong learning pipeline
   try {
     const lifelongPath = path.join(PLUGIN_ROOT, 'lib', 'learning', 'lifelong-learner.js');
@@ -191,6 +194,7 @@ async function main() {
       category: agentRole,
       data: {
         agentId,
+        agentType,
         score,
         summary,
         ...breakdown,
@@ -201,7 +205,7 @@ async function main() {
   }
 
   writeStdout({
-    message: `[agent-evaluator] ${agentId} (${agentRole}) scored ${score} (${summary}) | tools=${breakdown.toolUses} output=${breakdown.outputLength}chars`,
+    message: `[agent-evaluator] ${agentId} (${agentRole}/${agentType}) scored ${score} (${summary}) | tools=${breakdown.toolUses} output=${breakdown.outputLength}chars`,
   });
 }
 

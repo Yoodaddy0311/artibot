@@ -36,6 +36,7 @@ category: "orchestration"
 - [Core Guidance](#core-guidance)
 - [Quick Reference](#quick-reference)
 - [Token Budget Management](#token-budget-management)
+- [HARD-GATE: Design Before Implementation](#hard-gate-design-before-implementation)
 - [Workflow Checklist](#workflow-checklist)
 - [Human Checkpoints](#human-checkpoints)
 - [Freedom Levels](#freedom-levels)
@@ -151,9 +152,9 @@ TeamCreate -> TaskCreate(task1) -> TaskCreate(task2, blockedBy: [task1]) -> ... 
 
 ## Quick Reference
 
-**Routing**: See `references/routing-table.md` for the full routing matrix.
-**Flags**: See `references/flag-system.md` for flag precedence and auto-activation.
-**Personas**: See `references/persona-activation.md` for persona trigger conditions.
+**Routing**: See `${CLAUDE_SKILL_DIR}/references/routing-table.md` for the full routing matrix.
+**Flags**: See `${CLAUDE_SKILL_DIR}/references/flag-system.md` for flag precedence and auto-activation.
+**Personas**: See `${CLAUDE_SKILL_DIR}/references/persona-activation.md` for persona trigger conditions.
 
 **Team API Tools**:
 | Tool | Purpose |
@@ -242,6 +243,28 @@ Routing (direct mode):
 { "env": { "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1" } }
 ```
 
+## HARD-GATE: Design Before Implementation
+
+<HARD-GATE>
+**Applies to**: System 2 classified requests (complexity score >= threshold)
+
+**Rule**: Do NOT invoke any implementation action (Edit, Write, Bash build/deploy, TaskCreate for implementation) until a design document has been produced and approved.
+
+**Gate Protocol**:
+1. **Produce Design** — Write a design plan covering: goal, approach, affected files, risk assessment, rollback strategy
+2. **Save Design** — Store the plan in `docs/plans/{date}-{slug}.md` (e.g., `docs/plans/2026-03-06-auth-refactor.md`)
+3. **Request Approval** — Present the design to the user (or team lead in team mode) and wait for explicit approval
+4. **Gate Check** — Only after receiving "approve", "LGTM", "go ahead", or equivalent confirmation, proceed to implementation
+5. **Link Back** — Reference the approved design document in commit messages and task descriptions
+
+**Bypass Conditions** (gate is NOT enforced):
+- System 1 classified requests (simple, low complexity) — fast execution preserved
+- Explicit user override: "skip design", "just do it", "no plan needed"
+- Emergency hotfix with `--hotfix` flag
+
+**Violation Recovery**: If implementation begins without design approval, STOP immediately, document what was done, and produce the missing design before continuing.
+</HARD-GATE>
+
 ## Workflow Checklist
 
 Copy this checklist and track progress:
@@ -251,6 +274,7 @@ Progress:
 - [ ] Step 1: Parse request — extract keywords, match domain
 - [ ] Step 2: Score complexity (simple / moderate / complex)
 - [ ] Step 3: Identify delegation mode (direct / sub-agent / team)
+- [ ] Step 3.5: HARD-GATE — If System 2, produce design doc and get approval before proceeding
 - [ ] Step 4: Select personas and MCP servers to activate
 - [ ] Step 5: Compose team or spawn sub-agents as needed
 - [ ] Step 6: Execute with token budget monitoring

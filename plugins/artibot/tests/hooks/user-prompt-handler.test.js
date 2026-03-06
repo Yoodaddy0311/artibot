@@ -236,6 +236,96 @@ describe('user-prompt-handler hook', () => {
     });
   });
 
+  describe('!rv re-verification trigger', () => {
+    it('activates re-verification mode for "!rv"', async () => {
+      readStdin.mockResolvedValue(makeHookData('!rv'));
+
+      await import('../../scripts/hooks/user-prompt-handler.js');
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(writeStdout).toHaveBeenCalledTimes(1);
+      const output = writeStdout.mock.calls[0][0];
+      expect(output.message).toContain('[trigger] !rv re-verification mode activated');
+      expect(output.user_prompt).toContain('CRITICAL RE-VERIFICATION MODE');
+      expect(output.user_prompt).toContain('CLAIM AUDIT');
+      expect(output.user_prompt).toContain('EVIDENCE CHECK');
+    });
+
+    it('activates for "!rv" with additional context', async () => {
+      readStdin.mockResolvedValue(makeHookData('!rv check the auth module'));
+
+      await import('../../scripts/hooks/user-prompt-handler.js');
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(writeStdout).toHaveBeenCalledTimes(1);
+      const output = writeStdout.mock.calls[0][0];
+      expect(output.user_prompt).toContain('check the auth module');
+      expect(output.user_prompt).toContain('CRITICAL RE-VERIFICATION MODE');
+    });
+
+    it('is case-insensitive for !rv', async () => {
+      readStdin.mockResolvedValue(makeHookData('!RV'));
+
+      await import('../../scripts/hooks/user-prompt-handler.js');
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(writeStdout).toHaveBeenCalledTimes(1);
+      const output = writeStdout.mock.calls[0][0];
+      expect(output.message).toContain('!rv re-verification');
+    });
+
+    it('activates for Korean trigger "!재검증"', async () => {
+      readStdin.mockResolvedValue(makeHookData('!재검증'));
+
+      await import('../../scripts/hooks/user-prompt-handler.js');
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(writeStdout).toHaveBeenCalledTimes(1);
+      const output = writeStdout.mock.calls[0][0];
+      expect(output.message).toContain('!rv re-verification');
+      expect(output.user_prompt).toContain('CRITICAL RE-VERIFICATION MODE');
+    });
+
+    it('does not trigger !rv when it appears mid-prompt', async () => {
+      readStdin.mockResolvedValue(makeHookData('please review !rv the code'));
+
+      await import('../../scripts/hooks/user-prompt-handler.js');
+      await new Promise((r) => setTimeout(r, 50));
+
+      // Should detect as normal intent (review), not as !rv trigger
+      expect(writeStdout).toHaveBeenCalledTimes(1);
+      const output = writeStdout.mock.calls[0][0];
+      expect(output.message).toContain('action:review');
+      expect(output.user_prompt).toBeUndefined();
+    });
+
+    it('takes priority over normal intent detection', async () => {
+      readStdin.mockResolvedValue(makeHookData('!rv build test'));
+
+      await import('../../scripts/hooks/user-prompt-handler.js');
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(writeStdout).toHaveBeenCalledTimes(1);
+      const output = writeStdout.mock.calls[0][0];
+      // Should be !rv trigger, not intent detection
+      expect(output.message).toContain('!rv re-verification');
+      expect(output.message).not.toContain('action:build');
+    });
+
+    it('includes verification protocol steps in newPrompt', async () => {
+      readStdin.mockResolvedValue(makeHookData('!rv'));
+
+      await import('../../scripts/hooks/user-prompt-handler.js');
+      await new Promise((r) => setTimeout(r, 50));
+
+      const output = writeStdout.mock.calls[0][0];
+      expect(output.user_prompt).toContain('ASSUMPTION HUNT');
+      expect(output.user_prompt).toContain('RED FLAGS');
+      expect(output.user_prompt).toContain('CORRECTION REPORT');
+      expect(output.user_prompt).toContain('Do NOT rationalize');
+    });
+  });
+
   describe('error handling', () => {
     it('exits gracefully when readStdin rejects', async () => {
       readStdin.mockRejectedValue(new Error('stdin read failed'));

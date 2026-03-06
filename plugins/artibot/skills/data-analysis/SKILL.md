@@ -165,5 +165,5 @@ P1       | [action]        | [metric improvement]
 
 ## References
 
-- See `references/kpi-formula-library.md` for KPI formula library
-- See `references/analysis-types-guide.md` for analysis types guide
+- See `${CLAUDE_SKILL_DIR}/references/kpi-formula-library.md` for KPI formula library
+- See `${CLAUDE_SKILL_DIR}/references/analysis-types-guide.md` for analysis types guide

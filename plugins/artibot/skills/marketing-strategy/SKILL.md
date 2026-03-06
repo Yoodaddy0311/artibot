@@ -145,5 +145,5 @@ Metric:    [KPI]  | Target: [value] | Tracking: [method]
 
 ## References
 
-- See `references/market-sizing-framework.md` for market sizing framework
-- See `references/positioning-template.md` for positioning template
+- See `${CLAUDE_SKILL_DIR}/references/market-sizing-framework.md` for market sizing framework
+- See `${CLAUDE_SKILL_DIR}/references/positioning-template.md` for positioning template

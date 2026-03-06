@@ -179,5 +179,5 @@ Thresholds:
 
 ## References
 
-- See `references/segmentation-dimensions.md` for segmentation dimensions
-- See `references/segment-activation-matrix.md` for segment activation matrix
+- See `${CLAUDE_SKILL_DIR}/references/segmentation-dimensions.md` for segmentation dimensions
+- See `${CLAUDE_SKILL_DIR}/references/segment-activation-matrix.md` for segment activation matrix

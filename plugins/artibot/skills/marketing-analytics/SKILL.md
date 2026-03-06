@@ -175,5 +175,5 @@ P1       | [action]       | [metric lift]
 
 ## References
 
-- See `references/metrics-hierarchy.md` for metrics hierarchy
-- See `references/attribution-models-selection.md` for attribution models selection guide
+- See `${CLAUDE_SKILL_DIR}/references/metrics-hierarchy.md` for metrics hierarchy
+- See `${CLAUDE_SKILL_DIR}/references/attribution-models-selection.md` for attribution models selection guide

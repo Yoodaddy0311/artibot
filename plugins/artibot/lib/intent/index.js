@@ -35,4 +35,9 @@ export function detectIntent(text, options = {}) {
 
 export { matchKeywords, uniqueIntents } from './language.js';
 export { getRecommendations, getBestRecommendation } from './trigger.js';
-export { detectAmbiguity } from './ambiguity.js';
+export {
+  detectAmbiguity,
+  classifyAmbiguityType,
+  generateClarifyingQuestions,
+  AmbiguityType,
+} from './ambiguity.js';

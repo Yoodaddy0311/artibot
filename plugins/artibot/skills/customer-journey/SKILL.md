@@ -162,5 +162,5 @@ P1       | [stage]     | [pain point]     | [improvement]
 
 ## References
 
-- See `references/lifecycle-stages.md` for lifecycle stages
-- See `references/journey-map-template.md` for journey map template
+- See `${CLAUDE_SKILL_DIR}/references/lifecycle-stages.md` for lifecycle stages
+- See `${CLAUDE_SKILL_DIR}/references/journey-map-template.md` for journey map template

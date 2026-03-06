@@ -10,7 +10,7 @@
 
 import path from 'node:path';
 import { parseJSON, readStdin, toFileUrl } from '../utils/index.js';
-import { createErrorHandler, logHookError } from '../../lib/core/hook-utils.js';
+import { createErrorHandler, extractAgentId, extractAgentRole, logHookError } from '../../lib/core/hook-utils.js';
 
 // Dynamic import for tool-learner (ESM, relative to plugin root)
 const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT
@@ -59,6 +59,10 @@ async function main() {
   // Extract metadata
   const meta = extractMeta(toolInput);
 
+  // Extract agent context for per-agent tracking
+  const agentId = extractAgentId(hookData);
+  const agentType = extractAgentRole(hookData, 'main');
+
   // Extract session ID and project context from hook data
   const sessionId = hookData?.session_id ?? null;
   const project = hookData?.cwd ? path.basename(hookData.cwd) : (process.cwd() ? path.basename(process.cwd()) : null);
@@ -67,7 +71,7 @@ async function main() {
   try {
     const learnerPath = path.join(PLUGIN_ROOT, 'lib', 'learning', 'tool-learner.js');
     const { recordUsage } = await import(toFileUrl(learnerPath));
-    await recordUsage(toolName, context, score, meta);
+    await recordUsage(toolName, context, score, { ...meta, agentId, agentType });
 
     // Bridge: feed tool usage into the lifelong learning pipeline
     const lifelongPath = path.join(PLUGIN_ROOT, 'lib', 'learning', 'lifelong-learner.js');
@@ -75,7 +79,7 @@ async function main() {
     await collectExperience({
       type: 'tool',
       category: toolName,
-      data: { context, score, project, ...meta },
+      data: { context, score, project, agentId, agentType, ...meta },
       sessionId,
     });
   } catch (err) {

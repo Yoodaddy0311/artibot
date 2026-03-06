@@ -71,7 +71,7 @@ category: "testing"
 3. Fix implementation, not tests (unless tests are wrong)
 4. Use `--persona-qa` for complex test debugging
 
-See `references/coverage-requirements.md` for detailed metrics.
+See `${CLAUDE_SKILL_DIR}/references/coverage-requirements.md` for detailed metrics.
 
 ## Workflow Checklist
 

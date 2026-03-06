@@ -184,5 +184,5 @@ Logo:       [usage rules and restrictions]
 
 ## References
 
-- See `references/voice-definition-framework.md` for voice definition framework
-- See `references/messaging-architecture.md` for messaging architecture
+- See `${CLAUDE_SKILL_DIR}/references/voice-definition-framework.md` for voice definition framework
+- See `${CLAUDE_SKILL_DIR}/references/messaging-architecture.md` for messaging architecture

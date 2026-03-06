@@ -15,11 +15,11 @@ This file auto-loads when Claude accesses files in `plugins/artibot/`.
 | Directory | Purpose | Key Files |
 |-----------|---------|-----------|
 | `agents/` | Agent definitions (26 .md) | orchestrator.md (CTO), planner.md |
-| `commands/` | Slash commands (43 .md) | sc.md (router), implement.md, build.md |
-| `skills/` | SKILL.md + references/ (79 dirs) | principles/, tdd-workflow/, coding-standards/ |
+| `commands/` | Slash commands (46 .md) | sc.md (router), implement.md, build.md |
+| `skills/` | SKILL.md + references/ (83 dirs) | principles/, tdd-workflow/, coding-standards/ |
 | `lib/cognitive/` | Dual-process engine | router.js, system1.js, system2-core.js |
-| `lib/learning/` | Lifelong learning (9 modules) | grpo.js, memory.js, lifelong.js |
-| `lib/core/` | Core utilities (21 files) | plugin-loader.js, hook-utils.js |
+| `lib/learning/` | Lifelong learning (11 modules) | grpo.js, memory.js, lifelong.js |
+| `lib/core/` | Core utilities (22 files) | plugin-loader.js, hook-utils.js |
 | `lib/visual/` | Visual validation | visual-validator.js, screenshot-differ.js |
 | `lib/privacy/` | PII protection | pii-scrubber.js, homoglyph-detector.js |
 | `hooks/` | Event hooks config | hooks.json (14 event types) |

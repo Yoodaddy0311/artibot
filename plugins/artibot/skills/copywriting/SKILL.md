@@ -154,5 +154,5 @@ CTA OPTIONS
 
 ## References
 
-- See `references/persuasion-frameworks.md` for persuasion frameworks
-- See `references/cta-best-practices.md` for CTA best practices
+- See `${CLAUDE_SKILL_DIR}/references/persuasion-frameworks.md` for persuasion frameworks
+- See `${CLAUDE_SKILL_DIR}/references/cta-best-practices.md` for CTA best practices

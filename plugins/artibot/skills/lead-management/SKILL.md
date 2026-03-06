@@ -220,5 +220,5 @@ Metric              | Target  | Current
 
 ## References
 
-- See `references/lead-lifecycle-stages.md` for lead lifecycle stages and BANT qualification framework
-- See `references/lead-scoring-model.md` for lead scoring model and pipeline metrics
+- See `${CLAUDE_SKILL_DIR}/references/lead-lifecycle-stages.md` for lead lifecycle stages and BANT qualification framework
+- See `${CLAUDE_SKILL_DIR}/references/lead-scoring-model.md` for lead scoring model and pipeline metrics

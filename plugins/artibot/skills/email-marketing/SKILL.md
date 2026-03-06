@@ -152,5 +152,5 @@ GDPR:     [PASS|ISSUE]
 
 ## References
 
-- See `references/campaign-types-guide.md` for campaign types guide
-- See `references/deliverability-checklist.md` for deliverability checklist
+- See `${CLAUDE_SKILL_DIR}/references/campaign-types-guide.md` for campaign types guide
+- See `${CLAUDE_SKILL_DIR}/references/deliverability-checklist.md` for deliverability checklist

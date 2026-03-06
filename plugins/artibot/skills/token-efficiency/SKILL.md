@@ -64,7 +64,7 @@ category: "tooling"
 ### Status
 `[ok]` passed | `[x]` failed | `[!]` warning | `[i]` info | `[~]` in progress
 
-See `references/symbol-system.md` for the complete symbol table.
+See `${CLAUDE_SKILL_DIR}/references/symbol-system.md` for the complete symbol table.
 
 ## Workflow Checklist
 

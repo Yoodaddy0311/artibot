@@ -16,6 +16,49 @@ import { round as _coreRound } from '../core/index.js';
 const round = (n) => _coreRound(n, 2);
 
 // ---------------------------------------------------------------------------
+// Native Effort Level API Integration (extension point)
+// ---------------------------------------------------------------------------
+// TODO (#30806): When Claude Code exposes a native model/effort level API,
+// integrate it here. The expected shape is:
+//   { model: string, effortLevel: 'low'|'medium'|'high', reasoning_budget?: number }
+//
+// Integration plan:
+//   1. Accept native effort via configure() or a new setNativeEffort() function
+//   2. Map native effort to System 1/2: low->S1, medium->threshold-based, high->S2
+//   3. Use native effort as an override signal (highest priority) or blend with
+//      heuristic score via a configurable weight (e.g., nativeWeight: 0.6)
+//   4. Expose the native effort in route() return metadata for downstream consumers
+//
+// The current heuristic classification remains the fallback when native API
+// is unavailable, ensuring backward compatibility.
+// ---------------------------------------------------------------------------
+
+/** @type {{ model?: string, effortLevel?: string, reasoningBudget?: number } | null} */
+let nativeEffortHint = null;
+
+/**
+ * Set native effort level hint from Claude Code's plugin API.
+ * When set, this hint influences routing decisions alongside heuristic scores.
+ * Pass null to clear the hint and revert to pure heuristic routing.
+ *
+ * TODO (#30806): Wire this to the actual API when available.
+ *
+ * @param {{ model?: string, effortLevel?: 'low'|'medium'|'high', reasoningBudget?: number } | null} hint
+ * @returns {void}
+ */
+export function setNativeEffortHint(hint) {
+  nativeEffortHint = hint;
+}
+
+/**
+ * Get the current native effort hint (if any).
+ * @returns {{ model?: string, effortLevel?: string, reasoningBudget?: number } | null}
+ */
+export function getNativeEffortHint() {
+  return nativeEffortHint;
+}
+
+// ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
@@ -171,7 +214,17 @@ export function classifyComplexity(input, context = {}) {
   );
 
   const clampedScore = Math.max(0, Math.min(1, score));
-  const system = clampedScore < threshold ? 1 : 2;
+  let system = clampedScore < threshold ? 1 : 2;
+
+  // TODO (#30806): When native effort API is available, blend or override here.
+  // Current behavior: native hint overrides heuristic system assignment.
+  let nativeOverride = false;
+  if (nativeEffortHint && nativeEffortHint.effortLevel) {
+    const level = nativeEffortHint.effortLevel;
+    if (level === 'low') { system = 1; nativeOverride = true; }
+    else if (level === 'high') { system = 2; nativeOverride = true; }
+    // 'medium' defers to heuristic threshold
+  }
 
   // Confidence: higher when score is far from threshold
   const distance = Math.abs(clampedScore - threshold);
@@ -180,11 +233,12 @@ export function classifyComplexity(input, context = {}) {
   return {
     score: round(clampedScore),
     system,
-    confidence: round(confidence),
+    confidence: round(nativeOverride ? Math.max(confidence, 0.8) : confidence),
     factors: Object.fromEntries(
       Object.entries(factors).map(([k, v]) => [k, round(v)]),
     ),
     threshold: round(threshold),
+    nativeEffort: nativeEffortHint ? nativeEffortHint.effortLevel : null,
   };
 }
 
@@ -390,6 +444,7 @@ export function resetRouter() {
   threshold = DEFAULT_THRESHOLD;
   history = [];
   s1SuccessStreak = 0;
+  nativeEffortHint = null;
 }
 
 /**

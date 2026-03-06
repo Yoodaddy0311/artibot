@@ -161,5 +161,5 @@ KPI            | Target  | Tracking Method
 
 ## References
 
-- See `references/campaign-brief-template.md` for campaign brief template
-- See `references/timeline-phases.md` for campaign timeline phases
+- See `${CLAUDE_SKILL_DIR}/references/campaign-brief-template.md` for campaign brief template
+- See `${CLAUDE_SKILL_DIR}/references/timeline-phases.md` for campaign timeline phases

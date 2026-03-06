@@ -174,5 +174,5 @@ Filters:    [interactive filter needs]
 
 ## References
 
-- See `references/chart-selection-matrix.md` for chart selection matrix
-- See `references/dashboard-design-principles.md` for dashboard design principles
+- See `${CLAUDE_SKILL_DIR}/references/chart-selection-matrix.md` for chart selection matrix
+- See `${CLAUDE_SKILL_DIR}/references/dashboard-design-principles.md` for dashboard design principles

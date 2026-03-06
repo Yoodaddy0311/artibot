@@ -41,7 +41,7 @@ category: "code-quality"
 - **I**nterface Segregation: No forced dependency on unused interfaces
 - **D**ependency Inversion: Depend on abstractions, not concretions
 
-See `references/solid.md` for detailed examples.
+See `${CLAUDE_SKILL_DIR}/references/solid.md` for detailed examples.
 
 ### Design Principles
 - **DRY**: Abstract common functionality, eliminate duplication
@@ -59,7 +59,7 @@ See `references/solid.md` for detailed examples.
 
 ### Quality Gate Integration
 All code changes pass through a 3-step validation cycle.
-See `references/quality-gates.md` for the validation framework.
+See `${CLAUDE_SKILL_DIR}/references/quality-gates.md` for the validation framework.
 
 ### Execution Discipline (MANDATORY for ALL agents)
 
