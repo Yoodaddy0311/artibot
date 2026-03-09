@@ -30,3 +30,4 @@ export { STATES, createLifecycle, getCurrentState, defaultLifecycle } from './li
 export { createExtensionRegistry, defaultRegistry } from './extension.js';
 export { parsePlaybook, validatePlaybook, serializePlaybook, KNOWN_PATTERNS, KNOWN_ACTIONS } from './playbook-parser.js';
 export { loadSystemPlaybooks, loadUserPlaybooks, saveUserPlaybook, listPlaybooks, getPlaybook } from './playbook-registry.js';
+export { registerGuard, executeChain, listGuards, resetGuards, registerBuiltinGuards, normalizeCommand } from './guard-registry.js';
