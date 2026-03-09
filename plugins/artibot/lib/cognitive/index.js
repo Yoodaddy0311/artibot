@@ -41,6 +41,9 @@ export {
   assessComplexity,
 } from './system2.js';
 
+// Loop Detector (repetitive tool call detection)
+export { createLoopDetector } from './loop-detector.js';
+
 // Sandbox (safe execution)
 export {
   createSandbox,

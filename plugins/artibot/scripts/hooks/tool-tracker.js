@@ -11,6 +11,10 @@
 import path from 'node:path';
 import { parseJSON, readStdin, toFileUrl } from '../utils/index.js';
 import { createErrorHandler, extractAgentId, extractAgentRole, logHookError } from '../../lib/core/hook-utils.js';
+import { createLoopDetector } from '../../lib/cognitive/loop-detector.js';
+
+/** Shared loop detector instance (session-lifetime) */
+const loopDetector = createLoopDetector();
 
 // Dynamic import for tool-learner (ESM, relative to plugin root)
 const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT
@@ -66,6 +70,15 @@ async function main() {
   // Extract session ID and project context from hook data
   const sessionId = hookData?.session_id ?? null;
   const project = hookData?.cwd ? path.basename(hookData.cwd) : (process.cwd() ? path.basename(process.cwd()) : null);
+
+  // Loop detection: check for repetitive tool call patterns
+  const loopResult = loopDetector.detectLoop({ tool: toolName, args: toolInput });
+  if (loopResult.detected) {
+    const label = loopResult.severity === 'block' ? 'LOOP BLOCKED' : 'LOOP WARNING';
+    process.stdout.write(
+      `[artibot:${label}] Tool "${toolName}" called ${loopResult.count}x with same args (severity: ${loopResult.severity})\n`
+    );
+  }
 
   // Dynamically import tool-learner and record
   try {

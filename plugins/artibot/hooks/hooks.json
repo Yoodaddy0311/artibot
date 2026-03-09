@@ -193,6 +193,14 @@
           "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/team-idle-handler.js",
           "timeout": 5000
         }]
+      },
+      {
+        "matcher": "*",
+        "hooks": [{
+          "type": "command",
+          "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/clean-state-check.js",
+          "timeout": 5000
+        }]
       }
     ],
     "PermissionRequest": [
