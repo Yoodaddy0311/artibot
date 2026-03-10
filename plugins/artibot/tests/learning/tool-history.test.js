@@ -19,31 +19,31 @@ const fsModule = await import('node:fs/promises');
 const fs = fsModule.default;
 
 import {
-  clearCache,
   clampScore,
+  clearCache,
+  clearDirtyState,
   computeGrpoComposite,
   computeToolScores,
   countGrpoComparisons,
   createEmptyHistory,
-  clearDirtyState,
+  FLUSH_INTERVAL_MS,
   gatherRelatedTools,
   getBufferState,
   getConfidence,
   getDirtyState,
+  GRPO_LEARNING_RATE,
+  GRPO_WEIGHTS,
   loadHistory,
   makeGrpoKey,
   markDirty,
+  MAX_GRPO_GROUPS_PER_KEY,
+  MIN_SAMPLES,
   rebuildAggregates,
   saveHistory,
   setHistory,
   splitGrpoKey,
   suggestFromRelated,
   updateAggregate,
-  FLUSH_INTERVAL_MS,
-  GRPO_LEARNING_RATE,
-  GRPO_WEIGHTS,
-  MAX_GRPO_GROUPS_PER_KEY,
-  MIN_SAMPLES,
 } from '../../lib/learning/tool-history.js';
 
 // ---------------------------------------------------------------------------

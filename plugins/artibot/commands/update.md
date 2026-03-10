@@ -20,7 +20,8 @@ Parse $ARGUMENTS:
 1. Run the update script via Bash:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/update.js" $ARGUMENTS
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/artibot}"
+node "${PLUGIN_ROOT}/scripts/update.js" $ARGUMENTS
 ```
 
 2. Display the full output of the script to the user exactly as printed.
@@ -42,5 +43,6 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/update.js" $ARGUMENTS
 If the script exits with a non-zero code, display its stderr output and suggest running manually:
 
 ```
-node "${CLAUDE_PLUGIN_ROOT}/scripts/update.js" --check
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/artibot}"
+node "${PLUGIN_ROOT}/scripts/update.js" --check
 ```

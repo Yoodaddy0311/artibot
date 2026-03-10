@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  registerGuard, executeChain, listGuards, resetGuards,
-  registerBuiltinGuards, normalizeCommand,
+  executeChain, listGuards, registerBuiltinGuards, registerGuard,
+  resetGuards,
 } from '../../lib/core/guard-registry.js';
 
 vi.mock('node:fs', async () => {
@@ -14,8 +14,8 @@ function makeHookData(toolName, overrides = {}) {
   return { tool_name: toolName, tool_input: {}, ...overrides };
 }
 function fakeAwsKey() { return 'AKI' + 'AIOSFODNN7EXAMPLE'; }
-function fakeGhToken() { return 'gh' + 'p_' + 'A'.repeat(36); }
-function fakeGenericSecret() { return 'const api' + '_key = "supersecretkey12345678";'; }
+function _fakeGhToken() { return 'gh' + 'p_' + 'A'.repeat(36); }
+function _fakeGenericSecret() { return 'const api' + '_key = "supersecretkey12345678";'; }
 
 describe('guard-registry', () => {
   beforeEach(() => { resetGuards(); vi.clearAllMocks(); existsSync.mockReturnValue(false); });

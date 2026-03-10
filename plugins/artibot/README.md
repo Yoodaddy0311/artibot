@@ -1,6 +1,6 @@
 # Artibot
 
-![Tests](https://img.shields.io/badge/tests-3512%20passed-brightgreen) ![Coverage](https://img.shields.io/badge/coverage-97.5%25-brightgreen) ![License](https://img.shields.io/badge/license-MIT-blue) ![Version](https://img.shields.io/badge/version-1.9.2-blue) ![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen)
+![Tests](https://img.shields.io/badge/tests-3528%20passed-brightgreen) ![Coverage](https://img.shields.io/badge/coverage-97.5%25-brightgreen) ![License](https://img.shields.io/badge/license-MIT-blue) ![Version](https://img.shields.io/badge/version-1.9.3-blue) ![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen)
 
 Claude Code를 위한 **Agent Teams 기반** 지능형 오케스트레이션 플러그인. Claude의 네이티브 Agent Teams API를 핵심 엔진으로 사용하여 전문 에이전트 팀 구성, P2P 통신, 공유 태스크 관리를 통해 개발 생산성을 극대화합니다.
 
@@ -88,8 +88,9 @@ Artibot의 핵심 엔진은 Claude Code의 **Agent Teams API**입니다. 단순�
 
 ### 지능형 훅 시스템
 
-- 14개 이벤트에 29개 훅 등록 (HTTP webhook 알림 포함)
+- 15개 이벤트에 33개 훅 등록 (HTTP webhook 알림 포함)
 - **Guard Registry**: 중앙 집중식 가드 파이프라인 (`registerGuard()`/`executeChain()` API), 6개 내장 가드, 훅 코드 75% 감소
+- **Advisory File Lock**: 동시 훅 실행 시 상태 파일 경합 방지 (spin-lock, fail-open)
 - 위험 명령 차단, 민감 파일 보호, 자동 포맷, PR 감지, 팀원 생명주기 추적
 - HTTP webhook 지원: Slack/Discord/generic 형식으로 세션 이벤트 외부 알림
 
@@ -975,7 +976,7 @@ orchestrator는 **코드를 직접 작성하지 않습니다**. 팀을 구성하
 
 ## 훅 시스템
 
-14개 이벤트에 27개 훅이 등록되어 있습니다.
+15개 이벤트에 33개 훅이 등록되어 있습니다.
 
 ### 이벤트별 훅
 
@@ -1071,11 +1072,11 @@ plugins/artibot/
 ├── hooks/
 │   └── hooks.json               # 훅 이벤트 매핑
 ├── scripts/
-│   ├── hooks/                   # 23개 훅 스크립트 (ESM)
+│   ├── hooks/                   # 23개 훅 스크립트 (ESM, file-lock 포함)
 │   ├── ci/                      # 4개 CI 검증 스크립트
 │   └── utils/
 ├── lib/                         # 54개 모듈
-│   ├── core/                    # 코어 (24): platform, config, cache, lifecycle, extension, auto-fixer, error-codes, hook-utils, quickstart, style-registry, guard-registry 등
+│   ├── core/                    # 코어 (25): platform, config, cache, lifecycle, extension, auto-fixer, error-codes, hook-utils, quickstart, style-registry, guard-registry, file-lock 등
 │   ├── cognitive/               # 인지 엔진 (8): router, system1, system2 (core+strategies), sandbox, loop-detector
 │   ├── learning/                # 학습 (7): memory, grpo, knowledge-transfer, lifelong, tool-learner, self-evaluator
 │   ├── adapters/                # 멀티모델 어댑터 (7): base, gemini, codex, cursor, antigravity, adapter-utils

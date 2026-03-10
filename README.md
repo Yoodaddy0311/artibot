@@ -1,12 +1,12 @@
 # Artibot
 
 [![Coverage](https://img.shields.io/badge/coverage-97.5%25-brightgreen)](plugins/artibot/tests/)
-[![Tests](https://img.shields.io/badge/tests-3512%20passed-brightgreen)](plugins/artibot/tests/)
+[![Tests](https://img.shields.io/badge/tests-3528%20passed-brightgreen)](plugins/artibot/tests/)
 [![License](https://img.shields.io/badge/license-BSL--1.1-blue)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D18-green)](package.json)
 
 ![Claude Code Plugin](https://img.shields.io/badge/Claude_Code-Plugin-7C3AED?style=flat-square)
-![Version](https://img.shields.io/badge/version-1.9.2-blue?style=flat-square)
+![Version](https://img.shields.io/badge/version-1.9.3-blue?style=flat-square)
 ![License](https://img.shields.io/badge/license-BSL--1.1-green?style=flat-square)
 ![Node.js](https://img.shields.io/badge/Node.js-18%2B-brightgreen?style=flat-square)
 ![Agent Teams](https://img.shields.io/badge/Agent_Teams-Native-orange?style=flat-square)
@@ -46,6 +46,7 @@ Most Claude Code plugins use simple sub-agent (`Task()`) delegation -- fire-and-
 - **Loop Detection** -- Circular buffer-based agent loop detection with fingerprint matching, automatic warn/block on repeated tool calls
 - **Clean State Enforcement** -- TaskCompleted hook ensures lint+test verification at feature completion boundaries
 - **33 Event Hook Registrations** -- Cognitive routing, lifelong learning, session lifecycle, dangerous command blocking, auto-formatting, team tracking, loop detection, clean state checks, HTTP webhook notifications
+- **Advisory File Locking** -- Spin-lock based file locking for concurrent hook state access, fail-open pattern prevents workflow blocking
 - **DEV Protocol** -- Mandatory Decompose-Execute-Verify workflow with zero-skip policy for all code changes
 - **Vibe Coding Support** -- Natural language request handling with read-first, verify-after, evidence-based completion
 - **Visual Validation Pipeline** -- SSIM-based screenshot comparison, auto-fix suggestion, iterative correction loop via Playwright MCP
@@ -577,7 +578,7 @@ All teammates have their specialist tools + team collaboration tools (`SendMessa
 
 ## Hooks
 
-29 hook registrations across 14 event types:
+33 hook registrations across 15 event types:
 
 | Event | Script | Purpose |
 |-------|--------|---------|
@@ -677,7 +678,7 @@ plugins/artibot/
 |   +-- [23 dev skills]/
 |   +-- [23 marketing skills]/
 |   +-- [4 workflow skills]/
-+-- rules/                       # 7 auto-activating rules
++-- rules/                       # 8 auto-activating rules
 |   +-- dev-protocol.md          #   DEV (Decompose-Execute-Verify) protocol
 |   +-- quality-gates.md         #   Quality enforcement gates
 |   +-- agent-coordination.md    #   Agent collaboration patterns
@@ -685,7 +686,7 @@ plugins/artibot/
 +-- hooks/
 |   +-- hooks.json               # Hook event mappings
 +-- scripts/
-|   +-- hooks/                   # 21 hook scripts (ESM)
+|   +-- hooks/                   # 23 hook scripts (ESM)
 |   +-- ci/                      # 4 CI validation scripts
 |   +-- utils/
 +-- lib/
@@ -709,7 +710,7 @@ Key settings in `artibot.config.json`:
 
 | Setting | Description | Default |
 |---------|-------------|---------|
-| `version` | Plugin version | `1.9.1` |
+| `version` | Plugin version | `1.9.3` |
 | `cognitive.router.threshold` | System 1/2 boundary | `0.4` |
 | `cognitive.router.adaptRate` | Per-feedback adjustment step | `0.05` |
 | `cognitive.system1.maxLatency` | System 1 max response time (ms) | `100` |
@@ -813,7 +814,7 @@ node scripts/ci/validate-hooks.js     # Hook validation
 
 ## Version
 
-1.9.1 -- Guard Registry: centralized guard pipeline with 6 built-in guards, 75% hook code reduction, extensible `registerGuard()`/`executeChain()` API (3,459 tests)
+1.9.3 -- Install/update pipeline hardening: cross-computer portability, Windows Git Bash support, file-lock for concurrent hooks, ESM/CJS compat, advisory session-start, loop state persistence (3,528 tests)
 
 ## License
 

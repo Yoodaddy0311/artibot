@@ -72,6 +72,7 @@ function buildFingerprint(toolName, args) {
  * @property {number} [maxHistory=20] - Circular buffer size
  * @property {number} [warnThreshold=3] - Consecutive identical calls for warn
  * @property {number} [blockThreshold=5] - Consecutive identical calls for block
+ * @property {Array<{ tool: string, fingerprint: string }>} [initialHistory] - Pre-seed history for state restoration
  */
 
 /**
@@ -105,7 +106,9 @@ export function createLoopDetector(config = {}) {
   const blockThreshold = config.blockThreshold ?? DEFAULT_BLOCK_THRESHOLD;
 
   /** @type {Array<{ tool: string, fingerprint: string }>} */
-  let history = [];
+  let history = Array.isArray(config.initialHistory)
+    ? config.initialHistory.slice(-maxHistory)
+    : [];
 
   /**
    * Record a tool call and check for loop patterns.

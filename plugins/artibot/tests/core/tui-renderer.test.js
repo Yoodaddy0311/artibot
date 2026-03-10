@@ -4,22 +4,22 @@
  * @module tests/core/tui-renderer
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import {
   BLOCK,
   BOX,
-  COLORS,
-  MODE_DISPLAY,
-  STATUS_MAP,
-  SYMBOLS,
   centerText,
   color,
+  COLORS,
   countStatuses,
   formatTimestamp,
   getTermWidth,
+  MODE_DISPLAY,
   padRight,
+  STATUS_MAP,
   stripAnsi,
   supportsColor,
+  SYMBOLS,
   truncate,
 } from '../../lib/core/tui-renderer.js';
 

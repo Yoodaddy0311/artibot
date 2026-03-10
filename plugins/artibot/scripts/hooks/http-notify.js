@@ -11,8 +11,8 @@
  * @module scripts/hooks/http-notify
  */
 
-import { parseJSON, readStdin, getPluginRoot, resolveConfigPath } from '../utils/index.js';
-import { createErrorHandler, logHookError } from '../../lib/core/hook-utils.js';
+import { parseJSON, readStdin, resolveConfigPath } from '../utils/index.js';
+import { createErrorHandler } from '../../lib/core/hook-utils.js';
 import { readFileSync } from 'node:fs';
 
 /** @typedef {'slack' | 'discord' | 'generic'} WebhookFormat */

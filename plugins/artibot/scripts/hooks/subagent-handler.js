@@ -8,6 +8,7 @@
 import { atomicWriteSync, parseJSON, readStdin, writeStdout } from '../utils/index.js';
 import { existsSync, readFileSync } from 'node:fs';
 import { createErrorHandler, extractAgentId, extractAgentRole, getStatePath } from '../../lib/core/hook-utils.js';
+import { withFileLock } from '../../lib/core/file-lock.js';
 
 function loadState() {
   const statePath = getStatePath();
@@ -33,29 +34,47 @@ async function main() {
   const agentRole = extractAgentRole(hookData);
   const agentType = hookData?.agent_type || agentRole;
 
-  const state = loadState();
-  if (!state.agents) state.agents = {};
+  const statePath = getStatePath();
 
   if (action === 'start') {
-    state.agents[agentId] = {
-      role: agentRole,
-      agentType,
-      active: true,
-      startedAt: new Date().toISOString(),
-    };
-    saveState(state);
+    withFileLock(statePath, () => {
+      const loaded = loadState();
+      const updatedState = {
+        ...loaded,
+        agents: {
+          ...(loaded.agents || {}),
+          [agentId]: {
+            role: agentRole,
+            agentType,
+            active: true,
+            startedAt: new Date().toISOString(),
+          },
+        },
+      };
+      saveState(updatedState);
+    });
     writeStdout({
       message: `[team] Agent registered: ${agentId} (${agentRole})`,
     });
   } else if (action === 'stop') {
-    if (state.agents[agentId]) {
-      state.agents[agentId] = {
-        ...state.agents[agentId],
-        active: false,
-        stoppedAt: new Date().toISOString(),
-      };
-    }
-    saveState(state);
+    withFileLock(statePath, () => {
+      const loaded = loadState();
+      const existing = (loaded.agents || {})[agentId];
+      const updatedState = existing
+        ? {
+            ...loaded,
+            agents: {
+              ...(loaded.agents || {}),
+              [agentId]: {
+                ...existing,
+                active: false,
+                stoppedAt: new Date().toISOString(),
+              },
+            },
+          }
+        : loaded;
+      saveState(updatedState);
+    });
     writeStdout({
       message: `[team] Agent deregistered: ${agentId}`,
     });

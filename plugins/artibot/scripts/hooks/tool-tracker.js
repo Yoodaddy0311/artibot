@@ -9,12 +9,54 @@
  */
 
 import path from 'node:path';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { parseJSON, readStdin, toFileUrl } from '../utils/index.js';
-import { createErrorHandler, extractAgentId, extractAgentRole, logHookError } from '../../lib/core/hook-utils.js';
+import { createErrorHandler, extractAgentId, extractAgentRole, getArtibotDataDir, logHookError } from '../../lib/core/hook-utils.js';
 import { createLoopDetector } from '../../lib/cognitive/loop-detector.js';
 
-/** Shared loop detector instance (session-lifetime) */
-const loopDetector = createLoopDetector();
+/** Path to the persisted loop detector state file. */
+const LOOP_STATE_FILE = path.join(getArtibotDataDir(), 'loop-state.json');
+
+/** Inactivity timeout (ms) after which persisted state is discarded. */
+const STATE_EXPIRY_MS = 30 * 60 * 1000;
+
+/**
+ * Load persisted loop detector history from disk.
+ * Returns null if the file is missing, expired, or corrupt.
+ * @returns {Array<{ tool: string, fingerprint: string }> | null}
+ */
+function loadLoopState() {
+  try {
+    if (!existsSync(LOOP_STATE_FILE)) return null;
+    const data = JSON.parse(readFileSync(LOOP_STATE_FILE, 'utf-8'));
+    if (Date.now() - (data.lastUpdated || 0) > STATE_EXPIRY_MS) return null;
+    return Array.isArray(data.history) ? data.history : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Save loop detector history to disk for cross-process persistence.
+ * @param {object} detector - Loop detector instance
+ */
+function saveLoopState(detector) {
+  try {
+    mkdirSync(path.dirname(LOOP_STATE_FILE), { recursive: true });
+    writeFileSync(LOOP_STATE_FILE, JSON.stringify({
+      history: detector.getLoopHistory(),
+      lastUpdated: Date.now(),
+    }, null, 2));
+  } catch {
+    // Non-fatal: persistence failure does not block tool pipeline
+  }
+}
+
+/** Loop detector instance restored from persisted state when available. */
+const restoredHistory = loadLoopState();
+const loopDetector = createLoopDetector(
+  restoredHistory ? { initialHistory: restoredHistory } : {},
+);
 
 // Dynamic import for tool-learner (ESM, relative to plugin root)
 const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT
@@ -73,6 +115,10 @@ async function main() {
 
   // Loop detection: check for repetitive tool call patterns
   const loopResult = loopDetector.detectLoop({ tool: toolName, args: toolInput });
+
+  // Persist updated history for cross-process continuity
+  saveLoopState(loopDetector);
+
   if (loopResult.detected) {
     const label = loopResult.severity === 'block' ? 'LOOP BLOCKED' : 'LOOP WARNING';
     process.stdout.write(

@@ -57,8 +57,6 @@ async function main() {
 
   // Extract instruction source info from hook data
   const source = hookData?.source || hookData?.file || 'unknown';
-  const instructionType = hookData?.type || 'instructions';
-
   const version = loadVersion();
   const { valid, missing } = validatePluginStructure();
 

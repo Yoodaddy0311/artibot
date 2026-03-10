@@ -1,15 +1,15 @@
-import { describe, expect, it, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import {
-  recordScore,
   checkDrift,
+  CRITICAL_STREAK,
+  DRIFT_THRESHOLD,
   getHistory,
+  getSummary,
+  MIN_SAMPLES,
+  recordScore,
   resetAgent,
   resetAll,
-  getSummary,
   WINDOW_SIZE,
-  DRIFT_THRESHOLD,
-  CRITICAL_STREAK,
-  MIN_SAMPLES,
 } from '../../lib/learning/drift-detector.js';
 
 describe('drift-detector', () => {

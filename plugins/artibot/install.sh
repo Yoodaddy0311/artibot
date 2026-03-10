@@ -4,7 +4,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CLAUDE_DIR="${HOME}/.claude"
+CLAUDE_DIR="${HOME:-${USERPROFILE:-$(eval echo ~)}}/.claude"
 ARTIBOT_DIR="${CLAUDE_DIR}/artibot"
 
 # Colors
@@ -96,6 +96,11 @@ install_skills() {
 # Copy Hooks & Scripts
 # ──────────────────────────────────────────────
 install_hooks() {
+  # Clean before copy to prevent stale files from previous versions
+  for dir in hooks scripts lib; do
+    [ -d "${ARTIBOT_DIR}/${dir}" ] && rm -rf "${ARTIBOT_DIR}/${dir}"
+  done
+
   cp -r "${SCRIPT_DIR}/hooks" "${ARTIBOT_DIR}/"
   cp -r "${SCRIPT_DIR}/scripts" "${ARTIBOT_DIR}/"
   cp -r "${SCRIPT_DIR}/lib" "${ARTIBOT_DIR}/"
@@ -130,7 +135,7 @@ install_rules() {
 # Seed Project CLAUDE.md (Artibot methodology)
 # ──────────────────────────────────────────────
 seed_project_claude_md() {
-  local target_dir="${2:-.}"
+  local target_dir="${1:-.}"
   local claude_md="${target_dir}/CLAUDE.md"
 
   if [ -f "$claude_md" ]; then
@@ -205,7 +210,7 @@ PROJECT_CLAUDE
 # Seed CLAUDE.local.md template
 # ──────────────────────────────────────────────
 seed_local_config() {
-  local target_dir="${2:-.}"
+  local target_dir="${1:-.}"
   local local_md="${target_dir}/CLAUDE.local.md"
   local gitignore="${target_dir}/.gitignore"
 
@@ -224,6 +229,8 @@ seed_local_config() {
         echo "CLAUDE.local.md" >> "$gitignore"
         log "Added CLAUDE.local.md to .gitignore"
       fi
+    else
+      warn "No .gitignore found — CLAUDE.local.md may be accidentally committed"
     fi
   fi
 }
@@ -234,8 +241,23 @@ seed_local_config() {
 seed_auto_memory() {
   local memory_dir="${CLAUDE_DIR}/projects"
   # Find the current project's memory directory
+  # Claude Code hashes paths: replace / \ : with -, strip leading -
+  # On Git Bash, $PWD is /c/Users/... so normalize to C:\Users\... first
+  local normalized_path="$PWD"
+  if [[ "$normalized_path" =~ ^/([a-zA-Z])/ ]]; then
+    normalized_path="${BASH_REMATCH[1]^^}:${normalized_path:2}"
+  fi
   local project_hash
-  project_hash=$(echo "$PWD" | sed 's/[\/:\\]/-/g' | sed 's/^-//')
+  project_hash=$(echo "$normalized_path" | sed 's/[\/:\\]/-/g' | sed 's/^-//')
+
+  # Fallback: if computed hash dir doesn't exist, search for existing match
+  if [ ! -d "${memory_dir}/${project_hash}" ] && [ -d "$memory_dir" ]; then
+    local existing_match
+    existing_match=$(find "$memory_dir" -maxdepth 1 -type d -name "*$(basename "$PWD")" 2>/dev/null | head -1)
+    if [ -n "$existing_match" ]; then
+      project_hash=$(basename "$existing_match")
+    fi
+  fi
   local project_memory="${memory_dir}/${project_hash}/memory"
 
   # Only seed if no MEMORY.md exists yet
@@ -244,28 +266,35 @@ seed_auto_memory() {
     return
   fi
 
+  # Count actual installed assets for accurate memory seed
+  local mem_agent_count mem_cmd_count mem_skill_count
+  mem_agent_count=$(find "${CLAUDE_DIR}/agents" -name "*.md" -type f 2>/dev/null | wc -l | tr -d ' ')
+  mem_cmd_count=$(find "${CLAUDE_DIR}/commands" -name "*.md" -type f 2>/dev/null | wc -l | tr -d ' ')
+  mem_skill_count=$(find "${ARTIBOT_DIR}/skills" -maxdepth 1 -type d 2>/dev/null | wc -l | tr -d ' ')
+  mem_skill_count=$((mem_skill_count - 1))
+
   mkdir -p "$project_memory"
-  cat > "${project_memory}/MEMORY.md" <<'SEED_MEMORY'
+  cat > "${project_memory}/MEMORY.md" <<SEED_MEMORY
 # Project Memory (Seeded by Artibot)
 
 ## Artibot Quick Reference
-- **Agents**: 26 specialized agents — use `Task()` to delegate
-- **Commands**: `/sc` routes to optimal command/agent/skill automatically
+- **Agents**: ${mem_agent_count} specialized agents — use \`Task()\` to delegate
+- **Commands**: \`/sc\` routes to optimal command/agent/skill automatically
 - **DEV Protocol**: Decompose → Execute → Verify (mandatory for all code changes)
 - **Quality**: 80%+ test coverage, immutable patterns, functions < 50 lines
 
 ## Workflow Tips
-- Complex features: start with `/sc plan [feature]` or use planner agent
+- Complex features: start with \`/sc plan [feature]\` or use planner agent
 - After implementation: code-reviewer agent runs automatically via rules
-- Parallel work: launch multiple agents with `Task()` for independent tasks
+- Parallel work: launch multiple agents with \`Task()\` for independent tasks
 - Vibe coding: rules auto-activate on file access (no /sc needed after install)
 
 ## Key Paths
-- Agents: `~/.claude/agents/` (26 .md files)
-- Commands: `~/.claude/commands/` (43 .md files)
-- Skills: `~/.claude/artibot/skills/` (79 skill directories)
-- Rules: `~/.claude/rules/artibot/` (auto-activate on file access)
-- Config: `~/.claude/artibot/artibot.config.json`
+- Agents: \`~/.claude/agents/\` (${mem_agent_count} .md files)
+- Commands: \`~/.claude/commands/\` (${mem_cmd_count} .md files)
+- Skills: \`~/.claude/artibot/skills/\` (${mem_skill_count} skill directories)
+- Rules: \`~/.claude/rules/artibot/\` (auto-activate on file access)
+- Config: \`~/.claude/artibot/artibot.config.json\`
 SEED_MEMORY
   log "Auto-memory seeded with Artibot quickstart → ${project_memory}/MEMORY.md"
 }
@@ -309,6 +338,7 @@ configure_settings() {
   }
 }
 SETTINGS
+    chmod 600 "$settings_file"
     log "Settings created with Agent Teams enabled"
   fi
 }
@@ -317,6 +347,18 @@ SETTINGS
 # Swarm Intelligence Opt-In
 # ──────────────────────────────────────────────
 setup_swarm_consent() {
+  # Skip if already configured (prevent repeated prompts on re-install)
+  if [ -f "${ARTIBOT_DIR}/swarm-consent.json" ]; then
+    log "Swarm consent already configured — skipping"
+    return
+  fi
+
+  # Skip in non-interactive mode (CI, piped input, etc.)
+  if [ ! -t 0 ]; then
+    warn "Non-interactive mode — swarm disabled by default. Use '/sc swarm opt-in' later."
+    return
+  fi
+
   echo ""
   echo -e "${BLUE}━━━ Swarm Intelligence ━━━${NC}"
   echo "Share anonymized learning patterns with the Artibot community."
@@ -343,11 +385,11 @@ SWARMEOF
     # Enable swarm in installed config so isSwarmActive() returns true
     local config_file="${ARTIBOT_DIR}/artibot.config.json"
     if [ -f "$config_file" ] && command -v node &>/dev/null; then
-      node -e "
+      ARTIBOT_CONFIG_FILE="$config_file" node --input-type=commonjs -e "
         const fs = require('fs');
-        const cfg = JSON.parse(fs.readFileSync('$config_file', 'utf8'));
+        const cfg = JSON.parse(fs.readFileSync(process.env.ARTIBOT_CONFIG_FILE, 'utf8'));
         if (cfg.swarm) { cfg.swarm.enabled = true; cfg.swarm.optIn = true; }
-        fs.writeFileSync('$config_file', JSON.stringify(cfg, null, 2) + '\n');
+        fs.writeFileSync(process.env.ARTIBOT_CONFIG_FILE, JSON.stringify(cfg, null, 2) + '\n');
       "
     fi
 
@@ -368,13 +410,15 @@ save_source_path() {
   if [ -n "$git_root" ]; then
     local timestamp
     timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-    cat > "$source_json" <<SRCEOF
-{
-  "repoRoot": "$git_root",
-  "pluginDir": "$SCRIPT_DIR",
-  "savedAt": "$timestamp"
-}
-SRCEOF
+    REPO_ROOT="$git_root" PLUGIN_DIR="$SCRIPT_DIR" SAVE_AT="$timestamp" SOURCE_JSON="$source_json" \
+    node --input-type=commonjs -e "
+      const fs = require('fs');
+      fs.writeFileSync(process.env.SOURCE_JSON, JSON.stringify({
+        repoRoot: process.env.REPO_ROOT,
+        pluginDir: process.env.PLUGIN_DIR,
+        savedAt: process.env.SAVE_AT
+      }, null, 2) + '\n');
+    "
     log "Source repo path saved for auto-updates: ${git_root}"
   else
     warn "Not a git repo — source path not saved (manual git pull needed for updates)"
@@ -453,7 +497,10 @@ uninstall() {
 # Main
 # ──────────────────────────────────────────────
 main() {
-  echo -e "${BLUE}━━━ Artibot Installer v1.7.1 ━━━${NC}"
+  local version
+  version=$(ARTIBOT_CFG="${SCRIPT_DIR}/artibot.config.json" node --input-type=commonjs -e \
+    "console.log(JSON.parse(require('fs').readFileSync(process.env.ARTIBOT_CFG,'utf8')).version)" 2>/dev/null || echo "unknown")
+  echo -e "${BLUE}━━━ Artibot Installer v${version} ━━━${NC}"
   echo ""
 
   case "${1:-install}" in

@@ -16,7 +16,7 @@
 
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { ARTIBOT_DIR, round } from '../core/index.js';
+import { ARTIBOT_DIR } from '../core/index.js';
 
 // ---------------------------------------------------------------------------
 // Constants

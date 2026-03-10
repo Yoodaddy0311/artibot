@@ -1,6 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-hooks.json",
-  "description": "Artibot v1.4.0 - Claude Code Plugin Hooks",
+  "description": "Artibot v1.9.2 - Claude Code Plugin Hooks",
   "hooks": {
     "SessionStart": [
       {
@@ -17,7 +17,7 @@
         "once": true,
         "hooks": [{
           "type": "command",
-          "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/memory-tracker.js",
+          "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/memory-tracker.js SessionStart",
           "timeout": 5000
         }]
       },
@@ -182,14 +182,6 @@
         "matcher": "*",
         "hooks": [{
           "type": "command",
-          "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/tool-tracker.js",
-          "timeout": 5000
-        }]
-      },
-      {
-        "matcher": "*",
-        "hooks": [{
-          "type": "command",
           "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/team-idle-handler.js",
           "timeout": 5000
         }]
@@ -203,16 +195,7 @@
         }]
       }
     ],
-    "PermissionRequest": [
-      {
-        "matcher": "*",
-        "hooks": [{
-          "type": "command",
-          "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-bash.js",
-          "timeout": 5000
-        }]
-      }
-    ],
+    "PermissionRequest": [],
     "SessionEnd": [
       {
         "matcher": "*",
@@ -242,7 +225,7 @@
         "matcher": "*",
         "hooks": [{
           "type": "command",
-          "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/memory-tracker.js",
+          "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/memory-tracker.js SessionEnd",
           "timeout": 8000
         }]
       },
@@ -268,7 +251,7 @@
         "matcher": "*",
         "hooks": [{
           "type": "command",
-          "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/memory-tracker.js",
+          "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/memory-tracker.js PostToolUseFailure",
           "timeout": 5000
         }]
       }

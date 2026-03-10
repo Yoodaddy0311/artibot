@@ -22,6 +22,11 @@ vi.mock('node:fs', async () => {
   };
 });
 
+// Bypass file lock in tests — pass-through to the callback directly
+vi.mock('../../lib/core/file-lock.js', () => ({
+  withFileLock: vi.fn((_path, fn) => fn()),
+}));
+
 const { readStdin, writeStdout, atomicWriteSync } = await import('../../scripts/utils/index.js');
 const { readFileSync, existsSync } = await import('node:fs');
 

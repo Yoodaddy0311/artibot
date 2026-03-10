@@ -13,6 +13,7 @@
 // Router (dual-process dispatcher)
 export {
   classifyComplexity,
+  configure,
   route,
   adaptThreshold,
   getRoutingStats,

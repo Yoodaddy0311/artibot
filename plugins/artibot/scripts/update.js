@@ -64,6 +64,8 @@ function readCurrentVersion(pluginRoot) {
 // GitHub API fetch (Node 18+ native fetch)
 // ---------------------------------------------------------------------------
 
+// Note: This URL is also defined in version-checker.js (FETCH_TIMEOUT differs intentionally:
+// version-checker uses 3s for non-blocking session-start checks; update.js uses 5s for explicit user action).
 const GITHUB_API_URL = 'https://api.github.com/repos/Yoodaddy0311/artibot/releases/latest';
 const FETCH_TIMEOUT_MS = 5000;
 
@@ -115,8 +117,32 @@ function findSourceRepo(installScriptDir) {
     if (data.repoRoot && existsSync(path.join(data.repoRoot, '.git'))) {
       return { gitRoot: data.repoRoot, pluginDir: data.pluginDir || path.join(data.repoRoot, 'plugins', 'artibot') };
     }
+    // source-repo.json exists but path is stale (different machine or moved repo)
+    if (data.repoRoot) {
+      console.warn(`  Warning: source-repo.json points to ${data.repoRoot} which no longer exists.`);
+      console.warn('  Searching common locations...');
+    }
   } catch {
     // source-repo.json not found or invalid — fall through
+  }
+
+  // 1.5. Auto-detect from common clone locations (handles cross-machine git pull)
+  const commonLocations = [
+    path.join(home, 'Projects', 'Artibot'),
+    path.join(home, 'projects', 'Artibot'),
+    path.join(home, 'dev', 'Artibot'),
+    path.join(home, 'artibot'),
+    path.join(home, 'Projects', 'artibot'),
+    path.join(home, 'projects', 'artibot'),
+    path.join(home, 'src', 'Artibot'),
+    path.join(home, 'src', 'artibot'),
+  ];
+  for (const loc of commonLocations) {
+    const pluginDir = path.join(loc, 'plugins', 'artibot');
+    if (existsSync(path.join(loc, '.git')) && existsSync(path.join(pluginDir, 'package.json'))) {
+      console.log(`  Found source repo at ${loc} (auto-detected)`);
+      return { gitRoot: loc, pluginDir };
+    }
   }
 
   // 2. Walk up from install.sh location
@@ -148,13 +174,41 @@ function pullLatestSource(installScriptDir) {
   const repo = findSourceRepo(installScriptDir);
 
   if (!repo) {
-    console.log('  Source repo not found (tarball install?). Skipping git pull.');
+    console.log('  Source repo not found. The update will use currently installed files.');
+    console.log('  For full updates, clone the repo: git clone https://github.com/Yoodaddy0311/artibot.git');
     return { pulled: false, pluginDir: null };
   }
 
   try {
+    // Detect current branch and its upstream remote for smart pull
+    let pullCmd = 'git pull';
+    try {
+      const branch = execSync('git rev-parse --abbrev-ref HEAD', {
+        cwd: repo.gitRoot, encoding: 'utf-8', timeout: 5000,
+      }).trim();
+      let remote = 'origin';
+      try {
+        remote = execSync(`git config --get branch.${branch}.remote`, {
+          cwd: repo.gitRoot, encoding: 'utf-8', timeout: 5000,
+        }).trim() || 'origin';
+      } catch {
+        // No upstream configured — default to origin
+      }
+      pullCmd = `git pull ${remote} ${branch}`;
+    } catch {
+      // Fallback: try origin master, then origin main
+      try {
+        execSync('git rev-parse --verify origin/master', {
+          cwd: repo.gitRoot, stdio: 'ignore', timeout: 5000,
+        });
+        pullCmd = 'git pull origin master';
+      } catch {
+        pullCmd = 'git pull origin main';
+      }
+    }
+
     console.log(`  Pulling latest source from ${repo.gitRoot}...`);
-    execSync('git pull origin master', {
+    execSync(pullCmd, {
       cwd: repo.gitRoot,
       stdio: 'inherit',
       timeout: 30_000,
@@ -254,16 +308,53 @@ function findInstallScript() {
   return null;
 }
 
+/**
+ * Find a working bash executable on the current platform.
+ * On non-Windows systems, returns 'bash' directly.
+ * On Windows, searches common Git for Windows installation paths.
+ *
+ * @returns {string | null} Path to bash executable, or null if not found
+ */
+function findBash() {
+  if (process.platform !== 'win32') return 'bash';
+
+  const candidates = [
+    'bash', // Available via PATH (e.g., Git Bash in PATH)
+    'C:\\Program Files\\Git\\bin\\bash.exe',
+    'C:\\Program Files (x86)\\Git\\bin\\bash.exe',
+    path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Git', 'bin', 'bash.exe'),
+  ];
+
+  for (const candidate of candidates) {
+    try {
+      execSync(`"${candidate}" --version`, { stdio: 'ignore', timeout: 5000 });
+      return candidate;
+    } catch {
+      continue;
+    }
+  }
+
+  return null;
+}
+
 function runInstall(preResolvedPath) {
   const installScript = preResolvedPath || findInstallScript();
-  if (installScript) {
-    execSync(`bash "${installScript}"`, { stdio: 'inherit', timeout: 300_000 });
-  } else {
+  if (!installScript) {
     throw new Error(
       'install.sh not found. Searched: source repo, ~/.claude/artibot/, CLAUDE_PLUGIN_ROOT.\n' +
       'Run manually: cd <artibot-repo>/plugins/artibot && bash install.sh'
     );
   }
+
+  const bash = findBash();
+  if (!bash) {
+    throw new Error(
+      'bash not found. On Windows, install Git for Windows: https://git-scm.com/download/win\n' +
+      'Or run manually in Git Bash: bash "' + installScript + '"'
+    );
+  }
+
+  execSync(`"${bash}" "${installScript}"`, { stdio: 'inherit', timeout: 300_000 });
 }
 
 // ---------------------------------------------------------------------------
@@ -329,8 +420,8 @@ async function main() {
   console.log('-----------');
   console.log(`  1. Save backup metadata to ~/.claude/artibot/update-backup.json`);
   console.log(`  2. Pull latest source from git (if available)`);
-  console.log(`  3. Clear plugin cache at ~/.claude/plugins/cache/artibot/`);
-  console.log(`  4. Run: bash install.sh`);
+  console.log(`  3. Run: bash install.sh`);
+  console.log(`  4. Clear plugin cache at ~/.claude/plugins/cache/artibot/`);
 
   if (DRY_RUN) {
     console.log('\n[dry-run] No changes made. Remove --dry-run to execute.');
@@ -369,17 +460,19 @@ async function main() {
     }
   }
 
-  // Step 3: Clear cache
-  clearCache(home);
+  // Step 3: Run install BEFORE clearing cache (prevents broken state on failure)
   console.log(`  Installing via: ${finalInstallPath}`);
   try {
     runInstall(finalInstallPath);
   } catch (err) {
     console.error(`\nInstall command failed: ${err.message}`);
-    console.error('The cache has already been cleared. Please complete the update manually:');
+    console.error('Cache was preserved. Please complete the update manually:');
     printManualInstructions();
     process.exit(1);
   }
+
+  // Step 4: Clear cache AFTER successful install
+  clearCache(home);
 
   console.log('');
   console.log('Update complete.');

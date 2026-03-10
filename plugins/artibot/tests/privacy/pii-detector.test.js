@@ -7,9 +7,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   BUILTIN_PATTERNS,
+  hintMatches,
   TOKENS,
   VALIDATION_CHECKS,
-  hintMatches,
 } from '../../lib/privacy/pii-detector.js';
 
 // ---------------------------------------------------------------------------
@@ -29,7 +29,7 @@ describe('TOKENS', () => {
   });
 
   it('each token value is a non-empty string', () => {
-    for (const [key, value] of Object.entries(TOKENS)) {
+    for (const [_key, value] of Object.entries(TOKENS)) {
       expect(typeof value).toBe('string');
       expect(value.length).toBeGreaterThan(0);
     }

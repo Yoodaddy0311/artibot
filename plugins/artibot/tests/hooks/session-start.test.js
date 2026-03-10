@@ -112,7 +112,8 @@ describe('session-start hook', () => {
       expect(exitSpy).not.toHaveBeenCalled();
     });
 
-    it('does not write to stderr on success', async () => {
+    it('does not write to stderr on success when agent teams is active', async () => {
+      process.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS = '1';
       mockState.readStdinResult = Promise.resolve(JSON.stringify({}));
 
       await importAndWait();
@@ -133,13 +134,28 @@ describe('session-start hook', () => {
       expect(output.message).toContain('agent-teams (full)');
     });
 
-    it('auto-enables agent-teams in settings.json when env var is absent', async () => {
+    it('shows advisory message when agent teams is not configured', async () => {
       mockState.readStdinResult = Promise.resolve(JSON.stringify({}));
 
       await importAndWait();
 
       const output = mockState.writeStdoutCalls[0][0];
-      expect(output.message).toContain('agent-teams (auto-enabled');
+      expect(output.message).toContain('sub-agent (fallback)');
+      // Should write advisory to stderr instead of modifying settings.json
+      const stderrOutput = stderrSpy.mock.calls.map((c) => c[0]).join('');
+      expect(stderrOutput).toContain('Agent Teams not enabled');
+    });
+
+    it('does not modify settings.json (advisory only)', async () => {
+      const { writeFileSync } = await import('node:fs');
+      mockState.readStdinResult = Promise.resolve(JSON.stringify({}));
+
+      await importAndWait();
+
+      // Verify writeFileSync was never called with a settings.json path
+      const settingsWrites = vi.mocked(writeFileSync).mock.calls
+        .filter((c) => String(c[0]).includes('settings.json'));
+      expect(settingsWrites).toHaveLength(0);
     });
   });
 

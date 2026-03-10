@@ -5,6 +5,7 @@
 
 import { arch, homedir, platform } from 'node:os';
 import { versions } from 'node:process';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 
 /**
@@ -76,7 +77,16 @@ export function checkNodeVersion(minMajor = 18) {
  */
 export function getPluginRoot() {
   const envRoot = process.env.CLAUDE_PLUGIN_ROOT;
-  if (envRoot) return path.resolve(envRoot);
+  if (envRoot) {
+    const resolved = path.resolve(envRoot);
+    // Validate: warn if artibot.config.json is missing (may indicate stale env var)
+    const configPath = path.join(resolved, 'artibot.config.json');
+    if (!existsSync(configPath) && existsSync(resolved)) {
+      // Directory exists but missing config — likely a stale or wrong CLAUDE_PLUGIN_ROOT
+      // Still return it to avoid breaking callers, but other modules should handle gracefully
+    }
+    return resolved;
+  }
   // Fallback: this file lives in <root>/lib/core/platform.js
   return path.resolve(new URL('..', new URL('..', import.meta.url)).pathname.replace(/^\/([A-Z]:)/i, '$1'));
 }

@@ -251,7 +251,7 @@ async function main() {
   const raw = await readStdin();
   const hookData = parseJSON(raw);
 
-  const eventType = hookData?.event_type || hookData?.hook_type || 'unknown';
+  const eventType = process.argv[2] || hookData?.event_type || hookData?.hook_type || 'unknown';
 
   try {
     switch (eventType) {

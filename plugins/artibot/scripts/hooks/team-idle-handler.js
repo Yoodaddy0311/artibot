@@ -10,9 +10,10 @@
  * Stdout: JSON { message, stop? }
  */
 
-import { parseJSON, readStdin, resolveConfigPath, writeStdout } from '../utils/index.js';
+import { atomicWriteSync, parseJSON, readStdin, resolveConfigPath, writeStdout } from '../utils/index.js';
 import { existsSync, readFileSync } from 'node:fs';
 import { createErrorHandler, extractAgentId, extractAgentRole, getStatePath } from '../../lib/core/hook-utils.js';
+import { withFileLock } from '../../lib/core/file-lock.js';
 
 /** Maximum consecutive idle events before auto-stop (0 = disabled). */
 const DEFAULT_MAX_IDLE_COUNT = 0;
@@ -36,16 +37,19 @@ function loadAutoStopConfig() {
 }
 
 /**
- * Get the idle count for an agent from state, and increment it.
+ * Return a new state with the idle count for the given agent incremented (immutable).
  * @param {string} agentId
  * @param {object} state
- * @returns {number} Current idle count (after increment)
+ * @returns {{ state: object, count: number }}
  */
 function trackIdleCount(agentId, state) {
-  if (!state.idleCounts) state.idleCounts = {};
-  const prev = state.idleCounts[agentId] || 0;
-  state.idleCounts[agentId] = prev + 1;
-  return prev + 1;
+  const idleCounts = { ...(state.idleCounts || {}) };
+  const prev = idleCounts[agentId] || 0;
+  const count = prev + 1;
+  return {
+    state: { ...state, idleCounts: { ...idleCounts, [agentId]: count } },
+    count,
+  };
 }
 
 async function main() {
@@ -54,40 +58,58 @@ async function main() {
 
   const agentId = extractAgentId(hookData);
   const agentRole = extractAgentRole(hookData, '');
-  const agentType = hookData?.agent_type || agentRole;
 
-  // Check if there are pending tasks in state
   const statePath = getStatePath();
-  let pendingTasks = [];
-  let state = {};
+  const autoStopConfig = loadAutoStopConfig();
 
-  if (existsSync(statePath)) {
-    try {
-      state = JSON.parse(readFileSync(statePath, 'utf-8'));
-      pendingTasks = (state.tasks || []).filter((t) => t.status === 'pending');
-    } catch {
-      // Ignore
+  // Read-modify-write under file lock
+  const { pendingTasks, shouldStop, idleCount } = withFileLock(statePath, () => {
+    let state = {};
+    let pending = [];
+
+    if (existsSync(statePath)) {
+      try {
+        state = JSON.parse(readFileSync(statePath, 'utf-8'));
+        pending = (state.tasks || []).filter((t) => t.status === 'pending');
+      } catch {
+        // Ignore
+      }
     }
-  }
 
+    let stop = false;
+    let count = 0;
+
+    if (pending.length > 0) {
+      // Reset idle count when tasks are available (immutable)
+      if (state.idleCounts) {
+        state = {
+          ...state,
+          idleCounts: { ...state.idleCounts, [agentId]: 0 },
+        };
+      }
+    } else if (autoStopConfig.enabled && autoStopConfig.maxIdleCount > 0) {
+      const tracked = trackIdleCount(agentId, state);
+      state = tracked.state;
+      count = tracked.count;
+      if (count >= autoStopConfig.maxIdleCount) {
+        stop = true;
+      }
+    }
+
+    atomicWriteSync(statePath, state);
+    return { pendingTasks: pending, shouldStop: stop, idleCount: count };
+  });
+
+  // Build output message (no state mutation needed)
   const parts = [`[team] Teammate idle: ${agentId}`];
   if (agentRole) parts[0] += ` (${agentRole})`;
 
-  // Determine if we should stop this idle teammate
-  let shouldStop = false;
-  const autoStopConfig = loadAutoStopConfig();
-
   if (pendingTasks.length > 0) {
     parts.push(`${pendingTasks.length} pending task(s) available for assignment.`);
-    // Reset idle count when tasks are available
-    if (state.idleCounts) state.idleCounts[agentId] = 0;
   } else {
     parts.push('No pending tasks.');
-
     if (autoStopConfig.enabled && autoStopConfig.maxIdleCount > 0) {
-      const idleCount = trackIdleCount(agentId, state);
-      if (idleCount >= autoStopConfig.maxIdleCount) {
-        shouldStop = true;
+      if (shouldStop) {
         parts.push(`Auto-stopping after ${idleCount} idle events.`);
       } else {
         parts.push(`Idle count: ${idleCount}/${autoStopConfig.maxIdleCount}.`);
@@ -97,10 +119,9 @@ async function main() {
     }
   }
 
-  const result = { message: parts.join(' | ') };
-  if (shouldStop) {
-    result.stop = true;
-  }
+  const result = shouldStop
+    ? { message: parts.join(' | '), stop: true }
+    : { message: parts.join(' | ') };
 
   writeStdout(result);
 }

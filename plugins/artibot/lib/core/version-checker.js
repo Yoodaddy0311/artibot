@@ -13,10 +13,14 @@ const CACHE_FILE = 'update-check.json';
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 const GITHUB_API_URL =
   'https://api.github.com/repos/Yoodaddy0311/artibot/releases/latest';
+// Shorter timeout than update.js (5s) because this runs at session start and must not block.
+// update.js uses 5s because the user explicitly requested a version check.
 const FETCH_TIMEOUT_MS = 3000;
 
 /**
- * Compare two semver strings (major.minor.patch, no pre-release parsing).
+ * Compare two semver strings (major.minor.patch only).
+ * Pre-release suffixes (e.g. "-beta.1", "-rc.2") are stripped before comparison.
+ * This means "1.5.0-beta.1" is treated as equivalent to "1.5.0".
  * Returns true when `latest` is strictly newer than `current`.
  *
  * @param {string} current - Version currently installed, e.g. "1.4.0"
@@ -104,7 +108,12 @@ export async function checkForUpdate(currentVersion, cacheDir) {
   // 1. Try reading a valid cache entry first
   const cached = readCache(cacheFilePath);
   if (cached !== null) {
-    return cached;
+    // Invalidate cache if installed version changed since last check (e.g., manual upgrade)
+    if (cached.currentVersion && cached.currentVersion !== currentVersion) {
+      // Version changed — cache is stale, re-check
+    } else {
+      return cached;
+    }
   }
 
   // 2. Fetch the latest release from GitHub

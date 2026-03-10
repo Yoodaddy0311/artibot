@@ -1,16 +1,16 @@
-import { describe, expect, it, beforeEach, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   addEntry,
-  getEntries,
-  search,
-  decay,
-  getVaultStats,
-  resetVault,
-  createEmptyVault,
-  loadVault,
   CATEGORIES,
+  createEmptyVault,
+  decay,
   DECAY_MS,
+  getEntries,
+  getVaultStats,
+  loadVault,
   MAX_ENTRIES_PER_CATEGORY,
+  resetVault,
+  search,
 } from '../../lib/learning/vault.js';
 
 // Mock fs to avoid actual disk I/O in tests
