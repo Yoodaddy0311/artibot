@@ -56,6 +56,5 @@
     "./agents/typescript-pro.md"
   ],
   "commands": ["./commands/"],
-  "skills": ["./skills/"],
-  "rules": ["./rules/"]
+  "skills": ["./skills/"]
 }

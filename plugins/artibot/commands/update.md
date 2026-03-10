@@ -1,17 +1,18 @@
 ---
-description: (Artibot) Artibot 플러그인 버전 확인 및 업데이트
+description: (Artibot) Artibot 플러그인 버전 확인 및 자동 업데이트
 argument-hint: 'e.g. "최신 버전 확인 및 업데이트"'
 allowed-tools: [Bash, Read]
 ---
 
 # /artibot:update
 
-Check the current Artibot version against the latest GitHub release and optionally update.
+Check the current Artibot version against the latest GitHub release and auto-update if a newer version is available.
 
 ## Arguments
 
 Parse $ARGUMENTS:
-- `--check` (default): Check version only, report whether an update is available, do not install
+- (none): Auto-update — check version and install if an update is available
+- `--check`: Check version only, report whether an update is available, do not install
 - `--force`: Force reinstall regardless of whether the installed version matches the latest
 - `--dry-run`: Show what would happen without executing any install or cache operations
 
@@ -33,7 +34,8 @@ node "${PLUGIN_ROOT}/scripts/update.js" $ARGUMENTS
 
 | Flag | Checks Version | Downloads Update | Writes Files |
 |------|---------------|-----------------|-------------|
-| (none) / `--check` | Yes | No | No |
+| (none) | Yes | Yes (if available) | Yes (if available) |
+| `--check` | Yes | No | No |
 | `--force` | Yes | Yes (always) | Yes |
 | `--dry-run` | Yes | No (preview only) | No |
 | `--force --dry-run` | Yes | No (preview only) | No |

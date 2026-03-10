@@ -6,7 +6,8 @@
  *   node update.js [--check] [--force] [--dry-run]
  *
  * Flags:
- *   --check    (default) Check version only, do not update
+ *   (none)     Auto-update: check version and install if update available
+ *   --check    Check version only, do not update
  *   --force    Force reinstall regardless of current version
  *   --dry-run  Print what would happen without executing it
  *
@@ -25,9 +26,9 @@ import { getPluginRoot } from '../lib/core/platform.js';
 // ---------------------------------------------------------------------------
 
 const args = process.argv.slice(2);
-const CHECK   = args.includes('--check') || (!args.includes('--force') && !args.includes('--dry-run'));
-const FORCE   = args.includes('--force');
-const DRY_RUN = args.includes('--dry-run');
+const CHECK_ONLY = args.includes('--check');
+const FORCE      = args.includes('--force');
+const DRY_RUN    = args.includes('--dry-run');
 
 // ---------------------------------------------------------------------------
 // Path helpers
@@ -398,10 +399,10 @@ async function main() {
     console.log(`\nStatus: Update available (${currentVersion} -> ${latestVersion})`);
   }
 
-  // --check mode: stop here
-  if (CHECK && !FORCE) {
+  // --check mode: stop here (explicit --check flag only)
+  if (CHECK_ONLY && !FORCE) {
     if (updateAvailable) {
-      console.log('\nRun `/artibot:update --force` to install the update.');
+      console.log('\nRun `/artibot:update --force` to force reinstall, or just `/artibot:update` to auto-update.');
     }
     process.exit(0);
   }
