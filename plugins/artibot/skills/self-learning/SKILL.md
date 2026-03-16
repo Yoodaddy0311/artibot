@@ -7,14 +7,13 @@ description: |
   optimization for comparative tool ranking, and recommends optimal tools.
   Auto-activates when: tool selection is ambiguous, repeated tool failures detected,
   or new task patterns encountered without prior history.
-  Triggers: tool selection, which tool, best tool, recommend tool, learn, optimize tools,
+  Triggers: tool selection, which tool, best tool, recommend tool, optimize tools,
   GRPO, group comparison, 도구 추천, 도구 선택, 최적 도구
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 2
 triggers:
   - "tool selection"
   - "GRPO"
-  - "learn"
   - "optimize tools"
   - "recommend tool"
   - "which tool"

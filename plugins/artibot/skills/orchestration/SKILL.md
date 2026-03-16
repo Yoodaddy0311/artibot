@@ -5,7 +5,7 @@ description: |
   Routing intelligence engine that analyzes requests and routes to optimal agents, skills, and commands.
   Supports two delegation modes: Sub-Agent (Task tool) for focused tasks and Team Mode (Agent Teams API) for complex multi-domain coordination.
   Auto-activates when: complex multi-step requests, team composition needed, multi-domain tasks, ambiguous intent.
-  Triggers: analyze, build, implement, design, route, orchestrate, complex, multi-step, team, coordinate
+  Triggers: orchestrate, build, implement, design, route, complex, multi-step, team, coordinate
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 3
 progressive_disclosure:
@@ -13,12 +13,11 @@ progressive_disclosure:
   level1_tokens: 100
   level2_tokens: 4000
 triggers:
-  - "analyze"
+  - "orchestrate"
   - "build"
   - "implement"
   - "design"
   - "route"
-  - "orchestrate"
   - "complex"
   - "multi-step"
   - "team"

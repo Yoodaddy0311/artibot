@@ -1,12 +1,12 @@
 # Artibot
 
 [![Coverage](https://img.shields.io/badge/coverage-97.5%25-brightgreen)](plugins/artibot/tests/)
-[![Tests](https://img.shields.io/badge/tests-3528%20passed-brightgreen)](plugins/artibot/tests/)
+[![Tests](https://img.shields.io/badge/tests-3603%20passed-brightgreen)](plugins/artibot/tests/)
 [![License](https://img.shields.io/badge/license-BSL--1.1-blue)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D18-green)](package.json)
 
 ![Claude Code Plugin](https://img.shields.io/badge/Claude_Code-Plugin-7C3AED?style=flat-square)
-![Version](https://img.shields.io/badge/version-1.10.0-blue?style=flat-square)
+![Version](https://img.shields.io/badge/version-1.11.0-blue?style=flat-square)
 ![License](https://img.shields.io/badge/license-BSL--1.1-green?style=flat-square)
 ![Node.js](https://img.shields.io/badge/Node.js-18%2B-brightgreen?style=flat-square)
 ![Agent Teams](https://img.shields.io/badge/Agent_Teams-Native-orange?style=flat-square)
@@ -690,12 +690,12 @@ plugins/artibot/
 |   +-- ci/                      # 4 CI validation scripts
 |   +-- utils/
 +-- lib/
-|   +-- core/                    # Core modules (platform, config, cache, playbook-parser, playbook-registry, guard-registry)
+|   +-- core/                    # Core modules (platform, config, cache, playbook-parser, playbook-registry, guard-registry, event-bus, blocked-patterns)
 |   +-- visual/                  # Visual validation (SSIM differ, style-fixer, validator)
 |   +-- intent/                  # Intent detection (language, trigger)
 |   +-- context/                 # Context management (session)
 |   +-- privacy/                 # PII protection (pii-detector, pii-scrubber, homoglyph, token-rotation, differential-privacy)
-|   +-- learning/                # Lifelong learning (memory, GRPO, pattern-analyzer, tool-history, rule-extractor, skill-injector)
+|   +-- learning/                # Lifelong learning (memory, GRPO, pattern-analyzer, tool-history, rule-extractor, skill-injector, knowledge-demotion)
 |   +-- adapters/                # Cross-platform adapters
 +-- output-styles/               # 3 output styles
 +-- templates/                   # 3 writing templates
@@ -710,7 +710,7 @@ Key settings in `artibot.config.json`:
 
 | Setting | Description | Default |
 |---------|-------------|---------|
-| `version` | Plugin version | `1.10.0` |
+| `version` | Plugin version | `1.11.0` |
 | `cognitive.router.threshold` | System 1/2 boundary | `0.4` |
 | `cognitive.router.adaptRate` | Per-feedback adjustment step | `0.05` |
 | `cognitive.system1.maxLatency` | System 1 max response time (ms) | `100` |
@@ -814,7 +814,7 @@ node scripts/ci/validate-hooks.js     # Hook validation
 
 ## Version
 
-1.10.0 -- pm-skills benchmarking: Next Steps sections (46 commands), HITL v2 conversational checkpoints (25 skills), Output Templates (10 skills), /repo command for external repo analysis (3,528 tests)
+1.11.0 -- Self-diagnosis driven optimization: circular buffer router (O(1)), single-pass stats, Promise.all parallelization, shared blocked-patterns module, event bus infrastructure, knowledge-transfer/demotion split, dynamic import elimination, SKILL.md trigger dedup, config alias cleanup (3,603 tests)
 
 ## License
 

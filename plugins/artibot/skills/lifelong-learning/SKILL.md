@@ -5,12 +5,11 @@ description: |
   Continuous learning pipeline that captures session experiences, performs batch learning via GRPO,
   and transfers validated knowledge between System 1 and System 2 caches.
   Auto-activates when: session end, pattern discovery during routing, knowledge transfer triggers, manual /learn command.
-  Triggers: learn, experience, knowledge, transfer, promote, demote, grpo, batch, pattern, memory
+  Triggers: learn, experience, knowledge, transfer, promote, demote, grpo, batch, pattern, skill development, growth, continuous improvement
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 2
 triggers:
   - "learn"
-  - "improve"
   - "skill development"
   - "knowledge"
   - "growth"

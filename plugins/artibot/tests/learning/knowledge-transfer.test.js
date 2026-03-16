@@ -2,16 +2,18 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   bootstrapPromote,
   clearCache,
-  demoteFromSystem1,
   getPromotionCandidates,
   getSystem1Pattern,
   getSystem1Patterns,
   getTransferHistory,
   getTransferStats,
-  hotSwap,
   promoteToSystem1,
-  recordSystem1Usage,
 } from '../../lib/learning/knowledge-transfer.js';
+import {
+  demoteFromSystem1,
+  hotSwap,
+  recordSystem1Usage,
+} from '../../lib/learning/knowledge-demotion.js';
 
 vi.mock('../../lib/core/file.js', () => ({
   readJsonFile: vi.fn(() => Promise.resolve(null)),

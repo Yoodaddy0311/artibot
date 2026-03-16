@@ -4,15 +4,13 @@ name: continuous-learning
 description: |
   Pattern extraction and knowledge persistence across sessions using auto memory.
   Auto-activates when: recurring patterns detected, debugging insights gained, user preferences confirmed.
-  Triggers: remember, pattern, learned, save, memory, always do, never do, across sessions
+  Triggers: remember, pattern, learned, always do, never do, across sessions
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 2
 triggers:
   - "remember"
   - "pattern"
   - "learned"
-  - "save"
-  - "memory"
   - "always do"
   - "never do"
   - "across sessions"

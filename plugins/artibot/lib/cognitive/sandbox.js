@@ -5,60 +5,7 @@
  * @module lib/cognitive/sandbox
  */
 
-// path and getPlatform reserved for future sandbox CWD/platform-specific logic
-
-/**
- * Dangerous command patterns that are always blocked.
- * Extends the patterns from scripts/hooks/pre-bash.js for sandbox scope.
- * @type {Array<{ pattern: RegExp, label: string }>}
- */
-const BLOCKED_PATTERNS = [
-  // Filesystem destruction
-  { pattern: /rm\s+(-\w*r\w*f|--recursive).*\//i, label: 'rm -rf with path' },
-  { pattern: /rm\s+-\w*f\w*r.*\//i, label: 'rm -fr with path' },
-  { pattern: /del\s+\/s\s+\/q/i, label: 'del /s /q (Windows recursive delete)' },
-  { pattern: /rmdir\s+\/s\s+\/q/i, label: 'rmdir /s /q (Windows recursive delete)' },
-  { pattern: /:\s*>\s*\//i, label: 'truncate file' },
-
-  // Disk / filesystem
-  { pattern: /mkfs\./i, label: 'format filesystem' },
-  { pattern: /dd\s+if=/i, label: 'dd raw disk write' },
-  { pattern: />\s*\/dev\/sd/i, label: 'write to disk device' },
-  { pattern: /format\s+[a-z]:/i, label: 'format drive (Windows)' },
-  { pattern: /diskpart/i, label: 'diskpart (Windows disk management)' },
-
-  // Permission escalation
-  { pattern: /chmod\s+-R\s+777/i, label: 'chmod 777 recursive' },
-  { pattern: /chown\s+-R\s+root/i, label: 'chown to root recursive' },
-
-  // Git destructive
-  { pattern: /git\s+push\s+.*--force/i, label: 'git push --force' },
-  { pattern: /git\s+push\s+-f\b/i, label: 'git push -f' },
-  { pattern: /git\s+reset\s+--hard/i, label: 'git reset --hard' },
-  { pattern: /git\s+clean\s+-\w*f/i, label: 'git clean -f' },
-
-  // Database destruction
-  { pattern: /drop\s+(database|table|schema)\b/i, label: 'DROP DATABASE/TABLE' },
-  { pattern: /truncate\s+table\b/i, label: 'TRUNCATE TABLE' },
-  { pattern: /delete\s+from\s+\w+\s*;?\s*$/i, label: 'DELETE FROM without WHERE' },
-
-  // Package publishing
-  { pattern: /npm\s+publish/i, label: 'npm publish' },
-
-  // System shutdown / reboot
-  { pattern: /shutdown\s/i, label: 'system shutdown' },
-  { pattern: /reboot\b/i, label: 'system reboot' },
-  { pattern: /init\s+0\b/i, label: 'init 0 (halt)' },
-
-  // Network abuse
-  { pattern: /:(){ :\|:& };:/i, label: 'fork bomb' },
-  { pattern: /wget\s+.*\|\s*(sh|bash)/i, label: 'pipe download to shell' },
-  { pattern: /curl\s+.*\|\s*(sh|bash)/i, label: 'pipe download to shell' },
-
-  // Environment destruction
-  { pattern: /unset\s+(PATH|HOME|USER)\b/i, label: 'unset critical env var' },
-  { pattern: /export\s+PATH\s*=\s*$/i, label: 'empty PATH' },
-];
+import { BLOCKED_PATTERNS } from '../core/blocked-patterns.js';
 
 /**
  * Default sandbox configuration.

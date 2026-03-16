@@ -68,19 +68,23 @@ export {
   scheduleLearning,
 } from './lifelong-learner.js';
 
-// Knowledge Transfer (System 2 -> System 1 promotion/demotion)
+// Knowledge Transfer (System 2 -> System 1 promotion)
 export {
   promoteToSystem1,
   bootstrapPromote,
-  demoteFromSystem1,
-  recordSystem1Usage,
   getPromotionCandidates,
-  hotSwap,
   getSystem1Patterns,
   getSystem1Pattern,
   getTransferHistory,
   getTransferStats,
 } from './knowledge-transfer.js';
+
+// Knowledge Demotion (System 1 -> System 2 demotion + hot-swap)
+export {
+  demoteFromSystem1,
+  recordSystem1Usage,
+  hotSwap,
+} from './knowledge-demotion.js';
 
 // Rule Extractor (Conversation-to-Memory pipeline)
 export {
@@ -117,6 +121,17 @@ export {
   CATEGORIES as VAULT_CATEGORIES,
 } from './vault.js';
 
+// ---------------------------------------------------------------------------
+// Local imports for business logic functions below
+// (re-exports don't create local bindings)
+// ---------------------------------------------------------------------------
+import { extractRules as _extractRules } from './rule-extractor.js';
+import { saveMemory as _saveMemory, summarizeSession as _summarizeSession } from './memory-manager.js';
+import { injectRules as _injectRules } from './skill-injector.js';
+import { evaluateResult as _evaluateResult, getImprovementSuggestions as _getImprovementSuggestions } from './self-evaluator.js';
+import { evaluateGroup as _evaluateGroup, updateWeights as _updateWeights } from './grpo-optimizer.js';
+import { batchLearn as _batchLearn, collectDailyExperiences as _collectDailyExperiences, collectExperience as _collectExperience } from './lifelong-learner.js';
+
 /**
  * Process a user message through the conversation-to-memory pipeline.
  * Extracts rules, persists them to memory, and optionally injects
@@ -136,19 +151,17 @@ export {
 export async function processUserMessage(message, options = {}) {
   const { targetSkills = [], sessionId } = options;
 
-  const { extractRules: extract } = await import('./rule-extractor.js');
-  const rules = extract(message);
+  const rules = _extractRules(message);
 
   if (rules.length === 0) {
     return { rulesExtracted: 0, rules: [], memorySaved: false, injections: [] };
   }
 
   // Persist all rules to memory store
-  const { saveMemory } = await import('./memory-manager.js');
   let memorySaved = false;
   try {
     for (const rule of rules) {
-      await saveMemory('preference', {
+      await _saveMemory('preference', {
         ruleType: rule.type,
         content: rule.content,
         lang: rule.lang,
@@ -168,10 +181,9 @@ export async function processUserMessage(message, options = {}) {
   // Inject into target skills
   const injections = [];
   if (targetSkills.length > 0) {
-    const { injectRules } = await import('./skill-injector.js');
     for (const skillName of targetSkills) {
       try {
-        const result = await injectRules(rules, skillName);
+        const result = await _injectRules(rules, skillName);
         injections.push(result);
       } catch (err) {
         process.stderr.write(`[learning] skill injection failed for ${skillName}: ${err?.message ?? err}\n`);
@@ -218,8 +230,6 @@ function _evalTrendScore(trend) {
  */
 async function _runSelfEvaluation(sessionData) {
   try {
-    const { evaluateResult: selfEvaluate, getImprovementSuggestions } = await import('./self-evaluator.js');
-
     const sessionTask = {
       id: sessionData.sessionId ?? `session-${Date.now()}`,
       type: 'session',
@@ -231,12 +241,11 @@ async function _runSelfEvaluation(sessionData) {
       testsPass: sessionData.completedTasks?.length > 0 ? true : undefined,
       filesModified: sessionData.filesModified,
     };
-    await selfEvaluate(sessionTask, sessionResult);
+    await _evaluateResult(sessionTask, sessionResult);
 
-    const evalResult = await getImprovementSuggestions();
+    const evalResult = await _getImprovementSuggestions();
 
-    const { collectExperience } = await import('./lifelong-learner.js');
-    await collectExperience({
+    await _collectExperience({
       type: 'self-evaluation',
       category: 'session',
       data: {
@@ -264,7 +273,6 @@ async function _runSelfEvaluation(sessionData) {
  */
 async function _recordGrpoRound(learned) {
   try {
-    const { evaluateGroup: grpoEval, updateWeights: grpoUpdate } = await import('./grpo-optimizer.js');
     const candidates = learned.patterns.map((p, i) => ({
       id: `learn-cand-${Date.now()}-${i}`,
       strategy: p.category ?? 'default',
@@ -277,8 +285,8 @@ async function _recordGrpoRound(learned) {
       },
     }));
     if (candidates.length >= 2) {
-      const groupResult = grpoEval(candidates);
-      await grpoUpdate(groupResult);
+      const groupResult = _evaluateGroup(candidates);
+      await _updateWeights(groupResult);
     }
   } catch (grpoErr) {
     process.stderr.write(`[learning] GRPO recording failed: ${grpoErr?.message ?? grpoErr}\n`);
@@ -292,9 +300,8 @@ async function _recordGrpoRound(learned) {
  */
 async function _runLifelongLearning(sessionData) {
   try {
-    const { collectDailyExperiences: collect, batchLearn: learn } = await import('./lifelong-learner.js');
-    await collect(sessionData);
-    const learned = await learn();
+    await _collectDailyExperiences(sessionData);
+    const learned = await _batchLearn();
 
     if (learned && learned.patternsExtracted > 0) {
       await _recordGrpoRound(learned);
@@ -313,7 +320,7 @@ async function _runLifelongLearning(sessionData) {
  */
 async function _runHotSwap() {
   try {
-    const { hotSwap: swap } = await import('./knowledge-transfer.js');
+    const { hotSwap: swap } = await import('./knowledge-demotion.js');
     return await swap();
   } catch (err) {
     process.stderr.write(`[learning] knowledge hot-swap failed: ${err?.message ?? err}\n`);
@@ -335,8 +342,7 @@ export async function shutdownLearning(sessionData) {
   let hotSwapped = null;
 
   if (sessionData) {
-    const { summarizeSession: summarize } = await import('./memory-manager.js');
-    await summarize(sessionData);
+    await _summarizeSession(sessionData);
     summarized = true;
 
     evaluated = await _runSelfEvaluation(sessionData);
@@ -362,21 +368,17 @@ export async function shutdownLearning(sessionData) {
  * @returns {Promise<{ rankings: object[], weights: object, evaluation: object, memorySaved: boolean }>}
  */
 export async function runLearningCycle(task, candidateResults, options = {}) {
-  const { evaluateGroup: grpoEvaluate, updateWeights: grpoUpdateWeights } = await import('./grpo-optimizer.js');
-  const { evaluateResult: selfEvaluate } = await import('./self-evaluator.js');
-  const { saveMemory: memSave } = await import('./memory-manager.js');
-
   // Step 1-2: GRPO group evaluation
-  const groupResult = grpoEvaluate(candidateResults, options.rules);
+  const groupResult = _evaluateGroup(candidateResults, options.rules);
 
   // Step 3: Update weights
-  const weights = await grpoUpdateWeights(groupResult);
+  const weights = await _updateWeights(groupResult);
 
   // Step 4: Self-evaluate the best candidate
   const best = groupResult.best;
   const bestCandidate = candidateResults.find((c) => c.id === best?.candidateId);
   const evaluation = bestCandidate
-    ? await selfEvaluate(task, {
+    ? await _evaluateResult(task, {
         success: (bestCandidate.result?.exitCode ?? 1) === 0,
         duration: bestCandidate.result?.duration,
         testsPass: (bestCandidate.result?.errors ?? 1) === 0,
@@ -386,7 +388,7 @@ export async function runLearningCycle(task, candidateResults, options = {}) {
   // Step 5: Store learning in memory
   let memorySaved = false;
   try {
-    await memSave('learning', {
+    await _saveMemory('learning', {
       taskId: task.id,
       domain: task.domain,
       bestStrategy: best?.strategy,

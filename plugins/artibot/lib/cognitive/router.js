@@ -162,14 +162,98 @@ const STEP_PATTERNS = [
 ];
 
 // ---------------------------------------------------------------------------
+// Circular Buffer
+// ---------------------------------------------------------------------------
+
+/**
+ * Create a fixed-capacity circular buffer with O(1) push.
+ * Entries are stored in a pre-allocated array; a write pointer wraps around
+ * when capacity is reached, overwriting the oldest entry.
+ *
+ * @param {number} maxSize - Maximum number of entries the buffer can hold.
+ * @returns {{
+ *   push: (entry: T) => void,
+ *   get: (index: number) => T | undefined,
+ *   updateAt: (index: number, updater: (entry: T) => T) => void,
+ *   filter: (predicate: (entry: T) => boolean) => T[],
+ *   toArray: () => T[],
+ *   clear: () => void,
+ *   size: number,
+ * }}
+ * @template T
+ */
+function createCircularBuffer(maxSize) {
+  const buf = new Array(maxSize);
+  let head = 0;   // next write position
+  let count = 0;  // current number of entries
+
+  return {
+    /** Add an entry in O(1). Overwrites oldest when full. */
+    push(entry) {
+      buf[head] = entry;
+      head = (head + 1) % maxSize;
+      if (count < maxSize) count++;
+    },
+
+    /** Random access by logical index (0 = oldest). */
+    get(index) {
+      if (index < 0 || index >= count) return undefined;
+      const start = count < maxSize ? 0 : head;
+      return buf[(start + index) % maxSize];
+    },
+
+    /** Update a single entry at logical index without copying. */
+    updateAt(index, updater) {
+      if (index < 0 || index >= count) return;
+      const start = count < maxSize ? 0 : head;
+      const physical = (start + index) % maxSize;
+      buf[physical] = updater(buf[physical]);
+    },
+
+    /** Return entries matching predicate (oldest first). */
+    filter(predicate) {
+      const result = [];
+      const start = count < maxSize ? 0 : head;
+      for (let i = 0; i < count; i++) {
+        const entry = buf[(start + i) % maxSize];
+        if (predicate(entry)) result.push(entry);
+      }
+      return result;
+    },
+
+    /** Return all entries in insertion order (oldest first). */
+    toArray() {
+      if (count === 0) return [];
+      const start = count < maxSize ? 0 : head;
+      const result = new Array(count);
+      for (let i = 0; i < count; i++) {
+        result[i] = buf[(start + i) % maxSize];
+      }
+      return result;
+    },
+
+    /** Reset to empty state. */
+    clear() {
+      head = 0;
+      count = 0;
+    },
+
+    /** Current number of entries. */
+    get size() {
+      return count;
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
 // State (module-scoped, session-lifetime)
 // ---------------------------------------------------------------------------
 
 /** @type {number} Current adaptive threshold */
 let threshold = DEFAULT_THRESHOLD;
 
-/** @type {{ timestamp: number, input: string, score: number, system: 1|2, confidence: number, durationMs: number, success?: boolean }[]} */
-let history = [];
+/** @type {ReturnType<typeof createCircularBuffer>} */
+const history = createCircularBuffer(MAX_HISTORY);
 
 /** @type {number} Consecutive System 1 successes */
 let s1SuccessStreak = 0;
@@ -273,17 +357,14 @@ export function route(input, context = {}) {
     durationMs,
   };
 
-  history = [...history, entry];
-  if (history.length > MAX_HISTORY) {
-    history = history.slice(-MAX_HISTORY);
-  }
+  history.push(entry);
 
   return {
     system: classification.system,
     classification,
     metadata: {
       routedAt: entry.timestamp,
-      historySize: history.length,
+      historySize: history.size,
     },
   };
 }
@@ -332,12 +413,10 @@ export function adaptThreshold(feedback) {
     }
   }
 
-  // Mark the most recent matching history entry (immutable replacement)
+  // Mark the most recent matching history entry (immutable entry replacement)
   const recentIdx = findRecentEntryIndex(feedback.system);
   if (recentIdx >= 0) {
-    history = history.map((h, i) =>
-      i === recentIdx ? { ...h, success: feedback.success } : h,
-    );
+    history.updateAt(recentIdx, (h) => ({ ...h, success: feedback.success }));
   }
 
   return {
@@ -375,7 +454,7 @@ export function adaptThreshold(feedback) {
  * // stats.recentTrend === 'stable'
  */
 export function getRoutingStats() {
-  const total = history.length;
+  const total = history.size;
   if (total === 0) {
     return {
       totalRouted: 0,
@@ -391,34 +470,39 @@ export function getRoutingStats() {
     };
   }
 
-  const s1 = history.filter((h) => h.system === 1);
-  const s2 = history.filter((h) => h.system === 2);
+  // Single-pass accumulation over circular buffer
+  const all = history.toArray();
+  let s1Count = 0, s2Count = 0;
+  let sumScore = 0, sumConf = 0, sumDur = 0;
+  let s1WithFb = 0, s1Success = 0, s2WithFb = 0, s2Success = 0;
 
-  const avgScore = history.reduce((s, h) => s + h.score, 0) / total;
-  const avgConf = history.reduce((s, h) => s + h.confidence, 0) / total;
-  const avgDur = history.reduce((s, h) => s + h.durationMs, 0) / total;
+  for (const h of all) {
+    sumScore += h.score;
+    sumConf += h.confidence;
+    sumDur += h.durationMs;
+    if (h.system === 1) {
+      s1Count++;
+      if (h.success !== undefined) { s1WithFb++; if (h.success) s1Success++; }
+    } else {
+      s2Count++;
+      if (h.success !== undefined) { s2WithFb++; if (h.success) s2Success++; }
+    }
+  }
 
-  const s1WithFeedback = s1.filter((h) => h.success !== undefined);
-  const s2WithFeedback = s2.filter((h) => h.success !== undefined);
-
-  const s1SuccessRate = s1WithFeedback.length > 0
-    ? s1WithFeedback.filter((h) => h.success).length / s1WithFeedback.length
-    : 0;
-  const s2SuccessRate = s2WithFeedback.length > 0
-    ? s2WithFeedback.filter((h) => h.success).length / s2WithFeedback.length
-    : 0;
+  const s1SuccessRate = s1WithFb > 0 ? s1Success / s1WithFb : 0;
+  const s2SuccessRate = s2WithFb > 0 ? s2Success / s2WithFb : 0;
 
   // Trend detection: compare last 20% to first 80%
-  const recentTrend = detectTrend(history);
+  const recentTrend = detectTrend(all);
 
   return {
     totalRouted: total,
-    system1Count: s1.length,
-    system2Count: s2.length,
-    system1Ratio: round(s1.length / total),
-    avgScore: round(avgScore),
-    avgConfidence: round(avgConf),
-    avgDurationMs: round(avgDur),
+    system1Count: s1Count,
+    system2Count: s2Count,
+    system1Ratio: round(s1Count / total),
+    avgScore: round(sumScore / total),
+    avgConfidence: round(sumConf / total),
+    avgDurationMs: round(sumDur / total),
     currentThreshold: round(threshold),
     successRate: {
       system1: round(s1SuccessRate),
@@ -442,7 +526,7 @@ export function getRoutingStats() {
  */
 export function resetRouter() {
   threshold = DEFAULT_THRESHOLD;
-  history = [];
+  history.clear();
   s1SuccessStreak = 0;
   nativeEffortHint = null;
 }
@@ -621,8 +705,9 @@ function estimateNovelty(lower, context) {
  * @returns {number} Index or -1 if not found
  */
 function findRecentEntryIndex(system) {
-  for (let i = history.length - 1; i >= 0; i--) {
-    if (history[i].system === system && history[i].success === undefined) {
+  for (let i = history.size - 1; i >= 0; i--) {
+    const entry = history.get(i);
+    if (entry.system === system && entry.success === undefined) {
       return i;
     }
   }

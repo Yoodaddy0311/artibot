@@ -7,6 +7,7 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
+import { BLOCKED_PATTERNS } from './blocked-patterns.js';
 import { extractFilePath, isSkippablePath, matchesPathPattern } from './hook-utils.js';
 
 // -------------------------------------------------------------------------
@@ -157,32 +158,7 @@ function readFileSafe(filePath) {
 // Built-in Guard Patterns
 // -------------------------------------------------------------------------
 
-/** Dangerous command patterns for Bash guard. */
-const DANGEROUS_PATTERNS = [
-  { pattern: /rm\s+(-\w*r\w*f|--recursive).*\//i, label: 'rm -rf with path' },
-  { pattern: /rm\s+-\w*f\w*r.*\//i, label: 'rm -fr with path' },
-  { pattern: /rm\s+-\w*[rf]\w*\s+\*/i, label: 'rm with wildcard' },
-  { pattern: /sudo\s+rm\s/i, label: 'sudo rm' },
-  { pattern: /curl\s+.*\|\s*(sh|bash|zsh|python[23]?|perl|ruby|node)/i, label: 'curl pipe to interpreter' },
-  { pattern: /wget\s+.*\|\s*(sh|bash|zsh|python[23]?|perl|ruby|node)/i, label: 'wget pipe to interpreter' },
-  { pattern: /git\s+push\s+.*--force/i, label: 'git push --force' },
-  { pattern: /git\s+push\s+-f\b/i, label: 'git push -f' },
-  { pattern: /git\s+reset\s+--hard/i, label: 'git reset --hard' },
-  { pattern: /git\s+clean\s+-\w*f/i, label: 'git clean -f' },
-  { pattern: /git\s+checkout\s+\.\s*$/i, label: 'git checkout . (discard all changes)' },
-  { pattern: /git\s+restore\s+\.\s*$/i, label: 'git restore . (discard all changes)' },
-  { pattern: /git\s+branch\s+-D\b/i, label: 'git branch -D (force delete)' },
-  { pattern: /git\s+stash\s+drop/i, label: 'git stash drop' },
-  { pattern: /:\s*>\s*\//i, label: 'truncate file' },
-  { pattern: /mkfs\./i, label: 'format filesystem' },
-  { pattern: /dd\s+if=/i, label: 'dd raw disk write' },
-  { pattern: />\s*\/dev\/sd/i, label: 'write to disk device' },
-  { pattern: /chmod\s+-R\s+777/i, label: 'chmod 777 recursive' },
-  { pattern: /npm\s+publish/i, label: 'npm publish (public registry)' },
-  { pattern: /\b(DROP|TRUNCATE)\s+(TABLE|DATABASE)/i, label: 'SQL destructive operation' },
-  { pattern: /del\s+\/s/i, label: 'Windows recursive delete' },
-  { pattern: /rmdir\s+\/s/i, label: 'Windows recursive rmdir' },
-];
+/** @see {BLOCKED_PATTERNS} imported from ./blocked-patterns.js */
 
 /**
  * Normalize a command string to defeat common evasion techniques.
@@ -267,7 +243,7 @@ function checkDangerousCommand(ctx) {
   const normalized = normalizeCommand(command);
   const variants = [command, normalized];
 
-  for (const { pattern, label } of DANGEROUS_PATTERNS) {
+  for (const { pattern, label } of BLOCKED_PATTERNS) {
     for (const variant of variants) {
       if (pattern.test(variant)) {
         return {

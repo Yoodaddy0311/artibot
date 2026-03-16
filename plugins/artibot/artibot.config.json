@@ -1,5 +1,5 @@
 {
-  "version": "1.10.0",
+  "version": "1.11.0",
 
   "agents": {
     "modelPolicy": {
@@ -31,10 +31,6 @@
       "mcp": "mcp-developer",
       "performance": "performance-engineer",
       "typescript": "typescript-pro",
-      "email": "content-marketer",
-      "social media": "content-marketer",
-      "excel": "data-analyst",
-      "analytics": "data-analyst",
       "benchmark": "repo-benchmarker",
       "marketing strategy": "marketing-strategist",
       "data analysis": "data-analyst",
@@ -42,11 +38,6 @@
       "seo": "seo-specialist",
       "cro": "cro-specialist",
       "advertising": "ad-specialist",
-      "ad": "ad-specialist",
-      "crm": "marketing-strategist",
-      "mkt": "marketing-strategist",
-      "ppt": "presentation-designer",
-      "social": "content-marketer",
       "swarm": "orchestrator",
       "team": "orchestrator"
     }

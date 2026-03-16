@@ -492,9 +492,16 @@ export async function warmCache() {
   const files = await listFiles(dir, '.json');
   const patterns = [];
 
-  for (const file of files.slice(0, MAX_WARM_CACHE_PATTERNS)) {
-    await _loadPatternsFromFile(file, patterns);
-  }
+  // Parallel loading — individual file failures are non-critical
+  await Promise.all(
+    files.slice(0, MAX_WARM_CACHE_PATTERNS).map(async (file) => {
+      try {
+        await _loadPatternsFromFile(file, patterns);
+      } catch {
+        // Individual file failures are silently skipped
+      }
+    })
+  );
 
   // Also load System 1 promoted patterns (from knowledge-transfer)
   await _loadPromotedPatterns(patterns);
@@ -577,7 +584,7 @@ export async function savePattern(pattern) {
   // Update in-memory cache
   const idx = _loadedPatterns.findIndex((p) => p.id === pattern.id);
   if (idx >= 0) {
-    _loadedPatterns[idx] = saved;
+    _loadedPatterns = _loadedPatterns.map((p, i) => i === idx ? saved : p);
   } else if (_loadedPatterns.length < MAX_WARM_CACHE_PATTERNS) {
     _loadedPatterns.push(saved);
   }
@@ -612,7 +619,7 @@ export async function recordPatternOutcome(patternId, success) {
     lastUsed: Date.now(),
   };
 
-  _loadedPatterns[idx] = updated;
+  _loadedPatterns = _loadedPatterns.map((p, i) => i === idx ? updated : p);
   await savePattern(updated);
 }
 

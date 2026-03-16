@@ -25,6 +25,12 @@ vi.mock('../../scripts/utils/index.js', () => ({
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+
+// Minimal wait (ms) for the async main() pipeline to settle after dynamic import.
+// Uses a short real delay instead of the original 500ms, since mocked I/O resolves
+// instantly.
+const SETTLE_MS = 100;
+
 describe('nightly-learner hook', () => {
   let stderrSpy;
   let exitSpy;
@@ -48,9 +54,9 @@ describe('nightly-learner hook', () => {
     exitSpy.mockRestore();
   });
 
-  async function importAndWait(delay = 500) {
+  async function importAndWait() {
     await import('../../scripts/hooks/nightly-learner.js');
-    await new Promise((r) => setTimeout(r, delay));
+    await new Promise((r) => setTimeout(r, SETTLE_MS));
   }
 
   describe('early exit conditions', () => {
@@ -188,7 +194,7 @@ describe('nightly-learner hook', () => {
       } catch {
         // Expected
       }
-      await new Promise((r) => setTimeout(r, 300));
+      await new Promise((r) => setTimeout(r, SETTLE_MS));
 
       expect(exitSpy).toHaveBeenCalledWith(0);
     });

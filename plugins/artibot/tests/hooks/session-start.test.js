@@ -63,6 +63,12 @@ vi.mock('../../lib/core/version-checker.js', () => ({
 // Tests
 // ---------------------------------------------------------------------------
 
+// Minimal wait (ms) for the async main() pipeline to settle after dynamic import.
+// Uses a short real delay instead of the original 500ms, since mocked I/O resolves
+// instantly. The 2000ms internal Promise.race timeout in session-start.js is handled
+// by making checkForUpdate resolve immediately (default mock behavior).
+const SETTLE_MS = 100;
+
 describe('session-start hook', () => {
   let stderrSpy;
   let exitSpy;
@@ -86,10 +92,9 @@ describe('session-start hook', () => {
 
   async function importAndWait() {
     await import('../../scripts/hooks/session-start.js');
-    // Allow enough time for the async main() pipeline to complete,
-    // including the dynamic import attempt and Promise.race timeout.
-    // 100ms is insufficient under parallel test load; 500ms is safe.
-    await new Promise((r) => setTimeout(r, 500));
+    // Allow the async main() pipeline to complete. With all I/O mocked to
+    // resolve instantly, a short real delay is sufficient.
+    await new Promise((r) => setTimeout(r, SETTLE_MS));
   }
 
   describe('successful initialization', () => {
@@ -234,19 +239,18 @@ describe('session-start hook', () => {
     });
 
     it('still writes output when checkForUpdate times out', async () => {
-      // Factory returns a Promise that resolves only after 3000ms, exceeding the
-      // 2000ms wrapper timeout in session-start.js. Promise.race rejects at 2000ms,
-      // the catch block swallows it, and writeStdout is called immediately after.
-      mockState.checkForUpdateFactory = () =>
-        new Promise((resolve) => setTimeout(() => resolve({ hasUpdate: false }), 3000));
+      // Factory returns a Promise that never resolves, so the 2000ms
+      // Promise.race timeout in session-start.js fires. The catch block
+      // swallows it and writeStdout is called.
+      mockState.checkForUpdateFactory = () => new Promise(() => {});
       mockState.readStdinResult = Promise.resolve(JSON.stringify({}));
 
       await import('../../scripts/hooks/session-start.js');
-      // Wait 3000ms: the 2000ms race timeout fires, then writeStdout is called.
-      // Extra headroom accounts for parallel test load slowing timers.
-      await new Promise((r) => setTimeout(r, 3000));
+      // Wait for the 2000ms internal Promise.race timeout to fire,
+      // plus settle time for the async pipeline to complete.
+      await new Promise((r) => setTimeout(r, 2200));
 
       expect(mockState.writeStdoutCalls.length).toBeGreaterThan(0);
-    }, 10000);
+    }, 5000);
   });
 });
