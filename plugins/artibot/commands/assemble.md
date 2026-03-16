@@ -137,3 +137,13 @@ If the user wants to dismiss: send shutdown_request to all teammates, then TeamD
 - The roster banner is shown IMMEDIATELY (before teammates respond)
 - NO hero titles or cringey names - use plain role descriptions only
 - Banner shows full 26-agent roster, but only 5 representatives actually spawn
+
+## Next Steps
+
+작업 완료 후 추천 후속 액션:
+
+| # | 액션 | 커맨드 | 설명 |
+|---|------|--------|------|
+| 1 | 팀 작업 배정 | `/team` | 소환된 팀에 작업 배정 |
+| 2 | 워크플로우 실행 | `/orchestrate` | 멀티에이전트 워크플로우 구성 |
+| 3 | 작업 등록 | `/task` | 팀 작업 항목 등록 |

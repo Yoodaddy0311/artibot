@@ -48,3 +48,13 @@ If the script exits with a non-zero code, display its stderr output and suggest 
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/artibot}"
 node "${PLUGIN_ROOT}/scripts/update.js" --check
 ```
+
+## Next Steps
+
+작업 완료 후 추천 후속 액션:
+
+| # | 액션 | 커맨드 | 설명 |
+|---|------|--------|------|
+| 1 | 프로젝트 로드 | `/load` | 업데이트 후 프로젝트 재로드 |
+| 2 | 새 기능 확인 | `/index` | 업데이트된 기능 목록 확인 |
+| 3 | 전체 검증 | `/verify` | 업데이트 후 전체 검증 |

@@ -97,44 +97,56 @@ Plot competitors on 2x2 matrices using relevant axes:
 | Messaging change | Medium | Monitor results, test counter-messaging |
 | Partnership | Medium | Identify alternative partnerships |
 
-## Output Format
+## Output Template
+
 ```
 COMPETITIVE INTELLIGENCE REPORT
 ================================
-Competitors: [count analyzed]
-Market:      [segment]
-Date:        [analysis date]
+Date:     [YYYY-MM-DD]
+Market:   [target market/segment]
+Scope:    [# competitors analyzed]
 
-COMPETITOR PROFILES
--------------------
-[Competitor]: [one-line positioning]
-  Strengths: [1-3 key strengths]
-  Weaknesses: [1-3 key weaknesses]
-  Pricing:   [model and entry price]
-  Target:    [primary audience]
+COMPETITOR PROFILES (Top 5)
+───────────────────────────
+[1] [Competitor Name]
+    Category:     [direct | indirect | emerging]
+    Positioning:  [1-line positioning statement]
+    Strengths:    [key strength 1], [key strength 2]
+    Weaknesses:   [key weakness 1], [key weakness 2]
+    Recent Moves: [notable recent action]
+    Threat Level: [LOW | MEDIUM | HIGH | CRITICAL]
 
-POSITIONING MAP
----------------
-[2x2 matrix description with competitor placement]
+[2-5] [repeat structure]
 
-SWOT ANALYSIS
--------------
-Strengths:      [bullet list]
-Weaknesses:     [bullet list]
-Opportunities:  [bullet list]
-Threats:        [bullet list]
+QUICK COMPARISON MATRIX
+───────────────────────
+Feature/Capability | Us | Comp1 | Comp2 | Comp3 | Comp4 | Comp5
+───────────────────|────|───────|───────|───────|───────|──────
+[feature 1]        | ●  | ●     | ○     | ●     | ○     | ○
+[feature 2]        | ○  | ●     | ●     | ○     | ●     | ○
+Legend: ● = strong, ◐ = partial, ○ = absent
 
-DIFFERENTIATION
----------------
-Our Advantage:  [key differentiator]
-Gap to Close:   [where competitors lead]
-Whitespace:     [unaddressed market need]
+DIFFERENTIATION MAP
+───────────────────
+Our Unique Strengths:
+  [1] [strength]: [why competitors cannot easily replicate]
+  [2] ...
+
+Competitive Gaps (we lag):
+  [1] [gap]: [competitor leading] -> Effort to close: [LOW|MEDIUM|HIGH]
+  [2] ...
+
+LANDMINES TO PLANT
+──────────────────
+[1] [strategic action]: [makes our strength their weakness]
+[2] ...
 
 RECOMMENDATIONS
----------------
-Priority | Action                    | Target Competitor
----------|---------------------------|-------------------
-P1       | [strategic action]        | [competitor]
+───────────────
+Priority | Action                    | Effort | Impact | Timeline
+---------|---------------------------|--------|--------|----------
+P1       | [action]                  | [L/M/H]| [L/M/H]| [timeframe]
+P2       | [action]                  | [L/M/H]| [L/M/H]| [timeframe]
 ```
 
 ## Quick Reference

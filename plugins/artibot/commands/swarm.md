@@ -117,3 +117,13 @@ Check swarm server health:
 - Server unhealthy: Show degraded status, skip sync
 - Checksum mismatch on download: Reject corrupted weights, keep local
 - Not opted in: Refuse sync operations with clear message
+
+## Next Steps
+
+작업 완료 후 추천 후속 액션:
+
+| # | 액션 | 커맨드 | 설명 |
+|---|------|--------|------|
+| 1 | 학습 패턴 확인 | `/learn` | 스웜에서 수신한 패턴 확인 |
+| 2 | 동기화 저장 | `/checkpoint` | 동기화 결과 체크포인트 저장 |
+| 3 | 패턴 적용 | `/improve` | 수신된 패턴 코드에 적용 |

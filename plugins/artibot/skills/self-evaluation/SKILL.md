@@ -171,11 +171,36 @@ Progress:
 
 ## Human Checkpoints
 
-| After Step | Checkpoint | Type | Options |
-|-----------|-----------|------|---------|
-| Step 1 | Evaluation scores reasonable? | Approval | Accept scores / Override specific dimension |
-| Step 4 | GRPO ranking reflects actual quality? | Go-No-Go | Accept ranking / Discard this comparison |
-| Step 7 | Improvement suggestions actionable? | Selection | Implement now / Defer / Dismiss |
+### Checkpoint 1: 평가 점수 검토 (After Step 1)
+**Context**: 4개 차원(정확성·완성도·효율성·만족도)에 따른 자동 채점이 완료된 시점. 가중치 기반 산출이므로 실제 작업 품질과 괴리가 생길 수 있어 사람의 판단이 필요하다.
+**Ask**: "평가 점수가 **실제 작업 품질을 적절히 반영**하고 있나요?"
+**Options**:
+1. Accept scores — 점수를 그대로 수용하고 다음 단계로 진행
+2. Override specific dimension — 특정 차원 점수를 수동으로 조정
+**Default**: 1 (자동 산출 점수가 대부분의 경우 신뢰 가능)
+**Skippable**: No — 점수 수용 또는 조정을 명시적으로 결정해야 함
+**Freedom**: LOW
+
+### Checkpoint 2: GRPO 랭킹 유효성 확인 (After Step 4)
+**Context**: 후보 전략들의 상대 랭킹이 산출된 시점. 비교 조건이 동등하지 않으면 랭킹이 왜곡될 수 있으므로 저장 전에 검증이 필요하다.
+**Ask**: "GRPO 랭킹이 **실제 품질 차이를 올바르게 반영**하고 있나요?"
+**Options**:
+1. Accept ranking — 랭킹을 수용하고 가중치 업데이트로 진행
+2. Discard this comparison — 이번 비교 결과를 폐기하고 가중치 업데이트 생략
+**Default**: 1 (규칙 기반 평가는 일반적으로 신뢰 가능)
+**Skippable**: No — 랭킹 수용 또는 폐기를 명시적으로 결정해야 함
+**Freedom**: LOW
+
+### Checkpoint 3: 개선 제안 실행 여부 (After Step 7)
+**Context**: 점수가 3.0 미만인 경우 자동 생성된 개선 제안 목록이 준비된 시점. 제안의 우선순위와 실행 가능성은 현재 컨텍스트에 따라 달라진다.
+**Ask**: "생성된 **개선 제안을 어떻게 처리**하시겠어요?"
+**Options**:
+1. Implement now — 즉시 개선 작업 착수
+2. Defer — 다음 세션으로 미루고 메모리에 보류 항목으로 저장
+3. Dismiss — 현재 컨텍스트에 맞지 않아 제안 무시
+**Default**: 2 (즉각 실행보다 계획적 접근이 안전)
+**Skippable**: Yes (skip 시 Defer로 처리)
+**Freedom**: HIGH
 
 ## Freedom Levels
 

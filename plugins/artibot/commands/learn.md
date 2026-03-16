@@ -88,3 +88,13 @@ SAVED TO
 - Do not duplicate patterns already in MEMORY.md or CLAUDE.md
 - Update existing patterns if new evidence refines them
 - Delete patterns proven wrong by new evidence
+
+## Next Steps
+
+작업 완료 후 추천 후속 액션:
+
+| # | 액션 | 커맨드 | 설명 |
+|---|------|--------|------|
+| 1 | 학습 저장 | `/checkpoint` | 학습 패턴 체크포인트 저장 |
+| 2 | 패턴 적용 | `/improve` | 학습된 패턴 코드에 적용 |
+| 3 | 패턴 분석 | `/analyze` | 추출된 패턴 품질 분석 |

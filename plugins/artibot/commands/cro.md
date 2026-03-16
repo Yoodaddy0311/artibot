@@ -126,3 +126,13 @@ P2       | [cat]    | [specific action]     | +[X]%
 /cro form --url example.com/contact --focus mobile,speed
 /cro onboarding --funnel "signup,setup,first-action,aha-moment" --ab-test
 ```
+
+## Next Steps
+
+작업 완료 후 추천 후속 액션:
+
+| # | 액션 | 커맨드 | 설명 |
+|---|------|--------|------|
+| 1 | 전환 분석 | `/analytics` | 전환 데이터 심층 분석 |
+| 2 | 랜딩 개선 | `/content` | 전환율 기반 랜딩 페이지 개선 |
+| 3 | 광고 최적화 | `/ad` | 전환 데이터 기반 광고 최적화 |

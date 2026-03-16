@@ -236,12 +236,46 @@ Progress:
 
 ## Human Checkpoints
 
-| After Step | Checkpoint | Type | Options |
-|-----------|-----------|------|---------|
-| Step 3 | Requirements capture intent correctly? | Approval | Approve / Revise wording |
-| Step 4 | Acceptance criteria testable and complete? | Go-No-Go | Proceed / Add missing scenarios |
-| Step 6 | Priority classification agreed? | Selection | Confirm priorities / Reprioritize |
-| Step 7 | Stakeholder sign-off? | Approval | Approved / Changes requested |
+### Checkpoint 1: 요구사항 의도 검토 (After Step 3)
+**Context**: EARS 패턴을 적용하여 요구사항 문장이 작성된 시점. 문법은 맞더라도 원래 비즈니스 의도를 정확히 반영하지 못할 수 있어 검토가 필요하다.
+**Ask**: "작성된 요구사항이 **원래 의도를 정확히 표현**하고 있나요?"
+**Options**:
+1. Approve — 요구사항을 승인하고 인수 기준 작성으로 진행
+2. Revise wording — 표현을 수정하고 재검토
+**Default**: 1 (EARS 패턴이 올바르게 적용된 경우)
+**Skippable**: No — 승인 또는 수정을 명시적으로 결정해야 함
+**Freedom**: LOW
+
+### Checkpoint 2: 인수 기준 완성도 확인 (After Step 4)
+**Context**: Given-When-Then 형식으로 인수 기준이 작성된 시점. 누락된 시나리오(엣지 케이스, 오류 케이스)가 있으면 나중에 테스트 커버리지 갭이 발생한다.
+**Ask**: "인수 기준이 **테스트 가능하고 모든 시나리오를 포함**하고 있나요?"
+**Options**:
+1. Proceed — 완성도를 확인하고 우선순위 분류로 진행
+2. Add missing scenarios — 누락된 시나리오를 추가한 후 재검토
+**Default**: 1 (모든 주요 경로와 오류 케이스가 작성된 경우)
+**Skippable**: No — 진행 또는 추가 작성을 명시적으로 결정해야 함
+**Freedom**: LOW
+
+### Checkpoint 3: 우선순위 분류 합의 (After Step 6)
+**Context**: P0-P3 프레임워크로 각 요구사항의 우선순위가 분류된 시점. 우선순위는 비즈니스 컨텍스트에 따라 달라지므로 이해관계자 합의가 필요하다.
+**Ask**: "**우선순위 분류(P0-P3)가 현재 비즈니스 상황**에 맞게 결정되었나요?"
+**Options**:
+1. Confirm priorities — 우선순위를 확정하고 이해관계자 검토로 진행
+2. Reprioritize — 일부 항목의 우선순위를 조정하고 재확인
+3. Escalate decision — 비즈니스 오너에게 결정을 위임
+**Default**: 1 (팀 내 합의가 이루어진 경우)
+**Skippable**: Yes (skip 시 Confirm priorities로 처리)
+**Freedom**: MEDIUM
+
+### Checkpoint 4: 이해관계자 최종 승인 (After Step 7)
+**Context**: 요구사항·인수 기준·우선순위가 모두 완성되어 이해관계자 검토를 마친 시점. 승인 없이 구현을 시작하면 나중에 재작업이 발생할 수 있다.
+**Ask**: "이해관계자가 **현재 스펙 문서를 최종 승인**했나요?"
+**Options**:
+1. Approved — 승인 완료, 구현 단계로 이관
+2. Changes requested — 피드백 반영 후 재검토 요청
+**Default**: 1 (검토 미팅 후 명시적 승인을 받은 경우)
+**Skippable**: No — 승인 또는 변경 요청을 명시적으로 기록해야 함
+**Freedom**: LOW
 
 ## Freedom Levels
 

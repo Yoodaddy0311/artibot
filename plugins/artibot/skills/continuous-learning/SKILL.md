@@ -77,11 +77,38 @@ Progress:
 
 ## Human Checkpoints
 
-| After Step | Checkpoint | Type | Options |
-|-----------|-----------|------|---------|
-| Step 2 | Is this pattern confirmed across multiple interactions? | Go-No-Go | Save / Wait for more evidence |
-| Step 3 | Correct classification for this learning? | Selection | Preference / Pattern / Debug insight / Decision |
-| Step 6 | Which outdated entries to prune? | Selection | Remove specific entries / Keep all / Archive |
+### Checkpoint 1: 패턴 저장 승인 (After Step 2)
+**Context**: 관찰된 패턴이 2회 이상 상호작용에서 확인되었는지 검증한 시점. 단일 관찰을 저장하면 불확실한 정보가 메모리를 오염시킨다.
+**Ask**: "이 패턴이 **여러 상호작용에서 충분히 확인**되었나요? 지금 저장할까요?"
+**Options**:
+1. Save — 패턴이 검증되었으므로 메모리에 저장
+2. Wait for more evidence — 추가 관찰이 필요, 아직 저장하지 않음
+**Default**: 2 (불확실한 정보 저장보다 대기가 안전)
+**Skippable**: No — 검증 없는 저장은 메모리 품질 저하
+**Freedom**: LOW
+
+### Checkpoint 2: 학습 분류 선택 (After Step 3)
+**Context**: 저장할 학습의 유형을 결정하는 시점. 잘못된 분류는 향후 정보 검색과 활용을 어렵게 만든다.
+**Ask**: "이 학습을 **어떤 유형으로 분류**하는 게 적합한가요?"
+**Options**:
+1. Preference — 사용자 워크플로우/도구/소통 방식 선호
+2. Pattern — 코드나 작업에서 반복되는 확인된 패턴
+3. Debug insight — 디버깅에서 발견한 재사용 가능한 인사이트
+4. Decision — 이후 세션에도 유지되어야 할 아키텍처 결정
+**Default**: 2 (대부분의 학습은 패턴 유형에 해당)
+**Skippable**: Yes (use default) — 기본값인 Pattern으로 분류 후 진행
+**Freedom**: MEDIUM
+
+### Checkpoint 3: 오래된 항목 정리 선택 (After Step 6)
+**Context**: MEMORY.md가 200줄 한계에 근접하여 오래된 항목을 정리해야 하는 시점. 어떤 항목을 제거할지는 관련성 판단이 필요하다.
+**Ask**: "MEMORY.md 한계에 근접했습니다. **어떤 항목을 정리**할까요?"
+**Options**:
+1. Remove specific entries — 지정한 항목을 삭제
+2. Keep all — 현재 그대로 유지 (한계 초과 위험 감수)
+3. Archive — 오래된 항목을 별도 파일로 이동 후 링크만 유지
+**Default**: 3 (삭제보다 아카이빙이 안전)
+**Skippable**: Yes (use default) — 기본값인 아카이빙으로 진행
+**Freedom**: HIGH
 
 ## Freedom Levels
 

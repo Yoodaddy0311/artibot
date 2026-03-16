@@ -92,11 +92,36 @@ Progress:
 
 ## Human Checkpoints
 
-| After Step | Checkpoint | Type | Options |
-|-----------|-----------|------|---------|
-| Step 2 | All sub-requests captured in decomposition? | Approval | Complete / Missing items identified |
-| Step 4 | Ambiguous request — clarify intent? | Selection | Interpretation A / Interpretation B / Ask user |
-| Step 7 | All items addressed with evidence? | Go-No-Go | Complete / Items missing — address now |
+### Checkpoint 1: 분해 완전성 승인 (After Step 2)
+**Context**: 요청을 원자적 항목으로 분해한 직후입니다. 누락된 항목이 있으면 Zero-Skip Mandate 위반으로 사용자 요청이 묵살됩니다. 실행 전에 반드시 확인합니다.
+**Ask**: "요청의 **모든 하위 항목이 분해에 포함되었나요**? 누락된 작업이 없는지 검토해 주세요."
+**Options**:
+1. Complete — 모든 하위 요청이 번호가 매겨진 항목으로 캡처됨
+2. Missing items identified — 누락된 항목을 명시하면 분해 목록에 추가 후 재확인
+**Default**: 1 (명확한 요청은 분해가 완전할 가능성이 높음)
+**Skippable**: No — 불완전한 분해는 조용한 스킵을 발생시켜 Zero-Skip Mandate를 위반함
+**Freedom**: LOW
+
+### Checkpoint 2: 모호한 요청 해석 선택 (After Step 4)
+**Context**: 실행 중 요청의 의도가 불명확하여 해석이 갈리는 경우에만 활성화됩니다. 잘못된 해석으로 실행을 완료하면 불필요한 재작업이 발생합니다.
+**Ask**: "요청의 의도가 **모호합니다**. 어떤 해석으로 진행할지 선택해 주세요."
+**Options**:
+1. Interpretation A — [첫 번째 해석 설명]
+2. Interpretation B — [두 번째 해석 설명]
+3. Ask user — 해석이 너무 불확실하여 사용자에게 직접 확인 필요
+**Default**: 3 (불확실할 때는 추측보다 물어보는 것이 안전함)
+**Skippable**: Yes (의도가 명확한 경우 자동으로 가장 자연스러운 해석 선택)
+**Freedom**: HIGH
+
+### Checkpoint 3: 완료 증거 최종 확인 (After Step 7)
+**Context**: Zero-Skip 감사를 포함한 모든 작업이 완료된 후, 각 항목에 대한 증거가 빠짐없이 보고에 포함되었는지 최종 점검하는 시점입니다.
+**Ask**: "**모든 항목이 증거와 함께 완료**되었나요? 누락된 항목이나 증거 없는 완료 주장이 없는지 확인해 주세요."
+**Options**:
+1. Complete — 모든 분해 항목이 file:line 증거와 함께 완료됨
+2. Items missing — address now — 미완료 항목이 발견됨, 지금 즉시 처리
+**Default**: 1 (DEV 프로토콜을 따랐다면 모든 항목이 완료된 상태)
+**Skippable**: No — 증거 없는 완료는 허용되지 않으며 누락 항목은 즉시 처리해야 함
+**Freedom**: LOW
 
 ## Freedom Levels
 

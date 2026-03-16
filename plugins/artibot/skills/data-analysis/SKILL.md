@@ -123,36 +123,61 @@ Biggest drop-off: Stage [n] -> Stage [n+1] ([X]% loss)
 | Position-based | 40% first, 40% last, 20% middle | Most balanced B2B model |
 | Data-driven | ML-based, weights by actual impact | High-volume data required |
 
-## Output Format
+## Output Template
+
 ```
 DATA ANALYSIS REPORT
-====================
-Question:   [analysis question]
-Dataset:    [source description]
+=====================
+Dataset:    [source/name]
 Period:     [date range]
-Records:    [count]
+Scope:      [rows/records analyzed]
+Method:     [analysis technique]
+
+METRICS HIERARCHY
+─────────────────
+TIER 1 - NORTH STAR
+  [metric name]: [current value] ([+/-% vs previous period])
+  Target: [target value] | Status: [ON TRACK | AT RISK | OFF TRACK]
+
+TIER 2 - INPUT METRICS (drive North Star)
+  [input metric 1]: [value] ([trend])
+  [input metric 2]: [value] ([trend])
+
+TIER 3 - HEALTH METRICS (system stability)
+  [health metric 1]: [value] ([threshold: acceptable range])
+  [health metric 2]: [value] ([threshold: acceptable range])
+
+TIER 4 - BUSINESS METRICS (outcomes)
+  [business metric 1]: [value]
+  [business metric 2]: [value]
 
 KEY FINDINGS
-------------
-1. [Finding with supporting metric]
-2. [Finding with supporting metric]
-3. [Finding with supporting metric]
+────────────
+[1] [finding]: [evidence - metric, data point, or pattern]
+[2] [finding]: [evidence]
+[3] [finding]: [evidence]
 
-KPI SUMMARY
------------
-Metric          | Current | Previous | Delta   | Status
-----------------|---------|----------|---------|--------
-[metric]        | [value] | [value]  | [+/--%] | [trend]
+ANOMALIES & OUTLIERS
+────────────────────
+[1] [anomaly]: [expected vs actual] -> Possible cause: [hypothesis]
 
-DETAILED ANALYSIS
------------------
-[Analysis sections by dimension]
+DASHBOARD SNAPSHOT
+──────────────────
++------------------+  +------------------+
+| North Star: [val]|  | Health:    [OK]   |
+| Trend:  [up/dn]  |  | Uptime:   [val]  |
+| vs Target: [%]   |  | Err Rate: [val]  |
++------------------+  +------------------+
++------------------+  +------------------+
+| Input 1:  [val]  |  | Input 2:  [val]  |
+| Trend:  [up/dn]  |  | Trend:  [up/dn]  |
++------------------+  +------------------+
 
 RECOMMENDATIONS
----------------
-Priority | Action           | Expected Impact
----------|-----------------|----------------
-P1       | [action]        | [metric improvement]
+───────────────
+Priority | Action             | Expected Impact | Data Confidence
+---------|--------------------|-----------------|----------------
+P1       | [action]           | [impact]        | [HIGH|MEDIUM|LOW]
 ```
 
 ## Quick Reference

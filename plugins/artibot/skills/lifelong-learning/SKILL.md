@@ -189,11 +189,36 @@ Progress:
 
 ## Human Checkpoints
 
-| After Step | Checkpoint | Type | Options |
-|-----------|-----------|------|---------|
-| Step 4 | GRPO comparison results reasonable? | Approval | Accept / Reset group data |
-| Step 5 | Threshold adjustment direction correct? | Go-No-Go | Apply / Revert adjustment |
-| Step 6 | Promotion/demotion decisions valid? | Selection | Promote / Demote / Hold |
+### Checkpoint 1: GRPO 비교 결과 검토 (After Step 4)
+**Context**: System 1과 System 2의 성공률 비교가 완료된 시점. 그룹별 결과가 합리적인지 확인해야 라우팅 임계값 조정의 신뢰성이 보장된다.
+**Ask**: "Step 4 GRPO 그룹 비교 결과를 확인했습니다. **각 그룹의 성공률 차이가 합리적으로 보이나요?**"
+**Options**:
+1. Accept — 결과가 합리적, Step 5 임계값 조정으로 진행
+2. Reset group data — 그룹 데이터를 초기화하고 재집계
+**Default**: 1 (데이터가 충분할 경우 GRPO 결과는 신뢰 가능)
+**Skippable**: No — 잘못된 비교 결과로 임계값이 왜곡될 수 있음
+**Freedom**: LOW
+
+### Checkpoint 2: 임계값 조정 방향 확인 (After Step 5)
+**Context**: adaptRate * advantage 공식으로 라우팅 임계값이 조정된 시점. 조정 방향(올리기/내리기)이 실제 관찰된 패턴과 일치하는지 검증이 필요하다.
+**Ask**: "라우팅 임계값이 조정되었습니다. **조정 방향(System 2 비중 증가/감소)이 세션에서 관찰된 패턴과 맞나요?**"
+**Options**:
+1. Apply — 조정값 적용, Step 6 지식 이전으로 진행
+2. Revert adjustment — 이번 조정 취소, 기존 임계값 유지
+**Default**: 1 (공식 범위 [-0.1, 0.1]로 클램핑되어 있어 안전)
+**Skippable**: No — 잘못된 방향 조정은 라우팅 품질을 누적 저하시킬 수 있음
+**Freedom**: LOW
+
+### Checkpoint 3: 승격/강등 결정 검토 (After Step 6)
+**Context**: 패턴의 System 1 ↔ System 2 이동 결정이 완료된 시점. 자동 기준(3회 연속 성공/2회 연속 실패)이 맥락에 맞는지 사람의 판단이 필요할 수 있다.
+**Ask**: "지식 이전 결정이 생성되었습니다. **각 패턴의 승격/강등/보류 결정이 타당해 보이나요?**"
+**Options**:
+1. Promote — 해당 패턴을 System 1로 승격
+2. Demote — 해당 패턴을 System 2로 강등
+3. Hold — 이번 사이클에서는 현재 위치 유지
+**Default**: 자동 기준 결과 적용 (임계값 기반 결정이 기본값)
+**Skippable**: Yes (기본값 사용) — 자동 기준으로 결정하고 Step 7 퍼시스턴스로 진행
+**Freedom**: MEDIUM
 
 ## Freedom Levels
 

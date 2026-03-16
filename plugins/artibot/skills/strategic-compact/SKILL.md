@@ -56,6 +56,64 @@ category: "analysis"
 - Abbreviate repeated technical terms
 - Tables and bullets over prose
 
+## Output Template
+
+```
+STRATEGIC COMPACTION REPORT
+============================
+Session:    [session ID or date]
+Zone:       [GREEN | YELLOW | ORANGE | RED | CRITICAL]
+Usage:      [current %] -> [target % after compaction]
+
+CONTEXT TRIAGE
+──────────────
+PRESERVE (active, uncommitted, critical)
+  [1] [context item]: [why essential]
+  [2] ...
+
+SUMMARIZE (completed, resolved, reference)
+  [1] [context item] -> Summary: [1-line compressed version]
+  [2] ...
+
+DROP (exploratory, superseded, failed)
+  [1] [context item]: [why safe to drop]
+  [2] ...
+
+TRADE-OFFS
+──────────
+Kept           | Dropped        | Rationale
+───────────────|────────────────|──────────────────
+[context A]    | [context X]    | [A is active, X is resolved]
+[context B]    | [context Y]    | [B blocks task, Y is reference-only]
+
+CANNOT DROP (non-negotiable context)
+────────────────────────────────────
+[1] [item]: [consequence if lost]
+[2] ...
+
+WILL NOT PRESERVE (explicit exclusions)
+───────────────────────────────────────
+[1] [item]: [why not worth the token cost]
+[2] ...
+
+COMPACTION RESULT
+─────────────────
+Before:  [n] tokens (~[%] context)
+After:   [n] tokens (~[%] context)
+Savings: [n] tokens ([%] reduction)
+Quality: [% information preserved]
+
+SURVIVAL VALIDATION
+───────────────────
+Check                              | Status
+───────────────────────────────────|────────
+Active task state preserved?       | [PASS|FAIL]
+Uncommitted decisions intact?      | [PASS|FAIL]
+Current file context available?    | [PASS|FAIL]
+Recovery possible from compacted?  | [PASS|FAIL]
+```
+
+
 ## Workflow Checklist
 
 Copy this checklist and track progress:
@@ -72,11 +130,36 @@ Progress:
 
 ## Human Checkpoints
 
-| After Step | Checkpoint | Type | Options |
-|-----------|-----------|------|---------|
-| Step 1 | Context zone assessment correct? | Approval | Confirm zone / Override assessment |
-| Step 3 | Classification of preserve/summarize/drop correct? | Selection | Approve / Move items between categories |
-| Step 5 | Essential context intact after compression? | Go-No-Go | Resume / Re-expand critical context |
+### Checkpoint 1: 컨텍스트 존 평가 확인 (After Step 1)
+**Context**: 현재 컨텍스트 사용량이 자동으로 측정되어 존(Green/Yellow/Orange/Red/Critical)이 판단된 시점. 존 판단이 틀리면 너무 이른 압축 또는 너무 늦은 압축으로 이어질 수 있다.
+**Ask**: "현재 **컨텍스트 존 판단이 정확**한가요?"
+**Options**:
+1. Confirm zone — 판단된 존을 수용하고 해당 존 액션으로 진행
+2. Override assessment — 다른 존으로 수동 조정
+**Default**: 1 (자동 측정값이 신뢰할 수 있는 경우)
+**Skippable**: No — 존 확인 또는 오버라이드를 명시적으로 결정해야 함
+**Freedom**: LOW
+
+### Checkpoint 2: 분류 결과 검토 (After Step 3)
+**Context**: 컨텍스트 항목들이 preserve/summarize/drop 세 범주로 분류된 시점. 자동 분류는 판단 오류가 있을 수 있으며, 진행 중인 작업에 필요한 항목이 잘못 분류되면 복구가 어렵다.
+**Ask**: "**preserve/summarize/drop 분류가 현재 작업에 적합**한가요?"
+**Options**:
+1. Approve — 분류 결과를 승인하고 압축 단계로 진행
+2. Move items between categories — 일부 항목의 범주를 조정하고 재확인
+3. Restart classification — 분류를 처음부터 다시 수행
+**Default**: 1 (분류 기준이 명확하게 적용된 경우)
+**Skippable**: Yes (skip 시 Approve로 처리)
+**Freedom**: HIGH
+
+### Checkpoint 3: 압축 후 필수 컨텍스트 생존 검증 (After Step 5)
+**Context**: 압축이 완료되어 보존 대상 컨텍스트가 토큰 효율적 형식으로 변환된 시점. 필수 정보가 소실되면 작업을 재개할 수 없으므로 재개 전 반드시 확인해야 한다.
+**Ask**: "압축 후 **작업 재개에 필요한 필수 컨텍스트가 모두 살아있나요**?"
+**Options**:
+1. Resume — 필수 컨텍스트가 보존됨을 확인, 압축된 상태로 작업 재개
+2. Re-expand critical context — 손실된 필수 항목을 복원한 후 재개
+**Default**: 1 (검증 체크리스트를 통과한 경우)
+**Skippable**: No — 재개 또는 복원 후 재개를 명시적으로 결정해야 함
+**Freedom**: LOW
 
 ## Freedom Levels
 
@@ -90,6 +173,36 @@ Progress:
 | Resume work | MEDIUM | Re-orientation approach depends on task state |
 
 **Anti-Patterns**: Waiting until critical zone, compacting without preserving task state, dropping context needed for in-progress decisions
+
+## Output Template
+
+```
+COMPACTION CHECKPOINT
+=====================
+Session:    [session context summary]
+Phase:      [current work phase]
+Date:       [date]
+
+PRESERVED CONTEXT
+-----------------
+Category         | Items | Key Details
+-----------------|-------|---------------------------
+Active decisions | [n]   | [list of active decisions]
+Pending work     | [n]   | [list of pending items]
+Key constraints  | [n]   | [list of constraints]
+File state       | [n]   | [files in progress]
+
+SAFE TO COMPACT
+---------------
+- [completed work item that can be compressed]
+- [resolved decision that can be summarized]
+
+COMPACTION RECOMMENDATION
+-------------------------
+Action     | Reason              | Risk
+-----------|---------------------|------
+[compact/wait/checkpoint] | [reason] | [LOW/MEDIUM/HIGH]
+```
 
 ## Quick Reference
 - Act at yellow zone (60-75%), not red

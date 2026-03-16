@@ -138,34 +138,64 @@ Messaging:
 | Differentiable | Distinct from other segments | Clear boundaries |
 | Actionable | Can take specific action | Unique strategy per segment |
 
-## Output Format
+## Output Template
+
 ```
 SEGMENTATION STRATEGY
 =====================
-Approach:   [segmentation dimensions]
+Approach:   [segmentation dimensions used]
 Segments:   [count]
 Data Source: [sources used]
+Method:     [RFM | Behavioral | Hybrid]
 
-SEGMENTS
---------
-Segment: [name]
-  Size:     [estimated count / %]
-  Criteria: [defining rules]
-  Profile:  [key characteristics]
-  Strategy: [engagement approach]
-  KPIs:     [tracking metrics]
+SEGMENT PROFILES
+────────────────
+SEGMENT [1]: [Name]
+  Size:        [estimated count / %]
+  RFM Score:   [R/F/M values, if applicable]
+  Criteria:    [defining rules]
+  Profile:     [key characteristics]
 
-LEAD SCORING (if applicable)
------------------------------
+  JTBD (Jobs to Be Done):
+    Primary:   [main job this segment hires the product for]
+    Secondary: [secondary job]
+
+  Sentiment:   [score -1.0 to +1.0] | [POSITIVE | NEUTRAL | NEGATIVE]
+  Pain Points: [top frustrations]
+
+  Strategy:    [engagement approach]
+  Channels:    [preferred channels]
+  KPIs:        [tracking metrics]
+
+[repeat for each segment]
+
+LEAD SCORING MODEL (if applicable)
+───────────────────────────────────
 Category     | Signal         | Points
--------------|---------------|--------
-[category]   | [signal]      | [+/- points]
+─────────────|───────────────|────────
+Demographic  | [signal]      | [+/- points]
+Behavioral   | [signal]      | [+/- points]
+Engagement   | [signal]      | [+/- points]
+Negative     | [signal]      | [+/- points]
 
 Thresholds:
-  Cold:        [0-X]
-  MQL:         [X-Y]
-  SQL:         [Y-Z]
-  Sales Ready: [Z-100]
+  Cold (0-30) -> Nurture | MQL (31-50) -> Marketing | SQL (51-80) -> Sales | Ready (81-100) -> Immediate
+
+SEGMENT COMPARISON MATRIX
+─────────────────────────
+Dimension    | Seg 1  | Seg 2  | Seg 3  | Seg 4
+─────────────|────────|────────|────────|───────
+Size         | [val]  | [val]  | [val]  | [val]
+Sentiment    | [val]  | [val]  | [val]  | [val]
+LTV          | [val]  | [val]  | [val]  | [val]
+Conversion   | [val]  | [val]  | [val]  | [val]
+Churn Risk   | [val]  | [val]  | [val]  | [val]
+
+RECOMMENDATIONS
+───────────────
+Priority | Segment    | Action              | Expected Impact
+---------|-----------|---------------------|----------------
+P1       | [segment] | [action]            | [impact]
 ```
 
 ## Quick Reference

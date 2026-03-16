@@ -78,3 +78,14 @@ Use GFM markdown tables:
 | SEO Score | [n/100] |
 | Readability | [grade level] |
 | Keywords | [primary], [secondary] |
+
+## Next Steps
+
+작업 완료 후 추천 후속 액션:
+
+| # | 액션 | 커맨드 | 설명 |
+|---|------|--------|------|
+| 1 | SEO 최적화 | `/seo` | 콘텐츠 검색 엔진 최적화 |
+| 2 | 소셜 배포 | `/social` | 콘텐츠 소셜 미디어 배포 |
+| 3 | 이메일 캠페인 | `/email` | 콘텐츠 이메일 마케팅 연동 |
+| 4 | 성과 추적 | `/analytics` | 콘텐츠 성과 지표 추적 |

@@ -126,3 +126,13 @@ P2       | [category] | [specific action]               | [traffic delta]
 /seo technical --url example.com --pages top-10
 /seo strategy --keywords "marketing automation" --competitors "hubspot.com,mailchimp.com"
 ```
+
+## Next Steps
+
+작업 완료 후 추천 후속 액션:
+
+| # | 액션 | 커맨드 | 설명 |
+|---|------|--------|------|
+| 1 | SEO 콘텐츠 | `/content` | SEO 최적화 콘텐츠 작성 |
+| 2 | 성과 추적 | `/analytics` | SEO 성과 지표 추적 |
+| 3 | 전환 최적화 | `/cro` | 검색 유입 전환율 최적화 |

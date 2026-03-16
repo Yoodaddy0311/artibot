@@ -62,3 +62,13 @@ REMAINING (if any)
 ------------------
 [error details requiring manual intervention]
 ```
+
+## Next Steps
+
+작업 완료 후 추천 후속 액션:
+
+| # | 액션 | 커맨드 | 설명 |
+|---|------|--------|------|
+| 1 | 수정 검증 | `/test` | 빌드 수정 후 테스트 실행 |
+| 2 | 전체 검증 | `/verify` | 전체 검증 파이프라인 실행 |
+| 3 | 근본 원인 분석 | `/analyze` | 빌드 실패 근본 원인 심층 분석 |

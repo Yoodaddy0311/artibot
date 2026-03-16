@@ -127,3 +127,14 @@ Est. Conversion:   [%]
 /email launch --segment active --ab cta --tone urgent
 /email re-engagement --segment churned --automation --series 3
 ```
+
+## Next Steps
+
+작업 완료 후 추천 후속 액션:
+
+| # | 액션 | 커맨드 | 설명 |
+|---|------|--------|------|
+| 1 | 이메일 성과 | `/analytics` | 이메일 캠페인 성과 분석 |
+| 2 | 전환 최적화 | `/cro` | 이메일 전환율 최적화 |
+| 3 | 콘텐츠 개선 | `/content` | 이메일 콘텐츠 품질 향상 |
+| 4 | 구독자 관리 | `/crm` | 구독자 세그먼트 관리 |

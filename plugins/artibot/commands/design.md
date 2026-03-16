@@ -71,3 +71,13 @@ Use GFM markdown tables:
 | From | To | Coupling |
 |------|----|----------|
 | [module] | [module] | tight/loose |
+
+## Next Steps
+
+작업 완료 후 추천 후속 액션:
+
+| # | 액션 | 커맨드 | 설명 |
+|---|------|--------|------|
+| 1 | 설계 구현 | `/implement` | 설계 결과 기반 구현 시작 |
+| 2 | 설계 검증 | `/analyze` | 설계 품질 및 의존성 분석 |
+| 3 | 설계 문서화 | `/document` | ADR 및 설계 문서 작성 |

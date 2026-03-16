@@ -75,3 +75,13 @@ TypeCheck: [PASS|FAIL]
 Tests:     [PASS|FAIL]
 Lines removed: [n]
 ```
+
+## Next Steps
+
+작업 완료 후 추천 후속 액션:
+
+| # | 액션 | 커맨드 | 설명 |
+|---|------|--------|------|
+| 1 | 정리 검증 | `/verify` | 정리 후 전체 검증 파이프라인 |
+| 2 | 리그레션 확인 | `/test` | 코드 정리 후 리그레션 테스트 |
+| 3 | 품질 측정 | `/analyze --focus quality` | 정리 후 코드 품질 측정 |

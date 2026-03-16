@@ -175,11 +175,36 @@ Progress:
 
 ## Human Checkpoints
 
-| After Step | Checkpoint | Type | Options |
-|-----------|-----------|------|---------|
-| Step 3 | Routing decision appropriate? | Approval | Confirm / Force System 2 / Force System 1 |
-| Step 5 | Escalation triggered — proceed with deeper analysis? | Go-No-Go | Proceed / Override with quick answer |
-| Step 7 | Threshold adjustment direction correct? | Approval | Accept adjustment / Reset threshold |
+### Checkpoint 1: 라우팅 결정 검토 (After Step 3)
+**Context**: 복잡도 점수에 따라 System 1 또는 System 2가 선택된 시점. 자동 라우팅 결과가 실제 요청의 성격에 맞는지 확인이 필요하다.
+**Ask**: "복잡도 점수 기반으로 **[System 1 / System 2]** 로 라우팅했습니다. 이 결정이 적절한가요?"
+**Options**:
+1. Confirm — 라우팅 결정을 그대로 진행
+2. Force System 2 — 더 깊은 분석이 필요하다고 판단
+3. Force System 1 — 빠른 응답으로 충분하다고 판단
+**Default**: 1 (자동 라우팅 결과를 신뢰)
+**Skippable**: No — 잘못된 라우팅은 응답 품질에 직접 영향을 미침
+**Freedom**: LOW
+
+### Checkpoint 2: 에스컬레이션 승인 (After Step 5)
+**Context**: System 1 실행 중 신뢰도 저하 또는 패턴 미스로 System 2 에스컬레이션이 트리거된 시점. 추가 처리 비용이 발생하므로 사용자 확인이 필요하다.
+**Ask**: "System 1 신뢰도가 기준치 미만으로 **에스컬레이션**이 트리거되었습니다. System 2 심층 분석을 진행할까요?"
+**Options**:
+1. Proceed — System 2 심층 분석 진행
+2. Override with quick answer — 현재 System 1 결과로 빠르게 응답
+**Default**: 1 (에스컬레이션 트리거는 신뢰도 문제가 있다는 신호)
+**Skippable**: No — 에스컬레이션 무시 시 낮은 품질의 응답 위험
+**Freedom**: LOW
+
+### Checkpoint 3: 임계값 조정 확인 (After Step 7)
+**Context**: 실행 결과 피드백을 바탕으로 적응형 학습이 threshold를 조정하려는 시점. 임계값 변경은 이후 모든 라우팅에 영향을 미친다.
+**Ask**: "적응형 학습이 threshold를 **[현재값 → 조정값]** 으로 변경하려 합니다. 이 조정 방향이 올바른가요?"
+**Options**:
+1. Accept adjustment — 조정을 적용하고 학습 루프 계속
+2. Reset threshold — 기본값(0.4)으로 되돌림
+**Default**: 1 (자동 학습 피드백을 신뢰)
+**Skippable**: No — 임계값은 시스템 전반 라우팅 품질에 영향
+**Freedom**: MEDIUM
 
 ## Freedom Levels
 

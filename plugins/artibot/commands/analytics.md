@@ -133,3 +133,14 @@ P1       | [action]                | [channel]| [+XX% metric]
 /analytics executive-summary --period quarterly --compare yoy --kpi mrr,arr,churn,nps
 /analytics forecast --kpi mrr,cac --period quarterly --data @revenue/history.csv
 ```
+
+## Next Steps
+
+작업 완료 후 추천 후속 액션:
+
+| # | 액션 | 커맨드 | 설명 |
+|---|------|--------|------|
+| 1 | 상세 데이터 | `/excel` | 분석 결과 상세 데이터 가공 |
+| 2 | 발표 자료 | `/ppt` | 분석 결과 프레젠테이션 제작 |
+| 3 | 전략 수정 | `/mkt` | 데이터 기반 마케팅 전략 수정 |
+| 4 | 콘텐츠 최적화 | `/content` | 성과 기반 콘텐츠 개선 |

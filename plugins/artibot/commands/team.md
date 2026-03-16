@@ -299,3 +299,13 @@ This runs the original flow: Phase 1 through 6, with automatic shutdown after re
 - Cross-checker reviewing their own work
 - **작업 완료 후 팀원을 임의로 셧다운** — 재소환 토큰 낭비 (idle 유지가 더 저렴)
 - **"혹시 모르니까" 셧다운** — 애매하면 유지가 정답
+
+## Next Steps
+
+작업 완료 후 추천 후속 액션:
+
+| # | 액션 | 커맨드 | 설명 |
+|---|------|--------|------|
+| 1 | 팀 작업 커밋 | `/git` | 팀 작업 결과 커밋 및 푸시 |
+| 2 | 작업 리포트 | `/daily` | 팀 작업 일일 회고 리포트 |
+| 3 | 결과 검증 | `/verify` | 팀 작업 결과 전체 검증 |

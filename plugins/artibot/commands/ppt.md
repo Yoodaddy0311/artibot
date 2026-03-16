@@ -119,3 +119,13 @@ Layout Grid:   [grid description]
 /ppt "Developer Onboarding" --type workshop --audience technical --duration 60 --include-notes
 /ppt "Product Launch" --type keynote --audience customer --style bold
 ```
+
+## Next Steps
+
+작업 완료 후 추천 후속 액션:
+
+| # | 액션 | 커맨드 | 설명 |
+|---|------|--------|------|
+| 1 | 콘텐츠 보강 | `/content` | 발표 자료 콘텐츠 보강 |
+| 2 | 문서 연동 | `/document` | 발표 자료와 문서 연동 |
+| 3 | 데이터 보충 | `/excel` | 발표 데이터 추가 분석 |

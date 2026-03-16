@@ -179,12 +179,49 @@ Progress:
 
 ## Human Checkpoints
 
-| After Step | Checkpoint | Type | Options |
-|-----------|-----------|------|---------|
-| Step 2 | Mode selection correct for this task? | Selection | Sub-Agent / Team / Direct execution |
-| Step 3 | Scope boundaries clear and complete? | Approval | Approve scopes / Refine boundaries |
-| Step 4 | Team pattern appropriate? | Selection | Leader / Council / Swarm / Pipeline |
-| Step 6 | Aggregated results meet requirements? | Go-No-Go | Accept / Request additional work / Retry |
+### Checkpoint 1: 위임 모드 선택 (After Step 2)
+**Context**: 복잡도/병렬성/소통 필요/규모 점수를 산출하여 Sub-Agent 또는 Team 모드를 선택한 시점. 잘못된 모드 선택은 리소스 낭비 또는 조율 실패로 이어진다.
+**Ask**: "점수 **[X.X]** 기반으로 **[Sub-Agent / Team / Direct]** 모드를 선택했습니다. 이 결정이 맞나요?"
+**Options**:
+1. Sub-Agent — Task 툴로 독립적 단일 도메인 작업 위임
+2. Team — Agent Teams API로 멀티도메인 복잡 조율
+3. Direct execution — 위임 없이 직접 실행
+**Default**: 점수 기반 자동 선택
+**Skippable**: Yes (use default) — 자동 점수 기반 모드로 진행
+**Freedom**: MEDIUM
+
+### Checkpoint 2: 범위 경계 승인 (After Step 3)
+**Context**: 각 에이전트 또는 태스크의 책임 범위와 성공 기준을 정의한 시점. 모호한 범위 경계는 중복 작업이나 누락으로 이어진다.
+**Ask**: "각 에이전트의 **범위와 성공 기준**이 명확하게 정의되었나요?"
+**Options**:
+1. Approve scopes — 정의된 범위 승인, 에이전트 생성 진행
+2. Refine boundaries — 특정 에이전트의 범위를 추가로 조정
+**Default**: 1 (범위가 구체적으로 작성되었다면 승인)
+**Skippable**: No — 범위가 불명확하면 에이전트 결과의 품질을 보장할 수 없음
+**Freedom**: HIGH
+
+### Checkpoint 3: 팀 패턴 선택 (After Step 4)
+**Context**: Team 모드에서 에이전트 간 조율 방식을 결정하는 시점. 패턴 선택은 리더십 구조, 소통 방식, 태스크 분배 전략에 영향을 미친다.
+**Ask**: "이 작업에 **어떤 팀 패턴**이 가장 적합한가요?"
+**Options**:
+1. Leader — 명확한 권한, 리더가 태스크 할당 및 결과 수집
+2. Council — 합의 필요, 팀원이 토론 후 리더가 결정
+3. Swarm — 독립 태스크, 팀원이 TaskList에서 자율 선택
+4. Pipeline — 순차 의존성, blockedBy로 실행 순서 강제
+**Default**: 3 (대부분의 병렬 작업은 Swarm이 효율적)
+**Skippable**: Yes (use default) — 기본값인 Swarm 패턴으로 진행
+**Freedom**: MEDIUM
+
+### Checkpoint 4: 결과 수락 여부 결정 (After Step 6)
+**Context**: 모든 에이전트의 결과를 취합하고 중복 제거, 교차 검증, 우선순위 정렬을 완료한 시점. 요구사항을 충족하지 못한 결과는 추가 작업이 필요하다.
+**Ask**: "취합된 결과가 **요구사항을 충족**하나요?"
+**Options**:
+1. Accept — 결과를 최종 산출물로 수락
+2. Request additional work — 특정 에이전트에 추가 작업 요청
+3. Retry — 전체 또는 일부 에이전트를 다시 실행
+**Default**: 1 (명시적 충족 기준 달성 시 수락)
+**Skippable**: No — 불완전한 결과를 그대로 수락하면 품질 보장 불가
+**Freedom**: MEDIUM
 
 ## Freedom Levels
 

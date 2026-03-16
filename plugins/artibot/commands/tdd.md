@@ -76,3 +76,14 @@ Target:  [n]%
 Actual:  [n]%
 Status:  [PASS|FAIL]
 ```
+
+## Next Steps
+
+작업 완료 후 추천 후속 액션:
+
+| # | 액션 | 커맨드 | 설명 |
+|---|------|--------|------|
+| 1 | 전체 검증 | `/verify` | TDD 완료 후 전체 검증 |
+| 2 | 코드 리뷰 | `/code-review` | 테스트 및 구현 코드 리뷰 |
+| 3 | 리팩토링 | `/improve` | GREEN 후 REFACTOR 단계 |
+| 4 | 커밋 | `/git` | TDD 결과 커밋 및 푸시 |

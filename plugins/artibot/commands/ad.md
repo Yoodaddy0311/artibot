@@ -116,3 +116,14 @@ OPTIMIZATION NOTES
 /ad video --channel youtube --variants 3 --objective awareness
 /ad retargeting --channel meta,google --audience "cart abandoners" --objective sales
 ```
+
+## Next Steps
+
+작업 완료 후 추천 후속 액션:
+
+| # | 액션 | 커맨드 | 설명 |
+|---|------|--------|------|
+| 1 | 성과 분석 | `/analytics` | 광고 캠페인 KPI 및 ROI 분석 |
+| 2 | 랜딩 페이지 | `/content` | 광고 연결 랜딩 페이지 콘텐츠 제작 |
+| 3 | 전환 최적화 | `/cro` | 광고 유입 전환율 최적화 |
+| 4 | 유기적 보완 | `/seo` | 유료 광고와 유기적 검색 시너지 |

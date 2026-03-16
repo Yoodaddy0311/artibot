@@ -97,11 +97,37 @@ Progress:
 
 ## Human Checkpoints
 
-| After Step | Checkpoint | Type | Options |
-|-----------|-----------|------|---------|
-| Step 1 | Existing patterns identified correctly? | Approval | Confirm patterns / Clarify conventions |
-| Step 4 | File split strategy acceptable? | Selection | Split by feature / Split by type / Keep as-is |
-| Step 6 | Quality violations found — fix now or defer? | Go-No-Go | Fix all / Fix critical only / Defer with ticket |
+### Checkpoint 1: 기존 패턴 확인 (After Step 1)
+**Context**: 코드 수정 전 기존 코드베이스의 컨벤션과 패턴을 파악한 시점. 잘못 식별된 패턴 기반으로 작업하면 일관성이 깨질 수 있다.
+**Ask**: "기존 코드에서 **[식별된 패턴 목록]** 을 확인했습니다. 이 패턴들이 올바르게 파악되었나요?"
+**Options**:
+1. Confirm patterns — 확인된 패턴대로 작업 진행
+2. Clarify conventions — 특정 컨벤션에 대해 추가 설명 필요
+**Default**: 1 (코드 자체를 신뢰)
+**Skippable**: No — 잘못된 패턴 식별은 코드 불일관성으로 이어짐
+**Freedom**: HIGH
+
+### Checkpoint 2: 파일 분할 전략 선택 (After Step 4)
+**Context**: 파일이 800줄 한계에 근접하거나 초과하여 분할이 필요한 시점. 분할 전략에 따라 코드 구조와 향후 유지보수성이 달라진다.
+**Ask**: "파일 크기가 기준을 초과하여 분할이 필요합니다. **어떤 방식으로 분할**할까요?"
+**Options**:
+1. Split by feature — 기능/도메인별로 분리 (권장)
+2. Split by type — 타입별로 분리 (컴포넌트/훅/유틸 등)
+3. Keep as-is — 현재 크기를 유지하고 다음 기회에 처리
+**Default**: 1 (feature-first 조직 원칙에 따름)
+**Skippable**: Yes (use default) — 기본값인 feature 분할로 진행
+**Freedom**: MEDIUM
+
+### Checkpoint 3: 품질 위반 처리 방향 결정 (After Step 6)
+**Context**: 품질 체크리스트 실행 후 위반 사항이 발견된 시점. 모든 위반을 즉시 수정할지, 우선순위를 정할지 결정이 필요하다.
+**Ask**: "품질 위반 **[N건]** 이 발견되었습니다. 지금 모두 수정할까요?"
+**Options**:
+1. Fix all — 모든 위반을 지금 수정하고 진행
+2. Fix critical only — 뮤테이션, 미처리 에러 등 치명적 항목만 수정
+3. Defer with ticket — 기록 후 나중에 처리 (기술 부채 등록)
+**Default**: 1 (품질 기준은 타협 없이 지킴)
+**Skippable**: No — 품질 위반을 무시하면 코드베이스 품질 저하
+**Freedom**: LOW
 
 ## Freedom Levels
 

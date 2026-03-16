@@ -74,3 +74,13 @@ PITFALLS
 --------
 [Common mistakes and how to avoid them]
 ```
+
+## Next Steps
+
+작업 완료 후 추천 후속 액션:
+
+| # | 액션 | 커맨드 | 설명 |
+|---|------|--------|------|
+| 1 | 학습 적용 | `/implement` | 이해한 내용 기반 구현 |
+| 2 | 설명 문서화 | `/document` | 설명 내용 문서로 저장 |
+| 3 | 심층 분석 | `/analyze` | 관련 영역 심층 분석 |

@@ -104,3 +104,13 @@ Use GFM markdown tables:
 | Action | [specific code change] |
 | Confidence | HIGH/MEDIUM/LOW |
 | Regression Risk | HIGH/MEDIUM/LOW |
+
+## Next Steps
+
+작업 완료 후 추천 후속 액션:
+
+| # | 액션 | 커맨드 | 설명 |
+|---|------|--------|------|
+| 1 | 수정 적용 | `/implement` | 진단 결과 기반 수정 구현 |
+| 2 | 수정 검증 | `/test` | 수정 사항 테스트 실행 |
+| 3 | 근본 원인 심층 분석 | `/analyze` | 트러블슈팅 결과 심층 분석 |

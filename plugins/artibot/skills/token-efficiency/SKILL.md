@@ -82,10 +82,27 @@ Progress:
 
 ## Human Checkpoints
 
-| After Step | Checkpoint | Type | Options |
-|-----------|-----------|------|---------|
-| Step 2 | Compression level appropriate? | Selection | Minimal / Efficient / Compressed / Critical |
-| Step 6 | Compressed output still clear and complete? | Go-No-Go | Accept / Decompress specific sections |
+### Checkpoint 1: 압축 레벨 적합성 확인 (After Step 2)
+**Context**: 컨텍스트 사용률을 감지한 후 압축 레벨을 선택하는 시점입니다. 잘못된 레벨 선택은 불필요한 정보 손실(과압축) 또는 컨텍스트 초과(미압축)를 초래할 수 있습니다.
+**Ask**: "선택된 압축 레벨이 **현재 상황에 적합한가요**? 컨텍스트 사용률과 작업 복잡도를 고려해 확인해 주세요."
+**Options**:
+1. Minimal — 0-40% 컨텍스트, 가벼운 압축으로 충분함
+2. Efficient — 40-70% 컨텍스트, 균형 잡힌 압축 적용
+3. Compressed — 70-85% 컨텍스트, 심볼과 약어 적극 활용
+4. Critical — 85-95% 컨텍스트, 핵심 내용만 유지
+**Default**: 2 (중간 수준이 대부분의 상황에서 안전한 선택)
+**Skippable**: Yes (컨텍스트 임계값이 명확하면 자동 선택 가능)
+**Freedom**: LOW
+
+### Checkpoint 2: 압축 결과물 품질 검증 (After Step 6)
+**Context**: 모든 압축 기법을 적용한 후, 95% 이상의 정보 보존 목표가 달성되었는지 확인하는 최종 시점입니다. 압축이 지나쳐 핵심 내용이 손실되면 전체 작업이 무의미해집니다.
+**Ask**: "압축된 결과물이 **여전히 명확하고 완전한가요**? 중요한 정보가 손실되지 않았는지 검토해 주세요."
+**Options**:
+1. Accept — 정보 보존이 95% 이상이며 결과물이 명확함
+2. Decompress specific sections — 특정 섹션이 과압축되어 명확성이 떨어짐, 해당 부분만 복원
+**Default**: 1 (압축 기법을 올바르게 적용했다면 품질이 유지됨)
+**Skippable**: No — 정보 손실 없이 압축이 완료되었는지 반드시 확인해야 함
+**Freedom**: MEDIUM
 
 ## Freedom Levels
 

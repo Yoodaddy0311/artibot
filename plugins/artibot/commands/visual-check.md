@@ -98,3 +98,13 @@ NEXT STEPS (if FAIL)
 # Run with retry iterations for flaky renders
 /visual-check https://example.com --baseline ./baselines/home.png --iterations 3
 ```
+
+## Next Steps
+
+작업 완료 후 추천 후속 액션:
+
+| # | 액션 | 커맨드 | 설명 |
+|---|------|--------|------|
+| 1 | 시각적 수정 | `/improve` | 발견된 시각적 이슈 수정 |
+| 2 | E2E 테스트 | `/test` | 수정 후 E2E 테스트 실행 |
+| 3 | 커밋 | `/git` | 시각적 수정 커밋 및 푸시 |

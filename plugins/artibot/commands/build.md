@@ -69,3 +69,14 @@ OPTIMIZATION (if --optimize)
 Bundle Size: [total] ([delta from last])
 Suggestions: [tree-shaking, code-split, lazy-load candidates]
 ```
+
+## Next Steps
+
+작업 완료 후 추천 후속 액션:
+
+| # | 액션 | 커맨드 | 설명 |
+|---|------|--------|------|
+| 1 | 테스트 실행 | `/test` | 빌드 결과 테스트 검증 |
+| 2 | 검증 파이프라인 | `/verify` | lint → typecheck → test → build 검증 |
+| 3 | 성능 최적화 | `/improve --focus performance` | 빌드 성능 개선 |
+| 4 | 커밋 | `/git` | 빌드 성공 후 커밋 및 푸시 |

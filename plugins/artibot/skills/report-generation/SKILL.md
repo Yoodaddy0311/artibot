@@ -139,39 +139,50 @@ Churn           | 3.2%     | 3.0%    | +0.2pp   | [flat] | AT RISK
 - [ ] Consistent formatting and terminology
 - [ ] Proofread for accuracy and clarity
 
-## Output Format
+## Output Template
+
 ```
-[REPORT TYPE] REPORT
-====================
-Period:     [date range]
-Author:     [name/team]
-Audience:   [target audience]
+[REPORT TITLE]
+===============
+Author:    [agent/team]
+Date:      [YYYY-MM-DD]
+Audience:  [technical | executive | mixed]
+Version:   [draft | final]
 
 EXECUTIVE SUMMARY
------------------
-[Bottom line finding]
-- [Key metric 1]: [value] vs [target] ([delta])
-- [Key metric 2]: [value] vs [target] ([delta])
-- [Key insight or concern]
+─────────────────
+[2-3 sentences: what was done, key finding, recommendation]
 
-KPI SCORECARD
--------------
-[Scorecard table with status indicators]
+KEY FINDINGS (audience-adapted)
+───────────────────────────────
+Technical Language           -> User-Facing Language
+-----------------------------   -----------------------------
+"Latency P99 increased 40%" -> "Some users experienced slower load times"
+"Memory leak in auth module" -> "Login reliability issue identified and fixed"
+"API rate limit exceeded"    -> "High demand caused temporary service delays"
 
-ANALYSIS
---------
-[Detailed analysis sections]
+[1] [finding in audience-appropriate language]
+[2] [finding]
+[3] [finding]
 
-INSIGHTS
---------
-1. [Insight with evidence]
-2. [Insight with evidence]
+DETAILED ANALYSIS
+─────────────────
+[Section 1 Title]
+[Analysis with supporting data]
 
-RECOMMENDATIONS
----------------
-Priority | Action           | Impact          | Owner
----------|-----------------|-----------------|------
-P1       | [action]        | [expected lift] | [team]
+[Section 2 Title]
+[Analysis with supporting data]
+
+ACTION ITEMS
+────────────
+# | Action                | Owner    | Deadline   | Priority | Status
+--|----------------------|----------|------------|----------|--------
+1 | [action description] | [person] | [YYYY-MM-DD]| [P1-P3] | [OPEN|DONE]
+2 | [action description] | [person] | [YYYY-MM-DD]| [P1-P3] | [OPEN|DONE]
+
+APPENDIX
+────────
+[Supporting data, raw metrics, methodology notes]
 ```
 
 ## Quick Reference

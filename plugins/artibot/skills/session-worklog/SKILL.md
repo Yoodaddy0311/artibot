@@ -118,6 +118,62 @@ Append a worklog entry when ANY of these occur:
 ---
 ```
 
+## Output Template
+
+```
+## YYYY-MM-DD | [1-line summary of main work]
+
+### 작업
+- [completed task 1]
+- [completed task 2]
+
+### 결정
+- [decision]: [rationale in 1 phrase]
+
+### 보류
+- [pending item or blocker]
+- (없음) if nothing pending
+
+---
+```
+
+## Output Template
+
+```
+## YYYY-MM-DD | [1-line summary of main work]
+
+### Tasks
+- [completed task 1]
+- [completed task 2]
+- [completed task 3]
+
+### Decisions
+- [decision]: [rationale in 1 phrase]
+- [decision]: [rationale]
+
+### Pending
+- [pending item or blocker]
+- (none) if nothing pending
+
+### Retrospective (optional - on significant sessions)
+
+START (new practices to adopt):
+  - [practice to adopt]
+
+STOP (practices to discontinue):
+  - [practice to stop]
+
+CONTINUE (practices working well):
+  - [practice working well]
+
+### Session Metrics (optional)
+- Files changed: [n]
+- Tests added: [n]
+- Coverage delta: [+/-n%]
+- Duration: ~[n]h
+```
+
+
 ## Integration with Other Skills
 
 - **checkpoint**: `/checkpoint` creates a detailed snapshot; worklog creates a lightweight summary
@@ -141,10 +197,26 @@ Progress:
 
 ## Human Checkpoints
 
-| After Step | Checkpoint | Type | Options |
-|-----------|-----------|------|---------|
-| Step 3 | Entry captures session accurately? | Approval | Append / Edit entry / Skip this log |
-| Step 5 | Oldest entry safe to remove? | Go-No-Go | Trim / Archive to separate file first |
+### Checkpoint 1: 엔트리 내용 확인 (After Step 3)
+**Context**: 세션의 작업·결정·보류 항목이 작성된 시점. 자동 생성된 요약이 실제 세션을 정확히 반영하는지 추가하기 전에 검토가 필요하다.
+**Ask**: "작성된 워크로그 엔트리가 **이번 세션 작업을 정확히 담고 있나요**?"
+**Options**:
+1. Append — 그대로 worklog.md에 추가
+2. Edit entry — 내용을 수정한 후 추가
+3. Skip this log — 이번 세션은 기록하지 않음
+**Default**: 1 (자동 작성된 요약이 대체로 정확한 경우)
+**Skippable**: No — 추가·수정·건너뛰기 중 하나를 명시적으로 결정해야 함
+**Freedom**: MEDIUM
+
+### Checkpoint 2: 오래된 엔트리 삭제 승인 (After Step 5)
+**Context**: 200줄·10엔트리 상한 초과로 가장 오래된 엔트리를 삭제하려는 시점. 삭제 전에 해당 엔트리를 보존해야 할 이유가 없는지 확인이 필요하다.
+**Ask**: "가장 오래된 엔트리를 **지금 삭제해도 괜찮나요**?"
+**Options**:
+1. Trim — 오래된 엔트리를 삭제하고 새 엔트리를 추가
+2. Archive to separate file first — 별도 파일에 보관한 후 삭제 진행
+**Default**: 1 (오래된 세션 기록은 대부분 삭제해도 무방)
+**Skippable**: No — 삭제 또는 보관 후 삭제를 명시적으로 결정해야 함
+**Freedom**: LOW
 
 ## Freedom Levels
 

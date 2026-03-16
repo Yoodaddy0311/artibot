@@ -69,3 +69,13 @@ Lines:    [n]% (threshold: 80%)  [PASS|FAIL]
 Branches: [n]% (threshold: 70%)  [PASS|FAIL]
 Uncovered: [file:lines], ...
 ```
+
+## Next Steps
+
+작업 완료 후 추천 후속 액션:
+
+| # | 액션 | 커맨드 | 설명 |
+|---|------|--------|------|
+| 1 | 실패 수정 | `/improve` | 테스트 실패 항목 코드 수정 |
+| 2 | 전체 파이프라인 | `/verify` | 전체 검증 파이프라인 실행 |
+| 3 | 커버리지 분석 | `/analyze --focus quality` | 테스트 커버리지 심층 분석 |

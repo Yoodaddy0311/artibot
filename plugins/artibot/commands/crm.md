@@ -121,3 +121,13 @@ Segment: [name]
 /crm pipeline --stage consideration,decision --scoring
 /crm onboarding --automation --stage onboarding --personas 2
 ```
+
+## Next Steps
+
+작업 완료 후 추천 후속 액션:
+
+| # | 액션 | 커맨드 | 설명 |
+|---|------|--------|------|
+| 1 | 이메일 자동화 | `/email` | CRM 기반 이메일 자동화 설계 |
+| 2 | 지표 분석 | `/analytics` | CRM 지표 분석 및 대시보드 |
+| 3 | 마케팅 연동 | `/mkt` | CRM과 마케팅 전략 연동 |

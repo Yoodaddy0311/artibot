@@ -262,3 +262,13 @@ When `--save` is specified:
 - Do NOT read the entire git log — always use `--since`/`--until` date bounds
 - Do NOT generate next steps without evidence — every item MUST cite its source
 - Do NOT skip any section silently — show a note explaining why it was skipped
+
+## Next Steps
+
+작업 완료 후 추천 후속 액션:
+
+| # | 액션 | 커맨드 | 설명 |
+|---|------|--------|------|
+| 1 | 체크포인트 저장 | `/checkpoint` | 현재 상태 스냅샷 저장 |
+| 2 | 미완료 작업 정리 | `/task` | 보류 및 진행중 작업 정리 |
+| 3 | 변경사항 커밋 | `/git` | 미커밋 변경사항 커밋 |

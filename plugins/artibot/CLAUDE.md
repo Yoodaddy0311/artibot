@@ -15,8 +15,8 @@ This file auto-loads when Claude accesses files in `plugins/artibot/`.
 | Directory | Purpose | Key Files |
 |-----------|---------|-----------|
 | `agents/` | Agent definitions (26 .md) | orchestrator.md (CTO), planner.md |
-| `commands/` | Slash commands (46 .md) | sc.md (router), implement.md, build.md |
-| `skills/` | SKILL.md + references/ (83 dirs) | principles/, tdd-workflow/, coding-standards/ |
+| `commands/` | Slash commands (47 .md) | sc.md (router), implement.md, build.md, repo.md |
+| `skills/` | SKILL.md + references/ (87 dirs) | principles/, tdd-workflow/, coding-standards/, repo-benchmarking/ |
 | `lib/cognitive/` | Dual-process engine | router.js, system1.js, system2-core.js |
 | `lib/learning/` | Lifelong learning (11 modules) | grpo.js, memory.js, lifelong.js |
 | `lib/core/` | Core utilities (22 files) | plugin-loader.js, hook-utils.js |
@@ -24,7 +24,7 @@ This file auto-loads when Claude accesses files in `plugins/artibot/`.
 | `lib/privacy/` | PII protection | pii-scrubber.js, homoglyph-detector.js |
 | `hooks/` | Event hooks config | hooks.json (14 event types) |
 | `rules/` | Path-specific auto-rules | dev-protocol.md, quality-gates.md |
-| `tests/` | Vitest test suite (71 files) | 2,933 test cases |
+| `tests/` | Vitest test suite (91 files) | 3,528 test cases |
 
 ## Development Standards
 

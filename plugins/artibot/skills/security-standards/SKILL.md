@@ -94,12 +94,46 @@ Progress:
 
 ## Human Checkpoints
 
-| After Step | Checkpoint | Type | Options |
-|-----------|-----------|------|---------|
-| Step 1 | Any secrets detected in code? | Go-No-Go | Clean / STOP and rotate secrets |
-| Step 3 | SQL injection vectors eliminated? | Approval | Verified safe / Needs remediation |
-| Step 6 | Auth coverage complete for all endpoints? | Go-No-Go | All covered / Gaps found — fix first |
-| Step 8 | Critical vulnerabilities in dependencies? | Selection | Update deps / Accept risk / Block release |
+### Checkpoint 1: 시크릿 노출 여부 확인 (After Step 1)
+**Context**: 사전 커밋 보안 체크가 완료된 시점. 코드에 하드코딩된 시크릿이 발견되면 즉시 중단하고 로테이션해야 한다 — 이 단계를 지나치면 되돌릴 수 없다.
+**Ask**: "사전 커밋 체크가 완료되었습니다. **코드에서 하드코딩된 API 키, 비밀번호, 토큰이 발견되었나요?**"
+**Options**:
+1. Clean — 시크릿 없음, Step 2 입력 검증으로 진행
+2. STOP and rotate secrets — 즉시 작업 중단, 노출된 시크릿 로테이션 후 재검토
+**Default**: 1 (체크 완료 후 이상 없으면 진행)
+**Skippable**: No — 시크릿 노출은 즉각적인 보안 사고로 이어질 수 있음
+**Freedom**: LOW
+
+### Checkpoint 2: SQL 인젝션 방어 검증 (After Step 3)
+**Context**: 파라미터화 쿼리 사용 여부가 검토된 시점. SQL 인젝션은 OWASP Top 1으로 문자열 연결 쿼리가 하나라도 있으면 전체 DB가 위험에 노출된다.
+**Ask**: "SQL 쿼리 검토가 완료되었습니다. **모든 DB 쿼리가 파라미터화 쿼리를 사용하고 있나요?**"
+**Options**:
+1. Verified safe — 모든 쿼리가 파라미터화됨, Step 4로 진행
+2. Needs remediation — 문자열 연결 쿼리 발견, 수정 후 재검증
+**Default**: 1 (검토 완료 후 안전이 확인되면 진행)
+**Skippable**: No — 파라미터화되지 않은 쿼리는 즉시 수정 필요
+**Freedom**: LOW
+
+### Checkpoint 3: 인증/인가 커버리지 확인 (After Step 6)
+**Context**: 모든 엔드포인트의 인증/인가 적용 여부가 검토된 시점. 커버리지 갭이 있으면 무인증 접근 경로가 생기므로 배포 전에 반드시 해소해야 한다.
+**Ask**: "엔드포인트 인증/인가 검토가 완료되었습니다. **모든 엔드포인트에 적절한 인증과 인가가 적용되어 있나요?**"
+**Options**:
+1. All covered — 모든 엔드포인트 커버됨, Step 7로 진행
+2. Gaps found — fix first — 커버리지 갭 발견, 수정 완료 후 재검토
+**Default**: 1 (커버리지 확인 후 이상 없으면 진행)
+**Skippable**: No — 인증 갭은 보안 취약점이므로 배포 전 해소 필수
+**Freedom**: LOW
+
+### Checkpoint 4: 의존성 취약점 대응 방식 선택 (After Step 8)
+**Context**: 의존성 취약점 감사가 완료된 시점. Critical/High 취약점은 즉시 조치가 필요하지만, 수정 불가능한 경우 위험 수용이나 릴리스 차단을 선택해야 한다.
+**Ask**: "의존성 취약점 감사가 완료되었습니다. **발견된 취약점을 어떻게 처리하시겠나요?**"
+**Options**:
+1. Update deps — 취약한 의존성 즉시 업데이트
+2. Accept risk — 심각도 낮음 또는 수정 불가 취약점으로 위험 수용 문서화
+3. Block release — Critical 취약점 해소 전까지 릴리스 차단
+**Default**: 1 (업데이트 가능한 경우 즉시 패치가 원칙)
+**Skippable**: Yes (기본값 사용) — 업데이트 진행
+**Freedom**: MEDIUM
 
 ## Freedom Levels
 

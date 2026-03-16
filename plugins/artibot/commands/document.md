@@ -81,3 +81,13 @@ Public APIs Documented: [n/total]
 Code Examples Included: [n]
 Cross-references Valid: [YES|NO]
 ```
+
+## Next Steps
+
+작업 완료 후 추천 후속 액션:
+
+| # | 액션 | 커맨드 | 설명 |
+|---|------|--------|------|
+| 1 | 문서 커밋 | `/git` | 문서 변경사항 커밋 및 푸시 |
+| 2 | 커버리지 분석 | `/analyze` | 문서 커버리지 및 품질 분석 |
+| 3 | 문서 품질 개선 | `/improve` | 문서 정확성 및 완성도 개선 |

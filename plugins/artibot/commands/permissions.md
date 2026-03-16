@@ -263,3 +263,13 @@ Claude Code는 도구별 와일드카드 패턴을 지원합니다. `allowedTool
 - 프로덕션 환경에서는 `manual` 또는 `selective` 권장
 - 설정은 `~/.claude/settings.json`에 저장되어 모든 세션에 적용
 - 와일드카드 패턴으로 최소 권한 원칙(Principle of Least Privilege) 적용 권장
+
+## Next Steps
+
+작업 완료 후 추천 후속 액션:
+
+| # | 액션 | 커맨드 | 설명 |
+|---|------|--------|------|
+| 1 | 프로젝트 로드 | `/load` | 권한 설정 후 프로젝트 로드 |
+| 2 | 빠른 시작 | `/quickstart` | 설정 완료 후 가이드 시작 |
+| 3 | 기능 탐색 | `/index` | 사용 가능한 기능 확인 |

@@ -116,3 +116,13 @@ Platform    | Primary (3-5)    | Secondary (5-10)  | Niche (3-5)
 /social calendar --platform linkedin,twitter --campaign "Thought Leadership" --schedule
 /social carousel --platform instagram,linkedin --repurpose @blog/latest-post.md
 ```
+
+## Next Steps
+
+작업 완료 후 추천 후속 액션:
+
+| # | 액션 | 커맨드 | 설명 |
+|---|------|--------|------|
+| 1 | 성과 분석 | `/analytics` | 소셜 미디어 성과 분석 |
+| 2 | 콘텐츠 제작 | `/content` | 소셜 콘텐츠 추가 제작 |
+| 3 | 유료 프로모션 | `/ad` | 소셜 광고 캠페인 생성 |

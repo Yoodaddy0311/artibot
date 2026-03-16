@@ -90,12 +90,46 @@ Progress:
 
 ## Human Checkpoints
 
-| After Step | Checkpoint | Type | Options |
-|-----------|-----------|------|---------|
-| Step 1 | Does the test capture the right behavior? | Go-No-Go | Proceed / Rewrite test |
-| Step 5 | Refactored code acceptable? | Approval | Approve / More refactoring needed |
-| Step 6 | Coverage below threshold — add more tests? | Selection | Add unit tests / Add integration tests / Accept with justification |
-| Step 7 | Test quality review | Go-No-Go | Tests meet quality standards / Revise |
+### Checkpoint 1: 테스트 행동 검증 (After Step 1)
+**Context**: TDD의 RED 단계에서 테스트를 작성한 직후입니다. 이 시점에 테스트가 잘못된 행동을 정의하면 이후 모든 구현이 잘못된 방향으로 진행됩니다.
+**Ask**: "작성한 테스트가 **올바른 행동을 정의하고 있나요**? 구현 전에 테스트 내용을 검토해 주세요."
+**Options**:
+1. Proceed — 테스트가 기대 동작을 정확히 정의함, 구현 단계로 진행
+2. Rewrite test — 테스트가 잘못된 행동을 정의하거나 범위가 맞지 않음
+**Default**: 1 (명확한 요구사항이 있는 경우 테스트가 올바를 가능성이 높음)
+**Skippable**: No — 잘못된 테스트로 시작하면 GREEN 단계에서 잘못된 코드가 작성됨
+**Freedom**: MEDIUM
+
+### Checkpoint 2: 리팩토링 결과 승인 (After Step 5)
+**Context**: REFACTOR 단계 완료 후, 모든 테스트가 여전히 통과하는 상태에서 코드 품질 개선 결과를 확인하는 시점입니다.
+**Ask**: "리팩토링된 코드가 **수용 가능한 수준인가요**? 품질과 가독성을 검토해 주세요."
+**Options**:
+1. Approve — 리팩토링 결과가 충분히 개선되어 커버리지 검증으로 진행
+2. More refactoring needed — 추가 리팩토링이 필요한 부분이 있음
+**Default**: 1 (테스트가 통과하고 코드가 개선되었다면 일반적으로 수용 가능)
+**Skippable**: No — 품질 검토 없이 완료 처리하면 기술 부채가 누적됨
+**Freedom**: HIGH
+
+### Checkpoint 3: 커버리지 미달 시 추가 테스트 결정 (After Step 6)
+**Context**: 커버리지가 80% 임계값 미만인 경우에만 활성화됩니다. 어떤 종류의 테스트를 추가할지, 또는 예외를 인정할지 결정하는 시점입니다.
+**Ask**: "커버리지가 **80% 임계값 미만입니다**. 어떻게 대응할지 선택해 주세요."
+**Options**:
+1. Add unit tests — 단위 테스트를 추가하여 함수/클래스 커버리지 향상
+2. Add integration tests — 통합 테스트를 추가하여 모듈 간 경로 커버리지 향상
+3. Accept with justification — 낮은 커버리지를 문서화된 이유로 수용 (예: 외부 API 레이어)
+**Default**: 1 (단위 테스트가 가장 빠르고 저렴하게 커버리지를 올리는 방법)
+**Skippable**: Yes (커버리지가 이미 80% 이상이면 이 체크포인트는 건너뜀)
+**Freedom**: HIGH
+
+### Checkpoint 4: 테스트 품질 최종 검토 (After Step 7)
+**Context**: 모든 TDD 사이클이 완료된 후, 테스트 코드 자체의 품질 — 격리성, 네이밍, 단일 어설션 — 을 최종 점검하는 시점입니다.
+**Ask**: "테스트 품질 기준을 **모두 충족하나요**? 격리성, 네이밍, 단일 어설션 포커스를 확인해 주세요."
+**Options**:
+1. Tests meet quality standards — 모든 품질 기준이 충족됨, 완료 처리
+2. Revise — 특정 테스트가 격리 위반, 불명확한 네이밍, 다중 어설션 등의 문제를 가짐
+**Default**: 1 (TDD 워크플로우를 따랐다면 품질 기준이 충족될 가능성이 높음)
+**Skippable**: No — 품질 미달 테스트는 미래에 false positive/negative를 만들어냄
+**Freedom**: MEDIUM
 
 ## Freedom Levels
 

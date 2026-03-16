@@ -68,3 +68,13 @@ LOW [count]
 VERDICT: [APPROVE|REQUEST_CHANGES|BLOCK]
 Blocking Issues: [count]
 ```
+
+## Next Steps
+
+작업 완료 후 추천 후속 액션:
+
+| # | 액션 | 커맨드 | 설명 |
+|---|------|--------|------|
+| 1 | 지적사항 개선 | `/improve` | 리뷰 지적사항 코드 개선 |
+| 2 | 테스트 추가 | `/test` | 리뷰에서 발견된 갭 테스트 보강 |
+| 3 | 커밋 | `/git` | 리뷰 반영 후 커밋 및 푸시 |

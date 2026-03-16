@@ -94,3 +94,13 @@ Tasks:    [active: n, completed: n]
 Saved to: [file path]
 Worklog:  [appended to memory/worklog.md]
 ```
+
+## Next Steps
+
+작업 완료 후 추천 후속 액션:
+
+| # | 액션 | 커맨드 | 설명 |
+|---|------|--------|------|
+| 1 | 일일 리포트 | `/daily` | 체크포인트 포함 일일 회고 |
+| 2 | 작업 관리 | `/task` | 체크포인트 기반 작업 정리 |
+| 3 | 커밋 | `/git` | 체크포인트 시점 변경사항 커밋 |

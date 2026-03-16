@@ -97,3 +97,14 @@ Use GFM markdown tables:
 | File | Action |
 |------|--------|
 | [file path] | created/modified |
+
+## Next Steps
+
+작업 완료 후 추천 후속 액션:
+
+| # | 액션 | 커맨드 | 설명 |
+|---|------|--------|------|
+| 1 | 테스트 작성 | `/tdd` | 구현 코드 테스트 작성 |
+| 2 | 코드 리뷰 | `/code-review` | 구현 결과 코드 리뷰 |
+| 3 | 전체 검증 | `/verify` | lint → typecheck → test 검증 |
+| 4 | 커밋 | `/git` | 구현 완료 후 커밋 및 푸시 |

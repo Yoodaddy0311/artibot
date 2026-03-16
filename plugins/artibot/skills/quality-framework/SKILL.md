@@ -222,6 +222,103 @@ quality_gates:
 - [ ] Breaking change documented and versioned
 - [ ] Feature flag for risky changes
 
+## Output Template
+
+```
+QUALITY VALIDATION REPORT
+=========================
+Project:    [project name]
+Date:       [date]
+Scope:      [file/module/project]
+
+VALIDATION RESULTS
+------------------
+Step              | Status  | Details
+------------------|---------|---------------------------
+1. Syntax         | PASS/FAIL | [parser/formatter result]
+2. Types          | PASS/FAIL | [type checker result]
+3. Lint           | PASS/FAIL | [errors/warnings count]
+4. Security       | PASS/FAIL | [vulnerabilities found]
+5. Tests          | PASS/FAIL | [pass/fail count, coverage %]
+6. Performance    | PASS/WARN | [response time, bundle size]
+7. Documentation  | PASS/WARN | [coverage %, missing items]
+8. Integration    | PASS/WARN | [breaking changes, flags]
+
+QUALITY METRICS
+---------------
+Metric           | Value   | Status | Threshold
+-----------------|---------|--------|----------
+Unit coverage    | [n%]    | [G/Y/R]| >= 80%
+Complexity avg   | [n]     | [G/Y/R]| <= 10
+Tech debt ratio  | [n%]    | [G/Y/R]| < 5%
+Test flakiness   | [n%]    | [G/Y/R]| 0%
+
+BLOCKING ISSUES
+---------------
+[List of blocking issues that must be resolved before merge]
+
+RECOMMENDATIONS
+---------------
+Priority | Action              | Impact
+---------|---------------------|--------
+P1       | [action]            | [impact]
+```
+
+## Output Template
+
+```
+QUALITY ASSESSMENT REPORT
+==========================
+Project:   [name]
+Framework: ATLAS (Assess -> Test -> Limit -> Assure -> Sustain)
+Date:      [YYYY-MM-DD]
+Scope:     [files/modules assessed]
+
+QUALITY GATE STATUS
+───────────────────
+Gate                | Score  | Threshold | Status
+────────────────────|────────|───────────|──────────
+Syntax & Parsing    | [val]  | PASS      | [PASS|FAIL]
+Type Safety         | [val]  | PASS      | [PASS|FAIL]
+Lint & Style        | [n err]| 0 errors  | [PASS|FAIL]
+Security Scan       | [n vul]| 0 critical| [PASS|FAIL]
+Test Coverage       | [%]    | >=80%     | [PASS|FAIL]
+Performance Budget  | [val]  | [target]  | [PASS|FAIL]
+Documentation       | [%]    | >=70%     | [PASS|FAIL]
+Integration         | [pass] | All green | [PASS|FAIL]
+
+RISK CLASSIFICATION (for failed gates)
+──────────────────────────────────────
+TIGERS (real, high-impact risks - address immediately)
+  [1] [risk]: [impact] -> Fix: [action]
+  [2] ...
+
+PAPER TIGERS (appear dangerous but manageable)
+  [1] [risk]: [why it looks bad] -> Reality: [why it is acceptable]
+  [2] ...
+
+ELEPHANTS (everyone sees but nobody addresses)
+  [1] [risk]: [why it persists] -> Cost of inaction: [consequence]
+  [2] ...
+
+QUALITY METRICS SUMMARY
+───────────────────────
+Metric             | Current | Previous | Trend
+───────────────────|─────────|──────────|──────
+Statements         | [%]     | [%]      | [up/down/flat]
+Branches           | [%]     | [%]      | [up/down/flat]
+Functions          | [%]     | [%]      | [up/down/flat]
+ESLint Warnings    | [n]     | [n]      | [up/down/flat]
+Tech Debt (hours)  | [n]     | [n]      | [up/down/flat]
+
+RECOMMENDATIONS
+───────────────
+Priority | Quality Area | Action               | Effort
+---------|-------------|----------------------|--------
+P1       | [area]      | [action]             | [L/M/H]
+```
+
+
 ## Quick Reference
 
 **Validation order**: Syntax -> Types -> Lint -> Security -> Tests -> Performance -> Docs -> Integration
@@ -260,12 +357,53 @@ Progress:
 
 ## Human Checkpoints
 
-| After Step | Checkpoint | Type | Options |
-|-----------|-----------|------|---------|
-| Step 4 | Security vulnerabilities found? | Go-No-Go | Clean — proceed / Vulnerabilities — STOP and fix |
-| Step 5 | Coverage below thresholds? | Selection | Add tests / Accept with justification / Block merge |
-| Step 6 | Performance regression detected? | Go-No-Go | Within budget / Regression — investigate before proceeding |
-| Step 8 | Breaking changes introduced? | Selection | Version bump / Feature flag / Revert change |
+### Checkpoint 1: 검증 범위 선택 (Before Step 1)
+**Context**: 8단계 검증 사이클 시작 전. 전체 실행 vs 선택적 실행 결정.
+**Ask**: "8단계 검증 중 **어디에 집중할까요?**"
+**Options**:
+1. 전체 8단계 — 완전한 검증 사이클 실행
+2. 블로킹 게이트만 — Step 1,2,4,5 (Syntax, Types, Security, Tests)
+3. 보안 중심 — Step 4 (Security) + Step 5 (Tests) 심층 분석
+4. 커스텀 — 특정 단계 직접 선택
+**Default**: 2 (블로킹 게이트가 핵심)
+**Skippable**: Yes — 기본값으로 진행
+**Freedom**: MEDIUM
+
+### Checkpoint 2: 보안 발견 대응 (After Step 4)
+**Context**: 보안 스캔에서 취약점 발견됨. 심각도별 대응 결정 필요.
+**Ask**: "보안 취약점 [N]건 발견. **비크리티컬 항목 처리 방침은?**"
+**Options**:
+1. 전체 수정 — 모든 취약점 즉시 수정
+2. Critical + High만 — 긴급 항목만 수정, 나머지 트래킹
+3. Critical만 — 최소 수정, 나머지 별도 태스크
+4. 개별 판단 — 각 취약점별 수정/보류 결정
+**Default**: 2 (Critical + High 우선)
+**Skippable**: No — 보안은 스킵 불가
+**Freedom**: LOW
+
+### Checkpoint 3: 커버리지 대응 (After Step 5)
+**Context**: 테스트 커버리지 측정 완료. 타겟 대비 결과 확인.
+**Ask**: "커버리지 [X]% (타겟 [Y]%). **갭 대응 방침은?**"
+**Options**:
+1. 전체 보충 — 모든 미커버 영역 테스트 추가
+2. 상위 3 리스크만 — 가장 위험한 미커버 영역만 보충
+3. 현상 유지 — 현재 수준 수용 (사유 기록)
+4. 타겟 변경 — 프로젝트 상황에 맞게 타겟 재설정
+**Default**: 2 (리스크 기반 우선순위)
+**Skippable**: Yes — 기본값으로 진행
+**Freedom**: MEDIUM
+
+### Checkpoint 4: 브레이킹 체인지 전략 (After Step 8)
+**Context**: 통합 검증에서 브레이킹 체인지 감지됨. 릴리스 전략 결정 필요.
+**Ask**: "브레이킹 체인지가 감지되었습니다. **릴리스 전략은?**"
+**Options**:
+1. 메이저 버전 범프 — semver 메이저 업데이트
+2. 피처 플래그 — 점진적 롤아웃
+3. 호환성 래퍼 — 하위호환 유지하며 내부 변경
+4. 리버트 — 변경 취소, 대안 설계
+**Default**: 2 (피처 플래그가 가장 안전)
+**Skippable**: No — 브레이킹 체인지는 반드시 결정 필요
+**Freedom**: LOW
 
 ## Freedom Levels
 

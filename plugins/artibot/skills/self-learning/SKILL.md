@@ -249,11 +249,35 @@ Progress:
 
 ## Human Checkpoints
 
-| After Step | Checkpoint | Type | Options |
-|-----------|-----------|------|---------|
-| Step 3 | Tool recommendation reasonable for this context? | Approval | Accept / Override with different tool |
-| Step 4 | Group comparison fair (same task, controlled conditions)? | Go-No-Go | Record comparison / Discard |
-| Step 6 | Pruning removed only obsolete data? | Approval | Confirm / Adjust retention period |
+### Checkpoint 1: 도구 추천 검토 (After Step 3)
+**Context**: Toolformer가 현재 컨텍스트 키에 대한 최적 도구를 순위별로 추천한 시점. 추천은 과거 성공률 기반이므로 새로운 상황에서는 맞지 않을 수 있다.
+**Ask**: "추천된 도구가 **현재 컨텍스트에 적합**한가요?"
+**Options**:
+1. Accept — 추천 도구를 수용하고 진행
+2. Override with different tool — 다른 도구를 수동으로 지정하고 해당 도구의 사용 결과를 학습에 반영
+**Default**: 1 (신뢰도 medium 이상이면 추천 수용 권장)
+**Skippable**: No — 수용 또는 오버라이드를 명시적으로 결정해야 함
+**Freedom**: MEDIUM
+
+### Checkpoint 2: GRPO 그룹 비교 조건 검증 (After Step 4)
+**Context**: 동일 작업에 대해 여러 도구를 비교하는 GRPO 그룹 비교를 기록하려는 시점. 비교 조건이 동등하지 않으면 학습 데이터가 오염된다.
+**Ask**: "이번 그룹 비교가 **동일 작업·통제된 조건**에서 수행되었나요?"
+**Options**:
+1. Record comparison — 비교 결과를 기록하고 GRPO 점수 업데이트
+2. Discard — 조건이 불균등하여 이번 비교 결과를 폐기
+**Default**: 1 (도구 비교가 동일 입력으로 수행된 경우)
+**Skippable**: No — 기록 또는 폐기를 명시적으로 결정해야 함
+**Freedom**: MEDIUM
+
+### Checkpoint 3: 데이터 정리 결과 확인 (After Step 6)
+**Context**: 90일 보존 기간 및 컨텍스트당 200건 상한에 따라 오래된 학습 기록이 삭제된 시점. 유용한 데이터가 의도치 않게 삭제되지 않았는지 확인이 필요하다.
+**Ask**: "정리 작업이 **오래된 데이터만 제거**했나요?"
+**Options**:
+1. Confirm — 정리 결과를 수용하고 완료
+2. Adjust retention period — 보존 기간 또는 상한을 조정하고 재실행
+**Default**: 1 (설정된 보존 정책이 적절한 경우)
+**Skippable**: No — 확인 또는 정책 조정을 명시적으로 결정해야 함
+**Freedom**: LOW
 
 ## Freedom Levels
 

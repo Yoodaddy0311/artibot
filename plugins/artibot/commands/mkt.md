@@ -123,3 +123,14 @@ Use GFM markdown tables:
 /mkt growth --budget bootstrap --timeline half-year
 /mkt brand --market "enterprise HR" --competitor "Workday,BambooHR"
 ```
+
+## Next Steps
+
+작업 완료 후 추천 후속 액션:
+
+| # | 액션 | 커맨드 | 설명 |
+|---|------|--------|------|
+| 1 | 콘텐츠 실행 | `/content` | 전략 기반 콘텐츠 제작 |
+| 2 | 광고 캠페인 | `/ad` | 전략 기반 광고 캠페인 실행 |
+| 3 | 성과 추적 | `/analytics` | 마케팅 성과 KPI 추적 |
+| 4 | SEO 전략 | `/seo` | 검색 엔진 최적화 전략 |

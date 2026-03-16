@@ -284,12 +284,48 @@ Progress:
 
 ## Human Checkpoints
 
-| After Step | Checkpoint | Type | Options |
-|-----------|-----------|------|---------|
-| Step 2 | Complexity classification correct? | Approval | Confirm / Override level |
-| Step 3 | Delegation mode appropriate for this task? | Selection | Direct / Sub-Agent / Team Mode |
-| Step 5 | Team composition acceptable? | Approval | Approve team / Adjust members / Reduce scope |
-| Step 7 | Results meet quality expectations? | Go-No-Go | Accept / Request revision / Escalate |
+### Checkpoint 1: 복잡도 분류 확인 (After Step 2)
+**Context**: 요청의 복잡도가 simple/moderate/complex로 분류된 시점. 잘못된 분류는 토큰 예산과 위임 모드 전체에 영향을 주므로 초기에 확인이 필요하다.
+**Ask**: "요청이 **[분류된 레벨]**로 분류되었습니다. 이 복잡도 분류가 맞나요?"
+**Options**:
+1. Confirm — 분류 확인, Step 3 위임 모드 선택으로 진행
+2. Override level — simple / moderate / complex 중 다른 레벨로 재분류
+**Default**: 1 (자동 분류 알고리즘을 신뢰)
+**Skippable**: No — 복잡도는 토큰 예산과 위임 전략의 기반이 됨
+**Freedom**: MEDIUM
+
+### Checkpoint 2: 위임 모드 선택 (After Step 3)
+**Context**: Direct / Sub-Agent / Team Mode 중 위임 방식이 결정된 시점. 실제 태스크 특성과 팀 리소스를 고려해 사용자가 조정할 수 있다.
+**Ask**: "이 태스크에 **[선택된 위임 모드]**가 제안되었습니다. 이 방식이 적절한가요?"
+**Options**:
+1. Direct — 오케스트레이터가 직접 실행
+2. Sub-Agent — Task 툴로 단일 에이전트 위임
+3. Team Mode — Agent Teams API로 팀 구성 및 조율
+**Default**: 자동 점수 기반 결정 (Score >= 0.5 → Team, < 0.5 → Sub-Agent)
+**Skippable**: Yes (기본값 사용) — 자동 선택 모드로 진행
+**Freedom**: HIGH
+
+### Checkpoint 3: 팀 구성 승인 (After Step 5)
+**Context**: 팀 멤버와 역할 배분이 확정된 시점. 팀 크기와 구성이 태스크 범위에 비해 과하거나 부족할 수 있어 사람의 검토가 필요하다.
+**Ask**: "팀이 구성되었습니다. **제안된 팀 멤버와 역할 배분이 이 작업에 적합한가요?**"
+**Options**:
+1. Approve team — 구성 확인, 실행 시작
+2. Adjust members — 특정 에이전트 추가/제거 후 진행
+3. Reduce scope — 작업 범위를 좁혀 더 작은 팀으로 재구성
+**Default**: 1 (자동 팀 구성 로직을 신뢰)
+**Skippable**: No — 팀 구성 후 변경은 비용이 크므로 사전 승인 필요
+**Freedom**: HIGH
+
+### Checkpoint 4: 결과 품질 검토 (After Step 7)
+**Context**: 모든 에이전트의 결과가 집계되고 품질 게이트 통과 여부가 확인된 시점. 최종 수락 전 사람의 판단으로 추가 수정이나 에스컬레이션 여부를 결정한다.
+**Ask**: "작업 결과가 집계되었습니다. **결과물이 기대한 품질 기준을 충족하나요?**"
+**Options**:
+1. Accept — 결과 수락, 보고서 출력
+2. Request revision — 특정 부분 재작업 요청
+3. Escalate — 더 높은 복잡도 레벨로 재분류하여 재시작
+**Default**: 1 (품질 게이트를 통과한 결과는 수락)
+**Skippable**: No — 최종 결과의 수락/거절은 사람의 판단이 필요
+**Freedom**: MEDIUM
 
 ## Freedom Levels
 

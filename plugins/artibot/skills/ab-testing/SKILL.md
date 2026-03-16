@@ -131,32 +131,47 @@ Results:
 Learnings: [Key takeaway for future tests]
 ```
 
-## Output Format
+## Output Template
+
 ```
-A/B TEST PLAN
-=============
-Test Name:   [descriptive name]
-Hypothesis:  [if/then/because]
-Type:        [A/B|multivariate|bandit]
-Priority:    [P1|P2|P3]
+A/B TEST ANALYSIS REPORT
+=========================
+Test ID:     [test-id]
+Hypothesis:  [if X then Y because Z]
+Duration:    [start] -> [end] ([n] days)
+Sample Size: Control [n] / Variant [n]
+Status:      [RUNNING | CONCLUDED | STOPPED]
 
-VARIANTS
---------
-Control (A):   [current state description]
-Treatment (B): [proposed change description]
+RESULTS SUMMARY
+───────────────
+Metric         | Control | Variant | Delta  | Confidence | Significant?
+───────────────|─────────|─────────|────────|────────────|─────────────
+[primary KPI]  | [value] | [value] | [+/-%] | [%]        | [YES|NO]
+[secondary KPI]| [value] | [value] | [+/-%] | [%]        | [YES|NO]
 
-PARAMETERS
-----------
-Primary Metric: [metric name]
-Baseline:       [current value]
-MDE:            [minimum detectable effect]
-Sample Size:    [per variant]
-Duration:       [estimated days]
-Confidence:     [95%]
+GUARDRAIL METRICS (must not degrade)
+─────────────────────────────────────
+Metric          | Baseline | Current | Status
+────────────────|──────────|─────────|───────
+[guardrail 1]   | [value]  | [value] | [OK | DEGRADED | BREACHED]
+[guardrail 2]   | [value]  | [value] | [OK | DEGRADED | BREACHED]
 
-SECONDARY METRICS
------------------
-[metric]: [monitoring threshold]
+DECISION MATRIX
+───────────────
+             | Significant     | Not Significant
+─────────────|─────────────────|─────────────────
+Positive     | SHIP            | EXTEND (need more data)
+Negative     | STOP            | EXTEND or REDESIGN
+Guardrail Hit| STOP            | STOP
+
+RECOMMENDATION: [SHIP | EXTEND | STOP | REDESIGN]
+Rationale:     [1-2 sentence justification]
+
+NEXT STEPS
+──────────
+[1] [action based on decision]
+[2] [follow-up test or rollout plan]
+[3] [monitoring plan post-ship]
 ```
 
 ## Quick Reference

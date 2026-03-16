@@ -127,3 +127,13 @@ EXPORT
 /excel roi --data @campaigns/ad-spend.csv --period quarterly --format narrative
 /excel attribution --data @analytics/touchpoints.csv --kpi conversions
 ```
+
+## Next Steps
+
+작업 완료 후 추천 후속 액션:
+
+| # | 액션 | 커맨드 | 설명 |
+|---|------|--------|------|
+| 1 | 프레젠테이션 | `/ppt` | 데이터 분석 결과 발표 자료 |
+| 2 | 추가 분석 | `/analytics` | 심층 마케팅 분석 수행 |
+| 3 | 인사이트 콘텐츠 | `/content` | 분석 인사이트 콘텐츠화 |
