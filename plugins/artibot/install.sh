@@ -54,7 +54,7 @@ setup_directories() {
 }
 
 # ──────────────────────────────────────────────
-# Copy Agents (26 agent .md files)
+# Copy Agents (28 agent .md files)
 # ──────────────────────────────────────────────
 install_agents() {
   local count=0

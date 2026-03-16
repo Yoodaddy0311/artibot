@@ -14,7 +14,7 @@ This file auto-loads when Claude accesses files in `plugins/artibot/`.
 
 | Directory | Purpose | Key Files |
 |-----------|---------|-----------|
-| `agents/` | Agent definitions (26 .md) | orchestrator.md (CTO), planner.md |
+| `agents/` | Agent definitions (28 .md) | orchestrator.md (CTO), planner.md |
 | `commands/` | Slash commands (47 .md) | sc.md (router), implement.md, build.md, repo.md |
 | `skills/` | SKILL.md + references/ (87 dirs) | principles/, tdd-workflow/, coding-standards/, repo-benchmarking/ |
 | `lib/cognitive/` | Dual-process engine | router.js, system1.js, system2-core.js |

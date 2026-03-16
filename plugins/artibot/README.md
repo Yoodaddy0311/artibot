@@ -1057,7 +1057,7 @@ orchestrator는 **코드를 직접 작성하지 않습니다**. 팀을 구성하
 plugins/artibot/
 ├── .claude-plugin/
 │   └── plugin.json              # 플러그인 매니페스트
-├── agents/                      # 26개 에이전트 정의 (orchestrator 1 + 팀원 25)
+├── agents/                      # 28개 에이전트 정의 (orchestrator 1 + 팀원 27)
 │   ├── orchestrator.md          #   CTO / 팀 리더 (Agent Teams API)
 │   └── [25개 전문 에이전트].md    #   팀원 (SendMessage + TaskUpdate)
 ├── commands/                    # 47개 슬래시 커맨드
