@@ -74,14 +74,27 @@ export class CodexAdapter extends BaseAdapter {
    * Codex CLI does not have slash commands, so commands become skill workflows.
    */
   convertCommand(command) {
+    const description = cleanDescription(command.frontmatter?.description ?? `Workflow for /${command.name} command`);
     const frontmatter = buildFrontmatter({
       name: `cmd-${command.name}`,
-      description: `Workflow for /${command.name} command`,
+      description,
     });
+
+    const body = stripClaudeSpecificRefs(command.content, {
+      skillsPath: '.agents/skills/',
+      platformName: 'AI Agent',
+      instructionFile: 'AGENTS.md',
+    });
+
+    const preface = [
+      '> Exported from an Artibot slash command workflow.',
+      '> If a referenced teammate or team-only tool is unavailable, execute that phase directly or consult `AGENTS.md`.',
+      '',
+    ].join('\n');
 
     return {
       path: path.join(this.skillsDir, `cmd-${command.name}`, 'SKILL.md'),
-      content: `${frontmatter}\n${command.content}`,
+      content: `${frontmatter}\n${preface}${body}`,
     };
   }
 

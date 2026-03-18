@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  on,
   emit,
   getLastEvent,
-  reset,
   getStats,
+  on,
+  reset,
 } from '../../lib/core/event-bus.js';
 
 describe('event-bus', () => {
@@ -131,7 +131,10 @@ describe('event-bus', () => {
     it('handles non-Error throws gracefully', () => {
       const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
 
-      on('err-str', () => { throw 'string-error'; }); // eslint-disable-line no-throw-literal
+      on('err-str', () => {
+        // Intentionally throw a non-Error value to verify event-bus resilience.
+        throw 'string-error';
+      });
       emit('err-str', null);
 
       expect(stderrSpy).toHaveBeenCalledWith(

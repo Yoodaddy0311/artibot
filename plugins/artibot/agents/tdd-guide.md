@@ -13,6 +13,7 @@ description: |
 
   Do NOT use for: E2E tests (use e2e-runner), architecture design, code review, documentation
 model: opus
+modelTier: premium
 tools:
   - Read
   - Write

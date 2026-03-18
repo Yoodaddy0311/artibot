@@ -12,6 +12,7 @@ description: |
 
   Do NOT use for: frontend components, CI/CD pipelines, application-level business logic
 model: opus
+modelTier: premium
 tools:
   - Read
   - Write

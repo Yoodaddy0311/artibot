@@ -16,6 +16,7 @@ const VALID_HOOK_EVENTS = new Set([
   'PostToolUseFailure',
   'PreCompact',
   'PostCompact',
+  'InstructionsLoaded',
   'Stop',
   'UserPromptSubmit',
   'SubagentStart',

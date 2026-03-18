@@ -1,6 +1,7 @@
 ---
+name: daily
 context: forked
-description: "일일 회고 리포트 — 오늘의 커밋, 품질, 작업 현황, 다음 단계를 구조화된 대시보드로 출력. Use when reviewing daily progress, generating retrospective reports, or planning next actions."
+description: "일일 회고 리포트. 오늘의 커밋, 품질 상태, 작업 현황, 다음 단계를 구조화된 대시보드로 정리한다. Use when reviewing daily progress, generating a retrospective, or planning the next actions."
 triggers:
   - daily
   - recap
@@ -8,103 +9,55 @@ triggers:
   - 일일 보고
   - 오늘 작업
   - 오늘 뭐 했지
-  - today
   - retrospective
-  - 복기
-  - 일일 리포트
+  - daily report
 ---
 
-# /daily — Daily Retrospective Report
+# /daily
 
-Collects today's git activity, quality metrics, task status, and worklog entries into a structured review dashboard.
+오늘의 작업 흐름을 짧고 구조적으로 정리하는 일일 회고 스킬입니다.
 
 ## Activation
 
-Auto-activates when user mentions: "daily", "recap", "회고", "오늘 작업", "오늘 뭐 했지", "복기", "일일 보고"
+다음과 같은 요청에서 사용합니다.
+- 오늘 한 일 정리
+- 일일 회고
+- 커밋/품질/작업 현황 요약
+- 다음 단계 우선순위 정리
 
-## What It Reports (7 Sections)
+## Output Shape
 
-1. **커밋 요약** — Today's commits with type, description, file count
-2. **변경 현황** — Files changed grouped by directory
-3. **품질 현황** — Test results, coverage, lint status
-4. **작업 현황** — Current tasks (completed/in-progress/pending)
-5. **세션 기록** — Today's worklog entry (작업/결정/보류)
-6. **다음 단계** — Prioritized next actions from tasks + worklog + git
-7. **Footer** — Generation time, duration, data sources
+다음 6개 섹션을 기본 골격으로 사용합니다.
+1. 오늘의 커밋 요약
+2. 변경 파일/영역 요약
+3. 품질 상태
+4. 작업 현황
+5. 주요 결정과 메모
+6. 다음 단계
 
-## Flags
+## Workflow
 
-- `--save`: Persist to `memory/daily/YYYY-MM-DD.md`
-- `--quick`: Skip quality checks (<5s)
-- `--date YYYY-MM-DD`: Historical lookup
-- `--no-tasks`: Skip task collection
+1. 오늘 날짜 기준으로 git 활동을 수집합니다.
+2. 테스트, lint, coverage 등 품질 신호를 확인합니다.
+3. 현재 진행 중/완료/대기 작업을 모읍니다.
+4. worklog 또는 세션 메모가 있으면 핵심 결정만 압축합니다.
+5. 다음 단계는 우선순위와 근거를 함께 정리합니다.
 
-## Data Sources
+## Checklist
 
-| Source | Tool | Section |
-|--------|------|---------|
-| Git log | Bash | 커밋 요약, 변경 현황 |
-| npm test | Bash | 품질 현황 |
-| TaskList | TaskList tool | 작업 현황, 다음 단계 |
-| worklog.md | Read | 세션 기록, 다음 단계 |
-| git status | Bash | 다음 단계 |
-
-## Workflow Checklist
-
-Copy this checklist and track progress:
-
-```
+```text
 Progress:
-- [ ] Step 1: Collect today's git log (commits, file changes)
-- [ ] Step 2: Run quality checks (npm test, lint, coverage)
-- [ ] Step 3: Gather task status (completed/in-progress/pending)
-- [ ] Step 4: Read worklog for session entries
-- [ ] Step 5: Compile 7-section dashboard
-- [ ] Step 6: Generate prioritized next actions
-- [ ] Step 7: Save report if --save flag (memory/daily/YYYY-MM-DD.md)
+- [ ] 오늘의 커밋 수집
+- [ ] 품질 상태 확인
+- [ ] 작업 현황 정리
+- [ ] 주요 결정/메모 반영
+- [ ] 다음 단계 우선순위 정리
+- [ ] 최종 대시보드 출력
 ```
 
-## Human Checkpoints
+## Guardrails
 
-### Checkpoint 1: 품질 이슈 처리 결정 (After Step 2)
-**Context**: 품질 체크 실행 후 테스트 실패, 린트 오류, 커버리지 저하 등이 발견된 시점. 회고 보고서 작성 전에 이슈를 처리할지 결정해야 한다.
-**Ask**: "품질 체크에서 **이슈가 발견**되었습니다. 지금 바로 수정할까요?"
-**Options**:
-1. Fix issues — 회고 작성 전 발견된 이슈를 먼저 수정
-2. Note and proceed — 이슈를 기록하고 보고서에 포함하여 계속 진행
-**Default**: 2 (회고는 현재 상태를 있는 그대로 기록하는 것이 목적)
-**Skippable**: No — 이슈를 무시하면 보고서 정확성이 낮아짐
-**Freedom**: MEDIUM
-
-### Checkpoint 2: 다음 단계 우선순위 확인 (After Step 6)
-**Context**: 여러 소스(태스크, 워크로그, git 상태)에서 다음 액션을 수집하여 우선순위를 정한 시점. 자동 우선순위가 실제 업무 맥락과 다를 수 있다.
-**Ask**: "다음 단계를 **[우선순위 목록]** 으로 정렬했습니다. 이 순서가 맞나요?"
-**Options**:
-1. Accept priorities — 현재 우선순위 그대로 최종 보고서에 포함
-2. Reorder — 특정 항목의 우선순위를 변경
-3. Add items — 목록에 빠진 항목을 추가
-**Default**: 1 (자동 수집된 우선순위를 신뢰)
-**Skippable**: Yes (use default) — 기본 우선순위로 보고서 완성
-**Freedom**: HIGH
-
-### Checkpoint 3: 보고서 저장 확인 (After Step 7)
-**Context**: 7섹션 대시보드가 완성된 시점. --save 플래그 없이 실행된 경우에도 향후 참조를 위해 저장 여부를 선택할 수 있다.
-**Ask**: "오늘의 회고 보고서가 완성되었습니다. **파일로 저장**할까요? (`memory/daily/YYYY-MM-DD.md`)"
-**Options**:
-1. Save — 지정 경로에 보고서 저장
-2. Skip — 저장하지 않고 화면 출력으로만 확인
-**Default**: 2 (명시적 --save 없이는 저장 안 함)
-**Skippable**: No — 사용자의 저장 의도를 명확히 확인해야 함
-**Freedom**: LOW
-
-## Freedom Levels
-
-| Step | Freedom | Guidance |
-|------|:-------:|----------|
-| Collect git log | LOW | Standard git commands, date-filtered |
-| Run quality checks | LOW | npm test and lint — run as defined |
-| Gather task status | MEDIUM | TaskList query, interpretation of status flexible |
-| Read worklog | LOW | Fixed file location, read as-is |
-| Compile dashboard | LOW | 7-section format is defined |
-| Generate next actions | HIGH | Prioritization requires judgment across sources |
-| Save report | LOW | Path format and content defined |
+- 장황한 회고보다 빠르게 훑을 수 있는 요약을 우선합니다.
+- 실패한 테스트나 미해결 이슈는 숨기지 말고 드러냅니다.
+- 다음 단계는 실행 가능한 액션으로 씁니다.
+- 정보가 비어 있으면 추측하지 말고 “확인되지 않음”으로 표시합니다.

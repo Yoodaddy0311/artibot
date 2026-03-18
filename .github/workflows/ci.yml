@@ -58,6 +58,24 @@ jobs:
             echo "No test directory found. Skipping tests."
           fi
 
+      - name: Run runtime eval gate
+        run: npm run eval:runtime:check
+
+      - name: Publish runtime eval summary
+        if: always()
+        run: node scripts/ci/publish-runtime-eval-summary.js
+
+      - name: Upload runtime eval artifacts
+        if: always() && matrix.node-version == 20
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-evals-node-${{ matrix.node-version }}
+          path: |
+            plugins/artibot/_reports/runtime-task-suite.json
+            plugins/artibot/_reports/runtime-eval-comparison.json
+            _benchmarks/runtime-eval-comparison.md
+          if-no-files-found: warn
+
       - name: Run ESLint
         run: |
           if [ -f ".eslintrc.json" ] || [ -f ".eslintrc.js" ] || [ -f ".eslintrc.yml" ] || [ -f "eslint.config.js" ] || [ -f "eslint.config.mjs" ]; then

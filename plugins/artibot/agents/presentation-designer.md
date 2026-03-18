@@ -15,6 +15,7 @@ description: |
   Do NOT use for: code implementation, email campaigns, social media, infrastructure,
   data analysis (use data-analyst), marketing strategy (use marketing-strategist)
 model: sonnet
+modelTier: standard
 tools:
   - Read
   - Write

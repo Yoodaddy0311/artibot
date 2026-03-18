@@ -12,6 +12,7 @@ description: |
 
   Do NOT use for: unit tests, integration tests without browser, API-only testing
 model: opus
+modelTier: premium
 tools:
   - Read
   - Write

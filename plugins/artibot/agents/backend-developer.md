@@ -12,6 +12,7 @@ description: |
 
   Do NOT use for: UI components, CSS styling, frontend state management, DevOps pipelines
 model: opus
+modelTier: premium
 tools:
   - Read
   - Write

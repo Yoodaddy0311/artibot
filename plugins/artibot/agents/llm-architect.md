@@ -12,6 +12,7 @@ description: |
 
   Do NOT use for: traditional backend logic, CSS styling, database schema without AI context
 model: opus
+modelTier: premium
 tools:
   - Read
   - Write

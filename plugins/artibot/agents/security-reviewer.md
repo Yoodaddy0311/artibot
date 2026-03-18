@@ -13,6 +13,7 @@ description: |
 
   Do NOT use for: general code quality, performance optimization, UI/UX review
 model: opus
+modelTier: premium
 tools:
   - Read
   - Write

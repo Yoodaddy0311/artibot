@@ -15,6 +15,7 @@ description: |
   Do NOT use for: code implementation, content creation, design, infrastructure,
   strategy formulation, ad copy writing
 model: sonnet
+modelTier: standard
 tools:
   - Read
   - Write

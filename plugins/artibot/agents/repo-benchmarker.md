@@ -13,6 +13,7 @@ description: |
 
   Do NOT use for: implementation, code writing, bug fixes, security audits, testing
 model: opus
+modelTier: premium
 tools:
   - Read
   - Glob

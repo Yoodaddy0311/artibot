@@ -12,6 +12,7 @@ description: |
 
   Do NOT use for: implementation, writing new code, security audits (use security-reviewer), testing
 model: opus
+modelTier: premium
 tools:
   - Read
   - Grep

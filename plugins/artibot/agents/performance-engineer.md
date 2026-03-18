@@ -13,6 +13,7 @@ description: |
 
   Do NOT use for: feature implementation, UI styling, content creation, security audits, documentation
 model: opus
+modelTier: premium
 tools:
   - Read
   - Write

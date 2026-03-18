@@ -12,6 +12,7 @@ description: |
 
   Do NOT use for: active feature development, pre-release code freezes, code with no test coverage
 model: opus
+modelTier: premium
 tools:
   - Read
   - Write

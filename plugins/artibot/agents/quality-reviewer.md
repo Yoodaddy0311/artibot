@@ -13,6 +13,7 @@ description: |
   Do NOT use for: spec compliance (use spec-reviewer), security audits (use security-reviewer),
   writing code, implementation
 model: opus
+modelTier: premium
 tools:
   - Read
   - Grep

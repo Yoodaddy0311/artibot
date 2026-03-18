@@ -12,6 +12,7 @@ description: |
 
   Do NOT use for: runtime logic without type concerns, CSS styling, infrastructure, content creation
 model: opus
+modelTier: premium
 tools:
   - Read
   - Write

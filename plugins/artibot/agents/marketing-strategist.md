@@ -15,6 +15,7 @@ description: |
   Do NOT use for: code implementation, email copy writing, social media posts, ad creation,
   technical SEO audits, data visualization, slide design
 model: opus
+modelTier: premium
 tools:
   - Read
   - Write

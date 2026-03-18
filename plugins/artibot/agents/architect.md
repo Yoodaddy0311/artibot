@@ -13,6 +13,7 @@ description: |
 
   Do NOT use for: implementation details, bug fixes, styling, test writing, DevOps
 model: opus
+modelTier: premium
 tools:
   - Read
   - Glob

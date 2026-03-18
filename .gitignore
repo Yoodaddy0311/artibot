@@ -2,6 +2,7 @@ node_modules/
 .DS_Store
 .claude/
 *.log
+*.tmp
 .env
 .env.*
 temp-repos/
@@ -24,3 +25,8 @@ NVIDIA Corporation/
 *.png
 !assets/*.jpeg
 !assets/*.png
+
+# Codex CLI auto-generated files
+/.agents/
+/AGENTS.md
+/agents/

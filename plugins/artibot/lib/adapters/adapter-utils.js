@@ -93,6 +93,8 @@ export function stripAgentTeamsRefs(content, mapping = {}) {
  */
 export function stripClaudeSpecificRefs(content, mapping) {
   return content
+    .replace(/\$\{CLAUDE_SKILL_DIR\}\//g, './')
+    .replace(/\$\{CLAUDE_SKILL_DIR\}/g, '.')
     .replace(/\.claude\/skills\//g, mapping.skillsPath)
     .replace(/Claude Code/g, mapping.platformName)
     .replace(/CLAUDE\.md/g, mapping.instructionFile);

@@ -12,6 +12,7 @@ description: |
 
   Do NOT use for: simple single-file edits, bug fixes with obvious solutions, documentation-only tasks
 model: opus
+modelTier: premium
 tools:
   - Read
   - Grep

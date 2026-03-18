@@ -12,6 +12,7 @@ description: |
 
   Do NOT use for: backend API logic, database queries, infrastructure, DevOps
 model: opus
+modelTier: premium
 tools:
   - Read
   - Write

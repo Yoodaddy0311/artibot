@@ -14,6 +14,7 @@ description: |
 
   Do NOT use for: single-file edits, simple questions, documentation-only tasks
 model: opus
+modelTier: premium
 tools:
   # --- Team Lifecycle ---
   - TeamCreate

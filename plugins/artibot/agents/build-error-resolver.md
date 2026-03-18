@@ -12,6 +12,7 @@ description: |
 
   Do NOT use for: runtime bugs, logic errors, performance issues, feature implementation
 model: opus
+modelTier: premium
 tools:
   - Read
   - Write

@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { BLOCKED_PATTERNS, CATEGORIES } from '../../lib/core/blocked-patterns.js';
 
 describe('blocked-patterns', () => {

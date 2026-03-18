@@ -12,6 +12,7 @@ description: |
 
   Do NOT use for: UI components, business logic, database schema design, content creation
 model: opus
+modelTier: premium
 tools:
   - Read
   - Write

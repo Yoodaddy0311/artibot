@@ -12,6 +12,7 @@ description: |
 
   Do NOT use for: code implementation, testing, infrastructure, database design
 model: sonnet
+modelTier: standard
 tools:
   - Read
   - Write

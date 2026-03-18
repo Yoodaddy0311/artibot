@@ -1,0 +1,6 @@
+# Personal local config (auto-excluded — do not commit)
+CLAUDE.local.md
+
+# Build artifacts
+_reports/
+_benchmarks/

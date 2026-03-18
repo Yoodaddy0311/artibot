@@ -193,6 +193,7 @@ async function validateHooks() {
       'SessionStart', 'SessionEnd',
       'PreToolUse', 'PostToolUse', 'PostToolUseFailure',
       'PreCompact', 'PostCompact',
+      'InstructionsLoaded',
       'Stop', 'UserPromptSubmit',
       'SubagentStart', 'SubagentStop', 'SubAgentTurn',
       'TeammateIdle', 'Notification',

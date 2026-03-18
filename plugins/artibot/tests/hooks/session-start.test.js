@@ -63,11 +63,8 @@ vi.mock('../../lib/core/version-checker.js', () => ({
 // Tests
 // ---------------------------------------------------------------------------
 
-// Minimal wait (ms) for the async main() pipeline to settle after dynamic import.
-// Uses a short real delay instead of the original 500ms, since mocked I/O resolves
-// instantly. The 2000ms internal Promise.race timeout in session-start.js is handled
-// by making checkForUpdate resolve immediately (default mock behavior).
-const SETTLE_MS = 100;
+const POLL_MS = 25;
+const SETTLE_TIMEOUT_MS = 3000;
 
 describe('session-start hook', () => {
   let stderrSpy;
@@ -90,11 +87,23 @@ describe('session-start hook', () => {
     delete process.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS;
   });
 
-  async function importAndWait() {
+  async function waitForStdout(timeoutMs = SETTLE_TIMEOUT_MS) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (mockState.writeStdoutCalls.length > 0) {
+        return;
+      }
+      await new Promise((r) => setTimeout(r, POLL_MS));
+    }
+  }
+
+  async function importAndWait(options = {}) {
     await import('../../scripts/hooks/session-start.js');
-    // Allow the async main() pipeline to complete. With all I/O mocked to
-    // resolve instantly, a short real delay is sufficient.
-    await new Promise((r) => setTimeout(r, SETTLE_MS));
+    if (options.waitForStdout === false) {
+      await new Promise((r) => setTimeout(r, POLL_MS));
+      return;
+    }
+    await waitForStdout(options.timeoutMs);
   }
 
   describe('successful initialization', () => {
@@ -245,10 +254,7 @@ describe('session-start hook', () => {
       mockState.checkForUpdateFactory = () => new Promise(() => {});
       mockState.readStdinResult = Promise.resolve(JSON.stringify({}));
 
-      await import('../../scripts/hooks/session-start.js');
-      // Wait for the 2000ms internal Promise.race timeout to fire,
-      // plus settle time for the async pipeline to complete.
-      await new Promise((r) => setTimeout(r, 2200));
+      await importAndWait({ timeoutMs: 2600 });
 
       expect(mockState.writeStdoutCalls.length).toBeGreaterThan(0);
     }, 5000);

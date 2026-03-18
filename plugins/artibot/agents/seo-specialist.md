@@ -15,6 +15,7 @@ description: |
   Do NOT use for: code implementation, email campaigns, social media content,
   paid advertising, CRM workflows, presentation design
 model: sonnet
+modelTier: standard
 tools:
   - Read
   - Write

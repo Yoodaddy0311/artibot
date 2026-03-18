@@ -1,6 +1,6 @@
 {
   "name": "artibot",
-  "version": "1.11.0",
+  "version": "1.12.0",
   "description": "Artibot - Claude Code orchestration plugin runtime",
   "private": true,
   "type": "module",
@@ -11,12 +11,15 @@
     "validate": "node scripts/validate.js",
     "lint": "eslint lib/ scripts/ tests/",
     "lint:fix": "eslint --fix lib/ scripts/ tests/",
-    "ci": "node scripts/validate.js && npm run lint && npm test",
+    "ci": "node scripts/validate.js && npm run lint && npm test && npm run eval:runtime:check",
     "ci:coverage": "node scripts/validate.js && npm run lint && node scripts/ci/validate-coverage.js",
     "test": "vitest run",
+    "test:evals": "vitest run tests/evals",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "test:coverage:check": "node scripts/ci/validate-coverage.js --check"
+    "test:coverage:check": "node scripts/ci/validate-coverage.js --check",
+    "eval:runtime": "node scripts/evals/run-runtime-task-suite.js",
+    "eval:runtime:check": "node scripts/ci/validate-runtime-evals.js"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

@@ -1,12 +1,12 @@
 # Artibot
 
 [![Coverage](https://img.shields.io/badge/coverage-97.5%25-brightgreen)](plugins/artibot/tests/)
-[![Tests](https://img.shields.io/badge/tests-3603%20passed-brightgreen)](plugins/artibot/tests/)
+[![Tests](https://img.shields.io/badge/tests-3587%20passed-brightgreen)](plugins/artibot/tests/)
 [![License](https://img.shields.io/badge/license-BSL--1.1-blue)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D18-green)](package.json)
 
 ![Claude Code Plugin](https://img.shields.io/badge/Claude_Code-Plugin-7C3AED?style=flat-square)
-![Version](https://img.shields.io/badge/version-1.11.0-blue?style=flat-square)
+![Version](https://img.shields.io/badge/version-1.12.0-blue?style=flat-square)
 ![License](https://img.shields.io/badge/license-BSL--1.1-green?style=flat-square)
 ![Node.js](https://img.shields.io/badge/Node.js-18%2B-brightgreen?style=flat-square)
 ![Agent Teams](https://img.shields.io/badge/Agent_Teams-Native-orange?style=flat-square)
@@ -814,7 +814,7 @@ node scripts/ci/validate-hooks.js     # Hook validation
 
 ## Version
 
-1.11.0 -- Self-diagnosis driven optimization: circular buffer router (O(1)), single-pass stats, Promise.all parallelization, shared blocked-patterns module, event bus infrastructure, knowledge-transfer/demotion split, dynamic import elimination, SKILL.md trigger dedup, config alias cleanup (3,603 tests)
+1.12.0 -- Runtime middleware pipeline, eval quality gate CI integration, full Codex CLI platform export, statusline.sh 2-line status bar, InstructionsLoaded hook event support (3,587 tests)
 
 ## License
 

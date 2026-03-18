@@ -1,6 +1,6 @@
 # Artibot
 
-![Tests](https://img.shields.io/badge/tests-3603%20passed-brightgreen) ![Coverage](https://img.shields.io/badge/coverage-97.5%25-brightgreen) ![License](https://img.shields.io/badge/license-MIT-blue) ![Version](https://img.shields.io/badge/version-1.11.0-blue) ![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen)
+![Tests](https://img.shields.io/badge/tests-3587%20passed-brightgreen) ![Coverage](https://img.shields.io/badge/coverage-97.5%25-brightgreen) ![License](https://img.shields.io/badge/license-MIT-blue) ![Version](https://img.shields.io/badge/version-1.12.0-blue) ![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen)
 
 Claude Code를 위한 **Agent Teams 기반** 지능형 오케스트레이션 플러그인. Claude의 네이티브 Agent Teams API를 핵심 엔진으로 사용하여 전문 에이전트 팀 구성, P2P 통신, 공유 태스크 관리를 통해 개발 생산성을 극대화합니다.
 
@@ -1103,6 +1103,34 @@ node scripts/ci/validate-skills.js    # 스킬 검증
 node scripts/ci/validate-commands.js  # 커맨드 검증
 node scripts/ci/validate-hooks.js     # 훅 검증
 ```
+
+---
+
+## v1.12.0 주요 변경사항
+
+### Runtime Middleware Pipeline
+- `runtime-prompt.js` — UserPromptSubmit 훅으로 매 프롬프트마다 런타임 컨텍스트(eval 점수, 인지 모드, 세션 상태)를 주입하는 미들웨어
+- `lib/runtime/` — 런타임 데이터 수집 및 집계 모듈
+
+### Eval Quality Gate
+- `scripts/evals/run-runtime-task-suite.js` — 런타임 태스크 스위트 평가 실행기
+- `scripts/ci/validate-runtime-evals.js` — CI eval 품질 검증 (임계값 미달 시 실패)
+- `scripts/ci/publish-runtime-eval-summary.js` — GitHub Actions에 eval 결과 요약 게시
+- CI 파이프라인에 `eval:runtime:check` 자동 적용
+
+### Full Platform Export (Codex CLI 개선)
+- `.agents/` 디렉토리: `exportForCodex()` 호출 시 생성되는 Codex 전용 에이전트 내보내기
+- `AGENTS.md`: Codex CLI용 에이전트 컨텍스트 파일
+- `install-artibot-codex-global.ps1`: Windows PowerShell용 전역 Codex 설치 스크립트
+
+### Statusline 스크립트
+- `scripts/hooks/statusline.sh` — Claude Code 세션에서 Artibot 상태를 2줄로 표시하는 bash 스크립트
+  - Line 1: `[model] 📁 dir  🌿 branch  ✎dirty  | 🤖 agent`
+  - Line 2: `ctx_bar %  | 💰 cost ⏱ elapsed  | artibot vX.Y.Z ✓eval  | ⚡ cog_mode`
+  - ANSI 색상 (green/yellow/red 컨텍스트 임계값), jq/Node.js 이중 파싱, Git 5초 캐시
+
+### `InstructionsLoaded` 이벤트 지원
+- `scripts/ci/validate-hooks.js` 및 `scripts/validate.js`에 신규 Claude Code 훅 이벤트 `InstructionsLoaded` 화이트리스트 추가
 
 ---
 

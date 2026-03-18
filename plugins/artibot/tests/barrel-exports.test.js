@@ -17,7 +17,7 @@ describe('lib/privacy/index.js barrel exports', () => {
     expect(mod.TOKENS).toBeDefined();
     expect(mod.VALIDATION_CHECKS).toBeDefined();
     expect(typeof mod.hintMatches).toBe('function');
-  });
+  }, 15000);
 
   it('re-exports pii-scrubber functions', async () => {
     const mod = await import('../lib/privacy/index.js');

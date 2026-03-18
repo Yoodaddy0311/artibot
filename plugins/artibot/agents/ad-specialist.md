@@ -15,6 +15,7 @@ description: |
   Do NOT use for: code implementation, organic content, SEO, infrastructure,
   CRM workflows, data analysis
 model: sonnet
+modelTier: standard
 tools:
   - Read
   - Write

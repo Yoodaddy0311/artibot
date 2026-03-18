@@ -182,12 +182,18 @@ describe('E2E: Plugin Initialization Flow', () => {
       expect(hooksConfig.hooks.SessionStart.length).toBeGreaterThan(0);
     });
 
-    it('registers UserPromptSubmit hooks including cognitive router', () => {
+    it('registers UserPromptSubmit hooks including runtime prompt after user-prompt-handler', () => {
       expect(hooksConfig.hooks.UserPromptSubmit).toBeDefined();
       const commands = hooksConfig.hooks.UserPromptSubmit.flatMap(
         (entry) => entry.hooks.map((h) => h.command),
       );
-      expect(commands.some((cmd) => cmd.includes('cognitive-router'))).toBe(true);
+      expect(commands.some((cmd) => cmd.includes('user-prompt-handler'))).toBe(true);
+      expect(commands.some((cmd) => cmd.includes('runtime-prompt'))).toBe(true);
+
+      const userPromptIndex = commands.findIndex((cmd) => cmd.includes('user-prompt-handler'));
+      const runtimePromptIndex = commands.findIndex((cmd) => cmd.includes('runtime-prompt'));
+      expect(userPromptIndex).toBeGreaterThanOrEqual(0);
+      expect(runtimePromptIndex).toBeGreaterThan(userPromptIndex);
     });
 
     it('registers PreToolUse hooks for Write and Bash', () => {

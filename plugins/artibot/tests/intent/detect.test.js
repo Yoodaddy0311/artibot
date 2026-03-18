@@ -25,19 +25,19 @@ describe('detectIntent() - integration', () => {
   });
 
   it('handles Korean input', () => {
-    const result = detectIntent('버그 수정해줘');
+    const result = detectIntent('\uBC84\uADF8 \uC218\uC815\uD574\uC918');
     expect(result.intents).toContain('action:fix');
     expect(result.best).not.toBeNull();
   });
 
   it('handles Japanese input', () => {
-    const result = detectIntent('テストを実行');
+    const result = detectIntent('\u30C6\u30B9\u30C8\u3092\u5B9F\u884C');
     expect(result.intents).toContain('action:test');
   });
 
   it('accepts custom languages option', () => {
     const result = detectIntent('build', { languages: ['en'] });
-    expect(result.matches.every(m => m.lang === 'en')).toBe(true);
+    expect(result.matches.every((m) => m.lang === 'en')).toBe(true);
   });
 
   it('accepts custom ambiguityThreshold', () => {
