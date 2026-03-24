@@ -293,7 +293,7 @@
 
   "skills": {
     "lazyLoading": {
-      "enabled": false,
+      "enabled": true,
       "maxConcurrent": 5
     }
   },
