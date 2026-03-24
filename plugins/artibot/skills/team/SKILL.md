@@ -45,6 +45,30 @@ Progress:
 - [ ] 최종 통합 보고
 ```
 
+## Worktree 격리 모드 (선택)
+
+병렬 작업 시 파일 충돌을 원천 방지하려면 `--worktree` 플래그를 사용합니다.
+각 팀원이 독립된 Git worktree에서 작업하므로 동일 파일 동시 수정이 안전합니다.
+
+**사용법**:
+```
+/team --worktree "이 기능 구현해줘"
+```
+
+**TEAM SETUP 시 적용**:
+팀 생성 단계에서 `isolation: "worktree"` 옵션을 지정하면 모든 팀원이 격리된 worktree에서 생성됩니다.
+
+```
+Task(subagent_type, team_name, name, { isolation: "worktree" })
+```
+
+**설정**: `artibot.config.json`의 `team.worktreeIsolation.enabled`를 `true`로 설정하면 기본 동작이 됩니다.
+
+**주의사항**:
+- 기본값은 `enabled: false` (opt-in)
+- worktree 작업 완료 후 자동으로 결과가 메인 worktree에 병합됩니다
+- `mergeStrategy: "auto"` — 충돌 시 git-autopilot-merge 전략 적용
+
 ## Guardrails
 
 - 리더는 직접 구현보다 분해와 조정에 집중합니다.

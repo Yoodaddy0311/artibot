@@ -1,6 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-hooks.json",
-  "description": "Artibot v1.9.2 - Claude Code Plugin Hooks",
+  "description": "Artibot v1.12.0 - Claude Code Plugin Hooks",
   "hooks": {
     "SessionStart": [
       {
@@ -29,6 +29,24 @@
           "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/swarm-download.js",
           "timeout": 15000
         }]
+      },
+      {
+        "matcher": "*",
+        "once": true,
+        "hooks": [{
+          "type": "command",
+          "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/git-autopilot-setup.js",
+          "timeout": 5000
+        }]
+      },
+      {
+        "matcher": "*",
+        "once": true,
+        "hooks": [{
+          "type": "command",
+          "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/git-autopilot-session.js",
+          "timeout": 10000
+        }]
       }
     ],
     "PreToolUse": [
@@ -45,6 +63,14 @@
         "hooks": [{
           "type": "command",
           "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-bash.js",
+          "timeout": 5000
+        }]
+      },
+      {
+        "matcher": "tool == \"Write\" || tool == \"Edit\"",
+        "hooks": [{
+          "type": "command",
+          "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/git-autopilot-guard.js",
           "timeout": 5000
         }]
       }
@@ -101,6 +127,14 @@
           "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/check-console-log.js",
           "timeout": 10000
         }]
+      },
+      {
+        "matcher": "*",
+        "hooks": [{
+          "type": "command",
+          "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/git-autopilot-close.js",
+          "timeout": 15000
+        }]
       }
     ],
     "UserPromptSubmit": [
@@ -118,6 +152,14 @@
           "type": "command",
           "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/runtime-prompt.js",
           "timeout": 3000
+        }]
+      },
+      {
+        "matcher": "*",
+        "hooks": [{
+          "type": "command",
+          "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/git-autopilot-save.js",
+          "timeout": 5000
         }]
       }
     ],

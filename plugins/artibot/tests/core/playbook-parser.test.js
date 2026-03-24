@@ -3,8 +3,14 @@ import {
   KNOWN_ACTIONS,
   KNOWN_PATTERNS,
   parsePlaybook,
+  parseDagPlaybook,
   serializePlaybook,
   validatePlaybook,
+  validateDagPlaybook,
+  detectCycle,
+  topologicalSort,
+  getExecutionOrder,
+  getParallelGroups,
 } from '../../lib/core/playbook-parser.js';
 
 // ---------------------------------------------------------------------------
@@ -366,5 +372,307 @@ describe('serializePlaybook()', () => {
 
   it('returns empty string for number input', () => {
     expect(serializePlaybook(42)).toBe('');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// parseDagPlaybook()
+// ---------------------------------------------------------------------------
+
+describe('parseDagPlaybook()', () => {
+  it('parses a simple DAG with 2 nodes', () => {
+    const result = parseDagPlaybook({
+      name: 'simple',
+      nodes: [
+        { id: 'plan', action: 'plan', pattern: 'leader' },
+        { id: 'impl', action: 'implement', pattern: 'swarm', dependsOn: ['plan'] },
+      ],
+    });
+    expect(result.isDag).toBe(true);
+    expect(result.nodes).toHaveLength(2);
+    expect(result.phases).toHaveLength(2);
+    expect(result.phases[0].action).toBe('plan');
+    expect(result.phases[1].action).toBe('implement');
+  });
+
+  it('returns empty for null input', () => {
+    const result = parseDagPlaybook(null);
+    expect(result.isDag).toBe(true);
+    expect(result.nodes).toHaveLength(0);
+    expect(result.phases).toHaveLength(0);
+  });
+
+  it('returns empty for input without nodes', () => {
+    const result = parseDagPlaybook({ name: 'bad' });
+    expect(result.nodes).toHaveLength(0);
+  });
+
+  it('normalizes action and pattern to lowercase', () => {
+    const result = parseDagPlaybook({
+      nodes: [{ id: 'a', action: 'PLAN', pattern: 'LEADER' }],
+    });
+    expect(result.nodes[0].action).toBe('plan');
+    expect(result.nodes[0].pattern).toBe('leader');
+  });
+
+  it('preserves parallel flag', () => {
+    const result = parseDagPlaybook({
+      nodes: [
+        { id: 'a', action: 'plan', parallel: true },
+        { id: 'b', action: 'impl', parallel: false },
+      ],
+    });
+    expect(result.nodes[0].parallel).toBe(true);
+    expect(result.nodes[1].parallel).toBe(false);
+  });
+
+  it('preserves condition field', () => {
+    const result = parseDagPlaybook({
+      nodes: [{ id: 'a', action: 'plan', condition: 'hasTests === true' }],
+    });
+    expect(result.nodes[0].condition).toBe('hasTests === true');
+  });
+
+  it('preserves agent field', () => {
+    const result = parseDagPlaybook({
+      nodes: [{ id: 'a', action: 'plan', agent: 'planner' }],
+    });
+    expect(result.nodes[0].agent).toBe('planner');
+  });
+
+  it('parsePlaybook dispatches to parseDagPlaybook for DAG input', () => {
+    const dagInput = {
+      nodes: [
+        { id: 'plan', action: 'plan', pattern: 'leader' },
+        { id: 'impl', action: 'implement', pattern: 'swarm', dependsOn: ['plan'] },
+      ],
+    };
+    const result = parsePlaybook(dagInput);
+    expect(result.isDag).toBe(true);
+    expect(result.nodes).toHaveLength(2);
+    expect(result.phases).toHaveLength(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// validateDagPlaybook()
+// ---------------------------------------------------------------------------
+
+describe('validateDagPlaybook()', () => {
+  it('validates a correct DAG', () => {
+    const dag = parseDagPlaybook({
+      nodes: [
+        { id: 'a', action: 'plan', pattern: 'leader' },
+        { id: 'b', action: 'implement', pattern: 'swarm', dependsOn: ['a'] },
+      ],
+    });
+    const { valid, errors } = validateDagPlaybook(dag);
+    expect(valid).toBe(true);
+    expect(errors).toHaveLength(0);
+  });
+
+  it('rejects null input', () => {
+    const { valid } = validateDagPlaybook(null);
+    expect(valid).toBe(false);
+  });
+
+  it('rejects missing nodes array', () => {
+    const { valid, errors } = validateDagPlaybook({ name: 'bad' });
+    expect(valid).toBe(false);
+    expect(errors[0]).toContain('nodes array');
+  });
+
+  it('rejects empty nodes array', () => {
+    const { valid } = validateDagPlaybook({ nodes: [] });
+    expect(valid).toBe(false);
+  });
+
+  it('rejects node without id', () => {
+    const dag = { nodes: [{ action: 'plan' }] };
+    const { valid, errors } = validateDagPlaybook(dag);
+    expect(valid).toBe(false);
+    expect(errors.some((e) => e.includes('non-empty string id'))).toBe(true);
+  });
+
+  it('rejects duplicate node ids', () => {
+    const dag = {
+      nodes: [
+        { id: 'a', action: 'plan' },
+        { id: 'a', action: 'implement' },
+      ],
+    };
+    const { valid, errors } = validateDagPlaybook(dag);
+    expect(valid).toBe(false);
+    expect(errors.some((e) => e.includes("Duplicate node id: 'a'"))).toBe(true);
+  });
+
+  it('rejects node without action', () => {
+    const dag = { nodes: [{ id: 'a' }] };
+    const { valid, errors } = validateDagPlaybook(dag);
+    expect(valid).toBe(false);
+    expect(errors.some((e) => e.includes('action is required'))).toBe(true);
+  });
+
+  it('rejects dependsOn referencing unknown node', () => {
+    const dag = {
+      nodes: [{ id: 'a', action: 'plan', dependsOn: ['nonexistent'] }],
+    };
+    const { valid, errors } = validateDagPlaybook(dag);
+    expect(valid).toBe(false);
+    expect(errors.some((e) => e.includes("unknown node 'nonexistent'"))).toBe(true);
+  });
+
+  it('detects cycles', () => {
+    const dag = {
+      nodes: [
+        { id: 'a', action: 'plan', dependsOn: ['b'] },
+        { id: 'b', action: 'implement', dependsOn: ['a'] },
+      ],
+    };
+    const { valid, errors } = validateDagPlaybook(dag);
+    expect(valid).toBe(false);
+    expect(errors.some((e) => e.includes('Cycle detected'))).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// detectCycle()
+// ---------------------------------------------------------------------------
+
+describe('detectCycle()', () => {
+  it('returns null for acyclic graph', () => {
+    const nodes = [
+      { id: 'a', action: 'plan', dependsOn: [] },
+      { id: 'b', action: 'impl', dependsOn: ['a'] },
+      { id: 'c', action: 'review', dependsOn: ['b'] },
+    ];
+    expect(detectCycle(nodes)).toBeNull();
+  });
+
+  it('detects a simple 2-node cycle', () => {
+    const nodes = [
+      { id: 'a', action: 'plan', dependsOn: ['b'] },
+      { id: 'b', action: 'impl', dependsOn: ['a'] },
+    ];
+    const cycle = detectCycle(nodes);
+    expect(cycle).toBeTruthy();
+    expect(cycle.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('detects a 3-node cycle', () => {
+    const nodes = [
+      { id: 'a', action: 'plan', dependsOn: ['c'] },
+      { id: 'b', action: 'impl', dependsOn: ['a'] },
+      { id: 'c', action: 'review', dependsOn: ['b'] },
+    ];
+    const cycle = detectCycle(nodes);
+    expect(cycle).toBeTruthy();
+  });
+
+  it('returns null for single node without deps', () => {
+    expect(detectCycle([{ id: 'a', action: 'plan', dependsOn: [] }])).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// topologicalSort()
+// ---------------------------------------------------------------------------
+
+describe('topologicalSort()', () => {
+  it('sorts a linear chain', () => {
+    const nodes = [
+      { id: 'c', action: 'review', dependsOn: ['b'] },
+      { id: 'a', action: 'plan', dependsOn: [] },
+      { id: 'b', action: 'impl', dependsOn: ['a'] },
+    ];
+    const sorted = topologicalSort(nodes);
+    const ids = sorted.map((n) => n.id);
+    expect(ids.indexOf('a')).toBeLessThan(ids.indexOf('b'));
+    expect(ids.indexOf('b')).toBeLessThan(ids.indexOf('c'));
+  });
+
+  it('handles parallel nodes at same level', () => {
+    const nodes = [
+      { id: 'root', action: 'plan', dependsOn: [] },
+      { id: 'b', action: 'impl-be', dependsOn: ['root'] },
+      { id: 'a', action: 'impl-fe', dependsOn: ['root'] },
+    ];
+    const sorted = topologicalSort(nodes);
+    expect(sorted[0].id).toBe('root');
+    // a and b should both come after root (order between them is deterministic: alphabetical)
+    expect(sorted.map((n) => n.id)).toEqual(['root', 'a', 'b']);
+  });
+
+  it('returns empty for empty input', () => {
+    expect(topologicalSort([])).toEqual([]);
+    expect(topologicalSort(null)).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getExecutionOrder()
+// ---------------------------------------------------------------------------
+
+describe('getExecutionOrder()', () => {
+  it('returns node IDs in dependency order', () => {
+    const nodes = [
+      { id: 'plan', action: 'plan', dependsOn: [] },
+      { id: 'impl', action: 'implement', dependsOn: ['plan'] },
+      { id: 'review', action: 'review', dependsOn: ['impl'] },
+    ];
+    const order = getExecutionOrder(nodes);
+    expect(order).toEqual(['plan', 'impl', 'review']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getParallelGroups()
+// ---------------------------------------------------------------------------
+
+describe('getParallelGroups()', () => {
+  it('groups parallel-eligible nodes at the same level', () => {
+    const nodes = [
+      { id: 'plan', action: 'plan', dependsOn: [] },
+      { id: 'impl-fe', action: 'implement', parallel: true, dependsOn: ['plan'] },
+      { id: 'impl-be', action: 'implement', parallel: true, dependsOn: ['plan'] },
+      { id: 'review', action: 'review', dependsOn: ['impl-fe', 'impl-be'] },
+    ];
+    const groups = getParallelGroups(nodes);
+    expect(groups).toHaveLength(3);
+    expect(groups[0]).toEqual(['plan']);
+    expect(groups[1]).toEqual(['impl-be', 'impl-fe']);
+    expect(groups[2]).toEqual(['review']);
+  });
+
+  it('returns single groups for linear chain', () => {
+    const nodes = [
+      { id: 'a', action: 'plan', dependsOn: [] },
+      { id: 'b', action: 'impl', dependsOn: ['a'] },
+      { id: 'c', action: 'review', dependsOn: ['b'] },
+    ];
+    const groups = getParallelGroups(nodes);
+    expect(groups).toHaveLength(3);
+    expect(groups[0]).toEqual(['a']);
+    expect(groups[1]).toEqual(['b']);
+    expect(groups[2]).toEqual(['c']);
+  });
+
+  it('returns empty for empty input', () => {
+    expect(getParallelGroups([])).toEqual([]);
+    expect(getParallelGroups(null)).toEqual([]);
+  });
+
+  it('handles diamond dependency pattern', () => {
+    const nodes = [
+      { id: 'start', action: 'plan', dependsOn: [] },
+      { id: 'left', action: 'impl', dependsOn: ['start'] },
+      { id: 'right', action: 'impl', dependsOn: ['start'] },
+      { id: 'end', action: 'merge', dependsOn: ['left', 'right'] },
+    ];
+    const groups = getParallelGroups(nodes);
+    expect(groups).toHaveLength(3);
+    expect(groups[0]).toEqual(['start']);
+    expect(groups[1]).toEqual(['left', 'right']);
+    expect(groups[2]).toEqual(['end']);
   });
 });

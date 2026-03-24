@@ -5,14 +5,24 @@
  * System playbooks: loaded from artibot.config.json playbooks section.
  * User playbooks: stored in ~/.claude/artibot/playbooks/ directory.
  *
+ * Supports both legacy string format and DAG-based playbooks.
+ *
  * Zero runtime dependencies. ESM only.
  * @module lib/core/playbook-registry
  */
 
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { ensureDir, listFiles, readJsonFile, writeJsonFile } from './file.js';
 import { getHomeDir } from './platform.js';
-import { KNOWN_PATTERNS, parsePlaybook, validatePlaybook } from './playbook-parser.js';
+import {
+  KNOWN_PATTERNS,
+  parsePlaybook,
+  parseDagPlaybook,
+  validatePlaybook,
+  validateDagPlaybook,
+  detectCycle,
+} from './playbook-parser.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -43,6 +53,8 @@ const DOMAIN_KEYWORDS = {
  * @property {number} phaseCount - Number of phases
  * @property {string[]} patterns - Unique patterns used in phases
  * @property {string[]} tags - Inferred tags for the playbook
+ * @property {boolean} [isDag] - True if this playbook uses DAG format
+ * @property {import('./playbook-parser.js').DagNode[]} [nodes] - DAG nodes (only for DAG playbooks)
  */
 
 /**
@@ -94,6 +106,16 @@ function buildTags(name, phases) {
 }
 
 /**
+ * Check whether an input is a DAG-format playbook.
+ *
+ * @param {*} raw - Raw playbook data
+ * @returns {boolean}
+ */
+function isDagFormat(raw) {
+  return raw && typeof raw === 'object' && Array.isArray(raw.nodes);
+}
+
+/**
  * Build a PlaybookInfo object from raw data.
  *
  * @param {string} name - Playbook name
@@ -103,11 +125,14 @@ function buildTags(name, phases) {
  * @returns {PlaybookInfo}
  */
 function buildPlaybookInfo(name, raw, source, meta = {}) {
-  const parsed = parsePlaybook(raw);
+  const isDag = isDagFormat(raw);
+  const parsed = isDag
+    ? parseDagPlaybook({ ...raw, name })
+    : parsePlaybook(raw);
   const phases = parsed.phases;
   const uniquePatterns = [...new Set(phases.map((p) => p.pattern).filter(Boolean))];
 
-  return {
+  const info = {
     name,
     description: meta.description || '',
     source,
@@ -117,6 +142,13 @@ function buildPlaybookInfo(name, raw, source, meta = {}) {
     patterns: uniquePatterns,
     tags: meta.tags || buildTags(name, phases),
   };
+
+  if (isDag) {
+    info.isDag = true;
+    info.nodes = parsed.nodes;
+  }
+
+  return info;
 }
 
 // ---------------------------------------------------------------------------
@@ -186,7 +218,7 @@ export async function loadUserPlaybooks(userDir = USER_PLAYBOOKS_DIR) {
  * Save a user-defined playbook to disk.
  *
  * @param {string} name - Playbook name (used as filename)
- * @param {import('./playbook-parser.js').Playbook|string} playbook - Playbook object or string
+ * @param {import('./playbook-parser.js').Playbook|string|object} playbook - Playbook object, string, or DAG
  * @param {string} [userDir] - Directory to save to (defaults to ~/.claude/artibot/playbooks/)
  * @returns {Promise<{ saved: boolean, error?: string }>}
  * @example
@@ -196,6 +228,21 @@ export async function loadUserPlaybooks(userDir = USER_PLAYBOOKS_DIR) {
 export async function saveUserPlaybook(name, playbook, userDir = USER_PLAYBOOKS_DIR) {
   if (!name || typeof name !== 'string') {
     return { saved: false, error: 'Name must be a non-empty string' };
+  }
+
+  // Handle DAG format
+  if (isDagFormat(playbook)) {
+    const dagParsed = parseDagPlaybook({ ...playbook, name });
+    const dagValidation = validateDagPlaybook(dagParsed);
+    if (!dagValidation.valid) {
+      return { saved: false, error: dagValidation.errors.join('; ') };
+    }
+
+    await ensureDir(userDir);
+    const safeName = name.replace(/[^a-zA-Z0-9-_]/g, '-');
+    const filePath = path.join(userDir, `${safeName}.json`);
+    await writeJsonFile(filePath, { name, nodes: dagParsed.nodes });
+    return { saved: true };
   }
 
   const parsed = typeof playbook === 'string' ? parsePlaybook(playbook) : playbook;
@@ -238,7 +285,7 @@ export async function listPlaybooks(options = {}) {
 
   if (!source || source === 'system') {
     const systemPath = configPath ?? path.join(
-      new URL('..', new URL('..', import.meta.url)).pathname.replace(/^\/([A-Z]:)/i, '$1'),
+      fileURLToPath(new URL('../..', import.meta.url)),
       'artibot.config.json',
     );
     const systemMap = await loadSystemPlaybooks(systemPath);

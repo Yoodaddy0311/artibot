@@ -66,13 +66,18 @@ jobs:
       - name: Coverage
         run: npm run test:coverage
 
-      - name: Upload coverage to Codecov
+      - name: Validate coverage thresholds
+        run: node scripts/ci/validate-coverage.js --check
+
+      - name: Upload coverage report
         if: matrix.os == 'ubuntu-latest' && matrix.node-version == 20
-        uses: codecov/codecov-action@v4
+        uses: actions/upload-artifact@v4
         with:
-          file: plugins/artibot/coverage/lcov.info
-          flags: unittests
-          fail_ci_if_error: false
+          name: coverage-report-${{ matrix.os }}-node-${{ matrix.node-version }}
+          path: |
+            plugins/artibot/coverage/coverage-summary.json
+            plugins/artibot/coverage/lcov.info
+          if-no-files-found: warn
 
       - name: Security audit
         run: npm audit --audit-level=high

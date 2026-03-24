@@ -40,9 +40,9 @@ describe('swarm-config', () => {
       expect(SWARM_DEFAULTS.differentialPrivacy.delta).toBe(1e-5);
     });
 
-    it('should have a valid server URL', () => {
-      expect(SWARM_DEFAULTS.serverUrl).toContain('artibot-swarm');
-      expect(SWARM_DEFAULTS.serverUrl).toMatch(/^https:\/\//);
+    it('should have a valid localhost server URL', () => {
+      expect(SWARM_DEFAULTS.serverUrl).toContain('localhost');
+      expect(SWARM_DEFAULTS.serverUrl).toMatch(/^http:\/\/localhost/);
     });
   });
 

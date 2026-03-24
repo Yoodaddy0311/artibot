@@ -7,7 +7,8 @@
 
 import os from 'node:os';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFile as execFileCb } from 'node:child_process';
+import { promisify } from 'node:util';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createArtibotAgent } from './create-artibot-agent.js';
 import { createRouterMiddleware } from './middleware/router.js';
@@ -20,6 +21,8 @@ import { createCheckpointMiddleware } from './middleware/checkpoint.js';
 import { ensureDir, readJsonFile, writeJsonFile } from '../core/file.js';
 import { ARTIBOT_DIR } from '../core/config.js';
 import { getPluginRoot } from '../core/platform.js';
+
+const execFile = promisify(execFileCb);
 
 const TEST_CONFIG = Object.freeze({
   automation: {
@@ -115,10 +118,11 @@ async function runRuntimePrompt(prompt, options = {}) {
   });
 }
 
-function runHook(scriptName, payload, options = {}) {
+async function runHook(scriptName, payload, options = {}) {
   const pluginRoot = options.pluginRoot || getPluginRoot();
   const scriptPath = path.join(pluginRoot, 'scripts', 'hooks', scriptName);
-  const stdout = execFileSync(process.execPath, [scriptPath], {
+  const timeout = options.timeout ?? 30_000;
+  const { stdout } = await execFile(process.execPath, [scriptPath], {
     cwd: pluginRoot,
     env: {
       ...process.env,
@@ -128,19 +132,21 @@ function runHook(scriptName, payload, options = {}) {
     },
     input: JSON.stringify(payload),
     encoding: 'utf-8',
-  }).trim();
+    timeout,
+  });
 
-  return stdout ? JSON.parse(stdout) : null;
+  const trimmed = stdout.trim();
+  return trimmed ? JSON.parse(trimmed) : null;
 }
 
 async function runHookChain(prompt, options = {}) {
   const basePayload = { user_prompt: prompt, event: 'UserPromptSubmit' };
-  const firstOutput = runHook('user-prompt-handler.js', basePayload, options);
+  const firstOutput = await runHook('user-prompt-handler.js', basePayload, options);
   const runtimePayload = {
     ...basePayload,
     user_prompt: firstOutput?.user_prompt || prompt,
   };
-  const runtimeOutput = runHook('runtime-prompt.js', runtimePayload, options);
+  const runtimeOutput = await runHook('runtime-prompt.js', runtimePayload, options);
   return { firstOutput, runtimeOutput };
 }
 
@@ -163,6 +169,47 @@ async function runCheckpointScenario() {
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+}
+
+async function runMiddlewarePipelineScenario() {
+  const results = await Promise.all([
+    runRuntimePrompt('fix typo in readme'),
+    runRuntimePrompt('analyze security vulnerabilities, then refactor auth flow, then deploy to production'),
+    runRuntimePrompt('implement a new REST API endpoint for user authentication'),
+  ]);
+  return results;
+}
+
+async function runErrorRecoveryScenario() {
+  const failingMiddleware = async (state) => {
+    throw new Error('simulated middleware failure');
+  };
+  Object.defineProperty(failingMiddleware, 'name', { value: 'failingMiddleware' });
+
+  const runtime = createArtibotAgent({
+    config: TEST_CONFIG,
+    now: Date.now,
+    checkpointStore: new Map(),
+    middleware: [
+      createRouterMiddleware(),
+      failingMiddleware,
+      createSkillsMiddleware(),
+      createTasksMiddleware({ now: Date.now }),
+      createSubagentsMiddleware(),
+      createSummarizationMiddleware(),
+      createCheckpointMiddleware({ store: new Map(), now: Date.now, persistToDisk: false }),
+    ],
+  });
+
+  return runtime.preparePrompt({
+    prompt: 'build a dashboard with charts and authentication',
+    hookData: { event: 'UserPromptSubmit' },
+  });
+}
+
+async function runSchedulingConfigScenario() {
+  const result = await runRuntimePrompt('schedule nightly learning at 2 AM');
+  return result;
 }
 
 export const DEFAULT_RUNTIME_EVAL_SCENARIOS = [
@@ -222,11 +269,54 @@ export const DEFAULT_RUNTIME_EVAL_SCENARIOS = [
       makeAssertion('delegation-tools', Array.isArray(result.context.subagents.contract.tools) && result.context.subagents.contract.tools.length > 0, JSON.stringify(result.context.subagents.contract.tools)),
     ],
   },
+  {
+    id: 'middleware-pipeline-parallel',
+    name: 'Middleware pipeline processes multiple prompts in parallel correctly',
+    run: () => runMiddlewarePipelineScenario(),
+    evaluate: (results) => [
+      makeAssertion('parallel-count', results.length === 3, String(results.length)),
+      makeAssertion('system1-route', results[0].context.routing.system === 'system1', results[0].context.routing.system),
+      makeAssertion('system2-route', results[1].context.routing.system === 'system2', results[1].context.routing.system),
+      makeAssertion('intent-detected', results[2].context.intent.best === 'action:implement', results[2].context.intent.best),
+      makeAssertion('all-have-runtime', results.every((r) => r.context.runtime.name === 'artibot-runtime-phase1'), 'all runtime contexts present'),
+    ],
+  },
+  {
+    id: 'error-recovery',
+    name: 'Middleware failure triggers graceful degradation without crashing',
+    run: () => runErrorRecoveryScenario(),
+    evaluate: (result) => [
+      makeAssertion('did-not-crash', Boolean(result), 'pipeline completed'),
+      makeAssertion('has-routing', Boolean(result.context.routing), String(Boolean(result.context.routing))),
+      makeAssertion('error-in-message', result.message.includes('error'), result.message),
+      makeAssertion('prompt-preserved', result.userPrompt.length > 0, result.userPrompt.slice(0, 80)),
+      makeAssertion('skills-still-ran', Boolean(result.context.skills), String(Boolean(result.context.skills))),
+    ],
+  },
+  {
+    id: 'scheduling-config',
+    name: 'Scheduling-related prompt routes and produces valid runtime context',
+    run: () => runSchedulingConfigScenario(),
+    evaluate: (result) => [
+      makeAssertion('has-routing', Boolean(result.context.routing), String(Boolean(result.context.routing))),
+      makeAssertion('has-intent', Boolean(result.context.intent), String(Boolean(result.context.intent))),
+      makeAssertion('prompt-processed', result.userPrompt.length > 0, result.userPrompt.slice(0, 80)),
+      makeAssertion('runtime-name', result.context.runtime.name === 'artibot-runtime-phase1', result.context.runtime.name),
+    ],
+  },
 ];
 
 export async function evaluateRuntimeScenario(scenario) {
   const startedAt = new Date().toISOString();
+  const memBefore = process.memoryUsage().heapUsed;
+  const t0 = performance.now();
+
   const output = await scenario.run();
+
+  const durationMs = Math.round((performance.now() - t0) * 100) / 100;
+  const memAfter = process.memoryUsage().heapUsed;
+  const memDeltaBytes = memAfter - memBefore;
+
   const assertions = scenario.evaluate(output);
   const score = scoreAssertions(assertions);
   const criticalFailures = assertions.filter((item) => item.critical && !item.passed).length;
@@ -235,24 +325,46 @@ export async function evaluateRuntimeScenario(scenario) {
     id: scenario.id,
     name: scenario.name,
     startedAt,
+    durationMs,
+    memDeltaBytes,
     score,
     passed: criticalFailures === 0 && score >= 0.75,
     assertions,
   };
 }
 
-export async function evaluateRuntimeSuite(scenarios = DEFAULT_RUNTIME_EVAL_SCENARIOS) {
-  const results = [];
-  for (const scenario of scenarios) {
-    results.push(await evaluateRuntimeScenario(scenario));
+const SUITE_TIMEOUT_MS = 120_000;
+
+export async function evaluateRuntimeSuite(scenarios = DEFAULT_RUNTIME_EVAL_SCENARIOS, options = {}) {
+  const parallel = options.parallel ?? true;
+  const suiteTimeout = options.timeout ?? SUITE_TIMEOUT_MS;
+  const suiteT0 = performance.now();
+
+  let results;
+  if (parallel) {
+    const tasks = scenarios.map((scenario) => evaluateRuntimeScenario(scenario));
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error(`Suite timeout after ${suiteTimeout}ms`)), suiteTimeout),
+    );
+    results = await Promise.race([Promise.all(tasks), timeoutPromise]);
+  } else {
+    results = [];
+    for (const scenario of scenarios) {
+      if (performance.now() - suiteT0 > suiteTimeout) {
+        break;
+      }
+      results.push(await evaluateRuntimeScenario(scenario));
+    }
   }
 
+  const suiteDurationMs = Math.round((performance.now() - suiteT0) * 100) / 100;
   const averageScore = results.length > 0
     ? Math.round((results.reduce((sum, item) => sum + item.score, 0) / results.length) * 100) / 100
     : 0;
 
   return {
     generatedAt: new Date().toISOString(),
+    suiteDurationMs,
     total: results.length,
     passed: results.filter((item) => item.passed).length,
     failed: results.filter((item) => !item.passed).length,
@@ -270,11 +382,17 @@ export function formatRuntimeSuiteReport(report) {
     `Passed:    ${report.passed}`,
     `Failed:    ${report.failed}`,
     `Avg Score: ${report.averageScore}`,
-    '',
   ];
 
+  if (report.suiteDurationMs != null) {
+    lines.push(`Duration:  ${report.suiteDurationMs}ms`);
+  }
+  lines.push('');
+
   for (const result of report.results) {
-    lines.push(`${result.passed ? 'PASS' : 'FAIL'} ${result.id} (${result.score})`);
+    const timing = result.durationMs != null ? ` ${result.durationMs}ms` : '';
+    const mem = result.memDeltaBytes != null ? ` mem=${Math.round(result.memDeltaBytes / 1024)}KB` : '';
+    lines.push(`${result.passed ? 'PASS' : 'FAIL'} ${result.id} (${result.score}${timing}${mem})`);
     for (const assertion of result.assertions) {
       lines.push(`  - ${assertion.passed ? 'ok' : 'xx'} ${assertion.name}: ${assertion.detail}`);
     }

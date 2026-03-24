@@ -43,24 +43,14 @@ const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 
 /**
  * Set of hosts allowed for outbound HTTP requests.
- * Only these hosts can be contacted by the swarm client.
- * Additional hosts can be added via ARTIBOT_SWARM_ALLOWED_HOSTS env var.
+ * Only localhost is permitted — DATA POLICY forbids external server access.
  */
 const ALLOWED_HOSTS = new Set([
   'localhost',
   '127.0.0.1',
   '::1',
   '[::1]', // URL-parsed form of IPv6 localhost
-  'artibot-swarm-249539591811.asia-northeast3.run.app',
 ]);
-
-// Allow extending the allowlist via environment variable (comma-separated)
-if (process.env.ARTIBOT_SWARM_ALLOWED_HOSTS) {
-  for (const host of process.env.ARTIBOT_SWARM_ALLOWED_HOSTS.split(',')) {
-    const trimmed = host.trim();
-    if (trimmed) ALLOWED_HOSTS.add(trimmed);
-  }
-}
 
 /** RFC 1918 / RFC 6598 private IPv4 ranges (excluding explicit localhost) */
 const PRIVATE_IP_PATTERNS = [
@@ -135,11 +125,13 @@ function validateUrl(urlString) {
  * @returns {string}
  */
 function resolveServerUrl(config) {
-  return (
-    process.env.ARTIBOT_SWARM_SERVER ||
-    config?.serverUrl ||
-    'https://artibot-swarm-249539591811.asia-northeast3.run.app'
-  );
+  const raw = process.env.ARTIBOT_SWARM_SERVER || config?.serverUrl || 'http://localhost:3000';
+  try {
+    validateUrl(raw);
+  } catch {
+    return 'http://localhost:3000';
+  }
+  return raw;
 }
 
 /**

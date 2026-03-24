@@ -7,6 +7,7 @@ import { arch, homedir, platform } from 'node:os';
 import { versions } from 'node:process';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 /**
  * Detect the current OS platform and architecture.
@@ -88,7 +89,7 @@ export function getPluginRoot() {
     return resolved;
   }
   // Fallback: this file lives in <root>/lib/core/platform.js
-  return path.resolve(new URL('..', new URL('..', import.meta.url)).pathname.replace(/^\/([A-Z]:)/i, '$1'));
+  return fileURLToPath(new URL('../..', import.meta.url));
 }
 
 /**

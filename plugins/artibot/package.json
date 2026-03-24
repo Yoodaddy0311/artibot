@@ -4,13 +4,17 @@
   "description": "Artibot - Claude Code orchestration plugin runtime",
   "private": true,
   "type": "module",
+  "main": "./lib/core/index.js",
+  "bin": {
+    "artibot": "./bin/artibot.js"
+  },
   "engines": {
     "node": ">=18.0.0"
   },
   "scripts": {
     "validate": "node scripts/validate.js",
-    "lint": "eslint lib/ scripts/ tests/",
-    "lint:fix": "eslint --fix lib/ scripts/ tests/",
+    "lint": "eslint bin/ lib/ scripts/ tests/",
+    "lint:fix": "eslint --fix bin/ lib/ scripts/ tests/",
     "ci": "node scripts/validate.js && npm run lint && npm test && npm run eval:runtime:check",
     "ci:coverage": "node scripts/validate.js && npm run lint && node scripts/ci/validate-coverage.js",
     "test": "vitest run",

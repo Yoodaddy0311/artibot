@@ -35,6 +35,12 @@ describe('detectIntent() - integration', () => {
     expect(result.intents).toContain('action:test');
   });
 
+  it('handles Chinese input', () => {
+    const result = detectIntent('\u4FEE\u590D\u8FD9\u4E2A\u9519\u8BEF');
+    expect(result.intents).toContain('action:fix');
+    expect(result.best).not.toBeNull();
+  });
+
   it('accepts custom languages option', () => {
     const result = detectIntent('build', { languages: ['en'] });
     expect(result.matches.every((m) => m.lang === 'en')).toBe(true);

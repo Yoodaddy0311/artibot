@@ -119,13 +119,13 @@ export function configure(config = {}) {
  * Maps domain names to arrays of lowercase keyword triggers.
  */
 const DOMAIN_KEYWORDS = Object.freeze({
-  frontend:       ['component', 'ui', 'css', 'react', 'vue', 'responsive', 'accessibility', '컴포넌트', '프론트'],
-  backend:        ['api', 'database', 'server', 'endpoint', 'service', 'auth', 'db', '서버', '백엔드', 'データベース'],
-  security:       ['security', 'vulnerability', 'threat', 'compliance', 'encrypt', 'xss', 'injection', 'audit', '보안', '취약', '감사', 'セキュリティ', '監査'],
-  infrastructure: ['deploy', 'docker', 'ci/cd', 'monitoring', 'k8s', 'terraform', '배포', 'インフラ'],
-  testing:        ['test', 'e2e', 'coverage', 'spec', 'jest', 'playwright', '테스트', 'テスト'],
-  documentation:  ['document', 'readme', 'docs', 'guide', 'wiki', '문서', 'ドキュメント'],
-  design:         ['architecture', 'design', 'pattern', 'scalability', '설계', '아키텍처', 'アーキテクチャ'],
+  frontend:       ['component', 'ui', 'css', 'react', 'vue', 'responsive', 'accessibility', '컴포넌트', '프론트', 'コンポーネント', 'フロントエンド', '组件', '前端', '界面'],
+  backend:        ['api', 'database', 'server', 'endpoint', 'service', 'auth', 'db', '서버', '백엔드', 'データベース', 'サーバー', 'バックエンド', '服务器', '后端', '数据库', '接口'],
+  security:       ['security', 'vulnerability', 'threat', 'compliance', 'encrypt', 'xss', 'injection', 'audit', '보안', '취약', '감사', 'セキュリティ', '監査', '脆弱性', '安全', '漏洞', '审计', '加密'],
+  infrastructure: ['deploy', 'docker', 'ci/cd', 'monitoring', 'k8s', 'terraform', '배포', 'インフラ', 'デプロイ', '部署', '监控', '容器'],
+  testing:        ['test', 'e2e', 'coverage', 'spec', 'jest', 'playwright', '테스트', 'テスト', '単体テスト', '测试', '单元测试', '覆盖率'],
+  documentation:  ['document', 'readme', 'docs', 'guide', 'wiki', '문서', 'ドキュメント', '文書', '文档', '说明', '指南'],
+  design:         ['architecture', 'design', 'pattern', 'scalability', '설계', '아키텍처', 'アーキテクチャ', '設計', '设计', '架构', '模块'],
 });
 
 /**

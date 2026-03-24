@@ -166,10 +166,17 @@ Settings in `artibot.config.json` under `learning.lifelong` and `learning.knowle
 {
   "learning": {
     "lifelong": { "batchSize": 50, "grpoGroupSize": 5 },
-    "knowledgeTransfer": { "promotionThreshold": 3, "demotionThreshold": 2 }
+    "knowledgeTransfer": { "promotionThreshold": 3, "demotionThreshold": 2 },
+    "schedule": { "enabled": false, "nightlyLearner": "3 2 * * *", "driftCheck": "7 6 * * 1" }
   }
 }
 ```
+
+### Automatic Scheduling (CronCreate)
+
+When `learning.schedule.enabled` is `true`, the learning pipeline can be automatically scheduled
+within the current Claude Code session via the `CronCreate` tool. Jobs are session-only (in-memory)
+and auto-expire after 7 days. See the **scheduled-learning** skill for full setup details.
 
 ## Workflow Checklist
 

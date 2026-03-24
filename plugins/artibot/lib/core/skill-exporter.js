@@ -43,12 +43,29 @@ export function parseFrontmatter(content) {
  */
 function parseSimpleYaml(yaml) {
   const result = {};
-  const lines = yaml.split('\n');
+  const lines = yaml.split('\n').map((l) => l.replace(/\r$/, ''));
   let currentKey = null;
   let currentValue = '';
   let isMultiLine = false;
+  let isList = false;
+  let listItems = [];
 
   for (const line of lines) {
+    // Check if current line is a dash-list item (e.g., "  - value")
+    const dashMatch = isList && line.match(/^\s+-\s+(.*)$/);
+
+    if (isList) {
+      if (dashMatch) {
+        listItems.push(dashMatch[1].trim().replace(/^["']|["']$/g, ''));
+        continue;
+      } else {
+        result[currentKey] = listItems;
+        isList = false;
+        listItems = [];
+        currentKey = null;
+      }
+    }
+
     if (isMultiLine) {
       if (line.startsWith('  ') || line.startsWith('\t')) {
         currentValue += (currentValue ? '\n' : '') + line.replace(/^ {2}|\t/, '');
@@ -74,6 +91,10 @@ function parseSimpleYaml(yaml) {
           .slice(1, -1)
           .split(',')
           .map((s) => s.trim().replace(/^["']|["']$/g, ''));
+      } else if (rawValue === '') {
+        // Empty value — next lines may be dash-list items or multi-line
+        isList = true;
+        listItems = [];
       } else {
         result[currentKey] = rawValue.replace(/^["']|["']$/g, '');
       }
@@ -82,6 +103,9 @@ function parseSimpleYaml(yaml) {
 
   if (isMultiLine && currentKey) {
     result[currentKey] = currentValue;
+  }
+  if (isList && currentKey) {
+    result[currentKey] = listItems;
   }
 
   return result;
@@ -116,6 +140,90 @@ export async function loadSkills(pluginRoot) {
       platforms: frontmatter.platforms ?? [],
       content: body,
       dirName,
+      references: refFiles,
+    });
+  }
+
+  return skills;
+}
+
+// ---------------------------------------------------------------------------
+// Lazy Loading API
+// ---------------------------------------------------------------------------
+
+/**
+ * @typedef {object} SkillIndexEntry
+ * @property {string} name - Skill name
+ * @property {string} dirName - Directory name
+ * @property {string} description - Short description
+ * @property {string[]} triggers - Trigger keywords for matching
+ * @property {string[]} platforms - Supported platforms
+ */
+
+/**
+ * Load a lightweight skill index (frontmatter only, no body content).
+ * Used for lazy loading: match triggers first, then load full skill on demand.
+ *
+ * @param {string} [pluginRoot] - Override plugin root path
+ * @returns {Promise<SkillIndexEntry[]>}
+ */
+export async function loadSkillIndex(pluginRoot) {
+  const root = pluginRoot ?? getPluginRoot();
+  const skillsRoot = path.join(root, 'skills');
+  const skillDirs = await listDirs(skillsRoot);
+
+  const index = [];
+
+  for (const dir of skillDirs) {
+    const skillMdPath = path.join(dir, 'SKILL.md');
+    const content = await readTextFile(skillMdPath);
+    if (!content) continue;
+
+    const { frontmatter } = parseFrontmatter(content);
+    const dirName = path.basename(dir);
+    const triggers = Array.isArray(frontmatter.triggers) ? frontmatter.triggers : [];
+
+    index.push({
+      name: frontmatter.name ?? dirName,
+      dirName,
+      description: frontmatter.description ?? '',
+      triggers: triggers.map((t) => t.toLowerCase()),
+      platforms: frontmatter.platforms ?? [],
+    });
+  }
+
+  return index;
+}
+
+/**
+ * Load specific skills by name from the skills/ directory.
+ *
+ * @param {string[]} names - Skill names (or dirNames) to load
+ * @param {string} [pluginRoot] - Override plugin root path
+ * @returns {Promise<import('../adapters/base-adapter.js').SkillDefinition[]>}
+ */
+export async function loadSkillsByNames(names, pluginRoot) {
+  const root = pluginRoot ?? getPluginRoot();
+  const skillsRoot = path.join(root, 'skills');
+  const nameSet = new Set(names);
+  const skills = [];
+
+  for (const name of nameSet) {
+    const dir = path.join(skillsRoot, name);
+    const skillMdPath = path.join(dir, 'SKILL.md');
+    const content = await readTextFile(skillMdPath);
+    if (!content) continue;
+
+    const { frontmatter, body } = parseFrontmatter(content);
+    const refsDir = path.join(dir, 'references');
+    const refFiles = await listFiles(refsDir, '.md');
+
+    skills.push({
+      name: frontmatter.name ?? name,
+      description: frontmatter.description ?? '',
+      platforms: frontmatter.platforms ?? [],
+      content: body,
+      dirName: name,
       references: refFiles,
     });
   }

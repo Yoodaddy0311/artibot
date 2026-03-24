@@ -22,7 +22,7 @@ const DEFAULTS = {
   swarm: {
     enabled: false,
     optIn: false,
-    serverUrl: 'https://artibot-swarm-249539591811.asia-northeast3.run.app',
+    serverUrl: 'http://localhost:3000',
     syncInterval: 'session',
     localGlobalRatio: [0.3, 0.7],
     differentialPrivacy: { enabled: true, epsilon: 1.0, delta: 1e-5 },

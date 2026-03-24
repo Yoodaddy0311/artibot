@@ -37,6 +37,64 @@ function normalizePrompt(prompt, hookData) {
 }
 
 /**
+ * Run a single middleware with error boundary.
+ * On failure, logs to stderr and returns state unchanged (graceful degradation).
+ *
+ * @param {string} name - Middleware name for error reporting
+ * @param {Function} fn - Middleware function
+ * @param {object} state - Pipeline state
+ * @returns {Promise<object>} state (possibly unchanged on error)
+ */
+async function runMiddleware(name, fn, state) {
+  try {
+    await fn(state);
+  } catch (err) {
+    process.stderr.write(`[artibot:middleware:${name}] ${err?.message || err}\n`);
+    state.messageParts.push(`${name}=error`);
+  }
+  return state;
+}
+
+/**
+ * Run multiple independent middlewares in parallel on a shared state.
+ * Each middleware writes to distinct context keys, so parallel execution is safe.
+ * userPrompt appends and messageParts pushes are collected per-middleware
+ * and merged sequentially afterward to preserve deterministic ordering.
+ *
+ * @param {Array<[string, Function]>} entries - [name, fn] pairs
+ * @param {object} state - Pipeline state
+ * @returns {Promise<void>}
+ */
+async function runParallel(entries, state) {
+  const basePrompt = state.userPrompt;
+
+  const results = await Promise.all(entries.map(async ([name, fn]) => {
+    const localState = {
+      ...state,
+      userPrompt: basePrompt,
+      messageParts: [],
+      context: { ...state.context },
+      config: state.config,
+      input: state.input,
+    };
+    await runMiddleware(name, fn, localState);
+    return {
+      promptSuffix: localState.userPrompt.slice(basePrompt.length),
+      messageParts: localState.messageParts,
+      context: localState.context,
+    };
+  }));
+
+  let prompt = basePrompt;
+  for (const r of results) {
+    prompt += r.promptSuffix;
+    state.messageParts.push(...r.messageParts);
+    Object.assign(state.context, r.context);
+  }
+  state.userPrompt = prompt;
+}
+
+/**
  * Create an Artibot runtime agent instance for hook integration.
  *
  * @param {object} [options]
@@ -59,19 +117,24 @@ export function createArtibotAgent(options = {}) {
   const middlewareOptions = options.middlewareOptions || {};
 
   const backend = options.backend || createCompositeBackend(options.backendOptions);
-  const middleware = options.middleware || [
-    createRouterMiddleware(middlewareOptions.router),
-    createMemoryMiddleware(middlewareOptions.memory),
-    createSkillsMiddleware(middlewareOptions.skills),
-    createTasksMiddleware({ now, ...(middlewareOptions.tasks || {}) }),
-    createSubagentsMiddleware(middlewareOptions.subagents),
-    createSummarizationMiddleware(middlewareOptions.summarization),
-    createCheckpointMiddleware({
-      store: checkpointStore,
-      now,
-      ...(middlewareOptions.checkpoint || {}),
-      ...(options.checkpointOptions || {}),
-    }),
+  const customMiddleware = options.middleware || null;
+
+  const mwRouter = createRouterMiddleware(middlewareOptions.router);
+  const mwMemory = createMemoryMiddleware(middlewareOptions.memory);
+  const mwSkills = createSkillsMiddleware(middlewareOptions.skills);
+  const mwTasks = createTasksMiddleware({ now, ...(middlewareOptions.tasks || {}) });
+  const mwSubagents = createSubagentsMiddleware(middlewareOptions.subagents);
+  const mwSummarization = createSummarizationMiddleware(middlewareOptions.summarization);
+  const mwCheckpoint = createCheckpointMiddleware({
+    store: checkpointStore,
+    now,
+    ...(middlewareOptions.checkpoint || {}),
+    ...(options.checkpointOptions || {}),
+  });
+
+  const allMiddleware = customMiddleware || [
+    mwRouter, mwMemory, mwSkills, mwTasks,
+    mwSubagents, mwSummarization, mwCheckpoint,
   ];
 
   const configPromise = options.config
@@ -95,7 +158,7 @@ export function createArtibotAgent(options = {}) {
           runtime: {
             name: 'artibot-runtime-phase1',
             preparedAt: new Date(now()).toISOString(),
-            middleware: middleware.map((fn) => fn.name || 'anonymous'),
+            middleware: allMiddleware.map((fn) => fn.name || 'anonymous'),
           },
           hook: {
             event: hookData?.event || 'UserPromptSubmit',
@@ -116,8 +179,25 @@ export function createArtibotAgent(options = {}) {
         };
       }
 
-      for (const apply of middleware) {
-        await apply(state);
+      if (customMiddleware) {
+        for (const apply of customMiddleware) {
+          await runMiddleware(apply.name || 'anonymous', apply, state);
+        }
+      } else {
+        // Phase 1: router (all others depend on routing/intent)
+        await runMiddleware('router', mwRouter, state);
+        // Phase 2: memory, skills, tasks (independent, only read router output)
+        await runParallel([
+          ['memory', mwMemory],
+          ['skills', mwSkills],
+          ['tasks', mwTasks],
+        ], state);
+        // Phase 3: subagents (depends on tasks)
+        await runMiddleware('subagents', mwSubagents, state);
+        // Phase 4: summarization (reads final userPrompt)
+        await runMiddleware('summarization', mwSummarization, state);
+        // Phase 5: checkpoint (reads all context)
+        await runMiddleware('checkpoint', mwCheckpoint, state);
       }
 
       const selectedBackend = backend.selectBackend(state.context);

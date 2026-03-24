@@ -18,7 +18,7 @@ const CONSENT_PATH = path.join(ARTIBOT_DIR, 'swarm-consent.json');
 export const SWARM_DEFAULTS = {
   enabled: false,
   optIn: false,
-  serverUrl: 'https://artibot-swarm-249539591811.asia-northeast3.run.app',
+  serverUrl: 'http://localhost:3000',
   syncInterval: 'session',
   localGlobalRatio: [0.3, 0.7],
   differentialPrivacy: {

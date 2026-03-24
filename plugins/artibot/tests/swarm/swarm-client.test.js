@@ -145,11 +145,21 @@ describe('uploadWeights()', () => {
   });
 
   it('uses ARTIBOT_SWARM_SERVER env var when set', async () => {
-    // Use the default allowed host to test env var override
-    process.env.ARTIBOT_SWARM_SERVER = 'https://artibot-swarm-249539591811.asia-northeast3.run.app';
+    // Use localhost to test env var override (DATA POLICY: no external hosts)
+    process.env.ARTIBOT_SWARM_SERVER = 'http://localhost:4000';
     await uploadWeights({ tools: {} }, {});
     expect(mockFetch).toHaveBeenCalledWith(
-      expect.stringContaining('artibot-swarm-249539591811.asia-northeast3.run.app'),
+      expect.stringContaining('localhost:4000'),
+      expect.anything(),
+    );
+    delete process.env.ARTIBOT_SWARM_SERVER;
+  });
+
+  it('falls back to localhost when ARTIBOT_SWARM_SERVER points to external host', async () => {
+    process.env.ARTIBOT_SWARM_SERVER = 'https://evil.example.com';
+    await uploadWeights({ tools: {} }, {});
+    expect(mockFetch).toHaveBeenCalledWith(
+      expect.stringContaining('localhost:3000'),
       expect.anything(),
     );
     delete process.env.ARTIBOT_SWARM_SERVER;
@@ -165,12 +175,13 @@ describe('uploadWeights()', () => {
     );
   });
 
-  it('rejects config.serverUrl pointing to non-allowed host', async () => {
+  it('falls back to localhost when config.serverUrl points to non-allowed host', async () => {
     delete process.env.ARTIBOT_SWARM_SERVER;
-    const result = await uploadWeights({ tools: {} }, {}, { config: { serverUrl: 'https://evil.example.com' } });
-    expect(result.success).toBe(false);
-    expect(result.error).toMatch(/SSRF blocked/);
-    expect(mockFetch).not.toHaveBeenCalled();
+    await uploadWeights({ tools: {} }, {}, { config: { serverUrl: 'https://evil.example.com' } });
+    expect(mockFetch).toHaveBeenCalledWith(
+      expect.stringContaining('localhost:3000'),
+      expect.anything(),
+    );
   });
 });
 
@@ -378,9 +389,9 @@ describe('SSRF Protection - validateUrl()', () => {
     expect(url.hostname).toBe('[::1]');
   });
 
-  it('allows the default swarm server host', () => {
-    const url = validateUrl('https://artibot-swarm-249539591811.asia-northeast3.run.app/api/v1/weights');
-    expect(url.hostname).toBe('artibot-swarm-249539591811.asia-northeast3.run.app');
+  it('allows localhost as the default swarm server host', () => {
+    const url = validateUrl('http://localhost:3000/api/v1/weights');
+    expect(url.hostname).toBe('localhost');
   });
 
   it('blocks hosts not in the allowlist', () => {
@@ -405,11 +416,11 @@ describe('SSRF Protection - validateUrl()', () => {
     expect(() => validateUrl('')).toThrow('Invalid URL');
   });
 
-  it('ALLOWED_HOSTS contains expected entries', () => {
+  it('ALLOWED_HOSTS contains only localhost entries', () => {
     expect(ALLOWED_HOSTS.has('localhost')).toBe(true);
     expect(ALLOWED_HOSTS.has('127.0.0.1')).toBe(true);
     expect(ALLOWED_HOSTS.has('::1')).toBe(true);
-    expect(ALLOWED_HOSTS.has('artibot-swarm-249539591811.asia-northeast3.run.app')).toBe(true);
+    expect(ALLOWED_HOSTS.size).toBe(4); // localhost, 127.0.0.1, ::1, [::1]
   });
 });
 
@@ -419,41 +430,46 @@ describe('SSRF Protection - integration with API functions', () => {
     mockFetch.mockResolvedValue(makeOkResponse({ version: 'v1' }));
   });
 
-  it('uploadWeights rejects SSRF attempts via config.serverUrl', async () => {
-    const result = await uploadWeights(
+  it('uploadWeights falls back to localhost on SSRF config.serverUrl', async () => {
+    await uploadWeights(
       { tools: {} },
       {},
       { config: { serverUrl: 'https://evil.example.com' } },
     );
-    expect(result.success).toBe(false);
-    expect(result.error).toMatch(/SSRF blocked/);
-    expect(mockFetch).not.toHaveBeenCalled();
+    expect(mockFetch).toHaveBeenCalledWith(
+      expect.stringContaining('localhost:3000'),
+      expect.anything(),
+    );
   });
 
-  it('downloadLatestWeights rejects SSRF attempts via config.serverUrl', async () => {
-    const result = await downloadLatestWeights(null, {
+  it('downloadLatestWeights falls back to localhost on SSRF config.serverUrl', async () => {
+    await downloadLatestWeights(null, {
       config: { serverUrl: 'https://internal.corp.net' },
     });
-    expect(result.success).toBe(false);
-    expect(result.error).toMatch(/SSRF blocked/);
-    expect(mockFetch).not.toHaveBeenCalled();
+    expect(mockFetch).toHaveBeenCalledWith(
+      expect.stringContaining('localhost:3000'),
+      expect.anything(),
+    );
   });
 
-  it('checkHealth rejects SSRF attempts via config.serverUrl', async () => {
-    const result = await checkHealth({
+  it('checkHealth falls back to localhost on SSRF config.serverUrl', async () => {
+    await checkHealth({
       config: { serverUrl: 'file:///etc/passwd' },
     });
-    expect(result.status).toBe('unreachable');
-    expect(mockFetch).not.toHaveBeenCalled();
+    expect(mockFetch).toHaveBeenCalledWith(
+      expect.stringContaining('localhost:3000'),
+      expect.anything(),
+    );
   });
 
-  it('getContributionStats rejects SSRF attempts via config.serverUrl', async () => {
-    const result = await getContributionStats('client-1', {
+  it('getContributionStats falls back to localhost on SSRF config.serverUrl', async () => {
+    await getContributionStats('client-1', {
       config: { serverUrl: 'https://malicious.attacker.io' },
     });
-    expect(result.success).toBe(false);
-    expect(result.error).toMatch(/SSRF blocked/);
-    expect(mockFetch).not.toHaveBeenCalled();
+    expect(mockFetch).toHaveBeenCalledWith(
+      expect.stringContaining('localhost:3000'),
+      expect.anything(),
+    );
   });
 });
 
@@ -499,18 +515,18 @@ describe('withRetry() - SSRF/URL error propagation', () => {
     vi.clearAllMocks();
   });
 
-  it('does not retry when SSRF error is thrown inside requestFn', async () => {
-    // The SSRF check happens in fetchWithTimeout -> validateUrl, which throws before fetch
-    // If SSRF error occurs, withRetry should NOT retry (rethrows immediately)
-    const result = await uploadWeights(
+  it('falls back to localhost when config.serverUrl is blocked (no SSRF retry needed)', async () => {
+    // resolveServerUrl validates early — blocked hosts fall back to localhost
+    // so the request goes to localhost instead of being blocked at fetch time
+    await uploadWeights(
       { tools: {} },
       {},
       { config: { serverUrl: 'https://blocked-host.example.com' } },
     );
-    expect(result.success).toBe(false);
-    expect(result.error).toMatch(/SSRF blocked/);
-    // mockFetch should not be called
-    expect(mockFetch).not.toHaveBeenCalled();
+    expect(mockFetch).toHaveBeenCalledWith(
+      expect.stringContaining('localhost:3000'),
+      expect.anything(),
+    );
   });
 
   it('does not retry on 4xx errors (non-429)', async () => {

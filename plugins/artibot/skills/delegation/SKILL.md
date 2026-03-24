@@ -97,6 +97,17 @@ Use the `Task` tool to spawn focused sub-agents for bounded work.
 - Parallel for independent ops, sequential only for dependencies
 - Max concurrent: 7 (configurable)
 
+**Worktree Isolation** (optional):
+병렬 Sub-Agent가 동일 파일을 수정할 가능성이 있을 때, `isolation: "worktree"` 옵션으로 각 에이전트를 독립 Git worktree에서 실행할 수 있습니다.
+
+```
+Task(subagent_type, { isolation: "worktree" })
+```
+
+- `artibot.config.json`의 `team.worktreeIsolation.enabled: true`로 기본 활성화 가능
+- 기본값: `false` (opt-in)
+- 완료 후 결과가 메인 worktree로 자동 병합 (`mergeStrategy: "auto"`)
+
 **Result Aggregation**: Collect -> Deduplicate -> Cross-reference -> Prioritize -> Synthesize
 
 ---

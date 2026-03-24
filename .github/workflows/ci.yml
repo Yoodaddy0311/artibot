@@ -50,13 +50,16 @@ jobs:
       - name: Validate hooks
         run: node scripts/ci/validate-hooks.js
 
-      - name: Run tests
+      - name: Run tests with coverage
         run: |
           if [ -d "tests" ] || [ -d "__tests__" ] || [ -d "test" ]; then
-            npx vitest run --reporter=verbose
+            npx vitest run --reporter=verbose --coverage
           else
             echo "No test directory found. Skipping tests."
           fi
+
+      - name: Validate coverage thresholds
+        run: node scripts/ci/validate-coverage.js --check
 
       - name: Run runtime eval gate
         run: npm run eval:runtime:check
@@ -74,6 +77,16 @@ jobs:
             plugins/artibot/_reports/runtime-task-suite.json
             plugins/artibot/_reports/runtime-eval-comparison.json
             _benchmarks/runtime-eval-comparison.md
+          if-no-files-found: warn
+
+      - name: Upload coverage report
+        if: always() && matrix.node-version == 20
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report-node-${{ matrix.node-version }}
+          path: |
+            plugins/artibot/coverage/coverage-summary.json
+            plugins/artibot/coverage/lcov.info
           if-no-files-found: warn
 
       - name: Run ESLint

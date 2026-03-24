@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import os from 'node:os';
+import { fileURLToPath } from 'node:url';
 import {
   getPlaybook,
   listPlaybooks,
@@ -15,9 +16,7 @@ import {
 // ---------------------------------------------------------------------------
 
 /** Path to the real plugin config */
-const REAL_CONFIG = path.resolve(
-  new URL('../../artibot.config.json', import.meta.url).pathname.replace(/^\/([A-Z]:)/i, '$1'),
-);
+const REAL_CONFIG = fileURLToPath(new URL('../../artibot.config.json', import.meta.url));
 
 /** Write a temporary config and return its path */
 async function writeTempConfig(data, dir) {
@@ -65,8 +64,8 @@ describe('loadSystemPlaybooks()', () => {
     expect(feature.name).toBe('feature');
     expect(feature.source).toBe('system');
     expect(Array.isArray(feature.phases)).toBe(true);
-    expect(feature.phases).toHaveLength(5);
-    expect(feature.phaseCount).toBe(5);
+    expect(feature.phases).toHaveLength(6);
+    expect(feature.phaseCount).toBe(6);
     expect(feature.patterns).toContain('leader');
     expect(feature.patterns).toContain('council');
     expect(feature.patterns).toContain('swarm');
@@ -325,7 +324,15 @@ describe('getPlaybook()', () => {
     const pb = await getPlaybook('feature', { configPath: REAL_CONFIG, userDir: tempDir });
     expect(pb).toBeDefined();
     expect(pb.name).toBe('feature');
-    expect(pb.phases).toHaveLength(5);
+    expect(pb.phases).toHaveLength(6);
+  });
+
+  it('returns the feature playbook as DAG with nodes', async () => {
+    const pb = await getPlaybook('feature', { configPath: REAL_CONFIG, userDir: tempDir });
+    expect(pb.isDag).toBe(true);
+    expect(pb.nodes).toBeDefined();
+    expect(pb.nodes).toHaveLength(6);
+    expect(pb.nodes[0].id).toBe('plan');
   });
 
   it('returns the security playbook', async () => {
