@@ -1,6 +1,6 @@
 # Artibot
 
-![Tests](https://img.shields.io/badge/tests-3587%20passed-brightgreen) ![Coverage](https://img.shields.io/badge/coverage-97.5%25-brightgreen) ![License](https://img.shields.io/badge/license-MIT-blue) ![Version](https://img.shields.io/badge/version-1.12.0-blue) ![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen)
+![Tests](https://img.shields.io/badge/tests-3765%20passed-brightgreen) ![Coverage](https://img.shields.io/badge/coverage-97.5%25-brightgreen) ![License](https://img.shields.io/badge/license-MIT-blue) ![Version](https://img.shields.io/badge/version-1.13.0-blue) ![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen)
 
 Claude Code를 위한 **Agent Teams 기반** 지능형 오케스트레이션 플러그인. Claude의 네이티브 Agent Teams API를 핵심 엔진으로 사용하여 전문 에이전트 팀 구성, P2P 통신, 공유 태스크 관리를 통해 개발 생산성을 극대화합니다.
 
@@ -47,7 +47,7 @@ Artibot의 핵심 엔진은 Claude Code의 **Agent Teams API**입니다. 단순�
 
 ### CTO-Led 팀 오케스트레이션
 
-- **orchestrator** 에이전트가 팀 리더(CTO)로서 25개 전문 에이전트를 팀으로 구성
+- **orchestrator** 에이전트가 팀 리더(CTO)로서 27개 전문 에이전트를 팀으로 구성
 - Delegation 모드: 리더는 조율만 담당, 직접 코드 작성 안함
 - 5가지 오케스트레이션 패턴: Leader, Council, Swarm, Pipeline, Watchdog
 - 3단계 팀 규모: Solo(0명), Squad(3명), Platoon(5명)
@@ -72,12 +72,12 @@ Artibot의 핵심 엔진은 Claude Code의 **Agent Teams API**입니다. 단순�
 | **토큰 비용** | 1x | ~5x |
 | **적합 작업** | 단일 파일 분석, 검색, 빠른 위임 | 복잡한 기능 구현, 멀티 에이전트 협업 |
 
-### 47개 슬래시 커맨드
+### 48개 슬래시 커맨드
 
 - `/sc`로 자연어 의도를 분석하여 최적 커맨드로 자동 라우팅
 - 개발, 분석, 품질, 테스트, 문서화, 배포, 마케팅 전 영역 커버
 
-### 87개 도메인 스킬
+### 96개 도메인 스킬
 
 - 11개 페르소나 스킬 (architect, frontend, backend, security 등)
 - 6개 코어 스킬 (orchestration, principles, coding/security/testing standards)
@@ -139,10 +139,10 @@ Artibot은 Claude Code 외에도 **Gemini CLI**, **OpenAI Codex CLI**, **Cursor 
 | **호환성 점수** | 10/10 | 9/10 | 8/10 | 6/10 | 8/10 |
 | Agent Teams (P2P 메시징) | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Sub-Agent (단방향 위임) | ✅ | ✅ | ✅ | ⚠️ 제한적 | ✅ |
-| 25개 전문 에이전트 | ✅ | ✅ 자동변환 | ✅ 자동변환 | ✅ 자동변환 | ✅ 자동변환 |
-| 77개 스킬 (SKILL.md) | ✅ | ✅ | ✅ | ✅ | ✅ |
-| 슬래시 커맨드 | ✅ 39개 | ✅ TOML | → Workflows | → Prompts | → Workflows |
-| Hooks 자동작동 | ✅ 14이벤트 | ✅ 동일패턴 | ⚠️ 제한적 | ❌ | ✅ Agent Manager |
+| 27개 전문 에이전트 | ✅ | ✅ 자동변환 | ✅ 자동변환 | ✅ 자동변환 | ✅ 자동변환 |
+| 96개 스킬 (SKILL.md) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| 슬래시 커맨드 | ✅ 48개 | ✅ TOML | → Workflows | → Prompts | → Workflows |
+| Hooks 자동작동 | ✅ 15이벤트 | ✅ 동일패턴 | ⚠️ 제한적 | ❌ | ✅ Agent Manager |
 | 인지 라우터 (System 1/2) | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 자가학습 (GRPO) | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 메모리 (3-scope) | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -499,7 +499,7 @@ cd artibot/plugins/artibot && bash install.sh
                             └──────────┬───────────────┘
                                        ▼
                             ┌──────────────────────────┐
-                            │   25개 전문 에이전트 (팀원)   │
+                            │   27개 전문 에이전트 (팀원)   │
                             │  TaskList → 자기할당        │
                             │  SendMessage → P2P 소통    │
                             │  TaskUpdate → 완료 보고     │
@@ -780,7 +780,7 @@ Artibot v1.5.0 initialized
 
 orchestrator는 **코드를 직접 작성하지 않습니다**. 팀을 구성하고, 태스크를 분배하고, 팀원간 조율하고, 결과를 종합하는 역할만 수행합니다.
 
-### 전문 에이전트 (25개 팀원)
+### 전문 에이전트 (27개 팀원)
 
 모든 팀원은 자신의 전문 도구 + 팀 협업 도구를 가집니다:
 - `SendMessage` - 리더/동료에게 DM, 셧다운 응답
@@ -846,7 +846,7 @@ orchestrator는 **코드를 직접 작성하지 않습니다**. 팀을 구성하
 
 ### 팀원 행동 프로토콜
 
-모든 25개 팀원은 팀으로 실행될 때 다음 프로토콜을 따릅니다:
+모든 27개 팀원은 팀으로 실행될 때 다음 프로토콜을 따릅니다:
 
 ```
 1. TaskList → 할당된 태스크 확인
@@ -1040,7 +1040,7 @@ orchestrator는 **코드를 직접 작성하지 않습니다**. 팀을 구성하
 | `team.ctoAgent` | CTO 역할 에이전트 | `orchestrator` |
 | `team.delegationModeSelection` | Sub-Agent/Team 자동 선택 | complexity 기반 |
 | `automation.intentDetection` | 의도 자동 감지 | `true` |
-| `automation.supportedLanguages` | 지원 언어 | `en, ko, ja` |
+| `automation.supportedLanguages` | 지원 언어 | `en, ko, ja, zh` |
 
 ### 팀 저장소
 
@@ -1059,13 +1059,13 @@ plugins/artibot/
 │   └── plugin.json              # 플러그인 매니페스트
 ├── agents/                      # 28개 에이전트 정의 (orchestrator 1 + 팀원 27)
 │   ├── orchestrator.md          #   CTO / 팀 리더 (Agent Teams API)
-│   └── [25개 전문 에이전트].md    #   팀원 (SendMessage + TaskUpdate)
-├── commands/                    # 47개 슬래시 커맨드
+│   └── [27개 전문 에이전트].md    #   팀원 (SendMessage + TaskUpdate)
+├── commands/                    # 48개 슬래시 커맨드
 │   ├── sc.md                    #   메인 라우터
 │   ├── orchestrate.md           #   팀 오케스트레이션 (TeamCreate)
 │   ├── spawn.md                 #   팀 스폰 (병렬 실행)
 │   └── [38개 커맨드].md
-├── skills/                      # 87개 스킬 디렉토리 (forked context 격리)
+├── skills/                      # 96개 스킬 디렉토리 (forked context 격리)
 │   ├── orchestration/           #   위임 모드 선택 + 팀 라우팅
 │   ├── delegation/              #   Sub-Agent/Team 위임 전략
 │   └── [76개 스킬]/
@@ -1103,6 +1103,35 @@ node scripts/ci/validate-skills.js    # 스킬 검증
 node scripts/ci/validate-commands.js  # 커맨드 검증
 node scripts/ci/validate-hooks.js     # 훅 검증
 ```
+
+---
+
+## v1.13.0 주요 변경사항
+
+### 다국어 Intent 확장 (중국어 추가)
+- `lib/intent/language.js` — 중국어(Simplified Chinese) 키워드 32개 추가, 일본어 키워드 18개 강화
+- `detectLanguage()` 함수 신규: 한국어 > 일본어 > 중국어 > 영어 우선순위 감지
+- `lib/cognitive/router.js` — DOMAIN_KEYWORDS 7개 도메인 모두에 중국어/일본어 키워드 동기화
+- 지원 언어: `en, ko, ja` → `en, ko, ja, zh`
+
+### Playbook DAG 시스템
+- 기존 문자열 기반 플레이북 → DAG(Directed Acyclic Graph) 구조로 전환
+- `parseDagPlaybook()`, `validateDagPlaybook()`, `detectCycle()`, `topologicalSort()`, `getExecutionOrder()`, `getParallelGroups()` 함수 추가
+- 8개 플레이북 DAG 변환: 병렬 노드(feature: FE/BE 동시구현, marketing-campaign: 콘텐츠/광고 동시제작 등)
+- 기존 문자열 형식 하위 호환 유지 (`playbooksLegacy`)
+
+### Git Autopilot 훅 시스템
+- 5개 git-autopilot 훅 등록: setup(SessionStart), session(SessionStart), guard(PreToolUse), save(UserPromptSubmit), close(Stop)
+- WIP 인터벌 자동 커밋, 원격 미병합 파일 쓰기 경고, 세션 종료 시 스쿼시+푸시
+
+### Worktree 격리 모드
+- `team.worktreeIsolation` 설정 추가 (`enabled: false` 기본, opt-in)
+- `/team --worktree` 플래그로 병렬 팀원 격리 실행 지원
+- `delegation` 스킬에 Sub-Agent worktree 옵션 안내 추가
+
+### hooks.json 동기화
+- 버전 `v1.9.2` → `v1.12.0` → `v1.13.0` 동기화
+- 35개 훅 등록, 15개 이벤트 타입
 
 ---
 

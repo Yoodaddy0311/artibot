@@ -1,12 +1,12 @@
 # Artibot
 
 [![Coverage](https://img.shields.io/badge/coverage-97.5%25-brightgreen)](plugins/artibot/tests/)
-[![Tests](https://img.shields.io/badge/tests-3587%20passed-brightgreen)](plugins/artibot/tests/)
+[![Tests](https://img.shields.io/badge/tests-3765%20passed-brightgreen)](plugins/artibot/tests/)
 [![License](https://img.shields.io/badge/license-BSL--1.1-blue)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D18-green)](package.json)
 
 ![Claude Code Plugin](https://img.shields.io/badge/Claude_Code-Plugin-7C3AED?style=flat-square)
-![Version](https://img.shields.io/badge/version-1.12.0-blue?style=flat-square)
+![Version](https://img.shields.io/badge/version-1.13.0-blue?style=flat-square)
 ![License](https://img.shields.io/badge/license-BSL--1.1-green?style=flat-square)
 ![Node.js](https://img.shields.io/badge/Node.js-18%2B-brightgreen?style=flat-square)
 ![Agent Teams](https://img.shields.io/badge/Agent_Teams-Native-orange?style=flat-square)
@@ -34,25 +34,25 @@ Most Claude Code plugins use simple sub-agent (`Task()`) delegation -- fire-and-
 
 - **Cognitive Architecture** -- Dual-process System 1/2 routing inspired by Kahneman's theory: fast intuitive responses for simple tasks, deep deliberative reasoning for complex ones
 - **Lifelong Learning** -- GRPO-based batch learning from session outcomes with automatic knowledge transfer between System 1 and System 2 caches
-- **CTO-Led Orchestration** -- `orchestrator` agent leads 25 specialist agents as a team coordinator (delegation mode: no direct coding)
+- **CTO-Led Orchestration** -- `orchestrator` agent leads 27 specialist agents as a team coordinator (delegation mode: no direct coding)
 - **Intelligent Delegation** -- Auto-selects Sub-Agent (simple) vs Agent Team (complex) based on cognitive complexity scoring
 - **5 Orchestration Patterns** -- Leader, Council, Swarm, Pipeline, Watchdog
-- **8 Playbooks** -- Feature, Bugfix, Refactor, Security + Marketing Campaign, Marketing Audit, Content Launch, Competitive Analysis (now with executable parser and registry)
-- **47 Slash Commands** -- `/sc` smart router, `/daily`, `/team`, `/orchestrate`, `/spawn`, `/implement`, `/visual-check`, `/sc playbook`, and more
+- **8 DAG Playbooks** -- Feature, Bugfix, Refactor, Security + Marketing Campaign, Marketing Audit, Content Launch, Competitive Analysis (DAG-based with parallel node execution, topological sort, and cycle detection)
+- **48 Slash Commands** -- `/sc` smart router, `/daily`, `/team`, `/orchestrate`, `/spawn`, `/implement`, `/visual-check`, `/sc playbook`, and more
 - **28 Specialized Agents** -- Architecture, security, frontend, backend, testing, DevOps, marketing, SEO, analytics, and more (opus 73%, sonnet 27%)
-- **87 Domain Skills** -- 11 persona skills, 8 core skills, 16 language skills, 8 utility skills, 35 marketing skills, visual-validation, daily, team, session-worklog, vibe-coding, repo-benchmarking (all enhanced with Anthropic best-practice descriptions, workflow checklists, HITL v2 conversational checkpoints, output templates, and freedom levels)
+- **96 Domain Skills** -- 11 persona skills, 8 core skills, 16 language skills, 8 utility skills, 35 marketing skills, visual-validation, daily, team, session-worklog, vibe-coding, repo-benchmarking (all enhanced with Anthropic best-practice descriptions, workflow checklists, HITL v2 conversational checkpoints, output templates, and freedom levels)
 - **8 Auto-Activating Rules** -- DEV protocol, quality gates, agent coordination, config safety, frontend/backend/test patterns, clean state enforcement
 - **Guard Registry** -- Centralized guard pipeline with `registerGuard()`/`executeChain()` API, 6 built-in guards extracted from hook scripts (75% code reduction)
 - **Loop Detection** -- Circular buffer-based agent loop detection with fingerprint matching, automatic warn/block on repeated tool calls
 - **Clean State Enforcement** -- TaskCompleted hook ensures lint+test verification at feature completion boundaries
-- **33 Event Hook Registrations** -- Cognitive routing, lifelong learning, session lifecycle, dangerous command blocking, auto-formatting, team tracking, loop detection, clean state checks, HTTP webhook notifications
+- **35 Event Hook Registrations** -- Cognitive routing, lifelong learning, session lifecycle, dangerous command blocking, auto-formatting, team tracking, loop detection, clean state checks, HTTP webhook notifications, git autopilot
 - **Advisory File Locking** -- Spin-lock based file locking for concurrent hook state access, fail-open pattern prevents workflow blocking
 - **DEV Protocol** -- Mandatory Decompose-Execute-Verify workflow with zero-skip policy for all code changes
 - **Vibe Coding Support** -- Natural language request handling with read-first, verify-after, evidence-based completion
 - **Visual Validation Pipeline** -- SSIM-based screenshot comparison, auto-fix suggestion, iterative correction loop via Playwright MCP
 - **Conversation-to-Memory** -- Auto-extracts rules and decisions from user messages (Korean/English), injects into skills dynamically
 - **Project CLAUDE.md Seeding** -- `install.sh` auto-generates project-level CLAUDE.md with Artibot methodology and DEV protocol
-- **Forked Context Skills** -- All 83 skills run in isolated forked context for clean execution without cross-contamination
+- **Forked Context Skills** -- All 96 skills run in isolated forked context for clean execution without cross-contamination
 - **HTTP Webhook Notifications** -- Session events sent to Slack, Discord, or custom endpoints via configurable webhooks
 - **Cross-Platform Compatible** -- Works with Gemini CLI, OpenAI Codex, and Cursor via platform adapters
 - **Zero Dependencies** -- Pure Node.js built-in modules only (`node:fs`, `node:path`, `node:os`)
@@ -237,7 +237,7 @@ Spawns 5 teammates that self-claim tasks from the shared task list and report fi
                                       |
                                       v
                           +-----------------------+
-                          |  25 Specialist Agents  |
+                          |  27 Specialist Agents  |
                           |  TaskList -> self-claim|
                           |  SendMessage -> P2P    |
                           |  TaskUpdate -> report  |
@@ -412,7 +412,7 @@ TeamCreate -> [Council] research -> [Swarm] analyze -> [Council] synthesize -> [
 
 The orchestrator **never writes code directly**. It assembles the team, distributes tasks, coordinates between teammates, and synthesizes results.
 
-### Specialist Agents (25 Teammates)
+### Specialist Agents (27 Teammates)
 
 All teammates have their specialist tools + team collaboration tools (`SendMessage`, `TaskList`, `TaskGet`, `TaskUpdate`).
 
@@ -562,7 +562,7 @@ All teammates have their specialist tools + team collaboration tools (`SendMessa
 
 ## Skills
 
-87 auto-activating domain skills organized in six categories:
+96 auto-activating domain skills organized in six categories:
 
 **Core Skills (8):** orchestration, cognitive-routing, lifelong-learning, token-efficiency, principles, coding-standards, security-standards, testing-standards
 
@@ -662,7 +662,7 @@ plugins/artibot/
 |   +-- orchestrator.md          #   CTO / Team leader (Agent Teams API)
 |   +-- [17 dev specialists].md  #   Development teammates
 |   +-- [8 marketing agents].md  #   Marketing specialists
-+-- commands/                    # 47 slash commands
++-- commands/                    # 48 slash commands
 |   +-- sc.md                    #   Smart router
 |   +-- daily.md                 #   Daily work recap and retrospective
 |   +-- team.md                  #   Parallel team orchestration
@@ -670,7 +670,7 @@ plugins/artibot/
 |   +-- spawn.md                 #   Team spawn (parallel execution)
 |   +-- [25 dev commands].md
 |   +-- [10 marketing commands].md
-+-- skills/                      # 87 skill directories
++-- skills/                      # 96 skill directories
 |   +-- orchestration/           #   Delegation mode + team routing
 |   +-- cognitive-routing/       #   System 1/2 dual-process routing
 |   +-- lifelong-learning/       #   GRPO batch learning + knowledge transfer
@@ -710,7 +710,7 @@ Key settings in `artibot.config.json`:
 
 | Setting | Description | Default |
 |---------|-------------|---------|
-| `version` | Plugin version | `1.11.0` |
+| `version` | Plugin version | `1.13.0` |
 | `cognitive.router.threshold` | System 1/2 boundary | `0.4` |
 | `cognitive.router.adaptRate` | Per-feedback adjustment step | `0.05` |
 | `cognitive.system1.maxLatency` | System 1 max response time (ms) | `100` |
@@ -728,7 +728,7 @@ Key settings in `artibot.config.json`:
 | `team.levels.squad` | Squad team size | `2-4` |
 | `team.levels.platoon` | Platoon team size | `5+` |
 | `automation.intentDetection` | Auto intent detection | `true` |
-| `automation.supportedLanguages` | Supported languages | `en, ko, ja` |
+| `automation.supportedLanguages` | Supported languages | `en, ko, ja, zh` |
 
 ## Validation
 
@@ -814,7 +814,7 @@ node scripts/ci/validate-hooks.js     # Hook validation
 
 ## Version
 
-1.12.0 -- Runtime middleware pipeline, eval quality gate CI integration, full Codex CLI platform export, statusline.sh 2-line status bar, InstructionsLoaded hook event support (3,587 tests)
+1.13.0 -- Playbook DAG system, Chinese intent support, Git Autopilot hooks, Worktree isolation mode (3,765 tests)
 
 ## License
 

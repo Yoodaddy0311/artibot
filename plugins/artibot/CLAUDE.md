@@ -5,7 +5,7 @@ This file auto-loads when Claude accesses files in `plugins/artibot/`.
 ## Architecture
 
 - **Engine**: Claude Native Agent Teams API (TeamCreate, SendMessage, TaskCreate)
-- **Agents**: 26 specialized agents in `agents/` (opus 73%, sonnet 27%)
+- **Agents**: 28 specialized agents in `agents/` (opus 73%, sonnet 27%)
 - **Cognitive Core**: Dual-process routing in `lib/cognitive/` (System 1 fast / System 2 deliberate)
 - **Learning Pipeline**: `lib/learning/` (GRPO self-eval, memory, knowledge-transfer, lifelong)
 - **Swarm**: `lib/swarm/` (federated collective learning across instances)
@@ -15,16 +15,16 @@ This file auto-loads when Claude accesses files in `plugins/artibot/`.
 | Directory | Purpose | Key Files |
 |-----------|---------|-----------|
 | `agents/` | Agent definitions (28 .md) | orchestrator.md (CTO), planner.md |
-| `commands/` | Slash commands (47 .md) | sc.md (router), implement.md, build.md, repo.md |
-| `skills/` | SKILL.md + references/ (87 dirs) | principles/, tdd-workflow/, coding-standards/, repo-benchmarking/ |
+| `commands/` | Slash commands (48 .md) | sc.md (router), implement.md, build.md, repo.md |
+| `skills/` | SKILL.md + references/ (96 dirs) | principles/, tdd-workflow/, coding-standards/, repo-benchmarking/ |
 | `lib/cognitive/` | Dual-process engine | router.js, system1.js, system2-core.js |
 | `lib/learning/` | Lifelong learning (11 modules) | grpo.js, memory.js, lifelong.js |
 | `lib/core/` | Core utilities (22 files) | plugin-loader.js, hook-utils.js |
 | `lib/visual/` | Visual validation | visual-validator.js, screenshot-differ.js |
 | `lib/privacy/` | PII protection | pii-scrubber.js, homoglyph-detector.js |
-| `hooks/` | Event hooks config | hooks.json (14 event types) |
+| `hooks/` | Event hooks config | hooks.json (15 event types, 35 registrations) |
 | `rules/` | Path-specific auto-rules | dev-protocol.md, quality-gates.md |
-| `tests/` | Vitest test suite (91 files) | 3,528 test cases |
+| `tests/` | Vitest test suite (108 files) | 3,765 test cases |
 
 ## Development Standards
 
@@ -37,7 +37,7 @@ This file auto-loads when Claude accesses files in `plugins/artibot/`.
 ## Testing
 
 ```bash
-npm test              # Run all 2,933 tests
+npm test              # Run all 3,765 tests
 npm run test:coverage # Coverage report
 npm run test:bench    # 27 benchmarks
 npm run lint          # ESLint (0 errors, 0 warnings target)
