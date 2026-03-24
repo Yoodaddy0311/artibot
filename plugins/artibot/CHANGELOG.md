@@ -9,9 +9,254 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [1.5.0] - Unreleased
+## [1.13.0] - 2026-03-24
 
-_Next planned release. No changes yet._
+### Summary / 요약
+
+**English**: Major architecture upgrade in 4 phases — stabilization (Swarm security, DATA POLICY enforcement), Claude integration (middleware parallelization, async eval), architecture (Playbook DAG, lazy skills), and ecosystem (CLI standalone, multilingual intent, Git Autopilot). 3,765 tests across 108 files.
+
+**한국어**: 4단계 아키텍처 업그레이드 — 안정화(Swarm 보안, DATA POLICY 적용), Claude 통합(미들웨어 병렬화, 비동기 eval), 아키텍처(Playbook DAG, 스킬 lazy loading), 에코시스템(CLI 독립실행, 다국어 intent, Git Autopilot). 108개 파일에서 3,765개 테스트 통과.
+
+### Added / 추가됨
+
+- **Chinese intent keywords** (32): 实现, 开发, 测试, 调试, 修复, 重构, 设计, 架构, 安全, 文档 등 전체 intent 카테고리 커버
+- **Japanese intent enhancement** (+18): 構築, 開発, 修復, バグ, 単体テスト, リファクタリング, 最適化, セキュリティ, 脆弱性 등
+- **`detectLanguage()` function**: 한국어 > 일본어 > 중국어 > 영어 우선순위 감지 (CJK 문자 범위 기반)
+- **Playbook DAG system**: `parseDagPlaybook()`, `validateDagPlaybook()`, `detectCycle()`, `topologicalSort()`, `getExecutionOrder()`, `getParallelGroups()` — Kahn 알고리즘 토폴로지컬 정렬, 순환 의존성 감지
+- **8 DAG playbooks**: feature (FE/BE 병렬), marketing-campaign (콘텐츠/광고 병렬), marketing-audit (SEO/CRO 병렬), competitive-analysis (시장/SEO 병렬) 등 병렬 노드 지원
+- **Git Autopilot hooks** (5): `git-autopilot-setup` (SessionStart), `git-autopilot-session` (SessionStart), `git-autopilot-guard` (PreToolUse), `git-autopilot-save` (UserPromptSubmit), `git-autopilot-close` (Stop)
+- **Worktree isolation mode**: `team.worktreeIsolation` config (opt-in, `enabled: false` 기본), `/team --worktree` 플래그
+- **Artibot CLI standalone** (`bin/artibot.js`): 6개 명령어, zero deps
+- **Skill lazy loading**: opt-in 세션 캐시
+- **CronCreate nightly-learner**: 스케줄링 (opt-in)
+- **Middleware unit tests** (55): 미들웨어 파이프라인 테스트
+- **Eval scenarios** (3): 신규 평가 시나리오 + 메트릭
+- **활용 가이드**: `docs/GUIDE.md`
+- **CI coverage threshold**: 커버리지 임계값 적용
+
+### Changed / 변경됨
+
+- **Middleware execution**: 순차 → 병렬 (5단계 + 에러 바운더리)
+- **Eval execution**: 동기 → 비동기 (`Promise.all` 병렬)
+- **hooks.json**: v1.9.2 → v1.13.0 동기화 (35개 훅 등록, 15개 이벤트 타입)
+- **`playbooksLegacy`**: 기존 문자열 플레이북을 `playbooksLegacy`로 보존, 신규 DAG를 `playbooks`로 전환
+- **Supported languages**: `[en, ko, ja]` → `[en, ko, ja, zh]`
+- **DOMAIN_KEYWORDS** (router.js): 7개 도메인 모두에 중국어/일본어 키워드 동기화
+- **Version**: 모든 매니페스트 1.12.0 → 1.13.0 (package.json, plugin.json, artibot.config.json, hooks.json)
+
+### Fixed / 수정됨
+
+- **playbook-registry**: Korean path 버그 (`fileURLToPath` 인코딩 문제)
+- **Swarm DATA POLICY violation**: 외부 GCP 서버 URL → localhost 전용
+- **Environment variable bypass**: `resolveServerUrl` 조기 검증으로 env var 우회 차단
+- **platform.js `getPluginRoot`**: Korean path (바탕 화면) 처리 수정
+
+### Security / 보안
+
+- **Swarm server URL**: 외부 서버 URL 완전 제거 (`https://artibot-swarm-*.run.app` → `http://localhost:3000`)
+- **SSRF prevention**: env var 기반 서버 URL 우회 차단
+- **ALLOWED_HOSTS**: localhost 전용으로 제한
+
+---
+
+## [1.12.0] - 2026-03-18
+
+### Summary / 요약
+
+**English**: Runtime middleware pipeline, eval quality gate CI integration, full Codex CLI platform export, statusline.sh 2-line status bar, InstructionsLoaded hook event support. 3,587 tests.
+
+**한국어**: 런타임 미들웨어 파이프라인, eval 품질 게이트 CI 통합, Codex CLI 플랫폼 전체 내보내기, statusline.sh 2줄 상태 표시줄, InstructionsLoaded 훅 이벤트 지원. 3,587개 테스트.
+
+### Added / 추가됨
+
+- **Runtime middleware pipeline**: `runtime-prompt.js` — UserPromptSubmit 훅으로 런타임 컨텍스트 주입
+- **Eval quality gate**: `scripts/evals/run-runtime-task-suite.js`, `scripts/ci/validate-runtime-evals.js`
+- **Full Codex CLI export**: `.agents/` 디렉토리, `AGENTS.md`, `install-artibot-codex-global.ps1`
+- **Statusline script**: `scripts/hooks/statusline.sh` — 2줄 상태 표시 (ANSI 색상, Git 캐시)
+- **InstructionsLoaded event**: `validate-hooks.js` 및 `validate.js`에 신규 이벤트 화이트리스트 추가
+
+---
+
+## [1.11.0] - 2026-03-16
+
+### Summary / 요약
+
+**English**: Self-diagnosis optimization — circular buffer for loop detection, event bus for inter-module communication, shared blocked patterns, knowledge demotion split.
+
+**한국어**: 자가 진단 최적화 — 루프 감지용 순환 버퍼, 모듈 간 통신용 이벤트 버스, 공유 차단 패턴, 지식 강등 분리.
+
+### Added / 추가됨
+
+- **Circular buffer** (`lib/cognitive/loop-detector.js`): Agent loop detection with fingerprint matching
+- **Event bus** (`lib/core/event-bus.js`): Inter-module pub/sub communication
+- **Shared blocked patterns** (`lib/core/blocked-patterns.js`): Centralized dangerous command patterns
+- **Knowledge demotion** (`lib/learning/knowledge-demotion.js`): Split from knowledge-transfer for clarity
+
+---
+
+## [1.10.0] - 2026-03-16
+
+### Summary / 요약
+
+**English**: PM-skills benchmarking — 46 commands (Next Steps), HITL v2 conversational checkpoints (25 skills), Output Templates (10 skills), /repo command for external repo analysis.
+
+**한국어**: PM 스킬 벤치마킹 — 46개 커맨드 (Next Steps), HITL v2 대화형 체크포인트 (25개 스킬), 출력 템플릿 (10개 스킬), 외부 레포 분석용 /repo 커맨드.
+
+### Added / 추가됨
+
+- **HITL v2 checkpoints**: 25개 스킬에 대화형 인간 체크포인트 추가
+- **Output templates**: 10개 스킬에 구조화된 출력 템플릿
+- **`/repo` command**: 외부 레포지토리 분석 및 비교
+- **Next Steps**: 46개 커맨드로 확장
+
+---
+
+## [1.9.3] - 2026-03-10
+
+### Summary / 요약
+
+**English**: Install/update pipeline hardening — 56 fixes, file-lock for concurrent access, cross-computer portability.
+
+**한국어**: 설치/업데이트 파이프라인 강화 — 56개 수정, 동시 접근용 파일 잠금, 크로스 컴퓨터 이식성.
+
+### Added / 추가됨
+
+- **Advisory file locking** (`lib/core/file-lock.js`): Spin-lock based concurrent state access
+- **Cross-computer portability**: Korean path 처리, 플랫폼 독립적 경로 해석
+
+### Fixed / 수정됨
+
+- 56개 설치/업데이트 관련 버그 수정
+- `install.sh` 경로 해석 안정화
+
+---
+
+## [1.9.2] - 2026-03-09
+
+### Summary / 요약
+
+**English**: Loop detection and clean state enforcement from harness engineering.
+
+**한국어**: 하네스 엔지니어링으로부터의 루프 감지 및 클린 상태 강제.
+
+### Added / 추가됨
+
+- **Loop detection**: Circular buffer 기반 에이전트 루프 감지, fingerprint matching
+- **Clean state enforcement**: TaskCompleted 훅에서 lint+test 검증
+
+---
+
+## [1.9.1] - 2026-03-09
+
+### Summary / 요약
+
+**English**: Guard pipeline centralization with registry pattern.
+
+**한국어**: 레지스트리 패턴으로 가드 파이프라인 중앙화.
+
+### Changed / 변경됨
+
+- **Guard registry** (`lib/core/guard-registry.js`): `registerGuard()`/`executeChain()` API
+- 6개 내장 가드를 훅 스크립트에서 추출 (75% 코드 감소)
+
+---
+
+## [1.9.0] - 2026-03-06
+
+### Summary / 요약
+
+**English**: Claude Code v2.1.69 compatibility, quality gate innovation, cognitive/learning expansion. 2,933 tests.
+
+**한국어**: Claude Code v2.1.69 호환성, 품질 게이트 혁신, 인지/학습 확장. 2,933개 테스트.
+
+### Added / 추가됨
+
+- **Quality gate hook** (`quality-gate.js`): PostToolUse Write/Edit 시 자동 품질 검증
+- **Cognitive router expansion**: 멀티 도메인 키워드, 불확실성/위험도 감지
+- **Learning expansion**: 자기 평가, 도구 학습 강화
+
+### Changed / 변경됨
+
+- Claude Code v2.1.69 API 호환성 업데이트
+- 훅 이벤트 매처 표현식 구문 업데이트
+
+---
+
+## [1.8.0] - 2026-03-03
+
+### Summary / 요약
+
+**English**: Code quality cleanup, forked context skills, HTTP webhook hooks, 212 new tests.
+
+**한국어**: 코드 품질 정리, forked context 스킬, HTTP 웹훅 훅, 212개 신규 테스트.
+
+### Added / 추가됨
+
+- **Forked context skills**: 모든 스킬을 격리된 forked context에서 실행
+- **HTTP webhook** (`http-notify.js`): SessionEnd 시 Slack/Discord/커스텀 엔드포인트로 이벤트 전송
+- **212 new tests**: 테스트 스위트 대폭 확장
+
+### Changed / 변경됨
+
+- 코드 품질 전반적 정리 및 ESLint 준수 강화
+
+---
+
+## [1.7.0] - 2026-02-27
+
+### Summary / 요약
+
+**English**: DEV protocol, vibe coding support, daily/team commands, rules system. Sub-releases: v1.7.1 (81 skill enhancements), v1.7.2 (branch coverage 83%→91%), v1.7.3 (federated swarm production).
+
+**한국어**: DEV 프로토콜, 바이브 코딩 지원, daily/team 커맨드, 규칙 시스템. 서브 릴리즈: v1.7.1 (81개 스킬 강화), v1.7.2 (브랜치 커버리지 83%→91%), v1.7.3 (연합 스웜 프로덕션).
+
+### Added / 추가됨
+
+- **DEV protocol** (`rules/dev-protocol.md`): Decompose-Execute-Verify 필수 워크플로우
+- **Vibe coding** (`skills/vibe-coding/`): 자연어 코딩 요청 처리
+- **`/daily` command**: 일일 회고 리포트
+- **`/team` command**: 병렬 팀 오케스트레이션 (교차 검증 포함)
+- **Rules system**: 8개 자동 활성화 규칙 (경로 기반)
+- **v1.7.1**: 81개 SKILL.md에 Anthropic 베스트 프랙티스 적용
+- **v1.7.2**: 60개 신규 테스트, 브랜치 커버리지 83%→91%
+- **v1.7.3**: 연합 스웜 학습 프로덕션 + 업데이트 수정
+
+---
+
+## [1.6.0] - 2026-02-23
+
+### Summary / 요약
+
+**English**: Visual validation pipeline, conversation-to-memory, playbook activation, self-learning pipeline achieving 90+ score.
+
+**한국어**: 시각적 검증 파이프라인, 대화-메모리 변환, 플레이북 활성화, 90점 이상 달성한 자가학습 파이프라인.
+
+### Added / 추가됨
+
+- **Visual validation** (`lib/visual/`): SSIM 기반 스크린샷 비교, 자동 CSS 수정 제안
+- **Conversation-to-Memory**: 사용자 메시지에서 규칙/결정 자동 추출, 스킬에 동적 주입
+- **Playbook activation**: 플레이북 파서 및 레지스트리
+- **Self-learning pipeline**: GRPO 기반 자가학습 90+ 점수 달성
+
+---
+
+## [1.5.0] - 2026-02-20
+
+### Summary / 요약
+
+**English**: Post-Sprint 6 release with BSL 1.1 license, repository cleanup, and stability fixes.
+
+**한국어**: Sprint 6 이후 릴리즈. BSL 1.1 라이선스, 레포지토리 정리, 안정성 수정.
+
+### Added / 추가됨
+
+- **BSL 1.1 license**: 코드 보호를 위한 라이선스 전환
+- **Secret scanning prevention**: GitHub 비밀 스캐닝 오탐 방지
+
+### Changed / 변경됨
+
+- 내부 문서/벤치마크/블로그를 공개 레포에서 제외
+- README를 v1.5.0 수치로 업데이트
 
 ---
 
@@ -269,7 +514,18 @@ _Next planned release. No changes yet._
 
 ---
 
-[1.5.0]: https://github.com/Yoodaddy0311/artibot/compare/v1.4.0...HEAD
+[1.13.0]: https://github.com/Yoodaddy0311/artibot/compare/v1.12.0...v1.13.0
+[1.12.0]: https://github.com/Yoodaddy0311/artibot/compare/v1.11.0...v1.12.0
+[1.11.0]: https://github.com/Yoodaddy0311/artibot/compare/v1.10.0...v1.11.0
+[1.10.0]: https://github.com/Yoodaddy0311/artibot/compare/v1.9.3...v1.10.0
+[1.9.3]: https://github.com/Yoodaddy0311/artibot/compare/v1.9.2...v1.9.3
+[1.9.2]: https://github.com/Yoodaddy0311/artibot/compare/v1.9.1...v1.9.2
+[1.9.1]: https://github.com/Yoodaddy0311/artibot/compare/v1.9.0...v1.9.1
+[1.9.0]: https://github.com/Yoodaddy0311/artibot/compare/v1.8.0...v1.9.0
+[1.8.0]: https://github.com/Yoodaddy0311/artibot/compare/v1.7.0...v1.8.0
+[1.7.0]: https://github.com/Yoodaddy0311/artibot/compare/v1.6.0...v1.7.0
+[1.6.0]: https://github.com/Yoodaddy0311/artibot/compare/v1.5.0...v1.6.0
+[1.5.0]: https://github.com/Yoodaddy0311/artibot/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/Yoodaddy0311/artibot/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/Yoodaddy0311/artibot/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/Yoodaddy0311/artibot/compare/v1.1.0...v1.2.0
