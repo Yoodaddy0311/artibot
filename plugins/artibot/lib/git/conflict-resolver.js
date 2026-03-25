@@ -174,7 +174,7 @@ function resolveSingleLineSemantic(ourLine, theirLine) {
  * @returns {number}
  */
 function compareSemver(a, b) {
-  const parse = (s) => s.split(/[.\-]/).map((n) => parseInt(n, 10) || 0);
+  const parse = (s) => s.split(/[.-]/).map((n) => parseInt(n, 10) || 0);
   const av = parse(a);
   const bv = parse(b);
   for (let i = 0; i < Math.max(av.length, bv.length); i++) {

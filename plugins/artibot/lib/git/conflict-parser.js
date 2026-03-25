@@ -104,8 +104,6 @@ function parseOneBlock(lines, startIdx, oursLabel) {
   const ours = [];
   const base = [];
   const theirs = [];
-  let theirsLabel = '';
-
   /** @type {'ours'|'base'|'theirs'} */
   let section = 'ours';
   let hasBase = false;
@@ -126,7 +124,6 @@ function parseOneBlock(lines, startIdx, oursLabel) {
 
     const theirsMatch = MARKER_THEIRS.exec(line);
     if (theirsMatch) {
-      theirsLabel = theirsMatch[1];
       return {
         startLine: startIdx,
         endLine: i,
@@ -134,7 +131,7 @@ function parseOneBlock(lines, startIdx, oursLabel) {
         base: hasBase ? [...base] : [],
         theirs: [...theirs],
         oursLabel,
-        theirsLabel,
+        theirsLabel: theirsMatch[1],
       };
     }
 

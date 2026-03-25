@@ -8,6 +8,7 @@
 
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { join } from 'node:path';
 import { hasConflictMarkers } from './conflict-parser.js';
 import { readFile } from 'node:fs/promises';
 import { logError } from '../core/error.js';
@@ -108,7 +109,7 @@ export async function attemptPreemptiveRebase(targetBranch, cwd) {
   try {
     await execFileAsync('git', ['rebase', targetBranch], { cwd, timeout: 60_000 });
     return Object.freeze({ success: true, conflictFiles: [] });
-  } catch (_err) {
+  } catch {
     const conflictFiles = await findFilesWithConflictMarkers(cwd);
     await abortRebase(cwd);
     return Object.freeze({ success: false, conflictFiles });
@@ -151,7 +152,7 @@ async function findFilesWithConflictMarkers(cwd) {
   const results = await Promise.all(
     trackedFiles.map(async (f) => {
       try {
-        const content = await readFile(`${cwd}/${f}`, 'utf8');
+        const content = await readFile(join(cwd, f), 'utf8');
         return hasConflictMarkers(content) ? f : null;
       } catch {
         return null;

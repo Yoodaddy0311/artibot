@@ -330,16 +330,65 @@ configure_settings() {
       warn "Add this to ~/.claude/settings.json manually:"
       echo -e "${BLUE}  \"env\": { \"CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS\": \"1\" }${NC}"
     fi
+    # Register statusLine if not already present
+    _register_statusline "$settings_file"
   else
     cat > "$settings_file" <<'SETTINGS'
 {
   "env": {
     "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "bash ~/.claude/artibot/scripts/hooks/statusline.sh",
+    "padding": 2
   }
 }
 SETTINGS
     chmod 600 "$settings_file"
-    log "Settings created with Agent Teams enabled"
+    log "Settings created with Agent Teams enabled and statusLine registered"
+  fi
+}
+
+# ──────────────────────────────────────────────
+# Register statusLine in an existing settings.json
+# Skips if statusLine key already present.
+# Uses jq if available, falls back to Node.js.
+# ──────────────────────────────────────────────
+_register_statusline() {
+  local settings_file="$1"
+
+  # Skip if already registered
+  if grep -q '"statusLine"' "$settings_file" 2>/dev/null; then
+    log "statusLine already registered in settings.json — skipping"
+    return
+  fi
+
+  local statusline_json='"statusLine": { "type": "command", "command": "bash ~/.claude/artibot/scripts/hooks/statusline.sh", "padding": 2 }'
+
+  if command -v jq &>/dev/null; then
+    # jq available: merge cleanly
+    local tmp_file="${settings_file}.tmp.$$"
+    jq '. + {"statusLine": {"type": "command", "command": "bash ~/.claude/artibot/scripts/hooks/statusline.sh", "padding": 2}}' \
+      "$settings_file" > "$tmp_file" && mv "$tmp_file" "$settings_file"
+    log "statusLine registered in settings.json (via jq)"
+  elif command -v node &>/dev/null; then
+    # Node.js fallback: read, merge, write atomically
+    ARTIBOT_SETTINGS="$settings_file" node --input-type=commonjs -e "
+      const fs = require('fs');
+      const path = process.env.ARTIBOT_SETTINGS;
+      const cfg = JSON.parse(fs.readFileSync(path, 'utf8'));
+      if (!cfg.statusLine) {
+        cfg.statusLine = { type: 'command', command: 'bash ~/.claude/artibot/scripts/hooks/statusline.sh', padding: 2 };
+        const tmp = path + '.tmp.' + process.pid;
+        fs.writeFileSync(tmp, JSON.stringify(cfg, null, 2) + '\n');
+        fs.renameSync(tmp, path);
+      }
+    "
+    log "statusLine registered in settings.json (via node)"
+  else
+    warn "Neither jq nor node available — add statusLine manually to ~/.claude/settings.json:"
+    echo -e "${BLUE}  ${statusline_json}${NC}"
   fi
 }
 
