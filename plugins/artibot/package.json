@@ -15,7 +15,7 @@
     "validate": "node scripts/validate.js",
     "lint": "eslint bin/ lib/ scripts/ tests/",
     "lint:fix": "eslint --fix bin/ lib/ scripts/ tests/",
-    "ci": "node scripts/validate.js && npm run lint && npm test && npm run eval:runtime:check",
+    "ci": "node scripts/validate.js && npm run skill:check && npm run lint && npm test && npm run eval:runtime:check",
     "ci:coverage": "node scripts/validate.js && npm run lint && node scripts/ci/validate-coverage.js",
     "test": "vitest run",
     "test:evals": "vitest run tests/evals",
