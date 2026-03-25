@@ -12,6 +12,7 @@ triggers:
   - "speed"
   - "benchmark"
   - "profiling"
+agent: Explore
 agents:
   - "performance-engineer"
 tokens: "~3K"

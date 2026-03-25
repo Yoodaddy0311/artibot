@@ -13,6 +13,7 @@ triggers:
   - "coverage"
   - "edge case"
   - "regression"
+agent: Explore
 agents:
   - "tdd-guide"
 tokens: "~3K"

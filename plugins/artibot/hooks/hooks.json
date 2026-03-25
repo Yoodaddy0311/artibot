@@ -47,6 +47,15 @@
           "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/git-autopilot-session.js",
           "timeout": 10000
         }]
+      },
+      {
+        "matcher": "*",
+        "once": true,
+        "hooks": [{
+          "type": "command",
+          "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/auto-learning-check.js",
+          "timeout": 5000
+        }]
       }
     ],
     "PreToolUse": [

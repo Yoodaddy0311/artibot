@@ -22,7 +22,8 @@ This file auto-loads when Claude accesses files in `plugins/artibot/`.
 | `lib/core/` | Core utilities (22 files) | plugin-loader.js, hook-utils.js |
 | `lib/visual/` | Visual validation | visual-validator.js, screenshot-differ.js |
 | `lib/privacy/` | PII protection | pii-scrubber.js, homoglyph-detector.js |
-| `hooks/` | Event hooks config | hooks.json (15 event types, 35 registrations) |
+| `lib/runtime/` | Runtime pipeline (10 middlewares) | create-artibot-agent.js, evaluator.js, middleware/ |
+| `hooks/` | Event hooks config | hooks.json (15 event types, 36 registrations) |
 | `rules/` | Path-specific auto-rules | dev-protocol.md, quality-gates.md |
 | `tests/` | Vitest test suite (108 files) | 3,765 test cases |
 

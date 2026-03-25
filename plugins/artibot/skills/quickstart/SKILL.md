@@ -14,11 +14,14 @@ triggers:
   - "setup"
 agents:
   - "orchestrator"
+argument-hint: "[project-type] e.g., node, python, rust, go"
 tokens: "~1K"
 category: "onboarding"
 ---
 
 # Interactive Quickstart Guide
+
+Use `$ARGUMENTS` to specify the project type for targeted quickstart guidance.
 
 ## When This Skill Applies
 - First time a user interacts with Artibot in a new project

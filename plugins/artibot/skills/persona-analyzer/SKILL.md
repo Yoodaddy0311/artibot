@@ -12,6 +12,7 @@ triggers:
   - "debug"
   - "troubleshoot"
   - "diagnose"
+agent: Explore
 agents:
   - "code-reviewer"
 tokens: "~3K"

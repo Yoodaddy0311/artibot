@@ -12,6 +12,7 @@ triggers:
   - "system design"
   - "patterns"
   - "architect"
+agent: Plan
 agents:
   - "architect"
 tokens: "~4K"

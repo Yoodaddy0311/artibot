@@ -12,6 +12,7 @@ triggers:
   - "security audit"
   - "OWASP"
   - "security"
+agent: Explore
 agents:
   - "security-reviewer"
 tokens: "~3K"
