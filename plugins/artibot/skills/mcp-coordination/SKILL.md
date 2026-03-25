@@ -1,5 +1,5 @@
 ---
-context: forked
+context: fork
 name: mcp-coordination
 description: "Coordinates MCP server selection and multi-server orchestration with parallel/sequential modes and fallback strategies for complex multi-domain tasks. Use when user asks about MCP coordination, server selection, multi-server orchestration, tool coordination, fallback strategy, or MCP 조율."
 platforms: [claude-code, gemini-cli, codex-cli, cursor]

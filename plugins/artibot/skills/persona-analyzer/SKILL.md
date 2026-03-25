@@ -1,5 +1,6 @@
 ---
-context: forked
+context: fork
+user-invocable: false
 name: persona-analyzer
 description: "Evidence-based root cause analysis decision framework for systematic debugging and investigation. Use when user asks to analyze, investigate, debug, troubleshoot, diagnose, or find root cause of issues, or mentions 분석, 조사, or 근본 원인."
 platforms: [claude-code, gemini-cli, codex-cli, cursor]

@@ -1,5 +1,5 @@
 ---
-context: forked
+context: fork
 name: email-marketing
 description: "Creates email campaigns, automation sequences, and deliverability optimization covering drip campaigns, newsletters, onboarding, and cold outreach with compliance best practices. Use when user asks about email campaign, newsletter, drip sequence, email automation, deliverability, cold outreach, 이메일 마케팅, 이메일 캠페인, 뉴스레터, or 자동화 시퀀스."
 platforms: [claude-code, gemini-cli, codex-cli, cursor]

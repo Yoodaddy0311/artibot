@@ -1,6 +1,7 @@
 ---
 name: daily
-context: forked
+context: fork
+disable-model-invocation: true
 description: "일일 회고 리포트. 오늘의 커밋, 품질 상태, 작업 현황, 다음 단계를 구조화된 대시보드로 정리한다. Use when reviewing daily progress, generating a retrospective, or planning the next actions."
 triggers:
   - daily

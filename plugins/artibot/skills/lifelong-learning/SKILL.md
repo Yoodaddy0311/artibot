@@ -1,5 +1,6 @@
 ---
-context: forked
+context: fork
+user-invocable: false
 name: lifelong-learning
 description: |
   Continuous learning pipeline that captures session experiences, performs batch learning via GRPO,

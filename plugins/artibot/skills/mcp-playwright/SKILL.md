@@ -1,5 +1,5 @@
 ---
-context: forked
+context: fork
 name: mcp-playwright
 description: "Provides Playwright MCP server workflow for E2E testing, visual validation, cross-browser automation, and performance measurement with error recovery strategies. Use when user asks about Playwright, E2E testing, browser automation, screenshot testing, visual regression, cross-browser testing, E2E 테스트, or 브라우저."
 platforms: [claude-code, gemini-cli, codex-cli, cursor]

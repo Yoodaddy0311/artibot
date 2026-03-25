@@ -1,5 +1,5 @@
 ---
-context: forked
+context: fork
 name: copywriting
 description: "Applies persuasive writing frameworks (AIDA, PAS, BAB) for headlines, CTAs, ad copy, email subjects, and landing pages with platform-specific character constraints. Use when user asks about copywriting, headline, CTA, ad copy, subject line, landing page copy, persuasive writing, tagline, 카피라이팅, 헤드라인, or 광고 문구."
 platforms: [claude-code, gemini-cli, codex-cli, cursor]

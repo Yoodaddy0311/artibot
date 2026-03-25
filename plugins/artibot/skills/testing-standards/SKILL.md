@@ -1,5 +1,6 @@
 ---
-context: forked
+context: fork
+user-invocable: false
 name: testing-standards
 description: |
   Testing standards enforcing 80% coverage, Testing Pyramid, and TDD workflow.

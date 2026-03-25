@@ -1,5 +1,6 @@
 ---
-context: forked
+context: fork
+disable-model-invocation: true
 name: verification-completion
 description: |
   Evidence-before-claims verification enforcing proof of completion before any "done" claim.

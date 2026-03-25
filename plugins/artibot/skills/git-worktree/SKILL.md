@@ -1,5 +1,5 @@
 ---
-context: forked
+context: fork
 name: git-worktree
 description: |
   Git 워크트리 라이프사이클 관리 — 여러 브랜치를 동시에 열어두고 작업. 생성·상태 확인·충돌 예측·머지·정리를 단계별 안내.

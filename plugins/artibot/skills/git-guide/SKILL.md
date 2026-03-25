@@ -1,5 +1,5 @@
 ---
-context: forked
+context: fork
 name: git-guide
 description: |
   Git 초보자 대화형 가이드 — 상황을 물어보고 단계별 명령어를 안내. CLI 공포 없이 Git 학습.

@@ -1,5 +1,6 @@
 ---
-context: forked
+context: fork
+disable-model-invocation: true
 name: scheduled-learning
 description: |
   CronCreate-based automatic scheduling for the nightly-learner pipeline and drift checks.

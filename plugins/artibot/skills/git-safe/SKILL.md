@@ -1,5 +1,5 @@
 ---
-context: forked
+context: fork
 name: git-safe
 description: |
   Git 안전망 — 수동 백업 폴더 대신 Git stash/tag/bundle로 안전하게 상태 보존. 작업 잃을 걱정 없이 실험 가능.

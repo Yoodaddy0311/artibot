@@ -1,5 +1,5 @@
 ---
-context: forked
+context: fork
 name: lang-kotlin
 description: "Provides Kotlin patterns including coroutines, sealed classes, value classes, and framework-specific best practices for Ktor, Compose Multiplatform, and Spring Boot. Use when writing Kotlin code, designing coroutine-based concurrency, working with Jetpack Compose or Ktor, debugging Flow issues, or asking about .kt/.kts files or Gradle Kotlin DSL."
 level: 2

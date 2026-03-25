@@ -1,5 +1,6 @@
 ---
-context: forked
+context: fork
+user-invocable: false
 name: principles
 description: |
   Core development principles enforcing SOLID, DRY, KISS, YAGNI, and quality-first design.

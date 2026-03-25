@@ -1,5 +1,5 @@
 ---
-context: forked
+context: fork
 name: lang-scala
 description: "Provides Scala 3 patterns including given/using, opaque types, enums, and framework-specific best practices for Cats Effect, ZIO, Akka, and Apache Spark. Use when writing Scala code, designing functional effect systems, working with SBT builds, debugging type-level programming, or asking about .scala files, case classes, or Play Framework."
 level: 2

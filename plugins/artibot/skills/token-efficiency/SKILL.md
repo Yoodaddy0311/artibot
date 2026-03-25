@@ -1,5 +1,6 @@
 ---
-context: forked
+context: fork
+user-invocable: false
 name: token-efficiency
 description: |
   Intelligent token optimization engine with adaptive compression and persona-aware output.

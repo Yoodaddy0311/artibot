@@ -1,5 +1,6 @@
 ---
-context: forked
+context: fork
+user-invocable: false
 name: continuous-learning
 description: |
   Pattern extraction and knowledge persistence across sessions using auto memory.

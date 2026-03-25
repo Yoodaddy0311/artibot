@@ -1,5 +1,5 @@
 ---
-context: forked
+context: fork
 name: git-strategy
 description: |
   팀 상황에 맞는 Git 브랜치 전략 추천 — 팀 크기, 배포 주기, 릴리즈 방식을 물어보고 최적 전략 제안.

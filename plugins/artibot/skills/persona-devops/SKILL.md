@@ -1,5 +1,6 @@
 ---
-context: forked
+context: fork
+user-invocable: false
 name: persona-devops
 description: "Infrastructure automation and reliability engineering decision framework for deployment pipelines and observability. Use when user works on deployment, CI/CD, Docker, Kubernetes, monitoring, infrastructure as code, or pipeline automation, or mentions 배포 or 인프라."
 platforms: [claude-code, gemini-cli, codex-cli, cursor]

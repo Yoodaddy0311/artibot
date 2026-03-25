@@ -1,5 +1,5 @@
 ---
-context: forked
+context: fork
 name: lang-ruby
 description: "Provides Ruby patterns including pattern matching, Ractor concurrency, Data classes, and framework-specific best practices for Rails 7.2 and Hotwire/Turbo. Use when writing Ruby code, working with ActiveRecord or RSpec, configuring Bundler or Gemfile, debugging Rails errors, or asking about .rb files, Sidekiq, or Turbo Streams."
 level: 2

@@ -1,5 +1,6 @@
 ---
-context: forked
+context: fork
+user-invocable: false
 name: self-evaluation
 description: |
   Self-Rewarding + GRPO hybrid evaluation system for autonomous quality assessment, optimization, and improvement.

@@ -1,5 +1,6 @@
 ---
-context: forked
+context: fork
+user-invocable: false
 name: persona-architect
 description: "Systems architecture decision framework with long-term thinking focus on scalability, modularity, and dependency management. Use when user discusses architecture, system design, scalability, module boundaries, trade-off analysis, dependency graphs, or ADR decisions, or mentions 아키텍처, 설계, or 확장성."
 platforms: [claude-code, gemini-cli, codex-cli, cursor]

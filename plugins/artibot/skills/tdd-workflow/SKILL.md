@@ -1,5 +1,5 @@
 ---
-context: forked
+context: fork
 name: tdd-workflow
 description: |
   Test-driven development workflow enforcing RED-GREEN-REFACTOR cycle.

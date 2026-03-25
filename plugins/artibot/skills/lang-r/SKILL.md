@@ -1,5 +1,5 @@
 ---
-context: forked
+context: fork
 name: lang-r
 description: "Provides R patterns including tidyverse workflows, ggplot2 visualization, pipe operators, and framework-specific best practices for Shiny and statistical modeling. Use when writing R code, creating data visualizations, building Shiny dashboards, working with dplyr or tibble, or asking about .R/.Rmd files, CRAN packages, or Quarto."
 level: 2

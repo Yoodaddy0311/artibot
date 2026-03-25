@@ -1,5 +1,6 @@
 ---
-context: forked
+context: fork
+user-invocable: false
 name: cognitive-routing
 description: |
   Dual-process cognitive routing engine inspired by Kahneman's System 1/2 theory.

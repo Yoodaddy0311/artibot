@@ -1,5 +1,6 @@
 ---
-context: forked
+context: fork
+disable-model-invocation: true
 name: session-worklog
 description: "Automatic session work journal maintained in auto-memory. Records tasks, decisions, and pending items at session end or after significant work blocks. Use when logging completed work, recording decisions, or preserving session context for recovery."
 level: 2

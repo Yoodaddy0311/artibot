@@ -1,5 +1,6 @@
 ---
-context: forked
+context: fork
+disable-model-invocation: true
 name: git-sync
 description: |
   Git 동기화 자동화 — pull/push/rebase를 상황에 맞게 자동 실행. 충돌 감지 시 git-conflict 스킬로 위임.

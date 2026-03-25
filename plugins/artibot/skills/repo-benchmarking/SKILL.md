@@ -1,5 +1,5 @@
 ---
-context: forked
+context: fork
 name: repo-benchmarking
 description: "Clones and benchmarks external git repositories against Artibot with quantified 10-dimension scoring, structural comparison, pattern extraction, and adoption recommendations. Use when user asks to compare repos, benchmark a project, analyze external code, evaluate competitors, 레포 비교, 벤치마크, 외부 레포 분석, or 채택 평가."
 platforms: [claude-code, gemini-cli, codex-cli, cursor]

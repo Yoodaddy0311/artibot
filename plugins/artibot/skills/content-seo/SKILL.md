@@ -1,5 +1,5 @@
 ---
-context: forked
+context: fork
 name: content-seo
 description: "Optimizes on-page content for search engines including meta tags, heading structure, content quality, topical authority, and E-E-A-T signals. Use when user asks about content SEO, on-page SEO, meta tags, content optimization, content gap analysis, topical authority, E-E-A-T, 콘텐츠 SEO, 온페이지 최적화, or 콘텐츠 갭."
 platforms: [claude-code, gemini-cli, codex-cli, cursor]

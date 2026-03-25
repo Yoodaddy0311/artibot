@@ -1,6 +1,6 @@
 ---
 name: team
-context: forked
+context: fork
 description: "Parallel team execution with cross-check. Leader delegates, teammates work independently, then verify each other. Use when parallel independent work with cross-verification is needed."
 triggers:
   - team

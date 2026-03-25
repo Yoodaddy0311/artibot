@@ -1,5 +1,5 @@
 ---
-context: forked
+context: fork
 name: cro-page
 description: "Optimizes landing page conversion rates covering above-the-fold analysis, value proposition clarity, CTA optimization, and trust signal placement with heuristic evaluation. Use when user asks about landing page optimization, page CRO, conversion rate, above the fold, CTA optimization, trust signals, hero section, 랜딩페이지, 페이지 CRO, or 전환율 최적화."
 level: 3

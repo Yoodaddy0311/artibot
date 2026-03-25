@@ -1,5 +1,5 @@
 ---
-context: forked
+context: fork
 name: lang-typescript
 description: "Provides TypeScript patterns including strict configuration, utility types, discriminated unions, branded types, and framework-specific best practices for Next.js, Astro, and Remix. Use when writing TypeScript code, configuring tsconfig.json, designing type-safe APIs, debugging type errors, or asking about .ts/.tsx files, generics, or interfaces."
 level: 2

@@ -1,5 +1,5 @@
 ---
-context: forked
+context: fork
 name: git-conflict
 description: |
   Git 충돌 해결 자동화 — 충돌 블록을 분류하고 안전한 것은 자동 해결, 위험한 것은 Human Checkpoint.

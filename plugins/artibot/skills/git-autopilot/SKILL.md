@@ -1,5 +1,6 @@
 ---
-context: forked
+context: fork
+disable-model-invocation: true
 name: git-autopilot
 description: |
   Git 완전 자동화 — 사용자는 코드만 작성, Git은 100% 자동. 스테이징·커밋·푸시를 훅으로 자동 처리.

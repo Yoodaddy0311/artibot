@@ -1,5 +1,6 @@
 ---
-context: forked
+context: fork
+user-invocable: false
 name: systematic-debugging
 description: |
   Systematic debugging methodology enforcing root cause investigation before any fix.

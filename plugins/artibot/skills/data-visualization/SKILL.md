@@ -1,5 +1,5 @@
 ---
-context: forked
+context: fork
 name: data-visualization
 description: "Guides data visualization with chart selection, dashboard layout design, visual encoding, and data storytelling best practices. Use when user asks about data visualization, chart selection, graph design, dashboard layout, infographic, data storytelling, 데이터 시각화, 차트, 대시보드, or 그래프."
 platforms: [claude-code, gemini-cli, codex-cli, cursor]

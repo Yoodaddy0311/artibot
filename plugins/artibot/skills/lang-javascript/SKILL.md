@@ -1,5 +1,5 @@
 ---
-context: forked
+context: fork
 name: lang-javascript
 description: "Provides JavaScript patterns including ES2024+ features, async/await, and framework-specific best practices for Node.js 22, Bun, and Deno 2. Use when writing JavaScript code, configuring ESM modules, working with Vitest or Express, debugging async errors, or asking about .js/.mjs files, promises, or AbortController."
 level: 2

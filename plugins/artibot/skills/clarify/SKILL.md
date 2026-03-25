@@ -1,5 +1,5 @@
 ---
-context: forked
+context: fork
 name: clarify
 description: |
   Hypothesis-based clarification pipeline that transforms ambiguous user requests

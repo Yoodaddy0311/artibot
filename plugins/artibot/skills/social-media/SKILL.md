@@ -1,5 +1,5 @@
 ---
-context: forked
+context: fork
 name: social-media
 description: "Creates multi-platform social media content with scheduling strategy, engagement optimization, platform-specific formats, and content calendars. Use when user asks about social media, Twitter, LinkedIn, Instagram, TikTok, YouTube, content calendar, hashtag strategy, social engagement, 소셜 미디어, 소셜 콘텐츠, or 콘텐츠 캘린더."
 platforms: [claude-code, gemini-cli, codex-cli, cursor]

@@ -1,5 +1,6 @@
 ---
-context: forked
+context: fork
+disable-model-invocation: true
 name: setup
 description: |
   Artibot 초기 설정 인터랙티브 위저드 — 언어, 개발 환경, Agent Teams, MCP 서버, 권한, Git 자동화를 단계별로 안내.

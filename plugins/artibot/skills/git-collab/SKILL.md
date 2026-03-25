@@ -1,5 +1,5 @@
 ---
-context: forked
+context: fork
 name: git-collab
 description: |
   Git 팀 협업 온보딩 자동화 — 신규 팀원을 위한 저장소 설정, 브랜치 규칙, PR 워크플로우 자동 안내.
