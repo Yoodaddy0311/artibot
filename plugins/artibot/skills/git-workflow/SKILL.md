@@ -27,6 +27,12 @@ category: "devops"
 
 Use `$ARGUMENTS` to specify the git operation or workflow step to focus on.
 
+## Current State
+<!-- Dynamic context injected at activation -->
+!`git status --short 2>/dev/null | head -10`
+!`git log --oneline -5 2>/dev/null`
+!`git branch --show-current 2>/dev/null`
+
 ## When This Skill Applies
 - Creating commits with conventional commit format
 - Branch creation and management strategy

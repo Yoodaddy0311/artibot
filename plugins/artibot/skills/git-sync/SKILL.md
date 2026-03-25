@@ -25,6 +25,12 @@ category: "devops"
 
 # Git Sync (동기화 자동화)
 
+## Current State
+<!-- Dynamic context injected at activation -->
+!`git rev-list --left-right --count HEAD...@{upstream} 2>/dev/null`
+!`git status --short 2>/dev/null | head -10`
+!`git stash list --oneline 2>/dev/null | head -5`
+
 ## 목적
 
 로컬↔원격 브랜치 동기화를 안전하게 자동화.

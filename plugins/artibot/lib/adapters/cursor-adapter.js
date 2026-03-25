@@ -14,7 +14,7 @@
 
 import path from 'node:path';
 import { BaseAdapter } from './base-adapter.js';
-import { buildFrontmatter, cleanDescription, stripAgentTeamsRefs, stripClaudeSpecificRefs } from './adapter-utils.js';
+import { buildFrontmatter, buildSkillFrontmatter, cleanDescription, stripAgentTeamsRefs, stripClaudeSpecificRefs } from './adapter-utils.js';
 
 export class CursorAdapter extends BaseAdapter {
   get platformId() {
@@ -38,10 +38,7 @@ export class CursorAdapter extends BaseAdapter {
    * Cursor supports SKILL.md in .cursor/skills/ directory.
    */
   convertSkill(skill) {
-    const frontmatter = buildFrontmatter({
-      name: skill.name,
-      description: cleanDescription(skill.description),
-    });
+    const frontmatter = buildSkillFrontmatter(skill);
 
     const body = stripClaudeSpecificRefs(skill.content, {
       skillsPath: '.cursor/skills/',

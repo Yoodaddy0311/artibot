@@ -25,6 +25,10 @@ category: "testing"
 
 Use `$ARGUMENTS` to specify the test target (module, service, or component).
 
+## Current State
+<!-- Dynamic context injected at activation -->
+!`npm test -- --reporter=dot 2>&1 | tail -5`
+
 ## When This Skill Applies
 - Implementing new features (tests first)
 - Fixing bugs (reproduction test first)

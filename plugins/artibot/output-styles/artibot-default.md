@@ -25,6 +25,17 @@ description: Default Artibot output style - clean, structured, concise
 - Summary line with bold metrics before the table
 - Blockquote footer for supplementary notes
 
+## Design Tokens
+
+This style uses the shared token system defined in `tokens.md`.
+All output-styles share these tokens for consistent semantics across formats.
+
+Key token groups used by default style:
+- **Status**: `status-ok` (✅), `status-warn` (⚠️), `status-error` (❌) for task/test results
+- **Accent**: `accent` (**bold**), `code` (`` `inline` ``), `highlight` (**`bold code`**) for emphasis
+- **Severity**: `severity-critical` through `severity-low` for issue classification
+- **Metric**: `metric-count`, `metric-percent`, `metric-score` for quantitative data
+
 ## Token Efficiency
 
 - Prefer tables over prose for comparisons

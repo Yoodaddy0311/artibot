@@ -26,6 +26,11 @@ category: "devops"
 
 Use `$ARGUMENTS` to specify the conflicting file path to resolve.
 
+## Current State
+<!-- Dynamic context injected at activation -->
+!`git diff --name-only --diff-filter=U 2>/dev/null`
+!`git status --short 2>/dev/null | head -10`
+
 ## 목적
 
 머지/리베이스 충돌 시 충돌 블록을 자동 분류하고:

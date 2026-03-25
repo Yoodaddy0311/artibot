@@ -14,7 +14,7 @@
 
 import path from 'node:path';
 import { BaseAdapter } from './base-adapter.js';
-import { buildFrontmatter, cleanDescription, stripAgentTeamsRefs, stripClaudeSpecificRefs } from './adapter-utils.js';
+import { buildSkillFrontmatter, stripAgentTeamsRefs, stripClaudeSpecificRefs } from './adapter-utils.js';
 
 export class GeminiAdapter extends BaseAdapter {
   get platformId() {
@@ -39,10 +39,7 @@ export class GeminiAdapter extends BaseAdapter {
    * with minor adjustments to platform-specific references.
    */
   convertSkill(skill) {
-    const frontmatter = buildFrontmatter({
-      name: skill.name,
-      description: cleanDescription(skill.description),
-    });
+    const frontmatter = buildSkillFrontmatter(skill);
 
     const body = stripClaudeSpecificRefs(skill.content, {
       skillsPath: '.agent/skills/',

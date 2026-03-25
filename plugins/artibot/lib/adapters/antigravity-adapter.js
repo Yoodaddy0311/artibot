@@ -26,7 +26,7 @@
 
 import path from 'node:path';
 import { BaseAdapter } from './base-adapter.js';
-import { buildFrontmatter, cleanDescription, stripClaudeSpecificRefs } from './adapter-utils.js';
+import { buildSkillFrontmatter, stripClaudeSpecificRefs } from './adapter-utils.js';
 
 export class AntigravityAdapter extends BaseAdapter {
   get platformId() {
@@ -50,10 +50,7 @@ export class AntigravityAdapter extends BaseAdapter {
    * Antigravity supports SKILL.md natively via its Gemini CLI heritage.
    */
   convertSkill(skill) {
-    const frontmatter = buildFrontmatter({
-      name: skill.name,
-      description: cleanDescription(skill.description),
-    });
+    const frontmatter = buildSkillFrontmatter(skill);
 
     const body = stripClaudeSpecificRefs(skill.content, {
       skillsPath: '.antigravity/skills/',

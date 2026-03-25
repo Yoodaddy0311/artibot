@@ -14,7 +14,7 @@
 
 import path from 'node:path';
 import { BaseAdapter } from './base-adapter.js';
-import { buildFrontmatter, cleanDescription, stripAgentTeamsRefs, stripClaudeSpecificRefs } from './adapter-utils.js';
+import { buildFrontmatter, buildSkillFrontmatter, cleanDescription, stripAgentTeamsRefs, stripClaudeSpecificRefs } from './adapter-utils.js';
 
 export class CodexAdapter extends BaseAdapter {
   get platformId() {
@@ -39,10 +39,7 @@ export class CodexAdapter extends BaseAdapter {
    * The format is a passthrough with platform-specific reference updates.
    */
   convertSkill(skill) {
-    const frontmatter = buildFrontmatter({
-      name: skill.name,
-      description: cleanDescription(skill.description),
-    });
+    const frontmatter = buildSkillFrontmatter(skill);
 
     const body = stripClaudeSpecificRefs(skill.content, {
       skillsPath: '.agents/skills/',

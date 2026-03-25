@@ -42,11 +42,10 @@ function loadCliConfig(pluginRoot) {
  */
 export function createCliAdapter(options = {}) {
   const { pluginRoot, teamMode = false } = options;
-  const config = options.config || loadCliConfig(pluginRoot);
-
-  if (teamMode) {
-    config.team = { ...config.team, enabled: true };
-  }
+  const baseConfig = options.config || loadCliConfig(pluginRoot);
+  const config = teamMode
+    ? { ...baseConfig, team: { ...baseConfig.team, enabled: true } }
+    : baseConfig;
 
   const agent = createArtibotAgent({
     config,
