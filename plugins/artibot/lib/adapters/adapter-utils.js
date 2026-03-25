@@ -35,6 +35,67 @@ export function buildFrontmatter(fields) {
 }
 
 // ---------------------------------------------------------------------------
+// Skill Frontmatter (extended)
+// ---------------------------------------------------------------------------
+
+/** Claude Code-specific frontmatter fields stripped during cross-platform export. */
+const CLAUDE_ONLY_FIELDS = new Set([
+  'agent', 'allowed-tools', 'user-invocable', 'disable-model-invocation',
+  'context', 'argument-hint', 'progressive_disclosure',
+]);
+
+/**
+ * Build extended skill frontmatter with platform filtering.
+ * Includes common fields (triggers, category, level, platforms) and strips
+ * Claude Code-specific fields, preserving them as YAML comments.
+ *
+ * @param {object} skill - Parsed skill definition
+ * @param {string} skill.name
+ * @param {string} skill.description
+ * @param {string[]} [skill.triggers]
+ * @param {string} [skill.category]
+ * @param {number|string} [skill.level]
+ * @param {string[]} [skill.platforms]
+ * @param {string} [skill.tokens]
+ * @param {string[]} [skill.agents]
+ * @param {Record<string, unknown>} [skill.extraFields] - All other frontmatter fields
+ * @returns {string} YAML frontmatter string
+ */
+export function buildSkillFrontmatter(skill) {
+  const fields = {
+    name: skill.name,
+    description: cleanDescription(skill.description),
+  };
+
+  if (skill.triggers?.length) fields.triggers = skill.triggers;
+  if (skill.category) fields.category = skill.category;
+  if (skill.level != null) fields.level = String(skill.level);
+  if (skill.platforms?.length) fields.platforms = skill.platforms;
+  if (skill.tokens) fields.tokens = skill.tokens;
+  if (skill.agents?.length) fields.agents = skill.agents;
+
+  const frontmatter = buildFrontmatter(fields);
+
+  // Preserve Claude-only fields as comments for traceability
+  const commentLines = [];
+  const extra = skill.extraFields || {};
+  for (const [key, value] of Object.entries(extra)) {
+    if (CLAUDE_ONLY_FIELDS.has(key)) {
+      const serialized = Array.isArray(value) ? `[${value.join(', ')}]` : String(value);
+      commentLines.push(`# claude-only: ${key}: ${serialized}`);
+    }
+  }
+
+  if (commentLines.length === 0) return frontmatter;
+
+  // Insert comments before closing ---
+  const lines = frontmatter.split('\n');
+  const closingIdx = lines.lastIndexOf('---');
+  lines.splice(closingIdx, 0, ...commentLines);
+  return lines.join('\n');
+}
+
+// ---------------------------------------------------------------------------
 // Description Cleaning
 // ---------------------------------------------------------------------------
 
