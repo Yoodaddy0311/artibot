@@ -31,7 +31,7 @@ const PATTERNS_DIR = path.join(ARTIBOT_DIR, 'patterns');
 const MAX_LOG_ENTRIES = 200;
 const EXEC_TIMEOUT = 120_000;
 const MAX_BUFFER = 50 * 1024 * 1024; // 50 MB for large vitest JSON output
-const SHELL_OPTS = { shell: true }; // Required on Windows for npx/npm resolution
+const SHELL_OPTS = { shell: true }; // Required on Windows for npx resolution (NOT for git)
 
 const VALID_STAGES = [
   'self-scan',
@@ -218,7 +218,7 @@ export async function runPatternExtract(options = {}) {
     const { stdout } = await execFile(
       'git',
       ['log', `--since=${since}`, '--format=%H|%s|%an|%aI', '--no-merges'],
-      { ...SHELL_OPTS, cwd, timeout: 30_000, encoding: 'utf-8' },
+      { cwd, timeout: 30_000, encoding: 'utf-8' },
     );
     const lines = stdout.trim().split('\n').filter(Boolean);
     report.commits = lines.map((line) => {
@@ -244,7 +244,7 @@ export async function runPatternExtract(options = {}) {
     const { stdout } = await execFile(
       'git',
       ['log', `--since=${since}`, '--name-only', '--format=', '--no-merges'],
-      { ...SHELL_OPTS, cwd, timeout: 30_000, encoding: 'utf-8' },
+      { cwd, timeout: 30_000, encoding: 'utf-8' },
     );
     const fileCounts = {};
     for (const file of stdout.trim().split('\n').filter(Boolean)) {
