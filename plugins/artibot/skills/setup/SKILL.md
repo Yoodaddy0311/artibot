@@ -16,11 +16,14 @@ triggers:
   - "initial setup"
   - "artibot setup"
 agents: []
+argument-hint: "[language|environment] e.g., korean, english, reset"
 tokens: 2000
 category: setup
 ---
 
 # Artibot Setup Wizard
+
+Use `$ARGUMENTS` to specify a language or jump to a specific setup step.
 
 ## 목적
 

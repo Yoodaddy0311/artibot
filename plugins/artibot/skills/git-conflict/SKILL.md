@@ -17,11 +17,14 @@ triggers:
   - "충돌 해결"
 agents:
   - "devops-engineer"
+argument-hint: "[file-path] e.g., src/auth/login.ts, package-lock.json"
 tokens: "~2K"
 category: "devops"
 ---
 
 # Git Conflict Resolver
+
+Use `$ARGUMENTS` to specify the conflicting file path to resolve.
 
 ## 목적
 

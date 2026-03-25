@@ -23,7 +23,10 @@
     "test:coverage": "vitest run --coverage",
     "test:coverage:check": "node scripts/ci/validate-coverage.js --check",
     "eval:runtime": "node scripts/evals/run-runtime-task-suite.js",
-    "eval:runtime:check": "node scripts/ci/validate-runtime-evals.js"
+    "eval:runtime:check": "node scripts/ci/validate-runtime-evals.js",
+    "skill:check": "node scripts/gen-skill-docs.js --check",
+    "skill:check:json": "node scripts/gen-skill-docs.js --json",
+    "skill:report": "node scripts/gen-skill-docs.js --report"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

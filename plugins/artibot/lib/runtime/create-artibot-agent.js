@@ -138,7 +138,8 @@ export function createArtibotAgent(options = {}) {
 
   const allMiddleware = customMiddleware || [
     mwRouter, mwMemory, mwSkills, mwTasks,
-    mwSubagents, mwSummarization, mwCheckpoint,
+    mwSubagents, mwGuardrail, mwSummarization,
+    mwTokenUsage, mwCheckpoint,
   ];
 
   const configPromise = options.config
@@ -198,10 +199,15 @@ export function createArtibotAgent(options = {}) {
         ], state);
         // Phase 3: subagents (depends on tasks)
         await runMiddleware('subagents', mwSubagents, state);
-        // Phase 4: summarization (reads final userPrompt)
+        // Phase 4: guardrail (reads subagents/tasks tool lists)
+        await runMiddleware('guardrail', mwGuardrail, state);
+        // Phase 5: summarization (reads final userPrompt)
         await runMiddleware('summarization', mwSummarization, state);
-        // Phase 5: checkpoint (reads all context)
-        await runMiddleware('checkpoint', mwCheckpoint, state);
+        // Phase 6: token-usage + checkpoint (independent, read all context)
+        await runParallel([
+          ['tokenUsage', mwTokenUsage],
+          ['checkpoint', mwCheckpoint],
+        ], state);
       }
 
       const selectedBackend = backend.selectBackend(state.context);

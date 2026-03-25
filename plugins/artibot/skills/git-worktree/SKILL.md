@@ -17,11 +17,15 @@ triggers:
   - "workspace"
 agents:
   - "devops-engineer"
+argument-hint: "[branch] [path] e.g., feat/login, create fix/auth-crash"
 tokens: "~2K"
 category: "devops"
 ---
 
 # Git Worktree
+
+Use `$ARGUMENTS` to specify the worktree operation and branch target.
+
 
 ## 목적
 

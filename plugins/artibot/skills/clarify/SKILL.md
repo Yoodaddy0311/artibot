@@ -27,11 +27,14 @@ triggers:
 agents:
   - "planner"
   - "orchestrator"
+argument-hint: "[ambiguous-request] e.g., improve the app, add authentication"
 tokens: "~2K"
 category: "intent"
 ---
 
 # Clarify: Hypothesis-Based Requirement Clarification
+
+Use `$ARGUMENTS` to provide the ambiguous request to clarify.
 
 ## When This Skill Applies
 - User request triggers multiple conflicting intents (ambiguity score >= threshold)

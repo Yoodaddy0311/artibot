@@ -16,11 +16,14 @@ triggers:
   - "git 초보"
   - "how do I git"
 agents: []
+argument-hint: "[question] e.g., 커밋 어떻게, push rejected 오류, 브랜치 삭제"
 tokens: "~1.5K"
 category: "devops"
 ---
 
 # Git Guide (초보자)
+
+Use `$ARGUMENTS` to describe your git question or error message.
 
 ## 목적
 

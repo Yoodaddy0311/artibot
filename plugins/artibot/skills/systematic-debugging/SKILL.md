@@ -22,11 +22,14 @@ triggers:
 agents:
   - "tdd-guide"
   - "backend-developer"
+argument-hint: "[error-description] e.g., TypeError in auth.js, login 500 error"
 tokens: "~3K"
 category: "debugging"
 ---
 
 # Systematic Debugging
+
+Use `$ARGUMENTS` to describe the error or symptom to investigate.
 
 ## Contents
 - [When This Skill Applies](#when-this-skill-applies)

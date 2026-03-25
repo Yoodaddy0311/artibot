@@ -291,6 +291,30 @@
     "excludeSelectors": []
   },
 
+  "runtime": {
+    "middleware": [
+      "router",
+      "subagents",
+      "tasks",
+      "checkpoint",
+      "memory",
+      "skills",
+      "guardrail",
+      "token-usage",
+      "summarization"
+    ]
+  },
+
+  "autoLearning": {
+    "enabled": true,
+    "schedule": "0 3 * * *",
+    "pipeline": ["self-scan", "pattern-extract", "knowledge-update", "skill-refinement"],
+    "autoCommit": true,
+    "autoPush": true,
+    "maxChangesPerRun": 10
+  },
+
+
   "skills": {
     "lazyLoading": {
       "enabled": true,
