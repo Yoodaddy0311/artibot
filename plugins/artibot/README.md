@@ -1,6 +1,6 @@
 # Artibot
 
-![Tests](https://img.shields.io/badge/tests-3765%20passed-brightgreen) ![Coverage](https://img.shields.io/badge/coverage-97.5%25-brightgreen) ![License](https://img.shields.io/badge/license-MIT-blue) ![Version](https://img.shields.io/badge/version-1.13.0-blue) ![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen)
+![Tests](https://img.shields.io/badge/tests-3887%20passed-brightgreen) ![Coverage](https://img.shields.io/badge/coverage-97.5%25-brightgreen) ![License](https://img.shields.io/badge/license-MIT-blue) ![Version](https://img.shields.io/badge/version-1.14.1-blue) ![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen)
 
 Claude Code를 위한 **Agent Teams 기반** 지능형 오케스트레이션 플러그인. Claude의 네이티브 Agent Teams API를 핵심 엔진으로 사용하여 전문 에이전트 팀 구성, P2P 통신, 공유 태스크 관리를 통해 개발 생산성을 극대화합니다.
 
@@ -77,18 +77,36 @@ Artibot의 핵심 엔진은 Claude Code의 **Agent Teams API**입니다. 단순�
 - `/sc`로 자연어 의도를 분석하여 최적 커맨드로 자동 라우팅
 - 개발, 분석, 품질, 테스트, 문서화, 배포, 마케팅 전 영역 커버
 
-### 96개 도메인 스킬
+### 99개 도메인 스킬
 
 - 11개 페르소나 스킬 (architect, frontend, backend, security 등)
 - 6개 코어 스킬 (orchestration, principles, coding/security/testing standards)
 - 8개 유틸리티 스킬 (git-workflow, tdd, delegation, MCP 연동 등)
 - 16개 언어 스킬 (TypeScript, Python, Go, Rust, Java 등)
 - 23개 마케팅 스킬 (SEO, CRO, A/B 테스트, 이메일 마케팅 등)
-- 14개 기타 스킬 (cognitive-routing, platform, library, quality 등)
+- 17개 기타 스킬 (cognitive-routing, platform, library, quality, auto-learning-pipeline, git-worktree, dynamic-context-injection 등)
+
+### 런타임 미들웨어 파이프라인 (v1.14.0+)
+
+- 9단계 미들웨어 엔진: router → subagents → tasks → checkpoint → memory → skills → guardrail → token-usage → summarization
+- GuardrailMiddleware: 런타임 안전 가드레일 (위험 패턴 차단, 리소스 제한)
+- TokenUsageMiddleware: 토큰 사용량 추적 및 최적화 제안
+- SummarizationMiddleware: 응답 자동 요약 및 컨텍스트 압축
+
+### 자동 학습 파이프라인 (v1.14.0+)
+
+- 제로 설정 야간 자기 개선: self-scan → pattern-extract → knowledge-update → skill-refinement
+- `autoLearning` 설정: 스케줄 (cron), 자동 커밋/푸시, 실행당 최대 변경 수 제한
+- SessionStart 훅으로 스케줄 체크 및 자동 트리거
+
+### Output Design System (v1.14.0+)
+
+- 7개 출력 스타일: default, compressed, mentor, team-dashboard, tokens, narrative, statusline
+- Design Token 시스템 (`tokens.md`): 일관된 포맷팅을 위한 디자인 토큰
 
 ### 지능형 훅 시스템
 
-- 15개 이벤트에 33개 훅 등록 (HTTP webhook 알림 포함)
+- 15개 이벤트에 36개 훅 등록 (HTTP webhook 알림 포함)
 - **Guard Registry**: 중앙 집중식 가드 파이프라인 (`registerGuard()`/`executeChain()` API), 6개 내장 가드, 훅 코드 75% 감소
 - **Advisory File Lock**: 동시 훅 실행 시 상태 파일 경합 방지 (spin-lock, fail-open)
 - 위험 명령 차단, 민감 파일 보호, 자동 포맷, PR 감지, 팀원 생명주기 추적
@@ -140,7 +158,7 @@ Artibot은 Claude Code 외에도 **Gemini CLI**, **OpenAI Codex CLI**, **Cursor 
 | Agent Teams (P2P 메시징) | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Sub-Agent (단방향 위임) | ✅ | ✅ | ✅ | ⚠️ 제한적 | ✅ |
 | 27개 전문 에이전트 | ✅ | ✅ 자동변환 | ✅ 자동변환 | ✅ 자동변환 | ✅ 자동변환 |
-| 96개 스킬 (SKILL.md) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| 99개 스킬 (SKILL.md) | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 슬래시 커맨드 | ✅ 48개 | ✅ TOML | → Workflows | → Prompts | → Workflows |
 | Hooks 자동작동 | ✅ 15이벤트 | ✅ 동일패턴 | ⚠️ 제한적 | ❌ | ✅ Agent Manager |
 | 인지 라우터 (System 1/2) | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -976,7 +994,7 @@ orchestrator는 **코드를 직접 작성하지 않습니다**. 팀을 구성하
 
 ## 훅 시스템
 
-15개 이벤트에 33개 훅이 등록되어 있습니다.
+15개 이벤트에 36개 훅이 등록되어 있습니다.
 
 ### 이벤트별 훅
 

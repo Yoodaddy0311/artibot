@@ -1,12 +1,12 @@
 # Artibot
 
 [![Coverage](https://img.shields.io/badge/coverage-97.5%25-brightgreen)](plugins/artibot/tests/)
-[![Tests](https://img.shields.io/badge/tests-3765%20passed-brightgreen)](plugins/artibot/tests/)
+[![Tests](https://img.shields.io/badge/tests-3887%20passed-brightgreen)](plugins/artibot/tests/)
 [![License](https://img.shields.io/badge/license-BSL--1.1-blue)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D18-green)](package.json)
 
 ![Claude Code Plugin](https://img.shields.io/badge/Claude_Code-Plugin-7C3AED?style=flat-square)
-![Version](https://img.shields.io/badge/version-1.13.0-blue?style=flat-square)
+![Version](https://img.shields.io/badge/version-1.14.1-blue?style=flat-square)
 ![License](https://img.shields.io/badge/license-BSL--1.1-green?style=flat-square)
 ![Node.js](https://img.shields.io/badge/Node.js-18%2B-brightgreen?style=flat-square)
 ![Agent Teams](https://img.shields.io/badge/Agent_Teams-Native-orange?style=flat-square)
@@ -40,19 +40,22 @@ Most Claude Code plugins use simple sub-agent (`Task()`) delegation -- fire-and-
 - **8 DAG Playbooks** -- Feature, Bugfix, Refactor, Security + Marketing Campaign, Marketing Audit, Content Launch, Competitive Analysis (DAG-based with parallel node execution, topological sort, and cycle detection)
 - **48 Slash Commands** -- `/sc` smart router, `/daily`, `/team`, `/orchestrate`, `/spawn`, `/implement`, `/visual-check`, `/sc playbook`, and more
 - **28 Specialized Agents** -- Architecture, security, frontend, backend, testing, DevOps, marketing, SEO, analytics, and more (opus 73%, sonnet 27%)
-- **96 Domain Skills** -- 11 persona skills, 8 core skills, 16 language skills, 8 utility skills, 35 marketing skills, visual-validation, daily, team, session-worklog, vibe-coding, repo-benchmarking (all enhanced with Anthropic best-practice descriptions, workflow checklists, HITL v2 conversational checkpoints, output templates, and freedom levels)
+- **99 Domain Skills** -- 11 persona skills, 8 core skills, 16 language skills, 8 utility skills, 35 marketing skills, visual-validation, daily, team, session-worklog, vibe-coding, repo-benchmarking, auto-learning-pipeline, git-worktree, dynamic-context-injection (all enhanced with Anthropic best-practice descriptions, workflow checklists, HITL v2 conversational checkpoints, output templates, and freedom levels)
 - **8 Auto-Activating Rules** -- DEV protocol, quality gates, agent coordination, config safety, frontend/backend/test patterns, clean state enforcement
 - **Guard Registry** -- Centralized guard pipeline with `registerGuard()`/`executeChain()` API, 6 built-in guards extracted from hook scripts (75% code reduction)
 - **Loop Detection** -- Circular buffer-based agent loop detection with fingerprint matching, automatic warn/block on repeated tool calls
 - **Clean State Enforcement** -- TaskCompleted hook ensures lint+test verification at feature completion boundaries
-- **35 Event Hook Registrations** -- Cognitive routing, lifelong learning, session lifecycle, dangerous command blocking, auto-formatting, team tracking, loop detection, clean state checks, HTTP webhook notifications, git autopilot
+- **36 Event Hook Registrations** -- Cognitive routing, lifelong learning, session lifecycle, dangerous command blocking, auto-formatting, team tracking, loop detection, clean state checks, HTTP webhook notifications, git autopilot, auto-learning scheduler
 - **Advisory File Locking** -- Spin-lock based file locking for concurrent hook state access, fail-open pattern prevents workflow blocking
 - **DEV Protocol** -- Mandatory Decompose-Execute-Verify workflow with zero-skip policy for all code changes
 - **Vibe Coding Support** -- Natural language request handling with read-first, verify-after, evidence-based completion
 - **Visual Validation Pipeline** -- SSIM-based screenshot comparison, auto-fix suggestion, iterative correction loop via Playwright MCP
 - **Conversation-to-Memory** -- Auto-extracts rules and decisions from user messages (Korean/English), injects into skills dynamically
 - **Project CLAUDE.md Seeding** -- `install.sh` auto-generates project-level CLAUDE.md with Artibot methodology and DEV protocol
-- **Forked Context Skills** -- All 96 skills run in isolated forked context for clean execution without cross-contamination
+- **Runtime Middleware Pipeline** -- 9-stage middleware engine (router, subagents, tasks, checkpoint, memory, skills, guardrail, token-usage, summarization) for runtime context injection
+- **Auto-Learning Pipeline** -- Zero-config nightly self-improvement: self-scan, pattern-extract, knowledge-update, skill-refinement with auto-commit/push
+- **Output Design System** -- 7 output styles with design tokens (tokens.md) and narrative template for consistent formatting
+- **Forked Context Skills** -- All 99 skills run in isolated forked context for clean execution without cross-contamination
 - **HTTP Webhook Notifications** -- Session events sent to Slack, Discord, or custom endpoints via configurable webhooks
 - **Cross-Platform Compatible** -- Works with Gemini CLI, OpenAI Codex, and Cursor via platform adapters
 - **Zero Dependencies** -- Pure Node.js built-in modules only (`node:fs`, `node:path`, `node:os`)
@@ -562,7 +565,7 @@ All teammates have their specialist tools + team collaboration tools (`SendMessa
 
 ## Skills
 
-96 auto-activating domain skills organized in six categories:
+99 auto-activating domain skills organized in six categories:
 
 **Core Skills (8):** orchestration, cognitive-routing, lifelong-learning, token-efficiency, principles, coding-standards, security-standards, testing-standards
 
@@ -574,11 +577,11 @@ All teammates have their specialist tools + team collaboration tools (`SendMessa
 
 **Marketing Skills (34):** marketing-strategy, campaign-planning, seo-strategy, technical-seo, content-seo, social-media, email-marketing, competitive-intelligence, advertising, ab-testing, brand-guidelines, copywriting, customer-journey, data-analysis, data-visualization, lead-management, marketing-analytics, presentation-design, report-generation, segmentation, cro-page, cro-funnel, cro-forms, and more
 
-**Workflow Skills (5):** daily (work recap/retrospective), team (parallel orchestration), session-worklog (auto session tracking), vibe-coding (natural language coding protocol), repo-benchmarking (external repo analysis and comparison)
+**Workflow Skills (8):** daily (work recap/retrospective), team (parallel orchestration), session-worklog (auto session tracking), vibe-coding (natural language coding protocol), repo-benchmarking (external repo analysis and comparison), auto-learning-pipeline (zero-config nightly self-improvement), git-worktree (worktree isolation), dynamic-context-injection (runtime context management)
 
 ## Hooks
 
-33 hook registrations across 15 event types:
+36 hook registrations across 15 event types:
 
 | Event | Script | Purpose |
 |-------|--------|---------|
@@ -670,14 +673,15 @@ plugins/artibot/
 |   +-- spawn.md                 #   Team spawn (parallel execution)
 |   +-- [25 dev commands].md
 |   +-- [10 marketing commands].md
-+-- skills/                      # 96 skill directories
++-- skills/                      # 99 skill directories
 |   +-- orchestration/           #   Delegation mode + team routing
 |   +-- cognitive-routing/       #   System 1/2 dual-process routing
 |   +-- lifelong-learning/       #   GRPO batch learning + knowledge transfer
 |   +-- delegation/              #   Sub-Agent/Team strategies
+|   +-- auto-learning-pipeline/  #   Zero-config nightly self-improvement
 |   +-- [23 dev skills]/
 |   +-- [23 marketing skills]/
-|   +-- [4 workflow skills]/
+|   +-- [7 workflow skills]/
 +-- rules/                       # 8 auto-activating rules
 |   +-- dev-protocol.md          #   DEV (Decompose-Execute-Verify) protocol
 |   +-- quality-gates.md         #   Quality enforcement gates
@@ -686,19 +690,21 @@ plugins/artibot/
 +-- hooks/
 |   +-- hooks.json               # Hook event mappings
 +-- scripts/
-|   +-- hooks/                   # 23 hook scripts (ESM)
-|   +-- ci/                      # 4 CI validation scripts
+|   +-- hooks/                   # 24 hook scripts (ESM)
+|   +-- ci/                      # 6 CI validation scripts
+|   +-- evals/                   # Runtime eval suite
 |   +-- utils/
 +-- lib/
 |   +-- core/                    # Core modules (platform, config, cache, playbook-parser, playbook-registry, guard-registry, event-bus, blocked-patterns)
+|   +-- runtime/                 # Runtime pipeline (12 files, 9 middlewares: router, subagents, tasks, checkpoint, memory, skills, guardrail, token-usage, summarization)
 |   +-- visual/                  # Visual validation (SSIM differ, style-fixer, validator)
 |   +-- intent/                  # Intent detection (language, trigger)
 |   +-- context/                 # Context management (session)
 |   +-- privacy/                 # PII protection (pii-detector, pii-scrubber, homoglyph, token-rotation, differential-privacy)
-|   +-- learning/                # Lifelong learning (memory, GRPO, pattern-analyzer, tool-history, rule-extractor, skill-injector, knowledge-demotion)
+|   +-- learning/                # Lifelong learning (15 modules: memory, GRPO, pattern-analyzer, tool-history, rule-extractor, skill-injector, knowledge-demotion, etc.)
 |   +-- adapters/                # Cross-platform adapters
-+-- output-styles/               # 3 output styles
-+-- templates/                   # 3 writing templates
++-- output-styles/               # 7 output styles (default, compressed, mentor, team-dashboard, tokens, narrative, statusline)
++-- templates/                   # 5 writing templates
 +-- artibot.config.json          # Plugin config (Agent Teams settings)
 +-- package.json                 # Node.js ESM runtime
 +-- .mcp.json                    # MCP server configuration
@@ -710,7 +716,7 @@ Key settings in `artibot.config.json`:
 
 | Setting | Description | Default |
 |---------|-------------|---------|
-| `version` | Plugin version | `1.13.0` |
+| `version` | Plugin version | `1.14.1` |
 | `cognitive.router.threshold` | System 1/2 boundary | `0.4` |
 | `cognitive.router.adaptRate` | Per-feedback adjustment step | `0.05` |
 | `cognitive.system1.maxLatency` | System 1 max response time (ms) | `100` |
@@ -814,7 +820,7 @@ node scripts/ci/validate-hooks.js     # Hook validation
 
 ## Version
 
-1.13.0 -- Playbook DAG system, Chinese intent support, Git Autopilot hooks, Worktree isolation mode (3,765 tests)
+1.14.1 -- Auto-learning pipeline, runtime middleware engine (9 stages), output design system, guardrail/token-usage middlewares, zero-config nightly self-improvement (3,887 tests)
 
 ## License
 
