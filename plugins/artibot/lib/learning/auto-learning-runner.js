@@ -30,6 +30,8 @@ const LEARNING_LOG_PATH = path.join(ARTIBOT_DIR, 'learning-log.json');
 const PATTERNS_DIR = path.join(ARTIBOT_DIR, 'patterns');
 const MAX_LOG_ENTRIES = 200;
 const EXEC_TIMEOUT = 120_000;
+const MAX_BUFFER = 50 * 1024 * 1024; // 50 MB for large vitest JSON output
+const SHELL_OPTS = { shell: true }; // Required on Windows for npx/npm resolution
 
 const VALID_STAGES = [
   'self-scan',
@@ -93,6 +95,62 @@ export function validateConfig(config) {
 }
 
 // ---------------------------------------------------------------------------
+// Stage 1: Self-Scan — helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Run a command and return stdout even if the process exits non-zero.
+ * @param {string} cmd
+ * @param {string[]} args
+ * @param {object} opts - execFile options
+ * @returns {Promise<string>} stdout
+ */
+async function execCapture(cmd, args, opts) {
+  try {
+    const { stdout } = await execFile(cmd, args, { ...SHELL_OPTS, ...opts });
+    return stdout;
+  } catch (err) {
+    // execFile attaches stdout/stderr to the error on non-zero exit
+    if (err.stdout) return err.stdout;
+    throw err;
+  }
+}
+
+function parseLintOutput(stdout) {
+  const eslintResult = JSON.parse(stdout);
+  const errorCount = eslintResult.reduce((sum, f) => sum + f.errorCount, 0);
+  const warningCount = eslintResult.reduce((sum, f) => sum + f.warningCount, 0);
+  return { errorCount, warningCount, passed: errorCount === 0 };
+}
+
+async function runLintCheck(cwd) {
+  const stdout = await execCapture('npx', ['eslint', '.', '--format', 'json'], {
+    cwd,
+    timeout: EXEC_TIMEOUT,
+    encoding: 'utf-8',
+    maxBuffer: MAX_BUFFER,
+  });
+  return parseLintOutput(stdout);
+}
+
+function parseTestOutput(stdout) {
+  const testResult = JSON.parse(stdout);
+  const passed = testResult.numPassedTests ?? 0;
+  const failed = testResult.numFailedTests ?? 0;
+  return { passed, failed, total: passed + failed, allPassed: failed === 0 };
+}
+
+async function runTestCheck(cwd) {
+  const stdout = await execCapture('npx', ['vitest', 'run', '--reporter=json'], {
+    cwd,
+    timeout: EXEC_TIMEOUT,
+    encoding: 'utf-8',
+    maxBuffer: MAX_BUFFER,
+  });
+  return parseTestOutput(stdout);
+}
+
+// ---------------------------------------------------------------------------
 // Stage 1: Self-Scan
 // ---------------------------------------------------------------------------
 
@@ -112,54 +170,22 @@ export async function runSelfScan(options = {}) {
     coverage: null,
   };
 
-  // Lint
+  // Lint — eslint exits non-zero when errors found, so parse err.stdout too
   try {
-    const { stdout } = await execFile('npx', ['eslint', '.', '--format', 'json'], {
-      cwd,
-      timeout: EXEC_TIMEOUT,
-      encoding: 'utf-8',
-    });
-    const eslintResult = JSON.parse(stdout);
-    const errorCount = eslintResult.reduce((sum, f) => sum + f.errorCount, 0);
-    const warningCount = eslintResult.reduce((sum, f) => sum + f.warningCount, 0);
-    report.lint = { errorCount, warningCount, passed: errorCount === 0 };
-  } catch (err) {
-    report.lint = { errorCount: -1, warningCount: -1, passed: false, error: err.message };
-  }
-
-  // Tests
-  try {
-    const { stdout } = await execFile('npx', ['vitest', 'run', '--reporter=json'], {
-      cwd,
-      timeout: EXEC_TIMEOUT,
-      encoding: 'utf-8',
-    });
-    const testResult = JSON.parse(stdout);
-    const passed = testResult.numPassedTests ?? 0;
-    const failed = testResult.numFailedTests ?? 0;
-    report.tests = { passed, failed, total: passed + failed, allPassed: failed === 0 };
-  } catch (err) {
-    report.tests = { passed: 0, failed: -1, total: -1, allPassed: false, error: err.message };
-  }
-
-  // Coverage (parse from vitest JSON output if available)
-  try {
-    const { stdout } = await execFile(
-      'npx',
-      ['vitest', 'run', '--coverage', '--reporter=json'],
-      { cwd, timeout: EXEC_TIMEOUT, encoding: 'utf-8' },
-    );
-    const coverageResult = JSON.parse(stdout);
-    const summary = coverageResult.coverageMap?.total ?? {};
-    report.coverage = {
-      statements: round(summary.statements?.pct ?? 0),
-      branches: round(summary.branches?.pct ?? 0),
-      functions: round(summary.functions?.pct ?? 0),
-      lines: round(summary.lines?.pct ?? 0),
-    };
+    report.lint = await runLintCheck(cwd);
   } catch {
-    report.coverage = null;
+    report.lint = { errorCount: -1, warningCount: -1, passed: false, error: 'lint check failed' };
   }
+
+  // Tests — vitest exits non-zero on test failures, so parse err.stdout too
+  try {
+    report.tests = await runTestCheck(cwd);
+  } catch {
+    report.tests = { passed: 0, failed: -1, total: -1, allPassed: false, error: 'test check failed' };
+  }
+
+  // Coverage — skip separate run, rely on test results
+  report.coverage = null;
 
   return report;
 }
@@ -192,7 +218,7 @@ export async function runPatternExtract(options = {}) {
     const { stdout } = await execFile(
       'git',
       ['log', `--since=${since}`, '--format=%H|%s|%an|%aI', '--no-merges'],
-      { cwd, timeout: 30_000, encoding: 'utf-8' },
+      { ...SHELL_OPTS, cwd, timeout: 30_000, encoding: 'utf-8' },
     );
     const lines = stdout.trim().split('\n').filter(Boolean);
     report.commits = lines.map((line) => {
@@ -218,7 +244,7 @@ export async function runPatternExtract(options = {}) {
     const { stdout } = await execFile(
       'git',
       ['log', `--since=${since}`, '--name-only', '--format=', '--no-merges'],
-      { cwd, timeout: 30_000, encoding: 'utf-8' },
+      { ...SHELL_OPTS, cwd, timeout: 30_000, encoding: 'utf-8' },
     );
     const fileCounts = {};
     for (const file of stdout.trim().split('\n').filter(Boolean)) {

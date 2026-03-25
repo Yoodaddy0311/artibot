@@ -1,45 +1,41 @@
 #!/usr/bin/env node
 /**
- * SessionStart hook — Auto-Learning Pipeline status check & auto-register.
- * Reads autoLearning config, outputs schedule status, and attempts to
- * auto-register the schedule if not already registered.
+ * SessionStart hook — Auto-Learning Pipeline status check.
+ * Reads autoLearning config and marker, reports registration method and status.
+ * If schedule was registered as "hint-only" (install.sh fallback), prompts
+ * the user to complete registration in the current session.
  * Runs once per session (hooks.json: once: true).
  */
 
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { parseJSON, readStdin, resolveConfigPath, writeStdout } from '../utils/index.js';
 import { createErrorHandler } from '../../lib/core/hook-utils.js';
 
 /**
- * Check if auto-learning schedule marker exists.
+ * Read the registration marker if it exists.
  *
  * @param {string} artibotDir
- * @returns {boolean}
+ * @returns {{ method: string, schedule: string } | null}
  */
-function isScheduleRegistered(artibotDir) {
+function readMarker(artibotDir) {
   const markerPath = path.join(artibotDir, 'auto-learning-registered.json');
-  return existsSync(markerPath);
+  if (!existsSync(markerPath)) return null;
+  try {
+    return JSON.parse(readFileSync(markerPath, 'utf-8'));
+  } catch {
+    return null;
+  }
 }
 
 /**
- * Write schedule registration marker so we don't re-prompt.
+ * Determine if the registration method is actually active (vs hint-only).
  *
- * @param {string} artibotDir
- * @param {string} schedule
+ * @param {string} method
+ * @returns {boolean}
  */
-function markScheduleRegistered(artibotDir, schedule) {
-  const markerPath = path.join(artibotDir, 'auto-learning-registered.json');
-  const data = {
-    registeredAt: new Date().toISOString(),
-    schedule,
-    method: 'auto-session-hint',
-  };
-  try {
-    writeFileSync(markerPath, JSON.stringify(data, null, 2) + '\n');
-  } catch {
-    // Non-critical: marker write failure is acceptable
-  }
+function isActiveMethod(method) {
+  return ['claude-schedule', 'crontab', 'schtasks'].includes(method);
 }
 
 async function main() {
@@ -70,23 +66,32 @@ async function main() {
   const dryRun = autoLearn.dryRun ? ' (DRY RUN)' : '';
   const maxChanges = autoLearn.maxChangesPerRun ?? 10;
 
-  // Resolve artibot directory for schedule marker
   const artibotDir = path.dirname(configPath);
-  const registered = isScheduleRegistered(artibotDir);
+  const marker = readMarker(artibotDir);
 
   const lines = [
     `[auto-learn] Pipeline ON | schedule: ${schedule} | stages: ${stages} | max: ${maxChanges}${dryRun}`,
   ];
 
-  if (!registered) {
-    // First time: output setup hint and mark as acknowledged
+  if (!marker) {
+    // No marker at all — install.sh was not run or old version
     lines.push(
-      '[auto-learn] Schedule not yet registered. Run: node ~/.claude/artibot/scripts/setup-auto-learning.js --schedule',
+      '[auto-learn] Schedule not registered. Run: bash ~/.claude/artibot/install.sh',
+    );
+  } else if (!isActiveMethod(marker.method)) {
+    // Marker exists but schedule not actually registered (hint-only fallback)
+    lines.push(
+      `[auto-learn] Schedule pending (method: ${marker.method}). To activate:`,
     );
     lines.push(
-      '[auto-learn] Or use CronCreate in-session: schedule="' + schedule + '" command="node ~/.claude/artibot/scripts/auto-learning-runner.js"',
+      '[auto-learn]   Option 1: Use CronCreate tool in this session',
     );
-    markScheduleRegistered(artibotDir, schedule);
+    lines.push(
+      '[auto-learn]   Option 2: node ~/.claude/artibot/scripts/setup-auto-learning.js --schedule',
+    );
+  } else {
+    // Active registration
+    lines.push(`[auto-learn] Registered via ${marker.method}`);
   }
 
   writeStdout({ message: lines.join('\n') });

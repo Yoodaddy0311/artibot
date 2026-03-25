@@ -449,8 +449,128 @@ SWARMEOF
 }
 
 # ──────────────────────────────────────────────
-# Auto-Learning Pipeline Setup (auto-register schedule)
+# Auto-Learning Pipeline Setup (zero-config auto-register)
+# Priority: claude schedule > crontab > schtasks > hint-only
 # ──────────────────────────────────────────────
+
+# Read schedule cron expression from config
+_get_auto_learning_schedule() {
+  ARTIBOT_CFG="${ARTIBOT_DIR}/artibot.config.json" node --input-type=commonjs -e \
+    "const c=JSON.parse(require('fs').readFileSync(process.env.ARTIBOT_CFG,'utf8')); console.log(c.autoLearning?.schedule||'0 3 * * *')" 2>/dev/null || echo "0 3 * * *"
+}
+
+# Check if autoLearning is enabled in config
+_is_auto_learning_enabled() {
+  ARTIBOT_CFG="${ARTIBOT_DIR}/artibot.config.json" node --input-type=commonjs -e \
+    "const c=JSON.parse(require('fs').readFileSync(process.env.ARTIBOT_CFG,'utf8')); process.exit(c.autoLearning?.enabled===true?0:1)" 2>/dev/null
+}
+
+# Write marker file to prevent duplicate registration
+_write_auto_learning_marker() {
+  local marker="$1" method="$2" schedule="$3"
+  local timestamp
+  timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+  MARKER_FILE="$marker" MARKER_TS="$timestamp" MARKER_SCHED="$schedule" MARKER_METHOD="$method" \
+  node --input-type=commonjs -e "
+    const fs = require('fs');
+    fs.writeFileSync(process.env.MARKER_FILE, JSON.stringify({
+      registeredAt: process.env.MARKER_TS,
+      schedule: process.env.MARKER_SCHED,
+      method: process.env.MARKER_METHOD
+    }, null, 2) + '\n');
+  " 2>/dev/null || true
+}
+
+# Strategy 1: claude schedule (persistent, cross-platform)
+_try_claude_schedule() {
+  local schedule="$1"
+  if ! command -v claude &>/dev/null; then
+    return 1
+  fi
+
+  # Build the pipeline prompt
+  local prompt
+  prompt="Run the Artibot auto-learning pipeline: self-scan, pattern-extract, knowledge-update, skill-refinement. Auto-commit and push if changes found."
+
+  claude schedule create \
+    --cron "$schedule" \
+    --project "${ARTIBOT_DIR}" \
+    --prompt "$prompt" \
+    &>/dev/null
+
+  return $?
+}
+
+# Strategy 2: crontab (Linux/macOS)
+_try_crontab() {
+  local schedule="$1"
+  if ! command -v crontab &>/dev/null; then
+    return 1
+  fi
+
+  local runner_path="${ARTIBOT_DIR}/scripts/run-auto-learning.js"
+  if [ ! -f "$runner_path" ]; then
+    return 1
+  fi
+
+  local cron_comment="# artibot-auto-learning"
+  local cron_line="${schedule} cd ${ARTIBOT_DIR} && node scripts/run-auto-learning.js >> /tmp/artibot-auto-learning.log 2>&1 ${cron_comment}"
+
+  # Check if already in crontab (idempotent)
+  if crontab -l 2>/dev/null | grep -q "artibot-auto-learning"; then
+    return 0
+  fi
+
+  # Append to existing crontab
+  ( crontab -l 2>/dev/null; echo "$cron_line" ) | crontab - 2>/dev/null
+  return $?
+}
+
+# Strategy 3: schtasks (Windows)
+_try_schtasks() {
+  if ! command -v schtasks.exe &>/dev/null && ! command -v schtasks &>/dev/null; then
+    return 1
+  fi
+
+  local runner_path="${ARTIBOT_DIR}/scripts/run-auto-learning.js"
+  if [ ! -f "$runner_path" ]; then
+    return 1
+  fi
+
+  local task_name="ArtibotAutoLearning"
+
+  # Check if already registered (idempotent)
+  if schtasks.exe /Query /TN "$task_name" &>/dev/null 2>&1 || schtasks /Query /TN "$task_name" &>/dev/null 2>&1; then
+    return 0
+  fi
+
+  # Convert ARTIBOT_DIR to Windows path for schtasks
+  local win_artibot_dir
+  win_artibot_dir=$(cygpath -w "$ARTIBOT_DIR" 2>/dev/null || echo "$ARTIBOT_DIR")
+
+  local node_path
+  node_path=$(which node 2>/dev/null || command -v node 2>/dev/null)
+  local win_node_path
+  win_node_path=$(cygpath -w "$node_path" 2>/dev/null || echo "$node_path")
+
+  local win_runner
+  win_runner=$(cygpath -w "$runner_path" 2>/dev/null || echo "$runner_path")
+
+  # Create daily task at 03:00
+  local schtasks_cmd="schtasks.exe"
+  command -v schtasks.exe &>/dev/null || schtasks_cmd="schtasks"
+
+  $schtasks_cmd /Create \
+    /TN "$task_name" \
+    /TR "\"${win_node_path}\" \"${win_runner}\"" \
+    /SC DAILY \
+    /ST 03:00 \
+    /F \
+    &>/dev/null 2>&1
+
+  return $?
+}
+
 setup_auto_learning() {
   local marker="${ARTIBOT_DIR}/auto-learning-registered.json"
 
@@ -460,28 +580,56 @@ setup_auto_learning() {
     return
   fi
 
-  # Attempt auto-registration via claude schedule (if available)
-  if command -v claude &>/dev/null; then
-    local schedule
-    schedule=$(ARTIBOT_CFG="${ARTIBOT_DIR}/artibot.config.json" node --input-type=commonjs -e \
-      "const c=JSON.parse(require('fs').readFileSync(process.env.ARTIBOT_CFG,'utf8')); console.log(c.autoLearning?.schedule||'0 3 * * *')" 2>/dev/null || echo "0 3 * * *")
+  # Check if auto-learning is enabled
+  if ! _is_auto_learning_enabled; then
+    log "Auto-learning pipeline disabled in config — skipping"
+    return
+  fi
 
-    log "Auto-learning pipeline enabled (schedule: ${schedule})"
-    log "  To register persistent schedule: node ~/.claude/artibot/scripts/setup-auto-learning.js --schedule"
-    log "  Or use CronCreate in session for one-off scheduling"
+  local schedule
+  schedule=$(_get_auto_learning_schedule)
+  local method="none"
+  local success=false
 
-    # Write marker so SessionStart hook doesn't re-prompt
-    local timestamp
-    timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-    MARKER_FILE="$marker" MARKER_TS="$timestamp" MARKER_SCHED="$schedule" \
-    node --input-type=commonjs -e "
-      const fs = require('fs');
-      fs.writeFileSync(process.env.MARKER_FILE, JSON.stringify({
-        registeredAt: process.env.MARKER_TS,
-        schedule: process.env.MARKER_SCHED,
-        method: 'install.sh'
-      }, null, 2) + '\n');
-    " 2>/dev/null || true
+  echo ""
+  echo -e "${BLUE}━━━ Auto-Learning Pipeline ━━━${NC}"
+  echo "Setting up automatic learning schedule: ${schedule}"
+
+  # Strategy 1: claude schedule
+  if _try_claude_schedule "$schedule" 2>/dev/null; then
+    method="claude-schedule"
+    success=true
+    log "Auto-learning registered via claude schedule (persistent)"
+  fi
+
+  # Strategy 2: crontab (Linux/macOS)
+  if [ "$success" = false ] && _try_crontab "$schedule" 2>/dev/null; then
+    method="crontab"
+    success=true
+    log "Auto-learning registered via crontab"
+  fi
+
+  # Strategy 3: schtasks (Windows)
+  if [ "$success" = false ] && _try_schtasks 2>/dev/null; then
+    method="schtasks"
+    success=true
+    log "Auto-learning registered via Windows Task Scheduler"
+  fi
+
+  # Fallback: hint only
+  if [ "$success" = false ]; then
+    method="hint-only"
+    warn "Could not auto-register schedule. Options:"
+    echo -e "  ${BLUE}1)${NC} In Claude session: use CronCreate tool"
+    echo -e "  ${BLUE}2)${NC} Manual: node ~/.claude/artibot/scripts/setup-auto-learning.js --schedule"
+    echo -e "  ${BLUE}3)${NC} CI: node ~/.claude/artibot/scripts/setup-auto-learning.js --webhook"
+  fi
+
+  # Write marker regardless (prevents re-prompting)
+  _write_auto_learning_marker "$marker" "$method" "$schedule"
+
+  if [ "$success" = true ]; then
+    log "Auto-learning pipeline active: ${schedule} via ${method}"
   fi
 }
 
