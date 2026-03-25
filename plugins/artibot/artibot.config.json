@@ -312,7 +312,8 @@
     "autoCommit": true,
     "autoPush": true,
     "maxChangesPerRun": 10,
-    "dryRun": false
+    "dryRun": false,
+    "allowedPaths": null
   },
 
 

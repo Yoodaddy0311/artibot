@@ -18,6 +18,9 @@ import path from 'node:path';
 import { readJsonFile } from '../core/file.js';
 import { ARTIBOT_DIR, round } from '../core/index.js';
 
+// PII fields to strip from provenance when packaging for Swarm sharing
+const PROVENANCE_PII_FIELDS = ['user', 'emailHash', 'machineHash'];
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -39,6 +42,29 @@ const MIN_SAMPLE_SIZE = 3;
 
 /** Minimum confidence for a pattern to be packaged */
 const MIN_CONFIDENCE = 0.4;
+
+// ---------------------------------------------------------------------------
+// Provenance PII Stripping
+// ---------------------------------------------------------------------------
+
+/**
+ * Strip PII fields from a provenance object for Swarm sharing.
+ * Removes user, emailHash, machineHash; keeps project-level metadata
+ * (project, projectName, branch, commitRange, extractedAt, pipelineVersion).
+ *
+ * @param {object|null} provenance - Full provenance object
+ * @returns {object|null} Sanitized provenance or null
+ */
+export function stripProvenance(provenance) {
+  if (!provenance || typeof provenance !== 'object') return null;
+  const sanitized = {};
+  for (const [key, value] of Object.entries(provenance)) {
+    if (!PROVENANCE_PII_FIELDS.includes(key)) {
+      sanitized[key] = value;
+    }
+  }
+  return Object.keys(sanitized).length > 0 ? sanitized : null;
+}
 
 // ---------------------------------------------------------------------------
 // Pattern -> Weight Conversion
@@ -95,11 +121,16 @@ export async function packagePatterns(localPatterns) {
     }
   }
 
+  // Collect and sanitize provenance from patterns (strip PII for Swarm)
+  const rawProvenance = patterns.find((p) => p.provenance)?.provenance ?? null;
+  const safeProvenance = stripProvenance(rawProvenance);
+
   const metadata = {
     patternCount: patterns.length,
     packagedCount: countWeightEntries(weights),
     packagedAt: new Date().toISOString(),
     categories: Object.keys(weights).filter((k) => Object.keys(weights[k]).length > 0),
+    provenance: safeProvenance,
   };
 
   const checksum = createHash('sha256')

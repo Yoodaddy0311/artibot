@@ -133,6 +133,8 @@ export {
   runAutoCommit,
   checkBranchSafety,
   countChanges,
+  collectProvenance,
+  stripProvenancePII,
 } from './auto-learning-runner.js';
 
 // ---------------------------------------------------------------------------
