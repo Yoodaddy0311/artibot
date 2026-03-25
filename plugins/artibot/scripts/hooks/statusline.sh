@@ -206,6 +206,22 @@ fi
 # ─── Cognitive mode (System1 vs System2 via env or default) ──────────────────
 COG_MODE="${ARTIBOT_COG_MODE:-sys1}"
 
+# ─── Session token usage (from runtime-prompt.js) ───────────────────────────
+TOKEN_LABEL=''
+TOKEN_FILE="$PLUGIN_ROOT/runtime/token-usage-session.json"
+if [ -f "$TOKEN_FILE" ]; then
+  RAW_TOKENS=$(_json_file_get "$TOKEN_FILE" '.totalTokens' '0')
+  if [ -n "$RAW_TOKENS" ] && [ "$RAW_TOKENS" -gt 0 ] 2>/dev/null; then
+    if [ "$RAW_TOKENS" -ge 1000000 ]; then
+      TOKEN_LABEL="~$(( RAW_TOKENS / 1000000 ))M tokens"
+    elif [ "$RAW_TOKENS" -ge 1000 ]; then
+      TOKEN_LABEL="~$(( RAW_TOKENS / 1000 ))K tokens"
+    else
+      TOKEN_LABEL="~${RAW_TOKENS} tokens"
+    fi
+  fi
+fi
+
 # ─── Assemble Line 1 ─────────────────────────────────────────────────────────
 MODEL_LABEL=$(format_model "$MODEL")
 
@@ -248,6 +264,9 @@ AB_SEGMENT=''
 
 # Cognitive mode segment
 LINE2="${LINE2}  | ⚡ ${COG_MODE}"
+
+# Token usage segment
+[ -n "$TOKEN_LABEL" ] && LINE2="${LINE2}  | ${TOKEN_LABEL}"
 
 # ─── Output ──────────────────────────────────────────────────────────────────
 printf '%b\n' "$LINE1"

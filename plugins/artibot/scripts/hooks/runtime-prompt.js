@@ -11,7 +11,7 @@
  */
 
 import path from 'node:path';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import {
   getPluginRoot,
   parseJSON,
@@ -145,6 +145,36 @@ async function fallbackPreparePrompt(prompt, pluginRoot, hookData) {
   };
 }
 
+/**
+ * Persist token usage session stats to a temp file for statusline.sh.
+ * @param {object} context - prepared.context from preparePrompt
+ * @param {string} pluginRoot
+ */
+function persistTokenUsage(context, pluginRoot) {
+  const tokenUsage = context?.tokenUsage;
+  if (!tokenUsage?.enabled) return;
+
+  const session = tokenUsage.session || {};
+  const data = {
+    totalTokens: session.totalTokens || 0,
+    totalInput: session.totalInput || 0,
+    totalOutput: session.totalOutput || 0,
+    requestCount: session.requestCount || 0,
+    updatedAt: new Date().toISOString(),
+  };
+
+  try {
+    const runtimeDir = path.join(pluginRoot, 'runtime');
+    mkdirSync(runtimeDir, { recursive: true });
+    writeFileSync(
+      path.join(runtimeDir, 'token-usage-session.json'),
+      JSON.stringify(data) + '\n',
+    );
+  } catch {
+    // Non-critical: statusline will just not show tokens
+  }
+}
+
 async function main() {
   const raw = await readStdin();
   const hookData = parseJSON(raw);
@@ -156,6 +186,9 @@ async function main() {
   const prepared = await fallbackPreparePrompt(prompt, pluginRoot, hookData);
 
   if (!prepared) return;
+
+  // Persist token usage for statusline
+  persistTokenUsage(prepared.context, pluginRoot);
 
   writeStdout({
     user_prompt: prepared.userPrompt ?? prompt,
