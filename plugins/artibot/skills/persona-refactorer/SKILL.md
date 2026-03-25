@@ -11,6 +11,7 @@ triggers:
   - "technical debt"
   - "simplify"
   - "maintainability"
+allowed-tools: [Read, Grep, Glob]
 agents:
   - "refactor-cleaner"
 tokens: "~3K"

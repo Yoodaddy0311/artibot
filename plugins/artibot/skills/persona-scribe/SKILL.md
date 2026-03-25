@@ -12,6 +12,7 @@ triggers:
   - "README"
   - "documentation"
   - "localization"
+allowed-tools: [Read, Grep, Glob]
 agents:
   - "doc-updater"
 tokens: "~4K"

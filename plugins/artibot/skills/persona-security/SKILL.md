@@ -13,6 +13,7 @@ triggers:
   - "OWASP"
   - "security"
 agent: Explore
+allowed-tools: [Read, Grep, Glob]
 agents:
   - "security-reviewer"
 tokens: "~3K"
