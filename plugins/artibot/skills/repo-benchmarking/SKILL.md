@@ -13,6 +13,7 @@ triggers:
   - "레포 분석"
   - "벤치마크"
   - "레포 비교"
+agent: Explore
 agents:
   - "repo-benchmarker"
   - "architect"

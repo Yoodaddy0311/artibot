@@ -11,6 +11,7 @@ triggers:
   - "statistics"
   - "data insights"
   - "data patterns"
+agent: Explore
 agents:
   - "code-reviewer"
   - "performance-engineer"

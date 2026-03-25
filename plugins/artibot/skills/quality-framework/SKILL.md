@@ -17,6 +17,7 @@ triggers:
   - "security validation"
   - "performance standards"
   - "quality metrics"
+agent: Explore
 agents:
   - "tdd-guide"
   - "security-reviewer"

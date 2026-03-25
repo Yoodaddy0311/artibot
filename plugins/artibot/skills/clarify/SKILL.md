@@ -24,6 +24,7 @@ triggers:
   - "specify"
   - "명확히"
   - "구체적으로"
+agent: Plan
 agents:
   - "planner"
   - "orchestrator"
