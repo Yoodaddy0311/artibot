@@ -278,7 +278,7 @@
       "demotionThreshold": 2
     },
     "schedule": {
-      "enabled": false,
+      "enabled": true,
       "nightlyLearner": "3 2 * * *",
       "driftCheck": "7 6 * * 1"
     }

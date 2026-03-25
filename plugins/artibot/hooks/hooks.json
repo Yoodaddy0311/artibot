@@ -56,6 +56,15 @@
           "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/auto-learning-check.js",
           "timeout": 5000
         }]
+      },
+      {
+        "matcher": "*",
+        "once": true,
+        "hooks": [{
+          "type": "command",
+          "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/skill-validation-check.js",
+          "timeout": 5000
+        }]
       }
     ],
     "PreToolUse": [

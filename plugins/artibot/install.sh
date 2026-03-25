@@ -449,6 +449,43 @@ SWARMEOF
 }
 
 # ──────────────────────────────────────────────
+# Auto-Learning Pipeline Setup (auto-register schedule)
+# ──────────────────────────────────────────────
+setup_auto_learning() {
+  local marker="${ARTIBOT_DIR}/auto-learning-registered.json"
+
+  # Skip if already registered
+  if [ -f "$marker" ]; then
+    log "Auto-learning schedule already registered — skipping"
+    return
+  fi
+
+  # Attempt auto-registration via claude schedule (if available)
+  if command -v claude &>/dev/null; then
+    local schedule
+    schedule=$(ARTIBOT_CFG="${ARTIBOT_DIR}/artibot.config.json" node --input-type=commonjs -e \
+      "const c=JSON.parse(require('fs').readFileSync(process.env.ARTIBOT_CFG,'utf8')); console.log(c.autoLearning?.schedule||'0 3 * * *')" 2>/dev/null || echo "0 3 * * *")
+
+    log "Auto-learning pipeline enabled (schedule: ${schedule})"
+    log "  To register persistent schedule: node ~/.claude/artibot/scripts/setup-auto-learning.js --schedule"
+    log "  Or use CronCreate in session for one-off scheduling"
+
+    # Write marker so SessionStart hook doesn't re-prompt
+    local timestamp
+    timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+    MARKER_FILE="$marker" MARKER_TS="$timestamp" MARKER_SCHED="$schedule" \
+    node --input-type=commonjs -e "
+      const fs = require('fs');
+      fs.writeFileSync(process.env.MARKER_FILE, JSON.stringify({
+        registeredAt: process.env.MARKER_TS,
+        schedule: process.env.MARKER_SCHED,
+        method: 'install.sh'
+      }, null, 2) + '\n');
+    " 2>/dev/null || true
+  fi
+}
+
+# ──────────────────────────────────────────────
 # Save Source Repo Path (for auto-update git pull)
 # ──────────────────────────────────────────────
 save_source_path() {
@@ -567,6 +604,7 @@ main() {
       seed_local_config
       seed_auto_memory
       setup_swarm_consent
+      setup_auto_learning
       save_source_path
       verify_install
       ;;

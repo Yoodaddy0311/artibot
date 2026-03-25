@@ -1,6 +1,5 @@
 ---
 context: fork
-disable-model-invocation: true
 name: strategic-compact
 description: |
   Context compaction strategy for preserving critical information during PreCompact events.

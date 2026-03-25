@@ -1,6 +1,5 @@
 ---
 context: fork
-user-invocable: false
 name: orchestration
 description: |
   Routing intelligence engine that analyzes requests and routes to optimal agents, skills, and commands.

@@ -28,7 +28,7 @@ const FALLBACK_CONFIG = Object.freeze({
 });
 
 function summarizeMessage(parts) {
-  const core = parts.filter(Boolean).slice(0, 6).join(' | ');
+  const core = parts.filter(Boolean).slice(0, 9).join(' | ');
   return core ? `[runtime] ${core}` : '[runtime] prepared';
 }
 
