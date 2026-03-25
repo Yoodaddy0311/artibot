@@ -13,6 +13,7 @@ triggers:
   - "benchmark"
   - "profiling"
 agent: Explore
+allowed-tools: [Read, Grep, Glob]
 agents:
   - "performance-engineer"
 tokens: "~3K"

@@ -14,6 +14,7 @@ triggers:
   - "edge case"
   - "regression"
 agent: Explore
+allowed-tools: [Read, Grep, Glob]
 agents:
   - "tdd-guide"
 tokens: "~3K"
