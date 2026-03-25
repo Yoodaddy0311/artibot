@@ -18,6 +18,7 @@ triggers:
   - "performance standards"
   - "quality metrics"
 agent: Explore
+allowed-tools: [Read, Grep, Glob]
 agents:
   - "tdd-guide"
   - "security-reviewer"

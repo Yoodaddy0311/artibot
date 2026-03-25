@@ -121,6 +121,20 @@ export {
   CATEGORIES as VAULT_CATEGORIES,
 } from './vault.js';
 
+// Auto-Learning Pipeline Runner
+export {
+  runAutoLearningPipeline,
+  loadAutoLearningConfig,
+  validateConfig as validateAutoLearningConfig,
+  runSelfScan,
+  runPatternExtract,
+  runKnowledgeUpdate,
+  runSkillRefinement,
+  runAutoCommit,
+  checkBranchSafety,
+  countChanges,
+} from './auto-learning-runner.js';
+
 // ---------------------------------------------------------------------------
 // Local imports for business logic functions below
 // (re-exports don't create local bindings)

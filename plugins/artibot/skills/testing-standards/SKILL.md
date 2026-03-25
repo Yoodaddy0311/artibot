@@ -19,6 +19,7 @@ triggers:
   - "integration test"
   - "E2E"
   - "test quality"
+allowed-tools: [Read, Grep, Glob]
 agents:
   - "tdd-guide"
   - "backend-developer"

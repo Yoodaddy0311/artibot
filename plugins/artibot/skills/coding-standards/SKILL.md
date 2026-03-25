@@ -21,6 +21,7 @@ triggers:
   - "class"
   - "style"
   - "standards"
+allowed-tools: [Read, Grep, Glob]
 agents:
   - "refactor-cleaner"
   - "backend-developer"

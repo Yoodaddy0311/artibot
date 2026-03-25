@@ -19,6 +19,7 @@ triggers:
   - "validate"
   - "sanitize"
   - "encrypt"
+allowed-tools: [Read, Grep, Glob]
 agents:
   - "security-reviewer"
   - "backend-developer"

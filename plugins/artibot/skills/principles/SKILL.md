@@ -17,6 +17,7 @@ triggers:
   - "SOLID"
   - "clean code"
   - "DRY"
+allowed-tools: [Read, Grep, Glob]
 agents:
   - "architect"
   - "refactor-cleaner"

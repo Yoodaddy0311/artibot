@@ -311,7 +311,8 @@
     "pipeline": ["self-scan", "pattern-extract", "knowledge-update", "skill-refinement"],
     "autoCommit": true,
     "autoPush": true,
-    "maxChangesPerRun": 10
+    "maxChangesPerRun": 10,
+    "dryRun": false
   },
 
 
