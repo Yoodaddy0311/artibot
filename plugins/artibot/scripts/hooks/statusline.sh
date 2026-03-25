@@ -36,7 +36,9 @@ _json_file_get() {
         const keys = '$path'.replace(/^\./,'').split('.');
         let v = o;
         for (const k of keys) v = v && v[k];
-        process.stdout.write(v != null ? String(v) : '$default');
+        if (v == null) { process.stdout.write('$default'); }
+        else if (typeof v === 'object') { process.stdout.write('$default'); }
+        else { process.stdout.write(String(v)); }
       } catch { process.stdout.write('$default'); }
     " 2>/dev/null || echo "$default"
   else
@@ -56,7 +58,9 @@ jq_get() {
         const keys = '$key'.replace(/^\./,'').split('.');
         let v = o;
         for (const k of keys) v = v && v[k];
-        process.stdout.write(v != null ? String(v) : '$default');
+        if (v == null) { process.stdout.write('$default'); }
+        else if (typeof v === 'object') { process.stdout.write('$default'); }
+        else { process.stdout.write(String(v)); }
       } catch { process.stdout.write('$default'); }
     " 2>/dev/null || echo "$default"
   else
