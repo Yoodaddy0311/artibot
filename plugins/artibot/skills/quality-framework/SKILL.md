@@ -31,6 +31,11 @@ platforms: [claude-code, gemini-cli, codex-cli, cursor]
 
 # ATLAS Quality Framework
 
+## Current State
+<!-- Dynamic context injected at activation -->
+!`npm run lint 2>&1 | tail -3`
+!`npm test 2>&1 | tail -5`
+
 ## Contents
 - [When This Skill Applies](#when-this-skill-applies)
 - [ATLAS Dimensions](#atlas-dimensions)

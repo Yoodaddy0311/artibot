@@ -31,6 +31,11 @@ category: "debugging"
 
 Use `$ARGUMENTS` to describe the error or symptom to investigate.
 
+## Current State
+<!-- Dynamic context injected at activation -->
+!`git log --oneline --all --grep='fix' -5 2>/dev/null`
+!`git diff --stat HEAD~3 2>/dev/null`
+
 ## Contents
 - [When This Skill Applies](#when-this-skill-applies)
 - [Iron Law](#iron-law)
