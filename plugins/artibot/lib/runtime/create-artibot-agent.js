@@ -17,6 +17,8 @@ import { createSkillsMiddleware } from './middleware/skills.js';
 import { createTasksMiddleware } from './middleware/tasks.js';
 import { createSubagentsMiddleware } from './middleware/subagents.js';
 import { createSummarizationMiddleware } from './middleware/summarization.js';
+import { createGuardrailMiddleware } from './middleware/guardrail.js';
+import { createTokenUsageMiddleware } from './middleware/token-usage.js';
 import { createCheckpointMiddleware } from './middleware/checkpoint.js';
 
 const FALLBACK_CONFIG = Object.freeze({
@@ -125,6 +127,8 @@ export function createArtibotAgent(options = {}) {
   const mwTasks = createTasksMiddleware({ now, ...(middlewareOptions.tasks || {}) });
   const mwSubagents = createSubagentsMiddleware(middlewareOptions.subagents);
   const mwSummarization = createSummarizationMiddleware(middlewareOptions.summarization);
+  const mwGuardrail = createGuardrailMiddleware(middlewareOptions.guardrail);
+  const mwTokenUsage = createTokenUsageMiddleware({ now, ...(middlewareOptions.tokenUsage || {}) });
   const mwCheckpoint = createCheckpointMiddleware({
     store: checkpointStore,
     now,

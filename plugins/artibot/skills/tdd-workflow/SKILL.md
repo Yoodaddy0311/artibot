@@ -17,10 +17,13 @@ triggers:
 agents:
   - "tdd-guide"
   - "backend-developer"
+argument-hint: "[target] e.g., auth-service, utils, login-form"
 tokens: "~3K"
 category: "testing"
 ---
 # TDD Workflow
+
+Use `$ARGUMENTS` to specify the test target (module, service, or component).
 
 ## When This Skill Applies
 - Implementing new features (tests first)

@@ -19,10 +19,13 @@ triggers:
 agents:
   - "devops-engineer"
   - "doc-updater"
+argument-hint: "[operation] e.g., commit, branch, merge, PR, rebase"
 tokens: "~3K"
 category: "devops"
 ---
 # Git Workflow
+
+Use `$ARGUMENTS` to specify the git operation or workflow step to focus on.
 
 ## When This Skill Applies
 - Creating commits with conventional commit format
