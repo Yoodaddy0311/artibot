@@ -972,7 +972,7 @@ orchestrator는 **코드를 직접 작성하지 않습니다**. 팀을 구성하
 | `report-generation` | 리포트 생성, 데이터 요약 |
 | `segmentation` | 시장/고객 세그멘테이션 |
 
-### 기타 스킬 (13개)
+### 기타 스킬 (16개)
 
 | 스킬 | 설명 |
 |------|------|
@@ -989,6 +989,9 @@ orchestrator는 **코드를 직접 작성하지 않습니다**. 팀을 구성하
 | `platform-database-cloud` | DB/클라우드 플랫폼 패턴 |
 | `library-mermaid` | Mermaid 다이어그램 패턴 |
 | `library-shadcn` | shadcn/ui 컴포넌트 패턴 |
+| `auto-learning-pipeline` | 제로 설정 야간 자기 개선 파이프라인 |
+| `git-worktree` | Git worktree 격리 실행 |
+| `dynamic-context-injection` | 런타임 동적 컨텍스트 주입 |
 
 ---
 
@@ -1083,28 +1086,31 @@ plugins/artibot/
 │   ├── orchestrate.md           #   팀 오케스트레이션 (TeamCreate)
 │   ├── spawn.md                 #   팀 스폰 (병렬 실행)
 │   └── [38개 커맨드].md
-├── skills/                      # 96개 스킬 디렉토리 (forked context 격리)
+├── skills/                      # 99개 스킬 디렉토리 (forked context 격리)
 │   ├── orchestration/           #   위임 모드 선택 + 팀 라우팅
 │   ├── delegation/              #   Sub-Agent/Team 위임 전략
-│   └── [76개 스킬]/
+│   ├── auto-learning-pipeline/  #   제로 설정 야간 자기 개선
+│   └── [79개 스킬]/
 ├── hooks/
 │   └── hooks.json               # 훅 이벤트 매핑
 ├── scripts/
-│   ├── hooks/                   # 23개 훅 스크립트 (ESM, file-lock 포함)
-│   ├── ci/                      # 4개 CI 검증 스크립트
+│   ├── hooks/                   # 24개 훅 스크립트 (ESM, file-lock 포함)
+│   ├── ci/                      # 6개 CI 검증 스크립트
+│   ├── evals/                   # 런타임 eval 스위트
 │   └── utils/
-├── lib/                         # 54개 모듈
+├── lib/                         # 66개 모듈
 │   ├── core/                    # 코어 (27): platform, config, cache, lifecycle, extension, auto-fixer, error-codes, hook-utils, quickstart, style-registry, guard-registry, file-lock, event-bus, blocked-patterns 등
+│   ├── runtime/                 # 런타임 (12): create-artibot-agent, evaluator, middleware/ (9: router, subagents, tasks, checkpoint, memory, skills, guardrail, token-usage, summarization)
 │   ├── cognitive/               # 인지 엔진 (8): router, system1, system2 (core+strategies), sandbox, loop-detector
-│   ├── learning/                # 학습 (8): memory, grpo, knowledge-transfer, knowledge-demotion, lifelong, tool-learner, self-evaluator, vault
+│   ├── learning/                # 학습 (15): memory, grpo, knowledge-transfer, knowledge-demotion, lifelong, tool-learner, self-evaluator, vault 등
 │   ├── adapters/                # 멀티모델 어댑터 (7): base, gemini, codex, cursor, antigravity, adapter-utils
-│   ├── swarm/                   # 연합 지능 (5): swarm-client, pattern-packager, sync-scheduler, swarm-persistence
+│   ├── swarm/                   # 연합 지능 (6): swarm-client, pattern-packager, sync-scheduler, swarm-persistence, swarm-config
 │   ├── intent/                  # 의도 감지 (4): language, trigger, ambiguity
-│   ├── privacy/                 # 프라이버시 (5): pii-scrubber, pii-detector, homoglyph-detector, token-rotation, differential-privacy
-│   ├── system/                  # 시스템 (1): lsp-client
-│   └── context/                 # 컨텍스트 (1): session
-├── output-styles/               # 4개 출력 스타일
-├── templates/                   # 3개 작성 템플릿
+│   ├── privacy/                 # 프라이버시 (6): pii-scrubber, pii-detector, homoglyph-detector, token-rotation, differential-privacy
+│   ├── system/                  # 시스템 (2): lsp-client
+│   └── context/                 # 컨텍스트 (2): session
+├── output-styles/               # 7개 출력 스타일 (default, compressed, mentor, team-dashboard, tokens, narrative, statusline)
+├── templates/                   # 5개 작성 템플릿
 ├── artibot.config.json          # 플러그인 설정 (Agent Teams 포함)
 ├── package.json                 # Node.js ESM 런타임
 └── .mcp.json                    # MCP 서버 설정
@@ -1121,6 +1127,36 @@ node scripts/ci/validate-skills.js    # 스킬 검증
 node scripts/ci/validate-commands.js  # 커맨드 검증
 node scripts/ci/validate-hooks.js     # 훅 검증
 ```
+
+---
+
+## v1.14.0~v1.14.1 주요 변경사항
+
+### 자동 학습 파이프라인 (v1.14.0)
+- `autoLearning` 설정: 크론 스케줄 기반 야간 자기 개선 (self-scan → pattern-extract → knowledge-update → skill-refinement)
+- `auto-learning-check.js` SessionStart 훅: 스케줄 확인 및 자동 트리거
+- `auto-learning-pipeline` 스킬: 파이프라인 설정 및 운영 가이드
+
+### 런타임 미들웨어 엔진 (v1.14.0)
+- 9단계 미들웨어 파이프라인: router → subagents → tasks → checkpoint → memory → skills → guardrail → token-usage → summarization
+- `GuardrailMiddleware`: 런타임 안전 가드레일 (위험 패턴 차단, 리소스 제한)
+- `TokenUsageMiddleware`: 토큰 사용량 추적 및 최적화 제안
+- `SummarizationMiddleware`: 응답 자동 요약 및 컨텍스트 압축
+- `artibot.config.json`에 `runtime.middleware` 배열 등록
+
+### Output Design System (v1.14.0)
+- `output-styles/tokens.md`: 디자인 토큰 시스템 (색상, 간격, 타이포그래피 토큰)
+- `output-styles/artibot-narrative.md`: 내러티브 스타일 템플릿
+- 7개 출력 스타일로 확장 (기존 4개 + tokens, narrative, statusline)
+
+### SKILL.md 검증 파이프라인 (v1.14.0)
+- `scripts/gen-skill-docs.js`: 99개 스킬 SKILL.md 유효성 검증 및 리포트 생성
+- `npm run skill:check` / `npm run skill:report` 스크립트 추가
+
+### 제로 설정 자동 학습 (v1.14.1)
+- autoCommit/autoPush 기본 활성화
+- maxChangesPerRun 제한으로 안전한 자동 변경
+- 멀티플랫폼 호환성 개선
 
 ---
 
@@ -1149,7 +1185,7 @@ node scripts/ci/validate-hooks.js     # 훅 검증
 
 ### hooks.json 동기화
 - 버전 `v1.9.2` → `v1.12.0` → `v1.13.0` 동기화
-- 35개 훅 등록, 15개 이벤트 타입
+- 36개 훅 등록, 15개 이벤트 타입
 
 ---
 
