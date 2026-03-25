@@ -13,6 +13,7 @@ triggers:
   - "troubleshoot"
   - "diagnose"
 agent: Explore
+allowed-tools: [Read, Grep, Glob]
 agents:
   - "code-reviewer"
 tokens: "~3K"

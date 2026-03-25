@@ -343,7 +343,28 @@ async function main() {
   }
 }
 
-main().catch(err => {
-  console.error('Fatal:', err.message);
-  process.exit(2);
-});
+// Only run main() when executed directly (not imported for testing)
+const isDirectRun = process.argv[1]?.endsWith('gen-skill-docs.js');
+if (isDirectRun) {
+  main().catch(err => {
+    console.error('Fatal:', err.message);
+    process.exit(2);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Exports for testing
+// ---------------------------------------------------------------------------
+
+export {
+  parseFrontmatter as _parseFrontmatter,
+  validateSkill as _validateSkill,
+  detectTriggerDuplicates as _detectTriggerDuplicates,
+  summarize as _summarize,
+  formatTableReport as _formatTableReport,
+  REQUIRED_FIELDS,
+  RECOMMENDED_FIELDS,
+  VALID_CONTEXTS,
+  VALID_PLATFORMS,
+  VALID_CATEGORIES,
+};

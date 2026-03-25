@@ -13,6 +13,7 @@ triggers:
   - "authentication"
   - "backend"
   - "reliability"
+allowed-tools: [Read, Grep, Glob]
 agents:
   - "backend-developer"
 tokens: "~3K"

@@ -13,6 +13,7 @@ triggers:
   - "teach"
   - "mentor"
   - "educate"
+allowed-tools: [Read, Grep, Glob]
 agents:
   - "planner"
 tokens: "~3K"

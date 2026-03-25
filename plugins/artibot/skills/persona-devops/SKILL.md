@@ -13,6 +13,7 @@ triggers:
   - "DevOps"
   - "pipeline"
   - "monitoring"
+allowed-tools: [Read, Grep, Glob]
 agents:
   - "devops-engineer"
 tokens: "~3K"

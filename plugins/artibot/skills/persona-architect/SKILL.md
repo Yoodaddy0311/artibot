@@ -13,6 +13,7 @@ triggers:
   - "patterns"
   - "architect"
 agent: Plan
+allowed-tools: [Read, Grep, Glob]
 agents:
   - "architect"
 tokens: "~4K"

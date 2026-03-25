@@ -14,6 +14,7 @@ triggers:
   - "accessibility"
   - "frontend"
   - "UX"
+allowed-tools: [Read, Grep, Glob]
 agents:
   - "frontend-developer"
 tokens: "~4K"
