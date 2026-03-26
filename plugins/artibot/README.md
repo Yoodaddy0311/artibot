@@ -1,6 +1,6 @@
 # Artibot
 
-![Tests](https://img.shields.io/badge/tests-3887%20passed-brightgreen) ![Coverage](https://img.shields.io/badge/coverage-97.5%25-brightgreen) ![License](https://img.shields.io/badge/license-MIT-blue) ![Version](https://img.shields.io/badge/version-1.14.1-blue) ![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen)
+![Tests](https://img.shields.io/badge/tests-3989%20passed-brightgreen) ![Coverage](https://img.shields.io/badge/coverage-89.27%25-brightgreen) ![License](https://img.shields.io/badge/license-MIT-blue) ![Version](https://img.shields.io/badge/version-1.14.3-blue) ![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen)
 
 Claude Code를 위한 **Agent Teams 기반** 지능형 오케스트레이션 플러그인. Claude의 네이티브 Agent Teams API를 핵심 엔진으로 사용하여 전문 에이전트 팀 구성, P2P 통신, 공유 태스크 관리를 통해 개발 생산성을 극대화합니다.
 
@@ -77,7 +77,7 @@ Artibot의 핵심 엔진은 Claude Code의 **Agent Teams API**입니다. 단순�
 - `/sc`로 자연어 의도를 분석하여 최적 커맨드로 자동 라우팅
 - 개발, 분석, 품질, 테스트, 문서화, 배포, 마케팅 전 영역 커버
 
-### 99개 도메인 스킬
+### 98개 도메인 스킬
 
 - 11개 페르소나 스킬 (architect, frontend, backend, security 등)
 - 6개 코어 스킬 (orchestration, principles, coding/security/testing standards)
@@ -158,7 +158,7 @@ Artibot은 Claude Code 외에도 **Gemini CLI**, **OpenAI Codex CLI**, **Cursor 
 | Agent Teams (P2P 메시징) | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Sub-Agent (단방향 위임) | ✅ | ✅ | ✅ | ⚠️ 제한적 | ✅ |
 | 27개 전문 에이전트 | ✅ | ✅ 자동변환 | ✅ 자동변환 | ✅ 자동변환 | ✅ 자동변환 |
-| 99개 스킬 (SKILL.md) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| 98개 스킬 (SKILL.md) | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 슬래시 커맨드 | ✅ 48개 | ✅ TOML | → Workflows | → Prompts | → Workflows |
 | Hooks 자동작동 | ✅ 15이벤트 | ✅ 동일패턴 | ⚠️ 제한적 | ❌ | ✅ Agent Manager |
 | 인지 라우터 (System 1/2) | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -1086,7 +1086,7 @@ plugins/artibot/
 │   ├── orchestrate.md           #   팀 오케스트레이션 (TeamCreate)
 │   ├── spawn.md                 #   팀 스폰 (병렬 실행)
 │   └── [38개 커맨드].md
-├── skills/                      # 99개 스킬 디렉토리 (forked context 격리)
+├── skills/                      # 98개 스킬 디렉토리 (forked context 격리)
 │   ├── orchestration/           #   위임 모드 선택 + 팀 라우팅
 │   ├── delegation/              #   Sub-Agent/Team 위임 전략
 │   ├── auto-learning-pipeline/  #   제로 설정 야간 자기 개선
@@ -1150,7 +1150,7 @@ node scripts/ci/validate-hooks.js     # 훅 검증
 - 7개 출력 스타일로 확장 (기존 4개 + tokens, narrative, statusline)
 
 ### SKILL.md 검증 파이프라인 (v1.14.0)
-- `scripts/gen-skill-docs.js`: 99개 스킬 SKILL.md 유효성 검증 및 리포트 생성
+- `scripts/gen-skill-docs.js`: 98개 스킬 SKILL.md 유효성 검증 및 리포트 생성
 - `npm run skill:check` / `npm run skill:report` 스크립트 추가
 
 ### 제로 설정 자동 학습 (v1.14.1)

@@ -1,12 +1,12 @@
 # Artibot
 
-[![Coverage](https://img.shields.io/badge/coverage-97.5%25-brightgreen)](plugins/artibot/tests/)
-[![Tests](https://img.shields.io/badge/tests-3887%20passed-brightgreen)](plugins/artibot/tests/)
+[![Coverage](https://img.shields.io/badge/coverage-89.27%25-brightgreen)](plugins/artibot/tests/)
+[![Tests](https://img.shields.io/badge/tests-3989%20passed-brightgreen)](plugins/artibot/tests/)
 [![License](https://img.shields.io/badge/license-BSL--1.1-blue)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D18-green)](package.json)
 
 ![Claude Code Plugin](https://img.shields.io/badge/Claude_Code-Plugin-7C3AED?style=flat-square)
-![Version](https://img.shields.io/badge/version-1.14.1-blue?style=flat-square)
+![Version](https://img.shields.io/badge/version-1.14.3-blue?style=flat-square)
 ![License](https://img.shields.io/badge/license-BSL--1.1-green?style=flat-square)
 ![Node.js](https://img.shields.io/badge/Node.js-18%2B-brightgreen?style=flat-square)
 ![Agent Teams](https://img.shields.io/badge/Agent_Teams-Native-orange?style=flat-square)
@@ -40,7 +40,7 @@ Most Claude Code plugins use simple sub-agent (`Task()`) delegation -- fire-and-
 - **8 DAG Playbooks** -- Feature, Bugfix, Refactor, Security + Marketing Campaign, Marketing Audit, Content Launch, Competitive Analysis (DAG-based with parallel node execution, topological sort, and cycle detection)
 - **48 Slash Commands** -- `/sc` smart router, `/daily`, `/team`, `/orchestrate`, `/spawn`, `/implement`, `/visual-check`, `/sc playbook`, and more
 - **28 Specialized Agents** -- Architecture, security, frontend, backend, testing, DevOps, marketing, SEO, analytics, and more (opus 73%, sonnet 27%)
-- **99 Domain Skills** -- 11 persona skills, 8 core skills, 16 language skills, 8 utility skills, 35 marketing skills, visual-validation, daily, team, session-worklog, vibe-coding, repo-benchmarking, auto-learning-pipeline, git-worktree, dynamic-context-injection (all enhanced with Anthropic best-practice descriptions, workflow checklists, HITL v2 conversational checkpoints, output templates, and freedom levels)
+- **98 Domain Skills** -- 11 persona skills, 8 core skills, 16 language skills, 8 utility skills, 35 marketing skills, visual-validation, daily, team, session-worklog, vibe-coding, repo-benchmarking, auto-learning-pipeline, git-worktree, dynamic-context-injection (all enhanced with Anthropic best-practice descriptions, workflow checklists, HITL v2 conversational checkpoints, output templates, and freedom levels)
 - **8 Auto-Activating Rules** -- DEV protocol, quality gates, agent coordination, config safety, frontend/backend/test patterns, clean state enforcement
 - **Guard Registry** -- Centralized guard pipeline with `registerGuard()`/`executeChain()` API, 6 built-in guards extracted from hook scripts (75% code reduction)
 - **Loop Detection** -- Circular buffer-based agent loop detection with fingerprint matching, automatic warn/block on repeated tool calls
@@ -55,7 +55,7 @@ Most Claude Code plugins use simple sub-agent (`Task()`) delegation -- fire-and-
 - **Runtime Middleware Pipeline** -- 9-stage middleware engine (router, subagents, tasks, checkpoint, memory, skills, guardrail, token-usage, summarization) for runtime context injection
 - **Auto-Learning Pipeline** -- Zero-config nightly self-improvement: self-scan, pattern-extract, knowledge-update, skill-refinement with auto-commit/push
 - **Output Design System** -- 7 output styles with design tokens (tokens.md) and narrative template for consistent formatting
-- **Forked Context Skills** -- All 99 skills run in isolated forked context for clean execution without cross-contamination
+- **Forked Context Skills** -- All 98 skills run in isolated forked context for clean execution without cross-contamination
 - **HTTP Webhook Notifications** -- Session events sent to Slack, Discord, or custom endpoints via configurable webhooks
 - **Cross-Platform Compatible** -- Works with Gemini CLI, OpenAI Codex, and Cursor via platform adapters
 - **Zero Dependencies** -- Pure Node.js built-in modules only (`node:fs`, `node:path`, `node:os`)
@@ -565,7 +565,7 @@ All teammates have their specialist tools + team collaboration tools (`SendMessa
 
 ## Skills
 
-99 auto-activating domain skills organized in six categories:
+98 auto-activating domain skills organized in six categories:
 
 **Core Skills (8):** orchestration, cognitive-routing, lifelong-learning, token-efficiency, principles, coding-standards, security-standards, testing-standards
 
@@ -673,7 +673,7 @@ plugins/artibot/
 |   +-- spawn.md                 #   Team spawn (parallel execution)
 |   +-- [25 dev commands].md
 |   +-- [10 marketing commands].md
-+-- skills/                      # 99 skill directories
++-- skills/                      # 98 skill directories
 |   +-- orchestration/           #   Delegation mode + team routing
 |   +-- cognitive-routing/       #   System 1/2 dual-process routing
 |   +-- lifelong-learning/       #   GRPO batch learning + knowledge transfer
@@ -820,7 +820,7 @@ node scripts/ci/validate-hooks.js     # Hook validation
 
 ## Version
 
-1.14.1 -- Auto-learning pipeline, runtime middleware engine (9 stages), output design system, guardrail/token-usage middlewares, zero-config nightly self-improvement (3,887 tests)
+1.14.3 -- Auto-learning pipeline, runtime middleware engine (9 stages), output design system, guardrail/token-usage middlewares, zero-config nightly self-improvement (3,989 tests)
 
 ## License
 
