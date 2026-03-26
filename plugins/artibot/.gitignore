@@ -4,3 +4,6 @@ CLAUDE.local.md
 # Build artifacts
 _reports/
 _benchmarks/
+
+# Runtime session data
+runtime/
