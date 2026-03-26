@@ -56,12 +56,10 @@ function estimateTokens(text, charsPerToken) {
  * @param {object} state
  * @param {number} inputTokens
  * @param {number} outputTokens
- * @param {string} model
- * @param {string} agent
- * @param {() => number} nowFn
+ * @param {{ model: string, agent: string, nowFn: () => number }} opts
  * @returns {UsageEntry}
  */
-function buildEntry(state, inputTokens, outputTokens, model, agent, nowFn) {
+function buildEntry(state, inputTokens, outputTokens, { model, agent, nowFn }) {
   return Object.freeze({
     inputTokens,
     outputTokens,
@@ -251,7 +249,7 @@ export function createTokenUsageMiddleware(options = {}) {
     const model = resolveModel(state);
     const agent = resolveAgent(state);
 
-    const entry = buildEntry(state, inputTokens, outputTokens, model, agent, now);
+    const entry = buildEntry(state, inputTokens, outputTokens, { model, agent, nowFn: now });
     store = recordUsage(store, entry, maxEntries);
 
     const usage = getUsage(store);

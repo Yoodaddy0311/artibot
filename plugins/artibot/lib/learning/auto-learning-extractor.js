@@ -125,6 +125,7 @@ export async function collectProvenance(options = {}) {
  */
 export function stripProvenancePII(provenance) {
   if (!provenance) return {};
+  // eslint-disable-next-line no-unused-vars
   const { user: _u, emailHash: _e, machineHash: _m, ...safe } = provenance;
   return safe;
 }

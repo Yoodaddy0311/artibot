@@ -43,8 +43,8 @@ async function main() {
   parseJSON(raw);
 
   // Load config
-  let config = {};
   const configPath = resolveConfigPath('artibot.config.json');
+  let config;
   try {
     config = JSON.parse(readFileSync(configPath, 'utf-8'));
   } catch {

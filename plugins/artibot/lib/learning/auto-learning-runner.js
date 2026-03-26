@@ -20,7 +20,7 @@
  */
 
 import path from 'node:path';
-import { readJsonFile, writeJsonFile, ensureDir } from '../core/file.js';
+import { ensureDir, readJsonFile, writeJsonFile } from '../core/file.js';
 import { ARTIBOT_DIR } from '../core/index.js';
 import { getPluginRoot } from '../core/platform.js';
 
@@ -46,7 +46,7 @@ export {
 
 // Import for internal use by orchestrator
 import { runSelfScan } from './auto-learning-scanner.js';
-import { runPatternExtract, collectProvenance } from './auto-learning-extractor.js';
+import { collectProvenance, runPatternExtract } from './auto-learning-extractor.js';
 import { runAutoCommit } from './auto-learning-committer.js';
 
 // ---------------------------------------------------------------------------
@@ -128,6 +128,7 @@ export function validateConfig(config) {
  * @param {boolean} [options.dryRun] - Skip writes
  * @returns {Promise<object>} KnowledgeReport
  */
+// eslint-disable-next-line complexity
 export async function runKnowledgeUpdate(scanReport, patternReport, options = {}) {
   const report = {
     stage: 'knowledge-update',
@@ -348,6 +349,7 @@ export async function runAutoLearningPipeline(overrideConfig = {}) {
  * @param {object} result
  * @returns {Promise<void>}
  */
+// eslint-disable-next-line complexity
 async function appendPipelineLog(result) {
   try {
     const existing = (await readJsonFile(LEARNING_LOG_PATH)) ?? { entries: [] };

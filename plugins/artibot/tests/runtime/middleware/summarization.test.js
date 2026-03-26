@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
-  createSummarizationMiddleware,
-  _estimateTokens,
-  _splitSegments,
-  _partitionSegments,
-  _summarizeSegments,
-  _rebuildPrompt,
   _calcCompactionStats,
+  _estimateTokens,
+  _partitionSegments,
+  _rebuildPrompt,
+  _splitSegments,
+  _summarizeSegments,
+  createSummarizationMiddleware,
 } from '../../../lib/runtime/middleware/summarization.js';
 
 function makeState(prompt = 'short prompt') {

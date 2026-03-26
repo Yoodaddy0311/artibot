@@ -1,16 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import {
-  KNOWN_ACTIONS,
-  KNOWN_PATTERNS,
-  parsePlaybook,
-  parseDagPlaybook,
-  serializePlaybook,
-  validatePlaybook,
-  validateDagPlaybook,
   detectCycle,
-  topologicalSort,
   getExecutionOrder,
   getParallelGroups,
+  KNOWN_ACTIONS,
+  KNOWN_PATTERNS,
+  parseDagPlaybook,
+  parsePlaybook,
+  serializePlaybook,
+  topologicalSort,
+  validateDagPlaybook,
+  validatePlaybook,
 } from '../../lib/core/playbook-parser.js';
 
 // ---------------------------------------------------------------------------

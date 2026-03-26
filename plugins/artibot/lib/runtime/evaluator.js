@@ -181,7 +181,7 @@ async function runMiddlewarePipelineScenario() {
 }
 
 async function runErrorRecoveryScenario() {
-  const failingMiddleware = async (state) => {
+  const failingMiddleware = async (_state) => {
     throw new Error('simulated middleware failure');
   };
   Object.defineProperty(failingMiddleware, 'name', { value: 'failingMiddleware' });
@@ -384,14 +384,14 @@ export function formatRuntimeSuiteReport(report) {
     `Avg Score: ${report.averageScore}`,
   ];
 
-  if (report.suiteDurationMs != null) {
+  if (report.suiteDurationMs !== null && report.suiteDurationMs !== undefined) {
     lines.push(`Duration:  ${report.suiteDurationMs}ms`);
   }
   lines.push('');
 
   for (const result of report.results) {
-    const timing = result.durationMs != null ? ` ${result.durationMs}ms` : '';
-    const mem = result.memDeltaBytes != null ? ` mem=${Math.round(result.memDeltaBytes / 1024)}KB` : '';
+    const timing = result.durationMs !== null && result.durationMs !== undefined ? ` ${result.durationMs}ms` : '';
+    const mem = result.memDeltaBytes !== null && result.memDeltaBytes !== undefined ? ` mem=${Math.round(result.memDeltaBytes / 1024)}KB` : '';
     lines.push(`${result.passed ? 'PASS' : 'FAIL'} ${result.id} (${result.score}${timing}${mem})`);
     for (const assertion of result.assertions) {
       lines.push(`  - ${assertion.passed ? 'ok' : 'xx'} ${assertion.name}: ${assertion.detail}`);

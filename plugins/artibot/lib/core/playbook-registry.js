@@ -17,11 +17,10 @@ import { ensureDir, listFiles, readJsonFile, writeJsonFile } from './file.js';
 import { getHomeDir } from './platform.js';
 import {
   KNOWN_PATTERNS,
-  parsePlaybook,
   parseDagPlaybook,
-  validatePlaybook,
+  parsePlaybook,
   validateDagPlaybook,
-  detectCycle,
+  validatePlaybook,
 } from './playbook-parser.js';
 
 // ---------------------------------------------------------------------------

@@ -14,7 +14,7 @@
 
 import path from 'node:path';
 import { BaseAdapter } from './base-adapter.js';
-import { buildFrontmatter, buildSkillFrontmatter, cleanDescription, stripAgentTeamsRefs, stripClaudeSpecificRefs } from './adapter-utils.js';
+import { buildSkillFrontmatter, stripAgentTeamsRefs, stripClaudeSpecificRefs } from './adapter-utils.js';
 
 export class CursorAdapter extends BaseAdapter {
   get platformId() {

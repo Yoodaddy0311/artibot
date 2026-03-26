@@ -69,7 +69,7 @@ export function buildSkillFrontmatter(skill) {
 
   if (skill.triggers?.length) fields.triggers = skill.triggers;
   if (skill.category) fields.category = skill.category;
-  if (skill.level != null) fields.level = String(skill.level);
+  if (skill.level !== null && skill.level !== undefined) fields.level = String(skill.level);
   if (skill.platforms?.length) fields.platforms = skill.platforms;
   if (skill.tokens) fields.tokens = skill.tokens;
   if (skill.agents?.length) fields.agents = skill.agents;

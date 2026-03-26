@@ -11,8 +11,8 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import path from 'node:path';
-import { readStdin, parseJSON, writeStdout } from '../utils/index.js';
-import { createErrorHandler, extractToolName, extractFilePath } from '../../lib/core/hook-utils.js';
+import { parseJSON, readStdin, writeStdout } from '../utils/index.js';
+import { createErrorHandler, extractFilePath, extractToolName } from '../../lib/core/hook-utils.js';
 
 // -------------------------------------------------------------------------
 // Constants

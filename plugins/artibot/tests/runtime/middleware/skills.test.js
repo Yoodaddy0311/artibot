@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { createSkillsMiddleware, _resetSkillCaches } from '../../../lib/runtime/middleware/skills.js';
+import { _resetSkillCaches, createSkillsMiddleware } from '../../../lib/runtime/middleware/skills.js';
 
 function makeState(overrides = {}) {
   return {
