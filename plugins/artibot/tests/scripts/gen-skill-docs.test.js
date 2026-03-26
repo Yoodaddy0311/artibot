@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
-  _parseFrontmatter,
-  _validateSkill,
   _detectTriggerDuplicates,
-  _summarize,
   _formatTableReport,
+  _parseFrontmatter,
+  _summarize,
+  _validateSkill,
   REQUIRED_FIELDS,
   VALID_CONTEXTS,
 } from '../../scripts/gen-skill-docs.js';

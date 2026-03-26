@@ -22,17 +22,17 @@
 import { createServer } from 'node:http';
 import { createHash } from 'node:crypto';
 import {
-  storeWeights,
+  flushStore,
+  getClientStats,
   getLatestWeights,
-  getWeightsSince,
   getRecentWeightSnapshots,
+  getServerInfo,
+  getWeightsSince,
+  initStore,
+  recordDownload,
   setGlobalWeights,
   storeTelemetry,
-  getClientStats,
-  recordDownload,
-  getServerInfo,
-  initStore,
-  flushStore,
+  storeWeights,
 } from './store.js';
 import { federatedAverage } from './merge.js';
 

@@ -11,7 +11,7 @@
  */
 
 import path from 'node:path';
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import {
   getPluginRoot,
   parseJSON,

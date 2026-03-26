@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { matchKeywords, uniqueIntents, detectLanguage } from '../../lib/intent/language.js';
+import { detectLanguage, matchKeywords, uniqueIntents } from '../../lib/intent/language.js';
 
 describe('language', () => {
   describe('matchKeywords()', () => {

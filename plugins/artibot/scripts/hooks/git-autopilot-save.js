@@ -10,7 +10,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import path from 'node:path';
-import { readStdin, parseJSON, atomicWriteSync } from '../utils/index.js';
+import { atomicWriteSync, parseJSON, readStdin } from '../utils/index.js';
 import { createErrorHandler } from '../../lib/core/hook-utils.js';
 
 // -------------------------------------------------------------------------

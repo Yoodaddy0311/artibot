@@ -6,10 +6,10 @@
  * @module lib/git/conflict-resolver
  */
 
-import { readFileSync, writeFileSync, mkdirSync, copyFileSync, existsSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { join, dirname, basename } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { parseConflictBlocks, splitLines } from './conflict-parser.js';
 import { logError } from '../core/error.js';
 

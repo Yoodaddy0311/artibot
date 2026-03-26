@@ -1,13 +1,13 @@
-import { describe, it, expect } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import {
-  parseConflictBlocks,
-  hasConflictMarkers,
   extractNonConflictLines,
+  hasConflictMarkers,
+  parseConflictBlocks,
 } from '../../lib/git/conflict-parser.js'
 import {
+  formatResolutionSummary,
   resolveBlock,
   resolveFile,
-  formatResolutionSummary,
 } from '../../lib/git/conflict-resolver.js'
 
 // ─── TC1: 공백 전용 충돌 (positional) ────────────────────────────────────────

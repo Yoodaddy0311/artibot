@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
-  createGuardrailMiddleware,
-  _matchToolPattern,
   _conditionsMet,
-  _findMatchingRule,
   _evaluateToolCall,
+  _findMatchingRule,
+  _matchToolPattern,
+  createGuardrailMiddleware,
   DEFAULT_RULES,
 } from '../../../lib/runtime/middleware/guardrail.js';
 

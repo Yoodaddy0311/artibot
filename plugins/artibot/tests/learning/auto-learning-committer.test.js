@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
-  matchGlob,
-  isAutoCommitAllowed,
-  buildAutoCommitMessage,
   AUTO_COMMIT_ALLOWLIST,
   AUTO_COMMIT_DENYLIST,
+  buildAutoCommitMessage,
+  isAutoCommitAllowed,
+  matchGlob,
 } from '../../lib/learning/auto-learning-committer.js';
 
 // ---------------------------------------------------------------------------

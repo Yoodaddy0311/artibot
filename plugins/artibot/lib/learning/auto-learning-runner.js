@@ -20,7 +20,7 @@
  */
 
 import path from 'node:path';
-import { readJsonFile, writeJsonFile, ensureDir } from '../core/file.js';
+import { ensureDir, readJsonFile, writeJsonFile } from '../core/file.js';
 import { ARTIBOT_DIR } from '../core/index.js';
 import { getPluginRoot } from '../core/platform.js';
 
@@ -46,7 +46,7 @@ export {
 
 // Import for internal use by orchestrator
 import { runSelfScan } from './auto-learning-scanner.js';
-import { runPatternExtract, collectProvenance } from './auto-learning-extractor.js';
+import { collectProvenance, runPatternExtract } from './auto-learning-extractor.js';
 import { runAutoCommit } from './auto-learning-committer.js';
 
 // ---------------------------------------------------------------------------

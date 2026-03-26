@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
-  validateConfig,
   runKnowledgeUpdate,
   runSkillRefinement,
+  validateConfig,
 } from '../../lib/learning/auto-learning-runner.js';
 
 // ---------------------------------------------------------------------------
