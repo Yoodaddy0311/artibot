@@ -16,7 +16,6 @@ import { fileURLToPath } from 'node:url';
 import { ensureDir, listFiles, readJsonFile, writeJsonFile } from './file.js';
 import { getHomeDir } from './platform.js';
 import {
-  detectCycle,
   KNOWN_PATTERNS,
   parseDagPlaybook,
   parsePlaybook,

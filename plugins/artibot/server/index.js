@@ -352,6 +352,55 @@ function handleStats(req, res, params) {
 // ---------------------------------------------------------------------------
 
 /**
+ * Dispatch request to the appropriate route handler.
+ *
+ * @param {import('node:http').IncomingMessage} req
+ * @param {import('node:http').ServerResponse} res
+ * @param {string} pathname
+ */
+async function dispatchRoute(req, res, pathname) {
+  if (req.method === 'POST' && pathname === '/api/v1/weights') {
+    return await handleUploadWeights(req, res);
+  }
+  if (req.method === 'GET' && pathname === '/api/v1/weights/latest') {
+    return handleDownloadWeights(req, res);
+  }
+  if (req.method === 'POST' && pathname === '/api/v1/telemetry') {
+    return await handleTelemetry(req, res);
+  }
+  if (req.method === 'GET' && pathname === '/api/v1/health') {
+    return handleHealth(req, res);
+  }
+  const statsMatch = matchRoute('/api/v1/stats/:clientId', pathname);
+  if (req.method === 'GET' && statsMatch) {
+    return handleStats(req, res, statsMatch);
+  }
+  if (pathname === '/' || pathname === '') {
+    return handleHealth(req, res);
+  }
+  return json(res, 404, { error: 'Not found' }, req);
+}
+
+/**
+ * Handle route-level errors and map to HTTP responses.
+ *
+ * @param {import('node:http').IncomingMessage} req
+ * @param {import('node:http').ServerResponse} res
+ * @param {string} pathname
+ * @param {Error} err
+ */
+function handleRouteError(req, res, pathname, err) {
+  console.error(`[ERROR] ${req.method} ${pathname}:`, err.message); // eslint-disable-line no-console
+  if (err.message === 'Invalid JSON') {
+    return json(res, 400, { error: 'Invalid JSON in request body' }, req);
+  }
+  if (err.message?.includes('exceeds')) {
+    return json(res, 413, { error: err.message }, req);
+  }
+  return json(res, 500, { error: 'Internal server error' }, req);
+}
+
+/**
  * Main request handler.
  *
  * @param {import('node:http').IncomingMessage} req
@@ -385,51 +434,9 @@ async function handleRequest(req, res) {
   const pathname = url.pathname;
 
   try {
-    // POST /api/v1/weights
-    if (req.method === 'POST' && pathname === '/api/v1/weights') {
-      return await handleUploadWeights(req, res);
-    }
-
-    // GET /api/v1/weights/latest
-    if (req.method === 'GET' && pathname === '/api/v1/weights/latest') {
-      return handleDownloadWeights(req, res);
-    }
-
-    // POST /api/v1/telemetry
-    if (req.method === 'POST' && pathname === '/api/v1/telemetry') {
-      return await handleTelemetry(req, res);
-    }
-
-    // GET /api/v1/health
-    if (req.method === 'GET' && pathname === '/api/v1/health') {
-      return handleHealth(req, res);
-    }
-
-    // GET /api/v1/stats/:clientId
-    const statsMatch = matchRoute('/api/v1/stats/:clientId', pathname);
-    if (req.method === 'GET' && statsMatch) {
-      return handleStats(req, res, statsMatch);
-    }
-
-    // Root - redirect to health
-    if (pathname === '/' || pathname === '') {
-      return handleHealth(req, res);
-    }
-
-    // 404
-    return json(res, 404, { error: 'Not found' }, req);
+    return await dispatchRoute(req, res, pathname);
   } catch (err) {
-    console.error(`[ERROR] ${req.method} ${pathname}:`, err.message);
-
-    if (err.message === 'Invalid JSON') {
-      return json(res, 400, { error: 'Invalid JSON in request body' }, req);
-    }
-
-    if (err.message?.includes('exceeds')) {
-      return json(res, 413, { error: err.message }, req);
-    }
-
-    return json(res, 500, { error: 'Internal server error' }, req);
+    return handleRouteError(req, res, pathname, err);
   }
 }
 
@@ -445,6 +452,7 @@ const hasPersistence = initStore();
 
 const server = createServer(handleRequest);
 
+/* eslint-disable no-console */
 server.listen(PORT, () => {
   console.log(`[Artibot Swarm Server] Listening on port ${PORT}`);
   console.log(`[Artibot Swarm Server] FedAvg window: ${FEDAVG_WINDOW} snapshots`);
