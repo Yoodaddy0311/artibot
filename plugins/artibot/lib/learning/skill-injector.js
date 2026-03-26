@@ -1,8 +1,11 @@
 /**
  * Skill Injector.
- * Injects user-extracted rules into skill SKILL.md files as a
- * project-specific rules section, preventing duplicate injections
- * via a content-addressed injection log.
+ * Injects auto-learned rules into skill references/ directories as JSON,
+ * preventing duplicate injections via a content-addressed injection log.
+ *
+ * Rules are stored in `skills/<name>/references/auto-learned-rules.json`
+ * (inside the auto-commit allowlist) rather than modifying SKILL.md
+ * (which is on the auto-commit denylist).
  *
  * Supported injection targets: coding-standards, frontend-patterns, testing-standards
  * (and any other skill directory under the plugin's skills/ directory).
@@ -22,11 +25,10 @@ import { getPluginRoot } from '../core/platform.js';
 
 const INJECTION_LOG_PATH = path.join(ARTIBOT_DIR, 'skill-injection-log.json');
 
-/** Header appended to SKILL.md when project rules section is first created */
-const PROJECT_RULES_HEADER = '\n## Project-Specific Rules\n\n' +
-  '> Auto-injected from conversation history. Do not edit manually.\n';
+/** Filename for auto-learned rules stored in skill references/ directory */
+const AUTO_LEARNED_RULES_FILE = 'auto-learned-rules.json';
 
-/** Sentinel comment used to locate the project-rules section in SKILL.md */
+/** Sentinel used to locate the legacy project-rules section in SKILL.md */
 const SECTION_SENTINEL = '## Project-Specific Rules';
 
 const MAX_INJECTION_LOG = 2000;
@@ -99,6 +101,38 @@ function getSkillMdPath(skillName) {
 }
 
 /**
+ * Resolve the absolute path to a skill's auto-learned-rules.json in references dir.
+ * This path is within the auto-commit allowlist.
+ * @param {string} skillName
+ * @returns {string}
+ */
+function getAutoLearnedRulesPath(skillName) {
+  return path.join(getPluginRoot(), 'skills', skillName, 'references', AUTO_LEARNED_RULES_FILE);
+}
+
+/**
+ * Read existing auto-learned rules from references/ JSON file.
+ * @param {string} skillName
+ * @returns {Promise<Array<{ type: string, content: string, injectedAt: string }>>}
+ */
+async function readAutoLearnedRules(skillName) {
+  const data = await readJsonFile(getAutoLearnedRulesPath(skillName));
+  return Array.isArray(data) ? data : [];
+}
+
+/**
+ * Write auto-learned rules to references/ JSON file.
+ * @param {string} skillName
+ * @param {Array<{ type: string, content: string, injectedAt: string }>} rules
+ * @returns {Promise<void>}
+ */
+async function writeAutoLearnedRules(skillName, rules) {
+  const refsDir = path.join(getPluginRoot(), 'skills', skillName, 'references');
+  await ensureDir(refsDir);
+  await writeJsonFile(getAutoLearnedRulesPath(skillName), rules);
+}
+
+/**
  * Check if a skill exists (SKILL.md is present).
  * @param {string} skillName
  * @returns {Promise<boolean>}
@@ -156,35 +190,6 @@ function formatRuleLine(rule) {
   return `- ${typeLabel} ${rule.content}`;
 }
 
-/**
- * Inject new rule lines into existing SKILL.md text.
- * If the project-rules section doesn't exist, creates it at the end.
- * Returns the updated content string (immutable transformation).
- *
- * @param {string} originalContent - Current SKILL.md text
- * @param {string[]} newLines - Formatted rule lines to add
- * @returns {string}
- */
-function injectIntoContent(originalContent, newLines) {
-  if (newLines.length === 0) return originalContent;
-
-  const addendum = newLines.join('\n');
-
-  if (originalContent.includes(SECTION_SENTINEL)) {
-    // Append after the sentinel (at end of existing section)
-    const idx = originalContent.indexOf(SECTION_SENTINEL);
-    // Find the end of the section header line
-    const endOfHeader = originalContent.indexOf('\n', idx) + 1;
-    const before = originalContent.slice(0, endOfHeader);
-    const after = originalContent.slice(endOfHeader);
-    return `${before}${addendum}\n${after}`;
-  }
-
-  // No section yet: append header + rules at the end
-  const base = originalContent.trimEnd();
-  return `${base}\n${PROJECT_RULES_HEADER}${addendum}\n`;
-}
-
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -198,9 +203,10 @@ function injectIntoContent(originalContent, newLines) {
  */
 
 /**
- * Inject extracted rules into a target skill's SKILL.md.
+ * Inject extracted rules into a target skill's references/ directory.
+ * Rules are stored in `references/auto-learned-rules.json` (within the
+ * auto-commit allowlist) rather than modifying SKILL.md (on the denylist).
  * Rules already present in the injection log are silently skipped.
- * Returns an updated skill context object for downstream use.
  *
  * @param {Array<{ type: string, content: string, [key: string]: unknown }>} rules
  * @param {string} targetSkill - Skill directory name (e.g. 'coding-standards')
@@ -227,7 +233,7 @@ export async function injectRules(rules, targetSkill) {
   );
 
   const now = new Date().toISOString();
-  const newLines = [];
+  const newEntries = [];
   const newLogRecords = [];
   const injectedContents = [];
   let skipped = 0;
@@ -238,7 +244,12 @@ export async function injectRules(rules, targetSkill) {
       skipped++;
       continue;
     }
-    newLines.push(formatRuleLine(rule));
+    newEntries.push({
+      type: rule.type,
+      content: rule.content,
+      formatted: formatRuleLine(rule),
+      injectedAt: now,
+    });
     newLogRecords.push({
       skillName: targetSkill,
       ruleHash: hash,
@@ -250,16 +261,17 @@ export async function injectRules(rules, targetSkill) {
     alreadyInjected.add(hash);
   }
 
-  if (newLines.length > 0) {
-    const original = await readSkillMd(targetSkill);
-    const updated = injectIntoContent(original, newLines);
-    await writeSkillMd(targetSkill, updated);
+  if (newEntries.length > 0) {
+    // Write to references/auto-learned-rules.json (auto-commit allowlist)
+    const existing = await readAutoLearnedRules(targetSkill);
+    const merged = [...existing, ...newEntries];
+    await writeAutoLearnedRules(targetSkill, merged);
     await appendInjectionLog(newLogRecords);
   }
 
   return {
     skillName: targetSkill,
-    injected: newLines.length,
+    injected: newEntries.length,
     skipped,
     injectedContents,
   };
@@ -278,7 +290,8 @@ export async function getInjectedRules(skillName) {
 
 /**
  * Clear all injected rules for a given skill.
- * Removes injection log entries and strips the project-rules section from SKILL.md.
+ * Removes injection log entries and deletes references/auto-learned-rules.json.
+ * Also strips legacy project-rules section from SKILL.md if present.
  *
  * @param {string} skillName
  * @returns {Promise<{ cleared: number }>}
@@ -292,12 +305,18 @@ export async function clearInjections(skillName) {
   await ensureDir(ARTIBOT_DIR);
   await writeJsonFile(INJECTION_LOG_PATH, remaining);
 
-  // Strip project-rules section from SKILL.md if it exists
+  // Remove auto-learned rules JSON file
+  try {
+    await fs.unlink(getAutoLearnedRulesPath(skillName));
+  } catch {
+    // File may not exist — non-critical
+  }
+
+  // Legacy cleanup: strip project-rules section from SKILL.md if present
   if (await skillExists(skillName)) {
     const original = await readSkillMd(skillName);
     if (original.includes(SECTION_SENTINEL)) {
       const idx = original.indexOf(SECTION_SENTINEL);
-      // Also strip the preceding blank line(s)
       const stripped = original.slice(0, idx).trimEnd();
       await writeSkillMd(skillName, stripped + '\n');
     }
