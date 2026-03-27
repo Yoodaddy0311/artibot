@@ -57,7 +57,7 @@ function buildOverride(evalId, humanScore, aiScore, context, options = {}) {
  */
 function dimensionStats(overrides, dimension) {
   const relevant = overrides.filter(
-    (o) => o.context?.dimensions?.[dimension] != null,
+    (o) => o.context?.dimensions?.[dimension] !== null && o.context?.dimensions?.[dimension] !== undefined,
   );
 
   if (relevant.length === 0) {
