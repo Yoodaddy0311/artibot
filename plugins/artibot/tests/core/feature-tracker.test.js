@@ -1,10 +1,10 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
-  createFeatureTracker,
   FEATURES,
-  formatIndicator,
+  createFeatureTracker,
   formatCompressedIndicator,
   formatDashboard,
+  formatIndicator,
 } from '../../lib/core/feature-tracker.js';
 import { emit, reset as resetEventBus } from '../../lib/core/event-bus.js';
 

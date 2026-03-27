@@ -6,7 +6,7 @@
  * @module lib/core/feature-tracker
  */
 
-import { on, emit } from './event-bus.js';
+import { on } from './event-bus.js';
 
 // ---------------------------------------------------------------------------
 // Feature registry (immutable definitions)
