@@ -5,6 +5,9 @@ description: |
   Auto-activates when: {activation conditions}.
 
   Triggers: {keyword1}, {keyword2}, {pattern1}
+sources:
+  - "{https://official-docs.example.com/llms.txt}"
+  - "{https://api.example.com/$discovery/rest}"
 ---
 
 # {Skill Title}

@@ -5,6 +5,7 @@
  * @module lib/runtime/middleware/router
  */
 
+import { emit } from '../../core/event-bus.js';
 import { classifyComplexity } from '../../cognitive/router.js';
 import { detectIntent } from '../../intent/index.js';
 
@@ -56,6 +57,8 @@ export function createRouterMiddleware(options = {}) {
     if (state.context.intent.best) {
       state.messageParts.push(`intent=${state.context.intent.best}`);
     }
+
+    emit('feature:cognitive-route', { detail: `${system} (score ${classification.score ?? 0})` });
 
     return state;
   };

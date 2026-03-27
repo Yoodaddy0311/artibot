@@ -23,6 +23,10 @@ agents:
 tokens: "~4K"
 category: "language"
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
+sources:
+  - "https://www.typescriptlang.org/docs/handbook/intro.html"
+  - "https://www.typescriptlang.org/tsconfig/"
+  - "https://www.typescriptlang.org/docs/handbook/release-notes/overview.html"
 ---
 
 # TypeScript Patterns & Best Practices

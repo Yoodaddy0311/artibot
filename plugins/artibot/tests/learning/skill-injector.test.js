@@ -44,6 +44,7 @@ vi.mock('node:fs/promises', () => ({
 import {
   clearInjections,
   getInjectedRules,
+  getSkillSources,
   injectRules,
 } from '../../lib/learning/skill-injector.js';
 
@@ -427,5 +428,94 @@ describe('clearInjections()', () => {
 
     const result = await clearInjections('coding-standards');
     expect(result.cleared).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getSkillSources()
+// ---------------------------------------------------------------------------
+
+describe('getSkillSources()', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockEnsureDir.mockResolvedValue(undefined);
+    mockFsAccess.mockResolvedValue(undefined); // skill exists
+  });
+
+  it('returns empty sources when skill does not exist', async () => {
+    mockFsAccess.mockRejectedValue(new Error('ENOENT'));
+    const result = await getSkillSources('nonexistent-skill');
+    expect(result.sources).toEqual([]);
+    expect(result.hint).toBe('');
+  });
+
+  it('returns empty sources when SKILL.md has no sources field', async () => {
+    mockFsReadFile.mockResolvedValue(
+      '---\nname: lang-go\ndescription: "Go patterns"\n---\n# Go Patterns',
+    );
+    const result = await getSkillSources('lang-go');
+    expect(result.sources).toEqual([]);
+    expect(result.hint).toBe('');
+  });
+
+  it('parses dash-list sources from frontmatter', async () => {
+    mockFsReadFile.mockResolvedValue(
+      '---\nname: lang-typescript\nsources:\n  - "https://typescriptlang.org/docs"\n  - "https://typescriptlang.org/tsconfig"\n---\n# TS',
+    );
+    const result = await getSkillSources('lang-typescript');
+    expect(result.sources).toEqual([
+      'https://typescriptlang.org/docs',
+      'https://typescriptlang.org/tsconfig',
+    ]);
+  });
+
+  it('parses inline array sources from frontmatter', async () => {
+    mockFsReadFile.mockResolvedValue(
+      '---\nname: test-skill\nsources: ["https://example.com/docs", "https://example.com/api"]\n---\n# Test',
+    );
+    const result = await getSkillSources('test-skill');
+    expect(result.sources).toEqual([
+      'https://example.com/docs',
+      'https://example.com/api',
+    ]);
+  });
+
+  it('generates hint string with Source of Truth header', async () => {
+    mockFsReadFile.mockResolvedValue(
+      '---\nname: test-skill\nsources:\n  - "https://docs.example.com"\n---\n# Test',
+    );
+    const result = await getSkillSources('test-skill');
+    expect(result.hint).toContain('## Source of Truth');
+    expect(result.hint).toContain('https://docs.example.com');
+    expect(result.hint).toContain('Fetch these');
+  });
+
+  it('handles sources field with no quotes around URLs', async () => {
+    mockFsReadFile.mockResolvedValue(
+      '---\nname: test-skill\nsources:\n  - https://docs.example.com\n---\n# Test',
+    );
+    const result = await getSkillSources('test-skill');
+    expect(result.sources).toEqual(['https://docs.example.com']);
+  });
+
+  it('handles SKILL.md without frontmatter', async () => {
+    mockFsReadFile.mockResolvedValue('# Just a title\n\nNo frontmatter here.');
+    const result = await getSkillSources('test-skill');
+    expect(result.sources).toEqual([]);
+    expect(result.hint).toBe('');
+  });
+
+  it('stops parsing sources at next top-level key', async () => {
+    mockFsReadFile.mockResolvedValue(
+      '---\nname: test-skill\nsources:\n  - "https://docs.example.com"\ncategory: "language"\n---\n# Test',
+    );
+    const result = await getSkillSources('test-skill');
+    expect(result.sources).toEqual(['https://docs.example.com']);
+  });
+
+  it('returns empty sources when SKILL.md is empty', async () => {
+    mockFsReadFile.mockResolvedValue('');
+    const result = await getSkillSources('test-skill');
+    expect(result.sources).toEqual([]);
   });
 });

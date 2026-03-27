@@ -17,6 +17,9 @@ agents:
   - "frontend-developer"
 tokens: "~2K"
 category: "tooling"
+sources:
+  - "https://context7.com/docs"
+  - "https://modelcontextprotocol.io/introduction"
 ---
 # MCP: Context7
 

@@ -8,6 +8,9 @@ agents: ["frontend-developer", "architect"]
 tokens: "~4K"
 category: "library"
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
+sources:
+  - "https://ui.shadcn.com/docs"
+  - "https://www.radix-ui.com/primitives/docs/overview/introduction"
 ---
 
 # shadcn/ui Component Patterns

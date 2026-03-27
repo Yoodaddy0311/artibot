@@ -6,6 +6,8 @@
  * @module lib/runtime/middleware/guardrail
  */
 
+import { emit } from '../../core/event-bus.js';
+
 // ---------------------------------------------------------------------------
 // Default policy rules
 // ---------------------------------------------------------------------------
@@ -244,8 +246,10 @@ export function createGuardrailMiddleware(options = {}) {
     if (denied.length > 0) {
       state.messageParts.push(`guardrail=denied:${denied.join(',')}`);
       state.userPrompt += `\n\n⚠️ Guardrail: tools denied by policy — ${denied.join(', ')}`;
+      emit('feature:guardrail-applied', { detail: `denied ${denied.join(',')}` });
     } else if (asked.length > 0) {
       state.messageParts.push(`guardrail=ask:${asked.join(',')}`);
+      emit('feature:guardrail-applied', { detail: `ask ${asked.join(',')}` });
     } else {
       state.messageParts.push(`guardrail=ok`);
     }

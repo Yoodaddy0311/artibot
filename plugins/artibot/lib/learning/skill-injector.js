@@ -191,6 +191,73 @@ function formatRuleLine(rule) {
 }
 
 // ---------------------------------------------------------------------------
+// Source of Truth URL Parsing
+// ---------------------------------------------------------------------------
+
+/**
+ * Parse SKILL.md frontmatter to extract `sources:` field.
+ * Returns an array of source URLs that agents can fetch for live documentation.
+ * @param {string} content - SKILL.md file content
+ * @returns {string[]} Array of source URLs (empty if none)
+ */
+function parseSourcesFromFrontmatter(content) {
+  const fmMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  if (!fmMatch) return [];
+
+  const yamlBlock = fmMatch[1];
+  const sources = [];
+
+  // Match inline array: sources: ["url1", "url2"]
+  const inlineMatch = yamlBlock.match(/^sources\s*:\s*\[([^\]]*)\]/m);
+  if (inlineMatch) {
+    return inlineMatch[1]
+      .split(',')
+      .map((s) => s.trim().replace(/^["']|["']$/g, ''))
+      .filter(Boolean);
+  }
+
+  // Match dash-list:
+  //   sources:
+  //     - "url1"
+  //     - "url2"
+  const lines = yamlBlock.split('\n');
+  let inSources = false;
+  for (const line of lines) {
+    if (/^sources\s*:\s*$/.test(line)) {
+      inSources = true;
+      continue;
+    }
+    if (inSources) {
+      const dashMatch = line.match(/^\s+-\s+["']?([^"'\s]+)["']?/);
+      if (dashMatch) {
+        sources.push(dashMatch[1]);
+      } else if (/^\S/.test(line)) {
+        break; // next top-level key
+      }
+    }
+  }
+
+  return sources;
+}
+
+/**
+ * Build a context hint string for agents, listing source-of-truth URLs.
+ * Returns empty string if no sources are defined.
+ * @param {string[]} sources - Array of source URLs
+ * @returns {string}
+ */
+function formatSourcesHint(sources) {
+  if (!sources || sources.length === 0) return '';
+  const urlList = sources.map((url) => `  - ${url}`).join('\n');
+  return (
+    `\n## Source of Truth\n` +
+    `The following URLs provide live, up-to-date documentation for this skill.\n` +
+    `Fetch these when you need the latest API specs, SDK changes, or best practices:\n` +
+    `${urlList}\n`
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
@@ -286,6 +353,23 @@ export async function injectRules(rules, targetSkill) {
 export async function getInjectedRules(skillName) {
   const log = await loadInjectionLog();
   return skillName ? log.filter((r) => r.skillName === skillName) : log;
+}
+
+/**
+ * Get source-of-truth URLs for a given skill by parsing its SKILL.md frontmatter.
+ * Returns an object with the raw URLs and a formatted hint string for agent context.
+ *
+ * @param {string} skillName - Skill directory name (e.g. 'lang-typescript')
+ * @returns {Promise<{ sources: string[], hint: string }>}
+ */
+export async function getSkillSources(skillName) {
+  const exists = await skillExists(skillName);
+  if (!exists) return { sources: [], hint: '' };
+
+  const content = await readSkillMd(skillName);
+  const sources = parseSourcesFromFrontmatter(content);
+  const hint = formatSourcesHint(sources);
+  return { sources, hint };
 }
 
 /**

@@ -7,6 +7,8 @@
  * @module lib/runtime/middleware/summarization
  */
 
+import { emit } from '../../core/event-bus.js';
+
 // ---------------------------------------------------------------------------
 // Pure helpers
 // ---------------------------------------------------------------------------
@@ -175,6 +177,8 @@ export function createSummarizationMiddleware(options = {}) {
     };
 
     state.messageParts.push(`compact=${reductionPercent}%`);
+
+    emit('feature:token-saving', { detail: `compacted ${reductionPercent}%` });
 
     return state;
   };
