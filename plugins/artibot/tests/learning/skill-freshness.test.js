@@ -329,8 +329,6 @@ async function scanWithMockReaddir(checker, _dir, dirNames, files) {
   return results;
 }
 
-// Need parseFrontmatter for the helper
-import { _parseFrontmatter } from '../../lib/learning/skill-freshness.js';
 
 // ---------------------------------------------------------------------------
 // markVerified

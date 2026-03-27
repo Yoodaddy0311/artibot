@@ -148,3 +148,13 @@ export {
 export {
   createEvalCalibrator,
 } from './eval-calibrator.js';
+
+// Eval Isolator (Self-evaluation bias separation)
+export {
+  createEvalIsolator,
+} from './eval-isolator.js';
+
+// Skill Freshness Checker (Versioning & staleness detection)
+export {
+  createSkillFreshnessChecker,
+} from './skill-freshness.js';
