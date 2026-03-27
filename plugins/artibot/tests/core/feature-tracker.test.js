@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
-  FEATURES,
   createFeatureTracker,
+  FEATURES,
   formatCompressedIndicator,
   formatDashboard,
   formatIndicator,
