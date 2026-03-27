@@ -12,6 +12,8 @@ sources:
   - "https://auth0.com/docs"
   - "https://clerk.com/docs"
   - "https://datatracker.ietf.org/doc/html/rfc6749"
+version: "1.0.0"
+lastVerified: "2026-03-27"
 ---
 
 # Authentication & Authorization Patterns

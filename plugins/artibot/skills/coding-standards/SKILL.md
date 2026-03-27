@@ -27,6 +27,8 @@ agents:
   - "backend-developer"
 tokens: "~3K"
 category: "code-quality"
+version: "1.0.0"
+lastVerified: "2026-03-27"
 ---
 
 # Coding Standards

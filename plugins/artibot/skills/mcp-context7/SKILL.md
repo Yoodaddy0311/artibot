@@ -20,6 +20,8 @@ category: "tooling"
 sources:
   - "https://context7.com/docs"
   - "https://modelcontextprotocol.io/introduction"
+version: "1.0.0"
+lastVerified: "2026-03-27"
 ---
 # MCP: Context7
 

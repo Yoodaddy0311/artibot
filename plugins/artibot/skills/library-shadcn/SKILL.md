@@ -11,6 +11,8 @@ platforms: [claude-code, gemini-cli, codex-cli, cursor]
 sources:
   - "https://ui.shadcn.com/docs"
   - "https://www.radix-ui.com/primitives/docs/overview/introduction"
+version: "1.0.0"
+lastVerified: "2026-03-27"
 ---
 
 # shadcn/ui Component Patterns

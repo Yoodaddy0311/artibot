@@ -8,6 +8,8 @@ description: |
 sources:
   - "{https://official-docs.example.com/llms.txt}"
   - "{https://api.example.com/$discovery/rest}"
+version: "1.0.0"
+lastVerified: "{YYYY-MM-DD}"
 ---
 
 # {Skill Title}

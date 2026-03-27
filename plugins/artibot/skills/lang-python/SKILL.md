@@ -28,6 +28,8 @@ sources:
   - "https://docs.python.org/3/library/typing.html"
   - "https://docs.pydantic.dev/latest/"
   - "https://fastapi.tiangolo.com/"
+version: "1.0.0"
+lastVerified: "2026-03-27"
 ---
 
 # Python Patterns & Best Practices

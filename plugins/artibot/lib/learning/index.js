@@ -138,3 +138,13 @@ export {
   shutdownLearning,
   runLearningCycle,
 } from './pipeline.js';
+
+// Skill Auto-Promotion (Voyager pattern)
+export {
+  createSkillPromoter,
+} from './skill-promoter.js';
+
+// Eval Calibrator (Human feedback → GRPO weight adjustment)
+export {
+  createEvalCalibrator,
+} from './eval-calibrator.js';

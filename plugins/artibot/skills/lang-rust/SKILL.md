@@ -24,6 +24,8 @@ agents:
 tokens: "~4K"
 category: "language"
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
+version: "1.0.0"
+lastVerified: "2026-03-27"
 ---
 
 # Rust Patterns & Best Practices

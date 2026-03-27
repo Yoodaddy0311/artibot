@@ -27,6 +27,8 @@ sources:
   - "https://www.typescriptlang.org/docs/handbook/intro.html"
   - "https://www.typescriptlang.org/tsconfig/"
   - "https://www.typescriptlang.org/docs/handbook/release-notes/overview.html"
+version: "1.0.0"
+lastVerified: "2026-03-27"
 ---
 
 # TypeScript Patterns & Best Practices
