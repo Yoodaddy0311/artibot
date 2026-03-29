@@ -6,24 +6,6 @@
  */
 
 // ---------------------------------------------------------------------------
-// Helpers (pure, no side effects)
-// ---------------------------------------------------------------------------
-
-/**
- * Deep-clone a Map of Sets for immutable snapshots.
- *
- * @param {Map<string, Set<string>>} map
- * @returns {Map<string, Set<string>>}
- */
-function cloneGraph(map) {
-  const copy = new Map();
-  for (const [k, v] of map) {
-    copy.set(k, new Set(v));
-  }
-  return copy;
-}
-
-// ---------------------------------------------------------------------------
 // Dag class
 // ---------------------------------------------------------------------------
 
