@@ -20,7 +20,6 @@ import { createSummarizationMiddleware } from './middleware/summarization.js';
 import { createGuardrailMiddleware } from './middleware/guardrail.js';
 import { createTokenUsageMiddleware } from './middleware/token-usage.js';
 import { createCheckpointMiddleware } from './middleware/checkpoint.js';
-import { createAciConstraintMiddleware } from './middleware/aci-constraint.js';
 import { createLifecycleMiddleware } from './middleware/lifecycle.js';
 
 const FALLBACK_CONFIG = Object.freeze({
@@ -137,13 +136,12 @@ export function createArtibotAgent(options = {}) {
     ...(middlewareOptions.checkpoint || {}),
     ...(options.checkpointOptions || {}),
   });
-  const mwAciConstraint = createAciConstraintMiddleware(middlewareOptions.aciConstraint);
   const mwLifecycle = createLifecycleMiddleware({ now, ...(middlewareOptions.lifecycle || {}) });
 
   const allMiddleware = customMiddleware || [
     mwLifecycle,
     mwRouter, mwMemory, mwSkills, mwTasks,
-    mwSubagents, mwAciConstraint, mwGuardrail, mwSummarization,
+    mwSubagents, mwGuardrail, mwSummarization,
     mwTokenUsage, mwCheckpoint,
   ];
 
@@ -207,8 +205,7 @@ export function createArtibotAgent(options = {}) {
         ], state);
         // Phase 3: subagents (depends on tasks)
         await runMiddleware('subagents', mwSubagents, state);
-        // Phase 3.5: ACI constraints (reads agent type from subagents)
-        await runMiddleware('aciConstraint', mwAciConstraint, state);
+        // Phase 3.5: (reserved for future middleware)
         // Phase 4: guardrail (reads subagents/tasks tool lists + ACI constraints)
         await runMiddleware('guardrail', mwGuardrail, state);
         // Phase 5: summarization (reads final userPrompt)
