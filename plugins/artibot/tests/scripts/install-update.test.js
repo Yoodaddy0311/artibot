@@ -18,9 +18,6 @@ const PLUGIN_ROOT = path.resolve(
  * for install.sh's recursive cp to include them.
  */
 const V1_15_NEW_FILES = [
-  'lib/runtime/middleware/aci-constraint.js',
-  'lib/runtime/middleware/context-reset.js',
-  'lib/runtime/sprint-contract.js',
   'lib/learning/eval-isolator.js',
   'lib/learning/eval-calibrator.js',
   'lib/learning/skill-freshness.js',
