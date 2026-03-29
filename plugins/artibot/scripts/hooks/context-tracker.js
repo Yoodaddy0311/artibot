@@ -40,7 +40,7 @@ const CRITICAL_THRESHOLD = 0.90;
 export function estimateTokens(contextWindow, rawInput) {
   const max = contextWindow?.max_tokens ?? DEFAULT_MAX_TOKENS;
 
-  if (contextWindow?.current_tokens != null) {
+  if (contextWindow?.current_tokens !== null && contextWindow?.current_tokens !== undefined) {
     return { current: contextWindow.current_tokens, max };
   }
 
@@ -67,7 +67,7 @@ export function calcUsagePercent(current, max) {
  * @returns {number}
  */
 export function calcDelta(current, previous) {
-  if (previous == null) return 0;
+  if (previous === null || previous === undefined) return 0;
   return current - previous;
 }
 

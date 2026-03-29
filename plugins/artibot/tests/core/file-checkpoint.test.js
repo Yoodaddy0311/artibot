@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 
 vi.mock('node:fs', async () => {
   const actual = await vi.importActual('node:fs');
@@ -39,7 +39,7 @@ describe('FileCheckpoint', () => {
   // ─── Constructor ─────────────────────────────────────────────────
 
   it('creates checkpoint directory on construction', () => {
-    const cp = new FileCheckpoint('sess-1');
+    const _cp = new FileCheckpoint('sess-1');
 
     expect(mkdirSync).toHaveBeenCalledWith(
       expect.stringContaining('artibot-file-checkpoints-sess-1'),

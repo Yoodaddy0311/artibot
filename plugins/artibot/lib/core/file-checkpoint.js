@@ -6,8 +6,8 @@
  * @module lib/core/file-checkpoint
  */
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from 'node:fs';
-import { join, basename } from 'node:path';
+import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { basename, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
 /** Maximum number of snapshots retained per instance (FIFO eviction). */
