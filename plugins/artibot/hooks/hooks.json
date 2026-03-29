@@ -99,6 +99,14 @@
           "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/git-autopilot-guard.js",
           "timeout": 5000
         }]
+      },
+      {
+        "matcher": "tool == \"Write\" || tool == \"Edit\"",
+        "hooks": [{
+          "type": "command",
+          "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-write-checkpoint.js",
+          "timeout": 5000
+        }]
       }
     ],
     "PostToolUse": [
@@ -338,6 +346,14 @@
         "hooks": [{
           "type": "command",
           "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/workflow-status.js notification",
+          "timeout": 3000
+        }]
+      },
+      {
+        "matcher": "*",
+        "hooks": [{
+          "type": "command",
+          "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/context-tracker.js",
           "timeout": 3000
         }]
       }
