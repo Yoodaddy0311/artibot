@@ -80,7 +80,8 @@ describe('patternToRegex()', () => {
 
   it('matches a simple pattern', () => {
     const regex = patternToRegex('console.log($MSG)');
-    const match = 'console.log("hello")'.match(regex);
+    // Global regex — use exec() to get capture groups
+    const match = regex.exec('console.log("hello")');
     expect(match).not.toBeNull();
     expect(match[1]).toBe('"hello"');
   });
