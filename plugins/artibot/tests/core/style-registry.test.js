@@ -1,12 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 // Mock platform.js so getPluginRoot returns a decoded path even when
 // import.meta.url percent-encodes non-ASCII characters (e.g. Korean "바탕 화면").
 const DECODED_PLUGIN_ROOT = path.resolve(
-  decodeURIComponent(
-    path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/i, '$1')),
-  ),
+  fileURLToPath(import.meta.url),
   '..', '..',
 );
 vi.mock('../../lib/core/platform.js', () => ({

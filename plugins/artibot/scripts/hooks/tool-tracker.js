@@ -9,6 +9,7 @@
  */
 
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { parseJSON, readStdin, toFileUrl } from '../utils/index.js';
 import { createErrorHandler, extractAgentId, extractAgentRole, getArtibotDataDir, logHookError } from '../../lib/core/hook-utils.js';
@@ -62,7 +63,7 @@ const loopDetector = createLoopDetector(
 const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT
   ? path.resolve(process.env.CLAUDE_PLUGIN_ROOT)
   : path.resolve(
-      path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/i, '$1')),
+      path.dirname(fileURLToPath(import.meta.url)),
       '..',
       '..'
     );

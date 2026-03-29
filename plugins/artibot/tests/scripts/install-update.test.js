@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { isNewerVersion } from '../../lib/core/version-checker.js';
 
 // ---------------------------------------------------------------------------
@@ -8,7 +9,7 @@ import { isNewerVersion } from '../../lib/core/version-checker.js';
 // ---------------------------------------------------------------------------
 
 const PLUGIN_ROOT = path.resolve(
-  new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/i, '$1'),
+  fileURLToPath(import.meta.url),
   '..', '..', '..',
 );
 
@@ -17,9 +18,6 @@ const PLUGIN_ROOT = path.resolve(
  * for install.sh's recursive cp to include them.
  */
 const V1_15_NEW_FILES = [
-  'lib/runtime/middleware/aci-constraint.js',
-  'lib/runtime/middleware/context-reset.js',
-  'lib/runtime/sprint-contract.js',
   'lib/learning/eval-isolator.js',
   'lib/learning/eval-calibrator.js',
   'lib/learning/skill-freshness.js',

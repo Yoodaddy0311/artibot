@@ -69,6 +69,23 @@ Task(subagent_type, team_name, name, { isolation: "worktree" })
 - worktree 작업 완료 후 자동으로 결과가 메인 worktree에 병합됩니다
 - `mergeStrategy: "auto"` — 충돌 시 git-autopilot-merge 전략 적용
 
+## Auto-Apply Mode
+
+`team.autoApply: true` (default) in `artibot.config.json` enables automatic team mode.
+When enabled, Claude automatically uses /team workflow for requests that meet ALL criteria:
+
+1. **2+ independent subtasks** that can be parallelized
+2. **2+ different files or domains** (e.g., frontend + backend, hook + config)
+3. **Medium or higher complexity** (not a simple single-file edit or question)
+
+### Opt-out
+
+| Method | Scope | How |
+|--------|-------|-----|
+| Config | Permanent | `team.autoApply: false` in `artibot.config.json` |
+| Local | Per-user | Add `team.autoApply: false` in `CLAUDE.local.md` |
+| Prompt | Per-request | Include `--no-team` in the prompt |
+
 ## Guardrails
 
 - 리더는 직접 구현보다 분해와 조정에 집중합니다.

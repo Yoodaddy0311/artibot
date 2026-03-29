@@ -9,6 +9,7 @@ import { parseJSON, readStdin, writeStdout } from '../utils/index.js';
 import { createErrorHandler } from '../../lib/core/hook-utils.js';
 
 const REVERIFY_TRIGGER_PREFIX = /^!rv\b|^!(?:\uC7AC\uAC80\uC99D)(?=\s|$)/iu;
+const NO_TEAM_FLAG = /--no-team/i;
 
 /**
  * Special trigger patterns that transform the user prompt.
@@ -66,6 +67,16 @@ async function main() {
   if (!prompt) return;
 
   const trimmedPrompt = prompt.trim();
+  // Strip --no-team flag and pass through as a signal in the output
+  if (NO_TEAM_FLAG.test(trimmedPrompt)) {
+    const cleaned = trimmedPrompt.replace(NO_TEAM_FLAG, "").trim();
+    writeStdout({
+      user_prompt: cleaned,
+      message: "[team] --no-team flag detected, auto-team disabled for this request",
+    });
+    return;
+  }
+
   for (const { pattern, handler } of SPECIAL_TRIGGERS) {
     if (pattern.test(trimmedPrompt)) {
       const result = handler(trimmedPrompt, hookData);

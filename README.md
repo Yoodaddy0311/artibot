@@ -1,12 +1,12 @@
 # Artibot
 
 [![Coverage](https://img.shields.io/badge/coverage-89.27%25-brightgreen)](plugins/artibot/tests/)
-[![Tests](https://img.shields.io/badge/tests-3989%20passed-brightgreen)](plugins/artibot/tests/)
+[![Tests](https://img.shields.io/badge/tests-4918%20passed-brightgreen)](plugins/artibot/tests/)
 [![License](https://img.shields.io/badge/license-BSL--1.1-blue)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D18-green)](package.json)
 
 ![Claude Code Plugin](https://img.shields.io/badge/Claude_Code-Plugin-7C3AED?style=flat-square)
-![Version](https://img.shields.io/badge/version-1.14.3-blue?style=flat-square)
+![Version](https://img.shields.io/badge/version-2.0.0-blue?style=flat-square)
 ![License](https://img.shields.io/badge/license-BSL--1.1-green?style=flat-square)
 ![Node.js](https://img.shields.io/badge/Node.js-18%2B-brightgreen?style=flat-square)
 ![Agent Teams](https://img.shields.io/badge/Agent_Teams-Native-orange?style=flat-square)

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { readdirSync, readFileSync } from 'node:fs';
 
 /**
@@ -21,9 +22,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 // decodeURIComponent is needed because import.meta.url percent-encodes
 // non-ASCII characters (e.g. Korean "바탕 화면") which breaks fs operations.
 const PLUGIN_ROOT = path.resolve(
-  decodeURIComponent(
-    path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/i, '$1')),
-  ),
+  path.dirname(fileURLToPath(import.meta.url)),
   '..', '..',
 );
 

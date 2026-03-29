@@ -1,13 +1,10 @@
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
 
 const PLUGIN_ROOT = path.resolve(
-  decodeURIComponent(
-    path.dirname(
-      new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/i, '$1'),
-    ),
-  ),
+  path.dirname(fileURLToPath(import.meta.url)),
   '..',
   '..',
 );

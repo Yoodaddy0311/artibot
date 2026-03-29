@@ -9,6 +9,148 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.0.0] - 2026-03-30
+
+### Summary / 요약
+
+**English**: Self-Evolution Engine, Extreme Efficiency optimizations, and Future Platform foundation. 25 new modules across 3 tracks, /team auto-apply, full hook/skill/agent audit, 4,918 tests.
+
+**한국어**: 자가 진화 엔진, 극한 효율 최적화, 미래 플랫폼 기반. 3개 트랙에 걸친 25개 신규 모듈, /team 자동 적용, 전체 훅/스킬/에이전트 전수 검사, 4,918개 테스트.
+
+### Added / 추가됨
+
+- **Track A (Self-Evolution)**: Neural Session Memory, AutoResearch Pipeline, Skill Evolution Engine, Cross-Session Knowledge Graph
+- **Track B (Extreme Efficiency)**: Rate Limit Sentinel, Adaptive Context Modes, Predictive Context Budget, Zero-Waste Smart Pipeline
+- **Track C (Future Platform)**: Universal Harness Adapter (6 harnesses), Plugin Marketplace, Artibot SDK, Collective Intelligence Hub
+- **Team auto-apply** (`team.autoApply: true`): Automatic /team workflow for qualifying requests (2+ subtasks, 2+ domains, medium+ complexity)
+- **`--no-team` flag**: Per-request opt-out in user-prompt-handler.js
+- **Context Modes**: DEV/REVIEW/DEBUG/DEPLOY with auto-detection, wired to router middleware
+- **Smart Pipeline**: Opt-in middleware pipeline optimization
+- **Session Memory hooks**: SessionEnd compress, SessionStart recall
+
+### Changed / 변경됨
+
+- **Version**: 1.15.0 → 2.0.0 across all manifests
+- **CLAUDE.md**: Auto Team Mode section added with activation criteria and opt-out methods
+- **install.sh**: Version bump to 2.0.0
+- **README.md**: Updated to reflect v2.0.0 capabilities
+- **Tests**: 4,270 → 4,918 (+648), 126 → 147 test files (+21)
+- **hooks.json**: 36 → 42 registrations
+- **lib/learning/**: 19 → 26 modules
+- **lib/core/**: 28 → 32 files
+
+### Fixed / 수정됨
+
+- **Korean path imports**: `toFileUrl()` percent-encoding fix for non-ASCII paths on Windows
+- **Context modes test**: Replace unsupported Chinese keyword with English
+- **Quality audit**: Full hook/script, skill/command/agent audit with stale reference cleanup
+
+---
+
+## [1.15.0] - 2026-03-27
+
+### Summary / 요약
+
+**English**: Benchmark intelligence from 3-source analysis (awesome-ai-agents 215 agents, Anthropic harness blog, Google Agent Skills blog). 11 features implemented (5 HIGH + 6 MEDIUM). DAG orchestration quality fixes. 4,270 tests.
+
+**한국어**: 3개 소스 벤치마크 분석 (awesome-ai-agents 215 에이전트, Anthropic harness 블로그, Google Agent Skills 블로그) 기반 인텔리전스. 11개 기능 구현 (HIGH 5 + MEDIUM 6). DAG 오케스트레이션 품질 수정. 4,270개 테스트.
+
+### Added / 추가됨
+
+- **ACI Constraint middleware**: Agent role-based tool restriction
+- **Context Reset middleware**: Structured handoff on token threshold
+- **Eval Isolator**: Self-eval bias separation
+- **Sprint Contract**: Pre-task done-criteria negotiation
+- **Source of Truth URL**: SKILL.md `sources:` field for live docs
+- **Feature Tracker + Intelligence output style**: UX visibility improvements
+- **Harness Ablation Test**: Middleware effectiveness eval
+- **Evaluator Calibration**: Human feedback few-shot + GRPO weight tuning
+- **Skill Versioning & Freshness**: `version`/`lastVerified` tracking
+- **Skill Evaluation Harness**: On/off effectiveness benchmark
+- **Voyager Skill Auto-Promotion**: Success pattern → skill crystallization
+
+### Fixed / 수정됨
+
+- **Dag.dependents() / Dag.has()**: Public API for Canceler integration
+- **Canceler.cancelDownstream()**: Refactored to use Dag public API instead of private fields
+- **FileCheckpoint**: 1MB file size guard to prevent large file delays
+- **Write-Before-Read Guard**: CLAUDE.md/CLAUDE.local.md/.claude/ whitelist added
+
+---
+
+## [1.14.3] - 2026-03-25
+
+### Fixed / 수정됨
+
+- **Statusline**: Fix `[[object Object]]` bug when jq_get/node returns nested object
+- **Session token display**: Add token estimate to statusline (`~12K tokens` format)
+- **persistTokenUsage()**: Write session data to `runtime/token-usage-session.json`
+- **Token formatting**: >=1M → ~1M, >=1K → ~12K, <1K → ~500
+
+---
+
+## [1.14.2] - 2026-03-25
+
+### Changed / 변경됨
+
+- **auto-learning-runner.js**: Split from 1013→382 lines into 4 modules (runner, scanner, extractor, committer)
+- **learning/index.js**: Extract business logic → pipeline.js (427→140 lines pure barrel)
+- **Provenance tracking**: user, project, branch, commitRange per pattern
+
+### Added / 추가됨
+
+- **Auto-commit security guardrails**: Allowlist/denylist (7 allow, 25 deny patterns)
+- **PII protection**: Email/hostname SHA-256 hashing, Swarm PII auto-strip
+- **Commit tagging**: `[AUTOMATED]` tag for auto vs manual distinction
+- **99 new tests**: Auto-learning modules (4 test files, 100% pass)
+
+---
+
+## [1.14.1] - 2026-03-25
+
+### Fixed / 수정됨
+
+- **Skill restore**: 5 skills restored (delegation, orchestration, vibe-coding, strategic-compact, verification-completion)
+- **Platform compat**: `convertSkill()` frontmatter expansion for Codex/Cursor/AntiGravity
+- **cli-adapter.js**: Mutation → immutable pattern fix
+- **auto-learning-runner.js**: Windows compat fixes (`shell:true`, `maxBuffer`, non-zero exit)
+
+### Added / 추가됨
+
+- **install.sh**: Zero-config auto-learning (`claude schedule` → `crontab` → `schtasks` chain)
+- **Dynamic context injection**: 6 skills with live git/npm context
+- **CI pipeline**: `skill:check` added to ci script
+- **output-styles**: tokens.md auto-reference in default style
+
+---
+
+## [1.14.0] - 2026-03-25
+
+### Summary / 요약
+
+**English**: Benchmark-driven evolution from deer-flow, gstack, OpenAI blog, and Claude Code Skills docs. Skills P0 compliance fix, auto-learning pipeline, 3 new middlewares. 3,887 tests.
+
+**한국어**: deer-flow, gstack, OpenAI 블로그, Claude Code Skills 문서 기반 벤치마크 주도 진화. 스킬 P0 컴플라이언스 수정, 자동 학습 파이프라인, 3개 신규 미들웨어. 3,887개 테스트.
+
+### Added / 추가됨
+
+- **GuardrailMiddleware**: Policy-based tool call authorization
+- **TokenUsageMiddleware**: Per-model/agent token tracking
+- **SummarizationMiddleware**: Expanded with deer-flow pattern
+- **Auto-learning pipeline**: 5-stage (scan → extract → update → refine → commit)
+- **setup-auto-learning.js**: Claude schedule / cron / webhook activation
+- **Output design token system**: tokens.md + narrative output style
+- **gen-skill-docs.js**: SKILL.md validation pipeline
+- **128 new tests** (3,887 total), 111 test files
+
+### Fixed / 수정됨
+
+- **P0**: Fix `context: forked` → `context: fork` across 98 skills (Claude Code compliance)
+- **P0**: Add `disable-model-invocation` (10 skills) + `user-invocable: false` (26 skills)
+- **P1**: Add `$ARGUMENTS`/argument-hint (9 skills), agent field (9), allowed-tools (16)
+
+---
+
 ## [1.13.0] - 2026-03-24
 
 ### Summary / 요약
@@ -514,6 +656,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+[2.0.0]: https://github.com/Yoodaddy0311/artibot/compare/v1.15.0...v2.0.0
+[1.15.0]: https://github.com/Yoodaddy0311/artibot/compare/v1.14.3...v1.15.0
+[1.14.3]: https://github.com/Yoodaddy0311/artibot/compare/v1.14.2...v1.14.3
+[1.14.2]: https://github.com/Yoodaddy0311/artibot/compare/v1.14.1...v1.14.2
+[1.14.1]: https://github.com/Yoodaddy0311/artibot/compare/v1.14.0...v1.14.1
+[1.14.0]: https://github.com/Yoodaddy0311/artibot/compare/v1.13.0...v1.14.0
 [1.13.0]: https://github.com/Yoodaddy0311/artibot/compare/v1.12.0...v1.13.0
 [1.12.0]: https://github.com/Yoodaddy0311/artibot/compare/v1.11.0...v1.12.0
 [1.11.0]: https://github.com/Yoodaddy0311/artibot/compare/v1.10.0...v1.11.0
