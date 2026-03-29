@@ -8,6 +8,7 @@
 import { emit } from '../../core/event-bus.js';
 import { classifyComplexity } from '../../cognitive/router.js';
 import { detectIntent } from '../../intent/index.js';
+import { detectMode, applyMode, MODES } from '../../cognitive/context-modes.js';
 
 /**
  * @param {object} [options]
