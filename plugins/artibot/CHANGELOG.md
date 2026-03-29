@@ -656,6 +656,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+[2.0.0]: https://github.com/Yoodaddy0311/artibot/compare/v1.15.0...v2.0.0
+[1.15.0]: https://github.com/Yoodaddy0311/artibot/compare/v1.14.3...v1.15.0
+[1.14.3]: https://github.com/Yoodaddy0311/artibot/compare/v1.14.2...v1.14.3
+[1.14.2]: https://github.com/Yoodaddy0311/artibot/compare/v1.14.1...v1.14.2
+[1.14.1]: https://github.com/Yoodaddy0311/artibot/compare/v1.14.0...v1.14.1
+[1.14.0]: https://github.com/Yoodaddy0311/artibot/compare/v1.13.0...v1.14.0
 [1.13.0]: https://github.com/Yoodaddy0311/artibot/compare/v1.12.0...v1.13.0
 [1.12.0]: https://github.com/Yoodaddy0311/artibot/compare/v1.11.0...v1.12.0
 [1.11.0]: https://github.com/Yoodaddy0311/artibot/compare/v1.10.0...v1.11.0
