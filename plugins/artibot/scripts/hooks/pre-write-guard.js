@@ -13,7 +13,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { atomicWriteSync, parseJSON, readStdin, writeStdout } from '../utils/index.js';
-import { createErrorHandler, extractFilePath, extractToolName, logHookError, normalizePath } from '../../lib/core/hook-utils.js';
+import { createErrorHandler, extractFilePath, extractToolName, normalizePath } from '../../lib/core/hook-utils.js';
 
 /**
  * Build the tracking file path for a given session.
