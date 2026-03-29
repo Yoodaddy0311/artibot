@@ -16,16 +16,16 @@ This file auto-loads when Claude accesses files in `plugins/artibot/`.
 |-----------|---------|-----------|
 | `agents/` | Agent definitions (28 .md) | orchestrator.md (CTO), planner.md |
 | `commands/` | Slash commands (48 .md) | sc.md (router), implement.md, build.md, repo.md |
-| `skills/` | SKILL.md + references/ (96 dirs) | principles/, tdd-workflow/, coding-standards/, repo-benchmarking/ |
+| `skills/` | SKILL.md + references/ (99 dirs) | principles/, tdd-workflow/, coding-standards/ |
 | `lib/cognitive/` | Dual-process engine | router.js, system1.js, system2-core.js |
-| `lib/learning/` | Lifelong learning (11 modules) | grpo.js, memory.js, lifelong.js |
-| `lib/core/` | Core utilities (22 files) | plugin-loader.js, hook-utils.js |
+| `lib/learning/` | Lifelong learning (19 modules) | grpo.js, memory.js, lifelong.js, skill-promoter.js, eval-calibrator.js, skill-freshness.js |
+| `lib/core/` | Core utilities (28 files) | plugin-loader.js, hook-utils.js, feature-tracker.js |
 | `lib/visual/` | Visual validation | visual-validator.js, screenshot-differ.js |
 | `lib/privacy/` | PII protection | pii-scrubber.js, homoglyph-detector.js |
-| `lib/runtime/` | Runtime pipeline (10 middlewares) | create-artibot-agent.js, evaluator.js, middleware/ |
+| `lib/runtime/` | Runtime pipeline (15 files, 11 middlewares) | create-artibot-agent.js, evaluator.js, middleware/, sprint-contract.js |
 | `hooks/` | Event hooks config | hooks.json (15 event types, 36 registrations) |
 | `rules/` | Path-specific auto-rules | dev-protocol.md, quality-gates.md |
-| `tests/` | Vitest test suite (108 files) | 3,765 test cases |
+| `tests/` | Vitest test suite (126 files) | 4,270 test cases |
 
 ## Development Standards
 
@@ -38,7 +38,7 @@ This file auto-loads when Claude accesses files in `plugins/artibot/`.
 ## Testing
 
 ```bash
-npm test              # Run all 3,765 tests
+npm test              # Run all 4,270 tests
 npm run test:coverage # Coverage report
 npm run test:bench    # 27 benchmarks
 npm run lint          # ESLint (0 errors, 0 warnings target)

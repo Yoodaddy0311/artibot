@@ -8,6 +8,12 @@ agents: ["backend-developer", "security-reviewer"]
 tokens: "~4K"
 category: "platform"
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
+sources:
+  - "https://auth0.com/docs"
+  - "https://clerk.com/docs"
+  - "https://datatracker.ietf.org/doc/html/rfc6749"
+version: "1.0.0"
+lastVerified: "2026-03-27"
 ---
 
 # Authentication & Authorization Patterns

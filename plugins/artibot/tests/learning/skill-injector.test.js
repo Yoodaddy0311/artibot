@@ -26,12 +26,14 @@ vi.mock('../../lib/core/platform.js', () => ({
 const mockFsAccess = vi.fn();
 const mockFsReadFile = vi.fn();
 const mockFsWriteFile = vi.fn();
+const mockFsUnlink = vi.fn();
 
 vi.mock('node:fs/promises', () => ({
   default: {
     access: (...args) => mockFsAccess(...args),
     readFile: (...args) => mockFsReadFile(...args),
     writeFile: (...args) => mockFsWriteFile(...args),
+    unlink: (...args) => mockFsUnlink(...args),
   },
 }));
 
@@ -42,6 +44,7 @@ vi.mock('node:fs/promises', () => ({
 import {
   clearInjections,
   getInjectedRules,
+  getSkillSources,
   injectRules,
 } from '../../lib/learning/skill-injector.js';
 
@@ -53,6 +56,32 @@ function makeRule(type, content, confidence = 0.9) {
   return { type, content, confidence, source: 'conversation', lang: 'en', extractedAt: new Date().toISOString(), rawMatch: content };
 }
 
+/**
+ * Find the writeJsonFile call that wrote to a references/auto-learned-rules.json path.
+ * Returns the written data, or undefined if not found.
+ */
+function findAutoLearnedWrite() {
+  for (const call of mockWriteJsonFile.mock.calls) {
+    if (typeof call[0] === 'string' && call[0].includes('auto-learned-rules.json')) {
+      return call[1];
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Find the writeJsonFile call that wrote the injection log.
+ * Returns the written data, or undefined if not found.
+ */
+function findInjectionLogWrite() {
+  for (const call of mockWriteJsonFile.mock.calls) {
+    if (typeof call[0] === 'string' && call[0].includes('skill-injection-log.json')) {
+      return call[1];
+    }
+  }
+  return undefined;
+}
+
 // ---------------------------------------------------------------------------
 // injectRules()
 // ---------------------------------------------------------------------------
@@ -61,7 +90,7 @@ describe('injectRules()', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockEnsureDir.mockResolvedValue(undefined);
-    mockReadJsonFile.mockResolvedValue([]); // empty injection log
+    mockReadJsonFile.mockResolvedValue([]); // empty injection log + empty auto-learned rules
     mockWriteJsonFile.mockResolvedValue(undefined);
     mockFsAccess.mockResolvedValue(undefined); // skill exists
     mockFsReadFile.mockResolvedValue('# Coding Standards\n\nSome content.');
@@ -86,41 +115,41 @@ describe('injectRules()', () => {
     expect(result.skipped).toBe(1);
   });
 
-  it('injects a single new rule into SKILL.md', async () => {
+  it('injects a single new rule into references/auto-learned-rules.json', async () => {
     const rules = [makeRule('preference', 'Always use TypeScript')];
     const result = await injectRules(rules, 'coding-standards');
 
     expect(result.injected).toBe(1);
     expect(result.skipped).toBe(0);
     expect(result.injectedContents).toContain('Always use TypeScript');
-    expect(mockFsWriteFile).toHaveBeenCalledTimes(1);
+
+    const written = findAutoLearnedWrite();
+    expect(written).toBeDefined();
+    expect(written).toHaveLength(1);
+    expect(written[0].content).toBe('Always use TypeScript');
   });
 
-  it('creates project-rules section if not present in SKILL.md', async () => {
-    mockFsReadFile.mockResolvedValue('# Coding Standards\n\nExisting content.');
-    const rules = [makeRule('prohibition', 'Never use var')];
-    await injectRules(rules, 'coding-standards');
-
-    const writtenContent = mockFsWriteFile.mock.calls[0][1];
-    expect(writtenContent).toContain('## Project-Specific Rules');
-    expect(writtenContent).toContain('[prohibition] Never use var');
-  });
-
-  it('appends to existing project-rules section', async () => {
-    mockFsReadFile.mockResolvedValue(
-      '# Coding Standards\n\n## Project-Specific Rules\n\n- [preference] Use pnpm\n',
-    );
+  it('writes to references/ directory (auto-commit allowlist)', async () => {
     const rules = [makeRule('preference', 'Always use TypeScript')];
     await injectRules(rules, 'coding-standards');
 
-    const writtenContent = mockFsWriteFile.mock.calls[0][1];
-    expect(writtenContent).toContain('Use pnpm');
-    expect(writtenContent).toContain('Always use TypeScript');
+    const writeCall = mockWriteJsonFile.mock.calls.find(
+      (c) => typeof c[0] === 'string' && c[0].includes('references'),
+    );
+    expect(writeCall).toBeDefined();
+    expect(writeCall[0]).toContain('references');
+    expect(writeCall[0]).toContain('auto-learned-rules.json');
+  });
+
+  it('does NOT modify SKILL.md directly', async () => {
+    const rules = [makeRule('preference', 'Always use TypeScript')];
+    await injectRules(rules, 'coding-standards');
+
+    // fs.writeFile should NOT be called (SKILL.md is not touched)
+    expect(mockFsWriteFile).not.toHaveBeenCalled();
   });
 
   it('skips rules already in injection log (deduplication)', async () => {
-    // Simulate a log with existing rule hash for "preference::always use typescript"
-    // We need to pre-populate the log with the correct hash
     const rules = [makeRule('preference', 'Always use TypeScript')];
 
     // First injection - should succeed
@@ -128,10 +157,8 @@ describe('injectRules()', () => {
     expect(first.injected).toBe(1);
 
     // Second injection: now the log contains the hash
-    // After first injection, writeJsonFile was called with the log
-    const savedLog = mockWriteJsonFile.mock.calls[0]?.[1] ?? [];
+    const savedLog = findInjectionLogWrite() ?? [];
     mockReadJsonFile.mockResolvedValue(savedLog);
-    mockFsReadFile.mockResolvedValue('# Coding Standards\n\n## Project-Specific Rules\n\n- [preference] Always use TypeScript\n');
 
     const second = await injectRules(rules, 'coding-standards');
     expect(second.injected).toBe(0);
@@ -152,39 +179,44 @@ describe('injectRules()', () => {
   it('persists the injection log after writing', async () => {
     const rules = [makeRule('preference', 'Always use TypeScript')];
     await injectRules(rules, 'coding-standards');
-    expect(mockWriteJsonFile).toHaveBeenCalled();
-    const logArg = mockWriteJsonFile.mock.calls[0][1];
+
+    const logArg = findInjectionLogWrite();
+    expect(logArg).toBeDefined();
     expect(Array.isArray(logArg)).toBe(true);
     expect(logArg.length).toBe(1);
     expect(logArg[0].skillName).toBe('coding-standards');
   });
 
-  it('formats preference rules with [preference] label', async () => {
+  it('includes formatted rule line in JSON entry', async () => {
     const rules = [makeRule('preference', 'Always use TypeScript')];
     await injectRules(rules, 'coding-standards');
-    const writtenContent = mockFsWriteFile.mock.calls[0][1];
-    expect(writtenContent).toContain('[preference] Always use TypeScript');
+
+    const written = findAutoLearnedWrite();
+    expect(written[0].formatted).toBe('- [preference] Always use TypeScript');
   });
 
   it('formats prohibition rules with [prohibition] label', async () => {
     const rules = [makeRule('prohibition', 'Never use var')];
     await injectRules(rules, 'coding-standards');
-    const writtenContent = mockFsWriteFile.mock.calls[0][1];
-    expect(writtenContent).toContain('[prohibition] Never use var');
+
+    const written = findAutoLearnedWrite();
+    expect(written[0].formatted).toContain('[prohibition] Never use var');
   });
 
   it('formats decision rules with [decision] label', async () => {
     const rules = [makeRule('decision', 'Use Bun runtime')];
     await injectRules(rules, 'coding-standards');
-    const writtenContent = mockFsWriteFile.mock.calls[0][1];
-    expect(writtenContent).toContain('[decision] Use Bun runtime');
+
+    const written = findAutoLearnedWrite();
+    expect(written[0].formatted).toContain('[decision] Use Bun runtime');
   });
 
   it('formats tool-preference rules with [tool] label', async () => {
     const rules = [makeRule('tool-preference', 'pnpm instead of npm')];
     await injectRules(rules, 'coding-standards');
-    const writtenContent = mockFsWriteFile.mock.calls[0][1];
-    expect(writtenContent).toContain('[tool] pnpm instead of npm');
+
+    const written = findAutoLearnedWrite();
+    expect(written[0].formatted).toContain('[tool] pnpm instead of npm');
   });
 
   it('returns skillName in result', async () => {
@@ -193,19 +225,18 @@ describe('injectRules()', () => {
     expect(result.skillName).toBe('testing-standards');
   });
 
-  it('does NOT write SKILL.md when all rules are duplicates', async () => {
-    // Build a log that already has this rule
+  it('does NOT write when all rules are duplicates', async () => {
     const rules = [makeRule('preference', 'Always use TypeScript')];
     await injectRules(rules, 'coding-standards'); // first pass
 
-    const savedLog = mockWriteJsonFile.mock.calls[0]?.[1] ?? [];
+    const savedLog = findInjectionLogWrite() ?? [];
     mockReadJsonFile.mockResolvedValue(savedLog);
-    mockFsWriteFile.mockClear();
+    mockWriteJsonFile.mockClear();
 
     const second = await injectRules(rules, 'coding-standards');
     expect(second.injected).toBe(0);
-    // writeFile for SKILL.md should not have been called
-    expect(mockFsWriteFile).not.toHaveBeenCalled();
+    // No writes should occur
+    expect(findAutoLearnedWrite()).toBeUndefined();
   });
 
   it('handles log with many entries without throwing', async () => {
@@ -221,6 +252,27 @@ describe('injectRules()', () => {
     const rules = [makeRule('preference', 'Brand new rule')];
     const result = await injectRules(rules, 'coding-standards');
     expect(result.injected).toBe(1);
+  });
+
+  it('merges with existing auto-learned rules', async () => {
+    const existingRules = [
+      { type: 'preference', content: 'Old rule', formatted: '- [preference] Old rule', injectedAt: '2026-01-01' },
+    ];
+    // readJsonFile returns existing rules for auto-learned-rules.json
+    mockReadJsonFile.mockImplementation((filePath) => {
+      if (typeof filePath === 'string' && filePath.includes('auto-learned-rules.json')) {
+        return Promise.resolve(existingRules);
+      }
+      return Promise.resolve([]); // empty injection log
+    });
+
+    const rules = [makeRule('preference', 'New rule')];
+    await injectRules(rules, 'coding-standards');
+
+    const written = findAutoLearnedWrite();
+    expect(written).toHaveLength(2);
+    expect(written[0].content).toBe('Old rule');
+    expect(written[1].content).toBe('New rule');
   });
 });
 
@@ -291,6 +343,7 @@ describe('clearInjections()', () => {
     mockFsAccess.mockResolvedValue(undefined);
     mockFsReadFile.mockResolvedValue('# Skill\n\n## Project-Specific Rules\n\n- [preference] Old rule\n');
     mockFsWriteFile.mockResolvedValue(undefined);
+    mockFsUnlink.mockResolvedValue(undefined);
   });
 
   it('removes log entries for the given skill', async () => {
@@ -318,7 +371,28 @@ describe('clearInjections()', () => {
     expect(result.cleared).toBe(2);
   });
 
-  it('strips project-rules section from SKILL.md', async () => {
+  it('deletes auto-learned-rules.json file', async () => {
+    mockReadJsonFile.mockResolvedValue([
+      { skillName: 'coding-standards', ruleHash: 'aaa', type: 'preference', content: 'A', injectedAt: '' },
+    ]);
+
+    await clearInjections('coding-standards');
+
+    expect(mockFsUnlink).toHaveBeenCalledTimes(1);
+    const unlinkPath = mockFsUnlink.mock.calls[0][0];
+    expect(unlinkPath).toContain('auto-learned-rules.json');
+    expect(unlinkPath).toContain('references');
+  });
+
+  it('handles missing auto-learned-rules.json gracefully', async () => {
+    mockReadJsonFile.mockResolvedValue([]);
+    mockFsUnlink.mockRejectedValue(new Error('ENOENT'));
+
+    const result = await clearInjections('coding-standards');
+    expect(result.cleared).toBe(0);
+  });
+
+  it('strips legacy project-rules section from SKILL.md', async () => {
     const log = [{ skillName: 'coding-standards', ruleHash: 'aaa', type: 'preference', content: 'A', injectedAt: '' }];
     mockReadJsonFile.mockResolvedValue(log);
 
@@ -354,8 +428,94 @@ describe('clearInjections()', () => {
 
     const result = await clearInjections('coding-standards');
     expect(result.cleared).toBe(1);
-    // SKILL.md write should not have been called because there is no sentinel
-    // (skill exists but no section to strip)
-    // The file write would not modify anything
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getSkillSources()
+// ---------------------------------------------------------------------------
+
+describe('getSkillSources()', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockEnsureDir.mockResolvedValue(undefined);
+    mockFsAccess.mockResolvedValue(undefined); // skill exists
+  });
+
+  it('returns empty sources when skill does not exist', async () => {
+    mockFsAccess.mockRejectedValue(new Error('ENOENT'));
+    const result = await getSkillSources('nonexistent-skill');
+    expect(result.sources).toEqual([]);
+    expect(result.hint).toBe('');
+  });
+
+  it('returns empty sources when SKILL.md has no sources field', async () => {
+    mockFsReadFile.mockResolvedValue(
+      '---\nname: lang-go\ndescription: "Go patterns"\n---\n# Go Patterns',
+    );
+    const result = await getSkillSources('lang-go');
+    expect(result.sources).toEqual([]);
+    expect(result.hint).toBe('');
+  });
+
+  it('parses dash-list sources from frontmatter', async () => {
+    mockFsReadFile.mockResolvedValue(
+      '---\nname: lang-typescript\nsources:\n  - "https://typescriptlang.org/docs"\n  - "https://typescriptlang.org/tsconfig"\n---\n# TS',
+    );
+    const result = await getSkillSources('lang-typescript');
+    expect(result.sources).toEqual([
+      'https://typescriptlang.org/docs',
+      'https://typescriptlang.org/tsconfig',
+    ]);
+  });
+
+  it('parses inline array sources from frontmatter', async () => {
+    mockFsReadFile.mockResolvedValue(
+      '---\nname: test-skill\nsources: ["https://example.com/docs", "https://example.com/api"]\n---\n# Test',
+    );
+    const result = await getSkillSources('test-skill');
+    expect(result.sources).toEqual([
+      'https://example.com/docs',
+      'https://example.com/api',
+    ]);
+  });
+
+  it('generates hint string with Source of Truth header', async () => {
+    mockFsReadFile.mockResolvedValue(
+      '---\nname: test-skill\nsources:\n  - "https://docs.example.com"\n---\n# Test',
+    );
+    const result = await getSkillSources('test-skill');
+    expect(result.hint).toContain('## Source of Truth');
+    expect(result.hint).toContain('https://docs.example.com');
+    expect(result.hint).toContain('Fetch these');
+  });
+
+  it('handles sources field with no quotes around URLs', async () => {
+    mockFsReadFile.mockResolvedValue(
+      '---\nname: test-skill\nsources:\n  - https://docs.example.com\n---\n# Test',
+    );
+    const result = await getSkillSources('test-skill');
+    expect(result.sources).toEqual(['https://docs.example.com']);
+  });
+
+  it('handles SKILL.md without frontmatter', async () => {
+    mockFsReadFile.mockResolvedValue('# Just a title\n\nNo frontmatter here.');
+    const result = await getSkillSources('test-skill');
+    expect(result.sources).toEqual([]);
+    expect(result.hint).toBe('');
+  });
+
+  it('stops parsing sources at next top-level key', async () => {
+    mockFsReadFile.mockResolvedValue(
+      '---\nname: test-skill\nsources:\n  - "https://docs.example.com"\ncategory: "language"\n---\n# Test',
+    );
+    const result = await getSkillSources('test-skill');
+    expect(result.sources).toEqual(['https://docs.example.com']);
+  });
+
+  it('returns empty sources when SKILL.md is empty', async () => {
+    mockFsReadFile.mockResolvedValue('');
+    const result = await getSkillSources('test-skill');
+    expect(result.sources).toEqual([]);
   });
 });

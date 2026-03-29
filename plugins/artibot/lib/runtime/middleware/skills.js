@@ -7,6 +7,7 @@
  * @module lib/runtime/middleware/skills
  */
 
+import { emit } from '../../core/event-bus.js';
 import { loadSkillIndex, loadSkillsByNames } from '../../core/skill-exporter.js';
 
 /** @type {import('../../core/skill-exporter.js').SkillIndexEntry[] | null} */
@@ -123,6 +124,11 @@ export function createSkillsMiddleware(options = {}) {
     };
 
     state.messageParts.push(`skills=${deduped.length}`);
+
+    if (lazyHit && loaded.length > 0) {
+      emit('feature:source-fetched', { detail: `${loaded.length} skills loaded` });
+    }
+
     return state;
   };
 }

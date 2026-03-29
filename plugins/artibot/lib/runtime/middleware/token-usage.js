@@ -5,6 +5,8 @@
  * @module lib/runtime/middleware/token-usage
  */
 
+import { emit } from '../../core/event-bus.js';
+
 // ---------------------------------------------------------------------------
 // Store (session-scoped, immutable updates)
 // ---------------------------------------------------------------------------
@@ -272,6 +274,8 @@ export function createTokenUsageMiddleware(options = {}) {
     };
 
     state.messageParts.push(`tokens=${formatTokenCount(inputTokens)}`);
+
+    emit('feature:token-saving', { detail: `${formatTokenCount(inputTokens)} in` });
 
     return state;
   };

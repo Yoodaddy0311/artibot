@@ -20,6 +20,7 @@ import { createSummarizationMiddleware } from './middleware/summarization.js';
 import { createGuardrailMiddleware } from './middleware/guardrail.js';
 import { createTokenUsageMiddleware } from './middleware/token-usage.js';
 import { createCheckpointMiddleware } from './middleware/checkpoint.js';
+import { createLifecycleMiddleware } from './middleware/lifecycle.js';
 
 const FALLBACK_CONFIG = Object.freeze({
   automation: { supportedLanguages: ['en', 'ko', 'ja'], ambiguityThreshold: 50 },
@@ -135,8 +136,10 @@ export function createArtibotAgent(options = {}) {
     ...(middlewareOptions.checkpoint || {}),
     ...(options.checkpointOptions || {}),
   });
+  const mwLifecycle = createLifecycleMiddleware({ now, ...(middlewareOptions.lifecycle || {}) });
 
   const allMiddleware = customMiddleware || [
+    mwLifecycle,
     mwRouter, mwMemory, mwSkills, mwTasks,
     mwSubagents, mwGuardrail, mwSummarization,
     mwTokenUsage, mwCheckpoint,
@@ -190,6 +193,8 @@ export function createArtibotAgent(options = {}) {
           await runMiddleware(apply.name || 'anonymous', apply, state);
         }
       } else {
+        // Phase 0: lifecycle setup (outermost — runs first, teardown context recorded)
+        await runMiddleware('lifecycle', mwLifecycle, state);
         // Phase 1: router (all others depend on routing/intent)
         await runMiddleware('router', mwRouter, state);
         // Phase 2: memory, skills, tasks (independent, only read router output)
@@ -200,7 +205,8 @@ export function createArtibotAgent(options = {}) {
         ], state);
         // Phase 3: subagents (depends on tasks)
         await runMiddleware('subagents', mwSubagents, state);
-        // Phase 4: guardrail (reads subagents/tasks tool lists)
+        // Phase 3.5: (reserved for future middleware)
+        // Phase 4: guardrail (reads subagents/tasks tool lists + ACI constraints)
         await runMiddleware('guardrail', mwGuardrail, state);
         // Phase 5: summarization (reads final userPrompt)
         await runMiddleware('summarization', mwSummarization, state);

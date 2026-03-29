@@ -97,13 +97,14 @@ install_skills() {
 # ──────────────────────────────────────────────
 install_hooks() {
   # Clean before copy to prevent stale files from previous versions
-  for dir in hooks scripts lib; do
+  for dir in hooks scripts lib output-styles; do
     [ -d "${ARTIBOT_DIR}/${dir}" ] && rm -rf "${ARTIBOT_DIR}/${dir}"
   done
 
   cp -r "${SCRIPT_DIR}/hooks" "${ARTIBOT_DIR}/"
   cp -r "${SCRIPT_DIR}/scripts" "${ARTIBOT_DIR}/"
   cp -r "${SCRIPT_DIR}/lib" "${ARTIBOT_DIR}/"
+  [ -d "${SCRIPT_DIR}/output-styles" ] && cp -r "${SCRIPT_DIR}/output-styles" "${ARTIBOT_DIR}/"
 
   # Copy config files
   cp "${SCRIPT_DIR}/artibot.config.json" "${ARTIBOT_DIR}/"

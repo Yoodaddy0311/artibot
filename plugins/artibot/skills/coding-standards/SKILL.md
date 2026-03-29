@@ -27,6 +27,8 @@ agents:
   - "backend-developer"
 tokens: "~3K"
 category: "code-quality"
+version: "1.0.0"
+lastVerified: "2026-03-27"
 ---
 
 # Coding Standards
@@ -151,3 +153,10 @@ Progress:
 | File length | <800 lines | Split by responsibility |
 | Nesting depth | <4 levels | Early returns, extract methods |
 | Mutation | 0 allowed | Spread/map/filter/reduce |
+
+## Project-Specific Rules
+
+> Auto-injected from conversation history. Do not edit manually.
+- [auto-learned] Recurring fix pattern detected. Consider adding automated checks for: fix: resolve all ESLint errors and warnings (86 → 0)
+- [auto-learned] Recurring fix pattern detected. Consider adding automated checks for: fix(v1.14.3): statusline [object Object] bug fix + session token display
+- [auto-learned] Recurring fix pattern detected. Consider adding automated checks for: fix(v1.14.1): auto-activation, platform compat, skill restore, zero-config learning

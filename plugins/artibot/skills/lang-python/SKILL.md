@@ -23,6 +23,13 @@ agents:
 tokens: "~4K"
 category: "language"
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
+sources:
+  - "https://docs.python.org/3/whatsnew/index.html"
+  - "https://docs.python.org/3/library/typing.html"
+  - "https://docs.pydantic.dev/latest/"
+  - "https://fastapi.tiangolo.com/"
+version: "1.0.0"
+lastVerified: "2026-03-27"
 ---
 
 # Python Patterns & Best Practices

@@ -20,6 +20,8 @@ agents:
 argument-hint: "[target] e.g., auth-service, utils, login-form"
 tokens: "~3K"
 category: "testing"
+version: "1.0.0"
+lastVerified: "2026-03-27"
 ---
 # TDD Workflow
 

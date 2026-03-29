@@ -1,6 +1,6 @@
 # Artibot
 
-![Tests](https://img.shields.io/badge/tests-3887%20passed-brightgreen) ![Coverage](https://img.shields.io/badge/coverage-97.5%25-brightgreen) ![License](https://img.shields.io/badge/license-MIT-blue) ![Version](https://img.shields.io/badge/version-1.14.1-blue) ![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen)
+![Tests](https://img.shields.io/badge/tests-4831%20passed-brightgreen) ![Coverage](https://img.shields.io/badge/coverage-89.27%25-brightgreen) ![License](https://img.shields.io/badge/license-MIT-blue) ![Version](https://img.shields.io/badge/version-2.0.0-blue) ![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen)
 
 Claude Code를 위한 **Agent Teams 기반** 지능형 오케스트레이션 플러그인. Claude의 네이티브 Agent Teams API를 핵심 엔진으로 사용하여 전문 에이전트 팀 구성, P2P 통신, 공유 태스크 관리를 통해 개발 생산성을 극대화합니다.
 
@@ -77,7 +77,7 @@ Artibot의 핵심 엔진은 Claude Code의 **Agent Teams API**입니다. 단순�
 - `/sc`로 자연어 의도를 분석하여 최적 커맨드로 자동 라우팅
 - 개발, 분석, 품질, 테스트, 문서화, 배포, 마케팅 전 영역 커버
 
-### 99개 도메인 스킬
+### 98개 도메인 스킬
 
 - 11개 페르소나 스킬 (architect, frontend, backend, security 등)
 - 6개 코어 스킬 (orchestration, principles, coding/security/testing standards)
@@ -88,10 +88,12 @@ Artibot의 핵심 엔진은 Claude Code의 **Agent Teams API**입니다. 단순�
 
 ### 런타임 미들웨어 파이프라인 (v1.14.0+)
 
-- 9단계 미들웨어 엔진: router → subagents → tasks → checkpoint → memory → skills → guardrail → token-usage → summarization
+- 11단계 미들웨어 엔진: router → subagents → tasks → checkpoint → memory → skills → guardrail → token-usage → summarization → lifecycle → plan-mode
 - GuardrailMiddleware: 런타임 안전 가드레일 (위험 패턴 차단, 리소스 제한)
 - TokenUsageMiddleware: 토큰 사용량 추적 및 최적화 제안
 - SummarizationMiddleware: 응답 자동 요약 및 컨텍스트 압축
+- LifecycleMiddleware: Setup/Teardown 3-phase 에이전트 생명주기
+- PlanModeMiddleware: 읽기 전용 guardrail로 안전한 분석 단계 보장
 
 ### 자동 학습 파이프라인 (v1.14.0+)
 
@@ -158,7 +160,7 @@ Artibot은 Claude Code 외에도 **Gemini CLI**, **OpenAI Codex CLI**, **Cursor 
 | Agent Teams (P2P 메시징) | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Sub-Agent (단방향 위임) | ✅ | ✅ | ✅ | ⚠️ 제한적 | ✅ |
 | 27개 전문 에이전트 | ✅ | ✅ 자동변환 | ✅ 자동변환 | ✅ 자동변환 | ✅ 자동변환 |
-| 99개 스킬 (SKILL.md) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| 98개 스킬 (SKILL.md) | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 슬래시 커맨드 | ✅ 48개 | ✅ TOML | → Workflows | → Prompts | → Workflows |
 | Hooks 자동작동 | ✅ 15이벤트 | ✅ 동일패턴 | ⚠️ 제한적 | ❌ | ✅ Agent Manager |
 | 인지 라우터 (System 1/2) | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -1086,7 +1088,7 @@ plugins/artibot/
 │   ├── orchestrate.md           #   팀 오케스트레이션 (TeamCreate)
 │   ├── spawn.md                 #   팀 스폰 (병렬 실행)
 │   └── [38개 커맨드].md
-├── skills/                      # 99개 스킬 디렉토리 (forked context 격리)
+├── skills/                      # 98개 스킬 디렉토리 (forked context 격리)
 │   ├── orchestration/           #   위임 모드 선택 + 팀 라우팅
 │   ├── delegation/              #   Sub-Agent/Team 위임 전략
 │   ├── auto-learning-pipeline/  #   제로 설정 야간 자기 개선
@@ -1094,13 +1096,13 @@ plugins/artibot/
 ├── hooks/
 │   └── hooks.json               # 훅 이벤트 매핑
 ├── scripts/
-│   ├── hooks/                   # 24개 훅 스크립트 (ESM, file-lock 포함)
+│   ├── hooks/                   # 28개 훅 스크립트 (ESM, file-lock 포함)
 │   ├── ci/                      # 6개 CI 검증 스크립트
 │   ├── evals/                   # 런타임 eval 스위트
 │   └── utils/
-├── lib/                         # 66개 모듈
+├── lib/                         # 79개 모듈
 │   ├── core/                    # 코어 (27): platform, config, cache, lifecycle, extension, auto-fixer, error-codes, hook-utils, quickstart, style-registry, guard-registry, file-lock, event-bus, blocked-patterns 등
-│   ├── runtime/                 # 런타임 (12): create-artibot-agent, evaluator, middleware/ (9: router, subagents, tasks, checkpoint, memory, skills, guardrail, token-usage, summarization)
+│   ├── runtime/                 # 런타임 (14): create-artibot-agent, evaluator, middleware/ (11: router, subagents, tasks, checkpoint, memory, skills, guardrail, token-usage, summarization, lifecycle, plan-mode)
 │   ├── cognitive/               # 인지 엔진 (8): router, system1, system2 (core+strategies), sandbox, loop-detector
 │   ├── learning/                # 학습 (15): memory, grpo, knowledge-transfer, knowledge-demotion, lifelong, tool-learner, self-evaluator, vault 등
 │   ├── adapters/                # 멀티모델 어댑터 (7): base, gemini, codex, cursor, antigravity, adapter-utils
@@ -1130,6 +1132,34 @@ node scripts/ci/validate-hooks.js     # 훅 검증
 
 ---
 
+## v1.15.0 주요 변경사항
+
+### 하네스 엔지니어링 도입 (v1.15.0)
+Claude Code 하네스 아키텍처에서 영감받은 13개 신규 모듈 도입:
+
+#### 오케스트레이션 엔진
+- **DAG 기반 태스크 오케스트레이션** — 자동 의존성 관리, 순환 감지, 스킵 전파
+- **세분화된 상태 머신** — 8종 태스크 상태 (PENDING→RUNNING→SUCCESS/FAILURE/ERROR/KILLED/SKIPPED)
+- **Graceful Cancellation** — 실행 중 안전 취소 + 하류 자동 중단
+- **복잡도 기반 에이전트 분할** — 줄 수/서브태스크/파일 수 기반 자동 분할 제안
+
+#### 방어적 안전장치
+- **Write-Before-Read Guard** — Read 없이 파일 수정 시 자동 차단
+- **Edit Error Recovery** — Edit 실패 시 패턴 감지 → 자동 복구 안내
+- **File Checkpoint** — 파일 변경 전 자동 스냅샷 + 복원
+- **Plan Mode** — 읽기 전용 guardrail로 안전한 분석 단계 보장
+
+#### 모니터링 & 복구
+- **Context Token Tracker** — 매 턴 토큰 사용량 + 70%/90% 임계치 경고
+- **Context Recovery** — 컨텍스트 초과 시 자동 점진적 truncation
+
+#### 런타임 & 도구
+- **Lifecycle 미들웨어** — Setup/Teardown 3-phase 에이전트 생명주기
+- **AST-aware Code Search** — ast-grep 기반 구조적 코드 검색/치환 (25개 언어)
+- **Plan Tracker** — 플랜 체크박스 파싱 + 진행률 추적 + 세션 히스토리
+
+---
+
 ## v1.14.0~v1.14.1 주요 변경사항
 
 ### 자동 학습 파이프라인 (v1.14.0)
@@ -1150,7 +1180,7 @@ node scripts/ci/validate-hooks.js     # 훅 검증
 - 7개 출력 스타일로 확장 (기존 4개 + tokens, narrative, statusline)
 
 ### SKILL.md 검증 파이프라인 (v1.14.0)
-- `scripts/gen-skill-docs.js`: 99개 스킬 SKILL.md 유효성 검증 및 리포트 생성
+- `scripts/gen-skill-docs.js`: 98개 스킬 SKILL.md 유효성 검증 및 리포트 생성
 - `npm run skill:check` / `npm run skill:report` 스크립트 추가
 
 ### 제로 설정 자동 학습 (v1.14.1)

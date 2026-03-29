@@ -162,7 +162,7 @@ describe('auto-learning-committer/buildAutoCommitMessage', () => {
 
   const baseProvenance = {
     machineHash: 'abc12345',
-    pipelineVersion: '1.14.0',
+    pipelineVersion: '1.15.0',
     projectName: 'Artibot',
   };
 
@@ -190,13 +190,13 @@ describe('auto-learning-committer/buildAutoCommitMessage', () => {
   it('provenance 정보 포함', () => {
     const msg = buildAutoCommitMessage(basePipelineResult, 1, 0, baseProvenance);
     expect(msg).toContain('Artibot@abc12345');
-    expect(msg).toContain('v1.14.0');
+    expect(msg).toContain('v1.15.0');
   });
 
   it('provenance 없을 때 fallback', () => {
     const msg = buildAutoCommitMessage(basePipelineResult, 1, 0, null);
     expect(msg).toContain('unknown');
-    expect(msg).toContain('v1.14.0');
+    expect(msg).toContain('v1.15.0');
   });
 
   it('stagesRun 없으면 "all"', () => {

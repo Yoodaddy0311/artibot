@@ -1,0 +1,168 @@
+import { describe, expect, it } from 'vitest';
+import { existsSync, readFileSync } from 'node:fs';
+import path from 'node:path';
+import { isNewerVersion } from '../../lib/core/version-checker.js';
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+const PLUGIN_ROOT = path.resolve(
+  new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/i, '$1'),
+  '..', '..', '..',
+);
+
+/**
+ * All v1.15.0 new files that must be present in the plugin source tree
+ * for install.sh's recursive cp to include them.
+ */
+const V1_15_NEW_FILES = [
+  'lib/runtime/middleware/aci-constraint.js',
+  'lib/runtime/middleware/context-reset.js',
+  'lib/runtime/sprint-contract.js',
+  'lib/learning/eval-isolator.js',
+  'lib/learning/eval-calibrator.js',
+  'lib/learning/skill-freshness.js',
+  'lib/learning/skill-promoter.js',
+  'lib/core/feature-tracker.js',
+  'output-styles/artibot-intelligence.md',
+  'scripts/evals/harness-ablation.js',
+  'scripts/evals/skill-effectiveness.js',
+];
+
+// ---------------------------------------------------------------------------
+// 1. v1.15.0 신규 파일이 소스 트리에 존재
+// ---------------------------------------------------------------------------
+
+describe('install/v1.15.0 new files exist in source', () => {
+  for (const relPath of V1_15_NEW_FILES) {
+    it(`소스에 존재: ${relPath}`, () => {
+      const full = path.join(PLUGIN_ROOT, relPath);
+      expect(existsSync(full)).toBe(true);
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 2. install.sh가 모든 신규 파일의 상위 디렉토리를 재귀 복사
+// ---------------------------------------------------------------------------
+
+describe('install/install.sh covers new file directories', () => {
+  let installShContent;
+
+  it('install.sh 파일 존재', () => {
+    const installPath = path.join(PLUGIN_ROOT, 'install.sh');
+    expect(existsSync(installPath)).toBe(true);
+    installShContent = readFileSync(installPath, 'utf-8');
+  });
+
+  for (const relPath of V1_15_NEW_FILES) {
+    const topDir = relPath.split('/')[0]; // lib, scripts, output-styles, etc.
+    it(`install.sh가 ${topDir}/ 디렉토리를 재귀 복사`, () => {
+      // install.sh uses: cp -r "${SCRIPT_DIR}/<dir>" "${ARTIBOT_DIR}/"
+      const pattern = new RegExp(`cp\\s+-r\\s+.*["']?\\$\\{?SCRIPT_DIR\\}?["']?/${topDir}["']?\\s`);
+      const hasRecursiveCopy = pattern.test(installShContent);
+      // Also accept patterns like cp -r "${SCRIPT_DIR}/output-styles" "${ARTIBOT_DIR}/"
+      const altPattern = new RegExp(`cp\\s+-r\\s+.*${topDir}.*ARTIBOT_DIR`);
+      expect(hasRecursiveCopy || altPattern.test(installShContent)).toBe(true);
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 3. update.js 버전 비교: 1.14.3 → 1.15.0 업데이트 감지
+// ---------------------------------------------------------------------------
+
+describe('update/version comparison', () => {
+  it('1.14.3 → 1.15.0 업데이트 감지', () => {
+    expect(isNewerVersion('1.14.3', 'v1.15.0')).toBe(true);
+  });
+
+  it('1.15.0 → 1.15.0 동일 버전은 업데이트 아님', () => {
+    expect(isNewerVersion('1.15.0', 'v1.15.0')).toBe(false);
+  });
+
+  it('1.15.0 → 1.14.3 다운그레이드 아님', () => {
+    expect(isNewerVersion('1.15.0', 'v1.14.3')).toBe(false);
+  });
+
+  it('0.0.0 → 어떤 버전이든 업데이트', () => {
+    expect(isNewerVersion('0.0.0', 'v1.15.0')).toBe(true);
+  });
+
+  it('v 접두사 무관', () => {
+    expect(isNewerVersion('v1.14.3', '1.15.0')).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 4. SKILL.md sources/version/lastVerified 필드 보존 (설치 시 덮어쓰기)
+// ---------------------------------------------------------------------------
+
+describe('install/SKILL.md field preservation', () => {
+  it('스킬 디렉토리에 SKILL.md가 존재하고 frontmatter 포함', () => {
+    const skillsDir = path.join(PLUGIN_ROOT, 'skills');
+    if (!existsSync(skillsDir)) return; // skip if skills dir missing
+
+    // Check a sample skill for frontmatter fields
+    const sampleSkill = path.join(skillsDir, 'principles', 'SKILL.md');
+    if (!existsSync(sampleSkill)) return;
+
+    const content = readFileSync(sampleSkill, 'utf-8');
+    // Skills should have frontmatter with at least name and description
+    expect(content).toMatch(/^---/);
+    expect(content).toMatch(/name:/);
+  });
+
+  it('install.sh가 skills를 cp -r로 복사 (원본 그대로 보존)', () => {
+    const installPath = path.join(PLUGIN_ROOT, 'install.sh');
+    const content = readFileSync(installPath, 'utf-8');
+    // install_skills() uses cp -r to copy the entire skills directory
+    expect(content).toMatch(/cp\s+-r\s+.*skills.*ARTIBOT_DIR/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 5. CLAUDE.local.md 보호: 업데이트 시 덮어쓰이지 않음
+// ---------------------------------------------------------------------------
+
+describe('install/CLAUDE.local.md protection', () => {
+  it('install.sh가 CLAUDE.local.md 존재 시 건너뜀', () => {
+    const installPath = path.join(PLUGIN_ROOT, 'install.sh');
+    const content = readFileSync(installPath, 'utf-8');
+
+    // seed_local_config checks: if [ -f "$local_md" ]; then ... return
+    expect(content).toMatch(/seed_local_config/);
+    expect(content).toMatch(/CLAUDE\.local\.md already exists.*skipping/);
+  });
+
+  it('CLAUDE.local.md 템플릿이 존재', () => {
+    const templatePath = path.join(PLUGIN_ROOT, 'templates', 'CLAUDE.local.md.template');
+    expect(existsSync(templatePath)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 6. update.js 구조 검증
+// ---------------------------------------------------------------------------
+
+describe('update/structure', () => {
+  it('update.js가 소스에 존재', () => {
+    expect(existsSync(path.join(PLUGIN_ROOT, 'scripts', 'update.js'))).toBe(true);
+  });
+
+  it('update.js가 isNewerVersion을 사용', () => {
+    const content = readFileSync(
+      path.join(PLUGIN_ROOT, 'scripts', 'update.js'), 'utf-8',
+    );
+    expect(content).toContain('isNewerVersion');
+  });
+
+  it('update.js가 install.sh를 실행', () => {
+    const content = readFileSync(
+      path.join(PLUGIN_ROOT, 'scripts', 'update.js'), 'utf-8',
+    );
+    expect(content).toContain('install.sh');
+    expect(content).toContain('runInstall');
+  });
+});

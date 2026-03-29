@@ -326,6 +326,115 @@ Progress:
 **Skippable**: No — 최종 결과의 수락/거절은 사람의 판단이 필요
 **Freedom**: MEDIUM
 
+## DAG-Based Task Dependency Management
+
+Use the `Dag` class and `STATUS` state machine from `lib/orchestration/` to model task dependencies with cycle detection, topological ordering, and automatic skip propagation.
+
+### Imports
+
+```js
+import { Dag } from '../../lib/orchestration/dag.js';
+import { STATUS, transition } from '../../lib/orchestration/status.js';
+import { createCanceler } from '../../lib/orchestration/canceler.js';
+```
+
+### Registering Tasks in the DAG
+
+When creating tasks via `TaskCreate`, simultaneously register them in a DAG instance to track dependencies:
+
+```
+// 1. Build the DAG from workflow phases
+const dag = new Dag();
+dag.add('plan');                          // no dependencies (root)
+dag.add('design',    ['plan']);           // depends on plan
+dag.add('implement', ['design']);         // depends on design
+dag.add('test',      ['implement']);      // depends on implement
+dag.add('review',    ['test']);           // depends on test
+
+// 2. Validate before execution
+if (dag.detectCycles()) {
+  throw new Error('Workflow has circular dependencies');
+}
+
+// 3. Get execution order
+const order = dag.topologicalSort();
+// -> ['plan', 'design', 'implement', 'test', 'review']
+```
+
+### Querying Ready Tasks with `getReady()`
+
+Use `getReady(completed)` to determine which tasks can be started now, enabling maximum parallelism:
+
+```
+const completed = new Set();
+
+// Initial: only root tasks are ready
+dag.getReady(completed);  // -> ['plan']
+
+// After 'plan' completes
+completed.add('plan');
+dag.getReady(completed);  // -> ['design']
+
+// For parallel workflows (e.g., test + docs both depend on implement):
+// dag.add('test', ['implement']);
+// dag.add('docs', ['implement']);
+// After implement completes:
+// dag.getReady(completed) -> ['test', 'docs']  (both ready in parallel)
+```
+
+### Status Transitions
+
+Track task status using the state machine. The `transition()` function validates that the move is legal:
+
+```
+let taskStatus = STATUS.PENDING;
+
+// Task dependencies not yet met
+taskStatus = transition(taskStatus, STATUS.WAITING_ON_DEPS);
+
+// Dependencies satisfied, start execution
+taskStatus = transition(taskStatus, STATUS.RUNNING);
+
+// Task completes
+taskStatus = transition(taskStatus, STATUS.SUCCESS);
+
+// Invalid transitions throw:
+// transition(STATUS.SUCCESS, STATUS.RUNNING) -> Error!
+```
+
+Valid status flow:
+```
+PENDING -> WAITING_ON_DEPS -> RUNNING -> SUCCESS / FAILURE / ERROR / KILLED
+PENDING -> SKIPPED (skip propagation)
+```
+
+### Cancellation and Skip Propagation
+
+When a task fails, cancel all downstream tasks automatically:
+
+```
+const canceler = createCanceler();
+// If 'implement' fails, cancel everything downstream:
+canceler.cancelDownstream(dag, 'implement', (taskId) => statusMap.get(taskId));
+// -> cancels 'test' and 'review'
+
+// Skip propagation (when a task is intentionally skipped):
+const toSkip = dag.skipPropagate('design');
+// -> ['design', 'implement', 'test', 'review'] (all downstream with no alternative path)
+```
+
+### Integration with Pipeline Pattern
+
+The existing Pipeline orchestration pattern (`TaskCreate` with `blockedBy`) maps directly to DAG:
+
+| Pipeline Pattern (existing) | DAG Enhancement |
+|---|---|
+| `TaskCreate(task2, blockedBy: [task1])` | `dag.add('task2', ['task1'])` |
+| Manual sequential execution | `dag.getReady(completed)` for auto-parallel |
+| No cycle validation | `dag.detectCycles()` before execution |
+| No skip propagation | `dag.skipPropagate(failedTask)` |
+| No topological ordering | `dag.topologicalSort()` for optimal order |
+
 ## Freedom Levels
 
 | Step | Freedom | Guidance |
