@@ -12,6 +12,21 @@
 import { existsSync, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+
+/** Files that are always allowed without a prior Read. */
+const WHITELIST_BASENAMES = new Set(['CLAUDE.md', 'CLAUDE.local.md']);
+
+/**
+ * Check if a file path matches the whitelist (Claude config files).
+ * @param {string} filePath
+ * @returns {boolean}
+ */
+function isWhitelisted(filePath) {
+  if (!filePath) return false;
+  if (WHITELIST_BASENAMES.has(path.basename(filePath))) return true;
+  const normalized = filePath.replace(/\\/g, '/');
+  return normalized.includes('.claude/');
+}
 import { atomicWriteSync, parseJSON, readStdin, writeStdout } from '../utils/index.js';
 import { createErrorHandler, extractFilePath, extractToolName, normalizePath } from '../../lib/core/hook-utils.js';
 
@@ -81,6 +96,12 @@ function handleWriteGuard(hookData) {
   }
 
   const normalized = normalizePath(filePath);
+
+  // Allow whitelisted files (Claude config) without Read requirement
+  if (isWhitelisted(filePath)) {
+    writeStdout({ decision: 'approve' });
+    return;
+  }
 
   // Allow new file creation (file does not exist yet)
   if (!existsSync(filePath)) {

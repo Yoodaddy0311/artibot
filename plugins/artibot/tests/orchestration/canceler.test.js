@@ -1,21 +1,20 @@
-import { describe, expect, it, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { createCanceler } from '../../lib/orchestration/canceler.js';
+import { Dag } from '../../lib/orchestration/dag.js';
 import { STATUS } from '../../lib/orchestration/status.js';
 
 /**
- * Build a minimal DAG-like graph for testing cancelDownstream.
- * Graph: A -> B -> C, A -> D (B and D depend on A, C depends on B)
+ * Build a DAG for testing cancelDownstream.
+ * Graph: A -> B -> C, A -> D (B and D depend on A, C depends on B), E independent
  */
 function makeDag() {
-  return {
-    graph: new Map([
-      ['A', { name: 'A', graph: [] }],
-      ['B', { name: 'B', graph: ['A'] }],
-      ['C', { name: 'C', graph: ['B'] }],
-      ['D', { name: 'D', graph: ['A'] }],
-      ['E', { name: 'E', graph: [] }], // independent
-    ]),
-  };
+  const dag = new Dag();
+  dag.add('A');
+  dag.add('B', ['A']);
+  dag.add('C', ['B']);
+  dag.add('D', ['A']);
+  dag.add('E');
+  return dag;
 }
 
 describe('orchestration/canceler', () => {

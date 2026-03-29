@@ -70,20 +70,20 @@ export function createCanceler(options = {}) {
 
     /**
      * Cancel all downstream tasks of a failed/cancelled task in the DAG.
-     * Walks the DAG graph and cancels every task that transitively depends
-     * on the given task, provided its status is cancellable.
+     * Walks the DAG using its public API and cancels every task that
+     * transitively depends on the given task, provided its status is cancellable.
      *
-     * @param {object} dag - A Dag instance with `graph` Map of vertices.
+     * @param {import('./dag.js').Dag} dag - A Dag instance.
      * @param {string} failedTaskId - The task that failed or was cancelled.
      * @param {(taskId: string) => string} [getStatus] - Status lookup per task.
      * @returns {string[]} List of newly cancelled downstream task IDs.
      */
     cancelDownstream(dag, failedTaskId, getStatus) {
       const statusFn = getStatus || (() => STATUS.PENDING);
-      const graph = dag?.graph;
-      if (!graph) return [];
+      if (!dag || typeof dag.dependents !== 'function') return [];
+      if (!dag.has(failedTaskId)) return [];
 
-      const downstream = findDownstream(graph, failedTaskId);
+      const downstream = findDownstream(dag, failedTaskId);
       const newlyCancelled = [];
 
       for (const taskId of downstream) {
@@ -117,28 +117,26 @@ export function createCanceler(options = {}) {
 
 /**
  * Find all tasks that transitively depend on the given task.
- * A task B depends on task A if A appears in B's dependency list (graph edges).
+ * Uses the Dag's public `dependents(id)` method for BFS traversal.
  *
- * @param {Map<string, object>} graph - DAG graph map (name -> Vertex).
+ * @param {import('./dag.js').Dag} dag - A Dag instance.
  * @param {string} taskId - The root task to find dependents of.
  * @returns {string[]} All downstream task IDs (breadth-first order).
  */
-function findDownstream(graph, taskId) {
-  const dependents = [];
+function findDownstream(dag, taskId) {
+  const result = [];
   const visited = new Set();
   const queue = [taskId];
 
   while (queue.length > 0) {
     const current = queue.shift();
-    for (const [name, vertex] of graph) {
-      if (visited.has(name)) continue;
-      const deps = vertex.graph || [];
-      if (deps.includes(current)) {
-        visited.add(name);
-        dependents.push(name);
-        queue.push(name);
-      }
+    const children = dag.dependents(current);
+    for (const child of children) {
+      if (visited.has(child)) continue;
+      visited.add(child);
+      result.push(child);
+      queue.push(child);
     }
   }
-  return dependents;
+  return result;
 }

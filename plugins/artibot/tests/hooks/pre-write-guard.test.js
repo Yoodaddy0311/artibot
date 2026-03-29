@@ -303,6 +303,66 @@ describe('pre-write-guard hook', () => {
     });
   });
 
+  describe('whitelist - Claude config files (approve without Read)', () => {
+    it('approves Write to CLAUDE.md without prior Read', async () => {
+      const filePath = '/project/CLAUDE.md';
+
+      // File exists but was NOT read
+      existsSync.mockImplementation((p) => {
+        if (typeof p === 'string' && p.includes('artibot-read-tracking')) return true;
+        return true;
+      });
+      readFileSync.mockReturnValue('[]');
+
+      readStdin.mockResolvedValue(makePreWriteData(filePath));
+
+      await import('../../scripts/hooks/pre-write-guard.js');
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(writeStdout).toHaveBeenCalledWith(
+        expect.objectContaining({ decision: 'approve' }),
+      );
+    });
+
+    it('approves Write to CLAUDE.local.md without prior Read', async () => {
+      const filePath = '/project/CLAUDE.local.md';
+
+      existsSync.mockImplementation((p) => {
+        if (typeof p === 'string' && p.includes('artibot-read-tracking')) return true;
+        return true;
+      });
+      readFileSync.mockReturnValue('[]');
+
+      readStdin.mockResolvedValue(makePreWriteData(filePath));
+
+      await import('../../scripts/hooks/pre-write-guard.js');
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(writeStdout).toHaveBeenCalledWith(
+        expect.objectContaining({ decision: 'approve' }),
+      );
+    });
+
+    it('approves Write to .claude/ directory files without prior Read', async () => {
+      const filePath = '/home/user/.claude/settings.json';
+
+      existsSync.mockImplementation((p) => {
+        if (typeof p === 'string' && p.includes('artibot-read-tracking')) return true;
+        return true;
+      });
+      readFileSync.mockReturnValue('[]');
+
+      readStdin.mockResolvedValue(makePreWriteData(filePath));
+
+      await import('../../scripts/hooks/pre-write-guard.js');
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(writeStdout).toHaveBeenCalledWith(
+        expect.objectContaining({ decision: 'approve' }),
+      );
+    });
+  });
+
   describe('error handling', () => {
     it('blocks by default when hook errors', async () => {
       readStdin.mockRejectedValue(new Error('stdin read failed'));

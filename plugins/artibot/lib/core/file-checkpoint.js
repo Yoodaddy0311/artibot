@@ -6,12 +6,15 @@
  * @module lib/core/file-checkpoint
  */
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
 /** Maximum number of snapshots retained per instance (FIFO eviction). */
 const MAX_SNAPSHOTS = 10;
+
+/** Maximum file size in bytes eligible for snapshotting (1 MB). */
+const MAX_FILE_SIZE = 1_048_576;
 
 /**
  * File-level checkpoint system with FIFO eviction.
@@ -48,6 +51,13 @@ export class FileCheckpoint {
    */
   snapshot(filePath) {
     if (!filePath || !existsSync(filePath)) return null;
+
+    if (statSync(filePath).size > MAX_FILE_SIZE) {
+      process.stderr.write(
+        `[artibot:file-checkpoint] Skipping snapshot for large file (>1MB): ${filePath}\n`,
+      );
+      return null;
+    }
 
     const content = readFileSync(filePath, 'utf-8');
     const record = Object.freeze({

@@ -87,6 +87,30 @@ export class Dag {
   }
 
   /**
+   * Get direct dependents of a node (nodes that depend on this one).
+   *
+   * @param {string} id
+   * @returns {string[]}
+   */
+  dependents(id) {
+    const deps = this.#dependents.get(id);
+    if (!deps) {
+      throw new Error(`Unknown node: "${id}"`);
+    }
+    return [...deps];
+  }
+
+  /**
+   * Check whether a node exists in the graph.
+   *
+   * @param {string} id
+   * @returns {boolean}
+   */
+  has(id) {
+    return this.#deps.has(id);
+  }
+
+  /**
    * Get all ancestor nodes (transitive dependencies) via BFS.
    *
    * @param {string} id

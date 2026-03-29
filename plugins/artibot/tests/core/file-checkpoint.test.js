@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 
 vi.mock('node:fs', async () => {
   const actual = await vi.importActual('node:fs');
@@ -9,6 +9,7 @@ vi.mock('node:fs', async () => {
     mkdirSync: vi.fn(),
     readFileSync: vi.fn(() => ''),
     readdirSync: vi.fn(() => []),
+    statSync: vi.fn(() => ({ size: 100 })),
     unlinkSync: vi.fn(),
     writeFileSync: vi.fn(),
   };
@@ -27,6 +28,7 @@ describe('FileCheckpoint', () => {
     vi.mocked(mkdirSync).mockImplementation(() => {});
     vi.mocked(readFileSync).mockReturnValue('');
     vi.mocked(readdirSync).mockReturnValue([]);
+    vi.mocked(statSync).mockReturnValue({ size: 100 });
     vi.mocked(unlinkSync).mockImplementation(() => {});
     vi.mocked(writeFileSync).mockImplementation(() => {});
     ({ FileCheckpoint } = await import('../../lib/core/file-checkpoint.js'));
@@ -211,6 +213,35 @@ describe('FileCheckpoint', () => {
 
     expect(history).toHaveLength(1);
     expect(history[0].filePath).toBe('/a');
+  });
+
+  // ─── Large file guard ───────────────────────────────────────────
+
+  it('returns null and skips snapshot for files larger than 1MB', () => {
+    vi.mocked(existsSync).mockReturnValue(true);
+    vi.mocked(statSync).mockReturnValue({ size: 1_048_577 });
+    vi.mocked(readdirSync).mockReturnValue([]);
+
+    const cp = new FileCheckpoint('s1');
+    vi.mocked(writeFileSync).mockClear();
+    const result = cp.snapshot('/app/huge-file.bin');
+
+    expect(result).toBeNull();
+    // Should not have written a snapshot JSON (only mkdirSync calls from constructor)
+    expect(writeFileSync).not.toHaveBeenCalled();
+  });
+
+  it('snapshots files exactly at 1MB boundary', () => {
+    vi.mocked(existsSync).mockReturnValue(true);
+    vi.mocked(statSync).mockReturnValue({ size: 1_048_576 });
+    vi.mocked(readFileSync).mockReturnValue('data');
+    vi.mocked(readdirSync).mockReturnValue([]);
+
+    const cp = new FileCheckpoint('s1');
+    const result = cp.snapshot('/app/edge-file.js');
+
+    expect(result).not.toBeNull();
+    expect(result.filePath).toBe('/app/edge-file.js');
   });
 
   // ─── clear() ─────────────────────────────────────────────────────
