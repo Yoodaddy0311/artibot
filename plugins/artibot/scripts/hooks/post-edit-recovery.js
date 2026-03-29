@@ -11,7 +11,7 @@
  */
 
 import { parseJSON, readStdin, writeStdout } from '../utils/index.js';
-import { createErrorHandler, extractToolName, logHookError } from '../../lib/core/hook-utils.js';
+import { createErrorHandler, extractToolName } from '../../lib/core/hook-utils.js';
 
 /**
  * Known failure patterns in Edit/Write tool output.
