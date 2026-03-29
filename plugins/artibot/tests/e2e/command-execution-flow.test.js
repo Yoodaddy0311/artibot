@@ -22,9 +22,7 @@ import { readFileSync } from 'node:fs';
 // decodeURIComponent is needed because import.meta.url percent-encodes
 // non-ASCII characters (e.g. Korean "바탕 화면") which breaks fs operations.
 const PLUGIN_ROOT = path.resolve(
-  decodeURIComponent(
-    path.dirname(fileURLToPath(import.meta.url)/i, '$1')),
-  ),
+  path.dirname(fileURLToPath(import.meta.url)),
   '..', '..',
 );
 

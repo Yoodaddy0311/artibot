@@ -4,9 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
 
 const PLUGIN_ROOT = path.resolve(
-  decodeURIComponent(
-    path.dirname(fileURLToPath(import.meta.url)/i, '$1')),
-  ),
+  path.dirname(fileURLToPath(import.meta.url)),
   '..', '..',
 );
 
