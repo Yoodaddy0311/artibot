@@ -10,7 +10,7 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-ARTIBOT_VERSION="1.3.0"
+ARTIBOT_VERSION="2.0.0"
 MIN_NODE_MAJOR=18
 DEFAULT_PLUGIN_DIR="$HOME/.claude/plugins/artibot"
 REPO_URL="https://github.com/Artience/artibot"

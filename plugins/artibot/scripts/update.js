@@ -18,6 +18,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { execSync } from 'node:child_process';
 import path from 'node:path';
 import os from 'node:os';
+import { fileURLToPath } from 'node:url';
 import { isNewerVersion } from '../lib/core/version-checker.js';
 import { getPluginRoot } from '../lib/core/platform.js';
 
@@ -284,7 +285,7 @@ function findInstallScript() {
 
   // 1. Source repo: this file lives in <repo>/plugins/artibot/scripts/update.js
   //    install.sh is at <repo>/plugins/artibot/install.sh
-  const scriptDir = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/i, '$1'));
+  const scriptDir = path.dirname(fileURLToPath(import.meta.url));
   const repoRoot = path.resolve(scriptDir, '..');
   candidates.push(path.join(repoRoot, 'install.sh'));
 
