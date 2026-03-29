@@ -215,7 +215,7 @@ export function buildAutoCommitMessage(pipelineResult, allowedCount, blockedCoun
   const dateStr = new Date().toISOString().slice(0, 10);
   const stages = pipelineResult.stagesRun?.join(', ') ?? 'all';
   const machineHash = provenance?.machineHash || hashShort(os.hostname());
-  const version = provenance?.pipelineVersion || '1.14.0';
+  const version = provenance?.pipelineVersion || '1.15.0';
   const project = provenance?.projectName || 'unknown';
 
   return [

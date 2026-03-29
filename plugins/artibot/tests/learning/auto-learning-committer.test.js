@@ -162,7 +162,7 @@ describe('auto-learning-committer/buildAutoCommitMessage', () => {
 
   const baseProvenance = {
     machineHash: 'abc12345',
-    pipelineVersion: '1.14.0',
+    pipelineVersion: '1.15.0',
     projectName: 'Artibot',
   };
 

@@ -81,7 +81,7 @@ describe('auto-learning-extractor/stripProvenancePII', () => {
     branch: 'artibot/master',
     commitRange: 'abc1234..def5678',
     extractedAt: '2026-03-25T03:00:00.000Z',
-    pipelineVersion: '1.14.0',
+    pipelineVersion: '1.15.0',
   };
 
   it('user 필드 제거', () => {
@@ -106,7 +106,7 @@ describe('auto-learning-extractor/stripProvenancePII', () => {
     expect(result.branch).toBe('artibot/master');
     expect(result.commitRange).toBe('abc1234..def5678');
     expect(result.extractedAt).toBe('2026-03-25T03:00:00.000Z');
-    expect(result.pipelineVersion).toBe('1.14.0');
+    expect(result.pipelineVersion).toBe('1.15.0');
   });
 
   it('null 입력 → 빈 객체', () => {

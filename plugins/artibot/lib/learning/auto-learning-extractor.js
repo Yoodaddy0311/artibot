@@ -89,7 +89,7 @@ export async function collectProvenance(options = {}) {
   const hostname = os.hostname();
 
   // Read version from config
-  let pipelineVersion = '1.14.0';
+  let pipelineVersion = '1.15.0';
   try {
     const configPath = path.join(getPluginRoot(), 'artibot.config.json');
     const config = await readJsonFile(configPath);
