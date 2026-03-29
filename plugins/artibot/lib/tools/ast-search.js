@@ -8,7 +8,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { readFile } from 'node:fs/promises';
-import { resolve, relative } from 'node:path';
+import { resolve } from 'node:path';
 import { stat } from 'node:fs/promises';
 
 const execFileAsync = promisify(execFile);
