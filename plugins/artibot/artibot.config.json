@@ -45,6 +45,7 @@
 
   "team": {
     "enabled": true,
+    "autoApply": true,
     "engine": "claude-agent-teams",
     "envVar": "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS",
     "maxTeammates": null,

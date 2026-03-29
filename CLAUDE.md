@@ -19,6 +19,22 @@
 - Architecture decisions: use architect agent
 - Multiple independent tasks: launch agents in parallel
 
+### Auto Team Mode (team.autoApply)
+When `team.autoApply` is `true` in `artibot.config.json` (default), automatically use /team workflow for qualifying requests WITHOUT the user needing to type `/team`. This applies when ALL of these conditions are met:
+1. The request involves **2+ independent subtasks** that can be parallelized
+2. The request involves **2+ different files or domains** (e.g., frontend + backend, hook + config + test)
+3. The estimated complexity is **medium or higher** (not a simple single-file edit or question)
+
+When auto-team triggers, behave exactly as if the user typed `/team <their request>`:
+- Decompose into independent work units
+- Create a team and delegate to parallel teammates
+- Cross-verify results before reporting
+
+**Opt-out methods** (any one disables auto-team for the scope):
+- Set `team.autoApply: false` in `artibot.config.json` (permanent)
+- Add `team.autoApply: false` in `CLAUDE.local.md` under Personal Workflow Preferences (per-user)
+- Include `--no-team` anywhere in the prompt (per-request)
+
 ### Quality Gates
 - Read before write (no blind modifications)
 - Functions < 50 lines, files < 800 lines

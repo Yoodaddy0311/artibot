@@ -17,6 +17,7 @@
 
 import { parseJSON, readStdin, toFileUrl, writeStdout } from '../utils/index.js';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createErrorHandler, extractAgentId, extractAgentRole, logHookError } from '../../lib/core/hook-utils.js';
 
 // ---------------------------------------------------------------------------
@@ -25,7 +26,7 @@ import { createErrorHandler, extractAgentId, extractAgentRole, logHookError } fr
 const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT
   ? path.resolve(process.env.CLAUDE_PLUGIN_ROOT)
   : path.resolve(
-      path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/i, '$1')),
+      path.dirname(fileURLToPath(import.meta.url)),
       '..',
       '..'
     );
