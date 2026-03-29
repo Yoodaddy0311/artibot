@@ -9,7 +9,7 @@ import { isNewerVersion } from '../../lib/core/version-checker.js';
 // ---------------------------------------------------------------------------
 
 const PLUGIN_ROOT = path.resolve(
-  new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/i, '$1'),
+  fileURLToPath(import.meta.url),
   '..', '..', '..',
 );
 
