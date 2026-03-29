@@ -21,6 +21,7 @@ import { createGuardrailMiddleware } from './middleware/guardrail.js';
 import { createTokenUsageMiddleware } from './middleware/token-usage.js';
 import { createCheckpointMiddleware } from './middleware/checkpoint.js';
 import { createAciConstraintMiddleware } from './middleware/aci-constraint.js';
+import { createLifecycleMiddleware } from './middleware/lifecycle.js';
 
 const FALLBACK_CONFIG = Object.freeze({
   automation: { supportedLanguages: ['en', 'ko', 'ja'], ambiguityThreshold: 50 },
@@ -137,8 +138,10 @@ export function createArtibotAgent(options = {}) {
     ...(options.checkpointOptions || {}),
   });
   const mwAciConstraint = createAciConstraintMiddleware(middlewareOptions.aciConstraint);
+  const mwLifecycle = createLifecycleMiddleware({ now, ...(middlewareOptions.lifecycle || {}) });
 
   const allMiddleware = customMiddleware || [
+    mwLifecycle,
     mwRouter, mwMemory, mwSkills, mwTasks,
     mwSubagents, mwAciConstraint, mwGuardrail, mwSummarization,
     mwTokenUsage, mwCheckpoint,
@@ -192,6 +195,8 @@ export function createArtibotAgent(options = {}) {
           await runMiddleware(apply.name || 'anonymous', apply, state);
         }
       } else {
+        // Phase 0: lifecycle setup (outermost — runs first, teardown context recorded)
+        await runMiddleware('lifecycle', mwLifecycle, state);
         // Phase 1: router (all others depend on routing/intent)
         await runMiddleware('router', mwRouter, state);
         // Phase 2: memory, skills, tasks (independent, only read router output)

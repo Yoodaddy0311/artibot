@@ -71,6 +71,55 @@ RISKS
 [severity] [description] -> [mitigation]
 ```
 
+## Plan Tracker Integration
+
+플랜 생성 후 `PlanTracker` (`lib/core/plan-tracker.js`)를 활용하여 진행 상태를 추적한다.
+
+**1. 플랜 파싱 — 태스크 목록 추출**
+```js
+import { PlanTracker } from './lib/core/plan-tracker.js';
+
+const tracker = new PlanTracker();
+const tasks = tracker.parsePlan(planMarkdown);
+// [{ text: 'Set up project structure', completed: false }, ...]
+```
+
+**2. 진행률 확인**
+```js
+const { total, completed, percentage } = tracker.getProgress();
+// { total: 12, completed: 5, percentage: 42 }
+```
+
+**3. 태스크 완료 마킹 (불변 — 새 마크다운 반환)**
+```js
+const updatedMarkdown = tracker.markCompleted(taskIndex);
+// 원본 planMarkdown은 변경되지 않음
+```
+
+**4. 세션 간 상태 지속 (`.plan-state.json`)**
+```js
+// 세션 시작 시
+tracker.addSession('session-abc');
+
+// 작업 완료 후 상태 저장
+const state = tracker.toState('/path/to/plan.md');
+await writeJsonFile('/path/to/.plan-state.json', state);
+
+// 다음 세션에서 복원
+const saved = await readJsonFile('/path/to/.plan-state.json');
+tracker.fromState(saved);
+```
+
+**상태 파일 형식** (`.plan-state.json`):
+```json
+{
+  "planFile": "/path/to/plan.md",
+  "tasks": [{ "text": "...", "completed": true }, ...],
+  "sessions": [{ "id": "session-abc", "completedIndices": [0, 2], "startedAt": "..." }],
+  "lastUpdated": "2026-03-29T..."
+}
+```
+
 ## Next Steps
 
 작업 완료 후 추천 후속 액션:
