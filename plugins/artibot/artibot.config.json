@@ -229,7 +229,7 @@
   "swarm": {
     "enabled": true,
     "optIn": true,
-    "serverUrl": "http://localhost:8080",
+    "serverUrl": "https://artibot-swarm-154860486472.asia-northeast3.run.app",
     "syncInterval": "session",
     "localGlobalRatio": [0.3, 0.7],
     "differentialPrivacy": {
