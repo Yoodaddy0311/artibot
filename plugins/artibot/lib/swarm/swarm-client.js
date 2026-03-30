@@ -43,7 +43,7 @@ const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 
 /**
  * Set of hosts allowed for outbound HTTP requests.
- * Only localhost is permitted — DATA POLICY forbids external server access.
+ * Localhost + official Artibot Swarm Server on GCP Cloud Run.
  */
 const ALLOWED_HOSTS = new Set([
   'localhost',
@@ -51,6 +51,11 @@ const ALLOWED_HOSTS = new Set([
   '::1',
   '[::1]', // URL-parsed form of IPv6 localhost
 ]);
+
+/** Host patterns allowed for swarm server (Cloud Run domains) */
+const ALLOWED_HOST_PATTERNS = [
+  /^artibot-swarm-\d+\.[\w-]+\.run\.app$/, // GCP Cloud Run
+];
 
 /** RFC 1918 / RFC 6598 private IPv4 ranges (excluding explicit localhost) */
 const PRIVATE_IP_PATTERNS = [
@@ -101,8 +106,10 @@ function validateUrl(urlString) {
     throw new Error(`SSRF blocked: protocol '${url.protocol}' not allowed`);
   }
 
-  // Check allowlist
-  if (!ALLOWED_HOSTS.has(url.hostname)) {
+  // Check allowlist (exact match or pattern match)
+  const hostAllowed = ALLOWED_HOSTS.has(url.hostname)
+    || ALLOWED_HOST_PATTERNS.some((p) => p.test(url.hostname));
+  if (!hostAllowed) {
     throw new Error(`SSRF blocked: host '${url.hostname}' not in allowlist`);
   }
 
