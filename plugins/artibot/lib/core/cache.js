@@ -219,6 +219,10 @@ export class Cache {
  * Shared default cache instance with 30-second TTL.
  * Use this for common caching needs across the plugin.
  *
+ * // TODO: bridge config.context.importCacheTTL when config-aware cache
+ * // initialization is implemented. Currently the default 30000ms matches
+ * // the config value, but the cache does not read it from config.
+ *
  * @type {Cache}
  * @example
  * import { defaultCache } from './cache.js';

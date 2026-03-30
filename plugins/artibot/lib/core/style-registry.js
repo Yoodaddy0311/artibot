@@ -45,6 +45,11 @@ const MAX_STYLES = 50;
 /** @type {Map<string, StyleConfig>} */
 const registry = new Map();
 
+// TODO: bridge config.output.defaultStyle — expose a getDefaultStyle() that
+// reads the config value and returns getStyle(config.output.defaultStyle).
+// Consumers (e.g., output formatting in runtime pipeline) would call
+// getDefaultStyle() instead of hardcoding a style name.
+
 /** Whether built-in styles have been loaded */
 let builtinsLoaded = false;
 

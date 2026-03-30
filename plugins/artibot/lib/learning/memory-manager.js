@@ -13,6 +13,11 @@ import { ARTIBOT_DIR } from '../core/config.js';
 // Constants
 // ---------------------------------------------------------------------------
 
+// TODO: bridge config.learning.memoryScopes when multi-scope memory is
+// implemented. Currently all memory is stored under ~/.claude/artibot/memory/
+// (the "user" scope). The config defines user, project, and session scopes
+// but this module does not read or differentiate them.
+
 const MEMORY_DIR_NAME = 'memory';
 const STORE_FILES = {
   userPreferences: 'user-preferences.json',

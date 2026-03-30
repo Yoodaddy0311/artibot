@@ -64,6 +64,13 @@ const VALID_STAGES = [
   'skill-refinement',
 ];
 
+// NOTE: config.learning.schedule (nightlyLearner/driftCheck cron fields) is
+// defined in artibot.config.json but has no runtime consumer. The original
+// nightly-learner.js module was removed as dead code. The scheduled-learning
+// skill (skills/scheduled-learning/SKILL.md) documents the intended design
+// but is not yet implemented. These config fields should be considered
+// planned-but-not-implemented until a CronCreate-based scheduler is built.
+
 const DEFAULT_CONFIG = Object.freeze({
   enabled: false,
   schedule: '0 3 * * *',

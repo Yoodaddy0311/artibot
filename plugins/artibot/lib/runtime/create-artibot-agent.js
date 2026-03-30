@@ -146,6 +146,10 @@ export function createArtibotAgent(options = {}) {
   const mwLifecycle = createLifecycleMiddleware({ now, ...(middlewareOptions.lifecycle || {}) });
   const mwSmartPipeline = createSmartPipelineMiddleware(middlewareOptions.smartPipeline);
 
+  // TODO: bridge config.runtime.middleware — the config defines a middleware
+  // list intended to make this pipeline configurable. Implementing dynamic
+  // middleware loading requires a registry + ordering/dependency resolution.
+  // For now the pipeline is hardcoded below.
   const allMiddleware = customMiddleware || [
     mwLifecycle,
     mwSmartPipeline,

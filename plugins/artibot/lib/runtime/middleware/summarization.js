@@ -121,6 +121,10 @@ function calcCompactionStats(originalTokens, compactedTokens) {
  * @param {number} [options.charsPerToken=4] - Characters-per-token estimation ratio.
  * @param {number} [options.compactThresholdChars] - Legacy char-based threshold (overrides maxTokens).
  * @returns {(state: object) => Promise<object>}
+ *
+ * // TODO: bridge config.output.maxContextLength as an alternative threshold
+ * // for context window management. Currently maxTokens (token-based) is used
+ * // but maxContextLength (character-based) from config is not consumed.
  */
 export function createSummarizationMiddleware(options = {}) {
   const {
