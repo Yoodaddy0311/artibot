@@ -56,6 +56,11 @@ export {
   cleanup as cleanupSandbox,
 } from './sandbox.js';
 
+// Auto-Research Pipeline
+export {
+  createAutoResearch,
+} from './auto-research.js';
+
 /**
  * Process an input through the full cognitive pipeline.
  * Routes to System 1 or System 2 based on complexity assessment.

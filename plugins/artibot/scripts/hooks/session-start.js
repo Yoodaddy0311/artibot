@@ -59,6 +59,33 @@ async function main() {
     }
   }
 
+  // Session Memory: recall relevant context from past sessions
+  let sessionRecall = null;
+  try {
+    const sessionMemoryPath = path.join(env.pluginRoot, 'lib', 'learning', 'session-memory.js');
+    const { createSessionMemory } = await import(toFileUrl(sessionMemoryPath));
+    const sessionMemory = createSessionMemory();
+    sessionRecall = await sessionMemory.recall(process.cwd(), 5);
+  } catch {
+    // Non-critical: session memory recall is best-effort
+  }
+
+  // Collective Intelligence: load cross-project pattern recommendations
+  let collectiveTop = null;
+  try {
+    const pluginRoot = env.pluginRoot;
+    const hubPath = path.join(pluginRoot, 'lib', 'swarm', 'collective-hub.js');
+    const persistPath = path.join(pluginRoot, 'lib', 'swarm', 'swarm-persistence.js');
+    const { generateWeeklyTop } = await import(toFileUrl(hubPath));
+    const { loadFromDisk } = await import(toFileUrl(persistPath));
+    const store = await loadFromDisk();
+    if (store?.patterns?.length > 0) {
+      collectiveTop = generateWeeklyTop(store.patterns, 5);
+    }
+  } catch {
+    // Non-critical: collective intelligence is best-effort
+  }
+
   const version = config.version || '1.0.0';
   const restored = previousState ? ` | Session restored from ${previousState.startedAt || 'unknown'}` : '';
 
@@ -100,6 +127,19 @@ async function main() {
     `Artibot v${version} initialized`,
     `Platform: ${env.platform}/${env.arch} | Node ${env.nodeVersion} | Mode: ${teamMode}${restored}${setupHint}`,
   ];
+
+  // Append session memory recall summary if available
+  if (sessionRecall && sessionRecall.length > 0) {
+    const topics = sessionRecall
+      .map((r) => r.memory?.keywords?.slice(0, 3).join(', '))
+      .filter(Boolean)
+      .join(' | ');
+    lines.push(`Session memory: ${sessionRecall.length} relevant memories recalled (${topics})`);
+  }
+
+  if (collectiveTop?.patterns?.length > 0) {
+    lines.push(`| Collective: ${collectiveTop.patterns.length} cross-project patterns available`);
+  }
 
   // Non-blocking update notification — any error is swallowed.
   // Wrapped with a 2000ms outer timeout so the update check never consumes

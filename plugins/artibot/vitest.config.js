@@ -5,7 +5,7 @@ function stripShebangPlugin() {
   return {
     name: 'strip-shebang',
     transform(code, id) {
-      if (id.includes('scripts/hooks') && code.startsWith('#!')) {
+      if ((id.includes('scripts/hooks') || id.includes('scripts/evals')) && code.startsWith('#!')) {
         return { code: code.replace(/^#![^\n]*\n/, ''), map: null };
       }
     },

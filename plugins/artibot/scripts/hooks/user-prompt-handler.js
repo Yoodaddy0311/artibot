@@ -1,15 +1,18 @@
 #!/usr/bin/env node
 /**
  * UserPromptSubmit hook.
- * Handles high-priority prompt rewrites such as !rv re-verification mode.
+ * Handles high-priority prompt rewrites such as !rv re-verification mode
+ * and team auto-apply detection.
  * Standard prompt routing now happens in runtime-prompt.js.
  */
 
-import { parseJSON, readStdin, writeStdout } from '../utils/index.js';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { getPluginRoot, parseJSON, readStdin, toFileUrl, writeStdout } from '../utils/index.js';
 import { createErrorHandler } from '../../lib/core/hook-utils.js';
 
 const REVERIFY_TRIGGER_PREFIX = /^!rv\b|^!(?:\uC7AC\uAC80\uC99D)(?=\s|$)/iu;
-const NO_TEAM_FLAG = /--no-team/i;
+const NO_TEAM_FLAG = /--no-team/i;
 
 /**
  * Special trigger patterns that transform the user prompt.
@@ -69,7 +72,7 @@ async function main() {
   const trimmedPrompt = prompt.trim();
   // Strip --no-team flag and pass through as a signal in the output
   if (NO_TEAM_FLAG.test(trimmedPrompt)) {
-    const cleaned = trimmedPrompt.replace(NO_TEAM_FLAG, "").trim();
+    const cleaned = trimmedPrompt.replace(NO_TEAM_FLAG, '').trim();
     writeStdout({
       user_prompt: cleaned,
       message: "[team] --no-team flag detected, auto-team disabled for this request",
@@ -88,6 +91,61 @@ async function main() {
       });
       return;
     }
+  }
+
+  // Auto-team detection: if enabled, classify complexity and signal team mode
+  const autoTeamResult = await checkAutoTeam(trimmedPrompt);
+  if (autoTeamResult) {
+    writeStdout({
+      user_prompt: trimmedPrompt,
+      message: autoTeamResult.message,
+      autoTeam: true,
+      classification: autoTeamResult.classification,
+    });
+    return;
+  }
+}
+
+/**
+ * Load team config from artibot.config.json.
+ * @returns {{ enabled: boolean, autoApply: boolean } | null}
+ */
+function loadTeamConfig() {
+  try {
+    const pluginRoot = getPluginRoot();
+    const configPath = path.join(pluginRoot, 'artibot.config.json');
+    const config = JSON.parse(readFileSync(configPath, 'utf-8'));
+    return config.team || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Check if the prompt qualifies for automatic team mode.
+ * Conditions: team.enabled + team.autoApply + classifyComplexity returns system 2.
+ * @param {string} prompt
+ * @returns {Promise<{ message: string, classification: object } | null>}
+ */
+async function checkAutoTeam(prompt) {
+  const teamConfig = loadTeamConfig();
+  if (!teamConfig?.enabled || !teamConfig?.autoApply) return null;
+
+  try {
+    const pluginRoot = getPluginRoot();
+    const routerPath = path.join(pluginRoot, 'lib', 'cognitive', 'router.js');
+    const { classifyComplexity } = await import(toFileUrl(routerPath));
+    const classification = classifyComplexity(prompt);
+
+    if (classification.system !== 2) return null;
+
+    const { score, factors, confidence } = classification;
+    return {
+      message: `[team] auto-apply triggered (system2, score=${score}, domains=${factors.domains}, steps=${factors.steps}, confidence=${confidence})`,
+      classification,
+    };
+  } catch {
+    return null;
   }
 }
 

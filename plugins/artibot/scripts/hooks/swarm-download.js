@@ -45,13 +45,31 @@ async function main() {
 
     const swarmCfg = getSwarmConfig(config);
 
+    // Quick health check before attempting sync
+    let serverHealthy = true;
+    try {
+      const clientPath = path.join(pluginRoot, 'lib', 'swarm', 'swarm-client.js');
+      const { checkHealth } = await import(toFileUrl(clientPath));
+      const health = await checkHealth(swarmCfg.serverUrl || swarmCfg.server?.url);
+      serverHealthy = health?.healthy !== false;
+      if (!serverHealthy) {
+        process.stderr.write('[swarm-download] Server unhealthy, skipping download\n');
+      }
+    } catch {
+      // Health check failure is non-critical — attempt sync anyway
+    }
+
     // Download latest global weights and merge into local
     const { onSessionStart, scheduleSync } = await import(toFileUrl(syncPath));
-    const result = await onSessionStart({ config: swarmCfg });
 
     const parts = ['[swarm-download] Session start sync complete'];
-    if (result?.downloaded) parts.push(`downloaded: v${result.version ?? '?'}`);
-    if (!result?.downloaded) parts.push('no new weights');
+
+    if (serverHealthy) {
+      const result = await onSessionStart({ config: swarmCfg });
+
+      if (result?.downloaded) parts.push(`downloaded: v${result.version ?? '?'}`);
+      if (!result?.downloaded) parts.push('no new weights');
+    }
 
     // Schedule periodic sync if interval is not session-only
     if (swarmCfg.syncInterval && swarmCfg.syncInterval !== 'session') {

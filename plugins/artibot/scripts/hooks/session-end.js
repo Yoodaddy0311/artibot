@@ -87,6 +87,45 @@ async function main() {
     } catch (err) {
       logHookError('session-end', 'learning pipeline failed', err);
     }
+
+    // Self-Evolution Loop: compress → knowledge-graph → skill-evolver → auto-research → contribute
+    try {
+      const plugRoot = getPluginRoot();
+      const evolutionPath = path.join(plugRoot, 'lib', 'learning', 'evolution-loop.js');
+      const configPath = path.join(plugRoot, 'artibot.config.json');
+      const { createEvolutionLoop } = await import(toFileUrl(evolutionPath));
+
+      // Read swarm config so Stage 5 (collective contribution) respects install-time opt-in
+      let hubConfig = { optIn: false, minSuccessRate: 0.6, minUsageCount: 5 };
+      try {
+        const { readFileSync } = await import('node:fs');
+        const cfg = JSON.parse(readFileSync(configPath, 'utf-8'));
+        if (cfg.swarm) {
+          hubConfig = {
+            optIn: Boolean(cfg.swarm.optIn && cfg.swarm.enabled),
+            minSuccessRate: cfg.swarm.minSuccessRate ?? 0.6,
+            minUsageCount: cfg.swarm.minUsageCount ?? 5,
+          };
+        }
+      } catch {
+        // Config read failure — use safe defaults (optIn: false)
+      }
+
+      const loop = createEvolutionLoop({ hubConfig });
+      const evolutionResult = await loop.run({
+        events: hookData.events || [],
+        skillUsages: hookData.skill_usages || [],
+        routingResult: hookData.routing_result || null,
+      });
+
+      if (evolutionResult.errors.length > 0) {
+        for (const err of evolutionResult.errors) {
+          logHookError('session-end', `evolution-loop ${err.stage}: ${err.message}`);
+        }
+      }
+    } catch (err) {
+      logHookError('session-end', `evolution-loop failed: ${err.message || err}`);
+    }
   }
 }
 

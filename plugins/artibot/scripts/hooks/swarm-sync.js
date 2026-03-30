@@ -69,6 +69,28 @@ async function main() {
     if (result?.error) parts.push(`error: ${result.error}`);
 
     process.stderr.write(`${parts.join(' | ')}\n`);
+
+    // Cancel any periodic sync timers to prevent orphaned timers
+    try {
+      const { cancelSync } = await import(toFileUrl(syncPath));
+      cancelSync();
+    } catch {
+      // Non-critical: timer may not exist
+    }
+
+    // Report session telemetry to swarm server
+    try {
+      const clientPath = path.join(pluginRoot, 'lib', 'swarm', 'swarm-client.js');
+      const { reportTelemetry } = await import(toFileUrl(clientPath));
+      await reportTelemetry({
+        sessionId: hookData.session_id || 'unknown',
+        duration: hookData.duration || 0,
+        toolCount: hookData.tool_count || 0,
+        timestamp: new Date().toISOString(),
+      }, swarmCfg);
+    } catch {
+      // Non-critical: telemetry is best-effort
+    }
   } catch (err) {
     logHookError('swarm-sync', 'sync failed', err);
   }

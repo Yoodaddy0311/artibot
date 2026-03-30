@@ -158,3 +158,27 @@ export {
 export {
   createSkillFreshnessChecker,
 } from './skill-freshness.js';
+
+// Session Memory (Neural TF-IDF vector engine)
+export {
+  createSessionMemory,
+} from './session-memory.js';
+
+// Skill Evolver (Skill evolution engine)
+export {
+  createSkillEvolver,
+  computeMetrics as computeSkillMetrics,
+  CLASSIFICATION as SKILL_CLASSIFICATION,
+} from './skill-evolver.js';
+
+// Knowledge Graph (Cross-session knowledge graph)
+export {
+  createKnowledgeGraph,
+  NODE_TYPES,
+  EDGE_RELATIONS,
+} from './knowledge-graph.js';
+
+// Evolution Loop (Self-Evolution Pipeline Orchestrator)
+export {
+  createEvolutionLoop,
+} from './evolution-loop.js';

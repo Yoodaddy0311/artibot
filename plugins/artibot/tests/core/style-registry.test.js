@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 // import.meta.url percent-encodes non-ASCII characters (e.g. Korean "바탕 화면").
 const DECODED_PLUGIN_ROOT = path.resolve(
   fileURLToPath(import.meta.url),
-  '..', '..',
+  '..', '..', '..',
 );
 vi.mock('../../lib/core/platform.js', () => ({
   getPluginRoot: vi.fn(() => DECODED_PLUGIN_ROOT),
