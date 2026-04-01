@@ -35,3 +35,4 @@ export { on, emit, getLastEvent, reset as resetEventBus, getStats as getEventBus
 
 export { createMetricsCollector, defaultCollector } from './metrics-collector.js';
 export { checkInstructionBudget, getSkillTokenEstimate, budgetReport } from './instruction-budget.js';
+export { createSnapshot, formatForPrompt, estimateTokens, estimateSnapshotTokens, SNAPSHOT_MAX_TOKENS } from './agent-memory-snapshot.js';
