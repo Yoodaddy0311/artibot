@@ -69,6 +69,37 @@ function getChangedFiles(cwd) {
 // -------------------------------------------------------------------------
 
 /**
+ * Advance past non-code regions (strings, comments, escapes).
+ * @param {string} ch - Current character
+ * @param {string} next - Next character
+ * @param {object} state - Parser state (mutated in place)
+ * @returns {{ skip: boolean }}
+ */
+function skipNonCode(ch, next, state) {
+  if (state.escaped) { state.escaped = false; return { skip: true }; }
+  if (ch === '\\') { state.escaped = true; return { skip: true }; }
+
+  if (state.inLineComment) {
+    if (ch === '\n') state.inLineComment = false;
+    return { skip: true };
+  }
+  if (state.inBlockComment) {
+    if (ch === '*' && next === '/') { state.inBlockComment = false; state.advance = true; }
+    return { skip: true };
+  }
+  if (state.inString) {
+    if (ch === state.stringChar) state.inString = false;
+    return { skip: true };
+  }
+
+  if (ch === '/' && next === '/') { state.inLineComment = true; state.advance = true; return { skip: true }; }
+  if (ch === '/' && next === '*') { state.inBlockComment = true; state.advance = true; return { skip: true }; }
+  if (ch === '"' || ch === "'" || ch === '`') { state.inString = true; state.stringChar = ch; return { skip: true }; }
+
+  return { skip: false };
+}
+
+/**
  * Check for bracket/brace mismatch in a file.
  * @param {string} content
  * @returns {string|null} Warning message or null
@@ -80,36 +111,15 @@ function checkBracketMismatch(content) {
     Object.entries(pairs).map(([k, v]) => [v, k]),
   );
   const stack = [];
-  let inString = false;
-  let stringChar = '';
-  let escaped = false;
-  let inLineComment = false;
-  let inBlockComment = false;
+  const state = { escaped: false, inString: false, stringChar: '', inLineComment: false, inBlockComment: false, advance: false };
 
   for (let i = 0; i < content.length; i++) {
+    state.advance = false;
+    const result = skipNonCode(content[i], content[i + 1], state);
+    if (state.advance) i++;
+    if (result.skip) continue;
+
     const ch = content[i];
-    const next = content[i + 1];
-
-    if (escaped) { escaped = false; continue; }
-    if (ch === '\\') { escaped = true; continue; }
-
-    if (inLineComment) {
-      if (ch === '\n') inLineComment = false;
-      continue;
-    }
-    if (inBlockComment) {
-      if (ch === '*' && next === '/') { inBlockComment = false; i++; }
-      continue;
-    }
-    if (inString) {
-      if (ch === stringChar) inString = false;
-      continue;
-    }
-
-    if (ch === '/' && next === '/') { inLineComment = true; i++; continue; }
-    if (ch === '/' && next === '*') { inBlockComment = true; i++; continue; }
-    if (ch === '"' || ch === "'" || ch === '`') { inString = true; stringChar = ch; continue; }
-
     if (openers.has(ch)) {
       stack.push(ch);
     } else if (closerToOpener[ch]) {
@@ -127,6 +137,7 @@ function checkBracketMismatch(content) {
   }
   return null;
 }
+
 
 /**
  * Check for pattern violations (console.log, TODO/FIXME).
@@ -212,6 +223,90 @@ function loadCodexMode() {
 }
 
 // -------------------------------------------------------------------------
+// Analysis Pipeline
+// -------------------------------------------------------------------------
+
+/**
+ * Analyze changed files for quality issues.
+ * @param {string[]} changedFiles
+ * @param {string} repoRoot
+ * @returns {{ sensitiveFiles: string[], bracketWarnings: string[], patternWarnings: string[] }}
+ */
+function analyzeChangedFiles(changedFiles, repoRoot) {
+  const sensitiveFiles = [];
+  const bracketWarnings = [];
+  const patternWarnings = [];
+
+  for (const file of changedFiles) {
+    if (isSkippablePath(file)) continue;
+
+    if (isSensitiveFile(file)) sensitiveFiles.push(file);
+    if (!hasExtension(file, CODE_EXTENSIONS)) continue;
+
+    const absPath = path.join(repoRoot, file);
+    if (!existsSync(absPath)) continue;
+
+    try {
+      const content = readFileSync(absPath, 'utf-8');
+      const basename = path.basename(file);
+      const bracketIssue = checkBracketMismatch(content);
+      if (bracketIssue) bracketWarnings.push(`${basename}: ${bracketIssue}`);
+      patternWarnings.push(...checkPatternViolations(content, basename));
+    } catch {
+      // Skip unreadable files
+    }
+  }
+
+  return { sensitiveFiles, bracketWarnings, patternWarnings };
+}
+
+/**
+ * Aggregate analysis results into a flat issues array.
+ * @param {{ sensitiveFiles: string[], bracketWarnings: string[], patternWarnings: string[] }} analysis
+ * @param {string[]} missingTests
+ * @returns {string[]}
+ */
+function aggregateIssues(analysis, missingTests) {
+  const issues = [];
+  const { sensitiveFiles, bracketWarnings, patternWarnings } = analysis;
+
+  if (sensitiveFiles.length > 0) {
+    issues.push(`Sensitive files changed: ${sensitiveFiles.join(', ')}`);
+  }
+  if (bracketWarnings.length > 0) {
+    issues.push(`Bracket mismatch: ${bracketWarnings.join('; ')}`);
+  }
+  if (patternWarnings.length > 0) {
+    issues.push(`Pattern violations: ${patternWarnings.join('; ')}`);
+  }
+  if (missingTests.length > 0) {
+    issues.push(`Code without tests: ${missingTests.slice(0, 5).join(', ')}`);
+  }
+  return issues;
+}
+
+/**
+ * Build the final review gate result and write to stdout.
+ * @param {string[]} issues
+ * @param {string[]} changedFiles
+ * @param {string|null} codexMode
+ */
+function buildResult(issues, changedFiles, codexMode) {
+  const needsCodexReview = codexMode === 'review' || codexMode === 'dev';
+  const codexFlag = needsCodexReview ? { codexCrossCheck: true } : {};
+
+  if (issues.length > 0) {
+    const reason = `Review gate found ${issues.length} issue(s):\n${issues.map((i) => `  - ${i}`).join('\n')}`;
+    log(reason);
+    writeStdout({ decision: 'BLOCK', reason, issues, changedFiles, ...codexFlag });
+  } else {
+    const reason = `All ${changedFiles.length} changed file(s) passed review gate`;
+    log(reason);
+    writeStdout({ decision: 'ALLOW', reason, changedFiles, ...codexFlag });
+  }
+}
+
+// -------------------------------------------------------------------------
 // Main
 // -------------------------------------------------------------------------
 
@@ -232,83 +327,11 @@ async function main() {
     return;
   }
 
-  const issues = [];
-  const sensitiveFiles = [];
-  const bracketWarnings = [];
-  const patternWarnings = [];
-
-  for (const file of changedFiles) {
-    if (isSkippablePath(file)) continue;
-
-    // Sensitive file check
-    if (isSensitiveFile(file)) {
-      sensitiveFiles.push(file);
-    }
-
-    // Content-based checks for code files only
-    if (!hasExtension(file, CODE_EXTENSIONS)) continue;
-
-    const absPath = path.join(repoRoot, file);
-    if (!existsSync(absPath)) continue;
-
-    try {
-      const content = readFileSync(absPath, 'utf-8');
-      const basename = path.basename(file);
-
-      // Bracket mismatch
-      const bracketIssue = checkBracketMismatch(content);
-      if (bracketIssue) bracketWarnings.push(`${basename}: ${bracketIssue}`);
-
-      // Pattern violations
-      const violations = checkPatternViolations(content, basename);
-      patternWarnings.push(...violations);
-    } catch {
-      // Skip unreadable files
-    }
-  }
-
-  // Missing tests check
+  const analysis = analyzeChangedFiles(changedFiles, repoRoot);
   const missingTests = checkMissingTests(changedFiles, repoRoot);
+  const issues = aggregateIssues(analysis, missingTests);
 
-  // Aggregate issues
-  if (sensitiveFiles.length > 0) {
-    issues.push(`Sensitive files changed: ${sensitiveFiles.join(', ')}`);
-  }
-  if (bracketWarnings.length > 0) {
-    issues.push(`Bracket mismatch: ${bracketWarnings.join('; ')}`);
-  }
-  if (patternWarnings.length > 0) {
-    issues.push(`Pattern violations: ${patternWarnings.join('; ')}`);
-  }
-  if (missingTests.length > 0) {
-    issues.push(`Code without tests: ${missingTests.slice(0, 5).join(', ')}`);
-  }
-
-  // Build result
-  const codexMode = loadCodexMode();
-  const needsCodexReview = codexMode === 'review' || codexMode === 'dev';
-
-  if (issues.length > 0) {
-    const reason = `Review gate found ${issues.length} issue(s):\n${issues.map((i) => `  - ${i}`).join('\n')}`;
-    log(reason);
-    writeStdout({
-      decision: 'BLOCK',
-      reason,
-      issues,
-      changedFiles,
-      ...(needsCodexReview ? { codexCrossCheck: true } : {}),
-    });
-  } else {
-    const reason = `All ${changedFiles.length} changed file(s) passed review gate`;
-    log(reason);
-    writeStdout({
-      decision: 'ALLOW',
-      reason,
-      changedFiles,
-      ...(needsCodexReview ? { codexCrossCheck: true } : {}),
-    });
-  }
-
+  buildResult(issues, changedFiles, loadCodexMode());
   void hookData;
 }
 
