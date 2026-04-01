@@ -32,3 +32,5 @@ export { parsePlaybook, validatePlaybook, serializePlaybook, KNOWN_PATTERNS, KNO
 export { loadSystemPlaybooks, loadUserPlaybooks, saveUserPlaybook, listPlaybooks, getPlaybook } from './playbook-registry.js';
 export { registerGuard, executeChain, listGuards, resetGuards, registerBuiltinGuards, normalizeCommand } from './guard-registry.js';
 export { on, emit, getLastEvent, reset as resetEventBus, getStats as getEventBusStats } from './event-bus.js';
+
+export { createMetricsCollector, defaultCollector } from './metrics-collector.js';
