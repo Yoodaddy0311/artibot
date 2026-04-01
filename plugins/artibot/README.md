@@ -1,6 +1,6 @@
 # Artibot
 
-![Tests](https://img.shields.io/badge/tests-4918%20passed-brightgreen) ![Coverage](https://img.shields.io/badge/coverage-89.27%25-brightgreen) ![License](https://img.shields.io/badge/license-MIT-blue) ![Version](https://img.shields.io/badge/version-2.0.0-blue) ![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen)
+![Tests](https://img.shields.io/badge/tests-4918%20passed-brightgreen) ![Coverage](https://img.shields.io/badge/coverage-89.27%25-brightgreen) ![License](https://img.shields.io/badge/license-MIT-blue) ![Version](https://img.shields.io/badge/version-2.1.0-blue) ![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen)
 
 Claude Code를 위한 **Agent Teams 기반** 지능형 오케스트레이션 플러그인. Claude의 네이티브 Agent Teams API를 핵심 엔진으로 사용하여 전문 에이전트 팀 구성, P2P 통신, 공유 태스크 관리를 통해 개발 생산성을 극대화합니다.
 
@@ -78,7 +78,7 @@ Artibot의 핵심 엔진은 Claude Code의 **Agent Teams API**입니다. 단순�
 - `/sc`로 자연어 의도를 분석하여 최적 커맨드로 자동 라우팅
 - 개발, 분석, 품질, 테스트, 문서화, 배포, 마케팅 전 영역 커버
 
-### 117개 도메인 스킬
+### 127개 도메인 스킬
 
 - 11개 페르소나 스킬 (architect, frontend, backend, security 등)
 - 6개 코어 스킬 (orchestration, principles, coding/security/testing standards)
@@ -86,6 +86,7 @@ Artibot의 핵심 엔진은 Claude Code의 **Agent Teams API**입니다. 단순�
 - 16개 언어 스킬 (TypeScript, Python, Go, Rust, Java 등)
 - 23개 마케팅 스킬 (SEO, CRO, A/B 테스트, 이메일 마케팅 등)
 - 17개 기타 스킬 (cognitive-routing, platform, library, quality, auto-learning-pipeline, git-worktree, dynamic-context-injection 등)
+- 10개 신규 스킬 (v2.1.0): load-testing, observability, ci-cd-pipelines, codex-integration, agent-memory-snapshot, compaction-survival, prompt-caching-strategy, hook-feedback-merge, api-security, event-sourcing
 
 ### 런타임 미들웨어 파이프라인 (v1.14.0+)
 
@@ -106,6 +107,25 @@ Artibot의 핵심 엔진은 Claude Code의 **Agent Teams API**입니다. 단순�
 
 - 7개 출력 스타일: default, compressed, mentor, team-dashboard, tokens, narrative, statusline
 - Design Token 시스템 (`tokens.md`): 일관된 포맷팅을 위한 디자인 토큰
+
+
+### Codex 크로스체크 통합 (v2.1.0+)
+
+- `/codex` 커맨드로 OpenAI Codex 기반 크로스 모델 리뷰 실행
+- 3가지 모드: `review` (리뷰만), `dev` (리뷰+구현), `off` (비활성)
+- codex-plugin-cc 연동으로 Claude ↔ Codex 교차 검증 자동화
+
+### Context Efficiency (v2.1.0+)
+
+- 구조화된 컴팩션 요약: pending work, key files, current work 메타데이터 보존
+- 에이전트 메모리 스냅샷으로 위임 시 컨텍스트 손실 방지
+- Instruction budget 모니터링 (개별 파일 4K, 전체 12K chars 제한)
+
+### 품질 게이트 강화 (v2.1.0+)
+
+- **Stop-Review-Gate**: 작업 완료 전 자동 품질 검증 (bracket mismatch, pattern violations, sensitive files, missing tests)
+- **리뷰 출력 JSON Schema 강제**: code-review, adversarial-review 출력이 `review-output.schema.json` 준수
+- **중앙 메트릭스 수집기**: `lib/core/metrics-collector.js` — 훅 실행, 에이전트 성능, 토큰 사용량 통합 추적
 
 ### 지능형 훅 시스템
 
@@ -1135,7 +1155,7 @@ plugins/artibot/
 │   ├── orchestrate.md           #   팀 오케스트레이션 (TeamCreate)
 │   ├── spawn.md                 #   팀 스폰 (병렬 실행)
 │   └── [47개 커맨드].md
-├── skills/                      # 117개 스킬 디렉토리 (forked context 격리)
+├── skills/                      # 127개 스킬 디렉토리 (forked context 격리)
 │   ├── orchestration/           #   위임 모드 선택 + 팀 라우팅
 │   ├── delegation/              #   Sub-Agent/Team 위임 전략
 │   ├── auto-learning-pipeline/  #   제로 설정 야간 자기 개선
@@ -1176,6 +1196,41 @@ node scripts/ci/validate-skills.js    # 스킬 검증
 node scripts/ci/validate-commands.js  # 커맨드 검증
 node scripts/ci/validate-hooks.js     # 훅 검증
 ```
+
+---
+
+## v2.1.0 주요 변경사항
+
+### 크로스 모델 검증 (v2.1.0)
+OpenAI Codex CLI와의 크로스체크 통합으로 AI 모델 간 교차 검증 도입:
+- `/codex` 커맨드: review/dev/off 3가지 모드, codex-plugin-cc 연동
+- Stop-Review-Gate 훅: 작업 완료 전 자동 품질 게이트 (bracket mismatch, pattern violations, sensitive files, missing tests)
+- 리뷰 출력 JSON Schema 강제: `schemas/review-output.schema.json` 준수
+
+### Context Efficiency 엔진 (v2.1.0)
+컨텍스트 윈도우 효율성을 체계적으로 관리:
+- `pre-compact.js` 훅: 구조화된 컴팩션 요약 (scope, tools, pending work, key files)
+- Instruction budget 모니터링: 개별 4K, 전체 12K chars 제한
+- `compaction-survival` / `strategic-compact` 스킬 역할 분리 및 상호 참조
+
+### 품질 인프라 강화 (v2.1.0)
+- **중앙 메트릭스 수집기** — `lib/core/metrics-collector.js`: 훅 실행, 에이전트 성능, 토큰 사용량 통합
+- **5-Layer Architecture 문서화** — CLAUDE.md에 계층도 + 의존 방향 명시
+- **온보딩 가이드** — README에 핵심 개념 5가지 + 최소 실행 흐름 추가
+
+### 신규 스킬 10개 (v2.1.0)
+- **인프라**: load-testing, observability, ci-cd-pipelines
+- **통합**: codex-integration, agent-memory-snapshot
+- **최적화**: compaction-survival, prompt-caching-strategy
+- **개발자**: hook-feedback-merge
+- **참조**: api-security (references), event-sourcing (references)
+
+### 전수검수 결과 (v2.1.0)
+- 44 files changed, +4,395 lines
+- 코드 중복 제거: strategic-compact ↔ compaction-survival 트리거 충돌 해소
+- 함수 리팩토링: `system1.js:fastResponse` 100줄 → 49줄 분할
+- 훅 시스템 감사: 34/34 등록 정합성 PASS, 미등록 4건 확인
+- `disable-model-invocation`: spawn, swarm, orchestrate 위임 디스패처에 적용
 
 ---
 

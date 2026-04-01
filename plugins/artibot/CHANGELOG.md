@@ -9,6 +9,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+
+## [2.1.0] - 2026-04-02
+
+### Summary / 요약
+
+**English**: Codex cross-check integration, Stop-Review-Gate quality hook, centralized metrics collector, 10 new skills, trigger conflict resolution, and architecture documentation overhaul. 44 files changed, +4,395 / -173 lines.
+
+**한국어**: Codex 크로스체크 통합, Stop-Review-Gate 품질 훅, 중앙 메트릭스 수집기, 10개 신규 스킬, 트리거 충돌 해소, 아키텍처 문서 전면 개편. 44개 파일 변경, +4,395 / -173줄.
+
+### Added / 추가됨
+
+- **`/codex` command**: Codex CLI 크로스체크 통합 (review/dev/off 모드)
+- **Stop-Review-Gate hook**: 작업 완료 전 자동 품질 검증 (bracket mismatch, pattern violations, sensitive files, missing tests)
+- **`lib/core/metrics-collector.js`**: 분산 stats를 통합하는 중앙 메트릭스 수집기
+- **`lib/core/instruction-budget.js`**: 4K/12K chars instruction 예산 모니터링
+- **`lib/core/agent-memory-snapshot.js`**: 에이전트 위임 시 컨텍스트 보존 스냅샷
+- **10 new skills**: load-testing, observability, ci-cd-pipelines, codex-integration, agent-memory-snapshot, compaction-survival, prompt-caching-strategy, hook-feedback-merge + 2 references (api-security, event-sourcing)
+
+### Improved / 개선됨
+
+- **Pre-compact hook**: 구조화 요약 (pending work, key files, recent requests 보존)
+- **Context Efficiency 표준**: chars/4+1, 160자 truncation, 4 message preservation 문서화
+- **5-Layer Architecture**: CLAUDE.md에 계층 다이어그램 추가
+- **온보딩 Quick Start**: README.md에 흐름 중심 온보딩 섹션 추가
+- **`disable-model-invocation`**: 순수 위임 커맨드 (spawn/swarm/orchestrate)에 적용
+- **리뷰 출력 JSON Schema**: code-review, adversarial-review, code-reviewer, security-reviewer에 `review-output.schema.json` 강제
+- **Auto-compact 임계값**: session-start.js에서 180K으로 조정
+
+### Fixed / 수정됨
+
+- **estimateTokens 중복**: 5곳 → canonical 1곳으로 통합
+- **CHARS_PER_TOKEN 상수**: 3곳 → 1곳 통합
+- **clamp01 함수**: 3곳 → 1곳 통합
+- **트리거 충돌 6건 해소**: workflow, security audit, compact, adversarial review
+- **system1.js `fastResponse()`**: 100→49줄 리팩토링
+- **metrics-collector.js `getSummary()`**: 62→11줄 리팩토링
+- **CRO 스킬 카테고리**: cro-forms, cro-funnel, cro-page의 category testing → marketing
+- **pre-compact 타임아웃**: 5s → 8s
+
+### Stats / 통계
+
+| Metric | Before | After | Delta |
+|--------|--------|-------|-------|
+| Files changed | — | — | 44 |
+| Lines | — | — | +4,395 / -173 |
+| Commands | 48 | 50 | +2 |
+| Skills | 98 | 117 | +19 |
+| Hooks | 36 | 39 | +3 |
+| Core modules | 32 | 35 | +3 |
+
+---
+
 ## [2.0.0] - 2026-03-30
 
 ### Summary / 요약
