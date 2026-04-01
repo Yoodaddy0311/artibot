@@ -16,7 +16,7 @@ This file auto-loads when Claude accesses files in `plugins/artibot/`.
 Layer 5 (Runtime):    lib/runtime/    — 11-stage middleware pipeline, agent factory
 Layer 4 (Cognitive):  lib/cognitive/  — System 1/2 dual-process routing
 Layer 3 (Learning):   lib/learning/   — GRPO, memory, knowledge-transfer, lifelong
-Layer 2 (Auxiliary):  lib/adapters/, lib/swarm/, lib/privacy/, lib/orchestration/, lib/intent/, lib/visual/, lib/git/
+Layer 2 (Auxiliary):  lib/adapters/, lib/swarm/, lib/privacy/, lib/orchestration/, lib/intent/, lib/visual/, lib/git/, lib/context/, lib/sdk/, lib/system/, lib/tools/
 Layer 1 (Core):       lib/core/       — config, cache, I/O, lifecycle, event-bus, guard-registry
 ```
 
@@ -54,6 +54,15 @@ Layer 1 (Core):       lib/core/       — config, cache, I/O, lifecycle, event-b
 - **Coverage thresholds**: Statements 90%, Branches 85%, Functions 88%, Lines 90%
 - **Immutable patterns**: Never mutate objects, always spread/create new
 - **Functions < 50 lines, Files < 800 lines**
+
+## Context Efficiency
+
+- **Instruction budget**: Individual files <= 4K chars, total <= 12K chars across all instruction files
+- **Token estimation**: `chars / 4 + 1` heuristic for quick budget calculations
+- **Compaction survival**: Front-load critical info in first 160 chars of outputs
+- **Key file extraction**: Always use full paths with extensions (e.g., `lib/core/metrics-collector.js`)
+- **Recent message preservation**: Last 4 messages survive compaction verbatim
+- **Prompt caching**: Static instructions above dynamic context for cache hit rate
 
 ## Testing
 

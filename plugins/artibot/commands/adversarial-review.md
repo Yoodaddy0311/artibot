@@ -92,7 +92,6 @@ VERDICT: [PASS|FAIL|WARNING]
 Blocking Issues: [count of critical+high]
 ```
 
-`--json` 플래그 사용 시 `plugins/artibot/schemas/review-output.schema.json` 스키마에 맞춘 JSON 출력.
 ## Structured JSON Output
 
 `--json` 플래그 유무와 관계없이, 리뷰 결과는 반드시 `schemas/review-output.schema.json` 스키마를 준수하여 구조화된 JSON 출력을 포함할 것. 핵심 필드: `verdict` (pass/fail/warning), `findings[]` (severity, file, line, confidence, description, suggestion), `next_steps[]`.
