@@ -15,6 +15,22 @@ export function round(n, precision = 3) {
   const factor = 10 ** precision;
   return Math.round(n * factor) / factor;
 }
+
+/** Approximate characters per token for budget estimation. */
+export const CHARS_PER_TOKEN = 4;
+
+/**
+ * Estimate token count from character content.
+ * Canonical implementation — other modules should import this.
+ * @param {string} text - Raw text content
+ * @param {number} [charsPerToken=4] - Characters-per-token ratio
+ * @returns {number} Estimated token count
+ */
+export function estimateTokens(text, charsPerToken = CHARS_PER_TOKEN) {
+  if (!text || typeof text !== 'string') return 0;
+  return Math.ceil(text.length / charsPerToken) + 1;
+}
+
 export { loadConfig, getConfig, resetConfig, ARTIBOT_DIR } from './config.js';
 export { Cache, defaultCache } from './cache.js';
 export { readStdinJSON, readStdin, writeJSON, writeText, writeError, writeHookResult } from './io.js';
@@ -35,4 +51,4 @@ export { on, emit, getLastEvent, reset as resetEventBus, getStats as getEventBus
 
 export { createMetricsCollector, defaultCollector } from './metrics-collector.js';
 export { checkInstructionBudget, getSkillTokenEstimate, budgetReport } from './instruction-budget.js';
-export { createSnapshot, formatForPrompt, estimateTokens, estimateSnapshotTokens, SNAPSHOT_MAX_TOKENS } from './agent-memory-snapshot.js';
+export { createSnapshot, formatForPrompt, estimateSnapshotTokens, SNAPSHOT_MAX_TOKENS } from './agent-memory-snapshot.js';

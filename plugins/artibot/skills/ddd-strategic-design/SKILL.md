@@ -112,3 +112,7 @@ lastVerified: "2026-03-31"
 3. 유비쿼터스 언어를 코드에 직접 반영
 4. 경계 결정을 ADR로 기록
 5. 구현 전 전략적 설계를 먼저 완료
+
+## References
+
+See `${CLAUDE_SKILL_DIR}/references/event-sourcing.md` for Event Sourcing, CQRS, Saga, and Snapshot 패턴.

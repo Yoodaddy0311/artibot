@@ -238,7 +238,7 @@
           {
             "type": "command",
             "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-compact.js",
-            "timeout": 5000
+            "timeout": 8000
           }
         ],
         "priority": "optional",

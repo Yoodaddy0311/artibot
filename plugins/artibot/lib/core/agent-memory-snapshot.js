@@ -4,6 +4,8 @@
  * @module lib/core/agent-memory-snapshot
  */
 
+import { estimateTokens } from './index.js';
+
 /** Maximum snapshot budget in estimated tokens */
 const MAX_TOKENS = 500;
 
@@ -19,16 +21,6 @@ const MAX_CHARS = 2000;
 function truncate(str, maxLen) {
   if (!str || str.length <= maxLen) return str ?? '';
   return str.slice(0, maxLen - 1) + '\u2026';
-}
-
-/**
- * Estimate token count for a string (chars/4 + 1).
- * @param {string} text
- * @returns {number}
- */
-export function estimateTokens(text) {
-  if (!text) return 0;
-  return Math.ceil(text.length / 4) + 1;
 }
 
 /**

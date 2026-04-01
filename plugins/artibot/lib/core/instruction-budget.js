@@ -8,6 +8,7 @@
 
 import path from 'node:path';
 import { exists, readTextFile } from './file.js';
+import { estimateTokens } from './index.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -18,9 +19,6 @@ const PER_FILE_LIMIT = 4_000;
 
 /** Maximum total characters across all instruction files */
 const TOTAL_LIMIT = 12_000;
-
-/** Approximate chars-per-token ratio for budget estimation */
-const CHARS_PER_TOKEN = 4;
 
 /** Known instruction file names to scan */
 const INSTRUCTION_FILES = [
@@ -34,13 +32,14 @@ const INSTRUCTION_FILES = [
 
 /**
  * Estimate token count from character content.
+ * Delegates to the canonical estimateTokens in core/index.js.
  *
  * @param {string} content - Raw text content
  * @returns {number} Estimated token count
  */
 export function getSkillTokenEstimate(content) {
   if (typeof content !== 'string' || content.length === 0) return 0;
-  return Math.ceil(content.length / CHARS_PER_TOKEN) + 1;
+  return estimateTokens(content);
 }
 
 // ---------------------------------------------------------------------------

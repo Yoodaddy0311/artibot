@@ -2,12 +2,12 @@
 context: fork
 user-invocable: false
 name: compaction-survival
-description: "컴팩션 생존 전략 — 컨텍스트 압축 시 핵심 정보 보존, key files 추출, pending work 추론. Use when preparing for context compaction, preserving critical state across compression, or recovering after context loss."
+description: "컴팩션 생존 전략 — 컨텍스트 압축 시 핵심 정보 보존 방법. key files 추출, pending work 추론, 메타데이터 생존 전략. See also: strategic-compact (컴팩션 시점 제안)"
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: progressive
 triggers:
   - "compaction"
-  - "compact"
+  - "compaction survival"
   - "컴팩션"
   - "context loss"
   - "컨텍스트 손실"
