@@ -35,15 +35,15 @@ Layer 1 (Core):       lib/core/       — config, cache, I/O, lifecycle, event-b
 | Directory | Purpose | Key Files |
 |-----------|---------|-----------|
 | `agents/` | Agent definitions (28 .md) | orchestrator.md (CTO), planner.md |
-| `commands/` | Slash commands (48 .md) | sc.md (router), implement.md, build.md, repo.md |
-| `skills/` | SKILL.md + references/ (99 dirs) | principles/, tdd-workflow/, coding-standards/ |
+| `commands/` | Slash commands (50 .md) | sc.md (router), implement.md, build.md, repo.md |
+| `skills/` | SKILL.md + references/ (117 dirs) | principles/, tdd-workflow/, coding-standards/ |
 | `lib/cognitive/` | Dual-process engine | router.js, system1.js, system2-core.js |
 | `lib/learning/` | Lifelong learning (26 modules) | grpo.js, memory.js, lifelong.js, skill-promoter.js, eval-calibrator.js, skill-freshness.js |
 | `lib/core/` | Core utilities (32 files) | plugin-loader.js, hook-utils.js, feature-tracker.js |
 | `lib/visual/` | Visual validation | visual-validator.js, screenshot-differ.js |
 | `lib/privacy/` | PII protection | pii-scrubber.js, homoglyph-detector.js |
 | `lib/runtime/` | Runtime pipeline (15 files, 11 middlewares) | create-artibot-agent.js, evaluator.js, middleware/, sprint-contract.js |
-| `hooks/` | Event hooks config | hooks.json (15 event types, 42 registrations) |
+| `hooks/` | Event hooks config | hooks.json (15 event types, 39 registrations) |
 | `rules/` | Path-specific auto-rules | dev-protocol.md, quality-gates.md |
 | `tests/` | Vitest test suite (147 files) | 4,918 test cases |
 
