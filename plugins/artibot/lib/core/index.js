@@ -34,3 +34,4 @@ export { registerGuard, executeChain, listGuards, resetGuards, registerBuiltinGu
 export { on, emit, getLastEvent, reset as resetEventBus, getStats as getEventBusStats } from './event-bus.js';
 
 export { createMetricsCollector, defaultCollector } from './metrics-collector.js';
+export { checkInstructionBudget, getSkillTokenEstimate, budgetReport } from './instruction-budget.js';
