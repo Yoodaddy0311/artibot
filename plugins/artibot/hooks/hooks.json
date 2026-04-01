@@ -251,6 +251,18 @@
         "hooks": [
           {
             "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/stop-review-gate.js",
+            "timeout": 15000
+          }
+        ],
+        "priority": "critical",
+        "category": "quality"
+      },
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
             "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/check-console-log.js",
             "timeout": 10000
           }

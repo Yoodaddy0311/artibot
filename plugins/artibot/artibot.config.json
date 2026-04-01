@@ -1,16 +1,81 @@
 {
   "version": "2.0.0",
-
   "agents": {
     "modelPolicy": {
-      "high": { "model": "opus", "agents": ["orchestrator", "architect", "security-reviewer", "frontend-developer", "backend-developer", "code-reviewer", "tdd-guide", "database-reviewer", "mcp-developer", "typescript-pro", "planner", "refactor-cleaner", "build-error-resolver", "llm-architect", "devops-engineer", "performance-engineer", "e2e-runner", "marketing-strategist", "repo-benchmarker", "quality-reviewer", "spec-reviewer"] },
-      "medium": { "model": "sonnet", "agents": ["doc-updater", "content-marketer", "data-analyst", "presentation-designer", "seo-specialist", "cro-specialist", "ad-specialist"] }
+      "high": {
+        "model": "opus",
+        "agents": [
+          "orchestrator",
+          "architect",
+          "security-reviewer",
+          "frontend-developer",
+          "backend-developer",
+          "code-reviewer",
+          "tdd-guide",
+          "database-reviewer",
+          "mcp-developer",
+          "typescript-pro",
+          "planner",
+          "refactor-cleaner",
+          "build-error-resolver",
+          "llm-architect",
+          "devops-engineer",
+          "performance-engineer",
+          "e2e-runner",
+          "marketing-strategist",
+          "repo-benchmarker",
+          "quality-reviewer",
+          "spec-reviewer"
+        ]
+      },
+      "medium": {
+        "model": "sonnet",
+        "agents": [
+          "doc-updater",
+          "content-marketer",
+          "data-analyst",
+          "presentation-designer",
+          "seo-specialist",
+          "cro-specialist",
+          "ad-specialist"
+        ]
+      }
     },
     "categories": {
-      "manager": ["orchestrator", "planner", "architect"],
-      "expert": ["security-reviewer", "frontend-developer", "backend-developer", "database-reviewer", "performance-engineer", "mcp-developer", "llm-architect", "typescript-pro", "devops-engineer"],
-      "builder": ["code-reviewer", "tdd-guide", "build-error-resolver", "refactor-cleaner"],
-      "support": ["doc-updater", "content-marketer", "e2e-runner", "marketing-strategist", "data-analyst", "presentation-designer", "seo-specialist", "cro-specialist", "ad-specialist", "repo-benchmarker"]
+      "manager": [
+        "orchestrator",
+        "planner",
+        "architect"
+      ],
+      "expert": [
+        "security-reviewer",
+        "frontend-developer",
+        "backend-developer",
+        "database-reviewer",
+        "performance-engineer",
+        "mcp-developer",
+        "llm-architect",
+        "typescript-pro",
+        "devops-engineer"
+      ],
+      "builder": [
+        "code-reviewer",
+        "tdd-guide",
+        "build-error-resolver",
+        "refactor-cleaner"
+      ],
+      "support": [
+        "doc-updater",
+        "content-marketer",
+        "e2e-runner",
+        "marketing-strategist",
+        "data-analyst",
+        "presentation-designer",
+        "seo-specialist",
+        "cro-specialist",
+        "ad-specialist",
+        "repo-benchmarker"
+      ]
     },
     "taskBased": {
       "code review": "code-reviewer",
@@ -42,7 +107,6 @@
       "team": "orchestrator"
     }
   },
-
   "team": {
     "enabled": true,
     "autoApply": true,
@@ -60,9 +124,19 @@
       "cleanupOnClose": true
     },
     "api": {
-      "lifecycle": ["TeamCreate", "TeamDelete"],
-      "communication": ["SendMessage"],
-      "taskManagement": ["TaskCreate", "TaskUpdate", "TaskList", "TaskGet"],
+      "lifecycle": [
+        "TeamCreate",
+        "TeamDelete"
+      ],
+      "communication": [
+        "SendMessage"
+      ],
+      "taskManagement": [
+        "TaskCreate",
+        "TaskUpdate",
+        "TaskList",
+        "TaskGet"
+      ],
       "spawning": "Task(subagent_type, team_name, name)"
     },
     "gracefulDegradation": {
@@ -71,35 +145,70 @@
         "agent-teams": {
           "condition": "TeamCreate tool available",
           "requires": "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1",
-          "capabilities": ["team-lifecycle", "p2p-messaging", "shared-tasks", "parallel-spawning"],
-          "platforms": ["claude-code"]
+          "capabilities": [
+            "team-lifecycle",
+            "p2p-messaging",
+            "shared-tasks",
+            "parallel-spawning"
+          ],
+          "platforms": [
+            "claude-code"
+          ]
         },
         "sub-agent": {
           "condition": "Task tool available BUT TeamCreate unavailable",
           "requires": "Claude Code (any version)",
-          "capabilities": ["fire-and-forget-delegation", "parallel-spawning", "result-aggregation"],
-          "platforms": ["claude-code"],
+          "capabilities": [
+            "fire-and-forget-delegation",
+            "parallel-spawning",
+            "result-aggregation"
+          ],
+          "platforms": [
+            "claude-code"
+          ],
           "fallbackFrom": "agent-teams"
         },
         "direct": {
           "condition": "Neither TeamCreate nor Task tool available",
           "requires": "Any AI coding assistant",
-          "capabilities": ["sequential-execution", "self-review"],
-          "platforms": ["gemini-cli", "codex-cli", "cursor", "windsurf", "antigravity"],
+          "capabilities": [
+            "sequential-execution",
+            "self-review"
+          ],
+          "platforms": [
+            "gemini-cli",
+            "codex-cli",
+            "cursor",
+            "windsurf",
+            "antigravity"
+          ],
           "fallbackFrom": "sub-agent"
         }
       },
-      "detectionPriority": ["agent-teams", "sub-agent", "direct"]
+      "detectionPriority": [
+        "agent-teams",
+        "sub-agent",
+        "direct"
+      ]
     },
     "delegationModeSelection": {
       "subAgent": {
         "condition": "complexity < 0.4 AND single domain AND steps < 3",
-        "tools": ["Task"],
+        "tools": [
+          "Task"
+        ],
         "communication": "one-way (result return only)"
       },
       "agentTeam": {
         "condition": "complexity >= 0.4 OR multi-domain OR steps >= 3",
-        "tools": ["TeamCreate", "SendMessage", "TaskCreate", "TaskUpdate", "TaskList", "TeamDelete"],
+        "tools": [
+          "TeamCreate",
+          "SendMessage",
+          "TaskCreate",
+          "TaskUpdate",
+          "TaskList",
+          "TeamDelete"
+        ],
         "communication": "P2P bidirectional + shared task list"
       }
     },
@@ -140,115 +249,471 @@
     "playbooks": {
       "feature": {
         "nodes": [
-          { "id": "plan", "action": "plan", "pattern": "leader", "agent": "planner" },
-          { "id": "design", "action": "design", "pattern": "council", "agent": "architect", "dependsOn": ["plan"] },
-          { "id": "impl-fe", "action": "implement", "pattern": "swarm", "agent": "frontend-developer", "parallel": true, "dependsOn": ["design"] },
-          { "id": "impl-be", "action": "implement", "pattern": "swarm", "agent": "backend-developer", "parallel": true, "dependsOn": ["design"] },
-          { "id": "review", "action": "review", "pattern": "council", "agent": "code-reviewer", "dependsOn": ["impl-fe", "impl-be"] },
-          { "id": "merge", "action": "merge", "pattern": "leader", "dependsOn": ["review"] }
+          {
+            "id": "plan",
+            "action": "plan",
+            "pattern": "leader",
+            "agent": "planner"
+          },
+          {
+            "id": "design",
+            "action": "design",
+            "pattern": "council",
+            "agent": "architect",
+            "dependsOn": [
+              "plan"
+            ]
+          },
+          {
+            "id": "impl-fe",
+            "action": "implement",
+            "pattern": "swarm",
+            "agent": "frontend-developer",
+            "parallel": true,
+            "dependsOn": [
+              "design"
+            ]
+          },
+          {
+            "id": "impl-be",
+            "action": "implement",
+            "pattern": "swarm",
+            "agent": "backend-developer",
+            "parallel": true,
+            "dependsOn": [
+              "design"
+            ]
+          },
+          {
+            "id": "review",
+            "action": "review",
+            "pattern": "council",
+            "agent": "code-reviewer",
+            "dependsOn": [
+              "impl-fe",
+              "impl-be"
+            ]
+          },
+          {
+            "id": "merge",
+            "action": "merge",
+            "pattern": "leader",
+            "dependsOn": [
+              "review"
+            ]
+          }
         ]
       },
       "bugfix": {
         "nodes": [
-          { "id": "analyze", "action": "analyze", "pattern": "leader", "agent": "planner" },
-          { "id": "fix", "action": "fix", "pattern": "pipeline", "agent": "backend-developer", "dependsOn": ["analyze"] },
-          { "id": "test", "action": "test", "pattern": "pipeline", "agent": "tdd-guide", "dependsOn": ["fix"] },
-          { "id": "verify", "action": "verify", "pattern": "council", "agent": "code-reviewer", "dependsOn": ["test"] }
+          {
+            "id": "analyze",
+            "action": "analyze",
+            "pattern": "leader",
+            "agent": "planner"
+          },
+          {
+            "id": "fix",
+            "action": "fix",
+            "pattern": "pipeline",
+            "agent": "backend-developer",
+            "dependsOn": [
+              "analyze"
+            ]
+          },
+          {
+            "id": "test",
+            "action": "test",
+            "pattern": "pipeline",
+            "agent": "tdd-guide",
+            "dependsOn": [
+              "fix"
+            ]
+          },
+          {
+            "id": "verify",
+            "action": "verify",
+            "pattern": "council",
+            "agent": "code-reviewer",
+            "dependsOn": [
+              "test"
+            ]
+          }
         ]
       },
       "refactor": {
         "nodes": [
-          { "id": "assess", "action": "assess", "pattern": "council", "agent": "architect" },
-          { "id": "refactor", "action": "refactor", "pattern": "pipeline", "agent": "refactor-cleaner", "dependsOn": ["assess"] },
-          { "id": "test", "action": "test", "pattern": "swarm", "agent": "tdd-guide", "dependsOn": ["refactor"] },
-          { "id": "review", "action": "review", "pattern": "council", "agent": "code-reviewer", "dependsOn": ["test"] }
+          {
+            "id": "assess",
+            "action": "assess",
+            "pattern": "council",
+            "agent": "architect"
+          },
+          {
+            "id": "refactor",
+            "action": "refactor",
+            "pattern": "pipeline",
+            "agent": "refactor-cleaner",
+            "dependsOn": [
+              "assess"
+            ]
+          },
+          {
+            "id": "test",
+            "action": "test",
+            "pattern": "swarm",
+            "agent": "tdd-guide",
+            "dependsOn": [
+              "refactor"
+            ]
+          },
+          {
+            "id": "review",
+            "action": "review",
+            "pattern": "council",
+            "agent": "code-reviewer",
+            "dependsOn": [
+              "test"
+            ]
+          }
         ]
       },
       "security": {
         "nodes": [
-          { "id": "scan", "action": "scan", "pattern": "leader", "agent": "security-reviewer" },
-          { "id": "assess", "action": "assess", "pattern": "council", "agent": "architect", "dependsOn": ["scan"] },
-          { "id": "fix", "action": "fix", "pattern": "pipeline", "agent": "backend-developer", "dependsOn": ["assess"] },
-          { "id": "verify", "action": "verify", "pattern": "council", "agent": "security-reviewer", "dependsOn": ["fix"] }
+          {
+            "id": "scan",
+            "action": "scan",
+            "pattern": "leader",
+            "agent": "security-reviewer"
+          },
+          {
+            "id": "assess",
+            "action": "assess",
+            "pattern": "council",
+            "agent": "architect",
+            "dependsOn": [
+              "scan"
+            ]
+          },
+          {
+            "id": "fix",
+            "action": "fix",
+            "pattern": "pipeline",
+            "agent": "backend-developer",
+            "dependsOn": [
+              "assess"
+            ]
+          },
+          {
+            "id": "verify",
+            "action": "verify",
+            "pattern": "council",
+            "agent": "security-reviewer",
+            "dependsOn": [
+              "fix"
+            ]
+          }
         ]
       },
       "marketing-campaign": {
         "nodes": [
-          { "id": "strategy", "action": "strategy", "pattern": "leader", "agent": "marketing-strategist" },
-          { "id": "plan", "action": "plan", "pattern": "council", "agent": "planner", "dependsOn": ["strategy"] },
-          { "id": "create-content", "action": "create", "pattern": "swarm", "agent": "content-marketer", "parallel": true, "dependsOn": ["plan"] },
-          { "id": "create-ads", "action": "create", "pattern": "swarm", "agent": "ad-specialist", "parallel": true, "dependsOn": ["plan"] },
-          { "id": "review", "action": "review", "pattern": "council", "dependsOn": ["create-content", "create-ads"] },
-          { "id": "launch", "action": "launch", "pattern": "leader", "agent": "marketing-strategist", "dependsOn": ["review"] }
+          {
+            "id": "strategy",
+            "action": "strategy",
+            "pattern": "leader",
+            "agent": "marketing-strategist"
+          },
+          {
+            "id": "plan",
+            "action": "plan",
+            "pattern": "council",
+            "agent": "planner",
+            "dependsOn": [
+              "strategy"
+            ]
+          },
+          {
+            "id": "create-content",
+            "action": "create",
+            "pattern": "swarm",
+            "agent": "content-marketer",
+            "parallel": true,
+            "dependsOn": [
+              "plan"
+            ]
+          },
+          {
+            "id": "create-ads",
+            "action": "create",
+            "pattern": "swarm",
+            "agent": "ad-specialist",
+            "parallel": true,
+            "dependsOn": [
+              "plan"
+            ]
+          },
+          {
+            "id": "review",
+            "action": "review",
+            "pattern": "council",
+            "dependsOn": [
+              "create-content",
+              "create-ads"
+            ]
+          },
+          {
+            "id": "launch",
+            "action": "launch",
+            "pattern": "leader",
+            "agent": "marketing-strategist",
+            "dependsOn": [
+              "review"
+            ]
+          }
         ]
       },
       "marketing-audit": {
         "nodes": [
-          { "id": "scan", "action": "scan", "pattern": "leader", "agent": "data-analyst" },
-          { "id": "assess-seo", "action": "assess", "pattern": "council", "agent": "seo-specialist", "parallel": true, "dependsOn": ["scan"] },
-          { "id": "assess-cro", "action": "assess", "pattern": "council", "agent": "cro-specialist", "parallel": true, "dependsOn": ["scan"] },
-          { "id": "optimize", "action": "optimize", "pattern": "pipeline", "dependsOn": ["assess-seo", "assess-cro"] },
-          { "id": "verify", "action": "verify", "pattern": "council", "agent": "data-analyst", "dependsOn": ["optimize"] }
+          {
+            "id": "scan",
+            "action": "scan",
+            "pattern": "leader",
+            "agent": "data-analyst"
+          },
+          {
+            "id": "assess-seo",
+            "action": "assess",
+            "pattern": "council",
+            "agent": "seo-specialist",
+            "parallel": true,
+            "dependsOn": [
+              "scan"
+            ]
+          },
+          {
+            "id": "assess-cro",
+            "action": "assess",
+            "pattern": "council",
+            "agent": "cro-specialist",
+            "parallel": true,
+            "dependsOn": [
+              "scan"
+            ]
+          },
+          {
+            "id": "optimize",
+            "action": "optimize",
+            "pattern": "pipeline",
+            "dependsOn": [
+              "assess-seo",
+              "assess-cro"
+            ]
+          },
+          {
+            "id": "verify",
+            "action": "verify",
+            "pattern": "council",
+            "agent": "data-analyst",
+            "dependsOn": [
+              "optimize"
+            ]
+          }
         ]
       },
       "content-launch": {
         "nodes": [
-          { "id": "plan", "action": "plan", "pattern": "leader", "agent": "planner" },
-          { "id": "create", "action": "create", "pattern": "swarm", "agent": "content-marketer", "dependsOn": ["plan"] },
-          { "id": "review", "action": "review", "pattern": "council", "dependsOn": ["create"] },
-          { "id": "publish", "action": "publish", "pattern": "leader", "dependsOn": ["review"] }
+          {
+            "id": "plan",
+            "action": "plan",
+            "pattern": "leader",
+            "agent": "planner"
+          },
+          {
+            "id": "create",
+            "action": "create",
+            "pattern": "swarm",
+            "agent": "content-marketer",
+            "dependsOn": [
+              "plan"
+            ]
+          },
+          {
+            "id": "review",
+            "action": "review",
+            "pattern": "council",
+            "dependsOn": [
+              "create"
+            ]
+          },
+          {
+            "id": "publish",
+            "action": "publish",
+            "pattern": "leader",
+            "dependsOn": [
+              "review"
+            ]
+          }
         ]
       },
       "competitive-analysis": {
         "nodes": [
-          { "id": "research", "action": "research", "pattern": "council", "agent": "data-analyst" },
-          { "id": "analyze-market", "action": "analyze", "pattern": "swarm", "agent": "data-analyst", "parallel": true, "dependsOn": ["research"] },
-          { "id": "analyze-seo", "action": "analyze", "pattern": "swarm", "agent": "seo-specialist", "parallel": true, "dependsOn": ["research"] },
-          { "id": "synthesize", "action": "synthesize", "pattern": "council", "dependsOn": ["analyze-market", "analyze-seo"] },
-          { "id": "report", "action": "report", "pattern": "leader", "agent": "marketing-strategist", "dependsOn": ["synthesize"] }
+          {
+            "id": "research",
+            "action": "research",
+            "pattern": "council",
+            "agent": "data-analyst"
+          },
+          {
+            "id": "analyze-market",
+            "action": "analyze",
+            "pattern": "swarm",
+            "agent": "data-analyst",
+            "parallel": true,
+            "dependsOn": [
+              "research"
+            ]
+          },
+          {
+            "id": "analyze-seo",
+            "action": "analyze",
+            "pattern": "swarm",
+            "agent": "seo-specialist",
+            "parallel": true,
+            "dependsOn": [
+              "research"
+            ]
+          },
+          {
+            "id": "synthesize",
+            "action": "synthesize",
+            "pattern": "council",
+            "dependsOn": [
+              "analyze-market",
+              "analyze-seo"
+            ]
+          },
+          {
+            "id": "report",
+            "action": "report",
+            "pattern": "leader",
+            "agent": "marketing-strategist",
+            "dependsOn": [
+              "synthesize"
+            ]
+          }
         ]
       }
     },
     "playbookMeta": {
-      "feature": { "description": "End-to-end feature implementation", "domain": "development", "tags": ["feature", "implementation"] },
-      "bugfix": { "description": "Bug analysis and fix workflow", "domain": "development", "tags": ["bugfix", "debug"] },
-      "refactor": { "description": "Code refactoring and quality improvement", "domain": "development", "tags": ["refactor", "quality"] },
-      "security": { "description": "Security audit and vulnerability remediation", "domain": "security", "tags": ["security", "audit"] },
-      "marketing-campaign": { "description": "Full marketing campaign execution", "domain": "marketing", "tags": ["marketing", "campaign", "launch"] },
-      "marketing-audit": { "description": "Marketing performance audit and optimization", "domain": "marketing", "tags": ["marketing", "audit", "optimize"] },
-      "content-launch": { "description": "Content creation and publication workflow", "domain": "marketing", "tags": ["content", "publish", "launch"] },
-      "competitive-analysis": { "description": "Competitive landscape research and reporting", "domain": "marketing", "tags": ["research", "competitive", "analysis"] }
+      "feature": {
+        "description": "End-to-end feature implementation",
+        "domain": "development",
+        "tags": [
+          "feature",
+          "implementation"
+        ]
+      },
+      "bugfix": {
+        "description": "Bug analysis and fix workflow",
+        "domain": "development",
+        "tags": [
+          "bugfix",
+          "debug"
+        ]
+      },
+      "refactor": {
+        "description": "Code refactoring and quality improvement",
+        "domain": "development",
+        "tags": [
+          "refactor",
+          "quality"
+        ]
+      },
+      "security": {
+        "description": "Security audit and vulnerability remediation",
+        "domain": "security",
+        "tags": [
+          "security",
+          "audit"
+        ]
+      },
+      "marketing-campaign": {
+        "description": "Full marketing campaign execution",
+        "domain": "marketing",
+        "tags": [
+          "marketing",
+          "campaign",
+          "launch"
+        ]
+      },
+      "marketing-audit": {
+        "description": "Marketing performance audit and optimization",
+        "domain": "marketing",
+        "tags": [
+          "marketing",
+          "audit",
+          "optimize"
+        ]
+      },
+      "content-launch": {
+        "description": "Content creation and publication workflow",
+        "domain": "marketing",
+        "tags": [
+          "content",
+          "publish",
+          "launch"
+        ]
+      },
+      "competitive-analysis": {
+        "description": "Competitive landscape research and reporting",
+        "domain": "marketing",
+        "tags": [
+          "research",
+          "competitive",
+          "analysis"
+        ]
+      }
     },
-    "messageTypes": ["message", "broadcast", "shutdown_request", "shutdown_response", "plan_approval_response"],
+    "messageTypes": [
+      "message",
+      "broadcast",
+      "shutdown_request",
+      "shutdown_response",
+      "plan_approval_response"
+    ],
     "teamStorage": {
       "config": "~/.claude/teams/{team-name}/config.json",
       "tasks": "~/.claude/tasks/{team-name}/"
     }
   },
-
   "swarm": {
     "enabled": true,
     "optIn": true,
     "serverUrl": "http://localhost:3000",
     "syncInterval": "session",
-    "localGlobalRatio": [0.3, 0.7],
+    "localGlobalRatio": [
+      0.3,
+      0.7
+    ],
     "differentialPrivacy": {
       "enabled": true,
-      "epsilon": 1.0,
-      "delta": 1e-5
+      "epsilon": 1,
+      "delta": 0.00001
     }
   },
-
   "automation": {
     "intentDetection": true,
     "ambiguityThreshold": 50,
-    "supportedLanguages": ["en", "ko", "ja", "zh"]
+    "supportedLanguages": [
+      "en",
+      "ko",
+      "ja",
+      "zh"
+    ]
   },
-
   "context": {
     "importCacheTTL": 30000
   },
-
   "cognitive": {
     "router": {
       "threshold": 0.4,
@@ -263,7 +728,6 @@
       "sandboxEnabled": true
     }
   },
-
   "learning": {
     "memoryScopes": {
       "user": "~/.claude/artibot/",
@@ -284,14 +748,12 @@
       "driftCheck": "7 6 * * 1"
     }
   },
-
   "visual": {
     "maxIterations": 3,
     "threshold": 0.95,
     "disableAnimations": true,
     "excludeSelectors": []
   },
-
   "runtime": {
     "middleware": [
       "router",
@@ -305,28 +767,35 @@
       "summarization"
     ]
   },
-
   "autoLearning": {
     "enabled": true,
     "schedule": "0 3 * * *",
-    "pipeline": ["self-scan", "pattern-extract", "knowledge-update", "skill-refinement"],
+    "pipeline": [
+      "self-scan",
+      "pattern-extract",
+      "knowledge-update",
+      "skill-refinement"
+    ],
     "autoCommit": true,
     "autoPush": true,
     "maxChangesPerRun": 10,
     "dryRun": false,
     "allowedPaths": null
   },
-
-
   "skills": {
     "lazyLoading": {
       "enabled": true,
       "maxConcurrent": 5
     }
   },
-
   "output": {
     "maxContextLength": 500,
     "defaultStyle": "artibot-default"
+  },
+  "codex": {
+    "mode": "off",
+    "defaultModel": "o4-mini",
+    "timeout": 60000,
+    "reviewOnStop": false
   }
 }
