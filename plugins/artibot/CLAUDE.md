@@ -10,6 +10,26 @@ This file auto-loads when Claude accesses files in `plugins/artibot/`.
 - **Learning Pipeline**: `lib/learning/` (GRPO self-eval, memory, knowledge-transfer, lifelong)
 - **Swarm**: `lib/swarm/` (federated collective learning across instances)
 
+## 5-Layer Architecture
+
+```
+Layer 5 (Runtime):    lib/runtime/    — 11-stage middleware pipeline, agent factory
+Layer 4 (Cognitive):  lib/cognitive/  — System 1/2 dual-process routing
+Layer 3 (Learning):   lib/learning/   — GRPO, memory, knowledge-transfer, lifelong
+Layer 2 (Auxiliary):  lib/adapters/, lib/swarm/, lib/privacy/, lib/orchestration/, lib/intent/, lib/visual/, lib/git/
+Layer 1 (Core):       lib/core/       — config, cache, I/O, lifecycle, event-bus, guard-registry
+```
+
+**Dependency direction**: Upper layers import lower layers only (Layer 5 → 4 → 3 → 2 → 1).
+
+| Layer | Responsibility |
+|-------|---------------|
+| **5 — Runtime** | Request lifecycle: middleware pipeline orchestrates agent creation, evaluation, and response |
+| **4 — Cognitive** | Intent classification: routes requests to System 1 (fast/intuitive) or System 2 (deliberate) |
+| **3 — Learning** | Self-improvement: GRPO self-eval, memory persistence, cross-session knowledge transfer |
+| **2 — Auxiliary** | Domain services: platform adapters, swarm federation, privacy scrubbing, visual validation |
+| **1 — Core** | Foundation: config loading, file I/O, caching, event bus, guard registry, debug utilities |
+
 ## Module Map
 
 | Directory | Purpose | Key Files |
