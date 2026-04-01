@@ -73,12 +73,12 @@ Artibot의 핵심 엔진은 Claude Code의 **Agent Teams API**입니다. 단순�
 | **토큰 비용** | 1x | ~5x |
 | **적합 작업** | 단일 파일 분석, 검색, 빠른 위임 | 복잡한 기능 구현, 멀티 에이전트 협업 |
 
-### 48개 슬래시 커맨드
+### 50개 슬래시 커맨드
 
 - `/sc`로 자연어 의도를 분석하여 최적 커맨드로 자동 라우팅
 - 개발, 분석, 품질, 테스트, 문서화, 배포, 마케팅 전 영역 커버
 
-### 98개 도메인 스킬
+### 117개 도메인 스킬
 
 - 11개 페르소나 스킬 (architect, frontend, backend, security 등)
 - 6개 코어 스킬 (orchestration, principles, coding/security/testing standards)
@@ -109,7 +109,7 @@ Artibot의 핵심 엔진은 Claude Code의 **Agent Teams API**입니다. 단순�
 
 ### 지능형 훅 시스템
 
-- 15개 이벤트에 36개 훅 등록 (HTTP webhook 알림 포함)
+- 15개 이벤트에 39개 훅 등록 (HTTP webhook 알림 포함)
 - **Guard Registry**: 중앙 집중식 가드 파이프라인 (`registerGuard()`/`executeChain()` API), 6개 내장 가드, 훅 코드 75% 감소
 - **Advisory File Lock**: 동시 훅 실행 시 상태 파일 경합 방지 (spin-lock, fail-open)
 - 위험 명령 차단, 민감 파일 보호, 자동 포맷, PR 감지, 팀원 생명주기 추적
@@ -161,8 +161,8 @@ Artibot은 Claude Code 외에도 **Gemini CLI**, **OpenAI Codex CLI**, **Cursor 
 | Agent Teams (P2P 메시징) | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Sub-Agent (단방향 위임) | ✅ | ✅ | ✅ | ⚠️ 제한적 | ✅ |
 | 27개 전문 에이전트 | ✅ | ✅ 자동변환 | ✅ 자동변환 | ✅ 자동변환 | ✅ 자동변환 |
-| 98개 스킬 (SKILL.md) | ✅ | ✅ | ✅ | ✅ | ✅ |
-| 슬래시 커맨드 | ✅ 48개 | ✅ TOML | → Workflows | → Prompts | → Workflows |
+| 117개 스킬 (SKILL.md) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| 슬래시 커맨드 | ✅ 50개 | ✅ TOML | → Workflows | → Prompts | → Workflows |
 | Hooks 자동작동 | ✅ 15이벤트 | ✅ 동일패턴 | ⚠️ 제한적 | ❌ | ✅ Agent Manager |
 | 인지 라우터 (System 1/2) | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 자가학습 (GRPO) | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -430,7 +430,7 @@ Agent Teams (Full P2P)  →  Sub-Agent (단방향)  →  Direct (직접 실행)
 | 1 | **Agent Teams** | Claude의 네이티브 Agent Teams API로 전문 에이전트를 팀으로 구성. P2P 통신, 공유 태스크, 자기 할당 지원 |
 | 2 | **Cognitive Routing** | System 1(직관적 빠른 판단) / System 2(심층 분석) 이중 프로세스로 요청 복잡도에 따라 자동 라우팅 |
 | 3 | **Guard Registry** | 중앙 집중식 안전 파이프라인. 위험 명령 차단, 민감 파일 보호, Stop-Review-Gate로 코드 리뷰 강제 |
-| 4 | **Skills** | 98개 도메인 스킬이 컨텍스트에 따라 자동 활성화. 페르소나, 코딩 표준, 언어별 패턴, 마케팅 전략 등 |
+| 4 | **Skills** | 117개 도메인 스킬이 컨텍스트에 따라 자동 활성화. 페르소나, 코딩 표준, 언어별 패턴, 마케팅 전략 등 |
 | 5 | **Hooks** | 15개 이벤트에 연결된 자동화 파이프라인. 포맷팅, 검증, 추적, 외부 알림을 코드 변경 없이 처리 |
 
 ### 최소 실행 흐름
@@ -1046,7 +1046,7 @@ orchestrator는 **코드를 직접 작성하지 않습니다**. 팀을 구성하
 
 ## 훅 시스템
 
-15개 이벤트에 36개 훅이 등록되어 있습니다.
+15개 이벤트에 39개 훅이 등록되어 있습니다.
 
 ### 이벤트별 훅
 
@@ -1130,20 +1130,20 @@ plugins/artibot/
 ├── agents/                      # 28개 에이전트 정의 (orchestrator 1 + 팀원 27)
 │   ├── orchestrator.md          #   CTO / 팀 리더 (Agent Teams API)
 │   └── [27개 전문 에이전트].md    #   팀원 (SendMessage + TaskUpdate)
-├── commands/                    # 48개 슬래시 커맨드
+├── commands/                    # 50개 슬래시 커맨드
 │   ├── sc.md                    #   메인 라우터
 │   ├── orchestrate.md           #   팀 오케스트레이션 (TeamCreate)
 │   ├── spawn.md                 #   팀 스폰 (병렬 실행)
-│   └── [38개 커맨드].md
-├── skills/                      # 98개 스킬 디렉토리 (forked context 격리)
+│   └── [47개 커맨드].md
+├── skills/                      # 117개 스킬 디렉토리 (forked context 격리)
 │   ├── orchestration/           #   위임 모드 선택 + 팀 라우팅
 │   ├── delegation/              #   Sub-Agent/Team 위임 전략
 │   ├── auto-learning-pipeline/  #   제로 설정 야간 자기 개선
-│   └── [79개 스킬]/
+│   └── [114개 스킬]/
 ├── hooks/
 │   └── hooks.json               # 훅 이벤트 매핑
 ├── scripts/
-│   ├── hooks/                   # 28개 훅 스크립트 (ESM, file-lock 포함)
+│   ├── hooks/                   # 37개 훅 스크립트 (ESM, file-lock 포함)
 │   ├── ci/                      # 6개 CI 검증 스크립트
 │   ├── evals/                   # 런타임 eval 스위트
 │   └── utils/
@@ -1227,7 +1227,7 @@ Claude Code 하네스 아키텍처에서 영감받은 13개 신규 모듈 도입
 - 7개 출력 스타일로 확장 (기존 4개 + tokens, narrative, statusline)
 
 ### SKILL.md 검증 파이프라인 (v1.14.0)
-- `scripts/gen-skill-docs.js`: 98개 스킬 SKILL.md 유효성 검증 및 리포트 생성
+- `scripts/gen-skill-docs.js`: 117개 스킬 SKILL.md 유효성 검증 및 리포트 생성
 - `npm run skill:check` / `npm run skill:report` 스크립트 추가
 
 ### 제로 설정 자동 학습 (v1.14.1)
@@ -1262,7 +1262,7 @@ Claude Code 하네스 아키텍처에서 영감받은 13개 신규 모듈 도입
 
 ### hooks.json 동기화
 - 버전 `v1.9.2` → `v1.12.0` → `v1.13.0` 동기화
-- 36개 훅 등록, 15개 이벤트 타입
+- 39개 훅 등록, 15개 이벤트 타입
 
 ---
 
