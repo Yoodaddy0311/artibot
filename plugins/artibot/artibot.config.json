@@ -794,8 +794,10 @@
   },
   "codex": {
     "mode": "off",
+    "pluginPath": "",
     "defaultModel": "o4-mini",
     "timeout": 60000,
-    "reviewOnStop": false
+    "reviewOnStop": false,
+    "dataPolicy": "코드가 OpenAI API로 전송됩니다. 민감 프로젝트에 주의하세요."
   }
 }

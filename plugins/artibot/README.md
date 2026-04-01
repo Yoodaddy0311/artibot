@@ -9,6 +9,7 @@ Claude Code를 위한 **Agent Teams 기반** 지능형 오케스트레이션 플
 - [핵심 특징](#핵심-특징)
 - [설치](#설치)
 - [크로스 플랫폼 설치 가이드](#크로스-플랫폼-설치-가이드)
+- [시작하기 (Onboarding Guide)](#시작하기-onboarding-guide)
 - [빠른 시작](#빠른-시작)
 - [Agent Teams 아키텍처](#agent-teams-아키텍처)
 - [인지 아키텍처 (Cognitive + Learning)](#인지-아키텍처-cognitive--learning)
@@ -415,6 +416,52 @@ Agent Teams (Full P2P)  →  Sub-Agent (단방향)  →  Direct (직접 실행)
 2. Task() 도구 사용 가능 → Sub-Agent 모드
 3. 도구 없음 → Direct 모드 (오케스트레이터가 직접 실행)
 ```
+
+---
+
+## 시작하기 (Onboarding Guide)
+
+> Claude Code를 위한 지능형 오케스트레이션 플러그인 — 28개 전문 에이전트가 팀으로 협업하여 개발 생산성을 극대화합니다.
+
+### 핵심 개념 5가지
+
+| # | 개념 | 설명 |
+|---|------|------|
+| 1 | **Agent Teams** | Claude의 네이티브 Agent Teams API로 전문 에이전트를 팀으로 구성. P2P 통신, 공유 태스크, 자기 할당 지원 |
+| 2 | **Cognitive Routing** | System 1(직관적 빠른 판단) / System 2(심층 분석) 이중 프로세스로 요청 복잡도에 따라 자동 라우팅 |
+| 3 | **Guard Registry** | 중앙 집중식 안전 파이프라인. 위험 명령 차단, 민감 파일 보호, Stop-Review-Gate로 코드 리뷰 강제 |
+| 4 | **Skills** | 98개 도메인 스킬이 컨텍스트에 따라 자동 활성화. 페르소나, 코딩 표준, 언어별 패턴, 마케팅 전략 등 |
+| 5 | **Hooks** | 15개 이벤트에 연결된 자동화 파이프라인. 포맷팅, 검증, 추적, 외부 알림을 코드 변경 없이 처리 |
+
+### 최소 실행 흐름
+
+```
+설치 → 첫 실행 → /sc로 자연어 입력 → 인지 라우팅 → 최적 커맨드 자동 선택 → 결과 확인
+```
+
+1. **설치**: `bash install.sh` (에이전트, 커맨드, 스킬, 훅을 `~/.claude/`에 복사)
+2. **첫 실행**: Claude Code 세션 시작 시 Artibot 자동 로드
+3. **라우팅**: `/sc 로그인 기능 구현해줘` → 인지 라우터가 의도 분석 → `/implement`로 라우팅
+4. **실행**: 복잡도에 따라 Sub-Agent 또는 Agent Team 자동 선택 → 결과 반환
+5. **확인**: 구조화된 보고서 (GFM 테이블 형식)로 결과 확인
+
+### 안전장치
+
+| 장치 | 역할 |
+|------|------|
+| **Guard Registry** | `registerGuard()` / `executeChain()` API로 6개 내장 가드 중앙 관리 |
+| **Stop-Review-Gate** | 코드 변경 후 자동 리뷰 트리거. CRITICAL 이슈 시 머지 차단 |
+| **데이터 정책** | 외부 DB 접근 금지, 모든 데이터는 Artibot 자체 플러그인 내에서만 처리 |
+| **PII Scrubber** | 스웜 동기화 시 개인정보 자동 제거 + 차등 프라이버시 노이즈 적용 |
+
+### 확장 포인트
+
+| 확장 | 방법 |
+|------|------|
+| **커스텀 스킬** | `skills/{name}/SKILL.md` 생성 → 자동 인식 |
+| **커스텀 훅** | `hooks.json`에 이벤트 등록 → ESM 스크립트 자동 실행 |
+| **MCP 서버** | `.mcp.json`에 서버 추가 → Context7, Playwright 등 외부 도구 연동 |
+| **커스텀 에이전트** | `agents/{name}.md` 생성 → frontmatter로 모델, 도구, 스킬 설정 |
 
 ---
 
