@@ -24,6 +24,54 @@
  * collector.registerSource('eventBus', () => getEventBusStats());
  * const snapshot = await collector.collect();
  */
+
+/**
+ * Extract KPI summary from a collected snapshot's sources.
+ * @param {object} s - snapshot.sources object
+ * @returns {object} KPI entries to merge into summary
+ */
+function extractKpis(s) {
+  const kpis = {};
+
+  if (s.eventBus && !s.eventBus.error) {
+    kpis.eventBus = Object.freeze({
+      eventTypes: s.eventBus.eventTypes ?? 0,
+      totalListeners: s.eventBus.totalListeners ?? 0,
+      cachedEvents: s.eventBus.cachedEvents ?? 0,
+    });
+  }
+
+  if (s.cognitiveRouter && !s.cognitiveRouter.error) {
+    kpis.cognitiveRouter = Object.freeze({
+      totalRouted: s.cognitiveRouter.totalRouted ?? 0,
+      system1Ratio: s.cognitiveRouter.system1Ratio ?? 0,
+      successRate: s.cognitiveRouter.successRate ?? { system1: 0, system2: 0 },
+      recentTrend: s.cognitiveRouter.recentTrend ?? 'stable',
+    });
+  }
+
+  if (s.grpo && !s.grpo.error) {
+    kpis.grpo = Object.freeze({
+      totalRounds: s.grpo.totalRounds ?? 0,
+      weights: s.grpo.weights ?? {},
+      teamWeights: s.grpo.teamWeights ?? {},
+    });
+  }
+
+  if (s.evalCalibrator && !s.evalCalibrator.error) {
+    kpis.evalCalibrator = Object.freeze({
+      avgDelta: s.evalCalibrator.avgDelta ?? 0,
+      avgAbsDelta: s.evalCalibrator.avgAbsDelta ?? 0,
+      totalOverrides: s.evalCalibrator.totalOverrides ?? 0,
+    });
+  }
+
+  if (s.guards && !s.guards.error) kpis.guards = Object.freeze({ ...s.guards });
+  if (s.hooks && !s.hooks.error) kpis.hooks = Object.freeze({ ...s.hooks });
+  if (s.toolCalls && !s.toolCalls.error) kpis.toolCalls = Object.freeze({ ...s.toolCalls });
+
+  return kpis;
+}
 export function createMetricsCollector() {
   /** @type {Map<string, () => object | Promise<object>>} */
   let sources = new Map();
@@ -92,59 +140,8 @@ export function createMetricsCollector() {
     const summary = {
       timestamp: snapshot.timestamp,
       sourceCount: Object.keys(s).length,
+      ...extractKpis(s),
     };
-
-    // Event bus KPIs
-    if (s.eventBus && !s.eventBus.error) {
-      summary.eventBus = Object.freeze({
-        eventTypes: s.eventBus.eventTypes ?? 0,
-        totalListeners: s.eventBus.totalListeners ?? 0,
-        cachedEvents: s.eventBus.cachedEvents ?? 0,
-      });
-    }
-
-    // Cognitive router KPIs
-    if (s.cognitiveRouter && !s.cognitiveRouter.error) {
-      summary.cognitiveRouter = Object.freeze({
-        totalRouted: s.cognitiveRouter.totalRouted ?? 0,
-        system1Ratio: s.cognitiveRouter.system1Ratio ?? 0,
-        successRate: s.cognitiveRouter.successRate ?? { system1: 0, system2: 0 },
-        recentTrend: s.cognitiveRouter.recentTrend ?? 'stable',
-      });
-    }
-
-    // GRPO KPIs
-    if (s.grpo && !s.grpo.error) {
-      summary.grpo = Object.freeze({
-        totalRounds: s.grpo.totalRounds ?? 0,
-        weights: s.grpo.weights ?? {},
-        teamWeights: s.grpo.teamWeights ?? {},
-      });
-    }
-
-    // Eval calibrator KPIs
-    if (s.evalCalibrator && !s.evalCalibrator.error) {
-      summary.evalCalibrator = Object.freeze({
-        avgDelta: s.evalCalibrator.avgDelta ?? 0,
-        avgAbsDelta: s.evalCalibrator.avgAbsDelta ?? 0,
-        totalOverrides: s.evalCalibrator.totalOverrides ?? 0,
-      });
-    }
-
-    // Guard KPIs
-    if (s.guards && !s.guards.error) {
-      summary.guards = Object.freeze({ ...s.guards });
-    }
-
-    // Hook execution KPIs
-    if (s.hooks && !s.hooks.error) {
-      summary.hooks = Object.freeze({ ...s.hooks });
-    }
-
-    // Tool call KPIs
-    if (s.toolCalls && !s.toolCalls.error) {
-      summary.toolCalls = Object.freeze({ ...s.toolCalls });
-    }
 
     return Object.freeze(summary);
   }
