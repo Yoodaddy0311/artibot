@@ -257,10 +257,7 @@ async function main() {
     log(message);
 
     writeStdout({
-      message,
-      summary,
-      tokenEstimate,
-      suppress_follow_up_questions: true,
+      systemMessage: message,
     });
   } catch (err) {
     logHookError(HOOK_NAME, 'Failed to save snapshot', err);

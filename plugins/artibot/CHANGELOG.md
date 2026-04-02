@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.1.1] - 2026-04-02
+
+### Summary / 요약
+
+**English**: Hook JSON schema compliance fix — 4 hooks producing invalid output that caused Claude Code validation errors. Also fixed pre-write-guard Read tracking bug. 7 files changed.
+
+**한국어**: Hook JSON 스키마 준수 수정 — Claude Code 검증 에러를 유발하던 4개 hook의 잘못된 출력 수정. pre-write-guard Read 추적 버그도 해결. 7개 파일 변경.
+
+### Fixed / 수정됨
+
+- **stop-review-gate.js**: decision 값 'ALLOW'/'BLOCK' → 'approve'/'block' (스키마 준수), 스키마 외 필드(issues, changedFiles, codexCrossCheck) 제거
+- **pre-write-guard.js**: hook_event_name 필드 의존 제거 → PostToolUse Read 이벤트 추적 정상화
+- **pre-compact.js**: 스키마 외 필드(summary, tokenEstimate, suppress_follow_up_questions) 제거 → systemMessage 사용
+- **quality-gate.js**: block 시 message → reason (스키마 준수), warning 시 hookSpecificOutput.additionalContext 적용
+
+### Tests Updated / 테스트 업데이트
+
+- **pre-compact.test.js**: snapshot 구조 및 systemMessage 필드에 맞게 assertion 업데이트
+- **quality-gate.test.js**: reason 필드 및 hookSpecificOutput 구조에 맞게 assertion 업데이트
+
+---
 
 ## [2.1.0] - 2026-04-02
 

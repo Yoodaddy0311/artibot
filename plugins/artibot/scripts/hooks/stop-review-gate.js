@@ -298,11 +298,11 @@ function buildResult(issues, changedFiles, codexMode) {
   if (issues.length > 0) {
     const reason = `Review gate found ${issues.length} issue(s):\n${issues.map((i) => `  - ${i}`).join('\n')}`;
     log(reason);
-    writeStdout({ decision: 'block', reason, issues, changedFiles, ...codexFlag });
+    writeStdout({ decision: 'block', reason });
   } else {
     const reason = `All ${changedFiles.length} changed file(s) passed review gate`;
     log(reason);
-    writeStdout({ decision: 'approve', reason, changedFiles, ...codexFlag });
+    writeStdout({ decision: 'approve', reason });
   }
 }
 

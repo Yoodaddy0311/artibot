@@ -25,14 +25,19 @@ async function main() {
   if (result.decision === 'block') {
     writeStdout({
       decision: 'block',
-      message: result.reason,
+      reason: result.reason,
     });
   } else if (result.warnings.length > 0) {
     const lines = ['[quality-gate] WARNINGS:'];
     for (const warn of result.warnings) {
       lines.push(`  - ${warn}`);
     }
-    writeStdout({ message: lines.join('\n') });
+    writeStdout({
+      hookSpecificOutput: {
+        hookEventName: 'PostToolUse',
+        additionalContext: lines.join('\n'),
+      },
+    });
   }
 }
 
