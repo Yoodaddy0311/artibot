@@ -30,6 +30,46 @@ const REQUIRED_SKILL_FIELDS = ['name', 'description'];
  * reg.registerHook('pre-command', (ctx) => console.log(ctx));
  * reg.listExtensions(); // { skills: [...], hooks: [...] }
  */
+/**
+ * Validate skill registration parameters.
+ * @param {string} name
+ * @param {object} config
+ * @param {Map} existingSkills
+ */
+function validateSkillParams(name, config, existingSkills) {
+  if (!name || typeof name !== 'string') {
+    throw new Error('Skill name must be a non-empty string');
+  }
+  if (!config || typeof config !== 'object') {
+    throw new Error('Skill config must be an object');
+  }
+  for (const field of REQUIRED_SKILL_FIELDS) {
+    if (!config[field]) {
+      throw new Error(`Skill config missing required field: "${field}"`);
+    }
+  }
+  if (config.name !== name) {
+    throw new Error(`Skill config.name ("${config.name}") must match the registered name ("${name}")`);
+  }
+  if (existingSkills.has(name)) {
+    throw new Error(`Skill "${name}" is already registered`);
+  }
+}
+
+/**
+ * Validate hook registration parameters.
+ * @param {string} event
+ * @param {Function} handler
+ */
+function validateHookParams(event, handler) {
+  if (!event || typeof event !== 'string') {
+    throw new Error('Hook event must be a non-empty string');
+  }
+  if (typeof handler !== 'function') {
+    throw new Error('Hook handler must be a function');
+  }
+}
+
 export function createExtensionRegistry() {
   /** @type {Map<string, object>} */
   const skills = new Map();

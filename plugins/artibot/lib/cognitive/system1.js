@@ -254,7 +254,6 @@ export function patternMatch(input, context) {
  */
 export async function fastResponse(input, context = {}) {
   const start = performance.now();
-
   if (!input || typeof input !== 'string' || input.trim().length === 0) {
     return {
       response: null,
@@ -265,14 +264,11 @@ export async function fastResponse(input, context = {}) {
       escalateReason: 'empty_input',
     };
   }
-
   // Ensure patterns are loaded
   if (!_warmed) {
     await warmCache();
   }
-
   const cacheKey = buildCacheKey(input, context);
-
   // 1. Check in-memory response cache (sub-ms)
   const cached = _patternCache.get(cacheKey);
   if (cached) {
@@ -282,18 +278,11 @@ export async function fastResponse(input, context = {}) {
       latencyMs: Math.round((performance.now() - start) * 100) / 100,
     };
   }
-
   // 2. Pattern matching against loaded patterns (sync, fast)
   const match = patternMatch(input, context);
-  let bestResponse = null;
-  let bestConfidence = 0;
-  let bestSource = 'none';
-
-  if (match.pattern && match.score >= MIN_PATTERN_MATCH_SCORE) {
-    bestResponse = match.pattern.response;
-    bestConfidence = match.score * match.pattern.confidence;
-    bestSource = 'pattern';
-  }
+  const candidate = match.pattern && match.score >= MIN_PATTERN_MATCH_SCORE
+    ? { response: match.pattern.response, confidence: match.score * match.pattern.confidence, source: 'pattern' }
+    : { response: null, confidence: 0, source: 'none' };
 
   // 3. Parallel: memory search + tool suggestion (async, <100ms each)
   const [memoryHits, toolSuggestion] = await Promise.all([
@@ -301,7 +290,29 @@ export async function fastResponse(input, context = {}) {
     _suggestToolCached(input, context),
   ]);
 
-  // 4. If memory has high-relevance hits, boost confidence or use as response
+  // 4-5. Merge signals from all sources
+  const merged = _mergeSignals(candidate, memoryHits, toolSuggestion);
+
+  // 6. Build result and optionally cache
+  const result = _buildFastResult(merged, memoryHits, start);
+  if (!result.escalate) {
+    _patternCache.set(cacheKey, result);
+  }
+
+  return result;
+}
+
+
+/**
+ * Merge memory hits and tool suggestions into the best candidate.
+ * @param {{ response: object|null, confidence: number, source: string }} candidate
+ * @param {Array} memoryHits
+ * @param {Array} toolSuggestion
+ * @returns {{ response: object|null, confidence: number, source: string, toolResult: object|null }}
+ */
+function _mergeSignals(candidate, memoryHits, toolSuggestion) {
+  let { response: bestResponse, confidence: bestConfidence, source: bestSource } = candidate;
+
   if (memoryHits.length > 0 && memoryHits[0].score > 0.5) {
     if (bestConfidence < memoryHits[0].score) {
       bestResponse = {
@@ -312,12 +323,10 @@ export async function fastResponse(input, context = {}) {
       bestConfidence = memoryHits[0].score;
       bestSource = 'memory';
     } else {
-      // Boost pattern confidence with memory corroboration
       bestConfidence = Math.min(1, bestConfidence + 0.1);
     }
   }
 
-  // 5. If tool suggestion available, attach it
   const toolResult = toolSuggestion.length > 0 ? toolSuggestion[0] : null;
   if (toolResult && bestSource === 'none') {
     bestResponse = {
@@ -330,27 +339,30 @@ export async function fastResponse(input, context = {}) {
     bestSource = 'tool';
   }
 
-  // 6. Determine if escalation is needed
-  const shouldEscalate = bestConfidence < ESCALATION_THRESHOLD;
-  const latencyMs = Math.round((performance.now() - start) * 100) / 100;
+  return { response: bestResponse, confidence: bestConfidence, source: bestSource, toolResult };
+}
 
-  const result = {
-    response: bestResponse,
-    confidence: Math.round(bestConfidence * 1000) / 1000,
-    source: bestSource,
+/**
+ * Build the final FastResponse object with escalation logic.
+ * @param {{ response: object|null, confidence: number, source: string, toolResult: object|null }} merged
+ * @param {Array} memoryHits
+ * @param {number} startTime
+ * @returns {FastResponse}
+ */
+function _buildFastResult(merged, memoryHits, startTime) {
+  const shouldEscalate = merged.confidence < ESCALATION_THRESHOLD;
+  const latencyMs = Math.round((performance.now() - startTime) * 100) / 100;
+
+  return {
+    response: merged.response,
+    confidence: Math.round(merged.confidence * 1000) / 1000,
+    source: merged.source,
     latencyMs,
-    ...(toolResult && { toolSuggestion: toolResult }),
+    ...(merged.toolResult && { toolSuggestion: merged.toolResult }),
     ...(memoryHits.length > 0 && { memoryHits: memoryHits.slice(0, 5) }),
     ...(shouldEscalate && { escalate: true }),
-    ...(shouldEscalate && { escalateReason: _getEscalationReason(bestConfidence, bestSource) }),
+    ...(shouldEscalate && { escalateReason: _getEscalationReason(merged.confidence, merged.source) }),
   };
-
-  // Cache the result for subsequent identical queries
-  if (!shouldEscalate) {
-    _patternCache.set(cacheKey, result);
-  }
-
-  return result;
 }
 
 // ---------------------------------------------------------------------------

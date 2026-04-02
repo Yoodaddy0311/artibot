@@ -16,6 +16,11 @@ async function main() {
   const raw = await readStdin();
   parseJSON(raw);
 
+  // Set auto-compact threshold for team sessions (lower = more aggressive)
+  if (!process.env.CLAUDE_CODE_AUTO_COMPACT_INPUT_TOKENS) {
+    process.env.CLAUDE_CODE_AUTO_COMPACT_INPUT_TOKENS = '180000';
+  }
+
   // Environment detection
   const env = {
     platform: os.platform(),

@@ -136,7 +136,7 @@ async function main() {
   const toolName = extractToolName(hookData);
 
   // PostToolUse Read tracking mode
-  if (hookEvent === 'PostToolUse' && toolName === 'Read') {
+  if (toolName === 'Read') {
     handleReadTracking(hookData);
     return;
   }

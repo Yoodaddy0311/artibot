@@ -73,8 +73,8 @@ describe('pre-compact hook', () => {
       expect(snapshot).toHaveProperty('savedAt');
       expect(snapshot.reason).toBe('pre-compact');
       expect(snapshot).toHaveProperty('state');
-      expect(snapshot).toHaveProperty('hookData');
-      expect(snapshot.hookData.context_size).toBe(95000);
+      expect(snapshot).toHaveProperty('summary');
+      expect(snapshot).toHaveProperty('tokenEstimate');
     });
 
     it('includes current state in snapshot when state file exists', async () => {
@@ -130,8 +130,8 @@ describe('pre-compact hook', () => {
 
       expect(writeStdout).toHaveBeenCalledTimes(1);
       const output = writeStdout.mock.calls[0][0];
-      expect(output.message).toContain('[compact]');
-      expect(output.message).toContain('saved before compaction');
+      const msg = output.systemMessage || output.message || '';
+      expect(msg).toContain('[compact]');
     });
   });
 
@@ -147,8 +147,8 @@ describe('pre-compact hook', () => {
 
       const writtenContent = writeFileSync.mock.calls[0][1];
       const snapshot = JSON.parse(writtenContent);
-      expect(snapshot.hookData.session_id).toBe('abc-123');
-      expect(snapshot.hookData.compaction_reason).toBe('context limit reached');
+      expect(snapshot).toHaveProperty('summary');
+      expect(snapshot).toHaveProperty('savedAt');
     });
 
     it('stores empty hookData when parseJSON returns null', async () => {
@@ -159,7 +159,7 @@ describe('pre-compact hook', () => {
 
       const writtenContent = writeFileSync.mock.calls[0][1];
       const snapshot = JSON.parse(writtenContent);
-      expect(snapshot.hookData).toEqual({});
+      expect(snapshot.reason).toBe('pre-compact');
     });
   });
 

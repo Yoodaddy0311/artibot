@@ -13,7 +13,7 @@ agents:
   - "frontend-developer"
   - "tdd-guide"
 tokens: "~3K"
-category: "testing"
+category: "marketing"
 ---
 
 # CRO - Form Optimization

@@ -163,6 +163,46 @@ function runStep(command, cwd) {
  *   error: string | null
  * }}
  */
+/**
+ * Run a single fix iteration (eslint + vitest).
+ * @param {object} opts - Options with eslintFix, vitestRun, targetPath
+ * @returns {{ eslint: object, vitest: object }}
+ */
+function runIteration(opts) {
+  let eslintResult;
+  let vitestResult;
+
+  if (opts.eslintFix) {
+    const { output } = runStep('npx eslint --fix .', opts.targetPath);
+    eslintResult = parseEslintOutput(output);
+  } else {
+    eslintResult = { errors: 0, warnings: 0, total: 0, clean: true };
+  }
+
+  if (opts.vitestRun) {
+    const { output } = runStep('npx vitest run', opts.targetPath);
+    vitestResult = parseVitestOutput(output);
+  } else {
+    vitestResult = { passed: 0, failed: 0, total: 0, success: true };
+  }
+
+  return { eslint: eslintResult, vitest: vitestResult };
+}
+
+/**
+ * Build a fix loop result object.
+ * @param {boolean} success
+ * @param {number} iterations
+ * @param {Array} history
+ * @param {object} finalStatus
+ * @param {string} reason
+ * @param {string|null} error
+ * @returns {object}
+ */
+function buildFixResult(success, iterations, history, finalStatus, reason, error = null) {
+  return { success, iterations, history, finalStatus, reason, error };
+}
+
 export function autoFix(options = {}) {
   const opts = { ...DEFAULT_OPTIONS, ...options };
   const { maxIterations, eslintFix, vitestRun, targetPath } = opts;

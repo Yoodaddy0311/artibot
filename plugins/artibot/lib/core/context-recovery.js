@@ -9,8 +9,8 @@
  * @module lib/core/context-recovery
  */
 
-/** Characters per estimated token. */
-const CHARS_PER_TOKEN = 4;
+
+import { CHARS_PER_TOKEN } from './index.js';
 
 /**
  * Context window limit recovery system.

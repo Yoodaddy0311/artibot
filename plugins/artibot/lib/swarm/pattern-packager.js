@@ -16,6 +16,7 @@
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { readJsonFile } from '../core/file.js';
+import { clamp01 } from '../learning/pattern-analyzer.js';
 import { ARTIBOT_DIR, round } from '../core/index.js';
 
 // PII fields to strip from provenance when packaging for Swarm sharing
@@ -552,13 +553,4 @@ function countWeightEntries(weights) {
 }
 
 /**
- * Clamp a value between 0 and 1.
- *
- * @param {number} value - Value to clamp
- * @returns {number}
- */
-function clamp01(value) {
-  if (typeof value !== 'number' || Number.isNaN(value)) return 0;
-  return Math.max(0, Math.min(1, value));
-}
 

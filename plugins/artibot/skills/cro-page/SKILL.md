@@ -13,7 +13,7 @@ agents:
   - "frontend-developer"
   - "performance-engineer"
 tokens: "~3K"
-category: "testing"
+category: "marketing"
 ---
 
 # CRO - Page Optimization

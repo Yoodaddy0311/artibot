@@ -2,6 +2,9 @@
 description: (Artibot) Federated Swarm Intelligence - manage collective learning participation
 argument-hint: '<action> e.g. "status", "sync", "health", "stats", "opt-in", "opt-out"'
 allowed-tools: [Read, Bash, Glob, Grep]
+argument-hint: '[action] e.g. "스웜 동기화 상태 확인"'
+allowed-tools: [Read, Bash, TaskCreate]
+disable-model-invocation: true
 ---
 
 # /swarm
@@ -102,7 +105,6 @@ Always show when discussing swarm:
 
 ```
 SWARM STATUS
-============
 Participation: [active/inactive]
 Last Sync:     [timestamp or "never"]
 Sync Interval: [session/hourly/daily]

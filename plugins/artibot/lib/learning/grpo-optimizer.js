@@ -12,6 +12,7 @@
 
 import path from 'node:path';
 import { ensureDir, readJsonFile, writeJsonFile } from '../core/file.js';
+import { clamp01 } from './pattern-analyzer.js';
 import { getHomeDir } from '../core/platform.js';
 
 const GRPO_FILENAME = 'grpo-history.json';
@@ -571,10 +572,6 @@ function getAgentsForDomain(domain, count) {
 // Utilities
 // ---------------------------------------------------------------------------
 
-function clamp01(value) {
-  if (typeof value !== 'number' || Number.isNaN(value)) return 0;
-  return Math.max(0, Math.min(1, value));
-}
 
 /**
  * Exported CLI rule set for external use and customization.

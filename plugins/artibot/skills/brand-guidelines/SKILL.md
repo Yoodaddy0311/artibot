@@ -1,6 +1,7 @@
 ---
 context: fork
 name: brand-guidelines
+platforms: [claude-code, gemini-cli, codex-cli, cursor]
 description: "Manages brand identity including voice guidelines, visual standards, messaging consistency, and brand governance with frameworks for style guides and cross-channel consistency. Use when user asks about brand guidelines, brand voice, style guide, brand identity, tone of voice, messaging framework, visual identity, 브랜드 가이드라인, 브랜드 보이스, or 스타일 가이드."
 level: 3
 triggers:

@@ -2,14 +2,15 @@
 context: fork
 name: strategic-compact
 description: |
-  Context compaction strategy for preserving critical information during PreCompact events.
+  Context compaction timing strategy — suggests WHEN to trigger compaction based on context usage patterns.
   Auto-activates when: context >75%, PreCompact triggered, long sessions, multi-phase tasks.
-  Triggers: compact, context, compress, long session, context window, memory pressure
+  Triggers: strategic compact, context strategy, compress timing, long session, context window, memory pressure
+  See also: compaction-survival (정보 보존 전략)
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 2
 triggers:
   - "strategy"
-  - "compact"
+  - "strategic compact"
   - "executive summary"
   - "strategic plan"
   - "priorities"

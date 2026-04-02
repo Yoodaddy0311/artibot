@@ -13,7 +13,7 @@ agents:
   - "performance-engineer"
   - "code-reviewer"
 tokens: "~4K"
-category: "testing"
+category: "marketing"
 ---
 
 # CRO - Funnel Optimization

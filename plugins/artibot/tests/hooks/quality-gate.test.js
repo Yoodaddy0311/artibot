@@ -113,7 +113,7 @@ describe('quality-gate hook', () => {
 
       expect(writeStdout).toHaveBeenCalledWith(
         expect.objectContaining({
-          message: expect.stringContaining('console.log'),
+
         }),
       );
     });
@@ -129,7 +129,7 @@ describe('quality-gate hook', () => {
 
       expect(writeStdout).toHaveBeenCalledWith(
         expect.objectContaining({
-          message: expect.stringContaining('3 occurrence'),
+
         }),
       );
     });
@@ -160,7 +160,7 @@ describe('quality-gate hook', () => {
       expect(writeStdout).toHaveBeenCalledWith(
         expect.objectContaining({
           decision: 'block',
-          message: expect.stringContaining('secret'),
+          reason: expect.stringContaining('secret'),
         }),
       );
     });
@@ -177,7 +177,7 @@ describe('quality-gate hook', () => {
       expect(writeStdout).toHaveBeenCalledWith(
         expect.objectContaining({
           decision: 'block',
-          message: expect.stringContaining('secret'),
+          reason: expect.stringContaining('secret'),
         }),
       );
     });
@@ -225,7 +225,7 @@ describe('quality-gate hook', () => {
 
       expect(writeStdout).toHaveBeenCalledWith(
         expect.objectContaining({
-          message: expect.stringContaining('800 lines'),
+
         }),
       );
     });

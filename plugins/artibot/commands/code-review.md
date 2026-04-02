@@ -69,6 +69,10 @@ VERDICT: [APPROVE|REQUEST_CHANGES|BLOCK]
 Blocking Issues: [count]
 ```
 
+## Structured JSON Output
+
+리뷰 결과는 반드시 `schemas/review-output.schema.json` 스키마를 준수하여 구조화된 JSON 출력을 포함할 것. 핵심 필드: `verdict` (pass/fail/warning), `findings[]` (severity, file, line, confidence, description, suggestion), `next_steps[]`.
+
 ## Next Steps
 
 작업 완료 후 추천 후속 액션:

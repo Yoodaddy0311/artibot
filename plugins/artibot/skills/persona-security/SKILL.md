@@ -9,7 +9,7 @@ triggers:
   - "vulnerability"
   - "threat"
   - "compliance"
-  - "security audit"
+  - "security assessment"
   - "OWASP"
   - "security"
 agent: Explore
