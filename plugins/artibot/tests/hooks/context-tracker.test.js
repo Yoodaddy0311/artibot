@@ -283,7 +283,9 @@ describe('context-tracker hook', () => {
         context_window: { current_tokens: 45000, max_tokens: 128000 },
       };
       readStdin.mockResolvedValue(JSON.stringify(input));
-      existsSync.mockReturnValue(false);
+      // turnCount 4 → newTurnCount 5 → hits EMIT_INTERVAL → emits to stderr
+      existsSync.mockReturnValue(true);
+      readFileSync.mockReturnValue(JSON.stringify({ currentTokens: 45000, turnCount: 4 }));
 
       vi.resetModules();
       await import('../../scripts/hooks/context-tracker.js');
@@ -294,7 +296,7 @@ describe('context-tracker hook', () => {
         expect.objectContaining({ session_id: 'integration-test' }),
       );
 
-      // Stderr status output
+      // Stderr status output (only emitted every 5 turns or at thresholds)
       expect(stderrSpy).toHaveBeenCalledWith(
         expect.stringContaining('45,000 tokens'),
       );
@@ -343,7 +345,7 @@ describe('context-tracker hook', () => {
       existsSync.mockReturnValue(true);
       readFileSync.mockReturnValue(JSON.stringify({
         currentTokens: 47000,
-        turnCount: 2,
+        turnCount: 4,
       }));
 
       vi.resetModules();

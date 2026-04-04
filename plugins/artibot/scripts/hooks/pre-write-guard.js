@@ -27,6 +27,38 @@ function isWhitelisted(filePath) {
   const normalized = filePath.replace(/\\/g, '/');
   return normalized.includes('.claude/');
 }
+
+/**
+ * Determine if the write-before-read guard should be enforced.
+ * Uses a two-tier check:
+ *   1. Project marker: CWD must contain artibot.config.json (opt-in)
+ *   2. File scope: file must be inside the plugin root or CWD
+ * External projects without the marker file are always approved.
+ * @param {string} filePath
+ * @returns {boolean}
+ */
+function shouldEnforceGuard(filePath) {
+  if (!filePath) return false;
+
+  // Tier 1: Project marker check — only enforce in artibot projects
+  const cwd = process.cwd();
+  const hasMarker = existsSync(path.join(cwd, 'artibot.config.json'))
+    || existsSync(path.join(cwd, 'plugins', 'artibot', 'artibot.config.json'));
+  if (!hasMarker) {
+    process.stderr.write(`[artibot:pre-write-guard] Skipped: no artibot.config.json in CWD (${cwd})
+`);
+    return false;
+  }
+
+  // Tier 2: File must be inside plugin root OR inside CWD (case-insensitive on Windows)
+  const norm = filePath.replace(/\\/g, '/').toLowerCase();
+  const pluginRoot = (process.env.CLAUDE_PLUGIN_ROOT || '').replace(/\\/g, '/').toLowerCase();
+  const cwdNorm = cwd.replace(/\\/g, '/').toLowerCase();
+
+  if (pluginRoot && norm.startsWith(pluginRoot)) return true;
+  if (cwdNorm && norm.startsWith(cwdNorm)) return true;
+  return norm.includes('plugins/artibot/');
+}
 import { atomicWriteSync, parseJSON, readStdin, writeStdout } from '../utils/index.js';
 import { createErrorHandler, extractFilePath, extractToolName, normalizePath } from '../../lib/core/hook-utils.js';
 
@@ -75,11 +107,20 @@ function recordReadPath(trackingPath, filePath) {
 function handleReadTracking(hookData) {
   const sessionId = hookData?.session_id || 'default';
   const filePath = extractFilePath(hookData);
-  if (!filePath) return;
+  if (!filePath) {
+    writeStdout({ decision: 'approve' });
+    return;
+  }
 
-  const trackingPath = getTrackingPath(sessionId);
-  recordReadPath(trackingPath, filePath);
-  process.stderr.write(`[artibot:pre-write-guard] Tracked read: ${filePath}\n`);
+  try {
+    const trackingPath = getTrackingPath(sessionId);
+    recordReadPath(trackingPath, filePath);
+    process.stderr.write(`[artibot:pre-write-guard] Tracked read: ${filePath}\n`);
+  } catch (err) {
+    process.stderr.write(`[artibot:pre-write-guard] Track failed: ${err.message}\n`);
+  }
+  // Always approve Read operations (tracking is best-effort)
+  writeStdout({ decision: 'approve' });
 }
 
 /**
@@ -103,6 +144,12 @@ function handleWriteGuard(hookData) {
     return;
   }
 
+  // Skip guard for external projects (no artibot.config.json in CWD)
+  if (!shouldEnforceGuard(filePath)) {
+    writeStdout({ decision: 'approve' });
+    return;
+  }
+
   // Allow new file creation (file does not exist yet)
   if (!existsSync(filePath)) {
     writeStdout({ decision: 'approve' });
@@ -115,6 +162,13 @@ function handleWriteGuard(hookData) {
   const readPaths = loadReadPaths(trackingPath);
 
   if (readPaths.includes(normalized)) {
+    writeStdout({ decision: 'approve' });
+    return;
+  }
+
+  // Degraded mode: if tracking file is missing, approve with warning
+  if (!existsSync(trackingPath)) {
+    process.stderr.write(`[artibot:pre-write-guard] Warning: tracking file missing, approving ${toolName} for "${filePath}" in degraded mode\n`);
     writeStdout({ decision: 'approve' });
     return;
   }

@@ -94,7 +94,7 @@ async function main() {
     }
 
     writeStdout({
-      message: `[cognitive] ${system.toUpperCase()} | complexity=${result.score} confidence=${result.confidence} factors=${JSON.stringify(result.factors)} | threshold=${result.threshold}${intentInfo}`,
+      message: `[cognitive] ${system.toUpperCase()} | c=${result.score} conf=${result.confidence} t=${result.threshold}${intentInfo}`,
     });
   } catch (err) {
     // Fallback: simple keyword-based routing if router module fails

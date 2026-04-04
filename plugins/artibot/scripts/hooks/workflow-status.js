@@ -201,6 +201,12 @@ async function main() {
   const blockedCnt = teammates.filter((t) => t.status === 'blocked').length;
   const errorCnt = teammates.filter((t) => t.status === 'error').length;
 
+  // Skip dashboard output when there are no teammates (solo mode)
+  if (teammates.length === 0) {
+    writeStdout({});
+    return;
+  }
+
   const parts = [`[workflow] ${eventType}`];
   parts.push(`Team: ${teammates.length} members (${activeCnt} active)`);
 

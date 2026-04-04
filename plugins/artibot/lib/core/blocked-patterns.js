@@ -40,7 +40,7 @@ const BLOCKED_PATTERNS = Object.freeze([
   { pattern: /chown\s+-R\s+root/i, label: 'chown to root recursive', category: 'permission' },
 
   // ── Git destructive ─────────────────────────────────────────────────
-  { pattern: /git\s+push\s+.*--force/i, label: 'git push --force', category: 'git' },
+  { pattern: /git\s+push\s+.*--force(?!-with-lease)/i, label: 'git push --force', category: 'git' },
   { pattern: /git\s+push\s+-f\b/i, label: 'git push -f', category: 'git' },
   { pattern: /git\s+reset\s+--hard/i, label: 'git reset --hard', category: 'git' },
   { pattern: /git\s+clean\s+-\w*f/i, label: 'git clean -f', category: 'git' },
