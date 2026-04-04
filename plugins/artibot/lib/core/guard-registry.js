@@ -235,6 +235,12 @@ const MAX_FILE_LINES = 800;
 // Built-in Guard Implementations
 // -------------------------------------------------------------------------
 
+/** Safe command patterns that override block patterns (e.g. --force-with-lease). */
+const SAFE_OVERRIDES = [
+  /--force-with-lease/i,
+  /--force-if-includes/i,
+];
+
 /** Check dangerous Bash commands. */
 function checkDangerousCommand(ctx) {
   const command = ctx.toolInput?.command || '';
@@ -246,6 +252,10 @@ function checkDangerousCommand(ctx) {
   for (const { pattern, label } of BLOCKED_PATTERNS) {
     for (const variant of variants) {
       if (pattern.test(variant)) {
+        // Allow safe variants (e.g. --force-with-lease is a safe force push)
+        if (SAFE_OVERRIDES.some((safe) => safe.test(command))) {
+          continue;
+        }
         return {
           decision: 'block',
           reason: `DANGEROUS COMMAND DETECTED: "${label}". Command: "${command}". This operation is blocked for safety.`,

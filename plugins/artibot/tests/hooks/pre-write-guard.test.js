@@ -161,7 +161,7 @@ describe('pre-write-guard hook', () => {
 
   describe('Write guard - Write without Read (block)', () => {
     it('blocks Write to existing file not Read in session', async () => {
-      const filePath = '/project/src/app.js';
+      const filePath = '/workspace/plugins/artibot/lib/core/config.js';
 
       // File exists on disk but tracking file is empty
       existsSync.mockImplementation((p) => {
@@ -184,7 +184,7 @@ describe('pre-write-guard hook', () => {
     });
 
     it('blocks Edit to existing file not Read in session', async () => {
-      const filePath = '/project/src/config.js';
+      const filePath = '/workspace/plugins/artibot/lib/core/cache.js';
 
       existsSync.mockImplementation((p) => {
         if (typeof p === 'string' && p.includes('artibot-read-tracking')) return true;
@@ -266,7 +266,7 @@ describe('pre-write-guard hook', () => {
     });
 
     it('handles corrupted tracking file gracefully', async () => {
-      const filePath = '/project/src/app.js';
+      const filePath = '/workspace/plugins/artibot/lib/core/config.js';
 
       existsSync.mockReturnValue(true);
       readFileSync.mockReturnValue('not valid json');

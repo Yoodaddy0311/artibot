@@ -26,6 +26,9 @@ const CHARS_PER_TOKEN = 4;
 const WARN_THRESHOLD = 0.70;
 const CRITICAL_THRESHOLD = 0.90;
 
+/** Only emit status to stderr every N turns (reduces context token cost). */
+const EMIT_INTERVAL = 5;
+
 // ---------------------------------------------------------------------------
 // Token Estimation
 // ---------------------------------------------------------------------------
@@ -193,9 +196,16 @@ async function main() {
     logHookError('context-tracker', 'failed to save session state', err);
   }
 
-  // Output status to stderr
-  const status = buildStatusMessage(current, max, delta);
-  process.stderr.write(`[artibot:context-tracker] ${status}\n`);
+  // Output status to stderr (batched: every 5 turns OR at threshold crossings)
+  const percent = calcUsagePercent(current, max);
+  const crossedWarn = percent >= WARN_THRESHOLD * 100;
+  const crossedCritical = percent >= CRITICAL_THRESHOLD * 100;
+  const shouldEmit = crossedWarn || crossedCritical || (newTurnCount % EMIT_INTERVAL === 0);
+
+  if (shouldEmit) {
+    const status = buildStatusMessage(current, max, delta);
+    process.stderr.write(`[artibot:context-tracker] ${status}\n`);
+  }
 }
 
 main().catch(createErrorHandler('context-tracker'));

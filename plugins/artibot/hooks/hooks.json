@@ -121,6 +121,18 @@
         "category": "security"
       },
       {
+        "matcher": "tool == \"Read\"",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-write-guard.js",
+            "timeout": 3000
+          }
+        ],
+        "priority": "operational",
+        "category": "security"
+      },
+      {
         "matcher": "tool == \"Write\" || tool == \"Edit\"",
         "hooks": [
           {

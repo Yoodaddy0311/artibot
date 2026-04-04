@@ -15,7 +15,20 @@ async function main() {
   resetGuards();
   registerBuiltinGuards();
 
-  const toolName = extractToolName(hookData) || 'Write';
+  const toolName = extractToolName(hookData) || '';
+
+  // Only process Write/Edit — other tools should not be handled by this hook
+  if (toolName !== 'Write' && toolName !== 'Edit') {
+    writeStdout({ decision: 'approve' });
+    return;
+  }
+
+  // If hookData has a bash command field, this is a misdirected Bash tool call
+  if (hookData?.tool_input?.command) {
+    writeStdout({ decision: 'approve' });
+    return;
+  }
+
   const result = executeChain('pre', toolName, hookData);
 
   if (result.decision === 'block') {
