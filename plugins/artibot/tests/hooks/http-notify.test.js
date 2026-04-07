@@ -227,6 +227,22 @@ describe('loadWebhookConfig()', () => {
     const config = loadWebhookConfig();
     expect(config).toBeNull();
   });
+
+  it('preserves timeoutMs: 0 from config (nullish coalescing)', () => {
+    delete process.env.ARTIBOT_WEBHOOK_URL;
+    delete process.env.ARTIBOT_WEBHOOK_FORMAT;
+    readFileSync.mockReturnValueOnce(JSON.stringify({
+      hooks: {
+        webhook: {
+          url: 'https://example.com/hook',
+          timeoutMs: 0,
+        },
+      },
+    }));
+    const config = loadWebhookConfig();
+    expect(config).not.toBeNull();
+    expect(config.timeoutMs).toBe(0);
+  });
 });
 
 // ---------------------------------------------------------------------------
