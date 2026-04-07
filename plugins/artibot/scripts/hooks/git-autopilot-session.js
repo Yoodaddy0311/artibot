@@ -85,6 +85,26 @@ function gitPull(cwd) {
 }
 
 /**
+ * Check whether git is currently in an active rebase state.
+ * @param {string} cwd
+ * @returns {boolean}
+ */
+function isRebaseInProgress(cwd) {
+  try {
+    const gitDir = execSync('git rev-parse --git-dir', {
+      cwd,
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    const rebaseMerge = path.join(cwd, gitDir, 'rebase-merge');
+    const rebaseApply = path.join(cwd, gitDir, 'rebase-apply');
+    return existsSync(rebaseMerge) || existsSync(rebaseApply);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Ensure the autopilot branch exists and is checked out.
  * Creates from current HEAD if new.
  * @param {string} cwd
@@ -135,14 +155,27 @@ async function main() {
   if (config.autoPullOnSession) {
     const pulled = gitPull(repoRoot);
     if (!pulled) {
-      log('git pull failed — attempting conflict auto-resolution');
-      const { results, allResolved } = autoResolveAll(repoRoot);
-      if (allResolved) {
-        log(`Auto-resolved ${results.length} conflict(s)`);
-        execSync('git rebase --continue', { cwd: repoRoot, stdio: 'ignore' });
+      if (!isRebaseInProgress(repoRoot)) {
+        log('git pull failed (no rebase in progress) — skipping conflict resolution');
       } else {
-        const unresolved = results.filter((r) => !r.resolved).map((r) => r.filePath);
-        log(`Could not auto-resolve: ${unresolved.join(', ')} — manual resolution required`);
+        log('git pull failed — attempting conflict auto-resolution');
+        const { results, allResolved } = autoResolveAll(repoRoot);
+        if (allResolved && results.length > 0) {
+          log(`Auto-resolved ${results.length} conflict(s)`);
+          try {
+            execSync('git rebase --continue', { cwd: repoRoot, stdio: 'ignore' });
+          } catch {
+            log('rebase --continue failed — manual resolution may be required');
+            execSync('git rebase --abort', { cwd: repoRoot, stdio: 'ignore' });
+          }
+        } else if (!allResolved) {
+          const unresolved = results.filter((r) => !r.resolved).map((r) => r.filePath);
+          log(`Could not auto-resolve: ${unresolved.join(', ')} — manual resolution required`);
+        } else {
+          // rebase in progress but no conflicted files — abort stale rebase
+          log('Rebase in progress but no conflicts found — aborting stale rebase');
+          execSync('git rebase --abort', { cwd: repoRoot, stdio: 'ignore' });
+        }
       }
     } else {
       log(`Pulled latest changes on "${currentBranch}"`);
