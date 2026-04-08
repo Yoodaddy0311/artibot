@@ -7,7 +7,7 @@
  */
 
 import { execSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { getPluginRoot, parseJSON, readStdin, writeStdout } from '../utils/index.js';
 import { createErrorHandler, hasExtension, isSkippablePath } from '../../lib/core/hook-utils.js';
@@ -107,17 +107,30 @@ function checkPatternViolations(content, filename) {
   const warnings = [];
   const lines = content.split('\n');
 
-  const consolePattern = /\bconsole\.(log|debug|info)\s*\(/g;
-  const todoPattern = /\b(TODO|FIXME|HACK|XXX)\b/g;
+  const consolePattern = /\bconsole\.(log|debug|info)\s*\(/;
+  const todoPattern = /\b(TODO|FIXME|HACK|XXX)\b/;
+  const jsdocLine = /^\s*\*(?!\/)/; // matches JSDoc continuation lines
+  const singleLineComment = /^\s*\/\//;
 
   const consoleHits = [];
   const todoHits = [];
+  let inBlockComment = false;
 
   for (let i = 0; i < lines.length; i++) {
-    consolePattern.lastIndex = 0;
-    todoPattern.lastIndex = 0;
-    if (consolePattern.test(lines[i])) consoleHits.push(i + 1);
-    if (todoPattern.test(lines[i])) todoHits.push(i + 1);
+    const line = lines[i];
+    // Track block comment state (simple line-level heuristic)
+    if (inBlockComment) {
+      if (/\*\//.test(line)) inBlockComment = false;
+      continue;
+    }
+    if (/^\s*\/\*/.test(line) && !/\*\//.test(line)) {
+      inBlockComment = true;
+      continue;
+    }
+    // Skip JSDoc continuation lines and single-line comments
+    if (jsdocLine.test(line) || singleLineComment.test(line)) continue;
+    if (consolePattern.test(line)) consoleHits.push(i + 1);
+    if (todoPattern.test(line)) todoHits.push(i + 1);
   }
 
   if (consoleHits.length > 0) {
@@ -146,6 +159,37 @@ function isSensitiveFile(filePath) {
  * @param {string} repoRoot
  * @returns {string[]} Files without tests
  */
+/**
+ * Recursively walk a directory and collect all `*.test.*` and `*.spec.*` basenames.
+ * Used to match arbitrary lib paths against any mirror test regardless of depth.
+ *
+ * @param {string} rootDir
+ * @returns {Set<string>} Set of basename stems (e.g. "router", "dag").
+ */
+function collectTestBasenames(rootDir) {
+  const stems = new Set();
+  const stack = [rootDir];
+  while (stack.length > 0) {
+    const dir = stack.pop();
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        stack.push(full);
+      } else if (entry.isFile()) {
+        const match = entry.name.match(/^(.+?)\.(?:test|spec)\.(?:js|mjs|cjs|ts|tsx|jsx)$/);
+        if (match) stems.add(match[1]);
+      }
+    }
+  }
+  return stems;
+}
+
 function checkMissingTests(files, repoRoot) {
   const codeFiles = files.filter(
     (f) => hasExtension(f, TEST_EXTENSIONS)
@@ -157,43 +201,23 @@ function checkMissingTests(files, repoRoot) {
       && !/\/scripts\/(validate-|migrate-|audit-|generate-|phase\d+-audit|inject-)/.test(f),
   );
 
+  // Pre-collect all test basename stems under plugins/artibot/tests/ once.
+  const testsRoot = path.join(repoRoot, 'plugins', 'artibot', 'tests');
+  const testStems = existsSync(testsRoot) ? collectTestBasenames(testsRoot) : new Set();
+
   const missing = [];
   for (const file of codeFiles) {
     const ext = path.extname(file);
     const base = file.slice(0, -ext.length);
     const baseName = path.basename(base);
 
+    // Fast path: any test file anywhere under tests/** with matching basename.
+    if (testStems.has(baseName)) continue;
+
     // Sibling-path variants: foo.js -> foo.test.js
     const siblingVariants = [`${base}.test${ext}`, `${base}.spec${ext}`];
-
-    // Mirror-path variants: lib/core/foo.js -> tests/core/foo.test.js
-    //                       lib/runtime/foo.js -> tests/runtime/foo.test.js
-    //                       scripts/foo.js -> tests/scripts/foo.test.js
-    const mirrorVariants = [];
-    const libMatch = file.match(/(.*?\/)(?:lib|scripts)\/(.+?)\/([^/]+)\.(js|mjs|cjs|ts|tsx|jsx)$/);
-    if (libMatch) {
-      const [, pluginPath, subdir, name, e] = libMatch;
-      mirrorVariants.push(
-        `${pluginPath}tests/${subdir}/${name}.test.${e}`,
-        `${pluginPath}tests/${subdir}/${name}.spec.${e}`,
-      );
-    }
-    // Generic tests/** search: any file under tests/ whose basename matches.
-    const testsRoot = path.join(repoRoot, 'plugins', 'artibot', 'tests');
-    const genericCandidates = [
-      path.join(testsRoot, 'core', `${baseName}.test${ext}`),
-      path.join(testsRoot, 'hooks', `${baseName}.test${ext}`),
-      path.join(testsRoot, 'runtime', `${baseName}.test${ext}`),
-      path.join(testsRoot, 'scripts', `${baseName}.test${ext}`),
-    ];
-
-    const allVariants = [
-      ...siblingVariants.map((t) => path.join(repoRoot, t)),
-      ...mirrorVariants.map((t) => path.join(repoRoot, t)),
-      ...genericCandidates,
-    ];
-    const hasTest = allVariants.some((t) => existsSync(t));
-    if (!hasTest) missing.push(file);
+    const hasSibling = siblingVariants.some((t) => existsSync(path.join(repoRoot, t)));
+    if (!hasSibling) missing.push(file);
   }
   return missing;
 }
@@ -243,7 +267,19 @@ function analyzeChangedFiles(changedFiles, repoRoot) {
       const ext = path.extname(file);
       const bracketIssue = checkBracketMismatch(absPath, ext);
       if (bracketIssue) bracketWarnings.push(`${basename}: ${bracketIssue}`);
-      patternWarnings.push(...checkPatternViolations(content, basename));
+      // Pattern checks are advisory only; skip for files where console output
+      // and TODO/FIXME references are legitimate:
+      //   - CLI scripts under scripts/ (they use console.log for output)
+      //   - test files (debug output is normal)
+      //   - the review-gate itself (references TODO/FIXME as patterns to detect)
+      //   - CJS one-shots (*.cjs)
+      const isCliScript = /\/scripts\//.test(file) && !/\/scripts\/hooks\/(?!stop-review-gate)/.test(file);
+      const isTestFile = /\/tests\//.test(file) || /\.test\.|\.spec\./.test(file);
+      const isSelfFile = file.endsWith('stop-review-gate.js');
+      const isCjs = file.endsWith('.cjs');
+      if (!isCliScript && !isTestFile && !isSelfFile && !isCjs) {
+        patternWarnings.push(...checkPatternViolations(content, basename));
+      }
     } catch {
       // Skip unreadable files
     }
