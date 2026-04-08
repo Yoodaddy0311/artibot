@@ -1,4 +1,6 @@
+/* eslint-disable no-undef */
 /**
+ * CommonJS one-shot repair script. Uses Node globals directly.
  * Fix pre-write.js: when matcher is ignored and it fires for Bash,
  * the toolName defaults to 'Write' if extractToolName returns empty.
  * Instead of defaulting to 'Write', we must ALSO check ctx.toolInput.command

@@ -18,7 +18,7 @@
  * @module scripts/migrate-command-toolsets
  */
 
-import { readFileSync, readdirSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { atomicWriteSync } from './utils/index.js';
