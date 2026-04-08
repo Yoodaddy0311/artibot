@@ -1,0 +1,32 @@
+[
+  {
+    "type": "auto-learned",
+    "content": "Recurring fix pattern detected. Consider adding automated checks for: fix(lint): preserve-caught-error + no-useless-assignment",
+    "formatted": "- [auto-learned] Recurring fix pattern detected. Consider adding automated checks for: fix(lint): preserve-caught-error + no-useless-assignment",
+    "injectedAt": "2026-04-08T16:08:33.169Z"
+  },
+  {
+    "type": "auto-learned",
+    "content": "Recurring fix pattern detected. Consider adding automated checks for: fix(ci): align coverage thresholds with cross-platform reality",
+    "formatted": "- [auto-learned] Recurring fix pattern detected. Consider adding automated checks for: fix(ci): align coverage thresholds with cross-platform reality",
+    "injectedAt": "2026-04-08T16:08:33.169Z"
+  },
+  {
+    "type": "auto-learned",
+    "content": "Recurring fix pattern detected. Consider adding automated checks for: fix(ci): comprehensive audit — 5 more bugs unearthed by full sweep",
+    "formatted": "- [auto-learned] Recurring fix pattern detected. Consider adding automated checks for: fix(ci): comprehensive audit — 5 more bugs unearthed by full sweep",
+    "injectedAt": "2026-04-08T16:08:33.169Z"
+  },
+  {
+    "type": "auto-learned",
+    "content": "Recurring fix pattern detected. Consider adding automated checks for: fix(ci): plugin-validate.yml — handle plugin.skills/commands as arrays",
+    "formatted": "- [auto-learned] Recurring fix pattern detected. Consider adding automated checks for: fix(ci): plugin-validate.yml — handle plugin.skills/commands as arrays",
+    "injectedAt": "2026-04-08T16:08:33.169Z"
+  },
+  {
+    "type": "auto-learned",
+    "content": "Recurring fix pattern detected. Consider adding automated checks for: fix(ci): unblock Release workflow — 8 ghost-untracked runtime files",
+    "formatted": "- [auto-learned] Recurring fix pattern detected. Consider adding automated checks for: fix(ci): unblock Release workflow — 8 ghost-untracked runtime files",
+    "injectedAt": "2026-04-08T16:08:33.169Z"
+  }
+]
