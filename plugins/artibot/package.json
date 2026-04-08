@@ -9,7 +9,7 @@
     "artibot": "./bin/artibot.js"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20.0.0"
   },
   "scripts": {
     "validate": "node scripts/validate.js",

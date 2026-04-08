@@ -7,8 +7,7 @@
 
 import os from 'node:os';
 import path from 'node:path';
-import { execFile as execFileCb } from 'node:child_process';
-import { promisify } from 'node:util';
+import { execFileSync as execFileSyncCompat } from 'node:child_process';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createArtibotAgent } from './create-artibot-agent.js';
 import { createRouterMiddleware } from './middleware/router.js';
@@ -21,8 +20,6 @@ import { createCheckpointMiddleware } from './middleware/checkpoint.js';
 import { ensureDir, readJsonFile, writeJsonFile } from '../core/file.js';
 import { ARTIBOT_DIR } from '../core/config.js';
 import { getPluginRoot } from '../core/platform.js';
-
-const execFile = promisify(execFileCb);
 
 const TEST_CONFIG = Object.freeze({
   automation: {
@@ -122,20 +119,36 @@ async function runHook(scriptName, payload, options = {}) {
   const pluginRoot = options.pluginRoot || getPluginRoot();
   const scriptPath = path.join(pluginRoot, 'scripts', 'hooks', scriptName);
   const timeout = options.timeout ?? 30_000;
-  const { stdout } = await execFile(process.execPath, [scriptPath], {
-    cwd: pluginRoot,
-    env: {
-      ...process.env,
-      CLAUDE_PLUGIN_ROOT: pluginRoot,
-      ARTIBOT_RUNTIME_CHECKPOINT_DISABLE: '1',
-      ARTIBOT_RUNTIME_MEMORY_DISABLE: '1',
-    },
-    input: JSON.stringify(payload),
-    encoding: 'utf-8',
-    timeout,
-  });
+  // Use execFileSync instead of async execFile because async execFile has a
+  // known stdin-piping race on Windows with hooks that call readStdin() —
+  // the parent's input write doesn't always trigger 'end' on the child's
+  // stdin, causing the hook to hang until SIGTERM. execFileSync writes
+  // input deterministically before returning. Run on a microtask boundary
+  // so callers still see Promise semantics.
+  await Promise.resolve();
+  let stdout;
+  try {
+    stdout = execFileSyncCompat(process.execPath, [scriptPath], {
+      cwd: pluginRoot,
+      env: {
+        ...process.env,
+        CLAUDE_PLUGIN_ROOT: pluginRoot,
+        ARTIBOT_RUNTIME_CHECKPOINT_DISABLE: '1',
+        ARTIBOT_RUNTIME_MEMORY_DISABLE: '1',
+      },
+      input: JSON.stringify(payload),
+      encoding: 'utf-8',
+      timeout,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+  } catch (err) {
+    // Re-throw with stderr context so the suite can see what failed.
+    const stderr = err.stderr ? String(err.stderr).slice(0, 500) : '';
+    const reason = stderr || err.message || 'unknown';
+    throw new Error(`runHook(${scriptName}) failed: ${reason}`);
+  }
 
-  const trimmed = stdout.trim();
+  const trimmed = String(stdout || '').trim();
   return trimmed ? JSON.parse(trimmed) : null;
 }
 
