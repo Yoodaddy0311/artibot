@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "repoUrl": "https://github.com/Yoodaddy0311/artibot-swarm.git",
   "backend": "git",
-  "createdAt": "2026-04-08T17:19:48.661Z",
+  "createdAt": "2026-04-08T17:49:40.598Z",
   "createdOn": "hee",
   "notes": "Portable swarm profile — safe to commit. Other machines auto-detect and offer opt-in."
 }
