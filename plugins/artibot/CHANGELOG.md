@@ -9,6 +9,90 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.3.0] - 2026-04-08
+
+### Summary / 요약
+
+**English**: Major declutter sprint — Phase 1 Quick Wins + Phase 2 Core Consolidation (Rounds 1-4). Eleven sub-phases delivered across four workstreams (CSV rules, agent registry, lifecycle routing, hook dispatcher). Zero new dependencies, zero deletions, 144 new unit tests (5091/5091 total pass), 0 lint errors. Rolldown/vitest parser bug fixes, review-gate false positive elimination, INDEX.md glob exclusion, literal backspace byte fix in user-prompt-handler regex.
+
+**한국어**: 대규모 정리 스프린트 — Phase 1 Quick Wins + Phase 2 핵심 통합 (Round 1-4). 4개 워크스트림에 걸쳐 11개 sub-phase 완료 (CSV 규칙, 에이전트 레지스트리, 생명주기 라우팅, 훅 디스패처). 신규 의존성 0, 삭제 0, 144개 신규 단위 테스트 (총 5091/5091 통과), 0 lint 오류. Rolldown/vitest 파서 버그 수정, review-gate false positive 제거, INDEX.md glob 제외, user-prompt-handler regex의 literal backspace 바이트 수정.
+
+### Added / 추가됨
+
+**Phase 1 — Quick Wins (additive patterns from 6-repo benchmark)**
+- `lib/core/skill-hash.js` — SHA-256 8-char skill body hashing (from mcp2cli pattern)
+- `lib/core/skill-hash-cache.js` — mtime-cached `.claude-cache/skill-hashes.json` (119 entries)
+- `lib/core/toolset-loader.js` — 9 capability sets manifest loader (from hermes-agent pattern)
+- `toolsets.json` — 9 toolsets: code, design, devops, content, marketing, analysis, meta, team, misc
+- `scripts/validate-rationalizations.js`, `scripts/migrate-command-toolsets.js`, `scripts/inject-source-hash.js`, `scripts/phase1-audit.js`
+- `## Rationalizations` sections on **all 119 skills** (5-row excuse/rebuttal table, from addyosmani/agent-skills pattern)
+- `source_hash` frontmatter on all 119 skills (idempotent, mtime-safe)
+- `toolset:` frontmatter on all 54 commands (grouped into 9 capability sets)
+
+**Phase 2 — Core Consolidation (WS-D/B/A/C Round 1-4)**
+- `lib/core/rules-csv-loader.js` — zero-dep CSV parser (quoted fields, CRLF, malformed rows)
+- `lib/core/rules-resolver.js` — `agent → rules:[domain:id]` resolution with caching
+- `rules/csv/{frontend,backend,security,performance,ux,accessibility,testing,devops,database,llm,typing,patterns}.csv` — **173 canonical rules** across 12 domains
+- `rules/csv/drafts/_draft_*.csv` — 8 preparatory drafts (not loaded by default)
+- `lib/core/agent-frontmatter-schema.js` + `scripts/validate-agent-frontmatter.js` — self-registering agent schema
+- `lib/core/agent-registry.js` — mtime-cached agent dynamic registry (28 agents)
+- `lib/core/lifecycle-manifest.js` + `lifecycle.json` — 8-phase lifecycle declarative manifest (spec/plan/build/verify/review/ship/marketing/design)
+- `lib/core/lifecycle-router.js` — pure routing function with context matcher + toolset mapping
+- `lib/core/hook-dispatcher.js` + `hooks/dispatch-table.json` — additive 4-canonical-slot middleware dispatcher (hooks.json UNTOUCHED)
+- `lib/runtime/agent-resolver.js` — additive B.3 integration shim (feature flag `ARTIBOT_AGENT_REGISTRY` default OFF)
+- `scripts/audit-hooks.js` + `docs/phase2/hook-audit.md` — 43-registration hook audit (keep/merge/exception decisions)
+- `scripts/generate-agent-index.js` + `agents/INDEX.md` — auto-generated agent index
+- 4 new lifecycle commands: `/spec`, `/review`, `/ship`, `/marketing` (+ `lifecycle:` frontmatter on `plan/build/verify/design`)
+- 28 agents: `capabilities[]` + `lifecycle:` + `rules:` frontmatter (79 total rule references)
+
+**New tests (144 total)**
+- `tests/core/{skill-hash,skill-hash-cache,rules-csv-loader,rules-resolver,agent-registry,lifecycle-manifest,lifecycle-router,hook-dispatcher}.test.js`
+- `tests/runtime/agent-resolver.test.js`
+
+### Fixed / 수정됨
+
+**Parser / Tooling bugs (preexisting, discovered during Phase 2)**
+- `lib/swarm/pattern-packager.js`: unterminated JSDoc `/**` at end of file (rolldown parse failure)
+- `scripts/evals/harness-ablation.js`: stale import of deleted `aci-constraint.js` middleware; removed shebang that confused rolldown
+- `scripts/hooks/user-prompt-handler.js`: **literal backspace byte (0x08)** embedded in regex → replaced with `\b` escape sequence
+- `tests/core/style-registry.test.js`: mock `DECODED_PLUGIN_ROOT` path was off by one directory
+- `tests/evals/harness-ablation.test.js`: stale `aciConstraint` assertion
+- `vitest.config.js`: `stripShebangPlugin` only processed `scripts/hooks/` — extended to all `scripts/` paths
+- `lib/core/agent-registry.js` + `scripts/validate-agent-frontmatter.js`: INDEX.md inflated agent count to 29 — added exclusion filter
+
+**Review-gate (stop hook) redesign**
+- `checkBracketMismatch` replaced hand-rolled parser with `node --check` → eliminates template literal / regex / JSDoc type false positives
+- `checkMissingTests` recursive tests/** walk with basename Set lookup → finds mirror tests at any depth
+- `checkPatternViolations` skips JSDoc/block/line comments → eliminates `@example console.log(...)` false positives
+- Pattern check exclusions: CLI scripts, test files, self, .cjs one-shots
+- Removed unused `codexFlag` variable, fixed sort-imports warning
+
+**Lint cleanup (zero warnings)**
+- 14 errors resolved: unused vars (`runIteration`, `buildFixResult`, `validateSkillParams`, `validateHookParams`, `applyMode/detectMode/MODES`, `hookEvent`), no-undef in `.cjs`, control-regex backspace
+- 5 warnings resolved: complexity/max-depth disable directives with justification comments
+
+### Changed / 변경됨
+
+- `scripts/hooks/session-start.js`: non-blocking skill-hash cache refresh block (try/catch wrapped, stderr-only diagnostics, EXIT 0 contract preserved)
+- `tests/hooks/session-start.test.js`: stderr filter for informational cache messages
+- Version sync: `package.json`, `plugin.json`, `artibot.config.json`, `marketplace.json` all → 2.3.0
+
+### Safety / 안전성
+
+- `hooks/hooks.json` — **byte-identical** to pre-2.3.0 (0 diff)
+- SessionStart hook smoke test: EXIT 0 (contract preserved)
+- All changes additive — zero deletions of agents/skills/commands
+- Zero new npm dependencies (Node built-ins only)
+- Korean path safe (`toFileUrl()` used for all dynamic imports)
+
+### Deferred (require user approval) / 사용자 승인 대기
+
+- **WS-A.4** — `lifecycleRouting.enabled = true` flag flip
+- **WS-C.3** — `hooks.json` migration to 4 canonical slots
+- **WS-C.4** — legacy hook script `_deprecated/` move (depends on C.3)
+
+---
+
 ## [2.1.1] - 2026-04-02
 
 ### Summary / 요약
