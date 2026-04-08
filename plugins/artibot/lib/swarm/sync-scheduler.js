@@ -13,7 +13,34 @@ import path from 'node:path';
 import { ensureDir, readJsonFile, writeJsonFile } from '../core/file.js';
 import { ARTIBOT_DIR } from '../core/config.js';
 import { downloadLatestWeights, flushOfflineQueue, uploadWeights } from './swarm-client.js';
+import { gitDownloadLatestWeights, gitUploadWeights } from './git-backend.js';
 import { mergeWeights, packagePatterns, unpackWeights } from './pattern-packager.js';
+
+/**
+ * Resolve the upload function based on config.backend.
+ * @param {object} config
+ * @returns {Function}
+ */
+function resolveUpload(config) {
+  if (config?.backend === 'git') {
+    return (weights, metadata, options) =>
+      gitUploadWeights(weights, metadata, { ...options, repoUrl: config.gitRepoUrl });
+  }
+  return uploadWeights;
+}
+
+/**
+ * Resolve the download function based on config.backend.
+ * @param {object} config
+ * @returns {Function}
+ */
+function resolveDownload(config) {
+  if (config?.backend === 'git') {
+    return (currentVersion, options) =>
+      gitDownloadLatestWeights(currentVersion, { ...options, repoUrl: config.gitRepoUrl });
+  }
+  return downloadLatestWeights;
+}
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -214,15 +241,22 @@ async function performSync(options = {}) {
     let flushed = 0;
     let version = state.currentVersion;
 
-    // Step 1: Flush offline queue
-    const flushResult = await flushOfflineQueue({ config: options.config });
-    flushed = flushResult.flushed;
-    state.pendingUploads = flushResult.remaining;
+    // Resolve backend implementations based on config
+    const upload = resolveUpload(options.config);
+    const download = resolveDownload(options.config);
+    const isGitBackend = options.config?.backend === 'git';
+
+    // Step 1: Flush offline queue (http only — git backend commits immediately)
+    if (!isGitBackend) {
+      const flushResult = await flushOfflineQueue({ config: options.config });
+      flushed = flushResult.flushed;
+      state.pendingUploads = flushResult.remaining;
+    }
 
     // Step 2: Package and upload local patterns
     const packaged = await packagePatterns();
     if (packaged.metadata.packagedCount > 0) {
-      const uploadResult = await uploadWeights(
+      const uploadResult = await upload(
         packaged.weights,
         {
           version: state.currentVersion,
@@ -249,7 +283,7 @@ async function performSync(options = {}) {
     }
 
     // Step 3: Download latest global weights
-    const downloadResult = await downloadLatestWeights(
+    const downloadResult = await download(
       state.currentVersion,
       { config: options.config },
     );

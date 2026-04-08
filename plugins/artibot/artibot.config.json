@@ -699,7 +699,9 @@
       "enabled": true,
       "epsilon": 1,
       "delta": 0.00001
-    }
+    },
+    "backend": "git",
+    "gitRepoUrl": "https://github.com/Yoodaddy0311/artibot-swarm.git"
   },
   "automation": {
     "intentDetection": true,
