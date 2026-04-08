@@ -172,7 +172,6 @@ export async function dispatch(slot, payload) {
     const handlers = slotDef && Array.isArray(slotDef.handlers) ? slotDef.handlers : [];
     const timeoutMs = getTimeoutMs();
     for (const spec of handlers) {
-      // eslint-disable-next-line no-await-in-loop -- ordered execution is required
       const result = await runHandler(spec, payload, timeoutMs);
       results.push(result);
     }
