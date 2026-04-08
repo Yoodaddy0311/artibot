@@ -2,6 +2,7 @@
 name: data-analyst
 capabilities: [data-analysis, reporting, dashboarding, kpi-tracking]
 lifecycle: marketing
+rules: []
 description: |
   Data analysis specialist focused on marketing metrics, statistical analysis,
   reporting, dashboard design, and data visualization. Transforms raw data into

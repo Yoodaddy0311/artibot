@@ -2,6 +2,7 @@
 name: content-marketer
 capabilities: [content-strategy, copywriting, editorial-planning, content-distribution]
 lifecycle: marketing
+rules: []
 description: |
   Content marketing specialist focused on SEO-optimized writing, social media strategy,
   email campaigns, and brand voice consistency. Creates engagement-driven technical content.

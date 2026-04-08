@@ -2,6 +2,7 @@
 name: spec-reviewer
 capabilities: [spec-compliance, requirement-verification, acceptance-criteria-check]
 lifecycle: review
+rules: [patterns:decompose-execute-verify, patterns:single-responsibility, patterns:read-before-write]
 description: |
   요구사항 감시관 — 구현이 원래 스펙/요구사항과 정확히 일치하는지 검증한다.
   과잉 구현, 누락 기능, 스펙 벗어난 변경을 빈틈없이 탐지하는 1단계 리뷰어.

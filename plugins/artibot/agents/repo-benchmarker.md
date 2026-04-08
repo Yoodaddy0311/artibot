@@ -2,6 +2,7 @@
 name: repo-benchmarker
 capabilities: [benchmarking, repo-analysis, comparative-study, tool-evaluation]
 lifecycle: null
+rules: []
 description: |
   Repository benchmarking specialist that analyzes external repos (ADK, plugins, skills,
   frameworks) and compares them against the current Artibot build. Produces quantified

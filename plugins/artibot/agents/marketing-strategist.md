@@ -2,6 +2,7 @@
 name: marketing-strategist
 capabilities: [market-analysis, competitive-intelligence, gtm-planning, growth-strategy]
 lifecycle: marketing
+rules: []
 description: |
   Marketing strategy specialist focused on market analysis, competitive intelligence,
   campaign planning, and growth strategy. Creates data-driven marketing plans with

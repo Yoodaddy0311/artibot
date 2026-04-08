@@ -217,7 +217,11 @@ function renderTable(rows) {
  */
 async function main() {
   const entries = await readdir(AGENTS_DIR);
-  const mdFiles = entries.filter((f) => f.endsWith('.md')).sort();
+  // Exclude documentation files (INDEX.md, README.md) — they live in agents/
+  // for discoverability but are not agent definitions.
+  const mdFiles = entries
+    .filter((f) => f.endsWith('.md') && f !== 'INDEX.md' && f !== 'README.md')
+    .sort();
   const rows = await Promise.all(
     mdFiles.map((file) => validateFile(join(AGENTS_DIR, file))),
   );

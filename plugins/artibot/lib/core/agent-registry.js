@@ -268,7 +268,11 @@ async function loadEntry(filePath, mtimeMs) {
  */
 async function statAgentFiles() {
   const dir = agentsDir();
-  const names = (await readdir(dir)).filter((n) => n.endsWith('.md')).sort();
+  // Exclude documentation files (INDEX.md, README.md) — they live in agents/
+  // for discoverability but are not agent definitions.
+  const names = (await readdir(dir))
+    .filter((n) => n.endsWith('.md') && n !== 'INDEX.md' && n !== 'README.md')
+    .sort();
   const files = [];
   let maxMtimeMs = 0;
   for (const name of names) {

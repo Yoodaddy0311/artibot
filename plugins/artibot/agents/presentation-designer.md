@@ -2,6 +2,7 @@
 name: presentation-designer
 capabilities: [slide-design, visual-storytelling, layout-composition, pitch-deck]
 lifecycle: design
+rules: [ux:readable-line-length, ux:clear-cta-hierarchy, accessibility:contrast-ratio]
 description: |
   Presentation design specialist focused on narrative structure, slide layouts,
   data visualization, and visual storytelling for business communications.
