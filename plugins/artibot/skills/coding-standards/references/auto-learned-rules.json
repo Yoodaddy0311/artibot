@@ -28,5 +28,11 @@
     "content": "Recurring fix pattern detected. Consider adding automated checks for: fix(ci): unblock Release workflow — 8 ghost-untracked runtime files",
     "formatted": "- [auto-learned] Recurring fix pattern detected. Consider adding automated checks for: fix(ci): unblock Release workflow — 8 ghost-untracked runtime files",
     "injectedAt": "2026-04-08T16:08:33.169Z"
+  },
+  {
+    "type": "auto-learned",
+    "content": "Recurring fix pattern detected. Consider adding automated checks for: fix(lint): preserve-caught-error in git-backend.js",
+    "formatted": "- [auto-learned] Recurring fix pattern detected. Consider adding automated checks for: fix(lint): preserve-caught-error in git-backend.js",
+    "injectedAt": "2026-04-08T18:00:39.837Z"
   }
 ]
