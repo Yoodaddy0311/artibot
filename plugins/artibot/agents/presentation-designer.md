@@ -1,5 +1,7 @@
 ---
 name: presentation-designer
+capabilities: [slide-design, visual-storytelling, layout-composition, pitch-deck]
+lifecycle: design
 description: |
   Presentation design specialist focused on narrative structure, slide layouts,
   data visualization, and visual storytelling for business communications.

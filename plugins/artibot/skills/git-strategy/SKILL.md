@@ -20,6 +20,7 @@ agents:
   - "devops-engineer"
 tokens: "~2K"
 category: "devops"
+source_hash: 7c357a74
 ---
 
 # Git Strategy Recommender
@@ -181,3 +182,16 @@ Q4. 릴리즈 버전 관리가 필요한가요?
 - 전략 전환 시 기존 브랜치/히스토리 영향 반드시 경고
 - Git Flow는 소규모 팀에게 과도하게 복잡할 수 있음을 명시
 - 추천은 팀 상황 기반 — 강요하지 않고 최종 선택은 사용자에게
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the discipline required by this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "git flow works for everyone" | git flow was designed for versioned desktop releases — it is overkill for continuous delivery web apps |
+| "trunk-based requires feature flags we don't have" | you can adopt trunk-based incrementally; the flags come with it, not before it |
+| "long-lived branches are fine for big features" | long-lived branches become merge disasters — slice the feature behind a flag instead |
+| "we'll pick a strategy when we grow" | by the time you grow, the ad-hoc strategy is entrenched; choose early even for small teams |
+| "release branches protect stability" | release branches protect nothing if hotfixes skip them; pick one path and enforce it |
+

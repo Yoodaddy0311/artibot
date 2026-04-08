@@ -14,6 +14,7 @@ agents:
   - "orchestrator"
 tokens: "~3K"
 category: "tooling"
+source_hash: e185d0bb
 ---
 # MCP: Coordination
 
@@ -61,3 +62,15 @@ category: "tooling"
 - Fallback strategies: `${CLAUDE_SKILL_DIR}/references/fallback-strategies.md`
 - Activate only servers scoring >0.6 relevance
 - Cache Context7 lookups (2-5K tokens saved per query)
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the rigor of this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "one MCP server is enough" | specialized servers outperform generalists — coordinate them, do not collapse them |
+| "parallel MCP calls cause chaos" | parallel calls are the whole point of coordination — chaos comes from missing fallback strategy |
+| "I will sequence everything" | sequential blocks on the slowest call — parallelize independent work |
+| "fallback is YAGNI" | MCP servers fail, timeout, and rate-limit — fallback is the difference between degraded and down |
+| "orchestration logic belongs in the agent prompt" | prompts drift; orchestration logic belongs in the coordination skill with explicit modes |

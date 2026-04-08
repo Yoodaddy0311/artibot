@@ -1,5 +1,7 @@
 ---
 name: seo-specialist
+capabilities: [technical-seo, keyword-research, on-page-optimization, link-strategy]
+lifecycle: marketing
 description: |
   SEO specialist focused on technical SEO audits, keyword strategy, content
   optimization, and search visibility improvement. Produces actionable audit

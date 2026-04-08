@@ -3,6 +3,7 @@ description: (Artibot) Federated Swarm Intelligence - manage collective learning
 argument-hint: '[action] e.g. "스웜 동기화 상태 확인"'
 allowed-tools: [Read, Bash, TaskCreate]
 disable-model-invocation: true
+toolset: team
 ---
 
 # /sc swarm

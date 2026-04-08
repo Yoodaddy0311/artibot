@@ -2,6 +2,7 @@
 description: (Artibot) Clone and benchmark external git repos against Artibot with scored comparison
 argument-hint: '[git-url] e.g. "https://github.com/org/repo --deep"'
 allowed-tools: [Read, Glob, Grep, Bash, Task, TaskCreate]
+toolset: analysis
 ---
 
 # /repo

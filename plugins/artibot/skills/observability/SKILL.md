@@ -29,6 +29,7 @@ category: "infrastructure"
 risk: safe
 version: "1.0.0"
 lastVerified: "2026-04-01"
+source_hash: 31f93e7a
 ---
 
 # Observability
@@ -277,3 +278,15 @@ Progress:
 | 응답 시간 | Histogram | histogram_quantile() 로 백분위 |
 | 동시 연결 | Gauge | 현재 값 직접 조회 |
 | 이벤트 크기 분포 | Summary | 클라이언트 사이드 백분위 |
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the rigor of this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "logs are enough" | logs show individual events; metrics show distributions and rates |
+| "sampling skews the data" | 100% sampling at scale costs more than it reveals — sample intelligently |
+| "we will add tracing when we need it" | you need it the moment latency spikes — add it before the incident, not during |
+| "SLIs are vanity metrics" | SLIs are the contract with users; without them you cannot prioritize reliability work |
+| "alerts cause fatigue" | fatigue comes from bad alerts, not alerts themselves — tune to symptoms, not causes |

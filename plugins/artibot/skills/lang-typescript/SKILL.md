@@ -29,6 +29,7 @@ sources:
   - "https://www.typescriptlang.org/docs/handbook/release-notes/overview.html"
 version: "1.0.0"
 lastVerified: "2026-03-27"
+source_hash: ad3f2758
 ---
 
 # TypeScript Patterns & Best Practices
@@ -236,3 +237,15 @@ const mockFetch = vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>()
 - `!` non-null assertion without guard
 - Overly wide `object` or `{}` types
 - Forgetting `readonly` for immutable data
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip idiomatic patterns in this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "any is fine, I'll type it later" | any disables all type checking and propagates virally — a single any in a reducer infects the whole store. Use unknown + narrowing, or generate types from schemas (zod, drizzle). |
+| "as Foo gets me past the compiler error" | Type assertions bypass the checker and silently break at runtime when the shape drifts. Use type guards (value is Foo) or schema validation at the trust boundary. |
+| "Optional chaining everywhere is defensive coding" | a?.b?.c?.d obscures which layer is actually nullable and hides data-model bugs. Model required vs optional in the type, validate at the boundary, then access directly. |
+| "strict mode is too noisy for this project" | Without strictNullChecks and noImplicitAny the compiler gives you a false sense of safety; the TypeScript team reports ~15% of null-related runtime bugs eliminated just by enabling strict. |
+| "enums are clearer than string unions" | TS enums generate runtime objects, don't tree-shake, break const folding, and aren't structural. `type Status = 'idle' \| 'loading' \| 'done'` is zero-cost and composes with template literals. |

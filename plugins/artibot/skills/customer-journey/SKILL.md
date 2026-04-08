@@ -15,6 +15,7 @@ agents:
   - "frontend-developer"
 tokens: "~4K"
 category: "marketing"
+source_hash: 7fce375c
 ---
 
 # Customer Journey
@@ -164,3 +165,16 @@ P1       | [stage]     | [pain point]     | [improvement]
 
 - See `${CLAUDE_SKILL_DIR}/references/lifecycle-stages.md` for lifecycle stages
 - See `${CLAUDE_SKILL_DIR}/references/journey-map-template.md` for journey map template
+
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the rigor of this marketing practice, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "We already have a funnel, we don't need a journey map." | Funnels track conversion; journeys track experience, emotion, and friction. They answer different questions and both are required. |
+| "Personas cover the lifecycle view." | Personas describe who; journeys describe when and where. Without stage-by-stage mapping, touchpoint gaps stay invisible. |
+| "Touchpoints post-purchase aren't marketing's job." | Retention and advocacy stages drive LTV; abandoning post-purchase mapping caps revenue growth at acquisition ceiling. |
+| "We interviewed 3 customers, that's enough input." | Journey mapping requires 8-12 interviews minimum per persona to reach saturation; smaller samples miss critical friction points. |
+| "Moments of truth are too subjective to track." | Moments of truth can be instrumented via CSAT, NPS at stage, and session replay; subjectivity is a measurement gap, not an excuse. |

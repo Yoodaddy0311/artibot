@@ -30,6 +30,7 @@ category: "orchestration"
 version: "1.0.0"
 risk: safe
 lastVerified: "2026-03-31"
+source_hash: 15f3c060
 ---
 
 # Multi-Agent Architecture Patterns
@@ -118,3 +119,15 @@ agent_a = Agent(name="Agent A", functions=[transfer_to_agent_b])
 5. Supervisor 병목 모니터링 + 체크포인팅
 6. 에이전트 간 출력 전달 전 검증
 7. 무한 루프 방지를 위한 TTL 설정
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the discipline of this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "one big agent is simpler than a swarm" | one big agent hits a context ceiling; multi-agent horizontally scales past it |
+| "supervisor patterns add latency" | supervisors add a routing turn but prevent wrong-agent work that costs entire task cycles |
+| "token multiplier kills the economics" | the multiplier is bounded (~3-5x); the quality and parallelism gains exceed that on non-trivial tasks |
+| "hierarchical is over-engineered" | hierarchical isolates failure domains — the alternative is one stuck agent blocking the whole system |
+| "consensus mechanisms are philosophical overhead" | consensus catches divergent hallucinations before they propagate; it's a cheap sanity check |

@@ -1,5 +1,7 @@
 ---
 name: cro-specialist
+capabilities: [conversion-optimization, ab-testing, funnel-analysis, ux-hypothesis]
+lifecycle: marketing
 description: |
   Conversion rate optimization specialist focused on landing page audits,
   funnel analysis, form optimization, A/B test design, and user experience

@@ -1,5 +1,7 @@
 ---
 name: quality-reviewer
+capabilities: [code-quality, maintainability-audit, standard-enforcement]
+lifecycle: review
 description: |
   코드 품질 전문관 — 코드 품질, 패턴 준수, 보안 기초, 성능을 검증하는 2단계 리뷰어.
   스펙 일치는 보지 않는다 — 오직 코드가 "잘" 작성되었는지만 본다.

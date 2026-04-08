@@ -16,6 +16,7 @@ agents:
   - "doc-updater"
 tokens: "~3K"
 category: "marketing"
+source_hash: bbeb1e8e
 ---
 
 # Presentation Design
@@ -161,3 +162,15 @@ Font Pairing:  [headline] / [body]
 
 - See `${CLAUDE_SKILL_DIR}/references/narrative-arc-templates.md` for narrative arc templates
 - See `${CLAUDE_SKILL_DIR}/references/slide-design-principles.md` for slide design principles
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the rigor of this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "content is what matters, not layout" | bad layout buries good content; readers bounce before they reach your insight |
+| "bullet points are efficient" | bullet points kill narrative flow — one idea per slide beats five bullets |
+| "I will add speaker notes if I have time" | speaker notes are what make the deck reusable by others — write them while context is fresh |
+| "charts speak for themselves" | no chart speaks for itself — annotate the takeaway directly on the chart |
+| "more slides = more thorough" | more slides = more time, less retention — cut slides until the narrative is tight |

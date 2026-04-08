@@ -1,5 +1,7 @@
 ---
 name: typescript-pro
+capabilities: [type-system, generics, type-inference, strict-mode-migration]
+lifecycle: build
 description: |
   TypeScript specialist focused on advanced type system usage, type-safe architecture,
   and migration from JavaScript. Expert in generics, conditional types, mapped types, and strict mode patterns.

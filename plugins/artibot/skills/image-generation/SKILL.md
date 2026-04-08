@@ -21,6 +21,7 @@ agents:
   - "frontend-developer"
 tokens: "~5K"
 category: "design"
+source_hash: c99592e7
 ---
 
 # Image Generation
@@ -146,3 +147,15 @@ Step 3 완료 후, 대화 컨텍스트에 유지:
 
 ## References
 - **`references/image-studio-prompt.md`** -- 7모드 이미지 프롬프트 엔지니어링 시스템. 모드별 페르소나, 워크플로우, 출력 템플릿 포함. (Image Studio v3.1)
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the discipline of this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "more detail in the prompt means better images" | over-specified prompts produce muddled outputs — focus on subject, style, composition; drop the rest |
+| "I'll iterate by editing the prompt" | prompt edits without a baseline produce random walks; generate a base, then use structured refinement |
+| "negative prompts always improve quality" | negative prompts help for specific failures, but stacking them over-constrains the latent space |
+| "style references are optional" | style references are the highest-signal token budget you can spend — absence of style = default aesthetic drift |
+| "the model knows what I mean by 'modern'" | abstract adjectives map to training-data averages; anchor with concrete references |

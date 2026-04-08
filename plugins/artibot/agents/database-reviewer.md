@@ -1,5 +1,7 @@
 ---
 name: database-reviewer
+capabilities: [schema-review, query-optimization, index-analysis, migration-audit]
+lifecycle: verify
 description: |
   PostgreSQL and Firestore database specialist for query optimization, schema design, and security.
   Expert in indexing strategies, RLS policies, connection management, and data modeling.

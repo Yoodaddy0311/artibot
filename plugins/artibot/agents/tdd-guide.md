@@ -1,5 +1,7 @@
 ---
 name: tdd-guide
+capabilities: [test-first, red-green-refactor, coverage-analysis, test-design]
+lifecycle: build
 description: |
   Test-driven development specialist enforcing RED-GREEN-REFACTOR discipline.
   Guides test-first implementation with 80%+ coverage targets.

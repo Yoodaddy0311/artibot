@@ -26,6 +26,7 @@ category: "optimization"
 risk: safe
 version: "1.0.0"
 lastVerified: "2026-04-01"
+source_hash: fd4bafdf
 ---
 
 # Compaction Survival
@@ -189,3 +190,15 @@ Progress:
 | 파일 경로 명시 | `/` + 확장자 포함 전체 경로 | key files 자동 추출 대상 |
 | Checkpoint | 75% 도달 시 /checkpoint | auto memory에 상태 영구 저장 |
 | Task 기록 | 진행 중 작업을 TaskCreate | 컴팩션 후 TaskList로 복구 가능 |
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the discipline of this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "the compactor preserves what matters" | compaction is aggressive summarization — load-bearing details get lossy-compressed to one sentence |
+| "I'll re-read files after compaction" | re-reads cost 2-5x the tokens you saved; front-load critical info before the window narrows |
+| "recent messages are safe" | only the last 4 messages survive verbatim — anything earlier is at the compactor's mercy |
+| "file paths will be remembered" | only `/`-delimited paths with extensions get auto-extracted; paraphrased references get lost |
+| "I'll checkpoint later" | later is after compaction, when the state you wanted to checkpoint no longer exists in full fidelity |

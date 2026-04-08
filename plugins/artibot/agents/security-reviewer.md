@@ -1,5 +1,7 @@
 ---
 name: security-reviewer
+capabilities: [vulnerability-detection, owasp-audit, secret-scanning, threat-modeling]
+lifecycle: review
 description: |
   Security vulnerability detection and remediation specialist.
   Focused on OWASP Top 10, authentication/authorization flaws, secret exposure,

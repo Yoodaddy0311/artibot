@@ -8,6 +8,7 @@ agents: ["devops-engineer", "backend-developer"]
 tokens: "~4K"
 category: "platform"
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
+source_hash: 2a4a26be
 ---
 
 # Deployment Patterns
@@ -216,3 +217,15 @@ Complex microservices? -> Kubernetes, ECS
 ```
 lint -> typecheck -> test -> build -> deploy-staging -> e2e -> deploy-prod
 ```
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the rigor of this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "manual deploy is fine for now" | manual deploys skip validation and are how incidents happen at 2am — automate from day one |
+| "Docker is overkill" | containers are the artifact contract between dev and prod — without them "works on my machine" wins |
+| "blue-green is overengineering" | rollback without blue-green is a prayer; with it, rollback is a routing flip |
+| "Kubernetes for a small app" | agreed — use a PaaS instead; the point is: pick the right tool, not skip deployment automation |
+| "I will add health checks after launch" | no health checks means no safe restart and no safe autoscale — add them on day one |
