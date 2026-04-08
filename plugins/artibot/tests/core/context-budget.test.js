@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
-  EWMA,
   createContextBudget,
   distributeWeighted,
+  EWMA,
   predictTaskCost,
 } from '../../lib/core/context-budget.js';
 

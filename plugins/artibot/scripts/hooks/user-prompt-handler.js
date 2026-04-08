@@ -9,7 +9,7 @@ import { parseJSON, readStdin, writeStdout } from '../utils/index.js';
 import { createErrorHandler } from '../../lib/core/hook-utils.js';
 
 const REVERIFY_TRIGGER_PREFIX = /^!rv\b|^!(?:\uC7AC\uAC80\uC99D)(?=\s|$)/iu;
-const NO_TEAM_FLAG = /--no-team/i;
+const NO_TEAM_FLAG = /--no-team\b/i;
 
 /**
  * Special trigger patterns that transform the user prompt.

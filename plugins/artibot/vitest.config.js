@@ -1,13 +1,15 @@
 import { defineConfig } from 'vitest/config';
 
-/** Strip shebang lines so hook scripts can be imported in tests on Windows. */
+/** Strip shebang lines so CLI scripts can be imported in tests on Windows. */
 function stripShebangPlugin() {
   return {
     name: 'strip-shebang',
-    transform(code, id) {
-      if (id.includes('scripts/hooks') && code.startsWith('#!')) {
-        return { code: code.replace(/^#![^\n]*\n/, ''), map: null };
+    enforce: 'pre',
+    transform(code) {
+      if (typeof code === 'string' && code.startsWith('#!')) {
+        return { code: code.replace(/^#![^\n]*\n?/, ''), map: null };
       }
+      return undefined;
     },
   };
 }

@@ -36,6 +36,7 @@ const REQUIRED_SKILL_FIELDS = ['name', 'description'];
  * @param {object} config
  * @param {Map} existingSkills
  */
+// eslint-disable-next-line no-unused-vars
 function validateSkillParams(name, config, existingSkills) {
   if (!name || typeof name !== 'string') {
     throw new Error('Skill name must be a non-empty string');
@@ -61,6 +62,7 @@ function validateSkillParams(name, config, existingSkills) {
  * @param {string} event
  * @param {Function} handler
  */
+// eslint-disable-next-line no-unused-vars
 function validateHookParams(event, handler) {
   if (!event || typeof event !== 'string') {
     throw new Error('Hook event must be a non-empty string');
