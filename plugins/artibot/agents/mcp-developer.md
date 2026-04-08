@@ -2,6 +2,7 @@
 name: mcp-developer
 capabilities: [mcp-server-design, tool-authoring, protocol-integration, schema-validation]
 lifecycle: build
+rules: [llm:output-schema, llm:retry-with-backoff, patterns:dependency-injection, patterns:error-context]
 description: |
   Model Context Protocol specialist focused on MCP server development, tool integration,
   and Claude Code plugin architecture. Expert in MCP SDK, server patterns, and tool orchestration.
