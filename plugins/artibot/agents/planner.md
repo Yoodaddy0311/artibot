@@ -2,6 +2,7 @@
 name: planner
 capabilities: [implementation-planning, risk-analysis, dependency-mapping, phased-execution]
 lifecycle: plan
+rules: [patterns:decompose-execute-verify, patterns:single-responsibility, patterns:read-before-write]
 description: |
   Implementation planning specialist for complex features and architectural changes.
   Expert in risk identification, dependency analysis, and phased execution strategies.

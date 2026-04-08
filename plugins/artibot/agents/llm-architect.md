@@ -2,6 +2,7 @@
 name: llm-architect
 capabilities: [prompt-engineering, rag-design, llm-integration, eval-harness]
 lifecycle: build
+rules: [llm:prompt-in-vcs, llm:output-schema, llm:prompt-injection-defense, llm:token-budget, llm:evaluation-harness]
 description: |
   LLM integration specialist focused on prompt engineering, model orchestration,
   RAG pipelines, and AI application architecture. Expert in Claude, OpenAI, LangChain, and vector databases.

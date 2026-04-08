@@ -2,6 +2,7 @@
 name: orchestrator
 capabilities: [team-coordination, task-dispatch, delegation, cross-verification, quality-gate]
 lifecycle: null
+rules: []
 description: |
   CTO-level team leader for complex multi-step projects using Claude Agent Teams API.
   Creates teams, spawns specialized teammates, distributes tasks, manages quality gates,
