@@ -145,7 +145,7 @@ async function runHook(scriptName, payload, options = {}) {
     // Re-throw with stderr context so the suite can see what failed.
     const stderr = err.stderr ? String(err.stderr).slice(0, 500) : '';
     const reason = stderr || err.message || 'unknown';
-    throw new Error(`runHook(${scriptName}) failed: ${reason}`);
+    throw new Error(`runHook(${scriptName}) failed: ${reason}`, { cause: err });
   }
 
   const trimmed = String(stdout || '').trim();

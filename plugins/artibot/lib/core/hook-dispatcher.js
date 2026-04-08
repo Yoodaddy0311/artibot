@@ -50,7 +50,7 @@ function getTimeoutMs() {
  */
 export async function loadDispatchTable() {
   const filePath = getDispatchTablePath();
-  let mtimeMs = 0;
+  let mtimeMs;
   try {
     const st = await stat(filePath);
     mtimeMs = st.mtimeMs;
