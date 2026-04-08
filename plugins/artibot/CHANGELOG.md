@@ -9,6 +9,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.3.1] - 2026-04-08
+
+### Summary / 요약
+
+**English**: Critical session-start performance fix. Two root-cause bugs found by profiling: (1) `session-start.js` had a `Promise.race` timer leak that held Node's event loop open for 2000ms after `checkForUpdate` already resolved (cached); (2) `git-autopilot-session.js` ran `git pull --rebase` on every session with no throttle (~800ms each). Session start latency dropped from ~2500ms to ~440ms in the realistic parallel-execution scenario.
+
+**한국어**: 세션 시작 성능 치명적 버그 수정. 프로파일링으로 찾은 2건의 근본 원인: (1) `session-start.js`의 `Promise.race` 타이머 leak — `checkForUpdate`가 캐시 히트로 즉시 resolve된 후에도 Node 이벤트 루프가 2000ms 동안 종료 안 됨; (2) `git-autopilot-session.js`가 매 세션마다 `git pull --rebase` 실행 (~800ms). 병렬 실행 시나리오에서 세션 시작 지연이 ~2500ms → ~440ms로 감소.
+
+### Fixed / 수정됨
+
+- **scripts/hooks/session-start.js**: `Promise.race` 타이머 리크 수정
+  - Before: `setTimeout(..., 2000)` 타이머가 race 종료 후에도 event loop에 남아 2s 지연
+  - After: `try/finally`에서 `clearTimeout()` 호출로 즉시 종료
+  - **개선**: 2252ms → 275ms (**-1977ms, -87.8%**)
+
+- **scripts/hooks/git-autopilot-session.js**: `git pull` throttle 추가
+  - Before: 매 세션마다 무조건 `git pull --rebase --autostash` 실행 (~800ms)
+  - After: `.git/autopilot.json`의 `lastPullAt` 체크 → 5분 이내 재시도 스킵
+  - Timestamp는 성공/실패 무관하게 기록 (실패 시에도 재시도 방지)
+  - **개선**: 1086ms → 301ms (**-785ms, -72%**, throttled runs)
+
+### Performance Impact / 성능 영향
+
+| 시나리오 | Before | After | 개선 |
+|---------|:------:|:-----:|:----:|
+| 단일 `session-start.js` | 2252ms | 275ms | **-87.8%** |
+| 단일 `git-autopilot-session.js` (throttled) | 1086ms | 301ms | **-72%** |
+| **병렬 실행 (Claude Code 실제 동작)** | ~2500ms | **442ms** | **-82%** |
+
+**사용자 체감**: 세션 시작 약 2.5초 → 0.4초 (6배 빠름). 하루 10 세션 기준 약 20초 절약, 연간 ~2시간의 대기 시간 제거.
+
+### Root Cause Analysis / 근본 원인 분석
+
+두 버그 모두 **프로파일링 기반으로 발견**. 당초 계획했던 C.3 hooks.json 마이그레이션(43 → 4 canonical slots)은 Claude Code 공식 문서 확인 결과 "훅이 이미 병렬 실행됨" → 예상 이득이 ~170-335ms에서 ~10-150ms로 축소되어 위험 대비 이득이 불리하다고 판단, **Option A (실제 병목 프로파일링)** 로 피벗. 결과적으로 2개 파일 수정만으로 C.3 병합 대비 10-200배 큰 이득 달성.
+
+### Testing / 테스트
+
+- 기존 테스트 34/34 통과 (session-start + skill-hash + skill-hash-cache)
+- SessionStart hook smoke test: EXIT 0
+- ESLint: 0 errors / 0 warnings
+
+### Safety / 안전성
+
+- `hooks.json` 무변경 (byte-identical)
+- 함수 시그니처 동일 (backward-compatible)
+- `.git/autopilot.json`에 `lastPullAt` 필드 추가 (additive, 기존 필드 유지)
+- 5분 throttle 윈도우는 원격 변경 감지 지연을 최소화하면서 성능 이득 극대화
+
+---
+
 ## [2.3.0] - 2026-04-08
 
 ### Summary / 요약

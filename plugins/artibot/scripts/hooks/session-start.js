@@ -109,18 +109,27 @@ async function main() {
   // Non-blocking update notification — any error is swallowed.
   // Wrapped with a 2000ms outer timeout so the update check never consumes
   // more than 2 seconds, leaving ample headroom within the 5000ms hook limit.
+  // CRITICAL: the timer MUST be cleared after Promise.race settles, otherwise
+  // the unreferenced pending timer keeps Node's event loop alive for the full
+  // 2000ms even when updatePromise already resolved — adding ~2s to session
+  // start hook latency. clearTimeout() fixes this.
   try {
     const cacheDir = path.join(home, '.claude', 'artibot');
     const updatePromise = checkForUpdate(version, cacheDir);
-    const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('timeout')), 2000)
-    );
-    const updateInfo = await Promise.race([updatePromise, timeoutPromise]);
-    if (updateInfo.hasUpdate) {
-      lines.push(
-        `\u2b06\ufe0f New version available: v${updateInfo.latestVersion} (current: v${version})`,
-        `   Update: /artibot:update --force`
-      );
+    let timeoutHandle;
+    const timeoutPromise = new Promise((_, reject) => {
+      timeoutHandle = setTimeout(() => reject(new Error('timeout')), 2000);
+    });
+    try {
+      const updateInfo = await Promise.race([updatePromise, timeoutPromise]);
+      if (updateInfo.hasUpdate) {
+        lines.push(
+          `\u2b06\ufe0f New version available: v${updateInfo.latestVersion} (current: v${version})`,
+          `   Update: /artibot:update --force`
+        );
+      }
+    } finally {
+      clearTimeout(timeoutHandle);
     }
   } catch {
     // Never block session start on version-check failures
