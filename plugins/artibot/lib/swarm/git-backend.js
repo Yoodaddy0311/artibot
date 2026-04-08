@@ -103,7 +103,7 @@ export async function ensureSwarmClone(repoUrl) {
   try {
     runGit(`clone --depth 20 ${repoUrl} "${SWARM_CLONE_DIR}"`, ARTIBOT_DIR);
   } catch (err) {
-    throw new Error(`swarm clone failed: ${err.message || String(err)}`);
+    throw new Error(`swarm clone failed: ${err.message || String(err)}`, { cause: err });
   }
   return { cloneDir: SWARM_CLONE_DIR, freshClone: true };
 }
