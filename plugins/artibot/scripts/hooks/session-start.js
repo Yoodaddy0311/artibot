@@ -150,6 +150,26 @@ async function main() {
     process.stderr.write(`[artibot] skill-hash cache refresh skipped: ${err.message}\n`);
   }
 
+  // Swarm auto-detect: if this device has a swarm profile shipped with the
+  // fork but isn't opted in yet, print a one-time hint. Non-blocking, stderr
+  // only, never affects stdout JSON contract.
+  try {
+    const autodetectPath = path.join(env.pluginRoot, 'scripts', 'swarm-autodetect.js');
+    const { existsSync: fsExists } = await import('node:fs');
+    if (fsExists(autodetectPath)) {
+      const { spawn } = await import('node:child_process');
+      // Fire and forget — don't await, don't block.
+      const proc = spawn(process.execPath, [autodetectPath, '--quiet'], {
+        cwd: env.pluginRoot,
+        stdio: ['ignore', 'ignore', 'inherit'],
+        detached: false,
+      });
+      proc.unref();
+    }
+  } catch {
+    // Never block session start on swarm autodetect failures
+  }
+
   const message = lines.join('\n');
 
   writeStdout({ message });

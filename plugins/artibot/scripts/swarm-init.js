@@ -14,6 +14,7 @@
  */
 
 import path from 'node:path';
+import os from 'node:os';
 import { execSync } from 'node:child_process';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { ensureMachineHash, ensureSwarmClone, gitHealthCheck } from '../lib/swarm/git-backend.js';
@@ -21,6 +22,28 @@ import { optIn, optOut } from '../lib/swarm/swarm-config.js';
 import { ARTIBOT_DIR } from '../lib/core/config.js';
 import { getPluginRoot } from '../lib/core/platform.js';
 import { atomicWriteSync } from './utils/index.js';
+
+/**
+ * Write the portable swarm profile to .claude-plugin/swarm-profile.json.
+ * This file travels with the user's artibot fork and lets new devices
+ * auto-discover the swarm repo on first install.
+ *
+ * @param {string} pluginRoot
+ * @param {string} repoUrl
+ */
+function writeSwarmProfile(pluginRoot, repoUrl) {
+  const profilePath = path.join(pluginRoot, '.claude-plugin', 'swarm-profile.json');
+  const profile = {
+    schemaVersion: 1,
+    repoUrl,
+    backend: 'git',
+    createdAt: new Date().toISOString(),
+    createdOn: os.hostname(),
+    notes: 'Portable swarm profile — safe to commit. Other machines auto-detect and offer opt-in.',
+  };
+  atomicWriteSync(profilePath, profile);
+  return profilePath;
+}
 
 const DEFAULT_REPO = 'https://github.com/Yoodaddy0311/artibot-swarm.git';
 
@@ -143,7 +166,12 @@ async function initSwarm(repoUrl) {
   await optIn();
   out('Consent recorded — opted in.');
 
-  // 6. Health check
+  // 6. Write portable profile for auto-detection on other devices
+  const profilePath = writeSwarmProfile(pluginRoot, repoUrl);
+  out(`Profile written: ${profilePath}`);
+  out('  → commit this file to your fork so other devices auto-discover it.');
+
+  // 7. Health check
   const health = await gitHealthCheck({ repoUrl });
   out(`Health: ${health.ok ? 'OK' : 'WARN'} — ${health.message}`);
 

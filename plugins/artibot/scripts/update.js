@@ -476,6 +476,26 @@ async function main() {
   // Step 4: Clear cache AFTER successful install
   clearCache(home);
 
+  // Step 5: Swarm autodetect — emit hint if user has a profile but no consent.
+  // Non-blocking, advisory only. Run from the freshly-installed plugin root.
+  try {
+    const newPluginRoot = path.join(home, '.claude', 'artibot');
+    const autodetectPath = path.join(newPluginRoot, 'scripts', 'swarm-autodetect.js');
+    if (existsSync(autodetectPath)) {
+      const result = execSync(`node "${autodetectPath}" --quiet`, {
+        encoding: 'utf-8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+        timeout: 5000,
+      });
+      if (result && result.trim()) {
+        console.log('');
+        console.log(result);
+      }
+    }
+  } catch {
+    // Never block update on swarm autodetect
+  }
+
   console.log('');
   console.log('Update complete.');
   console.log('RESTART REQUIRED: Please restart Claude Code for the update to take effect.');
