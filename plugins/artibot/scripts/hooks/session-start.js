@@ -151,15 +151,19 @@ async function main() {
   }
 
   // Swarm auto-detect: if this device has a swarm profile shipped with the
-  // fork but isn't opted in yet, print a one-time hint. Non-blocking, stderr
-  // only, never affects stdout JSON contract.
+  // fork but isn't opted in yet, automatically activate it (one-time per
+  // repoUrl + machine). Non-blocking background spawn, stderr only.
+  //
+  // Trust model: a committed swarm-profile.json in the user's own fork is
+  // treated as implicit consent. User can still explicitly opt out via
+  // swarm-init.js --reset; the auto-applied marker respects optedOutAt.
   try {
     const autodetectPath = path.join(env.pluginRoot, 'scripts', 'swarm-autodetect.js');
     const { existsSync: fsExists } = await import('node:fs');
     if (fsExists(autodetectPath)) {
       const { spawn } = await import('node:child_process');
       // Fire and forget — don't await, don't block.
-      const proc = spawn(process.execPath, [autodetectPath, '--quiet'], {
+      const proc = spawn(process.execPath, [autodetectPath, '--auto'], {
         cwd: env.pluginRoot,
         stdio: ['ignore', 'ignore', 'inherit'],
         detached: false,

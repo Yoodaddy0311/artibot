@@ -22,8 +22,32 @@ import path from 'node:path';
 import { execSync } from 'node:child_process';
 import { getPluginRoot } from '../lib/core/platform.js';
 import { getSwarmConfig, loadConsent } from '../lib/swarm/swarm-config.js';
+import { ARTIBOT_DIR } from '../lib/core/config.js';
+import { readJsonFile, writeJsonFile } from '../lib/core/file.js';
 
 const PROFILE_REL = path.join('.claude-plugin', 'swarm-profile.json');
+const AUTO_APPLIED_MARKER = path.join(ARTIBOT_DIR, 'swarm-autoapplied.json');
+
+/**
+ * Read the auto-applied marker. If present, auto-apply has already run for
+ * this combination of (profile repoUrl, machine). Prevents re-running on
+ * every session.
+ */
+async function readAutoAppliedMarker() {
+  const data = await readJsonFile(AUTO_APPLIED_MARKER);
+  return data && typeof data === 'object' ? data : null;
+}
+
+/**
+ * Persist the auto-applied marker so we don't re-run on every session start.
+ */
+async function writeAutoAppliedMarker(profile, outcome) {
+  await writeJsonFile(AUTO_APPLIED_MARKER, {
+    repoUrl: profile.repoUrl,
+    appliedAt: new Date().toISOString(),
+    outcome, // 'success' | 'failed' | 'declined'
+  });
+}
 
 function log(line) {
   process.stderr.write(line + '\n');
@@ -133,6 +157,7 @@ async function main() {
   const args = process.argv.slice(2);
   const isJson = args.includes('--json');
   const doApply = args.includes('--apply');
+  const doAuto = args.includes('--auto');
   const isQuiet = args.includes('--quiet');
 
   const pluginRoot = getPluginRoot();
@@ -140,6 +165,39 @@ async function main() {
 
   if (isJson) {
     process.stdout.write(JSON.stringify(classification, null, 2) + '\n');
+    return;
+  }
+
+  // --auto: fully automatic activation on first detection.
+  // Trusts the presence of a committed swarm-profile.json in the user's own
+  // fork as implicit consent (user explicitly committed it). Runs once per
+  // (repoUrl, machine) — tracked via swarm-autoapplied.json marker.
+  if (doAuto) {
+    if (classification.state !== 'profile-only') {
+      // Nothing to auto-apply (no profile, already active, or mismatch).
+      return;
+    }
+    // Skip if user explicitly opted out before
+    if (classification.consent?.optedOutAt) {
+      log('[swarm] Auto-apply skipped — user previously opted out. Run --apply to re-enable.');
+      return;
+    }
+    // Skip if already auto-applied for this repoUrl
+    const marker = await readAutoAppliedMarker();
+    if (marker && marker.repoUrl === classification.profile.repoUrl) {
+      return;
+    }
+    log(`[swarm] Auto-activating federated learning from committed profile ...`);
+    log(`[swarm]   repo: ${classification.profile.repoUrl}`);
+    const result = applyProfile(pluginRoot, classification.profile);
+    if (result.ok) {
+      await writeAutoAppliedMarker(classification.profile, 'success');
+      log('[swarm] Auto-activated. This device is now part of your swarm.');
+    } else {
+      await writeAutoAppliedMarker(classification.profile, 'failed');
+      log(`[swarm] Auto-apply failed: ${result.error}`);
+      log('[swarm] You can retry manually: node plugins/artibot/scripts/swarm-autodetect.js --apply');
+    }
     return;
   }
 

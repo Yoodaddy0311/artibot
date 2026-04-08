@@ -476,16 +476,16 @@ async function main() {
   // Step 4: Clear cache AFTER successful install
   clearCache(home);
 
-  // Step 5: Swarm autodetect — emit hint if user has a profile but no consent.
-  // Non-blocking, advisory only. Run from the freshly-installed plugin root.
+  // Step 5: Swarm autodetect — auto-activate federated learning from the
+  // committed swarm-profile.json (if present). One-time per repoUrl+machine.
   try {
     const newPluginRoot = path.join(home, '.claude', 'artibot');
     const autodetectPath = path.join(newPluginRoot, 'scripts', 'swarm-autodetect.js');
     if (existsSync(autodetectPath)) {
-      const result = execSync(`node "${autodetectPath}" --quiet`, {
+      const result = execSync(`node "${autodetectPath}" --auto`, {
         encoding: 'utf-8',
         stdio: ['ignore', 'pipe', 'pipe'],
-        timeout: 5000,
+        timeout: 30000,
       });
       if (result && result.trim()) {
         console.log('');
