@@ -7,12 +7,15 @@ on:
       - "plugins/artibot/agents/**"
       - "plugins/artibot/skills/**"
       - "plugins/artibot/commands/**"
+      - ".github/workflows/plugin-validate.yml"
   pull_request:
     paths:
       - "plugins/artibot/.claude-plugin/plugin.json"
       - "plugins/artibot/agents/**"
       - "plugins/artibot/skills/**"
       - "plugins/artibot/commands/**"
+      - ".github/workflows/plugin-validate.yml"
+  workflow_dispatch:
 
 permissions:
   contents: read
