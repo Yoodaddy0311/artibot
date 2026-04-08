@@ -21,6 +21,7 @@ agents:
   - "performance-engineer"
 tokens: "~2K"
 category: "tooling"
+source_hash: 2eccc99a
 ---
 
 # Token Efficiency Engine
@@ -115,3 +116,15 @@ Progress:
 | Abbreviation system | MEDIUM | Abbreviations defined, audience familiarity varies |
 | Structural optimization | HIGH | Many valid approaches to restructure content |
 | Validate preservation | LOW | >=95% information preservation is non-negotiable |
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the discipline of this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "the context window is big enough" | "big enough" until it isn't — efficiency is how you stay below the ceiling under unpredictable load |
+| "compression loses nuance" | well-designed compression preserves semantics; the lost nuance was usually noise anyway |
+| "optimizing tokens is premature" | tokens are dollars and latency — there's no "premature" about it |
+| "persona-aware output is cosmetic" | persona-aware output reduces re-asks, which is the single biggest hidden token cost |
+| "I'll optimize when I hit the limit" | at the limit, optimization options collapse to "truncate" — optimize early while you still have choices |

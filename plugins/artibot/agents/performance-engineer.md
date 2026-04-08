@@ -1,5 +1,7 @@
 ---
 name: performance-engineer
+capabilities: [profiling, bottleneck-analysis, optimization, benchmarking]
+lifecycle: verify
 description: |
   Performance optimization specialist focused on profiling, bottleneck identification,
   memory analysis, and runtime performance tuning. Expert in CPU/memory profiling,

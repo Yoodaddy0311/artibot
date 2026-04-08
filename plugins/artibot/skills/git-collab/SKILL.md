@@ -20,6 +20,7 @@ agents:
   - "doc-updater"
 tokens: "~2K"
 category: "devops"
+source_hash: cd2c4401
 ---
 
 # Git Collab (팀 협업 온보딩)
@@ -203,3 +204,16 @@ gh api repos/{owner}/{repo}/branches/main/protection \
 - CONTRIBUTING.md는 덮어쓰기 전 기존 내용 표시
 - Git 설정(`user.name`, `user.email`)은 전역 vs 프로젝트별 차이 설명
 - GPG 서명 설정은 키 생성 선행 필요 — 없으면 단계 안내
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the discipline required by this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "the new hire can figure out git" | unguided onboarding produces force-pushes to main within the first week; standardize the on-ramp |
+| "we all use different workflows, it's fine" | divergent workflows cause merge hell and PR review confusion; pick one and document it |
+| "CODEOWNERS is bureaucracy" | CODEOWNERS is the mechanism that prevents unreviewed changes to critical paths — that's safety, not process |
+| "branch protection slows us down" | it slows down the five minutes before you would have broken main for everyone else |
+| "we don't need a PR template" | without a template every PR description becomes "see title", and reviewers re-ask the same questions |
+

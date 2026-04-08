@@ -22,6 +22,7 @@ agents:
 tokens: "~4K"
 category: "language"
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
+source_hash: 8b32adf1
 ---
 
 # Swift Patterns & Best Practices
@@ -292,3 +293,15 @@ struct UserRow: View {
 - **SwiftUI**: Declarative UI with `@Observable` macro, navigation stacks, and `.task` modifier
 - **Swift Testing**: Modern test framework with `#expect` macros, parameterized tests, and suites
 - **Vapor**: Server-side Swift with async routing, Fluent ORM, and structured concurrency
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip idiomatic patterns in this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "Force unwrap with ! is fine, I just set it" | ! crashes with EXC_BAD_INSTRUCTION in prod and defeats Swift's optional system. Use guard let, if let, or ?? with a default — never ship ! outside test fixtures. |
+| "weak self is unnecessary in this closure" | Escaping closures capturing self create retain cycles that leak view controllers and their entire view hierarchy. [weak self] with guard let self is the default idiom. |
+| "DispatchQueue.main.async is simpler than @MainActor" | @MainActor is compiler-enforced, composes with async/await, and eliminates the "which queue am I on?" question. Dispatch is legacy for new Swift Concurrency code. |
+| "class is more flexible than struct" | Structs give value semantics, thread safety, and copy-on-write for free. Apple's WWDC guidance is "prefer struct unless you need identity or inheritance" since Swift 2. |
+| "Task {} without a handle is fine, fire-and-forget" | Unstructured Tasks aren't cancelled when their parent scope ends and leak across SwiftUI view lifecycles. Use .task { } modifier or store the Task handle for cancellation. |

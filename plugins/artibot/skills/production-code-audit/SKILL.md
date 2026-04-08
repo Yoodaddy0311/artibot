@@ -29,6 +29,7 @@ category: "quality"
 version: "1.0.0"
 risk: safe
 lastVerified: "2026-03-31"
+source_hash: 17d9f59e
 ---
 
 # Production Code Audit
@@ -151,3 +152,15 @@ wc -l *.ts | sort -rn | head -20
 4. 변경 후 테스트 통과 확인
 5. Before/After 메트릭 포함한 리포트
 6. 분기별 정기 감사 권장
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the rigor of this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "linter caught everything" | linters do not check for business logic bugs or privacy leaks |
+| "audit after ship, it is faster" | post-ship audits discover issues you cannot rollback; audit before |
+| "code review covered this" | code review is per-PR; audit is cross-cutting — different lenses catch different bugs |
+| "tests would have caught it" | tests catch what you thought to test; audits catch what you did not |
+| "the scan is noisy" | triage the signal, tune the rules — noisy output is better than silent failure |

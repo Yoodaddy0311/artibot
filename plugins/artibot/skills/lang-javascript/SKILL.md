@@ -23,6 +23,7 @@ agents:
 tokens: "~4K"
 category: "language"
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
+source_hash: 6762b6be
 ---
 
 # JavaScript Patterns & Best Practices
@@ -237,3 +238,15 @@ Deno.serve((req) => serveDir(req, { fsRoot: './public' }))
 - **Express/Fastify/Hono**: Middleware-based HTTP with validation (Zod) and structured error handling
 - **Vitest**: Modern test runner with ESM-first, watch mode, and coverage
 - **Bun/Deno**: Runtime-native APIs for file I/O, HTTP, SQLite, and testing
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip idiomatic patterns in this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "var is fine, it's been around forever" | var hoisting and function scope cause TDZ bugs and loop-closure surprises. const/let give block scoping and prevent reassignment — ESLint no-var is a default in every major config. |
+| "== is shorter than ===" | == triggers ToPrimitive coercion with 20+ special cases ('' == 0, [] == false). === is the only predictable equality; eslint eqeqeq catches all instances. |
+| "forEach with await works for sequential async" | forEach ignores returned promises, so awaits run concurrently and errors are swallowed. Use for...of with await, or Promise.all when parallelism is actually wanted. |
+| "Floating promises are fine in fire-and-forget" | Unhandled rejections crash Node 15+ by default and leak in browsers. Either await, .catch(), or explicitly void promise to mark intent — no-floating-promises enforces this. |
+| "CommonJS require is easier than ESM imports" | CJS blocks tree-shaking, top-level await, and the Node 22 ESM-first ecosystem. New code should be ESM; tooling (Vite, Bun, Deno) treats CJS as legacy. |

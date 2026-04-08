@@ -15,6 +15,7 @@ agents:
   - "performance-engineer"
 tokens: "~4K"
 category: "marketing"
+source_hash: 142ec718
 ---
 
 # Marketing Analytics
@@ -177,3 +178,16 @@ P1       | [action]       | [metric lift]
 
 - See `${CLAUDE_SKILL_DIR}/references/metrics-hierarchy.md` for metrics hierarchy
 - See `${CLAUDE_SKILL_DIR}/references/attribution-models-selection.md` for attribution models selection guide
+
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the rigor of this marketing practice, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "The dashboard shows green, we're good." | Green dashboards without significance testing can hide noise as trend; always annotate with variance and confidence band. |
+| "We can't attribute, so we'll go with gut feel." | Imperfect attribution is still better than none; use MMM, incrementality tests, or geo-holdouts when MTA fails. |
+| "YoY growth is proof of channel health." | YoY growth can be driven by market tailwinds, not channel quality; normalize vs. category index before declaring wins. |
+| "Vanity metrics are fine for the exec deck." | Exec metrics set organizational priorities; vanity metrics in exec reporting misdirect budget across quarters. |
+| "One data source is the source of truth." | Single-source reporting hides ingestion errors and ad platform discrepancies; triangulate GA, ad platforms, and CRM. |

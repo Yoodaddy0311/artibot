@@ -16,6 +16,7 @@ agents:
   - "doc-updater"
 tokens: "~3K"
 category: "marketing"
+source_hash: de908716
 ---
 
 # Social Media
@@ -161,3 +162,16 @@ CALENDAR (if applicable)
 
 - See `${CLAUDE_SKILL_DIR}/references/platform-specifications.md` for platform specifications
 - See `${CLAUDE_SKILL_DIR}/references/content-pillar-strategy.md` for content pillar strategy
+
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the rigor of this marketing practice, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "Post the same content on every platform." | Each platform has distinct format, aspect ratio, and hook conventions; cross-posting raw content yields 30-60% lower engagement. |
+| "Follower count is the goal." | Followers without engagement are a vanity metric; reach, saves, and shares predict revenue impact. |
+| "Posting frequency is what matters most." | Over-posting trains the algorithm to reduce per-post reach; quality and timing beat raw volume on every platform since 2023. |
+| "Organic reach will come back." | Organic reach on Meta platforms has declined to 1-5% and will not recover; plan with paid amplification in the mix. |
+| "Hashtags don't matter anymore." | Hashtags drive discovery on TikTok, Instagram Reels, and LinkedIn; the specific tactic changes, but the discovery function remains. |

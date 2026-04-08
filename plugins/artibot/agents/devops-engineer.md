@@ -1,5 +1,7 @@
 ---
 name: devops-engineer
+capabilities: [ci-cd, deployment, infrastructure, release-automation]
+lifecycle: ship
 description: |
   Infrastructure and deployment specialist focused on CI/CD pipelines, containerization,
   monitoring, and automated operations. Expert in Docker, GitHub Actions, Terraform, and observability.

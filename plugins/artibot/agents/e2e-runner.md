@@ -1,5 +1,7 @@
 ---
 name: e2e-runner
+capabilities: [e2e-testing, browser-automation, flake-detection, test-execution]
+lifecycle: verify
 description: |
   Playwright E2E testing specialist focused on critical user journey validation.
   Expert in Page Object Model pattern, flaky test management, and artifact collection.

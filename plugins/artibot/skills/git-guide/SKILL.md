@@ -19,6 +19,7 @@ agents: []
 argument-hint: "[question] e.g., 커밋 어떻게, push rejected 오류, 브랜치 삭제"
 tokens: "~1.5K"
 category: "devops"
+source_hash: e395c9d4
 ---
 
 # Git Guide (초보자)
@@ -159,3 +160,16 @@ git branch
 - `git reset --hard`는 데이터 손실 위험 경고 필수
 - `main`/`master` 직접 커밋은 팀 영향 경고 후 안내
 - 명령어만 나열하지 말고 항상 설명 포함
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the discipline required by this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "I'll just learn git by doing" | doing without a mental model produces the "detached HEAD" panic; learn the graph first |
+| "I use the GUI, I don't need CLI" | GUIs abstract the common path and hide the recovery path; CLI literacy is the escape hatch |
+| "git is too complicated" | git has 10 commands you need daily and 90 you rarely touch — the daily 10 are learnable in an afternoon |
+| "I'll just delete the folder and re-clone" | reclone loses uncommitted work and uncovered stashes; learn reset/stash/reflog before nuking |
+| "reflog is for experts" | reflog is the undo button — beginners need it more than experts do, because they make more mistakes |
+

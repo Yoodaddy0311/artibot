@@ -25,6 +25,7 @@ agents:
   - "backend-developer"
 tokens: "~3K"
 category: "testing"
+source_hash: d81fba95
 ---
 
 # Testing Standards
@@ -152,3 +153,17 @@ Progress:
 | Unit | Many | <10ms | Function/class | >=80% |
 | Integration | Some | <1s | Module/API | >=70% |
 | E2E | Few | <30s | User journey | Critical paths |
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip critical steps in this skill, paired with factual rebuttals. Use this to catch and resist shortcuts.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "A manual test is enough for this change" | Manual tests are not rerunnable by CI, do not prevent regressions, and exist only in your memory. Every future refactor has to re-discover the same edge cases by hand. Automated tests pay for themselves after the first regression they catch. |
+| "100% coverage is overkill, 80% is the target anyway" | 80% is the floor, not the ceiling. The 20% you skip is almost always the error paths and edge cases — exactly where production bugs live. Coverage numbers mean nothing if the uncovered lines are the risky ones. |
+| "Mocks are easier to write than fixtures" | Easy-to-write mocks drift from the real interface silently. When the real API changes, the mocked test keeps passing while production breaks. Fixtures — even minimal ones — anchor tests to real contracts. |
+| "The integration test will catch it, I don't need a unit test" | Integration tests are slow, expensive, and imprecise — when they fail, you get a module name, not a function name. Unit tests isolate the defect; integration tests only prove something is wrong. You need both, not one. |
+| "This test is flaky, I'll add .skip for now" | `.skip` is a permanent invisible hole. Every skipped test is a behavior that used to work and now may not. Either fix the flake (usually shared state or async timing) or delete the test with a postmortem — never skip silently. |
+| "I'll test the private methods directly for simplicity" | Private methods are implementation details — tests coupled to them break on every refactor, creating false friction. Test the public API; if a private method is hard to reach through the API, that is a design signal, not a testing problem. |
+| "The happy path test is enough" | Happy paths pass on day one regardless of test quality. Bugs live in empty arrays, null inputs, timeouts, and boundary values. A test suite with only happy paths is a marketing document, not a safety net. |

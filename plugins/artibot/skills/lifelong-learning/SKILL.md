@@ -19,6 +19,7 @@ agents:
   - "planner"
 tokens: "~2K"
 category: "learning"
+source_hash: d5a5a1f0
 ---
 
 # Lifelong Learning
@@ -245,3 +246,15 @@ Progress:
 **Promotion**: 3 consecutive System 2 successes -> System 1 cache
 **Demotion**: 2 consecutive System 1 failures -> System 2 re-analysis
 **Storage**: `~/.claude/artibot/`
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the discipline of this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "learning across sessions breaks reproducibility" | reproducibility comes from versioned knowledge stores, not from amnesia — snapshot and replay |
+| "GRPO is overkill for my use case" | GRPO is just group-relative comparison; it's the simplest correct way to extract preference signal from rollouts |
+| "validated knowledge is stale by the time it transfers" | staleness is managed via freshness scoring; untransferred knowledge has infinite staleness |
+| "System 1 to System 2 transfer introduces bugs" | transfer WITH validation catches bugs; transfer is not the risk — untested promotion is |
+| "I'll curate the training set manually" | manual curation is where bias enters; automated capture with review gates is more neutral |

@@ -18,6 +18,7 @@ agents:
   - "orchestrator"
 tokens: "~1K"
 category: "learning"
+source_hash: 7f6d35af
 ---
 
 # Scheduled Learning
@@ -163,3 +164,15 @@ Progress:
 **Expiry**: 7 days auto-expire for recurring jobs
 **Nightly**: 2:03 AM daily — GRPO batch learning + knowledge transfer
 **Drift**: 6:07 AM Monday — routing threshold drift analysis
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the discipline of this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "on-demand learning is enough" | on-demand means "when I remember" which means "never"; scheduling makes it non-optional |
+| "scheduled jobs waste compute on idle periods" | idle-period learning is the cheapest compute you have; it's amortized background work |
+| "I'll run it manually at milestones" | milestones drift; the schedule is your external pacemaker |
+| "batch schedules lag real-time signal" | real-time learning is where noise enters; batch is the correct buffer for stable signal extraction |
+| "the scheduler adds ops complexity" | one cron line is not ops complexity; the absence of scheduling is what creates the complexity of manual reminders |

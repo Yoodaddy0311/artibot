@@ -22,6 +22,7 @@ level1_tokens: 200
 level2_tokens: 3000
 category: "quality"
 risk: safe
+source_hash: d1551cd6
 ---
 
 # Adversarial Review
@@ -171,3 +172,17 @@ JSON 구조화 출력이 필요한 경우 `plugins/artibot/schemas/review-output
 - 신뢰 경계에 집중: 외부 입력이 내부로 들어오는 모든 지점
 - 연쇄 공격 고려: 단독으로는 낮은 위험이라도 조합 시 위험할 수 있음
 - Fail-closed 원칙: 에러 시 거부가 기본, 허용이 아님
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip critical steps in this skill, paired with factual rebuttals. Use this to catch and resist shortcuts.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "It's a small change, a full review is overkill" | Supply-chain attacks, auth bypasses, and data leaks routinely ship as one-line diffs. Severity is decided by the attacker, not by the line count. Every diff crossing a trust boundary deserves the full attack-surface pass. |
+| "The author is senior, I can rubber-stamp this" | Senior engineers write the most dangerous bugs because their code gets the least scrutiny. Reviewer accountability is independent of author rank — your sign-off is your signature, not theirs. |
+| "CI will catch any real problems" | CI catches what its rules were written to catch: known lint patterns, test failures, maybe SAST signatures. It does not catch logic errors, authorization bypasses, race conditions, or novel attack vectors. Reviewers are the layer CI cannot replace. |
+| "The tests pass, so the code is correct" | Tests prove the code does what the tests say — not what the spec says, and not what an attacker might induce. Adversarial review exists precisely because test coverage and attack surface are different sets. |
+| "I don't understand this part, but it looks fine" | "Looks fine" in unfamiliar code is not a review — it is abdication. Either learn the area well enough to have an opinion, or explicitly flag the section as unreviewed and request a subject-matter expert. Silent approval is worse than no approval. |
+| "Rubber-stamping saves team velocity" | Velocity gained by skipped reviews is paid back 10x in incident response, security patches, and postmortems. Every untriaged vulnerability in main is a scheduled outage whose date has not been set yet. |
+| "This was already reviewed in a previous PR" | Previous reviews covered previous code. Rebases, refactors, and context changes can turn yesterday's safe code into today's vulnerability. Re-review the current diff against the current codebase — history is not exoneration. |

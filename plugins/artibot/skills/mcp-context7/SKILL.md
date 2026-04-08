@@ -22,6 +22,7 @@ sources:
   - "https://modelcontextprotocol.io/introduction"
 version: "1.0.0"
 lastVerified: "2026-03-27"
+source_hash: c6df7ccd
 ---
 # MCP: Context7
 
@@ -66,3 +67,15 @@ lastVerified: "2026-03-27"
 - Max 3 attempts per question
 - Cache results within session
 - Fallback: WebSearch -> cached knowledge -> built-in knowledge
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the rigor of this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "my training data is recent enough" | library APIs break weekly; Context7 has current docs your training does not |
+| "I will just read the README" | READMEs lag behind releases; Context7 queries the live doc source |
+| "Context7 is slow" | one Context7 query is faster than debugging a deprecated API call in production |
+| "I know this library well" | well enough to know what changed in the last minor version? verify before you commit |
+| "caching means stale data" | Context7 caches with TTL and you can force-refresh — stale is a configuration choice |

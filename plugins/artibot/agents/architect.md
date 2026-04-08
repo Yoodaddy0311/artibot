@@ -1,5 +1,7 @@
 ---
 name: architect
+capabilities: [system-design, boundary-definition, trade-off-analysis, adr-authoring]
+lifecycle: design
 description: |
   Systems architecture specialist focused on long-term maintainability, scalability,
   and structural integrity. Evaluates trade-offs, designs module boundaries, and

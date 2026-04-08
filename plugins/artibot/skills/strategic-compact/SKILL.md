@@ -19,6 +19,7 @@ agents:
   - "architect"
 tokens: "~2K"
 category: "analysis"
+source_hash: 20062e8f
 ---
 # Strategic Compaction
 
@@ -258,3 +259,15 @@ const result = ContextRecovery.truncateOutput(
 - Always checkpoint before compaction
 - Preserve > Summarize > Drop
 - Essential: active tasks, uncommitted decisions, current files
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the discipline of this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "auto-compact is enough" | auto-compaction triggers at 75% — you've already lost control of what gets compressed |
+| "compacting mid-task saves tokens" | mid-task compaction loses the task state you needed to complete it |
+| "I'll compact at phase boundaries" | phase boundaries are exactly right — but only if you ACTUALLY compact, not just plan to |
+| "compaction costs more tokens than it saves" | a good compact summary is 10% of the raw content it replaces; the math is decisive |
+| "I don't know what to preserve" | preserve file paths, decisions, and open questions — everything else is re-derivable |

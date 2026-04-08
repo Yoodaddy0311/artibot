@@ -1,5 +1,7 @@
 ---
 name: frontend-developer
+capabilities: [ui-implementation, component-architecture, state-management, accessibility]
+lifecycle: build
 description: |
   Frontend specialist focused on UI/UX implementation, component architecture, and web performance.
   Expert in React, Next.js, Vue, CSS, accessibility (WCAG 2.1 AA), and responsive design.

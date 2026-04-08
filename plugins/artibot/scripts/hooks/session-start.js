@@ -126,6 +126,21 @@ async function main() {
     // Never block session start on version-check failures
   }
 
+  // Phase 1 Quick Win: refresh skill hash cache if stale.
+  // Wrapped in try/catch — must NEVER block session start.
+  // Only writes to stderr; stdout JSON contract is preserved.
+  try {
+    const cacheModPath = path.join(env.pluginRoot, 'lib', 'core', 'skill-hash-cache.js');
+    const { refreshIfStale } = await import(toFileUrl(cacheModPath));
+    const cache = await refreshIfStale();
+    if (cache && cache.skills) {
+      const count = Object.keys(cache.skills).length;
+      process.stderr.write(`[artibot] skill-hash cache: ${count} skills indexed\n`);
+    }
+  } catch (err) {
+    process.stderr.write(`[artibot] skill-hash cache refresh skipped: ${err.message}\n`);
+  }
+
   const message = lines.join('\n');
 
   writeStdout({ message });

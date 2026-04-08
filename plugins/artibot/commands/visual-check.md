@@ -2,6 +2,7 @@
 description: (Artibot) Visual regression testing via SSIM screenshot comparison with CSS fix suggestions
 argument-hint: '[url] e.g. "https://example.com --baseline ./baselines/home.png"'
 allowed-tools: [Read, Write, Bash, Glob, Task, TodoWrite]
+toolset: design
 ---
 
 # /visual-check

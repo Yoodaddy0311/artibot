@@ -14,6 +14,7 @@ agents:
   - "architect"
 tokens: "~4K"
 category: "marketing"
+source_hash: 9cac87b5
 ---
 
 # Campaign Planning
@@ -163,3 +164,16 @@ KPI            | Target  | Tracking Method
 
 - See `${CLAUDE_SKILL_DIR}/references/campaign-brief-template.md` for campaign brief template
 - See `${CLAUDE_SKILL_DIR}/references/timeline-phases.md` for campaign timeline phases
+
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the rigor of this marketing practice, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "We'll figure out measurement after launch." | Measurement plan built post-launch produces unattributable spend; KPIs, baselines, and tracking must be frozen before go-live. |
+| "One channel is enough if it's working." | Single-channel campaigns cap reach at that channel's ceiling and ignore cross-channel lift; integrated plans outperform siloed by 15-35%. |
+| "Budget allocation mirrors last quarter." | Copy-paste budgets ignore CAC trends and channel saturation; allocation must be re-derived from current marginal CAC per channel. |
+| "Creative can come together in the last week." | Rushed creative skips localization, legal, and A/B variant production, reducing campaign effectiveness by 20-40%. |
+| "We don't need a kill criterion." | Without written stop-loss triggers (CPA ceiling, ROAS floor), underperforming campaigns run 2-3x longer than they should. |

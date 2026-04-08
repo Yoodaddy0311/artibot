@@ -25,6 +25,7 @@ triggers:
 tokens: "~2K"
 category: "workflow"
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
+source_hash: f721ef83
 ---
 
 # Vibe Coding Quality Protocol
@@ -134,3 +135,15 @@ Progress:
 | Re-read after modify | LOW | Mandatory, no exceptions |
 | Report evidence | LOW | file:line format required |
 | Zero-skip audit | LOW | Every item must be addressed or explicitly blocked with reason |
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the discipline of this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "casual request = casual implementation" | casual phrasing hides sharp requirements; decompose every request, regardless of tone |
+| "the user said 'just' so it's simple" | "just" is a linguistic tell for underestimated scope; treat it as a red flag, not a permission slip |
+| "vibes mean I can skip verification" | vibes mean the requirements are implicit, which means verification is MORE necessary, not less |
+| "I'll interpret freely" | free interpretation is where user-agent alignment fails; enforce DECOMPOSE-EXECUTE-VERIFY regardless of register |
+| "natural language requests don't need formal specs" | every request becomes a formal spec the moment you execute it — the only question is whether YOU write it or it emerges accidentally |

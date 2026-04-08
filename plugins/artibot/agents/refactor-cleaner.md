@@ -1,5 +1,7 @@
 ---
 name: refactor-cleaner
+capabilities: [refactoring, dead-code-removal, complexity-reduction, pattern-extraction]
+lifecycle: build
 description: |
   Dead code cleanup and refactoring specialist using static analysis tools.
   Expert in knip, depcheck, ts-prune for detection and safe incremental removal.

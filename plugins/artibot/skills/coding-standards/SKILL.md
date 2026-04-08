@@ -29,6 +29,7 @@ tokens: "~3K"
 category: "code-quality"
 version: "1.0.0"
 lastVerified: "2026-03-27"
+source_hash: 7a01304d
 ---
 
 # Coding Standards
@@ -160,3 +161,15 @@ Progress:
 - [auto-learned] Recurring fix pattern detected. Consider adding automated checks for: fix: resolve all ESLint errors and warnings (86 → 0)
 - [auto-learned] Recurring fix pattern detected. Consider adding automated checks for: fix(v1.14.3): statusline [object Object] bug fix + session token display
 - [auto-learned] Recurring fix pattern detected. Consider adding automated checks for: fix(v1.14.1): auto-activation, platform compat, skill restore, zero-config learning
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the rigor of this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "style is subjective" | consistency reduces cognitive load during review; the standard matters more than which one |
+| "the linter is too strict" | every suppressed rule is a bug waiting to happen — disable with justification, not reflex |
+| "naming does not matter if it works" | names are the primary API of your code; bad names cost hours in downstream debugging |
+| "I will fix formatting in a follow-up" | follow-ups never happen — format on save, not on promise |
+| "mutating is faster than copying" | mutation hides race conditions and breaks time-travel debugging; copy unless profiled hot path |

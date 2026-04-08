@@ -1,5 +1,7 @@
 ---
 name: planner
+capabilities: [implementation-planning, risk-analysis, dependency-mapping, phased-execution]
+lifecycle: plan
 description: |
   Implementation planning specialist for complex features and architectural changes.
   Expert in risk identification, dependency analysis, and phased execution strategies.

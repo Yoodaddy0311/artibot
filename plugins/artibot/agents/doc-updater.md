@@ -1,5 +1,7 @@
 ---
 name: doc-updater
+capabilities: [documentation, api-docs, changelog-updates, readme-maintenance]
+lifecycle: ship
 description: |
   Documentation specialist focused on keeping docs accurate, comprehensive, and
   aligned with code. Expert in technical writing, API documentation, and changelog management.

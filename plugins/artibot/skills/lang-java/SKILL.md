@@ -25,6 +25,7 @@ category: "language"
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 version: "1.0.0"
 lastVerified: "2026-03-27"
+source_hash: 42af44c3
 ---
 
 # Java Patterns & Best Practices
@@ -340,3 +341,15 @@ class UserControllerIT {
 - Mutable public fields
 - `instanceof` without pattern matching (verbose)
 - Raw types (always parameterize generics)
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip idiomatic patterns in this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "checked exceptions clutter signatures, I'll wrap in RuntimeException" | Blanket RuntimeException wrapping erases recovery info and defeats the compiler's completeness check. Use sealed exception hierarchies or Either-style Result types. |
+| "return null for empty results, Optional is verbose" | null return forces every caller into defensive branches and causes NPE when they forget. Optional documents absence in the signature and composes with map/orElse. |
+| "raw types are easier than generics" | Raw types disable all type checking and compile with unchecked warnings that become heap pollution at runtime. Use <?> or proper type parameters — it's a 1-line fix. |
+| "@Autowired field injection is cleaner than constructor" | Field injection makes classes untestable without Spring, hides dependencies, and prevents final fields. Spring's own docs recommend constructor injection since 4.3. |
+| "I'll stick with java.util.Date, it works" | Date is mutable, not thread-safe, and months are 0-indexed. java.time (JSR-310) is immutable, timezone-aware, and the only supported API since Java 8. |

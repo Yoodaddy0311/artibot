@@ -2,6 +2,7 @@
 description: (Artibot) Parallel team execution with cross-check — persistent team mode, leader delegates only, implementation on opus 4.6, review phases on sonnet 4.6
 argument-hint: '[task] e.g. "이 기능 구현하고 테스트도 작성해줘"'
 allowed-tools: [Read, Glob, Grep, Bash, TeamCreate, SendMessage, TaskCreate, TaskUpdate, TaskList, TaskGet, Task, TeamDelete]
+toolset: team
 ---
 
 # /team

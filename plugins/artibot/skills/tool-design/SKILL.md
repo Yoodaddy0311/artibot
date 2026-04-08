@@ -29,6 +29,7 @@ category: "architecture"
 version: "1.0.0"
 risk: safe
 lastVerified: "2026-03-31"
+source_hash: cdb68458
 ---
 
 # Tool Design for Agents
@@ -128,3 +129,15 @@ MCP 도구는 항상 정규화된 이름 사용: `ServerName:tool_name`
 5. 일관된 네이밍 컨벤션 유지
 6. 실제 에이전트 상호작용으로 도구 테스트
 7. 모델 개선 시 함께 진화하는 최소 아키텍처 지향
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the discipline of this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "one mega-tool covers all cases" | mega-tools have unclear invocation semantics; the model can't decide when to call them |
+| "more parameters = more flexible" | every optional param is an ambiguity the model must resolve from context |
+| "the description can be short, the model is smart" | description engineering is the primary driver of correct tool selection; short descriptions are the #1 failure mode |
+| "I'll merge similar tools for simplicity" | merging distinct tools creates invocation ambiguity that costs more than the simplicity saves |
+| "architectural reduction is refactoring busywork" | fewer, sharper tools measurably improves selection accuracy — it's the highest-leverage refactor you can do |

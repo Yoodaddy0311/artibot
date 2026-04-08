@@ -1,5 +1,7 @@
 ---
 name: ad-specialist
+capabilities: [ad-copywriting, campaign-setup, bid-strategy, creative-testing]
+lifecycle: marketing
 description: |
   Advertising specialist focused on paid media copy, creative briefs,
   campaign structure, A/B variant generation, and performance optimization

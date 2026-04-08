@@ -21,6 +21,7 @@ agents:
 tokens: "~4K"
 category: "language"
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
+source_hash: f724dda4
 ---
 
 # Ruby Patterns & Best Practices
@@ -257,3 +258,15 @@ end
 - **Rails 7.2**: Convention over configuration with strict loading, normalizations, and Solid Queue
 - **Hotwire/Turbo**: Server-rendered real-time UI with Turbo Streams and Stimulus controllers
 - **RSpec + FactoryBot**: BDD testing with factory-based test data and clean doubles
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip idiomatic patterns in this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "Monkey-patching core classes is the Ruby way" | Reopening String or Array creates global conflicts across gems and upgrades. Use refinements (using MyRefinement) for scoped patches, or a module extension. |
+| "rescue => e catches everything, it's safer" | Bare rescue catches StandardError but hides NoMethodError and ArgumentError — actual bugs. Rescue the specific class you expect and re-raise anything else. |
+| "Rails N+1 is fine, there's only a few records" | Bullet gem reports show N+1 queries scale with data; staging with 10 rows hides the prod 10k-row slowdown. Always eager-load with includes/preload/eager_load. |
+| "Keyword args are slower than positional hashes" | Ruby 3+ optimized keyword args and split them from positional — they're now faster than {} hashes for method dispatch. The performance argument is obsolete. |
+| "Metaprogramming with method_missing is flexible" | method_missing breaks respond_to?, IDE autocomplete, stack traces, and performance. Use define_method or a proper delegation pattern (Forwardable, SimpleDelegator). |
