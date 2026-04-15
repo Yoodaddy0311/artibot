@@ -14,7 +14,7 @@
  * Hook attachment: SessionEnd (low-priority, observability)
  */
 
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { ARTIBOT_DIR } from '../../lib/core/config.js';
 import { rotateJsonArray, rotatePatternFiles } from '../../lib/core/rotation.js';

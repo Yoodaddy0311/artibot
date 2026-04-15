@@ -17,7 +17,7 @@
  * Stdout: { hookSpecificOutput: { hookEventName, additionalContext } }
  */
 
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'; // eslint-disable-line sort-imports
 import path from 'node:path';
 import { ARTIBOT_DIR } from '../../lib/core/config.js';
 import { readStdin, writeStdout } from '../utils/index.js';

@@ -9,6 +9,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.5.0] - 2026-04-15
+
+### Summary / 요약
+
+**English**: GRPO reactivation + auto-invoke hardening + retention policy. After a 6-week dormancy, GRPO (Group Relative Policy Optimization) is now wired into the daily auto-learning pipeline as a dedicated stage and exposed to cognitive modules via a safe `grpo-bridge`. Three new auto-invoke skills (`polish`, `oss-ai-catalog`, `feedback`) land content-quality review, OSS tool recommendations, and bug/feature capture without users typing any slash-command. New SessionStart digest hook surfaces learning/swarm/pattern state in one line; new SessionEnd rotation-runner hook bounds unbounded state files. PermissionRequest auto-approve hook scaffolded for future non-developer UX. Benchmarked against 5 external repos with scored 10-dimension comparison. `/repo` upgraded to multi-URL batch + parallel teammate analysis.
+
+**한국어**: GRPO 재가동 + 자동호출 강화 + 보유기간 정책. 6주 휴면 상태였던 GRPO가 일일 자동학습 파이프라인에 stage로 편입되고 `grpo-bridge`를 통해 인지 모듈에서 안전하게 호출 가능. 자동호출형 스킬 3종(`polish`, `oss-ai-catalog`, `feedback`) 추가. SessionStart 상태 1줄 노출 + SessionEnd 상태 파일 자동 정리 훅 신규. PermissionRequest 자동승인 훅 스캐폴딩. 5개 외부 레포 벤치마크. `/repo` 다중 URL 병렬 팀 분석으로 업그레이드.
+
+### Added / 추가됨
+
+- **GRPO stage in daily auto-learning** (`lib/learning/auto-learning-runner.js`)
+- **`lib/cognitive/grpo-bridge.js`** — safe read layer (`getStrategyBias`, `getTopStrategy`, `getTopTeam`, `getLearnedSignalSummary`, `NEUTRAL_BIAS`)
+- **`lib/core/rotation.js`** — retention primitives with file locks
+- **Skills**: `polish` (AI-slop auto-remediation), `oss-ai-catalog` (curated OSS AI reference), `feedback` (auto bug/feature → GitHub Issues)
+- **Hooks**: `session-digest`, `permission-auto-approve`, `rotation-runner`
+- **Docs**: `docs/AGENT-FLAGS.md`, `docs/ERRORS.md`, `docs/HOOK-EVENTS-2026.md`, root `AGENTS.md`, `CITATION.cff`
+- **Config**: `team.autoApplyTriggers` (OR), `retention`, `permissions.autoApprove`
+- **Tests**: +60 new tests
+
+### Changed / 변경됨
+
+- Auto-learning pipeline: 4 stages → 5 stages (+`grpo`)
+- `runGrpoStage` refactored into 3 helpers for complexity ≤20
+- Guardrail block reason now surfaces top-3 blocked file names
+- `CLAUDE.md`: Operator-Waits DNA + Auto-invoke Principle codified
+- `/repo` command: multi-URL batch, parallel teammate analysis, don't-replace-if-better default, complexity budget, 5-repo seed profiles
+- Auto-team trigger: AND → OR condition
+
+### Removed / 제거됨
+
+- Dead files: `hooks/hooks.json.backup`, `scripts/hooks/_fix-prw.cjs`
+
+### Fixed / 수정됨
+
+- GRPO dormant 6 weeks → now daily via pipeline stage
+- Auto-team trigger too strict → relaxed OR condition
+
+### Benchmark / 벤치마크
+
+| Dimension | Artibot | modu-cowork | minimax-cli |
+|---|---:|---:|---:|
+| Hook System | 10 | 1 | 2 |
+| Orchestration | 9 | 5 | 3 |
+| Agent Architecture | 9 | 6 | 4 |
+| Innovation | 9 | 7 | 6 |
+| **Total (/100)** | **82** | 62 | 64 |
+
+### Tests
+
+- Added: 60 tests
+- Total: 3244 / 3244 passing
+- Lint: 0 errors, 0 warnings
+
+---
+
 ## [2.4.0] - 2026-04-09
 
 ### Summary / 요약

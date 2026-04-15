@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
-  NEUTRAL_BIAS,
   getLearnedSignalSummary,
   getStrategyBias,
   getTopStrategy,
   getTopTeam,
+  NEUTRAL_BIAS,
 } from '../../lib/cognitive/grpo-bridge.js';
 
 // ---------------------------------------------------------------------------

@@ -366,52 +366,71 @@ export async function runAutoLearningPipeline(overrideConfig = {}) {
  * @param {object|null} selfScan - Result from runSelfScan stage (for lint/test signal).
  * @returns {Promise<object>} stage report
  */
+/**
+ * Build the scan signal used by every candidate (exitCode + error count).
+ * @param {object|null} selfScan
+ * @returns {{ exitCode: number, errors: number }}
+ */
+function buildScanSignal(selfScan) {
+  const lintOk = (selfScan?.lintErrors ?? 0) === 0;
+  const testOk = selfScan?.testsPassed === true;
+  return {
+    exitCode: lintOk && testOk ? 0 : 1,
+    errors: selfScan?.lintErrors ?? 0,
+  };
+}
+
+/**
+ * Convert extracted commit patterns into GRPO candidate objects.
+ * @param {object[]} patterns
+ * @param {{ exitCode: number, errors: number }} signal
+ * @returns {object[]}
+ */
+function patternsToCandidates(patterns, signal) {
+  const ts = Date.now();
+  return patterns.map((p, i) => ({
+    id: `auto-learn-cand-${ts}-${i}`,
+    strategy: (p?.type && typeof p.type === 'string') ? p.type : 'default',
+    result: {
+      exitCode: signal.exitCode,
+      errors: signal.errors,
+      duration: 1000,
+      commandLength: typeof p?.subject === 'string' ? p.subject.length : 0,
+      sideEffects: 0,
+    },
+  }));
+}
+
+/**
+ * Summarize a GRPO group result into the stage report shape.
+ * @param {object} groupResult
+ * @param {number} candidateCount
+ * @returns {object}
+ */
+function summarizeGrpoResult(groupResult, candidateCount) {
+  const best = groupResult?.best ?? null;
+  const spread = typeof groupResult?.spread === 'number' ? groupResult.spread : 0;
+  return {
+    candidateCount,
+    bestStrategy: best?.strategy ?? null,
+    bestScore: typeof best?.composite === 'number' ? Math.round(best.composite * 1000) / 1000 : null,
+    spread: Math.round(spread * 1000) / 1000,
+  };
+}
+
 export async function runGrpoStage(patternExtract, selfScan) {
   try {
     const patterns = Array.isArray(patternExtract?.patterns) ? patternExtract.patterns : [];
     if (patterns.length < 2) {
-      return {
-        skipped: true,
-        reason: 'insufficient-patterns',
-        minimumNeeded: 2,
-        got: patterns.length,
-      };
+      return { skipped: true, reason: 'insufficient-patterns', minimumNeeded: 2, got: patterns.length };
     }
-
-    const lintOk = (selfScan?.lintErrors ?? 0) === 0;
-    const testOk = selfScan?.testsPassed === true;
-    const baseExitCode = lintOk && testOk ? 0 : 1;
-    const baseErrors = selfScan?.lintErrors ?? 0;
-
-    const ts = Date.now();
-    const candidates = patterns.map((p, i) => ({
-      id: `auto-learn-cand-${ts}-${i}`,
-      strategy: (p?.type && typeof p.type === 'string') ? p.type : 'default',
-      result: {
-        exitCode: baseExitCode,
-        errors: baseErrors,
-        duration: 1000,
-        commandLength: typeof p?.subject === 'string' ? p.subject.length : 0,
-        sideEffects: 0,
-      },
-    }));
-
+    const signal = buildScanSignal(selfScan);
+    const candidates = patternsToCandidates(patterns, signal);
     const groupResult = evaluateGroup(candidates);
     await updateWeights(groupResult);
-
-    const best = groupResult?.best ?? null;
-    const spread = typeof groupResult?.spread === 'number' ? groupResult.spread : 0;
-
-    return {
-      candidateCount: candidates.length,
-      bestStrategy: best?.strategy ?? null,
-      bestScore: typeof best?.composite === 'number' ? Math.round(best.composite * 1000) / 1000 : null,
-      spread: Math.round(spread * 1000) / 1000,
-    };
+    return summarizeGrpoResult(groupResult, candidates.length);
   } catch (err) {
-    return {
-      error: err?.message ?? String(err),
-    };
+    return { error: err?.message ?? String(err) };
   }
 }
 
