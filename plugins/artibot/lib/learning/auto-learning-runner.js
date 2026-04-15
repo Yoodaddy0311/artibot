@@ -366,7 +366,7 @@ export async function runAutoLearningPipeline(overrideConfig = {}) {
  * @param {object|null} selfScan - Result from runSelfScan stage (for lint/test signal).
  * @returns {Promise<object>} stage report
  */
-async function runGrpoStage(patternExtract, selfScan) {
+export async function runGrpoStage(patternExtract, selfScan) {
   try {
     const patterns = Array.isArray(patternExtract?.patterns) ? patternExtract.patterns : [];
     if (patterns.length < 2) {
