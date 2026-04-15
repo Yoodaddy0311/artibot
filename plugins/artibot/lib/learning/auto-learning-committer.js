@@ -17,6 +17,27 @@ import { hashShort } from './auto-learning-extractor.js';
 
 const execFile = promisify(execFileCb);
 
+/**
+ * Format a human-readable reason string when all changes are blocked by the
+ * guardrail. Surfaces up to the first 3 blocked file names so users can
+ * see WHY the auto-commit was skipped without reading hook logs.
+ *
+ * Pure function — no I/O. Extracted for testability (R3).
+ *
+ * @param {number} total - Total changed file count (allowed + blocked).
+ * @param {string[]} blocked - List of blocked file paths.
+ * @returns {string} Human-readable reason.
+ */
+export function formatGuardrailReason(total, blocked) {
+  const blockedList = Array.isArray(blocked) ? blocked : [];
+  if (blockedList.length === 0) {
+    return 'no changes to commit';
+  }
+  const top = blockedList.slice(0, 3).join(', ');
+  const more = blockedList.length > 3 ? ` (+${blockedList.length - 3} more)` : '';
+  return `all ${total} changes blocked by guardrail — first: ${top}${more}`;
+}
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -333,13 +354,7 @@ export async function runAutoCommit(config, pipelineResult, options = {}) {
 
   if (allowed.length === 0) {
     report.skipped = true;
-    if (blocked.length > 0) {
-      const top = blocked.slice(0, 3).join(', ');
-      const more = blocked.length > 3 ? ` (+${blocked.length - 3} more)` : '';
-      report.reason = `all ${total} changes blocked by guardrail — first: ${top}${more}`;
-    } else {
-      report.reason = 'no changes to commit';
-    }
+    report.reason = formatGuardrailReason(total, blocked);
     return report;
   }
 
