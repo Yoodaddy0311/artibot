@@ -107,6 +107,21 @@ npm run lint          # ESLint (0 errors, 0 warnings target)
 - Architecture decisions: use architect agent
 - Multiple independent tasks: launch agents in parallel
 
+### Operator-Waits DNA (Mandatory)
+**Orchestrator (main Claude) delegates by default. Teammates execute and cross-check.**
+
+| Situation | Who runs | Rationale |
+|---|---|---|
+| <30 lines, single file, no domain risk | Orchestrator inline | Overhead of spawning exceeds work |
+| ≥2 independent subtasks | **Parallel teammates** (one per subtask) | Core DNA — Artibot's #1 differentiator |
+| ≥2 files or domains touched | **Parallel teammates** + cross-verify | Prevents silent conflicts |
+| Any medium+ complexity request | **planner → parallel executors → reviewer** | Chain guarantees quality |
+
+Violation symptom: "all work done inline by the main thread" = DNA breach. When detected, stop and delegate.
+
+### Auto-invoke Principle
+Never instruct the user to type slash-commands. Detect intent and trigger commands/skills/agents silently. Users include non-developers.
+
 ### Quality Gates
 - Read before write (no blind modifications)
 - Functions < 50 lines, files < 800 lines

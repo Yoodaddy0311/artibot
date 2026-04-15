@@ -110,6 +110,18 @@
   "team": {
     "enabled": true,
     "autoApply": true,
+    "autoApplyTriggers": {
+      "logic": "OR",
+      "minSubtasks": 2,
+      "minFiles": 2,
+      "minComplexity": "medium",
+      "excludeTrivial": {
+        "maxLines": 30,
+        "singleFile": true
+      },
+      "persistentTeam": true,
+      "comment": "Any ONE trigger fires team mode. Orchestrator delegates; only trivial edits (single file, <30 lines) run inline. Restores Artibot's parallel-team DNA."
+    },
     "engine": "claude-agent-teams",
     "envVar": "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS",
     "maxTeammates": null,
