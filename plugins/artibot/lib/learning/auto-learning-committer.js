@@ -333,9 +333,13 @@ export async function runAutoCommit(config, pipelineResult, options = {}) {
 
   if (allowed.length === 0) {
     report.skipped = true;
-    report.reason = blocked.length > 0
-      ? `all ${total} changes blocked by guardrail`
-      : 'no changes to commit';
+    if (blocked.length > 0) {
+      const top = blocked.slice(0, 3).join(', ');
+      const more = blocked.length > 3 ? ` (+${blocked.length - 3} more)` : '';
+      report.reason = `all ${total} changes blocked by guardrail — first: ${top}${more}`;
+    } else {
+      report.reason = 'no changes to commit';
+    }
     return report;
   }
 

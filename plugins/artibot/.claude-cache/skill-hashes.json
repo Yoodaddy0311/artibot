@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-04-15T00:53:27.832Z",
+  "generatedAt": "2026-04-15T08:32:38.411Z",
   "skills": {
     "ab-testing": {
       "hash": "701661e8",
@@ -151,6 +151,11 @@
       "hash": "55c1bbeb",
       "path": "skills\\email-marketing\\SKILL.md",
       "size": 6453
+    },
+    "feedback": {
+      "hash": "86c04ffc",
+      "path": "skills\\feedback\\SKILL.md",
+      "size": 3702
     },
     "fp-refactor": {
       "hash": "59d3e5ea",
@@ -367,6 +372,11 @@
       "path": "skills\\orchestration\\SKILL.md",
       "size": 19430
     },
+    "oss-ai-catalog": {
+      "hash": "27c775bf",
+      "path": "skills\\oss-ai-catalog\\SKILL.md",
+      "size": 4326
+    },
     "persona-analyzer": {
       "hash": "b24665d0",
       "path": "skills\\persona-analyzer\\SKILL.md",
@@ -436,6 +446,11 @@
       "hash": "2a4a26be",
       "path": "skills\\platform-deployment\\SKILL.md",
       "size": 8169
+    },
+    "polish": {
+      "hash": "6cd0ed27",
+      "path": "skills\\polish\\SKILL.md",
+      "size": 3877
     },
     "presentation-design": {
       "hash": "bbeb1e8e",

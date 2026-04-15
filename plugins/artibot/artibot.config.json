@@ -803,6 +803,15 @@
       "maxConcurrent": 5
     }
   },
+  "retention": {
+    "dailyExperiencesMaxDays": 30,
+    "skillInjectionLogMaxDays": 90,
+    "patternFilesMaxDays": 14,
+    "learningLogMaxEntries": 200
+  },
+  "permissions": {
+    "autoApprove": []
+  },
   "output": {
     "maxContextLength": 500,
     "defaultStyle": "artibot-default"
