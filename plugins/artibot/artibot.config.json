@@ -788,7 +788,8 @@
       "self-scan",
       "pattern-extract",
       "knowledge-update",
-      "skill-refinement"
+      "skill-refinement",
+      "grpo"
     ],
     "autoCommit": true,
     "autoPush": true,
