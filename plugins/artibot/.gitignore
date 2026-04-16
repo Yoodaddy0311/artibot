@@ -5,5 +5,5 @@ CLAUDE.local.md
 _reports/
 _benchmarks/
 
-# Runtime session data
-runtime/
+# Runtime session data (top-level only — do NOT match lib/runtime/ or its subdirs)
+/runtime/

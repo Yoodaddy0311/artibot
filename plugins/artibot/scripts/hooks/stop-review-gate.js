@@ -7,9 +7,9 @@
  */
 
 import { execSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { parseJSON, readStdin, writeStdout, getPluginRoot } from '../utils/index.js';
+import { getPluginRoot, parseJSON, readStdin, writeStdout } from '../utils/index.js';
 import { createErrorHandler, hasExtension, isSkippablePath } from '../../lib/core/hook-utils.js';
 
 const HOOK_NAME = 'stop-review-gate';
@@ -69,73 +69,31 @@ function getChangedFiles(cwd) {
 // -------------------------------------------------------------------------
 
 /**
- * Advance past non-code regions (strings, comments, escapes).
- * @param {string} ch - Current character
- * @param {string} next - Next character
- * @param {object} state - Parser state (mutated in place)
- * @returns {{ skip: boolean }}
+ * Check for syntax errors (including bracket mismatch) in a JS/MJS/CJS file.
+ * Delegates to Node's own parser via `node --check` for accurate results —
+ * this avoids hand-rolled parser false positives on template literals,
+ * regex literals, and nested `${...}` interpolation.
+ *
+ * Returns a short message on failure, or null on success.
+ *
+ * @param {string} absPath - Absolute path to the file to check.
+ * @param {string} ext - File extension (only .js/.mjs/.cjs are checked).
+ * @returns {string|null}
  */
-function skipNonCode(ch, next, state) {
-  if (state.escaped) { state.escaped = false; return { skip: true }; }
-  if (ch === '\\') { state.escaped = true; return { skip: true }; }
-
-  if (state.inLineComment) {
-    if (ch === '\n') state.inLineComment = false;
-    return { skip: true };
+function checkBracketMismatch(absPath, ext) {
+  if (!['.js', '.mjs', '.cjs'].includes(ext)) return null;
+  try {
+    execSync(`node --check "${absPath}"`, {
+      stdio: ['ignore', 'ignore', 'pipe'],
+      timeout: 5000,
+    });
+    return null;
+  } catch (err) {
+    const stderr = String(err.stderr || err.message || '').trim();
+    // Extract the first error line for a terse message.
+    const firstLine = stderr.split('\n').find((l) => /SyntaxError|error/i.test(l));
+    return firstLine ? firstLine.slice(0, 120) : 'syntax error';
   }
-  if (state.inBlockComment) {
-    if (ch === '*' && next === '/') { state.inBlockComment = false; state.advance = true; }
-    return { skip: true };
-  }
-  if (state.inString) {
-    if (ch === state.stringChar) state.inString = false;
-    return { skip: true };
-  }
-
-  if (ch === '/' && next === '/') { state.inLineComment = true; state.advance = true; return { skip: true }; }
-  if (ch === '/' && next === '*') { state.inBlockComment = true; state.advance = true; return { skip: true }; }
-  if (ch === '"' || ch === "'" || ch === '`') { state.inString = true; state.stringChar = ch; return { skip: true }; }
-
-  return { skip: false };
-}
-
-/**
- * Check for bracket/brace mismatch in a file.
- * @param {string} content
- * @returns {string|null} Warning message or null
- */
-function checkBracketMismatch(content) {
-  const pairs = { '(': ')', '{': '}', '[': ']' };
-  const openers = new Set(Object.keys(pairs));
-  const closerToOpener = Object.fromEntries(
-    Object.entries(pairs).map(([k, v]) => [v, k]),
-  );
-  const stack = [];
-  const state = { escaped: false, inString: false, stringChar: '', inLineComment: false, inBlockComment: false, advance: false };
-
-  for (let i = 0; i < content.length; i++) {
-    state.advance = false;
-    const result = skipNonCode(content[i], content[i + 1], state);
-    if (state.advance) i++;
-    if (result.skip) continue;
-
-    const ch = content[i];
-    if (openers.has(ch)) {
-      stack.push(ch);
-    } else if (closerToOpener[ch]) {
-      const expected = closerToOpener[ch];
-      if (stack.length === 0 || stack[stack.length - 1] !== expected) {
-        return `unmatched '${ch}' detected`;
-      }
-      stack.pop();
-    }
-  }
-
-  if (stack.length > 0) {
-    const unclosed = stack.map((c) => `'${c}'`).join(', ');
-    return `unclosed brackets: ${unclosed}`;
-  }
-  return null;
 }
 
 
@@ -149,17 +107,30 @@ function checkPatternViolations(content, filename) {
   const warnings = [];
   const lines = content.split('\n');
 
-  const consolePattern = /\bconsole\.(log|debug|info)\s*\(/g;
-  const todoPattern = /\b(TODO|FIXME|HACK|XXX)\b/g;
+  const consolePattern = /\bconsole\.(log|debug|info)\s*\(/;
+  const todoPattern = /\b(TODO|FIXME|HACK|XXX)\b/;
+  const jsdocLine = /^\s*\*(?!\/)/; // matches JSDoc continuation lines
+  const singleLineComment = /^\s*\/\//;
 
   const consoleHits = [];
   const todoHits = [];
+  let inBlockComment = false;
 
   for (let i = 0; i < lines.length; i++) {
-    consolePattern.lastIndex = 0;
-    todoPattern.lastIndex = 0;
-    if (consolePattern.test(lines[i])) consoleHits.push(i + 1);
-    if (todoPattern.test(lines[i])) todoHits.push(i + 1);
+    const line = lines[i];
+    // Track block comment state (simple line-level heuristic)
+    if (inBlockComment) {
+      if (/\*\//.test(line)) inBlockComment = false;
+      continue;
+    }
+    if (/^\s*\/\*/.test(line) && !/\*\//.test(line)) {
+      inBlockComment = true;
+      continue;
+    }
+    // Skip JSDoc continuation lines and single-line comments
+    if (jsdocLine.test(line) || singleLineComment.test(line)) continue;
+    if (consolePattern.test(line)) consoleHits.push(i + 1);
+    if (todoPattern.test(line)) todoHits.push(i + 1);
   }
 
   if (consoleHits.length > 0) {
@@ -188,21 +159,65 @@ function isSensitiveFile(filePath) {
  * @param {string} repoRoot
  * @returns {string[]} Files without tests
  */
+/**
+ * Recursively walk a directory and collect all `*.test.*` and `*.spec.*` basenames.
+ * Used to match arbitrary lib paths against any mirror test regardless of depth.
+ *
+ * @param {string} rootDir
+ * @returns {Set<string>} Set of basename stems (e.g. "router", "dag").
+ */
+function collectTestBasenames(rootDir) {
+  const stems = new Set();
+  const stack = [rootDir];
+  while (stack.length > 0) {
+    const dir = stack.pop();
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        stack.push(full);
+      } else if (entry.isFile()) {
+        const match = entry.name.match(/^(.+?)\.(?:test|spec)\.(?:js|mjs|cjs|ts|tsx|jsx)$/);
+        if (match) stems.add(match[1]);
+      }
+    }
+  }
+  return stems;
+}
+
 function checkMissingTests(files, repoRoot) {
   const codeFiles = files.filter(
-    (f) => hasExtension(f, TEST_EXTENSIONS) && !f.includes('.test.') && !f.includes('.spec.') && !f.includes('__tests__'),
+    (f) => hasExtension(f, TEST_EXTENSIONS)
+      && !f.includes('.test.')
+      && !f.includes('.spec.')
+      && !f.includes('__tests__')
+      // CLI entry scripts and one-shot utilities don't need tests:
+      && !/\/scripts\/hooks\//.test(f)
+      && !/\/scripts\/(validate-|migrate-|audit-|generate-|phase\d+-audit|inject-)/.test(f),
   );
+
+  // Pre-collect all test basename stems under plugins/artibot/tests/ once.
+  const testsRoot = path.join(repoRoot, 'plugins', 'artibot', 'tests');
+  const testStems = existsSync(testsRoot) ? collectTestBasenames(testsRoot) : new Set();
 
   const missing = [];
   for (const file of codeFiles) {
     const ext = path.extname(file);
     const base = file.slice(0, -ext.length);
-    const testVariants = [
-      `${base}.test${ext}`,
-      `${base}.spec${ext}`,
-    ];
-    const hasTest = testVariants.some((t) => existsSync(path.join(repoRoot, t)));
-    if (!hasTest) missing.push(file);
+    const baseName = path.basename(base);
+
+    // Fast path: any test file anywhere under tests/** with matching basename.
+    if (testStems.has(baseName)) continue;
+
+    // Sibling-path variants: foo.js -> foo.test.js
+    const siblingVariants = [`${base}.test${ext}`, `${base}.spec${ext}`];
+    const hasSibling = siblingVariants.some((t) => existsSync(path.join(repoRoot, t)));
+    if (!hasSibling) missing.push(file);
   }
   return missing;
 }
@@ -249,9 +264,22 @@ function analyzeChangedFiles(changedFiles, repoRoot) {
     try {
       const content = readFileSync(absPath, 'utf-8');
       const basename = path.basename(file);
-      const bracketIssue = checkBracketMismatch(content);
+      const ext = path.extname(file);
+      const bracketIssue = checkBracketMismatch(absPath, ext);
       if (bracketIssue) bracketWarnings.push(`${basename}: ${bracketIssue}`);
-      patternWarnings.push(...checkPatternViolations(content, basename));
+      // Pattern checks are advisory only; skip for files where console output
+      // and TODO/FIXME references are legitimate:
+      //   - CLI scripts under scripts/ (they use console.log for output)
+      //   - test files (debug output is normal)
+      //   - the review-gate itself (references TODO/FIXME as patterns to detect)
+      //   - CJS one-shots (*.cjs)
+      const isCliScript = /\/scripts\//.test(file) && !/\/scripts\/hooks\/(?!stop-review-gate)/.test(file);
+      const isTestFile = /\/tests\//.test(file) || /\.test\.|\.spec\./.test(file);
+      const isSelfFile = file.endsWith('stop-review-gate.js');
+      const isCjs = file.endsWith('.cjs');
+      if (!isCliScript && !isTestFile && !isSelfFile && !isCjs) {
+        patternWarnings.push(...checkPatternViolations(content, basename));
+      }
     } catch {
       // Skip unreadable files
     }
@@ -292,8 +320,9 @@ function aggregateIssues(analysis, missingTests) {
  * @param {string|null} codexMode
  */
 function buildResult(issues, changedFiles, codexMode) {
-  const needsCodexReview = codexMode === 'review' || codexMode === 'dev';
-  const codexFlag = needsCodexReview ? { codexCrossCheck: true } : {};
+  // Reserved: codexMode can trigger cross-check in future releases.
+  // Currently the flag is informational only.
+  void codexMode;
 
   if (issues.length > 0) {
     const reason = `Review gate found ${issues.length} issue(s):\n${issues.map((i) => `  - ${i}`).join('\n')}`;

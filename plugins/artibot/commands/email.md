@@ -2,6 +2,7 @@
 description: (Artibot) Email campaign creation with A/B testing, segmentation, automation sequences, and deliverability optimization
 argument-hint: '[type] e.g. "온보딩 드립 캠페인 작성"'
 allowed-tools: [Read, Write, Task, WebSearch, TaskCreate]
+toolset: content
 ---
 
 # /email

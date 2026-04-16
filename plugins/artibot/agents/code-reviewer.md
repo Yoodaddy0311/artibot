@@ -1,5 +1,8 @@
 ---
 name: code-reviewer
+capabilities: [code-review, pattern-detection, severity-classification, review-orchestration]
+lifecycle: review
+rules: [patterns:read-before-write, patterns:decompose-execute-verify, testing:coverage-statements, patterns:single-responsibility]
 description: |
   2단계 코드 리뷰 오케스트레이터. spec-reviewer(스펙 일치) + quality-reviewer(코드 품질)를
   순차적으로 호출하여 빈틈없는 코드 검수를 수행한다. Sub-agent와 팀원의 작업물을 반드시 검수한다.

@@ -1,6 +1,6 @@
 {
   "name": "artibot",
-  "version": "2.2.0",
+  "version": "2.5.0",
   "description": "Artibot - Claude Code orchestration plugin runtime",
   "private": true,
   "type": "module",
@@ -9,7 +9,7 @@
     "artibot": "./bin/artibot.js"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20.0.0"
   },
   "scripts": {
     "validate": "node scripts/validate.js",
@@ -26,7 +26,10 @@
     "eval:runtime:check": "node scripts/ci/validate-runtime-evals.js",
     "skill:check": "node scripts/gen-skill-docs.js --check",
     "skill:check:json": "node scripts/gen-skill-docs.js --json",
-    "skill:report": "node scripts/gen-skill-docs.js --report"
+    "skill:report": "node scripts/gen-skill-docs.js --report",
+    "release:check": "node scripts/release-check.js",
+    "sync:local": "bash scripts/sync-local.sh",
+    "release": "npm run release:check && npm run ci && npm run sync:local"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

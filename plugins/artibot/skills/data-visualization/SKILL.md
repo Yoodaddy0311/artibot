@@ -16,6 +16,7 @@ agents:
   - "code-reviewer"
 tokens: "~3K"
 category: "analysis"
+source_hash: df38d037
 ---
 
 # Data Visualization
@@ -176,3 +177,15 @@ Filters:    [interactive filter needs]
 
 - See `${CLAUDE_SKILL_DIR}/references/chart-selection-matrix.md` for chart selection matrix
 - See `${CLAUDE_SKILL_DIR}/references/dashboard-design-principles.md` for dashboard design principles
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the rigor of this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "a pie chart works for everything" | pie charts fail past three categories and for comparisons — pick the chart that matches the question |
+| "color makes it pretty" | color is data encoding, not decoration — unconsidered color misleads readers |
+| "I will add the axis labels later" | unlabeled charts are actively misleading; no chart is better than a mystery chart |
+| "3D adds depth" | 3D distorts comparisons and hides occluded data — use 2D unless the extra dimension encodes data |
+| "the default matplotlib is fine" | defaults optimize for quick iteration, not for communication — style your final output |

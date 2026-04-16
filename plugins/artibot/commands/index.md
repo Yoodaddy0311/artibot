@@ -2,6 +2,7 @@
 description: (Artibot) Browse and search available commands, agents, skills, and plugin capabilities
 argument-hint: '[query] e.g. "사용 가능한 명령어 검색"'
 allowed-tools: [Read, Glob, Grep]
+toolset: meta
 ---
 
 # /index

@@ -22,6 +22,7 @@ agents:
   - "orchestrator"
 tokens: "~3K"
 category: "learning"
+source_hash: 109862fc
 ---
 
 # Self-Learning Tool Selection (Toolformer + GRPO)
@@ -304,3 +305,15 @@ Progress:
 - Min samples: 3 before recommending
 - Storage: `~/.claude/artibot/tool-history.json`
 - Retention: 90 days, 200 records/context cap
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the discipline of this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "tool selection is obvious" | obvious today is stale tomorrow — tool landscape shifts and learned success rates track it |
+| "Toolformer-style learning needs huge datasets" | even 50 rollouts per tool produces usable success-rate estimates; the dataset excuse is folklore |
+| "GRPO is research, not production" | GRPO is just group-relative scoring; the math fits on a napkin and runs in <1ms |
+| "context-aware tool choice is over-engineering" | generic tool choice wastes 30%+ of calls on wrong tools; context-awareness is the ROI move |
+| "I'll hardcode the tool policy" | hardcoded policies can't adapt; learned policies improve with every session |

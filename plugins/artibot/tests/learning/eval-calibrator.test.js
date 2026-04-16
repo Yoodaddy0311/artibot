@@ -5,7 +5,7 @@ import {
   createEvalCalibrator,
   DEFAULT_DIMENSIONS,
 } from '../../lib/learning/eval-calibrator.js';
-import { reset as resetEventBus, getLastEvent } from '../../lib/core/event-bus.js';
+import { getLastEvent, reset as resetEventBus } from '../../lib/core/event-bus.js';
 
 // ---------------------------------------------------------------------------
 // Helpers

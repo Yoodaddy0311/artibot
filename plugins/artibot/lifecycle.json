@@ -1,0 +1,62 @@
+{
+  "version": 1,
+  "description": "8 lifecycle phases — each routes to candidate agents during execution",
+  "lifecycles": {
+    "spec": {
+      "label": "Spec & Requirements",
+      "description": "Define requirements, acceptance criteria, and user stories",
+      "default_agent": null,
+      "candidates": [],
+      "context_matchers": ["spec", "requirement", "acceptance criteria", "user story", "스펙", "요구사항"]
+    },
+    "plan": {
+      "label": "Plan & Architecture",
+      "description": "Decompose features, design systems, estimate risks",
+      "default_agent": "planner",
+      "candidates": ["planner", "architect"],
+      "context_matchers": ["plan", "architect", "design", "계획", "설계"]
+    },
+    "build": {
+      "label": "Build & Implementation",
+      "description": "Write code, implement features, fix bugs",
+      "default_agent": "backend-developer",
+      "candidates": ["backend-developer", "frontend-developer", "typescript-pro", "build-error-resolver", "llm-architect", "mcp-developer", "tdd-guide", "refactor-cleaner"],
+      "context_matchers": ["implement", "build", "code", "write", "구현", "작성"]
+    },
+    "verify": {
+      "label": "Verify & Test",
+      "description": "Run tests, validate E2E flows, benchmark performance",
+      "default_agent": "tdd-guide",
+      "candidates": ["tdd-guide", "e2e-runner", "performance-engineer", "database-reviewer"],
+      "context_matchers": ["test", "verify", "benchmark", "check", "검증", "테스트"]
+    },
+    "review": {
+      "label": "Review & Quality",
+      "description": "Code review, security audit, spec compliance",
+      "default_agent": "code-reviewer",
+      "candidates": ["code-reviewer", "security-reviewer", "spec-reviewer", "quality-reviewer"],
+      "context_matchers": ["review", "audit", "security", "리뷰", "보안"]
+    },
+    "ship": {
+      "label": "Ship & Deploy",
+      "description": "Deploy, release, document shipped changes",
+      "default_agent": "devops-engineer",
+      "candidates": ["devops-engineer", "doc-updater"],
+      "context_matchers": ["deploy", "ship", "release", "배포", "릴리즈"]
+    },
+    "marketing": {
+      "label": "Marketing & Growth",
+      "description": "Marketing strategy, content, ads, CRO, SEO, analytics",
+      "default_agent": "marketing-strategist",
+      "candidates": ["marketing-strategist", "ad-specialist", "content-marketer", "cro-specialist", "seo-specialist", "data-analyst"],
+      "context_matchers": ["marketing", "ads", "cro", "seo", "campaign", "마케팅", "광고"]
+    },
+    "design": {
+      "label": "Design & Architecture",
+      "description": "System design, presentation design, visual standards",
+      "default_agent": "architect",
+      "candidates": ["architect", "presentation-designer"],
+      "context_matchers": ["design", "architecture", "presentation", "디자인", "발표"]
+    }
+  }
+}

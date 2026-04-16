@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  allowedTransitions,
+  canCancel,
+  isTerminal,
   STATUS,
   transition,
-  isTerminal,
-  canCancel,
-  allowedTransitions,
 } from '../../lib/orchestration/status.js';
 
 describe('status', () => {

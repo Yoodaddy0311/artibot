@@ -17,6 +17,7 @@ agents:
   - "backend-developer"
 tokens: "~4K"
 category: "marketing"
+source_hash: 64f38bc5
 ---
 
 # SEO Strategy
@@ -163,3 +164,16 @@ Phase        | Timeframe  | Actions              | Target
 - See `${CLAUDE_SKILL_DIR}/references/search-intent-classification.md` for search intent classification framework
 - See `${CLAUDE_SKILL_DIR}/references/keyword-priority-formula.md` for keyword priority formula
 - See `${CLAUDE_SKILL_DIR}/references/geo-optimization-guide.md` for GEO (Generative Engine Optimization) principles
+
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the rigor of this marketing practice, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "Keyword density still matters." | Keyword density has been deprecated as a ranking signal since ~2013; topical coverage and intent match are what rank today. |
+| "We'll add schema markup later." | Structured data is a prerequisite for rich results and GEO surfaces; shipping without it forfeits SERP real estate permanently. |
+| "Search intent is the same across keywords." | Intent (informational, navigational, transactional, commercial) dictates page type; mismatched intent kills ranking regardless of content quality. |
+| "Publishing velocity beats depth." | Thin-content velocity triggers Helpful Content classifier demotions; one authoritative page beats ten shallow ones. |
+| "Link building means buying links." | Paid link schemes violate Google guidelines and trigger manual actions; durable authority comes from digital PR and linkable assets. |

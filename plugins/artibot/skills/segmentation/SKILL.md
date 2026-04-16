@@ -14,6 +14,7 @@ agents:
   - "code-reviewer"
 tokens: "~3K"
 category: "marketing"
+source_hash: dc543348
 ---
 
 # Segmentation
@@ -211,3 +212,16 @@ P1       | [segment] | [action]            | [impact]
 
 - See `${CLAUDE_SKILL_DIR}/references/segmentation-dimensions.md` for segmentation dimensions
 - See `${CLAUDE_SKILL_DIR}/references/segment-activation-matrix.md` for segment activation matrix
+
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the rigor of this marketing practice, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "Our audience is everyone interested in X." | Undifferentiated "everyone" audiences underperform segmented audiences by 2-4x on CPA; segmentation is a cost lever. |
+| "Demographics tell us enough about the user." | Demographics predict who; behavior predicts what they will do next. Without behavioral signals, segments fail to drive action. |
+| "RFM is too complex for our team." | RFM is 3 SQL columns and 3 quintiles; the "complexity" excuse costs 20-40% of potential retention revenue. |
+| "We don't have enough data for cohorts." | Cohort analysis works from 100+ users per cohort; skipping it hides retention curve differences between acquisition sources. |
+| "Send the same message to all segments, it's faster." | Batch-and-blast trains unsubscribes and depresses sender reputation; segmented messaging compounds engagement over weeks. |

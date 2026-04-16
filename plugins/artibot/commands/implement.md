@@ -2,6 +2,7 @@
 description: (Artibot) Feature implementation with planner/tdd-guide/code-reviewer pipeline
 argument-hint: '[feature] e.g. "로그인 기능 구현"'
 allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, Task, TaskCreate]
+toolset: team
 ---
 
 # /implement

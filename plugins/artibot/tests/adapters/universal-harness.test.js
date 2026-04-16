@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
-  detectHarness,
-  mapHooks,
-  convertAgentDefinition,
-  UniversalHarnessAdapter,
-  _HARNESS_REGISTRY,
-  _CANONICAL_HOOKS,
   _camelToKebab,
+  _CANONICAL_HOOKS,
+  _HARNESS_REGISTRY,
   _translateHookEvent,
   _wrapAsMdc,
+  convertAgentDefinition,
+  detectHarness,
+  mapHooks,
+  UniversalHarnessAdapter,
 } from '../../lib/adapters/universal-harness.js';
 
 describe('universal-harness', () => {

@@ -132,7 +132,13 @@ describe('session-start hook', () => {
 
       await importAndWait();
 
-      const stderrOutput = stderrSpy.mock.calls.map((c) => c[0]).join('');
+      // Filter out informational skill-hash cache messages (Phase 1 Quick Win).
+      // These are advisory only, not errors, and may appear in test environments
+      // where the cache module's dynamic import target is mocked.
+      const stderrOutput = stderrSpy.mock.calls
+        .map((c) => c[0])
+        .filter((line) => !String(line).includes('skill-hash'))
+        .join('');
       expect(stderrOutput).toBe('');
     });
   });

@@ -3,6 +3,7 @@ import {
   AUTO_COMMIT_ALLOWLIST,
   AUTO_COMMIT_DENYLIST,
   buildAutoCommitMessage,
+  formatGuardrailReason,
   isAutoCommitAllowed,
   matchGlob,
 } from '../../lib/learning/auto-learning-committer.js';
@@ -241,5 +242,57 @@ describe('auto-learning-committer/constants', () => {
     expect(AUTO_COMMIT_DENYLIST).toContain('lib/core/**');
     expect(AUTO_COMMIT_DENYLIST).toContain('agents/**');
     expect(AUTO_COMMIT_DENYLIST).toContain('commands/**');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// formatGuardrailReason — pure helper extracted from runAutoCommit (R3).
+// Surfaces blocked file names so users can debug auto-commit skips without
+// reading raw hook logs.
+// ---------------------------------------------------------------------------
+
+describe('auto-learning-committer/formatGuardrailReason', () => {
+  it('blocked가 비어있으면 "no changes to commit"', () => {
+    expect(formatGuardrailReason(0, [])).toBe('no changes to commit');
+  });
+
+  it('blocked가 null이어도 안전 (배열 처리)', () => {
+    expect(formatGuardrailReason(0, null)).toBe('no changes to commit');
+  });
+
+  it('blocked가 undefined여도 안전', () => {
+    expect(formatGuardrailReason(5, undefined)).toBe('no changes to commit');
+  });
+
+  it('blocked 1개 → 파일 이름 노출', () => {
+    const r = formatGuardrailReason(1, ['lib/core/secret.js']);
+    expect(r).toContain('all 1 changes blocked by guardrail');
+    expect(r).toContain('lib/core/secret.js');
+    expect(r).not.toContain('+');
+  });
+
+  it('blocked 3개 → 모두 노출, "+ more" 없음', () => {
+    const r = formatGuardrailReason(3, ['a.js', 'b.js', 'c.js']);
+    expect(r).toContain('a.js, b.js, c.js');
+    expect(r).not.toContain('more');
+  });
+
+  it('blocked 4개 이상 → top 3 + "(+N more)"', () => {
+    const r = formatGuardrailReason(5, ['fileA.js', 'fileB.js', 'fileC.js', 'fileD.js', 'fileE.js']);
+    expect(r).toContain('fileA.js, fileB.js, fileC.js');
+    expect(r).toContain('(+2 more)');
+    expect(r).not.toContain('fileD.js');
+    expect(r).not.toContain('fileE.js');
+  });
+
+  it('total과 blocked 길이가 다를 수 있다 (실제로는 blocked만 차단됨)', () => {
+    const r = formatGuardrailReason(10, ['x.js', 'y.js']);
+    expect(r).toContain('all 10 changes');
+    expect(r).toContain('x.js, y.js');
+  });
+
+  it('blocked가 배열 아님 → no changes to commit (안전 fallback)', () => {
+    expect(formatGuardrailReason(5, 'not-an-array')).toBe('no changes to commit');
+    expect(formatGuardrailReason(5, { foo: 'bar' })).toBe('no changes to commit');
   });
 });

@@ -60,10 +60,14 @@ function main() {
 
   if (!checkOnly) {
     console.log('Running runtime eval suite...\n');
+    // 5-minute timeout: the suite itself runs in ~10s on Linux but Windows
+    // process-spawn overhead (sync execFileSync per hook scenario) can push
+    // the total to ~120s. The previous 120s timeout was hitting SIGTERM
+    // exactly at the boundary on Windows runners.
     execSync('node scripts/evals/run-runtime-task-suite.js', {
       cwd: pluginRoot,
       stdio: 'inherit',
-      timeout: 120_000,
+      timeout: 300_000,
     });
     console.log('');
   }

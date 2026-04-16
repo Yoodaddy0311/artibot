@@ -17,6 +17,7 @@ agents:
   - "performance-engineer"
 tokens: "~4K"
 category: "analysis"
+source_hash: fd7e2af1
 ---
 
 # Data Analysis
@@ -193,3 +194,15 @@ P1       | [action]           | [impact]        | [HIGH|MEDIUM|LOW]
 
 - See `${CLAUDE_SKILL_DIR}/references/kpi-formula-library.md` for KPI formula library
 - See `${CLAUDE_SKILL_DIR}/references/analysis-types-guide.md` for analysis types guide
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the rigor of this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "the number looks right, ship it" | right to whom? validate against a second source before acting on a single query |
+| "I will clean the data later" | dirty data contaminates downstream decisions — clean before you analyze, not after |
+| "correlation is close enough to causation" | acting on correlation is how teams ship wrong features — establish causality or caveat the finding |
+| "the outliers are errors, drop them" | outliers often contain the signal — investigate before excluding |
+| "averages tell the story" | averages hide distribution tails where the real users (and problems) live — show p50/p95 |

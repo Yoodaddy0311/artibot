@@ -27,6 +27,7 @@ agents:
   - "frontend-developer"
 tokens: "~4K"
 category: "testing"
+source_hash: 64f60461
 ---
 
 # Visual Validation
@@ -135,3 +136,15 @@ These instructions should be dispatched via the Playwright MCP server at runtime
 ## References
 
 - See `${CLAUDE_SKILL_DIR}/references/validation-thresholds.md` for validation thresholds
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the rigor of this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "screenshot diff is flaky" | SSIM with tolerance is not flaky — pixel-exact is; use the right metric |
+| "eyeballing it is faster" | eyeballing misses subpixel shifts and rebrand drifts — tools do not blink |
+| "visual tests break on every CSS change" | they break on every unintended CSS change — that is the feature, update baselines intentionally |
+| "we do not need visual tests for an API" | dashboards and admin UIs are visual surfaces; APIs with docs have rendered docs |
+| "baselines bloat the repo" | store baselines in object storage, not git — bloat is a storage choice |

@@ -14,6 +14,7 @@ agents:
   - "tdd-guide"
 tokens: "~3K"
 category: "marketing"
+source_hash: fcb87289
 ---
 
 # CRO - Form Optimization
@@ -178,3 +179,16 @@ P1       | [change]          | +[X]%
 
 - See `${CLAUDE_SKILL_DIR}/references/field-optimization-guide.md` for field optimization and completion rate guide
 - See `${CLAUDE_SKILL_DIR}/references/validation-ux-patterns.md` for validation UX patterns and error handling
+
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the rigor of this marketing practice, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "More fields give sales better qualification." | Every added field drops form completion 5-15%; qualify post-submit via enrichment or progressive profiling instead. |
+| "Inline validation is a nice-to-have." | Error-on-submit patterns force rework loops and increase abandonment by 20-30% vs. real-time validation. |
+| "Required asterisks are enough labeling." | Placeholder-only labels fail WCAG and disappear on focus, causing input errors; use persistent labels above fields. |
+| "Mobile forms just need smaller inputs." | Mobile forms require input-type attributes (tel, email, numeric) and touch target sizing; reusing desktop layouts loses 30%+ mobile conversions. |
+| "Autofill is out of our control." | Autocomplete attribute values (name, email, cc-number) must be set explicitly; skipping them disables browser autofill and tanks conversion. |

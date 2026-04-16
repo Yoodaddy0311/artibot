@@ -14,10 +14,12 @@ refs/
 nul
 _benchmarks/
 blog-artibot-intro.md
-docs/
+/docs/
 plugins/artibot/_reports/
 plugins/artibot/_Benchmarks/
-plugins/artibot/docs/
+plugins/artibot/docs/*
+!plugins/artibot/docs/phase2/
+!plugins/artibot/docs/phase2/**
 plugins/artibot/coverage/
 plugins/artibot/image.png
 NVIDIA Corporation/

@@ -30,6 +30,7 @@ category: "development"
 version: "1.0.0"
 risk: safe
 lastVerified: "2026-03-31"
+source_hash: 59d3e5ea
 ---
 
 # FP Refactor: Imperative → Functional
@@ -165,3 +166,15 @@ const result = pipe(safeParseJSON(input), E.getOrElse(() => defaultValue));
 4. Either의 left를 도메인 에러 타입으로 구체화
 5. Option.none을 비즈니스 로직 분기에 활용
 6. 불필요한 추상화 회피 (YAGNI)
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip idiomatic patterns in this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "Mutable state is faster" | For hot loops the JIT often optimizes immutable updates via structural sharing (Immer, Immutable.js). The real cost is debugging shared mutation — measurable in bug-density studies, not microbenchmarks. |
+| "FP is academic, real teams use OOP" | Cats Effect, ZIO, fp-ts, and Effect ship in banks, fintechs, and compilers. The patterns (Either, Option, Task) are the same ones TypeScript's Result types and Rust's ? operator encode. |
+| "Monads are scary math" | A monad is just `flatMap` + a constructor — you already use it with Array.flatMap and Promise.then. Naming it doesn't add complexity; it adds composability (do-notation, for-comprehensions). |
+| "A plain for-loop is clearer than reduce" | Loops mix iteration, accumulation, and mutation in one scope, making off-by-one and early-exit bugs common. reduce/fold separate the step function from the traversal and are trivially parallelizable. |
+| "Side effects are inevitable, why pretend?" | FP doesn't ban effects — it reifies them (IO, Task, Effect) so they're scheduled, testable, and cancellable. "Inevitable" effects that aren't tracked become untestable race conditions. |

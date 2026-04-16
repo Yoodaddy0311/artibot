@@ -20,6 +20,7 @@ agents:
   - "orchestrator"
 tokens: "~2K"
 category: "learning"
+source_hash: 2c846133
 ---
 
 # Self-Evaluation (Self-Rewarding + GRPO Pattern)
@@ -223,3 +224,15 @@ Progress:
 - Review suggestions when scores drop below 3.0
 - Check `getRecommendation()` before selecting strategy or team composition
 - All rule-based: no external judge AI needed
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the discipline of this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "the model can't objectively grade itself" | self-rewarding with rubrics is calibrated on held-out data; it's more objective than no evaluation at all |
+| "external eval is always better" | external eval is slower and rarer; self-eval runs every turn and catches regressions in real time |
+| "self-grading inflates scores" | inflation is detectable via GRPO relative comparison across rollouts; absolute grades aren't the point |
+| "evaluation slows down the task" | un-evaluated output ships bugs; evaluation is how you avoid the rework cycle that actually slows things down |
+| "I'll evaluate at the end" | end-of-task evaluation can't steer the task; per-step evaluation is what closes the loop |
