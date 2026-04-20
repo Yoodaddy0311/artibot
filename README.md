@@ -6,7 +6,7 @@
 [![Node](https://img.shields.io/badge/node-%3E%3D18-green)](package.json)
 
 ![Claude Code Plugin](https://img.shields.io/badge/Claude_Code-Plugin-7C3AED?style=flat-square)
-![Version](https://img.shields.io/badge/version-2.6.0-blue?style=flat-square)
+![Version](https://img.shields.io/badge/version-2.7.0-blue?style=flat-square)
 ![License](https://img.shields.io/badge/license-BSL--1.1-green?style=flat-square)
 ![Node.js](https://img.shields.io/badge/Node.js-18%2B-brightgreen?style=flat-square)
 ![Agent Teams](https://img.shields.io/badge/Agent_Teams-Native-orange?style=flat-square)
@@ -820,13 +820,14 @@ node scripts/ci/validate-hooks.js     # Hook validation
 
 ## Version
 
-**2.6.0** (2026-04-20) — Claude Opus 4.7 migration. EFFORT_POLICY auto-routing (xhigh/high/medium/low per command), Task Budget (beta) opt-in, 1M context zones (400k/700k/900k), 2576px high-res image support, Claude Design integration for /ppt. Sampling-params rule flipped (4.7 breaking fix), DNA override for fewer-subagent default, auto-invoke extended to all commands. 5,183 tests passing (+19).
+**2.7.0** (2026-04-20) — Version-aligned with Claude **4.7**. Includes the full Claude 4.7 migration work: EFFORT_POLICY auto-routing (xhigh/high/medium/low per command), Task Budget (beta) opt-in, 1M context zones (400k/700k/900k), 2576px high-res image support, Claude Design integration for /ppt. Sampling-params rule flipped (4.7 breaking fix), DNA override for fewer-subagent default, auto-invoke extended to all commands. Plus a ghost middleware bug fix surfaced by Linux CI and coverage threshold realignment (85→80) to match the documented policy. **5,203 tests passing on CI.**
 
 [📖 Full release notes (비개발자용)](./RELEASE_NOTES_4.7_KO.md) · [CHANGELOG](./plugins/artibot/CHANGELOG.md)
 
 <details>
 <summary>Version history</summary>
 
+- **2.6.0** (2026-04-20) — Initial Claude 4.7 migration tag (superseded by 2.7.0 for version-alignment)
 - **2.5.0** (2026-04-15) — GRPO reactivation + auto-invoke hardening + retention policy
 - **2.4.0** — Git-based swarm + cross-device activation
 - **2.3.0** (2026-04-08) — Rationalizations, source_hash, toolset consolidation
