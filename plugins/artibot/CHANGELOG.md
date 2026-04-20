@@ -9,6 +9,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.8.0] - 2026-04-20
+
+### Summary / 요약
+
+**English**: Adds automatic cleanup of Claude Code's auto-saved pasted-image files. When a user presses Ctrl+V with an image in the clipboard, Claude Code CLI writes `image.png` / `image copy.png` / `image copy N.png` to the current working directory and injects `& 'path'` into the next prompt. There is no upstream setting to disable this yet (anthropics/claude-code#26679). This release adds a conservative SessionStart hook that sweeps those files if and only if they match the exact auto-save filename pattern, are small (<10 MB), recent (<48 h), and not tracked by git. Safe by construction — intentional design assets are never touched.
+
+**한국어**: Claude Code가 클립보드 이미지를 붙여넣을 때 자동 저장하는 파일(`image.png`, `image copy.png`, `image copy N.png`)을 세션 시작 시 자동 정리하는 훅 추가. Claude Code 측 기능 요청(anthropics/claude-code#26679)이 아직 구현되지 않은 상태에서의 우회책. **보수적 4중 가드**로 사용자의 의도적 PNG는 절대 건드리지 않음: ① 파일명이 Claude Code 자동 저장 패턴과 정확히 일치 ② 크기 < 10 MB ③ 수정시각 < 48시간 ④ git 미추적.
+
+### Added / 추가됨
+
+- **`scripts/hooks/image-cleanup.js`** — SessionStart hook for pasted-image sweep. Exported `main()`, `classifyCandidate()`, `listCandidates()` for testability.
+- **Opt-out signals** (both supported):
+  - Env var: `ARTIBOT_IMAGE_CLEANUP=off`
+  - Config file: `~/.claude/artibot/config.json` → `{ "imageCleanup": false }`
+- **13 new unit tests** in `tests/hooks/image-cleanup.test.js` — pattern matching, classify edge cases (size/age/missing), tracked-file protection, delete-failure handling, opt-out signals.
+- `hooks.json` — new SessionStart registration, category `cleanup`, priority `optional`, `once: true`, 5 s timeout.
+
+### Safety Notes
+
+- Hook fires **once per session** (`"once": true`) — not a polling loop.
+- Any of the four gates failing → file is skipped, not deleted.
+- Legitimate PNGs named `image.png` that you intentionally committed with git are preserved (the git-tracked check).
+- Files older than 48 h are preserved (likely kept on purpose).
+- Files larger than 10 MB are preserved (design assets).
+- If the sweep fails for any reason, the session proceeds normally — no SessionStart chain breakage.
+
+### Testing
+
+- Vitest: **5,222 passing** (+13 new — 5,209 → 5,222)
+- Lint: 0 errors, 0 warnings
+- release:check: PASS
+
+---
+
 ## [2.7.1] - 2026-04-20
 
 ### Summary / 요약

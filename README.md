@@ -6,7 +6,7 @@
 [![Node](https://img.shields.io/badge/node-%3E%3D18-green)](package.json)
 
 ![Claude Code Plugin](https://img.shields.io/badge/Claude_Code-Plugin-7C3AED?style=flat-square)
-![Version](https://img.shields.io/badge/version-2.7.1-blue?style=flat-square)
+![Version](https://img.shields.io/badge/version-2.8.0-blue?style=flat-square)
 ![License](https://img.shields.io/badge/license-BSL--1.1-green?style=flat-square)
 ![Node.js](https://img.shields.io/badge/Node.js-18%2B-brightgreen?style=flat-square)
 ![Agent Teams](https://img.shields.io/badge/Agent_Teams-Native-orange?style=flat-square)
@@ -819,6 +819,8 @@ node scripts/ci/validate-hooks.js     # Hook validation
 **Artience** ([@Yoodaddy0311](https://github.com/Yoodaddy0311))
 
 ## Version
+
+**2.8.0** (2026-04-20) — Auto-cleanup of Claude Code's pasted-image files (`image.png` / `image copy.png` …). Conservative 4-gate sweep on SessionStart: filename pattern + size < 10 MB + age < 48 h + not git-tracked. Opt-out via `ARTIBOT_IMAGE_CLEANUP=off` or `~/.claude/artibot/config.json`.
 
 **2.7.1** (2026-04-20) — **Critical scope-guard patch.** `git-autopilot-setup` no longer auto-creates `.git/autopilot.json` in unrelated repos — activation is strictly opt-in via `--init` flag or Artibot self-detection. Fixes cross-project git history pollution that was silently injecting `artibot/` branch prefixes and `wip: artibot auto-save` commits into other projects. See [CHANGELOG migration guide](./plugins/artibot/CHANGELOG.md) for cleanup steps.
 

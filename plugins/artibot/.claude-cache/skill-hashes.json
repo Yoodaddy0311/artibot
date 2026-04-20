@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-04-15T10:06:38.391Z",
+  "generatedAt": "2026-04-20T06:23:01.524Z",
   "skills": {
     "ab-testing": {
       "hash": "701661e8",
@@ -63,9 +63,9 @@
       "size": 9223
     },
     "compaction-survival": {
-      "hash": "fd4bafdf",
+      "hash": "f01223ca",
       "path": "skills\\compaction-survival\\SKILL.md",
-      "size": 5144
+      "size": 5238
     },
     "competitive-intelligence": {
       "hash": "8b28fdd9",
@@ -155,7 +155,7 @@
     "feedback": {
       "hash": "86c04ffc",
       "path": "skills\\feedback\\SKILL.md",
-      "size": 3702
+      "size": 3842
     },
     "fp-refactor": {
       "hash": "59d3e5ea",
@@ -173,9 +173,9 @@
       "size": 4489
     },
     "git-conflict": {
-      "hash": "5f5b2689",
+      "hash": "7d9e91d5",
       "path": "skills\\git-conflict\\SKILL.md",
-      "size": 4715
+      "size": 5819
     },
     "git-guide": {
       "hash": "e395c9d4",
@@ -375,7 +375,7 @@
     "oss-ai-catalog": {
       "hash": "27c775bf",
       "path": "skills\\oss-ai-catalog\\SKILL.md",
-      "size": 4326
+      "size": 4394
     },
     "persona-analyzer": {
       "hash": "b24665d0",
@@ -450,7 +450,7 @@
     "polish": {
       "hash": "6cd0ed27",
       "path": "skills\\polish\\SKILL.md",
-      "size": 3877
+      "size": 3975
     },
     "presentation-design": {
       "hash": "bbeb1e8e",
@@ -548,9 +548,9 @@
       "size": 11777
     },
     "strategic-compact": {
-      "hash": "20062e8f",
+      "hash": "24a025d4",
       "path": "skills\\strategic-compact\\SKILL.md",
-      "size": 9288
+      "size": 9609
     },
     "swarm-intelligence": {
       "hash": "e2241486",
@@ -583,9 +583,9 @@
       "size": 7807
     },
     "token-efficiency": {
-      "hash": "2eccc99a",
+      "hash": "01e476b0",
       "path": "skills\\token-efficiency\\SKILL.md",
-      "size": 5335
+      "size": 5414
     },
     "tool-design": {
       "hash": "cdb68458",
@@ -603,9 +603,9 @@
       "size": 6040
     },
     "visual-validation": {
-      "hash": "64f60461",
+      "hash": "4e12c0fd",
       "path": "skills\\visual-validation\\SKILL.md",
-      "size": 5573
+      "size": 5836
     },
     "yes-md": {
       "hash": "b605c119",
