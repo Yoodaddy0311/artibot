@@ -173,6 +173,30 @@ git add package-lock.json
 - [ ] `package-lock.json` 등 lock 파일은 재생성 전략 사용
 - [ ] 모든 충돌 해결 후 `git status` 로 잔여 충돌 없음 확인
 
+## ⚠️ Whole-Merge `-X` 전략 금지 (Commit-Level Strategy Pitfall)
+
+`git pull --no-rebase -X theirs` 또는 `git merge -X ours`는 **모든 충돌에 일괄 적용**된다. 이 전략은:
+
+1. ✅ 런타임/lock 파일 등 **의도치 않은** 공통 충돌만 있을 때는 안전
+2. ❌ 동일 파일에 **나의 의도적 변경 + 원격의 다른 변경**이 공존하면 내 변경이 **소리 없이 원복**됨
+
+### 실제 사고 사례 (2026-04-20)
+4.7 migration 머지 시 `-X theirs` 사용 → 런타임 파일은 정상 해소됐으나 `llm.csv`, `CLAUDE.md`, `CHANGELOG.md` 3개의 의도적 변경까지 원격 버전으로 원복. 복구 커밋(`30080cb`) 필요.
+
+### 권장 대체 전략 (파일 단위)
+
+| 상황 | 명령 |
+|---|---|
+| 특정 파일만 remote 채택 | `git checkout --theirs <path>` → `git add <path>` |
+| 특정 파일만 local 채택 | `git checkout --ours <path>` → `git add <path>` |
+| 의도적 변경 + 런타임 충돌 섞임 | 머지 진행 → 런타임 파일만 `--theirs` → 의도적 파일은 수동 해결 |
+| 대량 런타임 파일 | `.gitignore` 추가 → `git rm --cached <path>` → 커밋 |
+
+### Pre-Merge 체크리스트
+- [ ] 나의 최근 커밋이 touch한 파일 목록 확보 (`git diff HEAD~1 --name-only`)
+- [ ] 원격이 touch할 파일 목록 확보 (`git diff HEAD..origin/<branch> --name-only`)
+- [ ] 교집합(위험 파일) 확인 — **이 파일은 `-X` 전략으로 해결하지 말 것**
+
 ## Guardrails
 
 - `safe_theirs` 자동 채택 시 사용자에게 내용 표시 후 진행
@@ -180,6 +204,7 @@ git add package-lock.json
 - 바이너리 파일은 절대 자동 해결 금지
 - 충돌 해결 커밋 메시지에 반드시 어느 브랜치 간 머지인지 명시
 - `git checkout --ours/--theirs`는 파일 전체를 덮어쓰므로 파일 단위 사용 시 경고
+- **`git merge/pull -X theirs|ours` 는 commit-level 전략 — 내 의도적 변경을 원복시킬 수 있음. 파일별 `git checkout --theirs/--ours <path>` 우선 사용**
 
 ## Rationalizations
 
