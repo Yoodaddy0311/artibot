@@ -5,9 +5,48 @@
  * @module lib/runtime/middleware/tasks
  */
 
+import path from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+
 function makeTaskId(nowFn) {
   const now = nowFn();
   return `rt-${now.toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/**
+ * Load the most recent effort + task-budget meta written by runtime-prompt.js.
+ * Returns null when either file is missing or unreadable — downstream code
+ * must treat effort/budget as optional.
+ *
+ * @param {string|undefined} pluginRoot
+ * @returns {{ effort: string|null, taskBudget: number|null, command: string|null }|null}
+ */
+function readEffortMeta(pluginRoot) {
+  if (!pluginRoot) return null;
+  try {
+    const runtimeDir = path.join(pluginRoot, 'runtime');
+    const effortPath = path.join(runtimeDir, 'current-effort.json');
+    const budgetPath = path.join(runtimeDir, 'current-task-budget.json');
+
+    if (!existsSync(effortPath)) return null;
+    const effortRaw = JSON.parse(readFileSync(effortPath, 'utf-8'));
+    const meta = {
+      effort: effortRaw.effort || null,
+      command: effortRaw.command || null,
+      taskBudget: null,
+    };
+
+    if (existsSync(budgetPath)) {
+      const budgetRaw = JSON.parse(readFileSync(budgetPath, 'utf-8'));
+      if (typeof budgetRaw.budget === 'number' && budgetRaw.budget > 0) {
+        meta.taskBudget = budgetRaw.budget;
+      }
+    }
+
+    return meta;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -37,6 +76,22 @@ export function createTasksMiddleware(options = {}) {
       phases,
       createdAt: new Date(now()).toISOString(),
     };
+
+    // P3-10: automatically attach effort/taskBudget meta when the prior
+    // UserPromptSubmit hook (runtime-prompt.js) persisted them. This lets
+    // /team orchestrator propagate `[artibot:effort=X][artibot:task-budget=Y]`
+    // to each teammate without an explicit re-derive step.
+    const pluginRoot = state.input?.pluginRoot
+      || state.context?.pluginRoot
+      || state.pluginRoot;
+    const effortMeta = readEffortMeta(pluginRoot);
+    if (effortMeta && effortMeta.effort) {
+      task.meta = {
+        effort: effortMeta.effort,
+        command: effortMeta.command,
+        taskBudget: effortMeta.taskBudget,
+      };
+    }
 
     state.context.tasks = task;
     state.messageParts.push(`task=${mode}`);

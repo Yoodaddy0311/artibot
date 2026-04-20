@@ -1,5 +1,17 @@
 ---
 name: polish
+context: fork
+triggers:
+  - "글 써줘"
+  - "블로그"
+  - "이메일"
+  - "보고서"
+  - "카피"
+  - "제안서"
+  - "AI 같아"
+  - "기계적이야"
+  - "자연스럽게"
+  - "사람처럼"
 description: |
   AI-slop auto-detection and human-voice rewriting for any text output produced by Artibot agents (content-marketer, copywriter, ad-specialist, presentation-designer, seo-specialist, doc-updater). Auto-activates on every content-producing agent's output — user does NOT need to invoke this skill. Detects mechanical AI patterns (korean: "~에 대해 살펴보겠습니다", "~라고 할 수 있습니다", "또한/그러나/따라서" 과용, 획일적 문장 길이; english: delve/leverage/pivotal/robust/tapestry/"It's important to note"/"In conclusion" 남용) and rewrites to natural human voice while preserving factual content.
 

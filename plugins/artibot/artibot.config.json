@@ -779,7 +779,48 @@
       "guardrail",
       "token-usage",
       "summarization"
+    ],
+    "effort": {
+      "injectPrompt": true,
+      "nativeApi": false,
+      "budgetMap": {
+        "xhigh": 128000,
+        "high": 64000,
+        "medium": 32000,
+        "low": 16000
+      }
+    },
+    "longContext": {
+      "enabled": false,
+      "betaHeader": "context-1m-2025-08-01",
+      "activationThreshold": 180000
+    }
+  },
+  "extensions": {
+    "enabled": true,
+    "searchPaths": [
+      "~/.claude/plugins/"
+    ],
+    "dataPolicy": "local",
+    "allowedDataPolicies": [
+      "local",
+      "artibot-swarm"
     ]
+  },
+  "ux": {
+    "plainLanguage": {
+      "enabled": false,
+      "locale": "ko"
+    },
+    "skillLevel": "auto",
+    "profilePath": "runtime/user-profile.json"
+  },
+  "dashboard": {
+    "enabled": false,
+    "updateIntervalMs": 1000,
+    "showTeammates": true,
+    "showEffort": true,
+    "showTaskBudget": true
   },
   "autoLearning": {
     "enabled": true,

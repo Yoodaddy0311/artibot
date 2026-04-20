@@ -14,8 +14,12 @@
 
 import { readdir, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
+import os from 'node:os';
 import { LIFECYCLE_VALUES } from './agent-frontmatter-schema.js';
 import { getPluginRoot } from './platform.js';
+
+const ALLOWED_DATA_POLICIES = new Set(['local', 'artibot-swarm']);
+const EXT_MANIFEST_REQUIRED = ['name', 'version', 'dataPolicy'];
 
 const FENCE = '---';
 const DESCRIPTION_MAX = 280;
@@ -360,4 +364,193 @@ export async function getAgentsForLifecycle(lifecycle) {
  */
 export function _resetAgentCache() {
   cache = null;
+}
+
+// ---------------------------------------------------------------------------
+// External agent drop-in (extensions)
+// ---------------------------------------------------------------------------
+
+/**
+ * Expand a leading `~/` segment to the user's home directory.
+ *
+ * @param {string} p
+ * @returns {string}
+ */
+function expandHome(p) {
+  if (typeof p !== 'string') return p;
+  if (p === '~') return os.homedir();
+  if (p.startsWith('~/') || p.startsWith('~\\')) {
+    return path.join(os.homedir(), p.slice(2));
+  }
+  return p;
+}
+
+/**
+ * Validate an external extension manifest (`artibot.ext.json`).
+ *
+ * Required fields: `name`, `version`, `dataPolicy`.
+ * `dataPolicy` must be one of {local, artibot-swarm} — anything else
+ * (e.g., `external`) is rejected per the Artibot DATA POLICY.
+ *
+ * @param {unknown} manifest
+ * @returns {{ valid: boolean, errors: string[], warnings: string[] }}
+ */
+export function validateExternalManifest(manifest) {
+  const errors = [];
+  const warnings = [];
+  if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) {
+    return { valid: false, errors: ['manifest: must be a non-null object'], warnings };
+  }
+  const m = /** @type {Record<string, unknown>} */ (manifest);
+  for (const field of EXT_MANIFEST_REQUIRED) {
+    if (!m[field] || (typeof m[field] === 'string' && m[field].trim() === '')) {
+      errors.push(`missing required field: ${field}`);
+    }
+  }
+  if (typeof m.dataPolicy === 'string' && !ALLOWED_DATA_POLICIES.has(m.dataPolicy)) {
+    errors.push(
+      `dataPolicy "${m.dataPolicy}" rejected — only {local, artibot-swarm} are allowed`,
+    );
+  }
+  if (typeof m.description !== 'string' || m.description.trim() === '') {
+    warnings.push('description: missing or empty');
+  }
+  return { valid: errors.length === 0, errors, warnings };
+}
+
+/**
+ * @typedef {object} ExternalAgentRef
+ * @property {string} namespacedName - `<pluginId>:<agentName>`
+ * @property {string} pluginId - the manifest's `name` field
+ * @property {string} agentName - bare agent file stem
+ * @property {string} path - absolute path to the agent .md file
+ * @property {string} manifestPath - absolute path to the ext manifest
+ */
+
+/**
+ * List immediate subdirectories of a search path matching `artibot-ext-*`.
+ *
+ * @param {string} searchPath
+ * @returns {Promise<string[]>} absolute dir paths
+ */
+async function listExtensionDirs(searchPath) {
+  const expanded = expandHome(searchPath);
+  try {
+    const entries = await readdir(expanded, { withFileTypes: true });
+    return entries
+      .filter((e) => e.isDirectory() && e.name.startsWith('artibot-ext-'))
+      .map((e) => path.join(expanded, e.name));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Read and parse an extension manifest, returning `null` on any failure
+ * (missing file, invalid JSON, invalid schema).
+ *
+ * @param {string} manifestPath
+ * @returns {Promise<{ manifest: Record<string, unknown>, valid: boolean, errors: string[] } | null>}
+ */
+async function readExtManifest(manifestPath) {
+  try {
+    const raw = await readFile(manifestPath, 'utf-8');
+    const manifest = JSON.parse(raw);
+    const check = validateExternalManifest(manifest);
+    if (!check.valid) {
+      process.stderr.write(
+        `[agent-registry] rejected extension ${manifestPath}: ${check.errors.join('; ')}\n`,
+      );
+      return { manifest, valid: false, errors: check.errors };
+    }
+    return { manifest, valid: true, errors: [] };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Enumerate agent .md files inside an extension directory.
+ *
+ * @param {string} extDir
+ * @returns {Promise<string[]>} absolute agent file paths
+ */
+async function listExtAgentFiles(extDir) {
+  const agentsPath = path.join(extDir, 'agents');
+  try {
+    const entries = await readdir(agentsPath);
+    return entries
+      .filter((n) => n.endsWith('.md') && n !== 'INDEX.md' && n !== 'README.md')
+      .sort()
+      .map((n) => path.join(agentsPath, n));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Scan the given search paths for `artibot-ext-*` packages and return a flat
+ * list of external agent references with namespaced names.
+ *
+ * Extensions with missing or invalid manifests are skipped with a warning.
+ *
+ * @param {string[]} searchPaths - paths to scan (supports `~/` prefix)
+ * @returns {Promise<ExternalAgentRef[]>}
+ */
+export async function scanExternalAgents(searchPaths) {
+  if (!Array.isArray(searchPaths) || searchPaths.length === 0) return [];
+  /** @type {ExternalAgentRef[]} */
+  const out = [];
+  for (const searchPath of searchPaths) {
+    const extDirs = await listExtensionDirs(searchPath);
+    for (const extDir of extDirs) {
+      const manifestPath = path.join(extDir, 'artibot.ext.json');
+      const result = await readExtManifest(manifestPath);
+      if (!result || !result.valid) continue;
+      const pluginId = String(result.manifest.name);
+      const agentFiles = await listExtAgentFiles(extDir);
+      for (const filePath of agentFiles) {
+        const agentName = path.basename(filePath, '.md');
+        out.push({
+          namespacedName: `${pluginId}:${agentName}`,
+          pluginId,
+          agentName,
+          path: filePath,
+          manifestPath,
+        });
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Load agents, optionally including external drop-ins.
+ *
+ * When `options.includeExternal` is true (or not false) and `options.searchPaths`
+ * is provided, also scans the search paths for `artibot-ext-*` packages and
+ * merges their agents into the returned map under namespaced names.
+ *
+ * The built-in registry behaviour is preserved; this is a non-breaking addition.
+ *
+ * @param {string} [_pluginRoot] - reserved for future use; built-in uses getPluginRoot()
+ * @param {{ includeExternal?: boolean, searchPaths?: string[] }} [options]
+ * @returns {Promise<Map<string, AgentEntry>>}
+ */
+export async function loadAgents(_pluginRoot, options = {}) {
+  const base = await loadAgentRegistry();
+  if (!options.includeExternal || !Array.isArray(options.searchPaths)) return base;
+  const merged = new Map(base);
+  const refs = await scanExternalAgents(options.searchPaths);
+  for (const ref of refs) {
+    try {
+      const st = await stat(ref.path);
+      const entry = await loadEntry(ref.path, st.mtimeMs);
+      if (!entry) continue;
+      merged.set(ref.namespacedName, { ...entry, name: ref.namespacedName });
+    } catch {
+      // skip unreadable
+    }
+  }
+  return merged;
 }

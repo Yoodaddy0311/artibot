@@ -24,6 +24,8 @@ source_hash: eb9d81f5
 
 Use `$ARGUMENTS` to specify the project type for targeted quickstart guidance.
 
+> **Plain-language onboarding (P3-7/8)**: On first run, call `detectSkillLevel()` from `lib/core/user-profile.js`. If it returns `novice` (default), offer to enable plain-language mode by setting `ux.plainLanguage.enabled = true` and `ux.skillLevel = "auto"` in `artibot.config.json`. Every subsequent status message will then be passed through `toPlainLanguage()` (see `lib/core/plain-language.js`) so beginners see friendly Korean/English phrasing while experts keep the terse developer output. The detection auto-promotes to `pro` once ~10 slash-commands or jargon-dense prompts accumulate — no explicit toggle needed for most users.
+
 ## When This Skill Applies
 - First time a user interacts with Artibot in a new project
 - User explicitly asks for help getting started

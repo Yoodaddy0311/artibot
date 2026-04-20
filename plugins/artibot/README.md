@@ -128,6 +128,13 @@ Artibot의 핵심 엔진은 Claude Code의 **Agent Teams API**입니다. 단순�
 - **리뷰 출력 JSON Schema 강제**: code-review, adversarial-review 출력이 `review-output.schema.json` 준수
 - **중앙 메트릭스 수집기**: `lib/core/metrics-collector.js` — 훅 실행, 에이전트 성능, 토큰 사용량 통합 추적
 
+### Visual Progress Dashboard (v2.8.0+)
+
+- **한-줄 Statusline**: `[artibot] /implement · effort=xhigh · budget=128K · tokens=45K · longCtx=on` 포맷으로 현재 명령·effort·토큰·long-context 상태를 한눈에 표시
+- **Opt-in**: `artibot.config.json`의 `dashboard.enabled` 플래그 (기본 false). 섹션별 on/off: `showEffort`, `showTaskBudget`, `showTeammates`
+- **Zero-crash**: runtime JSON 파일 누락/파손 시 해당 섹션만 생략. TTY가 아니거나 `NO_COLOR=1`이면 ANSI 색상 자동 비활성화
+- 렌더러: `scripts/statusline.sh` / `scripts/statusline.js` → `lib/tui/dashboard.js`
+
 ### 지능형 훅 시스템
 
 - 15개 이벤트에 39개 훅 등록 (HTTP webhook 알림 포함)

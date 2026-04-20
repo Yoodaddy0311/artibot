@@ -1,5 +1,17 @@
 ---
 name: feedback
+context: fork
+triggers:
+  - "버그"
+  - "버그 신고"
+  - "이상해"
+  - "안 돼"
+  - "기능 요청"
+  - "개선해줘"
+  - "bug"
+  - "broken"
+  - "doesn't work"
+  - "feature request"
 description: |
   Auto-captures user bug reports and feature requests, conducts a structured interview, and creates a GitHub issue on the Artibot repository — all without the user typing any slash-command. Triggered by natural complaint/request language.
 

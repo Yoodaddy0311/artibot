@@ -35,7 +35,7 @@ const VALID_CATEGORIES = [
 // --- Frontmatter Parser ---
 
 function parseFrontmatter(content) {
-  const match = content.match(/^---\n([\s\S]*?)\n---/);
+  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
   if (!match) return null;
 
   const raw = match[1];
@@ -45,7 +45,7 @@ function parseFrontmatter(content) {
   let inArray = false;
   let arrayItems = [];
 
-  for (const line of raw.split('\n')) {
+  for (const line of raw.split(/\r?\n/)) {
     // Array item
     if (inArray && /^\s+-\s+/.test(line)) {
       arrayItems.push(line.replace(/^\s+-\s+/, '').replace(/^["']|["']$/g, ''));

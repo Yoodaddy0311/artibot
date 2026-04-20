@@ -10,6 +10,9 @@
  * @module lib/sdk/artibot-sdk
  */
 
+import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+
 // ---------------------------------------------------------------------------
 // Schema Definitions
 // ---------------------------------------------------------------------------
@@ -132,12 +135,14 @@ export function createSkill(spec) {
 
   const skillMd = `${frontmatter.join('\n')}\n${spec.body}`;
 
-  return {
+  const result = {
     valid: true,
     errors: [],
     skillMd,
     dirName: spec.name,
   };
+  result.commit = (pluginRoot, options) => _commitSkill(result, spec, pluginRoot, options);
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -200,12 +205,14 @@ export function createAgent(spec) {
 
   lines.push('', spec.body);
 
-  return {
+  const result = {
     valid: true,
     errors: [],
     agentMd: lines.join('\n'),
     fileName: `${spec.name}.md`,
   };
+  result.commit = (pluginRoot, options) => _commitAgent(result, spec, pluginRoot, options);
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -258,7 +265,9 @@ export function createHook(spec) {
     description: spec.description || `Custom hook: ${spec.name}`,
   };
 
-  return { valid: true, errors: [], scriptContent, registration };
+  const result = { valid: true, errors: [], scriptContent, registration };
+  result.commit = (pluginRoot, options) => _commitHook(result, spec, pluginRoot, options);
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -314,7 +323,9 @@ export function createMiddleware(spec) {
     target: spec.target || null,
   };
 
-  return { valid: true, errors: [], moduleContent, registration };
+  const result = { valid: true, errors: [], moduleContent, registration };
+  result.commit = (pluginRoot, options) => _commitMiddleware(result, spec, pluginRoot, options);
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -363,6 +374,212 @@ export function validatePackage(pkg) {
 }
 
 // ---------------------------------------------------------------------------
+// Commit Helpers (disk I/O)
+// ---------------------------------------------------------------------------
+
+/** Regex patterns that may indicate DATA POLICY violations (warn, not block). */
+const DATA_POLICY_PATTERNS = [
+  /\bfetch\s*\(/,
+  /https\.request\b/,
+  /child_process\b/,
+  /\beval\s*\(/,
+  /\bnew\s+Function\s*\(/,
+];
+
+/**
+ * Scan a body/script string for patterns that suggest external network access,
+ * subprocess spawning, or dynamic code evaluation. Returns warnings (non-blocking).
+ *
+ * @param {string} body
+ * @returns {string[]}
+ */
+export function scanDataPolicyViolations(body) {
+  const warnings = [];
+  if (typeof body !== 'string' || body.length === 0) return warnings;
+  for (const pattern of DATA_POLICY_PATTERNS) {
+    if (pattern.test(body)) {
+      warnings.push(`data-policy: body matches pattern ${pattern.source}`);
+    }
+  }
+  return warnings;
+}
+
+/**
+ * Check whether a path exists.
+ *
+ * @param {string} p
+ * @returns {Promise<boolean>}
+ */
+async function pathExists(p) {
+  try {
+    await access(p);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Write a file, guarding against overwrite unless explicitly allowed.
+ *
+ * @param {string} filePath
+ * @param {string} content
+ * @param {boolean} overwrite
+ * @returns {Promise<boolean>} true if the target already existed
+ */
+async function writeWithOverwrite(filePath, content, overwrite) {
+  const existed = await pathExists(filePath);
+  if (existed && !overwrite) {
+    throw new Error(
+      `file exists, pass overwrite:true to replace: ${filePath}`,
+    );
+  }
+  await mkdir(path.dirname(filePath), { recursive: true });
+  await writeFile(filePath, content, 'utf-8');
+  return existed;
+}
+
+/**
+ * Read, mutate, and write a JSON file. The mutator receives the parsed value
+ * (or an empty object if the file was missing) and returns the new value.
+ *
+ * @param {string} filePath
+ * @param {(data: any) => any} mutate
+ * @returns {Promise<void>}
+ */
+async function updateJsonFile(filePath, mutate) {
+  let data = {};
+  if (await pathExists(filePath)) {
+    const raw = await readFile(filePath, 'utf-8');
+    data = raw.trim() === '' ? {} : JSON.parse(raw);
+  }
+  const next = mutate(data);
+  await mkdir(path.dirname(filePath), { recursive: true });
+  await writeFile(filePath, `${JSON.stringify(next, null, 2)}\n`, 'utf-8');
+}
+
+/**
+ * Commit a skill scaffold to disk under <pluginRoot>/skills/<name>/SKILL.md.
+ * Also creates a references/ subdirectory for convenience.
+ *
+ * @param {{ skillMd: string, dirName: string }} result
+ * @param {object} spec
+ * @param {string} pluginRoot
+ * @param {{ overwrite?: boolean }} [options]
+ * @returns {Promise<{ path: string, overwritten: boolean, warnings: string[] }>}
+ */
+async function _commitSkill(result, spec, pluginRoot, options = {}) {
+  if (!pluginRoot || typeof pluginRoot !== 'string') {
+    throw new Error('commit: pluginRoot must be a non-empty string');
+  }
+  const overwrite = options.overwrite === true;
+  const warnings = scanDataPolicyViolations(spec.body);
+  const skillDir = path.join(pluginRoot, 'skills', result.dirName);
+  const skillFile = path.join(skillDir, 'SKILL.md');
+  const existed = await writeWithOverwrite(skillFile, result.skillMd, overwrite);
+  await mkdir(path.join(skillDir, 'references'), { recursive: true });
+  return { path: skillFile, overwritten: existed, warnings };
+}
+
+/**
+ * Commit an agent to <pluginRoot>/agents/<name>.md and register it in
+ * .claude-plugin/plugin.json (idempotent push).
+ *
+ * @param {{ agentMd: string, fileName: string }} result
+ * @param {object} spec
+ * @param {string} pluginRoot
+ * @param {{ overwrite?: boolean }} [options]
+ * @returns {Promise<{ path: string, overwritten: boolean, warnings: string[] }>}
+ */
+async function _commitAgent(result, spec, pluginRoot, options = {}) {
+  if (!pluginRoot || typeof pluginRoot !== 'string') {
+    throw new Error('commit: pluginRoot must be a non-empty string');
+  }
+  const overwrite = options.overwrite === true;
+  const warnings = scanDataPolicyViolations(spec.body);
+  const agentFile = path.join(pluginRoot, 'agents', result.fileName);
+  const existed = await writeWithOverwrite(agentFile, result.agentMd, overwrite);
+  const manifest = path.join(pluginRoot, '.claude-plugin', 'plugin.json');
+  const entry = `./agents/${result.fileName}`;
+  await updateJsonFile(manifest, (data) => {
+    const next = { ...data };
+    const agents = Array.isArray(next.agents) ? [...next.agents] : [];
+    if (!agents.includes(entry)) agents.push(entry);
+    next.agents = agents;
+    return next;
+  });
+  return { path: agentFile, overwritten: existed, warnings };
+}
+
+/**
+ * Commit a hook script to <pluginRoot>/scripts/hooks/<name>.js and register
+ * it in hooks/hooks.json under the correct event array.
+ *
+ * @param {{ scriptContent: string, registration: object }} result
+ * @param {object} spec
+ * @param {string} pluginRoot
+ * @param {{ overwrite?: boolean }} [options]
+ * @returns {Promise<{ path: string, overwritten: boolean, warnings: string[] }>}
+ */
+async function _commitHook(result, spec, pluginRoot, options = {}) {
+  if (!pluginRoot || typeof pluginRoot !== 'string') {
+    throw new Error('commit: pluginRoot must be a non-empty string');
+  }
+  const overwrite = options.overwrite === true;
+  const warnings = scanDataPolicyViolations(spec.script);
+  const scriptFile = path.join(pluginRoot, 'scripts', 'hooks', `${spec.name}.js`);
+  const existed = await writeWithOverwrite(scriptFile, result.scriptContent, overwrite);
+  const hooksFile = path.join(pluginRoot, 'hooks', 'hooks.json');
+  await updateJsonFile(hooksFile, (data) => {
+    const next = { ...data };
+    const hooks = (next.hooks && typeof next.hooks === 'object') ? { ...next.hooks } : {};
+    const eventList = Array.isArray(hooks[spec.event]) ? [...hooks[spec.event]] : [];
+    const entry = {
+      matcher: '*',
+      hooks: [{ type: 'command', command: `node \${CLAUDE_PLUGIN_ROOT}/scripts/hooks/${spec.name}.js` }],
+      category: 'sdk',
+    };
+    const already = eventList.some((h) => JSON.stringify(h) === JSON.stringify(entry));
+    if (!already) eventList.push(entry);
+    hooks[spec.event] = eventList;
+    next.hooks = hooks;
+    return next;
+  });
+  return { path: scriptFile, overwritten: existed, warnings };
+}
+
+/**
+ * Commit a middleware module to <pluginRoot>/lib/runtime/middleware/<name>.js
+ * and register the name in artibot.config.json runtime.middleware array.
+ *
+ * @param {{ moduleContent: string, registration: object }} result
+ * @param {object} spec
+ * @param {string} pluginRoot
+ * @param {{ overwrite?: boolean }} [options]
+ * @returns {Promise<{ path: string, overwritten: boolean, warnings: string[] }>}
+ */
+async function _commitMiddleware(result, spec, pluginRoot, options = {}) {
+  if (!pluginRoot || typeof pluginRoot !== 'string') {
+    throw new Error('commit: pluginRoot must be a non-empty string');
+  }
+  const overwrite = options.overwrite === true;
+  const warnings = scanDataPolicyViolations(spec.factoryCode);
+  const moduleFile = path.join(pluginRoot, 'lib', 'runtime', 'middleware', `${spec.name}.js`);
+  const existed = await writeWithOverwrite(moduleFile, result.moduleContent, overwrite);
+  const configFile = path.join(pluginRoot, 'artibot.config.json');
+  await updateJsonFile(configFile, (data) => {
+    const next = { ...data };
+    const runtime = (next.runtime && typeof next.runtime === 'object') ? { ...next.runtime } : {};
+    const middleware = Array.isArray(runtime.middleware) ? [...runtime.middleware] : [];
+    if (!middleware.includes(spec.name)) middleware.push(spec.name);
+    runtime.middleware = middleware;
+    next.runtime = runtime;
+    return next;
+  });
+  return { path: moduleFile, overwritten: existed, warnings };
+}
+
+// ---------------------------------------------------------------------------
 // Exports for testing
 // ---------------------------------------------------------------------------
 
@@ -374,4 +591,8 @@ export {
   VALID_MIDDLEWARE_POSITIONS as _VALID_MIDDLEWARE_POSITIONS,
   validateRequired as _validateRequired,
   validateKebabCase as _validateKebabCase,
+  _commitSkill,
+  _commitAgent,
+  _commitHook,
+  _commitMiddleware,
 };

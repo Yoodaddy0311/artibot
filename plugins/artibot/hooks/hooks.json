@@ -245,6 +245,30 @@
         "category": "tracking"
       },
       {
+        "matcher": "tool == \"Bash\"",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/post-bash-failure.js",
+            "timeout": 3000
+          }
+        ],
+        "priority": "operational",
+        "category": "recovery"
+      },
+      {
+        "matcher": "tool == \"Edit\" || tool == \"Write\"",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/post-write-tdd.js",
+            "timeout": 2000
+          }
+        ],
+        "priority": "advisory",
+        "category": "quality"
+      },
+      {
         "matcher": "*",
         "hooks": [
           {

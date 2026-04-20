@@ -6,7 +6,7 @@
  */
 
 import { getPluginRoot, parseJSON, readStdin, resolveConfigPath, toFileUrl, writeStdout } from '../utils/index.js';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { checkForUpdate } from '../../lib/core/version-checker.js';
@@ -36,6 +36,36 @@ async function main() {
     config = JSON.parse(readFileSync(configPath, 'utf-8'));
   } catch {
     // Use defaults if config missing
+  }
+
+  // P3-3: 1M context opt-in. When `runtime.longContext.enabled` is true in
+  // artibot.config.json, append the beta header to ANTHROPIC_BETA (advisory,
+  // child-process only — Claude Code picks it up when spawned from this env)
+  // and persist runtime/long-context-active.json so statusline/observability
+  // surfaces the activated state.
+  try {
+    const longContext = config?.runtime?.longContext;
+    if (longContext && longContext.enabled === true) {
+      const betaHeader = longContext.betaHeader || 'context-1m-2025-08-01';
+      const existing = process.env.ANTHROPIC_BETA || '';
+      const merged = existing
+        ? Array.from(new Set(existing.split(',').map((s) => s.trim()).filter(Boolean).concat(betaHeader))).join(',')
+        : betaHeader;
+      process.env.ANTHROPIC_BETA = merged;
+
+      const runtimeDir = path.join(env.pluginRoot, 'runtime');
+      mkdirSync(runtimeDir, { recursive: true });
+      writeFileSync(
+        path.join(runtimeDir, 'long-context-active.json'),
+        JSON.stringify({
+          enabled: true,
+          betaHeader,
+          activatedAt: new Date().toISOString(),
+        }) + '\n',
+      );
+    }
+  } catch {
+    // Non-critical: long-context activation is advisory
   }
 
   // Resolve home directory once for use throughout

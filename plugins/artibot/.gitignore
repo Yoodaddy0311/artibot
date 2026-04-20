@@ -4,6 +4,7 @@ CLAUDE.local.md
 # Build artifacts
 _reports/
 _benchmarks/
+coverage/
 
 # Runtime session data (top-level only — do NOT match lib/runtime/ or its subdirs)
 /runtime/

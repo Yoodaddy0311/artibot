@@ -72,6 +72,60 @@ function persistEffortMeta(meta, pluginRoot) {
   }
 }
 
+/**
+ * Notify the cognitive router of the current session-wide effort hint.
+ * Only invoked when `runtime.effort.nativeApi` is enabled in config.
+ * Swallows all errors — this is advisory-only wiring.
+ *
+ * @param {'xhigh'|'high'|'medium'|'low'|null} effortLevel
+ * @param {string} pluginRoot
+ * @returns {Promise<void>}
+ */
+async function applyNativeEffortHint(effortLevel, pluginRoot) {
+  if (!effortLevel) return;
+  try {
+    const routerPath = path.join(pluginRoot, 'lib', 'cognitive', 'router.js');
+    const { setNativeEffortHint } = await import(toFileUrl(routerPath));
+    // Router maps 'xhigh' into the 'high' effort band (system 2 override).
+    const normalized = effortLevel === 'xhigh' ? 'high' : effortLevel;
+    setNativeEffortHint({ effortLevel: normalized });
+  } catch {
+    // Non-critical: fall back to heuristic routing
+  }
+}
+
+/**
+ * Build the effort prefix directive injected at the top of the user prompt.
+ * Output format:
+ *   [artibot:effort level=xhigh command=implement]
+ *
+ * Returns empty string when effort metadata is missing.
+ *
+ * @param {{ command: string, effort: string } | null} meta
+ * @returns {string}
+ */
+function buildEffortDirective(meta) {
+  if (!meta || !meta.effort) return '';
+  const command = meta.command ? ` command=${meta.command}` : '';
+  return `[artibot:effort level=${meta.effort}${command}]`;
+}
+
+/**
+ * Prepend one or more artibot directives to the user prompt on a single
+ * leading line, separated from the original prompt by a blank line.
+ *
+ * @param {string} basePrompt - Original (or already-prepared) user prompt.
+ * @param {string[]} directives - Directive strings (empty entries are dropped).
+ * @returns {string}
+ */
+function applyPromptPrefix(basePrompt, directives) {
+  const valid = directives.filter((d) => typeof d === 'string' && d.length > 0);
+  if (valid.length === 0) return basePrompt;
+  const header = valid.join('');
+  const body = String(basePrompt || '');
+  return `${header}\n\n${body}`;
+}
+
 const FALLBACK_SYSTEM2_KEYWORDS = [
   'architecture',
   'security',
@@ -105,13 +159,43 @@ function loadRuntimeConfig(pluginRoot) {
       supportedLanguages: ['en', 'ko', 'ja'],
       ambiguityThreshold: 50,
     },
+    runtime: {
+      effort: {
+        injectPrompt: true,
+        nativeApi: false,
+        budgetMap: {
+          xhigh: 128000,
+          high: 64000,
+          medium: 32000,
+          low: 16000,
+        },
+      },
+      longContext: {
+        enabled: false,
+        betaHeader: 'context-1m-2025-08-01',
+        activationThreshold: 180000,
+      },
+    },
   };
 
   try {
     const configPath = path.join(pluginRoot, 'artibot.config.json');
+    const parsed = JSON.parse(readFileSync(configPath, 'utf-8'));
     return {
       ...defaults,
-      ...JSON.parse(readFileSync(configPath, 'utf-8')),
+      ...parsed,
+      runtime: {
+        ...defaults.runtime,
+        ...(parsed.runtime || {}),
+        effort: {
+          ...defaults.runtime.effort,
+          ...((parsed.runtime && parsed.runtime.effort) || {}),
+        },
+        longContext: {
+          ...defaults.runtime.longContext,
+          ...((parsed.runtime && parsed.runtime.longContext) || {}),
+        },
+      },
     };
   } catch {
     return defaults;
@@ -234,6 +318,11 @@ async function main() {
   if (!prompt) return;
 
   const pluginRoot = getPluginRoot();
+  const runtimeConfig = loadRuntimeConfig(pluginRoot);
+  const effortConfig = runtimeConfig?.runtime?.effort || {};
+  const injectPrompt = effortConfig.injectPrompt !== false; // default true
+  const useNativeApi = effortConfig.nativeApi === true;     // default false
+
   const prepared = await fallbackPreparePrompt(prompt, pluginRoot, hookData);
 
   if (!prepared) return;
@@ -251,13 +340,75 @@ async function main() {
     : null;
   persistEffortMeta(effortMeta, pluginRoot);
 
+  // P3-8: record user signal for skill-level auto-detection.
+  // Non-critical — any failure is swallowed so the prompt flow is unaffected.
+  try {
+    const profileModPath = path.join(pluginRoot, 'lib', 'core', 'user-profile.js');
+    const { recordSignal, configureProfilePath } = await import(toFileUrl(profileModPath));
+    const uxProfilePath = runtimeConfig?.ux?.profilePath;
+    if (uxProfilePath) configureProfilePath(uxProfilePath);
+    await recordSignal({
+      type: commandName ? 'slash-command' : 'natural-language',
+      value: commandName || String(prompt).slice(0, 60),
+      timestamp: Date.now(),
+    });
+  } catch {
+    // Non-critical: profile tracking is advisory
+  }
+
+  // Task Budget auto-wire (P3-2): derive max_tokens per effort and persist
+  // runtime/current-task-budget.json + build the [artibot:task-budget …]
+  // directive that is injected alongside the effort prefix.
+  let taskBudgetDirective = '';
+  try {
+    const tbPath = path.join(pluginRoot, 'lib', 'runtime', 'task-budget.js');
+    const {
+      getTaskBudgetForEffort,
+      buildTaskBudgetDirective,
+      persistTaskBudget,
+    } = await import(toFileUrl(tbPath));
+
+    if (effortMeta) {
+      const budget = getTaskBudgetForEffort(effortMeta.effort, runtimeConfig);
+      if (budget) {
+        taskBudgetDirective = buildTaskBudgetDirective(
+          effortMeta.effort,
+          budget,
+          runtimeConfig,
+        );
+        persistTaskBudget(
+          { command: effortMeta.command, effort: effortMeta.effort, budget },
+          pluginRoot,
+        );
+      }
+    }
+  } catch {
+    // Non-critical: task budget is advisory
+  }
+
+  // Optional: native effort hint → cognitive router (session-wide)
+  if (useNativeApi && effortMeta) {
+    await applyNativeEffortHint(effortMeta.effort, pluginRoot);
+  }
+
+  // Build the prompt to return. When injectPrompt is enabled and an
+  // effort was resolved, prepend [artibot:effort …][artibot:task-budget …]
+  // on the first line followed by a blank line, then the (possibly
+  // prepared) user prompt. This mirrors the 4.7 "advisory directive"
+  // pattern from the official effort guide.
+  const basePrompt = prepared.userPrompt ?? prompt;
+  const effortDirective = buildEffortDirective(effortMeta);
+  const finalUserPrompt = injectPrompt
+    ? applyPromptPrefix(basePrompt, [effortDirective, taskBudgetDirective])
+    : basePrompt;
+
   const baseMessage = prepared.message ?? '[runtime] prompt prepared';
   const finalMessage = effortMeta
     ? `${baseMessage} | cmd=/${effortMeta.command} effort=${effortMeta.effort}`
     : baseMessage;
 
   writeStdout({
-    user_prompt: prepared.userPrompt ?? prompt,
+    user_prompt: finalUserPrompt,
     message: finalMessage,
   });
 }

@@ -1,5 +1,17 @@
 ---
 name: oss-ai-catalog
+context: fork
+triggers:
+  - "오픈소스 AI"
+  - "OSS 추천"
+  - "어떤 LLM"
+  - "어떤 모델"
+  - "vector DB"
+  - "RAG framework"
+  - "inference engine"
+  - "LangChain"
+  - "vLLM"
+  - "open source AI"
 description: |
   Curated open-source AI catalog reference. Auto-activates when llm-architect, content-marketer, data-analyst, mcp-developer, backend-developer, or any agent needs to RECOMMEND an open-source AI tool, model, framework, inference engine, vector DB, or agent/RAG library to the user. Provides category-indexed lookup across 14 domains (Deep learning frameworks, Foundation models, Inference engines, Agentic AI, RAG/Vector DBs, Generative media, Training/Fine-tuning, MLOps, Evaluation, Safety, Specialized domains, UIs, Dev tools, Learning resources).
 
