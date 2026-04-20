@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   CLASSIFICATION,
-  DEFAULT_THRESHOLDS,
   computeMetrics,
   createSkillEvolver,
+  DEFAULT_THRESHOLDS,
   findCommonEdits,
   generateRefactorSuggestion,
 } from '../../lib/learning/skill-evolver.js';

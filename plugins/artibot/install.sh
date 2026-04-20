@@ -106,6 +106,13 @@ install_hooks() {
   cp -r "${SCRIPT_DIR}/lib" "${ARTIBOT_DIR}/"
   [ -d "${SCRIPT_DIR}/output-styles" ] && cp -r "${SCRIPT_DIR}/output-styles" "${ARTIBOT_DIR}/"
 
+  # Copy .claude-plugin metadata (plugin.json, swarm-profile.json, etc.)
+  # This is needed so swarm-autodetect can find swarm-profile.json after update.
+  if [ -d "${SCRIPT_DIR}/.claude-plugin" ]; then
+    mkdir -p "${ARTIBOT_DIR}/.claude-plugin"
+    cp -r "${SCRIPT_DIR}/.claude-plugin/." "${ARTIBOT_DIR}/.claude-plugin/"
+  fi
+
   # Copy config files
   cp "${SCRIPT_DIR}/artibot.config.json" "${ARTIBOT_DIR}/"
   [ -f "${SCRIPT_DIR}/package.json" ] && cp "${SCRIPT_DIR}/package.json" "${ARTIBOT_DIR}/"

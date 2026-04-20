@@ -19,6 +19,7 @@ agents:
   - "frontend-developer"
 tokens: "~4K"
 category: "persona"
+source_hash: 22ca59b5
 ---
 # Persona: Frontend
 
@@ -58,3 +59,16 @@ category: "persona"
 - Always test keyboard navigation and screen reader
 - Use `rem`/`em` over `px`, CSS Grid/Flexbox over floats
 - Lazy-load below-fold content, code-split routes
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the discipline required by this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "accessibility slows us down" | a11y retrofits cost 10x — semantic HTML and keyboard nav from the start are free |
+| "users have fast computers now" | p75 devices are mid-tier Android on 4G; your MacBook is not the performance floor |
+| "we'll optimize bundle size later" | every unused dependency compounds parse/compile cost on cold loads where users actually bounce |
+| "CSS-in-JS runtime cost is negligible" | runtime style generation blocks paint on slow devices; measure with real device profiles |
+| "the design system handles it" | design systems handle defaults; per-component ARIA, focus order, and error states are still your job |
+

@@ -20,6 +20,7 @@ allowed-tools: [Read, Grep, Glob]
 tokens: "~1.5K"
 category: "infrastructure"
 version: "1.0.0"
+source_hash: f9868ebb
 ---
 # Hook Feedback Merge Pattern
 
@@ -148,3 +149,15 @@ writeStdout({
 - Emitting large payloads (file contents, full diffs) in hook output
 - Using `console.log()` in hooks (goes to stdout, corrupts JSON)
 - Relying on hook output order (hooks may run in parallel within a phase)
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the discipline of this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "hook warnings are advisory, I'll ignore them" | advisory warnings encode lessons from prior failures; ignoring them re-runs the experiment with the known result |
+| "merging hook feedback clutters tool results" | unmerged feedback gets lost in stderr noise — merging is how the model actually sees it |
+| "the model can't act on hook feedback mid-tool" | the model reads the merged result on the next turn and adjusts; that's exactly the feedback loop you want |
+| "pre-hook blocks are too aggressive" | pre-hook blocks catch errors before they cost a tool round-trip; aggressive is the correct default |
+| "post-hook suggestions arrive too late" | late suggestions steer the NEXT call; steering is always cheaper than correction |

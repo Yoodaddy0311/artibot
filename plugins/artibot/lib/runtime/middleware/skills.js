@@ -61,6 +61,7 @@ export function createSkillsMiddleware(options = {}) {
   const lazyEnabled = lazyConfig.enabled === true;
   const pluginRoot = options.pluginRoot;
 
+  // eslint-disable-next-line complexity
   return async function skillsMiddleware(state) {
     // Bridge: prefer creation-time options, fall back to runtime config
     const runtimeLazy = state.config?.skills?.lazyLoading || {};

@@ -29,6 +29,7 @@ category: "architecture"
 version: "1.0.0"
 risk: safe
 lastVerified: "2026-03-31"
+source_hash: 3632deda
 ---
 
 # DDD Strategic Design
@@ -116,3 +117,15 @@ lastVerified: "2026-03-31"
 ## References
 
 See `${CLAUDE_SKILL_DIR}/references/event-sourcing.md` for Event Sourcing, CQRS, Saga, and Snapshot 패턴.
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the rigor of this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "bounded contexts are academic" | contexts are the seams where teams can work in parallel — without them you get a distributed monolith |
+| "one ubiquitous language is enough" | the same word means different things per context — enforce context-local vocabulary |
+| "just split by technical layer" | technical layers create shared databases and shared pain; split by domain capability |
+| "context maps are documentation theater" | context maps reveal integration anti-patterns (conformist, anti-corruption) before they cost you |
+| "subdomain classification is premature" | core vs supporting vs generic drives build/buy decisions — classify before allocating effort |

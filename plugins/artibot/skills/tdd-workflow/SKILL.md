@@ -22,6 +22,7 @@ tokens: "~3K"
 category: "testing"
 version: "1.0.0"
 lastVerified: "2026-03-27"
+source_hash: b0104fec
 ---
 # TDD Workflow
 
@@ -237,3 +238,17 @@ ANTI-PATTERNS CHECK
 - Every bug fix gets a regression test
 - Test names describe expected behavior
 - 80%+ unit, 70%+ integration coverage
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip critical steps in this skill, paired with factual rebuttals. Use this to catch and resist shortcuts.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "I'll add tests after the implementation works" | Post-hoc tests confirm your implementation, not the requirement. They encode the bug you wrote, not the behavior the user needs. RED before GREEN is how you prove the test actually catches failure. |
+| "This function is too small/trivial to test" | "Trivial" functions are where off-by-one, null-handling, and boundary bugs live. A 3-line test for a 3-line function is still cheaper than a production incident. |
+| "The test is obvious — I can see the code is correct" | Reading is not executing. Type coercion, async ordering, and closure capture routinely fool visual inspection. If it's obvious, the test takes 30 seconds and proves it. |
+| "I'll skip RED and write the test after GREEN" | A test that has never failed is a test you cannot trust. You have not proven it actually exercises the code path — it may pass vacuously. RED is the only way to verify the test is wired correctly. |
+| "Refactoring does not need new tests, coverage is already there" | Refactoring changes structure, not behavior — the existing tests are your safety net. But if coverage is below 80% on the target, you are refactoring blind. Measure first, then refactor. |
+| "Mocking the database is too much setup for this test" | Over-mocking is an anti-pattern, but zero mocking at boundaries means your "unit test" is really an integration test pretending to be fast. Use fixtures or in-memory adapters — not `.skip`. |
+| "The bug is too hard to reproduce in a test" | If you cannot reproduce it in a test, you cannot prove you fixed it. "Hard to reproduce" means you have not yet isolated the state — that isolation IS the fix. |

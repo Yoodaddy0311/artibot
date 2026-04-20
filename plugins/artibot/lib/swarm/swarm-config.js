@@ -18,7 +18,15 @@ const CONSENT_PATH = path.join(ARTIBOT_DIR, 'swarm-consent.json');
 export const SWARM_DEFAULTS = {
   enabled: false,
   optIn: false,
+  /**
+   * Transport backend:
+   *   'http' — classic Node server at serverUrl (localhost only per DATA POLICY)
+   *   'git'  — user-owned private git repo (recommended for multi-device sync)
+   */
+  backend: 'http',
   serverUrl: 'http://localhost:3000',
+  /** Git swarm repo URL — only used when backend === 'git' */
+  gitRepoUrl: null,
   syncInterval: 'session',
   localGlobalRatio: [0.3, 0.7],
   differentialPrivacy: {

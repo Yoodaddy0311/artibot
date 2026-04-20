@@ -21,6 +21,7 @@ agents:
   - "devops-engineer"
 tokens: "~3K"
 category: "learning"
+source_hash: 901645c4
 ---
 
 # Auto-Learning Pipeline
@@ -257,3 +258,15 @@ Progress:
 **Safety**: maxChangesPerRun=10, dryRun mode, main branch protection
 **Logs**: `~/.claude/artibot/learning-log.json`
 **Setup**: `node scripts/setup-auto-learning.js`
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the discipline of this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "manual curation is higher quality" | manual curation doesn't scale past one session; auto-pipelines surface patterns you'd never notice by hand |
+| "the pipeline will learn noise" | noise gets filtered by confidence thresholds and validation gates — untuned learning still beats zero learning |
+| "I'll enable it once the code is stable" | stability without feedback loops is a local maximum; the pipeline is how you escape it |
+| "learned patterns contradict my intent" | if the pattern contradicts intent, your intent wasn't encoded as a constraint — fix the gate, not the pipeline |
+| "batching learning wastes fresh signal" | per-event learning overfits to outliers; batch learning with GRPO is the correct statistical frame |

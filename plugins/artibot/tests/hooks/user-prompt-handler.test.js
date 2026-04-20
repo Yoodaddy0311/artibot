@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { readFileSync as realReadFileSync } from 'node:fs';
+import { readFileSync as _realReadFileSync } from 'node:fs';
 
 vi.mock('node:fs', async (importOriginal) => {
   const mod = await importOriginal();
@@ -22,7 +22,6 @@ vi.mock('../../scripts/utils/index.js', () => ({
 
 let readStdin;
 let writeStdout;
-let readFileSync;
 
 const KOREAN_REVERIFY_TRIGGER = '!\uC7AC\uAC80\uC99D';
 const KOREAN_REVERIFY_CONTEXT = 'auth \uBAA8\uB4C8 \uB2E4\uC2DC \uD655\uC778';
@@ -35,7 +34,6 @@ describe('user-prompt-handler hook', () => {
   beforeEach(async () => {
     vi.resetModules();
     ({ readStdin, writeStdout } = await import('../../scripts/utils/index.js'));
-    ({ readFileSync } = await import('node:fs'));
     vi.clearAllMocks();
   });
 

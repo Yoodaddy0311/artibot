@@ -20,6 +20,7 @@ agents:
 argument-hint: "[branch] [path] e.g., feat/login, create fix/auth-crash"
 tokens: "~2K"
 category: "devops"
+source_hash: 4157d466
 ---
 
 # Git Worktree
@@ -263,3 +264,16 @@ git branch -d feat/login-page
 /git worktree merge develop        # → develop squash-merge
 /git worktree clean                # 정리
 ```
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the discipline required by this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "one clone is simpler" | one clone forces serial work on branches you could parallelize |
+| "worktrees confuse IDEs" | modern IDEs handle worktrees fine; the friction is 10 minutes vs hours of context switching |
+| "stash is good enough for switching" | stash loses IDE state, running processes, and build caches — worktrees preserve all three |
+| "worktrees duplicate disk usage" | git worktree shares the object store; only working files are duplicated, measured in MB not GB |
+| "I'll forget to clean up old worktrees" | git worktree list + prune surfaces them on demand; orphaned worktrees are recoverable, lost context is not |
+

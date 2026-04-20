@@ -22,6 +22,7 @@ agents:
 argument-hint: "[operation] e.g., commit, branch, merge, PR, rebase"
 tokens: "~3K"
 category: "devops"
+source_hash: 9a6de7f3
 ---
 # Git Workflow
 
@@ -140,3 +141,16 @@ Progress:
 - Always `git diff --staged` before commit
 - New commits over amending when hooks fail
 - PR body: Summary (bullets) + Test Plan (checklist)
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the discipline required by this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "conventional commits are for libraries" | conventional commits drive changelogs and semver for apps too; the payoff is automation, not ceremony |
+| "one big PR is fine if the feature is cohesive" | big PRs get rubber-stamped; small PRs get read — reviewer attention is the scarce resource |
+| "I'll self-review in the mirror" | self-review misses the same blind spots that produced the bug; a second pair of eyes is non-negotiable |
+| "branch names don't matter" | branch names surface in CI logs, PR lists, and deploy markers; descriptive names save minutes every day |
+| "we can fix the workflow once it breaks" | broken workflow = broken releases; fix the workflow when you first feel friction, not after an incident |
+

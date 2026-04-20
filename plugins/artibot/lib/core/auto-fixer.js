@@ -168,6 +168,7 @@ function runStep(command, cwd) {
  * @param {object} opts - Options with eslintFix, vitestRun, targetPath
  * @returns {{ eslint: object, vitest: object }}
  */
+// eslint-disable-next-line no-unused-vars
 function runIteration(opts) {
   let eslintResult;
   let vitestResult;
@@ -199,6 +200,7 @@ function runIteration(opts) {
  * @param {string|null} error
  * @returns {object}
  */
+// eslint-disable-next-line no-unused-vars, max-params
 function buildFixResult(success, iterations, history, finalStatus, reason, error = null) {
   return { success, iterations, history, finalStatus, reason, error };
 }

@@ -29,6 +29,7 @@ category: "development"
 version: "1.0.0"
 risk: safe
 lastVerified: "2026-03-31"
+source_hash: c440f725
 ---
 
 # Memory Safety Patterns
@@ -157,3 +158,15 @@ FFI(외국어 함수 인터페이스) 사용 시:
 4. 소유권 이전은 명시적으로
 5. FFI 경계에서 할당/해제 일치
 6. Error path에서도 리소스 해제 보장
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the rigor of this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "GC handles it" | GC handles memory, not resources — files, sockets, and locks still need RAII-style cleanup |
+| "leaks will show up in load tests" | small leaks only show after hours; code review and ownership patterns catch them first |
+| "smart pointers are overhead" | smart pointers cost nanoseconds; use-after-free costs a CVE |
+| "I will free it later" | "later" is where every memory bug lives — tie lifetime to scope |
+| "raw pointers are fine if I am careful" | careful scales to zero engineers on your team — encode safety in types, not discipline |

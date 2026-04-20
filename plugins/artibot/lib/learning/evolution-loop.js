@@ -7,11 +7,11 @@
  */
 
 import { createSessionMemory } from './session-memory.js';
-import { createKnowledgeGraph, NODE_TYPES, EDGE_RELATIONS } from './knowledge-graph.js';
+import { createKnowledgeGraph, EDGE_RELATIONS, NODE_TYPES } from './knowledge-graph.js';
 import { createSkillEvolver } from './skill-evolver.js';
 import { createAutoResearch } from '../cognitive/auto-research.js';
-import { qualifyPattern, buildContribution } from '../swarm/collective-hub.js';
-import { saveToDisk, loadFromDisk } from '../swarm/swarm-persistence.js';
+import { buildContribution } from '../swarm/collective-hub.js';
+import { loadFromDisk, saveToDisk } from '../swarm/swarm-persistence.js';
 
 /**
  * Extract knowledge graph nodes from a compressed memory record.
@@ -75,6 +75,7 @@ export function createEvolutionLoop(options = {}) {
      * @param {object} [context.routingResult] - Last routing result for auto-research trigger
      * @returns {Promise<object>} Pipeline result with per-stage outcomes
      */
+    // eslint-disable-next-line complexity
     async run(context = {}) {
       const result = {
         compressed: null,

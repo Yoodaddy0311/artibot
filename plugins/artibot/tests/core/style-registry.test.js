@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 // Mock platform.js so getPluginRoot returns a decoded path even when
 // import.meta.url percent-encodes non-ASCII characters (e.g. Korean "바탕 화면").
+// Resolve: <file> -> core -> tests -> plugins/artibot (plugin root).
 const DECODED_PLUGIN_ROOT = path.resolve(
   fileURLToPath(import.meta.url),
   '..', '..', '..',

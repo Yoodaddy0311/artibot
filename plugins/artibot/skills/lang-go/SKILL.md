@@ -25,6 +25,7 @@ category: "language"
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 version: "1.0.0"
 lastVerified: "2026-03-27"
+source_hash: c4f565c8
 ---
 
 # Go Patterns & Best Practices
@@ -307,3 +308,15 @@ func BenchmarkProcess(b *testing.B) {
 - Shared mutable state without synchronization
 - Global variables
 - `panic` for expected errors
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip idiomatic patterns in this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "panic is fine here, it's exceptional" | Go reserves panic for unrecoverable bugs; expected failures must return error. Libraries that panic break caller control flow and defy errors.Is/As composition. |
+| "I'll launch a goroutine and forget it" | Unbounded goroutines leak memory and file descriptors. Every goroutine needs a lifecycle tied to context.Context or a done channel — errgroup.Group enforces this. |
+| "Naked returns keep the function short" | Naked returns hide which value changed and interact badly with defer mutating named returns. Explicit returns are mandatory past ~10 lines per Effective Go. |
+| "Let me define an interface up front for flexibility" | Go idiom is "accept interfaces, return structs" — interfaces belong on the consumer side. Pre-declared producer interfaces cause bloat and break structural typing benefits. |
+| "init() is convenient for setup" | init() runs at import time with no error return, no ordering guarantees across packages, and poisons tests. Use explicit New() constructors that return (*T, error). |

@@ -15,6 +15,7 @@ agents:
   - "doc-updater"
 tokens: "~3K"
 category: "marketing"
+source_hash: 55c1bbeb
 ---
 
 # Email Marketing
@@ -154,3 +155,16 @@ GDPR:     [PASS|ISSUE]
 
 - See `${CLAUDE_SKILL_DIR}/references/campaign-types-guide.md` for campaign types guide
 - See `${CLAUDE_SKILL_DIR}/references/deliverability-checklist.md` for deliverability checklist
+
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the rigor of this marketing practice, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "Send frequency doesn't matter if content is good." | Send frequency drives list fatigue and unsubscribe rates independently of content quality; cadence must be tested per segment. |
+| "Open rates are the main KPI." | Open rates became unreliable after Apple MPP (2021); click rate, reply rate, and conversion are the true health metrics now. |
+| "Skip the plain-text version, everyone uses HTML." | Missing plain-text alternative triggers spam filters and excludes screen readers; multipart/alternative is a deliverability baseline. |
+| "We don't need authentication records, our ESP handles it." | SPF, DKIM, and DMARC must be aligned for your sending domain; ESP defaults alone produce Gmail/Yahoo bulk-sender violations since 2024. |
+| "Batch-and-blast is faster than segmentation." | Batch sends pollute engagement reputation with disinterested subscribers; segmented sends yield 2-5x revenue per send. |

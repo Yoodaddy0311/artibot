@@ -8,6 +8,7 @@ agents: ["backend-developer", "architect"]
 tokens: "~4K"
 category: "platform"
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
+source_hash: 0befe53d
 ---
 
 # Cloud Database Patterns
@@ -238,3 +239,15 @@ Edge function -> HTTP driver (no TCP) -> Connection pooler -> Database
 - [ ] Credentials in environment variables
 - [ ] Read replica URL for read-heavy workloads
 ```
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the rigor of this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "connection pooling is an optimization" | serverless without pooling exhausts the DB in minutes — pooling is correctness, not optimization |
+| "edge and DB in the same region is fine" | users are global; DB latency from one region kills edge benefits — use read replicas or edge DBs |
+| "I will write raw SQL everywhere" | raw SQL with user input is how SQL injection ships — parameterize always |
+| "migrations can wait until deploy" | undocumented schema changes break rollback — every schema change is a migration |
+| "Firebase is just a database" | Firebase has security rules that are code; without testing them anyone can read your data |

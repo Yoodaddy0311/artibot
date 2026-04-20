@@ -2,6 +2,7 @@
 description: (Artibot) Marketing strategy planning with market analysis, competitive intelligence, and campaign architecture
 argument-hint: '[topic] e.g. "GTM 전략 수립"'
 allowed-tools: [Read, Write, Glob, Grep, Task, WebSearch, TaskCreate]
+toolset: marketing
 ---
 
 # /mkt
