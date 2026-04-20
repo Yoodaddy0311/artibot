@@ -1,5 +1,8 @@
 ---
 name: build-error-resolver
+capabilities: [build-diagnostics, dependency-resolution, compiler-errors, toolchain-repair]
+lifecycle: build
+rules: [typing:strict-mode, typing:no-ts-ignore, patterns:fail-fast, patterns:error-context]
 description: |
   Build and TypeScript error resolution specialist. Diagnoses compilation failures,
   type errors, and dependency issues. Applies minimal, targeted fixes only.

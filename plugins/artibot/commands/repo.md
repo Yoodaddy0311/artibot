@@ -1,123 +1,161 @@
 ---
-description: (Artibot) Clone and benchmark external git repos against Artibot with scored comparison
-argument-hint: '[git-url] e.g. "https://github.com/org/repo --deep"'
-allowed-tools: [Read, Glob, Grep, Bash, Task, TaskCreate]
+description: (Artibot) Clone and benchmark one or many external git repos against Artibot with scored comparison, parallel team analysis, and complexity-aware adoption filtering
+argument-hint: '[git-url ...] [--focus area] [--deep|--quick] [--no-replace-if-better] [--parallel]'
+allowed-tools: [Read, Glob, Grep, Bash, Task, TaskCreate, TaskUpdate]
+toolset: analysis
 ---
 
 # /repo
 
-Clone an external git repository, analyze its structure and capabilities, and produce a quantified comparison against the current Artibot build. Git clone is performed directly at command level; analysis is delegated to the `repo-benchmarker` agent.
+Clone 1..N external git repositories, analyze each against the current Artibot build, and produce a quantified multi-repo comparison. Multi-URL analyses run in **parallel teams** (one teammate per repo) with the orchestrator aggregating, per Artibot's "operator delegates, team executes + cross-checks" DNA.
 
 ## Arguments
 
-Parse $ARGUMENTS:
-- `url`: Git repository URL (HTTPS only — SSH and local paths blocked for security)
-- `--focus [area]`: Limit analysis — `agents`, `commands`, `skills`, `hooks`, `architecture`, `quality`, `innovation`
-- `--deep`: Full dependency mapping + code quality metrics (default: structure + feature inventory)
-- `--quick`: Structure-only scan, skip code quality and innovation scoring
-- `--compare-only`: Skip clone, use already-cloned repo at `~/.claude/artibot/repos/[repo-name]`
-- `--skip-clone`: Alias for `--compare-only`
-- `--output [format]`: `table` (default) | `json` | `markdown`
+Parse $ARGUMENTS (space-separated URLs supported):
+- `url [url ...]`: One or more HTTPS git URLs. SSH and local paths blocked.
+- `--focus [area]`: `agents` | `commands` | `skills` | `hooks` | `architecture` | `quality` | `innovation` | `domain-coverage`
+- `--deep`: Full dependency mapping + code quality metrics
+- `--quick`: Structure-only scan
+- `--compare-only` / `--skip-clone`: Skip clone, use cached
+- `--no-replace-if-better` *(default ON)*: If Artibot is stronger on a dimension, DO NOT suggest replacement — only note advantage
+- `--complexity-budget [low|med|high]` *(default low)*: Filter adoption suggestions by how much complexity they add. `low` = "성능 향상은 좋지만 단순함 유지" mode
+- `--parallel` *(auto-on for ≥2 URLs)*: Spawn one `repo-benchmarker` teammate per repo; aggregate via orchestrator
+- `--domain-check`: For marketplace-style repos (e.g., modu-cowork), compare domain/vertical coverage rather than code
+- `--output`: `table` (default) | `json` | `markdown`
 
-## Security
+## Security (unchanged, hardened)
 
-1. **URL Validation**: HTTPS only. Reject SSH (`git@`), `file://`, relative paths, and non-git URLs
-2. **Clone Isolation**: Clone to `~/.claude/artibot/repos/[sanitized-repo-name]/` (never into project directory)
-3. **Depth Limit**: `git clone --depth 1` by default (full clone only with `--deep`)
-4. **Size Guard**: Abort if repo exceeds 500MB (configurable)
-5. **No Execution**: Never run scripts, Makefiles, or install dependencies from cloned repos
-6. **Sanitized Paths**: Strip `..`, shell metacharacters, and null bytes from repo name
+1. HTTPS only. Reject `git@`, `file://`, relative paths
+2. Clone isolation to `~/.claude/artibot/repos/[sanitized-name]/`
+3. `--depth 1` default; full clone only with `--deep`
+4. Size guard: abort if any repo > 500MB
+5. **No execution** of cloned scripts / Makefiles / `npm install`
+6. Sanitize `..`, shell metachars, null bytes from repo names
+7. **NEW**: Refuse to read/execute any `.env`, credential files, or binary artifacts from cloned repos
 
 ## Execution Flow
 
-1. **Validate**: Parse and validate git URL. Check security constraints. Sanitize repo name for directory path
-2. **Clone** (command-level Bash):
-   - Check cache at `~/.claude/artibot/repos/[repo-name]/`
-   - If found and `--compare-only`: skip clone, use cached
-   - If found and no flag: run `git -C [path] pull` to update
-   - If not found: run `git clone --depth 1 [url] [path]`
-   - Verify clone success before proceeding
-3. **Load Context**: Scan cloned repo structure — directory tree, config files, file counts, framework detection
-4. **Delegate Analysis**: Spawn `repo-benchmarker` agent via Task tool with:
-   - Target repo path
-   - Artibot repo path (`plugins/artibot/`)
-   - Focus area (if specified)
-   - Analysis depth (`quick` | `standard` | `deep`)
-5. **Receive Results**: repo-benchmarker produces 10-dimension scored comparison
-6. **Enrich**: Add improvement suggestions with adoption effort estimates (LOW/MEDIUM/HIGH)
-7. **Report**: Output final benchmark report in requested format
+1. **Parse & Validate** — tokenize URLs, validate each, dedupe
+2. **Clone in parallel** — `git clone --depth 1` per URL (background jobs, `wait`)
+3. **Structure Scan** — count agents/commands/skills/hooks/lib/tests per repo
+4. **Delegate**:
+   - If 1 URL → single `repo-benchmarker` agent
+   - If ≥2 URLs → spawn N `repo-benchmarker` teammates **in parallel** (orchestrator aggregates). **This is the default; do not inline-analyze sequentially when more than one repo is given.**
+   - If `--deep` → add `architect` + `code-reviewer` teammates for design & quality passes
+   - If `--domain-check` → add `marketing-strategist` teammate for vertical coverage comparison
+5. **Score** — 10 dimensions per repo (see below)
+6. **Complexity-Filter Adoption** — drop any suggestion that violates `--complexity-budget`
+7. **Don't-Replace-If-Better Rule** — if Artibot's score on dimension D exceeds target's, label as "ADVANTAGE — keep as-is"; never recommend swap
+8. **Validate claims** *(inspired by awesome-opensource-ai/validate_awesome.py)* — for each adoption suggestion, verify the referenced file/pattern actually exists in the target repo (grep/read check) before listing
+9. **Aggregate Report** — single multi-repo table if N≥2
 
-## Agent Delegation
+## 10 Scoring Dimensions
 
-| Phase | Agent | Task |
-|-------|-------|------|
-| Structure Analysis | Task(Explore) | Map directory tree, file counts, config files |
-| Deep Analysis | Task(repo-benchmarker) | 10-dimension scoring, pattern extraction |
-| Architecture Review | Task(architect) | Design pattern comparison (if `--deep`) |
-| Quality Metrics | Task(code-reviewer) | Code quality comparison (if `--deep`) |
+| # | Dimension | Measures |
+|---|---|---|
+| 1 | Agent Architecture | # specialized agents, role separation, model-tier policy |
+| 2 | Orchestration Patterns | parallel teams, cross-check, routing, delegation discipline |
+| 3 | Skill System | skill count, SKILL.md structure, chaining, activation clarity |
+| 4 | Command System | slash-command coverage, argument hygiene, UX |
+| 5 | Hook System | hook count, event coverage, pipeline integration |
+| 6 | API Integration | provider adapters, region/fallback, MCP depth |
+| 7 | Code Quality | strict types, test coverage, linting, module limits |
+| 8 | Documentation | README depth, per-module docs, changelog discipline |
+| 9 | CI/CD & Validation | workflows, release automation, benchmarks |
+| 10 | Innovation | novel patterns (learning loops, self-eval, cognitive routing) |
 
-## Output Format
+## Agent Delegation (parallel-first)
+
+| Phase | Agent | When |
+|---|---|---|
+| Structure scan | Task(Explore) per repo | always |
+| Core benchmark | Task(repo-benchmarker) **×N parallel** | default for multi-repo |
+| Architecture review | Task(architect) | `--deep` |
+| Code quality | Task(code-reviewer) | `--deep` |
+| Domain/vertical | Task(marketing-strategist) | `--domain-check` |
+| Aggregation & complexity filter | orchestrator (main) | always |
+
+**Orchestrator discipline**: the main thread only *aggregates*. Per-repo analysis is never run inline when parallelism is available — this preserves Artibot's "operator delegates, team executes + cross-checks" DNA.
+
+## Complexity Budget Rules
+
+When `--complexity-budget low` (default):
+- **ACCEPT**: additive single-file skills, doc conventions, low-risk hooks, pure utility functions
+- **REJECT**: new frameworks, new build systems, domain-plugin splits, ML model dependencies
+- **DEFER**: anything requiring migration of ≥3 existing modules
+
+## Don't-Replace-If-Better Rule
+
+For each dimension D:
+```
+if artibot_score[D] >= target_score[D]:
+    emit("ARTIBOT ADVANTAGE — retain: " + rationale)
+    suppress_replacement_suggestions_for(D)
+else:
+    evaluate_adoption(target_pattern, complexity_budget)
+```
+
+## Output Format (multi-repo)
 
 ```
-REPO BENCHMARK: [repo-name]
-============================
-Source:     [git-url]
-Cloned:    [path] ([cached|fresh])
-Artibot:   v[version]
-Date:      [date]
-Mode:      [quick|standard|deep]
-Focus:     [area or "all"]
+REPO BENCHMARK — BATCH
+========================
+Repos:    [n]
+Artibot:  v[version]
+Date:     [date]
+Mode:     [quick|standard|deep]
+Budget:   [low|med|high]
 
-STRUCTURE COMPARISON
+STRUCTURE MATRIX
+────────────────
+Metric     | Artibot | [repo1] | [repo2] | ...
+Agents     | [n]     | [n]     | [n]     |
+Commands   | [n]     | [n]     | [n]     |
+Skills     | [n]     | [n]     | [n]     |
+Hooks      | [n]     | [n]     | [n]     |
+Tests      | [n]     | [n]     | [n]     |
+
+SCORE MATRIX (10-pt)
 ────────────────────
-Metric          | Artibot | Target | Delta
-────────────────|─────────|────────|──────
-Agents          | [n]     | [n]    | [+/-]
-Commands        | [n]     | [n]    | [+/-]
-Skills          | [n]     | [n]    | [+/-]
-Hooks           | [n]     | [n]    | [+/-]
-Lib modules     | [n]     | [n]    | [+/-]
-Test files      | [n]     | [n]    | [+/-]
-Total files     | [n]     | [n]    | [+/-]
+Dimension              | Artibot | [r1] | [r2] | Winner
+Agent Architecture     | 9       | 4    | 5    | A
+Orchestration          | 9       | 3    | 5    | A
+Skill System           | 8       | 5    | 9    | r2
+...
+WEIGHTED TOTAL (/100)  | 82      | 60   | 62   | A
 
-SCORE COMPARISON (10-point scale)
-─────────────────────────────────
-Dimension              | Artibot | Target | Delta | Winner
-───────────────────────|─────────|────────|───────|────────
-Agent Architecture     | [0-10]  | [0-10] | [+/-] | [A|T|=]
-Orchestration Patterns | [0-10]  | [0-10] | [+/-] | [A|T|=]
-Skill System           | [0-10]  | [0-10] | [+/-] | [A|T|=]
-Command System         | [0-10]  | [0-10] | [+/-] | [A|T|=]
-Hook System            | [0-10]  | [0-10] | [+/-] | [A|T|=]
-API Integration        | [0-10]  | [0-10] | [+/-] | [A|T|=]
-Code Quality           | [0-10]  | [0-10] | [+/-] | [A|T|=]
-Documentation          | [0-10]  | [0-10] | [+/-] | [A|T|=]
-CI/CD & Validation     | [0-10]  | [0-10] | [+/-] | [A|T|=]
-Innovation             | [0-10]  | [0-10] | [+/-] | [A|T|=]
-───────────────────────|─────────|────────|───────|────────
-WEIGHTED TOTAL         | [0-100] | [0-100]| [+/-] | [A|T|=]
+ADOPTABLE (filtered by --complexity-budget=low)
+────────────────────────────────────────────────
+[1] [source]: [pattern] → Effort: L | Impact: H | Claim-verified: ✓
 
-ADOPTABLE ELEMENTS
-──────────────────
-[1] [element]: [description] → Effort: [LOW|MEDIUM|HIGH]
+ARTIBOT ADVANTAGES (don't-replace list)
+────────────────────────────────────────
+[1] [dim]: [why stronger — keep as-is]
 
-ARTIBOT ADVANTAGES
-──────────────────
-[1] [element]: [why stronger]
+SUPPRESSED (would add complexity beyond budget)
+───────────────────────────────────────────────
+[1] [source]: [pattern] — REJECTED: [reason]
 
 RECOMMENDATIONS
 ───────────────
-Priority | Action                    | Effort | Impact
----------|---------------------------|--------|--------
-P1       | [action]                  | [L/M/H]| [L/M/H]
+Priority | Action | Effort | Impact | Complexity
+P1       | ...    | L      | H      | +0
 ```
 
-## Next Steps
+## Reference Repo Profiles (seed knowledge)
 
-작업 완료 후 추천 후속 액션:
+When any of these URLs is passed, pre-apply known profile:
+- `MiniMax-AI/cli` → CLI/Bun/TS, media APIs, dual-region → **focus: Code Quality, API Integration**
+- `google/magika` → ML file-type detection → **focus: Innovation**; SKIP framework-replacement
+- `alvinreal/awesome-opensource-ai` → curated list → **focus: Documentation, validator pattern**
+- `GoogleCloudPlatform/generative-ai` → notebooks/samples → **focus: Documentation, Domain organization**; SKIP agent-framework comparison
+- `modu-ai/cowork-plugins` → Claude Code plugin marketplace, 17 plugins × 71 SME skills → **focus: Skill System, domain-coverage**; direct competitor → score all dimensions strictly
+
+## Next Steps
 
 | # | 액션 | 커맨드 | 설명 |
 |---|------|--------|------|
 | 1 | 심층 분석 | `/analyze` | 벤치마크 결과 심층 분석 |
-| 2 | 패턴 구현 | `/implement` | 채택 가능 패턴 구현 시작 |
-| 3 | 개선 계획 | `/plan` | 벤치마크 기반 개선 로드맵 |
+| 2 | 채택 패턴 구현 | `/implement` | 단일 채택 항목 구현 시작 |
+| 3 | 개선 로드맵 | `/plan --from-benchmark` | 여러 채택 항목 통합 계획 |
+| 4 | 팀 병렬 실행 | `/team` | auto-team 트리거 완화 후 실전 파일럿 |

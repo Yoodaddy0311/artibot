@@ -26,6 +26,7 @@ agents:
   - "orchestrator"
 tokens: "~5K"
 category: "orchestration"
+source_hash: 27f267d4
 ---
 
 # Orchestration & Routing Intelligence
@@ -447,3 +448,15 @@ The existing Pipeline orchestration pattern (`TaskCreate` with `blockedBy`) maps
 | Execute with budget | LOW | Token budgets must be respected, /clear strategy mandatory |
 | Aggregate results | MEDIUM | Dedup and cross-reference, but synthesis requires judgment |
 | Report outcomes | LOW | Evidence-based reporting required, no claims without proof |
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the discipline of this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "I can pick the right agent by gut" | gut routing is inconsistent under load; an explicit router makes decisions auditable |
+| "sub-agent mode is always better than team mode" | sub-agent is for focused single tasks; team mode is for parallel independent work — picking one for both wastes capability |
+| "routing logic belongs in the prompt" | prompt-embedded routing doesn't compose across sessions; externalize the router so it can learn |
+| "agents should figure out their own delegation" | self-delegation loops to infinity without a coordinator; someone has to be the adult in the room |
+| "orchestration adds bureaucracy" | the "bureaucracy" is the difference between 4 agents doing the same task and 4 agents covering 4 tasks |

@@ -23,6 +23,7 @@ agents:
   - "refactor-cleaner"
 tokens: "~3K"
 category: "code-quality"
+source_hash: dda690c5
 ---
 
 # Development Principles
@@ -149,3 +150,15 @@ Progress:
 | Re-read files | LOW | Mandatory after every modification |
 | Report evidence | LOW | file:line format required, no vague claims |
 | Zero-skip check | LOW | Every item must be addressed or explicitly blocked |
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the rigor of this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "SOLID is dogma" | SOLID is the most-cited debugging tool in real incidents — ignore it and the bug reports come back |
+| "KISS means no abstractions" | KISS means appropriate abstractions, not zero; duplication is also complexity |
+| "YAGNI justifies technical debt" | YAGNI avoids speculative features; it does not excuse skipping tests or error handling |
+| "DRY always" | DRY across unrelated concepts creates the wrong abstraction — duplicate until the pattern is clear |
+| "principles slow me down" | principles are guardrails at speed; without them you ship bugs faster, not features |

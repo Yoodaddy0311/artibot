@@ -8,12 +8,17 @@
  * @module scripts/hooks/git-autopilot-session
  */
 
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import path from 'node:path';
 import { parseJSON, readStdin } from '../utils/index.js';
 import { createErrorHandler } from '../../lib/core/hook-utils.js';
 import { autoResolveAll } from './git-autopilot-merge.js';
+
+// Throttle: skip `git pull` if a successful pull happened within this window.
+// 5 minutes is aggressive enough to save ~800ms on every rapid-fire session
+// restart while still picking up remote changes reasonably quickly in practice.
+const PULL_THROTTLE_MS = 5 * 60 * 1000;
 
 // -------------------------------------------------------------------------
 // Helpers
@@ -85,6 +90,62 @@ function gitPull(cwd) {
 }
 
 /**
+ * Check whether a recent pull was made. Avoids redundant network round-trips
+ * on rapid session restarts. Reads `lastPullAt` from `.git/autopilot.json`.
+ *
+ * @param {string} repoRoot
+ * @returns {boolean} true if pull should be skipped (recent enough)
+ */
+function isPullThrottled(repoRoot) {
+  try {
+    const configPath = path.join(repoRoot, '.git', 'autopilot.json');
+    const config = JSON.parse(readFileSync(configPath, 'utf-8'));
+    if (!config.lastPullAt) return false;
+    const age = Date.now() - new Date(config.lastPullAt).getTime();
+    return age < PULL_THROTTLE_MS;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Persist the last-pull timestamp into `.git/autopilot.json`.
+ * Errors are swallowed — throttling is advisory, not critical.
+ *
+ * @param {string} repoRoot
+ */
+function recordPullTimestamp(repoRoot) {
+  try {
+    const configPath = path.join(repoRoot, '.git', 'autopilot.json');
+    const config = JSON.parse(readFileSync(configPath, 'utf-8'));
+    config.lastPullAt = new Date().toISOString();
+    writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
+  } catch {
+    // Ignore — throttling will fall back to pulling next time
+  }
+}
+
+/**
+ * Check whether git is currently in an active rebase state.
+ * @param {string} cwd
+ * @returns {boolean}
+ */
+function isRebaseInProgress(cwd) {
+  try {
+    const gitDir = execSync('git rev-parse --git-dir', {
+      cwd,
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    const rebaseMerge = path.join(cwd, gitDir, 'rebase-merge');
+    const rebaseApply = path.join(cwd, gitDir, 'rebase-apply');
+    return existsSync(rebaseMerge) || existsSync(rebaseApply);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Ensure the autopilot branch exists and is checked out.
  * Creates from current HEAD if new.
  * @param {string} cwd
@@ -131,21 +192,38 @@ async function main() {
   const currentBranch = getCurrentBranch(repoRoot);
   const log = (msg) => process.stderr.write(`[artibot:git-autopilot-session] ${msg}\n`);
 
-  // Step 1: Auto-pull
-  if (config.autoPullOnSession) {
+  // Step 1: Auto-pull (throttled — skip if last pull attempt was within PULL_THROTTLE_MS).
+  // Timestamp is recorded regardless of success: the throttle protects against
+  // repeated attempts (which cost ~800ms each) even when the pull fails.
+  if (config.autoPullOnSession && !isPullThrottled(repoRoot)) {
     const pulled = gitPull(repoRoot);
-    if (!pulled) {
-      log('git pull failed — attempting conflict auto-resolution');
-      const { results, allResolved } = autoResolveAll(repoRoot);
-      if (allResolved) {
-        log(`Auto-resolved ${results.length} conflict(s)`);
-        execSync('git rebase --continue', { cwd: repoRoot, stdio: 'ignore' });
-      } else {
-        const unresolved = results.filter((r) => !r.resolved).map((r) => r.filePath);
-        log(`Could not auto-resolve: ${unresolved.join(', ')} — manual resolution required`);
-      }
-    } else {
+    recordPullTimestamp(repoRoot);
+    if (pulled) {
       log(`Pulled latest changes on "${currentBranch}"`);
+    } else {
+      if (!isRebaseInProgress(repoRoot)) {
+        log('git pull failed (no rebase in progress) — skipping conflict resolution');
+      } else {
+        log('git pull failed — attempting conflict auto-resolution');
+        const { results, allResolved } = autoResolveAll(repoRoot);
+        if (allResolved && results.length > 0) {
+          log(`Auto-resolved ${results.length} conflict(s)`);
+          // eslint-disable-next-line max-depth -- git rebase recovery requires nested try/catch
+          try {
+            execSync('git rebase --continue', { cwd: repoRoot, stdio: 'ignore' });
+          } catch {
+            log('rebase --continue failed — manual resolution may be required');
+            execSync('git rebase --abort', { cwd: repoRoot, stdio: 'ignore' });
+          }
+        } else if (!allResolved) {
+          const unresolved = results.filter((r) => !r.resolved).map((r) => r.filePath);
+          log(`Could not auto-resolve: ${unresolved.join(', ')} — manual resolution required`);
+        } else {
+          // rebase in progress but no conflicted files — abort stale rebase
+          log('Rebase in progress but no conflicts found — aborting stale rebase');
+          execSync('git rebase --abort', { cwd: repoRoot, stdio: 'ignore' });
+        }
+      }
     }
   }
 

@@ -16,6 +16,7 @@ agents:
   - "frontend-developer"
 tokens: "~3K"
 category: "marketing"
+source_hash: c8b012f3
 ---
 
 # Brand Guidelines
@@ -187,3 +188,16 @@ Logo:       [usage rules and restrictions]
 
 - See `${CLAUDE_SKILL_DIR}/references/voice-definition-framework.md` for voice definition framework
 - See `${CLAUDE_SKILL_DIR}/references/messaging-architecture.md` for messaging architecture
+
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the rigor of this marketing practice, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "Designers know the brand, we don't need a written guide." | Tribal knowledge evaporates with turnover; without a documented style guide, visual drift compounds across 6-12 months. |
+| "Voice and tone are subjective, can't be codified." | Voice attributes (e.g., confident not arrogant, warm not saccharine) can and must be expressed as do/don't pairs with examples. |
+| "Color tokens are a nice-to-have." | Without semantic color tokens, every new surface re-invents palette decisions and accessibility contrast fails audit. |
+| "We'll fix brand inconsistencies in the redesign." | Inconsistencies erode brand recall by measurable percentages each quarter; governance must be continuous, not batched. |
+| "Logo lockup rules are too rigid for social." | Clear-space and minimum-size rules exist because violations reduce recognition at thumbnail sizes by up to 50%. |

@@ -2,6 +2,7 @@
 description: (Artibot) Interactive setup wizard — language, dev environment, Agent Teams, MCP servers, permissions, Git automation
 argument-hint: '[step] e.g. "language" | "git" | "permissions" — or no argument to run full wizard'
 allowed-tools: [Read, Write, Edit, Bash, Glob]
+toolset: meta
 ---
 
 # /setup

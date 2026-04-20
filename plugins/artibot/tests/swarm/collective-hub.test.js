@@ -1,17 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import {
-  anonymizeId,
-  createInstanceHash,
-  qualifyPattern,
-  computeRankingScore,
-  rankPatterns,
-  buildContribution,
-  generateWeeklyTop,
+  _MAX_BATCH_SIZE,
   _MIN_SHARE_SUCCESS_RATE,
   _MIN_USAGE_COUNT,
-  _MAX_BATCH_SIZE,
   _PII_KEYS,
   _stripPiiFromMetadata,
+  anonymizeId,
+  buildContribution,
+  computeRankingScore,
+  createInstanceHash,
+  generateWeeklyTop,
+  qualifyPattern,
+  rankPatterns,
 } from '../../lib/swarm/collective-hub.js';
 
 const baseConfig = { optIn: true, shareTypes: ['tool'], minSuccessRate: 0.6, minUsageCount: 5 };

@@ -16,6 +16,7 @@ agents:
   - "doc-updater"
 tokens: "~3K"
 category: "marketing"
+source_hash: b03c3667
 ---
 
 # Copywriting
@@ -156,3 +157,16 @@ CTA OPTIONS
 
 - See `${CLAUDE_SKILL_DIR}/references/persuasion-frameworks.md` for persuasion frameworks
 - See `${CLAUDE_SKILL_DIR}/references/cta-best-practices.md` for CTA best practices
+
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the rigor of this marketing practice, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "List every feature, customers will figure out the value." | Features without benefit translation force cognitive load on the reader; conversion drops 20-40% vs. benefit-led copy. |
+| "Jargon signals expertise." | Industry jargon excludes buyers outside the inner circle and reduces comprehension; plain language at 6th-8th grade reads highest. |
+| "Long copy always outperforms short copy." | Copy length must match decision complexity; short copy wins for impulse purchases, long copy for high-consideration, never the reverse. |
+| "The client approved it, so it's done." | Client approval is not market validation; copy must be tested against real audiences via A/B or 5-second tests. |
+| "AIDA is old, we don't need a framework." | Frameworks (AIDA, PAS, BAB) are scaffolds for completeness, not creativity caps; skipping them produces copy missing attention or action. |

@@ -25,6 +25,7 @@ agents:
   - "backend-developer"
 tokens: "~3K"
 category: "security"
+source_hash: c8eaae49
 ---
 
 # Security Standards
@@ -160,3 +161,17 @@ Progress:
 | CSRF | Anti-CSRF tokens, SameSite cookies | High |
 | Secrets Exposure | Env vars, vault, .gitignore | Critical |
 | Mass Assignment | Allowlists, DTOs, schema validation | Medium |
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip critical steps in this skill, paired with factual rebuttals. Use this to catch and resist shortcuts.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "It's an internal-only endpoint, so injection doesn't matter" | Internal networks get breached via phishing, SSRF, and compromised service accounts. Every production incident postmortem cites "internal-only" code that was reached from the outside. Defense in depth assumes the perimeter has already failed. |
+| "We'll add auth later, this is just an MVP" | "Later" becomes "never" the moment the endpoint is shipped and indexed. Every public-facing URL is scanned within hours of DNS propagation. Add auth before the first deploy — retrofitting requires schema changes, session migrations, and user re-onboarding. |
+| "This API key is just for development, it's fine to commit" | Dev keys get real rate limits, real billing, and real access. GitHub is scraped continuously for leaked secrets; your "dev" key will be abused within minutes. Use `.env.local` + `.gitignore` — there is no zero-cost exception. |
+| "OWASP Top 10 doesn't apply to this kind of service" | OWASP Top 10 is derived from thousands of cross-industry incidents — injection, broken auth, and misconfiguration appear in every domain from payments to IoT to ML pipelines. If you cannot name which specific OWASP item is inapplicable and why, the answer is: all ten apply. |
+| "The user input comes from our own frontend, it's already validated" | Client-side validation is a UX hint, not a security boundary. An attacker bypasses your frontend with curl in under 10 seconds. Every server handler must re-validate — trust ends at the network boundary. |
+| "Error messages need stack traces so users can report bugs" | Stack traces leak framework versions, file paths, SQL table names, and internal class structures — a free reconnaissance kit for attackers. Log full traces server-side, return an opaque correlation ID to the user. |
+| "Parameterized queries are slower than string concatenation" | The performance delta is measured in microseconds; the SQL injection that string concatenation enables is measured in full database exfiltration. This is not a tradeoff — prepared statements are both safer and cached by the DB planner. |

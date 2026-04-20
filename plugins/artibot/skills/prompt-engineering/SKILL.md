@@ -28,6 +28,7 @@ category: "development"
 version: "1.0.0"
 risk: safe
 lastVerified: "2026-03-31"
+source_hash: 947e33e8
 ---
 
 # Prompt Engineering Patterns
@@ -158,3 +159,15 @@ Version 3 (Reasoning): "핵심 발견 3개를 식별한 후 각각 요약" → �
 4. 프롬프트를 코드처럼 버전 관리
 5. 프로덕션 프롬프트는 메트릭 모니터링
 6. 단순한 것부터 시작, 필요 시에만 복잡도 추가
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the discipline of this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "more examples always help" | too many examples dilute the signal and blow the context budget |
+| "the model will figure it out" | hope is not a strategy — explicit constraints beat implicit intent every time |
+| "Chain-of-Thought is for weak models" | CoT measurably improves strong models on multi-step reasoning; the "weak model" framing is outdated |
+| "system prompts and user prompts are interchangeable" | system prompts have higher weight and better persistence; misplacing constraints loses them |
+| "I'll tune the prompt after seeing failures" | post-hoc tuning overfits to observed failures; structured design catches unseen failures too |

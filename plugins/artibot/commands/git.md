@@ -2,6 +2,7 @@
 description: (Artibot) Git workflow assistant with commit conventions, PR creation, branch management, worktree automation, and beginner-friendly collaboration tools
 argument-hint: '[operation] e.g. "커밋 후 PR 생성", "worktree create feat/login", "guide pull"'
 allowed-tools: [Read, Bash, Glob, Grep, TaskCreate]
+toolset: devops
 ---
 
 # /git

@@ -22,6 +22,7 @@ agents:
 tokens: "~4K"
 category: "language"
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
+source_hash: 230bc409
 ---
 
 # Flutter/Dart Patterns & Best Practices
@@ -346,3 +347,15 @@ class AppTheme {
 - **Riverpod 2**: Code-generated providers with `@riverpod`, `AsyncValue` for loading states, and `ref.invalidate` for refresh
 - **go_router**: Declarative routing with path parameters, redirect guards, and ShellRoute for persistent navigation
 - **Material 3**: Adaptive theming with `colorSchemeSeed`, `useMaterial3`, and responsive breakpoints
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip idiomatic patterns in this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "setState is simpler than Riverpod for this screen" | setState couples state to the widget tree, preventing reuse and making testing require pumpWidget. Riverpod providers are testable as plain Dart and survive hot reload. |
+| "StatefulWidget is fine, I don't need hooks or providers" | Managing controllers/subscriptions in initState/dispose is error-prone — forgotten dispose() is the #1 leak source. flutter_hooks or Riverpod's AutoDispose handles this automatically. |
+| "BuildContext across async gaps is usually okay" | Using context after an await can reference a disposed widget and crash with "Looking up a deactivated widget". Always guard with `if (!context.mounted) return` — Flutter 3.7+ lints this. |
+| "Navigator.push is simpler than go_router" | Imperative navigation breaks deep links, browser back button on web, and typed routes. go_router gives declarative, URL-first routing that matches Flutter's web story. |
+| "I'll use setState inside build, it's only once" | Any setState in build causes an infinite rebuild loop and throws in debug. State mutations belong in event handlers or providers, never the render phase. |

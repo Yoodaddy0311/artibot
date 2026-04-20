@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
-  MODES,
-  detectMode,
-  getModeConfig,
   applyMode,
+  detectMode,
   getActiveMode,
+  getModeConfig,
+  MODES,
 } from '../../lib/cognitive/context-modes.js';
 
 // ---------------------------------------------------------------------------

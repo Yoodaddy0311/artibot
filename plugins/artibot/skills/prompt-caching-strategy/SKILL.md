@@ -26,6 +26,7 @@ category: "optimization"
 risk: safe
 version: "1.0.0"
 lastVerified: "2026-04-01"
+source_hash: 4787da02
 ---
 
 # Prompt Caching Strategy
@@ -195,3 +196,15 @@ Progress:
 | MEMORY.md | | O |
 | 활성 스킬 목록 | | O |
 | 스킬 Level 1 | 이전 턴 캐시 가능 | 첫 로드 시 동적 |
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the discipline of this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "cache hits are a nice-to-have" | cached tokens are 10x cheaper and 5x faster — at scale this is the difference between viable and unviable |
+| "I'll put dynamic context first for freshness" | dynamic-first destroys cache reuse; put static above dynamic to maximize the cacheable prefix |
+| "the boundary doesn't matter much" | the boundary is everything — one byte of dynamic content above your static block invalidates the entire prefix cache |
+| "caching makes debugging harder" | cached requests are identical by construction — they're EASIER to debug, not harder |
+| "tool definitions change too often to cache" | tool definitions should be versioned and stable; "too often" means your tool design needs discipline, not that caching is wrong |

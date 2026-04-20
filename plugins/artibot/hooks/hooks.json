@@ -61,6 +61,19 @@
         "hooks": [
           {
             "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/session-digest.js",
+            "timeout": 3000
+          }
+        ],
+        "priority": "observability",
+        "category": "digest"
+      },
+      {
+        "matcher": "*",
+        "once": true,
+        "hooks": [
+          {
+            "type": "command",
             "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/git-autopilot-session.js",
             "timeout": 10000
           }
@@ -118,18 +131,6 @@
           }
         ],
         "priority": "critical",
-        "category": "security"
-      },
-      {
-        "matcher": "tool == \"Read\"",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-write-guard.js",
-            "timeout": 3000
-          }
-        ],
-        "priority": "operational",
         "category": "security"
       },
       {
@@ -421,7 +422,20 @@
         "category": "tracking"
       }
     ],
-    "PermissionRequest": [],
+    "PermissionRequest": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/permission-auto-approve.js",
+            "timeout": 3000
+          }
+        ],
+        "priority": "operational",
+        "category": "permission"
+      }
+    ],
     "SessionEnd": [
       {
         "matcher": "*",
@@ -446,6 +460,18 @@
         ],
         "priority": "optional",
         "category": "learning"
+      },
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/rotation-runner.js",
+            "timeout": 8000
+          }
+        ],
+        "priority": "observability",
+        "category": "maintenance"
       },
       {
         "matcher": "*",

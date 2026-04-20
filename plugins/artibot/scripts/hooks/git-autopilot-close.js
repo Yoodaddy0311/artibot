@@ -156,16 +156,14 @@ function squashWipCommits(cwd, branch, branchPrefix, wipCount) {
       stdio: ['ignore', 'pipe', 'ignore'],
     }).trim();
 
-    const totalCommits = parseInt(
-      execSync(`git rev-list --count ${mergeBase}..HEAD`, {
-        cwd,
-        encoding: 'utf-8',
-        stdio: ['ignore', 'pipe', 'ignore'],
-      }).trim(),
-      10
-    );
+    const totalCommitsRaw = execSync(`git rev-list --count ${mergeBase}..HEAD`, {
+      cwd,
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    const totalCommits = parseInt(totalCommitsRaw, 10);
 
-    if (totalCommits < 2) return true;
+    if (Number.isNaN(totalCommits) || totalCommits < 2) return true;
 
     // Soft-reset to merge-base, re-commit everything as one clean commit
     execSync(`git reset --soft ${mergeBase}`, { cwd, stdio: 'ignore' });

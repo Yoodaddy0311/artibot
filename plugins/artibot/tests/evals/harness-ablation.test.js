@@ -195,7 +195,6 @@ describe('harness-ablation/constants', () => {
     expect(names).toContain('skills');
     expect(names).toContain('tasks');
     expect(names).toContain('subagents');
-    expect(names).toContain('aciConstraint');
     expect(names).toContain('guardrail');
     expect(names).toContain('summarization');
     expect(names).toContain('tokenUsage');

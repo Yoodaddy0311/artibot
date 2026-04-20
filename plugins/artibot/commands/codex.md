@@ -8,6 +8,7 @@ allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, TaskCreate]
 arguments:
   - action: "setup | mode | review | idea | (빈값=status)"
   - target: "모드명 또는 리뷰 대상"
+toolset: team
 ---
 
 # /codex
