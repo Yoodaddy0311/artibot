@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-04-20T05:17:49.939Z",
+  "generatedAt": "2026-04-15T10:06:38.391Z",
   "skills": {
     "ab-testing": {
       "hash": "701661e8",
@@ -63,9 +63,9 @@
       "size": 9223
     },
     "compaction-survival": {
-      "hash": "f01223ca",
+      "hash": "fd4bafdf",
       "path": "skills\\compaction-survival\\SKILL.md",
-      "size": 5238
+      "size": 5144
     },
     "competitive-intelligence": {
       "hash": "8b28fdd9",
@@ -173,9 +173,9 @@
       "size": 4489
     },
     "git-conflict": {
-      "hash": "7d9e91d5",
+      "hash": "5f5b2689",
       "path": "skills\\git-conflict\\SKILL.md",
-      "size": 5819
+      "size": 4715
     },
     "git-guide": {
       "hash": "e395c9d4",
@@ -548,9 +548,9 @@
       "size": 11777
     },
     "strategic-compact": {
-      "hash": "24a025d4",
+      "hash": "20062e8f",
       "path": "skills\\strategic-compact\\SKILL.md",
-      "size": 9609
+      "size": 9288
     },
     "swarm-intelligence": {
       "hash": "e2241486",
@@ -583,9 +583,9 @@
       "size": 7807
     },
     "token-efficiency": {
-      "hash": "01e476b0",
+      "hash": "2eccc99a",
       "path": "skills\\token-efficiency\\SKILL.md",
-      "size": 5414
+      "size": 5335
     },
     "tool-design": {
       "hash": "cdb68458",
@@ -603,9 +603,9 @@
       "size": 6040
     },
     "visual-validation": {
-      "hash": "4e12c0fd",
+      "hash": "64f60461",
       "path": "skills\\visual-validation\\SKILL.md",
-      "size": 5836
+      "size": 5573
     },
     "yes-md": {
       "hash": "b605c119",
