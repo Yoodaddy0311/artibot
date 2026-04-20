@@ -269,6 +269,7 @@ export class Dag {
         const children = this.#dependents.get(candidate);
         if (children) {
           for (const child of children) {
+            // eslint-disable-next-line max-depth -- cascade propagation requires nested branch
             if (!skipped.has(child)) queue.push(child);
           }
         }

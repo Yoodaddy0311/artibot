@@ -1,14 +1,14 @@
-import { describe, expect, it, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import {
   ComplexityBudget,
   countLines,
   countSubtasks,
+  DEFAULT_THRESHOLDS,
   extractFileReferences,
   extractHeadings,
   extractNumberedGroups,
   groupFilesByDirectory,
   Level,
-  DEFAULT_THRESHOLDS,
 } from '../../lib/orchestration/complexity-budget.js';
 
 // ---------------------------------------------------------------------------

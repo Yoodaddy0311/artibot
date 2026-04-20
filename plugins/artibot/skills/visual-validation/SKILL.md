@@ -27,6 +27,7 @@ agents:
   - "frontend-developer"
 tokens: "~4K"
 category: "testing"
+source_hash: 64f60461
 ---
 
 # Visual Validation
@@ -66,6 +67,12 @@ Compare the current render against the baseline:
 | Dynamic content with animations | 0.85 |
 
 Always use the **lowest acceptable threshold** for your use case to avoid false positives.
+
+### Claude Opus 4.7 고해상도 가이드
+- Playwright 스크린샷 기본 해상도: **2576px** (이전 1568px) — 3.75MP 이내
+- 모델 좌표는 실제 픽셀과 1:1 매핑 → 스케일 팩터 계산 불필요
+- 고해상도는 토큰을 더 소모 — 고충실도가 불필요한 경우 다운샘플 권장
+- Playwright 설정: viewport `{ width: 2576, height: 1600 }` 또는 원본 유지 후 `fullPage: true`
 
 ## Best Practices
 
@@ -135,3 +142,15 @@ These instructions should be dispatched via the Playwright MCP server at runtime
 ## References
 
 - See `${CLAUDE_SKILL_DIR}/references/validation-thresholds.md` for validation thresholds
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the rigor of this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "screenshot diff is flaky" | SSIM with tolerance is not flaky — pixel-exact is; use the right metric |
+| "eyeballing it is faster" | eyeballing misses subpixel shifts and rebrand drifts — tools do not blink |
+| "visual tests break on every CSS change" | they break on every unintended CSS change — that is the feature, update baselines intentionally |
+| "we do not need visual tests for an API" | dashboards and admin UIs are visual surfaces; APIs with docs have rendered docs |
+| "baselines bloat the repo" | store baselines in object storage, not git — bloat is a storage choice |

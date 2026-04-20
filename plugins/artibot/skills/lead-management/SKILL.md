@@ -16,6 +16,7 @@ agents:
   - "code-reviewer"
 tokens: "~4K"
 category: "marketing"
+source_hash: fa392769
 ---
 
 # Lead Management
@@ -222,3 +223,16 @@ Metric              | Target  | Current
 
 - See `${CLAUDE_SKILL_DIR}/references/lead-lifecycle-stages.md` for lead lifecycle stages and BANT qualification framework
 - See `${CLAUDE_SKILL_DIR}/references/lead-scoring-model.md` for lead scoring model and pipeline metrics
+
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the rigor of this marketing practice, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "All leads go straight to sales." | Unqualified leads waste sales capacity and train reps to ignore marketing handoffs; MQL criteria and nurture must gate transfer. |
+| "Lead scoring is a set-and-forget model." | Scoring weights drift as buyer behavior shifts; models must be recalibrated quarterly against closed-won data. |
+| "Speed-to-lead doesn't matter for B2B." | Response within 5 minutes increases conversion 9x vs. 30 minutes; B2B is not exempt from decay curves. |
+| "We don't need SLAs between marketing and sales." | Without SLAs on response time and follow-up count, leads leak at the handoff and attribution arguments dominate meetings. |
+| "Nurture sequences are just drip emails." | Effective nurture branches on behavior signals and routes to sales on intent triggers; linear drips produce <10% of segmented performance. |

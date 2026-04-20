@@ -1,0 +1,25 @@
+cff-version: 1.2.0
+message: "If you use Artibot in your research or product, please cite it as below."
+title: "Artibot: Claude Code Plugin for Multi-Agent Orchestration"
+abstract: >-
+  Artibot is a Claude Code plugin providing multi-agent orchestration with
+  parallel team execution, cognitive routing (System 1/2), lifelong learning
+  (GRPO self-evaluation), a 37-hook event pipeline, and 119 domain skills.
+  It treats the operator as a delegator and offloads execution plus
+  cross-checking to specialized teammates.
+type: software
+authors:
+  - name: "Artience"
+    website: "https://github.com/Yoodaddy0311/artibot"
+repository-code: "https://github.com/Yoodaddy0311/artibot"
+keywords:
+  - claude-code
+  - agent-orchestration
+  - multi-agent
+  - plugin
+  - ai-agents
+  - cognitive-routing
+  - lifelong-learning
+license: MIT
+version: "2.5.0"
+date-released: "2026-04-15"

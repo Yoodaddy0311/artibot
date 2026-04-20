@@ -11,6 +11,7 @@ triggers:
   - verification
   - 팀원들
   - 병렬로
+source_hash: cd022fd3
 ---
 
 # /team
@@ -93,3 +94,15 @@ When enabled, Claude automatically uses /team workflow for requests that meet AL
 - 교차 검증 없이 결과를 바로 합치지 않습니다.
 - 같은 사람이 자기 결과를 검증하지 않습니다.
 - 최종 보고에는 “무엇을 했는지”뿐 아니라 “무엇을 검증했는지”를 함께 적습니다.
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the rigor of this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "solo is faster than coordinating" | solo hits sequential limits; parallel teams finish in wall-clock time, not agent-time |
+| "agents will duplicate work" | that is what cross-check is for — duplication is caught and reconciled |
+| "the orchestrator is overhead" | orchestrator enforces decomposition and verification — without it you get drift |
+| "I will just do it myself" | that scales to one task; teams scale to domains |
+| "cross-check is redundant review" | cross-check is independent verification from a different lens — that is how bugs get caught |

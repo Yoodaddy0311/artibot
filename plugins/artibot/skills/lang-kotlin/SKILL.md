@@ -22,6 +22,7 @@ agents:
 tokens: "~4K"
 category: "language"
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
+source_hash: 7b01ee8b
 ---
 
 # Kotlin Patterns & Best Practices
@@ -223,3 +224,15 @@ fun UserCard(user: User, onEdit: (User) -> Unit) {
 - **Ktor**: Lightweight async server with coroutine-native routing, serialization, and plugins
 - **Spring Boot**: Kotlin-idiomatic DI with coroutine support via `spring-webflux`
 - **Compose Multiplatform**: Declarative UI with shared business logic across Android, iOS, Desktop, Web
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip idiomatic patterns in this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "!! is quick, the value can't be null here" | !! throws NPE and defeats Kotlin's null-safety guarantee — the same bug Kotlin was designed to eliminate. Use ?: with a fallback, requireNotNull with a message, or smart-casts. |
+| "GlobalScope.launch is easier than passing a scope" | GlobalScope coroutines leak across the lifecycle and bypass structured concurrency. Inject a CoroutineScope or use viewModelScope/lifecycleScope — GlobalScope is flagged @DelicateCoroutinesApi. |
+| "runBlocking inside suspend is a quick fix" | runBlocking inside a suspend context deadlocks on single-threaded dispatchers (Android Main, Dispatchers.Main.immediate). Just call the suspend function directly. |
+| "data class for everything, it's free" | Data classes expose copy() and componentN() for every field — risky for entities with identity or mutable state. Use value class for wrappers, sealed class for ADTs. |
+| "lateinit var beats nullable, I'll initialize it soon" | lateinit throws UninitializedPropertyAccessException, which is an NPE with extra steps. Use val + constructor, by lazy {}, or an explicit null with ?. — safer and more explicit. |

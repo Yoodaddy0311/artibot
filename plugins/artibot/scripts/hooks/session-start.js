@@ -149,21 +149,69 @@ async function main() {
   // Non-blocking update notification — any error is swallowed.
   // Wrapped with a 2000ms outer timeout so the update check never consumes
   // more than 2 seconds, leaving ample headroom within the 5000ms hook limit.
+  // CRITICAL: the timer MUST be cleared after Promise.race settles, otherwise
+  // the unreferenced pending timer keeps Node's event loop alive for the full
+  // 2000ms even when updatePromise already resolved — adding ~2s to session
+  // start hook latency. clearTimeout() fixes this.
   try {
     const cacheDir = path.join(home, '.claude', 'artibot');
     const updatePromise = checkForUpdate(version, cacheDir);
-    const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('timeout')), 2000)
-    );
-    const updateInfo = await Promise.race([updatePromise, timeoutPromise]);
-    if (updateInfo.hasUpdate) {
-      lines.push(
-        `\u2b06\ufe0f New version available: v${updateInfo.latestVersion} (current: v${version})`,
-        `   Update: /artibot:update --force`
-      );
+    let timeoutHandle;
+    const timeoutPromise = new Promise((_, reject) => {
+      timeoutHandle = setTimeout(() => reject(new Error('timeout')), 2000);
+    });
+    try {
+      const updateInfo = await Promise.race([updatePromise, timeoutPromise]);
+      if (updateInfo.hasUpdate) {
+        lines.push(
+          `\u2b06\ufe0f New version available: v${updateInfo.latestVersion} (current: v${version})`,
+          `   Update: /artibot:update --force`
+        );
+      }
+    } finally {
+      clearTimeout(timeoutHandle);
     }
   } catch {
     // Never block session start on version-check failures
+  }
+
+  // Phase 1 Quick Win: refresh skill hash cache if stale.
+  // Wrapped in try/catch — must NEVER block session start.
+  // Only writes to stderr; stdout JSON contract is preserved.
+  try {
+    const cacheModPath = path.join(env.pluginRoot, 'lib', 'core', 'skill-hash-cache.js');
+    const { refreshIfStale } = await import(toFileUrl(cacheModPath));
+    const cache = await refreshIfStale();
+    if (cache && cache.skills) {
+      const count = Object.keys(cache.skills).length;
+      process.stderr.write(`[artibot] skill-hash cache: ${count} skills indexed\n`);
+    }
+  } catch (err) {
+    process.stderr.write(`[artibot] skill-hash cache refresh skipped: ${err.message}\n`);
+  }
+
+  // Swarm auto-detect: if this device has a swarm profile shipped with the
+  // fork but isn't opted in yet, automatically activate it (one-time per
+  // repoUrl + machine). Non-blocking background spawn, stderr only.
+  //
+  // Trust model: a committed swarm-profile.json in the user's own fork is
+  // treated as implicit consent. User can still explicitly opt out via
+  // swarm-init.js --reset; the auto-applied marker respects optedOutAt.
+  try {
+    const autodetectPath = path.join(env.pluginRoot, 'scripts', 'swarm-autodetect.js');
+    const { existsSync: fsExists } = await import('node:fs');
+    if (fsExists(autodetectPath)) {
+      const { spawn } = await import('node:child_process');
+      // Fire and forget — don't await, don't block.
+      const proc = spawn(process.execPath, [autodetectPath, '--auto'], {
+        cwd: env.pluginRoot,
+        stdio: ['ignore', 'ignore', 'inherit'],
+        detached: false,
+      });
+      proc.unref();
+    }
+  } catch {
+    // Never block session start on swarm autodetect failures
   }
 
   const message = lines.join('\n');

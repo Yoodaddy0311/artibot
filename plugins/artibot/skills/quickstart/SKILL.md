@@ -17,6 +17,7 @@ agents:
 argument-hint: "[project-type] e.g., node, python, rust, go"
 tokens: "~1K"
 category: "onboarding"
+source_hash: eb9d81f5
 ---
 
 # Interactive Quickstart Guide
@@ -57,3 +58,15 @@ Display a clear, formatted welcome message with:
 | Rust | Cargo.toml | load, analyze, build |
 | Go | go.mod | load, analyze, test |
 | Java | pom.xml | load, analyze, build |
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the rigor of this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "I will figure it out from the docs" | docs scatter across files; quickstart is the sequenced path to first success |
+| "quickstart is for beginners only" | quickstart is the regression test for onboarding — experts use it to validate setup too |
+| "our tool is too complex for quickstart" | if you cannot write a quickstart, new users cannot start — that is a product bug |
+| "I will skip the detection step" | project detection is what makes quickstart personalized — skipping it gives generic advice |
+| "screenshots will go stale" | so will your UX; update screenshots as a sign the quickstart is maintained |

@@ -20,6 +20,7 @@ agents:
   - "code-reviewer"
   - "security-reviewer"
 tokens: "~2.5K"
+source_hash: d07e8a1b
 ---
 
 # Codex Plugin Integration (codex-plugin-cc)
@@ -138,3 +139,15 @@ review/dev 모드 활성화 시, Stop-Review-Gate 훅에서 자동으로 Codex �
 - 플러그인: codex-plugin-cc (별도 Claude Code 플러그인)
 - 민감 파일 자동 제외: `.env`, `*.pem`, `credentials.*`
 - Artibot 단독 리뷰 폴백: Codex 오류 시 자동
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the rigor of this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "Codex and Claude will just agree" | the whole point is disagreement — convergence without divergence means one of them skipped thinking |
+| "I will skip cross-check for simple tasks" | simple tasks are where blind spots hide; cross-check costs little and catches a lot |
+| "Codex does not know our codebase" | fresh-eyes review beats codebase-blind agreement; feed it the relevant files and listen |
+| "two LLMs double the hallucinations" | two independent LLMs narrow the hallucination surface — agreement is weak but disagreement is strong signal |
+| "integration is too much overhead" | the plugin handles transport; your overhead is one command invocation |

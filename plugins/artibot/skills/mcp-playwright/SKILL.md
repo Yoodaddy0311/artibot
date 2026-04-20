@@ -15,6 +15,7 @@ agents:
   - "tdd-guide"
 tokens: "~2K"
 category: "tooling"
+source_hash: b38af4d3
 ---
 # MCP: Playwright
 
@@ -63,3 +64,15 @@ test('user completes flow', async ({ page }) => {
 - Always cleanup browser connections
 - Batch operations to minimize browser restarts
 - Fallback: generate test code files for local execution
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the rigor of this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "unit tests cover this" | unit tests do not catch browser rendering, keyboard nav, or cross-frame bugs — E2E does |
+| "headless is good enough" | headless misses visual regressions that only appear under real rendering |
+| "flaky tests are normal" | flakiness is almost always a missing wait — Playwright auto-waits if you let it |
+| "screenshots bloat the repo" | store baselines in artifact storage, not git — bloat is a config issue |
+| "cross-browser is legacy worry" | Safari and mobile WebKit still diverge from Chromium on flex, focus, and dates — test all three |

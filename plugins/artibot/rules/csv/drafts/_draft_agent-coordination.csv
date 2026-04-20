@@ -1,0 +1,11 @@
+domain,rule_id,severity,context,description,rationale
+agent_coordination,model-policy-1,warn,Model Policy,"**Opus** (73%): orchestrator, architect, security-reviewer, frontend/backend-developer, code-reviewer, tdd-guide, database-reviewer, mcp-developer, typescript-pro, planner, refactor-cleaner, build-error-resolver, llm-architect, devops-engineer, performance-engineer, e2e-runner, marketing-strategist, repo-benchmarker",
+agent_coordination,model-policy-2,warn,Model Policy,"**Sonnet** (27%): doc-updater, content-marketer, data-analyst, presentation-designer, seo-specialist, cro-specialist, ad-specialist",
+agent_coordination,delegation-rules-3,warn,Delegation Rules,Complex features → use planner agent first,
+agent_coordination,delegation-rules-4,warn,Delegation Rules,After writing code → use code-reviewer agent,
+agent_coordination,delegation-rules-5,warn,Delegation Rules,Bug fix or new feature → use tdd-guide agent,
+agent_coordination,delegation-rules-6,warn,Delegation Rules,Architecture decisions → use architect agent,
+agent_coordination,delegation-rules-7,warn,Delegation Rules,Multiple independent tasks → launch agents in parallel,
+agent_coordination,quality-enforcement-8,warn,Quality Enforcement,Every agent MUST follow DEV protocol (Decompose-Execute-Verify),
+agent_coordination,quality-enforcement-9,warn,Quality Enforcement,Orchestrator verifies completion evidence from all teammates,
+agent_coordination,quality-enforcement-10,warn,Quality Enforcement,"""Done"" without proof = NOT done",

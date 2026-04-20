@@ -2,6 +2,7 @@
 description: (Artibot) Test-driven development workflow (RED -> GREEN -> REFACTOR)
 argument-hint: '[feature] e.g. "TDD로 유틸 함수 개발"'
 allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, Task, TaskCreate]
+toolset: code
 ---
 
 # /tdd

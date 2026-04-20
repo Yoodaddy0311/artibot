@@ -25,6 +25,7 @@ agents:
 argument-hint: "[error-description] e.g., TypeError in auth.js, login 500 error"
 tokens: "~3K"
 category: "debugging"
+source_hash: 16fbf30a
 ---
 
 # Systematic Debugging
@@ -308,3 +309,15 @@ Progress:
 | Apply fix | MEDIUM | Minimal change required, but approach is flexible |
 | Verify fix | LOW | Full test suite must pass, no exceptions |
 | Document resolution | MEDIUM | Format flexible, content must include root cause and fix rationale |
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the rigor of this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "I know what is wrong" | confirmation bias — write down your hypothesis first, then test it |
+| "just restart, it will fix it" | restart hides state bugs that recur in production |
+| "I will grep my way to the bug" | grep finds symptoms; debuggers and binary search find causes |
+| "logging more will reveal it" | logging is a tool, not a strategy — form a hypothesis first, then add targeted logs |
+| "the stack trace is enough" | the stack trace shows where it failed, not why — always ask why five times |

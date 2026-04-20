@@ -19,6 +19,7 @@ agents: []
 argument-hint: "[language|environment] e.g., korean, english, reset"
 tokens: 2000
 category: setup
+source_hash: 2c90d31d
 ---
 
 # Artibot Setup Wizard
@@ -274,3 +275,15 @@ Claude Code를 재시작하면 설정이 적용됩니다.
 - Swarm/모델: `~/.claude/artibot/artibot.config.json`
 - MCP: `~/.claude/artibot/.mcp.json`
 - Git 자동화: `~/.claude/artibot/git-autopilot.json`
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the rigor of this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "I will use defaults for everything" | defaults are safe, not optimal — setup surfaces decisions you should make consciously |
+| "setup wizards are slow" | wizards front-load decisions; skipping means making them later under pressure |
+| "I can edit the config file directly" | editing JSON bypasses validation and migration — the wizard knows the schema |
+| "I will run setup later when I need a feature" | features depend on config; setup ensures dependencies are present before the need arises |
+| "setup prompts are noise" | every prompt represents a real choice — skipping means silently accepting defaults |

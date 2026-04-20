@@ -13,6 +13,7 @@ triggers:
 tokens: "~500"
 category: "workflow"
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
+source_hash: 0b7b471e
 ---
 
 # Session Worklog
@@ -237,3 +238,15 @@ When starting a new session:
 2. Check the most recent entry for context
 3. Check "보류" section for pending items
 4. Resume work with full awareness of previous session
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the rigor of this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "the git log is my worklog" | git log shows commits; worklog shows decisions, blockers, and dead-ends |
+| "I will write it at the end of the week" | end-of-week you has forgotten Monday context — write as you go |
+| "nobody reads worklogs" | future-you reads them; worklogs are the index to past decisions |
+| "it is just noise" | noise filtered becomes signal — grepping old worklogs is how teams recover tribal knowledge |
+| "auto-generated is lazy" | auto-generated is consistent; embellish with rationale, do not hand-write the whole thing |

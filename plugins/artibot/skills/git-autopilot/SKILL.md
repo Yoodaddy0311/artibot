@@ -19,6 +19,7 @@ agents:
   - "devops-engineer"
 tokens: "~2K"
 category: "devops"
+source_hash: 3bbb1443
 ---
 
 # Git Autopilot
@@ -173,3 +174,16 @@ classifyBlock(ours, theirs):
 - full 모드 활성화는 반드시 사용자 명시적 선택 필요
 - `dangerouslySkipPermissions` 없이도 동작 가능하도록 설계
 - squash 전 현재 커밋 수 사용자에게 항상 표시
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the discipline required by this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "automated commits are risky" | manual commits that skip the diff review are equally risky — autopilot enforces the review the human keeps skipping |
+| "I'll batch it into one commit later" | batched commits lose the bisectable history; autopilot preserves atomicity at the moment work happens |
+| "the commit message is obvious from the diff" | future readers see only the message in log output — the diff is one click away, the context is gone |
+| "I don't need conventional commits" | without a convention, release notes, changelogs, and semver automation all break downstream |
+| "just --amend, it's faster" | amend rewrites published history; autopilot prefers additive commits that survive pushes safely |
+

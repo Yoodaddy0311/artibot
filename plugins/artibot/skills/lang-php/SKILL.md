@@ -21,6 +21,7 @@ agents:
 tokens: "~4K"
 category: "language"
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
+source_hash: 81fcaa6a
 ---
 
 # PHP Patterns & Best Practices
@@ -287,3 +288,15 @@ class UserRepository extends ServiceEntityRepository
 - **Laravel 11**: Slim bootstrap, Eloquent ORM with enum casts, Form Request validation, Pest testing
 - **Symfony 7**: Attribute-based routing, autowired services, Doctrine ORM, PHPUnit/Pest
 - **PHPStan**: Static analysis at level 8+ with strict rules for production codebases
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip idiomatic patterns in this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "declare(strict_types=1) breaks things, I'll skip it" | Without strict types, PHP silently coerces '5abc' to 5 and true to 1, hiding API contract bugs. strict_types catches these at call site and is mandatory in PHP 8+ codebases. |
+| "Eloquent with() is good enough, N+1 isn't that bad" | N+1 queries scale linearly with row count — a 100-row page becomes 101 queries. Laravel Debugbar or Telescope surfaces them; eager loading is a one-line fix. |
+| "Raw queries are faster than query builder" | DB::raw bypasses parameter binding and is the #1 source of SQL injection in Laravel apps. Query builder compiles to the same SQL with prepared statements. |
+| "mass assignment without $fillable is convenient" | Unguarded fill() lets attackers set is_admin via request payload — classic mass assignment CVE. $fillable or $guarded is mandatory; Laravel 9+ throws MassAssignmentException by default. |
+| "readonly classes are overkill, just use private setters" | readonly properties (PHP 8.1) and readonly classes (8.2) are enforced at the engine level and document immutability in the type. Private setters rely on convention and are mutable via reflection. |

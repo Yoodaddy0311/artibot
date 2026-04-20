@@ -30,6 +30,7 @@ sources:
   - "https://fastapi.tiangolo.com/"
 version: "1.0.0"
 lastVerified: "2026-03-27"
+source_hash: b1e58f0b
 ---
 
 # Python Patterns & Best Practices
@@ -303,3 +304,15 @@ async def test_create_user(db):
 - `import *`
 - String formatting with `%` (use f-strings)
 - Blocking I/O in async functions
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip idiomatic patterns in this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "except: pass to keep the code running" | Bare except swallows KeyboardInterrupt, SystemExit, and MemoryError — the very signals you need. Catch specific exceptions; ruff's E722 flags this. |
+| "def f(x, items=[]) is a shortcut for an empty list" | Mutable default args are evaluated once at def time, so calls share state across invocations. Use None + `items = items or []`; ruff B006 catches it. |
+| "One-line list comprehension is more Pythonic" | Comprehensions with multiple filters or side effects become unreadable and slower than a for-loop. Use a generator or explicit loop when logic exceeds one predicate. |
+| "Type hints slow me down and Python is dynamic anyway" | mypy/pyright catch ~60% of refactor regressions before runtime, and hints are the contract IDEs, FastAPI, and pydantic all consume. Untyped public APIs are technical debt. |
+| "sys.path.append fixes my import issue" | Mutating sys.path hides package layout bugs and breaks on reinstall, packaging, and tests. Fix with a proper pyproject.toml, src/ layout, or editable install (pip install -e). |

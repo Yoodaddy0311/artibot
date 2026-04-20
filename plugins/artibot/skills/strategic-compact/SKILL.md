@@ -19,6 +19,7 @@ agents:
   - "architect"
 tokens: "~2K"
 category: "analysis"
+source_hash: 20062e8f
 ---
 # Strategic Compaction
 
@@ -43,6 +44,15 @@ category: "analysis"
 | Orange | 75-85% | Active compression, defer non-critical |
 | Red | 85-95% | Force efficiency, essential ops only |
 | Critical | 95%+ | Emergency protocols |
+
+### Claude Opus 4.7 (1M 컨텍스트) 전략
+4.7은 1M 토큰을 표준 가격으로 제공하므로 **지연 컴팩션** 가능.
+- 400k 토큰 미만: 컴팩션 보류 (성능 페널티 없음)
+- 400k-700k: 주의 — 다음 휴지기에 `/checkpoint` 권장
+- 700k-900k: 즉시 컴팩션 실행, 또는 `/load`를 `--full-context` 없이 재호출
+- 900k+: 긴급 — compaction-survival 트리거
+
+주의: 신 토크나이저는 동일 텍스트를 최대 1.35배 토큰으로 소비 → 실제 효용 컨텍스트는 ~740k-1M.
 
 **Compaction Process**:
 1. Checkpoint: save current task state before compaction
@@ -258,3 +268,15 @@ const result = ContextRecovery.truncateOutput(
 - Always checkpoint before compaction
 - Preserve > Summarize > Drop
 - Essential: active tasks, uncommitted decisions, current files
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the discipline of this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "auto-compact is enough" | auto-compaction triggers at 75% — you've already lost control of what gets compressed |
+| "compacting mid-task saves tokens" | mid-task compaction loses the task state you needed to complete it |
+| "I'll compact at phase boundaries" | phase boundaries are exactly right — but only if you ACTUALLY compact, not just plan to |
+| "compaction costs more tokens than it saves" | a good compact summary is 10% of the raw content it replaces; the math is decisive |
+| "I don't know what to preserve" | preserve file paths, decisions, and open questions — everything else is re-derivable |

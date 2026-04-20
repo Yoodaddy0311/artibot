@@ -19,6 +19,7 @@ agents:
   - "architect"
 tokens: "~3K"
 category: "analysis"
+source_hash: 0b32c63b
 ---
 
 # Repo Benchmarking
@@ -159,3 +160,15 @@ Progress:
 - `--compare-only` reuses cached clone
 - repo-benchmarker agent handles the heavy analysis
 - All scores require evidence (file paths, code examples)
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the rigor of this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "I already know how our repo compares" | gut feel is biased; 10-dimension scoring surfaces blind spots |
+| "cloning repos wastes disk" | repos are ephemeral in the benchmark workspace — clean up after, not before |
+| "the score is just a number" | the score drives the action items — not the number, the gap |
+| "external repos use different stacks" | stack-agnostic dimensions (docs, tests, architecture) still compare |
+| "benchmarking is copying" | benchmarking finds patterns to adapt, not code to copy — the output is learning, not lifting |

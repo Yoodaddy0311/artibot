@@ -31,6 +31,7 @@ agents:
 argument-hint: "[ambiguous-request] e.g., improve the app, add authentication"
 tokens: "~2K"
 category: "intent"
+source_hash: e1f36028
 ---
 
 # Clarify: Hypothesis-Based Requirement Clarification
@@ -177,3 +178,15 @@ This skill works with `lib/intent/ambiguity.js`:
 - Repeating a question the user already answered
 - Generating questions without classifying the ambiguity type first
 - Skipping the Before/After visualization
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the discipline of this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "the request is obvious, I'll just start" | obvious requests have 3+ valid interpretations on average; the rework from the wrong one costs 10x a clarifying question |
+| "asking questions feels slow" | silent assumptions feel fast until the user rejects the output — then you've paid both the build cost and the rework cost |
+| "I'll infer from context" | inference fills gaps with your priors, not the user's; MCQ clarification surfaces the gap explicitly in one round-trip |
+| "too many questions annoy the user" | one grouped MCQ with 3-5 options is less annoying than shipping the wrong thing and asking why |
+| "ambiguity will resolve during implementation" | ambiguity compounds — every downstream decision inherits the original unclarity as a hidden assumption |

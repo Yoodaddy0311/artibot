@@ -1,10 +1,10 @@
-import { describe, expect, it, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import {
   AstSearch,
-  parseAstGrepOutput,
   escapeRegex,
-  patternToRegex,
   extractMetaVarNames,
+  parseAstGrepOutput,
+  patternToRegex,
 } from '../../lib/tools/ast-search.js';
 
 // ---------------------------------------------------------------------------

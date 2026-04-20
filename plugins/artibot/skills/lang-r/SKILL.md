@@ -23,6 +23,7 @@ agents:
 tokens: "~4K"
 category: "language"
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
+source_hash: b60eac35
 ---
 
 # R Patterns & Best Practices
@@ -338,3 +339,15 @@ shinyApp(ui, server)
 - **tidyverse**: Consistent grammar for data import, wrangling, and visualization with pipe-based workflows
 - **ggplot2**: Layered grammar of graphics for publication-quality static and interactive visualizations
 - **Shiny + bslib**: Reactive web applications with modern Bootstrap theming, caching, and modular design
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip idiomatic patterns in this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "attach() makes columns easier to reference" | attach() pollutes the global search path and silently uses stale copies after mutation. Use with()/within() or dplyr pipes — attach() is flagged by lintr and CRAN policy. |
+| "for-loops are fine, I don't need vectorization" | R's for-loops are 10–100x slower than vectorized ops because each iteration allocates. Use vapply, purrr::map_*, or dplyr verbs — also type-safe against silent coercion. |
+| "rm(list=ls()) at the top of my script keeps things clean" | Clearing the env hides reproducibility bugs (scripts relying on globals) and doesn't unload packages or reset options. Use a fresh R session or renv for real isolation. |
+| "stringsAsFactors was always TRUE, just leave it" | Implicit factor conversion silently breaks joins and mutate() on character columns. R 4.0 flipped the default to FALSE; code relying on TRUE is legacy. |
+| "I'll use $ subsetting, [[ ]] is verbose" | $ performs partial matching (df$nam matches df$name) — a silent source of bugs when columns are renamed. [[ ]] is exact and the tidyverse standard. |
