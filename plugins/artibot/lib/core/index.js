@@ -49,6 +49,21 @@ export { loadSystemPlaybooks, loadUserPlaybooks, saveUserPlaybook, listPlaybooks
 export { registerGuard, executeChain, listGuards, resetGuards, registerBuiltinGuards, normalizeCommand } from './guard-registry.js';
 export { on, emit, getLastEvent, reset as resetEventBus, getStats as getEventBusStats } from './event-bus.js';
 
+// Context Budget (Predictive token budget allocation)
+export {
+  createContextBudget,
+  EWMA,
+  predictTaskCost,
+} from './context-budget.js';
+
+// Marketplace (Plugin install/update system)
+export {
+  createInstallPlan,
+  computeUpdateDiff,
+  detectConflicts,
+  parseSemver,
+  checkUpdate,
+} from './marketplace.js';
 export { createMetricsCollector, defaultCollector } from './metrics-collector.js';
 export { checkInstructionBudget, getSkillTokenEstimate, budgetReport } from './instruction-budget.js';
 export { createSnapshot, formatForPrompt, estimateSnapshotTokens, SNAPSHOT_MAX_TOKENS } from './agent-memory-snapshot.js';

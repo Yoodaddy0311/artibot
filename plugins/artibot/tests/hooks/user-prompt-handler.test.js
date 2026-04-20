@@ -1,8 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { readFileSync as realReadFileSync } from 'node:fs';
+
+vi.mock('node:fs', async (importOriginal) => {
+  const mod = await importOriginal();
+  return { ...mod, readFileSync: vi.fn(mod.readFileSync) };
+});
 
 vi.mock('../../scripts/utils/index.js', () => ({
   readStdin: vi.fn(),
   writeStdout: vi.fn(),
+  getPluginRoot: vi.fn(() => '/mock/plugin'),
+  toFileUrl: vi.fn((p) => `file:///${p.replace(/\\/g, '/')}`),
   parseJSON: vi.fn((str) => {
     try {
       return JSON.parse(str);
@@ -14,6 +22,7 @@ vi.mock('../../scripts/utils/index.js', () => ({
 
 let readStdin;
 let writeStdout;
+let readFileSync;
 
 const KOREAN_REVERIFY_TRIGGER = '!\uC7AC\uAC80\uC99D';
 const KOREAN_REVERIFY_CONTEXT = 'auth \uBAA8\uB4C8 \uB2E4\uC2DC \uD655\uC778';
@@ -26,6 +35,7 @@ describe('user-prompt-handler hook', () => {
   beforeEach(async () => {
     vi.resetModules();
     ({ readStdin, writeStdout } = await import('../../scripts/utils/index.js'));
+    ({ readFileSync } = await import('node:fs'));
     vi.clearAllMocks();
   });
 
@@ -126,6 +136,43 @@ describe('user-prompt-handler hook', () => {
       const output = writeStdout.mock.calls[0][0];
       expect(output.message).toContain('!rv re-verification');
       expect(output.user_prompt).toContain('build test');
+    });
+  });
+
+  describe('--no-team flag', () => {
+    it('strips --no-team and signals opt-out', async () => {
+      readStdin.mockResolvedValue(makeHookData('implement feature --no-team'));
+
+      await import('../../scripts/hooks/user-prompt-handler.js');
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      expect(writeStdout).toHaveBeenCalledTimes(1);
+      const output = writeStdout.mock.calls[0][0];
+      expect(output.user_prompt).toBe('implement feature');
+      expect(output.message).toContain('--no-team flag detected');
+    });
+
+    it('is case-insensitive for --no-team', async () => {
+      readStdin.mockResolvedValue(makeHookData('task --NO-TEAM'));
+
+      await import('../../scripts/hooks/user-prompt-handler.js');
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      expect(writeStdout).toHaveBeenCalledTimes(1);
+      expect(writeStdout.mock.calls[0][0].message).toContain('--no-team flag detected');
+    });
+  });
+
+  describe('auto-team detection', () => {
+    it('does not trigger when config is unreadable (graceful fallback)', async () => {
+      // Config file doesn't exist at /mock/plugin path — checkAutoTeam catches and returns null
+      readStdin.mockResolvedValue(makeHookData('implement complex feature across frontend and backend'));
+
+      await import('../../scripts/hooks/user-prompt-handler.js');
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      // Without readable config, auto-team silently skips
+      expect(writeStdout).not.toHaveBeenCalled();
     });
   });
 

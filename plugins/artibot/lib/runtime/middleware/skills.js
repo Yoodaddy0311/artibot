@@ -59,10 +59,15 @@ export function createSkillsMiddleware(options = {}) {
   const { intentToSkills = {} } = options;
   const lazyConfig = options.lazyLoading || {};
   const lazyEnabled = lazyConfig.enabled === true;
-  const maxConcurrent = lazyConfig.maxConcurrent ?? 5;
   const pluginRoot = options.pluginRoot;
 
   return async function skillsMiddleware(state) {
+    // Bridge: prefer creation-time options, fall back to runtime config
+    const runtimeLazy = state.config?.skills?.lazyLoading || {};
+    const effectiveLazyEnabled = lazyEnabled || runtimeLazy.enabled === true;
+    const effectiveMaxConcurrent = lazyConfig.maxConcurrent ?? runtimeLazy.maxConcurrent ?? 5;
+    const effectivePluginRoot = pluginRoot ?? runtimeLazy.pluginRoot;
+
     const intentInfo = state.context.intent || {};
     const bestCommand = intentInfo.commands?.[0];
     const bestIntent = intentInfo.best;
@@ -82,10 +87,10 @@ export function createSkillsMiddleware(options = {}) {
     let source = 'intent-derived';
     let lazyHit = false;
 
-    if (lazyEnabled) {
+    if (effectiveLazyEnabled) {
       try {
         if (!_indexCache) {
-          _indexCache = await loadSkillIndex(pluginRoot);
+          _indexCache = await loadSkillIndex(effectivePluginRoot);
         }
 
         const keywords = [
@@ -94,11 +99,11 @@ export function createSkillsMiddleware(options = {}) {
           bestIntent,
         ].filter(Boolean);
 
-        const matched = matchSkills(_indexCache, keywords, maxConcurrent);
+        const matched = matchSkills(_indexCache, keywords, effectiveMaxConcurrent);
 
         const uncached = matched.filter((n) => !_skillCache.has(n));
         if (uncached.length > 0) {
-          const freshSkills = await loadSkillsByNames(uncached, pluginRoot);
+          const freshSkills = await loadSkillsByNames(uncached, effectivePluginRoot);
           for (const skill of freshSkills) {
             _skillCache.set(skill.dirName, skill);
           }

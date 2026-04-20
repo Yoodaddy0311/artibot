@@ -111,33 +111,38 @@ export async function appendTransferLog(entry) {
  * @param {number} [pattern.consecutiveSuccesses] - Number of consecutive successes
  * @param {string} [pattern.insight] - Human-readable insight
  * @param {object} [pattern.bestData] - Best-performing data snapshot
+ * @param {object} [options] - Optional config overrides
+ * @param {number} [options.promotionThreshold] - Override PROMOTION_THRESHOLD
+ * @param {number} [options.confidenceThreshold] - Override CONFIDENCE_THRESHOLD
  * @returns {Promise<{
  *   promoted: boolean,
  *   reason: string,
  *   pattern: object | null
  * }>}
  */
-export async function promoteToSystem1(pattern) {
+export async function promoteToSystem1(pattern, options = {}) {
   if (!pattern?.key) {
     return { promoted: false, reason: 'Pattern missing key', pattern: null };
   }
 
   const successes = pattern.consecutiveSuccesses ?? 0;
   const confidence = pattern.confidence ?? 0;
+  const promoThresh = options.promotionThreshold ?? PROMOTION_THRESHOLD;
+  const confThresh = options.confidenceThreshold ?? CONFIDENCE_THRESHOLD;
 
   // Check promotion criteria
-  if (successes < PROMOTION_THRESHOLD) {
+  if (successes < promoThresh) {
     return {
       promoted: false,
-      reason: `Insufficient successes: ${successes}/${PROMOTION_THRESHOLD}`,
+      reason: `Insufficient successes: ${successes}/${promoThresh}`,
       pattern: null,
     };
   }
 
-  if (confidence < CONFIDENCE_THRESHOLD) {
+  if (confidence < confThresh) {
     return {
       promoted: false,
-      reason: `Confidence too low: ${round(confidence)}/${CONFIDENCE_THRESHOLD}`,
+      reason: `Confidence too low: ${round(confidence)}/${confThresh}`,
       pattern: null,
     };
   }
@@ -249,18 +254,24 @@ export async function bootstrapPromote(pattern) {
  * Scan all learned patterns and return those eligible for System 1 promotion.
  * Checks consecutiveSuccesses >= 3 and confidence > 0.8.
  *
+ * @param {object} [options] - Optional config overrides
+ * @param {number} [options.promotionThreshold] - Override PROMOTION_THRESHOLD
+ * @param {number} [options.confidenceThreshold] - Override CONFIDENCE_THRESHOLD
  * @returns {Promise<{
  *   candidates: object[],
  *   alreadyPromoted: string[],
  *   belowThreshold: object[]
  * }>}
  */
-export async function getPromotionCandidates() {
+export async function getPromotionCandidates(options = {}) {
   const patternTypes = ['tool', 'error', 'success', 'team', 'general'];
   const candidates = [];
   const belowThreshold = [];
   const cache = await loadSystem1Cache();
   const alreadyPromoted = [...cache.keys()];
+
+  const promoThresh = options.promotionThreshold ?? PROMOTION_THRESHOLD;
+  const confThresh = options.confidenceThreshold ?? CONFIDENCE_THRESHOLD;
 
   for (const type of patternTypes) {
     const filePath = path.join(PATTERNS_DIR, `${type}-patterns.json`);
@@ -274,7 +285,7 @@ export async function getPromotionCandidates() {
       const successes = pattern.consecutiveSuccesses ?? 0;
       const confidence = pattern.confidence ?? 0;
 
-      if (successes >= PROMOTION_THRESHOLD && confidence >= CONFIDENCE_THRESHOLD) {
+      if (successes >= promoThresh && confidence >= confThresh) {
         candidates.push({
           key: pattern.key,
           type: pattern.type,
@@ -290,8 +301,8 @@ export async function getPromotionCandidates() {
           key: pattern.key,
           confidence,
           consecutiveSuccesses: successes,
-          needsSuccesses: Math.max(0, PROMOTION_THRESHOLD - successes),
-          needsConfidence: Math.max(0, round(CONFIDENCE_THRESHOLD - confidence)),
+          needsSuccesses: Math.max(0, promoThresh - successes),
+          needsConfidence: Math.max(0, round(confThresh - confidence)),
         });
       }
     }

@@ -64,3 +64,14 @@ export {
   loadConsent,
   SWARM_DEFAULTS,
 } from './swarm-config.js';
+
+// Collective Intelligence Hub (anonymous pattern sharing)
+export {
+  qualifyPattern,
+  rankPatterns,
+  buildContribution,
+  generateWeeklyTop,
+  anonymizeId,
+  createInstanceHash,
+  computeRankingScore,
+} from './collective-hub.js';

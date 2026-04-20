@@ -1,131 +1,133 @@
 ---
 description: (Artibot) Federated Swarm Intelligence - manage collective learning participation
+argument-hint: '<action> e.g. "status", "sync", "health", "stats", "opt-in", "opt-out"'
+allowed-tools: [Read, Bash, Glob, Grep]
 argument-hint: '[action] e.g. "스웜 동기화 상태 확인"'
 allowed-tools: [Read, Bash, TaskCreate]
 disable-model-invocation: true
 toolset: team
 ---
 
-# /sc swarm
+# /swarm
 
-Manage participation in the Federated Swarm Intelligence network. Share anonymized learning patterns with the community and benefit from collective intelligence.
+Manage Artibot's federated swarm intelligence — cross-machine pattern sharing.
 
 ## Arguments
 
 Parse $ARGUMENTS:
-- `status`: Show current sync status, opt-in state, and pending operations
-- `sync`: Force an immediate synchronization (upload local patterns + download global weights)
-- `opt-in`: Enable swarm participation (requires explicit user consent)
-- `opt-out`: Disable swarm participation and stop all sync activity
-- `stats`: Show contribution statistics (uploads, downloads, rank)
-- `health`: Check swarm server health and latency
+- `action`: Required. One of: `status`, `sync`, `health`, `stats`, `opt-in`, `opt-out`
+- `--force`: Force sync even if recently synced
 
-## Subcommands
+## Current State Detection
 
-### `/sc swarm status`
+Before any action, check the current swarm state:
+1. Import `isSwarmActive` and `getSwarmConfig` from `lib/swarm/swarm-config.js`
+2. Import `loadConfig` from `lib/core/config.js`
+3. Load config, check opt-in status
 
-Display current swarm intelligence status:
+## Actions
 
-1. Read `~/.claude/artibot/swarm-sync-state.json`
-2. Report:
-   - **Participation**: opt-in / opt-out
-   - **Last Upload**: timestamp or "never"
-   - **Last Download**: timestamp or "never"
-   - **Pending Uploads**: count of offline-queued items
-   - **Current Version**: local weight version
-   - **Sync Interval**: session / hourly / daily
-   - **Total Syncs**: upload count + download count
-3. Check server health and report latency
+### status
+Show current swarm sync status.
 
-### `/sc swarm sync`
+**Steps:**
+1. Import `getSyncStatus` from `lib/swarm/sync-scheduler.js`
+2. Import `getSwarmConfig` from `lib/swarm/swarm-config.js`
+3. Display:
+   - Opt-in status (active/inactive)
+   - Last sync timestamp
+   - Sync interval (session/hourly/daily)
+   - Pending uploads/downloads
+   - Server URL (if configured)
 
-Force an immediate sync cycle:
+### sync
+Force a full bidirectional sync cycle (upload + download + merge).
 
-1. Verify opt-in status (refuse if not opted in)
-2. Flush any offline-queued uploads
-3. Package local patterns (tool success rates, error patterns, team compositions)
-4. Apply PII scrubbing and differential privacy noise
-5. Upload to swarm server
-6. Download latest global weights
-7. Merge global weights into local patterns (default ratio: local 30%, global 70%)
-8. Report results:
-   - Patterns uploaded / downloaded
-   - New version received
-   - Merge statistics
+**Steps:**
+1. Check opt-in first — refuse if not opted in
+2. Import `forceSync` from `lib/swarm/sync-scheduler.js`
+3. Run `forceSync({ config: swarmCfg })`
+4. Report: uploaded version, downloaded version, merge result
 
-### `/sc swarm opt-in`
+### health
+Check swarm server health.
 
-Enable swarm participation:
+**Steps:**
+1. Import `checkHealth` from `lib/swarm/swarm-client.js`
+2. Call `checkHealth({ config: swarmCfg })` — resolves server URL from config internally
+3. Report: server status (healthy/degraded/unreachable), latency in ms
 
-1. Explain what data is shared:
-   - Anonymized tool usage success rates
-   - Error pattern signatures (hashed, no original messages)
-   - Command effectiveness scores
-   - Team composition patterns
-2. Explain privacy protections:
-   - PII scrubbing before upload
-   - Differential privacy noise (Laplacian mechanism, epsilon=1.0)
-   - SHA-256 anonymization of all identifiers
-   - No source code or file paths shared
-3. Require explicit confirmation
-4. Update `artibot.config.json` -> `swarm.optIn = true`
-5. Perform initial download of global weights
+### stats
+Show contribution statistics.
 
-### `/sc swarm opt-out`
+**Steps:**
+1. Import `getContributionStats` from `lib/swarm/swarm-client.js`
+2. Call `getContributionStats(clientId, { config: swarmCfg })` — clientId from swarm config
+3. Display:
+   - Patterns contributed (uploads)
+   - Patterns received (downloads)
+   - Contribution rank
+   - Success indicator
 
-Disable swarm participation:
+### opt-in
+Enable swarm participation.
 
-1. Cancel any scheduled sync timers
-2. Update `artibot.config.json` -> `swarm.optIn = false`
-3. Confirm: local patterns are retained, only sync is stopped
-4. Optionally purge cached global weights
+**Steps:**
+1. Import `optIn` from `lib/swarm/swarm-config.js`
+2. Call `optIn()`
+3. Confirm: "Swarm participation enabled. Patterns will be shared anonymously."
 
-### `/sc swarm stats`
+### opt-out
+Disable swarm participation.
 
-Show contribution statistics:
+**Steps:**
+1. Import `optOut` from `lib/swarm/swarm-config.js`
+2. Call `optOut()`
+3. Confirm: "Swarm participation disabled. No patterns will be shared."
 
-1. Read local sync state for upload/download counts
-2. Query server for contribution rank (if available)
-3. Show local pattern summary:
-   - Total patterns by type (tool, error, success, team)
-   - Average confidence across patterns
-   - Patterns eligible for upload (sample size >= 3, confidence >= 0.4)
-4. Show merge statistics from last sync
-
-## Privacy Guarantees
-
-All swarm operations enforce:
-- **PII Scrubber**: Strips file paths, usernames, project names, API keys before upload
-- **Differential Privacy**: Laplacian noise with configurable epsilon (default 1.0)
-- **Anonymization**: All keys hashed with SHA-256 (only first 12 chars used)
-- **Size Limit**: Maximum 5MB per upload
-- **Opt-in Only**: Never syncs without explicit user consent
-
-### `/sc swarm health`
-
-Check swarm server health:
-
-1. Call server health endpoint
-2. Report:
-   - **Status**: healthy / degraded / unreachable
-   - **Latency**: round-trip time in milliseconds
-   - **Server Version**: if available
-   - **Total Clients**: participating instances
-3. Show connectivity diagnosis if unreachable
+## Privacy Notice
+Always show when discussing swarm:
+- All shared patterns are anonymized (SHA-256 hashed, only first 12 chars used)
+- PII is automatically stripped (user, email, hostname, IP, path)
+- Only patterns with sufficient sample size and confidence qualify for upload
+- Differential privacy noise applied (Laplacian mechanism, epsilon=1.0)
+- Maximum 5MB per upload
+- Opt-out is instant and permanent until re-opted in
 
 ## Error Handling
 
-- Network unavailable: Queue upload for later, report offline status
-- Server unhealthy: Show degraded status, skip sync
-- Checksum mismatch on download: Reject corrupted weights, keep local
-- Not opted in: Refuse sync operations with clear message
+- **Not opted in**: Refuse sync/stats operations with clear message directing to `opt-in`
+- **Network unavailable**: Queue upload for later, report offline status
+- **Server unhealthy**: Show degraded status, skip sync
+- **Sync already in progress**: Report and wait — do not start a second sync
+- **Missing client ID**: Report error from `getContributionStats` — client ID required
+
+## Output Format
+
+```
+SWARM STATUS
+Participation: [active/inactive]
+Last Sync:     [timestamp or "never"]
+Sync Interval: [session/hourly/daily]
+Pending:       [count] uploads, [count] downloads
+Server:        [URL] ([healthy/degraded/unreachable], [latency]ms)
+```
+
+## Examples
+
+```
+/swarm status        -- check current swarm state
+/swarm sync          -- force sync (upload + download + merge)
+/swarm health        -- check server health and latency
+/swarm stats         -- view contribution statistics
+/swarm opt-in        -- enable swarm participation
+/swarm opt-out       -- disable swarm participation
+```
 
 ## Next Steps
 
-작업 완료 후 추천 후속 액션:
-
-| # | 액션 | 커맨드 | 설명 |
-|---|------|--------|------|
-| 1 | 학습 패턴 확인 | `/learn` | 스웜에서 수신한 패턴 확인 |
-| 2 | 동기화 저장 | `/checkpoint` | 동기화 결과 체크포인트 저장 |
-| 3 | 패턴 적용 | `/improve` | 수신된 패턴 코드에 적용 |
+| # | Action | Command | Description |
+|---|--------|---------|-------------|
+| 1 | Review patterns | `/learn` | Inspect patterns received from swarm |
+| 2 | Save checkpoint | `/checkpoint` | Checkpoint after sync |
+| 3 | Apply patterns | `/improve` | Apply received patterns to codebase |

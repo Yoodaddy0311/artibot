@@ -229,7 +229,9 @@ function authenticate(req) {
     const authHeader = req.headers['authorization'] ?? '';
     return authHeader === `Bearer ${AUTH_TOKEN}`;
   }
-  // No token configured: restrict to localhost only
+  // Cloud Run: trust IAM-authenticated requests (K_SERVICE is set by Cloud Run)
+  if (process.env.K_SERVICE) return true;
+  // No token configured, not Cloud Run: restrict to localhost only
   return isLocalhost(req);
 }
 
