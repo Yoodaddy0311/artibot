@@ -1,5 +1,8 @@
 ---
 name: backend-developer
+capabilities: [api-design, database-integration, server-logic, auth-flow]
+lifecycle: build
+rules: [backend:rest-verbs, backend:input-validation, backend:parameterized-queries, security:no-hardcoded-secrets, performance:db-n-plus-1]
 description: |
   Backend specialist focused on API design, server-side reliability, and data integrity.
   Expert in Python FastAPI, Node.js (Express/Fastify), PostgreSQL, Redis, and microservices.

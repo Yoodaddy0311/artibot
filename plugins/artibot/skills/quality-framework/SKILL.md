@@ -27,6 +27,7 @@ agents:
 tokens: "~5K"
 category: "code-quality"
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
+source_hash: c3db3f38
 ---
 
 # ATLAS Quality Framework
@@ -425,3 +426,15 @@ Progress:
 | Performance check | MEDIUM | Budgets defined, warning-level (review, don't block) |
 | Documentation | MEDIUM | Required for public API, depth flexible |
 | Integration check | MEDIUM | Breaking change policy defined, rollback approach flexible |
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the rigor of this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "we have tests, that is quality" | tests are one dimension; ATLAS covers automation, learning, adaptivity, security too |
+| "quality frameworks are bureaucracy" | frameworks compress decisions into checklists — checklists prevent regression |
+| "we will measure coverage when we have time" | uncovered code is unknown code; coverage is the minimum visibility bar |
+| "80% coverage is arbitrary" | arbitrary but load-bearing — it forces you to test the branches you would skip |
+| "adaptive quality is vague" | adaptive means tuning thresholds per module risk — not every file needs 95% |

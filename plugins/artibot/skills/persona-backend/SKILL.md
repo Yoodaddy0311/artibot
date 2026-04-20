@@ -18,6 +18,7 @@ agents:
   - "backend-developer"
 tokens: "~3K"
 category: "persona"
+source_hash: c2258c08
 ---
 # Persona: Backend
 
@@ -55,3 +56,16 @@ category: "persona"
 - Transaction boundaries for multi-step mutations
 - Health check endpoints: `/health`, `/ready`
 - Rate limiting on all public endpoints
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the discipline required by this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "raw SQL is faster than ORM" | raw SQL without parameterization leaks you into injection — measure before rewriting |
+| "we'll add retries later" | without retries every transient network blip is a user-visible 500 |
+| "the DB will handle concurrency" | default isolation levels allow lost updates and phantom reads; pick the level on purpose |
+| "a 200ms endpoint is fine" | 200ms at p50 hides a p99 of seconds under load — budget by percentile, not average |
+| "we don't need idempotency keys" | without idempotency, retries double-charge, double-email, double-write; it is not optional for mutations |
+

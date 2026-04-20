@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * Harness Ablation Test.
  * Disables middlewares one-at-a-time and compares eval scores to baseline,
@@ -17,7 +16,6 @@ import { createSummarizationMiddleware } from '../../lib/runtime/middleware/summ
 import { createGuardrailMiddleware } from '../../lib/runtime/middleware/guardrail.js';
 import { createTokenUsageMiddleware } from '../../lib/runtime/middleware/token-usage.js';
 import { createCheckpointMiddleware } from '../../lib/runtime/middleware/checkpoint.js';
-import { createAciConstraintMiddleware } from '../../lib/runtime/middleware/aci-constraint.js';
 
 // ---------------------------------------------------------------------------
 // Default middleware registry
@@ -36,7 +34,6 @@ const DEFAULT_MIDDLEWARES = [
   { name: 'skills', factory: () => createSkillsMiddleware() },
   { name: 'tasks', factory: (opts) => createTasksMiddleware({ now: opts.now }) },
   { name: 'subagents', factory: () => createSubagentsMiddleware() },
-  { name: 'aciConstraint', factory: () => createAciConstraintMiddleware() },
   { name: 'guardrail', factory: () => createGuardrailMiddleware() },
   { name: 'summarization', factory: () => createSummarizationMiddleware() },
   { name: 'tokenUsage', factory: (opts) => createTokenUsageMiddleware({ now: opts.now }) },
@@ -116,7 +113,7 @@ function scoreResult(result) {
  * @param {Function[]} middleware - Middleware array
  * @param {object[]} scenarios - Scenarios to run
  * @param {object} runtimeConfig - Config for createArtibotAgent
- * @returns {Promise<{ scores: Record<string, number>, average: number }>}
+ * @returns {Promise<object>} Object with scores map and average number.
  */
 async function evalWithMiddleware(middleware, scenarios, runtimeConfig) {
   const now = runtimeConfig.now || Date.now;
@@ -168,7 +165,7 @@ function buildStack(entries, factoryOpts) {
  * @param {number} [config.threshold=0.05] - Delta threshold for removal candidate
  * @param {object} [config.runtimeConfig] - Runtime config overrides
  * @param {Function} [config.now] - Clock injection
- * @returns {Promise<{ baseline: { scores: Record<string,number>, average: number }, results: Array<{ name: string, scores: Record<string,number>, average: number, delta: number }>, removeCandidates: string[] }>}
+ * @returns {Promise<object>} Ablation result with baseline, per-middleware results, and removeCandidates list.
  */
 export async function runAblationTest(config = {}) {
   const entries = config.middlewares || DEFAULT_MIDDLEWARES;

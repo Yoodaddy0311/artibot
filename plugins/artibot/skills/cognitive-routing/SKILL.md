@@ -28,6 +28,7 @@ agents:
   - "orchestrator"
 tokens: "~3K"
 category: "orchestration"
+source_hash: 751eb791
 ---
 
 # Cognitive Routing
@@ -218,3 +219,15 @@ Progress:
 | Check escalation | LOW | Escalation rules are defined, follow exactly |
 | Record experience | LOW | Schema is fixed, record all fields |
 | Adaptive learning | MEDIUM | Adjustment step clamped, but direction requires interpretation |
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the discipline of this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "System 2 is safer, always use it" | System 2 on trivial tasks burns 10x the tokens for zero quality gain and crowds out context you'll need later |
+| "System 1 misses edge cases" | System 1 is pattern matching calibrated on prior success — the edge cases it misses are exactly what System 2 should escalate to |
+| "routing adds latency" | the router runs in <50ms; the wrong pipeline costs seconds to minutes — routing pays for itself on the first decision |
+| "I can tell which system to use manually" | manual routing drifts under fatigue and time pressure; the router is the consistency layer you lack |
+| "dual-process is over-engineering" | dual-process is how humans solve this exact problem — it's under-engineering to pretend one mode fits all requests |

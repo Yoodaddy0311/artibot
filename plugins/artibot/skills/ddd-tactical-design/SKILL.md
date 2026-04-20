@@ -30,6 +30,7 @@ category: "architecture"
 version: "1.0.0"
 risk: safe
 lastVerified: "2026-03-31"
+source_hash: 4eb81a99
 ---
 
 # DDD Tactical Design
@@ -160,3 +161,15 @@ interface OrderRepository {
 4. 의미 있는 상태 전이에 도메인 이벤트 발행
 5. Repository는 Aggregate Root 경계에서만
 6. Aggregate는 작게 유지, ID로 참조
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the rigor of this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "aggregates are over-engineering" | aggregates are the consistency boundary — skip them and concurrent writes corrupt state |
+| "value objects are just structs" | value objects enforce invariants at construction; structs let you bypass them |
+| "repositories are just DAOs" | repositories hide persistence from the domain; DAOs leak SQL into business logic |
+| "domain events are async overhead" | events decouple write-side from read-side and are the cheapest audit log you will ever build |
+| "anemic models are fine with services" | service layers without rich models leak invariants everywhere — data and behavior belong together |

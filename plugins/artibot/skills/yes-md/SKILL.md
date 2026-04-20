@@ -28,6 +28,7 @@ category: "quality"
 version: "1.0.0"
 risk: safe
 lastVerified: "2026-03-31"
+source_hash: b605c119
 ---
 
 # YES.md - AI Governance Engine
@@ -120,3 +121,15 @@ Bash, Read, Grep, WebSearch 등 도구를 먼저 사용. 질문은 진정으로 
 5. 디버깅 2회 실패 시 접근 전환
 6. 수정 후 Ripple Check 필수
 7. 버그 종료 시 3단계 프로토콜 준수
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the discipline of this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "evidence slows me down" | un-evidenced claims cause rework loops that cost 10x the evidence collection |
+| "the safety gates are overkill" | every gate maps to a historical failure mode; removing gates is inviting the original failure back |
+| "I can declare done without proof" | done-without-proof is anti-pattern #1 in agent systems; proof IS the completion |
+| "anti-slack detection is paranoid" | slack detection catches the exact failure modes humans also miss under fatigue — it's a mirror, not paranoia |
+| "governance is for big teams" | governance is for any system making autonomous decisions — scale makes it mandatory, not relevant |

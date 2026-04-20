@@ -14,6 +14,7 @@ agents:
   - "doc-updater"
 tokens: "~3K"
 category: "marketing"
+source_hash: f13d3ddc
 ---
 
 # Content SEO
@@ -173,3 +174,16 @@ Missing Topic   | Volume | Difficulty | Priority
 
 - See `${CLAUDE_SKILL_DIR}/references/on-page-checklist.md` for on-page SEO checklist
 - See `${CLAUDE_SKILL_DIR}/references/content-quality-scoring.md` for content quality scoring matrix
+
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the rigor of this marketing practice, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "Just stuff the keyword a few more times." | Keyword density over ~2% triggers over-optimization penalties and hurts readability; semantic coverage beats raw repetition. |
+| "Meta descriptions don't affect rankings, skip them." | Meta descriptions drive CTR from SERP, which is an indirect ranking signal; missing descriptions cede CTR to competitors. |
+| "H1-H6 hierarchy is a visual choice." | Heading structure is parsed by crawlers for topical outline; skipping levels or using multiple H1s breaks topical signals and accessibility. |
+| "E-E-A-T is only for YMYL sites." | Google applies E-E-A-T signals (author bios, citations, experience markers) site-wide since 2022; lacking them caps ranking ceiling. |
+| "Content length guarantees ranking." | Word count correlates with coverage, not causation; 800 focused words beat 3000 padded words on intent match. |

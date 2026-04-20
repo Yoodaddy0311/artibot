@@ -4,9 +4,10 @@ name: CI
 
 on:
   push:
-    branches: [master, main]
+    branches: [master, main, "artibot/**"]
   pull_request:
-    branches: [master, main]
+    branches: [master, main, "artibot/**"]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -18,7 +19,7 @@ jobs:
 
     strategy:
       matrix:
-        node-version: [18, 20]
+        node-version: [20, 22]
 
     defaults:
       run:
@@ -69,7 +70,7 @@ jobs:
         run: node scripts/ci/publish-runtime-eval-summary.js
 
       - name: Upload runtime eval artifacts
-        if: always() && matrix.node-version == 20
+        if: always() && matrix.node-version == 22
         uses: actions/upload-artifact@v4
         with:
           name: runtime-evals-node-${{ matrix.node-version }}
@@ -80,7 +81,7 @@ jobs:
           if-no-files-found: warn
 
       - name: Upload coverage report
-        if: always() && matrix.node-version == 20
+        if: always() && matrix.node-version == 22
         uses: actions/upload-artifact@v4
         with:
           name: coverage-report-node-${{ matrix.node-version }}

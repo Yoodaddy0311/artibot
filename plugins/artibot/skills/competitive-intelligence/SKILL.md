@@ -15,6 +15,7 @@ agents:
   - "architect"
 tokens: "~4K"
 category: "marketing"
+source_hash: 8b28fdd9
 ---
 
 # Competitive Intelligence
@@ -161,3 +162,16 @@ P2       | [action]                  | [L/M/H]| [L/M/H]| [timeframe]
 
 - See `${CLAUDE_SKILL_DIR}/references/competitor-analysis-framework.md` for competitor analysis framework
 - See `${CLAUDE_SKILL_DIR}/references/feature-comparison-matrix.md` for feature comparison matrix
+
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the rigor of this marketing practice, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "We already know our competitors." | Static competitor lists miss category-adjacent disruptors; quarterly re-scans of search, review sites, and funding data are mandatory. |
+| "SWOT is enough analysis." | SWOT without Porter's Five Forces or JTBD lensing produces generic positioning and misses structural threats. |
+| "Their pricing page tells us everything." | Public pricing reveals <30% of actual deal economics; discount patterns, contract terms, and churn signals require sales-win/loss interviews. |
+| "Benchmarking against the leader is the goal." | Copying the leader locks in follower economics; differentiation requires identifying the dimension where the leader is structurally weak. |
+| "Competitor monitoring is a one-time project." | Market positions shift within 4-8 weeks; without a living tracker (reviews, job posts, releases), intel decays rapidly. |

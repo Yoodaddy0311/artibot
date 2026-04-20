@@ -8,6 +8,7 @@
 
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { parseJSON, readStdin, writeStdout } from '../utils/index.js';
 import { createErrorHandler } from '../../lib/core/hook-utils.js';
 
@@ -57,10 +58,8 @@ async function main() {
   parseJSON(raw);
 
   // Find skills directory
-  const hookDir = path.dirname(new URL(import.meta.url).pathname);
-  // Normalize Windows paths: /C:/... → C:/...
-  const normalized = hookDir.replace(/^\/([A-Z]:)/, '$1');
-  const pluginRoot = path.resolve(normalized, '..', '..');
+  const hookFile = fileURLToPath(import.meta.url);
+  const pluginRoot = path.resolve(path.dirname(hookFile), '..', '..');
   const skillsDir = path.join(pluginRoot, 'skills');
 
   let entries;

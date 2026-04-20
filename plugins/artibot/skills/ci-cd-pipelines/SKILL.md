@@ -26,6 +26,7 @@ category: "infrastructure"
 risk: safe
 version: "1.0.0"
 lastVerified: "2026-04-01"
+source_hash: 82209682
 ---
 
 # CI/CD Pipelines (GitHub Actions)
@@ -297,3 +298,15 @@ Progress:
 | Environment | 배포 승인 + 시크릿 분리 | `environment:` |
 | OIDC | 클라우드 인증 (무자격증명) | `permissions.id-token: write` |
 | Concurrency | 중복 실행 방지 | `concurrency:` |
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the rigor of this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "local tests pass, CI is redundant" | local envs drift — CI is the shared source of truth for every contributor |
+| "skip the matrix build, it is slow" | matrix catches OS/runtime differences you cannot reproduce locally |
+| "hardcoding the secret is fine for now" | committed secrets survive force-push and leak to forks — use OIDC or encrypted secrets |
+| "I will add caching later" | unbounded CI cost is how teams lose pipeline budget — cache dependencies from day one |
+| "reusable workflows are overkill" | copy-paste pipelines drift across repos — one fix becomes twenty edits |

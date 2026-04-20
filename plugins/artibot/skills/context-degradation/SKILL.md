@@ -29,6 +29,7 @@ category: "quality"
 version: "1.0.0"
 risk: safe
 lastVerified: "2026-03-31"
+source_hash: 8e3bbe6d
 ---
 
 # Context Degradation Patterns
@@ -105,3 +106,15 @@ lastVerified: "2026-03-31"
 4. 검색 문서는 컨텍스트 추가 전 정확성 검증
 5. 태스크 세그먼테이션으로 컨텍스트 혼동 방지
 6. 점진적 열화(graceful degradation) 설계
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the discipline of this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "long context means Claude remembers everything" | lost-in-middle is real and measurable — middle positions have 30-40% worse recall than start/end |
+| "more context is always better" | distraction and confusion scale super-linearly; at some point added context reduces answer quality |
+| "poisoning is rare" | one bad example in 50 can flip the model's pattern; tool failure traces and wrong hypotheses poison faster than you think |
+| "I'll detect degradation from the output" | degraded outputs look fluent — the tell is inconsistency with earlier turns, which you've already lost context of |
+| "clash resolves itself" | contradictory facts in context cause the model to pick one non-deterministically; resolve clashes explicitly or expect random answers |

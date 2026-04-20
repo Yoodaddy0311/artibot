@@ -18,7 +18,10 @@ function main() {
     process.exit(0);
   }
 
-  const files = readdirSync(agentsDir).filter((f) => f.endsWith('.md'));
+  // Exclude documentation files (INDEX.md, README.md) — they live in agents/
+  // for discoverability but are not agent definitions.
+  const files = readdirSync(agentsDir)
+    .filter((f) => f.endsWith('.md') && f !== 'INDEX.md' && f !== 'README.md');
   if (files.length === 0) {
     console.log('No agent .md files found. Skipping.');
     process.exit(0);

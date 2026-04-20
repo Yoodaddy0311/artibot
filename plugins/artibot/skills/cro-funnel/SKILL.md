@@ -14,6 +14,7 @@ agents:
   - "code-reviewer"
 tokens: "~4K"
 category: "marketing"
+source_hash: 6fca323b
 ---
 
 # CRO - Funnel Optimization
@@ -174,3 +175,16 @@ P1       | [stage] | [specific action] | +[X]%    | [A/B test]
 
 - See `${CLAUDE_SKILL_DIR}/references/funnel-diagnostics.md` for funnel diagnostics and stage analysis framework
 - See `${CLAUDE_SKILL_DIR}/references/micro-conversion-tracking.md` for micro-conversion tracking and analysis
+
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the rigor of this marketing practice, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "That drop-off rate is industry standard." | Industry averages hide the top-decile opportunity; benchmarks are ceilings to beat, not floors to accept. |
+| "More steps let us collect richer data." | Every additional step compounds drop-off multiplicatively; data collection must be weighed against completion revenue loss. |
+| "Desktop funnel metrics represent everyone." | Mobile funnels behave differently at every step; aggregated metrics mask mobile-specific breakage. |
+| "Cohorts all convert the same." | Without cohort segmentation by source, device, and intent, funnel averages mislead; optimization must be per-cohort. |
+| "Scroll depth proves engagement." | Scroll depth without micro-conversion events is indistinguishable from abandonment-mid-scroll; pair with click and dwell signals. |

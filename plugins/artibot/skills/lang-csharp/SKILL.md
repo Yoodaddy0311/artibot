@@ -23,6 +23,7 @@ agents:
 tokens: "~4K"
 category: "language"
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
+source_hash: a4fd7a26
 ---
 
 # C# Patterns & Best Practices
@@ -263,3 +264,15 @@ public class UserRepository(AppDbContext db) : IUserRepository
 - **ASP.NET Core Minimal API**: Lightweight HTTP with typed route groups, validation, and OpenAPI
 - **Entity Framework Core**: Code-first ORM with migrations, compiled queries, and specification pattern
 - **Blazor**: Interactive web UI with server-side or WASM rendering and component model
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip idiomatic patterns in this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "async void is fine for event handlers" | async void swallows exceptions into the SynchronizationContext and crashes the process on unhandled throws. Use async Task even in handlers, wrapping with try/catch. |
+| ".Result / .Wait() unblocks me quickly" | Sync-over-async deadlocks in ASP.NET classic SynchronizationContext and starves the threadpool. Propagate async all the way up; use GetAwaiter().GetResult() only at Main. |
+| "Nullable reference types are noisy, I'll disable them" | NRT catches NullReferenceException at compile time — Microsoft reports ~30% NRE reduction in internal services. Use `?` and `!` deliberately instead of disabling. |
+| "IEnumerable is fine, I don't need IReadOnlyList" | IEnumerable can be lazy, infinite, or re-enumerated with side effects. Exposing IReadOnlyList/IReadOnlyCollection documents intent and enables Count without iteration. |
+| "record classes are just DTOs, use class" | Records get value equality, with-expressions, and deconstruction for free. Primary constructors + records eliminate ~40% of boilerplate in domain models. |

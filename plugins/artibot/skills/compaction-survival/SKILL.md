@@ -26,15 +26,18 @@ category: "optimization"
 risk: safe
 version: "1.0.0"
 lastVerified: "2026-04-01"
+source_hash: fd4bafdf
 ---
 
 # Compaction Survival
 
 ## When This Skill Applies
-- 컨텍스트 윈도우가 75% 이상 사용되어 압축이 임박한 경우
+- 컨텍스트 사용률이 45% 이상인 경우 (70%+는 즉시 조치 필요 — 구간표 참조)
 - 장시간 세션에서 핵심 상태를 보존해야 하는 경우
 - 다단계 작업 중 컴팩션으로 인한 정보 손실 방지
 - 컴팩션 후 작업 연속성 복구
+
+> Claude 4.7 tokenizer는 동일 텍스트에 더 많은 토큰을 사용할 수 있어 5%p 조기 트리거 필요 (75% → 70%).
 
 ## Do NOT Use When
 - 프롬프트 캐시 구조 설계 (prompt-caching-strategy 참조)
@@ -63,10 +66,10 @@ Claude Code는 컨텍스트 윈도우 한계에 근접하면 이전 메시지를
 
 ```
 컨텍스트 사용률:
-  0-50%   → 안전 — 정상 작업
-  50-75%  → 주의 — 핵심 상태 정리 시작
-  75-90%  → 위험 — 즉시 생존 조치 실행
-  90%+    → 임박 — 컴팩션 자동 트리거
+  0-45%   → 안전 — 정상 작업
+  45-70%  → 주의 — 핵심 상태 정리 시작
+  70-85%  → 위험 — 즉시 생존 조치 실행
+  85%+    → 임박 — 컴팩션 자동 트리거
 ```
 
 **주의 신호**: 세션이 길어지고 많은 파일을 읽고 편집했다면 컨텍스트가 빠르게 소모된다. 특히 대형 파일 읽기, 긴 빌드 출력, 다수의 도구 호출이 컨텍스트를 급격히 소비한다.
@@ -142,7 +145,7 @@ Claude Code는 컨텍스트 윈도우 한계에 근접하면 이전 메시지를
 
 ### Step 4: 사전 방어 — Checkpoint 활용
 
-장시간 작업 전 또는 컨텍스트 75% 도달 시:
+장시간 작업 전 또는 컨텍스트 70% 도달 시:
 
 ```
 사전 방어 절차:
@@ -187,5 +190,17 @@ Progress:
 | 최근 메시지 활용 | 핵심 정보를 최근 4개 메시지에 | 컴팩션은 오래된 메시지부터 압축 |
 | 160자 규칙 | 앞 160자에 핵심 배치 | 요약 시 앞부분 우선 보존 |
 | 파일 경로 명시 | `/` + 확장자 포함 전체 경로 | key files 자동 추출 대상 |
-| Checkpoint | 75% 도달 시 /checkpoint | auto memory에 상태 영구 저장 |
+| Checkpoint | 70% 도달 시 /checkpoint | auto memory에 상태 영구 저장 |
 | Task 기록 | 진행 중 작업을 TaskCreate | 컴팩션 후 TaskList로 복구 가능 |
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the discipline of this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "the compactor preserves what matters" | compaction is aggressive summarization — load-bearing details get lossy-compressed to one sentence |
+| "I'll re-read files after compaction" | re-reads cost 2-5x the tokens you saved; front-load critical info before the window narrows |
+| "recent messages are safe" | only the last 4 messages survive verbatim — anything earlier is at the compactor's mercy |
+| "file paths will be remembered" | only `/`-delimited paths with extensions get auto-extracted; paraphrased references get lost |
+| "I'll checkpoint later" | later is after compaction, when the state you wanted to checkpoint no longer exists in full fidelity |

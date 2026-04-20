@@ -26,6 +26,7 @@ category: "language"
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 version: "1.0.0"
 lastVerified: "2026-03-27"
+source_hash: b6195578
 ---
 
 # Rust Patterns & Best Practices
@@ -297,3 +298,15 @@ async fn test_api_get_user() {
 - `unsafe` without clear justification
 - Blocking in async context (use `spawn_blocking`)
 - Overly complex lifetime annotations (often indicates design issue)
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip idiomatic patterns in this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "Just .clone() it, the borrow checker is in the way" | Clone hides ownership design flaws and allocates on every call. Restructure with &, Rc, or Cow — clippy's needless_clone catches most cases in CI. |
+| "unsafe is okay here for performance" | unsafe blocks require documented safety invariants (// SAFETY: …) and must be justified by miri or benchmarks. Most "needed" unsafe is solvable with slices, split_at_mut, or std primitives. |
+| "unwrap() is fine, this can never fail" | unwrap() panics abort Tokio tasks and crash binaries in prod. Use .expect("reason") at minimum, or propagate with ? and thiserror. Clippy lints unwrap_used for a reason. |
+| "&str and String are basically the same" | Taking String forces callers to allocate; returning &str forces lifetime plumbing. Idiom: accept AsRef<str>/&str, return String when ownership transfers. |
+| "std::thread::sleep inside async is fine for a quick pause" | Blocking calls stall the entire Tokio worker thread, starving other tasks. Use tokio::time::sleep — clippy has disallowed_methods for this and tokio-console detects it. |

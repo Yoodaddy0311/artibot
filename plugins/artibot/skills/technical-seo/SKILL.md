@@ -16,6 +16,7 @@ agents:
   - "performance-engineer"
 tokens: "~4K"
 category: "marketing"
+source_hash: 55492f78
 ---
 
 # Technical SEO
@@ -163,3 +164,16 @@ P1       | [cat]    | [specific action]   | [expected improvement]
 - See `${CLAUDE_SKILL_DIR}/references/core-web-vitals.md` for Core Web Vitals optimization guide
 - See `${CLAUDE_SKILL_DIR}/references/audit-scoring-matrix.md` for technical SEO audit scoring matrix
 - See `${CLAUDE_SKILL_DIR}/references/schema-markup-types.md` for schema markup types reference
+
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the rigor of this marketing practice, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "Core Web Vitals are a developer problem." | CWV are ranking factors and CRO levers; treating them as dev-only lets SEO and conversion regress together. |
+| "Sitemap covers crawlability." | Sitemaps are a hint, not a guarantee; crawl budget, internal linking, and robots.txt must align or pages stay uncrawled. |
+| "JavaScript rendering is fine, Google handles it." | Google renders JS on a delay and some bots don't at all; critical content should be in initial HTML for reliable indexing. |
+| "Canonical tags are optional." | Without canonicals, duplicate content and faceted URLs dilute link equity and trigger index bloat. |
+| "hreflang is only for global sites." | hreflang is required any time two URLs target different locales or languages; skipping it produces wrong-language SERPs. |

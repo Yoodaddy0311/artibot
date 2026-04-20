@@ -734,3 +734,35 @@ function detectTrend(entries) {
   if (diff < -0.15) return 'shifting_to_s2';
   return 'stable';
 }
+
+// ---------------------------------------------------------------------------
+// Effort Level Policy (Claude Opus 4.7 effort parameter)
+// ---------------------------------------------------------------------------
+// Official guide: https://platform.claude.com/docs/ko/build-with-claude/effort
+// 'xhigh' is the 4.7-introduced level recommended for agentic coding.
+// Messages API caller reads EFFORT_POLICY to auto-inject `effort` per command.
+
+/** @type {Readonly<Record<string, 'xhigh'|'high'|'medium'|'low'>>} */
+export const EFFORT_POLICY = Object.freeze({
+  // xhigh — agentic coding (4.7 official recommendation)
+  implement: 'xhigh', team: 'xhigh', tdd: 'xhigh',
+  'build-fix': 'xhigh', cleanup: 'xhigh',
+  // high — focused reasoning
+  'code-review': 'high', 'adversarial-review': 'high',
+  plan: 'high', troubleshoot: 'high', analyze: 'high', design: 'high',
+  // medium — balanced
+  daily: 'medium', load: 'medium', index: 'medium',
+  explain: 'medium', document: 'medium',
+  // low — cost-saving
+  permissions: 'low', update: 'low', quickstart: 'low',
+});
+
+/**
+ * Resolve effort level for a slash command name.
+ * @param {string} commandName - e.g. 'implement', 'code-review' (leading '/' optional)
+ * @returns {'xhigh'|'high'|'medium'|'low'} Defaults to 'medium' for unknown commands.
+ */
+export function getEffortForCommand(commandName) {
+  const key = String(commandName || '').replace(/^\//, '').trim();
+  return EFFORT_POLICY[key] ?? 'medium';
+}

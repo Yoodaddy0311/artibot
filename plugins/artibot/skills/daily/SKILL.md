@@ -12,6 +12,7 @@ triggers:
   - 오늘 뭐 했지
   - retrospective
   - daily report
+source_hash: 057eb7d4
 ---
 
 # /daily
@@ -62,3 +63,15 @@ Progress:
 - 실패한 테스트나 미해결 이슈는 숨기지 말고 드러냅니다.
 - 다음 단계는 실행 가능한 액션으로 씁니다.
 - 정보가 비어 있으면 추측하지 말고 “확인되지 않음”으로 표시합니다.
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the rigor of this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "I remember what I did today" | memory decays within 24h — write it down while it is fresh |
+| "the standup covers this" | standups capture tasks, not decisions or context — daily worklog is the durable record |
+| "nothing worth reporting happened" | if nothing happened, document why — blockers count as work |
+| "I will batch the whole week Friday" | Friday-you has forgotten Monday-you; daily cadence is the point |
+| "the commit log is my worklog" | commits show code changes; worklog shows why and what was learned |

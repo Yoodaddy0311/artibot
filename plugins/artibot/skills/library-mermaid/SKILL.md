@@ -8,6 +8,7 @@ agents: ["architect", "doc-updater"]
 tokens: "~3K"
 category: "library"
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
+source_hash: 170822f6
 ---
 
 # Mermaid Diagramming Patterns
@@ -243,3 +244,15 @@ Architecture? -> C4 with flowchart subgraphs
 ```
 
 **Direction Options**: `TD` (top-down), `LR` (left-right), `BT` (bottom-top), `RL` (right-left)
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the rigor of this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "ASCII diagrams are good enough" | ASCII breaks in rendered Markdown and cannot show complex relationships — Mermaid renders natively in GitHub |
+| "diagrams go stale, why bother" | stale diagrams reveal stale understanding — the fix is version control, not skipping them |
+| "I will draw it in Figma instead" | Figma diagrams are not diffable and require a license — Mermaid lives in the repo |
+| "the code is the documentation" | code shows implementation; diagrams show intent and flow — both are needed |
+| "the syntax is too finicky" | Mermaid has a linter and preview — fix the syntax once and reuse the skill forever |

@@ -9,7 +9,7 @@
  */
 
 import { existsSync, readFileSync } from 'node:fs';
-import { parseJSON, readStdin, writeStdout, atomicWriteSync } from '../utils/index.js';
+import { atomicWriteSync, parseJSON, readStdin, writeStdout } from '../utils/index.js';
 import { createErrorHandler, logHookError } from '../../lib/core/hook-utils.js';
 
 // ---------------------------------------------------------------------------
