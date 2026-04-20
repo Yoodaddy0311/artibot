@@ -10,7 +10,7 @@ import { createSessionMemory } from './session-memory.js';
 import { createKnowledgeGraph, NODE_TYPES, EDGE_RELATIONS } from './knowledge-graph.js';
 import { createSkillEvolver } from './skill-evolver.js';
 import { createAutoResearch } from '../cognitive/auto-research.js';
-import { qualifyPattern, buildContribution } from '../swarm/collective-hub.js';
+import { buildContribution } from '../swarm/collective-hub.js';
 import { saveToDisk, loadFromDisk } from '../swarm/swarm-persistence.js';
 
 /**
