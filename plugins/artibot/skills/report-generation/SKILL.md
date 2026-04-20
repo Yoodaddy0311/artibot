@@ -15,6 +15,7 @@ agents:
   - "doc-updater"
 tokens: "~3K"
 category: "analysis"
+source_hash: 6968f6ed
 ---
 
 # Report Generation
@@ -197,3 +198,16 @@ APPENDIX
 
 - See `${CLAUDE_SKILL_DIR}/references/report-structure-template.md` for report structure template
 - See `${CLAUDE_SKILL_DIR}/references/kpi-scorecard-design.md` for KPI scorecard design
+
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the rigor of this marketing practice, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "Just dump the data, the reader will interpret it." | Raw data dumps force cognitive load and hide the insight; every report must lead with a 3-sentence executive summary. |
+| "Screenshots of dashboards are enough." | Screenshots lose context, annotations, and drill-down; summarize findings in text with the chart as evidence, not the reverse. |
+| "No need for confidence levels on forecasts." | Single-point forecasts masquerade as certainty; always include low/mid/high bands with assumption notes. |
+| "We'll mention caveats in the meeting." | Caveats spoken but not written get lost when the deck is forwarded; data quality notes must live in the report itself. |
+| "Weekly reports can reuse last week's template verbatim." | Static templates hide anomalies; each report must call out delta vs. prior period and flag statistical outliers explicitly. |

@@ -23,6 +23,7 @@ agents:
 tokens: "~4K"
 category: "language"
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
+source_hash: 1b6d8f5a
 ---
 
 # Scala Patterns & Best Practices
@@ -248,3 +249,15 @@ val dailyActive = events
 - **Cats Effect 3**: Pure functional IO with Resource safety, fiber-based concurrency, and composable effects
 - **ZIO 2**: Effect system with typed errors, built-in dependency injection via ZLayer, and structured concurrency
 - **Apache Spark 3.5**: Distributed data processing with type-safe Dataset API and adaptive query execution
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip idiomatic patterns in this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "var is fine in this one place" | Every var is a concurrency footgun in a language used heavily in actor/concurrent systems. Use val + copy(), or State/Ref monads for managed mutation. |
+| "null is unavoidable when calling Java libs" | Wrap Java interop at the boundary with Option(javaCall()) and never let null escape into Scala code. scalafix has DisableSyntax rules for unwrapped null. |
+| "implicit conversions make the API nicer" | Implicit conversions (pre-Scala 3) cause type-inference chaos and surprise coercions. Scala 3 requires `given Conversion[A, B]` with explicit imports for a reason. |
+| "Future.sequence handles my parallelism needs" | Future captures the execution context at creation and eagerly runs — not referentially transparent, not cancellable. Cats Effect IO or ZIO gives proper fibers, cancellation, and resource safety. |
+| "opaque types are the same as type aliases" | `type UserId = Long` lets you pass any Long; `opaque type UserId = Long` enforces the distinction at compile time with zero runtime cost. Use opaque for domain primitives. |

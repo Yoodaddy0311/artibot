@@ -19,6 +19,7 @@ triggers:
 agents: []
 tokens: "~1.5K"
 category: "devops"
+source_hash: 9394ea28
 ---
 
 # Git Safe (안전망)
@@ -180,3 +181,16 @@ git checkout -b experiment/$(date +%Y%m%d)
 - 공유 브랜치(main/develop)에서 `reset --hard` 절대 안내 금지
 - bundle 파일은 `.gitignore` 된 경로에 저장 권장 (저장소 내부 금지)
 - stash 목록이 10개 이상이면 정리 제안
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the discipline required by this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "I'll back up to a folder copy" | folder copies drift from git state, lose history, and clutter the workspace — use stash/tag/bundle |
+| "stash is unsafe, I might lose it" | stashes live in reflog for 90 days; named stashes and tags make them discoverable forever |
+| "I don't need a backup, I just committed" | local commits die with your disk; safety nets require either a remote or a bundle |
+| "rebasing is always safer than merge" | rebasing rewrites history — without a tag before the rebase, recovery from a bad conflict resolution is painful |
+| "force push is fine on my branch" | force push is fine until a collaborator pulled it; always use --force-with-lease |
+

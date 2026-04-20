@@ -186,7 +186,6 @@ async function main() {
   const hookData = parseJSON(raw);
   if (!hookData) return;
 
-  const hookEvent = hookData?.hook_event_name || '';
   const toolName = extractToolName(hookData);
 
   // PostToolUse Read tracking mode

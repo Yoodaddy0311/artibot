@@ -14,9 +14,10 @@ refs/
 nul
 _benchmarks/
 blog-artibot-intro.md
-docs/
+/docs/
 plugins/artibot/_reports/
 plugins/artibot/_Benchmarks/
+# Internal development docs — plugin surface is plugins/artibot/README.md only
 plugins/artibot/docs/
 plugins/artibot/coverage/
 plugins/artibot/image.png

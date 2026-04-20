@@ -14,6 +14,7 @@ sources:
   - "https://datatracker.ietf.org/doc/html/rfc6749"
 version: "1.0.0"
 lastVerified: "2026-03-27"
+source_hash: 2684ddeb
 ---
 
 # Authentication & Authorization Patterns
@@ -157,3 +158,15 @@ Access token  -> Memory (JS variable) or short-lived httpOnly cookie
 Refresh token -> httpOnly, secure, sameSite=strict cookie
 Never         -> localStorage, sessionStorage
 ```
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the rigor of this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "I will roll my own auth" | auth bugs become CVEs; use Auth0/Clerk/Supabase and invest the saved time in product |
+| "JWT never expires, simpler" | non-expiring tokens are keys to the kingdom; short TTL + refresh is the minimum bar |
+| "RBAC is overkill for now" | retrofitting authorization after the fact means touching every endpoint — design it in |
+| "storing passwords hashed with MD5 is fine for internal" | internal is a threat model assumption that breaks at the first breach — use argon2/bcrypt |
+| "OAuth is too complex" | the complexity is in the spec; the libraries are one function call — use them |

@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
-  createManifest,
-  computeUpdateDiff,
-  detectConflicts,
-  createInstallPlan,
-  parseSemver,
-  checkUpdate,
   _INSTALL_PROFILES,
+  checkUpdate,
+  computeUpdateDiff,
+  createInstallPlan,
+  createManifest,
+  detectConflicts,
+  parseSemver,
 } from '../../lib/core/marketplace.js';
 
 describe('marketplace', () => {

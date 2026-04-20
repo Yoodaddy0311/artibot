@@ -17,6 +17,7 @@ agents:
   - "performance-engineer"
 tokens: "~4K"
 category: "testing"
+source_hash: 701661e8
 ---
 
 # A/B Testing
@@ -187,3 +188,16 @@ NEXT STEPS
 
 - See `${CLAUDE_SKILL_DIR}/references/statistical-foundations.md` for statistical foundations for A/B testing
 - See `${CLAUDE_SKILL_DIR}/references/test-design-framework.md` for test design framework and experiment roadmap
+
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the rigor of this marketing practice, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "The trend already looks clear, let's call it." | Early peeking inflates false positives 3-5x; significance must be evaluated only at the pre-declared sample size or via sequential testing with alpha-spending. |
+| "p < 0.05, so we have a winner." | p-value without effect size, CI width, and power analysis is meaningless; report lift, confidence interval, and minimum detectable effect together. |
+| "We don't need a pre-registered hypothesis." | Without a written hypothesis, primary metric, and stopping rule before launch, any positive result is indistinguishable from HARKing (hypothesizing after results known). |
+| "Novelty effect will wear off, ship it anyway." | Novelty and primacy effects require a minimum 1-2 full business cycles of observation; shipping early bakes in regression risk. |
+| "Sample size calculators are overkill for this test." | Running underpowered tests wastes traffic and produces coin-flip conclusions; MDE-based sizing is 5 minutes and non-negotiable. |

@@ -23,6 +23,7 @@ agents:
 tokens: "~4K"
 category: "language"
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
+source_hash: c705a020
 ---
 
 # Elixir Patterns & Best Practices
@@ -325,3 +326,15 @@ end
 - **Phoenix 1.7**: Component-based views with HEEx, streams for efficient list rendering, PubSub for real-time
 - **LiveView**: Server-rendered interactive UI with streams, async assigns, and hook-based JS interop
 - **Ecto**: Composable query builder with changesets, multi-tenancy, and embedded schemas
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip idiomatic patterns in this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "I'll just use a plain spawn, I don't need a GenServer" | Plain spawn bypasses OTP supervision, so crashes don't restart and state is lost. Any process holding state belongs under a Supervisor — that's the whole point of "let it crash". |
+| "try/rescue to keep the process alive" | Elixir's philosophy is fail fast and let the supervisor restart. Defensive rescue hides bugs and desynchronizes state — restart with :transient/:permanent strategies instead. |
+| "with statements are confusing, nested case is clearer" | Nested case pyramids obscure the happy path. `with` expresses a pipeline of expected matches and gives one else clause for all failure shapes — mandatory idiom beyond 2 levels. |
+| "GenServer.call everywhere is simpler than cast" | Every call blocks the caller and serializes through the callee's mailbox — a hotspot GenServer becomes a bottleneck. Use cast for fire-and-forget, or split state across processes. |
+| "I'll put the logic in the controller, Phoenix is MVC" | Phoenix contexts exist so business logic stays out of controllers and is testable without Plug.Conn. Controllers should be ≤10 lines: parse params, call context, render. |

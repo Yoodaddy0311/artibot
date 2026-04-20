@@ -86,7 +86,7 @@ export function loadWebhookConfig() {
       return {
         url: webhook.url,
         format: webhook.format || detectFormat(webhook.url),
-        timeoutMs: webhook.timeoutMs || 5000,
+        timeoutMs: webhook.timeoutMs ?? 5000,
       };
     }
   } catch {
@@ -106,7 +106,7 @@ export function loadWebhookConfig() {
 export async function sendWebhook(config, payload) {
   try {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), config.timeoutMs || 5000);
+    const timer = setTimeout(() => controller.abort(), config.timeoutMs ?? 5000);
 
     const response = await fetch(config.url, {
       method: 'POST',

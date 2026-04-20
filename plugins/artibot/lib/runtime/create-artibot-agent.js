@@ -21,8 +21,6 @@ import { createGuardrailMiddleware } from './middleware/guardrail.js';
 import { createTokenUsageMiddleware } from './middleware/token-usage.js';
 import { createCheckpointMiddleware } from './middleware/checkpoint.js';
 import { createLifecycleMiddleware } from './middleware/lifecycle.js';
-import { createSmartPipelineMiddleware } from './middleware/smart-pipeline.js';
-import { createRateSentinel } from '../orchestration/rate-sentinel.js';
 
 const FALLBACK_CONFIG = Object.freeze({
   automation: { supportedLanguages: ['en', 'ko', 'ja'], ambiguityThreshold: 50 },
@@ -144,7 +142,6 @@ export function createArtibotAgent(options = {}) {
     ...(options.checkpointOptions || {}),
   });
   const mwLifecycle = createLifecycleMiddleware({ now, ...(middlewareOptions.lifecycle || {}) });
-  const mwSmartPipeline = createSmartPipelineMiddleware(middlewareOptions.smartPipeline);
 
   // TODO: bridge config.runtime.middleware — the config defines a middleware
   // list intended to make this pipeline configurable. Implementing dynamic
@@ -152,7 +149,6 @@ export function createArtibotAgent(options = {}) {
   // For now the pipeline is hardcoded below.
   const allMiddleware = customMiddleware || [
     mwLifecycle,
-    mwSmartPipeline,
     mwRouter, mwMemory, mwSkills, mwTasks,
     mwSubagents, mwGuardrail, mwSummarization,
     mwTokenUsage, mwCheckpoint,
@@ -208,8 +204,6 @@ export function createArtibotAgent(options = {}) {
       } else {
         // Phase 0: lifecycle setup (outermost — runs first, teardown context recorded)
         await runMiddleware('lifecycle', mwLifecycle, state);
-        // Phase 0.5: smart pipeline (may mark middlewares to skip)
-        await runMiddleware('smartPipeline', mwSmartPipeline, state);
         // Phase 1: router (all others depend on routing/intent)
         await runMiddleware('router', mwRouter, state);
         // Phase 2: memory, skills, tasks (independent, only read router output)

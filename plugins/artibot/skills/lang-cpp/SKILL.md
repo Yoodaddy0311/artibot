@@ -23,6 +23,7 @@ agents:
 tokens: "~4K"
 category: "language"
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
+source_hash: 70efada9
 ---
 
 # C++ Patterns & Best Practices
@@ -278,3 +279,15 @@ gtest_discover_tests(tests)
 - **CMake 3.28+**: Modern target-based build with presets, FetchContent, and compile_commands.json
 - **GoogleTest/Catch2**: Unit testing with mocking support and parameterized tests
 - **Conan/vcpkg**: Package management for dependency resolution and reproducible builds
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip idiomatic patterns in this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "new/delete is explicit and controllable" | Raw owning pointers leak on exceptions and double-free on refactors. std::unique_ptr and std::make_shared give the same control with RAII and zero overhead. |
+| "Raw pointers are faster than smart pointers" | unique_ptr compiles to a raw pointer under -O2; benchmarks show 0ns overhead. shared_ptr only costs when you actually need atomic refcounting. |
+| "I'll add const later, it complicates signatures" | const-correctness is viral — adding it later requires touching every caller. It's also how the optimizer proves aliasing safety for autovectorization. |
+| "auto hides the type, it's unclear" | auto prevents implicit conversions, narrowing, and the most-vexing-parse. Herb Sutter's AAA style (Almost Always Auto) is now the C++ Core Guidelines default. |
+| "Concepts are overkill, SFINAE works fine" | SFINAE errors are 200-line template walls of text; concepts give one-line diagnostics and enable overload resolution. C++20 concepts are the documented path forward. |

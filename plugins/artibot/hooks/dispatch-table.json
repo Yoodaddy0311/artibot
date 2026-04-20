@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "description": "Phase 2 WS-C.2 dispatch table — additive companion to hooks.json. Activated under feature flag in C.3 (pending user approval).",
+  "slots": {
+    "SessionStart": {
+      "label": "Session Initialization",
+      "handlers": []
+    },
+    "UserPromptSubmit": {
+      "label": "User Prompt Pre-processing",
+      "handlers": []
+    },
+    "PostToolUse": {
+      "label": "After Tool Execution",
+      "handlers": []
+    },
+    "PreCompact": {
+      "label": "Before Context Compaction",
+      "handlers": []
+    }
+  }
+}

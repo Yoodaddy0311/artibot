@@ -120,6 +120,7 @@ export async function appendTransferLog(entry) {
  *   pattern: object | null
  * }>}
  */
+// eslint-disable-next-line complexity
 export async function promoteToSystem1(pattern, options = {}) {
   if (!pattern?.key) {
     return { promoted: false, reason: 'Pattern missing key', pattern: null };

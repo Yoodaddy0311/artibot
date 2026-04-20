@@ -2,6 +2,7 @@
 description: (Artibot) Systematic problem investigation with root cause analysis
 argument-hint: '[symptoms] e.g. "타임아웃 에러 원인 분석"'
 allowed-tools: [Read, Glob, Grep, Bash, Task, TaskCreate]
+toolset: code
 ---
 
 # /troubleshoot
