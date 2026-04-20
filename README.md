@@ -6,7 +6,7 @@
 [![Node](https://img.shields.io/badge/node-%3E%3D18-green)](package.json)
 
 ![Claude Code Plugin](https://img.shields.io/badge/Claude_Code-Plugin-7C3AED?style=flat-square)
-![Version](https://img.shields.io/badge/version-2.7.0-blue?style=flat-square)
+![Version](https://img.shields.io/badge/version-2.7.1-blue?style=flat-square)
 ![License](https://img.shields.io/badge/license-BSL--1.1-green?style=flat-square)
 ![Node.js](https://img.shields.io/badge/Node.js-18%2B-brightgreen?style=flat-square)
 ![Agent Teams](https://img.shields.io/badge/Agent_Teams-Native-orange?style=flat-square)
@@ -819,6 +819,8 @@ node scripts/ci/validate-hooks.js     # Hook validation
 **Artience** ([@Yoodaddy0311](https://github.com/Yoodaddy0311))
 
 ## Version
+
+**2.7.1** (2026-04-20) — **Critical scope-guard patch.** `git-autopilot-setup` no longer auto-creates `.git/autopilot.json` in unrelated repos — activation is strictly opt-in via `--init` flag or Artibot self-detection. Fixes cross-project git history pollution that was silently injecting `artibot/` branch prefixes and `wip: artibot auto-save` commits into other projects. See [CHANGELOG migration guide](./plugins/artibot/CHANGELOG.md) for cleanup steps.
 
 **2.7.0** (2026-04-20) — Version-aligned with Claude **4.7**. Includes the full Claude 4.7 migration work: EFFORT_POLICY auto-routing (xhigh/high/medium/low per command), Task Budget (beta) opt-in, 1M context zones (400k/700k/900k), 2576px high-res image support, Claude Design integration for /ppt. Sampling-params rule flipped (4.7 breaking fix), DNA override for fewer-subagent default, auto-invoke extended to all commands. Plus a ghost middleware bug fix surfaced by Linux CI and coverage threshold realignment (85→80) to match the documented policy. **5,203 tests passing on CI.**
 

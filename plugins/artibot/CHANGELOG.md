@@ -9,6 +9,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.7.1] - 2026-04-20
+
+### Summary / 요약
+
+**English**: Critical scope-guard patch. The `git-autopilot-setup` hook no longer auto-creates `.git/autopilot.json` in unrelated repos. Prior releases (≤ 2.7.0) would silently inject `artibot/` branch prefixes and `wip: artibot auto-save` commits into any git project where a Claude Code session started — polluting histories and causing merge confusion across projects. Activation is now strictly opt-in: existing autopilot.json is refreshed, but new creation only happens when the user explicitly passes `--init` or the repo is Artibot itself (detected via `plugin.json`).
+
+**한국어**: **다른 프로젝트 오염 버그 긴급 패치.** 이전 버전(≤ 2.7.0)의 `git-autopilot-setup` 훅은 Claude Code 세션이 시작되는 모든 git 프로젝트에 `.git/autopilot.json`을 자동 생성해, 관련 없는 프로젝트에도 `artibot/` 브랜치 접두사와 `wip: artibot auto-save` 커밋을 주입했다. 본 패치부터 autopilot 활성화는 **엄격하게 opt-in**: 기존 파일은 갱신하되, 새 파일 생성은 유저가 명시적으로 `--init`을 전달하거나 해당 repo가 Artibot 자체(`plugin.json`의 `name: "artibot"`로 판별)일 때만 수행된다.
+
+### Fixed / 수정됨
+
+- **`git-autopilot-setup.js`** — added opt-in activation gate (branch: `skipped | created | updated | no-repo | error` outcomes)
+- Silent no-op when invoked outside a git repo (was: stderr noise every session)
+- Main loop refactored to export `main(argv)` for testability; CLI entry gated on direct invocation
+
+### Migration / 마이그레이션
+
+타 프로젝트에서 이미 오염된 경우 수동 정리:
+
+```bash
+# 해당 프로젝트 루트에서
+rm .git/autopilot.json
+
+# 자동 생성된 "wip: artibot auto-save" 커밋은 필요 시 git rebase -i 로 정리
+```
+
+Artibot repo 자체는 영향 없음 (plugin.json 자동 감지로 기존 동작 유지).
+
+### Added / 추가됨
+
+- New test file `tests/hooks/git-autopilot-setup.test.js` — 6 tests covering all 5 outcomes of the opt-in policy (skipped / --init / refresh / Artibot self / no-repo)
+
+### Testing
+
+- Lint: 0 errors, 0 warnings
+- Vitest: **5,209 passing** (+6 new — 5,203 → 5,209)
+- CI target: clean PASS on Node 20 + Node 22
+
+---
+
 ## [2.7.0] - 2026-04-20
 
 ### Summary / 요약
