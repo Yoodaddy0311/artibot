@@ -325,7 +325,7 @@ export class AstSearch {
         const results = parseAstGrepOutput(err.stdout);
         return { results, fallback: false };
       }
-      throw new Error(`ast-grep search failed: ${err.message}`);
+      throw new Error(`ast-grep search failed: ${err.message}`, { cause: err });
     }
   }
 
@@ -387,7 +387,7 @@ export class AstSearch {
           })),
         };
       }
-      throw new Error(`ast-grep replace failed: ${err.message}`);
+      throw new Error(`ast-grep replace failed: ${err.message}`, { cause: err });
     }
   }
 }

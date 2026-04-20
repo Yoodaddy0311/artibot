@@ -14,6 +14,7 @@ agents:
   - "performance-engineer"
 tokens: "~3K"
 category: "marketing"
+source_hash: 69eb51e1
 ---
 
 # CRO - Page Optimization
@@ -157,3 +158,16 @@ P1       | [cat]    | [action]      | +[X]%
 
 - See `${CLAUDE_SKILL_DIR}/references/heuristic-evaluation.md` for heuristic page evaluation framework
 - See `${CLAUDE_SKILL_DIR}/references/trust-signals-inventory.md` for trust signal placement and impact inventory
+
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the rigor of this marketing practice, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "The hero looks great in design review." | Design review is not ATF performance review; hero must be validated on real devices within the 3-second attention window. |
+| "One CTA per page is a rule we can break." | Multiple competing CTAs split attention and reduce primary conversion 10-25%; secondary CTAs belong below the fold or in a different weight. |
+| "Social proof is optional if the product is strong." | Trust signals (testimonials, logos, counts) are heuristics that reduce purchase anxiety; their absence measurably increases bounce. |
+| "Page speed is a dev problem, not CRO." | Every 100ms of LCP delay drops conversion 1-2%; Core Web Vitals are a CRO lever, not an engineering ticket. |
+| "Our value prop is obvious from the product name." | Value prop must answer what/for-whom/why-better within 5 seconds; relying on the name loses 40%+ of first-time visitors. |

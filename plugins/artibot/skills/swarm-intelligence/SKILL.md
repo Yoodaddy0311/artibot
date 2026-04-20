@@ -20,6 +20,7 @@ agents:
   - "orchestrator"
 tokens: "~3K"
 category: "learning"
+source_hash: e2241486
 ---
 
 # Federated Swarm Intelligence
@@ -129,3 +130,15 @@ Local and global weights are merged using weighted averaging:
 - `lib/swarm/pattern-packager.js` - Pattern <-> weight conversion
 - `lib/swarm/sync-scheduler.js` - Sync timing and session hooks
 - `lib/swarm/index.js` - Public API re-exports
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the discipline of this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "my instance's learnings are private" | anonymized patterns carry no PII — sharing success rates is epidemiology, not surveillance |
+| "federated learning is too complex to set up" | federated simply means "sum gradients locally, share aggregates" — it's a loop, not a framework |
+| "other instances learn different things than me" | that's the point — diversity in the swarm exposes you to patterns your session never encountered |
+| "swarm updates will poison my local model" | validation gates and version pinning prevent poisoning; "might poison" is an excuse for zero updates |
+| "I'll join the swarm once it's mature" | the swarm matures BY people joining; waiting is a coordination failure |

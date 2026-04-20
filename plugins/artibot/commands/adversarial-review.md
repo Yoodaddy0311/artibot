@@ -2,6 +2,7 @@
 description: (Artibot) Adversarial code review from attacker's perspective using code-reviewer + security-reviewer agents
 argument-hint: '[target] e.g. "src/ 적대적 리뷰해줘"'
 allowed-tools: [Read, Glob, Grep, Bash, Task, TaskCreate]
+toolset: code
 ---
 
 # /adversarial-review

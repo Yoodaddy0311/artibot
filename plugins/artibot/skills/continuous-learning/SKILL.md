@@ -19,6 +19,7 @@ agents:
   - "orchestrator"
 tokens: "~2K"
 category: "learning"
+source_hash: 70c75841
 ---
 # Continuous Learning
 
@@ -125,3 +126,15 @@ Progress:
 - MEMORY.md < 200 lines (always loaded)
 - Organize: MEMORY.md links to topic files
 - Prune regularly: remove outdated patterns
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the discipline of this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "I'll remember the pattern next time" | you won't — session memory dies at turn N, and the next session starts from pretraining only |
+| "patterns are too project-specific to learn" | project-specific IS the value; global patterns are already in the base model |
+| "saving patterns is premature optimization" | the cost of a save is bytes; the cost of re-discovering the pattern is the full debugging session you already paid |
+| "I'll codify patterns into docs manually" | manual codification happens zero times out of ten; auto-capture happens every time |
+| "learned patterns will conflict with new conventions" | conflicts are the signal the convention changed — surface them via versioning, don't suppress learning |

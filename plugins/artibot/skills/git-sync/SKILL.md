@@ -21,6 +21,7 @@ agents:
   - "devops-engineer"
 tokens: "~1.5K"
 category: "devops"
+source_hash: 4cfa96c0
 ---
 
 # Git Sync (동기화 자동화)
@@ -230,3 +231,16 @@ git push origin main
 - pull 시 미커밋 변경사항이 있으면 stash 먼저 처리
 - push 전 `.env`/`*.secret`/`*.key` 파일 자동 스캔
 - upstream sync 시 fork main을 rebase로 처리 (merge 대신)
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the discipline required by this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "I'll pull at the end of the day" | end-of-day pulls surface a day of conflicts at once; sync incrementally or pay interest |
+| "git pull always works" | default git pull does a merge that pollutes history with merge commits; configure rebase or ff-only |
+| "fetch and merge is the same as pull" | fetch + review + merge is the same; pull skips the review step that catches surprise force-pushes |
+| "I don't need to sync my feature branch with main" | drifting feature branches discover incompatibilities at PR time, when it is most expensive |
+| "upstream is always clean" | upstream can be force-pushed, rewritten, or have a rogue commit — verify before blindly resetting to it |
+

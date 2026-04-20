@@ -2,6 +2,7 @@
 description: (Artibot) Feature implementation with planner/tdd-guide/code-reviewer pipeline
 argument-hint: '[feature] e.g. "로그인 기능 구현"'
 allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, Task, TaskCreate]
+toolset: team
 ---
 
 # /implement
@@ -59,6 +60,16 @@ If `--type` not specified, detect from feature description:
 - **Zero-Skip**: Every requirement from decomposition MUST be addressed. No silent drops.
 - **Evidence-Based**: Completion claims require file paths, line numbers, or test results.
 - **Ask-When-Unclear**: If any requirement is ambiguous, ask the user BEFORE implementing.
+
+### Task Budget (Beta, Opus 4.7+)
+구현 작업 전체에 예산을 부여해 에이전트 무한 루프를 방지한다. 베타 헤더 `task-budgets-2026-03-13` 필요. 기본 **64,000** 토큰, 대형 리팩토링은 **128,000**, 최소값은 **20,000** (20k 미만 설정 불가). 개방형 탐색에는 설정 금지 (작업 거부 유발 가능).
+
+```json
+{
+  "headers": { "anthropic-beta": "task-budgets-2026-03-13" },
+  "output_config": { "task_budget": { "type": "tokens", "total": 64000 } }
+}
+```
 
 ## Pipeline by Type
 

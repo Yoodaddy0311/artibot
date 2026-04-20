@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
-  createSkillFreshnessChecker,
-  _parseDate,
   _daysBetween,
+  _parseDate,
   _parseFrontmatter,
   _updateLastVerified,
+  createSkillFreshnessChecker,
 } from '../../lib/learning/skill-freshness.js';
 
 // ---------------------------------------------------------------------------

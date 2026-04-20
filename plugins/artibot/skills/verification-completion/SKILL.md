@@ -21,6 +21,7 @@ agents:
   - "tdd-guide"
 tokens: "~3K"
 category: "quality"
+source_hash: 76cdbedd
 ---
 
 # Verification Before Completion
@@ -165,3 +166,17 @@ When the user types `!rv`, this skill's verification protocol is activated in ma
 - Every completion assertion requires fresh evidence
 - No rationalization is tolerated
 - The correction report must be honest and direct
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip critical steps in this skill, paired with factual rebuttals. Use this to catch and resist shortcuts.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "Tests pass on my machine, that's good enough" | "My machine" has your node version, your env vars, your cached dependencies, and your file permissions. CI catches the delta you cannot see. "Works locally" is a hypothesis, not evidence — paste the CI log or re-run in a clean container. |
+| "The linter is being too strict, I'll ignore this warning" | Warnings you ignore become errors you ship. Every linter rule exists because someone already paid the cost for that bug. If the rule is genuinely wrong, disable it explicitly with a comment and a justification — never silently. |
+| "I'll re-read the file later before committing" | "Later" is where half-written changes live. The DEV protocol says re-read immediately after write — file system caches, editor reload races, and failed saves all hide behind "later." Re-read now or you have not verified anything. |
+| "The git diff looks fine, I don't need to re-read the whole file" | Diffs show what changed, not what the surrounding context now means. A one-line edit can break a function 20 lines away via closure capture, import order, or type narrowing. Re-read the whole modified function at minimum. |
+| "The test passed once, I don't need to run it again after my fix" | A passing test before your fix proves nothing about after. Fixes routinely regress unrelated tests via shared state, async timing, or module caching. Re-run the full relevant suite — not just the one you targeted. |
+| "I believe this fix is correct based on the code" | "Based on the code" means you read it; it does not mean you ran it. Belief is the most expensive currency in debugging — every "I believe" in a completion report is a future regression waiting to happen. |
+| "The failing test is flaky, not related to my change" | Until proven otherwise, every failure is related to the change in front of you. Re-run it three times: if it fails even once, it is real. "Flaky" is the diagnosis you reach AFTER investigation, not before. |

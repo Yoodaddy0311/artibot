@@ -21,6 +21,7 @@ agents:
   - "orchestrator"
 tokens: "~2K"
 version: "1.0.0"
+source_hash: ac80733d
 ---
 
 # Agent Memory Snapshot
@@ -142,3 +143,15 @@ const cost = estimateSnapshotTokens(snapshot);
 | `estimateTokens(text)` | 문자열 | 토큰 수 |
 | `estimateSnapshotTokens(snapshot)` | 스냅샷 | 토큰 수 |
 | `SNAPSHOT_MAX_TOKENS` | — | 500 (상수) |
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the discipline of this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "the subagent can read the same files I did" | every re-read is 2-5x the tokens a snapshot would cost, and the subagent lacks your derived reasoning — ship the conclusions, not the raw inputs |
+| "a full transcript is the safest handoff" | transcripts bury the signal in noise; the subagent wastes its context budget parsing what you already parsed |
+| "I'll skip the snapshot for a quick task" | quick tasks that fail mid-flight need the snapshot most — recovery without one means starting from zero |
+| "snapshots go stale immediately" | a stale snapshot with a timestamp beats a fresh guess; delta-update the snapshot instead of discarding it |
+| "the subagent will ask if it needs more" | round-trip clarifications cost more tokens than a thorough snapshot and break parallelism |

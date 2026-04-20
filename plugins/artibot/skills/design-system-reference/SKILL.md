@@ -22,6 +22,7 @@ agents:
   - "presentation-designer"
 tokens: "~4K"
 category: "design"
+source_hash: 7540d882
 ---
 
 # Design System Reference
@@ -102,3 +103,15 @@ Every DESIGN.md follows the **9-Section Schema** (see `references/design-md-sche
 - **`references/linear.md`** -- Linear design system (dark-mode-first, indigo accent)
 - **`references/supabase.md`** -- Supabase design system (dark terminal, emerald green)
 - **`references/apple.md`** -- Apple design system (cinematic binary, product hero)
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the rigor of this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "we do not need a design system yet" | inconsistency compounds fast — the cost of starting one at scale is 10x the cost at day one |
+| "designers will just Figma it" | Figma without tokens means visual drift between design and code — tokens are the contract |
+| "one-off components are faster" | every one-off is a future migration — build reusable or justify the exception in writing |
+| "dark mode is a post-launch polish" | retrofit dark mode = rewriting color math everywhere; bake semantic tokens in from the start |
+| "accessibility is a QA issue" | a11y is an architecture issue — color contrast and focus order are baked in at the token level |

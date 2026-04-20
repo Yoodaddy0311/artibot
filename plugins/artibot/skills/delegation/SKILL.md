@@ -25,6 +25,7 @@ agents:
   - "orchestrator"
 tokens: "~5K"
 category: "orchestration"
+source_hash: dd3cd6dd
 ---
 
 # Delegation Strategies
@@ -334,3 +335,15 @@ const score = budget.getScore(taskDescription);
 
 Always aggregate and cross-reference results from both modes.
 Prefer Swarm pattern for independent tasks, Pipeline for dependencies, Council for consensus.
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the discipline of this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "serial subagents are easier to debug" | serial = 4x wall-clock cost; parallel with explicit deps is the right default |
+| "I'll delegate the easy stuff" | the cheap tasks crowd your context; delegate the expensive searches instead |
+| "subagents don't share my context" | that's the feature, not the bug — isolated context is how you get fresh reasoning and avoid poisoning |
+| "I can do it faster myself" | "faster" ignores opportunity cost — while you do it serially, a parallel team could finish 4 tasks in the same wall-clock |
+| "delegation overhead exceeds the benefit" | overhead is bounded (~500 tokens per handoff); benefit scales with task size — delegate anything above 2k tokens of work |

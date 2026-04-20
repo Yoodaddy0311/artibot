@@ -3,6 +3,7 @@ description: (Artibot) Multi-agent workflow orchestration for complex operations
 argument-hint: '[workflow] e.g. "기능 개발 파이프라인"'
 allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, TeamCreate, SendMessage, TaskCreate, TaskUpdate, TaskList, TaskGet, Task, TeamDelete]
 disable-model-invocation: true
+toolset: team
 ---
 
 # /orchestrate
