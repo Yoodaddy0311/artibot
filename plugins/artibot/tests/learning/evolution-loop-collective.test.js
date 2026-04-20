@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // ---------------------------------------------------------------------------
 // Mock swarm modules (must be before import of evolution-loop)
@@ -45,7 +45,7 @@ vi.mock('../../lib/swarm/swarm-persistence.js', () => ({
 
 import { createEvolutionLoop } from '../../lib/learning/evolution-loop.js';
 import { buildContribution } from '../../lib/swarm/collective-hub.js';
-import { saveToDisk, loadFromDisk } from '../../lib/swarm/swarm-persistence.js';
+import { loadFromDisk, saveToDisk } from '../../lib/swarm/swarm-persistence.js';
 
 // ---------------------------------------------------------------------------
 // Mock factories (same as existing test file for Stages 1-4)
