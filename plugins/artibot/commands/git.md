@@ -81,7 +81,7 @@ Show changes with context-aware summary.
 ```
 
 ### autopilot
-**Activate skill**: `git-autopilot`
+**Activate skill**: `git-unified` (see `references/autopilot.md`)
 Smart Git automation that handles pull/commit/push cycles with safety checks.
 - Auto-detect dirty state and suggest commit or stash
 - Pre-push validation (secrets scan, lint, test)
@@ -94,7 +94,7 @@ Smart Git automation that handles pull/commit/push cycles with safety checks.
 - `--interval [seconds]`: WIP auto-commit interval (default: 300)
 
 ### guide
-**Activate skill**: `git-guide`
+**Activate skill**: `git-unified` (see `references/guide.md`)
 Interactive Git learning assistant for beginners.
 - Explain Git concepts in plain language (Korean/English)
 - Step-by-step walkthroughs for common tasks (pull, push, branch, merge)
@@ -110,7 +110,7 @@ Interactive Git learning assistant for beginners.
 ```
 
 ### conflict
-**Activate skill**: `git-conflict`
+**Activate skill**: `git-unified` (see `references/conflict.md`)
 AI-powered merge conflict detection and resolution.
 - Pre-merge conflict prediction using `git merge-tree` (dry-run, no side effects)
 - AI conflict resolution: send both diffs + merge base to Claude for resolution
@@ -126,7 +126,7 @@ AI-powered merge conflict detection and resolution.
 ```
 
 ### strategy
-**Activate skill**: `git-strategy`
+**Activate skill**: `git-unified` (see `references/strategy.md`)
 Branch strategy advisor and enforcement.
 - Recommend branch strategy based on team size and project type
 - Enforce naming conventions (feat/*, fix/*, release/*)
@@ -134,7 +134,7 @@ Branch strategy advisor and enforcement.
 - PR workflow templates
 
 ### collab
-**Activate skill**: `git-collab`
+**Activate skill**: `git-unified` (see `references/collab.md`)
 Team collaboration assistant for Git beginners.
 - "Someone pushed changes" — guide through pull + rebase/merge
 - "I need to share my work" — guide through commit + push
@@ -142,7 +142,7 @@ Team collaboration assistant for Git beginners.
 - Multi-contributor workflow visualization
 
 ### safe
-**Activate skill**: `git-safe`
+**Activate skill**: `git-unified` (see `references/safe.md`)
 Safety-first Git operations with undo guidance.
 - Wrap dangerous operations (reset, force-push, rebase) with confirmation
 - Always show "how to undo" after each operation
@@ -150,7 +150,7 @@ Safety-first Git operations with undo guidance.
 - Block force-push to main/master by default
 
 ### sync
-**Activate skill**: `git-sync`
+**Activate skill**: `git-unified` (see `references/sync.md`)
 Smart synchronization with remote repositories.
 - Auto-detect upstream changes and suggest pull
 - Handle diverged branches with guided rebase or merge
@@ -158,7 +158,7 @@ Smart synchronization with remote repositories.
 - Fork sync support (upstream → origin)
 
 ### worktree
-**Activate skill**: `git-worktree`
+**Activate skill**: `git-unified` (see `references/worktree.md`)
 Git worktree lifecycle management (Git-Zero workspace abstraction).
 
 **Sub-operations:**

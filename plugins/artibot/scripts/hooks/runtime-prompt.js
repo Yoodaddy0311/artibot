@@ -21,6 +21,57 @@ import {
 } from '../utils/index.js';
 import { createErrorHandler } from '../../lib/core/hook-utils.js';
 
+/**
+ * Detect a leading slash command in the prompt and return its name.
+ * Matches the first whitespace-delimited token after an optional '/'.
+ * @param {string} prompt
+ * @returns {string|null}
+ */
+function detectSlashCommand(prompt) {
+  const trimmed = String(prompt || '').trimStart();
+  if (!trimmed.startsWith('/')) return null;
+  const match = trimmed.slice(1).match(/^([a-z][a-z0-9_-]{0,31})(?=\s|$)/i);
+  return match ? match[1].toLowerCase() : null;
+}
+
+/**
+ * Resolve effort level for a detected slash command using EFFORT_POLICY.
+ * Falls back to null on any import failure so the hook stays safe.
+ * @param {string} commandName
+ * @param {string} pluginRoot
+ * @returns {Promise<'xhigh'|'high'|'medium'|'low'|null>}
+ */
+async function resolveCommandEffort(commandName, pluginRoot) {
+  if (!commandName) return null;
+  try {
+    const routerPath = path.join(pluginRoot, 'lib', 'cognitive', 'router.js');
+    const { getEffortForCommand } = await import(toFileUrl(routerPath));
+    return getEffortForCommand(commandName);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Persist the detected command + effort to runtime/ for downstream consumers
+ * (statusline, observability, future native effort API wiring).
+ * @param {{ command: string, effort: string } | null} meta
+ * @param {string} pluginRoot
+ */
+function persistEffortMeta(meta, pluginRoot) {
+  if (!meta) return;
+  try {
+    const runtimeDir = path.join(pluginRoot, 'runtime');
+    mkdirSync(runtimeDir, { recursive: true });
+    writeFileSync(
+      path.join(runtimeDir, 'current-effort.json'),
+      JSON.stringify({ ...meta, updatedAt: new Date().toISOString() }) + '\n',
+    );
+  } catch {
+    // Non-critical: effort metadata is advisory
+  }
+}
+
 const FALLBACK_SYSTEM2_KEYWORDS = [
   'architecture',
   'security',
@@ -190,9 +241,24 @@ async function main() {
   // Persist token usage for statusline
   persistTokenUsage(prepared.context, pluginRoot);
 
+  // Detect slash command and auto-inject effort hint (Claude 4.7 effort_level).
+  // Advisory only — stored to runtime/current-effort.json for observability
+  // and appended to the hook message so the router surfaces the decision.
+  const commandName = detectSlashCommand(prompt);
+  const effort = await resolveCommandEffort(commandName, pluginRoot);
+  const effortMeta = commandName && effort
+    ? { command: commandName, effort }
+    : null;
+  persistEffortMeta(effortMeta, pluginRoot);
+
+  const baseMessage = prepared.message ?? '[runtime] prompt prepared';
+  const finalMessage = effortMeta
+    ? `${baseMessage} | cmd=/${effortMeta.command} effort=${effortMeta.effort}`
+    : baseMessage;
+
   writeStdout({
     user_prompt: prepared.userPrompt ?? prompt,
-    message: prepared.message ?? '[runtime] prompt prepared',
+    message: finalMessage,
   });
 }
 

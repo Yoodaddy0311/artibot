@@ -184,7 +184,7 @@ The webhook payload triggers a pipeline run scoped to the changed files.
 | `lib/learning/tool-learner.js` | Tool usage stats for skill refinement |
 | `scripts/hooks/nightly-learner.js` | Existing session-end learning (complementary) |
 | `skills/scheduled-learning/` | CronCreate scheduling (session-only alternative) |
-| `skills/git-autopilot/` | Auto-commit strategy reuse |
+| `skills/git-unified/` (references/autopilot.md) | Auto-commit strategy reuse |
 
 ## Workflow Checklist
 
@@ -247,7 +247,7 @@ Progress:
 - **No dependency changes**: Never modify package.json, lock files, or config schemas
 - **Rollback**: All auto-commits use conventional commit format for easy `git revert`
 - **Logging**: Every pipeline run writes a detailed log entry to learning-log.json
-- **excludePaths**: Respects git-autopilot excludePaths (`.env`, `*.secret`, `*.key`)
+- **excludePaths**: Respects git-unified autopilot excludePaths (`.env`, `*.secret`, `*.key`)
 
 ## Quick Reference
 

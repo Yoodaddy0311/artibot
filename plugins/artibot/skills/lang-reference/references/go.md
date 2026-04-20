@@ -1,0 +1,292 @@
+# Go Patterns & Best Practices
+
+## Contents
+- [When This Skill Applies](#when-this-skill-applies)
+- [Core Guidance](#core-guidance)
+- [Quick Reference](#quick-reference)
+
+## When This Skill Applies
+- Writing or reviewing Go code
+- Designing interfaces and struct composition
+- Implementing error handling patterns
+- Using goroutines and channels
+- Echo, Fiber, or Gin development
+- Writing table-driven tests
+
+## Core Guidance
+
+### Interfaces
+```go
+// Small, focused interfaces (Go philosophy)
+type Reader interface {
+    Read(p []byte) (n int, err error)
+}
+
+// Accept interfaces, return structs
+type UserRepository interface {
+    FindByID(ctx context.Context, id string) (*User, error)
+    Save(ctx context.Context, user *User) error
+}
+
+// Embed interfaces for composition
+type ReadWriter interface {
+    Reader
+    Writer
+}
+
+// Implicit implementation - no 'implements' keyword
+type FileReader struct { f *os.File }
+func (r *FileReader) Read(p []byte) (int, error) { return r.f.Read(p) }
+```
+
+### Error Handling
+```go
+// Custom error types with context
+type NotFoundError struct {
+    Resource string
+    ID       string
+}
+
+func (e *NotFoundError) Error() string {
+    return fmt.Sprintf("%s with ID %q not found", e.Resource, e.ID)
+}
+
+// Wrapping errors (Go 1.13+)
+func GetUser(ctx context.Context, id string) (*User, error) {
+    user, err := db.FindByID(ctx, id)
+    if err != nil {
+        return nil, fmt.Errorf("GetUser %s: %w", id, err)
+    }
+    return user, nil
+}
+
+// Checking error types
+var notFound *NotFoundError
+if errors.As(err, &notFound) {
+    // handle not found
+}
+
+// Sentinel errors
+var ErrNotFound = errors.New("not found")
+if errors.Is(err, ErrNotFound) {
+    // handle
+}
+```
+
+### Goroutines & Channels
+```go
+// WaitGroup for fan-out
+func processAll(items []Item) []Result {
+    results := make([]Result, len(items))
+    var wg sync.WaitGroup
+    for i, item := range items {
+        wg.Add(1)
+        go func(idx int, it Item) {
+            defer wg.Done()
+            results[idx] = process(it)
+        }(i, item)
+    }
+    wg.Wait()
+    return results
+}
+
+// errgroup for concurrent error handling
+func fetchAll(ctx context.Context, urls []string) ([][]byte, error) {
+    g, ctx := errgroup.WithContext(ctx)
+    results := make([][]byte, len(urls))
+    for i, url := range urls {
+        i, url := i, url // capture
+        g.Go(func() error {
+            data, err := fetch(ctx, url)
+            if err != nil {
+                return fmt.Errorf("fetch %s: %w", url, err)
+            }
+            results[i] = data
+            return nil
+        })
+    }
+    return results, g.Wait()
+}
+
+// Context-aware channel pattern
+func worker(ctx context.Context, jobs <-chan Job) <-chan Result {
+    out := make(chan Result)
+    go func() {
+        defer close(out)
+        for job := range jobs {
+            select {
+            case <-ctx.Done():
+                return
+            case out <- process(job):
+            }
+        }
+    }()
+    return out
+}
+```
+
+### Module System
+```bash
+# Initialize module
+go mod init github.com/user/project
+
+# Add dependency
+go get github.com/labstack/echo/v4@latest
+
+# Tidy (remove unused, add missing)
+go mod tidy
+
+# Workspace mode (multi-module development)
+go work init ./module-a ./module-b
+go work sync
+```
+
+### Framework Patterns
+
+#### Echo
+```go
+import "github.com/labstack/echo/v4"
+import "github.com/labstack/echo/v4/middleware"
+
+func main() {
+    e := echo.New()
+    e.Use(middleware.Logger(), middleware.Recover(), middleware.CORS())
+
+    // Route groups
+    api := e.Group("/api/v1")
+    api.Use(authMiddleware)
+    api.GET("/users/:id", getUser)
+    api.POST("/users", createUser)
+
+    e.Logger.Fatal(e.Start(":8080"))
+}
+
+func getUser(c echo.Context) error {
+    id := c.Param("id")
+    user, err := userService.FindByID(c.Request().Context(), id)
+    if err != nil {
+        var notFound *NotFoundError
+        if errors.As(err, &notFound) {
+            return echo.ErrNotFound
+        }
+        return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+    }
+    return c.JSON(http.StatusOK, user)
+}
+```
+
+#### Fiber
+```go
+import "github.com/gofiber/fiber/v2"
+
+app := fiber.New(fiber.Config{
+    ErrorHandler: func(c *fiber.Ctx, err error) error {
+        code := fiber.StatusInternalServerError
+        var e *fiber.Error
+        if errors.As(err, &e) {
+            code = e.Code
+        }
+        return c.Status(code).JSON(fiber.Map{"error": err.Error()})
+    },
+})
+
+app.Get("/users/:id", func(c *fiber.Ctx) error {
+    id := c.Params("id")
+    user, err := userService.FindByID(c.Context(), id)
+    if err != nil {
+        return fiber.NewError(fiber.StatusNotFound, "user not found")
+    }
+    return c.JSON(user)
+})
+```
+
+#### Gin
+```go
+import "github.com/gin-gonic/gin"
+
+router := gin.New()
+router.Use(gin.Logger(), gin.Recovery())
+
+v1 := router.Group("/api/v1")
+v1.Use(authMiddleware())
+
+v1.GET("/users/:id", func(c *gin.Context) {
+    id := c.Param("id")
+    user, err := userService.FindByID(c.Request.Context(), id)
+    if err != nil {
+        c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+        return
+    }
+    c.JSON(http.StatusOK, user)
+})
+```
+
+### Testing: Table-Driven Tests + testify
+```go
+import (
+    "testing"
+    "github.com/stretchr/testify/assert"
+    "github.com/stretchr/testify/require"
+)
+
+func TestValidateEmail(t *testing.T) {
+    tests := []struct {
+        name    string
+        email   string
+        wantErr bool
+    }{
+        {"valid", "user@example.com", false},
+        {"no at", "userexample.com", true},
+        {"empty", "", true},
+    }
+
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            err := validateEmail(tt.email)
+            if tt.wantErr {
+                require.Error(t, err)
+            } else {
+                assert.NoError(t, err)
+            }
+        })
+    }
+}
+
+// Benchmark
+func BenchmarkProcess(b *testing.B) {
+    for b.N > 0; b.N-- {
+        process(testInput)
+    }
+}
+```
+
+## Quick Reference
+
+| Pattern | When to Use |
+|---------|------------|
+| `sync.Once` | Lazy initialization, singleton |
+| `sync.Map` | Concurrent-safe map |
+| `context.WithTimeout` | Deadline for operations |
+| `defer` | Cleanup (close, unlock, recover) |
+| `io.Reader/Writer` | Stream processing |
+| `http.Handler` interface | HTTP middleware chain |
+| `option func` pattern | Flexible config |
+
+**Anti-Patterns**:
+- Goroutine leaks (always use context or done channel)
+- Ignoring errors with `_`
+- Shared mutable state without synchronization
+- Global variables
+- `panic` for expected errors
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip idiomatic patterns in this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "panic is fine here, it's exceptional" | Go reserves panic for unrecoverable bugs; expected failures must return error. Libraries that panic break caller control flow and defy errors.Is/As composition. |
+| "I'll launch a goroutine and forget it" | Unbounded goroutines leak memory and file descriptors. Every goroutine needs a lifecycle tied to context.Context or a done channel — errgroup.Group enforces this. |
+| "Naked returns keep the function short" | Naked returns hide which value changed and interact badly with defer mutating named returns. Explicit returns are mandatory past ~10 lines per Effective Go. |
+| "Let me define an interface up front for flexibility" | Go idiom is "accept interfaces, return structs" — interfaces belong on the consumer side. Pre-declared producer interfaces cause bloat and break structural typing benefits. |
+| "init() is convenient for setup" | init() runs at import time with no error return, no ordering guarantees across packages, and poisons tests. Use explicit New() constructors that return (*T, error). |

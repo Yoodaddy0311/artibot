@@ -56,5 +56,15 @@
     "./agents/typescript-pro.md"
   ],
   "commands": ["./commands/"],
-  "skills": ["./skills/"]
+  "skills": ["./skills/"],
+  "rules": [
+    "./rules/agent-coordination.md",
+    "./rules/backend-patterns.md",
+    "./rules/clean-state.md",
+    "./rules/config-safety.md",
+    "./rules/dev-protocol.md",
+    "./rules/frontend-patterns.md",
+    "./rules/quality-gates.md",
+    "./rules/test-patterns.md"
+  ]
 }

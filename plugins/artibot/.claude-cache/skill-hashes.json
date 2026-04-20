@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-04-20T13:24:35.280Z",
+  "generatedAt": "2026-04-20T14:22:26.140Z",
   "skills": {
     "ab-testing": {
       "hash": "701661e8",
@@ -23,9 +23,9 @@
       "size": 4493
     },
     "auto-learning-pipeline": {
-      "hash": "901645c4",
+      "hash": "7bb84828",
       "path": "skills\\auto-learning-pipeline\\SKILL.md",
-      "size": 11034
+      "size": 11066
     },
     "brand-guidelines": {
       "hash": "c8b012f3",
@@ -162,50 +162,10 @@
       "path": "skills\\fp-refactor\\SKILL.md",
       "size": 5355
     },
-    "git-autopilot": {
-      "hash": "3bbb1443",
-      "path": "skills\\git-autopilot\\SKILL.md",
-      "size": 4821
-    },
-    "git-collab": {
-      "hash": "cd2c4401",
-      "path": "skills\\git-collab\\SKILL.md",
-      "size": 4489
-    },
-    "git-conflict": {
-      "hash": "7d9e91d5",
-      "path": "skills\\git-conflict\\SKILL.md",
-      "size": 5819
-    },
-    "git-guide": {
-      "hash": "e395c9d4",
-      "path": "skills\\git-guide\\SKILL.md",
-      "size": 3925
-    },
-    "git-safe": {
-      "hash": "9394ea28",
-      "path": "skills\\git-safe\\SKILL.md",
-      "size": 4281
-    },
-    "git-strategy": {
-      "hash": "7c357a74",
-      "path": "skills\\git-strategy\\SKILL.md",
-      "size": 4278
-    },
-    "git-sync": {
-      "hash": "4cfa96c0",
-      "path": "skills\\git-sync\\SKILL.md",
-      "size": 5085
-    },
-    "git-workflow": {
-      "hash": "9a6de7f3",
-      "path": "skills\\git-workflow\\SKILL.md",
-      "size": 5926
-    },
-    "git-worktree": {
-      "hash": "4157d466",
-      "path": "skills\\git-worktree\\SKILL.md",
-      "size": 6863
+    "git-unified": {
+      "hash": "9717f9c4",
+      "path": "skills\\git-unified\\SKILL.md",
+      "size": 6196
     },
     "hook-feedback-merge": {
       "hash": "f9868ebb",
@@ -217,85 +177,10 @@
       "path": "skills\\image-generation\\SKILL.md",
       "size": 4875
     },
-    "lang-cpp": {
-      "hash": "70efada9",
-      "path": "skills\\lang-cpp\\SKILL.md",
-      "size": 8883
-    },
-    "lang-csharp": {
-      "hash": "a4fd7a26",
-      "path": "skills\\lang-csharp\\SKILL.md",
-      "size": 9420
-    },
-    "lang-elixir": {
-      "hash": "c705a020",
-      "path": "skills\\lang-elixir\\SKILL.md",
-      "size": 10411
-    },
-    "lang-flutter": {
-      "hash": "230bc409",
-      "path": "skills\\lang-flutter\\SKILL.md",
-      "size": 11245
-    },
-    "lang-go": {
-      "hash": "c4f565c8",
-      "path": "skills\\lang-go\\SKILL.md",
-      "size": 8947
-    },
-    "lang-java": {
-      "hash": "42af44c3",
-      "path": "skills\\lang-java\\SKILL.md",
-      "size": 11356
-    },
-    "lang-javascript": {
-      "hash": "6762b6be",
-      "path": "skills\\lang-javascript\\SKILL.md",
-      "size": 7636
-    },
-    "lang-kotlin": {
-      "hash": "7b01ee8b",
-      "path": "skills\\lang-kotlin\\SKILL.md",
-      "size": 8404
-    },
-    "lang-php": {
-      "hash": "81fcaa6a",
-      "path": "skills\\lang-php\\SKILL.md",
-      "size": 9163
-    },
-    "lang-python": {
-      "hash": "b1e58f0b",
-      "path": "skills\\lang-python\\SKILL.md",
-      "size": 9185
-    },
-    "lang-r": {
-      "hash": "b60eac35",
-      "path": "skills\\lang-r\\SKILL.md",
-      "size": 11013
-    },
-    "lang-ruby": {
-      "hash": "f724dda4",
-      "path": "skills\\lang-ruby\\SKILL.md",
-      "size": 8053
-    },
-    "lang-rust": {
-      "hash": "b6195578",
-      "path": "skills\\lang-rust\\SKILL.md",
-      "size": 9170
-    },
-    "lang-scala": {
-      "hash": "1b6d8f5a",
-      "path": "skills\\lang-scala\\SKILL.md",
-      "size": 8831
-    },
-    "lang-swift": {
-      "hash": "8b32adf1",
-      "path": "skills\\lang-swift\\SKILL.md",
-      "size": 10384
-    },
-    "lang-typescript": {
-      "hash": "ad3f2758",
-      "path": "skills\\lang-typescript\\SKILL.md",
-      "size": 8004
+    "lang-reference": {
+      "hash": "a4a6eb41",
+      "path": "skills\\lang-reference\\SKILL.md",
+      "size": 9200
     },
     "lead-management": {
       "hash": "fa392769",
@@ -528,9 +413,9 @@
       "size": 7190
     },
     "session-worklog": {
-      "hash": "0b7b471e",
+      "hash": "73e31a3d",
       "path": "skills\\session-worklog\\SKILL.md",
-      "size": 7316
+      "size": 7357
     },
     "setup": {
       "hash": "2c90d31d",
