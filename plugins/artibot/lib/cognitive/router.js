@@ -744,17 +744,27 @@ function detectTrend(entries) {
 
 /** @type {Readonly<Record<string, 'xhigh'|'high'|'medium'|'low'>>} */
 export const EFFORT_POLICY = Object.freeze({
-  // xhigh — agentic coding (4.7 official recommendation)
+  // xhigh — agentic coding / multi-file implementation (4.7 official recommendation)
   implement: 'xhigh', team: 'xhigh', tdd: 'xhigh',
-  'build-fix': 'xhigh', cleanup: 'xhigh',
-  // high — focused reasoning
-  'code-review': 'high', 'adversarial-review': 'high',
+  'build-fix': 'xhigh', cleanup: 'xhigh', 'refactor-clean': 'xhigh',
+  orchestrate: 'xhigh', spawn: 'xhigh', swarm: 'xhigh',
+  // high — focused reasoning / review / design
+  'code-review': 'high', 'adversarial-review': 'high', review: 'high',
   plan: 'high', troubleshoot: 'high', analyze: 'high', design: 'high',
-  // medium — balanced
+  estimate: 'high', spec: 'high', verify: 'high', improve: 'high', repo: 'high',
+  // medium — balanced content / domain work
   daily: 'medium', load: 'medium', index: 'medium',
-  explain: 'medium', document: 'medium',
-  // low — cost-saving
+  explain: 'medium', document: 'medium', checkpoint: 'medium', learn: 'medium',
+  git: 'medium', playbook: 'medium', build: 'medium', ship: 'medium',
+  test: 'medium', 'visual-check': 'medium',
+  ad: 'medium', analytics: 'medium', content: 'medium',
+  crm: 'medium', cro: 'medium', email: 'medium', excel: 'medium',
+  marketing: 'medium', mkt: 'medium', ppt: 'medium',
+  seo: 'medium', social: 'medium',
+  // low — cost-saving / lookup / config
   permissions: 'low', update: 'low', quickstart: 'low',
+  sc: 'low', sdk: 'low', setup: 'low', task: 'low',
+  assemble: 'low', codex: 'low',
 });
 
 /**
