@@ -8,6 +8,7 @@ agents: ["architect"]
 tokens: "~3K"
 category: "workflow"
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
+source_hash: 022945ba
 ---
 
 # SPEC Format: Structured Requirements & Specifications
@@ -288,3 +289,15 @@ Progress:
 | Quality checklist | LOW | All 6 quality attributes must be verified |
 | Classify priority | MEDIUM | P0-P3 framework defined, but business context drives decisions |
 | Stakeholder review | HIGH | Review format and cadence are flexible |
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the rigor of this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "specs slow down development" | unspec'd features cost 3x to fix post-launch; spec is the cheap refactor |
+| "we are agile, specs are waterfall" | agile specs are lightweight and iterative — SPEC format is one page, not a requirements doc |
+| "acceptance criteria are obvious" | if obvious, they are easy to write; if hard to write, they were not obvious |
+| "the ticket description is enough" | ticket descriptions drift; SPEC is the durable contract between PM and engineering |
+| "I will write the spec after coding" | post-hoc specs are documentation, not requirements — the whole value is up-front alignment |

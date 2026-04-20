@@ -13,6 +13,7 @@ sources:
   - "https://www.radix-ui.com/primitives/docs/overview/introduction"
 version: "1.0.0"
 lastVerified: "2026-03-27"
+source_hash: ab45ed51
 ---
 
 # shadcn/ui Component Patterns
@@ -307,3 +308,15 @@ export function cn(...inputs: ClassValue[]) {
 **Dark Mode**: `next-themes` + `attribute="class"` + `.dark` CSS scope
 **Forms**: React Hook Form + Zod + shadcn Form components
 **Accessibility**: Radix handles ARIA; you handle labels, contrast, and keyboard testing
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the rigor of this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "I will build my own components" | shadcn gives you accessible Radix primitives — reinventing means reinventing a11y bugs |
+| "copy-paste components are a mess" | shadcn is not a dependency — owning the source is the feature, not the bug |
+| "CVA variants are overkill" | variants centralize style decisions; without them you get prop-drilling className everywhere |
+| "dark mode with Tailwind is enough" | semantic CSS variables beat dark: prefixes at scale — use shadcn tokens |
+| "I will skip Radix and use divs" | divs are not accessible by default — Radix gives you keyboard nav and ARIA for free |

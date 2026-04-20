@@ -1,0 +1,109 @@
+{
+  "version": 1,
+  "description": "Toolset composition manifest — groups commands into capability sets for context-aware activation. Phase 1 Quick Win adopted from NousResearch/hermes-agent.",
+  "toolsets": {
+    "code": {
+      "label": "Code Engineering",
+      "description": "Build, test, verify, refactor, and review code.",
+      "commands": [
+        "build",
+        "build-fix",
+        "test",
+        "verify",
+        "tdd",
+        "refactor-clean",
+        "code-review",
+        "adversarial-review",
+        "troubleshoot",
+        "cleanup"
+      ]
+    },
+    "design": {
+      "label": "Design & Visual",
+      "description": "Presentation, design system, and visual validation.",
+      "commands": [
+        "ppt",
+        "design",
+        "visual-check",
+        "document"
+      ]
+    },
+    "devops": {
+      "label": "DevOps & Git",
+      "description": "Source control, deployment, and operational workflows.",
+      "commands": [
+        "git"
+      ]
+    },
+    "content": {
+      "label": "Content & SEO",
+      "description": "Content marketing, social, email, and SEO.",
+      "commands": [
+        "content",
+        "social",
+        "email",
+        "seo"
+      ]
+    },
+    "marketing": {
+      "label": "Marketing Strategy",
+      "description": "Strategy, advertising, CRO, CRM, and analytics.",
+      "commands": [
+        "mkt",
+        "ad",
+        "cro",
+        "crm",
+        "analytics"
+      ]
+    },
+    "analysis": {
+      "label": "Analysis & Research",
+      "description": "Code analysis, explanation, learning, and benchmarking.",
+      "commands": [
+        "analyze",
+        "explain",
+        "learn",
+        "repo",
+        "excel"
+      ]
+    },
+    "meta": {
+      "label": "Meta & Configuration",
+      "description": "Router, index, setup, permissions, plugin management.",
+      "commands": [
+        "sc",
+        "index",
+        "quickstart",
+        "setup",
+        "permissions",
+        "update",
+        "playbook",
+        "load"
+      ]
+    },
+    "team": {
+      "label": "Team & Orchestration",
+      "description": "Multi-agent coordination, planning, and execution.",
+      "commands": [
+        "team",
+        "swarm",
+        "assemble",
+        "task",
+        "plan",
+        "implement",
+        "improve",
+        "estimate",
+        "checkpoint",
+        "daily",
+        "orchestrate",
+        "spawn",
+        "codex"
+      ]
+    },
+    "misc": {
+      "label": "Miscellaneous",
+      "description": "Commands not yet categorized into a primary toolset.",
+      "commands": []
+    }
+  }
+}

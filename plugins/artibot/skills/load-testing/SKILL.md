@@ -26,6 +26,7 @@ category: "testing"
 risk: safe
 version: "1.0.0"
 lastVerified: "2026-04-01"
+source_hash: 999cc1bf
 ---
 
 # Load Testing (k6)
@@ -237,3 +238,15 @@ Progress:
 | p99 응답시간 | <1s | 1s-2s | >2s |
 | 에러율 | <0.1% | 0.1%-1% | >1% |
 | 처리량 | 목표 이상 | 목표의 80% | 목표 미만 |
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the rigor of this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "it works on my machine under load" | your machine is not production scale — load test against production-like infra |
+| "we will add load tests after launch" | post-launch load failures are incidents; pre-launch load tests are cheap insurance |
+| "load tests do not match real traffic" | that is why you model traffic with ramp-up and think-time — synthetic traffic beats no traffic |
+| "one 5-minute run is enough" | soak tests find leaks; spike tests find scaling gaps — one scenario only finds happy-path |
+| "p95 is fine if p50 is fast" | p95 is the experience of 1 in 20 users — treat it as a threshold, not a footnote |

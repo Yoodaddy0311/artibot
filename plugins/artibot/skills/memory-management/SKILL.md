@@ -21,6 +21,7 @@ agents:
   - "orchestrator"
 tokens: "~2K"
 category: "learning"
+source_hash: 03ee7158
 ---
 # Memory Management
 
@@ -157,3 +158,15 @@ Progress:
 - Commands: 7-day TTL, max 500 entries
 - Errors: 90-day TTL, max 200 entries
 - Search: keyword-based RAG with recency weighting
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the discipline of this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "the context window is my memory" | context is working memory, not long-term — it evicts on every session boundary and every compaction |
+| "RAG is too complex for a side project" | a flat file with embeddings is 30 lines of code; "too complex" is the excuse, not the reality |
+| "I'll persist memory when I have time" | persistence deferred = information lost — every session without it is irrecoverable |
+| "storing user preferences is a privacy risk" | storing locally with scoped access is the opposite of a privacy risk; it's how you avoid re-asking |
+| "memory search returns irrelevant results" | irrelevance is a retrieval tuning problem, not a memory problem — fix the scorer, don't abandon the store |

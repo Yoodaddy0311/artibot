@@ -35,6 +35,8 @@ When auto-team triggers, behave exactly as if the user typed `/team <their reque
 - Add `team.autoApply: false` in `CLAUDE.local.md` under Personal Workflow Preferences (per-user)
 - Include `--no-team` anywhere in the prompt (per-request)
 
+**Claude 4.7 주의**: 4.7은 기본적으로 서브에이전트 소환을 줄이나, 이 자동 팀 정책이 해당 기본값을 명시적으로 오버라이드한다. 3개 조건을 만족하면 `/team` 입력 여부와 무관하게 병렬 팀으로 진행.
+
 ### Quality Gates
 - Read before write (no blind modifications)
 - Functions < 50 lines, files < 800 lines

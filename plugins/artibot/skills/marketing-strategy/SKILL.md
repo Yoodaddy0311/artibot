@@ -14,6 +14,7 @@ agents:
   - "architect"
 tokens: "~4K"
 category: "marketing"
+source_hash: 95a1cb83
 ---
 
 # Marketing Strategy
@@ -147,3 +148,16 @@ Metric:    [KPI]  | Target: [value] | Tracking: [method]
 
 - See `${CLAUDE_SKILL_DIR}/references/market-sizing-framework.md` for market sizing framework
 - See `${CLAUDE_SKILL_DIR}/references/positioning-template.md` for positioning template
+
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the rigor of this marketing practice, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "Positioning can be decided after launch." | Pre-launch positioning shapes product decisions, pricing, and channel fit; retrofitting it is 3-5x more expensive. |
+| "We serve everyone who needs our product." | "Everyone" is not a segment; strategy requires choosing a beachhead where the org can win decisively within 12 months. |
+| "TAM is the number investors want to see." | TAM without SAM/SOM is a vanity figure; go-to-market plans must be built on SOM and realistic conversion rates. |
+| "Differentiation is about being better." | Better-on-same-axis is a price war; true differentiation chooses a different axis the incumbent cannot follow without cannibalizing. |
+| "Strategy and tactics blur in practice." | Strategy is what to say no to; without explicit exclusions, execution teams default to saying yes to everything and dilute focus. |

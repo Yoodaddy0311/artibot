@@ -551,6 +551,3 @@ function countWeightEntries(weights) {
     0,
   );
 }
-
-/**
-

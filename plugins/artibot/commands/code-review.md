@@ -2,6 +2,7 @@
 description: (Artibot) Code review with severity classification using code-reviewer agent
 argument-hint: '[target] e.g. "src/ 코드 리뷰해줘"'
 allowed-tools: [Read, Glob, Grep, Bash, Task, TaskCreate]
+toolset: code
 ---
 
 # /code-review

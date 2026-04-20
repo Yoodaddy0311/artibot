@@ -2,6 +2,7 @@
 description: (Artibot) Claude Code 권한(permission) 설정 관리 — auto-yes 토글, 허용 도구 관리, 현재 상태 조회
 argument-hint: '[action] e.g. "auto-yes", "status", "reset"'
 allowed-tools: [Read, Write, Edit, Bash, Glob]
+toolset: meta
 ---
 
 # /permissions

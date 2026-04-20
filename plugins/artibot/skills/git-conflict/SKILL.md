@@ -20,6 +20,7 @@ agents:
 argument-hint: "[file-path] e.g., src/auth/login.ts, package-lock.json"
 tokens: "~2K"
 category: "devops"
+source_hash: 5f5b2689
 ---
 
 # Git Conflict Resolver
@@ -179,3 +180,16 @@ git add package-lock.json
 - 바이너리 파일은 절대 자동 해결 금지
 - 충돌 해결 커밋 메시지에 반드시 어느 브랜치 간 머지인지 명시
 - `git checkout --ours/--theirs`는 파일 전체를 덮어쓰므로 파일 단위 사용 시 경고
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the discipline required by this skill, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "accept theirs, it's probably right" | "probably" = prayer-driven merging; read both sides before accepting |
+| "squash now, sort later" | squashed conflicts lose the information needed to resolve them |
+| "I'll just take ours for lock files" | lock files must be regenerated, not hand-merged — either side picked manually will desync with package.json |
+| "it's just whitespace, accept either" | whitespace conflicts often hide real semantic conflicts masked by reformatting; inspect the neighbors |
+| "the tests will catch bad merges" | tests catch what they cover; merge mistakes in error handling and concurrency usually slip past the suite |
+

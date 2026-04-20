@@ -1,0 +1,21 @@
+{
+  "name": "artibot-cowork",
+  "version": "0.1.0",
+  "description": "Cowork-optimized slim build of Artibot — marketing, content, data, design, and CRO/SEO skills for knowledge workers using Claude Cowork",
+  "author": {
+    "name": "Artience"
+  },
+  "homepage": "https://github.com/Yoodaddy0311/artibot",
+  "repository": "https://github.com/Yoodaddy0311/artibot",
+  "license": "MIT",
+  "keywords": [
+    "cowork",
+    "marketing",
+    "content",
+    "seo",
+    "cro",
+    "data-analysis",
+    "presentation",
+    "knowledge-work"
+  ]
+}

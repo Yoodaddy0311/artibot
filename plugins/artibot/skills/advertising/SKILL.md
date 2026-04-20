@@ -16,6 +16,7 @@ agents:
   - "ad-specialist"
 tokens: "~3K"
 category: "marketing"
+source_hash: 5f514760
 ---
 
 # Advertising
@@ -156,3 +157,16 @@ FORMAT COMPLIANCE
 
 - See `${CLAUDE_SKILL_DIR}/references/platform-specs.md` for platform specifications and ad format requirements
 - See `${CLAUDE_SKILL_DIR}/references/bidding-strategy-guide.md` for bidding strategy and audience targeting guide
+
+
+## Rationalizations
+
+The following table captures common excuses agents make to skip the rigor of this marketing practice, paired with factual rebuttals.
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "Last-click attribution is good enough." | Last-click systematically undervalues upper-funnel channels by 40-60%; use data-driven or MTA models before reallocating budget. |
+| "CTR is the north star for creative." | High CTR with low post-click conversion burns budget; optimize to CPA or ROAS, not vanity engagement. |
+| "Broad match will let the algorithm find us winners." | Broad match without negative keyword hygiene and conversion signals produces 30-70% wasted spend on irrelevant queries. |
+| "We only need one creative per ad set." | Creative fatigue sets in within 7-14 days on Meta; without 4-6 rotating variants, frequency climbs and CPM rises. |
+| "Lifetime budget is simpler than daily pacing." | Lifetime budgets concentrate delivery on early/late days and miss dayparting signals; daily budgets with bid caps give predictable pacing. |
