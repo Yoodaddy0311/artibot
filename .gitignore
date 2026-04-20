@@ -17,9 +17,8 @@ blog-artibot-intro.md
 /docs/
 plugins/artibot/_reports/
 plugins/artibot/_Benchmarks/
-plugins/artibot/docs/*
-!plugins/artibot/docs/phase2/
-!plugins/artibot/docs/phase2/**
+# Internal development docs — plugin surface is plugins/artibot/README.md only
+plugins/artibot/docs/
 plugins/artibot/coverage/
 plugins/artibot/image.png
 NVIDIA Corporation/
