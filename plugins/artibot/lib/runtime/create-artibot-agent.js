@@ -21,7 +21,7 @@ import { createGuardrailMiddleware } from './middleware/guardrail.js';
 import { createTokenUsageMiddleware } from './middleware/token-usage.js';
 import { createCheckpointMiddleware } from './middleware/checkpoint.js';
 import { createLifecycleMiddleware } from './middleware/lifecycle.js';
-import { createSmartPipelineMiddleware } from './middleware/smart-pipeline.js';
+import { createSmartPipelineMiddleware } from './smart-pipeline.js';
 import { createRateSentinel } from '../orchestration/rate-sentinel.js';
 
 const FALLBACK_CONFIG = Object.freeze({
