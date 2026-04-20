@@ -122,6 +122,8 @@ Violation symptom: "all work done inline by the main thread" = DNA breach. When 
 ### Auto-invoke Principle
 Never instruct the user to type slash-commands. Detect intent and trigger commands/skills/agents silently. Users include non-developers.
 
+**적용 범위**: `/team`뿐 아니라 `/implement`, `/plan`, `/code-review`, `/verify`, `/daily` 등 모든 커맨드에 동일 적용. 상황 감지 → 자동 트리거. 단, 커맨드 내부 워크플로우 가이드(Phase 정의, 체크리스트 등)는 절대 단축·생략 금지 — 풀 워크플로우 그대로 실행.
+
 ### Quality Gates
 - Read before write (no blind modifications)
 - Functions < 50 lines, files < 800 lines
