@@ -61,6 +61,19 @@
         "hooks": [
           {
             "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/image-cleanup.js",
+            "timeout": 5000
+          }
+        ],
+        "priority": "optional",
+        "category": "cleanup"
+      },
+      {
+        "matcher": "*",
+        "once": true,
+        "hooks": [
+          {
+            "type": "command",
             "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/session-digest.js",
             "timeout": 3000
           }
