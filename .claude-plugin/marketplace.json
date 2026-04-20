@@ -11,7 +11,7 @@
     {
       "name": "artibot",
       "description": "Cognitive orchestration framework with dual-process routing, lifelong learning, expert agent teams, and workflow automation for Claude Code",
-      "version": "2.7.0",
+      "version": "2.7.1",
       "author": {
         "name": "Artience"
       },

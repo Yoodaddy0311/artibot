@@ -1,8 +1,25 @@
 #!/usr/bin/env node
 /**
- * Git Autopilot — Initial setup script.
- * Creates .git/autopilot.json with default configuration.
- * Run once per repository: node scripts/hooks/git-autopilot-setup.js
+ * Git Autopilot — setup script (opt-in, v2.7.1+).
+ *
+ * Policy:
+ *   - If .git/autopilot.json already exists → refresh it (lastSetupAt, merge defaults).
+ *   - If it does NOT exist → do nothing, unless one of:
+ *       (a) --init flag is passed explicitly by the user, OR
+ *       (b) this is the Artibot repo itself (detected via plugin.json).
+ *
+ * Prior behavior (≤ v2.7.0): this hook auto-created autopilot.json in every
+ * git repo whenever Claude Code started a session. Because Artibot installs
+ * globally, that meant unrelated projects got `artibot/` branch prefixes and
+ * `wip: artibot auto-save` commits injected into their history. The policy
+ * above restores opt-in semantics.
+ *
+ * Manual activation in a non-Artibot repo (do this only when you want it):
+ *   node ~/.claude/artibot/scripts/hooks/git-autopilot-setup.js --init
+ *
+ * Manual deactivation:
+ *   rm .git/autopilot.json
+ *
  * @module scripts/hooks/git-autopilot-setup
  */
 
@@ -58,23 +75,56 @@ function readExistingConfig(configPath) {
   }
 }
 
+/**
+ * Detect whether the current repo is the Artibot plugin itself.
+ * Used to grandfather in autopilot activation for Artibot's own development,
+ * while keeping other repos opt-in.
+ * @param {string} repoRoot
+ * @returns {boolean}
+ */
+function isArtibotRepo(repoRoot) {
+  try {
+    const pluginJsonPath = path.join(repoRoot, 'plugins', 'artibot', '.claude-plugin', 'plugin.json');
+    if (!existsSync(pluginJsonPath)) return false;
+    const parsed = JSON.parse(readFileSync(pluginJsonPath, 'utf-8'));
+    return parsed?.name === 'artibot';
+  } catch {
+    return false;
+  }
+}
+
 // -------------------------------------------------------------------------
 // Main
 // -------------------------------------------------------------------------
 
-async function main() {
+/**
+ * Exported so tests can drive it with mocked fs/child_process.
+ * Returns `'skipped' | 'created' | 'updated' | 'no-repo' | 'error'` for testability.
+ * @param {string[]} [argv] - Extra args (defaults to process.argv.slice(2))
+ * @returns {Promise<string>}
+ */
+export async function main(argv) {
+  const args = argv ?? process.argv.slice(2);
+  const wantsInit = args.includes('--init');
+
   let repoRoot;
   try {
     repoRoot = getRepoRoot();
   } catch {
-    process.stderr.write('[artibot:git-autopilot-setup] Not inside a git repository.\n');
-    process.exit(1);
+    // Not in a git repo — silent no-op (hook fires on every SessionStart,
+    // so shell-started-outside-a-repo cases should not log errors).
+    return 'no-repo';
   }
 
   const configPath = path.join(repoRoot, '.git', 'autopilot.json');
-  const existing = existsSync(configPath) ? readExistingConfig(configPath) : {};
-  const isUpdate = Object.keys(existing).length > 0;
+  const hasExisting = existsSync(configPath);
 
+  // Opt-in gate: skip silently unless one of three activation paths.
+  if (!hasExisting && !wantsInit && !isArtibotRepo(repoRoot)) {
+    return 'skipped';
+  }
+
+  const existing = hasExisting ? readExistingConfig(configPath) : {};
   const config = {
     ...DEFAULT_CONFIG,
     ...existing,
@@ -85,19 +135,27 @@ async function main() {
     atomicWriteSync(configPath, config);
   } catch (err) {
     logHookError('git-autopilot-setup', 'Failed to write config', err);
-    process.exit(1);
+    return 'error';
   }
 
-  const verb = isUpdate ? 'Updated' : 'Created';
+  const verb = hasExisting ? 'Updated' : 'Created';
   process.stdout.write(`[artibot:git-autopilot-setup] ${verb} ${configPath}\n`);
   process.stdout.write(`  WIP interval: ${config.wipIntervalMinutes}m\n`);
   process.stdout.write(`  Auto-pull: ${config.autoPullOnSession}\n`);
   process.stdout.write(`  Auto-push: ${config.autoPushOnStop}\n`);
   process.stdout.write(`  Squash WIP: ${config.squashWipOnClose}\n`);
   process.stdout.write(`  Conflict strategy: ${config.conflictStrategy}\n`);
+
+  return hasExisting ? 'updated' : 'created';
 }
 
-main().catch((err) => {
-  logHookError('git-autopilot-setup', err.message || String(err));
-  process.exit(1);
-});
+// CLI entry — only runs when this file is invoked directly, not on import.
+const isCliEntry = process.argv[1] && process.argv[1].endsWith('git-autopilot-setup.js');
+if (isCliEntry) {
+  main().then((outcome) => {
+    if (outcome === 'error') process.exit(1);
+  }).catch((err) => {
+    logHookError('git-autopilot-setup', err.message || String(err));
+    process.exit(1);
+  });
+}
