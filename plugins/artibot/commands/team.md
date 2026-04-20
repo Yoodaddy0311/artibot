@@ -1,5 +1,5 @@
 ---
-description: (Artibot) Parallel team execution with cross-check — persistent team mode, leader delegates only, implementation on opus 4.6, review phases on sonnet 4.6
+description: (Artibot) Parallel team execution with cross-check — persistent team mode, leader delegates only, implementation on opus 4.7 (xhigh effort 권장), review phases on sonnet 4.6
 argument-hint: '[task] e.g. "이 기능 구현하고 테스트도 작성해줘"'
 allowed-tools: [Read, Glob, Grep, Bash, TeamCreate, SendMessage, TaskCreate, TaskUpdate, TaskList, TaskGet, Task, TeamDelete]
 toolset: team
@@ -7,7 +7,7 @@ toolset: team
 
 # /team
 
-Parallel team execution with mandatory cross-check and **persistent team mode**. The leader (YOU) delegates work and receives results ONLY — never does the work yourself. Implementation teammates (Phase 3) run on **opus 4.6** for maximum code quality. Review teammates (Phase 4 cross-check, Phase 4.5 inspection) run on **sonnet 4.6** for faster turnaround. By default, the team **persists** after task completion and awaits the next assignment. Use `--one-shot` to revert to single-task-then-shutdown behavior.
+Parallel team execution with mandatory cross-check and **persistent team mode**. The leader (YOU) delegates work and receives results ONLY — never does the work yourself. Implementation teammates (Phase 3) run on **opus 4.7** for maximum code quality. Review teammates (Phase 4 cross-check, Phase 4.5 inspection) run on **sonnet 4.6** for faster turnaround. By default, the team **persists** after task completion and awaits the next assignment. Use `--one-shot` to revert to single-task-then-shutdown behavior.
 
 ## Arguments
 
@@ -42,6 +42,25 @@ Parse $ARGUMENTS:
 - 다음 작업에서 해당 팀원의 전문성이 **확실히 불필요**할 때만 교체
 - 애매하면 유지 — idle 상태 팀원은 토큰을 소비하지 않는다
 - 셧다운 판단 기준: 다음 작업의 도메인이 완전히 달라져서 해당 전문성이 0% 필요할 때만
+
+### Task Budget (Beta, Opus 4.7+) ⚗️ research preview — API 변경 가능
+에이전트 루프 토큰 폭주 방지용 옵트인. 팀 전체 작업 예산을 모델에 권고한다.
+
+```json
+{
+  "headers": { "anthropic-beta": "task-budgets-2026-03-13" },
+  "output_config": { "task_budget": { "type": "tokens", "total": 128000 } }
+}
+```
+
+| 상황 | 권장 task_budget |
+|---|---|
+| `/team` 구현 phase | 128,000 |
+| `/team` 리뷰 phase | 40,000 |
+| 짧은 배치 | 20,000 (최소) |
+| 개방형 탐색 | 설정하지 말 것 |
+
+주의: 하드 캡 아님. `max_tokens`(요청별 상한)와 역할이 다름.
 
 ## Execution Flow
 

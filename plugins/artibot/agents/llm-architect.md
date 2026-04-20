@@ -56,7 +56,7 @@ category: expert
 
 | Use Case | Recommended Model | Rationale |
 |-----------|-------------------|-----------|
-| Complex reasoning | claude-opus-4-6 | Deepest reasoning capability |
+| Complex reasoning | claude-opus-4-7 | Deepest reasoning + 1M context + adaptive thinking + xhigh effort 지원 |
 | General coding | claude-sonnet-4-6 | Best balance of speed and capability |
 | High-throughput | claude-sonnet-4-6 | Quality-first approach |
 | Embeddings | text-embedding-3-small | Cost-effective for most use cases |

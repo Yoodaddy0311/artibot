@@ -1,6 +1,6 @@
 domain,rule_id,severity,context,description,rationale
 llm,prompt-in-vcs,warning,LLM prompts,"Store prompts as versioned files, not inline magic strings","Prompts are code and must be reviewed, diffed, and rolled back"
-llm,temperature-explicit,warning,LLM API calls,"Set temperature explicitly per call — don't rely on SDK defaults","Defaults drift across SDK versions and silently change behavior"
+llm,sampling-params-omit,error,LLM API calls,"Omit `temperature`, `top_p`, `top_k` for Claude Opus 4.7+ (non-default values return 400). Use prompting + `effort` parameter to guide behavior.","Claude Opus 4.7 rejects non-default sampling params. Temperature=0 never guaranteed determinism anyway."
 llm,output-schema,error,Structured LLM output,"Validate model output against a schema (Zod/Pydantic) before use","LLMs hallucinate fields; unvalidated output crashes downstream code"
 llm,retry-with-backoff,error,LLM API calls,"Retry transient failures with exponential backoff and jitter","LLM APIs have variable latency and rate limits"
 llm,token-budget,warning,Long context prompts,"Track input and output tokens against a budget","Runaway token usage blows up cost and hits context limits"

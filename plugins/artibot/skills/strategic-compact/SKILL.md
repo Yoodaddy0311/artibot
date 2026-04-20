@@ -45,6 +45,15 @@ source_hash: 20062e8f
 | Red | 85-95% | Force efficiency, essential ops only |
 | Critical | 95%+ | Emergency protocols |
 
+### Claude Opus 4.7 (1M 컨텍스트) 전략
+4.7은 1M 토큰을 표준 가격으로 제공하므로 **지연 컴팩션** 가능.
+- 400k 토큰 미만: 컴팩션 보류 (성능 페널티 없음)
+- 400k-700k: 주의 — 다음 휴지기에 `/checkpoint` 권장
+- 700k-900k: 즉시 컴팩션 실행, 또는 `/load`를 `--full-context` 없이 재호출
+- 900k+: 긴급 — compaction-survival 트리거
+
+주의: 신 토크나이저는 동일 텍스트를 최대 1.35배 토큰으로 소비 → 실제 효용 컨텍스트는 ~740k-1M.
+
 **Compaction Process**:
 1. Checkpoint: save current task state before compaction
 2. Classify: sort context into preserve/summarize/drop

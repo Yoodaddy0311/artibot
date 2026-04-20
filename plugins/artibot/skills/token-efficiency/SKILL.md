@@ -27,11 +27,13 @@ source_hash: 2eccc99a
 # Token Efficiency Engine
 
 ## When This Skill Applies
-- Context window usage exceeds 75%
+- Context window usage exceeds 60%
 - Large-scale operations spanning many files
 - Explicit `--uc` / `--ultracompressed` flag
 - Output exceeds token budget for complexity level
 - Emergency compression needed (context >95%)
+
+> Claude 4.7 신 토크나이저는 최대 1.35배 토큰을 소비하므로 기존 임계값에 1.35 안전 버퍼 필요 (75% → 60%).
 
 ## Core Guidance
 

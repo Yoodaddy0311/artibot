@@ -130,3 +130,20 @@ Layout Grid:   [grid description]
 | 1 | 콘텐츠 보강 | `/content` | 발표 자료 콘텐츠 보강 |
 | 2 | 문서 연동 | `/document` | 발표 자료와 문서 연동 |
 | 3 | 데이터 보충 | `/excel` | 발표 데이터 추가 분석 |
+
+## Claude Design 연계 (선택적)
+
+Claude Design(Labs research preview)과 Artibot `/ppt`는 **보완관계**다:
+
+| 단계 | 도구 | 산출물 |
+|---|---|---|
+| 1. 시각 시안 | Claude Design (canvas) | 슬라이드 레이아웃, 비주얼 디렉션, 컬러/타이포 |
+| 2. 내러티브 구조 | Artibot `/ppt` | Problem→Solution 아크, 슬라이드별 스피커 노트, 데이터 시각화 권장 |
+| 3. 통합 | PPTX export ↔ Artibot 구조 주입 | 최종 덱 |
+
+**권장 워크플로**:
+1. Claude Design에서 20-30분 시안 러프 생성 (PPTX export)
+2. Artibot `/ppt`에 "이 덱의 내러티브 아크 설계" 요청 → 구조 산출물 받기
+3. 시안에 구조 매핑하여 최종 편집
+
+**⚠️ 주의**: Pencil MCP(.pen 파일)는 Claude Design과 무관한 3rd-party 도구다. 혼동하지 말 것.

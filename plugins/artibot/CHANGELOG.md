@@ -9,6 +9,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] - 2026-04-20
+
+### Summary / 요약
+
+**English**: Claude Opus 4.7 migration. Flipped sampling-params rule (400-error avoidance), updated model IDs to opus-4-7 (sonnet-4-6 preserved), added effort-routing policy (xhigh/high/medium/low per command) in `lib/cognitive/router.js`, Task Budget (beta) opt-in guide for /team and /implement, 1M context strategy with delayed compaction (400k/700k/900k zones), 2576px / 3.75MP high-res image defaults for visual validation, Claude Design integration for /ppt. Reinforced Operator-Waits DNA as explicit override for 4.7's reduced-subagent default. Extended auto-invoke principle to all commands. 17 modified + 1 new test file, 5183 tests passing (+19).
+
+**한국어**: Claude Opus 4.7 대응. 샘플링 파라미터 규칙 반전(400 에러 회피), 모델 ID opus-4-7 갱신(sonnet-4-6 유지), `lib/cognitive/router.js`에 커맨드별 effort 자동 매핑(xhigh/high/medium/low) 정책 추가, `/team`·`/implement`에 Task Budget(베타) 옵트인 가이드, 1M 컨텍스트 지연 컴팩션(400k/700k/900k 구간), 2576px / 3.75MP 고해상도 시각 검증 기본값, `/ppt` × Claude Design 연계. 4.7의 "기본 서브에이전트 감소" 기본값을 Operator-Waits DNA가 명시적으로 오버라이드. 모든 커맨드에 자동 트리거 원칙 확장. 17파일 수정 + 1 테스트 신규, 5183 테스트 통과(+19).
+
+### Added / 추가됨
+
+- **`EFFORT_POLICY` + `getEffortForCommand()`** in `lib/cognitive/router.js:738-770` — 4.7 effort parameter auto-injection per command
+- **`HIGH_RES_DEFAULT`** const in `lib/visual/visual-validator.js:24-34` (2576px / 3.75MP / 1:1 coordinate mapping)
+- **Task Budget (beta) sections** in `commands/team.md:46`, `commands/implement.md:65` (header `task-budgets-2026-03-13`, 20k minimum)
+- **1M context zones** (400k/700k/900k) in `skills/strategic-compact/SKILL.md:48-56`
+- **`--full-context` option** in `commands/load.md:19-26`
+- **Claude Design integration** section in `commands/ppt.md:135+` (Pencil MCP 별개 명시)
+- **"Claude 4.7 Override"** section in `agents/orchestrator.md:87-88`
+- **Effort Level Policy** section in `commands/sc.md:26-38`
+- **19 unit tests** for EFFORT_POLICY / getEffortForCommand — `tests/cognitive/router-effort-policy.test.js` (100% line coverage of new exports)
+
+### Changed / 변경됨
+
+- `rules/csv/llm.csv:3` — rule `temperature-explicit` (warning, "Set explicitly") → **`sampling-params-omit`** (error, "Omit temperature/top_p/top_k for Claude Opus 4.7+")
+- `agents/llm-architect.md:59` — `claude-opus-4-6` → **`claude-opus-4-7`** + "1M context + adaptive thinking + xhigh effort 지원" (sonnet-4-6 rows 유지)
+- `agents/code-reviewer.md:44` — "opus 4.6 모델로 동작하며" → **"opus 4.7 모델로 동작하며"**
+- `commands/team.md` frontmatter + 본문 — implementation on **opus 4.7 (xhigh effort 권장)**, review phases sonnet 4.6 유지
+- `skills/token-efficiency/SKILL.md:30,36` — trigger **75% → 60%** (신 토크나이저 +35% 안전 버퍼)
+- `skills/compaction-survival/SKILL.md:35,40,69-72` — trigger **75% → 70%**, 구간표 50/75/90 → 45/70/85, 서술 명확화
+- `CLAUDE.md:38` — Auto Team Mode에 4.7 override 주의 추가
+- `plugins/artibot/CLAUDE.md:125` — Auto-invoke Principle 적용 범위를 모든 커맨드로 확장 (워크플로우 단축 금지 명시)
+
+### Testing
+
+- Lint: 0 errors
+- Vitest: **5183 passing** (164 test files, 17.21s) — 이전 5164 → +19 (회귀 0)
+- 신규 테스트: `tests/cognitive/router-effort-policy.test.js` — 19 tests, 100% line coverage of new router exports
+
+---
+
 ## [2.5.0] - 2026-04-15
 
 ### Summary / 요약

@@ -21,6 +21,18 @@ const DEFAULTS = {
   excludeSelectors: [],
 };
 
+/**
+ * High-resolution defaults aligned with Claude Opus 4.7 vision limits.
+ * Claude 4.7 raises the image ceiling to 2576px / 3.75MP (up from 1568px / 1.15MP)
+ * and guarantees 1:1 pixel-to-coordinate mapping (no scale-factor math required).
+ * Use for Playwright capture when fine-grained SSIM diff fidelity matters.
+ * @see https://platform.claude.com/docs/ko/build-with-claude/vision
+ */
+export const HIGH_RES_DEFAULT = Object.freeze({
+  width: 2576,
+  maxMegapixels: 3.75,
+});
+
 // ---------------------------------------------------------------------------
 // Playwright MCP Instruction Builders
 // ---------------------------------------------------------------------------
