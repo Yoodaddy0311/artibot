@@ -9,6 +9,136 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.0.0] - 2026-04-21
+
+### Summary / 요약
+
+**English**: Major "Autonomous Agent OS" release. Artibot transitions from opt-in to **active-by-default** self-governance: 7 self-control behaviors (auto-commit, auto-cleanup, auto-skill-register, auto-macro-register, auto-PR, auto-wakeup, auto-lifecycle) run automatically after a 5-run First-Run observation window. Critical safety preserved via 12-category blocker guards (prototype pollution, DATA POLICY, gh pr merge, git push-to-main, path traversal) that cannot be disabled. Adds AGO observation layer (Decision Trail, Swarm Convergence, Self-Benchmark, Auto-Spawn Advisor, Macro Learning), SDK `.commit()` for runtime authoring, Extension Manifest + Marketplace Installer platform layer, plain-language UX + skill-level auto-detection, Emergency Kill Switch, and GitHub Actions self-control scheduler.
+
+**한국어**: 메이저 "자율 에이전트 OS" 릴리즈. opt-in → **active-by-default** 전환: 7개 자가 통제 기능이 설치 후 5회 관찰(First-Run) 이후 자동 동작. 12개 카테고리 critical blocker 가드는 무력화 불가. AGO 관찰 계층 + SDK `.commit()` + Extension Manifest + Marketplace Installer + 평어 UX + 역량 자동 감지 + Emergency Kill Switch + GitHub Actions 자가 통제 스케줄러 추가.
+
+### BREAKING CHANGES
+
+- **Active-by-Default**: 자가 통제 기능 설치 직후 자동 동작. 끄는 법: `ago.selfControl.masterEnabled: false` (docs/SELF-CONTROL.md)
+- **First-Run Observe 5회**: 설치 후 첫 5회는 관찰만, 6회차부터 자동 활성
+- **Emergency Kill Switch**: 1시간 내 치명 실패 3회 누적 시 masterEnabled 자동 OFF + 24h 쿨다운
+- **`ARTIBOT_SELF_CONTROL` env 제거**: 3중 게이트 → 2중 게이트 (masterEnabled + feature.enabled)
+- **macroLearning.mode `"suggest-only"`로 복원**: 자동 등록은 `ago.selfControl.autoMacroRegister` 경로로 분리
+- **Node 버전**: engines `>=20.0.0`. CI matrix `[20, 22, 24]`
+
+### Added / 추가됨
+
+**Autonomous Self-Control (7)**
+- Auto-Commit Runner (`scripts/cron/auto-commit-runner.js` + `risk-classifier.js` + `rollback-guard.js`): low-risk만 자동 커밋, 회귀 시 자동 rollback, git push 금지
+- Auto-Cleanup Runner (`scripts/cron/auto-cleanup-runner.js`): eslint --fix만, maxFilesPerRun=20
+- Auto-Skill Registrar (`lib/sdk/auto-skill-registrar.js`): 24h staging, DATA POLICY 2회 스캔
+- Auto Macro Register (`lib/learning/macro-learner.js` `tryAutoRegister`/`sweepAutoRegister`): 5회 + 30일 거부 윈도우, session-end + 주간 cron
+- Auto-PR Creator (`scripts/cron/auto-pr-creator.js`): autoMerge=false 하드코딩, --draft 강제, 시간당 1회, gh pr merge 정적 차단
+- Auto Wakeup Scheduler (`lib/learning/wakeup-scheduler.js`): marker-only, ScheduleWakeup 호출 0건, 4중 게이트
+- Auto Lifecycle Autopilot (`lib/learning/skill-lifecycle-autopilot.js`): 14일 grace, PROTECTED_SKILLS frozen
+
+**Safety Infrastructure**
+- First-Run Guard (`lib/learning/first-run-guard.js`): 5회 관찰 → 자동 전환
+- Emergency Kill Switch (`lib/learning/kill-switch.js`): 치명 실패 3/1h → masterEnabled OFF + 24h 쿨다운
+- Self-Control Gates (`lib/learning/self-control-gates.js`): 4-gate 공통 헬퍼
+
+**AGO Observation Layer (5)**
+- Decision Trail (`lib/core/decision-trail.js`): 모든 자율 결정 기록, 30일 retention, 민감 정보 redaction
+- Auto-Spawn Advisor (`lib/learning/auto-spawn-advisor.js`): 다음 세션 제안 write-only
+- Swarm Convergence Detector (`lib/swarm/convergence-detector.js`): 3+ 인스턴스 패턴 수렴
+- Self-Benchmark (`lib/learning/self-benchmark.js` + `scripts/cron/self-benchmark-runner.js`): 주간 5차원 리포트
+- Macro Learning (`lib/learning/macro-learner.js`): 자연어 매크로 감지 + 자동 등록
+
+**Platform Layer**
+- SDK `.commit()` (`lib/sdk/artibot-sdk.js`): createSkill/Agent/Hook/Middleware 4 factory 디스크 생성
+- Extension Manifest 표준 (`lib/core/extension-loader.js` + `docs/EXTENSION-MANIFEST.md`): `artibot.ext.json`
+- Marketplace Installer (`lib/core/marketplace-installer.js` + `commands/install.md`): file:// + github.com/Yoodaddy0311/
+- External Agent Drop-in (`lib/core/agent-registry.js` 확장): `~/.claude/plugins/artibot-ext-*` 자동 스캔
+
+**User Experience**
+- Plain-Language Translator (`lib/core/plain-language.js`): 기술 용어 → 평어 (ko/en/ja)
+- User Profile (`lib/core/user-profile.js`): novice/pro 자동 판별
+- Visual Dashboard (`lib/tui/dashboard.js` + `scripts/statusline.{sh,js}`): statusline 실시간 표시
+- Post-Bash Recovery Hook (`scripts/hooks/post-bash-failure.js`): 빌드/테스트 실패 → agent 자동 추천
+- Post-Write TDD Hook (`scripts/hooks/post-write-tdd.js`): mirror test 부재 감지
+
+**Runtime / 4.7 Integration**
+- EFFORT_POLICY 19 → **55 커맨드** 전면 분류
+- EFFORT Prompt Injection: `[artibot:effort level=X command=Y]` prefix
+- Task Budget Auto-Wire (`lib/runtime/task-budget.js`): xhigh=128K, high=64K, medium=32K, low=16K
+- 1M Context Opt-in: `runtime.longContext.enabled`, ANTHROPIC_BETA merge
+
+**Infrastructure**
+- GitHub Actions `.github/workflows/self-control.yml`: 주간 self-benchmark, 매일 cleanup, 주간 macro sweep
+- actions @v5 업그레이드: checkout/setup-node/upload-artifact 13 refs
+- Node matrix `[20, 22, 24]`
+
+### Changed / 변경됨
+
+- Skill 통합: lang-* 16 → `lang-reference`, git-* 9 → `git-unified` (내용 보존)
+- CLAUDE.md 축소: 7084 → 3240 chars (캐시 예산 준수)
+- orchestrator tools 정리: `Read`/`Glob`/`Grep` 제거 (위임 enforcement)
+- rules 이관: 글로벌 → 플러그인 path-scoped
+- memory-manager anti-poisoning validator (prototype pollution + payload + source)
+- atomicWriteJson 중앙화 (`lib/core/file.js`): 3곳 중복 제거
+- redaction 중앙화 (`lib/core/redaction.js`): 3모듈 공유
+- main() 함수 분해: session-start 315→33, runtime-prompt 131→32, session-end 155→13, cron runners 100-130→35-48
+- user-profile 경로 버그 수정: pluginRoot 결합 + tmp cleanup
+- self-benchmark loader path 오타 수정
+
+### Fixed / 수정됨
+
+- CRLF 파서 버그 (`gen-skill-docs.js`): skill:check 97 errors → **0**
+- auto-commit-runner:245 unused assignment (`.catch()` 체인)
+- Hook TODO 리터럴 오탐: `auto-spawn-advisor.js` → "pending item"
+- statusline.js unused assignment
+- import sort order (test files)
+
+### Removed / 제거됨
+
+- `scripts/hooks/cognitive-router.js` (runtime-prompt.js 대체)
+- `CHANGELOG-v1.9.0.md` (통합)
+- `scripts/status-line.js` (중복)
+- `team.playbooksLegacy` + 15 dead config keys
+- `dashboard.updateIntervalMs`, `ago.mode` (미사용)
+- `codex.dataPolicy` → `codex.warning` (스키마 혼동 제거)
+
+### Testing / 테스트
+
+- Vitest: **5811 passing** (+589 vs 2.8.0)
+- Lint: 0 errors / 0 warnings (--max-warnings 0)
+- Validate: 29 agents / 99 skills / 56 commands / 49 hooks
+- skill:check: 0 errors (이전 97)
+- Runtime Eval Gate: 8/8 averageScore 1.0
+- Node matrix CI: 20 / 22 / 24
+
+### Safety Invariants
+
+항상 보장 (무력화 불가):
+- `git push` to main/master 자동 금지
+- `gh pr merge` 호출 0건 (정적 + 런타임)
+- `ScheduleWakeup` 직접 호출 0건 (marker-only)
+- DATA POLICY: `dataPolicy ∈ {local, artibot-swarm}` 외 거부
+- PROTECTED_SKILLS deprecate 불가
+- MIN_GRACE_DAYS=14 상수 불변
+- autoMerge=false 하드코딩
+- Prototype pollution 6+ 모듈 가드
+- Path traversal pluginRoot 결합
+- URL allowlist (file:// + github.com/Yoodaddy0311/)
+
+### Migration / 마이그레이션
+
+**2.8.x → 3.0.0**:
+1. `masterEnabled=true` 자동 설정 (기본 OFF → ON)
+2. 설치 후 첫 5회는 관찰만 (실제 변경 없음)
+3. 옵트아웃: `ago.selfControl.masterEnabled: false` 또는 개별 기능
+4. `ARTIBOT_SELF_CONTROL` env 제거해도 동작 동일
+5. `.github/workflows/self-control.yml` 자동 생성 (불필요 시 파일 삭제)
+
+**신규 설치**: 설정 불필요, 설치 → 세션 시작 → 자동 동작. 자세한 가이드는 `docs/SELF-CONTROL.md`.
+
+---
+
 ## [2.8.0] - 2026-04-20
 
 ### Summary / 요약
