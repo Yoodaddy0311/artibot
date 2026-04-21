@@ -242,15 +242,12 @@ async function validateAndRollback({ cwd, guard, baseline, snap, trail, config, 
   const check = await guard.validateAgainstBaseline(baseline, { cwd });
   if (check.passed) return { rolledBack: false };
 
-  let rb = { reverted: false };
-  try {
-    rb = await guard.rollback(snap, { cwd });
-  } catch (rbErr) {
+  const rb = await guard.rollback(snap, { cwd }).catch(async (rbErr) => {
     await reportCriticalFailure('autoCommit', `rollback-failed: ${rbErr.message}`, config, {
       killSwitch, pluginRoot: cwd,
     });
     throw rbErr;
-  }
+  });
   await trail({
     subsystem: 'auto-commit',
     action: 'rolled-back',
