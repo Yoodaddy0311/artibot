@@ -121,17 +121,17 @@ export function buildSuggestion(signal, ctx) {
 // ---------------------------------------------------------------------------
 
 /**
- * Collect unresolved-TODO signals from session summary transcript markers.
+ * Collect unresolved pending-item signals from session summary transcript markers.
  * @param {object} sessionSummary
  * @returns {Array<object>}
  */
 function collectTodoSignals(sessionSummary) {
-  const todos = Array.isArray(sessionSummary?.unresolvedTodos) ? sessionSummary.unresolvedTodos : [];
-  return todos.slice(0, 10).map((todo) => ({
+  const items = Array.isArray(sessionSummary?.unresolvedTodos) ? sessionSummary.unresolvedTodos : [];
+  return items.slice(0, 10).map((item) => ({
     category: 'unresolved-todo',
-    reason: `Unresolved TODO: ${String(todo?.text ?? todo).slice(0, 200)}`,
-    confidence: Number.isFinite(todo?.confidence) ? todo.confidence : 0.85,
-    suggestedAction: 'Review and resolve TODO before continuing related work',
+    reason: `Pending item: ${String(item?.text ?? item).slice(0, 200)}`,
+    confidence: Number.isFinite(item?.confidence) ? item.confidence : 0.85,
+    suggestedAction: 'Review and resolve pending items before continuing related work',
     depth: 0,
   }));
 }
