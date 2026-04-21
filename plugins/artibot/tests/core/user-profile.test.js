@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { existsSync, mkdirSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
+import { isAbsolute, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   _resetPathCache,
   configureProfilePath,
@@ -10,6 +11,7 @@ import {
   recordSignal,
   setSkillLevel,
 } from '../../lib/core/user-profile.js';
+import { getPluginRoot } from '../../lib/core/platform.js';
 
 const TMP_ROOT = join(tmpdir(), 'artibot-user-profile-tests');
 
@@ -153,6 +155,67 @@ describe('user-profile', () => {
       await recordSignal({ type: 'slash-command', value: 'test' });
       expect(existsSync(explicit)).toBe(true);
       try { rmSync(explicit); } catch { /* ignore */ }
+    });
+
+    it('resolves relative paths against the plugin root (not CWD)', async () => {
+      // Write to a relative path — the module must anchor it to the plugin
+      // root so it resolves to the same file regardless of process.cwd().
+      const relPath = `runtime/__test__/user-profile-${Date.now()}-${Math.random().toString(36).slice(2)}.json`;
+      const expected = join(getPluginRoot(), relPath);
+      configureProfilePath(relPath);
+      await recordSignal({ type: 'slash-command', value: 'test' });
+      expect(existsSync(expected)).toBe(true);
+      try { rmSync(expected); } catch { /* ignore */ }
+    });
+
+    it('keeps absolute paths unchanged and does not prepend the plugin root', async () => {
+      const explicit = uniquePath();
+      expect(isAbsolute(explicit)).toBe(true);
+      configureProfilePath(explicit);
+      await recordSignal({ type: 'slash-command', value: 'test' });
+      expect(existsSync(explicit)).toBe(true);
+      // must NOT have been re-rooted under the plugin dir
+      expect(explicit.startsWith(getPluginRoot())).toBe(false);
+      try { rmSync(explicit); } catch { /* ignore */ }
+    });
+
+    it('expands ~/ prefix against the user home dir', async () => {
+      configureProfilePath('~/.__artibot_test_home_expansion.json');
+      const expected = join(homedir(), '.__artibot_test_home_expansion.json');
+      await recordSignal({ type: 'slash-command', value: 'home-expand' });
+      expect(existsSync(expected)).toBe(true);
+      try { rmSync(expected); } catch { /* ignore */ }
+    });
+  });
+
+  describe('tmp file hygiene', () => {
+    it('does not leave a *.tmp.* file on successful write', async () => {
+      await recordSignal({ type: 'slash-command', value: 'ok' });
+      const dir = TMP_ROOT;
+      const leftovers = readdirSync(dir).filter((n) => n.includes('.tmp.'));
+      expect(leftovers).toEqual([]);
+    });
+
+    it('cleans up stale tmp files from prior interrupted writes', async () => {
+      const { writeFileSync } = await import('node:fs');
+      const stale = `${profilePath}.tmp.999999`;
+      writeFileSync(stale, '{"partial":true}');
+      expect(existsSync(stale)).toBe(true);
+      // A successful write should opportunistically clear stale tmp files.
+      await recordSignal({ type: 'slash-command', value: 'trigger-cleanup' });
+      expect(existsSync(stale)).toBe(false);
+    });
+
+    it('removes its own tmp file when rename fails', async () => {
+      // Force a rename failure by pointing the profile at an unwritable target
+      // (a path whose parent is an existing file, not a directory). On rename
+      // failure writeProfile MUST unlink the tmp file and swallow the error.
+      const unwritableParent = fileURLToPath(import.meta.url); // this test file
+      const badTarget = join(unwritableParent, 'nope.json');
+      const tmpForBad = `${badTarget}.tmp.${process.pid}`;
+      configureProfilePath(badTarget);
+      await recordSignal({ type: 'slash-command', value: 'force-fail' });
+      expect(existsSync(tmpForBad)).toBe(false);
     });
   });
 

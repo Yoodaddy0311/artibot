@@ -20,6 +20,7 @@
 
 import path from 'node:path';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { redactString as sharedRedactString, TAGGED_PATTERNS } from '../core/redaction.js';
 
 // --- action keyword catalogue -----------------------------------------------
 
@@ -38,35 +39,18 @@ const ACTION_KEYWORDS = Object.freeze({
 
 const FORBIDDEN_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
 
-// --- redaction (duplicates decision-trail style regexes, intentionally
-//     kept local so macro-learner stays importable without coupling) --------
-
-const REDACT_PATTERNS = Object.freeze([
-  // API keys: sk-..., AIza..., ghp_..., AKIA..., Bearer tokens
-  { re: /\b(sk|AIza|ghp|gho|ghu|AKIA)[A-Za-z0-9_-]{12,}\b/g, tag: '[redacted:key]' },
-  { re: /Bearer\s+[A-Za-z0-9._-]{16,}/gi, tag: '[redacted:bearer]' },
-  // JWT-ish
-  { re: /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, tag: '[redacted:jwt]' },
-  // Windows absolute paths (C:\... or C:/...) - avoid leaking home dirs
-  { re: /\b[A-Z]:[\\/][^\s"'`]{2,}/g, tag: '[redacted:path]' },
-  // POSIX home paths
-  { re: /\/(Users|home)\/[^\s"'`/]+\/[^\s"'`]*/g, tag: '[redacted:path]' },
-  // Email addresses
-  { re: /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, tag: '[redacted:email]' },
-]);
+// --- redaction (delegated to lib/core/redaction.js — tagged pattern set) ----
 
 /**
- * Redact sensitive tokens from a string. Pure function; does not mutate input.
+ * Redact sensitive tokens from a string using the shared tagged pattern set
+ * (`[redacted:key]`, `[redacted:path]`, `[redacted:email]`, ...). Pure
+ * function; does not mutate input.
+ *
  * @param {string} input
  * @returns {string}
  */
 export function redactSensitive(input) {
-  if (typeof input !== 'string' || input.length === 0) return '';
-  let out = input;
-  for (const { re, tag } of REDACT_PATTERNS) {
-    out = out.replace(re, tag);
-  }
-  return out;
+  return sharedRedactString(input, { patterns: TAGGED_PATTERNS });
 }
 
 // --- detection --------------------------------------------------------------
@@ -348,4 +332,175 @@ export async function rejectSuggestion(suggestionId, options) {
   suggestion.rejectedAt = new Date().toISOString();
   safeWriteJson(filePath, store);
   return { rejected: true };
+}
+
+// ---------------------------------------------------------------------------
+// AGO Self-Control — auto-register path (opt-in, triple-gated)
+// ---------------------------------------------------------------------------
+
+const AUTO_MIN_CONFIDENCE = 0.85;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Evaluate the three opt-in gates for auto-register:
+ *   1. `ARTIBOT_SELF_CONTROL` env flag is set
+ *   2. `ago.selfControl.masterEnabled === true`
+ *   3. `ago.selfControl.autoMacroRegister.enabled === true`
+ *
+ * @param {object} config
+ * @returns {{ok: true, cfg: object} | {ok: false, reason: string}}
+ */
+function evalAutoGate(config) {
+  if (!process.env.ARTIBOT_SELF_CONTROL) return { ok: false, reason: 'env-not-set' };
+  const sc = config?.ago?.selfControl;
+  if (!sc || sc.masterEnabled !== true) return { ok: false, reason: 'master-disabled' };
+  const ar = sc.autoMacroRegister;
+  if (!ar || ar.enabled !== true) return { ok: false, reason: 'module-disabled' };
+  return { ok: true, cfg: ar };
+}
+
+/**
+ * Check whether the same fingerprint has a rejection inside the cooldown window.
+ */
+function hasRecentRejection(store, fp, now, windowDays) {
+  const windowMs = windowDays * DAY_MS;
+  return store.suggestions.some((s) =>
+    s?.status === 'rejected'
+    && s?.pattern?.fingerprint === fp
+    && s?.rejectedAt
+    && (now - Date.parse(s.rejectedAt)) <= windowMs,
+  );
+}
+
+/**
+ * Attempt to auto-register a single pending suggestion.
+ *
+ * Opt-in extension of the suggest-only contract. Requires the three AGO
+ * self-control gates (env + masterEnabled + module enabled) plus stricter
+ * per-suggestion criteria (min occurrences, min confidence, no recent rejection).
+ *
+ * @param {object} suggestion - Pending suggestion object (as returned by observePrompt).
+ * @param {{pluginRoot: string, config: object, now?: number}} options
+ * @returns {Promise<{registered: boolean, macroId?: string, reason?: string}>}
+ */
+/**
+ * Per-suggestion precheck. Returns a skip-reason object or null when all
+ * per-suggestion criteria pass.
+ */
+function precheckAutoRegister(suggestion, gateCfg) {
+  if (suggestion.status !== 'pending') return { registered: false, reason: 'not-pending' };
+
+  const minOccurrences = Number.isInteger(gateCfg.minOccurrences) && gateCfg.minOccurrences >= 1
+    ? gateCfg.minOccurrences
+    : 5;
+  const occurrences = suggestion.pattern?.occurrences ?? 0;
+  if (occurrences < minOccurrences) return { registered: false, reason: 'below-occurrences' };
+
+  const confidence = typeof suggestion.confidence === 'number' ? suggestion.confidence : 0;
+  if (confidence < AUTO_MIN_CONFIDENCE) return { registered: false, reason: 'low-confidence' };
+
+  return null;
+}
+
+/**
+ * Persist a new macro entry into artibot.config.json. Returns macroId on
+ * success or a skip-reason object on failure.
+ */
+function writeMacroEntry(pluginRoot, suggestion, now) {
+  const configPath = path.join(pluginRoot, 'artibot.config.json');
+  const cfg = safeReadJson(configPath, null);
+  if (!cfg || typeof cfg !== 'object') return { registered: false, reason: 'config-unreadable' };
+  if (!cfg.macros || typeof cfg.macros !== 'object' || Array.isArray(cfg.macros)) {
+    cfg.macros = Object.create(null);
+  }
+
+  const macroId = `m_${String(suggestion.pattern.fingerprint).replace(/[^a-z0-9]+/gi, '_')}`;
+  if (FORBIDDEN_KEYS.has(macroId)) return { registered: false, reason: 'forbidden-macro-id' };
+
+  cfg.macros[macroId] = {
+    actions: suggestion.pattern.actions.slice(),
+    trigger: suggestion.pattern.triggerPhrase,
+    createdAt: new Date(now).toISOString(),
+    source: 'macro-learner-auto',
+    suggestionId: suggestion.id,
+  };
+  safeWriteJson(configPath, cfg);
+  return { macroId };
+}
+
+/**
+ * Mirror approval state into the suggestion store.
+ */
+function markStoreApproved(filePath, store, suggestionId, macroId, now) {
+  const stored = store.suggestions.find((s) => s?.id === suggestionId);
+  if (!stored) return;
+  stored.status = 'approved';
+  stored.approvedAt = new Date(now).toISOString();
+  stored.macroId = macroId;
+  stored.autoRegistered = true;
+  safeWriteJson(filePath, store);
+}
+
+export async function tryAutoRegister(suggestion, options) {
+  const pluginRoot = options?.pluginRoot;
+  const config = options?.config || {};
+  const now = typeof options?.now === 'number' ? options.now : Date.now();
+
+  if (!pluginRoot || !suggestion) return { registered: false, reason: 'invalid-args' };
+
+  const gate = evalAutoGate(config);
+  if (!gate.ok) return { registered: false, reason: gate.reason };
+
+  const precheck = precheckAutoRegister(suggestion, gate.cfg);
+  if (precheck) return precheck;
+
+  const filePath = resolveSuggestionsPath(pluginRoot, config);
+  const store = loadStore(filePath);
+
+  const windowDays = Number.isFinite(gate.cfg.noRejectionWindowDays)
+    ? gate.cfg.noRejectionWindowDays
+    : 30;
+  if (hasRecentRejection(store, suggestion.pattern?.fingerprint, now, windowDays)) {
+    return { registered: false, reason: 'recent-rejection' };
+  }
+
+  const write = writeMacroEntry(pluginRoot, suggestion, now);
+  if (write.reason) return write;
+
+  markStoreApproved(filePath, store, suggestion.id, write.macroId, now);
+  return { registered: true, macroId: write.macroId };
+}
+
+/**
+ * Sweep all pending suggestions and attempt auto-register per entry.
+ * Short-circuits with the gate reason if the triple gate is not open.
+ *
+ * @param {{pluginRoot: string, config: object, now?: number}} options
+ * @returns {Promise<{registered: Array<{id:string,macroId:string}>, skipped: Array<{id:string,reason:string}>, reason?: string}>}
+ */
+export async function sweepAutoRegister(options) {
+  const pluginRoot = options?.pluginRoot;
+  const config = options?.config || {};
+  const now = typeof options?.now === 'number' ? options.now : Date.now();
+
+  const gate = evalAutoGate(config);
+  if (!gate.ok) return { registered: [], skipped: [], reason: gate.reason };
+  if (!pluginRoot) return { registered: [], skipped: [], reason: 'invalid-args' };
+
+  const filePath = resolveSuggestionsPath(pluginRoot, config);
+  const store = loadStore(filePath);
+  const pending = store.suggestions.filter((s) => s?.status === 'pending');
+
+  const registered = [];
+  const skipped = [];
+  for (const suggestion of pending) {
+    const r = await tryAutoRegister(suggestion, { pluginRoot, config, now });
+    if (r.registered) {
+      registered.push({ id: suggestion.id, macroId: r.macroId });
+    } else {
+      skipped.push({ id: suggestion.id, reason: r.reason });
+    }
+  }
+
+  return { registered, skipped };
 }

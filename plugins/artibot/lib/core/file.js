@@ -120,6 +120,26 @@ export function ensureDirSync(dirPath) {
 }
 
 /**
+ * Synchronous read-and-parse of a JSON file with a fallback.
+ * Intended for hot, synchronous paths (hooks, middleware) where an async
+ * API would complicate the call site. Returns `fallback` when the file is
+ * missing, unreadable, or contains invalid JSON.
+ *
+ * @template T
+ * @param {string} filePath - Absolute path to the JSON file.
+ * @param {T} [fallback=null] - Value returned on any failure.
+ * @returns {object|T} Parsed JSON object, or `fallback` on failure.
+ */
+export function readJsonFileSync(filePath, fallback = null) {
+  try {
+    if (!fsSync.existsSync(filePath)) return fallback;
+    return JSON.parse(fsSync.readFileSync(filePath, 'utf-8'));
+  } catch {
+    return fallback;
+  }
+}
+
+/**
  * List files in a directory matching an optional extension filter.
  * Returns an empty array if the directory does not exist.
  *

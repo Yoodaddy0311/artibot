@@ -10,8 +10,8 @@
  */
 
 import path from 'node:path';
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { getHomeDir } from './platform.js';
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+import { getHomeDir, getPluginRoot } from './platform.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -70,15 +70,35 @@ let cachedProfilePath = null;
 
 /**
  * Expand ~ at the start of a path to the user home directory.
+ * Handles both `~/foo` and `~\foo` (Windows) prefixes.
  * @param {string} p
  * @returns {string}
  */
 function expandHome(p) {
   if (!p) return p;
-  if (p.startsWith('~/') || p === '~') {
-    return path.join(getHomeDir(), p.slice(1));
+  if (p === '~') return getHomeDir();
+  if (p.startsWith('~/') || p.startsWith('~\\')) {
+    return path.join(getHomeDir(), p.slice(2));
   }
   return p;
+}
+
+/**
+ * Resolve a user-supplied profile path. Supports:
+ *   - `~` / `~/...` / `~\...` home-relative paths
+ *   - absolute paths (kept as-is)
+ *   - relative paths (resolved against the plugin root, NOT CWD)
+ *
+ * Resolving against the plugin root — instead of CWD — prevents the per-session
+ * directory drift that caused stale `runtime/user-profile.json.tmp.*` files when
+ * the hook was launched from differing working directories.
+ *
+ * @param {string} newPath
+ * @returns {string}
+ */
+function resolveConfiguredPath(newPath) {
+  const expanded = expandHome(newPath);
+  return path.isAbsolute(expanded) ? expanded : path.join(getPluginRoot(), expanded);
 }
 
 /**
@@ -100,7 +120,7 @@ function resolveProfilePath() {
  * @param {string|null} newPath
  */
 export function configureProfilePath(newPath) {
-  cachedProfilePath = newPath ? expandHome(newPath) : null;
+  cachedProfilePath = newPath ? resolveConfiguredPath(newPath) : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -148,19 +168,53 @@ async function readProfile() {
 }
 
 /**
+ * Remove any stale `*.tmp.*` sibling files next to the profile destination.
+ * Runs best-effort; a missing directory or a read error is silently ignored.
+ *
+ * @param {string} destPath
+ */
+function cleanupStaleTmpFiles(destPath) {
+  try {
+    const dir = path.dirname(destPath);
+    const base = path.basename(destPath);
+    const prefix = `${base}.tmp.`;
+    const entries = readdirSync(dir);
+    for (const name of entries) {
+      if (name.startsWith(prefix)) {
+        try { unlinkSync(path.join(dir, name)); } catch { /* ignore */ }
+      }
+    }
+  } catch {
+    // Non-critical: cleanup is advisory
+  }
+}
+
+/**
  * Atomically persist a profile to disk. Failures are swallowed because
- * profile tracking is advisory only.
+ * profile tracking is advisory only. Any intermediate tmp file is always
+ * removed — either via rename-to-final (success) or via explicit unlink
+ * (rename failure).
  *
  * @param {Profile} profile
  * @returns {Promise<void>}
  */
 async function writeProfile(profile) {
   const p = resolveProfilePath();
+  const tmp = `${p}.tmp.${process.pid}`;
   try {
     mkdirSync(path.dirname(p), { recursive: true });
-    const tmp = `${p}.tmp.${process.pid}`;
     writeFileSync(tmp, JSON.stringify(profile, null, 2), 'utf-8');
-    renameSync(tmp, p);
+    try {
+      renameSync(tmp, p);
+    } catch (err) {
+      // Rename failed (e.g. cross-device, stale lock). Ensure the tmp file is
+      // removed so it cannot accumulate across sessions.
+      try { unlinkSync(tmp); } catch { /* ignore */ }
+      throw err;
+    }
+    // Opportunistic cleanup of stale tmp files left over from previous
+    // interrupted runs (crashed processes, older pids, etc.).
+    cleanupStaleTmpFiles(p);
   } catch {
     // Non-critical: profile persistence is advisory
   }

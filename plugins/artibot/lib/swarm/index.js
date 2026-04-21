@@ -75,3 +75,11 @@ export {
   createInstanceHash,
   computeRankingScore,
 } from './collective-hub.js';
+
+// Convergence Detector (multi-instance pattern agreement → confidence boost)
+export {
+  detectConvergence,
+  applyBoost,
+  persistConvergedPatterns,
+  getConvergedPatterns,
+} from './convergence-detector.js';

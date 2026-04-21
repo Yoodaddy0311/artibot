@@ -1,0 +1,273 @@
+#!/usr/bin/env node
+/**
+ * AGO Self-Control Wave 1 — Auto-Commit Runner.
+ *
+ * Reads git working-tree changes, classifies their risk, and (if within
+ * `ago.selfControl.autoCommit.maxRiskLevel`) creates a local commit.
+ * On post-commit regression, it rolls back to the pre-commit HEAD.
+ *
+ * Triple gate (all three must be true to do anything):
+ *   1. `ago.selfControl.masterEnabled` === true
+ *   2. `ago.selfControl.autoCommit.enabled` === true
+ *   3. env var `ARTIBOT_SELF_CONTROL` === '1'
+ *
+ * Hard safety rails:
+ *   - Never calls `git push`.
+ *   - Never commits files whose classified level is `critical`.
+ *   - Single-process lock via `runtime/auto-commit.lock` with PID + timestamp.
+ *
+ * Usage:
+ *   ARTIBOT_SELF_CONTROL=1 node scripts/cron/auto-commit-runner.js [--dry-run]
+ *
+ * @module scripts/cron/auto-commit-runner
+ */
+
+import { spawn } from 'node:child_process';
+import fsSync from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import { readJsonFile } from '../../lib/core/file.js';
+import { getPluginRoot } from '../../lib/core/platform.js';
+import { recordDecision } from '../../lib/core/decision-trail.js';
+import {
+  classifyDiff,
+  isWithinRiskCeiling,
+} from '../../lib/learning/risk-classifier.js';
+import {
+  rollback,
+  runValidation,
+  snapshot,
+  validateAgainstBaseline,
+} from '../../lib/learning/rollback-guard.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// ---------------------------------------------------------------------------
+// Git helpers — all via spawn argv (no shell interpolation)
+// ---------------------------------------------------------------------------
+
+function runGit(args, cwd) {
+  return new Promise((resolve, reject) => {
+    const child = spawn('git', args, { cwd, shell: false });
+    let stdout = '';
+    let stderr = '';
+    child.stdout?.on('data', (d) => { stdout += d.toString(); });
+    child.stderr?.on('data', (d) => { stderr += d.toString(); });
+    child.on('error', reject);
+    child.on('close', (code) => resolve({ code: code ?? 0, stdout, stderr }));
+  });
+}
+
+/**
+ * Collect changed files via `git status --porcelain` and `git diff --numstat`.
+ *
+ * @param {string} cwd
+ * @returns {Promise<{files: Array<{path: string, status: string, additions: number, deletions: number}>}>}
+ */
+export async function collectDiff(cwd) {
+  const porcelain = await runGit(['status', '--porcelain'], cwd);
+  if (porcelain.code !== 0) throw new Error(`git status failed: ${porcelain.stderr}`);
+  const files = [];
+  for (const line of porcelain.stdout.split('\n')) {
+    if (!line.trim()) continue;
+    const code = line.slice(0, 2);
+    const filePath = line.slice(3).trim();
+    let status = 'M';
+    if (code.includes('A') || code.includes('?')) status = 'A';
+    else if (code.includes('D')) status = 'D';
+    files.push({ path: filePath, status, additions: 0, deletions: 0 });
+  }
+  if (files.length === 0) return { files };
+
+  const numstat = await runGit(['diff', 'HEAD', '--numstat'], cwd);
+  if (numstat.code === 0) {
+    for (const line of numstat.stdout.split('\n')) {
+      const [a, d, p] = line.split('\t');
+      if (!p) continue;
+      const entry = files.find((f) => f.path === p.trim());
+      if (entry) {
+        entry.additions = Number.parseInt(a, 10) || 0;
+        entry.deletions = Number.parseInt(d, 10) || 0;
+      }
+    }
+  }
+  return { files };
+}
+
+// ---------------------------------------------------------------------------
+// Lock file (single-instance guard)
+// ---------------------------------------------------------------------------
+
+function lockPath(pluginRoot) {
+  return path.join(pluginRoot, 'runtime', 'auto-commit.lock');
+}
+
+export function acquireLock(pluginRoot) {
+  const p = lockPath(pluginRoot);
+  try {
+    fsSync.mkdirSync(path.dirname(p), { recursive: true });
+    fsSync.writeFileSync(
+      p,
+      JSON.stringify({ pid: process.pid, timestamp: new Date().toISOString() }),
+      { flag: 'wx' },
+    );
+    return true;
+  } catch (err) {
+    if (err.code === 'EEXIST') return false;
+    throw err;
+  }
+}
+
+export function releaseLock(pluginRoot) {
+  try { fsSync.unlinkSync(lockPath(pluginRoot)); } catch { /* ignore */ }
+}
+
+// ---------------------------------------------------------------------------
+// Main flow
+// ---------------------------------------------------------------------------
+
+/**
+ * Determine whether the triple gate allows this run.
+ *
+ * @param {object} config
+ * @param {NodeJS.ProcessEnv} env
+ * @returns {{allowed: boolean, reason?: string}}
+ */
+export function checkGates(config, env) {
+  const sc = config?.ago?.selfControl;
+  if (!sc?.masterEnabled) return { allowed: false, reason: 'masterEnabled=false' };
+  if (!sc?.autoCommit?.enabled) return { allowed: false, reason: 'autoCommit.enabled=false' };
+  if (env.ARTIBOT_SELF_CONTROL !== '1') {
+    return { allowed: false, reason: 'ARTIBOT_SELF_CONTROL env not set to 1' };
+  }
+  return { allowed: true };
+}
+
+/**
+ * Core pipeline. Exported for testability — the wrapper `main()` injects
+ * real git/validation deps, tests can inject mocks via `deps`.
+ *
+ * @param {object} deps
+ */
+export async function runAutoCommit(deps) {
+  const {
+    cwd,
+    config,
+    env = process.env,
+    dryRun = false,
+    logger = console,
+    gitOps = { collectDiff, runGit },
+    guard = { snapshot, runValidation, validateAgainstBaseline, rollback },
+    classify = classifyDiff,
+    trail = recordDecision,
+  } = deps;
+
+  const gate = checkGates(config, env);
+  if (!gate.allowed) {
+    logger.log(`auto-commit: skipped — ${gate.reason}`);
+    return { ran: false, reason: gate.reason };
+  }
+
+  const ac = config.ago.selfControl.autoCommit;
+  const maxLevel = ac.maxRiskLevel || 'low';
+
+  const diff = await gitOps.collectDiff(cwd);
+  if (diff.files.length === 0) {
+    logger.log('auto-commit: no changes');
+    return { ran: false, reason: 'no changes' };
+  }
+
+  const classification = classify(diff);
+  if (!isWithinRiskCeiling(classification.level, maxLevel)) {
+    await trail({
+      subsystem: 'auto-commit',
+      action: 'refused',
+      reason: `level=${classification.level} exceeds ceiling=${maxLevel}`,
+      inputs: { files: diff.files.map((f) => f.path) },
+      outputs: { level: classification.level },
+    });
+    logger.log(`auto-commit: refused — ${classification.level} > ${maxLevel}`);
+    return { ran: false, reason: 'risk ceiling', classification };
+  }
+
+  const baseline = await guard.runValidation({ cwd });
+  if (ac.requiredTestsPass && !baseline.tests.passed) {
+    return { ran: false, reason: 'baseline tests failing' };
+  }
+  if (ac.requiredLintClean && !baseline.lint.passed) {
+    return { ran: false, reason: 'baseline lint failing' };
+  }
+
+  const snap = await guard.snapshot({ cwd });
+  if (dryRun) {
+    logger.log(`auto-commit: dry-run — would commit ${diff.files.length} files at ${snap.sha}`);
+    return { ran: false, reason: 'dry-run', classification, snapshot: snap };
+  }
+
+  const add = await gitOps.runGit(['add', '-A'], cwd);
+  if (add.code !== 0) return { ran: false, reason: 'git add failed' };
+
+  const msg = `chore(artibot-auto): ${classification.level}-risk auto-commit [skip ci]`;
+  const commit = await gitOps.runGit(['commit', '-m', msg], cwd);
+  if (commit.code !== 0) return { ran: false, reason: 'git commit failed' };
+
+  if (ac.rollbackOnRegression !== false) {
+    const check = await guard.validateAgainstBaseline(baseline, { cwd });
+    if (!check.passed) {
+      const rb = await guard.rollback(snap, { cwd });
+      await trail({
+        subsystem: 'auto-commit',
+        action: 'rolled-back',
+        reason: `regressions: ${check.regressions.join(',')}`,
+        outputs: { sha: snap.sha, reverted: rb.reverted },
+      });
+      return { ran: true, committed: true, rolledBack: rb.reverted, regressions: check.regressions };
+    }
+  }
+
+  await trail({
+    subsystem: 'auto-commit',
+    action: 'committed',
+    reason: `${classification.level}-risk auto-commit`,
+    outputs: { sha: snap.sha, files: diff.files.length },
+  });
+  return { ran: true, committed: true, rolledBack: false, classification };
+}
+
+// ---------------------------------------------------------------------------
+// CLI entrypoint
+// ---------------------------------------------------------------------------
+
+async function main() {
+  const args = process.argv.slice(2);
+  const dryRun = args.includes('--dry-run');
+  const pluginRoot = getPluginRoot() || path.resolve(__dirname, '..', '..');
+  const configPath = path.join(pluginRoot, 'artibot.config.json');
+  const config = (await readJsonFile(configPath)) || {};
+
+  if (!acquireLock(pluginRoot)) {
+    process.stderr.write('auto-commit: lock held by another process\n');
+    process.exit(0);
+  }
+  try {
+    const result = await runAutoCommit({ cwd: pluginRoot, config, dryRun });
+    process.stdout.write(`auto-commit: ${JSON.stringify(result)}\n`);
+  } finally {
+    releaseLock(pluginRoot);
+  }
+  process.exit(0);
+}
+
+// Only run when invoked directly (not when imported by tests).
+if (import.meta.url === `file://${process.argv[1]}` ||
+    import.meta.url === pathToFileURLSafe(process.argv[1])) {
+  main().catch((err) => {
+    process.stderr.write(`auto-commit cron failed: ${err.message}\n`);
+    process.exit(1);
+  });
+}
+
+function pathToFileURLSafe(p) {
+  try { return new URL(`file://${path.resolve(p)}`).href; } catch { return ''; }
+}

@@ -817,14 +817,56 @@
   },
   "dashboard": {
     "enabled": false,
-    "updateIntervalMs": 1000,
     "showTeammates": true,
     "showEffort": true,
     "showTaskBudget": true
   },
   "ago": {
-    "mode": "observe-only",
     "selfControlEnabled": false,
+    "selfControl": {
+      "masterEnabled": false,
+      "autoCommit": {
+        "enabled": false,
+        "maxRiskLevel": "low",
+        "requiredTestsPass": true,
+        "requiredLintClean": true,
+        "rollbackOnRegression": true
+      },
+      "autoCleanup": {
+        "enabled": false,
+        "tools": ["eslint-fix"],
+        "maxFilesPerRun": 20
+      },
+      "autoSkillRegister": {
+        "enabled": false,
+        "stagingDays": 1,
+        "stagingPath": "runtime/skills-staging/",
+        "minConfidence": 0.85
+      },
+      "autoMacroRegister": {
+        "enabled": false,
+        "minOccurrences": 5,
+        "noRejectionWindowDays": 30
+      },
+      "autoPR": {
+        "enabled": false,
+        "autoMerge": false,
+        "branchPrefix": "artibot/auto/",
+        "categories": ["drift", "security-fix", "test-flake"]
+      },
+      "autoWakeup": {
+        "enabled": false,
+        "maxPerHour": 2,
+        "maxDepth": 2,
+        "minDelaySeconds": 300
+      },
+      "autoLifecycle": {
+        "enabled": false,
+        "graceDays": 14,
+        "deprecateThreshold": 0,
+        "promoteThreshold": 5
+      }
+    },
     "decisionTrail": {
       "enabled": true,
       "path": "runtime/decision-trail.json",

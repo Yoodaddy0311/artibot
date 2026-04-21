@@ -50,8 +50,10 @@ async function buildFixture(overrides = {}) {
     await writeFile(path.join(dir, 'lib', 'runtime', 'effort.js'), 'export function x(){}\n');
   }
 
+  // lib/core/ — holds plain-language.js and (per real repo layout) extension-loader.js
+  await mkdir(path.join(dir, 'lib', 'core'), { recursive: true });
   if (overrides.extensionLoader !== false) {
-    await writeFile(path.join(dir, 'lib', 'runtime', 'extension-loader.js'), 'export const loader = 1;\n');
+    await writeFile(path.join(dir, 'lib', 'core', 'extension-loader.js'), 'export const loader = 1;\n');
   }
 
   // lib/sdk/artibot-sdk.js with .commit()
@@ -60,9 +62,6 @@ async function buildFixture(overrides = {}) {
     ? 'export const sdk = {};\n'
     : 'export const sdk = { commit(){ return 1; } };\n// sdk.commit( usage\n';
   await writeFile(path.join(dir, 'lib', 'sdk', 'artibot-sdk.js'), sdkBody);
-
-  // lib/core/plain-language.js
-  await mkdir(path.join(dir, 'lib', 'core'), { recursive: true });
   const plainBody = (overrides.plainEntries ?? 4) > 0
     ? Array.from({ length: overrides.plainEntries ?? 4 })
         .map((_, i) => `export function p${i}(){}`)
@@ -183,6 +182,35 @@ describe('self-benchmark/gatherRepoStats', () => {
     const s = await gatherRepoStats(fx.dir);
     // 2 + 1 = 3 hook commands
     expect(s.hookCount).toBe(3);
+  });
+
+  it('detects extension-loader at lib/core/extension-loader.js', async () => {
+    const s = await gatherRepoStats(fx.dir);
+    expect(s.extensionLoaderExists).toBe(true);
+  });
+
+  it('flags extension-loader missing when absent from lib/core/', async () => {
+    const { dir } = await buildFixture({ extensionLoader: false });
+    try {
+      const s = await gatherRepoStats(dir);
+      expect(s.extensionLoaderExists).toBe(false);
+    } finally {
+      await rm(dir, { recursive: true, force: true }).catch(() => {});
+    }
+  });
+
+  it('extensibility dimension gains +3 when loader present vs absent', async () => {
+    const present = await gatherRepoStats(fx.dir);
+    const { dir: absentDir } = await buildFixture({ extensionLoader: false });
+    try {
+      const absent = await gatherRepoStats(absentDir);
+      const presentScore = computeDimensionScores(present).extensible.score;
+      const absentScore = computeDimensionScores(absent).extensible.score;
+      // scoreExtensible adds 3 for loader; score is clamped to [0, 10]
+      expect(presentScore - absentScore).toBeCloseTo(3, 2);
+    } finally {
+      await rm(absentDir, { recursive: true, force: true }).catch(() => {});
+    }
   });
 });
 

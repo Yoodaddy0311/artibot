@@ -20,6 +20,10 @@ import path from 'node:path';
 import fsSync from 'node:fs';
 import { ensureDir } from './file.js';
 import { getPluginRoot } from './platform.js';
+import {
+  redactObject as sharedRedactObject,
+  redactString as sharedRedactString,
+} from './redaction.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -28,19 +32,6 @@ import { getPluginRoot } from './platform.js';
 const DEFAULT_PATH = 'runtime/decision-trail.json';
 const DEFAULT_RETENTION_DAYS = 30;
 const MAX_ENTRIES = 5000; // hard cap to keep file size bounded
-const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
-
-// Redaction patterns (ordered — most specific first)
-const REDACT_PATTERNS = Object.freeze([
-  // API keys / tokens / secrets / passwords / bearer
-  [/(?:api[_-]?key|token|secret|password|bearer)[\s=:]+[^\s"']+/gi, '***REDACTED***'],
-  // Windows user paths C:\Users\<name>\ -> C:\Users\{user}\
-  [/([A-Za-z]:[\\/])(?:Users|users)[\\/][^\\/"'\s]+/g, '$1Users\\{user}'],
-  // Unix home paths /home/<name>/ or /Users/<name>/
-  [/\/(?:home|Users)\/[^/\s"']+/g, '/{home}/{user}'],
-  // Email addresses
-  [/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g, '{email}'],
-]);
 
 // ---------------------------------------------------------------------------
 // Config loading (lazy, cached)
@@ -94,45 +85,37 @@ function resolveTrailPath() {
 }
 
 // ---------------------------------------------------------------------------
-// Redaction
+// Redaction — delegates to lib/core/redaction.js (single source of truth).
 // ---------------------------------------------------------------------------
 
 /**
- * Redact sensitive substrings in a string.
+ * Redact sensitive substrings in a string. Preserves legacy output format
+ * (`***REDACTED***`, `{email}`, `$1Users\{user}`, `/{home}/{user}`) via the
+ * shared GENERIC pattern set.
+ *
  * @param {string} s
  * @returns {string}
  */
 function redactString(s) {
-  let out = s;
-  for (const [re, repl] of REDACT_PATTERNS) {
-    out = out.replace(re, repl);
-  }
-  return out;
+  if (typeof s !== 'string') return s;
+  return sharedRedactString(s);
 }
 
 /**
- * Deep-clone a value while applying redaction to strings and rejecting
- * prototype-pollution keys. Returns a sanitized copy.
+ * Deep-clone a value, optionally redacting strings. Delegates to
+ * sharedRedactObject which already drops prototype-pollution keys and
+ * returns a new structure without mutating the input.
  *
  * @param {unknown} value
  * @param {boolean} redact
  * @returns {unknown}
  */
 function sanitize(value, redact) {
-  if (value === null || value === undefined) return value;
-  const t = typeof value;
-  if (t === 'string') return redact ? redactString(value) : value;
-  if (t === 'number' || t === 'boolean') return value;
-  if (Array.isArray(value)) return value.map((v) => sanitize(v, redact));
-  if (t === 'object') {
-    const out = {};
-    for (const key of Object.keys(value)) {
-      if (UNSAFE_KEYS.has(key)) continue; // drop prototype-pollution keys
-      out[key] = sanitize(value[key], redact);
-    }
-    return out;
+  if (!redact) {
+    // Empty pattern set = structure-clone + unsafe-key stripping, no string mutation.
+    return sharedRedactObject(value, { patterns: [] });
   }
-  return undefined; // functions / symbols are not serialized
+  return sharedRedactObject(value);
 }
 
 // ---------------------------------------------------------------------------

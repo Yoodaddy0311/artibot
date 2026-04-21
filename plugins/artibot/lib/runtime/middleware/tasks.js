@@ -6,7 +6,7 @@
  */
 
 import path from 'node:path';
-import { existsSync, readFileSync } from 'node:fs';
+import { readJsonFileSync } from '../../core/file.js';
 
 function makeTaskId(nowFn) {
   const now = nowFn();
@@ -15,7 +15,7 @@ function makeTaskId(nowFn) {
 
 /**
  * Load the most recent effort + task-budget meta written by runtime-prompt.js.
- * Returns null when either file is missing or unreadable — downstream code
+ * Returns null when the effort file is missing or unreadable — downstream code
  * must treat effort/budget as optional.
  *
  * @param {string|undefined} pluginRoot
@@ -23,30 +23,22 @@ function makeTaskId(nowFn) {
  */
 function readEffortMeta(pluginRoot) {
   if (!pluginRoot) return null;
-  try {
-    const runtimeDir = path.join(pluginRoot, 'runtime');
-    const effortPath = path.join(runtimeDir, 'current-effort.json');
-    const budgetPath = path.join(runtimeDir, 'current-task-budget.json');
+  const runtimeDir = path.join(pluginRoot, 'runtime');
+  const effortRaw = readJsonFileSync(path.join(runtimeDir, 'current-effort.json'));
+  if (!effortRaw) return null;
 
-    if (!existsSync(effortPath)) return null;
-    const effortRaw = JSON.parse(readFileSync(effortPath, 'utf-8'));
-    const meta = {
-      effort: effortRaw.effort || null,
-      command: effortRaw.command || null,
-      taskBudget: null,
-    };
+  const meta = {
+    effort: effortRaw.effort || null,
+    command: effortRaw.command || null,
+    taskBudget: null,
+  };
 
-    if (existsSync(budgetPath)) {
-      const budgetRaw = JSON.parse(readFileSync(budgetPath, 'utf-8'));
-      if (typeof budgetRaw.budget === 'number' && budgetRaw.budget > 0) {
-        meta.taskBudget = budgetRaw.budget;
-      }
-    }
-
-    return meta;
-  } catch {
-    return null;
+  const budgetRaw = readJsonFileSync(path.join(runtimeDir, 'current-task-budget.json'));
+  if (budgetRaw && typeof budgetRaw.budget === 'number' && budgetRaw.budget > 0) {
+    meta.taskBudget = budgetRaw.budget;
   }
+
+  return meta;
 }
 
 /**

@@ -18,7 +18,7 @@
  */
 
 import path from 'node:path';
-import { readdir, readFile, stat } from 'node:fs/promises';
+import { readdir } from 'node:fs/promises';
 
 import {
   ensureDir,
@@ -141,7 +141,7 @@ export async function gatherRepoStats(pluginRoot) {
   ]);
 
   const [extensionLoaderExists, lifelongHookRegistered, postBashFailureExists] = await Promise.all([
-    exists(path.join(root, 'lib', 'runtime', 'extension-loader.js')).catch(() => false),
+    exists(path.join(root, 'lib', 'core', 'extension-loader.js')).catch(() => false),
     grepCount(path.join(root, 'hooks'), 'lifelong', (n) => n.endsWith('.json')),
     exists(path.join(root, 'scripts', 'hooks', 'post-bash-failure.js')),
   ]);
@@ -466,6 +466,3 @@ async function writeTextFile(filePath, content) {
   await fs.writeFile(filePath, content, 'utf-8');
 }
 
-// Silence unused-import lint if stat/readFile ever become used by extensions.
-void stat;
-void readFile;

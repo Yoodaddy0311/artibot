@@ -67,3 +67,21 @@ export {
 export { createMetricsCollector, defaultCollector } from './metrics-collector.js';
 export { checkInstructionBudget, getSkillTokenEstimate, budgetReport } from './instruction-budget.js';
 export { createSnapshot, formatForPrompt, estimateSnapshotTokens, SNAPSHOT_MAX_TOKENS } from './agent-memory-snapshot.js';
+
+// Decision Trail (AGO Track G3 explainability)
+export { recordDecision, queryDecisions, pruneDecisionTrail, getDecisionStats } from './decision-trail.js';
+
+// Extension loader (plugin discovery + manifest validation)
+export { validateManifest, loadExtension, discoverExtensions } from './extension-loader.js';
+
+// Marketplace installer (install / uninstall / list)
+export { installFromRegistry, installFromUrl, uninstall, listInstalled } from './marketplace-installer.js';
+
+// Plain language (localization dictionary)
+export { toPlainLanguage, getDictionary, registerDictionary } from './plain-language.js';
+
+// User profile (skill-level signals & promotion)
+export { getProfile, recordSignal, setSkillLevel, detectSkillLevel, configureProfilePath } from './user-profile.js';
+
+// Redaction (centralized sensitive-token masking)
+export { redactString, redactObject, DEFAULT_PATTERNS, GENERIC_PATTERNS, TAGGED_PATTERNS } from './redaction.js';
