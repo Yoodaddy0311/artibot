@@ -18,7 +18,7 @@ async function main() {
   const __dirname = path.dirname(__filename);
   const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT || path.resolve(__dirname, '..');
 
-  let config = {};
+  let config;
   try {
     const configPath = path.join(pluginRoot, 'artibot.config.json');
     config = JSON.parse(readFileSync(configPath, 'utf-8'));
