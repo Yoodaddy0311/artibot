@@ -6,9 +6,17 @@
  * time specified in `artibot.config.json > ago.selfBenchmark.schedule`
  * (default `0 4 * * 1` — Monday 04:00).
  *
+ * Wave-2 gates (all must hold):
+ *   1. `ago.selfControl.masterEnabled`    — default true (user-level off-switch)
+ *   2. `ago.selfBenchmark.enabled`        — default true (per-feature off-switch)
+ *   3. kill-switch not tripped for `self-benchmark`
+ *
+ * First-run observe mode is allowed: the benchmark is read-only/report-only
+ * so running it during the initial observation window is safe.
+ *
  * Behavior:
  *   - Reads `artibot.config.json`.
- *   - Short-circuits (exit 0) if `ago.selfBenchmark.enabled` is false.
+ *   - Short-circuits (exit 0) when any gate fails.
  *   - Otherwise runs the observational benchmark and writes the report.
  *   - Never modifies source code. Never makes network calls.
  *
@@ -36,10 +44,29 @@ async function main() {
   const configPath = path.join(pluginRoot, 'artibot.config.json');
   const config = (await readJsonFile(configPath)) || {};
 
+  // Gate 1: master self-control off-switch.
+  const masterEnabled = config?.ago?.selfControl?.masterEnabled !== false;
+  if (!masterEnabled) {
+    process.stdout.write('self-benchmark: disabled via ago.selfControl.masterEnabled=false\n');
+    process.exit(0);
+  }
+
+  // Gate 2: per-feature off-switch — defaults to true.
   const sbCfg = config?.ago?.selfBenchmark || {};
-  if (!sbCfg.enabled) {
+  if (sbCfg.enabled === false) {
     process.stdout.write('self-benchmark: disabled via ago.selfBenchmark.enabled=false\n');
     process.exit(0);
+  }
+
+  // Gate 3: kill-switch. Graceful if module missing.
+  try {
+    const ks = await import('../../lib/learning/kill-switch.js');
+    if (await ks.isKillSwitchTripped(config, { feature: 'self-benchmark', pluginRoot })) {
+      process.stdout.write('self-benchmark: skipped — kill-switch tripped for self-benchmark\n');
+      process.exit(0);
+    }
+  } catch {
+    // Best-effort: missing kill-switch must not block the runner.
   }
 
   const result = await runSelfBenchmark({ pluginRoot, config, dryRun });

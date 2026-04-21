@@ -41,6 +41,8 @@ function baseConfig(overrides = {}) {
           promoteThreshold: 5,
           ...overrides,
         },
+        // Disable first-run observe mode so tests exercise the full path.
+        firstRunMode: { enabled: false },
       },
     },
   };
@@ -50,6 +52,12 @@ async function makeTmpRoot() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'skill-lifecycle-'));
   await fs.mkdir(path.join(root, 'skills'), { recursive: true });
   await fs.mkdir(path.join(root, 'runtime'), { recursive: true });
+  // Pre-seed first-run state past threshold as a belt-and-braces bypass.
+  await fs.writeFile(
+    path.join(root, 'runtime', 'first-run-state.json'),
+    JSON.stringify({ globalRuns: 999, features: {}, transitions: [] }),
+    'utf-8',
+  );
   return root;
 }
 
@@ -94,25 +102,25 @@ async function writeClaudePatterns(claudeDir, entries) {
 // checkGates
 // ---------------------------------------------------------------------------
 
-describe('skill-lifecycle-autopilot/checkGates', () => {
+describe('skill-lifecycle-autopilot/checkGates (default-on)', () => {
   it('closes when masterEnabled is false', () => {
     const cfg = baseConfig();
     cfg.ago.selfControl.masterEnabled = false;
-    expect(checkGates(cfg, { ARTIBOT_SELF_CONTROL: '1' }).open).toBe(false);
+    expect(checkGates(cfg).open).toBe(false);
   });
 
   it('closes when autoLifecycle.enabled is false', () => {
     const cfg = baseConfig();
     cfg.ago.selfControl.autoLifecycle.enabled = false;
-    expect(checkGates(cfg, { ARTIBOT_SELF_CONTROL: '1' }).open).toBe(false);
+    expect(checkGates(cfg).open).toBe(false);
   });
 
-  it('closes without env var', () => {
-    expect(checkGates(baseConfig(), {}).open).toBe(false);
+  it('opens without env var (default-on)', () => {
+    expect(checkGates(baseConfig(), {}).open).toBe(true);
   });
 
-  it('opens on full green light', () => {
-    expect(checkGates(baseConfig(), { ARTIBOT_SELF_CONTROL: '1' }).open).toBe(true);
+  it('opens on default config', () => {
+    expect(checkGates(baseConfig()).open).toBe(true);
   });
 });
 

@@ -6,16 +6,18 @@
  * drift / security / test-flake conditions, produces a candidate branch with
  * a focused fix, and opens a DRAFT PR via `gh pr create`. It NEVER merges.
  *
- * Triple-gate safety:
- *   1. `ago.selfControl.masterEnabled === true`
- *   2. `ago.selfControl.autoPR.enabled === true`
- *   3. `ARTIBOT_SELF_CONTROL=1` environment variable
+ * Self-control is ON by default. The user opts out via config:
+ *   - `ago.selfControl.masterEnabled: false` (global)
+ *   - `ago.selfControl.autoPR.enabled: false` (feature-specific)
  *
- * Additional hard invariants (enforced in code, verified by tests):
- *   - Only categories listed in `ago.selfControl.autoPR.categories` proceed.
+ * Safety layers (non-negotiable, enforced in code + tests):
+ *   - `autoMerge === true` BLOCKED (defense-in-depth).
+ *   - Only categories in `ago.selfControl.autoPR.categories` proceed.
  *   - `--draft` is always passed to `gh pr create`.
  *   - At most 1 PR per hour (runtime/auto-pr-cooldown.json).
  *   - `gh pr merge` is NEVER invoked. Pushes to `main`/`master` are blocked.
+ *   - Kill switch trips after 3 critical failures in 24h.
+ *   - First 5 runs are observe-only (First-Run Guard).
  *   - Every attempt is written to the Decision Trail.
  *
  * Usage:
@@ -51,16 +53,19 @@ const SUPPORTED_CATEGORIES = Object.freeze(['drift', 'security-fix', 'test-flake
 // ---------------------------------------------------------------------------
 
 /**
+ * Check user-opt-out gates. Self-control is ON by default; only explicit
+ * `false` values opt out. `autoMerge === true` remains a hard security
+ * invariant and always closes the gate.
+ *
  * @param {object} config
- * @param {NodeJS.ProcessEnv} [env]
+ * @param {NodeJS.ProcessEnv} [_env] - kept for signature compatibility; unused.
  * @returns {{open: boolean, reason?: string}}
  */
-export function checkGates(config, env = process.env) {
+export function checkGates(config, _env) {
   const sc = config?.ago?.selfControl;
-  if (!sc || sc.masterEnabled !== true) return { open: false, reason: 'masterEnabled=false' };
-  if (!sc.autoPR || sc.autoPR.enabled !== true) return { open: false, reason: 'autoPR.enabled=false' };
-  if (env.ARTIBOT_SELF_CONTROL !== '1') return { open: false, reason: 'env ARTIBOT_SELF_CONTROL!=1' };
-  if (sc.autoPR.autoMerge === true) return { open: false, reason: 'autoMerge must be false' };
+  if (sc && sc.masterEnabled === false) return { open: false, reason: 'masterEnabled=false' };
+  if (sc?.autoPR?.enabled === false) return { open: false, reason: 'autoPR.enabled=false' };
+  if (sc?.autoPR?.autoMerge === true) return { open: false, reason: 'autoMerge must be false' };
   return { open: true };
 }
 
@@ -208,6 +213,52 @@ export function buildFixPlan(category, now) {
 }
 
 // ---------------------------------------------------------------------------
+// Safety helpers (kill-switch + first-run guard, tolerant to missing modules)
+// ---------------------------------------------------------------------------
+
+/**
+ * @param {object} config
+ * @param {{pluginRoot?: string}} [opts]
+ * @returns {Promise<boolean>}
+ */
+async function isAutoPrKillSwitchActive(config, opts = {}) {
+  try {
+    const mod = await import('../../lib/learning/kill-switch.js');
+    return await mod.isKillSwitchTripped(config, { ...opts, feature: 'auto-pr' });
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * @param {object} config
+ * @param {{pluginRoot?: string}} [opts]
+ * @returns {Promise<boolean>}
+ */
+async function isAutoPrObserveOnly(config, opts = {}) {
+  try {
+    const mod = await import('../../lib/learning/first-run-guard.js');
+    const state = await mod.shouldObserveOnly('auto-pr', config, opts);
+    await mod.bumpRunCounter('auto-pr', config, opts);
+    return Boolean(state?.shouldObserve);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * @param {string} error
+ * @param {object} config
+ * @param {{pluginRoot?: string}} [opts]
+ */
+async function recordAutoPrFailure(error, config, opts = {}) {
+  try {
+    const mod = await import('../../lib/learning/kill-switch.js');
+    await mod.recordFailure({ feature: 'auto-pr', error }, config, opts);
+  } catch { /* ignore */ }
+}
+
+// ---------------------------------------------------------------------------
 // Orchestration
 // ---------------------------------------------------------------------------
 
@@ -226,6 +277,7 @@ export async function createAutoPR(options) {
   const now = options.now || new Date();
   const env = options.env || process.env;
   const runImpl = options.runImpl || runCommand;
+  const pluginRoot = options.pluginRoot;
 
   const gate = checkGates(options.config, env);
   if (!gate.open) {
@@ -236,6 +288,16 @@ export async function createAutoPR(options) {
       inputs: { category: options.category },
     });
     return { status: 'rejected', reason: gate.reason };
+  }
+
+  if (await isAutoPrKillSwitchActive(options.config, { pluginRoot })) {
+    await recordDecision({
+      subsystem: 'auto-pr-creator',
+      action: 'rejected',
+      reason: 'kill-switch-tripped',
+      inputs: { category: options.category },
+    });
+    return { status: 'rejected', reason: 'kill-switch-tripped' };
   }
 
   if (!isCategoryAllowed(options.config, options.category)) {
@@ -275,11 +337,25 @@ export async function createAutoPR(options) {
     return { status: 'dry-run', branch: plan.branch };
   }
 
+  // First-Run Guard: observe-only for the initial N runs. Returns a
+  // "would-create" decision without invoking git/gh.
+  if (await isAutoPrObserveOnly(options.config, { pluginRoot })) {
+    await recordDecision({
+      subsystem: 'auto-pr-creator',
+      action: 'would-create',
+      reason: 'first-run observe-only',
+      inputs: { category: options.category },
+      outputs: { branch: plan.branch },
+    });
+    return { status: 'observe-only', branch: plan.branch };
+  }
+
   const cwd = options.pluginRoot;
   await runImpl('git', ['checkout', '-b', plan.branch], { cwd });
   await runImpl('git', ['commit', '--allow-empty', '-m', plan.title], { cwd });
   const pushRes = await runImpl('git', ['push', '-u', 'origin', plan.branch], { cwd });
   if (pushRes.code !== 0) {
+    await recordAutoPrFailure('push-failed', options.config, { pluginRoot });
     return { status: 'failed', reason: 'push-failed', branch: plan.branch };
   }
 
@@ -302,6 +378,7 @@ export async function createAutoPR(options) {
   });
 
   if (prRes.code !== 0) {
+    await recordAutoPrFailure('gh-failed', options.config, { pluginRoot });
     return { status: 'failed', reason: 'gh-failed', branch: plan.branch };
   }
   return { status: 'created', branch: plan.branch, prUrl };

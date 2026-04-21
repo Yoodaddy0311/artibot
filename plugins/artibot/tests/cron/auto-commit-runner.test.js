@@ -1,6 +1,13 @@
 /**
  * Tests for scripts/cron/auto-commit-runner.
  *
+ * Covers the new default-ON gate model:
+ *   - Explicit opt-out (masterEnabled/autoCommit.enabled = false)
+ *   - Kill switch
+ *   - First-run observe-only guard
+ *   - Critical blocker (risk ceiling)
+ *   - Failure -> kill-switch recordFailure wiring
+ *
  * All git/validation ops are injected via the `deps` bag. No real git
  * commands are ever executed.
  */
@@ -36,6 +43,20 @@ function makeConfig({
   };
 }
 
+function makeKillSwitch({ tripped = false } = {}) {
+  return {
+    isKillSwitchTripped: vi.fn(async () => tripped),
+    recordFailure: vi.fn(async () => undefined),
+  };
+}
+
+function makeFirstRunGuard({ observe = false, mode = 'active' } = {}) {
+  return {
+    shouldObserveOnly: vi.fn(async () => ({ shouldObserve: observe, mode })),
+    bumpRunCounter: vi.fn(async () => undefined),
+  };
+}
+
 function makeDeps(overrides = {}) {
   const gitOps = {
     collectDiff: vi.fn(async () => ({
@@ -59,41 +80,46 @@ function makeDeps(overrides = {}) {
   return {
     cwd: '/repo',
     config: makeConfig(),
-    env: { ARTIBOT_SELF_CONTROL: '1' },
+    env: {}, // env no longer consulted; kept for signature compat.
     logger: { log: vi.fn() },
     gitOps,
     guard,
     trail,
+    killSwitch: makeKillSwitch(),
+    firstRunGuard: makeFirstRunGuard(),
     ...overrides,
   };
 }
 
 // ---------------------------------------------------------------------------
-// checkGates
+// checkGates — default-ON semantics
 // ---------------------------------------------------------------------------
 
-describe('checkGates', () => {
-  it('rejects when masterEnabled is false', () => {
-    const r = checkGates(makeConfig({ masterEnabled: false }), { ARTIBOT_SELF_CONTROL: '1' });
+describe('checkGates (default-ON)', () => {
+  it('rejects when masterEnabled is explicitly false', () => {
+    const r = checkGates(makeConfig({ masterEnabled: false }), {});
     expect(r.allowed).toBe(false);
     expect(r.reason).toContain('masterEnabled');
   });
 
-  it('rejects when autoCommit.enabled is false', () => {
-    const r = checkGates(makeConfig({ acEnabled: false }), { ARTIBOT_SELF_CONTROL: '1' });
+  it('rejects when autoCommit.enabled is explicitly false', () => {
+    const r = checkGates(makeConfig({ acEnabled: false }), {});
     expect(r.allowed).toBe(false);
     expect(r.reason).toContain('autoCommit.enabled');
   });
 
-  it('rejects when env var is missing', () => {
-    const r = checkGates(makeConfig(), {});
-    expect(r.allowed).toBe(false);
-    expect(r.reason).toContain('ARTIBOT_SELF_CONTROL');
+  it('allows when config is empty (default ON)', () => {
+    expect(checkGates({}, {}).allowed).toBe(true);
   });
 
-  it('allows only when all three gates pass', () => {
-    const r = checkGates(makeConfig(), { ARTIBOT_SELF_CONTROL: '1' });
-    expect(r.allowed).toBe(true);
+  it('allows when selfControl is missing entirely', () => {
+    expect(checkGates({ ago: {} }, {}).allowed).toBe(true);
+  });
+
+  it('allows regardless of env vars (env gate deprecated)', () => {
+    // Previously required ARTIBOT_SELF_CONTROL=1 — now ignored.
+    expect(checkGates(makeConfig(), {}).allowed).toBe(true);
+    expect(checkGates(makeConfig(), { ARTIBOT_SELF_CONTROL: '0' }).allowed).toBe(true);
   });
 });
 
@@ -102,29 +128,72 @@ describe('checkGates', () => {
 // ---------------------------------------------------------------------------
 
 describe('runAutoCommit gates', () => {
-  it('returns early when masterEnabled=false — no git ops', async () => {
+  it('returns early when masterEnabled=false — no git ops, no kill-switch query', async () => {
     const deps = makeDeps({ config: makeConfig({ masterEnabled: false }) });
     const r = await runAutoCommit(deps);
     expect(r.ran).toBe(false);
+    expect(r.reason).toContain('masterEnabled');
     expect(deps.gitOps.collectDiff).not.toHaveBeenCalled();
     expect(deps.gitOps.runGit).not.toHaveBeenCalled();
     expect(deps.guard.snapshot).not.toHaveBeenCalled();
   });
 
-  it('returns early when env not set — no git ops', async () => {
+  it('runs when env var is unset (env gate deprecated)', async () => {
     const deps = makeDeps({ env: {} });
     const r = await runAutoCommit(deps);
+    expect(r.ran).toBe(true);
+    expect(r.committed).toBe(true);
+  });
+
+  it('halts when kill switch is tripped', async () => {
+    const deps = makeDeps({ killSwitch: makeKillSwitch({ tripped: true }) });
+    const r = await runAutoCommit(deps);
     expect(r.ran).toBe(false);
+    expect(r.reason).toContain('kill-switch');
     expect(deps.gitOps.collectDiff).not.toHaveBeenCalled();
+    expect(deps.trail).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'refused', reason: expect.stringContaining('kill-switch') }),
+    );
   });
 });
 
 // ---------------------------------------------------------------------------
-// runAutoCommit — risk classification
+// First-run guard
+// ---------------------------------------------------------------------------
+
+describe('runAutoCommit first-run guard', () => {
+  it('logs would-commit and skips write ops when in observe mode', async () => {
+    const deps = makeDeps({ firstRunGuard: makeFirstRunGuard({ observe: true }) });
+    const r = await runAutoCommit(deps);
+    expect(r.ran).toBe(false);
+    expect(r.observe).toBe(true);
+    expect(r.reason).toBe('first-run-observe-mode');
+    // No commit / snapshot / validation performed.
+    expect(deps.guard.snapshot).not.toHaveBeenCalled();
+    expect(deps.guard.runValidation).not.toHaveBeenCalled();
+    expect(deps.gitOps.runGit).not.toHaveBeenCalled();
+    // Trail records intent.
+    expect(deps.trail).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'would-commit' }),
+    );
+    // Counter was bumped.
+    expect(deps.firstRunGuard.bumpRunCounter).toHaveBeenCalledWith('autoCommit', expect.any(Object));
+  });
+
+  it('passes through when guard says active', async () => {
+    const deps = makeDeps();
+    const r = await runAutoCommit(deps);
+    expect(r.ran).toBe(true);
+    expect(r.committed).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Risk classification — critical blocker always on
 // ---------------------------------------------------------------------------
 
 describe('runAutoCommit risk ceiling', () => {
-  it('refuses critical changes', async () => {
+  it('refuses critical changes (package.json)', async () => {
     const deps = makeDeps({
       gitOps: {
         collectDiff: vi.fn(async () => ({
@@ -138,7 +207,6 @@ describe('runAutoCommit risk ceiling', () => {
     expect(r.reason).toBe('risk ceiling');
     expect(r.classification.level).toBe('critical');
     expect(deps.guard.snapshot).not.toHaveBeenCalled();
-    // trail should record the refusal
     expect(deps.trail).toHaveBeenCalledWith(
       expect.objectContaining({ subsystem: 'auto-commit', action: 'refused' }),
     );
@@ -172,7 +240,7 @@ describe('runAutoCommit risk ceiling', () => {
 });
 
 // ---------------------------------------------------------------------------
-// runAutoCommit — happy path + rollback
+// Full flow + rollback + kill-switch failure wiring
 // ---------------------------------------------------------------------------
 
 describe('runAutoCommit full flow', () => {
@@ -182,7 +250,6 @@ describe('runAutoCommit full flow', () => {
     expect(r.ran).toBe(true);
     expect(r.committed).toBe(true);
     expect(r.rolledBack).toBe(false);
-    // verify argv never contains push
     for (const call of deps.gitOps.runGit.mock.calls) {
       expect(call[0]).not.toContain('push');
     }
@@ -210,7 +277,6 @@ describe('runAutoCommit full flow', () => {
     const r = await runAutoCommit(deps);
     expect(r.ran).toBe(false);
     expect(r.reason).toBe('dry-run');
-    // Only collectDiff should have been called on gitOps, no writes.
     expect(deps.gitOps.runGit).not.toHaveBeenCalled();
   });
 
@@ -224,5 +290,34 @@ describe('runAutoCommit full flow', () => {
     const r = await runAutoCommit(deps);
     expect(r.ran).toBe(false);
     expect(r.reason).toContain('baseline tests');
+  });
+
+  it('reports critical failure to kill-switch on rollback-failure', async () => {
+    const deps = makeDeps();
+    deps.guard.validateAgainstBaseline = vi.fn(async () => ({
+      passed: false,
+      regressions: ['tests'],
+      current: {},
+      baseline: {},
+    }));
+    deps.guard.rollback = vi.fn(async () => { throw new Error('rollback-disk-full'); });
+    await expect(runAutoCommit(deps)).rejects.toThrow(/rollback-disk-full/);
+    expect(deps.killSwitch.recordFailure).toHaveBeenCalledWith(
+      expect.objectContaining({
+        feature: 'autoCommit',
+        error: expect.stringContaining('rollback-failed'),
+      }),
+      expect.any(Object),
+    );
+  });
+
+  it('reports failure to kill-switch when snapshot throws', async () => {
+    const deps = makeDeps();
+    deps.guard.snapshot = vi.fn(async () => { throw new Error('git-index-corrupt'); });
+    await expect(runAutoCommit(deps)).rejects.toThrow(/git-index-corrupt/);
+    expect(deps.killSwitch.recordFailure).toHaveBeenCalledWith(
+      expect.objectContaining({ feature: 'autoCommit' }),
+      expect.any(Object),
+    );
   });
 });

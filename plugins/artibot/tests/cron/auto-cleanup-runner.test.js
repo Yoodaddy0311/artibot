@@ -1,6 +1,13 @@
 /**
  * Tests for scripts/cron/auto-cleanup-runner.
  *
+ * Covers the new default-ON gate model:
+ *   - Explicit opt-out
+ *   - Kill switch
+ *   - First-run observe-only (always rollback, log would-cleanup)
+ *   - Critical blocker (non-low classification => rollback)
+ *   - Failure -> kill-switch recordFailure wiring
+ *
  * All tool/git ops injected via the `deps` bag. No real processes spawn.
  */
 import { describe, expect, it, vi } from 'vitest';
@@ -31,11 +38,25 @@ function makeConfig({
   };
 }
 
+function makeKillSwitch({ tripped = false } = {}) {
+  return {
+    isKillSwitchTripped: vi.fn(async () => tripped),
+    recordFailure: vi.fn(async () => undefined),
+  };
+}
+
+function makeFirstRunGuard({ observe = false, mode = 'active' } = {}) {
+  return {
+    shouldObserveOnly: vi.fn(async () => ({ shouldObserve: observe, mode })),
+    bumpRunCounter: vi.fn(async () => undefined),
+  };
+}
+
 function makeDeps(overrides = {}) {
   return {
     cwd: '/repo',
     config: makeConfig(),
-    env: { ARTIBOT_SELF_CONTROL: '1' },
+    env: {}, // env no longer consulted; kept for signature compat.
     logger: { log: vi.fn() },
     runner: vi.fn(async () => ({ code: 0, stdout: '', stderr: '' })),
     gitOps: {
@@ -48,31 +69,32 @@ function makeDeps(overrides = {}) {
       rollback: vi.fn(async () => ({ reverted: true, sha: 'beef1234' })),
     },
     trail: vi.fn(async () => ({ id: 'x', timestamp: 'now' })),
+    killSwitch: makeKillSwitch(),
+    firstRunGuard: makeFirstRunGuard(),
     ...overrides,
   };
 }
 
 // ---------------------------------------------------------------------------
-// checkGates
+// checkGates — default-ON semantics
 // ---------------------------------------------------------------------------
 
-describe('cleanup checkGates', () => {
-  it('rejects master-disabled', () => {
-    expect(checkGates(makeConfig({ masterEnabled: false }), { ARTIBOT_SELF_CONTROL: '1' }).allowed)
-      .toBe(false);
+describe('cleanup checkGates (default-ON)', () => {
+  it('rejects master-disabled (explicit false)', () => {
+    expect(checkGates(makeConfig({ masterEnabled: false }), {}).allowed).toBe(false);
   });
 
-  it('rejects individual disable', () => {
-    expect(checkGates(makeConfig({ enabled: false }), { ARTIBOT_SELF_CONTROL: '1' }).allowed)
-      .toBe(false);
+  it('rejects individual disable (explicit false)', () => {
+    expect(checkGates(makeConfig({ enabled: false }), {}).allowed).toBe(false);
   });
 
-  it('rejects missing env', () => {
-    expect(checkGates(makeConfig(), {}).allowed).toBe(false);
+  it('allows when config is empty (default ON)', () => {
+    expect(checkGates({}, {}).allowed).toBe(true);
   });
 
-  it('allows triple-gate pass', () => {
-    expect(checkGates(makeConfig(), { ARTIBOT_SELF_CONTROL: '1' }).allowed).toBe(true);
+  it('allows regardless of env var (env gate deprecated)', () => {
+    expect(checkGates(makeConfig(), {}).allowed).toBe(true);
+    expect(checkGates(makeConfig(), { ARTIBOT_SELF_CONTROL: '0' }).allowed).toBe(true);
   });
 });
 
@@ -99,7 +121,7 @@ describe('resolveTools', () => {
 });
 
 // ---------------------------------------------------------------------------
-// runAutoCleanup
+// runAutoCleanup — gates
 // ---------------------------------------------------------------------------
 
 describe('runAutoCleanup gates', () => {
@@ -111,11 +133,11 @@ describe('runAutoCleanup gates', () => {
     expect(deps.runner).not.toHaveBeenCalled();
   });
 
-  it('no-ops when env not set', async () => {
+  it('runs when env var is unset (env gate deprecated)', async () => {
     const deps = makeDeps({ env: {} });
     const r = await runAutoCleanup(deps);
-    expect(r.ran).toBe(false);
-    expect(deps.runner).not.toHaveBeenCalled();
+    expect(r.ran).toBe(true);
+    expect(deps.runner).toHaveBeenCalled();
   });
 
   it('no-ops with no configured tools', async () => {
@@ -124,7 +146,49 @@ describe('runAutoCleanup gates', () => {
     expect(r.ran).toBe(false);
     expect(r.reason).toContain('no tools');
   });
+
+  it('halts when kill switch is tripped', async () => {
+    const deps = makeDeps({ killSwitch: makeKillSwitch({ tripped: true }) });
+    const r = await runAutoCleanup(deps);
+    expect(r.ran).toBe(false);
+    expect(r.reason).toContain('kill-switch');
+    expect(deps.runner).not.toHaveBeenCalled();
+    expect(deps.guard.snapshot).not.toHaveBeenCalled();
+    expect(deps.trail).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'refused', reason: expect.stringContaining('kill-switch') }),
+    );
+  });
 });
+
+// ---------------------------------------------------------------------------
+// First-run observe mode
+// ---------------------------------------------------------------------------
+
+describe('runAutoCleanup first-run guard', () => {
+  it('in observe mode: runs tools, rolls back, records would-cleanup', async () => {
+    const deps = makeDeps({ firstRunGuard: makeFirstRunGuard({ observe: true }) });
+    const r = await runAutoCleanup(deps);
+    expect(r.ran).toBe(false);
+    expect(r.observe).toBe(true);
+    expect(r.reason).toBe('first-run-observe-mode');
+    expect(deps.guard.rollback).toHaveBeenCalled();
+    expect(deps.trail).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'would-cleanup' }),
+    );
+    expect(deps.firstRunGuard.bumpRunCounter).toHaveBeenCalledWith('autoCleanup', expect.any(Object));
+  });
+
+  it('passes through when guard says active', async () => {
+    const deps = makeDeps();
+    const r = await runAutoCleanup(deps);
+    expect(r.ran).toBe(true);
+    expect(r.rolledBack).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Full flow
+// ---------------------------------------------------------------------------
 
 describe('runAutoCleanup flow', () => {
   it('applies low-risk formatter changes and records trail', async () => {
@@ -187,5 +251,15 @@ describe('runAutoCleanup flow', () => {
     const r = await runAutoCleanup(deps);
     expect(r.dryRun).toBe(true);
     expect(deps.guard.rollback).toHaveBeenCalled();
+  });
+
+  it('reports failure to kill-switch when snapshot throws', async () => {
+    const deps = makeDeps();
+    deps.guard.snapshot = vi.fn(async () => { throw new Error('git-index-corrupt'); });
+    await expect(runAutoCleanup(deps)).rejects.toThrow(/git-index-corrupt/);
+    expect(deps.killSwitch.recordFailure).toHaveBeenCalledWith(
+      expect.objectContaining({ feature: 'autoCleanup' }),
+      expect.any(Object),
+    );
   });
 });

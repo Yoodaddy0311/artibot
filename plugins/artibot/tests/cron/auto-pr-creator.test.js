@@ -43,6 +43,8 @@ function baseConfig(overrides = {}) {
           categories: ['drift', 'security-fix', 'test-flake'],
           ...overrides,
         },
+        // Disable first-run observe mode so tests exercise the full path.
+        firstRunMode: { enabled: false },
       },
     },
   };
@@ -56,34 +58,35 @@ async function makeTmpRoot() {
 // checkGates
 // ---------------------------------------------------------------------------
 
-describe('auto-pr-creator/checkGates', () => {
-  it('closes when masterEnabled is false', () => {
+describe('auto-pr-creator/checkGates (default-on)', () => {
+  it('closes when masterEnabled is false (user opt-out)', () => {
     const cfg = baseConfig();
     cfg.ago.selfControl.masterEnabled = false;
-    expect(checkGates(cfg, { ARTIBOT_SELF_CONTROL: '1' }).open).toBe(false);
+    expect(checkGates(cfg).open).toBe(false);
   });
 
-  it('closes when autoPR.enabled is false', () => {
+  it('closes when autoPR.enabled is false (feature opt-out)', () => {
     const cfg = baseConfig();
     cfg.ago.selfControl.autoPR.enabled = false;
-    expect(checkGates(cfg, { ARTIBOT_SELF_CONTROL: '1' }).open).toBe(false);
+    expect(checkGates(cfg).open).toBe(false);
   });
 
-  it('closes when env var missing', () => {
+  it('opens by default without env var', () => {
+    // Default-on: absence of env var must not close the gate.
     const cfg = baseConfig();
-    expect(checkGates(cfg, {}).open).toBe(false);
+    expect(checkGates(cfg, {}).open).toBe(true);
   });
 
-  it('closes when autoMerge would be true (defense in depth)', () => {
+  it('closes when autoMerge would be true (hard security invariant)', () => {
     const cfg = baseConfig({ autoMerge: true });
-    const res = checkGates(cfg, { ARTIBOT_SELF_CONTROL: '1' });
+    const res = checkGates(cfg);
     expect(res.open).toBe(false);
     expect(res.reason).toMatch(/autoMerge/);
   });
 
-  it('opens when all three gates pass', () => {
+  it('opens with default config', () => {
     const cfg = baseConfig();
-    expect(checkGates(cfg, { ARTIBOT_SELF_CONTROL: '1' }).open).toBe(true);
+    expect(checkGates(cfg).open).toBe(true);
   });
 });
 
@@ -223,20 +226,51 @@ describe('auto-pr-creator/buildFixPlan', () => {
 
 describe('auto-pr-creator/createAutoPR', () => {
   let root;
-  beforeEach(async () => { root = await makeTmpRoot(); });
+  beforeEach(async () => {
+    root = await makeTmpRoot();
+    // Pre-seed first-run state so tests exercise the full path by default.
+    await fs.mkdir(path.join(root, 'runtime'), { recursive: true });
+    await fs.writeFile(
+      path.join(root, 'runtime', 'first-run-state.json'),
+      JSON.stringify({ globalRuns: 999, features: {}, transitions: [] }),
+      'utf-8',
+    );
+  });
   afterEach(async () => { await fs.rm(root, { recursive: true, force: true }); });
 
-  it('rejects when gate is closed', async () => {
+  it('rejects when user opts out (masterEnabled=false)', async () => {
     const cfg = baseConfig();
     cfg.ago.selfControl.masterEnabled = false;
     const res = await createAutoPR({
       config: cfg,
       pluginRoot: root,
       category: 'drift',
-      env: { ARTIBOT_SELF_CONTROL: '1' },
       now: NOW,
     });
     expect(res.status).toBe('rejected');
+  });
+
+  it('rejects when kill-switch is tripped', async () => {
+    await fs.writeFile(
+      path.join(root, 'runtime', 'kill-switch.json'),
+      JSON.stringify({
+        features: {
+          'auto-pr': {
+            failures: [{ at: Date.now(), error: 'seed' }],
+            trippedAt: new Date().toISOString(),
+          },
+        },
+      }),
+      'utf-8',
+    );
+    const res = await createAutoPR({
+      config: baseConfig(),
+      pluginRoot: root,
+      category: 'drift',
+      now: NOW,
+    });
+    expect(res.status).toBe('rejected');
+    expect(res.reason).toBe('kill-switch-tripped');
   });
 
   it('rejects when category not allowed', async () => {

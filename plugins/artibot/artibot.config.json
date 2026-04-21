@@ -822,46 +822,57 @@
     "showTaskBudget": true
   },
   "ago": {
-    "selfControlEnabled": false,
+    "selfControlEnabled": true,
     "selfControl": {
-      "masterEnabled": false,
+      "masterEnabled": true,
+      "firstRunMode": {
+        "enabled": true,
+        "observeRuns": 5,
+        "statePath": "runtime/first-run-state.json"
+      },
+      "emergencyKillSwitch": {
+        "enabled": true,
+        "maxFailuresPerHour": 3,
+        "cooldownHours": 24,
+        "statePath": "runtime/kill-switch-state.json"
+      },
       "autoCommit": {
-        "enabled": false,
+        "enabled": true,
         "maxRiskLevel": "low",
         "requiredTestsPass": true,
         "requiredLintClean": true,
         "rollbackOnRegression": true
       },
       "autoCleanup": {
-        "enabled": false,
+        "enabled": true,
         "tools": ["eslint-fix"],
         "maxFilesPerRun": 20
       },
       "autoSkillRegister": {
-        "enabled": false,
+        "enabled": true,
         "stagingDays": 1,
         "stagingPath": "runtime/skills-staging/",
         "minConfidence": 0.85
       },
       "autoMacroRegister": {
-        "enabled": false,
+        "enabled": true,
         "minOccurrences": 5,
         "noRejectionWindowDays": 30
       },
       "autoPR": {
-        "enabled": false,
+        "enabled": true,
         "autoMerge": false,
         "branchPrefix": "artibot/auto/",
         "categories": ["drift", "security-fix", "test-flake"]
       },
       "autoWakeup": {
-        "enabled": false,
+        "enabled": true,
         "maxPerHour": 2,
         "maxDepth": 2,
         "minDelaySeconds": 300
       },
       "autoLifecycle": {
-        "enabled": false,
+        "enabled": true,
         "graceDays": 14,
         "deprecateThreshold": 0,
         "promoteThreshold": 5
@@ -874,10 +885,10 @@
       "redactSensitive": true
     },
     "autoSpawn": {
-      "enabled": false,
+      "enabled": true,
       "maxDepth": 2,
       "minConfidence": 0.8,
-      "requireOptIn": true
+      "requireOptIn": false
     },
     "swarmConvergence": {
       "enabled": true,
@@ -886,16 +897,16 @@
       "confidenceThreshold": 0.7
     },
     "selfBenchmark": {
-      "enabled": false,
+      "enabled": true,
       "schedule": "0 4 * * 1",
       "reportPath": "_reports/self-benchmark.md",
       "dimensions": ["evolved", "extensible", "productive", "universal", "quality"]
     },
     "macroLearning": {
       "enabled": true,
-      "mode": "suggest-only",
+      "mode": "auto-with-safety",
       "minOccurrences": 3,
-      "requireUserApproval": true,
+      "requireUserApproval": false,
       "suggestionsPath": "runtime/macro-suggestions.json"
     }
   },

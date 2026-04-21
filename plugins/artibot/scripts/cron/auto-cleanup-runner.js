@@ -6,16 +6,23 @@
  * working tree, then classifies the resulting diff. Only low-risk results
  * are accepted; otherwise changes are rolled back.
  *
- * Triple gate (all three must be true):
- *   1. `ago.selfControl.masterEnabled` === true
- *   2. `ago.selfControl.autoCleanup.enabled` === true
- *   3. env var `ARTIBOT_SELF_CONTROL` === '1'
+ * Gate model (default-ON, 1+1 shape):
+ *   1. Opt-out gates: `ago.selfControl.masterEnabled` or
+ *      `ago.selfControl.autoCleanup.enabled` explicitly set to `false` blocks
+ *      the run. Default/missing = ON.
+ *   2. Kill switch: three critical failures in a row auto-disables the feature.
+ *   3. First-run guard: first N runs are observe-only (rollback immediately,
+ *      log `would-cleanup` decision).
+ *   4. Critical blocker: classifier must return `low`; anything else is
+ *      rolled back unconditionally.
+ *
+ * The legacy `ARTIBOT_SELF_CONTROL` env var gate has been removed.
  *
  * Limits:
  *   - `maxFilesPerRun` (default 20) from config.
  *
  * Usage:
- *   ARTIBOT_SELF_CONTROL=1 node scripts/cron/auto-cleanup-runner.js [--dry-run]
+ *   node scripts/cron/auto-cleanup-runner.js [--dry-run]
  *
  * @module scripts/cron/auto-cleanup-runner
  */
@@ -60,14 +67,48 @@ function run(cmd, args, cwd) {
 // Gate check (shared shape with auto-commit)
 // ---------------------------------------------------------------------------
 
-export function checkGates(config, env) {
+/**
+ * Explicit opt-out check — default ON.
+ *
+ * @param {object} config
+ * @param {NodeJS.ProcessEnv} [_env] Deprecated — kept for signature compatibility.
+ * @returns {{allowed: boolean, reason?: string}}
+ */
+export function checkGates(config, _env) {
   const sc = config?.ago?.selfControl;
-  if (!sc?.masterEnabled) return { allowed: false, reason: 'masterEnabled=false' };
-  if (!sc?.autoCleanup?.enabled) return { allowed: false, reason: 'autoCleanup.enabled=false' };
-  if (env.ARTIBOT_SELF_CONTROL !== '1') {
-    return { allowed: false, reason: 'ARTIBOT_SELF_CONTROL env not set to 1' };
-  }
+  if (sc?.masterEnabled === false) return { allowed: false, reason: 'masterEnabled=false' };
+  if (sc?.autoCleanup?.enabled === false) return { allowed: false, reason: 'autoCleanup.enabled=false' };
   return { allowed: true };
+}
+
+async function loadKillSwitch() {
+  try {
+    const mod = await import('../../lib/learning/kill-switch.js');
+    return {
+      isKillSwitchTripped: mod.isKillSwitchTripped || (async () => false),
+      recordFailure: mod.recordFailure || (async () => undefined),
+    };
+  } catch {
+    return {
+      isKillSwitchTripped: async () => false,
+      recordFailure: async () => undefined,
+    };
+  }
+}
+
+async function loadFirstRunGuard() {
+  try {
+    const mod = await import('../../lib/learning/first-run-guard.js');
+    return {
+      shouldObserveOnly: mod.shouldObserveOnly || (async () => ({ shouldObserve: false, mode: 'active' })),
+      bumpRunCounter: mod.bumpRunCounter || (async () => undefined),
+    };
+  } catch {
+    return {
+      shouldObserveOnly: async () => ({ shouldObserve: false, mode: 'active' }),
+      bumpRunCounter: async () => undefined,
+    };
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -105,12 +146,27 @@ export async function runAutoCleanup(deps) {
     guard = { snapshot, rollback },
     classify = classifyDiff,
     trail = recordDecision,
+    killSwitch,
+    firstRunGuard,
   } = deps;
 
+  // Gate 1: explicit opt-out.
   const gate = checkGates(config, env);
   if (!gate.allowed) {
     logger.log(`auto-cleanup: skipped — ${gate.reason}`);
     return { ran: false, reason: gate.reason };
+  }
+
+  // Gate 2: kill switch.
+  const ks = killSwitch || (await loadKillSwitch());
+  if (await ks.isKillSwitchTripped(config)) {
+    logger.log('auto-cleanup: skipped — kill-switch tripped');
+    await trail({
+      subsystem: 'auto-cleanup',
+      action: 'refused',
+      reason: 'kill-switch tripped',
+    });
+    return { ran: false, reason: 'kill-switch tripped' };
   }
 
   const cleanup = config.ago.selfControl.autoCleanup;
@@ -120,51 +176,88 @@ export async function runAutoCleanup(deps) {
     return { ran: false, reason: 'no tools configured' };
   }
 
-  const snap = await guard.snapshot({ cwd });
+  // Gate 3: first-run guard. Observe-only = run tools but always rollback and
+  // log a `would-cleanup` decision (so we see what it *would* do).
+  const frg = firstRunGuard || (await loadFirstRunGuard());
+  const { shouldObserve, mode } = await frg.shouldObserveOnly('autoCleanup', config);
+  await frg.bumpRunCounter('autoCleanup', config);
 
-  // Execute each deterministic fix tool.
-  for (const tool of tools) {
-    const res = await runner(tool.cmd, tool.args, cwd);
-    if (res.code !== 0) {
-      logger.log(`auto-cleanup: tool exited ${res.code} — ${(res.stderr || '').trim()}`);
+  try {
+    const snap = await guard.snapshot({ cwd });
+
+    // Execute each deterministic fix tool.
+    for (const tool of tools) {
+      const res = await runner(tool.cmd, tool.args, cwd);
+      if (res.code !== 0) {
+        logger.log(`auto-cleanup: tool exited ${res.code} — ${(res.stderr || '').trim()}`);
+      }
     }
-  }
 
-  const diff = await gitOps.collectDiff(cwd);
-  if (diff.files.length === 0) {
-    logger.log('auto-cleanup: no changes produced');
-    return { ran: true, changed: 0 };
-  }
+    const diff = await gitOps.collectDiff(cwd);
+    if (diff.files.length === 0) {
+      logger.log('auto-cleanup: no changes produced');
+      return { ran: true, changed: 0 };
+    }
 
-  // Cap file count per run.
-  if (diff.files.length > maxFiles) {
-    diff.files = diff.files.slice(0, maxFiles);
-  }
+    // Cap file count per run.
+    if (diff.files.length > maxFiles) {
+      diff.files = diff.files.slice(0, maxFiles);
+    }
 
-  const classification = classify(diff);
-  if (classification.level !== 'low') {
-    const rb = await guard.rollback(snap, { cwd });
+    const classification = classify(diff);
+
+    // Observe-only: always rollback, record would-cleanup intent.
+    if (shouldObserve) {
+      const rb = await guard.rollback(snap, { cwd });
+      await trail({
+        subsystem: 'auto-cleanup',
+        action: 'would-cleanup',
+        reason: `first-run observe mode (${mode || 'observe'})`,
+        outputs: {
+          files: diff.files.map((f) => f.path),
+          level: classification.level,
+          reverted: rb.reverted,
+        },
+      });
+      logger.log(`auto-cleanup: observe-only — would format ${diff.files.length} files`);
+      return {
+        ran: false,
+        reason: 'first-run-observe-mode',
+        observe: true,
+        changed: diff.files.length,
+        rolledBack: rb.reverted,
+        classification,
+      };
+    }
+
+    // Critical blocker: any non-low classification forces rollback.
+    if (classification.level !== 'low') {
+      const rb = await guard.rollback(snap, { cwd });
+      await trail({
+        subsystem: 'auto-cleanup',
+        action: 'rolled-back',
+        reason: `non-low classification: ${classification.level}`,
+        outputs: { reverted: rb.reverted, level: classification.level },
+      });
+      return { ran: true, changed: diff.files.length, rolledBack: true, classification };
+    }
+
+    if (dryRun) {
+      const rb = await guard.rollback(snap, { cwd });
+      return { ran: true, changed: diff.files.length, dryRun: true, rolledBack: rb.reverted };
+    }
+
     await trail({
       subsystem: 'auto-cleanup',
-      action: 'rolled-back',
-      reason: `non-low classification: ${classification.level}`,
-      outputs: { reverted: rb.reverted, level: classification.level },
+      action: 'applied',
+      reason: `${diff.files.length} files formatted`,
+      outputs: { files: diff.files.map((f) => f.path) },
     });
-    return { ran: true, changed: diff.files.length, rolledBack: true, classification };
+    return { ran: true, changed: diff.files.length, rolledBack: false, classification };
+  } catch (err) {
+    await ks.recordFailure({ feature: 'autoCleanup', error: err.message }, config);
+    throw err;
   }
-
-  if (dryRun) {
-    const rb = await guard.rollback(snap, { cwd });
-    return { ran: true, changed: diff.files.length, dryRun: true, rolledBack: rb.reverted };
-  }
-
-  await trail({
-    subsystem: 'auto-cleanup',
-    action: 'applied',
-    reason: `${diff.files.length} files formatted`,
-    outputs: { files: diff.files.map((f) => f.path) },
-  });
-  return { ran: true, changed: diff.files.length, rolledBack: false, classification };
 }
 
 // ---------------------------------------------------------------------------

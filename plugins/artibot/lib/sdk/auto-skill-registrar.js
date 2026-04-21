@@ -2,12 +2,13 @@
  * Auto Skill Registrar — AGO Self-Control Track 3.
  *
  * Promotes auto-researched skills from a staging area into the official
- * `skills/` directory after a configurable cool-down period. Every promotion
- * passes through a triple safety gate:
+ * `skills/` directory after a configurable cool-down period. Self-control is
+ * ON by default. The user may opt out via config. Additional safety:
  *
- *   1. masterEnabled === true                   (ago.selfControl.masterEnabled)
- *   2. autoSkillRegister.enabled === true       (per-module opt-in)
- *   3. env ARTIBOT_SELF_CONTROL === '1'         (operator consent)
+ *   1. masterEnabled respected (user opt-out)
+ *   2. autoSkillRegister.enabled respected (per-feature opt-out)
+ *   3. Kill switch (auto-OFF after 3 critical failures in 24h)
+ *   4. First-Run Guard (first 5 runs observe-only)
  *
  * The staging area lives under <pluginRoot>/runtime/skills-staging/<name>/,
  * which is ignored by git. Promotion reuses `createSkill().commit()` from
@@ -43,23 +44,66 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000;
 // ---------------------------------------------------------------------------
 
 /**
- * Check whether the triple safety gate is open.
+ * Check whether the user has opted out of auto-skill-registration.
+ * Self-control is ON by default — only explicit `false` opts out.
+ *
  * @param {object} config - artibot.config.json
- * @param {NodeJS.ProcessEnv} [env]
  * @returns {{allowed: boolean, reason?: string}}
  */
-export function isGateOpen(config, env = process.env) {
+export function isGateOpen(config) {
   const sc = config?.ago?.selfControl;
-  if (!sc || sc.masterEnabled !== true) {
+  if (sc && sc.masterEnabled === false) {
     return { allowed: false, reason: 'master-disabled' };
   }
-  if (sc.autoSkillRegister?.enabled !== true) {
+  if (sc?.autoSkillRegister?.enabled === false) {
     return { allowed: false, reason: 'module-disabled' };
   }
-  if (env.ARTIBOT_SELF_CONTROL !== '1') {
-    return { allowed: false, reason: 'env-not-set' };
-  }
   return { allowed: true };
+}
+
+/**
+ * Check the dynamic kill-switch. Module import is tolerant to missing file.
+ * @param {object} config
+ * @param {{pluginRoot?: string}} [opts]
+ * @returns {Promise<boolean>}
+ */
+async function isKillSwitchActive(config, opts = {}) {
+  try {
+    const mod = await import('../learning/kill-switch.js');
+    return await mod.isKillSwitchTripped(config, { ...opts, feature: 'auto-skill-register' });
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Evaluate first-run guard state. Tolerant to missing module.
+ * @param {object} config
+ * @param {{pluginRoot?: string}} [opts]
+ * @returns {Promise<boolean>} true when still in observe-only mode.
+ */
+async function isObserveOnly(config, opts = {}) {
+  try {
+    const mod = await import('../learning/first-run-guard.js');
+    const state = await mod.shouldObserveOnly('auto-skill-register', config, opts);
+    await mod.bumpRunCounter('auto-skill-register', config, opts);
+    return Boolean(state?.shouldObserve);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Report a critical failure to the kill switch (best-effort).
+ * @param {string} error
+ * @param {object} config
+ * @param {{pluginRoot?: string}} [opts]
+ */
+async function recordCriticalFailure(error, config, opts = {}) {
+  try {
+    const mod = await import('../learning/kill-switch.js');
+    await mod.recordFailure({ feature: 'auto-skill-register', error }, config, opts);
+  } catch { /* ignore */ }
 }
 
 /**
@@ -152,8 +196,11 @@ export async function stageSkill(skillSpec, options) {
   const config = options?.config || {};
   if (!pluginRoot) return { staged: false, reason: 'invalid-args' };
 
-  const gate = isGateOpen(config, process.env);
+  const gate = isGateOpen(config);
   if (!gate.allowed) return { staged: false, reason: gate.reason };
+  if (await isKillSwitchActive(config, { pluginRoot })) {
+    return { staged: false, reason: 'kill-switch-tripped' };
+  }
 
   const { stagingDays, stagingPath, minConfidence } = resolveOptions(config);
   const confidence = Number.isFinite(skillSpec?.confidence) ? skillSpec.confidence : 0;
@@ -164,8 +211,10 @@ export async function stageSkill(skillSpec, options) {
   const skill = createSkill(skillSpec);
   if (!skill.valid) return { staged: false, reason: 'invalid-spec', errors: skill.errors };
 
+  // DATA POLICY scan #1 (staging).
   const policyWarnings = scanDataPolicyViolations(skillSpec.body);
   if (policyWarnings.length > 0) {
+    await recordCriticalFailure('data-policy-violation at staging', config, { pluginRoot });
     return { staged: false, reason: 'data-policy-violation', errors: policyWarnings };
   }
 
@@ -174,9 +223,18 @@ export async function stageSkill(skillSpec, options) {
     return { staged: false, reason: 'already-staged' };
   }
 
+  const observeOnly = await isObserveOnly(config, { pluginRoot });
   const nowMs = Number.isFinite(options?.now) ? options.now : Date.now();
   const stagedAt = new Date(nowMs).toISOString();
   const scheduledPromotionAt = new Date(nowMs + stagingDays * MS_PER_DAY).toISOString();
+
+  if (observeOnly) {
+    return {
+      staged: false,
+      reason: 'observe-only',
+      would: { stagingPath: dir, scheduledPromotionAt },
+    };
+  }
 
   await mkdir(dir, { recursive: true });
   await writeFile(path.join(dir, 'SKILL.md'), skill.skillMd, 'utf-8');
@@ -305,8 +363,12 @@ export async function promoteRipened(options) {
   const out = { promoted: [], pending: [], rejected: [], skipped: [] };
   if (!pluginRoot) return { ...out, reason: 'invalid-args' };
 
-  const gate = isGateOpen(config, process.env);
+  const gate = isGateOpen(config);
   if (!gate.allowed) return { ...out, reason: gate.reason };
+  if (await isKillSwitchActive(config, { pluginRoot })) {
+    return { ...out, reason: 'kill-switch-tripped' };
+  }
+  const observeOnly = await isObserveOnly(config, { pluginRoot });
 
   const { stagingPath, minConfidence } = resolveOptions(config);
   const rootDir = path.join(pluginRoot, stagingPath);
@@ -320,10 +382,18 @@ export async function promoteRipened(options) {
     const decision = await evaluateStaged(pluginRoot, stagingPath, entry.name, minConfidence, nowMs);
     if (decision.action === 'pending') { out.pending.push(decision.skillName); continue; }
     if (decision.action === 'reject') { out.rejected.push(decision.skillName); continue; }
+    if (observeOnly) { out.pending.push(decision.skillName); continue; }
     const result = await promoteOne(pluginRoot, stagingPath, decision.skillName);
-    if (result.promoted) out.promoted.push(decision.skillName);
-    else out.rejected.push(decision.skillName);
+    if (result.promoted) {
+      out.promoted.push(decision.skillName);
+    } else {
+      out.rejected.push(decision.skillName);
+      if (result.reason === 'data-policy-violation') {
+        await recordCriticalFailure('data-policy-violation at promote', config, { pluginRoot });
+      }
+    }
   }
+  if (observeOnly) out.reason = 'observe-only';
   return out;
 }
 

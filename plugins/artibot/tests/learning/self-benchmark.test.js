@@ -1,7 +1,45 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import os from 'node:os';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const RUNNER_PATH = path.resolve(
+  __dirname,
+  '..',
+  '..',
+  'scripts',
+  'cron',
+  'self-benchmark-runner.js',
+);
+const PLUGIN_ROOT = path.resolve(__dirname, '..', '..');
+
+/**
+ * Run the self-benchmark cron runner in a child process with a custom
+ * ARTIBOT_PLUGIN_ROOT so it reads our fixture config. We use --dry-run
+ * to guarantee no disk mutations inside PLUGIN_ROOT.
+ *
+ * @param {string} root  pluginRoot fixture
+ * @returns {{code: number, stdout: string, stderr: string}}
+ */
+function runRunner(root) {
+  const result = spawnSync(
+    process.execPath,
+    [RUNNER_PATH, '--dry-run'],
+    {
+      cwd: root,
+      env: { ...process.env, CLAUDE_PLUGIN_ROOT: root },
+      encoding: 'utf8',
+    },
+  );
+  return {
+    code: result.status ?? -1,
+    stdout: result.stdout ?? '',
+    stderr: result.stderr ?? '',
+  };
+}
 
 import {
   clamp10,
@@ -357,3 +395,100 @@ describe('self-benchmark/runSelfBenchmark', () => {
     expect(totalScore).toBeLessThanOrEqual(100);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Wave-2 cron runner gates (default-ON + kill-switch integration)
+// ---------------------------------------------------------------------------
+
+describe('self-benchmark-runner / Wave-2 gates', () => {
+  /**
+   * Write a minimal config fixture into `root/artibot.config.json` then run
+   * the cron runner in a child process using PLUGIN_ROOT's actual lib/
+   * (we avoid rebuilding the whole plugin tree — only the config is needed
+   * for the gate short-circuits we exercise here).
+   *
+   * @param {object} config
+   * @param {object} [ksState] optional kill-switch JSON
+   */
+  async function prepFixture(config, ksState) {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'sb-runner-'));
+    await writeFile(path.join(root, 'artibot.config.json'), JSON.stringify(config));
+    if (ksState) {
+      await mkdir(path.join(root, 'runtime'), { recursive: true });
+      await writeFile(
+        path.join(root, 'runtime', 'kill-switch.json'),
+        JSON.stringify(ksState),
+      );
+    }
+    return root;
+  }
+
+  it('default enabled=true: runner reaches benchmark (no "disabled" short-circuit) with empty config', async () => {
+    const root = await prepFixture({});
+    try {
+      const { stdout } = runRunner(root);
+      // With empty config we hit Wave-2 defaults (all ON). Runner may fail
+      // later because fixture does not have full plugin tree — we only assert
+      // it did NOT short-circuit on the gates.
+      expect(stdout).not.toContain('ago.selfBenchmark.enabled=false');
+      expect(stdout).not.toContain('masterEnabled=false');
+      expect(stdout).not.toContain('kill-switch tripped');
+    } finally {
+      await rm(root, { recursive: true, force: true }).catch(() => {});
+    }
+  });
+
+  it('masterEnabled=false short-circuits immediately', async () => {
+    const root = await prepFixture({
+      ago: { selfControl: { masterEnabled: false } },
+    });
+    try {
+      const { stdout, code } = runRunner(root);
+      expect(code).toBe(0);
+      expect(stdout).toContain('masterEnabled=false');
+    } finally {
+      await rm(root, { recursive: true, force: true }).catch(() => {});
+    }
+  });
+
+  it('selfBenchmark.enabled=false short-circuits', async () => {
+    const root = await prepFixture({
+      ago: {
+        selfControl: { masterEnabled: true },
+        selfBenchmark: { enabled: false },
+      },
+    });
+    try {
+      const { stdout, code } = runRunner(root);
+      expect(code).toBe(0);
+      expect(stdout).toContain('ago.selfBenchmark.enabled=false');
+    } finally {
+      await rm(root, { recursive: true, force: true }).catch(() => {});
+    }
+  });
+
+  it('tripped kill-switch for self-benchmark short-circuits', async () => {
+    const root = await prepFixture(
+      {}, // empty config → wave-2 defaults ON
+      {
+        features: {
+          'self-benchmark': {
+            failures: [],
+            trippedAt: new Date().toISOString(),
+          },
+        },
+      },
+    );
+    try {
+      const { stdout, code } = runRunner(root);
+      expect(code).toBe(0);
+      expect(stdout).toContain('kill-switch tripped for self-benchmark');
+    } finally {
+      await rm(root, { recursive: true, force: true }).catch(() => {});
+    }
+  });
+});
+
+// Re-export PLUGIN_ROOT ensures the top-level constant is not tree-shaken
+// away and surfaces if someone deletes the reference above.
+export const _PLUGIN_ROOT_REF = PLUGIN_ROOT;

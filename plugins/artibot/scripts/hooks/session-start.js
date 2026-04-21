@@ -203,6 +203,58 @@ async function main() {
     // Non-critical: macro suggestions surfacing is advisory-only.
   }
 
+  // AGO Self-Control Wave 2: First-Run Safe Mode + welcome + active-mode banner.
+  // Non-blocking: if the module or state file is unavailable, skip silently.
+  // Only emits banners when masterEnabled is true (default).
+  try {
+    const masterEnabled = config?.ago?.selfControl?.masterEnabled !== false;
+    if (masterEnabled) {
+      const firstRunPath = path.join(env.pluginRoot, 'lib', 'learning', 'first-run-guard.js');
+      const { getFirstRunState } = await import(toFileUrl(firstRunPath));
+      const firstRunState = await getFirstRunState(config);
+      const threshold = config?.ago?.selfControl?.firstRunMode?.observeRuns || 5;
+
+      // First-install welcome — shown once (marker under runtime/).
+      const runtimeDir = path.join(env.pluginRoot, 'runtime');
+      const welcomeMarker = path.join(runtimeDir, 'self-control-welcomed.marker');
+      if (!existsSync(welcomeMarker)) {
+        lines.push(
+          '[artibot:welcome] Artibot은 기본 ON 모드로 시작됐어요. 처음 5회는 관찰만 하며 학습합니다. 끄려면 artibot.config.json의 ago.selfControl.masterEnabled=false.',
+        );
+        try {
+          mkdirSync(runtimeDir, { recursive: true });
+          writeFileSync(welcomeMarker, new Date().toISOString() + '\n', 'utf-8');
+        } catch {
+          // ignore marker write failure
+        }
+      }
+
+      if (firstRunState.mode === 'observe') {
+        lines.push(
+          `[artibot:first-run-mode runs=${firstRunState.runsSoFar}/${threshold} — 자가 통제가 관찰 모드입니다. ${threshold}회 실행 후 자동 활성화됩니다.]`,
+        );
+      } else {
+        lines.push('[artibot:active-mode] 자가 관리 엔진 활성 상태 (masterEnabled=true)');
+      }
+    }
+  } catch {
+    // Non-critical: first-run status is advisory-only.
+  }
+
+  // AGO Self-Control Wave 2: Emergency Kill Switch status.
+  try {
+    const ksPath = path.join(env.pluginRoot, 'lib', 'learning', 'kill-switch.js');
+    const { getKillSwitchState } = await import(toFileUrl(ksPath));
+    const ksState = await getKillSwitchState(config);
+    if (ksState.tripped) {
+      lines.push(
+        `[artibot:kill-switch-tripped — 연속 실패로 자가 통제가 일시 중지됐습니다. /artibot:reset-kill-switch로 재활성하세요.]`,
+      );
+    }
+  } catch {
+    // Non-critical: kill-switch status is advisory-only.
+  }
+
   // Non-blocking update notification — any error is swallowed.
   // Wrapped with a 2000ms outer timeout so the update check never consumes
   // more than 2 seconds, leaving ample headroom within the 5000ms hook limit.

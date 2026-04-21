@@ -342,21 +342,64 @@ const AUTO_MIN_CONFIDENCE = 0.85;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
- * Evaluate the three opt-in gates for auto-register:
- *   1. `ARTIBOT_SELF_CONTROL` env flag is set
- *   2. `ago.selfControl.masterEnabled === true`
- *   3. `ago.selfControl.autoMacroRegister.enabled === true`
+ * Evaluate opt-out gates for auto-register. Self-control is ON by default;
+ * only explicit `false` opts out. Kill-switch and first-run-guard are checked
+ * separately by the async helpers below.
  *
  * @param {object} config
  * @returns {{ok: true, cfg: object} | {ok: false, reason: string}}
  */
 function evalAutoGate(config) {
-  if (!process.env.ARTIBOT_SELF_CONTROL) return { ok: false, reason: 'env-not-set' };
   const sc = config?.ago?.selfControl;
-  if (!sc || sc.masterEnabled !== true) return { ok: false, reason: 'master-disabled' };
-  const ar = sc.autoMacroRegister;
-  if (!ar || ar.enabled !== true) return { ok: false, reason: 'module-disabled' };
-  return { ok: true, cfg: ar };
+  if (sc && sc.masterEnabled === false) return { ok: false, reason: 'master-disabled' };
+  const ar = sc?.autoMacroRegister;
+  if (ar && ar.enabled === false) return { ok: false, reason: 'module-disabled' };
+  return { ok: true, cfg: ar || {} };
+}
+
+/**
+ * Dynamic kill-switch check. Tolerant to missing module.
+ * @param {object} config
+ * @param {{pluginRoot?: string}} [opts]
+ * @returns {Promise<boolean>}
+ */
+async function isAutoMacroKillSwitchActive(config, opts = {}) {
+  try {
+    const mod = await import('./kill-switch.js');
+    return await mod.isKillSwitchTripped(config, { ...opts, feature: 'auto-macro-register' });
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * First-run guard. Increments counter each call. Tolerant to missing module.
+ * @param {object} config
+ * @param {{pluginRoot?: string}} [opts]
+ * @returns {Promise<boolean>}
+ */
+async function isAutoMacroObserveOnly(config, opts = {}) {
+  try {
+    const mod = await import('./first-run-guard.js');
+    const state = await mod.shouldObserveOnly('auto-macro-register', config, opts);
+    await mod.bumpRunCounter('auto-macro-register', config, opts);
+    return Boolean(state?.shouldObserve);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Report critical failure to kill switch (best-effort, never throws).
+ * @param {string} error
+ * @param {object} config
+ * @param {{pluginRoot?: string}} [opts]
+ */
+async function recordAutoMacroFailure(error, config, opts = {}) {
+  try {
+    const mod = await import('./kill-switch.js');
+    await mod.recordFailure({ feature: 'auto-macro-register', error }, config, opts);
+  } catch { /* ignore */ }
 }
 
 /**
@@ -450,6 +493,9 @@ export async function tryAutoRegister(suggestion, options) {
 
   const gate = evalAutoGate(config);
   if (!gate.ok) return { registered: false, reason: gate.reason };
+  if (await isAutoMacroKillSwitchActive(config, { pluginRoot })) {
+    return { registered: false, reason: 'kill-switch-tripped' };
+  }
 
   const precheck = precheckAutoRegister(suggestion, gate.cfg);
   if (precheck) return precheck;
@@ -457,6 +503,7 @@ export async function tryAutoRegister(suggestion, options) {
   const filePath = resolveSuggestionsPath(pluginRoot, config);
   const store = loadStore(filePath);
 
+  // 30-day rejection window remains a hard invariant even under default-ON.
   const windowDays = Number.isFinite(gate.cfg.noRejectionWindowDays)
     ? gate.cfg.noRejectionWindowDays
     : 30;
@@ -464,8 +511,18 @@ export async function tryAutoRegister(suggestion, options) {
     return { registered: false, reason: 'recent-rejection' };
   }
 
+  const observeOnly = await isAutoMacroObserveOnly(config, { pluginRoot });
+  if (observeOnly) {
+    return { registered: false, reason: 'observe-only' };
+  }
+
   const write = writeMacroEntry(pluginRoot, suggestion, now);
-  if (write.reason) return write;
+  if (write.reason) {
+    if (write.reason === 'forbidden-macro-id' || write.reason === 'config-unreadable') {
+      await recordAutoMacroFailure(write.reason, config, { pluginRoot });
+    }
+    return write;
+  }
 
   markStoreApproved(filePath, store, suggestion.id, write.macroId, now);
   return { registered: true, macroId: write.macroId };
@@ -486,6 +543,9 @@ export async function sweepAutoRegister(options) {
   const gate = evalAutoGate(config);
   if (!gate.ok) return { registered: [], skipped: [], reason: gate.reason };
   if (!pluginRoot) return { registered: [], skipped: [], reason: 'invalid-args' };
+  if (await isAutoMacroKillSwitchActive(config, { pluginRoot })) {
+    return { registered: [], skipped: [], reason: 'kill-switch-tripped' };
+  }
 
   const filePath = resolveSuggestionsPath(pluginRoot, config);
   const store = loadStore(filePath);

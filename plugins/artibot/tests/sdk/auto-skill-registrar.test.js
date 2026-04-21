@@ -22,13 +22,6 @@ import {
 /** @type {string} */
 let pluginRoot;
 
-function enableGate() {
-  process.env.ARTIBOT_SELF_CONTROL = '1';
-}
-function disableGate() {
-  delete process.env.ARTIBOT_SELF_CONTROL;
-}
-
 function makeConfig(overrides = {}) {
   return {
     ago: {
@@ -41,9 +34,24 @@ function makeConfig(overrides = {}) {
           minConfidence: 0.85,
           ...overrides,
         },
+        // Disable first-run observe mode for tests so normal flows exercise
+        // the full promotion/staging path.
+        firstRunMode: { enabled: false },
       },
     },
   };
+}
+
+function seedFirstRunBypass(root) {
+  // Pre-write state file with runs already past threshold so any accidental
+  // invocation of the guard returns active mode.
+  const dir = path.join(root, 'runtime');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    path.join(dir, 'first-run-state.json'),
+    JSON.stringify({ globalRuns: 999, features: {}, transitions: [] }),
+    'utf-8',
+  );
 }
 
 function validSpec(extra = {}) {
@@ -65,11 +73,10 @@ beforeEach(() => {
     JSON.stringify({ version: '0.0.0' }, null, 2),
     'utf-8',
   );
-  enableGate();
+  seedFirstRunBypass(pluginRoot);
 });
 
 afterEach(() => {
-  disableGate();
   rmSync(pluginRoot, { recursive: true, force: true });
 });
 
@@ -77,7 +84,7 @@ afterEach(() => {
 // Gate
 // ---------------------------------------------------------------------------
 
-describe('triple safety gate', () => {
+describe('user opt-out gate (default-on)', () => {
   it('refuses staging when masterEnabled is false', async () => {
     const cfg = makeConfig();
     cfg.ago.selfControl.masterEnabled = false;
@@ -86,18 +93,48 @@ describe('triple safety gate', () => {
     expect(r.reason).toBe('master-disabled');
   });
 
-  it('refuses staging when module is disabled', async () => {
+  it('refuses staging when feature is disabled', async () => {
     const cfg = makeConfig({ enabled: false });
     const r = await stageSkill(validSpec(), { pluginRoot, config: cfg });
     expect(r.staged).toBe(false);
     expect(r.reason).toBe('module-disabled');
   });
 
-  it('refuses staging when env var is missing', async () => {
-    disableGate();
+  it('proceeds with default config (no env var required)', async () => {
+    const r = await stageSkill(validSpec(), { pluginRoot, config: makeConfig() });
+    expect(r.staged).toBe(true);
+  });
+
+  it('refuses when kill-switch is tripped', async () => {
+    // Seed a tripped kill-switch state directly.
+    const ksPath = path.join(pluginRoot, 'runtime', 'kill-switch.json');
+    writeFileSync(
+      ksPath,
+      JSON.stringify({
+        features: {
+          'auto-skill-register': {
+            failures: [{ at: Date.now(), error: 'seed' }],
+            trippedAt: new Date().toISOString(),
+          },
+        },
+      }),
+      'utf-8',
+    );
     const r = await stageSkill(validSpec(), { pluginRoot, config: makeConfig() });
     expect(r.staged).toBe(false);
-    expect(r.reason).toBe('env-not-set');
+    expect(r.reason).toBe('kill-switch-tripped');
+  });
+
+  it('first-run observe mode stages nothing and reports would-stage', async () => {
+    // Unseed the bypass so we fall back into observe-only for this test.
+    rmSync(path.join(pluginRoot, 'runtime', 'first-run-state.json'), { force: true });
+    const cfg = makeConfig();
+    // Re-enable firstRunMode explicitly (threshold 5).
+    cfg.ago.selfControl.firstRunMode = { enabled: true, observeRuns: 5 };
+    const r = await stageSkill(validSpec(), { pluginRoot, config: cfg });
+    expect(r.staged).toBe(false);
+    expect(r.reason).toBe('observe-only');
+    expect(r.would?.stagingPath).toContain('skills-staging');
   });
 });
 
@@ -257,10 +294,35 @@ describe('promoteRipened', () => {
     expect(r.rejected).toContain('auto-demo');
   });
 
-  it('returns reason when gate is closed', async () => {
-    disableGate();
-    const r = await promoteRipened({ pluginRoot, config: makeConfig() });
+  it('returns reason when gate is closed (user opted out)', async () => {
+    const cfg = makeConfig();
+    cfg.ago.selfControl.masterEnabled = false;
+    const r = await promoteRipened({ pluginRoot, config: cfg });
     expect(r.promoted).toHaveLength(0);
-    expect(r.reason).toBe('env-not-set');
+    expect(r.reason).toBe('master-disabled');
+  });
+
+  it('returns kill-switch-tripped when tripped mid-sweep', async () => {
+    const t0 = Date.parse('2026-04-20T00:00:00Z');
+    await stageSkill(validSpec(), { pluginRoot, config: makeConfig(), now: t0 });
+    writeFileSync(
+      path.join(pluginRoot, 'runtime', 'kill-switch.json'),
+      JSON.stringify({
+        features: {
+          'auto-skill-register': {
+            failures: [{ at: t0, error: 'seed' }],
+            trippedAt: new Date(t0).toISOString(),
+          },
+        },
+      }),
+      'utf-8',
+    );
+    const r = await promoteRipened({
+      pluginRoot,
+      config: makeConfig(),
+      now: t0 + 2 * 24 * 60 * 60 * 1000,
+    });
+    expect(r.promoted).toHaveLength(0);
+    expect(r.reason).toBe('kill-switch-tripped');
   });
 });

@@ -2,17 +2,20 @@
  * Skill Lifecycle Autopilot — AGO Self-Control Module 6.
  *
  * Analyzes skill usage statistics to identify deprecation and promotion
- * candidates. Applies decisions only when three gates are open:
- *   1. `ago.selfControl.masterEnabled === true`
- *   2. `ago.selfControl.autoLifecycle.enabled === true`
- *   3. `ARTIBOT_SELF_CONTROL=1` environment variable
+ * candidates. Self-control is ON by default; the user opts out via config:
+ *   - `ago.selfControl.masterEnabled: false`
+ *   - `ago.selfControl.autoLifecycle.enabled: false`
+ *
+ * Additional safety layers (never weakened):
+ *   - PROTECTED_SKILLS are NEVER deprecated, regardless of usage stats.
+ *   - `MIN_GRACE_DAYS = 14` is an immutable constant; deletion is blocked
+ *     until the grace period elapses.
+ *   - Kill switch auto-OFF after 3 critical failures in 24h.
+ *   - First 5 runs are observe-only (no disk mutation).
  *
  * Deprecation is two-phase: mark frontmatter with `deprecated: true` +
  * `deprecatedAt`, then actual deletion only after `graceDays` (14) elapse.
  * Promotion adds `priority: high` to frontmatter — no code changes.
- *
- * Protected core skills are never deprecated. All decisions are written to
- * the Decision Trail for explainability.
  *
  * Zero runtime deps. ESM only.
  * @module lib/learning/skill-lifecycle-autopilot
@@ -52,24 +55,69 @@ const DEPRECATE_WINDOW_DAYS = 14;
 // ---------------------------------------------------------------------------
 
 /**
- * Check that all three safety gates are open.
+ * Check user-opt-out gates. Self-control is ON by default; only explicit
+ * `false` opts out. PROTECTED_SKILLS + MIN_GRACE_DAYS remain hard invariants
+ * enforced inside the mutation helpers regardless of gate state.
  *
  * @param {object} [config]
- * @param {object} [env]
+ * @param {object} [_env] - kept for signature compatibility; unused.
  * @returns {{open: boolean, reason?: string}}
  */
-export function checkGates(config, env = process.env) {
+export function checkGates(config, _env) {
   const sc = config?.ago?.selfControl;
-  if (!sc || sc.masterEnabled !== true) {
+  if (sc && sc.masterEnabled === false) {
     return { open: false, reason: 'masterEnabled=false' };
   }
-  if (!sc.autoLifecycle || sc.autoLifecycle.enabled !== true) {
+  if (sc?.autoLifecycle?.enabled === false) {
     return { open: false, reason: 'autoLifecycle.enabled=false' };
   }
-  if (env.ARTIBOT_SELF_CONTROL !== '1') {
-    return { open: false, reason: 'env ARTIBOT_SELF_CONTROL!=1' };
-  }
   return { open: true };
+}
+
+// ---------------------------------------------------------------------------
+// Safety helpers (kill-switch + first-run guard; tolerant to missing modules)
+// ---------------------------------------------------------------------------
+
+/**
+ * @param {object} config
+ * @param {{pluginRoot?: string}} [opts]
+ * @returns {Promise<boolean>}
+ */
+async function isLifecycleKillSwitchActive(config, opts = {}) {
+  try {
+    const mod = await import('./kill-switch.js');
+    return await mod.isKillSwitchTripped(config, { ...opts, feature: 'auto-lifecycle' });
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * @param {object} config
+ * @param {{pluginRoot?: string}} [opts]
+ * @returns {Promise<boolean>}
+ */
+async function isLifecycleObserveOnly(config, opts = {}) {
+  try {
+    const mod = await import('./first-run-guard.js');
+    const state = await mod.shouldObserveOnly('auto-lifecycle', config, opts);
+    await mod.bumpRunCounter('auto-lifecycle', config, opts);
+    return Boolean(state?.shouldObserve);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * @param {string} error
+ * @param {object} config
+ * @param {{pluginRoot?: string}} [opts]
+ */
+async function recordLifecycleFailure(error, config, opts = {}) {
+  try {
+    const mod = await import('./kill-switch.js');
+    await mod.recordFailure({ feature: 'auto-lifecycle', error }, config, opts);
+  } catch { /* ignore */ }
 }
 
 // ---------------------------------------------------------------------------
@@ -345,11 +393,15 @@ function defaultClaudeDir() {
 export async function deprecateSkill(skillName, options = {}) {
   const gate = checkGates(options.config, options.env);
   if (!gate.open) return { applied: false, reason: `gate-closed: ${gate.reason}` };
+  // Hard invariant — PROTECTED_SKILLS never deprecated, gate state irrelevant.
   if (PROTECTED_SKILLS.includes(skillName)) {
     return { applied: false, reason: 'protected-skill' };
   }
-
   const pluginRoot = options.pluginRoot || getPluginRoot();
+  if (await isLifecycleKillSwitchActive(options.config, { pluginRoot })) {
+    return { applied: false, reason: 'kill-switch-tripped' };
+  }
+
   const now = typeof options.now === 'function' ? options.now() : new Date();
   const filePath = path.join(pluginRoot, 'skills', skillName, 'SKILL.md');
   const source = await readSkillFile(pluginRoot, skillName);
@@ -358,6 +410,17 @@ export async function deprecateSkill(skillName, options = {}) {
   if (!fm) return { applied: false, reason: 'no-frontmatter' };
 
   const deprecatedAt = now.toISOString().slice(0, 10);
+  if (await isLifecycleObserveOnly(options.config, { pluginRoot })) {
+    await recordDecision({
+      subsystem: 'skill-lifecycle-autopilot',
+      action: 'would-deprecate',
+      reason: 'first-run observe-only',
+      inputs: { skill: skillName },
+      outputs: { deprecatedAt, graceDays: MIN_GRACE_DAYS },
+    });
+    return { applied: false, reason: 'observe-only', path: filePath };
+  }
+
   let nextFm = upsertFrontmatterKey(fm.frontmatter, 'deprecated', 'true');
   nextFm = upsertFrontmatterKey(nextFm, 'deprecatedAt', `"${deprecatedAt}"`);
   const next = `---\n${nextFm}\n---\n${fm.body}`;
@@ -387,11 +450,25 @@ export async function promoteSkill(skillName, options = {}) {
   if (!gate.open) return { applied: false, reason: `gate-closed: ${gate.reason}` };
 
   const pluginRoot = options.pluginRoot || getPluginRoot();
+  if (await isLifecycleKillSwitchActive(options.config, { pluginRoot })) {
+    return { applied: false, reason: 'kill-switch-tripped' };
+  }
   const filePath = path.join(pluginRoot, 'skills', skillName, 'SKILL.md');
   const source = await readSkillFile(pluginRoot, skillName);
   if (!source) return { applied: false, reason: 'skill-not-found' };
   const fm = splitFrontmatter(source);
   if (!fm) return { applied: false, reason: 'no-frontmatter' };
+
+  if (await isLifecycleObserveOnly(options.config, { pluginRoot })) {
+    await recordDecision({
+      subsystem: 'skill-lifecycle-autopilot',
+      action: 'would-promote',
+      reason: 'first-run observe-only',
+      inputs: { skill: skillName },
+      outputs: { priority: 'high' },
+    });
+    return { applied: false, reason: 'observe-only', path: filePath };
+  }
 
   const nextFm = upsertFrontmatterKey(fm.frontmatter, 'priority', 'high');
   const next = `---\n${nextFm}\n---\n${fm.body}`;
@@ -419,6 +496,7 @@ export async function promoteSkill(skillName, options = {}) {
 export async function finalizeDeprecation(skillName, deprecatedAt, options = {}) {
   const gate = checkGates(options.config, options.env);
   if (!gate.open) return { applied: false, reason: `gate-closed: ${gate.reason}` };
+  // Hard invariants: PROTECTED_SKILLS blocked; MIN_GRACE_DAYS unshortenable.
   if (PROTECTED_SKILLS.includes(skillName)) {
     return { applied: false, reason: 'protected-skill' };
   }
@@ -434,10 +512,25 @@ export async function finalizeDeprecation(skillName, deprecatedAt, options = {})
   }
 
   const pluginRoot = options.pluginRoot || getPluginRoot();
+  if (await isLifecycleKillSwitchActive(options.config, { pluginRoot })) {
+    return { applied: false, reason: 'kill-switch-tripped' };
+  }
+  if (await isLifecycleObserveOnly(options.config, { pluginRoot })) {
+    await recordDecision({
+      subsystem: 'skill-lifecycle-autopilot',
+      action: 'would-finalize',
+      reason: 'first-run observe-only',
+      inputs: { skill: skillName, deprecatedAt },
+      outputs: { elapsedDays: diffDays },
+    });
+    return { applied: false, reason: 'observe-only' };
+  }
+
   const skillDir = path.join(pluginRoot, 'skills', skillName);
   try {
     await fs.rm(skillDir, { recursive: true, force: true });
   } catch (err) {
+    await recordLifecycleFailure(`rm-failed: ${err.message}`, options.config, { pluginRoot });
     return { applied: false, reason: `rm-failed: ${err.message}` };
   }
 
@@ -465,6 +558,10 @@ export async function sweepLifecycle(options = {}) {
   const gate = checkGates(options.config, options.env);
   if (!gate.open) {
     return { deprecated: [], promoted: [], finalized: [], skipped: [{ name: '*', reason: gate.reason }] };
+  }
+  const pluginRoot = options.pluginRoot || getPluginRoot();
+  if (await isLifecycleKillSwitchActive(options.config, { pluginRoot })) {
+    return { deprecated: [], promoted: [], finalized: [], skipped: [{ name: '*', reason: 'kill-switch-tripped' }] };
   }
   const plan = await analyzeLifecycle(options);
   const deprecated = [];

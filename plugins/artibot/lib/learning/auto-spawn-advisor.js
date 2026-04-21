@@ -5,10 +5,17 @@
  * next-session suggestions to `runtime/next-session-suggestions.json`.
  *
  * Key safety constraints (enforced here and by artibot.config.json):
- *   - opt-in only (`ago.autoSpawn.enabled` must be true)
+ *   - Default ON (Wave 2): `ago.autoSpawn.enabled` defaults to true.
+ *     Users can disable globally via `ago.selfControl.masterEnabled=false`
+ *     or per-feature via `ago.autoSpawn.enabled=false`.
+ *   - Kill-switch integration: a tripped kill-switch hard-blocks writes.
  *   - max recursion depth ({@link DEFAULT_MAX_DEPTH}) caps wakeup chains
  *   - each suggestion is inert: `requiresApproval: true`, never auto-executed
  *   - NEVER calls ScheduleWakeup or any spawn API — write-only
+ *
+ * Because this module is observation/suggestion-only, it also runs during
+ * first-run observe mode — the marker file is informational and carries no
+ * execution risk.
  *
  * Detection signals (all optional, graceful on missing files):
  *   - Unresolved TODOs (session transcript markers)
@@ -48,16 +55,23 @@ const VALID_CATEGORIES = new Set([
 
 /**
  * Read config.ago.autoSpawn with defaults, coercing missing fields.
+ *
+ * Wave-2 policy: `enabled` defaults to `true` and `requireOptIn` defaults to
+ * `false` so auto-spawn observation runs by default. Callers still honour
+ * explicit user overrides (false stays false).
+ *
  * @param {object|null|undefined} config
- * @returns {{enabled: boolean, maxDepth: number, minConfidence: number, requireOptIn: boolean}}
+ * @returns {{masterEnabled: boolean, enabled: boolean, maxDepth: number, minConfidence: number, requireOptIn: boolean}}
  */
 export function resolveAutoSpawnConfig(config) {
   const raw = config?.ago?.autoSpawn ?? {};
+  const masterRaw = config?.ago?.selfControl?.masterEnabled;
   return {
-    enabled: Boolean(raw.enabled),
+    masterEnabled: masterRaw !== false,
+    enabled: raw.enabled !== false,
     maxDepth: Number.isFinite(raw.maxDepth) ? raw.maxDepth : DEFAULT_MAX_DEPTH,
     minConfidence: Number.isFinite(raw.minConfidence) ? raw.minConfidence : DEFAULT_MIN_CONFIDENCE,
-    requireOptIn: raw.requireOptIn !== false,
+    requireOptIn: raw.requireOptIn === true,
   };
 }
 
@@ -212,9 +226,29 @@ export async function analyzeNextSession(sessionSummary, options) {
 
   const cfg = resolveAutoSpawnConfig(config);
 
-  // Opt-in gate — absolute hard requirement.
-  if (cfg.requireOptIn && !cfg.enabled) {
+  // Master user opt-out always wins.
+  if (!cfg.masterEnabled) {
+    return { suggestions: [], written: false, reason: 'master-disabled' };
+  }
+
+  // Per-feature opt-out.
+  if (!cfg.enabled) {
+    return { suggestions: [], written: false, reason: 'feature-disabled' };
+  }
+
+  // Legacy strict opt-in path (callers may still set requireOptIn=true).
+  if (cfg.requireOptIn && !(config?.ago?.autoSpawn?.enabled === true)) {
     return { suggestions: [], written: false, reason: 'opt-in-required' };
+  }
+
+  // Kill-switch hard-block (graceful import; never throws if module missing).
+  try {
+    const ks = await import('./kill-switch.js');
+    if (await ks.isKillSwitchTripped(config, { feature: 'auto-spawn', pluginRoot })) {
+      return { suggestions: [], written: false, reason: 'kill-switch-tripped' };
+    }
+  } catch {
+    // Best-effort: missing kill-switch module must not break the advisor.
   }
 
   const summary = sessionSummary ?? {};

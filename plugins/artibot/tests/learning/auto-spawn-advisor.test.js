@@ -28,22 +28,37 @@ function readSuggestionsFile(root) {
 }
 
 describe('auto-spawn-advisor / resolveAutoSpawnConfig', () => {
-  it('returns safe defaults when config is missing', () => {
+  it('returns wave-2 defaults (masterEnabled=true, enabled=true, requireOptIn=false)', () => {
     const cfg = resolveAutoSpawnConfig(undefined);
-    expect(cfg.enabled).toBe(false);
+    expect(cfg.masterEnabled).toBe(true);
+    expect(cfg.enabled).toBe(true);
     expect(cfg.maxDepth).toBe(2);
     expect(cfg.minConfidence).toBe(0.8);
-    expect(cfg.requireOptIn).toBe(true);
+    expect(cfg.requireOptIn).toBe(false);
+  });
+
+  it('respects explicit disable (enabled=false)', () => {
+    const cfg = resolveAutoSpawnConfig({
+      ago: { autoSpawn: { enabled: false } },
+    });
+    expect(cfg.enabled).toBe(false);
+  });
+
+  it('respects master opt-out (selfControl.masterEnabled=false)', () => {
+    const cfg = resolveAutoSpawnConfig({
+      ago: { selfControl: { masterEnabled: false } },
+    });
+    expect(cfg.masterEnabled).toBe(false);
   });
 
   it('respects provided values', () => {
     const cfg = resolveAutoSpawnConfig({
-      ago: { autoSpawn: { enabled: true, maxDepth: 3, minConfidence: 0.9, requireOptIn: false } },
+      ago: { autoSpawn: { enabled: true, maxDepth: 3, minConfidence: 0.9, requireOptIn: true } },
     });
     expect(cfg.enabled).toBe(true);
     expect(cfg.maxDepth).toBe(3);
     expect(cfg.minConfidence).toBe(0.9);
-    expect(cfg.requireOptIn).toBe(false);
+    expect(cfg.requireOptIn).toBe(true);
   });
 });
 
@@ -95,13 +110,66 @@ describe('auto-spawn-advisor / analyzeNextSession', () => {
     rmSync(root, { recursive: true, force: true });
   });
 
-  it('does NOT write when opt-in is missing (default disabled)', async () => {
+  it('writes by default when config is empty (Wave-2 default ON)', async () => {
+    const result = await analyzeNextSession(
+      { testFailures: [{ name: 'foo.test.js' }] },
+      { pluginRoot: root, config: {} },
+    );
+    expect(result.written).toBe(true);
+    expect(result.suggestions.length).toBeGreaterThan(0);
+  });
+
+  it('respects master opt-out (selfControl.masterEnabled=false)', async () => {
+    const result = await analyzeNextSession(
+      { testFailures: [{ name: 'foo.test.js' }] },
+      { pluginRoot: root, config: { ago: { selfControl: { masterEnabled: false } } } },
+    );
+    expect(result.written).toBe(false);
+    expect(result.reason).toBe('master-disabled');
+  });
+
+  it('respects feature opt-out (autoSpawn.enabled=false)', async () => {
+    const result = await analyzeNextSession(
+      { testFailures: [{ name: 'foo.test.js' }] },
+      { pluginRoot: root, config: { ago: { autoSpawn: { enabled: false } } } },
+    );
+    expect(result.written).toBe(false);
+    expect(result.reason).toBe('feature-disabled');
+  });
+
+  it('legacy opt-in gate still works when requireOptIn=true and enabled not explicitly true', async () => {
+    const result = await analyzeNextSession(
+      { testFailures: [{ name: 'foo.test.js' }] },
+      {
+        pluginRoot: root,
+        config: { ago: { autoSpawn: { requireOptIn: true } } },
+      },
+    );
+    // enabled defaults to true but the user forced requireOptIn=true and did not set enabled=true explicitly → opt-in-required
+    expect(result.written).toBe(false);
+    expect(result.reason).toBe('opt-in-required');
+  });
+
+  it('kill-switch trip hard-blocks writes', async () => {
+    // Seed the kill-switch state file so `isKillSwitchTripped` returns true for 'auto-spawn'.
+    const ksDir = path.join(root, 'runtime');
+    mkdirSync(ksDir, { recursive: true });
+    const ksState = {
+      features: {
+        'auto-spawn': {
+          failures: [],
+          trippedAt: new Date().toISOString(),
+        },
+      },
+    };
+    writeFileSync(path.join(ksDir, 'kill-switch.json'), JSON.stringify(ksState), 'utf8');
+
     const result = await analyzeNextSession(
       { testFailures: [{ name: 'foo.test.js' }] },
       { pluginRoot: root, config: {} },
     );
     expect(result.written).toBe(false);
-    expect(result.reason).toBe('opt-in-required');
+    expect(result.reason).toBe('kill-switch-tripped');
   });
 
   it('writes suggestions when enabled and signals present', async () => {

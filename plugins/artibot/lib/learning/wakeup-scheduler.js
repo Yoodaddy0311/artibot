@@ -6,12 +6,15 @@
  * is LLM-context-only and must be invoked (if at all) by the operator or
  * the LLM after surfacing the marker in session-start.
  *
- * 4-gate model (all four must hold, else silently rejected):
- *   1. masterEnabled                  — `ago.selfControl.masterEnabled`
- *   2. autoWakeup.enabled             — `ago.selfControl.autoWakeup.enabled`
- *   3. env ARTIBOT_SELF_CONTROL=1     — explicit operator signal
- *   4. time-window                    — currently "always on" once 1-3 pass
- *                                       (field kept for future schedules)
+ * Wave-2 4-gate model (all four must hold, else silently rejected):
+ *   1. masterEnabled              — `ago.selfControl.masterEnabled` (default true)
+ *   2. autoWakeup.enabled         — `ago.selfControl.autoWakeup.enabled` (default true)
+ *   3. kill-switch not tripped    — `lib/learning/kill-switch.js`
+ *   4. first-run guard allows     — observe mode *still allows* marker writes
+ *                                   because markers are inert/informational.
+ *
+ * The legacy `ARTIBOT_SELF_CONTROL=1` environment gate has been **removed**
+ * in Wave 2: self-control is now default-on and users opt out via config.
  *
  * Further gates (fail-closed):
  *   - rate limit: maxPerHour (default 2)
@@ -59,6 +62,10 @@ function redactString(s) {
 
 /**
  * Resolve autoWakeup config with safe defaults.
+ *
+ * Wave-2 policy: `masterEnabled` and `autoWakeup.enabled` default to **true**
+ * (self-control default-ON). Users opt out by setting either flag to `false`.
+ *
  * @param {object|null|undefined} config
  * @returns {{masterEnabled: boolean, enabled: boolean, maxPerHour: number, maxDepth: number, minDelaySeconds: number}}
  */
@@ -66,8 +73,8 @@ export function resolveWakeupConfig(config) {
   const sc = config?.ago?.selfControl ?? {};
   const aw = sc.autoWakeup ?? {};
   return {
-    masterEnabled: Boolean(sc.masterEnabled),
-    enabled: Boolean(aw.enabled),
+    masterEnabled: sc.masterEnabled !== false,
+    enabled: aw.enabled !== false,
     maxPerHour: Number.isFinite(aw.maxPerHour) ? aw.maxPerHour : DEFAULTS.maxPerHour,
     maxDepth: Number.isFinite(aw.maxDepth) ? aw.maxDepth : DEFAULTS.maxDepth,
     minDelaySeconds: Number.isFinite(aw.minDelaySeconds) ? aw.minDelaySeconds : DEFAULTS.minDelaySeconds,
@@ -75,16 +82,18 @@ export function resolveWakeupConfig(config) {
 }
 
 /**
- * Evaluate the 4 master gates. Returns null when all pass, else a short reason.
+ * Evaluate the master config gates. Returns null when all pass, else a short
+ * reason. Wave-2: env gate removed; kill-switch / first-run gates are enforced
+ * asynchronously in {@link requestWakeup}.
+ *
  * @param {object} cfg
- * @param {{env?: NodeJS.ProcessEnv, now?: Date}} [ctx]
+ * @param {{now?: Date}} [ctx]
  * @returns {string|null}
  */
+// eslint-disable-next-line no-unused-vars -- `ctx` preserved for future time-window gate
 export function evaluateGates(cfg, ctx) {
   if (!cfg?.masterEnabled) return 'gate:master-disabled';
   if (!cfg?.enabled) return 'gate:autoWakeup-disabled';
-  const env = ctx?.env ?? process.env;
-  if (env.ARTIBOT_SELF_CONTROL !== '1') return 'gate:env-missing';
   // Time-window gate reserved for future use; treated as always-open today.
   return null;
 }
@@ -146,6 +155,59 @@ async function appendRateLimit(pluginRoot, now) {
 }
 
 // ---------------------------------------------------------------------------
+// Gate helpers — extracted to keep requestWakeup below the complexity cap.
+// ---------------------------------------------------------------------------
+
+/**
+ * Run the pre-request side-gates (kill-switch, first-run guard). Returns a
+ * short-circuit reason if writes must be blocked, else null. Never throws.
+ *
+ * @param {string} pluginRoot
+ * @param {object} [config]
+ * @returns {Promise<string|null>}
+ */
+async function runPreRequestGates(pluginRoot, config) {
+  try {
+    const ks = await import('./kill-switch.js');
+    if (await ks.isKillSwitchTripped(config, { feature: 'auto-wakeup', pluginRoot })) {
+      return 'kill-switch-tripped';
+    }
+  } catch {
+    // best-effort
+  }
+  try {
+    const frg = await import('./first-run-guard.js');
+    await frg.bumpRunCounter('auto-wakeup', config);
+  } catch {
+    // best-effort
+  }
+  return null;
+}
+
+/**
+ * Validate a single request payload against the per-request limits.
+ * Returns {reason, delay, depth} where `reason` is non-null on rejection.
+ *
+ * @param {object} request
+ * @param {{minDelaySeconds: number, maxDepth: number}} cfg
+ * @returns {{reason: string|null, delay: number, depth: number}}
+ */
+function validateRequest(request, cfg) {
+  if (!request || typeof request !== 'object') {
+    return { reason: 'invalid-request', delay: -1, depth: 0 };
+  }
+  const delay = Number.isFinite(request.delaySeconds) ? request.delaySeconds : -1;
+  if (delay < cfg.minDelaySeconds) {
+    return { reason: 'minDelaySeconds-not-met', delay, depth: 0 };
+  }
+  const depth = Number.isFinite(request.depth) ? request.depth : 0;
+  if (depth > cfg.maxDepth) {
+    return { reason: 'maxDepth-exceeded', delay, depth };
+  }
+  return { reason: null, delay, depth };
+}
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
@@ -163,7 +225,7 @@ async function appendRateLimit(pluginRoot, now) {
  * @param {object} options
  * @param {string} options.pluginRoot
  * @param {object} [options.config]
- * @param {NodeJS.ProcessEnv} [options.env]
+ * @param {NodeJS.ProcessEnv} [options.env]  reserved; Wave-2 no longer reads ARTIBOT_SELF_CONTROL
  * @param {Date} [options.now]
  * @returns {Promise<{queued: boolean, markerPath: string|null, reason?: string, requestId?: string}>}
  */
@@ -176,21 +238,17 @@ export async function requestWakeup(request, options) {
   const cfg = resolveWakeupConfig(options?.config);
   const now = options?.now instanceof Date ? options.now : new Date();
 
-  const gateFail = evaluateGates(cfg, { env: options?.env, now });
+  const gateFail = evaluateGates(cfg, { now });
   if (gateFail) return { queued: false, markerPath: null, reason: gateFail };
 
-  // Validate individual request.
-  if (!request || typeof request !== 'object') {
-    return { queued: false, markerPath: null, reason: 'invalid-request' };
+  const preGate = await runPreRequestGates(pluginRoot, options?.config);
+  if (preGate) return { queued: false, markerPath: null, reason: preGate };
+
+  const validation = validateRequest(request, cfg);
+  if (validation.reason) {
+    return { queued: false, markerPath: null, reason: validation.reason };
   }
-  const delay = Number.isFinite(request.delaySeconds) ? request.delaySeconds : -1;
-  if (delay < cfg.minDelaySeconds) {
-    return { queued: false, markerPath: null, reason: 'minDelaySeconds-not-met' };
-  }
-  const depth = Number.isFinite(request.depth) ? request.depth : 0;
-  if (depth > cfg.maxDepth) {
-    return { queued: false, markerPath: null, reason: 'maxDepth-exceeded' };
-  }
+  const { delay, depth } = validation;
 
   // Rate limit check.
   const rateLimitPath = path.join(pluginRoot, RATE_LIMIT_REL);

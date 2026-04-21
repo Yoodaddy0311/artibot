@@ -1,8 +1,9 @@
 /**
- * Tests for lib/learning/wakeup-scheduler.js (AGO Self-Control 7).
+ * Tests for lib/learning/wakeup-scheduler.js (AGO Self-Control 7 / Wave-2).
  *
  * Covers:
- *   - 4 master gates (masterEnabled, autoWakeup.enabled, env, time-window)
+ *   - Master gates (masterEnabled, autoWakeup.enabled) — env gate removed in Wave 2
+ *   - Kill-switch integration
  *   - maxPerHour, minDelaySeconds, maxDepth rejections
  *   - happy path: marker file written
  *   - readPendingWakeups / fulfillWakeup round-trip
@@ -14,11 +15,13 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
   rmSync,
   statSync,
+  writeFileSync,
 } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -64,13 +67,25 @@ const validRequest = () => ({
 });
 
 describe('wakeup-scheduler / resolveWakeupConfig', () => {
-  it('returns safe defaults when config is missing', () => {
+  it('returns Wave-2 defaults (masterEnabled=true, enabled=true) when config is missing', () => {
     const cfg = resolveWakeupConfig(undefined);
-    expect(cfg.masterEnabled).toBe(false);
-    expect(cfg.enabled).toBe(false);
+    expect(cfg.masterEnabled).toBe(true);
+    expect(cfg.enabled).toBe(true);
     expect(cfg.maxPerHour).toBe(2);
     expect(cfg.maxDepth).toBe(2);
     expect(cfg.minDelaySeconds).toBe(300);
+  });
+
+  it('respects explicit disable (masterEnabled=false)', () => {
+    const cfg = resolveWakeupConfig({ ago: { selfControl: { masterEnabled: false } } });
+    expect(cfg.masterEnabled).toBe(false);
+  });
+
+  it('respects explicit disable (autoWakeup.enabled=false)', () => {
+    const cfg = resolveWakeupConfig({
+      ago: { selfControl: { autoWakeup: { enabled: false } } },
+    });
+    expect(cfg.enabled).toBe(false);
   });
 
   it('respects provided values', () => {
@@ -88,26 +103,24 @@ describe('wakeup-scheduler / resolveWakeupConfig', () => {
 describe('wakeup-scheduler / evaluateGates', () => {
   it('rejects when masterEnabled is false', () => {
     const cfg = resolveWakeupConfig({ ago: { selfControl: { masterEnabled: false } } });
-    expect(evaluateGates(cfg, { env: { ARTIBOT_SELF_CONTROL: '1' } })).toBe('gate:master-disabled');
+    expect(evaluateGates(cfg)).toBe('gate:master-disabled');
   });
 
   it('rejects when autoWakeup.enabled is false', () => {
     const cfg = resolveWakeupConfig({
       ago: { selfControl: { masterEnabled: true, autoWakeup: { enabled: false } } },
     });
-    expect(evaluateGates(cfg, { env: { ARTIBOT_SELF_CONTROL: '1' } })).toBe('gate:autoWakeup-disabled');
+    expect(evaluateGates(cfg)).toBe('gate:autoWakeup-disabled');
   });
 
-  it('rejects when env ARTIBOT_SELF_CONTROL is not 1', () => {
+  it('passes all gates when fully enabled (env no longer required in Wave-2)', () => {
     const cfg = resolveWakeupConfig(enabledConfig());
-    expect(evaluateGates(cfg, { env: {} })).toBe('gate:env-missing');
-    expect(evaluateGates(cfg, { env: { ARTIBOT_SELF_CONTROL: '0' } })).toBe('gate:env-missing');
-    expect(evaluateGates(cfg, { env: { ARTIBOT_SELF_CONTROL: 'true' } })).toBe('gate:env-missing');
+    expect(evaluateGates(cfg)).toBeNull();
   });
 
-  it('passes all gates when fully enabled', () => {
-    const cfg = resolveWakeupConfig(enabledConfig());
-    expect(evaluateGates(cfg, { env: { ARTIBOT_SELF_CONTROL: '1' } })).toBeNull();
+  it('passes with empty config (Wave-2 defaults are on)', () => {
+    const cfg = resolveWakeupConfig(undefined);
+    expect(evaluateGates(cfg)).toBeNull();
   });
 });
 
@@ -122,7 +135,7 @@ describe('wakeup-scheduler / requestWakeup', () => {
   });
 
   it('rejects without pluginRoot', async () => {
-    const r = await requestWakeup(validRequest(), { pluginRoot: '', env: { ARTIBOT_SELF_CONTROL: '1' }, config: enabledConfig() });
+    const r = await requestWakeup(validRequest(), { pluginRoot: '', config: enabledConfig() });
     expect(r.queued).toBe(false);
     expect(r.reason).toBe('missing-pluginRoot');
   });
@@ -130,7 +143,6 @@ describe('wakeup-scheduler / requestWakeup', () => {
   it('rejects when master gate fails', async () => {
     const r = await requestWakeup(validRequest(), {
       pluginRoot: root,
-      env: { ARTIBOT_SELF_CONTROL: '1' },
       config: { ago: { selfControl: { masterEnabled: false, autoWakeup: { enabled: true } } } },
     });
     expect(r.queued).toBe(false);
@@ -140,25 +152,36 @@ describe('wakeup-scheduler / requestWakeup', () => {
   it('rejects when autoWakeup gate fails', async () => {
     const r = await requestWakeup(validRequest(), {
       pluginRoot: root,
-      env: { ARTIBOT_SELF_CONTROL: '1' },
       config: { ago: { selfControl: { masterEnabled: true, autoWakeup: { enabled: false } } } },
     });
     expect(r.reason).toBe('gate:autoWakeup-disabled');
   });
 
-  it('rejects when env gate fails', async () => {
+  it('rejects when kill-switch tripped for auto-wakeup', async () => {
+    const ksDir = path.join(root, 'runtime');
+    mkdirSync(ksDir, { recursive: true });
+    const ksState = {
+      features: {
+        'auto-wakeup': {
+          failures: [],
+          trippedAt: new Date().toISOString(),
+        },
+      },
+    };
+    writeFileSync(path.join(ksDir, 'kill-switch.json'), JSON.stringify(ksState), 'utf8');
+
     const r = await requestWakeup(validRequest(), {
       pluginRoot: root,
-      env: {},
       config: enabledConfig(),
     });
-    expect(r.reason).toBe('gate:env-missing');
+    expect(r.queued).toBe(false);
+    expect(r.reason).toBe('kill-switch-tripped');
   });
 
   it('rejects when delaySeconds below minimum', async () => {
     const r = await requestWakeup(
       { ...validRequest(), delaySeconds: 100 },
-      { pluginRoot: root, env: { ARTIBOT_SELF_CONTROL: '1' }, config: enabledConfig() },
+      { pluginRoot: root, config: enabledConfig() },
     );
     expect(r.queued).toBe(false);
     expect(r.reason).toBe('minDelaySeconds-not-met');
@@ -167,14 +190,14 @@ describe('wakeup-scheduler / requestWakeup', () => {
   it('rejects when depth exceeds maxDepth', async () => {
     const r = await requestWakeup(
       { ...validRequest(), depth: 5 },
-      { pluginRoot: root, env: { ARTIBOT_SELF_CONTROL: '1' }, config: enabledConfig() },
+      { pluginRoot: root, config: enabledConfig() },
     );
     expect(r.queued).toBe(false);
     expect(r.reason).toBe('maxDepth-exceeded');
   });
 
   it('rejects when maxPerHour exceeded', async () => {
-    const opts = { pluginRoot: root, env: { ARTIBOT_SELF_CONTROL: '1' }, config: enabledConfig() };
+    const opts = { pluginRoot: root, config: enabledConfig() };
     const first = await requestWakeup(validRequest(), opts);
     const second = await requestWakeup(validRequest(), opts);
     const third = await requestWakeup(validRequest(), opts);
@@ -184,14 +207,13 @@ describe('wakeup-scheduler / requestWakeup', () => {
     expect(third.reason).toBe('maxPerHour-exceeded');
   });
 
-  it('happy path: writes marker file with redacted content', async () => {
+  it('happy path: writes marker file with redacted content (no env required)', async () => {
     const req = {
       ...validRequest(),
       reason: 'secret=supersecret123 and email leaked foo@example.com',
     };
     const r = await requestWakeup(req, {
       pluginRoot: root,
-      env: { ARTIBOT_SELF_CONTROL: '1' },
       config: enabledConfig(),
     });
     expect(r.queued).toBe(true);
@@ -205,6 +227,11 @@ describe('wakeup-scheduler / requestWakeup', () => {
     expect(entry.reason).not.toContain('supersecret123');
     expect(entry.reason).not.toContain('foo@example.com');
     expect(entry.category).toBe('test-regression');
+  });
+
+  it('happy path with empty config (Wave-2 defaults on)', async () => {
+    const r = await requestWakeup(validRequest(), { pluginRoot: root, config: {} });
+    expect(r.queued).toBe(true);
   });
 });
 
@@ -224,7 +251,7 @@ describe('wakeup-scheduler / readPendingWakeups', () => {
   });
 
   it('returns only unfulfilled entries', async () => {
-    const opts = { pluginRoot: root, env: { ARTIBOT_SELF_CONTROL: '1' }, config: enabledConfig() };
+    const opts = { pluginRoot: root, config: enabledConfig() };
     const first = await requestWakeup(validRequest(), opts);
     expect(first.queued).toBe(true);
 
@@ -245,7 +272,7 @@ describe('wakeup-scheduler / fulfillWakeup', () => {
   });
 
   it('marks fulfilled and hides from subsequent reads', async () => {
-    const opts = { pluginRoot: root, env: { ARTIBOT_SELF_CONTROL: '1' }, config: enabledConfig() };
+    const opts = { pluginRoot: root, config: enabledConfig() };
     const { requestId } = await requestWakeup(validRequest(), opts);
     expect(requestId).toBeTruthy();
 
@@ -277,7 +304,7 @@ describe('wakeup-scheduler / resetRateLimit', () => {
   });
 
   it('clears rate-limit entries allowing new requests', async () => {
-    const opts = { pluginRoot: root, env: { ARTIBOT_SELF_CONTROL: '1' }, config: enabledConfig() };
+    const opts = { pluginRoot: root, config: enabledConfig() };
     await requestWakeup(validRequest(), opts);
     await requestWakeup(validRequest(), opts);
     const blocked = await requestWakeup(validRequest(), opts);

@@ -17,9 +17,6 @@ import {
   tryAutoRegister,
 } from '../../lib/learning/macro-learner.js';
 
-function enableGate() { process.env.ARTIBOT_SELF_CONTROL = '1'; }
-function disableGate() { delete process.env.ARTIBOT_SELF_CONTROL; }
-
 function makeAutoConfig(overrides = {}) {
   return {
     ago: {
@@ -31,16 +28,31 @@ function makeAutoConfig(overrides = {}) {
           noRejectionWindowDays: 30,
           ...overrides,
         },
+        // Bypass first-run observe mode for deterministic tests.
+        firstRunMode: { enabled: false },
       },
       macroLearning: {
         enabled: true,
+        // auto-with-safety posture: users CAN auto-register if all other
+        // safety layers (occurrence count, 30d rejection window, confidence)
+        // pass. The 30d rejection window remains enforced.
         mode: 'suggest-only',
         minOccurrences: 3,
-        requireUserApproval: true,
+        requireUserApproval: false,
         suggestionsPath: 'runtime/macro-suggestions.json',
       },
     },
   };
+}
+
+function seedFirstRunBypass(root) {
+  const dir = path.join(root, 'runtime');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    path.join(dir, 'first-run-state.json'),
+    JSON.stringify({ globalRuns: 999, features: {}, transitions: [] }),
+    'utf-8',
+  );
 }
 
 function seedStore(root, suggestions) {
@@ -82,11 +94,10 @@ beforeEach(() => {
     JSON.stringify({ version: '0.0.0' }, null, 2),
     'utf-8',
   );
-  enableGate();
+  seedFirstRunBypass(root);
 });
 
 afterEach(() => {
-  disableGate();
   rmSync(root, { recursive: true, force: true });
 });
 
@@ -112,12 +123,47 @@ describe('tryAutoRegister gate', () => {
     expect(r.reason).toBe('module-disabled');
   });
 
-  it('refuses when ARTIBOT_SELF_CONTROL env is not set', async () => {
-    disableGate();
+  it('proceeds with default config (no env var required)', async () => {
+    seedStore(root, [makePending()]);
+    const r = await tryAutoRegister(makePending(), { pluginRoot: root, config: makeAutoConfig() });
+    expect(r.registered).toBe(true);
+  });
+
+  it('refuses when kill-switch is tripped', async () => {
+    writeFileSync(
+      path.join(root, 'runtime', 'kill-switch.json'),
+      JSON.stringify({
+        features: {
+          'auto-macro-register': {
+            failures: [{ at: Date.now(), error: 'seed' }],
+            trippedAt: new Date().toISOString(),
+          },
+        },
+      }),
+      'utf-8',
+    );
     seedStore(root, [makePending()]);
     const r = await tryAutoRegister(makePending(), { pluginRoot: root, config: makeAutoConfig() });
     expect(r.registered).toBe(false);
-    expect(r.reason).toBe('env-not-set');
+    expect(r.reason).toBe('kill-switch-tripped');
+  });
+
+  it('still enforces 30-day rejection window under default-ON', async () => {
+    const now = Date.parse('2026-04-20T00:00:00Z');
+    const recentReject = makePending({
+      id: 'macro-rejected',
+      status: 'rejected',
+      rejectedAt: new Date(now - 5 * 24 * 60 * 60 * 1000).toISOString(),
+    });
+    const pending = makePending({ id: 'macro-new' });
+    seedStore(root, [recentReject, pending]);
+    const r = await tryAutoRegister(pending, {
+      pluginRoot: root,
+      config: makeAutoConfig(),
+      now,
+    });
+    expect(r.registered).toBe(false);
+    expect(r.reason).toBe('recent-rejection');
   });
 });
 
@@ -262,11 +308,12 @@ describe('sweepAutoRegister', () => {
     expect(Object.keys(cfg.macros || {})).toHaveLength(1);
   });
 
-  it('short-circuits when gate is closed', async () => {
-    disableGate();
+  it('short-circuits when user opts out (masterEnabled=false)', async () => {
+    const cfg = makeAutoConfig();
+    cfg.ago.selfControl.masterEnabled = false;
     seedStore(root, [makePending()]);
-    const r = await sweepAutoRegister({ pluginRoot: root, config: makeAutoConfig() });
+    const r = await sweepAutoRegister({ pluginRoot: root, config: cfg });
     expect(r.registered).toHaveLength(0);
-    expect(r.reason).toBe('env-not-set');
+    expect(r.reason).toBe('master-disabled');
   });
 });
