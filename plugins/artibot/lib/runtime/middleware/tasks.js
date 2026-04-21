@@ -5,9 +5,40 @@
  * @module lib/runtime/middleware/tasks
  */
 
+import path from 'node:path';
+import { readJsonFileSync } from '../../core/file.js';
+
 function makeTaskId(nowFn) {
   const now = nowFn();
   return `rt-${now.toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/**
+ * Load the most recent effort + task-budget meta written by runtime-prompt.js.
+ * Returns null when the effort file is missing or unreadable — downstream code
+ * must treat effort/budget as optional.
+ *
+ * @param {string|undefined} pluginRoot
+ * @returns {{ effort: string|null, taskBudget: number|null, command: string|null }|null}
+ */
+function readEffortMeta(pluginRoot) {
+  if (!pluginRoot) return null;
+  const runtimeDir = path.join(pluginRoot, 'runtime');
+  const effortRaw = readJsonFileSync(path.join(runtimeDir, 'current-effort.json'));
+  if (!effortRaw) return null;
+
+  const meta = {
+    effort: effortRaw.effort || null,
+    command: effortRaw.command || null,
+    taskBudget: null,
+  };
+
+  const budgetRaw = readJsonFileSync(path.join(runtimeDir, 'current-task-budget.json'));
+  if (budgetRaw && typeof budgetRaw.budget === 'number' && budgetRaw.budget > 0) {
+    meta.taskBudget = budgetRaw.budget;
+  }
+
+  return meta;
 }
 
 /**
@@ -37,6 +68,22 @@ export function createTasksMiddleware(options = {}) {
       phases,
       createdAt: new Date(now()).toISOString(),
     };
+
+    // P3-10: automatically attach effort/taskBudget meta when the prior
+    // UserPromptSubmit hook (runtime-prompt.js) persisted them. This lets
+    // /team orchestrator propagate `[artibot:effort=X][artibot:task-budget=Y]`
+    // to each teammate without an explicit re-derive step.
+    const pluginRoot = state.input?.pluginRoot
+      || state.context?.pluginRoot
+      || state.pluginRoot;
+    const effortMeta = readEffortMeta(pluginRoot);
+    if (effortMeta && effortMeta.effort) {
+      task.meta = {
+        effort: effortMeta.effort,
+        command: effortMeta.command,
+        taskBudget: effortMeta.taskBudget,
+      };
+    }
 
     state.context.tasks = task;
     state.messageParts.push(`task=${mode}`);

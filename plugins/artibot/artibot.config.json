@@ -1,5 +1,5 @@
 {
-  "version": "2.8.0",
+  "version": "3.0.0",
   "agents": {
     "modelPolicy": {
       "high": {
@@ -247,16 +247,6 @@
       "do": "swarm",
       "check": "council",
       "act": "leader"
-    },
-    "playbooksLegacy": {
-      "feature": "[leader] plan -> [council] design -> [swarm] implement -> [council] review -> [leader] merge",
-      "bugfix": "[leader] analyze -> [pipeline] fix -> [council] verify",
-      "refactor": "[council] assess -> [pipeline] refactor -> [swarm] test -> [council] review",
-      "security": "[leader] scan -> [council] assess -> [pipeline] fix -> [council] verify",
-      "marketing-campaign": "[leader] strategy -> [council] plan -> [swarm] create -> [council] review -> [leader] launch",
-      "marketing-audit": "[leader] scan -> [council] assess -> [pipeline] optimize -> [council] verify",
-      "content-launch": "[leader] plan -> [swarm] create -> [council] review -> [leader] publish",
-      "competitive-analysis": "[council] research -> [swarm] analyze -> [council] synthesize -> [leader] report"
     },
     "playbooks": {
       "feature": {
@@ -779,7 +769,136 @@
       "guardrail",
       "token-usage",
       "summarization"
+    ],
+    "effort": {
+      "injectPrompt": true,
+      "nativeApi": false,
+      "budgetMap": {
+        "xhigh": 128000,
+        "high": 64000,
+        "medium": 32000,
+        "low": 16000
+      }
+    },
+    "longContext": {
+      "enabled": false,
+      "betaHeader": "context-1m-2025-08-01",
+      "activationThreshold": 180000
+    }
+  },
+  "extensions": {
+    "enabled": true,
+    "searchPaths": [
+      "~/.claude/plugins/"
+    ],
+    "dataPolicy": "local",
+    "allowedDataPolicies": [
+      "local",
+      "artibot-swarm"
     ]
+  },
+  "ux": {
+    "plainLanguage": {
+      "enabled": false,
+      "locale": "ko"
+    },
+    "skillLevel": "auto",
+    "profilePath": "runtime/user-profile.json"
+  },
+  "dashboard": {
+    "enabled": false,
+    "showTeammates": true,
+    "showEffort": true,
+    "showTaskBudget": true
+  },
+  "ago": {
+    "selfControlEnabled": true,
+    "selfControl": {
+      "masterEnabled": true,
+      "firstRunMode": {
+        "enabled": true,
+        "observeRuns": 5,
+        "statePath": "runtime/first-run-state.json"
+      },
+      "emergencyKillSwitch": {
+        "enabled": true,
+        "maxFailuresPerHour": 3,
+        "cooldownHours": 24,
+        "statePath": "runtime/kill-switch-state.json"
+      },
+      "autoCommit": {
+        "enabled": true,
+        "maxRiskLevel": "low",
+        "requiredTestsPass": true,
+        "requiredLintClean": true,
+        "rollbackOnRegression": true
+      },
+      "autoCleanup": {
+        "enabled": true,
+        "tools": ["eslint-fix"],
+        "maxFilesPerRun": 20
+      },
+      "autoSkillRegister": {
+        "enabled": true,
+        "stagingDays": 1,
+        "stagingPath": "runtime/skills-staging/",
+        "minConfidence": 0.85
+      },
+      "autoMacroRegister": {
+        "enabled": true,
+        "minOccurrences": 5,
+        "noRejectionWindowDays": 30
+      },
+      "autoPR": {
+        "enabled": true,
+        "autoMerge": false,
+        "branchPrefix": "artibot/auto/",
+        "categories": ["drift", "security-fix", "test-flake"]
+      },
+      "autoWakeup": {
+        "enabled": true,
+        "maxPerHour": 2,
+        "maxDepth": 2,
+        "minDelaySeconds": 300
+      },
+      "autoLifecycle": {
+        "enabled": true,
+        "graceDays": 14,
+        "deprecateThreshold": 0,
+        "promoteThreshold": 5
+      }
+    },
+    "decisionTrail": {
+      "enabled": true,
+      "path": "runtime/decision-trail.json",
+      "retentionDays": 30,
+      "redactSensitive": true
+    },
+    "autoSpawn": {
+      "enabled": true,
+      "maxDepth": 2,
+      "minConfidence": 0.8,
+      "requireOptIn": false
+    },
+    "swarmConvergence": {
+      "enabled": true,
+      "minInstances": 3,
+      "confidenceBoost": 0.15,
+      "confidenceThreshold": 0.7
+    },
+    "selfBenchmark": {
+      "enabled": true,
+      "schedule": "0 4 * * 1",
+      "reportPath": "_reports/self-benchmark.md",
+      "dimensions": ["evolved", "extensible", "productive", "universal", "quality"]
+    },
+    "macroLearning": {
+      "enabled": true,
+      "mode": "suggest-only",
+      "minOccurrences": 3,
+      "requireUserApproval": true,
+      "suggestionsPath": "runtime/macro-suggestions.json"
+    }
   },
   "autoLearning": {
     "enabled": true,
@@ -822,6 +941,6 @@
     "defaultModel": "o4-mini",
     "timeout": 60000,
     "reviewOnStop": false,
-    "dataPolicy": "코드가 OpenAI API로 전송됩니다. 민감 프로젝트에 주의하세요."
+    "warning": "코드가 OpenAI API로 전송됩니다. 민감 프로젝트에 주의하세요."
   }
 }

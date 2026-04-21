@@ -451,18 +451,18 @@ describe('getSkillSources()', () => {
 
   it('returns empty sources when SKILL.md has no sources field', async () => {
     mockFsReadFile.mockResolvedValue(
-      '---\nname: lang-go\ndescription: "Go patterns"\n---\n# Go Patterns',
+      '---\nname: lang-reference\ndescription: "Language patterns"\n---\n# Language Patterns',
     );
-    const result = await getSkillSources('lang-go');
+    const result = await getSkillSources('lang-reference');
     expect(result.sources).toEqual([]);
     expect(result.hint).toBe('');
   });
 
   it('parses dash-list sources from frontmatter', async () => {
     mockFsReadFile.mockResolvedValue(
-      '---\nname: lang-typescript\nsources:\n  - "https://typescriptlang.org/docs"\n  - "https://typescriptlang.org/tsconfig"\n---\n# TS',
+      '---\nname: lang-reference\nsources:\n  - "https://typescriptlang.org/docs"\n  - "https://typescriptlang.org/tsconfig"\n---\n# TS',
     );
-    const result = await getSkillSources('lang-typescript');
+    const result = await getSkillSources('lang-reference');
     expect(result.sources).toEqual([
       'https://typescriptlang.org/docs',
       'https://typescriptlang.org/tsconfig',

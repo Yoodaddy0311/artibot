@@ -1,6 +1,6 @@
 {
   "name": "artibot",
-  "version": "2.8.0",
+  "version": "3.0.0",
   "description": "Cognitive orchestration framework with dual-process routing, lifelong learning, expert agent teams, and workflow automation for Claude Code",
   "author": {
     "name": "Artience"
@@ -56,5 +56,15 @@
     "./agents/typescript-pro.md"
   ],
   "commands": ["./commands/"],
-  "skills": ["./skills/"]
+  "skills": ["./skills/"],
+  "rules": [
+    "./rules/agent-coordination.md",
+    "./rules/backend-patterns.md",
+    "./rules/clean-state.md",
+    "./rules/config-safety.md",
+    "./rules/dev-protocol.md",
+    "./rules/frontend-patterns.md",
+    "./rules/quality-gates.md",
+    "./rules/test-patterns.md"
+  ]
 }

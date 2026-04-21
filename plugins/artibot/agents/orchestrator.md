@@ -53,13 +53,12 @@ tools:
   - Task(typescript-pro)
   - Task(repo-benchmarker)
   - Task(Explore)
-  # --- Read-Only (ONLY for single config file checks, NEVER for codebase analysis) ---
-  # Codebase analysis MUST be delegated to teammates (Explore, planner, etc.)
-  - Read
-  - Glob
-  - Grep
-  - Bash
-  - WebSearch
+  # --- Minimal support tools ---
+  # Codebase analysis is FORBIDDEN here — delegate to Task(Explore)/Task(planner).
+  # Read/Glob/Grep are intentionally omitted to prevent DNA violation
+  # (orchestrator doing the work itself instead of delegating).
+  - Bash          # team ops only (e.g., git status for delegation context)
+  - WebSearch     # external fact lookup for team briefing
 permissionMode: delegate
 maxTurns: 25
 skills:

@@ -32,7 +32,7 @@ permissionMode: acceptEdits
 maxTurns: 25
 skills:
   - coding-standards
-  - lang-typescript
+  - lang-reference
 memory:
   scope: project
 category: expert

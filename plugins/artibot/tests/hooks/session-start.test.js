@@ -12,6 +12,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const mockState = {
   readStdinResult: Promise.resolve('{}'),
   writeStdoutCalls: [],
+  writeFileSyncCalls: [],
+  mkdirSyncCalls: [],
   readFileSyncImpl: () => { throw new Error('ENOENT'); },
   existsSyncResult: false,
   // checkForUpdateFactory is called on each invocation, returning a fresh Promise.
@@ -41,8 +43,8 @@ vi.mock('node:fs', async () => {
     ...actual,
     readFileSync: vi.fn((...args) => mockState.readFileSyncImpl(...args)),
     existsSync: vi.fn(() => mockState.existsSyncResult),
-    writeFileSync: vi.fn(() => {}),
-    mkdirSync: vi.fn(() => {}),
+    writeFileSync: vi.fn((...args) => { mockState.writeFileSyncCalls.push(args); }),
+    mkdirSync: vi.fn((...args) => { mockState.mkdirSyncCalls.push(args); }),
   };
 });
 
@@ -74,6 +76,8 @@ describe('session-start hook', () => {
     vi.resetModules();
     mockState.readStdinResult = Promise.resolve('{}');
     mockState.writeStdoutCalls = [];
+    mockState.writeFileSyncCalls = [];
+    mockState.mkdirSyncCalls = [];
     mockState.readFileSyncImpl = () => { throw new Error('ENOENT'); };
     mockState.existsSyncResult = false;
     mockState.checkForUpdateFactory = () => Promise.resolve({ hasUpdate: false });
@@ -85,6 +89,7 @@ describe('session-start hook', () => {
     stderrSpy.mockRestore();
     exitSpy.mockRestore();
     delete process.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS;
+    delete process.env.ANTHROPIC_BETA;
   });
 
   async function waitForStdout(timeoutMs = SETTLE_TIMEOUT_MS) {
@@ -264,5 +269,80 @@ describe('session-start hook', () => {
 
       expect(mockState.writeStdoutCalls.length).toBeGreaterThan(0);
     }, 5000);
+  });
+
+  describe('P3-3: long-context opt-in', () => {
+    it('persists runtime/long-context-active.json when enabled=true', async () => {
+      mockState.readFileSyncImpl = (filePath) => {
+        if (String(filePath).includes('artibot.config.json')) {
+          return JSON.stringify({
+            version: '2.8.0',
+            runtime: {
+              longContext: {
+                enabled: true,
+                betaHeader: 'context-1m-2025-08-01',
+                activationThreshold: 180000,
+              },
+            },
+          });
+        }
+        throw new Error('ENOENT');
+      };
+      mockState.readStdinResult = Promise.resolve(JSON.stringify({}));
+
+      await importAndWait();
+
+      const longContextWrites = mockState.writeFileSyncCalls.filter((args) =>
+        String(args[0]).includes('long-context-active.json'),
+      );
+      expect(longContextWrites.length).toBeGreaterThan(0);
+
+      const payload = JSON.parse(longContextWrites[0][1]);
+      expect(payload.enabled).toBe(true);
+      expect(payload.betaHeader).toBe('context-1m-2025-08-01');
+      expect(typeof payload.activatedAt).toBe('string');
+    });
+
+    it('appends betaHeader to ANTHROPIC_BETA env when enabled', async () => {
+      mockState.readFileSyncImpl = (filePath) => {
+        if (String(filePath).includes('artibot.config.json')) {
+          return JSON.stringify({
+            runtime: {
+              longContext: {
+                enabled: true,
+                betaHeader: 'context-1m-2025-08-01',
+              },
+            },
+          });
+        }
+        throw new Error('ENOENT');
+      };
+      mockState.readStdinResult = Promise.resolve(JSON.stringify({}));
+
+      await importAndWait();
+
+      expect(process.env.ANTHROPIC_BETA).toContain('context-1m-2025-08-01');
+    });
+
+    it('does NOT write long-context file when enabled=false (default)', async () => {
+      mockState.readFileSyncImpl = (filePath) => {
+        if (String(filePath).includes('artibot.config.json')) {
+          return JSON.stringify({
+            runtime: {
+              longContext: { enabled: false, betaHeader: 'context-1m-2025-08-01' },
+            },
+          });
+        }
+        throw new Error('ENOENT');
+      };
+      mockState.readStdinResult = Promise.resolve(JSON.stringify({}));
+
+      await importAndWait();
+
+      const longContextWrites = mockState.writeFileSyncCalls.filter((args) =>
+        String(args[0]).includes('long-context-active.json'),
+      );
+      expect(longContextWrites).toHaveLength(0);
+    });
   });
 });

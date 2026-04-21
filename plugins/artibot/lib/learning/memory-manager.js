@@ -96,6 +96,110 @@ async function persistStore(storeKey, store) {
 }
 
 // ---------------------------------------------------------------------------
+// Input Validation (anti-poisoning guard)
+// ---------------------------------------------------------------------------
+
+const MAX_DATA_BYTES = 64 * 1024; // 64KB per entry — reject payload bombs
+const MAX_STRING_LEN = 8 * 1024;  // 8KB per string field
+const MAX_TAG_COUNT = 50;
+const ALLOWED_SOURCE_RE = /^[a-z0-9][a-z0-9._:-]{0,63}$/i;
+const ALLOWED_TYPE_RE = /^[a-z][a-z0-9_-]{0,31}$/i;
+
+/**
+ * Validate and sanitize a saveMemory() input before it reaches the store.
+ * Rejects oversize payloads, unsafe source strings, prototype pollution keys,
+ * and non-plain-object payloads that could poison future sessions.
+ * Unknown types are accepted (they fall through to the projectContexts store
+ * via typeToStoreKey), but the type string itself must match a safe pattern
+ * so it cannot carry injected content.
+ * Throws an Error with `.code = 'MEMORY_VALIDATION'` on failure.
+ *
+ * @param {string} type
+ * @param {unknown} data
+ * @param {object} options
+ * @returns {{ data: object, source: string, tags?: string[] }}
+ */
+function validateMemoryInput(type, data, options) {
+  if (typeof type !== 'string' || !ALLOWED_TYPE_RE.test(type)) {
+    throw Object.assign(new Error(`invalid memory type: ${type}`), {
+      code: 'MEMORY_VALIDATION',
+    });
+  }
+  if (data === null || typeof data !== 'object' || Array.isArray(data)) {
+    throw Object.assign(new Error('memory data must be a plain object'), {
+      code: 'MEMORY_VALIDATION',
+    });
+  }
+  // Reject payloads with suspicious prototype pollution keys
+  for (const key of ['__proto__', 'constructor', 'prototype']) {
+    if (Object.prototype.hasOwnProperty.call(data, key)) {
+      throw Object.assign(new Error(`forbidden key in memory data: ${key}`), {
+        code: 'MEMORY_VALIDATION',
+      });
+    }
+  }
+  // Size cap to prevent payload bombs poisoning the store
+  let serialized;
+  try {
+    serialized = JSON.stringify(data);
+  } catch {
+    throw Object.assign(new Error('memory data not JSON-serializable'), {
+      code: 'MEMORY_VALIDATION',
+    });
+  }
+  if (serialized.length > MAX_DATA_BYTES) {
+    throw Object.assign(
+      new Error(`memory data exceeds ${MAX_DATA_BYTES} bytes`),
+      { code: 'MEMORY_VALIDATION' },
+    );
+  }
+  // Source string must match an allowlist pattern — prevents injection of
+  // arbitrary provenance labels that future sessions may trust.
+  const source = options.source ?? 'system';
+  if (typeof source !== 'string' || !ALLOWED_SOURCE_RE.test(source)) {
+    throw Object.assign(new Error(`invalid memory source: ${source}`), {
+      code: 'MEMORY_VALIDATION',
+    });
+  }
+  // Truncate per-field strings that are individually too long
+  const sanitized = truncateStrings(data, MAX_STRING_LEN);
+  // Optional user tags must be a bounded array of short strings
+  let tags = options.tags;
+  if (tags !== undefined) {
+    if (!Array.isArray(tags)) {
+      throw Object.assign(new Error('memory tags must be an array'), {
+        code: 'MEMORY_VALIDATION',
+      });
+    }
+    tags = tags
+      .filter((t) => typeof t === 'string' && t.length > 0 && t.length <= 64)
+      .slice(0, MAX_TAG_COUNT);
+  }
+  return { data: sanitized, source, tags };
+}
+
+/**
+ * Deep-clone an object while truncating overlong string fields.
+ * Protects the store from a single huge field blowing the 64KB budget on
+ * small numeric keys.
+ * @param {object} value
+ * @param {number} maxLen
+ * @returns {object}
+ */
+function truncateStrings(value, maxLen) {
+  if (typeof value === 'string') {
+    return value.length > maxLen ? `${value.slice(0, maxLen)}…[truncated]` : value;
+  }
+  if (Array.isArray(value)) return value.map((v) => truncateStrings(v, maxLen));
+  if (value && typeof value === 'object') {
+    const out = {};
+    for (const [k, v] of Object.entries(value)) out[k] = truncateStrings(v, maxLen);
+    return out;
+  }
+  return value;
+}
+
+// ---------------------------------------------------------------------------
 // Memory Entry Factory
 // ---------------------------------------------------------------------------
 
@@ -261,11 +365,19 @@ function tokenizeQuery(query) {
  * @returns {Promise<object>} The saved entry
  */
 export async function saveMemory(type, data, options = {}) {
+  // Anti-poisoning guard: reject unknown types, oversize/unsafe payloads,
+  // prototype pollution keys, and unvetted source labels before persistence.
+  const validated = validateMemoryInput(type, data, options);
+
   await ensureDir(getMemoryDir());
 
   const storeKey = typeToStoreKey(type);
   const store = await loadStore(storeKey);
-  const entry = createEntry(type, data, options);
+  const entry = createEntry(type, validated.data, {
+    ...options,
+    source: validated.source,
+    tags: validated.tags,
+  });
 
   // For preferences, deduplicate by data.key if present
   let entries = store.entries;

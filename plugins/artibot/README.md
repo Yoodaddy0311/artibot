@@ -78,14 +78,15 @@ Artibot의 핵심 엔진은 Claude Code의 **Agent Teams API**입니다. 단순�
 - `/sc`로 자연어 의도를 분석하여 최적 커맨드로 자동 라우팅
 - 개발, 분석, 품질, 테스트, 문서화, 배포, 마케팅 전 영역 커버
 
-### 127개 도메인 스킬
+### 99개 도메인 스킬
 
 - 11개 페르소나 스킬 (architect, frontend, backend, security 등)
 - 6개 코어 스킬 (orchestration, principles, coding/security/testing standards)
-- 8개 유틸리티 스킬 (git-workflow, tdd, delegation, MCP 연동 등)
-- 16개 언어 스킬 (TypeScript, Python, Go, Rust, Java 등)
+- 1개 Git 통합 스킬 (git-unified — 9개 서브툴: autopilot, collab, conflict, guide, safe, strategy, sync, workflow, worktree 통합)
+- 1개 언어 통합 스킬 (lang-reference — 16개 언어 통합 허브)
+- 8개 유틸리티 스킬 (tdd, delegation, MCP 연동 등)
 - 23개 마케팅 스킬 (SEO, CRO, A/B 테스트, 이메일 마케팅 등)
-- 17개 기타 스킬 (cognitive-routing, platform, library, quality, auto-learning-pipeline, git-worktree, dynamic-context-injection 등)
+- 16개 기타 스킬 (cognitive-routing, platform, library, quality, auto-learning-pipeline, dynamic-context-injection 등)
 - 10개 신규 스킬 (v2.1.0): load-testing, observability, ci-cd-pipelines, codex-integration, agent-memory-snapshot, compaction-survival, prompt-caching-strategy, hook-feedback-merge, api-security, event-sourcing
 
 ### 런타임 미들웨어 파이프라인 (v1.14.0+)
@@ -126,6 +127,13 @@ Artibot의 핵심 엔진은 Claude Code의 **Agent Teams API**입니다. 단순�
 - **Stop-Review-Gate**: 작업 완료 전 자동 품질 검증 (bracket mismatch, pattern violations, sensitive files, missing tests)
 - **리뷰 출력 JSON Schema 강제**: code-review, adversarial-review 출력이 `review-output.schema.json` 준수
 - **중앙 메트릭스 수집기**: `lib/core/metrics-collector.js` — 훅 실행, 에이전트 성능, 토큰 사용량 통합 추적
+
+### Visual Progress Dashboard (v2.8.0+)
+
+- **한-줄 Statusline**: `[artibot] /implement · effort=xhigh · budget=128K · tokens=45K · longCtx=on` 포맷으로 현재 명령·effort·토큰·long-context 상태를 한눈에 표시
+- **Opt-in**: `artibot.config.json`의 `dashboard.enabled` 플래그 (기본 false). 섹션별 on/off: `showEffort`, `showTaskBudget`, `showTeammates`
+- **Zero-crash**: runtime JSON 파일 누락/파손 시 해당 섹션만 생략. TTY가 아니거나 `NO_COLOR=1`이면 ANSI 색상 자동 비활성화
+- 렌더러: `scripts/statusline.sh` / `scripts/statusline.js` → `lib/tui/dashboard.js`
 
 ### 지능형 훅 시스템
 
@@ -983,7 +991,7 @@ orchestrator는 **코드를 직접 작성하지 않습니다**. 팀을 구성하
 
 | 스킬 | 설명 |
 |------|------|
-| `git-workflow` | Conventional Commits, PR 워크플로우, 브랜치 전략 |
+| `git-unified` | Git 통합 허브 (9개 서브툴: autopilot/collab/conflict/guide/safe/strategy/sync/workflow/worktree). 상세는 `skills/git-unified/references/*.md` |
 | `tdd-workflow` | Red-Green-Refactor 사이클, 커버리지 목표 |
 | `delegation` | Sub-Agent/Team 위임 전략, 모드 선택 매트릭스 |
 | `mcp-context7` | Context7 라이브러리 문서 조회 |
@@ -992,26 +1000,11 @@ orchestrator는 **코드를 직접 작성하지 않습니다**. 팀을 구성하
 | `continuous-learning` | 세션 간 패턴 추출 및 메모리 저장 |
 | `strategic-compact` | 컨텍스트 압축 시 핵심 상태 보존 |
 
-### 언어 스킬 (16개)
+### 언어 스킬 (1개 통합)
 
 | 스킬 | 설명 |
 |------|------|
-| `lang-typescript` | TypeScript 코딩 패턴, strict mode |
-| `lang-javascript` | JavaScript 모던 패턴, ESM |
-| `lang-python` | Python 코딩 표준, PEP 8 |
-| `lang-go` | Go 코딩 표준, 동시성 패턴 |
-| `lang-rust` | Rust 소유권, 안전성 패턴 |
-| `lang-java` | Java 디자인 패턴, 엔터프라이즈 |
-| `lang-kotlin` | Kotlin 코딩 표준, 코루틴 |
-| `lang-php` | PHP 모던 패턴, 프레임워크 |
-| `lang-ruby` | Ruby 코딩 표준, Rails 패턴 |
-| `lang-cpp` | C++ 모던 패턴, 메모리 관리 |
-| `lang-csharp` | C# 코딩 표준, .NET 패턴 |
-| `lang-scala` | Scala 함수형 패턴, Akka |
-| `lang-swift` | Swift 코딩 표준, iOS 패턴 |
-| `lang-elixir` | Elixir/OTP 패턴, 동시성 |
-| `lang-flutter` | Flutter/Dart 위젯, 상태 관리 |
-| `lang-r` | R 통계 분석, 데이터 패턴 |
+| `lang-reference` | 16개 언어 통합 허브 (TypeScript / JavaScript / Python / Go / Rust / Java / Kotlin / PHP / Ruby / C++ / C# / Scala / Swift / Elixir / Flutter·Dart / R). 언어별 상세는 `skills/lang-reference/references/{언어}.md` |
 
 ### 마케팅 스킬 (23개)
 
@@ -1059,7 +1052,6 @@ orchestrator는 **코드를 직접 작성하지 않습니다**. 팀을 구성하
 | `library-mermaid` | Mermaid 다이어그램 패턴 |
 | `library-shadcn` | shadcn/ui 컴포넌트 패턴 |
 | `auto-learning-pipeline` | 제로 설정 야간 자기 개선 파이프라인 |
-| `git-worktree` | Git worktree 격리 실행 |
 | `dynamic-context-injection` | 런타임 동적 컨텍스트 주입 |
 
 ---

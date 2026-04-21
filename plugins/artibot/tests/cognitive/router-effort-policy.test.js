@@ -8,43 +8,52 @@ describe('EFFORT_POLICY constant', () => {
     expect(Object.isFrozen(EFFORT_POLICY)).toBe(true);
   });
 
-  it('contains all five xhigh agentic-coding commands', () => {
-    const xhighKeys = ['implement', 'team', 'tdd', 'build-fix', 'cleanup'];
+  it('classifies agentic-coding / multi-file commands as xhigh', () => {
+    const xhighKeys = [
+      'implement', 'team', 'tdd', 'build-fix', 'cleanup',
+      'refactor-clean', 'orchestrate', 'spawn', 'swarm',
+    ];
     for (const key of xhighKeys) {
       expect(EFFORT_POLICY[key]).toBe('xhigh');
     }
   });
 
-  it('contains all six high focused-reasoning commands', () => {
+  it('classifies focused-reasoning / review / design commands as high', () => {
     const highKeys = [
-      'code-review',
-      'adversarial-review',
-      'plan',
-      'troubleshoot',
-      'analyze',
-      'design',
+      'code-review', 'adversarial-review', 'review',
+      'plan', 'troubleshoot', 'analyze', 'design',
+      'estimate', 'spec', 'verify', 'improve', 'repo',
     ];
     for (const key of highKeys) {
       expect(EFFORT_POLICY[key]).toBe('high');
     }
   });
 
-  it('contains all five medium balanced commands', () => {
-    const mediumKeys = ['daily', 'load', 'index', 'explain', 'document'];
+  it('classifies balanced content / domain commands as medium', () => {
+    const mediumKeys = [
+      'daily', 'load', 'index', 'explain', 'document',
+      'checkpoint', 'learn', 'git', 'playbook', 'build', 'ship',
+      'test', 'visual-check',
+      'ad', 'analytics', 'content', 'crm', 'cro', 'email',
+      'excel', 'marketing', 'mkt', 'ppt', 'seo', 'social',
+    ];
     for (const key of mediumKeys) {
       expect(EFFORT_POLICY[key]).toBe('medium');
     }
   });
 
-  it('contains all three low cost-saving commands', () => {
-    const lowKeys = ['permissions', 'update', 'quickstart'];
+  it('classifies cost-saving / lookup / config commands as low', () => {
+    const lowKeys = [
+      'permissions', 'update', 'quickstart',
+      'sc', 'sdk', 'setup', 'task', 'assemble', 'codex',
+    ];
     for (const key of lowKeys) {
       expect(EFFORT_POLICY[key]).toBe('low');
     }
   });
 
-  it('has exactly 19 total keys', () => {
-    expect(Object.keys(EFFORT_POLICY)).toHaveLength(19);
+  it('covers every slash command with a classification (55 total)', () => {
+    expect(Object.keys(EFFORT_POLICY)).toHaveLength(55);
   });
 
   it('uses only the four valid effort levels for every value', () => {

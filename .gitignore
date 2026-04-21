@@ -32,3 +32,8 @@ NVIDIA Corporation/
 /AGENTS.md
 /agents/
 CLAUDE.local.md
+
+# Defense against Windows path-as-filename bug (vitest/tmp output misconfig)
+C:Users*
+*vitest-out.json
+*AppDataLocalTemp*

@@ -182,3 +182,56 @@ export {
 export {
   createEvolutionLoop,
 } from './evolution-loop.js';
+
+// Auto Spawn Advisor (next-session suggestion writer)
+export {
+  analyzeNextSession,
+  readPendingSuggestions,
+  resolveSuggestion,
+} from './auto-spawn-advisor.js';
+
+// Self Benchmark (5-dimension repo scoring)
+export {
+  runSelfBenchmark,
+  computeDimensionScores,
+  gatherRepoStats,
+} from './self-benchmark.js';
+
+// Macro Learner (prompt sequence → suggested macros)
+export {
+  observePrompt,
+  getMacroSuggestions,
+  approveSuggestion,
+  rejectSuggestion,
+  tryAutoRegister,
+  sweepAutoRegister,
+} from './macro-learner.js';
+
+// Risk Classifier (diff-level risk scoring)
+export {
+  classifyDiff,
+  scoreFile,
+} from './risk-classifier.js';
+
+// Rollback Guard (snapshot / validate / rollback)
+export {
+  snapshot,
+  validateAgainstBaseline,
+  rollback,
+} from './rollback-guard.js';
+
+// Wakeup Scheduler (AGO Self-Control 7 — marker-only wakeup signal)
+export {
+  requestWakeup,
+  readPendingWakeups,
+  fulfillWakeup,
+  resetRateLimit,
+} from './wakeup-scheduler.js';
+
+// Skill Lifecycle Autopilot (deprecation / promotion sweep)
+export {
+  analyzeLifecycle,
+  deprecateSkill,
+  promoteSkill,
+  sweepLifecycle,
+} from './skill-lifecycle-autopilot.js';

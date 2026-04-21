@@ -79,7 +79,7 @@ User triggers /codex review
     "defaultModel": "o4-mini",
     "timeout": 60000,
     "reviewOnStop": false,
-    "dataPolicy": "코드가 OpenAI API로 전송됩니다. 민감 프로젝트에 주의하세요."
+    "warning": "코드가 OpenAI API로 전송됩니다. 민감 프로젝트에 주의하세요."
   }
 }
 ```

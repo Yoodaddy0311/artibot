@@ -181,7 +181,7 @@ CONTINUE (practices working well):
 - **checkpoint**: `/checkpoint` creates a detailed snapshot; worklog creates a lightweight summary
 - **continuous-learning**: Worklog entries can feed pattern extraction
 - **vibe-coding**: After DEV protocol completion, auto-append worklog if significant work done
-- **git-workflow**: Commit/push triggers worklog append
+- **git-unified (workflow)**: Commit/push triggers worklog append (see `references/workflow.md`)
 
 ## Workflow Checklist
 

@@ -33,7 +33,7 @@ maxTurns: 25
 skills:
   - persona-frontend
   - coding-standards
-  - lang-typescript
+  - lang-reference
 memory:
   scope: project
 category: expert

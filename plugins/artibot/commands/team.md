@@ -76,6 +76,24 @@ Break the user's request into independent work units:
 - Each unit should be independently completable
 - Choose the best specialist agent for each unit
 
+### Auto-Effort Pre-injection (4.7 Agentic)
+
+Before spawning teammates, `scripts/hooks/runtime-prompt.js` has already written:
+- `runtime/current-effort.json` — 현재 커맨드의 effort level (xhigh/high/medium/low)
+- `runtime/current-task-budget.json` — 해당 effort에 매핑된 max_tokens budget
+
+The orchestrator MUST:
+1. Phase 1 시작 직후 두 파일을 Read (없으면 effort=xhigh, budget=128000 기본값 적용)
+2. 각 팀원의 초기 프롬프트 맨 앞에 아래 디렉티브를 포함:
+   ```
+   [artibot:effort level={effort} command=team][artibot:task-budget max_tokens={budget}]
+
+   {원래 teammate prompt}
+   ```
+3. **Lower-only override allowed mid-team** — 예: Phase 4 review 팀원은 `high` 또는 `medium`로 하향 가능
+4. **Up-escalate requires user approval** — 팀원이 기본값보다 더 높은 effort/budget를 요청하면 유저 확인 필요
+5. `lib/runtime/middleware/tasks.js`는 위 파일을 자동 Read해 `task.meta.effort`, `task.meta.taskBudget`을 채워주므로, TaskCreate 시 meta를 그대로 넘기면 된다
+
 ### Phase 2: TEAM SETUP (Leader only)
 ```
 TeamCreate(

@@ -65,6 +65,84 @@ export async function writeJsonFile(filePath, data, indent = 2) {
 }
 
 /**
+ * Build a unique temp sibling path for atomic writes. Includes pid + hrtime +
+ * random suffix so concurrent writers in the same process collide only
+ * astronomically rarely (avoids the "two writers pick the same ms" race).
+ *
+ * @param {string} filePath - Target absolute path.
+ * @returns {string} Temp sibling path.
+ */
+function buildAtomicTmpPath(filePath) {
+  const rand = Math.random().toString(36).slice(2, 8);
+  return `${filePath}.tmp.${process.pid}.${Date.now()}.${rand}`;
+}
+
+/**
+ * Clean up a stray tmp file, swallowing ENOENT. Never throws.
+ *
+ * @param {string} tmpPath
+ * @returns {void}
+ */
+function cleanupTmpSync(tmpPath) {
+  try { fsSync.unlinkSync(tmpPath); } catch { /* best-effort */ }
+}
+
+/**
+ * Atomic JSON write with temp file + rename. Guaranteed crash-safe: readers
+ * never observe a partial file. Creates parent directory first, then writes
+ * a unique tmp sibling, then renames into place. If rename fails, the tmp
+ * file is removed so we never leak `.tmp.*` droppings.
+ *
+ * Use this for any JSON state file that must survive crashes / concurrent
+ * writes (self-control state, decision trail, kill-switch state, first-run
+ * guard, cooldown files, etc).
+ *
+ * @param {string} filePath - Absolute path to the JSON file.
+ * @param {object} data - Data to serialize as JSON.
+ * @param {number} [indent=2] - Number of spaces for indentation.
+ * @returns {Promise<void>}
+ * @example
+ * await atomicWriteJson('/path/runtime/state.json', { globalRuns: 3 });
+ */
+export async function atomicWriteJson(filePath, data, indent = 2) {
+  await ensureDir(path.dirname(filePath));
+  const tmp = buildAtomicTmpPath(filePath);
+  const content = JSON.stringify(data, null, indent) + '\n';
+  try {
+    await fs.writeFile(tmp, content, 'utf-8');
+    await fs.rename(tmp, filePath);
+  } catch (err) {
+    cleanupTmpSync(tmp);
+    throw err;
+  }
+}
+
+/**
+ * Synchronous variant of `atomicWriteJson`. Intended for startup-critical
+ * paths (hooks, sync loggers, kill-switch config flip) where an async API
+ * would complicate the call site. Identical crash-safety semantics.
+ *
+ * @param {string} filePath - Absolute path to the JSON file.
+ * @param {object} data - Data to serialize as JSON.
+ * @param {number} [indent=2] - Number of spaces for indentation.
+ * @returns {void}
+ * @example
+ * atomicWriteJsonSync('/path/runtime/decision-trail.json', trail);
+ */
+export function atomicWriteJsonSync(filePath, data, indent = 2) {
+  ensureDirSync(path.dirname(filePath));
+  const tmp = buildAtomicTmpPath(filePath);
+  const content = JSON.stringify(data, null, indent) + '\n';
+  try {
+    fsSync.writeFileSync(tmp, content, 'utf-8');
+    fsSync.renameSync(tmp, filePath);
+  } catch (err) {
+    cleanupTmpSync(tmp);
+    throw err;
+  }
+}
+
+/**
  * Read a file as a UTF-8 string.
  * Returns `null` if the file does not exist.
  *
@@ -116,6 +194,26 @@ export function ensureDirSync(dirPath) {
     fsSync.mkdirSync(dirPath, { recursive: true });
   } catch (err) {
     if (err.code !== 'EEXIST') throw err;
+  }
+}
+
+/**
+ * Synchronous read-and-parse of a JSON file with a fallback.
+ * Intended for hot, synchronous paths (hooks, middleware) where an async
+ * API would complicate the call site. Returns `fallback` when the file is
+ * missing, unreadable, or contains invalid JSON.
+ *
+ * @template T
+ * @param {string} filePath - Absolute path to the JSON file.
+ * @param {T} [fallback=null] - Value returned on any failure.
+ * @returns {object|T} Parsed JSON object, or `fallback` on failure.
+ */
+export function readJsonFileSync(filePath, fallback = null) {
+  try {
+    if (!fsSync.existsSync(filePath)) return fallback;
+    return JSON.parse(fsSync.readFileSync(filePath, 'utf-8'));
+  } catch {
+    return fallback;
   }
 }
 

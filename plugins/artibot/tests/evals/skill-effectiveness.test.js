@@ -61,10 +61,10 @@ describe('evaluateSkill()', () => {
 
   it('returns zeros when no test cases provided', async () => {
     const harness = createSkillEvalHarness();
-    const result = await harness.evaluateSkill('lang-typescript', []);
+    const result = await harness.evaluateSkill('lang-reference', []);
 
     expect(result).toMatchObject({
-      skillName: 'lang-typescript',
+      skillName: 'lang-reference',
       baseline: 0,
       withSkill: 0,
       delta: 0,
@@ -82,9 +82,9 @@ describe('evaluateSkill()', () => {
     });
 
     const tc = harness.createTestCase('Test', 'input', { expected: true });
-    const result = await harness.evaluateSkill('lang-typescript', [tc]);
+    const result = await harness.evaluateSkill('lang-reference', [tc]);
 
-    expect(result.skillName).toBe('lang-typescript');
+    expect(result.skillName).toBe('lang-reference');
     expect(result.baseline).toBe(0.3);
     expect(result.withSkill).toBe(0.9);
     expect(result.delta).toBe(0.6);
@@ -140,14 +140,14 @@ describe('evaluateSkill()', () => {
     });
 
     const tc = harness.createTestCase('Test', 'input', {});
-    await harness.evaluateSkill('lang-python', [tc]);
+    await harness.evaluateSkill('lang-reference', [tc]);
 
     expect(emit).toHaveBeenCalledTimes(1);
     expect(emit).toHaveBeenCalledWith(
       'feature:skill-eval',
       expect.objectContaining({
         type: 'skill-evaluated',
-        skillName: 'lang-python',
+        skillName: 'lang-reference',
       }),
     );
   });
@@ -293,7 +293,7 @@ describe('generateReport()', () => {
     const harness = createSkillEvalHarness();
     const results = [
       {
-        skillName: 'lang-typescript',
+        skillName: 'lang-reference',
         baseline: 0.3,
         withSkill: 0.9,
         delta: 0.6,
@@ -305,7 +305,7 @@ describe('generateReport()', () => {
     const report = harness.generateReport(results);
 
     expect(report).toContain('SKILL EFFECTIVENESS REPORT');
-    expect(report).toContain('lang-typescript');
+    expect(report).toContain('lang-reference');
     expect(report).toContain('TOP 5');
     expect(report).toContain('BOTTOM 5');
     expect(report).toContain('200.0%');
