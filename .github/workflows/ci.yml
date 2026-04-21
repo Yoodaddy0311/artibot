@@ -27,10 +27,10 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: ${{ matrix.node-version }}
           cache: npm
@@ -71,7 +71,7 @@ jobs:
 
       - name: Upload runtime eval artifacts
         if: always() && matrix.node-version == 22
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: runtime-evals-node-${{ matrix.node-version }}
           path: |
@@ -82,7 +82,7 @@ jobs:
 
       - name: Upload coverage report
         if: always() && matrix.node-version == 22
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: coverage-report-node-${{ matrix.node-version }}
           path: |
