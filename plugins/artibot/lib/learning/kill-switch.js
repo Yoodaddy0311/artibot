@@ -26,10 +26,10 @@
  * @module lib/learning/kill-switch
  */
 
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
-import { readJsonFile, writeJsonFile } from '../core/file.js';
+import { atomicWriteJsonSync, readJsonFile, writeJsonFile } from '../core/file.js';
 import { getPluginRoot } from '../core/platform.js';
 
 // ---------------------------------------------------------------------------
@@ -83,27 +83,6 @@ function resolveEmergencyStatePath(config, pluginRoot) {
 /** @returns {string} */
 function resolveConfigJsonPath(pluginRoot) {
   return path.join(pluginRoot || getPluginRoot(), 'artibot.config.json');
-}
-
-// ---------------------------------------------------------------------------
-// Atomic JSON write (used for config.json and emergency state)
-// ---------------------------------------------------------------------------
-
-/**
- * Atomic JSON write. Creates parent dirs, tolerates EEXIST, rename-over.
- * @param {string} filePath
- * @param {object} data
- */
-function atomicWriteJson(filePath, data) {
-  const dir = path.dirname(filePath);
-  try {
-    mkdirSync(dir, { recursive: true });
-  } catch (err) {
-    if (err.code !== 'EEXIST') throw err;
-  }
-  const tmp = `${filePath}.tmp.${process.pid}.${Date.now()}`;
-  writeFileSync(tmp, `${JSON.stringify(data, null, 2)}\n`, 'utf-8');
-  renameSync(tmp, filePath);
 }
 
 // ---------------------------------------------------------------------------
@@ -213,7 +192,7 @@ function setMasterEnabled(enabled, pluginRoot) {
     cfg.ago = cfg.ago || {};
     cfg.ago.selfControl = cfg.ago.selfControl || {};
     cfg.ago.selfControl.masterEnabled = Boolean(enabled);
-    atomicWriteJson(cfgPath, cfg);
+    atomicWriteJsonSync(cfgPath, cfg);
     return true;
   } catch (err) {
     process.stderr.write(`[artibot:kill-switch] config write failed: ${err.message}\n`);
@@ -336,7 +315,7 @@ export async function resetKillSwitch(featureOrConfig, maybeConfig, opts = {}) {
   const config = featureOrConfig;
   const emergencyPath = resolveEmergencyStatePath(config, opts.pluginRoot);
   const fresh = { failures: [], tripped: false, trippedAt: null, cooldownUntil: null };
-  try { atomicWriteJson(emergencyPath, fresh); } catch { /* ignore */ }
+  try { atomicWriteJsonSync(emergencyPath, fresh); } catch { /* ignore */ }
 
   // Also clear v1 state
   const v1Path = resolveStatePath(config, opts.pluginRoot);
@@ -382,7 +361,7 @@ export async function getKillSwitchState(config, opts = {}) {
     changed = true;
   }
   if (changed) {
-    try { atomicWriteJson(filePath, state); } catch { /* ignore */ }
+    try { atomicWriteJsonSync(filePath, state); } catch { /* ignore */ }
   }
 
   return {
@@ -427,7 +406,7 @@ async function recordEmergencyFailure(entry, config, opts = {}) {
     );
   }
 
-  try { atomicWriteJson(filePath, state); } catch { /* ignore */ }
+  try { atomicWriteJsonSync(filePath, state); } catch { /* ignore */ }
 
   return {
     tripped: state.tripped,

@@ -15,9 +15,10 @@
  * @module lib/learning/first-run-guard
  */
 
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
+import { atomicWriteJsonSync } from '../core/file.js';
 import { getPluginRoot } from '../core/platform.js';
 
 const DEFAULT_OBSERVE_RUNS = 5;
@@ -34,23 +35,6 @@ function resolveStatePath(config, opts = {}) {
   if (path.isAbsolute(rel)) return rel;
   const root = opts.pluginRoot || getPluginRoot();
   return path.join(root, rel);
-}
-
-/**
- * Atomic JSON write. Creates parent dir and renames a .tmp sibling.
- * @param {string} filePath
- * @param {object} data
- */
-function atomicWriteJson(filePath, data) {
-  const dir = path.dirname(filePath);
-  try {
-    mkdirSync(dir, { recursive: true });
-  } catch (err) {
-    if (err.code !== 'EEXIST') throw err;
-  }
-  const tmp = `${filePath}.tmp.${process.pid}.${Date.now()}`;
-  writeFileSync(tmp, `${JSON.stringify(data, null, 2)}\n`, 'utf-8');
-  renameSync(tmp, filePath);
 }
 
 /**
@@ -160,7 +144,7 @@ export async function bumpRunCounter(featureName, config, opts = {}) {
     transitioned = true;
   }
 
-  atomicWriteJson(filePath, state);
+  atomicWriteJsonSync(filePath, state);
 
   const mode = state.globalRuns >= threshold ? 'active' : 'observe';
   return {
@@ -206,7 +190,7 @@ export async function shouldObserveOnly(featureName, config, opts = {}) {
 export async function resetFirstRunState(config, opts = {}) {
   const filePath = resolveStatePath(config, opts);
   const fresh = { globalRuns: 0, features: {}, transitions: [] };
-  atomicWriteJson(filePath, fresh);
+  atomicWriteJsonSync(filePath, fresh);
   return { reset: true, path: filePath };
 }
 

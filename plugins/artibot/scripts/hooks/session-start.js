@@ -12,123 +12,144 @@ import os from 'node:os';
 import { checkForUpdate } from '../../lib/core/version-checker.js';
 import { createErrorHandler } from '../../lib/core/hook-utils.js';
 
-async function main() {
-  const raw = await readStdin();
-  parseJSON(raw);
-
-  // Set auto-compact threshold for team sessions (lower = more aggressive)
-  if (!process.env.CLAUDE_CODE_AUTO_COMPACT_INPUT_TOKENS) {
-    process.env.CLAUDE_CODE_AUTO_COMPACT_INPUT_TOKENS = '180000';
-  }
-
-  // Environment detection
-  const env = {
+/**
+ * Build the environment descriptor used in the welcome banner and downstream
+ * helpers. Snapshots platform/arch/node/plugin-root at session start.
+ * @returns {{ platform: string, arch: string, nodeVersion: string, pluginRoot: string }}
+ */
+function detectEnvironment() {
+  return {
     platform: os.platform(),
     arch: os.arch(),
     nodeVersion: process.version,
     pluginRoot: getPluginRoot(),
   };
+}
 
-  // Load artibot.config.json
-  let config = {};
-  const configPath = resolveConfigPath('artibot.config.json');
+/**
+ * Load artibot.config.json. Returns `{}` when missing/unreadable so callers
+ * never need to guard against null.
+ * @returns {object}
+ */
+function loadConfig() {
   try {
-    config = JSON.parse(readFileSync(configPath, 'utf-8'));
+    const configPath = resolveConfigPath('artibot.config.json');
+    return JSON.parse(readFileSync(configPath, 'utf-8'));
   } catch {
-    // Use defaults if config missing
+    return {};
   }
+}
 
-  // P3-3: 1M context opt-in. When `runtime.longContext.enabled` is true in
-  // artibot.config.json, append the beta header to ANTHROPIC_BETA (advisory,
-  // child-process only — Claude Code picks it up when spawned from this env)
-  // and persist runtime/long-context-active.json so statusline/observability
-  // surfaces the activated state.
+/**
+ * P3-3: 1M context opt-in. When `runtime.longContext.enabled` is true in
+ * artibot.config.json, append the beta header to ANTHROPIC_BETA (advisory,
+ * child-process only — Claude Code picks it up when spawned from this env)
+ * and persist runtime/long-context-active.json so statusline/observability
+ * surfaces the activated state.
+ * @param {object} config
+ * @param {string} pluginRoot
+ */
+function activateLongContext(config, pluginRoot) {
   try {
     const longContext = config?.runtime?.longContext;
-    if (longContext && longContext.enabled === true) {
-      const betaHeader = longContext.betaHeader || 'context-1m-2025-08-01';
-      const existing = process.env.ANTHROPIC_BETA || '';
-      const merged = existing
-        ? Array.from(new Set(existing.split(',').map((s) => s.trim()).filter(Boolean).concat(betaHeader))).join(',')
-        : betaHeader;
-      process.env.ANTHROPIC_BETA = merged;
+    if (!longContext || longContext.enabled !== true) return;
 
-      const runtimeDir = path.join(env.pluginRoot, 'runtime');
-      mkdirSync(runtimeDir, { recursive: true });
-      writeFileSync(
-        path.join(runtimeDir, 'long-context-active.json'),
-        JSON.stringify({
-          enabled: true,
-          betaHeader,
-          activatedAt: new Date().toISOString(),
-        }) + '\n',
-      );
-    }
+    const betaHeader = longContext.betaHeader || 'context-1m-2025-08-01';
+    const existing = process.env.ANTHROPIC_BETA || '';
+    process.env.ANTHROPIC_BETA = existing
+      ? Array.from(new Set(existing.split(',').map((s) => s.trim()).filter(Boolean).concat(betaHeader))).join(',')
+      : betaHeader;
+
+    const runtimeDir = path.join(pluginRoot, 'runtime');
+    mkdirSync(runtimeDir, { recursive: true });
+    writeFileSync(
+      path.join(runtimeDir, 'long-context-active.json'),
+      JSON.stringify({
+        enabled: true,
+        betaHeader,
+        activatedAt: new Date().toISOString(),
+      }) + '\n',
+    );
   } catch {
     // Non-critical: long-context activation is advisory
   }
+}
 
-  // Resolve home directory once for use throughout
-  const home = process.env.USERPROFILE || process.env.HOME || '';
-
-  // Restore previous session state via lib/context/session module
-  let previousState = null;
+/**
+ * Restore previous session state. Tries lib/context/session module first;
+ * falls back to manual state file read.
+ * @param {string} pluginRoot
+ * @param {string} home
+ * @returns {Promise<object|null>}
+ */
+async function loadPreviousState(pluginRoot, home) {
   try {
-    const sessionModPath = path.join(env.pluginRoot, 'lib', 'context', 'session.js');
-    const { loadSessionState } = await import(
-      toFileUrl(sessionModPath)
-    );
+    const sessionModPath = path.join(pluginRoot, 'lib', 'context', 'session.js');
+    const { loadSessionState } = await import(toFileUrl(sessionModPath));
     const state = await loadSessionState();
-    if (state && state.sessionId) {
-      previousState = state;
-    }
+    if (state && state.sessionId) return state;
   } catch {
-    // Fallback: manual state loading if session module fails
-    const statePath = path.join(home, '.claude', 'artibot-state.json');
-    if (existsSync(statePath)) {
-      try {
-        previousState = JSON.parse(readFileSync(statePath, 'utf-8'));
-      } catch {
-        // Ignore corrupted state
-      }
+    // Fall through to manual loading
+  }
+  const statePath = path.join(home, '.claude', 'artibot-state.json');
+  if (existsSync(statePath)) {
+    try {
+      return JSON.parse(readFileSync(statePath, 'utf-8'));
+    } catch {
+      // Ignore corrupted state
     }
   }
+  return null;
+}
 
-  // Session Memory: recall relevant context from past sessions
-  let sessionRecall = null;
+/**
+ * Session Memory: recall relevant context from past sessions.
+ * @param {string} pluginRoot
+ * @returns {Promise<Array|null>}
+ */
+async function recallSessionMemory(pluginRoot) {
   try {
-    const sessionMemoryPath = path.join(env.pluginRoot, 'lib', 'learning', 'session-memory.js');
+    const sessionMemoryPath = path.join(pluginRoot, 'lib', 'learning', 'session-memory.js');
     const { createSessionMemory } = await import(toFileUrl(sessionMemoryPath));
     const sessionMemory = createSessionMemory();
-    sessionRecall = await sessionMemory.recall(process.cwd(), 5);
+    return await sessionMemory.recall(process.cwd(), 5);
   } catch {
-    // Non-critical: session memory recall is best-effort
+    return null;
   }
+}
 
-  // Collective Intelligence: load cross-project pattern recommendations
-  let collectiveTop = null;
+/**
+ * Collective Intelligence: load cross-project pattern recommendations.
+ * @param {string} pluginRoot
+ * @returns {Promise<object|null>}
+ */
+async function loadCollectiveTop(pluginRoot) {
   try {
-    const pluginRoot = env.pluginRoot;
     const hubPath = path.join(pluginRoot, 'lib', 'swarm', 'collective-hub.js');
     const persistPath = path.join(pluginRoot, 'lib', 'swarm', 'swarm-persistence.js');
     const { generateWeeklyTop } = await import(toFileUrl(hubPath));
     const { loadFromDisk } = await import(toFileUrl(persistPath));
     const store = await loadFromDisk();
     if (store?.patterns?.length > 0) {
-      collectiveTop = generateWeeklyTop(store.patterns, 5);
+      return generateWeeklyTop(store.patterns, 5);
     }
   } catch {
-    // Non-critical: collective intelligence is best-effort
+    // Non-critical
   }
+  return null;
+}
 
-  const version = config.version || '1.0.0';
-  const restored = previousState ? ` | Session restored from ${previousState.startedAt || 'unknown'}` : '';
-
-  // Detect Agent Teams capability
+/**
+ * Detect Agent Teams orchestration mode. Reads env + settings.json and
+ * emits a stderr advisory when the env is not configured. Never modifies
+ * settings.json.
+ * @param {string} home
+ * @returns {{ teamMode: string, setupHint: string }}
+ */
+function detectTeamMode(home) {
   const agentTeamsEnv = process.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS;
   const hasAgentTeams = agentTeamsEnv === '1' || agentTeamsEnv === 'true';
 
-  // Check settings.json for Agent Teams env configuration
   let settingsHasTeamEnv = false;
   const settingsPath = path.join(home, '.claude', 'settings.json');
   if (existsSync(settingsPath)) {
@@ -141,29 +162,37 @@ async function main() {
     }
   }
 
-  // Determine orchestration mode (advisory only — never modify settings.json)
-  let teamMode;
-  let setupHint = '';
   if (hasAgentTeams) {
-    teamMode = 'agent-teams (full)';
-  } else if (settingsHasTeamEnv) {
-    teamMode = 'agent-teams (restart required)';
-    setupHint = '\n  Restart Claude Code to activate Agent Teams.';
-  } else {
-    teamMode = 'sub-agent (fallback)';
-    setupHint = '\n  Enable full team mode: Add {"env":{"CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS":"1"}} to ~/.claude/settings.json';
-    process.stderr.write(
-      '[artibot] Agent Teams not enabled. Add to ~/.claude/settings.json:\n' +
-      '  "env": { "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1" }\n'
-    );
+    return { teamMode: 'agent-teams (full)', setupHint: '' };
   }
+  if (settingsHasTeamEnv) {
+    return {
+      teamMode: 'agent-teams (restart required)',
+      setupHint: '\n  Restart Claude Code to activate Agent Teams.',
+    };
+  }
+  process.stderr.write(
+    '[artibot] Agent Teams not enabled. Add to ~/.claude/settings.json:\n' +
+    '  "env": { "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1" }\n'
+  );
+  return {
+    teamMode: 'sub-agent (fallback)',
+    setupHint: '\n  Enable full team mode: Add {"env":{"CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS":"1"}} to ~/.claude/settings.json',
+  };
+}
 
+/**
+ * Build the initial banner lines including version, platform, team mode,
+ * session-memory summary, and collective-intelligence teaser.
+ * @param {object} params
+ * @returns {string[]}
+ */
+function buildBannerLines({ version, env, teamMode, setupHint, previousState, sessionRecall, collectiveTop }) {
+  const restored = previousState ? ` | Session restored from ${previousState.startedAt || 'unknown'}` : '';
   const lines = [
     `Artibot v${version} initialized`,
     `Platform: ${env.platform}/${env.arch} | Node ${env.nodeVersion} | Mode: ${teamMode}${restored}${setupHint}`,
   ];
-
-  // Append session memory recall summary if available
   if (sessionRecall && sessionRecall.length > 0) {
     const topics = sessionRecall
       .map((r) => r.memory?.keywords?.slice(0, 3).join(', '))
@@ -171,79 +200,96 @@ async function main() {
       .join(' | ');
     lines.push(`Session memory: ${sessionRecall.length} relevant memories recalled (${topics})`);
   }
-
   if (collectiveTop?.patterns?.length > 0) {
     lines.push(`| Collective: ${collectiveTop.patterns.length} cross-project patterns available`);
   }
+  return lines;
+}
 
-  // AGO Track G6: surface pending next-session suggestions from prior session.
-  // Best-effort, never blocks start.
+/**
+ * AGO Track G6/G10: surface pending advisor suggestions + macro suggestions.
+ * Best-effort, never blocks start.
+ * @param {string} pluginRoot
+ * @param {object} config
+ * @param {string[]} lines
+ */
+async function surfaceAdvisoryMessages(pluginRoot, config, lines) {
   try {
-    const advisorPath = path.join(env.pluginRoot, 'lib', 'learning', 'auto-spawn-advisor.js');
+    const advisorPath = path.join(pluginRoot, 'lib', 'learning', 'auto-spawn-advisor.js');
     const { readPendingSuggestions } = await import(toFileUrl(advisorPath));
-    const pending = await readPendingSuggestions(env.pluginRoot);
+    const pending = await readPendingSuggestions(pluginRoot);
     if (pending.length > 0) {
       lines.push(`[artibot:pending-suggestions count=${pending.length}]`);
     }
   } catch {
-    // Non-critical: advisor suggestions are advisory-only.
+    // Non-critical
   }
-
-  // AGO Track G10: surface pending macro-learning suggestions.
-  // Suggest-only — user still must explicitly approve via a user-facing flow.
   try {
-    const macroPath = path.join(env.pluginRoot, 'lib', 'learning', 'macro-learner.js');
+    const macroPath = path.join(pluginRoot, 'lib', 'learning', 'macro-learner.js');
     const { getMacroSuggestions } = await import(toFileUrl(macroPath));
-    const macroSuggestions = await getMacroSuggestions(env.pluginRoot, config);
+    const macroSuggestions = await getMacroSuggestions(pluginRoot, config);
     const macroPending = macroSuggestions.filter((s) => s && s.status === 'pending');
     if (macroPending.length > 0) {
       lines.push(`[artibot:macro-suggestions count=${macroPending.length}]`);
     }
   } catch {
-    // Non-critical: macro suggestions surfacing is advisory-only.
+    // Non-critical
   }
+}
 
-  // AGO Self-Control Wave 2: First-Run Safe Mode + welcome + active-mode banner.
-  // Non-blocking: if the module or state file is unavailable, skip silently.
-  // Only emits banners when masterEnabled is true (default).
+/**
+ * AGO Self-Control Wave 2: First-Run Safe Mode welcome + active-mode banner.
+ * Non-blocking. Only emits banners when masterEnabled is true (default).
+ * @param {string} pluginRoot
+ * @param {object} config
+ * @param {string[]} lines
+ */
+async function maybeEmitFirstRunBanner(pluginRoot, config, lines) {
   try {
     const masterEnabled = config?.ago?.selfControl?.masterEnabled !== false;
-    if (masterEnabled) {
-      const firstRunPath = path.join(env.pluginRoot, 'lib', 'learning', 'first-run-guard.js');
-      const { getFirstRunState } = await import(toFileUrl(firstRunPath));
-      const firstRunState = await getFirstRunState(config);
-      const threshold = config?.ago?.selfControl?.firstRunMode?.observeRuns || 5;
+    if (!masterEnabled) return;
 
-      // First-install welcome — shown once (marker under runtime/).
-      const runtimeDir = path.join(env.pluginRoot, 'runtime');
-      const welcomeMarker = path.join(runtimeDir, 'self-control-welcomed.marker');
-      if (!existsSync(welcomeMarker)) {
-        lines.push(
-          '[artibot:welcome] Artibot은 기본 ON 모드로 시작됐어요. 처음 5회는 관찰만 하며 학습합니다. 끄려면 artibot.config.json의 ago.selfControl.masterEnabled=false.',
-        );
-        try {
-          mkdirSync(runtimeDir, { recursive: true });
-          writeFileSync(welcomeMarker, new Date().toISOString() + '\n', 'utf-8');
-        } catch {
-          // ignore marker write failure
-        }
-      }
+    const firstRunPath = path.join(pluginRoot, 'lib', 'learning', 'first-run-guard.js');
+    const { getFirstRunState } = await import(toFileUrl(firstRunPath));
+    const firstRunState = await getFirstRunState(config);
+    const threshold = config?.ago?.selfControl?.firstRunMode?.observeRuns || 5;
 
-      if (firstRunState.mode === 'observe') {
-        lines.push(
-          `[artibot:first-run-mode runs=${firstRunState.runsSoFar}/${threshold} — 자가 통제가 관찰 모드입니다. ${threshold}회 실행 후 자동 활성화됩니다.]`,
-        );
-      } else {
-        lines.push('[artibot:active-mode] 자가 관리 엔진 활성 상태 (masterEnabled=true)');
+    const runtimeDir = path.join(pluginRoot, 'runtime');
+    const welcomeMarker = path.join(runtimeDir, 'self-control-welcomed.marker');
+    if (!existsSync(welcomeMarker)) {
+      lines.push(
+        '[artibot:welcome] Artibot은 기본 ON 모드로 시작됐어요. 처음 5회는 관찰만 하며 학습합니다. 끄려면 artibot.config.json의 ago.selfControl.masterEnabled=false.',
+      );
+      try {
+        mkdirSync(runtimeDir, { recursive: true });
+        writeFileSync(welcomeMarker, new Date().toISOString() + '\n', 'utf-8');
+      } catch {
+        // ignore marker write failure
       }
     }
-  } catch {
-    // Non-critical: first-run status is advisory-only.
-  }
 
-  // AGO Self-Control Wave 2: Emergency Kill Switch status.
+    if (firstRunState.mode === 'observe') {
+      lines.push(
+        `[artibot:first-run-mode runs=${firstRunState.runsSoFar}/${threshold} — 자가 통제가 관찰 모드입니다. ${threshold}회 실행 후 자동 활성화됩니다.]`,
+      );
+    } else {
+      lines.push('[artibot:active-mode] 자가 관리 엔진 활성 상태 (masterEnabled=true)');
+    }
+  } catch {
+    // Non-critical
+  }
+}
+
+/**
+ * AGO Self-Control Wave 2: Emergency Kill Switch status. Appends a warning
+ * line when the kill switch is tripped.
+ * @param {string} pluginRoot
+ * @param {object} config
+ * @param {string[]} lines
+ */
+async function appendKillSwitchStatus(pluginRoot, config, lines) {
   try {
-    const ksPath = path.join(env.pluginRoot, 'lib', 'learning', 'kill-switch.js');
+    const ksPath = path.join(pluginRoot, 'lib', 'learning', 'kill-switch.js');
     const { getKillSwitchState } = await import(toFileUrl(ksPath));
     const ksState = await getKillSwitchState(config);
     if (ksState.tripped) {
@@ -252,16 +298,21 @@ async function main() {
       );
     }
   } catch {
-    // Non-critical: kill-switch status is advisory-only.
+    // Non-critical
   }
+}
 
-  // Non-blocking update notification — any error is swallowed.
-  // Wrapped with a 2000ms outer timeout so the update check never consumes
-  // more than 2 seconds, leaving ample headroom within the 5000ms hook limit.
-  // CRITICAL: the timer MUST be cleared after Promise.race settles, otherwise
-  // the unreferenced pending timer keeps Node's event loop alive for the full
-  // 2000ms even when updatePromise already resolved — adding ~2s to session
-  // start hook latency. clearTimeout() fixes this.
+/**
+ * Non-blocking update notification — any error is swallowed. Wrapped with a
+ * 2000ms outer timeout so the update check never consumes more than 2 seconds,
+ * leaving ample headroom within the 5000ms hook limit. CRITICAL: the timer
+ * MUST be cleared after Promise.race settles, otherwise the unreferenced
+ * pending timer keeps Node's event loop alive for the full 2000ms.
+ * @param {string} version
+ * @param {string} home
+ * @param {string[]} lines
+ */
+async function checkUpdateBounded(version, home, lines) {
   try {
     const cacheDir = path.join(home, '.claude', 'artibot');
     const updatePromise = checkForUpdate(version, cacheDir);
@@ -283,12 +334,17 @@ async function main() {
   } catch {
     // Never block session start on version-check failures
   }
+}
 
-  // Phase 1 Quick Win: refresh skill hash cache if stale.
-  // Wrapped in try/catch — must NEVER block session start.
-  // Only writes to stderr; stdout JSON contract is preserved.
+/**
+ * Phase 1 Quick Win: refresh skill hash cache if stale. Wrapped in try/catch
+ * — must NEVER block session start. Only writes to stderr; stdout JSON
+ * contract is preserved.
+ * @param {string} pluginRoot
+ */
+async function primeSkillCache(pluginRoot) {
   try {
-    const cacheModPath = path.join(env.pluginRoot, 'lib', 'core', 'skill-hash-cache.js');
+    const cacheModPath = path.join(pluginRoot, 'lib', 'core', 'skill-hash-cache.js');
     const { refreshIfStale } = await import(toFileUrl(cacheModPath));
     const cache = await refreshIfStale();
     if (cache && cache.skills) {
@@ -298,34 +354,63 @@ async function main() {
   } catch (err) {
     process.stderr.write(`[artibot] skill-hash cache refresh skipped: ${err.message}\n`);
   }
+}
 
-  // Swarm auto-detect: if this device has a swarm profile shipped with the
-  // fork but isn't opted in yet, automatically activate it (one-time per
-  // repoUrl + machine). Non-blocking background spawn, stderr only.
-  //
-  // Trust model: a committed swarm-profile.json in the user's own fork is
-  // treated as implicit consent. User can still explicitly opt out via
-  // swarm-init.js --reset; the auto-applied marker respects optedOutAt.
+/**
+ * Swarm auto-detect: if this device has a swarm profile shipped with the
+ * fork but isn't opted in yet, automatically activate it. Fire-and-forget
+ * background spawn, stderr only.
+ * @param {string} pluginRoot
+ */
+async function maybeSwarmAutodetect(pluginRoot) {
   try {
-    const autodetectPath = path.join(env.pluginRoot, 'scripts', 'swarm-autodetect.js');
+    const autodetectPath = path.join(pluginRoot, 'scripts', 'swarm-autodetect.js');
     const { existsSync: fsExists } = await import('node:fs');
-    if (fsExists(autodetectPath)) {
-      const { spawn } = await import('node:child_process');
-      // Fire and forget — don't await, don't block.
-      const proc = spawn(process.execPath, [autodetectPath, '--auto'], {
-        cwd: env.pluginRoot,
-        stdio: ['ignore', 'ignore', 'inherit'],
-        detached: false,
-      });
-      proc.unref();
-    }
+    if (!fsExists(autodetectPath)) return;
+    const { spawn } = await import('node:child_process');
+    const proc = spawn(process.execPath, [autodetectPath, '--auto'], {
+      cwd: pluginRoot,
+      stdio: ['ignore', 'ignore', 'inherit'],
+      detached: false,
+    });
+    proc.unref();
   } catch {
     // Never block session start on swarm autodetect failures
   }
+}
 
-  const message = lines.join('\n');
+async function main() {
+  const raw = await readStdin();
+  parseJSON(raw);
 
-  writeStdout({ message });
+  if (!process.env.CLAUDE_CODE_AUTO_COMPACT_INPUT_TOKENS) {
+    process.env.CLAUDE_CODE_AUTO_COMPACT_INPUT_TOKENS = '180000';
+  }
+
+  const env = detectEnvironment();
+  const config = loadConfig();
+  activateLongContext(config, env.pluginRoot);
+
+  const home = process.env.USERPROFILE || process.env.HOME || '';
+  const previousState = await loadPreviousState(env.pluginRoot, home);
+  const sessionRecall = await recallSessionMemory(env.pluginRoot);
+  const collectiveTop = await loadCollectiveTop(env.pluginRoot);
+
+  const version = config.version || '1.0.0';
+  const { teamMode, setupHint } = detectTeamMode(home);
+
+  const lines = buildBannerLines({
+    version, env, teamMode, setupHint, previousState, sessionRecall, collectiveTop,
+  });
+
+  await surfaceAdvisoryMessages(env.pluginRoot, config, lines);
+  await maybeEmitFirstRunBanner(env.pluginRoot, config, lines);
+  await appendKillSwitchStatus(env.pluginRoot, config, lines);
+  await checkUpdateBounded(version, home, lines);
+  await primeSkillCache(env.pluginRoot);
+  await maybeSwarmAutodetect(env.pluginRoot);
+
+  writeStdout({ message: lines.join('\n') });
 }
 
 main().catch(createErrorHandler('session-start', { exit: true }));

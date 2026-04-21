@@ -34,6 +34,7 @@ import { fileURLToPath } from 'node:url';
 import { ensureDir, readJsonFile, writeJsonFile } from '../../lib/core/file.js';
 import { getPluginRoot } from '../../lib/core/platform.js';
 import { recordDecision } from '../../lib/core/decision-trail.js';
+import { resolveSelfControlGates } from '../../lib/learning/self-control-gates.js';
 
 // ---------------------------------------------------------------------------
 // Constants (security-critical — do not weaken)
@@ -217,36 +218,9 @@ export function buildFixPlan(category, now) {
 // ---------------------------------------------------------------------------
 
 /**
- * @param {object} config
- * @param {{pluginRoot?: string}} [opts]
- * @returns {Promise<boolean>}
- */
-async function isAutoPrKillSwitchActive(config, opts = {}) {
-  try {
-    const mod = await import('../../lib/learning/kill-switch.js');
-    return await mod.isKillSwitchTripped(config, { ...opts, feature: 'auto-pr' });
-  } catch {
-    return false;
-  }
-}
-
-/**
- * @param {object} config
- * @param {{pluginRoot?: string}} [opts]
- * @returns {Promise<boolean>}
- */
-async function isAutoPrObserveOnly(config, opts = {}) {
-  try {
-    const mod = await import('../../lib/learning/first-run-guard.js');
-    const state = await mod.shouldObserveOnly('auto-pr', config, opts);
-    await mod.bumpRunCounter('auto-pr', config, opts);
-    return Boolean(state?.shouldObserve);
-  } catch {
-    return false;
-  }
-}
-
-/**
+ * Best-effort record of a critical failure for the auto-pr kill-switch.
+ * Never throws; telemetry failures must not bubble into the runner.
+ *
  * @param {string} error
  * @param {object} config
  * @param {{pluginRoot?: string}} [opts]
@@ -263,6 +237,97 @@ async function recordAutoPrFailure(error, config, opts = {}) {
 // ---------------------------------------------------------------------------
 
 /**
+ * Record a rejection decision and return the rejected result bag.
+ *
+ * @param {object} args
+ * @returns {Promise<{status: 'rejected', reason: string}>}
+ */
+async function rejectWith({ reason, category, extra }) {
+  await recordDecision({
+    subsystem: 'auto-pr-creator',
+    action: 'rejected',
+    reason: extra ? `${reason}: ${extra}` : reason,
+    inputs: { category, ...(extra && reason === 'cooldown' ? { perHourLimit: MAX_PER_HOUR } : {}) },
+  });
+  return { status: 'rejected', reason: extra && reason === 'gate-closed' ? extra : reason };
+}
+
+/**
+ * Pre-flight: resolve all gates, category, cooldown, plan & branch.
+ *
+ * @returns {Promise<{ok: true, plan: object, cooldown: object} | {ok: false, result: object}>}
+ */
+async function preflightAutoPR({ config, pluginRoot, category, now }) {
+  const gate = checkGates(config);
+  if (!gate.open) {
+    return { ok: false, result: await rejectWith({ reason: 'gate-closed', category, extra: gate.reason }) };
+  }
+
+  const gates = await resolveSelfControlGates('auto-pr', config, {
+    pluginRoot, configKey: 'autoPR',
+  });
+  if (!gates.proceed && gates.reason === 'kill-switch tripped') {
+    return { ok: false, result: await rejectWith({ reason: 'kill-switch-tripped', category }) };
+  }
+  // Opt-out already covered by checkGates; gates may also flag observeOnly.
+
+  if (!isCategoryAllowed(config, category)) {
+    return { ok: false, result: await rejectWith({ reason: 'category-not-allowed', category }) };
+  }
+
+  const cooldown = await checkCooldown(pluginRoot, now);
+  if (!cooldown.allowed) {
+    return { ok: false, result: await rejectWith({ reason: 'cooldown', category }) };
+  }
+
+  const plan = buildFixPlan(category, now);
+  const branchCheck = validateBranch(plan.branch);
+  if (!branchCheck.ok) {
+    return { ok: false, result: { status: 'rejected', reason: `bad-branch: ${branchCheck.reason}` } };
+  }
+
+  return { ok: true, plan, cooldown, observeOnly: gates.observeOnly };
+}
+
+/**
+ * Push + create draft PR via injected runImpl. Returns a result bag.
+ *
+ * @returns {Promise<object>}
+ */
+async function pushAndCreatePR({ plan, pluginRoot, runImpl, config, now, cooldownHistory, category }) {
+  const cwd = pluginRoot;
+  await runImpl('git', ['checkout', '-b', plan.branch], { cwd });
+  await runImpl('git', ['commit', '--allow-empty', '-m', plan.title], { cwd });
+  const pushRes = await runImpl('git', ['push', '-u', 'origin', plan.branch], { cwd });
+  if (pushRes.code !== 0) {
+    await recordAutoPrFailure('push-failed', config, { pluginRoot });
+    return { status: 'failed', reason: 'push-failed', branch: plan.branch };
+  }
+
+  const prRes = await runImpl(
+    'gh',
+    ['pr', 'create', '--draft', '--title', plan.title, '--body', plan.body, '--head', plan.branch],
+    { cwd },
+  );
+  await recordAttempt(pluginRoot, now, cooldownHistory);
+
+  const urlMatch = /https?:\/\/\S+/.exec(prRes.stdout || '');
+  const prUrl = urlMatch ? urlMatch[0] : null;
+  await recordDecision({
+    subsystem: 'auto-pr-creator',
+    action: prRes.code === 0 ? 'created' : 'failed',
+    inputs: { category },
+    outputs: { branch: plan.branch, prUrl },
+  });
+
+  if (prRes.code !== 0) {
+    await recordAutoPrFailure('gh-failed', config, { pluginRoot });
+    return { status: 'failed', reason: 'gh-failed', branch: plan.branch };
+  }
+  return { status: 'created', branch: plan.branch, prUrl };
+}
+
+/**
  * @param {object} options
  * @param {object} options.config
  * @param {string} options.pluginRoot
@@ -275,113 +340,38 @@ async function recordAutoPrFailure(error, config, opts = {}) {
  */
 export async function createAutoPR(options) {
   const now = options.now || new Date();
-  const env = options.env || process.env;
   const runImpl = options.runImpl || runCommand;
-  const pluginRoot = options.pluginRoot;
+  const { config, pluginRoot, category } = options;
 
-  const gate = checkGates(options.config, env);
-  if (!gate.open) {
-    await recordDecision({
-      subsystem: 'auto-pr-creator',
-      action: 'rejected',
-      reason: `gate-closed: ${gate.reason}`,
-      inputs: { category: options.category },
-    });
-    return { status: 'rejected', reason: gate.reason };
-  }
-
-  if (await isAutoPrKillSwitchActive(options.config, { pluginRoot })) {
-    await recordDecision({
-      subsystem: 'auto-pr-creator',
-      action: 'rejected',
-      reason: 'kill-switch-tripped',
-      inputs: { category: options.category },
-    });
-    return { status: 'rejected', reason: 'kill-switch-tripped' };
-  }
-
-  if (!isCategoryAllowed(options.config, options.category)) {
-    await recordDecision({
-      subsystem: 'auto-pr-creator',
-      action: 'rejected',
-      reason: 'category-not-allowed',
-      inputs: { category: options.category },
-    });
-    return { status: 'rejected', reason: 'category-not-allowed' };
-  }
-
-  const cd = await checkCooldown(options.pluginRoot, now);
-  if (!cd.allowed) {
-    await recordDecision({
-      subsystem: 'auto-pr-creator',
-      action: 'rejected',
-      reason: 'cooldown',
-      inputs: { category: options.category, perHourLimit: MAX_PER_HOUR },
-    });
-    return { status: 'rejected', reason: 'cooldown' };
-  }
-
-  const plan = buildFixPlan(options.category, now);
-  const branchCheck = validateBranch(plan.branch);
-  if (!branchCheck.ok) {
-    return { status: 'rejected', reason: `bad-branch: ${branchCheck.reason}` };
-  }
+  const pre = await preflightAutoPR({ config, pluginRoot, category, now });
+  if (!pre.ok) return pre.result;
+  const { plan, cooldown, observeOnly } = pre;
 
   if (options.dryRun) {
     await recordDecision({
       subsystem: 'auto-pr-creator',
       action: 'dry-run',
-      inputs: { category: options.category },
+      inputs: { category },
       outputs: { branch: plan.branch },
     });
     return { status: 'dry-run', branch: plan.branch };
   }
 
-  // First-Run Guard: observe-only for the initial N runs. Returns a
-  // "would-create" decision without invoking git/gh.
-  if (await isAutoPrObserveOnly(options.config, { pluginRoot })) {
+  if (observeOnly) {
     await recordDecision({
       subsystem: 'auto-pr-creator',
       action: 'would-create',
       reason: 'first-run observe-only',
-      inputs: { category: options.category },
+      inputs: { category },
       outputs: { branch: plan.branch },
     });
     return { status: 'observe-only', branch: plan.branch };
   }
 
-  const cwd = options.pluginRoot;
-  await runImpl('git', ['checkout', '-b', plan.branch], { cwd });
-  await runImpl('git', ['commit', '--allow-empty', '-m', plan.title], { cwd });
-  const pushRes = await runImpl('git', ['push', '-u', 'origin', plan.branch], { cwd });
-  if (pushRes.code !== 0) {
-    await recordAutoPrFailure('push-failed', options.config, { pluginRoot });
-    return { status: 'failed', reason: 'push-failed', branch: plan.branch };
-  }
-
-  const prRes = await runImpl(
-    'gh',
-    ['pr', 'create', '--draft', '--title', plan.title, '--body', plan.body, '--head', plan.branch],
-    { cwd },
-  );
-
-  await recordAttempt(options.pluginRoot, now, cd.history);
-
-  const urlMatch = /https?:\/\/\S+/.exec(prRes.stdout || '');
-  const prUrl = urlMatch ? urlMatch[0] : null;
-
-  await recordDecision({
-    subsystem: 'auto-pr-creator',
-    action: prRes.code === 0 ? 'created' : 'failed',
-    inputs: { category: options.category },
-    outputs: { branch: plan.branch, prUrl },
+  return pushAndCreatePR({
+    plan, pluginRoot, runImpl, config, now,
+    cooldownHistory: cooldown.history, category,
   });
-
-  if (prRes.code !== 0) {
-    await recordAutoPrFailure('gh-failed', options.config, { pluginRoot });
-    return { status: 'failed', reason: 'gh-failed', branch: plan.branch };
-  }
-  return { status: 'created', branch: plan.branch, prUrl };
 }
 
 // ---------------------------------------------------------------------------

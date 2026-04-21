@@ -248,16 +248,6 @@
       "check": "council",
       "act": "leader"
     },
-    "playbooksLegacy": {
-      "feature": "[leader] plan -> [council] design -> [swarm] implement -> [council] review -> [leader] merge",
-      "bugfix": "[leader] analyze -> [pipeline] fix -> [council] verify",
-      "refactor": "[council] assess -> [pipeline] refactor -> [swarm] test -> [council] review",
-      "security": "[leader] scan -> [council] assess -> [pipeline] fix -> [council] verify",
-      "marketing-campaign": "[leader] strategy -> [council] plan -> [swarm] create -> [council] review -> [leader] launch",
-      "marketing-audit": "[leader] scan -> [council] assess -> [pipeline] optimize -> [council] verify",
-      "content-launch": "[leader] plan -> [swarm] create -> [council] review -> [leader] publish",
-      "competitive-analysis": "[council] research -> [swarm] analyze -> [council] synthesize -> [leader] report"
-    },
     "playbooks": {
       "feature": {
         "nodes": [
@@ -951,6 +941,6 @@
     "defaultModel": "o4-mini",
     "timeout": 60000,
     "reviewOnStop": false,
-    "dataPolicy": "코드가 OpenAI API로 전송됩니다. 민감 프로젝트에 주의하세요."
+    "warning": "코드가 OpenAI API로 전송됩니다. 민감 프로젝트에 주의하세요."
   }
 }

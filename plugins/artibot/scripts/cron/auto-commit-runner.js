@@ -48,6 +48,10 @@ import {
   snapshot,
   validateAgainstBaseline,
 } from '../../lib/learning/rollback-guard.js';
+import {
+  reportCriticalFailure,
+  resolveSelfControlGates,
+} from '../../lib/learning/self-control-gates.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -156,97 +160,23 @@ export function checkGates(config, _env) {
 }
 
 /**
- * Dynamically import kill-switch helpers. Returns inert stubs if the module
- * has not yet been implemented (parallel work in progress).
+ * Assess the current working-tree diff against the configured risk ceiling.
  *
- * @returns {Promise<{isKillSwitchTripped: Function, recordFailure: Function}>}
+ * @param {object} args
+ * @param {string} args.cwd
+ * @param {object} args.gitOps
+ * @param {Function} args.classify
+ * @param {string} args.maxLevel
+ * @param {Function} args.trail
+ * @param {object} args.logger
+ * @returns {Promise<{empty?: boolean, over?: boolean, diff?: object, classification?: object}>}
  */
-async function loadKillSwitch() {
-  try {
-    const mod = await import('../../lib/learning/kill-switch.js');
-    return {
-      isKillSwitchTripped: mod.isKillSwitchTripped || (async () => false),
-      recordFailure: mod.recordFailure || (async () => undefined),
-    };
-  } catch {
-    return {
-      isKillSwitchTripped: async () => false,
-      recordFailure: async () => undefined,
-    };
-  }
-}
-
-/**
- * Dynamically import first-run-guard helpers. Returns inert stubs (always
- * `active`, no-op counter) when the module is missing.
- *
- * @returns {Promise<{shouldObserveOnly: Function, bumpRunCounter: Function}>}
- */
-async function loadFirstRunGuard() {
-  try {
-    const mod = await import('../../lib/learning/first-run-guard.js');
-    return {
-      shouldObserveOnly: mod.shouldObserveOnly || (async () => ({ shouldObserve: false, mode: 'active' })),
-      bumpRunCounter: mod.bumpRunCounter || (async () => undefined),
-    };
-  } catch {
-    return {
-      shouldObserveOnly: async () => ({ shouldObserve: false, mode: 'active' }),
-      bumpRunCounter: async () => undefined,
-    };
-  }
-}
-
-/**
- * Core pipeline. Exported for testability — the wrapper `main()` injects
- * real git/validation deps, tests can inject mocks via `deps`.
- *
- * @param {object} deps
- */
-export async function runAutoCommit(deps) {
-  const {
-    cwd,
-    config,
-    env = process.env,
-    dryRun = false,
-    logger = console,
-    gitOps = { collectDiff, runGit },
-    guard = { snapshot, runValidation, validateAgainstBaseline, rollback },
-    classify = classifyDiff,
-    trail = recordDecision,
-    killSwitch,
-    firstRunGuard,
-  } = deps;
-
-  // Gate 1: user-explicit opt-out.
-  const gate = checkGates(config, env);
-  if (!gate.allowed) {
-    logger.log(`auto-commit: skipped — ${gate.reason}`);
-    return { ran: false, reason: gate.reason };
-  }
-
-  // Gate 2: kill switch (three critical failures in a row auto-disables).
-  const ks = killSwitch || (await loadKillSwitch());
-  if (await ks.isKillSwitchTripped(config)) {
-    logger.log('auto-commit: skipped — kill-switch tripped');
-    await trail({
-      subsystem: 'auto-commit',
-      action: 'refused',
-      reason: 'kill-switch tripped',
-    });
-    return { ran: false, reason: 'kill-switch tripped' };
-  }
-
-  const ac = config.ago.selfControl.autoCommit;
-  const maxLevel = ac.maxRiskLevel || 'low';
-
+async function assessRisk({ cwd, gitOps, classify, maxLevel, trail, logger }) {
   const diff = await gitOps.collectDiff(cwd);
   if (diff.files.length === 0) {
     logger.log('auto-commit: no changes');
-    return { ran: false, reason: 'no changes' };
+    return { empty: true };
   }
-
-  // Critical blocker (always-on): risk ceiling refusal.
   const classification = classify(diff);
   if (!isWithinRiskCeiling(classification.level, maxLevel)) {
     await trail({
@@ -257,81 +187,172 @@ export async function runAutoCommit(deps) {
       outputs: { level: classification.level },
     });
     logger.log(`auto-commit: refused — ${classification.level} > ${maxLevel}`);
-    return { ran: false, reason: 'risk ceiling', classification };
+    return { over: true, diff, classification };
+  }
+  return { diff, classification };
+}
+
+/**
+ * Run baseline validation + take a rollback snapshot.
+ *
+ * @param {object} args
+ * @param {string} args.cwd
+ * @param {object} args.guard
+ * @param {object} args.ac - autoCommit config
+ * @returns {Promise<{ok: boolean, reason?: string, baseline?: object, snap?: object}>}
+ */
+async function snapshotState({ cwd, guard, ac }) {
+  const baseline = await guard.runValidation({ cwd });
+  if (ac.requiredTestsPass && !baseline.tests.passed) {
+    return { ok: false, reason: 'baseline tests failing' };
+  }
+  if (ac.requiredLintClean && !baseline.lint.passed) {
+    return { ok: false, reason: 'baseline lint failing' };
+  }
+  const snap = await guard.snapshot({ cwd });
+  return { ok: true, baseline, snap };
+}
+
+/**
+ * Perform the actual `git add -A && git commit -m ...`.
+ *
+ * @param {object} args
+ * @param {string} args.cwd
+ * @param {object} args.gitOps
+ * @param {object} args.classification
+ * @returns {Promise<{ok: boolean, reason?: string}>}
+ */
+async function executeCommit({ cwd, gitOps, classification }) {
+  const add = await gitOps.runGit(['add', '-A'], cwd);
+  if (add.code !== 0) return { ok: false, reason: 'git add failed' };
+  const msg = `chore(artibot-auto): ${classification.level}-risk auto-commit [skip ci]`;
+  const commit = await gitOps.runGit(['commit', '-m', msg], cwd);
+  if (commit.code !== 0) return { ok: false, reason: 'git commit failed' };
+  return { ok: true };
+}
+
+/**
+ * Post-commit: run validation against baseline; on regression, rollback.
+ * Rollback failures are reported to the kill-switch and re-thrown.
+ *
+ * @param {object} args
+ * @returns {Promise<{rolledBack: boolean, regressions?: string[]}>}
+ */
+async function validateAndRollback({ cwd, guard, baseline, snap, trail, config, killSwitch }) {
+  const check = await guard.validateAgainstBaseline(baseline, { cwd });
+  if (check.passed) return { rolledBack: false };
+
+  let rb = { reverted: false };
+  try {
+    rb = await guard.rollback(snap, { cwd });
+  } catch (rbErr) {
+    await reportCriticalFailure('autoCommit', `rollback-failed: ${rbErr.message}`, config, {
+      killSwitch, pluginRoot: cwd,
+    });
+    throw rbErr;
+  }
+  await trail({
+    subsystem: 'auto-commit',
+    action: 'rolled-back',
+    reason: `regressions: ${check.regressions.join(',')}`,
+    outputs: { sha: snap.sha, reverted: rb.reverted },
+  });
+  return { rolledBack: rb.reverted, regressions: check.regressions };
+}
+
+/**
+ * Record an observe-only "would-commit" decision and return a result bag.
+ *
+ * @returns {Promise<object>}
+ */
+async function recordObserveDecision({ gates, diff, classification, trail, logger }) {
+  await trail({
+    subsystem: 'auto-commit',
+    action: 'would-commit',
+    reason: `first-run observe mode (${gates.mode || 'observe'})`,
+    inputs: { files: diff.files.map((f) => f.path) },
+    outputs: { level: classification.level },
+  });
+  logger.log(`auto-commit: observe-only — would commit ${diff.files.length} files (${classification.level})`);
+  return { ran: false, reason: 'first-run-observe-mode', observe: true, classification };
+}
+
+/**
+ * Mutating half of the commit pipeline (snapshot -> commit -> validate).
+ *
+ * @returns {Promise<object>} runAutoCommit result bag
+ */
+async function performCommitFlow(ctx) {
+  const { cwd, guard, ac, dryRun, diff, classification, gitOps, trail, config, killSwitch, logger } = ctx;
+  const snapRes = await snapshotState({ cwd, guard, ac });
+  if (!snapRes.ok) return { ran: false, reason: snapRes.reason };
+  const { baseline, snap } = snapRes;
+  if (dryRun) {
+    logger.log(`auto-commit: dry-run — would commit ${diff.files.length} files at ${snap.sha}`);
+    return { ran: false, reason: 'dry-run', classification, snapshot: snap };
+  }
+  const ex = await executeCommit({ cwd, gitOps, classification });
+  if (!ex.ok) return { ran: false, reason: ex.reason };
+
+  if (ac.rollbackOnRegression !== false) {
+    const vr = await validateAndRollback({ cwd, guard, baseline, snap, trail, config, killSwitch });
+    if (vr.regressions) {
+      return { ran: true, committed: true, rolledBack: vr.rolledBack, regressions: vr.regressions };
+    }
+  }
+  await trail({
+    subsystem: 'auto-commit',
+    action: 'committed',
+    reason: `${classification.level}-risk auto-commit`,
+    outputs: { sha: snap.sha, files: diff.files.length },
+  });
+  return { ran: true, committed: true, rolledBack: false, classification };
+}
+
+/**
+ * Core pipeline. Exported for testability — the wrapper `main()` injects
+ * real git/validation deps, tests can inject mocks via `deps`.
+ *
+ * @param {object} deps
+ */
+export async function runAutoCommit(deps) {
+  const {
+    cwd, config, dryRun = false, logger = console,
+    gitOps = { collectDiff, runGit },
+    guard = { snapshot, runValidation, validateAgainstBaseline, rollback },
+    classify = classifyDiff, trail = recordDecision,
+    killSwitch, firstRunGuard,
+  } = deps;
+
+  const gates = await resolveSelfControlGates('autoCommit', config, {
+    pluginRoot: cwd, killSwitch, firstRunGuard,
+  });
+  if (!gates.proceed) {
+    logger.log(`auto-commit: skipped — ${gates.reason}`);
+    if (gates.reason === 'kill-switch tripped') {
+      await trail({ subsystem: 'auto-commit', action: 'refused', reason: 'kill-switch tripped' });
+    }
+    return { ran: false, reason: gates.reason };
   }
 
-  // Gate 3: first-run guard — observe-only for the first N runs.
-  const frg = firstRunGuard || (await loadFirstRunGuard());
-  const { shouldObserve, mode } = await frg.shouldObserveOnly('autoCommit', config);
-  await frg.bumpRunCounter('autoCommit', config);
-  if (shouldObserve) {
-    await trail({
-      subsystem: 'auto-commit',
-      action: 'would-commit',
-      reason: `first-run observe mode (${mode || 'observe'})`,
-      inputs: { files: diff.files.map((f) => f.path) },
-      outputs: { level: classification.level },
-    });
-    logger.log(`auto-commit: observe-only — would commit ${diff.files.length} files (${classification.level})`);
-    return { ran: false, reason: 'first-run-observe-mode', observe: true, classification };
+  const ac = config.ago.selfControl.autoCommit;
+  const risk = await assessRisk({
+    cwd, gitOps, classify, trail, logger, maxLevel: ac.maxRiskLevel || 'low',
+  });
+  if (risk.empty) return { ran: false, reason: 'no changes' };
+  if (risk.over) return { ran: false, reason: 'risk ceiling', classification: risk.classification };
+  const { diff, classification } = risk;
+
+  if (gates.observeOnly) {
+    return recordObserveDecision({ gates, diff, classification, trail, logger });
   }
 
   try {
-    const baseline = await guard.runValidation({ cwd });
-    if (ac.requiredTestsPass && !baseline.tests.passed) {
-      return { ran: false, reason: 'baseline tests failing' };
-    }
-    if (ac.requiredLintClean && !baseline.lint.passed) {
-      return { ran: false, reason: 'baseline lint failing' };
-    }
-
-    const snap = await guard.snapshot({ cwd });
-    if (dryRun) {
-      logger.log(`auto-commit: dry-run — would commit ${diff.files.length} files at ${snap.sha}`);
-      return { ran: false, reason: 'dry-run', classification, snapshot: snap };
-    }
-
-    const add = await gitOps.runGit(['add', '-A'], cwd);
-    if (add.code !== 0) return { ran: false, reason: 'git add failed' };
-
-    const msg = `chore(artibot-auto): ${classification.level}-risk auto-commit [skip ci]`;
-    const commit = await gitOps.runGit(['commit', '-m', msg], cwd);
-    if (commit.code !== 0) return { ran: false, reason: 'git commit failed' };
-
-    if (ac.rollbackOnRegression !== false) {
-      const check = await guard.validateAgainstBaseline(baseline, { cwd });
-      if (!check.passed) {
-        let rb = { reverted: false };
-        try {
-          rb = await guard.rollback(snap, { cwd });
-        } catch (rbErr) {
-          // Rollback failure is a critical event — feed kill-switch.
-          await ks.recordFailure(
-            { feature: 'autoCommit', error: `rollback-failed: ${rbErr.message}` },
-            config,
-          );
-          throw rbErr;
-        }
-        await trail({
-          subsystem: 'auto-commit',
-          action: 'rolled-back',
-          reason: `regressions: ${check.regressions.join(',')}`,
-          outputs: { sha: snap.sha, reverted: rb.reverted },
-        });
-        return { ran: true, committed: true, rolledBack: rb.reverted, regressions: check.regressions };
-      }
-    }
-
-    await trail({
-      subsystem: 'auto-commit',
-      action: 'committed',
-      reason: `${classification.level}-risk auto-commit`,
-      outputs: { sha: snap.sha, files: diff.files.length },
+    return await performCommitFlow({
+      cwd, guard, ac, dryRun, diff, classification, gitOps, trail, config, killSwitch, logger,
     });
-    return { ran: true, committed: true, rolledBack: false, classification };
   } catch (err) {
-    // Critical failure — record for kill-switch trip-tracking.
-    await ks.recordFailure({ feature: 'autoCommit', error: err.message }, config);
+    await reportCriticalFailure('autoCommit', err, config, { killSwitch, pluginRoot: cwd });
     throw err;
   }
 }

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-04-21T04:37:52.850Z",
+  "generatedAt": "2026-04-21T04:59:19.113Z",
   "skills": {
     "ab-testing": {
       "hash": "701661e8",
@@ -48,9 +48,9 @@
       "size": 7219
     },
     "codex-integration": {
-      "hash": "d07e8a1b",
+      "hash": "f686bba9",
       "path": "skills\\codex-integration\\SKILL.md",
-      "size": 5397
+      "size": 5394
     },
     "coding-standards": {
       "hash": "7a01304d",

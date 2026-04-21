@@ -229,23 +229,18 @@ function getMiddlewareOptionsFromEnv() {
   };
 }
 
-async function fallbackPreparePrompt(prompt, pluginRoot, hookData) {
-  const config = loadRuntimeConfig(pluginRoot);
-
-  try {
-    const runtimePath = path.join(pluginRoot, 'lib', 'runtime', 'create-artibot-agent.js');
-    const { createArtibotAgent } = await import(toFileUrl(runtimePath));
-    const runtime = createArtibotAgent({
-      pluginRoot,
-      config,
-      middlewareOptions: getMiddlewareOptionsFromEnv(),
-      checkpointOptions: getCheckpointOptionsFromEnv(),
-    });
-    return await runtime.preparePrompt({ prompt, hookData });
-  } catch {
-    // Keep a tiny in-script fallback so the hook remains safe during upgrades.
-  }
-
+/**
+ * Build the minimal in-script fallback envelope used when the real runtime
+ * module cannot be loaded (fresh checkouts, CI, upgrades). Classifies the
+ * prompt into system1/system2 via keyword sniffing and attempts a lightweight
+ * intent detection. All errors are swallowed.
+ *
+ * @param {string} prompt
+ * @param {string} pluginRoot
+ * @param {object} config
+ * @returns {Promise<object>}
+ */
+async function buildFallbackEnvelope(prompt, pluginRoot, config) {
   let system = 'system1';
   const lower = prompt.toLowerCase();
   if (FALLBACK_SYSTEM2_KEYWORDS.some((keyword) => lower.includes(keyword.toLowerCase()))) {
@@ -272,12 +267,28 @@ async function fallbackPreparePrompt(prompt, pluginRoot, hookData) {
   return {
     userPrompt: prompt,
     message: `[runtime] ${system.toUpperCase()} | fallback | intent=${intentSummary}`,
-    context: {
-      system,
-      intentSummary,
-      fallback: true,
-    },
+    context: { system, intentSummary, fallback: true },
   };
+}
+
+async function fallbackPreparePrompt(prompt, pluginRoot, hookData) {
+  const config = loadRuntimeConfig(pluginRoot);
+
+  try {
+    const runtimePath = path.join(pluginRoot, 'lib', 'runtime', 'create-artibot-agent.js');
+    const { createArtibotAgent } = await import(toFileUrl(runtimePath));
+    const runtime = createArtibotAgent({
+      pluginRoot,
+      config,
+      middlewareOptions: getMiddlewareOptionsFromEnv(),
+      checkpointOptions: getCheckpointOptionsFromEnv(),
+    });
+    return await runtime.preparePrompt({ prompt, hookData });
+  } catch {
+    // Keep a tiny in-script fallback so the hook remains safe during upgrades.
+  }
+
+  return buildFallbackEnvelope(prompt, pluginRoot, config);
 }
 
 /**
@@ -310,56 +321,55 @@ function persistTokenUsage(context, pluginRoot) {
   }
 }
 
-async function main() {
-  const raw = await readStdin();
-  const hookData = parseJSON(raw);
-
-  const prompt = hookData?.user_prompt || hookData?.content || '';
-  if (!prompt) return;
-
-  const pluginRoot = getPluginRoot();
-  const runtimeConfig = loadRuntimeConfig(pluginRoot);
-  const effortConfig = runtimeConfig?.runtime?.effort || {};
-  const injectPrompt = effortConfig.injectPrompt !== false; // default true
-  const useNativeApi = effortConfig.nativeApi === true;     // default false
-
-  const prepared = await fallbackPreparePrompt(prompt, pluginRoot, hookData);
-
-  if (!prepared) return;
-
-  // Persist token usage for statusline
-  persistTokenUsage(prepared.context, pluginRoot);
-
-  // Detect slash command and auto-inject effort hint (Claude 4.7 effort_level).
-  // Advisory only — stored to runtime/current-effort.json for observability
-  // and appended to the hook message so the router surfaces the decision.
+/**
+ * Resolve the effort metadata for a prompt. Persists the result to
+ * runtime/current-effort.json and returns `{ command, effort } | null`.
+ *
+ * @param {string} prompt
+ * @param {string} pluginRoot
+ * @returns {Promise<{ command: string, effort: string } | null>}
+ */
+async function resolveEffortMeta(prompt, pluginRoot) {
   const commandName = detectSlashCommand(prompt);
   const effort = await resolveCommandEffort(commandName, pluginRoot);
-  const effortMeta = commandName && effort
-    ? { command: commandName, effort }
-    : null;
+  const effortMeta = commandName && effort ? { command: commandName, effort } : null;
   persistEffortMeta(effortMeta, pluginRoot);
+  return effortMeta;
+}
 
-  // AGO G3 — record effort classification for Explainability (observe-only).
-  // Wrapped in try/catch so Decision Trail failures never break the prompt.
-  if (effortMeta) {
-    try {
-      const trailPath = path.join(pluginRoot, 'lib', 'core', 'decision-trail.js');
-      const { recordDecision } = await import(toFileUrl(trailPath));
-      await recordDecision({
-        subsystem: 'runtime-prompt',
-        action: 'effort-classified',
-        reason: `slash command '/${effortMeta.command}' matched EFFORT_POLICY`,
-        inputs: { command: effortMeta.command },
-        outputs: { effort: effortMeta.effort },
-      });
-    } catch {
-      // Non-critical: decision trail is advisory
-    }
+/**
+ * AGO G3 — record effort classification for Explainability (observe-only).
+ * Wrapped in try/catch so Decision Trail failures never break the prompt.
+ * @param {{ command: string, effort: string } | null} effortMeta
+ * @param {string} pluginRoot
+ */
+async function recordEffortDecision(effortMeta, pluginRoot) {
+  if (!effortMeta) return;
+  try {
+    const trailPath = path.join(pluginRoot, 'lib', 'core', 'decision-trail.js');
+    const { recordDecision } = await import(toFileUrl(trailPath));
+    await recordDecision({
+      subsystem: 'runtime-prompt',
+      action: 'effort-classified',
+      reason: `slash command '/${effortMeta.command}' matched EFFORT_POLICY`,
+      inputs: { command: effortMeta.command },
+      outputs: { effort: effortMeta.effort },
+    });
+  } catch {
+    // Non-critical: decision trail is advisory
   }
+}
 
-  // P3-8: record user signal for skill-level auto-detection.
-  // Non-critical — any failure is swallowed so the prompt flow is unaffected.
+/**
+ * P3-8: record user signal for skill-level auto-detection + G10 macro
+ * observation. Both are non-critical and observe-only.
+ *
+ * @param {string} prompt
+ * @param {string|null} commandName
+ * @param {string} pluginRoot
+ * @param {object} runtimeConfig
+ */
+async function recordPromptSignals(prompt, commandName, pluginRoot, runtimeConfig) {
   try {
     const profileModPath = path.join(pluginRoot, 'lib', 'core', 'user-profile.js');
     const { recordSignal, configureProfilePath } = await import(toFileUrl(profileModPath));
@@ -374,10 +384,27 @@ async function main() {
     // Non-critical: profile tracking is advisory
   }
 
-  // Task Budget auto-wire (P3-2): derive max_tokens per effort and persist
-  // runtime/current-task-budget.json + build the [artibot:task-budget …]
-  // directive that is injected alongside the effort prefix.
-  let taskBudgetDirective = '';
+  try {
+    const macroPath = path.join(pluginRoot, 'lib', 'learning', 'macro-learner.js');
+    const { observePrompt } = await import(toFileUrl(macroPath));
+    await observePrompt(prompt, { pluginRoot, config: runtimeConfig });
+  } catch {
+    // Non-critical: macro learning is advisory
+  }
+}
+
+/**
+ * Task Budget auto-wire (P3-2): derive max_tokens per effort and persist
+ * runtime/current-task-budget.json + build the [artibot:task-budget …]
+ * directive that is injected alongside the effort prefix.
+ *
+ * @param {{ command: string, effort: string } | null} effortMeta
+ * @param {string} pluginRoot
+ * @param {object} runtimeConfig
+ * @returns {Promise<string>}
+ */
+async function resolveTaskBudgetDirective(effortMeta, pluginRoot, runtimeConfig) {
+  if (!effortMeta) return '';
   try {
     const tbPath = path.join(pluginRoot, 'lib', 'runtime', 'task-budget.js');
     const {
@@ -386,45 +413,28 @@ async function main() {
       persistTaskBudget,
     } = await import(toFileUrl(tbPath));
 
-    if (effortMeta) {
-      const budget = getTaskBudgetForEffort(effortMeta.effort, runtimeConfig);
-      if (budget) {
-        taskBudgetDirective = buildTaskBudgetDirective(
-          effortMeta.effort,
-          budget,
-          runtimeConfig,
-        );
-        persistTaskBudget(
-          { command: effortMeta.command, effort: effortMeta.effort, budget },
-          pluginRoot,
-        );
-      }
-    }
+    const budget = getTaskBudgetForEffort(effortMeta.effort, runtimeConfig);
+    if (!budget) return '';
+    const directive = buildTaskBudgetDirective(effortMeta.effort, budget, runtimeConfig);
+    persistTaskBudget(
+      { command: effortMeta.command, effort: effortMeta.effort, budget },
+      pluginRoot,
+    );
+    return directive;
   } catch {
     // Non-critical: task budget is advisory
+    return '';
   }
+}
 
-  // Optional: native effort hint → cognitive router (session-wide)
-  if (useNativeApi && effortMeta) {
-    await applyNativeEffortHint(effortMeta.effort, pluginRoot);
-  }
-
-  // G10: Macro Learning (suggest-only). Observe the prompt to detect
-  // repeating multi-action patterns. Never auto-registers macros — only
-  // writes to runtime/macro-suggestions.json for later user approval.
-  try {
-    const macroPath = path.join(pluginRoot, 'lib', 'learning', 'macro-learner.js');
-    const { observePrompt } = await import(toFileUrl(macroPath));
-    await observePrompt(prompt, { pluginRoot, config: runtimeConfig });
-  } catch {
-    // Non-critical: macro learning is advisory
-  }
-
-  // Build the prompt to return. When injectPrompt is enabled and an
-  // effort was resolved, prepend [artibot:effort …][artibot:task-budget …]
-  // on the first line followed by a blank line, then the (possibly
-  // prepared) user prompt. This mirrors the 4.7 "advisory directive"
-  // pattern from the official effort guide.
+/**
+ * Compose the final user prompt and hook message. When `injectPrompt` is
+ * disabled we return the base prompt untouched.
+ *
+ * @param {object} params
+ * @returns {{ user_prompt: string, message: string }}
+ */
+function composePromptOutput({ prepared, prompt, effortMeta, taskBudgetDirective, injectPrompt }) {
   const basePrompt = prepared.userPrompt ?? prompt;
   const effortDirective = buildEffortDirective(effortMeta);
   const finalUserPrompt = injectPrompt
@@ -436,10 +446,40 @@ async function main() {
     ? `${baseMessage} | cmd=/${effortMeta.command} effort=${effortMeta.effort}`
     : baseMessage;
 
-  writeStdout({
-    user_prompt: finalUserPrompt,
-    message: finalMessage,
-  });
+  return { user_prompt: finalUserPrompt, message: finalMessage };
+}
+
+async function main() {
+  const raw = await readStdin();
+  const hookData = parseJSON(raw);
+
+  const prompt = hookData?.user_prompt || hookData?.content || '';
+  if (!prompt) return;
+
+  const pluginRoot = getPluginRoot();
+  const runtimeConfig = loadRuntimeConfig(pluginRoot);
+  const effortConfig = runtimeConfig?.runtime?.effort || {};
+  const injectPrompt = effortConfig.injectPrompt !== false; // default true
+  const useNativeApi = effortConfig.nativeApi === true;     // default false
+
+  const prepared = await fallbackPreparePrompt(prompt, pluginRoot, hookData);
+  if (!prepared) return;
+
+  persistTokenUsage(prepared.context, pluginRoot);
+
+  const effortMeta = await resolveEffortMeta(prompt, pluginRoot);
+  await recordEffortDecision(effortMeta, pluginRoot);
+  await recordPromptSignals(prompt, effortMeta?.command || null, pluginRoot, runtimeConfig);
+
+  const taskBudgetDirective = await resolveTaskBudgetDirective(effortMeta, pluginRoot, runtimeConfig);
+
+  if (useNativeApi && effortMeta) {
+    await applyNativeEffortHint(effortMeta.effort, pluginRoot);
+  }
+
+  writeStdout(composePromptOutput({
+    prepared, prompt, effortMeta, taskBudgetDirective, injectPrompt,
+  }));
 }
 
 main().catch(createErrorHandler('runtime-prompt'));

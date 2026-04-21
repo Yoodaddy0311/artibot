@@ -1,6 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { ensureDir, exists, listDirs, listFiles, readJsonFile, readTextFile, writeJsonFile } from '../../lib/core/file.js';
+import {
+  atomicWriteJson,
+  atomicWriteJsonSync,
+  ensureDir,
+  exists,
+  listDirs,
+  listFiles,
+  readJsonFile,
+  readTextFile,
+  writeJsonFile,
+} from '../../lib/core/file.js';
 import fs from 'node:fs/promises';
+import fsSync from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 
@@ -159,6 +170,107 @@ describe('file', () => {
       await fs.writeFile(path.join(tmpDir, 'file.txt'), '');
       const dirs = await listDirs(tmpDir);
       expect(dirs).toEqual([]);
+    });
+  });
+
+  describe('atomicWriteJson()', () => {
+    it('writes JSON atomically with trailing newline', async () => {
+      const file = path.join(tmpDir, 'atomic.json');
+      await atomicWriteJson(file, { hello: 'world' });
+      const content = await fs.readFile(file, 'utf-8');
+      expect(JSON.parse(content)).toEqual({ hello: 'world' });
+      expect(content.endsWith('\n')).toBe(true);
+    });
+
+    it('creates parent directories', async () => {
+      const file = path.join(tmpDir, 'nested', 'a', 'b', 'state.json');
+      await atomicWriteJson(file, { ok: true });
+      expect(JSON.parse(await fs.readFile(file, 'utf-8'))).toEqual({ ok: true });
+    });
+
+    it('does not leave a .tmp sibling on success', async () => {
+      const file = path.join(tmpDir, 'clean.json');
+      await atomicWriteJson(file, { a: 1 });
+      const entries = await fs.readdir(tmpDir);
+      const tmps = entries.filter((e) => e.startsWith('clean.json.tmp'));
+      expect(tmps).toEqual([]);
+    });
+
+    it('overwrites existing file without readers observing partial state', async () => {
+      const file = path.join(tmpDir, 'overwrite.json');
+      await atomicWriteJson(file, { v: 1 });
+      await atomicWriteJson(file, { v: 2 });
+      expect(JSON.parse(await fs.readFile(file, 'utf-8'))).toEqual({ v: 2 });
+    });
+
+    it('cleans up tmp sibling when rename fails', async () => {
+      // Simulate rename failure by making target a non-empty directory —
+      // rename of a file over a non-empty dir fails on every platform.
+      const target = path.join(tmpDir, 'collide.json');
+      await fs.mkdir(target);
+      await fs.writeFile(path.join(target, 'x'), 'lock');
+
+      await expect(atomicWriteJson(target, { v: 1 })).rejects.toThrow();
+
+      // Temp sibling (if any) must not linger.
+      const entries = await fs.readdir(tmpDir);
+      const tmps = entries.filter((e) => e.startsWith('collide.json.tmp'));
+      expect(tmps).toEqual([]);
+    });
+
+    it('concurrent writes: final file is valid + no tmp leaks', async () => {
+      const file = path.join(tmpDir, 'concurrent.json');
+      // Windows can EPERM on concurrent rename-over-same-target; tolerate
+      // individual failures but assert the end-state invariants.
+      const results = await Promise.allSettled(
+        Array.from({ length: 8 }, (_, i) => atomicWriteJson(file, { writer: i })),
+      );
+      expect(results.some((r) => r.status === 'fulfilled')).toBe(true);
+      const parsed = JSON.parse(await fs.readFile(file, 'utf-8'));
+      expect(typeof parsed.writer).toBe('number');
+      // No tmp leftovers, regardless of per-writer outcome.
+      const entries = await fs.readdir(tmpDir);
+      const tmps = entries.filter((e) => e.startsWith('concurrent.json.tmp'));
+      expect(tmps).toEqual([]);
+    });
+
+    it('respects custom indent', async () => {
+      const file = path.join(tmpDir, 'indent.json');
+      await atomicWriteJson(file, { a: 1 }, 4);
+      const content = await fs.readFile(file, 'utf-8');
+      expect(content).toContain('    "a"');
+    });
+  });
+
+  describe('atomicWriteJsonSync()', () => {
+    it('writes JSON atomically', () => {
+      const file = path.join(tmpDir, 'sync-atomic.json');
+      atomicWriteJsonSync(file, { hello: 'sync' });
+      const content = fsSync.readFileSync(file, 'utf-8');
+      expect(JSON.parse(content)).toEqual({ hello: 'sync' });
+      expect(content.endsWith('\n')).toBe(true);
+    });
+
+    it('creates parent directories', () => {
+      const file = path.join(tmpDir, 'sync', 'deep', 'nest.json');
+      atomicWriteJsonSync(file, { ok: true });
+      expect(JSON.parse(fsSync.readFileSync(file, 'utf-8'))).toEqual({ ok: true });
+    });
+
+    it('does not leave a .tmp sibling on success', () => {
+      const file = path.join(tmpDir, 'sync-clean.json');
+      atomicWriteJsonSync(file, { a: 1 });
+      const entries = fsSync.readdirSync(tmpDir);
+      expect(entries.filter((e) => e.startsWith('sync-clean.json.tmp'))).toEqual([]);
+    });
+
+    it('cleans up tmp sibling when rename fails', () => {
+      const target = path.join(tmpDir, 'sync-collide.json');
+      fsSync.mkdirSync(target);
+      fsSync.writeFileSync(path.join(target, 'x'), 'lock');
+      expect(() => atomicWriteJsonSync(target, { v: 1 })).toThrow();
+      const entries = fsSync.readdirSync(tmpDir);
+      expect(entries.filter((e) => e.startsWith('sync-collide.json.tmp'))).toEqual([]);
     });
   });
 });

@@ -18,7 +18,7 @@
 
 import path from 'node:path';
 import fsSync from 'node:fs';
-import { ensureDir } from './file.js';
+import { atomicWriteJsonSync, ensureDir } from './file.js';
 import { getPluginRoot } from './platform.js';
 import {
   redactObject as sharedRedactObject,
@@ -134,27 +134,6 @@ function readTrailSync() {
   } catch {
     return { entries: [], metadata: { createdAt: new Date().toISOString() } };
   }
-}
-
-/**
- * Atomically write JSON to disk (write-temp + rename). Synchronous to keep
- * the recordDecision append path simple and crash-safe even on Windows +
- * OneDrive where concurrent writes can race.
- *
- * @param {string} filePath
- * @param {unknown} data
- * @returns {void}
- */
-function atomicWriteJsonSync(filePath, data) {
-  const dir = path.dirname(filePath);
-  try {
-    fsSync.mkdirSync(dir, { recursive: true });
-  } catch (err) {
-    if (err.code !== 'EEXIST') throw err;
-  }
-  const tmp = `${filePath}.tmp.${process.pid}`;
-  fsSync.writeFileSync(tmp, JSON.stringify(data, null, 2) + '\n', 'utf-8');
-  fsSync.renameSync(tmp, filePath);
 }
 
 function writeTrailSync(data) {
