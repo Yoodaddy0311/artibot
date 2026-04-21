@@ -126,6 +126,44 @@ async function main() {
     } catch (err) {
       logHookError('session-end', `evolution-loop failed: ${err.message || err}`);
     }
+
+    // AGO Track G6: auto-spawn advisor (next-session suggestions).
+    // Opt-in, write-only, never executes or schedules anything.
+    // Failure is graceful — must never block session-end.
+    try {
+      const plugRoot = getPluginRoot();
+      const advisorPath = path.join(plugRoot, 'lib', 'learning', 'auto-spawn-advisor.js');
+      const cfgPath = path.join(plugRoot, 'artibot.config.json');
+      const { analyzeNextSession } = await import(toFileUrl(advisorPath));
+
+      let agoConfig = {};
+      try {
+        const { readFileSync } = await import('node:fs');
+        agoConfig = JSON.parse(readFileSync(cfgPath, 'utf-8'));
+      } catch {
+        // Missing/unreadable config → advisor will treat as opt-in=false.
+      }
+
+      const advisorSummary = {
+        unresolvedTodos: Array.isArray(hookData.unresolved_todos) ? hookData.unresolved_todos : [],
+        testFailures: Array.isArray(hookData.test_failures) ? hookData.test_failures : [],
+        driftWarnings: Array.isArray(hookData.drift_warnings) ? hookData.drift_warnings : [],
+        staleSkills: Array.isArray(hookData.stale_skills) ? hookData.stale_skills : [],
+        learningIncomplete: hookData.learning_incomplete ?? null,
+      };
+
+      const advisorResult = await analyzeNextSession(advisorSummary, {
+        pluginRoot: plugRoot,
+        config: agoConfig,
+      });
+      if (advisorResult.written) {
+        process.stderr.write(
+          `[artibot] auto-spawn-advisor: ${advisorResult.suggestions.length} suggestion(s) written\n`,
+        );
+      }
+    } catch (err) {
+      logHookError('session-end', `auto-spawn-advisor failed: ${err.message || err}`);
+    }
   }
 }
 

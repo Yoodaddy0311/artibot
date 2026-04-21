@@ -340,6 +340,24 @@ async function main() {
     : null;
   persistEffortMeta(effortMeta, pluginRoot);
 
+  // AGO G3 — record effort classification for Explainability (observe-only).
+  // Wrapped in try/catch so Decision Trail failures never break the prompt.
+  if (effortMeta) {
+    try {
+      const trailPath = path.join(pluginRoot, 'lib', 'core', 'decision-trail.js');
+      const { recordDecision } = await import(toFileUrl(trailPath));
+      await recordDecision({
+        subsystem: 'runtime-prompt',
+        action: 'effort-classified',
+        reason: `slash command '/${effortMeta.command}' matched EFFORT_POLICY`,
+        inputs: { command: effortMeta.command },
+        outputs: { effort: effortMeta.effort },
+      });
+    } catch {
+      // Non-critical: decision trail is advisory
+    }
+  }
+
   // P3-8: record user signal for skill-level auto-detection.
   // Non-critical — any failure is swallowed so the prompt flow is unaffected.
   try {
@@ -389,6 +407,17 @@ async function main() {
   // Optional: native effort hint → cognitive router (session-wide)
   if (useNativeApi && effortMeta) {
     await applyNativeEffortHint(effortMeta.effort, pluginRoot);
+  }
+
+  // G10: Macro Learning (suggest-only). Observe the prompt to detect
+  // repeating multi-action patterns. Never auto-registers macros — only
+  // writes to runtime/macro-suggestions.json for later user approval.
+  try {
+    const macroPath = path.join(pluginRoot, 'lib', 'learning', 'macro-learner.js');
+    const { observePrompt } = await import(toFileUrl(macroPath));
+    await observePrompt(prompt, { pluginRoot, config: runtimeConfig });
+  } catch {
+    // Non-critical: macro learning is advisory
   }
 
   // Build the prompt to return. When injectPrompt is enabled and an

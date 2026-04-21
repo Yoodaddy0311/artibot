@@ -263,6 +263,41 @@ function stripPiiFromMetadata(metadata) {
 }
 
 // ---------------------------------------------------------------------------
+// Convergence Integration (AGO G8) — optional post-processing
+// ---------------------------------------------------------------------------
+
+/**
+ * Rank patterns, then attach swarm-convergence metadata when enabled.
+ * Existing `rankPatterns` behavior is preserved — this wrapper only adds a
+ * non-mutating `convergence` field (empty when feature disabled).
+ *
+ * Does NOT mutate skills or promote anything. Purely a metadata passthrough.
+ *
+ * @param {SharedPattern[]} patterns
+ * @param {Array<{instanceHash: string, pattern: object, confidence: number}>} contributions
+ * @param {object} [config] - full config, e.g. { ago: { swarmConvergence: {...} } }
+ * @param {number} [topN=10]
+ * @param {object} [context]
+ * @returns {Promise<{ ranked: SharedPattern[], convergence: object[] }>}
+ */
+export async function rankPatternsWithConvergence(
+  patterns,
+  contributions,
+  config = {},
+  topN = 10,
+  context = {},
+) {
+  const ranked = rankPatterns(patterns, topN, context);
+  const cfg = config?.ago?.swarmConvergence;
+  if (!cfg || cfg.enabled !== true) {
+    return { ranked, convergence: [] };
+  }
+  const { detectConvergence } = await import('./convergence-detector.js');
+  const convergence = await detectConvergence(contributions || [], cfg);
+  return { ranked, convergence };
+}
+
+// ---------------------------------------------------------------------------
 // Weekly Recommendations (Top-N)
 // ---------------------------------------------------------------------------
 

@@ -359,6 +359,27 @@ export function route(input, context = {}) {
 
   history.push(entry);
 
+  // AGO G3 — record classification for Explainability (observe-only).
+  // Dynamic import to avoid a hard dependency; all failures are swallowed.
+  try {
+    import('../core/decision-trail.js').then(({ recordDecision }) => {
+      recordDecision({
+        subsystem: 'cognitive-router',
+        action: 'classified',
+        reason: `heuristic score ${classification.score} vs threshold ${classification.threshold}`,
+        outputs: {
+          system: classification.system,
+          score: classification.score,
+          threshold: classification.threshold,
+          nativeEffort: classification.nativeEffort,
+        },
+        confidence: classification.confidence,
+      }).catch(() => {});
+    }).catch(() => {});
+  } catch {
+    // Non-critical: decision trail is advisory
+  }
+
   return {
     system: classification.system,
     classification,

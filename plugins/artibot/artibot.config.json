@@ -822,6 +822,41 @@
     "showEffort": true,
     "showTaskBudget": true
   },
+  "ago": {
+    "mode": "observe-only",
+    "selfControlEnabled": false,
+    "decisionTrail": {
+      "enabled": true,
+      "path": "runtime/decision-trail.json",
+      "retentionDays": 30,
+      "redactSensitive": true
+    },
+    "autoSpawn": {
+      "enabled": false,
+      "maxDepth": 2,
+      "minConfidence": 0.8,
+      "requireOptIn": true
+    },
+    "swarmConvergence": {
+      "enabled": true,
+      "minInstances": 3,
+      "confidenceBoost": 0.15,
+      "confidenceThreshold": 0.7
+    },
+    "selfBenchmark": {
+      "enabled": false,
+      "schedule": "0 4 * * 1",
+      "reportPath": "_reports/self-benchmark.md",
+      "dimensions": ["evolved", "extensible", "productive", "universal", "quality"]
+    },
+    "macroLearning": {
+      "enabled": true,
+      "mode": "suggest-only",
+      "minOccurrences": 3,
+      "requireUserApproval": true,
+      "suggestionsPath": "runtime/macro-suggestions.json"
+    }
+  },
   "autoLearning": {
     "enabled": true,
     "schedule": "0 3 * * *",

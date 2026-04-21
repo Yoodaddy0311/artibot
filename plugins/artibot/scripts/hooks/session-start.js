@@ -176,6 +176,33 @@ async function main() {
     lines.push(`| Collective: ${collectiveTop.patterns.length} cross-project patterns available`);
   }
 
+  // AGO Track G6: surface pending next-session suggestions from prior session.
+  // Best-effort, never blocks start.
+  try {
+    const advisorPath = path.join(env.pluginRoot, 'lib', 'learning', 'auto-spawn-advisor.js');
+    const { readPendingSuggestions } = await import(toFileUrl(advisorPath));
+    const pending = await readPendingSuggestions(env.pluginRoot);
+    if (pending.length > 0) {
+      lines.push(`[artibot:pending-suggestions count=${pending.length}]`);
+    }
+  } catch {
+    // Non-critical: advisor suggestions are advisory-only.
+  }
+
+  // AGO Track G10: surface pending macro-learning suggestions.
+  // Suggest-only — user still must explicitly approve via a user-facing flow.
+  try {
+    const macroPath = path.join(env.pluginRoot, 'lib', 'learning', 'macro-learner.js');
+    const { getMacroSuggestions } = await import(toFileUrl(macroPath));
+    const macroSuggestions = await getMacroSuggestions(env.pluginRoot, config);
+    const macroPending = macroSuggestions.filter((s) => s && s.status === 'pending');
+    if (macroPending.length > 0) {
+      lines.push(`[artibot:macro-suggestions count=${macroPending.length}]`);
+    }
+  } catch {
+    // Non-critical: macro suggestions surfacing is advisory-only.
+  }
+
   // Non-blocking update notification — any error is swallowed.
   // Wrapped with a 2000ms outer timeout so the update check never consumes
   // more than 2 seconds, leaving ample headroom within the 5000ms hook limit.

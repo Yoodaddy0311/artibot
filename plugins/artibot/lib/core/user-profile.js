@@ -305,12 +305,29 @@ export async function recordSignal(signal) {
     profile.signals = profile.signals.slice(-MAX_STORED_SIGNALS);
   }
 
+  const previousLevel = profile.skillLevel;
   const { level, evidence } = classify(profile.signals);
   profile.skillLevel = level;
   profile.source = profile.signals.length >= MIN_SIGNALS_FOR_AUTO_DETECT ? 'detected' : 'initial';
   profile.evidence = evidence;
   profile.updatedAt = new Date().toISOString();
   await writeProfile(profile);
+
+  // AGO G3 — record skill-level changes for Explainability (observe-only).
+  // Only fire on actual transitions; swallow all errors.
+  if (previousLevel !== level) {
+    try {
+      const { recordDecision } = await import('./decision-trail.js');
+      await recordDecision({
+        subsystem: 'user-profile',
+        action: 'skill-level-changed',
+        reason: `auto-detected from ${profile.signals.length} signals`,
+        outputs: { from: previousLevel, to: level, evidence },
+      });
+    } catch {
+      // Non-critical: decision trail is advisory
+    }
+  }
 }
 
 /**
