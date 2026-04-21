@@ -218,7 +218,41 @@ async function main() {
     } catch (err) {
       logHookError('session-end', `auto-spawn-advisor failed: ${err.message || err}`);
     }
+
+    // B1: AGO Self-Control — sweep pending macro suggestions for auto-registration.
+    // Triple-gated inside `sweepAutoRegister`: masterEnabled + autoMacroRegister.enabled
+    // + kill-switch. Observe-only runs return `reason: 'observe-only'` per suggestion.
+    // Non-critical — must never block session-end.
+    try {
+      await runMacroAutoRegister();
+    } catch (err) {
+      logHookError('session-end', `macro-auto-register failed: ${err.message || err}`);
+    }
   }
+}
+
+/**
+ * Load macro-learner and sweep pending suggestions. Reads config fresh to
+ * respect user edits made during the session. Runs the sweep unconditionally
+ * (the macro-learner enforces gates itself) so the hook stays one-line simple.
+ *
+ * @returns {Promise<void>}
+ */
+export async function runMacroAutoRegister(deps = {}) {
+  const pluginRoot = deps.pluginRoot || getPluginRoot();
+  let sweep = deps.sweepAutoRegister;
+  if (!sweep) {
+    const macroPath = path.join(pluginRoot, 'lib', 'learning', 'macro-learner.js');
+    const mod = await import(toFileUrl(macroPath));
+    sweep = mod.sweepAutoRegister;
+  }
+  const config = deps.config || (await readArtibotConfig());
+  const result = await sweep({ pluginRoot, config });
+  const count = Array.isArray(result?.registered) ? result.registered.length : 0;
+  if (count > 0) {
+    process.stderr.write(`[artibot:macros-auto-registered count=${count}]\n`);
+  }
+  return { registered: count };
 }
 
 main().catch(createErrorHandler('session-end', { exit: true }));

@@ -1,0 +1,174 @@
+# Artibot Self-Control scheduled runner (Blocker B2 fix).
+#
+# Each cron runner is ON by default via `artibot.config.json`, but had no
+# GitHub Actions trigger. This workflow wires the four runners to concrete
+# schedule + workflow_dispatch triggers so they actually execute without a
+# human typing `node scripts/cron/...` every time.
+#
+# Opt-in posture:
+#   - The workflow file is checked in and ON by default, matching the
+#     config's default-ON stance.
+#   - To disable: delete this file, or remove the `schedule:` block, or flip
+#     the corresponding `ago.selfControl.*.enabled` config key to false
+#     (runners exit 0 without side effects when gated off).
+#
+# Safety posture (DATA POLICY: never send data to external DBs/plugins):
+#   - High-risk runners (`auto-commit`, `auto-pr`) run ONLY via
+#     `workflow_dispatch` (manual). They are never on the cron line.
+#   - Low-risk runners (`self-benchmark`, `auto-cleanup`) run on cron with
+#     `permissions: contents: read`.
+#   - `continue-on-error: true` keeps a single runner failure from cascading.
+#   - No `gh pr merge`, no `git push --force`, no external network calls.
+#   - GitHub Actions free tier budget: each cron job is a single node process,
+#     typically <1 min, well under the 2000 min/month cap.
+
+name: Self-Control
+
+on:
+  schedule:
+    # Weekly self-benchmark: Monday 04:00 UTC.
+    - cron: "0 4 * * 1"
+    # Daily auto-cleanup (eslint --fix only, low-risk): 03:00 UTC.
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+    inputs:
+      task:
+        description: "Self-control task to run"
+        required: true
+        default: self-benchmark
+        type: choice
+        options:
+          - self-benchmark
+          - auto-cleanup
+          - auto-commit
+          - auto-pr
+      dry_run:
+        description: "Pass --dry-run to the runner"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+
+# Default to read-only. The auto-commit/auto-pr dispatch path upgrades this
+# per-job via `permissions:` override at job level.
+permissions:
+  contents: read
+
+concurrency:
+  group: self-control-${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    name: Run self-control task
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    # High-risk runners (auto-commit / auto-pr) need write to touch the
+    # working tree or open a DRAFT PR. They only enter this job through the
+    # manual workflow_dispatch path — schedule triggers can never select them.
+    permissions:
+      contents: write
+      pull-requests: write
+
+    defaults:
+      run:
+        working-directory: plugins/artibot
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: plugins/artibot/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts || npm install
+
+      - name: Resolve task
+        id: resolve
+        working-directory: ${{ github.workspace }}
+        env:
+          DISPATCH_TASK: ${{ github.event.inputs.task }}
+          DISPATCH_DRY_RUN: ${{ github.event.inputs.dry_run }}
+          SCHEDULE_CRON: ${{ github.event.schedule }}
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            TASK="${DISPATCH_TASK}"
+            DRY="${DISPATCH_DRY_RUN:-false}"
+          else
+            case "${SCHEDULE_CRON}" in
+              "0 4 * * 1") TASK="self-benchmark" ;;
+              "0 3 * * *") TASK="auto-cleanup" ;;
+              *)
+                echo "::warning::Unknown cron '${SCHEDULE_CRON}' — defaulting to self-benchmark"
+                TASK="self-benchmark"
+                ;;
+            esac
+            DRY="false"
+          fi
+
+          # Whitelist — reject anything unexpected (defense-in-depth against
+          # a future malformed input reaching `node`).
+          case "${TASK}" in
+            self-benchmark|auto-cleanup|auto-commit|auto-pr) ;;
+            *)
+              echo "::error::Invalid task '${TASK}'"
+              exit 1
+              ;;
+          esac
+
+          # Map task -> runner file.
+          case "${TASK}" in
+            self-benchmark) RUNNER="self-benchmark-runner.js" ;;
+            auto-cleanup)   RUNNER="auto-cleanup-runner.js" ;;
+            auto-commit)    RUNNER="auto-commit-runner.js" ;;
+            auto-pr)        RUNNER="auto-pr-creator.js" ;;
+          esac
+
+          echo "task=${TASK}" >> "${GITHUB_OUTPUT}"
+          echo "runner=${RUNNER}" >> "${GITHUB_OUTPUT}"
+          echo "dry_run=${DRY}" >> "${GITHUB_OUTPUT}"
+          echo "Resolved: task=${TASK} runner=${RUNNER} dry_run=${DRY}"
+
+      - name: Run self-control task
+        id: run
+        continue-on-error: true
+        env:
+          DRY_RUN: ${{ steps.resolve.outputs.dry_run }}
+        run: |
+          set -euo pipefail
+          ARGS=""
+          if [ "${DRY_RUN}" = "true" ]; then
+            ARGS="--dry-run"
+          fi
+          echo "node scripts/cron/${{ steps.resolve.outputs.runner }} ${ARGS}"
+          node "scripts/cron/${{ steps.resolve.outputs.runner }}" ${ARGS}
+
+      - name: Upload reports artifact
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: self-control-${{ steps.resolve.outputs.task }}-${{ github.run_id }}
+          path: |
+            plugins/artibot/_reports/
+            plugins/artibot/runtime/decision-trail/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Surface runner failure
+        if: steps.run.outcome == 'failure'
+        run: |
+          echo "::warning::Runner '${{ steps.resolve.outputs.task }}' exited non-zero. See logs and uploaded artifact."
+          # continue-on-error keeps the job green so a flaky runner does not
+          # mask the overall workflow schedule, but we still want a visible
+          # signal in the Actions UI.

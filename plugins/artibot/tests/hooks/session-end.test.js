@@ -47,6 +47,7 @@ describe('session-end hook - learning pipeline', () => {
   let stderrSpy;
   let exitSpy;
   let runLearningPipeline;
+  let runMacroAutoRegister;
 
   beforeEach(async () => {
     vi.resetModules();
@@ -58,6 +59,7 @@ describe('session-end hook - learning pipeline', () => {
     // Dynamically import to get a fresh module with runLearningPipeline
     const mod = await import('../../scripts/hooks/session-end.js');
     runLearningPipeline = mod.runLearningPipeline;
+    runMacroAutoRegister = mod.runMacroAutoRegister;
 
     // Allow the main() side-effect to complete
     await new Promise((r) => setTimeout(r, 100));
@@ -318,6 +320,63 @@ describe('session-end hook - learning pipeline', () => {
 
       expect(result).toBeDefined();
       expect(result.summarized).toBe(true);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // B1: macro-learner sweep integration
+  // ---------------------------------------------------------------------------
+  describe('runMacroAutoRegister()', () => {
+    it('invokes sweepAutoRegister with pluginRoot + config', async () => {
+      const sweep = vi.fn(async () => ({ registered: [], skipped: [] }));
+      const result = await runMacroAutoRegister({
+        pluginRoot: '/fake/root',
+        config: { ago: { selfControl: { masterEnabled: true } } },
+        sweepAutoRegister: sweep,
+      });
+      expect(sweep).toHaveBeenCalledWith({
+        pluginRoot: '/fake/root',
+        config: expect.objectContaining({ ago: expect.anything() }),
+      });
+      expect(result.registered).toBe(0);
+    });
+
+    it('emits stderr marker when macros are registered', async () => {
+      const sweep = vi.fn(async () => ({
+        registered: [{ id: 's1', macroId: 'm_1' }, { id: 's2', macroId: 'm_2' }],
+        skipped: [],
+      }));
+      stderrSpy.mockClear();
+      const result = await runMacroAutoRegister({
+        pluginRoot: '/fake/root',
+        config: {},
+        sweepAutoRegister: sweep,
+      });
+      expect(result.registered).toBe(2);
+      const wrote = stderrSpy.mock.calls.some((c) =>
+        typeof c[0] === 'string' && c[0].includes('macros-auto-registered count=2'),
+      );
+      expect(wrote).toBe(true);
+    });
+
+    it('stays silent when no macros are registered', async () => {
+      const sweep = vi.fn(async () => ({ registered: [], skipped: [{ id: 'a', reason: 'low-confidence' }] }));
+      stderrSpy.mockClear();
+      await runMacroAutoRegister({ pluginRoot: '/fake/root', config: {}, sweepAutoRegister: sweep });
+      const wrote = stderrSpy.mock.calls.some((c) =>
+        typeof c[0] === 'string' && c[0].includes('macros-auto-registered'),
+      );
+      expect(wrote).toBe(false);
+    });
+
+    it('handles missing registered array gracefully', async () => {
+      const sweep = vi.fn(async () => ({ reason: 'master-disabled' }));
+      const result = await runMacroAutoRegister({
+        pluginRoot: '/fake/root',
+        config: { ago: { selfControl: { masterEnabled: false } } },
+        sweepAutoRegister: sweep,
+      });
+      expect(result.registered).toBe(0);
     });
   });
 });

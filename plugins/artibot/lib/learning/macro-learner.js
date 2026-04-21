@@ -1,19 +1,35 @@
 /**
- * Macro Learning (suggest-only).
+ * Macro Learning — two independent registration paths.
  *
  * Observes user prompts, detects repeating multi-action sequences, and records
- * candidate macros as SUGGESTIONS — never registers them automatically.
+ * candidate macros as SUGGESTIONS. Registration into
+ * `artibot.config.json.macros` happens via one of two mutually exclusive paths:
  *
- * Registration into `artibot.config.json.macros` only happens inside
- * `approveSuggestion()`, which MUST be invoked by an explicit user-facing flow.
+ * 1) Explicit-approval path — `approveSuggestion()`
+ *    - Triggered ONLY by an explicit user-facing flow (UI/CLI action such as
+ *      "yes, register this macro").
+ *    - Gated by `ago.macroLearning.mode === "suggest-only"` AND
+ *      `ago.macroLearning.requireUserApproval === true`.
+ *    - This is the safe, default-documented posture for the
+ *      `ago.macroLearning.*` config surface.
+ *
+ * 2) Auto-register path — `tryAutoRegister()` / `sweepAutoRegister()`
+ *    - Triggered by AGO Self-Control under `ago.selfControl.autoMacroRegister`.
+ *    - Separate config surface; does NOT read `ago.macroLearning.mode` or
+ *      `ago.macroLearning.requireUserApproval`.
+ *    - 3-gate (`masterEnabled` + `autoMacroRegister.enabled` + kill-switch)
+ *      plus per-suggestion criteria: minOccurrences (default 5), confidence
+ *      floor 0.85, and a 30-day rejection cooldown window.
  *
  * Design constraints:
  *   - Zero runtime deps
  *   - ESM
  *   - No prototype pollution (Object.create(null) + key guards)
  *   - Redacts sensitive tokens (API keys, file paths) before persisting
- *   - `mode: "suggest-only"` + `requireUserApproval: true` is the only supported
- *     safe posture. If a caller passes an unsafe mode, approveSuggestion bails.
+ *   - The explicit-approval path refuses to run unless
+ *     `mode === "suggest-only"` AND `requireUserApproval === true`. Unsafe
+ *     combinations bail with `reason: "unsafe-mode"` or
+ *     `reason: "auto-register-forbidden"`.
  *
  * @module lib/learning/macro-learner
  */
@@ -257,11 +273,16 @@ function resolveSuggestionTerminalState(suggestion) {
 }
 
 /**
- * Explicitly approve a suggestion: writes macro entry to artibot.config.json
- * under `macros`. This is the ONLY path that mutates the config.
+ * Explicitly approve a suggestion — registration path (1) of 2.
  *
- * Refuses to run unless `requireUserApproval: true` AND `mode === 'suggest-only'`
- * — matches the documented safe posture.
+ * Writes macro entry to `artibot.config.json` under `macros`. This is the path
+ * the user (or a user-facing UI/CLI) invokes when saying "yes, register this
+ * macro". It is intentionally NOT the auto path — see `tryAutoRegister()` for
+ * the AGO Self-Control auto-register path.
+ *
+ * Refuses to run unless `requireUserApproval: true` AND `mode === "suggest-only"`
+ * on `ago.macroLearning` — matches the documented safe posture. Any other
+ * combination bails without mutating config.
  *
  * @param {string} suggestionId
  * @param {{pluginRoot: string, config: object}} options
@@ -416,11 +437,24 @@ function hasRecentRejection(store, fp, now, windowDays) {
 }
 
 /**
- * Attempt to auto-register a single pending suggestion.
+ * Attempt to auto-register a single pending suggestion — registration path (2) of 2.
  *
- * Opt-in extension of the suggest-only contract. Requires the three AGO
- * self-control gates (env + masterEnabled + module enabled) plus stricter
- * per-suggestion criteria (min occurrences, min confidence, no recent rejection).
+ * AGO Self-Control path. Fully independent from `approveSuggestion()`: it reads
+ * `ago.selfControl.autoMacroRegister` (NOT `ago.macroLearning.mode` /
+ * `requireUserApproval`) and enforces its own 3-gate + per-suggestion criteria.
+ *
+ * Gates (short-circuit in order):
+ *   1. `ago.selfControl.masterEnabled !== false`
+ *   2. `ago.selfControl.autoMacroRegister.enabled !== false`
+ *   3. kill-switch not tripped for `auto-macro-register`
+ *
+ * Per-suggestion criteria:
+ *   - `suggestion.status === "pending"`
+ *   - `occurrences >= minOccurrences` (default 5)
+ *   - `confidence >= 0.85`
+ *   - no prior rejection of the same fingerprint within `noRejectionWindowDays`
+ *     (default 30)
+ *   - first-run-guard is not in observe-only mode
  *
  * @param {object} suggestion - Pending suggestion object (as returned by observePrompt).
  * @param {{pluginRoot: string, config: object, now?: number}} options

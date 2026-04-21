@@ -904,9 +904,9 @@
     },
     "macroLearning": {
       "enabled": true,
-      "mode": "auto-with-safety",
+      "mode": "suggest-only",
       "minOccurrences": 3,
-      "requireUserApproval": false,
+      "requireUserApproval": true,
       "suggestionsPath": "runtime/macro-suggestions.json"
     }
   },
