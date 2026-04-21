@@ -34,5 +34,29 @@
     "content": "Recurring fix pattern detected. Consider adding automated checks for: fix(lint): preserve-caught-error in git-backend.js",
     "formatted": "- [auto-learned] Recurring fix pattern detected. Consider adding automated checks for: fix(lint): preserve-caught-error in git-backend.js",
     "injectedAt": "2026-04-08T18:00:39.837Z"
+  },
+  {
+    "type": "auto-learned",
+    "content": "Recurring fix pattern detected. Consider adding automated checks for: fix(ci): silence pre-existing complexity warnings + auto-fix sort-imports",
+    "formatted": "- [auto-learned] Recurring fix pattern detected. Consider adding automated checks for: fix(ci): silence pre-existing complexity warnings + auto-fix sort-imports",
+    "injectedAt": "2026-04-20T18:00:33.123Z"
+  },
+  {
+    "type": "auto-learned",
+    "content": "Recurring fix pattern detected. Consider adding automated checks for: fix(ci): remove ghost smart-pipeline middleware + 3 unused var lint errors",
+    "formatted": "- [auto-learned] Recurring fix pattern detected. Consider adding automated checks for: fix(ci): remove ghost smart-pipeline middleware + 3 unused var lint errors",
+    "injectedAt": "2026-04-20T18:00:33.123Z"
+  },
+  {
+    "type": "auto-learned",
+    "content": "Recurring fix pattern detected. Consider adding automated checks for: fix(ci): import path bug + align coverage thresholds with 80% policy",
+    "formatted": "- [auto-learned] Recurring fix pattern detected. Consider adding automated checks for: fix(ci): import path bug + align coverage thresholds with 80% policy",
+    "injectedAt": "2026-04-20T18:00:33.123Z"
+  },
+  {
+    "type": "auto-learned",
+    "content": "Recurring fix pattern detected. Consider adding automated checks for: fix(4.7): restore 3 items lost during merge -X theirs",
+    "formatted": "- [auto-learned] Recurring fix pattern detected. Consider adding automated checks for: fix(4.7): restore 3 items lost during merge -X theirs",
+    "injectedAt": "2026-04-20T18:00:33.123Z"
   }
 ]
