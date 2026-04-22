@@ -15,9 +15,15 @@ The full `artibot` plugin is a 119-skill, 28-agent orchestration framework built
 
 ## Contents
 
-### Skills (30)
+### Skills (34)
 
 **Marketing & Content**: `advertising`, `campaign-planning`, `competitive-intelligence`, `content-seo`, `copywriting`, `email-marketing`, `lead-management`, `marketing-analytics`, `marketing-strategy`, `segmentation`, `social-media`
+
+**Korean Market**: `kr-marketing` (Naver C-Rank/DIA SEO, Kakao Moment, PIPA compliance, Korean platform guide)
+
+**Research & Compliance**: `market-research` (TAM/SAM/SOM, survey design, trend analysis), `ad-compliance` (표시광고법, PIPA, FTC, GDPR)
+
+**Quality**: `ai-slop-reviewer` (AI pattern detection, text quality scoring — run after any text output)
 
 **Data & Reporting**: `ab-testing`, `data-analysis`, `data-visualization`, `report-generation`
 
@@ -65,7 +71,9 @@ Add the parent `artibot` repository as a marketplace, then install `artibot-cowo
 
 ## Versioning
 
-This package starts at `0.1.0` and tracks the upstream `artibot` content but with its own release cadence. When upstream skills/agents change, this package will pull updates selectively.
+**v0.2.0**: Added `ai-slop-reviewer`, `kr-marketing`, `market-research`, `ad-compliance` skills. Updated `seo-strategy` (Naver C-Rank/DIA) and `social-media` (Naver blog, KakaoStory, BAND). Added `anti-ai-writing` reference for copywriting.
+
+This package tracks the upstream `artibot` content with its own release cadence. When upstream skills/agents change, this package will pull updates selectively.
 
 ## License
 
