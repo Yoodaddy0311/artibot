@@ -1,4 +1,5 @@
 <!--
+INDEPENDENT REFERENCE — not derived from fixtures; demonstrates long-form-writing skill spec compliance only.
 Reference implementation — demonstrates long-form-writing skill compliance.
 All entities (Acme Dev Tools, cited studies, expert quotes) are fictional and illustrative only.
 Hook frame declared in meta block below.
@@ -14,7 +15,7 @@ Hook frame declared in meta block below.
 
 ---
 
-Sixty percent of OpenTelemetry migrations stall before full coverage, and the reason is not the collector, the backend, or the schema. Teams hit a wall when instrumentation leaves the platform team's core services and enters product surfaces owned by other engineers. The stall is organizational, not technical, and the fix is a service-ownership gate — not another SDK revision.
+OpenTelemetry rollouts stall at 60% coverage because instrumentation crosses into services the platform team does not own, and product engineers have no deadline forcing the work. The stall is organizational, not technical. The fix is a service-ownership gate in the release pipeline — owned outside the platform team.
 
 ## Why Do 60% of OpenTelemetry Rollouts Plateau Before Full Coverage?
 

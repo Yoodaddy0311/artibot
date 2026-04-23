@@ -41,7 +41,7 @@ sync.
 Append a section to `plugins/artibot-cowork/CHANGELOG.md`:
 
 ```
-## [0.4.0] - 2026-04-23
+## [X.Y.Z] - YYYY-MM-DD
 ### Added
 - schema-generator skill (AEO/GEO)
 - smoke-test suite (Unit K)

@@ -46,8 +46,9 @@ workflow.
   coverage, dependency-graph cycles, and agent-skill allow-list integrity.
 - `reports/token-budget-audit.md` — per-skill token footprint audit with savings
   recommendations (reference extraction, trigger dedup, frontmatter slimming).
-- `scripts/release-lock.{sh,ps1}` — release gate scripts that fail fast on
-  version mismatch between `plugin.json`, `package.json`, and `CHANGELOG.md`.
+- `scripts/release-lock.js` + `scripts/release.js` (Node ESM, `.git/autopilot.json`
+  백업/복원 + release commit 오케스트레이션) — release gate scripts that fail fast
+  on version mismatch between `plugin.json`, `package.json`, and `CHANGELOG.md`.
 - `docs/cross-plugin-synergy.md` — architecture design doc for 0.5.0 wiring between
   `artibot-cowork` and `artibot` core (DATA POLICY preserved: in-plugin + self-server only).
 - `samples/` — 6 curated sample outputs (one per writing skill) demonstrating
