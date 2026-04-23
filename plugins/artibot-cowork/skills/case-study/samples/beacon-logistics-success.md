@@ -1,4 +1,5 @@
 <!--
+INDEPENDENT REFERENCE — demonstrates case-study skill compliance with a fictional scenario; not derived from fixtures/brief-case-study.md.
 Reference implementation — demonstrates case-study skill compliance.
 All entities (Beacon Logistics, RouteLift, quoted stakeholders) are fictional.
 Industry variant: B2B SaaS serving SMB logistics.

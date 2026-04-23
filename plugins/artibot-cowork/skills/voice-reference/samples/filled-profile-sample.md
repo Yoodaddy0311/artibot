@@ -1,4 +1,6 @@
 <!--
+INDEPENDENT REFERENCE — not derived from fixtures; demonstrates voice-reference skill spec compliance only.
+This file covers voice-profile-template role only. writing-samples-scaffold lives separately at skills/voice-reference/references/writing-samples-scaffold.md.
 Reference implementation — demonstrates voice-reference skill compliance.
 All entities (Acme Dev Tools, referenced writers) are fictional.
 Fully filled example of voice-profile-template.md at brand-level scope.
@@ -68,6 +70,10 @@ Fully populated example. Use as a reference for what a complete, actionable prof
 - "First-party data" — preferred over "our research" or "internal study"; signals provenance clearly.
 - "Rebuild, not patch" — signals a commitment to root-cause change over surface fix.
 - "Hit" (past tense) — compact verb for "reached," used in metric descriptions ("coverage hit 85% in week eleven").
+- "The pattern is X. The mechanism is Y." — paired construction separating observation from explanation.
+- "Ships" / "shipped" — preferred verb for release events over "launched" or "released"; carries craft-register connotation.
+- "Owned outside the team" — recurring phrase for naming authority placement in organizational arguments.
+- "Names the cost" — replaces vague "highlights" or "shows"; signals that a specific expense or tradeoff is being made visible.
 
 ---
 
@@ -79,6 +85,10 @@ Fully populated example. Use as a reference for what a complete, actionable prof
 - "Cutting-edge" — replaced with specific version numbers or release dates; the adjective dates instantly.
 - "Seamless" — the experience being described usually has seams; naming them is more honest.
 - "Empower" — "enable," "equip," or just describe what the reader can now do.
+- "Game-changer" / "game-changing" — empty superlative; replace with the specific change observed.
+- "Best-in-class" — unprovable without a benchmark citation; either cite the benchmark or drop the phrase.
+- "Robust" — vague; replace with the specific property ("handles 10x spike without degradation").
+- "Delve into" — AI-slop tell; replace with the direct verb of the action ("read," "examine," "run the numbers").
 
 ---
 

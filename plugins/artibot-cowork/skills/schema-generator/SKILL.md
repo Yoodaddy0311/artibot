@@ -34,6 +34,19 @@ category: "marketing"
 
 This skill is the executable counterpart to `skills/copywriting/references/aeo-geo-2026.md`. The reference explains *why*; this skill hands back templates, snippets, and a decision table.
 
+## Placeholder Convention
+
+All templates in this skill and in `references/json-ld-schemas.md` use a single placeholder format: **`<ANGLE_SNAKE>`** — an `UPPER_SNAKE_CASE` token wrapped in angle brackets.
+
+| Rule | Example |
+|---|---|
+| Wrap every placeholder in `<` and `>` | `<AUTHOR_NAME>` |
+| Use `UPPER_SNAKE_CASE` for the inner name | `<HEADLINE_UP_TO_110_CHARS>` |
+| Include unit or format hints in the name when helpful | `<ISO_8601_DATETIME>`, `<BCP47_LANG_CODE>` |
+| Strip every `<ANGLE_SNAKE>` token before deploy | Find-and-replace pass with editor regex `<[A-Z0-9_]+>` |
+
+Editors can sweep for unresolved placeholders with a single regex: `<[A-Z0-9_]+>`. Any hit in a shipped JSON-LD file is a bug.
+
 ## Core Guidance
 
 ### 1. Schema Type Decision Table
@@ -71,7 +84,7 @@ Full templates with all fields live in `references/json-ld-schemas.md`.
 
 ### 3. Minimal `Article` JSON-LD Template
 
-Placeholders use `<ANGLE>` syntax so editors can find and replace them.
+Placeholders follow the `<ANGLE_SNAKE>` convention defined above — `UPPER_SNAKE_CASE` inside angle brackets, find-and-replace before deploy.
 
 ```json
 {
@@ -207,7 +220,7 @@ One script tag, one `FAQPage`, N `Question`s. Questions must match visible page 
 }
 ```
 
-Note: `InterviewObject` is a less-established type. As of 2026, verify current support against schema.org and Google's structured data docs before relying on rich-result eligibility.
+> As of 2026-04, `InterviewObject` is an emerging schema.org type with limited AI engine support. Verify current adoption before production use. See json-ld-schemas.md:446 for extended note.
 
 ### 8. `BreadcrumbList` Template (pair with every primary schema)
 
@@ -291,7 +304,7 @@ Update llms.txt if site uses one -> Paste into validator -> Ship
 ## Anti-Patterns
 
 - **Do NOT** copy a schema type used by a competitor without checking that your content actually fits it — mismatched types can trigger manual action penalties.
-- **Do NOT** leave `<ANGLE_PLACEHOLDERS>` in shipped JSON-LD. The schema is valid but the content is meaningless to retrieval systems.
+- **Do NOT** leave `<ANGLE_SNAKE_PLACEHOLDERS>` in shipped JSON-LD. The schema is valid but the content is meaningless to retrieval systems.
 - **Do NOT** duplicate a primary schema type on the same page (two `Article` blocks). Answer engines pick one, often the wrong one.
 - **Do NOT** mark up invisible content. The schema must reflect what a human reader can see on the page.
 - **Do NOT** auto-fetch validator endpoints or vendor crawler docs from this skill. Templates are static; verification is a human step.
@@ -307,7 +320,7 @@ SCHEMA BLOCK(S)
 ---------------
 File:       [suggested filename, e.g., article.jsonld]
 Schema:     [Article | OpinionArticle | FAQPage | HowTo | ...]
-Placeholders: [count of <ANGLE> tokens to fill]
+Placeholders: [count of <ANGLE_SNAKE> tokens to fill]
 
 ```json
 { ... }
@@ -326,7 +339,7 @@ Scope:      [full site | section]
 
 VALIDATION CHECKLIST
 --------------------
-- [ ] All <ANGLE_PLACEHOLDERS> replaced
+- [ ] All <ANGLE_SNAKE_PLACEHOLDERS> replaced
 - [ ] Dates in ISO 8601
 - [ ] Author Person linked to /about or author page
 - [ ] Pasted into schema.org validator and Google Rich Results Test

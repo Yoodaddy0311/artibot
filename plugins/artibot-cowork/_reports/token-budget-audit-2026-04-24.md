@@ -99,7 +99,7 @@
 |---|---|---:|---:|---:|
 | A. 단일 skill (copywriting only) | SKILL.md 1개 | 158 | 1,896 | 0.19% |
 | A'. 단일 skill + 1 reference (copywriting + aeo-geo-2026) | SKILL + 1 ref | 321 | 3,852 | 0.39% |
-| B. writing pack (v0.3.0) | 6 SKILL + 4 refs | 1,298 + 612 = 1,910 | 22,920 | 2.29% |
+| B. writing pack (v0.3.0) | 6 SKILL + 4 refs¹ | 1,298 + 612 = 1,910 | 22,920 | 2.29% |
 | C. marketing 풀팩 (v0.3.0 + v0.4.0 신규 5) | 11 SKILL + 해당 refs | 약 3,200 | 38,400 | 3.84% |
 | D. content-marketer agent + 전 skills 로드 (worst case) | 41 SKILL + 66 refs | 14,609 | 175,308 | 17.53% |
 | D'. D + system prompts + 대화 기록 500K | D + overhead | ~800,000 | 800,000 | 80% |
@@ -111,6 +111,8 @@
 Writing pack refs 계산 내역 (4 refs):
 - anti-ai-writing (141) + aeo-geo-2026 (163) + long-form-quality-rubric (158) + voice-profile-template (87) + writing-samples-scaffold (150) = 699
 - 상위 4개만 선택시 612 lines. 전체 5 refs 포함시 699 lines.
+
+> ¹ **시나리오 B 주석**: "4 refs"는 `writing-samples-scaffold.md`(150 lines) 제외 기준. scaffold는 유저가 직접 채우는 fill-in placeholder 파일이라 실제 context 로드 대상이 아님. 5 refs 전체 포함 시 1,997 lines / ~23,964 tokens / 2.40% (차이 +0.11%p).
 
 ## 5. 현 lazy-load 설정 실효성
 

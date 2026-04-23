@@ -164,7 +164,7 @@ Operator or user message that contains any of: `long-form`, `pillar post`, `in-d
 - [ ] No forbidden rhetorical moves (no "it depends", no generic CTA)
 - [ ] AI-slop score ≥ 75
 - [ ] Long-form rubric total ≥ 80
-- [ ] Word count 1,200-1,600
+- [ ] Word count 1,200-1,600 (matches `brief-expert-column.md` fixture spec; note `column-editorial` skill native spec is 1,500-2,000w — this scenario grades against the fixture target, not the skill default)
 
 ### Failure Signatures to Log
 

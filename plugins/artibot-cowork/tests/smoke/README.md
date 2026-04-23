@@ -6,6 +6,14 @@ These tests exist to catch the most common regressions before a release: wrong-s
 
 ---
 
+## Samples vs Fixtures
+
+`skills/*/samples/*.md` files are **independent reference implementations** demonstrating skill-level spec compliance with self-contained fictional scenarios. They are NOT derived from `tests/smoke/fixtures/*.md` briefs. Do not use samples as fixture-pass baseline; samples serve as skill grammar references.
+
+When a scenario's pass criteria (word count, structural expectations) diverge from the underlying skill's native spec, the scenario grades against the **fixture** target, not the sample. This is intentional — fixtures exist to exercise a specific reader/stakes context, while samples demonstrate the skill's default recipe.
+
+---
+
 ## Purpose
 
 | Goal | How these tests meet it |
