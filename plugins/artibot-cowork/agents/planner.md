@@ -26,7 +26,7 @@ permissionMode: plan
 maxTurns: 25
 skills:
   - principles
-  - persona-architect
+  - marketing-strategy
 memory:
   scope: project
 category: manager
