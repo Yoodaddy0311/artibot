@@ -43,7 +43,7 @@ Score each of five categories independently, then sum for a 0-100 total. A piece
 | 2 | Secondary keyword coverage | 4 | 3-7 semantically related terms distributed across H2/H3 |
 | 3 | Heading hierarchy | 4 | Single H1, H2 for each major section, H3 only where depth is needed; no skipped levels |
 | 4 | Meta title + description | 3 | Title 50-60 chars, description 140-160 chars, both include primary keyword |
-| 5 | Internal links | 3 | 3-6 contextual internal links with descriptive anchor text |
+| 5 | Internal links | 3 | 2-3 contextual internal links with descriptive anchor text |
 | 6 | External authority links | 2 | 2-4 outbound links to authoritative, non-competing sources |
 | 7 | Image alt text | 2 | Every image has descriptive alt text; at least one image includes the keyword |
 | 8 | URL slug | 2 | Slug is short, keyword-bearing, hyphen-separated, no stopwords |
@@ -81,7 +81,7 @@ Score each of five categories independently, then sum for a 0-100 total. A piece
 |---|-------|--------|----------------|
 | 1 | Citable passages | 4 | At least 2 self-contained blocks of 120-180 words that include a proper noun, a number, and a source — quotable without context |
 | 2 | Q&A heading ratio | 3 | 60-70% of H2 headings are phrased as questions |
-| 3 | Statistics density | 3 | Minimum 5 verifiable statistics with sources across the piece |
+| 3 | Statistics density | 3 | Minimum 8 per 2,000 words verifiable statistics with sources across the piece |
 | 4 | Authoritative quotes | 2 | At least 1 block-quoted expert statement with name, role, and date |
 | 5 | Summary block | 2 | TL;DR or key-takeaways block near the top; bullet list of 3-5 items |
 | 6 | FAQ section | 1 | 3+ question-and-answer pairs at the end, marked with FAQPage schema |
