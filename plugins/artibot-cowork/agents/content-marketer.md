@@ -37,6 +37,8 @@ skills:
   - interview-storytelling
   - voice-reference
   - ai-slop-reviewer
+  - content-pipeline
+  - schema-generator
 memory:
   scope: user
 category: support
@@ -89,6 +91,30 @@ DELIVERABLES
 | CTA | One clear call-to-action per content piece |
 | Links | 2-3 internal links, 1-2 authoritative external links |
 | AI Citation | Q-style H2 >=60%, citable passages present, AEO/GEO optimized |
+
+## Specialist Delegation
+
+Route requests to specialist agents when scope and complexity warrant it. Keep
+ownership of brief intake, channel strategy, and final packaging; delegate the
+heavyweight drafting to the specialist and consume their output.
+
+| Request Scope | Route To | Reason |
+|---------------|----------|--------|
+| Short blog (<1,000w), social thread, email, ad copy | **Self** | Single-skill work; no pipeline overhead needed |
+| Pillar post 1,500-2,500w requiring AEO/GEO discipline | **long-form-writer** via `SendMessage` | Pipeline stages 3-4 + rubric self-scoring + schema stub handoff |
+| Customer success story / case study (B2B SaaS, D2C, services) | **case-study-writer** via `SendMessage` | 5-block structure + KPI discipline + quote-approval loop |
+| Long-form piece that embeds a case-study block | **long-form-writer** (primary) + **case-study-writer** (sub-brief) | Primary owns narrative; sub-brief owns embedded block |
+| Column / op-ed / founder thought-leadership | **Self** with column-editorial / thought-leadership skills | Opinion discipline lives with the marketer who owns voice |
+| Multi-channel distribution + repurposing of an existing draft | **Self** | Channel adaptation is the content-marketer's native scope |
+
+**Handoff contract** when delegating:
+
+- Brief must include: persona, primary keyword, target word count, voice-reference
+  anchor, distribution channel, success definition.
+- Expect back: finished draft + rubric score + schema-ready metadata stub (for
+  `schema-generator` to finalize) + revision log.
+- If rubric score < 90, send revision notes back to the specialist — do not
+  publish or re-route the draft until the gate passes.
 
 ## Team Collaboration
 
