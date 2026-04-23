@@ -1,7 +1,7 @@
 ---
 context: fork
 name: seo-strategy
-description: "Develops SEO strategy including keyword research, search intent classification, ranking factor analysis, keyword clustering, and GEO (Generative Engine Optimization). Use when user asks about SEO strategy, keyword research, search intent, ranking factors, content gap analysis, SEO roadmap, GEO, 검색엔진최적화, 키워드 리서치, or 검색 의도."
+description: "Develops SEO strategy including keyword research, search intent classification, ranking factor analysis, keyword clustering, and GEO (Generative Engine Optimization). Use when user asks about SEO strategy, keyword research, search intent, ranking factors, content gap analysis, SEO roadmap, GEO, 검색엔진최적화, 키워드 리서치, 검색 의도, 네이버 SEO, C-Rank, or 네이버 블로그."
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 3
 triggers:
@@ -12,10 +12,15 @@ triggers:
   - "SERP"
   - "link building"
   - "technical SEO"
+  - "네이버 SEO"
+  - "C-Rank"
+  - "네이버 블로그"
+  - "국내 검색"
+  - "Naver SEO"
 agents:
   - "code-reviewer"
   - "backend-developer"
-tokens: "~4K"
+tokens: "~5K"
 category: "marketing"
 ---
 
@@ -115,7 +120,43 @@ Optimizing for AI-powered search (ChatGPT, Gemini, Perplexity):
 - Write in a style that AI can easily extract and attribute
 - Ensure brand entity is well-defined across the web
 
-### 7. SEO Roadmap Template
+### 7. Naver SEO (한국 검색 최적화)
+
+Google SEO와 다른 네이버 고유 알고리즘 두 가지:
+
+#### C-Rank (Creator Rank) — 블로그/발행자 신뢰도
+| 요소 | 설명 | 최적화 방향 |
+|------|------|------------|
+| 활동성 | 포스팅 빈도, 규칙성 | 주 2-3회 일정한 발행 |
+| 반응성 | 방문자 수, 댓글, 공유 | 독자 참여 유도 콘텐츠 |
+| 영향력 | 이웃/구독자 규모 | 지속적 팔로워 성장 |
+| 주제 전문성 | 동일 카테고리 일관성 | 단일 주제 집중 |
+
+#### DIA (Document Index Algorithm) — 콘텐츠 품질
+| 지표 | 설명 | 최적화 방향 |
+|------|------|------------|
+| 정보 정확성 | 출처, 전문성 표시 | 데이터·수치·전문가 인용 |
+| 체류 시간 | 스크롤 깊이 | 1,500자 이상, 목차 제공 |
+| 이탈률 | 바운스 역지표 | 관련 포스트 내부링크 |
+| 원본성 | Copy Detector 회피 | 직접 작성, 인용 시 출처 명시 |
+
+#### 스마트블록 최적화
+- **뷰 탭**: 블로그 + 카페 통합 — 키워드 + 전문성 중심
+- **인플루언서 탭**: C-Rank 상위 — 팬 기반 구축 필요
+- **지역 키워드**: `[지역명] + [서비스/제품명]` 조합 우선 공략
+- **최신성**: 발행 후 48시간이 노출 피크 → 오전 9-11시 발행 권장
+
+#### 네이버 SEO vs Google SEO 비교
+| 항목 | 네이버 | 구글 |
+|------|--------|------|
+| 핵심 지표 | C-Rank (발행자 신뢰) | PageRank (도메인 권위) |
+| 백링크 가중치 | 낮음 | 매우 높음 |
+| 발행 빈도 | 높을수록 유리 | 품질 > 빈도 |
+| 이미지 최적화 | 자체 이미지 검색 | Alt text, 구조화 데이터 |
+| 지역 SEO | 스마트플레이스 연동 | Google Business Profile |
+| 추천 포스트 길이 | 1,500~2,500자 | 1,500~2,500 words |
+
+### 8. SEO Roadmap Template
 
 | Phase | Timeframe | Focus | Expected Impact |
 |-------|-----------|-------|----------------|
@@ -123,6 +164,7 @@ Optimizing for AI-powered search (ChatGPT, Gemini, Perplexity):
 | Foundation | Month 2-4 | Core content creation, internal linking | 20-40% growth |
 | Growth | Month 4-8 | Link building, content scaling, new clusters | 40-80% growth |
 | Authority | Month 8-12 | Thought leadership, PR, advanced content | 80-150% growth |
+| 한국 시장 | Month 1-3 | 네이버 블로그 C-Rank 구축, 스마트블록 공략 (빠른 성과 시 네이버 키워드 광고 병행 검토) | 국내 검색 점유 확대 |
 
 ## Output Format
 ```
@@ -163,3 +205,4 @@ Phase        | Timeframe  | Actions              | Target
 - See `${CLAUDE_SKILL_DIR}/references/search-intent-classification.md` for search intent classification framework
 - See `${CLAUDE_SKILL_DIR}/references/keyword-priority-formula.md` for keyword priority formula
 - See `${CLAUDE_SKILL_DIR}/references/geo-optimization-guide.md` for GEO (Generative Engine Optimization) principles
+- See `${CLAUDE_SKILL_DIR}/references/naver-seo-guide.md` for Naver-specific SEO tactics (C-Rank, DIA, Smartblock optimization) — 향후 추가 예정
