@@ -21,6 +21,12 @@ agents:
   - "doc-updater"
 tokens: "~4K"
 category: "marketing"
+depends_on:
+  - copywriting
+suggests:
+  - voice-reference
+  - long-form-writing
+  - ai-slop-reviewer
 ---
 
 # Interview Storytelling

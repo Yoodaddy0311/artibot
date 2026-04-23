@@ -22,6 +22,9 @@ agents:
   - "doc-updater"
 tokens: "~3K"
 category: "marketing"
+depends_on: []
+suggests:
+  - ai-slop-reviewer
 ---
 
 # Voice Reference
