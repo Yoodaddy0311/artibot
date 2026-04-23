@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-04-21T05:12:44.244Z",
+  "generatedAt": "2026-04-22T18:00:15.640Z",
   "skills": {
     "ab-testing": {
       "hash": "701661e8",
@@ -165,7 +165,7 @@
     "git-unified": {
       "hash": "9717f9c4",
       "path": "skills\\git-unified\\SKILL.md",
-      "size": 6196
+      "size": 6382
     },
     "hook-feedback-merge": {
       "hash": "f9868ebb",
@@ -180,7 +180,7 @@
     "lang-reference": {
       "hash": "a4a6eb41",
       "path": "skills\\lang-reference\\SKILL.md",
-      "size": 9200
+      "size": 9473
     },
     "lead-management": {
       "hash": "fa392769",
