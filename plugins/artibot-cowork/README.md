@@ -15,9 +15,11 @@ The full `artibot` plugin is a 119-skill, 28-agent orchestration framework built
 
 ## Contents
 
-### Skills (34)
+### Skills (39)
 
 **Marketing & Content**: `advertising`, `campaign-planning`, `competitive-intelligence`, `content-seo`, `copywriting`, `email-marketing`, `lead-management`, `marketing-analytics`, `marketing-strategy`, `segmentation`, `social-media`
+
+**Long-form Writing**: `long-form-writing`, `case-study`, `column-editorial`, `thought-leadership`, `interview-storytelling`
 
 **Korean Market**: `kr-marketing` (Naver C-Rank/DIA SEO, Kakao Moment, PIPA compliance, Korean platform guide)
 
@@ -70,6 +72,27 @@ Add the parent `artibot` repository as a marketplace, then install `artibot-cowo
 - **External binaries**: only `npx` for the `context7` MCP server
 
 ## Versioning
+
+**New in v0.3.0**: Long-form writing pack — blog deep-dives, case studies, columns, thought leadership, interviews.
+
+New skills:
+
+| Skill | Purpose |
+|-------|---------|
+| `long-form-writing` | Deep-dive blog articles (1,500-4,000+ words) with Q-style H2 and citable passages |
+| `case-study` | Problem / approach / result narratives with verifiable metrics |
+| `column-editorial` | Opinion-driven editorials with defended thesis and evidence |
+| `thought-leadership` | Industry-voice pieces that stake a perspective and drive conversation |
+| `interview-storytelling` | Q&A-to-feature conversions preserving voice while shaping narrative |
+
+New references:
+
+| Reference | Purpose |
+|-----------|---------|
+| `long-form-quality-rubric.md` | 90+ score gate for publish-readiness across structure, evidence, voice, AEO/GEO |
+| `aeo-geo-citation-patterns.md` | Citable passage shapes (120-180 word blocks) and Q-style H2 patterns for AI citation |
+
+The `content-marketer` agent now includes a **Quality Gate** step that runs `ai-slop-reviewer` against `long-form-quality-rubric.md` before publishing — only pieces scoring 90+ are flagged publish-ready.
 
 **v0.2.0**: Added `ai-slop-reviewer`, `kr-marketing`, `market-research`, `ad-compliance` skills. Updated `seo-strategy` (Naver C-Rank/DIA) and `social-media` (Naver blog, KakaoStory, BAND). Added `anti-ai-writing` reference for copywriting.
 
