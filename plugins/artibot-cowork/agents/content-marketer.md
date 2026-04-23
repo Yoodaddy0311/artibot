@@ -35,6 +35,7 @@ skills:
   - column-editorial
   - thought-leadership
   - interview-storytelling
+  - voice-reference
   - ai-slop-reviewer
 memory:
   scope: user

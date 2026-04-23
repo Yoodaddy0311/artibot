@@ -15,11 +15,11 @@ The full `artibot` plugin is a 119-skill, 28-agent orchestration framework built
 
 ## Contents
 
-### Skills (39)
+### Skills (40)
 
 **Marketing & Content**: `advertising`, `campaign-planning`, `competitive-intelligence`, `content-seo`, `copywriting`, `email-marketing`, `lead-management`, `marketing-analytics`, `marketing-strategy`, `segmentation`, `social-media`
 
-**Long-form Writing**: `long-form-writing`, `case-study`, `column-editorial`, `thought-leadership`, `interview-storytelling`
+**Long-form Writing**: `long-form-writing`, `case-study`, `column-editorial`, `thought-leadership`, `interview-storytelling`, `voice-reference`
 
 **Korean Market**: `kr-marketing` (Naver C-Rank/DIA SEO, Kakao Moment, PIPA compliance, Korean platform guide)
 
@@ -84,6 +84,7 @@ New skills:
 | `column-editorial` | Opinion-driven editorials with defended thesis and evidence |
 | `thought-leadership` | Industry-voice pieces that stake a perspective and drive conversation |
 | `interview-storytelling` | Q&A-to-feature conversions preserving voice while shaping narrative |
+| `voice-reference` | Voice calibration scaffold — stores past writing samples to anchor tone consistency across long-form, case study, column, thought leadership, and interview outputs |
 
 New references:
 
