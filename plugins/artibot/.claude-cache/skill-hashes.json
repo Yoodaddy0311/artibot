@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-04-22T18:00:15.640Z",
+  "generatedAt": "2026-04-23T18:06:18.373Z",
   "skills": {
     "ab-testing": {
       "hash": "701661e8",
@@ -46,6 +46,11 @@
       "hash": "e1f36028",
       "path": "skills\\clarify\\SKILL.md",
       "size": 7219
+    },
+    "code-slop-reviewer": {
+      "hash": "6521f482",
+      "path": "skills\\code-slop-reviewer\\SKILL.md",
+      "size": 13856
     },
     "codex-integration": {
       "hash": "f686bba9",
