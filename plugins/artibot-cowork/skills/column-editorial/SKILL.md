@@ -21,6 +21,13 @@ agents:
   - "doc-updater"
 tokens: "~4K"
 category: "marketing"
+depends_on:
+  - copywriting
+  - long-form-writing
+suggests:
+  - voice-reference
+  - ai-slop-reviewer
+  - marketing-strategy
 ---
 
 # Column & Editorial Writing

@@ -23,6 +23,11 @@ agents:
   - "doc-updater"
 tokens: "~4K"
 category: "marketing"
+depends_on:
+  - copywriting
+suggests:
+  - voice-reference
+  - ai-slop-reviewer
 ---
 
 # Long-Form Writing
