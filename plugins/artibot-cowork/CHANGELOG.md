@@ -191,6 +191,6 @@ optimized for knowledge-worker usage via Claude Cowork.
 
 ## Release process
 
-See `scripts/release-lock.{sh,ps1}` for the release gate. Changes to
-`.claude-plugin/plugin.json#version` must be accompanied by a matching section in
-this file before the release commit lands.
+See `scripts/release-lock.js` + `scripts/release.js` for the release gate. Changes
+to `.claude-plugin/plugin.json#version` must be accompanied by a matching section
+in this file before the release commit lands.
