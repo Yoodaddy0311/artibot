@@ -69,9 +69,10 @@ const WORD_SPLIT = /[^\p{L}\p{N}]+/u;
  * @param {number} [minLen=DEFAULTS.minTokenLength]
  * @returns {string[]} ordered, deduplicated tokens
  */
-export function extractFeatureTokens(intent, context = {}, minLen = DEFAULTS.minTokenLength) {
+export function extractFeatureTokens(intent, context, minLen = DEFAULTS.minTokenLength) {
   const seen = new Set();
   const out = [];
+  const ctx = context && typeof context === 'object' ? context : {};
   const push = (raw) => {
     if (typeof raw !== 'string') return;
     const lower = raw.toLowerCase().trim();
@@ -89,10 +90,10 @@ export function extractFeatureTokens(intent, context = {}, minLen = DEFAULTS.min
     if (!Array.isArray(arr)) return;
     for (const v of arr) push(v);
   };
-  bucket(context.commands);
-  bucket(context.intents);
-  bucket(context.domains);
-  bucket(context.extraTokens);
+  bucket(ctx.commands);
+  bucket(ctx.intents);
+  bucket(ctx.domains);
+  bucket(ctx.extraTokens);
 
   return out;
 }

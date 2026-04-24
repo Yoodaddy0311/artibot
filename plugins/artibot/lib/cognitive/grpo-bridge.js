@@ -43,6 +43,15 @@ const DEFAULT_SKILL_POLICY_PATH = path.join(
   'skill-policy-v1.json',
 );
 
+/** Default path to the agent-selection policy file (GRPO v3.5 §5.4). */
+const DEFAULT_AGENT_POLICY_PATH = path.join(
+  getHomeDir(),
+  '.claude',
+  'artibot',
+  'policies',
+  'agent-policy-v1.json',
+);
+
 /** TTL for routing-policy memoization (ms). */
 const POLICY_TTL_MS = 60_000;
 
