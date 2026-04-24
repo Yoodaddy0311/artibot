@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   computeReward,
   computeRewardComponents,
-  validateEpisodeForReward,
   REWARD_CLIP,
   REWARD_WEIGHTS,
+  validateEpisodeForReward,
 } from '../../../lib/learning/grpo/reward-capture.js';
 
 // ---------------------------------------------------------------------------

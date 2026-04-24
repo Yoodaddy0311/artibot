@@ -30,7 +30,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { atomicWriteJson, readJsonFile, exists } from '../../core/file.js';
+import { atomicWriteJson, exists, readJsonFile } from '../../core/file.js';
 import { ARTIBOT_DIR } from '../../core/config.js';
 import { computeReward } from './reward-capture.js';
 
@@ -54,7 +54,8 @@ const CORRUPT_SUFFIX = '.corrupted.json';
 // ---------------------------------------------------------------------------
 
 function hasExistingReward(record) {
-  return record != null
+  return record !== null
+    && record !== undefined
     && typeof record === 'object'
     && typeof record.reward === 'number'
     && Number.isFinite(record.reward);

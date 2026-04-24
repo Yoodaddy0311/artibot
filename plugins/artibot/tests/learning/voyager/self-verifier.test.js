@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
   _internals,
-  VERDICTS,
   createSelfVerifier,
+  VERDICTS,
 } from '../../../lib/learning/voyager/self-verifier.js';
 
 // ---------------------------------------------------------------------------

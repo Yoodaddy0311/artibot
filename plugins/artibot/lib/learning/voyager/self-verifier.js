@@ -156,7 +156,7 @@ function aggregateVerdict(scores, { threshold, acceptRatio, rejectRatio }) {
   const reasons = [];
   if (passRatio >= acceptRatio) {
     reasons.push(`pass-ratio ${passRatio.toFixed(2)} >= ${acceptRatio}`);
-    return freezeVerdict(VERDICT_ACCEPT, avgScore, passCount, failCount, total, reasons);
+    return freezeVerdict(VERDICT_ACCEPT, { avgScore, passCount, failCount, total, reasons });
   }
   if (failRatio >= rejectRatio) {
     reasons.push(`fail-ratio ${failRatio.toFixed(2)} >= ${rejectRatio}`);
@@ -166,13 +166,13 @@ function aggregateVerdict(scores, { threshold, acceptRatio, rejectRatio }) {
         .sort((a, b) => a.similarity - b.similarity)[0];
       reasons.push(`worst-episode-score ${worst.similarity.toFixed(3)}`);
     }
-    return freezeVerdict(VERDICT_REJECT, avgScore, passCount, failCount, total, reasons);
+    return freezeVerdict(VERDICT_REJECT, { avgScore, passCount, failCount, total, reasons });
   }
   reasons.push(`pass-ratio ${passRatio.toFixed(2)} between ${rejectRatio} and ${acceptRatio}`);
-  return freezeVerdict(VERDICT_REVIEW, avgScore, passCount, failCount, total, reasons);
+  return freezeVerdict(VERDICT_REVIEW, { avgScore, passCount, failCount, total, reasons });
 }
 
-function freezeVerdict(verdict, avgScore, passCount, failCount, total, reasons) {
+function freezeVerdict(verdict, { avgScore, passCount, failCount, total, reasons }) {
   return Object.freeze({
     verdict,
     score: Number(avgScore.toFixed(3)),
