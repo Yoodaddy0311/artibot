@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtemp, rm, writeFile, mkdir } from 'node:fs/promises';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import {
@@ -15,7 +15,6 @@ import {
   isDeterministicEnv,
   DEFAULT_BLEND_ALPHA,
   ALPHA_FLOOR,
-  BLEND_DECISION_THRESHOLD,
 } from '../../lib/cognitive/grpo-routing.js';
 
 // ---------------------------------------------------------------------------
@@ -234,16 +233,16 @@ describe('grpo-bridge/getRoutingBias', () => {
     expect(out.confidence).toBeGreaterThan(0.9);
   });
 
-  it('60초 memoization: 두 번째 호출은 cache hit', async () => {
+  it('60초 memoization: 파일 삭제 후에도 cache에서 서빙', async () => {
     const ok = path.join(tmpDir, 'cache-test.json');
-    await writeFile(ok, JSON.stringify({ theta: Array(10).fill(0.1) }));
-    const spy = vi.spyOn(await import('node:fs/promises'), 'readFile');
-    await getRoutingBias({}, { policyPath: ok });
-    const callsAfterFirst = spy.mock.calls.length;
-    await getRoutingBias({}, { policyPath: ok });
-    // Second call within TTL → no additional readFile
-    expect(spy.mock.calls.length).toBe(callsAfterFirst);
-    spy.mockRestore();
+    await writeFile(ok, JSON.stringify({ theta: Array(9).fill(0.1) }));
+    const first = await getRoutingBias({}, { policyPath: ok });
+    expect(first.source).toBe('policy');
+    // Delete the file; second call within TTL must still hit memo, not re-read.
+    await rm(ok, { force: true });
+    const second = await getRoutingBias({}, { policyPath: ok });
+    expect(second.source).toBe('policy');
+    expect(second.p_s2).toBeCloseTo(first.p_s2, 5);
   });
 
   it('never throws — 모든 예외는 fallback으로 전환', async () => {
