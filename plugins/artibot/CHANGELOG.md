@@ -9,6 +9,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.8.0] - 2026-04-24
+
+### Added
+- **MCP Server implementation** (v3.1 template → v3.8 real server)
+  - `lib/mcp/server.js` — stdio transport, JSON-RPC 2.0, MCP handshake
+  - `lib/mcp/tool-registry.js` — tool registration + schema validation
+  - Basic tools: list-skills, list-agents, get-skill, get-agent, get-memory-stats
+- **MCP bridges** (expose Artibot systems)
+  - `lib/mcp/bridge/skills-bridge.js` — skill inventory/search
+  - `lib/mcp/bridge/agents-bridge.js` — agent registry
+  - `lib/mcp/bridge/memory-bridge.js` — hierarchical memory (with redaction)
+  - `lib/mcp/bridge/git-bridge.js` — read-only git ops
+- **MCP bin**: `bin/artibot-mcp.mjs` — stdio entrypoint
+- **Docs**: `docs/mcp-server-usage.md` — Claude Desktop/Code integration guide
+
+### Changed
+- 3-file version sync: 3.7.0 → 3.8.0
+- `package.json` bin entries: artibot, artibot-dashboard, artibot-mcp
+- `.well-known/mcp-server.json` capabilities populated (previously template-only)
+
+### Compatibility
+- Zero public API changes
+- MCP server is opt-in (must be launched via `artibot-mcp` bin)
+- All tools are read-only in v3.8 (write ops deferred to v3.9)
+- External MCP clients (Claude Desktop) can now consume Artibot
+
+### Verification
+- MCP handshake tested with JSON-RPC framing
+- Redaction applied to memory-bridge responses
+
+---
+
 ## [3.7.0] - 2026-04-24
 
 ### Added
