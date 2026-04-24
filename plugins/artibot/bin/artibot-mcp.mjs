@@ -196,6 +196,42 @@ function handleFallback(msg, stdout) {
 }
 
 /**
+ * Create and bridge-wire the server from loaded modules. Returns
+ * `{ server, failed }` — when `failed` is true, caller should return early
+ * (process.exitCode already set and error logged).
+ * @param {object} mods
+ * @param {{stdin:NodeJS.ReadableStream, stdout:NodeJS.WritableStream, stderr:NodeJS.WritableStream}} io
+ */
+async function bootServer(mods, { stdin, stdout, stderr }) {
+  if (typeof mods.createArtibotMcpServer !== 'function') {
+    return { server: null, failed: false };
+  }
+  let server;
+  try {
+    server = await mods.createArtibotMcpServer({
+      pluginRoot: PLUGIN_ROOT,
+      name: 'artibot-mcp',
+      version: loadVersion(),
+      stdin,
+      stdout,
+      stderr,
+    });
+  } catch (err) {
+    stderr.write(`[artibot-mcp] server failed to start: ${err?.message ?? err}\n`);
+    process.exitCode = 1;
+    return { server: null, failed: true };
+  }
+  if (typeof mods.wireBridges === 'function') {
+    try {
+      await mods.wireBridges(server, { pluginRoot: PLUGIN_ROOT });
+    } catch (err) {
+      stderr.write(`[artibot-mcp] bridge wiring failed: ${err?.message ?? err}\n`);
+    }
+  }
+  return { server, failed: false };
+}
+
+/**
  * CLI entry. Exported for tests.
  * @param {string[]} argv
  * @param {object} [deps]
@@ -229,35 +265,9 @@ export async function main(argv, deps = {}) {
   }
 
   const mods = await loadModules();
-
-  let server = null;
-  if (typeof mods.createArtibotMcpServer === 'function') {
-    try {
-      server = await mods.createArtibotMcpServer({
-        pluginRoot: PLUGIN_ROOT,
-        version: loadVersion(),
-        stdin,
-        stdout,
-        stderr,
-      });
-      if (typeof mods.wireBridges === 'function') {
-        try {
-          await mods.wireBridges(server, { pluginRoot: PLUGIN_ROOT });
-        } catch (err) {
-          stderr.write(`[artibot-mcp] bridge wiring failed: ${err?.message ?? err}\n`);
-        }
-      }
-      if (typeof server.start === 'function') {
-        await server.start();
-      }
-    } catch (err) {
-      stderr.write(`[artibot-mcp] server failed to start: ${err?.message ?? err}\n`);
-      process.exitCode = 1;
-      return;
-    }
-  } else {
-    await fallbackStdioLoop(stdin, stdout, stderr);
-  }
+  const boot = await bootServer(mods, { stdin, stdout, stderr });
+  if (boot.failed) return;
+  const server = boot.server;
 
   const shutdown = async (sig) => {
     stderr.write(`[artibot-mcp] ${sig} received — stopping.\n`);
@@ -271,9 +281,50 @@ export async function main(argv, deps = {}) {
   process.on('SIGINT', () => shutdown('SIGINT'));
   process.on('SIGTERM', () => shutdown('SIGTERM'));
 
-  if (server && typeof server.waitUntilClosed === 'function') {
-    await server.waitUntilClosed();
+  // Run loop: prefer MS1 contract `server.run({read, write})`. Fall back to
+  // `server.start()` + `server.waitUntilClosed()` for test mocks, and to the
+  // built-in fallback loop when no server module is present.
+  if (server && typeof server.run === 'function') {
+    await server.run(createStdioTransport(stdin, stdout));
+  } else if (server && typeof server.start === 'function') {
+    await server.start();
+    if (typeof server.waitUntilClosed === 'function') {
+      await server.waitUntilClosed();
+    }
+  } else if (!server) {
+    await fallbackStdioLoop(stdin, stdout, stderr);
   }
+}
+
+/**
+ * Wrap a Node.js stdin/stdout pair into the {read, write} transport MS1
+ * expects. `read` is an async iterable of line strings (NDJSON framed),
+ * `write` serializes one response line.
+ * @param {NodeJS.ReadableStream} stdin
+ * @param {NodeJS.WritableStream} stdout
+ */
+function createStdioTransport(stdin, stdout) {
+  async function* lines() {
+    let buf = '';
+    stdin.setEncoding?.('utf-8');
+    for await (const chunk of stdin) {
+      buf += chunk;
+      let idx;
+      while ((idx = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, idx);
+        buf = buf.slice(idx + 1);
+        if (line.length > 0) yield line;
+      }
+    }
+    if (buf.trim().length > 0) yield buf;
+  }
+  return {
+    read: lines(),
+    write: (line) =>
+      new Promise((resolvePromise, reject) => {
+        stdout.write(line, (err) => (err ? reject(err) : resolvePromise()));
+      }),
+  };
 }
 
 const invokedFromCli =

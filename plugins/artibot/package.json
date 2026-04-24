@@ -7,7 +7,8 @@
   "main": "./lib/core/index.js",
   "bin": {
     "artibot": "./bin/artibot.js",
-    "artibot-dashboard": "./bin/artibot-dashboard.mjs"
+    "artibot-dashboard": "./bin/artibot-dashboard.mjs",
+    "artibot-mcp": "./bin/artibot-mcp.mjs"
   },
   "engines": {
     "node": ">=20.0.0"

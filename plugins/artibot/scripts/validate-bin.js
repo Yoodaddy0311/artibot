@@ -28,6 +28,7 @@ const PKG_PATH = path.join(PLUGIN_ROOT, 'package.json');
 const REQUIRED_BIN = Object.freeze({
   artibot: './bin/artibot.js',
   'artibot-dashboard': './bin/artibot-dashboard.mjs',
+  'artibot-mcp': './bin/artibot-mcp.mjs',
 });
 
 const errors = [];
