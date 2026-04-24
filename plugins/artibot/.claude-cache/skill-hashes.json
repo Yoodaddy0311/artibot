@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-04-24T01:00:55.880Z",
+  "generatedAt": "2026-04-24T01:12:54.673Z",
   "skills": {
     "ab-testing": {
       "hash": "701661e8",
@@ -171,6 +171,11 @@
       "hash": "9717f9c4",
       "path": "skills\\git-unified\\SKILL.md",
       "size": 6382
+    },
+    "hook-event-emitter": {
+      "hash": "f49b715d",
+      "path": "skills\\hook-event-emitter\\SKILL.md",
+      "size": 8480
     },
     "hook-feedback-merge": {
       "hash": "f9868ebb",
