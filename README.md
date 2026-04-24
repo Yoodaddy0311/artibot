@@ -1,15 +1,25 @@
 # Artibot
 
-[![Coverage](https://img.shields.io/badge/coverage-89.27%25-brightgreen)](plugins/artibot/tests/)
-[![Tests](https://img.shields.io/badge/tests-4918%20passed-brightgreen)](plugins/artibot/tests/)
-[![License](https://img.shields.io/badge/license-BSL--1.1-blue)](LICENSE)
-[![Node](https://img.shields.io/badge/node-%3E%3D18-green)](package.json)
+[![Version](https://img.shields.io/badge/version-3.9.0-blue?style=flat-square)](plugins/artibot/CHANGELOG.md)
+[![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
+[![Node.js](https://img.shields.io/badge/Node.js-18%2B-brightgreen?style=flat-square)](package.json)
+[![Tests](https://img.shields.io/badge/tests-passing-brightgreen?style=flat-square)](plugins/artibot/tests/)
+[![Coverage](https://img.shields.io/badge/coverage-90%25%2B-brightgreen?style=flat-square)](plugins/artibot/tests/)
+[![Lint](https://img.shields.io/badge/lint-clean-brightgreen?style=flat-square)](plugins/artibot/eslint.config.js)
+[![Claude Code Plugin](https://img.shields.io/badge/Claude_Code-Plugin-7C3AED?style=flat-square)](https://github.com/anthropics/claude-code)
+[![Cowork Plugin](https://img.shields.io/badge/Claude_Cowork-Plugin-orange?style=flat-square)](https://claude.com/cowork)
+[![Agent Teams](https://img.shields.io/badge/Agent_Teams-Native-orange?style=flat-square)](plugins/artibot/lib/runtime/middleware/subagents.js)
 
-![Claude Code Plugin](https://img.shields.io/badge/Claude_Code-Plugin-7C3AED?style=flat-square)
-![Version](https://img.shields.io/badge/version-2.8.0-blue?style=flat-square)
-![License](https://img.shields.io/badge/license-BSL--1.1-green?style=flat-square)
-![Node.js](https://img.shields.io/badge/Node.js-18%2B-brightgreen?style=flat-square)
-![Agent Teams](https://img.shields.io/badge/Agent_Teams-Native-orange?style=flat-square)
+> **Cognitive orchestration OS for Claude Code with hierarchical memory, GRPO-RLVR self-learning, MCP server, and multi-platform agent teams.**
+
+This repository ships **two complementary plugins** under one marketplace:
+
+| Plugin | Target | Version | Best for |
+|---|---|---|---|
+| [`artibot`](./plugins/artibot/) | Claude Code (developer CLI) | **3.9.0** | full Agent Teams orchestration, TDD, code review, security audits, GRPO learning, MCP server |
+| [`artibot-cowork`](./plugins/artibot-cowork/) | Claude Cowork (knowledge workers) | **0.4.0** | marketing campaigns, long-form writing, AEO/GEO content, KR-market SEO, AI-slop detection |
+
+Both plugins share the same DEV protocol, Korean market expertise, data-sovereignty policy, and 6-stage content quality pipeline. They differ only in **target environment** and **skill mix**.
 
 A cognitive orchestration plugin for [Claude Code](https://github.com/anthropics/claude-code) powered by **dual-process routing**, **lifelong learning**, and the **native Agent Teams API**. Artibot uses a System 1/2 cognitive architecture to classify every request, assembles specialized agent teams with P2P communication, and continuously learns from session outcomes to improve routing accuracy over time.
 
@@ -818,7 +828,42 @@ node scripts/ci/validate-hooks.js     # Hook validation
 
 **Artience** ([@Yoodaddy0311](https://github.com/Yoodaddy0311))
 
+## Quick Links
+
+| Resource | Path |
+|---|---|
+| **artibot plugin README** (Claude Code) | [`plugins/artibot/README.md`](./plugins/artibot/README.md) |
+| **artibot-cowork plugin README** (Claude Cowork) | [`plugins/artibot-cowork/README.md`](./plugins/artibot-cowork/README.md) |
+| **CHANGELOG** | [`plugins/artibot/CHANGELOG.md`](./plugins/artibot/CHANGELOG.md) |
+| **Architecture deep dive** | [`plugins/artibot/docs/ARCHITECTURE.md`](./plugins/artibot/docs/ARCHITECTURE.md) |
+| **Competitive evaluation** | [`plugins/artibot/_reports/market-competitive-eval-2026-04-24.md`](./plugins/artibot/_reports/market-competitive-eval-2026-04-24.md) |
+| **AI ecosystem research** | [`plugins/artibot/_reports/ai-ecosystem-research-2026-04-24.md`](./plugins/artibot/_reports/ai-ecosystem-research-2026-04-24.md) |
+| **MCP server usage** | [`plugins/artibot/docs/mcp-server-usage.md`](./plugins/artibot/docs/mcp-server-usage.md) |
+| **Marketplace submission package** | [`plugins/artibot/_marketplace/`](./plugins/artibot/_marketplace/) |
+
+## When to use which
+
+```
+                          ┌──────────────────────────┐
+        Developer task →  │  artibot (Claude Code)   │  ← TDD, /code-review, /implement, /orchestrate
+                          └──────────────────────────┘
+
+                          ┌──────────────────────────┐
+   Knowledge-worker task → │  artibot-cowork (Cowork) │  ← /campaign, long-form writing, KR SEO
+                          └──────────────────────────┘
+```
+
+You can install **both** in the same Anthropic account — `artibot` runs in your Claude Code terminal sessions, `artibot-cowork` runs in your Cowork chat. They never interfere because they target different runtimes.
+
 ## Version
+
+**3.9.0** (2026-04-24) — OTEL exporter (opt-in, loopback-preferred), multi-session dashboard, session aggregator with daily rollups, session capture middleware. See [CHANGELOG](./plugins/artibot/CHANGELOG.md) for full list.
+
+**3.8.0** (2026-04-24) — MCP server implementation (stdio transport, JSON-RPC 2.0, MCP handshake). Bridges for skills / agents / memory / git. `artibot-mcp` bin for Claude Desktop integration.
+
+**3.7.0** (2026-04-24) — Joint Agent-Skill GRPO policy (correlation-aware joint selection).
+
+**3.6.0** (2026-04-24) — Neural GRPO policy (2-layer MLP opt-in, group-relative advantage + backprop).
 
 **2.8.0** (2026-04-20) — Auto-cleanup of Claude Code's pasted-image files (`image.png` / `image copy.png` …). Conservative 4-gate sweep on SessionStart: filename pattern + size < 10 MB + age < 48 h + not git-tracked. Opt-out via `ARTIBOT_IMAGE_CLEANUP=off` or `~/.claude/artibot/config.json`.
 
@@ -841,4 +886,4 @@ node scripts/ci/validate-hooks.js     # Hook validation
 
 ## License
 
-Business Source License 1.1 -- See [LICENSE](LICENSE) for details.
+MIT License — see [LICENSE](LICENSE) for details. Both `plugins/artibot/` and `plugins/artibot-cowork/` ship under MIT, matching the upstream marketplace policy.

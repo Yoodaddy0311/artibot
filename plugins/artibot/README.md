@@ -1,6 +1,225 @@
 # Artibot
 
-![Tests](https://img.shields.io/badge/tests-4918%20passed-brightgreen) ![Coverage](https://img.shields.io/badge/coverage-89.27%25-brightgreen) ![License](https://img.shields.io/badge/license-MIT-blue) ![Version](https://img.shields.io/badge/version-2.1.0-blue) ![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen)
+[![Version](https://img.shields.io/badge/version-3.9.0-blue?style=flat-square)](./CHANGELOG.md)
+[![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](./LICENSE)
+[![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen?style=flat-square)](./package.json)
+[![Tests](https://img.shields.io/badge/tests-passing-brightgreen?style=flat-square)](./tests/)
+[![Lint](https://img.shields.io/badge/lint-clean-brightgreen?style=flat-square)](./eslint.config.js)
+[![Coverage](https://img.shields.io/badge/coverage-90%25%2B-brightgreen?style=flat-square)](./tests/)
+[![Claude Code](https://img.shields.io/badge/Claude_Code-Plugin-7C3AED?style=flat-square)](https://github.com/anthropics/claude-code)
+
+> **Cognitive orchestration OS for Claude Code** — hierarchical memory, GRPO-RLVR self-learning, MCP server, and multi-platform agent teams.
+>
+> **Claude Code를 위한 인지 오케스트레이션 OS** — 계층 메모리, GRPO-RLVR 자가 학습, MCP 서버, 멀티 플랫폼 에이전트 팀.
+
+Artibot은 Claude Code의 네이티브 **Agent Teams API**를 핵심 엔진으로 사용하여 28개 전문 에이전트, 100+ 도메인 스킬, 11단계 런타임 미들웨어, 37개 학습 모듈, 9개 스웜 모듈을 통합한 **5-layer 오케스트레이션 OS**입니다. System 1/2 인지 라우팅과 GRPO 기반 자가 학습으로 매 세션마다 라우팅 정확도가 향상됩니다.
+
+---
+
+## Quick Demo (30초 안에 결과 보기 / 30-Second First Win)
+
+```bash
+# 1. Install (Claude Code marketplace)
+claude plugin marketplace add https://github.com/Yoodaddy0311/artibot
+claude plugin install artibot@artibot
+
+# 2. Smart-route a natural-language request
+/sc 로그인 기능을 TDD로 구현해줘
+#  → routes to /implement → Agent Team spawns planner + architect + backend + tdd-guide
+#  → P2P coordination → result returned
+
+# 3. Inspect what just happened
+/daily       # auto-generated session retrospective with team metrics
+```
+
+That's it. No manual config. Agent Teams auto-enables on first session start.
+
+---
+
+## Why Artibot? (vs LangGraph / AutoGen / CrewAI / Agent Skills)
+
+7 differentiators backed by file-level evidence (see `_reports/market-competitive-eval-2026-04-24.md`):
+
+| # | Differentiator | Evidence |
+|---|---|---|
+| 1 | **Dual-Process Cognitive Router (System 1 / System 2)** — production implementation of 2026 DPA architecture | `lib/cognitive/router.js`, `system1.js`, `system2-core.js` |
+| 2 | **Hierarchical Memory** — working / episodic / semantic with active curation | `lib/learning/memory-manager.js`, `lib/learning/lifelong.js` |
+| 3 | **37-Module Lifelong Learning** — GRPO + RLVR + drift-detector + skill-lifecycle-autopilot | `lib/learning/` (auto-learning-*, evolution-loop, grpo-optimizer, ...) |
+| 4 | **11-Stage Runtime Middleware** — router → subagents → tasks → checkpoint → memory → skills → guardrail → token-usage → summarization → lifecycle → plan-mode | `lib/runtime/middleware/` |
+| 5 | **MCP Server (v3.8+)** — Artibot exposes its own MCP server so Claude Desktop/Code can consume Artibot inventory | `lib/mcp/server.js`, `bin/artibot-mcp.mjs` |
+| 6 | **Data Sovereignty** — outbound to external DBs is hard-blocked. Memory, learning, swarm all stay on disk | `CLAUDE.md` DATA POLICY + `lib/privacy/` |
+| 7 | **Native Agent Teams API** — TeamCreate / SendMessage / TaskCreate, not Task() one-shot delegation | `lib/runtime/middleware/subagents.js`, `lib/runtime/middleware/tasks.js` |
+
+Competitive scoring (10-dim, see report Section 6.2):
+
+| Framework | Total / 100 |
+|---|---|
+| **Artibot v3.9.0** | **89** |
+| everything-claude-code | 87 |
+| LangGraph 1.1.3 | 74 |
+| AutoGen (AG2) | 65 |
+| CrewAI | 60 |
+| anthropics/skills (official) | 60 |
+
+Inside the Claude Code plugin category, Artibot leads on **Self-improvement (10/10)**, **Safety (10/10)**, **Architecture (10/10)**, and **Observability (9/10)**.
+
+---
+
+## Architecture Overview
+
+```mermaid
+flowchart TD
+    U[User Request] --> SC[/sc Smart Router/]
+    SC --> CR[Cognitive Router<br/>complexity scoring]
+    CR -->|score &lt; 0.4| S1[System 1<br/>fast pattern match]
+    CR -->|score &gt;= 0.4| S2[System 2<br/>deliberative reasoning]
+    S1 --> SUB[Sub-Agent Mode<br/>Task one-way]
+    S2 --> TM[Agent Team Mode<br/>TeamCreate + P2P]
+    SUB --> RT[Runtime Middleware Pipeline<br/>11 stages]
+    TM --> RT
+    RT --> AG[28 Specialist Agents<br/>orchestrator + 27 teammates]
+    AG --> LL[Lifelong Learning<br/>GRPO + RLVR + memory transfer]
+    LL --> CR
+```
+
+**5-Layer Architecture** (top-down dependency only):
+
+| # | Layer | Directory | Responsibility |
+|---|---|---|---|
+| 5 | Runtime | `lib/runtime/` | 11-stage middleware, agent factory |
+| 4 | Cognitive | `lib/cognitive/` | System 1/2 routing, EFFORT_POLICY |
+| 3 | Learning | `lib/learning/` | GRPO, hierarchical memory, knowledge transfer |
+| 2 | Auxiliary | `lib/{adapters,swarm,privacy,visual,mcp,observability,git,...}/` | Domain services |
+| 1 | Core | `lib/core/` | Config, I/O, cache, event-bus, guards |
+
+Detailed module map: `docs/ARCHITECTURE.md`.
+
+---
+
+## Key Features (Marketplace Summary)
+
+| Pillar | What you get |
+|---|---|
+| **Cognitive Routing** | System 1 (fast pattern match, <100ms) vs System 2 (sandboxed deliberation), auto-escalation rules |
+| **Hierarchical Memory** | working / episodic / semantic layers with promotion/demotion, MEMORY.md index, 3-scope (user / project / session) |
+| **GRPO + RLVR Self-Learning** | Group-Relative Policy Optimization with verifiable rewards (test pass / typecheck / no-revisit) — no external reward model |
+| **MCP Server** | Artibot publishes its own MCP server (skills, agents, memory, git bridges); also consumes Context7 + Playwright |
+| **Multi-Platform Agent Teams** | Native Claude Code; auto-export adapters for Gemini CLI / Codex CLI / Cursor / Antigravity (graceful degradation) |
+| **Observability** | OTEL exporter (opt-in, loopback-preferred), multi-session dashboard, token-usage middleware, hook event fan-out |
+| **Sub-Plugin Pattern** | `artibot-cowork` 41-skill marketing/writing/Korean-market vertical, with isolated release cadence |
+| **Zero External Dependencies** | Pure Node.js built-ins (`node:fs`, `node:path`, `node:os`); ESM-only |
+| **DEV Protocol** | Decompose-Execute-Verify mandatory workflow; zero-skip policy; claim-validator CI gate |
+
+Full feature breakdown is in [핵심 특징](#핵심-특징) below.
+
+---
+
+## Installation
+
+### Claude Code (Recommended)
+
+```bash
+claude plugin marketplace add https://github.com/Yoodaddy0311/artibot
+claude plugin install artibot@artibot
+```
+
+Agent Teams auto-enables on first session start. To uninstall: `claude plugin uninstall artibot`.
+
+### Manual
+
+```bash
+git clone https://github.com/Yoodaddy0311/artibot.git
+cd artibot/plugins/artibot
+bash install.sh
+```
+
+### Other Platforms (auto-converted)
+
+| Platform | Compatibility | Adapter |
+|---|---|---|
+| Claude Code | 10/10 | native (no adapter) |
+| Gemini CLI | 9/10 | `lib/adapters/gemini.js` |
+| Codex CLI | 8/10 | `lib/adapters/codex.js` |
+| Antigravity | 8/10 | shares Gemini adapter |
+| Cursor IDE | 6/10 | `lib/adapters/cursor.js` |
+
+See [크로스 플랫폼 설치 가이드](#크로스-플랫폼-설치-가이드) for batch export and platform-specific notes.
+
+---
+
+## Usage Patterns (Top 5)
+
+| # | Pattern | Example | What happens |
+|---|---|---|---|
+| 1 | **Smart Routing** | `/sc 로그인 기능 구현` | `/sc` analyzes intent → routes to `/implement` → spawns Agent Team |
+| 2 | **Direct Command** | `/code-review @src/auth/` | invokes `code-reviewer` agent with strict severity ladder |
+| 3 | **Team Orchestration** | `/orchestrate payment system --pattern feature` | full feature playbook (plan → design → implement → review → merge) |
+| 4 | **Parallel Spawn** | `/spawn security audit --mode parallel --agents 5` | 5 teammates self-claim from shared TaskList, P2P findings via SendMessage |
+| 5 | **Marketing** | `/campaign product launch --channels email,social,ads` | marketing-campaign DAG playbook with strategist + content + analytics |
+
+Full command reference is in [커맨드 레퍼런스](#커맨드-레퍼런스) below.
+
+---
+
+## Configuration
+
+Key fields in `artibot.config.json` (file is auto-validated against schema):
+
+| Field | Default | Purpose |
+|---|---|---|
+| `version` | `3.9.0` | Synced across plugin.json / package.json / artibot.config.json |
+| `cognitive.router.threshold` | `0.4` | System 1 ↔ System 2 boundary |
+| `cognitive.system1.maxLatency` | `100` | ms — System 1 response cap before escalation |
+| `learning.lifelong.batchSize` | `50` | Experiences per GRPO batch |
+| `learning.grpoRouting.modelType` | `"linear"` | `"linear"` or `"mlp"` (v3.6+ neural policy) |
+| `learning.grpoRouting.jointPolicy.enabled` | `false` | v3.7+ joint agent×skill correlation policy |
+| `team.engine` | `"claude-agent-teams"` | Native Claude Code Agent Teams |
+| `team.delegationMode` | `true` | Orchestrator coordinates only, never writes code |
+| `team.autoApply` | `true` | Auto-trigger `/team` when 3 conditions met |
+| `observability.otel.enabled` | `false` | v3.9+ OTEL exporter (opt-in, loopback warned) |
+| `observability.sessionCapture.enabled` | `true` | v3.9+ multi-session aggregation |
+| `automation.supportedLanguages` | `en, ko, ja, zh` | Intent detection languages |
+
+Full configuration reference: [설정](#설정) section.
+
+---
+
+## Roadmap
+
+**v3.9.0 (current, stable)** — OTEL exporter + multi-session dashboard + session aggregator. See [CHANGELOG](./CHANGELOG.md).
+
+**v4.x candidates** (see `_reports/ai-ecosystem-research-2026-04-24.md` Section 8):
+
+| Pick | Theme | Target | Detail |
+|---|---|---|---|
+| #1 | Hierarchical 3-layer memory (working / episodic / semantic) | v0.5 successor | promote / consolidate / retrieve API; weekly cron episodic→semantic |
+| #2 | Voyager-style skill auto-curation loop | next | candidate skills in `skills-candidate/`, GRPO-shadow validation, auto-promote |
+| #3 | Local federated swarm w/ GRPO-RLVR | long horizon | per-task-family routing weights, verifiable signals only, no cross-user data |
+
+Detailed planning lives in `_reports/horizon-2-3-roadmap.md` (kept in `_reports/` to avoid bloating the README).
+
+---
+
+## Contributing
+
+1. Fork, branch from `master`.
+2. Follow DEV Protocol: **Decompose → Execute (read before write) → Verify (re-read after change)**.
+3. Quality gates: functions < 50 lines, files < 800 lines, immutable patterns, 80%+ coverage target.
+4. Run before PR:
+   ```bash
+   npm run ci           # validate + skill:check + lint + test + eval:runtime
+   ```
+5. Submit PR against `artibot/master`. CI runs `claim-validator` ("done without proof = not done").
+
+Full guide: [CONTRIBUTING.md](./CONTRIBUTING.md).
+
+---
+
+## License
+
+MIT © Artience. See [LICENSE](./LICENSE).
+
+---
 
 Claude Code를 위한 **Agent Teams 기반** 지능형 오케스트레이션 플러그인. Claude의 네이티브 Agent Teams API를 핵심 엔진으로 사용하여 전문 에이전트 팀 구성, P2P 통신, 공유 태스크 관리를 통해 개발 생산성을 극대화합니다.
 

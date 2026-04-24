@@ -1,6 +1,69 @@
 # Artibot for Cowork
 
+[![Version](https://img.shields.io/badge/version-0.4.0-blue?style=flat-square)](./CHANGELOG.md)
+[![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](../../LICENSE)
+[![Skills](https://img.shields.io/badge/skills-41-7C3AED?style=flat-square)](./skills/)
+[![Agents](https://img.shields.io/badge/agents-10-7C3AED?style=flat-square)](./agents/)
+[![Cowork](https://img.shields.io/badge/Claude_Cowork-Plugin-orange?style=flat-square)](https://claude.com/cowork)
+[![Tests](https://img.shields.io/badge/smoke--tests-passing-brightgreen?style=flat-square)](./tests/)
+
+> **Marketing & long-form writing pipeline for Claude Cowork** — 6-skill writing pack with AEO/GEO citation patterns, voice calibration, and AI-slop detection.
+>
+> **Claude Cowork용 마케팅 & 장문 콘텐츠 파이프라인** — 6개 작문 스킬, AEO/GEO 인용 패턴, 보이스 캘리브레이션, AI-슬롭 검출.
+
 A slim, Cowork-optimized variant of the [Artibot](https://github.com/Yoodaddy0311/artibot) plugin, designed for knowledge workers using **Claude Cowork** (the Claude desktop app) rather than developers using Claude Code.
+
+---
+
+## Why artibot-cowork? (vs vanilla Cowork / generic skill packs)
+
+| # | Differentiator | What it gives you |
+|---|---|---|
+| 1 | **End-to-end writing pipeline** | `content-pipeline` skill orchestrates 5 stages (persona → brief → outline → draft → review → publish) with explicit handoff contracts |
+| 2 | **AEO / GEO ready** | `aeo-geo-citation-patterns.md` reference + `schema-generator` skill emits JSON-LD (`Article`/`FAQPage`/`HowTo`/`QAPage`) and citable 120-180 word passages |
+| 3 | **Voice calibration** | `voice-reference` skill anchors tone across long-form / case-study / column / thought-leadership / interview outputs |
+| 4 | **AI-slop detection** | `ai-slop-reviewer` runs after every text output — pattern detection + quality scoring with `long-form-quality-rubric.md` (90+ gate for publish) |
+| 5 | **Korean market depth** | `kr-marketing` skill (Naver C-Rank/DIA SEO, Kakao Moment, PIPA compliance) — rare in English-first plugins |
+| 6 | **Compliance built-in** | `ad-compliance` covers 표시광고법, PIPA, FTC, GDPR; reduces legal review iterations |
+| 7 | **Sandbox-safe** | No hooks, no external scripts, no `lib/`, no `server/`, no background processes — runs cleanly in any Cowork sandbox |
+
+---
+
+## Quick Demo (30초 안에 결과 보기 / 30-Second First Win)
+
+```text
+# 1. Install — drag artibot-cowork.plugin into Cowork chat (or use marketplace)
+
+# 2. Run the long-form writing pipeline on a fresh topic
+"Write a 1,800-word case study on how we reduced onboarding friction"
+#  → content-pipeline orchestrates: persona → brief → outline → draft → review → publish
+#  → ai-slop-reviewer auto-runs against long-form-quality-rubric (90+ gate)
+#  → schema-generator emits JSON-LD + citable passages
+
+# 3. Voice-calibrate against past samples
+"Use my brand voice from /voice-reference samples for the next draft"
+```
+
+That's it. No config. Skills auto-activate by trigger words.
+
+---
+
+## Quickstart Installation
+
+### Option 1: Drag-and-drop (recommended for Cowork)
+
+In Cowork, drag the `artibot-cowork.plugin` file into the chat and accept the install prompt.
+
+### Option 2: Marketplace
+
+```text
+/plugin marketplace add Yoodaddy0311/artibot
+/plugin install artibot-cowork@artibot
+```
+
+That triggers the bundled `kr-marketing` and `content-pipeline` skills to auto-register.
+
+---
 
 ## What's different from the full Artibot plugin
 
