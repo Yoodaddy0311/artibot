@@ -763,9 +763,9 @@
       "semanticRetentionDays": -1,
       "archiveAfterDays": 365,
       "weights": {
-        "working": 0.50,
-        "episodic": 0.30,
-        "semantic": 0.20
+        "working": 0.5,
+        "episodic": 0.3,
+        "semantic": 0.2
       },
       "promotion": {
         "minOccurrences": 3,
@@ -790,11 +790,15 @@
       "klPenalty": 0.01,
       "learningRate": 0.02,
       "snapshotCount": 3,
-      "groupingLevels": ["fine", "medium", "coarse"],
+      "groupingLevels": [
+        "fine",
+        "medium",
+        "coarse"
+      ],
       "agentPolicy": {
         "enabled": false,
         "policyPath": "~/.claude/artibot/policies/agent-policy-v1.json",
-        "temperature": 1.0
+        "temperature": 1
       },
       "skillPolicy": {
         "enabled": false,
