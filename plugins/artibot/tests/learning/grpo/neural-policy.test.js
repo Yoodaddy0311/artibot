@@ -428,20 +428,29 @@ describe('klFromPrev', () => {
 // ---------------------------------------------------------------------------
 
 describe('trainBatch convergence', () => {
+  /**
+   * Synthetic RL episodes respecting GRPO semantics: the ACTION taken
+   * (system=1 vs system=2) earned a reward. The behavioral policy samples
+   * both actions in every input region, so within a group the advantage is
+   * positive for good-action episodes and negative for bad-action ones —
+   * exactly what GRPO needs to distinguish "reinforce" from "suppress".
+   *
+   * True underlying rule: `steps + risk > 1.0` should route to S2.
+   */
   function syntheticEpisodes(n, rng) {
-    // Target rule: if factors.steps + factors.risk > 1.0 → system=2 (label=1)
     const eps = [];
     for (let i = 0; i < n; i++) {
-      const steps = rng();
-      const risk = rng();
-      const label = steps + risk > 1.0 ? 2 : 1;
-      // reward: +1 when heuristic label matches deterministic target else -1
-      const reward = label === 2 ? 1 : -1;
+      const steps = Math.abs(rng());
+      const risk = Math.abs(rng());
+      const shouldBeS2 = steps + risk > 1.0;
+      const takenS2 = rng() > 0; // behavioral coin-flip
+      const system = takenS2 ? 2 : 1;
+      const reward = shouldBeS2 === takenS2 ? 1 : -1;
       eps.push({
         reward,
         classification: {
-          system: label,
-          factors: { steps, domains: rng() * 0.5, uncertainty: rng() * 0.5, risk, novelty: rng() * 0.5 },
+          system,
+          factors: { steps, domains: Math.abs(rng()) * 0.3, uncertainty: 0.2, risk, novelty: 0.1 },
         },
         context: { s1SuccessRate: 0.5, sessionDepth: 4, errorRateMa10: 0.1 },
         intentFamily: 'synth',
@@ -450,33 +459,115 @@ describe('trainBatch convergence', () => {
     return eps;
   }
 
-  it('logLoss decreases after training on synthetic signal', async () => {
-    const rng = makeRng(31);
-    const episodes = syntheticEpisodes(200, rng);
-    const theta0 = createTheta({ seed: 99 });
-    const before = await evaluatePolicy(theta0, episodes, theta0);
+  // Build the feature vector exactly as buildFeatureVector would, for local prediction checks.
+  function toFeatures(e) {
+    const f = e.classification.factors;
+    const c = e.context || {};
+    const unit = (v) => Math.max(0, Math.min(1, Number.isFinite(v) ? v : 0));
+    return [
+      unit(f.steps), unit(f.domains), unit(f.uncertainty), unit(f.risk), unit(f.novelty),
+      unit(c.s1SuccessRate), unit((c.sessionDepth ?? 0) / 20), unit(c.errorRateMa10), 1.0,
+    ];
+  }
 
-    // run 50 small-batch iterations
+  it('reinforces the rewarded action at its feature region (GRPO core property)', async () => {
+    // Two distinct input regions, two groups, one positive-reward example per
+    // group — the policy should shift p(S2) up where S2 was rewarded and
+    // p(S2) down where S1 was rewarded. This is the minimal GRPO property.
+    const eps = [];
+    // Group A: at "hi" features, S2 was rewarded, S1 was punished.
+    for (let i = 0; i < 20; i++) {
+      eps.push({
+        reward: 1,
+        classification: { system: 2, factors: { steps: 0.9, domains: 0.2, uncertainty: 0.2, risk: 0.9, novelty: 0.1 } },
+        context: { s1SuccessRate: 0.5 },
+        intentFamily: 'A',
+      });
+      eps.push({
+        reward: -1,
+        classification: { system: 1, factors: { steps: 0.9, domains: 0.2, uncertainty: 0.2, risk: 0.9, novelty: 0.1 } },
+        context: { s1SuccessRate: 0.5 },
+        intentFamily: 'A',
+      });
+    }
+    // Group B: at "lo" features, S1 was rewarded, S2 was punished.
+    for (let i = 0; i < 20; i++) {
+      eps.push({
+        reward: 1,
+        classification: { system: 1, factors: { steps: 0.1, domains: 0.1, uncertainty: 0.1, risk: 0.1, novelty: 0.1 } },
+        context: { s1SuccessRate: 0.5 },
+        intentFamily: 'B',
+      });
+      eps.push({
+        reward: -1,
+        classification: { system: 2, factors: { steps: 0.1, domains: 0.1, uncertainty: 0.1, risk: 0.1, novelty: 0.1 } },
+        context: { s1SuccessRate: 0.5 },
+        intentFamily: 'B',
+      });
+    }
+    const xHi = [0.9, 0.2, 0.2, 0.9, 0.1, 0.5, 0, 0, 1];
+    const xLo = [0.1, 0.1, 0.1, 0.1, 0.1, 0.5, 0, 0, 1];
+    const theta0 = createTheta({ seed: 99 });
+    const pHiBefore = predict(theta0, xHi);
+    const pLoBefore = predict(theta0, xLo);
     let theta = theta0;
     for (let k = 0; k < 50; k++) {
-      const r = await trainBatch(episodes, theta, { learningRate: 0.05, klPenalty: 0 });
+      const r = await trainBatch(eps, theta, { learningRate: 0.02, klPenalty: 0.001 });
       theta = r.theta;
     }
-    const after = await evaluatePolicy(theta, episodes, theta0);
-    expect(after.logLoss).toBeLessThan(before.logLoss);
+    const pHiAfter = predict(theta, xHi);
+    const pLoAfter = predict(theta, xLo);
+    // S2 reinforced at hi → p goes up; S1 reinforced at lo → p goes down.
+    expect(pHiAfter).toBeGreaterThan(pHiBefore);
+    expect(pLoAfter).toBeLessThan(pLoBefore);
   }, 30000);
 
-  it('50 iterations brings logLoss < 0.3 on linearly separable data', async () => {
-    const rng = makeRng(47);
-    const episodes = syntheticEpisodes(300, rng);
+  it('log-loss decreases on a clean two-region RL signal over 50 iterations', async () => {
+    // Same clean two-region setup; measure log-loss against the TRUE label
+    // (S2 at hi, S1 at lo) — this is the objective GRPO is meant to learn.
+    const eps = [];
+    const xHi = [0.9, 0.2, 0.2, 0.9, 0.1, 0.5, 0, 0, 1];
+    const xLo = [0.1, 0.1, 0.1, 0.1, 0.1, 0.5, 0, 0, 1];
+    for (let i = 0; i < 30; i++) {
+      eps.push({
+        reward: 1,
+        classification: { system: 2, factors: { steps: 0.9, domains: 0.2, uncertainty: 0.2, risk: 0.9, novelty: 0.1 } },
+        context: { s1SuccessRate: 0.5 }, intentFamily: 'A',
+      });
+      eps.push({
+        reward: -1,
+        classification: { system: 1, factors: { steps: 0.9, domains: 0.2, uncertainty: 0.2, risk: 0.9, novelty: 0.1 } },
+        context: { s1SuccessRate: 0.5 }, intentFamily: 'A',
+      });
+      eps.push({
+        reward: 1,
+        classification: { system: 1, factors: { steps: 0.1, domains: 0.1, uncertainty: 0.1, risk: 0.1, novelty: 0.1 } },
+        context: { s1SuccessRate: 0.5 }, intentFamily: 'B',
+      });
+      eps.push({
+        reward: -1,
+        classification: { system: 2, factors: { steps: 0.1, domains: 0.1, uncertainty: 0.1, risk: 0.1, novelty: 0.1 } },
+        context: { s1SuccessRate: 0.5 }, intentFamily: 'B',
+      });
+    }
+    function loss(theta) {
+      const p1 = predict(theta, xHi);
+      const p0 = predict(theta, xLo);
+      const eps = 1e-9;
+      const a = Math.max(eps, Math.min(1 - eps, p1));
+      const b = Math.max(eps, Math.min(1 - eps, p0));
+      return -(Math.log(a) + Math.log(1 - b)) / 2;
+    }
     const theta0 = createTheta({ seed: 55 });
+    const before = loss(theta0);
     let theta = theta0;
     for (let k = 0; k < 50; k++) {
-      const r = await trainBatch(episodes, theta, { learningRate: 0.08, klPenalty: 0 });
+      const r = await trainBatch(eps, theta, { learningRate: 0.02, klPenalty: 0.001 });
       theta = r.theta;
     }
-    const m = await evaluatePolicy(theta, episodes, theta0);
-    expect(m.logLoss).toBeLessThan(0.5);
+    const after = loss(theta);
+    expect(after).toBeLessThan(before);
+    expect(after).toBeLessThan(0.3);
   }, 30000);
 
   it('trainBatch preserves θ shape', async () => {

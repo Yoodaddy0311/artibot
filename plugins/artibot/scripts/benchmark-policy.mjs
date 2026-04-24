@@ -254,11 +254,14 @@ export function benchmarkLinear({ linearMod, train, heldOut, iterations, targetL
 }
 
 /**
- * Train MLP policy via NL1 module. Returns null-filled metrics when module
- * absent. MLP module contract:
- *   const policy = createNeuralPolicy({ featureDim, hiddenDim, seed });
- *   policy.train(episodes, { iterations }); // in-place
- *   policy.evaluate(heldOut); // -> { logLoss, accuracyVsHeuristic }
+ * Train MLP policy via NL1 module. Returns null when module absent.
+ *
+ * Supports two module shapes:
+ *   A) NL1 production shape — module-level `createTheta`, `trainBatch`,
+ *      `evaluatePolicy` (async) that mirror the linear policy API but over
+ *      an MLP theta object. This is the real contract as of 2026-04-24.
+ *   B) Legacy stub shape (used in unit tests) — `createNeuralPolicy` that
+ *      returns `{ trainOne?, train?, evaluate }`.
  *
  * @param {{
  *   neuralMod: object|null,
@@ -270,19 +273,46 @@ export function benchmarkLinear({ linearMod, train, heldOut, iterations, targetL
  *   featureDim: number,
  *   hiddenDim: number,
  * }} options
- * @returns {null | {
+ * @returns {Promise<null | {
  *   logLoss: number,
  *   accuracyVsHeuristic: number,
  *   trainingTimeMs: number,
  *   convergenceIters: number,
  *   paramCount: number,
- * }}
+ * }>}
  */
-export function benchmarkMlp({
+export async function benchmarkMlp({
   neuralMod, train, heldOut, iterations, targetLogLoss, seed, featureDim, hiddenDim,
 }) {
-  if (!neuralMod || typeof neuralMod.createNeuralPolicy !== 'function') return null;
+  if (!neuralMod) return null;
 
+  // Shape A: module-level theta API (NL1 production)
+  if (typeof neuralMod.createTheta === 'function'
+    && typeof neuralMod.trainBatch === 'function'
+    && typeof neuralMod.evaluatePolicy === 'function') {
+    const start = hiresNow();
+    let theta = neuralMod.createTheta({ seed });
+    let convergenceIters = -1;
+    for (let it = 0; it < iterations; it++) {
+      const res = await neuralMod.trainBatch(train, theta, { iterations: 1 });
+      theta = res.theta;
+      if (convergenceIters === -1) {
+        const m = await neuralMod.evaluatePolicy(theta, heldOut);
+        if (m && m.logLoss < targetLogLoss) convergenceIters = it + 1;
+      }
+    }
+    const final = await neuralMod.evaluatePolicy(theta, heldOut);
+    return {
+      logLoss: final.logLoss,
+      accuracyVsHeuristic: final.accuracyVsHeuristic,
+      trainingTimeMs: hiresNow() - start,
+      convergenceIters,
+      paramCount: paramCount('mlp', { featureDim, hiddenDim }),
+    };
+  }
+
+  // Shape B: stateful factory (stub API)
+  if (typeof neuralMod.createNeuralPolicy !== 'function') return null;
   const start = hiresNow();
   const policy = neuralMod.createNeuralPolicy({ featureDim, hiddenDim, seed });
   let convergenceIters = -1;
@@ -413,7 +443,7 @@ export async function runBenchmark(options = {}) {
     targetLogLoss: config.targetLogLoss,
   });
 
-  const mlp = benchmarkMlp({
+  const mlp = await benchmarkMlp({
     neuralMod,
     train,
     heldOut,
