@@ -144,9 +144,9 @@ describe('router + GRPO integration — config safe-defaults', () => {
     resetGrpoRoutingConfigCache();
   });
 
-  it('getGrpoRoutingConfig는 enabled:false가 기본', async () => {
+  it('getGrpoRoutingConfig는 v3.5에서 enabled:true가 기본 (default-on flip)', async () => {
     const cfg = await getGrpoRoutingConfig({ force: true });
-    expect(cfg.enabled).toBe(false);
+    expect(cfg.enabled).toBe(true);
     expect(cfg.blendAlpha).toBeGreaterThanOrEqual(0.1);
     expect(cfg.blendAlpha).toBeLessThanOrEqual(1);
     expect(Array.isArray(cfg.groupingLevels)).toBe(true);

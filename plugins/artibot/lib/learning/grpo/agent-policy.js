@@ -15,28 +15,37 @@
  *   - Gradient is the classic softmax cross-entropy form:
  *         grad_a = advantage * (1[a=chosen] - pi(a|f))
  *     scaled by reward advantage over the group. No feature vector — action
- *     selection is family-conditional only (d=|A_f|).
+ *     selection is family-conditional only.
  *   - Fallback to `artibot.config.json` `agents.taskBased` map until a family
  *     has >=3 trained episodes (baseline continuity).
  *
- * Storage: `~/.claude/artibot/policies/agent-policy-v1.json`, 3-snapshot retention.
- * Zero external deps, deterministic under `NODE_ENV=test`, no network IO.
+ * Persistence lives in `agent-policy-store.js` to keep this file within the
+ * 800-line quality gate.
  *
- * See `_design/grpo-rlvr-routing-2026-04-24.md` Section 5.4 (Agent Selection
- * Extension) + Section 3.4 (Group Definition).
+ * Zero external deps. Deterministic under `NODE_ENV=test`. No network IO.
+ *
+ * See `_design/grpo-rlvr-routing-2026-04-24.md` Section 5.4 + Section 3.4.
  *
  * @module lib/learning/grpo/agent-policy
  */
 
-import path from 'node:path';
-import { ensureDir, readJsonFile, writeJsonFile } from '../../core/file.js';
-import { getHomeDir } from '../../core/platform.js';
+import {
+  loadPolicy,
+  savePolicy,
+  snapshot,
+  listSnapshots,
+  resolvePolicyPaths,
+  writeRolledBackPolicy,
+} from './agent-policy-store.js';
+
+// Re-export persistence surface for external consumers (tests, bridge).
+export { loadPolicy, savePolicy, snapshot, listSnapshots, resolvePolicyPaths };
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-/** Training defaults — mirror `learning.grpoRouting.*` config block. */
+/** Training defaults — conservative; callers override via `config`. */
 export const DEFAULTS = Object.freeze({
   learningRate: 0.05,
   klPenalty: 0.01,
@@ -49,9 +58,6 @@ export const DEFAULTS = Object.freeze({
   maxBatchIterations: 10,
 });
 
-const POLICY_VERSION = 1;
-const MODEL_TYPE = 'softmax-weights';
-
 // ---------------------------------------------------------------------------
 // Math primitives
 // ---------------------------------------------------------------------------
@@ -62,7 +68,7 @@ const MODEL_TYPE = 'softmax-weights';
  *
  * @param {number[]} weights
  * @param {number} [temperature=1.0]
- * @returns {number[]} probabilities summing to 1, same length as weights
+ * @returns {number[]} probabilities summing to 1
  */
 export function softmax(weights, temperature = 1.0) {
   if (!Array.isArray(weights) || weights.length === 0) return [];
@@ -102,11 +108,10 @@ export function clipWeights(weights, range = DEFAULTS.clipRange) {
 }
 
 /**
- * Group-relative advantage: (r_i - mean) / std. Epsilon-guarded std so that
- * zero-variance groups collapse to all-zero advantages rather than NaN.
+ * Group-relative advantage: (r_i - mean) / std. Epsilon-guarded std.
  *
  * @param {number[]} rewards
- * @returns {number[]} same length
+ * @returns {number[]}
  */
 export function computeAdvantages(rewards) {
   const n = rewards.length;
@@ -127,8 +132,7 @@ export function computeAdvantages(rewards) {
 }
 
 /**
- * L2 divergence between two weight vectors (same proxy used by routing
- * policy-updater). Length mismatch -> 0.
+ * L2 divergence between two weight vectors. Length mismatch -> 0.
  *
  * @param {number[]} a
  * @param {number[]} b
@@ -145,8 +149,8 @@ export function klFromPrev(a, b) {
 }
 
 /**
- * Aggregate "KL" across the whole weights object — sums per-family L2
- * divergence so a single-family large update cannot slip past the guard.
+ * Aggregate per-family L2 across the whole weights object. Takes the union of
+ * per-family keys so removed/added agents count toward divergence.
  *
  * @param {Record<string, Record<string, number>>} next
  * @param {Record<string, Record<string, number>>} prev
@@ -157,27 +161,22 @@ export function klTotal(next, prev) {
   const prevSafe = prev && typeof prev === 'object' ? prev : {};
   let total = 0;
   for (const fam of Object.keys(next)) {
-    const a = familyToVector(next[fam]);
-    const b = familyToVector(prevSafe[fam] ?? {});
     const keys = unionKeys(next[fam], prevSafe[fam] ?? {});
     const av = keys.map((k) => next[fam]?.[k] ?? 0);
     const bv = keys.map((k) => prevSafe[fam]?.[k] ?? 0);
     total += klFromPrev(av, bv);
-    // Touch a/b so linter does not flag unused (kept for future typed use).
-    if (a === null || b === null) total += 0;
   }
   return total;
 }
 
-function familyToVector(family) {
-  if (!family || typeof family !== 'object') return [];
-  return Object.values(family).filter((v) => Number.isFinite(v));
-}
-
 function unionKeys(a, b) {
   const set = new Set();
-  if (a && typeof a === 'object') for (const k of Object.keys(a)) set.add(k);
-  if (b && typeof b === 'object') for (const k of Object.keys(b)) set.add(k);
+  if (a && typeof a === 'object') for (const k of Object.keys(a)) {
+    if (k !== '__count__') set.add(k);
+  }
+  if (b && typeof b === 'object') for (const k of Object.keys(b)) {
+    if (k !== '__count__') set.add(k);
+  }
   return [...set].sort();
 }
 
@@ -187,7 +186,7 @@ function unionKeys(a, b) {
 
 /**
  * Extract the baseline agent for a task family from a config-like object.
- * Looks up `config.agents.taskBased[taskFamily]`; returns `null` when no map
+ * Reads `config.agents.taskBased[taskFamily]`. Returns `null` when no map
  * entry exists. Config is intentionally read-only here (FL1 owns writes).
  *
  * @param {object|null|undefined} config
@@ -201,17 +200,17 @@ export function baselineAgentFor(config, taskFamily) {
 }
 
 /**
- * Default candidate set = keys of `weights[taskFamily]` union baseline agent,
- * falling back to the whole `taskBased` value set when nothing is known.
+ * Default candidate set = learned agents for the family union baseline,
+ * falling back to all taskBased agents when the family is fully unknown.
  *
  * @param {Record<string, Record<string, number>>} weights
  * @param {string} taskFamily
  * @param {object} [config]
- * @returns {string[]} deduped, sorted candidate list
+ * @returns {string[]}
  */
 export function defaultCandidates(weights, taskFamily, config) {
   const fromWeights = weights && weights[taskFamily] && typeof weights[taskFamily] === 'object'
-    ? Object.keys(weights[taskFamily])
+    ? Object.keys(weights[taskFamily]).filter((k) => k !== '__count__')
     : [];
   const baseline = baselineAgentFor(config, taskFamily);
   const all = new Set(fromWeights);
@@ -231,12 +230,6 @@ export function defaultCandidates(weights, taskFamily, config) {
 // Selection
 // ---------------------------------------------------------------------------
 
-/**
- * Argmax of a distribution (deterministic tie-break on first index).
- *
- * @param {number[]} probs
- * @returns {number}
- */
 function argmax(probs) {
   let best = 0;
   let bestV = -Infinity;
@@ -251,23 +244,15 @@ function argmax(probs) {
 
 /**
  * Select an agent from a softmax over learned weights for a family.
- * Deterministic: returns the argmax. Production code may wrap this with
- * epsilon-greedy exploration at the caller site.
- *
- * Contract:
- *   - Never throws.
- *   - Returns `{ agent: null, ... }` only when no candidates resolve.
- *   - When the family is untrained AND a baseline exists, returns the baseline
- *     with `source = 'baseline'`.
- *   - When trained, returns `source = 'policy'` with full distribution.
+ * Deterministic: returns the argmax. Callers may wrap with epsilon-greedy.
  *
  * @param {Record<string, Record<string, number>>} weights
  * @param {string} taskFamily
  * @param {object} [options]
- * @param {string[]} [options.candidates]    // override candidate set
- * @param {number}   [options.temperature=1.0]
- * @param {object}   [options.config]        // for baseline fallback
- * @param {number}   [options.minFamilyOccurrences=DEFAULTS.minFamilyOccurrences]
+ * @param {string[]} [options.candidates]
+ * @param {number} [options.temperature=1.0]
+ * @param {object} [options.config]
+ * @param {number} [options.minFamilyOccurrences]
  * @returns {{
  *   agent: string|null,
  *   source: 'policy'|'baseline'|'fallback',
@@ -335,17 +320,9 @@ export function selectAgent(weights, taskFamily, options = {}) {
 // ---------------------------------------------------------------------------
 
 /**
- * Normalize an agent-selection episode into `{ family, agent, reward, exploration }`.
- * Returns `null` when the record is missing required fields.
- *
+ * Normalize an agent-selection episode. Returns `null` on missing fields.
  * Expected shape:
- *   {
- *     reward: number,
- *     taskFamily: string,          // family key (fine/medium/coarse)
- *     selectedAgent: string,       // agent that executed
- *     candidates?: string[],       // optional candidate set at decision time
- *     isExploration?: boolean,
- *   }
+ *   { reward, taskFamily, selectedAgent, candidates?, isExploration? }
  *
  * @param {object} episode
  * @returns {{ family:string, agent:string, reward:number, candidates:string[]|null, exploration:boolean } | null}
@@ -392,25 +369,14 @@ export function groupByFamily(episodes) {
 
 /**
  * Single-family softmax policy-gradient update with KL shrinkage.
- * For each non-exploration episode in the family, the gradient for agent `a`
- * is `advantage * (1[a=chosen] - pi(a|f))`, summed over episodes. The KL
- * penalty shrinks back toward `prevFamilyWeights`.
- *
- * @param {object} prevFamilyWeights - previous weights object for this family
- * @param {ReturnType<typeof normalizeEpisode>[]} familyEps
- * @param {object} options
- * @param {number} options.learningRate
- * @param {number} options.klPenalty
- * @param {number} options.temperature
- * @param {number} options.clipRange
- * @returns {{ weights: object, episodesUsed: number, explorationSkipped: number, agents: string[] }}
+ * For each non-exploration episode, the gradient for agent `a` is
+ * `advantage * (1[a=chosen] - pi(a|f))`, summed across episodes.
  */
-function updateFamily(prevFamilyWeights, familyEps, options) {
+function updateFamily(prevFamilyWeights, familyEps, opts) {
   const prev = prevFamilyWeights && typeof prevFamilyWeights === 'object' ? prevFamilyWeights : {};
   const trainable = familyEps.filter((e) => !e.exploration);
   const explorationSkipped = familyEps.length - trainable.length;
 
-  // Build the agent set = previously-seen union with episode agents + candidates.
   const agentSet = new Set();
   for (const k of Object.keys(prev)) {
     if (k === '__count__') continue;
@@ -423,12 +389,7 @@ function updateFamily(prevFamilyWeights, familyEps, options) {
   const agents = [...agentSet].sort();
 
   if (trainable.length === 0 || agents.length === 0) {
-    return {
-      weights: { ...prev },
-      episodesUsed: 0,
-      explorationSkipped,
-      agents,
-    };
+    return { weights: { ...prev }, episodesUsed: 0, explorationSkipped, agents };
   }
 
   const prevVec = agents.map((a) => {
@@ -437,14 +398,12 @@ function updateFamily(prevFamilyWeights, familyEps, options) {
   });
   let weights = [...prevVec];
 
-  const rewards = trainable.map((e) => e.reward);
-  const advantages = computeAdvantages(rewards);
-
+  const advantages = computeAdvantages(trainable.map((e) => e.reward));
   const grad = new Array(agents.length).fill(0);
   for (let i = 0; i < trainable.length; i++) {
     const ep = trainable[i];
     const adv = advantages[i];
-    const probs = softmax(weights, options.temperature);
+    const probs = softmax(weights, opts.temperature);
     for (let k = 0; k < agents.length; k++) {
       const indicator = agents[k] === ep.agent ? 1 : 0;
       grad[k] += adv * (indicator - probs[k]);
@@ -452,20 +411,15 @@ function updateFamily(prevFamilyWeights, familyEps, options) {
   }
 
   for (let k = 0; k < agents.length; k++) {
-    weights[k] = weights[k] + options.learningRate * grad[k] - options.klPenalty * (weights[k] - prevVec[k]);
+    weights[k] = weights[k] + opts.learningRate * grad[k] - opts.klPenalty * (weights[k] - prevVec[k]);
   }
-  weights = clipWeights(weights, options.clipRange);
+  weights = clipWeights(weights, opts.clipRange);
 
   const next = {};
   for (let k = 0; k < agents.length; k++) next[agents[k]] = weights[k];
   next.__count__ = (prev.__count__ ?? 0) + trainable.length;
 
-  return {
-    weights: next,
-    episodesUsed: trainable.length,
-    explorationSkipped,
-    agents,
-  };
+  return { weights: next, episodesUsed: trainable.length, explorationSkipped, agents };
 }
 
 /**
@@ -504,28 +458,20 @@ export function updatePolicy(episodes, prevWeights, options = {}) {
     let famWeights = result[family] ?? {};
     let used = 0;
     let skipped = 0;
-
     for (let it = 0; it < iterations; it++) {
-      const upd = updateFamily(famWeights, bucket, { learningRate: lr, klPenalty: lambda, temperature, clipRange });
+      const upd = updateFamily(famWeights, bucket, {
+        learningRate: lr, klPenalty: lambda, temperature, clipRange,
+      });
       famWeights = upd.weights;
-      if (it === 0) {
-        used = upd.episodesUsed;
-        skipped = upd.explorationSkipped;
-      }
+      if (it === 0) { used = upd.episodesUsed; skipped = upd.explorationSkipped; }
     }
-
     result[family] = famWeights;
     if (used > 0) familiesTouched += 1;
     totalUsed += used;
     explorationSkipped += skipped;
   }
 
-  return {
-    weights: result,
-    episodesUsed: totalUsed,
-    familiesTouched,
-    explorationSkipped,
-  };
+  return { weights: result, episodesUsed: totalUsed, familiesTouched, explorationSkipped };
 }
 
 // ---------------------------------------------------------------------------
@@ -539,12 +485,7 @@ export function updatePolicy(episodes, prevWeights, options = {}) {
  * @param {object[]} heldOut
  * @param {Record<string, Record<string, number>>} [prevWeights]
  * @param {object} [options]
- * @returns {{
- *   logLoss: number,
- *   accuracyVsBaseline: number,
- *   klFromPrev: number,
- *   samples: number,
- * }}
+ * @returns {{ logLoss:number, accuracyVsBaseline:number, klFromPrev:number, samples:number }}
  */
 export function evaluatePolicy(weights, heldOut, prevWeights, options = {}) {
   const temperature = options.temperature ?? DEFAULTS.temperature;
@@ -568,13 +509,9 @@ export function evaluatePolicy(weights, heldOut, prevWeights, options = {}) {
     const logits = agents.map((a) => (typeof familyW[a] === 'number' ? familyW[a] : 0));
     const probs = softmax(logits, temperature);
     const idx = agents.indexOf(s.agent);
-    if (idx < 0) {
-      lossSum += -Math.log(eps);
-      continue;
-    }
+    if (idx < 0) { lossSum += -Math.log(eps); continue; }
     lossSum += -Math.log(Math.max(eps, probs[idx]));
-    const best = argmax(probs);
-    if (agents[best] === s.agent) correct++;
+    if (agents[argmax(probs)] === s.agent) correct++;
   }
   return {
     logLoss: lossSum / samples.length,
@@ -582,187 +519,6 @@ export function evaluatePolicy(weights, heldOut, prevWeights, options = {}) {
     klFromPrev: klVal,
     samples: samples.length,
   };
-}
-
-// ---------------------------------------------------------------------------
-// Persistence
-// ---------------------------------------------------------------------------
-
-/**
- * Resolve the canonical agent-policy paths. Honors an absolute `policyPath`
- * override; otherwise defaults to `~/.claude/artibot/policies/agent-policy-v1.json`.
- *
- * @param {string} [policyPath]
- * @returns {{ policyFile: string, snapshotDir: string }}
- */
-export function resolvePolicyPaths(policyPath) {
-  const file = policyPath && path.isAbsolute(policyPath)
-    ? policyPath
-    : path.join(getHomeDir(), '.claude', 'artibot', 'policies', 'agent-policy-v1.json');
-  const dir = path.dirname(file);
-  return { policyFile: file, snapshotDir: path.join(dir, 'agent-snapshots') };
-}
-
-function makeSnapshotId(now = new Date()) {
-  const iso = now.toISOString().replace(/[:.]/g, '-');
-  // Deterministic under NODE_ENV=test: append pid so parallel tests don't collide.
-  const suffix = process.env.NODE_ENV === 'test'
-    ? `${process.pid}`
-    : Math.random().toString(36).slice(2, 8);
-  return `agent-v${POLICY_VERSION}-${iso}-${suffix}`;
-}
-
-/**
- * Load the policy from disk. Returns `null` on missing/malformed file.
- *
- * @param {string} [policyPath]
- * @returns {Promise<object|null>}
- */
-export async function loadPolicy(policyPath) {
-  const { policyFile } = resolvePolicyPaths(policyPath);
-  const data = await readJsonFile(policyFile);
-  if (!data || typeof data !== 'object') return null;
-  if (!data.weights || typeof data.weights !== 'object') return null;
-  return data;
-}
-
-/**
- * Save the policy with a rotating snapshot.
- *
- * @param {Record<string, Record<string, number>>} weights
- * @param {object} metrics
- * @param {object} [options]
- * @param {string} [options.policyPath]
- * @param {number} [options.trainedOnEpisodes]
- * @param {string} [options.previousSnapshotId]
- * @param {number} [options.snapshotCount=DEFAULTS.snapshotCount]
- * @returns {Promise<{ policy: object, snapshotId: string, policyFile: string }>}
- */
-export async function savePolicy(weights, metrics, options = {}) {
-  const { policyFile, snapshotDir } = resolvePolicyPaths(options.policyPath);
-  const snapshotCount = options.snapshotCount ?? DEFAULTS.snapshotCount;
-  await ensureDir(path.dirname(policyFile));
-  await ensureDir(snapshotDir);
-
-  const snapshotId = makeSnapshotId();
-  const policy = {
-    version: POLICY_VERSION,
-    modelType: MODEL_TYPE,
-    weights: cloneWeights(weights),
-    trainedAt: new Date().toISOString(),
-    trainedOnEpisodes: options.trainedOnEpisodes ?? 0,
-    metrics: {
-      logLoss: round6(metrics?.logLoss ?? 0),
-      accuracyVsBaseline: round6(metrics?.accuracyVsBaseline ?? 0),
-      klFromPrev: round6(metrics?.klFromPrev ?? 0),
-    },
-    previousSnapshotId: options.previousSnapshotId ?? null,
-    snapshotId,
-  };
-
-  await writeJsonFile(policyFile, policy);
-  await writeJsonFile(path.join(snapshotDir, `${snapshotId}.json`), policy);
-  await pruneSnapshots(snapshotDir, snapshotCount);
-  return { policy, snapshotId, policyFile };
-}
-
-/**
- * Write a standalone snapshot. Useful for tests and manual rollback fixtures.
- *
- * @param {Record<string, Record<string, number>>} weights
- * @param {string} id
- * @param {string} [policyPath]
- * @returns {Promise<string>} absolute snapshot file path
- */
-export async function snapshot(weights, id, policyPath) {
-  const { snapshotDir } = resolvePolicyPaths(policyPath);
-  await ensureDir(snapshotDir);
-  const file = path.join(snapshotDir, `${id}.json`);
-  await writeJsonFile(file, {
-    version: POLICY_VERSION,
-    modelType: MODEL_TYPE,
-    weights: cloneWeights(weights),
-    trainedAt: new Date().toISOString(),
-    snapshotId: id,
-  });
-  return file;
-}
-
-/**
- * List snapshots newest-first. Malformed files are skipped.
- *
- * @param {string} [policyPath]
- * @returns {Promise<Array<{ id:string, file:string, trainedAt:string, weights:object }>>}
- */
-export async function listSnapshots(policyPath) {
-  const { snapshotDir } = resolvePolicyPaths(policyPath);
-  const fs = await import('node:fs/promises');
-  let entries;
-  try {
-    entries = await fs.readdir(snapshotDir);
-  } catch {
-    return [];
-  }
-  const records = [];
-  for (const name of entries) {
-    if (!name.endsWith('.json')) continue;
-    const file = path.join(snapshotDir, name);
-    const data = await readJsonFile(file);
-    if (!data || !data.weights || typeof data.weights !== 'object') continue;
-    records.push({
-      id: data.snapshotId ?? name.replace(/\.json$/, ''),
-      file,
-      trainedAt: data.trainedAt ?? '',
-      weights: data.weights,
-    });
-  }
-  records.sort((a, b) => (b.trainedAt || '').localeCompare(a.trainedAt || ''));
-  return records;
-}
-
-async function pruneSnapshots(snapshotDir, retain) {
-  const fs = await import('node:fs/promises');
-  let entries;
-  try {
-    entries = await fs.readdir(snapshotDir);
-  } catch {
-    return;
-  }
-  const files = [];
-  for (const name of entries) {
-    if (!name.endsWith('.json')) continue;
-    const full = path.join(snapshotDir, name);
-    try {
-      const stat = await fs.stat(full);
-      files.push({ full, mtime: stat.mtimeMs });
-    } catch {
-      // skip
-    }
-  }
-  files.sort((a, b) => b.mtime - a.mtime);
-  const toDelete = files.slice(Math.max(0, retain));
-  for (const f of toDelete) {
-    try {
-      await fs.unlink(f.full);
-    } catch {
-      // best-effort
-    }
-  }
-}
-
-function round6(n) {
-  if (!Number.isFinite(n)) return 0;
-  return Math.round(n * 1e6) / 1e6;
-}
-
-function cloneWeights(weights) {
-  if (!weights || typeof weights !== 'object') return {};
-  const out = {};
-  for (const fam of Object.keys(weights)) {
-    const inner = weights[fam];
-    if (inner && typeof inner === 'object') out[fam] = { ...inner };
-  }
-  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -775,10 +531,6 @@ function cloneWeights(weights) {
  * @param {Record<string, Record<string, number>>} weights
  * @param {string} taskFamily
  * @param {object} [options]
- * @param {number} [options.topK=3]
- * @param {string[]} [options.candidates]
- * @param {number} [options.temperature=1.0]
- * @param {object} [options.config]
  * @returns {{
  *   recommendation: string|null,
  *   confidence: number,
@@ -803,23 +555,14 @@ export function getRecommendation(weights, taskFamily, options = {}) {
 // ---------------------------------------------------------------------------
 
 /**
- * Create a stateful agent-policy updater scoped to a policy file.
+ * Create a stateful agent-policy instance scoped to a policy file.
  *
  * @param {object} [options]
  * @param {string} [options.policyPath]
  * @param {object} [options.config]         // routing-policy config block
- * @param {object} [options.baseConfig]     // full artibot config (for taskBased baseline)
+ * @param {object} [options.baseConfig]     // full artibot.config.json for baseline
  * @param {{ info: Function, warn: Function, error: Function }} [options.logger]
- * @returns {{
- *   loadPolicy: () => Promise<object|null>,
- *   selectAgent: (family: string, ctx?: object) => Promise<ReturnType<typeof selectAgent>>,
- *   getRecommendation: (family: string, opts?: object) => Promise<ReturnType<typeof getRecommendation>>,
- *   trainFromEpisodes: (episodes: object[], heldOut?: object[]) => Promise<{
- *     policy: object|null, metrics: object, rejected?: string,
- *   }>,
- *   listSnapshots: () => Promise<Array<{ id:string, file:string, trainedAt:string, weights:object }>>,
- *   rollback: (n?: number) => Promise<{ rolledBackTo:string, weights:object }|null>,
- * }}
+ * @returns {object}
  */
 export function createAgentPolicy(options = {}) {
   const policyPath = options.policyPath;
@@ -848,6 +591,7 @@ export function createAgentPolicy(options = {}) {
         ...opts,
         config: opts.config ?? baseConfig,
         temperature: opts.temperature ?? config.temperature,
+        minFamilyOccurrences: config.minFamilyOccurrences,
       });
     },
 
@@ -883,7 +627,6 @@ export function createAgentPolicy(options = {}) {
         previousSnapshotId: prev?.snapshotId ?? null,
         snapshotCount: config.snapshotCount,
       });
-
       return { policy: saved.policy, metrics, familiesTouched: update.familiesTouched };
     },
 
@@ -894,16 +637,7 @@ export function createAgentPolicy(options = {}) {
       const idx = Math.max(0, Math.min(snapshots.length - 1, n));
       const target = snapshots[idx];
       if (!target) return null;
-      const { policyFile } = resolvePolicyPaths(policyPath);
-      await writeJsonFile(policyFile, {
-        version: POLICY_VERSION,
-        modelType: MODEL_TYPE,
-        weights: cloneWeights(target.weights),
-        trainedAt: new Date().toISOString(),
-        rolledBackFrom: snapshots[0]?.id ?? null,
-        rolledBackTo: target.id,
-        snapshotId: target.id,
-      });
+      await writeRolledBackPolicy(policyPath, target, snapshots[0]?.id ?? null);
       return { rolledBackTo: target.id, weights: target.weights };
     },
   };

@@ -55,11 +55,36 @@ const POLICY_TTL_MS = 60_000;
 let _routingPolicyCache = null;
 
 /**
+ * Memoization cache for skill-policy reads. Same TTL semantics as the
+ * routing policy cache; keyed independently because the two policies live
+ * in separate JSON files.
+ * @type {{ loadedAt: number|null, policy: object|null, policyPath: string }|null}
+ */
+let _skillPolicyCache = null;
+
+/**
+ * Memoization cache for per-(intent, candidates) skill trigger biases.
+ * Separate from the policy cache above so scoring can short-circuit without
+ * re-reading the JSON when the same candidates keep appearing turn-to-turn.
+ * @type {Map<string, { loadedAt: number, value: Record<string, number> }>}
+ */
+const _skillBiasMemo = new Map();
+
+/**
  * Reset the routing-policy memo. Exposed for test isolation.
  * @returns {void}
  */
 export function resetRoutingBiasCache() {
   _routingPolicyCache = null;
+}
+
+/**
+ * Reset the skill-policy memos. Exposed for test isolation.
+ * @returns {void}
+ */
+export function resetSkillBiasCache() {
+  _skillPolicyCache = null;
+  _skillBiasMemo.clear();
 }
 
 /**
@@ -341,5 +366,132 @@ export async function getRoutingBias(features, options = {}) {
     return { p_s2: p, confidence, source: 'policy' };
   } catch {
     return fallback;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Skill trigger bias (v3.5 §5.5)
+// ---------------------------------------------------------------------------
+
+/**
+ * Read the skill-trigger policy from disk, memoized for 60s. Never throws.
+ * @param {string} [policyPath]
+ * @returns {Promise<object|null>}
+ */
+async function readSkillPolicy(policyPath = DEFAULT_SKILL_POLICY_PATH) {
+  const now = Date.now();
+  if (
+    _skillPolicyCache
+    && _skillPolicyCache.policyPath === policyPath
+    && _skillPolicyCache.loadedAt !== null
+    && now - _skillPolicyCache.loadedAt < POLICY_TTL_MS
+  ) {
+    return _skillPolicyCache.policy;
+  }
+
+  try {
+    const raw = await readFile(policyPath, 'utf8');
+    const parsed = JSON.parse(raw);
+    _skillPolicyCache = { loadedAt: now, policy: parsed, policyPath };
+    return parsed;
+  } catch {
+    _skillPolicyCache = { loadedAt: now, policy: null, policyPath };
+    return null;
+  }
+}
+
+function memoKey(intent, candidates) {
+  const safeIntent = typeof intent === 'string' ? intent : '';
+  const names = Array.isArray(candidates)
+    ? [...candidates].filter((c) => typeof c === 'string').sort().join('|')
+    : '';
+  return `${safeIntent}::${names}`;
+}
+
+function scoreFromPolicy(policy, intent, candidates) {
+  const skills = policy?.skills;
+  if (!skills || typeof skills !== 'object') return null;
+  const out = Object.create(null);
+  const tokens = [];
+  const seen = new Set();
+  const add = (raw) => {
+    if (typeof raw !== 'string') return;
+    for (const t of raw.toLowerCase().split(/[^\p{L}\p{N}]+/u)) {
+      if (!t || t.length < 2 || seen.has(t)) continue;
+      seen.add(t);
+      tokens.push(t);
+    }
+  };
+  add(intent);
+
+  for (const name of candidates) {
+    const entry = skills[name];
+    if (!entry || typeof entry !== 'object') {
+      out[name] = null; // neutral — caller falls back to regex
+      continue;
+    }
+    const w = entry.triggerWeights ?? {};
+    let z = Number.isFinite(entry.baseline_bias) ? entry.baseline_bias : 0;
+    for (const t of tokens) {
+      const v = w[t];
+      if (typeof v === 'number' && Number.isFinite(v)) z += v;
+    }
+    out[name] = sigmoid(z);
+  }
+  return out;
+}
+
+/**
+ * Get a per-skill invoke bias for the supplied intent + candidate set. When
+ * the skill policy file is missing, malformed, or the candidate has no
+ * trained entry, that candidate's bias is `null` (caller keeps regex
+ * decision). Memoized for 60s per (intent, sorted-candidates) key.
+ *
+ * Contract:
+ *   - Never throws.
+ *   - Returns `null` when the whole policy is unavailable — the middleware
+ *     treats this as "fall back to regex across the board".
+ *   - Per-candidate `null` preserves the baseline for that skill only.
+ *
+ * @param {string} intent
+ * @param {string[]} candidates
+ * @param {object} [options]
+ * @param {string} [options.policyPath]
+ * @returns {Promise<Record<string, number|null>|null>}
+ *
+ * @example
+ * const bias = await getSkillTriggerBias('refactor foo.js', ['tdd-workflow', 'copywriting']);
+ * if (bias && bias['tdd-workflow'] != null && bias['tdd-workflow'] > 0.5) {
+ *   triggerSkill('tdd-workflow');
+ * }
+ */
+export async function getSkillTriggerBias(intent, candidates, options = {}) {
+  if (!Array.isArray(candidates) || candidates.length === 0) return null;
+  const safeCandidates = candidates.filter((c) => typeof c === 'string' && c);
+  if (safeCandidates.length === 0) return null;
+
+  const key = memoKey(intent, safeCandidates);
+  const now = Date.now();
+  const cached = _skillBiasMemo.get(key);
+  if (cached && now - cached.loadedAt < POLICY_TTL_MS) {
+    return cached.value;
+  }
+
+  try {
+    const policy = await readSkillPolicy(options.policyPath ?? DEFAULT_SKILL_POLICY_PATH);
+    if (!policy) {
+      _skillBiasMemo.set(key, { loadedAt: now, value: null });
+      return null;
+    }
+    const scores = scoreFromPolicy(policy, intent, safeCandidates);
+    if (!scores) {
+      _skillBiasMemo.set(key, { loadedAt: now, value: null });
+      return null;
+    }
+    _skillBiasMemo.set(key, { loadedAt: now, value: scores });
+    return scores;
+  } catch {
+    _skillBiasMemo.set(key, { loadedAt: now, value: null });
+    return null;
   }
 }
