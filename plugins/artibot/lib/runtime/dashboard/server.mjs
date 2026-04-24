@@ -19,6 +19,7 @@ import { watch, existsSync, statSync, createReadStream } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { dirname, join, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createAggregator } from './aggregator.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_PUBLIC_DIR = join(HERE, 'public');
@@ -161,6 +162,49 @@ async function serveStatic(req, res, publicDir) {
 }
 
 /**
+ * Serve a specific absolute file with nosniff + no-store headers.
+ * @param {string} abs
+ * @param {import('node:http').ServerResponse} res
+ */
+async function serveStaticFile(abs, res) {
+  try {
+    const st = await stat(abs);
+    if (!st.isFile()) { res.writeHead(404).end('not found'); return; }
+    const ext = abs.slice(abs.lastIndexOf('.')).toLowerCase();
+    const type = MIME[ext] || 'application/octet-stream';
+    const body = await readFile(abs);
+    res.writeHead(200, {
+      'content-type': type,
+      'cache-control': 'no-store',
+      'x-content-type-options': 'nosniff',
+    });
+    res.end(body);
+  } catch {
+    res.writeHead(404).end('not found');
+  }
+}
+
+/**
+ * Write a JSON response from an async producer, with uniform error handling.
+ * @param {import('node:http').ServerResponse} res
+ * @param {() => Promise<any>} producer
+ */
+async function writeJson(res, producer) {
+  try {
+    const body = await producer();
+    res.writeHead(200, {
+      'content-type': 'application/json; charset=utf-8',
+      'cache-control': 'no-store',
+      'x-content-type-options': 'nosniff',
+    });
+    res.end(JSON.stringify(body));
+  } catch (err) {
+    res.writeHead(500, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ error: err?.message ?? 'aggregator failed' }));
+  }
+}
+
+/**
  * Minimal inbound frame parser for close detection. Text/ping are ignored
  * (the dashboard is read-only from the browser's perspective).
  * @param {Buffer} buf
@@ -195,11 +239,25 @@ export async function createDashboardServer(opts = {}) {
   const eventFile = opts.eventFile ?? defaultEventFile();
 
   const clients = new Set();
+  const aggregator = createAggregator({ eventFile });
 
   const httpServer = createServer(async (req, res) => {
-    if (req.url === '/healthz') {
+    const urlPath = (req.url ?? '/').split('?')[0];
+    if (urlPath === '/healthz') {
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ ok: true, clients: clients.size }));
+      return;
+    }
+    if (urlPath === '/multi-session' || urlPath === '/multi-session/') {
+      await serveStaticFile(join(publicDir, 'multi-session.html'), res);
+      return;
+    }
+    if (urlPath === '/api/sessions') {
+      await writeJson(res, async () => ({ sessions: await aggregator.getSessions() }));
+      return;
+    }
+    if (urlPath === '/api/aggregates') {
+      await writeJson(res, async () => aggregator.getAll());
       return;
     }
     await serveStatic(req, res, publicDir);
