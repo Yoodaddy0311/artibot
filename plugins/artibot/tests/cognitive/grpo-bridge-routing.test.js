@@ -215,7 +215,7 @@ describe('grpo-bridge/getRoutingBias', () => {
   it('theta 유효 → sigmoid(theta·x) 반환', async () => {
     // 9 features + bias = 10. All zeros except bias(1.0) gives sigmoid(0) = 0.5.
     const ok = path.join(tmpDir, 'zero-theta.json');
-    await writeFile(ok, JSON.stringify({ version: 1, theta: Array(10).fill(0) }));
+    await writeFile(ok, JSON.stringify({ version: 1, theta: Array(9).fill(0) }));
     const out = await getRoutingBias({}, { policyPath: ok });
     expect(out.source).toBe('policy');
     expect(out.p_s2).toBeCloseTo(0.5, 5);
@@ -274,7 +274,7 @@ describe('grpo-bridge/getCachedRoutingBias (sync hot path)', () => {
 
   it('prime 후 동기 호출 → policy 응답', async () => {
     const ok = path.join(tmpDir, 'theta.json');
-    await writeFile(ok, JSON.stringify({ theta: Array(10).fill(0) }));
+    await writeFile(ok, JSON.stringify({ theta: Array(9).fill(0) }));
     await primeRoutingBiasCache({ policyPath: ok });
     const out = getCachedRoutingBias({});
     expect(out.source).toBe('policy');
