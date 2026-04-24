@@ -9,6 +9,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.7.0] - 2026-04-24
+
+### Added
+- **Joint Agent-Skill GRPO policy** — correlation-aware joint selection
+  - `lib/learning/grpo/joint-policy.js` — marginal agent × skill + correlation matrix
+  - `score(agent, skill | f) = agent_prob(agent|f) × (1 + lambda × corr[f][agent][skill])`
+  - Fallback to independent mode for unseen task families
+  - `grpo-bridge.getJointRecommendation(taskFamily, intent, context)`
+  - `scripts/hooks/nightly-joint-policy-trainer.mjs` — cron `15 3 * * *`
+- **Joint vs Independent benchmark** (`scripts/benchmark-joint-policy.mjs`)
+  - Synthetic seeded episodes with intentional correlation
+  - End-to-end accuracy, training time, convergence
+
+### Changed
+- `artibot.config.json` version 3.6.0 → 3.7.0
+- `learning.grpoRouting.jointPolicy` block added (enabled: false default)
+- `learning.schedule.nightlyJointPolicyTrainer: "15 3 * * *"`
+
+### Compatibility
+- Zero public API changes
+- Existing agent-policy + skill-policy continue unchanged
+- Joint policy opt-in via config flag
+
+### Verification
+- All tests passing
+- 3-file version sync at 3.7.0
+
+---
+
 ## [3.6.0] - 2026-04-24
 
 ### Added
