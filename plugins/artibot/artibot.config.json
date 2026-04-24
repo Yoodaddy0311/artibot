@@ -778,6 +778,7 @@
     },
     "grpoRouting": {
       "enabled": true,
+      "modelType": "linear",
       "policyPath": "~/.claude/artibot/policies/routing-policy-v1.json",
       "blendAlpha": 0.7,
       "alphaDecayPerWeek": 0.05,
