@@ -408,6 +408,23 @@ export async function saveMemory(type, data, options = {}) {
   } catch {
     return { ...entry, persisted: false };
   }
+
+  // Hierarchical mirror (Phase A): when the feature flag is on, also upsert
+  // into the SemanticStore for preference|error types. Episodic (context,
+  // command) mirroring arrives with Phase B's episodic.js module.
+  if (isHierarchicalEnabled() && isSemanticType(type)) {
+    try {
+      await getSemanticStore().put({
+        data: validated.data,
+        type,
+        tags: entry.tags,
+        source: validated.source,
+      });
+    } catch {
+      // Mirror is best-effort — the legacy store remains the source of truth
+      // until Phase C flips the default.
+    }
+  }
   return entry;
 }
 
