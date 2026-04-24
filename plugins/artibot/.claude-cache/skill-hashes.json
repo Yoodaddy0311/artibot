@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-04-24T02:11:19.573Z",
+  "generatedAt": "2026-04-24T05:30:46.846Z",
   "skills": {
     "ab-testing": {
       "hash": "701661e8",
@@ -503,9 +503,9 @@
       "size": 5836
     },
     "voyager-curation": {
-      "hash": "885c7954",
+      "hash": "4b4a3e2d",
       "path": "skills\\voyager-curation\\SKILL.md",
-      "size": 5615
+      "size": 7219
     },
     "yes-md": {
       "hash": "b605c119",

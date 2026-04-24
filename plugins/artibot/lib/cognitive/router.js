@@ -11,23 +11,18 @@
  */
 
 import { round as _coreRound } from '../core/index.js';
-import { applyGrpoBlending, applyExploration, BLEND_DECISION_THRESHOLD } from './grpo-routing.js';
-import { getCachedRoutingBias, primeRoutingBiasCache } from './grpo-bridge.js';
-import { getCachedGrpoRoutingConfig, getGrpoRoutingConfig } from './grpo-routing-config.js';
+import { routeWithPolicy } from './grpo-routing.js';
+import { getCachedRoutingBias } from './grpo-bridge.js';
+import { getCachedGrpoRoutingConfig } from './grpo-routing-config.js';
 // Router uses 2 decimal precision for display values
 const round = (n) => _coreRound(n, 2);
 
-// ---------------------------------------------------------------------------
 // Native Effort Level API Integration (extension point)
-// ---------------------------------------------------------------------------
 // TODO (#30806): When Claude Code exposes a native model/effort level API,
 // integrate here. Expected shape: { model, effortLevel: 'low'|'medium'|'high',
 // reasoning_budget? }. Plan: (1) accept via configure()/setNativeEffort(),
-// (2) map low->S1, medium->threshold, high->S2, (3) either override or blend
-// with heuristic (e.g. nativeWeight: 0.6), (4) expose in route() metadata.
-// Heuristic classification remains the fallback for backward compatibility.
-// ---------------------------------------------------------------------------
-
+// (2) map low->S1, medium->threshold, high->S2, (3) override or blend with
+// heuristic, (4) expose in route() metadata. Heuristic stays as fallback.
 /** @type {{ model?: string, effortLevel?: string, reasoningBudget?: number } | null} */
 let nativeEffortHint = null;
 
@@ -295,21 +290,13 @@ export function classifyComplexity(input, context = {}) {
   const clampedScore = Math.max(0, Math.min(1, score));
   let system = clampedScore < threshold ? 1 : 2;
 
-  // GRPO-RLVR flag-gated blending (design §5.3 + §8.3). When disabled — the
-  // v3.4 default — this branch is never entered: zero cost, zero behavior change.
+  // GRPO-RLVR flag-gated blending (design §5.3 + §8.3). Disabled by default.
   let grpoMeta = null;
   const grpoCfg = getCachedGrpoRoutingConfig();
   if (grpoCfg.enabled) {
     const bias = getCachedRoutingBias({ ...factors, ...(context.runtimeFeatures ?? {}) });
-    const { finalScore, blended, alphaApplied } = applyGrpoBlending({
-      heuristicScore: clampedScore, bias, alpha: grpoCfg.blendAlpha,
-    });
-    if (blended) {
-      system = finalScore >= BLEND_DECISION_THRESHOLD ? 2 : 1;
-      const probed = applyExploration({ system }, grpoCfg.epsilonExplore);
-      system = probed.system;
-      grpoMeta = { p_s2: bias.p_s2, confidence: bias.confidence, blendedScore: finalScore, alpha: alphaApplied, explored: probed.explored };
-    }
+    const r = routeWithPolicy({ heuristicSystem: system, heuristicScore: clampedScore, bias, alpha: grpoCfg.blendAlpha, epsilon: grpoCfg.epsilonExplore });
+    system = r.system; grpoMeta = r.meta;
   }
 
   // TODO (#30806): When native effort API is available, blend or override here.
@@ -335,6 +322,7 @@ export function classifyComplexity(input, context = {}) {
     ),
     threshold: round(threshold),
     nativeEffort: nativeEffortHint ? nativeEffortHint.effortLevel : null,
+    grpoRouting: grpoMeta,
   };
 }
 

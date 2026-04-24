@@ -36,10 +36,12 @@ function makeEpisode(overrides = {}) {
 
 describe('self-verifier — internals', () => {
   it('tokenize drops short tokens and non-word chars', () => {
-    const toks = _internals.tokenize('Refactor! the pricing-module v2.');
+    const toks = _internals.tokenize('Refactor! a is pricing-module v2.');
     expect(toks).toContain('refactor');
     expect(toks).toContain('pricing-module');
-    expect(toks).not.toContain('the');
+    // Tokens shorter than MIN_TOKEN_LENGTH (3) must be dropped.
+    expect(toks).not.toContain('a');
+    expect(toks).not.toContain('is');
     expect(toks).not.toContain('v2');
   });
 

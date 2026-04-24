@@ -114,9 +114,9 @@ export function predict(theta, x) {
 export function clipTheta(theta, range = DEFAULTS.clipRange) {
   const r = Math.abs(range);
   return theta.map((v) => {
-    if (!Number.isFinite(v)) return 0;
-    if (v > r) return r;
-    if (v < -r) return -r;
+    if (Number.isNaN(v)) return 0;
+    if (v === Infinity || v > r) return r;
+    if (v === -Infinity || v < -r) return -r;
     return v;
   });
 }

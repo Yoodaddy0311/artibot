@@ -122,7 +122,7 @@ function nonNegativeInt(n) {
  * @returns {{ok: true, episode: Required<EpisodeRewardInput>} | {ok: false, reason: string}}
  */
 export function validateEpisodeForReward(episode) {
-  if (episode == null || typeof episode !== 'object') {
+  if (episode === null || episode === undefined || typeof episode !== 'object') {
     return { ok: false, reason: 'not-an-object' };
   }
   const toolCalls = Array.isArray(episode.toolCalls) ? episode.toolCalls : [];

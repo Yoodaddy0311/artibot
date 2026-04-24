@@ -205,26 +205,6 @@ describe('episodic memory store', () => {
     });
   });
 
-  describe('tmpdir round-trip (no mock)', () => {
-    it('writes and reads episodes on a real temp dir', async () => {
-      vi.doUnmock('../../../lib/core/file.js');
-      vi.resetModules();
-      const { createEpisodicStore: realCreate } = await import('../../../lib/learning/memory/episodic.js');
-      const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'artibot-ep-'));
-      try {
-        const store = realCreate({ storePath: tmp, now: () => 1_000 });
-        const ep = await store.appendEpisode({ sessionId: 's', title: 'real', summary: 'disk write' });
-        expect(ep).toBeTruthy();
-        const raw = await fs.readFile(path.join(tmp, 'episodes.json'), 'utf-8');
-        const parsed = JSON.parse(raw);
-        expect(parsed.episodes).toHaveLength(1);
-        expect(parsed.episodes[0].title).toBe('real');
-      } finally {
-        await fs.rm(tmp, { recursive: true, force: true });
-      }
-    });
-  });
-
   describe('v3.4 GRPO reward hook (Phase A)', () => {
     it('attaches reward and rewardComponents on append', async () => {
       const store = createEpisodicStore({ storePath: '/tmp/ep-rwd1', now: () => 10 });
@@ -278,6 +258,26 @@ describe('episodic memory store', () => {
         toolCalls: [{ exitCode: 0 }],
       });
       expect(Object.isFrozen(ep.rewardComponents)).toBe(true);
+    });
+  });
+
+  describe('tmpdir round-trip (no mock)', () => {
+    it('writes and reads episodes on a real temp dir', async () => {
+      vi.doUnmock('../../../lib/core/file.js');
+      vi.resetModules();
+      const { createEpisodicStore: realCreate } = await import('../../../lib/learning/memory/episodic.js');
+      const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'artibot-ep-'));
+      try {
+        const store = realCreate({ storePath: tmp, now: () => 1_000 });
+        const ep = await store.appendEpisode({ sessionId: 's', title: 'real', summary: 'disk write' });
+        expect(ep).toBeTruthy();
+        const raw = await fs.readFile(path.join(tmp, 'episodes.json'), 'utf-8');
+        const parsed = JSON.parse(raw);
+        expect(parsed.episodes).toHaveLength(1);
+        expect(parsed.episodes[0].title).toBe('real');
+      } finally {
+        await fs.rm(tmp, { recursive: true, force: true });
+      }
     });
   });
 });

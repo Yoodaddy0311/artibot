@@ -483,15 +483,25 @@ describe('createPolicyUpdater facade', () => {
     const seed = new Array(9).fill(0);
     await savePolicy(seed, { logLoss: 0.5, accuracyVsHeuristic: 0.7, klFromPrev: 0 });
     const updater = createPolicyUpdater({
-      config: { klRejectThreshold: 0.0001, learningRate: 10, klPenalty: 0 },
+      config: { klRejectThreshold: 0.0001, learningRate: 50, klPenalty: 0 },
     });
+    // Two distinct groups with asymmetric rewards -> non-zero advantages -> non-zero gradient
     const eps = [];
-    for (let i = 0; i < 50; i++) {
+    for (let i = 0; i < 30; i++) {
       eps.push(makeEpisode({
         reward: 1,
+        intentFamily: 'A',
         classification: {
           system: 2,
-          factors: { steps: 1, domains: 1, uncertainty: 1, risk: 1, novelty: 1 },
+          factors: { steps: 1, domains: 1, uncertainty: 0.5, risk: 1, novelty: 0.5 },
+        },
+      }));
+      eps.push(makeEpisode({
+        reward: -0.5,
+        intentFamily: 'A',
+        classification: {
+          system: 1,
+          factors: { steps: 0.9, domains: 0.9, uncertainty: 0.4, risk: 0.9, novelty: 0.4 },
         },
       }));
     }
