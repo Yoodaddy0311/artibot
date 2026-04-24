@@ -224,4 +224,60 @@ describe('episodic memory store', () => {
       }
     });
   });
+
+  describe('v3.4 GRPO reward hook (Phase A)', () => {
+    it('attaches reward and rewardComponents on append', async () => {
+      const store = createEpisodicStore({ storePath: '/tmp/ep-rwd1', now: () => 10 });
+      const ep = await store.appendEpisode({
+        sessionId: 's', title: 't', summary: 'b',
+        toolCalls: [{ exitCode: 0 }, { exitCode: 0 }],
+        errors: 0, testPassRatio: 1.0, typecheckClean: true,
+        importanceScore: 0.8,
+      });
+      expect(ep).toBeTruthy();
+      expect(typeof ep.reward).toBe('number');
+      expect(ep.reward).toBeGreaterThan(0);
+      expect(ep.rewardComponents).toBeDefined();
+      expect(ep.rewardComponents.timedOut).toBe(false);
+    });
+
+    it('defaults reward to 0 when no verifiable signals present', async () => {
+      const store = createEpisodicStore({ storePath: '/tmp/ep-rwd2', now: () => 10 });
+      const ep = await store.appendEpisode({
+        sessionId: 's', title: 't2', summary: 'b2',
+      });
+      expect(ep.reward).toBe(0);
+    });
+
+    it('yields reward 0 for timedOut episodes', async () => {
+      const store = createEpisodicStore({ storePath: '/tmp/ep-rwd3', now: () => 10 });
+      const ep = await store.appendEpisode({
+        sessionId: 's', title: 't3', summary: 'b3',
+        toolCalls: [{ exitCode: 0 }],
+        timedOut: true,
+      });
+      expect(ep.reward).toBe(0);
+      expect(ep.rewardComponents.timedOut).toBe(true);
+    });
+
+    it('honours explicit reward if caller supplies one', async () => {
+      const store = createEpisodicStore({ storePath: '/tmp/ep-rwd4', now: () => 10 });
+      const ep = await store.appendEpisode({
+        sessionId: 's', title: 't4', summary: 'b4',
+        reward: 0.42,
+        rewardComponents: { manual: true },
+      });
+      expect(ep.reward).toBe(0.42);
+      expect(ep.rewardComponents.manual).toBe(true);
+    });
+
+    it('rewardComponents is a frozen object (immutability contract)', async () => {
+      const store = createEpisodicStore({ storePath: '/tmp/ep-rwd5', now: () => 10 });
+      const ep = await store.appendEpisode({
+        sessionId: 's', title: 't5', summary: 'b5',
+        toolCalls: [{ exitCode: 0 }],
+      });
+      expect(Object.isFrozen(ep.rewardComponents)).toBe(true);
+    });
+  });
 });

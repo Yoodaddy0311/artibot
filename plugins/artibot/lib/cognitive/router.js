@@ -11,7 +11,9 @@
  */
 
 import { round as _coreRound } from '../core/index.js';
-
+import { applyGrpoBlending, applyExploration, BLEND_DECISION_THRESHOLD } from './grpo-routing.js';
+import { getCachedRoutingBias, primeRoutingBiasCache } from './grpo-bridge.js';
+import { getCachedGrpoRoutingConfig, getGrpoRoutingConfig } from './grpo-routing-config.js';
 // Router uses 2 decimal precision for display values
 const round = (n) => _coreRound(n, 2);
 
@@ -19,18 +21,11 @@ const round = (n) => _coreRound(n, 2);
 // Native Effort Level API Integration (extension point)
 // ---------------------------------------------------------------------------
 // TODO (#30806): When Claude Code exposes a native model/effort level API,
-// integrate it here. The expected shape is:
-//   { model: string, effortLevel: 'low'|'medium'|'high', reasoning_budget?: number }
-//
-// Integration plan:
-//   1. Accept native effort via configure() or a new setNativeEffort() function
-//   2. Map native effort to System 1/2: low->S1, medium->threshold-based, high->S2
-//   3. Use native effort as an override signal (highest priority) or blend with
-//      heuristic score via a configurable weight (e.g., nativeWeight: 0.6)
-//   4. Expose the native effort in route() return metadata for downstream consumers
-//
-// The current heuristic classification remains the fallback when native API
-// is unavailable, ensuring backward compatibility.
+// integrate here. Expected shape: { model, effortLevel: 'low'|'medium'|'high',
+// reasoning_budget? }. Plan: (1) accept via configure()/setNativeEffort(),
+// (2) map low->S1, medium->threshold, high->S2, (3) either override or blend
+// with heuristic (e.g. nativeWeight: 0.6), (4) expose in route() metadata.
+// Heuristic classification remains the fallback for backward compatibility.
 // ---------------------------------------------------------------------------
 
 /** @type {{ model?: string, effortLevel?: string, reasoningBudget?: number } | null} */
@@ -299,6 +294,23 @@ export function classifyComplexity(input, context = {}) {
 
   const clampedScore = Math.max(0, Math.min(1, score));
   let system = clampedScore < threshold ? 1 : 2;
+
+  // GRPO-RLVR flag-gated blending (design §5.3 + §8.3). When disabled — the
+  // v3.4 default — this branch is never entered: zero cost, zero behavior change.
+  let grpoMeta = null;
+  const grpoCfg = getCachedGrpoRoutingConfig();
+  if (grpoCfg.enabled) {
+    const bias = getCachedRoutingBias({ ...factors, ...(context.runtimeFeatures ?? {}) });
+    const { finalScore, blended, alphaApplied } = applyGrpoBlending({
+      heuristicScore: clampedScore, bias, alpha: grpoCfg.blendAlpha,
+    });
+    if (blended) {
+      system = finalScore >= BLEND_DECISION_THRESHOLD ? 2 : 1;
+      const probed = applyExploration({ system }, grpoCfg.epsilonExplore);
+      system = probed.system;
+      grpoMeta = { p_s2: bias.p_s2, confidence: bias.confidence, blendedScore: finalScore, alpha: alphaApplied, explored: probed.explored };
+    }
+  }
 
   // TODO (#30806): When native effort API is available, blend or override here.
   // Current behavior: native hint overrides heuristic system assignment.

@@ -28,6 +28,7 @@ import {
 } from '../../core/file.js';
 import { ARTIBOT_DIR } from '../../core/config.js';
 import { cosineSimilarity, tokenize } from '../session-memory.js';
+import { computeReward } from '../grpo/reward-capture.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -57,6 +58,8 @@ const DAY_MS = 24 * 60 * 60 * 1000;
  * @property {number} importanceScore - Derived during flush (see design 3.1)
  * @property {string} hash - Stable content hash (dedup)
  * @property {Array<string>} [links] - Semantic signatures this episode supports
+ * @property {number} [reward] - GRPO-RLVR verifiable reward in [-1.5, 1.2] (v3.4)
+ * @property {object} [rewardComponents] - Breakdown from reward-capture (v3.4)
  */
 
 /**
@@ -109,6 +112,28 @@ function toKeywords(text) {
     .map(([w]) => w);
 }
 
+/**
+ * Safe wrapper around {@link computeReward}. Failures degrade to reward 0 so
+ * a bug in the extractor never blocks the memory write path.
+ * @param {object} input
+ * @returns {{reward: number, rewardComponents: object}}
+ */
+function safeComputeReward(input) {
+  try {
+    const result = computeReward(input);
+    if (!result || typeof result !== 'object') {
+      return { reward: 0, rewardComponents: { invalid: true } };
+    }
+    const reward = Number.isFinite(result.reward) ? result.reward : 0;
+    const components = result.rewardComponents && typeof result.rewardComponents === 'object'
+      ? result.rewardComponents
+      : {};
+    return { reward, rewardComponents: components };
+  } catch {
+    return { reward: 0, rewardComponents: { invalid: true } };
+  }
+}
+
 function normaliseRecord(input, now) {
   const timestamp = coerceTimestamp(input.timestamp ?? input.createdAt, now);
   const summary = String(input.summary ?? input.buffer ?? '').slice(0, 4000);
@@ -124,6 +149,14 @@ function normaliseRecord(input, now) {
   const importanceScore = typeof input.importanceScore === 'number'
     ? input.importanceScore
     : 0;
+  // v3.4 GRPO reward capture: compute once at finalisation, attach to record.
+  // Uses input fields (toolCalls, errors, etc.) plus the coerced importanceScore.
+  const rewardInput = { ...input, importanceScore };
+  const hasExplicitReward = typeof input.reward === 'number'
+    && Number.isFinite(input.reward);
+  const computed = hasExplicitReward
+    ? { reward: input.reward, rewardComponents: input.rewardComponents || {} }
+    : safeComputeReward(rewardInput);
   return Object.freeze({
     id: input.id || genId(),
     sessionId: input.sessionId ? String(input.sessionId) : 'unknown',
@@ -135,6 +168,8 @@ function normaliseRecord(input, now) {
     importanceScore,
     hash: input.hash || stableHash(`${title}::${summary}`),
     links: Object.freeze(Array.isArray(input.links) ? input.links.slice() : []),
+    reward: computed.reward,
+    rewardComponents: Object.freeze({ ...computed.rewardComponents }),
   });
 }
 

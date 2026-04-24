@@ -27,6 +27,8 @@ import fs from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 
 import { atomicWriteJson, ensureDir, readJsonFile } from '../../core/file.js';
+import { createSelfVerifier, VERDICTS } from './self-verifier.js';
+import { logRejection as logCurriculumRejection } from './curriculum-log.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -262,6 +264,10 @@ function proposalSkillSlug(cluster) {
  * @property {number} [maxProposals=5]
  * @property {(cluster: object, existingSkills: string[]) => string} [draftGenerator]
  * @property {() => number} [now]
+ * @property {object} [config] - Artibot config; read `learning.voyager.selfVerify` (default true).
+ * @property {object} [selfVerifier] - Pre-built verifier (for testing / custom cosine).
+ * @property {string} [curriculumLogPath] - Optional override for auto-reject logging.
+ * @property {string} [pluginRoot] - Passed to curriculum-log for default path resolution.
  *
  * @param {CuratorOptions} options
  */
@@ -275,6 +281,8 @@ export function createCurator(options) {
     stagingDir,
     rejectionLedgerPath,
     draftGenerator,
+    curriculumLogPath,
+    pluginRoot,
   } = options;
   if (!episodicStore || typeof episodicStore.listEpisodes !== 'function') {
     throw new TypeError('options.episodicStore must expose listEpisodes()');
@@ -293,6 +301,17 @@ export function createCurator(options) {
     : DEFAULT_MAX_PROPOSALS;
   const now = typeof options.now === 'function' ? options.now : () => Date.now();
   const ledgerPath = rejectionLedgerPath || path.join(stagingDir, REJECTION_LEDGER_FILE);
+
+  // Self-verifier (v3.4.0+). Opt-out via config.learning.voyager.selfVerify = false.
+  const selfVerifier = options.selfVerifier
+    || createSelfVerifier({
+      episodicStore,
+      config: options.config,
+    });
+  const logOptions = {};
+  if (curriculumLogPath) logOptions.logPath = curriculumLogPath;
+  if (pluginRoot) logOptions.pluginRoot = pluginRoot;
+  if (typeof options.now === 'function') logOptions.now = options.now;
 
   async function analyzeEpisodes(filters = {}) {
     const episodes = await episodicStore.listEpisodes();
@@ -316,9 +335,9 @@ export function createCurator(options) {
     }
   }
 
-  function renderDraft(cluster, existingSkills) {
+  function renderDraft(cluster, existingSkills, preflight = null) {
     if (typeof draftGenerator === 'function') {
-      return draftGenerator(cluster, existingSkills);
+      return draftGenerator(cluster, existingSkills, preflight);
     }
     const slug = proposalSkillSlug(cluster);
     const triggers = cluster.toolUnion.concat(extractTopTokens(cluster.exampleIntent, 4))
@@ -391,6 +410,9 @@ export function createCurator(options) {
         recencyBoost: cluster.recencyBoost,
         score: cluster.score,
         generatedAt: new Date(now()).toISOString(),
+        preflightVerdict: preflight?.verdict ?? null,
+        preflightScore: preflight?.score ?? null,
+        preflightReasons: Array.isArray(preflight?.reasons) ? preflight.reasons : [],
       }, null, 2),
       '```',
       '',
@@ -403,8 +425,48 @@ export function createCurator(options) {
     if (inCooldown(rejections, cluster.signature, now(), cooldownDays)) {
       return { proposed: false, reason: 'cooldown', signature: cluster.signature };
     }
+
+    // Shadow-dry-run self-verification (v3.4.0+). Pure cosine overlap check —
+    // no LLM call, no network. Disabled when config.learning.voyager.selfVerify
+    // is false.
+    let preflight = null;
+    if (selfVerifier?.enabled) {
+      try {
+        preflight = await selfVerifier.verifyProposal({
+          proposal: cluster,
+          pastEpisodes: cluster.frames,
+        });
+      } catch (err) {
+        // Verifier errors must not block proposals — degrade to "review".
+        preflight = {
+          verdict: VERDICTS.REVIEW,
+          score: 0,
+          total: 0,
+          reasons: [`verifier-error:${String(err?.message || err).slice(0, 120)}`],
+        };
+      }
+    }
+
+    if (preflight && preflight.verdict === VERDICTS.REJECT) {
+      try {
+        await logCurriculumRejection(
+          cluster.signature,
+          `self-verify-fail score=${preflight.score}`,
+          logOptions,
+        );
+      } catch { /* logging is best-effort */ }
+      return Object.freeze({
+        proposed: false,
+        reason: 'self-verify-fail',
+        signature: cluster.signature,
+        preflightVerdict: preflight.verdict,
+        preflightScore: preflight.score,
+        preflightReasons: preflight.reasons,
+      });
+    }
+
     const existing = await listExistingSkills();
-    const body = renderDraft(cluster, existing);
+    const body = renderDraft(cluster, existing, preflight);
     const filePath = path.join(stagingDir, stagingFileName(cluster.signature));
     await fs.writeFile(filePath, body, 'utf-8');
     return Object.freeze({
@@ -413,6 +475,8 @@ export function createCurator(options) {
       filePath,
       score: cluster.score,
       occurrence: cluster.occurrence,
+      preflightVerdict: preflight?.verdict ?? null,
+      preflightScore: preflight?.score ?? null,
     });
   }
 
@@ -503,6 +567,7 @@ export function createCurator(options) {
     listProposals,
     approveProposal,
     rejectProposal,
+    selfVerifier,
     _internals: Object.freeze({
       ledgerPath,
       stagingDir,
@@ -510,6 +575,7 @@ export function createCurator(options) {
       minOccurrences,
       cooldownDays,
       maxProposals,
+      selfVerifyEnabled: !!selfVerifier?.enabled,
     }),
   });
 }

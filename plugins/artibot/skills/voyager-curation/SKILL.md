@@ -57,9 +57,40 @@ If a candidate looks like a macro (≤2 steps, same keywords), prefer `macro-lea
 1. **Analyze** — `analyzeEpisodes({ sinceDays: 14 })` pulls frames from `episodicStore`.
 2. **Cluster** — `groupByPattern(frames)` Jaccard-clusters by (intent tokens ∪ tool set).
 3. **Score** — `scoreCandidates(clusters)` ranks by `occurrence × distinctSessions × successRate × recencyBoost`.
-4. **Propose** — top N clusters render into `runtime/voyager-staging/voyager-proposal-<hash>.md`.
-5. **Review** — user opens each draft, edits the procedure, replaces scaffolded sections.
-6. **Approve / Reject** — `approveProposal(hash)` moves the file into `skills/<name>/SKILL.md`; `rejectProposal(hash, reason)` deletes it and writes a 30-day cooldown entry into `runtime/voyager-staging/voyager-rejections.json`.
+4. **Self-Verify (v3.4.0+)** — shadow-dry-run cosine overlap check. Obvious drift is auto-discarded before staging. See below.
+5. **Propose** — surviving clusters render into `runtime/voyager-staging/voyager-proposal-<hash>.md`.
+6. **Review** — user opens each draft, edits the procedure, replaces scaffolded sections.
+7. **Approve / Reject** — `approveProposal(hash)` moves the file into `skills/<name>/SKILL.md`; `rejectProposal(hash, reason)` deletes it and writes a 30-day cooldown entry into `runtime/voyager-staging/voyager-rejections.json`.
+
+## Self-Verification (v3.4.0+)
+
+Voyager's original paper includes a self-verification pass where the agent tests a freshly written skill against the environment before adding it to the library. Artibot cannot execute skills in a sandbox, so we approximate with a **shadow-dry-run**: a pure, local, LLM-free textual overlap check between the proposal's trigger/process and the very episodes that inspired it.
+
+### Concept
+
+For each past episode clustered into the proposal, the verifier computes a token-based cosine similarity against the proposal text (`trigger ∪ process`). Aggregated results produce a 3-tier verdict:
+
+| Verdict | Condition | Effect |
+|---|---|---|
+| `accept` | ≥ 70% of episodes at or above the similarity threshold (default 0.8) | Normal staging flow. Draft written, ready for user review. |
+| `review` | between the accept and reject bands | Draft is still written, but `metadata.preflightVerdict: "review"` is embedded so you can see why the curator flagged it. |
+| `reject` | ≥ 50% of episodes below threshold | Draft is **NOT** staged. An `auto-reject` entry goes into the curriculum log with reason `self-verify-fail`. |
+
+No LLM calls, no network I/O. Deterministic — same inputs always produce the same verdict.
+
+### Opt-out
+
+Set in `artibot.config.json`:
+
+```json
+{
+  "learning": {
+    "voyager": { "selfVerify": false }
+  }
+}
+```
+
+When disabled, every proposal is treated as `accept` and the old v3.3 staging path is preserved byte-for-byte.
 
 ## Example Usage (Node, in-process)
 

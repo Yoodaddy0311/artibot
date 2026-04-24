@@ -15,6 +15,7 @@ import {
   listTemplateSections,
   refineDraft,
 } from '../../../lib/learning/voyager/iterative-prompter.js';
+import { VERDICTS } from '../../../lib/learning/voyager/self-verifier.js';
 
 // ---------------------------------------------------------------------------
 // Mock episodic store — in-memory list with the public `listEpisodes` shape.
@@ -427,5 +428,188 @@ describe('iterative-prompter', () => {
     const keys = listTemplateSections();
     expect(keys).toContain('process');
     expect(keys).toContain('anti-patterns');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Self-verification pre-flight (v3.4.0+)
+// ---------------------------------------------------------------------------
+
+describe('createCurator — self-verification pre-flight', () => {
+  let root;
+  let skillsDir;
+  let stagingDir;
+  let curriculumLogPath;
+
+  beforeEach(async () => {
+    ({ root, skillsDir, stagingDir } = await makeTmpDirs());
+    curriculumLogPath = path.join(root, 'runtime', 'voyager-curriculum.jsonl');
+  });
+
+  afterEach(async () => {
+    await fs.rm(root, { recursive: true, force: true });
+  });
+
+  function buildCurator({ now, episodes, selfVerifier, config } = {}) {
+    const store = mockEpisodicStore(episodes || []);
+    return createCurator({
+      episodicStore: store,
+      skillRegistryPath: skillsDir,
+      stagingDir,
+      minOccurrences: 3,
+      cooldownDays: 30,
+      maxProposals: 3,
+      now: now ? () => now : undefined,
+      selfVerifier,
+      config,
+      curriculumLogPath,
+    });
+  }
+
+  it('accepts a proposal when the verifier returns accept', async () => {
+    const now = Date.UTC(2026, 3, 20);
+    const eps = [1, 2, 3, 4].map((i) => makeEpisode({
+      sessionId: `s${i}`,
+      timestamp: now - i * 1000,
+      summary: 'refactor pricing module split files',
+      tools: ['Read', 'Edit', 'Bash'],
+    }));
+    const verifier = {
+      enabled: true,
+      verifyProposal: async () => ({
+        verdict: VERDICTS.ACCEPT,
+        score: 0.9,
+        reasons: ['pass-ratio 1.00 >= 0.7'],
+      }),
+    };
+    const curator = buildCurator({ now, episodes: eps, selfVerifier: verifier });
+    const frames = await curator.analyzeEpisodes({ sinceDays: 14 });
+    const clusters = curator.groupByPattern(frames);
+    const scored = curator.scoreCandidates(clusters, { now, minOccurrences: 3 });
+    const [result] = await curator.proposeFromClusters(scored);
+    expect(result.proposed).toBe(true);
+    expect(result.preflightVerdict).toBe(VERDICTS.ACCEPT);
+    expect(result.preflightScore).toBeCloseTo(0.9, 5);
+  });
+
+  it('auto-rejects the proposal when the verifier returns reject', async () => {
+    const now = Date.UTC(2026, 3, 20);
+    const eps = [1, 2, 3, 4].map((i) => makeEpisode({
+      sessionId: `s${i}`,
+      timestamp: now - i * 1000,
+      summary: 'totally unrelated noise tokens',
+      tools: ['Bash'],
+    }));
+    const verifier = {
+      enabled: true,
+      verifyProposal: async () => ({
+        verdict: VERDICTS.REJECT,
+        score: 0.2,
+        reasons: ['fail-ratio 0.80 >= 0.5', 'worst-episode-score 0.100'],
+      }),
+    };
+    const curator = buildCurator({ now, episodes: eps, selfVerifier: verifier });
+    const frames = await curator.analyzeEpisodes({ sinceDays: 14 });
+    const clusters = curator.groupByPattern(frames);
+    const scored = curator.scoreCandidates(clusters, { now, minOccurrences: 3 });
+    const [result] = await curator.proposeFromClusters(scored);
+    expect(result.proposed).toBe(false);
+    expect(result.reason).toBe('self-verify-fail');
+    expect(result.preflightVerdict).toBe(VERDICTS.REJECT);
+
+    // Staging file must NOT exist.
+    const expectedPath = path.join(
+      stagingDir,
+      `voyager-proposal-${result.signature}.md`,
+    );
+    await expect(fs.access(expectedPath)).rejects.toBeTruthy();
+
+    // Curriculum log must contain an auto-reject line with self-verify-fail reason.
+    const raw = await fs.readFile(curriculumLogPath, 'utf-8');
+    const lines = raw.split('\n').filter(Boolean);
+    expect(lines.length).toBeGreaterThan(0);
+    const record = JSON.parse(lines[lines.length - 1]);
+    expect(record.kind).toBe('rejection');
+    expect(record.reason).toContain('self-verify-fail');
+  });
+
+  it('annotates review verdicts in the staged metadata block', async () => {
+    const now = Date.UTC(2026, 3, 20);
+    const eps = [1, 2, 3, 4].map((i) => makeEpisode({
+      sessionId: `s${i}`,
+      timestamp: now - i * 1000,
+      summary: 'refactor pricing module split files borderline',
+      tools: ['Read', 'Edit'],
+    }));
+    const verifier = {
+      enabled: true,
+      verifyProposal: async () => ({
+        verdict: VERDICTS.REVIEW,
+        score: 0.55,
+        reasons: ['pass-ratio 0.50 between 0.5 and 0.7'],
+      }),
+    };
+    const curator = buildCurator({ now, episodes: eps, selfVerifier: verifier });
+    const frames = await curator.analyzeEpisodes({ sinceDays: 14 });
+    const clusters = curator.groupByPattern(frames);
+    const scored = curator.scoreCandidates(clusters, { now, minOccurrences: 3 });
+    const [result] = await curator.proposeFromClusters(scored);
+    expect(result.proposed).toBe(true);
+    expect(result.preflightVerdict).toBe(VERDICTS.REVIEW);
+
+    const body = await fs.readFile(result.filePath, 'utf-8');
+    expect(body).toContain('"preflightVerdict": "review"');
+    expect(body).toContain('"preflightScore": 0.55');
+  });
+
+  it('falls back to review if the verifier throws', async () => {
+    const now = Date.UTC(2026, 3, 20);
+    const eps = [1, 2, 3, 4].map((i) => makeEpisode({
+      sessionId: `s${i}`,
+      timestamp: now - i * 1000,
+      summary: 'refactor pricing module split files again',
+      tools: ['Read', 'Edit'],
+    }));
+    const verifier = {
+      enabled: true,
+      verifyProposal: async () => { throw new Error('boom'); },
+    };
+    const curator = buildCurator({ now, episodes: eps, selfVerifier: verifier });
+    const frames = await curator.analyzeEpisodes({ sinceDays: 14 });
+    const clusters = curator.groupByPattern(frames);
+    const scored = curator.scoreCandidates(clusters, { now, minOccurrences: 3 });
+    const [result] = await curator.proposeFromClusters(scored);
+    expect(result.proposed).toBe(true); // review → still proposes
+    expect(result.preflightVerdict).toBe(VERDICTS.REVIEW);
+
+    const body = await fs.readFile(result.filePath, 'utf-8');
+    expect(body).toContain('verifier-error');
+  });
+
+  it('bypasses self-verification when config.learning.voyager.selfVerify is false', async () => {
+    const now = Date.UTC(2026, 3, 20);
+    const eps = [1, 2, 3, 4].map((i) => makeEpisode({
+      sessionId: `s${i}`,
+      timestamp: now - i * 1000,
+      summary: 'opt-out path test data',
+      tools: ['Bash'],
+    }));
+    const curator = buildCurator({
+      now,
+      episodes: eps,
+      config: { learning: { voyager: { selfVerify: false } } },
+    });
+    expect(curator._internals.selfVerifyEnabled).toBe(false);
+    const frames = await curator.analyzeEpisodes({ sinceDays: 14 });
+    const clusters = curator.groupByPattern(frames);
+    const scored = curator.scoreCandidates(clusters, { now, minOccurrences: 3 });
+    const [result] = await curator.proposeFromClusters(scored);
+    expect(result.proposed).toBe(true);
+    expect(result.preflightVerdict).toBe(null);
+  });
+
+  it('defaults selfVerify to true when config is omitted', async () => {
+    const curator = buildCurator({});
+    expect(curator._internals.selfVerifyEnabled).toBe(true);
   });
 });

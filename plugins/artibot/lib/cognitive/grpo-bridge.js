@@ -230,3 +230,107 @@ export async function getLearnedSignalSummary() {
     return { hasData: false, totalRounds: 0, taskRounds: 0, teamRounds: 0 };
   }
 }
+
+/**
+ * Synchronous peek at the most recently memoized policy. Returns the same
+ * `{ p_s2, confidence, source }` shape as {@link getRoutingBias} but never
+ * awaits IO — if the memo is cold or stale beyond TTL, returns the neutral
+ * fallback. Intended for the sync hot path inside `router.classifyComplexity`.
+ *
+ * @param {RoutingFeatures} features
+ * @returns {{ p_s2: number, confidence: number, source: 'policy'|'fallback' }}
+ */
+export function getCachedRoutingBias(features) {
+  const fallback = { p_s2: 0.5, confidence: 0, source: 'fallback' };
+  const now = Date.now();
+  if (
+    !_routingPolicyCache
+    || _routingPolicyCache.loadedAt === null
+    || now - _routingPolicyCache.loadedAt >= POLICY_TTL_MS
+  ) {
+    return fallback;
+  }
+  const policy = _routingPolicyCache.policy;
+  if (!policy || !Array.isArray(policy.theta)) return fallback;
+
+  try {
+    const theta = policy.theta;
+    const x = toFeatureVector(features);
+    if (theta.length !== x.length) return fallback;
+    let z = 0;
+    for (let i = 0; i < theta.length; i++) {
+      const t = theta[i];
+      if (typeof t !== 'number' || !Number.isFinite(t)) return fallback;
+      z += t * x[i];
+    }
+    const p = sigmoid(z);
+    if (!Number.isFinite(p)) return fallback;
+    const confidence = Math.max(0, Math.min(1, Math.abs(p - 0.5) * 2));
+    return { p_s2: p, confidence, source: 'policy' };
+  } catch {
+    return fallback;
+  }
+}
+
+/**
+ * Prefetch and memoize the routing policy. Fire-and-forget; safe to ignore
+ * the returned promise. After resolution the sync {@link getCachedRoutingBias}
+ * will serve bias reads for the next 60 seconds.
+ * @param {{ policyPath?: string }} [options]
+ * @returns {Promise<void>}
+ */
+export async function primeRoutingBiasCache(options = {}) {
+  try {
+    await readPolicy(options.policyPath ?? DEFAULT_POLICY_PATH);
+  } catch {
+    // swallow
+  }
+}
+
+/**
+ * Read the GRPO routing policy and compute the probability of routing to
+ * System 2 for the supplied feature vector. Always safe: when the policy file
+ * is missing, malformed, or the feature vector is invalid, returns a neutral
+ * reading (`p_s2: 0.5, confidence: 0`). Memoized for 60s across calls.
+ *
+ * Contract:
+ *   - Never throws.
+ *   - `p_s2` is always a finite number in [0, 1].
+ *   - `confidence` is 0 when fallback is used, otherwise proportional to how
+ *     far `p_s2` sits from 0.5 (edge confidence = 1).
+ *
+ * @param {RoutingFeatures} features - Pre-execution routing features.
+ * @param {object} [options]
+ * @param {string} [options.policyPath] - Override path (defaults to ~/.claude/artibot/policies/routing-policy-v1.json).
+ * @returns {Promise<{ p_s2: number, confidence: number, source: 'policy'|'fallback' }>}
+ *
+ * @example
+ * const bias = await getRoutingBias({ steps: 0.4, domains: 0.3, risk: 0.2 });
+ * if (bias.confidence > 0.3) useBiasedRouting(bias.p_s2);
+ */
+export async function getRoutingBias(features, options = {}) {
+  const fallback = { p_s2: 0.5, confidence: 0, source: 'fallback' };
+  try {
+    const policy = await readPolicy(options.policyPath ?? DEFAULT_POLICY_PATH);
+    if (!policy || !Array.isArray(policy.theta)) return fallback;
+
+    const theta = policy.theta;
+    const x = toFeatureVector(features);
+    if (theta.length !== x.length) return fallback;
+
+    let z = 0;
+    for (let i = 0; i < theta.length; i++) {
+      const t = theta[i];
+      if (typeof t !== 'number' || !Number.isFinite(t)) return fallback;
+      z += t * x[i];
+    }
+
+    const p = sigmoid(z);
+    if (!Number.isFinite(p)) return fallback;
+    // Distance-from-0.5 maps to confidence; clamp to [0, 1].
+    const confidence = Math.max(0, Math.min(1, Math.abs(p - 0.5) * 2));
+    return { p_s2: p, confidence, source: 'policy' };
+  } catch {
+    return fallback;
+  }
+}
