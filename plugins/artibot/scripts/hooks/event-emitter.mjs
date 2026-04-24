@@ -13,8 +13,8 @@
  * @module scripts/hooks/event-emitter
  */
 
-import { appendFileSync, mkdirSync, existsSync } from 'node:fs';
-import { join, dirname, resolve } from 'node:path';
+import { appendFileSync, existsSync, mkdirSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseJSON, readStdin, writeStdout } from '../utils/index.js';
 import { redactObject } from '../../lib/core/redaction.js';

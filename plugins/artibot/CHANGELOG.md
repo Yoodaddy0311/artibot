@@ -9,31 +9,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased] — targeting v0.5.0
+## [3.1.0] - 2026-04-24
 
 ### Added
 
-- Hook Event Emitter + dashboard schema (from disler/observability benchmark)
-- Token Cache ROI measurement middleware (Scopeon-inspired)
-- MCP 2.0 Server Cards support (`.well-known/mcp-server`)
-- AGENTS.md cross-tool export adapters seed (Cursor/Codex/OpenCode)
-- Hierarchical 3-Layer Memory design doc (working/episodic/semantic)
-- `knip.json` config (dead-code detection entry/project paths)
-- session-start-sweep hook skeleton
+- **Hook Event Emitter skill** + 대시보드 스키마 + ESM 훅 (disler/observability 패턴)
+- **Token Cache ROI middleware** (Scopeon-inspired, cache_read / cache_creation 분리 계측)
+- **MCP 2.0 Server Cards support** (`.well-known/mcp-server.json` + 2.0 integration 가이드)
+- **AGENTS.md cross-tool export seed** (Cursor / Codex / OpenCode / Windsurf / Antigravity)
+- **Hierarchical 3-Layer Memory design doc** (working/episodic/semantic — v0.6 default-on 로드맵)
+- **code-slop-reviewer skill** (ai-slop-reviewer 코드 도메인 이식, 35개 slop 패턴, JS/TS/Python)
+- **plugins/_shared/rubrics/** 공유 인프라 (severity-tiers, category-floor, auto-flag-schema)
+- **cross-plugin-synergy design doc** (cowork↔core 10-매핑, 5년 AGI 로드맵)
+- **Market/competitive/self-diagnostic/ecosystem reports** (4개 _reports 문서)
+- **knip.json** dead-code 탐지 config
+- **session-start-sweep hook skeleton** (runtime/*.tmp.* 60분 만료 자동 삭제)
 
 ### Changed
 
-- `CLAUDE.md` skill count updated to actual (100 skills, 56 commands)
-- `redaction.js` duplicate export removed
+- `CLAUDE.md` skill count 실측값 반영 (100 skills, 56 commands)
+- `redaction.js` 중복 export 제거 (`DEFAULT_PATTERNS` → `GENERIC_PATTERNS` 일원화)
+- `eslint.config.js` `.mjs` 확장자 커버 (`scripts/**/*.{js,mjs}`)
+- `artibot.config.json` `runtime.middleware` 배열에 `cache-roi` 추가
 
 ### Removed
 
-- Residual `budget_tokens` references (Opus 4.7 adaptive thinking 강제화)
-- `runtime/*.tmp.*` orphan files cleaned
+- Residual `budget_tokens` references (Opus 4.7 adaptive thinking 강제화로 파라미터 폐기)
+- `runtime/*.tmp.*` orphan 파일 16개 정리
 
 ### Fixed
 
-- agent-registry test leak via `__test_*` filter (C1)
+- ESLint `.mjs` no-undef 오탐 (process globals 누락) — `npm run ci` 블로커 해제
 
 ---
 

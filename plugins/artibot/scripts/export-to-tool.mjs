@@ -26,8 +26,8 @@
  *      plugins/artibot/docs/mcp-2.0-integration.md
  */
 
-import { readdir, readFile, mkdir, writeFile } from "node:fs/promises";
-import { dirname, join, resolve, basename } from "node:path";
+import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const SUPPORTED_TOOLS = new Set(["cursor", "codex", "opencode"]);
