@@ -55,7 +55,7 @@ const IMPORTANCE_WEIGHTS = Object.freeze({
  * @returns {number}
  */
 export function estimateEntryTokens(body) {
-  if (body == null) return MIN_ENTRY_TOKENS;
+  if (body === null || body === undefined) return MIN_ENTRY_TOKENS;
   const text = typeof body === 'string' ? body : JSON.stringify(body);
   const raw = Math.ceil(String(text).length / CHARS_PER_TOKEN);
   return Math.max(MIN_ENTRY_TOKENS, raw);
