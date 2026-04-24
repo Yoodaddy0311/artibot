@@ -9,6 +9,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — targeting v0.5.0
+
+### Added
+
+- Hook Event Emitter + dashboard schema (from disler/observability benchmark)
+- Token Cache ROI measurement middleware (Scopeon-inspired)
+- MCP 2.0 Server Cards support (`.well-known/mcp-server`)
+- AGENTS.md cross-tool export adapters seed (Cursor/Codex/OpenCode)
+- Hierarchical 3-Layer Memory design doc (working/episodic/semantic)
+- `knip.json` config (dead-code detection entry/project paths)
+- session-start-sweep hook skeleton
+
+### Changed
+
+- `CLAUDE.md` skill count updated to actual (100 skills, 56 commands)
+- `redaction.js` duplicate export removed
+
+### Removed
+
+- Residual `budget_tokens` references (Opus 4.7 adaptive thinking 강제화)
+- `runtime/*.tmp.*` orphan files cleaned
+
+### Fixed
+
+- agent-registry test leak via `__test_*` filter (C1)
+
+---
+
 ## [3.0.0] - 2026-04-21
 
 ### Summary / 요약

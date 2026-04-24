@@ -12,7 +12,6 @@
 
 import { describe, expect, it } from 'vitest';
 import {
-  DEFAULT_PATTERNS,
   GENERIC_PATTERNS,
   redactObject,
   redactString,
@@ -162,10 +161,6 @@ describe('redactObject — deep traversal', () => {
 });
 
 describe('pattern catalogue exports', () => {
-  it('DEFAULT_PATTERNS equals GENERIC_PATTERNS', () => {
-    expect(DEFAULT_PATTERNS).toBe(GENERIC_PATTERNS);
-  });
-
   it('GENERIC_PATTERNS is frozen', () => {
     expect(Object.isFrozen(GENERIC_PATTERNS)).toBe(true);
   });
