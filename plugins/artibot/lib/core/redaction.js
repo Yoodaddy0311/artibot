@@ -59,11 +59,9 @@ export const TAGGED_PATTERNS = Object.freeze([
   { re: /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, tag: '[redacted:email]' },
 ]);
 
-/**
- * The default pattern set used by redactString / redactObject when no
- * explicit `patterns` option is supplied. Aliases GENERIC_PATTERNS.
- */
-export const DEFAULT_PATTERNS = GENERIC_PATTERNS;
+// Note: a duplicate `DEFAULT_PATTERNS` export (alias of GENERIC_PATTERNS) was
+// removed in favor of the single canonical `GENERIC_PATTERNS` name. Callers
+// that still want "the default" should reference `GENERIC_PATTERNS` directly.
 
 // Keys that must never appear in a sanitized object — prototype pollution guard.
 const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
@@ -111,7 +109,7 @@ function normalizePatterns(patterns, replacement) {
  * @param {string} input
  * @param {object} [options]
  * @param {ReadonlyArray<[RegExp, string]|{re: RegExp, tag: string}|RegExp>} [options.patterns]
- *   Override pattern set. Defaults to {@link DEFAULT_PATTERNS}.
+ *   Override pattern set. Defaults to {@link GENERIC_PATTERNS}.
  * @param {string} [options.replacement] - Fallback tag for bare-RegExp entries.
  * @returns {string}
  */
@@ -121,7 +119,7 @@ export function redactString(input, options = {}) {
     ? options.replacement
     : '***REDACTED***';
   const patterns = normalizePatterns(
-    options.patterns ?? DEFAULT_PATTERNS,
+    options.patterns ?? GENERIC_PATTERNS,
     replacement,
   );
   let out = input;

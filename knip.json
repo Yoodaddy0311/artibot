@@ -1,0 +1,21 @@
+{
+  "$schema": "https://unpkg.com/knip@latest/schema.json",
+  "entry": [
+    "plugins/artibot/scripts/**/*.js",
+    "plugins/artibot/scripts/**/*.mjs",
+    "plugins/artibot/lib/core/index.js",
+    "plugins/artibot/lib/runtime/agent-resolver.js",
+    "plugins/artibot/lib/runtime/create-artibot-agent.js",
+    "plugins/artibot/lib/runtime/evaluator.js",
+    "plugins/artibot/lib/runtime/smart-pipeline.js",
+    "plugins/artibot/lib/runtime/task-budget.js",
+    "plugins/artibot/tests/**/*.test.js"
+  ],
+  "project": ["plugins/artibot/lib/**/*.js"],
+  "ignoreDependencies": [],
+  "ignore": [
+    "**/runtime/**",
+    "**/node_modules/**",
+    "plugins/artibot/agents/__test_*"
+  ]
+}

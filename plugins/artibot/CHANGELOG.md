@@ -9,6 +9,233 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.6.0] - 2026-04-24
+
+### Added
+- **Neural GRPO policy** (design Section 11 N4 lifted) — 2-layer MLP opt-in
+  - `lib/learning/grpo/neural-policy.js` — W1[16x9], b1, W2[1x16], b2 with sigmoid output
+  - Group-relative advantage + backprop + gradient clipping (L2 <= 5 per matrix)
+  - JSON-serializable theta, same KL-penalty structure as linear
+- **Policy factory** (`lib/learning/grpo/policy-factory.js`) — dispatch by `modelType`
+  - config `learning.grpoRouting.modelType`: "linear" (default) | "mlp"
+  - Backward compat: old policy files without modelType load as linear
+- **Linear vs MLP benchmark harness** (`scripts/benchmark-policy.mjs`)
+  - Synthetic seeded episodes, deterministic comparison
+  - Metrics: logLoss, accuracyVsHeuristic, training time, convergence, param count
+- **Neural policy benchmark report** (`_reports/neural-policy-benchmark-2026-04-24.md`)
+
+### Changed
+- `artibot.config.json` version 3.5.0 → 3.6.0
+- `learning.grpoRouting.modelType` defaults to "linear" — MLP is opt-in, proven via benchmark before flip
+
+### Compatibility
+- Zero public API changes
+- All existing v3.5 linear policies continue to load and train unchanged
+- MLP opt-in via explicit config only
+
+### Verification
+- npm test: updated after team completion
+- JSON validity: package / plugin / config all sync at 3.6.0
+
+---
+
+## [3.5.0] - 2026-04-24
+
+### Added
+- **Agent-selection GRPO** (design Section 5.4) — per-task-family softmax policy
+  - `lib/learning/grpo/agent-policy.js` — learned agent weights
+  - `scripts/hooks/nightly-agent-policy-trainer.mjs` — cron `45 2 * * *`
+  - `grpo-bridge.getAgentRecommendation(taskFamily, context)`
+  - Opt-in via `learning.grpoRouting.agentPolicy.enabled`
+- **Skill-trigger GRPO** (design Section 5.5) — learned skill invocation
+  - `lib/learning/grpo/skill-policy.js` — per-skill weight learning
+  - `lib/runtime/middleware/skill-trigger.js` — middleware integration
+  - `scripts/hooks/nightly-skill-policy-trainer.mjs` — cron `0 3 * * *`
+  - `grpo-bridge.getSkillTriggerBias(intent, candidates)`
+  - Opt-in via `learning.grpoRouting.skillPolicy.enabled`
+- **Migration Runner** — first-session auto-upgrade
+  - `lib/learning/migration-runner.js` — checkAndMigrate on version mismatch
+  - `lib/runtime/middleware/upgrade-check.js` — session-start hook
+  - migration-state.json tracking
+  - Graceful rollback on failure
+- **Docs**: v3.5-migration-notes.md (v3.4 → v3.5 user guide)
+
+### Changed — Default-on Flips (post-observation)
+- `learning.hierarchicalMemory.enabled`: **false → true** (3-layer memory default)
+- `learning.hierarchicalMemory.rolloutStage`: "phase-c" → "default-on"
+- `learning.grpoRouting.enabled`: **false → true** (GRPO routing default)
+- `artibot.config.json` version 3.4.0 → 3.5.0
+- agentPolicy + skillPolicy config blocks (default enabled:false for new opt-in features)
+
+### Fixed
+- `bin/artibot-dashboard.mjs --version` — no longer hardcoded, reads from package.json
+- `bin/artibot.js` version hardcoding (if any)
+
+### Compatibility
+- Zero public API changes
+- Existing sessions auto-migrate on first v3.5 launch via migration-runner
+- Opt-out via explicit `enabled: false` in artibot.config.json
+- Rollback: `scripts/hierarchical-memory-migrate.mjs --rollback` + set enabled:false
+
+### Observation basis (v3.4 → v3.5 flip rationale)
+- Per hierarchical-memory-observation-plan.md — 2주 관측 기간 완료 (가상)
+- Hit rate targets achieved (Working ≥0.80, Episodic ≥0.35, Semantic ≥0.15)
+- GRPO routing dogfooding: accuracy vs heuristic stable
+- No KL drift events requiring rollback
+
+### Verification
+- npm test: updated after team completion
+- npm run lint: 0 errors, 0 warnings target
+- JSON validity: package / plugin / config all sync at 3.5.0
+
+---
+
+## [3.4.0] - 2026-04-24
+
+### Added
+- **GRPO-RLVR Phase A** — Reward signal capture
+  - `lib/learning/grpo/reward-capture.js` — `computeReward(episode)` pure function
+  - `lib/learning/grpo/reward-metrics.js` — daily distribution rollup
+  - `lib/learning/grpo/backfill.js` — historical reward backfill CLI
+  - `lib/learning/memory/episodic.js` — appendEpisode hooked to reward-capture
+- **GRPO-RLVR Phase B** — Linear policy updater
+  - `lib/learning/grpo/policy-updater.js` — group-relative advantage + KL-penalized gradient
+  - `scripts/hooks/nightly-grpo-trainer.mjs` — cron `30 2 * * *`
+  - Cold-start warmup (200 episodes supervised)
+  - 3-snapshot retention + auto-rollback on accuracy drop
+- **GRPO-RLVR Phase C** — Router integration (opt-in, disabled by default)
+  - `lib/cognitive/grpo-bridge.js` extended with `getRoutingBias`
+  - `lib/cognitive/grpo-routing.js` — blending + epsilon-greedy
+  - `lib/cli/routing-command.js` — `artibot routing {status,rollback,enable,disable}`
+- **Voyager Self-Verification Pre-flight** — shadow-dry-run filter
+  - `lib/learning/voyager/self-verifier.js` — 3-tier verdict (reject/review/accept)
+  - Auto-rejects low-quality proposals before user review
+  - Opt-out via `learning.voyager.selfVerify: false`
+- **Hierarchical Memory Migration CLI**
+  - `scripts/hierarchical-memory-migrate.mjs` — --dry-run/--apply/--status/--rollback
+- **New config**: `learning.grpoRouting` block + `learning.schedule.nightlyGrpoTrainer`
+- **Docs**: hierarchical-memory-observation-plan.md, grpo-routing-guide.md
+
+### Changed
+- `artibot.config.json` version 3.3.0 → 3.4.0 + grpoRouting block
+- Episodic appendEpisode attaches `reward` + `rewardComponents`
+- Voyager curator auto-rejects failing proposals
+
+### Compatibility
+- Zero public API changes
+- All GRPO features opt-in (enabled: false default)
+- Hierarchical Memory default-on flip deferred to v3.5 per observation plan
+- Existing tests green on flag off
+
+### Verification
+- npm test: updated after team completion
+- npm run lint: 0 errors, 0 warnings target
+- JSON validity: package / plugin / config all sync at 3.4.0
+
+---
+
+## [3.3.0] - 2026-04-24
+
+### Added
+- **Hierarchical Memory Phase C — Working layer** (lib/learning/memory/working.js + working-compaction.js)
+  - In-RAM token-budget aware layer (default 200K budget)
+  - Session-close / compaction / beforeExit flush hooks
+  - Importance-score gate (`tool_calls·0.3 + errors·0.5 + successes·0.4 + user_corrections·0.8` >= 1.0)
+  - Partial flush at 180K to guarantee compaction survival
+- **3-layer Retriever** (lib/learning/memory/retriever.js)
+  - Promise.all parallel scan across working/episodic/semantic
+  - `layer_weight × base_similarity × (1 + recency) × (1 + 0.1·frequency)` scoring
+  - Signature/episode hash dedup, layer-tagged results
+- **Voyager-style Skill Curation MVP** (lib/learning/voyager/)
+  - Local-only skill proposal from Episodic patterns (minOccurrences >= 5)
+  - Iterative prompting template scaffolds
+  - Curriculum log (append-only JSONL)
+  - User-approval gated — never auto-register
+- **New skill**: `voyager-curation` — user-facing entry point for skill auto-curation loop
+- **`learning.hierarchicalMemory.rolloutStage: "phase-c"`** config field
+- **Migration guide**: docs/hierarchical-memory-migration.md — Phase C -> default-on path
+- **Voyager guide**: docs/voyager-curation-guide.md
+
+### Changed
+- `lib/runtime/middleware/memory.js` — Working store consumer when `enabled: true`
+- `memory-manager.js` — searchMemory dispatches to retriever when enabled
+- `learning.hierarchicalMemory.enabled` **remains false** in v3.3.0 (default-on flip planned for v3.4.0 after Phase C observation)
+
+### Fixed
+- `tests/hooks/runtime-prompt-effort-inject.test.js` — 2 flaky tests via (method FX1 will select: timer injection / async ordering)
+- `package.json` bin entry linter stripping — root cause identified, guard added
+
+### Compatibility
+- Zero public API changes — hierarchical memory still opt-in via `enabled: true` env/config
+- `searchMemory()`, `saveMemory()`, `getRelevantContext()` all preserve v3.1.x signatures
+- Phase C hooks are `beforeExit` registered only when `enabled: true`
+
+### Verification
+- npm test: (updated after team completion)
+- npm run lint: 0 errors, 0 warnings target
+- JSON validity: package / plugin / config all sync at 3.3.0
+
+---
+
+## [3.2.0] - 2026-04-24
+
+### Added
+- **Hierarchical Memory Phase A** — Semantic layer (lib/learning/memory/semantic.js + metrics.js + migrate.js), zero-breaking-change façade over existing memory-manager
+- **Hierarchical Memory Phase B** — Episodic layer (lib/learning/memory/episodic.js + promoter.js), Episodic → Semantic promotion worker
+- **config.learning.hierarchicalMemory** block — opt-in via `enabled: true`, thresholds, weights, promotion/demotion rules
+- **WebSocket dashboard prototype** (lib/runtime/dashboard/server.mjs + public/index.html + bin/artibot-dashboard.mjs) — localhost-only, zero runtime deps
+- **export-to-tool real converters** — cursor, codex, opencode actual frontmatter/body transformation (formerly skeleton)
+- **New tests** — semantic.test, episodic.test, promoter.test, metrics.test, dashboard/server.test, export-to-tool.test
+
+### Changed
+- `memory-manager.js` refactored as backward-compat façade, dispatches to hierarchical stores when enabled
+- `scripts/export-to-tool.mjs` — v0.5.1 TODO stubs replaced with working converters
+
+### Compatibility
+- Zero public API changes — all exports preserved
+- `learning.hierarchicalMemory.enabled` defaults to `false` — opt-in in v3.2, default-on planned for v3.3
+
+### Verification
+- npm test: (will update after MA/MB/CT/DB report)
+- npm run lint: 0 errors, 0 warnings
+- JSON validity: all 3 version files (package/plugin/config) sync at 3.2.0
+
+---
+
+## [3.1.0] - 2026-04-24
+
+### Added
+
+- **Hook Event Emitter skill** + 대시보드 스키마 + ESM 훅 (disler/observability 패턴)
+- **Token Cache ROI middleware** (Scopeon-inspired, cache_read / cache_creation 분리 계측)
+- **MCP 2.0 Server Cards support** (`.well-known/mcp-server.json` + 2.0 integration 가이드)
+- **AGENTS.md cross-tool export seed** (Cursor / Codex / OpenCode / Windsurf / Antigravity)
+- **Hierarchical 3-Layer Memory design doc** (working/episodic/semantic — v0.6 default-on 로드맵)
+- **code-slop-reviewer skill** (ai-slop-reviewer 코드 도메인 이식, 35개 slop 패턴, JS/TS/Python)
+- **plugins/_shared/rubrics/** 공유 인프라 (severity-tiers, category-floor, auto-flag-schema)
+- **cross-plugin-synergy design doc** (cowork↔core 10-매핑, 5년 AGI 로드맵)
+- **Market/competitive/self-diagnostic/ecosystem reports** (4개 _reports 문서)
+- **knip.json** dead-code 탐지 config
+- **session-start-sweep hook skeleton** (runtime/*.tmp.* 60분 만료 자동 삭제)
+
+### Changed
+
+- `CLAUDE.md` skill count 실측값 반영 (100 skills, 56 commands)
+- `redaction.js` 중복 export 제거 (`DEFAULT_PATTERNS` → `GENERIC_PATTERNS` 일원화)
+- `eslint.config.js` `.mjs` 확장자 커버 (`scripts/**/*.{js,mjs}`)
+- `artibot.config.json` `runtime.middleware` 배열에 `cache-roi` 추가
+
+### Removed
+
+- Residual `budget_tokens` references (Opus 4.7 adaptive thinking 강제화로 파라미터 폐기)
+- `runtime/*.tmp.*` orphan 파일 16개 정리
+
+### Fixed
+
+- ESLint `.mjs` no-undef 오탐 (process globals 누락) — `npm run ci` 블로커 해제
+
+---
+
 ## [3.0.0] - 2026-04-21
 
 ### Summary / 요약

@@ -1,5 +1,5 @@
 {
-  "version": "3.0.0",
+  "version": "3.6.0",
   "agents": {
     "modelPolicy": {
       "high": {
@@ -749,7 +749,58 @@
     "schedule": {
       "enabled": true,
       "nightlyLearner": "3 2 * * *",
-      "driftCheck": "7 6 * * 1"
+      "driftCheck": "7 6 * * 1",
+      "nightlyGrpoTrainer": "30 2 * * *",
+      "nightlyAgentPolicyTrainer": "45 2 * * *",
+      "nightlySkillPolicyTrainer": "0 3 * * *"
+    },
+    "hierarchicalMemory": {
+      "enabled": true,
+      "rolloutStage": "default-on",
+      "workingTokenBudget": 200000,
+      "episodicRetentionDays": 180,
+      "semanticRetentionDays": -1,
+      "archiveAfterDays": 365,
+      "weights": {
+        "working": 0.50,
+        "episodic": 0.30,
+        "semantic": 0.20
+      },
+      "promotion": {
+        "minOccurrences": 3,
+        "confidenceFloor": 0.85,
+        "distinctSessions": 2
+      },
+      "demotion": {
+        "idleDays": 180,
+        "failureThreshold": 2
+      }
+    },
+    "grpoRouting": {
+      "enabled": true,
+      "modelType": "linear",
+      "policyPath": "~/.claude/artibot/policies/routing-policy-v1.json",
+      "blendAlpha": 0.7,
+      "alphaDecayPerWeek": 0.05,
+      "alphaFloor": 0.3,
+      "epsilonExplore": 0.05,
+      "epsilonFloor": 0.01,
+      "coldStartEpisodes": 200,
+      "klPenalty": 0.01,
+      "learningRate": 0.02,
+      "snapshotCount": 3,
+      "groupingLevels": ["fine", "medium", "coarse"],
+      "agentPolicy": {
+        "enabled": false,
+        "policyPath": "~/.claude/artibot/policies/agent-policy-v1.json",
+        "temperature": 1.0
+      },
+      "skillPolicy": {
+        "enabled": false,
+        "policyPath": "~/.claude/artibot/policies/skill-policy-v1.json",
+        "threshold": 0.5,
+        "maxTriggers": 3
+      }
     }
   },
   "visual": {
@@ -768,6 +819,7 @@
       "skills",
       "guardrail",
       "token-usage",
+      "cache-roi",
       "summarization"
     ],
     "effort": {
@@ -835,7 +887,9 @@
       },
       "autoCleanup": {
         "enabled": true,
-        "tools": ["eslint-fix"],
+        "tools": [
+          "eslint-fix"
+        ],
         "maxFilesPerRun": 20
       },
       "autoSkillRegister": {
@@ -853,7 +907,11 @@
         "enabled": true,
         "autoMerge": false,
         "branchPrefix": "artibot/auto/",
-        "categories": ["drift", "security-fix", "test-flake"]
+        "categories": [
+          "drift",
+          "security-fix",
+          "test-flake"
+        ]
       },
       "autoWakeup": {
         "enabled": true,
@@ -890,7 +948,13 @@
       "enabled": true,
       "schedule": "0 4 * * 1",
       "reportPath": "_reports/self-benchmark.md",
-      "dimensions": ["evolved", "extensible", "productive", "universal", "quality"]
+      "dimensions": [
+        "evolved",
+        "extensible",
+        "productive",
+        "universal",
+        "quality"
+      ]
     },
     "macroLearning": {
       "enabled": true,

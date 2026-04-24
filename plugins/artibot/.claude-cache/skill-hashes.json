@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-04-21T05:12:44.244Z",
+  "generatedAt": "2026-04-24T07:40:29.533Z",
   "skills": {
     "ab-testing": {
       "hash": "701661e8",
@@ -46,6 +46,11 @@
       "hash": "e1f36028",
       "path": "skills\\clarify\\SKILL.md",
       "size": 7219
+    },
+    "code-slop-reviewer": {
+      "hash": "6521f482",
+      "path": "skills\\code-slop-reviewer\\SKILL.md",
+      "size": 13856
     },
     "codex-integration": {
       "hash": "f686bba9",
@@ -165,7 +170,12 @@
     "git-unified": {
       "hash": "9717f9c4",
       "path": "skills\\git-unified\\SKILL.md",
-      "size": 6196
+      "size": 6382
+    },
+    "hook-event-emitter": {
+      "hash": "f49b715d",
+      "path": "skills\\hook-event-emitter\\SKILL.md",
+      "size": 8480
     },
     "hook-feedback-merge": {
       "hash": "f9868ebb",
@@ -180,7 +190,7 @@
     "lang-reference": {
       "hash": "a4a6eb41",
       "path": "skills\\lang-reference\\SKILL.md",
-      "size": 9200
+      "size": 9473
     },
     "lead-management": {
       "hash": "fa392769",
@@ -491,6 +501,11 @@
       "hash": "4e12c0fd",
       "path": "skills\\visual-validation\\SKILL.md",
       "size": 5836
+    },
+    "voyager-curation": {
+      "hash": "4b4a3e2d",
+      "path": "skills\\voyager-curation\\SKILL.md",
+      "size": 7219
     },
     "yes-md": {
       "hash": "b605c119",

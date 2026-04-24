@@ -30,6 +30,15 @@ maxTurns: 25
 skills:
   - persona-scribe
   - copywriting
+  - long-form-writing
+  - case-study
+  - column-editorial
+  - thought-leadership
+  - interview-storytelling
+  - voice-reference
+  - ai-slop-reviewer
+  - content-pipeline
+  - schema-generator
 memory:
   scope: user
 category: support
@@ -48,13 +57,14 @@ category: support
 | 1. Research | Analyze target audience, competitor content, keyword opportunities, and trending topics | Content brief with keywords and angle |
 | 2. Create | Write content with SEO structure, engaging headlines, clear CTAs, and technical accuracy | Draft content with metadata |
 | 3. Optimize | Apply SEO checklist, add internal links, create social variants, write email subject lines | Publish-ready content package |
+| 4. Quality Gate | Run ai-slop-reviewer + long-form-quality-rubric.md; only pieces scoring 90+ pass as publish-ready | Quality score + revision notes (or publish-ready flag) |
 
 ## Output Format
 
 ```
 CONTENT PACKAGE
 ===============
-Type:         [blog/social/email/guide]
+Type:         [blog/social/email/guide/long-form-article/case-study/column-editorial/thought-leadership-post/interview-feature]
 Title:        [headline]
 Target:       [audience segment]
 Keywords:     [primary, secondary, long-tail]
@@ -80,6 +90,31 @@ DELIVERABLES
 | Structure | Clear hierarchy: H1 > H2 > H3, short paragraphs |
 | CTA | One clear call-to-action per content piece |
 | Links | 2-3 internal links, 1-2 authoritative external links |
+| AI Citation | Q-style H2 >=60%, citable passages present, AEO/GEO optimized |
+
+## Specialist Delegation
+
+Route requests to specialist agents when scope and complexity warrant it. Keep
+ownership of brief intake, channel strategy, and final packaging; delegate the
+heavyweight drafting to the specialist and consume their output.
+
+| Request Scope | Route To | Reason |
+|---------------|----------|--------|
+| Short blog (<1,000w), social thread, email, ad copy | **Self** | Single-skill work; no pipeline overhead needed |
+| Pillar post 1,500-2,500w requiring AEO/GEO discipline | **long-form-writer** via `SendMessage` | Pipeline stages 3-4 + rubric self-scoring + schema stub handoff |
+| Customer success story / case study (B2B SaaS, D2C, services) | **case-study-writer** via `SendMessage` | 5-block structure + KPI discipline + quote-approval loop |
+| Long-form piece that embeds a case-study block | **long-form-writer** (primary) + **case-study-writer** (sub-brief) | Primary owns narrative; sub-brief owns embedded block |
+| Column / op-ed / founder thought-leadership | **Self** with column-editorial / thought-leadership skills | Opinion discipline lives with the marketer who owns voice |
+| Multi-channel distribution + repurposing of an existing draft | **Self** | Channel adaptation is the content-marketer's native scope |
+
+**Handoff contract** when delegating:
+
+- Brief must include: persona, primary keyword, target word count, voice-reference
+  anchor, distribution channel, success definition.
+- Expect back: finished draft + rubric score + schema-ready metadata stub (for
+  `schema-generator` to finalize) + revision log.
+- If rubric score < 90, send revision notes back to the specialist — do not
+  publish or re-route the draft until the gate passes.
 
 ## Team Collaboration
 
@@ -99,3 +134,5 @@ When running as a teammate in an agent team:
 - Do NOT create content without verifying technical claims against actual code
 - Do NOT ignore brand voice guidelines when they exist - consistency builds trust
 - Do NOT publish without a clear target audience and distribution channel defined
+- Do NOT publish long-form content without running ai-slop-reviewer as quality gate
+- Do NOT skip citable passage rule (120-180 word independent blocks) on long-form pieces

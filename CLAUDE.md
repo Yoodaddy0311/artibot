@@ -20,10 +20,12 @@
 - Multiple independent tasks: launch agents in parallel
 
 ### Auto Team Mode (team.autoApply)
-When `team.autoApply` is `true` in `artibot.config.json` (default), automatically use /team workflow for qualifying requests WITHOUT the user needing to type `/team`. This applies when ALL of these conditions are met:
+When `team.autoApply` is `true` in `artibot.config.json` (default), automatically use /team workflow for qualifying requests WITHOUT the user needing to type `/team`. This applies when ANY of these conditions are met (OR logic, per `plugins/artibot/artibot.config.json` → `team.autoApplyTriggers.logic`):
 1. The request involves **2+ independent subtasks** that can be parallelized
 2. The request involves **2+ different files or domains** (e.g., frontend + backend, hook + config + test)
-3. The estimated complexity is **medium or higher** (not a simple single-file edit or question)
+3. The estimated complexity is **medium or higher**
+
+**Exception (excludeTrivial)**: single-file edits under 30 lines bypass auto-team and run inline. See config `autoApplyTriggers.excludeTrivial`.
 
 When auto-team triggers, behave exactly as if the user typed `/team <their request>`:
 - Decompose into independent work units
@@ -35,7 +37,7 @@ When auto-team triggers, behave exactly as if the user typed `/team <their reque
 - Add `team.autoApply: false` in `CLAUDE.local.md` under Personal Workflow Preferences (per-user)
 - Include `--no-team` anywhere in the prompt (per-request)
 
-**Claude 4.7 주의**: 4.7은 기본적으로 서브에이전트 소환을 줄이나, 이 자동 팀 정책이 해당 기본값을 명시적으로 오버라이드한다. 3개 조건을 만족하면 `/team` 입력 여부와 무관하게 병렬 팀으로 진행.
+**Claude 4.7 주의**: 4.7은 기본적으로 서브에이전트 소환을 줄이나, 이 자동 팀 정책이 해당 기본값을 명시적으로 오버라이드한다. 조건 중 하나라도 만족하면 `/team` 입력 여부와 무관하게 병렬 팀으로 진행.
 
 ### Quality Gates
 - Read before write (no blind modifications)

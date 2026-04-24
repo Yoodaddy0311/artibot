@@ -1,0 +1,56 @@
+{
+  "$schema": "https://modelcontextprotocol.io/schemas/2026/mcp-server.json",
+  "_comment": "Template — populate capabilities when MCP server features are added. See docs/mcp-2.0-integration.md.",
+  "name": "artibot",
+  "version": "3.0.0",
+  "description": "Artibot — autonomous agent OS with 28 agents, 100 skills, and Claude Agent Teams orchestration.",
+  "license": "MIT",
+  "homepage": "https://github.com/Yoodaddy0311/artibot",
+  "capabilities": {
+    "tools": {
+      "listChanged": false,
+      "_note": "No tools exposed yet. Populate when first MCP tool ships."
+    },
+    "resources": {
+      "listChanged": false,
+      "subscribe": false,
+      "_note": "Planned: agent registry + skill index as read-only resources."
+    },
+    "prompts": {
+      "listChanged": false,
+      "_note": "Planned: expose command templates (/plan, /team, /code-review) as MCP prompts."
+    },
+    "tasks": {
+      "retry": false,
+      "expiry": false,
+      "_note": "Planned for v0.7.0 alongside streamable-http transport."
+    }
+  },
+  "auth": {
+    "schemes": ["none"],
+    "recommended": "oauth2",
+    "_note": "Local usage is unauthenticated. OAuth2 recommended for any hosted deployment."
+  },
+  "contacts": [
+    {
+      "name": "Artibot Maintainer",
+      "email": "artience.ads.team.tf@gmail.com",
+      "role": "maintainer"
+    }
+  ],
+  "transports": ["stdio"],
+  "endpoints": {
+    "_note": "No HTTP endpoint yet. Add `streamable-http` URL here when the Node server lands (v0.6.0+)."
+  },
+  "dataPolicy": {
+    "scope": "local",
+    "forwarding": "none",
+    "_note": "Artibot CRITICAL policy — no external DB, no third-party forwarding."
+  },
+  "roadmap": {
+    "currentVersion": "3.0.0",
+    "tasksSupport": "v0.7.0",
+    "streamableHttp": "v0.7.0",
+    "oauth2": "v1.0.0"
+  }
+}
