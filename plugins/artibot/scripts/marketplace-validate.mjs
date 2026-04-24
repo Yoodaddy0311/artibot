@@ -332,23 +332,12 @@ async function main() {
   process.exit(summary.failed > 0 ? 1 : 0);
 }
 
-const isDirectInvocation = (() => {
-  try {
-    return import.meta.url === `file://${process.argv[1]}` ||
-      import.meta.url === pathToFileUrlSafe(process.argv[1]);
-  } catch {
-    return false;
-  }
-})();
-
-function pathToFileUrlSafe(p) {
-  if (!p) return '';
-  // Lightweight cross-platform; full URL encoding handled by Node when needed.
-  const normalized = p.replace(/\\/g, '/');
-  return normalized.startsWith('/') ? `file://${normalized}` : `file:///${normalized}`;
-}
-
-if (isDirectInvocation) {
+// Only run main() when invoked directly (not when imported by tests).
+// Absolute-path comparison avoids the Korean-path / percent-encoding mismatch
+// (project memory: Windows + non-ASCII chars break file:// URL equality).
+const invokedPath = process.argv[1] ? resolve(process.argv[1]) : '';
+const thisPath = fileURLToPath(import.meta.url);
+if (invokedPath === thisPath) {
   main().catch((err) => {
     process.stderr.write(`marketplace-validate error: ${err.stack || err.message}\n`);
     process.exit(2);

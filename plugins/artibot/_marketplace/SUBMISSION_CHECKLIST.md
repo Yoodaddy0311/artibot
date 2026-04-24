@@ -1,5 +1,11 @@
 # Artibot — Marketplace Submission Checklist
 
+- **Plugin:** `artibot` v3.9.0 + sibling `artibot-cowork` v0.4.0
+- **License:** MIT (both)
+- **Target marketplace:** Claude Code Plugin Marketplace
+- **Last updated:** 2026-04-24
+- **Owner sign-off:** B-RD (docs) + B-MK (marketplace package) + C-RM (roadmap) + DevOps (CI/release)
+
 Run this checklist top-to-bottom before clicking Submit. All items must be
 checked or have a tracked exception.
 
@@ -79,3 +85,65 @@ checked or have a tracked exception.
 - [ ] Tag the release in git (`git tag v3.9.0 && git push --tags`) — only with user approval
 - [ ] Watch the listing PR for review feedback for 7 days
 - [ ] Schedule follow-up to update screenshots / matrix every quarter
+
+## 11. README polish (B-RD verification)
+
+- [x] Root `README.md` has v3.9.0 badge, MIT license badge, dual-plugin guidance table at top
+- [x] Root `README.md` has Quick Links table pointing to plugin READMEs, CHANGELOG, ARCHITECTURE, _reports, _marketplace
+- [x] Root `README.md` "When to use which" decision diagram present
+- [x] `plugins/artibot/README.md` has v3.9.0 hero badges (version / license / node / tests / lint / coverage / Claude Code)
+- [x] `plugins/artibot/README.md` has 1-line tagline (English + Korean)
+- [x] `plugins/artibot/README.md` has Quick Demo (30-Second First Win) section with copy-paste install command
+- [x] `plugins/artibot/README.md` has "Why Artibot?" 7-differentiator table with file-level evidence
+- [x] `plugins/artibot/README.md` has competitive scoring table (vs LangGraph / AutoGen / CrewAI / everything-cc / etc.)
+- [x] `plugins/artibot/README.md` has Architecture Overview with Mermaid `flowchart TD` diagram
+- [x] `plugins/artibot/README.md` has 5-layer architecture table
+- [x] `plugins/artibot/README.md` has Key Features marketplace summary table
+- [x] `plugins/artibot/README.md` has Installation section (Claude Code + Manual + Other Platforms)
+- [x] `plugins/artibot/README.md` has Usage Patterns (top 5) table
+- [x] `plugins/artibot/README.md` has Configuration table with v3.9.0 config fields
+- [x] `plugins/artibot/README.md` has Roadmap section linking to `_reports/horizon-2-3-roadmap.md`
+- [x] `plugins/artibot/README.md` has Contributing section with DEV protocol summary
+- [x] `plugins/artibot/README.md` has License section (MIT)
+- [x] `plugins/artibot/README.md` PRESERVES all existing Korean content below the prelude
+- [x] `plugins/artibot-cowork/README.md` has v0.4.0 hero badges (version / license / skills / agents / cowork / tests)
+- [x] `plugins/artibot-cowork/README.md` has 1-line tagline (English + Korean)
+- [x] `plugins/artibot-cowork/README.md` has "Why artibot-cowork?" 7-differentiator table
+- [x] `plugins/artibot-cowork/README.md` has Quick Demo section
+- [x] `plugins/artibot-cowork/README.md` has Quickstart Installation
+- [x] `plugins/artibot-cowork/README.md` PRESERVES all existing v0.4.0 content
+- [x] All 3 README badges use shields.io (no other badge providers)
+- [x] All external URLs are trusted domains only (shields.io, github.com, anthropic.com, claude.com)
+
+## 12. Roadmap & design doc cross-references (C-RM verification)
+
+- [ ] `_reports/horizon-2-3-roadmap.md` exists (referenced from `plugins/artibot/README.md` Roadmap section)
+- [ ] `docs/ARCHITECTURE.md` exists (referenced from `plugins/artibot/README.md` 5-layer table + root README Quick Links)
+- [ ] `docs/mcp-server-usage.md` exists (referenced from CHANGELOG v3.8.0 + root README Quick Links)
+- [ ] `_reports/market-competitive-eval-2026-04-24.md` referenced from plugin README "Why Artibot?" section — VERIFIED file exists
+- [ ] `_reports/ai-ecosystem-research-2026-04-24.md` referenced from plugin README Roadmap section — VERIFIED file exists
+- [ ] CONTRIBUTING.md exists at repo root (referenced from plugin README Contributing section)
+- [ ] LICENSE file exists at repo root (referenced from all 3 README badges)
+- [ ] RELEASE_NOTES_3.9_KO.md exists (Korean release notes for non-developer users) — optional but recommended
+
+## 13. Submission package summary
+
+| Section | Items | Owner | Status |
+|---|---|---|---|
+| 0. Pre-flight | 3 | DevOps | TODO |
+| 1. Manifest | 7 | B-MK | TODO |
+| 2. Documentation | 5 | B-RD | partial PASS (README done; SECURITY/CONTRIBUTING/ARCHITECTURE pending) |
+| 3. Media | 5 | B-MK | TODO |
+| 4. Content quality | 3 | B-MK | TODO |
+| 5. Safety / compliance | 4 | Security | TODO |
+| 6. Testing receipts | 3 | DevOps | TODO |
+| 7. Cross-tool | 4 | DevOps | TODO |
+| 8. Release artefacts | 3 | DevOps | TODO |
+| 9. Submission | 4 | Lead | TODO |
+| 10. Post-submission | 3 | Lead | TODO |
+| 11. README polish | 26 | B-RD | PASS (all 26) |
+| 12. Roadmap & design doc cross-refs | 8 | C-RM | TODO (2 of 8 verified, 6 pending file creation) |
+
+**Total items: 78** (up from B-MK's original 50; B-RD added 26 README rows + 8 cross-ref rows in Sections 11 + 12).
+
+**Final approval:** flip this header to `READY FOR SUBMISSION` only when all sections show PASS or have a documented tracked exception in a follow-up issue.
