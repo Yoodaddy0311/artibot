@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.2.0] - 2026-04-24
+
+### Added
+- **Hierarchical Memory Phase A** — Semantic layer (lib/learning/memory/semantic.js + metrics.js + migrate.js), zero-breaking-change façade over existing memory-manager
+- **Hierarchical Memory Phase B** — Episodic layer (lib/learning/memory/episodic.js + promoter.js), Episodic → Semantic promotion worker
+- **config.learning.hierarchicalMemory** block — opt-in via `enabled: true`, thresholds, weights, promotion/demotion rules
+- **WebSocket dashboard prototype** (lib/runtime/dashboard/server.mjs + public/index.html + bin/artibot-dashboard.mjs) — localhost-only, zero runtime deps
+- **export-to-tool real converters** — cursor, codex, opencode actual frontmatter/body transformation (formerly skeleton)
+- **New tests** — semantic.test, episodic.test, promoter.test, metrics.test, dashboard/server.test, export-to-tool.test
+
+### Changed
+- `memory-manager.js` refactored as backward-compat façade, dispatches to hierarchical stores when enabled
+- `scripts/export-to-tool.mjs` — v0.5.1 TODO stubs replaced with working converters
+
+### Compatibility
+- Zero public API changes — all exports preserved
+- `learning.hierarchicalMemory.enabled` defaults to `false` — opt-in in v3.2, default-on planned for v3.3
+
+### Verification
+- npm test: (will update after MA/MB/CT/DB report)
+- npm run lint: 0 errors, 0 warnings
+- JSON validity: all 3 version files (package/plugin/config) sync at 3.2.0
+
+---
+
 ## [3.1.0] - 2026-04-24
 
 ### Added
