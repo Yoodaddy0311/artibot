@@ -1,5 +1,5 @@
 {
-  "version": "3.6.0",
+  "version": "3.7.0",
   "agents": {
     "modelPolicy": {
       "high": {
@@ -752,7 +752,8 @@
       "driftCheck": "7 6 * * 1",
       "nightlyGrpoTrainer": "30 2 * * *",
       "nightlyAgentPolicyTrainer": "45 2 * * *",
-      "nightlySkillPolicyTrainer": "0 3 * * *"
+      "nightlySkillPolicyTrainer": "0 3 * * *",
+      "nightlyJointPolicyTrainer": "15 3 * * *"
     },
     "hierarchicalMemory": {
       "enabled": true,
@@ -800,6 +801,11 @@
         "policyPath": "~/.claude/artibot/policies/skill-policy-v1.json",
         "threshold": 0.5,
         "maxTriggers": 3
+      },
+      "jointPolicy": {
+        "enabled": false,
+        "policyPath": "~/.claude/artibot/policies/joint-policy-v1.json",
+        "correlationWeight": 0.5
       }
     }
   },
