@@ -9,6 +9,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.3.0] - 2026-04-24
+
+### Added
+- **Hierarchical Memory Phase C — Working layer** (lib/learning/memory/working.js + working-compaction.js)
+  - In-RAM token-budget aware layer (default 200K budget)
+  - Session-close / compaction / beforeExit flush hooks
+  - Importance-score gate (`tool_calls·0.3 + errors·0.5 + successes·0.4 + user_corrections·0.8` >= 1.0)
+  - Partial flush at 180K to guarantee compaction survival
+- **3-layer Retriever** (lib/learning/memory/retriever.js)
+  - Promise.all parallel scan across working/episodic/semantic
+  - `layer_weight × base_similarity × (1 + recency) × (1 + 0.1·frequency)` scoring
+  - Signature/episode hash dedup, layer-tagged results
+- **Voyager-style Skill Curation MVP** (lib/learning/voyager/)
+  - Local-only skill proposal from Episodic patterns (minOccurrences >= 5)
+  - Iterative prompting template scaffolds
+  - Curriculum log (append-only JSONL)
+  - User-approval gated — never auto-register
+- **New skill**: `voyager-curation` — user-facing entry point for skill auto-curation loop
+- **`learning.hierarchicalMemory.rolloutStage: "phase-c"`** config field
+- **Migration guide**: docs/hierarchical-memory-migration.md — Phase C -> default-on path
+- **Voyager guide**: docs/voyager-curation-guide.md
+
+### Changed
+- `lib/runtime/middleware/memory.js` — Working store consumer when `enabled: true`
+- `memory-manager.js` — searchMemory dispatches to retriever when enabled
+- `learning.hierarchicalMemory.enabled` **remains false** in v3.3.0 (default-on flip planned for v3.4.0 after Phase C observation)
+
+### Fixed
+- `tests/hooks/runtime-prompt-effort-inject.test.js` — 2 flaky tests via (method FX1 will select: timer injection / async ordering)
+- `package.json` bin entry linter stripping — root cause identified, guard added
+
+### Compatibility
+- Zero public API changes — hierarchical memory still opt-in via `enabled: true` env/config
+- `searchMemory()`, `saveMemory()`, `getRelevantContext()` all preserve v3.1.x signatures
+- Phase C hooks are `beforeExit` registered only when `enabled: true`
+
+### Verification
+- npm test: (updated after team completion)
+- npm run lint: 0 errors, 0 warnings target
+- JSON validity: package / plugin / config all sync at 3.3.0
+
+---
+
 ## [3.2.0] - 2026-04-24
 
 ### Added
