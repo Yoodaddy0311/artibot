@@ -1,5 +1,5 @@
 {
-  "version": "3.1.0",
+  "version": "3.2.0",
   "agents": {
     "modelPolicy": {
       "high": {
@@ -750,6 +750,27 @@
       "enabled": true,
       "nightlyLearner": "3 2 * * *",
       "driftCheck": "7 6 * * 1"
+    },
+    "hierarchicalMemory": {
+      "enabled": false,
+      "workingTokenBudget": 200000,
+      "episodicRetentionDays": 180,
+      "semanticRetentionDays": -1,
+      "archiveAfterDays": 365,
+      "weights": {
+        "working": 0.50,
+        "episodic": 0.30,
+        "semantic": 0.20
+      },
+      "promotion": {
+        "minOccurrences": 3,
+        "confidenceFloor": 0.85,
+        "distinctSessions": 2
+      },
+      "demotion": {
+        "idleDays": 180,
+        "failureThreshold": 2
+      }
     }
   },
   "visual": {

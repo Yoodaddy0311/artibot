@@ -85,6 +85,32 @@ function printHelp() {
 //   - lines starting with "#" inside a block are preserved as comments
 // ---------------------------------------------------------------------------
 
+/**
+ * Consume consecutive "  - item" lines starting at `start` and return the
+ * collected items plus the next line index. Inline "# comment" suffixes are
+ * stripped; blank / commented lines inside the block are skipped.
+ */
+function readNestedArray(lines, start) {
+  const items = [];
+  let i = start;
+  while (i < lines.length) {
+    const sub = lines[i];
+    const itemMatch = sub.match(/^\s+-\s+(.*)$/);
+    if (itemMatch) {
+      const v = itemMatch[1].replace(/\s+#.*$/, "").trim().replace(/^["']|["']$/g, "");
+      if (v) items.push(v);
+      i++;
+      continue;
+    }
+    if (/^\s*#/.test(sub) || /^\s*$/.test(sub)) {
+      i++;
+      continue;
+    }
+    break;
+  }
+  return { items, nextIndex: i };
+}
+
 export function parseFrontmatter(src) {
   if (!src.startsWith("---")) return { frontmatter: {}, body: src };
   const endRel = src.slice(3).search(/\r?\n---/);
@@ -136,30 +162,9 @@ export function parseFrontmatter(src) {
 
     // Nested array follows (lines starting with "- " or "  - ")
     if (rest === "") {
-      const items = [];
-      i++;
-      while (i < lines.length) {
-        const sub = lines[i];
-        const itemMatch = sub.match(/^\s+-\s+(.*)$/);
-        if (itemMatch) {
-          // strip inline comments: "- Read   # comment"
-          const v = itemMatch[1].replace(/\s+#.*$/, "").trim().replace(/^["']|["']$/g, "");
-          if (v) items.push(v);
-          i++;
-          continue;
-        }
-        // comment / blank inside the array block
-        if (/^\s*#/.test(sub) || /^\s*$/.test(sub)) {
-          i++;
-          continue;
-        }
-        break;
-      }
-      if (items.length > 0) {
-        fm[key] = items;
-      } else {
-        fm[key] = "";
-      }
+      const { items, nextIndex } = readNestedArray(lines, i + 1);
+      fm[key] = items.length > 0 ? items : "";
+      i = nextIndex;
       continue;
     }
 
@@ -237,7 +242,10 @@ export function toKebabCase(s) {
  * Claude-specific.
  */
 export function stripTeamCollaboration(body, noteLines) {
-  const re = /^##\s+Team Collaboration[\s\S]*?(?=^##\s|\Z)/m;
+  // Match: "## Team Collaboration" heading + everything until the NEXT "## " h2
+  // heading OR end-of-string (whichever comes first). JS regex has no \Z anchor,
+  // so we handle EOF with an explicit alternation on $(?![\s\S]) .
+  const re = /^##\s+Team Collaboration[\s\S]*?(?=^##\s|$(?![\s\S]))/m;
   if (!re.test(body)) return body;
   const replacement = noteLines.map((l) => `<!-- ${l} -->`).join("\n") + "\n\n";
   return body.replace(re, replacement);

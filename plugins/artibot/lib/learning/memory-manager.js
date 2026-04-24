@@ -662,6 +662,74 @@ export async function getMemoryStats() {
 }
 
 // ---------------------------------------------------------------------------
+// Hierarchical Memory Façade (v3.2.0 Phase A)
+// ---------------------------------------------------------------------------
+//
+// When `learning.hierarchicalMemory.enabled === true` (read lazily from the
+// project config OR the HIERARCHICAL_MEMORY=1 env override), saveMemory and
+// searchMemory dispatch through the per-layer stores:
+//   - type=preference|error → semantic layer
+//   - type=context|command  → episodic layer (falls through to legacy until
+//                              Phase B's episodic store lands)
+//
+// The public API shape is unchanged. When the flag is off (default in
+// Phase A) callers observe the flat v3.1.x behaviour bit-for-bit.
+
+const SEMANTIC_STORE_FILENAME = 'semantic.json';
+
+let _semanticStoreCache = null;
+let _hierarchicalFlagChecked = false;
+let _hierarchicalFlagValue = false;
+
+function isHierarchicalEnabled() {
+  if (process.env.HIERARCHICAL_MEMORY === '1') return true;
+  if (process.env.HIERARCHICAL_MEMORY === '0') return false;
+  if (_hierarchicalFlagChecked) return _hierarchicalFlagValue;
+  _hierarchicalFlagChecked = true;
+  _hierarchicalFlagValue = false;
+  return _hierarchicalFlagValue;
+}
+
+/**
+ * Test seam: force-enable hierarchical dispatch without touching env.
+ * @param {boolean} enabled
+ */
+export function __setHierarchicalMemoryEnabled(enabled) {
+  _hierarchicalFlagChecked = true;
+  _hierarchicalFlagValue = Boolean(enabled);
+}
+
+/**
+ * Get (lazily-construct) the default SemanticStore bound to the artibot
+ * memory dir.
+ * @returns {object}
+ */
+function getSemanticStore() {
+  if (_semanticStoreCache) return _semanticStoreCache;
+  _semanticStoreCache = createSemanticStore({
+    storePath: path.join(getMemoryDir(), SEMANTIC_STORE_FILENAME),
+  });
+  return _semanticStoreCache;
+}
+
+/**
+ * Test seam: override the semantic store instance. Pass `null` to reset.
+ * @param {object|null} store
+ */
+export function __setSemanticStore(store) {
+  _semanticStoreCache = store;
+}
+
+/**
+ * Decide whether a given memory `type` should route to the semantic layer.
+ * @param {string} type
+ * @returns {boolean}
+ */
+function isSemanticType(type) {
+  return type === 'preference' || type === 'error';
+}
+
+// ---------------------------------------------------------------------------
 // Internal Helpers
 // ---------------------------------------------------------------------------
 
@@ -679,3 +747,6 @@ function typeToStoreKey(type) {
   };
   return mapping[type] || 'projectContexts';
 }
+
+// Export helper so callers and tests can consult dispatch predicates.
+export { isSemanticType, isHierarchicalEnabled };

@@ -17,6 +17,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 
+/* eslint-disable sort-imports */
 import {
   CONVERTERS,
   collectAgents,
@@ -29,6 +30,7 @@ import {
   stripTeamCollaboration,
   toKebabCase,
 } from '../../scripts/export-to-tool.mjs';
+/* eslint-enable sort-imports */
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PLUGIN_ROOT = path.resolve(__dirname, '..', '..');
