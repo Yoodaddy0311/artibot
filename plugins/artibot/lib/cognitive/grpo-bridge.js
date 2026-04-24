@@ -34,6 +34,15 @@ const DEFAULT_POLICY_PATH = path.join(
   'routing-policy-v1.json',
 );
 
+/** Default path to the skill trigger policy file (GRPO v3.5 §5.5). */
+const DEFAULT_SKILL_POLICY_PATH = path.join(
+  getHomeDir(),
+  '.claude',
+  'artibot',
+  'policies',
+  'skill-policy-v1.json',
+);
+
 /** TTL for routing-policy memoization (ms). */
 const POLICY_TTL_MS = 60_000;
 
