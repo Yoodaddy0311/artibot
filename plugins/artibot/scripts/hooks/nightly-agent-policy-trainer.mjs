@@ -32,7 +32,7 @@ import {
   createAgentPolicy,
   DEFAULTS,
 } from '../../lib/learning/grpo/agent-policy.js';
-import { readJsonFile, writeJsonFile, ensureDir } from '../../lib/core/file.js';
+import { ensureDir, readJsonFile, writeJsonFile } from '../../lib/core/file.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

@@ -584,10 +584,10 @@ export async function getAgentRecommendation(taskFamily, context = {}) {
   if (typeof taskFamily !== 'string' || taskFamily.length === 0) return fallback;
   try {
     const mod = await import('../learning/grpo/agent-policy.js');
-    const { getRecommendation } = mod;
+    const getAgentRec = mod.getRecommendation;
     const policy = await readAgentPolicy(context.policyPath ?? DEFAULT_AGENT_POLICY_PATH);
     const weights = policy?.weights ?? {};
-    const out = getRecommendation(weights, taskFamily, {
+    const out = getAgentRec(weights, taskFamily, {
       candidates: context.candidates,
       temperature: context.temperature,
       config: context.config,

@@ -30,16 +30,16 @@
  */
 
 import {
+  listSnapshots,
   loadPolicy,
+  resolvePolicyPaths,
   savePolicy,
   snapshot,
-  listSnapshots,
-  resolvePolicyPaths,
   writeRolledBackPolicy,
 } from './agent-policy-store.js';
 
 // Re-export persistence surface for external consumers (tests, bridge).
-export { loadPolicy, savePolicy, snapshot, listSnapshots, resolvePolicyPaths };
+export { listSnapshots, loadPolicy, resolvePolicyPaths, savePolicy, snapshot };
 
 // ---------------------------------------------------------------------------
 // Constants
