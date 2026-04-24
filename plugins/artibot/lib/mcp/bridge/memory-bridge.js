@@ -4,7 +4,9 @@
  *
  * All responses pass through `lib/core/redaction.js` before leaving this
  * module — the MCP surface must never emit raw secrets, paths, or emails.
- * The GENERIC pattern set is used (same sentinels downstream tests rely on).
+ * Both the GENERIC and TAGGED pattern sets are applied so that raw key
+ * prefixes (sk-, AIza, ghp_, Bearer, JWTs) are caught even when they are
+ * not paired with an `api_key=` / `token=` anchor.
  *
  * Design contract:
  *   - Zero runtime deps.
@@ -20,10 +22,31 @@
  * @module lib/mcp/bridge/memory-bridge
  */
 
-import { redactObject, redactString } from '../../core/redaction.js';
+import {
+  GENERIC_PATTERNS,
+  TAGGED_PATTERNS,
+  redactObject,
+  redactString,
+} from '../../core/redaction.js';
 
 const DEFAULT_SEARCH_LIMIT = 10;
 const MAX_SEARCH_LIMIT = 50;
+
+// Combined redaction pattern list — GENERIC_PATTERNS catch `api_key=…`
+// anchors, TAGGED_PATTERNS catch bare secret prefixes (sk-, AIza, ghp_…,
+// JWTs, Bearer tokens). Passing both in order is intentional.
+const STRICT_PATTERNS = Object.freeze([
+  ...GENERIC_PATTERNS,
+  ...TAGGED_PATTERNS,
+]);
+
+function strictRedactString(input) {
+  return redactString(input, { patterns: STRICT_PATTERNS });
+}
+
+function strictRedactObject(value) {
+  return redactObject(value, { patterns: STRICT_PATTERNS });
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -130,7 +153,7 @@ export function createMemoryBridge(deps = {}) {
 
   const redact = typeof deps.redactor === 'function'
     ? deps.redactor
-    : (value) => redactObject(value);
+    : strictRedactObject;
 
   async function getMemoryStats() {
     try {
@@ -176,7 +199,7 @@ export function createMemoryBridge(deps = {}) {
     if (typeof query !== 'string' || query.trim() === '') {
       return { ok: false, error: 'query required' };
     }
-    const safeQuery = redactString(query);
+    const safeQuery = strictRedactString(query);
     let limit = DEFAULT_SEARCH_LIMIT;
     if (Number.isFinite(args.limit) && args.limit > 0) {
       limit = Math.min(MAX_SEARCH_LIMIT, Math.floor(args.limit));
