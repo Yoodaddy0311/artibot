@@ -18,10 +18,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  computeImportanceScore,
   createWorkingStore,
   estimateEntryTokens,
   tallyEntryKinds,
-  computeImportanceScore,
   WORKING_CONSTANTS,
 } from '../../../lib/learning/memory/working.js';
 

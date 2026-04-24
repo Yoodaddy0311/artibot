@@ -753,6 +753,7 @@
     },
     "hierarchicalMemory": {
       "enabled": false,
+      "rolloutStage": "phase-c",
       "workingTokenBudget": 200000,
       "episodicRetentionDays": 180,
       "semanticRetentionDays": -1,

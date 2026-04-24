@@ -18,8 +18,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createWorkingStore } from '../../../lib/learning/memory/working.js';
 import {
-  onCompactionStart,
   onBeforeExit,
+  onCompactionStart,
   registerProcessHandlers,
 } from '../../../lib/learning/memory/working-compaction.js';
 
