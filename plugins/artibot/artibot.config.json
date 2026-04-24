@@ -1,5 +1,5 @@
 {
-  "version": "3.4.0",
+  "version": "3.5.0",
   "agents": {
     "modelPolicy": {
       "high": {
@@ -750,11 +750,13 @@
       "enabled": true,
       "nightlyLearner": "3 2 * * *",
       "driftCheck": "7 6 * * 1",
-      "nightlyGrpoTrainer": "30 2 * * *"
+      "nightlyGrpoTrainer": "30 2 * * *",
+      "nightlyAgentPolicyTrainer": "45 2 * * *",
+      "nightlySkillPolicyTrainer": "0 3 * * *"
     },
     "hierarchicalMemory": {
-      "enabled": false,
-      "rolloutStage": "phase-c",
+      "enabled": true,
+      "rolloutStage": "default-on",
       "workingTokenBudget": 200000,
       "episodicRetentionDays": 180,
       "semanticRetentionDays": -1,

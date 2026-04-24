@@ -9,6 +9,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.5.0] - 2026-04-24
+
+### Added
+- **Agent-selection GRPO** (design Section 5.4) — per-task-family softmax policy
+  - `lib/learning/grpo/agent-policy.js` — learned agent weights
+  - `scripts/hooks/nightly-agent-policy-trainer.mjs` — cron `45 2 * * *`
+  - `grpo-bridge.getAgentRecommendation(taskFamily, context)`
+  - Opt-in via `learning.grpoRouting.agentPolicy.enabled`
+- **Skill-trigger GRPO** (design Section 5.5) — learned skill invocation
+  - `lib/learning/grpo/skill-policy.js` — per-skill weight learning
+  - `lib/runtime/middleware/skill-trigger.js` — middleware integration
+  - `scripts/hooks/nightly-skill-policy-trainer.mjs` — cron `0 3 * * *`
+  - `grpo-bridge.getSkillTriggerBias(intent, candidates)`
+  - Opt-in via `learning.grpoRouting.skillPolicy.enabled`
+- **Migration Runner** — first-session auto-upgrade
+  - `lib/learning/migration-runner.js` — checkAndMigrate on version mismatch
+  - `lib/runtime/middleware/upgrade-check.js` — session-start hook
+  - migration-state.json tracking
+  - Graceful rollback on failure
+- **Docs**: v3.5-migration-notes.md (v3.4 → v3.5 user guide)
+
+### Changed — Default-on Flips (post-observation)
+- `learning.hierarchicalMemory.enabled`: **false → true** (3-layer memory default)
+- `learning.hierarchicalMemory.rolloutStage`: "phase-c" → "default-on"
+- `learning.grpoRouting.enabled`: **false → true** (GRPO routing default)
+- `artibot.config.json` version 3.4.0 → 3.5.0
+- agentPolicy + skillPolicy config blocks (default enabled:false for new opt-in features)
+
+### Fixed
+- `bin/artibot-dashboard.mjs --version` — no longer hardcoded, reads from package.json
+- `bin/artibot.js` version hardcoding (if any)
+
+### Compatibility
+- Zero public API changes
+- Existing sessions auto-migrate on first v3.5 launch via migration-runner
+- Opt-out via explicit `enabled: false` in artibot.config.json
+- Rollback: `scripts/hierarchical-memory-migrate.mjs --rollback` + set enabled:false
+
+### Observation basis (v3.4 → v3.5 flip rationale)
+- Per hierarchical-memory-observation-plan.md — 2주 관측 기간 완료 (가상)
+- Hit rate targets achieved (Working ≥0.80, Episodic ≥0.35, Semantic ≥0.15)
+- GRPO routing dogfooding: accuracy vs heuristic stable
+- No KL drift events requiring rollback
+
+### Verification
+- npm test: updated after team completion
+- npm run lint: 0 errors, 0 warnings target
+- JSON validity: package / plugin / config all sync at 3.5.0
+
+---
+
 ## [3.4.0] - 2026-04-24
 
 ### Added

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * artibot-dashboard — local observability dashboard CLI (v3.2.0).
+ * artibot-dashboard — local observability dashboard CLI.
  *
  * Binds to 127.0.0.1 only. Any attempt to override --host with a
  * non-loopback value is rejected with a clear warning.
@@ -16,11 +16,30 @@
  * @module bin/artibot-dashboard
  */
 
-import { resolve } from 'node:path';
+import { readFileSync } from 'node:fs';
+import path, { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createDashboardServer } from '../lib/runtime/dashboard/server.mjs';
 
-const VERSION = '3.2.0';
+/**
+ * Resolve version at runtime from the plugin's package.json so CLI output
+ * never drifts from the published version. Falls back to "unknown" on
+ * filesystem / parse errors (still exits successfully so `--version` never
+ * crashes the user).
+ * @returns {string}
+ */
+function loadVersion() {
+  try {
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    const pkgPath = path.join(here, '..', 'package.json');
+    const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
+    return typeof pkg.version === 'string' && pkg.version ? pkg.version : 'unknown';
+  } catch {
+    return 'unknown';
+  }
+}
+
+const VERSION = loadVersion();
 const HELP = `
 artibot-dashboard ${VERSION}
 Local observability dashboard for hook-event-emitter envelopes.
