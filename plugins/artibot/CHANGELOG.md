@@ -9,6 +9,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.9.0] - 2026-04-24
+
+### Added
+- **OTEL exporter** (opt-in, loopback-preferred)
+  - `lib/observability/otel-exporter.js` — OTLP HTTP JSON, zero deps
+  - `lib/runtime/middleware/otel-middleware.js` — emits spans + metrics
+  - Default disabled; explicit endpoint required; loopback warning for non-localhost
+  - Retry buffer to JSONL on export failure
+- **Multi-session dashboard** — new tab `multi-session.html`
+  - Sessions list (timestamp, duration, tool/token counts)
+  - Aggregates: Top 10 tools, error rate trend, token histogram
+  - `/api/sessions` + `/api/aggregates` endpoints added to dashboard server
+- **Session aggregator** (`lib/observability/session-aggregator.js`)
+  - Daily rollup to `runtime/session-rollups.json`
+  - 30-day prune (archive, never hard-delete)
+  - `scripts/hooks/nightly-session-rollup.mjs` cron `30 4 * * *`
+- **Session capture middleware** — binds SessionStart/End to aggregator
+
+### Changed
+- 3-file version sync: 3.9.0
+- Dashboard server routes: `/multi-session`, `/api/sessions`, `/api/aggregates`
+- Config: `observability.otel.*`, `observability.sessionCapture.enabled`, `schedule.nightlySessionRollup`
+
+### Compatibility
+- Zero public API changes
+- OTEL exporter opt-in (endpoint required)
+- Session capture default-on but non-invasive
+- Existing dashboard index.html unchanged (multi-session is additive)
+
+### Verification
+- All new tests passing
+- Dashboard routes smoke-tested
+- 3-file version sync at 3.9.0
+
+---
+
 ## [3.8.0] - 2026-04-24
 
 ### Added
