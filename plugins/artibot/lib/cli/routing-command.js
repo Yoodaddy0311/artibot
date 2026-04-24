@@ -12,7 +12,7 @@
  */
 
 import path from 'node:path';
-import { readFile, writeFile, copyFile, readdir } from 'node:fs/promises';
+import { copyFile, readdir, readFile, writeFile } from 'node:fs/promises';
 import { getHomeDir, getPluginRoot } from '../core/platform.js';
 import {
   getGrpoRoutingConfig,

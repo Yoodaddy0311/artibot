@@ -3,18 +3,18 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import {
-  getRoutingBias,
   getCachedRoutingBias,
+  getRoutingBias,
   primeRoutingBiasCache,
   resetRoutingBiasCache,
 } from '../../lib/cognitive/grpo-bridge.js';
 import {
-  applyGrpoBlending,
-  applyExploration,
-  routeWithPolicy,
-  isDeterministicEnv,
-  DEFAULT_BLEND_ALPHA,
   ALPHA_FLOOR,
+  applyExploration,
+  applyGrpoBlending,
+  DEFAULT_BLEND_ALPHA,
+  isDeterministicEnv,
+  routeWithPolicy,
 } from '../../lib/cognitive/grpo-routing.js';
 
 // ---------------------------------------------------------------------------
@@ -224,7 +224,7 @@ describe('grpo-bridge/getRoutingBias', () => {
   it('강한 양수 theta → p_s2 높음, confidence 높음', async () => {
     const strong = path.join(tmpDir, 'strong.json');
     // theta = [5,5,5,5,5,5,5,5,5,5], x·theta large positive
-    await writeFile(strong, JSON.stringify({ theta: Array(10).fill(5) }));
+    await writeFile(strong, JSON.stringify({ theta: Array(9).fill(5) }));
     const out = await getRoutingBias(
       { steps: 1, domains: 1, uncertainty: 1, risk: 1, novelty: 1 },
       { policyPath: strong },

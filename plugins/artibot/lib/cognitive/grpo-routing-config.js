@@ -57,6 +57,21 @@ export function resetGrpoRoutingConfigCache() {
 }
 
 /**
+ * Inject a raw config fragment into the memo for deterministic tests.
+ * The value is normalized + frozen; TTL is set to now. NEVER call this in
+ * production code paths — it exists purely so integration tests can toggle
+ * the `enabled` flag without mutating `artibot.config.json` on disk.
+ *
+ * @param {object|undefined} rawFragment - Raw `learning.grpoRouting` shape.
+ * @returns {object} the normalized value now in the cache
+ */
+export function __setCachedConfigForTests(rawFragment) {
+  const value = normalize(rawFragment);
+  _configCache = { loadedAt: Date.now(), value };
+  return value;
+}
+
+/**
  * Coerce a value to a finite number inside [min, max]; fallback on failure.
  * @param {unknown} value
  * @param {number} min
