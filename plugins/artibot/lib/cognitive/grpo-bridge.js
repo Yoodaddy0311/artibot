@@ -504,3 +504,102 @@ export async function getSkillTriggerBias(intent, candidates, options = {}) {
     return null;
   }
 }
+
+// ---------------------------------------------------------------------------
+// Agent-selection policy bridge (GRPO v3.5 §5.4)
+// ---------------------------------------------------------------------------
+
+/**
+ * Memoization cache for agent-policy reads. Same TTL as the other caches.
+ * @type {{ loadedAt: number|null, policy: object|null, policyPath: string }|null}
+ */
+let _agentPolicyCache = null;
+
+/**
+ * Reset the agent-policy memo. Exposed for test isolation.
+ * @returns {void}
+ */
+export function resetAgentPolicyCache() {
+  _agentPolicyCache = null;
+}
+
+/**
+ * Load the agent-selection policy JSON from disk, memoized for 60s.
+ * Returns `null` on missing/malformed file (caller falls back to baseline).
+ *
+ * @param {string} [policyPath]
+ * @returns {Promise<object|null>}
+ */
+async function readAgentPolicy(policyPath = DEFAULT_AGENT_POLICY_PATH) {
+  const now = Date.now();
+  if (
+    _agentPolicyCache
+    && _agentPolicyCache.policyPath === policyPath
+    && _agentPolicyCache.loadedAt !== null
+    && now - _agentPolicyCache.loadedAt < POLICY_TTL_MS
+  ) {
+    return _agentPolicyCache.policy;
+  }
+  try {
+    const raw = await readFile(policyPath, 'utf8');
+    const parsed = JSON.parse(raw);
+    _agentPolicyCache = { loadedAt: now, policy: parsed, policyPath };
+    return parsed;
+  } catch {
+    _agentPolicyCache = { loadedAt: now, policy: null, policyPath };
+    return null;
+  }
+}
+
+/**
+ * Recommend an agent for a task family using the learned softmax policy.
+ *
+ * Safe by construction:
+ *   - Never throws.
+ *   - Returns `{ recommendation: null, source: 'fallback' }` when no policy
+ *     file exists AND no baseline map was provided. The middleware should
+ *     fall back to `artibot.config.json`'s `agents.taskBased` map.
+ *   - When the family has insufficient learned evidence, returns the baseline
+ *     with `source = 'baseline'`.
+ *   - When learned, returns `source = 'policy'` + confidence + top-K alternatives.
+ *
+ * Memoized for 60s.
+ *
+ * @param {string} taskFamily
+ * @param {object} [context]
+ * @param {object} [context.config] - full artibot config for taskBased baseline
+ * @param {string[]} [context.candidates] - explicit candidate list override
+ * @param {number} [context.temperature=1.0]
+ * @param {number} [context.topK=3]
+ * @param {string} [context.policyPath]
+ * @returns {Promise<{
+ *   recommendation: string|null,
+ *   confidence: number,
+ *   source: 'policy'|'baseline'|'fallback',
+ *   alternatives: Array<{ agent: string, prob: number, weight: number }>,
+ * }>}
+ */
+export async function getAgentRecommendation(taskFamily, context = {}) {
+  const fallback = { recommendation: null, confidence: 0, source: 'fallback', alternatives: [] };
+  if (typeof taskFamily !== 'string' || taskFamily.length === 0) return fallback;
+  try {
+    const mod = await import('../learning/grpo/agent-policy.js');
+    const { getRecommendation } = mod;
+    const policy = await readAgentPolicy(context.policyPath ?? DEFAULT_AGENT_POLICY_PATH);
+    const weights = policy?.weights ?? {};
+    const out = getRecommendation(weights, taskFamily, {
+      candidates: context.candidates,
+      temperature: context.temperature,
+      config: context.config,
+      topK: context.topK,
+    });
+    return {
+      recommendation: out?.recommendation ?? null,
+      confidence: typeof out?.confidence === 'number' ? out.confidence : 0,
+      source: out?.source ?? 'fallback',
+      alternatives: Array.isArray(out?.alternatives) ? out.alternatives : [],
+    };
+  } catch {
+    return fallback;
+  }
+}
