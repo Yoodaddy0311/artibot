@@ -8,6 +8,7 @@
 import path from 'node:path';
 import { ensureDir, readJsonFile, writeJsonFile } from '../core/file.js';
 import { ARTIBOT_DIR } from '../core/config.js';
+import { createSemanticStore } from './memory/semantic.js';
 
 // ---------------------------------------------------------------------------
 // Constants

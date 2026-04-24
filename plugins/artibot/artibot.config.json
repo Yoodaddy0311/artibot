@@ -772,7 +772,7 @@
       "summarization"
     ],
     "effort": {
-      "injectPrompt": true,
+      "injectPrompt": false,
       "nativeApi": false,
       "budgetMap": {
         "xhigh": 128000,
@@ -836,7 +836,9 @@
       },
       "autoCleanup": {
         "enabled": true,
-        "tools": ["eslint-fix"],
+        "tools": [
+          "eslint-fix"
+        ],
         "maxFilesPerRun": 20
       },
       "autoSkillRegister": {
@@ -854,7 +856,11 @@
         "enabled": true,
         "autoMerge": false,
         "branchPrefix": "artibot/auto/",
-        "categories": ["drift", "security-fix", "test-flake"]
+        "categories": [
+          "drift",
+          "security-fix",
+          "test-flake"
+        ]
       },
       "autoWakeup": {
         "enabled": true,
@@ -891,7 +897,13 @@
       "enabled": true,
       "schedule": "0 4 * * 1",
       "reportPath": "_reports/self-benchmark.md",
-      "dimensions": ["evolved", "extensible", "productive", "universal", "quality"]
+      "dimensions": [
+        "evolved",
+        "extensible",
+        "productive",
+        "universal",
+        "quality"
+      ]
     },
     "macroLearning": {
       "enabled": true,

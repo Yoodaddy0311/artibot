@@ -6,7 +6,8 @@
   "type": "module",
   "main": "./lib/core/index.js",
   "bin": {
-    "artibot": "./bin/artibot.js"
+    "artibot": "./bin/artibot.js",
+    "artibot-dashboard": "./bin/artibot-dashboard.mjs"
   },
   "engines": {
     "node": ">=20.0.0"

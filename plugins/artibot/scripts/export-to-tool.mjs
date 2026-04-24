@@ -1,29 +1,25 @@
 #!/usr/bin/env node
 /**
- * export-to-tool.mjs — Cross-tool parity exporter (skeleton, v0.5.0).
+ * export-to-tool.mjs — Cross-tool parity exporter (v0.5.1).
  *
- * Reads Artibot's AGENTS.md + plugins/artibot/agents/ *.md source of truth
+ * Reads Artibot's source-of-truth agents under `plugins/artibot/agents/{name}.md`
  * and projects them into the format each supported tool expects.
  *
  * Supported --tool values:
- *   cursor   -> .cursor/rules/<agent>.mdc
- *   codex    -> AGENTS.md + .codex/agents/<agent>.md
- *   opencode -> .opencode/agents.json
+ *   cursor    -> <out>/{name}.mdc           Cursor Rules-for-AI file
+ *   codex     -> <out>/{name}.md            OpenAI Codex CLI agent spec
+ *   opencode  -> <out>/{name}.md            OpenCode agent markdown
  *
  * USAGE
- *   node plugins/artibot/scripts/export-to-tool.mjs --tool cursor   --out ./.cursor/rules/
- *   node plugins/artibot/scripts/export-to-tool.mjs --tool codex    --out ./
- *   node plugins/artibot/scripts/export-to-tool.mjs --tool opencode --out ./.opencode/
- *
- * STATUS
- *   v0.5.0 — CLI scaffold + agent enumeration only. Actual format conversion
- *            is intentionally stubbed (see TODO markers) and lands in v0.5.1.
+ *   node plugins/artibot/scripts/export-to-tool.mjs --tool cursor --out ./cursor-export/
+ *   node plugins/artibot/scripts/export-to-tool.mjs --tool codex --out ./codex-export/ --agents orchestrator,planner
+ *   node plugins/artibot/scripts/export-to-tool.mjs --tool opencode --out ./opencode-export/ --dry-run
  *
  * DATA POLICY
  *   Local-only. No network calls. No third-party forwarding.
  *
  * See: plugins/artibot/AGENTS.md  (conversion rules table)
- *      plugins/artibot/docs/mcp-2.0-integration.md
+ *      plugins/artibot/docs/cross-tool-export.md (user guide)
  */
 
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
@@ -35,12 +31,24 @@ const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const PLUGIN_ROOT = resolve(SCRIPT_DIR, "..");
 const AGENTS_DIR = join(PLUGIN_ROOT, "agents");
 
-function parseArgs(argv) {
-  const args = { tool: null, out: null };
+// ---------------------------------------------------------------------------
+// CLI parsing
+// ---------------------------------------------------------------------------
+
+export function parseArgs(argv) {
+  const args = {
+    tool: null,
+    out: null,
+    agents: null,
+    dryRun: false,
+    help: false,
+  };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--tool") args.tool = argv[++i];
     else if (a === "--out") args.out = argv[++i];
+    else if (a === "--agents") args.agents = argv[++i];
+    else if (a === "--dry-run") args.dryRun = true;
     else if (a === "--help" || a === "-h") args.help = true;
   }
   return args;
@@ -52,101 +60,367 @@ function printHelp() {
       "export-to-tool.mjs — Artibot cross-tool exporter",
       "",
       "Usage:",
-      "  node export-to-tool.mjs --tool <cursor|codex|opencode> --out <dir>",
+      "  node export-to-tool.mjs --tool <cursor|codex|opencode> --out <dir> [options]",
       "",
-      "Flags:",
-      "  --tool   Target tool (required)",
-      "  --out    Output directory (required)",
-      "  --help   Show this help",
+      "Required:",
+      "  --tool      Target tool: cursor, codex, opencode",
+      "  --out       Output directory (created if missing)",
+      "",
+      "Options:",
+      "  --agents    Comma-separated subset (default: all discovered agents)",
+      "  --dry-run   Convert only; do not write files (summary to stderr)",
+      "  --help      Show this help",
       "",
     ].join("\n")
   );
 }
 
-/** Minimal frontmatter parser — avoids external deps (Artibot is zero-runtime-dep). */
-function parseFrontmatter(src) {
+// ---------------------------------------------------------------------------
+// Frontmatter parser (minimal YAML subset used in agent files)
+// Handles:
+//   - key: value  (scalar)
+//   - key: |      (multi-line block scalar, joined by newlines)
+//   - key:        (followed by "- item" lines -> array)
+//   - key: [a, b] (inline array)
+//   - lines starting with "#" inside a block are preserved as comments
+// ---------------------------------------------------------------------------
+
+export function parseFrontmatter(src) {
   if (!src.startsWith("---")) return { frontmatter: {}, body: src };
-  const end = src.indexOf("\n---", 3);
-  if (end === -1) return { frontmatter: {}, body: src };
-  const raw = src.slice(3, end).trim();
-  const body = src.slice(end + 4).replace(/^\n/, "");
+  const endRel = src.slice(3).search(/\r?\n---/);
+  if (endRel === -1) return { frontmatter: {}, body: src };
+  const end = 3 + endRel;
+  const raw = src.slice(3, end).replace(/^\r?\n/, "");
+  const afterDelim = src.slice(end).replace(/^\r?\n---/, "");
+  const body = afterDelim.replace(/^\r?\n/, "");
+
   const fm = {};
-  for (const line of raw.split(/\r?\n/)) {
-    const m = line.match(/^([A-Za-z0-9_-]+):\s*(.*)$/);
-    if (!m) continue;
-    const [, key, value] = m;
-    fm[key] = value.trim();
+  const lines = raw.split(/\r?\n/);
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    // skip blanks and comments at top level
+    if (/^\s*$/.test(line) || /^\s*#/.test(line)) {
+      i++;
+      continue;
+    }
+    const keyMatch = line.match(/^([A-Za-z0-9_-]+):\s*(.*)$/);
+    if (!keyMatch) {
+      i++;
+      continue;
+    }
+    const [, key, rest] = keyMatch;
+
+    // Inline array: key: [a, b, c]
+    const inlineArr = rest.match(/^\[(.*)\]$/);
+    if (inlineArr) {
+      fm[key] = inlineArr[1]
+        .split(",")
+        .map((s) => s.trim().replace(/^["']|["']$/g, ""))
+        .filter(Boolean);
+      i++;
+      continue;
+    }
+
+    // Block scalar: key: |  or key: >
+    if (rest === "|" || rest === ">") {
+      const collected = [];
+      i++;
+      while (i < lines.length && /^(\s{2,}|\t)/.test(lines[i])) {
+        collected.push(lines[i].replace(/^(\s{2}|\t)/, ""));
+        i++;
+      }
+      fm[key] = collected.join("\n").trim();
+      continue;
+    }
+
+    // Nested array follows (lines starting with "- " or "  - ")
+    if (rest === "") {
+      const items = [];
+      i++;
+      while (i < lines.length) {
+        const sub = lines[i];
+        const itemMatch = sub.match(/^\s+-\s+(.*)$/);
+        if (itemMatch) {
+          // strip inline comments: "- Read   # comment"
+          const v = itemMatch[1].replace(/\s+#.*$/, "").trim().replace(/^["']|["']$/g, "");
+          if (v) items.push(v);
+          i++;
+          continue;
+        }
+        // comment / blank inside the array block
+        if (/^\s*#/.test(sub) || /^\s*$/.test(sub)) {
+          i++;
+          continue;
+        }
+        break;
+      }
+      if (items.length > 0) {
+        fm[key] = items;
+      } else {
+        fm[key] = "";
+      }
+      continue;
+    }
+
+    // Plain scalar
+    fm[key] = rest.trim().replace(/^["']|["']$/g, "");
+    i++;
   }
   return { frontmatter: fm, body };
 }
 
-async function collectAgents() {
+// ---------------------------------------------------------------------------
+// Agent discovery
+// ---------------------------------------------------------------------------
+
+export async function collectAgents(dir = AGENTS_DIR, filter = null) {
   let entries;
   try {
-    entries = await readdir(AGENTS_DIR);
+    entries = await readdir(dir);
   } catch (err) {
-    process.stderr.write(`[export] cannot read ${AGENTS_DIR}: ${err.message}\n`);
-    return [];
+    throw new Error(`cannot read agents dir ${dir}: ${err.message}`);
   }
+  const filterSet = filter ? new Set(filter.split(",").map((s) => s.trim()).filter(Boolean)) : null;
   const out = [];
   for (const file of entries) {
     if (!file.endsWith(".md")) continue;
-    const full = join(AGENTS_DIR, file);
+    if (file === "INDEX.md") continue;
+    const name = basename(file, ".md");
+    if (filterSet && !filterSet.has(name)) continue;
+    const full = join(dir, file);
     const src = await readFile(full, "utf8");
     const { frontmatter, body } = parseFrontmatter(src);
     out.push({
       file,
-      name: frontmatter.name || basename(file, ".md"),
+      path: full,
+      name: frontmatter.name || name,
       description: frontmatter.description || "",
       model: frontmatter.model || "opus",
+      modelTier: frontmatter.modelTier || "",
       category: frontmatter.category || "",
+      tools: Array.isArray(frontmatter.tools) ? frontmatter.tools : [],
+      permissionMode: frontmatter.permissionMode || "",
+      maxTurns: frontmatter.maxTurns || "",
+      skills: Array.isArray(frontmatter.skills) ? frontmatter.skills : [],
+      frontmatter,
       body,
     });
+  }
+  if (filterSet) {
+    // Verify requested agents were found
+    const foundNames = new Set(out.map((a) => a.name));
+    for (const wanted of filterSet) {
+      if (!foundNames.has(wanted)) {
+        throw new Error(`agent not found: ${wanted}`);
+      }
+    }
   }
   return out;
 }
 
-// TODO(v0.5.1): implement full .mdc emission with globs + alwaysApply.
-async function exportCursor(agents, outDir) {
-  await mkdir(outDir, { recursive: true });
-  for (const a of agents) {
-    const mdc = `---\ndescription: ${a.description}\nalwaysApply: false\n---\n\n${a.body}`;
-    await writeFile(join(outDir, `${a.name}.mdc`), mdc, "utf8");
+// ---------------------------------------------------------------------------
+// Helpers: kebab-case, comment block, body transforms
+// ---------------------------------------------------------------------------
+
+export function toKebabCase(s) {
+  return String(s)
+    .replace(/([a-z0-9])([A-Z])/g, "$1-$2")
+    .replace(/[\s_]+/g, "-")
+    .toLowerCase();
+}
+
+/**
+ * Replace a "## Team Collaboration" section (and its body until the next "## "
+ * heading or EOF) with a disclaimer comment block. Used by codex/opencode
+ * since the Claude Code Agent Teams API (TaskCreate/SendMessage etc.) is
+ * Claude-specific.
+ */
+export function stripTeamCollaboration(body, noteLines) {
+  const re = /^##\s+Team Collaboration[\s\S]*?(?=^##\s|\Z)/m;
+  if (!re.test(body)) return body;
+  const replacement = noteLines.map((l) => `<!-- ${l} -->`).join("\n") + "\n\n";
+  return body.replace(re, replacement);
+}
+
+// ---------------------------------------------------------------------------
+// Cursor converter
+// Target: .cursor/rules/<name>.mdc
+//   - frontmatter: description + alwaysApply + globs
+//   - body preserved; tools list prepended as HTML comment for reference
+// ---------------------------------------------------------------------------
+
+export function convertCursor(agent) {
+  const fileName = `${toKebabCase(agent.name)}.mdc`;
+  const descEscaped = String(agent.description).replace(/\n/g, " ").replace(/"/g, '\\"');
+  const fmLines = [
+    "---",
+    `description: "${descEscaped}"`,
+    `globs: ["**/*"]`,
+    "alwaysApply: false",
+    "---",
+    "",
+  ];
+  const toolsNote = agent.tools.length
+    ? `<!-- Artibot source tools: ${agent.tools.join(", ")} -->`
+    : "<!-- Artibot source tools: (none declared) -->";
+  const modelNote = agent.model
+    ? `<!-- Artibot source model hint: ${agent.model}${agent.modelTier ? ` (${agent.modelTier})` : ""} -->`
+    : "";
+  const header = [toolsNote, modelNote].filter(Boolean).join("\n");
+  const content = `${fmLines.join("\n")}${header}\n\n${agent.body.trimEnd()}\n`;
+  return { fileName, content };
+}
+
+// ---------------------------------------------------------------------------
+// Codex converter
+// Target: <out>/<name>.md (user will drop into ~/.codex/agents/)
+//   - YAML frontmatter: name, description, model, tools
+//   - Claude-specific fields preserved as HTML comments
+//   - Team Collaboration section replaced with disclaimer
+// ---------------------------------------------------------------------------
+
+export function convertCodex(agent) {
+  const fileName = `${toKebabCase(agent.name)}.md`;
+  const description = String(agent.description).replace(/\n/g, " ").trim();
+
+  const fmLines = ["---"];
+  fmLines.push(`name: ${agent.name}`);
+  fmLines.push(`description: "${description.replace(/"/g, '\\"')}"`);
+  if (agent.model) fmLines.push(`model: ${agent.model}`);
+  if (agent.tools.length) {
+    fmLines.push("tools:");
+    for (const t of agent.tools) fmLines.push(`  - ${t}`);
   }
-  return agents.length;
+  fmLines.push("---");
+
+  const claudeSpecificComments = [];
+  if (agent.modelTier) claudeSpecificComments.push(`Claude-specific: modelTier=${agent.modelTier}`);
+  if (agent.permissionMode) claudeSpecificComments.push(`Claude-specific: permissionMode=${agent.permissionMode}`);
+  if (agent.maxTurns) claudeSpecificComments.push(`Claude-specific: maxTurns=${agent.maxTurns}`);
+  if (agent.skills.length) claudeSpecificComments.push(`Claude-specific: skills=${agent.skills.join(", ")}`);
+
+  const commentBlock = claudeSpecificComments.length
+    ? claudeSpecificComments.map((c) => `<!-- ${c} -->`).join("\n") + "\n"
+    : "";
+
+  const transformedBody = stripTeamCollaboration(agent.body, [
+    "Claude Code Teams API (TeamCreate/SendMessage/TaskCreate) — not supported in Codex.",
+    "Fallback: sequential subagent spawn; see plugins/artibot/AGENTS.md §4.",
+  ]);
+
+  const content = `${fmLines.join("\n")}\n\n${commentBlock}${transformedBody.trimEnd()}\n`;
+  return { fileName, content };
 }
 
-// TODO(v0.5.1): emit combined AGENTS.md index + per-agent body under .codex/agents/.
-async function exportCodex(agents, outDir) {
-  await mkdir(outDir, { recursive: true });
-  const sections = agents.map(
-    (a) =>
-      `## ${a.name}\n\n**Model:** ${a.model}  \n**Category:** ${a.category}\n\n${a.description}\n\n${a.body}`
-  );
-  const index = `# Artibot Agents (Codex export)\n\n${sections.join("\n\n---\n\n")}\n`;
-  await writeFile(join(outDir, "AGENTS.md"), index, "utf8");
-  return agents.length;
+// ---------------------------------------------------------------------------
+// OpenCode converter
+// Target: .opencode/agents/<name>.md
+//   - Minimal frontmatter: name, description, tools
+//   - Other Claude fields tucked into HTML comment
+// ---------------------------------------------------------------------------
+
+export function convertOpenCode(agent) {
+  const fileName = `${toKebabCase(agent.name)}.md`;
+  const description = String(agent.description).replace(/\n/g, " ").trim();
+
+  const fmLines = ["---"];
+  fmLines.push(`name: ${agent.name}`);
+  fmLines.push(`description: "${description.replace(/"/g, '\\"')}"`);
+  if (agent.tools.length) {
+    fmLines.push("tools:");
+    for (const t of agent.tools) fmLines.push(`  - ${t}`);
+  }
+  fmLines.push("---");
+
+  const hiddenMeta = [];
+  if (agent.model) hiddenMeta.push(`model=${agent.model}`);
+  if (agent.modelTier) hiddenMeta.push(`modelTier=${agent.modelTier}`);
+  if (agent.category) hiddenMeta.push(`category=${agent.category}`);
+  if (agent.permissionMode) hiddenMeta.push(`permissionMode=${agent.permissionMode}`);
+  if (agent.maxTurns) hiddenMeta.push(`maxTurns=${agent.maxTurns}`);
+  if (agent.skills.length) hiddenMeta.push(`skills=${agent.skills.join(", ")}`);
+
+  const metaBlock = hiddenMeta.length
+    ? `<!-- artibot-meta: ${hiddenMeta.join("; ")} -->\n`
+    : "";
+
+  const transformedBody = stripTeamCollaboration(agent.body, [
+    "Team Collaboration section removed — OpenCode does not support Claude Agent Teams API.",
+  ]);
+
+  const content = `${fmLines.join("\n")}\n\n${metaBlock}${transformedBody.trimEnd()}\n`;
+  return { fileName, content };
 }
 
-// TODO(v0.5.1): richer schema (tools[], permissions) and JSON schema validation.
-async function exportOpenCode(agents, outDir) {
-  await mkdir(outDir, { recursive: true });
-  const payload = agents.map((a) => ({
-    name: a.name,
-    description: a.description,
-    model: a.model,
-    category: a.category,
-    systemPrompt: a.body,
-  }));
-  await writeFile(join(outDir, "agents.json"), JSON.stringify(payload, null, 2), "utf8");
-  return agents.length;
+// ---------------------------------------------------------------------------
+// Converter registry
+// ---------------------------------------------------------------------------
+
+export const CONVERTERS = {
+  cursor: convertCursor,
+  codex: convertCodex,
+  opencode: convertOpenCode,
+};
+
+// ---------------------------------------------------------------------------
+// Orchestrator: run conversion, optionally write
+// ---------------------------------------------------------------------------
+
+export async function runExport({ tool, out, agents, dryRun }, agentsDir = AGENTS_DIR) {
+  if (!SUPPORTED_TOOLS.has(tool)) {
+    throw new Error(`unsupported tool: ${tool} (supported: ${[...SUPPORTED_TOOLS].join(", ")})`);
+  }
+  const converter = CONVERTERS[tool];
+  const collected = await collectAgents(agentsDir, agents);
+  if (collected.length === 0) {
+    throw new Error(`no agents discovered under ${agentsDir}`);
+  }
+
+  const results = collected.map((a) => ({ agent: a, ...converter(a) }));
+
+  if (!dryRun) {
+    if (!out) throw new Error("--out is required unless --dry-run is specified");
+    const absOut = resolve(out);
+    try {
+      await mkdir(absOut, { recursive: true });
+    } catch (err) {
+      throw new Error(`output dir creation failed: ${absOut}: ${err.message}`);
+    }
+    for (const r of results) {
+      const target = join(absOut, r.fileName);
+      await writeFile(target, r.content, "utf8");
+    }
+  }
+
+  return {
+    tool,
+    out: out ? resolve(out) : null,
+    dryRun: Boolean(dryRun),
+    agentCount: collected.length,
+    files: results.map((r) => ({ name: r.agent.name, fileName: r.fileName, bytes: Buffer.byteLength(r.content, "utf8") })),
+  };
 }
+
+// ---------------------------------------------------------------------------
+// CLI entrypoint
+// ---------------------------------------------------------------------------
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  if (args.help || !args.tool || !args.out) {
+  if (args.help) {
     printHelp();
-    process.exit(args.help ? 0 : 1);
+    process.exit(0);
+  }
+  if (!args.tool) {
+    process.stderr.write("[export] --tool is required\n");
+    printHelp();
+    process.exit(1);
+  }
+  if (!args.out && !args.dryRun) {
+    process.stderr.write("[export] --out is required (or use --dry-run)\n");
+    printHelp();
+    process.exit(1);
   }
   if (!SUPPORTED_TOOLS.has(args.tool)) {
     process.stderr.write(
@@ -155,23 +429,30 @@ async function main() {
     process.exit(2);
   }
 
-  const agents = await collectAgents();
-  if (agents.length === 0) {
-    process.stderr.write(`[export] no agents discovered under ${AGENTS_DIR}\n`);
+  try {
+    const summary = await runExport(args);
+    const mode = summary.dryRun ? "dry-run" : "written";
+    process.stderr.write(
+      `[export] tool=${summary.tool} agents=${summary.agentCount} mode=${mode}` +
+        (summary.out ? ` out=${summary.out}` : "") +
+        "\n"
+    );
+    for (const f of summary.files) {
+      process.stderr.write(`[export]   ${f.name} -> ${f.fileName} (${f.bytes}B)\n`);
+    }
+    process.exit(0);
+  } catch (err) {
+    process.stderr.write(`[export] error: ${err.message}\n`);
     process.exit(3);
   }
-
-  let written = 0;
-  if (args.tool === "cursor") written = await exportCursor(agents, resolve(args.out));
-  else if (args.tool === "codex") written = await exportCodex(agents, resolve(args.out));
-  else if (args.tool === "opencode") written = await exportOpenCode(agents, resolve(args.out));
-
-  process.stderr.write(
-    `[export] tool=${args.tool} agents=${agents.length} written=${written} out=${resolve(args.out)}\n`
-  );
 }
 
-main().catch((err) => {
-  process.stderr.write(`[export] fatal: ${err.stack || err.message}\n`);
-  process.exit(99);
-});
+// Only run main() when invoked directly (not when imported by tests)
+const invokedPath = process.argv[1] ? resolve(process.argv[1]) : "";
+const thisPath = fileURLToPath(import.meta.url);
+if (invokedPath === thisPath) {
+  main().catch((err) => {
+    process.stderr.write(`[export] fatal: ${err.stack || err.message}\n`);
+    process.exit(99);
+  });
+}
