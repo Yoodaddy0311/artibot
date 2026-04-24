@@ -105,14 +105,20 @@ function attachMemoryContextToPrompt(state, relevant, hitCount, workingLines) {
 }
 
 function setMemorySuccessState(state, relevant, hitCount, workingLines) {
+  const workingHits = workingLines?.length || 0;
   state.context.memory = {
     enabled: true,
     hitCount,
-    workingHits: workingLines?.length || 0,
+    workingHits,
     relevant,
   };
   attachMemoryContextToPrompt(state, relevant, hitCount, workingLines);
-  state.messageParts.push(`memory=${hitCount}+L1:${workingLines?.length || 0}`);
+  // Preserve v3.1 wire format when L1 is inactive (zero hits AND no working
+  // lines) — existing tests assert exact `memory=N` strings.
+  const msg = workingHits > 0
+    ? `memory=${hitCount}+L1:${workingHits}`
+    : `memory=${hitCount}`;
+  state.messageParts.push(msg);
 }
 
 function setMemoryErrorState(state, error) {

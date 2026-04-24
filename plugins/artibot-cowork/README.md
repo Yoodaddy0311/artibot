@@ -73,9 +73,32 @@ Add the parent `artibot` repository as a marketplace, then install `artibot-cowo
 
 ## Versioning
 
-**New in v0.3.0**: Long-form writing pack — blog deep-dives, case studies, columns, thought leadership, interviews.
+**New in v0.4.0** — "From library to pipeline." The 0.3.0 writing skills are now wired into an end-to-end content pipeline with specialist agents, AEO/GEO tooling, and executable quality rubrics.
 
-New skills:
+New orchestration & tooling:
+
+| Addition | Purpose |
+|----------|---------|
+| `content-pipeline` skill | 5-stage orchestration (persona → brief → outline → draft → review → publish) with explicit handoff contracts |
+| `schema-generator` skill | Emits JSON-LD (`Article`/`FAQPage`/`HowTo`/`QAPage`), `<meta>` tags, and citable-passage markers from finished drafts |
+| `long-form-writer` agent (Sonnet) | Specialist owning pipeline stages 3-4; self-scores via long-form-quality rubric, maxTurns=30 |
+| `case-study-writer` agent (Sonnet) | Specialist for 5-block case studies with quote-approval workflow |
+| Smoke test suite | 3 fictional briefs + writing-pack.test.md covering frontmatter, triggers, dependency graph, allow-lists |
+| Samples gallery | 6 publish-grade reference outputs (one per writing skill) |
+| Release scripts | `release-lock.js` + `release.js` + RELEASE.md SOP — version parity gate across plugin.json / package.json / CHANGELOG.md |
+| Token budget audit | `_reports/token-budget-audit-2026-04-24.md` with per-skill footprints |
+
+Changed:
+
+- `content-marketer` agent rewired — 11 skills, new **Specialist Delegation** section routing to `long-form-writer` / `case-study-writer`; `content-pipeline` + `schema-generator` added to allow-list.
+- 6 writing SKILL.md frontmatters now declare explicit `depends_on` / `suggests` graphs for dependency-aware skill loading.
+- Zero breaking changes — all v0.3.0 APIs preserved; new skills opt-in via trigger words or explicit invocation.
+
+---
+
+**v0.3.0**: Long-form writing pack — blog deep-dives, case studies, columns, thought leadership, interviews.
+
+Skills added:
 
 | Skill | Purpose |
 |-------|---------|
@@ -86,7 +109,7 @@ New skills:
 | `interview-storytelling` | Q&A-to-feature conversions preserving voice while shaping narrative |
 | `voice-reference` | Voice calibration scaffold — stores past writing samples to anchor tone consistency across long-form, case study, column, thought leadership, and interview outputs |
 
-New references:
+References added:
 
 | Reference | Purpose |
 |-----------|---------|

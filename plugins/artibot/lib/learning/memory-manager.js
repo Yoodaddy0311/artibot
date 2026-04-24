@@ -8,9 +8,7 @@
 import path from 'node:path';
 import { ensureDir, readJsonFile, writeJsonFile } from '../core/file.js';
 import { ARTIBOT_DIR } from '../core/config.js';
-import { createSemanticStore } from './memory/semantic.js';
-import { createEpisodicStore } from './memory/episodic.js';
-import { createRetriever } from './memory/retriever.js';
+import { createMemoryDispatcher } from './memory/dispatch.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -689,14 +687,14 @@ export async function getMemoryStats() {
 // The public API shape is unchanged. When the flag is off (default in
 // Phase A) callers observe the flat v3.1.x behaviour bit-for-bit.
 
-const SEMANTIC_STORE_FILENAME = 'semantic.json';
-const EPISODIC_STORE_DIRNAME = 'episodic';
+// Dispatcher singleton — owns all 3-layer wiring (semantic/episodic/working
+// stores + retriever). Kept external so memory-manager.js stays under 800
+// lines and test seams are centralised.
+const _dispatcher = createMemoryDispatcher({
+  getMemoryDir,
+  typeToStoreKey,
+});
 
-let _semanticStoreCache = null;
-let _episodicStoreCache = null;
-let _retrieverCache = null;
-let _workingStoreOverride = null;
-let _retrieverConfigOverride = null;
 let _hierarchicalFlagChecked = false;
 let _hierarchicalFlagValue = false;
 
@@ -718,162 +716,15 @@ export function __setHierarchicalMemoryEnabled(enabled) {
   _hierarchicalFlagValue = Boolean(enabled);
 }
 
-/**
- * Get (lazily-construct) the default SemanticStore bound to the artibot
- * memory dir.
- * @returns {object}
- */
-function getSemanticStore() {
-  if (_semanticStoreCache) return _semanticStoreCache;
-  _semanticStoreCache = createSemanticStore({
-    storePath: path.join(getMemoryDir(), SEMANTIC_STORE_FILENAME),
-  });
-  return _semanticStoreCache;
-}
+const getSemanticStore = () => _dispatcher.getSemanticStore();
+const getEpisodicStore = () => _dispatcher.getEpisodicStore();
+const searchMemoryHierarchical = (q, o) => _dispatcher.searchMemoryHierarchical(q, o);
 
-/**
- * Test seam: override the semantic store instance. Pass `null` to reset.
- * @param {object|null} store
- */
-export function __setSemanticStore(store) {
-  _semanticStoreCache = store;
-  _retrieverCache = null;
-}
-
-/**
- * Lazily construct the default EpisodicStore under the artibot memory dir.
- * @returns {object}
- */
-function getEpisodicStore() {
-  if (_episodicStoreCache) return _episodicStoreCache;
-  _episodicStoreCache = createEpisodicStore({
-    storePath: path.join(getMemoryDir(), EPISODIC_STORE_DIRNAME),
-  });
-  return _episodicStoreCache;
-}
-
-/**
- * Test seam: override the episodic store instance. Pass `null` to reset.
- * @param {object|null} store
- */
-export function __setEpisodicStore(store) {
-  _episodicStoreCache = store;
-  _retrieverCache = null;
-}
-
-/**
- * Test seam: inject a working store (WC1-owned).
- * Import path is wrapped in try/catch at call time so we remain compatible
- * before `lib/learning/memory/working.js` lands.
- * @param {object|null} store
- */
-export function __setWorkingStore(store) {
-  _workingStoreOverride = store ?? null;
-  _retrieverCache = null;
-}
-
-/**
- * Attempt to load the optional working store module. Swallows the ENOENT
- * until WC1 ships `lib/learning/memory/working.js`.
- * @returns {Promise<object|null>}
- */
-async function tryLoadWorkingStore() {
-  if (_workingStoreOverride) return _workingStoreOverride;
-  try {
-    const mod = await import('./memory/working.js');
-    if (mod && typeof mod.createWorkingStore === 'function') {
-      return mod.createWorkingStore();
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Test seam: override retriever config (mainly `weights`).
- * @param {object|null} cfg
- */
-export function __setRetrieverConfig(cfg) {
-  _retrieverConfigOverride = cfg ?? null;
-  _retrieverCache = null;
-}
-
-/**
- * Test seam: swap the retriever instance.
- * @param {object|null} retriever
- */
-export function __setRetriever(retriever) {
-  _retrieverCache = retriever;
-}
-
-/**
- * Lazily create a retriever bound to the active semantic + episodic stores.
- * Called at first dispatch of a hierarchical searchMemory.
- * @returns {Promise<object>}
- */
-async function getOrCreateRetriever() {
-  if (_retrieverCache) return _retrieverCache;
-  const workingStore = await tryLoadWorkingStore();
-  _retrieverCache = createRetriever({
-    workingStore,
-    episodicStore: getEpisodicStore(),
-    semanticStore: getSemanticStore(),
-    config: _retrieverConfigOverride ?? undefined,
-  });
-  return _retrieverCache;
-}
-
-/**
- * Hierarchical dispatch: shape retriever output into the legacy
- * `{entry, score, store}` tuple array expected by callers. Returns `null`
- * when the retriever cannot satisfy the request (e.g., empty query); the
- * caller then falls through to the flat implementation below.
- *
- * @param {string} query
- * @param {object} options
- * @returns {Promise<Array<{entry: object, score: number, store: string, layer: string}>|null>}
- */
-async function searchMemoryHierarchical(query, options) {
-  try {
-    const retriever = await getOrCreateRetriever();
-    const res = await retriever.search(query, { limit: options.limit ?? 10 });
-    if (!res || !Array.isArray(res.results)) return null;
-    const threshold = typeof options.threshold === 'number' ? options.threshold : 0;
-    const typeFilter = Array.isArray(options.types) && options.types.length > 0
-      ? new Set(options.types.map((t) => typeToStoreKey(t)))
-      : null;
-    const mapped = res.results
-      .filter((r) => r.score >= threshold)
-      .map((r) => ({
-        entry: r.entry,
-        score: r.score,
-        store: inferStoreKey(r),
-        layer: r.layer,
-      }))
-      .filter((r) => (typeFilter ? typeFilter.has(r.store) : true));
-    return mapped;
-  } catch {
-    // Fall back to flat on any unexpected failure.
-    return null;
-  }
-}
-
-/**
- * Map a retriever hit back to one of the 4 legacy store keys for
- * backward-compat with `getRelevantContext`.
- * @param {{entry: object, layer: string}} hit
- * @returns {string}
- */
-function inferStoreKey(hit) {
-  if (hit.layer === 'working') return 'workingLayer';
-  if (hit.layer === 'episodic') return 'projectContexts';
-  const t = hit.entry?.type;
-  if (t === 'error') return 'errorPatterns';
-  if (t === 'command') return 'commandHistory';
-  if (t === 'context') return 'projectContexts';
-  return 'userPreferences';
-}
+export const __setSemanticStore = (store) => _dispatcher.__setSemanticStore(store);
+export const __setEpisodicStore = (store) => _dispatcher.__setEpisodicStore(store);
+export const __setWorkingStore = (store) => _dispatcher.__setWorkingStore(store);
+export const __setRetriever = (r) => _dispatcher.__setRetriever(r);
+export const __setRetrieverConfig = (cfg) => _dispatcher.__setRetrieverConfig(cfg);
 
 /**
  * Decide whether a given memory `type` should route to the semantic layer.

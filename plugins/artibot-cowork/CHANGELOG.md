@@ -21,7 +21,7 @@ Planned work targeted at `0.5.0+`:
 
 ---
 
-## [0.4.0] - 2026-04-24 (in-progress)
+## [0.4.0] - 2026-04-24
 
 Release theme: **"From library to pipeline."** 0.3.0 shipped the writing skills as
 isolated assets; 0.4.0 wires them into an end-to-end content pipeline with specialist
