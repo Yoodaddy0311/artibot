@@ -55,10 +55,35 @@ for (const [name, expected] of Object.entries(REQUIRED_BIN)) {
   }
 }
 
+/**
+ * Lint-like guard: bin entry CLIs must not hardcode a semver literal into a
+ * `VERSION` constant. They should read `package.json` at runtime so
+ * `--version` output can never drift from the published version.
+ *
+ * Pattern flagged: `const VERSION = '3.2.0'` (single- or double-quoted,
+ * optional `let`/`var`, optional whitespace). Version strings inside
+ * comments, URLs, or string templates are not flagged.
+ */
+const HARDCODED_VERSION_RE =
+  /(?:const|let|var)\s+VERSION\s*=\s*['"]\d+\.\d+\.\d+(?:-[\w.-]+)?['"]/;
+
+for (const [name, target] of Object.entries(REQUIRED_BIN)) {
+  const binPath = path.join(PLUGIN_ROOT, target);
+  if (!existsSync(binPath)) continue; // already reported above
+  const src = readFileSync(binPath, 'utf-8');
+  if (HARDCODED_VERSION_RE.test(src)) {
+    errors.push(
+      `Bin "${name}" has hardcoded VERSION literal — read from package.json instead (${target})`
+    );
+  }
+}
+
 if (errors.length > 0) {
   console.error('[validate-bin] Failed:');
   for (const e of errors) console.error(`  - ${e}`);
   process.exit(1);
 }
 
-console.log(`[validate-bin] OK — ${Object.keys(REQUIRED_BIN).length} bin entries verified`);
+console.log(
+  `[validate-bin] OK — ${Object.keys(REQUIRED_BIN).length} bin entries verified (no hardcoded versions)`
+);
