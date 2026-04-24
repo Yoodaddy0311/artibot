@@ -9,6 +9,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.6.0] - 2026-04-24
+
+### Added
+- **Neural GRPO policy** (design Section 11 N4 lifted) — 2-layer MLP opt-in
+  - `lib/learning/grpo/neural-policy.js` — W1[16x9], b1, W2[1x16], b2 with sigmoid output
+  - Group-relative advantage + backprop + gradient clipping (L2 <= 5 per matrix)
+  - JSON-serializable theta, same KL-penalty structure as linear
+- **Policy factory** (`lib/learning/grpo/policy-factory.js`) — dispatch by `modelType`
+  - config `learning.grpoRouting.modelType`: "linear" (default) | "mlp"
+  - Backward compat: old policy files without modelType load as linear
+- **Linear vs MLP benchmark harness** (`scripts/benchmark-policy.mjs`)
+  - Synthetic seeded episodes, deterministic comparison
+  - Metrics: logLoss, accuracyVsHeuristic, training time, convergence, param count
+- **Neural policy benchmark report** (`_reports/neural-policy-benchmark-2026-04-24.md`)
+
+### Changed
+- `artibot.config.json` version 3.5.0 → 3.6.0
+- `learning.grpoRouting.modelType` defaults to "linear" — MLP is opt-in, proven via benchmark before flip
+
+### Compatibility
+- Zero public API changes
+- All existing v3.5 linear policies continue to load and train unchanged
+- MLP opt-in via explicit config only
+
+### Verification
+- npm test: updated after team completion
+- JSON validity: package / plugin / config all sync at 3.6.0
+
+---
+
 ## [3.5.0] - 2026-04-24
 
 ### Added
