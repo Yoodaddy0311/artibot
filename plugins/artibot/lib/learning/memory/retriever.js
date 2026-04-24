@@ -171,18 +171,42 @@ export function dedupResults(scored) {
 // ---------------------------------------------------------------------------
 
 async function scanWorking(store, query, perLayerLimit) {
-  if (!store || typeof store.search !== 'function') {
-    return { layer: 'working', results: [] };
-  }
+  if (!store) return { layer: 'working', results: [] };
   try {
-    const raw = await store.search(query, { limit: perLayerLimit });
-    const list = Array.isArray(raw) ? raw : [];
-    const results = list.map((r) => ({
-      entry: r.entry ?? r,
-      similarity: Number(r.similarity ?? r.score ?? 0),
-      layer: 'working',
-    }));
-    return { layer: 'working', results };
+    // Preferred: explicit search() — matches retriever contract.
+    if (typeof store.search === 'function') {
+      const raw = await store.search(query, { limit: perLayerLimit });
+      const list = Array.isArray(raw) ? raw : [];
+      return {
+        layer: 'working',
+        results: list.map((r) => ({
+          entry: r.entry ?? r,
+          similarity: Number(r.similarity ?? r.score ?? 0),
+          layer: 'working',
+        })),
+      };
+    }
+    // Fallback: snapshot() — WC1's current surface. Rank by keyword overlap
+    // so Working remains useful before a first-class search() lands.
+    if (typeof store.snapshot === 'function') {
+      const snap = store.snapshot();
+      const entries = Array.isArray(snap?.entries) ? snap.entries : [];
+      const qTokens = query.toLowerCase().split(/\s+/).filter(Boolean);
+      const scored = entries
+        .map((entry) => {
+          const text = JSON.stringify(entry).toLowerCase();
+          const hits = qTokens.reduce((n, t) => (text.includes(t) ? n + 1 : n), 0);
+          return {
+            entry,
+            similarity: qTokens.length ? hits / qTokens.length : 0,
+            layer: 'working',
+          };
+        })
+        .filter((r) => r.similarity > 0)
+        .slice(0, perLayerLimit);
+      return { layer: 'working', results: scored };
+    }
+    return { layer: 'working', results: [] };
   } catch {
     return { layer: 'working', results: [] };
   }

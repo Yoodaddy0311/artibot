@@ -4,11 +4,11 @@ import path from 'node:path';
 import os from 'node:os';
 
 import {
-  logProposal,
+  _internals,
   logApproval,
+  logProposal,
   logRejection,
   summary,
-  _internals,
 } from '../../../lib/learning/voyager/curriculum-log.js';
 
 let tmpDir;

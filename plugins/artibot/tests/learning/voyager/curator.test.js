@@ -4,16 +4,16 @@ import path from 'node:path';
 import os from 'node:os';
 
 import {
+  _testing,
   createCurator,
   extractFrame,
   groupByPattern,
   scoreCandidates,
-  _testing,
 } from '../../../lib/learning/voyager/curator.js';
 import {
   generateSkillDraft,
-  refineDraft,
   listTemplateSections,
+  refineDraft,
 } from '../../../lib/learning/voyager/iterative-prompter.js';
 
 // ---------------------------------------------------------------------------
@@ -140,7 +140,7 @@ describe('scoreCandidates', () => {
         tools: ['Bash', 'Read'],
       })),
     ).filter(Boolean);
-    const low = [1, 2, 3, 4, 5].map((i) =>
+    const low = [1, 2, 3, 4, 5].map(() =>
       extractFrame(makeEpisode({
         sessionId: 'same-session',
         timestamp: now - 29 * 24 * 60 * 60 * 1000,

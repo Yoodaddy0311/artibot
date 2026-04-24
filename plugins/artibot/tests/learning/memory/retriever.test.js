@@ -14,13 +14,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
-  createRetriever,
-  resolveWeights,
-  recencyBoost,
-  frequencyBoost,
-  applyScoring,
-  dedupResults,
   __test__,
+  applyScoring,
+  createRetriever,
+  dedupResults,
+  frequencyBoost,
+  recencyBoost,
+  resolveWeights,
 } from '../../../lib/learning/memory/retriever.js';
 
 // ---------------------------------------------------------------------------
@@ -243,6 +243,25 @@ describe('createRetriever — search()', () => {
     const { results } = await retriever.search('query');
     expect(results.some((r) => r.layer === 'working')).toBe(false);
     expect(metrics.recordQuery).toHaveBeenCalledWith('working', 0);
+  });
+
+  it('falls back to snapshot() when working store has no search()', async () => {
+    const snapshotStore = {
+      snapshot: vi.fn(() => ({
+        entries: [
+          { id: 'w-a', content: 'query about artibot memory' },
+          { id: 'w-b', content: 'unrelated chatter' },
+        ],
+      })),
+    };
+    const retriever = createRetriever({
+      workingStore: snapshotStore,
+      episodicStore: makeEpisodicStore([]),
+      semanticStore: makeSemanticStore([]),
+    });
+    const { results } = await retriever.search('artibot memory');
+    expect(snapshotStore.snapshot).toHaveBeenCalled();
+    expect(results.some((r) => r.layer === 'working' && r.entry.id === 'w-a')).toBe(true);
   });
 
   it('isolates per-layer failures (one scanner throws → others still succeed)', async () => {

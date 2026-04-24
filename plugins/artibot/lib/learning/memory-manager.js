@@ -717,7 +717,6 @@ export function __setHierarchicalMemoryEnabled(enabled) {
 }
 
 const getSemanticStore = () => _dispatcher.getSemanticStore();
-const getEpisodicStore = () => _dispatcher.getEpisodicStore();
 const searchMemoryHierarchical = (q, o) => _dispatcher.searchMemoryHierarchical(q, o);
 
 export const __setSemanticStore = (store) => _dispatcher.__setSemanticStore(store);

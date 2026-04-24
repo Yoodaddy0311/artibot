@@ -26,7 +26,7 @@ import path from 'node:path';
 import fs from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 
-import { ensureDir, readJsonFile, atomicWriteJson } from '../../core/file.js';
+import { atomicWriteJson, ensureDir, readJsonFile } from '../../core/file.js';
 
 // ---------------------------------------------------------------------------
 // Constants
