@@ -9,6 +9,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.4.0] - 2026-04-24
+
+### Added
+- **GRPO-RLVR Phase A** — Reward signal capture
+  - `lib/learning/grpo/reward-capture.js` — `computeReward(episode)` pure function
+  - `lib/learning/grpo/reward-metrics.js` — daily distribution rollup
+  - `lib/learning/grpo/backfill.js` — historical reward backfill CLI
+  - `lib/learning/memory/episodic.js` — appendEpisode hooked to reward-capture
+- **GRPO-RLVR Phase B** — Linear policy updater
+  - `lib/learning/grpo/policy-updater.js` — group-relative advantage + KL-penalized gradient
+  - `scripts/hooks/nightly-grpo-trainer.mjs` — cron `30 2 * * *`
+  - Cold-start warmup (200 episodes supervised)
+  - 3-snapshot retention + auto-rollback on accuracy drop
+- **GRPO-RLVR Phase C** — Router integration (opt-in, disabled by default)
+  - `lib/cognitive/grpo-bridge.js` extended with `getRoutingBias`
+  - `lib/cognitive/grpo-routing.js` — blending + epsilon-greedy
+  - `lib/cli/routing-command.js` — `artibot routing {status,rollback,enable,disable}`
+- **Voyager Self-Verification Pre-flight** — shadow-dry-run filter
+  - `lib/learning/voyager/self-verifier.js` — 3-tier verdict (reject/review/accept)
+  - Auto-rejects low-quality proposals before user review
+  - Opt-out via `learning.voyager.selfVerify: false`
+- **Hierarchical Memory Migration CLI**
+  - `scripts/hierarchical-memory-migrate.mjs` — --dry-run/--apply/--status/--rollback
+- **New config**: `learning.grpoRouting` block + `learning.schedule.nightlyGrpoTrainer`
+- **Docs**: hierarchical-memory-observation-plan.md, grpo-routing-guide.md
+
+### Changed
+- `artibot.config.json` version 3.3.0 → 3.4.0 + grpoRouting block
+- Episodic appendEpisode attaches `reward` + `rewardComponents`
+- Voyager curator auto-rejects failing proposals
+
+### Compatibility
+- Zero public API changes
+- All GRPO features opt-in (enabled: false default)
+- Hierarchical Memory default-on flip deferred to v3.5 per observation plan
+- Existing tests green on flag off
+
+### Verification
+- npm test: updated after team completion
+- npm run lint: 0 errors, 0 warnings target
+- JSON validity: package / plugin / config all sync at 3.4.0
+
+---
+
 ## [3.3.0] - 2026-04-24
 
 ### Added

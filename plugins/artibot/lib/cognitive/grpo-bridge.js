@@ -10,7 +10,10 @@
  * @module lib/cognitive/grpo-bridge
  */
 
+import path from 'node:path';
+import { readFile } from 'node:fs/promises';
 import { getGrpoStats, getRecommendation } from '../learning/grpo-optimizer.js';
+import { getHomeDir } from '../core/platform.js';
 
 /**
  * Neutral bias returned when GRPO has no data or a read fails. Multiplying
@@ -21,6 +24,117 @@ export const NEUTRAL_BIAS = 1.0;
 /** Clamp range to prevent any single GRPO weight from dominating cognition. */
 const BIAS_MIN = 0.5;
 const BIAS_MAX = 1.5;
+
+/** Default path to the routing policy file (produced by Phase B policy-updater). */
+const DEFAULT_POLICY_PATH = path.join(
+  getHomeDir(),
+  '.claude',
+  'artibot',
+  'policies',
+  'routing-policy-v1.json',
+);
+
+/** TTL for routing-policy memoization (ms). */
+const POLICY_TTL_MS = 60_000;
+
+/**
+ * Cached policy snapshot. Shared across calls within the TTL window so that
+ * a chatty routing loop does not hammer the filesystem. `null` means "no
+ * read attempted yet"; an object with `loadedAt: null` means "read failed".
+ * @type {{ loadedAt: number|null, policy: object|null, policyPath: string }|null}
+ */
+let _routingPolicyCache = null;
+
+/**
+ * Reset the routing-policy memo. Exposed for test isolation.
+ * @returns {void}
+ */
+export function resetRoutingBiasCache() {
+  _routingPolicyCache = null;
+}
+
+/**
+ * Feature vector used by the linear policy (see design §3.3, d=9 features).
+ * @typedef {{
+ *   steps?: number,
+ *   domains?: number,
+ *   uncertainty?: number,
+ *   risk?: number,
+ *   novelty?: number,
+ *   s1SuccessRate?: number,
+ *   sessionDepth?: number,
+ *   errorRate?: number,
+ * }} RoutingFeatures
+ */
+
+/** Feature order must stay in sync with the policy file schema. */
+const FEATURE_ORDER = Object.freeze([
+  'steps',
+  'domains',
+  'uncertainty',
+  'risk',
+  'novelty',
+  's1SuccessRate',
+  'sessionDepth',
+  'errorRate',
+]);
+
+/** Numerical-stability logistic (sigmoid) that never returns NaN. */
+function sigmoid(z) {
+  if (!Number.isFinite(z)) return 0.5;
+  if (z >= 0) {
+    const e = Math.exp(-z);
+    return 1 / (1 + e);
+  }
+  const e = Math.exp(z);
+  return e / (1 + e);
+}
+
+/**
+ * Build a feature vector in the canonical order, filling missing values with
+ * 0 and always appending a `bias` constant of 1.0 at the tail. Defensive: any
+ * non-finite number is coerced to 0 to keep downstream math safe.
+ * @param {RoutingFeatures} features
+ * @returns {number[]} length == FEATURE_ORDER.length + 1
+ */
+function toFeatureVector(features) {
+  const safe = features && typeof features === 'object' ? features : {};
+  const x = FEATURE_ORDER.map((key) => {
+    const v = safe[key];
+    return typeof v === 'number' && Number.isFinite(v) ? v : 0;
+  });
+  x.push(1.0); // bias term
+  return x;
+}
+
+/**
+ * Load the routing policy from disk, memoized for 60s. Never throws — failures
+ * return `null`, which tells {@link getRoutingBias} to emit the neutral fallback.
+ * @param {string} [policyPath]
+ * @returns {Promise<object|null>}
+ */
+async function readPolicy(policyPath = DEFAULT_POLICY_PATH) {
+  const now = Date.now();
+  if (
+    _routingPolicyCache
+    && _routingPolicyCache.policyPath === policyPath
+    && _routingPolicyCache.loadedAt !== null
+    && now - _routingPolicyCache.loadedAt < POLICY_TTL_MS
+  ) {
+    return _routingPolicyCache.policy;
+  }
+
+  try {
+    const raw = await readFile(policyPath, 'utf8');
+    const parsed = JSON.parse(raw);
+    _routingPolicyCache = { loadedAt: now, policy: parsed, policyPath };
+    return parsed;
+  } catch {
+    // Also cache the miss so a hot loop does not re-stat every turn.
+    _routingPolicyCache = { loadedAt: now, policy: null, policyPath };
+    return null;
+  }
+}
 
 /**
  * Clamp a value to [min, max].
