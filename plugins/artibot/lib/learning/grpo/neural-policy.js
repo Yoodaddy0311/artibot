@@ -452,58 +452,53 @@ export async function trainBatch(episodes, thetaPrev, options = {}) {
 
   const baseTheta = isValidTheta(thetaPrev) ? cloneTheta(thetaPrev) : createTheta();
   const { normalizeEpisode: ne } = await import('./policy-updater.js');
+  const groups = bucketByGroup(episodes, ne);
 
-  const normalized = [];
+  let theta = cloneTheta(baseTheta);
+  let stats = { groupsUsed: 0, episodesUsed: 0, explorationSkipped: 0 };
+  for (let it = 0; it < iterations; it++) {
+    stats = runIteration(theta, groups, baseTheta, lr, lambda, clipNorm);
+  }
+  return { theta, ...stats };
+}
+
+/** Normalise + group episodes by intent-family. */
+function bucketByGroup(episodes, ne) {
+  const groups = new Map();
   for (const raw of episodes ?? []) {
     const n = ne(raw);
-    if (n) normalized.push(n);
-  }
-
-  // group by intent-family
-  const groups = new Map();
-  for (const n of normalized) {
+    if (!n) continue;
     const bucket = groups.get(n.group) ?? [];
     bucket.push(n);
     groups.set(n.group, bucket);
   }
+  return groups;
+}
 
-  let theta = cloneTheta(baseTheta);
-  let groupsUsed = 0;
-  let episodesUsed = 0;
-  let explorationSkipped = 0;
-
-  for (let it = 0; it < iterations; it++) {
-    const acc = zeroGrad();
-    let localGroups = 0;
-    let localEps = 0;
-    let localSkipped = 0;
-
-    for (const [, bucket] of groups) {
-      const trainable = bucket.filter((e) => !e.exploration);
-      localSkipped += bucket.length - trainable.length;
-      if (trainable.length === 0) continue;
-
-      const advantages = computeAdvantages(trainable.map((e) => e.r));
-      for (let i = 0; i < trainable.length; i++) {
-        const ep = trainable[i];
-        const cache = forward(theta, ep.x);
-        const grads = backward(theta, ep.x, cache, ep.label, advantages[i]);
-        addGrad(acc, grads);
-        localEps++;
-      }
-      localGroups++;
+/**
+ * Run one gradient step across all groups and apply the update.
+ * @returns {{ groupsUsed: number, episodesUsed: number, explorationSkipped: number }}
+ */
+function runIteration(theta, groups, baseTheta, lr, lambda, clipNorm) {
+  const acc = zeroGrad();
+  let gUsed = 0;
+  let eUsed = 0;
+  let skipped = 0;
+  for (const [, bucket] of groups) {
+    const trainable = bucket.filter((e) => !e.exploration);
+    skipped += bucket.length - trainable.length;
+    if (trainable.length === 0) continue;
+    const advantages = computeAdvantages(trainable.map((e) => e.r));
+    for (let i = 0; i < trainable.length; i++) {
+      const ep = trainable[i];
+      const cache = forward(theta, ep.x);
+      addGrad(acc, backward(theta, ep.x, cache, ep.label, advantages[i]));
+      eUsed++;
     }
-
-    applyUpdate(theta, acc, baseTheta, lr, lambda, clipNorm);
-
-    if (it === iterations - 1) {
-      groupsUsed = localGroups;
-      episodesUsed = localEps;
-      explorationSkipped = localSkipped;
-    }
+    gUsed++;
   }
-
-  return { theta, groupsUsed, episodesUsed, explorationSkipped };
+  applyUpdate(theta, acc, baseTheta, lr, lambda, clipNorm);
+  return { groupsUsed: gUsed, episodesUsed: eUsed, explorationSkipped: skipped };
 }
 
 function zeroGrad() {

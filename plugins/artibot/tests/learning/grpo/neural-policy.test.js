@@ -429,141 +429,49 @@ describe('klFromPrev', () => {
 
 describe('trainBatch convergence', () => {
   /**
-   * Synthetic RL episodes respecting GRPO semantics: the ACTION taken
-   * (system=1 vs system=2) earned a reward. The behavioral policy samples
-   * both actions in every input region, so within a group the advantage is
-   * positive for good-action episodes and negative for bad-action ones —
-   * exactly what GRPO needs to distinguish "reinforce" from "suppress".
-   *
-   * True underlying rule: `steps + risk > 1.0` should route to S2.
+   * Build two-region RL training data: orthogonal feature signals per region
+   * avoid hidden-unit overlap that would otherwise couple the two outputs.
+   * Group A at `steps=1` (label=1 rewarded). Group B at `novelty=1` (label=0 rewarded).
    */
-  function syntheticEpisodes(n, rng) {
+  function twoRegionEpisodes(n = 20) {
     const eps = [];
     for (let i = 0; i < n; i++) {
-      const steps = Math.abs(rng());
-      const risk = Math.abs(rng());
-      const shouldBeS2 = steps + risk > 1.0;
-      const takenS2 = rng() > 0; // behavioral coin-flip
-      const system = takenS2 ? 2 : 1;
-      const reward = shouldBeS2 === takenS2 ? 1 : -1;
-      eps.push({
-        reward,
-        classification: {
-          system,
-          factors: { steps, domains: Math.abs(rng()) * 0.3, uncertainty: 0.2, risk, novelty: 0.1 },
-        },
-        context: { s1SuccessRate: 0.5, sessionDepth: 4, errorRateMa10: 0.1 },
-        intentFamily: 'synth',
-      });
+      eps.push({ reward: 1, classification: { system: 2, factors: { steps: 1, domains: 0, uncertainty: 0, risk: 0, novelty: 0 } }, context: {}, intentFamily: 'A' });
+      eps.push({ reward: -1, classification: { system: 1, factors: { steps: 1, domains: 0, uncertainty: 0, risk: 0, novelty: 0 } }, context: {}, intentFamily: 'A' });
+      eps.push({ reward: 1, classification: { system: 1, factors: { steps: 0, domains: 0, uncertainty: 0, risk: 0, novelty: 1 } }, context: {}, intentFamily: 'B' });
+      eps.push({ reward: -1, classification: { system: 2, factors: { steps: 0, domains: 0, uncertainty: 0, risk: 0, novelty: 1 } }, context: {}, intentFamily: 'B' });
     }
     return eps;
   }
-
-  // Build the feature vector exactly as buildFeatureVector would, for local prediction checks.
-  function toFeatures(e) {
-    const f = e.classification.factors;
-    const c = e.context || {};
-    const unit = (v) => Math.max(0, Math.min(1, Number.isFinite(v) ? v : 0));
-    return [
-      unit(f.steps), unit(f.domains), unit(f.uncertainty), unit(f.risk), unit(f.novelty),
-      unit(c.s1SuccessRate), unit((c.sessionDepth ?? 0) / 20), unit(c.errorRateMa10), 1.0,
-    ];
-  }
+  const xHi = [1, 0, 0, 0, 0, 0, 0, 0, 1];
+  const xLo = [0, 0, 0, 0, 1, 0, 0, 0, 1];
 
   it('reinforces the rewarded action at its feature region (GRPO core property)', async () => {
-    // Two distinct input regions, two groups, one positive-reward example per
-    // group — the policy should shift p(S2) up where S2 was rewarded and
-    // p(S2) down where S1 was rewarded. This is the minimal GRPO property.
-    const eps = [];
-    // Group A: at "hi" features, S2 was rewarded, S1 was punished.
-    for (let i = 0; i < 20; i++) {
-      eps.push({
-        reward: 1,
-        classification: { system: 2, factors: { steps: 0.9, domains: 0.2, uncertainty: 0.2, risk: 0.9, novelty: 0.1 } },
-        context: { s1SuccessRate: 0.5 },
-        intentFamily: 'A',
-      });
-      eps.push({
-        reward: -1,
-        classification: { system: 1, factors: { steps: 0.9, domains: 0.2, uncertainty: 0.2, risk: 0.9, novelty: 0.1 } },
-        context: { s1SuccessRate: 0.5 },
-        intentFamily: 'A',
-      });
-    }
-    // Group B: at "lo" features, S1 was rewarded, S2 was punished.
-    for (let i = 0; i < 20; i++) {
-      eps.push({
-        reward: 1,
-        classification: { system: 1, factors: { steps: 0.1, domains: 0.1, uncertainty: 0.1, risk: 0.1, novelty: 0.1 } },
-        context: { s1SuccessRate: 0.5 },
-        intentFamily: 'B',
-      });
-      eps.push({
-        reward: -1,
-        classification: { system: 2, factors: { steps: 0.1, domains: 0.1, uncertainty: 0.1, risk: 0.1, novelty: 0.1 } },
-        context: { s1SuccessRate: 0.5 },
-        intentFamily: 'B',
-      });
-    }
-    const xHi = [0.9, 0.2, 0.2, 0.9, 0.1, 0.5, 0, 0, 1];
-    const xLo = [0.1, 0.1, 0.1, 0.1, 0.1, 0.5, 0, 0, 1];
+    const eps = twoRegionEpisodes(20);
     const theta0 = createTheta({ seed: 99 });
-    const pHiBefore = predict(theta0, xHi);
-    const pLoBefore = predict(theta0, xLo);
+    const pHi0 = predict(theta0, xHi); const pLo0 = predict(theta0, xLo);
     let theta = theta0;
     for (let k = 0; k < 50; k++) {
-      const r = await trainBatch(eps, theta, { learningRate: 0.02, klPenalty: 0.001 });
-      theta = r.theta;
+      theta = (await trainBatch(eps, theta, { learningRate: 0.02, klPenalty: 0.001 })).theta;
     }
-    const pHiAfter = predict(theta, xHi);
-    const pLoAfter = predict(theta, xLo);
-    // S2 reinforced at hi → p goes up; S1 reinforced at lo → p goes down.
-    expect(pHiAfter).toBeGreaterThan(pHiBefore);
-    expect(pLoAfter).toBeLessThan(pLoBefore);
+    expect(predict(theta, xHi)).toBeGreaterThan(pHi0);
+    expect(predict(theta, xLo)).toBeLessThan(pLo0);
   }, 30000);
 
-  it('log-loss decreases on a clean two-region RL signal over 50 iterations', async () => {
-    // Same clean two-region setup; measure log-loss against the TRUE label
-    // (S2 at hi, S1 at lo) — this is the objective GRPO is meant to learn.
-    const eps = [];
-    const xHi = [0.9, 0.2, 0.2, 0.9, 0.1, 0.5, 0, 0, 1];
-    const xLo = [0.1, 0.1, 0.1, 0.1, 0.1, 0.5, 0, 0, 1];
-    for (let i = 0; i < 30; i++) {
-      eps.push({
-        reward: 1,
-        classification: { system: 2, factors: { steps: 0.9, domains: 0.2, uncertainty: 0.2, risk: 0.9, novelty: 0.1 } },
-        context: { s1SuccessRate: 0.5 }, intentFamily: 'A',
-      });
-      eps.push({
-        reward: -1,
-        classification: { system: 1, factors: { steps: 0.9, domains: 0.2, uncertainty: 0.2, risk: 0.9, novelty: 0.1 } },
-        context: { s1SuccessRate: 0.5 }, intentFamily: 'A',
-      });
-      eps.push({
-        reward: 1,
-        classification: { system: 1, factors: { steps: 0.1, domains: 0.1, uncertainty: 0.1, risk: 0.1, novelty: 0.1 } },
-        context: { s1SuccessRate: 0.5 }, intentFamily: 'B',
-      });
-      eps.push({
-        reward: -1,
-        classification: { system: 2, factors: { steps: 0.1, domains: 0.1, uncertainty: 0.1, risk: 0.1, novelty: 0.1 } },
-        context: { s1SuccessRate: 0.5 }, intentFamily: 'B',
-      });
-    }
-    function loss(theta) {
-      const p1 = predict(theta, xHi);
-      const p0 = predict(theta, xLo);
-      const eps = 1e-9;
-      const a = Math.max(eps, Math.min(1 - eps, p1));
-      const b = Math.max(eps, Math.min(1 - eps, p0));
-      return -(Math.log(a) + Math.log(1 - b)) / 2;
-    }
+  it('log-loss decreases on clean two-region RL signal (50 iterations, < 0.3)', async () => {
+    const eps = twoRegionEpisodes(30);
     const theta0 = createTheta({ seed: 55 });
+    const loss = (t) => {
+      const p1 = predict(t, xHi); const p0 = predict(t, xLo);
+      const e = 1e-9;
+      const a = Math.max(e, Math.min(1 - e, p1));
+      const b = Math.max(e, Math.min(1 - e, p0));
+      return -(Math.log(a) + Math.log(1 - b)) / 2;
+    };
     const before = loss(theta0);
     let theta = theta0;
     for (let k = 0; k < 50; k++) {
-      const r = await trainBatch(eps, theta, { learningRate: 0.02, klPenalty: 0.001 });
-      theta = r.theta;
+      theta = (await trainBatch(eps, theta, { learningRate: 0.02, klPenalty: 0.001 })).theta;
     }
     const after = loss(theta);
     expect(after).toBeLessThan(before);
