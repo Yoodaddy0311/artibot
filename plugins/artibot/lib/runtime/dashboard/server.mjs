@@ -15,7 +15,7 @@
 import { createServer } from 'node:http';
 import { createHash } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
-import { watch, existsSync, statSync, createReadStream } from 'node:fs';
+import { createReadStream, existsSync, statSync, watch } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { dirname, join, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';

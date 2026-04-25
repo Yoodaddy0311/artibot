@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { createMemoryBridge } from '../../lib/mcp/bridge/memory-bridge.js';
 
 // Test fixtures use concatenated prefixes so security scanners don't false-positive.

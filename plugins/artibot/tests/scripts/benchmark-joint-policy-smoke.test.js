@@ -1,15 +1,15 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
-  createRng,
-  TASK_FAMILIES,
   AGENTS,
-  SKILLS,
+  createRng,
   FAMILY_PREFERENCES,
   generateEpisodes,
-  splitEpisodes,
   matrixSparsity,
   pairAccuracy,
   parseArgs,
+  SKILLS,
+  splitEpisodes,
+  TASK_FAMILIES,
 } from '../../scripts/benchmark-joint-policy.mjs';
 
 describe('benchmark-joint-policy (smoke)', () => {

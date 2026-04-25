@@ -4,9 +4,9 @@ import os from 'node:os';
 import path from 'node:path';
 
 import {
+  __internals,
   checkAndMigrate,
   createMigrationRunner,
-  __internals,
 } from '../../lib/learning/migration-runner.js';
 
 const { SCHEMA_VERSION } = __internals;

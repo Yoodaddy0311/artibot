@@ -24,9 +24,9 @@
 
 import {
   GENERIC_PATTERNS,
-  TAGGED_PATTERNS,
   redactObject,
   redactString,
+  TAGGED_PATTERNS,
 } from '../../core/redaction.js';
 
 const DEFAULT_SEARCH_LIMIT = 10;

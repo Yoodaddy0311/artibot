@@ -12,7 +12,7 @@
  * @module lib/runtime/dashboard/aggregator
  */
 
-import { existsSync, createReadStream } from 'node:fs';
+import { createReadStream, existsSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 
 const DAY_MS = 24 * 60 * 60 * 1000;

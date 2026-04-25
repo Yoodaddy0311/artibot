@@ -1,11 +1,11 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
-  parseArgs,
-  USAGE,
   filterByWindow,
   filterJointEligible,
-  summarizeJointEpisodes,
+  parseArgs,
   resolveTrailPath,
+  summarizeJointEpisodes,
+  USAGE,
 } from '../../scripts/hooks/nightly-joint-policy-trainer.mjs';
 
 describe('nightly-joint-policy-trainer (smoke)', () => {

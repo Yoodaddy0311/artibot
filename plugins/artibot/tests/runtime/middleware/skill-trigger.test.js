@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  createSkillTriggerMiddleware,
   createIdentityFallback,
+  createSkillTriggerMiddleware,
   DEFAULT_TRIGGER_OPTIONS,
 } from '../../../lib/runtime/middleware/skill-trigger.js';
 

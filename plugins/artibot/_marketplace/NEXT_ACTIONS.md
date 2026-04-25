@@ -1,18 +1,20 @@
 # Marketplace — Next Actions
 
 Generated: 2026-04-25
-Status: v3.9-stable submitted; deferred items below.
+Last updated: 2026-04-25 (post-recovery, v3.9.1 patch)
+Status: v3.9.1 stable; one PR live, one needs re-submission via Anthropic form.
 
 ---
 
-## Done (autonomous, this session)
+## Done (autonomous)
 
 | # | Action | Result | Link |
 |---|---|---|---|
 | 1 | GitHub repo metadata (description, homepage, 12 topics) | ✅ Done | [Yoodaddy0311/artibot](https://github.com/Yoodaddy0311/artibot) |
 | 2 | GitHub Releases v3.5–v3.9.0 + v3.9-stable annotated tag | ✅ Done | [Releases](https://github.com/Yoodaddy0311/artibot/releases) |
-| 3 | Anthropic official marketplace PR (artibot + artibot-cowork) | ✅ Submitted | [anthropics/claude-plugins-official#1584](https://github.com/anthropics/claude-plugins-official/pull/1584) |
-| 4 | ComposioHQ/awesome-claude-plugins PR | ✅ Submitted | [ComposioHQ/awesome-claude-plugins#196](https://github.com/ComposioHQ/awesome-claude-plugins/pull/196) |
+| 3 | ~~Anthropic official marketplace PR~~ | ❌ **Auto-rejected** (9s after open) — repo accepts Anthropic-internal contribs only | [anthropics/claude-plugins-official#1584 (closed)](https://github.com/anthropics/claude-plugins-official/pull/1584) |
+| 4 | ComposioHQ/awesome-claude-plugins PR | 🟡 **OPEN, awaiting review** | [ComposioHQ/awesome-claude-plugins#196](https://github.com/ComposioHQ/awesome-claude-plugins/pull/196) |
+| 5 | v3.9.1 stabilization patch (5 lint errors, recovery commit, .gitignore hardening) | ✅ Done | local commit |
 
 ---
 
@@ -43,10 +45,9 @@ Per user instruction, scheduled for **much later** — no current target date.
 
 | # | Action | Notes |
 |---|---|---|
-| C1 | Monitor [PR #1584](https://github.com/anthropics/claude-plugins-official/pull/1584) for reviewer feedback | Anthropic-Verified badge requires extra review |
-| C2 | Monitor [PR #196](https://github.com/ComposioHQ/awesome-claude-plugins/pull/196) for merge | Active list, usually merged quickly |
-| C3 | If C1 reviewer requests changes (e.g., split into 2 PRs, screenshot requirement, demo URL) | Address per request |
-| C4 | After C1 merge — verify plugin discoverable via `/plugin install artibot` in Claude Code | End-to-end check |
+| **C0** | **🚨 Re-submit via official Anthropic form: [clau.de/plugin-directory-submission](https://clau.de/plugin-directory-submission)** | **PR #1584 was auto-rejected by bot** — `anthropics/claude-plugins-official` is for Anthropic team contribs only. **User must submit via this form** (login required) |
+| C1 | Monitor [PR #196](https://github.com/ComposioHQ/awesome-claude-plugins/pull/196) for merge | Active list, usually merged quickly |
+| C2 | After C0 review — verify plugin discoverable via `/plugin install artibot` in Claude Code | End-to-end check |
 
 ### D. Additional Awesome Lists (parallel exposure)
 

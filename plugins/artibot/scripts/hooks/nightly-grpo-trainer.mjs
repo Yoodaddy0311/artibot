@@ -35,7 +35,7 @@ import {
   DEFAULTS,
   resolvePolicyPaths,
 } from '../../lib/learning/grpo/policy-updater.js';
-import { readJsonFile, writeJsonFile, ensureDir } from '../../lib/core/file.js';
+import { ensureDir, readJsonFile, writeJsonFile } from '../../lib/core/file.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

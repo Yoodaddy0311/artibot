@@ -1,8 +1,8 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
   parseArgs,
-  USAGE,
   resolveDefaultStoragePath,
+  USAGE,
   yesterdayKey,
 } from '../../scripts/hooks/nightly-session-rollup.mjs';
 

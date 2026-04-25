@@ -454,7 +454,7 @@ export async function trainBatch(episodes, thetaPrev, options = {}) {
   const { normalizeEpisode: ne } = await import('./policy-updater.js');
   const groups = bucketByGroup(episodes, ne);
 
-  let theta = cloneTheta(baseTheta);
+  const theta = cloneTheta(baseTheta);
   let stats = { groupsUsed: 0, episodesUsed: 0, explorationSkipped: 0 };
   for (let it = 0; it < iterations; it++) {
     stats = runIteration(theta, groups, baseTheta, lr, lambda, clipNorm);

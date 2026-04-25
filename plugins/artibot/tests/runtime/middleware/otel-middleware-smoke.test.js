@@ -1,9 +1,9 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
-  resolveOtelConfig,
-  createOtelMiddleware,
-  buildPipelineSpan,
   buildMetricsFromState,
+  buildPipelineSpan,
+  createOtelMiddleware,
+  resolveOtelConfig,
 } from '../../../lib/runtime/middleware/otel-middleware.js';
 
 describe('otel-middleware (smoke)', () => {

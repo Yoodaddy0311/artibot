@@ -38,19 +38,19 @@ import { getHomeDir } from '../../core/platform.js';
 
 import {
   createAgentPolicy,
-  getRecommendation as getAgentRecommendation,
-  selectAgent as selectAgentMarginal,
   defaultCandidates as defaultAgentCandidates,
+  getRecommendation as getAgentRecommendation,
   loadPolicy as loadAgentPolicy,
   normalizeEpisode as normalizeAgentEpisode,
+  selectAgent as selectAgentMarginal,
 } from './agent-policy.js';
 
 import {
   createSkillPolicy,
+  emptyPolicy as emptySkillPolicy,
+  loadPolicy as loadSkillPolicy,
   scoreSkillsWith,
   selectFromScores,
-  loadPolicy as loadSkillPolicy,
-  emptyPolicy as emptySkillPolicy,
 } from './skill-policy.js';
 
 // ---------------------------------------------------------------------------
@@ -450,7 +450,7 @@ export function selectJointWith(params) {
 
   const evidence = familyEvidence(jointPolicy, taskFamily);
   const minEvidence = options.minCorrelationEpisodes ?? DEFAULTS.minCorrelationEpisodes;
-  const useJoint = chosenAgent != null && evidence >= minEvidence;
+  const useJoint = chosenAgent !== null && chosenAgent !== undefined && evidence >= minEvidence;
   const lambda = options.lambda ?? DEFAULTS.lambda;
 
   const adjusted = Object.create(null);
@@ -475,7 +475,7 @@ export function selectJointWith(params) {
     correlation: perSkillCorr[p.name] ?? 0,
   }));
 
-  const source = chosenAgent == null
+  const source = (chosenAgent === null || chosenAgent === undefined)
     ? 'fallback'
     : (useJoint ? 'joint' : 'independent');
 

@@ -1,12 +1,12 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
-  dayKey,
-  normalizeMetrics,
   buildSessionRecord,
-  foldIntoBucket,
-  upsertBucket,
-  isOlderThan,
   createSessionAggregator,
+  dayKey,
+  foldIntoBucket,
+  isOlderThan,
+  normalizeMetrics,
+  upsertBucket,
 } from '../../lib/observability/session-aggregator.js';
 
 describe('session-aggregator pure helpers (smoke)', () => {

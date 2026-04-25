@@ -1,9 +1,9 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 
-import { backfillRecord, backfillFile } from '../../../lib/learning/grpo/backfill.js';
+import { backfillFile, backfillRecord } from '../../../lib/learning/grpo/backfill.js';
 
 describe('backfillRecord (pure)', () => {
   it('returns null for non-object input', () => {
@@ -47,7 +47,7 @@ describe('backfillFile (disk)', () => {
   });
 
   afterEach(async () => {
-    try { await fs.rm(dir, { recursive: true, force: true }); } catch {}
+    try { await fs.rm(dir, { recursive: true, force: true }); } catch { /* cleanup best-effort */ }
   });
 
   it('returns zeroed report when the file does not exist', async () => {

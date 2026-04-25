@@ -107,10 +107,10 @@ async function copyDirRecursive(src, dest) {
     const srcPath = path.join(src, entry.name);
     const destPath = path.join(dest, entry.name);
     if (entry.isDirectory()) {
-      // eslint-disable-next-line no-await-in-loop
+       
       await copyDirRecursive(srcPath, destPath);
     } else if (entry.isFile()) {
-      // eslint-disable-next-line no-await-in-loop
+       
       await fs.copyFile(srcPath, destPath);
     }
   }
@@ -176,7 +176,7 @@ export async function runStatus({ memoryDir, log = console.log }) {
   const reports = [];
   for (const name of LEGACY_FILES) {
     const p = path.join(memoryDir, name);
-    // eslint-disable-next-line no-await-in-loop
+     
     const store = await readJsonSafe(p);
     const summary = summarizeStore(store);
     const migratedAt = store?.metadata?.migratedAt ?? null;
@@ -199,7 +199,7 @@ export async function runDryRun({ memoryDir, log = console.log }) {
   const reports = [];
   for (const name of LEGACY_FILES) {
     const p = path.join(memoryDir, name);
-    // eslint-disable-next-line no-await-in-loop
+     
     const store = await readJsonSafe(p);
     const summary = summarizeStore(store);
     reports.push({ file: name, ...summary });
@@ -227,10 +227,10 @@ async function makeBackup(memoryDir, ts) {
     const srcPath = path.join(memoryDir, entry.name);
     const destPath = path.join(backupDir, entry.name);
     if (entry.isDirectory()) {
-      // eslint-disable-next-line no-await-in-loop
+       
       await copyDirRecursive(srcPath, destPath);
     } else if (entry.isFile()) {
-      // eslint-disable-next-line no-await-in-loop
+       
       await fs.copyFile(srcPath, destPath);
     }
   }
@@ -311,7 +311,7 @@ export async function runRollback({ memoryDir, log = console.log, now = () => Da
   for (const name of LEGACY_FILES) {
     const current = path.join(memoryDir, name);
     if (await pathExists(current)) {
-      // eslint-disable-next-line no-await-in-loop
+       
       await fs.rename(current, path.join(preRollbackPath, name));
     }
   }
@@ -319,7 +319,7 @@ export async function runRollback({ memoryDir, log = console.log, now = () => Da
   for (const name of LEGACY_FILES) {
     const backupFile = path.join(backupPath, name);
     if (await pathExists(backupFile)) {
-      // eslint-disable-next-line no-await-in-loop
+       
       await fs.copyFile(backupFile, path.join(memoryDir, name));
     }
   }

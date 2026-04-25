@@ -309,7 +309,7 @@ export function postJson(url, payload, opts = {}) {
     let target;
     try {
       target = new URL(url);
-    } catch (e) {
+    } catch {
       reject(new Error(`invalid endpoint: ${url}`));
       return;
     }

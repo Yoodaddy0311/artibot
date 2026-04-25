@@ -17,16 +17,15 @@ import { gzipSync } from 'node:zlib';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import {
+  atomicWriteJson,
   ensureDir,
   readJsonFile,
-  atomicWriteJson,
 } from '../../core/file.js';
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-const STORE_FILENAME = 'semantic.json';
 const ARCHIVE_DIR_NAME = 'archive';
 const LAYER = 'semantic';
 

@@ -7,7 +7,7 @@
 
   "name": "artibot",
   "displayName": "Artibot — Autonomous Agent OS for Claude Code",
-  "version": "3.9.0",
+  "version": "3.9.1",
   "description": "Cognitive orchestration framework with dual-process routing, lifelong learning, expert agent teams, and workflow automation for Claude Code. 28 agents, 100 skills, 56 commands, 5,000+ tests.",
   "shortDescription": "Autonomous Agent OS — 28 agents, 100 skills, dual-process cognition, lifelong learning, parallel teams.",
   "tagline": "Production-grade autonomous agent OS that orchestrates the work for you.",
@@ -253,8 +253,8 @@
 
   "changelog": "./CHANGELOG.md",
   "release": {
-    "current": "3.9.0",
-    "releasedAt": "2026-04-24",
+    "current": "3.9.1",
+    "releasedAt": "2026-04-25",
     "channel": "stable"
   },
 

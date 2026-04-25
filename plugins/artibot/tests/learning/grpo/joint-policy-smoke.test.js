@@ -1,10 +1,10 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
-  emptyPolicy,
-  resolvePolicyPaths,
-  POLICY_VERSION,
-  MODEL_TYPE,
   DEFAULTS,
+  emptyPolicy,
+  MODEL_TYPE,
+  POLICY_VERSION,
+  resolvePolicyPaths,
 } from '../../../lib/learning/grpo/joint-policy.js';
 
 describe('joint-policy pure helpers (smoke)', () => {

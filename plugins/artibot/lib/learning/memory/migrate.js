@@ -188,7 +188,7 @@ export async function runMigration({ memoryDir, now = () => Date.now() } = {}) {
   let totalTagged = 0;
   for (const name of LEGACY_FILES) {
     const p = path.join(memoryDir, name);
-    // eslint-disable-next-line no-await-in-loop
+     
     const report = await migrateFile(p, now);
     reports.push(report);
     totalTagged += report.tagged;

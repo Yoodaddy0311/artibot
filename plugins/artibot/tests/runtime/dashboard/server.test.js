@@ -4,15 +4,15 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync, appendFileSync, mkdirSync } from 'node:fs';
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createConnection } from 'node:net';
 import { createHash, randomBytes } from 'node:crypto';
 import {
-  createDashboardServer,
   assertLoopback,
   computeAcceptKey,
+  createDashboardServer,
   encodeTextFrame,
   resolvePublicFile,
   tailLines,

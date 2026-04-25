@@ -21,6 +21,9 @@ plugins/artibot/_Benchmarks/
 plugins/artibot/docs/
 plugins/artibot/coverage/
 plugins/artibot/image.png
+# Runtime state files (token usage, sessions, hashes) — never commit; caused rebase corruption v3.9.0→v3.9.1
+plugins/artibot/runtime/
+plugins/artibot/.claude-cache/
 NVIDIA Corporation/
 *.jpeg
 *.png

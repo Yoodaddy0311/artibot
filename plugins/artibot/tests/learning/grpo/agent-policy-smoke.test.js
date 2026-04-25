@@ -1,12 +1,12 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
-  softmax,
+  baselineAgentFor,
   clipWeights,
   computeAdvantages,
+  DEFAULTS,
   klFromPrev,
   klTotal,
-  baselineAgentFor,
-  DEFAULTS,
+  softmax,
 } from '../../../lib/learning/grpo/agent-policy.js';
 
 describe('agent-policy pure helpers (smoke)', () => {

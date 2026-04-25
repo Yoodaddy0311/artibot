@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  createUpgradeCheckMiddleware,
   __resetUpgradeCheckState,
+  createUpgradeCheckMiddleware,
 } from '../../../lib/runtime/middleware/upgrade-check.js';
 
 function makeConfig(overrides = {}) {

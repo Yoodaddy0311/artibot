@@ -13,30 +13,30 @@
  * `node:http` server bound to 127.0.0.1 on an ephemeral port.
  */
 
-import { describe, expect, it, beforeEach, afterEach } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import http from 'node:http';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 
 import {
-  createOtelExporter,
-  generateSpanId,
-  generateTraceId,
-  msToNano,
-  toAttributeValue,
-  toAttributes,
-  isLoopbackEndpoint,
-  buildResource,
-  buildSpan,
-  buildTracePayload,
+  _internals,
+  appendToBuffer,
   buildCounterMetric,
   buildGaugeMetric,
   buildMetricsPayload,
-  appendToBuffer,
+  buildResource,
+  buildSpan,
+  buildTracePayload,
+  createOtelExporter,
   drainBuffer,
+  generateSpanId,
+  generateTraceId,
+  isLoopbackEndpoint,
+  msToNano,
   resolveBufferPath,
-  _internals,
+  toAttributes,
+  toAttributeValue,
 } from '../../lib/observability/otel-exporter.js';
 
 // ---------------------------------------------------------------------------

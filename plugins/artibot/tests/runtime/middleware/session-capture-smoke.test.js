@@ -1,9 +1,9 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
   createAccumulator,
+  createSessionCaptureMiddleware,
   extractDelta,
   foldDelta,
-  createSessionCaptureMiddleware,
 } from '../../../lib/runtime/middleware/session-capture.js';
 
 describe('session-capture (smoke)', () => {

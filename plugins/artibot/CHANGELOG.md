@@ -9,6 +9,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.9.1] - 2026-04-25
+
+### Fixed
+- **5 pre-existing lint errors** (zero behavioral change, CI now green)
+  - `lib/learning/grpo/joint-policy.js` — replaced `!= null` / `== null` with explicit `!== null && !== undefined` for eqeqeq compliance (lines 453, 478)
+  - `lib/learning/memory/semantic.js` — removed unused `STORE_FILENAME` constant
+  - `lib/observability/otel-exporter.js` — dropped unused error binding `e` in `postJson` catch (ES2019 optional binding)
+  - `tests/learning/grpo/backfill.test.js` — annotated empty cleanup catch block
+
+### Hardened
+- **Rebase corruption guard** — added `plugins/artibot/runtime/` and `plugins/artibot/.claude-cache/` to `.gitignore`. Prevents the v3.9.0→v3.9.1 incident where a `.gitignore`-mismatched runtime file blocked rebase, then `git rebase --skip` silently dropped the marketplace submission commit.
+
+### Recovered
+- **Marketplace submission artifacts** restored from dangling commits (`87af057` + `aaa441f`) after accidental session interruption: `marketplace.json` (273 lines), `_marketplace/{README, SUBMISSION_CHECKLIST, demo-script, elevator-pitch, feature-matrix, screenshots/README, NEXT_ACTIONS}.md`, `scripts/marketplace-validate.mjs`, `tests/scripts/marketplace-validate.test.js` (33 tests), `_design/horizon-2-3-roadmap-2026-04-25.md` (361 lines), READMEs (root + artibot + cowork) marketplace prelude.
+
+### Documented
+- `_marketplace/NEXT_ACTIONS.md` updated with **PR #1584 auto-rejection** note — `anthropics/claude-plugins-official` is Anthropic-internal only; external submissions go through [clau.de/plugin-directory-submission](https://clau.de/plugin-directory-submission) (user action required).
+
+### Verification
+- Tests: 6,835/6,835 passing across 246 files (vitest)
+- Marketplace validate: 33/33 passing (`tests/scripts/marketplace-validate.test.js`)
+- Lint: 0 errors (was 5), 6 warnings remain (complexity-only, deferred)
+- Validate / validate:bin / skill:check / eval:runtime:check: all PASS
+- 3-file version sync: 3.9.1 (`plugin.json`, `package.json`, `marketplace.json`)
+
+### Compatibility
+- Zero public API changes; pure stabilization patch
+- Safe drop-in upgrade from 3.9.0
+
+---
+
 ## [3.9.0] - 2026-04-24
 
 ### Added

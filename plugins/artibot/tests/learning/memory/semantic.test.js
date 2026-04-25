@@ -163,7 +163,7 @@ describe('createSemanticStore', () => {
   it('find respects limit', async () => {
     const store = await makeStore();
     for (let i = 0; i < 5; i += 1) {
-      // eslint-disable-next-line no-await-in-loop
+       
       await store.put({ data: { key: `k${i}`, value: 'korean' } });
     }
     const results = await store.find('korean', { limit: 2 });

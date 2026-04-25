@@ -1,13 +1,13 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
+  createAggregator,
   DEFAULT_TOKEN_BUCKETS,
-  extractTokens,
   envTime,
-  groupSessions,
-  getToolUsageTop,
+  extractTokens,
   getErrorRateTrend,
   getTokenHistogram,
-  createAggregator,
+  getToolUsageTop,
+  groupSessions,
 } from '../../../lib/runtime/dashboard/aggregator.js';
 
 describe('dashboard/aggregator (smoke)', () => {
