@@ -42,7 +42,7 @@ async function handler(args = {}) {
   try {
     skills = await collectSkillDirs(root);
   } catch (err) {
-    throw new Error(`failed to read skills directory: ${err.message}`);
+    throw new Error(`failed to read skills directory: ${err.message}`, { cause: err });
   }
   let filtered = skills;
   if (typeof args.prefix === 'string' && args.prefix.length > 0) {

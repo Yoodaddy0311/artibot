@@ -495,7 +495,7 @@ export function createCurator(options) {
     const proposals = [];
     for (const file of files) {
       const full = path.join(stagingDir, file);
-      let content = '';
+      let content;
       try { content = await fs.readFile(full, 'utf-8'); } catch { continue; }
       const signature = file.replace(PROPOSAL_FILE_PREFIX, '').replace(/\.md$/, '');
       const nameMatch = /^name:\s*(.+)$/m.exec(content);

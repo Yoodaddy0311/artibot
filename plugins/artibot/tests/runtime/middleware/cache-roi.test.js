@@ -1,16 +1,16 @@
-import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  computeCacheMetrics,
-  createEmptySession,
-  foldMetrics,
-  resolveSessionPath,
-  persistSession,
-  createCacheRoiMiddleware,
+  _extractUsage,
   _PRICING,
+  _resolveModel,
   _resolvePricing,
   _safeInt,
-  _extractUsage,
-  _resolveModel,
+  computeCacheMetrics,
+  createCacheRoiMiddleware,
+  createEmptySession,
+  foldMetrics,
+  persistSession,
+  resolveSessionPath,
 } from '../../../lib/runtime/middleware/cache-roi.js';
 
 // ---------------------------------------------------------------------------

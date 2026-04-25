@@ -215,6 +215,36 @@ Full guide: [CONTRIBUTING.md](./CONTRIBUTING.md).
 
 ---
 
+## Privacy & Data Policy
+
+Artibot is **local-first by design**. All operational data — including learned
+patterns, GRPO policy weights, hierarchical memory, swarm telemetry, command
+history, hook checkpoints, and benchmark artifacts — is read from and written
+to your own filesystem under the plugin root or `~/.claude/artibot/`. The
+plugin never establishes outbound network connections to third-party telemetry,
+analytics, or remote storage backends. The only network traffic Claude Code
+itself makes is the Anthropic API calls you initiate; Artibot does not add to
+that surface.
+
+The hardened guarantees, enforced through code paths in `lib/privacy/`,
+extension manifest validation, and CI gates:
+
+| Surface | Enforcement |
+|---|---|
+| External DB / cross-org data egress | Hard-blocked. `agent-registry.js` rejects any extension whose `dataPolicy` is not `local` or `artibot-swarm` (see `tests/core/agent-registry.test.js`). |
+| PII / secrets in prompts and logs | `lib/privacy/pii-scrubber.js` + `pii-detector.js` redact emails, tokens, IPs, and homoglyph attacks before any persisted write. |
+| Cross-instance learning (Swarm) | Opt-in only. Anonymized hash-only signal exchange via `lib/swarm/`. Disable with `ARTIBOT_SWARM=0`. |
+| Cache ROI / token usage tracking | Local JSON only at `runtime/cache-roi-session.json`. Disable with `ARTIBOT_CACHE_ROI=0`. |
+| OpenTelemetry export | Disabled by default. Only emits when an OTEL collector endpoint is explicitly configured by the user. |
+
+**Bug reports & contributions** — please open an issue at
+<https://github.com/Yoodaddy0311/artibot/issues>. Issues are public; do not
+include credentials, internal paths, or proprietary code.
+
+**Author contact** — `artience.ads.team.tf@gmail.com`.
+
+---
+
 ## License
 
 MIT © Artience. See [LICENSE](./LICENSE).

@@ -1,10 +1,10 @@
-import { describe, expect, it, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import {
-  loadToolsets,
+  _resetToolsetCache,
   getToolsetForCommand,
   listCommandsInToolset,
   listToolsets,
-  _resetToolsetCache,
+  loadToolsets,
 } from '../../lib/core/toolset-loader.js';
 
 // These tests exercise the live `plugins/artibot/toolsets.json` manifest.

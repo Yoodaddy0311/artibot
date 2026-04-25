@@ -58,7 +58,7 @@ export async function collectRoutingStatus() {
   const config = await getGrpoRoutingConfig({ force: true });
   const policyPath = policyFilePath(config.policyPath);
   const policy = await readJson(policyPath);
-  let snapshots = [];
+  let snapshots;
   try {
     const entries = await readdir(snapshotsDir());
     snapshots = entries.filter((f) => f.endsWith('.json')).sort().reverse();

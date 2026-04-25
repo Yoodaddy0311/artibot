@@ -30,7 +30,7 @@
  * @param {object} s - snapshot.sources object
  * @returns {object} KPI entries to merge into summary
  */
-// eslint-disable-next-line complexity -- linear dispatch over many KPI types
+ 
 function extractKpis(s) {
   const kpis = {};
 

@@ -149,7 +149,7 @@ export function createSmartPipeline(middlewares, options = {}) {
    * @param {object} state - Pipeline state with context for routing
    * @returns {Promise<object>} Final state
    */
-  // eslint-disable-next-line complexity -- orchestrates 11 middleware stages with per-stage guards
+   
   async function run(state) {
     const routingContext = {
       intent: state.context?.routing?.intent || state.context?.intent?.best || '',

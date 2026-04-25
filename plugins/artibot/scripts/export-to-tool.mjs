@@ -184,7 +184,7 @@ export async function collectAgents(dir = AGENTS_DIR, filter = null) {
   try {
     entries = await readdir(dir);
   } catch (err) {
-    throw new Error(`cannot read agents dir ${dir}: ${err.message}`);
+    throw new Error(`cannot read agents dir ${dir}: ${err.message}`, { cause: err });
   }
   const filterSet = filter ? new Set(filter.split(",").map((s) => s.trim()).filter(Boolean)) : null;
   const out = [];
@@ -393,7 +393,7 @@ export async function runExport({ tool, out, agents, dryRun }, agentsDir = AGENT
     try {
       await mkdir(absOut, { recursive: true });
     } catch (err) {
-      throw new Error(`output dir creation failed: ${absOut}: ${err.message}`);
+      throw new Error(`output dir creation failed: ${absOut}: ${err.message}`, { cause: err });
     }
     for (const r of results) {
       const target = join(absOut, r.fileName);

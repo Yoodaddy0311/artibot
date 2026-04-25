@@ -24,7 +24,7 @@ async function handler(args = {}) {
   try {
     registry = await loadAgentRegistry();
   } catch (err) {
-    throw new Error(`failed to load agent registry: ${err.message}`);
+    throw new Error(`failed to load agent registry: ${err.message}`, { cause: err });
   }
   const names = await listAgents();
   const entries = names.map((name) => {

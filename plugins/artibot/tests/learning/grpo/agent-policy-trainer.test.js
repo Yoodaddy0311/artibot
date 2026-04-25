@@ -237,7 +237,7 @@ describe('runNightlyAgentTrainer', () => {
     expect(res.status).toBe('dry-run');
     expect(res.metrics.samples).toBeGreaterThan(0);
     // policy file should not exist
-    let existed = false;
+    let existed;
     try {
       await fs.access(pp);
       existed = true;

@@ -124,7 +124,7 @@ function computeConfidence(occurrences, distinctSessions, floor) {
 // ---------------------------------------------------------------------------
 
 function defaultRuntimePaths() {
-  let root = null;
+  let root;
   try { root = getPluginRoot(); } catch { root = process.cwd(); }
   return {
     rejectionsPath: path.join(root, 'runtime', 'promotion-rejections.json'),

@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  adjustSkillScore,
+  correlationOf,
   DEFAULTS,
   emptyPolicy,
-  normalizeEpisode,
-  correlationOf,
   familyEvidence,
-  adjustSkillScore,
+  normalizeEpisode,
   updateCorrelation,
 } from '../../../lib/learning/grpo/joint-policy.js';
 

@@ -712,7 +712,7 @@ export function createPolicyUpdater(options = {}) {
       const hasPrev = Boolean(prev);
 
       let theta;
-      let usedEpisodes = 0;
+      let usedEpisodes;
       let coldStart = false;
 
       if (!hasPrev) {

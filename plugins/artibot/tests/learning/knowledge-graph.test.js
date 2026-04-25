@@ -1,8 +1,8 @@
-import { describe, expect, it, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import {
-  NODE_TYPES,
-  EDGE_RELATIONS,
   createKnowledgeGraph,
+  EDGE_RELATIONS,
+  NODE_TYPES,
 } from '../../lib/learning/knowledge-graph.js';
 
 // ---------------------------------------------------------------------------

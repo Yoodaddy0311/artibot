@@ -103,7 +103,7 @@ async function runGit(argv, cwd) {
     return { stdout: String(stdout || ''), stderr: String(stderr || '') };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    throw new Error(`git-bridge: ${argv.join(' ')} failed: ${msg}`);
+    throw new Error(`git-bridge: ${argv.join(' ')} failed: ${msg}`, { cause: err });
   }
 }
 

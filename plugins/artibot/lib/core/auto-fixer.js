@@ -200,7 +200,7 @@ function runIteration(opts) {
  * @param {string|null} error
  * @returns {object}
  */
-// eslint-disable-next-line no-unused-vars, max-params
+// eslint-disable-next-line no-unused-vars
 function buildFixResult(success, iterations, history, finalStatus, reason, error = null) {
   return { success, iterations, history, finalStatus, reason, error };
 }
