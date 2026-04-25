@@ -43,11 +43,15 @@ Per user instruction, scheduled for **much later** — no current target date.
 
 ### C. Submission Follow-up
 
+> 🟢 **Major correction (2026-04-25)** — `anthropics/claude-code` repo's `.claude-plugin/marketplace.json` reveals: **plugin distribution is NOT via PR** to a central repo. Each project hosts its own `marketplace.json` and users add it via `claude plugin marketplace add owner/repo`. Artibot already has this at repo root and v3.9.1 sync is done — **users can install today**.
+
 | # | Action | Notes |
 |---|---|---|
-| **C0** | **🚨 Re-submit via official Anthropic form: [clau.de/plugin-directory-submission](https://clau.de/plugin-directory-submission)** | **PR #1584 was auto-rejected by bot** — `anthropics/claude-plugins-official` is for Anthropic team contribs only. **User must submit via this form** (login required) |
-| C1 | Monitor [PR #196](https://github.com/ComposioHQ/awesome-claude-plugins/pull/196) for merge | Active list, usually merged quickly |
-| C2 | After C0 review — verify plugin discoverable via `/plugin install artibot` in Claude Code | End-to-end check |
+| **C0** | **✅ Self-hosted marketplace LIVE** — `Yoodaddy0311/artibot` repo root has `.claude-plugin/marketplace.json` (synced to v3.9.1). Users install via:<br>`claude plugin marketplace add Yoodaddy0311/artibot`<br>`/plugin install artibot@artibot` | Fully autonomous; no Anthropic gatekeeping |
+| C1 | (optional) Submit to [clau.de/plugin-directory-submission](https://clau.de/plugin-directory-submission) for **Anthropic-Verified** badge | Form requires user login; only needed for the verified badge, not for distribution itself |
+| C2 | Monitor [PR #196](https://github.com/ComposioHQ/awesome-claude-plugins/pull/196) for merge | Active list, usually merged quickly |
+| C3 | Verify end-to-end: `claude plugin marketplace add Yoodaddy0311/artibot` works on a fresh machine | One-time smoke test |
+| ~~C4~~ | ~~PR #1584 to anthropics/claude-plugins-official~~ | ❌ Auto-rejected — that repo is Anthropic-internal only. Closed. |
 
 ### D. Additional Awesome Lists (parallel exposure)
 
@@ -78,6 +82,15 @@ Per user instruction, scheduled for **much later** — no current target date.
 |---|---|---|
 | G1 | Run `node scripts/export-to-tool.mjs --tool cursor --out ...` and publish as separate Cursor extension | Already has working converter |
 | G2 | Same for codex / opencode | Bonus distribution channels |
+
+### H. Observability — OTEL UI Integration (deferred per user)
+
+| # | Action | Status / Why deferred | When |
+|---|---|---|---|
+| H1 | Local OTEL collector (Jaeger or otel-collector-contrib) for trace ingest validation | Docker Desktop daemon must be started by user (GUI). Backend code (`lib/observability/otel-exporter.js`, `lib/runtime/middleware/otel-middleware.js`) ready. | When user starts Docker Desktop |
+| H2 | End-to-end smoke: set `ARTIBOT_OTEL_ENDPOINT=http://localhost:4318/v1/traces` → run pipeline → verify trace in Jaeger UI ([http://localhost:16686](http://localhost:16686)) | Needs H1 first | Same session as H1 |
+| H3 | **Multi-session dashboard OTEL panel** — extend `lib/runtime/dashboard/server.mjs` + `multi-session.html` with: (a) live trace stream, (b) span waterfall, (c) cache-ROI / token-usage gauges from OTEL metrics | New feature; ~1–2 days work; requires H1+H2 baseline | After H2 validates trace pipeline works |
+| H4 | OTEL config UI on dashboard (toggle enabled/endpoint/headers without editing JSON) | UX polish | After H3 |
 
 ---
 
