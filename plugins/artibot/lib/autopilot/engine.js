@@ -1,0 +1,544 @@
+/**
+ * Autopilot engine — Phase orchestrator.
+ *
+ * Important contract: the engine itself never invokes agents directly.
+ * Each Phase function returns an instruction object that the main Claude
+ * uses to issue the actual Task() / TeamCreate() / Bash() calls.
+ *
+ * Reference: PRD docs/PRD/autopilot-mode.md sections 5.4 and 13.2.
+ *
+ * @module lib/autopilot/engine
+ */
+
+import { generatePRD } from './prd-generator.js';
+import { generateReport } from './report-generator.js';
+import {
+  loadSession,
+  saveSession,
+  newSessionId,
+} from './session-store.js';
+import { shouldPause, pauseReason } from './safety.js';
+import { notifyCompletion, notifyPause } from './notification.js';
+import { appendEvent } from './telemetry.js';
+
+/**
+ * Best-effort telemetry tick. Never throws into Phase logic.
+ * @param {string} sessionId
+ * @param {object} event
+ */
+function tick(sessionId, event) {
+  try {
+    if (!sessionId) return;
+    appendEvent(sessionId, event);
+  } catch {
+    /* telemetry must not break engine flow */
+  }
+}
+
+/** Phase names in canonical order. */
+export const PHASES = Object.freeze([
+  'INTAKE',
+  'PLAN',
+  'EXECUTE',
+  'CROSS_CHECK',
+  'VERIFY',
+  'IMPROVE',
+  'REPORT',
+]);
+
+/**
+ * Persist a state mutation safely. Returns the saved state.
+ * @param {object} state
+ * @returns {object}
+ */
+function persist(state) {
+  state.updatedAt = new Date().toISOString();
+  saveSession(state);
+  return state;
+}
+
+/**
+ * Build the initial session state object.
+ * @param {{ task: string, mode?: string, options?: object, sessionId?: string }} args
+ * @returns {object}
+ */
+function makeInitialState({ task, mode, options, sessionId }) {
+  const id = sessionId || newSessionId();
+  return {
+    sessionId: id,
+    task: task || '',
+    mode: mode || 'default',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    options: { maxDuration: '4h', budget: 2_000_000, ...(options || {}) },
+    phase: 'INTAKE',
+    prdPath: null,
+    reportPath: null,
+    phases: [],
+    checkpoints: [],
+    queuedQuestions: [],
+    errors: [],
+    counters: { buildFailures: 0, testFailures: 0 },
+    tokenUsage: 0,
+    lastReviewedSHA: null,
+  };
+}
+
+/**
+ * Append a phase record. Mutates state.
+ * @param {object} state
+ * @param {object} phase
+ */
+function recordPhase(state, phase) {
+  state.phases = Array.isArray(state.phases) ? state.phases : [];
+  state.phases.push({ ts: new Date().toISOString(), ...phase });
+}
+
+/**
+ * Check if the session should freeze; returns a pause instruction when true.
+ * @param {object} state
+ * @returns {object|null} pause instruction or null
+ */
+function maybePause(state) {
+  if (!shouldPause(state)) return null;
+  const reason = pauseReason(state) || 'safety-trigger';
+  if (state.phase && state.phase !== 'PAUSED') {
+    state.lastPhase = state.phase;
+  }
+  state.phase = 'PAUSED';
+  state.pausedReason = reason;
+  persist(state);
+  tick(state.sessionId, {
+    phase: state.lastPhase || 'PAUSED',
+    type: 'pause',
+    level: 'warn',
+    message: `Autopilot paused: ${reason}`,
+    data: { reason },
+  });
+  const note = notifyPause(state.sessionId, reason);
+  return {
+    type: 'pause',
+    sessionId: state.sessionId,
+    reason,
+    notification: note,
+    instructions: [
+      'Autopilot 세션이 자동 일시정지되었습니다.',
+      `사유: ${reason}`,
+      '사용자 결정 후 /autopilot:resume <sessionId> 로 재개할 수 있습니다.',
+    ],
+  };
+}
+
+/**
+ * Phase 0 — Intake: generate PRD via prd-generator.
+ * @param {object} state
+ * @returns {object} instruction
+ */
+export function runPhase0Intake(state) {
+  state.phase = 'INTAKE';
+  tick(state.sessionId, { phase: 'INTAKE', type: 'phase-start', level: 'info', message: 'Phase 0 INTAKE 시작' });
+  const paused = maybePause(state);
+  if (paused) return paused;
+  const { filePath, slug } = generatePRD({
+    task: state.task,
+    sessionId: state.sessionId,
+    options: { ...state.options, mode: state.mode },
+  });
+  state.prdPath = filePath;
+  recordPhase(state, { name: 'INTAKE', status: 'done', artifact: filePath, slug });
+  persist(state);
+  tick(state.sessionId, { phase: 'INTAKE', type: 'phase-end', level: 'info', message: 'Phase 0 INTAKE 완료', data: { prdPath: filePath } });
+  return {
+    type: 'phase-result',
+    phase: 'INTAKE',
+    sessionId: state.sessionId,
+    prdPath: filePath,
+    nextPhase: 'PLAN',
+  };
+}
+
+/**
+ * Phase 1 — Plan: instruction for the main Claude to delegate to planner agent.
+ * @param {object} state
+ * @returns {object}
+ */
+export function runPhase1Plan(state) {
+  state.phase = 'PLAN';
+  tick(state.sessionId, { phase: 'PLAN', type: 'phase-start', level: 'info', message: 'Phase 1 PLAN 시작' });
+  const paused = maybePause(state);
+  if (paused) return paused;
+  recordPhase(state, { name: 'PLAN', status: 'queued' });
+  persist(state);
+  tick(state.sessionId, { phase: 'PLAN', type: 'phase-end', level: 'info', message: 'Phase 1 PLAN 위임 완료' });
+  return {
+    type: 'delegate',
+    phase: 'PLAN',
+    sessionId: state.sessionId,
+    agent: 'planner',
+    nextPhase: 'EXECUTE',
+    instructions: [
+      `Autopilot 세션 ${state.sessionId} Phase 1.`,
+      `PRD: ${state.prdPath}`,
+      '계획 산출물: 작업 단위 분해, 위험 식별, 병렬화 가능 여부 표.',
+      '결과는 markdown 표 + 우선순위로 반환.',
+    ],
+    promptFor: 'planner',
+  };
+}
+
+/**
+ * Phase 2 — Execute: instruction to spin up a parallel team.
+ * @param {object} state
+ * @returns {object}
+ */
+export function runPhase2Execute(state) {
+  state.phase = 'EXECUTE';
+  tick(state.sessionId, { phase: 'EXECUTE', type: 'phase-start', level: 'info', message: 'Phase 2 EXECUTE 시작' });
+  const paused = maybePause(state);
+  if (paused) return paused;
+  recordPhase(state, { name: 'EXECUTE', status: 'queued' });
+  persist(state);
+  tick(state.sessionId, { phase: 'EXECUTE', type: 'phase-end', level: 'info', message: 'Phase 2 EXECUTE 위임 완료' });
+  return {
+    type: 'team-create',
+    phase: 'EXECUTE',
+    sessionId: state.sessionId,
+    nextPhase: 'CROSS_CHECK',
+    instructions: [
+      `Autopilot 세션 ${state.sessionId} Phase 2.`,
+      'TeamCreate 로 병렬 teammate 를 생성하고 Phase 1 의 작업 단위를 분배.',
+      '각 teammate 는 본 작업 디렉토리만 수정. 외부 송신/destructive action 금지.',
+      'WIP commit 30분 주기. checkpoint SHA 를 session.checkpoints 에 기록.',
+    ],
+    teamHint: { parallel: true, leadAgent: 'orchestrator' },
+  };
+}
+
+/**
+ * Phase 3 — Cross-check: instruct reviewer agents.
+ * @param {object} state
+ * @returns {object}
+ */
+export function runPhase3CrossCheck(state) {
+  state.phase = 'CROSS_CHECK';
+  tick(state.sessionId, { phase: 'CROSS_CHECK', type: 'phase-start', level: 'info', message: 'Phase 3 CROSS_CHECK 시작' });
+  const paused = maybePause(state);
+  if (paused) return paused;
+  recordPhase(state, { name: 'CROSS_CHECK', status: 'queued' });
+  persist(state);
+  tick(state.sessionId, { phase: 'CROSS_CHECK', type: 'phase-end', level: 'info', message: 'Phase 3 CROSS_CHECK 위임 완료' });
+  return {
+    type: 'delegate',
+    phase: 'CROSS_CHECK',
+    sessionId: state.sessionId,
+    agents: ['code-reviewer', 'spec-reviewer'],
+    nextPhase: 'VERIFY',
+    instructions: [
+      `Autopilot 세션 ${state.sessionId} Phase 3.`,
+      'Phase 2 의 변경 파일에 대해 code-reviewer + spec-reviewer 를 동시 소환.',
+      '결론을 state.crossCheck.verdict ("pass"|"warn"|"fail") 와 notes 로 기록.',
+    ],
+  };
+}
+
+/**
+ * Phase 4 — Verify: run npm run ci; on failure, summon build-error-resolver.
+ * @param {object} state
+ * @returns {object}
+ */
+export function runPhase4Verify(state) {
+  state.phase = 'VERIFY';
+  tick(state.sessionId, { phase: 'VERIFY', type: 'phase-start', level: 'info', message: 'Phase 4 VERIFY 시작' });
+  const paused = maybePause(state);
+  if (paused) return paused;
+  recordPhase(state, { name: 'VERIFY', status: 'queued' });
+  persist(state);
+  tick(state.sessionId, { phase: 'VERIFY', type: 'phase-end', level: 'info', message: 'Phase 4 VERIFY 위임 완료' });
+  return {
+    type: 'verify',
+    phase: 'VERIFY',
+    sessionId: state.sessionId,
+    nextPhase: 'IMPROVE',
+    command: 'npm run ci',
+    onFailure: {
+      agent: 'build-error-resolver',
+      retryLimit: 3,
+      escalateTo: 'pause',
+    },
+    instructions: [
+      `Autopilot 세션 ${state.sessionId} Phase 4.`,
+      'Bash 로 npm run ci 실행. 결과(lint/typecheck/test/build) 를 state.verifyResult 에 기록.',
+      '실패 시 build-error-resolver 호출. 3회 재시도 후에도 실패면 pause.',
+      '실패할 때마다 state.counters.buildFailures 또는 testFailures 증가.',
+    ],
+  };
+}
+
+/**
+ * Phase 5 — Improve: refactor-cleaner + performance-engineer analysis.
+ * @param {object} state
+ * @returns {object}
+ */
+export function runPhase5Improve(state) {
+  state.phase = 'IMPROVE';
+  tick(state.sessionId, { phase: 'IMPROVE', type: 'phase-start', level: 'info', message: 'Phase 5 IMPROVE 시작' });
+  const paused = maybePause(state);
+  if (paused) return paused;
+  recordPhase(state, { name: 'IMPROVE', status: 'queued' });
+  persist(state);
+  tick(state.sessionId, { phase: 'IMPROVE', type: 'phase-end', level: 'info', message: 'Phase 5 IMPROVE 위임 완료' });
+  return {
+    type: 'delegate',
+    phase: 'IMPROVE',
+    sessionId: state.sessionId,
+    agents: ['refactor-cleaner', 'performance-engineer'],
+    nextPhase: 'REPORT',
+    instructions: [
+      `Autopilot 세션 ${state.sessionId} Phase 5.`,
+      'refactor-cleaner: 중복/스타일/dead-code 제안.',
+      'performance-engineer: 핫패스/메모리/캐시 제안.',
+      '제안은 state.improvements (array of string) 와 state.futurePlans 에 기록.',
+    ],
+  };
+}
+
+/**
+ * Phase 6 — Report: generate completion report and notify.
+ * @param {object} state
+ * @returns {object}
+ */
+export function runPhase6Report(state) {
+  state.phase = 'REPORT';
+  tick(state.sessionId, { phase: 'REPORT', type: 'phase-start', level: 'info', message: 'Phase 6 REPORT 시작' });
+  const paused = maybePause(state);
+  if (paused) return paused;
+  state.completedAt = new Date().toISOString();
+  const { filePath } = generateReport(state.sessionId);
+  state.reportPath = filePath;
+  state.phase = 'COMPLETED';
+  recordPhase(state, { name: 'REPORT', status: 'done', artifact: filePath });
+  persist(state);
+  tick(state.sessionId, { phase: 'REPORT', type: 'phase-end', level: 'info', message: 'Phase 6 REPORT 완료', data: { reportPath: filePath } });
+  tick(state.sessionId, { phase: 'COMPLETED', type: 'session-complete', level: 'info', message: 'Autopilot 세션 완료' });
+  const note = notifyCompletion(state.sessionId, 'COMPLETED');
+  return {
+    type: 'phase-result',
+    phase: 'REPORT',
+    sessionId: state.sessionId,
+    reportPath: filePath,
+    notification: note,
+    nextPhase: null,
+  };
+}
+
+/**
+ * Start a new autopilot session.
+ * Persists initial state and runs Phase 0 (PRD).
+ * Returns sessionId + prdPath; subsequent phases are driven by the main Claude
+ * via resumeAutopilot or direct phase calls.
+ *
+ * @param {{ task: string, mode?: string, options?: object, sessionId?: string }} args
+ * @returns {Promise<{ sessionId: string, prdPath: string, phase: string, instruction: object, paused?: boolean, reason?: string }>}
+ */
+export async function startAutopilot({ task, mode, options, sessionId } = {}) {
+  if (!task || typeof task !== 'string') {
+    throw new TypeError('task is required');
+  }
+  const state = makeInitialState({ task, mode, options, sessionId });
+  persist(state);
+  const instruction = runPhase0Intake(state);
+  const base = {
+    sessionId: state.sessionId,
+    prdPath: state.prdPath,
+    phase: state.phase,
+    instruction,
+  };
+  if (instruction.type === 'pause') {
+    return { ...base, paused: true, reason: instruction.reason };
+  }
+  return base;
+}
+
+const PHASE_TO_RUNNER = Object.freeze({
+  INTAKE: runPhase0Intake,
+  PLAN: runPhase1Plan,
+  EXECUTE: runPhase2Execute,
+  CROSS_CHECK: runPhase3CrossCheck,
+  VERIFY: runPhase4Verify,
+  IMPROVE: runPhase5Improve,
+  REPORT: runPhase6Report,
+});
+
+/**
+ * Determine the next phase to run from the current phase label.
+ * @param {string} current
+ * @returns {string|null}
+ */
+function nextPhaseAfter(current) {
+  if (current === 'COMPLETED' || current === 'ABORTED') return null;
+  if (current === 'PAUSED') return null;
+  const idx = PHASES.indexOf(current);
+  if (idx === -1) return 'PLAN';
+  if (idx >= PHASES.length - 1) return null;
+  return PHASES[idx + 1];
+}
+
+/**
+ * Resume a session by running its next phase exactly once.
+ * Returns the phase label it just attempted plus a status string.
+ * @param {string} sessionId
+ * @returns {Promise<{ phase: string, status: string, instruction?: object }>}
+ */
+export async function resumeAutopilot(sessionId) {
+  if (!sessionId) throw new TypeError('sessionId required');
+  const state = loadSession(sessionId);
+  if (!state) throw new Error(`session not found: ${sessionId}`);
+  if (state.phase === 'COMPLETED') return { phase: 'COMPLETED', status: 'noop' };
+  if (state.phase === 'ABORTED') return { phase: 'ABORTED', status: 'noop' };
+
+  const target = state.phase === 'PAUSED'
+    ? state.lastPhase || 'PLAN'
+    : nextPhaseAfter(state.phase) || state.phase;
+  const runner = PHASE_TO_RUNNER[target];
+  if (!runner) {
+    return { phase: state.phase, status: 'unknown-phase' };
+  }
+  const instruction = runner(state);
+  return {
+    phase: state.phase,
+    status: instruction?.type === 'pause' ? 'paused' : 'ok',
+    instruction,
+  };
+}
+
+/**
+ * Get current session status. If sessionId omitted, returns the most-recent session.
+ * @param {string} [sessionId]
+ * @returns {Promise<object|null>}
+ */
+export async function getStatus(sessionId) {
+  if (sessionId) return loadSession(sessionId);
+  // Fallback: pick the most recent session by createdAt.
+  const { listSessions } = await import('./session-store.js');
+  const ids = listSessions();
+  if (!ids.length) return null;
+  let best = null;
+  for (const id of ids) {
+    const s = loadSession(id);
+    if (!s) continue;
+    if (!best || (s.createdAt || '') > (best.createdAt || '')) best = s;
+  }
+  return best;
+}
+
+/**
+ * Abort an active session. Generates a final report when graceful.
+ * @param {string} sessionId
+ * @param {{ graceful?: boolean }} [opts]
+ * @returns {Promise<{ sessionId: string, status: string, reportPath?: string }>}
+ */
+export async function abortAutopilot(sessionId, { graceful = true } = {}) {
+  if (!sessionId) throw new TypeError('sessionId required');
+  const state = loadSession(sessionId);
+  if (!state) throw new Error(`session not found: ${sessionId}`);
+  state.phase = 'ABORTED';
+  state.abortedAt = new Date().toISOString();
+  state.summary = state.summary || `Aborted ${graceful ? 'gracefully' : 'forcefully'} by user.`;
+  persist(state);
+  tick(sessionId, {
+    phase: 'ABORTED',
+    type: 'abort',
+    level: 'warn',
+    message: `Autopilot ${graceful ? 'graceful' : 'forced'} abort`,
+    data: { graceful },
+  });
+  let reportPath = null;
+  if (graceful) {
+    try {
+      const r = generateReport(sessionId);
+      reportPath = r.filePath;
+      state.reportPath = reportPath;
+      persist(state);
+    } catch {
+      /* report generation best-effort on abort */
+    }
+  }
+  return { sessionId, status: 'ABORTED', reportPath };
+}
+
+export { notifyCompletion, notifyPause };
+
+/**
+ * Append a labeled phase result to state.phases. Surfaced for commands/autopilot.md.
+ * @param {object} state
+ * @param {{ phase: string, status: string, [k: string]: any }} payload
+ * @returns {object} mutated state
+ */
+export function recordPhaseResult(state, payload = {}) {
+  if (!state) throw new TypeError('state required');
+  const { phase, status, ...rest } = payload;
+  recordPhase(state, { name: phase, status, ...rest });
+  persist(state);
+  return state;
+}
+
+/**
+ * Append a checkpoint (typically a git SHA) to state.checkpoints.
+ * @param {object} state
+ * @param {{ sha?: string, label?: string, [k: string]: any }} payload
+ * @returns {object} mutated state
+ */
+export function recordCheckpoint(state, payload = {}) {
+  if (!state) throw new TypeError('state required');
+  const { sha = null, label = null, ...rest } = payload;
+  state.checkpoints = Array.isArray(state.checkpoints) ? state.checkpoints : [];
+  state.checkpoints.push({
+    ts: new Date().toISOString(),
+    sha,
+    phase: state.phase,
+    label,
+    ...rest,
+  });
+  persist(state);
+  return state;
+}
+
+/**
+ * Classify a verify failure for downstream agent routing (Phase 4 onFailure path).
+ * @param {{ command?: string, exitCode?: number|null, stderr?: string, stdout?: string }} payload
+ * @returns {'typecheck'|'test'|'lint'|'build'|'unknown-failure'|'unknown'}
+ */
+export function classifyFailure(payload = {}) {
+  const out = String(payload.stderr || payload.stdout || '').toLowerCase();
+  if (/(?:typescript|\btsc\b|type error|ts\d{4})/i.test(out)) return 'typecheck';
+  if (/(?:vitest|jest|\bspec\b|\btest\b)/i.test(out)) return 'test';
+  if (/(?:eslint|lint error)/i.test(out)) return 'lint';
+  if (/(?:webpack|rollup|esbuild|tsup|next build|\bbuild\b)/i.test(out)) return 'build';
+  if (payload.exitCode != null && payload.exitCode !== 0) return 'unknown-failure';
+  return 'unknown';
+}
+
+/**
+ * Record a secret-leak event and freeze the session (PAUSED).
+ * @param {object} state
+ * @param {{ kind?: string, detail?: any, location?: string }} leak
+ * @returns {object} mutated state
+ */
+export function recordSecretLeak(state, leak = {}) {
+  if (!state) throw new TypeError('state required');
+  const { kind = 'secret', detail = null, location = null } = leak;
+  state.errors = Array.isArray(state.errors) ? state.errors : [];
+  state.errors.push({
+    ts: new Date().toISOString(),
+    kind,
+    detail,
+    location,
+  });
+  if (state.phase && state.phase !== 'PAUSED') {
+    state.lastPhase = state.phase;
+  }
+  state.phase = 'PAUSED';
+  state.pausedReason = `secret-leak: ${kind}`;
+  persist(state);
+  return state;
+}

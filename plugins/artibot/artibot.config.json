@@ -688,6 +688,36 @@
       "tasks": "~/.claude/tasks/{team-name}/"
     }
   },
+  "autopilot": {
+    "enabled": true,
+    "defaultMode": "default",
+    "modes": ["default", "night", "plan"],
+    "limits": {
+      "maxDuration": "4h",
+      "maxBudget": 2000000,
+      "maxBuildFailures": 3,
+      "maxTestFailures": 5,
+      "contextThreshold": 0.85,
+      "checkpointInterval": "30m"
+    },
+    "safety": {
+      "pauseOnDanger": true,
+      "blockSecretLeak": true,
+      "blockExternalSend": true,
+      "dangerousPatterns": ["force-push", "branch-delete", "db-drop", "rm-rf-root"]
+    },
+    "phases": ["INTAKE", "PLAN", "EXECUTE", "CROSS_CHECK", "VERIFY", "IMPROVE", "REPORT"],
+    "paths": {
+      "prdDir": "docs/PRD/",
+      "reportDir": "reports/AUTOPILOT/",
+      "sessionDir": "runtime/autopilot/"
+    },
+    "notification": {
+      "onCompletion": true,
+      "onPause": true,
+      "channel": "PushNotification"
+    }
+  },
   "swarm": {
     "enabled": true,
     "optIn": true,

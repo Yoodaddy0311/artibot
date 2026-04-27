@@ -7,6 +7,10 @@ on:
       - "plugins/artibot/agents/**"
       - "plugins/artibot/skills/**"
       - "plugins/artibot/commands/**"
+      - "plugins/artibot-cowork/.claude-plugin/plugin.json"
+      - "plugins/artibot-cowork/agents/**"
+      - "plugins/artibot-cowork/skills/**"
+      - "plugins/artibot-cowork/commands/**"
       - ".github/workflows/plugin-validate.yml"
   pull_request:
     paths:
@@ -14,6 +18,10 @@ on:
       - "plugins/artibot/agents/**"
       - "plugins/artibot/skills/**"
       - "plugins/artibot/commands/**"
+      - "plugins/artibot-cowork/.claude-plugin/plugin.json"
+      - "plugins/artibot-cowork/agents/**"
+      - "plugins/artibot-cowork/skills/**"
+      - "plugins/artibot-cowork/commands/**"
       - ".github/workflows/plugin-validate.yml"
   workflow_dispatch:
 
@@ -22,21 +30,26 @@ permissions:
 
 jobs:
   plugin-structure:
-    name: Validate plugin.json structure
+    name: Validate ${{ matrix.plugin }} plugin.json structure
     runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        plugin: [artibot, artibot-cowork]
 
     defaults:
       run:
-        working-directory: plugins/artibot
+        working-directory: plugins/${{ matrix.plugin }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
 
-      - name: Setup Node.js 20
+      - name: Setup Node.js 22
         uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Validate plugin.json schema
         run: |

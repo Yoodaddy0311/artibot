@@ -1,0 +1,156 @@
+name: Release Cowork
+
+on:
+  push:
+    tags:
+      - "cowork-v*"
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    name: Validate before cowork release
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: plugins/artibot-cowork
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - name: Verify version matches tag
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#cowork-v}"
+          PLUGIN_VERSION=$(node -e "console.log(JSON.parse(require('fs').readFileSync('.claude-plugin/plugin.json','utf-8')).version)")
+          if [ "$TAG_VERSION" != "$PLUGIN_VERSION" ]; then
+            echo "::error::Tag version ($TAG_VERSION) does not match plugin.json version ($PLUGIN_VERSION)"
+            exit 1
+          fi
+          echo "Version verified: $TAG_VERSION"
+
+      - name: Verify CHANGELOG entry exists
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#cowork-v}"
+          if ! grep -q "^## \[${TAG_VERSION}\]" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md missing entry for [${TAG_VERSION}]"
+            exit 1
+          fi
+          echo "CHANGELOG entry found for ${TAG_VERSION}"
+
+      - name: Validate plugin.json schema
+        run: |
+          node -e "
+          const fs = require('fs');
+          const plugin = JSON.parse(fs.readFileSync('.claude-plugin/plugin.json', 'utf-8'));
+          const required = ['name', 'version', 'description'];
+          let errors = 0;
+          for (const field of required) {
+            if (!plugin[field]) { console.error('FAIL: missing', field); errors++; }
+          }
+          const semver = /^\d+\.\d+\.\d+(-[\w.]+)?$/;
+          if (plugin.version && !semver.test(plugin.version)) {
+            console.error('FAIL: invalid version', plugin.version); errors++;
+          }
+          if (errors > 0) process.exit(1);
+          console.log('PASS:', plugin.name, plugin.version);
+          "
+
+      - name: Validate skills directory structure
+        run: |
+          node -e "
+          const fs = require('fs');
+          const path = require('path');
+          const skillsDir = 'skills';
+          if (!fs.existsSync(skillsDir)) { process.exit(0); }
+          const dirs = fs.readdirSync(skillsDir).filter(e =>
+            fs.statSync(path.join(skillsDir, e)).isDirectory()
+          );
+          let errors = 0;
+          for (const dir of dirs) {
+            const skillMd = path.join(skillsDir, dir, 'SKILL.md');
+            if (!fs.existsSync(skillMd)) {
+              console.error('FAIL:', dir, 'missing SKILL.md');
+              errors++;
+            }
+          }
+          if (errors > 0) process.exit(1);
+          console.log('All', dirs.length, 'skill directories valid.');
+          "
+
+      - name: Validate commands frontmatter
+        run: |
+          node -e "
+          const fs = require('fs');
+          const path = require('path');
+          const cmdsDir = 'commands';
+          if (!fs.existsSync(cmdsDir)) { process.exit(0); }
+          const files = fs.readdirSync(cmdsDir).filter(f => f.endsWith('.md'));
+          let errors = 0;
+          for (const file of files) {
+            const content = fs.readFileSync(path.join(cmdsDir, file), 'utf-8');
+            if (!/^---\r?\n[\s\S]*?\r?\n---/.test(content)) {
+              console.error('FAIL:', file, 'missing frontmatter');
+              errors++;
+            }
+          }
+          if (errors > 0) process.exit(1);
+          console.log('All', files.length, 'command files valid.');
+          "
+
+  release:
+    name: Create GitHub Release (cowork)
+    needs: validate
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Extract changelog section
+        id: changelog
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#cowork-v}"
+          CHANGELOG_FILE="plugins/artibot-cowork/CHANGELOG.md"
+
+          # Extract section between ## [VERSION] and the next ## [
+          SECTION=$(awk -v ver="$TAG_VERSION" '
+            $0 ~ "^## \\[" ver "\\]" { found=1; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' "$CHANGELOG_FILE")
+
+          if [ -z "$SECTION" ]; then
+            SECTION="See CHANGELOG.md for details."
+          fi
+
+          {
+            echo "changes<<CHANGES_EOF"
+            echo "$SECTION"
+            echo "CHANGES_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Artibot Cowork ${{ github.ref_name }}
+          body: |
+            ## Artibot Cowork ${{ github.ref_name }}
+
+            ${{ steps.changelog.outputs.changes }}
+
+            ---
+            *Cowork-optimized slim build of Artibot — marketing, content, data, design skills for knowledge workers using Claude Cowork.*
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-rc') || contains(github.ref_name, '-beta') || contains(github.ref_name, '-alpha') }}
