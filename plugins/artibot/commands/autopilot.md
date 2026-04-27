@@ -20,6 +20,7 @@ Autonomous long-running mode for **3~4시간 자리 비움 / 야간 자율 작�
 | `/autopilot:status [session-id]` | 진행 Phase / 큐 / 토큰 / 위험 상태 조회 | read-only |
 | `/autopilot:abort <session-id>` | 마지막 SHA 보존 후 graceful shutdown | safety check 후 종료 |
 | `/autopilot:tail [session-id] [--lines N]` | Live Telemetry — 마지막 N개 이벤트 표 출력 (기본 50, --follow 시 1초 폴링) | read-only |
+| `/autopilot:list [--orphans]` | 활성 세션 + worktree + lock 상태 표 출력 | read-only |
 
 ## Common Options
 
@@ -30,13 +31,15 @@ Autonomous long-running mode for **3~4시간 자리 비움 / 야간 자율 작�
 | `--no-notify` | off | 완료 알림 비활성화 |
 | `--no-team` | off | 병렬 팀 비활성화 (단일 메인 실행) |
 | `--checkpoint <interval>` | `30m` | 체크포인트(WIP commit) 주기 |
+| `--worktree` | off | git worktree 격리 사용 (P0-3, 기본 브랜치: `autopilot/<sessionId>`) |
+| `--detached` | off | worktree를 detached HEAD로 생성 (advanced) |
 
 ## Arguments
 
 Parse `$ARGUMENTS`:
 - `task-description`: 자율 처리할 작업 설명 (필수, `:resume`/`:status`/`:abort` 제외)
-- subcommand 접미어: `night` / `plan` / `resume` / `status` / `abort` 중 하나 (없으면 `default`)
-- `--max`, `--budget`, `--no-notify`, `--no-team`, `--checkpoint`: 위 표 참조
+- subcommand 접미어: `night` / `plan` / `resume` / `status` / `abort` / `list` 중 하나 (없으면 `default`)
+- `--max`, `--budget`, `--no-notify`, `--no-team`, `--checkpoint`, `--worktree`, `--detached`: 위 표 참조
 - `session-id`: `:resume` / `:abort` / `:status` 에서 사용 (`ap-YYYYMMDD-HHMMSS` 형식)
 
 ## Execution Flow (메인 Claude가 받았을 때 수행할 절차)
@@ -61,6 +64,7 @@ Parse `$ARGUMENTS`:
 | `status` | `engine.getStatus(sessionId?)` → `SessionState` | 상태 표 출력 후 종료 |
 | `abort` | `engine.abortAutopilot(sessionId, { graceful: true })` → `AbortResult` | 결과 표 출력 후 종료 |
 | `tail` | `engine.readEvents(sessionId, { tail: lines })` → `Event[]` | 이벤트 표 출력 후 종료 (PRD v4.1 P0-2 Live Telemetry) |
+| `list` | `engine.listActiveWorktrees()` + `engine.listSessions()` 조합 → GFM 표 출력 후 종료 |
 
 ### Step 3 — Phase Execution Loop
 
@@ -119,6 +123,32 @@ Phase 6 완료 후:
 4. `--follow` 옵션 사용 시 `engine.tailEventsStream(sessionId)` 로 1초 폴링하며 새 이벤트를 한 줄씩 추가 출력. AbortSignal 로 중단 가능.
 
 DATA POLICY: ndjson 파일은 로컬에만 존재. 외부 송신 없음.
+
+## Multi-session Orchestration (P0-3)
+
+`--worktree` 옵션 시 git worktree로 세션 격리 + 파일 lock으로 동시 N 자율 세션 안전 운영.
+
+### 동작
+
+1. Phase 2 EXECUTE 시 `createWorktree(sessionId)` → `runtime/autopilot/worktrees/<sessionId>` 또는 ASCII tmpdir(한글 cwd 회피)
+2. 기본 branched: `autopilot/<sessionId>` 브랜치 생성. `--detached` 시 detached HEAD
+3. featureKey 단위 lock — 동일 feature에 동시 진입 시 두 번째 세션은 `ok=false` + holder 정보
+4. abort 시 worktree 자동 제거 + lock 자동 해제 (best-effort)
+
+### 한계
+
+- 한글 cwd 환경에서 worktree path는 ASCII tmpdir fallback (사용자 작업디렉토리 외부)
+- worktree 생성 실패 시 graceful fallback (워크트리 미사용 + warn 텔레메트리)
+- pruneOrphans는 startup 권장 (`/autopilot:list --orphans`로 확인)
+
+### `/autopilot:list` 출력 예시
+
+| sessionId | mode | phase | worktree | lock | branch |
+|-----------|------|-------|----------|------|--------|
+| ap-20260427-130421 | night | EXECUTE | runtime/autopilot/worktrees/ap-... | locked | autopilot/ap-... |
+| ap-20260427-110001 | default | COMPLETED | (none) | (released) | - |
+
+`--orphans`: session-store에는 없지만 worktree 디렉토리만 남은 항목 표시
 
 ## Safety Policy (PRD §5.5)
 

@@ -21,6 +21,12 @@ import { shouldPause, pauseReason } from './safety.js';
 import { notifyCompletion, notifyPause } from './notification.js';
 import { appendEvent } from './telemetry.js';
 import { recallLessons, appendLesson, extractKey } from './memory.js';
+import {
+  createWorktree,
+  removeWorktree,
+  listWorktrees,
+} from './worktree-manager.js';
+import { releaseLock } from './lock.js';
 
 /**
  * Best-effort telemetry tick. Never throws into Phase logic.
@@ -97,6 +103,9 @@ function makeInitialState({ task, mode, options, sessionId }) {
     counters: { buildFailures: 0, testFailures: 0 },
     tokenUsage: 0,
     lastReviewedSHA: null,
+    worktreePath: null,
+    lockPath: null,
+    parentSession: options?.parentSession || null,
   };
 }
 
@@ -233,10 +242,43 @@ export function runPhase2Execute(state) {
   tick(state.sessionId, { phase: 'EXECUTE', type: 'phase-start', level: 'info', message: 'Phase 2 EXECUTE 시작' });
   const paused = maybePause(state);
   if (paused) return paused;
+
+  let worktreePath = null;
+  if (state.options?.useWorktree) {
+    try {
+      const r = createWorktree(state.sessionId);
+      if (r.ok) {
+        worktreePath = r.path;
+        state.worktreePath = r.path;
+        tick(state.sessionId, {
+          phase: 'EXECUTE',
+          type: 'worktree-created',
+          level: 'info',
+          message: `worktree=${r.path}`,
+          data: { branch: r.branch },
+        });
+      } else {
+        tick(state.sessionId, {
+          phase: 'EXECUTE',
+          type: 'worktree-fallback',
+          level: 'warn',
+          message: r.error || 'worktree create failed',
+        });
+      }
+    } catch (err) {
+      tick(state.sessionId, {
+        phase: 'EXECUTE',
+        type: 'worktree-fallback',
+        level: 'warn',
+        message: err?.message || 'worktree create threw',
+      });
+    }
+  }
+
   recordPhase(state, { name: 'EXECUTE', status: 'queued' });
   persist(state);
   tick(state.sessionId, { phase: 'EXECUTE', type: 'phase-end', level: 'info', message: 'Phase 2 EXECUTE 위임 완료' });
-  return {
+  const instruction = {
     type: 'team-create',
     phase: 'EXECUTE',
     sessionId: state.sessionId,
@@ -249,6 +291,11 @@ export function runPhase2Execute(state) {
     ],
     teamHint: { parallel: true, leadAgent: 'orchestrator' },
   };
+  if (worktreePath) {
+    instruction.worktreePath = worktreePath;
+    instruction.cwdHint = worktreePath;
+  }
+  return instruction;
 }
 
 /**
@@ -506,10 +553,37 @@ export async function abortAutopilot(sessionId, { graceful = true } = {}) {
       /* report generation best-effort on abort */
     }
   }
+  try {
+    if (state.worktreePath) removeWorktree(sessionId, { force: !graceful });
+  } catch {
+    /* cleanup non-blocking */
+  }
+  try {
+    if (state.featureKey) releaseLock(state.featureKey, sessionId);
+  } catch {
+    /* cleanup non-blocking */
+  }
   return { sessionId, status: 'ABORTED', reportPath };
 }
 
 export { notifyCompletion, notifyPause };
+
+/**
+ * List active autopilot worktrees as a normalized array.
+ * @returns {Array<{path: string, branch: string|null, sessionId: string|null}>}
+ */
+export function listActiveWorktrees() {
+  try {
+    const trees = listWorktrees({ autopilotOnly: true });
+    return trees.map((t) => ({
+      path: t.path,
+      branch: t.branch,
+      sessionId: t.sessionId || null,
+    }));
+  } catch {
+    return [];
+  }
+}
 
 /**
  * Append a labeled phase result to state.phases. Surfaced for commands/autopilot.md.

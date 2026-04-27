@@ -17,8 +17,26 @@ export {
   runPhase4Verify,
   runPhase5Improve,
   runPhase6Report,
+  listActiveWorktrees,
   PHASES,
 } from './engine.js';
+
+export {
+  getLockPath,
+  acquireLock,
+  releaseLock,
+  isLocked,
+  readLock,
+} from './lock.js';
+
+export {
+  getWorktreesRoot,
+  getWorktreePath,
+  createWorktree,
+  removeWorktree,
+  listWorktrees,
+  pruneOrphans,
+} from './worktree-manager.js';
 
 export {
   classifyRisk,
