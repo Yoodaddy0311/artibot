@@ -163,12 +163,31 @@ export function acquireLock(featureKey, sessionId, opts = {}) {
   const deadline = Date.now() + timeoutMs;
   let last = first;
   while (Date.now() < deadline) {
-    const start = Date.now();
-    while (Date.now() - start < POLL_MS) { /* busy-wait small slice */ }
+    sleepSync(POLL_MS);
     last = attemptAcquire(featureKey, sessionId);
     if (last.ok) return last;
   }
   return last;
+}
+
+/**
+ * Synchronous sleep without busy-wait. Uses Atomics.wait on an unshared
+ * Int32Array view — yields the thread to the OS scheduler instead of
+ * spinning the CPU. Falls back to a single small busy-wait slice when
+ * SharedArrayBuffer is unavailable in the runtime.
+ * @param {number} ms
+ */
+function sleepSync(ms) {
+  const target = Math.max(0, ms | 0);
+  if (target === 0) return;
+  try {
+    const sab = new SharedArrayBuffer(4);
+    const ia = new Int32Array(sab);
+    Atomics.wait(ia, 0, 0, target);
+  } catch {
+    const start = Date.now();
+    while (Date.now() - start < target) { /* fallback only */ }
+  }
 }
 
 /**

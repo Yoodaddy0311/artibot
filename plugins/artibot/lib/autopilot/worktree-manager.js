@@ -85,6 +85,7 @@ export function createWorktree(sessionId, opts = {}) {
     const stderr = (result.stderr || '').trim();
     return { ok: false, error: stderr || `git exited with code ${result.status}` };
   }
+  listCache = null;
   return { ok: true, path: wtPath, branch };
 }
 
@@ -116,6 +117,7 @@ export function removeWorktree(sessionId, opts = {}) {
     }
     return { ok: false, error: stderr || `git exited with code ${result.status}` };
   }
+  listCache = null;
   return { ok: true };
 }
 
@@ -143,26 +145,46 @@ function parsePorcelain(raw) {
   }).filter((r) => r.path);
 }
 
+const LIST_CACHE_TTL_MS = 5000;
+let listCache = null;
+
 /**
- * List all git worktrees known to the current repo.
+ * Invalidate the in-process listWorktrees cache. Called automatically by
+ * createWorktree / removeWorktree / pruneOrphans; also exported for tests.
+ */
+export function invalidateListCache() {
+  listCache = null;
+}
+
+/**
+ * List all git worktrees known to the current repo. Annotated records are
+ * cached for LIST_CACHE_TTL_MS to avoid repeated git CLI forks; mutation
+ * helpers in this module invalidate the cache automatically.
  * @param {{autopilotOnly?: boolean}} [opts]
  * @returns {Array<{path: string, branch: string|null, sha: string|null, sessionId?: string}>}
  */
 export function listWorktrees(opts = {}) {
-  const result = spawnSync('git', ['worktree', 'list', '--porcelain'], {
-    encoding: 'utf-8',
-    timeout: GIT_TIMEOUT_MS,
-  });
-  if (result.error || result.status !== 0) return [];
-  const records = parsePorcelain(result.stdout || '');
-  const root = getWorktreesRoot();
-  const annotated = records.map((r) => {
-    const norm = path.normalize(r.path);
-    if (norm.startsWith(path.normalize(root) + path.sep)) {
-      return { ...r, sessionId: path.basename(norm) };
-    }
-    return r;
-  });
+  const now = Date.now();
+  let annotated;
+  if (listCache && now - listCache.ts < LIST_CACHE_TTL_MS) {
+    annotated = listCache.records;
+  } else {
+    const result = spawnSync('git', ['worktree', 'list', '--porcelain'], {
+      encoding: 'utf-8',
+      timeout: GIT_TIMEOUT_MS,
+    });
+    if (result.error || result.status !== 0) return [];
+    const records = parsePorcelain(result.stdout || '');
+    const root = getWorktreesRoot();
+    annotated = records.map((r) => {
+      const norm = path.normalize(r.path);
+      if (norm.startsWith(path.normalize(root) + path.sep)) {
+        return { ...r, sessionId: path.basename(norm) };
+      }
+      return r;
+    });
+    listCache = { ts: now, records: annotated };
+  }
   if (opts.autopilotOnly) return annotated.filter((r) => r.sessionId);
   return annotated;
 }
@@ -179,5 +201,6 @@ export function pruneOrphans() {
   if (result.error || result.status !== 0) return { pruned: 0 };
   const out = (result.stdout || '') + (result.stderr || '');
   const matches = out.match(/Removing worktrees\/|Removing\s+/gi);
+  listCache = null;
   return { pruned: matches ? matches.length : 0 };
 }

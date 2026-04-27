@@ -237,43 +237,46 @@ export function runPhase1Plan(state) {
  * @param {object} state
  * @returns {object}
  */
+function attemptCreateWorktree(state) {
+  if (!state.options?.useWorktree) return null;
+  try {
+    const r = createWorktree(state.sessionId);
+    if (r.ok) {
+      state.worktreePath = r.path;
+      tick(state.sessionId, {
+        phase: 'EXECUTE',
+        type: 'worktree-created',
+        level: 'info',
+        message: `worktree=${r.path}`,
+        data: { branch: r.branch },
+      });
+      return r.path;
+    }
+    tick(state.sessionId, {
+      phase: 'EXECUTE',
+      type: 'worktree-fallback',
+      level: 'warn',
+      message: r.error || 'worktree create failed',
+    });
+    return null;
+  } catch (err) {
+    tick(state.sessionId, {
+      phase: 'EXECUTE',
+      type: 'worktree-fallback',
+      level: 'warn',
+      message: err?.message || 'worktree create threw',
+    });
+    return null;
+  }
+}
+
 export function runPhase2Execute(state) {
   state.phase = 'EXECUTE';
   tick(state.sessionId, { phase: 'EXECUTE', type: 'phase-start', level: 'info', message: 'Phase 2 EXECUTE 시작' });
   const paused = maybePause(state);
   if (paused) return paused;
 
-  let worktreePath = null;
-  if (state.options?.useWorktree) {
-    try {
-      const r = createWorktree(state.sessionId);
-      if (r.ok) {
-        worktreePath = r.path;
-        state.worktreePath = r.path;
-        tick(state.sessionId, {
-          phase: 'EXECUTE',
-          type: 'worktree-created',
-          level: 'info',
-          message: `worktree=${r.path}`,
-          data: { branch: r.branch },
-        });
-      } else {
-        tick(state.sessionId, {
-          phase: 'EXECUTE',
-          type: 'worktree-fallback',
-          level: 'warn',
-          message: r.error || 'worktree create failed',
-        });
-      }
-    } catch (err) {
-      tick(state.sessionId, {
-        phase: 'EXECUTE',
-        type: 'worktree-fallback',
-        level: 'warn',
-        message: err?.message || 'worktree create threw',
-      });
-    }
-  }
+  const worktreePath = attemptCreateWorktree(state);
 
   recordPhase(state, { name: 'EXECUTE', status: 'queued' });
   persist(state);
