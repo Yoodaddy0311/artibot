@@ -12,6 +12,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { getPluginRoot } from '../core/platform.js';
 import { loadSession } from './session-store.js';
+import { renderProfile } from './profile-renderer.js';
 
 /**
  * @returns {string} project root one level above plugin root
@@ -35,7 +36,8 @@ function phaseRow(phase) {
 }
 
 /**
- * Render markdown report from a session state object.
+ * Render markdown report from a session state object (legacy single-template).
+ * Kept for backward compatibility with existing callers.
  * @param {object} state
  * @returns {string}
  */
@@ -141,12 +143,139 @@ ${nextAction}
 }
 
 /**
- * Generate the report file for a session.
- * Loads state via session-store, renders markdown, writes to reports/AUTOPILOT/{sessionId}.md.
- * @param {string} sessionId
- * @returns {{ filePath: string, content: string }}
+ * Render a markdown table from rows. Returns 'N/A' when empty.
+ * @param {string[]} headers
+ * @param {Array<Array<string|number>>} rows
+ * @returns {string}
  */
-export function generateReport(sessionId) {
+function table(headers, rows) {
+  if (!rows || rows.length === 0) return 'N/A';
+  const head = `| ${headers.join(' | ')} |`;
+  const sep = `|${headers.map(() => '---').join('|')}|`;
+  const body = rows.map((r) => `| ${r.map((c) => (c === null || c === undefined ? '-' : String(c))).join(' | ')} |`);
+  return [head, sep, ...body].join('\n');
+}
+
+/**
+ * Render a numbered list. Returns 'N/A' when empty.
+ * @param {Array<string|object>} items
+ * @returns {string}
+ */
+function numberedList(items) {
+  if (!items || items.length === 0) return 'N/A';
+  return items
+    .map((it, i) => {
+      const text = typeof it === 'string' ? it : (it.text || it.message || JSON.stringify(it));
+      return `${i + 1}. ${text}`;
+    })
+    .join('\n');
+}
+
+/**
+ * Build the full data object consumed by every profile template.
+ * Missing fields collapse to 'N/A' / '없음' so assertNoUnfilled passes.
+ * @param {object} state
+ * @returns {object}
+ */
+export function buildReportData(state) {
+  const s = state || {};
+  const phases = Array.isArray(s.phases) ? s.phases : [];
+  const errors = Array.isArray(s.errors) ? s.errors : [];
+  const risks = Array.isArray(s.risks) && s.risks.length ? s.risks : errors;
+  const improvements = Array.isArray(s.improvements) ? s.improvements : [];
+  const future = Array.isArray(s.futurePlans) ? s.futurePlans : [];
+  const verify = s.verifyResult || {};
+
+  const phaseTable = table(
+    ['Phase', 'Status', 'Duration', 'Files', 'Checks'],
+    phases.map((p) => [p?.name || '?', p?.status || '?',
+      p?.durationMs ? `${Math.round(p.durationMs / 1000)}s` : '-',
+      p?.changedFiles ?? '-', p?.checks || '-']),
+  );
+  const phaseSummary = phases.length
+    ? phases.map((p) => `- ${p?.name || '?'}: ${p?.status || '?'}`).join('\n')
+    : 'N/A';
+
+  const changedFiles = Array.isArray(s.changedFiles) ? s.changedFiles : [];
+  const changedFilesTable = changedFiles.length
+    ? table(['File', 'Change'], changedFiles.map((f) => (typeof f === 'string' ? [f, '-'] : [f.path || '-', f.change || '-'])))
+    : 'N/A';
+
+  const testResultsTable = Object.keys(verify).length
+    ? table(['Check', 'Result'], [
+        ['lint', verify.lint || '-'],
+        ['typecheck', verify.typecheck || '-'],
+        ['test', verify.test || '-'],
+        ['build', verify.build || '-'],
+      ])
+    : 'N/A';
+  const testEmoji = verify.test === 'pass' ? '모두 통과 ✅' : (verify.test ? `결과: ${verify.test} ❌` : '아직 검증 전');
+  const testSummary = Object.keys(verify).length
+    ? `lint=${verify.lint || '-'}, type=${verify.typecheck || '-'}, test=${verify.test || '-'}, build=${verify.build || '-'}`
+    : 'N/A';
+
+  const crossCheckTable = s.crossCheck
+    ? table(['Item', 'Value'], [
+        ['Verdict', s.crossCheck.verdict || '-'],
+        ['Notes', s.crossCheck.notes || '-'],
+      ])
+    : 'N/A';
+
+  const risksTable = risks.length
+    ? table(['Severity', 'Description'], risks.map((r) => (typeof r === 'string'
+        ? ['-', r]
+        : [r.severity || '-', r.message || r.text || JSON.stringify(r)])))
+    : 'N/A';
+  const risksTop5 = numberedList(risks.slice(0, 5));
+  const risksTop3 = numberedList(risks.slice(0, 3));
+
+  const sessionId = s.sessionId || '-';
+  const task = (s.task || '없음').slice(0, 240);
+  const status = s.phase || s.status || '-';
+
+  return {
+    sessionId,
+    mode: s.mode || 'default',
+    startedAt: s.createdAt || s.startedAt || '-',
+    completedAt: s.completedAt || '-',
+    status,
+    task,
+    tldr: s.summary || `${task} — 상태 ${status}`,
+    phaseTable,
+    phaseSummary,
+    changedFilesTable,
+    testResultsTable,
+    testSummary,
+    testEmoji,
+    crossCheckTable,
+    improvementsTable: numberedList(improvements),
+    improvementsCount: improvements.length,
+    futurePlansTable: numberedList(future),
+    futurePlansCount: future.length,
+    risksTable,
+    risksTop5,
+    risksTop3,
+    nextAction: s.nextAction || (status === 'COMPLETED' ? '추가 작업 없음. 사용자 검토 권장.' : '세션 상태 검토 권장.'),
+    kpiSummary: s.kpiSummary || `Phases ${phases.length}, Improvements ${improvements.length}, Risks ${risks.length}`,
+    kpiSimple: s.kpiSimple || `${phases.length}개 단계 · ${improvements.length}개 개선 · ${risks.length}개 리스크`,
+    roi: s.roi || 'N/A',
+    dependencies: s.dependencies
+      ? (Array.isArray(s.dependencies) ? s.dependencies.join(', ') : String(s.dependencies))
+      : 'N/A',
+    strategicImplications: s.strategicImplications || 'N/A',
+    casualClosing: s.casualClosing || (status === 'COMPLETED' ? '잘 마무리됐어요! 🎉' : '계속 진행 중이에요.'),
+  };
+}
+
+/**
+ * Generate the report file(s) for a session.
+ * Multi-style aware: when style='all' or style='dev' with deriveAll, renders all 4 styles.
+ * Backwards compatible — returns `{ filePath, content }` for the dev style.
+ * @param {string} sessionId
+ * @param {{ style?: string, deriveAll?: boolean }} [opts]
+ * @returns {{ filePath: string|null, content: string|null, results?: object }}
+ */
+export function generateReport(sessionId, opts = {}) {
   if (!sessionId || typeof sessionId !== 'string') {
     throw new TypeError('sessionId required');
   }
@@ -154,13 +283,38 @@ export function generateReport(sessionId) {
   if (!state) {
     throw new Error(`session not found: ${sessionId}`);
   }
-  const content = renderReport(state);
-  const filePath = path.join(getProjectRoot(), 'reports', 'AUTOPILOT', `${sessionId}.md`);
+  const style = opts.style || 'dev';
+  const deriveAll = opts.deriveAll !== false;
+  const data = buildReportData(state);
+  const styles = style === 'all' || (style === 'dev' && deriveAll)
+    ? ['dev', 'pm', 'exec', 'casual']
+    : [style];
+
+  const reportsDir = path.join(getProjectRoot(), 'reports', 'AUTOPILOT');
   try {
-    mkdirSync(dirname(filePath), { recursive: true });
+    mkdirSync(reportsDir, { recursive: true });
   } catch (err) {
     if (err.code !== 'EEXIST') throw err;
   }
-  writeFileSync(filePath, content, 'utf-8');
-  return { filePath, content };
+
+  const results = {};
+  for (const s of styles) {
+    try {
+      const content = renderProfile(s, data);
+      const fileName = s === 'dev' ? `${sessionId}.md` : `${sessionId}.${s}.md`;
+      const filePath = path.join(reportsDir, fileName);
+      writeFileSync(filePath, content, 'utf-8');
+      results[s] = { filePath, content };
+    } catch (err) {
+      results[s] = { error: err.message };
+    }
+  }
+
+  const primary = results.dev && !results.dev.error
+    ? results.dev
+    : (results[style] && !results[style].error ? results[style] : null);
+  if (primary) {
+    return { filePath: primary.filePath, content: primary.content, results };
+  }
+  return { filePath: null, content: null, results };
 }

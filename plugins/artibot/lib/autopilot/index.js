@@ -55,7 +55,18 @@ export {
 export {
   generateReport,
   renderReport,
+  buildReportData,
 } from './report-generator.js';
+
+export {
+  loadProfile,
+  parseSections,
+  parseSimpleYaml,
+  mustacheRender,
+  assertNoUnfilled,
+  capLines,
+  renderProfile,
+} from './profile-renderer.js';
 
 export {
   saveSession,
