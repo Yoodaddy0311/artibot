@@ -33,6 +33,7 @@ Autonomous long-running mode for **3~4시간 자리 비움 / 야간 자율 작�
 | `--checkpoint <interval>` | `30m` | 체크포인트(WIP commit) 주기 |
 | `--worktree` | off | git worktree 격리 사용 (P0-3, 기본 브랜치: `autopilot/<sessionId>`) |
 | `--detached` | off | worktree를 detached HEAD로 생성 (advanced) |
+| `--mcp-verify` | off | Phase 4 VERIFY에서 자체 plugin MCP 화이트리스트 호출 (P0-4) |
 
 ## Arguments
 
@@ -149,6 +150,20 @@ DATA POLICY: ndjson 파일은 로컬에만 존재. 외부 송신 없음.
 | ap-20260427-110001 | default | COMPLETED | (none) | (released) | - |
 
 `--orphans`: session-store에는 없지만 worktree 디렉토리만 남은 항목 표시
+
+## MCP-driven Verification (P0-4)
+
+`--mcp-verify` 옵션 시 Phase 4 VERIFY에서 Artibot 자체 plugin MCP 만 화이트리스트 호출.
+
+### 화이트리스트 정책
+- **허용**: `plugin:artibot:` 접두사 + `[a-z0-9-]+` (예: `plugin:artibot:playwright`, `plugin:artibot:context7`)
+- **차단**: 외부 / 제3자 MCP, 위장된 접두사 (`plugin:artibot-X:Y` 등)
+- **응답 검증**: 외부 HTTP URL / Public IP / 클라우드 호스트 / outbound POST / shell exfil 흔적 자동 감지
+
+### DATA POLICY
+- 외부 host로 데이터 송신/수신 일체 금지
+- `validateMcpResponse`가 5종 정규식으로 위반 즉시 abort
+- base64 1단계 디코드 후 재검사로 우회 차단
 
 ## Safety Policy (PRD §5.5)
 
