@@ -48,16 +48,52 @@ function isoDate(d = new Date()) {
 }
 
 /**
- * Render the PRD body. Pure function — no I/O.
- * @param {{ task: string, sessionId: string, options?: object }} input
+ * Escape a markdown table cell: convert `|` to `\|`, collapse newlines, truncate.
+ * @param {string} text
+ * @param {number} max
  * @returns {string}
  */
-export function renderPRD({ task, sessionId, options = {} }) {
+function escapeCell(text, max = 200) {
+  const s = String(text ?? '').replace(/\r?\n/g, ' ').replace(/\|/g, '\\|');
+  return s.length > max ? s.slice(0, max) + '…' : s;
+}
+
+/**
+ * Render the Prior Lessons section. Returns empty string if no lessons.
+ * @param {Array<object>} lessons
+ * @returns {string}
+ */
+function renderPriorLessons(lessons) {
+  if (!Array.isArray(lessons) || lessons.length === 0) return '';
+  const rows = lessons.map((l) => {
+    const ts = escapeCell(l?.ts || '', 40);
+    const src = escapeCell(l?.sourcePhase || l?.sessionId || '', 60);
+    const body = escapeCell(l?.lesson || '', 200);
+    return `| ${ts} | ${src} | ${body} |`;
+  }).join('\n');
+  return `## Prior Lessons
+
+이전 세션에서 추출된 학습 (자동 회수, 외부 송신 0):
+
+| ts | source | lesson |
+|----|--------|--------|
+${rows}
+
+`;
+}
+
+/**
+ * Render the PRD body. Pure function — no I/O.
+ * @param {{ task: string, sessionId: string, options?: object, priorLessons?: Array<object> }} input
+ * @returns {string}
+ */
+export function renderPRD({ task, sessionId, options = {}, priorLessons }) {
   const safeTask = (task || '').trim() || '(작업 설명 없음)';
   const created = isoDate();
   const mode = options.mode || 'default';
   const maxDuration = options.maxDuration || '4h';
   const budget = options.budget ?? 2_000_000;
+  const priorSection = renderPriorLessons(priorLessons);
 
   return `# PRD: ${safeTask}
 
@@ -70,7 +106,7 @@ export function renderPRD({ task, sessionId, options = {} }) {
 
 ---
 
-## 1. 배경
+${priorSection}## 1. 배경
 
 본 PRD는 Autopilot 엔진이 수신한 사용자 요청을 분해하고, Phase 1~6을 위한 합의된 명세로 변환하기 위해 자동 생성되었다.
 
@@ -136,17 +172,18 @@ export function renderPRD({ task, sessionId, options = {} }) {
 /**
  * Generate a PRD file for the given task.
  * Writes to docs/PRD/{slug}-{sessionId}.md under the project root.
- * @param {{ task: string, sessionId: string, options?: object }} args
+ * @param {{ task: string, sessionId: string, options?: object, priorLessons?: Array<object> }} args
  * @returns {{ filePath: string, content: string, slug: string }}
  */
-export function generatePRD({ task, sessionId, options = {} }) {
+export function generatePRD({ task, sessionId, options = {}, priorLessons }) {
   if (!sessionId || typeof sessionId !== 'string') {
     throw new TypeError('sessionId is required');
   }
   const slug = slugify(task);
   const fileName = `${slug}-${sessionId}.md`;
   const filePath = path.join(getProjectRoot(), 'docs', 'PRD', fileName);
-  const content = renderPRD({ task, sessionId, options });
+  const lessons = priorLessons ?? options.priorLessons;
+  const content = renderPRD({ task, sessionId, options, priorLessons: lessons });
   try {
     mkdirSync(dirname(filePath), { recursive: true });
   } catch (err) {
