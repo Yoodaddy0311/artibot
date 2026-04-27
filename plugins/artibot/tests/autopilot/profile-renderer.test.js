@@ -181,9 +181,10 @@ describe('renderProfile', () => {
       const lineCount = out.split('\n').length;
       expect(out, `${style} no unfilled`).not.toMatch(/\{\{\w+\}\}/);
       expect(lineCount, `${style} <= maxLines`).toBeLessThanOrEqual(config.maxLines);
-      // minLines is a soft lower bound; with rich dummy data we should easily clear ~half of it.
-      // This guards against accidental empty rendering while staying tolerant of dummy variations.
-      expect(lineCount, `${style} >= 1 line`).toBeGreaterThanOrEqual(1);
+      // minLines is a soft lower bound. Dummy data covers ~30% of the target;
+      // real session data trivially exceeds minLines once Phase 2 starts.
+      const softFloor = Math.max(1, Math.floor((config.minLines || 1) * 0.3));
+      expect(lineCount, `${style} >= floor(minLines * 0.3)`).toBeGreaterThanOrEqual(softFloor);
     }
   });
 });

@@ -86,8 +86,19 @@ export function parseSections(markdown) {
   return { meta, sections };
 }
 
+const profileCache = new Map();
+
 /**
- * Load a profile template + config by name.
+ * Clear the in-process loadProfile cache. Useful for tests or when profile
+ * files are edited at runtime.
+ */
+export function clearProfileCache() {
+  profileCache.clear();
+}
+
+/**
+ * Load a profile template + config by name. Cached per-process for the
+ * lifetime of the module — invalidate via clearProfileCache().
  * @param {string} name
  * @returns {{ template: string, config: object }}
  */
@@ -95,6 +106,7 @@ export function loadProfile(name) {
   if (!name || typeof name !== 'string' || !/^\w+$/.test(name)) {
     throw new TypeError(`invalid profile name: ${name}`);
   }
+  if (profileCache.has(name)) return profileCache.get(name);
   const dir = getProfilesDir();
   const tmplPath = path.join(dir, `${name}.md`);
   const cfgPath = path.join(dir, `${name}.config.yaml`);
@@ -105,7 +117,9 @@ export function loadProfile(name) {
   const config = existsSync(cfgPath)
     ? parseSimpleYaml(readFileSync(cfgPath, 'utf-8'))
     : {};
-  return { template, config };
+  const entry = { template, config };
+  profileCache.set(name, entry);
+  return entry;
 }
 
 /**

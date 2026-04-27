@@ -9,7 +9,6 @@
 
 import path from 'node:path';
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
 import { getPluginRoot } from '../core/platform.js';
 import { loadSession } from './session-store.js';
 import { renderProfile } from './profile-renderer.js';
@@ -171,6 +170,77 @@ function numberedList(items) {
     .join('\n');
 }
 
+/** Session-level metadata fields. */
+function buildSessionMeta(state) {
+  const s = state || {};
+  const task = (s.task || '없음').slice(0, 240);
+  const status = s.phase || s.status || '-';
+  return {
+    sessionId: s.sessionId || '-',
+    mode: s.mode || 'default',
+    startedAt: s.createdAt || s.startedAt || '-',
+    completedAt: s.completedAt || '-',
+    status,
+    task,
+    tldr: s.summary || `${task} — 상태 ${status}`,
+  };
+}
+
+/** Phase table + summary fields. */
+function buildPhaseFields(phases) {
+  const p = Array.isArray(phases) ? phases : [];
+  const phaseTable = table(['Phase', 'Status', 'Duration', 'Files', 'Checks'], p.map((x) => [
+    x?.name || '?', x?.status || '?',
+    x?.durationMs ? `${Math.round(x.durationMs / 1000)}s` : '-',
+    x?.changedFiles ?? '-', x?.checks || '-',
+  ]));
+  const phaseSummary = p.length
+    ? p.map((x) => `- ${x?.name || '?'}: ${x?.status || '?'}`).join('\n')
+    : 'N/A';
+  return { phaseTable, phaseSummary };
+}
+
+/** Verify result + changed-files fields. */
+function buildVerifyFields(verifyResult, changedFiles) {
+  const v = verifyResult || {};
+  const cf = Array.isArray(changedFiles) ? changedFiles : [];
+  const changedFilesTable = cf.length
+    ? table(['File', 'Change'], cf.map((f) => (typeof f === 'string' ? [f, '-'] : [f.path || '-', f.change || '-'])))
+    : 'N/A';
+  const hasResults = Object.keys(v).length > 0;
+  const testResultsTable = hasResults
+    ? table(['Check', 'Result'], [['lint', v.lint || '-'], ['typecheck', v.typecheck || '-'], ['test', v.test || '-'], ['build', v.build || '-']])
+    : 'N/A';
+  const testEmoji = v.test === 'pass' ? '모두 통과 ✅' : (v.test ? `결과: ${v.test} ❌` : '아직 검증 전');
+  const testSummary = hasResults
+    ? `lint=${v.lint || '-'}, type=${v.typecheck || '-'}, test=${v.test || '-'}, build=${v.build || '-'}`
+    : 'N/A';
+  return { changedFilesTable, testResultsTable, testEmoji, testSummary };
+}
+
+/** Risk + improvement + future-plan fields. */
+function buildRiskFields(state) {
+  const s = state || {};
+  const errors = Array.isArray(s.errors) ? s.errors : [];
+  const risks = Array.isArray(s.risks) && s.risks.length ? s.risks : errors;
+  const improvements = Array.isArray(s.improvements) ? s.improvements : [];
+  const future = Array.isArray(s.futurePlans) ? s.futurePlans : [];
+  const risksTable = risks.length
+    ? table(['Severity', 'Description'], risks.map((r) => (typeof r === 'string'
+        ? ['-', r]
+        : [r.severity || '-', r.message || r.text || JSON.stringify(r)])))
+    : 'N/A';
+  return {
+    risksTable,
+    risksTop5: numberedList(risks.slice(0, 5)),
+    risksTop3: numberedList(risks.slice(0, 3)),
+    improvementsTable: numberedList(improvements),
+    improvementsCount: improvements.length,
+    futurePlansTable: numberedList(future),
+    futurePlansCount: future.length,
+  };
+}
+
 /**
  * Build the full data object consumed by every profile template.
  * Missing fields collapse to 'N/A' / '없음' so assertNoUnfilled passes.
@@ -179,82 +249,20 @@ function numberedList(items) {
  */
 export function buildReportData(state) {
   const s = state || {};
+  const status = s.phase || s.status || '-';
   const phases = Array.isArray(s.phases) ? s.phases : [];
+  const improvements = Array.isArray(s.improvements) ? s.improvements : [];
   const errors = Array.isArray(s.errors) ? s.errors : [];
   const risks = Array.isArray(s.risks) && s.risks.length ? s.risks : errors;
-  const improvements = Array.isArray(s.improvements) ? s.improvements : [];
-  const future = Array.isArray(s.futurePlans) ? s.futurePlans : [];
-  const verify = s.verifyResult || {};
-
-  const phaseTable = table(
-    ['Phase', 'Status', 'Duration', 'Files', 'Checks'],
-    phases.map((p) => [p?.name || '?', p?.status || '?',
-      p?.durationMs ? `${Math.round(p.durationMs / 1000)}s` : '-',
-      p?.changedFiles ?? '-', p?.checks || '-']),
-  );
-  const phaseSummary = phases.length
-    ? phases.map((p) => `- ${p?.name || '?'}: ${p?.status || '?'}`).join('\n')
-    : 'N/A';
-
-  const changedFiles = Array.isArray(s.changedFiles) ? s.changedFiles : [];
-  const changedFilesTable = changedFiles.length
-    ? table(['File', 'Change'], changedFiles.map((f) => (typeof f === 'string' ? [f, '-'] : [f.path || '-', f.change || '-'])))
-    : 'N/A';
-
-  const testResultsTable = Object.keys(verify).length
-    ? table(['Check', 'Result'], [
-        ['lint', verify.lint || '-'],
-        ['typecheck', verify.typecheck || '-'],
-        ['test', verify.test || '-'],
-        ['build', verify.build || '-'],
-      ])
-    : 'N/A';
-  const testEmoji = verify.test === 'pass' ? '모두 통과 ✅' : (verify.test ? `결과: ${verify.test} ❌` : '아직 검증 전');
-  const testSummary = Object.keys(verify).length
-    ? `lint=${verify.lint || '-'}, type=${verify.typecheck || '-'}, test=${verify.test || '-'}, build=${verify.build || '-'}`
-    : 'N/A';
-
   const crossCheckTable = s.crossCheck
-    ? table(['Item', 'Value'], [
-        ['Verdict', s.crossCheck.verdict || '-'],
-        ['Notes', s.crossCheck.notes || '-'],
-      ])
+    ? table(['Item', 'Value'], [['Verdict', s.crossCheck.verdict || '-'], ['Notes', s.crossCheck.notes || '-']])
     : 'N/A';
-
-  const risksTable = risks.length
-    ? table(['Severity', 'Description'], risks.map((r) => (typeof r === 'string'
-        ? ['-', r]
-        : [r.severity || '-', r.message || r.text || JSON.stringify(r)])))
-    : 'N/A';
-  const risksTop5 = numberedList(risks.slice(0, 5));
-  const risksTop3 = numberedList(risks.slice(0, 3));
-
-  const sessionId = s.sessionId || '-';
-  const task = (s.task || '없음').slice(0, 240);
-  const status = s.phase || s.status || '-';
-
   return {
-    sessionId,
-    mode: s.mode || 'default',
-    startedAt: s.createdAt || s.startedAt || '-',
-    completedAt: s.completedAt || '-',
-    status,
-    task,
-    tldr: s.summary || `${task} — 상태 ${status}`,
-    phaseTable,
-    phaseSummary,
-    changedFilesTable,
-    testResultsTable,
-    testSummary,
-    testEmoji,
+    ...buildSessionMeta(state),
+    ...buildPhaseFields(phases),
+    ...buildVerifyFields(s.verifyResult, s.changedFiles),
+    ...buildRiskFields(state),
     crossCheckTable,
-    improvementsTable: numberedList(improvements),
-    improvementsCount: improvements.length,
-    futurePlansTable: numberedList(future),
-    futurePlansCount: future.length,
-    risksTable,
-    risksTop5,
-    risksTop3,
     nextAction: s.nextAction || (status === 'COMPLETED' ? '추가 작업 없음. 사용자 검토 권장.' : '세션 상태 검토 권장.'),
     kpiSummary: s.kpiSummary || `Phases ${phases.length}, Improvements ${improvements.length}, Risks ${risks.length}`,
     kpiSimple: s.kpiSimple || `${phases.length}개 단계 · ${improvements.length}개 개선 · ${risks.length}개 리스크`,

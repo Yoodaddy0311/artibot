@@ -3,7 +3,7 @@
  * Covers style selection: default (dev + deriveAll), 'all', 'exec', deriveAll=false.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { existsSync, unlinkSync, rmSync } from 'node:fs';
+import { existsSync, unlinkSync } from 'node:fs';
 import path from 'node:path';
 import { generateReport } from '../../lib/autopilot/report-generator.js';
 import { saveSession, deleteSession } from '../../lib/autopilot/session-store.js';
