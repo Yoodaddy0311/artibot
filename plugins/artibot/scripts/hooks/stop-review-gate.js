@@ -198,7 +198,12 @@ function checkMissingTests(files, repoRoot) {
       && !f.includes('__tests__')
       // CLI entry scripts and one-shot utilities don't need tests:
       && !/\/scripts\/hooks\//.test(f)
-      && !/\/scripts\/(validate-|migrate-|audit-|generate-|phase\d+-audit|inject-)/.test(f),
+      && !/\/scripts\/(validate-|migrate-|audit-|generate-|phase\d+-audit|inject-)/.test(f)
+      // Config files (eslint.config.js, vitest.config.js, prettier.config.js, etc.):
+      && !/\.config\.(js|mjs|cjs|ts)$/.test(f)
+      // Smoke / scratch tools (anywhere under */smoke/* or with leading underscore):
+      && !/\/smoke\//.test(f)
+      && !path.basename(f).startsWith('_'),
   );
 
   // Pre-collect all test basename stems under plugins/artibot/tests/ once.
