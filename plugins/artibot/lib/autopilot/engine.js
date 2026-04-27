@@ -108,6 +108,18 @@ function maybePause(state) {
   }
   state.phase = 'PAUSED';
   state.pausedReason = reason;
+  try {
+    if (state.featureKey) {
+      appendLesson(state.featureKey, {
+        sessionId: state.sessionId,
+        lesson: `Pause at ${state.lastPhase || 'unknown'}: ${reason}`,
+        errorPattern: reason,
+        sourcePhase: state.lastPhase || null,
+      });
+    }
+  } catch {
+    /* learn non-blocking */
+  }
   persist(state);
   tick(state.sessionId, {
     phase: state.lastPhase || 'PAUSED',
@@ -138,12 +150,28 @@ function maybePause(state) {
 export function runPhase0Intake(state) {
   state.phase = 'INTAKE';
   tick(state.sessionId, { phase: 'INTAKE', type: 'phase-start', level: 'info', message: 'Phase 0 INTAKE 시작' });
+  try {
+    const featureKey = extractKey(state.task || '');
+    const priorLessons = recallLessons(state.task || '', { limit: 5 });
+    state.featureKey = featureKey;
+    state.priorLessons = priorLessons;
+    tick(state.sessionId, {
+      phase: 'INTAKE',
+      type: 'memory-recall',
+      level: 'info',
+      message: `prior lessons recalled: ${priorLessons.length}`,
+      data: { featureKey },
+    });
+  } catch {
+    /* recall non-blocking */
+  }
   const paused = maybePause(state);
   if (paused) return paused;
   const { filePath, slug } = generatePRD({
     task: state.task,
     sessionId: state.sessionId,
     options: { ...state.options, mode: state.mode },
+    priorLessons: state.priorLessons,
   });
   state.prdPath = filePath;
   recordPhase(state, { name: 'INTAKE', status: 'done', artifact: filePath, slug });
@@ -318,6 +346,19 @@ export function runPhase6Report(state) {
   state.reportPath = filePath;
   state.phase = 'COMPLETED';
   recordPhase(state, { name: 'REPORT', status: 'done', artifact: filePath });
+  try {
+    if (state.featureKey) {
+      appendLesson(state.featureKey, {
+        sessionId: state.sessionId,
+        lesson: `Completed: ${(state.task || '').slice(0, 160)}`,
+        successPattern: 'session-complete',
+        tokenCost: state.tokenUsage || 0,
+        sourcePhase: 'REPORT',
+      });
+    }
+  } catch {
+    /* learn non-blocking */
+  }
   persist(state);
   tick(state.sessionId, { phase: 'REPORT', type: 'phase-end', level: 'info', message: 'Phase 6 REPORT 완료', data: { reportPath: filePath } });
   tick(state.sessionId, { phase: 'COMPLETED', type: 'session-complete', level: 'info', message: 'Autopilot 세션 완료' });
@@ -479,6 +520,30 @@ export function recordPhaseResult(state, payload = {}) {
   if (!state) throw new TypeError('state required');
   const { phase, status, ...rest } = payload;
   recordPhase(state, { name: phase, status, ...rest });
+  if (phase === 'IMPROVE' && state.featureKey) {
+    try {
+      const improvements = Array.isArray(rest.improvements) ? rest.improvements : [];
+      for (const item of improvements) {
+        appendLesson(state.featureKey, {
+          sessionId: state.sessionId,
+          lesson: `Improvement: ${String(item).slice(0, 200)}`,
+          successPattern: 'improve-suggestion',
+          sourcePhase: 'IMPROVE',
+        });
+      }
+      const futurePlans = Array.isArray(rest.futurePlans) ? rest.futurePlans : [];
+      for (const plan of futurePlans) {
+        appendLesson(state.featureKey, {
+          sessionId: state.sessionId,
+          lesson: `FuturePlan: ${String(plan).slice(0, 200)}`,
+          successPattern: 'future-plan',
+          sourcePhase: 'IMPROVE',
+        });
+      }
+    } catch {
+      /* learn non-blocking */
+    }
+  }
   persist(state);
   return state;
 }
@@ -540,6 +605,18 @@ export function recordSecretLeak(state, leak = {}) {
   }
   state.phase = 'PAUSED';
   state.pausedReason = `secret-leak: ${kind}`;
+  try {
+    if (state.featureKey) {
+      appendLesson(state.featureKey, {
+        sessionId: state.sessionId,
+        lesson: `SecretLeak at ${state.lastPhase || 'unknown'}: ${kind}`,
+        errorPattern: `secret-leak:${kind}`,
+        sourcePhase: state.lastPhase || null,
+      });
+    }
+  } catch {
+    /* learn non-blocking */
+  }
   persist(state);
   return state;
 }

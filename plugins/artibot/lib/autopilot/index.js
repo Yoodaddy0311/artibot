@@ -60,3 +60,16 @@ export {
   tailEventsStream,
   getEventsPath,
 } from './telemetry.js';
+
+export {
+  getMemoryDir,
+  getFeaturePath,
+  extractKey,
+  normalizeLesson,
+  appendLesson,
+  tokenize,
+  jaccard,
+  scoreLesson,
+  recallLessons,
+  compactFeature,
+} from './memory.js';
