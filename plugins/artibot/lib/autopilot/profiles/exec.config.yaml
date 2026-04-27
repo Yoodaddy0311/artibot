@@ -1,0 +1,4 @@
+name: exec
+include: [tldr, kpiSummary, roi, risksTop3, strategicImplications, nextAction]
+maxLines: 60
+minLines: 30

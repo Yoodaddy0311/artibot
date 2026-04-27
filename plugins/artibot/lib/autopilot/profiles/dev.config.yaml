@@ -1,0 +1,4 @@
+name: dev
+include: [tldr, phaseTable, changedFilesTable, testResultsTable, crossCheckTable, improvementsTable, futurePlansTable, risksTable, nextAction]
+maxLines: 400
+minLines: 200
