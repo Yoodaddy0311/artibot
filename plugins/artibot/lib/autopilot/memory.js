@@ -23,11 +23,11 @@ import path from 'node:path';
 import {
   appendFileSync,
   existsSync,
-  mkdirSync,
   readFileSync,
   writeFileSync,
 } from 'node:fs';
 import { createHash } from 'node:crypto';
+import { ensureDirSync } from '../core/file.js';
 import { getStoreDir } from './session-store.js';
 
 const LESSON_MAX_CHARS = 240;
@@ -105,10 +105,10 @@ export function normalizeLesson(input) {
   const ts = typeof src.ts === 'string' && src.ts ? src.ts : new Date().toISOString();
   const taskHash = typeof src.taskHash === 'string' && src.taskHash ? src.taskHash : shortHash(lesson);
   const out = { ts, sessionId: src.sessionId ?? null, taskHash, lesson };
-  if (src.errorPattern != null) out.errorPattern = String(src.errorPattern);
-  if (src.successPattern != null) out.successPattern = String(src.successPattern);
+  if (src.errorPattern) out.errorPattern = String(src.errorPattern);
+  if (src.successPattern) out.successPattern = String(src.successPattern);
   if (typeof src.tokenCost === 'number' && Number.isFinite(src.tokenCost)) out.tokenCost = src.tokenCost;
-  if (src.sourcePhase != null) out.sourcePhase = String(src.sourcePhase);
+  if (src.sourcePhase) out.sourcePhase = String(src.sourcePhase);
   return out;
 }
 
@@ -123,15 +123,20 @@ export function appendLesson(featureKey, lesson) {
   if (!featureKey || typeof featureKey !== 'string') {
     throw new TypeError('featureKey must be a non-empty string');
   }
-  const dir = getMemoryDir();
-  try {
-    mkdirSync(dir, { recursive: true });
-  } catch (err) {
-    if (err.code !== 'EEXIST') throw err;
-  }
+  ensureDirSync(getMemoryDir());
   const normalized = normalizeLesson(lesson);
-  const line = JSON.stringify(normalized) + '\n';
-  appendFileSync(getFeaturePath(featureKey), line, 'utf-8');
+  const filePath = getFeaturePath(featureKey);
+  // F3 dedup: skip when last entry has identical taskHash + lesson body.
+  const existing = existsSync(filePath) ? readLessonFile(filePath) : [];
+  const last = existing[existing.length - 1];
+  if (last && last.taskHash === normalized.taskHash && last.lesson === normalized.lesson) {
+    return last;
+  }
+  appendFileSync(filePath, JSON.stringify(normalized) + '\n', 'utf-8');
+  // F5 auto-compact: archive older half once threshold is crossed.
+  if (existing.length + 1 >= DEFAULT_COMPACT_THRESHOLD) {
+    try { compactFeature(featureKey); } catch { /* compact non-blocking */ }
+  }
   return normalized;
 }
 

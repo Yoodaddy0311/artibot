@@ -36,6 +36,21 @@ function tick(sessionId, event) {
   }
 }
 
+/**
+ * Best-effort lesson append. Skips when state.featureKey is unset (Phase 0
+ * has not run yet) and never throws into Phase logic.
+ * @param {object} state
+ * @param {object} payload - lesson body sans sessionId (auto-attached)
+ */
+function safeAppendLesson(state, payload) {
+  try {
+    if (!state || !state.featureKey) return;
+    appendLesson(state.featureKey, { sessionId: state.sessionId, ...payload });
+  } catch {
+    /* learn non-blocking */
+  }
+}
+
 /** Phase names in canonical order. */
 export const PHASES = Object.freeze([
   'INTAKE',
@@ -108,18 +123,11 @@ function maybePause(state) {
   }
   state.phase = 'PAUSED';
   state.pausedReason = reason;
-  try {
-    if (state.featureKey) {
-      appendLesson(state.featureKey, {
-        sessionId: state.sessionId,
-        lesson: `Pause at ${state.lastPhase || 'unknown'}: ${reason}`,
-        errorPattern: reason,
-        sourcePhase: state.lastPhase || null,
-      });
-    }
-  } catch {
-    /* learn non-blocking */
-  }
+  safeAppendLesson(state, {
+    lesson: `Pause at ${state.lastPhase || 'unknown'}: ${reason}`,
+    errorPattern: reason,
+    sourcePhase: state.lastPhase || null,
+  });
   persist(state);
   tick(state.sessionId, {
     phase: state.lastPhase || 'PAUSED',
@@ -346,19 +354,12 @@ export function runPhase6Report(state) {
   state.reportPath = filePath;
   state.phase = 'COMPLETED';
   recordPhase(state, { name: 'REPORT', status: 'done', artifact: filePath });
-  try {
-    if (state.featureKey) {
-      appendLesson(state.featureKey, {
-        sessionId: state.sessionId,
-        lesson: `Completed: ${(state.task || '').slice(0, 160)}`,
-        successPattern: 'session-complete',
-        tokenCost: state.tokenUsage || 0,
-        sourcePhase: 'REPORT',
-      });
-    }
-  } catch {
-    /* learn non-blocking */
-  }
+  safeAppendLesson(state, {
+    lesson: `Completed: ${(state.task || '').slice(0, 160)}`,
+    successPattern: 'session-complete',
+    tokenCost: state.tokenUsage || 0,
+    sourcePhase: 'REPORT',
+  });
   persist(state);
   tick(state.sessionId, { phase: 'REPORT', type: 'phase-end', level: 'info', message: 'Phase 6 REPORT 완료', data: { reportPath: filePath } });
   tick(state.sessionId, { phase: 'COMPLETED', type: 'session-complete', level: 'info', message: 'Autopilot 세션 완료' });
@@ -520,28 +521,22 @@ export function recordPhaseResult(state, payload = {}) {
   if (!state) throw new TypeError('state required');
   const { phase, status, ...rest } = payload;
   recordPhase(state, { name: phase, status, ...rest });
-  if (phase === 'IMPROVE' && state.featureKey) {
-    try {
-      const improvements = Array.isArray(rest.improvements) ? rest.improvements : [];
-      for (const item of improvements) {
-        appendLesson(state.featureKey, {
-          sessionId: state.sessionId,
-          lesson: `Improvement: ${String(item).slice(0, 200)}`,
-          successPattern: 'improve-suggestion',
-          sourcePhase: 'IMPROVE',
-        });
-      }
-      const futurePlans = Array.isArray(rest.futurePlans) ? rest.futurePlans : [];
-      for (const plan of futurePlans) {
-        appendLesson(state.featureKey, {
-          sessionId: state.sessionId,
-          lesson: `FuturePlan: ${String(plan).slice(0, 200)}`,
-          successPattern: 'future-plan',
-          sourcePhase: 'IMPROVE',
-        });
-      }
-    } catch {
-      /* learn non-blocking */
+  if (phase === 'IMPROVE') {
+    const improvements = Array.isArray(rest.improvements) ? rest.improvements : [];
+    for (const item of improvements) {
+      safeAppendLesson(state, {
+        lesson: `Improvement: ${String(item).slice(0, 200)}`,
+        successPattern: 'improve-suggestion',
+        sourcePhase: 'IMPROVE',
+      });
+    }
+    const futurePlans = Array.isArray(rest.futurePlans) ? rest.futurePlans : [];
+    for (const plan of futurePlans) {
+      safeAppendLesson(state, {
+        lesson: `FuturePlan: ${String(plan).slice(0, 200)}`,
+        successPattern: 'future-plan',
+        sourcePhase: 'IMPROVE',
+      });
     }
   }
   persist(state);
@@ -580,7 +575,7 @@ export function classifyFailure(payload = {}) {
   if (/(?:vitest|jest|\bspec\b|\btest\b)/i.test(out)) return 'test';
   if (/(?:eslint|lint error)/i.test(out)) return 'lint';
   if (/(?:webpack|rollup|esbuild|tsup|next build|\bbuild\b)/i.test(out)) return 'build';
-  if (payload.exitCode != null && payload.exitCode !== 0) return 'unknown-failure';
+  if (typeof payload.exitCode === 'number' && payload.exitCode !== 0) return 'unknown-failure';
   return 'unknown';
 }
 
@@ -605,18 +600,11 @@ export function recordSecretLeak(state, leak = {}) {
   }
   state.phase = 'PAUSED';
   state.pausedReason = `secret-leak: ${kind}`;
-  try {
-    if (state.featureKey) {
-      appendLesson(state.featureKey, {
-        sessionId: state.sessionId,
-        lesson: `SecretLeak at ${state.lastPhase || 'unknown'}: ${kind}`,
-        errorPattern: `secret-leak:${kind}`,
-        sourcePhase: state.lastPhase || null,
-      });
-    }
-  } catch {
-    /* learn non-blocking */
-  }
+  safeAppendLesson(state, {
+    lesson: `SecretLeak at ${state.lastPhase || 'unknown'}: ${kind}`,
+    errorPattern: `secret-leak:${kind}`,
+    sourcePhase: state.lastPhase || null,
+  });
   persist(state);
   return state;
 }

@@ -20,10 +20,10 @@ import path from 'node:path';
 import {
   appendFileSync,
   existsSync,
-  mkdirSync,
   readFileSync,
 } from 'node:fs';
 import { dirname } from 'node:path';
+import { ensureDirSync } from '../core/file.js';
 import { getStoreDir } from './session-store.js';
 
 /**
@@ -71,12 +71,7 @@ export function appendEvent(sessionId, event) {
     throw new TypeError('sessionId must be a non-empty string');
   }
   const filePath = getEventsPath(sessionId);
-  const dir = dirname(filePath);
-  try {
-    mkdirSync(dir, { recursive: true });
-  } catch (err) {
-    if (err.code !== 'EEXIST') throw err;
-  }
+  ensureDirSync(dirname(filePath));
   const normalized = normalizeEvent(sessionId, event);
   const line = `${JSON.stringify(normalized)}\n`;
   appendFileSync(filePath, line, 'utf-8');

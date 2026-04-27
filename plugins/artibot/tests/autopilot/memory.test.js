@@ -6,7 +6,7 @@
  * Korean-path safe; uses unique feature keys per test for filesystem isolation.
  */
 import { describe, it, expect, afterEach } from 'vitest';
-import { existsSync, readdirSync, unlinkSync, writeFileSync, appendFileSync } from 'node:fs';
+import { existsSync, readdirSync, unlinkSync, appendFileSync } from 'node:fs';
 import path from 'node:path';
 import {
   getMemoryDir,
@@ -36,7 +36,7 @@ afterEach(() => {
     return;
   }
   let files = [];
-  try { files = readdirSync(dir); } catch { files = []; }
+  try { files = readdirSync(dir); } catch { /* missing dir is fine */ }
   while (createdKeys.length) {
     const key = createdKeys.pop();
     for (const f of files) {
@@ -197,20 +197,56 @@ describe('compactFeature', () => {
     expect(result.kept).toBe(5);
   });
 
-  it('archives older lessons keeping latest 50 when 100+', () => {
+  it('archives older lessons at custom threshold (avoiding F5 auto-trigger)', () => {
     const key = uniqueKey('compact');
-    for (let i = 0; i < 105; i += 1) {
+    // 11 entries < DEFAULT_COMPACT_THRESHOLD(100), so auto-compact does not fire.
+    for (let i = 0; i < 11; i += 1) {
       appendLesson(key, { lesson: `entry-${i}` });
     }
-    const result = compactFeature(key, { threshold: 100, keepLatest: 50 });
-    expect(result.archived).toBe(55);
-    expect(result.kept).toBe(50);
+    const result = compactFeature(key, { threshold: 10, keepLatest: 5 });
+    expect(result.archived).toBe(6);
+    expect(result.kept).toBe(5);
     const dir = getMemoryDir();
     const files = readdirSync(dir);
     const archives = files.filter((f) => f.startsWith(`${key}.`) && f.includes('archive'));
     expect(archives.length).toBeGreaterThanOrEqual(1);
     for (const f of archives) createdKeys.push(f.replace('.jsonl', ''));
     const remaining = recallLessons('entry', { featureKey: key, limit: 100 });
+    expect(remaining.length).toBeLessThanOrEqual(5);
+  });
+});
+
+describe('F3 dedup (v1.1)', () => {
+  it('skips append when last entry has identical taskHash + lesson body', () => {
+    const key = uniqueKey('dedup');
+    const a = appendLesson(key, { sessionId: 's1', lesson: '동일 lesson 본문' });
+    const b = appendLesson(key, { sessionId: 's1', lesson: '동일 lesson 본문' });
+    expect(b.ts).toBe(a.ts);
+    const all = recallLessons('동일', { featureKey: key, limit: 100 });
+    expect(all.length).toBe(1);
+  });
+
+  it('appends when lesson body differs (no false-positive dedup)', () => {
+    const key = uniqueKey('nodedup');
+    appendLesson(key, { sessionId: 's1', lesson: 'lesson A' });
+    appendLesson(key, { sessionId: 's1', lesson: 'lesson B' });
+    const all = recallLessons('lesson', { featureKey: key, limit: 100 });
+    expect(all.length).toBe(2);
+  });
+});
+
+describe('F5 auto-compact (v1.1)', () => {
+  it('auto-compacts on append when DEFAULT_COMPACT_THRESHOLD (100) is reached', () => {
+    const key = uniqueKey('autocompact');
+    for (let i = 0; i < 100; i += 1) {
+      appendLesson(key, { lesson: `auto-${i}` });
+    }
+    const dir = getMemoryDir();
+    const files = readdirSync(dir);
+    const archives = files.filter((f) => f.startsWith(`${key}.`) && f.includes('archive'));
+    expect(archives.length).toBeGreaterThanOrEqual(1);
+    for (const f of archives) createdKeys.push(f.replace('.jsonl', ''));
+    const remaining = recallLessons('auto', { featureKey: key, limit: 200 });
     expect(remaining.length).toBeLessThanOrEqual(50);
   });
 });

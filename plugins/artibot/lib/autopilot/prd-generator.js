@@ -8,8 +8,9 @@
  */
 
 import path from 'node:path';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { ensureDirSync } from '../core/file.js';
 import { getPluginRoot } from '../core/platform.js';
 
 /**
@@ -184,11 +185,7 @@ export function generatePRD({ task, sessionId, options = {}, priorLessons }) {
   const filePath = path.join(getProjectRoot(), 'docs', 'PRD', fileName);
   const lessons = priorLessons ?? options.priorLessons;
   const content = renderPRD({ task, sessionId, options, priorLessons: lessons });
-  try {
-    mkdirSync(dirname(filePath), { recursive: true });
-  } catch (err) {
-    if (err.code !== 'EEXIST') throw err;
-  }
+  ensureDirSync(dirname(filePath));
   writeFileSync(filePath, content, 'utf-8');
   return { filePath, content, slug };
 }

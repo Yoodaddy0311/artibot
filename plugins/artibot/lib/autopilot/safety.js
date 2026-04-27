@@ -43,7 +43,7 @@ export const DANGEROUS_PATTERNS = Object.freeze([
  * @returns {string}
  */
 function probeText(toolCall) {
-  if (toolCall == null) return '';
+  if (toolCall === null || toolCall === undefined) return '';
   if (typeof toolCall === 'string') return toolCall;
   if (typeof toolCall !== 'object') return String(toolCall);
   const candidates = [
@@ -95,7 +95,7 @@ const DEFAULT_THRESHOLDS = Object.freeze({
  * @returns {number|null} milliseconds, or null if unparseable
  */
 export function parseDuration(input) {
-  if (input == null) return null;
+  if (input === null || input === undefined) return null;
   if (typeof input === 'number' && Number.isFinite(input)) return input;
   const m = /^\s*(\d+)\s*(ms|s|m|h|d)\s*$/i.exec(String(input));
   if (!m) return null;
