@@ -38,32 +38,52 @@ const VIOLATION_PATTERNS = Object.freeze([
   { id: 'shell-exfil', re: /\b(curl|wget|nc)\s+(-\w+\s+)*https?:/gi },
 ]);
 
+const ALLOW_LIST_TTL_MS = 30_000;
+let allowListCache = null;
+
 /**
- * Load the MCP allow list from artibot.config.json.
+ * Clear the in-process allow-list cache. Useful in tests or after editing
+ * artibot.config.json at runtime.
+ */
+export function clearAllowListCache() {
+  allowListCache = null;
+}
+
+/**
+ * Load the MCP allow list from artibot.config.json. Cached for ~30s in-process
+ * to avoid disk I/O on every isAllowed/wrapInvocation call.
  * Falls back to safe defaults on read or parse failure.
  * @returns {{ entries: Set<string>, blockExternal: boolean, enabled: boolean }}
  */
 export function loadAllowList() {
+  const now = Date.now();
+  if (allowListCache && now - allowListCache.ts < ALLOW_LIST_TTL_MS) {
+    return allowListCache.value;
+  }
   const defaults = {
     entries: new Set(DEFAULT_ALLOW_LIST),
     blockExternal: true,
     enabled: false,
   };
+  let value = defaults;
   try {
     const cfgPath = path.join(getPluginRoot(), 'artibot.config.json');
     const raw = readFileSync(cfgPath, 'utf8');
     const cfg = JSON.parse(raw);
     const mcp = cfg && cfg.autopilot && cfg.autopilot.mcp;
-    if (!mcp || typeof mcp !== 'object') return defaults;
-    const list = Array.isArray(mcp.allowList) ? mcp.allowList : DEFAULT_ALLOW_LIST;
-    return {
-      entries: new Set(list.filter((v) => typeof v === 'string')),
-      blockExternal: mcp.blockExternal !== false,
-      enabled: mcp.enabled === true,
-    };
+    if (mcp && typeof mcp === 'object') {
+      const list = Array.isArray(mcp.allowList) ? mcp.allowList : DEFAULT_ALLOW_LIST;
+      value = {
+        entries: new Set(list.filter((v) => typeof v === 'string')),
+        blockExternal: mcp.blockExternal !== false,
+        enabled: mcp.enabled === true,
+      };
+    }
   } catch {
-    return defaults;
+    /* fall through to defaults */
   }
+  allowListCache = { ts: now, value };
+  return value;
 }
 
 /**
@@ -162,8 +182,8 @@ export function validateMcpResponse(response) {
   const haystack = decoded ? `${direct}\n${decoded}` : direct;
   const violations = [];
   for (const { id, re } of VIOLATION_PATTERNS) {
-    const rx = new RegExp(re.source, re.flags);
-    const m = haystack.match(rx);
+    // VIOLATION_PATTERNS is module-frozen; String.match is lastIndex-safe with /g.
+    const m = haystack.match(re);
     if (m && m.length > 0) {
       violations.push({ id, sample: String(m[0]).slice(0, 80) });
     }
