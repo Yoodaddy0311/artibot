@@ -20,6 +20,7 @@ import {
 import { shouldPause, pauseReason } from './safety.js';
 import { notifyCompletion, notifyPause } from './notification.js';
 import { appendEvent } from './telemetry.js';
+import { recallLessons, appendLesson, extractKey } from './memory.js';
 
 /**
  * Best-effort telemetry tick. Never throws into Phase logic.
