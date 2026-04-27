@@ -27,6 +27,7 @@ import {
   listWorktrees,
 } from './worktree-manager.js';
 import { releaseLock } from './lock.js';
+import { loadAllowList } from './mcp-verifier.js';
 
 /**
  * Best-effort telemetry tick. Never throws into Phase logic.
@@ -329,7 +330,42 @@ export function runPhase3CrossCheck(state) {
 }
 
 /**
+ * Attach MCP-verify metadata to a Phase 4 instruction (W2 integration).
+ * Mutates `state.verifyResult.mcp` slot and emits a telemetry tick.
+ * @param {object} state
+ * @param {object} instruction - Phase 4 instruction to be augmented
+ */
+function attachMcpVerify(state, instruction) {
+  const allow = loadAllowList();
+  instruction.mcp = {
+    enabled: true,
+    allowedPrefix: 'plugin:artibot:',
+    allowList: Array.from(allow.entries),
+    blockExternal: allow.blockExternal,
+    instructions: [
+      '추가로 자체 plugin MCP 검증을 수행하세요.',
+      'Artibot 자체 plugin MCP 만 호출 (plugin:artibot: prefix).',
+      '외부 host로 데이터 송신/수신 절대 금지.',
+      'MCP 응답을 받으면 validateMcpResponse(response)로 검증.',
+      'violations 발견 시 즉시 phase abort.',
+    ],
+  };
+  state.verifyResult = state.verifyResult || {};
+  state.verifyResult.mcp = state.verifyResult.mcp || { ok: null, violations: [] };
+  persist(state);
+  tick(state.sessionId, {
+    phase: 'VERIFY',
+    type: 'mcp-verify-enabled',
+    level: 'info',
+    message: 'MCP-driven verification enabled',
+    data: { allowList: Array.from(allow.entries) },
+  });
+}
+
+/**
  * Phase 4 — Verify: run npm run ci; on failure, summon build-error-resolver.
+ * When state.options.mcpVerify is true, an additional MCP-verify directive
+ * is attached (instruction.mcp + state.verifyResult.mcp slot).
  * @param {object} state
  * @returns {object}
  */
@@ -341,7 +377,7 @@ export function runPhase4Verify(state) {
   recordPhase(state, { name: 'VERIFY', status: 'queued' });
   persist(state);
   tick(state.sessionId, { phase: 'VERIFY', type: 'phase-end', level: 'info', message: 'Phase 4 VERIFY 위임 완료' });
-  return {
+  const instruction = {
     type: 'verify',
     phase: 'VERIFY',
     sessionId: state.sessionId,
@@ -359,6 +395,10 @@ export function runPhase4Verify(state) {
       '실패할 때마다 state.counters.buildFailures 또는 testFailures 증가.',
     ],
   };
+  if (state.options?.mcpVerify) {
+    attachMcpVerify(state, instruction);
+  }
+  return instruction;
 }
 
 /**

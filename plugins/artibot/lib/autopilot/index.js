@@ -102,3 +102,10 @@ export {
   recallLessons,
   compactFeature,
 } from './memory.js';
+
+export {
+  loadAllowList,
+  isAllowed,
+  wrapInvocation,
+  validateMcpResponse,
+} from './mcp-verifier.js';
