@@ -22,6 +22,7 @@ import { ensureDirSync } from '../core/file.js';
 import { getStoreDir } from './session-store.js';
 
 const GIT_TIMEOUT_MS = 15000;
+// eslint-disable-next-line no-control-regex
 const NON_ASCII = /[^\x00-\x7F]/;
 
 /**

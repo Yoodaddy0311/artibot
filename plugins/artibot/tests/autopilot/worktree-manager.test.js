@@ -44,7 +44,9 @@ describe('getWorktreesRoot / getWorktreePath', () => {
   it('falls back to ASCII tmpdir when cwd has non-ASCII chars', () => {
     const root = getWorktreesRoot();
     // On a Korean cwd (this repo) the root must be ASCII-only.
+    // eslint-disable-next-line no-control-regex
     if (/[^\x00-\x7F]/.test(process.cwd())) {
+      // eslint-disable-next-line no-control-regex
       expect(/[^\x00-\x7F]/.test(root)).toBe(false);
       expect(root.startsWith(os.tmpdir())).toBe(true);
     }
