@@ -9,6 +9,7 @@ triggers:
   - "funnel optimization"
   - "CRO"
   - "conversion rate"
+platforms: [claude-code, gemini-cli, codex-cli, cursor]
 agents:
   - "performance-engineer"
   - "code-reviewer"

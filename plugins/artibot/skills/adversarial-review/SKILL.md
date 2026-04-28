@@ -18,6 +18,7 @@ allowed-tools: [Read, Grep, Glob, Bash]
 agents:
   - "code-reviewer"
   - "security-reviewer"
+tokens: 3000
 level1_tokens: 200
 level2_tokens: 3000
 category: "quality"

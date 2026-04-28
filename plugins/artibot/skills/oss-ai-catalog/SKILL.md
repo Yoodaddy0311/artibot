@@ -24,6 +24,11 @@ description: |
 
   DO NOT hardcode recommendations in agent prompts; consult this skill so recommendations stay fresh.
 whenNotToUse: "Proprietary or commercial-only tool recommendations; do not apply when the user explicitly needs a managed SaaS product and open-source constraints do not apply."
+platforms: [claude-code, gemini-cli, codex-cli, cursor]
+level: 2
+category: library
+tokens: 2500
+agents: [llm-architect, backend-developer, data-analyst]
 auto-invoke: true
 user-invocable: false
 ---

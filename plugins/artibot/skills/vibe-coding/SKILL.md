@@ -24,6 +24,7 @@ triggers:
   - "do"
 tokens: "~2K"
 category: "workflow"
+agents: [orchestrator, code-reviewer]
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 source_hash: f721ef83
 whenNotToUse: "Non-coding requests (documentation, analysis, design discussion) where the DEV decompose-execute-verify loop is not applicable."

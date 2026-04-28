@@ -20,6 +20,7 @@ agent: Explore
 allowed-tools: [Read, Grep, Glob, Bash]
 agents:
   - "devops-engineer"
+tokens: 3500
 level1_tokens: 200
 level2_tokens: 3500
 category: "infrastructure"

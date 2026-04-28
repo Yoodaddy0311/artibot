@@ -20,6 +20,7 @@ allowed-tools: [Read, Grep, Glob, Bash]
 agents:
   - "performance-engineer"
   - "architect"
+tokens: 2500
 level1_tokens: 200
 level2_tokens: 2500
 category: "optimization"

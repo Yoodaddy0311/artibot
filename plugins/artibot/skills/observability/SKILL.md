@@ -23,6 +23,7 @@ allowed-tools: [Read, Grep, Glob, Bash]
 agents:
   - "devops-engineer"
   - "performance-engineer"
+tokens: 4000
 level1_tokens: 200
 level2_tokens: 4000
 category: "infrastructure"

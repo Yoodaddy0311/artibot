@@ -11,6 +11,7 @@ triggers:
   - "pipeline"
   - "prospect"
   - "lead nurture"
+platforms: [claude-code, gemini-cli, codex-cli, cursor]
 agents:
   - "backend-developer"
   - "code-reviewer"

@@ -9,6 +9,7 @@ triggers:
   - "CRO page"
   - "conversion page"
   - "page design"
+platforms: [claude-code, gemini-cli, codex-cli, cursor]
 agents:
   - "frontend-developer"
   - "performance-engineer"

@@ -9,6 +9,7 @@ triggers:
   - "CRO form"
   - "form UX"
   - "form design"
+platforms: [claude-code, gemini-cli, codex-cli, cursor]
 agents:
   - "frontend-developer"
   - "tdd-guide"

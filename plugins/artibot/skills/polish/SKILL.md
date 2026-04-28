@@ -25,6 +25,11 @@ description: |
   - Code, JSON, YAML, SQL, or other structured non-prose output
   - Internal agent-to-agent messages
   - Short acknowledgements (< 200 chars)
+platforms: [claude-code, gemini-cli, codex-cli, cursor]
+level: 2
+category: code-quality
+tokens: 2500
+agents: [content-marketer, doc-updater]
 auto-invoke: true
 user-invocable: false
 whenNotToUse: "Do not apply polish to code blocks, JSON/YAML/SQL, internal agent-to-agent messages, or outputs shorter than 200 characters. Do not re-run on text that has already been polished in the same session (idempotency guard)."

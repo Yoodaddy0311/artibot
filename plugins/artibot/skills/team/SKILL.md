@@ -11,6 +11,11 @@ triggers:
   - verification
   - 팀원들
   - 병렬로
+platforms: [claude-code, gemini-cli, codex-cli, cursor]
+level: 2
+category: orchestration
+tokens: 2500
+agents: [orchestrator, planner]
 source_hash: cd022fd3
 whenNotToUse: "Single-file edits under 30 lines, simple single-domain tasks, or requests explicitly flagged with --no-team where inline execution is more efficient than parallel team overhead."
 ---

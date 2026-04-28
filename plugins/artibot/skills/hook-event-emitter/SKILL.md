@@ -21,6 +21,7 @@ allowed-tools: [Read, Grep, Glob, Bash]
 agents:
   - "devops-engineer"
   - "performance-engineer"
+tokens: 3800
 level1_tokens: 220
 level2_tokens: 3800
 category: "observability"

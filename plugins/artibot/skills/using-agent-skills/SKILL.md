@@ -2,7 +2,7 @@
 name: using-agent-skills
 context: fork
 user-invocable: false
-level: 0
+level: 1
 description: "Discovery flowchart for Artibot's 102 skills. Use this as orientation when the user asks 'what skills do you have', 'how do I do X', 'what commands are available', or when picking the right tool for an unfamiliar task."
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 triggers:
@@ -16,6 +16,7 @@ triggers:
 allowed-tools: [Read, Grep, Glob]
 tokens: "~2K"
 category: "meta"
+agents: [orchestrator, planner]
 whenNotToUse: "Inside an active skill — discovery is for orientation, not work. If you already know which skill applies, jump straight to it."
 ---
 
