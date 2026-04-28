@@ -9,6 +9,7 @@ tokens: "~3K"
 category: "workflow"
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 source_hash: 022945ba
+whenNotToUse: "Do not apply when the request is a quick exploratory spike, a one-liner fix, or when the stakeholder explicitly wants to prototype first and specify later. EARS overhead exceeds value for tasks under 30 minutes of implementation."
 ---
 
 # SPEC Format: Structured Requirements & Specifications
@@ -301,3 +302,22 @@ The following table captures common excuses agents make to skip the rigor of thi
 | "acceptance criteria are obvious" | if obvious, they are easy to write; if hard to write, they were not obvious |
 | "the ticket description is enough" | ticket descriptions drift; SPEC is the durable contract between PM and engineering |
 | "I will write the spec after coding" | post-hoc specs are documentation, not requirements — the whole value is up-front alignment |
+
+## Common Rationalizations
+
+| Rationalization | Why it's wrong | What to do instead |
+|---|---|---|
+| "The ticket description is clear enough, no need for EARS" | Ticket descriptions drift and allow multiple interpretations; EARS produces a single unambiguous statement that is testable by definition | Convert the ticket description into at least one EARS sentence before implementation starts |
+| "We are agile so formal specs slow us down" | Lightweight one-page specs prevent rework; the cost of writing EARS is always less than the cost of building the wrong thing | Use the EARS templates for user-facing requirements only; skip internal helper functions |
+| "Acceptance criteria are obvious from the feature name" | If they were obvious, stakeholders would not argue about whether the feature is done; the arguments happen because nothing was written down | Write one Given-When-Then per happy path and one per known error path before coding |
+| "I will add the spec after the prototype is approved" | Post-hoc specs encode the prototype's bugs as requirements; requirements written before implementation constrain the design | Write requirements for the approved scope, then implement — even a one-day prototype deserves a scope statement |
+| "The three-tier boundary (Always/Ask first/Never) is overkill for this change" | Undocumented tier boundaries produce scope creep silently; every "small" unspecified change that shipped too far has no written boundary to point to | Add at minimum an "Out of Scope" section listing two or three explicit exclusions |
+
+## Red Flags
+
+- Writing requirements in natural language without any EARS pattern applied
+- Acceptance criteria using words like "fast", "easy", "good" without measurable thresholds
+- A spec document that contains no Given-When-Then blocks for error scenarios
+- Requirements that were written after the implementation was already merged
+- Priority classifications made without stakeholder input or documented rationale
+- Any requirement containing both "and" and "or" in the same EARS sentence (compound requirement)

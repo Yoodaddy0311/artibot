@@ -75,7 +75,7 @@ export function createEvolutionLoop(options = {}) {
      * @param {object} [context.routingResult] - Last routing result for auto-research trigger
      * @returns {Promise<object>} Pipeline result with per-stage outcomes
      */
-    // eslint-disable-next-line complexity
+     
     async run(context = {}) {
       const result = {
         compressed: null,

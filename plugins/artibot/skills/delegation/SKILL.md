@@ -26,6 +26,7 @@ agents:
 tokens: "~5K"
 category: "orchestration"
 source_hash: dd3cd6dd
+whenNotToUse: "Do not delegate single-file changes under 30 lines to sub-agents or teams — the delegation overhead exceeds the task cost. Do not use Team Mode for tasks with strict sequential dependencies where all work would block on the first agent anyway."
 ---
 
 # Delegation Strategies
@@ -347,3 +348,22 @@ The following table captures common excuses agents make to skip the discipline o
 | "subagents don't share my context" | that's the feature, not the bug — isolated context is how you get fresh reasoning and avoid poisoning |
 | "I can do it faster myself" | "faster" ignores opportunity cost — while you do it serially, a parallel team could finish 4 tasks in the same wall-clock |
 | "delegation overhead exceeds the benefit" | overhead is bounded (~500 tokens per handoff); benefit scales with task size — delegate anything above 2k tokens of work |
+
+## Common Rationalizations
+
+| Rationalization | Why it's wrong | What to do instead |
+|---|---|---|
+| "I'll delegate after I have a rough plan to make scope clearer" | Planning inline before delegating is doing the expensive cognitive work in the main thread — delegation's benefit is parallelizing that work | Delegate with a rough scope and let the sub-agent refine it; the sub-agent's first output can be a scoping report |
+| "Sub-agent results are hard to integrate, it's easier to do it myself" | Integration difficulty is a scope definition problem, not a delegation problem; well-bounded sub-agent tasks produce deterministic outputs that integrate trivially | Define explicit output schemas for each sub-agent task before spawning |
+| "Team Mode is only needed for big projects" | Team Mode is triggered by communication need, not project size; two independent tasks that need to share findings qualify for Team Mode at any project scale | Use the scoring matrix — if communication need >= 0.5, use Team Mode regardless of project size |
+| "Broadcasting to the whole team keeps everyone informed" | Broadcasts interrupt all agents and consume their context budget; use DMs for agent-specific information and reserve broadcasts for critical blockers | Default to `SendMessage(type: "message", recipient: "<name>")` and only broadcast for shutdown or blocker alerts |
+| "TeamDelete is optional cleanup, the session ends anyway" | Orphaned teams consume server-side resources and pollute the TaskList for subsequent sessions | Always call `TeamDelete` at the end of every team session as the final step of the workflow checklist |
+
+## Red Flags
+
+- Task spanning more than 3 domains executed entirely in the main agent thread
+- Sub-agent spawned with a task description over 500 words (too much context — scope it down)
+- Team created without a `TaskCreate` call to define the work units
+- Agent receiving results from 3+ sub-agents without a structured aggregation step
+- `TeamDelete` missing from completed team session logs
+- Broadcasting when a direct `SendMessage` to one agent would suffice

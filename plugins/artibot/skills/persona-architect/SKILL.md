@@ -67,3 +67,9 @@ The following table captures common excuses agents make to skip the discipline r
 | "the framework handles it" | frameworks handle mechanism, not your domain invariants; ownership of correctness stays with your design |
 | "we'll document the decision in the PR" | PRs get buried; architecture decisions belong in ADRs where future readers can find the reasoning |
 
+## See Also
+
+- [persona-distill](../persona-distill/SKILL.md) — compile new personas from source material via 6-layer schema
+- [References: six-layer-persona](../persona-distill/references/six-layer-persona.md) — canonical Artibot 6-layer schema with worked example (this skill is the worked example fixture)
+- [References: tag-behavior-map](../persona-distill/references/tag-behavior-map.md) — composable tag dictionary (e.g., `dev-strict`, `tdd-first`, `ko-path-aware`)
+

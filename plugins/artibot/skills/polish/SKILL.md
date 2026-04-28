@@ -27,6 +27,7 @@ description: |
   - Short acknowledgements (< 200 chars)
 auto-invoke: true
 user-invocable: false
+whenNotToUse: "Do not apply polish to code blocks, JSON/YAML/SQL, internal agent-to-agent messages, or outputs shorter than 200 characters. Do not re-run on text that has already been polished in the same session (idempotency guard)."
 ---
 
 # polish — AI-slop Auto-Remediation (Post-Generation Hook Skill)
@@ -108,3 +109,22 @@ Scan the draft against two pattern sets:
 | seo-specialist | ✅ | meta description은 length 제약 엄격 유지 |
 | doc-updater | ✅ | code block·API signature skip |
 | planner / code-reviewer / architect | ❌ | 내부 분석물은 polish 대상 아님 |
+
+## Common Rationalizations
+
+| Rationalization | Why it's wrong | What to do instead |
+|---|---|---|
+| "The draft is already natural, polish will over-edit it" | Polish is idempotent by design — if the change rate is below 5% the skill is a no-op; running it on already-clean text costs almost nothing | Always run polish; let the idempotency guard decide whether changes are needed |
+| "Polishing adds latency to the agent chain" | Polish is a regex-and-rewrite pass, not an LLM call; the latency is negligible compared to the producer agent that created the draft | Run polish as the final synchronous step of every content-producing agent chain |
+| "The AI tone markers are subtle, users won't notice" | Users reliably notice AI-slop patterns even when they cannot name them; they experience the text as hollow or untrustworthy without knowing why | Apply the diagnostic against both banned-pattern lists regardless of perceived subtlety |
+| "Length preservation ±10% is too strict for heavy rewrites" | Outputs that grow beyond ±10% are adding content that was not in the draft; outputs that shrink more than 10% are losing factual content | If the rewrite requires more than ±10% change, the draft has a structural problem that polish should not mask — return it to the producer |
+| "I'll polish only when the user complains about AI tone" | Reactive polish means most users see the AI-slop version; proactive auto-chaining means no user sees it | Configure auto-invoke in the agent chain — polish should never be an optional step |
+
+## Red Flags
+
+- Content-marketer or copywriter output reaching the user without a polish pass
+- Polish skip logged for output over 200 characters with no justification in the session log
+- Rewritten text containing any of the banned English slop patterns (delve, leverage, pivotal)
+- Output length changed by more than 10% from the draft
+- Code block content modified by the polish rewrite
+- Same draft polished twice in the same session (missing idempotency guard)

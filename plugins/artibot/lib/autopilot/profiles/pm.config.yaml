@@ -1,0 +1,4 @@
+name: pm
+include: [tldr, kpiSummary, phaseSummary, risksTop5, dependencies, testSummary, nextAction]
+maxLines: 120
+minLines: 60

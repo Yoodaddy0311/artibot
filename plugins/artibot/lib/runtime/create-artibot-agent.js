@@ -159,7 +159,7 @@ export function createArtibotAgent(options = {}) {
     : loadConfig().catch(() => FALLBACK_CONFIG);
 
   return {
-    // eslint-disable-next-line complexity
+     
     async preparePrompt({ prompt, hookData } = {}) {
       const normalizedPrompt = normalizePrompt(prompt, hookData);
       const config = await configPromise;

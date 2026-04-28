@@ -137,7 +137,7 @@ export function validateConfig(config) {
  * @param {boolean} [options.dryRun] - Skip writes
  * @returns {Promise<object>} KnowledgeReport
  */
-// eslint-disable-next-line complexity
+ 
 export async function runKnowledgeUpdate(scanReport, patternReport, options = {}) {
   const report = {
     stage: 'knowledge-update',
@@ -446,7 +446,7 @@ export async function runGrpoStage(patternExtract, selfScan) {
  * @param {object} result
  * @returns {Promise<void>}
  */
-// eslint-disable-next-line complexity
+ 
 async function appendPipelineLog(result) {
   try {
     const existing = (await readJsonFile(LEARNING_LOG_PATH)) ?? { entries: [] };

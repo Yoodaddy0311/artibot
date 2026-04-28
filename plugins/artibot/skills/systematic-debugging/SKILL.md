@@ -26,6 +26,7 @@ argument-hint: "[error-description] e.g., TypeError in auth.js, login 500 error"
 tokens: "~3K"
 category: "debugging"
 source_hash: 16fbf30a
+whenNotToUse: "Do not apply the full 4-phase investigation to trivial typos, obvious off-by-one errors visible in a single line, or issues where root cause is already established in a prior post-mortem. Skip Phase 1-2 overhead when the error is deterministic and the fix is one character."
 ---
 
 # Systematic Debugging
@@ -321,3 +322,22 @@ The following table captures common excuses agents make to skip the rigor of thi
 | "I will grep my way to the bug" | grep finds symptoms; debuggers and binary search find causes |
 | "logging more will reveal it" | logging is a tool, not a strategy — form a hypothesis first, then add targeted logs |
 | "the stack trace is enough" | the stack trace shows where it failed, not why — always ask why five times |
+
+## Common Rationalizations
+
+| Rationalization | Why it's wrong | What to do instead |
+|---|---|---|
+| "I've seen this error before, I know the fix" | Pattern recognition without reproduction skips verification that the root cause is the same; the symptom can be identical while the cause differs | Write down your hypothesis explicitly before applying any fix, then validate it matches the reproduction evidence |
+| "Just try the fix and see if CI passes" | Guess-and-check debugging adds commits with no traceability, pollutes git history, and trains you to ship unverified changes | Follow the Iron Law: reproduce first, form a hypothesis, validate, then fix — CI green is evidence of correctness, not a substitute for understanding |
+| "The error is intermittent so I can't reproduce it" | Intermittent errors are reproducible under specific timing, concurrency, or state conditions; "can't reproduce" means "haven't isolated the state yet" | Use `git bisect`, add timing assertions, or inject artificial delays to make the intermittent condition deterministic |
+| "Root cause analysis is only for post-mortems, not everyday bugs" | Post-mortems investigate production failures; everyday root cause analysis prevents them — the discipline is the same at both scales | Apply Phase 1-3 to every bug regardless of severity; abbreviated versions (5 minutes) are still better than blind fixes |
+| "Fixing the symptom is faster than finding the root cause" | Symptom fixes compound: three symptom patches often collide later in a triple failure that is ten times harder to debug | Time yourself: root cause investigation rarely exceeds 30 minutes for bugs that symptom-patching would take days to suppress |
+
+## Red Flags
+
+- A fix commit without a corresponding reproduction test in the same PR
+- Comments like "not sure why this works" or "removing this breaks things" in the codebase
+- Multiple recent commits touching the same function in a short window (symptom-patching pattern)
+- Hypothesis stated in the PR description as "might be related to X" rather than "X causes Y when Z"
+- Stack trace pasted in a PR comment with no root cause classification above it
+- Phases skipped because "it was a simple fix" but the test suite now has a new test nobody wrote

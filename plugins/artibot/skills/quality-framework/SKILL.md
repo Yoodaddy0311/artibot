@@ -28,6 +28,7 @@ tokens: "~5K"
 category: "code-quality"
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 source_hash: c3db3f38
+whenNotToUse: "Do not run the full 8-step ATLAS cycle on every micro-PR or hotfix. For single-file changes under 50 lines, run only the blocking gates (Steps 1, 2, 4, 5). Reserve full cycle execution for release candidates and architecture-level changes."
 ---
 
 # ATLAS Quality Framework
@@ -438,3 +439,22 @@ The following table captures common excuses agents make to skip the rigor of thi
 | "we will measure coverage when we have time" | uncovered code is unknown code; coverage is the minimum visibility bar |
 | "80% coverage is arbitrary" | arbitrary but load-bearing — it forces you to test the branches you would skip |
 | "adaptive quality is vague" | adaptive means tuning thresholds per module risk — not every file needs 95% |
+
+## Common Rationalizations
+
+| Rationalization | Why it's wrong | What to do instead |
+|---|---|---|
+| "The blocking gates passed so the full ATLAS is overkill" | Blocking gates catch syntax and security; the warning-level gates (performance, documentation, integration) accumulate technical debt silently when skipped | Run warning-level gates as reviewable items, not blocking, but track them in the backlog |
+| "Coverage dropped 3%, that's within noise" | A 3% coverage drop on a 10-file module is statistically significant if the uncovered lines are new error paths; noise is only noise in aggregate, not per-module | Check which specific lines are uncovered before treating a drop as noise |
+| "GRPO quality improvement is theoretical overhead" | GRPO tracking takes one `saveMemory` call per resolved quality issue; the cost is near zero and the accumulated patterns meaningfully improve future quality decisions | Enable quality pattern logging in `artibot.config.json` — it is off by default and costs nothing to turn on |
+| "The framework is for the team, not solo work" | Solo work has the same failure modes as team work; the framework exists because individual developers skip the same steps for the same rationalizations | Apply the same blocking gates on solo PRs that you would require of a teammate |
+| "Documentation step is always last and always cut" | Documentation cut from every sprint accumulates an undocumented API surface that becomes a maintenance burden; the step is in the cycle because it is always tempting to skip | Cap documentation effort at 20 minutes per PR — enough for a one-paragraph summary and any changed method signatures |
+
+## Red Flags
+
+- PR merged with Step 4 (Security) or Step 5 (Tests) in FAIL status
+- Coverage threshold configured lower than 80% without a documented justification
+- ATLAS framework invoked but only Steps 1-3 executed and result reported as "passed"
+- Performance budgets never checked because "we don't have a performance test setup yet"
+- Quality metrics dashboard last updated more than 30 days ago
+- GRPO quality loop disabled with no record of why it was turned off

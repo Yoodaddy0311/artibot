@@ -1,0 +1,4 @@
+name: casual
+include: [tldr, kpiSimple, testEmoji, casualClosing, nextAction]
+maxLines: 80
+minLines: 40

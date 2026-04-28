@@ -30,6 +30,7 @@ version: "1.0.0"
 risk: safe
 lastVerified: "2026-03-31"
 source_hash: 17d9f59e
+whenNotToUse: "Do not run a full 4-phase audit on proof-of-concept branches, internal tooling with no external exposure, or code that is about to be deleted. Reserve audit depth for production-bound code or pre-release milestones."
 ---
 
 # Production Code Audit
@@ -164,3 +165,22 @@ The following table captures common excuses agents make to skip the rigor of thi
 | "code review covered this" | code review is per-PR; audit is cross-cutting — different lenses catch different bugs |
 | "tests would have caught it" | tests catch what you thought to test; audits catch what you did not |
 | "the scan is noisy" | triage the signal, tune the rules — noisy output is better than silent failure |
+
+## Common Rationalizations
+
+| Rationalization | Why it's wrong | What to do instead |
+|---|---|---|
+| "We already have a linter and tests so the audit is redundant" | Linters enforce style; tests verify what you chose to test; audits find cross-cutting issues that neither scans for (auth gaps, N+1 patterns, god classes) | Run the audit as a fourth layer after lint and tests — each layer has a different detection surface |
+| "Critical issues will be caught in staging" | Staging environments rarely have production-scale data, production IAM roles, or production traffic patterns; audit catches structural issues that staging traffic never triggers | Fix Critical and High findings before the code reaches any shared environment |
+| "The audit report is a list, not a priority — I'll handle items when convenient" | Unordered audit output gets triaged as low-priority indefinitely; Critical findings without deadlines never get fixed | Assign CRITICAL items to the current sprint, HIGH to the next one, track in your issue tracker |
+| "Automated scanning already ran in CI, manual audit is overkill" | Automated scanners catch known vulnerability patterns; manual audit phases (Discovery, Architecture) require human judgment about design intent | Use automated scans as Phase 2 input, not as a replacement for Phase 1 Discovery or Phase 3 fixes |
+| "We can't stop development for an audit" | Audits run on existing code, not blocking code in flight; schedule a time-boxed audit sprint quarterly without halting feature work | Time-box the audit to two days per quarter — that is the cost of a single production incident |
+
+## Red Flags
+
+- Audit report generated but no CRITICAL items linked to issues in the tracker
+- Phase 1 Discovery skipped and scan started directly from grep patterns
+- Audit findings reported as a markdown file with no owner assigned
+- Before/After metrics absent from the audit report (no baseline to measure improvement)
+- Security scan limited to dependency vulnerabilities only, missing injection and auth checks
+- Audit run by the same engineer who wrote the code without a second reviewer on Critical findings

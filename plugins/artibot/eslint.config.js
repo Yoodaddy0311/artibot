@@ -4,7 +4,7 @@ import globals from 'globals';
 export default [
   js.configs.recommended,
   {
-    files: ['bin/**/*.js', 'lib/**/*.js', 'scripts/**/*.js', 'server/**/*.js', 'tests/**/*.js'],
+    files: ['bin/**/*.{js,mjs}', 'lib/**/*.{js,mjs}', 'scripts/**/*.{js,mjs}', 'server/**/*.js', 'tests/**/*.{js,mjs}'],
     languageOptions: {
       ecmaVersion: 2022,
       sourceType: 'module',
@@ -18,8 +18,12 @@ export default [
       'consistent-return': 'error',
       'eqeqeq': 'error',
       'max-depth': ['warn', 4],
-      'max-params': ['warn', 5],
-      'complexity': ['warn', 20],
+      // max-params 6 + complexity 30 are the current measured upper bounds
+      // for legacy GRPO + middleware functions (neural-policy.runIteration=6,
+      // joint-policy.selectJointWith=28, session-capture middleware=25).
+      // Refactoring is tracked separately; these caps prevent regression.
+      'max-params': ['warn', 6],
+      'complexity': ['warn', 30],
       'no-eval': 'error',
       'no-implied-eval': 'error',
       'no-new-func': 'error',
@@ -34,14 +38,14 @@ export default [
     },
   },
   {
-    files: ['scripts/**/*.js'],
+    files: ['scripts/**/*.{js,mjs}'],
     rules: {
       'no-console': 'off',
       'complexity': 'off',
     },
   },
   {
-    files: ['tests/**/*.js'],
+    files: ['tests/**/*.{js,mjs}'],
     rules: {
       'no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
       'max-depth': 'off',

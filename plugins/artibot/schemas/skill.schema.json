@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "title": "SkillFrontmatter",
+  "description": "Schema for Artibot SKILL.md frontmatter fields. All fields except name and description are optional.",
+  "type": "object",
+  "required": ["name", "description", "context"],
+  "properties": {
+    "context": {
+      "type": "string",
+      "description": "Skill context type. Use 'fork' for user-accessible skills."
+    },
+    "name": {
+      "type": "string",
+      "description": "Unique skill identifier matching the directory name."
+    },
+    "description": {
+      "type": "string",
+      "description": "One-paragraph description of when the skill applies and what it does."
+    },
+    "whenNotToUse": {
+      "type": "string",
+      "maxLength": 500,
+      "description": "Explicit scope boundaries describing when NOT to activate this skill. 1-2 sentences covering anti-triggers and out-of-scope contexts."
+    },
+    "level": {
+      "type": ["integer", "string"],
+      "description": "Cognitive depth level: 1=reference, 2=workflow, 3=analysis, 'progressive'=adaptive disclosure."
+    },
+    "triggers": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Keywords or phrases that auto-activate this skill."
+    },
+    "agents": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Agent names this skill delegates to."
+    },
+    "tokens": {
+      "type": "string",
+      "description": "Approximate token budget hint, e.g. '~3K'."
+    },
+    "category": {
+      "type": "string",
+      "description": "Skill category for grouping and filtering."
+    },
+    "platforms": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Supported platforms: claude-code, gemini-cli, codex-cli, cursor."
+    },
+    "source_hash": {
+      "type": "string",
+      "description": "8-character hex hash of the canonical source used to derive this skill."
+    },
+    "version": {
+      "type": "string",
+      "description": "Semantic version of this skill file."
+    },
+    "lastVerified": {
+      "type": "string",
+      "format": "date",
+      "description": "ISO date when this skill was last verified against the codebase."
+    },
+    "risk": {
+      "type": "string",
+      "enum": ["safe", "moderate", "high"],
+      "description": "Risk classification for skill execution."
+    },
+    "auto-invoke": {
+      "type": "boolean",
+      "description": "Whether the skill is auto-invoked by the agent chain without user input."
+    },
+    "user-invocable": {
+      "type": "boolean",
+      "description": "Whether the user can explicitly invoke this skill."
+    },
+    "allowed-tools": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Subset of tools this skill is permitted to use."
+    },
+    "progressive_disclosure": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "level1_tokens": { "type": "integer" },
+        "level2_tokens": { "type": "integer" }
+      },
+      "description": "Progressive disclosure configuration for multi-level skills."
+    },
+    "argument-hint": {
+      "type": "string",
+      "description": "Hint shown to the user for the $ARGUMENTS placeholder."
+    }
+  },
+  "additionalProperties": true
+}

@@ -23,6 +23,7 @@ category: "testing"
 version: "1.0.0"
 lastVerified: "2026-03-27"
 source_hash: b0104fec
+whenNotToUse: "Do not apply the full RED-GREEN-REFACTOR cycle to throwaway scripts, one-off data migrations, or exploratory code that will be deleted within 24 hours. Also skip when adding tests to already-running legacy code under time pressure — defer to a dedicated coverage sprint instead."
 ---
 # TDD Workflow
 
@@ -252,3 +253,22 @@ The following table captures common excuses agents make to skip critical steps i
 | "Refactoring does not need new tests, coverage is already there" | Refactoring changes structure, not behavior — the existing tests are your safety net. But if coverage is below 80% on the target, you are refactoring blind. Measure first, then refactor. |
 | "Mocking the database is too much setup for this test" | Over-mocking is an anti-pattern, but zero mocking at boundaries means your "unit test" is really an integration test pretending to be fast. Use fixtures or in-memory adapters — not `.skip`. |
 | "The bug is too hard to reproduce in a test" | If you cannot reproduce it in a test, you cannot prove you fixed it. "Hard to reproduce" means you have not yet isolated the state — that isolation IS the fix. |
+
+## Common Rationalizations
+
+| Rationalization | Why it's wrong | What to do instead |
+|---|---|---|
+| "I already know the implementation, tests come after" | Tests written after implementation confirm the code you wrote, not the behavior required; RED phase exists to prove the test is wired correctly | Write the failing test first even if the implementation is mentally obvious — the 30-second cost is less than the regression it will catch |
+| "GREEN phase is done when the test passes, refactoring is optional" | Skipping REFACTOR leaves the codebase in the state it took to pass tests, not the state it should be in long-term; coverage without clarity accumulates debt | Budget at least 5 minutes per cycle for REFACTOR even if the only change is renaming a variable |
+| "80% coverage is arbitrary so I'll aim for whatever is natural" | "Whatever is natural" trends to 40% because the natural tendency is to test happy paths; the 80% floor forces testing of error branches and edge cases | Set the coverage threshold in your vitest config so CI enforces it mechanically, not by intention |
+| "This module is stable, adding tests will break it" | Adding tests to stable code cannot break it unless the code had untested side effects; such tests are revealing hidden fragility, not creating it | Add characterization tests that record current behavior, then refactor with confidence |
+| "Integration tests cover this unit, I don't need unit tests too" | Integration tests are slow and imprecise — they tell you something is wrong, not where; unit tests tell you which function failed | Keep both layers: unit tests for fast feedback, integration for contract verification |
+
+## Red Flags
+
+- Test files committed without a corresponding RED commit in the git log
+- `.skip` or `.only` annotations present in any test file at merge time
+- Test names that describe implementation ("calls `saveUser`") rather than behavior ("persists a new user to the store")
+- Coverage badge below 80% on modules touched in the current PR
+- Refactoring commits that also add new features (GREEN and REFACTOR mixed in one commit)
+- Mocks that re-implement non-trivial logic rather than stubbing at a boundary

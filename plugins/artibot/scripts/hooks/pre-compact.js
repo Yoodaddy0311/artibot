@@ -7,8 +7,9 @@
  * @module scripts/hooks/pre-compact
  */
 
-import { parseJSON, readStdin, writeStdout } from '../utils/index.js';
+import { getPluginRoot, parseJSON, readStdin, writeStdout } from '../utils/index.js';
 import path from 'node:path';
+import { execSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createErrorHandler, getClaudeDir, getStatePath, logHookError } from '../../lib/core/hook-utils.js';
 
@@ -202,6 +203,80 @@ function formatSummaryMessage(summary, tokenEstimate) {
 }
 
 /**
+ * AD-40: capture cwd, current git branch, and `git status --short` so the
+ * model can resume after compaction without re-issuing exploratory git
+ * commands. All sub-calls wrapped in try/catch — failures must NEVER throw.
+ * @returns {{ cwd: string, branch: string, gitStatus: string, capturedAt: string }}
+ */
+function captureGitState() {
+  const cwd = process.cwd();
+  const capturedAt = new Date().toISOString();
+  let branch = 'unknown';
+  let gitStatus = '';
+  try {
+    branch = execSync('git rev-parse --abbrev-ref HEAD', {
+      cwd,
+      stdio: ['ignore', 'pipe', 'ignore'],
+      encoding: 'utf-8',
+      timeout: 2000,
+    }).trim() || 'unknown';
+  } catch {
+    // Not a git repo or git unavailable — leave default
+  }
+  try {
+    gitStatus = execSync('git status --short', {
+      cwd,
+      stdio: ['ignore', 'pipe', 'ignore'],
+      encoding: 'utf-8',
+      timeout: 2000,
+    });
+  } catch {
+    // Best effort
+  }
+  return { cwd, branch, gitStatus, capturedAt };
+}
+
+/**
+ * AD-40: write a markdown state snapshot under runtime/state/. The file is
+ * intentionally human-readable so anyone resuming a session (human or
+ * model) can scan it without parsing JSON. Failures are swallowed.
+ * @param {ReturnType<typeof captureGitState>} state
+ * @returns {string|null} absolute path of the written file, or null on failure
+ */
+function writePreCompactState(state) {
+  try {
+    const repoRoot = path.resolve(getPluginRoot(), '..', '..');
+    const dir = path.join(repoRoot, 'runtime', 'state');
+    mkdirSync(dir, { recursive: true });
+    // Sanitise ISO ts for filesystem (no colons on Windows)
+    const fileStamp = state.capturedAt.replace(/[:.]/g, '-');
+    const filePath = path.join(dir, `pre-compact-${fileStamp}.md`);
+    const safeStatus = (state.gitStatus || '(clean / unavailable)').trimEnd();
+    const body = [
+      '---',
+      `cwd: ${state.cwd}`,
+      `branch: ${state.branch}`,
+      `ts: ${state.capturedAt}`,
+      'event: pre-compact',
+      '---',
+      '',
+      '# Pre-compact state snapshot',
+      '',
+      '`git status --short`:',
+      '',
+      '```',
+      safeStatus,
+      '```',
+      '',
+    ].join('\n');
+    writeFileSync(filePath, body, 'utf-8');
+    return filePath;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Load current artibot state from disk.
  * @param {string} statePath
  * @returns {object}
@@ -239,6 +314,11 @@ async function main() {
     .join('');
   const tokenEstimate = estimateTokens(totalText);
 
+  // AD-40: capture git/cwd snapshot for human-readable resume context.
+  // Wrapped per-call internally so failures never reach the main flow.
+  const gitState = captureGitState();
+  const stateFilePath = writePreCompactState(gitState);
+
   // Save snapshot before compaction
   const snapshot = {
     savedAt: new Date().toISOString(),
@@ -247,6 +327,12 @@ async function main() {
     summary,
     tokenEstimate,
     suppress_follow_up_questions: true,
+    gitState: {
+      cwd: gitState.cwd,
+      branch: gitState.branch,
+      hasStatus: Boolean(gitState.gitStatus && gitState.gitStatus.trim().length > 0),
+    },
+    stateFilePath,
   };
 
   try {

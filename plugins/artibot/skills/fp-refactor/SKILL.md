@@ -31,6 +31,7 @@ version: "1.0.0"
 risk: safe
 lastVerified: "2026-03-31"
 source_hash: 59d3e5ea
+whenNotToUse: "Do not apply fp-ts patterns to simple CRUD handlers, scripts with no error branching, or codebases where the team has no FP experience and no budget for the learning curve. The abstraction cost exceeds the benefit in these contexts."
 ---
 
 # FP Refactor: Imperative → Functional
@@ -178,3 +179,22 @@ The following table captures common excuses agents make to skip idiomatic patter
 | "Monads are scary math" | A monad is just `flatMap` + a constructor — you already use it with Array.flatMap and Promise.then. Naming it doesn't add complexity; it adds composability (do-notation, for-comprehensions). |
 | "A plain for-loop is clearer than reduce" | Loops mix iteration, accumulation, and mutation in one scope, making off-by-one and early-exit bugs common. reduce/fold separate the step function from the traversal and are trivially parallelizable. |
 | "Side effects are inevitable, why pretend?" | FP doesn't ban effects — it reifies them (IO, Task, Effect) so they're scheduled, testable, and cancellable. "Inevitable" effects that aren't tracked become untestable race conditions. |
+
+## Common Rationalizations
+
+| Rationalization | Why it's wrong | What to do instead |
+|---|---|---|
+| "FP refactoring is all-or-nothing, I'll wait until we can do it fully" | Gradual migration is the documented strategy for this skill; boundary adapters allow FP and imperative code to coexist safely in the same codebase | Start with one module's error handling, convert try/catch to Either, and ship — no full rewrite required |
+| "Either is harder to debug than try/catch" | Either's left channel is always typed and explicit; try/catch catches `unknown` and requires runtime inspection to identify the error type | Use branded error types in the Either left channel; they are more debuggable than generic Error objects |
+| "pipe() chains are unreadable for the team" | pipe() readability is a familiarity problem that resolves after one sprint; the alternative (deeply nested function calls) is measurably worse in code review | Introduce pipe() in one utility module first; run a team review session before spreading to services |
+| "Option is verbose compared to optional chaining" | Optional chaining (`?.`) returns `undefined` silently; Option forces the caller to handle the None case explicitly — the verbosity is the feature | Use Option for values that the business logic must handle explicitly; use `?.` for display-level defaults |
+| "TaskEither is overkill when async/await is cleaner" | async/await throws on rejection, forcing try/catch at every call site; TaskEither composes error handling in the type system and propagates it automatically | Use TaskEither for chains of 3+ async operations; for a single fetch, async/await is acceptable |
+
+## Red Flags
+
+- FP patterns introduced in a module without a corresponding team knowledge-sharing session
+- `pipe()` chain with more than 8 steps without a named intermediate variable for readability
+- Either left channel typed as `Error` or `unknown` (use specific error types)
+- Mixing `pipe()` and imperative `let`/mutation in the same function body
+- fp-ts imported but `pipe` not used (individual function calls without composition defeats the pattern)
+- Refactoring to FP in a module with less than 60% test coverage (no safety net)

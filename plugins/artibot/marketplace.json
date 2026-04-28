@@ -1,0 +1,273 @@
+{
+  "$schema": "https://github.com/anthropics/claude-plugins-official/schemas/marketplace-manifest.v1.json",
+  "_comment": "Public marketplace listing manifest. Subject to Anthropic spec finalization (claude-plugins-official). Fields modelled on common plugin marketplace conventions (VS Code, Cursor, Anthropic Skills). Update when the official Claude Code plugin marketplace schema lands.",
+  "_specStatus": "draft",
+  "_specSource": "https://github.com/anthropics/claude-plugins-official",
+  "_lastReviewed": "2026-04-24",
+
+  "name": "artibot",
+  "displayName": "Artibot — Autonomous Agent OS for Claude Code",
+  "version": "3.9.1",
+  "description": "Cognitive orchestration framework with dual-process routing, lifelong learning, expert agent teams, and workflow automation for Claude Code. 28 agents, 100 skills, 56 commands, 5,000+ tests.",
+  "shortDescription": "Autonomous Agent OS — 28 agents, 100 skills, dual-process cognition, lifelong learning, parallel teams.",
+  "tagline": "Production-grade autonomous agent OS that orchestrates the work for you.",
+
+  "author": {
+    "name": "Artience",
+    "email": "artience.ads.team.tf@gmail.com",
+    "url": "https://github.com/Yoodaddy0311"
+  },
+  "publisher": "artience",
+  "maintainers": [
+    {
+      "name": "Artibot Maintainer",
+      "email": "artience.ads.team.tf@gmail.com",
+      "role": "primary"
+    }
+  ],
+
+  "license": "MIT",
+  "licenseFile": "./LICENSE",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Yoodaddy0311/artibot",
+    "directory": "plugins/artibot"
+  },
+  "homepage": "https://github.com/Yoodaddy0311/artibot",
+  "bugs": {
+    "url": "https://github.com/Yoodaddy0311/artibot/issues"
+  },
+  "documentation": {
+    "readme": "./README.md",
+    "changelog": "./CHANGELOG.md",
+    "contributing": "../../CONTRIBUTING.md",
+    "security": "./SECURITY.md",
+    "architecture": "./docs/ARCHITECTURE.md"
+  },
+
+  "categories": [
+    "orchestration",
+    "agents",
+    "learning",
+    "observability",
+    "workflow-automation",
+    "code-quality",
+    "tdd",
+    "marketing",
+    "developer-tools"
+  ],
+  "keywords": [
+    "ai",
+    "llm",
+    "agent",
+    "agents",
+    "agent-teams",
+    "claude-code",
+    "claude",
+    "mcp",
+    "orchestration",
+    "personas",
+    "workflow",
+    "tdd",
+    "code-review",
+    "security",
+    "quality",
+    "marketing",
+    "seo",
+    "analytics",
+    "cross-platform",
+    "cognitive-architecture",
+    "dual-process",
+    "lifelong-learning",
+    "autonomous-agent"
+  ],
+
+  "minimumClaudeCodeVersion": "1.0.0",
+  "engines": {
+    "node": ">=20.0.0",
+    "claude-code": ">=1.0.0"
+  },
+
+  "supportedPlatforms": [
+    "claude-code",
+    "cursor",
+    "codex-cli",
+    "opencode"
+  ],
+  "primaryPlatform": "claude-code",
+  "platformNotes": {
+    "claude-code": "Native — full feature set including Agent Teams API, hooks, MCP server, statusline.",
+    "cursor": "Subset — agents/skills via AGENTS.md alias and `scripts/export-to-tool.mjs --tool=cursor`.",
+    "codex-cli": "Subset — agents exported (Team Collaboration sections stripped) via `scripts/export-to-tool.mjs --tool=codex`.",
+    "opencode": "Subset — agents exported (Team Collaboration sections stripped) via `scripts/export-to-tool.mjs --tool=opencode`."
+  },
+
+  "operatingSystems": ["windows", "macos", "linux"],
+
+  "entryPoints": {
+    "manifest": "./.claude-plugin/plugin.json",
+    "mcpServer": "./.well-known/mcp-server.json",
+    "agents": {
+      "directory": "./agents/",
+      "count": 28
+    },
+    "skills": {
+      "directory": "./skills/",
+      "count": 100
+    },
+    "commands": {
+      "directory": "./commands/",
+      "count": 56
+    },
+    "hooks": {
+      "directory": "./hooks/",
+      "count": 2
+    },
+    "rules": {
+      "directory": "./rules/",
+      "count": 8
+    }
+  },
+
+  "features": [
+    {
+      "id": "agent-teams",
+      "name": "Parallel Agent Teams",
+      "description": "Native Claude Agent Teams API integration (TeamCreate / SendMessage / TaskCreate) with automatic decomposition and cross-verification."
+    },
+    {
+      "id": "dual-process",
+      "name": "Dual-Process Cognitive Routing",
+      "description": "System 1 / System 2 routing with EFFORT_POLICY: fast inline path for trivial work, deliberate parallel path for complex multi-domain tasks."
+    },
+    {
+      "id": "lifelong-learning",
+      "name": "Lifelong Learning Loop",
+      "description": "GRPO + skill-evolver + drift-detector + skill-lifecycle-autopilot — production-grade self-improvement across sessions."
+    },
+    {
+      "id": "observability",
+      "name": "Built-in Observability",
+      "description": "11-stage middleware emits hook events; OTEL exporter (opt-in, loopback-preferred); multi-session dashboard with token / cost aggregates."
+    },
+    {
+      "id": "data-sovereignty",
+      "name": "Data Sovereignty",
+      "description": "Strict no-external-DB policy. All data stays in local Artibot plugin and the user's own server. No third-party telemetry."
+    },
+    {
+      "id": "cross-tool",
+      "name": "Cross-tool Export",
+      "description": "AGENTS.md alias + export adapters (Cursor, Codex CLI, OpenCode) — write once, run on multiple AI dev tools."
+    }
+  ],
+
+  "screenshots": [
+    {
+      "path": "_marketplace/screenshots/01-orchestrator-overview.png",
+      "caption": "Orchestrator delegating to a parallel agent team",
+      "alt": "Artibot orchestrator coordinating multiple specialized agents"
+    },
+    {
+      "path": "_marketplace/screenshots/02-agent-team-parallel.png",
+      "caption": "Three teammates running in parallel with cross-verification",
+      "alt": "Parallel agent teams executing independent subtasks"
+    },
+    {
+      "path": "_marketplace/screenshots/03-multi-session-dashboard.png",
+      "caption": "Multi-session dashboard — token usage and tool aggregates",
+      "alt": "Local observability dashboard"
+    },
+    {
+      "path": "_marketplace/screenshots/04-skill-marketplace-view.png",
+      "caption": "100 skills with frontmatter, triggers, and rationalizations",
+      "alt": "Skill catalogue overview"
+    },
+    {
+      "path": "_marketplace/screenshots/05-tdd-flow.png",
+      "caption": "TDD agent: RED → GREEN → IMPROVE workflow",
+      "alt": "Test-driven development flow with tdd-guide agent"
+    }
+  ],
+
+  "media": {
+    "icon": "_marketplace/screenshots/icon-256.png",
+    "banner": "_marketplace/screenshots/banner-1280x640.png",
+    "demoVideo": null,
+    "demoUrl": null
+  },
+
+  "pricing": {
+    "model": "free",
+    "tier": "open-source",
+    "license": "MIT",
+    "commercialUse": true,
+    "subscriptionRequired": false,
+    "byok": false
+  },
+
+  "safetyCompliance": {
+    "dataPolicy": "local-only",
+    "externalDatabaseAccess": "forbidden",
+    "thirdPartyTelemetry": "none",
+    "userDataForwarding": "none",
+    "secretsHandling": "env-vars-only",
+    "auditLog": "runtime/token-usage-session.json",
+    "complianceNotes": "Strict CRITICAL data policy — no external DB, no third-party forwarding. OTEL exporter opt-in with loopback-preferred enforcement.",
+    "vulnerabilityDisclosure": "./SECURITY.md"
+  },
+
+  "permissions": {
+    "filesystem": ["read", "write"],
+    "network": ["loopback-only-by-default"],
+    "shell": ["execute"],
+    "claudeAgentTeamsApi": true,
+    "mcpTools": true,
+    "thirdPartyApis": "user-configured-only"
+  },
+
+  "qualityMetrics": {
+    "tests": 4918,
+    "coverage": {
+      "statements": 90,
+      "branches": 85,
+      "functions": 88,
+      "lines": 90
+    },
+    "lintErrors": 0,
+    "ciStatus": "passing",
+    "selfBenchmarkScore": 89
+  },
+
+  "installation": {
+    "method": "git-clone",
+    "command": "git clone https://github.com/Yoodaddy0311/artibot.git",
+    "postInstall": "cd plugins/artibot && npm install && npm run validate",
+    "windowsInstaller": "./install.sh (bash) or ../../install-artibot-codex-global.ps1",
+    "documentation": "./README.md"
+  },
+
+  "preview": false,
+  "experimental": false,
+  "deprecated": false,
+
+  "changelog": "./CHANGELOG.md",
+  "release": {
+    "current": "3.9.1",
+    "releasedAt": "2026-04-25",
+    "channel": "stable"
+  },
+
+  "support": {
+    "email": "artience.ads.team.tf@gmail.com",
+    "issues": "https://github.com/Yoodaddy0311/artibot/issues",
+    "discussions": "https://github.com/Yoodaddy0311/artibot/discussions"
+  },
+
+  "tags": [
+    "verified-publisher",
+    "open-source",
+    "data-sovereign",
+    "production-grade"
+  ]
+}

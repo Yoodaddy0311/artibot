@@ -1,7 +1,7 @@
 ---
 context: fork
 name: social-media
-description: "Creates multi-platform social media content with scheduling strategy, engagement optimization, platform-specific formats, and content calendars. Use when user asks about social media, Twitter, LinkedIn, Instagram, TikTok, YouTube, content calendar, hashtag strategy, social engagement, 소셜 미디어, 소셜 콘텐츠, or 콘텐츠 캘린더."
+description: "Creates multi-platform social media content with scheduling strategy, engagement optimization, platform-specific formats, and content calendars. Use when user asks about social media, Twitter, LinkedIn, Instagram, TikTok, YouTube, content calendar, hashtag strategy, social engagement, 소셜 미디어, 소셜 콘텐츠, 콘텐츠 캘린더, 카카오스토리, 네이버 블로그, 밴드, or 한국 SNS."
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 3
 triggers:
@@ -12,6 +12,12 @@ triggers:
   - "LinkedIn"
   - "social strategy"
   - "engagement"
+  - "네이버 블로그"
+  - "카카오스토리"
+  - "Band"
+  - "밴드"
+  - "한국 SNS"
+  - "카카오채널"
 agents:
   - "doc-updater"
 tokens: "~3K"
@@ -75,6 +81,34 @@ Define Goal -> Choose Platform(s) -> Create Content -> Optimize for Platform -> 
 | Hashtags | 3-5 per post | Trending + niche |
 | Best Times | Tue-Thu 10am-12pm | Varies by audience |
 
+#### 한국 플랫폼
+
+#### 네이버 블로그
+| Element | Spec | Best Practice |
+|---------|------|---------------|
+| 포스트 길이 | 최소 1,500자 권장 | 3,000자 이상이 체류 시간 유리 |
+| 이미지 | 10장 이내 권장 | 1:1 또는 3:2 비율, 최소 760px 너비 |
+| 해시태그 | 10-15개 | 카테고리 일관성 유지 |
+| 발행 시간 | 오전 9-11시 | C-Rank 활동성 지표 반영 |
+| 내부 링크 | 연관 포스트 3개 이상 | 스크롤 깊이 및 체류 시간 향상 |
+
+#### 카카오스토리
+| Element | Spec | Best Practice |
+|---------|------|---------------|
+| 포스트 | 제한 없음 | 200자 내외가 최적 |
+| 이미지 | 1:1, 4:3, 16:9 | 카드 형태 콘텐츠 적합 |
+| 영상 | 10분 이내 | 1-3분 최적 |
+| 해시태그 | 5개 내외 | 탐색 기반 콘텐츠에 유효 |
+| 타겟 | 30-50대 여성 비중 높음 | 생활/관심사/지역 밀착 콘텐츠 |
+
+#### 밴드 (BAND)
+| Element | Spec | Best Practice |
+|---------|------|---------------|
+| 그룹 포스트 | 이미지 20장 이내 | 커뮤니티/동호회 대상 |
+| 투표 기능 | 최대 10개 선택지 | 참여율 높은 설문형 콘텐츠 |
+| 정기 알림 | 그룹 알림 | 정보성 콘텐츠 + 주기적 업로드 |
+| 타겟 | 40-60대 비중 높음 | 모임/동호회/학부모 커뮤니티 |
+
 ### 3. Content Pillar Strategy
 
 | Pillar | Content Mix | Purpose |
@@ -110,6 +144,12 @@ Week | Mon          | Tue          | Wed          | Thu          | Fri
 - Instagram: 3-7 posts/week + daily stories
 - TikTok: 1-3 videos/day
 
+**한국 플랫폼 운영 원칙**:
+- 네이버 블로그: 주 2-3회, 오전 9-11시 발행
+- 카카오스토리: 주 3-5회, 라이프스타일/공감 콘텐츠
+- 밴드: 그룹 특성에 따라 주 1-2회
+- 카카오채널 친구톡: 주 1-2회, 오전 10-11시 / 오후 1-2시
+
 ### 6. Engagement Benchmarks
 
 | Platform | Good Engagement | Great Engagement | Top 10% |
@@ -118,6 +158,8 @@ Week | Mon          | Tue          | Wed          | Thu          | Fri
 | LinkedIn | 2-4% | 4-8% | 8%+ |
 | Instagram | 1-3% | 3-6% | 6%+ |
 | TikTok | 3-6% | 6-15% | 15%+ |
+| 네이버 블로그 | 3-7% | 7-12% | 12%+ | (공감+댓글+공유율) |
+| 카카오스토리 | 1-3% | 3-6% | 6%+ | (반응율) |
 
 ### 7. Content Repurposing Matrix
 
@@ -151,7 +193,7 @@ CALENDAR (if applicable)
 
 ## Quick Reference
 
-**Platforms**: Twitter/X, LinkedIn, Instagram, TikTok, YouTube
+**Platforms**: Twitter/X, LinkedIn, Instagram, TikTok, YouTube, **네이버 블로그, 카카오스토리, 밴드**
 **Content Pillars**: Educational (40%), Engaging (25%), Promotional (20%), Entertaining (10%), UGC (5%)
 **Key Metrics**: Engagement rate, reach, impressions, click-through rate, follower growth
 

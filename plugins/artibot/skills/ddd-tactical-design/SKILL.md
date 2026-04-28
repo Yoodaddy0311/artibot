@@ -31,6 +31,7 @@ version: "1.0.0"
 risk: safe
 lastVerified: "2026-03-31"
 source_hash: 4eb81a99
+whenNotToUse: "Do not apply DDD tactical patterns to simple CRUD APIs, admin dashboards, or data pipeline scripts where the domain has no invariants worth protecting. The aggregate/repository/domain-event overhead is unjustified when there is no complex domain logic."
 ---
 
 # DDD Tactical Design
@@ -173,3 +174,22 @@ The following table captures common excuses agents make to skip the rigor of thi
 | "repositories are just DAOs" | repositories hide persistence from the domain; DAOs leak SQL into business logic |
 | "domain events are async overhead" | events decouple write-side from read-side and are the cheapest audit log you will ever build |
 | "anemic models are fine with services" | service layers without rich models leak invariants everywhere — data and behavior belong together |
+
+## Common Rationalizations
+
+| Rationalization | Why it's wrong | What to do instead |
+|---|---|---|
+| "Aggregates are just objects with extra steps" | Aggregates define consistency boundaries that prevent concurrent writes from corrupting invariants; a plain object with no boundary allows partial updates that violate business rules | Identify at least one invariant the aggregate must protect before designing its boundary; if there are none, use a plain DTO |
+| "Value objects are verbose compared to plain interfaces" | Interfaces allow invalid states to be constructed and passed around; Value Objects enforce validation at construction so invalid states never exist in the domain | Make the constructor private and expose a static factory method that validates; the one-time setup prevents entire classes of bugs |
+| "Domain events add async complexity I don't need" | Domain events are not inherently async — they can be synchronous within a transaction; the complexity they add is the complexity that exists in the domain that you were silently hiding | Use synchronous domain events collected in the aggregate and dispatched after save; async event buses come later |
+| "Repository pattern is just an ORM wrapper with extra naming" | Repository hides the persistence technology from the domain; an ORM wrapper leaks query language into domain logic; the distinction matters when the persistence technology changes | Write the repository interface in the domain layer with no ORM imports; implement it in the infrastructure layer |
+| "I'll add DDD patterns after the first version ships" | Post-hoc DDD is a full rewrite, not an additive enhancement; anemic models that have shipped accumulate direct mutation patterns in controllers and services that are expensive to untangle | Design the core domain aggregates before writing the first endpoint; the route handler can be thin from day one |
+
+## Red Flags
+
+- Business logic implemented in a controller or route handler instead of a domain object method
+- Aggregate Root with a public setter (setters allow external mutation of invariants)
+- Domain event named in present tense (`OrderSubmit` instead of `OrderSubmitted`)
+- Repository method that returns a child entity directly rather than through the Aggregate Root
+- Value Object created with a public constructor and no validation
+- Two aggregates directly referencing each other's objects instead of IDs

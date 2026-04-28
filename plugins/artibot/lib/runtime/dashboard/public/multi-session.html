@@ -1,0 +1,416 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Artibot Dashboard — Multi-Session</title>
+  <meta name="color-scheme" content="dark" />
+  <style>
+    :root {
+      --bg: #0b0f14;
+      --panel: #111820;
+      --panel-2: #0f1620;
+      --border: #1f2a37;
+      --fg: #e6edf3;
+      --muted: #8b98a5;
+      --accent: #4cc2ff;
+      --accent-2: #c7a1ff;
+      --ok: #3fb950;
+      --warn: #d29922;
+      --err: #f85149;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      --focus: 0 0 0 2px rgba(76, 194, 255, 0.6);
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg);
+      font: 14px/1.45 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+    a { color: var(--accent); }
+    button { font: inherit; color: inherit; cursor: pointer; }
+    button:focus-visible, [role="tab"]:focus-visible { outline: none; box-shadow: var(--focus); }
+
+    header { padding: 12px 16px; border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+    header h1 { margin: 0; font-size: 14px; font-weight: 600; letter-spacing: 0.3px; }
+    header .meta { color: var(--muted); font-family: var(--mono); font-size: 12px; }
+    #status { display: inline-block; padding: 2px 8px; border-radius: 10px;
+      background: #1a2330; border: 1px solid var(--border); font-size: 12px; }
+    #status.on { color: var(--ok); border-color: #24402b; }
+    #status.off { color: var(--err); border-color: #402424; }
+
+    nav[role="tablist"] { display: flex; gap: 0; border-bottom: 1px solid var(--border);
+      background: var(--panel); }
+    [role="tab"] { background: transparent; border: none; color: var(--muted);
+      padding: 10px 16px; font-size: 13px; letter-spacing: 0.3px;
+      border-bottom: 2px solid transparent; }
+    [role="tab"][aria-selected="true"] { color: var(--fg); border-bottom-color: var(--accent); }
+    [role="tab"]:hover { color: var(--fg); }
+
+    main { padding: 16px; }
+    [role="tabpanel"][hidden] { display: none; }
+
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 12px; margin-bottom: 16px; }
+    .card { background: var(--panel); border: 1px solid var(--border);
+      border-radius: 6px; padding: 12px; }
+    .card .num { font-family: var(--mono); font-size: 22px; }
+    .card .lbl { color: var(--muted); font-size: 11px; text-transform: uppercase;
+      letter-spacing: 0.5px; }
+
+    table { width: 100%; border-collapse: collapse; background: var(--panel);
+      border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+    caption { text-align: left; padding: 10px 12px; font-size: 12px;
+      color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px;
+      background: var(--panel-2); border-bottom: 1px solid var(--border); }
+    th, td { padding: 8px 12px; text-align: left; font-family: var(--mono);
+      font-size: 12px; border-bottom: 1px solid #111a23; }
+    th { color: var(--muted); font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.4px; font-size: 11px; }
+    tr:hover td { background: var(--panel-2); }
+    td.num, th.num { text-align: right; }
+    td.err { color: var(--err); }
+    td.ok { color: var(--ok); }
+
+    .list { background: var(--panel); border: 1px solid var(--border);
+      border-radius: 6px; max-height: 60vh; overflow-y: auto; }
+    .row { display: grid; grid-template-columns: 92px 140px 120px 1fr;
+      gap: 10px; padding: 6px 10px; border-bottom: 1px solid #111a23;
+      font-family: var(--mono); font-size: 12px; align-items: start; }
+    .row:hover { background: var(--panel-2); }
+    .ts { color: var(--muted); white-space: nowrap; }
+    .ev { color: var(--accent); }
+    .tool { color: var(--accent-2); }
+    .payload { color: #cbd5e1; overflow: hidden; text-overflow: ellipsis;
+      white-space: nowrap; }
+    .row.err .ev { color: var(--err); }
+
+    /* Sparkline / histogram containers */
+    .chart { background: var(--panel); border: 1px solid var(--border);
+      border-radius: 6px; padding: 12px; margin-bottom: 16px; }
+    .chart h3 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase;
+      letter-spacing: 0.5px; color: var(--muted); }
+    .spark { display: flex; align-items: flex-end; gap: 4px; height: 64px;
+      padding: 4px 0; }
+    .spark .bar { flex: 1; min-width: 8px; background: var(--accent);
+      border-radius: 2px 2px 0 0; opacity: 0.85; position: relative; }
+    .spark .bar[data-rate="0"] { background: var(--ok); opacity: 0.6; }
+    .spark .bar[data-kind="err"] { background: var(--err); }
+    .spark .bar:hover { opacity: 1; }
+    .spark .bar[title]::after { content: ''; }
+    .hist { display: flex; align-items: flex-end; gap: 6px; height: 120px; }
+    .hist .b { flex: 1; min-width: 12px; background: var(--accent-2);
+      border-radius: 2px 2px 0 0; opacity: 0.85; }
+    .hist-labels { display: flex; gap: 6px; margin-top: 6px;
+      font-family: var(--mono); font-size: 10px; color: var(--muted); }
+    .hist-labels span { flex: 1; min-width: 12px; text-align: center; }
+
+    footer { padding: 10px 16px; color: var(--muted); font-size: 11px;
+      border-top: 1px solid var(--border); background: var(--panel); }
+
+    .empty { padding: 24px; text-align: center; color: var(--muted); font-size: 12px; }
+
+    /* Screen-reader only helper */
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0;
+      margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap;
+      border: 0; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Artibot Multi-Session Dashboard</h1>
+    <div class="meta">
+      <span id="status" class="off" role="status" aria-live="polite">disconnected</span>
+      <span id="count" aria-live="polite">0 events</span>
+    </div>
+  </header>
+
+  <nav role="tablist" aria-label="Views">
+    <button role="tab" id="tab-live" aria-controls="panel-live" aria-selected="true" tabindex="0">Live</button>
+    <button role="tab" id="tab-sessions" aria-controls="panel-sessions" aria-selected="false" tabindex="-1">Sessions</button>
+    <button role="tab" id="tab-aggregates" aria-controls="panel-aggregates" aria-selected="false" tabindex="-1">Aggregates</button>
+  </nav>
+
+  <main>
+    <section role="tabpanel" id="panel-live" aria-labelledby="tab-live" tabindex="0">
+      <div class="grid" aria-label="Live summary">
+        <div class="card"><div class="num" id="liveTotal">0</div><div class="lbl">Total events</div></div>
+        <div class="card"><div class="num" id="liveError">0%</div><div class="lbl">Tool error rate</div></div>
+        <div class="card"><div class="num" id="liveSessions">0</div><div class="lbl">Unique sessions</div></div>
+      </div>
+      <div class="list" id="liveList" aria-live="polite" aria-label="Live event stream"></div>
+    </section>
+
+    <section role="tabpanel" id="panel-sessions" aria-labelledby="tab-sessions" tabindex="0" hidden>
+      <div style="margin-bottom:10px;">
+        <button id="refreshSessions" type="button" aria-label="Refresh sessions">Refresh</button>
+      </div>
+      <table aria-describedby="sessionsCaption">
+        <caption id="sessionsCaption">Recent Sessions (newest first)</caption>
+        <thead>
+          <tr>
+            <th scope="col">Session ID</th>
+            <th scope="col">Started</th>
+            <th scope="col" class="num">Duration</th>
+            <th scope="col" class="num">Events</th>
+            <th scope="col" class="num">Tools</th>
+            <th scope="col" class="num">Errors</th>
+            <th scope="col" class="num">Tokens</th>
+          </tr>
+        </thead>
+        <tbody id="sessionsBody"></tbody>
+      </table>
+    </section>
+
+    <section role="tabpanel" id="panel-aggregates" aria-labelledby="tab-aggregates" tabindex="0" hidden>
+      <div style="margin-bottom:10px;">
+        <button id="refreshAgg" type="button" aria-label="Refresh aggregates">Refresh</button>
+      </div>
+
+      <div class="chart" aria-labelledby="topToolsHeading">
+        <h3 id="topToolsHeading">Top 10 Tools</h3>
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">Tool</th>
+              <th scope="col" class="num">Count</th>
+              <th scope="col" class="num">Errors</th>
+              <th scope="col" class="num">Rate</th>
+            </tr>
+          </thead>
+          <tbody id="topToolsBody"></tbody>
+        </table>
+      </div>
+
+      <div class="chart" aria-labelledby="errTrendHeading">
+        <h3 id="errTrendHeading">Error Rate Trend (last 7 days)</h3>
+        <div class="spark" id="errSpark" role="img" aria-label="Sparkline of daily error rate"></div>
+        <div class="hist-labels" id="errSparkLabels"></div>
+      </div>
+
+      <div class="chart" aria-labelledby="tokenHistHeading">
+        <h3 id="tokenHistHeading">Token Consumption Histogram (per session)</h3>
+        <div class="hist" id="tokenHist" role="img" aria-label="Histogram of token totals per session"></div>
+        <div class="hist-labels" id="tokenHistLabels"></div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    Loopback-only (127.0.0.1). No external transmission. Schema v1. Multi-session view v3.9.
+  </footer>
+
+  <script>
+  (function () {
+    "use strict";
+    var MAX_ROWS = 200;
+    var state = { total: 0, postCount: 0, postFail: 0, sessions: new Set(), events: [] };
+
+    function el(id) { return document.getElementById(id); }
+    function setText(id, v) { var n = el(id); if (n) n.textContent = String(v); }
+
+    /* ---------- Tabs ---------- */
+    var tabs = Array.prototype.slice.call(document.querySelectorAll('[role="tab"]'));
+    function activateTab(id) {
+      tabs.forEach(function (t) {
+        var selected = t.id === id;
+        t.setAttribute('aria-selected', selected ? 'true' : 'false');
+        t.tabIndex = selected ? 0 : -1;
+        var panel = el(t.getAttribute('aria-controls'));
+        if (panel) { if (selected) panel.removeAttribute('hidden'); else panel.setAttribute('hidden', ''); }
+      });
+      if (id === 'tab-sessions') loadSessions();
+      if (id === 'tab-aggregates') loadAggregates();
+    }
+    tabs.forEach(function (t) {
+      t.addEventListener('click', function () { activateTab(t.id); });
+      t.addEventListener('keydown', function (e) {
+        var i = tabs.indexOf(t);
+        if (e.key === 'ArrowRight') { activateTab(tabs[(i + 1) % tabs.length].id); tabs[(i + 1) % tabs.length].focus(); }
+        else if (e.key === 'ArrowLeft') { var j = (i - 1 + tabs.length) % tabs.length; activateTab(tabs[j].id); tabs[j].focus(); }
+        else if (e.key === 'Home') { activateTab(tabs[0].id); tabs[0].focus(); }
+        else if (e.key === 'End') { activateTab(tabs[tabs.length - 1].id); tabs[tabs.length - 1].focus(); }
+      });
+    });
+
+    /* ---------- Live tab ---------- */
+    function fmtTs(ts) { try { return new Date(ts).toISOString().slice(11, 23); } catch (_) { return ''; } }
+    function rowNode(ev) {
+      var row = document.createElement('div');
+      row.className = 'row' + (ev.event === 'ErrorRaised' ? ' err' : '');
+      var ts = document.createElement('span'); ts.className = 'ts'; ts.textContent = fmtTs(ev.timestamp);
+      var name = document.createElement('span'); name.className = 'ev'; name.textContent = ev.event || '';
+      var tool = document.createElement('span'); tool.className = 'tool'; tool.textContent = ev.tool || '';
+      var payload = document.createElement('span'); payload.className = 'payload';
+      try { payload.textContent = JSON.stringify(ev.payload); } catch (_) { payload.textContent = ''; }
+      row.appendChild(ts); row.appendChild(name); row.appendChild(tool); row.appendChild(payload);
+      return row;
+    }
+    function onEnvelope(ev) {
+      state.total += 1;
+      if (ev && ev.sessionId) state.sessions.add(ev.sessionId);
+      if (ev && ev.event === 'PostToolUse') {
+        state.postCount += 1;
+        if (ev.payload && ev.payload.ok === false) state.postFail += 1;
+      }
+      setText('liveTotal', state.total);
+      setText('count', state.total + ' events');
+      setText('liveSessions', state.sessions.size);
+      var rate = state.postCount === 0 ? 0
+        : Math.round((state.postFail / state.postCount) * 1000) / 10;
+      setText('liveError', rate + '%');
+      var host = el('liveList');
+      host.insertBefore(rowNode(ev), host.firstChild);
+      while (host.childNodes.length > MAX_ROWS) host.removeChild(host.lastChild);
+    }
+
+    function connect() {
+      var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      var url = proto + '//' + location.host + '/ws';
+      var ws;
+      try { ws = new WebSocket(url); } catch (_) { return; }
+      var status = el('status');
+      ws.addEventListener('open', function () { status.textContent = 'connected'; status.className = 'on'; });
+      ws.addEventListener('message', function (msg) {
+        try { onEnvelope(JSON.parse(msg.data)); } catch (_) { /* skip */ }
+      });
+      ws.addEventListener('close', function () {
+        status.textContent = 'disconnected'; status.className = 'off';
+        setTimeout(connect, 1500);
+      });
+      ws.addEventListener('error', function () { try { ws.close(); } catch (_) {} });
+    }
+
+    /* ---------- Sessions tab ---------- */
+    function fmtDuration(ms) {
+      if (!Number.isFinite(ms) || ms <= 0) return '—';
+      var s = Math.round(ms / 1000);
+      if (s < 60) return s + 's';
+      var m = Math.floor(s / 60); var rs = s % 60;
+      if (m < 60) return m + 'm ' + rs + 's';
+      var h = Math.floor(m / 60); var rm = m % 60;
+      return h + 'h ' + rm + 'm';
+    }
+    function fmtTime(iso) {
+      if (!iso) return '—';
+      try { return new Date(iso).toISOString().replace('T', ' ').slice(0, 19) + 'Z'; }
+      catch (_) { return iso; }
+    }
+    async function loadSessions() {
+      var body = el('sessionsBody');
+      body.textContent = '';
+      try {
+        var resp = await fetch('/api/sessions');
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        var data = await resp.json();
+        var sessions = (data && data.sessions) || [];
+        if (sessions.length === 0) {
+          var tr = document.createElement('tr');
+          var td = document.createElement('td');
+          td.colSpan = 7; td.className = 'empty'; td.textContent = 'No sessions yet.';
+          tr.appendChild(td); body.appendChild(tr); return;
+        }
+        sessions.forEach(function (s) {
+          var tr = document.createElement('tr');
+          tr.appendChild(cell(s.sessionId));
+          tr.appendChild(cell(fmtTime(s.startedAt)));
+          tr.appendChild(cell(fmtDuration(s.durationMs), 'num'));
+          tr.appendChild(cell(s.eventCount, 'num'));
+          tr.appendChild(cell(s.toolCount, 'num'));
+          tr.appendChild(cell(s.errorCount, 'num ' + (s.errorCount > 0 ? 'err' : 'ok')));
+          tr.appendChild(cell(s.tokenTotal, 'num'));
+          body.appendChild(tr);
+        });
+      } catch (e) {
+        var tr2 = document.createElement('tr');
+        var td2 = document.createElement('td');
+        td2.colSpan = 7; td2.className = 'empty err';
+        td2.textContent = 'Failed to load sessions: ' + (e && e.message ? e.message : 'unknown');
+        tr2.appendChild(td2); body.appendChild(tr2);
+      }
+    }
+    function cell(v, cls) {
+      var td = document.createElement('td');
+      if (cls) td.className = cls;
+      td.textContent = String(v == null ? '' : v);
+      return td;
+    }
+
+    /* ---------- Aggregates tab ---------- */
+    async function loadAggregates() {
+      try {
+        var resp = await fetch('/api/aggregates');
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        var data = await resp.json();
+        renderTopTools(data.toolUsageTop || []);
+        renderTrend(data.errorRateTrend || []);
+        renderHistogram(data.tokenHistogram || []);
+      } catch (_) { /* leave placeholders */ }
+    }
+    function renderTopTools(rows) {
+      var body = el('topToolsBody');
+      body.textContent = '';
+      if (rows.length === 0) {
+        var tr = document.createElement('tr');
+        var td = document.createElement('td');
+        td.colSpan = 4; td.className = 'empty'; td.textContent = 'No tool data yet.';
+        tr.appendChild(td); body.appendChild(tr); return;
+      }
+      rows.forEach(function (r) {
+        var tr = document.createElement('tr');
+        tr.appendChild(cell(r.tool));
+        tr.appendChild(cell(r.count, 'num'));
+        tr.appendChild(cell(r.errorCount, 'num ' + (r.errorCount > 0 ? 'err' : 'ok')));
+        tr.appendChild(cell(r.errorRate + '%', 'num'));
+        body.appendChild(tr);
+      });
+    }
+    function renderTrend(series) {
+      var host = el('errSpark'); host.textContent = '';
+      var labels = el('errSparkLabels'); labels.textContent = '';
+      if (series.length === 0) {
+        host.textContent = ''; host.setAttribute('aria-label', 'No trend data'); return;
+      }
+      var max = 0;
+      series.forEach(function (d) { if (d.rate > max) max = d.rate; });
+      if (max === 0) max = 1;
+      series.forEach(function (d) {
+        var bar = document.createElement('div');
+        bar.className = 'bar';
+        bar.setAttribute('data-rate', String(d.rate));
+        bar.setAttribute('data-kind', d.errors > 0 ? 'err' : 'ok');
+        bar.style.height = Math.max(2, Math.round((d.rate / max) * 100)) + '%';
+        bar.title = d.day + ': ' + d.rate + '% (' + d.errors + '/' + d.total + ')';
+        host.appendChild(bar);
+        var lbl = document.createElement('span');
+        lbl.textContent = d.day.slice(5);
+        labels.appendChild(lbl);
+      });
+    }
+    function renderHistogram(buckets) {
+      var host = el('tokenHist'); host.textContent = '';
+      var labels = el('tokenHistLabels'); labels.textContent = '';
+      if (buckets.length === 0) { return; }
+      var max = 0;
+      buckets.forEach(function (b) { if (b.count > max) max = b.count; });
+      if (max === 0) max = 1;
+      buckets.forEach(function (b) {
+        var bar = document.createElement('div'); bar.className = 'b';
+        bar.style.height = Math.max(2, Math.round((b.count / max) * 100)) + '%';
+        bar.title = b.label + ': ' + b.count + ' session' + (b.count === 1 ? '' : 's');
+        host.appendChild(bar);
+        var lbl = document.createElement('span');
+        lbl.textContent = b.label;
+        labels.appendChild(lbl);
+      });
+    }
+
+    /* ---------- Wire refresh buttons ---------- */
+    el('refreshSessions').addEventListener('click', loadSessions);
+    el('refreshAgg').addEventListener('click', loadAggregates);
+
+    /* ---------- Boot ---------- */
+    activateTab('tab-live');
+    connect();
+  })();
+  </script>
+</body>
+</html>

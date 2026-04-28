@@ -1,21 +1,24 @@
 {
   "name": "artibot",
-  "version": "3.0.0",
+  "version": "4.1.0",
   "description": "Artibot - Claude Code orchestration plugin runtime",
   "private": true,
   "type": "module",
   "main": "./lib/core/index.js",
   "bin": {
-    "artibot": "./bin/artibot.js"
+    "artibot": "./bin/artibot.js",
+    "artibot-dashboard": "./bin/artibot-dashboard.mjs",
+    "artibot-mcp": "./bin/artibot-mcp.mjs"
   },
   "engines": {
     "node": ">=20.0.0"
   },
   "scripts": {
     "validate": "node scripts/validate.js",
+    "validate:bin": "node scripts/validate-bin.js",
     "lint": "eslint bin/ lib/ scripts/ tests/",
     "lint:fix": "eslint --fix bin/ lib/ scripts/ tests/",
-    "ci": "node scripts/validate.js && npm run skill:check && npm run lint && npm test && npm run eval:runtime:check",
+    "ci": "node scripts/validate.js && node scripts/validate-bin.js && npm run skill:check && npm run lint && npm test && npm run eval:runtime:check",
     "ci:coverage": "node scripts/validate.js && npm run lint && node scripts/ci/validate-coverage.js",
     "test": "vitest run",
     "test:evals": "vitest run tests/evals",
@@ -34,7 +37,7 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@vitest/coverage-v8": "^4.0.18",
-    "eslint": "^10.0.0",
+    "eslint": "^10.2.1",
     "globals": "^17.3.0",
     "vitest": "^4.0.18"
   }

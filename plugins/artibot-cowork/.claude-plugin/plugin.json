@@ -1,7 +1,7 @@
 {
   "name": "artibot-cowork",
-  "version": "0.1.0",
-  "description": "Cowork-optimized slim build of Artibot — marketing, content, data, design, and CRO/SEO skills for knowledge workers using Claude Cowork",
+  "version": "0.4.0",
+  "description": "Cowork-optimized slim build of Artibot — marketing, content, data, design, CRO/SEO, Korean market, and compliance skills for knowledge workers using Claude Cowork",
   "author": {
     "name": "Artience"
   },
@@ -16,6 +16,19 @@
     "cro",
     "data-analysis",
     "presentation",
-    "knowledge-work"
+    "knowledge-work",
+    "kr-marketing",
+    "compliance",
+    "market-research",
+    "ai-quality",
+    "long-form",
+    "blog",
+    "case-study",
+    "column",
+    "thought-leadership",
+    "interview-storytelling",
+    "aeo",
+    "geo",
+    "voice"
   ]
 }

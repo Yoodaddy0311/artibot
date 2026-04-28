@@ -84,4 +84,4 @@ export { toPlainLanguage, getDictionary, registerDictionary } from './plain-lang
 export { getProfile, recordSignal, setSkillLevel, detectSkillLevel, configureProfilePath } from './user-profile.js';
 
 // Redaction (centralized sensitive-token masking)
-export { redactString, redactObject, DEFAULT_PATTERNS, GENERIC_PATTERNS, TAGGED_PATTERNS } from './redaction.js';
+export { redactString, redactObject, GENERIC_PATTERNS, TAGGED_PATTERNS } from './redaction.js';

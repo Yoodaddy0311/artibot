@@ -1,17 +1,17 @@
 {
-  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
   "name": "artibot",
+  "version": "1.0.0",
+  "description": "Cognitive orchestration framework with dual-process routing, lifelong learning, expert agent teams, and knowledge-work skills for Claude Code",
   "owner": {
-    "name": "Artience"
-  },
-  "metadata": {
-    "description": "Intelligent orchestration framework with 26 expert agent teams, 79 domain skills, and cognitive routing for Claude Code"
+    "name": "Artience",
+    "email": "artience.ads.team.tf@gmail.com"
   },
   "plugins": [
     {
       "name": "artibot",
-      "description": "Cognitive orchestration framework with dual-process routing, lifelong learning, expert agent teams, and workflow automation for Claude Code",
-      "version": "2.8.0",
+      "description": "Cognitive orchestration framework with dual-process routing, hierarchical 3-layer memory, GRPO-RLVR self-learning, expert agent teams, and workflow automation for Claude Code",
+      "version": "3.9.1",
       "author": {
         "name": "Artience"
       },
@@ -19,13 +19,15 @@
       "category": "development",
       "homepage": "https://github.com/Yoodaddy0311/artibot",
       "repository": "https://github.com/Yoodaddy0311/artibot",
-      "license": "BSL-1.1",
+      "license": "MIT",
       "keywords": [
         "orchestration",
         "agent-teams",
         "cognitive-routing",
         "dual-process",
         "lifelong-learning",
+        "hierarchical-memory",
+        "grpo-rlvr",
         "marketing",
         "seo",
         "tdd",
@@ -36,7 +38,7 @@
     {
       "name": "artibot-cowork",
       "description": "Cowork-optimized slim build of Artibot — marketing, content, data, design, and CRO/SEO skills for knowledge workers using Claude Cowork. No hooks, no developer-only components.",
-      "version": "0.1.0",
+      "version": "0.4.0",
       "author": {
         "name": "Artience"
       },

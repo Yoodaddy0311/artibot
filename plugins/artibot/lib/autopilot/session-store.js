@@ -1,0 +1,123 @@
+/**
+ * Session store for autopilot runs.
+ * Persists state to runtime/autopilot/{sessionId}.json.
+ * Korean-path safe; uses atomic writes to prevent partial-write corruption.
+ *
+ * Schema reference: PRD docs/PRD/autopilot-mode.md section 13.4
+ *
+ * @module lib/autopilot/session-store
+ */
+
+import path from 'node:path';
+import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync, renameSync } from 'node:fs';
+import { dirname } from 'node:path';
+import { getPluginRoot } from '../core/platform.js';
+
+/**
+ * Resolve the autopilot runtime directory inside the plugin root.
+ * Path is constructed via path.join so Korean / spaced paths are preserved.
+ * @returns {string} absolute directory path
+ */
+export function getStoreDir() {
+  return path.join(getPluginRoot(), 'runtime', 'autopilot');
+}
+
+/**
+ * Resolve the absolute path of a session JSON file.
+ * @param {string} sessionId
+ * @returns {string}
+ */
+export function getSessionPath(sessionId) {
+  if (!sessionId || typeof sessionId !== 'string') {
+    throw new TypeError('sessionId must be a non-empty string');
+  }
+  return path.join(getStoreDir(), `${sessionId}.json`);
+}
+
+/**
+ * Atomically persist a session state object.
+ * Creates parent dir if missing.
+ * @param {object} state - Session state matching PRD section 13.4
+ * @returns {string} absolute file path written
+ */
+export function saveSession(state) {
+  if (!state || typeof state !== 'object' || !state.sessionId) {
+    throw new TypeError('state.sessionId is required');
+  }
+  const filePath = getSessionPath(state.sessionId);
+  const dir = dirname(filePath);
+  try {
+    mkdirSync(dir, { recursive: true });
+  } catch (err) {
+    if (err.code !== 'EEXIST') throw err;
+  }
+  const tmp = `${filePath}.tmp.${process.pid}`;
+  try {
+    writeFileSync(tmp, JSON.stringify(state, null, 2), 'utf-8');
+    renameSync(tmp, filePath);
+  } catch (err) {
+    try { unlinkSync(tmp); } catch { /* ignore */ }
+    throw err;
+  }
+  return filePath;
+}
+
+/**
+ * Load a session by id. Returns null if missing or unreadable.
+ * @param {string} sessionId
+ * @returns {object|null}
+ */
+export function loadSession(sessionId) {
+  try {
+    const filePath = getSessionPath(sessionId);
+    if (!existsSync(filePath)) return null;
+    const raw = readFileSync(filePath, 'utf-8');
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * List all stored session ids (without .json extension).
+ * @returns {string[]}
+ */
+export function listSessions() {
+  try {
+    const dir = getStoreDir();
+    if (!existsSync(dir)) return [];
+    return readdirSync(dir)
+      .filter((name) => name.endsWith('.json'))
+      .map((name) => name.slice(0, -5));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Delete a session file. Returns true on success, false if missing.
+ * @param {string} sessionId
+ * @returns {boolean}
+ */
+export function deleteSession(sessionId) {
+  try {
+    const filePath = getSessionPath(sessionId);
+    if (!existsSync(filePath)) return false;
+    unlinkSync(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Generate a fresh session id of form ap-YYYYMMDD-HHmmss.
+ * @returns {string}
+ */
+export function newSessionId() {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  const ymd = `${d.getUTCFullYear()}${pad(d.getUTCMonth() + 1)}${pad(d.getUTCDate())}`;
+  const hms = `${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}${pad(d.getUTCSeconds())}`;
+  return `ap-${ymd}-${hms}`;
+}

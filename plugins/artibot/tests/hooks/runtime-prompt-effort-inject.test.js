@@ -47,6 +47,22 @@ describe('runtime-prompt effort + task-budget prefix injection', () => {
   beforeAll(() => {
     expect(existsSync(SCRIPT_PATH)).toBe(true);
     originalConfig = readFileSync(CONFIG_PATH, 'utf-8');
+    // Force a deterministic config for the positive-path assertions so that
+    // the suite is resilient to drift in artibot.config.json (e.g. an
+    // auto-commit flipping runtime.effort.injectPrompt to false). The opt-out
+    // test below writes its own config and restores in a finally block.
+    const base = JSON.parse(originalConfig);
+    const forced = {
+      ...base,
+      runtime: {
+        ...base.runtime,
+        effort: {
+          ...(base.runtime?.effort || {}),
+          injectPrompt: true,
+        },
+      },
+    };
+    writeFileSync(CONFIG_PATH, JSON.stringify(forced, null, 2));
   });
 
   afterAll(() => {

@@ -1,5 +1,5 @@
 {
-  "version": "3.0.0",
+  "version": "4.1.0",
   "agents": {
     "modelPolicy": {
       "high": {
@@ -688,6 +688,47 @@
       "tasks": "~/.claude/tasks/{team-name}/"
     }
   },
+  "autopilot": {
+    "enabled": true,
+    "defaultMode": "default",
+    "modes": ["default", "night", "plan"],
+    "limits": {
+      "maxDuration": "4h",
+      "maxBudget": 2000000,
+      "maxBuildFailures": 3,
+      "maxTestFailures": 5,
+      "contextThreshold": 0.85,
+      "checkpointInterval": "30m"
+    },
+    "safety": {
+      "pauseOnDanger": true,
+      "blockSecretLeak": true,
+      "blockExternalSend": true,
+      "dangerousPatterns": ["force-push", "branch-delete", "db-drop", "rm-rf-root"]
+    },
+    "phases": ["INTAKE", "PLAN", "EXECUTE", "CROSS_CHECK", "VERIFY", "IMPROVE", "REPORT"],
+    "paths": {
+      "prdDir": "docs/PRD/",
+      "reportDir": "reports/AUTOPILOT/",
+      "sessionDir": "runtime/autopilot/"
+    },
+    "notification": {
+      "onCompletion": true,
+      "onPause": true,
+      "channel": "PushNotification"
+    },
+    "mcp": {
+      "enabled": false,
+      "allowList": ["plugin:artibot:playwright", "plugin:artibot:context7"],
+      "blockExternal": true,
+      "allowedPrefix": "plugin:artibot:",
+      "denyHostPatterns": [
+        "https?://(?!localhost|127\\.0\\.0\\.1|::1|0\\.0\\.0\\.0)",
+        "\\.(s3|amazonaws|googleapis|blob\\.core\\.windows|firebaseio)\\."
+      ],
+      "comment": "MCP-driven Verification (P0-4): only Artibot self-plugin MCPs allowed. External MCP/host blocked. opt-in via --mcp-verify."
+    }
+  },
   "swarm": {
     "enabled": true,
     "optIn": true,
@@ -749,7 +790,68 @@
     "schedule": {
       "enabled": true,
       "nightlyLearner": "3 2 * * *",
-      "driftCheck": "7 6 * * 1"
+      "driftCheck": "7 6 * * 1",
+      "nightlyGrpoTrainer": "30 2 * * *",
+      "nightlyAgentPolicyTrainer": "45 2 * * *",
+      "nightlySkillPolicyTrainer": "0 3 * * *",
+      "nightlyJointPolicyTrainer": "15 3 * * *"
+    },
+    "hierarchicalMemory": {
+      "enabled": true,
+      "rolloutStage": "default-on",
+      "workingTokenBudget": 200000,
+      "episodicRetentionDays": 180,
+      "semanticRetentionDays": -1,
+      "archiveAfterDays": 365,
+      "weights": {
+        "working": 0.5,
+        "episodic": 0.3,
+        "semantic": 0.2
+      },
+      "promotion": {
+        "minOccurrences": 3,
+        "confidenceFloor": 0.85,
+        "distinctSessions": 2
+      },
+      "demotion": {
+        "idleDays": 180,
+        "failureThreshold": 2
+      }
+    },
+    "grpoRouting": {
+      "enabled": true,
+      "modelType": "linear",
+      "policyPath": "~/.claude/artibot/policies/routing-policy-v1.json",
+      "blendAlpha": 0.7,
+      "alphaDecayPerWeek": 0.05,
+      "alphaFloor": 0.3,
+      "epsilonExplore": 0.05,
+      "epsilonFloor": 0.01,
+      "coldStartEpisodes": 200,
+      "klPenalty": 0.01,
+      "learningRate": 0.02,
+      "snapshotCount": 3,
+      "groupingLevels": [
+        "fine",
+        "medium",
+        "coarse"
+      ],
+      "agentPolicy": {
+        "enabled": false,
+        "policyPath": "~/.claude/artibot/policies/agent-policy-v1.json",
+        "temperature": 1
+      },
+      "skillPolicy": {
+        "enabled": false,
+        "policyPath": "~/.claude/artibot/policies/skill-policy-v1.json",
+        "threshold": 0.5,
+        "maxTriggers": 3
+      },
+      "jointPolicy": {
+        "enabled": false,
+        "policyPath": "~/.claude/artibot/policies/joint-policy-v1.json",
+        "correlationWeight": 0.5
+      }
     }
   },
   "visual": {
@@ -768,6 +870,7 @@
       "skills",
       "guardrail",
       "token-usage",
+      "cache-roi",
       "summarization"
     ],
     "effort": {
@@ -835,7 +938,9 @@
       },
       "autoCleanup": {
         "enabled": true,
-        "tools": ["eslint-fix"],
+        "tools": [
+          "eslint-fix"
+        ],
         "maxFilesPerRun": 20
       },
       "autoSkillRegister": {
@@ -853,7 +958,11 @@
         "enabled": true,
         "autoMerge": false,
         "branchPrefix": "artibot/auto/",
-        "categories": ["drift", "security-fix", "test-flake"]
+        "categories": [
+          "drift",
+          "security-fix",
+          "test-flake"
+        ]
       },
       "autoWakeup": {
         "enabled": true,
@@ -890,7 +999,13 @@
       "enabled": true,
       "schedule": "0 4 * * 1",
       "reportPath": "_reports/self-benchmark.md",
-      "dimensions": ["evolved", "extensible", "productive", "universal", "quality"]
+      "dimensions": [
+        "evolved",
+        "extensible",
+        "productive",
+        "universal",
+        "quality"
+      ]
     },
     "macroLearning": {
       "enabled": true,

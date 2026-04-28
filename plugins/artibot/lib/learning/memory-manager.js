@@ -8,6 +8,7 @@
 import path from 'node:path';
 import { ensureDir, readJsonFile, writeJsonFile } from '../core/file.js';
 import { ARTIBOT_DIR } from '../core/config.js';
+import { createMemoryDispatcher } from './memory/dispatch.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -407,6 +408,23 @@ export async function saveMemory(type, data, options = {}) {
   } catch {
     return { ...entry, persisted: false };
   }
+
+  // Hierarchical mirror (Phase A): when the feature flag is on, also upsert
+  // into the SemanticStore for preference|error types. Episodic (context,
+  // command) mirroring arrives with Phase B's episodic.js module.
+  if (isHierarchicalEnabled() && isSemanticType(type)) {
+    try {
+      await getSemanticStore().put({
+        data: validated.data,
+        type,
+        tags: entry.tags,
+        source: validated.source,
+      });
+    } catch {
+      // Mirror is best-effort — the legacy store remains the source of truth
+      // until Phase C flips the default.
+    }
+  }
   return entry;
 }
 
@@ -423,6 +441,18 @@ export async function searchMemory(query, options = {}) {
   const { types, limit = 10, threshold = 0.1 } = options;
   const queryTokens = tokenizeQuery(query);
   if (queryTokens.length === 0) return [];
+
+  // Phase C dispatch: when the hierarchical flag is on, route through the
+  // 3-layer retriever (Working/Episodic/Semantic). Flat legacy behaviour
+  // remains the default until the v3.4 default-on flip.
+  if (isHierarchicalEnabled()) {
+    const hierarchical = await searchMemoryHierarchical(query, {
+      ...options,
+      limit,
+      threshold,
+    });
+    if (hierarchical !== null) return hierarchical;
+  }
 
   const storeKeys = types ? types.map(typeToStoreKey) : Object.keys(STORE_FILES);
   const results = [];
@@ -644,6 +674,67 @@ export async function getMemoryStats() {
 }
 
 // ---------------------------------------------------------------------------
+// Hierarchical Memory Façade (v3.2.0 Phase A)
+// ---------------------------------------------------------------------------
+//
+// When `learning.hierarchicalMemory.enabled === true` (read lazily from the
+// project config OR the HIERARCHICAL_MEMORY=1 env override), saveMemory and
+// searchMemory dispatch through the per-layer stores:
+//   - type=preference|error → semantic layer
+//   - type=context|command  → episodic layer (falls through to legacy until
+//                              Phase B's episodic store lands)
+//
+// The public API shape is unchanged. When the flag is off (default in
+// Phase A) callers observe the flat v3.1.x behaviour bit-for-bit.
+
+// Dispatcher singleton — owns all 3-layer wiring (semantic/episodic/working
+// stores + retriever). Kept external so memory-manager.js stays under 800
+// lines and test seams are centralised.
+const _dispatcher = createMemoryDispatcher({
+  getMemoryDir,
+  typeToStoreKey,
+});
+
+let _hierarchicalFlagChecked = false;
+let _hierarchicalFlagValue = false;
+
+function isHierarchicalEnabled() {
+  if (process.env.HIERARCHICAL_MEMORY === '1') return true;
+  if (process.env.HIERARCHICAL_MEMORY === '0') return false;
+  if (_hierarchicalFlagChecked) return _hierarchicalFlagValue;
+  _hierarchicalFlagChecked = true;
+  _hierarchicalFlagValue = false;
+  return _hierarchicalFlagValue;
+}
+
+/**
+ * Test seam: force-enable hierarchical dispatch without touching env.
+ * @param {boolean} enabled
+ */
+export function __setHierarchicalMemoryEnabled(enabled) {
+  _hierarchicalFlagChecked = true;
+  _hierarchicalFlagValue = Boolean(enabled);
+}
+
+const getSemanticStore = () => _dispatcher.getSemanticStore();
+const searchMemoryHierarchical = (q, o) => _dispatcher.searchMemoryHierarchical(q, o);
+
+export const __setSemanticStore = (store) => _dispatcher.__setSemanticStore(store);
+export const __setEpisodicStore = (store) => _dispatcher.__setEpisodicStore(store);
+export const __setWorkingStore = (store) => _dispatcher.__setWorkingStore(store);
+export const __setRetriever = (r) => _dispatcher.__setRetriever(r);
+export const __setRetrieverConfig = (cfg) => _dispatcher.__setRetrieverConfig(cfg);
+
+/**
+ * Decide whether a given memory `type` should route to the semantic layer.
+ * @param {string} type
+ * @returns {boolean}
+ */
+function isSemanticType(type) {
+  return type === 'preference' || type === 'error';
+}
+
+// ---------------------------------------------------------------------------
 // Internal Helpers
 // ---------------------------------------------------------------------------
 
@@ -661,3 +752,6 @@ function typeToStoreKey(type) {
   };
   return mapping[type] || 'projectContexts';
 }
+
+// Export helper so callers and tests can consult dispatch predicates.
+export { isSemanticType, isHierarchicalEnabled };

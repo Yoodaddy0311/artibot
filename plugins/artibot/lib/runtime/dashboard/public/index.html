@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Artibot Dashboard</title>
+  <meta name="color-scheme" content="dark" />
+  <style>
+    :root {
+      --bg: #0b0f14;
+      --panel: #111820;
+      --border: #1f2a37;
+      --fg: #e6edf3;
+      --muted: #8b98a5;
+      --accent: #4cc2ff;
+      --ok: #3fb950;
+      --warn: #d29922;
+      --err: #f85149;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg);
+      font: 14px/1.45 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+    a { color: var(--accent); }
+    header { padding: 12px 16px; border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+    header h1 { margin: 0; font-size: 14px; font-weight: 600; letter-spacing: 0.3px; }
+    header .meta { color: var(--muted); font-family: var(--mono); font-size: 12px; }
+    #status { display: inline-block; padding: 2px 8px; border-radius: 10px;
+      background: #1a2330; border: 1px solid var(--border); font-size: 12px; }
+    #status.on { color: var(--ok); border-color: #24402b; }
+    #status.off { color: var(--err); border-color: #402424; }
+    main { display: grid; grid-template-columns: 260px 1fr; gap: 0;
+      height: calc(100vh - 46px); }
+    aside { border-right: 1px solid var(--border); padding: 12px 14px;
+      overflow-y: auto; }
+    aside h2 { font-size: 11px; text-transform: uppercase; letter-spacing: 1px;
+      color: var(--muted); margin: 16px 0 6px; }
+    aside h2:first-child { margin-top: 0; }
+    .card { background: var(--panel); border: 1px solid var(--border);
+      border-radius: 6px; padding: 10px; margin-bottom: 10px; }
+    .card .num { font-family: var(--mono); font-size: 22px; }
+    .card .lbl { color: var(--muted); font-size: 11px; text-transform: uppercase;
+      letter-spacing: 0.5px; }
+    .filter { display: flex; align-items: center; gap: 6px; padding: 3px 0;
+      font-size: 12px; font-family: var(--mono); cursor: pointer; }
+    .filter input { accent-color: var(--accent); }
+    .list { overflow-y: auto; padding: 8px 12px; }
+    .row { display: grid; grid-template-columns: 92px 140px 120px 1fr;
+      gap: 10px; padding: 6px 8px; border-bottom: 1px solid #111a23;
+      font-family: var(--mono); font-size: 12px; align-items: start; }
+    .row:hover { background: #0f1620; }
+    .ts { color: var(--muted); white-space: nowrap; }
+    .ev { color: var(--accent); }
+    .tool { color: #c7a1ff; }
+    .payload { color: #cbd5e1; overflow: hidden; text-overflow: ellipsis;
+      white-space: nowrap; }
+    .row.err .ev { color: var(--err); }
+    .topN { margin: 0; padding: 0; list-style: none; font-family: var(--mono); font-size: 12px; }
+    .topN li { display: flex; justify-content: space-between; padding: 2px 0;
+      color: var(--fg); }
+    .topN .c { color: var(--muted); }
+    footer { padding: 8px 12px; color: var(--muted); font-size: 11px;
+      border-top: 1px solid var(--border); background: var(--panel); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Artibot Local Observability</h1>
+    <div class="meta">
+      <span id="status" class="off" role="status" aria-live="polite">disconnected</span>
+      <span id="count" aria-live="polite">0 events</span>
+    </div>
+  </header>
+  <main>
+    <aside aria-label="Controls and summary">
+      <h2>Summary</h2>
+      <div class="card">
+        <div class="num" id="totalEvents">0</div>
+        <div class="lbl">Total events</div>
+      </div>
+      <div class="card">
+        <div class="num" id="errorRate">0%</div>
+        <div class="lbl">Tool error rate</div>
+      </div>
+      <h2>Top tools</h2>
+      <ol class="topN" id="topTools" aria-live="polite"></ol>
+      <h2>Filters</h2>
+      <div id="filters"></div>
+    </aside>
+    <section class="list" id="list" aria-label="Event stream" aria-live="polite"></section>
+  </main>
+  <footer>
+    Loopback-only (127.0.0.1). No external transmission. Schema v1.
+  </footer>
+  <script>
+  (function () {
+    "use strict";
+    var EVENT_TYPES = [
+      "SessionStart", "SessionEnd", "UserPromptSubmit", "PreToolUse",
+      "PostToolUse", "Stop", "SubagentStop", "PreCompact", "Notification",
+      "TaskCreated", "TaskCompleted", "ErrorRaised"
+    ];
+    var MAX_ROWS = 200;
+
+    var state = {
+      events: [],
+      filters: new Set(EVENT_TYPES),
+      total: 0,
+      toolCounts: {},
+      postCount: 0,
+      postFail: 0,
+    };
+
+    function el(id) { return document.getElementById(id); }
+
+    function renderFilters() {
+      var host = el("filters");
+      var frag = document.createDocumentFragment();
+      EVENT_TYPES.forEach(function (t) {
+        var label = document.createElement("label");
+        label.className = "filter";
+        var cb = document.createElement("input");
+        cb.type = "checkbox";
+        cb.checked = true;
+        cb.setAttribute("aria-label", "filter " + t);
+        cb.addEventListener("change", function () {
+          if (cb.checked) state.filters.add(t); else state.filters.delete(t);
+          repaintList();
+        });
+        label.appendChild(cb);
+        var span = document.createElement("span");
+        span.textContent = t;
+        label.appendChild(span);
+        frag.appendChild(label);
+      });
+      host.appendChild(frag);
+    }
+
+    function fmtTs(ts) {
+      try { return new Date(ts).toISOString().slice(11, 23); }
+      catch (_) { return ""; }
+    }
+
+    function rowNode(ev) {
+      var row = document.createElement("div");
+      row.className = "row" + (ev.event === "ErrorRaised" ? " err" : "");
+      var ts = document.createElement("span"); ts.className = "ts";
+      ts.textContent = fmtTs(ev.timestamp);
+      var name = document.createElement("span"); name.className = "ev";
+      name.textContent = ev.event;
+      var tool = document.createElement("span"); tool.className = "tool";
+      tool.textContent = ev.tool || "";
+      var payload = document.createElement("span"); payload.className = "payload";
+      try { payload.textContent = JSON.stringify(ev.payload); }
+      catch (_) { payload.textContent = ""; }
+      row.appendChild(ts); row.appendChild(name);
+      row.appendChild(tool); row.appendChild(payload);
+      return row;
+    }
+
+    function repaintList() {
+      var host = el("list");
+      host.textContent = "";
+      var frag = document.createDocumentFragment();
+      var visible = state.events.filter(function (e) {
+        return state.filters.has(e.event);
+      });
+      for (var i = visible.length - 1; i >= 0; i--) {
+        frag.appendChild(rowNode(visible[i]));
+      }
+      host.appendChild(frag);
+    }
+
+    function renderTop() {
+      var entries = Object.keys(state.toolCounts).map(function (k) {
+        return [k, state.toolCounts[k]];
+      });
+      entries.sort(function (a, b) { return b[1] - a[1]; });
+      var top = entries.slice(0, 5);
+      var host = el("topTools");
+      host.textContent = "";
+      top.forEach(function (pair) {
+        var li = document.createElement("li");
+        var name = document.createElement("span");
+        name.textContent = pair[0];
+        var c = document.createElement("span");
+        c.className = "c";
+        c.textContent = String(pair[1]);
+        li.appendChild(name); li.appendChild(c);
+        host.appendChild(li);
+      });
+    }
+
+    function onEnvelope(ev) {
+      state.events.push(ev);
+      if (state.events.length > MAX_ROWS) {
+        state.events.splice(0, state.events.length - MAX_ROWS);
+      }
+      state.total++;
+      el("totalEvents").textContent = String(state.total);
+      el("count").textContent = state.total + " events";
+      if (ev.event === "PostToolUse") {
+        state.postCount++;
+        if (ev.payload && ev.payload.ok === false) state.postFail++;
+        var t = ev.tool || "unknown";
+        state.toolCounts[t] = (state.toolCounts[t] || 0) + 1;
+        var rate = state.postCount === 0 ? 0
+          : Math.round((state.postFail / state.postCount) * 1000) / 10;
+        el("errorRate").textContent = rate + "%";
+        renderTop();
+      }
+      if (state.filters.has(ev.event)) {
+        var host = el("list");
+        host.insertBefore(rowNode(ev), host.firstChild);
+        while (host.childNodes.length > MAX_ROWS) {
+          host.removeChild(host.lastChild);
+        }
+      }
+    }
+
+    function connect() {
+      var proto = location.protocol === "https:" ? "wss:" : "ws:";
+      var url = proto + "//" + location.host + "/ws";
+      var ws = new WebSocket(url);
+      var status = el("status");
+      ws.addEventListener("open", function () {
+        status.textContent = "connected"; status.className = "on";
+      });
+      ws.addEventListener("message", function (msg) {
+        try { onEnvelope(JSON.parse(msg.data)); } catch (_) { /* skip */ }
+      });
+      ws.addEventListener("close", function () {
+        status.textContent = "disconnected"; status.className = "off";
+        setTimeout(connect, 1500);
+      });
+      ws.addEventListener("error", function () { try { ws.close(); } catch (_) {} });
+    }
+
+    renderFilters();
+    connect();
+  })();
+  </script>
+</body>
+</html>

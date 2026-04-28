@@ -357,6 +357,27 @@ async function primeSkillCache(pluginRoot) {
 }
 
 /**
+ * AD-23: First-of-day skill discovery inject. Calls the in-process helper
+ * from skill-discovery-inject.js so the using-agent-skills meta-skill
+ * appears in systemContext exactly once per local-day. Best-effort: any
+ * failure is swallowed so session start never fails.
+ * @param {string} pluginRoot
+ * @param {string[]} lines
+ */
+async function maybeInjectSkillDiscovery(pluginRoot, lines) {
+  try {
+    const modPath = path.join(pluginRoot, 'scripts', 'hooks', 'skill-discovery-inject.js');
+    const { maybeInject } = await import(toFileUrl(modPath));
+    const injected = await maybeInject(pluginRoot);
+    if (injected) {
+      lines.push('[artibot:skill-discovery] using-agent-skills meta-skill surfaced (first session today).');
+    }
+  } catch {
+    // Non-critical: discovery inject must never block session start
+  }
+}
+
+/**
  * Swarm auto-detect: if this device has a swarm profile shipped with the
  * fork but isn't opted in yet, automatically activate it. Fire-and-forget
  * background spawn, stderr only.
@@ -408,6 +429,7 @@ async function main() {
   await appendKillSwitchStatus(env.pluginRoot, config, lines);
   await checkUpdateBounded(version, home, lines);
   await primeSkillCache(env.pluginRoot);
+  await maybeInjectSkillDiscovery(env.pluginRoot, lines);
   await maybeSwarmAutodetect(env.pluginRoot);
 
   writeStdout({ message: lines.join('\n') });
