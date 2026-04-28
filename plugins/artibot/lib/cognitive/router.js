@@ -120,6 +120,12 @@ const DOMAIN_KEYWORDS = Object.freeze({
   // Additive only: existing entries above are unchanged.
   'source-driven': ['framework', 'library', 'sdk', 'current best practice', 'official docs', 'mdn', 'deprecated', 'migration', 'api reference', '공식 문서', '마이그레이션', '최신 문서'],
   persona:         ['persona', 'distill', 'compile a colleague', 'compile a persona', 'role distill', 'persona overlay', '페르소나', '인격', '역할 압축'],
+  // Phase 2 Squad A — Adoption IDs AD-01/02/11 (guardrails + tool-approval), AD-13 (orchestration-patterns)
+  guardrails:      ['guardrail', 'tripwire', 'input validation', 'output validation', 'policy check', 'agent safety', '가드레일', '트립와이어', '안전 검사'],
+  'tool-approval': ['tool approval', 'approval predicate', 'bash allowlist', 'pre-bash', 'permission gate', 'hitl', '도구 승인', '승인 게이트', '권한 검사'],
+  'orchestration-patterns': ['handoff', 'agent as tool', 'parallelize agents', 'agent topology', 'multi-agent pattern', 'orchestration pattern', '핸드오프', '에이전트 위임', '병렬 에이전트'],
+  // AD-23 (using-agent-skills meta-skill — also auto-injected at SessionStart)
+  'using-skills':  ['how do i', 'what skills', 'available commands', 'list skills', 'available skills', '어떤 스킬', '어떤 명령어', '사용 가능한', '뭐 할 수 있어'],
 });
 
 /**
