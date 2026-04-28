@@ -30,6 +30,7 @@ risk: safe
 version: "1.0.0"
 lastVerified: "2026-04-01"
 source_hash: 31f93e7a
+whenNotToUse: "Local development debugging or one-off log inspection; do not apply when there is no production service, no persistent metrics store, and no SLO/alerting requirement."
 ---
 
 # Observability

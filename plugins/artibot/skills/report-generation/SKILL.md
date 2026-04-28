@@ -16,6 +16,7 @@ agents:
 tokens: "~3K"
 category: "analysis"
 source_hash: 6968f6ed
+whenNotToUse: "Real-time dashboards, ad-hoc data exploration, or developer log inspection — use data-analysis or observability skills instead when the goal is investigation rather than a structured report deliverable."
 ---
 
 # Report Generation

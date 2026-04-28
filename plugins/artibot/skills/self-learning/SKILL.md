@@ -23,6 +23,7 @@ agents:
 tokens: "~3K"
 category: "learning"
 source_hash: 109862fc
+whenNotToUse: "Situations where tool choice is unambiguous and no historical failure pattern exists; do not apply overhead when only one valid tool exists for the task."
 ---
 
 # Self-Learning Tool Selection (Toolformer + GRPO)

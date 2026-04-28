@@ -19,6 +19,7 @@ agents:
 tokens: "~3K"
 category: "persona"
 source_hash: c2258c08
+whenNotToUse: "Frontend UI, CSS, or client-side rendering tasks with no server-side component; also not applicable for infrastructure/DevOps concerns."
 ---
 # Persona: Backend
 

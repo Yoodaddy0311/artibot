@@ -28,6 +28,7 @@ agents:
 tokens: "~4K"
 category: "testing"
 source_hash: 64f60461
+whenNotToUse: "Non-UI code paths (APIs, business logic, CLI tools) or environments without browser/screenshot capabilities where visual regression comparison is not feasible."
 ---
 
 # Visual Validation

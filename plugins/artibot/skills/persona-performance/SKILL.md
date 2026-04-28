@@ -19,6 +19,7 @@ agents:
 tokens: "~3K"
 category: "persona"
 source_hash: ee629c2a
+whenNotToUse: "Premature optimization of code that has not yet been measured; do not apply when no profiling data or performance baseline exists to guide the optimization."
 ---
 # Persona: Performance
 

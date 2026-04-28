@@ -27,6 +27,7 @@ agents:
 tokens: "~5K"
 category: "orchestration"
 source_hash: 27f267d4
+whenNotToUse: "Simple single-agent, single-file tasks under 30 lines where orchestration overhead exceeds the value; also not applicable outside the Artibot plugin environment."
 ---
 
 # Orchestration & Routing Intelligence

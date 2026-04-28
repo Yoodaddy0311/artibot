@@ -15,6 +15,7 @@ agents:
 tokens: "~3K"
 category: "tooling"
 source_hash: e185d0bb
+whenNotToUse: "Single-server MCP usage where no selection logic, fallback, or parallel orchestration is needed; do not apply when only one MCP tool is in scope."
 ---
 # MCP: Coordination
 

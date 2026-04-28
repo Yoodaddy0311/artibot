@@ -16,6 +16,7 @@ agents:
 tokens: "~2K"
 category: "tooling"
 source_hash: b38af4d3
+whenNotToUse: "Unit tests, API-only integration tests, or any test that does not require a real browser; do not apply when Playwright's browser context would add unnecessary overhead."
 ---
 # MCP: Playwright
 

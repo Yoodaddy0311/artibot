@@ -12,6 +12,7 @@ triggers:
   - 팀원들
   - 병렬로
 source_hash: cd022fd3
+whenNotToUse: "Single-file edits under 30 lines, simple single-domain tasks, or requests explicitly flagged with --no-team where inline execution is more efficient than parallel team overhead."
 ---
 
 # /team

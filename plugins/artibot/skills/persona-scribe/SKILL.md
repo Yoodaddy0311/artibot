@@ -18,6 +18,7 @@ agents:
 tokens: "~4K"
 category: "persona"
 source_hash: 08387e4a
+whenNotToUse: "Marketing copy, persuasive content, or non-technical prose where conversion or engagement is the goal rather than clarity and technical accuracy."
 ---
 # Persona: Scribe
 

@@ -17,6 +17,7 @@ agents:
   - "frontend-developer"
 tokens: "~2K"
 category: "tooling"
+whenNotToUse: "General reasoning, code review, or business logic tasks that do not require up-to-date library documentation or API reference lookup."
 sources:
   - "https://context7.com/docs"
   - "https://modelcontextprotocol.io/introduction"

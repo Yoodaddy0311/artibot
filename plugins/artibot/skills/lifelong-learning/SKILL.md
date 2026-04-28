@@ -20,6 +20,7 @@ agents:
 tokens: "~2K"
 category: "learning"
 source_hash: d5a5a1f0
+whenNotToUse: "One-off tasks or throwaway experiments where no routing pattern or user preference is worth persisting; do not trigger during active task execution."
 ---
 
 # Lifelong Learning

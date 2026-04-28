@@ -17,6 +17,7 @@ triggers:
   - "이미지 생성"
   - "이미지 수정"
   - "그려줘"
+whenNotToUse: "Text-only content creation, code generation, or tasks that do not involve creating, editing, or refining visual image assets."
 agents:
   - "frontend-developer"
 tokens: "~5K"

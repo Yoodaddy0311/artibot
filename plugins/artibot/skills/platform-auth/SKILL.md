@@ -15,6 +15,7 @@ sources:
 version: "1.0.0"
 lastVerified: "2026-03-27"
 source_hash: 2684ddeb
+whenNotToUse: "Public read-only routes or internal tooling with no access control requirements; do not apply when the feature has no authentication or permission boundary."
 ---
 
 # Authentication & Authorization Patterns

@@ -13,6 +13,7 @@ triggers:
   - retrospective
   - daily report
 source_hash: 057eb7d4
+whenNotToUse: "Mid-session task execution or detailed technical investigation — the daily skill is for end-of-day retrospective summaries, not real-time work tracking."
 ---
 
 # /daily
