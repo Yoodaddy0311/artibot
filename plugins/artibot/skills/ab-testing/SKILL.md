@@ -18,6 +18,7 @@ agents:
 tokens: "~4K"
 category: "testing"
 source_hash: 701661e8
+whenNotToUse: "Qualitative feedback collection, usability studies, or exploratory research where there is no clear metric hypothesis or insufficient traffic to reach statistical significance."
 ---
 
 # A/B Testing

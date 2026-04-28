@@ -94,7 +94,8 @@ async function validateAgents() {
   }
 
   const files = await readdir(agentsDir);
-  const mdFiles = files.filter(f => f.endsWith('.md'));
+  // Skip INDEX.md (and similar catalog/index files) — they are catalog files, not agent definitions.
+  const mdFiles = files.filter(f => f.endsWith('.md') && f.toLowerCase() !== 'index.md');
 
   if (mdFiles.length === 0) {
     warn('[agents] No agent .md files found');
@@ -197,7 +198,10 @@ async function validateHooks() {
       'Stop', 'UserPromptSubmit',
       'SubagentStart', 'SubagentStop', 'SubAgentTurn',
       'TeammateIdle', 'Notification',
-      'TaskCompleted', 'PermissionRequest'
+      'TaskCompleted', 'PermissionRequest',
+      // User-defined extension events (Artibot AD-07): orchestration lifecycle taps
+      // not part of the Claude Code platform spec but registered intentionally.
+      'on_handoff', 'on_llm_start', 'on_llm_end'
     ];
     const validHookTypes = ['command', 'prompt', 'agent'];
 
@@ -222,8 +226,17 @@ async function validateHooks() {
       if (hook.type && !validHookTypes.includes(hook.type)) {
         warn(`[hooks] ${eventName}: unknown hook type "${hook.type}"`);
       }
-      if (!hook.command) {
-        warn(`[hooks] ${eventName}: hook missing "command" field`);
+      // type:prompt blocks carry a "prompt" field instead of "command".
+      // Default (unset) type is treated as "command" for backwards compatibility.
+      const hookType = hook.type || 'command';
+      if (hookType === 'prompt') {
+        if (typeof hook.prompt !== 'string' || hook.prompt.trim().length === 0) {
+          warn(`[hooks] ${eventName}: type:prompt hook missing or empty "prompt" field`);
+        }
+      } else {
+        if (!hook.command) {
+          warn(`[hooks] ${eventName}: hook missing "command" field`);
+        }
       }
     }
 
