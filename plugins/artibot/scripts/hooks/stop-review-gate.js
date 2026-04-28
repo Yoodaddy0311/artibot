@@ -212,6 +212,12 @@ function checkMissingTests(files, repoRoot) {
 
   const missing = [];
   for (const file of codeFiles) {
+    // Skip deleted files: `git diff HEAD~1 HEAD` includes deletions, but a
+    // deleted source file with no sibling test would be falsely flagged as
+    // "code without tests" — causing review-gate loops after autopilot
+    // squash/cleanup commits.
+    if (!existsSync(path.join(repoRoot, file))) continue;
+
     const ext = path.extname(file);
     const base = file.slice(0, -ext.length);
     const baseName = path.basename(base);

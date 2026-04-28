@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.2.1] - 2026-04-29
+
+### Fixed
+
+- **stop-review-gate hook**: skip deleted files in missing-test check (`scripts/hooks/stop-review-gate.js:215-219`). Previously, `git diff HEAD~1 HEAD` returned files removed in autopilot squash/cleanup commits, and the missing-test scan flagged them as "code without tests" — looping the review gate indefinitely on downstream projects. The loop now `continue`s when the source file no longer exists on disk.
+
 ## [4.2.0] - 2026-04-28
 
 ### Added — 4-Repo Benchmark + Evolution (Autopilot session ap-20260428-094832)
