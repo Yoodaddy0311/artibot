@@ -15,6 +15,7 @@ agents:
 tokens: "~4K"
 category: "marketing"
 source_hash: 6fca323b
+whenNotToUse: "Single-page or single-step conversions with no multi-step flow to analyze; also not applicable when traffic data is unavailable and drop-off points cannot be measured."
 ---
 
 # CRO - Funnel Optimization

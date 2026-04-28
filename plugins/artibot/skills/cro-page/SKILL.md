@@ -15,6 +15,7 @@ agents:
 tokens: "~3K"
 category: "marketing"
 source_hash: 69eb51e1
+whenNotToUse: "Internal dashboards, admin panels, or developer tooling where conversion-rate optimization and persuasion heuristics are not relevant goals."
 ---
 
 # CRO - Page Optimization
