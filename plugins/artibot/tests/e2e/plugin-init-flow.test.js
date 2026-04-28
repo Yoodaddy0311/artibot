@@ -222,7 +222,9 @@ describe('E2E: Plugin Initialization Flow', () => {
 
     it('all hook script paths use CLAUDE_PLUGIN_ROOT variable', () => {
       const allCommands = Object.values(hooksConfig.hooks).flatMap(
-        (entries) => entries.flatMap((entry) => entry.hooks.map((h) => h.command)),
+        (entries) => entries.flatMap((entry) => entry.hooks
+          .filter((h) => h.type !== 'prompt')
+          .map((h) => h.command)),
       );
       for (const cmd of allCommands) {
         expect(cmd).toContain('${CLAUDE_PLUGIN_ROOT}');
@@ -231,7 +233,9 @@ describe('E2E: Plugin Initialization Flow', () => {
 
     it('all hook scripts reference files that exist on disk', () => {
       const allCommands = Object.values(hooksConfig.hooks).flatMap(
-        (entries) => entries.flatMap((entry) => entry.hooks.map((h) => h.command)),
+        (entries) => entries.flatMap((entry) => entry.hooks
+          .filter((h) => h.type !== 'prompt')
+          .map((h) => h.command)),
       );
       for (const cmd of allCommands) {
         // Extract the script path: "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/foo.js [args]"
@@ -248,7 +252,9 @@ describe('E2E: Plugin Initialization Flow', () => {
 
     it('all hooks have valid timeouts (positive number, <= 15000ms)', () => {
       const allTimeouts = Object.values(hooksConfig.hooks).flatMap(
-        (entries) => entries.flatMap((entry) => entry.hooks.map((h) => h.timeout)),
+        (entries) => entries.flatMap((entry) => entry.hooks
+          .filter((h) => h.type !== 'prompt')
+          .map((h) => h.timeout)),
       );
       for (const timeout of allTimeouts) {
         expect(timeout).toBeGreaterThan(0);

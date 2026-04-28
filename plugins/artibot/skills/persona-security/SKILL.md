@@ -19,6 +19,7 @@ agents:
 tokens: "~3K"
 category: "persona"
 source_hash: 043fef76
+whenNotToUse: "Routine feature implementation or refactoring with no security-sensitive surface (no auth, no sensitive data, no network boundary); also not applicable for performance or UX tasks."
 ---
 # Persona: Security
 

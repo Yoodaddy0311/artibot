@@ -17,6 +17,7 @@ agents:
 tokens: "~3K"
 category: "marketing"
 source_hash: bbeb1e8e
+whenNotToUse: "Long-form written documents, reports, or technical documentation where narrative slide structure and visual hierarchy are not the required output format."
 ---
 
 # Presentation Design

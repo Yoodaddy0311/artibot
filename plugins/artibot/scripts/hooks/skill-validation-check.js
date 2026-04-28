@@ -46,6 +46,11 @@ function checkSkill(skillDir) {
         issues.push(`missing field: ${field}`);
       }
     }
+
+    // Warning (non-blocking): check for whenNotToUse field
+    if (!frontmatter.includes('whenNotToUse:')) {
+      console.warn(`[skill-validation] Missing whenNotToUse: ${skillMd}`);
+    }
   } catch {
     issues.push('SKILL.md not found or unreadable');
   }

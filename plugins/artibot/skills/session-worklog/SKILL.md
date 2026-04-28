@@ -12,8 +12,10 @@ triggers:
   - "기록"
 tokens: "~500"
 category: "workflow"
+agents: [orchestrator, doc-updater]
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 source_hash: 0b7b471e
+whenNotToUse: "Mid-task execution where logging would interrupt flow; do not invoke during active problem-solving — reserve for session boundaries and natural breakpoints."
 ---
 
 # Session Worklog

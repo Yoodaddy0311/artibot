@@ -16,6 +16,7 @@ agents:
 tokens: "~3K"
 category: "marketing"
 source_hash: 55c1bbeb
+whenNotToUse: "Internal team communications, transactional system notifications, or developer-facing alerts that are not part of a marketing or nurture campaign."
 ---
 
 # Email Marketing

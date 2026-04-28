@@ -20,6 +20,7 @@ allowed-tools: [Read, Grep, Glob, Bash]
 agents:
   - "performance-engineer"
   - "devops-engineer"
+tokens: 3500
 level1_tokens: 200
 level2_tokens: 3500
 category: "testing"
@@ -27,6 +28,7 @@ risk: safe
 version: "1.0.0"
 lastVerified: "2026-04-01"
 source_hash: 999cc1bf
+whenNotToUse: "Unit tests, functional correctness tests, or UI tests — load testing applies exclusively to throughput, concurrency, and infrastructure capacity under traffic load."
 ---
 
 # Load Testing (k6)

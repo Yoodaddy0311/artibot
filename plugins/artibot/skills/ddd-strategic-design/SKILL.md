@@ -30,6 +30,7 @@ version: "1.0.0"
 risk: safe
 lastVerified: "2026-03-31"
 source_hash: 3632deda
+whenNotToUse: "Tactical implementation tasks (entity design, repository patterns, aggregates) — use ddd-tactical-design instead; do not apply when no domain boundary or team ownership decision is being made."
 ---
 
 # DDD Strategic Design

@@ -17,6 +17,7 @@ agents:
 tokens: "~3K"
 category: "persona"
 source_hash: 827e35ad
+whenNotToUse: "Greenfield implementation, feature development, or bug fixing where the goal is adding new behavior rather than improving existing structure."
 ---
 # Persona: Refactorer
 

@@ -20,6 +20,7 @@ allowed-tools: [Read, Grep, Glob, Bash]
 agents:
   - "performance-engineer"
   - "architect"
+tokens: 2500
 level1_tokens: 200
 level2_tokens: 2500
 category: "optimization"
@@ -27,6 +28,7 @@ risk: safe
 version: "1.0.0"
 lastVerified: "2026-04-01"
 source_hash: fd4bafdf
+whenNotToUse: "Short sessions well within context limits where compaction is not imminent; do not invoke as a routine step — only apply when context size poses a real loss risk."
 ---
 
 # Compaction Survival

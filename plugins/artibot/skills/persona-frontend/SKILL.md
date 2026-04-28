@@ -20,6 +20,7 @@ agents:
 tokens: "~4K"
 category: "persona"
 source_hash: 22ca59b5
+whenNotToUse: "Backend API design, database schema work, server-side logic, or infrastructure tasks with no user-facing rendering or browser interaction."
 ---
 # Persona: Frontend
 

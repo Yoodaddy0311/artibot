@@ -22,6 +22,7 @@ agents:
 tokens: "~3K"
 category: "quality"
 source_hash: 76cdbedd
+whenNotToUse: "Do not apply full verification protocol to internal planning steps, WIP checkpoints mid-task, or agent-to-agent status messages. Reserve the protocol for final completion claims that a human or downstream agent will act on."
 ---
 
 # Verification Before Completion
@@ -180,3 +181,22 @@ The following table captures common excuses agents make to skip critical steps i
 | "The test passed once, I don't need to run it again after my fix" | A passing test before your fix proves nothing about after. Fixes routinely regress unrelated tests via shared state, async timing, or module caching. Re-run the full relevant suite — not just the one you targeted. |
 | "I believe this fix is correct based on the code" | "Based on the code" means you read it; it does not mean you ran it. Belief is the most expensive currency in debugging — every "I believe" in a completion report is a future regression waiting to happen. |
 | "The failing test is flaky, not related to my change" | Until proven otherwise, every failure is related to the change in front of you. Re-run it three times: if it fails even once, it is real. "Flaky" is the diagnosis you reach AFTER investigation, not before. |
+
+## Common Rationalizations
+
+| Rationalization | Why it's wrong | What to do instead |
+|---|---|---|
+| "I summarized what I did, that counts as verification" | A summary of actions taken is not evidence of outcomes achieved; verification requires showing the system in its new state | Re-read the modified file and paste its current content at the relevant lines as evidence |
+| "The test I wrote specifically for this feature passes, so I'm done" | A single targeted test proves one path; the Iron Law requires the full relevant suite to rule out regressions | Run the full test suite for the affected module, not only the new test |
+| "I trust my implementation, evidence collection is bureaucratic" | Trust is internal state; evidence is external record — future reviewers (human or agent) cannot inherit your trust | Collect evidence for your future self: six months from now you will not remember why you were confident |
+| "It's obvious from the diff that the file changed correctly" | Diffs show intent, not execution; saved state, encoding issues, and hook side effects can all produce a diff that looks correct but isn't | Re-read the actual file bytes after every write, not the diff preview |
+| "I'll run verification before the PR, not after each task" | Deferring verification compounds uncertainty: multiple unverified changes make failure attribution impossible | Verify each atomic change immediately after making it; do not batch verification |
+
+## Red Flags
+
+- Completion report contains any phrase from the Red Flag Expressions table
+- Files listed as "modified" in the report but not re-read after modification
+- Test output not quoted or linked in the completion evidence
+- "Done" claim made before `npm test` or equivalent has been run
+- Verification section says "tests should pass" rather than "tests passed — [output]"
+- Agent TaskUpdate status set to "completed" before evidence is collected

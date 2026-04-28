@@ -181,6 +181,18 @@
         ],
         "priority": "critical",
         "category": "quality"
+      },
+      {
+        "matcher": "tool == \"WebFetch\"",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/webfetch-cache-pre.js",
+            "timeout": 3000
+          }
+        ],
+        "priority": "optional",
+        "category": "cache"
       }
     ],
     "PostToolUse": [
@@ -279,6 +291,18 @@
         ],
         "priority": "observability",
         "category": "tracking"
+      },
+      {
+        "matcher": "tool == \"WebFetch\"",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/webfetch-cache-post.js",
+            "timeout": 5000
+          }
+        ],
+        "priority": "optional",
+        "category": "cache"
       }
     ],
     "PreCompact": [
@@ -343,6 +367,17 @@
         ],
         "priority": "operational",
         "category": "git"
+      },
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "Run the DEV verify checklist before finalising. (1) DECOMPOSE: was every numbered item from the original request addressed? List any silently dropped items. (2) EXECUTE: was each modified file re-read after the change to confirm the edit landed at the intended line? (3) VERIFY: produce evidence per item (file:line + what changed). If any item lacks evidence, surface a 'Pending verification' note BEFORE the user sees the response. Reference: plugins/artibot/CLAUDE.md (DEV Protocol section)."
+          }
+        ],
+        "priority": "operational",
+        "category": "quality"
       }
     ],
     "UserPromptSubmit": [
@@ -405,6 +440,29 @@
         ],
         "priority": "operational",
         "category": "git"
+      },
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/ambiguity-guard.js",
+            "timeout": 3000
+          }
+        ],
+        "priority": "advisory",
+        "category": "quality"
+      },
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "If the user's message is very short (under 5 words), ambiguous, or could be interpreted multiple ways, briefly confirm your interpretation before any destructive or costly action (file modifications, deletions, force operations). For clear, unambiguous requests, proceed normally without confirmation."
+          }
+        ],
+        "priority": "advisory",
+        "category": "quality"
       }
     ],
     "SubagentStart": [
@@ -648,6 +706,48 @@
         ],
         "priority": "operational",
         "category": "lifecycle"
+      }
+    ],
+    "on_handoff": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/on-handoff.js",
+            "timeout": 5000
+          }
+        ],
+        "priority": "observability",
+        "category": "orchestration"
+      }
+    ],
+    "on_llm_start": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/on-llm-start.js",
+            "timeout": 5000
+          }
+        ],
+        "priority": "observability",
+        "category": "orchestration"
+      }
+    ],
+    "on_llm_end": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/on-llm-end.js",
+            "timeout": 5000
+          }
+        ],
+        "priority": "observability",
+        "category": "orchestration"
       }
     ]
   }

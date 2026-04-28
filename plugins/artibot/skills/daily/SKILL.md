@@ -3,6 +3,11 @@ name: daily
 context: fork
 disable-model-invocation: true
 description: "일일 회고 리포트. 오늘의 커밋, 품질 상태, 작업 현황, 다음 단계를 구조화된 대시보드로 정리한다. Use when reviewing daily progress, generating a retrospective, or planning the next actions."
+platforms: [claude-code, gemini-cli, codex-cli, cursor]
+level: 2
+category: workflow
+tokens: 1500
+agents: [orchestrator, doc-updater]
 triggers:
   - daily
   - recap
@@ -13,6 +18,7 @@ triggers:
   - retrospective
   - daily report
 source_hash: 057eb7d4
+whenNotToUse: "Mid-session task execution or detailed technical investigation — the daily skill is for end-of-day retrospective summaries, not real-time work tracking."
 ---
 
 # /daily

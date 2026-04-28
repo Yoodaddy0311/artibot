@@ -17,6 +17,7 @@ agents:
 tokens: "~3K"
 category: "marketing"
 source_hash: de908716
+whenNotToUse: "Long-form content (blog posts, whitepapers, email campaigns) or developer-facing communication that is not intended for social media platforms and does not need platform-specific format constraints."
 ---
 
 # Social Media

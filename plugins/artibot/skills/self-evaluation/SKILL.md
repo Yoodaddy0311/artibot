@@ -21,6 +21,7 @@ agents:
 tokens: "~2K"
 category: "learning"
 source_hash: 2c846133
+whenNotToUse: "Mid-task execution phases where evaluation would interrupt active work; do not apply when there is no completed task output to score or compare."
 ---
 
 # Self-Evaluation (Self-Rewarding + GRPO Pattern)

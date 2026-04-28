@@ -116,6 +116,10 @@ const DOMAIN_KEYWORDS = Object.freeze({
   testing:        ['test', 'e2e', 'coverage', 'spec', 'jest', 'playwright', '테스트', 'テスト', '単体テスト', '测试', '单元测试', '覆盖率'],
   documentation:  ['document', 'readme', 'docs', 'guide', 'wiki', '문서', 'ドキュメント', '文書', '文档', '说明', '指南'],
   design:         ['architecture', 'design', 'pattern', 'scalability', '설계', '아키텍처', 'アーキテクチャ', '設計', '设计', '架构', '模块'],
+  // Phase 2 Squad D — Adoption IDs AD-32 (source-driven-development), AD-50 (persona-distill)
+  // Additive only: existing entries above are unchanged.
+  'source-driven': ['framework', 'library', 'sdk', 'current best practice', 'official docs', 'mdn', 'deprecated', 'migration', 'api reference', '공식 문서', '마이그레이션', '최신 문서'],
+  persona:         ['persona', 'distill', 'compile a colleague', 'compile a persona', 'role distill', 'persona overlay', '페르소나', '인격', '역할 압축'],
 });
 
 /**

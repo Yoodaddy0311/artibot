@@ -29,6 +29,7 @@ agents:
 tokens: "~3K"
 category: "orchestration"
 source_hash: 751eb791
+whenNotToUse: "Simple one-step requests where routing classification overhead is unnecessary; also not applicable outside the Artibot plugin environment where the cognitive-router hook is not active."
 ---
 
 # Cognitive Routing

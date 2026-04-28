@@ -18,6 +18,7 @@ agents:
 tokens: "~4K"
 category: "marketing"
 source_hash: 64f38bc5
+whenNotToUse: "Internal-only content, behind-login pages, or developer documentation where organic search ranking is not a goal; also not applicable when the content is not publicly indexable."
 ---
 
 # SEO Strategy

@@ -58,5 +58,11 @@
     "content": "Recurring fix pattern detected. Consider adding automated checks for: fix(4.7): restore 3 items lost during merge -X theirs",
     "formatted": "- [auto-learned] Recurring fix pattern detected. Consider adding automated checks for: fix(4.7): restore 3 items lost during merge -X theirs",
     "injectedAt": "2026-04-20T18:00:33.123Z"
+  },
+  {
+    "type": "auto-learned",
+    "content": "Recurring fix pattern detected. Consider adding automated checks for: fix(coverage): lower branches threshold 77→76 for v4.1 P0 fallback paths",
+    "formatted": "- [auto-learned] Recurring fix pattern detected. Consider adding automated checks for: fix(coverage): lower branches threshold 77→76 for v4.1 P0 fallback paths",
+    "injectedAt": "2026-04-28T00:48:25.336Z"
   }
 ]

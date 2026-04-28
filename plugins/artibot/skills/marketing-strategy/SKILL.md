@@ -15,6 +15,7 @@ agents:
 tokens: "~4K"
 category: "marketing"
 source_hash: 95a1cb83
+whenNotToUse: "Tactical campaign execution, individual ad copy, or channel-specific optimization where high-level market sizing and positioning frameworks are not needed."
 ---
 
 # Marketing Strategy

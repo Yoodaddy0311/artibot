@@ -16,6 +16,7 @@ agents:
 tokens: "~4K"
 category: "marketing"
 source_hash: 8b28fdd9
+whenNotToUse: "Internal product decisions, technical architecture, or feature prioritization that are not driven by external competitive positioning or market landscape."
 ---
 
 # Competitive Intelligence

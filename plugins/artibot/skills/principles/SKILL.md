@@ -24,6 +24,7 @@ agents:
 tokens: "~3K"
 category: "code-quality"
 source_hash: dda690c5
+whenNotToUse: "Throwaway scripts, one-off data migrations, or prototype spikes explicitly scoped to be discarded — applying SOLID/DRY overhead to code with no maintenance lifecycle adds friction without benefit."
 ---
 
 # Development Principles

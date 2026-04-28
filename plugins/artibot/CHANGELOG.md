@@ -9,6 +9,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.2.0] - 2026-04-28
+
+### Added — 4-Repo Benchmark + Evolution (Autopilot session ap-20260428-094832)
+
+Adopted 22 P0/P1 patterns from 4 external repos (`fcakyon/phd-skills`, `titanwings/colleague-skill`, `openai/openai-agents-python`, `addyosmani/agent-skills`) while preserving full DNA and DATA POLICY (zero external HTTP egress).
+
+**New orchestration primitives** (from `openai-agents-python`):
+- `lib/orchestration/guardrails.js` — Input/output guardrail tripwire pattern with `GuardrailTripped` exception (AD-01)
+- `lib/orchestration/tool-guardrails.js` — Per-tool guardrail registry with `reject_content`/`raise_exception` behaviors (AD-02)
+- `lib/orchestration/agent-as-tool.js` — Wrap an agent as a callable tool spec for lightweight delegation (AD-03)
+- `lib/orchestration/handoff-filter.js` — Drop `function_call`/`reasoning` items on handoff for smaller payloads (AD-04)
+- `lib/learning/session.js` — Session ABC + `InMemorySession` + `JsonFileSession` (AD-05)
+- `lib/observability/trace.js` + `lib/observability/exporters/ndjson.js` — 7-span taxonomy with **local-only NDJSON exporter** (AD-06; BackendSpanExporter REJECTED per DATA POLICY)
+- `lib/security/cmd-allowlist.js` — Default 18-cmd allowlist + shell-metacharacter blocker (AD-09 + Phase 5 hardening)
+- 3 new hook events: `on_handoff`, `on_llm_start`, `on_llm_end` (AD-07)
+
+**New skills (6)**: guardrails, orchestration-patterns, tool-approval, persona-distill (+ six-layer-persona / tag-behavior-map references), source-driven-development, using-agent-skills
+
+**New hooks (4 ESM scripts)**: webfetch-cache-pre/post (local-only HTTP cache, AD-24), ambiguity-guard (defends "done"→"dont" typo, AD-38), skill-discovery-inject (SessionStart meta-skill, AD-23)
+
+**Hook system additions**: hooks.json Stop + UserPromptSubmit `type:prompt` blocks (AD-37); pre-compact.js writes `runtime/state/pre-compact-<ISO>.md` snapshot (AD-40)
+
+**Skill prose discipline (from agent-skills)**: 20 core skills gain `## Common Rationalizations` + `## Red Flags` (AD-22); `whenNotToUse` field on **108/108 skills** (100%, AD-26); new `schemas/skill.schema.json`; AGENTS.md three-layer model (AD-34); code-reviewer Verdict template with Critical/Important/Suggestion tiers (AD-28); spec-format 3-tier boundary (AD-27)
+
+### Changed
+- `scripts/validate.js` recognizes 3 extension hook events + `type:prompt` blocks + skips `agents/INDEX.md` catalog (+15 lines, +6 regression tests)
+- `scripts/gen-skill-docs.js` `VALID_CATEGORIES` expanded to 29 categories; `level` accepts `"progressive"` string in addition to 1-5 numeric
+- `scripts/hooks/session-start.js` chains skill-discovery-inject on first daily session (uses `toFileUrl()` for Korean path safety)
+- `lib/cognitive/router.js` keyword routing extended for `source-driven` and `persona` (additive)
+- `lib/security/cmd-allowlist.js` `isAllowedCommand()` now rejects shell-metacharacter chains (`;`, `&&`, `||`, `|`, backtick, `$()`, redirection)
+
+### Tests
+- **5,183 → 7,363 tests** (+2,180 net)
+- 281 test files
+- New DATA POLICY test: `tests/lib/observability/no-egress.test.js` asserts zero `fetch`/`http`/`https`/`axios` matches in Squad-A-owned files at CI time
+
+### Rejected (16 explicit DATA POLICY / DNA violations preserved as session ledger)
+BackendSpanExporter (OpenAI traces ingest URL); OpenAIConversationsSession; LiteLLM/any-llm; Realtime voice stack; Sandbox vendor extensions (Modal/E2B/Daytona/Cloudflare/Vercel/Blaxel/Runloop); notify.sh ntfy.sh/Slack webhooks; factcheck/xray DBLP/arXiv WebFetch; Bash-only hooks (Korean path incompatible); Multi-harness install scripts; "personas cannot orchestrate" rule; Feishu/DingTalk/Slack/WeChat collectors; Whisper transcribe_audio; Python `requirements.txt`; Multi-host installers (Hermes/OpenClaw/Codex); Workplace-political persona tags (PUA-master, blame-shifter); `.zip` skill packaging.
+
+### Verification
+- `npm run validate`: PASS (0 warnings, was 7)
+- `npm run skill:check`: PASS (108 skills, **0 warnings**, 100% fully compliant — was 80)
+- `npm run lint`: PASS (0 errors)
+- `npm test`: PASS (7,363/7,363)
+- `npm run eval:runtime:check`: PASS (8/8 scenarios, avg 1.0)
+- DNA invariants: 9/9 PRESERVED
+- DATA POLICY: zero external HTTP egress added across ~70 files / ~9,300 LOC
+
+---
+
 ## [3.9.1] - 2026-04-25
 
 ### Fixed

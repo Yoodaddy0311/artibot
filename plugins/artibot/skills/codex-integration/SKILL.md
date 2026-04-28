@@ -21,6 +21,7 @@ agents:
   - "security-reviewer"
 tokens: "~2.5K"
 source_hash: d07e8a1b
+whenNotToUse: "Single-AI workflows where codex-plugin-cc is not installed or OpenAI CLI is unavailable; do not apply when the user is not running a dual-AI (Artibot + Codex) setup."
 ---
 
 # Codex Plugin Integration (codex-plugin-cc)

@@ -20,6 +20,7 @@ agent: Explore
 allowed-tools: [Read, Grep, Glob, Bash]
 agents:
   - "devops-engineer"
+tokens: 3500
 level1_tokens: 200
 level2_tokens: 3500
 category: "infrastructure"
@@ -27,6 +28,7 @@ risk: safe
 version: "1.0.0"
 lastVerified: "2026-04-01"
 source_hash: 82209682
+whenNotToUse: "Non-GitHub CI systems (GitLab CI, Jenkins, CircleCI) or local dev scripts — this skill focuses specifically on GitHub Actions patterns and composable workflow design."
 ---
 
 # CI/CD Pipelines (GitHub Actions)

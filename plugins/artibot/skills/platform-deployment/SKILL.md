@@ -9,6 +9,7 @@ tokens: "~4K"
 category: "platform"
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 source_hash: 2a4a26be
+whenNotToUse: "Local development environment setup, manual one-off deploys, or hobby projects without a repeatable pipeline; also not applicable when the target platform is not covered (e.g., bare-metal, on-premise)."
 ---
 
 # Deployment Patterns

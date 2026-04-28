@@ -26,6 +26,7 @@ agents:
 tokens: "~3K"
 category: "testing"
 source_hash: d81fba95
+whenNotToUse: "Do not apply the 80% unit coverage threshold to infrastructure glue code (Docker entrypoints, CI YAML, config loaders with no logic). Do not require E2E tests for backend-only APIs with no user-facing journey — integration tests suffice there."
 ---
 
 # Testing Standards
@@ -167,3 +168,22 @@ The following table captures common excuses agents make to skip critical steps i
 | "This test is flaky, I'll add .skip for now" | `.skip` is a permanent invisible hole. Every skipped test is a behavior that used to work and now may not. Either fix the flake (usually shared state or async timing) or delete the test with a postmortem — never skip silently. |
 | "I'll test the private methods directly for simplicity" | Private methods are implementation details — tests coupled to them break on every refactor, creating false friction. Test the public API; if a private method is hard to reach through the API, that is a design signal, not a testing problem. |
 | "The happy path test is enough" | Happy paths pass on day one regardless of test quality. Bugs live in empty arrays, null inputs, timeouts, and boundary values. A test suite with only happy paths is a marketing document, not a safety net. |
+
+## Common Rationalizations
+
+| Rationalization | Why it's wrong | What to do instead |
+|---|---|---|
+| "The E2E tests already cover this, unit tests would be redundant" | E2E tests run in minutes; unit tests run in milliseconds; when coverage drops and E2E is the only layer, developers wait 10 minutes to learn a one-line fix broke a helper function | Keep both layers: E2E for journey confidence, unit for fast local feedback |
+| "80% is the target so I'll stop once I hit it" | 80% is a floor, not a goal; the 20% you omit is almost always the error branches and edge cases — the exact lines where production bugs live | After reaching 80%, identify which uncovered lines are risk-bearing and add targeted tests for them |
+| "Test isolation means no shared state, but our tests run fine with shared DB" | "Run fine" in series is not isolation — shared DB state means test order matters, and any test that modifies shared data will cause intermittent failures in parallel runs | Use a test database per worker, or wrap each test in a transaction that rolls back |
+| "Adding `.skip` is temporary until I have time to fix the flaky test" | `.skip` commits are permanent in practice; flaky tests silently removed from coverage calculations make the 80% threshold meaningless | Fix the flake immediately: either isolate the shared state, add retry logic for network tests, or delete the test with a written postmortem |
+| "Test names don't matter as long as the assertion is correct" | Unclear test names make failure messages unreadable; `should return undefined` tells you nothing, `should return undefined when user has no email address` tells you exactly what to fix | Use the `should [behavior] when [condition]` naming pattern; enforce it in code review |
+
+## Red Flags
+
+- Any `describe` block with more than one `it.skip` or `test.skip`
+- Test file that imports from the same module's implementation file (testing internals)
+- `beforeAll` or shared variables used to pass state between `it` blocks
+- Coverage threshold set to a value below 80% in `vitest.config.js` without a documented exception
+- Test that asserts a function was called but never asserts what the function returned
+- PR that adds new exported functions with zero corresponding test file additions

@@ -84,6 +84,7 @@ agents:
 argument-hint: "[operation] e.g., commit, branch, merge, PR, conflict, worktree, autopilot on, strategy, stash, help"
 tokens: "~3K"
 category: "workflow"
+whenNotToUse: "Non-Git version control systems (SVN, Mercurial) or tasks with no repository context where Git workflow guidance is irrelevant."
 level1_tokens: 200
 level2_tokens: 1200
 platforms: [claude-code, gemini-cli, codex-cli, cursor]

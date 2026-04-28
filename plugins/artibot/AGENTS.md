@@ -59,6 +59,35 @@ The `direct` degradation mode already lists the supported non–Claude Code plat
 
 ---
 
+## Skills, Personas, Commands — How / Who / When
+
+Artibot's three-layer behavioral model. Every agent interaction activates one or more of these layers:
+
+| Layer | What it is | When it fires | Example |
+|---|---|---|---|
+| Skills (how) | Process recipes — step-by-step discipline guides with rationalization guards and verification checklists | Auto-activated by trigger keywords in skill frontmatter | `tdd-workflow` activates when user says "fix bug" or "add tests" |
+| Personas (who) | Role-specialized decision frameworks — each persona owns a lifecycle phase and applies domain-specific judgment | Routed by lifecycle phase + request intent via `lib/cognitive/router.js` | `persona-architect` for system design questions; `persona-frontend` for UI questions |
+| Commands (when) | Lifecycle phase entrypoints — structured workflows that orchestrate agents and skills for a specific phase | User types slash-command, or orchestrator auto-triggers from context detection | `/spec` for requirements, `/plan` for architecture, `/build` for implementation, `/test` for verification, `/review` for code quality, `/ship` for deployment, `/marketing` for post-ship |
+
+### Layer interaction rules
+
+- A single request can activate one Skill, one Persona, and one Command simultaneously.
+- Skills fire first (they gate the how), then Personas apply judgment within that process, then Commands provide the lifecycle wrapper.
+- Skills are reusable across commands — `tdd-workflow` runs inside both `/build` and `/test`.
+- Personas are reusable across skills — `persona-architect` applies judgment within `spec-format`, `tool-design`, and `multi-agent-patterns`.
+- Commands are not reusable — each command owns its lifecycle phase and is entered once per phase boundary.
+
+### Distinguishing Skills from Personas
+
+| Question | Skills answer it | Personas answer it |
+|---|---|---|
+| "What process should I follow?" | Yes — skills are checklists and workflow guides | No |
+| "What would an expert in this domain decide?" | No | Yes — personas encode expert judgment |
+| "Can I skip step 4?" | Yes — skills carry rationalization guards to answer this | No |
+| "Should I use REST or GraphQL here?" | No | Yes — `persona-architect` evaluates this in context |
+
+---
+
 ## 3. Conversion rules — Claude Code frontmatter → other tools
 
 ### 3.1 Source frontmatter (Claude Code)

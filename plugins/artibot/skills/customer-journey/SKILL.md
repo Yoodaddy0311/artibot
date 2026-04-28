@@ -16,6 +16,7 @@ agents:
 tokens: "~4K"
 category: "marketing"
 source_hash: 7fce375c
+whenNotToUse: "Internal employee workflows, developer tooling UX, or B2B SaaS admin interfaces where customer lifecycle and marketing touchpoints are not the subject of analysis."
 ---
 
 # Customer Journey

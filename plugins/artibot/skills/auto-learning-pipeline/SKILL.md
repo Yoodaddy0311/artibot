@@ -22,6 +22,7 @@ agents:
 tokens: "~3K"
 category: "learning"
 source_hash: 901645c4
+whenNotToUse: "Interactive sessions where human-supervised learning (continuous-learning, self-evaluation) is preferred; also not applicable when autoLearning.enabled is false or Git write access is unavailable."
 ---
 
 # Auto-Learning Pipeline

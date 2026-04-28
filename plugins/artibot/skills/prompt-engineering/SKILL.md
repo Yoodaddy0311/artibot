@@ -29,6 +29,7 @@ version: "1.0.0"
 risk: safe
 lastVerified: "2026-03-31"
 source_hash: 947e33e8
+whenNotToUse: "Do not apply prompt engineering patterns to prompts that run once and are immediately discarded, or to simple factual queries where the model's default behavior is adequate. Reserve this skill for prompts that will be reused, parameterized, or embedded in production systems."
 ---
 
 # Prompt Engineering Patterns
@@ -171,3 +172,22 @@ The following table captures common excuses agents make to skip the discipline o
 | "Chain-of-Thought is for weak models" | CoT measurably improves strong models on multi-step reasoning; the "weak model" framing is outdated |
 | "system prompts and user prompts are interchangeable" | system prompts have higher weight and better persistence; misplacing constraints loses them |
 | "I'll tune the prompt after seeing failures" | post-hoc tuning overfits to observed failures; structured design catches unseen failures too |
+
+## Common Rationalizations
+
+| Rationalization | Why it's wrong | What to do instead |
+|---|---|---|
+| "Chain-of-Thought adds tokens and cost without measurable benefit" | CoT is the primary mechanism for multi-step reasoning accuracy; disabling it to save tokens is trading correctness for cost, which is a false economy on non-trivial tasks | Measure accuracy with and without CoT on 10 representative samples before concluding it doesn't help |
+| "Fewer examples means fewer tokens — one example is enough" | One example is insufficient for pattern teaching; the model infers the pattern from multiple examples and generalizes; a single example is an instruction, not pattern learning | Use 2-5 examples; for rare formats use 3, for common formats 2 may suffice |
+| "System prompts and user prompts are interchangeable" | System prompt content has higher positional weight and persists across the conversation; user prompt content is more likely to be forgotten in long conversations | Put role, rules, and format constraints in the system prompt; put task-specific data in the user prompt |
+| "Templates are over-engineering for a one-off prompt" | Prompts that start as one-off become production-critical; templates make parameterization safe, version-controllable, and reviewable | Write the prompt as a template from the start; replace hardcoded values with named variables even if there is only one caller today |
+| "The model is powerful enough to handle ambiguity in my prompt" | Ambiguity in prompts produces variance in outputs; variance in production prompts means some percentage of outputs are incorrect by design | Resolve ambiguity explicitly: replace "handle edge cases" with the specific list of edge cases to handle |
+
+## Red Flags
+
+- Production prompt stored as a string literal in application code with no versioning
+- System prompt contains both role definition and task-specific data (should be split)
+- Prompt version not bumped after any content change that affects output format
+- Chain-of-Thought disabled or absent on prompts involving ranking, comparison, or multi-step logic
+- Few-shot examples not tested against the actual input distribution
+- Prompt output format not validated against a schema in production

@@ -14,6 +14,7 @@ sources:
 version: "1.0.0"
 lastVerified: "2026-03-27"
 source_hash: ab45ed51
+whenNotToUse: "Non-React frontend stacks (Vue, Svelte, Angular) or projects that do not use Tailwind CSS, where shadcn/ui component patterns cannot be directly applied."
 ---
 
 # shadcn/ui Component Patterns

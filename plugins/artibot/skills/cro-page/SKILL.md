@@ -9,12 +9,14 @@ triggers:
   - "CRO page"
   - "conversion page"
   - "page design"
+platforms: [claude-code, gemini-cli, codex-cli, cursor]
 agents:
   - "frontend-developer"
   - "performance-engineer"
 tokens: "~3K"
 category: "marketing"
 source_hash: 69eb51e1
+whenNotToUse: "Internal dashboards, admin panels, or developer tooling where conversion-rate optimization and persuasion heuristics are not relevant goals."
 ---
 
 # CRO - Page Optimization

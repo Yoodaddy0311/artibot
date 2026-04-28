@@ -13,6 +13,7 @@ triggers:
   - "레포 분석"
   - "벤치마크"
   - "레포 비교"
+whenNotToUse: "Internal code review of a single codebase with no external reference repos; do not apply when competitive scoring and cross-repo structural comparison are not the goal."
 agent: Explore
 agents:
   - "repo-benchmarker"

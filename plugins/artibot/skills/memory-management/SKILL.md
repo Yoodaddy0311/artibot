@@ -22,6 +22,7 @@ agents:
 tokens: "~2K"
 category: "learning"
 source_hash: 03ee7158
+whenNotToUse: "Do not persist memory for single-session tasks that have no reuse value across sessions. Do not store sensitive data (API keys, passwords, personal user data) in any memory store. Skip memory operations when running in ephemeral CI environments where the memory directory is discarded after the run."
 ---
 # Memory Management
 
@@ -170,3 +171,22 @@ The following table captures common excuses agents make to skip the discipline o
 | "I'll persist memory when I have time" | persistence deferred = information lost — every session without it is irrecoverable |
 | "storing user preferences is a privacy risk" | storing locally with scoped access is the opposite of a privacy risk; it's how you avoid re-asking |
 | "memory search returns irrelevant results" | irrelevance is a retrieval tuning problem, not a memory problem — fix the scorer, don't abandon the store |
+
+## Common Rationalizations
+
+| Rationalization | Why it's wrong | What to do instead |
+|---|---|---|
+| "Session summaries are redundant because I can re-read the conversation" | Conversation history is unavailable after session end; summaries are the only cross-session continuity mechanism — without them every session starts from zero | Call `summarizeSession()` at session end unconditionally, even if the summary is brief |
+| "RAG scoring is complex so I'll just store everything and search later" | Storing everything without type classification pollutes the store and degrades retrieval precision; irrelevant memories score above relevant ones in noisy stores | Classify each memory entry with the correct type before saving — preference, context, command, or error |
+| "Error patterns don't need memory because I can look at the logs" | Logs are unindexed and unavailable across sessions; error-pattern memory enables RAG retrieval of the exact solution that worked last time for the same error | Save every error-resolution pair with the error message, root cause, and fix as tags |
+| "TTL management is a background task I'll schedule eventually" | Expired memories that are never pruned accumulate until the store is too noisy to be useful; pruning is a correctness requirement, not housekeeping | Call `pruneOldMemories()` at session start, before loading context — it takes milliseconds |
+| "Storing user preferences locally is unnecessary since I ask every session" | Re-asking known preferences degrades user experience and wastes context budget; permanent-TTL preference memory eliminates re-asking entirely | Store every stated preference with `type: "preference"` and `ttl: null` immediately when the user states it |
+
+## Red Flags
+
+- `summarizeSession()` never called at session end
+- Memory store growing beyond 200 error entries without a prune call
+- User preference asked in consecutive sessions for the same user
+- Memory entry saved without a type field (type is required for RAG scoring)
+- Sensitive data (tokens, passwords, PII) present in any memory JSON file
+- RAG query returning zero results when recent relevant sessions exist (scorer misconfiguration signal)

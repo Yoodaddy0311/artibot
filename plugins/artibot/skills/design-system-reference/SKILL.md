@@ -17,6 +17,7 @@ triggers:
   - "디자인 시스템"
   - "비주얼 디자인"
   - "디자인 토큰"
+whenNotToUse: "Functional UI implementation tasks (React components, CSS fixes) where design-token governance and visual specification are not the deliverable."
 agents:
   - "frontend-developer"
   - "presentation-designer"

@@ -29,6 +29,7 @@ version: "1.0.0"
 risk: safe
 lastVerified: "2026-03-31"
 source_hash: b605c119
+whenNotToUse: "Routine code generation or refactoring tasks where all claims are grounded in immediate tool output; do not add governance overhead to trivially verifiable single-step actions."
 ---
 
 # YES.md - AI Governance Engine

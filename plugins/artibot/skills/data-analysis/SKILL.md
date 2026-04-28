@@ -18,6 +18,7 @@ agents:
 tokens: "~4K"
 category: "analysis"
 source_hash: fd7e2af1
+whenNotToUse: "Qualitative research, code review, or system design tasks where numerical data, metrics, or statistical analysis are not the primary deliverable."
 ---
 
 # Data Analysis

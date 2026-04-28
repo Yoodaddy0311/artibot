@@ -30,6 +30,7 @@ version: "1.0.0"
 risk: safe
 lastVerified: "2026-03-31"
 source_hash: cdb68458
+whenNotToUse: "Do not apply tool consolidation and description engineering to one-off automation scripts or internal test helpers. This skill is for tools that will be invoked by an agent repeatedly or exposed in an MCP server — ephemeral tools do not justify the design overhead."
 ---
 
 # Tool Design for Agents
@@ -141,3 +142,22 @@ The following table captures common excuses agents make to skip the discipline o
 | "the description can be short, the model is smart" | description engineering is the primary driver of correct tool selection; short descriptions are the #1 failure mode |
 | "I'll merge similar tools for simplicity" | merging distinct tools creates invocation ambiguity that costs more than the simplicity saves |
 | "architectural reduction is refactoring busywork" | fewer, sharper tools measurably improves selection accuracy — it's the highest-leverage refactor you can do |
+
+## Common Rationalizations
+
+| Rationalization | Why it's wrong | What to do instead |
+|---|---|---|
+| "The tool description is self-explanatory from the name" | Tool names are identifiers, not instructions; agents select tools based on description match, not name match — a missing description is a silent invocation failure | Write a description that answers: what it does, when to use it, what it returns, and what errors it raises |
+| "Adding more parameters makes the tool more flexible" | Each optional parameter multiplies the number of invocation patterns the agent must reason over; the model resolves ambiguity incorrectly more often as parameter count grows | Add parameters only when there are at least two call sites that need different values; one call site = one fixed behavior |
+| "MCP tool naming is handled by the server, I don't need namespace prefixes" | In multi-server environments, duplicate tool names cause silent conflicts where the wrong server's tool is called | Always use `ServerName:tool_name` format in descriptions and documentation |
+| "I'll fix the tool description after I see how the agent uses it" | Description failures compound: an incorrect first invocation poisons the conversation context with wrong tool output, making subsequent calls harder to correct | Write the description before the implementation; treat it as the contract, not the afterthought |
+| "10-20 tools is too few for a complex agent system" | More tools create selection ambiguity; the recommended 10-20 range is derived from empirical agent performance studies, not arbitrary preference | Consolidate tools with overlapping semantics first; if you need more than 20, add a routing layer, not more tools |
+
+## Red Flags
+
+- Tool description shorter than 50 characters for any non-trivial tool
+- Tool parameter named `data`, `input`, `value`, or `x` without a more specific name
+- Two tools in the same server whose descriptions contain identical phrases
+- Any tool that returns different types depending on a parameter value without documenting both return shapes
+- Error responses that say only "error" or "failed" without a machine-readable code the agent can branch on
+- Tool added to an MCP server without an example invocation in the description or test suite

@@ -32,6 +32,7 @@ argument-hint: "[ambiguous-request] e.g., improve the app, add authentication"
 tokens: "~2K"
 category: "intent"
 source_hash: e1f36028
+whenNotToUse: "Do not trigger clarification for requests that are unambiguous, for tasks where clarifying would require more context than just starting, or when the user has already answered the same question in the current session. After 2 clarification rounds, proceed with stated assumptions."
 ---
 
 # Clarify: Hypothesis-Based Requirement Clarification
@@ -190,3 +191,22 @@ The following table captures common excuses agents make to skip the discipline o
 | "I'll infer from context" | inference fills gaps with your priors, not the user's; MCQ clarification surfaces the gap explicitly in one round-trip |
 | "too many questions annoy the user" | one grouped MCQ with 3-5 options is less annoying than shipping the wrong thing and asking why |
 | "ambiguity will resolve during implementation" | ambiguity compounds — every downstream decision inherits the original unclarity as a hidden assumption |
+
+## Common Rationalizations
+
+| Rationalization | Why it's wrong | What to do instead |
+|---|---|---|
+| "I can infer the intent from the codebase context" | Inference fills gaps with model priors, not the user's actual intent; the codebase tells you what exists, not what the user wants to change | Use codebase context to generate concrete hypothesis options in the MCQ, then let the user confirm |
+| "Asking questions makes me look uncertain and slows delivery" | Delivering the wrong thing makes the model look incapable and costs more time; one round-trip MCQ is faster than one rework cycle | Frame clarifying questions as "I want to get this right the first time" — users universally prefer it |
+| "The request is only slightly ambiguous, I'll pick the most likely interpretation" | "Most likely" is calibrated to training data, not to this user's context; even a 70% likely interpretation fails 30% of the time | When ambiguity is detected, always surface it explicitly even if you have a strong default |
+| "I'll clarify mid-implementation when I hit the unclear part" | Mid-implementation clarification requires explaining the current state to the user, who then must understand it to answer; pre-implementation MCQ is context-free | Identify all ambiguity dimensions before writing a single line of code |
+| "More than 5 questions covers edge cases more thoroughly" | Questions beyond 5 cause question fatigue and lower response quality; the answers to questions 6-10 are less useful than the answers to a well-chosen first 5 | Prioritize by impact — ask the 3-5 dimensions that most constrain implementation first |
+
+## Red Flags
+
+- Clarifying questions asked about information visible in the codebase or recent commits
+- More than 8 questions in a single clarification round
+- Same question asked in two consecutive clarification rounds
+- Ambiguity type not classified before questions are generated
+- Before/After visualization skipped in the clarification output
+- Proceeding to implementation after round 3 without documenting stated assumptions

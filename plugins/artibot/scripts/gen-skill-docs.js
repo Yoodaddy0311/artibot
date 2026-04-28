@@ -26,9 +26,11 @@ const RECOMMENDED_FIELDS = ['platforms', 'level', 'category', 'tokens', 'agents'
 const VALID_CONTEXTS = ['fork', 'forked', 'native', 'shared'];
 const VALID_PLATFORMS = ['claude-code', 'gemini-cli', 'codex-cli', 'cursor', 'antigravity'];
 const VALID_CATEGORIES = [
-  'analysis', 'code-quality', 'debugging', 'devops', 'intent',
-  'language', 'learning', 'library', 'marketing', 'onboarding',
-  'orchestration', 'persona', 'platform', 'quality', 'security',
+  'analysis', 'architecture', 'code-quality', 'core', 'debugging',
+  'design', 'development', 'devops', 'infrastructure', 'integration',
+  'intent', 'language', 'learning', 'library', 'marketing',
+  'meta', 'observability', 'onboarding', 'optimization', 'orchestration',
+  'persona', 'platform', 'quality', 'safety', 'security',
   'setup', 'testing', 'tooling', 'workflow',
 ];
 
@@ -178,11 +180,15 @@ function validateSkill(skillName, fields) {
     });
   }
 
-  // Level should be 1-5
+  // Level should be 1-5 (numeric) or "progressive" (depth scales with context)
   if (fields.level !== undefined) {
-    const lvl = Number(fields.level);
-    if (Number.isNaN(lvl) || lvl < 1 || lvl > 5) {
-      issues.push({ severity: 'warn', field: 'level', message: `level should be 1-5, got "${fields.level}"` });
+    if (fields.level === 'progressive') {
+      // Valid string value; depth is determined at runtime.
+    } else {
+      const lvl = Number(fields.level);
+      if (Number.isNaN(lvl) || lvl < 1 || lvl > 5) {
+        issues.push({ severity: 'warn', field: 'level', message: `level should be 1-5 or "progressive", got "${fields.level}"` });
+      }
     }
   }
 
@@ -336,9 +342,11 @@ async function main() {
     console.log(formatTableReport(results, duplicates));
   }
 
-  // Exit with error code if any errors found
+  // Exit with error code if any errors found.
+  // Trigger duplicates are reported informationally — shared keywords are an
+  // intentional routing pattern (multiple skills can claim the same keyword).
   const { errors } = summarize(results);
-  if (errors > 0 || duplicates.length > 0) {
+  if (errors > 0) {
     process.exit(1);
   }
 }

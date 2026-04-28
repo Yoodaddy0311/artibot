@@ -26,6 +26,7 @@ agents:
 tokens: "~3K"
 category: "security"
 source_hash: c8eaae49
+whenNotToUse: "Do not apply the full security checklist to internal CLI tools with no network exposure, local-only scripts, or test fixtures. When the attack surface is zero (no external input, no network, no persistence), scale down to secret-check only."
 ---
 
 # Security Standards
@@ -175,3 +176,22 @@ The following table captures common excuses agents make to skip critical steps i
 | "The user input comes from our own frontend, it's already validated" | Client-side validation is a UX hint, not a security boundary. An attacker bypasses your frontend with curl in under 10 seconds. Every server handler must re-validate — trust ends at the network boundary. |
 | "Error messages need stack traces so users can report bugs" | Stack traces leak framework versions, file paths, SQL table names, and internal class structures — a free reconnaissance kit for attackers. Log full traces server-side, return an opaque correlation ID to the user. |
 | "Parameterized queries are slower than string concatenation" | The performance delta is measured in microseconds; the SQL injection that string concatenation enables is measured in full database exfiltration. This is not a tradeoff — prepared statements are both safer and cached by the DB planner. |
+
+## Common Rationalizations
+
+| Rationalization | Why it's wrong | What to do instead |
+|---|---|---|
+| "Auth can be bolted on later, ship first" | Every endpoint deployed without auth is a permanently exploitable window; retrofitting auth requires schema migrations, session invalidation, and re-onboarding — all while the hole is open | Implement auth middleware before writing any business logic handler; it is one import and one line of middleware registration |
+| "This is just a dev key, it's safe to commit temporarily" | GitHub and npm registry are scraped continuously; "temporary" committed secrets get indexed and leaked within minutes, not days | Store every key in `.env.local` before the first keystroke; there is no safe temporary exception |
+| "Rate limiting is a DevOps concern, not a code concern" | Rate limiting logic belongs in middleware because the code owns the endpoint contract; if DevOps doesn't configure it, the endpoint is unprotected | Add express-rate-limit or equivalent as a default middleware on all public routes; configure it in code, tune it in config |
+| "The input comes from our own dropdown, users can't inject anything" | Dropdowns are bypassed with curl; every server handler must validate input as if the client is a malicious actor | Run schema validation on every request body regardless of how the frontend is constrained |
+| "Dependency vulnerabilities are theoretical — we haven't been exploited" | "Haven't been exploited" means "exploit hasn't been reported to you yet"; known vulnerabilities are actively scanned by automated bots | Run `npm audit` in CI and fail on `high` or above; patch or explicitly accept-risk with a comment |
+
+## Red Flags
+
+- Any endpoint handler that reads from `req.body` without a `schema.parse()` call above it
+- Environment variables loaded with `process.env.X` without a `|| throw` guard for undefined
+- A `try/catch` that catches an auth error and continues rather than returning 401
+- Dependency audit warnings suppressed with `--force` or `--legacy-peer-deps` without a comment
+- SQL query built with string template literals rather than parameterized form
+- Auth middleware added to some routes but missing from at least one endpoint in the same router

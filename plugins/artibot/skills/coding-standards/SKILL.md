@@ -30,6 +30,7 @@ category: "code-quality"
 version: "1.0.0"
 lastVerified: "2026-03-27"
 source_hash: 7a01304d
+whenNotToUse: "Do not apply Artibot-specific coding standards to code in vendor directories, generated files, or repositories you do not own. Do not enforce the 50-line function limit on data-heavy configuration objects or lookup tables where density is intentional."
 ---
 
 # Coding Standards
@@ -173,3 +174,22 @@ The following table captures common excuses agents make to skip the rigor of thi
 | "naming does not matter if it works" | names are the primary API of your code; bad names cost hours in downstream debugging |
 | "I will fix formatting in a follow-up" | follow-ups never happen — format on save, not on promise |
 | "mutating is faster than copying" | mutation hides race conditions and breaks time-travel debugging; copy unless profiled hot path |
+
+## Common Rationalizations
+
+| Rationalization | Why it's wrong | What to do instead |
+|---|---|---|
+| "This file is already 900 lines, splitting it would disrupt everything" | Disruption is proportional to coupling, not file size; a well-structured 900-line file splits into two 450-line files with one import change | Identify the largest independent responsibility in the file and extract it — one split, not a full refactor |
+| "Naming conventions are team preferences, not correctness issues" | Inconsistent names force every reader to infer meaning from context; inference errors compound across files into real bugs | Follow the verb+noun and is/has/can prefix rules mechanically — they are cheap to apply and expensive to ignore |
+| "The no-mutation rule doesn't apply to this performance-critical path" | Until you have a profiler trace showing mutation is the bottleneck, this is speculation; most mutation in codebases exists for convenience, not performance | Add an inline comment with the profiler evidence if you must mutate in a hot path; bare mutation with no comment gets flagged |
+| "console.log is fine for debugging, I'll remove it before the PR" | "Before the PR" is when you forget; console.log in production logs creates noise that masks real errors and may leak sensitive data | Use structured logging from day one; configure your editor to highlight console.log as a warning |
+| "Input validation adds boilerplate that obscures the real logic" | Unvalidated input is the most common cause of runtime errors and security vulnerabilities; schema validation belongs at the boundary, not scattered through business logic | Add a single schema.parse call at the entry point of each handler; the boilerplate is one line |
+
+## Red Flags
+
+- Functions over 50 lines with no extraction plan in the PR description
+- Files over 800 lines with no split scheduled in the backlog
+- Mutation of a parameter inside a function without an immutability comment
+- `console.log` statements committed to any branch except a dedicated debug branch
+- Boolean variable names without is/has/can/should prefix
+- Error thrown with `throw error` without wrapping or enriching the error context

@@ -15,6 +15,7 @@ agents:
 tokens: "~3K"
 category: "marketing"
 source_hash: dc543348
+whenNotToUse: "Technical user permissions/roles (RBAC) or infrastructure partitioning — segmentation applies to marketing audiences and behavioral cohorts, not access-control boundaries."
 ---
 
 # Segmentation

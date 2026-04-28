@@ -20,6 +20,7 @@ agents:
 tokens: "~2K"
 category: "analysis"
 source_hash: 20062e8f
+whenNotToUse: "Do not trigger strategic compaction below the yellow zone (60% context usage) or during active multi-file edits where task state is partially committed. Compacting mid-transaction loses the uncommitted state that the agent needs to complete the current operation."
 ---
 # Strategic Compaction
 
@@ -280,3 +281,22 @@ The following table captures common excuses agents make to skip the discipline o
 | "I'll compact at phase boundaries" | phase boundaries are exactly right — but only if you ACTUALLY compact, not just plan to |
 | "compaction costs more tokens than it saves" | a good compact summary is 10% of the raw content it replaces; the math is decisive |
 | "I don't know what to preserve" | preserve file paths, decisions, and open questions — everything else is re-derivable |
+
+## Common Rationalizations
+
+| Rationalization | Why it's wrong | What to do instead |
+|---|---|---|
+| "Compaction loses context so I'll avoid it as long as possible" | Waiting until the critical zone (95%+) means Claude triggers auto-compaction with no control over what is preserved; proactive compaction at yellow zone preserves task state intentionally | Monitor the context zone and compact at orange (75%) before auto-compaction fires |
+| "The classify step is subjective, I'll just compress everything" | Compressing everything removes the preserve/summarize/drop distinction; important active task state gets summarized the same as completed exploratory work | Spend 2 minutes on the classify step — the triage is what makes the compaction recoverable |
+| "Checkpoint before compaction is bureaucratic overhead" | Checkpoint takes one `saveMemory` call; without it, a failed compaction loses all task state with no recovery path | Write the checkpoint before every compaction, not after; it is the insurance policy |
+| "I'll compact mid-task to save tokens during a long refactor" | Mid-task compaction loses the intermediate state that connects earlier decisions to current code; the next agent turn cannot reconstruct the reasoning chain | Complete the current atomic operation (one file, one function) before compacting |
+| "Auto-compact is smart enough to preserve what matters" | Auto-compact applies a generic priority heuristic that does not know your task's specific critical context; it optimizes for recency and token count, not semantic importance | Use strategic compaction for tasks with domain-specific preserve requirements; reserve auto-compact for exploratory sessions |
+
+## Red Flags
+
+- Context zone entering red (85%) without a compaction checkpoint in the current session
+- Task state not saved before any compaction event
+- Compaction triggered during an active multi-file edit with uncommitted changes
+- Validate step skipped after compaction (no confirmation that active task context survived)
+- Compaction report shows 0% information preserved for the "active tasks" category
+- Context repeatedly hitting critical zone in the same session without a compaction strategy change

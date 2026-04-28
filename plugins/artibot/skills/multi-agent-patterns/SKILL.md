@@ -31,6 +31,7 @@ version: "1.0.0"
 risk: safe
 lastVerified: "2026-03-31"
 source_hash: 15f3c060
+whenNotToUse: "Do not use multi-agent architecture for tasks that fit within a single agent's context window with no parallelism benefit. A single agent with good tools outperforms a poorly coordinated multi-agent system — only scale out when context isolation or parallel execution provides a measurable benefit."
 ---
 
 # Multi-Agent Architecture Patterns
@@ -131,3 +132,22 @@ The following table captures common excuses agents make to skip the discipline o
 | "token multiplier kills the economics" | the multiplier is bounded (~3-5x); the quality and parallelism gains exceed that on non-trivial tasks |
 | "hierarchical is over-engineered" | hierarchical isolates failure domains — the alternative is one stuck agent blocking the whole system |
 | "consensus mechanisms are philosophical overhead" | consensus catches divergent hallucinations before they propagate; it's a cheap sanity check |
+
+## Common Rationalizations
+
+| Rationalization | Why it's wrong | What to do instead |
+|---|---|---|
+| "Supervisor pattern gives me control so I should default to it" | Supervisor becomes a bottleneck when it re-processes every sub-agent response; use `forward_message` to pass sub-agent output directly to the user when no synthesis is needed | Choose Supervisor only when synthesis is genuinely required; use Swarm for independent tasks |
+| "More agents means more parallelism and therefore faster results" | Token multiplier grows with agent count; beyond 7 agents the coordination overhead dominates; spawning 15 agents to do 15 files produces worse results than 5 agents on 3 files each | Set a hard cap (max 7 concurrent) and batch work instead of spawning one agent per unit |
+| "Context isolation is automatic in multi-agent systems" | Context is only isolated if you pass instruction-only messages to sub-agents; if you forward the full conversation history, isolation fails | Pass bounded task descriptions, not conversation threads; use file-system memory for shared state |
+| "Hierarchical architecture is over-engineered for this task" | Hierarchical is not about formality — it is about isolating failure domains; a flat swarm where one stuck agent can block the whole system is fragile by design | Use a two-level hierarchy (orchestrator + specialists) whenever tasks span more than two domains |
+| "Debate protocol wastes tokens on artificial disagreement" | Debate catches hallucinations that single-agent review misses; the cost is one additional agent turn — bounded and predictable | Apply debate only to high-stakes decisions (architecture choices, security design, critical algorithm selection) |
+
+## Red Flags
+
+- Multi-agent system with no TTL or circuit breaker on agent loops
+- Supervisor agent with a context window over 80% full due to aggregating all sub-agent outputs
+- Sub-agents receiving full conversation history instead of task-scoped instructions
+- Swarm pattern used for tasks with sequential dependencies (use Pipeline instead)
+- No aggregation step after parallel agent work — results not deduplicated or cross-referenced
+- Agent spawned without an explicit success criterion in the task description

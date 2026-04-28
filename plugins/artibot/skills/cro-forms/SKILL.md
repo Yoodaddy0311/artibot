@@ -9,12 +9,14 @@ triggers:
   - "CRO form"
   - "form UX"
   - "form design"
+platforms: [claude-code, gemini-cli, codex-cli, cursor]
 agents:
   - "frontend-developer"
   - "tdd-guide"
 tokens: "~3K"
 category: "marketing"
 source_hash: fcb87289
+whenNotToUse: "Backend data-entry or admin forms where UX friction reduction is not the goal; do not apply to forms used solely by internal operators or developers."
 ---
 
 # CRO - Form Optimization

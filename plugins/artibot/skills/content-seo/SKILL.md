@@ -15,6 +15,7 @@ agents:
 tokens: "~3K"
 category: "marketing"
 source_hash: f13d3ddc
+whenNotToUse: "Internal documentation, developer-facing references, or private content not intended for search engine indexing where ranking signals are irrelevant."
 ---
 
 # Content SEO

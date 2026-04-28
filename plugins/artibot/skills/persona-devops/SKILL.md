@@ -19,6 +19,7 @@ agents:
 tokens: "~3K"
 category: "persona"
 source_hash: 3cca81ad
+whenNotToUse: "Application-level feature development, API design, or frontend work that does not involve deployment pipelines, containerization, or infrastructure concerns."
 ---
 # Persona: DevOps
 

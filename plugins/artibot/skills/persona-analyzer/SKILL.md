@@ -19,6 +19,7 @@ agents:
 tokens: "~3K"
 category: "persona"
 source_hash: b24665d0
+whenNotToUse: "Greenfield feature design or specification tasks where no existing failure, bug, or anomaly is under investigation."
 ---
 # Persona: Analyzer
 

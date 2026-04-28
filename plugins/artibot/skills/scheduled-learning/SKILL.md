@@ -19,6 +19,7 @@ agents:
 tokens: "~1K"
 category: "learning"
 source_hash: 7f6d35af
+whenNotToUse: "Non-Claude Code environments or sessions where CronCreate is not available; also not applicable for on-demand, single-run learning triggers."
 ---
 
 # Scheduled Learning

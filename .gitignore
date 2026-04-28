@@ -40,3 +40,9 @@ CLAUDE.local.md
 C:Users*
 *vitest-out.json
 *AppDataLocalTemp*
+
+# Squad C (AD-23/24/37/38/40): hook-managed runtime data — never commit
+runtime/cache/
+runtime/state/
+!runtime/cache/webfetch/.gitkeep
+!runtime/state/.gitkeep

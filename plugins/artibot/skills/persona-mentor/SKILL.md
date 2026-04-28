@@ -19,6 +19,7 @@ agents:
 tokens: "~3K"
 category: "persona"
 source_hash: 24fb9e1c
+whenNotToUse: "Production code implementation, bug fixing, or performance optimization where the goal is delivering working code, not teaching concepts."
 ---
 # Persona: Mentor
 

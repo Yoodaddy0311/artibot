@@ -19,8 +19,10 @@ triggers:
 allowed-tools: [Read, Grep, Glob]
 tokens: "~1.5K"
 category: "infrastructure"
+agents: [devops-engineer, backend-developer]
 version: "1.0.0"
 source_hash: f9868ebb
+whenNotToUse: "Business logic, UI components, or any code that does not interact with the Claude Code hook system; this skill is exclusively for hook pipeline and tool result flow."
 ---
 # Hook Feedback Merge Pattern
 

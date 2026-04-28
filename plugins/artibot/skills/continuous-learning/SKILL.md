@@ -20,6 +20,7 @@ agents:
 tokens: "~2K"
 category: "learning"
 source_hash: 70c75841
+whenNotToUse: "One-time tasks or ephemeral session work where no persistent pattern or preference is worth storing across future sessions."
 ---
 # Continuous Learning
 

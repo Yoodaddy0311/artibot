@@ -198,6 +198,41 @@ When running as a teammate in an agent team:
 
 최종 리뷰 보고서에는 반드시 `schemas/review-output.schema.json` 스키마를 준수하는 구조화된 JSON 블록을 포함할 것. 핵심 필드: `verdict` (pass/fail/warning), `findings[]` (severity, file, line, confidence, description, suggestion), `next_steps[]`. 이를 통해 다른 에이전트나 파이프라인이 리뷰 결과를 프로그래밍적으로 소비할 수 있다.
 
+## Output Template (Verdict + Tier)
+
+Use this template as the final section of every code review report. It replaces the free-form FINAL VERDICT block and makes the output machine-parseable.
+
+```
+## Verdict: APPROVE | REQUEST CHANGES | REJECT
+
+### Critical (blocking — must fix before merge)
+- {item: file:line — specific description of the blocking issue}
+
+### Important (should fix before merge — may block at team discretion)
+- {item: file:line — description of the important issue}
+
+### Suggestion (nice-to-have — non-blocking)
+- {item: file:line — description of the improvement opportunity}
+```
+
+**Verdict decision rules:**
+
+| Verdict | Condition |
+|---|---|
+| APPROVE | Zero Critical, zero Important; Suggestions are optional |
+| REQUEST CHANGES | One or more Important items; or Critical items that are addressable without a redesign |
+| REJECT | Three or more Critical items; or any Critical item that requires architectural rework before re-review |
+
+**Tier definitions:**
+
+| Tier | Criteria | Examples |
+|---|---|---|
+| Critical (blocking) | Correctness, security, data loss, or spec deviation that makes the code wrong to ship | SQL injection, missing auth, test suite regression, scope violation |
+| Important (should fix) | Code quality or design issues that will cause maintenance problems within one sprint | Functions over 100 lines, missing error propagation, untested error paths |
+| Suggestion (nice-to-have) | Style, naming, or improvement opportunities that do not affect correctness | Better variable names, extracting a helper, adding a comment |
+
+---
+
 ## Anti-Patterns
 
 - Do NOT review code directly — always delegate to spec-reviewer and quality-reviewer

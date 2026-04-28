@@ -24,6 +24,7 @@ agents:
   - "tdd-guide"
 tokens: "~4K"
 category: "quality"
+whenNotToUse: "Do not apply to test fixtures, generated code (protobuf stubs, GraphQL codegen), or vendor files. Do not run on patches authored by humans with explicit style justifications — use code-reviewer directly instead."
 ---
 
 # Code Slop Reviewer
@@ -253,3 +254,22 @@ FINAL RECOMMENDATION
 - `../../_shared/rubrics/severity-tiers.md` — shared tier definitions aligned with `ai-slop-reviewer`
 - `../../_shared/rubrics/auto-flag-schema.md` — auto-flag YAML schema for telemetry collection
 - `plugins/artibot-cowork/skills/ai-slop-reviewer/SKILL.md` — sibling skill for content slop (same scoring structure, different vocabulary)
+
+## Common Rationalizations
+
+| Rationalization | Why it's wrong | What to do instead |
+|---|---|---|
+| "The code compiles and tests pass, slop review is cosmetic" | Slop that compiles is still surface area — every unnecessary function, wrapper, or try/catch must be read, understood, and maintained by future engineers | Run slop review as a pre-merge gate separate from test passage; both must clear |
+| "AI-generated code is fine if I reviewed it quickly" | Quick review catches logical errors but not structural slop — the patterns are subtle and require the specific vocabulary this skill provides | Apply the 10-category checklist and score before trusting a visual review |
+| "Flagging try-swallows is too strict — defensive code is safer" | Defensive code that swallows errors destroys observability; the cost of a silent failure in production exceeds any perceived safety | Remove silent catches; propagate errors with context or handle them explicitly with a documented recovery path |
+| "The score threshold of 70 is arbitrary" | The threshold is derived from observable patch quality — patches scoring below 70 consistently contain patterns that cause production issues; the number is calibrated, not arbitrary | If you believe the threshold is wrong for a specific context, document the justification and adjust in the shared rubric, not inline |
+| "I'll address slop findings in a follow-up PR" | Follow-up PRs for non-functional changes are deprioritized indefinitely; slop accumulates and the codebase drifts below the threshold permanently | Fix slop in the same PR that introduced it; the diff is small by definition if the score is borderline |
+
+## Red Flags
+
+- Patches from `tdd-guide` or `backend-developer` teammates reaching `code-reviewer` without a slop score
+- Any `catch {}` or `catch (e) { }` block without a comment explaining why the error is intentionally ignored
+- Options objects with more than 6 fields where the call sites pass 2 or fewer
+- The same error-handling block copy-pasted more than twice in a single file
+- `TODO` comments with no owner handle, no date, and no issue reference
+- A score below 50 reaching `code-reviewer` without an explicit override note from the team lead
