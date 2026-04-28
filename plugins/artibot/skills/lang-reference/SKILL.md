@@ -202,6 +202,7 @@ agents:
   - "typescript-pro"
 tokens: "~4K"
 category: "language"
+whenNotToUse: "Architecture decisions, infrastructure configuration, or non-language-specific tasks where language idiom patterns and framework conventions are not the subject."
 level1_tokens: 200
 level2_tokens: 1200
 platforms: [claude-code, gemini-cli, codex-cli, cursor]

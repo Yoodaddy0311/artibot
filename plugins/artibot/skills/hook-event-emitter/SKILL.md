@@ -24,6 +24,7 @@ agents:
 level1_tokens: 220
 level2_tokens: 3800
 category: "observability"
+whenNotToUse: "Cloud or remote telemetry pipelines, external monitoring services, or any observability surface that requires data to leave the device — this skill is local-only by design."
 risk: safe
 version: "0.5.0"
 lastVerified: "2026-04-23"

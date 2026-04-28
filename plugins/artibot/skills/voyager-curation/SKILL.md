@@ -22,6 +22,7 @@ agents:
   - "llm-architect"
 tokens: "~2K"
 category: "learning"
+whenNotToUse: "Manual skill authoring, editing existing skills, or any workflow requiring immediate promotion without user-approval staging — voyager-curation only proposes drafts, never auto-promotes."
 ---
 
 # Voyager Skill Curation (MVP)

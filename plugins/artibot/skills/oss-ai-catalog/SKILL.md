@@ -23,6 +23,7 @@ description: |
   - any "what tool should I use for X" question in an AI/ML context
 
   DO NOT hardcode recommendations in agent prompts; consult this skill so recommendations stay fresh.
+whenNotToUse: "Proprietary or commercial-only tool recommendations; do not apply when the user explicitly needs a managed SaaS product and open-source constraints do not apply."
 auto-invoke: true
 user-invocable: false
 ---
