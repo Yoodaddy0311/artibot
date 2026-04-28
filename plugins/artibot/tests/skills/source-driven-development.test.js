@@ -27,11 +27,11 @@ beforeAll(() => {
 // ---------------------------------------------------------------------------
 
 function parseFrontmatter(text) {
-  const match = text.match(/^---\n([\s\S]*?)\n---\n/);
+  const match = text.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/);
   if (!match) return null;
   const body = match[1];
   const fields = {};
-  const lines = body.split('\n');
+  const lines = body.split(/\r?\n/);
   let currentArray = null;
   for (const line of lines) {
     const arrayItemMatch = line.match(/^\s+-\s+(.+)$/);
