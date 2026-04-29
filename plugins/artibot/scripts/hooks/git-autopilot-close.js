@@ -9,14 +9,52 @@
  */
 
 import { existsSync, readFileSync } from 'node:fs';
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { parseJSON, readStdin } from '../utils/index.js';
 import { createErrorHandler } from '../../lib/core/hook-utils.js';
+import { resolveBaseBranch } from '../../lib/git/resolve-base.js';
+
+// -------------------------------------------------------------------------
+// Constants
+// -------------------------------------------------------------------------
+
+/**
+ * Hard ceiling on how many commits a single squash pass will collapse.
+ * Prevents catastrophic resets if merge-base resolution accidentally points
+ * at an ancient ancestor (e.g. root commit).
+ */
+const MAX_SQUASH_COMMITS = 50;
 
 // -------------------------------------------------------------------------
 // Helpers
 // -------------------------------------------------------------------------
+
+/**
+ * Run git with argv-array (shell-free).
+ *
+ * @param {string[]} args
+ * @param {object} [opts]
+ * @returns {string} trimmed stdout (throws on non-zero exit)
+ */
+function gitRun(args, opts = {}) {
+  return execFileSync('git', args, {
+    encoding: 'utf-8',
+    stdio: ['ignore', 'pipe', 'ignore'],
+    ...opts,
+  }).trim();
+}
+
+/**
+ * Run git silently (discards stdout); throws on non-zero exit.
+ *
+ * @param {string[]} args
+ * @param {object} [opts]
+ * @returns {void}
+ */
+function gitSilent(args, opts = {}) {
+  execFileSync('git', args, { stdio: 'ignore', ...opts });
+}
 
 /**
  * Get the repo root via git rev-parse.
@@ -24,10 +62,7 @@ import { createErrorHandler } from '../../lib/core/hook-utils.js';
  */
 function getRepoRoot() {
   try {
-    return execSync('git rev-parse --show-toplevel', {
-      encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    }).trim();
+    return gitRun(['rev-parse', '--show-toplevel']);
   } catch {
     return null;
   }
@@ -56,11 +91,7 @@ function loadConfig(repoRoot) {
  */
 function getCurrentBranch(cwd) {
   try {
-    return execSync('git branch --show-current', {
-      cwd,
-      encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    }).trim();
+    return gitRun(['branch', '--show-current'], { cwd });
   } catch {
     return '';
   }
@@ -73,7 +104,7 @@ function getCurrentBranch(cwd) {
  */
 function hasDirtyWorkspace(cwd) {
   try {
-    const status = execSync('git status --porcelain', {
+    const status = execFileSync('git', ['status', '--porcelain'], {
       cwd,
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'ignore'],
@@ -91,11 +122,11 @@ function hasDirtyWorkspace(cwd) {
  */
 function commitClose(cwd) {
   try {
-    execSync('git add -A', { cwd, stdio: 'ignore' });
+    gitSilent(['add', '-A'], { cwd });
     const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
-    execSync(
-      `git commit -m "chore: artibot session close [${timestamp}]" --no-verify`,
-      { cwd, stdio: 'ignore' }
+    gitSilent(
+      ['commit', '-m', `chore: artibot session close [${timestamp}]`, '--no-verify'],
+      { cwd }
     );
     return true;
   } catch {
@@ -107,70 +138,61 @@ function commitClose(cwd) {
  * Count the number of WIP commits since the branch diverged from its base.
  * WIP commits are identified by the "wip: artibot auto-save" prefix.
  * @param {string} cwd
- * @param {string} branch
- * @param {string} branchPrefix
+ * @param {string} baseBranch
  * @returns {number}
  */
-function countWipCommits(cwd, branch, branchPrefix) {
+function countWipCommits(cwd, baseBranch) {
+  if (!baseBranch) return 0;
   try {
-    // Find the merge-base between this branch and its non-autopilot ancestor
-    const baseBranch = branch.replace(branchPrefix, '');
-    const mergeBase = execSync(`git merge-base HEAD ${baseBranch}`, {
-      cwd,
-      encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    }).trim();
+    const mergeBase = gitRun(['merge-base', 'HEAD', baseBranch], { cwd });
+    if (!mergeBase) return 0;
 
-    const log = execSync(
-      `git log --oneline --grep="^wip: artibot auto-save" ${mergeBase}..HEAD`,
-      {
-        cwd,
-        encoding: 'utf-8',
-        stdio: ['ignore', 'pipe', 'ignore'],
-      }
+    const log = gitRun(
+      ['log', '--oneline', '--grep=^wip: artibot auto-save', `${mergeBase}..HEAD`],
+      { cwd }
     );
-    return log.trim().split('\n').filter(Boolean).length;
+    return log.split('\n').filter(Boolean).length;
   } catch {
     return 0;
   }
 }
 
 /**
- * Squash all WIP commits into a single clean commit via interactive rebase.
- * Uses --autosquash with fixup! prefix pattern.
- * Falls back to soft-reset + recommit if rebase is unavailable.
+ * Squash all WIP commits into a single clean commit.
+ * Soft-resets to merge-base then re-commits everything as one commit.
+ *
+ * Safety guards:
+ *   - merge-base must be a non-empty string.
+ *   - Total commits since merge-base must be < MAX_SQUASH_COMMITS to avoid
+ *     accidentally squashing through an ancient ancestor.
+ *
  * @param {string} cwd
- * @param {string} branch
- * @param {string} branchPrefix
+ * @param {string} baseBranch
  * @param {number} wipCount
  * @returns {boolean}
  */
-function squashWipCommits(cwd, branch, branchPrefix, wipCount) {
+function squashWipCommits(cwd, baseBranch, wipCount) {
   if (wipCount < 2) return true; // Nothing to squash
+  if (!baseBranch) return false;
 
   try {
-    const baseBranch = branch.replace(branchPrefix, '');
-    const mergeBase = execSync(`git merge-base HEAD ${baseBranch}`, {
-      cwd,
-      encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    }).trim();
+    const mergeBase = gitRun(['merge-base', 'HEAD', baseBranch], { cwd });
+    // Guard: empty merge-base means resolution failed — refuse to reset.
+    if (!mergeBase) return false;
 
-    const totalCommitsRaw = execSync(`git rev-list --count ${mergeBase}..HEAD`, {
-      cwd,
-      encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    }).trim();
+    const totalCommitsRaw = gitRun(['rev-list', '--count', `${mergeBase}..HEAD`], { cwd });
     const totalCommits = parseInt(totalCommitsRaw, 10);
 
     if (Number.isNaN(totalCommits) || totalCommits < 2) return true;
+    // Guard: refuse to squash absurd ranges (likely ancient-base mis-resolution).
+    if (totalCommits > MAX_SQUASH_COMMITS) return false;
 
     // Soft-reset to merge-base, re-commit everything as one clean commit
-    execSync(`git reset --soft ${mergeBase}`, { cwd, stdio: 'ignore' });
+    gitSilent(['reset', '--soft', mergeBase], { cwd });
     const timestamp = new Date().toISOString().slice(0, 10);
-    execSync(
-      `git commit -m "feat: artibot session work [${timestamp}]" --no-verify`,
-      { cwd, stdio: 'ignore' }
+    gitSilent(
+      ['commit', '-m', `feat: artibot session work [${timestamp}]`, '--no-verify'],
+      { cwd }
     );
     return true;
   } catch {
@@ -186,12 +208,12 @@ function squashWipCommits(cwd, branch, branchPrefix, wipCount) {
  */
 function pushBranch(cwd, branch) {
   try {
-    execSync(`git push origin ${branch} --no-verify`, { cwd, stdio: 'ignore' });
+    gitSilent(['push', 'origin', branch, '--no-verify'], { cwd });
     return true;
   } catch {
     // Try setting upstream on first push
     try {
-      execSync(`git push -u origin ${branch} --no-verify`, { cwd, stdio: 'ignore' });
+      gitSilent(['push', '-u', 'origin', branch, '--no-verify'], { cwd });
       return true;
     } catch {
       return false;
@@ -216,6 +238,7 @@ async function main() {
   const log = (msg) => process.stderr.write(`[artibot:git-autopilot-close] ${msg}\n`);
   const branch = getCurrentBranch(repoRoot);
   const branchPrefix = config.branchPrefix ?? 'artibot/';
+  const baseBranch = resolveBaseBranch(repoRoot, config);
 
   // Step 1: Commit remaining changes
   if (hasDirtyWorkspace(repoRoot)) {
@@ -227,9 +250,9 @@ async function main() {
 
   // Step 2: Squash WIP commits (only on autopilot branches)
   if (config.squashWipOnClose && branch.startsWith(branchPrefix)) {
-    const wipCount = countWipCommits(repoRoot, branch, branchPrefix);
+    const wipCount = countWipCommits(repoRoot, baseBranch);
     if (wipCount > 0) {
-      const squashed = squashWipCommits(repoRoot, branch, branchPrefix, wipCount);
+      const squashed = squashWipCommits(repoRoot, baseBranch, wipCount);
       log(
         squashed
           ? `Squashed ${wipCount} WIP commit(s) into clean commit`

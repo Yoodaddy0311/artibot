@@ -54,14 +54,21 @@ const MAX_AGE_MS = 48 * 60 * 60 * 1000;
  */
 function isDisabled() {
   if ((process.env.ARTIBOT_IMAGE_CLEANUP || '').toLowerCase() === 'off') return true;
+  const configPath = path.join(os.homedir(), '.claude', 'artibot', 'config.json');
   try {
-    const configPath = path.join(os.homedir(), '.claude', 'artibot', 'config.json');
     if (existsSync(configPath)) {
       const parsed = JSON.parse(readFileSync(configPath, 'utf-8'));
       if (parsed?.imageCleanup === false) return true;
     }
   } catch {
-    // Ignore — malformed config defaults to enabled.
+    // Fail-closed on malformed config: if a user wrote a config file at all,
+    // they intended to control behavior. Defaulting to enabled silently
+    // overrides their intent — the safer side is to disable until config is
+    // valid. This hook deletes files, so the bias must lean toward "off".
+    process.stderr.write(
+      `[artibot:image-cleanup] WARN: malformed config at ${configPath}, disabling hook\n`,
+    );
+    return true;
   }
   return false;
 }

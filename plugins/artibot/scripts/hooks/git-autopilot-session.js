@@ -9,7 +9,7 @@
  */
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { parseJSON, readStdin } from '../utils/index.js';
 import { createErrorHandler } from '../../lib/core/hook-utils.js';
@@ -25,15 +25,38 @@ const PULL_THROTTLE_MS = 5 * 60 * 1000;
 // -------------------------------------------------------------------------
 
 /**
+ * Run git with argv-array (shell-free) and return trimmed stdout.
+ *
+ * @param {string[]} args
+ * @param {object} [opts]
+ * @returns {string}
+ */
+function gitRun(args, opts = {}) {
+  return execFileSync('git', args, {
+    encoding: 'utf-8',
+    stdio: ['ignore', 'pipe', 'ignore'],
+    ...opts,
+  }).trim();
+}
+
+/**
+ * Run git silently (no captured output); throws on non-zero exit.
+ *
+ * @param {string[]} args
+ * @param {object} [opts]
+ * @returns {void}
+ */
+function gitSilent(args, opts = {}) {
+  execFileSync('git', args, { stdio: 'ignore', ...opts });
+}
+
+/**
  * Get the repo root via git rev-parse.
  * @returns {string|null}
  */
 function getRepoRoot() {
   try {
-    return execSync('git rev-parse --show-toplevel', {
-      encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    }).trim();
+    return gitRun(['rev-parse', '--show-toplevel']);
   } catch {
     return null;
   }
@@ -62,11 +85,7 @@ function loadConfig(repoRoot) {
  */
 function getCurrentBranch(cwd) {
   try {
-    return execSync('git branch --show-current', {
-      cwd,
-      encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    }).trim();
+    return gitRun(['branch', '--show-current'], { cwd });
   } catch {
     return '';
   }
@@ -79,10 +98,7 @@ function getCurrentBranch(cwd) {
  */
 function gitPull(cwd) {
   try {
-    execSync('git pull --rebase --autostash', {
-      cwd,
-      stdio: 'ignore',
-    });
+    gitSilent(['pull', '--rebase', '--autostash'], { cwd });
     return true;
   } catch {
     return false;
@@ -132,11 +148,7 @@ function recordPullTimestamp(repoRoot) {
  */
 function isRebaseInProgress(cwd) {
   try {
-    const gitDir = execSync('git rev-parse --git-dir', {
-      cwd,
-      encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    }).trim();
+    const gitDir = gitRun(['rev-parse', '--git-dir'], { cwd });
     const rebaseMerge = path.join(cwd, gitDir, 'rebase-merge');
     const rebaseApply = path.join(cwd, gitDir, 'rebase-apply');
     return existsSync(rebaseMerge) || existsSync(rebaseApply);
@@ -161,15 +173,15 @@ function ensureAutopilotBranch(cwd, branchPrefix, currentBranch) {
 
   try {
     // Check if branch already exists
-    execSync(`git show-ref --verify --quiet refs/heads/${autopilotBranch}`, {
-      cwd,
-      stdio: 'ignore',
-    });
+    gitSilent(
+      ['show-ref', '--verify', '--quiet', `refs/heads/${autopilotBranch}`],
+      { cwd }
+    );
     // Branch exists — switch to it
-    execSync(`git checkout ${autopilotBranch}`, { cwd, stdio: 'ignore' });
+    gitSilent(['checkout', autopilotBranch], { cwd });
   } catch {
     // Branch does not exist — create from current HEAD
-    execSync(`git checkout -b ${autopilotBranch}`, { cwd, stdio: 'ignore' });
+    gitSilent(['checkout', '-b', autopilotBranch], { cwd });
   }
 
   return autopilotBranch;
@@ -210,10 +222,10 @@ async function main() {
           log(`Auto-resolved ${results.length} conflict(s)`);
           // eslint-disable-next-line max-depth -- git rebase recovery requires nested try/catch
           try {
-            execSync('git rebase --continue', { cwd: repoRoot, stdio: 'ignore' });
+            gitSilent(['rebase', '--continue'], { cwd: repoRoot });
           } catch {
             log('rebase --continue failed — manual resolution may be required');
-            execSync('git rebase --abort', { cwd: repoRoot, stdio: 'ignore' });
+            gitSilent(['rebase', '--abort'], { cwd: repoRoot });
           }
         } else if (!allResolved) {
           const unresolved = results.filter((r) => !r.resolved).map((r) => r.filePath);
@@ -221,7 +233,7 @@ async function main() {
         } else {
           // rebase in progress but no conflicted files — abort stale rebase
           log('Rebase in progress but no conflicts found — aborting stale rebase');
-          execSync('git rebase --abort', { cwd: repoRoot, stdio: 'ignore' });
+          gitSilent(['rebase', '--abort'], { cwd: repoRoot });
         }
       }
     }

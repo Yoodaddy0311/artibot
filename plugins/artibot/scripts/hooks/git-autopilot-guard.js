@@ -9,7 +9,7 @@
  */
 
 import { existsSync, readFileSync } from 'node:fs';
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { parseJSON, readStdin, writeStdout } from '../utils/index.js';
 import { createErrorHandler, extractFilePath, extractToolName } from '../../lib/core/hook-utils.js';
@@ -31,7 +31,7 @@ const WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit']);
  */
 function getRepoRoot() {
   try {
-    return execSync('git rev-parse --show-toplevel', {
+    return execFileSync('git', ['rev-parse', '--show-toplevel'], {
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'ignore'],
     }).trim();
@@ -66,17 +66,27 @@ function loadConfig(repoRoot) {
 function hasRemoteChanges(filePath, cwd) {
   try {
     // Get the remote tracking ref (e.g. origin/main)
-    const trackingRef = execSync('git rev-parse --abbrev-ref --symbolic-full-name @{u}', {
-      cwd,
-      encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    }).trim();
+    const trackingRef = execFileSync(
+      'git',
+      ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'],
+      {
+        cwd,
+        encoding: 'utf-8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      },
+    ).trim();
 
-    const diff = execSync(`git diff --name-only HEAD ${trackingRef} -- "${filePath}"`, {
-      cwd,
-      encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    });
+    // argv-array form: filePath cannot be shell-interpreted, so backticks /
+    // `$(…)` / `;` in a malicious or unusual path are inert.
+    const diff = execFileSync(
+      'git',
+      ['diff', '--name-only', 'HEAD', trackingRef, '--', filePath],
+      {
+        cwd,
+        encoding: 'utf-8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      },
+    );
     return diff.trim().length > 0;
   } catch {
     return false; // No upstream or git error — allow

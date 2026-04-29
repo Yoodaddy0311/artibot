@@ -6,7 +6,7 @@
  * @module scripts/hooks/git-autopilot-merge
  */
 
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 
 // -------------------------------------------------------------------------
@@ -44,7 +44,7 @@ export function hasConflicts(filePath) {
  */
 export function listConflictedFiles(cwd) {
   try {
-    const output = execSync('git diff --name-only --diff-filter=U', {
+    const output = execFileSync('git', ['diff', '--name-only', '--diff-filter=U'], {
       cwd,
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'ignore'],
@@ -67,11 +67,11 @@ export function listConflictedFiles(cwd) {
  */
 export function resolveOurs(filePath, cwd) {
   try {
-    execSync(`git checkout --ours -- "${filePath}"`, {
+    execFileSync('git', ['checkout', '--ours', '--', filePath], {
       cwd,
       stdio: 'ignore',
     });
-    execSync(`git add -- "${filePath}"`, { cwd, stdio: 'ignore' });
+    execFileSync('git', ['add', '--', filePath], { cwd, stdio: 'ignore' });
     return { resolved: true, strategy: 'ours' };
   } catch (err) {
     return { resolved: false, strategy: 'ours', error: err.message };
@@ -86,11 +86,11 @@ export function resolveOurs(filePath, cwd) {
  */
 export function resolveTheirs(filePath, cwd) {
   try {
-    execSync(`git checkout --theirs -- "${filePath}"`, {
+    execFileSync('git', ['checkout', '--theirs', '--', filePath], {
       cwd,
       stdio: 'ignore',
     });
-    execSync(`git add -- "${filePath}"`, { cwd, stdio: 'ignore' });
+    execFileSync('git', ['add', '--', filePath], { cwd, stdio: 'ignore' });
     return { resolved: true, strategy: 'theirs' };
   } catch (err) {
     return { resolved: false, strategy: 'theirs', error: err.message };
@@ -117,7 +117,7 @@ export function resolveUnion(filePath, cwd) {
     }
 
     writeFileSync(filePath, resolved, 'utf-8');
-    execSync(`git add -- "${filePath}"`, { cwd, stdio: 'ignore' });
+    execFileSync('git', ['add', '--', filePath], { cwd, stdio: 'ignore' });
     return { resolved: true, strategy: 'union' };
   } catch (err) {
     return { resolved: false, strategy: 'union', error: err.message };

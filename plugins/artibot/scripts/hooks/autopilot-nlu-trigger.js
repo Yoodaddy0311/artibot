@@ -33,14 +33,21 @@ const NO_TEAM_FLAG = /--no-team\b/i;
  * @returns {boolean} true when autopilot suggestion is enabled
  */
 function isEnabled(pluginRoot) {
+  const cfgPath = path.join(pluginRoot, 'artibot.config.json');
   try {
-    const cfgPath = path.join(pluginRoot, 'artibot.config.json');
     if (!existsSync(cfgPath)) return true;
     const cfg = JSON.parse(readFileSync(cfgPath, 'utf-8'));
     const team = cfg?.team ?? {};
     return team.autoApply !== false && team.enabled !== false;
   } catch {
-    return true;
+    // Fail-closed on malformed config: if a user wrote a config file at all,
+    // they intended to control behavior. Defaulting to enabled silently
+    // overrides their intent — the safer side is to disable until config is
+    // valid.
+    process.stderr.write(
+      `[artibot:autopilot-nlu-trigger] WARN: malformed config at ${cfgPath}, disabling hook\n`,
+    );
+    return false;
   }
 }
 

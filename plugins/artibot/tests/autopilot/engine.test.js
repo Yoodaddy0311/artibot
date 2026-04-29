@@ -15,6 +15,9 @@ import {
   runPhase6Report,
 } from '../../lib/autopilot/index.js';
 import { deleteSession } from '../../lib/autopilot/session-store.js';
+import { releaseLock, getLockPath } from '../../lib/autopilot/lock.js';
+import { existsSync, unlinkSync } from 'node:fs';
+import { extractKey } from '../../lib/autopilot/memory.js';
 
 const cleanupIds = new Set();
 function track(id) {
@@ -161,5 +164,61 @@ describe('Phase runner functions return instruction objects', () => {
     expect(inst).toBeTruthy();
     expect(inst.type).toBe('phase-result');
     expect(typeof inst.reportPath).toBe('string');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// D-2 lock-collision regression (Phase 2c P0 fix)
+// ---------------------------------------------------------------------------
+describe('startAutopilot — feature lock collision (D-2)', () => {
+  // Use a deterministic but uncommon task so the featureKey is stable across
+  // the two calls within this single describe block.
+  const collisionTask = `lock-collision-regression-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const collisionKey = extractKey(collisionTask);
+
+  afterEach(() => {
+    // Best-effort: remove the lock file even if the test failed mid-way.
+    try {
+      const lockPath = getLockPath(collisionKey);
+      if (existsSync(lockPath)) unlinkSync(lockPath);
+    } catch {
+      /* cleanup best-effort */
+    }
+  });
+
+  it('first startAutopilot acquires the lock; second on the same task pauses with lock-held-by reason', async () => {
+    const a = await startAutopilot({ task: collisionTask, mode: 'plan' });
+    track(a.sessionId);
+    expect(a.paused).not.toBe(true);
+    expect(a.phase).toBe('INTAKE');
+
+    const b = await startAutopilot({ task: collisionTask, mode: 'plan' });
+    track(b.sessionId);
+    expect(b.paused).toBe(true);
+    expect(b.phase).toBe('PAUSED');
+    expect(b.reason).toMatch(/^lock-held-by-/);
+    // The instruction returned must be a pause directive (not a phase result).
+    expect(b.instruction).toBeTruthy();
+    expect(b.instruction.type).toBe('pause');
+
+    // Release explicitly so subsequent suites are not affected.
+    releaseLock(collisionKey, a.sessionId);
+  });
+
+  it('after release, a third startAutopilot for the same featureKey acquires successfully', async () => {
+    const a = await startAutopilot({ task: collisionTask, mode: 'plan' });
+    track(a.sessionId);
+    expect(a.paused).not.toBe(true);
+
+    // Release manually to mirror what completion / abort would do.
+    expect(releaseLock(collisionKey, a.sessionId)).toBe(true);
+
+    const c = await startAutopilot({ task: collisionTask, mode: 'plan' });
+    track(c.sessionId);
+    expect(c.paused).not.toBe(true);
+    expect(c.phase).toBe('INTAKE');
+
+    // Cleanup the lock for the third session.
+    releaseLock(collisionKey, c.sessionId);
   });
 });

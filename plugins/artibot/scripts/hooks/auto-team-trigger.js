@@ -106,8 +106,8 @@ function loadTeamConfig(pluginRoot) {
     enabled: true,
     triggers: { minSubtasks: 2, minFiles: 2, minComplexity: 'medium' },
   };
+  const cfgPath = path.join(pluginRoot, 'artibot.config.json');
   try {
-    const cfgPath = path.join(pluginRoot, 'artibot.config.json');
     if (!existsSync(cfgPath)) return defaults;
     const cfg = JSON.parse(readFileSync(cfgPath, 'utf-8'));
     const team = cfg?.team ?? {};
@@ -116,7 +116,14 @@ function loadTeamConfig(pluginRoot) {
       triggers: { ...defaults.triggers, ...(team.autoApplyTriggers || {}) },
     };
   } catch {
-    return defaults;
+    // Fail-closed on malformed config: if a user wrote a config file at all,
+    // they intended to control behavior. Defaulting to enabled silently
+    // overrides their intent — the safer side is to disable until config is
+    // valid.
+    process.stderr.write(
+      `[artibot:auto-team-trigger] WARN: malformed config at ${cfgPath}, disabling hook\n`,
+    );
+    return { ...defaults, enabled: false };
   }
 }
 

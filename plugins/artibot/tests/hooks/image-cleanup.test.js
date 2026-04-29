@@ -251,5 +251,47 @@ describe('image-cleanup', () => {
       expect(summary.disabled).toBe(true);
       expect(summary.deleted).toEqual([]);
     });
+
+    // -------------------------------------------------------------------
+    // C-1 fail-closed on malformed config (Phase 2c P0 fix)
+    // -------------------------------------------------------------------
+    it('fails closed (disabled=true) and warns to stderr when config JSON is malformed', () => {
+      mockState.existsSyncResults = { 'config.json': true };
+      mockState.readFileSyncImpl = (p) => {
+        if (String(p).includes('config.json')) {
+          // Truncated/invalid JSON — the kind a user might leave behind mid-edit.
+          return '{ "imageCleanup": fal';
+        }
+        throw new Error('ENOENT');
+      };
+      setRecentFile('image.png', 30_000);
+
+      const summary = mainFn({ cwd: '/fake/cwd' });
+
+      expect(summary.disabled).toBe(true);
+      expect(summary.deleted).toEqual([]);
+      // WARN must reach stderr so operators see the silent disable.
+      const stderr = mockState.stderrChunks.join('');
+      expect(stderr).toMatch(/WARN: malformed config/);
+    });
+
+    it('fails closed when readFileSync throws on a config that exists', () => {
+      mockState.existsSyncResults = { 'config.json': true };
+      mockState.readFileSyncImpl = (p) => {
+        if (String(p).includes('config.json')) {
+          const e = new Error('EACCES: permission denied');
+          e.code = 'EACCES';
+          throw e;
+        }
+        throw new Error('ENOENT');
+      };
+      setRecentFile('image.png', 30_000);
+
+      const summary = mainFn({ cwd: '/fake/cwd' });
+
+      expect(summary.disabled).toBe(true);
+      expect(summary.deleted).toEqual([]);
+      expect(mockState.stderrChunks.join('')).toMatch(/WARN: malformed config/);
+    });
   });
 });

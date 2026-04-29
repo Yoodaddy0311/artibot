@@ -55,8 +55,15 @@ vi.mock('node:fs', async () => {
   };
 });
 
+// Squad A converted session.js to argv-array execFileSync. We adapt the mock
+// by joining argv back into the same string form the existing matchers use,
+// so test cases like `cmd === 'git rev-parse --show-toplevel'` keep working.
 vi.mock('node:child_process', () => ({
   execSync: vi.fn((...args) => mockState.execSyncImpl(...args)),
+  execFileSync: vi.fn((file, argv = [], opts) => {
+    const joined = `${file} ${argv.join(' ')}`.trim();
+    return mockState.execSyncImpl(joined, opts);
+  }),
 }));
 
 // ---------------------------------------------------------------------------

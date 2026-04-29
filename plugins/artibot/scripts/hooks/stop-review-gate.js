@@ -6,7 +6,7 @@
  * @module scripts/hooks/stop-review-gate
  */
 
-import { execSync } from 'node:child_process';
+import { execFileSync, execSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { getPluginRoot, parseJSON, readStdin, writeStdout } from '../utils/index.js';
@@ -52,13 +52,34 @@ function getRepoRoot() {
 
 /** @returns {string[]} Changed file paths relative to repo root */
 function getChangedFiles(cwd) {
+  // Use --diff-filter=ACMR to exclude deleted (D) and only include
+  // Added/Copied/Modified/Renamed entries — deletions cause existsSync
+  // gates downstream to noisy-skip and previously created review-gate
+  // loops on autopilot squash/cleanup commits.
+  // --name-status emits "<STATUS>\t<path>" (renames emit a third column),
+  // so we strip the leading status column when parsing.
+  const parse = (output) =>
+    output
+      .trim()
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => {
+        const cols = line.split('\t');
+        // For A/C/M: ["M", "path"]; for R/C: ["R100", "old", "new"] — take last col.
+        return cols.length > 1 ? cols[cols.length - 1] : cols[0];
+      })
+      .filter(Boolean);
   try {
-    const output = execSync('git diff --name-only HEAD~1 HEAD 2>/dev/null || git diff --name-only HEAD', {
-      cwd,
-      encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    });
-    return output.trim().split('\n').filter(Boolean);
+    const output = execSync(
+      'git diff --name-status --diff-filter=ACMR HEAD~1 HEAD 2>/dev/null'
+        + ' || git diff --name-status --diff-filter=ACMR HEAD',
+      {
+        cwd,
+        encoding: 'utf-8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      },
+    );
+    return parse(output);
   } catch {
     return [];
   }
@@ -83,7 +104,9 @@ function getChangedFiles(cwd) {
 function checkBracketMismatch(absPath, ext) {
   if (!['.js', '.mjs', '.cjs'].includes(ext)) return null;
   try {
-    execSync(`node --check "${absPath}"`, {
+    // Argv-array form avoids shell quoting issues on Windows + paths with
+    // non-ASCII (e.g., Korean) or whitespace components.
+    execFileSync(process.execPath, ['--check', absPath], {
       stdio: ['ignore', 'ignore', 'pipe'],
       timeout: 5000,
     });
@@ -353,6 +376,12 @@ function buildResult(issues, changedFiles, codexMode) {
 async function main() {
   const raw = await readStdin();
   const hookData = parseJSON(raw) ?? {};
+
+  // Stop-hook recursion guard: if Claude is replaying a Stop event that this
+  // hook itself triggered, skip the gate to avoid infinite loops.
+  if (hookData.stop_hook_active === true) {
+    return;
+  }
 
   const repoRoot = getRepoRoot();
   if (!repoRoot) {

@@ -26,7 +26,7 @@ import {
   removeWorktree,
   listWorktrees,
 } from './worktree-manager.js';
-import { releaseLock } from './lock.js';
+import { acquireLock, releaseLock } from './lock.js';
 import { loadAllowList } from './mcp-verifier.js';
 
 /**
@@ -453,6 +453,13 @@ export function runPhase6Report(state) {
   persist(state);
   tick(state.sessionId, { phase: 'REPORT', type: 'phase-end', level: 'info', message: 'Phase 6 REPORT 완료', data: { reportPath: filePath } });
   tick(state.sessionId, { phase: 'COMPLETED', type: 'session-complete', level: 'info', message: 'Autopilot 세션 완료' });
+  // Release the feature lock acquired in startAutopilot. Best-effort —
+  // mirrors the cleanup pattern already used in abortAutopilot.
+  try {
+    if (state.featureKey) releaseLock(state.featureKey, state.sessionId);
+  } catch {
+    /* cleanup non-blocking */
+  }
   const note = notifyCompletion(state.sessionId, 'COMPLETED');
   return {
     type: 'phase-result',
@@ -478,18 +485,62 @@ export async function startAutopilot({ task, mode, options, sessionId } = {}) {
     throw new TypeError('task is required');
   }
   const state = makeInitialState({ task, mode, options, sessionId });
-  persist(state);
-  const instruction = runPhase0Intake(state);
-  const base = {
-    sessionId: state.sessionId,
-    prdPath: state.prdPath,
-    phase: state.phase,
-    instruction,
-  };
-  if (instruction.type === 'pause') {
-    return { ...base, paused: true, reason: instruction.reason };
+
+  // Derive featureKey early so we can guard against concurrent sessions
+  // working on the same feature (worktree/branch collision).
+  const featureKey = extractKey(task);
+  state.featureKey = featureKey;
+
+  // Attempt to acquire a cross-process feature lock. On collision we pause
+  // the new session immediately rather than racing the existing holder.
+  const lockResult = acquireLock(featureKey, state.sessionId);
+  if (!lockResult.ok) {
+    const holderId = lockResult.holder?.sessionId || 'unknown';
+    state.phase = 'PAUSED';
+    state.pausedReason = `lock-held-by-${holderId}`;
+    persist(state);
+    tick(state.sessionId, {
+      phase: 'PAUSED',
+      type: 'lock-collision',
+      level: 'warn',
+      message: `Autopilot start paused: featureKey ${featureKey} held by ${holderId}`,
+      data: { featureKey, holder: lockResult.holder || null },
+    });
+    return {
+      sessionId: state.sessionId,
+      prdPath: null,
+      phase: 'PAUSED',
+      instruction: {
+        type: 'pause',
+        sessionId: state.sessionId,
+        reason: state.pausedReason,
+      },
+      paused: true,
+      reason: state.pausedReason,
+    };
   }
-  return base;
+  state.lockPath = lockResult.lockPath;
+
+  try {
+    persist(state);
+    const instruction = runPhase0Intake(state);
+    const base = {
+      sessionId: state.sessionId,
+      prdPath: state.prdPath,
+      phase: state.phase,
+      instruction,
+    };
+    if (instruction.type === 'pause') {
+      return { ...base, paused: true, reason: instruction.reason };
+    }
+    return base;
+  } catch (err) {
+    // Lock leak guard: if Phase 0 throws (e.g. PRD generation, persist failure)
+    // we must release the feature lock before propagating, otherwise the holder
+    // appears stuck and blocks future sessions on the same feature.
+    try { releaseLock(featureKey, state.sessionId); } catch { /* best-effort */ }
+    throw err;
+  }
 }
 
 const PHASE_TO_RUNNER = Object.freeze({
