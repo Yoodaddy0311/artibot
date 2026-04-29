@@ -5,15 +5,15 @@
  * remove on missing sessions, and a guarded real-git create/remove
  * roundtrip that auto-skips when git or the repo is unavailable.
  */
-import { describe, it, expect, afterAll } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import os from 'node:os';
 import {
-  getWorktreesRoot,
-  getWorktreePath,
-  listWorktrees,
   createWorktree,
+  getWorktreePath,
+  getWorktreesRoot,
+  listWorktrees,
   removeWorktree,
 } from '../../lib/autopilot/worktree-manager.js';
 

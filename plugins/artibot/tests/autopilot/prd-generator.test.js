@@ -2,12 +2,12 @@
  * Unit tests for lib/autopilot/prd-generator.js
  * Covers slugify and generatePRD (with real I/O via tmpdir).
  */
-import { describe, it, expect, afterEach } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { existsSync, readFileSync, rmSync } from 'node:fs';
 import {
-  slugify,
-  renderPRD,
   generatePRD,
+  renderPRD,
+  slugify,
 } from '../../lib/autopilot/prd-generator.js';
 
 describe('slugify', () => {

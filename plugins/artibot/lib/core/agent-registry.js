@@ -275,7 +275,13 @@ async function statAgentFiles() {
   // Exclude documentation files (INDEX.md, README.md) — they live in agents/
   // for discoverability but are not agent definitions.
   const names = (await readdir(dir))
-    .filter((n) => n.endsWith('.md') && n !== 'INDEX.md' && n !== 'README.md')
+    .filter(
+      (n) =>
+        n.endsWith('.md') &&
+        n !== 'INDEX.md' &&
+        n !== 'README.md' &&
+        !n.startsWith('__test_'),
+    )
     .sort();
   const files = [];
   let maxMtimeMs = 0;

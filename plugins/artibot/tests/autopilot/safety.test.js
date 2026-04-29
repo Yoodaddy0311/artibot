@@ -2,12 +2,12 @@
  * Unit tests for lib/autopilot/safety.js
  * Covers classifyRisk, parseDuration, shouldPause.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
   classifyRisk,
   parseDuration,
-  shouldPause,
   pauseReason,
+  shouldPause,
 } from '../../lib/autopilot/safety.js';
 
 describe('classifyRisk', () => {

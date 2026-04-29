@@ -7,11 +7,11 @@
  * @see lib/autopilot/mcp-verifier.js — loadAllowList
  */
 
-import { describe, it, expect, afterEach } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import {
-  startAutopilot,
-  runPhase4Verify,
   getStatus,
+  runPhase4Verify,
+  startAutopilot,
 } from '../../lib/autopilot/index.js';
 import { deleteSession } from '../../lib/autopilot/session-store.js';
 

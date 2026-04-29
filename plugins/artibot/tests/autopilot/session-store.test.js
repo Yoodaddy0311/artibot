@@ -2,14 +2,14 @@
  * Unit tests for lib/autopilot/session-store.js
  * Covers newSessionId, save/load roundtrip, listSessions, deleteSession.
  */
-import { describe, it, expect, afterEach } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import {
-  newSessionId,
-  saveSession,
-  loadSession,
-  listSessions,
   deleteSession,
   getSessionPath,
+  listSessions,
+  loadSession,
+  newSessionId,
+  saveSession,
 } from '../../lib/autopilot/session-store.js';
 
 describe('newSessionId', () => {

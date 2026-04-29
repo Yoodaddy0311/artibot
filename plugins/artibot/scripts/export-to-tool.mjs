@@ -191,10 +191,17 @@ export async function collectAgents(dir = AGENTS_DIR, filter = null) {
   for (const file of entries) {
     if (!file.endsWith(".md")) continue;
     if (file === "INDEX.md") continue;
+    if (file.startsWith("__test_")) continue;
     const name = basename(file, ".md");
     if (filterSet && !filterSet.has(name)) continue;
     const full = join(dir, file);
-    const src = await readFile(full, "utf8");
+    let src;
+    try {
+      src = await readFile(full, "utf8");
+    } catch (err) {
+      if (err.code === "ENOENT") continue;
+      throw err;
+    }
     const { frontmatter, body } = parseFrontmatter(src);
     out.push({
       file,

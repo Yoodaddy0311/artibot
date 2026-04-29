@@ -5,20 +5,20 @@
  *
  * Korean-path safe; uses unique feature keys per test for filesystem isolation.
  */
-import { describe, it, expect, afterEach } from 'vitest';
-import { existsSync, readdirSync, unlinkSync, appendFileSync } from 'node:fs';
+import { afterEach, describe, expect, it } from 'vitest';
+import { appendFileSync, existsSync, readdirSync, unlinkSync } from 'node:fs';
 import path from 'node:path';
 import {
-  getMemoryDir,
-  getFeaturePath,
-  extractKey,
-  normalizeLesson,
   appendLesson,
-  tokenize,
-  jaccard,
-  scoreLesson,
-  recallLessons,
   compactFeature,
+  extractKey,
+  getFeaturePath,
+  getMemoryDir,
+  jaccard,
+  normalizeLesson,
+  recallLessons,
+  scoreLesson,
+  tokenize,
 } from '../../lib/autopilot/memory.js';
 
 const createdKeys = [];

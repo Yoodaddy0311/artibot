@@ -3,19 +3,19 @@
  * Covers startAutopilot, resumeAutopilot, getStatus, abortAutopilot, PHASES,
  * and the public Phase runner functions.
  */
-import { describe, it, expect, afterEach } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import {
-  startAutopilot,
-  resumeAutopilot,
-  getStatus,
   abortAutopilot,
+  getStatus,
   PHASES,
+  resumeAutopilot,
   runPhase0Intake,
   runPhase1Plan,
   runPhase6Report,
+  startAutopilot,
 } from '../../lib/autopilot/index.js';
 import { deleteSession } from '../../lib/autopilot/session-store.js';
-import { releaseLock, getLockPath } from '../../lib/autopilot/lock.js';
+import { getLockPath, releaseLock } from '../../lib/autopilot/lock.js';
 import { existsSync, unlinkSync } from 'node:fs';
 import { extractKey } from '../../lib/autopilot/memory.js';
 

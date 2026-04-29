@@ -1,5 +1,5 @@
-import { describe, expect, it, beforeEach, afterEach } from 'vitest';
-import { mkdtemp, readFile, rm, readdir } from 'node:fs/promises';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -10,10 +10,10 @@ import {
 } from '../../../lib/observability/trace.js';
 import { NdjsonExporter } from '../../../lib/observability/exporters/ndjson.js';
 import {
+  DEFAULT_BASH_ALLOWLIST,
+  diagnose,
   isAllowedCommand,
   parseLeadingBinary,
-  diagnose,
-  DEFAULT_BASH_ALLOWLIST,
 } from '../../../lib/security/cmd-allowlist.js';
 
 describe('Span', () => {

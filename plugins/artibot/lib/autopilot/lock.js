@@ -10,12 +10,12 @@
 
 import path from 'node:path';
 import {
-  openSync,
-  writeSync,
   closeSync,
+  existsSync,
+  openSync,
   readFileSync,
   unlinkSync,
-  existsSync,
+  writeSync,
 } from 'node:fs';
 import { ensureDirSync } from '../core/file.js';
 import { getStoreDir } from './session-store.js';

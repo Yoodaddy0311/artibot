@@ -21,7 +21,7 @@
  * @module lib/autopilot/nlu
  */
 
-/* eslint-disable no-misleading-character-class */
+ 
 
 const TIER1_PATTERNS = [
   /자고\s*올(?:게|\b)/u,

@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.3.1] - 2026-04-29
+
+Patch release — flaky test stabilization + lint warning autofix. Zero behavior change for end users.
+
+### Fixed
+
+- **Flaky test race in agents directory scan** — `tests/core/rules-resolver.test.js` writes `__test_*` fixture files into the live `plugins/artibot/agents/` directory. Parallel test files (`tests/scripts/export-to-tool.test.js`, `tests/mcp/server.test.js`) were scanning the same directory and racing on fixture lifecycle (ENOENT during readFile, or count mismatch when fixture was visible).
+  - `lib/core/agent-registry.js`: `statAgentFiles` now filters out `__test_*` prefix files.
+  - `scripts/export-to-tool.mjs`: `collectAgents` now filters out `__test_*` prefix files + tolerates ENOENT during individual file reads.
+- **54 sort-imports lint warnings autofixed** across `lib/autopilot/`, `lib/learning/session.js`, `lib/observability/exporters/ndjson.js`, and 22 test files (`eslint --fix`).
+
+### Internal
+
+- 91 lint warnings → 37 (60% reduction; remaining are intentional `no-console` in CLI/smoke scripts).
+- Full test suite: 7,389 / 7,389 passing across 3 consecutive runs (previously 1 flaky failure per ~2 runs).
+
+---
+
 ## [4.3.0] - 2026-04-29
 
 Hook/Git/Autopilot P0 hardening — Autopilot session `ap-20260429-010007` (4-squad parallel audit + fix). 12 P0 sites across 8 categories; 30+ regression tests added; CI green (7,389 / 7,389 tests, 0 lint errors, eval 8/8).

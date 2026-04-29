@@ -14,17 +14,17 @@ import { generatePRD } from './prd-generator.js';
 import { generateReport } from './report-generator.js';
 import {
   loadSession,
-  saveSession,
   newSessionId,
+  saveSession,
 } from './session-store.js';
-import { shouldPause, pauseReason } from './safety.js';
+import { pauseReason, shouldPause } from './safety.js';
 import { notifyCompletion, notifyPause } from './notification.js';
 import { appendEvent } from './telemetry.js';
-import { recallLessons, appendLesson, extractKey } from './memory.js';
+import { appendLesson, extractKey, recallLessons } from './memory.js';
 import {
   createWorktree,
-  removeWorktree,
   listWorktrees,
+  removeWorktree,
 } from './worktree-manager.js';
 import { acquireLock, releaseLock } from './lock.js';
 import { loadAllowList } from './mcp-verifier.js';

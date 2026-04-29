@@ -11,7 +11,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { readdir, readFile, stat } from 'node:fs/promises';
-import { join, resolve, basename } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = fileURLToPath(new URL('.', import.meta.url));

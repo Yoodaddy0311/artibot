@@ -3,20 +3,20 @@
  * Covers atomic acquire/release, stale recovery, mismatched session,
  * wait+timeout, Korean featureKey, and TypeError inputs.
  */
-import { describe, it, expect, afterEach } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import {
   existsSync,
+  mkdirSync,
   unlinkSync,
   writeFileSync,
-  mkdirSync,
 } from 'node:fs';
 import path from 'node:path';
 import {
   acquireLock,
-  releaseLock,
+  getLockPath,
   isLocked,
   readLock,
-  getLockPath,
+  releaseLock,
 } from '../../lib/autopilot/lock.js';
 
 /**

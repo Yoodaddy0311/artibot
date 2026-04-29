@@ -2,11 +2,11 @@
  * Integration tests for lib/autopilot/report-generator.js generateReport()
  * Covers style selection: default (dev + deriveAll), 'all', 'exec', deriveAll=false.
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { existsSync, unlinkSync } from 'node:fs';
 import path from 'node:path';
 import { generateReport } from '../../lib/autopilot/report-generator.js';
-import { saveSession, deleteSession } from '../../lib/autopilot/session-store.js';
+import { deleteSession, saveSession } from '../../lib/autopilot/session-store.js';
 import { getPluginRoot } from '../../lib/core/platform.js';
 
 /**

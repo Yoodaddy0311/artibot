@@ -2,14 +2,14 @@
  * Unit tests for lib/autopilot/mcp-verifier.js
  * Covers isAllowed, loadAllowList, wrapInvocation, validateMcpResponse.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
-  isAllowed,
-  loadAllowList,
-  wrapInvocation,
-  validateMcpResponse,
   ALLOWED_PREFIX,
   DEFAULT_ALLOW_LIST,
+  isAllowed,
+  loadAllowList,
+  validateMcpResponse,
+  wrapInvocation,
 } from '../../lib/autopilot/mcp-verifier.js';
 
 describe('isAllowed', () => {

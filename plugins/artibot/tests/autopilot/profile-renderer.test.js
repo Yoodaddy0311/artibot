@@ -3,14 +3,14 @@
  * Covers parseSimpleYaml, parseSections, mustacheRender, assertNoUnfilled,
  * capLines, loadProfile, renderProfile across 4 styles (dev/pm/exec/casual).
  */
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
-  parseSimpleYaml,
-  parseSections,
-  loadProfile,
-  mustacheRender,
   assertNoUnfilled,
   capLines,
+  loadProfile,
+  mustacheRender,
+  parseSections,
+  parseSimpleYaml,
   renderProfile,
 } from '../../lib/autopilot/profile-renderer.js';
 import { buildReportData } from '../../lib/autopilot/report-generator.js';

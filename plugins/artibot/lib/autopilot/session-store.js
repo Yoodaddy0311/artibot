@@ -9,7 +9,7 @@
  */
 
 import path from 'node:path';
-import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync, renameSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { getPluginRoot } from '../core/platform.js';
 

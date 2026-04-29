@@ -1,11 +1,11 @@
-import { describe, expect, it, beforeEach, afterEach } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  Session,
   InMemorySession,
   JsonFileSession,
+  Session,
 } from '../../../lib/learning/session.js';
 
 describe('Session ABC', () => {

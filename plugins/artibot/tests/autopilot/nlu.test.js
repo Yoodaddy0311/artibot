@@ -2,7 +2,7 @@
  * Unit tests for lib/autopilot/nlu.js
  * Covers classifyAutopilotIntent: night/default/plan suggestions, neg signal cap.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { classifyAutopilotIntent } from '../../lib/autopilot/nlu.js';
 
 describe('classifyAutopilotIntent', () => {

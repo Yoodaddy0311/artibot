@@ -4,8 +4,8 @@
  * @module lib/observability/exporters/ndjson
  */
 
-import { mkdir, appendFile } from 'node:fs/promises';
-import { dirname, join, isAbsolute } from 'node:path';
+import { appendFile, mkdir } from 'node:fs/promises';
+import { dirname, isAbsolute, join } from 'node:path';
 
 function defaultDir() {
   return join(process.cwd(), 'runtime', 'traces');

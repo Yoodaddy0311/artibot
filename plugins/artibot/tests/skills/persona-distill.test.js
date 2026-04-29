@@ -4,8 +4,8 @@
  *
  * @see plugins/artibot/skills/persona-distill/SKILL.md
  */
-import { describe, expect, it, beforeAll } from 'vitest';
-import { readFileSync, existsSync } from 'node:fs';
+import { beforeAll, describe, expect, it } from 'vitest';
+import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 

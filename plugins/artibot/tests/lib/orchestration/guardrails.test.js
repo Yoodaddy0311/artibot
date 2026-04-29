@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import {
   Guardrail,
   GuardrailTripped,
@@ -6,11 +6,11 @@ import {
   runOrThrow,
 } from '../../../lib/orchestration/guardrails.js';
 import {
-  registerToolGuardrail,
-  evaluateToolInput,
   clearToolGuardrails,
-  ToolGuardrailRejection,
+  evaluateToolInput,
   inspectRegistry,
+  registerToolGuardrail,
+  ToolGuardrailRejection,
 } from '../../../lib/orchestration/tool-guardrails.js';
 
 describe('Guardrail', () => {
