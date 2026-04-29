@@ -9,6 +9,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.3.0] - 2026-04-29
+
+Hook/Git/Autopilot P0 hardening — Autopilot session `ap-20260429-010007` (4-squad parallel audit + fix). 12 P0 sites across 8 categories; 30+ regression tests added; CI green (7,389 / 7,389 tests, 0 lint errors, eval 8/8).
+
+### Added
+
+- **`lib/git/resolve-base.js`** (new module, 87 lines) — Base branch resolver with 4-step fallback chain: `config.baseBranch` → `git symbolic-ref refs/remotes/origin/HEAD` → `master` → `main`. Replaces fragile `branch.replace(branchPrefix, '')` heuristic that broke on nested branch names (`feature/user/login`).
+- **Feature lock acquisition in `startAutopilot`** (`lib/autopilot/engine.js`) — PID-based file lock per featureKey (sha1 of task, 16 chars). Concurrent sessions on the same feature now return `{ paused: true, reason: 'lock-held-by-<sessionId>' }` instead of racing.
+- **`stop_hook_active` recursion guard** (`scripts/hooks/stop-review-gate.js`) — Early return when Claude Code signals hook re-entry, preventing infinite Stop-event loops.
+
+### Fixed
+
+- **`squashWipCommits` ancient-base safety** (`scripts/hooks/git-autopilot-close.js`) — `MAX_SQUASH_COMMITS = 50` cap + empty `mergeBase` guard. Prevents catastrophic 1000+-commit squash if base resolution returns ancient ref.
+- **Shell injection across all autopilot git hooks** (~25 sites) — All `execSync` template literals migrated to `execFileSync` argv-array via `gitRun`/`gitSilent` helpers. Affected: `git-autopilot-close.js`, `git-autopilot-session.js`, `git-autopilot-merge.js`, `git-autopilot-guard.js`. Korean paths (`바탕 화면`), spaces, and quote characters in branch/file names no longer break or inject.
+- **`stop-review-gate getChangedFiles`** (`scripts/hooks/stop-review-gate.js`) — `git diff --name-status --diff-filter=ACMR HEAD~1 HEAD` (excludes Deleted/Unmerged) replaces `--name-only`. Eliminates false-positive "missing test" flags on files removed in earlier WIP squash.
+- **`git-autopilot-guard.js` filePath argv** — `hasRemoteChanges` now passes filePath as argv element to `execFileSync`. Prevents shell injection if filename contains backticks/`$()`.
+- **Fail-closed config parsing** (3 hooks) — `image-cleanup.js` / `autopilot-nlu-trigger.js` / `auto-team-trigger.js`: malformed JSON now returns `disabled` (or safe default) + stderr WARN, instead of throwing or fail-open enabling the hook on broken state.
+- **`node --check` invocation** (Q9 cross-check, `stop-review-gate.js:107`) — `execSync` template literal → `execFileSync(process.execPath, ['--check', absPath])`. Korean paths and spaces in cwd no longer crash bracket-mismatch detection.
+- **Lock leak on Phase 0 throw** (Q5 cross-check, `lib/autopilot/engine.js`) — `try/catch` wrapping `persist + runPhase0Intake` with `releaseLock` in catch handler. Prevents stale featureKey locks blocking future sessions if Phase 0 errors after lock acquisition.
+
+### Tests
+
+- **+30 regression tests** across 8 files: `tests/git/resolve-base.test.js` (new, 7 tests), 4 new hook test files (`stop-review-gate`, `git-autopilot-merge`, `autopilot-nlu-trigger`, `auto-team-trigger`), updates to `engine.test.js`, `git-autopilot-close.test.js`, `git-autopilot-session.test.js`, `image-cleanup.test.js`.
+- **7,363 → 7,389 tests** (+26 net). All passing. Coverage thresholds maintained.
+- **Flaky test stabilization**: `autopilot-nlu-trigger` async wait converted from rigid `setTimeout(0) + setImmediate` to polling loop (5ms × 1000ms deadline). Resolves intermittent failure under full-suite load.
+
+### Internal — 4-Squad Attribution (parallel execution, Phase 2 EXECUTE)
+
+| Squad | Scope | Sites | Files |
+|-------|-------|-------|-------|
+| A | git-autopilot-close ancient-base + argv migration | 3 | `git-autopilot-close.js`, `git-autopilot-session.js`, `lib/git/resolve-base.js` (new) |
+| B | stop-review-gate / guard hardening | 3 | `stop-review-gate.js`, `git-autopilot-guard.js` |
+| C | Fail-closed config parsing | 3 | `image-cleanup.js`, `autopilot-nlu-trigger.js`, `auto-team-trigger.js` |
+| D | Merge resolver argv + engine lock | 2 | `git-autopilot-merge.js`, `lib/autopilot/engine.js` |
+
+Cross-check: `spec-reviewer` SPEC_PASS (12/12) + `quality-reviewer` QUALITY_WARN (Q5/Q9) → both warnings resolved in same cycle. Final verdict: APPROVE.
+
+### Deferred (P1 queue / future cycles)
+
+- **F1**: `squashWipCommits` full rewrite with dry-run UI (작업 #7) — held per user explicit policy `squashWipOnClose: false`.
+- **91 sort-imports lint warnings** (style, autofixable via `eslint --fix`).
+- **Lock-flow consistency** in `resumeAutopilot` / `abortAutopilot` (currently only `startAutopilot` has the lock contract).
+- **27 residual `execSync` sites** in non-autopilot hooks (image-cleanup, stop-review-gate misc paths).
+
+Full session report: `reports/AUTOPILOT/ap-20260429-010007.md`.
+
+---
+
 ## [4.2.1] - 2026-04-29
 
 ### Fixed
