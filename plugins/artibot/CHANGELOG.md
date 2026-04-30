@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.3.2] - 2026-04-30
+
+Patch release — autopilot resume safety + session id collision fix. Zero behavior change in the happy path.
+
+### Fixed
+
+- **`resumeAutopilot` lock symmetry (F4)** — `lib/autopilot/engine.js`. `startAutopilot` acquires the per-`featureKey` lock, but `resumeAutopilot` previously skipped the symmetric check, so a paused session could resume on top of another live session already holding the same lock. Resume now calls `isLocked(featureKey)` and pauses with `instruction.reason = 'lock-held-by-<sessionId>'` if a different live session owns the lock; if unheld, it best-effort re-acquires; if already held by the same session (typical single-process case) it proceeds as before. Stale-pid locks remain auto-reclaimed by `acquireLock`.
+- **Session id / tmp file collisions** — `lib/autopilot/session-store.js`. Two collision sources fixed:
+  - `newSessionId()` previously returned `ap-YYYYMMDD-HHmmss`, which collided when two sessions started in the same UTC second (parallel tests, fast-resume loops). Now returns `ap-YYYYMMDD-HHmmss-xxxx` with a 4-char base36 suffix.
+  - `saveSession()` tmp-file path was `${file}.tmp.${pid}`, which collided across concurrent saves from the same process. Now `${file}.tmp.${pid}.${Date.now()}.${rand}`.
+
+### Tests
+
+- `tests/autopilot/engine.test.js`: 2 new tests — paused-when-other-session-holds-lock, proceed-when-same-session-holds-lock.
+- `tests/autopilot/session-store.test.js`: 1 new test — 200 rapid `newSessionId()` calls must all be unique. Format regex updated to `^ap-\d{8}-\d{6}-[a-z0-9]{4}$`.
+- Autopilot suite: 29 / 29 passing.
+
+---
+
 ## [4.3.1] - 2026-04-29
 
 Patch release — flaky test stabilization + lint warning autofix. Zero behavior change for end users.
