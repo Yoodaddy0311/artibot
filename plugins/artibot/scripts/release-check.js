@@ -3,7 +3,9 @@
  * release-check.js — Verify release readiness before publishing.
  *
  * Checks:
- *   1. Version consistency across package.json, artibot.config.json, plugin.json
+ *   1. Version consistency across 5 files in lockstep (per AGENTS.md §8):
+ *        package.json, artibot.config.json, .claude-plugin/plugin.json,
+ *        .well-known/mcp-server.json, AGENTS.md ("Current plugin version: **X**")
  *   2. CHANGELOG.md has an entry for the current version
  *   3. Installed copy at ~/.claude/artibot/ is in sync (warns if drift)
  *
@@ -38,11 +40,12 @@ function readJson(file) {
   return JSON.parse(readFileSync(file, 'utf-8'));
 }
 
-// 1. Version consistency
+// 1. Version consistency — 5-file lockstep (AGENTS.md §8)
 const sources = [
   ['package.json', path.join(PLUGIN_ROOT, 'package.json')],
   ['artibot.config.json', path.join(PLUGIN_ROOT, 'artibot.config.json')],
   ['.claude-plugin/plugin.json', path.join(PLUGIN_ROOT, '.claude-plugin', 'plugin.json')],
+  ['.well-known/mcp-server.json', path.join(PLUGIN_ROOT, '.well-known', 'mcp-server.json')],
 ];
 
 const versions = sources.map(([label, file]) => {
@@ -52,6 +55,20 @@ const versions = sources.map(([label, file]) => {
   }
   return { label, version: readJson(file).version || null };
 });
+
+// AGENTS.md is markdown — extract the lockstep version line.
+const agentsPath = path.join(PLUGIN_ROOT, 'AGENTS.md');
+if (existsSync(agentsPath)) {
+  const agentsBody = readFileSync(agentsPath, 'utf-8');
+  const match = agentsBody.match(/Current plugin version:\s*\*\*([^*]+)\*\*/);
+  versions.push({ label: 'AGENTS.md', version: match ? match[1].trim() : null });
+  if (!match) {
+    errors.push('AGENTS.md missing "Current plugin version: **X.Y.Z**" line');
+  }
+} else {
+  errors.push('Missing version file: AGENTS.md');
+  versions.push({ label: 'AGENTS.md', version: null });
+}
 
 const distinct = new Set(versions.map((v) => v.version).filter(Boolean));
 if (distinct.size > 1) {
