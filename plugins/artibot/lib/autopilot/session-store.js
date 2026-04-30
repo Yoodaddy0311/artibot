@@ -51,7 +51,7 @@ export function saveSession(state) {
   } catch (err) {
     if (err.code !== 'EEXIST') throw err;
   }
-  const tmp = `${filePath}.tmp.${process.pid}`;
+  const tmp = `${filePath}.tmp.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}`;
   try {
     writeFileSync(tmp, JSON.stringify(state, null, 2), 'utf-8');
     renameSync(tmp, filePath);
@@ -111,7 +111,9 @@ export function deleteSession(sessionId) {
 }
 
 /**
- * Generate a fresh session id of form ap-YYYYMMDD-HHmmss.
+ * Generate a fresh session id of form ap-YYYYMMDD-HHmmss-xxxx.
+ * The 4-char random suffix prevents collisions when multiple sessions are
+ * created within the same UTC second (e.g., parallel tests).
  * @returns {string}
  */
 export function newSessionId() {
@@ -119,5 +121,6 @@ export function newSessionId() {
   const pad = (n) => String(n).padStart(2, '0');
   const ymd = `${d.getUTCFullYear()}${pad(d.getUTCMonth() + 1)}${pad(d.getUTCDate())}`;
   const hms = `${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}${pad(d.getUTCSeconds())}`;
-  return `ap-${ymd}-${hms}`;
+  const suffix = Math.random().toString(36).slice(2, 6).padEnd(4, '0');
+  return `ap-${ymd}-${hms}-${suffix}`;
 }

@@ -135,6 +135,38 @@ describe('resumeAutopilot', () => {
     const out = await resumeAutopilot(r.sessionId);
     expect(out.status).toBe('noop');
   });
+
+  it('returns paused when featureKey lock is held by a different session (F4)', async () => {
+    const task = 'F4 lock contention scenario A';
+    const r = await startAutopilot({ task, mode: 'plan' });
+    track(r.sessionId);
+    // Simulate a competing live session holding the same featureKey lock by
+    // releasing the original holder and writing a fresh lock under a new
+    // sessionId from the *current* process (so isStale returns false).
+    const featureKey = extractKey(task);
+    releaseLock(featureKey, r.sessionId);
+    const { acquireLock } = await import('../../lib/autopilot/lock.js');
+    const competitorId = 'ap-competitor-19990101-000000';
+    const acquired = acquireLock(featureKey, competitorId);
+    expect(acquired.ok).toBe(true);
+    try {
+      const out = await resumeAutopilot(r.sessionId);
+      expect(out.status).toBe('paused');
+      expect(out.instruction?.reason).toMatch(/lock-held-by-/);
+    } finally {
+      releaseLock(featureKey, competitorId);
+    }
+  });
+
+  it('proceeds when featureKey lock is already held by the same session (F4)', async () => {
+    const task = 'F4 lock self-recovery scenario B';
+    const r = await startAutopilot({ task, mode: 'plan' });
+    track(r.sessionId);
+    // The lock is still held by r.sessionId from startAutopilot. Resume should
+    // recognize it's our own and proceed without pausing.
+    const out = await resumeAutopilot(r.sessionId);
+    expect(out.status).not.toBe('paused');
+  });
 });
 
 describe('Phase runner functions return instruction objects', () => {

@@ -26,7 +26,7 @@ import {
   listWorktrees,
   removeWorktree,
 } from './worktree-manager.js';
-import { acquireLock, releaseLock } from './lock.js';
+import { acquireLock, isLocked, releaseLock } from './lock.js';
 import { loadAllowList } from './mcp-verifier.js';
 
 /**
@@ -579,6 +579,39 @@ export async function resumeAutopilot(sessionId) {
   if (!state) throw new Error(`session not found: ${sessionId}`);
   if (state.phase === 'COMPLETED') return { phase: 'COMPLETED', status: 'noop' };
   if (state.phase === 'ABORTED') return { phase: 'ABORTED', status: 'noop' };
+
+  // F4: Symmetric lock contract with startAutopilot. If a different live
+  // session holds the featureKey lock, pause this resume. If we already hold
+  // it (same sessionId) — typical in single-process Claude Code — proceed.
+  // Stale lock (dead pid) is auto-reclaimed by acquireLock.
+  if (state.featureKey) {
+    const status = isLocked(state.featureKey);
+    const heldByOther =
+      status.locked && status.holder?.sessionId && status.holder.sessionId !== sessionId;
+    if (heldByOther) {
+      const holderId = status.holder.sessionId;
+      tick(sessionId, {
+        phase: state.phase || 'PAUSED',
+        type: 'pause',
+        level: 'warn',
+        message: `Autopilot resume paused: featureKey ${state.featureKey} held by ${holderId}`,
+        data: { featureKey: state.featureKey, holder: status.holder || null },
+      });
+      return {
+        phase: state.phase || 'PAUSED',
+        status: 'paused',
+        instruction: {
+          type: 'pause',
+          reason: `lock-held-by-${holderId}`,
+          holder: status.holder,
+        },
+      };
+    }
+    // Either unlocked or already ours — refresh acquisition (best-effort).
+    if (!status.locked) {
+      try { acquireLock(state.featureKey, sessionId); } catch { /* best-effort */ }
+    }
+  }
 
   const target = state.phase === 'PAUSED'
     ? state.lastPhase || 'PLAN'
