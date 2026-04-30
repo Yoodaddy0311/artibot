@@ -227,7 +227,7 @@ All contributions must respect Artibot's **local-only data policy** — exports 
 | `plugins/artibot/.well-known/mcp-server.json` | `version` | plugin version |
 | `plugins/artibot/AGENTS.md` | this section | plugin version |
 
-Current plugin version: **3.0.0**. Keep the five in lockstep — `scripts/release-check.js` enforces the first three; the Server Card and this file are added to its checklist in v0.5.1.
+Current plugin version: **4.3.2**. Keep the five in lockstep — `scripts/release-check.js` enforces the first three; the Server Card and this file are added to its checklist in v0.5.1.
 
 ---
 
