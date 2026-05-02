@@ -213,7 +213,21 @@ async function withRetry(requestFn, maxRetries = MAX_RETRIES) {
         }
         lastError = err;
       } else {
-        return await response.json();
+        // Defensive: handle non-JSON success bodies (proxy/captive-portal HTML,
+        // empty 204, etc.) without leaking SyntaxError("Invalid or unexpected
+        // token") up the stack as a raw parse error.
+        const text = await response.text().catch(() => '');
+        if (!text) return {};
+        try {
+          return JSON.parse(text);
+        } catch (parseErr) {
+          const err = new Error(
+            `Invalid JSON response (status ${response.status}): ${text.slice(0, 120)}`,
+          );
+          err.cause = parseErr;
+          err.status = response.status;
+          throw err;
+        }
       }
     } catch (err) {
       lastError = err;

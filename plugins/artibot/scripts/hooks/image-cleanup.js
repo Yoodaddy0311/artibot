@@ -85,6 +85,7 @@ function trackedFilesAtRoot(cwd) {
       cwd,
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'ignore'],
+      windowsHide: true,
     });
     const tracked = new Set();
     for (const line of out.split('\n')) {

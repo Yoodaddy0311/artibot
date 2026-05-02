@@ -393,6 +393,7 @@ async function maybeSwarmAutodetect(pluginRoot) {
       cwd: pluginRoot,
       stdio: ['ignore', 'ignore', 'inherit'],
       detached: false,
+      windowsHide: true,
     });
     proc.unref();
   } catch {

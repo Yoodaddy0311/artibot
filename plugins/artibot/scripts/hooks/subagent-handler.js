@@ -7,7 +7,7 @@
 
 import { atomicWriteSync, parseJSON, readStdin, writeStdout } from '../utils/index.js';
 import { existsSync, readFileSync } from 'node:fs';
-import { createErrorHandler, extractAgentId, extractAgentRole, getStatePath } from '../../lib/core/hook-utils.js';
+import { cleanupStaleStateTmpFiles, createErrorHandler, extractAgentId, extractAgentRole, getStatePath } from '../../lib/core/hook-utils.js';
 import { withFileLock } from '../../lib/core/file-lock.js';
 
 function loadState() {
@@ -35,6 +35,9 @@ async function main() {
   const agentType = hookData?.agent_type || agentRole;
 
   const statePath = getStatePath();
+  // Best-effort: sweep orphan `.tmp.<pid>` files (>1min old) that prior
+  // crashes or EPERM failures may have left in ~/.claude/.
+  cleanupStaleStateTmpFiles(statePath);
 
   if (action === 'start') {
     withFileLock(statePath, () => {

@@ -67,9 +67,35 @@ export function checkNodeVersion(minMajor = 18) {
 }
 
 /**
+ * Normalize a plugin-root candidate by stripping a duplicated trailing
+ * `plugins/artibot/plugins/artibot` segment. This guards against worktree
+ * setups and stale env vars that sometimes produce the doubled path
+ * (root has typo'd nested copy or CLAUDE_PLUGIN_ROOT was set relative to
+ * another plugin root).
+ *
+ * @param {string} candidate - Resolved path candidate.
+ * @returns {string} Path with redundant trailing `plugins/artibot` removed if duplicated.
+ */
+function normalizePluginRoot(candidate) {
+  if (!candidate) return candidate;
+  // Use forward-slash form for matching (works on Windows + POSIX)
+  const forward = candidate.replace(/\\/g, '/');
+  const dup = /\/plugins\/artibot\/plugins\/artibot\/?$/i;
+  if (dup.test(forward)) {
+    const stripped = forward.replace(/\/plugins\/artibot\/?$/i, '');
+    return path.normalize(stripped);
+  }
+  return candidate;
+}
+
+/**
  * Resolve the plugin root directory path.
  * Uses the `CLAUDE_PLUGIN_ROOT` environment variable if set,
  * otherwise falls back to 2 levels up from this file (`lib/core` -> plugin root).
+ *
+ * Both the env-var path and the fallback are normalized to strip a
+ * duplicated `plugins/artibot/plugins/artibot` tail that can appear in
+ * worktrees or when the env var is set incorrectly.
  *
  * @returns {string} Absolute path to the plugin root directory.
  * @example
@@ -79,7 +105,7 @@ export function checkNodeVersion(minMajor = 18) {
 export function getPluginRoot() {
   const envRoot = process.env.CLAUDE_PLUGIN_ROOT;
   if (envRoot) {
-    const resolved = path.resolve(envRoot);
+    const resolved = normalizePluginRoot(path.resolve(envRoot));
     // Validate: warn if artibot.config.json is missing (may indicate stale env var)
     const configPath = path.join(resolved, 'artibot.config.json');
     if (!existsSync(configPath) && existsSync(resolved)) {
@@ -89,7 +115,8 @@ export function getPluginRoot() {
     return resolved;
   }
   // Fallback: this file lives in <root>/lib/core/platform.js
-  return fileURLToPath(new URL('../..', import.meta.url));
+  const fallback = fileURLToPath(new URL('../..', import.meta.url));
+  return normalizePluginRoot(fallback);
 }
 
 /**

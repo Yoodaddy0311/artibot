@@ -64,6 +64,7 @@ function git(cmd, cwd) {
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'pipe'],
       timeout: 5000,
+      windowsHide: true,
     }).trim();
   } catch (err) {
     logHookError(HOOK_NAME, `git failed: ${cmd}`, err);

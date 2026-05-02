@@ -44,6 +44,7 @@ function getRepoRoot() {
     return execSync('git rev-parse --show-toplevel', {
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'ignore'],
+      windowsHide: true,
     }).trim();
   } catch {
     return null;
@@ -77,6 +78,7 @@ function getChangedFiles(cwd) {
         cwd,
         encoding: 'utf-8',
         stdio: ['ignore', 'pipe', 'ignore'],
+        windowsHide: true,
       },
     );
     return parse(output);

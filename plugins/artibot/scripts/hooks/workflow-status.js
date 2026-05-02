@@ -10,7 +10,7 @@
 
 import { atomicWriteSync, parseJSON, readStdin, writeStdout } from '../utils/index.js';
 import { existsSync, readFileSync } from 'node:fs';
-import { createErrorHandler, extractAgentId, extractAgentRole, getStatePath as getStateFilePath } from '../../lib/core/hook-utils.js';
+import { cleanupStaleStateTmpFiles, createErrorHandler, extractAgentId, extractAgentRole, getStatePath as getStateFilePath } from '../../lib/core/hook-utils.js';
 import { withFileLock } from '../../lib/core/file-lock.js';
 
 const PHASE_NAMES = {
@@ -80,6 +80,9 @@ async function main() {
 
   const agentId = extractAgentId(hookData);
   const agentRole = extractAgentRole(hookData, '');
+
+  // Best-effort: sweep orphan `.tmp.<pid>` files (>1min old) before write.
+  cleanupStaleStateTmpFiles(getStateFilePath());
 
   // All state mutations happen inside the file lock (read-modify-write)
   const finalState = withFileLock(getStateFilePath(), () => {

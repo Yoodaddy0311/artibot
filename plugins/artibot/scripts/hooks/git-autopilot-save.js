@@ -26,6 +26,7 @@ function getRepoRoot() {
     return execSync('git rev-parse --show-toplevel', {
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'ignore'],
+      windowsHide: true,
     }).trim();
   } catch {
     return null;
@@ -84,6 +85,7 @@ function hasDirtyWorkspace(cwd) {
       cwd,
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'ignore'],
+      windowsHide: true,
     });
     return status.trim().length > 0;
   } catch {
@@ -98,11 +100,12 @@ function hasDirtyWorkspace(cwd) {
  */
 function createWipCommit(cwd) {
   try {
-    execSync('git add -A', { cwd, stdio: 'ignore' });
+    execSync('git add -A', { cwd, stdio: 'ignore', windowsHide: true });
     const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
     execSync(`git commit -m "wip: artibot auto-save [${timestamp}]" --no-verify`, {
       cwd,
       stdio: 'ignore',
+      windowsHide: true,
     });
     return true;
   } catch {

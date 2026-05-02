@@ -51,14 +51,53 @@ const DEFAULT_CONFIG = {
 // -------------------------------------------------------------------------
 
 /**
- * Resolve the repository root using git rev-parse.
- * @returns {string} Absolute path to repo root
+ * Normalize a path by collapsing a duplicated trailing
+ * `plugins/artibot/plugins/artibot` segment. Defensive guard against
+ * worktree edge cases where a caller mistakenly prepends plugin-root
+ * twice (observed in the wild via `plugins/artibot/plugins/artibot/...`
+ * ENOENT errors).
+ *
+ * @param {string} p
+ * @returns {string}
+ */
+function stripDoublePluginPath(p) {
+  if (!p) return p;
+  const forward = p.replace(/\\/g, '/');
+  if (/\/plugins\/artibot\/plugins\/artibot\/?$/i.test(forward)) {
+    return path.normalize(forward.replace(/\/plugins\/artibot\/?$/i, ''));
+  }
+  return p;
+}
+
+/**
+ * Resolve the repository working-tree root via git rev-parse. Works in
+ * both regular checkouts and linked worktrees (returns the worktree dir,
+ * not the main repo).
+ * @returns {string} Absolute path to repo/worktree root
  */
 function getRepoRoot() {
-  return execSync('git rev-parse --show-toplevel', {
+  const out = execSync('git rev-parse --show-toplevel', {
     encoding: 'utf-8',
     stdio: ['ignore', 'pipe', 'ignore'],
+    windowsHide: true,
   }).trim();
+  return stripDoublePluginPath(path.resolve(out));
+}
+
+/**
+ * Resolve the per-worktree git directory. In a worktree this is
+ * `<main>/.git/worktrees/<name>/`, in a normal repo this is `<root>/.git/`.
+ * Always a real directory we can safely write to (unlike the worktree's
+ * top-level `.git` which is a pointer file).
+ * @returns {string} Absolute path to git dir
+ */
+function getGitDir() {
+  const out = execSync('git rev-parse --absolute-git-dir', {
+    encoding: 'utf-8',
+    stdio: ['ignore', 'pipe', 'ignore'],
+    windowsHide: true,
+  }).trim();
+  return path.resolve(out);
 }
 
 /**
@@ -108,15 +147,20 @@ export async function main(argv) {
   const wantsInit = args.includes('--init');
 
   let repoRoot;
+  let gitDir;
   try {
     repoRoot = getRepoRoot();
+    gitDir = getGitDir();
   } catch {
     // Not in a git repo — silent no-op (hook fires on every SessionStart,
     // so shell-started-outside-a-repo cases should not log errors).
     return 'no-repo';
   }
 
-  const configPath = path.join(repoRoot, '.git', 'autopilot.json');
+  // Use the resolved git dir (handles worktrees where `<root>/.git` is a
+  // pointer file, not a directory; writing autopilot.json there fails with
+  // ENOTDIR/ENOENT).
+  const configPath = path.join(gitDir, 'autopilot.json');
   const hasExisting = existsSync(configPath);
 
   // Opt-in gate: skip silently unless one of three activation paths.
