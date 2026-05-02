@@ -14,6 +14,7 @@ import path from 'node:path';
 import { parseJSON, readStdin } from '../utils/index.js';
 import { createErrorHandler } from '../../lib/core/hook-utils.js';
 import { resolveBaseBranch } from '../../lib/git/resolve-base.js';
+import { isAutopilotAllowed } from '../../lib/autopilot/repo-identity.js';
 
 // -------------------------------------------------------------------------
 // Constants
@@ -231,6 +232,9 @@ async function main() {
 
   const repoRoot = getRepoRoot();
   if (!repoRoot) return;
+
+  // Capture-only gate: skip all git writes for repos outside the allowlist.
+  if (!isAutopilotAllowed(repoRoot)) return;
 
   const config = loadConfig(repoRoot);
   if (!config) return;

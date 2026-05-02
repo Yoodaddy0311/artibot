@@ -12,6 +12,7 @@ import { execSync } from 'node:child_process';
 import path from 'node:path';
 import { atomicWriteSync, parseJSON, readStdin } from '../utils/index.js';
 import { createErrorHandler } from '../../lib/core/hook-utils.js';
+import { isAutopilotAllowed } from '../../lib/autopilot/repo-identity.js';
 
 // -------------------------------------------------------------------------
 // Helpers
@@ -123,6 +124,10 @@ async function main() {
 
   const repoRoot = getRepoRoot();
   if (!repoRoot) return;
+
+  // Capture-only gate: skip all git writes for repos outside the allowlist.
+  // Learning subsystems (lifelong-learner / GRPO / swarm) are unaffected.
+  if (!isAutopilotAllowed(repoRoot)) return;
 
   const config = loadConfig(repoRoot);
   if (!config) return;

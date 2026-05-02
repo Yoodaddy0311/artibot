@@ -1,14 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 /**
- * git-autopilot-setup.js — opt-in activation policy (v2.7.1+).
+ * git-autopilot-setup.js — opt-in activation + allowlist policy (v4.4.0+).
  *
  * Policy under test:
- *   1. No autopilot.json + no --init + not Artibot repo → silent no-op, no write.
- *   2. No autopilot.json + --init flag → create with defaults.
- *   3. No autopilot.json + Artibot repo self-detected → create (grandfather).
- *   4. autopilot.json already exists → refresh (update lastSetupAt).
- *   5. Outside any git repo → silent no-op.
+ *   1. No autopilot.json + no --init + not Artibot repo + not allowlisted → 'skipped'.
+ *   2. No autopilot.json + --init flag → 'created'.
+ *   3. autopilot.json exists + allowlisted repo → 'updated' (refresh).
+ *   4. autopilot.json exists + NOT allowlisted + not Artibot repo → 'skipped-not-allowed'
+ *      (Capture-Only Mode: stale config files in unrelated repos stay inert).
+ *   5. Artibot self-repo (plugin.json grandfather) → 'created' even when remote
+ *      URL probe fails.
+ *   6. Outside any git repo → 'no-repo' silent.
  */
 
 // ---------------------------------------------------------------------------
@@ -18,6 +21,9 @@ const mockState = {
   existsSyncResults: {},
   readFileSyncImpl: () => { throw new Error('ENOENT'); },
   execSyncImpl: () => '/fake/repo/root\n',
+  // Default: probing remote URL fails (simulates non-allowlisted unknown repo).
+  // Tests that need allowlisted behavior override this with the artibot URL.
+  execFileSyncImpl: () => { throw new Error('git config failed'); },
   atomicWrites: [],
   stdoutChunks: [],
   stderrChunks: [],
@@ -52,6 +58,7 @@ vi.mock('node:fs', async () => {
 
 vi.mock('node:child_process', () => ({
   execSync: vi.fn((...args) => mockState.execSyncImpl(...args)),
+  execFileSync: vi.fn((...args) => mockState.execFileSyncImpl(...args)),
 }));
 
 // ---------------------------------------------------------------------------
@@ -61,6 +68,7 @@ function resetState() {
   mockState.existsSyncResults = {};
   mockState.readFileSyncImpl = () => { throw new Error('ENOENT'); };
   mockState.execSyncImpl = () => '/fake/repo/root\n';
+  mockState.execFileSyncImpl = () => { throw new Error('git config failed'); };
   mockState.atomicWrites = [];
   mockState.stdoutChunks = [];
   mockState.stderrChunks = [];
@@ -133,7 +141,7 @@ describe('git-autopilot-setup opt-in policy', () => {
   });
 
   describe('existing autopilot.json refresh', () => {
-    it('returns "updated" and preserves user overrides while refreshing lastSetupAt', async () => {
+    it('returns "updated" and preserves user overrides when repo is allowlisted', async () => {
       const oldConfig = {
         version: 1,
         enabled: true,
@@ -154,6 +162,9 @@ describe('git-autopilot-setup opt-in policy', () => {
         if (String(p).includes('autopilot.json')) return JSON.stringify(oldConfig);
         throw new Error('ENOENT');
       };
+      // Allowlisted repo URL — passes the capture-only gate.
+      mockState.execFileSyncImpl = () =>
+        'https://github.com/Yoodaddy0311/artibot.git\n';
 
       const outcome = await mainFn([]);
 
@@ -165,6 +176,38 @@ describe('git-autopilot-setup opt-in policy', () => {
       expect(written.branchPrefix).toBe('custom/');
       expect(written.lastSetupAt).not.toBe('2026-01-01T00:00:00.000Z');
       expect(mockState.stdoutChunks.join('')).toContain('Updated');
+    });
+
+    it('returns "skipped-not-allowed" when existing config is in a non-allowlisted repo (Capture-Only Mode)', async () => {
+      const staleConfig = {
+        version: 1,
+        enabled: true,
+        wipIntervalMinutes: 30,
+        autoPullOnSession: true,
+        autoPushOnStop: true,
+        squashWipOnClose: true,
+        branchPrefix: 'artibot/',
+        conflictStrategy: 'union',
+        guardEnabled: true,
+        lastSetupAt: '2026-01-01T00:00:00.000Z',
+      };
+      mockState.existsSyncResults = {
+        'autopilot.json': true,
+        'plugin.json': false,
+      };
+      mockState.readFileSyncImpl = (p) => {
+        if (String(p).includes('autopilot.json')) return JSON.stringify(staleConfig);
+        throw new Error('ENOENT');
+      };
+      // Non-allowlisted remote — stale config must NOT be refreshed.
+      mockState.execFileSyncImpl = () =>
+        'https://github.com/Yoodaddy0311/carib-website.git\n';
+
+      const outcome = await mainFn([]);
+
+      expect(outcome).toBe('skipped-not-allowed');
+      expect(mockState.atomicWrites).toHaveLength(0);
+      expect(mockState.stdoutChunks).toHaveLength(0);
     });
   });
 

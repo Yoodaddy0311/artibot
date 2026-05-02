@@ -13,6 +13,7 @@ import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { parseJSON, readStdin, writeStdout } from '../utils/index.js';
 import { createErrorHandler, extractFilePath, extractToolName } from '../../lib/core/hook-utils.js';
+import { isAutopilotAllowed } from '../../lib/autopilot/repo-identity.js';
 
 // -------------------------------------------------------------------------
 // Constants
@@ -117,6 +118,11 @@ async function main() {
 
   const repoRoot = getRepoRoot();
   if (!repoRoot) return;
+
+  // Capture-only gate: do not surface guard warnings outside the allowlist.
+  // The guard exists to protect autopilot's own workflow; in non-allowlisted
+  // repos the user manages their own git state and we stay silent.
+  if (!isAutopilotAllowed(repoRoot)) return;
 
   const config = loadConfig(repoRoot);
   if (!config) return;

@@ -14,6 +14,7 @@ import path from 'node:path';
 import { parseJSON, readStdin } from '../utils/index.js';
 import { createErrorHandler } from '../../lib/core/hook-utils.js';
 import { autoResolveAll } from './git-autopilot-merge.js';
+import { isAutopilotAllowed } from '../../lib/autopilot/repo-identity.js';
 
 // Throttle: skip `git pull` if a successful pull happened within this window.
 // 5 minutes is aggressive enough to save ~800ms on every rapid-fire session
@@ -197,6 +198,10 @@ async function main() {
 
   const repoRoot = getRepoRoot();
   if (!repoRoot) return; // Not a git repo — skip silently
+
+  // Capture-only gate: do not auto-pull, branch-switch, or modify config
+  // in repos outside the allowlist. Learning capture remains unaffected.
+  if (!isAutopilotAllowed(repoRoot)) return;
 
   const config = loadConfig(repoRoot);
   if (!config) return; // Autopilot disabled or not set up

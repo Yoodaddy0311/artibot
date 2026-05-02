@@ -89,6 +89,9 @@ function setupEnabledRepo() {
 
   mockState.execSyncImpl = (cmd) => {
     if (cmd === 'git rev-parse --show-toplevel') return '/repo';
+    if (cmd === 'git config --get remote.origin.url') {
+      return 'https://github.com/Yoodaddy0311/artibot.git';
+    }
     if (cmd === 'git branch --show-current') return 'artibot/master';
     if (cmd === 'git rev-parse --git-dir') return '.git';
     if (cmd.startsWith('git pull')) return '';
@@ -182,6 +185,9 @@ describe('git-autopilot-session', () => {
     setupEnabledRepo();
     mockState.execSyncImpl = (cmd) => {
       if (cmd === 'git rev-parse --show-toplevel') return '/repo';
+      if (cmd === 'git config --get remote.origin.url') {
+        return 'https://github.com/Yoodaddy0311/artibot.git';
+      }
       if (cmd === 'git branch --show-current') return 'artibot/master';
       if (cmd === 'git rev-parse --git-dir') return '.git';
       if (cmd.startsWith('git pull')) throw new Error('pull failed');
@@ -206,6 +212,9 @@ describe('git-autopilot-session', () => {
     mockState.execSyncImpl = (cmd) => {
       commands.push(cmd);
       if (cmd === 'git rev-parse --show-toplevel') return '/repo';
+      if (cmd === 'git config --get remote.origin.url') {
+        return 'https://github.com/Yoodaddy0311/artibot.git';
+      }
       if (cmd === 'git branch --show-current') return 'artibot/master';
       if (cmd === 'git rev-parse --git-dir') return '.git';
       if (cmd.startsWith('git pull')) throw new Error('pull failed');
@@ -234,6 +243,9 @@ describe('git-autopilot-session', () => {
     mockState.execSyncImpl = (cmd) => {
       commands.push(cmd);
       if (cmd === 'git rev-parse --show-toplevel') return '/repo';
+      if (cmd === 'git config --get remote.origin.url') {
+        return 'https://github.com/Yoodaddy0311/artibot.git';
+      }
       if (cmd === 'git branch --show-current') return 'artibot/master';
       if (cmd === 'git rev-parse --git-dir') return '.git';
       if (cmd.startsWith('git pull')) throw new Error('pull failed');
@@ -258,6 +270,9 @@ describe('git-autopilot-session', () => {
     mockState.execSyncImpl = (cmd) => {
       commands.push(cmd);
       if (cmd === 'git rev-parse --show-toplevel') return '/repo';
+      if (cmd === 'git config --get remote.origin.url') {
+        return 'https://github.com/Yoodaddy0311/artibot.git';
+      }
       if (cmd === 'git branch --show-current') return 'artibot/master';
       if (cmd === 'git rev-parse --git-dir') return '.git';
       if (cmd.startsWith('git pull')) throw new Error('pull failed');
@@ -284,6 +299,9 @@ describe('git-autopilot-session', () => {
     setupEnabledRepo();
     mockState.execSyncImpl = (cmd) => {
       if (cmd === 'git rev-parse --show-toplevel') return '/repo';
+      if (cmd === 'git config --get remote.origin.url') {
+        return 'https://github.com/Yoodaddy0311/artibot.git';
+      }
       if (cmd === 'git branch --show-current') return 'artibot/master';
       if (cmd === 'git rev-parse --git-dir') return '.git';
       if (cmd.startsWith('git pull')) throw new Error('pull failed');
@@ -312,6 +330,9 @@ describe('git-autopilot-session', () => {
     mockState.execSyncImpl = (cmd) => {
       commands.push(cmd);
       if (cmd === 'git rev-parse --show-toplevel') return '/repo';
+      if (cmd === 'git config --get remote.origin.url') {
+        return 'https://github.com/Yoodaddy0311/artibot.git';
+      }
       if (cmd === 'git branch --show-current') return 'main';
       if (cmd.startsWith('git pull')) return '';
       if (cmd.startsWith('git show-ref')) throw new Error('not found');

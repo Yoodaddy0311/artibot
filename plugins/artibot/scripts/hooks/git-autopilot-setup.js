@@ -28,6 +28,7 @@ import { execSync } from 'node:child_process';
 import path from 'node:path';
 import { atomicWriteSync } from '../utils/index.js';
 import { logHookError } from '../../lib/core/hook-utils.js';
+import { isAutopilotAllowed } from '../../lib/autopilot/repo-identity.js';
 
 // -------------------------------------------------------------------------
 // Constants
@@ -163,9 +164,17 @@ export async function main(argv) {
   const configPath = path.join(gitDir, 'autopilot.json');
   const hasExisting = existsSync(configPath);
 
-  // Opt-in gate: skip silently unless one of three activation paths.
-  if (!hasExisting && !wantsInit && !isArtibotRepo(repoRoot)) {
-    return 'skipped';
+  // Capture-only mode (v4.4.0+): autopilot.json create AND refresh both
+  // require the repo to be either (a) explicitly listed in the user-level
+  // allowlist, (b) the artibot plugin repo itself (grandfathered via
+  // plugin.json), or (c) a one-shot --init invocation.
+  //
+  // Without this guard, hooks fire in every repo where stale config files
+  // were deployed by older versions, polluting unrelated project histories
+  // with `wip: artibot auto-save` and `chore: artibot session close` commits.
+  const allowed = isAutopilotAllowed(repoRoot) || isArtibotRepo(repoRoot);
+  if (!allowed && !wantsInit) {
+    return hasExisting ? 'skipped-not-allowed' : 'skipped';
   }
 
   const existing = hasExisting ? readExistingConfig(configPath) : {};

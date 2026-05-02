@@ -9,6 +9,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.4.0] - 2026-05-03
+
+Minor release — **Capture-Only Mode**. Decouples the plugin's learning subsystems (lifelong-learner / GRPO / swarm / telemetry) from its git-side artifacts. Autopilot hooks now require an explicit allowlist match before performing any commit / push / config refresh; learning capture continues unchanged in every repo so the plugin keeps growing across projects without polluting unrelated git histories.
+
+### Added
+
+- **`lib/autopilot/repo-identity.js`** — new module. Exports `DEFAULT_ALLOWLIST` (frozen), `getAllowlistPath()`, `loadAllowlist()`, `getRemoteUrl(cwd)`, `normalizeRepoId(url)`, `isRepoInAllowlist(url, allowlist?)`, and the top-level gate `isAutopilotAllowed(cwd)`. Normalizes the four common remote-URL forms (`https://`, `https://user:tok@`, `git@host:`, `ssh://`) to canonical `owner/name`. Pure functions; runtime hooks never write the allowlist file.
+- **`~/.claude/artibot/autopilot-allowlist.json`** (bootstrap) — user-level allowlist with `Yoodaddy0311/artibot` + `Yoodaddy0311/artibot-swarm` by default. Edit `repos` to extend.
+- **Hook gates** — `git-autopilot-{save,close,session,guard}.js` each call `isAutopilotAllowed(repoRoot)` immediately after `getRepoRoot()` and exit silently when it returns false. `git-autopilot-setup.js` extends the same gate with an `isArtibotRepo(repoRoot)` plugin.json grandfather and a one-shot `--init` escape hatch.
+- **Setup return code `'skipped-not-allowed'`** — distinguishes a stale `autopilot.json` left behind in a non-allowlisted repo (config preserved untouched, no `lastSetupAt` refresh) from a fresh non-allowlisted repo (`'skipped'`).
+
+### Changed
+
+- **Setup policy** — refresh of an existing `autopilot.json` now also requires allowlist membership. Previously, any session start in any repo containing a stale config refreshed it; that behavior was the root cause of cross-project artibot branch / commit pollution observed in `Carib`, `Averify`, `Artience`. Stale configs now stay inert until either the repo is allowlisted or the user runs setup with `--init`.
+
+### Tests
+
+- **`tests/autopilot/repo-identity.test.js`** — 18 new tests covering URL normalization (8), allowlist lookup (7), and `loadAllowlist` defaults (3).
+- **`tests/hooks/git-autopilot-setup.test.js`** — extended with `'skipped-not-allowed'` scenario for stale config in non-allowlisted repo (`carib-website.git`); existing `'updated'` scenario now sets allowlisted remote URL through the `execFileSync` mock.
+- **`tests/hooks/git-autopilot-{session,close}.test.js`** — mock helpers inject `https://github.com/Yoodaddy0311/artibot.git` for the `git config --get remote.origin.url` probe so existing scenarios cross the new gate.
+- **51/51 passing** across the five autopilot test files.
+
+### Migration
+
+No action required for users of the artibot self-repo (grandfathered via `plugin.json`). For other repos: legacy `.git/autopilot.json` files remain on disk but are inert. To opt back in for a specific repo, either add its `owner/name` to `~/.claude/artibot/autopilot-allowlist.json` or run `node ~/.claude/artibot/scripts/hooks/git-autopilot-setup.js --init` from inside that repo.
+
+---
+
 ## [4.3.4] - 2026-05-03
 
 Patch release — eliminate the brief flashing cmd.exe window on Windows during auto-learning runs, and harden artibot's own autopilot against unattended pushes.

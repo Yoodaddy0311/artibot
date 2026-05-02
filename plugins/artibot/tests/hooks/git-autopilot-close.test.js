@@ -96,11 +96,17 @@ function setupEnabledRepo(overrides = {}) {
  * Build a flexible execFileSync mock from a list of [argMatcher, response] pairs.
  * argMatcher is a substring matched against `args.join(' ')`.
  * response can be a string or () => string.  Throws Error('mock-throw') by setting null.
+ *
+ * Auto-injects an artibot allowlist response for `git config --get remote.origin.url`
+ * so capture-only gate (v4.4.0+) lets the hook proceed.
  */
 function makeExec(rules, fallback = '') {
   return (file, args /*, opts */) => {
     if (file !== 'git') return fallback;
     const joined = (args || []).join(' ');
+    if (joined === 'config --get remote.origin.url') {
+      return 'https://github.com/Yoodaddy0311/artibot.git';
+    }
     for (const [matcher, response] of rules) {
       if (joined.includes(matcher) || joined === matcher) {
         if (response instanceof Error) throw response;
@@ -159,6 +165,9 @@ describe('git-autopilot-close', () => {
       recorded.push(args);
       const joined = (args || []).join(' ');
       if (joined === 'rev-parse --show-toplevel') return '/repo';
+      if (joined === 'config --get remote.origin.url') {
+        return 'https://github.com/Yoodaddy0311/artibot.git';
+      }
       if (joined === 'branch --show-current') return 'main';
       if (joined.startsWith('status --porcelain')) return 'M file.js\n';
       return '';
@@ -191,6 +200,9 @@ describe('git-autopilot-close', () => {
       recorded.push(args);
       const joined = (args || []).join(' ');
       if (joined === 'rev-parse --show-toplevel') return '/repo';
+      if (joined === 'config --get remote.origin.url') {
+        return 'https://github.com/Yoodaddy0311/artibot.git';
+      }
       if (joined === 'branch --show-current') return 'artibot/master';
       if (joined.startsWith('status --porcelain')) return '';
       if (joined.startsWith('merge-base')) return 'abc123';
@@ -225,6 +237,9 @@ describe('git-autopilot-close', () => {
       recorded.push(args);
       const joined = (args || []).join(' ');
       if (joined === 'rev-parse --show-toplevel') return '/repo';
+      if (joined === 'config --get remote.origin.url') {
+        return 'https://github.com/Yoodaddy0311/artibot.git';
+      }
       if (joined === 'branch --show-current') return 'artibot/master';
       if (joined.startsWith('status --porcelain')) return '';
       if (joined.startsWith('merge-base')) return 'abc123';
@@ -244,6 +259,9 @@ describe('git-autopilot-close', () => {
     mockState.execFileSyncImpl = (file, args) => {
       const joined = (args || []).join(' ');
       if (joined === 'rev-parse --show-toplevel') return '/repo';
+      if (joined === 'config --get remote.origin.url') {
+        return 'https://github.com/Yoodaddy0311/artibot.git';
+      }
       if (joined === 'branch --show-current') return 'artibot/master';
       if (joined.startsWith('status --porcelain')) return '';
       if (joined.startsWith('merge-base')) return 'abc123';
@@ -267,6 +285,9 @@ describe('git-autopilot-close', () => {
     mockState.execFileSyncImpl = (file, args) => {
       const joined = (args || []).join(' ');
       if (joined === 'rev-parse --show-toplevel') return '/repo';
+      if (joined === 'config --get remote.origin.url') {
+        return 'https://github.com/Yoodaddy0311/artibot.git';
+      }
       if (joined === 'branch --show-current') return 'artibot/master';
       if (joined.startsWith('status --porcelain')) return '';
       if (joined.startsWith('merge-base')) return 'abc123';
@@ -306,6 +327,9 @@ describe('git-autopilot-close — squashWipCommits safety guards', () => {
       recorded.push(args);
       const joined = (args || []).join(' ');
       if (joined === 'rev-parse --show-toplevel') return '/repo';
+      if (joined === 'config --get remote.origin.url') {
+        return 'https://github.com/Yoodaddy0311/artibot.git';
+      }
       if (joined === 'branch --show-current') return 'artibot/master';
       if (joined.startsWith('status --porcelain')) return '';
       if (joined.startsWith('merge-base')) return 'abc123';
@@ -331,6 +355,9 @@ describe('git-autopilot-close — squashWipCommits safety guards', () => {
       recorded.push(args);
       const joined = (args || []).join(' ');
       if (joined === 'rev-parse --show-toplevel') return '/repo';
+      if (joined === 'config --get remote.origin.url') {
+        return 'https://github.com/Yoodaddy0311/artibot.git';
+      }
       if (joined === 'branch --show-current') return 'artibot/master';
       if (joined.startsWith('status --porcelain')) return '';
       // merge-base returns empty (resolution failed but didn't throw)
