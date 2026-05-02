@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.3.4] - 2026-05-03
+
+Patch release — eliminate the brief flashing cmd.exe window on Windows during auto-learning runs, and harden artibot's own autopilot against unattended pushes.
+
+### Fixed
+
+- **`auto-learning-scanner.js`** — `SHELL_OPTS` now includes `windowsHide: true` alongside `shell: true`. With `shell: true` the runtime spawns `cmd.exe` on Windows; without `windowsHide` a console window flickers each time `npx eslint` / `npx vitest` is invoked from the auto-learning pipeline. All other 16+ child_process callsites in the plugin already set `windowsHide: true` — this was the lone holdout. Cosmetic only; no behavior change.
+
+### Changed
+
+- **`.git/autopilot.json` (artibot repo)** — `autoPushOnStop` flipped from `true` → `false`. WIP commits and session-close commits still happen locally; pushing now requires explicit `git push` or `npm run release`. Reduces risk of unattended remote writes during exploratory sessions, especially relevant given that autopilot configs were previously deployed to multiple sibling project repos.
+
+### Notes
+
+- Cross-project autopilot deployments (`Carib`, `Averify`, `Artience`, …) detected during this audit. Their `.git/autopilot.json` files are out of scope for this plugin's release — surfaced to the user for per-repo opt-out decisions. See conversation transcript 2026-05-03.
+
+---
+
 ## [4.3.3] - 2026-05-03
 
 Patch release — pre-Bash safety guards driven by 14-day cross-project error audit. Zero behavior change unless command actually trips a new pattern (warn-only).

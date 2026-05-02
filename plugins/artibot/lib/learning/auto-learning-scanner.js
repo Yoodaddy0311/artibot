@@ -20,7 +20,7 @@ const execFile = promisify(execFileCb);
 
 const EXEC_TIMEOUT = 120_000;
 const MAX_BUFFER = 50 * 1024 * 1024; // 50 MB for large vitest JSON output
-const SHELL_OPTS = { shell: true }; // Required on Windows for npx resolution
+const SHELL_OPTS = { shell: true, windowsHide: true }; // shell: npx resolution; windowsHide: suppress flashing cmd window on Windows
 
 // ---------------------------------------------------------------------------
 // Helpers
