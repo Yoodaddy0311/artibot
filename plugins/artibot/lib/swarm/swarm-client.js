@@ -223,8 +223,8 @@ async function withRetry(requestFn, maxRetries = MAX_RETRIES) {
         } catch (parseErr) {
           const err = new Error(
             `Invalid JSON response (status ${response.status}): ${text.slice(0, 120)}`,
+            { cause: parseErr },
           );
-          err.cause = parseErr;
           err.status = response.status;
           throw err;
         }
