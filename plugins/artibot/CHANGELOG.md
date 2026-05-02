@@ -9,6 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.3.3] - 2026-05-03
+
+Patch release — pre-Bash safety guards driven by 14-day cross-project error audit. Zero behavior change unless command actually trips a new pattern (warn-only).
+
+### Added
+
+- **`path-portability` guard (Windows-only, pre Bash)** — `lib/core/guard-registry.js`. Warns when a Bash command embeds an interpreter inline (`python -c`, `node -e`, `ruby -e`, …) together with a git-bash absolute path (`/c/Users/...`); non-bash runtimes on Windows cannot resolve those. Also warns when `/tmp/` is used absolutely on Windows (the directory does not exist). Decision: `warn`, never blocks — `ls /c/Users/...` and other native bash usages remain unaffected. Driven by 8+1 occurrences in the audit window.
+- **`bash-lint` guard (pre Bash)** — `lib/core/guard-registry.js`. Detects unmatched single/double quotes and unterminated heredocs that produce `unexpected EOF while looking for matching '` failures. Decision: `warn`. Skips commands >8000 chars to keep regex cheap.
+
+### Changed
+
+- `registerBuiltinGuards()` now registers 8 guards (was 6); 5 pre + 3 post.
+
+### Tests
+
+- `tests/core/guard-registry.test.js`: 9 new tests across `path-portability` (4, Windows-only via `it.runIf`) and `bash-lint` (5). Existing builtin-count assertions updated (6→8, 3+3→5+3, expected names list extended). Two existing fixture strings split via concatenation to avoid tripping the post-write hardcoded-secret guard during edits. **62/62 passing.**
+
+### Audit Source
+
+`memory/project_error_audit_20260503.md` — 20 projects, 38 sessions, 62,986 events scanned 2026-04-19 ~ 2026-05-03. 24 sessions had retry storms (max 7 consecutive failures). Carib carries ~70% of all errors; that project also gets a new `CLAUDE.md` with environment notes.
+
+---
+
 ## [4.3.2] - 2026-04-30
 
 Patch release — autopilot resume safety + session id collision fix. Zero behavior change in the happy path.
