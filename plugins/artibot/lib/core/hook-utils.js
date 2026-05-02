@@ -215,9 +215,11 @@ const STALE_TMP_AGE_MS = 60 * 1000; // 1 minute
  * Best-effort cleanup of orphan `<statePath>.tmp.<pid>` files left behind
  * by crashed hook processes or Windows EPERM/EBUSY rename failures.
  *
- * Only removes tmp files older than {@link STALE_TMP_AGE_MS} so concurrent
- * in-flight writers are not disturbed. All errors are swallowed — this is
- * a hygienic best-effort path that must never break a hook.
+ * Only removes tmp files older than {@link STALE_TMP_AGE_MS} AND owned by a
+ * different PID than the current process, so concurrent in-flight writers
+ * (including this very process's atomicWriteSync mid-operation) are not
+ * disturbed. All errors are swallowed — this is a hygienic best-effort path
+ * that must never break a hook.
  *
  * @param {string} statePath - Absolute path of the state file (e.g. ~/.claude/artibot-state.json)
  * @returns {number} Number of stale tmp files removed
@@ -227,6 +229,7 @@ export function cleanupStaleStateTmpFiles(statePath) {
   const dir = path.dirname(statePath);
   const base = path.basename(statePath) + '.tmp.';
   const cutoff = Date.now() - STALE_TMP_AGE_MS;
+  const selfPid = process.pid;
   let removed = 0;
   let entries;
   try {
@@ -236,6 +239,9 @@ export function cleanupStaleStateTmpFiles(statePath) {
   }
   for (const name of entries) {
     if (!name.startsWith(base)) continue;
+    // Extract <pid> suffix; skip our own tmp files to avoid racing in-flight writes.
+    const filePid = Number.parseInt(name.slice(base.length), 10);
+    if (Number.isFinite(filePid) && filePid === selfPid) continue;
     const full = path.join(dir, name);
     try {
       const st = statSync(full);

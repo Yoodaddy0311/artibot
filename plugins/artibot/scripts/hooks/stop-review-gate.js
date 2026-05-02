@@ -116,7 +116,7 @@ function checkBracketMismatch(absPath, ext) {
   } catch (err) {
     const stderr = String(err.stderr || err.message || '').trim();
     // Extract the first error line for a terse message.
-    const firstLine = stderr.split('\n').find((l) => /SyntaxError|error/i.test(l));
+    const firstLine = stderr.split('\n').find((l) => /SyntaxError\b/.test(l));
     return firstLine ? firstLine.slice(0, 120) : 'syntax error';
   }
 }
