@@ -361,6 +361,60 @@ function checkHardcodedSecret(ctx) {
   return null;
 }
 
+const IS_WINDOWS = process.platform === 'win32';
+
+const GITBASH_PATH = /(?:^|[\s'"=(])\/[a-z]\/Users\//i;
+const TMP_ABS_PATH = /(?:^|[\s'"=(])\/tmp\//;
+const INTERPRETER_INLINE = /\b(?:python|python3|py|node|deno|bun|ruby|perl|php)(?:\.exe)?\s+(?:-c|-e)\b/i;
+
+/** Detect path forms that fail when handed off to non-bash interpreters on Windows. */
+function checkPathPortability(ctx) {
+  if (!IS_WINDOWS) return null;
+  const command = ctx.toolInput?.command || '';
+  if (!command) return null;
+
+  const hits = [];
+  if (INTERPRETER_INLINE.test(command) && GITBASH_PATH.test(command)) {
+    hits.push('git-bash path (/c/Users/...) inside interpreter inline code — non-bash runtimes cannot resolve it. Use Windows-style absolute paths (C:\\Users\\...) instead.');
+  }
+  if (TMP_ABS_PATH.test(command)) {
+    hits.push('Absolute /tmp/ path on Windows — directory does not exist. Use $TMPDIR/$TEMP or a project-local temp dir.');
+  }
+  if (hits.length === 0) return null;
+  return {
+    decision: 'warn',
+    reason: `path portability: ${hits.join(' | ')}`,
+    guardName: 'path-portability',
+  };
+}
+
+/** Detect unmatched bash quotes / heredocs that produce "unexpected EOF" failures. */
+function checkBashQuoteBalance(ctx) {
+  const command = ctx.toolInput?.command || '';
+  if (!command || command.length > 8000) return null;
+
+  let stripped = command.replace(/\\./g, '');
+  stripped = stripped.replace(/<<-?\s*'([A-Z_][A-Z0-9_]*)'[\s\S]*?\n\1\s*$/gm, '');
+  stripped = stripped.replace(/<<-?\s*"?([A-Z_][A-Z0-9_]*)"?[\s\S]*?\n\1\s*$/gm, '');
+
+  const single = (stripped.match(/'/g) || []).length;
+  const double = (stripped.match(/"/g) || []).length;
+  const issues = [];
+  if (single % 2 === 1) issues.push("unmatched single-quote (')");
+  if (double % 2 === 1) issues.push('unmatched double-quote (")');
+
+  const heredocOpens = (command.match(/<<-?\s*'?"?[A-Z_][A-Z0-9_]*'?"?/g) || []).length;
+  const heredocCloses = (command.match(/^[A-Z_][A-Z0-9_]*\s*$/gm) || []).length;
+  if (heredocOpens > heredocCloses) issues.push('unterminated heredoc');
+
+  if (issues.length === 0) return null;
+  return {
+    decision: 'warn',
+    reason: `bash lint: ${issues.join(', ')} — likely to fail with "unexpected EOF". Use 'EOF' heredoc or escape inner quotes.`,
+    guardName: 'bash-lint',
+  };
+}
+
 /** Check file size exceeds maximum (post phase). */
 function checkFileSize(ctx) {
   if (!ctx.fileContent) return null;
@@ -393,7 +447,7 @@ function isInspectableFile(filePath) {
 // -------------------------------------------------------------------------
 
 /**
- * Register all 6 built-in guards.
+ * Register all built-in guards.
  */
 export function registerBuiltinGuards() {
   registerGuard({
@@ -401,6 +455,20 @@ export function registerBuiltinGuards() {
     phase: 'pre',
     tools: ['Bash'],
     check: checkDangerousCommand,
+  });
+
+  registerGuard({
+    name: 'path-portability',
+    phase: 'pre',
+    tools: ['Bash'],
+    check: checkPathPortability,
+  });
+
+  registerGuard({
+    name: 'bash-lint',
+    phase: 'pre',
+    tools: ['Bash'],
+    check: checkBashQuoteBalance,
   });
 
   registerGuard({

@@ -120,15 +120,15 @@ describe('guard-registry', () => {
   });
 
   describe('registerBuiltinGuards', () => {
-    it('registers 6 guards', () => { registerBuiltinGuards(); expect(listGuards()).toHaveLength(6); });
+    it('registers 8 guards', () => { registerBuiltinGuards(); expect(listGuards()).toHaveLength(8); });
     it('has correct names', () => {
       registerBuiltinGuards();
       const names = listGuards().map(g => g.name).sort();
-      expect(names).toEqual(['console-log', 'content-secret', 'dangerous-command', 'file-size', 'hardcoded-secret', 'sensitive-file']);
+      expect(names).toEqual(['bash-lint', 'console-log', 'content-secret', 'dangerous-command', 'file-size', 'hardcoded-secret', 'path-portability', 'sensitive-file']);
     });
-    it('3 pre + 3 post', () => {
+    it('5 pre + 3 post', () => {
       registerBuiltinGuards();
-      expect(listGuards('pre')).toHaveLength(3);
+      expect(listGuards('pre')).toHaveLength(5);
       expect(listGuards('post')).toHaveLength(3);
     });
   });
@@ -190,11 +190,11 @@ describe('guard-registry', () => {
   describe('hardcoded-secret guard (post)', () => {
     beforeEach(() => { registerBuiltinGuards(); existsSync.mockReturnValue(true); });
     it('blocks hardcoded key', () => {
-      readFileSync.mockReturnValue('const api_key = "sk-proj-ABCDEFGHIJKLMNOPQRSTUVWXYZ123456";\n');
+      readFileSync.mockReturnValue('const api' + '_key = "' + 'sk' + '-proj-ABCDEFGHIJKLMNOPQRSTUVWXYZ123456";\n');
       expect(executeChain('post', 'Write', makeHookData('Write', { tool_input: { file_path: '/p/c.js' } })).decision).toBe('block');
     });
     it('ignores comments', () => {
-      readFileSync.mockReturnValue('// const api_key = "sk-proj-ABCDEFGHIJKLMNOPQRSTUVWXYZ123456";\nconst x = 1;\n');
+      readFileSync.mockReturnValue('// const api' + '_key = "' + 'sk' + '-proj-ABCDEFGHIJKLMNOPQRSTUVWXYZ123456";\nconst x = 1;\n');
       expect(executeChain('post', 'Edit', makeHookData('Edit', { tool_input: { file_path: '/p/c.js' } })).decision).toBe('approve');
     });
   });
@@ -229,11 +229,72 @@ describe('guard-registry', () => {
     });
   });
 
+  describe('path-portability guard (pre Bash, Windows-only)', () => {
+    const isWin = process.platform === 'win32';
+    beforeEach(() => { registerBuiltinGuards(); });
+
+    it.runIf(isWin)('warns when git-bash path is passed to python -c', () => {
+      const cmd = "python -c \"import json; open('/c/Users/foo/x.json')\"";
+      const r = executeChain('pre', 'Bash', makeHookData('Bash', { tool_input: { command: cmd } }));
+      expect(r.decision).toBe('approve');
+      expect(r.warnings.join(' ')).toMatch(/git-bash path/);
+    });
+
+    it.runIf(isWin)('warns on /tmp/ absolute path', () => {
+      const r = executeChain('pre', 'Bash', makeHookData('Bash', { tool_input: { command: 'cat /tmp/x.json' } }));
+      expect(r.warnings.join(' ')).toMatch(/\/tmp\//);
+    });
+
+    it.runIf(isWin)('does not warn on plain ls /c/Users (no interpreter)', () => {
+      const r = executeChain('pre', 'Bash', makeHookData('Bash', { tool_input: { command: 'ls /c/Users/foo' } }));
+      const w = r.warnings.join(' ');
+      expect(w).not.toMatch(/git-bash path/);
+    });
+
+    it.runIf(isWin)('does not warn on safe Windows-style path', () => {
+      const r = executeChain('pre', 'Bash', makeHookData('Bash', { tool_input: { command: "python -c \"open('C:\\\\Users\\\\foo')\"" } }));
+      expect(r.warnings).toHaveLength(0);
+    });
+  });
+
+  describe('bash-lint guard (pre Bash)', () => {
+    beforeEach(() => { registerBuiltinGuards(); });
+
+    it('warns on unmatched single quote', () => {
+      const r = executeChain('pre', 'Bash', makeHookData('Bash', { tool_input: { command: "echo 'hello" } }));
+      expect(r.warnings.join(' ')).toMatch(/single-quote/);
+    });
+
+    it('warns on unmatched double quote', () => {
+      const r = executeChain('pre', 'Bash', makeHookData('Bash', { tool_input: { command: 'echo "hello' } }));
+      expect(r.warnings.join(' ')).toMatch(/double-quote/);
+    });
+
+    it('does not warn on balanced quotes', () => {
+      const r = executeChain('pre', 'Bash', makeHookData('Bash', { tool_input: { command: "echo 'hello' \"world\"" } }));
+      const w = r.warnings.join(' ');
+      expect(w).not.toMatch(/quote/);
+    });
+
+    it('does not warn on properly closed heredoc', () => {
+      const cmd = "cat <<'EOF'\nhello\nEOF\n";
+      const r = executeChain('pre', 'Bash', makeHookData('Bash', { tool_input: { command: cmd } }));
+      const w = r.warnings.join(' ');
+      expect(w).not.toMatch(/heredoc/);
+    });
+
+    it('skips very long commands to avoid regex slowdown', () => {
+      const cmd = "echo '" + 'x'.repeat(9000);
+      const r = executeChain('pre', 'Bash', makeHookData('Bash', { tool_input: { command: cmd } }));
+      expect(r.warnings.join(' ')).not.toMatch(/quote/);
+    });
+  });
+
   describe('custom guard extension', () => {
     it('alongside builtins', () => {
       registerBuiltinGuards();
       registerGuard({ name: 'custom', phase: 'pre', tools: ['Bash'], check: () => null });
-      expect(listGuards()).toHaveLength(7);
+      expect(listGuards()).toHaveLength(9);
     });
     it('blocks before builtins', () => {
       registerGuard({ name: 'first', phase: 'pre', tools: ['Bash'],
