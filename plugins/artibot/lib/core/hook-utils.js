@@ -6,6 +6,7 @@
  */
 
 import path from 'node:path';
+import { readdirSync, statSync, unlinkSync } from 'node:fs';
 
 // -------------------------------------------------------------------------
 // Path Validation
@@ -201,4 +202,49 @@ export function extractAgentId(hookData) {
  */
 export function extractAgentRole(hookData, defaultRole = 'teammate') {
   return hookData?.role || hookData?.agent_type || defaultRole;
+}
+
+// -------------------------------------------------------------------------
+// State File Tmp Cleanup
+// -------------------------------------------------------------------------
+
+// Tmp files older than this are considered orphans from crashed/killed processes.
+const STALE_TMP_AGE_MS = 60 * 1000; // 1 minute
+
+/**
+ * Best-effort cleanup of orphan `<statePath>.tmp.<pid>` files left behind
+ * by crashed hook processes or Windows EPERM/EBUSY rename failures.
+ *
+ * Only removes tmp files older than {@link STALE_TMP_AGE_MS} so concurrent
+ * in-flight writers are not disturbed. All errors are swallowed — this is
+ * a hygienic best-effort path that must never break a hook.
+ *
+ * @param {string} statePath - Absolute path of the state file (e.g. ~/.claude/artibot-state.json)
+ * @returns {number} Number of stale tmp files removed
+ */
+export function cleanupStaleStateTmpFiles(statePath) {
+  if (!statePath) return 0;
+  const dir = path.dirname(statePath);
+  const base = path.basename(statePath) + '.tmp.';
+  const cutoff = Date.now() - STALE_TMP_AGE_MS;
+  let removed = 0;
+  let entries;
+  try {
+    entries = readdirSync(dir);
+  } catch {
+    return 0;
+  }
+  for (const name of entries) {
+    if (!name.startsWith(base)) continue;
+    const full = path.join(dir, name);
+    try {
+      const st = statSync(full);
+      if (st.mtimeMs > cutoff) continue; // still in flight, leave alone
+      unlinkSync(full);
+      removed++;
+    } catch {
+      // file vanished mid-loop or is locked by another process — ignore
+    }
+  }
+  return removed;
 }

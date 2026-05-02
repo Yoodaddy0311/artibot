@@ -40,14 +40,6 @@ Violation symptom: "all work done inline by main thread" = DNA breach. Opt-out: 
 
 **Claude 4.7 override**: 4.7 reduces sub-agents by default. This policy explicitly reverses that default for this repo.
 
-## Agent Delegation Rules
-
-- Complex features → `planner` agent first
-- After writing code → `code-reviewer` agent
-- Bug fixes / new features → `tdd-guide` agent
-- Architecture decisions → `architect` agent
-- Multiple independent tasks → parallel agents
-
 ## Auto-invoke Principle
 
 Never tell the user to type slash-commands. Detect intent → trigger command/skill/agent silently. Users include non-developers. Applies to `/team`, `/implement`, `/plan`, `/code-review`, `/verify`, `/daily` — all commands. Inner command workflows (phases, checklists) must run in full, never shortened.
@@ -78,25 +70,4 @@ Config: `artibot.config.json` (model policy, team, cognitive). Manifest: `.claud
 
 ## Artibot Integration
 
-### DEV Protocol (Mandatory for all code changes)
-1. **DECOMPOSE**: Break request into numbered atomic items before any action
-2. **EXECUTE**: Read target file → Make change → Re-read to confirm
-3. **VERIFY**: Report with evidence per item (file:line + what changed)
-
-### Zero-Skip Policy
-- Never silently skip any part of a multi-part request
-- Never claim completion without re-reading the modified file
-- If blocked, explain WHY and propose alternatives
-
-### Agent Delegation
-- Complex features: use planner agent first
-- After writing code: use code-reviewer agent
-- Bug fixes / new features: use tdd-guide agent
-- Architecture decisions: use architect agent
-- Multiple independent tasks: launch agents in parallel
-
-### Quality Gates
-- Read before write (no blind modifications)
-- Functions < 50 lines, files < 800 lines
-- Immutable patterns (create new objects, never mutate)
-- 80%+ test coverage target
+See `~/.claude/rules/artibot/` for DEV Protocol, Agent Delegation, Quality Gates, and team auto-apply rules.

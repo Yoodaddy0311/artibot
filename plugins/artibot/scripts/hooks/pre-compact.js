@@ -219,6 +219,7 @@ function captureGitState() {
       stdio: ['ignore', 'pipe', 'ignore'],
       encoding: 'utf-8',
       timeout: 2000,
+      windowsHide: true,
     }).trim() || 'unknown';
   } catch {
     // Not a git repo or git unavailable — leave default
@@ -229,6 +230,7 @@ function captureGitState() {
       stdio: ['ignore', 'pipe', 'ignore'],
       encoding: 'utf-8',
       timeout: 2000,
+      windowsHide: true,
     });
   } catch {
     // Best effort

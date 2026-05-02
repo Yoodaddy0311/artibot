@@ -9,7 +9,7 @@
  */
 
 import path from 'node:path';
-import { mkdirSync, renameSync, writeFileSync } from 'node:fs';
+import { mkdirSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 
 // Canonical getPluginRoot from lib/core/platform.js (single source of truth)
@@ -51,10 +51,39 @@ export function resolveConfigPath(...segments) {
   return path.join(getPluginRoot(), ...segments);
 }
 
+// Retryable error codes on Windows when another process / AV / indexer holds the file
+const RETRYABLE_FS_CODES = new Set(['EPERM', 'EBUSY', 'EACCES', 'EEXIST']);
+
+/**
+ * Sleep synchronously by busy-waiting (Node has no setTimeoutSync).
+ * Used only inside the retry loop, so the wait windows are short (50/100/200ms).
+ * @param {number} ms
+ */
+function sleepSync(ms) {
+  const end = Date.now() + ms;
+  while (Date.now() < end) { /* busy wait */ }
+}
+
+/**
+ * Best-effort tmp file cleanup. Swallows all errors (file may be locked or gone).
+ * @param {string} tmpPath
+ */
+function safeUnlinkTmp(tmpPath) {
+  try {
+    unlinkSync(tmpPath);
+  } catch { /* ignore */ }
+}
+
 /**
  * Atomically write data to a file by writing to a temp file and renaming.
  * Prevents partial-write corruption of state files on crash or concurrent access.
- * Catches EEXIST on mkdir for Windows + OneDrive race conditions.
+ *
+ * Hardened for Windows: rename() can throw EPERM/EBUSY when another hook
+ * instance, antivirus, or the file indexer momentarily holds the target file.
+ * Retries with exponential backoff (50ms -> 100ms -> 200ms, max 3 attempts).
+ * On final failure logs to stderr and best-effort unlinks the tmp file so
+ * `~/.claude/artibot-state.json.tmp.<pid>` orphans do not accumulate.
+ *
  * @param {string} filePath - Destination file path
  * @param {string|object} data - String content or object to serialize as JSON
  */
@@ -66,8 +95,45 @@ export function atomicWriteSync(filePath, data) {
     if (err.code !== 'EEXIST') throw err;
   }
   const tmpPath = filePath + '.tmp.' + process.pid;
-  writeFileSync(tmpPath, typeof data === 'string' ? data : JSON.stringify(data, null, 2), 'utf-8');
-  renameSync(tmpPath, filePath);
+  const payload = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+
+  // Write tmp with retry (rare, but writeFileSync can also EPERM under contention).
+  const backoffs = [0, 50, 100, 200];
+  let writeErr = null;
+  for (let i = 0; i < backoffs.length; i++) {
+    if (i > 0) sleepSync(backoffs[i]);
+    try {
+      writeFileSync(tmpPath, payload, 'utf-8');
+      writeErr = null;
+      break;
+    } catch (err) {
+      writeErr = err;
+      if (!RETRYABLE_FS_CODES.has(err.code)) break;
+    }
+  }
+  if (writeErr) {
+    safeUnlinkTmp(tmpPath);
+    process.stderr.write(`[artibot:atomicWrite] tmp write failed for ${filePath}: ${writeErr.code || ''} ${writeErr.message}\n`);
+    return; // graceful: never throw out of a hook write
+  }
+
+  // Rename with retry. EPERM on Windows is the dominant failure here.
+  let renameErr = null;
+  for (let i = 0; i < backoffs.length; i++) {
+    if (i > 0) sleepSync(backoffs[i]);
+    try {
+      renameSync(tmpPath, filePath);
+      renameErr = null;
+      break;
+    } catch (err) {
+      renameErr = err;
+      if (!RETRYABLE_FS_CODES.has(err.code)) break;
+    }
+  }
+  if (renameErr) {
+    safeUnlinkTmp(tmpPath);
+    process.stderr.write(`[artibot:atomicWrite] rename failed for ${filePath}: ${renameErr.code || ''} ${renameErr.message}\n`);
+  }
 }
 
 /**
