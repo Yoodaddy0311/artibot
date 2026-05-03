@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.4.1] - 2026-05-03
+
+Patch release — wire up the documented `autopilot.enabled` config kill-switch in the NLU trigger hook. Closes a doc/code gap where `commands/autopilot.md` claimed the flag disabled autopilot suggestion, but the hook only consulted `team.autoApply` / `team.enabled`.
+
+### Fixed
+
+- **`scripts/hooks/autopilot-nlu-trigger.js`** — `isEnabled()` now also returns `false` when `cfg.autopilot.enabled === false`, independent of team config. Previously, setting `autopilot.enabled: false` in `artibot.config.json` had no effect; users had to disable team auto-apply (umbrella opt-out) just to silence the `[autopilot-suggested]` injection on long-running-work phrases like "자고 올 동안...". Now the autopilot suggestion has its own dedicated kill-switch.
+
+### Changed
+
+- **`artibot.config.json`** — `autopilot.enabled` flipped from `true` → `false` for the artibot self-repo. Per-feature opt-in via explicit `/autopilot <task>` command continues to work; only the natural-language auto-suggestion is silenced.
+
+### Tests
+
+- **`tests/hooks/autopilot-nlu-trigger.test.js`** — new test: `autopilot.enabled=false` suppresses emit even when classifier scores high (0.95) and `team.autoApply=true`. 4/4 file passing.
+
+---
+
 ## [4.4.0] - 2026-05-03
 
 Minor release — **Capture-Only Mode**. Decouples the plugin's learning subsystems (lifelong-learner / GRPO / swarm / telemetry) from its git-side artifacts. Autopilot hooks now require an explicit allowlist match before performing any commit / push / config refresh; learning capture continues unchanged in every repo so the plugin keeps growing across projects without polluting unrelated git histories.
