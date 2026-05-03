@@ -690,7 +690,7 @@
     }
   },
   "autopilot": {
-    "enabled": true,
+    "enabled": false,
     "defaultMode": "default",
     "modes": ["default", "night", "plan"],
     "limits": {

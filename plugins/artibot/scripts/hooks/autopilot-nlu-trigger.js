@@ -28,7 +28,10 @@ const NO_AUTOPILOT_FLAG = /--no-autopilot\b/i;
 const NO_TEAM_FLAG = /--no-team\b/i;
 
 /**
- * Read team config (single source of truth: artibot.config.json).
+ * Read team + autopilot config (single source of truth: artibot.config.json).
+ * Suggestion is gated by both: team-level kill switches AND a dedicated
+ * `autopilot.enabled` so users can disable autopilot suggestion without
+ * also disabling team auto-apply. Documented in `commands/autopilot.md`.
  * @param {string} pluginRoot
  * @returns {boolean} true when autopilot suggestion is enabled
  */
@@ -38,6 +41,8 @@ function isEnabled(pluginRoot) {
     if (!existsSync(cfgPath)) return true;
     const cfg = JSON.parse(readFileSync(cfgPath, 'utf-8'));
     const team = cfg?.team ?? {};
+    const autopilot = cfg?.autopilot ?? {};
+    if (autopilot.enabled === false) return false;
     return team.autoApply !== false && team.enabled !== false;
   } catch {
     // Fail-closed on malformed config: if a user wrote a config file at all,

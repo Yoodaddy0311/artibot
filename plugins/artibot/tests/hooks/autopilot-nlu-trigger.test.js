@@ -141,4 +141,36 @@ describe('autopilot-nlu-trigger — fail-closed on malformed config (C-2)', () =
     // No WARN expected — config was valid, just opt-out.
     expect(stderr).not.toMatch(/WARN: malformed config/);
   });
+
+  it('is disabled (no emit, no WARN) when autopilot.enabled=false even with team.autoApply=true', async () => {
+    mockState.readStdinResult = Promise.resolve(JSON.stringify({
+      user_prompt: '자고 올 동안 전체 시스템 리팩토링',
+    }));
+    mockState.existsSyncResults = { 'artibot.config.json': true };
+    mockState.readFileSyncImpl = (p) => {
+      if (String(p).includes('artibot.config.json')) {
+        return JSON.stringify({
+          team: { autoApply: true, enabled: true },
+          autopilot: { enabled: false },
+        });
+      }
+      throw new Error('ENOENT');
+    };
+    // Even if classifier would score above threshold, hook must not emit.
+    mockState.classifyResult = {
+      score: 0.95,
+      matched: ['자고 올 동안'],
+      suggestion: 'default',
+    };
+
+    await import('../../scripts/hooks/autopilot-nlu-trigger.js');
+    // Allow microtasks to flush in case async path runs.
+    const deadline = Date.now() + 200;
+    while (mockState.writeStdoutCalls.length === 0 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    expect(mockState.writeStdoutCalls).toHaveLength(0);
+    const stderr = stderrSpy.mock.calls.map(([m]) => m).join('');
+    expect(stderr).not.toMatch(/WARN: malformed config/);
+  });
 });
