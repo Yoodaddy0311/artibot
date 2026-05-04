@@ -16,7 +16,7 @@
  * @module lib/cognitive/multi-step-loop
  */
 
-import { solve } from './system2-core.js';
+import { extractFailureReason, solve } from './system2-core.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -71,7 +71,7 @@ export function evaluateSteps(solveResult) {
     if (result.status === 'success') {
       completedSteps.push(result.stepId);
     } else {
-      const reason = extractStepFailureReason(result);
+      const reason = extractFailureReason(result);
       failedSteps.push({
         stepId: result.stepId,
         action: result.action,
@@ -173,19 +173,17 @@ export function shouldContinue({ iteration, success, completionRate, previousRat
     return { shouldContinue: false, reason: `max_iterations_reached (${MAX_ITERATIONS})` };
   }
 
-  if (completionRate === 1.0) {
+  if (completionRate >= 1.0) {
     return { shouldContinue: false, reason: 'completion_rate_100_percent' };
   }
 
-  const improvement = completionRate - previousRate;
-  if (improvement < MIN_IMPROVEMENT_THRESHOLD && iteration > 1) {
-    const newStagnant = stagnantCount + 1;
-    if (newStagnant >= MAX_STAGNANT_ITERATIONS) {
-      return {
-        shouldContinue: false,
-        reason: `stagnant_for_${newStagnant}_iterations (improvement: ${(improvement * 100).toFixed(1)}%)`,
-      };
-    }
+  // stagnantCount is already incremented by the caller before passing here
+  if (stagnantCount >= MAX_STAGNANT_ITERATIONS && iteration > 1) {
+    const improvement = completionRate - previousRate;
+    return {
+      shouldContinue: false,
+      reason: `stagnant_for_${stagnantCount}_iterations (improvement: ${(improvement * 100).toFixed(1)}%)`,
+    };
   }
 
   return { shouldContinue: true, reason: 'improvement_possible' };
@@ -247,9 +245,10 @@ export function solveWithFeedback(task, options = {}) {
       completedStepIds.add(stepId);
     }
 
-    // Accumulate failure reasons (deduplicate by stepId)
+    // Accumulate failure reasons (deduplicate by stepId+reason via Set)
+    const failureKeySet = new Set(failedStepReasons.map((f) => `${f.stepId}::${f.reason}`));
     const newFailures = evaluation.failedSteps.filter(
-      (f) => !failedStepReasons.some((existing) => existing.stepId === f.stepId && existing.reason === f.reason),
+      (f) => !failureKeySet.has(`${f.stepId}::${f.reason}`),
     );
     failedStepReasons = [...failedStepReasons, ...newFailures];
 
@@ -290,7 +289,7 @@ export function solveWithFeedback(task, options = {}) {
     iterationHistory.push(iterationEntry);
 
     if (onIteration) {
-      onIteration(iterationEntry);
+      try { onIteration(iterationEntry); } catch { /* callback errors must not break the loop */ }
     }
 
     finalResult = solveResult;
@@ -307,7 +306,7 @@ export function solveWithFeedback(task, options = {}) {
       failedStepReasons,
       feedbackLog,
     };
-    currentTask = adaptTask(task, iterationState);
+    currentTask = adaptTask(currentTask, iterationState);
   }
 
   const lastEval = iterationHistory[iterationHistory.length - 1]?.evaluation;
@@ -324,23 +323,7 @@ export function solveWithFeedback(task, options = {}) {
   };
 }
 
-// ---------------------------------------------------------------------------
-// Internal helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Extract a failure reason from a step result.
- * @param {object} stepResult
- * @returns {string}
- */
-function extractStepFailureReason(stepResult) {
-  if (!stepResult.execution) return 'No execution data';
-  if (stepResult.execution.blocked) return `Blocked: ${stepResult.execution.blockedBy}`;
-  if (stepResult.execution.stderr) {
-    return stepResult.execution.stderr.split('\n')[0].slice(0, 200);
-  }
-  return `Exit code: ${stepResult.execution?.exitCode ?? 'unknown'}`;
-}
+// extractFailureReason is imported from system2-core.js (shared helper)
 
 // ---------------------------------------------------------------------------
 // Exports for testing

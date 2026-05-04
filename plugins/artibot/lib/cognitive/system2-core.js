@@ -709,7 +709,7 @@ function checkDependencies(step, completedResults, dependencies) {
  * @param {object} stepResult - Step execution result
  * @returns {string}
  */
-function extractFailureReason(stepResult) {
+export function extractFailureReason(stepResult) {
   if (!stepResult.execution) return 'No execution data';
   if (stepResult.execution.blocked) return `Blocked: ${stepResult.execution.blockedBy}`;
   if (stepResult.validation?.issues?.length > 0) {

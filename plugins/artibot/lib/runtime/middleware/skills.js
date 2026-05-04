@@ -71,6 +71,7 @@ function buildKeywordIndex(index) {
  * @param {Set<string>} matchSet - mutated in place
  */
 function _substringFallback(lowerKeywords, maxConcurrent, matchSet) {
+  if (!_keywordIndex) return;
   for (const kw of lowerKeywords) {
     if (matchSet.size >= maxConcurrent) return;
 
