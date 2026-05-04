@@ -26,6 +26,7 @@ export {
   reflect,
   solve,
   assessComplexity,
+  extractFailureReason,
 } from './system2-core.js';
 
 // Strategies: risk, complexity, team, correction heuristics

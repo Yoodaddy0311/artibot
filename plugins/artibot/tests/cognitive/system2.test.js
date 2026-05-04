@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   assessComplexity,
   execute,
+  extractFailureReason,
   plan,
   reflect,
   solve,
@@ -1131,5 +1132,45 @@ describe('system2', () => {
       // teamRecommendation may or may not be set depending on complexity score
       // This test exercises the code path at line 387
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// extractFailureReason (direct export tests)
+// ---------------------------------------------------------------------------
+describe('extractFailureReason — direct export', () => {
+  it('is exported from system2.js barrel', () => {
+    expect(typeof extractFailureReason).toBe('function');
+  });
+
+  it('returns "No execution data" when execution is missing', () => {
+    expect(extractFailureReason({})).toBe('No execution data');
+    expect(extractFailureReason({ execution: null })).toBe('No execution data');
+  });
+
+  it('returns blocked reason when execution is blocked', () => {
+    const result = extractFailureReason({ execution: { blocked: true, blockedBy: 'safety rule' } });
+    expect(result).toContain('Blocked');
+    expect(result).toContain('safety rule');
+  });
+
+  it('returns validation issues when present', () => {
+    const result = extractFailureReason({
+      execution: { exitCode: 1 },
+      validation: { issues: ['missing semicolon', 'unused var'] },
+    });
+    expect(result).toBe('missing semicolon; unused var');
+  });
+
+  it('returns first line of stderr when no validation issues', () => {
+    const result = extractFailureReason({
+      execution: { exitCode: 1, stderr: 'Error: file not found\nstack trace here' },
+    });
+    expect(result).toBe('Error: file not found');
+  });
+
+  it('returns exit code as fallback', () => {
+    const result = extractFailureReason({ execution: { exitCode: 127 } });
+    expect(result).toContain('127');
   });
 });
