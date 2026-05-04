@@ -127,6 +127,45 @@ function matchSkills(index, keywords, maxConcurrent) {
 }
 
 /**
+ * Match extension-registered skills against intent keywords.
+ * Extracted to reduce nesting depth in the main middleware function.
+ *
+ * @param {object} registry - Extension registry instance
+ * @param {object} intentInfo - Intent context from router
+ * @param {string|undefined} bestCommand - Best matched command
+ * @param {string[]} deduped - Mutable suggested skills array (matched items are appended)
+ * @returns {string[]} Names of matched extension skills
+ */
+function matchExtensionSkills(registry, intentInfo, bestCommand, deduped) {
+  const { skills: extSkills } = registry.listExtensions();
+  if (extSkills.length === 0) return [];
+
+  const keywords = [
+    ...(intentInfo.intents || []),
+    ...(intentInfo.commands || []),
+    intentInfo.best,
+    bestCommand,
+  ].filter(Boolean).map((k) => k.toLowerCase().replace(/^\//, ''));
+
+  const matched = [];
+  for (const ext of extSkills) {
+    const extName = ext.name.toLowerCase();
+    const extTriggers = Array.isArray(ext.config.triggers) ? ext.config.triggers : [];
+    const nameHit = keywords.some((kw) => extName.includes(kw) || kw.includes(extName));
+    const triggerHit = extTriggers.some((t) =>
+      keywords.some((kw) => t.toLowerCase().includes(kw) || kw.includes(t.toLowerCase())),
+    );
+    if (nameHit || triggerHit) {
+      matched.push(ext.name);
+      if (!deduped.includes(ext.name)) {
+        deduped.push(ext.name);
+      }
+    }
+  }
+  return matched;
+}
+
+/**
  * @param {object} [options]
  * @param {Record<string, string[]>} [options.intentToSkills] - Optional intent->skills map.
  * @param {object} [options.lazyLoading] - Lazy loading configuration.
@@ -202,33 +241,9 @@ export function createSkillsMiddleware(options = {}) {
     }
 
     // Merge extension-registered skills into suggestions
-    let extensionMatched = [];
-    if (extensionRegistry) {
-      const { skills: extSkills } = extensionRegistry.listExtensions();
-      if (extSkills.length > 0) {
-        const keywords = [
-          ...(intentInfo.intents || []),
-          ...(intentInfo.commands || []),
-          bestIntent,
-          bestCommand,
-        ].filter(Boolean).map((k) => k.toLowerCase().replace(/^\//, ''));
-
-        for (const ext of extSkills) {
-          const extName = ext.name.toLowerCase();
-          const extTriggers = Array.isArray(ext.config.triggers) ? ext.config.triggers : [];
-          const nameHit = keywords.some((kw) => extName.includes(kw) || kw.includes(extName));
-          const triggerHit = extTriggers.some((t) =>
-            keywords.some((kw) => t.toLowerCase().includes(kw) || kw.includes(t.toLowerCase())),
-          );
-          if (nameHit || triggerHit) {
-            extensionMatched.push(ext.name);
-            if (!deduped.includes(ext.name)) {
-              deduped.push(ext.name);
-            }
-          }
-        }
-      }
-    }
+    const extensionMatched = extensionRegistry
+      ? matchExtensionSkills(extensionRegistry, intentInfo, bestCommand, deduped)
+      : [];
 
     state.context.skills = {
       suggested: deduped,

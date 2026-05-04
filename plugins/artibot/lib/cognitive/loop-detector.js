@@ -53,14 +53,18 @@ function hashArgs(args) {
 }
 
 /**
- * Build a fingerprint tuple key from tool name and args.
+ * Build a fingerprint tuple key from tool name, args, and optional step context.
+ * When stepId is provided, the fingerprint is scoped to that step,
+ * preventing false positives during multi-step reasoning iterations.
  *
  * @param {string} toolName - Name of the tool
  * @param {*} args - Tool call arguments
+ * @param {string} [stepId] - Optional step ID for multi-step loop isolation
  * @returns {string} Fingerprint key
  */
-function buildFingerprint(toolName, args) {
-  return `${toolName || ''}::${hashArgs(args)}`;
+function buildFingerprint(toolName, args, stepId) {
+  const base = `${toolName || ''}::${hashArgs(args)}`;
+  return stepId ? `${stepId}::${base}` : base;
 }
 
 // ---------------------------------------------------------------------------
@@ -113,12 +117,14 @@ export function createLoopDetector(config = {}) {
   /**
    * Record a tool call and check for loop patterns.
    *
-   * @param {{ tool: string, args?: * }} toolCall - The tool call to check
+   * @param {{ tool: string, args?: *, stepId?: string }} toolCall - The tool call to check.
+   *   When stepId is provided, the fingerprint is scoped to that step,
+   *   isolating multi-step reasoning iterations from triggering false positives.
    * @returns {LoopDetectionResult}
    */
   function detectLoop(toolCall) {
     const tool = toolCall.tool || '';
-    const fingerprint = buildFingerprint(tool, toolCall.args);
+    const fingerprint = buildFingerprint(tool, toolCall.args, toolCall.stepId);
 
     // Append to circular buffer (immutable: create new array)
     const entry = Object.freeze({ tool, fingerprint });
