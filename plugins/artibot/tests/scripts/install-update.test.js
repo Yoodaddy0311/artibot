@@ -164,3 +164,36 @@ describe('update/structure', () => {
     expect(content).toContain('runInstall');
   });
 });
+
+// ---------------------------------------------------------------------------
+// 7. update.js branch fallback 순서 검증
+// ---------------------------------------------------------------------------
+
+describe('update/branch fallback order', () => {
+  let updateContent;
+
+  it('update.js를 읽을 수 있음', () => {
+    updateContent = readFileSync(
+      path.join(PLUGIN_ROOT, 'scripts', 'update.js'), 'utf-8',
+    );
+    expect(updateContent).toBeTruthy();
+  });
+
+  it('artibot/master를 첫 번째 fallback으로 시도', () => {
+    const artibotMasterIdx = updateContent.indexOf('origin/artibot/master');
+    const masterIdx = updateContent.indexOf('origin/master', artibotMasterIdx + 1);
+    expect(artibotMasterIdx).toBeGreaterThan(-1);
+    expect(masterIdx).toBeGreaterThan(artibotMasterIdx);
+  });
+
+  it('master를 두 번째 fallback으로 시도', () => {
+    const masterIdx = updateContent.indexOf("'git pull origin master'");
+    const mainIdx = updateContent.indexOf("'git pull origin main'");
+    expect(masterIdx).toBeGreaterThan(-1);
+    expect(mainIdx).toBeGreaterThan(masterIdx);
+  });
+
+  it('수동 안내 메시지가 artibot/master를 참조', () => {
+    expect(updateContent).toContain('git pull origin artibot/master');
+  });
+});
