@@ -104,6 +104,31 @@ async function runParallel(entries, state) {
 }
 
 /**
+ * Execute extension hooks registered for a given event.
+ * Each handler receives the pipeline state and runs with an error boundary.
+ * Failures are logged but do not break the pipeline (graceful degradation).
+ *
+ * @param {object} registry - Extension registry instance
+ * @param {string} event - Hook event name (e.g. 'pre-command', 'post-execute')
+ * @param {object} state - Pipeline state
+ * @returns {Promise<void>}
+ */
+async function runExtensionHooks(registry, event, state) {
+  if (!registry) return;
+  const handlers = registry.getHooksForEvent(event);
+  if (handlers.length === 0) return;
+
+  for (const handler of handlers) {
+    try {
+      await handler(state);
+    } catch (err) {
+      process.stderr.write(`[artibot:extension-hook:${event}] ${err?.message || err}\n`);
+      state.messageParts.push(`ext-hook:${event}=error`);
+    }
+  }
+}
+
+/**
  * Create an Artibot runtime agent instance for hook integration.
  *
  * @param {object} [options]
@@ -268,11 +293,17 @@ export function createArtibotAgent(options = {}) {
         available: Object.keys(backend.backends || {}),
       };
 
+      // Post-pipeline extension hooks
+      await runExtensionHooks(extensions, 'post-execute', state);
+
       return {
         userPrompt: state.userPrompt,
         message: summarizeMessage(state.messageParts),
         context: state.context,
       };
     },
+
+    /** Extension registry — register/unregister skills and hooks at runtime. */
+    extensions,
   };
 }
