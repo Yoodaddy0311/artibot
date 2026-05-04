@@ -276,6 +276,40 @@ describe('loop-detector', () => {
       expect(result.severity).toBe('warn');
     });
 
+    it('isolates fingerprints by stepId (multi-step loop support)', () => {
+      const call = { tool: 'Read', args: { file: 'a.js' } };
+      // Without stepId: 3 identical calls → warn
+      detector.detectLoop(call);
+      detector.detectLoop(call);
+      const r1 = detector.detectLoop(call);
+      expect(r1.detected).toBe(true);
+      expect(r1.severity).toBe('warn');
+
+      // Reset and try with different stepIds — should NOT trigger
+      detector.resetHistory();
+      detector.detectLoop({ ...call, stepId: 'step-1' });
+      detector.detectLoop({ ...call, stepId: 'step-2' });
+      const r2 = detector.detectLoop({ ...call, stepId: 'step-3' });
+      expect(r2.detected).toBe(false);
+    });
+
+    it('detects loops within same stepId', () => {
+      const call = { tool: 'Read', args: { file: 'a.js' }, stepId: 'step-1' };
+      detector.detectLoop(call);
+      detector.detectLoop(call);
+      const result = detector.detectLoop(call);
+      expect(result.detected).toBe(true);
+      expect(result.severity).toBe('warn');
+    });
+
+    it('stepId undefined behaves like legacy (no isolation)', () => {
+      const call = { tool: 'Write', args: { path: '/x' } };
+      detector.detectLoop(call);
+      detector.detectLoop(call);
+      const result = detector.detectLoop(call);
+      expect(result.detected).toBe(true);
+    });
+
     it('differentiates args with different key order (stringify is consistent)', () => {
       // JSON.stringify preserves insertion order, so different order = different hash
       // However, this is implementation-aware — just testing the behavior

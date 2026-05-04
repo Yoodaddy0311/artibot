@@ -198,14 +198,21 @@ function pullLatestSource(installScriptDir) {
       }
       pullCmd = `git pull ${remote} ${branch}`;
     } catch {
-      // Fallback: try origin master, then origin main
+      // Fallback: try origin artibot/master (default branch), then origin main
       try {
-        execSync('git rev-parse --verify origin/master', {
+        execSync('git rev-parse --verify origin/artibot/master', {
           cwd: repo.gitRoot, stdio: 'ignore', timeout: 5000,
         });
-        pullCmd = 'git pull origin master';
+        pullCmd = 'git pull origin artibot/master';
       } catch {
-        pullCmd = 'git pull origin main';
+        try {
+          execSync('git rev-parse --verify origin/master', {
+            cwd: repo.gitRoot, stdio: 'ignore', timeout: 5000,
+          });
+          pullCmd = 'git pull origin master';
+        } catch {
+          pullCmd = 'git pull origin main';
+        }
       }
     }
 
@@ -232,7 +239,7 @@ function printManualInstructions() {
   console.log('');
   console.log('To update manually:');
   console.log('  cd <artibot-repo>/plugins/artibot');
-  console.log('  git pull origin master');
+  console.log('  git pull origin artibot/master');
   console.log('  bash install.sh');
   console.log('');
   console.log('Or download the latest release from:');

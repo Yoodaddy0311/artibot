@@ -40,6 +40,7 @@ function phaseRow(phase) {
  * @param {object} state
  * @returns {string}
  */
+// eslint-disable-next-line complexity -- report rendering inherently has many branches
 export function renderReport(state) {
   if (!state || typeof state !== 'object') {
     throw new TypeError('state object required');

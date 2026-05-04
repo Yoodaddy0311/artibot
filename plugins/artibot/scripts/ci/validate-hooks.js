@@ -30,12 +30,18 @@ const VALID_HOOK_EVENTS = new Set([
 
 function validateHookFields(hook, eventName, entryIdx, hookIdx) {
   let errors = 0;
+  const prefix = `hooks.${eventName}[${entryIdx}].hooks[${hookIdx}]`;
   if (!hook.type) {
-    console.error(`FAIL: hooks.${eventName}[${entryIdx}].hooks[${hookIdx}] missing "type".`);
+    console.error(`FAIL: ${prefix} missing "type".`);
     errors++;
   }
-  if (!hook.command) {
-    console.error(`FAIL: hooks.${eventName}[${entryIdx}].hooks[${hookIdx}] missing "command".`);
+  if (hook.type === 'prompt') {
+    if (!hook.prompt) {
+      console.error(`FAIL: ${prefix} type "prompt" missing "prompt" field.`);
+      errors++;
+    }
+  } else if (!hook.command) {
+    console.error(`FAIL: ${prefix} missing "command".`);
     errors++;
   }
   return errors;

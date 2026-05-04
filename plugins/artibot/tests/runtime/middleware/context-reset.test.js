@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   createContextResetMiddleware,
-  serializeHandoff,
   deserializeHandoff,
+  serializeHandoff,
 } from '../../../lib/runtime/middleware/context-reset.js';
 import * as eventBus from '../../../lib/core/event-bus.js';
 

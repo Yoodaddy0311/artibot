@@ -46,3 +46,12 @@ runtime/cache/
 runtime/state/
 !runtime/cache/webfetch/.gitkeep
 !runtime/state/.gitkeep
+
+# Generated reports / analyses / plugin design proposals (committed history kept; new files ignored)
+reports/
+**/_design/
+**/_analysis/
+**/_research/
+**/_proposals/
+*-design-spec.md
+*-analysis-report.md
