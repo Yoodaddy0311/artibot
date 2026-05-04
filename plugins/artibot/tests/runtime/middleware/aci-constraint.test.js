@@ -5,7 +5,7 @@ import {
   createAciConstraintMiddleware,
   ROLE_CONSTRAINTS,
 } from '../../../lib/runtime/middleware/aci-constraint.js';
-import { reset as resetEventBus, getLastEvent } from '../../../lib/core/event-bus.js';
+import { getLastEvent, reset as resetEventBus } from '../../../lib/core/event-bus.js';
 
 // ---------------------------------------------------------------------------
 // Helpers

@@ -52,4 +52,10 @@ export default [
       'complexity': 'off',
     },
   },
+  {
+    files: ['tests/**/smoke/**/*.{js,mjs}', 'tests/**/*.smoke.{js,mjs}'],
+    rules: {
+      'no-console': 'off',
+    },
+  },
 ];

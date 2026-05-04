@@ -10,7 +10,7 @@ import {
   startContract,
   VALID_TRANSITIONS,
 } from '../../lib/runtime/sprint-contract.js';
-import { reset as resetEventBus, getLastEvent } from '../../lib/core/event-bus.js';
+import { getLastEvent, reset as resetEventBus } from '../../lib/core/event-bus.js';
 
 // ---------------------------------------------------------------------------
 // Helpers

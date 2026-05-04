@@ -5,11 +5,11 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import {
-  evaluateSteps,
+  _test,
   adaptTask,
+  evaluateSteps,
   shouldContinue,
   solveWithFeedback,
-  _test,
 } from '../../lib/cognitive/multi-step-loop.js';
 
 // ---------------------------------------------------------------------------

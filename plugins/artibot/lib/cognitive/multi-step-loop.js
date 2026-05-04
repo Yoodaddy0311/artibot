@@ -226,7 +226,7 @@ export function solveWithFeedback(task, options = {}) {
 
   const iterationHistory = [];
   let currentTask = { ...task };
-  let completedStepIds = new Set();
+  const completedStepIds = new Set();
   let failedStepReasons = [];
   let feedbackLog = [];
   let previousRate = 0;
