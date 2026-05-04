@@ -10,6 +10,7 @@
  */
 
 import { loadConfig } from '../core/config.js';
+import { createExtensionRegistry } from '../core/extension.js';
 import { createCompositeBackend } from './backend/composite-backend.js';
 import { createRouterMiddleware } from './middleware/router.js';
 import { createMemoryMiddleware } from './middleware/memory.js';
@@ -111,25 +112,31 @@ async function runParallel(entries, state) {
  * @param {object} [options.backend] - Optional backend instance.
  * @param {Function[]} [options.middleware] - Optional custom middleware chain.
  * @param {() => number} [options.now] - Clock injection for deterministic tests.
+ * @param {object} [options.extensionRegistry] - Pre-created extension registry. If omitted, a new one is created.
  * @returns {{
  *   preparePrompt: ({ prompt, hookData }: { prompt: string, hookData?: object }) => Promise<{
  *     userPrompt: string,
  *     message: string,
  *     context: object
- *   }>
+ *   }>,
+ *   extensions: object
  * }}
  */
 export function createArtibotAgent(options = {}) {
   const now = options.now || Date.now;
   const checkpointStore = options.checkpointStore || new Map();
   const middlewareOptions = options.middlewareOptions || {};
+  const extensions = options.extensionRegistry || createExtensionRegistry();
 
   const backend = options.backend || createCompositeBackend(options.backendOptions);
   const customMiddleware = options.middleware || null;
 
   const mwRouter = createRouterMiddleware(middlewareOptions.router);
   const mwMemory = createMemoryMiddleware(middlewareOptions.memory);
-  const mwSkills = createSkillsMiddleware(middlewareOptions.skills);
+  const mwSkills = createSkillsMiddleware({
+    ...middlewareOptions.skills,
+    extensionRegistry: extensions,
+  });
   const mwTasks = createTasksMiddleware({ now, ...(middlewareOptions.tasks || {}) });
   const mwSubagents = createSubagentsMiddleware(middlewareOptions.subagents);
   const mwSummarization = createSummarizationMiddleware(middlewareOptions.summarization);
@@ -143,16 +150,40 @@ export function createArtibotAgent(options = {}) {
   });
   const mwLifecycle = createLifecycleMiddleware({ now, ...(middlewareOptions.lifecycle || {}) });
 
-  // TODO: bridge config.runtime.middleware — the config defines a middleware
-  // list intended to make this pipeline configurable. Implementing dynamic
-  // middleware loading requires a registry + ordering/dependency resolution.
-  // For now the pipeline is hardcoded below.
-  const allMiddleware = customMiddleware || [
-    mwLifecycle,
-    mwRouter, mwMemory, mwSkills, mwTasks,
-    mwSubagents, mwGuardrail, mwSummarization,
-    mwTokenUsage, mwCheckpoint,
+  // Middleware registry — maps config names to instances for config-driven filtering.
+  const middlewareRegistry = Object.freeze({
+    'lifecycle': mwLifecycle,
+    'router': mwRouter,
+    'memory': mwMemory,
+    'skills': mwSkills,
+    'tasks': mwTasks,
+    'subagents': mwSubagents,
+    'guardrail': mwGuardrail,
+    'summarization': mwSummarization,
+    'token-usage': mwTokenUsage,
+    'checkpoint': mwCheckpoint,
+  });
+
+  // Default pipeline names (determines execution order).
+  const defaultPipeline = [
+    'lifecycle',
+    'router', 'memory', 'skills', 'tasks',
+    'subagents', 'guardrail', 'summarization',
+    'token-usage', 'checkpoint',
   ];
+
+  // Resolve enabled middleware set from config.
+  // When config.runtime.middleware is a non-empty array, only listed middleware runs.
+  // When absent or empty, all default middleware runs (backward compatible).
+  const configList = options.config?.runtime?.middleware;
+  const enabledMiddleware = (Array.isArray(configList) && configList.length > 0)
+    ? new Set(configList.filter((name) => name in middlewareRegistry))
+    : new Set(defaultPipeline);
+
+  const allMiddleware = customMiddleware ||
+    defaultPipeline
+      .filter((name) => enabledMiddleware.has(name))
+      .map((name) => middlewareRegistry[name]);
 
   const configPromise = options.config
     ? Promise.resolve(options.config)
@@ -202,28 +233,33 @@ export function createArtibotAgent(options = {}) {
           await runMiddleware(apply.name || 'anonymous', apply, state);
         }
       } else {
+        const isEnabled = (name) => enabledMiddleware.has(name);
+
         // Phase 0: lifecycle setup (outermost — runs first, teardown context recorded)
-        await runMiddleware('lifecycle', mwLifecycle, state);
+        if (isEnabled('lifecycle')) await runMiddleware('lifecycle', mwLifecycle, state);
         // Phase 1: router (all others depend on routing/intent)
-        await runMiddleware('router', mwRouter, state);
+        if (isEnabled('router')) await runMiddleware('router', mwRouter, state);
         // Phase 2: memory, skills, tasks (independent, only read router output)
-        await runParallel([
+        const phase2 = [
           ['memory', mwMemory],
           ['skills', mwSkills],
           ['tasks', mwTasks],
-        ], state);
+        ].filter(([name]) => isEnabled(name));
+        if (phase2.length > 0) await runParallel(phase2, state);
         // Phase 3: subagents (depends on tasks)
-        await runMiddleware('subagents', mwSubagents, state);
-        // Phase 3.5: (reserved for future middleware)
+        if (isEnabled('subagents')) await runMiddleware('subagents', mwSubagents, state);
+        // Phase 3.5: extension hooks (run registered pre-command hooks)
+        await runExtensionHooks(extensions, 'pre-command', state);
         // Phase 4: guardrail (reads subagents/tasks tool lists + ACI constraints)
-        await runMiddleware('guardrail', mwGuardrail, state);
+        if (isEnabled('guardrail')) await runMiddleware('guardrail', mwGuardrail, state);
         // Phase 5: summarization (reads final userPrompt)
-        await runMiddleware('summarization', mwSummarization, state);
+        if (isEnabled('summarization')) await runMiddleware('summarization', mwSummarization, state);
         // Phase 6: token-usage + checkpoint (independent, read all context)
-        await runParallel([
-          ['tokenUsage', mwTokenUsage],
-          ['checkpoint', mwCheckpoint],
-        ], state);
+        const phase6 = [
+          isEnabled('token-usage') && ['tokenUsage', mwTokenUsage],
+          isEnabled('checkpoint') && ['checkpoint', mwCheckpoint],
+        ].filter(Boolean);
+        if (phase6.length > 0) await runParallel(phase6, state);
       }
 
       const selectedBackend = backend.selectBackend(state.context);

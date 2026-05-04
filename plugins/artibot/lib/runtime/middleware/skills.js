@@ -17,7 +17,79 @@ let _indexCache = null;
 const _skillCache = new Map();
 
 /**
- * Match skill index entries against intent keywords and command names.
+ * Keyword → dirName[] lookup index for O(m) matching.
+ * Built once per index load; invalidated on _resetSkillCaches().
+ * @type {Map<string, Set<string>> | null}
+ */
+let _keywordIndex = null;
+
+/**
+ * Build a keyword → skill dirName index from the skill index entries.
+ * Each entry's name, dirName, and triggers are tokenised and stored.
+ * Index is built once and reused across requests.
+ *
+ * @param {import('../../core/skill-exporter.js').SkillIndexEntry[]} index
+ * @returns {Map<string, Set<string>>}
+ */
+function buildKeywordIndex(index) {
+  /** @type {Map<string, Set<string>>} */
+  const kwIndex = new Map();
+
+  const addToken = (token, dirName) => {
+    const existing = kwIndex.get(token);
+    if (existing) {
+      existing.add(dirName);
+    } else {
+      kwIndex.set(token, new Set([dirName]));
+    }
+  };
+
+  for (const entry of index) {
+    const nameLower = entry.name.toLowerCase();
+    const dirLower = entry.dirName.toLowerCase();
+
+    // Index full name and dirName for substring matching
+    addToken(nameLower, entry.dirName);
+    addToken(dirLower, entry.dirName);
+
+    // Index individual triggers
+    for (const trigger of entry.triggers) {
+      const tLower = trigger.toLowerCase();
+      addToken(tLower, entry.dirName);
+    }
+  }
+
+  return kwIndex;
+}
+
+/**
+ * Substring fallback scan for partial matches.
+ * Extracted to reduce nesting depth in matchSkills.
+ *
+ * @param {string[]} lowerKeywords
+ * @param {number} maxConcurrent
+ * @param {Set<string>} matchSet - mutated in place
+ */
+function _substringFallback(lowerKeywords, maxConcurrent, matchSet) {
+  for (const kw of lowerKeywords) {
+    if (matchSet.size >= maxConcurrent) return;
+
+    for (const [token, dirNames] of _keywordIndex) {
+      if (matchSet.size >= maxConcurrent) return;
+      if (!(token.includes(kw) || kw.includes(token))) continue;
+
+      for (const dirName of dirNames) {
+        if (matchSet.size >= maxConcurrent) return;
+        matchSet.add(dirName);
+      }
+    }
+  }
+}
+
+/**
+ * Match skill index entries against intent keywords using the keyword index.
+ * Complexity: O(m * k) where m = input keywords, k = avg index hits per keyword.
+ * Falls back to substring scan for partial matches not covered by exact lookup.
  *
  * @param {import('../../core/skill-exporter.js').SkillIndexEntry[]} index
  * @param {string[]} keywords - Intent keywords + command names to match
@@ -25,25 +97,33 @@ const _skillCache = new Map();
  * @returns {string[]} Matched skill dirNames
  */
 function matchSkills(index, keywords, maxConcurrent) {
+  if (!_keywordIndex) {
+    _keywordIndex = buildKeywordIndex(index);
+  }
+
   const lowerKeywords = keywords.map((k) => k.toLowerCase().replace(/^\//, ''));
-  const matches = [];
+  /** @type {Set<string>} */
+  const matchSet = new Set();
 
-  for (const entry of index) {
-    if (matches.length >= maxConcurrent) break;
+  // Phase 1: Exact lookup — keyword matches an indexed token
+  for (const kw of lowerKeywords) {
+    if (matchSet.size >= maxConcurrent) break;
 
-    const nameMatch = lowerKeywords.some((kw) =>
-      entry.name.toLowerCase().includes(kw) || entry.dirName.toLowerCase().includes(kw),
-    );
-    const triggerMatch = entry.triggers.some((t) =>
-      lowerKeywords.some((kw) => t.includes(kw) || kw.includes(t)),
-    );
-
-    if (nameMatch || triggerMatch) {
-      matches.push(entry.dirName);
+    const exact = _keywordIndex.get(kw);
+    if (exact) {
+      for (const dirName of exact) {
+        if (matchSet.size >= maxConcurrent) break;
+        matchSet.add(dirName);
+      }
     }
   }
 
-  return matches;
+  // Phase 2: Substring fallback — covers kw.includes(trigger) and name.includes(kw)
+  if (matchSet.size < maxConcurrent) {
+    _substringFallback(lowerKeywords, maxConcurrent, matchSet);
+  }
+
+  return [...matchSet];
 }
 
 /**
@@ -53,6 +133,7 @@ function matchSkills(index, keywords, maxConcurrent) {
  * @param {boolean} [options.lazyLoading.enabled=false] - Enable lazy loading mode.
  * @param {number} [options.lazyLoading.maxConcurrent=5] - Max skills to load per request.
  * @param {string} [options.pluginRoot] - Override plugin root path.
+ * @param {object} [options.extensionRegistry] - Extension registry for dynamic skill lookup.
  * @returns {(state: object) => Promise<object>}
  */
 export function createSkillsMiddleware(options = {}) {
@@ -60,8 +141,9 @@ export function createSkillsMiddleware(options = {}) {
   const lazyConfig = options.lazyLoading || {};
   const lazyEnabled = lazyConfig.enabled === true;
   const pluginRoot = options.pluginRoot;
+  const extensionRegistry = options.extensionRegistry || null;
 
-   
+
   return async function skillsMiddleware(state) {
     // Bridge: prefer creation-time options, fall back to runtime config
     const runtimeLazy = state.config?.skills?.lazyLoading || {};
@@ -119,6 +201,35 @@ export function createSkillsMiddleware(options = {}) {
       }
     }
 
+    // Merge extension-registered skills into suggestions
+    let extensionMatched = [];
+    if (extensionRegistry) {
+      const { skills: extSkills } = extensionRegistry.listExtensions();
+      if (extSkills.length > 0) {
+        const keywords = [
+          ...(intentInfo.intents || []),
+          ...(intentInfo.commands || []),
+          bestIntent,
+          bestCommand,
+        ].filter(Boolean).map((k) => k.toLowerCase().replace(/^\//, ''));
+
+        for (const ext of extSkills) {
+          const extName = ext.name.toLowerCase();
+          const extTriggers = Array.isArray(ext.config.triggers) ? ext.config.triggers : [];
+          const nameHit = keywords.some((kw) => extName.includes(kw) || kw.includes(extName));
+          const triggerHit = extTriggers.some((t) =>
+            keywords.some((kw) => t.toLowerCase().includes(kw) || kw.includes(t.toLowerCase())),
+          );
+          if (nameHit || triggerHit) {
+            extensionMatched.push(ext.name);
+            if (!deduped.includes(ext.name)) {
+              deduped.push(ext.name);
+            }
+          }
+        }
+      }
+    }
+
     state.context.skills = {
       suggested: deduped,
       source,
@@ -126,6 +237,9 @@ export function createSkillsMiddleware(options = {}) {
         loaded: loaded.map((s) => s.name),
         cacheSize: _skillCache.size,
         indexSize: _indexCache?.length ?? 0,
+      }),
+      ...(extensionMatched.length > 0 && {
+        extensionSkills: extensionMatched,
       }),
     };
 
@@ -146,5 +260,18 @@ export function createSkillsMiddleware(options = {}) {
 export function _resetSkillCaches() {
   _indexCache = null;
   _skillCache.clear();
+  _keywordIndex = null;
 }
+
+/**
+ * Expose keyword index for testing/inspection.
+ * Returns null if index has not been built yet.
+ * @returns {Map<string, Set<string>> | null}
+ */
+export function _getKeywordIndex() {
+  return _keywordIndex;
+}
+
+// Re-export for unit testing
+export { buildKeywordIndex as _buildKeywordIndex };
 
