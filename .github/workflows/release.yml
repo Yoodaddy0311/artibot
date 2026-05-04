@@ -105,3 +105,64 @@ jobs:
           draft: false
           prerelease: ${{ contains(github.ref_name, '-rc') || contains(github.ref_name, '-beta') || contains(github.ref_name, '-alpha') }}
           generate_release_notes: true
+
+  sync-readmes:
+    name: Sync README badges
+    needs: release
+    # Only run on stable releases (skip rc/beta/alpha pre-releases)
+    if: ${{ !contains(github.ref_name, '-rc') && !contains(github.ref_name, '-beta') && !contains(github.ref_name, '-alpha') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout artibot/master
+        uses: actions/checkout@v5
+        with:
+          ref: artibot/master
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - name: Compute counts
+        id: counts
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          AGENTS=$(find plugins/artibot/agents -maxdepth 1 -type f -name '*.md' | wc -l | tr -d ' ')
+          COMMANDS=$(find plugins/artibot/commands -maxdepth 1 -type f -name '*.md' | wc -l | tr -d ' ')
+          SKILLS=$(find plugins/artibot/skills -maxdepth 1 -mindepth 1 -type d | wc -l | tr -d ' ')
+          TESTS=$(find plugins/artibot/tests -type f \( -name '*.test.js' -o -name '*.spec.js' \) | wc -l | tr -d ' ')
+          {
+            echo "version=${VERSION}"
+            echo "agents=${AGENTS}"
+            echo "commands=${COMMANDS}"
+            echo "skills=${SKILLS}"
+            echo "tests=${TESTS}"
+          } >> "$GITHUB_OUTPUT"
+          echo "Computed: v${VERSION} | agents=${AGENTS} commands=${COMMANDS} skills=${SKILLS} tests=${TESTS}"
+
+      - name: Update version badges in READMEs
+        env:
+          VERSION: ${{ steps.counts.outputs.version }}
+        run: |
+          # Both README badges: shields.io version-X.Y.Z-blue
+          sed -i -E "s|version-[0-9]+\.[0-9]+\.[0-9]+-blue|version-${VERSION}-blue|g" README.md
+          sed -i -E "s|version-[0-9]+\.[0-9]+\.[0-9]+-blue|version-${VERSION}-blue|g" plugins/artibot/README.md
+          # Root README plugin table row for artibot
+          sed -i -E "s|(\[\`artibot\`\]\(\./plugins/artibot/\) \| Claude Code \(developer CLI\) \| )\*\*[0-9]+\.[0-9]+\.[0-9]+\*\*|\1**${VERSION}**|" README.md
+
+      - name: Commit and push README updates
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add README.md plugins/artibot/README.md
+          if git diff --cached --quiet; then
+            echo "No README changes to commit."
+            exit 0
+          fi
+          git commit -m "docs(release): sync README badges to ${GITHUB_REF_NAME} [skip ci]"
+          git push origin artibot/master
