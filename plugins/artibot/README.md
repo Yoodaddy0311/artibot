@@ -1,6 +1,6 @@
 # Artibot
 
-[![Version](https://img.shields.io/badge/version-3.9.0-blue?style=flat-square)](./CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-4.4.1-blue?style=flat-square)](./CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](./LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen?style=flat-square)](./package.json)
 [![Tests](https://img.shields.io/badge/tests-passing-brightgreen?style=flat-square)](./tests/)
@@ -167,7 +167,7 @@ Key fields in `artibot.config.json` (file is auto-validated against schema):
 
 | Field | Default | Purpose |
 |---|---|---|
-| `version` | `3.9.0` | Synced across plugin.json / package.json / artibot.config.json |
+| `version` | `4.4.1` | Synced across plugin.json / package.json / artibot.config.json |
 | `cognitive.router.threshold` | `0.4` | System 1 ↔ System 2 boundary |
 | `cognitive.system1.maxLatency` | `100` | ms — System 1 response cap before escalation |
 | `learning.lifelong.batchSize` | `50` | Experiences per GRPO batch |
@@ -186,7 +186,7 @@ Full configuration reference: [설정](#설정) section.
 
 ## Roadmap
 
-**v3.9.0 (current, stable)** — OTEL exporter + multi-session dashboard + session aggregator. See [CHANGELOG](./CHANGELOG.md).
+**v4.4.1 (current, stable)** — Capture-Only Mode + autopilot.enabled config kill-switch. See [CHANGELOG](./CHANGELOG.md).
 
 **v4.x candidates** (see `_reports/ai-ecosystem-research-2026-04-24.md` Section 8):
 
