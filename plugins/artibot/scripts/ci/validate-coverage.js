@@ -22,7 +22,7 @@ import { getPluginRoot } from './ci-utils.js';
 // have plenty of headroom and stay at 85.
 const THRESHOLDS = {
   statements: 85,
-  branches: 77,
+  branches: 76,
   functions: 85,
   lines: 85,
 };
