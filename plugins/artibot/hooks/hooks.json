@@ -372,8 +372,9 @@
         "matcher": "*",
         "hooks": [
           {
-            "type": "prompt",
-            "prompt": "Run the DEV verify checklist before finalising. (1) DECOMPOSE: was every numbered item from the original request addressed? List any silently dropped items. (2) EXECUTE: was each modified file re-read after the change to confirm the edit landed at the intended line? (3) VERIFY: produce evidence per item (file:line + what changed). If any item lacks evidence, surface a 'Pending verification' note BEFORE the user sees the response. Reference: plugins/artibot/CLAUDE.md (DEV Protocol section)."
+            "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/dev-verify-gate.js",
+            "timeout": 5000
           }
         ],
         "priority": "operational",

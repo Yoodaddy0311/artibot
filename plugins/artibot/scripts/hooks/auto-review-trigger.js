@@ -202,29 +202,38 @@ function saveFingerprint(pluginRoot, fingerprint) {
 }
 
 /**
- * Build the JSON payload for Stop/SubagentStop additionalContext.
+ * Build the JSON payload for Stop/SubagentStop.
+ *
+ * Stop/SubagentStop schema (Claude Code) only honors `decision: "block" + reason`.
+ * `hookSpecificOutput.additionalContext` is silently ignored on Stop events
+ * (it is valid for UserPromptSubmit / SessionStart / PreCompact only).
+ *
+ * `decision: "block"` prevents Claude from stopping; `reason` is fed back as
+ * system feedback so the next turn spawns the recommended reviewer agent.
+ *
  * @param {string[]} agents
  * @param {string[]} reasons
  * @param {number} fileCount
- * @param {string} eventName
+ * @param {string} eventName - reserved for future per-event branching
  * @returns {object}
  */
 function buildOutput(agents, reasons, fileCount, eventName) {
-  const ctx =
+  void eventName;
+  const reason =
     `[auto-review-required] agents: [${agents.join(', ')}]. ` +
     `Detected ${fileCount} changed file(s) — ${reasons.join('; ')}. ` +
     `Auto-spawn Task(subagent_type='${agents[0]}') to cross-check before reporting done.`;
-  return {
-    hookSpecificOutput: {
-      hookEventName: eventName,
-      additionalContext: ctx,
-    },
-  };
+  return { decision: 'block', reason };
 }
 
 async function main() {
   const raw = await readStdin();
   const hookData = parseJSON(raw) ?? {};
+
+  // Loop guard: Claude Code sets stop_hook_active=true when re-running Stop
+  // hooks after a previous block. Bail to prevent infinite block→retry loops.
+  if (hookData.stop_hook_active === true) return;
+
   const eventName = hookData?.hook_event_name === 'SubagentStop' ? 'SubagentStop' : 'Stop';
 
   const repoRoot = getRepoRoot();
