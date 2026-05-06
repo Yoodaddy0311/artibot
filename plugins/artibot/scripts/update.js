@@ -15,7 +15,7 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -182,42 +182,47 @@ function pullLatestSource(installScriptDir) {
   }
 
   try {
-    // Detect current branch and its upstream remote for smart pull
-    let pullCmd = 'git pull';
+    // Detect current branch + upstream remote for smart pull.
+    //
+    // Security: pullArgs MUST be passed to execFileSync as an array — never
+    // interpolated into a shell string. Branch names CAN contain shell
+    // metachars (semicolons, backticks). String interpolation would let a
+    // malicious origin (or a tampered local repo) inject arbitrary shell.
+    let pullArgs = ['pull'];
     try {
-      const branch = execSync('git rev-parse --abbrev-ref HEAD', {
+      const branch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
         cwd: repo.gitRoot, encoding: 'utf-8', timeout: 5000,
       }).trim();
       let remote = 'origin';
       try {
-        remote = execSync(`git config --get branch.${branch}.remote`, {
+        remote = execFileSync('git', ['config', '--get', `branch.${branch}.remote`], {
           cwd: repo.gitRoot, encoding: 'utf-8', timeout: 5000,
         }).trim() || 'origin';
       } catch {
         // No upstream configured — default to origin
       }
-      pullCmd = `git pull ${remote} ${branch}`;
+      pullArgs = ['pull', remote, branch];
     } catch {
       // Fallback: try origin artibot/master (default branch), then origin main
       try {
-        execSync('git rev-parse --verify origin/artibot/master', {
+        execFileSync('git', ['rev-parse', '--verify', 'origin/artibot/master'], {
           cwd: repo.gitRoot, stdio: 'ignore', timeout: 5000,
         });
-        pullCmd = 'git pull origin artibot/master';
+        pullArgs = ['pull', 'origin', 'artibot/master'];
       } catch {
         try {
-          execSync('git rev-parse --verify origin/master', {
+          execFileSync('git', ['rev-parse', '--verify', 'origin/master'], {
             cwd: repo.gitRoot, stdio: 'ignore', timeout: 5000,
           });
-          pullCmd = 'git pull origin master';
+          pullArgs = ['pull', 'origin', 'master'];
         } catch {
-          pullCmd = 'git pull origin main';
+          pullArgs = ['pull', 'origin', 'main'];
         }
       }
     }
 
     console.log(`  Pulling latest source from ${repo.gitRoot}...`);
-    execSync(pullCmd, {
+    execFileSync('git', pullArgs, {
       cwd: repo.gitRoot,
       stdio: 'inherit',
       timeout: 30_000,
@@ -336,7 +341,7 @@ function findBash() {
 
   for (const candidate of candidates) {
     try {
-      execSync(`"${candidate}" --version`, { stdio: 'ignore', timeout: 5000 });
+      execFileSync(candidate, ['--version'], { stdio: 'ignore', timeout: 5000 });
       return candidate;
     } catch {
       continue;
@@ -363,7 +368,7 @@ function runInstall(preResolvedPath) {
     );
   }
 
-  execSync(`"${bash}" "${installScript}"`, { stdio: 'inherit', timeout: 300_000 });
+  execFileSync(bash, [installScript], { stdio: 'inherit', timeout: 300_000 });
 }
 
 // ---------------------------------------------------------------------------
@@ -489,7 +494,7 @@ async function main() {
     const newPluginRoot = path.join(home, '.claude', 'artibot');
     const autodetectPath = path.join(newPluginRoot, 'scripts', 'swarm-autodetect.js');
     if (existsSync(autodetectPath)) {
-      const result = execSync(`node "${autodetectPath}" --auto`, {
+      const result = execFileSync(process.execPath, [autodetectPath, '--auto'], {
         encoding: 'utf-8',
         stdio: ['ignore', 'pipe', 'pipe'],
         timeout: 30000,
@@ -508,7 +513,22 @@ async function main() {
   console.log('RESTART REQUIRED: Please restart Claude Code for the update to take effect.');
 }
 
-main().catch((err) => {
-  console.error(`[artibot:update] Unexpected error: ${err.message}`);
-  process.exit(1);
-});
+// Only run main() when invoked as a CLI script, not when imported by tests.
+const isCliEntrypoint = process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
+if (isCliEntrypoint) {
+  main().catch((err) => {
+    console.error(`[artibot:update] Unexpected error: ${err.message}`);
+    process.exit(1);
+  });
+}
+
+// Named exports for unit testing. Leaves CLI behavior unchanged.
+export {
+  readCurrentVersion,
+  resolveHome,
+  findInstallScript,
+  findBash,
+  findSourceRepo,
+  saveBackupInfo,
+  clearCache,
+};
