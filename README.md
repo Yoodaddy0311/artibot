@@ -1,6 +1,6 @@
 # Artibot
 
-[![Version](https://img.shields.io/badge/version-4.5.1-blue?style=flat-square)](plugins/artibot/CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-4.5.2-blue?style=flat-square)](plugins/artibot/CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-18%2B-brightgreen?style=flat-square)](package.json)
 [![Tests](https://img.shields.io/badge/tests-passing-brightgreen?style=flat-square)](plugins/artibot/tests/)
@@ -16,8 +16,8 @@ This repository ships **two complementary plugins** under one marketplace:
 
 | Plugin | Target | Version | Best for |
 |---|---|---|---|
-| [`artibot`](./plugins/artibot/) | Claude Code (developer CLI) | **4.5.1** | full Agent Teams orchestration, TDD, code review, security audits, GRPO learning, MCP server |
-| [`artibot-cowork`](./plugins/artibot-cowork/) | Claude Cowork (knowledge workers) | **4.5.1** | marketing campaigns, long-form writing, AEO/GEO content, KR-market SEO, AI-slop detection |
+| [`artibot`](./plugins/artibot/) | Claude Code (developer CLI) | **4.5.2** | full Agent Teams orchestration, TDD, code review, security audits, GRPO learning, MCP server |
+| [`artibot-cowork`](./plugins/artibot-cowork/) | Claude Cowork (knowledge workers) | **0.4.0** | marketing campaigns, long-form writing, AEO/GEO content, KR-market SEO, AI-slop detection |
 
 Both plugins share the same DEV protocol, Korean market expertise, data-sovereignty policy, and 6-stage content quality pipeline. They differ only in **target environment** and **skill mix**.
 
@@ -876,11 +876,11 @@ You can install **both** in the same Anthropic account — `artibot` runs in you
 <details>
 <summary>Version history</summary>
 
-- **4.5.1** (2026-04-20) — Initial Claude 4.7 migration tag (superseded by 2.7.0 for version-alignment)
-- **4.5.1** (2026-04-15) — GRPO reactivation + auto-invoke hardening + retention policy
-- **4.5.1** — Git-based swarm + cross-device activation
-- **4.5.1** (2026-04-08) — Rationalizations, source_hash, toolset consolidation
-- **4.5.1** — Auto-learning pipeline, runtime middleware engine (9 stages)
+- **2.6.0** (2026-04-20) — Initial Claude 4.7 migration tag (superseded by 2.7.0 for version-alignment)
+- **2.5.0** (2026-04-15) — GRPO reactivation + auto-invoke hardening + retention policy
+- **2.4.0** — Git-based swarm + cross-device activation
+- **2.3.0** (2026-04-08) — Rationalizations, source_hash, toolset consolidation
+- **1.14.3** — Auto-learning pipeline, runtime middleware engine (9 stages)
 
 </details>
 
