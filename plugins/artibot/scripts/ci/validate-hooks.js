@@ -26,6 +26,12 @@ const VALID_HOOK_EVENTS = new Set([
   'Notification',
   'TaskCompleted',
   'PermissionRequest',
+  // Claude Agent SDK extension events (snake_case namespace).
+  // Recognized by the SDK runtime even though Claude Code surfaces
+  // its native events in PascalCase. Whitelisted to silence WARN noise.
+  'on_handoff',
+  'on_llm_start',
+  'on_llm_end',
 ]);
 
 function validateHookFields(hook, eventName, entryIdx, hookIdx) {

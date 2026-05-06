@@ -12,6 +12,11 @@ on:
 permissions:
   contents: read
 
+# Force JavaScript actions onto Node 24 ahead of GitHub's 2026-06-02 default switch.
+# Suppresses the Node 20 deprecation annotation emitted by older action versions.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   validate:
     name: Validate (Node ${{ matrix.node-version }})
