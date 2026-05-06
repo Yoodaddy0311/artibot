@@ -25,6 +25,7 @@
 import path from 'node:path';
 import { execSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import {
   atomicWriteSync,
   getPluginRoot,
@@ -106,12 +107,20 @@ function getChangedFiles(repoRoot) {
 }
 
 /**
+ * Build the cache fingerprint for loop-guard.
+ *
+ * Includes a short hash of `repoRoot` so different worktrees / repos sharing
+ * one plugin install don't collide on the same fingerprint file (worktree A's
+ * Stop would otherwise suppress worktree B's DEV verify reminder).
+ *
+ * @param {string} repoRoot
  * @param {string} sha
  * @param {string[]} files
  * @returns {string}
  */
-function buildFingerprint(sha, files) {
-  return `${sha}|${files.slice().sort().join(',')}`;
+function buildFingerprint(repoRoot, sha, files) {
+  const repoHash = createHash('sha1').update(repoRoot).digest('hex').slice(0, 8);
+  return `${repoHash}|${sha}|${files.slice().sort().join(',')}`;
 }
 
 /**
@@ -158,7 +167,7 @@ async function main() {
 
   const headSha = getHeadSha(repoRoot) || 'unknown';
   const pluginRoot = getPluginRoot();
-  const fingerprint = buildFingerprint(headSha, changedFiles);
+  const fingerprint = buildFingerprint(repoRoot, headSha, changedFiles);
   if (readLastFingerprint(pluginRoot) === fingerprint) return; // already verified
 
   saveFingerprint(pluginRoot, fingerprint);

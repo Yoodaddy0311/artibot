@@ -700,7 +700,7 @@ plugins/artibot/
 +-- hooks/
 |   +-- hooks.json               # Hook event mappings
 +-- scripts/
-|   +-- hooks/                   # 51 hook scripts (ESM)
+|   +-- hooks/                   # 52 hook scripts (ESM)
 |   +-- ci/                      # 6 CI validation scripts
 |   +-- evals/                   # Runtime eval suite
 |   +-- utils/
