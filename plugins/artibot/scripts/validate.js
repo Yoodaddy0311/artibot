@@ -199,8 +199,10 @@ async function validateHooks() {
       'SubagentStart', 'SubagentStop', 'SubAgentTurn',
       'TeammateIdle', 'Notification',
       'TaskCompleted', 'PermissionRequest',
-      // User-defined extension events (Artibot AD-07): orchestration lifecycle taps
-      // not part of the Claude Code platform spec but registered intentionally.
+      // Anthropic Agent SDK extension events (Artibot AD-07): reserved for future
+      // SDK-side wiring. Not registered in hooks.json since v4.5.4 — Claude Code's
+      // native hook loader rejects snake_case event keys at startup. Whitelisted
+      // here so the validator stays quiet if SDK config files reintroduce them.
       'on_handoff', 'on_llm_start', 'on_llm_end'
     ];
     const validHookTypes = ['command', 'prompt', 'agent'];

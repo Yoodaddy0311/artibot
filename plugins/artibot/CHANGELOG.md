@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.5.4] - 2026-05-06
+
+Patch release — fix `/doctor` plugin load errors. Removes the three Anthropic Agent SDK extension events (`on_handoff`, `on_llm_start`, `on_llm_end`) from `hooks/hooks.json` because Claude Code's native hook loader (Zod schema) rejects snake_case event keys at startup, causing every session to surface "Hook load failed" plugin errors.
+
+### Root Cause
+
+AD-07 wired the SDK extension events directly into `hooks.json` and v4.5.1 silenced our internal CI validator's `WARN` noise via a whitelist. That whitelist only quieted *our* validators — Claude Code's runtime loader still rejected the unknown keys, so `/doctor` reported three plugin load errors per session. Validator silence ≠ runtime acceptance.
+
+### Fixed
+
+- **`hooks/hooks.json`** — removed top-level `on_handoff`, `on_llm_start`, `on_llm_end` event blocks (42 lines). `InstructionsLoaded` is now the last entry.
+- **`scripts/hooks/on-{handoff,llm-start,llm-end}.js`** — header comments updated. The stub scripts are preserved as Anthropic Agent SDK extension stubs reserved for future SDK-side wiring (e.g. an `sdkHooks` block in `artibot.config.json`).
+- **`scripts/validate.js` & `scripts/ci/validate-hooks.js`** — whitelist comments clarified. The three event names stay whitelisted so the validator stays quiet if a future SDK config reintroduces them, but the comments now explicitly state they are not registered in `hooks.json`.
+
+### Notes
+
+- No functional change for Claude Code users — the three stubs were pass-through (`{continue: true}`) and never produced observable behavior.
+- Test `tests/scripts/validate.test.js:36` still passes vacuously (the events are no longer in the live `hooks.json`, so the "no Unknown hook event warning" assertion holds).
+- CHANGELOG gap (4.5.0–4.5.3) is tracked in `memory/MEMORY.md` Sprint History; this entry only covers v4.5.4.
+
+---
+
 ## [4.4.1] - 2026-05-03
 
 Patch release — wire up the documented `autopilot.enabled` config kill-switch in the NLU trigger hook. Closes a doc/code gap where `commands/autopilot.md` claimed the flag disabled autopilot suggestion, but the hook only consulted `team.autoApply` / `team.enabled`.

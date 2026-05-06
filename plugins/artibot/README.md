@@ -1,6 +1,6 @@
 # Artibot
 
-[![Version](https://img.shields.io/badge/version-4.5.3-blue?style=flat-square)](./CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-4.5.4-blue?style=flat-square)](./CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](./LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen?style=flat-square)](./package.json)
 [![Tests](https://img.shields.io/badge/tests-passing-brightgreen?style=flat-square)](./tests/)
@@ -167,7 +167,7 @@ Key fields in `artibot.config.json` (file is auto-validated against schema):
 
 | Field | Default | Purpose |
 |---|---|---|
-| `version` | `4.5.3` | Synced across plugin.json / package.json / artibot.config.json |
+| `version` | `4.5.4` | Synced across plugin.json / package.json / artibot.config.json |
 | `cognitive.router.threshold` | `0.4` | System 1 ↔ System 2 boundary |
 | `cognitive.system1.maxLatency` | `100` | ms — System 1 response cap before escalation |
 | `learning.lifelong.batchSize` | `50` | Experiences per GRPO batch |
@@ -186,7 +186,9 @@ Full configuration reference: [설정](#설정) section.
 
 ## Roadmap
 
-**v4.5.3 (current, stable)** — Security hardening + test coverage. `scripts/update.js` migrated all 5 `execSync` sites to `execFileSync` (eliminates theoretical shell injection via malicious branch names). 17-test coverage added for previously-untested update.js helpers. MEMORY.md Known Issues cleaned. See [CHANGELOG](./CHANGELOG.md).
+**v4.5.4 (current, stable)** — `/doctor` plugin error fix. Removed three Anthropic Agent SDK extension events (`on_handoff`, `on_llm_start`, `on_llm_end`) from `hooks/hooks.json` because Claude Code's native loader rejects snake_case event keys at startup. Stub scripts preserved as reserved SDK extension points. See [CHANGELOG](./CHANGELOG.md).
+
+**v4.5.3** — Security hardening + test coverage. `scripts/update.js` migrated all 5 `execSync` sites to `execFileSync` (eliminates theoretical shell injection via malicious branch names). 17-test coverage added for previously-untested update.js helpers.
 
 **v4.5.2** — `release.yml` sed regex hardened (GNU sed `-E` `\|` alternation footgun). Restored history bullets damaged in v4.5.0/v4.5.1 sync.
 

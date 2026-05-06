@@ -707,48 +707,6 @@
         "priority": "operational",
         "category": "lifecycle"
       }
-    ],
-    "on_handoff": [
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/on-handoff.js",
-            "timeout": 5000
-          }
-        ],
-        "priority": "observability",
-        "category": "orchestration"
-      }
-    ],
-    "on_llm_start": [
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/on-llm-start.js",
-            "timeout": 5000
-          }
-        ],
-        "priority": "observability",
-        "category": "orchestration"
-      }
-    ],
-    "on_llm_end": [
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/on-llm-end.js",
-            "timeout": 5000
-          }
-        ],
-        "priority": "observability",
-        "category": "orchestration"
-      }
     ]
   }
 }
