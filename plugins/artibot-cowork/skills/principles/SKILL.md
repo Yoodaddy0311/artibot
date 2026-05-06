@@ -3,65 +3,123 @@ context: fork
 user-invocable: false
 name: principles
 description: |
-  Core development principles enforcing SOLID, DRY, KISS, YAGNI, and quality-first design.
-  Auto-activates when: writing code, making design decisions, refactoring, reviewing architecture.
-  Triggers: design, architecture, refactor, pattern, principle, SOLID, clean code
-platforms: [claude-code, gemini-cli, codex-cli, cursor]
+  Core principles enforcing quality-first design, DEV protocol, Auto Mode safety, and Zero-Skip policy.
+  Auto-activates when: making decisions, reviewing work, designing workflows, using Auto Mode.
+  Triggers: design, principle, auto mode, autonomous, 자동, 원칙, quality, DEV protocol
+platforms: [claude-cowork, claude-code, gemini-cli, codex-cli, cursor]
 level: 3
 triggers:
   - "design"
-  - "architecture"
-  - "refactor"
-  - "pattern"
   - "principle"
-  - "SOLID"
-  - "clean code"
-  - "DRY"
-allowed-tools: [Read, Grep, Glob]
+  - "auto mode"
+  - "autonomous"
+  - "quality"
+  - "DEV protocol"
+  - "자동"
+  - "원칙"
 agents:
-  - "architect"
-  - "refactor-cleaner"
-tokens: "~3K"
-category: "code-quality"
+  - "orchestrator"
+  - "planner"
+tokens: "~4K"
+category: "quality"
 ---
 
 # Development Principles
 
 ## When This Skill Applies
-- Writing new code or modifying existing code
-- Making architectural or design decisions
-- Refactoring or improving code quality
-- Reviewing pull requests or code structure
-- Evaluating trade-offs between approaches
+- 마케팅/콘텐츠 결정을 내리거나 전략을 검토할 때
+- Auto Mode 사용 전 안전 체크리스트 확인
+- 에이전트 팀 조율 시 품질 게이트 설정
+- DEV Protocol 준수 여부 검증
+- 워크플로우 설계 및 루틴 정의
 
 ## Core Guidance
 
-### SOLID Principles
-- **S**ingle Responsibility: One class/function = one reason to change
-- **O**pen/Closed: Open for extension, closed for modification
-- **L**iskov Substitution: Subtypes must be substitutable for base types
-- **I**nterface Segregation: No forced dependency on unused interfaces
-- **D**ependency Inversion: Depend on abstractions, not concretions
+### 마케팅 워크 원칙
 
-See `${CLAUDE_SKILL_DIR}/references/solid.md` for detailed examples.
+- **Evidence > Assumptions**: 데이터와 리서치로 검증, 직관에만 의존 금지
+- **KISS**: 가장 단순한 전략이 최선. 복잡성은 실행 리스크
+- **YAGNI**: 지금 필요한 것만. 미래의 가상 캠페인을 위해 설계하지 않기
+- **DRY**: 반복 작업은 루틴으로 자동화. 같은 브리프를 두 번 쓰지 않기
+- **Measure First**: 최적화 전에 베이스라인 측정
 
-### Design Principles
-- **DRY**: Abstract common functionality, eliminate duplication
-- **KISS**: Simplest solution that works. Complexity is a cost.
-- **YAGNI**: Only implement current requirements. No speculative features.
-- **Composition > Inheritance**: Favor object composition
-- **Loose Coupling + High Cohesion**: Minimize dependencies, group related logic
+### 의사결정 프레임워크
 
-### Decision Framework
-1. **Evidence > Assumptions**: Verify with tests, metrics, documentation
-2. **Code > Documentation**: Working code is the source of truth
-3. **Measure first**: Profile before optimizing
-4. **Reversibility**: Prefer reversible decisions when uncertain
-5. **Trade-off analysis**: Consider immediate vs. long-term impact
+1. **Evidence > Assumptions**: 주장마다 데이터 소스 또는 리서치 근거 첨부
+2. **Reversibility**: 불확실할 때는 되돌릴 수 있는 결정 우선 (소규모 테스트 → 확대)
+3. **Trade-off 분석**: 단기 전환율 vs. 장기 브랜드 가치, 비용 vs. 품질
+4. **User > Platform**: 플랫폼 알고리즘이 아니라 실제 사용자를 위해 설계
+
+### Auto Mode 안전 가이드
+
+Auto Mode는 Claude가 중간 확인 없이 여러 작업을 자율 실행하는 모드입니다.
+
+#### 허용: Auto Mode에서 자율 실행 가능한 작업
+
+| 작업 유형 | 예시 | 이유 |
+|----------|------|------|
+| 리서치 & 분석 | 경쟁사 분석, 시장 조사 | 외부 데이터 읽기 전용 |
+| 초안 생성 | 콘텐츠 초안, 이메일 초안 | 검토 전 발행 없음 |
+| 데이터 집계 | 지표 수집, 리포트 생성 | 계산/요약만 수행 |
+| 스킬 체인 | 순차 스킬 실행 | 가이드/참조 호출만 |
+| 문서 업데이트 초안 | 변경 사항 반영 초안 | 사용자 검토 후 적용 |
+
+#### 차단: Auto Mode에서 사람 확인 필요한 작업
+
+| 작업 유형 | 예시 | 이유 |
+|----------|------|------|
+| **외부 발행** | SNS 포스팅, 이메일 발송 | 되돌릴 수 없음, 브랜드 노출 |
+| **예산 집행** | 광고 입찰 변경, 예산 조정 | 금전적 영향 |
+| **계정 설정 변경** | 광고 계정, CRM 설정 | 범위가 큰 영향 |
+| **법적 문서** | 계약서, 개인정보 관련 | 법적 책임 |
+| **브랜드 변경** | 로고, 슬로건 확정 | 되돌리기 어려움 |
+| **외부 API 쓰기** | 데이터베이스 수정, 파일 삭제 | 데이터 손실 위험 |
+
+#### Auto Mode 안전 체크리스트
+
+사용 전:
+```
+- [ ] 이 작업이 "차단" 목록에 해당하지 않는가?
+- [ ] 실수 시 되돌릴 수 있는가?
+- [ ] 외부에 발행/전송되는 내용이 없는가?
+- [ ] 금전적 영향이 없는가?
+```
+
+사용 중:
+```
+- [ ] 중간 결과물을 사용자가 볼 수 있는가?
+- [ ] 예상치 못한 방향으로 가면 즉시 중단할 수 있는가?
+```
+
+완료 후:
+```
+- [ ] 실제 실행된 작업 목록 검토
+- [ ] 외부 시스템에 변경 사항이 없음 확인
+- [ ] 생성된 콘텐츠 인간 검토 완료
+```
+
+#### xhigh Effort — 마케팅 맥락
+
+다음 작업은 **xhigh effort** (가장 높은 집중도와 리소스)로 실행합니다:
+
+| 작업 | Effort | 이유 |
+|------|--------|------|
+| `/ultraplan deep` | xhigh | WebSearch + 다중 스킬 체인 + 팀 오케스트레이션 |
+| `/team campaign` | xhigh | 전체 에이전트 팀 병렬 실행 |
+| 분기 마케팅 전략 | xhigh | 시장 분석 + 전략 + 실행 계획 전체 |
+| 경쟁사 전체 감사 | xhigh | 멀티 소스 리서치 + 종합 분석 |
+| `/ultraplan visual` | high | 시각화 포함, 다중 스킬 |
+| `/monitor` 설정 | high | 패턴 정의 + 대시보드 명세 |
+| 개별 콘텐츠 생성 | medium | 단일 스킬, 단일 에이전트 |
+| 루틴 상태 확인 | low | 정보 조회만 |
 
 ### Quality Gate Integration
-All code changes pass through a 3-step validation cycle.
-See `${CLAUDE_SKILL_DIR}/references/quality-gates.md` for the validation framework.
+
+모든 마케팅 산출물은 3단계 검증을 거칩니다:
+
+1. **전략 정렬**: 비즈니스 목표 및 브랜드 가이드라인과 일치하는가?
+2. **증거 기반**: 모든 주장에 데이터/리서치 근거가 있는가?
+3. **실행 가능성**: 예산, 인력, 일정 내에서 실현 가능한가?
 
 ### Execution Discipline (MANDATORY for ALL agents)
 
@@ -85,25 +143,24 @@ See `${CLAUDE_SKILL_DIR}/references/quality-gates.md` for the validation framewo
 
 | Principle | Check | Violation Signal |
 |-----------|-------|------------------|
-| SRP | Does this have one reason to change? | Class/function does multiple things |
-| DRY | Is this duplicated elsewhere? | Copy-paste patterns |
-| KISS | Is there a simpler way? | Over-engineering, unnecessary abstraction |
-| YAGNI | Is this needed now? | Speculative features, unused code |
-| DEV | Was every request item decomposed, executed, verified? | Silent skips, no evidence |
-| Zero-Skip | Was any part of the request dropped? | Missing items in completion report |
+| Evidence | 주장마다 근거가 있는가? | 출처 없는 통계, 가정에 기반한 전략 |
+| KISS | 더 단순한 방법이 있는가? | 불필요한 채널/단계 추가 |
+| YAGNI | 지금 필요한가? | 가상 미래 캠페인 설계 |
+| DRY | 반복되는 작업인가? | 동일 브리프 반복, 루틴화 미처리 |
+| DEV | 분해-실행-검증이 완료되었는가? | 무언의 스킵, 증거 없는 완료 주장 |
+| Auto Mode | "차단" 목록에 해당하지 않는가? | 외부 발행, 예산 집행, 계정 변경 |
+| Zero-Skip | 요청의 모든 항목이 처리되었는가? | 누락 항목, 불완전한 완료 |
 
 ## Workflow Checklist
 
-Copy this checklist and track progress:
-
 ```
 Progress:
-- [ ] Step 1: DECOMPOSE — Break request into numbered atomic items
-- [ ] Step 2: Read target files BEFORE any modifications
-- [ ] Step 3: EXECUTE — Apply changes following SOLID, DRY, KISS, YAGNI
-- [ ] Step 4: Re-read modified files to confirm correctness
-- [ ] Step 5: VERIFY — Report evidence (file:line) for each item
-- [ ] Step 6: Check for zero-skip — no items silently dropped
+- [ ] Step 1: DECOMPOSE — 요청을 번호 매긴 원자적 항목으로 분해
+- [ ] Step 2: 관련 스킬/데이터 소스 확인
+- [ ] Step 3: EXECUTE — Evidence 기반으로 실행
+- [ ] Step 4: Auto Mode 사용 시 안전 체크리스트 통과 확인
+- [ ] Step 5: VERIFY — 각 항목별 완료 증거 제출
+- [ ] Step 6: Zero-Skip 확인 — 누락 항목 없음
 ```
 
 ## Human Checkpoints

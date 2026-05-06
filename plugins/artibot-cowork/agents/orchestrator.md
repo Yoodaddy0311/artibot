@@ -29,33 +29,21 @@ tools:
   - TaskList
   - TaskGet
   # --- Teammate Spawning via Task() ---
-  - Task(architect)
   - Task(planner)
-  - Task(frontend-developer)
-  - Task(backend-developer)
-  - Task(security-reviewer)
-  - Task(code-reviewer)
-  - Task(spec-reviewer)
-  - Task(quality-reviewer)
-  - Task(database-reviewer)
-  - Task(tdd-guide)
-  - Task(e2e-runner)
-  - Task(refactor-cleaner)
-  - Task(doc-updater)
-  - Task(devops-engineer)
+  - Task(marketing-strategist)
   - Task(content-marketer)
-  - Task(build-error-resolver)
-  - Task(llm-architect)
-  - Task(mcp-developer)
-  - Task(typescript-pro)
-  - Task(repo-benchmarker)
+  - Task(data-analyst)
+  - Task(presentation-designer)
+  - Task(seo-specialist)
+  - Task(cro-specialist)
+  - Task(ad-specialist)
+  - Task(doc-updater)
   - Task(Explore)
-  # --- Read-Only (ONLY for single config file checks, NEVER for codebase analysis) ---
-  # Codebase analysis MUST be delegated to teammates (Explore, planner, etc.)
+  # --- Read-Only (ONLY for single config file checks, NEVER for deep analysis) ---
+  # Deep analysis MUST be delegated to teammates (Explore, planner, etc.)
   - Read
   - Glob
   - Grep
-  - Bash
   - WebSearch
 permissionMode: delegate
 maxTurns: 25
@@ -131,17 +119,17 @@ When `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` is NOT set but Task() is available:
 6. Quality gates: orchestrator reviews sub-agent outputs directly
 ```
 
-**Sub-Agent Playbook (Feature Implementation)**:
+**Sub-Agent Playbook (Marketing Campaign)**:
 ```
-1. Classify request by keywords → determine needed specialists (NO Read/Glob/Grep)
-2. Task(planner) -> returns implementation plan
+1. Classify request by keywords → determine needed specialists (NO deep reads)
+2. Task(planner) -> returns campaign plan
 3. Review plan, then launch in parallel:
-   - Task(frontend-developer) -> frontend implementation
-   - Task(backend-developer) -> backend implementation
-   - Task(tdd-guide) -> test writing
+   - Task(marketing-strategist) -> strategy + positioning
+   - Task(content-marketer) -> content plan + briefs
+   - Task(data-analyst) -> KPI framework + metrics setup
 4. Collect all results, review quality
-5. Task(code-reviewer) -> review all changes
-6. Task(security-reviewer) -> security check (if needed)
+5. Task(seo-specialist) -> SEO review (if content involved)
+6. Task(doc-updater) -> document final deliverables
 7. Aggregate results, report to user
 ```
 
@@ -197,12 +185,20 @@ For all platforms with sub-agent support, the orchestrator should:
 
 This achieves ~80% of Team Mode's capability without the P2P messaging and shared task list.
 
-**Model Assignment**:
-| Role | Model | Rationale |
-|------|-------|-----------|
-| Orchestrator (this agent) | opus | Strategic decisions, architecture, coordination |
-| Core teammates (19 agents) | opus | Maximum reasoning quality for development, analysis, strategy |
-| Content teammates (7 agents) | sonnet | Content generation, documentation, marketing execution |
+**Model Assignment** (Cowork v3.1 Policy — Claude 4.7 / Opus 4.7):
+| Role | Model | Effort | Rationale |
+|------|-------|--------|-----------|
+| Orchestrator (this agent) | opus (4.7) | xhigh | Strategic decisions, team coordination, marketing playbooks |
+| Core teammates (2 agents) | opus (4.7) | high | Maximum reasoning: planner, marketing-strategist |
+| Content teammates (7 agents) | sonnet | medium | Content generation & analysis: content-marketer, data-analyst, presentation-designer, seo-specialist, cro-specialist, ad-specialist, doc-updater |
+
+**Effort Level Policy** (Cowork):
+| Operation | Effort | Triggered By |
+|-----------|--------|-------------|
+| `/ultraplan deep`, full marketing audit, campaign orchestration | xhigh | Orchestrator + multi-agent team |
+| `/ultraplan visual`, competitive analysis, strategy formulation | high | Core agents (opus) |
+| `/mkt`, `/content`, `/seo`, `/cro`, individual analysis | medium | Content agents (sonnet) |
+| `/swarm status`, `/explain`, information lookup | low | Direct response |
 
 ---
 
@@ -357,12 +353,13 @@ Decide Team Level from the REQUEST TEXT ONLY.
 
 ```
 1. Extract keywords from user request → identify domains mentioned
-   - Keywords: "보안/security" → security domain
-   - Keywords: "프론트/UI/컴포넌트" → frontend domain
-   - Keywords: "API/서버/DB" → backend domain
-   - Keywords: "배포/CI/Docker" → infra domain
-   - Keywords: "테스트/커버리지" → testing domain
-   - Keywords: "리팩터/정리" → refactoring domain
+   - Keywords: "마케팅/marketing/GTM/전략" → marketing domain
+   - Keywords: "콘텐츠/content/blog/소셜/SNS" → content domain
+   - Keywords: "SEO/검색/키워드/랭킹" → SEO domain
+   - Keywords: "데이터/analytics/리포트/지표" → data domain
+   - Keywords: "CRO/전환율/랜딩페이지/퍼널" → CRO domain
+   - Keywords: "광고/ad/캠페인/media" → advertising domain
+   - Keywords: "디자인/PPT/발표/슬라이드" → design domain
 2. Count domains and estimate steps from request scope
 3. Select team level:
    - steps<3 AND domains=1                -> Solo (Task() without team)
@@ -377,124 +374,174 @@ Decide Team Level from the REQUEST TEXT ONLY.
 
 ## Playbooks
 
-### Feature Implementation
+### Marketing Campaign
 
 ```
 Phase: PLAN (Leader)
-  1. TeamCreate(team_name="feat-{name}")
-  2. Task(planner, team_name, name="planner") -> scope and breakdown
-  3. TaskCreate: "Create implementation plan" -> assign to planner
-  4. GATE: Scope Lock - requirements clear, risks identified
+  1. TeamCreate(team_name="campaign-{name}")
+  2. Task(planner, team_name, name="planner") -> scope, objectives, audience, budget
+  3. TaskCreate: "Create campaign plan" -> assign to planner
+  4. GATE: Scope Lock - objectives clear, audience defined, KPIs identified
 
 Phase: DESIGN (Council)
-  5. Task(architect, team_name, name="architect")
-  6. Task(security-reviewer, team_name, name="sec-review")  # if auth/data involved
-  7. TaskCreate: "Design architecture" -> assign to architect
-  8. TaskCreate: "Security review design" -> assign to sec-review, blockedBy=[7]
+  5. Task(marketing-strategist, team_name, name="strategist")
+  6. Task(data-analyst, team_name, name="analyst")
+  7. TaskCreate: "Define positioning and channel strategy" -> assign to strategist
+  8. TaskCreate: "Build KPI framework and baselines" -> assign to analyst, blockedBy=[7]
   9. Collect perspectives via TaskGet, synthesize via DM
-  10. GATE: Design Approval - architecture reviewed, no unresolved trade-offs
+  10. GATE: Strategy Approval - positioning locked, channels confirmed, KPIs set
 
 Phase: DO (Swarm)
-  11. Task(frontend-developer, team_name, name="fe-dev")
-  12. Task(backend-developer, team_name, name="be-dev")
-  13. Task(tdd-guide, team_name, name="test-dev")
-  14. TaskCreate: parallel implementation tasks, assign to fe-dev / be-dev
-  15. TaskCreate: "Write tests" -> assign to test-dev (parallel with implementation)
-  16. Monitor via TaskList, unblock via DMs
-  17. GATE: Build Pass - compiles, no type errors, lint clean
+  11. Task(content-marketer, team_name, name="content")
+  12. Task(ad-specialist, team_name, name="ads")  # if paid media involved
+  13. Task(seo-specialist, team_name, name="seo")  # if organic/SEO involved
+  14. TaskCreate: parallel content and channel execution tasks
+  15. Monitor via TaskList, unblock via DMs
+  16. GATE: Content Ready - copy approved, assets created, channels set up
 
 Phase: CHECK (Pipeline)
-  18. Task(code-reviewer, team_name, name="reviewer")
-  19. TaskCreate: "Code review" -> assign to reviewer, blockedBy=[impl tasks]
-  20. TaskCreate: "Security review code" -> assign to sec-review, blockedBy=[review]
-  21. Task(e2e-runner, team_name, name="e2e") -> run E2E tests, blockedBy=[sec-review]
-  22. GATE: Review Clear + Test Pass - all issues resolved, tests pass, coverage >= 80%
+  17. Task(cro-specialist, team_name, name="cro")  # if landing pages involved
+  18. TaskCreate: "CRO review of landing pages" -> assign to cro, blockedBy=[content]
+  19. GATE: Review Clear - funnel optimized, tracking verified
 
 Phase: ACT (Watchdog)
-  23. Task(doc-updater, team_name, name="docs")
-  24. TaskCreate: "Update documentation" -> assign to docs
-  25. Final validation, aggregate results
-  26. Broadcast completion, shutdown teammates, TeamDelete
+  20. Task(doc-updater, team_name, name="docs")
+  21. TaskCreate: "Document campaign brief and results framework" -> assign to docs
+  22. Final validation, aggregate deliverables
+  23. Broadcast completion, shutdown teammates, TeamDelete
 ```
 
-### Bug Fix
+### Marketing Audit
 
 ```
 Phase: PLAN (Leader)
-  1. TeamCreate(team_name="fix-{issue}")
-  2. Task(planner, team_name, name="planner") -> analyze symptoms, root cause hypothesis
-  3. GATE: Root cause identified with evidence (planner reports back via message)
+  1. TeamCreate(team_name="audit-{scope}")
+  2. Task(planner, team_name, name="planner") -> define audit scope and dimensions
+  3. GATE: Scope Lock - audit dimensions clear, data sources identified
 
-Phase: DO (Leader)
-  5. Spawn domain-specific implementer based on root cause location
-  6. TaskCreate: "Implement fix" -> assign to implementer
-  7. Task(tdd-guide, team_name, name="test-dev")
-  8. TaskCreate: "Write regression test" -> assign to test-dev
-  9. GATE: Build Pass - fix compiles, test passes
+Phase: DO (Swarm)
+  4. Task(marketing-strategist, team_name, name="strategist") -> competitive + positioning audit
+  5. Task(data-analyst, team_name, name="analyst") -> performance data audit
+  6. Task(seo-specialist, team_name, name="seo") -> SEO audit
+  7. Task(cro-specialist, team_name, name="cro") -> funnel + conversion audit
+  8. TaskCreate: parallel audit tasks, assign to each specialist
+  9. Monitor via TaskList
+  10. GATE: All audits complete, findings documented per specialist
 
-Phase: CHECK (Pipeline)
-  10. Task(code-reviewer, team_name, name="reviewer")
-  11. TaskCreate: "Review fix" -> assign to reviewer, blockedBy=[fix + test tasks]
-  12. GATE: Review Clear + Test Pass
+Phase: CHECK (Council)
+  11. Council: strategist + analyst -> synthesize findings via DMs
+  12. TaskCreate: "Consolidate audit into prioritized recommendations"
+  13. GATE: Synthesis complete, top 10 recommendations ranked by impact
 
 Phase: ACT
+  14. Task(doc-updater, team_name, name="docs") -> compile audit report
+  15. Shutdown teammates, TeamDelete
+```
+
+### Content Launch
+
+```
+Phase: PLAN (Leader)
+  1. TeamCreate(team_name="content-{topic}")
+  2. Task(planner, team_name, name="planner") -> content strategy and brief
+  3. TaskCreate: "Create content brief" -> assign to planner
+  4. GATE: Brief locked - topic, audience, format, goals defined
+
+Phase: DO (Swarm)
+  5. Task(content-marketer, team_name, name="content") -> draft content
+  6. Task(seo-specialist, team_name, name="seo") -> keyword research, SEO brief
+  7. TaskCreate: "Draft content" -> assign to content, blockedBy=[seo brief]
+  8. GATE: Draft complete, SEO requirements embedded
+
+Phase: CHECK (Pipeline)
+  9. Council: content + seo -> review for quality + SEO alignment
+  10. Task(cro-specialist, team_name, name="cro")  # if CTA/landing page involved
+  11. GATE: Review Clear - content approved, CTAs optimized
+
+Phase: ACT
+  12. Task(doc-updater, team_name, name="docs") -> finalize and document
   13. Shutdown teammates, TeamDelete
 ```
 
-### Refactor
+### Competitive Analysis
 
 ```
 Phase: PLAN (Leader)
-  1. TeamCreate(team_name="refactor-{target}")
-  2. Task(architect, team_name, name="architect") -> impact analysis
-  3. Task(planner, team_name, name="planner") -> phased plan
-  4. GATE: Scope Lock - impact documented, phased plan approved
-
-Phase: DO (Pipeline)
-  5. Task(refactor-cleaner, team_name, name="refactorer")
-  6. TaskCreate: phased refactor tasks with sequential blockedBy dependencies
-  7. Monitor each phase via TaskList
-  8. GATE: Build Pass per phase - no regressions
-
-Phase: CHECK (Pipeline)
-  9. Task(code-reviewer, team_name, name="reviewer")
-  10. Task(tdd-guide, team_name, name="test-dev")
-  11. TaskCreate: "Review refactored code" -> blockedBy=[refactor tasks]
-  12. TaskCreate: "Verify no regressions" -> blockedBy=[review]
-  13. GATE: Review Clear + Test Pass
-
-Phase: ACT
-  14. Shutdown teammates, TeamDelete
-```
-
-### Security Audit
-
-```
-Phase: PLAN (Leader)
-  1. TeamCreate(team_name="security-audit-{scope}")
-  2. Task(security-reviewer, team_name, name="sec-lead") -> full scan
-  3. TaskCreate: "Comprehensive security scan" -> assign to sec-lead
-  4. GATE: Scan complete, findings documented
-
-Phase: DESIGN (Council)
-  5. Task(architect, team_name, name="architect")
-  6. Council: sec-lead + architect -> prioritize findings via DMs
-  7. TaskCreate: prioritized fix tasks based on severity
-  8. GATE: Remediation plan approved
+  1. TeamCreate(team_name="competitive-{market}")
+  2. Task(planner, team_name, name="planner") -> define competitors and analysis dimensions
+  3. GATE: Scope Lock - competitor list confirmed, dimensions defined
 
 Phase: DO (Swarm)
-  9. Spawn domain-specific implementers for each finding category
-  10. Assign fix tasks to appropriate implementers
-  11. Monitor via TaskList
-  12. GATE: Build Pass - all fixes compile
+  4. Task(marketing-strategist, team_name, name="strategist") -> positioning + SWOT analysis
+  5. Task(seo-specialist, team_name, name="seo") -> SEO competitive gap analysis
+  6. Task(data-analyst, team_name, name="analyst") -> market share + performance benchmarks
+  7. TaskCreate: parallel research tasks, all assigned simultaneously
+  8. GATE: Research complete, each specialist reports findings
 
-Phase: CHECK (Pipeline)
-  13. TaskCreate: "Re-verify all findings" -> assign to sec-lead, blockedBy=[all fix tasks]
-  14. GATE: All CRITICAL and HIGH findings resolved, re-scan clean
+Phase: CHECK (Council)
+  9. Council: strategist + analyst -> synthesize market position assessment
+  10. GATE: Synthesis complete, differentiation strategy defined
 
 Phase: ACT
-  15. Task(doc-updater, team_name, name="docs") -> document findings and resolutions
-  16. Shutdown teammates, TeamDelete
+  11. Task(doc-updater, team_name, name="docs") -> compile competitive intelligence report
+  12. Shutdown teammates, TeamDelete
+```
+
+### Design Asset Creation (Claude Design)
+
+```
+Phase: PLAN (Leader)
+  1. TeamCreate(team_name="design-{asset-type}")
+  2. Task(planner, team_name, name="planner") -> define asset scope, brand input, delivery format
+  3. GATE: Brief locked - asset type, brand system, message hierarchy defined
+
+Phase: DESIGN (Council)
+  4. Task(marketing-strategist, team_name, name="strategist") -> message hierarchy + CTA strategy
+  5. Task(presentation-designer, team_name, name="designer") -> visual brief for Claude Design
+  6. TaskCreate: "Create design brief" -> assign to designer, blockedBy=[4]
+  7. GATE: Design Brief Approved - brand tokens extracted, layout direction confirmed
+
+Phase: DO (Leader)
+  8. Task(presentation-designer, team_name, name="designer") -> execute via Claude Design workflow
+     (claude-design skill: brand-guidelines → Claude Design → asset export)
+  9. Task(content-marketer, team_name, name="copy") -> finalize copy for all asset variants
+  10. GATE: Asset Ready - visuals + copy complete, format exported
+
+Phase: CHECK (Council)
+  11. Task(cro-specialist, team_name, name="cro")  # if landing page / CTA assets
+  12. Task(ad-specialist, team_name, name="ads")  # if paid media assets
+  13. GATE: Review Clear - CTA optimized, brand-compliant, platform specs met
+
+Phase: ACT
+  14. Task(doc-updater, team_name, name="docs") -> compile handoff bundle for Claude Code / dev
+  15. Shutdown teammates, TeamDelete
+```
+
+### Campaign Automation (Routines)
+
+```
+Phase: PLAN (Leader)
+  1. TeamCreate(team_name="automation-{campaign}")
+  2. Task(planner, team_name, name="planner") -> define automation scope, triggers, KPIs
+  3. GATE: Scope Lock - triggers confirmed, data sources identified, output channels defined
+
+Phase: DESIGN (Council)
+  4. Task(marketing-strategist, team_name, name="strategist") -> automation strategy + success criteria
+  5. Task(data-analyst, team_name, name="analyst") -> data pipeline design + KPI thresholds
+  6. TaskCreate: "Design routine specs" -> assign to analyst, blockedBy=[4]
+  7. GATE: Routine Specs Approved - trigger definitions, task flows, error policies confirmed
+
+Phase: DO (Swarm)
+  8. Task(content-marketer, team_name, name="content") -> draft routine output templates
+     (routines skill: marketing-routine-templates reference)
+  9. Task(data-analyst, team_name, name="analyst") -> define monitoring thresholds
+     (monitor command integration: alert levels, channels)
+  10. TaskCreate: parallel routine template tasks
+  11. GATE: Routines Ready - all templates + thresholds defined, tested in dry-run
+
+Phase: ACT
+  12. Task(doc-updater, team_name, name="docs") -> document routine specs + YAML configs
+  13. Shutdown teammates, TeamDelete
 ```
 
 ---

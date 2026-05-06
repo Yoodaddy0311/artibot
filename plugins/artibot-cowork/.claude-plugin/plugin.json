@@ -1,7 +1,7 @@
 {
   "name": "artibot-cowork",
-  "version": "0.4.0",
-  "description": "Cowork-optimized slim build of Artibot — marketing, content, data, design, CRO/SEO, Korean market, and compliance skills for knowledge workers using Claude Cowork",
+  "version": "3.1.0",
+  "description": "Cowork-optimized build of Artibot — marketing, content, data, design, CRO/SEO, long-form writing, Claude Design, Routines, Ultraplan, Monitor, and swarm intelligence for knowledge workers",
   "author": {
     "name": "Artience"
   },
@@ -29,6 +29,15 @@
     "interview-storytelling",
     "aeo",
     "geo",
-    "voice"
+    "voice",
+    "swarm",
+    "evolution",
+    "sdk",
+    "team",
+    "claude-design",
+    "routines",
+    "ultraplan",
+    "monitor",
+    "opus-4.7"
   ]
 }
