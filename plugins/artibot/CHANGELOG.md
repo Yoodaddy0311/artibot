@@ -9,6 +9,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.5.5] - 2026-05-06
+
+Patch release — Windows test stability + dev-deps security. Three fixes that surfaced when running the full `/verify` pipeline on Windows: (1) vitest's 5s default `testTimeout` was too tight for the many tests that spawn child processes via `execFileSync`/`execFile` (Node cold-start on Windows alone exceeds 5s for some suites), causing 14 timeouts across `validate.js`, `runtime-prompt`, `pre-compact`, `skill-hash-cache`, `artibot-cli`, `engine.execute-worktree`, `worktree-manager`, and `skills`/`skills-keyword-index`. (2) `listWorktrees` annotated records returned `git worktree list --porcelain`'s raw forward-slash paths on Windows while `getWorktreesRoot()` uses OS-native separators, so callers' `rec.path.startsWith(getWorktreesRoot())` checks failed unpredictably. (3) Five transitive dev-dep vulnerabilities (rollup high, vite high ×3, postcss moderate) carried by `vitest@4.0.18` / `@vitest/coverage-v8`. None of these affect production runtime — they only affect local/CI test reliability and dev-time security posture — but together they were noisy enough to mask real regressions and warrant a patch bump.
+
+### Fixed
+
+- **`vitest.config.js`** — Set `testTimeout: 30_000` and `hookTimeout: 30_000`. Windows Node cold-start + heavy IO suites need ≥5s; vitest's 5s default was producing flaky timeouts indistinguishable from real failures. 30s gives spawning suites room without masking real regressions.
+- **`lib/autopilot/worktree-manager.js`** — `listWorktrees` now returns the normalized path on every record (both annotated autopilot records *and* non-autopilot records), so `rec.path.startsWith(getWorktreesRoot())` is reliable across platforms regardless of whether git porcelain emitted forward or backward slashes.
+- **`hooks/hooks.json`** — `description` field updated from `"Artibot v2.0.0 - Claude Code Plugin Hooks"` to `"Artibot v4.5.4 - Claude Code Plugin Hooks"` (had been outdated since the 2.x → 4.x cutover; non-blocking but noisy in `/doctor`).
+- **`package-lock.json`** — `npm audit fix` applied. 5 vulns → 0. 20 transitive packages updated under `vitest`/`@vitest/coverage-v8` (rollup, vite, postcss, etc.). No top-level `package.json` changes; semver-compatible patches only.
+
+### Verification
+
+- `npm run lint` → 0 errors, 0 warnings
+- `npm test` → **7647/7647 pass** (was 7626/7647 before timeout fix, then 7645/7647 mid-fix flake on the worktree race, then clean)
+- `npm run validate` → 28 agents, 108 skills, 58 commands, 15 hook events, 58 hooks — all validated
+- `npm run skill:check` → exit 0
+- `npm run validate:readme:claims` → all README claims match file-system counts
+- `npm audit` → **0 vulnerabilities**
+
+### Notes
+
+- Two flaky cases observed transiently mid-investigation (`engine.execute-worktree.test.js > case 3 abortAutopilot graceful cleans up worktree` and `e2e/runtime-flow.test.js > preserves special-trigger rewrites`) self-recovered on the clean run after the timeout fix landed. Tracked as Windows file-system race symptoms, not regressions; will revisit if they re-surface.
+- The MEMORY.md `command-injection in scripts/update.js` and `0% coverage on update.js` Known Issues entries were already cleared by v4.5.3 — no action this patch.
+
+---
+
 ## [4.5.4] - 2026-05-06
 
 Patch release — fix `/doctor` plugin load errors. Removes the three Anthropic Agent SDK extension events (`on_handoff`, `on_llm_start`, `on_llm_end`) from `hooks/hooks.json` because Claude Code's native hook loader (Zod schema) rejects snake_case event keys at startup, causing every session to surface "Hook load failed" plugin errors.
