@@ -119,6 +119,8 @@ function getChangedFiles(repoRoot) {
  * @returns {string}
  */
 function buildFingerprint(repoRoot, sha, files) {
+  // 32-bit SHA1 truncation: collision impact = one suppressed DEV verify
+  // reminder. Not a security boundary — purely a deduplication key.
   const repoHash = createHash('sha1').update(repoRoot).digest('hex').slice(0, 8);
   return `${repoHash}|${sha}|${files.slice().sort().join(',')}`;
 }

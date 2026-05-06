@@ -53,6 +53,9 @@ const SECURITY_KEYWORDS = /\b(auth|crypto|password|secret|token|jwt|oauth|hash|b
 // DoS guard: skip security scan on files larger than this. A hostile repo could
 // stage a multi-GB file matching `git diff` and OOM the hook before the 8s
 // outer timeout fires (Node may already have allocated the read buffer).
+// Note: path-based SECURITY_KEYWORDS match (further below) still flags
+// oversized files whose path contains auth/token/etc., so the false-negative
+// window is "content-only security keywords inside a >256KB file".
 const MAX_SCAN_BYTES = 256 * 1024;
 
 // Defense-in-depth: agent name must come from this closed set before being
@@ -167,6 +170,7 @@ function classifyChanges(files, repoRoot) {
     try {
       // DoS guard: skip oversized files. Hostile repos could stage huge
       // tracked files; we don't need full content to gate reviewer agents.
+      // TOCTOU stat→read race accepted in single-user dev threat model.
       if (statSync(abs).size > MAX_SCAN_BYTES) continue;
       const content = readFileSync(abs, 'utf-8');
       if (SECURITY_KEYWORDS.test(content)) securityHits += 1;
@@ -195,6 +199,9 @@ function classifyChanges(files, repoRoot) {
  * @returns {string}
  */
 function buildFingerprint(repoRoot, sha, files) {
+  // 32-bit SHA1 truncation: collision impact = one suppressed advisory message.
+  // Not a security boundary — purely a deduplication key. Acceptable for ~65k
+  // worktrees/repos before birthday collision (≫ realistic dev-machine load).
   const repoHash = createHash('sha1').update(repoRoot).digest('hex').slice(0, 8);
   return `${repoHash}|${sha}|${files.slice().sort().join(',')}`;
 }
