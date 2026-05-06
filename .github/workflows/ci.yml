@@ -52,6 +52,14 @@ jobs:
       - name: Validate hooks
         run: node scripts/ci/validate-hooks.js
 
+      - name: Validate README claims (structural — PR fast gate)
+        if: github.event_name == 'pull_request'
+        run: node scripts/ci/validate-readme-claims.js
+
+      - name: Validate README claims (full — main strict gate)
+        if: github.event_name == 'push' && matrix.node-version == 22
+        run: node scripts/ci/validate-readme-claims.js --full
+
       - name: Run tests with coverage
         run: |
           if [ -d "tests" ] || [ -d "__tests__" ] || [ -d "test" ]; then
