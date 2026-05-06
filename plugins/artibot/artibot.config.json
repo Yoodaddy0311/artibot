@@ -115,7 +115,12 @@
       "minSubtasks": 3,
       "minFiles": 3,
       "minComplexity": "high",
-      "bypassIntents": ["question", "diagnose", "explain", "lookup"],
+      "bypassIntents": [
+        "question",
+        "diagnose",
+        "explain",
+        "lookup"
+      ],
       "excludeTrivial": {
         "maxLines": 50,
         "singleFile": true
@@ -692,7 +697,11 @@
   "autopilot": {
     "enabled": false,
     "defaultMode": "default",
-    "modes": ["default", "night", "plan"],
+    "modes": [
+      "default",
+      "night",
+      "plan"
+    ],
     "limits": {
       "maxDuration": "4h",
       "maxBudget": 2000000,
@@ -705,9 +714,22 @@
       "pauseOnDanger": true,
       "blockSecretLeak": true,
       "blockExternalSend": true,
-      "dangerousPatterns": ["force-push", "branch-delete", "db-drop", "rm-rf-root"]
+      "dangerousPatterns": [
+        "force-push",
+        "branch-delete",
+        "db-drop",
+        "rm-rf-root"
+      ]
     },
-    "phases": ["INTAKE", "PLAN", "EXECUTE", "CROSS_CHECK", "VERIFY", "IMPROVE", "REPORT"],
+    "phases": [
+      "INTAKE",
+      "PLAN",
+      "EXECUTE",
+      "CROSS_CHECK",
+      "VERIFY",
+      "IMPROVE",
+      "REPORT"
+    ],
     "paths": {
       "prdDir": "docs/PRD/",
       "reportDir": "reports/AUTOPILOT/",
@@ -720,7 +742,10 @@
     },
     "mcp": {
       "enabled": false,
-      "allowList": ["plugin:artibot:playwright", "plugin:artibot:context7"],
+      "allowList": [
+        "plugin:artibot:playwright",
+        "plugin:artibot:context7"
+      ],
       "blockExternal": true,
       "allowedPrefix": "plugin:artibot:",
       "denyHostPatterns": [
@@ -1058,5 +1083,18 @@
     "timeout": 60000,
     "reviewOnStop": false,
     "warning": "코드가 OpenAI API로 전송됩니다. 민감 프로젝트에 주의하세요."
+  },
+  "macros": {
+    "m_security_review_refactor_deploy": {
+      "actions": [
+        "security-review",
+        "refactor",
+        "deploy"
+      ],
+      "trigger": "analyze security vulnerabilities, then refactor auth flow, then deploy to production",
+      "createdAt": "2026-05-06T06:15:00.137Z",
+      "source": "macro-learner-auto",
+      "suggestionId": "macro-1777866809194"
+    }
   }
 }
