@@ -19,6 +19,13 @@ export default defineConfig({
   test: {
     root: '.',
     include: ['tests/**/*.test.js'],
+    // Windows-friendly default. Many tests spawn child processes
+    // (`execFileSync`/`execFile`) where Node cold-start alone can exceed
+    // vitest's 5s default on Windows, causing flaky timeouts unrelated to
+    // the code under test. 30s gives spawning + heavy IO suites room
+    // without masking real regressions.
+    testTimeout: 30_000,
+    hookTimeout: 30_000,
     coverage: {
       provider: 'v8',
       reportOnFailure: true,
