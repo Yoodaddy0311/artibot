@@ -186,6 +186,28 @@ function hasNewerEdits(pluginRoot, repoRoot, changedFiles) {
 }
 
 async function main() {
+  // ===========================================================================
+  // EMERGENCY DISABLE (v4.5.6 in-flight): unconditional bail.
+  //
+  // Root cause: this gate fires whenever the working tree has uncommitted
+  // changes, but in /team delegate workflows the changes come from teammates
+  // (fix-applier, etc.) — NOT the orchestrator turn that the gate is gating.
+  // Result: every orchestrator response while teammates are mid-edit gets
+  // blocked with "EXECUTE pending" feedback, paralysing all delegate flows.
+  //
+  // hooks.json registration was already removed (source + install), but
+  // Claude Code caches hooks.json at SessionStart so removal only takes
+  // effect on next session. This in-script bail neutralises the gate
+  // immediately for the current session as well.
+  //
+  // Proper fix tracked for v4.5.7: marker-file pattern (PostToolUse(Edit|
+  // Write|MultiEdit) writes runtime/last-main-agent-edit.timestamp; gate
+  // bails if marker mtime <= cache mtime). That distinguishes orchestrator
+  // edits from teammate edits and from working-tree drift.
+  // ===========================================================================
+  return;
+
+  // eslint-disable-next-line no-unreachable
   const raw = await readStdin();
   const hookData = parseJSON(raw) ?? {};
 
