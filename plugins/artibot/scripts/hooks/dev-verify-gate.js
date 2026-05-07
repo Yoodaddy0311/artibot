@@ -24,7 +24,7 @@
 
 import path from 'node:path';
 import { execSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import {
   atomicWriteSync,
@@ -152,6 +152,39 @@ function saveFingerprint(pluginRoot, fingerprint) {
   }
 }
 
+/**
+ * Check if any changed file has been modified since the cache file's mtime.
+ * Returns true if at least one file is newer (i.e., real new edits happened
+ * since last gate fire). Returns false if all files predate the cache (i.e.,
+ * HEAD/working-tree drift but no actual edits — e.g., git autopilot WIP
+ * commit shifted HEAD without user edits).
+ *
+ * @param {string} pluginRoot
+ * @param {string} repoRoot
+ * @param {string[]} changedFiles
+ * @returns {boolean}
+ */
+function hasNewerEdits(pluginRoot, repoRoot, changedFiles) {
+  const cachePath = path.join(pluginRoot, 'runtime', STATE_FILE);
+  if (!existsSync(cachePath)) return true; // no prior state — fire on first run
+  let cacheMtime;
+  try {
+    cacheMtime = statSync(cachePath).mtimeMs;
+  } catch {
+    return true; // unreadable cache — be safe, fire
+  }
+  for (const file of changedFiles) {
+    const abs = path.join(repoRoot, file);
+    if (!existsSync(abs)) continue;
+    try {
+      if (statSync(abs).mtimeMs > cacheMtime) return true;
+    } catch {
+      // skip unreadable
+    }
+  }
+  return false;
+}
+
 async function main() {
   const raw = await readStdin();
   const hookData = parseJSON(raw) ?? {};
@@ -167,8 +200,16 @@ async function main() {
   // Read-only / diagnostic turn — no DEV verify needed.
   if (changedFiles.length === 0) return;
 
-  const headSha = getHeadSha(repoRoot) || 'unknown';
   const pluginRoot = getPluginRoot();
+
+  // Mtime guard: if no changed file is newer than the cache, this turn made
+  // no real edits — the working-tree drift is from prior-turn residue or
+  // autopilot HEAD movement. Skip to prevent the infinite "fingerprint
+  // mismatched but nothing actually changed" block loop that was paralysing
+  // user work prior to this fix.
+  if (!hasNewerEdits(pluginRoot, repoRoot, changedFiles)) return;
+
+  const headSha = getHeadSha(repoRoot) || 'unknown';
   const fingerprint = buildFingerprint(repoRoot, headSha, changedFiles);
   if (readLastFingerprint(pluginRoot) === fingerprint) return; // already verified
 

@@ -98,13 +98,14 @@ function getHeadSha(repoRoot) {
 }
 
 /**
- * Get changed files vs HEAD using --name-only (covers staged + working tree
- * + last commit). Falls back gracefully if any subcommand fails.
+ * Get changed files vs HEAD using --name-only.
  *
- * Note: this includes `HEAD~1..HEAD` so a freshly committed change still
- * triggers reviewer suggestions. dev-verify-gate.js intentionally OMITS that
- * set — DEV verify is about the current edit cycle, not retroactive.
- * Do not "harmonize" the two without re-reading both rationale comments.
+ * Scope: working tree + staged ONLY. Previous versions also included
+ * `HEAD~1..HEAD`, but that triggered an infinite block→retry loop with
+ * git autopilot: every autopilot WIP commit moved HEAD, fingerprint
+ * mismatched, gate re-fired, suggesting reviewer for already-committed
+ * code that the user can no longer interactively change. Reviewer
+ * suggestions only apply to UNCOMMITTED work.
  *
  * @param {string} repoRoot
  * @returns {string[]}
@@ -114,7 +115,6 @@ function getChangedFiles(repoRoot) {
   for (const cmd of [
     'git diff --name-only HEAD',
     'git diff --name-only --cached',
-    'git diff --name-only HEAD~1 HEAD',
   ]) {
     const out = git(cmd, repoRoot);
     if (!out) continue;
