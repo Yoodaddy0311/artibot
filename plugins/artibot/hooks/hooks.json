@@ -337,18 +337,6 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/auto-review-trigger.js",
-            "timeout": 8000
-          }
-        ],
-        "priority": "operational",
-        "category": "quality"
-      },
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
             "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/git-autopilot-close.js",
             "timeout": 15000
           }
@@ -429,17 +417,6 @@
         ],
         "priority": "advisory",
         "category": "quality"
-      },
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "prompt",
-            "prompt": "If the user's message is very short (under 5 words), ambiguous, or could be interpreted multiple ways, briefly confirm your interpretation before any destructive or costly action (file modifications, deletions, force operations). For clear, unambiguous requests, proceed normally without confirmation."
-          }
-        ],
-        "priority": "advisory",
-        "category": "quality"
       }
     ],
     "SubagentStart": [
@@ -483,18 +460,6 @@
         ],
         "priority": "optional",
         "category": "team"
-      },
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/auto-review-trigger.js",
-            "timeout": 8000
-          }
-        ],
-        "priority": "operational",
-        "category": "quality"
       }
     ],
     "TeammateIdle": [
