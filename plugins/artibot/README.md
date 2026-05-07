@@ -1,6 +1,6 @@
 # Artibot
 
-[![Version](https://img.shields.io/badge/version-4.5.8-blue?style=flat-square)](./CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-4.5.9-blue?style=flat-square)](./CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](./LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen?style=flat-square)](./package.json)
 [![Tests](https://img.shields.io/badge/tests-passing-brightgreen?style=flat-square)](./tests/)
@@ -167,7 +167,7 @@ Key fields in `artibot.config.json` (file is auto-validated against schema):
 
 | Field | Default | Purpose |
 |---|---|---|
-| `version` | `4.5.8` | Synced across plugin.json / package.json / artibot.config.json |
+| `version` | `4.5.9` | Synced across plugin.json / package.json / artibot.config.json |
 | `cognitive.router.threshold` | `0.4` | System 1 ↔ System 2 boundary |
 | `cognitive.system1.maxLatency` | `100` | ms — System 1 response cap before escalation |
 | `learning.lifelong.batchSize` | `50` | Experiences per GRPO batch |
@@ -186,7 +186,9 @@ Full configuration reference: [설정](#설정) section.
 
 ## Roadmap
 
-**v4.5.8 (current, stable)** — DEV Verify Gate restored via main-agent edit marker. v4.5.6 hard-disabled `dev-verify-gate.js` because it fired on every Stop with uncommitted working-tree changes — including teammate-only edits during `/team` delegate flows, paralysing every orchestrator response. v4.5.8 reintroduces the gate with a marker-file pattern: a new PostToolUse hook (`mark-main-agent-edit.js`) writes `runtime/last-main-agent-edit.timestamp` ONLY when Edit/Write/MultiEdit fires from the main orchestrator (subagent contexts — detected via `subagent_id` / `subagent_type` / `parent_session_id` / `role: 'teammate'` — bail without touching the marker). The gate now compares marker mtime vs. its own fingerprint cache and bails when no main-agent edit has happened since the last fire — so teammate edits and HEAD drift no longer trigger spurious "Pending verification" asks. Also includes a P1 test fix for `git-autopilot-setup.test.js` (3 assertions migrated from stdout to stderr after v4.4.0 moved hook output off stdout to protect SessionStart's JSON parser). +27 tests (21 marker hook + 6 gate decision matrix).
+**v4.5.9 (current, stable)** — Worktree pool race fix + decision-trail test artifact leak fix. (1) `vitest.config.js` migrated to vitest 4 `projects` workspace: `tests/autopilot/**` files pinned to a single fork (`pool: 'forks'`, `poolOptions.forks.singleFork: true`) so `worktree-manager.test.js` and `engine.execute-worktree.test.js` no longer race on the shared `.git/worktrees/` namespace under parallel workers. Eliminated the `engine.execute-worktree.test.js` case 3 flake (`expected true to be false`, ~50% repro rate in v4.5.8). Parent `test.include` removed because `projects` plus a parent include creates an implicit default project that double-counts every test (observed 7674 → 15168 regression during config iteration). `pool` and `poolOptions` placed at project root, not nested under `test:`, per vitest 4 migration. (2) `tests/core/decision-trail.test.js` env-restore bug: `process.env.CLAUDE_PLUGIN_ROOT = ORIGINAL_PLUGIN_ROOT` coerced `undefined` to the literal string `"undefined"`, leaking `undefined/runtime/decision-trail.json` into the repo root after every test pass. Fixed via a `restorePluginRoot()` helper that uses `delete` when the original was unset. 11-run full-suite verification: case 3 occurrences = 0. Worktree race RESOLVED; two pre-existing timing flakes (`guardrails.test.js:74`, `decision-trail.test.js:303`) documented as next pickup.
+
+**v4.5.8** — DEV Verify Gate restored via main-agent edit marker. v4.5.6 hard-disabled `dev-verify-gate.js` because it fired on every Stop with uncommitted working-tree changes — including teammate-only edits during `/team` delegate flows, paralysing every orchestrator response. v4.5.8 reintroduces the gate with a marker-file pattern: a new PostToolUse hook (`mark-main-agent-edit.js`) writes `runtime/last-main-agent-edit.timestamp` ONLY when Edit/Write/MultiEdit fires from the main orchestrator (subagent contexts — detected via `subagent_id` / `subagent_type` / `parent_session_id` / `role: 'teammate'` — bail without touching the marker). The gate now compares marker mtime vs. its own fingerprint cache and bails when no main-agent edit has happened since the last fire — so teammate edits and HEAD drift no longer trigger spurious "Pending verification" asks. Also includes a P1 test fix for `git-autopilot-setup.test.js` (3 assertions migrated from stdout to stderr after v4.4.0 moved hook output off stdout to protect SessionStart's JSON parser). +27 tests (21 marker hook + 6 gate decision matrix).
 
 **v4.5.7** — Turn Recap restoration. Restored two regressed UX features: (1) `/recap` slash command was a 12-line thin alias to `/daily` since v4.5 (model often skipped the full workflow); now inlined as the full 276-line dashboard so it self-executes consistently. (2) New `stop-recap.js` Stop hook emits a one-line gray summary after every assistant turn (e.g. `[artibot:recap] ✏ 3 files · ⚙ 2 cmds · 🌿 4 uncommitted`) — read-only, stderr-only, `stop_hook_active` loop-guarded, 4 MB transcript cap, 2 s git timeout, so it cannot regress to v4.5.6-class infinite-loop conditions. Empty turns (no tool uses, no dirty files) emit nothing.
 

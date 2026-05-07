@@ -18,6 +18,20 @@ import * as profile from '../../lib/core/user-profile.js';
 // tempdir (isolated per test) and cannot touch the real repo.
 const ORIGINAL_PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT;
 
+// `process.env` coerces every assigned value to a string — assigning
+// `undefined` produces the literal string "undefined", which would then
+// flow into `path.join(getPluginRoot(), 'runtime', 'decision-trail.json')`
+// and create a real `undefined/runtime/decision-trail.json` directory at
+// the repo root. Restore via delete instead of assignment when the
+// original was unset.
+function restorePluginRoot() {
+  if (ORIGINAL_PLUGIN_ROOT === undefined) {
+    delete process.env.CLAUDE_PLUGIN_ROOT;
+  } else {
+    process.env.CLAUDE_PLUGIN_ROOT = ORIGINAL_PLUGIN_ROOT;
+  }
+}
+
 async function withSandbox(testFn, opts = {}) {
   const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'artibot-trail-'));
   const enabled = opts.enabled !== false;
@@ -45,7 +59,7 @@ async function withSandbox(testFn, opts = {}) {
   try {
     await testFn(trail, tmpRoot);
   } finally {
-    process.env.CLAUDE_PLUGIN_ROOT = ORIGINAL_PLUGIN_ROOT;
+    restorePluginRoot();
     trail._resetDecisionTrailCache();
     await fs.rm(tmpRoot, { recursive: true, force: true });
   }
@@ -53,7 +67,7 @@ async function withSandbox(testFn, opts = {}) {
 
 describe('decision-trail', () => {
   afterEach(() => {
-    process.env.CLAUDE_PLUGIN_ROOT = ORIGINAL_PLUGIN_ROOT;
+    restorePluginRoot();
   });
 
   describe('recordDecision()', () => {
