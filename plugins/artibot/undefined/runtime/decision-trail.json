@@ -1,0 +1,24 @@
+{
+  "entries": [
+    {
+      "id": "dec-mov56x24-05s8kz",
+      "timestamp": "2026-05-07T07:05:58.492Z",
+      "subsystem": "cognitive-router",
+      "action": "classified",
+      "reason": "heuristic score 0.26 vs threshold 0.4",
+      "inputs": null,
+      "outputs": {
+        "system": 1,
+        "score": 0.26,
+        "threshold": 0.4,
+        "nativeEffort": null
+      },
+      "confidence": 0.79
+    }
+  ],
+  "metadata": {
+    "createdAt": "2026-05-07T07:05:58.496Z",
+    "lastUpdated": "2026-05-07T07:05:58.492Z",
+    "totalAppended": 1
+  }
+}
