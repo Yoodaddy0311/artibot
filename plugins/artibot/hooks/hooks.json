@@ -343,6 +343,18 @@
         ],
         "priority": "operational",
         "category": "git"
+      },
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/stop-recap.js",
+            "timeout": 5000
+          }
+        ],
+        "priority": "optional",
+        "category": "ux"
       }
     ],
     "UserPromptSubmit": [
