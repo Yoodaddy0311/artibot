@@ -1,6 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-hooks.json",
-  "description": "Artibot v4.5.4 - Claude Code Plugin Hooks",
+  "description": "Artibot v4.5.7 - Claude Code Plugin Hooks",
   "hooks": {
     "SessionStart": [
       {

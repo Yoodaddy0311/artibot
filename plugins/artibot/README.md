@@ -1,6 +1,6 @@
 # Artibot
 
-[![Version](https://img.shields.io/badge/version-4.5.6-blue?style=flat-square)](./CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-4.5.7-blue?style=flat-square)](./CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](./LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen?style=flat-square)](./package.json)
 [![Tests](https://img.shields.io/badge/tests-passing-brightgreen?style=flat-square)](./tests/)
@@ -167,7 +167,7 @@ Key fields in `artibot.config.json` (file is auto-validated against schema):
 
 | Field | Default | Purpose |
 |---|---|---|
-| `version` | `4.5.4` | Synced across plugin.json / package.json / artibot.config.json |
+| `version` | `4.5.7` | Synced across plugin.json / package.json / artibot.config.json |
 | `cognitive.router.threshold` | `0.4` | System 1 ↔ System 2 boundary |
 | `cognitive.system1.maxLatency` | `100` | ms — System 1 response cap before escalation |
 | `learning.lifelong.batchSize` | `50` | Experiences per GRPO batch |
@@ -186,7 +186,13 @@ Full configuration reference: [설정](#설정) section.
 
 ## Roadmap
 
-**v4.5.4 (current, stable)** — `/doctor` plugin error fix. Removed three Anthropic Agent SDK extension events (`on_handoff`, `on_llm_start`, `on_llm_end`) from `hooks/hooks.json` because Claude Code's native loader rejects snake_case event keys at startup. Stub scripts preserved as reserved SDK extension points. See [CHANGELOG](./CHANGELOG.md).
+**v4.5.7 (current, stable)** — Turn Recap restoration. Restored two regressed UX features: (1) `/recap` slash command was a 12-line thin alias to `/daily` since v4.5 (model often skipped the full workflow); now inlined as the full 276-line dashboard so it self-executes consistently. (2) New `stop-recap.js` Stop hook emits a one-line gray summary after every assistant turn (e.g. `[artibot:recap] ✏ 3 files · ⚙ 2 cmds · 🌿 4 uncommitted`) — read-only, stderr-only, `stop_hook_active` loop-guarded, 4 MB transcript cap, 2 s git timeout, so it cannot regress to v4.5.6-class infinite-loop conditions. Empty turns (no tool uses, no dirty files) emit nothing.
+
+**v4.5.6** — Stop hook 전수 감사 + 무한 루프 차단. 3-에이전트 병렬 감사로 9건 수정: `auto-review-trigger.js` 스키마 `additionalContext` (Stop ignored) → `decision: "block" + reason`, removed `HEAD~1..HEAD` (autopilot WIP commit infinite loop), added 256 KB DoS guard + agent allowlist + worktree-isolated fingerprint, `dev-verify-gate.js` neu + emergency disable, `stop-review-gate.js` fingerprint cache. CRITICAL discovery: install copy (`~/.claude/artibot/`) is a separate copy from source repo and source edits do NOT auto-propagate.
+
+**v4.5.5** — Windows test stability + dev-deps security. `vitest.config.js` `testTimeout: 30_000` + `hookTimeout: 30_000` (Windows Node cold-start exceeded vitest 5 s default on 14 tests). Worktree path normalization fix + dev-deps `npm audit fix` (rollup high / vite high×3 / postcss moderate, all vitest@4 transitive) — 5 → 0 vulns.
+
+**v4.5.4** — `/doctor` plugin error fix. Removed three Anthropic Agent SDK extension events (`on_handoff`, `on_llm_start`, `on_llm_end`) from `hooks/hooks.json` because Claude Code's native loader rejects snake_case event keys at startup. Stub scripts preserved as reserved SDK extension points.
 
 **v4.5.3** — Security hardening + test coverage. `scripts/update.js` migrated all 5 `execSync` sites to `execFileSync` (eliminates theoretical shell injection via malicious branch names). 17-test coverage added for previously-untested update.js helpers.
 

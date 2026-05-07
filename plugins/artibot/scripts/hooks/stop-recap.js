@@ -38,6 +38,39 @@ const CMD_TOOLS = new Set(['Bash', 'PowerShell']);
 const READ_TOOLS = new Set(['Read', 'Grep', 'Glob']);
 
 /**
+ * Tally a single tool_use block into the running counts.
+ *
+ * @param {{ name?: string, type?: string }} block
+ * @param {{ edits: number, cmds: number, reads: number, agents: number }} counts
+ */
+function tallyBlock(block, counts) {
+  if (block?.type !== 'tool_use') return;
+  const name = block.name || '';
+  if (EDIT_TOOLS.has(name)) counts.edits++;
+  else if (CMD_TOOLS.has(name)) counts.cmds++;
+  else if (READ_TOOLS.has(name)) counts.reads++;
+  else if (name === 'Agent' || name === 'Task') counts.agents++;
+}
+
+/**
+ * Parse a JSONL line and extract role + content blocks. Returns null on
+ * malformed input.
+ *
+ * @param {string} line
+ * @returns {{ role: string|null, content: any[] }|null}
+ */
+function parseTranscriptLine(line) {
+  try {
+    const obj = JSON.parse(line);
+    const role = obj.message?.role || obj.role || obj.type || null;
+    const content = obj.message?.content ?? obj.content ?? [];
+    return { role, content: Array.isArray(content) ? content : [] };
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Read the JSONL transcript and count tool uses since the last user message.
  * Returns zeros on any failure.
  *
@@ -57,28 +90,15 @@ function countToolUsesSinceLastUser(transcriptPath) {
     const lines = raw.split('\n').filter(Boolean);
     let lastUserIdx = -1;
     for (let i = lines.length - 1; i >= 0; i--) {
-      try {
-        const obj = JSON.parse(lines[i]);
-        const role = obj.message?.role || obj.role || obj.type;
-        if (role === 'user') { lastUserIdx = i; break; }
-      } catch { /* skip malformed line */ }
+      const parsed = parseTranscriptLine(lines[i]);
+      if (parsed?.role === 'user') { lastUserIdx = i; break; }
     }
     if (lastUserIdx === -1) return counts;
 
     for (let i = lastUserIdx + 1; i < lines.length; i++) {
-      try {
-        const obj = JSON.parse(lines[i]);
-        const content = obj.message?.content ?? obj.content ?? [];
-        if (!Array.isArray(content)) continue;
-        for (const block of content) {
-          if (block?.type !== 'tool_use') continue;
-          const name = block.name || '';
-          if (EDIT_TOOLS.has(name)) counts.edits++;
-          else if (CMD_TOOLS.has(name)) counts.cmds++;
-          else if (READ_TOOLS.has(name)) counts.reads++;
-          else if (name === 'Agent' || name === 'Task') counts.agents++;
-        }
-      } catch { /* skip malformed line */ }
+      const parsed = parseTranscriptLine(lines[i]);
+      if (!parsed) continue;
+      for (const block of parsed.content) tallyBlock(block, counts);
     }
   } catch { /* swallow all transcript errors */ }
   return counts;
