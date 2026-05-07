@@ -17,6 +17,7 @@
 
 import { parseJSON, readStdin, toFileUrl, writeStdout } from '../utils/index.js';
 import path from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { createErrorHandler, extractAgentId, extractAgentRole, logHookError } from '../../lib/core/hook-utils.js';
 
@@ -169,6 +170,29 @@ function extractToolUseCount(hookData) {
 }
 
 // ---------------------------------------------------------------------------
+// Config gate
+// ---------------------------------------------------------------------------
+
+/**
+ * Read learning.collectAgentExperience from artibot.config.json.
+ * Default: true (preserve existing behavior). Returns false explicitly only
+ * when the key is set to `false` — any parse error or missing key keeps the
+ * pipeline enabled so opt-out is explicit, not accidental.
+ *
+ * @returns {boolean}
+ */
+function isAgentExperienceCollectionEnabled() {
+  try {
+    const configPath = path.join(PLUGIN_ROOT, 'artibot.config.json');
+    if (!existsSync(configPath)) return true;
+    const config = JSON.parse(readFileSync(configPath, 'utf-8'));
+    return config?.learning?.collectAgentExperience !== false;
+  } catch {
+    return true;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
@@ -186,23 +210,28 @@ async function main() {
   // Extract the explicit agent_type field (v2.1.69+) for finer classification
   const agentType = hookData?.agent_type || agentRole;
 
-  // Feed into lifelong learning pipeline
-  try {
-    const lifelongPath = path.join(PLUGIN_ROOT, 'lib', 'learning', 'lifelong-learner.js');
-    const { collectExperience } = await import(toFileUrl(lifelongPath));
-    await collectExperience({
-      type: 'agent',
-      category: agentRole,
-      data: {
-        agentId,
-        agentType,
-        score,
-        summary,
-        ...breakdown,
-      },
-    });
-  } catch (err) {
-    logHookError('agent-evaluator', 'learning pipeline unavailable', err);
+  // Feed into lifelong learning pipeline (gated to skip ~200-500ms cold-start
+  // dynamic import on every SubagentStop — accumulates in /team parallel).
+  // Default true preserves prior behavior; set learning.collectAgentExperience=false
+  // in artibot.config.json to opt out.
+  if (isAgentExperienceCollectionEnabled()) {
+    try {
+      const lifelongPath = path.join(PLUGIN_ROOT, 'lib', 'learning', 'lifelong-learner.js');
+      const { collectExperience } = await import(toFileUrl(lifelongPath));
+      await collectExperience({
+        type: 'agent',
+        category: agentRole,
+        data: {
+          agentId,
+          agentType,
+          score,
+          summary,
+          ...breakdown,
+        },
+      });
+    } catch (err) {
+      logHookError('agent-evaluator', 'learning pipeline unavailable', err);
+    }
   }
 
   writeStdout({

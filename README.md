@@ -591,7 +591,7 @@ All teammates have their specialist tools + team collaboration tools (`SendMessa
 
 ## Hooks
 
-54 hook registrations across 15 event types:
+52 hook registrations across 15 event types:
 
 | Event | Script | Purpose |
 |-------|--------|---------|

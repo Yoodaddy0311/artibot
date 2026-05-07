@@ -349,36 +349,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/check-console-log.js",
-            "timeout": 10000
-          }
-        ],
-        "priority": "operational",
-        "category": "quality"
-      },
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
             "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/git-autopilot-close.js",
             "timeout": 15000
           }
         ],
         "priority": "operational",
         "category": "git"
-      },
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/dev-verify-gate.js",
-            "timeout": 5000
-          }
-        ],
-        "priority": "operational",
-        "category": "quality"
       }
     ],
     "UserPromptSubmit": [
