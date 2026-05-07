@@ -1,6 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-hooks.json",
-  "description": "Artibot v4.5.7 - Claude Code Plugin Hooks",
+  "description": "Artibot v4.5.8 - Claude Code Plugin Hooks",
   "hooks": {
     "SessionStart": [
       {
@@ -281,6 +281,18 @@
         "category": "quality"
       },
       {
+        "matcher": "tool == \"Edit\" || tool == \"Write\" || tool == \"MultiEdit\"",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/mark-main-agent-edit.js",
+            "timeout": 3000
+          }
+        ],
+        "priority": "operational",
+        "category": "tracking"
+      },
+      {
         "matcher": "*",
         "hooks": [
           {
@@ -330,6 +342,18 @@
           }
         ],
         "priority": "critical",
+        "category": "quality"
+      },
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/dev-verify-gate.js",
+            "timeout": 8000
+          }
+        ],
+        "priority": "advisory",
         "category": "quality"
       },
       {

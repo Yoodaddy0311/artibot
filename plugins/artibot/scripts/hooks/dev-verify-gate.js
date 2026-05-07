@@ -37,6 +37,7 @@ import { createErrorHandler, logHookError } from '../../lib/core/hook-utils.js';
 
 const HOOK_NAME = 'dev-verify-gate';
 const STATE_FILE = 'last-dev-verify-sha.txt';
+const MARKER_FILE = 'last-main-agent-edit.timestamp';
 
 const DEV_VERIFY_REASON =
   'Run the DEV verify checklist before finalising. ' +
@@ -153,61 +154,49 @@ function saveFingerprint(pluginRoot, fingerprint) {
 }
 
 /**
- * Check if any changed file has been modified since the cache file's mtime.
- * Returns true if at least one file is newer (i.e., real new edits happened
- * since last gate fire). Returns false if all files predate the cache (i.e.,
- * HEAD/working-tree drift but no actual edits — e.g., git autopilot WIP
- * commit shifted HEAD without user edits).
+ * Has the main orchestrator agent made an edit since the last gate fire?
+ *
+ * Compares `runtime/last-main-agent-edit.timestamp` (written by the
+ * mark-main-agent-edit PostToolUse hook on Edit/Write/MultiEdit, only when
+ * NOT inside a subagent context) against `runtime/last-dev-verify-sha.txt`
+ * (written by this gate after a successful fire).
+ *
+ * Decision matrix:
+ *   - marker missing       → no main-agent edits have ever fired   → bail (false)
+ *   - cache missing        → first run, no baseline                → fire (true)
+ *   - marker mtime > cache → new main-agent edits since last fire → fire (true)
+ *   - marker mtime ≤ cache → no NEW edits (or only teammate edits) → bail (false)
+ *
+ * The "marker missing → bail" branch is critical: a fresh checkout with
+ * dirty working-tree (e.g. an in-progress branch resumed from another
+ * machine) must NOT spuriously fire the verify ask, because the orchestrator
+ * has not actually edited anything in this session yet.
  *
  * @param {string} pluginRoot
- * @param {string} repoRoot
- * @param {string[]} changedFiles
- * @returns {boolean}
+ * @returns {boolean} true → fire gate, false → bail
  */
-function hasNewerEdits(pluginRoot, repoRoot, changedFiles) {
+function hasNewerMainAgentEdit(pluginRoot) {
+  const markerPath = path.join(pluginRoot, 'runtime', MARKER_FILE);
   const cachePath = path.join(pluginRoot, 'runtime', STATE_FILE);
-  if (!existsSync(cachePath)) return true; // no prior state — fire on first run
-  let cacheMtime;
+
+  if (!existsSync(markerPath)) return false;
+  if (!existsSync(cachePath)) return true;
+
   try {
-    cacheMtime = statSync(cachePath).mtimeMs;
+    const markerMtime = statSync(markerPath).mtimeMs;
+    const cacheMtime = statSync(cachePath).mtimeMs;
+    return markerMtime > cacheMtime;
   } catch {
-    return true; // unreadable cache — be safe, fire
+    return true; // stat failure — be safe, fire
   }
-  for (const file of changedFiles) {
-    const abs = path.join(repoRoot, file);
-    if (!existsSync(abs)) continue;
-    try {
-      if (statSync(abs).mtimeMs > cacheMtime) return true;
-    } catch {
-      // skip unreadable
-    }
-  }
-  return false;
 }
 
 async function main() {
-  // ===========================================================================
-  // EMERGENCY DISABLE (v4.5.6 in-flight): unconditional bail.
-  //
-  // Root cause: this gate fires whenever the working tree has uncommitted
-  // changes, but in /team delegate workflows the changes come from teammates
-  // (fix-applier, etc.) — NOT the orchestrator turn that the gate is gating.
-  // Result: every orchestrator response while teammates are mid-edit gets
-  // blocked with "EXECUTE pending" feedback, paralysing all delegate flows.
-  //
-  // hooks.json registration was already removed (source + install), but
-  // Claude Code caches hooks.json at SessionStart so removal only takes
-  // effect on next session. This in-script bail neutralises the gate
-  // immediately for the current session as well.
-  //
-  // Proper fix tracked for v4.5.7: marker-file pattern (PostToolUse(Edit|
-  // Write|MultiEdit) writes runtime/last-main-agent-edit.timestamp; gate
-  // bails if marker mtime <= cache mtime). That distinguishes orchestrator
-  // edits from teammate edits and from working-tree drift.
-  // ===========================================================================
-  return;
+  // v4.5.8: emergency disable removed. The marker-file pattern below now
+  // distinguishes main-agent edits (gate fires) from teammate edits and
+  // working-tree drift (gate bails). See `mark-main-agent-edit.js` for the
+  // PostToolUse hook that writes the marker.
 
-  // eslint-disable-next-line no-unreachable
   const raw = await readStdin();
   const hookData = parseJSON(raw) ?? {};
 
@@ -224,12 +213,12 @@ async function main() {
 
   const pluginRoot = getPluginRoot();
 
-  // Mtime guard: if no changed file is newer than the cache, this turn made
-  // no real edits — the working-tree drift is from prior-turn residue or
-  // autopilot HEAD movement. Skip to prevent the infinite "fingerprint
-  // mismatched but nothing actually changed" block loop that was paralysing
-  // user work prior to this fix.
-  if (!hasNewerEdits(pluginRoot, repoRoot, changedFiles)) return;
+  // Marker check: did the main orchestrator agent edit anything since the
+  // last verify fire? If not (only teammates edited, or only working-tree
+  // drift like autopilot WIP commits), bail. This is the v4.5.8 fix for
+  // the v4.5.6 paralysis bug where every orchestrator Stop while teammates
+  // were mid-edit got blocked with a spurious "Pending verification" ask.
+  if (!hasNewerMainAgentEdit(pluginRoot)) return;
 
   const headSha = getHeadSha(repoRoot) || 'unknown';
   const fingerprint = buildFingerprint(repoRoot, headSha, changedFiles);
