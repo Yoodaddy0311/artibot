@@ -78,3 +78,60 @@ describe('generatePRD', () => {
     expect(() => generatePRD({ task: 'x' })).toThrow();
   });
 });
+
+describe('renderPRD — Goal Contract section (v4.6.0)', () => {
+  it('omits the Goal Contract section when options.goalContract is absent (legacy backward compat)', () => {
+    const md = renderPRD({
+      task: 'legacy task',
+      sessionId: 'ap-legacy',
+      options: {},
+    });
+    expect(md).not.toContain('Goal Contract');
+    expect(md).toContain('## 2. 목표');
+    expect(md).toContain('## 3. 범위');
+  });
+
+  it('renders a Goal Contract section between section 2 and 3 when supplied', () => {
+    const contract = {
+      objective: 'migrate API to v2',
+      stoppingCondition: 'all endpoints return 200',
+      validationCommand: 'npm run ci',
+      forbiddenChanges: [],
+      maxIterations: 3,
+    };
+    const md = renderPRD({
+      task: 'migration task',
+      sessionId: 'ap-goal-1',
+      options: { goalContract: contract },
+    });
+    expect(md).toContain('## 2.5 Goal Contract');
+    expect(md).toContain('"objective": "migrate API to v2"');
+    expect(md).toContain('"stoppingCondition": "all endpoints return 200"');
+    // Section ordering: 2 → 2.5 → 3
+    const idx2 = md.indexOf('## 2. 목표');
+    const idx25 = md.indexOf('## 2.5 Goal Contract');
+    const idx3 = md.indexOf('## 3. 범위');
+    expect(idx2).toBeLessThan(idx25);
+    expect(idx25).toBeLessThan(idx3);
+  });
+
+  it('emits the Goal Contract as a valid JSON-fenced block parseable by prd-parser', async () => {
+    const { parseGoalContract } = await import('../../lib/autopilot/prd-parser.js');
+    const contract = {
+      objective: 'X',
+      stoppingCondition: 'Y',
+      validationCommand: null,
+      forbiddenChanges: ['a.md'],
+      maxIterations: 2,
+    };
+    const md = renderPRD({
+      task: 'roundtrip task',
+      sessionId: 'ap-roundtrip',
+      options: { goalContract: contract },
+    });
+    const parsed = parseGoalContract(md);
+    expect(parsed.found).toBe(true);
+    expect(parsed.errors).toEqual([]);
+    expect(parsed.contract).toEqual(contract);
+  });
+});

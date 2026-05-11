@@ -53,6 +53,24 @@ export {
 } from './prd-generator.js';
 
 export {
+  validateGoalContract,
+  HARD_MAX_ITERATIONS,
+  DEFAULT_MAX_ITERATIONS,
+} from './goal-schema.js';
+
+export {
+  parseGoalContract,
+} from './prd-parser.js';
+
+export {
+  evaluateGoal,
+} from './goal-evaluator.js';
+
+export {
+  runPhaseGoalEvaluate,
+} from './goal-loop.js';
+
+export {
   generateReport,
   renderReport,
   buildReportData,

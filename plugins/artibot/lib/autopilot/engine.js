@@ -10,16 +10,15 @@
  * @module lib/autopilot/engine
  */
 
+import { readFileSync } from 'node:fs';
 import { generatePRD } from './prd-generator.js';
 import { generateReport } from './report-generator.js';
-import {
-  loadSession,
-  newSessionId,
-  saveSession,
-} from './session-store.js';
+import { parseGoalContract } from './prd-parser.js';
+import { runPhaseGoalEvaluate } from './goal-loop.js';
+import { makeInitialState, persist, recordPhase, tick } from './_engine-helpers.js';
+import { loadSession } from './session-store.js';
 import { pauseReason, shouldPause } from './safety.js';
 import { notifyCompletion, notifyPause } from './notification.js';
-import { appendEvent } from './telemetry.js';
 import { appendLesson, extractKey, recallLessons } from './memory.js';
 import {
   createWorktree,
@@ -28,20 +27,6 @@ import {
 } from './worktree-manager.js';
 import { acquireLock, isLocked, releaseLock } from './lock.js';
 import { loadAllowList } from './mcp-verifier.js';
-
-/**
- * Best-effort telemetry tick. Never throws into Phase logic.
- * @param {string} sessionId
- * @param {object} event
- */
-function tick(sessionId, event) {
-  try {
-    if (!sessionId) return;
-    appendEvent(sessionId, event);
-  } catch {
-    /* telemetry must not break engine flow */
-  }
-}
 
 /**
  * Best-effort lesson append. Skips when state.featureKey is unset (Phase 0
@@ -58,7 +43,14 @@ function safeAppendLesson(state, payload) {
   }
 }
 
-/** Phase names in canonical order. */
+/**
+ * Phase names in canonical order.
+ *
+ * EVALUATE (v4.6.0) sits between IMPROVE and REPORT and is a no-op
+ * "gate" for legacy sessions (no Goal Contract). When a Goal Contract
+ * is present, runPhaseGoalEvaluate may instead emit a re-EXECUTE
+ * instruction to start another iteration.
+ */
 export const PHASES = Object.freeze([
   'INTAKE',
   'PLAN',
@@ -66,59 +58,11 @@ export const PHASES = Object.freeze([
   'CROSS_CHECK',
   'VERIFY',
   'IMPROVE',
+  'EVALUATE',
   'REPORT',
 ]);
 
-/**
- * Persist a state mutation safely. Returns the saved state.
- * @param {object} state
- * @returns {object}
- */
-function persist(state) {
-  state.updatedAt = new Date().toISOString();
-  saveSession(state);
-  return state;
-}
 
-/**
- * Build the initial session state object.
- * @param {{ task: string, mode?: string, options?: object, sessionId?: string }} args
- * @returns {object}
- */
-function makeInitialState({ task, mode, options, sessionId }) {
-  const id = sessionId || newSessionId();
-  return {
-    sessionId: id,
-    task: task || '',
-    mode: mode || 'default',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    options: { maxDuration: '4h', budget: 2_000_000, ...(options || {}) },
-    phase: 'INTAKE',
-    prdPath: null,
-    reportPath: null,
-    phases: [],
-    checkpoints: [],
-    queuedQuestions: [],
-    errors: [],
-    counters: { buildFailures: 0, testFailures: 0 },
-    tokenUsage: 0,
-    lastReviewedSHA: null,
-    worktreePath: null,
-    lockPath: null,
-    parentSession: options?.parentSession || null,
-  };
-}
-
-/**
- * Append a phase record. Mutates state.
- * @param {object} state
- * @param {object} phase
- */
-function recordPhase(state, phase) {
-  state.phases = Array.isArray(state.phases) ? state.phases : [];
-  state.phases.push({ ts: new Date().toISOString(), ...phase });
-}
 
 /**
  * Check if the session should freeze; returns a pause instruction when true.
@@ -192,6 +136,37 @@ export function runPhase0Intake(state) {
     priorLessons: state.priorLessons,
   });
   state.prdPath = filePath;
+
+  // v4.6.0 — extract Goal Contract from the generated PRD when present.
+  // Legacy PRDs (no Goal Contract section) silently fall through with
+  // state.goalContract = null, preserving 100% backward compatibility.
+  try {
+    const prdContent = readFileSync(filePath, 'utf-8');
+    const parsed = parseGoalContract(prdContent);
+    if (parsed.found && parsed.contract) {
+      state.goalContract = parsed.contract;
+      tick(state.sessionId, {
+        phase: 'INTAKE',
+        type: 'goal-contract-parsed',
+        level: 'info',
+        message: `goal contract parsed: ${parsed.contract.objective}`,
+        data: {
+          maxIterations: parsed.contract.maxIterations,
+          hasValidationCommand: Boolean(parsed.contract.validationCommand),
+        },
+      });
+    } else if (parsed.found && parsed.errors.length > 0) {
+      tick(state.sessionId, {
+        phase: 'INTAKE',
+        type: 'goal-contract-error',
+        level: 'warn',
+        message: `goal contract parse failed: ${parsed.errors.join('; ')}`,
+      });
+    }
+  } catch {
+    /* parse non-blocking — legacy behavior preserved */
+  }
+
   recordPhase(state, { name: 'INTAKE', status: 'done', artifact: filePath, slug });
   persist(state);
   tick(state.sessionId, { phase: 'INTAKE', type: 'phase-end', level: 'info', message: 'Phase 0 INTAKE 완료', data: { prdPath: filePath } });
@@ -414,12 +389,16 @@ export function runPhase5Improve(state) {
   recordPhase(state, { name: 'IMPROVE', status: 'queued' });
   persist(state);
   tick(state.sessionId, { phase: 'IMPROVE', type: 'phase-end', level: 'info', message: 'Phase 5 IMPROVE 위임 완료' });
+  // v4.6.0 — when a Goal Contract is present, route through EVALUATE
+  // instead of jumping straight to REPORT. Legacy sessions continue
+  // straight to REPORT unchanged.
+  const nextPhaseFromImprove = state.goalContract ? 'EVALUATE' : 'REPORT';
   return {
     type: 'delegate',
     phase: 'IMPROVE',
     sessionId: state.sessionId,
     agents: ['refactor-cleaner', 'performance-engineer'],
-    nextPhase: 'REPORT',
+    nextPhase: nextPhaseFromImprove,
     instructions: [
       `Autopilot 세션 ${state.sessionId} Phase 5.`,
       'refactor-cleaner: 중복/스타일/dead-code 제안.',
@@ -550,6 +529,7 @@ const PHASE_TO_RUNNER = Object.freeze({
   CROSS_CHECK: runPhase3CrossCheck,
   VERIFY: runPhase4Verify,
   IMPROVE: runPhase5Improve,
+  EVALUATE: runPhaseGoalEvaluate,
   REPORT: runPhase6Report,
 });
 

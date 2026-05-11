@@ -60,6 +60,35 @@ function escapeCell(text, max = 200) {
 }
 
 /**
+ * Render the Goal Contract section. Returns empty string when no
+ * contract is supplied (backward compatible — legacy PRDs unchanged).
+ *
+ * The contract is emitted as a JSON-fenced block under section 2.5
+ * so `prd-parser.parseGoalContract()` can extract it for the autopilot
+ * iteration loop (v4.6.0).
+ *
+ * @param {object|null|undefined} contract validated Goal Contract
+ * @returns {string} markdown section (or '')
+ */
+function renderGoalContract(contract) {
+  if (!contract || typeof contract !== 'object') return '';
+  const json = JSON.stringify(contract, null, 2);
+  return `## 2.5 Goal Contract
+
+Machine-readable stopping condition for the autopilot iteration loop.
+Parsed by \`lib/autopilot/prd-parser.parseGoalContract()\`. When the
+\`validationCommand\` exit code is 0 the goal evaluator marks the
+contract as met and Phase 6 REPORT runs; otherwise the engine
+re-enters Phase 2 EXECUTE (capped by \`maxIterations\`).
+
+\`\`\`json
+${json}
+\`\`\`
+
+`;
+}
+
+/**
  * Render the Prior Lessons section. Returns empty string if no lessons.
  * @param {Array<object>} lessons
  * @returns {string}
@@ -95,6 +124,7 @@ export function renderPRD({ task, sessionId, options = {}, priorLessons }) {
   const maxDuration = options.maxDuration || '4h';
   const budget = options.budget ?? 2_000_000;
   const priorSection = renderPriorLessons(priorLessons);
+  const goalContractSection = renderGoalContract(options.goalContract);
 
   return `# PRD: ${safeTask}
 
@@ -123,7 +153,7 @@ ${priorSection}## 1. 배경
 | G2 | 안전 정책 준수 | 위험 액션 0건 또는 사용자 승인 통과 |
 | G3 | 검증 통과 | npm run ci 통과 |
 
-## 3. 범위 (Scope)
+${goalContractSection}## 3. 범위 (Scope)
 
 - 본 작업 디렉토리 내부에서만 변경
 - 외부 DB / 외부 플러그인 / 외부 API 호출 금지 (DATA POLICY)
