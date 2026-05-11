@@ -113,3 +113,129 @@ describe('resolveBaseBranch', () => {
     expect(result).toBe('main');
   });
 });
+
+describe('resolveBaseBranch — v4.5.12 stacked-PR upstream tracking', () => {
+  it('uses upstream tracking when branch tracks a DIFFERENT parent (stacked PR)', () => {
+    // Branch "phase3-4" tracks "origin/feature-parent" (a sibling, not self).
+    mockState.responses.set('rev-parse --abbrev-ref HEAD', 'phase3-4');
+    mockState.responses.set(
+      'rev-parse --abbrev-ref --symbolic-full-name @{upstream}',
+      'origin/feature-parent',
+    );
+    // origin/HEAD MUST NOT be consulted when stacked upstream resolves.
+    mockState.responses.set('symbolic-ref --short refs/remotes/origin/HEAD', 'origin/master');
+    const result = resolveBaseBranch('/repo', undefined);
+    expect(result).toBe('origin/feature-parent');
+  });
+
+  it('skips upstream when it points at the branch itself (origin/foo for branch foo)', () => {
+    // Self-tracking is the common case — must fall through to origin/HEAD.
+    mockState.responses.set('rev-parse --abbrev-ref HEAD', 'foo');
+    mockState.responses.set(
+      'rev-parse --abbrev-ref --symbolic-full-name @{upstream}',
+      'origin/foo',
+    );
+    mockState.responses.set('symbolic-ref --short refs/remotes/origin/HEAD', 'origin/master');
+    const result = resolveBaseBranch('/repo', undefined);
+    expect(result).toBe('master');
+  });
+
+  it('skips upstream tracking step when HEAD is detached', () => {
+    mockState.responses.set('rev-parse --abbrev-ref HEAD', 'HEAD');
+    mockState.responses.set('symbolic-ref --short refs/remotes/origin/HEAD', 'origin/main');
+    const result = resolveBaseBranch('/repo', undefined);
+    expect(result).toBe('main');
+  });
+
+  it('skips upstream tracking step when @{upstream} fails (no tracking set)', () => {
+    mockState.responses.set('rev-parse --abbrev-ref HEAD', 'detached-feature');
+    // @{upstream} throws when no upstream is configured
+    mockState.responses.set(
+      'rev-parse --abbrev-ref --symbolic-full-name @{upstream}',
+      new Error('no upstream'),
+    );
+    mockState.responses.set('symbolic-ref --short refs/remotes/origin/HEAD', 'origin/main');
+    const result = resolveBaseBranch('/repo', undefined);
+    expect(result).toBe('main');
+  });
+
+  it('explicit config.baseBranch still wins over upstream tracking', () => {
+    mockState.responses.set('rev-parse --abbrev-ref HEAD', 'phase3-4');
+    mockState.responses.set(
+      'rev-parse --abbrev-ref --symbolic-full-name @{upstream}',
+      'origin/feature-parent',
+    );
+    const result = resolveBaseBranch('/repo', { baseBranch: 'develop' });
+    expect(result).toBe('develop');
+  });
+});
+
+describe('isMergeBaseFresh — v4.5.12 age sanity gate', () => {
+  let isMergeBaseFresh;
+
+  beforeEach(async () => {
+    ({ isMergeBaseFresh } = await import('../../lib/git/resolve-base.js'));
+  });
+
+  it('returns true when mergeBase is recent (within maxAgeDays)', () => {
+    const now = Math.floor(Date.now() / 1000);
+    const fiveDaysAgo = now - 5 * 86400;
+    mockState.responses.set(`log -1 --format=%ct abc123`, String(fiveDaysAgo));
+    mockState.responses.set(`log -1 --format=%ct HEAD`, String(now));
+    expect(isMergeBaseFresh('abc123', '/repo', 30)).toBe(true);
+  });
+
+  it('returns false when mergeBase is older than maxAgeDays (default 30)', () => {
+    const now = Math.floor(Date.now() / 1000);
+    const sixtyDaysAgo = now - 60 * 86400;
+    mockState.responses.set(`log -1 --format=%ct ancientSha`, String(sixtyDaysAgo));
+    mockState.responses.set(`log -1 --format=%ct HEAD`, String(now));
+    expect(isMergeBaseFresh('ancientSha', '/repo')).toBe(false);
+  });
+
+  it('respects a custom maxAgeDays', () => {
+    const now = Math.floor(Date.now() / 1000);
+    const tenDaysAgo = now - 10 * 86400;
+    mockState.responses.set(`log -1 --format=%ct shaX`, String(tenDaysAgo));
+    mockState.responses.set(`log -1 --format=%ct HEAD`, String(now));
+    expect(isMergeBaseFresh('shaX', '/repo', 7)).toBe(false);
+    expect(isMergeBaseFresh('shaX', '/repo', 14)).toBe(true);
+  });
+
+  it('returns false for invalid inputs (null, empty, non-string)', () => {
+    expect(isMergeBaseFresh(null, '/repo')).toBe(false);
+    expect(isMergeBaseFresh('', '/repo')).toBe(false);
+    expect(isMergeBaseFresh(undefined, '/repo')).toBe(false);
+    expect(isMergeBaseFresh(42, '/repo')).toBe(false);
+  });
+
+  it('returns false when maxAgeDays is invalid (zero / negative / NaN)', () => {
+    const now = Math.floor(Date.now() / 1000);
+    mockState.responses.set(`log -1 --format=%ct sha`, String(now - 86400));
+    mockState.responses.set(`log -1 --format=%ct HEAD`, String(now));
+    expect(isMergeBaseFresh('sha', '/repo', 0)).toBe(false);
+    expect(isMergeBaseFresh('sha', '/repo', -5)).toBe(false);
+    expect(isMergeBaseFresh('sha', '/repo', NaN)).toBe(false);
+  });
+
+  it('returns false when git log fails for the mergeBase (commit missing)', () => {
+    mockState.responses.set(
+      `log -1 --format=%ct missingSha`,
+      new Error('unknown revision'),
+    );
+    mockState.responses.set(
+      `log -1 --format=%ct HEAD`,
+      String(Math.floor(Date.now() / 1000)),
+    );
+    expect(isMergeBaseFresh('missingSha', '/repo', 30)).toBe(false);
+  });
+
+  it('returns false when timestamp is malformed (non-numeric)', () => {
+    mockState.responses.set(`log -1 --format=%ct sha`, 'not-a-number');
+    mockState.responses.set(
+      `log -1 --format=%ct HEAD`,
+      String(Math.floor(Date.now() / 1000)),
+    );
+    expect(isMergeBaseFresh('sha', '/repo', 30)).toBe(false);
+  });
+});
