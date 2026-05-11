@@ -1,6 +1,6 @@
 # Artibot
 
-[![Version](https://img.shields.io/badge/version-4.5.12-blue?style=flat-square)](./CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-4.6.0-blue?style=flat-square)](./CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](./LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen?style=flat-square)](./package.json)
 [![Tests](https://img.shields.io/badge/tests-passing-brightgreen?style=flat-square)](./tests/)
@@ -167,7 +167,7 @@ Key fields in `artibot.config.json` (file is auto-validated against schema):
 
 | Field | Default | Purpose |
 |---|---|---|
-| `version` | `4.5.12` | Synced across plugin.json / package.json / artibot.config.json |
+| `version` | `4.6.0` | Synced across plugin.json / package.json / artibot.config.json |
 | `cognitive.router.threshold` | `0.4` | System 1 ↔ System 2 boundary |
 | `cognitive.system1.maxLatency` | `100` | ms — System 1 response cap before escalation |
 | `learning.lifelong.batchSize` | `50` | Experiences per GRPO batch |
@@ -186,7 +186,9 @@ Full configuration reference: [설정](#설정) section.
 
 ## Roadmap
 
-**v4.5.12 (current, stable)** — git-autopilot-close `mergeBase` resolution fix (prevents the Phase 3+4 branch-corruption incident class). Two-layer guard: (1) `lib/git/resolve-base.js` new step 2 — branch upstream tracking detects stacked-PR patterns (working branch tracking a parent feature branch rather than repo default); (2) new export `isMergeBaseFresh(mergeBase, cwd, maxAgeDays=30)` rejects any merge-base whose commit-time is older than 30 days from HEAD. `scripts/hooks/git-autopilot-close.js::squashWipCommits` calls the age gate BEFORE `git reset --soft <mergeBase>` so stale resolution → refuse to squash (preserves commits) instead of silent collapse. +14 tests (5 stacked-PR upstream + 7 age-gate + 2 invariants), 19/19 PASS in `resolve-base.test.js`, 11/11 regression in `git-autopilot-close.test.js`.
+**v4.6.0 (current, stable)** — **Goal-driven autopilot** (Codex `/goal` pattern adapted). 4-phase rollout in two PRs (#9, #11). **Phase 1 (Goal Contract slot)**: PRD now carries a machine-readable `## 2.5 Goal Contract` JSON block (`objective` / `stoppingCondition` / `validationCommand` / `forbiddenChanges` / `maxIterations`, hard cap 10). New modules `goal-schema.js` + `prd-parser.js`. **Phase 2 (Stopping Condition Evaluator)**: new EVALUATE phase inserted between IMPROVE and REPORT. `evaluateGoal` trusts ONLY the `validationCommand` exit code (no LLM judgment → no hallucination); `runPhaseGoalEvaluate` drives the iteration loop. Decision matrix: met → REPORT, not-met + under-cap → re-EXECUTE, cap reached / same-SHA-3x / confidence<0.8 → PAUSE. **Phase 3 (Goal-level Control Plane)**: `/autopilot:goal status|pause|resume|retry|clear <session-id>` — orthogonal to session-level pause. `state.goalPaused` lets users freeze evaluator while session continues. **Phase 4 (Progress Heartbeat)**: telemetry ticks gain a `progress` slot (`iteration/maxIterations/pct/met/exitCode`); `/autopilot:tail` renders a new `progress` column. Total +74 new tests (53 P1+P2 + 21 P3+P4). 100% backward compat — legacy PRDs without a Goal Contract continue the existing 7-phase flow.
+
+**v4.5.12** — git-autopilot-close `mergeBase` resolution fix (prevents the Phase 3+4 branch-corruption incident class). Two-layer guard: (1) `lib/git/resolve-base.js` new step 2 — branch upstream tracking detects stacked-PR patterns (working branch tracking a parent feature branch rather than repo default); (2) new export `isMergeBaseFresh(mergeBase, cwd, maxAgeDays=30)` rejects any merge-base whose commit-time is older than 30 days from HEAD. `scripts/hooks/git-autopilot-close.js::squashWipCommits` calls the age gate BEFORE `git reset --soft <mergeBase>` so stale resolution → refuse to squash (preserves commits) instead of silent collapse. +14 tests (5 stacked-PR upstream + 7 age-gate + 2 invariants), 19/19 PASS in `resolve-base.test.js`, 11/11 regression in `git-autopilot-close.test.js`.
 
 **v4.5.11** — Two isolation/race test flakes deferred from the v4.5.10 22-run matrix. `tests/hooks/autopilot-nlu-trigger.test.js` (2/11): the hook's top-level `main().catch(...)` fire-and-forget leaks microtasks INTO the next test's mockState under full-suite worker saturation, producing the canonical "opposite expectations fail together" signature. Fix: 100ms `afterEach` drain + deadline 1000→3000ms positive case + 200→1500ms flat-drain on negative case. `tests/autopilot/engine.mcp-verify.test.js` (1/11): `runPhase4Verify` mutates state in-memory then session-store writes to disk; under load the file write can lag the JS turn that re-reads via `getStatus()`. Fix: `vi.waitFor` poll (timeout 3000ms, interval 50ms) around re-read+assertion (same pattern as v4.5.10 case 3). Test-only changes — zero production-code modification.
 
