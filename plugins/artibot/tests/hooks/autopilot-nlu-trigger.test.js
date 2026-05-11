@@ -73,7 +73,14 @@ beforeEach(() => {
   stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
 });
 
-afterEach(() => {
+afterEach(async () => {
+  // Drain any in-flight fire-and-forget microtasks from the hook's
+  // top-level `main().catch(...)` so they cannot leak writeStdout
+  // calls into the NEXT test's mockState. Without this, two tests
+  // with opposite expectations (e.g. "expect length 1" vs
+  // "expect length 0") can simultaneously fail at ~1/11 rate under
+  // full-suite worker saturation. v4.5.11 isolation fix.
+  await new Promise((resolve) => setTimeout(resolve, 100));
   stderrSpy.mockRestore();
   vi.clearAllMocks();
 });
@@ -113,8 +120,9 @@ describe('autopilot-nlu-trigger — fail-closed on malformed config (C-2)', () =
     // The hook fires `main().catch(...)` at module-top with a dynamic import()
     // chain inside loadConfig. Under full-suite load the microtask queue can
     // take longer than 1-2 turns to flush, so poll until the stdout call lands
-    // or we hit a short timeout (vs flaky 2-microtask wait).
-    const deadline = Date.now() + 1000;
+    // or we hit a generous timeout. v4.5.11 hotfix raised 1000→3000ms after
+    // 2/11 reproduction in the v4.5.10 verification matrix.
+    const deadline = Date.now() + 3000;
     while (mockState.writeStdoutCalls.length === 0 && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 5));
     }
@@ -164,11 +172,12 @@ describe('autopilot-nlu-trigger — fail-closed on malformed config (C-2)', () =
     };
 
     await import('../../scripts/hooks/autopilot-nlu-trigger.js');
-    // Allow microtasks to flush in case async path runs.
-    const deadline = Date.now() + 200;
-    while (mockState.writeStdoutCalls.length === 0 && Date.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, 5));
-    }
+    // Allow ample time for the hook's fire-and-forget async chain to
+    // complete; with autopilot.enabled=false the hook should exit
+    // without writing stdout, so we DRAIN (not poll for length>0).
+    // v4.5.11 hotfix raised 200→1500ms to fully cover full-suite
+    // microtask queue saturation (2/11 reproduction).
+    await new Promise((resolve) => setTimeout(resolve, 1500));
     expect(mockState.writeStdoutCalls).toHaveLength(0);
     const stderr = stderrSpy.mock.calls.map(([m]) => m).join('');
     expect(stderr).not.toMatch(/WARN: malformed config/);

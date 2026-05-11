@@ -7,7 +7,7 @@
  * @see lib/autopilot/mcp-verifier.js — loadAllowList
  */
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   getStatus,
   runPhase4Verify,
@@ -58,10 +58,20 @@ describe('runPhase4Verify with mcpVerify', () => {
     cleanup.push(r.sessionId);
     const state = await getStatus(r.sessionId);
     runPhase4Verify(state);
-    const after = await getStatus(r.sessionId);
-    expect(after.verifyResult).toBeTruthy();
-    expect(after.verifyResult.mcp).toBeDefined();
-    expect(after.verifyResult.mcp.violations).toEqual([]);
+    // Phase 4 mutates state in-memory then session-store writes to disk.
+    // Under full-suite Windows worker saturation that file write can lag
+    // the JS turn that re-reads via getStatus (1/11 reproduction in the
+    // v4.5.10 verification matrix). Poll until disk reflects the write.
+    // v4.5.11 hotfix.
+    await vi.waitFor(
+      async () => {
+        const after = await getStatus(r.sessionId);
+        expect(after.verifyResult).toBeTruthy();
+        expect(after.verifyResult.mcp).toBeDefined();
+        expect(after.verifyResult.mcp.violations).toEqual([]);
+      },
+      { timeout: 3000, interval: 50 },
+    );
   });
 
   it('npm run ci command unchanged regardless of mcpVerify (backward compat)', async () => {
