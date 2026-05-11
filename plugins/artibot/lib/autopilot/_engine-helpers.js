@@ -50,6 +50,9 @@ export function makeInitialState({ task, mode, options, sessionId }) {
     lastIterationSHA: null,
     consecutiveSameSHA: 0,
     goalEvaluation: null,
+    // v4.6.0 Phase 3 — Goal-level control plane (orthogonal to session pause).
+    goalPaused: false,
+    goalControl: null,
   };
 }
 
