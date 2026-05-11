@@ -27,6 +27,28 @@ import { DEFAULT_MAX_ITERATIONS } from './goal-schema.js';
 import { persist, recordPhase, tick } from './_engine-helpers.js';
 
 /**
+ * Build a Phase 4 progress heartbeat slot for telemetry events. Keeps
+ * tail-render UI consistent across iterate / pause / met paths.
+ *
+ * @param {object} state autopilot session state
+ * @param {object} contract validated Goal Contract
+ * @param {object|null} [evalResult] last evaluator result (optional)
+ * @returns {{ iteration: number, maxIterations: number, pct: number, confidence: number|null, met: boolean|null, exitCode: number|null }}
+ */
+function buildProgress(state, contract, evalResult) {
+  const maxIter = contract?.maxIterations || DEFAULT_MAX_ITERATIONS;
+  const iter = state.goalIterations || 0;
+  return {
+    iteration: iter,
+    maxIterations: maxIter,
+    pct: maxIter > 0 ? Math.round((iter / maxIter) * 100) : 0,
+    confidence: evalResult?.confidence ?? null,
+    met: evalResult?.met ?? null,
+    exitCode: evalResult?.exitCode ?? null,
+  };
+}
+
+/**
  * Phase EVALUATE runner — evaluate the Goal Contract's stopping
  * condition and decide the next phase.
  *
@@ -60,6 +82,28 @@ export function runPhaseGoalEvaluate(state, evaluatorOpts = {}) {
       sessionId: state.sessionId,
       nextPhase: 'REPORT',
       skipped: true,
+    };
+  }
+
+  // v4.6.0 Phase 3 — goal-level pause (orthogonal to session pause).
+  // The session continues running but the evaluator is disabled until
+  // resumeGoal lifts the flag. EVALUATE becomes a pass-through.
+  if (state.goalPaused) {
+    recordPhase(state, { name: 'EVALUATE', status: 'skipped', reason: 'goal-paused' });
+    persist(state);
+    tick(state.sessionId, {
+      phase: 'EVALUATE',
+      type: 'phase-end',
+      level: 'info',
+      message: 'EVALUATE skipped (goal paused via /autopilot:goal pause)',
+    });
+    return {
+      type: 'phase-result',
+      phase: 'EVALUATE',
+      sessionId: state.sessionId,
+      nextPhase: 'REPORT',
+      skipped: true,
+      goalPaused: true,
     };
   }
 
@@ -104,6 +148,7 @@ export function runPhaseGoalEvaluate(state, evaluatorOpts = {}) {
     level: evalResult.met ? 'info' : 'warn',
     message: `goal evaluation: ${evalResult.reason}`,
     data: { met: evalResult.met, exitCode: evalResult.exitCode, confidence: evalResult.confidence },
+    progress: buildProgress(state, contract, evalResult),
   });
 
   // Met → proceed to REPORT.
@@ -159,6 +204,7 @@ export function runPhaseGoalEvaluate(state, evaluatorOpts = {}) {
       level: 'warn',
       message: state.pausedReason,
       data: { iterations: state.goalIterations, maxIter },
+      progress: buildProgress(state, contract, evalResult),
     });
     return {
       type: 'pause',
@@ -185,6 +231,7 @@ export function runPhaseGoalEvaluate(state, evaluatorOpts = {}) {
     level: 'info',
     message: `EVALUATE not met → re-EXECUTE iteration ${state.goalIterations}/${maxIter}`,
     data: { iteration: state.goalIterations, maxIter, reason: evalResult.reason },
+    progress: buildProgress(state, contract, evalResult),
   });
   return {
     type: 'phase-result',

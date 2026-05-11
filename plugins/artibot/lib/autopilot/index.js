@@ -71,6 +71,14 @@ export {
 } from './goal-loop.js';
 
 export {
+  pauseGoal,
+  resumeGoal,
+  retryGoal,
+  clearGoal,
+  getGoalStatus,
+} from './goal-control.js';
+
+export {
   generateReport,
   renderReport,
   buildReportData,
