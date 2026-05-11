@@ -5,7 +5,7 @@
  * cognitive router, and user-profile subsystems.
  */
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs/promises';
 import fsSync from 'node:fs';
 import path from 'node:path';
@@ -308,13 +308,19 @@ describe('decision-trail', () => {
         router.resetRouter();
         router.route('analyze security vulnerabilities in auth');
 
-        // router uses Promise-then, so yield to the microtask queue
-        await new Promise((r) => setTimeout(r, 60));
-
-        const entries = await mod.queryDecisions({ subsystem: 'cognitive-router' });
-        expect(entries.length).toBeGreaterThanOrEqual(1);
-        expect(entries[0].action).toBe('classified');
-        expect(entries[0].outputs).toHaveProperty('system');
+        // router uses Promise-then chains — under full-suite worker
+        // saturation a fixed 60ms wait can race the microtask queue.
+        // Poll until at least one cognitive-router entry lands instead of
+        // sleeping a fixed duration.
+        await vi.waitFor(
+          async () => {
+            const entries = await mod.queryDecisions({ subsystem: 'cognitive-router' });
+            expect(entries.length).toBeGreaterThanOrEqual(1);
+            expect(entries[0].action).toBe('classified');
+            expect(entries[0].outputs).toHaveProperty('system');
+          },
+          { timeout: 2000, interval: 20 },
+        );
       });
     });
 
