@@ -78,6 +78,31 @@ function getRepoRoot() {
   return git('git rev-parse --show-toplevel');
 }
 
+/**
+ * Is this repository the Artibot project itself?
+ *
+ * The DEV verify checklist is an Artibot-internal development policy. When the
+ * plugin is installed globally (`~/.claude/artibot/`), Stop hooks fire in every
+ * project the user works in — including unrelated codebases that don't follow
+ * Artibot's DEV protocol. Without this guard, those projects see a confusing
+ * "Reference: plugins/artibot/CLAUDE.md (DEV Protocol section)" reminder that
+ * has no meaning in their context.
+ *
+ * Detection signals (any one is sufficient):
+ *   - `plugins/artibot/CLAUDE.md`        → working from the Artibot monorepo root
+ *   - `artibot.config.json` at repoRoot  → working inside the plugin directory
+ *
+ * @param {string} repoRoot
+ * @returns {boolean}
+ */
+function isArtibotRepo(repoRoot) {
+  if (!repoRoot) return false;
+  return (
+    existsSync(path.join(repoRoot, 'plugins', 'artibot', 'CLAUDE.md')) ||
+    existsSync(path.join(repoRoot, 'artibot.config.json'))
+  );
+}
+
 /** @returns {string|null} */
 function getHeadSha(repoRoot) {
   return git('git rev-parse HEAD', repoRoot);
@@ -206,6 +231,11 @@ async function main() {
 
   const repoRoot = getRepoRoot();
   if (!repoRoot) return;
+
+  // Scope guard: DEV verify is an Artibot-internal policy. Bail silently in
+  // any other project the user happens to be working in (the plugin installs
+  // globally, so the Stop hook would otherwise fire everywhere).
+  if (!isArtibotRepo(repoRoot)) return;
 
   const changedFiles = getChangedFiles(repoRoot);
   // Read-only / diagnostic turn — no DEV verify needed.

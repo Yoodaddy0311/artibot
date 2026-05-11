@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 
@@ -174,5 +174,70 @@ describe('marker-vs-cache mtime semantics (ground truth)', () => {
     const cache = Date.now();
     fixture(marker, cache);
     expect(decide(marker, cache)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Artibot-repo scope guard (added 2026-05-07).
+//
+// dev-verify-gate.js installs globally (~/.claude/artibot/) so its Stop hook
+// fires in every project the user works in. The DEV verify checklist is an
+// Artibot-internal development policy and must NOT surface in unrelated
+// projects ("Reference: plugins/artibot/CLAUDE.md" was leaking out as noise).
+//
+// isArtibotRepo() is module-private — these tests independently assert the
+// same detection rules. Drift between the implementation and these tests is
+// a real regression.
+// ---------------------------------------------------------------------------
+describe('Artibot repo scope guard (ground truth)', () => {
+  let workdir;
+
+  beforeEach(() => {
+    workdir = mkdtempSync(path.join(os.tmpdir(), 'artibot-dvg-scope-'));
+  });
+
+  afterEach(() => {
+    try { rmSync(workdir, { recursive: true, force: true }); } catch { /* ignore */ }
+  });
+
+  // Reproduces the detection rules documented in dev-verify-gate.js
+  // isArtibotRepo(). If this lookup table changes, update both.
+  function detect(repoRoot) {
+    if (!repoRoot) return false;
+    return (
+      existsSync(path.join(repoRoot, 'plugins', 'artibot', 'CLAUDE.md')) ||
+      existsSync(path.join(repoRoot, 'artibot.config.json'))
+    );
+  }
+
+  it('detects Artibot monorepo root via plugins/artibot/CLAUDE.md', () => {
+    mkdirSync(path.join(workdir, 'plugins', 'artibot'), { recursive: true });
+    writeFileSync(path.join(workdir, 'plugins', 'artibot', 'CLAUDE.md'), '# stub');
+    expect(detect(workdir)).toBe(true);
+  });
+
+  it('detects plugin directory directly via artibot.config.json', () => {
+    writeFileSync(path.join(workdir, 'artibot.config.json'), '{}');
+    expect(detect(workdir)).toBe(true);
+  });
+
+  it('rejects unrelated project (no Artibot markers)', () => {
+    writeFileSync(path.join(workdir, 'package.json'), '{"name":"unrelated"}');
+    expect(detect(workdir)).toBe(false);
+  });
+
+  it('rejects empty / null repoRoot defensively', () => {
+    expect(detect(null)).toBe(false);
+    expect(detect('')).toBe(false);
+  });
+
+  it('rejects sibling directory with similarly-named plugin folder', () => {
+    // e.g. someone has plugins/artibot-fork/CLAUDE.md — must NOT match
+    mkdirSync(path.join(workdir, 'plugins', 'artibot-fork'), { recursive: true });
+    writeFileSync(
+      path.join(workdir, 'plugins', 'artibot-fork', 'CLAUDE.md'),
+      '# fork',
+    );
+    expect(detect(workdir)).toBe(false);
   });
 });
