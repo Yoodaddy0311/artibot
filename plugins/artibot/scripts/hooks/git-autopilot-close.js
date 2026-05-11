@@ -208,13 +208,17 @@ function squashWipCommits(cwd, baseBranch, wipCount) {
  * @returns {boolean}
  */
 function pushBranch(cwd, branch) {
+  // --no-verify: this hook IS the autopilot Stop pipeline — re-running pre-push
+  // hooks here would invoke stop-review-gate / dev-verify-gate recursively and
+  // can deadlock the session close. Inner timeout (12s) caps VPN/rate-limit
+  // hangs even when the outer hook timeout (15s) is generous.
   try {
-    gitSilent(['push', 'origin', branch, '--no-verify'], { cwd });
+    gitSilent(['push', 'origin', branch, '--no-verify'], { cwd, timeout: 12000 });
     return true;
   } catch {
     // Try setting upstream on first push
     try {
-      gitSilent(['push', '-u', 'origin', branch, '--no-verify'], { cwd });
+      gitSilent(['push', '-u', 'origin', branch, '--no-verify'], { cwd, timeout: 12000 });
       return true;
     } catch {
       return false;

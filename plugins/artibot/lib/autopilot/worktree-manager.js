@@ -178,10 +178,14 @@ export function listWorktrees(opts = {}) {
     const root = getWorktreesRoot();
     annotated = records.map((r) => {
       const norm = path.normalize(r.path);
+      // Always return the normalized path so callers can do
+      // `rec.path.startsWith(getWorktreesRoot())` reliably across platforms
+      // (git porcelain emits forward slashes on Windows, but our root uses
+      // OS-native separators).
       if (norm.startsWith(path.normalize(root) + path.sep)) {
-        return { ...r, sessionId: path.basename(norm) };
+        return { ...r, path: norm, sessionId: path.basename(norm) };
       }
-      return r;
+      return { ...r, path: norm };
     });
     listCache = { ts: now, records: annotated };
   }

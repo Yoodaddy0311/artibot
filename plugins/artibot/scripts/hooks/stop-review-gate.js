@@ -7,12 +7,14 @@
  */
 
 import { execFileSync, execSync } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
-import { getPluginRoot, parseJSON, readStdin, writeStdout } from '../utils/index.js';
+import { atomicWriteSync, getPluginRoot, parseJSON, readStdin, writeStdout } from '../utils/index.js';
 import { createErrorHandler, hasExtension, isSkippablePath } from '../../lib/core/hook-utils.js';
 
 const HOOK_NAME = 'stop-review-gate';
+const STATE_FILE = 'last-review-gate-sha.txt';
 const log = (msg) => process.stderr.write(`[artibot:${HOOK_NAME}] ${msg}\n`);
 
 const CODE_EXTENSIONS = new Set([
@@ -84,6 +86,92 @@ function getChangedFiles(cwd) {
     return parse(output);
   } catch {
     return [];
+  }
+}
+
+// -------------------------------------------------------------------------
+// Fingerprint Cache (loop-guard)
+// -------------------------------------------------------------------------
+// Mirrors dev-verify-gate.js pattern (scripts/hooks/dev-verify-gate.js:120-186)
+// to prevent self-loops where the same persistent issue triggers `decision:
+// "block"` on every Stop event. The `stop_hook_active` guard only catches
+// immediate Claude Code retries, not a sequence of separate Stop events with
+// identical working-tree state.
+
+/**
+ * Build the cache fingerprint: repoHash + HEAD + sorted(changed_files).
+ * @param {string} repoRoot
+ * @param {string} sha
+ * @param {string[]} files
+ * @returns {string}
+ */
+function buildFingerprint(repoRoot, sha, files) {
+  const repoHash = createHash('sha1').update(repoRoot).digest('hex').slice(0, 8);
+  return `${repoHash}|${sha}|${files.slice().sort().join(',')}`;
+}
+
+/** @returns {string} */
+function readLastFingerprint(pluginRoot) {
+  try {
+    const filePath = path.join(pluginRoot, 'runtime', STATE_FILE);
+    if (!existsSync(filePath)) return '';
+    return readFileSync(filePath, 'utf-8').trim();
+  } catch {
+    return '';
+  }
+}
+
+function saveFingerprint(pluginRoot, fingerprint) {
+  try {
+    const filePath = path.join(pluginRoot, 'runtime', STATE_FILE);
+    atomicWriteSync(filePath, fingerprint + '\n');
+  } catch {
+    // best-effort persistence
+  }
+}
+
+/**
+ * True if any changed file's mtime is newer than the cache file (real new
+ * edits since last gate fire). False means HEAD/working-tree drift but no
+ * actual edits — same break-the-loop pattern as dev-verify-gate.js:167-186.
+ *
+ * @param {string} pluginRoot
+ * @param {string} repoRoot
+ * @param {string[]} changedFiles
+ * @returns {boolean}
+ */
+function hasNewerEdits(pluginRoot, repoRoot, changedFiles) {
+  const cachePath = path.join(pluginRoot, 'runtime', STATE_FILE);
+  if (!existsSync(cachePath)) return true;
+  let cacheMtime;
+  try {
+    cacheMtime = statSync(cachePath).mtimeMs;
+  } catch {
+    return true;
+  }
+  for (const file of changedFiles) {
+    const abs = path.join(repoRoot, file);
+    if (!existsSync(abs)) continue;
+    try {
+      if (statSync(abs).mtimeMs > cacheMtime) return true;
+    } catch {
+      // skip unreadable
+    }
+  }
+  return false;
+}
+
+/** @returns {string|null} */
+function getHeadSha(repoRoot) {
+  try {
+    return execSync('git rev-parse HEAD', {
+      cwd: repoRoot,
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      windowsHide: true,
+    }).trim();
+  } catch {
+    return null;
   }
 }
 
@@ -304,12 +392,9 @@ function analyzeChangedFiles(changedFiles, repoRoot) {
       const bracketIssue = checkBracketMismatch(absPath, ext);
       if (bracketIssue) bracketWarnings.push(`${basename}: ${bracketIssue}`);
       // Pattern checks are advisory only; skip for files where console output
-      // and TODO/FIXME references are legitimate:
-      //   - CLI scripts under scripts/ (they use console.log for output)
-      //   - test files (debug output is normal)
-      //   - the review-gate itself (references TODO/FIXME as patterns to detect)
-      //   - CJS one-shots (*.cjs)
-      const isCliScript = /\/scripts\//.test(file) && !/\/scripts\/hooks\/(?!stop-review-gate)/.test(file);
+      // and TODO/FIXME references are legitimate: CLI scripts under scripts/**,
+      // test files, the review-gate itself (isSelfFile), and CJS one-shots.
+      const isCliScript = /\/scripts\//.test(file);
       const isTestFile = /\/tests\//.test(file) || /\.test\.|\.spec\./.test(file);
       const isSelfFile = file.endsWith('stop-review-gate.js');
       const isCjs = file.endsWith('.cjs');
@@ -351,24 +436,39 @@ function aggregateIssues(analysis, missingTests) {
 
 /**
  * Build the final review gate result and write to stdout.
+ *
+ * Loop-guard: when issues exist but the fingerprint matches the prior gate
+ * fire (same HEAD + same changed files), downgrade `block` to advisory log.
+ * Without this the gate would block every Stop event for persistent issues
+ * — same UX lock-up that motivated dev-verify-gate.js's fingerprint cache.
+ *
  * @param {string[]} issues
  * @param {string[]} changedFiles
  * @param {string|null} codexMode
+ * @param {{ duplicate: boolean, fingerprint: string|null, pluginRoot: string }} cacheCtx
  */
-function buildResult(issues, changedFiles, codexMode) {
-  // Reserved: codexMode can trigger cross-check in future releases.
-  // Currently the flag is informational only.
-  void codexMode;
+function buildResult(issues, changedFiles, codexMode, cacheCtx) {
+  void codexMode; // reserved for future cross-check
 
-  if (issues.length > 0) {
-    const reason = `Review gate found ${issues.length} issue(s):\n${issues.map((i) => `  - ${i}`).join('\n')}`;
-    log(reason);
-    writeStdout({ decision: 'block', reason });
-  } else {
+  if (issues.length === 0) {
     const reason = `All ${changedFiles.length} changed file(s) passed review gate`;
     log(reason);
     writeStdout({ decision: 'approve', reason });
+    return;
   }
+
+  const reason = `Review gate found ${issues.length} issue(s):\n${issues.map((i) => `  - ${i}`).join('\n')}`;
+
+  if (cacheCtx.duplicate) {
+    // Same fingerprint as last gate fire — downgrade to silent advisory to
+    // avoid blocking the user repeatedly for issues they've already seen.
+    log(`(advisory, duplicate fingerprint) ${reason}`);
+    return;
+  }
+
+  log(reason);
+  if (cacheCtx.fingerprint) saveFingerprint(cacheCtx.pluginRoot, cacheCtx.fingerprint);
+  writeStdout({ decision: 'block', reason });
 }
 
 // -------------------------------------------------------------------------
@@ -402,7 +502,23 @@ async function main() {
   const missingTests = checkMissingTests(changedFiles, repoRoot);
   const issues = aggregateIssues(analysis, missingTests);
 
-  buildResult(issues, changedFiles, loadCodexMode());
+  // Fingerprint cache + mtime guard (mirrors dev-verify-gate.js loop fix).
+  // Only relevant when issues exist — clean runs always emit `approve`.
+  const pluginRoot = getPluginRoot();
+  let cacheCtx = { duplicate: false, fingerprint: null, pluginRoot };
+  if (issues.length > 0) {
+    const headSha = getHeadSha(repoRoot) || 'unknown';
+    const fingerprint = buildFingerprint(repoRoot, headSha, changedFiles);
+    const sameFingerprint = readLastFingerprint(pluginRoot) === fingerprint;
+    const noNewerEdits = !hasNewerEdits(pluginRoot, repoRoot, changedFiles);
+    cacheCtx = {
+      duplicate: sameFingerprint && noNewerEdits,
+      fingerprint,
+      pluginRoot,
+    };
+  }
+
+  buildResult(issues, changedFiles, loadCodexMode(), cacheCtx);
   void hookData;
 }
 

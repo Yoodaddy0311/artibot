@@ -265,10 +265,15 @@ describe('session-start hook', () => {
       mockState.checkForUpdateFactory = () => new Promise(() => {});
       mockState.readStdinResult = Promise.resolve(JSON.stringify({}));
 
-      await importAndWait({ timeoutMs: 2600 });
+      // Source uses Promise.race({ timeout: 2000ms }). Polling margin
+      // relaxed from 2600→6000ms to absorb full-suite worker saturation
+      // — under heavy cold-start (import phase ~7min) the 600ms slack
+      // beyond the 2s race timeout was insufficient for the catch block
+      // microtask to flush its stdout write.
+      await importAndWait({ timeoutMs: 6000 });
 
       expect(mockState.writeStdoutCalls.length).toBeGreaterThan(0);
-    }, 5000);
+    }, 12000);
   });
 
   describe('P3-3: long-context opt-in', () => {

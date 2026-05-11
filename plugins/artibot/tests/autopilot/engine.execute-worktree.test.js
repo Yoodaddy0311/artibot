@@ -4,7 +4,7 @@
  * listActiveWorktrees export. Real git calls are tolerated to either succeed
  * or gracefully fall back; both branches are accepted as healthy outcomes.
  */
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   abortAutopilot,
   getStatus,
@@ -93,9 +93,20 @@ describe('engine + worktree integration — Phase 2 EXECUTE', () => {
     runPhase2Execute(state);
     const result = await abortAutopilot(r.sessionId, { graceful: true });
     expect(result.status).toBe('ABORTED');
-    const remaining = listWorktrees({ autopilotOnly: true });
-    const stillThere = remaining.some((w) => w.sessionId === r.sessionId);
-    expect(stillThere).toBe(false);
+    // v4.5.9 singleFork removed cross-process worktree races, but graceful
+    // `git worktree remove` is still an OS-level operation that can lag
+    // behind the JS abortAutopilot promise resolution under heavy load
+    // (1/11 reproduction in the v4.5.10 verification matrix). Poll until
+    // the active list reflects the removal instead of asserting on a
+    // synchronous snapshot.
+    await vi.waitFor(
+      () => {
+        const remaining = listWorktrees({ autopilotOnly: true });
+        const stillThere = remaining.some((w) => w.sessionId === r.sessionId);
+        expect(stillThere).toBe(false);
+      },
+      { timeout: 5000, interval: 50 },
+    );
     const post = await getStatus(r.sessionId);
     expect(post.phase).toBe('ABORTED');
   });

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-hooks.json",
-  "description": "Artibot v2.0.0 - Claude Code Plugin Hooks",
+  "description": "Artibot v4.5.8 - Claude Code Plugin Hooks",
   "hooks": {
     "SessionStart": [
       {
@@ -281,6 +281,18 @@
         "category": "quality"
       },
       {
+        "matcher": "tool == \"Edit\" || tool == \"Write\" || tool == \"MultiEdit\"",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/mark-main-agent-edit.js",
+            "timeout": 3000
+          }
+        ],
+        "priority": "operational",
+        "category": "tracking"
+      },
+      {
         "matcher": "*",
         "hooks": [
           {
@@ -337,23 +349,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/auto-review-trigger.js",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/dev-verify-gate.js",
             "timeout": 8000
           }
         ],
-        "priority": "operational",
-        "category": "quality"
-      },
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/check-console-log.js",
-            "timeout": 10000
-          }
-        ],
-        "priority": "operational",
+        "priority": "advisory",
         "category": "quality"
       },
       {
@@ -372,12 +372,13 @@
         "matcher": "*",
         "hooks": [
           {
-            "type": "prompt",
-            "prompt": "Run the DEV verify checklist before finalising. (1) DECOMPOSE: was every numbered item from the original request addressed? List any silently dropped items. (2) EXECUTE: was each modified file re-read after the change to confirm the edit landed at the intended line? (3) VERIFY: produce evidence per item (file:line + what changed). If any item lacks evidence, surface a 'Pending verification' note BEFORE the user sees the response. Reference: plugins/artibot/CLAUDE.md (DEV Protocol section)."
+            "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/stop-recap.js",
+            "timeout": 5000
           }
         ],
-        "priority": "operational",
-        "category": "quality"
+        "priority": "optional",
+        "category": "ux"
       }
     ],
     "UserPromptSubmit": [
@@ -452,17 +453,6 @@
         ],
         "priority": "advisory",
         "category": "quality"
-      },
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "prompt",
-            "prompt": "If the user's message is very short (under 5 words), ambiguous, or could be interpreted multiple ways, briefly confirm your interpretation before any destructive or costly action (file modifications, deletions, force operations). For clear, unambiguous requests, proceed normally without confirmation."
-          }
-        ],
-        "priority": "advisory",
-        "category": "quality"
       }
     ],
     "SubagentStart": [
@@ -506,18 +496,6 @@
         ],
         "priority": "optional",
         "category": "team"
-      },
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/auto-review-trigger.js",
-            "timeout": 8000
-          }
-        ],
-        "priority": "operational",
-        "category": "quality"
       }
     ],
     "TeammateIdle": [
@@ -706,48 +684,6 @@
         ],
         "priority": "operational",
         "category": "lifecycle"
-      }
-    ],
-    "on_handoff": [
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/on-handoff.js",
-            "timeout": 5000
-          }
-        ],
-        "priority": "observability",
-        "category": "orchestration"
-      }
-    ],
-    "on_llm_start": [
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/on-llm-start.js",
-            "timeout": 5000
-          }
-        ],
-        "priority": "observability",
-        "category": "orchestration"
-      }
-    ],
-    "on_llm_end": [
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/on-llm-end.js",
-            "timeout": 5000
-          }
-        ],
-        "priority": "observability",
-        "category": "orchestration"
       }
     ]
   }

@@ -12,6 +12,11 @@ on:
 permissions:
   contents: read
 
+# Force JavaScript actions onto Node 24 ahead of GitHub's 2026-06-02 default switch.
+# Suppresses the Node 20 deprecation annotation emitted by older action versions.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   validate:
     name: Validate (Node ${{ matrix.node-version }})
@@ -51,6 +56,14 @@ jobs:
 
       - name: Validate hooks
         run: node scripts/ci/validate-hooks.js
+
+      - name: Validate README claims (structural — PR fast gate)
+        if: github.event_name == 'pull_request'
+        run: node scripts/ci/validate-readme-claims.js
+
+      - name: Validate README claims (full — main strict gate)
+        if: github.event_name == 'push' && matrix.node-version == 22
+        run: node scripts/ci/validate-readme-claims.js --full
 
       - name: Run tests with coverage
         run: |

@@ -22,7 +22,8 @@
 
 import path from 'node:path';
 import { execSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import {
   atomicWriteSync,
   getPluginRoot,
@@ -48,6 +49,20 @@ const SPEC_PATH_PATTERNS = [
 ];
 
 const SECURITY_KEYWORDS = /\b(auth|crypto|password|secret|token|jwt|oauth|hash|bcrypt|encrypt|decrypt)\b/i;
+
+// DoS guard: skip security scan on files larger than this. A hostile repo could
+// stage a multi-GB file matching `git diff` and OOM the hook before the 8s
+// outer timeout fires (Node may already have allocated the read buffer).
+// Note: path-based SECURITY_KEYWORDS match (further below) still flags
+// oversized files whose path contains auth/token/etc., so the false-negative
+// window is "content-only security keywords inside a >256KB file".
+const MAX_SCAN_BYTES = 256 * 1024;
+
+// Defense-in-depth: agent name must come from this closed set before being
+// interpolated into the `reason` string emitted to Claude. Today
+// `classifyChanges` only ever produces values from this set, but the
+// allowlist guards future maintenance edits.
+const ALLOWED_AGENTS = new Set(['code-reviewer', 'spec-reviewer', 'security-reviewer']);
 
 /**
  * Run a git command in the repo root, returning trimmed stdout.
@@ -83,8 +98,14 @@ function getHeadSha(repoRoot) {
 }
 
 /**
- * Get changed files vs HEAD using --name-only (covers staged + working tree
- * + last commit). Falls back gracefully if any subcommand fails.
+ * Get changed files vs HEAD using --name-only.
+ *
+ * Scope: working tree + staged ONLY. Previous versions also included
+ * `HEAD~1..HEAD`, but that triggered an infinite block→retry loop with
+ * git autopilot: every autopilot WIP commit moved HEAD, fingerprint
+ * mismatched, gate re-fired, suggesting reviewer for already-committed
+ * code that the user can no longer interactively change. Reviewer
+ * suggestions only apply to UNCOMMITTED work.
  *
  * @param {string} repoRoot
  * @returns {string[]}
@@ -94,7 +115,6 @@ function getChangedFiles(repoRoot) {
   for (const cmd of [
     'git diff --name-only HEAD',
     'git diff --name-only --cached',
-    'git diff --name-only HEAD~1 HEAD',
   ]) {
     const out = git(cmd, repoRoot);
     if (!out) continue;
@@ -148,10 +168,14 @@ function classifyChanges(files, repoRoot) {
     const abs = path.join(repoRoot, file);
     if (!existsSync(abs)) continue;
     try {
+      // DoS guard: skip oversized files. Hostile repos could stage huge
+      // tracked files; we don't need full content to gate reviewer agents.
+      // TOCTOU stat→read race accepted in single-user dev threat model.
+      if (statSync(abs).size > MAX_SCAN_BYTES) continue;
       const content = readFileSync(abs, 'utf-8');
       if (SECURITY_KEYWORDS.test(content)) securityHits += 1;
     } catch {
-      // unreadable -> ignore
+      // unreadable / stat failure -> ignore
     }
   }
   if (securityHits > 0) {
@@ -164,12 +188,22 @@ function classifyChanges(files, repoRoot) {
 
 /**
  * Build the cache fingerprint for loop-guard.
+ *
+ * Includes a short hash of `repoRoot` so different worktrees / repos sharing
+ * one plugin install don't collide on the same fingerprint file (worktree A's
+ * Stop would otherwise suppress worktree B's reviewer suggestion).
+ *
+ * @param {string} repoRoot
  * @param {string} sha
  * @param {string[]} files
  * @returns {string}
  */
-function buildFingerprint(sha, files) {
-  return `${sha}|${files.slice().sort().join(',')}`;
+function buildFingerprint(repoRoot, sha, files) {
+  // 32-bit SHA1 truncation: collision impact = one suppressed advisory message.
+  // Not a security boundary — purely a deduplication key. Acceptable for ~65k
+  // worktrees/repos before birthday collision (≫ realistic dev-machine load).
+  const repoHash = createHash('sha1').update(repoRoot).digest('hex').slice(0, 8);
+  return `${repoHash}|${sha}|${files.slice().sort().join(',')}`;
 }
 
 /**
@@ -202,30 +236,35 @@ function saveFingerprint(pluginRoot, fingerprint) {
 }
 
 /**
- * Build the JSON payload for Stop/SubagentStop additionalContext.
- * @param {string[]} agents
+ * Build the JSON payload for Stop/SubagentStop.
+ *
+ * Stop/SubagentStop schema (Claude Code) only honors `decision: "block" + reason`.
+ * `hookSpecificOutput.additionalContext` is silently ignored on Stop events
+ * (it is valid for UserPromptSubmit / SessionStart / PreCompact only).
+ *
+ * `decision: "block"` prevents Claude from stopping; `reason` is fed back as
+ * system feedback so the next turn spawns the recommended reviewer agent.
+ *
+ * @param {string[]} agents - must already be filtered against ALLOWED_AGENTS
  * @param {string[]} reasons
  * @param {number} fileCount
- * @param {string} eventName
  * @returns {object}
  */
-function buildOutput(agents, reasons, fileCount, eventName) {
-  const ctx =
+function buildOutput(agents, reasons, fileCount) {
+  const reason =
     `[auto-review-required] agents: [${agents.join(', ')}]. ` +
     `Detected ${fileCount} changed file(s) — ${reasons.join('; ')}. ` +
     `Auto-spawn Task(subagent_type='${agents[0]}') to cross-check before reporting done.`;
-  return {
-    hookSpecificOutput: {
-      hookEventName: eventName,
-      additionalContext: ctx,
-    },
-  };
+  return { decision: 'block', reason };
 }
 
 async function main() {
   const raw = await readStdin();
   const hookData = parseJSON(raw) ?? {};
-  const eventName = hookData?.hook_event_name === 'SubagentStop' ? 'SubagentStop' : 'Stop';
+
+  // Loop guard: Claude Code sets stop_hook_active=true when re-running Stop
+  // hooks after a previous block. Bail to prevent infinite block→retry loops.
+  if (hookData.stop_hook_active === true) return;
 
   const repoRoot = getRepoRoot();
   if (!repoRoot) return;
@@ -235,14 +274,16 @@ async function main() {
 
   const headSha = getHeadSha(repoRoot) || 'unknown';
   const pluginRoot = getPluginRoot();
-  const fingerprint = buildFingerprint(headSha, changedFiles);
+  const fingerprint = buildFingerprint(repoRoot, headSha, changedFiles);
   if (readLastFingerprint(pluginRoot) === fingerprint) return; // already advised
 
-  const { agents, reasons } = classifyChanges(changedFiles, repoRoot);
+  const { agents: rawAgents, reasons } = classifyChanges(changedFiles, repoRoot);
+  // Defense-in-depth: never interpolate an unknown agent name into reason.
+  const agents = rawAgents.filter((a) => ALLOWED_AGENTS.has(a));
   if (agents.length === 0) return;
 
   saveFingerprint(pluginRoot, fingerprint);
-  writeStdout(buildOutput(agents, reasons, changedFiles.length, eventName));
+  writeStdout(buildOutput(agents, reasons, changedFiles.length));
 }
 
 main().catch(createErrorHandler(HOOK_NAME, { exit: false }));

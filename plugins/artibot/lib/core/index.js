@@ -85,3 +85,13 @@ export { getProfile, recordSignal, setSkillLevel, detectSkillLevel, configurePro
 
 // Redaction (centralized sensitive-token masking)
 export { redactString, redactObject, GENERIC_PATTERNS, TAGGED_PATTERNS } from './redaction.js';
+
+// Citation formatter (5 modes + lenticular bracket stripping)
+export {
+  CITATION_MODES,
+  extractDomain,
+  stripLenticularBrackets,
+  dedupeSources,
+  renderCitation,
+  formatCitations,
+} from './citation-formatter.js';

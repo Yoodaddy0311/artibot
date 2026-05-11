@@ -5,7 +5,7 @@
  * cognitive router, and user-profile subsystems.
  */
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs/promises';
 import fsSync from 'node:fs';
 import path from 'node:path';
@@ -17,6 +17,20 @@ import * as profile from '../../lib/core/user-profile.js';
 // We redirect the plugin root for these tests so the trail lands in a
 // tempdir (isolated per test) and cannot touch the real repo.
 const ORIGINAL_PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT;
+
+// `process.env` coerces every assigned value to a string — assigning
+// `undefined` produces the literal string "undefined", which would then
+// flow into `path.join(getPluginRoot(), 'runtime', 'decision-trail.json')`
+// and create a real `undefined/runtime/decision-trail.json` directory at
+// the repo root. Restore via delete instead of assignment when the
+// original was unset.
+function restorePluginRoot() {
+  if (ORIGINAL_PLUGIN_ROOT === undefined) {
+    delete process.env.CLAUDE_PLUGIN_ROOT;
+  } else {
+    process.env.CLAUDE_PLUGIN_ROOT = ORIGINAL_PLUGIN_ROOT;
+  }
+}
 
 async function withSandbox(testFn, opts = {}) {
   const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'artibot-trail-'));
@@ -45,7 +59,7 @@ async function withSandbox(testFn, opts = {}) {
   try {
     await testFn(trail, tmpRoot);
   } finally {
-    process.env.CLAUDE_PLUGIN_ROOT = ORIGINAL_PLUGIN_ROOT;
+    restorePluginRoot();
     trail._resetDecisionTrailCache();
     await fs.rm(tmpRoot, { recursive: true, force: true });
   }
@@ -53,7 +67,7 @@ async function withSandbox(testFn, opts = {}) {
 
 describe('decision-trail', () => {
   afterEach(() => {
-    process.env.CLAUDE_PLUGIN_ROOT = ORIGINAL_PLUGIN_ROOT;
+    restorePluginRoot();
   });
 
   describe('recordDecision()', () => {
@@ -294,13 +308,19 @@ describe('decision-trail', () => {
         router.resetRouter();
         router.route('analyze security vulnerabilities in auth');
 
-        // router uses Promise-then, so yield to the microtask queue
-        await new Promise((r) => setTimeout(r, 60));
-
-        const entries = await mod.queryDecisions({ subsystem: 'cognitive-router' });
-        expect(entries.length).toBeGreaterThanOrEqual(1);
-        expect(entries[0].action).toBe('classified');
-        expect(entries[0].outputs).toHaveProperty('system');
+        // router uses Promise-then chains — under full-suite worker
+        // saturation a fixed 60ms wait can race the microtask queue.
+        // Poll until at least one cognitive-router entry lands instead of
+        // sleeping a fixed duration.
+        await vi.waitFor(
+          async () => {
+            const entries = await mod.queryDecisions({ subsystem: 'cognitive-router' });
+            expect(entries.length).toBeGreaterThanOrEqual(1);
+            expect(entries[0].action).toBe('classified');
+            expect(entries[0].outputs).toHaveProperty('system');
+          },
+          { timeout: 2000, interval: 20 },
+        );
       });
     });
 

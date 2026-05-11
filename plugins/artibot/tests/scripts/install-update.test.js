@@ -187,8 +187,11 @@ describe('update/branch fallback order', () => {
   });
 
   it('master를 두 번째 fallback으로 시도', () => {
-    const masterIdx = updateContent.indexOf("'git pull origin master'");
-    const mainIdx = updateContent.indexOf("'git pull origin main'");
+    // v4.5.3+: pull args are passed as an array to execFileSync (no shell
+    // interpolation). The fallback order remains origin/master before
+    // origin/main; we now match the array literal form.
+    const masterIdx = updateContent.indexOf("['pull', 'origin', 'master']");
+    const mainIdx = updateContent.indexOf("['pull', 'origin', 'main']");
     expect(masterIdx).toBeGreaterThan(-1);
     expect(mainIdx).toBeGreaterThan(masterIdx);
   });
