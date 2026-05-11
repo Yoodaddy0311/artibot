@@ -13,7 +13,7 @@ import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { parseJSON, readStdin } from '../utils/index.js';
 import { createErrorHandler } from '../../lib/core/hook-utils.js';
-import { resolveBaseBranch } from '../../lib/git/resolve-base.js';
+import { isMergeBaseFresh, resolveBaseBranch } from '../../lib/git/resolve-base.js';
 import { isAutopilotAllowed } from '../../lib/autopilot/repo-identity.js';
 
 // -------------------------------------------------------------------------
@@ -180,6 +180,14 @@ function squashWipCommits(cwd, baseBranch, wipCount) {
     const mergeBase = gitRun(['merge-base', 'HEAD', baseBranch], { cwd });
     // Guard: empty merge-base means resolution failed — refuse to reset.
     if (!mergeBase) return false;
+
+    // v4.5.12 — age sanity gate. If mergeBase resolves to an ancient
+    // ancestor (older than 30 days from HEAD) the most likely cause is
+    // a stale default branch (origin/HEAD pointing at a branch the
+    // working branch never actually forked from). Refuse to squash —
+    // soft-resetting through dozens of legitimate commits would corrupt
+    // PR history (see the v4.6.0 Phase 3+4 incident).
+    if (!isMergeBaseFresh(mergeBase, cwd, 30)) return false;
 
     const totalCommitsRaw = gitRun(['rev-list', '--count', `${mergeBase}..HEAD`], { cwd });
     const totalCommits = parseInt(totalCommitsRaw, 10);

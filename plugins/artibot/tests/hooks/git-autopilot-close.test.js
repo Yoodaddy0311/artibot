@@ -42,6 +42,12 @@ vi.mock('../../lib/core/hook-utils.js', () => ({
 
 vi.mock('../../lib/git/resolve-base.js', () => ({
   resolveBaseBranch: vi.fn((...args) => mockState.resolveBaseImpl(...args)),
+  // v4.5.12 — squashWipCommits now calls isMergeBaseFresh; default to true
+  // (happy-path) and let individual tests override mockState.isMergeBaseFreshImpl
+  // when they want to exercise the age-gate refusal path.
+  isMergeBaseFresh: vi.fn((...args) =>
+    mockState.isMergeBaseFreshImpl ? mockState.isMergeBaseFreshImpl(...args) : true,
+  ),
 }));
 
 vi.mock('node:fs', async () => {
@@ -71,6 +77,7 @@ function resetState() {
   mockState.readFileSyncImpl = () => { throw new Error('ENOENT'); };
   mockState.execFileSyncImpl = () => '';
   mockState.resolveBaseImpl = () => 'master';
+  mockState.isMergeBaseFreshImpl = null; // null → default true (happy path)
 }
 
 function setupEnabledRepo(overrides = {}) {
