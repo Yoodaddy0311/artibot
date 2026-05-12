@@ -192,12 +192,15 @@ export async function main(argv) {
   }
 
   const verb = hasExisting ? 'Updated' : 'Created';
-  process.stdout.write(`[artibot:git-autopilot-setup] ${verb} ${configPath}\n`);
-  process.stdout.write(`  WIP interval: ${config.wipIntervalMinutes}m\n`);
-  process.stdout.write(`  Auto-pull: ${config.autoPullOnSession}\n`);
-  process.stdout.write(`  Auto-push: ${config.autoPushOnStop}\n`);
-  process.stdout.write(`  Squash WIP: ${config.squashWipOnClose}\n`);
-  process.stdout.write(`  Conflict strategy: ${config.conflictStrategy}\n`);
+  // Claude Code parses hook stdout as JSON — log lines must go to stderr to
+  // avoid SessionStart parse errors (CRITICAL: prior stdout caused JSON
+  // pollution every session start).
+  process.stderr.write(`[artibot:git-autopilot-setup] ${verb} ${configPath}\n`);
+  process.stderr.write(`  WIP interval: ${config.wipIntervalMinutes}m\n`);
+  process.stderr.write(`  Auto-pull: ${config.autoPullOnSession}\n`);
+  process.stderr.write(`  Auto-push: ${config.autoPushOnStop}\n`);
+  process.stderr.write(`  Squash WIP: ${config.squashWipOnClose}\n`);
+  process.stderr.write(`  Conflict strategy: ${config.conflictStrategy}\n`);
 
   return hasExisting ? 'updated' : 'created';
 }

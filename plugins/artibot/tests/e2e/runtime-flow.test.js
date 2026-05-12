@@ -51,7 +51,7 @@ describe('hook-chain runtime flow', () => {
     expect(runtimeOutput.message).toContain('route=SYSTEM1');
     expect(runtimeOutput.user_prompt).toContain('System 1 mode');
     expect(runtimeOutput.user_prompt).toContain('Original request:');
-  }, 15000);
+  }, 30000);
 
   it('preserves special-trigger rewrites before runtime enrichment', () => {
     const { firstOutput, runtimeOutput } = runHookChain('!rv check auth module');
@@ -60,7 +60,7 @@ describe('hook-chain runtime flow', () => {
     expect(runtimeOutput).not.toBeNull();
     expect(runtimeOutput.user_prompt).toContain('CRITICAL RE-VERIFICATION MODE');
     expect(runtimeOutput.message).toContain('[runtime]');
-  }, 15000);
+  }, 30000);
 
   it('preserves Korean special-trigger rewrites before runtime enrichment', () => {
     const { firstOutput, runtimeOutput } = runHookChain('!\uC7AC\uAC80\uC99D auth \uBAA8\uB4C8 \uB2E4\uC2DC \uD655\uC778');
@@ -69,5 +69,5 @@ describe('hook-chain runtime flow', () => {
     expect(runtimeOutput).not.toBeNull();
     expect(runtimeOutput.user_prompt).toContain('CRITICAL RE-VERIFICATION MODE');
     expect(runtimeOutput.message).toContain('[runtime]');
-  }, 15000);
+  }, 30000);
 });

@@ -21,6 +21,11 @@ Autonomous long-running mode for **3~4시간 자리 비움 / 야간 자율 작�
 | `/autopilot:abort <session-id>` | 마지막 SHA 보존 후 graceful shutdown | safety check 후 종료 |
 | `/autopilot:tail [session-id] [--lines N]` | Live Telemetry — 마지막 N개 이벤트 표 출력 (기본 50, --follow 시 1초 폴링) | read-only |
 | `/autopilot:list [--orphans]` | 활성 세션 + worktree + lock 상태 표 출력 | read-only |
+| `/autopilot:goal status <session-id>` | **v4.6.0 Phase 3** — Goal Contract 상태 조회 (paused, iterations, lastEvaluation, lastAction) | read-only |
+| `/autopilot:goal pause <session-id> [--reason "..."]` | Goal evaluator만 일시정지 (세션은 계속 실행). EVALUATE → REPORT pass-through | mutate (orthogonal to session pause) |
+| `/autopilot:goal resume <session-id>` | Goal evaluator 재개. 다음 EVALUATE 진입 시 정상 평가 | mutate |
+| `/autopilot:goal retry <session-id> [--no-reset]` | 재평가 강제 — 기본 `goalIterations=0`으로 리셋. `--no-reset` 시 카운터 유지 | mutate |
+| `/autopilot:goal clear <session-id>` | Goal Contract 제거 → legacy 7-phase 흐름으로 복귀 | mutate |
 
 ## Common Options
 
@@ -34,6 +39,9 @@ Autonomous long-running mode for **3~4시간 자리 비움 / 야간 자율 작�
 | `--worktree` | off | git worktree 격리 사용 (P0-3, 기본 브랜치: `autopilot/<sessionId>`) |
 | `--detached` | off | worktree를 detached HEAD로 생성 (advanced) |
 | `--mcp-verify` | off | Phase 4 VERIFY에서 자체 plugin MCP 화이트리스트 호출 (P0-4) |
+| `--goal "<stopping-condition>"` | off | **v4.6.0 Goal-driven mode** — verifiable stopping condition shorthand. PRD에 `## 2.5 Goal Contract` JSON 블록으로 삽입되며 Phase 5 후 evaluator가 `validationCommand` 결과로 자동 종료 결정. 미충족 시 Phase 2로 재진입 (cap = maxIterations, default 3, hard 10). |
+| `--validation-command <cmd>` | `npm run ci` | Goal Contract의 `validationCommand` 오버라이드. evaluator가 exit code 0 → met 판정. |
+| `--max-iterations <n>` | `3` | Phase 2 → 5 → evaluator 재진입 횟수 cap. 1~10 범위. |
 
 ## Arguments
 
@@ -42,6 +50,70 @@ Parse `$ARGUMENTS`:
 - subcommand 접미어: `night` / `plan` / `resume` / `status` / `abort` / `list` 중 하나 (없으면 `default`)
 - `--max`, `--budget`, `--no-notify`, `--no-team`, `--checkpoint`, `--worktree`, `--detached`: 위 표 참조
 - `session-id`: `:resume` / `:abort` / `:status` 에서 사용 (`ap-YYYYMMDD-HHMMSS` 형식)
+- `--goal`, `--validation-command`, `--max-iterations`: v4.6.0 Goal-driven mode (아래 "Goal-driven Mode" 섹션 참조)
+
+## Goal-driven Mode (v4.6.0)
+
+기존 7-phase 흐름은 **공정**(process) 자동화이고, Goal-driven은 **목표 도달**(outcome) 자동화입니다. 두 모드는 직교 — Goal Contract가 PRD에 있으면 engine이 Phase 5 후 evaluator를 추가로 실행해 stopping condition 충족 여부를 판단하고, 미충족 시 Phase 2로 재진입합니다.
+
+### Goal Contract slots
+
+PRD `## 2.5 Goal Contract` 섹션의 JSON 블록:
+
+```json
+{
+  "objective": "사람이 읽는 목표 설명",
+  "stoppingCondition": "verifiable 종료 조건 (자연어)",
+  "validationCommand": "npm run ci",
+  "forbiddenChanges": ["docs/PRD/**", "CHANGELOG.md"],
+  "maxIterations": 3
+}
+```
+
+- `objective`: 필수. 자연어 목표.
+- `stoppingCondition`: 필수. 충족 여부를 검증 가능한 형태로 명시.
+- `validationCommand`: optional. 미지정 시 evaluator는 `exit 0`을 자동 판정 못 하고 사용자 큐에 결정 요청.
+- `forbiddenChanges`: optional. agent에게 변경 금지 영역 전달 (정보 전달용).
+- `maxIterations`: optional. default 3, hard cap **10** (v4.5.6 무한루프 트라우마 가드).
+
+### Iteration loop
+
+```
+Phase 0 (INTAKE) → Phase 1 (PLAN) → Phase 2 (EXECUTE)
+                                          ↓
+Phase 6 ← Phase 5 (IMPROVE) ← Phase 4 (VERIFY) ← Phase 3 (CROSS_CHECK)
+              ↓
+         goal-evaluator
+              ↓
+   ├─ met=true → Phase 6 REPORT
+   └─ met=false → iteration < maxIterations
+                   ├─ true  → Phase 2 재진입
+                   └─ false → PAUSED + 사용자 큐
+```
+
+### Safety guards
+
+- **maxIterations hard cap = 10** (스키마 검증, 위반 시 contract 거부).
+- **동일 SHA 3 iteration 연속** → 강제 PAUSED (진행 없음 감지).
+- **evaluator hallucination 차단**: agent 판단 X, `validationCommand` exit code만 신뢰. exit 0 = met. 다른 exit code = 미충족.
+- **confidence < 0.8**: 사용자 큐에 결정 요청.
+
+### 사용 예시
+
+```bash
+# Stage 1B: 가장 단순 — stopping condition만 지정 (validationCommand=npm run ci 기본)
+/autopilot "migrate auth from v1 to v2" --goal "all auth endpoints return 200 under v2 schema"
+
+# 명시적 validationCommand
+/autopilot "optimize bundle" --goal "bundle < 500KB" --validation-command "npm run size:check"
+
+# iteration 제한 강화
+/autopilot "refactor cache layer" --goal "all cache tests pass" --max-iterations 5
+```
+
+### Legacy backward compat
+
+Goal Contract 슬롯이 없는 PRD는 기존 7-phase 단방향 흐름 (Phase 0~6) 그대로 실행. **기존 세션 resume + 기존 PRD 파일 모두 무영향.**
 
 ## Execution Flow (메인 Claude가 받았을 때 수행할 절차)
 
@@ -116,10 +188,14 @@ Phase 6 완료 후:
 2. `engine.readEvents(sessionId, { tail: lines })` 호출 (기본 `lines=50`).
 3. 결과를 GFM 표로 출력:
 
-| ts | phase | type | level | message |
-|----|-------|------|-------|---------|
-| 2026-04-27T... | INTAKE | phase-start | info | Phase 0 INTAKE 시작 |
-| ... | ... | ... | ... | ... |
+| ts | phase | type | level | message | progress |
+|----|-------|------|-------|---------|----------|
+| 2026-04-27T... | INTAKE | phase-start | info | Phase 0 INTAKE 시작 | - |
+| 2026-04-27T... | EVALUATE | goal-evaluated | warn | goal evaluation: validationCommand exit code 1 | 1/3 (33%) met=false |
+| 2026-04-27T... | EVALUATE | phase-end | info | EVALUATE not met → re-EXECUTE iteration 2/3 | 2/3 (67%) met=false |
+| ... | ... | ... | ... | ... | ... |
+
+**v4.6.0 Phase 4** — `progress` column shows goal-driven iteration progress when present (`iteration/maxIterations (pct%)` + `met` flag). Legacy non-goal events show `-`.
 
 4. `--follow` 옵션 사용 시 `engine.tailEventsStream(sessionId)` 로 1초 폴링하며 새 이벤트를 한 줄씩 추가 출력. AbortSignal 로 중단 가능.
 

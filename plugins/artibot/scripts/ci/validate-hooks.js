@@ -26,6 +26,13 @@ const VALID_HOOK_EVENTS = new Set([
   'Notification',
   'TaskCompleted',
   'PermissionRequest',
+  // Anthropic Agent SDK extension events (snake_case namespace).
+  // Removed from hooks.json in v4.5.4 because Claude Code's native loader
+  // rejects snake_case keys at startup. Kept whitelisted here so the validator
+  // stays quiet if a future SDK-side config (e.g. sdkHooks block) reintroduces them.
+  'on_handoff',
+  'on_llm_start',
+  'on_llm_end',
 ]);
 
 function validateHookFields(hook, eventName, entryIdx, hookIdx) {

@@ -122,7 +122,9 @@ async function main() {
 
   if (loopResult.detected) {
     const label = loopResult.severity === 'block' ? 'LOOP BLOCKED' : 'LOOP WARNING';
-    process.stdout.write(
+    // Claude Code parses PostToolUse stdout as JSON — alert text goes to
+    // stderr (matcher * triggers on every tool, prior stdout polluted JSON).
+    process.stderr.write(
       `[artibot:${label}] Tool "${toolName}" called ${loopResult.count}x with same args (severity: ${loopResult.severity})\n`
     );
   }

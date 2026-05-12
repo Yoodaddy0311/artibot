@@ -28,10 +28,13 @@ function runValidator() {
 }
 
 describe('validate.js — Phase 2 follow-up fixes', () => {
+  // First test triggers cold-start of the node validator subprocess; under
+  // full-suite worker saturation the global 30s testTimeout is insufficient.
+  // 60s gives realistic headroom while still bounding runaway processes.
   it('runs successfully against the live Artibot tree', () => {
     const output = runValidator();
     expect(output).toContain('Validation passed');
-  });
+  }, 60000);
 
   it('does not warn on extension events on_handoff / on_llm_start / on_llm_end (AD-07)', () => {
     const output = runValidator();

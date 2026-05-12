@@ -1,6 +1,6 @@
 {
   "name": "artibot",
-  "version": "4.4.1",
+  "version": "4.6.1",
   "description": "Artibot - Claude Code orchestration plugin runtime",
   "private": true,
   "type": "module",
@@ -30,6 +30,8 @@
     "skill:check": "node scripts/gen-skill-docs.js --check",
     "skill:check:json": "node scripts/gen-skill-docs.js --json",
     "skill:report": "node scripts/gen-skill-docs.js --report",
+    "validate:readme:claims": "node scripts/ci/validate-readme-claims.js",
+    "validate:readme:claims:full": "node scripts/ci/validate-readme-claims.js --full",
     "release:check": "node scripts/release-check.js",
     "sync:local": "bash scripts/sync-local.sh",
     "release": "npm run release:check && npm run ci && npm run sync:local"

@@ -1,6 +1,6 @@
 # Artibot
 
-[![Version](https://img.shields.io/badge/version-4.4.1-blue?style=flat-square)](./CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-4.6.1-blue?style=flat-square)](./CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](./LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen?style=flat-square)](./package.json)
 [![Tests](https://img.shields.io/badge/tests-passing-brightgreen?style=flat-square)](./tests/)
@@ -167,7 +167,7 @@ Key fields in `artibot.config.json` (file is auto-validated against schema):
 
 | Field | Default | Purpose |
 |---|---|---|
-| `version` | `4.4.1` | Synced across plugin.json / package.json / artibot.config.json |
+| `version` | `4.6.1` | Synced across plugin.json / package.json / artibot.config.json |
 | `cognitive.router.threshold` | `0.4` | System 1 ↔ System 2 boundary |
 | `cognitive.system1.maxLatency` | `100` | ms — System 1 response cap before escalation |
 | `learning.lifelong.batchSize` | `50` | Experiences per GRPO batch |
@@ -186,7 +186,35 @@ Full configuration reference: [설정](#설정) section.
 
 ## Roadmap
 
-**v4.4.1 (current, stable)** — Capture-Only Mode + autopilot.enabled config kill-switch. See [CHANGELOG](./CHANGELOG.md).
+**v4.6.0 (current, stable)** — **Goal-driven autopilot** (Codex `/goal` pattern adapted). 4-phase rollout in two PRs (#9, #11). **Phase 1 (Goal Contract slot)**: PRD now carries a machine-readable `## 2.5 Goal Contract` JSON block (`objective` / `stoppingCondition` / `validationCommand` / `forbiddenChanges` / `maxIterations`, hard cap 10). New modules `goal-schema.js` + `prd-parser.js`. **Phase 2 (Stopping Condition Evaluator)**: new EVALUATE phase inserted between IMPROVE and REPORT. `evaluateGoal` trusts ONLY the `validationCommand` exit code (no LLM judgment → no hallucination); `runPhaseGoalEvaluate` drives the iteration loop. Decision matrix: met → REPORT, not-met + under-cap → re-EXECUTE, cap reached / same-SHA-3x / confidence<0.8 → PAUSE. **Phase 3 (Goal-level Control Plane)**: `/autopilot:goal status|pause|resume|retry|clear <session-id>` — orthogonal to session-level pause. `state.goalPaused` lets users freeze evaluator while session continues. **Phase 4 (Progress Heartbeat)**: telemetry ticks gain a `progress` slot (`iteration/maxIterations/pct/met/exitCode`); `/autopilot:tail` renders a new `progress` column. Total +74 new tests (53 P1+P2 + 21 P3+P4). 100% backward compat — legacy PRDs without a Goal Contract continue the existing 7-phase flow.
+
+**v4.5.12** — git-autopilot-close `mergeBase` resolution fix (prevents the Phase 3+4 branch-corruption incident class). Two-layer guard: (1) `lib/git/resolve-base.js` new step 2 — branch upstream tracking detects stacked-PR patterns (working branch tracking a parent feature branch rather than repo default); (2) new export `isMergeBaseFresh(mergeBase, cwd, maxAgeDays=30)` rejects any merge-base whose commit-time is older than 30 days from HEAD. `scripts/hooks/git-autopilot-close.js::squashWipCommits` calls the age gate BEFORE `git reset --soft <mergeBase>` so stale resolution → refuse to squash (preserves commits) instead of silent collapse. +14 tests (5 stacked-PR upstream + 7 age-gate + 2 invariants), 19/19 PASS in `resolve-base.test.js`, 11/11 regression in `git-autopilot-close.test.js`.
+
+**v4.5.11** — Two isolation/race test flakes deferred from the v4.5.10 22-run matrix. `tests/hooks/autopilot-nlu-trigger.test.js` (2/11): the hook's top-level `main().catch(...)` fire-and-forget leaks microtasks INTO the next test's mockState under full-suite worker saturation, producing the canonical "opposite expectations fail together" signature. Fix: 100ms `afterEach` drain + deadline 1000→3000ms positive case + 200→1500ms flat-drain on negative case. `tests/autopilot/engine.mcp-verify.test.js` (1/11): `runPhase4Verify` mutates state in-memory then session-store writes to disk; under load the file write can lag the JS turn that re-reads via `getStatus()`. Fix: `vi.waitFor` poll (timeout 3000ms, interval 50ms) around re-read+assertion (same pattern as v4.5.10 case 3). Test-only changes — zero production-code modification.
+
+**v4.5.10** — dev-verify-gate scope guard (global Stop hook fired in non-Artibot projects) + 7 test flake fixes from the v4.5.10 verification matrix. (1) `scripts/hooks/dev-verify-gate.js` — new `isArtibotRepo(repoRoot)` helper detecting Artibot via `plugins/artibot/CLAUDE.md` OR `artibot.config.json`, scope guard inserted in `main()` so non-Artibot repos silent-bail (no more confusing "Reference: plugins/artibot/CLAUDE.md (DEV Protocol section)" reminders in unrelated projects). +5 ground-truth scope-guard tests. (2) Flake fixes — 22-run combined matrix (1st + 2nd verification): `guardrails.test.js:74` 60→150ms threshold (Windows full-suite worker saturation), `decision-trail.test.js:303` setTimeout→`vi.waitFor` polling, `e2e/runtime-flow.test.js` 3 cases 15000→30000ms timeout, `scripts/validate.test.js:31` first it 60000ms timeout, `hooks/session-start.test.js:268,276` timeoutMs 2600→6000 + test timeout 5000→12000, `router-grpo-integration.test.js:59` 50→200ms threshold, `engine.execute-worktree.test.js` case 3 sync assertion→`vi.waitFor` polling (timeout 15000ms, interval 100ms — initial 5000ms was insufficient under Windows `git worktree remove` lag, 2/11 reproduction). Final standalone verification on case 3 used 15854ms — proving the OS-level git operation can legitimately take 10s+ under load. Three secondary flakes (`autopilot-nlu-trigger` 2/11 isolation, `engine.mcp-verify` 1/11) deferred to v4.5.11 as separate isolation work.
+
+**v4.5.9** — Worktree pool race fix + decision-trail test artifact leak fix. (1) `vitest.config.js` migrated to vitest 4 `projects` workspace: `tests/autopilot/**` files pinned to a single fork (`pool: 'forks'`, `poolOptions.forks.singleFork: true`) so `worktree-manager.test.js` and `engine.execute-worktree.test.js` no longer race on the shared `.git/worktrees/` namespace under parallel workers. Eliminated the `engine.execute-worktree.test.js` case 3 flake (`expected true to be false`, ~50% repro rate in v4.5.8). Parent `test.include` removed because `projects` plus a parent include creates an implicit default project that double-counts every test (observed 7674 → 15168 regression during config iteration). `pool` and `poolOptions` placed at project root, not nested under `test:`, per vitest 4 migration. (2) `tests/core/decision-trail.test.js` env-restore bug: `process.env.CLAUDE_PLUGIN_ROOT = ORIGINAL_PLUGIN_ROOT` coerced `undefined` to the literal string `"undefined"`, leaking `undefined/runtime/decision-trail.json` into the repo root after every test pass. Fixed via a `restorePluginRoot()` helper that uses `delete` when the original was unset. 11-run full-suite verification: case 3 occurrences = 0. Worktree race RESOLVED; two pre-existing timing flakes (`guardrails.test.js:74`, `decision-trail.test.js:303`) documented as next pickup.
+
+**v4.5.8** — DEV Verify Gate restored via main-agent edit marker. v4.5.6 hard-disabled `dev-verify-gate.js` because it fired on every Stop with uncommitted working-tree changes — including teammate-only edits during `/team` delegate flows, paralysing every orchestrator response. v4.5.8 reintroduces the gate with a marker-file pattern: a new PostToolUse hook (`mark-main-agent-edit.js`) writes `runtime/last-main-agent-edit.timestamp` ONLY when Edit/Write/MultiEdit fires from the main orchestrator (subagent contexts — detected via `subagent_id` / `subagent_type` / `parent_session_id` / `role: 'teammate'` — bail without touching the marker). The gate now compares marker mtime vs. its own fingerprint cache and bails when no main-agent edit has happened since the last fire — so teammate edits and HEAD drift no longer trigger spurious "Pending verification" asks. Also includes a P1 test fix for `git-autopilot-setup.test.js` (3 assertions migrated from stdout to stderr after v4.4.0 moved hook output off stdout to protect SessionStart's JSON parser). +27 tests (21 marker hook + 6 gate decision matrix).
+
+**v4.5.7** — Turn Recap restoration. Restored two regressed UX features: (1) `/recap` slash command was a 12-line thin alias to `/daily` since v4.5 (model often skipped the full workflow); now inlined as the full 276-line dashboard so it self-executes consistently. (2) New `stop-recap.js` Stop hook emits a one-line gray summary after every assistant turn (e.g. `[artibot:recap] ✏ 3 files · ⚙ 2 cmds · 🌿 4 uncommitted`) — read-only, stderr-only, `stop_hook_active` loop-guarded, 4 MB transcript cap, 2 s git timeout, so it cannot regress to v4.5.6-class infinite-loop conditions. Empty turns (no tool uses, no dirty files) emit nothing.
+
+**v4.5.6** — Stop hook 전수 감사 + 무한 루프 차단. 3-에이전트 병렬 감사로 9건 수정: `auto-review-trigger.js` 스키마 `additionalContext` (Stop ignored) → `decision: "block" + reason`, removed `HEAD~1..HEAD` (autopilot WIP commit infinite loop), added 256 KB DoS guard + agent allowlist + worktree-isolated fingerprint, `dev-verify-gate.js` neu + emergency disable, `stop-review-gate.js` fingerprint cache. CRITICAL discovery: install copy (`~/.claude/artibot/`) is a separate copy from source repo and source edits do NOT auto-propagate.
+
+**v4.5.5** — Windows test stability + dev-deps security. `vitest.config.js` `testTimeout: 30_000` + `hookTimeout: 30_000` (Windows Node cold-start exceeded vitest 5 s default on 14 tests). Worktree path normalization fix + dev-deps `npm audit fix` (rollup high / vite high×3 / postcss moderate, all vitest@4 transitive) — 5 → 0 vulns.
+
+**v4.5.4** — `/doctor` plugin error fix. Removed three Anthropic Agent SDK extension events (`on_handoff`, `on_llm_start`, `on_llm_end`) from `hooks/hooks.json` because Claude Code's native loader rejects snake_case event keys at startup. Stub scripts preserved as reserved SDK extension points.
+
+**v4.5.3** — Security hardening + test coverage. `scripts/update.js` migrated all 5 `execSync` sites to `execFileSync` (eliminates theoretical shell injection via malicious branch names). 17-test coverage added for previously-untested update.js helpers.
+
+**v4.5.2** — `release.yml` sed regex hardened (GNU sed `-E` `\|` alternation footgun). Restored history bullets damaged in v4.5.0/v4.5.1 sync.
+
+**v4.5.1** — CI hygiene patch: SDK extension hook events whitelisted, GitHub Actions Node 24 force env added.
+
+**v4.5.0** — Citation formatter (5 modes + lenticular bracket sanitization) + README claims CI validator.
+
+**v4.4.1** — Capture-Only Mode + autopilot.enabled config kill-switch.
 
 **v4.x candidates** (see `_reports/ai-ecosystem-research-2026-04-24.md` Section 8):
 

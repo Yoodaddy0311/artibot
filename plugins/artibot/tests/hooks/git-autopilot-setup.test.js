@@ -136,7 +136,10 @@ describe('git-autopilot-setup opt-in policy', () => {
       expect(written.branchPrefix).toBe('artibot/');
       expect(written.wipIntervalMinutes).toBe(30);
       expect(typeof written.lastSetupAt).toBe('string');
-      expect(mockState.stdoutChunks.join('')).toContain('Created');
+      // Hook writes to stderr (not stdout) to avoid polluting Claude Code's
+      // SessionStart JSON parser. See git-autopilot-setup.js:198.
+      expect(mockState.stdoutChunks).toHaveLength(0);
+      expect(mockState.stderrChunks.join('')).toContain('Created');
     });
   });
 
@@ -175,7 +178,8 @@ describe('git-autopilot-setup opt-in policy', () => {
       expect(written.autoPullOnSession).toBe(false);
       expect(written.branchPrefix).toBe('custom/');
       expect(written.lastSetupAt).not.toBe('2026-01-01T00:00:00.000Z');
-      expect(mockState.stdoutChunks.join('')).toContain('Updated');
+      expect(mockState.stdoutChunks).toHaveLength(0);
+      expect(mockState.stderrChunks.join('')).toContain('Updated');
     });
 
     it('returns "skipped-not-allowed" when existing config is in a non-allowlisted repo (Capture-Only Mode)', async () => {
@@ -228,7 +232,8 @@ describe('git-autopilot-setup opt-in policy', () => {
 
       expect(outcome).toBe('created');
       expect(mockState.atomicWrites).toHaveLength(1);
-      expect(mockState.stdoutChunks.join('')).toContain('Created');
+      expect(mockState.stdoutChunks).toHaveLength(0);
+      expect(mockState.stderrChunks.join('')).toContain('Created');
     });
 
     it('returns "skipped" when plugin.json exists but name is different', async () => {

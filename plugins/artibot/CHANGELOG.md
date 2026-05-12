@@ -9,6 +9,83 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.6.1] - 2026-05-12
+
+Branch-integration release. The `master` and `artibot/master` branches had diverged at v4.4.1 (commit `4141dbf`) and progressed independently: `master` accumulated the `artibot-cowork` v3.1.0 upgrade (PR #7), while `artibot/master` accumulated 48 commits covering v4.5.0 → v4.6.0 of the `artibot` plugin. This release reunifies them on `master` so that the default branch reflects both plugin lines, eliminating the "tag latest = v4.6.0 but branch tip = v4.4.1 artibot" confusion. No new functional code in either plugin — only the merge commit, version bump, and README/CHANGELOG reconciliation.
+
+Detailed per-release history for v4.5.6 → v4.6.0 (which arrives on `master` through this merge) lives in `memory/MEMORY.md` Sprint History table; the CHANGELOG backfill for those intermediate releases is deferred to a follow-up.
+
+### Changed
+
+- **`plugins/artibot/.claude-plugin/plugin.json`** + **`package.json`** + **`artibot.config.json`** — version `4.6.0` → `4.6.1`.
+- **`README.md` (root)** — artibot row bumped to `**4.6.1**`; artibot-cowork row corrected from stale `**0.4.0**` to `**3.1.0**` and feature blurb extended with the v3.1.0 additions (Claude Design, Routines, Ultraplan, Monitor). Version badge updated to 4.6.1.
+- **`plugins/artibot/README.md`** — badge and config-table version refs bumped to 4.6.1.
+
+### Branch reconciliation
+
+- `master` ← `origin/artibot/master` standard merge (`--no-ff`). Auto-merge succeeded with no conflicts because the two lines touched disjoint file sets (`plugins/artibot/*` vs `plugins/artibot-cowork/*`); the only files modified on both sides were `README.md`, `.github/workflows/ci.yml`, `.github/workflows/release.yml`. For those three:
+  - `README.md` — auto-merge took the `artibot/master` version (which had the v4.6.0 numbers and cowork's stale **0.4.0**); the cowork row was then manually patched to **3.1.0** to reflect the actual `plugins/artibot-cowork/.claude-plugin/plugin.json` on disk.
+  - `.github/workflows/ci.yml` — `artibot/master` version retained (pure additions: `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24` env + README-claims validator on PR + main).
+  - `.github/workflows/release.yml` — `artibot/master` version retained (v4.5.2 sed-delimiter hardening, prevents the alternation-regex degeneration that previously clobbered the cowork row on every release).
+
+### Verification
+
+- `git status` clean post-merge
+- `plugins/artibot/.claude-plugin/plugin.json` version === `plugins/artibot/package.json` version === `plugins/artibot/artibot.config.json` version === `4.6.1`
+- `plugins/artibot-cowork/.claude-plugin/plugin.json` version === `3.1.0` (unchanged from master tip)
+- `README.md` cowork row matches on-disk plugin.json version
+
+---
+
+## [4.5.5] - 2026-05-06
+
+Patch release — Windows test stability + dev-deps security. Three fixes that surfaced when running the full `/verify` pipeline on Windows: (1) vitest's 5s default `testTimeout` was too tight for the many tests that spawn child processes via `execFileSync`/`execFile` (Node cold-start on Windows alone exceeds 5s for some suites), causing 14 timeouts across `validate.js`, `runtime-prompt`, `pre-compact`, `skill-hash-cache`, `artibot-cli`, `engine.execute-worktree`, `worktree-manager`, and `skills`/`skills-keyword-index`. (2) `listWorktrees` annotated records returned `git worktree list --porcelain`'s raw forward-slash paths on Windows while `getWorktreesRoot()` uses OS-native separators, so callers' `rec.path.startsWith(getWorktreesRoot())` checks failed unpredictably. (3) Five transitive dev-dep vulnerabilities (rollup high, vite high ×3, postcss moderate) carried by `vitest@4.0.18` / `@vitest/coverage-v8`. None of these affect production runtime — they only affect local/CI test reliability and dev-time security posture — but together they were noisy enough to mask real regressions and warrant a patch bump.
+
+### Fixed
+
+- **`vitest.config.js`** — Set `testTimeout: 30_000` and `hookTimeout: 30_000`. Windows Node cold-start + heavy IO suites need ≥5s; vitest's 5s default was producing flaky timeouts indistinguishable from real failures. 30s gives spawning suites room without masking real regressions.
+- **`lib/autopilot/worktree-manager.js`** — `listWorktrees` now returns the normalized path on every record (both annotated autopilot records *and* non-autopilot records), so `rec.path.startsWith(getWorktreesRoot())` is reliable across platforms regardless of whether git porcelain emitted forward or backward slashes.
+- **`hooks/hooks.json`** — `description` field updated from `"Artibot v2.0.0 - Claude Code Plugin Hooks"` to `"Artibot v4.5.4 - Claude Code Plugin Hooks"` (had been outdated since the 2.x → 4.x cutover; non-blocking but noisy in `/doctor`).
+- **`package-lock.json`** — `npm audit fix` applied. 5 vulns → 0. 20 transitive packages updated under `vitest`/`@vitest/coverage-v8` (rollup, vite, postcss, etc.). No top-level `package.json` changes; semver-compatible patches only.
+
+### Verification
+
+- `npm run lint` → 0 errors, 0 warnings
+- `npm test` → **7647/7647 pass** (was 7626/7647 before timeout fix, then 7645/7647 mid-fix flake on the worktree race, then clean)
+- `npm run validate` → 28 agents, 108 skills, 58 commands, 15 hook events, 58 hooks — all validated
+- `npm run skill:check` → exit 0
+- `npm run validate:readme:claims` → all README claims match file-system counts
+- `npm audit` → **0 vulnerabilities**
+
+### Notes
+
+- Two flaky cases observed transiently mid-investigation (`engine.execute-worktree.test.js > case 3 abortAutopilot graceful cleans up worktree` and `e2e/runtime-flow.test.js > preserves special-trigger rewrites`) self-recovered on the clean run after the timeout fix landed. Tracked as Windows file-system race symptoms, not regressions; will revisit if they re-surface.
+- The MEMORY.md `command-injection in scripts/update.js` and `0% coverage on update.js` Known Issues entries were already cleared by v4.5.3 — no action this patch.
+
+---
+
+## [4.5.4] - 2026-05-06
+
+Patch release — fix `/doctor` plugin load errors. Removes the three Anthropic Agent SDK extension events (`on_handoff`, `on_llm_start`, `on_llm_end`) from `hooks/hooks.json` because Claude Code's native hook loader (Zod schema) rejects snake_case event keys at startup, causing every session to surface "Hook load failed" plugin errors.
+
+### Root Cause
+
+AD-07 wired the SDK extension events directly into `hooks.json` and v4.5.1 silenced our internal CI validator's `WARN` noise via a whitelist. That whitelist only quieted *our* validators — Claude Code's runtime loader still rejected the unknown keys, so `/doctor` reported three plugin load errors per session. Validator silence ≠ runtime acceptance.
+
+### Fixed
+
+- **`hooks/hooks.json`** — removed top-level `on_handoff`, `on_llm_start`, `on_llm_end` event blocks (42 lines). `InstructionsLoaded` is now the last entry.
+- **`scripts/hooks/on-{handoff,llm-start,llm-end}.js`** — header comments updated. The stub scripts are preserved as Anthropic Agent SDK extension stubs reserved for future SDK-side wiring (e.g. an `sdkHooks` block in `artibot.config.json`).
+- **`scripts/validate.js` & `scripts/ci/validate-hooks.js`** — whitelist comments clarified. The three event names stay whitelisted so the validator stays quiet if a future SDK config reintroduces them, but the comments now explicitly state they are not registered in `hooks.json`.
+
+### Notes
+
+- No functional change for Claude Code users — the three stubs were pass-through (`{continue: true}`) and never produced observable behavior.
+- Test `tests/scripts/validate.test.js:36` still passes vacuously (the events are no longer in the live `hooks.json`, so the "no Unknown hook event warning" assertion holds).
+- CHANGELOG gap (4.5.0–4.5.3) is tracked in `memory/MEMORY.md` Sprint History; this entry only covers v4.5.4.
+
+---
+
 ## [4.4.1] - 2026-05-03
 
 Patch release — wire up the documented `autopilot.enabled` config kill-switch in the NLU trigger hook. Closes a doc/code gap where `commands/autopilot.md` claimed the flag disabled autopilot suggestion, but the hook only consulted `team.autoApply` / `team.enabled`.

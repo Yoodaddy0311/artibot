@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 /**
  * on_llm_end hook stub. Pass-through extension point.
- * Wired in hooks.json (AD-07).
+ * Anthropic Agent SDK extension stub (AD-07). Not wired in hooks.json —
+ * Claude Code's native loader rejects snake_case event keys. Reserved for
+ * future SDK runtime wiring (e.g., artibot.config.json sdkHooks section).
  * @module scripts/hooks/on-llm-end
  */
 

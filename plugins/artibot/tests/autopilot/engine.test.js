@@ -33,10 +33,10 @@ afterEach(() => {
 });
 
 describe('PHASES constant', () => {
-  it('exposes 7 phases in order INTAKE→REPORT', () => {
+  it('exposes 8 phases in order INTAKE→REPORT (v4.6.0 inserted EVALUATE between IMPROVE and REPORT)', () => {
     expect(Array.isArray(PHASES)).toBe(true);
     expect(PHASES).toEqual([
-      'INTAKE', 'PLAN', 'EXECUTE', 'CROSS_CHECK', 'VERIFY', 'IMPROVE', 'REPORT',
+      'INTAKE', 'PLAN', 'EXECUTE', 'CROSS_CHECK', 'VERIFY', 'IMPROVE', 'EVALUATE', 'REPORT',
     ]);
   });
 });

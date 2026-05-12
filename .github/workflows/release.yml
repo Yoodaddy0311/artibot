@@ -149,11 +149,20 @@ jobs:
         env:
           VERSION: ${{ steps.counts.outputs.version }}
         run: |
+          # NOTE on sed regex hygiene: GNU sed in -E (ERE) mode treats \| as
+          # alternation, NOT as a literal pipe. The previous version of this
+          # script used \| inside the artibot-row anchor and the regex
+          # degenerated to (alt1|alt2|" ")\*\*X.Y.Z\*\* — matching every
+          # `**X.Y.Z**` token in the file (including the cowork row and the
+          # version-history bullets). Fix: use # as the s-delimiter (so | is
+          # never special to sed) AND express literal pipes as [|] inside the
+          # pattern (so GNU's ERE alternation extension cannot grab them).
+          #
           # Both README badges: shields.io version-X.Y.Z-blue
-          sed -i -E "s|version-[0-9]+\.[0-9]+\.[0-9]+-blue|version-${VERSION}-blue|g" README.md
-          sed -i -E "s|version-[0-9]+\.[0-9]+\.[0-9]+-blue|version-${VERSION}-blue|g" plugins/artibot/README.md
-          # Root README plugin table row for artibot
-          sed -i -E "s|(\[\`artibot\`\]\(\./plugins/artibot/\) \| Claude Code \(developer CLI\) \| )\*\*[0-9]+\.[0-9]+\.[0-9]+\*\*|\1**${VERSION}**|" README.md
+          sed -i -E "s#version-[0-9]+\.[0-9]+\.[0-9]+-blue#version-${VERSION}-blue#g" README.md
+          sed -i -E "s#version-[0-9]+\.[0-9]+\.[0-9]+-blue#version-${VERSION}-blue#g" plugins/artibot/README.md
+          # Root README plugin table row — scoped to artibot row only.
+          sed -i -E "s#(\[\`artibot\`\]\(\./plugins/artibot/\) [|] Claude Code \(developer CLI\) [|] )\*\*[0-9]+\.[0-9]+\.[0-9]+\*\*#\1**${VERSION}**#" README.md
 
       - name: Commit and push README updates
         run: |

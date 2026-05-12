@@ -206,6 +206,44 @@ fi
 # ─── Cognitive mode (System1 vs System2 via env or default) ──────────────────
 COG_MODE="${ARTIBOT_COG_MODE:-sys1}"
 
+# ─── Effort level (cognitive depth from current-effort.json) ─────────────────
+EFFORT_LABEL=''
+EFFORT_FILE="$PLUGIN_ROOT/runtime/current-effort.json"
+if [ -f "$EFFORT_FILE" ]; then
+  EFFORT_VALUE=$(_json_file_get "$EFFORT_FILE" '.effort' '')
+  if [ -n "$EFFORT_VALUE" ]; then
+    EFFORT_LABEL="🎚 ${EFFORT_VALUE}"
+  fi
+fi
+
+# ─── Active teammates (parallel team mode) ───────────────────────────────────
+TEAM_LABEL=''
+TEAM_FILE="$PLUGIN_ROOT/runtime/current-teammates.json"
+if [ -f "$TEAM_FILE" ] && command -v node >/dev/null 2>&1; then
+  TEAM_LABEL=$(ARTIBOT_SL_FILE_CONTENT=$(cat "$TEAM_FILE" 2>/dev/null || true) node -e "
+    try {
+      const o = JSON.parse(process.env.ARTIBOT_SL_FILE_CONTENT || '{}');
+      const t = Array.isArray(o.teammates) ? o.teammates.filter(x => x && typeof x.name === 'string') : [];
+      if (t.length === 0) { process.stdout.write(''); }
+      else {
+        const first = t[0].name;
+        const extra = t.length > 1 ? '+' + (t.length - 1) : '';
+        process.stdout.write('👥 ' + first + extra);
+      }
+    } catch { process.stdout.write(''); }
+  " 2>/dev/null || true)
+fi
+
+# ─── Long context mode (1M window indicator) ────────────────────────────────
+LONGCTX_LABEL=''
+LONGCTX_FILE="$PLUGIN_ROOT/runtime/long-context-active.json"
+if [ -f "$LONGCTX_FILE" ]; then
+  LONGCTX_ENABLED=$(_json_file_get "$LONGCTX_FILE" '.enabled' 'false')
+  if [ "$LONGCTX_ENABLED" = "true" ]; then
+    LONGCTX_LABEL="🪟 1M"
+  fi
+fi
+
 # ─── Session token usage (from runtime-prompt.js) ───────────────────────────
 TOKEN_LABEL=''
 TOKEN_FILE="$PLUGIN_ROOT/runtime/token-usage-session.json"
@@ -262,8 +300,15 @@ AB_SEGMENT=''
 [ -n "$EVAL_STATUS"     ] && AB_SEGMENT="${AB_SEGMENT} ${EVAL_STATUS}"
 [ -n "$AB_SEGMENT"      ] && LINE2="${LINE2}  | ${AB_SEGMENT}"
 
-# Cognitive mode segment
+# Cognitive mode + effort segment
 LINE2="${LINE2}  | ⚡ ${COG_MODE}"
+[ -n "$EFFORT_LABEL" ] && LINE2="${LINE2} ${EFFORT_LABEL}"
+
+# Team segment (parallel teammates active)
+[ -n "$TEAM_LABEL" ] && LINE2="${LINE2}  | ${TEAM_LABEL}"
+
+# Long context segment
+[ -n "$LONGCTX_LABEL" ] && LINE2="${LINE2}  | ${LONGCTX_LABEL}"
 
 # Token usage segment
 [ -n "$TOKEN_LABEL" ] && LINE2="${LINE2}  | ${TOKEN_LABEL}"
