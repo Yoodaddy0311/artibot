@@ -9,6 +9,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.6.3] - 2026-05-12
+
+Adds `/learning` slash command for inspecting the on-disk state of the auto-learning + swarm federation system. Pure observation — never mutates state. Companion to the v4.6.2 schema improvements: now there is a one-step way to see what `certainty`, `weights.agents`, GRPO weights, and swarm sync look like at any moment.
+
+### Added
+
+- **`scripts/learning-diag.js`** — zero-dependency diagnostic script. Reads `~/.claude/artibot/grpo-history.json`, `swarm-sync-state.json`, `swarm-merged-weights.json`, and the six `patterns/*-patterns.json` files (plus `memory/error-patterns.json` fallback). Renders a 5-section markdown dashboard: GRPO Self-Learning, Swarm (Federated Learning), Top Performers, Risk Signals, Pattern File Health — followed by a Recommendations section that flags critical failure patterns (success < 25% AND conf ≥ 0.8 AND n ≥ 10), stale syncs (> 7 days), empty buckets, and dormant `teamWeights`. Pure reads, no network, no mutations.
+- **`commands/learning.md`** — slash command wrapper. Routes args (`--top N`, `--bottom N`, `--rounds N`, `--swarm`, `--patterns`, `--raw`, `--base <dir>`, `--help`) to the diagnostic script and renders output verbatim.
+
+### Features
+
+- **Top Performers ranking** uses `success × certainty` when v4.6.2's `certainty` field is present, falls back to `success × confidence` for pre-v4.6.2 entries — so the dashboard works on legacy data too.
+- **Risk Signals filter**: high confidence (≥ 0.5) + low success (< 35%) + non-trivial sample (n ≥ 6) — surfaces "consistent failure" tools/agents that the system has learned are broken but may still be invoked.
+- **Recommendations engine** is heuristic-based: detects empty swarm buckets (specifically calls out the post-v4.6.2 `agents` bucket vs other empty buckets), stale federated-learning sync, dormant `updateTeamWeights()`, and zero/sparse GRPO history.
+- **Five operating modes**: full dashboard (default), `--swarm` (federation-only), `--patterns` (file-health only), `--raw` (JSON dump with rounds elided), `--help`.
+- **Graceful degradation**: every read is guarded — missing files render as "_missing_" rows rather than crashing.
+
+### Changed
+
+- **README.md (root)** — slash-command count 58 → 59, directory-tree comment updated, plugin-table feature blurb gains `/learning diagnostics`.
+- **`validate-readme-claims.js`** — passes; no validator code change needed (file-count derivation is automatic).
+
+### Verification
+
+- `npx eslint scripts/learning-diag.js` → 0 errors, 0 warnings (clean run on the new script).
+- `node scripts/ci/validate-readme-claims.js` → all README claims match file-system counts (commands 59, agents 28, hookScripts 54, hookRegistrations 52).
+- Smoke test against live disk state confirms all five sections render correctly and flag the live `meta410-auditor` / `quiz-investigator` / `playwright_evaluate` entries as critical — same findings I extracted manually in the v4.6.2 analysis, now reproducible in a single command.
+
+### Not Fixed (still deferred from v4.6.2)
+
+The deferrals listed in v4.6.2 (Playwright 20% swarm failure, marketing-auditor regressions, dormant `teamWeights`) remain. `/learning` now makes them visible at a glance but does not fix them.
+
+---
+
 ## [4.6.2] - 2026-05-12
 
 Learning-system schema improvements driven by direct analysis of disk-state evidence (300 GRPO rounds + 15 swarm uploads + 37 merged tool weights). Two additive changes plus one schema correction. Backward compat: pre-v4.6.2 patterns and swarm payloads continue to work; new fields are optional.
