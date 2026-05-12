@@ -9,6 +9,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.6.2] - 2026-05-12
+
+Learning-system schema improvements driven by direct analysis of disk-state evidence (300 GRPO rounds + 15 swarm uploads + 37 merged tool weights). Two additive changes plus one schema correction. Backward compat: pre-v4.6.2 patterns and swarm payloads continue to work; new fields are optional.
+
+### Added
+
+- **`pattern.certainty`** — new sample-size-based signal in `extractPattern()` output (`lib/learning/pattern-analyzer.js`). Formula: `1 - 1/sqrt(n)`. n=3 → 0.42, n=10 → 0.68, n=30 → 0.82, n=132 → 0.91. Companion to the existing `confidence` field which conflates sample-size with composite-score signal (e.g. Write n=132 with 90% success previously surfaced as `confidence: 0.20` because Write commands rarely score high on the speed/brevity rules — accurate semantically, but misleading when consumers expected "certainty"). `certainty` lets downstream consumers (router, knowledge-transfer, convergence-detector) weight signals by sample size independently. Emitted in both variance and consensus modes.
+- **`weights.agents` bucket** — new top-level category in swarm payload schema (`lib/swarm/pattern-packager.js::packagePatterns`). Mirrors `weights.tools` structure. Pre-v4.6.2 code routed `case 'agent':` patterns into `weights.tools`, conflating agent and tool signals in peer-merged data (e.g. `sa360-auditor`, `llm-architect`, `planner` appeared alongside `Bash`, `Read`, `Edit` in `swarm-merged-weights.json::weights.tools`). Now correctly bucketed via dedicated `case 'agent':` → `weights.agents[category]`. `mergeWeights` and `unpackWeights` updated to handle the new bucket; new `unpackAgentWeights()` helper emits patterns with correct `type: 'agent'` and `key: 'agent::<name>'` (was incorrectly `tool::<name>`).
+- **9 new tests** — 3 in `pattern-analyzer.test.js` (certainty in variance mode + consensus mode + monotonic with n), 6 in `pattern-packager.test.js` (agent routes to `weights.agents` not `weights.tools`, certainty pack/unpack round-trip in both directions, certainty omitted when source pattern lacks it for backward compat).
+
+### Changed
+
+- **`pattern-packager.test.js`** — 2 existing tests updated to assert the corrected agent-routing behavior (previously these tests encoded the bug as expected behavior).
+- **`memory/MEMORY.md` (auto-memory)** — Sprint History entry for v4.6.2 + Status line bump.
+- **`memory/lessons-learned.md`** — new "학습 시스템 인사이트" section documenting Pattern semantics drift, the Playwright 20%-failure swarm-wide observation (deferred to its own investigation), and marketing-auditor agent regression candidates (`meta410-auditor`, `version-comparator`).
+
+### Backward Compat
+
+- All new fields are optional / additive. Pre-v4.6.2 patterns on disk (no `certainty` field) continue to round-trip cleanly through pack/unpack — the field is omitted rather than defaulted.
+- Pre-v4.6.2 swarm payloads on disk (with agents bundled into `weights.tools`) remain readable; only new uploads route through the corrected schema. No migration script needed.
+
+### Verification
+
+- `npx vitest run tests/learning tests/swarm` → **2,253/2,253 pass, 67 test files**
+- `npx eslint lib/learning/pattern-analyzer.js lib/swarm/pattern-packager.js tests/...` → 0 errors, 0 warnings
+- No production runtime changes — only schema (pattern shape) changes.
+
+### Not Fixed (deferred)
+
+- **GRPO `teamWeights={}`** — the `updateTeamWeights()` function is exported and tested but never invoked at runtime (no caller in middleware, hooks, or commands). Decision: leave dormant; treat as opt-in API surface rather than missing integration. Re-evaluate if team-level GRPO observability becomes required.
+- **Playwright `playwright_evaluate` / `playwright_screenshot` 20% success across swarm** — peer-wide failure pattern, not a learning-system bug. Needs its own MCP-side investigation.
+- **`meta410-auditor` (19% n=20)** and **`version-comparator` (22% n=66)** — possible agent-implementation regressions, separate concern.
+- **`/learning-diag` observability command** — designed but out of scope for this patch. Will likely ship as a script first.
+
+---
+
 ## [4.6.1] - 2026-05-12
 
 Branch-integration release. The `master` and `artibot/master` branches had diverged at v4.4.1 (commit `4141dbf`) and progressed independently: `master` accumulated the `artibot-cowork` v3.1.0 upgrade (PR #7), while `artibot/master` accumulated 48 commits covering v4.5.0 → v4.6.0 of the `artibot` plugin. This release reunifies them on `master` so that the default branch reflects both plugin lines, eliminating the "tag latest = v4.6.0 but branch tip = v4.4.1 artibot" confusion. No new functional code in either plugin — only the merge commit, version bump, and README/CHANGELOG reconciliation.

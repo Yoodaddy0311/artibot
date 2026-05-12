@@ -32,7 +32,7 @@ describe('packagePatterns()', () => {
 
   it('returns empty weights when no patterns provided', async () => {
     const result = await packagePatterns([]);
-    expect(result.weights).toEqual({ tools: {}, errors: {}, commands: {}, teams: {} });
+    expect(result.weights).toEqual({ tools: {}, errors: {}, commands: {}, teams: {}, agents: {} });
     expect(result.metadata.packagedCount).toBe(0);
   });
 
@@ -112,6 +112,34 @@ describe('packagePatterns()', () => {
     const result = await packagePatterns([pattern]);
     expect(result.weights.tools.Write.successRate).toBeLessThanOrEqual(1);
   });
+
+  it('routes agent patterns to weights.agents (not weights.tools)', async () => {
+    const pattern = makePattern('agent', 'llm-architect', {
+      bestData: { successRate: 0.85, avgMs: 200 },
+    });
+    const result = await packagePatterns([pattern]);
+    expect(result.weights.agents['llm-architect']).toBeDefined();
+    expect(result.weights.agents['llm-architect'].successRate).toBeGreaterThan(0);
+    // Critical: must NOT leak into tools bucket (pre-v4.6.2 behavior)
+    expect(result.weights.tools['llm-architect']).toBeUndefined();
+  });
+
+  it('propagates pattern.certainty through packageToolPattern', async () => {
+    const pattern = makePattern('tool', 'Read', {
+      certainty: 0.91,
+      bestData: { successRate: 0.95, avgMs: 100 },
+    });
+    const result = await packagePatterns([pattern]);
+    expect(result.weights.tools.Read.certainty).toBe(0.91);
+  });
+
+  it('omits certainty when pattern does not carry it (backward compat with pre-v4.6.2 data)', async () => {
+    const pattern = makePattern('tool', 'Read', {
+      bestData: { successRate: 0.95, avgMs: 100 },
+    });
+    const result = await packagePatterns([pattern]);
+    expect(result.weights.tools.Read.certainty).toBeUndefined();
+  });
 });
 
 describe('unpackWeights()', () => {
@@ -174,6 +202,35 @@ describe('unpackWeights()', () => {
     const patterns = unpackWeights(globalWeights);
     expect(patterns).toHaveLength(1);
     expect(patterns.every((p) => p.type === 'tool')).toBe(true);
+  });
+
+  it('unpacks agent weights into pattern array with type "agent"', () => {
+    const globalWeights = {
+      agents: {
+        'llm-architect': { successRate: 0.85, avgLatency: 0.7, confidence: 0.66, sampleSize: 6 },
+      },
+    };
+    const patterns = unpackWeights(globalWeights);
+    expect(patterns).toHaveLength(1);
+    expect(patterns[0].key).toBe('agent::llm-architect');
+    expect(patterns[0].type).toBe('agent');
+    expect(patterns[0].source).toBe('swarm-global');
+  });
+
+  it('round-trips certainty through unpackWeights when present', () => {
+    const globalWeights = {
+      tools: { Read: { successRate: 0.9, confidence: 0.85, certainty: 0.91, sampleSize: 132 } },
+    };
+    const patterns = unpackWeights(globalWeights);
+    expect(patterns[0].certainty).toBe(0.91);
+  });
+
+  it('omits certainty in unpacked pattern when weight lacks it', () => {
+    const globalWeights = {
+      tools: { Read: { successRate: 0.9, confidence: 0.85, sampleSize: 50 } },
+    };
+    const patterns = unpackWeights(globalWeights);
+    expect(patterns[0].certainty).toBeUndefined();
   });
 });
 
@@ -391,15 +448,18 @@ describe('packagePatterns() additional branches', () => {
     expect(result.metadata.packagedCount).toBe(0);
   });
 
-  it('packages agent patterns into weights.tools (mapped to tools category)', async () => {
+  it('packages agent patterns into weights.agents (separate bucket, not weights.tools)', async () => {
+    // Pre-v4.6.2 behavior incorrectly routed agent patterns into weights.tools,
+    // conflating them with real tool patterns in the swarm. Now properly bucketed.
     const pattern = makePattern('agent', 'orchestrator', {
       bestData: { successRate: 0.92, avgMs: 200 },
     });
     const result = await packagePatterns([pattern]);
-    expect(result.weights.tools.orchestrator).toBeDefined();
-    expect(result.weights.tools.orchestrator.successRate).toBeGreaterThan(0);
-    expect(result.weights.tools.orchestrator.confidence).toBe(0.8);
-    expect(result.weights.tools.orchestrator.sampleSize).toBe(10);
+    expect(result.weights.agents.orchestrator).toBeDefined();
+    expect(result.weights.agents.orchestrator.successRate).toBeGreaterThan(0);
+    expect(result.weights.agents.orchestrator.confidence).toBe(0.8);
+    expect(result.weights.agents.orchestrator.sampleSize).toBe(10);
+    expect(result.weights.tools.orchestrator).toBeUndefined();
   });
 });
 
@@ -760,7 +820,7 @@ describe('loadAllPatterns() - error fallback + agent type', () => {
     expect(Object.keys(result.weights.errors)).toHaveLength(1);
   });
 
-  it('loads agent-patterns.json from patterns/ directory', async () => {
+  it('loads agent-patterns.json from patterns/ directory (into weights.agents)', async () => {
     const agentPattern = makePattern('agent', 'planner', {
       bestData: { successRate: 0.88, avgMs: 150 },
     });
@@ -773,8 +833,8 @@ describe('loadAllPatterns() - error fallback + agent type', () => {
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce({ patterns: [agentPattern] });
     const result = await packagePatterns();
-    expect(result.weights.tools.planner).toBeDefined();
-    expect(result.weights.tools.planner.confidence).toBe(0.8);
+    expect(result.weights.agents.planner).toBeDefined();
+    expect(result.weights.agents.planner.confidence).toBe(0.8);
   });
 });
 

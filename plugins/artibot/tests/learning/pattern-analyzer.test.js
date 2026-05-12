@@ -327,6 +327,57 @@ describe('extractPattern()', () => {
     const pattern = extractPattern('tool::X', ranked);
     expect(pattern).toBeNull();
   });
+
+  it('emits sample-size-based certainty in variance mode', () => {
+    // certainty = 1 - 1/sqrt(n); n=2 -> 0.29.
+    // Separate from `confidence` which conflates sample size with composite.
+    const best = {
+      experience: makeExp('tool', 'Read', {}),
+      scores: { success: 0.95 },
+      composite: 0.9,
+      relativeAdvantage: 0.2,
+    };
+    const worse = {
+      experience: makeExp('tool', 'Read', {}),
+      scores: { success: 0.5 },
+      composite: 0.5,
+      relativeAdvantage: -0.2,
+    };
+    const ranked = makeRanked([best, worse], 0.7);
+    const pattern = extractPattern('tool::Read', ranked);
+    expect(pattern.certainty).toBeCloseTo(1 - 1 / Math.sqrt(2), 2);
+  });
+
+  it('emits sample-size-based certainty in consensus mode', () => {
+    // n=10 -> certainty ~0.68 (independent of group composite).
+    const mkEntry = () => ({
+      experience: makeExp('tool', 'Grep', {}),
+      scores: { success: 0.70 },
+      composite: 0.70,
+      relativeAdvantage: 0,
+    });
+    const entries = Array.from({ length: 10 }, mkEntry);
+    const ranked = makeRanked(entries, 0.70);
+    const pattern = extractPattern('tool::Grep', ranked);
+    expect(pattern.certainty).toBeCloseTo(1 - 1 / Math.sqrt(10), 2);
+  });
+
+  it('certainty rises monotonically with sample size', () => {
+    // n=132 vs n=10: large-sample certainty must exceed small-sample certainty
+    // for the same group composite — the original `confidence` field does NOT
+    // exhibit this property, which is why `certainty` was added.
+    const mkEntry = () => ({
+      experience: makeExp('tool', 'X', {}),
+      scores: { success: 0.50 },
+      composite: 0.50,
+      relativeAdvantage: 0,
+    });
+    const small = makeRanked(Array.from({ length: 10 }, mkEntry), 0.50);
+    const large = makeRanked(Array.from({ length: 132 }, mkEntry), 0.50);
+    const psmall = extractPattern('tool::X', small);
+    const plarge = extractPattern('tool::X', large);
+    expect(plarge.certainty).toBeGreaterThan(psmall.certainty);
+  });
 });
 
 // ---------------------------------------------------------------------------

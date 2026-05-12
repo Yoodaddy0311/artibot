@@ -95,6 +95,7 @@ export async function packagePatterns(localPatterns) {
     errors: {},
     commands: {},
     teams: {},
+    agents: {},
   };
 
   for (const pattern of patterns) {
@@ -117,7 +118,9 @@ export async function packagePatterns(localPatterns) {
         weights.teams[category] = packageTeamPattern(pattern);
         break;
       case 'agent':
-        weights.tools[category] = packageToolPattern(pattern);
+        // Agents get their own bucket (was incorrectly routed to weights.tools
+        // prior to this change, conflating agent and tool patterns in the swarm).
+        weights.agents[category] = packageToolPattern(pattern);
         break;
     }
   }
@@ -149,12 +152,19 @@ export async function packagePatterns(localPatterns) {
  */
 function packageToolPattern(pattern) {
   const data = pattern.bestData ?? {};
-  return {
+  const packed = {
     successRate: clamp01(data.successRate ?? pattern.confidence ?? 0),
     avgLatency: normalizeLatency(data.avgMs ?? 0),
     confidence: clamp01(pattern.confidence ?? 0),
     sampleSize: pattern.sampleSize ?? 0,
   };
+  // Propagate certainty (sample-size-based signal) if the pattern carries it.
+  // Pattern-analyzer adds this field in extractPattern(); older patterns from
+  // pre-v4.6.2 disk state may not have it — omit cleanly in that case.
+  if (typeof pattern.certainty === 'number') {
+    packed.certainty = clamp01(pattern.certainty);
+  }
+  return packed;
 }
 
 /**
@@ -229,6 +239,7 @@ export function unpackWeights(globalWeights) {
   unpackErrorWeights(globalWeights.errors, patterns, ts);
   unpackCommandWeights(globalWeights.commands, patterns, ts);
   unpackTeamWeights(globalWeights.teams, patterns, ts);
+  unpackAgentWeights(globalWeights.agents, patterns, ts);
 
   return patterns;
 }
@@ -243,7 +254,7 @@ export function unpackWeights(globalWeights) {
 function unpackToolWeights(tools, patterns, extractedAt) {
   if (!tools) return;
   for (const [category, weight] of Object.entries(tools)) {
-    patterns.push({
+    const entry = {
       key: `tool::${category}`,
       type: 'tool',
       category,
@@ -256,7 +267,40 @@ function unpackToolWeights(tools, patterns, extractedAt) {
       },
       source: 'swarm-global',
       extractedAt,
-    });
+    };
+    if (typeof weight.certainty === 'number') entry.certainty = weight.certainty;
+    patterns.push(entry);
+  }
+}
+
+/**
+ * Unpack agent weight entries into the patterns array.
+ * Mirror of unpackToolWeights but tags entries with type 'agent' so they
+ * route correctly through downstream pattern handling.
+ *
+ * @param {object|undefined} agents - Agent weight map from global weights
+ * @param {object[]} patterns - Target patterns array to push into
+ * @param {string} extractedAt - ISO timestamp string
+ */
+function unpackAgentWeights(agents, patterns, extractedAt) {
+  if (!agents) return;
+  for (const [category, weight] of Object.entries(agents)) {
+    const entry = {
+      key: `agent::${category}`,
+      type: 'agent',
+      category,
+      confidence: weight.confidence ?? 0.5,
+      bestComposite: weight.successRate ?? 0.5,
+      sampleSize: weight.sampleSize ?? 0,
+      bestData: {
+        successRate: weight.successRate ?? 0,
+        avgMs: denormalizeLatency(weight.avgLatency ?? 0.5),
+      },
+      source: 'swarm-global',
+      extractedAt,
+    };
+    if (typeof weight.certainty === 'number') entry.certainty = weight.certainty;
+    patterns.push(entry);
   }
 }
 
@@ -366,7 +410,7 @@ export function mergeWeights(local, global_, ratio) {
   const merged = {};
 
   // Merge each weight category
-  for (const category of ['tools', 'errors', 'commands', 'teams']) {
+  for (const category of ['tools', 'errors', 'commands', 'teams', 'agents']) {
     const localCat = local[category] ?? {};
     const globalCat = global_[category] ?? {};
     const allKeys = new Set([...Object.keys(localCat), ...Object.keys(globalCat)]);
