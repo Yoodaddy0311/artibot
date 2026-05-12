@@ -37,6 +37,208 @@ Detailed per-release history for v4.5.6 → v4.6.0 (which arrives on `master` th
 
 ---
 
+## [4.6.0] - 2026-05-11
+
+**Goal-driven autopilot** — adapts the Codex `/goal` pattern. 4-phase rollout shipped in two squash PRs (#9 covering Phases 1+2; PR #11 covering Phases 3+4 was fast-forward merged after PR #9 squash deleted its base). Total +74 new tests (53 P1+P2 + 21 P3+P4), all 254 autopilot suite tests pass. 100% backward compat: legacy PRDs without a Goal Contract continue the existing 7-phase flow.
+
+### Added
+
+- **Goal Contract slot in PRD** (Phase 1) — PRD now carries a machine-readable `## 2.5 Goal Contract` JSON block: `objective` / `stoppingCondition` / `validationCommand` / `forbiddenChanges` / `maxIterations` (hard cap 10). New modules `lib/autopilot/goal-schema.js` + `lib/autopilot/prd-parser.js`.
+- **Stopping Condition Evaluator + EVALUATE phase** (Phase 2) — new EVALUATE phase inserted between IMPROVE and REPORT. `lib/autopilot/goal-evaluator.js::evaluateGoal` trusts ONLY the `validationCommand` exit code (no LLM judgment → no hallucination). `lib/autopilot/goal-loop.js::runPhaseGoalEvaluate` drives the iteration loop with decision matrix: met → REPORT, not-met + under-cap → re-EXECUTE iteration, max-cap / same-SHA-3x / confidence<0.8 → PAUSE.
+- **Goal-level Control Plane** (Phase 3) — `lib/autopilot/goal-control.js` exports 5 functions (`pauseGoal` / `resumeGoal` / `retryGoal` / `clearGoal` / `getGoalStatus`). `state.goalPaused` slot is orthogonal to session-level pause. New `/autopilot:goal status|pause|resume|retry|clear <session-id>` subcommands.
+- **Progress Heartbeat** (Phase 4) — `buildProgress(state, contract, evalResult)` emits `{iteration, maxIterations, pct, confidence, met, exitCode}` on 3 evaluator-related telemetry ticks. `/autopilot:tail` gains a `progress` column.
+
+### Changed
+
+- **`lib/autopilot/engine.js`** — 1022 → 791 lines via extraction of `lib/autopilot/_engine-helpers.js` (`makeInitialState` / `tick` / `recordPhase` / `persist`). Brings the file back under the 800-line guard.
+- **`lib/autopilot/index.js`** — exports the new goal modules.
+
+### Scope isolation
+
+All changes confined to `lib/autopilot/*` + `commands/autopilot.md` + `tests/autopilot/*`. `/implement`, `/team`, and the 28 other agents are unaffected.
+
+---
+
+## [4.5.12] - 2026-05-10
+
+Patch release — fixes `git-autopilot-close` Stop-hook `mergeBase` resolution for stacked-PR branches. Recovered from a reflog incident where a session's `git reset --soft <mergeBase>` collapsed legitimate commits into a single autosave commit because `mergeBase` resolved to an ancient ancestor of `origin/HEAD` (=`origin/master`) instead of the working branch's actual upstream.
+
+### Root Cause
+
+When a working branch is part of a stacked-PR chain (e.g. feature branch B based on feature branch A, both based on master), `git merge-base @ origin/HEAD` returns the master-side base — far older than the branch's real "where my work started" point. The autopilot Stop hook then runs `git reset --soft <ancient-base>` and silently collapses all of A's commits into B's working tree, surfacing only as a single "wip: autosave" commit.
+
+### Fixed (2-layer defense)
+
+- **`lib/git/resolve-base.js`** (step 2 — upstream tracking) — if `@{upstream}` resolves to a different branch tip than the working branch, treat that upstream as the merge-base anchor (stacked-PR pattern). Self-tracking (e.g. `origin/foo` for branch `foo`) skips step 2 and falls through to step 3 (`origin/HEAD`).
+- **`lib/git/resolve-base.js`** (new export `isMergeBaseFresh`) — defense-in-depth age sanity gate. Compares `git log -1 --format=%ct <mergeBase>` against HEAD's commit-time; rejects merge-bases older than `maxAgeDays` (default 30). Empty input, malformed timestamps, missing commits → fail-closed `false`.
+- **`scripts/hooks/git-autopilot-close.js::squashWipCommits`** — calls `isMergeBaseFresh` AFTER the reset attempt; stale resolution → log `WIP squash failed` + preserve commits as-is (silent corruption blocked).
+
+### Verification
+
+- 14 new tests (5 stacked-PR upstream + 7 age-gate + 2 invariants)
+- `resolve-base.test.js` 19/19 pass
+- `git-autopilot-close.test.js` 11/11 regression pass with extended mock (new `isMergeBaseFreshImpl` slot)
+- PR #12 squash-merged as `2609d58`
+
+---
+
+## [4.5.11] - 2026-05-09
+
+Patch release — fixes two isolation/race flakes in the test suite that v4.5.10's 22-run stress matrix isolated. Test-only changes; zero production code modified.
+
+### Fixed
+
+- **`tests/hooks/autopilot-nlu-trigger.test.js`** (2/11 failure rate) — the hook's top-level `main().catch(...)` fire-and-forget leaked microtasks into the next test's `mockState` under full-suite worker saturation, producing the "opposite expectations both fail" signature (one test expected length 1 but got 0, another expected 0 but got 1). Fix: (a) `afterEach` adds 100ms drain to flush in-flight microtasks before `vi.clearAllMocks`, (b) 'default-on path' polling deadline 1000ms → 3000ms, (c) `autopilot.enabled=false` test replaced poll-then-expect-0 with a flat 1500ms drain.
+- **`tests/autopilot/engine.mcp-verify.test.js`** (1/11 failure rate) — `runPhase4Verify` mutates state in-memory then session-store disk-writes; under load, disk write lags behind the JS turn so `getStatus()` re-read sees stale state. Fix: wrapped re-read + assertion block in `vi.waitFor` poll (timeout 3000ms, interval 50ms), reusing v4.5.10's case 3 pattern.
+
+### Notes
+
+- Standalone vitest run: 2 files / 8 tests PASS.
+- Full-suite stability verification deferred to PR review.
+- Merged via PR #10 as squash `df44807`.
+
+---
+
+## [4.5.10] - 2026-05-08
+
+Patch release — `dev-verify-gate` scope guard (prevents the globally-installed Stop hook from firing in non-Artibot projects) + 7 timing/race flake fixes exposed by a 22-run cumulative verification matrix.
+
+### Fixed
+
+- **`scripts/hooks/dev-verify-gate.js`** (scope guard) — added `isArtibotRepo(repoRoot)` helper: returns true iff `plugins/artibot/CLAUDE.md` OR `artibot.config.json` exists. `main()` calls scope guard before `getChangedFiles()` → silent bail in non-Artibot repos. Previously, the global install copy (`~/.claude/artibot/`) fired "Reference: plugins/artibot/CLAUDE.md (DEV Protocol section)" advisories in every project's Stop event. +5 ground-truth scope-guard tests.
+- **`tests/lib/orchestration/guardrails.test.js:74`** — threshold 60ms → 150ms (Windows full-suite worker saturation measured 73ms in one case).
+- **`tests/core/decision-trail.test.js:303`** — `setTimeout(60)` → `vi.waitFor` poll (timeout 2s, interval 20ms).
+- **`tests/e2e/runtime-flow.test.js`** — 3 cases individual timeout 15000ms → 30000ms (Korean special-trigger case measured 6605ms standalone).
+- **`tests/scripts/validate.test.js:31`** — first `it` timeout 60000ms (validator subprocess cold-start).
+- **`tests/hooks/session-start.test.js:268,276`** — timeoutMs 2600 → 6000 + test timeout 5000 → 12000 (Promise.race 2000ms timeout's catch-block flush margin was insufficient).
+- **`tests/cognitive/router-grpo-integration.test.js:59`** — threshold 50ms → 200ms (OS scheduler jitter).
+- **`tests/autopilot/engine.execute-worktree.test.js`** case 3 — sync assertion → `vi.waitFor` poll. Initial 5000ms timeout still left 2/11 residual → extended to 15000ms / 100ms interval (Windows `git worktree remove` legitimately uses 10s+ under load).
+
+### Verification matrix
+
+22-run cumulative (11 full-suite runs × 2 phases). Targeted 2 fixes `guardrails:74` / `decision-trail:303`: **0/22 ✓**. 5 secondary fixes: 4 of 5 at 0/11 ✓; case 3 needed the 15s polling expansion.
+
+### Deferred to v4.5.11
+
+- `autopilot-nlu-trigger` 2/11 (mock state leak — structural, not timing)
+- `engine.mcp-verify` 1/11 (slot init race)
+
+### Notes
+
+- Stress test runs (11×) are intentional — surface hidden timing flakes. Pursuing 100% pass under stress risks infinite fix loops. CI's single Linux runner has different load profile from Windows worker saturation.
+- The scope-guard commit `1b2a7ac` was pre-pushed by autopilot session-close auto-commit before this release; version-bump + README + MEMORY sync is catch-up form.
+
+---
+
+## [4.5.9] - 2026-05-08
+
+Patch release — worktree pool race fix + decision-trail test artifact leak fix. Two issues isolated after v4.5.8: `engine.execute-worktree.test.js` case 3 flake (~50% under full-suite parallelism) and an `undefined/runtime/decision-trail.json` leak in repo root after full-suite runs.
+
+### Fixed
+
+- **`vitest.config.js`** — migrated to vitest 4 `projects` workspace. The two `tests/autopilot/**` files (`worktree-manager.test.js` + `engine.execute-worktree.test.js`) both invoke real `git worktree add/remove` against the same `.git/worktrees/` namespace; vitest's parallel workers raced the non-force `git worktree remove` path (`engine.js:684` `force: !graceful`) on the index lock. Fix: `autopilot` project gets `pool: 'forks'` + `poolOptions.forks.singleFork: true` → serialized to a single fork. Parent `test.include` removed (keeping it caused implicit default project to run alongside `projects[]`, doubling suite count 7674 → 15168). `pool`/`poolOptions` placed at project root per vitest 4 migration (replaces vitest 3's deprecated `poolMatchGlobs`).
+- **`tests/core/decision-trail.test.js`** — env restore bug. `process.env.CLAUDE_PLUGIN_ROOT = ORIGINAL_PLUGIN_ROOT` assigns when `ORIGINAL_PLUGIN_ROOT === undefined`, and `process.env` coerces every value to string, writing the literal `"undefined"`. Subsequent tests' `router.route()` → `recordDecision()` → `path.join("undefined", "runtime", "decision-trail.json")` leaked `undefined/runtime/decision-trail.json` into repo root. Fix: `restorePluginRoot()` helper — `delete process.env.CLAUDE_PLUGIN_ROOT` when original was undefined, otherwise assign. Applied at both `withSandbox finally` and `afterEach` sites.
+
+### Verification
+
+- Full-suite × 11 runs after fix 1 → case 3: **0/11 ✓**
+- Post-fix-2 confirmation: `undefined/` directory no longer created
+- ESLint 0/0; `scripts/validate.js` PASS (15 events, 56 hooks); `decision-trail.test.js` 18/18 PASS
+
+### Side-effect findings (deferred)
+
+- `guardrails.test.js:74` 60ms threshold too tight
+- `decision-trail.test.js:303` 60ms wait insufficient
+- Both pre-existing per v4.3.1 "flaky test stabilization" log; carried into next-session-pickup, fixed in v4.5.10.
+
+---
+
+## [4.5.8] - 2026-05-07
+
+Patch release — restores DEV Verify Gate (disabled in v4.5.6 as emergency) using a marker-pattern root-cause fix + 3 P1 regression fixes for `git-autopilot-setup` tests (stderr migration drift).
+
+### Root Cause
+
+v4.5.6 emergency-disabled `dev-verify-gate` after `hasNewerEdits` (file mtime based) misfired on teammate edits — paralysis-class infinite Stop-hook firing. Real fix requires distinguishing main-agent edits from sub-agent edits at marker write time, not at gate evaluation time.
+
+### Added
+
+- **`scripts/hooks/mark-main-agent-edit.js`** — PostToolUse hook on Edit/Write/MultiEdit. Writes `runtime/last-main-agent-edit.timestamp`. `isSubagentContext(hookData)` guard checks 4 signals (`subagent_id` / `subagent_type` / `parent_session_id` / `role:'teammate'`) → teammate edits skip marker write. This single guard resolves the v4.5.6 paralysis root cause.
+- **+27 tests** — `mark-main-agent-edit.test.js` 21 (isSubagentContext 9 + getMarkerPath 2 + main 10) + `dev-verify-gate.test.js` 6 (smoke 1 + ground-truth decision matrix 5 — independent mtime comparison validation to catch drift).
+
+### Changed
+
+- **`scripts/hooks/dev-verify-gate.js`** — emergency-disable `return;` removed. `hasNewerEdits` (file mtime, also triggered by teammates) replaced with `hasNewerMainAgentEdit` (marker mtime vs cache mtime). Decision matrix: no marker → bail / no cache → fire baseline / marker > cache → fire / marker ≤ cache → bail.
+- **`hooks/hooks.json`** — PostToolUse adds `mark-main-agent-edit` (matcher `Edit|Write|MultiEdit`, priority operational, category tracking); Stop re-registers `dev-verify-gate` (priority advisory, category quality). Hook regs 50 → 52, hook scripts 53 → 54.
+- **`tests/hooks/git-autopilot-setup.test.js`** (P1 regression) — 3 stdout assertions swapped to stderr to match the prior `process.stderr.write` migration.
+
+### Notes
+
+- `hooks.json` is cached at SessionStart → marker + gate take effect from the next Claude Code session.
+- The `engine.execute-worktree` case 3 full-suite race (standalone 4/4 pass, full-suite fails) is isolated and tracked separately — fixed in v4.5.9.
+
+---
+
+## [4.5.7] - 2026-05-07
+
+Patch release — restores the Turn Recap UX. User reported the gray one-line summary that used to appear after each response was gone after recent updates. Two regressions identified and both fixed.
+
+### Fixed
+
+- **`commands/recap.md`** — slash command was reduced to a 12-line thin alias ("execute /daily") in commit `0fad5b9` (2026-05-04), but slash commands cannot invoke other slash commands; the LLM frequently skipped the full 6-section dashboard / Next Steps algorithm / Edge Cases workflow. Replaced with the full `daily.md` body (276 lines) inlined.
+- **`scripts/hooks/stop-recap.js`** (new) — Stop hook prints a gray stderr one-liner `[artibot:recap] ✏ N files · ⚙ N cmds · 🤖 N agents · 📖 N reads · 🌿 N uncommitted` after each turn. Safety properties: read-only / stderr-only (Stop ignores `additionalContext`) / `stop_hook_active` loop guard / 4MB transcript cap / 2s git timeout / empty turns emit nothing / outermost try-catch guard. Zero risk of v4.5.6-class infinite loop regression. Helper extraction (`tallyBlock` / `parseTranscriptLine`) keeps max-depth ≤ 4.
+- **`hooks/hooks.json`** — Stop section adds `stop-recap` with priority="optional", category="ux". Hook regs 49 → 50, hook scripts 52 → 53.
+
+### Verification
+
+- `validate-hooks.js` PASS (Stop 2 → 3 entries)
+- ESLint 0 errors/warnings
+- 3 smoke tests (empty stdin / loop guard active / normal payload) all exit 0
+- `validate-readme-claims.js` PASS
+- Install copies synced: `~/.claude/commands/recap.md` + `~/.claude/artibot/scripts/hooks/stop-recap.js` + `~/.claude/artibot/hooks/hooks.json`.
+
+### Notes
+
+- `hooks.json` is cached at SessionStart → `stop-recap` fires from the next session after Claude Code restart.
+
+---
+
+## [4.5.6] - 2026-05-06
+
+Critical patch — full audit of all Stop hooks + infinite-firing loop blocked. User work was paralyzed by `dev-verify` Stop hook infinite firing. 3-agent parallel audit (`stop-auditor` / `tool-hook-auditor` / `registration-auditor`) + `fix-applier` delegation + cross-check review.
+
+### Critical Discovery
+
+**install copy (`~/.claude/artibot/`) is a separate copy from the source repo and source edits do NOT auto-propagate** — every hook fix must be synced to both locations. This is the foundational reason v4.5.1's whitelist had no runtime effect (see v4.5.4 root-cause).
+
+### Fixed (9 patches)
+
+- **`auto-review-trigger.js`** — schema fix: `hookSpecificOutput.additionalContext` (ignored by Stop) → `decision: "block" + reason`.
+- **`auto-review-trigger.js`** — removed `HEAD~1..HEAD` scan (autopilot WIP commit infinite loop blocker).
+- **`auto-review-trigger.js`** — `MAX_SCAN_BYTES = 256KB` DoS guard.
+- **`auto-review-trigger.js`** — `ALLOWED_AGENTS` allowlist (defense-in-depth).
+- **`auto-review-trigger.js`** — `buildFingerprint` adds `SHA1(repoRoot)[:8]` prefix (worktree isolation).
+- **`scripts/hooks/dev-verify-gate.js`** (new) — `hasNewerEdits` mtime guard + emergency-disable (marker-based fix deferred to v4.5.7, properly implemented in v4.5.8).
+- **`stop-review-gate.js`** — fingerprint cache (`buildFingerprint` / `saveFingerprint` / `cacheCtx.duplicate` → silent advisory downgrade) + inverted regex `isCliScript` simplified.
+- **`agent-evaluator.js`** — `isAgentExperienceCollectionEnabled` config gating (default `true` preserved).
+- **`git-autopilot-close.js`** — `pushBranch` adds `timeout: 12000` + `--no-verify` justification comment.
+
+### Changed
+
+- **`hooks/hooks.json`** — Stop entry: removed `check-console-log.js` (dead code) + `dev-verify-gate.js` registration → hook regs 54 → 52.
+- **README** — 51 → 52 hook scripts, 54 → 52 hook regs.
+
+### Verification
+
+- 298 test files PASS, 0 failures
+- `validate` / `lint` / `readme:claims` all PASS
+
+### Session Limitation
+
+`hooks.json` is cached at SessionStart → `dev-verify-gate` fires until Claude Code restart in the current session (emergency-disable's silent exit). v4.5.7 placeholder: marker-pattern reactivation (delivered in v4.5.8).
+
+---
+
 ## [4.5.5] - 2026-05-06
 
 Patch release — Windows test stability + dev-deps security. Three fixes that surfaced when running the full `/verify` pipeline on Windows: (1) vitest's 5s default `testTimeout` was too tight for the many tests that spawn child processes via `execFileSync`/`execFile` (Node cold-start on Windows alone exceeds 5s for some suites), causing 14 timeouts across `validate.js`, `runtime-prompt`, `pre-compact`, `skill-hash-cache`, `artibot-cli`, `engine.execute-worktree`, `worktree-manager`, and `skills`/`skills-keyword-index`. (2) `listWorktrees` annotated records returned `git worktree list --porcelain`'s raw forward-slash paths on Windows while `getWorktreesRoot()` uses OS-native separators, so callers' `rec.path.startsWith(getWorktreesRoot())` checks failed unpredictably. (3) Five transitive dev-dep vulnerabilities (rollup high, vite high ×3, postcss moderate) carried by `vitest@4.0.18` / `@vitest/coverage-v8`. None of these affect production runtime — they only affect local/CI test reliability and dev-time security posture — but together they were noisy enough to mask real regressions and warrant a patch bump.
