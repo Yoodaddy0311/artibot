@@ -9,6 +9,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.6.4] - 2026-05-13
+
+Fixes the measurement-bug class diagnosed by v4.6.3's `/learning` Risk Signals dashboard, migrates hook commands to upstream exec-form `args[]`, and adds compatibility aliases for upstream Claude Code commands. Pure measurement + plumbing — no GRPO algorithm change.
+
+### Fixed
+
+- **Learning-system `0.198` merge drag** (root cause of "20% success" Risk Signals for `mcp__playwright__evaluate`, `mcp__playwright__screenshot`, `AskUserQuestion`). Three independent fixes that together close the chain:
+  - **`scripts/hooks/tool-tracker.js`** — `SKIP_TOOLS` Set now also covers `AskUserQuestion`, `ExitPlanMode`, and `Skill` so they no longer fall through to the default `output ? 0.7 : 0.3` scorer and lock at 0.3.
+  - **`scripts/hooks/tool-tracker.js`** — new `mcp__*` branch in `scoreResult()` scores MCP tools by exit code + stderr length (Bash-style) instead of output length, which is unreliable for side-effect calls like `mcp__playwright__screenshot`.
+  - **`lib/swarm/pattern-packager.js`** — `packageToolPattern()`, `unpackToolWeights()`, and `unpackAgentWeights()` no longer fabricate `successRate: 0` (or `successRate = confidence`) when source data is missing. Fields are omitted instead, breaking the `0.66 × 0.3 + 0 × 0.7 = 0.198` arithmetic that dragged merged values down.
+  - **`lib/swarm/pattern-packager.js`** — `mergeEntries()` now treats `sampleSize: 0` on either side as "no real data" and returns the other side wholesale, providing defense-in-depth against legacy uploads that still carry fabricated zeros.
+
+### Changed
+
+- **`hooks/hooks.json`** — all 56 hook command entries migrated from shell-form `"command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/X.js [args]"` to exec-form `{ "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/hooks/X.js", ...] }`. Matches Claude Code v2.1.139+ recommended pattern for `${CLAUDE_PLUGIN_ROOT}` substitution (avoids shell quoting issues on Windows + Korean paths). Schema-validated against [json.schemastore.org/claude-code-hooks.json](https://json.schemastore.org/claude-code-hooks.json).
+
+### Added
+
+- **`commands/ultrareview.md`** — alias routing `/ultrareview` to Artibot's `/adversarial-review` (8-attack-surface review with `code-reviewer` + `security-reviewer` agents + OWASP Top 10 cross-check). Compatibility shim for users coming from upstream Claude Code naming.
+- **`commands/ultraplan.md`** — alias routing `/ultraplan` to Artibot's `/plan` (planner agent with risk identification + phase decomposition + autopilot hand-off). Compatibility shim.
+
+### Tests
+
+- **`tests/swarm/pattern-packager.test.js`** — 5 new regression tests covering the exact `0.198` merge arithmetic, omission of `successRate`/`avgMs` in pack/unpack when source data is absent, and `mergeEntries` defense-in-depth path. Existing "uses `??` defaults" test updated to match corrected semantics. 85 total tests now passing (was 79).
+- **`tests/hooks/tool-tracker.test.js`** — 9 new tests: 3 for SKIP_TOOLS additions, 6 for the `mcp__*` scoring branch. 74 total tests now passing (was 65).
+
+### Out of scope (deferred)
+
+- P2 agent score normalization (`quiz-investigator`, `meta410-auditor`, `version-comparator`) — observe after this fix propagates through swarm re-download; treat as separate ticket if scores remain anomalous.
+- A3 (OTEL `agent_id` / `parent_agent_id` propagation) — landed separately on v4.7.0 path; requires the v4.6.4 attribution baseline.
+
+---
+
 ## [4.6.3] - 2026-05-12
 
 Adds `/learning` slash command for inspecting the on-disk state of the auto-learning + swarm federation system. Pure observation — never mutates state. Companion to the v4.6.2 schema improvements: now there is a one-step way to see what `certainty`, `weights.agents`, GRPO weights, and swarm sync look like at any moment.
