@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.7.1] - 2026-05-13
+
+Patch release — closes the e2e-test regression introduced by v4.6.4's hooks.json exec-form migration. Pure test-infrastructure fix: the `tests/e2e/plugin-init-flow.test.js` helpers were reading `h.command` directly, which now contains only `"node"` after the migration (the script path moved to `h.args[]`). v4.6.4 and v4.7.0 ship the same runtime behavior — only their tagged release builds had a failing E2E suite. v4.7.1 is the first tag whose Release workflow runs cleanly end-to-end.
+
+### Fixed
+
+- **`tests/e2e/plugin-init-flow.test.js`** — adds a `fullCommand(h)` helper that reconstitutes the legacy `"node ..."` string from `{command, args[]}` when `args[]` is present, falling back to `h.command` for any pre-migration shell-form entries. Applied to all 4 hook-registry assertions (`UserPromptSubmit`, `PostToolUse`, `CLAUDE_PLUGIN_ROOT` substitution, on-disk path existence).
+- **`README.md`** — bumps slash-command claim 59 → 61 to match the v4.6.4 ultra* alias additions. The `validate-readme-claims.js` PR gate caught this drift on PR #13.
+
+### Notes
+
+- v4.6.4 / v4.7.0 GitHub Releases are still valid — `gh release create` succeeded at tag time, only the auto-triggered Release workflow failed because it ran tests against the pre-fix tagged commits.
+- No code under `lib/` or `scripts/` changed; only test infrastructure + README claims.
+- Master CI passed end-to-end at `a81abac` (PR #13 merge commit) with 4128/4128 + e2e suite included.
+
+---
+
 ## [4.7.0] - 2026-05-13
 
 Adds OpenTelemetry agent attribution propagation across the runtime middleware, learning records, and `/learning` dashboard. Enables answering "which agent was responsible when this tool failed" — a question the v4.6.4 measurement fix made answerable in principle (clean signal) but not yet attributable in practice (no agent column anywhere).
