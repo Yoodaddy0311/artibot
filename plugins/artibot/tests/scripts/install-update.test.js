@@ -196,7 +196,12 @@ describe('update/branch fallback order', () => {
     expect(mainIdx).toBeGreaterThan(masterIdx);
   });
 
-  it('수동 안내 메시지가 artibot/master를 참조', () => {
-    expect(updateContent).toContain('git pull origin artibot/master');
+  it('수동 안내 메시지가 master를 참조 (v4.7.1+ artibot/master deprecation start)', () => {
+    // v4.7.1: switched manual recommendation to `master` so that when
+    // origin/artibot/master is removed (eligible 2026-06-13), the printed
+    // advice still works. The auto-fallback chain still tries artibot/master
+    // first as a no-op for now.
+    expect(updateContent).toContain('git pull origin master');
+    expect(updateContent).not.toContain('git pull origin artibot/master');
   });
 });
