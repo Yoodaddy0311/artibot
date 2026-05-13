@@ -138,6 +138,54 @@ describe('tool-learner', () => {
       expect(record.command).toBe('/analyze');
       expect(record.domain).toBe('frontend');
     });
+
+    // v4.7.0 A3: agent attribution
+    it('stores meta.agentId as callingAgent on the record', async () => {
+      await recordUsage('Read', 'search:file', 1.0, { agentId: 'frontend-developer' });
+      await flushToDisk();
+      const content = JSON.parse(fs.writeFile.mock.calls[0][1]);
+      const record = content.contexts['search:file'][0];
+      expect(record.callingAgent).toBe('frontend-developer');
+    });
+
+    it('stores meta.agentType as parentAgent on the record', async () => {
+      await recordUsage('Read', 'search:file', 1.0, {
+        agentId: 'frontend-developer',
+        agentType: 'orchestrator',
+      });
+      await flushToDisk();
+      const content = JSON.parse(fs.writeFile.mock.calls[0][1]);
+      const record = content.contexts['search:file'][0];
+      expect(record.parentAgent).toBe('orchestrator');
+    });
+
+    it('does not persist callingAgent when agentId is "unknown" (sentinel from extractAgentId)', async () => {
+      await recordUsage('Read', 'search:file', 1.0, { agentId: 'unknown' });
+      await flushToDisk();
+      const content = JSON.parse(fs.writeFile.mock.calls[0][1]);
+      const record = content.contexts['search:file'][0];
+      expect(record.callingAgent).toBeUndefined();
+    });
+
+    it('does not persist parentAgent when agentType is "main" (default fallback)', async () => {
+      await recordUsage('Read', 'search:file', 1.0, {
+        agentId: 'orchestrator',
+        agentType: 'main',
+      });
+      await flushToDisk();
+      const content = JSON.parse(fs.writeFile.mock.calls[0][1]);
+      const record = content.contexts['search:file'][0];
+      expect(record.parentAgent).toBeUndefined();
+    });
+
+    it('omits callingAgent and parentAgent fields entirely when meta is empty (backward compat)', async () => {
+      await recordUsage('Read', 'search:file', 1.0);
+      await flushToDisk();
+      const content = JSON.parse(fs.writeFile.mock.calls[0][1]);
+      const record = content.contexts['search:file'][0];
+      expect(record).not.toHaveProperty('callingAgent');
+      expect(record).not.toHaveProperty('parentAgent');
+    });
   });
 
   // ---------------------------------------------------------------------------

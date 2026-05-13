@@ -9,6 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.7.0] - 2026-05-13
+
+Adds OpenTelemetry agent attribution propagation across the runtime middleware, learning records, and `/learning` dashboard. Enables answering "which agent was responsible when this tool failed" — a question the v4.6.4 measurement fix made answerable in principle (clean signal) but not yet attributable in practice (no agent column anywhere).
+
+**Synergy with v4.6.4**: Now that scoring is honest, attribution lets `/learning` Risk Signals isolate failures to a specific spawning agent rather than blaming the tool wholesale.
+
+### Added
+
+- **`lib/runtime/middleware/otel-middleware.js`** — pipeline spans now carry `artibot.agent_id` and `artibot.parent_agent_id` attributes when the active subagent contract supplies them. Backward compatible: top-level orchestrator spans (no contract) emit only the existing `artibot.agent` human-readable name. Both `buildPipelineSpan` and `buildMetricsFromState` propagate the new attributes consistently.
+- **`lib/learning/tool-learner.js`** — `UsageRecord` typedef extended with optional `callingAgent` (stable id of the invoker) and `parentAgent` (spawning agent in the chain). `recordUsage()` now persists `meta.agentId` → `callingAgent` and `meta.agentType` → `parentAgent`, skipping the `'unknown'` and `'main'` sentinels so they do not muddy aggregations. Pre-v4.7.0 records remain valid (fields are optional).
+- **`lib/cognitive/grpo-bridge.js`** — new `partitionRecordsByAgent(records)` helper groups `UsageRecord[]` by `callingAgent` so downstream consumers (Risk Signals, GRPO weight slicing) can compute per-agent metrics without re-implementing grouping. Records without attribution bucket under `__unattributed__`.
+- **`commands/learning.md`** — documents the `--by-agent` flag (groups Risk Signals + Top Performers by `callingAgent`) and adds two interpretation rows for `__unattributed__` dominance and agent-scoped tool failures.
+
+### Tests
+
+- **`tests/learning/tool-learner.test.js`** — 5 new attribution tests (94 → 99 passing): persistence of `callingAgent`/`parentAgent`, sentinel skip for `unknown`/`main`, backward-compat omission when `meta` is empty.
+- **`tests/cognitive/grpo-bridge.test.js`** — 5 new `partitionRecordsByAgent` tests (19 → 24): non-array safety, empty-array case, multi-agent grouping, `__unattributed__` bucketing, reference preservation.
+- **`tests/runtime/middleware/otel-middleware-smoke.test.js`** — 3 new tests (6 → 9): span attribute propagation, backward-compat omission when contract absent, metrics path attribute propagation.
+
+### Notes
+
+- The `--by-agent` flag in `/learning` is documented; the script-side rendering ships in a follow-up minor release once enough v4.7.0 records exist on disk to make the partitioned view useful.
+- Sub-agent OTEL context propagation across child processes is delegated to Claude Code itself; the contract assumes the runtime injects `agentId`/`parentAgentId` on the subagent contract object before middleware runs.
+
+---
+
 ## [4.6.4] - 2026-05-13
 
 Fixes the measurement-bug class diagnosed by v4.6.3's `/learning` Risk Signals dashboard, migrates hook commands to upstream exec-form `args[]`, and adds compatibility aliases for upstream Claude Code commands. Pure measurement + plumbing — no GRPO algorithm change.

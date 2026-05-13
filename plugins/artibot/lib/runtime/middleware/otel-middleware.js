@@ -54,6 +54,36 @@ function resolveAgent(state) {
 }
 
 /**
+ * Resolve a stable agent id for attribution (v4.7.0).
+ * Distinct from the human-readable name in resolveAgent — this is meant for
+ * downstream joins (e.g. /learning by-agent breakdown). Falls back to the
+ * human-readable name when no explicit id is carried.
+ * @param {object} state
+ * @returns {string|undefined}
+ */
+function resolveAgentId(state) {
+  return (
+    state?.context?.subagents?.contract?.agentId
+    || state?.context?.subagents?.contract?.targetAgent
+    || undefined
+  );
+}
+
+/**
+ * Resolve the parent (spawning) agent id for call-chain attribution (v4.7.0).
+ * Returns undefined for top-level orchestrator pipelines.
+ * @param {object} state
+ * @returns {string|undefined}
+ */
+function resolveParentAgentId(state) {
+  return (
+    state?.context?.subagents?.contract?.parentAgentId
+    || state?.context?.subagents?.contract?.parentAgent
+    || undefined
+  );
+}
+
+/**
  * Resolve the operation/intent label for attributes.
  * @param {object} state
  * @returns {string}
@@ -79,6 +109,13 @@ export function buildPipelineSpan(state, timing, exporter, rngFn) {
     'artibot.agent': resolveAgent(state),
     'artibot.operation': resolveOperation(state),
   };
+  // v4.7.0: stable id + spawn-chain attribution. Optional — only set when
+  // subagent contract carries explicit ids, so top-level orchestrator spans
+  // remain unchanged for backward compat.
+  const agentId = resolveAgentId(state);
+  if (agentId) attrs['artibot.agent_id'] = agentId;
+  const parentAgentId = resolveParentAgentId(state);
+  if (parentAgentId) attrs['artibot.parent_agent_id'] = parentAgentId;
   if (tokenUsage?.enabled && tokenUsage.current) {
     attrs['artibot.tokens.input'] = tokenUsage.current.inputTokens;
   }
@@ -116,6 +153,12 @@ export function buildMetricsFromState(state, timeMs, exporter) {
   const model = resolveModel(state);
   const agent = resolveAgent(state);
   const attrs = { 'artibot.model': model, 'artibot.agent': agent };
+  // v4.7.0: propagate agent_id / parent_agent_id when present so metrics can
+  // be sliced by spawn chain in downstream OTLP backends.
+  const agentId = resolveAgentId(state);
+  if (agentId) attrs['artibot.agent_id'] = agentId;
+  const parentAgentId = resolveParentAgentId(state);
+  if (parentAgentId) attrs['artibot.parent_agent_id'] = parentAgentId;
 
   const tokenUsage = state?.context?.tokenUsage;
   if (tokenUsage?.enabled && tokenUsage.session) {
