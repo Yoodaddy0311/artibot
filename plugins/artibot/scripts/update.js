@@ -244,7 +244,7 @@ function printManualInstructions() {
   console.log('');
   console.log('To update manually:');
   console.log('  cd <artibot-repo>/plugins/artibot');
-  console.log('  git pull origin artibot/master');
+  console.log('  git pull origin master');
   console.log('  bash install.sh');
   console.log('');
   console.log('Or download the latest release from:');
