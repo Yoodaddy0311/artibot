@@ -53,6 +53,13 @@ const MAX_RECORDS_PER_KEY = 200;
  * @property {number} timestamp - Unix ms
  * @property {string} [command] - Originating command (e.g. "/implement", "/analyze")
  * @property {string} [domain] - Domain tag (e.g. "frontend", "backend", "security")
+ * @property {string} [callingAgent] - Agent that invoked the tool (v4.7.0). For
+ *   sub-agent calls, this is the spawned agent's id; for orchestrator-direct
+ *   calls, this is the orchestrator id. Optional for backward compat —
+ *   pre-v4.7.0 records do not carry this field.
+ * @property {string} [parentAgent] - Calling agent's parent in the spawn chain
+ *   (v4.7.0). Enables attribution like "tool X failed when called by agent A
+ *   under parent B". Optional; null for top-level orchestrator.
  */
 
 /**
@@ -141,6 +148,11 @@ process.on('beforeExit', () => {
  * @param {Object} [meta] - Additional metadata
  * @param {string} [meta.command] - Originating slash command
  * @param {string} [meta.domain] - Domain classification
+ * @param {string} [meta.agentId] - Calling agent id (v4.7.0 attribution).
+ *   Stored as `callingAgent` on the record. Falsy values are not persisted.
+ * @param {string} [meta.agentType] - Calling agent role/type (v4.7.0).
+ *   Stored as `parentAgent` for spawn-chain attribution. Falsy values are
+ *   not persisted.
  * @returns {Promise<void>}
  * @example
  * await recordUsage('Grep', 'search:typescript', 0.9, { command: '/analyze', domain: 'backend' });
@@ -156,6 +168,10 @@ export async function recordUsage(tool, context, score, meta = {}) {
     timestamp: Date.now(),
     ...(meta.command && { command: meta.command }),
     ...(meta.domain && { domain: meta.domain }),
+    // v4.7.0: agent attribution. Skip 'unknown' since extractAgentId returns
+    // it as a fallback string — persisting 'unknown' would muddy aggregations.
+    ...(meta.agentId && meta.agentId !== 'unknown' && { callingAgent: meta.agentId }),
+    ...(meta.agentType && meta.agentType !== 'main' && { parentAgent: meta.agentType }),
   };
 
   // Append to context bucket

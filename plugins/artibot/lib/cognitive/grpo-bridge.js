@@ -603,3 +603,42 @@ export async function getAgentRecommendation(taskFamily, context = {}) {
     return fallback;
   }
 }
+
+// ---------------------------------------------------------------------------
+// v4.7.0 — Agent attribution partitioning
+//
+// UsageRecord now carries optional `callingAgent` and `parentAgent` fields
+// (see lib/learning/tool-learner.js typedef). The helper below partitions a
+// flat record array into per-agent buckets so downstream consumers (e.g.,
+// /learning by-agent breakdown, GRPO weight slicing) can compute scoped
+// metrics without re-implementing the grouping logic.
+// ---------------------------------------------------------------------------
+
+/**
+ * Group UsageRecord[] by `callingAgent`. Records lacking that field are
+ * bucketed under the literal key `__unattributed__` so callers can decide
+ * whether to include or skip them in attribution-aware analyses.
+ *
+ * Pure function — does not load history, does not mutate input. Intended for
+ * use after `loadHistory()` returns a `contexts[ctx]` array.
+ *
+ * @param {Array<{callingAgent?: string}>} records - Tool usage records
+ * @returns {Record<string, Array<object>>} Map of agent id -> records
+ *
+ * @example
+ * const records = history.contexts['edit:ts:file'] ?? [];
+ * const byAgent = partitionRecordsByAgent(records);
+ * // { orchestrator: [...], 'frontend-developer': [...], __unattributed__: [...] }
+ */
+export function partitionRecordsByAgent(records) {
+  if (!Array.isArray(records)) return {};
+  const buckets = {};
+  for (const rec of records) {
+    const key = (rec && typeof rec.callingAgent === 'string' && rec.callingAgent.length > 0)
+      ? rec.callingAgent
+      : '__unattributed__';
+    if (!buckets[key]) buckets[key] = [];
+    buckets[key].push(rec);
+  }
+  return buckets;
+}

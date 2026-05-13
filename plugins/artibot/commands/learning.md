@@ -39,6 +39,7 @@ Parse `$ARGUMENTS`:
 - `--patterns` — render only the Pattern File Health section
 - `--raw` — dump the underlying JSON state (compact form, rounds count only) instead of the formatted dashboard
 - `--base <dir>` — override the artibot install dir (default `~/.claude/artibot`)
+- `--by-agent` — **v4.7.0** — group Risk Signals and Top Performers by `callingAgent` so failures can be attributed to the spawning agent (e.g., "tool X is fine for orchestrator but failing every time `frontend-developer` calls it"). Records without attribution metadata appear under `__unattributed__`. Requires v4.7.0+ data; pre-v4.7.0 records render entirely under `__unattributed__`.
 - `--help`, `-h` — print the script's own flag reference and exit
 
 ## Execution Flow
@@ -64,6 +65,8 @@ node "${PLUGIN_ROOT}/scripts/learning-diag.js" $ARGUMENTS
 | Top performer has `cert` column populated | Post-v4.6.2 sample-size-aware certainty is flowing through pack/unpack |
 | Risk signal `critical` | success < 25% AND conf ≥ 0.8 AND n ≥ 10 — consistent failure, investigate |
 | `teamWeights` empty for long time | `updateTeamWeights()` API is dormant — by design or missed integration |
+| `__unattributed__` dominates `--by-agent` view | Pre-v4.7.0 records, or hook didn't capture `agent_id`. Trigger pattern re-extract after a few sessions; new records will carry `callingAgent` |
+| Same tool risk-signal scoped to one agent only | Attribution working — investigate that agent's prompt or context, not the tool itself |
 
 ## When to use
 

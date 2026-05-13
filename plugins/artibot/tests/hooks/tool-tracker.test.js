@@ -25,6 +25,8 @@ import path from 'node:path';
 const SKIP_TOOLS = new Set([
   'TodoRead', 'TodoWrite', 'TaskList', 'TaskGet', 'TaskUpdate',
   'TaskCreate', 'SendMessage', 'TeamCreate', 'TeamDelete',
+  // v4.6.4: orchestration-only tools that previously locked at 0.3
+  'AskUserQuestion', 'ExitPlanMode', 'Skill',
 ]);
 
 const MIN_SUBSTANTIVE_LENGTH = 10;
@@ -108,6 +110,18 @@ function getResultContent(result) {
 function scoreResult(toolName, result, _input) {
   if (result.error || result.is_error) return 0.0;
   const output = getResultContent(result);
+
+  // v4.6.4: MCP tools score via exit code + stderr (Bash-style), not output length.
+  if (toolName.startsWith('mcp__')) {
+    const exitCode = result.exit_code ?? result.exitCode;
+    const stderr = result.stderr || '';
+    if (exitCode !== 0 && exitCode !== undefined) return 0.1;
+    if (!output || output.length < MIN_SUBSTANTIVE_LENGTH) {
+      return stderr ? 0.4 : 0.7;
+    }
+    if (stderr && stderr.length > 50) return 0.7;
+    return 0.95;
+  }
 
   switch (toolName) {
     case 'Read':
@@ -198,6 +212,21 @@ describe('tool-tracker hook (pure function tests)', () => {
 
     it('does not include Bash', () => {
       expect(SKIP_TOOLS.has('Bash')).toBe(false);
+    });
+
+    // v4.6.4 regression: orchestration-only tools must be skipped to avoid
+    // polluting GRPO weights with apparent "20% success" signals from the
+    // default scoring branch.
+    it('includes AskUserQuestion (v4.6.4)', () => {
+      expect(SKIP_TOOLS.has('AskUserQuestion')).toBe(true);
+    });
+
+    it('includes ExitPlanMode (v4.6.4)', () => {
+      expect(SKIP_TOOLS.has('ExitPlanMode')).toBe(true);
+    });
+
+    it('includes Skill (v4.6.4)', () => {
+      expect(SKIP_TOOLS.has('Skill')).toBe(true);
     });
   });
 
@@ -346,6 +375,36 @@ describe('tool-tracker hook (pure function tests)', () => {
 
     it('returns 0.3 for unknown tool without output', () => {
       expect(scoreResult('CustomTool', {}, {})).toBe(0.3);
+    });
+
+    // v4.6.4 regression: MCP tools previously locked at 0.3 in default branch.
+    describe('MCP tool branch (mcp__*)', () => {
+      it('returns 0.95 for mcp__playwright__evaluate with substantive output', () => {
+        const result = { content: 'a'.repeat(60), exit_code: 0 };
+        expect(scoreResult('mcp__playwright__evaluate', result, {})).toBe(0.95);
+      });
+
+      it('returns 0.7 for mcp__playwright__screenshot with empty output but no error', () => {
+        // Side-effect calls (e.g., screenshot capture to file) often return empty content
+        expect(scoreResult('mcp__playwright__screenshot', {}, {})).toBe(0.7);
+      });
+
+      it('returns 0.4 for mcp__* with empty output and stderr present', () => {
+        expect(scoreResult('mcp__server__call', { stderr: 'minor warning' }, {})).toBe(0.4);
+      });
+
+      it('returns 0.1 for mcp__* with non-zero exit code', () => {
+        expect(scoreResult('mcp__server__call', { exit_code: 1, content: 'err' }, {})).toBe(0.1);
+      });
+
+      it('returns 0.7 for mcp__* with substantive output but long stderr', () => {
+        const result = { content: 'a'.repeat(60), stderr: 'w'.repeat(60), exit_code: 0 };
+        expect(scoreResult('mcp__some__tool', result, {})).toBe(0.7);
+      });
+
+      it('returns 0.0 when mcp__* result has explicit is_error', () => {
+        expect(scoreResult('mcp__server__call', { is_error: true }, {})).toBe(0.0);
+      });
     });
   });
 

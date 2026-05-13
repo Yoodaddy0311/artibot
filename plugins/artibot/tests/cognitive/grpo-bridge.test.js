@@ -5,6 +5,7 @@ import {
   getTopStrategy,
   getTopTeam,
   NEUTRAL_BIAS,
+  partitionRecordsByAgent,
 } from '../../lib/cognitive/grpo-bridge.js';
 
 // ---------------------------------------------------------------------------
@@ -140,5 +141,50 @@ describe('grpo-bridge/safety contract', () => {
   it('이상한 context도 무시하고 실행', async () => {
     await expect(getTopStrategy(null)).resolves.toBeDefined();
     await expect(getTopStrategy({ weird: [1, 2, 3] })).resolves.toBeDefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v4.7.0 A3 — partitionRecordsByAgent (attribution helper)
+// ---------------------------------------------------------------------------
+describe('grpo-bridge/partitionRecordsByAgent', () => {
+  it('returns empty object for non-array input', () => {
+    expect(partitionRecordsByAgent(null)).toEqual({});
+    expect(partitionRecordsByAgent(undefined)).toEqual({});
+    expect(partitionRecordsByAgent('not an array')).toEqual({});
+    expect(partitionRecordsByAgent({})).toEqual({});
+  });
+
+  it('returns empty object for empty array', () => {
+    expect(partitionRecordsByAgent([])).toEqual({});
+  });
+
+  it('groups records by callingAgent', () => {
+    const records = [
+      { tool: 'Read', callingAgent: 'orchestrator', score: 1.0 },
+      { tool: 'Read', callingAgent: 'frontend-developer', score: 0.5 },
+      { tool: 'Grep', callingAgent: 'orchestrator', score: 0.9 },
+    ];
+    const out = partitionRecordsByAgent(records);
+    expect(Object.keys(out).sort()).toEqual(['frontend-developer', 'orchestrator']);
+    expect(out.orchestrator).toHaveLength(2);
+    expect(out['frontend-developer']).toHaveLength(1);
+  });
+
+  it('buckets records without callingAgent under __unattributed__', () => {
+    const records = [
+      { tool: 'Read', score: 1.0 }, // no callingAgent
+      { tool: 'Read', callingAgent: '', score: 0.5 }, // empty string
+      { tool: 'Read', callingAgent: 'orchestrator', score: 0.9 },
+    ];
+    const out = partitionRecordsByAgent(records);
+    expect(out.__unattributed__).toHaveLength(2); // missing + empty string
+    expect(out.orchestrator).toHaveLength(1);
+  });
+
+  it('preserves record references (does not deep-copy)', () => {
+    const rec = { tool: 'Read', callingAgent: 'orchestrator', score: 1.0 };
+    const out = partitionRecordsByAgent([rec]);
+    expect(out.orchestrator[0]).toBe(rec); // same object reference
   });
 });

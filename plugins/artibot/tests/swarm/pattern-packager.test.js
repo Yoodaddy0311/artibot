@@ -682,8 +682,11 @@ describe('packagePatterns() - normalizeLatency and clamp branches', () => {
     expect(result.metadata.packagedCount).toBe(0);
   });
 
-  it('packageToolPattern uses ?? defaults when bestData fields are null (lines 113-118)', async () => {
-    // pattern with null bestData fields -> ?? defaults fire inside packageToolPattern
+  it('packageToolPattern omits successRate and avgLatency when bestData fields are null (v4.6.4 corrected semantics)', async () => {
+    // v4.6.4: previously this test documented the buggy `?? confidence ?? 0`
+    // fallback that fabricated a successRate from confidence (semantic
+    // conflation) and a latency of 1.0 from `0`. The corrected behavior
+    // omits these fields entirely so downstream merge does not see sentinels.
     const pattern = {
       key: 'tool::NullDataTool',
       type: 'tool',
@@ -691,14 +694,12 @@ describe('packagePatterns() - normalizeLatency and clamp branches', () => {
       sampleSize: 5,
       confidence: 0.6,
       bestData: { successRate: null, avgMs: null },
-      // confidence is set but bestData.successRate/avgMs are null -> ?? defaults
     };
     const result = await packagePatterns([pattern]);
     expect(result.weights.tools.NullDataTool).toBeDefined();
-    // successRate: null -> clamp01(null ?? confidence ?? 0) -> clamp01(0.6) = 0.6
-    expect(result.weights.tools.NullDataTool.successRate).toBeCloseTo(0.6);
-    // avgMs: null -> normalizeLatency(null ?? 0) -> normalizeLatency(0) = 1.0
-    expect(result.weights.tools.NullDataTool.avgLatency).toBe(1.0);
+    expect(result.weights.tools.NullDataTool.confidence).toBeCloseTo(0.6);
+    expect(result.weights.tools.NullDataTool.successRate).toBeUndefined();
+    expect(result.weights.tools.NullDataTool.avgLatency).toBeUndefined();
   });
 
   it('packageErrorPattern uses ?? defaults when bestData fields are null (lines 129,131,134)', async () => {
@@ -914,5 +915,87 @@ describe('unpackWeights() - teams avgDuration default branch (line 259)', () => 
     expect(patterns[0].bestData.duration).toBe(60000);
     // denormalizeFileCount(0.5) = round(20 * (1/0.5 - 1)) = 20
     expect(patterns[0].bestData.filesModified).toBe(20);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Regression: v4.6.4 — successRate=0 fabrication causing 0.198 merge bug
+// (Documented in next-session-pickup.md as the root cause for `playwright_evaluate`,
+// `playwright_screenshot`, and `AskUserQuestion` showing as 20% success in /learning.)
+// ---------------------------------------------------------------------------
+describe('v4.6.4 regression: 0-fabrication causing 0.198 merge drag', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    readJsonFile.mockResolvedValue(null);
+  });
+
+  it('unpackToolWeights omits successRate when global weight has no successRate field', () => {
+    const globalWeights = {
+      tools: { mcp__playwright__evaluate: { confidence: 0.9, sampleSize: 50 } },
+      // No successRate -> previously fabricated 0 via `?? 0` fallback
+    };
+    const patterns = unpackWeights(globalWeights);
+    expect(patterns).toHaveLength(1);
+    // Fix: omit successRate so downstream merge does not get a sentinel-0
+    expect(patterns[0].bestData.successRate).toBeUndefined();
+  });
+
+  it('unpackToolWeights omits avgMs when global weight has no avgLatency field', () => {
+    const globalWeights = {
+      tools: { mcp__playwright__screenshot: { confidence: 0.7, sampleSize: 20 } },
+    };
+    const patterns = unpackWeights(globalWeights);
+    expect(patterns).toHaveLength(1);
+    // Fix: omit avgMs so downstream code does not assume a fabricated default
+    expect(patterns[0].bestData.avgMs).toBeUndefined();
+  });
+
+  it('packageToolPattern omits successRate when no real measurement exists (no `?? 0` fabrication)', async () => {
+    // Pattern came from a previous unpack cycle where successRate was missing,
+    // and bestData.successRate is therefore undefined.
+    const pattern = {
+      key: 'tool::mcp__playwright__evaluate',
+      type: 'tool',
+      category: 'mcp__playwright__evaluate',
+      sampleSize: 10,
+      confidence: 0.66, // consensus-mode confidence, NOT a real success rate
+      bestData: {}, // no successRate measurement
+    };
+    const result = await packagePatterns([pattern]);
+    const tool = result.weights.tools.mcp__playwright__evaluate;
+    expect(tool).toBeDefined();
+    // Fix: do NOT fabricate successRate=0 (or =confidence). Omit field instead.
+    expect(tool.successRate).toBeUndefined();
+  });
+
+  it('mergeWeights does not drag local successRate to 0.198 when global has 0-fabricated value', () => {
+    // Reproduce the exact 0.198 bug arithmetic: 0.66 * 0.3 + 0 * 0.7 = 0.198
+    const local = {
+      tools: { mcp__playwright__evaluate: { successRate: 0.66, sampleSize: 10 } },
+      errors: {}, commands: {}, teams: {},
+    };
+    const global_ = {
+      // Simulates a stale/fabricated value uploaded by a peer that had no real data
+      tools: { mcp__playwright__evaluate: { successRate: 0, sampleSize: 0 } },
+      errors: {}, commands: {}, teams: {},
+    };
+    const merged = mergeWeights(local, global_);
+    // Fix: when global side has sampleSize=0 (no real data), local should win
+    expect(merged.tools.mcp__playwright__evaluate.successRate).toBeCloseTo(0.66, 3);
+  });
+
+  it('mergeWeights still applies weighted average when both sides have real data', () => {
+    // Sanity: existing weighted-average behavior still holds for legitimate data
+    const local = {
+      tools: { Read: { successRate: 0.8, sampleSize: 10 } },
+      errors: {}, commands: {}, teams: {},
+    };
+    const global_ = {
+      tools: { Read: { successRate: 0.95, sampleSize: 50 } },
+      errors: {}, commands: {}, teams: {},
+    };
+    const merged = mergeWeights(local, global_);
+    const expected = 0.8 * 0.3 + 0.95 * 0.7;
+    expect(merged.tools.Read.successRate).toBeCloseTo(expected, 3);
   });
 });

@@ -9,6 +9,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.7.0] - 2026-05-13
+
+Adds OpenTelemetry agent attribution propagation across the runtime middleware, learning records, and `/learning` dashboard. Enables answering "which agent was responsible when this tool failed" — a question the v4.6.4 measurement fix made answerable in principle (clean signal) but not yet attributable in practice (no agent column anywhere).
+
+**Synergy with v4.6.4**: Now that scoring is honest, attribution lets `/learning` Risk Signals isolate failures to a specific spawning agent rather than blaming the tool wholesale.
+
+### Added
+
+- **`lib/runtime/middleware/otel-middleware.js`** — pipeline spans now carry `artibot.agent_id` and `artibot.parent_agent_id` attributes when the active subagent contract supplies them. Backward compatible: top-level orchestrator spans (no contract) emit only the existing `artibot.agent` human-readable name. Both `buildPipelineSpan` and `buildMetricsFromState` propagate the new attributes consistently.
+- **`lib/learning/tool-learner.js`** — `UsageRecord` typedef extended with optional `callingAgent` (stable id of the invoker) and `parentAgent` (spawning agent in the chain). `recordUsage()` now persists `meta.agentId` → `callingAgent` and `meta.agentType` → `parentAgent`, skipping the `'unknown'` and `'main'` sentinels so they do not muddy aggregations. Pre-v4.7.0 records remain valid (fields are optional).
+- **`lib/cognitive/grpo-bridge.js`** — new `partitionRecordsByAgent(records)` helper groups `UsageRecord[]` by `callingAgent` so downstream consumers (Risk Signals, GRPO weight slicing) can compute per-agent metrics without re-implementing grouping. Records without attribution bucket under `__unattributed__`.
+- **`commands/learning.md`** — documents the `--by-agent` flag (groups Risk Signals + Top Performers by `callingAgent`) and adds two interpretation rows for `__unattributed__` dominance and agent-scoped tool failures.
+
+### Tests
+
+- **`tests/learning/tool-learner.test.js`** — 5 new attribution tests (94 → 99 passing): persistence of `callingAgent`/`parentAgent`, sentinel skip for `unknown`/`main`, backward-compat omission when `meta` is empty.
+- **`tests/cognitive/grpo-bridge.test.js`** — 5 new `partitionRecordsByAgent` tests (19 → 24): non-array safety, empty-array case, multi-agent grouping, `__unattributed__` bucketing, reference preservation.
+- **`tests/runtime/middleware/otel-middleware-smoke.test.js`** — 3 new tests (6 → 9): span attribute propagation, backward-compat omission when contract absent, metrics path attribute propagation.
+
+### Notes
+
+- The `--by-agent` flag in `/learning` is documented; the script-side rendering ships in a follow-up minor release once enough v4.7.0 records exist on disk to make the partitioned view useful.
+- Sub-agent OTEL context propagation across child processes is delegated to Claude Code itself; the contract assumes the runtime injects `agentId`/`parentAgentId` on the subagent contract object before middleware runs.
+
+---
+
+## [4.6.4] - 2026-05-13
+
+Fixes the measurement-bug class diagnosed by v4.6.3's `/learning` Risk Signals dashboard, migrates hook commands to upstream exec-form `args[]`, and adds compatibility aliases for upstream Claude Code commands. Pure measurement + plumbing — no GRPO algorithm change.
+
+### Fixed
+
+- **Learning-system `0.198` merge drag** (root cause of "20% success" Risk Signals for `mcp__playwright__evaluate`, `mcp__playwright__screenshot`, `AskUserQuestion`). Three independent fixes that together close the chain:
+  - **`scripts/hooks/tool-tracker.js`** — `SKIP_TOOLS` Set now also covers `AskUserQuestion`, `ExitPlanMode`, and `Skill` so they no longer fall through to the default `output ? 0.7 : 0.3` scorer and lock at 0.3.
+  - **`scripts/hooks/tool-tracker.js`** — new `mcp__*` branch in `scoreResult()` scores MCP tools by exit code + stderr length (Bash-style) instead of output length, which is unreliable for side-effect calls like `mcp__playwright__screenshot`.
+  - **`lib/swarm/pattern-packager.js`** — `packageToolPattern()`, `unpackToolWeights()`, and `unpackAgentWeights()` no longer fabricate `successRate: 0` (or `successRate = confidence`) when source data is missing. Fields are omitted instead, breaking the `0.66 × 0.3 + 0 × 0.7 = 0.198` arithmetic that dragged merged values down.
+  - **`lib/swarm/pattern-packager.js`** — `mergeEntries()` now treats `sampleSize: 0` on either side as "no real data" and returns the other side wholesale, providing defense-in-depth against legacy uploads that still carry fabricated zeros.
+
+### Changed
+
+- **`hooks/hooks.json`** — all 56 hook command entries migrated from shell-form `"command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/X.js [args]"` to exec-form `{ "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/hooks/X.js", ...] }`. Matches Claude Code v2.1.139+ recommended pattern for `${CLAUDE_PLUGIN_ROOT}` substitution (avoids shell quoting issues on Windows + Korean paths). Schema-validated against [json.schemastore.org/claude-code-hooks.json](https://json.schemastore.org/claude-code-hooks.json).
+
+### Added
+
+- **`commands/ultrareview.md`** — alias routing `/ultrareview` to Artibot's `/adversarial-review` (8-attack-surface review with `code-reviewer` + `security-reviewer` agents + OWASP Top 10 cross-check). Compatibility shim for users coming from upstream Claude Code naming.
+- **`commands/ultraplan.md`** — alias routing `/ultraplan` to Artibot's `/plan` (planner agent with risk identification + phase decomposition + autopilot hand-off). Compatibility shim.
+
+### Tests
+
+- **`tests/swarm/pattern-packager.test.js`** — 5 new regression tests covering the exact `0.198` merge arithmetic, omission of `successRate`/`avgMs` in pack/unpack when source data is absent, and `mergeEntries` defense-in-depth path. Existing "uses `??` defaults" test updated to match corrected semantics. 85 total tests now passing (was 79).
+- **`tests/hooks/tool-tracker.test.js`** — 9 new tests: 3 for SKIP_TOOLS additions, 6 for the `mcp__*` scoring branch. 74 total tests now passing (was 65).
+
+### Out of scope (deferred)
+
+- P2 agent score normalization (`quiz-investigator`, `meta410-auditor`, `version-comparator`) — observe after this fix propagates through swarm re-download; treat as separate ticket if scores remain anomalous.
+- A3 (OTEL `agent_id` / `parent_agent_id` propagation) — landed separately on v4.7.0 path; requires the v4.6.4 attribution baseline.
+
+---
+
 ## [4.6.3] - 2026-05-12
 
 Adds `/learning` slash command for inspecting the on-disk state of the auto-learning + swarm federation system. Pure observation — never mutates state. Companion to the v4.6.2 schema improvements: now there is a one-step way to see what `certainty`, `weights.agents`, GRPO weights, and swarm sync look like at any moment.

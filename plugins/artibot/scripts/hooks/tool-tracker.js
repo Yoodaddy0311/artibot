@@ -68,7 +68,13 @@ const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT
       '..'
     );
 
-/** Tools to skip tracking (too frequent / trivial) */
+/** Tools to skip tracking (too frequent / trivial / orchestration-only).
+ *
+ * v4.6.4: AskUserQuestion, ExitPlanMode, and Skill are CLI orchestration
+ * primitives whose result shape is not a tool measurement — they previously
+ * fell through to the default scoring branch and were locked at 0.3, which
+ * polluted GRPO weights with apparent "20% success" signals.
+ */
 const SKIP_TOOLS = new Set([
   'TodoRead',
   'TodoWrite',
@@ -79,6 +85,9 @@ const SKIP_TOOLS = new Set([
   'SendMessage',
   'TeamCreate',
   'TeamDelete',
+  'AskUserQuestion',
+  'ExitPlanMode',
+  'Skill',
 ]);
 
 /** Minimum output length to consider a result substantive */
@@ -230,6 +239,21 @@ function scoreResult(toolName, result, _input) {
   if (result.error || result.is_error) return 0.0;
 
   const output = getResultContent(result);
+
+  // v4.6.4: MCP tools (mcp__server__method) previously fell through to the
+  // default `output ? 0.7 : 0.3` branch, locking many at 0.3 and polluting
+  // GRPO weights. MCP tools surface success via stderr / structured response,
+  // not via output length, so we score them like Bash (exit-code + stderr).
+  if (toolName.startsWith('mcp__')) {
+    const exitCode = result.exit_code ?? result.exitCode;
+    const stderr = result.stderr || '';
+    if (exitCode !== 0 && exitCode !== undefined) return 0.1;
+    if (!output || output.length < MIN_SUBSTANTIVE_LENGTH) {
+      return stderr ? 0.4 : 0.7; // empty result without error is plausible (e.g. side-effect calls)
+    }
+    if (stderr && stderr.length > 50) return 0.7;
+    return 0.95;
+  }
 
   switch (toolName) {
     case 'Read': {

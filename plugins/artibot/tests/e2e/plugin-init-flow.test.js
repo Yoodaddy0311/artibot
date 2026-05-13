@@ -181,10 +181,17 @@ describe('E2E: Plugin Initialization Flow', () => {
       expect(hooksConfig.hooks.SessionStart.length).toBeGreaterThan(0);
     });
 
+    // v4.6.4: hooks migrated from shell-form to exec-form ({command, args[]}).
+    // This helper reconstitutes the full command line for substring assertions
+    // so the same checks work against both forms during/after migration.
+    const fullCommand = (h) => (Array.isArray(h.args) && h.args.length > 0
+      ? [h.command, ...h.args].join(' ')
+      : h.command);
+
     it('registers UserPromptSubmit hooks including runtime prompt after user-prompt-handler', () => {
       expect(hooksConfig.hooks.UserPromptSubmit).toBeDefined();
       const commands = hooksConfig.hooks.UserPromptSubmit.flatMap(
-        (entry) => entry.hooks.map((h) => h.command),
+        (entry) => entry.hooks.map(fullCommand),
       );
       expect(commands.some((cmd) => cmd.includes('user-prompt-handler'))).toBe(true);
       expect(commands.some((cmd) => cmd.includes('runtime-prompt'))).toBe(true);
@@ -205,7 +212,7 @@ describe('E2E: Plugin Initialization Flow', () => {
     it('registers PostToolUse hooks including quality gate', () => {
       expect(hooksConfig.hooks.PostToolUse).toBeDefined();
       const commands = hooksConfig.hooks.PostToolUse.flatMap(
-        (entry) => entry.hooks.map((h) => h.command),
+        (entry) => entry.hooks.map(fullCommand),
       );
       expect(commands.some((cmd) => cmd.includes('quality-gate'))).toBe(true);
     });
@@ -224,7 +231,7 @@ describe('E2E: Plugin Initialization Flow', () => {
       const allCommands = Object.values(hooksConfig.hooks).flatMap(
         (entries) => entries.flatMap((entry) => entry.hooks
           .filter((h) => h.type !== 'prompt')
-          .map((h) => h.command)),
+          .map(fullCommand)),
       );
       for (const cmd of allCommands) {
         expect(cmd).toContain('${CLAUDE_PLUGIN_ROOT}');
@@ -235,7 +242,7 @@ describe('E2E: Plugin Initialization Flow', () => {
       const allCommands = Object.values(hooksConfig.hooks).flatMap(
         (entries) => entries.flatMap((entry) => entry.hooks
           .filter((h) => h.type !== 'prompt')
-          .map((h) => h.command)),
+          .map(fullCommand)),
       );
       for (const cmd of allCommands) {
         // Extract the script path: "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/foo.js [args]"

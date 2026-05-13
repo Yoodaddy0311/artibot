@@ -153,11 +153,21 @@ export async function packagePatterns(localPatterns) {
 function packageToolPattern(pattern) {
   const data = pattern.bestData ?? {};
   const packed = {
-    successRate: clamp01(data.successRate ?? pattern.confidence ?? 0),
-    avgLatency: normalizeLatency(data.avgMs ?? 0),
     confidence: clamp01(pattern.confidence ?? 0),
     sampleSize: pattern.sampleSize ?? 0,
   };
+  // v4.6.4: successRate and avgLatency are only emitted when a real
+  // measurement exists. Previously, `?? pattern.confidence ?? 0` and
+  // `?? 0` fallbacks fabricated sentinel values that propagated through
+  // unpack -> repackage -> mergeEntries and produced the documented
+  // `0.66 * 0.3 + 0 * 0.7 = 0.198` drag for tools like
+  // `mcp__playwright__evaluate` and `AskUserQuestion`.
+  if (data.successRate !== undefined && data.successRate !== null) {
+    packed.successRate = clamp01(data.successRate);
+  }
+  if (data.avgMs !== undefined && data.avgMs !== null) {
+    packed.avgLatency = normalizeLatency(data.avgMs);
+  }
   // Propagate certainty (sample-size-based signal) if the pattern carries it.
   // Pattern-analyzer adds this field in extractPattern(); older patterns from
   // pre-v4.6.2 disk state may not have it — omit cleanly in that case.
@@ -254,6 +264,16 @@ export function unpackWeights(globalWeights) {
 function unpackToolWeights(tools, patterns, extractedAt) {
   if (!tools) return;
   for (const [category, weight] of Object.entries(tools)) {
+    // v4.6.4: bestData fields only included when source weight had real data.
+    // `weight.successRate ?? 0` previously fabricated 0 for absent measurements,
+    // which then propagated through repackage and dragged merged values down.
+    const bestData = {};
+    if (weight.successRate !== undefined && weight.successRate !== null) {
+      bestData.successRate = weight.successRate;
+    }
+    if (weight.avgLatency !== undefined && weight.avgLatency !== null) {
+      bestData.avgMs = denormalizeLatency(weight.avgLatency);
+    }
     const entry = {
       key: `tool::${category}`,
       type: 'tool',
@@ -261,10 +281,7 @@ function unpackToolWeights(tools, patterns, extractedAt) {
       confidence: weight.confidence ?? 0.5,
       bestComposite: weight.successRate ?? 0.5,
       sampleSize: weight.sampleSize ?? 0,
-      bestData: {
-        successRate: weight.successRate ?? 0,
-        avgMs: denormalizeLatency(weight.avgLatency ?? 0.5),
-      },
+      bestData,
       source: 'swarm-global',
       extractedAt,
     };
@@ -285,6 +302,15 @@ function unpackToolWeights(tools, patterns, extractedAt) {
 function unpackAgentWeights(agents, patterns, extractedAt) {
   if (!agents) return;
   for (const [category, weight] of Object.entries(agents)) {
+    // v4.6.4: same fabrication-fix as unpackToolWeights — omit bestData fields
+    // when source weight lacks them, instead of inserting sentinel zeros.
+    const bestData = {};
+    if (weight.successRate !== undefined && weight.successRate !== null) {
+      bestData.successRate = weight.successRate;
+    }
+    if (weight.avgLatency !== undefined && weight.avgLatency !== null) {
+      bestData.avgMs = denormalizeLatency(weight.avgLatency);
+    }
     const entry = {
       key: `agent::${category}`,
       type: 'agent',
@@ -292,10 +318,7 @@ function unpackAgentWeights(agents, patterns, extractedAt) {
       confidence: weight.confidence ?? 0.5,
       bestComposite: weight.successRate ?? 0.5,
       sampleSize: weight.sampleSize ?? 0,
-      bestData: {
-        successRate: weight.successRate ?? 0,
-        avgMs: denormalizeLatency(weight.avgLatency ?? 0.5),
-      },
+      bestData,
       source: 'swarm-global',
       extractedAt,
     };
@@ -447,6 +470,15 @@ export function mergeWeights(local, global_, ratio) {
  * @returns {object}
  */
 function mergeEntries(localEntry, globalEntry, localRatio, globalRatio) {
+  // v4.6.4: defense-in-depth — when one side has sampleSize=0 it has no real
+  // measurements to contribute, so the other side should win wholesale instead
+  // of dragging values toward 0 via weighted averaging. This guards against
+  // legacy uploads with fabricated 0 fields (root cause of the 0.198 drag).
+  const localSamples = typeof localEntry.sampleSize === 'number' ? localEntry.sampleSize : 0;
+  const globalSamples = typeof globalEntry.sampleSize === 'number' ? globalEntry.sampleSize : 0;
+  if (localSamples === 0 && globalSamples > 0) return { ...globalEntry };
+  if (globalSamples === 0 && localSamples > 0) return { ...localEntry };
+
   const merged = {};
   const allKeys = new Set([...Object.keys(localEntry), ...Object.keys(globalEntry)]);
 
