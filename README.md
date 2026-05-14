@@ -591,7 +591,7 @@ All teammates have their specialist tools + team collaboration tools (`SendMessa
 
 ## Hooks
 
-52 hook registrations across 15 event types:
+47 hook registrations across 15 event types:
 
 | Event | Script | Purpose |
 |-------|--------|---------|
@@ -700,7 +700,7 @@ plugins/artibot/
 +-- hooks/
 |   +-- hooks.json               # Hook event mappings
 +-- scripts/
-|   +-- hooks/                   # 54 hook scripts (ESM)
+|   +-- hooks/                   # 51 hook scripts (ESM)
 |   +-- ci/                      # 6 CI validation scripts
 |   +-- evals/                   # Runtime eval suite
 |   +-- utils/
