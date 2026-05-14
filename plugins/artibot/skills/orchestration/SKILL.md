@@ -6,6 +6,7 @@ description: |
   Supports two delegation modes: Sub-Agent (Task tool) for focused tasks and Team Mode (Agent Teams API) for complex multi-domain coordination.
   Auto-activates when: complex multi-step requests, team composition needed, multi-domain tasks, ambiguous intent.
   Triggers: orchestrate, build, implement, design, route, complex, multi-step, team, coordinate
+lang: [en]
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 3
 progressive_disclosure:

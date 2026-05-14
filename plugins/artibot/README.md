@@ -184,6 +184,36 @@ Full configuration reference: [설정](#설정) section.
 
 ---
 
+## Optional: Background Learning Schedules
+
+Artibot ships five nightly trainers (GRPO, agent-policy, skill-policy, joint-policy, session-rollup). They are **opt-in** — the plugin works without them. Enabling them sharpens routing accuracy and feeds the swarm `quality` bucket session-over-session.
+
+Generate the OS-specific install commands (printed only, never executed by this script):
+
+```bash
+node plugins/artibot/scripts/setup-nightly-trainers.js              # status + all guides
+node plugins/artibot/scripts/setup-nightly-trainers.js --cron       # POSIX crontab lines
+node plugins/artibot/scripts/setup-nightly-trainers.js --schtasks   # Windows schtasks lines
+node plugins/artibot/scripts/setup-nightly-trainers.js --schedule   # `claude schedule` lines
+node plugins/artibot/scripts/setup-nightly-trainers.js --dry-run    # preview without copy-paste prompt
+```
+
+Recommended schedules (UTC; 15-minute gaps avoid file lock contention):
+
+| Job | Cron |
+|---|---|
+| `nightly-grpo-trainer` | `30 2 * * *` |
+| `nightly-agent-policy-trainer` | `45 2 * * *` |
+| `nightly-skill-policy-trainer` | `0 3 * * *` |
+| `nightly-joint-policy-trainer` | `15 3 * * *` |
+| `nightly-session-rollup` | `30 4 * * *` |
+
+Full purpose / troubleshooting / disable instructions: [`docs/SCHEDULED-JOBS.md`](./docs/SCHEDULED-JOBS.md).
+
+All trainer state stays on disk under `~/.claude/artibot/`. Nothing is uploaded unless `swarm.enabled: true`.
+
+---
+
 ## Roadmap
 
 **v4.6.0 (current, stable)** — **Goal-driven autopilot** (Codex `/goal` pattern adapted). 4-phase rollout in two PRs (#9, #11). **Phase 1 (Goal Contract slot)**: PRD now carries a machine-readable `## 2.5 Goal Contract` JSON block (`objective` / `stoppingCondition` / `validationCommand` / `forbiddenChanges` / `maxIterations`, hard cap 10). New modules `goal-schema.js` + `prd-parser.js`. **Phase 2 (Stopping Condition Evaluator)**: new EVALUATE phase inserted between IMPROVE and REPORT. `evaluateGoal` trusts ONLY the `validationCommand` exit code (no LLM judgment → no hallucination); `runPhaseGoalEvaluate` drives the iteration loop. Decision matrix: met → REPORT, not-met + under-cap → re-EXECUTE, cap reached / same-SHA-3x / confidence<0.8 → PAUSE. **Phase 3 (Goal-level Control Plane)**: `/autopilot:goal status|pause|resume|retry|clear <session-id>` — orthogonal to session-level pause. `state.goalPaused` lets users freeze evaluator while session continues. **Phase 4 (Progress Heartbeat)**: telemetry ticks gain a `progress` slot (`iteration/maxIterations/pct/met/exitCode`); `/autopilot:tail` renders a new `progress` column. Total +74 new tests (53 P1+P2 + 21 P3+P4). 100% backward compat — legacy PRDs without a Goal Contract continue the existing 7-phase flow.

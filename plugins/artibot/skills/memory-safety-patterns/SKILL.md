@@ -6,6 +6,7 @@ description: |
   메모리 안전 패턴 - RAII, 소유권, 스마트 포인터, 크로스 언어 리소스 관리, use-after-free/leak 방지.
   Auto-activates when: memory management, resource cleanup, RAII patterns, ownership design.
   Triggers: memory safety, RAII, smart pointer, ownership, use-after-free, 메모리 안전, 리소스 관리
+lang: [en, ko]
 platforms: [claude-code]
 level: progressive
 progressive_disclosure:

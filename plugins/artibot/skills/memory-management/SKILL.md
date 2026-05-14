@@ -9,6 +9,7 @@ description: |
   Auto-activates when: session start/end, error resolution, user preferences stated, context retrieval needed.
   Triggers: memory, recall, context, persist, store, preferences, history, patterns,
   메모리, 기억, 컨텍스트, 선호, 패턴, 히스토리
+lang: [en, ko]
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 2
 triggers:

@@ -2,6 +2,7 @@
 context: fork
 name: codex-integration
 description: "Provides codex-plugin-cc integration workflow for cross-checking, development delegation, and idea generation with OpenAI Codex. Use when user asks about Codex, cross-check, 크로스체크, OpenAI CLI, dual-AI review, or wants to delegate tasks to Codex."
+lang: [en, ko]
 platforms: [claude-code]
 level: progressive
 level1_tokens: 200

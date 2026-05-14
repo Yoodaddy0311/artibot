@@ -6,6 +6,7 @@ description: |
   DDD 전술적 설계 - Entity, Value Object, Aggregate, Repository, Domain Service, Domain Event 패턴.
   Auto-activates when: implementing domain models, aggregate design, invariant enforcement.
   Triggers: DDD tactical, aggregate, value object, entity, domain event, DDD 전술, 도메인 모델
+lang: [en, ko]
 platforms: [claude-code]
 level: progressive
 progressive_disclosure:

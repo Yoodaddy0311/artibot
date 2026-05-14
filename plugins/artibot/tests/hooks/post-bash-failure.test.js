@@ -74,6 +74,10 @@ describe('extractCommand', () => {
     expect(extractCommand({ tool_input: { command: 'npm test' } })).toBe('npm test');
   });
 
+  it('reads tool_input.script (PowerShell tool shape)', () => {
+    expect(extractCommand({ tool_input: { script: 'npm test' } })).toBe('npm test');
+  });
+
   it('returns empty string when missing', () => {
     expect(extractCommand({})).toBe('');
   });
@@ -196,6 +200,34 @@ describe('post-bash-failure hook', () => {
       tool_name: 'Edit',
       tool_input: { command: 'npm run build' },
       tool_response: { exit_code: 1 },
+    }));
+
+    await import('../../scripts/hooks/post-bash-failure.js');
+    await new Promise((r) => setTimeout(r, 30));
+
+    expect(writeStdout).not.toHaveBeenCalled();
+  });
+
+  it('emits suggestion when PowerShell `npm test` fails', async () => {
+    readStdin.mockResolvedValue(JSON.stringify({
+      tool_name: 'PowerShell',
+      tool_input: { script: 'npm test' },
+      tool_response: { exit_code: 1 },
+    }));
+
+    await import('../../scripts/hooks/post-bash-failure.js');
+    await new Promise((r) => setTimeout(r, 30));
+
+    expect(writeStdout).toHaveBeenCalledTimes(1);
+    const out = writeStdout.mock.calls[0][0];
+    expect(out.message).toContain('reason=test');
+  });
+
+  it('emits no output when PowerShell command exits 0', async () => {
+    readStdin.mockResolvedValue(JSON.stringify({
+      tool_name: 'PowerShell',
+      tool_input: { script: 'npm test' },
+      tool_response: { exit_code: 0 },
     }));
 
     await import('../../scripts/hooks/post-bash-failure.js');

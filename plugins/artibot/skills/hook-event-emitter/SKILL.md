@@ -3,6 +3,7 @@ context: fork
 user-invocable: false
 name: hook-event-emitter
 description: "로컬 관측성(observability) 스킬 — Claude Code hook 이벤트를 JSONL 큐로 fan-out하고 localhost WebSocket 브로드캐스트로 대시보드에 노출. 외부 전송 0건, Artibot 내부 전용. Use when building a local hook monitor, agent dashboard, event tap, or any observability surface that must stay on-device."
+lang: [en, ko]
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: progressive
 triggers:

@@ -3,6 +3,7 @@ context: fork
 user-invocable: false
 name: persona-backend
 description: "Reliability-focused backend decision framework for API design, database operations, and server-side systems. Use when user works on API endpoints, database schemas, authentication, middleware, REST or GraphQL services, or mentions server, backend, 서버, 백엔드, or 인증."
+lang: [en, ko]
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 2
 triggers:

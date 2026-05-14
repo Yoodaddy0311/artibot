@@ -6,6 +6,7 @@ description: |
   Auto-activates when: context >75%, PreCompact triggered, long sessions, multi-phase tasks.
   Triggers: strategic compact, context strategy, compress timing, long session, context window, memory pressure
   See also: compaction-survival (정보 보존 전략)
+lang: [en, ko]
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 2
 triggers:

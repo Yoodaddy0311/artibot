@@ -2,6 +2,7 @@
 context: fork
 name: source-driven-development
 description: "DETECT → FETCH → IMPLEMENT → CITE for framework, library, and SDK work. Grounds every implementation decision in current official documentation, not training data. Pairs with sdd-cache hook for cheap revalidation."
+lang: [en]
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 2
 triggers:

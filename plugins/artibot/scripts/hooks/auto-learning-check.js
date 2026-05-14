@@ -47,7 +47,10 @@ async function main() {
   let config;
   try {
     config = JSON.parse(readFileSync(configPath, 'utf-8'));
-  } catch {
+  } catch (err) {
+    process.stderr.write(
+      `[auto-learn] config unreadable: ${err?.message || err}, pipeline status unknown\n`,
+    );
     return;
   }
 

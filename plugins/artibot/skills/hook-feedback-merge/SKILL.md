@@ -8,6 +8,7 @@ description: |
   so the model sees quality signals inline with tool output.
   Auto-activates when: writing hooks that produce feedback, reviewing hook output flow.
   Triggers: hook feedback, tool result, merge, pre-write, post-edit, quality gate
+lang: [en]
 platforms: [claude-code]
 level: 2
 triggers:

@@ -7,6 +7,7 @@ description: |
   Combines Meta Self-Rewarding patterns with Group Relative Policy Optimization (GRPO) for rule-based self-learning without judge AI.
   Auto-activates when: task completed, quality review needed, performance trends requested, team optimization needed.
   Triggers: evaluate, self-assess, quality, improve, performance, trend, score, feedback, grpo, optimize, candidates, compare
+lang: [en]
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 2
 triggers:

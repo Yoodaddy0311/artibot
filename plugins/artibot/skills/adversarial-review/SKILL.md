@@ -3,6 +3,7 @@ context: fork
 user-invocable: false
 name: adversarial-review
 description: "코드를 공격자 관점에서 리뷰하여 취약점, 엣지 케이스, 설계 결함을 탐지. Use when performing security review, attack surface analysis, pre-deploy verification, or PR security check, or mentions 적대적 리뷰, 공격적 리뷰, 취약점 리뷰."
+lang: [en, ko]
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: progressive
 triggers:

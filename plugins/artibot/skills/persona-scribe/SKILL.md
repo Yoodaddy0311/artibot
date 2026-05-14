@@ -3,6 +3,7 @@ context: fork
 user-invocable: false
 name: persona-scribe
 description: "Professional documentation and localization decision framework for technical writing, API docs, and multilingual content. Use when user creates documentation, writes guides or READMEs, drafts changelogs or PR descriptions, needs localization, or mentions 문서, 작성, or 가이드."
+lang: [en, ko]
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 3
 triggers:

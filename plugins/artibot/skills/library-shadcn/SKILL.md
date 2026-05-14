@@ -2,6 +2,7 @@
 context: fork
 name: library-shadcn
 description: "Provides shadcn/ui component patterns for React including installation, theming, dark mode, CVA variants, and accessibility with Radix UI primitives. Use when building UIs with shadcn/ui, setting up component libraries, customizing themes or dark mode, composing form patterns with Zod, or asking about shadcn, Radix, or Tailwind components."
+lang: [en]
 level: 2
 triggers: ["shadcn", "shadcn/ui", "radix", "tailwind components", "ui library", "component library", "dark mode"]
 agents: ["frontend-developer", "architect"]

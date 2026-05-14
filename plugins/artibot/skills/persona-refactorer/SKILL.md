@@ -3,6 +3,7 @@ context: fork
 user-invocable: false
 name: persona-refactorer
 description: "Code quality and technical debt management decision framework for systematic refactoring and simplification. Use when user requests refactoring, code cleanup, technical debt reduction, code smell detection, complexity reduction, or DRY improvements, or mentions 리팩토링 or 코드 품질."
+lang: [en, ko]
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 2
 triggers:

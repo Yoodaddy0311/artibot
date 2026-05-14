@@ -2,6 +2,7 @@
 context: fork
 name: campaign-planning
 description: "Designs campaign architecture, timelines, cross-channel coordination, and budget allocation for marketing campaigns from planning through measurement. Use when user asks about campaign planning, launch coordination, cross-channel marketing, campaign calendar, UTM tracking, budget allocation, 캠페인 기획, 캠페인 런칭, or 멀티채널."
+lang: [en, ko]
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 3
 triggers:

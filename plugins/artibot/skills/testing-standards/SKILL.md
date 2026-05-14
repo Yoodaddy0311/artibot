@@ -6,6 +6,7 @@ description: |
   Testing standards enforcing 80% coverage, Testing Pyramid, and TDD workflow.
   Auto-activates when: writing tests, implementing features, fixing bugs, refactoring code.
   Triggers: test, coverage, TDD, unit test, integration, e2e, jest, vitest, playwright
+lang: [en]
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 3
 progressive_disclosure:

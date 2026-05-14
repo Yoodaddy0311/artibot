@@ -6,12 +6,13 @@
  * @module scripts/hooks/stop-review-gate
  */
 
-import { execFileSync, execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { atomicWriteSync, getPluginRoot, parseJSON, readStdin, writeStdout } from '../utils/index.js';
 import { createErrorHandler, hasExtension, isSkippablePath } from '../../lib/core/hook-utils.js';
+import { getHeadSha, getRepoRoot } from '../../lib/git/repo-root-cache.js';
 
 const HOOK_NAME = 'stop-review-gate';
 const STATE_FILE = 'last-review-gate-sha.txt';
@@ -39,19 +40,8 @@ const SENSITIVE_FILENAMES = new Set([
 // -------------------------------------------------------------------------
 // Git Helpers
 // -------------------------------------------------------------------------
-
-/** @returns {string|null} */
-function getRepoRoot() {
-  try {
-    return execSync('git rev-parse --show-toplevel', {
-      encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-      windowsHide: true,
-    }).trim();
-  } catch {
-    return null;
-  }
-}
+// getRepoRoot / getHeadSha imported from lib/git/repo-root-cache.js
+// (process-scoped memoize — see v4.7.3 perf-auditor A1).
 
 /** @returns {string[]} Changed file paths relative to repo root */
 function getChangedFiles(cwd) {
@@ -167,20 +157,6 @@ function hasNewerEdits(pluginRoot, repoRoot, changedFiles) {
     }
   }
   return false;
-}
-
-/** @returns {string|null} */
-function getHeadSha(repoRoot) {
-  try {
-    return execSync('git rev-parse HEAD', {
-      cwd: repoRoot,
-      encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-      windowsHide: true,
-    }).trim();
-  } catch {
-    return null;
-  }
 }
 
 // -------------------------------------------------------------------------

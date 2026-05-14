@@ -4,6 +4,7 @@ context: fork
 user-invocable: false
 level: 1
 description: "Discovery flowchart for Artibot's 102 skills. Use this as orientation when the user asks 'what skills do you have', 'how do I do X', 'what commands are available', or when picking the right tool for an unfamiliar task."
+lang: [en]
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 triggers:
   - "how do I"

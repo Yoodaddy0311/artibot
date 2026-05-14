@@ -16,6 +16,24 @@ import path from 'node:path';
 /** Files that are always allowed without a prior Read. */
 const WHITELIST_BASENAMES = new Set(['CLAUDE.md', 'CLAUDE.local.md']);
 
+// ---------------------------------------------------------------------------
+// In-memory tracking cache (v4.7.3 perf — perf-auditor A1.1)
+// ---------------------------------------------------------------------------
+// Previously every Read fired existsSync + readFileSync + atomicWriteSync.
+// For >200-Read sessions this dominated PostToolUse latency. We now hold a
+// per-session Set in-process and debounce-flush dirty sessions to disk.
+
+/** @type {Map<string, Set<string>>} */
+const sessionReadCache = new Map();
+/** @type {Set<string>} sessions with pending writes. */
+const dirtySessions = new Set();
+/** @type {Map<string, string>} sessionId -> tracking file path. */
+const sessionPaths = new Map();
+/** @type {NodeJS.Timeout|null} */
+let debounceTimer = null;
+const FLUSH_DEBOUNCE_MS = 200;
+let exitHookInstalled = false;
+
 /**
  * Check if a file path matches the whitelist (Claude config files).
  * @param {string} filePath
@@ -72,31 +90,85 @@ function getTrackingPath(sessionId) {
 }
 
 /**
- * Load the set of read file paths from the tracking file.
+ * Lazily seed the in-memory cache for a session from disk.
+ * @param {string} sessionId
  * @param {string} trackingPath
- * @returns {string[]}
+ * @returns {Set<string>}
  */
-function loadReadPaths(trackingPath) {
+function getOrLoadSessionSet(sessionId, trackingPath) {
+  let set = sessionReadCache.get(sessionId);
+  if (set) return set;
+  set = new Set();
   try {
-    if (!existsSync(trackingPath)) return [];
-    const data = JSON.parse(readFileSync(trackingPath, 'utf-8'));
-    return Array.isArray(data) ? data : [];
+    if (existsSync(trackingPath)) {
+      const data = JSON.parse(readFileSync(trackingPath, 'utf-8'));
+      if (Array.isArray(data)) {
+        for (const p of data) set.add(p);
+      }
+    }
   } catch {
-    return [];
+    // corrupt or unreadable — treat as empty
   }
+  sessionReadCache.set(sessionId, set);
+  sessionPaths.set(sessionId, trackingPath);
+  return set;
 }
 
 /**
- * Add a file path to the tracking file.
+ * Synchronously flush every dirty session to disk.
+ * Called from the debounce timer and from process-exit.
+ */
+function flushDirtySessions() {
+  for (const sessionId of dirtySessions) {
+    const set = sessionReadCache.get(sessionId);
+    const trackingPath = sessionPaths.get(sessionId);
+    if (!set || !trackingPath) continue;
+    try {
+      atomicWriteSync(trackingPath, JSON.stringify([...set], null, 2));
+    } catch (err) {
+      process.stderr.write(`[artibot:pre-write-guard] flush failed: ${err.message}\n`);
+    }
+  }
+  dirtySessions.clear();
+  if (debounceTimer) {
+    clearTimeout(debounceTimer);
+    debounceTimer = null;
+  }
+}
+
+function ensureExitFlush() {
+  if (exitHookInstalled) return;
+  exitHookInstalled = true;
+  process.on('exit', flushDirtySessions);
+}
+
+/**
+ * Add a file path to the in-memory cache + schedule a debounced flush.
+ * @param {string} sessionId
  * @param {string} trackingPath
  * @param {string} filePath
+ * @returns {boolean} true if newly recorded, false if duplicate
  */
-function recordReadPath(trackingPath, filePath) {
-  const existing = loadReadPaths(trackingPath);
+function recordReadPath(sessionId, trackingPath, filePath) {
+  const set = getOrLoadSessionSet(sessionId, trackingPath);
   const normalized = normalizePath(filePath);
-  if (!existing.includes(normalized)) {
-    existing.push(normalized);
-    atomicWriteSync(trackingPath, JSON.stringify(existing, null, 2));
+  if (set.has(normalized)) return false;
+  set.add(normalized);
+  dirtySessions.add(sessionId);
+  ensureExitFlush();
+  if (debounceTimer) clearTimeout(debounceTimer);
+  debounceTimer = setTimeout(flushDirtySessions, FLUSH_DEBOUNCE_MS);
+  return true;
+}
+
+// Test-only — reset all memoize state between vitest cases.
+export function __resetForTest() {
+  sessionReadCache.clear();
+  dirtySessions.clear();
+  sessionPaths.clear();
+  if (debounceTimer) {
+    clearTimeout(debounceTimer);
+    debounceTimer = null;
   }
 }
 
@@ -114,7 +186,7 @@ function handleReadTracking(hookData) {
 
   try {
     const trackingPath = getTrackingPath(sessionId);
-    recordReadPath(trackingPath, filePath);
+    recordReadPath(sessionId, trackingPath, filePath);
     process.stderr.write(`[artibot:pre-write-guard] Tracked read: ${filePath}\n`);
   } catch (err) {
     process.stderr.write(`[artibot:pre-write-guard] Track failed: ${err.message}\n`);
@@ -159,15 +231,17 @@ function handleWriteGuard(hookData) {
   // Check if file was read in this session
   const sessionId = hookData?.session_id || 'default';
   const trackingPath = getTrackingPath(sessionId);
-  const readPaths = loadReadPaths(trackingPath);
+  const readSet = getOrLoadSessionSet(sessionId, trackingPath);
 
-  if (readPaths.includes(normalized)) {
+  if (readSet.has(normalized)) {
     writeStdout({ decision: 'approve' });
     return;
   }
 
-  // Degraded mode: if tracking file is missing, approve with warning
-  if (!existsSync(trackingPath)) {
+  // Degraded mode: if tracking file is missing AND cache is empty,
+  // we have no signal at all — approve with warning. (When cache has
+  // entries but disk is gone, we trust the in-memory state.)
+  if (readSet.size === 0 && !existsSync(trackingPath)) {
     process.stderr.write(`[artibot:pre-write-guard] Warning: tracking file missing, approving ${toolName} for "${filePath}" in degraded mode\n`);
     writeStdout({ decision: 'approve' });
     return;

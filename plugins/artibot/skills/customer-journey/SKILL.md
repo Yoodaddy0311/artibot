@@ -2,6 +2,7 @@
 context: fork
 name: customer-journey
 description: "Maps customer journeys with touchpoint analysis, lifecycle stage management, and experience optimization from awareness through advocacy. Use when user asks about customer journey, journey map, touchpoint analysis, lifecycle management, customer experience, onboarding, retention, CX, 고객 여정, 터치포인트, or 라이프사이클."
+lang: [en, ko]
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 3
 triggers:

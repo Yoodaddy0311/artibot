@@ -88,8 +88,8 @@ async function main() {
         toolCount: hookData.tool_count || 0,
         timestamp: new Date().toISOString(),
       }, swarmCfg);
-    } catch {
-      // Non-critical: telemetry is best-effort
+    } catch (err) {
+      logHookError('swarm-sync', 'telemetry failed', err);
     }
   } catch (err) {
     logHookError('swarm-sync', 'sync failed', err);

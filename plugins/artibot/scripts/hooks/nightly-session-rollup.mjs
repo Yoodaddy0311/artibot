@@ -20,6 +20,8 @@
  */
 
 import path from 'node:path';
+import os from 'node:os';
+import fs from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import {
   createSessionAggregator,
@@ -108,6 +110,31 @@ export function resolveDefaultStoragePath() {
 }
 
 /**
+ * Best-effort read of the claude-md-auditor cache file. Returns the average
+ * score (0..100) if the cache is fresh and well-formed, `null` otherwise.
+ *
+ * @returns {Promise<number|null>}
+ */
+export async function readClaudeMdAuditScore() {
+  const cachePath = path.join(os.homedir(), '.claude', 'artibot', 'audit-cache.json');
+  let raw;
+  try {
+    raw = await fs.readFile(cachePath, 'utf-8');
+  } catch {
+    return null;
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  const avg = parsed?.summary?.avgScore;
+  if (!Number.isFinite(avg)) return null;
+  return Math.max(0, Math.min(100, avg));
+}
+
+/**
  * Compute yesterday's UTC day key relative to `nowMs`.
  *
  * @param {number} [nowMs]
@@ -175,8 +202,13 @@ export async function runNightlyRollup(opts = {}) {
     const rolledUp = await aggregator.rollupDaily(targetDate);
     const pruned = await aggregator.pruneOlder(windowDays);
 
+    // Best-effort: pull the claude-md audit summary into the rollup so GRPO
+    // can pick it up next round. Missing cache is silently fine — the reward
+    // capture treats a null score as zero-contribution.
+    const claudeMdQuality = await readClaudeMdAuditScore();
+
     logger.info?.(
-      `rollup ${targetDate} sessions=${rolledUp?.sessionCount ?? 0} archived=${pruned.archived} kept=${pruned.kept}`,
+      `rollup ${targetDate} sessions=${rolledUp?.sessionCount ?? 0} archived=${pruned.archived} kept=${pruned.kept} claudeMdQuality=${claudeMdQuality ?? 'n/a'}`,
     );
 
     return {
@@ -186,6 +218,7 @@ export async function runNightlyRollup(opts = {}) {
         ? { day: rolledUp.day, sessionCount: rolledUp.sessionCount }
         : null,
       pruned,
+      claudeMdQuality,
     };
   } catch (err) {
     logger.error?.(`rollup failed: ${err?.message ?? err}`);

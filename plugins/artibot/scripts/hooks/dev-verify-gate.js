@@ -34,6 +34,10 @@ import {
   writeStdout,
 } from '../utils/index.js';
 import { createErrorHandler, logHookError } from '../../lib/core/hook-utils.js';
+import {
+  getHeadSha as getCachedHeadSha,
+  getRepoRoot as getCachedRepoRoot,
+} from '../../lib/git/repo-root-cache.js';
 
 const HOOK_NAME = 'dev-verify-gate';
 const STATE_FILE = 'last-dev-verify-sha.txt';
@@ -75,7 +79,7 @@ function git(cmd, cwd) {
 
 /** @returns {string|null} */
 function getRepoRoot() {
-  return git('git rev-parse --show-toplevel');
+  return getCachedRepoRoot();
 }
 
 /**
@@ -105,7 +109,7 @@ function isArtibotRepo(repoRoot) {
 
 /** @returns {string|null} */
 function getHeadSha(repoRoot) {
-  return git('git rev-parse HEAD', repoRoot);
+  return getCachedHeadSha(repoRoot);
 }
 
 /**

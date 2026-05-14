@@ -501,4 +501,54 @@ describe('tool-tracker hook (pure function tests)', () => {
       expect(extractExtFromGlob('src/**')).toBeNull();
     });
   });
+
+  // v4.7.3 regression guard (perf-auditor A1.4 / issue-scanner A2#1):
+  // Tools hitting the scoreResult default branch get locked at 0.7/0.3 which
+  // pollutes GRPO weights. The tests below pin scoring outcomes for tool
+  // namespaces that recur in real sessions, and assert SKIP_TOOLS invariants
+  // so a silent score-shift fails CI rather than reaching production.
+  describe('scoreResult default-branch regression guard', () => {
+    it('agent-namespaced tools resolve to the default branch (0.7 / 0.3)', () => {
+      expect(scoreResult('agent__custom_tool', { output: 'ok' }, {})).toBe(0.7);
+      expect(scoreResult('agent__custom_tool', {}, {})).toBe(0.3);
+      expect(SKIP_TOOLS.has('agent__custom_tool')).toBe(false);
+    });
+
+    it('team__create resolves to the default branch (0.7 / 0.3)', () => {
+      expect(scoreResult('team__create', { output: 'team-ok' }, {})).toBe(0.7);
+      expect(scoreResult('team__create', {}, {})).toBe(0.3);
+      expect(SKIP_TOOLS.has('team__create')).toBe(false);
+    });
+
+    it('mcp__server__method routes to MCP branch (0.95), NOT default 0.3', () => {
+      const score = scoreResult(
+        'mcp__server__method',
+        { content: 'a'.repeat(60), exit_code: 0, stderr: '' },
+        {},
+      );
+      expect(score).toBe(0.95);
+    });
+
+    it('AskUserQuestion is in SKIP_TOOLS (orchestration primitive)', () => {
+      expect(SKIP_TOOLS.has('AskUserQuestion')).toBe(true);
+    });
+
+    it('Skill is in SKIP_TOOLS (orchestration primitive)', () => {
+      expect(SKIP_TOOLS.has('Skill')).toBe(true);
+    });
+
+    // Meta-test: every score of 0.3 produced by scoreResult must come from
+    // either an explicit-cased fallback (Edit/Write/Task with no output) or
+    // the default branch with no output. Orchestration primitives MUST be
+    // routed to SKIP_TOOLS before they ever reach scoreResult.
+    it('meta: every 0.3 score path is justified (explicit case or default)', () => {
+      expect(scoreResult('Edit', {}, {})).toBe(0.3);
+      expect(scoreResult('Write', {}, {})).toBe(0.3);
+      expect(scoreResult('Task', {}, {})).toBe(0.3);
+      expect(scoreResult('GenericTool', {}, {})).toBe(0.3);
+      for (const skip of ['AskUserQuestion', 'ExitPlanMode', 'Skill', 'SendMessage', 'TeamCreate']) {
+        expect(SKIP_TOOLS.has(skip)).toBe(true);
+      }
+    });
+  });
 });
