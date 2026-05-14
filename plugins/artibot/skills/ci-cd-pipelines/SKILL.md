@@ -3,6 +3,7 @@ context: fork
 user-invocable: false
 name: ci-cd-pipelines
 description: "GitHub Actions 심화 패턴 — matrix strategy, reusable workflows, composite actions, 시크릿 관리, 캐싱 전략. Use when designing CI/CD pipelines, GitHub Actions workflows, or deployment automation."
+lang: [en, ko]
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: progressive
 triggers:

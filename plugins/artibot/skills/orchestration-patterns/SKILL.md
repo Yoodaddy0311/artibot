@@ -2,6 +2,7 @@
 context: fork
 name: orchestration-patterns
 description: "Catalog of agent orchestration patterns: agents-as-tools, handoff with history filter, deterministic workflows, parallelization, and LLM-as-judge loops."
+lang: [en]
 level: 2
 triggers: ["orchestration", "multi-agent", "handoff", "agent as tool", "workflow", "parallelize agents", "agent topology"]
 agents: ["architect", "planner", "llm-architect"]

@@ -5,6 +5,7 @@ description: |
   Git 통합 워크플로우 허브 — autopilot, collab (팀 온보딩), conflict (충돌 해결), guide (초보자 가이드), safe (안전망), strategy (브랜치 전략), sync (동기화), workflow (커밋·브랜치·PR), worktree (병렬 브랜치) 9개 서브툴을 통합.
   Auto-activates when: git, commit, branch, merge, PR, push, pull, rebase, release, conflict, stash, worktree, git flow, github flow, autopilot, 커밋, 브랜치, 머지, 충돌, 푸시, 동기화, 워크트리, git 자동화, 협업, 팀 온보딩 등 git 관련 작업이 감지될 때.
   Triggers: git, commit, branch, PR, pull request, merge, rebase, workflow, push, git sync, git pull, git push, 동기화, 최신 받기, 업데이트, worktree, 워크트리, git worktree, parallel branch, 병렬 작업, merge conflict, 충돌, CONFLICT, git conflict, 머지 충돌, rebase conflict, 충돌 해결, 브랜치 전략, git flow, github flow, trunk based, git strategy, 어떤 전략, 백업, 실험 전 저장, 되돌리기, git stash, 안전 저장, git safe, 작업 저장, git autopilot, 자동 커밋, autopilot on, autopilot off, autopilot status, 팀 온보딩, git 협업, 저장소 설정, 팀원 추가, collab setup, git 모르겠어, git 처음, git 어떻게, git 도움, git help, git 초보, how do I git, 커밋, 브랜치, 머지
+lang: [en, ko]
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 3
 triggers:

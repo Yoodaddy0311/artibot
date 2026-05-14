@@ -6,6 +6,7 @@ description: |
   Intelligent token optimization engine with adaptive compression and persona-aware output.
   Auto-activates when: context usage >75%, large-scale operations, --uc flag, output exceeds budget.
   Triggers: compress, efficient, tokens, --uc, large output, context limit
+lang: [en]
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 2
 triggers:

@@ -6,6 +6,7 @@ description: |
   DDD 전략적 설계 - 바운디드 컨텍스트, 유비쿼터스 언어, 서브도메인 분류, 팀 소유권 정렬.
   Auto-activates when: domain boundary definition, bounded context design, ubiquitous language creation.
   Triggers: DDD strategic, bounded context, ubiquitous language, subdomain, 바운디드 컨텍스트, DDD 전략
+lang: [en, ko]
 platforms: [claude-code]
 level: progressive
 progressive_disclosure:

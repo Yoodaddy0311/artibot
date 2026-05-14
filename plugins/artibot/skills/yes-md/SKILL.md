@@ -6,6 +6,7 @@ description: |
   Evidence-before-claims 거버넌스 엔진 - 6개 safety gate, 증거 기반 디버깅, anti-slack 탐지, 결론 무결성 검증.
   Auto-activates when: AI governance needed, debugging failures, unverified claims, evidence-based workflow.
   Triggers: yes-md, evidence, safety gate, verify first, 증거 기반, 검증 우선
+lang: [en, ko]
 platforms: [claude-code]
 level: progressive
 progressive_disclosure:

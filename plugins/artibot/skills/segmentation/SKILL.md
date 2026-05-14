@@ -2,6 +2,7 @@
 context: fork
 name: segmentation
 description: "Develops audience segmentation strategies with lead scoring models, behavioral triggers, persona development, and RFM analysis across demographic, firmographic, and psychographic dimensions. Use when user asks about segmentation, audience segment, lead scoring, persona, behavioral targeting, cohort, RFM, 세그먼테이션, 타겟팅, 리드 스코어링, or 페르소나."
+lang: [en, ko]
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 3
 triggers:

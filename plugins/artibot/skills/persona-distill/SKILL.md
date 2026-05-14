@@ -2,6 +2,7 @@
 context: fork
 name: persona-distill
 description: "Distill a person, role, or character into a reusable persona skill via the 6-layer schema. Use when the user wants to compile a colleague, an internal role archetype, or an authoring style into a persona-* skill — not when invoking an existing persona."
+lang: [en]
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 2
 triggers:

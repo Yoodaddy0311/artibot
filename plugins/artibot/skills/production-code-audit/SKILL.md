@@ -6,6 +6,7 @@ description: |
   자율 코드베이스 스캔 방법론 - 라인별 분석, 보안/성능/아키텍처/품질 이슈 탐지, 기업급 변환 체크리스트.
   Auto-activates when: production readiness audit, codebase security scan, enterprise quality check.
   Triggers: production audit, code audit, make production-ready, 프로덕션 감사, 코드 감사
+lang: [en, ko]
 platforms: [claude-code]
 level: progressive
 progressive_disclosure:

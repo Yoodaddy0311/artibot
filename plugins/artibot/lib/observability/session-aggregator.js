@@ -55,6 +55,15 @@ function safeNum(v) {
   return n;
 }
 
+function safeScore0to100(v) {
+  if (v === null || v === undefined) return null;
+  const n = Number(v);
+  if (!Number.isFinite(n)) return null;
+  if (n < 0) return 0;
+  if (n > 100) return 100;
+  return n;
+}
+
 /**
  * Normalize session metrics into the aggregator's canonical schema. Missing
  * fields default to zero so downstream folds never NaN.
@@ -83,6 +92,7 @@ export function normalizeMetrics(metrics = {}) {
     errorCount: safeNum(metrics.errorCount),
     costUsd: safeNum(metrics.costUsd),
     durationMs: safeNum(metrics.durationMs),
+    claudeMdQuality: safeScore0to100(metrics.claudeMdQuality),
   });
 }
 

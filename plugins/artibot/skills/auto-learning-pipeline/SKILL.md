@@ -7,6 +7,7 @@ description: |
   skill refinement, and auto-commit without human intervention.
   Integrates with claude schedule, Git server webhooks, and existing lib/learning/ modules.
   Triggers: auto learning, nightly pipeline, 자동 학습 파이프라인, autonomous learning, unattended learning
+lang: [en, ko]
 platforms: [claude-code]
 level: 3
 triggers:

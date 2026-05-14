@@ -65,12 +65,14 @@ export function extractExitCode(hookData) {
 }
 
 /**
- * Extract the Bash command string from hook data.
+ * Extract the command/script string from hook data.
+ * PowerShell tool emits the user-supplied program under tool_input.script,
+ * while Bash uses tool_input.command. Either is treated identically.
  * @param {object} hookData
  * @returns {string}
  */
 export function extractCommand(hookData) {
-  return hookData?.tool_input?.command || '';
+  return hookData?.tool_input?.command || hookData?.tool_input?.script || '';
 }
 
 /**
@@ -104,7 +106,7 @@ async function main() {
   if (!hookData) return;
 
   const toolName = extractToolName(hookData);
-  if (toolName !== 'Bash') return;
+  if (toolName !== 'Bash' && toolName !== 'PowerShell') return;
 
   const exitCode = extractExitCode(hookData);
   if (exitCode === null || exitCode === 0) return;

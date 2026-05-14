@@ -22,6 +22,16 @@ const LOOP_STATE_FILE = path.join(getArtibotDataDir(), 'loop-state.json');
 const STATE_EXPIRY_MS = 30 * 60 * 1000;
 
 /**
+ * Loop-state flush cadence (v4.7.3 perf — perf-auditor A1.2). Previously the
+ * detector state was written every PostToolUse fire; now we flush once per N
+ * calls or immediately when a loop is detected. Recovery semantics unchanged
+ * — detector history persists across crashes within the expiry window, with
+ * worst-case loss of N-1 entries at process kill.
+ */
+const LOOP_STATE_FLUSH_INTERVAL = 10;
+let loopCallCounter = 0;
+
+/**
  * Load persisted loop detector history from disk.
  * Returns null if the file is missing, expired, or corrupt.
  * @returns {Array<{ tool: string, fingerprint: string }> | null}
@@ -67,6 +77,35 @@ const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT
       '..',
       '..'
     );
+
+/**
+ * Dynamic-import module cache (v4.7.3 perf — perf-auditor A1.2).
+ * tool-learner.js and lifelong-learner.js were re-imported on every
+ * PostToolUse fire. ESM module cache makes repeat imports cheap, but the
+ * promise round-trip itself is non-trivial in a hot hook — memoize the
+ * resolved module promise so the second call onwards is a no-op.
+ *
+ * @type {Promise<{ recordUsage: Function }>|null}
+ */
+let toolLearnerModulePromise = null;
+/** @type {Promise<{ collectExperience: Function }>|null} */
+let lifelongLearnerModulePromise = null;
+
+function loadToolLearner() {
+  if (!toolLearnerModulePromise) {
+    const learnerPath = path.join(PLUGIN_ROOT, 'lib', 'learning', 'tool-learner.js');
+    toolLearnerModulePromise = import(toFileUrl(learnerPath));
+  }
+  return toolLearnerModulePromise;
+}
+
+function loadLifelongLearner() {
+  if (!lifelongLearnerModulePromise) {
+    const lifelongPath = path.join(PLUGIN_ROOT, 'lib', 'learning', 'lifelong-learner.js');
+    lifelongLearnerModulePromise = import(toFileUrl(lifelongPath));
+  }
+  return lifelongLearnerModulePromise;
+}
 
 /** Tools to skip tracking (too frequent / trivial / orchestration-only).
  *
@@ -126,8 +165,13 @@ async function main() {
   // Loop detection: check for repetitive tool call patterns
   const loopResult = loopDetector.detectLoop({ tool: toolName, args: toolInput });
 
-  // Persist updated history for cross-process continuity
-  saveLoopState(loopDetector);
+  // v4.7.3 perf: flush detector state every Nth call OR immediately on loop
+  // detection. Loop alerts must surface in real-time; benign tool calls can
+  // tolerate worst-case N-1 entries of lost history on crash.
+  loopCallCounter += 1;
+  if (loopResult.detected || loopCallCounter % LOOP_STATE_FLUSH_INTERVAL === 0) {
+    saveLoopState(loopDetector);
+  }
 
   if (loopResult.detected) {
     const label = loopResult.severity === 'block' ? 'LOOP BLOCKED' : 'LOOP WARNING';
@@ -138,15 +182,15 @@ async function main() {
     );
   }
 
-  // Dynamically import tool-learner and record
+  // Dynamically import tool-learner and record (modules memoized in
+  // toolLearnerModulePromise / lifelongLearnerModulePromise — first call
+  // pays the import cost, subsequent calls hit the cached promise).
   try {
-    const learnerPath = path.join(PLUGIN_ROOT, 'lib', 'learning', 'tool-learner.js');
-    const { recordUsage } = await import(toFileUrl(learnerPath));
+    const { recordUsage } = await loadToolLearner();
     await recordUsage(toolName, context, score, { ...meta, agentId, agentType });
 
     // Bridge: feed tool usage into the lifelong learning pipeline
-    const lifelongPath = path.join(PLUGIN_ROOT, 'lib', 'learning', 'lifelong-learner.js');
-    const { collectExperience } = await import(toFileUrl(lifelongPath));
+    const { collectExperience } = await loadLifelongLearner();
     await collectExperience({
       type: 'tool',
       category: toolName,

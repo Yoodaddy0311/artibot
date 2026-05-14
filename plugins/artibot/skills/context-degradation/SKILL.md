@@ -6,6 +6,7 @@ description: |
   LLM 컨텍스트 윈도우 실패 모드 분석 - lost-in-middle, poisoning, distraction, confusion, clash 패턴 진단 및 완화.
   Auto-activates when: long conversation degradation, context-related failures, agent output quality drops.
   Triggers: context degradation, lost in middle, context poisoning, context window, attention, 컨텍스트 열화
+lang: [en, ko]
 platforms: [claude-code]
 level: progressive
 progressive_disclosure:

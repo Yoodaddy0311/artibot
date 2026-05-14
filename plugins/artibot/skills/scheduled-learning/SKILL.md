@@ -6,6 +6,7 @@ description: |
   CronCreate-based automatic scheduling for the nightly-learner pipeline and drift checks.
   Activates learning jobs within the current Claude Code session using in-memory cron scheduling.
   Triggers: schedule learning, cron learning, nightly learner schedule, 학습 스케줄, 자동 학습
+lang: [en, ko]
 platforms: [claude-code]
 level: 2
 triggers:

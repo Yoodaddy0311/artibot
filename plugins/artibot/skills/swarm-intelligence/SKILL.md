@@ -7,6 +7,7 @@ description: |
   with the swarm network while preserving privacy through PII scrubbing and differential privacy.
   Enables all participants to benefit from collective experience without exposing individual data.
   Triggers: swarm, collective, federated, sync patterns, share learning, global weights, opt-in, contribution
+lang: [en]
 platforms: [claude-code]
 level: 2
 triggers:

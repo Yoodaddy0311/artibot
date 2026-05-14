@@ -58,6 +58,10 @@ export const REWARD_WEIGHTS = Object.freeze({
   demotedPenalty: 0.3,
   importanceFloor: 0.5,
   importanceSlope: 0.5,
+  // 7th dimension — claude-md-auditor surface. Bounded to ±0.05 so it
+  // never dominates verifiable signals; fed by the audit cache that the
+  // nightly session rollup picks up. See SKILL.md claude-md-auditor.
+  claudeMdQualityMax: 0.05,
 });
 
 // ---------------------------------------------------------------------------
@@ -75,6 +79,7 @@ export const REWARD_WEIGHTS = Object.freeze({
  * @property {boolean} [promoted]
  * @property {boolean} [demoted]
  * @property {boolean} [timedOut]
+ * @property {number|null} [claudeMdQuality] - 0..100 audit score; null = no audit ran this window
  */
 
 /**
@@ -86,6 +91,7 @@ export const REWARD_WEIGHTS = Object.freeze({
  * @property {number} corrections - negative contribution from userCorrections
  * @property {number} promoted - bonus for semantic promotion
  * @property {number} demoted - penalty for semantic demotion
+ * @property {number} claudeMdQuality - contribution from CLAUDE.md audit score (≤ ±0.05)
  * @property {number} importanceModulator - scale factor applied before clipping
  * @property {number} preClip - reward before REWARD_CLIP applied
  * @property {boolean} timedOut - true when episode was forcibly zeroed
@@ -138,6 +144,14 @@ export function validateEpisodeForReward(episode) {
     testPassRatio = clamp01(episode.testPassRatio, 0);
   }
 
+  let claudeMdQuality = null;
+  if (episode.claudeMdQuality !== undefined && episode.claudeMdQuality !== null) {
+    const n = Number(episode.claudeMdQuality);
+    if (Number.isFinite(n)) {
+      claudeMdQuality = Math.max(0, Math.min(100, n));
+    }
+  }
+
   return {
     ok: true,
     episode: {
@@ -150,6 +164,7 @@ export function validateEpisodeForReward(episode) {
       promoted: Boolean(episode.promoted),
       demoted: Boolean(episode.demoted),
       timedOut: Boolean(episode.timedOut),
+      claudeMdQuality,
     },
   };
 }
@@ -197,6 +212,16 @@ function importanceModulator(importanceScore) {
   return REWARD_WEIGHTS.importanceFloor + importanceScore * REWARD_WEIGHTS.importanceSlope;
 }
 
+function extractClaudeMdReward(score) {
+  if (score === null || score === undefined || !Number.isFinite(score)) return 0;
+  // Linear about the 50-point neutral: [0, 100] -> [-max, +max].
+  const max = REWARD_WEIGHTS.claudeMdQualityMax;
+  const norm = (score - 50) / 50;
+  if (norm > 1) return max;
+  if (norm < -1) return -max;
+  return max * norm;
+}
+
 function clipReward(value) {
   if (!Number.isFinite(value)) return 0;
   if (value < REWARD_CLIP.min) return REWARD_CLIP.min;
@@ -227,6 +252,7 @@ export function computeRewardComponents(episode) {
         corrections: 0,
         promoted: 0,
         demoted: 0,
+        claudeMdQuality: 0,
         importanceModulator: 1,
         preClip: 0,
         timedOut: false,
@@ -247,6 +273,7 @@ export function computeRewardComponents(episode) {
         corrections: 0,
         promoted: 0,
         demoted: 0,
+        claudeMdQuality: 0,
         importanceModulator: importanceModulator(e.importanceScore),
         preClip: 0,
         timedOut: true,
@@ -261,12 +288,14 @@ export function computeRewardComponents(episode) {
   const typecheck = extractTypecheck(e.typecheckClean);
   const corrections = extractCorrectionPenalty(e.userCorrections);
   const promo = extractPromotion(e.promoted, e.demoted);
+  const claudeMd = extractClaudeMdReward(e.claudeMdQuality);
   const modulator = importanceModulator(e.importanceScore);
 
   const base = toolSuccess + errorPenalty + tests + typecheck + corrections;
   // Modulator scales the verifiable-outcome portion. Promotion/demotion
-  // bonuses are long-term signals layered on top and not modulated.
-  const preClip = base * modulator + promo;
+  // bonuses and the CLAUDE.md audit signal are long-term, orthogonal —
+  // layered on top, not modulated.
+  const preClip = base * modulator + promo + claudeMd;
 
   return {
     reward: clipReward(preClip),
@@ -278,6 +307,7 @@ export function computeRewardComponents(episode) {
       corrections,
       promoted: e.promoted ? REWARD_WEIGHTS.promotedBonus : 0,
       demoted: e.demoted ? -REWARD_WEIGHTS.demotedPenalty : 0,
+      claudeMdQuality: claudeMd,
       importanceModulator: modulator,
       preClip,
       timedOut: false,

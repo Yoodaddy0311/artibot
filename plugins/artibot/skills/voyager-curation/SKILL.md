@@ -8,6 +8,7 @@ description: |
   directory for explicit user approval. No automatic promotion, no external
   data flow, no LLM calls during drafting.
   Triggers: voyager, skill curation, auto-skill, curate skills, 스킬 자동화, voyager-curation
+lang: [en, ko]
 platforms: [claude-code]
 level: 3
 triggers:

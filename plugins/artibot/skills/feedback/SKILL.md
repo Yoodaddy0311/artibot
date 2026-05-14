@@ -27,6 +27,7 @@ description: |
   - Rhetorical complaints inside code ("이 코드 이상하네" during review)
 
   The user never needs to type `/feedback` — Claude detects intent and starts the flow.
+lang: [en, ko]
 whenNotToUse: "Rhetorical complaints about unrelated topics, questions about how a feature works, or code-review comments that mention bugs in the code being reviewed (not Artibot itself)."
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 2

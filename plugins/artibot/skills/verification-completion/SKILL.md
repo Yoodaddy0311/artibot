@@ -5,6 +5,7 @@ description: |
   Evidence-before-claims verification enforcing proof of completion before any "done" claim.
   Auto-activates when: completing tasks, reporting results, claiming success, writing summaries.
   Triggers: done, complete, finished, implemented, fixed, resolved, verified, shipped
+lang: [en]
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 3
 triggers:

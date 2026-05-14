@@ -5,6 +5,7 @@ description: |
   Test-driven development workflow enforcing RED-GREEN-REFACTOR cycle.
   Auto-activates when: writing new features, fixing bugs, refactoring code with tests needed.
   Triggers: test, TDD, test-driven, coverage, unit test, RED GREEN REFACTOR, 테스트, TDD, 커버리지
+lang: [en, ko]
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 2
 triggers:

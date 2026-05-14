@@ -197,7 +197,10 @@ function loadRuntimeConfig(pluginRoot) {
         },
       },
     };
-  } catch {
+  } catch (err) {
+    process.stderr.write(
+      `[runtime-prompt] config parse failed, using defaults: ${err?.message || err}\n`,
+    );
     return defaults;
   }
 }

@@ -8,6 +8,7 @@ description: |
   based on complexity scoring, confidence thresholds, and adaptive learning.
   Auto-activates on every user request via the cognitive-router hook.
   Triggers: route, classify, cognitive, system1, system2, fast, deep, escalate, think, intuition
+lang: [en]
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 2
 progressive_disclosure:

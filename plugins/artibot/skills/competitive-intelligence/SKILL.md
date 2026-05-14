@@ -2,6 +2,7 @@
 context: fork
 name: competitive-intelligence
 description: "Conducts competitive analysis and market intelligence for positioning, differentiation, and strategic advantage using SWOT analysis and competitor monitoring frameworks. Use when user asks about competitor analysis, competitive intelligence, SWOT, differentiation, market positioning, benchmark, 경쟁 분석, 시장 정보, or 포지셔닝."
+lang: [en, ko]
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 3
 triggers:
