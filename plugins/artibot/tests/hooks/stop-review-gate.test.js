@@ -53,6 +53,20 @@ vi.mock('node:child_process', () => ({
     }
     throw new Error(`no-mock: ${cmd.slice(0, 60)}`);
   }),
+  // v4.7.2 (P1-1): getChangedFiles switched to execFileSync (shell-free).
+  // Map argv-array form ['git', 'diff', '--name-status', '--diff-filter=ACMR', ...]
+  // to the same matcher list by joining argv into a virtual command string.
+  execFileSync: vi.fn((file, args /*, opts */) => {
+    const cmd = [file, ...(Array.isArray(args) ? args : [])].join(' ');
+    mockState.execLog.push(cmd);
+    for (const [matcher, response] of mockState.execSyncResponses) {
+      if (cmd.includes(matcher)) {
+        if (response instanceof Error) throw response;
+        return typeof response === 'function' ? response(cmd) : response;
+      }
+    }
+    throw new Error(`no-mock: ${cmd.slice(0, 60)}`);
+  }),
 }));
 
 vi.mock('node:fs', async () => {

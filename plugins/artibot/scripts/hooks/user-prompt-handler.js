@@ -5,10 +5,11 @@
  * Standard prompt routing now happens in runtime-prompt.js.
  */
 
+import path from 'node:path';
 import { parseJSON, readStdin, writeStdout } from '../utils/index.js';
 import { createErrorHandler } from '../../lib/core/hook-utils.js';
 
-const REVERIFY_TRIGGER_PREFIX = /^!rv\b|^!(?:\uC7AC\uAC80\uC99D)(?=\s|$)/iu;
+const REVERIFY_TRIGGER_PREFIX = /^!rv\b|^!(?:재검증)(?=\s|$)/iu;
 const NO_TEAM_FLAG = /--no-team\b/i;
 
 /**
@@ -21,7 +22,7 @@ const SPECIAL_TRIGGERS = [
     handler: buildReverifyPrompt,
   },
   {
-    pattern: /^!(?:\uC7AC\uAC80\uC99D)(?:\s|$)/iu,
+    pattern: /^!(?:재검증)(?:\s|$)/iu,
     handler: buildReverifyPrompt,
   },
 ];
@@ -59,36 +60,62 @@ function buildReverifyPrompt(prompt, _hookData) {
   };
 }
 
-async function main() {
-  const raw = await readStdin();
-  const hookData = parseJSON(raw);
-
+/**
+ * Pure handler for UserPromptSubmit. Used both by the in-process dispatcher
+ * (via named export) and by the legacy stdin/stdout main() entry point.
+ *
+ * @param {object} hookData - Parsed hook payload (already JSON-decoded).
+ * @returns {{ user_prompt?: string, message?: string } | null}
+ *   - object when the prompt was rewritten or a flag was stripped (caller should
+ *     replace `payload.prompt`/`payload.user_prompt` with the returned value)
+ *   - null when the prompt should pass through unchanged
+ */
+export function handleUserPromptSubmit(hookData) {
   const prompt = hookData?.user_prompt || hookData?.content || '';
-  if (!prompt) return;
+  if (!prompt) return null;
 
   const trimmedPrompt = prompt.trim();
   // Strip --no-team flag and pass through as a signal in the output
   if (NO_TEAM_FLAG.test(trimmedPrompt)) {
     const cleaned = trimmedPrompt.replace(NO_TEAM_FLAG, "").trim();
-    writeStdout({
+    return {
       user_prompt: cleaned,
       message: "[team] --no-team flag detected, auto-team disabled for this request",
-    });
-    return;
+    };
   }
 
   for (const { pattern, handler } of SPECIAL_TRIGGERS) {
     if (pattern.test(trimmedPrompt)) {
       const result = handler(trimmedPrompt, hookData);
-      if (!result) return;
+      if (!result) return null;
 
-      writeStdout({
+      return {
         user_prompt: result.newPrompt,
         message: result.message,
-      });
-      return;
+      };
     }
   }
+
+  return null;
 }
 
-main().catch(createErrorHandler('user-prompt-handler', { exit: true }));
+async function main() {
+  const raw = await readStdin();
+  const hookData = parseJSON(raw);
+  const result = handleUserPromptSubmit(hookData ?? {});
+  if (result) writeStdout(result);
+}
+
+const isMain = (() => {
+  try {
+    const argv1 = process.argv[1] ? path.resolve(process.argv[1]) : '';
+    const here = path.resolve(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'));
+    return argv1 === here;
+  } catch {
+    return false;
+  }
+})();
+
+if (isMain) {
+  main().catch(createErrorHandler('user-prompt-handler', { exit: true }));
+}

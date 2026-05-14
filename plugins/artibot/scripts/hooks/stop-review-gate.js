@@ -72,21 +72,29 @@ function getChangedFiles(cwd) {
         return cols.length > 1 ? cols[cols.length - 1] : cols[0];
       })
       .filter(Boolean);
-  try {
-    const output = execSync(
-      'git diff --name-status --diff-filter=ACMR HEAD~1 HEAD 2>/dev/null'
-        + ' || git diff --name-status --diff-filter=ACMR HEAD',
-      {
-        cwd,
-        encoding: 'utf-8',
-        stdio: ['ignore', 'pipe', 'ignore'],
-        windowsHide: true,
-      },
-    );
-    return parse(output);
-  } catch {
-    return [];
+  // Try HEAD~1..HEAD first (post-commit diff). Fall back to working-tree
+  // diff vs HEAD when no parent commit exists (initial commit, shallow
+  // clone). execFileSync (no shell) avoids POSIX-only `2>/dev/null || ...`
+  // chaining that silently failed on Windows cmd.exe and emitted no diff
+  // for any changed file — see issue-scanner W4 P1-1.
+  const opts = {
+    cwd,
+    encoding: 'utf-8',
+    stdio: ['ignore', 'pipe', 'ignore'],
+    timeout: 5000,
+    windowsHide: true,
+  };
+  for (const args of [
+    ['diff', '--name-status', '--diff-filter=ACMR', 'HEAD~1', 'HEAD'],
+    ['diff', '--name-status', '--diff-filter=ACMR', 'HEAD'],
+  ]) {
+    try {
+      return parse(execFileSync('git', args, opts));
+    } catch {
+      // try next variant
+    }
   }
+  return [];
 }
 
 // -------------------------------------------------------------------------

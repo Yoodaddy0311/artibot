@@ -1,6 +1,11 @@
 #!/usr/bin/env node
 /**
- * Stop / SubagentStop hook — Auto-Review Trigger.
+ * @deprecated 2026-05-14 — moved to _deprecated/ as part of perf audit P1.
+ * No registered usage in hooks.json or via internal import.
+ * If you depended on this, please file an issue.
+ * Scheduled for deletion: 2026-05-21 (1 week monitoring).
+ *
+ * Original purpose: Stop / SubagentStop hook — Auto-Review Trigger.
  * After work concludes, scan `git diff --stat HEAD` and recommend reviewer
  * sub-agents (code-reviewer / spec-reviewer / security-reviewer) based on
  * which file types and keywords are present in the diff.
@@ -17,7 +22,7 @@
  * Loop guard: runtime/last-review-sha.txt holds the last suggested HEAD SHA.
  * If HEAD SHA + diff fingerprint match the saved one, skip (already advised).
  *
- * @module scripts/hooks/auto-review-trigger
+ * @module scripts/hooks/_deprecated/auto-review-trigger
  */
 
 import path from 'node:path';
@@ -30,8 +35,8 @@ import {
   parseJSON,
   readStdin,
   writeStdout,
-} from '../utils/index.js';
-import { createErrorHandler, hasExtension, logHookError } from '../../lib/core/hook-utils.js';
+} from '../../utils/index.js';
+import { createErrorHandler, hasExtension, logHookError } from '../../../lib/core/hook-utils.js';
 
 const HOOK_NAME = 'auto-review-trigger';
 const STATE_FILE = 'last-review-sha.txt';

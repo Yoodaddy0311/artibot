@@ -1,200 +1,88 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { readFileSync as _realReadFileSync } from 'node:fs';
+import { describe, expect, it } from 'vitest';
 
-vi.mock('node:fs', async (importOriginal) => {
-  const mod = await importOriginal();
-  return { ...mod, readFileSync: vi.fn(mod.readFileSync) };
-});
+import { handleUserPromptSubmit } from '../../scripts/hooks/user-prompt-handler.js';
 
-vi.mock('../../scripts/utils/index.js', () => ({
-  readStdin: vi.fn(),
-  writeStdout: vi.fn(),
-  getPluginRoot: vi.fn(() => '/mock/plugin'),
-  toFileUrl: vi.fn((p) => `file:///${p.replace(/\\/g, '/')}`),
-  parseJSON: vi.fn((str) => {
-    try {
-      return JSON.parse(str);
-    } catch {
-      return null;
-    }
-  }),
-}));
-
-let readStdin;
-let writeStdout;
-
-const KOREAN_REVERIFY_TRIGGER = '!\uC7AC\uAC80\uC99D';
-const KOREAN_REVERIFY_CONTEXT = 'auth \uBAA8\uB4C8 \uB2E4\uC2DC \uD655\uC778';
-
-function makeHookData(prompt, key = 'user_prompt') {
-  return JSON.stringify({ [key]: prompt });
-}
+const KOREAN_REVERIFY_TRIGGER = '!재검증';
+const KOREAN_REVERIFY_CONTEXT = 'auth 모듈 다시 확인';
 
 describe('user-prompt-handler hook', () => {
-  beforeEach(async () => {
-    vi.resetModules();
-    ({ readStdin, writeStdout } = await import('../../scripts/utils/index.js'));
-    vi.clearAllMocks();
-  });
-
   describe('normal prompts', () => {
-    it('does not emit output for regular prompts', async () => {
-      readStdin.mockResolvedValue(makeHookData('build a dashboard component'));
-
-      await import('../../scripts/hooks/user-prompt-handler.js');
-      await new Promise((resolve) => setTimeout(resolve, 50));
-
-      expect(writeStdout).not.toHaveBeenCalled();
+    it('returns null for regular prompts', () => {
+      expect(handleUserPromptSubmit({ user_prompt: 'build a dashboard component' })).toBeNull();
     });
 
-    it('does not emit output when !rv appears mid-prompt', async () => {
-      readStdin.mockResolvedValue(makeHookData('please review !rv the code'));
-
-      await import('../../scripts/hooks/user-prompt-handler.js');
-      await new Promise((resolve) => setTimeout(resolve, 50));
-
-      expect(writeStdout).not.toHaveBeenCalled();
+    it('returns null when !rv appears mid-prompt', () => {
+      expect(handleUserPromptSubmit({ user_prompt: 'please review !rv the code' })).toBeNull();
     });
 
-    it('does not emit output for empty or missing prompt payloads', async () => {
-      readStdin.mockResolvedValue(makeHookData(''));
-
-      await import('../../scripts/hooks/user-prompt-handler.js');
-      await new Promise((resolve) => setTimeout(resolve, 50));
-
-      expect(writeStdout).not.toHaveBeenCalled();
+    it('returns null for empty payload', () => {
+      expect(handleUserPromptSubmit({ user_prompt: '' })).toBeNull();
+      expect(handleUserPromptSubmit({})).toBeNull();
     });
 
-    it('reads prompt from content field when provided', async () => {
-      readStdin.mockResolvedValue(makeHookData('plain content prompt', 'content'));
-
-      await import('../../scripts/hooks/user-prompt-handler.js');
-      await new Promise((resolve) => setTimeout(resolve, 50));
-
-      expect(writeStdout).not.toHaveBeenCalled();
+    it('reads prompt from content field when provided', () => {
+      expect(handleUserPromptSubmit({ content: 'plain content prompt' })).toBeNull();
     });
   });
 
   describe('!rv re-verification trigger', () => {
-    it('activates re-verification mode for "!rv"', async () => {
-      readStdin.mockResolvedValue(makeHookData('!rv'));
-
-      await import('../../scripts/hooks/user-prompt-handler.js');
-      await new Promise((resolve) => setTimeout(resolve, 50));
-
-      expect(writeStdout).toHaveBeenCalledTimes(1);
-      const output = writeStdout.mock.calls[0][0];
-      expect(output.message).toContain('[trigger] !rv re-verification mode activated');
-      expect(output.user_prompt).toContain('CRITICAL RE-VERIFICATION MODE');
-      expect(output.user_prompt).toContain('CLAIM AUDIT');
-      expect(output.user_prompt).toContain('EVIDENCE CHECK');
+    it('activates re-verification mode for "!rv"', () => {
+      const out = handleUserPromptSubmit({ user_prompt: '!rv' });
+      expect(out).not.toBeNull();
+      expect(out.message).toContain('[trigger] !rv re-verification mode activated');
+      expect(out.user_prompt).toContain('CRITICAL RE-VERIFICATION MODE');
+      expect(out.user_prompt).toContain('CLAIM AUDIT');
+      expect(out.user_prompt).toContain('EVIDENCE CHECK');
     });
 
-    it('includes additional context after the trigger', async () => {
-      readStdin.mockResolvedValue(makeHookData('!rv check the auth module'));
-
-      await import('../../scripts/hooks/user-prompt-handler.js');
-      await new Promise((resolve) => setTimeout(resolve, 50));
-
-      expect(writeStdout).toHaveBeenCalledTimes(1);
-      const output = writeStdout.mock.calls[0][0];
-      expect(output.user_prompt).toContain('Additional context from user: check the auth module');
+    it('includes additional context after the trigger', () => {
+      const out = handleUserPromptSubmit({ user_prompt: '!rv check the auth module' });
+      expect(out.user_prompt).toContain('Additional context from user: check the auth module');
     });
 
-    it('is case-insensitive for !rv', async () => {
-      readStdin.mockResolvedValue(makeHookData('!RV'));
-
-      await import('../../scripts/hooks/user-prompt-handler.js');
-      await new Promise((resolve) => setTimeout(resolve, 50));
-
-      expect(writeStdout).toHaveBeenCalledTimes(1);
-      expect(writeStdout.mock.calls[0][0].message).toContain('!rv re-verification');
+    it('is case-insensitive for !rv', () => {
+      const out = handleUserPromptSubmit({ user_prompt: '!RV' });
+      expect(out).not.toBeNull();
+      expect(out.message).toContain('!rv re-verification');
     });
 
-    it('supports the Korean trigger "!재검증"', async () => {
-      readStdin.mockResolvedValue(makeHookData(`${KOREAN_REVERIFY_TRIGGER} ${KOREAN_REVERIFY_CONTEXT}`));
-
-      await import('../../scripts/hooks/user-prompt-handler.js');
-      await new Promise((resolve) => setTimeout(resolve, 50));
-
-      expect(writeStdout).toHaveBeenCalledTimes(1);
-      const output = writeStdout.mock.calls[0][0];
-      expect(output.message).toContain('!rv re-verification');
-      expect(output.user_prompt).toContain('CRITICAL RE-VERIFICATION MODE');
-      expect(output.user_prompt).toContain(`Additional context from user: ${KOREAN_REVERIFY_CONTEXT}`);
+    it('supports the Korean trigger "!재검증"', () => {
+      const out = handleUserPromptSubmit({
+        user_prompt: `${KOREAN_REVERIFY_TRIGGER} ${KOREAN_REVERIFY_CONTEXT}`,
+      });
+      expect(out).not.toBeNull();
+      expect(out.message).toContain('!rv re-verification');
+      expect(out.user_prompt).toContain('CRITICAL RE-VERIFICATION MODE');
+      expect(out.user_prompt).toContain(`Additional context from user: ${KOREAN_REVERIFY_CONTEXT}`);
     });
 
-    it('takes priority over words that might otherwise look like normal requests', async () => {
-      readStdin.mockResolvedValue(makeHookData('!rv build test'));
-
-      await import('../../scripts/hooks/user-prompt-handler.js');
-      await new Promise((resolve) => setTimeout(resolve, 50));
-
-      expect(writeStdout).toHaveBeenCalledTimes(1);
-      const output = writeStdout.mock.calls[0][0];
-      expect(output.message).toContain('!rv re-verification');
-      expect(output.user_prompt).toContain('build test');
+    it('takes priority over words that might otherwise look like normal requests', () => {
+      const out = handleUserPromptSubmit({ user_prompt: '!rv build test' });
+      expect(out).not.toBeNull();
+      expect(out.message).toContain('!rv re-verification');
+      expect(out.user_prompt).toContain('build test');
     });
   });
 
   describe('--no-team flag', () => {
-    it('strips --no-team and signals opt-out', async () => {
-      readStdin.mockResolvedValue(makeHookData('implement feature --no-team'));
-
-      await import('../../scripts/hooks/user-prompt-handler.js');
-      await new Promise((resolve) => setTimeout(resolve, 100));
-
-      expect(writeStdout).toHaveBeenCalledTimes(1);
-      const output = writeStdout.mock.calls[0][0];
-      expect(output.user_prompt).toBe('implement feature');
-      expect(output.message).toContain('--no-team flag detected');
+    it('strips --no-team and signals opt-out', () => {
+      const out = handleUserPromptSubmit({ user_prompt: 'implement feature --no-team' });
+      expect(out).not.toBeNull();
+      expect(out.user_prompt).toBe('implement feature');
+      expect(out.message).toContain('--no-team flag detected');
     });
 
-    it('is case-insensitive for --no-team', async () => {
-      readStdin.mockResolvedValue(makeHookData('task --NO-TEAM'));
-
-      await import('../../scripts/hooks/user-prompt-handler.js');
-      await new Promise((resolve) => setTimeout(resolve, 100));
-
-      expect(writeStdout).toHaveBeenCalledTimes(1);
-      expect(writeStdout.mock.calls[0][0].message).toContain('--no-team flag detected');
+    it('is case-insensitive for --no-team', () => {
+      const out = handleUserPromptSubmit({ user_prompt: 'task --NO-TEAM' });
+      expect(out).not.toBeNull();
+      expect(out.message).toContain('--no-team flag detected');
     });
   });
 
-  describe('auto-team detection', () => {
-    it('does not trigger when config is unreadable (graceful fallback)', async () => {
-      // Config file doesn't exist at /mock/plugin path — checkAutoTeam catches and returns null
-      readStdin.mockResolvedValue(makeHookData('implement complex feature across frontend and backend'));
-
-      await import('../../scripts/hooks/user-prompt-handler.js');
-      await new Promise((resolve) => setTimeout(resolve, 100));
-
-      // Without readable config, auto-team silently skips
-      expect(writeStdout).not.toHaveBeenCalled();
-    });
-  });
-
-  describe('error handling', () => {
-    it('exits gracefully when readStdin rejects', async () => {
-      readStdin.mockRejectedValue(new Error('stdin read failed'));
-      const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
-      const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => {});
-
-      await import('../../scripts/hooks/user-prompt-handler.js');
-      await new Promise((resolve) => setTimeout(resolve, 50));
-
-      expect(exitSpy).toHaveBeenCalledWith(0);
-      stderrSpy.mockRestore();
-      exitSpy.mockRestore();
-    });
-
-    it('handles invalid JSON payloads without crashing', async () => {
-      readStdin.mockResolvedValue('not valid json');
-
-      await import('../../scripts/hooks/user-prompt-handler.js');
-      await new Promise((resolve) => setTimeout(resolve, 50));
-
-      expect(writeStdout).not.toHaveBeenCalled();
+  describe('null payload tolerance', () => {
+    it('returns null for null/undefined hookData', () => {
+      expect(handleUserPromptSubmit(null)).toBeNull();
+      expect(handleUserPromptSubmit(undefined)).toBeNull();
     });
   });
 });

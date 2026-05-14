@@ -88,21 +88,45 @@ async function loadNlu() {
   return import(toFileUrl(nluPath));
 }
 
+/**
+ * Pure handler for UserPromptSubmit. Used by the in-process dispatcher
+ * (named export) and the legacy stdin/stdout main() entry point.
+ *
+ * @param {object} hookData - Parsed hook payload (already JSON-decoded).
+ * @returns {Promise<object|null>} hookSpecificOutput envelope, or null to pass through.
+ */
+export async function handleUserPromptSubmit(hookData) {
+  const prompt = String(hookData?.user_prompt || hookData?.content || '').trim();
+  if (!prompt) return null;
+
+  if (NO_AUTOPILOT_FLAG.test(prompt) || NO_TEAM_FLAG.test(prompt)) return null;
+  if (!isEnabled(getPluginRoot())) return null;
+
+  const { classifyAutopilotIntent } = await loadNlu();
+  const result = classifyAutopilotIntent(prompt);
+  if (!result.suggestion || result.score < 0.7) return null;
+
+  return buildOutput(result);
+}
+
 async function main() {
   const raw = await readStdin();
   if (!raw) return;
   const hookData = parseJSON(raw) ?? {};
-  const prompt = String(hookData?.user_prompt || hookData?.content || '').trim();
-  if (!prompt) return;
-
-  if (NO_AUTOPILOT_FLAG.test(prompt) || NO_TEAM_FLAG.test(prompt)) return;
-  if (!isEnabled(getPluginRoot())) return;
-
-  const { classifyAutopilotIntent } = await loadNlu();
-  const result = classifyAutopilotIntent(prompt);
-  if (!result.suggestion || result.score < 0.7) return;
-
-  writeStdout(buildOutput(result));
+  const result = await handleUserPromptSubmit(hookData);
+  if (result) writeStdout(result);
 }
 
-main().catch(createErrorHandler(HOOK_NAME, { exit: false }));
+const isMain = (() => {
+  try {
+    const argv1 = process.argv[1] ? path.resolve(process.argv[1]) : '';
+    const here = path.resolve(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'));
+    return argv1 === here;
+  } catch {
+    return false;
+  }
+})();
+
+if (isMain) {
+  main().catch(createErrorHandler(HOOK_NAME, { exit: false }));
+}

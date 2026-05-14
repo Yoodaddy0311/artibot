@@ -9,6 +9,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### Changed (BREAKING for users relying on silent commit/push)
+
+- **`scripts/hooks/git-autopilot-save.js`** + **`scripts/hooks/git-autopilot-close.js`** — auto-save / session-close commits and the auto-push step **no longer pass `--no-verify` by default**. The user's `pre-commit` and `pre-push` hooks now run, so secret-scan / lint / test gates can fail an autopilot commit instead of being silently bypassed (CLAUDE.md Git Safety Protocol).
+
+  To restore the pre-v4.7.2 behaviour, opt-in explicitly via `artibot.config.json`:
+
+  ```json
+  "git": {
+    "autopilot": {
+      "bypassPreCommitHooks": true,
+      "bypassPrePushHooks": true
+    }
+  }
+  ```
+
+  Per-repo override via `.git/autopilot.json` (`bypassPreCommitHooks` / `bypassPrePushHooks` keys) takes precedence over the plugin-level config.
+
+### Fixed
+
+- **`scripts/hooks/agent-evaluator.js`** — replace `lowerOutput.includes(marker)` substring match with word-boundary regex matching plus an error-negation phrase filter. Plain `.includes()` was firing `error` against `errorless`, `cannot` against `cannotation`, and was counting `no errors` / `0 issues found` / `error free build` as failures, inflating the error-marker rate for clean runs. Plural forms (`errors`, `failures`) still match via an `(s|es)?` suffix on single-word markers. (issue-scanner W4 P1-2)
+
+### Deprecated
+
+- **`scripts/hooks/_deprecated/`** — staging area for hooks with no registered usage in `hooks.json` and no internal import. Files moved here are scheduled for deletion after a 1-week monitoring window. If you depended on any of these, please file an issue before the scheduled removal date.
+  - `on-handoff.js`, `on-llm-start.js`, `on-llm-end.js` — Anthropic Agent SDK extension stubs (AD-07). Header explicitly notes "Not wired in hooks.json — Claude Code's native loader rejects snake_case event keys." Reserved for future SDK runtime wiring that never materialised. Scheduled deletion: **2026-05-21**.
+  - `auto-review-trigger.js` — Stop/SubagentStop reviewer-suggestion hook (PRD §5.3). Never registered in `hooks.json`; `stop-recap.js` only references it in a JSDoc comment. Scheduled deletion: **2026-05-21**.
+
+### Notes
+
+- `hooks.json` was **not** modified — all 4 deprecated files were already absent from the manifest.
+- Files retained in `scripts/hooks/` despite being unregistered: `event-emitter.mjs` (documented public API for the `hook-event-emitter` SKILL), `git-autopilot-merge.js` (imported by `git-autopilot-session.js:16`), `statusline.sh` (registered via `install.sh` as Claude Code `statusLine` slot), `skill-discovery-inject.js` (dynamic-imported by `session-start.js:369-371`), `check-console-log.js` (live test suite), `session-start-sweep.mjs` and `nightly-*.mjs` (designed but unwired — defer for separate evaluation).
+
+---
+
 ## [4.7.1] - 2026-05-13
 
 Patch release — closes the e2e-test regression introduced by v4.6.4's hooks.json exec-form migration. Pure test-infrastructure fix: the `tests/e2e/plugin-init-flow.test.js` helpers were reading `h.command` directly, which now contains only `"node"` after the migration (the script path moved to `h.args[]`). v4.6.4 and v4.7.0 ship the same runtime behavior — only their tagged release builds had a failing E2E suite. v4.7.1 is the first tag whose Release workflow runs cleanly end-to-end.
