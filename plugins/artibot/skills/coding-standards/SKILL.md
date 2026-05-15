@@ -6,6 +6,7 @@ description: |
   Coding standards and style guide enforcing immutability, error handling, file organization, and naming conventions.
   Auto-activates when: writing or modifying code, code review, creating new files or components.
   Triggers: code, write, edit, implement, component, function, class, style
+lang: [en]
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 3
 progressive_disclosure:

@@ -29,7 +29,7 @@ const PROVENANCE_PII_FIELDS = ['user', 'emailHash', 'machineHash'];
 const PATTERNS_DIR = path.join(ARTIBOT_DIR, 'patterns');
 
 /** Pattern types to package */
-const PATTERN_TYPES = ['tool', 'error', 'success', 'team', 'agent'];
+const PATTERN_TYPES = ['tool', 'error', 'success', 'team', 'agent', 'quality'];
 
 /** Fallback directory for patterns stored by memory-manager */
 const MEMORY_DIR = path.join(ARTIBOT_DIR, 'memory');
@@ -96,6 +96,7 @@ export async function packagePatterns(localPatterns) {
     commands: {},
     teams: {},
     agents: {},
+    quality: {},
   };
 
   for (const pattern of patterns) {
@@ -121,6 +122,9 @@ export async function packagePatterns(localPatterns) {
         // Agents get their own bucket (was incorrectly routed to weights.tools
         // prior to this change, conflating agent and tool patterns in the swarm).
         weights.agents[category] = packageToolPattern(pattern);
+        break;
+      case 'quality':
+        weights.quality[category] = packageQualityPattern(pattern);
         break;
     }
   }
@@ -211,6 +215,29 @@ function packageCommandPattern(pattern) {
 }
 
 /**
+ * Convert a CLAUDE.md quality audit pattern into a peer-comparable weight.
+ * The pattern is expected to carry `bestData.score` (0..100) and optional
+ * `bestData.criterion` / `bestData.projectType` for cross-project alignment.
+ *
+ * @param {object} pattern - Quality pattern to package
+ * @returns {object}
+ */
+function packageQualityPattern(pattern) {
+  const data = pattern.bestData ?? {};
+  const rawScore = Number(data.score);
+  const score = Number.isFinite(rawScore)
+    ? clamp01(Math.max(0, Math.min(100, rawScore)) / 100)
+    : 0;
+  return {
+    score,
+    criterion: typeof data.criterion === 'string' ? data.criterion : 'overall',
+    projectType: typeof data.projectType === 'string' ? data.projectType : 'unknown',
+    confidence: clamp01(pattern.confidence ?? 0),
+    sampleSize: pattern.sampleSize ?? 0,
+  };
+}
+
+/**
  * Convert a team composition pattern into effectiveness weight.
  *
  * @param {object} pattern - Team pattern to package
@@ -250,8 +277,36 @@ export function unpackWeights(globalWeights) {
   unpackCommandWeights(globalWeights.commands, patterns, ts);
   unpackTeamWeights(globalWeights.teams, patterns, ts);
   unpackAgentWeights(globalWeights.agents, patterns, ts);
+  unpackQualityWeights(globalWeights.quality, patterns, ts);
 
   return patterns;
+}
+
+/**
+ * Unpack quality weight entries into the patterns array.
+ *
+ * @param {object|undefined} quality - Quality weight map from global weights
+ * @param {object[]} patterns - Target patterns array to push into
+ * @param {string} extractedAt - ISO timestamp string
+ */
+function unpackQualityWeights(quality, patterns, extractedAt) {
+  if (!quality) return;
+  for (const [category, weight] of Object.entries(quality)) {
+    patterns.push({
+      key: `quality::${category}`,
+      type: 'quality',
+      category,
+      confidence: weight.confidence ?? 0.5,
+      sampleSize: weight.sampleSize ?? 0,
+      bestData: {
+        score: typeof weight.score === 'number' ? Math.round(weight.score * 100) : null,
+        criterion: weight.criterion ?? 'overall',
+        projectType: weight.projectType ?? 'unknown',
+      },
+      source: 'swarm-global',
+      extractedAt,
+    });
+  }
 }
 
 /**
@@ -433,7 +488,7 @@ export function mergeWeights(local, global_, ratio) {
   const merged = {};
 
   // Merge each weight category
-  for (const category of ['tools', 'errors', 'commands', 'teams', 'agents']) {
+  for (const category of ['tools', 'errors', 'commands', 'teams', 'agents', 'quality']) {
     const localCat = local[category] ?? {};
     const globalCat = global_[category] ?? {};
     const allKeys = new Set([...Object.keys(localCat), ...Object.keys(globalCat)]);

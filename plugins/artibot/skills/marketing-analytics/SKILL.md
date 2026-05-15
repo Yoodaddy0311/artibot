@@ -2,6 +2,7 @@
 context: fork
 name: marketing-analytics
 description: "Analyzes marketing performance with KPI dashboards, channel attribution, campaign ROI measurement, forecasting, and industry benchmarking. Use when user asks about marketing analytics, KPI dashboard, attribution, ROAS, CAC, LTV, channel performance, campaign ROI, 마케팅 분석, KPI 대시보드, 어트리뷰션, or ROAS."
+lang: [en, ko]
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 3
 triggers:

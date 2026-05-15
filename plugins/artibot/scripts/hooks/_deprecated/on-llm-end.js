@@ -1,13 +1,18 @@
 #!/usr/bin/env node
 /**
- * on_llm_end hook stub. Pass-through extension point.
+ * @deprecated 2026-05-14 — moved to _deprecated/ as part of perf audit P1.
+ * No registered usage in hooks.json or via internal import.
+ * If you depended on this, please file an issue.
+ * Scheduled for deletion: 2026-05-21 (1 week monitoring).
+ *
+ * Original purpose: on_llm_end hook stub. Pass-through extension point.
  * Anthropic Agent SDK extension stub (AD-07). Not wired in hooks.json —
  * Claude Code's native loader rejects snake_case event keys. Reserved for
  * future SDK runtime wiring (e.g., artibot.config.json sdkHooks section).
- * @module scripts/hooks/on-llm-end
+ * @module scripts/hooks/_deprecated/on-llm-end
  */
 
-import { parseJSON, readStdin, writeStdout } from '../utils/index.js';
+import { parseJSON, readStdin, writeStdout } from '../../utils/index.js';
 
 async function main() {
   const raw = await readStdin();

@@ -7,6 +7,7 @@ description: |
   Iron Law: NO FIXES WITHOUT ROOT CAUSE INVESTIGATION FIRST.
   Auto-activates when: debugging errors, investigating failures, fixing bugs, troubleshooting issues.
   Triggers: debug, bug, error, fix, investigate, troubleshoot, root cause, regression, crash, 디버그, 버그, 에러, 수정
+lang: [en, ko]
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 2
 triggers:

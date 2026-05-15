@@ -48,9 +48,9 @@ Most Claude Code plugins use simple sub-agent (`Task()`) delegation -- fire-and-
 - **Intelligent Delegation** -- Auto-selects Sub-Agent (simple) vs Agent Team (complex) based on cognitive complexity scoring
 - **5 Orchestration Patterns** -- Leader, Council, Swarm, Pipeline, Watchdog
 - **8 DAG Playbooks** -- Feature, Bugfix, Refactor, Security + Marketing Campaign, Marketing Audit, Content Launch, Competitive Analysis (DAG-based with parallel node execution, topological sort, and cycle detection)
-- **61 Slash Commands** -- `/sc` smart router, `/daily`, `/team`, `/orchestrate`, `/spawn`, `/implement`, `/visual-check`, `/sc playbook`, `/learning`, `/ultrareview`, `/ultraplan`, and more
+- **62 Slash Commands** -- `/sc` smart router, `/daily`, `/team`, `/orchestrate`, `/spawn`, `/implement`, `/visual-check`, `/sc playbook`, `/learning`, `/ultrareview`, `/ultraplan`, `/audit-claude-md`, and more
 - **28 Specialized Agents** -- Architecture, security, frontend, backend, testing, DevOps, marketing, SEO, analytics, and more (opus 73%, sonnet 27%)
-- **108 Domain Skills** -- 11 persona skills, 8 core skills, 16 language skills, 8 utility skills, 35 marketing skills, visual-validation, daily, team, session-worklog, vibe-coding, repo-benchmarking, auto-learning-pipeline, git-worktree, dynamic-context-injection (all enhanced with Anthropic best-practice descriptions, workflow checklists, HITL v2 conversational checkpoints, output templates, and freedom levels)
+- **109 Domain Skills** -- 11 persona skills, 8 core skills, 16 language skills, 8 utility skills, 35 marketing skills, visual-validation, daily, team, session-worklog, vibe-coding, repo-benchmarking, auto-learning-pipeline, git-worktree, dynamic-context-injection, claude-md-auditor (all enhanced with Anthropic best-practice descriptions, workflow checklists, HITL v2 conversational checkpoints, output templates, and freedom levels)
 - **8 Auto-Activating Rules** -- DEV protocol, quality gates, agent coordination, config safety, frontend/backend/test patterns, clean state enforcement
 - **Guard Registry** -- Centralized guard pipeline with `registerGuard()`/`executeChain()` API, 6 built-in guards extracted from hook scripts (75% code reduction)
 - **Loop Detection** -- Circular buffer-based agent loop detection with fingerprint matching, automatic warn/block on repeated tool calls
@@ -65,7 +65,7 @@ Most Claude Code plugins use simple sub-agent (`Task()`) delegation -- fire-and-
 - **Runtime Middleware Pipeline** -- 9-stage middleware engine (router, subagents, tasks, checkpoint, memory, skills, guardrail, token-usage, summarization) for runtime context injection
 - **Auto-Learning Pipeline** -- Zero-config nightly self-improvement: self-scan, pattern-extract, knowledge-update, skill-refinement with auto-commit/push
 - **Output Design System** -- 7 output styles with design tokens (tokens.md) and narrative template for consistent formatting
-- **Forked Context Skills** -- All 108 skills run in isolated forked context for clean execution without cross-contamination
+- **Forked Context Skills** -- All 109 skills run in isolated forked context for clean execution without cross-contamination
 - **HTTP Webhook Notifications** -- Session events sent to Slack, Discord, or custom endpoints via configurable webhooks
 - **Cross-Platform Compatible** -- Works with Gemini CLI, OpenAI Codex, and Cursor via platform adapters
 - **Zero Dependencies** -- Pure Node.js built-in modules only (`node:fs`, `node:path`, `node:os`)
@@ -591,7 +591,7 @@ All teammates have their specialist tools + team collaboration tools (`SendMessa
 
 ## Hooks
 
-52 hook registrations across 15 event types:
+47 hook registrations across 15 event types:
 
 | Event | Script | Purpose |
 |-------|--------|---------|
@@ -675,7 +675,7 @@ plugins/artibot/
 |   +-- orchestrator.md          #   CTO / Team leader (Agent Teams API)
 |   +-- [17 dev specialists].md  #   Development teammates
 |   +-- [8 marketing agents].md  #   Marketing specialists
-+-- commands/                    # 61 slash commands
++-- commands/                    # 62 slash commands
 |   +-- sc.md                    #   Smart router
 |   +-- daily.md                 #   Daily work recap and retrospective
 |   +-- team.md                  #   Parallel team orchestration
@@ -683,7 +683,7 @@ plugins/artibot/
 |   +-- spawn.md                 #   Team spawn (parallel execution)
 |   +-- [25 dev commands].md
 |   +-- [10 marketing commands].md
-+-- skills/                      # 108 skill directories
++-- skills/                      # 109 skill directories
 |   +-- orchestration/           #   Delegation mode + team routing
 |   +-- cognitive-routing/       #   System 1/2 dual-process routing
 |   +-- lifelong-learning/       #   GRPO batch learning + knowledge transfer
@@ -700,7 +700,7 @@ plugins/artibot/
 +-- hooks/
 |   +-- hooks.json               # Hook event mappings
 +-- scripts/
-|   +-- hooks/                   # 54 hook scripts (ESM)
+|   +-- hooks/                   # 51 hook scripts (ESM)
 |   +-- ci/                      # 6 CI validation scripts
 |   +-- evals/                   # Runtime eval suite
 |   +-- utils/

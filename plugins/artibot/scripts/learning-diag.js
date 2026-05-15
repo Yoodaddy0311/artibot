@@ -327,13 +327,17 @@ function renderRecommendations(state, rows) {
 
   const merged = state.swarmWeights?.weights;
   if (merged) {
-    const emptyBuckets = ['agents', 'errors', 'commands', 'teams']
+    const emptyBuckets = ['agents', 'errors', 'commands', 'teams', 'quality']
       .filter((c) => Object.keys(merged[c] ?? {}).length === 0);
     if (emptyBuckets.includes('agents')) {
       bullets.push('Swarm `agents` bucket is empty — either no peer has uploaded post-v4.6.2 yet, or local agent patterns lack the upload threshold (sample ≥ 3, confidence ≥ 0.4).');
     }
-    if (emptyBuckets.includes('errors') || emptyBuckets.includes('teams')) {
-      bullets.push(`Empty swarm buckets: ${emptyBuckets.filter((c) => c !== 'agents').join(', ')} — check if local pattern files exist and pass the upload filter.`);
+    if (emptyBuckets.includes('quality')) {
+      bullets.push('Swarm `quality` bucket is empty — claude-md-auditor skill has not run (or audit-cache.json is missing). Run `/audit-claude-md` to populate.');
+    }
+    const otherEmpty = emptyBuckets.filter((c) => c !== 'agents' && c !== 'quality');
+    if (otherEmpty.length > 0) {
+      bullets.push(`Empty swarm buckets: ${otherEmpty.join(', ')} — check if local pattern files exist and pass the upload filter.`);
     }
   }
 

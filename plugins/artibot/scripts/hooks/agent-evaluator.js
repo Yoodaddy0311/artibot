@@ -56,9 +56,63 @@ const PARTIAL_MARKERS = [
   'partial', 'incomplete', 'blocked', 'waiting', 'pending', 'skipped',
 ];
 
+/**
+ * Lines that contain any of these phrases are excluded from errorHits.
+ * v4.7.2 (issue-scanner W4 P1-2): plain `includes()` flagged
+ * "no errors", "0 issues found", "error free" as failures, inflating the
+ * error rate for clean runs.
+ */
+const ERROR_NEGATION_PHRASES = [
+  'no error', 'no errors', 'no errors found', 'no issues', '0 issues',
+  '0 issues found', 'not failed', 'cannot reproduce', 'error free',
+  'error-free',
+];
+
 // ---------------------------------------------------------------------------
 // Scoring logic
 // ---------------------------------------------------------------------------
+
+/**
+ * Escape regex special characters in a literal marker.
+ * @param {string} s
+ * @returns {string}
+ */
+function escapeRegex(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Count markers matched as whole tokens (word-boundary).
+ * v4.7.2 (P1-2): replaces `lowerOutput.includes(m)` substring match which
+ * fired on `terraformatter` for `traceback`, `application` for `cannot`, etc.
+ *
+ * @param {string} output - Raw output string (case preserved for line filter)
+ * @param {string[]} markers - Lowercase marker phrases
+ * @param {{ excludeNegations?: boolean }} [opts]
+ * @returns {number} Number of distinct markers matched in `output`
+ */
+function countMarkers(output, markers, opts = {}) {
+  if (!output) return 0;
+  const lines = opts.excludeNegations
+    ? output.split(/\r?\n/).filter((line) => {
+      const lower = line.toLowerCase();
+      return !ERROR_NEGATION_PHRASES.some((p) => lower.includes(p));
+    })
+    : null;
+  const haystack = (lines === null ? output : lines.join('\n')).toLowerCase();
+  return markers.reduce((count, m) => {
+    // Word-boundary on both ends prevents `error` matching `errorless` /
+    // `terraformatter`, `cannot` matching `cannotation`, etc. Single-word
+    // markers also match their `(s|es)` plural form so `error` still hits on
+    // `2 errors found` — preserves the legitimate signal the original
+    // substring-match captured.
+    const escaped = escapeRegex(m);
+    const isSingleWord = !/\s/.test(m);
+    const tail = isSingleWord ? '(?:s|es)?' : '';
+    const re = new RegExp(`(?:^|[^a-z0-9_])${escaped}${tail}(?:[^a-z0-9_]|$)`, 'i');
+    return count + (re.test(haystack) ? 1 : 0);
+  }, 0);
+}
 
 /**
  * Score an agent run from 0.0 to 1.0.
@@ -71,14 +125,12 @@ function evaluateAgent(hookData) {
   const toolUses = extractToolUseCount(hookData);
   const hasError = hookData?.error || hookData?.is_error || false;
 
-  const lowerOutput = output.toLowerCase();
-
   // --- Component scores ---
 
-  // a) Completion score
-  const successHits = SUCCESS_MARKERS.filter(m => lowerOutput.includes(m)).length;
-  const errorHits   = ERROR_MARKERS.filter(m => lowerOutput.includes(m)).length;
-  const partialHits = PARTIAL_MARKERS.filter(m => lowerOutput.includes(m)).length;
+  // a) Completion score (P1-2: word-boundary + error-negation filter)
+  const successHits = countMarkers(output, SUCCESS_MARKERS);
+  const errorHits   = countMarkers(output, ERROR_MARKERS, { excludeNegations: true });
+  const partialHits = countMarkers(output, PARTIAL_MARKERS);
 
   let completionScore = 0.5; // neutral default
   if (successHits > 0 && errorHits === 0) completionScore = 0.9;

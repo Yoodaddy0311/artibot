@@ -15,7 +15,9 @@ async function main() {
   resetGuards();
   registerBuiltinGuards();
 
-  const result = executeChain('pre', 'Bash', hookData);
+  const result = executeChain('pre', 'Bash', hookData, {
+    cwd: hookData?.cwd || process.cwd(),
+  });
 
   if (result.decision === 'block') {
     writeStdout({ decision: 'block', reason: result.reason });

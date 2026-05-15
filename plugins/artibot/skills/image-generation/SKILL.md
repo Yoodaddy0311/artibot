@@ -3,6 +3,7 @@ context: fork
 name: image-generation
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 description: "AI image prompt engineering and generation workflow. Use when user asks to generate, create, edit, or refine images. Triggers on: 이미지 만들어줘, 그림 생성해줘, 이미지 그려줘, 썸네일 만들어, 로고 만들어줘, 이미지 수정해줘, 사진 편집해줘, 아까 만든 거 수정, 색감 바꿔줘, image generate, create image, edit image, modify image, refine image."
+lang: [en, ko]
 level: 3
 triggers:
   - "image"

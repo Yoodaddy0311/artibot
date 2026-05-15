@@ -25,6 +25,7 @@ description: |
   - Code, JSON, YAML, SQL, or other structured non-prose output
   - Internal agent-to-agent messages
   - Short acknowledgements (< 200 chars)
+lang: [en, ko]
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 2
 category: code-quality

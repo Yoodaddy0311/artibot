@@ -6,6 +6,7 @@ description: |
   함수형 프로그래밍 마이그레이션 패턴 - try-catch→Either, null→Option, callbacks→Task, class DI→Reader.
   Auto-activates when: refactoring to FP patterns, fp-ts migration, functional error handling.
   Triggers: fp refactor, Either, Option, TaskEither, fp-ts, 함수형 리팩토링
+lang: [en, ko]
 platforms: [claude-code]
 level: progressive
 progressive_disclosure:

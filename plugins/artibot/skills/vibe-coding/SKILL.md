@@ -2,6 +2,7 @@
 context: fork
 name: vibe-coding
 description: "Quality enforcement for casual/natural language coding requests. Ensures every part of the user's request is decomposed, executed, verified, and reported. Use when handling natural language coding requests, multi-part instructions, or casual Korean/English coding commands."
+lang: [en]
 level: 1
 triggers:
   - "해줘"

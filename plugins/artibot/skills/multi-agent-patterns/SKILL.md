@@ -6,6 +6,7 @@ description: |
   멀티에이전트 실증 패턴 - supervisor/swarm/hierarchical 아키텍처, 토큰 multiplier, 컨텍스트 격리, 합의 메커니즘.
   Auto-activates when: multi-agent system design, agent coordination, context isolation needs.
   Triggers: multi-agent, supervisor, swarm, agent coordination, 멀티에이전트, 에이전트 협업
+lang: [en, ko]
 platforms: [claude-code]
 level: progressive
 progressive_disclosure:

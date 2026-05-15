@@ -188,18 +188,20 @@ describe('E2E: Plugin Initialization Flow', () => {
       ? [h.command, ...h.args].join(' ')
       : h.command);
 
-    it('registers UserPromptSubmit hooks including runtime prompt after user-prompt-handler', () => {
+    it('registers a single UserPromptSubmit dispatcher entry (IMPL-T2 consolidation)', () => {
       expect(hooksConfig.hooks.UserPromptSubmit).toBeDefined();
       const commands = hooksConfig.hooks.UserPromptSubmit.flatMap(
         (entry) => entry.hooks.map(fullCommand),
       );
-      expect(commands.some((cmd) => cmd.includes('user-prompt-handler'))).toBe(true);
-      expect(commands.some((cmd) => cmd.includes('runtime-prompt'))).toBe(true);
-
-      const userPromptIndex = commands.findIndex((cmd) => cmd.includes('user-prompt-handler'));
-      const runtimePromptIndex = commands.findIndex((cmd) => cmd.includes('runtime-prompt'));
-      expect(userPromptIndex).toBeGreaterThanOrEqual(0);
-      expect(runtimePromptIndex).toBeGreaterThan(userPromptIndex);
+      // v4.7.2 (IMPL-T2-EXEC): the 6 separate UserPromptSubmit hook entries
+      // were collapsed into a single in-process dispatcher. The dispatcher
+      // imports user-prompt-handler / runtime-prompt / auto-team-trigger /
+      // autopilot-nlu-trigger / ambiguity-guard as named exports and spawns
+      // git-autopilot-save as a child process. Order within the dispatcher
+      // (user-prompt-handler sync first, others Promise.all) is enforced in
+      // _userprompt-dispatcher.js, not in hooks.json.
+      expect(commands).toHaveLength(1);
+      expect(commands[0]).toContain('_userprompt-dispatcher');
     });
 
     it('registers PreToolUse hooks for Write and Bash', () => {

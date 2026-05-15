@@ -9,6 +9,7 @@ description: |
   Auto-activates when: ambiguity score >= threshold, multi-intent conflicts detected,
   or user explicitly asks for clarification.
   Triggers: clarify, unclear, what do you mean, ambiguous, vague, specify, 명확히, 구체적으로, 뭘 원하시는지
+lang: [en, ko]
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 2
 progressive_disclosure:

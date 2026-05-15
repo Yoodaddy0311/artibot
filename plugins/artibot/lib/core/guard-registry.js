@@ -8,7 +8,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { BLOCKED_PATTERNS } from './blocked-patterns.js';
-import { extractFilePath, isSkippablePath, matchesPathPattern } from './hook-utils.js';
+import { extractFilePath, isArtibotRepo, isSkippablePath, matchesPathPattern } from './hook-utils.js';
 
 // -------------------------------------------------------------------------
 // Registry State
@@ -28,6 +28,10 @@ let guards = [];
  * @param {string} guard.phase - 'pre' or 'post'
  * @param {string[]} guard.tools - Tool names this guard applies to
  * @param {Function} guard.check - (ctx) => GuardResult | null
+ * @param {string} [guard.category='artibot-policy'] - 'security-critical' or
+ *   'artibot-policy'. Security-critical guards run everywhere; artibot-policy
+ *   guards are skipped when the cwd is not the Artibot plugin repo (see
+ *   {@link executeChain}).
  * @throws {Error} If guard definition is invalid
  */
 export function registerGuard(guard) {
@@ -43,24 +47,46 @@ export function registerGuard(guard) {
   if (typeof guard.check !== 'function') {
     throw new Error(`Guard "${guard.name}" must have a check function.`);
   }
-  guards = [...guards, { ...guard }];
+  const category = guard.category || 'artibot-policy';
+  if (category !== 'security-critical' && category !== 'artibot-policy') {
+    throw new Error(`Guard "${guard.name}" has invalid category: "${category}". Must be "security-critical" or "artibot-policy".`);
+  }
+  guards = [...guards, { ...guard, category }];
 }
 
 /**
  * Execute the guard chain for a given phase and tool.
  * Runs matching guards sequentially. Stops on first block.
+ *
+ * Scope policy (added v4.7.4): when the caller's cwd is not the Artibot plugin
+ * repo, only `security-critical` guards run. `artibot-policy` guards
+ * (console-log, sensitive-file, content-secret, hardcoded-secret, file-size)
+ * are skipped silently to avoid false positives in unrelated user projects
+ * where Artibot is installed globally via `~/.claude/`.
+ *
  * @param {string} phase - 'pre' or 'post'
  * @param {string} toolName - Tool name (e.g. 'Bash', 'Write', 'Edit')
  * @param {object} hookData - Raw hook data from stdin
+ * @param {object} [opts]
+ * @param {string} [opts.cwd] - Working directory used for the Artibot-repo
+ *   scope check. Defaults to `process.cwd()` when omitted.
  * @returns {{decision: string, reason?: string, warnings: string[]}}
  */
-export function executeChain(phase, toolName, hookData) {
-  const matching = guards.filter(
+export function executeChain(phase, toolName, hookData, opts = {}) {
+  let matching = guards.filter(
     (g) => g.phase === phase && g.tools.includes(toolName),
   );
 
   if (matching.length === 0) {
     return { decision: 'approve', warnings: [] };
+  }
+
+  const cwd = opts.cwd || process.cwd();
+  if (!isArtibotRepo(cwd)) {
+    matching = matching.filter((g) => g.category === 'security-critical');
+    if (matching.length === 0) {
+      return { decision: 'approve', warnings: [] };
+    }
   }
 
   const ctx = buildContext(phase, toolName, hookData);
@@ -100,7 +126,7 @@ export function listGuards(phase, toolName) {
       if (toolName && !g.tools.includes(toolName)) return false;
       return true;
     })
-    .map(({ name, phase: p, tools }) => ({ name, phase: p, tools }));
+    .map(({ name, phase: p, tools, category }) => ({ name, phase: p, tools, category }));
 }
 
 /**
@@ -448,12 +474,23 @@ function isInspectableFile(filePath) {
 
 /**
  * Register all built-in guards.
+ *
+ * Each guard is tagged with a category that determines whether it runs
+ * outside the Artibot plugin repo (see {@link executeChain}):
+ *
+ *   - `security-critical`: runs everywhere (dangerous shell commands,
+ *     bash-lint hygiene, Windows path-portability) — these are not Artibot
+ *     opinions, they protect any project the user happens to be in.
+ *   - `artibot-policy`: skipped in non-Artibot repos to prevent
+ *     false-positive noise (e.g. flagging `.env` writes in a Next.js
+ *     project that legitimately writes its own secrets).
  */
 export function registerBuiltinGuards() {
   registerGuard({
     name: 'dangerous-command',
     phase: 'pre',
     tools: ['Bash'],
+    category: 'security-critical',
     check: checkDangerousCommand,
   });
 
@@ -461,6 +498,7 @@ export function registerBuiltinGuards() {
     name: 'path-portability',
     phase: 'pre',
     tools: ['Bash'],
+    category: 'security-critical',
     check: checkPathPortability,
   });
 
@@ -468,6 +506,7 @@ export function registerBuiltinGuards() {
     name: 'bash-lint',
     phase: 'pre',
     tools: ['Bash'],
+    category: 'security-critical',
     check: checkBashQuoteBalance,
   });
 
@@ -475,6 +514,7 @@ export function registerBuiltinGuards() {
     name: 'sensitive-file',
     phase: 'pre',
     tools: ['Write', 'Edit'],
+    category: 'artibot-policy',
     check: checkSensitiveFile,
   });
 
@@ -482,6 +522,7 @@ export function registerBuiltinGuards() {
     name: 'content-secret',
     phase: 'pre',
     tools: ['Write', 'Edit'],
+    category: 'artibot-policy',
     check: checkContentSecret,
   });
 
@@ -489,6 +530,7 @@ export function registerBuiltinGuards() {
     name: 'console-log',
     phase: 'post',
     tools: ['Edit', 'Write'],
+    category: 'artibot-policy',
     check: checkConsoleLog,
   });
 
@@ -496,6 +538,7 @@ export function registerBuiltinGuards() {
     name: 'hardcoded-secret',
     phase: 'post',
     tools: ['Edit', 'Write'],
+    category: 'artibot-policy',
     check: checkHardcodedSecret,
   });
 
@@ -503,6 +546,7 @@ export function registerBuiltinGuards() {
     name: 'file-size',
     phase: 'post',
     tools: ['Edit', 'Write'],
+    category: 'artibot-policy',
     check: checkFileSize,
   });
 }

@@ -42,11 +42,18 @@ Parse $ARGUMENTS:
 4. **Validate**: Verify patterns are consistent across multiple occurrences
    - Single occurrence = observation, not a pattern
    - 3+ occurrences = confirmed pattern worth persisting
-5. **Persist**: Save to memory files:
+5. **Diff Preview**: For every pattern that would touch an existing memory file, render the proposed change before writing:
+   - File path + `Why:` one-liner (which criterion / signal triggered the change)
+   - Use a ```diff fenced block — `-` for removed lines, `+` for added
+   - Group diffs by file. No `Write`/`Edit` calls in this step.
+   - Prompt: *"Apply the N diffs above? (yes / no / select N1,N2,...)"*
+6. **Persist**: Only after user approval (`yes` or explicit `select`):
    - Update MEMORY.md with concise summary and link
    - Create/update topic-specific file (e.g., `patterns.md`, `conventions.md`)
    - Use structured format for machine and human readability
-6. **Report**: Output what was learned and where it was saved
+   - On `no` (or missing input) → skip all writes and record the count
+7. **Report**: Output what was learned and where it was saved
+   - Skipped (not approved): N — these patterns are surfaced again next time
 
 ## Pattern Format
 
@@ -67,6 +74,8 @@ PATTERNS LEARNED
 Source:    [file|session|project]
 Topic:    [description]
 Patterns: [count extracted]
+APPROVED:  [n]
+SKIPPED:   [n]
 
 EXTRACTED
 ---------

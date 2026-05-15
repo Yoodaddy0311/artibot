@@ -5,6 +5,7 @@ description: |
   Visual regression testing using SSIM-based screenshot comparison.
   Auto-activates when: visual testing, UI regression checks, screenshot comparison, component validation, CSS fix suggestions needed.
   Triggers: visual, screenshot, regression, baseline, pixel, SSIM, UI validation, component check
+lang: [en]
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 3
 progressive_disclosure:

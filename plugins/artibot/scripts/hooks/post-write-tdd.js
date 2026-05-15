@@ -20,8 +20,10 @@ import {
   createErrorHandler,
   extractFilePath,
   extractToolName,
+  isArtibotRepo,
   normalizePath,
 } from '../../lib/core/hook-utils.js';
+import { getRepoRoot } from '../../lib/git/repo-root-cache.js';
 
 /**
  * Determine whether the file should be considered a non-test source file
@@ -90,6 +92,13 @@ async function main() {
 
   const filePath = extractFilePath(hookData);
   if (!filePath) return;
+
+  // Artibot scope guard: this advisory only makes sense inside the Artibot
+  // plugin repo (where the lib/ → tests/ mirror convention is enforced).
+  // In unrelated user projects, every lib/*.js Edit was emitting noisy
+  // [artibot:suggest-tdd ...] tokens against directory layouts that do not
+  // follow this convention.
+  if (!isArtibotRepo(getRepoRoot())) return;
 
   const normalized = normalizePath(filePath);
   if (!isLibSourceFile(normalized)) return;

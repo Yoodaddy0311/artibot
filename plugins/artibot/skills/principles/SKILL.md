@@ -6,6 +6,7 @@ description: |
   Core development principles enforcing SOLID, DRY, KISS, YAGNI, and quality-first design.
   Auto-activates when: writing code, making design decisions, refactoring, reviewing architecture.
   Triggers: design, architecture, refactor, pattern, principle, SOLID, clean code
+lang: [en]
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 3
 triggers:

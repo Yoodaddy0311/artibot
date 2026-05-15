@@ -3,6 +3,7 @@ context: fork
 user-invocable: false
 name: observability
 description: "통합 관측성 가이드 — Prometheus, Grafana, 분산 트레이싱, SLI/SLO, 알림 규칙. Use when setting up monitoring, tracing, alerting, or defining SLIs and SLOs."
+lang: [en, ko]
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: progressive
 triggers:

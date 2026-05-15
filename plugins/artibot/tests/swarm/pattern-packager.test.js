@@ -32,7 +32,7 @@ describe('packagePatterns()', () => {
 
   it('returns empty weights when no patterns provided', async () => {
     const result = await packagePatterns([]);
-    expect(result.weights).toEqual({ tools: {}, errors: {}, commands: {}, teams: {}, agents: {} });
+    expect(result.weights).toEqual({ tools: {}, errors: {}, commands: {}, teams: {}, agents: {}, quality: {} });
     expect(result.metadata.packagedCount).toBe(0);
   });
 
@@ -605,10 +605,11 @@ describe('packagePatterns() - normalizeLatency and clamp branches', () => {
       .mockResolvedValueOnce({ patterns: [pattern] }) // error-patterns.json fallback (memory/)
       .mockResolvedValueOnce(null) // success-patterns.json
       .mockResolvedValueOnce(null) // team-patterns.json
-      .mockResolvedValueOnce(null); // agent-patterns.json
+      .mockResolvedValueOnce(null) // agent-patterns.json
+      .mockResolvedValueOnce(null); // quality-patterns.json
     await packagePatterns(); // no arg -> loads from disk
-    // 5 primary reads + 1 error fallback = 6
-    expect(readJsonFile).toHaveBeenCalledTimes(6);
+    // 6 primary reads + 1 error fallback = 7
+    expect(readJsonFile).toHaveBeenCalledTimes(7);
   });
 
   it('normalizeFileCount: large file count approaches 0', async () => {
@@ -781,26 +782,27 @@ describe('loadAllPatterns() - error fallback + agent type', () => {
     const errPattern = makePattern('error', 'ENOENT', {
       bestData: { recoverable: true, message: 'file not found' },
     });
-    // tool=null, error(primary)=null, error(fallback)=data, success=null, team=null, agent=null
+    // tool=null, error(primary)=null, error(fallback)=data, success=null, team=null, agent=null, quality=null
     readJsonFile
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce({ patterns: [errPattern] })
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
       .mockResolvedValueOnce(null);
     const result = await packagePatterns();
-    expect(readJsonFile).toHaveBeenCalledTimes(6);
+    expect(readJsonFile).toHaveBeenCalledTimes(7);
     const errorKeys = Object.keys(result.weights.errors);
     expect(errorKeys).toHaveLength(1);
   });
 
   it('does not fall back for non-error types', async () => {
-    // All return null -> no fallback attempted for tool/success/team/agent
+    // All return null -> no fallback attempted for tool/success/team/agent/quality
     readJsonFile.mockResolvedValue(null);
     const result = await packagePatterns();
-    // 5 primary + 1 error fallback = 6 total calls
-    expect(readJsonFile).toHaveBeenCalledTimes(6);
+    // 6 primary + 1 error fallback = 7 total calls
+    expect(readJsonFile).toHaveBeenCalledTimes(7);
     expect(result.metadata.packagedCount).toBe(0);
   });
 
@@ -808,16 +810,17 @@ describe('loadAllPatterns() - error fallback + agent type', () => {
     const errPattern = makePattern('error', 'TypeError', {
       bestData: { recoverable: false },
     });
-    // tool=null, error(primary)=data (found!), success=null, team=null, agent=null
+    // tool=null, error(primary)=data (found!), success=null, team=null, agent=null, quality=null
     readJsonFile
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce({ patterns: [errPattern] })
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
       .mockResolvedValueOnce(null);
     const result = await packagePatterns();
-    // 5 primary reads, NO fallback since error was found
-    expect(readJsonFile).toHaveBeenCalledTimes(5);
+    // 6 primary reads, NO fallback since error was found
+    expect(readJsonFile).toHaveBeenCalledTimes(6);
     expect(Object.keys(result.weights.errors)).toHaveLength(1);
   });
 

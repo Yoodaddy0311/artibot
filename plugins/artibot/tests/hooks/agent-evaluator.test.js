@@ -55,17 +55,51 @@ function extractToolUseCount(hookData) {
   return matches ? matches.length : 0;
 }
 
+
+// --- P1-2 (v4.7.2): re-implemented from scripts/hooks/agent-evaluator.js ---
+const ERROR_NEGATION_PHRASES = [
+  'no error', 'no errors', 'no errors found', 'no issues', '0 issues',
+  '0 issues found', 'not failed', 'cannot reproduce', 'error free',
+  'error-free',
+];
+
+function escapeRegex(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function countMarkers(output, markers, opts = {}) {
+  if (!output) return 0;
+  const lines = opts.excludeNegations
+    ? output.split(/\r?\n/).filter((line) => {
+      const lower = line.toLowerCase();
+      return !ERROR_NEGATION_PHRASES.some((p) => lower.includes(p));
+    })
+    : null;
+  const haystack = (lines === null ? output : lines.join('\n')).toLowerCase();
+  return markers.reduce((count, m) => {
+    // Word-boundary on both ends prevents `error` matching `errorless` /
+    // `terraformatter`, `cannot` matching `cannotation`, etc. Single-word
+    // markers also match their `(s|es)` plural form so `error` still hits on
+    // `2 errors found` — preserves the legitimate signal the original
+    // substring-match captured.
+    const escaped = escapeRegex(m);
+    const isSingleWord = !/\s/.test(m);
+    const tail = isSingleWord ? '(?:s|es)?' : '';
+    const re = new RegExp(`(?:^|[^a-z0-9_])${escaped}${tail}(?:[^a-z0-9_]|$)`, 'i');
+    return count + (re.test(haystack) ? 1 : 0);
+  }, 0);
+}
+
 function evaluateAgent(hookData) {
   const output   = extractOutput(hookData);
   const toolUses = extractToolUseCount(hookData);
   const hasError = hookData?.error || hookData?.is_error || false;
 
-  const lowerOutput = output.toLowerCase();
-
-  // a) Completion score
-  const successHits = SUCCESS_MARKERS.filter(m => lowerOutput.includes(m)).length;
-  const errorHits   = ERROR_MARKERS.filter(m => lowerOutput.includes(m)).length;
-  const partialHits = PARTIAL_MARKERS.filter(m => lowerOutput.includes(m)).length;
+  // P1-2 (v4.7.2): word-boundary marker matching + ERROR_NEGATION_PHRASES.
+  // Helpers re-implemented from scripts/hooks/agent-evaluator.js below.
+  const successHits = countMarkers(output, SUCCESS_MARKERS);
+  const errorHits   = countMarkers(output, ERROR_MARKERS, { excludeNegations: true });
+  const partialHits = countMarkers(output, PARTIAL_MARKERS);
 
   let completionScore = 0.5;
   if (successHits > 0 && errorHits === 0) completionScore = 0.9;
@@ -406,6 +440,78 @@ describe('agent-evaluator hook (pure function tests)', () => {
       const hookData = {};
       const role = hookData.role || hookData.agent_type || 'teammate';
       expect(role).toBe('teammate');
+    });
+  });
+
+  describe('P1-2 measurement-bug regression — word-boundary + negation filter', () => {
+    it('does NOT count "traceback" inside word "terraformatter" as an error', () => {
+      const { breakdown } = evaluateAgent({
+        output: 'Ran terraformatter and finished cleanly.',
+        tool_use_count: 3,
+      });
+      expect(breakdown.errorMarkers).toBe(0);
+    });
+
+    it('does NOT count "cannot" inside word "application" as an error', () => {
+      const { breakdown } = evaluateAgent({
+        output: 'Updated the application configuration.',
+        tool_use_count: 2,
+      });
+      expect(breakdown.errorMarkers).toBe(0);
+    });
+
+    it('does NOT count negated phrase "no errors found" as an error', () => {
+      const { breakdown } = evaluateAgent({
+        output: 'All checks passed, no errors found, validated successfully.',
+        tool_use_count: 4,
+      });
+      expect(breakdown.errorMarkers).toBe(0);
+      expect(breakdown.successMarkers).toBeGreaterThanOrEqual(1);
+      expect(breakdown.completionScore).toBe(0.9);
+    });
+
+    it('does NOT count negated phrase "cannot reproduce" as an error', () => {
+      const { breakdown } = evaluateAgent({
+        output: 'Attempted reproduction; cannot reproduce the bug. Closing as resolved.',
+        tool_use_count: 5,
+      });
+      expect(breakdown.errorMarkers).toBe(0);
+      expect(breakdown.successMarkers).toBeGreaterThanOrEqual(1);
+    });
+
+    it('still counts a real "error" word as an error', () => {
+      const { breakdown } = evaluateAgent({
+        output: 'Build error: missing import.',
+        tool_use_count: 1,
+      });
+      expect(breakdown.errorMarkers).toBeGreaterThanOrEqual(1);
+    });
+
+    it('counts both success and error in mixed output (no negation)', () => {
+      const { breakdown } = evaluateAgent({
+        output: 'Implemented feature, but compilation error in test.',
+        tool_use_count: 4,
+      });
+      expect(breakdown.successMarkers).toBeGreaterThanOrEqual(1);
+      expect(breakdown.errorMarkers).toBeGreaterThanOrEqual(1);
+    });
+
+    it('does NOT count "failed" inside word "defaulted" as an error', () => {
+      const { breakdown } = evaluateAgent({
+        output: 'Code: defaulted to retry.',
+        tool_use_count: 1,
+      });
+      expect(breakdown.errorMarkers).toBe(0);
+    });
+
+    it('clean success report scores 0.9 (regression: previously dragged to 0.5/0.7)', () => {
+      const { breakdown } = evaluateAgent({
+        output: 'All checks passed, 0 issues found, validated and deployed.',
+        tool_use_count: 6,
+      });
+      expect(breakdown.errorMarkers).toBe(0);
+      expect(breakdown.successMarkers).toBeGreaterThanOrEqual(2);
+      expect(breakdown.completionScore).toBe(0.9);
     });
   });
 

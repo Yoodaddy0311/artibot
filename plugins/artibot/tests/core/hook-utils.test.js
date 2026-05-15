@@ -1,4 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import {
   createErrorHandler,
   extractAgentId,
@@ -11,6 +14,7 @@ import {
   getHomeDir,
   getStatePath,
   hasExtension,
+  isArtibotRepo,
   isEnvEnabled,
   isSkippablePath,
   logHookError,
@@ -407,5 +411,66 @@ describe('hook-utils / Hook Input Extraction', () => {
     it('uses custom default role', () => {
       expect(extractAgentRole({}, 'worker')).toBe('worker');
     });
+  });
+});
+
+// -------------------------------------------------------------------------
+// v4.7.4: isArtibotRepo source-of-truth (replaces duplicated impls in
+// dev-verify-gate.js / stop-review-gate.js / pre-write-guard.js)
+// -------------------------------------------------------------------------
+
+describe('hook-utils / isArtibotRepo', () => {
+  let workdir;
+
+  beforeEach(() => {
+    workdir = mkdtempSync(path.join(os.tmpdir(), 'artibot-hu-'));
+  });
+
+  afterEach(() => {
+    try { rmSync(workdir, { recursive: true, force: true }); } catch { /* ignore */ }
+  });
+
+  it('detects monorepo root via plugins/artibot/CLAUDE.md', () => {
+    mkdirSync(path.join(workdir, 'plugins', 'artibot'), { recursive: true });
+    writeFileSync(path.join(workdir, 'plugins', 'artibot', 'CLAUDE.md'), '# stub');
+    expect(isArtibotRepo(workdir)).toBe(true);
+  });
+
+  it('detects plugin directory directly via artibot.config.json', () => {
+    writeFileSync(path.join(workdir, 'artibot.config.json'), '{}');
+    expect(isArtibotRepo(workdir)).toBe(true);
+  });
+
+  it('detects when both signals are present', () => {
+    mkdirSync(path.join(workdir, 'plugins', 'artibot'), { recursive: true });
+    writeFileSync(path.join(workdir, 'plugins', 'artibot', 'CLAUDE.md'), '# stub');
+    writeFileSync(path.join(workdir, 'artibot.config.json'), '{}');
+    expect(isArtibotRepo(workdir)).toBe(true);
+  });
+
+  it('returns false when neither signal is present', () => {
+    writeFileSync(path.join(workdir, 'package.json'), '{"name":"unrelated"}');
+    expect(isArtibotRepo(workdir)).toBe(false);
+  });
+
+  it('returns false defensively for empty / null cwd (and no process fallback hit)', () => {
+    expect(isArtibotRepo('')).toBe(false);
+    // Argument explicitly null still returns false because the helper checks
+    // the supplied dir; it falls back to process.cwd() only when the arg is
+    // missing. Pass empty string above to exercise the !dir branch.
+    expect(isArtibotRepo(null)).toBe(false);
+  });
+
+  it('falls back to process.cwd() when called with no argument', () => {
+    const orig = process.cwd();
+    try {
+      process.chdir(workdir);
+      // No markers in workdir → false even via fallback.
+      expect(isArtibotRepo()).toBe(false);
+      writeFileSync(path.join(workdir, 'artibot.config.json'), '{}');
+      expect(isArtibotRepo()).toBe(true);
+    } finally {
+      process.chdir(orig);
+    }
   });
 });

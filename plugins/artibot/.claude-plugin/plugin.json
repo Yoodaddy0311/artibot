@@ -6,16 +6,29 @@
     "name": "Artience"
   },
   "repository": "https://github.com/Yoodaddy0311/artibot",
+  "homepage": "https://github.com/Yoodaddy0311/artibot",
   "license": "MIT",
-  "keywords": [
+  "categories": [
     "orchestration",
     "agent-teams",
+    "learning",
+    "marketing",
+    "korean"
+  ],
+  "compatibility": {
+    "claudeCode": ">=1.0",
+    "node": ">=20"
+  },
+  "keywords": [
+    "claude-code-plugin",
+    "orchestration",
+    "agent-teams",
+    "korean",
+    "self-improving",
     "personas",
-    "workflow",
     "tdd",
     "code-review",
     "security",
-    "quality",
     "mcp",
     "marketing",
     "seo",

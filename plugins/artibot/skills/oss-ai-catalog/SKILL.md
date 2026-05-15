@@ -23,6 +23,7 @@ description: |
   - any "what tool should I use for X" question in an AI/ML context
 
   DO NOT hardcode recommendations in agent prompts; consult this skill so recommendations stay fresh.
+lang: [en, ko]
 whenNotToUse: "Proprietary or commercial-only tool recommendations; do not apply when the user explicitly needs a managed SaaS product and open-source constraints do not apply."
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 2

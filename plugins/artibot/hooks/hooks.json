@@ -480,88 +480,13 @@
             "type": "command",
             "command": "node",
             "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/user-prompt-handler.js"
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/_userprompt-dispatcher.js"
             ],
-            "timeout": 3000
+            "timeout": 8000
           }
         ],
         "priority": "operational",
         "category": "lifecycle"
-      },
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/auto-team-trigger.js"
-            ],
-            "timeout": 3000
-          }
-        ],
-        "priority": "operational",
-        "category": "team"
-      },
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/runtime-prompt.js"
-            ],
-            "timeout": 3000
-          }
-        ],
-        "priority": "operational",
-        "category": "lifecycle"
-      },
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/autopilot-nlu-trigger.js"
-            ],
-            "timeout": 3000
-          }
-        ],
-        "priority": "advisory",
-        "category": "autopilot"
-      },
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/git-autopilot-save.js"
-            ],
-            "timeout": 5000
-          }
-        ],
-        "priority": "operational",
-        "category": "git"
-      },
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/ambiguity-guard.js"
-            ],
-            "timeout": 3000
-          }
-        ],
-        "priority": "advisory",
-        "category": "quality"
       }
     ],
     "SubagentStart": [

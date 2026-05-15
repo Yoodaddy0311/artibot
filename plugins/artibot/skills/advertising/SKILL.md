@@ -2,6 +2,7 @@
 context: fork
 name: advertising
 description: "Designs paid advertising campaigns with creative briefs, platform constraints, and bidding strategy optimization for Google Ads, Meta Ads, and LinkedIn Ads. Use when user asks about advertising, ad copy, paid media, Google Ads, Meta Ads, PPC, retargeting, creative brief, 광고, 유료 광고, or 리타겟팅."
+lang: [en, ko]
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 3
 triggers:

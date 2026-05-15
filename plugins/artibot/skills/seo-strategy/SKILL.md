@@ -2,6 +2,7 @@
 context: fork
 name: seo-strategy
 description: "Develops SEO strategy including keyword research, search intent classification, ranking factor analysis, keyword clustering, and GEO (Generative Engine Optimization). Use when user asks about SEO strategy, keyword research, search intent, ranking factors, content gap analysis, SEO roadmap, GEO, 검색엔진최적화, 키워드 리서치, or 검색 의도."
+lang: [en, ko]
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 3
 triggers:

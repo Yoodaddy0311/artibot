@@ -2,6 +2,7 @@
 context: fork
 name: lead-management
 description: "Manages lead lifecycle including lead scoring, qualification, nurture sequences, CRM workflows, MQL/SQL handoff, and pipeline optimization. Use when user asks about lead management, lead scoring, lead qualification, MQL, SQL, lead nurture, pipeline, CRM workflow, 리드 관리, 리드 스코어링, or 리드 육성."
+lang: [en, ko]
 level: 3
 triggers:
   - "lead"

@@ -158,11 +158,56 @@ export async function loadSkills(pluginRoot) {
  * @property {string} description - Short description
  * @property {string[]} triggers - Trigger keywords for matching
  * @property {string[]} platforms - Supported platforms
+ * @property {string[]} lang - Languages this skill is authored in (e.g. ["en"], ["en","ko"])
  */
+
+/**
+ * Detect the user's preferred language code (lowercased two-letter, e.g. "ko", "en").
+ * Reads CLAUDE_LOCALE > LC_ALL > LANG; defaults to "en" when unset/invalid.
+ * Exported for testing.
+ *
+ * @returns {string}
+ */
+export function detectUserLocale() {
+  const raw =
+    process.env.CLAUDE_LOCALE ||
+    process.env.LC_ALL ||
+    process.env.LANG ||
+    'en';
+  const m = String(raw).toLowerCase().match(/^([a-z]{2})/);
+  return m ? m[1] : 'en';
+}
+
+/**
+ * Stable-sort skill index entries so that entries matching the user's locale
+ * appear first. Entries lacking a `lang` array are treated as `["en"]`.
+ *
+ * @param {SkillIndexEntry[]} entries
+ * @param {string} [locale] - Defaults to detectUserLocale()
+ * @returns {SkillIndexEntry[]}
+ */
+export function prioritizeByLang(entries, locale) {
+  const userLang = (locale ?? detectUserLocale()).toLowerCase();
+  return entries
+    .map((entry, i) => ({ entry, i }))
+    .sort((a, b) => {
+      const aHit = (a.entry.lang ?? ['en']).includes(userLang) ? 0 : 1;
+      const bHit = (b.entry.lang ?? ['en']).includes(userLang) ? 0 : 1;
+      if (aHit !== bHit) return aHit - bHit;
+      return a.i - b.i;
+    })
+    .map(({ entry }) => entry);
+}
 
 /**
  * Load a lightweight skill index (frontmatter only, no body content).
  * Used for lazy loading: match triggers first, then load full skill on demand.
+ *
+ * Entries are returned in locale-preferred order: skills whose `lang` field
+ * matches the active locale (CLAUDE_LOCALE / LC_ALL / LANG) come first, with
+ * the original directory order preserved within each tier. This biases the
+ * downstream substring matcher toward locale-appropriate skills without
+ * dropping any candidate.
  *
  * @param {string} [pluginRoot] - Override plugin root path
  * @returns {Promise<SkillIndexEntry[]>}
@@ -182,6 +227,9 @@ export async function loadSkillIndex(pluginRoot) {
     const { frontmatter } = parseFrontmatter(content);
     const dirName = path.basename(dir);
     const triggers = Array.isArray(frontmatter.triggers) ? frontmatter.triggers : [];
+    const lang = Array.isArray(frontmatter.lang) && frontmatter.lang.length > 0
+      ? frontmatter.lang.map((l) => String(l).toLowerCase())
+      : ['en'];
 
     index.push({
       name: frontmatter.name ?? dirName,
@@ -189,10 +237,11 @@ export async function loadSkillIndex(pluginRoot) {
       description: frontmatter.description ?? '',
       triggers: triggers.map((t) => t.toLowerCase()),
       platforms: frontmatter.platforms ?? [],
+      lang,
     });
   }
 
-  return index;
+  return prioritizeByLang(index);
 }
 
 /**

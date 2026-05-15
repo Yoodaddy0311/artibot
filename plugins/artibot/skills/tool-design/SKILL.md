@@ -6,6 +6,7 @@ description: |
   에이전트 도구 설계 아키텍처 패턴 - 통합 vs 분리 트레이드오프, description engineering, architectural reduction.
   Auto-activates when: creating agent tools, debugging tool failures, optimizing tool sets.
   Triggers: tool design, tool API, MCP tool, agent tool, 도구 설계
+lang: [en, ko]
 platforms: [claude-code]
 level: progressive
 progressive_disclosure:

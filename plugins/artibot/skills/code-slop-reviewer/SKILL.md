@@ -2,6 +2,7 @@
 context: fork
 name: code-slop-reviewer
 description: "Detects AI-generated code slop patterns (defensive try/catch wrapping, premature abstractions, builtin wrappers, owner-less TODOs, over-configurable params) and scores 0-100 across five tiers. Gating input for code-reviewer agent. Use when user asks about code slop, AI 코드 검토, over-engineering 탐지, defensive code, boilerplate 코드, PR 리뷰, 코드 품질 게이트, slop detection, or LLM 코드 검증."
+lang: [en, ko]
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 3
 triggers:

@@ -197,7 +197,10 @@ function loadRuntimeConfig(pluginRoot) {
         },
       },
     };
-  } catch {
+  } catch (err) {
+    process.stderr.write(
+      `[runtime-prompt] config parse failed, using defaults: ${err?.message || err}\n`,
+    );
     return defaults;
   }
 }
@@ -449,12 +452,18 @@ function composePromptOutput({ prepared, prompt, effortMeta, taskBudgetDirective
   return { user_prompt: finalUserPrompt, message: finalMessage };
 }
 
-async function main() {
-  const raw = await readStdin();
-  const hookData = parseJSON(raw);
-
+/**
+ * Pure handler for UserPromptSubmit. Used by the in-process dispatcher
+ * (named export) and the legacy stdin/stdout main() entry point.
+ *
+ * @param {object} hookData - Parsed hook payload (already JSON-decoded).
+ * @returns {Promise<{ user_prompt: string, message: string } | null>}
+ *   - object when a runtime envelope was prepared
+ *   - null when no prompt was present
+ */
+export async function handleUserPromptSubmit(hookData) {
   const prompt = hookData?.user_prompt || hookData?.content || '';
-  if (!prompt) return;
+  if (!prompt) return null;
 
   const pluginRoot = getPluginRoot();
   const runtimeConfig = loadRuntimeConfig(pluginRoot);
@@ -463,7 +472,7 @@ async function main() {
   const useNativeApi = effortConfig.nativeApi === true;     // default false
 
   const prepared = await fallbackPreparePrompt(prompt, pluginRoot, hookData);
-  if (!prepared) return;
+  if (!prepared) return null;
 
   persistTokenUsage(prepared.context, pluginRoot);
 
@@ -477,9 +486,28 @@ async function main() {
     await applyNativeEffortHint(effortMeta.effort, pluginRoot);
   }
 
-  writeStdout(composePromptOutput({
+  return composePromptOutput({
     prepared, prompt, effortMeta, taskBudgetDirective, injectPrompt,
-  }));
+  });
 }
 
-main().catch(createErrorHandler('runtime-prompt'));
+async function main() {
+  const raw = await readStdin();
+  const hookData = parseJSON(raw);
+  const result = await handleUserPromptSubmit(hookData ?? {});
+  if (result) writeStdout(result);
+}
+
+const isMain = (() => {
+  try {
+    const argv1 = process.argv[1] ? path.resolve(process.argv[1]) : '';
+    const here = path.resolve(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'));
+    return argv1 === here;
+  } catch {
+    return false;
+  }
+})();
+
+if (isMain) {
+  main().catch(createErrorHandler('runtime-prompt'));
+}

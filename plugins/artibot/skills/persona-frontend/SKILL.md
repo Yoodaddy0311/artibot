@@ -3,6 +3,7 @@ context: fork
 user-invocable: false
 name: persona-frontend
 description: "UX and accessibility-focused frontend decision framework for component creation, responsive design, and Core Web Vitals optimization. Use when user creates UI components, works on responsive design, accessibility or WCAG compliance, CSS, React, Vue, or design systems, or mentions 컴포넌트, 반응형, or 접근성."
+lang: [en, ko]
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 3
 triggers:

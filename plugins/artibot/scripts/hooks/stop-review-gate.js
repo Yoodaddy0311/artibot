@@ -6,12 +6,13 @@
  * @module scripts/hooks/stop-review-gate
  */
 
-import { execFileSync, execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { atomicWriteSync, getPluginRoot, parseJSON, readStdin, writeStdout } from '../utils/index.js';
-import { createErrorHandler, hasExtension, isSkippablePath } from '../../lib/core/hook-utils.js';
+import { createErrorHandler, hasExtension, isArtibotRepo, isSkippablePath } from '../../lib/core/hook-utils.js';
+import { getHeadSha, getRepoRoot } from '../../lib/git/repo-root-cache.js';
 
 const HOOK_NAME = 'stop-review-gate';
 const STATE_FILE = 'last-review-gate-sha.txt';
@@ -39,19 +40,8 @@ const SENSITIVE_FILENAMES = new Set([
 // -------------------------------------------------------------------------
 // Git Helpers
 // -------------------------------------------------------------------------
-
-/** @returns {string|null} */
-function getRepoRoot() {
-  try {
-    return execSync('git rev-parse --show-toplevel', {
-      encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-      windowsHide: true,
-    }).trim();
-  } catch {
-    return null;
-  }
-}
+// getRepoRoot / getHeadSha imported from lib/git/repo-root-cache.js
+// (process-scoped memoize — see v4.7.3 perf-auditor A1).
 
 /** @returns {string[]} Changed file paths relative to repo root */
 function getChangedFiles(cwd) {
@@ -72,21 +62,29 @@ function getChangedFiles(cwd) {
         return cols.length > 1 ? cols[cols.length - 1] : cols[0];
       })
       .filter(Boolean);
-  try {
-    const output = execSync(
-      'git diff --name-status --diff-filter=ACMR HEAD~1 HEAD 2>/dev/null'
-        + ' || git diff --name-status --diff-filter=ACMR HEAD',
-      {
-        cwd,
-        encoding: 'utf-8',
-        stdio: ['ignore', 'pipe', 'ignore'],
-        windowsHide: true,
-      },
-    );
-    return parse(output);
-  } catch {
-    return [];
+  // Try HEAD~1..HEAD first (post-commit diff). Fall back to working-tree
+  // diff vs HEAD when no parent commit exists (initial commit, shallow
+  // clone). execFileSync (no shell) avoids POSIX-only `2>/dev/null || ...`
+  // chaining that silently failed on Windows cmd.exe and emitted no diff
+  // for any changed file — see issue-scanner W4 P1-1.
+  const opts = {
+    cwd,
+    encoding: 'utf-8',
+    stdio: ['ignore', 'pipe', 'ignore'],
+    timeout: 5000,
+    windowsHide: true,
+  };
+  for (const args of [
+    ['diff', '--name-status', '--diff-filter=ACMR', 'HEAD~1', 'HEAD'],
+    ['diff', '--name-status', '--diff-filter=ACMR', 'HEAD'],
+  ]) {
+    try {
+      return parse(execFileSync('git', args, opts));
+    } catch {
+      // try next variant
+    }
   }
+  return [];
 }
 
 // -------------------------------------------------------------------------
@@ -159,20 +157,6 @@ function hasNewerEdits(pluginRoot, repoRoot, changedFiles) {
     }
   }
   return false;
-}
-
-/** @returns {string|null} */
-function getHeadSha(repoRoot) {
-  try {
-    return execSync('git rev-parse HEAD', {
-      cwd: repoRoot,
-      encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-      windowsHide: true,
-    }).trim();
-  } catch {
-    return null;
-  }
 }
 
 // -------------------------------------------------------------------------
@@ -490,6 +474,13 @@ async function main() {
     log('Not in a git repository, skipping review gate');
     return;
   }
+
+  // v4.7.4 hotfix: skip silently when running in a non-Artibot repo.
+  // Artibot installs globally to ~/.claude/, so this Stop hook fires for
+  // every Claude Code session. The review gate's rules (mirror tests under
+  // plugins/artibot/tests/**, etc.) are Artibot-specific and produce false
+  // positives elsewhere. Same guard as dev-verify-gate.js:242.
+  if (!isArtibotRepo(repoRoot)) return;
 
   const changedFiles = getChangedFiles(repoRoot);
   if (changedFiles.length === 0) {
