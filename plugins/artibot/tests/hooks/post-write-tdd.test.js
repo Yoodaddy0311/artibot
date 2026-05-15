@@ -23,6 +23,22 @@ vi.mock('node:fs', async () => {
   };
 });
 
+// v4.7.4: post-write-tdd now bails out outside the Artibot plugin repo.
+// Tests assume the gate is open by default; the in-Artibot=false case has
+// its own dedicated test below that overrides this mock.
+let isArtibotRepoMock = vi.fn(() => true);
+vi.mock('../../lib/core/hook-utils.js', async () => {
+  const actual = await vi.importActual('../../lib/core/hook-utils.js');
+  return {
+    ...actual,
+    isArtibotRepo: (...args) => isArtibotRepoMock(...args),
+  };
+});
+
+vi.mock('../../lib/git/repo-root-cache.js', () => ({
+  getRepoRoot: vi.fn(() => '/fake/repo'),
+}));
+
 const { readStdin, writeStdout, getPluginRoot } = await import('../../scripts/utils/index.js');
 const { existsSync } = await import('node:fs');
 
@@ -138,6 +154,21 @@ describe('post-write-tdd hook', () => {
     vi.resetModules();
     getPluginRoot.mockReturnValue('/nonexistent-plugin-root');
     existsSync.mockReturnValue(false);
+    // Default: assume we're inside the Artibot repo so the gate proceeds.
+    isArtibotRepoMock = vi.fn(() => true);
+  });
+
+  it('silently skips when not running inside an Artibot repo', async () => {
+    isArtibotRepoMock = vi.fn(() => false);
+    readStdin.mockResolvedValue(makeHookData('Write', '/user-project/lib/foo.js'));
+    existsSync.mockReturnValue(false);
+
+    await import('../../scripts/hooks/post-write-tdd.js');
+    await new Promise((r) => setTimeout(r, 30));
+
+    // No advisory token emitted in user projects — the lib/ → tests/ mirror
+    // convention is Artibot-internal and would be noise elsewhere.
+    expect(writeStdout).not.toHaveBeenCalled();
   });
 
   it('suggests TDD when lib file has no test mirror', async () => {

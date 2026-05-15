@@ -6,7 +6,7 @@
  */
 
 import path from 'node:path';
-import { readdirSync, statSync, unlinkSync } from 'node:fs';
+import { existsSync, readdirSync, statSync, unlinkSync } from 'node:fs';
 
 // -------------------------------------------------------------------------
 // Path Validation
@@ -159,6 +159,37 @@ export function getStatePath() {
 export function isEnvEnabled(varName) {
   const value = process.env[varName];
   return value === '1' || value === 'true';
+}
+
+/**
+ * Detect whether the given directory is the Artibot plugin repo itself.
+ *
+ * Artibot installs globally to `~/.claude/`, so its hooks fire in every
+ * Claude Code session — including unrelated user projects. Hooks that
+ * enforce Artibot-specific policy (DEV verify, review-gate quality rules,
+ * TDD mirror suggestions, etc.) must gate on this helper to avoid
+ * false-positive noise outside the plugin repo.
+ *
+ * Detection signals (any one is sufficient):
+ *   - `plugins/artibot/CLAUDE.md`        → working from the Artibot monorepo root
+ *   - `artibot.config.json` at cwd       → working inside the plugin directory
+ *
+ * This is the source-of-truth replacing the previously-duplicated
+ * implementations in `dev-verify-gate.js` and `stop-review-gate.js`.
+ *
+ * @param {string} [cwd] - Directory to check. When the argument is omitted
+ *   entirely, falls back to `process.cwd()`. A falsy value passed
+ *   explicitly (e.g. `''` or `null`) returns `false` defensively, matching
+ *   the contract callers like the post-write-tdd hook depend on.
+ * @returns {boolean}
+ */
+export function isArtibotRepo(cwd) {
+  const dir = arguments.length === 0 ? process.cwd() : cwd;
+  if (!dir) return false;
+  return (
+    existsSync(path.join(dir, 'plugins', 'artibot', 'CLAUDE.md')) ||
+    existsSync(path.join(dir, 'artibot.config.json'))
+  );
 }
 
 // -------------------------------------------------------------------------

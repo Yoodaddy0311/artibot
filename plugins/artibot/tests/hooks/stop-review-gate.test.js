@@ -39,6 +39,17 @@ vi.mock('../../lib/core/hook-utils.js', () => ({
     return set.has(file.slice(idx));
   }),
   isSkippablePath: vi.fn(() => false),
+  // v4.7.4: hook now imports isArtibotRepo from hook-utils. Reuse the same
+  // existsSync-substring map already driving the gate so each test can
+  // toggle the Artibot-repo signal independently.
+  isArtibotRepo: vi.fn((cwd) => {
+    if (!cwd) return false;
+    for (const [key, val] of Object.entries(mockState.existsSyncResults)) {
+      if (key === 'CLAUDE.md' && val) return true;
+      if (key === 'artibot.config.json' && val) return true;
+    }
+    return false;
+  }),
   logHookError: vi.fn(),
 }));
 

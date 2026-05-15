@@ -9,9 +9,11 @@
  * Tracking file: /tmp/artibot-read-tracking-{sessionId}.json
  */
 
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
+import { getRepoRoot } from '../../lib/git/repo-root-cache.js';
 
 /** Files that are always allowed without a prior Read. */
 const WHITELIST_BASENAMES = new Set(['CLAUDE.md', 'CLAUDE.local.md']);
@@ -48,22 +50,37 @@ function isWhitelisted(filePath) {
 
 /**
  * Determine if the write-before-read guard should be enforced.
- * Uses a two-tier check:
- *   1. Project marker: CWD must contain artibot.config.json (opt-in)
- *   2. File scope: file must be inside the plugin root or CWD
- * External projects without the marker file are always approved.
+ *
+ * Tier 1 (Artibot-repo gate): the cwd's git repo-root — NOT the cwd itself —
+ * must contain `plugins/artibot/CLAUDE.md` or `artibot.config.json`. The
+ * earlier cwd-only check produced false positives in monorepo subdirectories
+ * (a sibling `artibot.config.json` in a parent dir would match unrelated
+ * subprojects); resolving via `getRepoRoot()` constrains detection to the
+ * actual repo we're inside.
+ *
+ * Tier 2 (file-scope gate): the file being written must live inside the
+ * plugin root OR inside the cwd (case-insensitive on Windows), to avoid
+ * tracking writes that escape the project boundary.
+ *
+ * External projects without an Artibot marker are always approved silently.
+ *
  * @param {string} filePath
  * @returns {boolean}
  */
 function shouldEnforceGuard(filePath) {
   if (!filePath) return false;
 
-  // Tier 1: Project marker check — only enforce in artibot projects
   const cwd = process.cwd();
-  const hasMarker = existsSync(path.join(cwd, 'artibot.config.json'))
-    || existsSync(path.join(cwd, 'plugins', 'artibot', 'artibot.config.json'));
+
+  // Tier 1: Artibot marker check anchored on the actual repo root, not cwd —
+  // prevents false positives where a parent directory in a monorepo carries
+  // an unrelated artibot.config.json. Falls back to cwd when not in a git
+  // repo (preserves the legacy bare-directory checkout behaviour).
+  const repoRoot = getRepoRoot(cwd) || cwd;
+  const hasMarker = existsSync(path.join(repoRoot, 'plugins', 'artibot', 'CLAUDE.md'))
+    || existsSync(path.join(repoRoot, 'artibot.config.json'));
   if (!hasMarker) {
-    process.stderr.write(`[artibot:pre-write-guard] Skipped: no artibot.config.json in CWD (${cwd})
+    process.stderr.write(`[artibot:pre-write-guard] Skipped: not an Artibot repo (repoRoot=${repoRoot})
 `);
     return false;
   }
@@ -77,8 +94,63 @@ function shouldEnforceGuard(filePath) {
   if (cwdNorm && norm.startsWith(cwdNorm)) return true;
   return norm.includes('plugins/artibot/');
 }
-import { atomicWriteSync, parseJSON, readStdin, writeStdout } from '../utils/index.js';
+import { atomicWriteSync, getPluginRoot, parseJSON, readStdin, writeStdout } from '../utils/index.js';
 import { createErrorHandler, extractFilePath, extractToolName, normalizePath } from '../../lib/core/hook-utils.js';
+
+const BLOCK_FINGERPRINT_FILE = 'last-pre-write-block.txt';
+
+/**
+ * Build a fingerprint that uniquely identifies a (sessionId, toolName,
+ * filePath) attempt. Two consecutive attempts with the same fingerprint
+ * indicate the model is retrying the same blocked operation — feed the
+ * second attempt through as approve to break the loop.
+ *
+ * Pattern mirrors dev-verify-gate.js:151-156 (sha1-truncated fingerprint
+ * cached on disk between hook invocations).
+ *
+ * @param {string} sessionId
+ * @param {string} toolName
+ * @param {string} normalizedPath
+ * @returns {string}
+ */
+function buildBlockFingerprint(sessionId, toolName, normalizedPath) {
+  return createHash('sha1')
+    .update(`${sessionId}|${toolName}|${normalizedPath}`)
+    .digest('hex')
+    .slice(0, 16);
+}
+
+/**
+ * Read the last block fingerprint from disk. Returns empty string when the
+ * fingerprint file does not exist or is unreadable.
+ * @returns {string}
+ */
+function readLastBlockFingerprint() {
+  try {
+    const filePath = path.join(getPluginRoot(), 'runtime', BLOCK_FINGERPRINT_FILE);
+    if (!existsSync(filePath)) return '';
+    return readFileSync(filePath, 'utf-8').trim();
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Persist the latest block fingerprint to disk so the next attempt can
+ * detect a duplicate and bypass the block.
+ * @param {string} fingerprint
+ */
+function saveBlockFingerprint(fingerprint) {
+  try {
+    const dir = path.join(getPluginRoot(), 'runtime');
+    if (!existsSync(dir)) {
+      mkdirSync(dir, { recursive: true });
+    }
+    atomicWriteSync(path.join(dir, BLOCK_FINGERPRINT_FILE), fingerprint + '\n');
+  } catch {
+    // best-effort — fingerprint persistence is a UX nicety, not load-bearing
+  }
+}
 
 /**
  * Build the tracking file path for a given session.
@@ -247,11 +319,27 @@ function handleWriteGuard(hookData) {
     return;
   }
 
+  // Loop guard: when the model retries the same blocked Write/Edit (same
+  // sessionId + toolName + filePath), downgrade the second block to approve.
+  // This breaks the user-reported "block → retry → block → ... must end
+  // session" loop. Fingerprint persists across hook invocations on disk so
+  // separate Node child-processes can share the bypass signal. Pattern
+  // mirrors dev-verify-gate.js's fingerprint cache (l.151-186).
+  const fingerprint = buildBlockFingerprint(sessionId, toolName, normalized);
+  if (readLastBlockFingerprint() === fingerprint) {
+    process.stderr.write(
+      `[pre-write-guard] duplicate block bypassed (loop guard) — file: ${filePath}\n`,
+    );
+    writeStdout({ decision: 'approve' });
+    return;
+  }
+
   // Block: existing file not read before write/edit
   const reason = `[WRITE-BEFORE-READ] ${toolName} blocked for "${filePath}". `
     + 'File exists but was not Read in this session. '
     + 'Read the file first to understand its contents before modifying.';
   process.stderr.write(`[artibot:pre-write-guard] ${reason}\n`);
+  saveBlockFingerprint(fingerprint);
   writeStdout({ decision: 'block', reason });
 }
 

@@ -11,7 +11,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { atomicWriteSync, getPluginRoot, parseJSON, readStdin, writeStdout } from '../utils/index.js';
-import { createErrorHandler, hasExtension, isSkippablePath } from '../../lib/core/hook-utils.js';
+import { createErrorHandler, hasExtension, isArtibotRepo, isSkippablePath } from '../../lib/core/hook-utils.js';
 import { getHeadSha, getRepoRoot } from '../../lib/git/repo-root-cache.js';
 
 const HOOK_NAME = 'stop-review-gate';
@@ -42,27 +42,6 @@ const SENSITIVE_FILENAMES = new Set([
 // -------------------------------------------------------------------------
 // getRepoRoot / getHeadSha imported from lib/git/repo-root-cache.js
 // (process-scoped memoize — see v4.7.3 perf-auditor A1).
-
-/**
- * Return true when the current repo is the Artibot plugin repo itself.
- *
- * The review-gate enforces Artibot-specific quality rules (e.g. mirror tests
- * under plugins/artibot/tests/**, JSDoc patterns, sensitive-file guard tuned
- * to this codebase). Running it in unrelated user repos was producing false
- * positives — every .js file under scripts/ was flagged as "Code without
- * tests" because plugins/artibot/tests/ doesn't exist there. v4.7.4 hotfix:
- * silent skip when not in Artibot repo. Mirrors dev-verify-gate.js:102-108.
- *
- * @param {string} repoRoot
- * @returns {boolean}
- */
-function isArtibotRepo(repoRoot) {
-  if (!repoRoot) return false;
-  return (
-    existsSync(path.join(repoRoot, 'plugins', 'artibot', 'CLAUDE.md')) ||
-    existsSync(path.join(repoRoot, 'artibot.config.json'))
-  );
-}
 
 /** @returns {string[]} Changed file paths relative to repo root */
 function getChangedFiles(cwd) {
