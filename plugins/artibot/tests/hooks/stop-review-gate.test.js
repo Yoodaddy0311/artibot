@@ -88,7 +88,9 @@ function reset() {
   mockState.readStdinResult = Promise.resolve('{}');
   mockState.execSyncResponses = [];
   mockState.execLog = [];
-  mockState.existsSyncResults = {};
+  // v4.7.4: default to Artibot repo so existing tests still exercise the gate.
+  // The new "skips silently when not in Artibot repo" test overrides this to {}.
+  mockState.existsSyncResults = { 'artibot.config.json': true };
   mockState.readFileSyncImpl = () => { throw new Error('ENOENT'); };
   mockState.writeStdoutCalls = [];
 }
@@ -152,6 +154,8 @@ describe('stop-review-gate — getChangedFiles --diff-filter=ACMR', () => {
       'plugins/artibot/lib/foo.js': true,
       'plugins/artibot/lib/bar.js': true,
       'plugins/artibot/tests': false,
+      // v4.7.4: isArtibotRepo gate signal — must pass for the gate to proceed.
+      'CLAUDE.md': true,
       'artibot.config.json': false,
     };
     mockState.readFileSyncImpl = () => 'export const x = 1;\n';
@@ -181,6 +185,8 @@ describe('stop-review-gate — getChangedFiles --diff-filter=ACMR', () => {
       // ensure we don't claim old/foo.js exists
       'old/foo.js': false,
       'plugins/artibot/tests': false,
+      // v4.7.4: isArtibotRepo gate signal — must pass for the gate to proceed.
+      'CLAUDE.md': true,
       'artibot.config.json': false,
     };
     // readFileSync should only be called for files reported as changed.
@@ -205,5 +211,44 @@ describe('stop-review-gate — getChangedFiles --diff-filter=ACMR', () => {
       const receivedFiles = text.match(/(\d+)\s+changed file/);
       expect(receivedFiles?.[1]).toBe('2');
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v4.7.4 hotfix — isArtibotRepo guard (silent skip in non-Artibot repos)
+// ---------------------------------------------------------------------------
+describe('stop-review-gate — isArtibotRepo guard', () => {
+  it('skips silently when not in Artibot repo (no plugins/artibot/CLAUDE.md, no artibot.config.json)', async () => {
+    // Override default Artibot-repo mock with empty existsSync — every path
+    // returns false → isArtibotRepo() returns false → main() returns silently.
+    mockState.existsSyncResults = {};
+    mockState.execSyncResponses = [
+      ['git rev-parse --show-toplevel', '/some/other/repo'],
+      // No diff mock — if main() proceeds past isArtibotRepo it will throw.
+    ];
+    mockState.readStdinResult = Promise.resolve(JSON.stringify({}));
+
+    await import('../../scripts/hooks/stop-review-gate.js');
+
+    expect(mockState.writeStdoutCalls).toHaveLength(0);
+    const logs = stderrSpy.mock.calls.map(([m]) => m).join('');
+    // Should not log review-gate messages — completely silent.
+    expect(logs).not.toContain('Review gate');
+    expect(logs).not.toContain('changed files');
+  });
+
+  it('proceeds when in Artibot repo (plugins/artibot/CLAUDE.md present)', async () => {
+    mockState.existsSyncResults = { 'CLAUDE.md': true };
+    mockState.execSyncResponses = [
+      ['git rev-parse --show-toplevel', '/artibot/repo'],
+      ['git diff --name-status', ''],
+    ];
+    mockState.readStdinResult = Promise.resolve(JSON.stringify({}));
+
+    await import('../../scripts/hooks/stop-review-gate.js');
+
+    // No-changes path emits an approve decision.
+    expect(mockState.writeStdoutCalls).toHaveLength(1);
+    expect(mockState.writeStdoutCalls[0].decision).toBe('approve');
   });
 });
