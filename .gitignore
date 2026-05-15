@@ -23,6 +23,7 @@ plugins/artibot/docs/*
 # User-facing docs (linked from README) must be tracked
 !plugins/artibot/docs/SCHEDULED-JOBS.md
 !plugins/artibot/docs/MCP-SETUP.md
+!plugins/artibot/docs/PRD-TELEGRAM-MCP.md
 plugins/artibot/coverage/
 plugins/artibot/image.png
 # Runtime state files (token usage, sessions, hashes) — never commit; caused rebase corruption v3.9.0→v3.9.1
