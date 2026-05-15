@@ -45,6 +45,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.7.5] - 2026-05-15
+
+GitHub MCP PoC (Phase 1) — opt-in integration of the official `github/github-mcp-server` so designated agents can read GitHub repo / issue / PR / code-scanning context without leaving Claude Code.
+
+### Added
+
+- **`.mcp.json`** — registers the official GitHub MCP via remote HTTP transport at `https://api.githubcopilot.com/mcp/`. Authenticates with `${GITHUB_TOKEN}` (Bearer header). Zero install: no Docker, no npm package — works the moment the env var is set. Falls back silently when `GITHUB_TOKEN` is unset, so users without a PAT are unaffected.
+- **`artibot.config.json`** — `autopilot.mcp.allowList` accepts `mcp__github__*` and `denyHostPatterns` whitelists `api.githubcopilot.com`. Read-only enforcement is layered: PAT scope (recommended fine-grained read-only) + allow-list pattern + the upstream server's read toolsets.
+- **`agents/{orchestrator,code-reviewer,security-reviewer,frontend-developer,backend-developer}.md`** — new `availableMcps: [github]` frontmatter field declares which agents may call GitHub MCP tools. All other agents are excluded by omission (data-analyst, content-marketer, etc.).
+- **`docs/MCP-SETUP.md`** — user-facing setup guide covering fine-grained PAT creation (read-only scopes only), `GITHUB_TOKEN` env var setup for Windows / macOS / Linux, security guidance (rotation, never commit, fine-grained over classic), verification (`claude mcp list`), and disabling.
+- **`tests/mcp/github-mcp-config.test.js`** — pins the config contract: valid JSON, http transport, official URL, Bearer placeholder (no hard-coded token), allow-list pattern present, allowed host whitelisted.
+
+### Notes
+
+- The original prompt suggested `npx -y github-mcp-server@latest`. That package on npm is an unrelated third-party Git CLI wrapper, and `@modelcontextprotocol/server-github` is deprecated. The official `github/github-mcp-server` is Go-based and is distributed only as a remote HTTP endpoint, a Docker image, or a pre-built binary. Remote HTTP was selected to preserve the zero-install UX of `context7` / `playwright`.
+- `code-security` toolset access (Code Scanning / Dependabot alerts) requires the corresponding read permissions on the PAT — see `docs/MCP-SETUP.md`.
+
+---
+
 ## [4.7.1] - 2026-05-13
 
 Patch release — closes the e2e-test regression introduced by v4.6.4's hooks.json exec-form migration. Pure test-infrastructure fix: the `tests/e2e/plugin-init-flow.test.js` helpers were reading `h.command` directly, which now contains only `"node"` after the migration (the script path moved to `h.args[]`). v4.6.4 and v4.7.0 ship the same runtime behavior — only their tagged release builds had a failing E2E suite. v4.7.1 is the first tag whose Release workflow runs cleanly end-to-end.
