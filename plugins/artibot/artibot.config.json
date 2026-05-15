@@ -1,5 +1,5 @@
 {
-  "version": "4.6.1",
+  "version": "4.7.1",
   "agents": {
     "modelPolicy": {
       "high": {
@@ -753,6 +753,13 @@
         "\\.(s3|amazonaws|googleapis|blob\\.core\\.windows|firebaseio)\\."
       ],
       "comment": "MCP-driven Verification (P0-4): only Artibot self-plugin MCPs allowed. External MCP/host blocked. opt-in via --mcp-verify."
+    }
+  },
+  "git": {
+    "autopilot": {
+      "bypassPreCommitHooks": false,
+      "bypassPrePushHooks": false,
+      "comment": "v4.7.2 (issue-scanner W4 P1-3/P1-4): defaults to false. The autopilot save/close hooks honour the user's pre-commit / pre-push hooks unless these flags are explicitly set to true. Restoring the pre-v4.7.2 behaviour (silent --no-verify) requires explicit opt-in here."
     }
   },
   "swarm": {

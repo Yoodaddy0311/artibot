@@ -9,6 +9,188 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### Changed (BREAKING for users relying on silent commit/push)
+
+- **`scripts/hooks/git-autopilot-save.js`** + **`scripts/hooks/git-autopilot-close.js`** — auto-save / session-close commits and the auto-push step **no longer pass `--no-verify` by default**. The user's `pre-commit` and `pre-push` hooks now run, so secret-scan / lint / test gates can fail an autopilot commit instead of being silently bypassed (CLAUDE.md Git Safety Protocol).
+
+  To restore the pre-v4.7.2 behaviour, opt-in explicitly via `artibot.config.json`:
+
+  ```json
+  "git": {
+    "autopilot": {
+      "bypassPreCommitHooks": true,
+      "bypassPrePushHooks": true
+    }
+  }
+  ```
+
+  Per-repo override via `.git/autopilot.json` (`bypassPreCommitHooks` / `bypassPrePushHooks` keys) takes precedence over the plugin-level config.
+
+### Fixed
+
+- **`scripts/hooks/agent-evaluator.js`** — replace `lowerOutput.includes(marker)` substring match with word-boundary regex matching plus an error-negation phrase filter. Plain `.includes()` was firing `error` against `errorless`, `cannot` against `cannotation`, and was counting `no errors` / `0 issues found` / `error free build` as failures, inflating the error-marker rate for clean runs. Plural forms (`errors`, `failures`) still match via an `(s|es)?` suffix on single-word markers. (issue-scanner W4 P1-2)
+
+### Deprecated
+
+- **`scripts/hooks/_deprecated/`** — staging area for hooks with no registered usage in `hooks.json` and no internal import. Files moved here are scheduled for deletion after a 1-week monitoring window. If you depended on any of these, please file an issue before the scheduled removal date.
+  - `on-handoff.js`, `on-llm-start.js`, `on-llm-end.js` — Anthropic Agent SDK extension stubs (AD-07). Header explicitly notes "Not wired in hooks.json — Claude Code's native loader rejects snake_case event keys." Reserved for future SDK runtime wiring that never materialised. Scheduled deletion: **2026-05-21**.
+  - `auto-review-trigger.js` — Stop/SubagentStop reviewer-suggestion hook (PRD §5.3). Never registered in `hooks.json`; `stop-recap.js` only references it in a JSDoc comment. Scheduled deletion: **2026-05-21**.
+
+### Notes
+
+- `hooks.json` was **not** modified — all 4 deprecated files were already absent from the manifest.
+- Files retained in `scripts/hooks/` despite being unregistered: `event-emitter.mjs` (documented public API for the `hook-event-emitter` SKILL), `git-autopilot-merge.js` (imported by `git-autopilot-session.js:16`), `statusline.sh` (registered via `install.sh` as Claude Code `statusLine` slot), `skill-discovery-inject.js` (dynamic-imported by `session-start.js:369-371`), `check-console-log.js` (live test suite), `session-start-sweep.mjs` and `nightly-*.mjs` (designed but unwired — defer for separate evaluation).
+
+---
+
+## [4.7.1] - 2026-05-13
+
+Patch release — closes the e2e-test regression introduced by v4.6.4's hooks.json exec-form migration. Pure test-infrastructure fix: the `tests/e2e/plugin-init-flow.test.js` helpers were reading `h.command` directly, which now contains only `"node"` after the migration (the script path moved to `h.args[]`). v4.6.4 and v4.7.0 ship the same runtime behavior — only their tagged release builds had a failing E2E suite. v4.7.1 is the first tag whose Release workflow runs cleanly end-to-end.
+
+### Fixed
+
+- **`tests/e2e/plugin-init-flow.test.js`** — adds a `fullCommand(h)` helper that reconstitutes the legacy `"node ..."` string from `{command, args[]}` when `args[]` is present, falling back to `h.command` for any pre-migration shell-form entries. Applied to all 4 hook-registry assertions (`UserPromptSubmit`, `PostToolUse`, `CLAUDE_PLUGIN_ROOT` substitution, on-disk path existence).
+- **`README.md`** — bumps slash-command claim 59 → 61 to match the v4.6.4 ultra* alias additions. The `validate-readme-claims.js` PR gate caught this drift on PR #13.
+
+### Notes
+
+- v4.6.4 / v4.7.0 GitHub Releases are still valid — `gh release create` succeeded at tag time, only the auto-triggered Release workflow failed because it ran tests against the pre-fix tagged commits.
+- No code under `lib/` or `scripts/` changed; only test infrastructure + README claims.
+- Master CI passed end-to-end at `a81abac` (PR #13 merge commit) with 4128/4128 + e2e suite included.
+
+---
+
+## [4.7.0] - 2026-05-13
+
+Adds OpenTelemetry agent attribution propagation across the runtime middleware, learning records, and `/learning` dashboard. Enables answering "which agent was responsible when this tool failed" — a question the v4.6.4 measurement fix made answerable in principle (clean signal) but not yet attributable in practice (no agent column anywhere).
+
+**Synergy with v4.6.4**: Now that scoring is honest, attribution lets `/learning` Risk Signals isolate failures to a specific spawning agent rather than blaming the tool wholesale.
+
+### Added
+
+- **`lib/runtime/middleware/otel-middleware.js`** — pipeline spans now carry `artibot.agent_id` and `artibot.parent_agent_id` attributes when the active subagent contract supplies them. Backward compatible: top-level orchestrator spans (no contract) emit only the existing `artibot.agent` human-readable name. Both `buildPipelineSpan` and `buildMetricsFromState` propagate the new attributes consistently.
+- **`lib/learning/tool-learner.js`** — `UsageRecord` typedef extended with optional `callingAgent` (stable id of the invoker) and `parentAgent` (spawning agent in the chain). `recordUsage()` now persists `meta.agentId` → `callingAgent` and `meta.agentType` → `parentAgent`, skipping the `'unknown'` and `'main'` sentinels so they do not muddy aggregations. Pre-v4.7.0 records remain valid (fields are optional).
+- **`lib/cognitive/grpo-bridge.js`** — new `partitionRecordsByAgent(records)` helper groups `UsageRecord[]` by `callingAgent` so downstream consumers (Risk Signals, GRPO weight slicing) can compute per-agent metrics without re-implementing grouping. Records without attribution bucket under `__unattributed__`.
+- **`commands/learning.md`** — documents the `--by-agent` flag (groups Risk Signals + Top Performers by `callingAgent`) and adds two interpretation rows for `__unattributed__` dominance and agent-scoped tool failures.
+
+### Tests
+
+- **`tests/learning/tool-learner.test.js`** — 5 new attribution tests (94 → 99 passing): persistence of `callingAgent`/`parentAgent`, sentinel skip for `unknown`/`main`, backward-compat omission when `meta` is empty.
+- **`tests/cognitive/grpo-bridge.test.js`** — 5 new `partitionRecordsByAgent` tests (19 → 24): non-array safety, empty-array case, multi-agent grouping, `__unattributed__` bucketing, reference preservation.
+- **`tests/runtime/middleware/otel-middleware-smoke.test.js`** — 3 new tests (6 → 9): span attribute propagation, backward-compat omission when contract absent, metrics path attribute propagation.
+
+### Notes
+
+- The `--by-agent` flag in `/learning` is documented; the script-side rendering ships in a follow-up minor release once enough v4.7.0 records exist on disk to make the partitioned view useful.
+- Sub-agent OTEL context propagation across child processes is delegated to Claude Code itself; the contract assumes the runtime injects `agentId`/`parentAgentId` on the subagent contract object before middleware runs.
+
+---
+
+## [4.6.4] - 2026-05-13
+
+Fixes the measurement-bug class diagnosed by v4.6.3's `/learning` Risk Signals dashboard, migrates hook commands to upstream exec-form `args[]`, and adds compatibility aliases for upstream Claude Code commands. Pure measurement + plumbing — no GRPO algorithm change.
+
+### Fixed
+
+- **Learning-system `0.198` merge drag** (root cause of "20% success" Risk Signals for `mcp__playwright__evaluate`, `mcp__playwright__screenshot`, `AskUserQuestion`). Three independent fixes that together close the chain:
+  - **`scripts/hooks/tool-tracker.js`** — `SKIP_TOOLS` Set now also covers `AskUserQuestion`, `ExitPlanMode`, and `Skill` so they no longer fall through to the default `output ? 0.7 : 0.3` scorer and lock at 0.3.
+  - **`scripts/hooks/tool-tracker.js`** — new `mcp__*` branch in `scoreResult()` scores MCP tools by exit code + stderr length (Bash-style) instead of output length, which is unreliable for side-effect calls like `mcp__playwright__screenshot`.
+  - **`lib/swarm/pattern-packager.js`** — `packageToolPattern()`, `unpackToolWeights()`, and `unpackAgentWeights()` no longer fabricate `successRate: 0` (or `successRate = confidence`) when source data is missing. Fields are omitted instead, breaking the `0.66 × 0.3 + 0 × 0.7 = 0.198` arithmetic that dragged merged values down.
+  - **`lib/swarm/pattern-packager.js`** — `mergeEntries()` now treats `sampleSize: 0` on either side as "no real data" and returns the other side wholesale, providing defense-in-depth against legacy uploads that still carry fabricated zeros.
+
+### Changed
+
+- **`hooks/hooks.json`** — all 56 hook command entries migrated from shell-form `"command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/X.js [args]"` to exec-form `{ "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/hooks/X.js", ...] }`. Matches Claude Code v2.1.139+ recommended pattern for `${CLAUDE_PLUGIN_ROOT}` substitution (avoids shell quoting issues on Windows + Korean paths). Schema-validated against [json.schemastore.org/claude-code-hooks.json](https://json.schemastore.org/claude-code-hooks.json).
+
+### Added
+
+- **`commands/ultrareview.md`** — alias routing `/ultrareview` to Artibot's `/adversarial-review` (8-attack-surface review with `code-reviewer` + `security-reviewer` agents + OWASP Top 10 cross-check). Compatibility shim for users coming from upstream Claude Code naming.
+- **`commands/ultraplan.md`** — alias routing `/ultraplan` to Artibot's `/plan` (planner agent with risk identification + phase decomposition + autopilot hand-off). Compatibility shim.
+
+### Tests
+
+- **`tests/swarm/pattern-packager.test.js`** — 5 new regression tests covering the exact `0.198` merge arithmetic, omission of `successRate`/`avgMs` in pack/unpack when source data is absent, and `mergeEntries` defense-in-depth path. Existing "uses `??` defaults" test updated to match corrected semantics. 85 total tests now passing (was 79).
+- **`tests/hooks/tool-tracker.test.js`** — 9 new tests: 3 for SKIP_TOOLS additions, 6 for the `mcp__*` scoring branch. 74 total tests now passing (was 65).
+
+### Out of scope (deferred)
+
+- P2 agent score normalization (`quiz-investigator`, `meta410-auditor`, `version-comparator`) — observe after this fix propagates through swarm re-download; treat as separate ticket if scores remain anomalous.
+- A3 (OTEL `agent_id` / `parent_agent_id` propagation) — landed separately on v4.7.0 path; requires the v4.6.4 attribution baseline.
+
+---
+
+## [4.6.3] - 2026-05-12
+
+Adds `/learning` slash command for inspecting the on-disk state of the auto-learning + swarm federation system. Pure observation — never mutates state. Companion to the v4.6.2 schema improvements: now there is a one-step way to see what `certainty`, `weights.agents`, GRPO weights, and swarm sync look like at any moment.
+
+### Added
+
+- **`scripts/learning-diag.js`** — zero-dependency diagnostic script. Reads `~/.claude/artibot/grpo-history.json`, `swarm-sync-state.json`, `swarm-merged-weights.json`, and the six `patterns/*-patterns.json` files (plus `memory/error-patterns.json` fallback). Renders a 5-section markdown dashboard: GRPO Self-Learning, Swarm (Federated Learning), Top Performers, Risk Signals, Pattern File Health — followed by a Recommendations section that flags critical failure patterns (success < 25% AND conf ≥ 0.8 AND n ≥ 10), stale syncs (> 7 days), empty buckets, and dormant `teamWeights`. Pure reads, no network, no mutations.
+- **`commands/learning.md`** — slash command wrapper. Routes args (`--top N`, `--bottom N`, `--rounds N`, `--swarm`, `--patterns`, `--raw`, `--base <dir>`, `--help`) to the diagnostic script and renders output verbatim.
+
+### Features
+
+- **Top Performers ranking** uses `success × certainty` when v4.6.2's `certainty` field is present, falls back to `success × confidence` for pre-v4.6.2 entries — so the dashboard works on legacy data too.
+- **Risk Signals filter**: high confidence (≥ 0.5) + low success (< 35%) + non-trivial sample (n ≥ 6) — surfaces "consistent failure" tools/agents that the system has learned are broken but may still be invoked.
+- **Recommendations engine** is heuristic-based: detects empty swarm buckets (specifically calls out the post-v4.6.2 `agents` bucket vs other empty buckets), stale federated-learning sync, dormant `updateTeamWeights()`, and zero/sparse GRPO history.
+- **Five operating modes**: full dashboard (default), `--swarm` (federation-only), `--patterns` (file-health only), `--raw` (JSON dump with rounds elided), `--help`.
+- **Graceful degradation**: every read is guarded — missing files render as "_missing_" rows rather than crashing.
+
+### Changed
+
+- **README.md (root)** — slash-command count 58 → 59, directory-tree comment updated, plugin-table feature blurb gains `/learning diagnostics`.
+- **`validate-readme-claims.js`** — passes; no validator code change needed (file-count derivation is automatic).
+
+### Verification
+
+- `npx eslint scripts/learning-diag.js` → 0 errors, 0 warnings (clean run on the new script).
+- `node scripts/ci/validate-readme-claims.js` → all README claims match file-system counts (commands 59, agents 28, hookScripts 54, hookRegistrations 52).
+- Smoke test against live disk state confirms all five sections render correctly and flag the live `meta410-auditor` / `quiz-investigator` / `playwright_evaluate` entries as critical — same findings I extracted manually in the v4.6.2 analysis, now reproducible in a single command.
+
+### Not Fixed (still deferred from v4.6.2)
+
+The deferrals listed in v4.6.2 (Playwright 20% swarm failure, marketing-auditor regressions, dormant `teamWeights`) remain. `/learning` now makes them visible at a glance but does not fix them.
+
+---
+
+## [4.6.2] - 2026-05-12
+
+Learning-system schema improvements driven by direct analysis of disk-state evidence (300 GRPO rounds + 15 swarm uploads + 37 merged tool weights). Two additive changes plus one schema correction. Backward compat: pre-v4.6.2 patterns and swarm payloads continue to work; new fields are optional.
+
+### Added
+
+- **`pattern.certainty`** — new sample-size-based signal in `extractPattern()` output (`lib/learning/pattern-analyzer.js`). Formula: `1 - 1/sqrt(n)`. n=3 → 0.42, n=10 → 0.68, n=30 → 0.82, n=132 → 0.91. Companion to the existing `confidence` field which conflates sample-size with composite-score signal (e.g. Write n=132 with 90% success previously surfaced as `confidence: 0.20` because Write commands rarely score high on the speed/brevity rules — accurate semantically, but misleading when consumers expected "certainty"). `certainty` lets downstream consumers (router, knowledge-transfer, convergence-detector) weight signals by sample size independently. Emitted in both variance and consensus modes.
+- **`weights.agents` bucket** — new top-level category in swarm payload schema (`lib/swarm/pattern-packager.js::packagePatterns`). Mirrors `weights.tools` structure. Pre-v4.6.2 code routed `case 'agent':` patterns into `weights.tools`, conflating agent and tool signals in peer-merged data (e.g. `sa360-auditor`, `llm-architect`, `planner` appeared alongside `Bash`, `Read`, `Edit` in `swarm-merged-weights.json::weights.tools`). Now correctly bucketed via dedicated `case 'agent':` → `weights.agents[category]`. `mergeWeights` and `unpackWeights` updated to handle the new bucket; new `unpackAgentWeights()` helper emits patterns with correct `type: 'agent'` and `key: 'agent::<name>'` (was incorrectly `tool::<name>`).
+- **9 new tests** — 3 in `pattern-analyzer.test.js` (certainty in variance mode + consensus mode + monotonic with n), 6 in `pattern-packager.test.js` (agent routes to `weights.agents` not `weights.tools`, certainty pack/unpack round-trip in both directions, certainty omitted when source pattern lacks it for backward compat).
+
+### Changed
+
+- **`pattern-packager.test.js`** — 2 existing tests updated to assert the corrected agent-routing behavior (previously these tests encoded the bug as expected behavior).
+- **`memory/MEMORY.md` (auto-memory)** — Sprint History entry for v4.6.2 + Status line bump.
+- **`memory/lessons-learned.md`** — new "학습 시스템 인사이트" section documenting Pattern semantics drift, the Playwright 20%-failure swarm-wide observation (deferred to its own investigation), and marketing-auditor agent regression candidates (`meta410-auditor`, `version-comparator`).
+
+### Backward Compat
+
+- All new fields are optional / additive. Pre-v4.6.2 patterns on disk (no `certainty` field) continue to round-trip cleanly through pack/unpack — the field is omitted rather than defaulted.
+- Pre-v4.6.2 swarm payloads on disk (with agents bundled into `weights.tools`) remain readable; only new uploads route through the corrected schema. No migration script needed.
+
+### Verification
+
+- `npx vitest run tests/learning tests/swarm` → **2,253/2,253 pass, 67 test files**
+- `npx eslint lib/learning/pattern-analyzer.js lib/swarm/pattern-packager.js tests/...` → 0 errors, 0 warnings
+- No production runtime changes — only schema (pattern shape) changes.
+
+### Not Fixed (deferred)
+
+- **GRPO `teamWeights={}`** — the `updateTeamWeights()` function is exported and tested but never invoked at runtime (no caller in middleware, hooks, or commands). Decision: leave dormant; treat as opt-in API surface rather than missing integration. Re-evaluate if team-level GRPO observability becomes required.
+- **Playwright `playwright_evaluate` / `playwright_screenshot` 20% success across swarm** — peer-wide failure pattern, not a learning-system bug. Needs its own MCP-side investigation.
+- **`meta410-auditor` (19% n=20)** and **`version-comparator` (22% n=66)** — possible agent-implementation regressions, separate concern.
+- **`/learning-diag` observability command** — designed but out of scope for this patch. Will likely ship as a script first.
+
+---
+
 ## [4.6.1] - 2026-05-12
 
 Branch-integration release. The `master` and `artibot/master` branches had diverged at v4.4.1 (commit `4141dbf`) and progressed independently: `master` accumulated the `artibot-cowork` v3.1.0 upgrade (PR #7), while `artibot/master` accumulated 48 commits covering v4.5.0 → v4.6.0 of the `artibot` plugin. This release reunifies them on `master` so that the default branch reflects both plugin lines, eliminating the "tag latest = v4.6.0 but branch tip = v4.4.1 artibot" confusion. No new functional code in either plugin — only the merge commit, version bump, and README/CHANGELOG reconciliation.
@@ -34,6 +216,208 @@ Detailed per-release history for v4.5.6 → v4.6.0 (which arrives on `master` th
 - `plugins/artibot/.claude-plugin/plugin.json` version === `plugins/artibot/package.json` version === `plugins/artibot/artibot.config.json` version === `4.6.1`
 - `plugins/artibot-cowork/.claude-plugin/plugin.json` version === `3.1.0` (unchanged from master tip)
 - `README.md` cowork row matches on-disk plugin.json version
+
+---
+
+## [4.6.0] - 2026-05-11
+
+**Goal-driven autopilot** — adapts the Codex `/goal` pattern. 4-phase rollout shipped in two squash PRs (#9 covering Phases 1+2; PR #11 covering Phases 3+4 was fast-forward merged after PR #9 squash deleted its base). Total +74 new tests (53 P1+P2 + 21 P3+P4), all 254 autopilot suite tests pass. 100% backward compat: legacy PRDs without a Goal Contract continue the existing 7-phase flow.
+
+### Added
+
+- **Goal Contract slot in PRD** (Phase 1) — PRD now carries a machine-readable `## 2.5 Goal Contract` JSON block: `objective` / `stoppingCondition` / `validationCommand` / `forbiddenChanges` / `maxIterations` (hard cap 10). New modules `lib/autopilot/goal-schema.js` + `lib/autopilot/prd-parser.js`.
+- **Stopping Condition Evaluator + EVALUATE phase** (Phase 2) — new EVALUATE phase inserted between IMPROVE and REPORT. `lib/autopilot/goal-evaluator.js::evaluateGoal` trusts ONLY the `validationCommand` exit code (no LLM judgment → no hallucination). `lib/autopilot/goal-loop.js::runPhaseGoalEvaluate` drives the iteration loop with decision matrix: met → REPORT, not-met + under-cap → re-EXECUTE iteration, max-cap / same-SHA-3x / confidence<0.8 → PAUSE.
+- **Goal-level Control Plane** (Phase 3) — `lib/autopilot/goal-control.js` exports 5 functions (`pauseGoal` / `resumeGoal` / `retryGoal` / `clearGoal` / `getGoalStatus`). `state.goalPaused` slot is orthogonal to session-level pause. New `/autopilot:goal status|pause|resume|retry|clear <session-id>` subcommands.
+- **Progress Heartbeat** (Phase 4) — `buildProgress(state, contract, evalResult)` emits `{iteration, maxIterations, pct, confidence, met, exitCode}` on 3 evaluator-related telemetry ticks. `/autopilot:tail` gains a `progress` column.
+
+### Changed
+
+- **`lib/autopilot/engine.js`** — 1022 → 791 lines via extraction of `lib/autopilot/_engine-helpers.js` (`makeInitialState` / `tick` / `recordPhase` / `persist`). Brings the file back under the 800-line guard.
+- **`lib/autopilot/index.js`** — exports the new goal modules.
+
+### Scope isolation
+
+All changes confined to `lib/autopilot/*` + `commands/autopilot.md` + `tests/autopilot/*`. `/implement`, `/team`, and the 28 other agents are unaffected.
+
+---
+
+## [4.5.12] - 2026-05-10
+
+Patch release — fixes `git-autopilot-close` Stop-hook `mergeBase` resolution for stacked-PR branches. Recovered from a reflog incident where a session's `git reset --soft <mergeBase>` collapsed legitimate commits into a single autosave commit because `mergeBase` resolved to an ancient ancestor of `origin/HEAD` (=`origin/master`) instead of the working branch's actual upstream.
+
+### Root Cause
+
+When a working branch is part of a stacked-PR chain (e.g. feature branch B based on feature branch A, both based on master), `git merge-base @ origin/HEAD` returns the master-side base — far older than the branch's real "where my work started" point. The autopilot Stop hook then runs `git reset --soft <ancient-base>` and silently collapses all of A's commits into B's working tree, surfacing only as a single "wip: autosave" commit.
+
+### Fixed (2-layer defense)
+
+- **`lib/git/resolve-base.js`** (step 2 — upstream tracking) — if `@{upstream}` resolves to a different branch tip than the working branch, treat that upstream as the merge-base anchor (stacked-PR pattern). Self-tracking (e.g. `origin/foo` for branch `foo`) skips step 2 and falls through to step 3 (`origin/HEAD`).
+- **`lib/git/resolve-base.js`** (new export `isMergeBaseFresh`) — defense-in-depth age sanity gate. Compares `git log -1 --format=%ct <mergeBase>` against HEAD's commit-time; rejects merge-bases older than `maxAgeDays` (default 30). Empty input, malformed timestamps, missing commits → fail-closed `false`.
+- **`scripts/hooks/git-autopilot-close.js::squashWipCommits`** — calls `isMergeBaseFresh` AFTER the reset attempt; stale resolution → log `WIP squash failed` + preserve commits as-is (silent corruption blocked).
+
+### Verification
+
+- 14 new tests (5 stacked-PR upstream + 7 age-gate + 2 invariants)
+- `resolve-base.test.js` 19/19 pass
+- `git-autopilot-close.test.js` 11/11 regression pass with extended mock (new `isMergeBaseFreshImpl` slot)
+- PR #12 squash-merged as `2609d58`
+
+---
+
+## [4.5.11] - 2026-05-09
+
+Patch release — fixes two isolation/race flakes in the test suite that v4.5.10's 22-run stress matrix isolated. Test-only changes; zero production code modified.
+
+### Fixed
+
+- **`tests/hooks/autopilot-nlu-trigger.test.js`** (2/11 failure rate) — the hook's top-level `main().catch(...)` fire-and-forget leaked microtasks into the next test's `mockState` under full-suite worker saturation, producing the "opposite expectations both fail" signature (one test expected length 1 but got 0, another expected 0 but got 1). Fix: (a) `afterEach` adds 100ms drain to flush in-flight microtasks before `vi.clearAllMocks`, (b) 'default-on path' polling deadline 1000ms → 3000ms, (c) `autopilot.enabled=false` test replaced poll-then-expect-0 with a flat 1500ms drain.
+- **`tests/autopilot/engine.mcp-verify.test.js`** (1/11 failure rate) — `runPhase4Verify` mutates state in-memory then session-store disk-writes; under load, disk write lags behind the JS turn so `getStatus()` re-read sees stale state. Fix: wrapped re-read + assertion block in `vi.waitFor` poll (timeout 3000ms, interval 50ms), reusing v4.5.10's case 3 pattern.
+
+### Notes
+
+- Standalone vitest run: 2 files / 8 tests PASS.
+- Full-suite stability verification deferred to PR review.
+- Merged via PR #10 as squash `df44807`.
+
+---
+
+## [4.5.10] - 2026-05-08
+
+Patch release — `dev-verify-gate` scope guard (prevents the globally-installed Stop hook from firing in non-Artibot projects) + 7 timing/race flake fixes exposed by a 22-run cumulative verification matrix.
+
+### Fixed
+
+- **`scripts/hooks/dev-verify-gate.js`** (scope guard) — added `isArtibotRepo(repoRoot)` helper: returns true iff `plugins/artibot/CLAUDE.md` OR `artibot.config.json` exists. `main()` calls scope guard before `getChangedFiles()` → silent bail in non-Artibot repos. Previously, the global install copy (`~/.claude/artibot/`) fired "Reference: plugins/artibot/CLAUDE.md (DEV Protocol section)" advisories in every project's Stop event. +5 ground-truth scope-guard tests.
+- **`tests/lib/orchestration/guardrails.test.js:74`** — threshold 60ms → 150ms (Windows full-suite worker saturation measured 73ms in one case).
+- **`tests/core/decision-trail.test.js:303`** — `setTimeout(60)` → `vi.waitFor` poll (timeout 2s, interval 20ms).
+- **`tests/e2e/runtime-flow.test.js`** — 3 cases individual timeout 15000ms → 30000ms (Korean special-trigger case measured 6605ms standalone).
+- **`tests/scripts/validate.test.js:31`** — first `it` timeout 60000ms (validator subprocess cold-start).
+- **`tests/hooks/session-start.test.js:268,276`** — timeoutMs 2600 → 6000 + test timeout 5000 → 12000 (Promise.race 2000ms timeout's catch-block flush margin was insufficient).
+- **`tests/cognitive/router-grpo-integration.test.js:59`** — threshold 50ms → 200ms (OS scheduler jitter).
+- **`tests/autopilot/engine.execute-worktree.test.js`** case 3 — sync assertion → `vi.waitFor` poll. Initial 5000ms timeout still left 2/11 residual → extended to 15000ms / 100ms interval (Windows `git worktree remove` legitimately uses 10s+ under load).
+
+### Verification matrix
+
+22-run cumulative (11 full-suite runs × 2 phases). Targeted 2 fixes `guardrails:74` / `decision-trail:303`: **0/22 ✓**. 5 secondary fixes: 4 of 5 at 0/11 ✓; case 3 needed the 15s polling expansion.
+
+### Deferred to v4.5.11
+
+- `autopilot-nlu-trigger` 2/11 (mock state leak — structural, not timing)
+- `engine.mcp-verify` 1/11 (slot init race)
+
+### Notes
+
+- Stress test runs (11×) are intentional — surface hidden timing flakes. Pursuing 100% pass under stress risks infinite fix loops. CI's single Linux runner has different load profile from Windows worker saturation.
+- The scope-guard commit `1b2a7ac` was pre-pushed by autopilot session-close auto-commit before this release; version-bump + README + MEMORY sync is catch-up form.
+
+---
+
+## [4.5.9] - 2026-05-08
+
+Patch release — worktree pool race fix + decision-trail test artifact leak fix. Two issues isolated after v4.5.8: `engine.execute-worktree.test.js` case 3 flake (~50% under full-suite parallelism) and an `undefined/runtime/decision-trail.json` leak in repo root after full-suite runs.
+
+### Fixed
+
+- **`vitest.config.js`** — migrated to vitest 4 `projects` workspace. The two `tests/autopilot/**` files (`worktree-manager.test.js` + `engine.execute-worktree.test.js`) both invoke real `git worktree add/remove` against the same `.git/worktrees/` namespace; vitest's parallel workers raced the non-force `git worktree remove` path (`engine.js:684` `force: !graceful`) on the index lock. Fix: `autopilot` project gets `pool: 'forks'` + `poolOptions.forks.singleFork: true` → serialized to a single fork. Parent `test.include` removed (keeping it caused implicit default project to run alongside `projects[]`, doubling suite count 7674 → 15168). `pool`/`poolOptions` placed at project root per vitest 4 migration (replaces vitest 3's deprecated `poolMatchGlobs`).
+- **`tests/core/decision-trail.test.js`** — env restore bug. `process.env.CLAUDE_PLUGIN_ROOT = ORIGINAL_PLUGIN_ROOT` assigns when `ORIGINAL_PLUGIN_ROOT === undefined`, and `process.env` coerces every value to string, writing the literal `"undefined"`. Subsequent tests' `router.route()` → `recordDecision()` → `path.join("undefined", "runtime", "decision-trail.json")` leaked `undefined/runtime/decision-trail.json` into repo root. Fix: `restorePluginRoot()` helper — `delete process.env.CLAUDE_PLUGIN_ROOT` when original was undefined, otherwise assign. Applied at both `withSandbox finally` and `afterEach` sites.
+
+### Verification
+
+- Full-suite × 11 runs after fix 1 → case 3: **0/11 ✓**
+- Post-fix-2 confirmation: `undefined/` directory no longer created
+- ESLint 0/0; `scripts/validate.js` PASS (15 events, 56 hooks); `decision-trail.test.js` 18/18 PASS
+
+### Side-effect findings (deferred)
+
+- `guardrails.test.js:74` 60ms threshold too tight
+- `decision-trail.test.js:303` 60ms wait insufficient
+- Both pre-existing per v4.3.1 "flaky test stabilization" log; carried into next-session-pickup, fixed in v4.5.10.
+
+---
+
+## [4.5.8] - 2026-05-07
+
+Patch release — restores DEV Verify Gate (disabled in v4.5.6 as emergency) using a marker-pattern root-cause fix + 3 P1 regression fixes for `git-autopilot-setup` tests (stderr migration drift).
+
+### Root Cause
+
+v4.5.6 emergency-disabled `dev-verify-gate` after `hasNewerEdits` (file mtime based) misfired on teammate edits — paralysis-class infinite Stop-hook firing. Real fix requires distinguishing main-agent edits from sub-agent edits at marker write time, not at gate evaluation time.
+
+### Added
+
+- **`scripts/hooks/mark-main-agent-edit.js`** — PostToolUse hook on Edit/Write/MultiEdit. Writes `runtime/last-main-agent-edit.timestamp`. `isSubagentContext(hookData)` guard checks 4 signals (`subagent_id` / `subagent_type` / `parent_session_id` / `role:'teammate'`) → teammate edits skip marker write. This single guard resolves the v4.5.6 paralysis root cause.
+- **+27 tests** — `mark-main-agent-edit.test.js` 21 (isSubagentContext 9 + getMarkerPath 2 + main 10) + `dev-verify-gate.test.js` 6 (smoke 1 + ground-truth decision matrix 5 — independent mtime comparison validation to catch drift).
+
+### Changed
+
+- **`scripts/hooks/dev-verify-gate.js`** — emergency-disable `return;` removed. `hasNewerEdits` (file mtime, also triggered by teammates) replaced with `hasNewerMainAgentEdit` (marker mtime vs cache mtime). Decision matrix: no marker → bail / no cache → fire baseline / marker > cache → fire / marker ≤ cache → bail.
+- **`hooks/hooks.json`** — PostToolUse adds `mark-main-agent-edit` (matcher `Edit|Write|MultiEdit`, priority operational, category tracking); Stop re-registers `dev-verify-gate` (priority advisory, category quality). Hook regs 50 → 52, hook scripts 53 → 54.
+- **`tests/hooks/git-autopilot-setup.test.js`** (P1 regression) — 3 stdout assertions swapped to stderr to match the prior `process.stderr.write` migration.
+
+### Notes
+
+- `hooks.json` is cached at SessionStart → marker + gate take effect from the next Claude Code session.
+- The `engine.execute-worktree` case 3 full-suite race (standalone 4/4 pass, full-suite fails) is isolated and tracked separately — fixed in v4.5.9.
+
+---
+
+## [4.5.7] - 2026-05-07
+
+Patch release — restores the Turn Recap UX. User reported the gray one-line summary that used to appear after each response was gone after recent updates. Two regressions identified and both fixed.
+
+### Fixed
+
+- **`commands/recap.md`** — slash command was reduced to a 12-line thin alias ("execute /daily") in commit `0fad5b9` (2026-05-04), but slash commands cannot invoke other slash commands; the LLM frequently skipped the full 6-section dashboard / Next Steps algorithm / Edge Cases workflow. Replaced with the full `daily.md` body (276 lines) inlined.
+- **`scripts/hooks/stop-recap.js`** (new) — Stop hook prints a gray stderr one-liner `[artibot:recap] ✏ N files · ⚙ N cmds · 🤖 N agents · 📖 N reads · 🌿 N uncommitted` after each turn. Safety properties: read-only / stderr-only (Stop ignores `additionalContext`) / `stop_hook_active` loop guard / 4MB transcript cap / 2s git timeout / empty turns emit nothing / outermost try-catch guard. Zero risk of v4.5.6-class infinite loop regression. Helper extraction (`tallyBlock` / `parseTranscriptLine`) keeps max-depth ≤ 4.
+- **`hooks/hooks.json`** — Stop section adds `stop-recap` with priority="optional", category="ux". Hook regs 49 → 50, hook scripts 52 → 53.
+
+### Verification
+
+- `validate-hooks.js` PASS (Stop 2 → 3 entries)
+- ESLint 0 errors/warnings
+- 3 smoke tests (empty stdin / loop guard active / normal payload) all exit 0
+- `validate-readme-claims.js` PASS
+- Install copies synced: `~/.claude/commands/recap.md` + `~/.claude/artibot/scripts/hooks/stop-recap.js` + `~/.claude/artibot/hooks/hooks.json`.
+
+### Notes
+
+- `hooks.json` is cached at SessionStart → `stop-recap` fires from the next session after Claude Code restart.
+
+---
+
+## [4.5.6] - 2026-05-06
+
+Critical patch — full audit of all Stop hooks + infinite-firing loop blocked. User work was paralyzed by `dev-verify` Stop hook infinite firing. 3-agent parallel audit (`stop-auditor` / `tool-hook-auditor` / `registration-auditor`) + `fix-applier` delegation + cross-check review.
+
+### Critical Discovery
+
+**install copy (`~/.claude/artibot/`) is a separate copy from the source repo and source edits do NOT auto-propagate** — every hook fix must be synced to both locations. This is the foundational reason v4.5.1's whitelist had no runtime effect (see v4.5.4 root-cause).
+
+### Fixed (9 patches)
+
+- **`auto-review-trigger.js`** — schema fix: `hookSpecificOutput.additionalContext` (ignored by Stop) → `decision: "block" + reason`.
+- **`auto-review-trigger.js`** — removed `HEAD~1..HEAD` scan (autopilot WIP commit infinite loop blocker).
+- **`auto-review-trigger.js`** — `MAX_SCAN_BYTES = 256KB` DoS guard.
+- **`auto-review-trigger.js`** — `ALLOWED_AGENTS` allowlist (defense-in-depth).
+- **`auto-review-trigger.js`** — `buildFingerprint` adds `SHA1(repoRoot)[:8]` prefix (worktree isolation).
+- **`scripts/hooks/dev-verify-gate.js`** (new) — `hasNewerEdits` mtime guard + emergency-disable (marker-based fix deferred to v4.5.7, properly implemented in v4.5.8).
+- **`stop-review-gate.js`** — fingerprint cache (`buildFingerprint` / `saveFingerprint` / `cacheCtx.duplicate` → silent advisory downgrade) + inverted regex `isCliScript` simplified.
+- **`agent-evaluator.js`** — `isAgentExperienceCollectionEnabled` config gating (default `true` preserved).
+- **`git-autopilot-close.js`** — `pushBranch` adds `timeout: 12000` + `--no-verify` justification comment.
+
+### Changed
+
+- **`hooks/hooks.json`** — Stop entry: removed `check-console-log.js` (dead code) + `dev-verify-gate.js` registration → hook regs 54 → 52.
+- **README** — 51 → 52 hook scripts, 54 → 52 hook regs.
+
+### Verification
+
+- 298 test files PASS, 0 failures
+- `validate` / `lint` / `readme:claims` all PASS
+
+### Session Limitation
+
+`hooks.json` is cached at SessionStart → `dev-verify-gate` fires until Claude Code restart in the current session (emergency-disable's silent exit). v4.5.7 placeholder: marker-pattern reactivation (delivered in v4.5.8).
 
 ---
 

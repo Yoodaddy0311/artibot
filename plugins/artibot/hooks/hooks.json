@@ -1,6 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-hooks.json",
-  "description": "Artibot v4.5.8 - Claude Code Plugin Hooks",
+  "description": "Artibot v4.6.4 - Claude Code Plugin Hooks (exec-form args[])",
   "hooks": {
     "SessionStart": [
       {
@@ -9,7 +9,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/session-start.js",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/session-start.js"
+            ],
             "timeout": 5000
           }
         ],
@@ -22,7 +25,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/memory-tracker.js SessionStart",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/memory-tracker.js",
+              "SessionStart"
+            ],
             "timeout": 5000
           }
         ],
@@ -35,7 +42,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/swarm-download.js",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/swarm-download.js"
+            ],
             "timeout": 15000
           }
         ],
@@ -48,7 +58,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/git-autopilot-setup.js",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/git-autopilot-setup.js"
+            ],
             "timeout": 5000
           }
         ],
@@ -61,7 +74,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/image-cleanup.js",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/image-cleanup.js"
+            ],
             "timeout": 5000
           }
         ],
@@ -74,7 +90,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/session-digest.js",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/session-digest.js"
+            ],
             "timeout": 3000
           }
         ],
@@ -87,7 +106,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/git-autopilot-session.js",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/git-autopilot-session.js"
+            ],
             "timeout": 10000
           }
         ],
@@ -100,7 +122,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/auto-learning-check.js",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/auto-learning-check.js"
+            ],
             "timeout": 5000
           }
         ],
@@ -113,7 +138,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/skill-validation-check.js",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/skill-validation-check.js"
+            ],
             "timeout": 5000
           }
         ],
@@ -127,7 +155,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-write.js",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-write.js"
+            ],
             "timeout": 5000
           }
         ],
@@ -139,7 +170,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-bash.js",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-bash.js"
+            ],
             "timeout": 5000
           }
         ],
@@ -151,7 +185,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-write-guard.js",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-write-guard.js"
+            ],
             "timeout": 5000
           }
         ],
@@ -163,7 +200,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/git-autopilot-guard.js",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/git-autopilot-guard.js"
+            ],
             "timeout": 5000
           }
         ],
@@ -175,7 +215,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-write-checkpoint.js",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-write-checkpoint.js"
+            ],
             "timeout": 5000
           }
         ],
@@ -187,7 +230,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/webfetch-cache-pre.js",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/webfetch-cache-pre.js"
+            ],
             "timeout": 3000
           }
         ],
@@ -201,7 +247,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-write-guard.js",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-write-guard.js"
+            ],
             "timeout": 3000
           }
         ],
@@ -213,7 +262,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/quality-gate.js",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/quality-gate.js"
+            ],
             "timeout": 8000
           }
         ],
@@ -225,7 +277,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/post-edit-format.js",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/post-edit-format.js"
+            ],
             "timeout": 10000
           }
         ],
@@ -237,7 +292,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/post-edit-recovery.js",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/post-edit-recovery.js"
+            ],
             "timeout": 5000
           }
         ],
@@ -249,7 +307,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/post-bash.js",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/post-bash.js"
+            ],
             "timeout": 5000
           }
         ],
@@ -261,7 +322,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/post-bash-failure.js",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/post-bash-failure.js"
+            ],
             "timeout": 3000
           }
         ],
@@ -273,7 +337,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/post-write-tdd.js",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/post-write-tdd.js"
+            ],
             "timeout": 2000
           }
         ],
@@ -285,7 +352,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/mark-main-agent-edit.js",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/mark-main-agent-edit.js"
+            ],
             "timeout": 3000
           }
         ],
@@ -297,7 +367,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/tool-tracker.js",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/tool-tracker.js"
+            ],
             "timeout": 3000
           }
         ],
@@ -309,7 +382,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/webfetch-cache-post.js",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/webfetch-cache-post.js"
+            ],
             "timeout": 5000
           }
         ],
@@ -323,7 +399,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-compact.js",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-compact.js"
+            ],
             "timeout": 8000
           }
         ],
@@ -337,7 +416,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/stop-review-gate.js",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/stop-review-gate.js"
+            ],
             "timeout": 15000
           }
         ],
@@ -349,7 +431,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/dev-verify-gate.js",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/dev-verify-gate.js"
+            ],
             "timeout": 8000
           }
         ],
@@ -361,7 +446,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/git-autopilot-close.js",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/git-autopilot-close.js"
+            ],
             "timeout": 15000
           }
         ],
@@ -373,7 +461,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/stop-recap.js",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/stop-recap.js"
+            ],
             "timeout": 5000
           }
         ],
@@ -387,72 +478,15 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/user-prompt-handler.js",
-            "timeout": 3000
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/_userprompt-dispatcher.js"
+            ],
+            "timeout": 8000
           }
         ],
         "priority": "operational",
         "category": "lifecycle"
-      },
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/auto-team-trigger.js",
-            "timeout": 3000
-          }
-        ],
-        "priority": "operational",
-        "category": "team"
-      },
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/runtime-prompt.js",
-            "timeout": 3000
-          }
-        ],
-        "priority": "operational",
-        "category": "lifecycle"
-      },
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/autopilot-nlu-trigger.js",
-            "timeout": 3000
-          }
-        ],
-        "priority": "advisory",
-        "category": "autopilot"
-      },
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/git-autopilot-save.js",
-            "timeout": 5000
-          }
-        ],
-        "priority": "operational",
-        "category": "git"
-      },
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/ambiguity-guard.js",
-            "timeout": 3000
-          }
-        ],
-        "priority": "advisory",
-        "category": "quality"
       }
     ],
     "SubagentStart": [
@@ -461,12 +495,20 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/subagent-handler.js start",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/subagent-handler.js",
+              "start"
+            ],
             "timeout": 5000
           },
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/workflow-status.js teammate-update",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/workflow-status.js",
+              "teammate-update"
+            ],
             "timeout": 5000
           }
         ],
@@ -480,17 +522,28 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/subagent-handler.js stop",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/subagent-handler.js",
+              "stop"
+            ],
             "timeout": 5000
           },
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/agent-evaluator.js",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/agent-evaluator.js"
+            ],
             "timeout": 8000
           },
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/workflow-status.js teammate-update",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/workflow-status.js",
+              "teammate-update"
+            ],
             "timeout": 5000
           }
         ],
@@ -504,12 +557,19 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/team-idle-handler.js",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/team-idle-handler.js"
+            ],
             "timeout": 5000
           },
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/workflow-status.js teammate-update",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/workflow-status.js",
+              "teammate-update"
+            ],
             "timeout": 5000
           }
         ],
@@ -523,7 +583,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/team-idle-handler.js",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/team-idle-handler.js"
+            ],
             "timeout": 5000
           }
         ],
@@ -535,7 +598,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/clean-state-check.js",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/clean-state-check.js"
+            ],
             "timeout": 5000
           }
         ],
@@ -549,7 +615,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/permission-auto-approve.js",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/permission-auto-approve.js"
+            ],
             "timeout": 3000
           }
         ],
@@ -563,7 +632,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/session-end.js",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/session-end.js"
+            ],
             "timeout": 10000
           }
         ],
@@ -575,7 +647,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/swarm-sync.js",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/swarm-sync.js"
+            ],
             "timeout": 15000
           }
         ],
@@ -587,7 +662,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/rotation-runner.js",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/rotation-runner.js"
+            ],
             "timeout": 8000
           }
         ],
@@ -599,7 +677,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/memory-tracker.js SessionEnd",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/memory-tracker.js",
+              "SessionEnd"
+            ],
             "timeout": 8000
           }
         ],
@@ -611,7 +693,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/http-notify.js",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/http-notify.js"
+            ],
             "timeout": 8000
           }
         ],
@@ -625,7 +710,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/tool-tracker.js failure",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/tool-tracker.js",
+              "failure"
+            ],
             "timeout": 5000
           }
         ],
@@ -637,7 +726,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/memory-tracker.js PostToolUseFailure",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/memory-tracker.js",
+              "PostToolUseFailure"
+            ],
             "timeout": 5000
           }
         ],
@@ -651,7 +744,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/workflow-status.js notification",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/workflow-status.js",
+              "notification"
+            ],
             "timeout": 3000
           }
         ],
@@ -663,7 +760,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/context-tracker.js",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/context-tracker.js"
+            ],
             "timeout": 3000
           }
         ],
@@ -678,7 +778,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/instructions-loaded.js",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/instructions-loaded.js"
+            ],
             "timeout": 5000
           }
         ],

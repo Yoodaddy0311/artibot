@@ -11,10 +11,30 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
-import { parseJSON, readStdin } from '../utils/index.js';
+import { parseJSON, readStdin, resolveConfigPath } from '../utils/index.js';
 import { createErrorHandler } from '../../lib/core/hook-utils.js';
 import { isMergeBaseFresh, resolveBaseBranch } from '../../lib/git/resolve-base.js';
 import { isAutopilotAllowed } from '../../lib/autopilot/repo-identity.js';
+
+/**
+ * Read `git.autopilot.bypassPreCommitHooks` / `bypassPrePushHooks` from
+ * artibot.config.json. Defaults to false (honour user hooks). v4.7.2
+ * (issue-scanner W4 P1-4): the previous unconditional `--no-verify` on
+ * commit/push violated CLAUDE.md Git Safety Protocol.
+ *
+ * @returns {{ bypassPreCommitHooks: boolean, bypassPrePushHooks: boolean }}
+ */
+function readArtibotBypassFlags() {
+  try {
+    const cfg = JSON.parse(readFileSync(resolveConfigPath('artibot.config.json'), 'utf-8'));
+    return {
+      bypassPreCommitHooks: cfg?.git?.autopilot?.bypassPreCommitHooks === true,
+      bypassPrePushHooks: cfg?.git?.autopilot?.bypassPrePushHooks === true,
+    };
+  } catch {
+    return { bypassPreCommitHooks: false, bypassPrePushHooks: false };
+  }
+}
 
 // -------------------------------------------------------------------------
 // Constants
@@ -118,17 +138,24 @@ function hasDirtyWorkspace(cwd) {
 
 /**
  * Commit all remaining changes with a "session close" message.
+ *
+ * v4.7.2 (issue-scanner W4 P1-4): pre-commit hooks are honoured by default.
+ * `--no-verify` is only added when `bypassPreCommitHooks` is true (set via
+ * .git/autopilot.json or artibot.config.json git.autopilot.bypassPreCommitHooks).
+ * The default lets secret-scan / lint / test gates fail the auto-save commit
+ * instead of silently committing through them.
+ *
  * @param {string} cwd
+ * @param {{ bypassPreCommitHooks?: boolean }} [opts]
  * @returns {boolean}
  */
-function commitClose(cwd) {
+function commitClose(cwd, opts = {}) {
   try {
     gitSilent(['add', '-A'], { cwd });
     const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
-    gitSilent(
-      ['commit', '-m', `chore: artibot session close [${timestamp}]`, '--no-verify'],
-      { cwd }
-    );
+    const args = ['commit', '-m', `chore: artibot session close [${timestamp}]`];
+    if (opts.bypassPreCommitHooks === true) args.push('--no-verify');
+    gitSilent(args, { cwd });
     return true;
   } catch {
     return false;
@@ -172,7 +199,7 @@ function countWipCommits(cwd, baseBranch) {
  * @param {number} wipCount
  * @returns {boolean}
  */
-function squashWipCommits(cwd, baseBranch, wipCount) {
+function squashWipCommits(cwd, baseBranch, wipCount, opts = {}) {
   if (wipCount < 2) return true; // Nothing to squash
   if (!baseBranch) return false;
 
@@ -196,13 +223,13 @@ function squashWipCommits(cwd, baseBranch, wipCount) {
     // Guard: refuse to squash absurd ranges (likely ancient-base mis-resolution).
     if (totalCommits > MAX_SQUASH_COMMITS) return false;
 
-    // Soft-reset to merge-base, re-commit everything as one clean commit
+    // Soft-reset to merge-base, re-commit everything as one clean commit.
+    // v4.7.2 (P1-4): re-commit honours bypassPreCommitHooks like commitClose().
     gitSilent(['reset', '--soft', mergeBase], { cwd });
     const timestamp = new Date().toISOString().slice(0, 10);
-    gitSilent(
-      ['commit', '-m', `feat: artibot session work [${timestamp}]`, '--no-verify'],
-      { cwd }
-    );
+    const args = ['commit', '-m', `feat: artibot session work [${timestamp}]`];
+    if (opts.bypassPreCommitHooks === true) args.push('--no-verify');
+    gitSilent(args, { cwd });
     return true;
   } catch {
     return false;
@@ -211,22 +238,28 @@ function squashWipCommits(cwd, baseBranch, wipCount) {
 
 /**
  * Push the current branch to origin.
+ *
+ * v4.7.2 (issue-scanner W4 P1-4): pre-push hooks are honoured by default.
+ * `--no-verify` is only added when `bypassPrePushHooks` is true. The previous
+ * unconditional `--no-verify` was a "safer than recursion" workaround, but it
+ * also bypassed legitimate user pre-push gates (test runs, secret scan).
+ * Honouring hooks by default and providing an explicit opt-out is the right
+ * trade-off — the inner 12s timeout still caps any pre-push hang.
+ *
  * @param {string} cwd
  * @param {string} branch
+ * @param {{ bypassPrePushHooks?: boolean }} [opts]
  * @returns {boolean}
  */
-function pushBranch(cwd, branch) {
-  // --no-verify: this hook IS the autopilot Stop pipeline — re-running pre-push
-  // hooks here would invoke stop-review-gate / dev-verify-gate recursively and
-  // can deadlock the session close. Inner timeout (12s) caps VPN/rate-limit
-  // hangs even when the outer hook timeout (15s) is generous.
+function pushBranch(cwd, branch, opts = {}) {
+  const noVerify = opts.bypassPrePushHooks === true ? ['--no-verify'] : [];
   try {
-    gitSilent(['push', 'origin', branch, '--no-verify'], { cwd, timeout: 12000 });
+    gitSilent(['push', 'origin', branch, ...noVerify], { cwd, timeout: 12000 });
     return true;
   } catch {
     // Try setting upstream on first push
     try {
-      gitSilent(['push', '-u', 'origin', branch, '--no-verify'], { cwd, timeout: 12000 });
+      gitSilent(['push', '-u', 'origin', branch, ...noVerify], { cwd, timeout: 12000 });
       return true;
     } catch {
       return false;
@@ -256,10 +289,22 @@ async function main() {
   const branchPrefix = config.branchPrefix ?? 'artibot/';
   const baseBranch = resolveBaseBranch(repoRoot, config);
 
+  // Per-repo override (.git/autopilot.json) takes precedence over plugin
+  // artibot.config.json — same precedence as git-autopilot-save.js.
+  const artibotFlags = readArtibotBypassFlags();
+  const bypassPreCommitHooks = config?.bypassPreCommitHooks === true
+    || artibotFlags.bypassPreCommitHooks;
+  const bypassPrePushHooks = config?.bypassPrePushHooks === true
+    || artibotFlags.bypassPrePushHooks;
+
   // Step 1: Commit remaining changes
   if (hasDirtyWorkspace(repoRoot)) {
-    const committed = commitClose(repoRoot);
-    log(committed ? 'Final changes committed' : 'Final commit failed — check git status');
+    const committed = commitClose(repoRoot, { bypassPreCommitHooks });
+    if (!committed && !bypassPreCommitHooks) {
+      log('Final commit failed — pre-commit hook may have rejected; run `git commit` manually or set git.autopilot.bypassPreCommitHooks=true');
+    } else {
+      log(committed ? 'Final changes committed' : 'Final commit failed — check git status');
+    }
   } else {
     log('No uncommitted changes at session close');
   }
@@ -268,7 +313,7 @@ async function main() {
   if (config.squashWipOnClose && branch.startsWith(branchPrefix)) {
     const wipCount = countWipCommits(repoRoot, baseBranch);
     if (wipCount > 0) {
-      const squashed = squashWipCommits(repoRoot, baseBranch, wipCount);
+      const squashed = squashWipCommits(repoRoot, baseBranch, wipCount, { bypassPreCommitHooks });
       log(
         squashed
           ? `Squashed ${wipCount} WIP commit(s) into clean commit`
@@ -279,8 +324,12 @@ async function main() {
 
   // Step 3: Push to remote
   if (config.autoPushOnStop) {
-    const pushed = pushBranch(repoRoot, branch);
-    log(pushed ? `Pushed "${branch}" to origin` : `Push failed — run: git push origin ${branch}`);
+    const pushed = pushBranch(repoRoot, branch, { bypassPrePushHooks });
+    if (!pushed && !bypassPrePushHooks) {
+      log(`Push failed — pre-push hook may have rejected; run: git push origin ${branch}, or set git.autopilot.bypassPrePushHooks=true`);
+    } else {
+      log(pushed ? `Pushed "${branch}" to origin` : `Push failed — run: git push origin ${branch}`);
+    }
   }
 
   void hookData;

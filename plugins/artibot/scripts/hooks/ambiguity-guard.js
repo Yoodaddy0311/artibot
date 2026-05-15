@@ -106,12 +106,27 @@ export function buildOutput(ev) {
   };
 }
 
+/**
+ * Pure handler for UserPromptSubmit. Used by the in-process dispatcher
+ * (named export) and the legacy stdin/stdout main() entry point.
+ *
+ * Returns the buildOutput envelope (always non-null because buildOutput
+ * always returns either { continue: true } or { continue: true, hookSpecificOutput }).
+ * Callers may inspect `additionalContext` presence to know whether to merge.
+ *
+ * @param {object} hookData - Parsed hook payload (already JSON-decoded).
+ * @returns {object} buildOutput envelope.
+ */
+export function handleUserPromptSubmit(hookData) {
+  const prompt = extractPrompt(hookData);
+  const ev = evaluatePrompt(prompt);
+  return buildOutput(ev);
+}
+
 async function main() {
   const raw = await readStdin();
   const hookData = parseJSON(raw) ?? {};
-  const prompt = extractPrompt(hookData);
-  const ev = evaluatePrompt(prompt);
-  writeStdout(buildOutput(ev));
+  writeStdout(handleUserPromptSubmit(hookData));
 }
 
 const isMain = (() => {

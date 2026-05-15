@@ -215,6 +215,11 @@ export function extractPattern(groupKey, ranked) {
 
   const [type, category] = groupKey.split('::');
 
+  // Sample-size-based statistical certainty (independent of composite score).
+  // n=3 -> 0.42, n=10 -> 0.68, n=30 -> 0.82, n=132 -> 0.91.
+  // Pairs with `confidence` so consumers can weight signals by sample size.
+  const certainty = round(1 - 1 / Math.sqrt(entries.length));
+
   // Check if best outperforms the mean (variance mode)
   if (bestEntry.composite > groupMean + 0.02) {
     const topEntries = entries.filter((e) => e.composite > groupMean);
@@ -227,6 +232,7 @@ export function extractPattern(groupKey, ranked) {
       type,
       category,
       confidence,
+      certainty,
       bestComposite: bestEntry.composite,
       groupMean,
       sampleSize: entries.length,
@@ -249,6 +255,7 @@ export function extractPattern(groupKey, ranked) {
       type,
       category,
       confidence,
+      certainty,
       bestComposite: bestEntry.composite,
       groupMean,
       sampleSize: entries.length,

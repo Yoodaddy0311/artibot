@@ -175,22 +175,46 @@ function buildOutput(reason) {
   };
 }
 
+/**
+ * Pure handler for UserPromptSubmit. Used by the in-process dispatcher
+ * (named export) and the legacy stdin/stdout main() entry point.
+ *
+ * @param {object} hookData - Parsed hook payload (already JSON-decoded).
+ * @returns {object|null} hookSpecificOutput envelope, or null to pass through.
+ */
+export function handleUserPromptSubmit(hookData) {
+  const prompt = String(hookData?.user_prompt || hookData?.content || '').trim();
+  if (!prompt) return null;
+
+  // Hard opt-outs first.
+  if (NO_TEAM_FLAG.test(prompt)) return null;
+  const { enabled, triggers } = loadTeamConfig(getPluginRoot());
+  if (!enabled) return null;
+
+  const reason = evaluatePrompt(prompt, triggers);
+  if (!reason) return null;
+
+  return buildOutput(reason);
+}
+
 async function main() {
   const raw = await readStdin();
   if (!raw) return; // graceful empty stdin
   const hookData = parseJSON(raw) ?? {};
-  const prompt = String(hookData?.user_prompt || hookData?.content || '').trim();
-  if (!prompt) return;
-
-  // Hard opt-outs first.
-  if (NO_TEAM_FLAG.test(prompt)) return;
-  const { enabled, triggers } = loadTeamConfig(getPluginRoot());
-  if (!enabled) return;
-
-  const reason = evaluatePrompt(prompt, triggers);
-  if (!reason) return;
-
-  writeStdout(buildOutput(reason));
+  const result = handleUserPromptSubmit(hookData);
+  if (result) writeStdout(result);
 }
 
-main().catch(createErrorHandler(HOOK_NAME, { exit: false }));
+const isMain = (() => {
+  try {
+    const argv1 = process.argv[1] ? path.resolve(process.argv[1]) : '';
+    const here = path.resolve(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'));
+    return argv1 === here;
+  } catch {
+    return false;
+  }
+})();
+
+if (isMain) {
+  main().catch(createErrorHandler(HOOK_NAME, { exit: false }));
+}

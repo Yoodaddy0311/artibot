@@ -8,3 +8,6 @@ coverage/
 
 # Runtime session data (top-level only — do NOT match lib/runtime/ or its subdirs)
 /runtime/
+
+# Pre-dispatcher hooks.json backup (single-use rollback artifact)
+hooks/hooks.json.before-dispatcher

@@ -116,10 +116,10 @@ jobs:
       contents: write
 
     steps:
-      - name: Checkout artibot/master
+      - name: Checkout master
         uses: actions/checkout@v5
         with:
-          ref: artibot/master
+          ref: master
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -174,4 +174,4 @@ jobs:
             exit 0
           fi
           git commit -m "docs(release): sync README badges to ${GITHUB_REF_NAME} [skip ci]"
-          git push origin artibot/master
+          git push origin master

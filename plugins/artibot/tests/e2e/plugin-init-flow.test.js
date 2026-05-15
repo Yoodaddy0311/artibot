@@ -181,18 +181,27 @@ describe('E2E: Plugin Initialization Flow', () => {
       expect(hooksConfig.hooks.SessionStart.length).toBeGreaterThan(0);
     });
 
-    it('registers UserPromptSubmit hooks including runtime prompt after user-prompt-handler', () => {
+    // v4.6.4: hooks migrated from shell-form to exec-form ({command, args[]}).
+    // This helper reconstitutes the full command line for substring assertions
+    // so the same checks work against both forms during/after migration.
+    const fullCommand = (h) => (Array.isArray(h.args) && h.args.length > 0
+      ? [h.command, ...h.args].join(' ')
+      : h.command);
+
+    it('registers a single UserPromptSubmit dispatcher entry (IMPL-T2 consolidation)', () => {
       expect(hooksConfig.hooks.UserPromptSubmit).toBeDefined();
       const commands = hooksConfig.hooks.UserPromptSubmit.flatMap(
-        (entry) => entry.hooks.map((h) => h.command),
+        (entry) => entry.hooks.map(fullCommand),
       );
-      expect(commands.some((cmd) => cmd.includes('user-prompt-handler'))).toBe(true);
-      expect(commands.some((cmd) => cmd.includes('runtime-prompt'))).toBe(true);
-
-      const userPromptIndex = commands.findIndex((cmd) => cmd.includes('user-prompt-handler'));
-      const runtimePromptIndex = commands.findIndex((cmd) => cmd.includes('runtime-prompt'));
-      expect(userPromptIndex).toBeGreaterThanOrEqual(0);
-      expect(runtimePromptIndex).toBeGreaterThan(userPromptIndex);
+      // v4.7.2 (IMPL-T2-EXEC): the 6 separate UserPromptSubmit hook entries
+      // were collapsed into a single in-process dispatcher. The dispatcher
+      // imports user-prompt-handler / runtime-prompt / auto-team-trigger /
+      // autopilot-nlu-trigger / ambiguity-guard as named exports and spawns
+      // git-autopilot-save as a child process. Order within the dispatcher
+      // (user-prompt-handler sync first, others Promise.all) is enforced in
+      // _userprompt-dispatcher.js, not in hooks.json.
+      expect(commands).toHaveLength(1);
+      expect(commands[0]).toContain('_userprompt-dispatcher');
     });
 
     it('registers PreToolUse hooks for Write and Bash', () => {
@@ -205,7 +214,7 @@ describe('E2E: Plugin Initialization Flow', () => {
     it('registers PostToolUse hooks including quality gate', () => {
       expect(hooksConfig.hooks.PostToolUse).toBeDefined();
       const commands = hooksConfig.hooks.PostToolUse.flatMap(
-        (entry) => entry.hooks.map((h) => h.command),
+        (entry) => entry.hooks.map(fullCommand),
       );
       expect(commands.some((cmd) => cmd.includes('quality-gate'))).toBe(true);
     });
@@ -224,7 +233,7 @@ describe('E2E: Plugin Initialization Flow', () => {
       const allCommands = Object.values(hooksConfig.hooks).flatMap(
         (entries) => entries.flatMap((entry) => entry.hooks
           .filter((h) => h.type !== 'prompt')
-          .map((h) => h.command)),
+          .map(fullCommand)),
       );
       for (const cmd of allCommands) {
         expect(cmd).toContain('${CLAUDE_PLUGIN_ROOT}');
@@ -235,7 +244,7 @@ describe('E2E: Plugin Initialization Flow', () => {
       const allCommands = Object.values(hooksConfig.hooks).flatMap(
         (entries) => entries.flatMap((entry) => entry.hooks
           .filter((h) => h.type !== 'prompt')
-          .map((h) => h.command)),
+          .map(fullCommand)),
       );
       for (const cmd of allCommands) {
         // Extract the script path: "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/foo.js [args]"

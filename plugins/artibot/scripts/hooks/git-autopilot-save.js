@@ -10,9 +10,25 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import path from 'node:path';
-import { atomicWriteSync, parseJSON, readStdin } from '../utils/index.js';
+import { atomicWriteSync, parseJSON, readStdin, resolveConfigPath } from '../utils/index.js';
 import { createErrorHandler } from '../../lib/core/hook-utils.js';
 import { isAutopilotAllowed } from '../../lib/autopilot/repo-identity.js';
+
+/**
+ * Read `git.autopilot.bypassPreCommitHooks` from artibot.config.json.
+ * Defaults to false (honour pre-commit hooks). v4.7.2 (issue-scanner W4 P1-3):
+ * the previous unconditional `--no-verify` violated CLAUDE.md Git Safety
+ * Protocol — opt-in is now required.
+ * @returns {boolean}
+ */
+function readArtibotBypassPreCommitHooks() {
+  try {
+    const cfg = JSON.parse(readFileSync(resolveConfigPath('artibot.config.json'), 'utf-8'));
+    return cfg?.git?.autopilot?.bypassPreCommitHooks === true;
+  } catch {
+    return false;
+  }
+}
 
 // -------------------------------------------------------------------------
 // Helpers
@@ -27,6 +43,7 @@ function getRepoRoot() {
     return execSync('git rev-parse --show-toplevel', {
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: 2000,
       windowsHide: true,
     }).trim();
   } catch {
@@ -86,6 +103,7 @@ function hasDirtyWorkspace(cwd) {
       cwd,
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: 2000,
       windowsHide: true,
     });
     return status.trim().length > 0;
@@ -96,16 +114,28 @@ function hasDirtyWorkspace(cwd) {
 
 /**
  * Stage all changes and create a WIP commit.
+ *
+ * v4.7.2 (issue-scanner W4 P1-3): pre-commit hooks are honored by default.
+ * Set `git.autopilot.bypassPreCommitHooks: true` in artibot.config.json to
+ * restore the pre-v4.7.2 behavior of passing `--no-verify`. The default
+ * (`false`) lets secret-scan / lint / test gates fail the auto-save commit
+ * instead of silently committing through them — see CLAUDE.md Git Safety
+ * Protocol.
+ *
  * @param {string} cwd
+ * @param {{ bypassPreCommitHooks?: boolean }} [opts]
  * @returns {boolean} true if commit succeeded
  */
-function createWipCommit(cwd) {
+function createWipCommit(cwd, opts = {}) {
   try {
-    execSync('git add -A', { cwd, stdio: 'ignore', windowsHide: true });
+    execSync('git add -A', { cwd, stdio: 'ignore', timeout: 2000, windowsHide: true });
     const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
-    execSync(`git commit -m "wip: artibot auto-save [${timestamp}]" --no-verify`, {
+    const bypass = opts.bypassPreCommitHooks === true;
+    const noVerify = bypass ? ' --no-verify' : '';
+    execSync(`git commit -m "wip: artibot auto-save [${timestamp}]"${noVerify}`, {
       cwd,
       stdio: 'ignore',
+      timeout: 5000,
       windowsHide: true,
     });
     return true;
@@ -145,7 +175,11 @@ async function main() {
     return;
   }
 
-  const saved = createWipCommit(repoRoot);
+  // bypassPreCommitHooks: per-repo override (.git/autopilot.json) takes
+  // precedence; falls back to artibot.config.json git.autopilot.bypassPreCommitHooks.
+  const bypassPreCommitHooks = config?.bypassPreCommitHooks === true
+    || readArtibotBypassPreCommitHooks();
+  const saved = createWipCommit(repoRoot, { bypassPreCommitHooks });
   const newTimestamp = new Date(now).toISOString();
   saveState(repoRoot, { ...state, lastWipAt: newTimestamp });
 
