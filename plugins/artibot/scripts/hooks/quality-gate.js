@@ -20,7 +20,9 @@ async function main() {
   resetGuards();
   registerBuiltinGuards();
 
-  const result = executeChain('post', toolName, hookData);
+  const result = executeChain('post', toolName, hookData, {
+    cwd: hookData?.cwd || process.cwd(),
+  });
 
   if (result.decision === 'block') {
     writeStdout({

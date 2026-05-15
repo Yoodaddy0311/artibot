@@ -1,13 +1,28 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-  executeChain, listGuards, registerBuiltinGuards, registerGuard,
-  resetGuards,
-} from '../../lib/core/guard-registry.js';
 
 vi.mock('node:fs', async () => {
   const actual = await vi.importActual('node:fs');
   return { ...actual, existsSync: vi.fn(() => false), readFileSync: vi.fn(() => '') };
 });
+
+// v4.7.4: executeChain skips artibot-policy guards when cwd is not the
+// Artibot plugin repo. The shared `node:fs` mock above forces existsSync
+// to false, so the real isArtibotRepo would always return false and every
+// pre/post Write+Edit guard would be skipped. We stub the helper to return
+// true by default, then override per-test where the scope behaviour matters.
+let isArtibotRepoStub = vi.fn(() => true);
+vi.mock('../../lib/core/hook-utils.js', async () => {
+  const actual = await vi.importActual('../../lib/core/hook-utils.js');
+  return {
+    ...actual,
+    isArtibotRepo: (...args) => isArtibotRepoStub(...args),
+  };
+});
+
+const {
+  executeChain, listGuards, registerBuiltinGuards, registerGuard,
+  resetGuards,
+} = await import('../../lib/core/guard-registry.js');
 const { existsSync, readFileSync } = await import('node:fs');
 
 function makeHookData(toolName, overrides = {}) {
@@ -18,7 +33,12 @@ function _fakeGhToken() { return 'gh' + 'p_' + 'A'.repeat(36); }
 function _fakeGenericSecret() { return 'const api' + '_key = "supersecretkey12345678";'; }
 
 describe('guard-registry', () => {
-  beforeEach(() => { resetGuards(); vi.clearAllMocks(); existsSync.mockReturnValue(false); });
+  beforeEach(() => {
+    resetGuards();
+    vi.clearAllMocks();
+    existsSync.mockReturnValue(false);
+    isArtibotRepoStub = vi.fn(() => true);
+  });
 
   describe('registerGuard', () => {
     it('registers a valid guard', () => {
@@ -303,6 +323,79 @@ describe('guard-registry', () => {
       const r = executeChain('pre', 'Bash', makeHookData('Bash', { tool_input: { command: 'ls' } }));
       expect(r.decision).toBe('block');
       expect(r.reason).toBe('custom block');
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // v4.7.4: Artibot-repo scope guard for executeChain.
+  //
+  // Outside the Artibot plugin repo, only `security-critical` guards run.
+  // The `artibot-policy` guards (sensitive-file/content-secret in pre,
+  // console-log/hardcoded-secret/file-size in post) are skipped to prevent
+  // false positives in unrelated user projects where Artibot is installed
+  // globally via ~/.claude/.
+  // -----------------------------------------------------------------------
+  describe('Artibot-repo scope (executeChain opts.cwd)', () => {
+    it('runs all matching guards in an Artibot repo', () => {
+      isArtibotRepoStub = vi.fn(() => true);
+      registerBuiltinGuards();
+      // sensitive-file is artibot-policy: must block on .env writes
+      // when in-Artibot.
+      const r = executeChain('pre', 'Write', makeHookData('Write', {
+        tool_input: { file_path: '/proj/.env', content: 'X=1' },
+      }), { cwd: '/artibot/repo' });
+      expect(r.decision).toBe('block');
+    });
+
+    it('skips artibot-policy guards in a non-Artibot repo (sensitive-file approves)', () => {
+      isArtibotRepoStub = vi.fn(() => false);
+      registerBuiltinGuards();
+      // Outside Artibot, writing .env is a legitimate user action — must approve.
+      const r = executeChain('pre', 'Write', makeHookData('Write', {
+        tool_input: { file_path: '/user-project/.env', content: 'API_KEY=abc' },
+      }), { cwd: '/user-project' });
+      expect(r.decision).toBe('approve');
+    });
+
+    it('keeps dangerous-command (security-critical) live in non-Artibot repos', () => {
+      isArtibotRepoStub = vi.fn(() => false);
+      registerBuiltinGuards();
+      const r = executeChain('pre', 'Bash', makeHookData('Bash', {
+        tool_input: { command: 'rm -rf /' },
+      }), { cwd: '/user-project' });
+      expect(r.decision).toBe('block');
+    });
+
+    it('skips post-phase artibot-policy guards (file-size warn) in non-Artibot repo', () => {
+      isArtibotRepoStub = vi.fn(() => false);
+      registerBuiltinGuards();
+      existsSync.mockReturnValue(true);
+      readFileSync.mockReturnValue(Array.from({ length: 850 }, (_, i) => 'l' + i).join('\n'));
+      const r = executeChain('post', 'Edit', makeHookData('Edit', {
+        tool_input: { file_path: '/user-project/big.js' },
+      }), { cwd: '/user-project' });
+      expect(r.warnings).toHaveLength(0);
+    });
+  });
+
+  describe('guard category metadata', () => {
+    it('defaults to artibot-policy when category omitted', () => {
+      registerGuard({ name: 'untagged', phase: 'pre', tools: ['Bash'], check: () => null });
+      const [g] = listGuards(undefined, 'Bash');
+      expect(g.category).toBe('artibot-policy');
+    });
+    it('rejects invalid category values', () => {
+      expect(() => registerGuard({
+        name: 'bad', phase: 'pre', tools: ['Bash'], category: 'unknown', check: () => null,
+      })).toThrow('invalid category');
+    });
+    it('builtin categories: 3 security-critical, 5 artibot-policy', () => {
+      registerBuiltinGuards();
+      const all = listGuards();
+      const sec = all.filter((g) => g.category === 'security-critical').map((g) => g.name).sort();
+      const pol = all.filter((g) => g.category === 'artibot-policy').map((g) => g.name).sort();
+      expect(sec).toEqual(['bash-lint', 'dangerous-command', 'path-portability']);
+      expect(pol).toEqual(['console-log', 'content-secret', 'file-size', 'hardcoded-secret', 'sensitive-file']);
     });
   });
 });

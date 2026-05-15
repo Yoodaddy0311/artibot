@@ -29,7 +29,9 @@ async function main() {
     return;
   }
 
-  const result = executeChain('pre', toolName, hookData);
+  const result = executeChain('pre', toolName, hookData, {
+    cwd: hookData?.cwd || process.cwd(),
+  });
 
   if (result.decision === 'block') {
     writeStdout({ decision: 'block', reason: result.reason });

@@ -33,7 +33,7 @@ import {
   readStdin,
   writeStdout,
 } from '../utils/index.js';
-import { createErrorHandler, logHookError } from '../../lib/core/hook-utils.js';
+import { createErrorHandler, isArtibotRepo, logHookError } from '../../lib/core/hook-utils.js';
 import {
   getHeadSha as getCachedHeadSha,
   getRepoRoot as getCachedRepoRoot,
@@ -80,31 +80,6 @@ function git(cmd, cwd) {
 /** @returns {string|null} */
 function getRepoRoot() {
   return getCachedRepoRoot();
-}
-
-/**
- * Is this repository the Artibot project itself?
- *
- * The DEV verify checklist is an Artibot-internal development policy. When the
- * plugin is installed globally (`~/.claude/artibot/`), Stop hooks fire in every
- * project the user works in — including unrelated codebases that don't follow
- * Artibot's DEV protocol. Without this guard, those projects see a confusing
- * "Reference: plugins/artibot/CLAUDE.md (DEV Protocol section)" reminder that
- * has no meaning in their context.
- *
- * Detection signals (any one is sufficient):
- *   - `plugins/artibot/CLAUDE.md`        → working from the Artibot monorepo root
- *   - `artibot.config.json` at repoRoot  → working inside the plugin directory
- *
- * @param {string} repoRoot
- * @returns {boolean}
- */
-function isArtibotRepo(repoRoot) {
-  if (!repoRoot) return false;
-  return (
-    existsSync(path.join(repoRoot, 'plugins', 'artibot', 'CLAUDE.md')) ||
-    existsSync(path.join(repoRoot, 'artibot.config.json'))
-  );
 }
 
 /** @returns {string|null} */
