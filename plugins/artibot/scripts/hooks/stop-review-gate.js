@@ -43,6 +43,27 @@ const SENSITIVE_FILENAMES = new Set([
 // getRepoRoot / getHeadSha imported from lib/git/repo-root-cache.js
 // (process-scoped memoize — see v4.7.3 perf-auditor A1).
 
+/**
+ * Return true when the current repo is the Artibot plugin repo itself.
+ *
+ * The review-gate enforces Artibot-specific quality rules (e.g. mirror tests
+ * under plugins/artibot/tests/**, JSDoc patterns, sensitive-file guard tuned
+ * to this codebase). Running it in unrelated user repos was producing false
+ * positives — every .js file under scripts/ was flagged as "Code without
+ * tests" because plugins/artibot/tests/ doesn't exist there. v4.7.4 hotfix:
+ * silent skip when not in Artibot repo. Mirrors dev-verify-gate.js:102-108.
+ *
+ * @param {string} repoRoot
+ * @returns {boolean}
+ */
+function isArtibotRepo(repoRoot) {
+  if (!repoRoot) return false;
+  return (
+    existsSync(path.join(repoRoot, 'plugins', 'artibot', 'CLAUDE.md')) ||
+    existsSync(path.join(repoRoot, 'artibot.config.json'))
+  );
+}
+
 /** @returns {string[]} Changed file paths relative to repo root */
 function getChangedFiles(cwd) {
   // Use --diff-filter=ACMR to exclude deleted (D) and only include
@@ -474,6 +495,13 @@ async function main() {
     log('Not in a git repository, skipping review gate');
     return;
   }
+
+  // v4.7.4 hotfix: skip silently when running in a non-Artibot repo.
+  // Artibot installs globally to ~/.claude/, so this Stop hook fires for
+  // every Claude Code session. The review gate's rules (mirror tests under
+  // plugins/artibot/tests/**, etc.) are Artibot-specific and produce false
+  // positives elsewhere. Same guard as dev-verify-gate.js:242.
+  if (!isArtibotRepo(repoRoot)) return;
 
   const changedFiles = getChangedFiles(repoRoot);
   if (changedFiles.length === 0) {
