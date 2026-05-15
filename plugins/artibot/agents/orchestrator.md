@@ -59,6 +59,8 @@ tools:
   # (orchestrator doing the work itself instead of delegating).
   - Bash          # team ops only (e.g., git status for delegation context)
   - WebSearch     # external fact lookup for team briefing
+availableMcps:
+  - github        # read-only via GITHUB_TOKEN PAT — repo/issue/PR/code read for delegation context
 permissionMode: delegate
 maxTurns: 25
 skills:
