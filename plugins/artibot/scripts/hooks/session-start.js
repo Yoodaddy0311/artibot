@@ -11,6 +11,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { checkForUpdate } from '../../lib/core/version-checker.js';
 import { createErrorHandler } from '../../lib/core/hook-utils.js';
+import { getLastTestStatus } from '../../lib/core/test-status.js';
 
 /**
  * Build the environment descriptor used in the welcome banner and downstream
@@ -303,6 +304,23 @@ async function appendKillSwitchStatus(pluginRoot, config, lines) {
 }
 
 /**
+ * Surface the last vitest result on SessionStart. Best-effort: any failure
+ * is silently swallowed so a missing/corrupt status file never blocks start.
+ * Output goes to stderr (banner) AND the lines array (visible to the user).
+ *
+ * @param {string} pluginRoot
+ * @param {string[]} lines
+ */
+function appendTestStatus(pluginRoot, lines) {
+  try {
+    const { warning } = getLastTestStatus(pluginRoot);
+    if (warning) lines.push(warning);
+  } catch {
+    // Never block session start on test-status read errors
+  }
+}
+
+/**
  * Non-blocking update notification — any error is swallowed. Wrapped with a
  * 2000ms outer timeout so the update check never consumes more than 2 seconds,
  * leaving ample headroom within the 5000ms hook limit. CRITICAL: the timer
@@ -428,6 +446,7 @@ async function main() {
   await surfaceAdvisoryMessages(env.pluginRoot, config, lines);
   await maybeEmitFirstRunBanner(env.pluginRoot, config, lines);
   await appendKillSwitchStatus(env.pluginRoot, config, lines);
+  appendTestStatus(env.pluginRoot, lines);
   await checkUpdateBounded(version, home, lines);
   await primeSkillCache(env.pluginRoot);
   await maybeInjectSkillDiscovery(env.pluginRoot, lines);
