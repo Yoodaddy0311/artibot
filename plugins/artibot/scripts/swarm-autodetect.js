@@ -116,7 +116,7 @@ async function classifyState(pluginRoot) {
  * @param {string} pluginRoot
  * @param {object} profile
  */
-function applyProfile(pluginRoot, profile) {
+export function applyProfile(pluginRoot, profile) {
   const initScript = path.join(pluginRoot, 'scripts', 'swarm-init.js');
   let safeRepoUrl;
   try {
