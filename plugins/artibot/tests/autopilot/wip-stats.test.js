@@ -7,9 +7,9 @@
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
+  countWipCommits,
   DEFAULT_AGE_THRESHOLD_MS,
   DEFAULT_COUNT_THRESHOLD,
-  countWipCommits,
   formatAdvisoryLine,
   getOldestWipAgeMs,
   isWipSubject,
