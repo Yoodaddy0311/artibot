@@ -26,22 +26,21 @@
  */
 
 import {
-  hookPath,
   isMainEntry,
   mergeResults,
   parseHookStdout,
   readPayload,
   spawnHook,
 } from './_dispatcher-utils.js';
+import { loadDispatchTable } from '../../lib/dispatcher/dispatch-table-loader.js';
 
 const HOOK_NAME = '_subagentstop-dispatcher';
 const EVENT_NAME = 'SubagentStop';
 
-const HOOKS = [
-  { name: 'subagent-handler', script: hookPath('subagent-handler.js'), timeoutMs: 5000, args: ['stop'] },
-  { name: 'agent-evaluator',  script: hookPath('agent-evaluator.js'),  timeoutMs: 8000 },
-  { name: 'workflow-status',  script: hookPath('workflow-status.js'),  timeoutMs: 5000, args: ['teammate-update'] },
-];
+/**
+ * Hook table — loaded from hooks/dispatch-table.json (v4.8.0 P1).
+ */
+const HOOKS = loadDispatchTable(EVENT_NAME);
 
 export { HOOKS };
 

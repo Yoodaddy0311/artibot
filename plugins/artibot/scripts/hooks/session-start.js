@@ -12,6 +12,12 @@ import os from 'node:os';
 import { checkForUpdate } from '../../lib/core/version-checker.js';
 import { createErrorHandler } from '../../lib/core/hook-utils.js';
 import { getLastTestStatus } from '../../lib/core/test-status.js';
+import {
+  countWipCommits,
+  formatAdvisoryLine as formatWipAdvisory,
+  getOldestWipAgeMs,
+  resolveThresholdsFromEnv,
+} from '../../lib/autopilot/wip-stats.js';
 
 /**
  * Build the environment descriptor used in the welcome banner and downstream
@@ -321,6 +327,28 @@ function appendTestStatus(pluginRoot, lines) {
 }
 
 /**
+ * v4.8.0 P1 (Task #12): surface accumulated WIP commits so the user can run
+ * `/squash` before pushing. Mirrors the appendTestStatus pattern — fully
+ * defensive: any git/IO failure resolves silently so SessionStart is never
+ * blocked. Threshold defaults: 10 commits OR oldest >= 4h; both overridable
+ * via ARTIBOT_WIP_COUNT_THRESHOLD / ARTIBOT_WIP_AGE_HOURS env vars.
+ *
+ * @param {string[]} lines
+ */
+function appendWipAdvisory(lines) {
+  try {
+    const count = countWipCommits('HEAD');
+    if (count <= 0) return;
+    const ageMs = getOldestWipAgeMs('HEAD');
+    const thresholds = resolveThresholdsFromEnv();
+    const advisory = formatWipAdvisory(count, ageMs, thresholds);
+    if (advisory) lines.push(advisory);
+  } catch {
+    // Never block session start on git errors or missing repo.
+  }
+}
+
+/**
  * Non-blocking update notification — any error is swallowed. Wrapped with a
  * 2000ms outer timeout so the update check never consumes more than 2 seconds,
  * leaving ample headroom within the 5000ms hook limit. CRITICAL: the timer
@@ -447,6 +475,7 @@ async function main() {
   await maybeEmitFirstRunBanner(env.pluginRoot, config, lines);
   await appendKillSwitchStatus(env.pluginRoot, config, lines);
   appendTestStatus(env.pluginRoot, lines);
+  appendWipAdvisory(lines);
   await checkUpdateBounded(version, home, lines);
   await primeSkillCache(env.pluginRoot);
   await maybeInjectSkillDiscovery(env.pluginRoot, lines);

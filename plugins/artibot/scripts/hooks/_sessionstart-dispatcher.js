@@ -31,27 +31,19 @@
  * @module scripts/hooks/_sessionstart-dispatcher
  */
 
-import { hookPath, isMainEntry, mergeResults, parseHookStdout, readPayload, spawnHook } from './_dispatcher-utils.js';
+import { isMainEntry, mergeResults, parseHookStdout, readPayload, spawnHook } from './_dispatcher-utils.js';
+import { loadDispatchTable } from '../../lib/dispatcher/dispatch-table-loader.js';
 
 const HOOK_NAME = '_sessionstart-dispatcher';
 const EVENT_NAME = 'SessionStart';
 
 /**
- * Hook table — order is only meaningful for stderr log readability;
- * execution is parallel. Each entry preserves the original hooks.json timeout
- * so a slow swarm-download (network-bound, 15s) doesn't get truncated.
+ * Hook table — loaded from hooks/dispatch-table.json (v4.8.0 P1). Order is
+ * only meaningful for stderr log readability; execution is parallel. Each
+ * entry preserves the original hooks.json timeout so a slow swarm-download
+ * (network-bound, 15s) doesn't get truncated.
  */
-const HOOKS = [
-  { name: 'session-start',          script: hookPath('session-start.js'),          timeoutMs: 5000 },
-  { name: 'memory-tracker',         script: hookPath('memory-tracker.js'),         timeoutMs: 5000, args: ['SessionStart'] },
-  { name: 'swarm-download',         script: hookPath('swarm-download.js'),         timeoutMs: 15000 },
-  { name: 'git-autopilot-setup',    script: hookPath('git-autopilot-setup.js'),    timeoutMs: 5000 },
-  { name: 'image-cleanup',          script: hookPath('image-cleanup.js'),          timeoutMs: 5000 },
-  { name: 'session-digest',         script: hookPath('session-digest.js'),         timeoutMs: 3000 },
-  { name: 'git-autopilot-session',  script: hookPath('git-autopilot-session.js'),  timeoutMs: 10000 },
-  { name: 'auto-learning-check',    script: hookPath('auto-learning-check.js'),    timeoutMs: 5000 },
-  { name: 'skill-validation-check', script: hookPath('skill-validation-check.js'), timeoutMs: 5000 },
-];
+const HOOKS = loadDispatchTable(EVENT_NAME);
 
 export { HOOKS };
 

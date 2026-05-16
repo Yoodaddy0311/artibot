@@ -26,24 +26,21 @@
  */
 
 import {
-  hookPath,
   isMainEntry,
   mergeResults,
   parseHookStdout,
   readPayload,
   spawnHook,
 } from './_dispatcher-utils.js';
+import { loadDispatchTable } from '../../lib/dispatcher/dispatch-table-loader.js';
 
 const HOOK_NAME = '_stop-dispatcher';
 const EVENT_NAME = 'Stop';
 
-const HOOKS = [
-  { name: 'stop-review-gate',    script: hookPath('stop-review-gate.js'),    timeoutMs: 15000 },
-  { name: 'dev-verify-gate',     script: hookPath('dev-verify-gate.js'),     timeoutMs: 8000 },
-  { name: 'git-autopilot-close', script: hookPath('git-autopilot-close.js'), timeoutMs: 15000 },
-  { name: 'stop-recap',          script: hookPath('stop-recap.js'),          timeoutMs: 5000 },
-  { name: 'session-notes',       script: hookPath('session-notes.js'),       timeoutMs: 5000 },
-];
+/**
+ * Hook table — loaded from hooks/dispatch-table.json (v4.8.0 P1).
+ */
+const HOOKS = loadDispatchTable(EVENT_NAME);
 
 export { HOOKS };
 

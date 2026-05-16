@@ -33,29 +33,22 @@
 
 import {
   extractToolName,
-  hookPath,
   isMainEntry,
   mergeResults,
   parseHookStdout,
   readPayload,
   spawnHook,
 } from './_dispatcher-utils.js';
+import { loadDispatchTable } from '../../lib/dispatcher/dispatch-table-loader.js';
 
 const HOOK_NAME = '_posttooluse-dispatcher';
 const EVENT_NAME = 'PostToolUse';
 
-const HOOKS = [
-  { name: 'pre-write-guard',     script: hookPath('pre-write-guard.js'),     timeoutMs: 3000,  tools: ['Read'] },
-  { name: 'quality-gate',        script: hookPath('quality-gate.js'),        timeoutMs: 8000,  tools: ['Edit', 'Write'] },
-  { name: 'post-edit-format',    script: hookPath('post-edit-format.js'),    timeoutMs: 10000, tools: ['Edit'] },
-  { name: 'post-edit-recovery',  script: hookPath('post-edit-recovery.js'),  timeoutMs: 5000,  tools: ['Edit', 'Write'] },
-  { name: 'post-bash',           script: hookPath('post-bash.js'),           timeoutMs: 5000,  tools: ['Bash'] },
-  { name: 'post-bash-failure',   script: hookPath('post-bash-failure.js'),   timeoutMs: 3000,  tools: ['Bash'] },
-  { name: 'post-write-tdd',      script: hookPath('post-write-tdd.js'),      timeoutMs: 2000,  tools: ['Edit', 'Write'] },
-  { name: 'mark-main-agent-edit', script: hookPath('mark-main-agent-edit.js'), timeoutMs: 3000, tools: ['Edit', 'Write', 'MultiEdit'] },
-  { name: 'tool-tracker',        script: hookPath('tool-tracker.js'),        timeoutMs: 3000,  tools: ['*'] },
-  { name: 'webfetch-cache-post', script: hookPath('webfetch-cache-post.js'), timeoutMs: 5000,  tools: ['WebFetch'] },
-];
+/**
+ * Hook table — loaded from hooks/dispatch-table.json (v4.8.0 P1).
+ * Each entry's `tools` array drives the per-payload routing in selectHooks().
+ */
+const HOOKS = loadDispatchTable(EVENT_NAME);
 
 export { HOOKS };
 

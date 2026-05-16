@@ -23,24 +23,21 @@
  */
 
 import {
-  hookPath,
   isMainEntry,
   mergeResults,
   parseHookStdout,
   readPayload,
   spawnHook,
 } from './_dispatcher-utils.js';
+import { loadDispatchTable } from '../../lib/dispatcher/dispatch-table-loader.js';
 
 const HOOK_NAME = '_sessionend-dispatcher';
 const EVENT_NAME = 'SessionEnd';
 
-const HOOKS = [
-  { name: 'session-end',     script: hookPath('session-end.js'),     timeoutMs: 10000 },
-  { name: 'swarm-sync',      script: hookPath('swarm-sync.js'),      timeoutMs: 15000 },
-  { name: 'rotation-runner', script: hookPath('rotation-runner.js'), timeoutMs: 8000 },
-  { name: 'memory-tracker',  script: hookPath('memory-tracker.js'),  timeoutMs: 8000, args: ['SessionEnd'] },
-  { name: 'http-notify',     script: hookPath('http-notify.js'),     timeoutMs: 8000 },
-];
+/**
+ * Hook table — loaded from hooks/dispatch-table.json (v4.8.0 P1).
+ */
+const HOOKS = loadDispatchTable(EVENT_NAME);
 
 export { HOOKS };
 
