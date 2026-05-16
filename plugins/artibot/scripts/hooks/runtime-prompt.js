@@ -11,6 +11,7 @@
  */
 
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import {
   getPluginRoot,
@@ -501,7 +502,7 @@ async function main() {
 const isMain = (() => {
   try {
     const argv1 = process.argv[1] ? path.resolve(process.argv[1]) : '';
-    const here = path.resolve(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'));
+    const here = path.resolve(fileURLToPath(import.meta.url));
     return argv1 === here;
   } catch {
     return false;

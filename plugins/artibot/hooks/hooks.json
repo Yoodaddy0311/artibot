@@ -215,27 +215,9 @@
             "type": "command",
             "command": "node",
             "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/subagent-handler.js",
-              "stop"
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/_subagentstop-dispatcher.js"
             ],
-            "timeout": 5000
-          },
-          {
-            "type": "command",
-            "command": "node",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/agent-evaluator.js"
-            ],
-            "timeout": 8000
-          },
-          {
-            "type": "command",
-            "command": "node",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/workflow-status.js",
-              "teammate-update"
-            ],
-            "timeout": 5000
+            "timeout": 15000
           }
         ],
         "priority": "optional",
