@@ -282,7 +282,6 @@ async function main() {
         const { results, allResolved } = autoResolveAll(repoRoot);
         if (allResolved && results.length > 0) {
           log(`Auto-resolved ${results.length} conflict(s)`);
-          // eslint-disable-next-line max-depth -- git rebase recovery requires nested try/catch
           try {
             gitSilent(['rebase', '--continue'], { cwd: repoRoot });
           } catch {
