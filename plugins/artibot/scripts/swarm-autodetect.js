@@ -20,7 +20,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { pathToFileURL } from 'node:url';
 import { getPluginRoot } from '../lib/core/platform.js';
 import { getSwarmConfig, loadConsent } from '../lib/swarm/swarm-config.js';
 import { ARTIBOT_DIR } from '../lib/core/config.js';
@@ -247,7 +247,25 @@ async function main() {
   printHint(classification.state, classification.profile);
 }
 
-main().catch((err) => {
-  process.stderr.write(`[swarm-autodetect] ${err.message || err}\n`);
-  process.exit(0); // advisory — never block
-});
+// Only auto-run when invoked directly via the Node CLI (not when imported by
+// a test or another module). Compares this module's URL to argv[1] resolved
+// as a file:// URL — matches Node's standard "main module" idiom.
+function isDirectInvocation() {
+  if (!process.argv[1]) return false;
+  try {
+    return import.meta.url === pathToFileURL(process.argv[1]).href;
+  } catch {
+    return false;
+  }
+}
+
+if (isDirectInvocation()) {
+  main().catch((err) => {
+    process.stderr.write(`[swarm-autodetect] ${err.message || err}\n`);
+    process.exit(0); // advisory — never block
+  });
+}
+
+// fileURLToPath import is needed defensively for tests that may import this
+// module; reference the symbol to satisfy lint rules without side effects.
+void fileURLToPath;
