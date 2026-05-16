@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, copyFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import {
@@ -21,36 +21,39 @@ function writeHandler(dir, name, body) {
   return file;
 }
 
-/**
- * Temporarily override the dispatch-table.json to point to given handler specs.
- * We patch the real plugin file then restore it in afterEach.
- */
-import { readFileSync } from 'node:fs';
 import { getPluginRoot } from '../../lib/core/platform.js';
 
-const TABLE_PATH = path.join(getPluginRoot(), 'hooks', 'dispatch-table.json');
+// Real plugin table — copied into the tmp override so the empty-handler-slot
+// assertion still reflects production shape, but the legacy WS-C.2 dispatcher
+// reads from the tmp file via ARTIBOT_HOOK_DISPATCH_TABLE_PATH. This prevents
+// race conditions with tests/dispatcher/dispatch-table.test.js, which reads the
+// real file in parallel.
+const REAL_TABLE_PATH = path.join(getPluginRoot(), 'hooks', 'dispatch-table.json');
 
 describe('hook-dispatcher', () => {
   let tmpDir;
-  let originalTable;
+  let tmpTablePath;
 
   beforeEach(() => {
     tmpDir = mkdtempSync(path.join(tmpdir(), 'hook-dispatcher-test-'));
-    originalTable = readFileSync(TABLE_PATH, 'utf-8');
+    tmpTablePath = path.join(tmpDir, 'dispatch-table.json');
+    copyFileSync(REAL_TABLE_PATH, tmpTablePath);
+    process.env.ARTIBOT_HOOK_DISPATCH_TABLE_PATH = tmpTablePath;
     _resetDispatcherCache();
   });
 
   afterEach(() => {
-    writeFileSync(TABLE_PATH, originalTable, 'utf-8');
+    delete process.env.ARTIBOT_HOOK_DISPATCH_TABLE_PATH;
     _resetDispatcherCache();
     if (tmpDir) rmSync(tmpDir, { recursive: true, force: true });
     tmpDir = null;
+    tmpTablePath = null;
     delete process.env.ARTIBOT_HOOK_TIMEOUT_MS;
   });
 
   function setTable(slots) {
     writeFileSync(
-      TABLE_PATH,
+      tmpTablePath,
       JSON.stringify({ version: 1, description: 'test', slots }, null, 2),
       'utf-8',
     );
@@ -58,8 +61,11 @@ describe('hook-dispatcher', () => {
   }
 
   it('returns empty results for a slot with no handlers', async () => {
-    const result = await dispatch('SessionStart', {});
-    expect(result.slot).toBe('SessionStart');
+    // PreCompact stays empty by design (single-hook strategy, not dispatcher-consolidated).
+    // Wave 3A populated SessionStart/UserPromptSubmit/etc. with handler entries; PreCompact is the
+    // canonical "empty handlers" slot for asserting baseline dispatcher behavior.
+    const result = await dispatch('PreCompact', {});
+    expect(result.slot).toBe('PreCompact');
     expect(result.results).toEqual([]);
     expect(typeof result.duration_ms).toBe('number');
   });
@@ -153,7 +159,7 @@ describe('hook-dispatcher', () => {
   });
 
   it('records total duration_ms on the dispatch result', async () => {
-    const result = await dispatch('SessionStart', {});
+    const result = await dispatch('PreCompact', {});
     expect(typeof result.duration_ms).toBe('number');
     expect(result.duration_ms).toBeGreaterThanOrEqual(0);
   });

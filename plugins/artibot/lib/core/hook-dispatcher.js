@@ -27,9 +27,15 @@ let _cache = null;
 
 /**
  * Resolve the absolute path to the dispatch table JSON file.
+ * Honors ARTIBOT_HOOK_DISPATCH_TABLE_PATH so legacy WS-C.2 tests can swap in a
+ * tmp table without mutating the real plugins/artibot/hooks/dispatch-table.json
+ * — that shared file is also read by the v4.8.0 spawn-based loader and parallel
+ * vitest runs would otherwise race.
  * @returns {string}
  */
 function getDispatchTablePath() {
+  const override = process.env.ARTIBOT_HOOK_DISPATCH_TABLE_PATH;
+  if (override) return override;
   return path.join(getPluginRoot(), 'hooks', 'dispatch-table.json');
 }
 
