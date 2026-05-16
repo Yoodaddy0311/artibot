@@ -143,3 +143,44 @@ describe('zero-downtime-migration skill frontmatter', () => {
     expect(fm.description.length).toBeGreaterThan(40);
   });
 });
+
+// README count claims must stay anchored to filesystem reality. docs-updater
+// bumps the "N개 슬래시 커맨드" line when /adr or /migrate is added. A drift
+// here = README lies about what ships, which CI's validate-readme-claims.js
+// catches at PR time but this vitest test catches earlier in the dev loop.
+describe('README anchor counts (docs-updater drift guard)', () => {
+  const README_PATH = path.join(PLUGIN_ROOT, 'README.md');
+
+  /** Count `.md` files directly under `commands/`. */
+  async function actualCommandCount() {
+    const { readdir } = await import('node:fs/promises');
+    const entries = await readdir(path.join(PLUGIN_ROOT, 'commands'));
+    return entries.filter((f) => f.endsWith('.md')).length;
+  }
+
+  // Blocks: docs-updater forgets to bump the count when /adr or /migrate
+  // (or any future command) is added — README claim diverges from reality.
+  it('"N개 슬래시 커맨드" claim in README matches commands/*.md count', async () => {
+    const actual = await actualCommandCount();
+    const readme = await readFile(README_PATH, 'utf-8');
+    const claim = readme.match(/(\d+)\s*개\s*슬래시\s*커맨드/);
+    expect(
+      claim,
+      'README must contain a "N개 슬래시 커맨드" claim docs-updater can target',
+    ).not.toBeNull();
+    const claimed = Number(claim[1]);
+    expect(
+      claimed,
+      `README claims ${claimed} commands but commands/ has ${actual} .md files`,
+    ).toBe(actual);
+  });
+
+  // Blocks: /adr and /migrate disappearing from the on-disk inventory while
+  // the README still advertises them. Anchors the new commands in the count.
+  it('commands/adr.md and commands/migrate.md are both present', async () => {
+    const { readdir } = await import('node:fs/promises');
+    const entries = await readdir(path.join(PLUGIN_ROOT, 'commands'));
+    expect(entries).toContain('adr.md');
+    expect(entries).toContain('migrate.md');
+  });
+});
