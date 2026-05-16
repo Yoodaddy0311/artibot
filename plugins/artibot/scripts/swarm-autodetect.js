@@ -20,6 +20,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { getPluginRoot } from '../lib/core/platform.js';
 import { getSwarmConfig, loadConsent } from '../lib/swarm/swarm-config.js';
 import { ARTIBOT_DIR } from '../lib/core/config.js';
