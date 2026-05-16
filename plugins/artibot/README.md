@@ -380,10 +380,11 @@ Artibot의 핵심 엔진은 Claude Code의 **Agent Teams API**입니다. 단순�
 | **토큰 비용** | 1x | ~5x |
 | **적합 작업** | 단일 파일 분석, 검색, 빠른 위임 | 복잡한 기능 구현, 멀티 에이전트 협업 |
 
-### 50개 슬래시 커맨드
+### 65개 슬래시 커맨드
 
 - `/sc`로 자연어 의도를 분석하여 최적 커맨드로 자동 라우팅
 - 개발, 분석, 품질, 테스트, 문서화, 배포, 마케팅 전 영역 커버
+- **비개발자도 자연어로 트리거 가능** — "ADR 작성해줘", "마이그레이션 전략 짜줘" 입력 시 자동으로 적합한 커맨드 제안
 
 ### 99개 도메인 스킬
 
@@ -497,7 +498,7 @@ Artibot은 Claude Code 외에도 **Gemini CLI**, **OpenAI Codex CLI**, **Cursor 
 | Sub-Agent (단방향 위임) | ✅ | ✅ | ✅ | ⚠️ 제한적 | ✅ |
 | 27개 전문 에이전트 | ✅ | ✅ 자동변환 | ✅ 자동변환 | ✅ 자동변환 | ✅ 자동변환 |
 | 117개 스킬 (SKILL.md) | ✅ | ✅ | ✅ | ✅ | ✅ |
-| 슬래시 커맨드 | ✅ 50개 | ✅ TOML | → Workflows | → Prompts | → Workflows |
+| 슬래시 커맨드 | ✅ 65개 | ✅ TOML | → Workflows | → Prompts | → Workflows |
 | Hooks 자동작동 | ✅ 15이벤트 | ✅ 동일패턴 | ⚠️ 제한적 | ❌ | ✅ Agent Manager |
 | 인지 라우터 (System 1/2) | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 자가학습 (GRPO) | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -1055,6 +1056,8 @@ Federated Swarm 서버 (옵트인 필요)
 | `/implement [feature]` | 기능 구현 파이프라인 | `--type`, `--tdd`, `--framework` |
 | `/improve [target]` | 증거 기반 코드 개선 | `--focus`, `--loop` |
 | `/design [domain]` | 시스템 설계 | `--adr` |
+| `/adr [title]` | 아키텍처 결정 기록(ADR) 작성 — 왜 이렇게 결정했는지 문서화 | `--status`, `--supersedes` |
+| `/migrate [target]` | 무중단 DB/인프라 마이그레이션 전략 수립 및 실행 가이드 | `--phase`, `--rollback` |
 
 ### 분석/디버깅 커맨드
 
@@ -1449,7 +1452,7 @@ plugins/artibot/
 ├── agents/                      # 28개 에이전트 정의 (orchestrator 1 + 팀원 27)
 │   ├── orchestrator.md          #   CTO / 팀 리더 (Agent Teams API)
 │   └── [27개 전문 에이전트].md    #   팀원 (SendMessage + TaskUpdate)
-├── commands/                    # 50개 슬래시 커맨드
+├── commands/                    # 65개 슬래시 커맨드
 │   ├── sc.md                    #   메인 라우터
 │   ├── orchestrate.md           #   팀 오케스트레이션 (TeamCreate)
 │   ├── spawn.md                 #   팀 스폰 (병렬 실행)

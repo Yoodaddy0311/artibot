@@ -8,8 +8,9 @@
  *
  *   1. Runs `user-prompt-handler` first because it can rewrite the prompt
  *      (e.g. !rv re-verification, --no-team flag stripping). Order matters.
- *   2. Runs the remaining 4 in-process hooks in parallel via Promise.allSettled
- *      (auto-team-trigger, runtime-prompt, autopilot-nlu-trigger, ambiguity-guard).
+ *   2. Runs the remaining 5 in-process hooks in parallel via Promise.allSettled
+ *      (auto-team-trigger, runtime-prompt, autopilot-nlu-trigger,
+ *      auto-command-suggest, ambiguity-guard).
  *      They only contribute additionalContext, so order does not matter.
  *   3. Spawns git-autopilot-save as a child process (it has its own state-file
  *      side effects and was being worked on concurrently in IMPL-T1; keeping
@@ -37,6 +38,7 @@ import { handleUserPromptSubmit as userPromptHandler } from './user-prompt-handl
 import { handleUserPromptSubmit as autoTeamTrigger } from './auto-team-trigger.js';
 import { handleUserPromptSubmit as runtimePrompt } from './runtime-prompt.js';
 import { handleUserPromptSubmit as autopilotNlu } from './autopilot-nlu-trigger.js';
+import { handleUserPromptSubmit as autoCommandSuggest } from './auto-command-suggest.js';
 import { handleUserPromptSubmit as ambiguityGuard } from './ambiguity-guard.js';
 
 const HOOK_NAME = '_userprompt-dispatcher';
@@ -199,6 +201,7 @@ async function main() {
       safeRun(autoTeamTrigger, payload, 'auto-team-trigger'),
       safeRun(runtimePrompt, payload, 'runtime-prompt'),
       safeRun(autopilotNlu, payload, 'autopilot-nlu-trigger'),
+      safeRun(autoCommandSuggest, payload, 'auto-command-suggest'),
       safeRun(ambiguityGuard, payload, 'ambiguity-guard'),
     ]),
     runGitAutopilotSave(payload),

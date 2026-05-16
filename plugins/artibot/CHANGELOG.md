@@ -49,6 +49,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`/adr` 커맨드 + `skills/adr-format/`** (Senior Eng Collection #4 벤치마킹) — 아키텍처 결정 기록(ADR) 작성 워크플로우. "ADR 작성해줘" 같은 자연어 입력으로도 자동 트리거됩니다. 결정 배경·대안·트레이드오프를 구조화된 문서로 남겨 팀 컨텍스트를 보존합니다.
+- **`/migrate` 커맨드 + `skills/zero-downtime-migration/`** (Senior Eng Collection #11) — 무중단 DB/인프라 마이그레이션 전략 수립 및 단계별 실행 가이드. Expand-Contract 패턴, 롤백 플랜, 단계별 검증 체크포인트를 자동 생성합니다.
+- **NLU 자동 탐지** — 비개발자가 "ADR 문서 만들어줘", "DB 마이그레이션 어떻게 하지" 처럼 자연어로 입력하면 NLU 훅이 의도를 분류하여 `/adr` 또는 `/migrate` 커맨드를 자동으로 제안합니다. 슬래시 커맨드 이름을 몰라도 됩니다.
+
 ### Changed (BREAKING for users relying on silent commit/push)
 
 - **`scripts/hooks/git-autopilot-save.js`** + **`scripts/hooks/git-autopilot-close.js`** — auto-save / session-close commits and the auto-push step **no longer pass `--no-verify` by default**. The user's `pre-commit` and `pre-push` hooks now run, so secret-scan / lint / test gates can fail an autopilot commit instead of being silently bypassed (CLAUDE.md Git Safety Protocol).

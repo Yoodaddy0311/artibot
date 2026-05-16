@@ -28,6 +28,7 @@
         { "name": "auto-team-trigger",      "script": "auto-team-trigger.js",      "timeoutMs": 5000, "order": "parallel" },
         { "name": "runtime-prompt",         "script": "runtime-prompt.js",         "timeoutMs": 5000, "order": "parallel" },
         { "name": "autopilot-nlu-trigger",  "script": "autopilot-nlu-trigger.js",  "timeoutMs": 5000, "order": "parallel" },
+        { "name": "auto-command-suggest",   "script": "auto-command-suggest.js",   "timeoutMs": 5000, "order": "parallel" },
         { "name": "ambiguity-guard",        "script": "ambiguity-guard.js",        "timeoutMs": 5000, "order": "parallel" },
         { "name": "git-autopilot-save",     "script": "git-autopilot-save.js",     "timeoutMs": 5000, "order": "child-spawn-side-effect" }
       ]
