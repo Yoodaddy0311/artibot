@@ -220,6 +220,28 @@ describe('classifyCommandIntent — Migrate false-positive suppression (≥ 5 ca
     // Blocks: UI navigation misread as migration.
     expect(classifyCommandIntent('다음 페이지로 이동 어떻게 처리')).toBeNull();
   });
+
+  it('does NOT match "로컬 dev 환경 이전" (skill whenNotToUse alignment)', () => {
+    // Blocks: local dev environment moves misread as production migration.
+    // zero-downtime-migration skill's whenNotToUse explicitly excludes
+    // non-production scenarios; classifier must respect that boundary.
+    expect(classifyCommandIntent('로컬 dev 환경 이전 작업')).toBeNull();
+  });
+
+  // KNOWN GAP: build-tool migrations like "Webpack→Vite" currently classify
+  // as migrate because the classifier matches the arrow-notation pattern
+  // without checking what's on either side. The skill's whenNotToUse marks
+  // these as out-of-scope (no production customer data risk).
+  //
+  // Skipped here rather than asserted-fail so the gap is documented and
+  // discoverable: when nlu-wirer adds a build-tool exclusion to
+  // MIGRATE_NEGATIVE_PATTERNS, flip `.skip` to enable and the test will
+  // start guarding the alignment.
+  it.skip('[GAP] does NOT match build-tool migrations (e.g. "Webpack→Vite")', () => {
+    // Blocks: build-tool change (no production data risk) framed as cutover.
+    expect(classifyCommandIntent('Webpack→Vite 전환')).toBeNull();
+    expect(classifyCommandIntent('Webpack에서 Vite로 교체')).toBeNull();
+  });
 });
 
 // ADR-specific false-positives: phrases with "vs"/"선택"/"choice" tokens that
@@ -248,6 +270,45 @@ describe('classifyCommandIntent — ADR false-positive suppression (≥ 5 cases)
   it('does NOT match "commit vs the previous one"', () => {
     // Blocks: git history question misread as ADR.
     expect(classifyCommandIntent('commit vs the previous one — diff 보여줘')).toBeNull();
+  });
+
+  it('does NOT match "버전 vs 태그" (git terminology)', () => {
+    // Blocks: git versioning question misread as tech decision.
+    expect(classifyCommandIntent('버전 vs 태그 차이가 뭐야')).toBeNull();
+  });
+
+  it('does NOT match "라이브러리 어디 있어" (location question)', () => {
+    // Blocks: file-location question misread as library decision.
+    expect(classifyCommandIntent('라이브러리 어디 있어')).toBeNull();
+  });
+
+  it('does NOT match single-opinion "X가 좋다고 들었어" (no comparison)', () => {
+    // Blocks: single-opinion hearsay misread as tech comparison.
+    expect(classifyCommandIntent('Postgres가 좋다고 들었어')).toBeNull();
+  });
+
+  it('does NOT match "변수명 vs 함수명" (code convention question)', () => {
+    // Blocks: naming-convention question misread as tech decision.
+    expect(classifyCommandIntent('변수명 vs 함수명 컨벤션 뭐가 좋아')).toBeNull();
+  });
+});
+
+// Known classifier gaps relative to skills/adr-format/SKILL.md triggers.
+// Skipped (not asserted-fail) so the alignment work is discoverable and
+// trackable: when nlu-wirer adds these patterns, flip `.skip` to enable.
+describe('classifyCommandIntent — ADR skill-trigger alignment gaps', () => {
+  // Blocks: explicit "ADR" keyword in user prompt — listed as a trigger in
+  // skills/adr-format/SKILL.md but the classifier currently has no pattern
+  // for the bare token.
+  it.skip('[GAP] matches bare "ADR" keyword in prompt', () => {
+    expect(classifyCommandIntent('ADR 작성해줘')?.command).toBe('adr');
+  });
+
+  // Blocks: English "compare options" listed in skill triggers but missing
+  // from ADR_EN_PATTERNS in auto-command-suggest.js.
+  it.skip('[GAP] matches English "compare options"', () => {
+    expect(classifyCommandIntent('compare options for state management')?.command)
+      .toBe('adr');
   });
 });
 
