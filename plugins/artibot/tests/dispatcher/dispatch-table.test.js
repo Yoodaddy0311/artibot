@@ -31,7 +31,10 @@ const PLUGIN_ROOT = path.resolve(HERE, '..', '..');
 
 const EXPECTED_HANDLER_COUNTS = {
   SessionStart: 9,
-  UserPromptSubmit: 6,
+  // Bumped 6 → 7 in v4.8.0 backlog: auto-command-suggest.js joined the
+  // UserPromptSubmit slot to suggest /adr and /migrate from natural-language
+  // prompts (alongside the existing auto-team-trigger and autopilot-nlu).
+  UserPromptSubmit: 7,
   PostToolUse: 10,
   Stop: 5,
   SessionEnd: 5,
