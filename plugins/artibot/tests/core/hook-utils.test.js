@@ -369,9 +369,27 @@ describe('hook-utils / Hook Input Extraction', () => {
       expect(extractToolName({ tool: 'Write' })).toBe('Write');
     });
 
-    it('returns empty string for missing data', () => {
-      expect(extractToolName(null)).toBe('');
-      expect(extractToolName({})).toBe('');
+    it('falls back to camelCase toolName', () => {
+      expect(extractToolName({ toolName: 'Bash' })).toBe('Bash');
+    });
+
+    it('falls back to nested toolUse.name', () => {
+      expect(extractToolName({ toolUse: { name: 'Read' } })).toBe('Read');
+    });
+
+    it('falls back to nested tool_use.name', () => {
+      expect(extractToolName({ tool_use: { name: 'Grep' } })).toBe('Grep');
+    });
+
+    it('returns null for missing data', () => {
+      expect(extractToolName(null)).toBeNull();
+      expect(extractToolName(undefined)).toBeNull();
+      expect(extractToolName({})).toBeNull();
+    });
+
+    it('returns null for non-object payloads', () => {
+      expect(extractToolName('Bash')).toBeNull();
+      expect(extractToolName(42)).toBeNull();
     });
   });
 

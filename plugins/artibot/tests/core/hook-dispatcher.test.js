@@ -191,4 +191,43 @@ describe('hook-dispatcher', () => {
     expect(result.results[0].success).toBe(false);
     expect(result.results[0].error).toMatch(/default function/);
   });
+
+  // v4.8.0 H-5: ARTIBOT_HOOK_DISPATCH_TABLE_PATH must NOT be honored when the
+  // process is not running under a test harness. Otherwise an attacker who can
+  // set env vars (e.g. via a poisoned dotfile or compromised CI variable) could
+  // redirect every hook dispatcher to a hostile JSON and gain code execution.
+  describe('env override gate (H-5)', () => {
+    it('ignores override when VITEST and NODE_ENV are both unset', async () => {
+      // Snapshot + clear test markers so getDispatchTablePath() falls into the
+      // production branch.
+      const savedVitest = process.env.VITEST;
+      const savedNodeEnv = process.env.NODE_ENV;
+      delete process.env.VITEST;
+      delete process.env.NODE_ENV;
+      // Point the override at a bogus path that would fail loudly if honored.
+      process.env.ARTIBOT_HOOK_DISPATCH_TABLE_PATH =
+        path.join(tmpDir, 'nonexistent-attacker-controlled.json');
+      _resetDispatcherCache();
+      try {
+        // The dispatcher should fall back to the real on-disk table and find
+        // PreCompact (empty handlers) — proving it ignored the bogus override.
+        const result = await dispatch('PreCompact', {});
+        expect(result.slot).toBe('PreCompact');
+        expect(result.results).toEqual([]);
+      } finally {
+        if (savedVitest !== undefined) process.env.VITEST = savedVitest;
+        if (savedNodeEnv !== undefined) process.env.NODE_ENV = savedNodeEnv;
+        // The outer afterEach will delete ARTIBOT_HOOK_DISPATCH_TABLE_PATH.
+      }
+    });
+
+    it('honors override when VITEST=true (existing test contract)', async () => {
+      // The default beforeEach already sets the env var and VITEST runs with
+      // VITEST=true, so this just re-asserts the production override path is
+      // not the only one in play.
+      expect(process.env.VITEST).toBe('true');
+      const result = await dispatch('PreCompact', {});
+      expect(result.slot).toBe('PreCompact');
+    });
+  });
 });

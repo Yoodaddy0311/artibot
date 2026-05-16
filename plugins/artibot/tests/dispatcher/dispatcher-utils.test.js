@@ -4,6 +4,7 @@ import {
   mergeResults,
   parseHookStdout,
 } from '../../scripts/hooks/_dispatcher-utils.js';
+import { extractToolName as extractToolNameFromCore } from '../../lib/core/hook-utils.js';
 
 describe('parseHookStdout', () => {
   it('returns null for empty / whitespace input', () => {
@@ -48,6 +49,24 @@ describe('extractToolName', () => {
     expect(extractToolName(undefined)).toBeNull();
     expect(extractToolName('string')).toBeNull();
     expect(extractToolName({})).toBeNull();
+  });
+
+  // v4.8.0 H-2: same function must back both import paths.
+  it('is the same function as lib/core/hook-utils#extractToolName', () => {
+    expect(extractToolName).toBe(extractToolNameFromCore);
+  });
+
+  it.each([
+    [{ tool_name: 'Edit' }, 'Edit'],
+    [{ tool: 'Bash' }, 'Bash'],
+    [{ toolName: 'Write' }, 'Write'],
+    [{ toolUse: { name: 'Read' } }, 'Read'],
+    [{ tool_use: { name: 'Grep' } }, 'Grep'],
+    [{}, null],
+    [null, null],
+  ])('both import paths produce identical result for %j', (input, expected) => {
+    expect(extractToolName(input)).toBe(expected);
+    expect(extractToolNameFromCore(input)).toBe(expected);
   });
 });
 

@@ -146,6 +146,25 @@ describe('loader API', () => {
     expect(() => loadDispatchTable(null)).toThrow(/non-empty string/);
   });
 
+  // v4.8.0 H-4: every resolved handler script lives strictly under HOOKS_DIR.
+  // Crafted traversal entries are covered by the dedicated security suite
+  // (tests/dispatcher/dispatch-table-loader-security.test.js) that swaps the
+  // table file at runtime; here we just sanity-check production data.
+  it('all real handler script paths stay strictly under getHooksDir() (H-4)', () => {
+    const hooksDir = getHooksDir();
+    const sep = path.sep;
+    const root = hooksDir.endsWith(sep) ? hooksDir : hooksDir + sep;
+    for (const slot of listSlots()) {
+      const handlers = loadDispatchTable(slot);
+      for (const h of handlers) {
+        expect(
+          h.script === hooksDir || h.script.startsWith(root),
+          `${slot} → ${h.name}: ${h.script} escapes hooksDir`,
+        ).toBe(true);
+      }
+    }
+  });
+
   it('returns defensive copies — mutating the result does not corrupt cache', () => {
     _resetCacheForTests();
     const first = loadDispatchTable('Stop');

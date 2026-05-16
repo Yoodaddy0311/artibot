@@ -75,6 +75,50 @@ describe('isLocalhost()', () => {
     expect(isLocalhost('example.com')).toBe(false);
     expect(isLocalhost('localhost.evil.com')).toBe(false);
   });
+
+  // v4.8.0 H-6: tighten loopback / mDNS detection so DNS-rebinding-style
+  // hostnames cannot smuggle traffic past the egress guard.
+  describe('hardening against rebinding tricks (H-6)', () => {
+    it('rejects 127.evil.com — only true 4-octet 127.x.x.x loopback passes', () => {
+      expect(isLocalhost('127.evil.com')).toBe(false);
+      expect(isLocalhost('127.a.b.c')).toBe(false);
+      expect(isLocalhost('127.foo.bar.baz')).toBe(false);
+      expect(isLocalhost('127.0.0.1.evil.com')).toBe(false);
+    });
+
+    it('accepts only valid 0-255 octets in 127/8', () => {
+      expect(isLocalhost('127.0.0.1')).toBe(true);
+      expect(isLocalhost('127.255.255.255')).toBe(true);
+      expect(isLocalhost('127.1.2.3')).toBe(true);
+      // Out-of-range octets are not valid IPv4 — reject.
+      expect(isLocalhost('127.0.0.256')).toBe(false);
+      expect(isLocalhost('127.999.0.1')).toBe(false);
+    });
+
+    it('rejects .local impostors (foo.local.evil.com, foo..local)', () => {
+      expect(isLocalhost('foo.local.evil.com')).toBe(false);
+      expect(isLocalhost('host.local.attacker.io')).toBe(false);
+      expect(isLocalhost('foo..local')).toBe(false);
+      expect(isLocalhost('foo .local')).toBe(false); // whitespace
+      expect(isLocalhost('.local')).toBe(false); // empty label
+    });
+
+    it('still accepts canonical .local mDNS hostnames', () => {
+      expect(isLocalhost('printer.local')).toBe(true);
+      expect(isLocalhost('my-mac.local')).toBe(true);
+    });
+
+    it('accepts IPv6 link-local (fe80::/10) addresses', () => {
+      expect(isLocalhost('fe80::1')).toBe(true);
+      expect(isLocalhost('fe80::abcd:1234')).toBe(true);
+      expect(isLocalhost('FE80::1')).toBe(true); // case-insensitive
+    });
+
+    it('rejects fe80 impostors', () => {
+      expect(isLocalhost('fe80.evil.com')).toBe(false);
+      expect(isLocalhost('not-fe80::1')).toBe(false);
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------

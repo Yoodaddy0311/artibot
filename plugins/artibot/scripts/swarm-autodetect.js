@@ -19,11 +19,12 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { execSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { getPluginRoot } from '../lib/core/platform.js';
 import { getSwarmConfig, loadConsent } from '../lib/swarm/swarm-config.js';
 import { ARTIBOT_DIR } from '../lib/core/config.js';
 import { readJsonFile, writeJsonFile } from '../lib/core/file.js';
+import { assertSafeGitUrl } from '../lib/swarm/git-backend.js';
 
 const PROFILE_REL = path.join('.claude-plugin', 'swarm-profile.json');
 const AUTO_APPLIED_MARKER = path.join(ARTIBOT_DIR, 'swarm-autoapplied.json');
@@ -116,16 +117,34 @@ async function classifyState(pluginRoot) {
  */
 function applyProfile(pluginRoot, profile) {
   const initScript = path.join(pluginRoot, 'scripts', 'swarm-init.js');
+  let safeRepoUrl;
   try {
-    const stdout = execSync(`node "${initScript}" --repo=${profile.repoUrl}`, {
+    safeRepoUrl = assertSafeGitUrl(profile.repoUrl);
+  } catch (err) {
+    return { ok: false, error: `unsafe repoUrl: ${err.message || String(err)}` };
+  }
+  const result = spawnSync(
+    process.execPath,
+    [initScript, `--repo=${safeRepoUrl}`],
+    {
       cwd: pluginRoot,
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    return { ok: true, output: stdout };
-  } catch (err) {
-    return { ok: false, error: err.message || String(err), stderr: err.stderr?.toString() };
+      shell: false,
+      windowsHide: true,
+    },
+  );
+  if (result.error) {
+    return { ok: false, error: result.error.message || String(result.error) };
   }
+  if (typeof result.status === 'number' && result.status !== 0) {
+    return {
+      ok: false,
+      error: `swarm-init exited with status ${result.status}`,
+      stderr: (result.stderr || '').toString(),
+    };
+  }
+  return { ok: true, output: (result.stdout || '').toString() };
 }
 
 function printHint(state, profile) {

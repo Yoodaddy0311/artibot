@@ -207,12 +207,34 @@ export function extractFilePath(hookData) {
 }
 
 /**
- * Extract the tool name from hook data.
+ * Extract the tool name from a hook payload.
+ *
+ * Single source of truth as of v4.8.0 (H-2). Previously duplicated in
+ * `scripts/hooks/_dispatcher-utils.js` with divergent key ordering — that
+ * file now re-exports this implementation.
+ *
+ * Recognized keys (in priority order):
+ *   - `tool_name` (snake_case, canonical Claude Code payload key)
+ *   - `tool` (legacy short form)
+ *   - `toolName` (camelCase variant)
+ *   - `toolUse.name` / `tool_use.name` (nested ToolUse envelope)
+ *
+ * Returns null when nothing matches or input is not an object, so callers
+ * can safely use truthy checks or `=== 'Bash'`-style equality.
+ *
  * @param {object} hookData - Parsed hook data
- * @returns {string}
+ * @returns {string|null}
  */
 export function extractToolName(hookData) {
-  return hookData?.tool_name || hookData?.tool || '';
+  if (!hookData || typeof hookData !== 'object') return null;
+  return (
+    hookData.tool_name ||
+    hookData.tool ||
+    hookData.toolName ||
+    hookData.toolUse?.name ||
+    hookData.tool_use?.name ||
+    null
+  );
 }
 
 /**

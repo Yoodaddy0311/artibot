@@ -224,6 +224,31 @@ describe('formatAdvisoryLine', () => {
   });
 });
 
+// v4.8.0 H-1: defaultGitRunner now uses execFileSync (argv form) instead of
+// execSync (shell-string form). These tests exercise the real runner with a
+// malicious cwd to verify shell metacharacters are NOT interpreted by a shell
+// (no subshell is spawned) and that runner errors propagate up to the
+// public-API safe defaults (0).
+describe('countWipCommits / getOldestWipAgeMs — real runner shell-safety', () => {
+  it('returns 0 when cwd contains shell metacharacters and is not a git repo', () => {
+    // execFileSync('git', [...], { cwd: '/tmp/$(whoami);ls' }) — if this were
+    // shell-form, the cwd would be interpreted by /bin/sh -c and the side
+    // effects of `whoami;ls` could fire. In argv form, the cwd is simply
+    // passed to Node's spawn() as a literal path. The path does not exist
+    // so git throws ENOENT and our wrapper falls through to 0.
+    const evilCwd = '/tmp/$(whoami);ls;`id`';
+    expect(countWipCommits('HEAD', { cwd: evilCwd })).toBe(0);
+    expect(getOldestWipAgeMs('HEAD', { cwd: evilCwd })).toBe(0);
+  });
+
+  it('returns 0 when branch name contains shell metacharacters and refs do not exist', () => {
+    // Even if cwd is a real git repo, an injected branch arg is just a literal
+    // ref name to `git log`. git will report `unknown revision` and we return 0.
+    const evilBranch = 'HEAD;rm -rf /';
+    expect(countWipCommits(evilBranch)).toBe(0);
+  });
+});
+
 describe('resolveThresholdsFromEnv', () => {
   const ORIGINAL = { ...process.env };
 

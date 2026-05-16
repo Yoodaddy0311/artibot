@@ -153,13 +153,41 @@ export function loadDispatchTable(slotName) {
     validateHandler(h, slotName, i);
     const resolved = {
       name: h.name,
-      script: path.join(HOOKS_DIR, h.script),
+      script: resolveScriptPath(h.script, slotName, i),
       timeoutMs: h.timeoutMs,
     };
     if (h.args) resolved.args = [...h.args];
     if (h.tools) resolved.tools = [...h.tools];
     return resolved;
   });
+}
+
+/**
+ * Resolve `script` (table-relative) into an absolute path AND verify it stays
+ * under HOOKS_DIR. Prevents directory traversal via crafted JSON entries like
+ * "../../../etc/passwd" — path.join would happily collapse them, so we
+ * normalize with path.resolve and reject anything that escapes the root.
+ *
+ * @param {string} script
+ * @param {string} slotName
+ * @param {number} index
+ * @returns {string}
+ */
+function resolveScriptPath(script, slotName, index) {
+  if (path.isAbsolute(script) || script.includes('\0')) {
+    throw new Error(
+      `dispatch-table-loader: ${slotName}.handlers[${index}].script must be a relative path without NUL bytes`,
+    );
+  }
+  const resolved = path.resolve(HOOKS_DIR, script);
+  const root = path.resolve(HOOKS_DIR);
+  const rootWithSep = root.endsWith(path.sep) ? root : root + path.sep;
+  if (resolved !== root && !resolved.startsWith(rootWithSep)) {
+    throw new Error(
+      `dispatch-table-loader: ${slotName}.handlers[${index}].script "${script}" escapes hooks dir`,
+    );
+  }
+  return resolved;
 }
 
 /**

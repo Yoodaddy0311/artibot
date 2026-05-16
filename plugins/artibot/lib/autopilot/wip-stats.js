@@ -13,7 +13,7 @@
  * @module lib/autopilot/wip-stats
  */
 
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 
 /** Default threshold counts (overridable per call). */
 export const DEFAULT_COUNT_THRESHOLD = 10;
@@ -27,12 +27,16 @@ const WIP_SUBJECT_RE = /^(\[wip\]|wip\b|wip:|wip\()/i;
  * Default git runner. Returns trimmed stdout. Throws on non-zero exit so
  * callers can fall through to their safe defaults.
  *
+ * Uses execFileSync (argv form) instead of execSync (shell-string form) so
+ * shell metacharacters in cwd, since, or branch values cannot trigger
+ * command injection. See v4.8.0 audit H-1.
+ *
  * @param {string[]} args
  * @param {{ cwd?: string }} [opts]
  * @returns {string}
  */
 function defaultGitRunner(args, opts = {}) {
-  return execSync(`git ${args.join(' ')}`, {
+  return execFileSync('git', args, {
     cwd: opts.cwd,
     encoding: 'utf-8',
     stdio: ['ignore', 'pipe', 'ignore'],
@@ -63,7 +67,7 @@ export function isWipSubject(subject) {
 export function countWipCommits(branch = 'HEAD', opts = {}) {
   const git = opts.git ?? defaultGitRunner;
   const args = ['log', '--pretty=%s'];
-  if (opts.since) args.push(`--since=${JSON.stringify(opts.since)}`);
+  if (opts.since) args.push(`--since=${opts.since}`);
   args.push(branch);
   args.push('--');
 

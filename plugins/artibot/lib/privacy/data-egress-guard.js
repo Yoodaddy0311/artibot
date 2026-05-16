@@ -63,14 +63,25 @@ const LOCALHOST_NAMES = new Set([
   '0.0.0.0',
 ]);
 
+/** Exact IPv4 loopback (127.0.0.0/8) — all four octets in 0-255 range. */
+const IPV4_LOOPBACK_RE = /^127\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
+/** Exact IPv6 link-local prefix fe80::/10 (canonical zero-compressed forms). */
+const IPV6_LINK_LOCAL_RE = /^fe80:(?::[0-9a-f]{0,4}){1,7}$/i;
+
 /**
  * Check whether a hostname refers to the local machine.
  *
- * Returns true for:
+ * Returns true ONLY for exact matches against:
  *   - `localhost`
- *   - `127.0.0.1` and any other `127.x.x.x` loopback
+ *   - `127.0.0.0/8` (IPv4 loopback, all four octets validated 0-255)
  *   - `::1` (IPv6 loopback, with or without brackets)
- *   - `*.local` (mDNS / Bonjour, e.g. `mymachine.local`)
+ *   - `fe80::/10` (IPv6 link-local)
+ *   - `*.local` mDNS labels — host must END with `.local` (and only `.local`,
+ *     not `.local.attacker.com`), and the `.local` token must be the final
+ *     label of the hostname.
+ *
+ * Hardened against DNS-rebinding-style impostors such as `127.evil.com`,
+ * `localhost.evil.com`, and `foo.local.evil.com` — all return false.
  *
  * @param {string} hostname - Hostname extracted from a URL
  * @returns {boolean}
@@ -79,8 +90,26 @@ export function isLocalhost(hostname) {
   if (typeof hostname !== 'string' || hostname.length === 0) return false;
   const lower = hostname.toLowerCase();
   if (LOCALHOST_NAMES.has(lower)) return true;
-  if (lower.startsWith('127.')) return true;
-  if (lower.endsWith('.local')) return true;
+  // IPv4 loopback — every octet must be a valid 0-255 number.
+  const v4 = IPV4_LOOPBACK_RE.exec(lower);
+  if (v4) {
+    return [v4[1], v4[2], v4[3]].every((o) => {
+      const n = Number(o);
+      return Number.isInteger(n) && n >= 0 && n <= 255;
+    });
+  }
+  // IPv6 link-local fe80::/10
+  if (IPV6_LINK_LOCAL_RE.test(lower)) return true;
+  // mDNS .local — exact-suffix only. Reject empty label, multi-dot tricks,
+  // and forms like `host.local.attacker.com`. The `.local` must be the final
+  // 6 characters and there must be content before it.
+  if (lower.endsWith('.local') && lower.length > '.local'.length) {
+    // Disallow consecutive dots (e.g. "foo..local") and stray whitespace.
+    if (lower.includes('..') || /\s/.test(lower)) return false;
+    // The substring `.local` may not appear anywhere except at the tail.
+    if (lower.lastIndexOf('.local') !== lower.length - '.local'.length) return false;
+    return true;
+  }
   return false;
 }
 

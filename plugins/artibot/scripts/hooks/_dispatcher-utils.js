@@ -27,7 +27,14 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
+import { extractToolName } from '../../lib/core/hook-utils.js';
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
+
+// v4.8.0 H-2: extractToolName is owned by lib/core/hook-utils.js; we re-export
+// it so the dispatcher hot path keeps a single import line and downstream
+// callers (_posttooluse-dispatcher.js, tests) see one canonical implementation.
+export { extractToolName };
 
 /**
  * Read the entire stdin payload and JSON-parse it. Returns {} on empty/invalid.
@@ -55,25 +62,6 @@ export async function readPayload() {
  */
 export function hookPath(name) {
   return path.join(HERE, name);
-}
-
-/**
- * Extract the tool name from a PostToolUse payload. Mirrors
- * `lib/core/hook-utils.js#extractToolName` but kept inline to avoid extra
- * imports in the hot path.
- * @param {object} payload
- * @returns {string|null}
- */
-export function extractToolName(payload) {
-  if (!payload || typeof payload !== 'object') return null;
-  return (
-    payload.tool ||
-    payload.tool_name ||
-    payload.toolName ||
-    payload.toolUse?.name ||
-    payload.tool_use?.name ||
-    null
-  );
 }
 
 /**
