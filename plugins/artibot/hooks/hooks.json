@@ -470,6 +470,21 @@
         ],
         "priority": "optional",
         "category": "ux"
+      },
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/session-notes.js"
+            ],
+            "timeout": 5000
+          }
+        ],
+        "priority": "optional",
+        "category": "learning"
       }
     ],
     "UserPromptSubmit": [

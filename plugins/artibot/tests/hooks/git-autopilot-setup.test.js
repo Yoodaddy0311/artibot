@@ -134,7 +134,10 @@ describe('git-autopilot-setup opt-in policy', () => {
       const written = mockState.atomicWrites[0].data;
       expect(written.enabled).toBe(true);
       expect(written.branchPrefix).toBe('artibot/');
-      expect(written.wipIntervalMinutes).toBe(30);
+      // v4.7.8: default bumped 30 → 120 (memory + SESSION-NOTES.md
+      // now handle context preservation; WIP is just a crash net).
+      expect(written.wipIntervalMinutes).toBe(120);
+      expect(written.version).toBe(2);
       expect(typeof written.lastSetupAt).toBe('string');
       // Hook writes to stderr (not stdout) to avoid polluting Claude Code's
       // SessionStart JSON parser. See git-autopilot-setup.js:198.
@@ -180,6 +183,105 @@ describe('git-autopilot-setup opt-in policy', () => {
       expect(written.lastSetupAt).not.toBe('2026-01-01T00:00:00.000Z');
       expect(mockState.stdoutChunks).toHaveLength(0);
       expect(mockState.stderrChunks.join('')).toContain('Updated');
+    });
+
+    it('migrates v1 + wipIntervalMinutes=30 → v2 + 120 (auto-bump when user kept old default)', async () => {
+      const v1Config = {
+        version: 1,
+        enabled: true,
+        wipIntervalMinutes: 30,
+        autoPullOnSession: true,
+        autoPushOnStop: true,
+        squashWipOnClose: true,
+        branchPrefix: 'artibot/',
+        conflictStrategy: 'union',
+        guardEnabled: true,
+        lastSetupAt: '2026-01-01T00:00:00.000Z',
+      };
+      mockState.existsSyncResults = {
+        'autopilot.json': true,
+        'plugin.json': false,
+      };
+      mockState.readFileSyncImpl = (p) => {
+        if (String(p).includes('autopilot.json')) return JSON.stringify(v1Config);
+        throw new Error('ENOENT');
+      };
+      mockState.execFileSyncImpl = () =>
+        'https://github.com/Yoodaddy0311/artibot.git\n';
+
+      const outcome = await mainFn([]);
+
+      expect(outcome).toBe('updated');
+      const written = mockState.atomicWrites[0].data;
+      // v4.7.8 migration: 30 was the old DEFAULT — bump to 120
+      expect(written.wipIntervalMinutes).toBe(120);
+      expect(written.version).toBe(2);
+    });
+
+    it('preserves customized wipIntervalMinutes during migration (user choice wins)', async () => {
+      const v1Custom = {
+        version: 1,
+        enabled: true,
+        wipIntervalMinutes: 60, // not the default — user deliberately chose this
+        autoPullOnSession: true,
+        autoPushOnStop: true,
+        squashWipOnClose: true,
+        branchPrefix: 'artibot/',
+        conflictStrategy: 'union',
+        guardEnabled: true,
+        lastSetupAt: '2026-01-01T00:00:00.000Z',
+      };
+      mockState.existsSyncResults = {
+        'autopilot.json': true,
+        'plugin.json': false,
+      };
+      mockState.readFileSyncImpl = (p) => {
+        if (String(p).includes('autopilot.json')) return JSON.stringify(v1Custom);
+        throw new Error('ENOENT');
+      };
+      mockState.execFileSyncImpl = () =>
+        'https://github.com/Yoodaddy0311/artibot.git\n';
+
+      const outcome = await mainFn([]);
+
+      expect(outcome).toBe('updated');
+      const written = mockState.atomicWrites[0].data;
+      // Custom value MUST be preserved
+      expect(written.wipIntervalMinutes).toBe(60);
+      expect(written.version).toBe(2);
+    });
+
+    it('does NOT re-migrate when version is already 2 (user may have deliberately chosen 30)', async () => {
+      const v2WithThirty = {
+        version: 2,
+        enabled: true,
+        wipIntervalMinutes: 30, // deliberate after v2 — leave alone
+        autoPullOnSession: true,
+        autoPushOnStop: true,
+        squashWipOnClose: true,
+        branchPrefix: 'artibot/',
+        conflictStrategy: 'union',
+        guardEnabled: true,
+        lastSetupAt: '2026-04-01T00:00:00.000Z',
+      };
+      mockState.existsSyncResults = {
+        'autopilot.json': true,
+        'plugin.json': false,
+      };
+      mockState.readFileSyncImpl = (p) => {
+        if (String(p).includes('autopilot.json')) return JSON.stringify(v2WithThirty);
+        throw new Error('ENOENT');
+      };
+      mockState.execFileSyncImpl = () =>
+        'https://github.com/Yoodaddy0311/artibot.git\n';
+
+      const outcome = await mainFn([]);
+
+      expect(outcome).toBe('updated');
+      const written = mockState.atomicWrites[0].data;
+      // Already v2 → respect the value as-is
+      expect(written.wipIntervalMinutes).toBe(30);
+      expect(written.version).toBe(2);
     });
 
     it('returns "skipped-not-allowed" when existing config is in a non-allowlisted repo (Capture-Only Mode)', async () => {

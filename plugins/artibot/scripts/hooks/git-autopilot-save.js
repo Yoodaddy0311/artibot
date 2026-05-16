@@ -195,7 +195,9 @@ async function main() {
   const config = loadConfig(repoRoot);
   if (!config) return;
 
-  const intervalMs = (config.wipIntervalMinutes ?? 30) * 60 * 1000;
+  // Default 120m (v4.7.8): memory + SESSION-NOTES.md handle context preservation;
+  // git WIP is now strictly a crash safety net, not a per-half-hour log.
+  const intervalMs = (config.wipIntervalMinutes ?? 120) * 60 * 1000;
   const state = loadState(repoRoot);
   const now = Date.now();
   const lastWip = state.lastWipAt ? new Date(state.lastWipAt).getTime() : 0;
