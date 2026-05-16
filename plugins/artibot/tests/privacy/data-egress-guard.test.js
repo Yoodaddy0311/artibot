@@ -296,6 +296,38 @@ describe('assertEgressAllowed()', () => {
     ).toBe(true);
   });
 
+  // v4.8.0 audit L-1: URL userinfo must not be allowed to slip past the
+  // hostname check, because creds leak through proxy/server access logs.
+  it('rejects URLs with embedded user credentials (L-1, allowlisted host)', () => {
+    expect(() =>
+      assertEgressAllowed('https://user:pass@api.github.com/repos', {
+        allowlist: new Set(['api.github.com']),
+      }),
+    ).toThrow(EgressBlockedError);
+    expect(() =>
+      assertEgressAllowed('https://user:pass@api.github.com/repos', {
+        allowlist: new Set(['api.github.com']),
+      }),
+    ).toThrow('embedded credentials');
+  });
+
+  it('rejects URLs with username-only userinfo (L-1)', () => {
+    expect(() =>
+      assertEgressAllowed('http://user@localhost:3000/api', {
+        allowlist: new Set(),
+      }),
+    ).toThrow('embedded credentials');
+  });
+
+  it('rejects URLs with userinfo even pointing at localhost (L-1)', () => {
+    // localhost is normally a hard allow — but embedded creds must still fail.
+    expect(() =>
+      assertEgressAllowed('http://x:y@127.0.0.1/api', {
+        allowlist: new Set(),
+      }),
+    ).toThrow(EgressBlockedError);
+  });
+
   it('defaults the allowlist to loadAllowlist() when no option is provided', () => {
     // Default disk allowlist contains api.github.com
     expect(assertEgressAllowed('https://api.github.com/anything')).toBe(true);

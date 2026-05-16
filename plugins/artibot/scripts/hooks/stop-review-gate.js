@@ -322,6 +322,17 @@ function checkMissingTests(files, repoRoot) {
     // Fast path: any test file anywhere under tests/** with matching basename.
     if (testStems.has(baseName)) continue;
 
+    // Suffix-test variants: foo.js -> foo-security.test.js, foo-edge-cases.test.js, etc.
+    // A test stem of the form "<baseName>-<suffix>" is treated as coverage of the
+    // source file. The `-` boundary prevents false positives like "auth" matching
+    // "authentication" while accepting domain-narrowed test files split for clarity.
+    let matchedBySuffix = false;
+    const prefix = `${baseName}-`;
+    for (const stem of testStems) {
+      if (stem.startsWith(prefix)) { matchedBySuffix = true; break; }
+    }
+    if (matchedBySuffix) continue;
+
     // Sibling-path variants: foo.js -> foo.test.js
     const siblingVariants = [`${base}.test${ext}`, `${base}.spec${ext}`];
     const hasSibling = siblingVariants.some((t) => existsSync(path.join(repoRoot, t)));

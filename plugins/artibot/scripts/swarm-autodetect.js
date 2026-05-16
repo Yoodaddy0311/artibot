@@ -60,7 +60,7 @@ function log(line) {
   process.stderr.write(line + '\n');
 }
 
-function readProfile(pluginRoot) {
+export function readProfile(pluginRoot) {
   const profilePath = path.join(pluginRoot, PROFILE_REL);
   if (!existsSync(profilePath)) return null;
   try {
