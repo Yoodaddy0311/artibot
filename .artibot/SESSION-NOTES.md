@@ -1,0 +1,36 @@
+# Artibot Session Notes
+
+> Auto-generated timeline of artibot sessions. **Memory** holds permanent
+> facts (user profile, feedback rules); **this file** holds per-session
+> events (commits, files, branch). Committed to git → shared across machines.
+
+---
+
+## 2026-05-16 14:13 UTC · `artibot/master`
+
+- **Commits** (20):
+  - `ec9c30a` chore(release): bump version to 4.8.1 across 5-file lockstep
+  - `e7c4f9e` docs(changelog): v4.8.1 hotfix — legacy stub + marketplace mirror
+  - `3cf264e` fix(hooks): prevent marketplace install drift + legacy stub for check-console-log
+  - `282da53` chore: artibot session close [2026-05-16 13:12:34]
+  - `360bfd5` test(nlu): extend ADR/Migrate false-positive coverage (+7 cases, 1 .skip)
+  - `9bd0862` chore: artibot session close [2026-05-16 12:49:33]
+  - `b452c60` chore: artibot session close [2026-05-16 12:42:51]
+  - `bcbc9c3` chore: artibot session close [2026-05-16 12:39:50]
+  - `b5aec3d` chore: artibot session close [2026-05-16 12:39:28]
+  - `7db2eac` chore(readme): bump root version badge to 4.8.0
+  - `ec30913` chore(readme): bump version badge + config table to 4.8.0
+  - `fec87eb` chore: artibot session close [2026-05-16 10:57:30]
+  - `81de607` chore: artibot session close [2026-05-16 10:55:59]
+  - `654a754` chore: artibot session close [2026-05-16 10:47:34]
+  - `64a2451` wip: artibot auto-save [2026-05-16 10:45:19]
+  - `7705da8` chore: artibot session close [2026-05-16 10:43:45]
+  - `7dd06e4` chore: artibot session close [2026-05-16 09:38:52]
+  - `861ace0` chore: artibot session close [2026-05-16 09:34:01]
+  - `2c2cc6a` wip: artibot auto-save [2026-05-16 09:33:05]
+  - `f6ed99c` chore: artibot session close [2026-05-16 09:33:00]
+- **Files touched**: 0
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
