@@ -232,6 +232,16 @@ export function assertEgressAllowed(url, options = {}) {
     );
   }
 
+  // v4.8.0 audit L-1: reject URLs carrying embedded `user[:pass]@` credentials.
+  // Even when the host is allowlisted, embedded creds leak through proxy and
+  // server access logs. WHATWG URL exposes them on .username / .password and
+  // any non-empty value indicates userinfo was present in the input.
+  if (parsed.username !== '' || parsed.password !== '') {
+    throw new EgressBlockedError(
+      `egress blocked${reason}: URL must not contain embedded credentials`,
+    );
+  }
+
   const hostname = parsed.hostname.toLowerCase();
 
   if (isLocalhost(hostname)) return true;

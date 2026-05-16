@@ -43,6 +43,14 @@ const MACHINE_HASH_PATH = path.join(ARTIBOT_DIR, 'swarm-machine-hash.json');
 /** Git command timeout (ms) */
 const GIT_TIMEOUT_MS = 30_000;
 
+/**
+ * Maximum commit message length. v4.8.0 audit L-2: spawnSync is shell-safe,
+ * but unbounded message length (e.g. a stack trace mistakenly piped through)
+ * can balloon `git commit -m` argv beyond the OS limit (Windows CreateProcess
+ * tops out at ~32K). Hard-cap at 8KB to keep argv well below that bound.
+ */
+const COMMIT_MESSAGE_MAX_BYTES = 8 * 1024;
+
 // ---------------------------------------------------------------------------
 // Machine identity
 // ---------------------------------------------------------------------------
@@ -205,7 +213,13 @@ export function commitAndPushSwarm(cloneDir, message) {
     const status = runGit(['status', '--porcelain'], cloneDir);
     if (!status) return true; // nothing to commit
     // -m takes the message as a single argv slot — no shell escaping needed.
-    const safeMessage = typeof message === 'string' ? message : String(message);
+    // L-2: enforce a hard cap (COMMIT_MESSAGE_MAX_BYTES) so a runaway caller
+    // can't blow past the OS argv limit. Slice on character count is a safe
+    // upper bound for UTF-8 byte count at our 8KB ceiling.
+    const rawMessage = typeof message === 'string' ? message : String(message);
+    const safeMessage = rawMessage.length > COMMIT_MESSAGE_MAX_BYTES
+      ? rawMessage.slice(0, COMMIT_MESSAGE_MAX_BYTES) + '\n... (truncated)'
+      : rawMessage;
     runGit(['commit', '-m', safeMessage], cloneDir);
     try {
       runGit(['push', 'origin', 'HEAD'], cloneDir);

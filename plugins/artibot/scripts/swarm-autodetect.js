@@ -30,6 +30,11 @@ import { assertSafeGitUrl } from '../lib/swarm/git-backend.js';
 const PROFILE_REL = path.join('.claude-plugin', 'swarm-profile.json');
 const AUTO_APPLIED_MARKER = path.join(ARTIBOT_DIR, 'swarm-autoapplied.json');
 
+// v4.8.0 audit M-2: cap swarm-profile.json at 64KB. Legitimate profiles are
+// <1KB; anything larger is either corrupt or an attempt to OOM the autodetect
+// run via a giant JSON document that crashes JSON.parse downstream.
+const PROFILE_MAX_BYTES = 64 * 1024;
+
 /**
  * Read the auto-applied marker. If present, auto-apply has already run for
  * this combination of (profile repoUrl, machine). Prevents re-running on
@@ -59,9 +64,16 @@ function readProfile(pluginRoot) {
   const profilePath = path.join(pluginRoot, PROFILE_REL);
   if (!existsSync(profilePath)) return null;
   try {
+    // M-2: enforce size cap BEFORE reading the whole file into memory.
+    const stats = statSync(profilePath);
+    if (stats.size > PROFILE_MAX_BYTES) return null;
     const raw = readFileSync(profilePath, 'utf-8');
     const profile = JSON.parse(raw);
-    if (!profile.repoUrl) return null;
+    // Schema check: must be a plain object with a string repoUrl. Anything
+    // else (arrays, primitives, repoUrl as number/object) is rejected so
+    // downstream assertSafeGitUrl never sees non-string input.
+    if (!profile || typeof profile !== 'object' || Array.isArray(profile)) return null;
+    if (typeof profile.repoUrl !== 'string' || profile.repoUrl.length === 0) return null;
     return { path: profilePath, ...profile };
   } catch {
     return null;
