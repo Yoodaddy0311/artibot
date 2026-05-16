@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import os from 'node:os';
@@ -14,8 +14,12 @@ import { fileURLToPath } from 'node:url';
  *   - swarm-sync.js: reportTelemetry rejects → logHookError invoked (unit-tested
  *     via mock instead of child process)
  *
- * The runtime-prompt and auto-learning-check checks run the real hook as a
- * child process so we observe the actual stderr stream.
+ * The runtime-prompt check now drives the exported handler in-process: the
+ * legacy child-process path relied on the script's `isMain` guard, which
+ * fails on filesystem paths containing non-ASCII characters (e.g. Korean
+ * `바탕 화면`) because `import.meta.url` percent-encodes those segments
+ * while `process.argv[1]` does not. The auto-learning-check pair still
+ * uses spawnSync — its hook always calls `main()` unconditionally.
  */
 
 const PLUGIN_ROOT = path.resolve(
@@ -35,6 +39,15 @@ function makeBrokenPluginRoot() {
 
 describe('silent fail → stderr (issue-scanner A2 #10)', () => {
   let tmpRoots = [];
+  let savedEnv;
+
+  beforeEach(() => {
+    savedEnv = {
+      CLAUDE_PLUGIN_ROOT: process.env.CLAUDE_PLUGIN_ROOT,
+      ARTIBOT_RUNTIME_CHECKPOINT_DISABLE: process.env.ARTIBOT_RUNTIME_CHECKPOINT_DISABLE,
+      ARTIBOT_RUNTIME_MEMORY_DISABLE: process.env.ARTIBOT_RUNTIME_MEMORY_DISABLE,
+    };
+  });
 
   afterEach(() => {
     for (const t of tmpRoots) {
@@ -42,6 +55,11 @@ describe('silent fail → stderr (issue-scanner A2 #10)', () => {
       catch { /* best effort */ }
     }
     tmpRoots = [];
+    for (const [k, v] of Object.entries(savedEnv)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+    vi.restoreAllMocks();
   });
 
   function runHook(scriptRelPath, payload, env = {}, cwd = PLUGIN_ROOT) {
@@ -58,36 +76,56 @@ describe('silent fail → stderr (issue-scanner A2 #10)', () => {
     return { stderr: String(result.stderr || ''), stdout: String(result.stdout || '') };
   }
 
-  it('runtime-prompt emits stderr when artibot.config.json is malformed', () => {
+  /**
+   * Capture stderr written by an in-process async call. We replace
+   * `process.stderr.write` for the duration of the callback so the
+   * suite stays isolated even if the call schedules microtasks.
+   */
+  async function captureStderr(asyncFn) {
+    const chunks = [];
+    const spy = vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
+      chunks.push(String(chunk));
+      return true;
+    });
+    try {
+      await asyncFn();
+    } finally {
+      spy.mockRestore();
+    }
+    return chunks.join('');
+  }
+
+  it('runtime-prompt emits stderr when artibot.config.json is malformed', async () => {
     const brokenRoot = makeBrokenPluginRoot();
     tmpRoots.push(brokenRoot);
     writeFileSync(path.join(brokenRoot, 'artibot.config.json'), '{ bogus json');
 
-    const { stderr } = runHook(
-      'scripts/hooks/runtime-prompt.js',
-      { user_prompt: 'hi', event: 'UserPromptSubmit' },
-      {
-        CLAUDE_PLUGIN_ROOT: brokenRoot,
-        ARTIBOT_RUNTIME_CHECKPOINT_DISABLE: '1',
-        ARTIBOT_RUNTIME_MEMORY_DISABLE: '1',
-      },
-      brokenRoot,
-    );
+    process.env.CLAUDE_PLUGIN_ROOT = brokenRoot;
+    process.env.ARTIBOT_RUNTIME_CHECKPOINT_DISABLE = '1';
+    process.env.ARTIBOT_RUNTIME_MEMORY_DISABLE = '1';
+
+    // Import lazily so the spy is installed before the module reads stderr.
+    const { handleUserPromptSubmit } = await import('../../scripts/hooks/runtime-prompt.js');
+
+    const stderr = await captureStderr(async () => {
+      await handleUserPromptSubmit({ user_prompt: 'hi', event: 'UserPromptSubmit' });
+    });
 
     expect(stderr).toContain('[runtime-prompt]');
     expect(stderr).toContain('config parse failed');
   });
 
-  it('runtime-prompt stays silent on a well-formed config', () => {
-    const { stderr } = runHook(
-      'scripts/hooks/runtime-prompt.js',
-      { user_prompt: 'hi', event: 'UserPromptSubmit' },
-      {
-        CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT,
-        ARTIBOT_RUNTIME_CHECKPOINT_DISABLE: '1',
-        ARTIBOT_RUNTIME_MEMORY_DISABLE: '1',
-      },
-    );
+  it('runtime-prompt stays silent on a well-formed config', async () => {
+    process.env.CLAUDE_PLUGIN_ROOT = PLUGIN_ROOT;
+    process.env.ARTIBOT_RUNTIME_CHECKPOINT_DISABLE = '1';
+    process.env.ARTIBOT_RUNTIME_MEMORY_DISABLE = '1';
+
+    const { handleUserPromptSubmit } = await import('../../scripts/hooks/runtime-prompt.js');
+
+    const stderr = await captureStderr(async () => {
+      await handleUserPromptSubmit({ user_prompt: 'hi', event: 'UserPromptSubmit' });
+    });
+
     expect(stderr).not.toContain('config parse failed');
   });
 
