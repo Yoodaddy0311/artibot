@@ -124,6 +124,53 @@ install_hooks() {
 }
 
 # ──────────────────────────────────────────────
+# Mirror to Claude Code marketplace install
+# ──────────────────────────────────────────────
+# Claude Code's plugin system maintains its own install copy at
+#   ~/.claude/plugins/marketplaces/artibot/plugins/artibot/
+# Every project session reads hooks from THAT path (via CLAUDE_PLUGIN_ROOT),
+# not from ~/.claude/artibot/. Skipping this mirror leaves the marketplace
+# at whatever version Claude Code last fetched (often months stale), causing
+# silent hook regressions in other projects after a manual update here.
+#
+# Legacy-stub policy: when a hook file is removed across versions (e.g.
+# check-console-log.js was consolidated into dev-verify-gate.js in v4.7.2),
+# leave a no-op stub at its original path. Existing Claude Code sessions
+# cache the v3.0.0 hooks.json in memory and will try to exec the removed
+# file on the next Stop event — MODULE_NOT_FOUND crashes the dispatcher.
+# Stubs keep those in-flight sessions alive until they restart.
+install_marketplace_mirror() {
+  local mkt_root="${CLAUDE_DIR}/plugins/marketplaces/artibot/plugins/artibot"
+  if [ ! -d "${mkt_root}" ]; then
+    log "Marketplace install not present (skip mirror)"
+    return 0
+  fi
+
+  # Mirror the hot paths from the direct install we just wrote.
+  # Same clean-before-copy contract as install_hooks for parity.
+  for dir in scripts hooks lib skills output-styles .claude-plugin; do
+    if [ -d "${ARTIBOT_DIR}/${dir}" ]; then
+      [ -d "${mkt_root}/${dir}" ] && rm -rf "${mkt_root}/${dir}"
+      cp -r "${ARTIBOT_DIR}/${dir}" "${mkt_root}/"
+    fi
+  done
+
+  # Commands and agents live only in the source repo (direct install omits
+  # them — Claude Code reads them straight from marketplace path). Pull them
+  # from the source repo, not from ${ARTIBOT_DIR}.
+  for dir in commands agents; do
+    if [ -d "${SCRIPT_DIR}/${dir}" ]; then
+      [ -d "${mkt_root}/${dir}" ] && rm -rf "${mkt_root}/${dir}"
+      cp -r "${SCRIPT_DIR}/${dir}" "${mkt_root}/"
+    fi
+  done
+
+  cp "${SCRIPT_DIR}/artibot.config.json" "${mkt_root}/"
+  [ -f "${SCRIPT_DIR}/package.json" ] && cp "${SCRIPT_DIR}/package.json" "${mkt_root}/"
+  log "Marketplace mirror updated → ${mkt_root}"
+}
+
+# ──────────────────────────────────────────────
 # Copy Rules (project-level .claude/rules/)
 # ──────────────────────────────────────────────
 install_rules() {
@@ -753,6 +800,7 @@ main() {
       install_commands
       install_skills
       install_hooks
+      install_marketplace_mirror
       install_rules
       install_mcp
       configure_settings
