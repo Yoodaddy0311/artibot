@@ -266,6 +266,3 @@ if (isDirectInvocation()) {
   });
 }
 
-// fileURLToPath import is needed defensively for tests that may import this
-// module; reference the symbol to satisfy lint rules without side effects.
-void fileURLToPath;
