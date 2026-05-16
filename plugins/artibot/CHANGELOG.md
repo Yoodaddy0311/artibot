@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.8.2] — 2026-05-16
+
+**Theme**: Hotfix for v4.6.4 exec-form `args[]` schema misadoption — every hook had been silently failing.
+
+### Fixed
+
+- **`hooks/hooks.json`** — Reverted from exec-form (`command: "node"` + `args: ["${CLAUDE_PLUGIN_ROOT}/scripts/hooks/<name>.js"]`) to shell-form (`command: "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/<name>.js"`). Claude Code 2.1.x ignores the non-standard `args[]` field — Claude Code, `hookify`, `everything-claude-code`, and the v4.5.8 baseline all use shell-form as the single source of truth. With `args[]` ignored, every hook invocation reduced to bare `node`, which on Node 22.19 enters `internal/main/eval_stdin` and tries to parse the incoming JSON payload as TypeScript. The crash surfaced loudest at the Stop slot (`[stdin]:1 Unexpected token ':'` from `eval_stdin`), but all 25 hook commands were broken. Manually invoking the dispatcher with the same stdin payload exited 0, confirming the dispatchers themselves were healthy and the regression was confined to `hooks.json` shape.
+
+### Changed
+
+- **`tests/hooks-schema-shape.test.js`** — Rewrote the schema tripwire to enforce shell-form: `command` must match `^node \$\{CLAUDE_PLUGIN_ROOT\}/scripts/hooks/<name>\.(js|mjs)(?:\s+\S+)*$`, no entry may carry an `args[]` field (explicit deny), and each referenced script must exist on disk. Description-bumping in `hooks.json` triggers the SHA1 fingerprint snapshot, forcing an explicit two-step update of `tests/hooks-schema-fingerprint.txt` for any future schema drift. New fingerprint: `0a4e18fe3d95c920406b72b2524f96dd994aab2d`.
+- **5-file version lockstep** — `.claude-plugin/plugin.json`, `.well-known/mcp-server.json`, `AGENTS.md`, `artibot.config.json`, `package.json` bumped 4.8.1 → 4.8.2 per `scripts/release-check.js`.
+
+### Verification
+
+- 98 hook-related tests pass (`hooks-schema-shape` 5, `legacy-stubs` 16, `validate-hooks` 6, `marketplace-installer` + 5 hook dispatcher suites totaling 76).
+- All three `hooks.json` copies (project source + `~/.claude/artibot/` + `~/.claude/plugins/marketplaces/artibot/...`) MD5-identical at `752e65c6...`.
+- E2E manual stdin payload → `_stop-dispatcher.js` exits 0, autopilot + session-notes hooks fire correctly.
+
+### Root Cause Note
+
+The v4.6.4 commit `7072ac1` ("exec-form hooks") migrated to `args[]` on the assumption that Claude Code honored it. No empirical check confirmed the behaviour and the schema tripwire at the time positively required `args[]`, so every regression run thereafter validated the broken shape. v4.8.2 inverts the tripwire: any future `args[]` reintroduction now fails the suite.
+
+---
+
 ## [4.8.1] — 2026-05-16
 
 **Theme**: Hotfix for v4.8.0 hook-removal regression + marketplace install drift.
