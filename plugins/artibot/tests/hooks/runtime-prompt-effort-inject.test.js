@@ -5,13 +5,20 @@
  *   [artibot:effort level=<X> command=<cmd>][artibot:task-budget max_tokens=<N>]
  * at the start of the user prompt, and that the opt-out flag
  * `runtime.effort.injectPrompt=false` leaves the prompt untouched.
+ *
+ * Migrated 2026-05-16 from `execFileSync` to in-process import. The CLI
+ * pathway depended on `isMain` correctly matching `process.argv[1]`
+ * against `import.meta.url`, but the latter percent-encodes non-ASCII
+ * path segments (e.g. Korean `바탕 화면`) and the comparison fell
+ * through to `false`, so `main()` never ran. Calling the exported
+ * handler bypasses that fragility while exercising the same contract.
  */
 
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { handleUserPromptSubmit } from '../../scripts/hooks/runtime-prompt.js';
 
 const PLUGIN_ROOT = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -21,28 +28,9 @@ const PLUGIN_ROOT = path.resolve(
 const SCRIPT_PATH = path.join(PLUGIN_ROOT, 'scripts', 'hooks', 'runtime-prompt.js');
 const CONFIG_PATH = path.join(PLUGIN_ROOT, 'artibot.config.json');
 
-function runHook(payload) {
-  const stdout = execFileSync(
-    process.execPath,
-    [SCRIPT_PATH],
-    {
-      cwd: PLUGIN_ROOT,
-      env: {
-        ...process.env,
-        CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT,
-        ARTIBOT_RUNTIME_CHECKPOINT_DISABLE: '1',
-        ARTIBOT_RUNTIME_MEMORY_DISABLE: '1',
-      },
-      input: JSON.stringify(payload),
-      encoding: 'utf-8',
-    },
-  ).trim();
-
-  return stdout ? JSON.parse(stdout) : null;
-}
-
 describe('runtime-prompt effort + task-budget prefix injection', () => {
   let originalConfig;
+  let savedEnv;
 
   beforeAll(() => {
     expect(existsSync(SCRIPT_PATH)).toBe(true);
@@ -70,8 +58,26 @@ describe('runtime-prompt effort + task-budget prefix injection', () => {
     writeFileSync(CONFIG_PATH, originalConfig);
   });
 
-  it('injects effort + task-budget prefix for /implement', () => {
-    const output = runHook({
+  beforeEach(() => {
+    savedEnv = {
+      CLAUDE_PLUGIN_ROOT: process.env.CLAUDE_PLUGIN_ROOT,
+      ARTIBOT_RUNTIME_CHECKPOINT_DISABLE: process.env.ARTIBOT_RUNTIME_CHECKPOINT_DISABLE,
+      ARTIBOT_RUNTIME_MEMORY_DISABLE: process.env.ARTIBOT_RUNTIME_MEMORY_DISABLE,
+    };
+    process.env.CLAUDE_PLUGIN_ROOT = PLUGIN_ROOT;
+    process.env.ARTIBOT_RUNTIME_CHECKPOINT_DISABLE = '1';
+    process.env.ARTIBOT_RUNTIME_MEMORY_DISABLE = '1';
+  });
+
+  afterEach(() => {
+    for (const [k, v] of Object.entries(savedEnv)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  });
+
+  it('injects effort + task-budget prefix for /implement', async () => {
+    const output = await handleUserPromptSubmit({
       user_prompt: '/implement add oauth login',
       event: 'UserPromptSubmit',
     });
@@ -86,10 +92,10 @@ describe('runtime-prompt effort + task-budget prefix injection', () => {
       /\[artibot:task-budget max_tokens=128000\]\n\n/,
     );
     expect(output.user_prompt).toContain('/implement add oauth login');
-  }, 30000);
+  });
 
-  it('injects prefix for /code-review at high effort (64000 tokens)', () => {
-    const output = runHook({
+  it('injects prefix for /code-review at high effort (64000 tokens)', async () => {
+    const output = await handleUserPromptSubmit({
       user_prompt: '/code-review auth module',
       event: 'UserPromptSubmit',
     });
@@ -98,10 +104,10 @@ describe('runtime-prompt effort + task-budget prefix injection', () => {
     expect(output.user_prompt).toMatch(
       /^\[artibot:effort level=high command=code-review\]\[artibot:task-budget max_tokens=64000\]/,
     );
-  }, 30000);
+  });
 
-  it('does not inject prefix for prompts without a slash command', () => {
-    const output = runHook({
+  it('does not inject prefix for prompts without a slash command', async () => {
+    const output = await handleUserPromptSubmit({
       user_prompt: 'fix typo in readme',
       event: 'UserPromptSubmit',
     });
@@ -109,9 +115,9 @@ describe('runtime-prompt effort + task-budget prefix injection', () => {
     expect(output).not.toBeNull();
     expect(output.user_prompt).not.toMatch(/^\[artibot:effort/);
     expect(output.user_prompt).toContain('fix typo in readme');
-  }, 30000);
+  });
 
-  it('respects runtime.effort.injectPrompt=false (opt-out)', () => {
+  it('respects runtime.effort.injectPrompt=false (opt-out)', async () => {
     // Temporarily overwrite config to exercise the opt-out branch,
     // then restore in the same test to avoid cross-test bleed.
     const base = JSON.parse(originalConfig);
@@ -128,7 +134,7 @@ describe('runtime-prompt effort + task-budget prefix injection', () => {
     writeFileSync(CONFIG_PATH, JSON.stringify(optOut, null, 2));
 
     try {
-      const output = runHook({
+      const output = await handleUserPromptSubmit({
         user_prompt: '/implement add oauth login',
         event: 'UserPromptSubmit',
       });
@@ -137,7 +143,19 @@ describe('runtime-prompt effort + task-budget prefix injection', () => {
       expect(output.user_prompt).not.toMatch(/^\[artibot:effort/);
       expect(output.user_prompt).toContain('/implement add oauth login');
     } finally {
-      writeFileSync(CONFIG_PATH, originalConfig);
+      // Restore forced (injectPrompt:true) config so subsequent suite runs
+      // observe the same baseline as beforeAll set up.
+      const forced = {
+        ...base,
+        runtime: {
+          ...base.runtime,
+          effort: {
+            ...(base.runtime?.effort || {}),
+            injectPrompt: true,
+          },
+        },
+      };
+      writeFileSync(CONFIG_PATH, JSON.stringify(forced, null, 2));
     }
-  }, 30000);
+  });
 });

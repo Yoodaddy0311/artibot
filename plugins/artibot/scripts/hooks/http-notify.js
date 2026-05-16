@@ -13,6 +13,11 @@
 
 import { parseJSON, readStdin, resolveConfigPath } from '../utils/index.js';
 import { createErrorHandler } from '../../lib/core/hook-utils.js';
+import {
+  assertEgressAllowed,
+  EgressBlockedError,
+  loadAllowlist,
+} from '../../lib/privacy/data-egress-guard.js';
 import { readFileSync } from 'node:fs';
 
 /** @typedef {'slack' | 'discord' | 'generic'} WebhookFormat */
@@ -105,6 +110,24 @@ export function loadWebhookConfig() {
  */
 export async function sendWebhook(config, payload) {
   try {
+    // DATA POLICY gate: refuse to send to any host outside the allowlist.
+    // Webhooks (Slack/Discord) are by definition third-party; users must
+    // opt the destination host in via ARTIBOT_ALLOW_EGRESS or allowlist.json.
+    try {
+      assertEgressAllowed(config.url, {
+        allowlist: loadAllowlist(),
+        reason: 'http-notify',
+      });
+    } catch (egressErr) {
+      if (egressErr instanceof EgressBlockedError) {
+        process.stderr.write(
+          `[artibot:http-notify] Webhook blocked by DATA POLICY: ${egressErr.message}\n`,
+        );
+        return false;
+      }
+      throw egressErr;
+    }
+
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), config.timeoutMs ?? 5000);
 

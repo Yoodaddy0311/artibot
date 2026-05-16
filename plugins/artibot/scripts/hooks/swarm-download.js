@@ -15,6 +15,11 @@
 import path from 'node:path';
 import { getPluginRoot, parseJSON, readStdin, toFileUrl } from '../utils/index.js';
 import { createErrorHandler, logHookError } from '../../lib/core/hook-utils.js';
+import {
+  assertEgressAllowed,
+  EgressBlockedError,
+  loadAllowlist,
+} from '../../lib/privacy/data-egress-guard.js';
 
 /**
  * Safely import a module via dynamic import. Returns null on failure
@@ -94,6 +99,28 @@ async function main() {
       swarmCfg = getSwarmConfig(config);
     } catch (err) {
       logHookError('swarm-download', 'getSwarmConfig failed', err);
+      return;
+    }
+
+    // DATA POLICY gate at hook level: refuse to talk to any swarm server
+    // outside the egress allowlist. swarm-client.js has its own SSRF allowlist
+    // for defence-in-depth; the hook-level check ensures the policy decision
+    // is logged before any network I/O is initiated.
+    const serverUrl =
+      process.env.ARTIBOT_SWARM_SERVER || swarmCfg?.serverUrl || 'http://localhost:3000';
+    try {
+      assertEgressAllowed(serverUrl, {
+        allowlist: loadAllowlist(),
+        reason: 'swarm-download',
+      });
+    } catch (egressErr) {
+      if (egressErr instanceof EgressBlockedError) {
+        process.stderr.write(
+          `[swarm-download] Skipped by DATA POLICY: ${egressErr.message}\n`,
+        );
+        return;
+      }
+      logHookError('swarm-download', 'egress guard threw unexpectedly', egressErr);
       return;
     }
 
