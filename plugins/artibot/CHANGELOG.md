@@ -43,7 +43,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Tests
 
 - **+~200 net tests** across the wave: dispatch-table loader (25), pr-description-builder (31), wip-stats (12), egress-guard (~30), dispatcher integration suites, regression coverage for each consolidated slot.
-- Net suite: 8217 passing across 332 test files (after removing 26 `check-console-log` tests).
+- Net suite: 8230 passing across 332 test files (after removing 26 `check-console-log` tests).
 
 ---
 
