@@ -88,6 +88,9 @@ function isPrivateIp(hostname) {
  *  - Hosts not in the allowlist
  *  - Private/reserved IP ranges (except localhost)
  *  - file:// protocol and other non-HTTP protocols
+ *  - URLs carrying userinfo (`user:pass@host`). Even if the hostname is
+ *    allowlisted, embedded credentials can leak into proxy logs and the
+ *    swarm server's access log. Reject upfront — v4.8.0 audit M-1.
  *
  * @param {string} urlString - URL to validate
  * @returns {URL} Validated URL object
@@ -104,6 +107,13 @@ function validateUrl(urlString) {
   // Block file:// and other dangerous protocols
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
     throw new Error(`SSRF blocked: protocol '${url.protocol}' not allowed`);
+  }
+
+  // Reject URL-embedded credentials regardless of host. WHATWG URL stores
+  // them on .username / .password and strips them from .href when both are
+  // empty — any non-empty value indicates `user[:pass]@` was present.
+  if (url.username !== '' || url.password !== '') {
+    throw new Error(`SSRF blocked: URL must not contain embedded credentials`);
   }
 
   // Check allowlist (exact match or pattern match)

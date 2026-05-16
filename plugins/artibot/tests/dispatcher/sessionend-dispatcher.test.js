@@ -14,7 +14,7 @@ const PLUGIN_ROOT = path.resolve(
 const SCRIPT_PATH = path.join(PLUGIN_ROOT, 'scripts', 'hooks', '_sessionend-dispatcher.js');
 
 function runDispatcher(payload, env = {}) {
-  let stdout = '';
+  let stdout;
   let status = 0;
   try {
     stdout = execFileSync(
