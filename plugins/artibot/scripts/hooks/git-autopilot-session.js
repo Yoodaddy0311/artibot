@@ -15,6 +15,7 @@ import { parseJSON, readStdin } from '../utils/index.js';
 import { createErrorHandler } from '../../lib/core/hook-utils.js';
 import { autoResolveAll } from './git-autopilot-merge.js';
 import { isAutopilotAllowed } from '../../lib/autopilot/repo-identity.js';
+import { resolveBaseBranch } from '../../lib/git/resolve-base.js';
 
 // Throttle: skip `git pull` if a successful pull happened within this window.
 // 5 minutes is aggressive enough to save ~800ms on every rapid-fire session
@@ -159,6 +160,56 @@ function isRebaseInProgress(cwd) {
 }
 
 /**
+ * Merge new commits from the canonical base branch (e.g. `origin/master`)
+ * into the current autopilot working branch. Solves the "another computer
+ * pushed v4.7.5 to master, this computer's `artibot/master` never sees it"
+ * problem: `git pull` only fetches `origin/<current-branch>`, so releases
+ * pushed directly to the base branch from another machine are invisible
+ * until the user manually merges.
+ *
+ * Behavior:
+ *   - Only runs on autopilot branches (prefix-matched)
+ *   - Skips when current branch IS the base branch
+ *   - Verifies `origin/<base>` exists before merge attempt
+ *   - On conflict: aborts the merge (workspace stays clean) and logs
+ *
+ * @param {string} cwd
+ * @param {string} currentBranch
+ * @param {object} config
+ * @returns {{ merged: number, conflict: boolean }}
+ */
+function syncFromBaseBranch(cwd, currentBranch, config) {
+  const branchPrefix = config.branchPrefix ?? 'artibot/';
+  if (!currentBranch.startsWith(branchPrefix)) return { merged: 0, conflict: false };
+
+  const base = resolveBaseBranch(cwd, config);
+  if (!base || base === currentBranch) return { merged: 0, conflict: false };
+
+  const remoteRef = base.startsWith('origin/') ? base : `origin/${base}`;
+  try {
+    gitSilent(['rev-parse', '--verify', '--quiet', remoteRef], { cwd });
+  } catch {
+    return { merged: 0, conflict: false };
+  }
+
+  let ahead;
+  try {
+    ahead = parseInt(gitRun(['rev-list', '--count', `HEAD..${remoteRef}`], { cwd }), 10);
+  } catch {
+    return { merged: 0, conflict: false };
+  }
+  if (!Number.isFinite(ahead) || ahead <= 0) return { merged: 0, conflict: false };
+
+  try {
+    gitSilent(['merge', remoteRef, '--no-edit', '--no-ff'], { cwd });
+    return { merged: ahead, conflict: false };
+  } catch {
+    try { gitSilent(['merge', '--abort'], { cwd }); } catch { /* ignore */ }
+    return { merged: 0, conflict: true };
+  }
+}
+
+/**
  * Ensure the autopilot branch exists and is checked out.
  * Creates from current HEAD if new.
  * @param {string} cwd
@@ -217,6 +268,12 @@ async function main() {
     recordPullTimestamp(repoRoot);
     if (pulled) {
       log(`Pulled latest changes on "${currentBranch}"`);
+      const sync = syncFromBaseBranch(repoRoot, currentBranch, config);
+      if (sync.merged > 0) {
+        log(`Merged ${sync.merged} commit(s) from base branch into "${currentBranch}"`);
+      } else if (sync.conflict) {
+        log('Base-branch sync had conflicts — aborted; resolve manually with `git merge origin/<base>`');
+      }
     } else {
       if (!isRebaseInProgress(repoRoot)) {
         log('git pull failed (no rebase in progress) — skipping conflict resolution');

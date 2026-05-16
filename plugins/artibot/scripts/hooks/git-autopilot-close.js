@@ -309,11 +309,14 @@ async function main() {
     log('No uncommitted changes at session close');
   }
 
-  // Step 2: Squash WIP commits (only on autopilot branches)
+  // Step 2: Squash WIP commits (only on autopilot branches).
+  // squashFailed tracks whether un-squashed WIP commits remain — gating Step 3.
+  let squashFailed = false;
   if (config.squashWipOnClose && branch.startsWith(branchPrefix)) {
     const wipCount = countWipCommits(repoRoot, baseBranch);
     if (wipCount > 0) {
       const squashed = squashWipCommits(repoRoot, baseBranch, wipCount, { bypassPreCommitHooks });
+      squashFailed = !squashed;
       log(
         squashed
           ? `Squashed ${wipCount} WIP commit(s) into clean commit`
@@ -322,13 +325,20 @@ async function main() {
     }
   }
 
-  // Step 3: Push to remote
+  // Step 3: Push to remote — skipped when squash failed to prevent WIP commits
+  // from leaking to origin. v4.7.7 (audit P1): pre-fix, `pushBranch` ran even
+  // when `squashWipOnClose=true` failed, publishing the raw `wip: artibot
+  // auto-save [...]` commits the squash was meant to hide.
   if (config.autoPushOnStop) {
-    const pushed = pushBranch(repoRoot, branch, { bypassPrePushHooks });
-    if (!pushed && !bypassPrePushHooks) {
-      log(`Push failed — pre-push hook may have rejected; run: git push origin ${branch}, or set git.autopilot.bypassPrePushHooks=true`);
+    if (squashFailed) {
+      log(`Push skipped — WIP squash failed, refusing to publish un-squashed WIP commits. Resolve manually then push: git push origin ${branch}`);
     } else {
-      log(pushed ? `Pushed "${branch}" to origin` : `Push failed — run: git push origin ${branch}`);
+      const pushed = pushBranch(repoRoot, branch, { bypassPrePushHooks });
+      if (!pushed && !bypassPrePushHooks) {
+        log(`Push failed — pre-push hook may have rejected; run: git push origin ${branch}, or set git.autopilot.bypassPrePushHooks=true`);
+      } else {
+        log(pushed ? `Pushed "${branch}" to origin` : `Push failed — run: git push origin ${branch}`);
+      }
     }
   }
 

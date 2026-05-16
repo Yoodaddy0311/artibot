@@ -359,4 +359,172 @@ describe('git-autopilot-session', () => {
     const logs = stderrSpy.mock.calls.map(([msg]) => msg).join('');
     expect(logs).not.toContain('Switched to autopilot branch');
   });
+
+  // -------------------------------------------------------------------------
+  // syncFromBaseBranch — cross-machine version drift fix
+  //
+  // Background: autopilot's `git pull` only fetches origin/<current-branch>.
+  // When another computer pushes a release to `master`, this computer's
+  // `artibot/master` never sees it until manual merge. The new sync step
+  // pulls origin/master into the autopilot branch automatically.
+  // -------------------------------------------------------------------------
+  it('merges from origin/master when autopilot branch is behind base', async () => {
+    const commands = [];
+    mockState.execSyncImpl = (cmd) => {
+      commands.push(cmd);
+      if (cmd === 'git rev-parse --show-toplevel') return '/repo';
+      if (cmd === 'git config --get remote.origin.url') {
+        return 'https://github.com/Yoodaddy0311/artibot.git';
+      }
+      if (cmd === 'git branch --show-current') return 'artibot/master';
+      if (cmd === 'git rev-parse --git-dir') return '.git';
+      if (cmd.startsWith('git pull')) return '';
+      // resolveBaseBranch: upstream tracking returns origin/master
+      if (cmd === 'git rev-parse --abbrev-ref --symbolic-full-name @{upstream}') {
+        return 'origin/master';
+      }
+      if (cmd.includes('rev-parse --verify --quiet origin/master')) return '';
+      if (cmd === 'git rev-list --count HEAD..origin/master') return '3';
+      if (cmd.startsWith('git merge origin/master')) return '';
+      if (cmd.startsWith('git show-ref')) return '';
+      if (cmd.startsWith('git checkout')) return '';
+      return '';
+    };
+    mockState.existsSyncResults = { 'autopilot.json': true };
+    mockState.readFileSyncImpl = () => JSON.stringify({
+      enabled: true,
+      autoPullOnSession: true,
+      branchPrefix: 'artibot/',
+    });
+
+    await import('../../scripts/hooks/git-autopilot-session.js');
+    const logs = stderrSpy.mock.calls.map(([msg]) => msg).join('');
+    expect(logs).toContain('Merged 3 commit(s) from base branch');
+    expect(commands.some((c) => c.startsWith('git merge origin/master'))).toBe(true);
+  });
+
+  it('skips base-branch sync when current branch is not an autopilot branch', async () => {
+    const commands = [];
+    mockState.execSyncImpl = (cmd) => {
+      commands.push(cmd);
+      if (cmd === 'git rev-parse --show-toplevel') return '/repo';
+      if (cmd === 'git config --get remote.origin.url') {
+        return 'https://github.com/Yoodaddy0311/artibot.git';
+      }
+      if (cmd === 'git branch --show-current') return 'feature/foo';
+      if (cmd === 'git rev-parse --git-dir') return '.git';
+      if (cmd.startsWith('git pull')) return '';
+      if (cmd.startsWith('git show-ref')) throw new Error('not found');
+      if (cmd.startsWith('git checkout -b')) return '';
+      return '';
+    };
+    mockState.existsSyncResults = { 'autopilot.json': true };
+    mockState.readFileSyncImpl = () => JSON.stringify({
+      enabled: true,
+      autoPullOnSession: true,
+      branchPrefix: 'artibot/',
+    });
+
+    await import('../../scripts/hooks/git-autopilot-session.js');
+    // No merge attempted — feature/foo is not autopilot-prefixed
+    expect(commands.some((c) => c.startsWith('git rev-list --count HEAD..origin/'))).toBe(false);
+    expect(commands.some((c) => c.startsWith('git merge origin/'))).toBe(false);
+  });
+
+  it('skips base-branch sync when origin/<base> ref is missing', async () => {
+    const commands = [];
+    mockState.execSyncImpl = (cmd) => {
+      commands.push(cmd);
+      if (cmd === 'git rev-parse --show-toplevel') return '/repo';
+      if (cmd === 'git config --get remote.origin.url') {
+        return 'https://github.com/Yoodaddy0311/artibot.git';
+      }
+      if (cmd === 'git branch --show-current') return 'artibot/master';
+      if (cmd === 'git rev-parse --git-dir') return '.git';
+      if (cmd.startsWith('git pull')) return '';
+      if (cmd === 'git rev-parse --abbrev-ref --symbolic-full-name @{upstream}') {
+        return 'origin/master';
+      }
+      if (cmd.includes('rev-parse --verify --quiet origin/master')) {
+        throw new Error('not found');
+      }
+      if (cmd.startsWith('git show-ref')) return '';
+      return '';
+    };
+    mockState.existsSyncResults = { 'autopilot.json': true };
+    mockState.readFileSyncImpl = () => JSON.stringify({
+      enabled: true,
+      autoPullOnSession: true,
+      branchPrefix: 'artibot/',
+    });
+
+    await import('../../scripts/hooks/git-autopilot-session.js');
+    expect(commands.some((c) => c.startsWith('git merge origin/'))).toBe(false);
+  });
+
+  it('skips base-branch sync when already in sync (ahead=0)', async () => {
+    const commands = [];
+    mockState.execSyncImpl = (cmd) => {
+      commands.push(cmd);
+      if (cmd === 'git rev-parse --show-toplevel') return '/repo';
+      if (cmd === 'git config --get remote.origin.url') {
+        return 'https://github.com/Yoodaddy0311/artibot.git';
+      }
+      if (cmd === 'git branch --show-current') return 'artibot/master';
+      if (cmd === 'git rev-parse --git-dir') return '.git';
+      if (cmd.startsWith('git pull')) return '';
+      if (cmd === 'git rev-parse --abbrev-ref --symbolic-full-name @{upstream}') {
+        return 'origin/master';
+      }
+      if (cmd.includes('rev-parse --verify --quiet origin/master')) return '';
+      if (cmd === 'git rev-list --count HEAD..origin/master') return '0';
+      if (cmd.startsWith('git show-ref')) return '';
+      return '';
+    };
+    mockState.existsSyncResults = { 'autopilot.json': true };
+    mockState.readFileSyncImpl = () => JSON.stringify({
+      enabled: true,
+      autoPullOnSession: true,
+      branchPrefix: 'artibot/',
+    });
+
+    await import('../../scripts/hooks/git-autopilot-session.js');
+    expect(commands.some((c) => c.startsWith('git merge origin/'))).toBe(false);
+    const logs = stderrSpy.mock.calls.map(([msg]) => msg).join('');
+    expect(logs).not.toContain('Merged ');
+  });
+
+  it('aborts merge on conflict and logs warning', async () => {
+    const commands = [];
+    mockState.execSyncImpl = (cmd) => {
+      commands.push(cmd);
+      if (cmd === 'git rev-parse --show-toplevel') return '/repo';
+      if (cmd === 'git config --get remote.origin.url') {
+        return 'https://github.com/Yoodaddy0311/artibot.git';
+      }
+      if (cmd === 'git branch --show-current') return 'artibot/master';
+      if (cmd === 'git rev-parse --git-dir') return '.git';
+      if (cmd.startsWith('git pull')) return '';
+      if (cmd === 'git rev-parse --abbrev-ref --symbolic-full-name @{upstream}') {
+        return 'origin/master';
+      }
+      if (cmd.includes('rev-parse --verify --quiet origin/master')) return '';
+      if (cmd === 'git rev-list --count HEAD..origin/master') return '2';
+      if (cmd.startsWith('git merge origin/master')) throw new Error('CONFLICT');
+      if (cmd === 'git merge --abort') return '';
+      if (cmd.startsWith('git show-ref')) return '';
+      return '';
+    };
+    mockState.existsSyncResults = { 'autopilot.json': true };
+    mockState.readFileSyncImpl = () => JSON.stringify({
+      enabled: true,
+      autoPullOnSession: true,
+      branchPrefix: 'artibot/',
+    });
+
+    await import('../../scripts/hooks/git-autopilot-session.js');
+    expect(commands).toContain('git merge --abort');
+    const logs = stderrSpy.mock.calls.map(([msg]) => msg).join('');
+    expect(logs).toContain('Base-branch sync had conflicts');
+  });
 });

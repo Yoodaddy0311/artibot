@@ -249,6 +249,64 @@ describe('git-autopilot-save', () => {
     expect(statusCall.opts?.timeout).toBe(2000);
   });
 
+  it('skips WIP commit when only auto-generated files are dirty (auto-learned-rules.json)', async () => {
+    // Regression for cross-machine version drift: WIP firing on pure
+    // auto-generated changes leaves the local branch "ahead of origin"
+    // even though there's no real user work to preserve.
+    const commands = setupRepo();
+    mockState.execSyncImpl = (cmd, _opts) => {
+      commands.push({ cmd, opts: _opts });
+      if (cmd === 'git rev-parse --show-toplevel') return '/repo\n';
+      if (cmd === 'git status --porcelain') {
+        return ' M plugins/artibot/skills/coding-standards/references/auto-learned-rules.json\n';
+      }
+      return '';
+    };
+
+    await import('../../scripts/hooks/git-autopilot-save.js');
+    await new Promise((r) => setTimeout(r, 30));
+
+    expect(commands.some((c) => c.cmd.startsWith('git add'))).toBe(false);
+    expect(commands.some((c) => c.cmd.startsWith('git commit'))).toBe(false);
+    // Timestamp still refreshed so we don't re-check immediately.
+    expect(mockState.atomicWrites).toHaveLength(1);
+  });
+
+  it('fires WIP commit when auto-generated AND real files are both dirty', async () => {
+    const commands = setupRepo();
+    mockState.execSyncImpl = (cmd, _opts) => {
+      commands.push({ cmd, opts: _opts });
+      if (cmd === 'git rev-parse --show-toplevel') return '/repo\n';
+      if (cmd === 'git status --porcelain') {
+        return ' M plugins/artibot/skills/coding-standards/references/auto-learned-rules.json\n M src/feature.ts\n';
+      }
+      return '';
+    };
+
+    await import('../../scripts/hooks/git-autopilot-save.js');
+    await new Promise((r) => setTimeout(r, 30));
+
+    expect(commands.some((c) => c.cmd.startsWith('git add'))).toBe(true);
+    expect(commands.some((c) => c.cmd.startsWith('git commit'))).toBe(true);
+  });
+
+  it('skips WIP when only runtime/ files are dirty', async () => {
+    const commands = setupRepo();
+    mockState.execSyncImpl = (cmd, _opts) => {
+      commands.push({ cmd, opts: _opts });
+      if (cmd === 'git rev-parse --show-toplevel') return '/repo\n';
+      if (cmd === 'git status --porcelain') {
+        return ' M plugins/artibot/runtime/state/session.json\n';
+      }
+      return '';
+    };
+
+    await import('../../scripts/hooks/git-autopilot-save.js');
+    await new Promise((r) => setTimeout(r, 30));
+
+    expect(commands.some((c) => c.cmd.startsWith('git commit'))).toBe(false);
+  });
+
   it('uses --no-verify only as a deliberate opt-in (metadata assert)', async () => {
     // Twin run: default = no flag; bypass = flag present.
     // This guards against any future refactor that flips the default.
