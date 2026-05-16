@@ -9,6 +9,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.8.0] — 2026-05-16
+
+**Theme**: Simplification + Stability. Hook slot consolidation, DATA POLICY runtime guard, dispatch-table single-source-of-truth, autopilot UX polish.
+
+### Added
+
+- **`lib/privacy/data-egress-guard.js`** (Wave 1B) — Fail-closed allowlist runtime guard. `assertEgressAllowed(url)` blocks outbound HTTPS to any host not in `lib/privacy/allowlist.json` or the `ARTIBOT_ALLOW_EGRESS` env var. Localhost / `127.x` / `::1` / `*.local` always allowed. Wired into `scripts/hooks/http-notify.js` and `scripts/hooks/swarm-*.js`. Enforces the "no external DB / no third-party plugin egress" data policy.
+- **`hooks/dispatch-table.json`** (Wave 3A) — Single source of truth for every spawn-based dispatcher's HOOKS array. 7 slots × 38 handler entries (SessionStart 9, UserPromptSubmit 6, PostToolUse 10, Stop 5, SessionEnd 5, SubagentStop 3, PreCompact 0). Eliminates drift between dispatcher source files and hook registration.
+- **`lib/dispatcher/dispatch-table-loader.js`** — Cached fail-fast loader. Dispatchers call `loadDispatchTable(slot)` at startup and receive resolved-path handler arrays. Validates `name/script/timeoutMs` per handler.
+- **`lib/release/pr-description-builder.js`** (Wave 3B, 326 LOC + 31 tests) — Auto-composes PR descriptions from `git log` + `.artibot/SESSION-NOTES.md` + diff stats. Buckets commits by `classifyCommit()` (WIP / release / regular). Injected file/git readers for testability.
+- **`lib/autopilot/wip-stats.js`** (Wave 3C) — WIP commit counter + age tracker. `appendWipAdvisory()` runs in SessionStart and emits `[artibot:wip] N WIP commit(s) (oldest Nh ago) — consider /squash before push` when thresholds exceed `ARTIBOT_WIP_COUNT_THRESHOLD=10` / `ARTIBOT_WIP_AGE_HOURS=4`.
+- **5 new dispatchers**: `_sessionstart-dispatcher.js`, `_posttooluse-dispatcher.js`, `_stop-dispatcher.js`, `_sessionend-dispatcher.js`, `_subagentstop-dispatcher.js`. All use `child_process.spawn` with `Promise.allSettled` + `ARTIBOT_DISABLE_<SLOT>=1` kill switch + exit 0 always. Shared spawn/merge utilities live in `_dispatcher-utils.js`.
+
+### Changed
+
+- **`hooks/hooks.json`** — Slot registrations consolidated: SessionStart 9→1, PostToolUse 10→1, Stop 5→1, SessionEnd 5→1, SubagentStop 3→1. Total entries 51 → 25. Every consolidated slot now points at a single dispatcher script; per-handler registration moves into `dispatch-table.json`.
+- **`lib/core/hook-dispatcher.js`** (legacy WS-C.2) — Now honours `ARTIBOT_HOOK_DISPATCH_TABLE_PATH` for test isolation, so its tests no longer race the v4.8.0 loader on the shared `dispatch-table.json` file.
+
+### Fixed
+
+- **Korean-path silent-skip bug in 9 hooks** (Wave 2A) — `new URL(import.meta.url).pathname` percent-encodes non-ASCII path segments (`바탕 화면` → `%EB%B0%94%ED%83%95%20%ED%99%94%EB%A9%B4`), but `process.argv[1]` arrives OS-decoded. The `isMain` guard `argv1 === here` was always false on Korean install paths, so the hook's `main()` silently never ran. Replaced with `path.resolve(fileURLToPath(import.meta.url))` in: `ambiguity-guard.js`, `autopilot-nlu-trigger.js`, `auto-team-trigger.js`, `runtime-prompt.js`, `skill-discovery-inject.js`, `user-prompt-handler.js`, `webfetch-cache-pre.js`, `webfetch-cache-post.js`, `_userprompt-dispatcher.js`.
+- **Test-file filesystem race** — `tests/core/hook-dispatcher.test.js` previously overwrote the real `hooks/dispatch-table.json` during parallel vitest runs, causing intermittent 14-test failures in `tests/dispatcher/dispatch-table.test.js`. The test now copies the real table into a tmp dir and overrides the path via `ARTIBOT_HOOK_DISPATCH_TABLE_PATH`.
+
+### Removed
+
+- **`scripts/hooks/check-console-log.js`** (Wave 4) — Confirmed-dead Stop hook. Unregistered since v4.7.2 (`CHANGELOG` line 429) and no internal imports. Test file `tests/hooks/check-console-log.test.js` also deleted. Documentation references in `README.md` / `SECURITY.md` / `docs/phase2/hook-audit.md` corrected.
+
+### Performance
+
+- **Hook fan-out is now parallel by default** at every consolidated slot — handlers fire via `Promise.allSettled`, bounded by the slot's longest `timeoutMs`. PostToolUse (10 handlers) cuts worst-case latency from sequential O(Σ timeoutMs) to O(max timeoutMs).
+
+### Tests
+
+- **+~200 net tests** across the wave: dispatch-table loader (25), pr-description-builder (31), wip-stats (12), egress-guard (~30), dispatcher integration suites, regression coverage for each consolidated slot.
+- Net suite: 8151 passing across 329 test files (after removing 26 `check-console-log` tests).
+
+---
+
 ## [Unreleased]
 
 ### Changed (BREAKING for users relying on silent commit/push)

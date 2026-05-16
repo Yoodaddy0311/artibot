@@ -1377,7 +1377,7 @@ orchestrator는 **코드를 직접 작성하지 않습니다**. 팀을 구성하
 | **PostToolUse** (Edit) | `post-edit-format.js` | JS/TS 파일 편집 후 Prettier 포맷 제안 |
 | **PostToolUse** (Bash) | `post-bash.js` | git push 후 PR URL 자동 감지 |
 | **PreCompact** | `pre-compact.js` | 컨텍스트 압축 전 상태 스냅샷 저장 |
-| **Stop** | `check-console-log.js` | 세션 종료 시 `console.log` 잔여 검사 |
+| **Stop** | `stop-review-gate.js` | 세션 종료 시 리뷰 게이트 체크 |
 | **UserPromptSubmit** | `user-prompt-handler.js` | 사용자 의도 감지, 관련 에이전트 제안 |
 | **SubagentStart/Stop** | `subagent-handler.js` | 서브에이전트/팀원 등록/해제 추적 |
 | **TeammateIdle** | `team-idle-handler.js` | 유휴 팀원에게 대기 태스크 할당 알림 |
