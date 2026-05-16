@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.8.1] — 2026-05-16
+
+**Theme**: Hotfix for v4.8.0 hook-removal regression + marketplace install drift.
+
+### Fixed
+
+- **`scripts/hooks/check-console-log.js`** — Restored as a no-op stub (`process.exit(0)`). v4.8.0 removed the file outright, but Claude Code sessions cache `hooks.json` in memory at startup. Sessions that loaded the v3.0.0 registration before the v4.7.2 dispatcher consolidation kept `check-console-log.js` wired as a Stop hook — the next Stop event after upgrade crashed with `Cannot find module .../check-console-log.js`. Symptom reproduced in unrelated projects (e.g. Carib) whose sessions had not been restarted.
+- **Marketplace install drift** — `install.sh` now mirrors the direct install at `~/.claude/artibot/` into the Claude Code marketplace path `~/.claude/plugins/marketplaces/artibot/plugins/artibot/`. Every project session reads hooks from the marketplace path via `CLAUDE_PLUGIN_ROOT`, so omitting this mirror left other projects on whatever version Claude Code last fetched (months stale). Root cause of the v3.0.0-cached Stop hook above. New `install_marketplace_mirror()` function runs after `install_hooks` in the main install sequence and is a no-op when the marketplace path is absent.
+
+### Added
+
+- **`tests/hooks/legacy-stubs.test.js`** (16 tests) — Regression guard for 8 v3.0.0 hooks that v4.7.2 consolidated into the dispatcher (`check-console-log.js`, `post-edit-format.js`, `post-bash.js`, `pre-compact.js`, `user-prompt-handler.js`, `subagent-handler.js`, `team-idle-handler.js`, `session-end.js`). Each hook gets two assertions (file exists + parses as Node script). Failure message guides remediation: restore the file or write a no-op stub.
+
+### Policy
+
+- **Legacy-stub policy** (inline docs in `install.sh`) — When a hook file is consolidated into the dispatcher, leave a no-op stub at the original path until in-flight sessions are expected to have restarted. Removing the file forces every cached-config session to crash on the next matching event.
+
+---
+
 ## [4.8.0] — 2026-05-16
 
 **Theme**: Simplification + Stability. Hook slot consolidation, DATA POLICY runtime guard, dispatch-table single-source-of-truth, autopilot UX polish.
