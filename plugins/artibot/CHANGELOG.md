@@ -9,6 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.8.3] — 2026-05-16
+
+**Theme**: Plugin-cache drift containment. Closes the v4.6.4 → v4.8.2 regression class by syncing the third install layer (`~/.claude/plugins/cache/artibot/artibot/<version>/`) — the one Claude Code actually loads at session start.
+
+### Added
+
+- **`install.sh` — `install_plugin_cache()`** (between `install_marketplace_mirror` and `install_rules`). Walks every `~/.claude/plugins/cache/artibot/artibot/<version>/` and mirrors the runtime hot paths (`hooks/`, `scripts/`, `lib/`, `output-styles/`, `artibot.config.json`, `package.json`) from the source. Deliberately does **not** touch `.claude-plugin/plugin.json` inside cache dirs — that file's `version` field is the cache routing key. No-op when the cache root is absent. Logs the count of synced version dirs.
+
+- **`scripts/update.js` — `detectHookDrift(pluginRoot, home)`**. Computes SHA-1 of source `hooks/hooks.json` against every cached copy and flags mismatches with `{ version, cacheHash }` pairs. Returns `{ drift: false, reason }` when the cache is absent, source is unreadable, or every cache matches. Triggered inside `main()` even when the version check reports "already up to date" — drift now forces a reinstall + `clearCache()`. Skipped in `--check` mode (drift is detected but not acted on, preserving the read-only contract).
+
+### Changed
+
+- **`scripts/update.js::main()`** install-decision: `shouldInstall = FORCE || updateAvailable || driftReport.drift`. Previously the up-to-date branch exited early. The exit message now reads `Triggering reinstall to resync cache.` when drift is detected, with per-version diff lines like `cache v4.8.1 hooks.json (a1b2c3d4) ≠ source (5e6f7890)`.
+
+### Tests
+
+- **`tests/scripts/update.test.js`** (+8 tests, total 25 → 33):
+  - `detectHookDrift` covers: matching cache (no drift), single mismatched version, no plugin cache present, unreadable source, missing cache hooks.json (incomplete cache, not drift).
+  - `fileHash` covers: stable SHA-1, null on missing file, distinct digests for distinct content.
+
+### Root Cause Note
+
+Three install layers + one runtime cache = four places a hook config can live. v4.8.1 introduced the marketplace mirror; v4.8.2 fixed the source. Neither touched the cache, so a `/update` reporting "already up to date" left the broken cache in place — the v4.6.4 args[] schema persisted in `~/.claude/plugins/cache/artibot/artibot/4.8.1/hooks/hooks.json` until manually copied over. v4.8.3 closes the loop: `install.sh` mirrors all three writable layers in one pass; `update.js` detects the drift the version check misses.
+
+---
+
 ## [4.8.2] — 2026-05-16
 
 **Theme**: Hotfix for v4.6.4 exec-form `args[]` schema misadoption — every hook had been silently failing.

@@ -171,6 +171,65 @@ install_marketplace_mirror() {
 }
 
 # ──────────────────────────────────────────────
+# Mirror to Claude Code plugin cache (per-version dirs)
+# ──────────────────────────────────────────────
+# Claude Code maintains a per-version plugin cache at
+#   ~/.claude/plugins/cache/artibot/artibot/<version>/
+# At session start it loads hooks.json from THE CACHE DIR — not the
+# marketplace mirror or the direct install. The cache is populated lazily
+# from the marketplace mirror on first plugin activation and is NOT
+# refreshed by install.sh writing only to the marketplace path. The
+# v4.6.4 → v4.8.2 hook regression went unnoticed for so long precisely
+# because users' caches held v4.6.4 args[] schema while the marketplace
+# mirror had moved on.
+#
+# Mirroring the hot paths into every cache version dir keeps future
+# sessions (post-restart) consistent. We do NOT touch .claude-plugin/plugin.json
+# inside the cache (its version field is the cache routing key — overwriting
+# it would orphan the cache entry from Claude Code's perspective). We also
+# do NOT delete the cache dir here — clearCache() in scripts/update.js
+# handles invalidation after an install. The split keeps install.sh
+# non-destructive on a fresh-install path while still propagating runtime
+# files to whatever cache versions already exist.
+install_plugin_cache() {
+  local cache_root="${CLAUDE_DIR}/plugins/cache/artibot/artibot"
+  if [ ! -d "${cache_root}" ]; then
+    log "Plugin cache not present (skip cache sync)"
+    return 0
+  fi
+
+  local synced=0
+  for version_dir in "${cache_root}"/*/; do
+    [ -d "${version_dir}" ] || continue
+    local v_root="${version_dir%/}"
+
+    # Mirror runtime hot paths only (NOT .claude-plugin to preserve plugin.json
+    # version routing key). Same clean-before-copy contract as the marketplace
+    # mirror for parity.
+    for dir in scripts hooks lib output-styles; do
+      if [ -d "${ARTIBOT_DIR}/${dir}" ]; then
+        [ -d "${v_root}/${dir}" ] && rm -rf "${v_root}/${dir}"
+        cp -r "${ARTIBOT_DIR}/${dir}" "${v_root}/"
+      fi
+    done
+
+    # Config files are version-tagged but the cache dir name is the routing
+    # key — overwriting these is safe (cache invariant lives in plugin.json
+    # which we deliberately leave alone).
+    [ -f "${SCRIPT_DIR}/artibot.config.json" ] && cp "${SCRIPT_DIR}/artibot.config.json" "${v_root}/"
+    [ -f "${SCRIPT_DIR}/package.json" ] && cp "${SCRIPT_DIR}/package.json" "${v_root}/"
+
+    synced=$((synced + 1))
+  done
+
+  if [ "$synced" -gt 0 ]; then
+    log "Plugin cache synced: ${synced} version dir(s) → ${cache_root}/"
+  else
+    log "Plugin cache directory present but contained no version dirs (skip)"
+  fi
+}
+
+# ──────────────────────────────────────────────
 # Copy Rules (project-level .claude/rules/)
 # ──────────────────────────────────────────────
 install_rules() {
@@ -801,6 +860,7 @@ main() {
       install_skills
       install_hooks
       install_marketplace_mirror
+      install_plugin_cache
       install_rules
       install_mcp
       configure_settings

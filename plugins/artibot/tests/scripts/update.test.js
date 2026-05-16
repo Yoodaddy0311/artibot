@@ -23,6 +23,8 @@ import { fileURLToPath } from 'node:url';
 
 import {
   clearCache,
+  detectHookDrift,
+  fileHash,
   findBash,
   findInstallScript,
   findSourceRepo,
@@ -230,6 +232,107 @@ describe('clearCache', () => {
 
   it('does not throw when cache directory does not exist', () => {
     expect(() => clearCache(tmpRoot)).not.toThrow();
+  });
+});
+
+describe('detectHookDrift', () => {
+  function setupSourceHooks(pluginRoot, payload) {
+    mkdirSync(join(pluginRoot, 'hooks'), { recursive: true });
+    writeFileSync(join(pluginRoot, 'hooks', 'hooks.json'), payload);
+  }
+
+  function setupCacheHooks(home, version, payload) {
+    const dir = join(home, '.claude', 'plugins', 'cache', 'artibot', 'artibot', version, 'hooks');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'hooks.json'), payload);
+  }
+
+  it('returns no drift when source matches every cache version', () => {
+    const pluginRoot = join(tmpRoot, 'plugin');
+    const home = join(tmpRoot, 'home');
+    mkdirSync(pluginRoot, { recursive: true });
+    mkdirSync(home, { recursive: true });
+    setupSourceHooks(pluginRoot, '{"v": 1}');
+    setupCacheHooks(home, '4.8.1', '{"v": 1}');
+    setupCacheHooks(home, '4.8.2', '{"v": 1}');
+
+    const report = detectHookDrift(pluginRoot, home);
+    expect(report.drift).toBe(false);
+  });
+
+  it('detects drift when any cache version differs from source', () => {
+    const pluginRoot = join(tmpRoot, 'plugin');
+    const home = join(tmpRoot, 'home');
+    mkdirSync(pluginRoot, { recursive: true });
+    mkdirSync(home, { recursive: true });
+    setupSourceHooks(pluginRoot, '{"v": 2}');
+    setupCacheHooks(home, '4.8.1', '{"v": 1}'); // stale
+    setupCacheHooks(home, '4.8.2', '{"v": 2}');
+
+    const report = detectHookDrift(pluginRoot, home);
+    expect(report.drift).toBe(true);
+    expect(report.mismatches).toHaveLength(1);
+    expect(report.mismatches[0].version).toBe('4.8.1');
+    expect(typeof report.sourceHash).toBe('string');
+    expect(report.sourceHash).toHaveLength(40);
+  });
+
+  it('reports no drift when plugin cache is absent', () => {
+    const pluginRoot = join(tmpRoot, 'plugin');
+    const home = join(tmpRoot, 'home');
+    mkdirSync(pluginRoot, { recursive: true });
+    mkdirSync(home, { recursive: true });
+    setupSourceHooks(pluginRoot, '{"v": 1}');
+
+    const report = detectHookDrift(pluginRoot, home);
+    expect(report.drift).toBe(false);
+    expect(report.reason).toBe('no plugin cache present');
+  });
+
+  it('reports no drift when source hooks.json is unreadable', () => {
+    const pluginRoot = join(tmpRoot, 'plugin');
+    const home = join(tmpRoot, 'home');
+    mkdirSync(pluginRoot, { recursive: true });
+    mkdirSync(home, { recursive: true });
+    // No source hooks.json written
+
+    const report = detectHookDrift(pluginRoot, home);
+    expect(report.drift).toBe(false);
+    expect(report.reason).toMatch(/source/);
+  });
+
+  it('treats missing cache hooks.json as incomplete (not drift)', () => {
+    const pluginRoot = join(tmpRoot, 'plugin');
+    const home = join(tmpRoot, 'home');
+    mkdirSync(pluginRoot, { recursive: true });
+    mkdirSync(home, { recursive: true });
+    setupSourceHooks(pluginRoot, '{"v": 1}');
+    // Create cache version dir but no hooks.json inside
+    mkdirSync(join(home, '.claude', 'plugins', 'cache', 'artibot', 'artibot', '4.8.1'), { recursive: true });
+
+    const report = detectHookDrift(pluginRoot, home);
+    expect(report.drift).toBe(false);
+  });
+});
+
+describe('fileHash', () => {
+  it('returns a stable SHA-1 digest for the same content', () => {
+    const filePath = join(tmpRoot, 'a.txt');
+    writeFileSync(filePath, 'hello');
+    const a = fileHash(filePath);
+    const b = fileHash(filePath);
+    expect(a).toBe(b);
+    expect(a).toHaveLength(40);
+  });
+
+  it('returns null for a missing file', () => {
+    expect(fileHash(join(tmpRoot, 'nope'))).toBeNull();
+  });
+
+  it('returns different digests for different content', () => {
+    writeFileSync(join(tmpRoot, 'a.txt'), 'one');
+    writeFileSync(join(tmpRoot, 'b.txt'), 'two');
+    expect(fileHash(join(tmpRoot, 'a.txt'))).not.toBe(fileHash(join(tmpRoot, 'b.txt')));
   });
 });
 

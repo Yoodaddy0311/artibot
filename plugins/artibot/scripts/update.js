@@ -14,8 +14,9 @@
  * Zero dependencies. Node 18+ built-ins only. ESM module format.
  */
 
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -284,6 +285,73 @@ function clearCache(home) {
 }
 
 // ---------------------------------------------------------------------------
+// Drift detection
+// ---------------------------------------------------------------------------
+
+/**
+ * SHA-1 digest of a file's bytes, or null when the file is missing/unreadable.
+ * Hash choice is deliberate: drift detection is integrity (not cryptographic),
+ * SHA-1 keeps fingerprint format aligned with tests/hooks-schema-fingerprint.txt.
+ */
+function fileHash(filePath) {
+  try {
+    return createHash('sha1').update(readFileSync(filePath)).digest('hex');
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Detect drift between the installed source's hooks.json and every cached
+ * copy under ~/.claude/plugins/cache/artibot/artibot/<version>/.
+ *
+ * Why hooks.json specifically: it is what Claude Code loads at session start
+ * and the file that caused the v4.6.4 → v4.8.2 silent regression. If the
+ * cached copy diverges from the source, restarting Claude Code reloads stale
+ * hooks even though `/update` reports "already up to date".
+ *
+ * Returns:
+ *   { drift: false }                              — no cache present or all match
+ *   { drift: true, sourceHash, mismatches: [...] }
+ *     where each mismatch is { version, cacheHash }
+ */
+function detectHookDrift(pluginRoot, home) {
+  const sourceHooks = path.join(pluginRoot, 'hooks', 'hooks.json');
+  const sourceHash = fileHash(sourceHooks);
+  if (!sourceHash) {
+    return { drift: false, reason: 'source hooks.json unreadable' };
+  }
+
+  const cacheRoot = path.join(home, '.claude', 'plugins', 'cache', 'artibot', 'artibot');
+  if (!existsSync(cacheRoot)) {
+    return { drift: false, reason: 'no plugin cache present' };
+  }
+
+  let entries;
+  try {
+    entries = readdirSync(cacheRoot, { withFileTypes: true });
+  } catch {
+    return { drift: false, reason: 'cache root unreadable' };
+  }
+
+  const mismatches = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const cacheHooks = path.join(cacheRoot, entry.name, 'hooks', 'hooks.json');
+    const cacheHash = fileHash(cacheHooks);
+    if (cacheHash === null) continue; // missing cache file isn't drift — it's incomplete cache
+    if (cacheHash !== sourceHash) {
+      mismatches.push({ version: entry.name, cacheHash });
+    }
+  }
+
+  if (mismatches.length === 0) {
+    return { drift: false, sourceHash };
+  }
+  return { drift: true, sourceHash, mismatches };
+}
+
+// ---------------------------------------------------------------------------
 // Plugin install
 // ---------------------------------------------------------------------------
 
@@ -420,8 +488,23 @@ async function main() {
     process.exit(0);
   }
 
+  // Drift detection: even when the version matches, the plugin cache at
+  // ~/.claude/plugins/cache/artibot/artibot/<version>/ can diverge from the
+  // source if a previous install bumped only the marketplace mirror. Compare
+  // hooks.json hashes — divergence is the smoking gun for the v4.6.4 → v4.8.2
+  // hook regression pattern. Skip in --check mode (no install allowed).
+  const driftReport = !CHECK_ONLY ? detectHookDrift(pluginRoot, home) : { drift: false };
+  if (driftReport.drift) {
+    console.log('');
+    console.log('Hook drift detected:');
+    for (const m of driftReport.mismatches) {
+      console.log(`  cache v${m.version} hooks.json (${m.cacheHash.slice(0, 8)}) ≠ source (${driftReport.sourceHash.slice(0, 8)})`);
+    }
+    console.log('  Triggering reinstall to resync cache.');
+  }
+
   // Determine if we should proceed with install
-  const shouldInstall = FORCE || updateAvailable;
+  const shouldInstall = FORCE || updateAvailable || driftReport.drift;
 
   if (!shouldInstall) {
     console.log('\nNothing to install. Use --force to reinstall anyway.');
@@ -531,4 +614,6 @@ export {
   findSourceRepo,
   saveBackupInfo,
   clearCache,
+  detectHookDrift,
+  fileHash,
 };
