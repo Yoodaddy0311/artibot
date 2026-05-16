@@ -281,13 +281,17 @@ describe('E2E: Plugin Initialization Flow', () => {
         (entries) => entries.flatMap((entry) => entry.hooks
           .filter((h) => h.type !== 'prompt')),
       );
+      const dispatcherRe = /\/_[a-z]+-dispatcher\.js(?:\s|$)/;
       for (const entry of allEntries) {
         expect(entry.timeout).toBeGreaterThan(0);
-        const isDispatcher = (entry.args || []).some((a) => /\/_[a-z]+-dispatcher\.js$/.test(a));
+        const isDispatcher =
+          (entry.args || []).some((a) => dispatcherRe.test(a)) ||
+          dispatcherRe.test(entry.command || '');
         const ceiling = isDispatcher ? 30000 : 15000;
+        const label = entry.args?.[0] || entry.command || 'unknown';
         expect(
           entry.timeout,
-          `${entry.args?.[0] || 'unknown'} exceeds ${ceiling}ms ceiling`,
+          `${label} exceeds ${ceiling}ms ceiling`,
         ).toBeLessThanOrEqual(ceiling);
       }
     });
