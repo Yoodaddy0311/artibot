@@ -34,3 +34,14 @@
 <!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
 
 ---
+
+## 2026-05-16 14:58 UTC · `artibot/master`
+
+- **Commits** (2):
+  - `91b77be` release(v4.8.3): plugin-cache drift containment
+  - `5eb2430` fix(hooks): v4.8.2 — revert exec-form args[] to shell-form
+- **Files touched**: 13
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
