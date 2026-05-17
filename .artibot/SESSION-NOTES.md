@@ -628,3 +628,13 @@
 <!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
 
 ---
+
+## 2026-05-17 16:07 UTC · `artibot/master`
+
+- **Commits** (1):
+  - `31830c7` release(v4.11.1): /autopilot cross-project resolver hotfix
+- **Files touched**: 2
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
