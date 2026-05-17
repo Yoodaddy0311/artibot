@@ -25,6 +25,7 @@ export {
   getLockPath,
   acquireLock,
   releaseLock,
+  releaseAllForSession,
   isLocked,
   readLock,
 } from './lock.js';
@@ -102,6 +103,9 @@ export {
   newSessionId,
   getSessionPath,
   getStoreDir,
+  CURRENT_SCHEMA_VERSION,
+  migrateState,
+  isLegacyState,
 } from './session-store.js';
 
 export {

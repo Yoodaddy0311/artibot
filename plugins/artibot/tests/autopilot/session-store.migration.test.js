@@ -10,7 +10,7 @@
  *   - immutability (input not mutated)
  */
 import { afterEach, describe, expect, it } from 'vitest';
-import { writeFileSync, existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import {
   CURRENT_SCHEMA_VERSION,

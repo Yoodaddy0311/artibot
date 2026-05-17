@@ -71,13 +71,10 @@ export function saveSession(state) {
     if (err.code !== 'EEXIST') throw err;
   }
   const tmp = `${filePath}.tmp.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}`;
-  let payload;
-  try {
-    payload = JSON.stringify(state, null, 2);
-  } catch (err) {
-    // stringify failed (e.g., circular ref) — nothing was written, nothing to clean.
-    throw err;
-  }
+  // JSON.stringify is called outside the tmp-cleanup try/catch on purpose:
+  // if serialization throws (circular ref, BigInt, etc.) no tmp file was
+  // ever created, so there is nothing to clean up.
+  const payload = JSON.stringify(state, null, 2);
   try {
     writeFileSync(tmp, payload, 'utf-8');
     renameSync(tmp, filePath);

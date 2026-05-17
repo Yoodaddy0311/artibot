@@ -281,32 +281,52 @@ export function detectInterruptedPhase(state) {
   try {
     if (!state || typeof state !== 'object') return { interrupted: false };
     const timeline = Array.isArray(state.timeline) ? state.timeline : [];
-    // Stack-based pairing: phase-start pushes, matching phase-end pops the
-    // most recent open entry. Assumes phases nest LIFO (engine.js never
-    // overlaps unrelated phases). Orphaned phase-end entries are ignored
-    // as data drift.
-    const pending = [];
-    for (const entry of timeline) {
-      if (!entry || typeof entry !== 'object') continue;
-      const type = entry.type;
-      const phase = typeof entry.phase === 'string' ? entry.phase : null;
-      if (!phase) continue;
-      if (type === 'phase-start') {
-        pending.push({ phase, startedAt: typeof entry.ts === 'string' ? entry.ts : null });
-      } else if (type === 'phase-end') {
-        for (let i = pending.length - 1; i >= 0; i -= 1) {
-          if (pending[i].phase === phase) {
-            pending.splice(i, 1);
-            break;
-          }
-        }
-      }
-    }
+    const pending = walkTimelinePending(timeline);
     if (pending.length === 0) return { interrupted: false };
     const last = pending[pending.length - 1];
     return { interrupted: true, phase: last.phase, startedAt: last.startedAt };
   } catch {
     return { interrupted: false };
+  }
+}
+
+/**
+ * Internal: stack-walk a timeline and return the still-open phase-start
+ * entries. phase-start pushes, matching phase-end pops the most recent
+ * open entry (LIFO; engine.js never overlaps unrelated phases). Orphaned
+ * phase-end entries are ignored as data drift.
+ *
+ * @param {Array<object>} timeline
+ * @returns {Array<{ phase: string, startedAt: string|null }>}
+ */
+function walkTimelinePending(timeline) {
+  const pending = [];
+  for (const entry of timeline) {
+    if (!entry || typeof entry !== 'object') continue;
+    const phase = typeof entry.phase === 'string' ? entry.phase : null;
+    if (!phase) continue;
+    if (entry.type === 'phase-start') {
+      pending.push({ phase, startedAt: typeof entry.ts === 'string' ? entry.ts : null });
+    } else if (entry.type === 'phase-end') {
+      popMatchingPhase(pending, phase);
+    }
+  }
+  return pending;
+}
+
+/**
+ * Internal: pop the most recent pending entry with the given phase name.
+ * No-op when none is found.
+ *
+ * @param {Array<{ phase: string }>} pending
+ * @param {string} phase
+ */
+function popMatchingPhase(pending, phase) {
+  for (let i = pending.length - 1; i >= 0; i -= 1) {
+    if (pending[i].phase === phase) {
+      pending.splice(i, 1);
+      return;
+    }
   }
 }
 

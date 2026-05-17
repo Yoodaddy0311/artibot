@@ -132,12 +132,26 @@ Goal Contract 슬롯이 없는 PRD는 기존 7-phase 단방향 흐름 (Phase 0~6
    - `options`: `{ maxDuration, budget, notify, team, checkpoint }`
    - `sessionId`: `:resume`/`:status`/`:abort` 인 경우만
 
+### Step 1.5 — Pre-flight Gate (default 모드 자동)
+
+`mode === 'default' | 'night' | 'plan'` 진입 직전 **자동 실행**:
+
+```js
+const goalContract = options.goal ? { objective: options.goal, stoppingCondition: '...', validationCommand: options.validationCommand } : null;
+const preflight = await engine.runPreflight({ cwd: process.cwd(), sessionId: pendingId, featureKey: engine.extractKey(task), options, goalContract });
+const pfInstr = engine.buildPreflightInstruction(preflight);
+if (pfInstr?.abort) { /* abort: surface preflight errors table via engine.renderPreflightSummary(preflight) + 종료 */ }
+if (pfInstr?.suppress) { /* warnings: state.preflightWarnings에 누적 + 계속 */ }
+```
+
+5 체크: `gitClean` / `lockFree` / `diskSpace (>500MB hard / >2GB warn)` / `nodeVersion (>=18 hard / >=20 warn)` / `goalContractLint`. Hard fail = abort, warn = continue + 누적. `:resume`는 pre-flight skip (이미 진행 중).
+
 ### Step 2 — Mode Dispatch
 
 | mode | 호출 | 다음 단계 |
 |------|------|-----------|
 | `default` / `night` / `plan` | `engine.startAutopilot({ task, mode, options })` → `{ sessionId, prdPath, instruction }` | Step 3 (Phase 진행) |
-| `resume` | `engine.resumeAutopilot(sessionId)` → `{ phase, status, instruction }` | Step 3 (재진입 Phase 부터) |
+| `resume` | `engine.resumeAutopilot(sessionId)` 직전 `detectInterruptedPhase(state)` 호출 — interrupted 검출 시 `engine.buildRecoveryNote(state)` 한국어 안내를 큐에 푸시 후 정상 resume | Step 3 (재진입 Phase 부터) |
 | `status` | `engine.getStatus(sessionId?)` → `SessionState` | 상태 표 출력 후 종료 |
 | `abort` | `engine.abortAutopilot(sessionId, { graceful: true })` → `AbortResult` | 결과 표 출력 후 종료 |
 | `tail` | `engine.readEvents(sessionId, { tail: lines })` → `Event[]` | 이벤트 표 출력 후 종료 (PRD v4.1 P0-2 Live Telemetry) |
@@ -146,6 +160,11 @@ Goal Contract 슬롯이 없는 PRD는 기존 7-phase 단방향 흐름 (Phase 0~6
 ### Step 3 — Phase Execution Loop
 
 엔진이 반환한 `instruction` 객체를 따라 **Phase 0 ~ 6을 순차 실행**한다. 각 Phase 완료 시 `engine.recordPhaseResult(sessionId, phase, result)`로 session-store 업데이트.
+
+**자동 통합 (default 모드 기본 ON)**:
+- 각 Phase 완료 직후 `engine.notePhaseCost(state, phase, { tokensIn, tokensOut, costUsd, model })` 호출 — Phase별 토큰/비용을 telemetry + state.usage에 기록
+- `engine.checkBudgetThreshold(sessionId, { limitUsd: options.budget })` 결과 `crossed === 95`면 `engine.buildCostWarningInstruction(state, threshold)`로 `notifyDanger` 발사
+- TUI 활성 세션은 footer에 `engine.renderCostInline(getSessionCost(sessionId))` 자동 표시
 
 #### Phase 0 — INTAKE (PRD 생성)
 - `Task(subagent_type="artibot:planner", model="opus", prompt="[Autopilot Phase 0] 사용자 요청: {task}\n\n`docs/PRD/<feature>-<sessionId>.md` 작성. PRD 템플릿: 배경/목표/비목표/시나리오/설계/산출물/실행계획/위험/수락기준")`
@@ -183,6 +202,9 @@ Goal Contract 슬롯이 없는 PRD는 기존 7-phase 단방향 흐름 (Phase 0~6
 Phase 6 완료 후:
 - `engine.notifyCompletion(sessionId)` 호출.
 - 보고서 경로 + 큐된 질문 요약을 사용자에게 출력.
+- 비용 요약: `engine.renderCostBlock(engine.getSessionCost(sessionId))` 마크다운 테이블을 사용자에게 노출 (Phase별 토큰/$ + Budget 사용률).
+- pre-flight 경고가 있었다면 `engine.renderPreflightSummary(state.preflightResult)` 출력 (참고용).
+- abort/완료 시 `engine.releaseAllForSession(sessionId)`로 잔존 lock 일괄 해제.
 
 ### `/autopilot:tail` Live Telemetry (PRD v4.1 P0-2)
 
