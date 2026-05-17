@@ -12,8 +12,6 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   existsSync,
   mkdirSync,
-  readdirSync,
-  rmSync,
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
@@ -158,7 +156,3 @@ describe('releaseAllForSession — return shape', () => {
   });
 });
 
-// Suppress "rmSync imported but unused" lint complaint — kept for symmetry with
-// other cleanup-heavy suites in case future tests need a hard-reset hook.
-void rmSync;
-void readdirSync;

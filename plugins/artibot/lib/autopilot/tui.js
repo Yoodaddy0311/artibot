@@ -446,12 +446,17 @@ export async function runTuiLoop(sessionId, opts = {}) {
         nullLoadStreak = 0;
       }
       const events = readEvents(sessionId, { tail: MAX_RECENT_EVENTS });
+      let costSummary = null;
+      try {
+        costSummary = getSessionCost(sessionId);
+      } catch { /* cost is best-effort */ }
       const frame = renderFrame({
         state: state || { sessionId, phase: 'UNKNOWN', mode: 'default' },
         events,
         width: caps.width,
         asciiOnly: caps.asciiOnly,
         tokenUsage: opts.tokenUsage,
+        costSummary,
       });
       // Clear + home, then write frame.
       try { stream.write(`${ESC}2J${ESC}H${frame}\n`); } catch { /* ignore */ }
