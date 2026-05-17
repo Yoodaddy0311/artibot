@@ -1,0 +1,10 @@
+# Feature Goal Contract template (v4.10.0).
+# Full pipeline contract for net-new work. Caller is expected to substitute
+# the {{...}} placeholders before validateGoalContract() runs; the literal
+# stoppingCondition is generic enough to serve as a starting point.
+name: feature
+objective: Ship the new feature end-to-end with tests and documentation
+stoppingCondition: new tests pass AND existing tests pass AND lint is clean AND user-visible behaviour matches the spec
+validationCommand: npm run ci
+forbiddenChanges: [docs/PRD/**, CHANGELOG.md]
+maxIterations: 5

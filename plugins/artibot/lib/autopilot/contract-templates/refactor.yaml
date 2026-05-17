@@ -1,0 +1,10 @@
+# Refactor Goal Contract template (v4.10.0).
+# Multi-phase refactor with extensive CROSS_CHECK gating to prevent behaviour
+# drift. maxIterations sits near the hard cap because refactors often need
+# multiple passes for shape + tests + types.
+name: refactor
+objective: Restructure target code for clarity without changing observable behaviour
+stoppingCondition: full test suite passes AND public API surface is unchanged AND lint is clean
+validationCommand: npm run ci
+forbiddenChanges: [docs/PRD/**, CHANGELOG.md]
+maxIterations: 7
