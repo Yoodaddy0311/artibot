@@ -234,6 +234,15 @@ export function runPhaseGoalEvaluate(state, evaluatorOpts = {}) {
     data: { iteration: state.goalIterations, maxIter, reason: evalResult.reason },
     progress: buildProgress(state, contract, evalResult),
   });
+  // Notify: iteration about to re-enter EXECUTE (throttled inside notifier).
+  try {
+    notifyIteration(state.sessionId, {
+      iteration: state.goalIterations,
+      maxIterations: maxIter,
+      met: false,
+      lastValidation: evalResult,
+    });
+  } catch { /* notification best-effort */ }
   return {
     type: 'phase-result',
     phase: 'EVALUATE',
