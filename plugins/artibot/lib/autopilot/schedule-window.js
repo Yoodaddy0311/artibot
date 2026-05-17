@@ -15,7 +15,6 @@
  * @module lib/autopilot/schedule-window
  */
 
-const MINUTES_PER_DAY = 24 * 60;
 const WINDOW_RE = /^([0-2]?\d):([0-5]\d)-([0-2]?\d):([0-5]\d)$/;
 
 /**
