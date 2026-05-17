@@ -9,6 +9,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.8.4] — 2026-05-17
+
+**Theme**: Autopilot cleanup — e2e regression fix + shared spawn mocking helper + System1 cache bounds + dead-code removal.
+
+### Fixed
+
+- **`tests/e2e/plugin-init-flow.test.js:284-296`** — Dispatcher detection regression from v4.8.2 shell-form revert. The test inferred "is dispatcher" from `entry.args[]` only, but v4.8.2 (commit `5eb2430`) collapsed every hook entry back to a single `command` string with no `args[]`. After the revert, no entry matched `_<name>-dispatcher.js`, so the 30 000 ms ceiling rule was never applied, and the first dispatcher with `timeout: 30000` failed against the 15 000 ms non-dispatcher ceiling. Fixed by also matching the dispatcher regex against `entry.command`. 41/41 plugin-init-flow tests pass.
+
+### Added
+
+- **`tests/utils/spawn-mock.js`** (140 lines, 4 exports). Closes backlog item #7 from v4.8.0 cleanup. Provides `commandRouter`, `execFileRouter`, `spawnSyncRouter`, and `mockChildProcess` — opt-in factories that replace the 17 in-line `vi.mock('node:child_process', …)` blocks across the suite. Existing inline mocks continue to work unchanged; new tests pick up the helpers via `import { commandRouter } from '../utils/spawn-mock.js'`. Routes accept either `Record<string, value>` or `Map`, support function-valued routes, and `spawnSyncRouter` normalises to the canonical `{ status, stdout, stderr }` shape callers expect.
+- **`tests/utils/spawn-mock.test.js`** (128 lines, 16 unit tests covering all four exports + fallback / Map / function-route / status-override paths).
+
+### Changed
+
+- **`lib/cognitive/system1.js:58/61/64`** — `_patternCache`, `_memoryCache`, `_toolCache` each pass `{ maxSize: 500 }` to the shared `Cache` constructor. Long-running sessions previously accumulated unbounded entries because the Cache base class only honours TTL when `maxSize` is explicitly supplied. The LRU bound caps cognitive-layer memory growth without altering hit-rate behaviour (all three caches stay well under 500 in normal usage).
+
+### Removed
+
+Six files / 559 lines total. Each was verified to have zero importers anywhere in the repo (source, tests, CI workflows, install scripts, command/skill markdown, CHANGELOG) before removal.
+
+- **`tests/autopilot/smoke/`** (entire directory, 4 files / 201 lines):
+  - `autopilot-plan.smoke.mjs` — self-referenced a non-existent `_autopilot-smoke.mjs`.
+  - `finish-night-session.mjs`, `start-night-session.mjs`, `full-integration-check.mjs` — zero external references; superseded by `tests/autopilot/engine.test.js` and the dedicated `goal-*.test.js` suites.
+- **`scripts/bootstrap-learning.js`** (189 lines) — one-shot bootstrap CLI; only self-references. Live equivalent is `lib/learning/bootstrapLearn` exported by `lib/learning/index.js`.
+- **`scripts/migrate-rules-to-csv.js`** (169 lines) — one-shot migration tool no longer required (migration completed pre-v4.0); only self-references.
+
+Refactor-cleaner audit also flagged 19 of 21 one-shot scripts in `scripts/` and ~50 barrel re-exports across `lib/*/index.js` as "potentially dead", but per-symbol verification showed every survivor is anchored by either (a) the `tests/barrel-exports.test.js` public-surface guard, (b) runtime `await import(toFileUrl(…))` from the `/autopilot` slash command, (c) a CHANGELOG entry signalling intent, or (d) an active test exercising the throw of an intentional stub. The two flagged "incomplete" stubs (`scripts/hooks/event-emitter.mjs::broadcastEnvelope()` and `lib/core/marketplace-installer.js::installFromRegistry()`) are documented design — both kept.
+
+### Verification
+
+- `npx vitest run` → **8 336 passed / 0 failed / 3 skipped** (336 test files, 24.23 s). Identical to the v4.8.3 baseline modulo the +24 new spawn-mock tests (`8 312 → 8 336`).
+- 5-file lockstep (`scripts/release-check.js`): all green at 4.8.4.
+
+### Audit Trail
+
+- Full Phase 0–6 transcript: `.artibot/REPORTS/2026-05-17-autopilot-session.md`.
+- Of the 79 findings surfaced by the 5-team parallel audit, this release acts on 10 (4 applied + 6 deletions); the remaining 69 are documented as load-bearing or filed in the Future Work queue (`§v4.8.4+ High-Impact / Medium-Risk / Low-Priority` in the report).
+
+---
+
 ## [4.8.3] — 2026-05-16
 
 **Theme**: Plugin-cache drift containment. Closes the v4.6.4 → v4.8.2 regression class by syncing the third install layer (`~/.claude/plugins/cache/artibot/artibot/<version>/`) — the one Claude Code actually loads at session start.

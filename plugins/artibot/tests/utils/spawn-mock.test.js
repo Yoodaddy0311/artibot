@@ -2,8 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   commandRouter,
   execFileRouter,
-  spawnSyncRouter,
   mockChildProcess,
+  spawnSyncRouter,
 } from './spawn-mock.js';
 
 describe('commandRouter', () => {

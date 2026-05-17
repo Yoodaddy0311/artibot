@@ -115,8 +115,8 @@ function normaliseSpawnResult(raw) {
     const obj = /** @type {Record<string, unknown>} */ (raw);
     return {
       status: typeof obj.status === 'number' ? obj.status : 0,
-      stdout: obj.stdout != null ? String(obj.stdout) : '',
-      stderr: obj.stderr != null ? String(obj.stderr) : '',
+      stdout: obj.stdout !== null && obj.stdout !== undefined ? String(obj.stdout) : '',
+      stderr: obj.stderr !== null && obj.stderr !== undefined ? String(obj.stderr) : '',
     };
   }
   return { status: 0, stdout: '', stderr: '' };
