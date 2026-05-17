@@ -34,14 +34,14 @@ describe('classifyTaskComplexity — trivial bucket', () => {
 });
 
 describe('classifyTaskComplexity — simple bucket', () => {
-  it('classifies a short non-keyword sentence as simple', () => {
-    const r = classifyTaskComplexity('Update copy text on the landing page hero section');
-    expect(['simple', 'medium']).toContain(r.level);
+  it('classifies a single-file tweak without keyword as simple', () => {
+    const r = classifyTaskComplexity('Tweak server.js to log on startup');
+    expect(r.level).toBe('simple');
   });
 
-  it('handles single file hint without keyword', () => {
-    const r = classifyTaskComplexity('Tweak server.js to log on startup');
-    expect(['simple', 'medium']).toContain(r.level);
+  it('classifies a 2-file change without strong keyword as simple', () => {
+    const r = classifyTaskComplexity('Wire foo.js into bar.js to share the cache');
+    expect(r.level).toBe('simple');
   });
 });
 

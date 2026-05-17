@@ -10,12 +10,12 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   CURRENT_QUEUE_SCHEMA_VERSION,
-  GOAL_STATUS,
   dequeueGoal,
   enqueueGoal,
   finalizeGoal,
   getDefaultQueueDir,
   getQueuePath,
+  GOAL_STATUS,
   listQueue,
   newQueueId,
   removeFromQueue,

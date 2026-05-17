@@ -137,14 +137,18 @@ describe('clusterFailures', () => {
   });
 
   it('sorts clusters by count desc, firstSeen asc on ties', () => {
+    // alpha collapses by path-strip → 1 entry.
+    // beta collapses by number-strip → 2 entries.
+    // gamma collapses by number-strip → 2 entries, earlier firstSeen.
     const events = [
-      makeEvent({ message: 'alpha alpha alpha' }),
-      makeEvent({ ts: '2026-05-10T00:00:00.000Z', message: 'beta foo' }),
-      makeEvent({ ts: '2026-05-11T00:00:00.000Z', message: 'beta bar' }),
-      makeEvent({ ts: '2026-05-09T00:00:00.000Z', message: 'gamma one' }),
-      makeEvent({ ts: '2026-05-12T00:00:00.000Z', message: 'gamma two' }),
+      makeEvent({ message: 'alpha failed at /tmp/a.js' }),
+      makeEvent({ ts: '2026-05-10T00:00:00.000Z', message: 'beta error code 1' }),
+      makeEvent({ ts: '2026-05-11T00:00:00.000Z', message: 'beta error code 2' }),
+      makeEvent({ ts: '2026-05-09T00:00:00.000Z', message: 'gamma fault at line 1' }),
+      makeEvent({ ts: '2026-05-12T00:00:00.000Z', message: 'gamma fault at line 2' }),
     ];
     const clusters = clusterFailures(events);
+    expect(clusters).toHaveLength(3);
     // beta(2) and gamma(2) tie → gamma (earlier firstSeen) comes first.
     expect(clusters[0].count).toBe(2);
     expect(clusters[0].sampleMessage).toContain('gamma');
@@ -153,10 +157,14 @@ describe('clusterFailures', () => {
   });
 
   it('respects minCount threshold', () => {
+    // "recurring foo" / "recurring bar" only collapse if we strip the
+    // bare-word tail — they don't, so use number-stripping to force the
+    // collapse instead. Three of these become one cluster of 3, plus the
+    // one-off lone entry that minCount=2 filters out.
     const events = [
-      makeEvent({ message: 'one-off failure' }),
-      makeEvent({ message: 'recurring foo' }),
-      makeEvent({ message: 'recurring bar' }),
+      makeEvent({ message: 'one-off totally distinct failure' }),
+      makeEvent({ message: 'recurring failure at line 11' }),
+      makeEvent({ message: 'recurring failure at line 22' }),
     ];
     const clusters = clusterFailures(events, { minCount: 2 });
     expect(clusters).toHaveLength(1);
