@@ -13,6 +13,7 @@
 
 import { newSessionId, saveSession } from './session-store.js';
 import { appendEvent } from './telemetry.js';
+import { notifyDanger, notifyPhaseProgress } from './notification.js';
 
 /**
  * Build the initial autopilot session state object. Factored out of
@@ -90,4 +91,37 @@ export function persist(state) {
   state.updatedAt = new Date().toISOString();
   saveSession(state);
   return state;
+}
+
+/**
+ * Build a danger notification when pause reason or error severity signals
+ * a safety-critical event. Returns null when no danger is detected.
+ * @param {object} state
+ * @param {string} reason
+ * @returns {object|null}
+ */
+export function maybeDangerNote(state, reason) {
+  const errs = Array.isArray(state.errors) ? state.errors : [];
+  const dangerErr = errs.find((e) => e?.severity === 'danger');
+  if (!dangerErr && !/secret-leak|danger/i.test(reason)) return null;
+  return notifyDanger(state.sessionId, {
+    riskType: dangerErr?.kind || reason,
+    detail: dangerErr?.detail ?? reason,
+  });
+}
+
+/**
+ * Best-effort phase-progress notification. Throttled inside notifyPhaseProgress.
+ * @param {object} state
+ * @param {string} fromPhase
+ * @param {string} toPhase
+ * @param {number|null} [durationMs]
+ * @returns {object|null}
+ */
+export function notePhaseProgress(state, fromPhase, toPhase, durationMs = null) {
+  try {
+    return notifyPhaseProgress(state.sessionId, { fromPhase, toPhase, durationMs });
+  } catch {
+    return null;
+  }
 }

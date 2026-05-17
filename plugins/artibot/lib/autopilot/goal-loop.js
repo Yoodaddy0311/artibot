@@ -25,6 +25,7 @@
 import { evaluateGoal } from './goal-evaluator.js';
 import { DEFAULT_MAX_ITERATIONS } from './goal-schema.js';
 import { persist, recordPhase, tick } from './_engine-helpers.js';
+import { notifyIteration } from './notification.js';
 
 /**
  * Build a Phase 4 progress heartbeat slot for telemetry events. Keeps

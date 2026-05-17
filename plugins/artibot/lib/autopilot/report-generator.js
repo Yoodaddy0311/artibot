@@ -12,6 +12,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { getPluginRoot } from '../core/platform.js';
 import { loadSession } from './session-store.js';
 import { renderProfile } from './profile-renderer.js';
+import { renderTimelineTable, summarizeSession } from './replay.js';
 
 /**
  * @returns {string} project root one level above plugin root
@@ -91,6 +92,17 @@ export function renderReport(state) {
     ? '추가 작업 없음. 사용자 검토 권장.'
     : '세션 상태 검토 후 /autopilot:resume 또는 /autopilot:abort 결정.');
 
+  // Inject Phase Timeline (auto-generated from events.ndjson). Failures
+  // collapse to a stub so legacy callers without telemetry never break.
+  let timelineBlock = '';
+  try {
+    if (state.sessionId) {
+      timelineBlock = renderTimelineTable(summarizeSession(state.sessionId));
+    }
+  } catch {
+    timelineBlock = '';
+  }
+
   return `# Autopilot 완료 보고서
 
 - **세션**: \`${state.sessionId || '-'}\`
@@ -111,7 +123,7 @@ ${state.prdPath ? `- [${state.prdPath}](${state.prdPath})` : '_(PRD 미생성)_'
 ## 3. Phase별 결과
 
 ${phaseTable}
-
+${timelineBlock ? `\n${timelineBlock}\n` : ''}
 ## 4. 변경 사항 (커밋)
 
 ${commitList}
@@ -258,12 +270,24 @@ export function buildReportData(state) {
   const crossCheckTable = s.crossCheck
     ? table(['Item', 'Value'], [['Verdict', s.crossCheck.verdict || '-'], ['Notes', s.crossCheck.notes || '-']])
     : 'N/A';
+  let phaseTimeline = 'N/A';
+  try {
+    if (s.sessionId) {
+      const summary = summarizeSession(s.sessionId);
+      if (summary && Array.isArray(summary.phases) && summary.phases.length > 0) {
+        phaseTimeline = renderTimelineTable(summary);
+      }
+    }
+  } catch {
+    phaseTimeline = 'N/A';
+  }
   return {
     ...buildSessionMeta(state),
     ...buildPhaseFields(phases),
     ...buildVerifyFields(s.verifyResult, s.changedFiles),
     ...buildRiskFields(state),
     crossCheckTable,
+    phaseTimeline,
     nextAction: s.nextAction || (status === 'COMPLETED' ? '추가 작업 없음. 사용자 검토 권장.' : '세션 상태 검토 권장.'),
     kpiSummary: s.kpiSummary || `Phases ${phases.length}, Improvements ${improvements.length}, Risks ${risks.length}`,
     kpiSimple: s.kpiSimple || `${phases.length}개 단계 · ${improvements.length}개 개선 · ${risks.length}개 리스크`,

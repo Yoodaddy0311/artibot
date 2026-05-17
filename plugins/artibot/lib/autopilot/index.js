@@ -106,7 +106,11 @@ export {
 
 export {
   notifyCompletion,
+  notifyDanger,
+  notifyIteration,
   notifyPause,
+  notifyPhaseProgress,
+  THROTTLE_WINDOW_MS,
 } from './notification.js';
 
 export {
@@ -115,6 +119,11 @@ export {
   tailEventsStream,
   getEventsPath,
 } from './telemetry.js';
+
+export {
+  summarizeSession,
+  renderTimelineTable,
+} from './replay.js';
 
 export {
   getMemoryDir,
