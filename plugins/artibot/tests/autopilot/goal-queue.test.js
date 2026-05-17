@@ -5,7 +5,7 @@
  * Uses an isolated tmp dir as `storeDir` so no real `~/.artibot` writes leak.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {

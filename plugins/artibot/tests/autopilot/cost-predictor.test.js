@@ -59,12 +59,14 @@ describe('predictCost (no history)', () => {
     expect(out.estimatedTokens).toBeGreaterThanOrEqual(8000);
   });
 
-  it('high-complexity multiplies vs low-complexity', () => {
-    const big = predictCost('refactor entire auth module from scratch with new schema', opts);
-    const small = predictCost('fix the typo in the readme file please now', opts);
+  it('high-complexity multiplier exceeds low-complexity for equal-length goals', () => {
+    // Use a long enough task (>~700 chars at default 12 tokens/char) so the
+    // floor (DEFAULT_MIN_TOKENS=8000) does not mask the multiplier difference.
+    const filler = 'x '.repeat(400);
+    const big = predictCost(`refactor everything ${filler}`, opts);
+    const small = predictCost(`fix typo ${filler}`, opts);
     expect(big.complexity).toBe('high');
     expect(small.complexity).toBe('low');
-    // big task is also longer, so the gap is amplified
     expect(big.estimatedTokens).toBeGreaterThan(small.estimatedTokens);
   });
 });

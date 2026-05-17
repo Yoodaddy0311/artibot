@@ -17,6 +17,7 @@
 import { describe, expect, it } from 'vitest';
 import { renderFlamegraph } from '../../lib/autopilot/flamegraph.js';
 
+// eslint-disable-next-line no-control-regex -- need to assert NO ANSI escape codes
 const ANSI = /\u001b\[/;
 
 describe('renderFlamegraph — empty inputs', () => {
@@ -103,13 +104,13 @@ describe('renderFlamegraph — sort modes', () => {
 
   it('sorts by duration descending when opts.sort = "duration"', () => {
     const out = renderFlamegraph([
-      { phase: 'A', durationMs: 200, tokens: 0, cost: 0 },
-      { phase: 'B', durationMs: 1000, tokens: 0, cost: 0 },
-      { phase: 'C', durationMs: 50, tokens: 0, cost: 0 },
+      { phase: 'AAA', durationMs: 200, tokens: 0, cost: 0 },
+      { phase: 'BBB', durationMs: 1000, tokens: 0, cost: 0 },
+      { phase: 'CCC', durationMs: 50, tokens: 0, cost: 0 },
     ], { sort: 'duration' });
-    const a = out.indexOf(' A ');
-    const b = out.indexOf(' B ');
-    const c = out.indexOf(' C ');
+    const a = out.indexOf('AAA');
+    const b = out.indexOf('BBB');
+    const c = out.indexOf('CCC');
     expect(b).toBeLessThan(a);
     expect(a).toBeLessThan(c);
   });

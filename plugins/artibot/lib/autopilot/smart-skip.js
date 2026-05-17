@@ -79,14 +79,17 @@ function matchedKeywords(lower, keywords) {
  * Compute a numeric complexity score (0..100) plus the structured factors
  * that contributed to it. Score boundaries map deterministically to the
  * four levels:
- *   <  15 → trivial
- *   < 35  → simple
- *   < 65  → medium
- *   >= 65 → complex
+ *   <  10 → trivial
+ *   <  30 → simple
+ *   <  55 → medium
+ *   >= 55 → complex
  *
- * Length contributes up to 20 points (capped); keyword class adds 25 / 15;
- * file-hint count adds 5 per match up to 25; explicit "and" / list separators
- * add 5 per up to 15.
+ * Weights (all capped & clamped to 0..100 total):
+ *   - length / 12  (cap 25)
+ *   - complex keyword hit (+40), else medium keyword hit (+22)
+ *   - trivial keyword hit (-20) — overrides accidental medium pickups
+ *   - file-path hint (+8 each, cap 30)
+ *   - multi-clause separator (+4 each, cap 15)
  *
  * @param {string} goal
  * @returns {{ level: ComplexityLevel, score: number, factors: string[] }}
@@ -104,8 +107,8 @@ export function classifyTaskComplexity(goal) {
   const complexHits = matchedKeywords(lower, COMPLEX_KEYWORDS);
   const mediumHits = matchedKeywords(lower, MEDIUM_KEYWORDS);
 
-  // Length signal (cap at 20).
-  const lengthPts = Math.min(20, Math.floor(text.length / 25));
+  // Length signal (cap at 25).
+  const lengthPts = Math.min(25, Math.floor(text.length / 12));
   if (lengthPts > 0) {
     score += lengthPts;
     factors.push(`length=${text.length}(+${lengthPts})`);
@@ -113,30 +116,30 @@ export function classifyTaskComplexity(goal) {
 
   // Keyword class signals.
   if (complexHits.length > 0) {
-    score += 25;
-    factors.push(`complex-kw:${complexHits.join(',')}(+25)`);
+    score += 40;
+    factors.push(`complex-kw:${complexHits.join(',')}(+40)`);
   } else if (mediumHits.length > 0) {
-    score += 15;
-    factors.push(`medium-kw:${mediumHits.join(',')}(+15)`);
+    score += 22;
+    factors.push(`medium-kw:${mediumHits.join(',')}(+22)`);
   }
   if (trivialHits.length > 0) {
     // Trivial keywords subtract to overcome accidental medium hits.
-    score -= 15;
-    factors.push(`trivial-kw:${trivialHits.join(',')}(-15)`);
+    score -= 20;
+    factors.push(`trivial-kw:${trivialHits.join(',')}(-20)`);
   }
 
-  // File-path signal (cap at 25).
+  // File-path signal (cap at 30, +8 per match).
   const fileHints = countFileHints(text);
   if (fileHints > 0) {
-    const pts = Math.min(25, fileHints * 5);
+    const pts = Math.min(30, fileHints * 8);
     score += pts;
     factors.push(`files=${fileHints}(+${pts})`);
   }
 
-  // Multi-clause signal (cap at 15).
+  // Multi-clause signal (cap at 15, +4 per match).
   const clauseHits = (lower.match(/\b(?:and|then|plus|also|,)\b/g) || []).length;
   if (clauseHits > 0) {
-    const pts = Math.min(15, clauseHits * 5);
+    const pts = Math.min(15, clauseHits * 4);
     score += pts;
     factors.push(`clauses=${clauseHits}(+${pts})`);
   }
@@ -144,9 +147,9 @@ export function classifyTaskComplexity(goal) {
   score = Math.max(0, Math.min(100, score));
 
   let level;
-  if (score < 15) level = 'trivial';
-  else if (score < 35) level = 'simple';
-  else if (score < 65) level = 'medium';
+  if (score < 10) level = 'trivial';
+  else if (score < 28) level = 'simple';
+  else if (score < 50) level = 'medium';
   else level = 'complex';
 
   return { level, score, factors };
