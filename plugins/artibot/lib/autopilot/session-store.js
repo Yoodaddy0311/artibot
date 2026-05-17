@@ -90,18 +90,109 @@ export function saveSession(state) {
 
 /**
  * Load a session by id. Returns null if missing or unreadable.
+ *
+ * Legacy (v1) state is transparently upgraded via {@link migrateState}.
+ * On successful upgrade, the migrated state is immediately re-persisted
+ * so the next load is already at {@link CURRENT_SCHEMA_VERSION}.
+ *
+ * Migration failure is treated as advisory: the original (untouched)
+ * parsed state is returned so the caller never sees a hard error from
+ * the recovery layer. A `warn`-level telemetry event is best-effort
+ * appended; telemetry import is lazy to avoid a load-time cycle.
+ *
  * @param {string} sessionId
  * @returns {object|null}
  */
 export function loadSession(sessionId) {
+  let parsed;
   try {
     const filePath = getSessionPath(sessionId);
     if (!existsSync(filePath)) return null;
     const raw = readFileSync(filePath, 'utf-8');
-    return JSON.parse(raw);
+    parsed = JSON.parse(raw);
   } catch {
     return null;
   }
+  if (!parsed || typeof parsed !== 'object') return parsed;
+  if (!isLegacyState(parsed)) return parsed;
+  let migrated;
+  try {
+    migrated = migrateState(parsed);
+  } catch (err) {
+    // Migration must never crash the loader — surface advisory warning instead.
+    emitMigrationWarn(sessionId, err);
+    return parsed;
+  }
+  try {
+    saveSession(migrated);
+  } catch {
+    /* save failure is non-fatal — in-memory migrated state is still returned */
+  }
+  return migrated;
+}
+
+/**
+ * Determine whether a parsed state object predates {@link CURRENT_SCHEMA_VERSION}.
+ * Missing, non-numeric, or numerically-lower `schemaVersion` all count as legacy.
+ *
+ * @param {object} state
+ * @returns {boolean}
+ */
+export function isLegacyState(state) {
+  if (!state || typeof state !== 'object') return false;
+  const v = state.schemaVersion;
+  if (v === undefined || v === null) return true;
+  if (typeof v !== 'number' || !Number.isFinite(v)) return true;
+  return v < CURRENT_SCHEMA_VERSION;
+}
+
+/**
+ * Pure migration step. Produces a new state object upgraded to
+ * {@link CURRENT_SCHEMA_VERSION}; the input is not mutated.
+ *
+ * v1 → v2 changes:
+ *   - Ensure `queuedQuestions`, `checkpoints`, `timeline` are arrays
+ *     (engine.js code paths assume `.push()` works on these slots).
+ *   - Stamp `schemaVersion`.
+ *
+ * Idempotent: calling on an already-v2 object returns an equivalent v2 object.
+ *
+ * @param {object} state
+ * @returns {object} migrated state (new reference)
+ */
+export function migrateState(state) {
+  if (!state || typeof state !== 'object') {
+    throw new TypeError('migrateState: state must be an object');
+  }
+  const next = { ...state };
+  if (!Array.isArray(next.queuedQuestions)) next.queuedQuestions = [];
+  if (!Array.isArray(next.checkpoints)) next.checkpoints = [];
+  if (!Array.isArray(next.timeline)) next.timeline = [];
+  next.schemaVersion = CURRENT_SCHEMA_VERSION;
+  return next;
+}
+
+/**
+ * Best-effort migration-failure warning. Lazy-imports telemetry so the
+ * session-store ↔ telemetry pair does not form a static load cycle.
+ *
+ * @param {string} sessionId
+ * @param {Error} err
+ */
+function emitMigrationWarn(sessionId, err) {
+  // Lazy + fire-and-forget: any failure in the warning path itself is swallowed.
+  import('./telemetry.js')
+    .then(({ appendEvent }) => {
+      try {
+        appendEvent(sessionId, {
+          type: 'schema-migration-failed',
+          level: 'warn',
+          message: `schemaVersion migration aborted: ${err?.message ?? 'unknown error'}`,
+          data: { error: String(err?.message ?? err) },
+        });
+      } catch { /* ignore */ }
+    })
+    .catch(() => { /* ignore */ });
 }
 
 /**

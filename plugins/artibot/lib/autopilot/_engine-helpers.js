@@ -13,8 +13,9 @@
 
 import { newSessionId, saveSession } from './session-store.js';
 import { appendEvent } from './telemetry.js';
-import { notifyDanger, notifyPhaseProgress } from './notification.js';
+import { notifyDanger, notifyPause, notifyPhaseProgress } from './notification.js';
 import { shouldActivateTui } from './tui.js';
+import { checkBudgetThreshold, recordPhaseUsage } from './cost-tracker.js';
 
 /**
  * Build the initial autopilot session state object. Factored out of
