@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  parseGoalIntent,
   DEFAULT_AUTO_MAX_ITERATIONS,
+  parseGoalIntent,
 } from '../../lib/cognitive/goal-intent-parser.js';
 import { HARD_MAX_ITERATIONS } from '../../lib/autopilot/goal-schema.js';
 

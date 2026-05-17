@@ -3,10 +3,10 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
-  SCHEMA_VERSION_V3,
-  SUPPORTED_FROM_VERSION,
   migrateV2toV3,
   needsV3Migration,
+  SCHEMA_VERSION_V3,
+  SUPPORTED_FROM_VERSION,
 } from '../../lib/autopilot/migrate-v3.js';
 
 describe('SCHEMA_VERSION_V3', () => {

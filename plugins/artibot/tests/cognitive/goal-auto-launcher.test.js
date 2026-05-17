@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildGoalSetup,
-  selectEvaluator,
   EVALUATOR_STRATEGIES,
+  selectEvaluator,
 } from '../../lib/cognitive/goal-auto-launcher.js';
 import { HARD_MAX_ITERATIONS } from '../../lib/autopilot/goal-schema.js';
 
