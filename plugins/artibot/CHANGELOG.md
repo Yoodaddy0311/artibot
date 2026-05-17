@@ -9,6 +9,68 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.9.0] — 2026-05-17
+
+**Theme**: `/autopilot` major upgrade — Track A (UX & observability) + Track B (cost) + Track C (resilience) + Track D (pre-flight). Base `/autopilot` 입력만으로 신기능 자동 적용. Code-review 4건 fix 포함.
+
+### Added
+
+#### Track A — UX & observability surface (`/autopilot` 자동 적용)
+
+- **`lib/autopilot/notification.js`** (274 lines). 5-notifier API: `notifyCompletion`, `notifyDanger`, `notifyIteration`, `notifyPause`, `notifyPhaseProgress`. PushNotification 기반, throttle window 5분 + TTL 1h + soft-cap 1000 entries 자동 cleanup. 누락 시 silent fail (best-effort).
+- **`lib/autopilot/replay.js`** — `summarizeSession`/`renderTimelineTable` (Phase 6 REPORT 자동 inject + `/autopilot:replay {sessionId}` 지원).
+- **`lib/autopilot/phase-diff.js`** (293 lines). Checkpoint SHA → `git diff --numstat` 집계. Phase 6 REPORT 자동 inject + `/autopilot:diff {sessionId}`. `isSafeSha` 가드로 option-injection 차단, stderr 캡처 후 `phase-diff:git-diff-failed` telemetry 발신.
+- **`lib/autopilot/tui.js`** — `renderFrame`/`runTuiLoop`/`shouldActivateTui`. `--no-tui` 옵션으로 off, CI 환경 자동 감지.
+
+#### Track B — Cost & token observability
+
+- **`lib/autopilot/cost-tracker.js`** (328 lines, 5 public APIs). Phase별 token usage 집계 + budget threshold (50/80/95%) 자동 경고. `notePhaseCost`/`getSessionCost`/`checkBudgetThreshold`/`renderCostBlock`/`renderCostInline`. Report-generator + TUI에서 inline render, `_engine-helpers.js`에서 phase 종료 시 자동 호출.
+- **Tests**: `cost-tracker.test.js` 23 tests.
+
+#### Track C — Crash recovery & schema versioning
+
+- **`lib/autopilot/session-store.js`** — `CURRENT_SCHEMA_VERSION = 2` + `migrateState`/`isLegacyState`. `saveSession`이 v2 자동 stamp, `loadSession`이 legacy v1 → v2 자동 migrate.
+- **`lib/autopilot/lock.js`** — `releaseAllForSession`. Crash 후 resume 시 stale lock 일괄 해제.
+- **`lib/autopilot/_engine-helpers.js`** — `detectInterruptedPhase`/`walkTimelinePending`/`popMatchingPhase`/`buildRecoveryNote`. Resume 시 마지막 인터럽트된 phase 위치 자동 감지 + recovery note 생성.
+- **Tests**: `session-store.migration.test.js` 18 + `lock-release-all.test.js` 7 + `engine-recovery.test.js` 19 tests.
+
+#### Track D — Pre-flight gate
+
+- **`lib/autopilot/preflight.js`** (278 lines, 2 public APIs). 5 checks: `gitClean`, `lockFree`, `diskSpace`, `nodeVersion`, `goalContractLint`. `runPreflight` (전체) + `runIndividualCheck` (단건). 실패 시 Step 1.5에서 user-facing instruction 자동 생성.
+- **`_engine-helpers.js`** — `buildPreflightInstruction`/`renderPreflightSummary`. Step 1.5에서 호출, REPORT에서도 summary inject.
+- **Tests**: `preflight.test.js` 28 tests.
+
+#### Slash-command auto-integration (`commands/autopilot.md`)
+
+- **Step 1.5** — Pre-flight Gate 신규 추가 (`runPreflight` + `buildPreflightInstruction`).
+- **resume row** — `detectInterruptedPhase` + `buildRecoveryNote` 자동 호출.
+- **자동 통합 블록** — `notePhaseCost` + `checkBudgetThreshold` + `renderCostInline` 매 phase 종료 시 자동 호출.
+- **Step 5 (REPORT)** — `renderCostBlock` + `renderPreflightSummary` + `releaseAllForSession` 자동 호출.
+- **Arguments** — `--no-tui` 옵션 파싱 추가.
+- **argument-hint** — `[--no-tui]` 노출.
+
+### Fixed
+
+- **Q1 — `lib/autopilot/notification.js`**: throttle Map 무제한 성장 위험. TTL 1h + soft-cap 1000 entries cleanup을 `isThrottled` 호출 시 자동 실행. 메모리 leak 방지.
+- **Q2 — `lib/autopilot/phase-diff.js:34-36`**: `defaultGitRunner` SHA 인자가 `--option`/`/path`/whitespace 등을 통과시킬 위험. `isSafeSha` 가드 도입 (`/^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$/`). Hex SHA + DI-mock id (`sha-plan`) 통과, option-injection 차단. 실패 시 `phase-diff:unsafe-sha` telemetry.
+- **Q9 — `lib/autopilot/phase-diff.js:46-52`**: `defaultGitRunner`가 stderr를 `ignore`로 버려서 git-diff 실패 원인 진단 불가능. `stdio: ['ignore', 'pipe', 'pipe']`로 변경 + `phase-diff:git-diff-failed` telemetry에 stderr 280자 truncate 포함.
+- **W1 — `commands/autopilot.md:55`**: `--no-tui` 옵션이 Arguments 파싱 목록에서 누락. 추가.
+
+### Verification
+
+- **`tests/autopilot/`** → **465/465 passed** (cost-tracker 23 + preflight 28 + engine-helpers 9 + migration 18 + lock-release-all 7 + recovery 19 + phase-diff 32 + notification 15 + 기존 314).
+- **Plugin-wide** → **8 272/8 276 passed** (4 fail은 v4.8.4 baseline pre-existing, 이번 작업 regression 아님).
+- **ESLint** → autopilot subsystem 0 errors.
+- **`engine.js`** → 799/800 lines (cap preserved). 신규 wire-in은 모두 slash command level (`commands/autopilot.md`) + `_engine-helpers.js`로 처리.
+- **Barrel exports** → `lib/autopilot/index.js`에서 11 신규 export runtime-resolvable 확인.
+
+### Audit Trail
+
+- Code review: 2-stage (spec-reviewer + quality-reviewer) 통과. Q1/Q2/Q9 + W1 4건 fix 반영.
+- 3 parallel agents (Track B/C/D) 동시 작업 — `_engine-helpers.js` 15 functions 무손실 보존 확인.
+
+---
+
 ## [4.8.4] — 2026-05-17
 
 **Theme**: Autopilot cleanup — e2e regression fix + shared spawn mocking helper + System1 cache bounds + dead-code removal.

@@ -1,6 +1,6 @@
 ---
 description: (Artibot) Autonomous long-running mode with PRD-first workflow, parallel execution, cross-check, verification, and completion report
-argument-hint: <task description> [--max 4h] [--budget 2000000]
+argument-hint: <task description> [--max 4h] [--budget 2000000] [--no-tui]
 allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, Task, TaskCreate, TaskUpdate, TaskList, TeamCreate, SendMessage, TaskGet, TeamDelete]
 toolset: team
 ---
