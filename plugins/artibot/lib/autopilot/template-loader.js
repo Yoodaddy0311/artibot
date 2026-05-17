@@ -20,7 +20,7 @@
  * @module lib/autopilot/template-loader
  */
 
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseSimpleYaml } from './profile-renderer.js';

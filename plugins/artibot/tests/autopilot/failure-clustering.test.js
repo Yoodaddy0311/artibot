@@ -6,9 +6,9 @@
 
 import { describe, expect, it } from 'vitest';
 import {
-  SUGGEST_FIX_MIN_COUNT,
   clusterFailures,
   extractErrorSignature,
+  SUGGEST_FIX_MIN_COUNT,
   suggestFix,
 } from '../../lib/autopilot/failure-clustering.js';
 

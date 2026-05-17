@@ -172,3 +172,122 @@ export {
   renderCostBlock,
   renderCostInline,
 } from './cost-tracker.js';
+
+// v4.10.0 — Track E: Multi-goal queue & scheduling
+export {
+  CURRENT_QUEUE_SCHEMA_VERSION,
+  GOAL_STATUS,
+  dequeueGoal,
+  enqueueGoal,
+  finalizeGoal,
+  getDefaultQueueDir,
+  getQueuePath,
+  listQueue,
+  newQueueId,
+  removeFromQueue,
+  runQueue,
+  setQueuePaused,
+} from './goal-queue.js';
+
+export {
+  isInWindow,
+  nextWindowStart,
+  parseWindow,
+} from './schedule-window.js';
+
+export {
+  classifyComplexity,
+  predictCost,
+} from './cost-predictor.js';
+
+export {
+  CURRENT_BUDGET_SCHEMA_VERSION,
+  getBudgetPath,
+  getGoalBudget,
+  getQueueTotal,
+  recordGoalUsage,
+} from './goal-budget-aggregator.js';
+
+// v4.10.0 — Track F: Resume granularity & rollback
+export {
+  rollbackToLastGreen,
+  listRollbackTargets,
+} from './rollback.js';
+
+export {
+  recordSubCheckpoint,
+  listSubCheckpoints,
+} from './sub-checkpoint.js';
+
+export {
+  migrateV2toV3,
+  needsV3Migration,
+  SCHEMA_VERSION_V3,
+  SUPPORTED_FROM_VERSION,
+} from './migrate-v3.js';
+
+export {
+  computeMachineId,
+  recordMachineId,
+  detectMachineDrift,
+  prepareRebase,
+} from './cross-machine.js';
+
+export {
+  createDryRunGitRunner,
+  wrapPhaseForDryRun,
+} from './dry-run.js';
+
+export {
+  replayPhase,
+} from './phase-replay.js';
+
+// v4.10.0 — Track G: Self-improvement & learning
+export {
+  SUGGEST_FIX_MIN_COUNT,
+  extractErrorSignature,
+  clusterFailures,
+  suggestFix,
+} from './failure-clustering.js';
+
+export {
+  COMPLEXITY_LEVELS,
+  SKIPPABLE_PHASES,
+  classifyTaskComplexity,
+  recommendSkippablePhases,
+} from './smart-skip.js';
+
+export {
+  DEFAULT_SCAN_LIMIT,
+  scanRecentSessions,
+  extractSuccessPatterns,
+  recommendDefaults,
+} from './cross-session-learner.js';
+
+export {
+  getTemplatesDir,
+  loadTemplate,
+  listTemplates,
+  clearTemplateCache,
+} from './template-loader.js';
+
+// v4.10.0 — Track H: Observability & auto-PR
+export {
+  renderFlamegraph,
+} from './flamegraph.js';
+
+export {
+  verifyRepoOwnership,
+  createAutoPR,
+} from './auto-pr.js';
+
+export {
+  createEventStream,
+  LOCAL_HOST,
+} from './dashboard-stream.js';
+
+export {
+  extractGoalFields,
+  extractPhaseFields,
+  computeDrift,
+} from './goal-drift-detector.js';

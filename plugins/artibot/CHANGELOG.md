@@ -9,6 +9,83 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.10.0] — 2026-05-17
+
+**Theme**: `/autopilot` 차기 메이저 업그레이드 — Track E (multi-goal queue) + Track F (resume & rollback) + Track G (self-improvement) + Track H (observability & auto-PR). **322 tests added** across 18 new lib modules. 4-agent 병렬 구현 + Claude `/goal` 네이티브 기능과의 통합 설계.
+
+### Added
+
+#### Track E — Multi-goal queue & scheduling (4 lib + 1 command, 90 tests)
+
+- **`lib/autopilot/goal-queue.js`** (370 lines). FIFO multi-goal queue, per-goal state (pending/running/completed/failed/paused), atomic write to `~/.artibot/queues/{id}.json`. 12 public APIs: `enqueueGoal`/`dequeueGoal`/`listQueue`/`removeFromQueue`/`runQueue`/`setQueuePaused`/`finalizeGoal`/`getDefaultQueueDir`/`getQueuePath`/`newQueueId` + `CURRENT_QUEUE_SCHEMA_VERSION`/`GOAL_STATUS`. DI for `now()`/storeDir.
+- **`lib/autopilot/schedule-window.js`** (145 lines). Pure HH:MM-HH:MM 파서 + wrap-around-aware `isInWindow`/`nextWindowStart`/`parseWindow`. 야간 자동 작업 (`--window 22:00-07:00`) 지원.
+- **`lib/autopilot/cost-predictor.js`** (206 lines). PRE-INTAKE token/duration 예측. 과거 events.ndjson + complexity multiplier 기반, zero-history 시 graceful fallback. `predictCost`/`classifyComplexity`.
+- **`lib/autopilot/goal-budget-aggregator.js`** (281 lines). per-goal budget tracker. cost-tracker.js를 modify 하지 않고 compose. queue-namespaced state at `{id}.budget.json`. 5 APIs.
+- **`commands/autopilot-queue.md`** (129 lines). `/autopilot:queue add|run|list|remove|pause|resume` 신규 서브커맨드.
+
+#### Track F — Resume granularity & rollback (6 lib, 84 tests)
+
+- **`lib/autopilot/rollback.js`** (174 lines). Phase-level rollback to last-green checkpoint. Worktree guard (`git rev-parse --show-toplevel`) + SHA validator 재사용. `rollbackToLastGreen`/`listRollbackTargets`.
+- **`lib/autopilot/sub-checkpoint.js`** (122 lines). Sub-step granularity. 기존 `state.subCheckpoints[]` 필드 추가 (v2 schema 비파괴). `recordSubCheckpoint`/`listSubCheckpoints`.
+- **`lib/autopilot/migrate-v3.js`** (71 lines). Pure v2→v3 schema migration. session-store.js 미수정 — orchestrator가 단계별 wire-in. `migrateV2toV3`/`needsV3Migration`/`SCHEMA_VERSION_V3`.
+- **`lib/autopilot/cross-machine.js`** (156 lines). Machine-id stamping (`os.hostname()` + user), drift 감지, rebase command planner (실행 안 함, plan array 반환). v4.8 sibling-PC drift 근본 해결.
+- **`lib/autopilot/dry-run.js`** (137 lines). Logging-only git runner + write-blocking fs facade HOF. `createDryRunGitRunner`/`wrapPhaseForDryRun`.
+- **`lib/autopilot/phase-replay.js`** (170 lines). 과거 phase를 새 worktree에서 재실행, dry-run default. `replayPhase`.
+
+#### Track G — Self-improvement & learning (4 lib + 3 YAML, 75 tests)
+
+- **`lib/autopilot/failure-clustering.js`** (282 lines). events.ndjson 누적 → signature 정규화 (paths/line-numbers/hex strip) → 3+회 동일 패턴 발견 시 deterministic fix suggestion. LLM 호출 없음. `extractErrorSignature`/`clusterFailures`/`suggestFix`.
+- **`lib/autopilot/smart-skip.js`** (206 lines). Task complexity classifier (trivial/simple/medium/complex). Trivial → CROSS_CHECK + IMPROVE skip 권장. `classifyTaskComplexity`/`recommendSkippablePhases`.
+- **`lib/autopilot/cross-session-learner.js`** (248 lines). 최근 N session 스캔 (DI sessionLoader) → success 패턴 추출 → 신규 goal 기본값 추천. `scanRecentSessions`/`extractSuccessPatterns`/`recommendDefaults`.
+- **`lib/autopilot/template-loader.js`** (172 lines). Goal Contract YAML template loader, cached, path-traversal guard. `loadTemplate`/`listTemplates`/`clearTemplateCache`.
+- **`lib/autopilot/contract-templates/{bugfix,refactor,feature}.yaml`** — pre-made Goal Contract templates.
+
+#### Track H — Observability & auto-PR (4 lib, 73 tests)
+
+- **`lib/autopilot/flamegraph.js`** (184 lines). ASCII phase-profile bar chart, markdown-embeddable, ANSI 없음. `renderFlamegraph`.
+- **`lib/autopilot/auto-pr.js`** (228 lines). `gh repo view` ownership gate + `gh pr create` via execFileSync (shell:false). **DATA POLICY 가드**: `canPush !== true` 시 reject, `--repo` 옵션으로 타 repo redirect 차단. `verifyRepoOwnership`/`createAutoPR`.
+- **`lib/autopilot/dashboard-stream.js`** (187 lines). SSE event stream. **DATA POLICY 가드**: `LOCAL_HOST = '127.0.0.1'` hardcoded, `opts.host` 무시. 15s heartbeat + events.ndjson tail. `createEventStream`.
+- **`lib/autopilot/goal-drift-detector.js`** (177 lines). Goal Contract vs phase output 비교 → `driftPct`/`missing[]`/`extra[]`/`inScope[]`. Pure function. `extractGoalFields`/`extractPhaseFields`/`computeDrift`.
+
+#### Claude `/goal` 통합 설계 (별도 design doc)
+
+- Claude Code v2.1.139+ 네이티브 `/goal` 기능 분석 완료. Auto-invoke DNA에 맞춰 **Option B (Cognitive Router → intent detection → 자동 setup)** 설계. 사용자는 일반 prompt만 작성하면 자동 goal 모드 활성화. Hybrid evaluator (Haiku + validationCommand) 권장. 본 릴리즈는 design only — 구현은 v4.11.0 후속.
+
+### Changed
+
+- **`lib/autopilot/index.js`** — 25+ 신규 symbols barrel re-export 추가. Track E/F/G/H 4 섹션 주석으로 그룹.
+
+### Verification
+
+- **`tests/autopilot/`** → **787/787 passed** (50 test files). 신규 +322 tests (Track E 90 + F 84 + G 75 + H 73), 기존 465 그대로.
+- **ESLint** → autopilot subsystem 0 errors / 0 warnings (18 신규 lib + 18 신규 test).
+- **`engine.js`** → 799/800 (cap 유지, 미수정).
+- **`session-store.js`** → 미수정 (migrate-v3는 분리 모듈, 다음 릴리즈에서 wire-in).
+- **Barrel runtime resolve** → 25 신규 export 전수 확인.
+
+### DATA POLICY 준수
+
+- 모든 신규 모듈 로컬 파일/git 만 사용. 외부 HTTP/DB/webhook 0건.
+- `auto-pr.js`: user-owned repo만 (gh CLI ownership check), `--repo` 옵션 차단.
+- `dashboard-stream.js`: 127.0.0.1 hardcoded, 외부 노출 불가.
+- `cross-machine.js`: `prepareRebase`는 command plan array만 반환, 실행 안 함.
+
+### Architecture
+
+- 4-agent 병렬 구현 (E/F/G/H backend-developer + claude-code-guide). FORBIDDEN files (engine/index/autopilot.md/cost-tracker/session-store) 무수정 보장 → 충돌 0건.
+- Functions <50 lines, files <800 lines, immutable patterns, atomic file writes, DI-first.
+- 5-Layer 아키텍처 준수: 신규 모듈 모두 Auxiliary 계층 (`lib/autopilot/`).
+
+### Deferred to v4.11.0
+
+- Claude `/goal` 통합 구현 (Cognitive router intent detection)
+- `commands/autopilot.md` wire-in (Track E/F/G/H 자동 적용 블록)
+- `bin/artibot-dashboard.mjs` SSE 연결
+- `session-store.js` v3 schema bump + migrate-v3 chain
+- `engine.js` runQueue 실제 startAutopilot 호출 연결
+
+---
+
 ## [4.9.0] — 2026-05-17
 
 **Theme**: `/autopilot` major upgrade — Track A (UX & observability) + Track B (cost) + Track C (resilience) + Track D (pre-flight). Base `/autopilot` 입력만으로 신기능 자동 적용. Code-review 4건 fix 포함.

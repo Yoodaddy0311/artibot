@@ -5,10 +5,10 @@
 
 import { describe, expect, it } from 'vitest';
 import {
-  COMPLEXITY_LEVELS,
-  SKIPPABLE_PHASES,
   classifyTaskComplexity,
+  COMPLEXITY_LEVELS,
   recommendSkippablePhases,
+  SKIPPABLE_PHASES,
 } from '../../lib/autopilot/smart-skip.js';
 
 describe('classifyTaskComplexity — empty / invalid', () => {
