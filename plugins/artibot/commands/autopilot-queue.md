@@ -34,12 +34,34 @@ Multi-goal scheduling layer on top of `/autopilot`. Enqueue several long-running
 
 ### Step 1 — Module Import
 
+**반드시 `CLAUDE_PLUGIN_ROOT` 환경변수 기준 절대경로**로 해석한다 (cwd 상대경로 금지 — 타 프로젝트에서 호출 시 "엔진 부재"로 실패). `/autopilot` Step 1과 동일한 resolver 사용 (3-location 폴백: env-var → marketplace mirror scan → fail-fast):
+
 ```js
-const queue = await import(toFileUrl('plugins/artibot/lib/autopilot/goal-queue.js'));
-const window = await import(toFileUrl('plugins/artibot/lib/autopilot/schedule-window.js'));
-const predictor = await import(toFileUrl('plugins/artibot/lib/autopilot/cost-predictor.js'));
-const budget = await import(toFileUrl('plugins/artibot/lib/autopilot/goal-budget-aggregator.js'));
-const engine = await import(toFileUrl('plugins/artibot/lib/autopilot/index.js'));
+import path from 'node:path';
+import fs from 'node:fs';
+// toFileUrl: 한글 경로 안전 (utils/index.js 참고)
+const toFileUrl = (p) => {
+  const f = p.replace(/\\/g, '/');
+  return /^[A-Z]:/i.test(f) ? `file:///${f}` : `file://${f}`;
+};
+// 3 가능 경로 — ~/.claude/artibot 은 install.sh의 runtime data dir이라 lib/ 없음, 후보 제외
+const home = process.env.USERPROFILE ?? process.env.HOME ?? '';
+const candidates = [process.env.CLAUDE_PLUGIN_ROOT].filter(Boolean);
+const mpDir = path.join(home, '.claude', 'plugins', 'marketplaces');
+if (fs.existsSync(mpDir)) {
+  for (const mp of fs.readdirSync(mpDir)) {
+    candidates.push(path.join(mpDir, mp, 'plugins', 'artibot'));
+  }
+}
+const pluginRoot = candidates.find((c) => fs.existsSync(path.join(c, 'lib/autopilot/index.js')));
+if (!pluginRoot) throw new Error('Artibot engine not found. Set CLAUDE_PLUGIN_ROOT or install via marketplace.');
+const lib = (rel) => toFileUrl(path.join(pluginRoot, 'lib/autopilot', rel));
+
+const queue = await import(lib('goal-queue.js'));
+const window = await import(lib('schedule-window.js'));
+const predictor = await import(lib('cost-predictor.js'));
+const budget = await import(lib('goal-budget-aggregator.js'));
+const engine = await import(lib('index.js'));
 ```
 
 ### Step 2 — Subcommand Dispatch

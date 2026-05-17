@@ -123,9 +123,30 @@ Goal Contract 슬롯이 없는 PRD는 기존 7-phase 단방향 흐름 (Phase 0~6
 
 ### Step 1 — Engine Import & Argument Parse
 
-1. `lib/autopilot/index.js` 동적 import (Windows 한글 경로는 `lib/core/utils/index.js`의 `toFileUrl()` 사용):
+1. `lib/autopilot/index.js` 동적 import — **반드시 `CLAUDE_PLUGIN_ROOT` 환경변수 기준 절대경로**로 해석한다 (cwd 상대경로 금지 — 타 프로젝트에서 호출 시 "엔진 부재"로 실패). Claude Code가 플러그인 커맨드 실행 시 `CLAUDE_PLUGIN_ROOT`를 주입. 미주입 시 마켓플레이스 mirror를 스캔하고, 그래도 못 찾으면 fail-fast로 명확한 에러:
    ```js
-   const engine = await import(toFileUrl('plugins/artibot/lib/autopilot/index.js'));
+   import path from 'node:path';
+   import fs from 'node:fs';
+   // toFileUrl: 한글 경로 안전 (pathToFileURL의 percent-encoding 회피 — utils/index.js 참고)
+   const toFileUrl = (p) => {
+     const f = p.replace(/\\/g, '/');
+     return /^[A-Z]:/i.test(f) ? `file:///${f}` : `file://${f}`;
+   };
+   // Plugin location candidates (3 가능 경로):
+   //   1. CLAUDE_PLUGIN_ROOT (Claude Code 주입 — 정상 경로)
+   //   2. ~/.claude/plugins/marketplaces/<id>/plugins/artibot/ (marketplace mirror)
+   //   3. (NOT ~/.claude/artibot — install.sh가 만드는 runtime data dir, lib/ 없음)
+   const home = process.env.USERPROFILE ?? process.env.HOME ?? '';
+   const candidates = [process.env.CLAUDE_PLUGIN_ROOT].filter(Boolean);
+   const mpDir = path.join(home, '.claude', 'plugins', 'marketplaces');
+   if (fs.existsSync(mpDir)) {
+     for (const mp of fs.readdirSync(mpDir)) {
+       candidates.push(path.join(mpDir, mp, 'plugins', 'artibot'));
+     }
+   }
+   const pluginRoot = candidates.find((c) => fs.existsSync(path.join(c, 'lib/autopilot/index.js')));
+   if (!pluginRoot) throw new Error('Artibot engine not found. Set CLAUDE_PLUGIN_ROOT or install via marketplace.');
+   const engine = await import(toFileUrl(path.join(pluginRoot, 'lib/autopilot/index.js')));
    ```
 2. `$ARGUMENTS` 파싱하여 `{ task, mode, options }` 분해:
    - `mode`: `default` | `night` | `plan` | `resume` | `status` | `abort`

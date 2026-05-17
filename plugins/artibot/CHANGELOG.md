@@ -9,6 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.11.1] — 2026-05-18
+
+**Theme**: `/autopilot` cross-project resolver hotfix — 타 프로젝트에서 호출 시 "엔진 부재"로 실패하던 버그 수정. Markdown-only 변경, lib 코드 무수정.
+
+### Fixed
+
+- **`commands/autopilot.md`**, **`commands/autopilot-queue.md`** — Step 1 Engine Import 블록의 `toFileUrl('plugins/artibot/lib/autopilot/...')` cwd-상대경로를 `CLAUDE_PLUGIN_ROOT` 기반 절대경로로 교체. 외부 프로젝트 cwd에서는 해당 상대경로가 존재하지 않아 dynamic `import()`가 실패하고 "엔진 부재"로 표시되던 회귀. **3-location fallback**으로 강건화:
+  1. `process.env.CLAUDE_PLUGIN_ROOT` (Claude Code가 플러그인 커맨드 실행 시 주입 — 정상 경로)
+  2. `~/.claude/plugins/marketplaces/<id>/plugins/artibot/` (env 미주입 시 마켓플레이스 mirror 자동 스캔, 검증: `lib/autopilot/index.js` 존재)
+  3. 후보 전부 실패 시 `throw new Error('Artibot engine not found. Set CLAUDE_PLUGIN_ROOT or install via marketplace.')` — silent broken state 차단.
+- `~/.claude/artibot/`은 `install.sh`가 만드는 runtime data dir이며 `lib/`가 없으므로 후보에서 의도적 제외 (코드 주석으로 명시).
+- `toFileUrl()` 한글 경로 안전 helper를 인라인으로 정의 — `lib/core/utils`에서 import할 때 발생하던 chicken-and-egg 의존성 회피.
+- `autopilot-queue.md`는 5개 lib 모듈 import를 `lib(rel)` 헬퍼로 DRY 정리.
+
+### Verification
+
+- code-reviewer 2-stage 검수 통과 (1차 BLOCKER `~/.claude/plugins/artibot` 가짜 경로 → 마켓플레이스 mirror 스캔으로 수정 후 2차 APPROVE).
+- 마켓플레이스 mirror 실존 확인: `~/.claude/plugins/marketplaces/artibot/plugins/artibot/lib/autopilot/index.js` ✓.
+- 잔존 cwd-상대 import 0건 (`grep -rn "toFileUrl('plugins/artibot/" commands/`).
+
+### Migration
+
+없음. Markdown 커맨드 파일만 변경, 외부 API/스키마/db 미변경. 기존 세션 resume 무영향.
+
+---
+
 ## [4.11.0] — 2026-05-17
 
 **Theme**: Auto-invoke layer for v4.10.0 — 비개발자도 슬래시 커맨드 없이 v4.10.0 신기능을 자연어 한 줄로 발동. **310 tests added** across 12 new lib modules + 1 hook. 4-agent 병렬 구현 (Track I/J/K/L).
