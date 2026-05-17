@@ -14,6 +14,16 @@ import { dirname } from 'node:path';
 import { getPluginRoot } from '../core/platform.js';
 
 /**
+ * Current persisted-state schema version. Bump when the on-disk shape
+ * gains a required field or changes semantics. Older state files are
+ * upgraded transparently in {@link loadSession} via {@link migrateState}.
+ *
+ * v1: pre-versioned legacy state (no `schemaVersion` field).
+ * v2: guarantees `queuedQuestions`, `checkpoints`, `timeline` arrays.
+ */
+export const CURRENT_SCHEMA_VERSION = 2;
+
+/**
  * Resolve the autopilot runtime directory inside the plugin root.
  * Path is constructed via path.join so Korean / spaced paths are preserved.
  * @returns {string} absolute directory path
@@ -36,13 +46,22 @@ export function getSessionPath(sessionId) {
 
 /**
  * Atomically persist a session state object.
- * Creates parent dir if missing.
+ * Creates parent dir if missing. Stamps {@link CURRENT_SCHEMA_VERSION} when
+ * the caller has not already supplied a `schemaVersion` field.
+ *
+ * Failure of either JSON.stringify or writeFileSync triggers tmp-file
+ * cleanup before re-throwing, so a corrupt half-written file is never
+ * left behind on disk (atomic rename is the only path to the final name).
+ *
  * @param {object} state - Session state matching PRD section 13.4
  * @returns {string} absolute file path written
  */
 export function saveSession(state) {
   if (!state || typeof state !== 'object' || !state.sessionId) {
     throw new TypeError('state.sessionId is required');
+  }
+  if (state.schemaVersion === undefined || state.schemaVersion === null) {
+    state.schemaVersion = CURRENT_SCHEMA_VERSION;
   }
   const filePath = getSessionPath(state.sessionId);
   const dir = dirname(filePath);
@@ -52,11 +71,18 @@ export function saveSession(state) {
     if (err.code !== 'EEXIST') throw err;
   }
   const tmp = `${filePath}.tmp.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}`;
+  let payload;
   try {
-    writeFileSync(tmp, JSON.stringify(state, null, 2), 'utf-8');
+    payload = JSON.stringify(state, null, 2);
+  } catch (err) {
+    // stringify failed (e.g., circular ref) — nothing was written, nothing to clean.
+    throw err;
+  }
+  try {
+    writeFileSync(tmp, payload, 'utf-8');
     renameSync(tmp, filePath);
   } catch (err) {
-    try { unlinkSync(tmp); } catch { /* ignore */ }
+    try { unlinkSync(tmp); } catch { /* ignore — tmp may not exist if writeFileSync threw early */ }
     throw err;
   }
   return filePath;
