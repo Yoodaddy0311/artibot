@@ -13,6 +13,7 @@ import { getPluginRoot } from '../core/platform.js';
 import { loadSession } from './session-store.js';
 import { renderProfile } from './profile-renderer.js';
 import { renderTimelineTable, summarizeSession } from './replay.js';
+import { diffSession, renderDiffTable } from './phase-diff.js';
 
 /**
  * @returns {string} project root one level above plugin root
@@ -103,6 +104,18 @@ export function renderReport(state) {
     timelineBlock = '';
   }
 
+  // Inject Phase Diff (auto-generated from checkpoint SHAs via git diff
+  // --numstat). Local read-only; failures degrade to empty so legacy callers
+  // without git history never break.
+  let diffBlock = '';
+  try {
+    if (state.sessionId) {
+      diffBlock = renderDiffTable(diffSession(state.sessionId, { state }));
+    }
+  } catch {
+    diffBlock = '';
+  }
+
   return `# Autopilot 완료 보고서
 
 - **세션**: \`${state.sessionId || '-'}\`
@@ -123,7 +136,7 @@ ${state.prdPath ? `- [${state.prdPath}](${state.prdPath})` : '_(PRD 미생성)_'
 ## 3. Phase별 결과
 
 ${phaseTable}
-${timelineBlock ? `\n${timelineBlock}\n` : ''}
+${timelineBlock ? `\n${timelineBlock}\n` : ''}${diffBlock ? `\n${diffBlock}\n` : ''}
 ## 4. 변경 사항 (커밋)
 
 ${commitList}
@@ -255,6 +268,38 @@ function buildRiskFields(state) {
 }
 
 /**
+ * Build the timeline + diff markdown blocks for a session (profile data).
+ * Failures collapse to 'N/A' so templates always have a printable value.
+ * @param {object} s - normalized state
+ * @returns {{ phaseTimeline: string, phaseDiff: string }}
+ */
+function buildTimelineFields(s) {
+  let phaseTimeline = 'N/A';
+  try {
+    if (s.sessionId) {
+      const summary = summarizeSession(s.sessionId);
+      if (summary && Array.isArray(summary.phases) && summary.phases.length > 0) {
+        phaseTimeline = renderTimelineTable(summary);
+      }
+    }
+  } catch {
+    phaseTimeline = 'N/A';
+  }
+  let phaseDiff = 'N/A';
+  try {
+    if (s.sessionId) {
+      const diff = diffSession(s.sessionId, { state: s });
+      if (diff && Array.isArray(diff.phases) && diff.phases.length > 0) {
+        phaseDiff = renderDiffTable(diff);
+      }
+    }
+  } catch {
+    phaseDiff = 'N/A';
+  }
+  return { phaseTimeline, phaseDiff };
+}
+
+/**
  * Build the full data object consumed by every profile template.
  * Missing fields collapse to 'N/A' / '없음' so assertNoUnfilled passes.
  * @param {object} state
@@ -270,17 +315,7 @@ export function buildReportData(state) {
   const crossCheckTable = s.crossCheck
     ? table(['Item', 'Value'], [['Verdict', s.crossCheck.verdict || '-'], ['Notes', s.crossCheck.notes || '-']])
     : 'N/A';
-  let phaseTimeline = 'N/A';
-  try {
-    if (s.sessionId) {
-      const summary = summarizeSession(s.sessionId);
-      if (summary && Array.isArray(summary.phases) && summary.phases.length > 0) {
-        phaseTimeline = renderTimelineTable(summary);
-      }
-    }
-  } catch {
-    phaseTimeline = 'N/A';
-  }
+  const { phaseTimeline, phaseDiff } = buildTimelineFields(s);
   return {
     ...buildSessionMeta(state),
     ...buildPhaseFields(phases),
@@ -288,6 +323,7 @@ export function buildReportData(state) {
     ...buildRiskFields(state),
     crossCheckTable,
     phaseTimeline,
+    phaseDiff,
     nextAction: s.nextAction || (status === 'COMPLETED' ? '추가 작업 없음. 사용자 검토 권장.' : '세션 상태 검토 권장.'),
     kpiSummary: s.kpiSummary || `Phases ${phases.length}, Improvements ${improvements.length}, Risks ${risks.length}`,
     kpiSimple: s.kpiSimple || `${phases.length}개 단계 · ${improvements.length}개 개선 · ${risks.length}개 리스크`,

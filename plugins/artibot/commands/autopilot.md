@@ -21,6 +21,7 @@ Autonomous long-running mode for **3~4시간 자리 비움 / 야간 자율 작�
 | `/autopilot:abort <session-id>` | 마지막 SHA 보존 후 graceful shutdown | safety check 후 종료 |
 | `/autopilot:tail [session-id] [--lines N]` | Live Telemetry — 마지막 N개 이벤트 표 출력 (기본 50, --follow 시 1초 폴링) | read-only |
 | `/autopilot:replay <session-id>` | 과거 세션 phase timeline 표 출력 (events.ndjson 집계 — 소요/이벤트/warn/error/retry/bottleneck) | read-only |
+| `/autopilot:diff <session-id>` | 과거 세션 phase별 git diff 요약 표 출력 (checkpoint SHA 경계 간 `git diff --numstat` 집계 — files/+ins/-del/top changes) | read-only |
 | `/autopilot:list [--orphans]` | 활성 세션 + worktree + lock 상태 표 출력 | read-only |
 | `/autopilot:goal status <session-id>` | **v4.6.0 Phase 3** — Goal Contract 상태 조회 (paused, iterations, lastEvaluation, lastAction) | read-only |
 | `/autopilot:goal pause <session-id> [--reason "..."]` | Goal evaluator만 일시정지 (세션은 계속 실행). EVALUATE → REPORT pass-through | mutate (orthogonal to session pause) |

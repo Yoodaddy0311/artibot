@@ -126,6 +126,11 @@ export {
 } from './replay.js';
 
 export {
+  diffSession,
+  renderDiffTable,
+} from './phase-diff.js';
+
+export {
   getMemoryDir,
   getFeaturePath,
   extractKey,

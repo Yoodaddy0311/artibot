@@ -147,7 +147,7 @@ export function notifyPause(sessionId, reason) {
 export function notifyDanger(sessionId, { riskType, detail } = {}) {
   const safeRisk = typeof riskType === 'string' && riskType.length > 0 ? riskType : 'unknown-risk';
   const title = `Autopilot DANGER: ${safeRisk}`;
-  const detailText = detail == null
+  const detailText = detail === null || detail === undefined
     ? ''
     : typeof detail === 'string'
       ? detail
