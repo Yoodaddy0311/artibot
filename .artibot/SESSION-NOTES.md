@@ -96,3 +96,23 @@
 <!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
 
 ---
+
+## 2026-05-17 00:37 UTC · `artibot/master`
+
+- **Commits** (1):
+  - `bc774ac` release(v4.8.4): autopilot cleanup — e2e fix + spawn-mock helper + system1 LRU + dead-code removal
+- **Files touched**: 8
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-05-17 00:38 UTC · `artibot/master`
+
+- **Commits** (1):
+  - `03fd193` chore: artibot session close [2026-05-17 00:37:19]
+- **Files touched**: 1
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
