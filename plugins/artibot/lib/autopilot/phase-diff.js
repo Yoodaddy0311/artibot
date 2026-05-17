@@ -18,12 +18,27 @@
 
 import { execFileSync } from 'node:child_process';
 import { loadSession } from './session-store.js';
+import { appendEvent } from './telemetry.js';
 
 const TOP_FILES_PER_PHASE = 5;
 
 /**
+ * SHA validator — guards execFileSync args against option-injection.
+ * Accepts alphanumeric + `-`/`_`, must NOT start with `-`, max 128 chars.
+ * This covers real hex SHAs and tolerates DI-mock identifiers (e.g. `sha-plan`).
+ * Rejects option-like args (`--upload-pack=...`), paths (`/`, `..`), empty
+ * strings, and anything with whitespace or shell metacharacters.
+ * @param {unknown} sha
+ * @returns {boolean}
+ */
+function isSafeSha(sha) {
+  return typeof sha === 'string' && /^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$/.test(sha);
+}
+
+/**
  * Default git runner — local read-only execFileSync.
- * Throws on non-zero exit; callers catch and degrade gracefully.
+ * stderr is captured (pipe, not ignored) so callers can surface failure
+ * cause via telemetry. Throws on non-zero exit; callers catch and degrade.
  * @param {string[]} args
  * @param {string} cwd
  * @returns {string} stdout
@@ -32,7 +47,7 @@ function defaultGitRunner(args, cwd) {
   return execFileSync('git', args, {
     cwd,
     encoding: 'utf-8',
-    stdio: ['ignore', 'pipe', 'ignore'],
+    stdio: ['ignore', 'pipe', 'pipe'],
   });
 }
 
@@ -106,6 +121,27 @@ function buildPhasePairs(checkpoints) {
 }
 
 /**
+ * Emit a phase-diff telemetry event without ever throwing into hot path.
+ * @param {string} sessionId
+ * @param {string} phase
+ * @param {string} type
+ * @param {string} message
+ */
+function safeTelemetry(sessionId, phase, type, message) {
+  if (!sessionId) return;
+  try {
+    appendEvent(sessionId, {
+      phase,
+      type: `phase-diff:${type}`,
+      level: 'warn',
+      message,
+    });
+  } catch {
+    /* telemetry best-effort — never break diff computation */
+  }
+}
+
+/**
  * Compute a single phase's diff entry using the provided git runner.
  * Failures degrade to an empty-but-present entry so caller can omit later.
  * @param {{phase: string, fromSha: string, toSha: string}} pair
@@ -113,7 +149,7 @@ function buildPhasePairs(checkpoints) {
  * @param {string} cwd
  * @returns {{phase, fromSha, toSha, filesChanged, insertions, deletions, topFiles}}
  */
-function computePhaseEntry(pair, gitRunner, cwd) {
+function computePhaseEntry(pair, gitRunner, cwd, sessionId) {
   const base = {
     phase: pair.phase,
     fromSha: pair.fromSha,
@@ -123,10 +159,18 @@ function computePhaseEntry(pair, gitRunner, cwd) {
     deletions: 0,
     topFiles: [],
   };
+  if (!isSafeSha(pair.fromSha) || !isSafeSha(pair.toSha)) {
+    safeTelemetry(sessionId, pair.phase, 'unsafe-sha', `${pair.fromSha} → ${pair.toSha}`);
+    return base;
+  }
   let stdout;
   try {
-    stdout = gitRunner(['diff', '--numstat', pair.fromSha, pair.toSha], cwd);
-  } catch {
+    stdout = gitRunner(['diff', '--numstat', pair.fromSha, pair.toSha, '--'], cwd);
+  } catch (err) {
+    const stderr = err && typeof err === 'object' && err.stderr
+      ? String(err.stderr).slice(0, 280).trim()
+      : (err && err.message ? String(err.message).slice(0, 280) : 'git-diff-failed');
+    safeTelemetry(sessionId, pair.phase, 'git-diff-failed', stderr);
     return base;
   }
   const files = parseNumstat(stdout);
@@ -193,7 +237,7 @@ export function diffSession(sessionId, opts = {}) {
   let totalInsertions = 0;
   let totalDeletions = 0;
   for (const pair of pairs) {
-    const entry = computePhaseEntry(pair, gitRunner, cwd);
+    const entry = computePhaseEntry(pair, gitRunner, cwd, sessionId);
     if (entry.filesChanged === 0) continue; // omit no-change phases
     phases.push(entry);
     totalFilesChanged += entry.filesChanged;

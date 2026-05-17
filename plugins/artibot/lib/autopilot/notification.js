@@ -19,13 +19,40 @@ import { loadSession, saveSession } from './session-store.js';
 /** @type {number} 5-minute throttle window for non-danger notifications. */
 export const THROTTLE_WINDOW_MS = 5 * 60 * 1000;
 
+/** @type {number} Cleanup trigger: entries beyond this trip a lazy sweep. */
+const THROTTLE_MAP_SOFT_CAP = 1000;
+/** @type {number} Sweep threshold: entries older than this age are evicted. */
+const THROTTLE_ENTRY_TTL_MS = 60 * 60 * 1000; // 1h
+
 /**
  * Module-level throttle gate. Map<`${sessionId}::${type}`, lastTsMs>.
  * Kept in-memory only — restarts reset throttle, which is acceptable
  * because we never want to silently drop events after a process restart.
+ *
+ * Memory-bound: lazy cleanup triggers when map.size > THROTTLE_MAP_SOFT_CAP,
+ * evicting entries whose ts is older than THROTTLE_ENTRY_TTL_MS. Long-running
+ * night sessions with many ended-but-not-cleaned sessions stay bounded.
  * @type {Map<string, number>}
  */
 const _throttleMap = new Map();
+
+/**
+ * Lazy cleanup — evicts stale entries when map exceeds soft cap.
+ * Called from isThrottled hot path, O(n) but only when n > 1000.
+ * @returns {number} evicted entry count
+ */
+function _cleanupThrottleMap() {
+  if (_throttleMap.size <= THROTTLE_MAP_SOFT_CAP) return 0;
+  const cutoff = Date.now() - THROTTLE_ENTRY_TTL_MS;
+  let evicted = 0;
+  for (const [key, ts] of _throttleMap.entries()) {
+    if (ts < cutoff) {
+      _throttleMap.delete(key);
+      evicted += 1;
+    }
+  }
+  return evicted;
+}
 
 /**
  * Reset throttle state. Test-only helper; not exported via index.js.
@@ -50,6 +77,7 @@ function isThrottled(sessionId, type, windowMs = THROTTLE_WINDOW_MS) {
   const last = _throttleMap.get(key);
   if (typeof last === 'number' && now - last < windowMs) return true;
   _throttleMap.set(key, now);
+  _cleanupThrottleMap();
   return false;
 }
 

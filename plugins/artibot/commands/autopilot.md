@@ -22,6 +22,7 @@ Autonomous long-running mode for **3~4시간 자리 비움 / 야간 자율 작�
 | `/autopilot:tail [session-id] [--lines N]` | Live Telemetry — 마지막 N개 이벤트 표 출력 (기본 50, --follow 시 1초 폴링) | read-only |
 | `/autopilot:replay <session-id>` | 과거 세션 phase timeline 표 출력 (events.ndjson 집계 — 소요/이벤트/warn/error/retry/bottleneck) | read-only |
 | `/autopilot:diff <session-id>` | 과거 세션 phase별 git diff 요약 표 출력 (checkpoint SHA 경계 간 `git diff --numstat` 집계 — files/+ins/-del/top changes) | read-only |
+| `/autopilot:tui [session-id]` | 실행 중인 세션의 라이브 TUI 대시보드 attach (phase progress / 토큰 / 큐 / 최근 이벤트, 1초 폴링). 기본 default 모드는 자동 시작 — 본 커맨드는 detached 세션 재attach 용도 | read-only |
 | `/autopilot:list [--orphans]` | 활성 세션 + worktree + lock 상태 표 출력 | read-only |
 | `/autopilot:goal status <session-id>` | **v4.6.0 Phase 3** — Goal Contract 상태 조회 (paused, iterations, lastEvaluation, lastAction) | read-only |
 | `/autopilot:goal pause <session-id> [--reason "..."]` | Goal evaluator만 일시정지 (세션은 계속 실행). EVALUATE → REPORT pass-through | mutate (orthogonal to session pause) |
@@ -35,7 +36,8 @@ Autonomous long-running mode for **3~4시간 자리 비움 / 야간 자율 작�
 |--------|--------|------|
 | `--max <duration>` | `4h` | 최대 실행 시간 (`30m`, `2h`, `8h` 등) |
 | `--budget <tokens>` | `2000000` | 토큰 임계치, 초과 시 pause |
-| `--no-notify` | off | 완료 알림 비활성화 |
+| `--no-notify` | off | 완료/pause/iteration/danger 알림 비활성화 (`notifyDanger`만 안전 직결 시 예외 발사) |
+| `--no-tui` | off | default 모드의 라이브 TUI 자동 렌더 비활성 (night 모드는 자동 off) |
 | `--no-team` | off | 병렬 팀 비활성화 (단일 메인 실행) |
 | `--checkpoint <interval>` | `30m` | 체크포인트(WIP commit) 주기 |
 | `--worktree` | off | git worktree 격리 사용 (P0-3, 기본 브랜치: `autopilot/<sessionId>`) |
@@ -50,7 +52,7 @@ Autonomous long-running mode for **3~4시간 자리 비움 / 야간 자율 작�
 Parse `$ARGUMENTS`:
 - `task-description`: 자율 처리할 작업 설명 (필수, `:resume`/`:status`/`:abort` 제외)
 - subcommand 접미어: `night` / `plan` / `resume` / `status` / `abort` / `list` 중 하나 (없으면 `default`)
-- `--max`, `--budget`, `--no-notify`, `--no-team`, `--checkpoint`, `--worktree`, `--detached`: 위 표 참조
+- `--max`, `--budget`, `--no-notify`, `--no-tui`, `--no-team`, `--checkpoint`, `--worktree`, `--detached`: 위 표 참조
 - `session-id`: `:resume` / `:abort` / `:status` 에서 사용 (`ap-YYYYMMDD-HHMMSS` 형식)
 - `--goal`, `--validation-command`, `--max-iterations`: v4.6.0 Goal-driven mode (아래 "Goal-driven Mode" 섹션 참조)
 

@@ -131,6 +131,12 @@ export {
 } from './phase-diff.js';
 
 export {
+  renderFrame,
+  runTuiLoop,
+  shouldActivateTui,
+} from './tui.js';
+
+export {
   getMemoryDir,
   getFeaturePath,
   extractKey,

@@ -14,6 +14,7 @@
 import { newSessionId, saveSession } from './session-store.js';
 import { appendEvent } from './telemetry.js';
 import { notifyDanger, notifyPhaseProgress } from './notification.js';
+import { shouldActivateTui } from './tui.js';
 
 /**
  * Build the initial autopilot session state object. Factored out of
@@ -124,4 +125,25 @@ export function notePhaseProgress(state, fromPhase, toPhase, durationMs = null) 
   } catch {
     return null;
   }
+}
+
+/**
+ * Build the TUI instruction marker attached to startAutopilot's return value.
+ * Returns null when TUI should be inactive (night mode, --no-tui, TTY-less env).
+ * The marker is intentionally not a real tool call — the main Claude reads it
+ * and decides whether to spawn `runTuiLoop` in the background.
+ *
+ * @param {object} state
+ * @param {{ isTTY?: boolean }} [env]
+ * @returns {object|null}
+ */
+export function buildTuiInstruction(state, env = {}) {
+  if (!state || !state.sessionId) return null;
+  if (!shouldActivateTui(state, env)) return null;
+  return {
+    tool: 'autopilot:tui-render',
+    sessionId: state.sessionId,
+    intervalMs: 1000,
+    hint: 'Main Claude should render the TUI via runTuiLoop() while polling phase results.',
+  };
 }

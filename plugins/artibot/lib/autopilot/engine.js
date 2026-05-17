@@ -15,7 +15,7 @@ import { generatePRD } from './prd-generator.js';
 import { generateReport } from './report-generator.js';
 import { parseGoalContract } from './prd-parser.js';
 import { runPhaseGoalEvaluate } from './goal-loop.js';
-import { makeInitialState, maybeDangerNote, notePhaseProgress, persist, recordPhase, tick } from './_engine-helpers.js';
+import { buildTuiInstruction, makeInitialState, maybeDangerNote, notePhaseProgress, persist, recordPhase, tick } from './_engine-helpers.js';
 import { loadSession } from './session-store.js';
 import { pauseReason, shouldPause } from './safety.js';
 import {
@@ -509,11 +509,13 @@ export async function startAutopilot({ task, mode, options, sessionId } = {}) {
   try {
     persist(state);
     const instruction = runPhase0Intake(state);
+    const tui = buildTuiInstruction(state, { isTTY: process.stdout.isTTY });
     const base = {
       sessionId: state.sessionId,
       prdPath: state.prdPath,
       phase: state.phase,
       instruction,
+      ...(tui ? { tui } : {}),
     };
     if (instruction.type === 'pause') {
       return { ...base, paused: true, reason: instruction.reason };
