@@ -80,15 +80,15 @@ export default defineConfig({
         },
         test: {
           name: 'autopilot',
-          include: ['tests/autopilot/**/*.test.js'],
+          include: ['tests/autopilot/**/*.test.{js,mjs}'],
         },
       },
       {
         extends: true,
         test: {
           name: 'main',
-          include: ['tests/**/*.test.js'],
-          exclude: ['tests/autopilot/**/*.test.js'],
+          include: ['tests/**/*.test.{js,mjs}'],
+          exclude: ['tests/autopilot/**/*.test.{js,mjs}'],
         },
       },
     ],
