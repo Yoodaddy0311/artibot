@@ -291,3 +291,46 @@ export {
   extractPhaseFields,
   computeDrift,
 } from './goal-drift-detector.js';
+
+// v4.11.0 — Track J: Engine auto-wiring helpers (silent integration of v4.10.0 features)
+export {
+  wirePreIntake,
+  wireResume,
+  wireVerifyFailure,
+  wirePhaseEnd,
+  wireReport,
+} from './auto-wire.js';
+
+export {
+  getAutoWirePolicy,
+  DEFAULT_AUTOWIRE_POLICY,
+  AUTOWIRE_KEYS,
+} from './auto-wire-policy.js';
+
+// v4.11.0 — Track K: Failure memory + template auto-suggest
+export {
+  FAILURE_MEMORY_SCHEMA_VERSION,
+  DEFAULT_MAX_ENTRIES,
+  DEFAULT_MAX_AGE_MS,
+  DEFAULT_RECALL_LIMIT,
+  computeRepoHash,
+  getMemoryPath,
+  recordFailureMemory,
+  recallRelevantFailures,
+  pruneOldMemory,
+} from './failure-memory.js';
+
+export {
+  TEMPLATE_NAMES,
+  HISTORY_BOOST,
+  suggestTemplate,
+  enrichWithTemplate,
+  recommendByHistory,
+} from './template-suggester.js';
+
+export {
+  DEFAULT_SURFACE_THRESHOLD,
+  DEFAULT_RENDER_LIMIT,
+  shouldSurfaceWarning,
+  buildMemoryWarning,
+} from './memory-surface.js';

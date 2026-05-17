@@ -9,6 +9,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.11.0] — 2026-05-17
+
+**Theme**: Auto-invoke layer for v4.10.0 — 비개발자도 슬래시 커맨드 없이 v4.10.0 신기능을 자연어 한 줄로 발동. **310 tests added** across 12 new lib modules + 1 hook. 4-agent 병렬 구현 (Track I/J/K/L).
+
+### Added
+
+#### Track I — Cognitive intent auto-routing (2 lib + 1 hook, 83 tests)
+
+- **`lib/cognitive/autopilot-intent.js`** (322 lines). 5-intent 결정론적 감지기: queue, schedule, dry-run, template (bugfix/refactor/feature), rollback. Korean + English regex 기반, LLM 미사용. APIs: `detectQueueIntent`, `detectScheduleIntent`, `detectDryRunIntent`, `detectTemplateHint`, `detectRollbackIntent`, `detectAllIntents`.
+- **`lib/cognitive/intent-router-extension.js`** (95 lines). Pure router bridge: `extendClassification`, `shouldAutoTrigger`, `dominantIntent` + `AUTOPILOT_FEATURES`/`DEFAULT_TRIGGER_THRESHOLD`. router.js 미변경 (확장만).
+- **`hooks/autopilot-intent-detector.mjs`** (184 lines). Pre-execute hook — stdin → `metadata.autopilotIntents` on stdout, silent-fail. v4.10.0 Track E~H 기능을 자동 발동시키는 트리거.
+
+#### Track J — Engine auto-wiring helpers (3 lib, 62 tests)
+
+- **`lib/autopilot/auto-wire.js`** (431 lines). 5 pure orchestration helpers — `wirePreIntake`, `wireResume`, `wireVerifyFailure`, `wirePhaseEnd`, `wireReport` — composing v4.10.0 Track E/F/G/H 모듈을 엔진 페이즈 진입/종료 지점에서 자동 발동. engine.js 미수정 (800줄 제한 유지).
+- **`lib/autopilot/_engine-helpers-v4.11.js`** (101 lines). Engine-internal helpers: `buildAutoWireBlock` (markdown 렌더) + `mergeAutoWireIntoState` (immutable telemetry append). 언더스코어 prefix로 internal 표시.
+- **`lib/autopilot/auto-wire-policy.js`** (121 lines). 3-tier 정책 해석: defaults → `autopilot.config.json` `autoWire` block → opts.override. `getAutoWirePolicy` (frozen), `DEFAULT_AUTOWIRE_POLICY`, `AUTOWIRE_KEYS`.
+
+#### Track K — Failure memory + template auto-suggest (3 lib, 82 tests)
+
+- **`lib/autopilot/failure-memory.js`** (332 lines). 영구 per-repo 실패 저장소 (`~/.artibot/failure-memory/{repoHash}.json`), LRU+TTL+atomic-write. `computeRepoHash` (remote URL 우선, cwd 폴백), `recordFailureMemory`, `recallRelevantFailures`, `pruneOldMemory` + 4 const exports. 90d TTL / 100 entries default.
+- **`lib/autopilot/template-suggester.js`** (230 lines). 결정론적 Korean/English 키워드 스코어 기반 템플릿 picker. `suggestTemplate`, `enrichWithTemplate` (사용자 입력 보존), `recommendByHistory` + `TEMPLATE_NAMES`/`HISTORY_BOOST`.
+- **`lib/autopilot/memory-surface.js`** (99 lines). Markdown 경고 블록 + threshold gate (pure). `shouldSurfaceWarning`, `buildMemoryWarning` + 2 const.
+
+#### Track L — Claude /goal native integration (3 lib, 83 tests)
+
+- **`lib/cognitive/goal-intent-parser.js`** (279 lines). 결정론적 NLP 파서 — KR/EN goal-intent 마커 감지, 조건 구문 추출, 검증 커맨드 제안, iteration cap 적용. `parseGoalIntent`, `DEFAULT_AUTO_MAX_ITERATIONS`.
+- **`lib/cognitive/goal-auto-launcher.js`** (173 lines). Pure setup builder — 파싱된 의도를 `{contractFragment, claudeGoalCommand, evaluatorChoice, instruction}` bundle로 변환. `/goal` 실행은 절대 안 함 (string emit만). `buildGoalSetup`, `selectEvaluator`, `EVALUATOR_STRATEGIES`.
+- **`lib/cognitive/hybrid-goal-evaluator.js`** (226 lines). Haiku-first + validation-fallback evaluator with consensus/conflict resolution; 모든 LLM/exec 콜 DI. `evaluateHybrid`, `HAIKU_TRUST_THRESHOLD`. **DATA POLICY 준수** — 모든 fetch/exec는 caller가 DI.
+
+### Changed
+
+- **`lib/autopilot/index.js`** — Track J + K barrel exports 추가 (22 새 심볼).
+- **`lib/cognitive/index.js`** — Track I + L barrel exports 추가 (18 새 심볼).
+- **`eslint.config.js`** (Track I) — `hooks/**/*.{js,mjs}` lint glob 추가.
+- **`vitest.config.js`** (Track I) — `.test.mjs` 패턴 추가.
+
+### Compatibility
+
+- v4.10.0 functions are unchanged. v4.11.0 layer is opt-in via policy; turning off `autoWire` returns to v4.10.0 behavior.
+- `engine.js` (799 lines), `lib/autopilot/index.js` orchestration (untouched signatures), `commands/autopilot.md` — 100% 호환.
+- DATA POLICY 유지: Track L Haiku/exec 호출은 모두 DI, 모듈 내부 직접 fetch/child_process 없음.
+
+### Deferred to v4.12.0
+
+- `commands/autopilot.md`에 intent-router-extension 자동 결합 (현재는 `/autopilot` 호출 시 explicit wiring 필요).
+- Pre-execute hook을 모든 슬래시 커맨드에 silent broadcast (현재는 `autopilot-intent-detector.mjs` standalone).
+- `~/.artibot/failure-memory/` migration 도구 (현재 schemaVersion 1만 존재).
+
+---
+
 ## [4.10.0] — 2026-05-17
 
 **Theme**: `/autopilot` 차기 메이저 업그레이드 — Track E (multi-goal queue) + Track F (resume & rollback) + Track G (self-improvement) + Track H (observability & auto-PR). **322 tests added** across 18 new lib modules. 4-agent 병렬 구현 + Claude `/goal` 네이티브 기능과의 통합 설계.
