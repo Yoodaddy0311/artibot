@@ -41,9 +41,21 @@ const QUEUE_BATCH_PATTERNS = [
   /\bqueue\s+(?:these|up|all)\b/i,
 ];
 
-const NUMBERED_LIST_RE = /(?:^|\n)\s*(\d+)[.)]\s+\S/g;
-const CONJUNCTION_CHAIN_RE = /(그리고|and)\b[\s\S]{1,40}?\1/iu;
+const KOREAN_CONJ_RE = /그리고/gu;
+const ENGLISH_CONJ_RE = /\band\b/gi;
 const COMMA_TASK_RE = /[^,\n]{6,},\s*[^,\n]{6,},\s*[^,\n]{6,}/u;
+
+/**
+ * Count occurrences of conjunction connectors. Two or more linking phrases
+ * (e.g., "A 그리고 B 그리고 C") signal a chained task list.
+ * @param {string} text
+ * @returns {number}
+ */
+function countConjunctions(text) {
+  const ko = (text.match(KOREAN_CONJ_RE) || []).length;
+  const en = (text.match(ENGLISH_CONJ_RE) || []).length;
+  return ko + en;
+}
 
 /**
  * Detect multi-goal queue intent in a prompt.
@@ -73,9 +85,12 @@ export function detectQueueIntent(prompt) {
     }
   }
 
-  // Conjunction chain ("X 그리고 Y 그리고 Z")
-  if (CONJUNCTION_CHAIN_RE.test(prompt)) {
-    confidence += 0.35;
+  // Conjunction chain ("X 그리고 Y 그리고 Z" or English "and ... and")
+  const conjCount = countConjunctions(prompt);
+  if (conjCount >= 2) {
+    confidence += 0.5;
+  } else if (conjCount === 1) {
+    confidence += 0.15;
   }
 
   // Comma-separated task list
@@ -155,7 +170,7 @@ export function detectScheduleIntent(prompt) {
   }
 
   if (nightHits > 0) {
-    const confidence = Math.min(CONFIDENCE_CAP, 0.6 + (nightHits - 1) * 0.15);
+    const confidence = Math.min(CONFIDENCE_CAP, 0.75 + (nightHits - 1) * 0.1);
     return { found: true, window: NIGHT_WINDOW, confidence: round2(confidence) };
   }
 

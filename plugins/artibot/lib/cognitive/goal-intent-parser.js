@@ -30,33 +30,46 @@ import { HARD_MAX_ITERATIONS } from '../autopilot/goal-schema.js';
 export const DEFAULT_AUTO_MAX_ITERATIONS = 5;
 
 /**
- * Goal-intent markers. Order matters only for tie-breaking on the
- * first match; all markers are scanned. Each entry is `[regex, weight]`
- * where weight contributes to the final confidence score (capped 1.0).
+ * Trailing-condition markers: the stopping-condition phrase appears
+ * AFTER the marker. e.g. "until <condition>", "될 때까지 <condition>".
  *
- * English markers are word-bounded; Korean markers do not use \b since
- * Korean lacks ASCII word breaks.
+ * Each entry is `[regex, weight]`. Weights contribute additively to
+ * the final confidence (capped 1.0). English markers are word-bounded;
+ * Korean markers cannot use \b (no ASCII word breaks).
  */
-const MARKERS = [
-  // English — strong markers
+const TRAILING_MARKERS = [
+  // English — strong
+  [/\biterate\s+until\b/i, 0.5],
+  [/\brepeat\s+until\b/i, 0.5],
   [/\buntil\b/i, 0.45],
   [/\bas\s+long\s+as\b/i, 0.45],
   [/\bkeep\s+(going|iterating|trying)\b/i, 0.4],
-  [/\biterate\s+until\b/i, 0.5],
-  [/\brepeat\s+until\b/i, 0.5],
-  [/\bwhen\s+.+\s+(done|met|passes|passing|green)\b/i, 0.4],
-  // English — weaker markers (need context to confirm)
+  // English — weaker (need supporting context)
   [/\biterate\b/i, 0.25],
   [/\brepeat\b/i, 0.2],
-  // Korean — strong markers
+  // Korean — strong
   [/조건이\s*만족할\s*때까지/, 0.5],
   [/될\s*때까지/, 0.45],
-  [/(되면|되면은)\s*(멈춰|중단|그만)/, 0.45],
   [/반복해서\s*.+\s*(까지|때까지)/, 0.45],
-  // Korean — weaker markers
+  // Korean — weaker
   [/반복/, 0.25],
   [/계속해서/, 0.25],
   [/계속\s*(시도|돌려|돌리)/, 0.3],
+];
+
+/**
+ * Enclosing-condition markers: the condition phrase is captured INSIDE
+ * the marker regex (group 1). e.g. "when refactor is done" captures
+ * "refactor is"; "테스트가 통과되면 멈춰" captures "테스트가 통과".
+ *
+ * Each entry is `[regex, weight]` where regex MUST have group 1 = the
+ * condition substring.
+ */
+const ENCLOSING_MARKERS = [
+  // English: "when <X> (done|met|passes|passing|green)"
+  [/\bwhen\s+(.+?)\s+(?:is\s+)?(?:done|met|passes|passing|green)\b/i, 0.4],
+  // Korean: "<X> 되면 (멈춰|중단|그만)"
+  [/([^.!?\n]+?)\s*되면\s*(?:멈춰|중단|그만)/, 0.45],
 ];
 
 /**
@@ -124,23 +137,53 @@ function suggestValidationCommand(condition) {
 }
 
 /**
- * Find the strongest marker match in the prompt. Returns the marker
- * end-index (where the condition phrase starts) and accumulated
- * confidence weight (sum of all matched marker weights, capped 1.0).
+ * Find the strongest marker match in the prompt. Scans both trailing
+ * and enclosing marker sets. Returns:
+ *   - kind: 'trailing' (condition extracted from text AFTER marker) or
+ *           'enclosing' (condition is the matched regex group 1).
+ *   - endIdx: position where condition starts (trailing only).
+ *   - extractedCondition: captured group (enclosing only).
+ *   - weight: total confidence (sum of all matched marker weights, ≤1).
+ *   - marker: the raw matched marker text (for debugging).
  *
  * @param {string} prompt
- * @returns {{ startIdx: number, endIdx: number, weight: number, marker: string }|null}
+ * @returns {{
+ *   kind: 'trailing'|'enclosing',
+ *   endIdx: number,
+ *   extractedCondition: string|null,
+ *   weight: number,
+ *   marker: string
+ * }|null}
  */
 function findMarker(prompt) {
   let best = null;
   let totalWeight = 0;
-  for (const [re, weight] of MARKERS) {
+  for (const [re, weight] of TRAILING_MARKERS) {
     const m = prompt.match(re);
     if (!m) continue;
     totalWeight += weight;
-    const endIdx = m.index + m[0].length;
     if (!best || weight > best.weight) {
-      best = { startIdx: m.index, endIdx, weight, marker: m[0] };
+      best = {
+        kind: 'trailing',
+        endIdx: m.index + m[0].length,
+        extractedCondition: null,
+        weight,
+        marker: m[0],
+      };
+    }
+  }
+  for (const [re, weight] of ENCLOSING_MARKERS) {
+    const m = prompt.match(re);
+    if (!m) continue;
+    totalWeight += weight;
+    if (!best || weight > best.weight) {
+      best = {
+        kind: 'enclosing',
+        endIdx: m.index + m[0].length,
+        extractedCondition: (m[1] || '').trim(),
+        weight,
+        marker: m[0],
+      };
     }
   }
   if (!best) return null;
@@ -163,8 +206,8 @@ function extractConditionPhrase(prompt, startIdx) {
     : tail;
   return slice
     .trim()
-    .replace(/^[,;:\-]+/, '')
-    .replace(/[,;:\-]+$/, '')
+    .replace(/^[,;:-]+/, '')
+    .replace(/[,;:-]+$/, '')
     .trim();
 }
 
@@ -202,7 +245,11 @@ export function parseGoalIntent(prompt, opts = {}) {
   const marker = findMarker(prompt);
   if (!marker) return fallback;
 
-  const condition = extractConditionPhrase(prompt, marker.endIdx);
+  const condition = marker.kind === 'enclosing'
+    ? (marker.extractedCondition || '').replace(/^[,;:-]+/, '')
+        .replace(/[,;:-]+$/, '')
+        .trim()
+    : extractConditionPhrase(prompt, marker.endIdx);
   if (!condition || condition.length < 2) {
     // Marker present but no meaningful tail → low-confidence signal,
     // not a usable goal contract.
