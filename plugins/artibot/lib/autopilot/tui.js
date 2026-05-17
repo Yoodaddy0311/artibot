@@ -20,6 +20,7 @@
 
 import { loadSession } from './session-store.js';
 import { readEvents } from './telemetry.js';
+import { getSessionCost, renderCostInline } from './cost-tracker.js';
 
 const ESC = '\x1b[';
 const COLORS = Object.freeze({
@@ -348,6 +349,7 @@ function queueRows(state, innerWidth) {
  *   summary?: object,
  *   width?: number,
  *   tokenUsage?: { used: number, budget: number },
+ *   costSummary?: object,
  *   asciiOnly?: boolean,
  * }} input
  * @returns {string} multi-line frame
@@ -377,6 +379,17 @@ export function renderFrame(input = {}) {
     for (const r of queueRows(state, innerWidth)) {
       lines.push(r);
     }
+  }
+  // Cost footer (one row when usage events exist; omitted otherwise).
+  let costLine;
+  try {
+    costLine = renderCostInline(input.costSummary);
+  } catch {
+    costLine = '';
+  }
+  if (costLine) {
+    lines.push(ruleLine('Cost', innerWidth));
+    lines.push(row(costLine, innerWidth));
   }
   lines.push(bottomBorder(innerWidth));
   return lines.join('\n');

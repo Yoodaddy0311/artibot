@@ -14,6 +14,7 @@ import { loadSession } from './session-store.js';
 import { renderProfile } from './profile-renderer.js';
 import { renderTimelineTable, summarizeSession } from './replay.js';
 import { diffSession, renderDiffTable } from './phase-diff.js';
+import { getSessionCost, renderCostBlock } from './cost-tracker.js';
 
 /**
  * @returns {string} project root one level above plugin root
@@ -116,6 +117,17 @@ export function renderReport(state) {
     diffBlock = '';
   }
 
+  // Inject Phase Cost (token + USD usage per phase). Auto-omitted when no
+  // `usage` events were recorded — render returns '' for empty summaries.
+  let costBlock = '';
+  try {
+    if (state.sessionId) {
+      costBlock = renderCostBlock(getSessionCost(state.sessionId));
+    }
+  } catch {
+    costBlock = '';
+  }
+
   return `# Autopilot 완료 보고서
 
 - **세션**: \`${state.sessionId || '-'}\`
@@ -136,7 +148,7 @@ ${state.prdPath ? `- [${state.prdPath}](${state.prdPath})` : '_(PRD 미생성)_'
 ## 3. Phase별 결과
 
 ${phaseTable}
-${timelineBlock ? `\n${timelineBlock}\n` : ''}${diffBlock ? `\n${diffBlock}\n` : ''}
+${timelineBlock ? `\n${timelineBlock}\n` : ''}${diffBlock ? `\n${diffBlock}\n` : ''}${costBlock ? `\n${costBlock}\n` : ''}
 ## 4. 변경 사항 (커밋)
 
 ${commitList}
@@ -268,10 +280,12 @@ function buildRiskFields(state) {
 }
 
 /**
- * Build the timeline + diff markdown blocks for a session (profile data).
- * Failures collapse to 'N/A' so templates always have a printable value.
+ * Build the timeline + diff + cost markdown blocks for a session
+ * (profile data). Failures collapse to 'N/A' so templates always have a
+ * printable value. The cost block is omitted (kept 'N/A') when no usage
+ * events were recorded for the session.
  * @param {object} s - normalized state
- * @returns {{ phaseTimeline: string, phaseDiff: string }}
+ * @returns {{ phaseTimeline: string, phaseDiff: string, phaseCost: string }}
  */
 function buildTimelineFields(s) {
   let phaseTimeline = 'N/A';
@@ -296,7 +310,16 @@ function buildTimelineFields(s) {
   } catch {
     phaseDiff = 'N/A';
   }
-  return { phaseTimeline, phaseDiff };
+  let phaseCost = 'N/A';
+  try {
+    if (s.sessionId) {
+      const rendered = renderCostBlock(getSessionCost(s.sessionId));
+      if (rendered) phaseCost = rendered;
+    }
+  } catch {
+    phaseCost = 'N/A';
+  }
+  return { phaseTimeline, phaseDiff, phaseCost };
 }
 
 /**
@@ -315,7 +338,7 @@ export function buildReportData(state) {
   const crossCheckTable = s.crossCheck
     ? table(['Item', 'Value'], [['Verdict', s.crossCheck.verdict || '-'], ['Notes', s.crossCheck.notes || '-']])
     : 'N/A';
-  const { phaseTimeline, phaseDiff } = buildTimelineFields(s);
+  const { phaseTimeline, phaseDiff, phaseCost } = buildTimelineFields(s);
   return {
     ...buildSessionMeta(state),
     ...buildPhaseFields(phases),
@@ -324,6 +347,7 @@ export function buildReportData(state) {
     crossCheckTable,
     phaseTimeline,
     phaseDiff,
+    phaseCost,
     nextAction: s.nextAction || (status === 'COMPLETED' ? '추가 작업 없음. 사용자 검토 권장.' : '세션 상태 검토 권장.'),
     kpiSummary: s.kpiSummary || `Phases ${phases.length}, Improvements ${improvements.length}, Risks ${risks.length}`,
     kpiSimple: s.kpiSimple || `${phases.length}개 단계 · ${improvements.length}개 개선 · ${risks.length}개 리스크`,

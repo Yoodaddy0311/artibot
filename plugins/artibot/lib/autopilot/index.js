@@ -155,3 +155,16 @@ export {
   wrapInvocation,
   validateMcpResponse,
 } from './mcp-verifier.js';
+
+export {
+  runPreflight,
+  runIndividualCheck,
+} from './preflight.js';
+
+export {
+  recordPhaseUsage,
+  getSessionCost,
+  checkBudgetThreshold,
+  renderCostBlock,
+  renderCostInline,
+} from './cost-tracker.js';
