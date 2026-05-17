@@ -150,7 +150,7 @@ function safeParseJson(raw) {
  * any failure path) so callers never see a parse error.
  */
 async function main() {
-  let envelope = {};
+  let envelope;
   try {
     const raw = await readStdin();
     const hookData = raw ? safeParseJson(raw) : null;
@@ -158,7 +158,7 @@ async function main() {
   } catch {
     envelope = {};
   }
-  process.stdout.write(JSON.stringify(envelope));
+  process.stdout.write(JSON.stringify(envelope || {}));
 }
 
 const isMain = (() => {
