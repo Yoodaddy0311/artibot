@@ -697,3 +697,13 @@
 <!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
 
 ---
+
+## 2026-05-18 00:40 UTC · `artibot/master`
+
+- **Commits** (1):
+  - `aadac63` test(coverage): temporarily lower branches threshold 76 -> 72 for v4.11 reunify
+- **Files touched**: 2
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
