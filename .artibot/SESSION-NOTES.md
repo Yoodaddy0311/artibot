@@ -717,3 +717,28 @@
 <!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
 
 ---
+
+## 2026-05-18 01:20 UTC · `master`
+
+- **Commits** (16):
+  - `17d9a67` Merge pull request #20 from Yoodaddy0311/artibot/master
+  - `45086d9` chore(release): v4.11.1 — reunify master <- artibot/master (PR #20)
+  - `a97eff5` fix(test): narrow stop-review-gate hyphen-suffix assertion + restore thresholds
+  - `031d80e` test(coverage): lower all thresholds further to clear CI Linux dip (PR #20)
+  - `1b27065` chore: artibot session close [2026-05-18 00:40:49]
+  - `17faa51` Merge pull request #18 from Yoodaddy0311/v4.7.6-telegram-prd
+  - `33ad5e7` Merge pull request #19 from Yoodaddy0311/v4.7.5-version-bump
+  - `fb9409e` chore(release): v4.7.5 — bump version metadata to match release tag
+  - `be0bfd7` docs(prd): v4.7.6 — Telegram MCP integration PRD (구현 보류)
+  - `8718586` Merge pull request #17 from Yoodaddy0311/v4.7.5-github-mcp
+  - `0733e5a` feat(mcp): v4.7.5 — GitHub MCP integration (Remote HTTP, read-only, opt-in PAT)
+  - `954e2de` Merge pull request #16 from Yoodaddy0311/v4.7.3-perf-quality-ext
+  - `2010740` fix(readme): align skill/command counts with v4.7.3 additions
+  - `102bca3` fix(hooks): v4.7.4 — silence Artibot hooks in unrelated user repos
+  - `7ddd1f3` fix(hooks): v4.7.4 — stop-review-gate isArtibotRepo guard (silent skip in non-Artibot repos)
+  - `92693b1` chore(perf-quality-ext): v4.7.3 — P1+P2 13건 (속도/품질/자가학습/확장 종합 개선)
+- **Files touched**: 5
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
