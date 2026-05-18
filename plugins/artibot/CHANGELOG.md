@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.11.3] — 2026-05-18
+
+**Theme**: Release-infra patch — 배지 동기와 required-check 누락을 영구 해결. 런타임 코드 변경 없음, CI/문서만 수정.
+
+### Fixed
+
+- **`.github/workflows/release.yml`** — `sync-readmes` 잡이 `git push origin master`로 직접 master에 push하던 부분을 PR + auto-merge 플로우로 전환. 브랜치 보호 정책이 default `GITHUB_TOKEN`의 protected-branch 직접 push를 거부해 4.11.0/4.11.1/4.11.2 전부 배지 동기가 실패했던 회귀. `permissions: pull-requests: write` 추가로 `gh pr create` 호출 가능.
+- **`.github/workflows/plugin-validate.yml`** — `pull_request` 트리거의 `paths` 필터 제거. "Validate artibot plugin.json structure", "Validate artibot-cowork plugin.json structure"가 master required check인데, plugin/agent/skill/commands 외 파일만 바뀐 PR(README, workflow 등)은 워크플로우가 발화 자체를 안 해서 required check가 "pending forever" 상태로 잠겨 auto-merge가 영구 BLOCKED되던 회귀. PR #23이 admin override 필요했던 이유. matrix 잡 2개가 ~10초/leg라 항상 실행해도 비용 무시. `push`는 master 직접 push 자체가 차단되므로 paths 필터 유지.
+- **`README.md`, `plugins/artibot/README.md`** — shields.io 버전 배지 4.8.0 → 4.11.2 catch-up sync (4.11.3 갱신은 다음 릴리즈 워크플로우 PR이 자동 처리).
+
+### Verification
+
+- PR #23 (release.yml + 배지) → admin merge로 검증.
+- PR #24 (plugin-validate paths 필터 제거) → **admin override 없이 auto-merge 통과**. 필수 체크 4종(Validate Node 22/24, plugin.json structure × 2) 모두 정상 실행/PASS — 자기 자신이 fix proof.
+- 4.11.3 릴리즈 워크플로우가 새 PR 기반 sync-readmes를 end-to-end 검증.
+
+### Migration
+
+없음. CI/문서만 변경, 런타임 API/스키마/db 미변경.
+
+---
+
 ## [4.11.2] — 2026-05-18
 
 **Theme**: `dev-verify-gate` race-condition hotfix — Stop 훅이 read-only 턴에서도 SESSION-NOTES.md 변경분을 false-positive로 감지해 DEV verify 블록이 반복 발화하던 버그 수정.
