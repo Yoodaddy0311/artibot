@@ -21,16 +21,11 @@ import { getPluginRoot } from './ci-utils.js';
 // coverage well past 90% on branches. The other axes (87%/89%/87% on CI)
 // have plenty of headroom and stay at 85.
 //
-// v4.11 temporary dip: all axes lowered to unblock the master reunify
-// (PR #20). First attempt (76→72 branches only) still failed CI Linux
-// because the ~5-10pp platform gap eats more than 2pp on branches AND
-// statements/lines hover at the threshold edge. Keep in sync with
-// vitest.config.js. Restore alongside the test additions tracked there.
 const THRESHOLDS = {
-  statements: 75,
-  branches: 65,
-  functions: 78,
-  lines: 78,
+  statements: 85,
+  branches: 76,
+  functions: 85,
+  lines: 85,
 };
 
 function main() {
