@@ -255,6 +255,25 @@ When using Artibot:
 - Regularly review the contents of `~/.claude/artibot/` to understand what data is being stored
 - Do not disable the PII scrubber when configuring Federated Swarm
 
+### Narrow Auto-Approve Permission Patterns / 자동 승인 권한 패턴 좁히기
+
+Claude Code's `.claude/settings.json` (and `.claude/settings.local.json`) supports an `allow` list that auto-approves tool calls matching the listed patterns. Broad wildcards turn auto-approve into effective arbitrary-code execution.
+
+- Avoid `Bash(node *)` / `PowerShell(node *)` — `node -e "..."` can run any code, including `child_process.exec(...)`.
+- Avoid `Bash(npm *)` / `PowerShell(npm *)` — `npm exec`, `npm run <arbitrary-script>`, and `npm config` can launch arbitrary commands.
+- Avoid `Bash(npx *)` — `npx <package>` will download and execute arbitrary packages.
+- Avoid `Bash(python3 -c '...')` and similar `-c` / `-e` evaluator flags.
+
+Prefer specific subcommands you actually use, e.g.:
+
+- `Bash(node --version)`
+- `Bash(npm test)` / `Bash(npm run lint)` / `Bash(npm run build)`
+- `Bash(git status)` / `Bash(git diff *)`
+
+If you need a broader policy, scope it to a directory (`Bash(npm run *:/path/to/project)`) or to a single repo via the project-local `settings.json` rather than the global allowlist.
+
+The Artibot `permission-auto-approve` hook (`scripts/hooks/permission-auto-approve.js`) accepts regex patterns from `artibot.config.json.permissions.autoApprove[].commandPattern`. Patterns like `.*` or unanchored `.+` for high-risk tools (`Bash`, `PowerShell`, `Write`) effectively disable approval prompts entirely — anchor them (`^git status$`) and keep them as narrow as possible.
+
 ---
 
 ## Vulnerability Disclosure History / 취약점 공개 이력
