@@ -267,7 +267,7 @@ Detailed planning lives in `_reports/horizon-2-3-roadmap.md` (kept in `_reports/
    ```bash
    npm run ci           # validate + skill:check + lint + test + eval:runtime
    ```
-5. Submit PR against `artibot/master`. CI runs `claim-validator` ("done without proof = not done").
+5. Submit PR against `master`. CI runs `claim-validator` ("done without proof = not done"). (The previous `artibot/master` integration branch has been deprecated — see PR #20 v4.11 reunify notes.)
 
 Full guide: [CONTRIBUTING.md](./CONTRIBUTING.md).
 
