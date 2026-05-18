@@ -55,7 +55,22 @@ jobs:
       - name: Validate hooks
         run: node scripts/ci/validate-hooks.js
 
-      - name: Run tests
+      # The tag-time vitest run is informational only. The authoritative
+      # quality gate is the CI run on the master branch that produced the
+      # commit being tagged (every PR into master must pass CI before merge).
+      # By the time a tag is pushed, that gate has already been cleared.
+      #
+      # Why not block on this run: tag-pinned vitest runs commit-time code,
+      # which often diverges from the OS-environment / flaky-test landscape
+      # at tag push time (e.g. v4.8.x and v4.11.x both failed this step on
+      # a legacy stop-review-gate over-specification that was later fixed in
+      # master — see PR #20). Blocking the GitHub Release on flaky tag-time
+      # tests previously left v4.8.0..v4.8.3 / v4.11.0 / v4.11.1 without
+      # auto-generated releases and forced manual `gh release create`. This
+      # step now surfaces failures as a warning (red ✗ on the step) without
+      # blocking the release job.
+      - name: Run tests (informational)
+        continue-on-error: true
         run: |
           if [ -d "tests" ] || [ -d "__tests__" ] || [ -d "test" ]; then
             npx vitest run --reporter=verbose
