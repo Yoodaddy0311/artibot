@@ -908,7 +908,7 @@
       "summarization"
     ],
     "effort": {
-      "injectPrompt": true,
+      "injectPrompt": false,
       "nativeApi": false,
       "budgetMap": {
         "xhigh": 128000,
