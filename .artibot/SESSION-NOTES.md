@@ -752,3 +752,15 @@
 <!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
 
 ---
+
+## 2026-05-18 01:49 UTC · `artibot/master`
+
+- **Commits** (3):
+  - `d67cecd` Merge pull request #21 from Yoodaddy0311/artibot/chore-dual-branch-deprecation
+  - `c904d94` chore: deprecate artibot/master integration branch + unblock release.yml on flaky tag-time tests
+  - `892deea` chore: artibot session close [2026-05-18 01:20:28]
+- **Files touched**: 3
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
