@@ -201,7 +201,10 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -b "${BRANCH}"
           git add README.md plugins/artibot/README.md
-          git commit -m "docs(release): sync README badges to ${GITHUB_REF_NAME} [skip ci]"
+          # No [skip ci] — the badge PR needs required CI checks to run so
+          # auto-merge can proceed. Adding [skip ci] would block both the push
+          # AND pull_request triggers, leaving the PR permanently BLOCKED.
+          git commit -m "docs(release): sync README badges to ${GITHUB_REF_NAME}"
           git push origin "${BRANCH}"
           gh pr create \
             --base master \
