@@ -124,6 +124,112 @@ install_hooks() {
 }
 
 # ──────────────────────────────────────────────
+# Mirror to Claude Code marketplace install
+# ──────────────────────────────────────────────
+# Claude Code's plugin system maintains its own install copy at
+#   ~/.claude/plugins/marketplaces/artibot/plugins/artibot/
+# Every project session reads hooks from THAT path (via CLAUDE_PLUGIN_ROOT),
+# not from ~/.claude/artibot/. Skipping this mirror leaves the marketplace
+# at whatever version Claude Code last fetched (often months stale), causing
+# silent hook regressions in other projects after a manual update here.
+#
+# Legacy-stub policy: when a hook file is removed across versions (e.g.
+# check-console-log.js was consolidated into dev-verify-gate.js in v4.7.2),
+# leave a no-op stub at its original path. Existing Claude Code sessions
+# cache the v3.0.0 hooks.json in memory and will try to exec the removed
+# file on the next Stop event — MODULE_NOT_FOUND crashes the dispatcher.
+# Stubs keep those in-flight sessions alive until they restart.
+install_marketplace_mirror() {
+  local mkt_root="${CLAUDE_DIR}/plugins/marketplaces/artibot/plugins/artibot"
+  if [ ! -d "${mkt_root}" ]; then
+    log "Marketplace install not present (skip mirror)"
+    return 0
+  fi
+
+  # Mirror the hot paths from the direct install we just wrote.
+  # Same clean-before-copy contract as install_hooks for parity.
+  for dir in scripts hooks lib skills output-styles .claude-plugin; do
+    if [ -d "${ARTIBOT_DIR}/${dir}" ]; then
+      [ -d "${mkt_root}/${dir}" ] && rm -rf "${mkt_root}/${dir}"
+      cp -r "${ARTIBOT_DIR}/${dir}" "${mkt_root}/"
+    fi
+  done
+
+  # Commands and agents live only in the source repo (direct install omits
+  # them — Claude Code reads them straight from marketplace path). Pull them
+  # from the source repo, not from ${ARTIBOT_DIR}.
+  for dir in commands agents; do
+    if [ -d "${SCRIPT_DIR}/${dir}" ]; then
+      [ -d "${mkt_root}/${dir}" ] && rm -rf "${mkt_root}/${dir}"
+      cp -r "${SCRIPT_DIR}/${dir}" "${mkt_root}/"
+    fi
+  done
+
+  cp "${SCRIPT_DIR}/artibot.config.json" "${mkt_root}/"
+  [ -f "${SCRIPT_DIR}/package.json" ] && cp "${SCRIPT_DIR}/package.json" "${mkt_root}/"
+  log "Marketplace mirror updated → ${mkt_root}"
+}
+
+# ──────────────────────────────────────────────
+# Mirror to Claude Code plugin cache (per-version dirs)
+# ──────────────────────────────────────────────
+# Claude Code maintains a per-version plugin cache at
+#   ~/.claude/plugins/cache/artibot/artibot/<version>/
+# At session start it loads hooks.json from THE CACHE DIR — not the
+# marketplace mirror or the direct install. The cache is populated lazily
+# from the marketplace mirror on first plugin activation and is NOT
+# refreshed by install.sh writing only to the marketplace path. The
+# v4.6.4 → v4.8.2 hook regression went unnoticed for so long precisely
+# because users' caches held v4.6.4 args[] schema while the marketplace
+# mirror had moved on.
+#
+# Mirroring the hot paths into every cache version dir keeps future
+# sessions (post-restart) consistent. We do NOT touch .claude-plugin/plugin.json
+# inside the cache (its version field is the cache routing key — overwriting
+# it would orphan the cache entry from Claude Code's perspective). We also
+# do NOT delete the cache dir here — clearCache() in scripts/update.js
+# handles invalidation after an install. The split keeps install.sh
+# non-destructive on a fresh-install path while still propagating runtime
+# files to whatever cache versions already exist.
+install_plugin_cache() {
+  local cache_root="${CLAUDE_DIR}/plugins/cache/artibot/artibot"
+  if [ ! -d "${cache_root}" ]; then
+    log "Plugin cache not present (skip cache sync)"
+    return 0
+  fi
+
+  local synced=0
+  for version_dir in "${cache_root}"/*/; do
+    [ -d "${version_dir}" ] || continue
+    local v_root="${version_dir%/}"
+
+    # Mirror runtime hot paths only (NOT .claude-plugin to preserve plugin.json
+    # version routing key). Same clean-before-copy contract as the marketplace
+    # mirror for parity.
+    for dir in scripts hooks lib output-styles; do
+      if [ -d "${ARTIBOT_DIR}/${dir}" ]; then
+        [ -d "${v_root}/${dir}" ] && rm -rf "${v_root}/${dir}"
+        cp -r "${ARTIBOT_DIR}/${dir}" "${v_root}/"
+      fi
+    done
+
+    # Config files are version-tagged but the cache dir name is the routing
+    # key — overwriting these is safe (cache invariant lives in plugin.json
+    # which we deliberately leave alone).
+    [ -f "${SCRIPT_DIR}/artibot.config.json" ] && cp "${SCRIPT_DIR}/artibot.config.json" "${v_root}/"
+    [ -f "${SCRIPT_DIR}/package.json" ] && cp "${SCRIPT_DIR}/package.json" "${v_root}/"
+
+    synced=$((synced + 1))
+  done
+
+  if [ "$synced" -gt 0 ]; then
+    log "Plugin cache synced: ${synced} version dir(s) → ${cache_root}/"
+  else
+    log "Plugin cache directory present but contained no version dirs (skip)"
+  fi
+}
+
+# ──────────────────────────────────────────────
 # Copy Rules (project-level .claude/rules/)
 # ──────────────────────────────────────────────
 install_rules() {
@@ -753,6 +859,8 @@ main() {
       install_commands
       install_skills
       install_hooks
+      install_marketplace_mirror
+      install_plugin_cache
       install_rules
       install_mcp
       configure_settings

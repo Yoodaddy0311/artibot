@@ -25,11 +25,27 @@ const DEFAULT_TIMEOUT_MS = 2000;
 
 let _cache = null;
 
+let _warnedAboutOverride = false;
+
 /**
  * Resolve the absolute path to the dispatch table JSON file.
+ * Honors ARTIBOT_HOOK_DISPATCH_TABLE_PATH ONLY when running under a test
+ * harness (VITEST=true or NODE_ENV=test). In production, an attacker-controlled
+ * env var could redirect the dispatcher to a hostile JSON and gain arbitrary
+ * code execution via crafted handler modules — the override is silently
+ * ignored (with a one-shot warning) outside of tests.
  * @returns {string}
  */
 function getDispatchTablePath() {
+  const override = process.env.ARTIBOT_HOOK_DISPATCH_TABLE_PATH;
+  const isTest = process.env.VITEST === 'true' || process.env.NODE_ENV === 'test';
+  if (override && isTest) return override;
+  if (override && !isTest && !_warnedAboutOverride) {
+    _warnedAboutOverride = true;
+    process.stderr.write(
+      '[hook-dispatcher] ARTIBOT_HOOK_DISPATCH_TABLE_PATH ignored outside test env\n',
+    );
+  }
   return path.join(getPluginRoot(), 'hooks', 'dispatch-table.json');
 }
 

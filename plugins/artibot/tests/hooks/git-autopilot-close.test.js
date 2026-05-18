@@ -354,6 +354,65 @@ describe('git-autopilot-close — squashWipCommits safety guards', () => {
     expect(logs).toContain('WIP squash failed');
   });
 
+  it('skips push when squashWipOnClose=true and squash fails (autoPushOnStop=true)', async () => {
+    // v4.7.7 audit P1: previously, when squash failed (e.g. totalCommits
+    // exceeded the safety ceiling), `pushBranch` still ran and published
+    // the raw `wip: artibot auto-save [...]` commits the squash was meant
+    // to hide. The gate must hold push back until squash succeeds.
+    setupEnabledRepo(); // autoPushOnStop:true, squashWipOnClose:true
+    const recorded = [];
+    mockState.resolveBaseImpl = () => 'master';
+    mockState.execFileSyncImpl = (file, args) => {
+      recorded.push(args);
+      const joined = (args || []).join(' ');
+      if (joined === 'rev-parse --show-toplevel') return '/repo';
+      if (joined === 'config --get remote.origin.url') {
+        return 'https://github.com/Yoodaddy0311/artibot.git';
+      }
+      if (joined === 'branch --show-current') return 'artibot/master';
+      if (joined.startsWith('status --porcelain')) return '';
+      if (joined.startsWith('merge-base')) return 'abc123';
+      if (joined.includes('--grep=^wip:')) return 'aaa wip\nbbb wip\nccc wip\n';
+      // Force squash failure via 50-commit ceiling
+      if (joined.startsWith('rev-list --count')) return '9999';
+      return '';
+    };
+
+    await import('../../scripts/hooks/git-autopilot-close.js');
+    const logs = stderrSpy.mock.calls.map(([m]) => m).join('');
+    expect(logs).toContain('WIP squash failed');
+    expect(logs).toContain('Push skipped');
+    // No push command should have been issued.
+    expect(recorded.some((a) => a[0] === 'push')).toBe(false);
+  });
+
+  it('still pushes when squash succeeds (autoPushOnStop=true)', async () => {
+    setupEnabledRepo();
+    const recorded = [];
+    mockState.resolveBaseImpl = () => 'master';
+    mockState.execFileSyncImpl = (file, args) => {
+      recorded.push(args);
+      const joined = (args || []).join(' ');
+      if (joined === 'rev-parse --show-toplevel') return '/repo';
+      if (joined === 'config --get remote.origin.url') {
+        return 'https://github.com/Yoodaddy0311/artibot.git';
+      }
+      if (joined === 'branch --show-current') return 'artibot/master';
+      if (joined.startsWith('status --porcelain')) return '';
+      if (joined.startsWith('merge-base')) return 'abc123';
+      if (joined.includes('--grep=^wip:')) return 'aaa wip\nbbb wip\n';
+      // Normal squash count (under ceiling)
+      if (joined.startsWith('rev-list --count')) return '5';
+      return '';
+    };
+
+    await import('../../scripts/hooks/git-autopilot-close.js');
+    const logs = stderrSpy.mock.calls.map(([m]) => m).join('');
+    expect(logs).toContain('Squashed');
+    expect(logs).not.toContain('Push skipped');
+    expect(recorded.some((a) => a[0] === 'push')).toBe(true);
+  });
+
   it('skips squash when merge-base resolves to an empty string', async () => {
     setupEnabledRepo({ autoPushOnStop: false });
     const recorded = [];

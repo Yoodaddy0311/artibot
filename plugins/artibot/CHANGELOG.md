@@ -9,7 +9,378 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.11.1] — 2026-05-18
+
+**Theme**: `/autopilot` cross-project resolver hotfix — 타 프로젝트에서 호출 시 "엔진 부재"로 실패하던 버그 수정. Markdown-only 변경, lib 코드 무수정.
+
+### Fixed
+
+- **`commands/autopilot.md`**, **`commands/autopilot-queue.md`** — Step 1 Engine Import 블록의 `toFileUrl('plugins/artibot/lib/autopilot/...')` cwd-상대경로를 `CLAUDE_PLUGIN_ROOT` 기반 절대경로로 교체. 외부 프로젝트 cwd에서는 해당 상대경로가 존재하지 않아 dynamic `import()`가 실패하고 "엔진 부재"로 표시되던 회귀. **3-location fallback**으로 강건화:
+  1. `process.env.CLAUDE_PLUGIN_ROOT` (Claude Code가 플러그인 커맨드 실행 시 주입 — 정상 경로)
+  2. `~/.claude/plugins/marketplaces/<id>/plugins/artibot/` (env 미주입 시 마켓플레이스 mirror 자동 스캔, 검증: `lib/autopilot/index.js` 존재)
+  3. 후보 전부 실패 시 `throw new Error('Artibot engine not found. Set CLAUDE_PLUGIN_ROOT or install via marketplace.')` — silent broken state 차단.
+- `~/.claude/artibot/`은 `install.sh`가 만드는 runtime data dir이며 `lib/`가 없으므로 후보에서 의도적 제외 (코드 주석으로 명시).
+- `toFileUrl()` 한글 경로 안전 helper를 인라인으로 정의 — `lib/core/utils`에서 import할 때 발생하던 chicken-and-egg 의존성 회피.
+- `autopilot-queue.md`는 5개 lib 모듈 import를 `lib(rel)` 헬퍼로 DRY 정리.
+
+### Verification
+
+- code-reviewer 2-stage 검수 통과 (1차 BLOCKER `~/.claude/plugins/artibot` 가짜 경로 → 마켓플레이스 mirror 스캔으로 수정 후 2차 APPROVE).
+- 마켓플레이스 mirror 실존 확인: `~/.claude/plugins/marketplaces/artibot/plugins/artibot/lib/autopilot/index.js` ✓.
+- 잔존 cwd-상대 import 0건 (`grep -rn "toFileUrl('plugins/artibot/" commands/`).
+
+### Migration
+
+없음. Markdown 커맨드 파일만 변경, 외부 API/스키마/db 미변경. 기존 세션 resume 무영향.
+
+---
+
+## [4.11.0] — 2026-05-17
+
+**Theme**: Auto-invoke layer for v4.10.0 — 비개발자도 슬래시 커맨드 없이 v4.10.0 신기능을 자연어 한 줄로 발동. **310 tests added** across 12 new lib modules + 1 hook. 4-agent 병렬 구현 (Track I/J/K/L).
+
+### Added
+
+#### Track I — Cognitive intent auto-routing (2 lib + 1 hook, 83 tests)
+
+- **`lib/cognitive/autopilot-intent.js`** (322 lines). 5-intent 결정론적 감지기: queue, schedule, dry-run, template (bugfix/refactor/feature), rollback. Korean + English regex 기반, LLM 미사용. APIs: `detectQueueIntent`, `detectScheduleIntent`, `detectDryRunIntent`, `detectTemplateHint`, `detectRollbackIntent`, `detectAllIntents`.
+- **`lib/cognitive/intent-router-extension.js`** (95 lines). Pure router bridge: `extendClassification`, `shouldAutoTrigger`, `dominantIntent` + `AUTOPILOT_FEATURES`/`DEFAULT_TRIGGER_THRESHOLD`. router.js 미변경 (확장만).
+- **`hooks/autopilot-intent-detector.mjs`** (184 lines). Pre-execute hook — stdin → `metadata.autopilotIntents` on stdout, silent-fail. v4.10.0 Track E~H 기능을 자동 발동시키는 트리거.
+
+#### Track J — Engine auto-wiring helpers (3 lib, 62 tests)
+
+- **`lib/autopilot/auto-wire.js`** (431 lines). 5 pure orchestration helpers — `wirePreIntake`, `wireResume`, `wireVerifyFailure`, `wirePhaseEnd`, `wireReport` — composing v4.10.0 Track E/F/G/H 모듈을 엔진 페이즈 진입/종료 지점에서 자동 발동. engine.js 미수정 (800줄 제한 유지).
+- **`lib/autopilot/_engine-helpers-v4.11.js`** (101 lines). Engine-internal helpers: `buildAutoWireBlock` (markdown 렌더) + `mergeAutoWireIntoState` (immutable telemetry append). 언더스코어 prefix로 internal 표시.
+- **`lib/autopilot/auto-wire-policy.js`** (121 lines). 3-tier 정책 해석: defaults → `autopilot.config.json` `autoWire` block → opts.override. `getAutoWirePolicy` (frozen), `DEFAULT_AUTOWIRE_POLICY`, `AUTOWIRE_KEYS`.
+
+#### Track K — Failure memory + template auto-suggest (3 lib, 82 tests)
+
+- **`lib/autopilot/failure-memory.js`** (332 lines). 영구 per-repo 실패 저장소 (`~/.artibot/failure-memory/{repoHash}.json`), LRU+TTL+atomic-write. `computeRepoHash` (remote URL 우선, cwd 폴백), `recordFailureMemory`, `recallRelevantFailures`, `pruneOldMemory` + 4 const exports. 90d TTL / 100 entries default.
+- **`lib/autopilot/template-suggester.js`** (230 lines). 결정론적 Korean/English 키워드 스코어 기반 템플릿 picker. `suggestTemplate`, `enrichWithTemplate` (사용자 입력 보존), `recommendByHistory` + `TEMPLATE_NAMES`/`HISTORY_BOOST`.
+- **`lib/autopilot/memory-surface.js`** (99 lines). Markdown 경고 블록 + threshold gate (pure). `shouldSurfaceWarning`, `buildMemoryWarning` + 2 const.
+
+#### Track L — Claude /goal native integration (3 lib, 83 tests)
+
+- **`lib/cognitive/goal-intent-parser.js`** (279 lines). 결정론적 NLP 파서 — KR/EN goal-intent 마커 감지, 조건 구문 추출, 검증 커맨드 제안, iteration cap 적용. `parseGoalIntent`, `DEFAULT_AUTO_MAX_ITERATIONS`.
+- **`lib/cognitive/goal-auto-launcher.js`** (173 lines). Pure setup builder — 파싱된 의도를 `{contractFragment, claudeGoalCommand, evaluatorChoice, instruction}` bundle로 변환. `/goal` 실행은 절대 안 함 (string emit만). `buildGoalSetup`, `selectEvaluator`, `EVALUATOR_STRATEGIES`.
+- **`lib/cognitive/hybrid-goal-evaluator.js`** (226 lines). Haiku-first + validation-fallback evaluator with consensus/conflict resolution; 모든 LLM/exec 콜 DI. `evaluateHybrid`, `HAIKU_TRUST_THRESHOLD`. **DATA POLICY 준수** — 모든 fetch/exec는 caller가 DI.
+
+### Changed
+
+- **`lib/autopilot/index.js`** — Track J + K barrel exports 추가 (22 새 심볼).
+- **`lib/cognitive/index.js`** — Track I + L barrel exports 추가 (18 새 심볼).
+- **`eslint.config.js`** (Track I) — `hooks/**/*.{js,mjs}` lint glob 추가.
+- **`vitest.config.js`** (Track I) — `.test.mjs` 패턴 추가.
+
+### Compatibility
+
+- v4.10.0 functions are unchanged. v4.11.0 layer is opt-in via policy; turning off `autoWire` returns to v4.10.0 behavior.
+- `engine.js` (799 lines), `lib/autopilot/index.js` orchestration (untouched signatures), `commands/autopilot.md` — 100% 호환.
+- DATA POLICY 유지: Track L Haiku/exec 호출은 모두 DI, 모듈 내부 직접 fetch/child_process 없음.
+
+### Deferred to v4.12.0
+
+- `commands/autopilot.md`에 intent-router-extension 자동 결합 (현재는 `/autopilot` 호출 시 explicit wiring 필요).
+- Pre-execute hook을 모든 슬래시 커맨드에 silent broadcast (현재는 `autopilot-intent-detector.mjs` standalone).
+- `~/.artibot/failure-memory/` migration 도구 (현재 schemaVersion 1만 존재).
+
+---
+
+## [4.10.0] — 2026-05-17
+
+**Theme**: `/autopilot` 차기 메이저 업그레이드 — Track E (multi-goal queue) + Track F (resume & rollback) + Track G (self-improvement) + Track H (observability & auto-PR). **322 tests added** across 18 new lib modules. 4-agent 병렬 구현 + Claude `/goal` 네이티브 기능과의 통합 설계.
+
+### Added
+
+#### Track E — Multi-goal queue & scheduling (4 lib + 1 command, 90 tests)
+
+- **`lib/autopilot/goal-queue.js`** (370 lines). FIFO multi-goal queue, per-goal state (pending/running/completed/failed/paused), atomic write to `~/.artibot/queues/{id}.json`. 12 public APIs: `enqueueGoal`/`dequeueGoal`/`listQueue`/`removeFromQueue`/`runQueue`/`setQueuePaused`/`finalizeGoal`/`getDefaultQueueDir`/`getQueuePath`/`newQueueId` + `CURRENT_QUEUE_SCHEMA_VERSION`/`GOAL_STATUS`. DI for `now()`/storeDir.
+- **`lib/autopilot/schedule-window.js`** (145 lines). Pure HH:MM-HH:MM 파서 + wrap-around-aware `isInWindow`/`nextWindowStart`/`parseWindow`. 야간 자동 작업 (`--window 22:00-07:00`) 지원.
+- **`lib/autopilot/cost-predictor.js`** (206 lines). PRE-INTAKE token/duration 예측. 과거 events.ndjson + complexity multiplier 기반, zero-history 시 graceful fallback. `predictCost`/`classifyComplexity`.
+- **`lib/autopilot/goal-budget-aggregator.js`** (281 lines). per-goal budget tracker. cost-tracker.js를 modify 하지 않고 compose. queue-namespaced state at `{id}.budget.json`. 5 APIs.
+- **`commands/autopilot-queue.md`** (129 lines). `/autopilot:queue add|run|list|remove|pause|resume` 신규 서브커맨드.
+
+#### Track F — Resume granularity & rollback (6 lib, 84 tests)
+
+- **`lib/autopilot/rollback.js`** (174 lines). Phase-level rollback to last-green checkpoint. Worktree guard (`git rev-parse --show-toplevel`) + SHA validator 재사용. `rollbackToLastGreen`/`listRollbackTargets`.
+- **`lib/autopilot/sub-checkpoint.js`** (122 lines). Sub-step granularity. 기존 `state.subCheckpoints[]` 필드 추가 (v2 schema 비파괴). `recordSubCheckpoint`/`listSubCheckpoints`.
+- **`lib/autopilot/migrate-v3.js`** (71 lines). Pure v2→v3 schema migration. session-store.js 미수정 — orchestrator가 단계별 wire-in. `migrateV2toV3`/`needsV3Migration`/`SCHEMA_VERSION_V3`.
+- **`lib/autopilot/cross-machine.js`** (156 lines). Machine-id stamping (`os.hostname()` + user), drift 감지, rebase command planner (실행 안 함, plan array 반환). v4.8 sibling-PC drift 근본 해결.
+- **`lib/autopilot/dry-run.js`** (137 lines). Logging-only git runner + write-blocking fs facade HOF. `createDryRunGitRunner`/`wrapPhaseForDryRun`.
+- **`lib/autopilot/phase-replay.js`** (170 lines). 과거 phase를 새 worktree에서 재실행, dry-run default. `replayPhase`.
+
+#### Track G — Self-improvement & learning (4 lib + 3 YAML, 75 tests)
+
+- **`lib/autopilot/failure-clustering.js`** (282 lines). events.ndjson 누적 → signature 정규화 (paths/line-numbers/hex strip) → 3+회 동일 패턴 발견 시 deterministic fix suggestion. LLM 호출 없음. `extractErrorSignature`/`clusterFailures`/`suggestFix`.
+- **`lib/autopilot/smart-skip.js`** (206 lines). Task complexity classifier (trivial/simple/medium/complex). Trivial → CROSS_CHECK + IMPROVE skip 권장. `classifyTaskComplexity`/`recommendSkippablePhases`.
+- **`lib/autopilot/cross-session-learner.js`** (248 lines). 최근 N session 스캔 (DI sessionLoader) → success 패턴 추출 → 신규 goal 기본값 추천. `scanRecentSessions`/`extractSuccessPatterns`/`recommendDefaults`.
+- **`lib/autopilot/template-loader.js`** (172 lines). Goal Contract YAML template loader, cached, path-traversal guard. `loadTemplate`/`listTemplates`/`clearTemplateCache`.
+- **`lib/autopilot/contract-templates/{bugfix,refactor,feature}.yaml`** — pre-made Goal Contract templates.
+
+#### Track H — Observability & auto-PR (4 lib, 73 tests)
+
+- **`lib/autopilot/flamegraph.js`** (184 lines). ASCII phase-profile bar chart, markdown-embeddable, ANSI 없음. `renderFlamegraph`.
+- **`lib/autopilot/auto-pr.js`** (228 lines). `gh repo view` ownership gate + `gh pr create` via execFileSync (shell:false). **DATA POLICY 가드**: `canPush !== true` 시 reject, `--repo` 옵션으로 타 repo redirect 차단. `verifyRepoOwnership`/`createAutoPR`.
+- **`lib/autopilot/dashboard-stream.js`** (187 lines). SSE event stream. **DATA POLICY 가드**: `LOCAL_HOST = '127.0.0.1'` hardcoded, `opts.host` 무시. 15s heartbeat + events.ndjson tail. `createEventStream`.
+- **`lib/autopilot/goal-drift-detector.js`** (177 lines). Goal Contract vs phase output 비교 → `driftPct`/`missing[]`/`extra[]`/`inScope[]`. Pure function. `extractGoalFields`/`extractPhaseFields`/`computeDrift`.
+
+#### Claude `/goal` 통합 설계 (별도 design doc)
+
+- Claude Code v2.1.139+ 네이티브 `/goal` 기능 분석 완료. Auto-invoke DNA에 맞춰 **Option B (Cognitive Router → intent detection → 자동 setup)** 설계. 사용자는 일반 prompt만 작성하면 자동 goal 모드 활성화. Hybrid evaluator (Haiku + validationCommand) 권장. 본 릴리즈는 design only — 구현은 v4.11.0 후속.
+
+### Changed
+
+- **`lib/autopilot/index.js`** — 25+ 신규 symbols barrel re-export 추가. Track E/F/G/H 4 섹션 주석으로 그룹.
+
+### Verification
+
+- **`tests/autopilot/`** → **787/787 passed** (50 test files). 신규 +322 tests (Track E 90 + F 84 + G 75 + H 73), 기존 465 그대로.
+- **ESLint** → autopilot subsystem 0 errors / 0 warnings (18 신규 lib + 18 신규 test).
+- **`engine.js`** → 799/800 (cap 유지, 미수정).
+- **`session-store.js`** → 미수정 (migrate-v3는 분리 모듈, 다음 릴리즈에서 wire-in).
+- **Barrel runtime resolve** → 25 신규 export 전수 확인.
+
+### DATA POLICY 준수
+
+- 모든 신규 모듈 로컬 파일/git 만 사용. 외부 HTTP/DB/webhook 0건.
+- `auto-pr.js`: user-owned repo만 (gh CLI ownership check), `--repo` 옵션 차단.
+- `dashboard-stream.js`: 127.0.0.1 hardcoded, 외부 노출 불가.
+- `cross-machine.js`: `prepareRebase`는 command plan array만 반환, 실행 안 함.
+
+### Architecture
+
+- 4-agent 병렬 구현 (E/F/G/H backend-developer + claude-code-guide). FORBIDDEN files (engine/index/autopilot.md/cost-tracker/session-store) 무수정 보장 → 충돌 0건.
+- Functions <50 lines, files <800 lines, immutable patterns, atomic file writes, DI-first.
+- 5-Layer 아키텍처 준수: 신규 모듈 모두 Auxiliary 계층 (`lib/autopilot/`).
+
+### Deferred to v4.11.0
+
+- Claude `/goal` 통합 구현 (Cognitive router intent detection)
+- `commands/autopilot.md` wire-in (Track E/F/G/H 자동 적용 블록)
+- `bin/artibot-dashboard.mjs` SSE 연결
+- `session-store.js` v3 schema bump + migrate-v3 chain
+- `engine.js` runQueue 실제 startAutopilot 호출 연결
+
+---
+
+## [4.9.0] — 2026-05-17
+
+**Theme**: `/autopilot` major upgrade — Track A (UX & observability) + Track B (cost) + Track C (resilience) + Track D (pre-flight). Base `/autopilot` 입력만으로 신기능 자동 적용. Code-review 4건 fix 포함.
+
+### Added
+
+#### Track A — UX & observability surface (`/autopilot` 자동 적용)
+
+- **`lib/autopilot/notification.js`** (274 lines). 5-notifier API: `notifyCompletion`, `notifyDanger`, `notifyIteration`, `notifyPause`, `notifyPhaseProgress`. PushNotification 기반, throttle window 5분 + TTL 1h + soft-cap 1000 entries 자동 cleanup. 누락 시 silent fail (best-effort).
+- **`lib/autopilot/replay.js`** — `summarizeSession`/`renderTimelineTable` (Phase 6 REPORT 자동 inject + `/autopilot:replay {sessionId}` 지원).
+- **`lib/autopilot/phase-diff.js`** (293 lines). Checkpoint SHA → `git diff --numstat` 집계. Phase 6 REPORT 자동 inject + `/autopilot:diff {sessionId}`. `isSafeSha` 가드로 option-injection 차단, stderr 캡처 후 `phase-diff:git-diff-failed` telemetry 발신.
+- **`lib/autopilot/tui.js`** — `renderFrame`/`runTuiLoop`/`shouldActivateTui`. `--no-tui` 옵션으로 off, CI 환경 자동 감지.
+
+#### Track B — Cost & token observability
+
+- **`lib/autopilot/cost-tracker.js`** (328 lines, 5 public APIs). Phase별 token usage 집계 + budget threshold (50/80/95%) 자동 경고. `notePhaseCost`/`getSessionCost`/`checkBudgetThreshold`/`renderCostBlock`/`renderCostInline`. Report-generator + TUI에서 inline render, `_engine-helpers.js`에서 phase 종료 시 자동 호출.
+- **Tests**: `cost-tracker.test.js` 23 tests.
+
+#### Track C — Crash recovery & schema versioning
+
+- **`lib/autopilot/session-store.js`** — `CURRENT_SCHEMA_VERSION = 2` + `migrateState`/`isLegacyState`. `saveSession`이 v2 자동 stamp, `loadSession`이 legacy v1 → v2 자동 migrate.
+- **`lib/autopilot/lock.js`** — `releaseAllForSession`. Crash 후 resume 시 stale lock 일괄 해제.
+- **`lib/autopilot/_engine-helpers.js`** — `detectInterruptedPhase`/`walkTimelinePending`/`popMatchingPhase`/`buildRecoveryNote`. Resume 시 마지막 인터럽트된 phase 위치 자동 감지 + recovery note 생성.
+- **Tests**: `session-store.migration.test.js` 18 + `lock-release-all.test.js` 7 + `engine-recovery.test.js` 19 tests.
+
+#### Track D — Pre-flight gate
+
+- **`lib/autopilot/preflight.js`** (278 lines, 2 public APIs). 5 checks: `gitClean`, `lockFree`, `diskSpace`, `nodeVersion`, `goalContractLint`. `runPreflight` (전체) + `runIndividualCheck` (단건). 실패 시 Step 1.5에서 user-facing instruction 자동 생성.
+- **`_engine-helpers.js`** — `buildPreflightInstruction`/`renderPreflightSummary`. Step 1.5에서 호출, REPORT에서도 summary inject.
+- **Tests**: `preflight.test.js` 28 tests.
+
+#### Slash-command auto-integration (`commands/autopilot.md`)
+
+- **Step 1.5** — Pre-flight Gate 신규 추가 (`runPreflight` + `buildPreflightInstruction`).
+- **resume row** — `detectInterruptedPhase` + `buildRecoveryNote` 자동 호출.
+- **자동 통합 블록** — `notePhaseCost` + `checkBudgetThreshold` + `renderCostInline` 매 phase 종료 시 자동 호출.
+- **Step 5 (REPORT)** — `renderCostBlock` + `renderPreflightSummary` + `releaseAllForSession` 자동 호출.
+- **Arguments** — `--no-tui` 옵션 파싱 추가.
+- **argument-hint** — `[--no-tui]` 노출.
+
+### Fixed
+
+- **Q1 — `lib/autopilot/notification.js`**: throttle Map 무제한 성장 위험. TTL 1h + soft-cap 1000 entries cleanup을 `isThrottled` 호출 시 자동 실행. 메모리 leak 방지.
+- **Q2 — `lib/autopilot/phase-diff.js:34-36`**: `defaultGitRunner` SHA 인자가 `--option`/`/path`/whitespace 등을 통과시킬 위험. `isSafeSha` 가드 도입 (`/^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$/`). Hex SHA + DI-mock id (`sha-plan`) 통과, option-injection 차단. 실패 시 `phase-diff:unsafe-sha` telemetry.
+- **Q9 — `lib/autopilot/phase-diff.js:46-52`**: `defaultGitRunner`가 stderr를 `ignore`로 버려서 git-diff 실패 원인 진단 불가능. `stdio: ['ignore', 'pipe', 'pipe']`로 변경 + `phase-diff:git-diff-failed` telemetry에 stderr 280자 truncate 포함.
+- **W1 — `commands/autopilot.md:55`**: `--no-tui` 옵션이 Arguments 파싱 목록에서 누락. 추가.
+
+### Verification
+
+- **`tests/autopilot/`** → **465/465 passed** (cost-tracker 23 + preflight 28 + engine-helpers 9 + migration 18 + lock-release-all 7 + recovery 19 + phase-diff 32 + notification 15 + 기존 314).
+- **Plugin-wide** → **8 272/8 276 passed** (4 fail은 v4.8.4 baseline pre-existing, 이번 작업 regression 아님).
+- **ESLint** → autopilot subsystem 0 errors.
+- **`engine.js`** → 799/800 lines (cap preserved). 신규 wire-in은 모두 slash command level (`commands/autopilot.md`) + `_engine-helpers.js`로 처리.
+- **Barrel exports** → `lib/autopilot/index.js`에서 11 신규 export runtime-resolvable 확인.
+
+### Audit Trail
+
+- Code review: 2-stage (spec-reviewer + quality-reviewer) 통과. Q1/Q2/Q9 + W1 4건 fix 반영.
+- 3 parallel agents (Track B/C/D) 동시 작업 — `_engine-helpers.js` 15 functions 무손실 보존 확인.
+
+---
+
+## [4.8.4] — 2026-05-17
+
+**Theme**: Autopilot cleanup — e2e regression fix + shared spawn mocking helper + System1 cache bounds + dead-code removal.
+
+### Fixed
+
+- **`tests/e2e/plugin-init-flow.test.js:284-296`** — Dispatcher detection regression from v4.8.2 shell-form revert. The test inferred "is dispatcher" from `entry.args[]` only, but v4.8.2 (commit `5eb2430`) collapsed every hook entry back to a single `command` string with no `args[]`. After the revert, no entry matched `_<name>-dispatcher.js`, so the 30 000 ms ceiling rule was never applied, and the first dispatcher with `timeout: 30000` failed against the 15 000 ms non-dispatcher ceiling. Fixed by also matching the dispatcher regex against `entry.command`. 41/41 plugin-init-flow tests pass.
+
+### Added
+
+- **`tests/utils/spawn-mock.js`** (140 lines, 4 exports). Closes backlog item #7 from v4.8.0 cleanup. Provides `commandRouter`, `execFileRouter`, `spawnSyncRouter`, and `mockChildProcess` — opt-in factories that replace the 17 in-line `vi.mock('node:child_process', …)` blocks across the suite. Existing inline mocks continue to work unchanged; new tests pick up the helpers via `import { commandRouter } from '../utils/spawn-mock.js'`. Routes accept either `Record<string, value>` or `Map`, support function-valued routes, and `spawnSyncRouter` normalises to the canonical `{ status, stdout, stderr }` shape callers expect.
+- **`tests/utils/spawn-mock.test.js`** (128 lines, 16 unit tests covering all four exports + fallback / Map / function-route / status-override paths).
+
+### Changed
+
+- **`lib/cognitive/system1.js:58/61/64`** — `_patternCache`, `_memoryCache`, `_toolCache` each pass `{ maxSize: 500 }` to the shared `Cache` constructor. Long-running sessions previously accumulated unbounded entries because the Cache base class only honours TTL when `maxSize` is explicitly supplied. The LRU bound caps cognitive-layer memory growth without altering hit-rate behaviour (all three caches stay well under 500 in normal usage).
+
+### Removed
+
+Six files / 559 lines total. Each was verified to have zero importers anywhere in the repo (source, tests, CI workflows, install scripts, command/skill markdown, CHANGELOG) before removal.
+
+- **`tests/autopilot/smoke/`** (entire directory, 4 files / 201 lines):
+  - `autopilot-plan.smoke.mjs` — self-referenced a non-existent `_autopilot-smoke.mjs`.
+  - `finish-night-session.mjs`, `start-night-session.mjs`, `full-integration-check.mjs` — zero external references; superseded by `tests/autopilot/engine.test.js` and the dedicated `goal-*.test.js` suites.
+- **`scripts/bootstrap-learning.js`** (189 lines) — one-shot bootstrap CLI; only self-references. Live equivalent is `lib/learning/bootstrapLearn` exported by `lib/learning/index.js`.
+- **`scripts/migrate-rules-to-csv.js`** (169 lines) — one-shot migration tool no longer required (migration completed pre-v4.0); only self-references.
+
+Refactor-cleaner audit also flagged 19 of 21 one-shot scripts in `scripts/` and ~50 barrel re-exports across `lib/*/index.js` as "potentially dead", but per-symbol verification showed every survivor is anchored by either (a) the `tests/barrel-exports.test.js` public-surface guard, (b) runtime `await import(toFileUrl(…))` from the `/autopilot` slash command, (c) a CHANGELOG entry signalling intent, or (d) an active test exercising the throw of an intentional stub. The two flagged "incomplete" stubs (`scripts/hooks/event-emitter.mjs::broadcastEnvelope()` and `lib/core/marketplace-installer.js::installFromRegistry()`) are documented design — both kept.
+
+### Verification
+
+- `npx vitest run` → **8 336 passed / 0 failed / 3 skipped** (336 test files, 24.23 s). Identical to the v4.8.3 baseline modulo the +24 new spawn-mock tests (`8 312 → 8 336`).
+- 5-file lockstep (`scripts/release-check.js`): all green at 4.8.4.
+
+### Audit Trail
+
+- Full Phase 0–6 transcript: `.artibot/REPORTS/2026-05-17-autopilot-session.md`.
+- Of the 79 findings surfaced by the 5-team parallel audit, this release acts on 10 (4 applied + 6 deletions); the remaining 69 are documented as load-bearing or filed in the Future Work queue (`§v4.8.4+ High-Impact / Medium-Risk / Low-Priority` in the report).
+
+---
+
+## [4.8.3] — 2026-05-16
+
+**Theme**: Plugin-cache drift containment. Closes the v4.6.4 → v4.8.2 regression class by syncing the third install layer (`~/.claude/plugins/cache/artibot/artibot/<version>/`) — the one Claude Code actually loads at session start.
+
+### Added
+
+- **`install.sh` — `install_plugin_cache()`** (between `install_marketplace_mirror` and `install_rules`). Walks every `~/.claude/plugins/cache/artibot/artibot/<version>/` and mirrors the runtime hot paths (`hooks/`, `scripts/`, `lib/`, `output-styles/`, `artibot.config.json`, `package.json`) from the source. Deliberately does **not** touch `.claude-plugin/plugin.json` inside cache dirs — that file's `version` field is the cache routing key. No-op when the cache root is absent. Logs the count of synced version dirs.
+
+- **`scripts/update.js` — `detectHookDrift(pluginRoot, home)`**. Computes SHA-1 of source `hooks/hooks.json` against every cached copy and flags mismatches with `{ version, cacheHash }` pairs. Returns `{ drift: false, reason }` when the cache is absent, source is unreadable, or every cache matches. Triggered inside `main()` even when the version check reports "already up to date" — drift now forces a reinstall + `clearCache()`. Skipped in `--check` mode (drift is detected but not acted on, preserving the read-only contract).
+
+### Changed
+
+- **`scripts/update.js::main()`** install-decision: `shouldInstall = FORCE || updateAvailable || driftReport.drift`. Previously the up-to-date branch exited early. The exit message now reads `Triggering reinstall to resync cache.` when drift is detected, with per-version diff lines like `cache v4.8.1 hooks.json (a1b2c3d4) ≠ source (5e6f7890)`.
+
+### Tests
+
+- **`tests/scripts/update.test.js`** (+8 tests, total 25 → 33):
+  - `detectHookDrift` covers: matching cache (no drift), single mismatched version, no plugin cache present, unreadable source, missing cache hooks.json (incomplete cache, not drift).
+  - `fileHash` covers: stable SHA-1, null on missing file, distinct digests for distinct content.
+
+### Root Cause Note
+
+Three install layers + one runtime cache = four places a hook config can live. v4.8.1 introduced the marketplace mirror; v4.8.2 fixed the source. Neither touched the cache, so a `/update` reporting "already up to date" left the broken cache in place — the v4.6.4 args[] schema persisted in `~/.claude/plugins/cache/artibot/artibot/4.8.1/hooks/hooks.json` until manually copied over. v4.8.3 closes the loop: `install.sh` mirrors all three writable layers in one pass; `update.js` detects the drift the version check misses.
+
+---
+
+## [4.8.2] — 2026-05-16
+
+**Theme**: Hotfix for v4.6.4 exec-form `args[]` schema misadoption — every hook had been silently failing.
+
+### Fixed
+
+- **`hooks/hooks.json`** — Reverted from exec-form (`command: "node"` + `args: ["${CLAUDE_PLUGIN_ROOT}/scripts/hooks/<name>.js"]`) to shell-form (`command: "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/<name>.js"`). Claude Code 2.1.x ignores the non-standard `args[]` field — Claude Code, `hookify`, `everything-claude-code`, and the v4.5.8 baseline all use shell-form as the single source of truth. With `args[]` ignored, every hook invocation reduced to bare `node`, which on Node 22.19 enters `internal/main/eval_stdin` and tries to parse the incoming JSON payload as TypeScript. The crash surfaced loudest at the Stop slot (`[stdin]:1 Unexpected token ':'` from `eval_stdin`), but all 25 hook commands were broken. Manually invoking the dispatcher with the same stdin payload exited 0, confirming the dispatchers themselves were healthy and the regression was confined to `hooks.json` shape.
+
+### Changed
+
+- **`tests/hooks-schema-shape.test.js`** — Rewrote the schema tripwire to enforce shell-form: `command` must match `^node \$\{CLAUDE_PLUGIN_ROOT\}/scripts/hooks/<name>\.(js|mjs)(?:\s+\S+)*$`, no entry may carry an `args[]` field (explicit deny), and each referenced script must exist on disk. Description-bumping in `hooks.json` triggers the SHA1 fingerprint snapshot, forcing an explicit two-step update of `tests/hooks-schema-fingerprint.txt` for any future schema drift. New fingerprint: `0a4e18fe3d95c920406b72b2524f96dd994aab2d`.
+- **5-file version lockstep** — `.claude-plugin/plugin.json`, `.well-known/mcp-server.json`, `AGENTS.md`, `artibot.config.json`, `package.json` bumped 4.8.1 → 4.8.2 per `scripts/release-check.js`.
+
+### Verification
+
+- 98 hook-related tests pass (`hooks-schema-shape` 5, `legacy-stubs` 16, `validate-hooks` 6, `marketplace-installer` + 5 hook dispatcher suites totaling 76).
+- All three `hooks.json` copies (project source + `~/.claude/artibot/` + `~/.claude/plugins/marketplaces/artibot/...`) MD5-identical at `752e65c6...`.
+- E2E manual stdin payload → `_stop-dispatcher.js` exits 0, autopilot + session-notes hooks fire correctly.
+
+### Root Cause Note
+
+The v4.6.4 commit `7072ac1` ("exec-form hooks") migrated to `args[]` on the assumption that Claude Code honored it. No empirical check confirmed the behaviour and the schema tripwire at the time positively required `args[]`, so every regression run thereafter validated the broken shape. v4.8.2 inverts the tripwire: any future `args[]` reintroduction now fails the suite.
+
+---
+
+## [4.8.1] — 2026-05-16
+
+**Theme**: Hotfix for v4.8.0 hook-removal regression + marketplace install drift.
+
+### Fixed
+
+- **`scripts/hooks/check-console-log.js`** — Restored as a no-op stub (`process.exit(0)`). v4.8.0 removed the file outright, but Claude Code sessions cache `hooks.json` in memory at startup. Sessions that loaded the v3.0.0 registration before the v4.7.2 dispatcher consolidation kept `check-console-log.js` wired as a Stop hook — the next Stop event after upgrade crashed with `Cannot find module .../check-console-log.js`. Symptom reproduced in unrelated projects (e.g. Carib) whose sessions had not been restarted.
+- **Marketplace install drift** — `install.sh` now mirrors the direct install at `~/.claude/artibot/` into the Claude Code marketplace path `~/.claude/plugins/marketplaces/artibot/plugins/artibot/`. Every project session reads hooks from the marketplace path via `CLAUDE_PLUGIN_ROOT`, so omitting this mirror left other projects on whatever version Claude Code last fetched (months stale). Root cause of the v3.0.0-cached Stop hook above. New `install_marketplace_mirror()` function runs after `install_hooks` in the main install sequence and is a no-op when the marketplace path is absent.
+
+### Added
+
+- **`tests/hooks/legacy-stubs.test.js`** (16 tests) — Regression guard for 8 v3.0.0 hooks that v4.7.2 consolidated into the dispatcher (`check-console-log.js`, `post-edit-format.js`, `post-bash.js`, `pre-compact.js`, `user-prompt-handler.js`, `subagent-handler.js`, `team-idle-handler.js`, `session-end.js`). Each hook gets two assertions (file exists + parses as Node script). Failure message guides remediation: restore the file or write a no-op stub.
+
+### Policy
+
+- **Legacy-stub policy** (inline docs in `install.sh`) — When a hook file is consolidated into the dispatcher, leave a no-op stub at the original path until in-flight sessions are expected to have restarted. Removing the file forces every cached-config session to crash on the next matching event.
+
+---
+
+## [4.8.0] — 2026-05-16
+
+**Theme**: Simplification + Stability. Hook slot consolidation, DATA POLICY runtime guard, dispatch-table single-source-of-truth, autopilot UX polish.
+
+### Added
+
+- **`lib/privacy/data-egress-guard.js`** (Wave 1B) — Fail-closed allowlist runtime guard. `assertEgressAllowed(url)` blocks outbound HTTPS to any host not in `lib/privacy/allowlist.json` or the `ARTIBOT_ALLOW_EGRESS` env var. Localhost / `127.x` / `::1` / `*.local` always allowed. Wired into `scripts/hooks/http-notify.js` and `scripts/hooks/swarm-*.js`. Enforces the "no external DB / no third-party plugin egress" data policy.
+- **`hooks/dispatch-table.json`** (Wave 3A) — Single source of truth for every spawn-based dispatcher's HOOKS array. 7 slots × 38 handler entries (SessionStart 9, UserPromptSubmit 6, PostToolUse 10, Stop 5, SessionEnd 5, SubagentStop 3, PreCompact 0). Eliminates drift between dispatcher source files and hook registration.
+- **`lib/dispatcher/dispatch-table-loader.js`** — Cached fail-fast loader. Dispatchers call `loadDispatchTable(slot)` at startup and receive resolved-path handler arrays. Validates `name/script/timeoutMs` per handler.
+- **`lib/release/pr-description-builder.js`** (Wave 3B, 326 LOC + 31 tests) — Auto-composes PR descriptions from `git log` + `.artibot/SESSION-NOTES.md` + diff stats. Buckets commits by `classifyCommit()` (WIP / release / regular). Injected file/git readers for testability.
+- **`lib/autopilot/wip-stats.js`** (Wave 3C) — WIP commit counter + age tracker. `appendWipAdvisory()` runs in SessionStart and emits `[artibot:wip] N WIP commit(s) (oldest Nh ago) — consider /squash before push` when thresholds exceed `ARTIBOT_WIP_COUNT_THRESHOLD=10` / `ARTIBOT_WIP_AGE_HOURS=4`.
+- **5 new dispatchers**: `_sessionstart-dispatcher.js`, `_posttooluse-dispatcher.js`, `_stop-dispatcher.js`, `_sessionend-dispatcher.js`, `_subagentstop-dispatcher.js`. All use `child_process.spawn` with `Promise.allSettled` + `ARTIBOT_DISABLE_<SLOT>=1` kill switch + exit 0 always. Shared spawn/merge utilities live in `_dispatcher-utils.js`.
+
+### Changed
+
+- **`hooks/hooks.json`** — Slot registrations consolidated: SessionStart 9→1, PostToolUse 10→1, Stop 5→1, SessionEnd 5→1, SubagentStop 3→1. Total entries 51 → 25. Every consolidated slot now points at a single dispatcher script; per-handler registration moves into `dispatch-table.json`.
+- **`lib/core/hook-dispatcher.js`** (legacy WS-C.2) — Now honours `ARTIBOT_HOOK_DISPATCH_TABLE_PATH` for test isolation, so its tests no longer race the v4.8.0 loader on the shared `dispatch-table.json` file.
+
+### Fixed
+
+- **Korean-path silent-skip bug in 9 hooks** (Wave 2A) — `new URL(import.meta.url).pathname` percent-encodes non-ASCII path segments (`바탕 화면` → `%EB%B0%94%ED%83%95%20%ED%99%94%EB%A9%B4`), but `process.argv[1]` arrives OS-decoded. The `isMain` guard `argv1 === here` was always false on Korean install paths, so the hook's `main()` silently never ran. Replaced with `path.resolve(fileURLToPath(import.meta.url))` in: `ambiguity-guard.js`, `autopilot-nlu-trigger.js`, `auto-team-trigger.js`, `runtime-prompt.js`, `skill-discovery-inject.js`, `user-prompt-handler.js`, `webfetch-cache-pre.js`, `webfetch-cache-post.js`, `_userprompt-dispatcher.js`.
+- **Test-file filesystem race** — `tests/core/hook-dispatcher.test.js` previously overwrote the real `hooks/dispatch-table.json` during parallel vitest runs, causing intermittent 14-test failures in `tests/dispatcher/dispatch-table.test.js`. The test now copies the real table into a tmp dir and overrides the path via `ARTIBOT_HOOK_DISPATCH_TABLE_PATH`.
+
+### Removed
+
+- **`scripts/hooks/check-console-log.js`** (Wave 4) — Confirmed-dead Stop hook. Unregistered since v4.7.2 (`CHANGELOG` line 429) and no internal imports. Test file `tests/hooks/check-console-log.test.js` also deleted. Documentation references in `README.md` / `SECURITY.md` / `docs/phase2/hook-audit.md` corrected.
+
+### Performance
+
+- **Hook fan-out is now parallel by default** at every consolidated slot — handlers fire via `Promise.allSettled`, bounded by the slot's longest `timeoutMs`. PostToolUse (10 handlers) cuts worst-case latency from sequential O(Σ timeoutMs) to O(max timeoutMs).
+
+### Tests
+
+- **+~200 net tests** across the wave: dispatch-table loader (25), pr-description-builder (31), wip-stats (12), egress-guard (~30), dispatcher integration suites, regression coverage for each consolidated slot.
+- Net suite: 8230 passing across 332 test files (after removing 26 `check-console-log` tests).
+
+---
+
 ## [Unreleased]
+
+### Added
+
+- **`/adr` 커맨드 + `skills/adr-format/`** (Senior Eng Collection #4 벤치마킹) — 아키텍처 결정 기록(ADR) 작성 워크플로우. "ADR 작성해줘" 같은 자연어 입력으로도 자동 트리거됩니다. 결정 배경·대안·트레이드오프를 구조화된 문서로 남겨 팀 컨텍스트를 보존합니다.
+- **`/migrate` 커맨드 + `skills/zero-downtime-migration/`** (Senior Eng Collection #11) — 무중단 DB/인프라 마이그레이션 전략 수립 및 단계별 실행 가이드. Expand-Contract 패턴, 롤백 플랜, 단계별 검증 체크포인트를 자동 생성합니다.
+- **NLU 자동 탐지** — 비개발자가 "ADR 문서 만들어줘", "DB 마이그레이션 어떻게 하지" 처럼 자연어로 입력하면 NLU 훅이 의도를 분류하여 `/adr` 또는 `/migrate` 커맨드를 자동으로 제안합니다. 슬래시 커맨드 이름을 몰라도 됩니다.
 
 ### Changed (BREAKING for users relying on silent commit/push)
 

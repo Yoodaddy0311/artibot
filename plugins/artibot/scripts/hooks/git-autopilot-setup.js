@@ -34,10 +34,14 @@ import { isAutopilotAllowed } from '../../lib/autopilot/repo-identity.js';
 // Constants
 // -------------------------------------------------------------------------
 
+// v4.7.8: WIP interval bumped 30 → 120. Memory and SESSION-NOTES.md now
+// preserve session context, so frequent code-snapshot commits are no longer
+// the primary safety net. 2h still preserves work against crashes/reboots
+// without flooding the branch with 16 WIP commits per day.
 const DEFAULT_CONFIG = {
-  version: 1,
+  version: 2,
   enabled: true,
-  wipIntervalMinutes: 30,
+  wipIntervalMinutes: 120,
   autoPullOnSession: true,
   autoPushOnStop: true,
   squashWipOnClose: true,
@@ -46,6 +50,21 @@ const DEFAULT_CONFIG = {
   guardEnabled: true,
   lastSetupAt: null,
 };
+
+/**
+ * Migrate v1 → v2: bump wipIntervalMinutes 30 → 120 IF the user still has
+ * the old default (never customized). Custom values are preserved.
+ *
+ * @param {object} existing parsed .git/autopilot.json (may be empty {})
+ * @returns {object} possibly migrated copy
+ */
+function migrateConfig(existing) {
+  const existingVersion = typeof existing.version === 'number' ? existing.version : 1;
+  if (existingVersion < 2 && existing.wipIntervalMinutes === 30) {
+    return { ...existing, wipIntervalMinutes: 120 };
+  }
+  return existing;
+}
 
 // -------------------------------------------------------------------------
 // Helpers
@@ -177,10 +196,11 @@ export async function main(argv) {
     return hasExisting ? 'skipped-not-allowed' : 'skipped';
   }
 
-  const existing = hasExisting ? readExistingConfig(configPath) : {};
+  const existing = hasExisting ? migrateConfig(readExistingConfig(configPath)) : {};
   const config = {
     ...DEFAULT_CONFIG,
     ...existing,
+    version: 2,
     lastSetupAt: new Date().toISOString(),
   };
 

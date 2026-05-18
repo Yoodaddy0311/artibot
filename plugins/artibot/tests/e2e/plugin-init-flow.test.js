@@ -211,12 +211,24 @@ describe('E2E: Plugin Initialization Flow', () => {
       expect(matchers.some((m) => m.includes('Bash'))).toBe(true);
     });
 
-    it('registers PostToolUse hooks including quality gate', () => {
+    it('registers PostToolUse hooks routed via the consolidated dispatcher', () => {
+      // v4.8.0: PostToolUse is now consolidated through
+      // _posttooluse-dispatcher.js which spawns quality-gate.js (and 9 other
+      // PostToolUse hooks) internally with per-tool matching. The hooks.json
+      // file therefore has exactly one PostToolUse entry pointing at the
+      // dispatcher; the underlying quality-gate hook still exists on disk
+      // and is wired through the dispatcher's HOOKS table.
       expect(hooksConfig.hooks.PostToolUse).toBeDefined();
       const commands = hooksConfig.hooks.PostToolUse.flatMap(
         (entry) => entry.hooks.map(fullCommand),
       );
-      expect(commands.some((cmd) => cmd.includes('quality-gate'))).toBe(true);
+      expect(commands).toHaveLength(1);
+      expect(commands[0]).toContain('_posttooluse-dispatcher');
+
+      // quality-gate.js must still exist as a standalone script (rollback
+      // safety — hooks.json can revert to direct registration).
+      const qg = path.join(PLUGIN_ROOT, 'scripts', 'hooks', 'quality-gate.js');
+      expect(() => readFileSync(qg, 'utf-8')).not.toThrow();
     });
 
     it('registers SessionEnd hooks for cleanup', () => {
@@ -259,15 +271,28 @@ describe('E2E: Plugin Initialization Flow', () => {
       }
     });
 
-    it('all hooks have valid timeouts (positive number, <= 15000ms)', () => {
-      const allTimeouts = Object.values(hooksConfig.hooks).flatMap(
+    it('all hooks have valid timeouts (positive number, <= 30000ms)', () => {
+      // v4.8.0: dispatcher slots use 30000ms because they wrap multiple
+      // child hooks each with their own per-hook timeout (the dispatcher
+      // ceiling must be >= slowest internal hook + IPC buffer). Direct
+      // (non-dispatcher) hook entries continue to use the old 15000ms
+      // ceiling — see the second loop below.
+      const allEntries = Object.values(hooksConfig.hooks).flatMap(
         (entries) => entries.flatMap((entry) => entry.hooks
-          .filter((h) => h.type !== 'prompt')
-          .map((h) => h.timeout)),
+          .filter((h) => h.type !== 'prompt')),
       );
-      for (const timeout of allTimeouts) {
-        expect(timeout).toBeGreaterThan(0);
-        expect(timeout).toBeLessThanOrEqual(15000);
+      const dispatcherRe = /\/_[a-z]+-dispatcher\.js(?:\s|$)/;
+      for (const entry of allEntries) {
+        expect(entry.timeout).toBeGreaterThan(0);
+        const isDispatcher =
+          (entry.args || []).some((a) => dispatcherRe.test(a)) ||
+          dispatcherRe.test(entry.command || '');
+        const ceiling = isDispatcher ? 30000 : 15000;
+        const label = entry.args?.[0] || entry.command || 'unknown';
+        expect(
+          entry.timeout,
+          `${label} exceeds ${ceiling}ms ceiling`,
+        ).toBeLessThanOrEqual(ceiling);
       }
     });
   });

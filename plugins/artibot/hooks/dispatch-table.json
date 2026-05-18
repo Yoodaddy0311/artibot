@@ -1,21 +1,94 @@
 {
-  "version": 1,
-  "description": "Phase 2 WS-C.2 dispatch table — additive companion to hooks.json. Activated under feature flag in C.3 (pending user approval).",
+  "version": 2,
+  "description": "Single source of truth for dispatcher hook tables. Each slot lists the child-process hooks that the corresponding dispatcher fans out in parallel. Loaded by lib/dispatcher/dispatch-table-loader.js and consumed by the *-dispatcher.js scripts. Adding a new hook = appending one entry here (no dispatcher code change).",
   "slots": {
     "SessionStart": {
       "label": "Session Initialization",
-      "handlers": []
+      "dispatcher": "scripts/hooks/_sessionstart-dispatcher.js",
+      "strategy": "parallel-spawn",
+      "handlers": [
+        { "name": "session-start",          "script": "session-start.js",          "timeoutMs": 5000 },
+        { "name": "memory-tracker",         "script": "memory-tracker.js",         "timeoutMs": 5000, "args": ["SessionStart"] },
+        { "name": "swarm-download",         "script": "swarm-download.js",         "timeoutMs": 15000 },
+        { "name": "git-autopilot-setup",    "script": "git-autopilot-setup.js",    "timeoutMs": 5000 },
+        { "name": "image-cleanup",          "script": "image-cleanup.js",          "timeoutMs": 5000 },
+        { "name": "session-digest",         "script": "session-digest.js",         "timeoutMs": 3000 },
+        { "name": "git-autopilot-session",  "script": "git-autopilot-session.js",  "timeoutMs": 10000 },
+        { "name": "auto-learning-check",    "script": "auto-learning-check.js",    "timeoutMs": 5000 },
+        { "name": "skill-validation-check", "script": "skill-validation-check.js", "timeoutMs": 5000 }
+      ]
     },
     "UserPromptSubmit": {
       "label": "User Prompt Pre-processing",
-      "handlers": []
+      "dispatcher": "scripts/hooks/_userprompt-dispatcher.js",
+      "strategy": "in-process-import",
+      "note": "This slot uses in-process named-export imports (not child-process spawn). Handler entries below are informational only; the dispatcher imports them directly via ESM. Do not consume from a loader.",
+      "handlers": [
+        { "name": "user-prompt-handler",    "script": "user-prompt-handler.js",    "timeoutMs": 5000, "order": "rewriter-first" },
+        { "name": "auto-team-trigger",      "script": "auto-team-trigger.js",      "timeoutMs": 5000, "order": "parallel" },
+        { "name": "runtime-prompt",         "script": "runtime-prompt.js",         "timeoutMs": 5000, "order": "parallel" },
+        { "name": "autopilot-nlu-trigger",  "script": "autopilot-nlu-trigger.js",  "timeoutMs": 5000, "order": "parallel" },
+        { "name": "auto-command-suggest",   "script": "auto-command-suggest.js",   "timeoutMs": 5000, "order": "parallel" },
+        { "name": "ambiguity-guard",        "script": "ambiguity-guard.js",        "timeoutMs": 5000, "order": "parallel" },
+        { "name": "git-autopilot-save",     "script": "git-autopilot-save.js",     "timeoutMs": 5000, "order": "child-spawn-side-effect" }
+      ]
     },
     "PostToolUse": {
       "label": "After Tool Execution",
-      "handlers": []
+      "dispatcher": "scripts/hooks/_posttooluse-dispatcher.js",
+      "strategy": "parallel-spawn-with-routing",
+      "handlers": [
+        { "name": "pre-write-guard",      "script": "pre-write-guard.js",      "timeoutMs": 3000,  "tools": ["Read"] },
+        { "name": "quality-gate",         "script": "quality-gate.js",         "timeoutMs": 8000,  "tools": ["Edit", "Write"] },
+        { "name": "post-edit-format",     "script": "post-edit-format.js",     "timeoutMs": 10000, "tools": ["Edit"] },
+        { "name": "post-edit-recovery",   "script": "post-edit-recovery.js",   "timeoutMs": 5000,  "tools": ["Edit", "Write"] },
+        { "name": "post-bash",            "script": "post-bash.js",            "timeoutMs": 5000,  "tools": ["Bash"] },
+        { "name": "post-bash-failure",    "script": "post-bash-failure.js",    "timeoutMs": 3000,  "tools": ["Bash"] },
+        { "name": "post-write-tdd",       "script": "post-write-tdd.js",       "timeoutMs": 2000,  "tools": ["Edit", "Write"] },
+        { "name": "mark-main-agent-edit", "script": "mark-main-agent-edit.js", "timeoutMs": 3000,  "tools": ["Edit", "Write", "MultiEdit"] },
+        { "name": "tool-tracker",         "script": "tool-tracker.js",         "timeoutMs": 3000,  "tools": ["*"] },
+        { "name": "webfetch-cache-post",  "script": "webfetch-cache-post.js",  "timeoutMs": 5000,  "tools": ["WebFetch"] }
+      ]
+    },
+    "Stop": {
+      "label": "End of Agent Turn",
+      "dispatcher": "scripts/hooks/_stop-dispatcher.js",
+      "strategy": "parallel-spawn",
+      "handlers": [
+        { "name": "stop-review-gate",    "script": "stop-review-gate.js",    "timeoutMs": 15000 },
+        { "name": "dev-verify-gate",     "script": "dev-verify-gate.js",     "timeoutMs": 8000 },
+        { "name": "git-autopilot-close", "script": "git-autopilot-close.js", "timeoutMs": 15000 },
+        { "name": "stop-recap",          "script": "stop-recap.js",          "timeoutMs": 5000 },
+        { "name": "session-notes",       "script": "session-notes.js",       "timeoutMs": 5000 }
+      ]
+    },
+    "SessionEnd": {
+      "label": "Session Teardown",
+      "dispatcher": "scripts/hooks/_sessionend-dispatcher.js",
+      "strategy": "parallel-spawn",
+      "handlers": [
+        { "name": "session-end",     "script": "session-end.js",     "timeoutMs": 10000 },
+        { "name": "swarm-sync",      "script": "swarm-sync.js",      "timeoutMs": 15000 },
+        { "name": "rotation-runner", "script": "rotation-runner.js", "timeoutMs": 8000 },
+        { "name": "memory-tracker",  "script": "memory-tracker.js",  "timeoutMs": 8000, "args": ["SessionEnd"] },
+        { "name": "http-notify",     "script": "http-notify.js",     "timeoutMs": 8000 }
+      ]
+    },
+    "SubagentStop": {
+      "label": "Subagent Turn End",
+      "dispatcher": "scripts/hooks/_subagentstop-dispatcher.js",
+      "strategy": "parallel-spawn",
+      "handlers": [
+        { "name": "subagent-handler", "script": "subagent-handler.js", "timeoutMs": 5000, "args": ["stop"] },
+        { "name": "agent-evaluator",  "script": "agent-evaluator.js",  "timeoutMs": 8000 },
+        { "name": "workflow-status",  "script": "workflow-status.js",  "timeoutMs": 5000, "args": ["teammate-update"] }
+      ]
     },
     "PreCompact": {
       "label": "Before Context Compaction",
+      "dispatcher": null,
+      "strategy": "single-hook",
+      "note": "Not dispatcher-consolidated. PreCompact remains a single direct hook registration in hooks.json.",
       "handlers": []
     }
   }

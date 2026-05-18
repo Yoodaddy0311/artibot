@@ -422,6 +422,26 @@ describe('SSRF Protection - validateUrl()', () => {
     expect(ALLOWED_HOSTS.has('::1')).toBe(true);
     expect(ALLOWED_HOSTS.size).toBe(4); // localhost, 127.0.0.1, ::1, [::1]
   });
+
+  // v4.8.0 audit M-1: URL-embedded credentials must be rejected.
+  it('blocks URLs with embedded user credentials (M-1, allowlisted host)', () => {
+    expect(() => validateUrl('http://attacker:pwd@localhost:3000/api')).toThrow('SSRF blocked');
+    expect(() => validateUrl('http://attacker:pwd@localhost:3000/api')).toThrow('embedded credentials');
+  });
+
+  it('blocks URLs with username-only userinfo (M-1)', () => {
+    expect(() => validateUrl('http://just-user@localhost/api')).toThrow('embedded credentials');
+  });
+
+  it('blocks URLs with embedded credentials even for Cloud Run allowlist pattern (M-1)', () => {
+    expect(() =>
+      validateUrl('https://x:y@artibot-swarm-1.us-central1.run.app/api/v1/health'),
+    ).toThrow('embedded credentials');
+  });
+
+  it('still accepts clean URLs after the M-1 hardening', () => {
+    expect(() => validateUrl('http://localhost:3000/api/v1/health')).not.toThrow();
+  });
 });
 
 describe('SSRF Protection - integration with API functions', () => {

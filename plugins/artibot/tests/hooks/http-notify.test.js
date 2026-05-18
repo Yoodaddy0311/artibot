@@ -250,13 +250,22 @@ describe('loadWebhookConfig()', () => {
 // ---------------------------------------------------------------------------
 describe('sendWebhook()', () => {
   let stderrSpy;
+  const originalAllowEgress = process.env.ARTIBOT_ALLOW_EGRESS;
 
   beforeEach(() => {
     stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    // The DATA POLICY egress guard requires the destination host to be
+    // allowlisted. Tests opt in explicitly via env var so the fetch path runs.
+    process.env.ARTIBOT_ALLOW_EGRESS = 'example.com';
   });
 
   afterEach(() => {
     stderrSpy.mockRestore();
+    if (originalAllowEgress === undefined) {
+      delete process.env.ARTIBOT_ALLOW_EGRESS;
+    } else {
+      process.env.ARTIBOT_ALLOW_EGRESS = originalAllowEgress;
+    }
     vi.restoreAllMocks();
   });
 
@@ -314,5 +323,20 @@ describe('sendWebhook()', () => {
     global.fetch = vi.fn().mockResolvedValueOnce({ ok: true });
     await sendWebhook({ url: 'https://example.com' }, { event: 'test' });
     expect(global.fetch).toHaveBeenCalled();
+  });
+
+  it('refuses (returns false) when DATA POLICY blocks the URL', async () => {
+    // Override allowlist so example.com is NOT permitted
+    delete process.env.ARTIBOT_ALLOW_EGRESS;
+    global.fetch = vi.fn().mockResolvedValueOnce({ ok: true });
+    const result = await sendWebhook(
+      { url: 'https://unallowed.example.com/hook', timeoutMs: 5000 },
+      { event: 'test' },
+    );
+    expect(result).toBe(false);
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(stderrSpy).toHaveBeenCalledWith(
+      expect.stringContaining('blocked by DATA POLICY'),
+    );
   });
 });

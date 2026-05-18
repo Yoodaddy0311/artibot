@@ -203,9 +203,9 @@ The hook system (`scripts/hooks/`) includes built-in protections:
 |------|-------|------------|
 | `pre-write.js` | PreToolUse (Write/Edit) | Blocks writes to `.env`, `.pem`, `.key`, and other sensitive file extensions |
 | `pre-bash.js` | PreToolUse (Bash) | Blocks execution of `rm -rf`, `git push --force`, and other destructive commands |
-| `check-console-log.js` | Stop | Warns on `console.log` presence to prevent accidental data logging |
+| `pre-write-guard.js` | PreToolUse (Write/Edit) | Repository guard — blocks writes outside the active workspace |
 | `quality-gate.js` | PostToolUse (Edit/Write) | Validates code quality after modifications |
-| `cognitive-router.js` | UserPromptSubmit | Routes through complexity analysis for safety |
+| `ambiguity-guard.js` | UserPromptSubmit | Detects ambiguous prompts (e.g. "done"→"dont" typos) before action |
 
 ### Hook Execution Constraints / 훅 실행 제약
 

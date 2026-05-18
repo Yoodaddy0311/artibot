@@ -20,6 +20,7 @@ import { getPluginRoot } from './ci-utils.js';
 // for the v8 instrumentation, so 78 is unattainable without raising local
 // coverage well past 90% on branches. The other axes (87%/89%/87% on CI)
 // have plenty of headroom and stay at 85.
+//
 const THRESHOLDS = {
   statements: 85,
   branches: 76,

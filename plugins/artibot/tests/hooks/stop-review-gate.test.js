@@ -263,3 +263,63 @@ describe('stop-review-gate — isArtibotRepo guard', () => {
     expect(mockState.writeStdoutCalls[0].decision).toBe('approve');
   });
 });
+
+// ---------------------------------------------------------------------------
+// v4.8.0 R2 — suffix-test variant recognition
+// Source `foo.js` is considered covered if any test stem starts with `foo-`
+// (e.g. foo-security.test.js, foo-edge-cases.test.js). Prevents false-positive
+// "Code without tests" warnings for source files split into domain-narrowed
+// test files. Regression for git-backend.js / git-backend-security.test.js.
+// ---------------------------------------------------------------------------
+describe('stop-review-gate — checkMissingTests suffix variant', () => {
+  it('does not flag code as missing tests when only a hyphen-suffixed test exists', async () => {
+    // git-backend.js has only git-backend-security.test.js — must NOT be flagged.
+    mockState.readStdinResult = Promise.resolve(JSON.stringify({}));
+    mockState.execSyncResponses = [
+      ['rev-parse --show-toplevel', '/repo'],
+      ['diff --name-status', 'M\tplugins/artibot/lib/swarm/git-backend.js\n'],
+    ];
+    mockState.existsSyncResults = {
+      'plugins/artibot/lib/swarm/git-backend.js': true,
+      // tests/ directory must exist so collectTestBasenames is invoked.
+      'plugins/artibot/tests': true,
+      'CLAUDE.md': true,
+      'artibot.config.json': false,
+    };
+    mockState.readFileSyncImpl = () => 'export const x = 1;\n';
+
+    // Override readdirSync ONLY for this test to emit a single suffixed test file.
+    const fs = await import('node:fs');
+    fs.readdirSync.mockImplementation((dir) => {
+      if (String(dir).includes('plugins/artibot/tests')
+          || String(dir).includes('plugins\\artibot\\tests')) {
+        return [{
+          name: 'git-backend-security.test.js',
+          isFile: () => true,
+          isDirectory: () => false,
+        }];
+      }
+      return [];
+    });
+
+    await import('../../scripts/hooks/stop-review-gate.js');
+
+    expect(mockState.writeStdoutCalls).toHaveLength(1);
+    const payload = mockState.writeStdoutCalls[0];
+    const reason = String(payload.reason ?? '');
+    // The contract under test: hyphen-suffixed tests count toward the
+    // missing-test gate. The only invariant we assert is that the
+    // "Code without tests" warning does NOT fire for this case.
+    //
+    // The previous version also asserted `reason` could not contain the
+    // string 'git-backend.js' at all. That was over-specified: other
+    // detectors (e.g. Bracket mismatch syntax check) are free to flag the
+    // same file for unrelated reasons, and on CI Linux one such detector
+    // did, producing "Bracket mismatch: git-backend.js: syntax error" and
+    // failing the assertion even though the missing-test gate worked
+    // correctly. Windows local did not exhibit the same detector path,
+    // hiding the over-specification until CI surfaced it.
+    expect(reason).not.toContain('Code without tests');
+  });
+
+});

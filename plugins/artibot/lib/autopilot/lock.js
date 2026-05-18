@@ -13,6 +13,7 @@ import {
   closeSync,
   existsSync,
   openSync,
+  readdirSync,
   readFileSync,
   unlinkSync,
   writeSync,
@@ -212,4 +213,61 @@ export function releaseLock(featureKey, sessionId) {
   } catch {
     return false;
   }
+}
+
+/**
+ * Release every lock currently held by the given session. Intended for
+ * session-shutdown / crash-recovery flows where the engine wants to drop
+ * all of its outstanding feature claims at once.
+ *
+ * Locks held by a different session (or with unreadable/corrupt files)
+ * are left alone and reported in `skipped`. PID is intentionally NOT
+ * checked here — a recovering process inheriting a crashed session's
+ * sessionId should still be able to clear its own locks. Stale detection
+ * is handled separately by {@link acquireLock}.
+ *
+ * @param {string} sessionId
+ * @returns {{ released: string[], skipped: string[] }}
+ */
+export function releaseAllForSession(sessionId) {
+  if (!sessionId || typeof sessionId !== 'string') {
+    throw new TypeError('sessionId must be a non-empty string');
+  }
+  const released = [];
+  const skipped = [];
+  const locksDir = path.join(getStoreDir(), 'locks');
+  if (!existsSync(locksDir)) return { released, skipped };
+
+  let entries;
+  try {
+    entries = readdirSync(locksDir);
+  } catch {
+    return { released, skipped };
+  }
+
+  for (const name of entries) {
+    if (!name.endsWith('.lock')) continue;
+    const featureKey = name.slice(0, -5);
+    const lockPath = path.join(locksDir, name);
+    let holder;
+    try {
+      const raw = readFileSync(lockPath, 'utf-8');
+      holder = JSON.parse(raw);
+    } catch {
+      // Corrupt or unreadable lock — skip rather than delete blindly.
+      skipped.push(featureKey);
+      continue;
+    }
+    if (!holder || holder.sessionId !== sessionId) {
+      skipped.push(featureKey);
+      continue;
+    }
+    try {
+      unlinkSync(lockPath);
+      released.push(featureKey);
+    } catch {
+      skipped.push(featureKey);
+    }
+  }
+  return { released, skipped };
 }

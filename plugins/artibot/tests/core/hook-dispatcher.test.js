@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import {
@@ -21,36 +21,39 @@ function writeHandler(dir, name, body) {
   return file;
 }
 
-/**
- * Temporarily override the dispatch-table.json to point to given handler specs.
- * We patch the real plugin file then restore it in afterEach.
- */
-import { readFileSync } from 'node:fs';
 import { getPluginRoot } from '../../lib/core/platform.js';
 
-const TABLE_PATH = path.join(getPluginRoot(), 'hooks', 'dispatch-table.json');
+// Real plugin table — copied into the tmp override so the empty-handler-slot
+// assertion still reflects production shape, but the legacy WS-C.2 dispatcher
+// reads from the tmp file via ARTIBOT_HOOK_DISPATCH_TABLE_PATH. This prevents
+// race conditions with tests/dispatcher/dispatch-table.test.js, which reads the
+// real file in parallel.
+const REAL_TABLE_PATH = path.join(getPluginRoot(), 'hooks', 'dispatch-table.json');
 
 describe('hook-dispatcher', () => {
   let tmpDir;
-  let originalTable;
+  let tmpTablePath;
 
   beforeEach(() => {
     tmpDir = mkdtempSync(path.join(tmpdir(), 'hook-dispatcher-test-'));
-    originalTable = readFileSync(TABLE_PATH, 'utf-8');
+    tmpTablePath = path.join(tmpDir, 'dispatch-table.json');
+    copyFileSync(REAL_TABLE_PATH, tmpTablePath);
+    process.env.ARTIBOT_HOOK_DISPATCH_TABLE_PATH = tmpTablePath;
     _resetDispatcherCache();
   });
 
   afterEach(() => {
-    writeFileSync(TABLE_PATH, originalTable, 'utf-8');
+    delete process.env.ARTIBOT_HOOK_DISPATCH_TABLE_PATH;
     _resetDispatcherCache();
     if (tmpDir) rmSync(tmpDir, { recursive: true, force: true });
     tmpDir = null;
+    tmpTablePath = null;
     delete process.env.ARTIBOT_HOOK_TIMEOUT_MS;
   });
 
   function setTable(slots) {
     writeFileSync(
-      TABLE_PATH,
+      tmpTablePath,
       JSON.stringify({ version: 1, description: 'test', slots }, null, 2),
       'utf-8',
     );
@@ -58,8 +61,11 @@ describe('hook-dispatcher', () => {
   }
 
   it('returns empty results for a slot with no handlers', async () => {
-    const result = await dispatch('SessionStart', {});
-    expect(result.slot).toBe('SessionStart');
+    // PreCompact stays empty by design (single-hook strategy, not dispatcher-consolidated).
+    // Wave 3A populated SessionStart/UserPromptSubmit/etc. with handler entries; PreCompact is the
+    // canonical "empty handlers" slot for asserting baseline dispatcher behavior.
+    const result = await dispatch('PreCompact', {});
+    expect(result.slot).toBe('PreCompact');
     expect(result.results).toEqual([]);
     expect(typeof result.duration_ms).toBe('number');
   });
@@ -153,7 +159,7 @@ describe('hook-dispatcher', () => {
   });
 
   it('records total duration_ms on the dispatch result', async () => {
-    const result = await dispatch('SessionStart', {});
+    const result = await dispatch('PreCompact', {});
     expect(typeof result.duration_ms).toBe('number');
     expect(result.duration_ms).toBeGreaterThanOrEqual(0);
   });
@@ -184,5 +190,44 @@ describe('hook-dispatcher', () => {
     const result = await dispatch('TestSlot', {});
     expect(result.results[0].success).toBe(false);
     expect(result.results[0].error).toMatch(/default function/);
+  });
+
+  // v4.8.0 H-5: ARTIBOT_HOOK_DISPATCH_TABLE_PATH must NOT be honored when the
+  // process is not running under a test harness. Otherwise an attacker who can
+  // set env vars (e.g. via a poisoned dotfile or compromised CI variable) could
+  // redirect every hook dispatcher to a hostile JSON and gain code execution.
+  describe('env override gate (H-5)', () => {
+    it('ignores override when VITEST and NODE_ENV are both unset', async () => {
+      // Snapshot + clear test markers so getDispatchTablePath() falls into the
+      // production branch.
+      const savedVitest = process.env.VITEST;
+      const savedNodeEnv = process.env.NODE_ENV;
+      delete process.env.VITEST;
+      delete process.env.NODE_ENV;
+      // Point the override at a bogus path that would fail loudly if honored.
+      process.env.ARTIBOT_HOOK_DISPATCH_TABLE_PATH =
+        path.join(tmpDir, 'nonexistent-attacker-controlled.json');
+      _resetDispatcherCache();
+      try {
+        // The dispatcher should fall back to the real on-disk table and find
+        // PreCompact (empty handlers) — proving it ignored the bogus override.
+        const result = await dispatch('PreCompact', {});
+        expect(result.slot).toBe('PreCompact');
+        expect(result.results).toEqual([]);
+      } finally {
+        if (savedVitest !== undefined) process.env.VITEST = savedVitest;
+        if (savedNodeEnv !== undefined) process.env.NODE_ENV = savedNodeEnv;
+        // The outer afterEach will delete ARTIBOT_HOOK_DISPATCH_TABLE_PATH.
+      }
+    });
+
+    it('honors override when VITEST=true (existing test contract)', async () => {
+      // The default beforeEach already sets the env var and VITEST runs with
+      // VITEST=true, so this just re-asserts the production override path is
+      // not the only one in play.
+      expect(process.env.VITEST).toBe('true');
+      const result = await dispatch('PreCompact', {});
+      expect(result.slot).toBe('PreCompact');
+    });
   });
 });

@@ -1,43 +1,57 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { execFileSync } from 'node:child_process';
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { handleUserPromptSubmit } from '../../scripts/hooks/runtime-prompt.js';
+
+/**
+ * runtime-prompt hook — in-process contract test.
+ *
+ * Historically this suite spawned the hook as a child process with
+ * `execFileSync`, which inadvertently relied on the script's `isMain`
+ * guard succeeding. That guard percent-decodes `process.argv[1]` and
+ * compares against `new URL(import.meta.url).pathname` — the latter is
+ * percent-encoded on paths with non-ASCII characters (e.g. Korean
+ * `바탕 화면`), so `main()` never ran and stdout came back empty.
+ *
+ * The hook exports `handleUserPromptSubmit` precisely for in-process
+ * callers (the userprompt dispatcher uses it too). Driving the contract
+ * through the export removes the spawn/path-encoding flake, runs ~10x
+ * faster, and keeps the assertions identical.
+ */
 
 const PLUGIN_ROOT = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   '..', '..',
 );
 
-const SCRIPT_PATH = path.join(PLUGIN_ROOT, 'scripts', 'hooks', 'runtime-prompt.js');
+let savedEnv;
 
-function runHook(payload) {
-  const stdout = execFileSync(
-    process.execPath,
-    [SCRIPT_PATH],
-    {
-      cwd: PLUGIN_ROOT,
-      env: {
-        ...process.env,
-        CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT,
-        ARTIBOT_RUNTIME_CHECKPOINT_DISABLE: '1',
-        ARTIBOT_RUNTIME_MEMORY_DISABLE: '1',
-      },
-      input: JSON.stringify(payload),
-      encoding: 'utf-8',
-    },
-  ).trim();
+beforeEach(() => {
+  savedEnv = {
+    CLAUDE_PLUGIN_ROOT: process.env.CLAUDE_PLUGIN_ROOT,
+    ARTIBOT_RUNTIME_CHECKPOINT_DISABLE: process.env.ARTIBOT_RUNTIME_CHECKPOINT_DISABLE,
+    ARTIBOT_RUNTIME_MEMORY_DISABLE: process.env.ARTIBOT_RUNTIME_MEMORY_DISABLE,
+  };
+  process.env.CLAUDE_PLUGIN_ROOT = PLUGIN_ROOT;
+  process.env.ARTIBOT_RUNTIME_CHECKPOINT_DISABLE = '1';
+  process.env.ARTIBOT_RUNTIME_MEMORY_DISABLE = '1';
+});
 
-  return stdout ? JSON.parse(stdout) : null;
-}
+afterEach(() => {
+  for (const [k, v] of Object.entries(savedEnv)) {
+    if (v === undefined) delete process.env[k];
+    else process.env[k] = v;
+  }
+});
 
 describe('runtime-prompt hook', () => {
-  it('returns no stdout when prompt payload is missing', () => {
-    const output = runHook({ other: 'value' });
+  it('returns null when prompt payload is missing', async () => {
+    const output = await handleUserPromptSubmit({ other: 'value' });
     expect(output).toBeNull();
   });
 
-  it('consumes a prompt already rewritten by user-prompt-handler', () => {
-    const output = runHook({
+  it('consumes a prompt already rewritten by user-prompt-handler', async () => {
+    const output = await handleUserPromptSubmit({
       user_prompt: 'CRITICAL RE-VERIFICATION MODE ACTIVATED.\nCLAIM AUDIT\nEVIDENCE CHECK',
       event: 'UserPromptSubmit',
     });
@@ -47,8 +61,8 @@ describe('runtime-prompt hook', () => {
     expect(output.user_prompt).toContain('CRITICAL RE-VERIFICATION MODE ACTIVATED.');
   });
 
-  it('rewrites a simple prompt through the Phase 1 runtime path', () => {
-    const output = runHook({
+  it('rewrites a simple prompt through the Phase 1 runtime path', async () => {
+    const output = await handleUserPromptSubmit({
       user_prompt: 'fix typo in readme',
       event: 'UserPromptSubmit',
     });
@@ -64,8 +78,8 @@ describe('runtime-prompt hook', () => {
     expect(output.user_prompt).toContain('fix typo in readme');
   });
 
-  it('rewrites a complex prompt through the Phase 1 runtime path', () => {
-    const output = runHook({
+  it('rewrites a complex prompt through the Phase 1 runtime path', async () => {
+    const output = await handleUserPromptSubmit({
       user_prompt: 'analyze security vulnerabilities, then refactor auth flow, then deploy to production',
       event: 'UserPromptSubmit',
     });

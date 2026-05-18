@@ -50,9 +50,8 @@ export default defineConfig({
       // CI on Linux measures ~5-10% lower than Windows local due to v8 coverage
       // instrumentation differences across platforms. Windows local typically
       // shows 90+/84+/89+/92+; CI on the same commits has measured 77.3% for
-      // branches even with the same test suite. Branches threshold is 77 to
-      // absorb that platform-specific dip without relaxing the other axes,
-      // which still hold near 92%/89%/92%.
+      // branches even with the same test suite.
+      //
       thresholds: {
         statements: 80,
         branches: 76,
@@ -80,15 +79,15 @@ export default defineConfig({
         },
         test: {
           name: 'autopilot',
-          include: ['tests/autopilot/**/*.test.js'],
+          include: ['tests/autopilot/**/*.test.{js,mjs}'],
         },
       },
       {
         extends: true,
         test: {
           name: 'main',
-          include: ['tests/**/*.test.js'],
-          exclude: ['tests/autopilot/**/*.test.js'],
+          include: ['tests/**/*.test.{js,mjs}'],
+          exclude: ['tests/autopilot/**/*.test.{js,mjs}'],
         },
       },
     ],

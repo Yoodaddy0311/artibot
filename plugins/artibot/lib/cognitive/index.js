@@ -61,6 +61,41 @@ export {
   createAutoResearch,
 } from './auto-research.js';
 
+// v4.11.0 — Track I: Autopilot intent auto-routing (silent intent detection)
+export {
+  detectQueueIntent,
+  detectScheduleIntent,
+  detectDryRunIntent,
+  detectTemplateHint,
+  detectRollbackIntent,
+  detectAllIntents,
+} from './autopilot-intent.js';
+
+export {
+  extendClassification,
+  shouldAutoTrigger,
+  dominantIntent,
+  AUTOPILOT_FEATURES,
+  DEFAULT_TRIGGER_THRESHOLD,
+} from './intent-router-extension.js';
+
+// v4.11.0 — Track L: Claude /goal native integration (hybrid evaluator)
+export {
+  parseGoalIntent,
+  DEFAULT_AUTO_MAX_ITERATIONS,
+} from './goal-intent-parser.js';
+
+export {
+  buildGoalSetup,
+  selectEvaluator,
+  EVALUATOR_STRATEGIES,
+} from './goal-auto-launcher.js';
+
+export {
+  evaluateHybrid,
+  HAIKU_TRUST_THRESHOLD,
+} from './hybrid-goal-evaluator.js';
+
 /**
  * Process an input through the full cognitive pipeline.
  * Routes to System 1 or System 2 based on complexity assessment.

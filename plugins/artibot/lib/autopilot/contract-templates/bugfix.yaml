@@ -1,0 +1,9 @@
+# Bugfix Goal Contract template (v4.10.0).
+# Minimal fix-and-verify contract; suitable for trivial / simple complexity.
+# Fields match lib/autopilot/goal-schema.js validateGoalContract().
+name: bugfix
+objective: Fix the reported defect with a minimal, surgical change
+stoppingCondition: failing test now passes AND no previously-passing test regresses
+validationCommand: npm test
+forbiddenChanges: [docs/PRD/**, CHANGELOG.md, package.json]
+maxIterations: 3

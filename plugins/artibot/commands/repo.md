@@ -33,6 +33,23 @@ Parse $ARGUMENTS (space-separated URLs supported):
 6. Sanitize `..`, shell metachars, null bytes from repo names
 7. **NEW**: Refuse to read/execute any `.env`, credential files, or binary artifacts from cloned repos
 
+## ★ MANDATORY: Code-Level Inspection (no shortcuts)
+
+**This command does CODE-LEVEL analysis. Not README-based, not WebFetch-based.**
+
+Every spawned `repo-benchmarker` teammate MUST:
+
+1. **First action = `git clone --depth 1`** to `~/.claude/artibot/repos/<sanitized-name>/`. NOT `WebFetch` of github.com URLs.
+2. **Enumerate** with `Glob`/`Bash ls -R` after clone — get the actual file tree.
+3. **Read ≥10 substantive source files** per repo (not just README/LICENSE). Cover: entrypoints, configs, key modules, examples, tests.
+4. **Cite `file_path:line_number`** for every claim. A claim without a line citation is rejected.
+5. **Quote ≤5-line code snippets** for any "ADOPT / TRANSFORM / REJECT" judgment — show the actual code you saw.
+6. **No README-only judgments**. If you only read the README, return `INSUFFICIENT-INSPECTION` for that dimension instead of guessing.
+
+**Forbidden shortcuts**: `WebFetch https://github.com/...`, `WebSearch "<repo> patterns"`, judging by repo description / star count / file names alone. Use these only AFTER cloning, to supplement code evidence.
+
+**Orchestrator verification**: before aggregating, sample 3 random claims from each teammate's report and confirm the cited `file_path:line_number` exists in the cloned tree. Reject any teammate whose citations don't check out — re-run with stricter instructions.
+
 ## Execution Flow
 
 1. **Parse & Validate** — tokenize URLs, validate each, dedupe

@@ -57,3 +57,12 @@ export {
   createNoiseFunction,
   validateDPConfig,
 } from './differential-privacy.js';
+
+// Data Egress Guard (DATA POLICY runtime enforcement)
+export {
+  EgressBlockedError,
+  assertEgressAllowed,
+  isLocalhost,
+  loadAllowlist,
+  safeFetch,
+} from './data-egress-guard.js';

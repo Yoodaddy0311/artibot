@@ -17,6 +17,11 @@
 import path from 'node:path';
 import { getPluginRoot, parseJSON, readStdin, toFileUrl } from '../utils/index.js';
 import { createErrorHandler, logHookError } from '../../lib/core/hook-utils.js';
+import {
+  assertEgressAllowed,
+  EgressBlockedError,
+  loadAllowlist,
+} from '../../lib/privacy/data-egress-guard.js';
 
 async function main() {
   const raw = await readStdin();
@@ -47,6 +52,28 @@ async function main() {
     }
 
     const swarmCfg = getSwarmConfig(config);
+
+    // DATA POLICY gate: only proceed if the configured swarm server URL is on
+    // the egress allowlist (localhost is auto-allowed for self-hosted swarms).
+    // swarm-client.js already enforces an internal SSRF allowlist, but we
+    // surface the DATA POLICY check at the hook level so deployment-time
+    // misconfiguration is logged and blocked before any network I/O.
+    const serverUrl =
+      process.env.ARTIBOT_SWARM_SERVER || swarmCfg?.serverUrl || 'http://localhost:3000';
+    try {
+      assertEgressAllowed(serverUrl, {
+        allowlist: loadAllowlist(),
+        reason: 'swarm-sync',
+      });
+    } catch (egressErr) {
+      if (egressErr instanceof EgressBlockedError) {
+        process.stderr.write(
+          `[swarm-sync] Skipped by DATA POLICY: ${egressErr.message}\n`,
+        );
+        return;
+      }
+      throw egressErr;
+    }
 
     // Build noise function if differential privacy is enabled
     let addNoise;

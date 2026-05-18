@@ -1,6 +1,6 @@
 # Artibot
 
-[![Version](https://img.shields.io/badge/version-4.7.5-blue?style=flat-square)](./CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-4.8.0-blue?style=flat-square)](./CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](./LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen?style=flat-square)](./package.json)
 [![Tests](https://img.shields.io/badge/tests-passing-brightgreen?style=flat-square)](./tests/)
@@ -167,7 +167,7 @@ Key fields in `artibot.config.json` (file is auto-validated against schema):
 
 | Field | Default | Purpose |
 |---|---|---|
-| `version` | `4.7.5` | Synced across plugin.json / package.json / artibot.config.json |
+| `version` | `4.8.0` | Synced across plugin.json / package.json / artibot.config.json |
 | `cognitive.router.threshold` | `0.4` | System 1 ↔ System 2 boundary |
 | `cognitive.system1.maxLatency` | `100` | ms — System 1 response cap before escalation |
 | `learning.lifelong.batchSize` | `50` | Experiences per GRPO batch |
@@ -380,10 +380,11 @@ Artibot의 핵심 엔진은 Claude Code의 **Agent Teams API**입니다. 단순�
 | **토큰 비용** | 1x | ~5x |
 | **적합 작업** | 단일 파일 분석, 검색, 빠른 위임 | 복잡한 기능 구현, 멀티 에이전트 협업 |
 
-### 50개 슬래시 커맨드
+### 66개 슬래시 커맨드
 
 - `/sc`로 자연어 의도를 분석하여 최적 커맨드로 자동 라우팅
 - 개발, 분석, 품질, 테스트, 문서화, 배포, 마케팅 전 영역 커버
+- **비개발자도 자연어로 트리거 가능** — "ADR 작성해줘", "마이그레이션 전략 짜줘" 입력 시 자동으로 적합한 커맨드 제안
 
 ### 99개 도메인 스킬
 
@@ -497,7 +498,7 @@ Artibot은 Claude Code 외에도 **Gemini CLI**, **OpenAI Codex CLI**, **Cursor 
 | Sub-Agent (단방향 위임) | ✅ | ✅ | ✅ | ⚠️ 제한적 | ✅ |
 | 27개 전문 에이전트 | ✅ | ✅ 자동변환 | ✅ 자동변환 | ✅ 자동변환 | ✅ 자동변환 |
 | 117개 스킬 (SKILL.md) | ✅ | ✅ | ✅ | ✅ | ✅ |
-| 슬래시 커맨드 | ✅ 50개 | ✅ TOML | → Workflows | → Prompts | → Workflows |
+| 슬래시 커맨드 | ✅ 66개 | ✅ TOML | → Workflows | → Prompts | → Workflows |
 | Hooks 자동작동 | ✅ 15이벤트 | ✅ 동일패턴 | ⚠️ 제한적 | ❌ | ✅ Agent Manager |
 | 인지 라우터 (System 1/2) | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 자가학습 (GRPO) | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -1055,6 +1056,8 @@ Federated Swarm 서버 (옵트인 필요)
 | `/implement [feature]` | 기능 구현 파이프라인 | `--type`, `--tdd`, `--framework` |
 | `/improve [target]` | 증거 기반 코드 개선 | `--focus`, `--loop` |
 | `/design [domain]` | 시스템 설계 | `--adr` |
+| `/adr [title]` | 아키텍처 결정 기록(ADR) 작성 — 왜 이렇게 결정했는지 문서화 | `--status`, `--supersedes` |
+| `/migrate [target]` | 무중단 DB/인프라 마이그레이션 전략 수립 및 실행 가이드 | `--phase`, `--rollback` |
 
 ### 분석/디버깅 커맨드
 
@@ -1377,7 +1380,7 @@ orchestrator는 **코드를 직접 작성하지 않습니다**. 팀을 구성하
 | **PostToolUse** (Edit) | `post-edit-format.js` | JS/TS 파일 편집 후 Prettier 포맷 제안 |
 | **PostToolUse** (Bash) | `post-bash.js` | git push 후 PR URL 자동 감지 |
 | **PreCompact** | `pre-compact.js` | 컨텍스트 압축 전 상태 스냅샷 저장 |
-| **Stop** | `check-console-log.js` | 세션 종료 시 `console.log` 잔여 검사 |
+| **Stop** | `stop-review-gate.js` | 세션 종료 시 리뷰 게이트 체크 |
 | **UserPromptSubmit** | `user-prompt-handler.js` | 사용자 의도 감지, 관련 에이전트 제안 |
 | **SubagentStart/Stop** | `subagent-handler.js` | 서브에이전트/팀원 등록/해제 추적 |
 | **TeammateIdle** | `team-idle-handler.js` | 유휴 팀원에게 대기 태스크 할당 알림 |
@@ -1449,7 +1452,7 @@ plugins/artibot/
 ├── agents/                      # 28개 에이전트 정의 (orchestrator 1 + 팀원 27)
 │   ├── orchestrator.md          #   CTO / 팀 리더 (Agent Teams API)
 │   └── [27개 전문 에이전트].md    #   팀원 (SendMessage + TaskUpdate)
-├── commands/                    # 50개 슬래시 커맨드
+├── commands/                    # 66개 슬래시 커맨드
 │   ├── sc.md                    #   메인 라우터
 │   ├── orchestrate.md           #   팀 오케스트레이션 (TeamCreate)
 │   ├── spawn.md                 #   팀 스폰 (병렬 실행)

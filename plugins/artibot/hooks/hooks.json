@@ -1,6 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-hooks.json",
-  "description": "Artibot v4.6.4 - Claude Code Plugin Hooks (exec-form args[])",
+  "description": "Artibot v4.8.2 - Claude Code Plugin Hooks (shell-form command, args[] not honored by Claude Code)",
   "hooks": {
     "SessionStart": [
       {
@@ -9,144 +9,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/session-start.js"
-            ],
-            "timeout": 5000
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/_sessionstart-dispatcher.js",
+            "timeout": 30000
           }
         ],
         "priority": "operational",
         "category": "lifecycle"
-      },
-      {
-        "matcher": "*",
-        "once": true,
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/memory-tracker.js",
-              "SessionStart"
-            ],
-            "timeout": 5000
-          }
-        ],
-        "priority": "operational",
-        "category": "tracking"
-      },
-      {
-        "matcher": "*",
-        "once": true,
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/swarm-download.js"
-            ],
-            "timeout": 15000
-          }
-        ],
-        "priority": "optional",
-        "category": "learning"
-      },
-      {
-        "matcher": "*",
-        "once": true,
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/git-autopilot-setup.js"
-            ],
-            "timeout": 5000
-          }
-        ],
-        "priority": "operational",
-        "category": "git"
-      },
-      {
-        "matcher": "*",
-        "once": true,
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/image-cleanup.js"
-            ],
-            "timeout": 5000
-          }
-        ],
-        "priority": "optional",
-        "category": "cleanup"
-      },
-      {
-        "matcher": "*",
-        "once": true,
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/session-digest.js"
-            ],
-            "timeout": 3000
-          }
-        ],
-        "priority": "observability",
-        "category": "digest"
-      },
-      {
-        "matcher": "*",
-        "once": true,
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/git-autopilot-session.js"
-            ],
-            "timeout": 10000
-          }
-        ],
-        "priority": "operational",
-        "category": "git"
-      },
-      {
-        "matcher": "*",
-        "once": true,
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/auto-learning-check.js"
-            ],
-            "timeout": 5000
-          }
-        ],
-        "priority": "optional",
-        "category": "learning"
-      },
-      {
-        "matcher": "*",
-        "once": true,
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/skill-validation-check.js"
-            ],
-            "timeout": 5000
-          }
-        ],
-        "priority": "optional",
-        "category": "learning"
       }
     ],
     "PreToolUse": [
@@ -155,10 +23,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-write.js"
-            ],
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-write.js",
             "timeout": 5000
           }
         ],
@@ -170,10 +35,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-bash.js"
-            ],
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-bash.js",
             "timeout": 5000
           }
         ],
@@ -185,10 +47,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-write-guard.js"
-            ],
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-write-guard.js",
             "timeout": 5000
           }
         ],
@@ -200,10 +59,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/git-autopilot-guard.js"
-            ],
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/git-autopilot-guard.js",
             "timeout": 5000
           }
         ],
@@ -215,10 +71,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-write-checkpoint.js"
-            ],
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-write-checkpoint.js",
             "timeout": 5000
           }
         ],
@@ -230,10 +83,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/webfetch-cache-pre.js"
-            ],
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/webfetch-cache-pre.js",
             "timeout": 3000
           }
         ],
@@ -243,154 +93,16 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "tool == \"Read\"",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-write-guard.js"
-            ],
-            "timeout": 3000
-          }
-        ],
-        "priority": "critical",
-        "category": "security"
-      },
-      {
-        "matcher": "tool == \"Edit\" || tool == \"Write\"",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/quality-gate.js"
-            ],
-            "timeout": 8000
-          }
-        ],
-        "priority": "critical",
-        "category": "quality"
-      },
-      {
-        "matcher": "tool == \"Edit\"",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/post-edit-format.js"
-            ],
-            "timeout": 10000
-          }
-        ],
-        "priority": "observability",
-        "category": "tracking"
-      },
-      {
-        "matcher": "tool == \"Edit\" || tool == \"Write\"",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/post-edit-recovery.js"
-            ],
-            "timeout": 5000
-          }
-        ],
-        "priority": "observability",
-        "category": "tracking"
-      },
-      {
-        "matcher": "tool == \"Bash\"",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/post-bash.js"
-            ],
-            "timeout": 5000
-          }
-        ],
-        "priority": "observability",
-        "category": "tracking"
-      },
-      {
-        "matcher": "tool == \"Bash\"",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/post-bash-failure.js"
-            ],
-            "timeout": 3000
-          }
-        ],
-        "priority": "operational",
-        "category": "recovery"
-      },
-      {
-        "matcher": "tool == \"Edit\" || tool == \"Write\"",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/post-write-tdd.js"
-            ],
-            "timeout": 2000
-          }
-        ],
-        "priority": "advisory",
-        "category": "quality"
-      },
-      {
-        "matcher": "tool == \"Edit\" || tool == \"Write\" || tool == \"MultiEdit\"",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/mark-main-agent-edit.js"
-            ],
-            "timeout": 3000
-          }
-        ],
-        "priority": "operational",
-        "category": "tracking"
-      },
-      {
         "matcher": "*",
         "hooks": [
           {
             "type": "command",
-            "command": "node",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/tool-tracker.js"
-            ],
-            "timeout": 3000
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/_posttooluse-dispatcher.js",
+            "timeout": 30000
           }
         ],
-        "priority": "observability",
-        "category": "tracking"
-      },
-      {
-        "matcher": "tool == \"WebFetch\"",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/webfetch-cache-post.js"
-            ],
-            "timeout": 5000
-          }
-        ],
-        "priority": "optional",
-        "category": "cache"
+        "priority": "operational",
+        "category": "lifecycle"
       }
     ],
     "PreCompact": [
@@ -399,10 +111,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-compact.js"
-            ],
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-compact.js",
             "timeout": 8000
           }
         ],
@@ -416,60 +125,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/stop-review-gate.js"
-            ],
-            "timeout": 15000
-          }
-        ],
-        "priority": "critical",
-        "category": "quality"
-      },
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/dev-verify-gate.js"
-            ],
-            "timeout": 8000
-          }
-        ],
-        "priority": "advisory",
-        "category": "quality"
-      },
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/git-autopilot-close.js"
-            ],
-            "timeout": 15000
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/_stop-dispatcher.js",
+            "timeout": 30000
           }
         ],
         "priority": "operational",
-        "category": "git"
-      },
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/stop-recap.js"
-            ],
-            "timeout": 5000
-          }
-        ],
-        "priority": "optional",
-        "category": "ux"
+        "category": "lifecycle"
       }
     ],
     "UserPromptSubmit": [
@@ -478,10 +139,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/_userprompt-dispatcher.js"
-            ],
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/_userprompt-dispatcher.js",
             "timeout": 8000
           }
         ],
@@ -495,20 +153,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/subagent-handler.js",
-              "start"
-            ],
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/subagent-handler.js start",
             "timeout": 5000
           },
           {
             "type": "command",
-            "command": "node",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/workflow-status.js",
-              "teammate-update"
-            ],
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/workflow-status.js teammate-update",
             "timeout": 5000
           }
         ],
@@ -522,29 +172,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/subagent-handler.js",
-              "stop"
-            ],
-            "timeout": 5000
-          },
-          {
-            "type": "command",
-            "command": "node",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/agent-evaluator.js"
-            ],
-            "timeout": 8000
-          },
-          {
-            "type": "command",
-            "command": "node",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/workflow-status.js",
-              "teammate-update"
-            ],
-            "timeout": 5000
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/_subagentstop-dispatcher.js",
+            "timeout": 15000
           }
         ],
         "priority": "optional",
@@ -557,19 +186,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/team-idle-handler.js"
-            ],
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/team-idle-handler.js",
             "timeout": 5000
           },
           {
             "type": "command",
-            "command": "node",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/workflow-status.js",
-              "teammate-update"
-            ],
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/workflow-status.js teammate-update",
             "timeout": 5000
           }
         ],
@@ -583,10 +205,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/team-idle-handler.js"
-            ],
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/team-idle-handler.js",
             "timeout": 5000
           }
         ],
@@ -598,10 +217,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/clean-state-check.js"
-            ],
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/clean-state-check.js",
             "timeout": 5000
           }
         ],
@@ -615,10 +231,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/permission-auto-approve.js"
-            ],
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/permission-auto-approve.js",
             "timeout": 3000
           }
         ],
@@ -632,76 +245,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/session-end.js"
-            ],
-            "timeout": 10000
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/_sessionend-dispatcher.js",
+            "timeout": 30000
           }
         ],
         "priority": "operational",
         "category": "lifecycle"
-      },
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/swarm-sync.js"
-            ],
-            "timeout": 15000
-          }
-        ],
-        "priority": "optional",
-        "category": "learning"
-      },
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/rotation-runner.js"
-            ],
-            "timeout": 8000
-          }
-        ],
-        "priority": "observability",
-        "category": "maintenance"
-      },
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/memory-tracker.js",
-              "SessionEnd"
-            ],
-            "timeout": 8000
-          }
-        ],
-        "priority": "operational",
-        "category": "tracking"
-      },
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/http-notify.js"
-            ],
-            "timeout": 8000
-          }
-        ],
-        "priority": "observability",
-        "category": "tracking"
       }
     ],
     "PostToolUseFailure": [
@@ -710,11 +259,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/tool-tracker.js",
-              "failure"
-            ],
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/tool-tracker.js failure",
             "timeout": 5000
           }
         ],
@@ -726,11 +271,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/memory-tracker.js",
-              "PostToolUseFailure"
-            ],
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/memory-tracker.js PostToolUseFailure",
             "timeout": 5000
           }
         ],
@@ -744,11 +285,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/workflow-status.js",
-              "notification"
-            ],
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/workflow-status.js notification",
             "timeout": 3000
           }
         ],
@@ -760,10 +297,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/context-tracker.js"
-            ],
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/context-tracker.js",
             "timeout": 3000
           }
         ],
@@ -778,10 +312,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/instructions-loaded.js"
-            ],
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/instructions-loaded.js",
             "timeout": 5000
           }
         ],

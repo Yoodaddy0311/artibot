@@ -1,6 +1,6 @@
 ---
 description: (Artibot) Autonomous long-running mode with PRD-first workflow, parallel execution, cross-check, verification, and completion report
-argument-hint: <task description> [--max 4h] [--budget 2000000]
+argument-hint: <task description> [--max 4h] [--budget 2000000] [--no-tui]
 allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, Task, TaskCreate, TaskUpdate, TaskList, TeamCreate, SendMessage, TaskGet, TeamDelete]
 toolset: team
 ---
@@ -20,6 +20,9 @@ Autonomous long-running mode for **3~4시간 자리 비움 / 야간 자율 작�
 | `/autopilot:status [session-id]` | 진행 Phase / 큐 / 토큰 / 위험 상태 조회 | read-only |
 | `/autopilot:abort <session-id>` | 마지막 SHA 보존 후 graceful shutdown | safety check 후 종료 |
 | `/autopilot:tail [session-id] [--lines N]` | Live Telemetry — 마지막 N개 이벤트 표 출력 (기본 50, --follow 시 1초 폴링) | read-only |
+| `/autopilot:replay <session-id>` | 과거 세션 phase timeline 표 출력 (events.ndjson 집계 — 소요/이벤트/warn/error/retry/bottleneck) | read-only |
+| `/autopilot:diff <session-id>` | 과거 세션 phase별 git diff 요약 표 출력 (checkpoint SHA 경계 간 `git diff --numstat` 집계 — files/+ins/-del/top changes) | read-only |
+| `/autopilot:tui [session-id]` | 실행 중인 세션의 라이브 TUI 대시보드 attach (phase progress / 토큰 / 큐 / 최근 이벤트, 1초 폴링). 기본 default 모드는 자동 시작 — 본 커맨드는 detached 세션 재attach 용도 | read-only |
 | `/autopilot:list [--orphans]` | 활성 세션 + worktree + lock 상태 표 출력 | read-only |
 | `/autopilot:goal status <session-id>` | **v4.6.0 Phase 3** — Goal Contract 상태 조회 (paused, iterations, lastEvaluation, lastAction) | read-only |
 | `/autopilot:goal pause <session-id> [--reason "..."]` | Goal evaluator만 일시정지 (세션은 계속 실행). EVALUATE → REPORT pass-through | mutate (orthogonal to session pause) |
@@ -33,7 +36,8 @@ Autonomous long-running mode for **3~4시간 자리 비움 / 야간 자율 작�
 |--------|--------|------|
 | `--max <duration>` | `4h` | 최대 실행 시간 (`30m`, `2h`, `8h` 등) |
 | `--budget <tokens>` | `2000000` | 토큰 임계치, 초과 시 pause |
-| `--no-notify` | off | 완료 알림 비활성화 |
+| `--no-notify` | off | 완료/pause/iteration/danger 알림 비활성화 (`notifyDanger`만 안전 직결 시 예외 발사) |
+| `--no-tui` | off | default 모드의 라이브 TUI 자동 렌더 비활성 (night 모드는 자동 off) |
 | `--no-team` | off | 병렬 팀 비활성화 (단일 메인 실행) |
 | `--checkpoint <interval>` | `30m` | 체크포인트(WIP commit) 주기 |
 | `--worktree` | off | git worktree 격리 사용 (P0-3, 기본 브랜치: `autopilot/<sessionId>`) |
@@ -48,7 +52,7 @@ Autonomous long-running mode for **3~4시간 자리 비움 / 야간 자율 작�
 Parse `$ARGUMENTS`:
 - `task-description`: 자율 처리할 작업 설명 (필수, `:resume`/`:status`/`:abort` 제외)
 - subcommand 접미어: `night` / `plan` / `resume` / `status` / `abort` / `list` 중 하나 (없으면 `default`)
-- `--max`, `--budget`, `--no-notify`, `--no-team`, `--checkpoint`, `--worktree`, `--detached`: 위 표 참조
+- `--max`, `--budget`, `--no-notify`, `--no-tui`, `--no-team`, `--checkpoint`, `--worktree`, `--detached`: 위 표 참조
 - `session-id`: `:resume` / `:abort` / `:status` 에서 사용 (`ap-YYYYMMDD-HHMMSS` 형식)
 - `--goal`, `--validation-command`, `--max-iterations`: v4.6.0 Goal-driven mode (아래 "Goal-driven Mode" 섹션 참조)
 
@@ -119,21 +123,56 @@ Goal Contract 슬롯이 없는 PRD는 기존 7-phase 단방향 흐름 (Phase 0~6
 
 ### Step 1 — Engine Import & Argument Parse
 
-1. `lib/autopilot/index.js` 동적 import (Windows 한글 경로는 `lib/core/utils/index.js`의 `toFileUrl()` 사용):
+1. `lib/autopilot/index.js` 동적 import — **반드시 `CLAUDE_PLUGIN_ROOT` 환경변수 기준 절대경로**로 해석한다 (cwd 상대경로 금지 — 타 프로젝트에서 호출 시 "엔진 부재"로 실패). Claude Code가 플러그인 커맨드 실행 시 `CLAUDE_PLUGIN_ROOT`를 주입. 미주입 시 마켓플레이스 mirror를 스캔하고, 그래도 못 찾으면 fail-fast로 명확한 에러:
    ```js
-   const engine = await import(toFileUrl('plugins/artibot/lib/autopilot/index.js'));
+   import path from 'node:path';
+   import fs from 'node:fs';
+   // toFileUrl: 한글 경로 안전 (pathToFileURL의 percent-encoding 회피 — utils/index.js 참고)
+   const toFileUrl = (p) => {
+     const f = p.replace(/\\/g, '/');
+     return /^[A-Z]:/i.test(f) ? `file:///${f}` : `file://${f}`;
+   };
+   // Plugin location candidates (3 가능 경로):
+   //   1. CLAUDE_PLUGIN_ROOT (Claude Code 주입 — 정상 경로)
+   //   2. ~/.claude/plugins/marketplaces/<id>/plugins/artibot/ (marketplace mirror)
+   //   3. (NOT ~/.claude/artibot — install.sh가 만드는 runtime data dir, lib/ 없음)
+   const home = process.env.USERPROFILE ?? process.env.HOME ?? '';
+   const candidates = [process.env.CLAUDE_PLUGIN_ROOT].filter(Boolean);
+   const mpDir = path.join(home, '.claude', 'plugins', 'marketplaces');
+   if (fs.existsSync(mpDir)) {
+     for (const mp of fs.readdirSync(mpDir)) {
+       candidates.push(path.join(mpDir, mp, 'plugins', 'artibot'));
+     }
+   }
+   const pluginRoot = candidates.find((c) => fs.existsSync(path.join(c, 'lib/autopilot/index.js')));
+   if (!pluginRoot) throw new Error('Artibot engine not found. Set CLAUDE_PLUGIN_ROOT or install via marketplace.');
+   const engine = await import(toFileUrl(path.join(pluginRoot, 'lib/autopilot/index.js')));
    ```
 2. `$ARGUMENTS` 파싱하여 `{ task, mode, options }` 분해:
    - `mode`: `default` | `night` | `plan` | `resume` | `status` | `abort`
    - `options`: `{ maxDuration, budget, notify, team, checkpoint }`
    - `sessionId`: `:resume`/`:status`/`:abort` 인 경우만
 
+### Step 1.5 — Pre-flight Gate (default 모드 자동)
+
+`mode === 'default' | 'night' | 'plan'` 진입 직전 **자동 실행**:
+
+```js
+const goalContract = options.goal ? { objective: options.goal, stoppingCondition: '...', validationCommand: options.validationCommand } : null;
+const preflight = await engine.runPreflight({ cwd: process.cwd(), sessionId: pendingId, featureKey: engine.extractKey(task), options, goalContract });
+const pfInstr = engine.buildPreflightInstruction(preflight);
+if (pfInstr?.abort) { /* abort: surface preflight errors table via engine.renderPreflightSummary(preflight) + 종료 */ }
+if (pfInstr?.suppress) { /* warnings: state.preflightWarnings에 누적 + 계속 */ }
+```
+
+5 체크: `gitClean` / `lockFree` / `diskSpace (>500MB hard / >2GB warn)` / `nodeVersion (>=18 hard / >=20 warn)` / `goalContractLint`. Hard fail = abort, warn = continue + 누적. `:resume`는 pre-flight skip (이미 진행 중).
+
 ### Step 2 — Mode Dispatch
 
 | mode | 호출 | 다음 단계 |
 |------|------|-----------|
 | `default` / `night` / `plan` | `engine.startAutopilot({ task, mode, options })` → `{ sessionId, prdPath, instruction }` | Step 3 (Phase 진행) |
-| `resume` | `engine.resumeAutopilot(sessionId)` → `{ phase, status, instruction }` | Step 3 (재진입 Phase 부터) |
+| `resume` | `engine.resumeAutopilot(sessionId)` 직전 `detectInterruptedPhase(state)` 호출 — interrupted 검출 시 `engine.buildRecoveryNote(state)` 한국어 안내를 큐에 푸시 후 정상 resume | Step 3 (재진입 Phase 부터) |
 | `status` | `engine.getStatus(sessionId?)` → `SessionState` | 상태 표 출력 후 종료 |
 | `abort` | `engine.abortAutopilot(sessionId, { graceful: true })` → `AbortResult` | 결과 표 출력 후 종료 |
 | `tail` | `engine.readEvents(sessionId, { tail: lines })` → `Event[]` | 이벤트 표 출력 후 종료 (PRD v4.1 P0-2 Live Telemetry) |
@@ -142,6 +181,11 @@ Goal Contract 슬롯이 없는 PRD는 기존 7-phase 단방향 흐름 (Phase 0~6
 ### Step 3 — Phase Execution Loop
 
 엔진이 반환한 `instruction` 객체를 따라 **Phase 0 ~ 6을 순차 실행**한다. 각 Phase 완료 시 `engine.recordPhaseResult(sessionId, phase, result)`로 session-store 업데이트.
+
+**자동 통합 (default 모드 기본 ON)**:
+- 각 Phase 완료 직후 `engine.notePhaseCost(state, phase, { tokensIn, tokensOut, costUsd, model })` 호출 — Phase별 토큰/비용을 telemetry + state.usage에 기록
+- `engine.checkBudgetThreshold(sessionId, { limitUsd: options.budget })` 결과 `crossed === 95`면 `engine.buildCostWarningInstruction(state, threshold)`로 `notifyDanger` 발사
+- TUI 활성 세션은 footer에 `engine.renderCostInline(getSessionCost(sessionId))` 자동 표시
 
 #### Phase 0 — INTAKE (PRD 생성)
 - `Task(subagent_type="artibot:planner", model="opus", prompt="[Autopilot Phase 0] 사용자 요청: {task}\n\n`docs/PRD/<feature>-<sessionId>.md` 작성. PRD 템플릿: 배경/목표/비목표/시나리오/설계/산출물/실행계획/위험/수락기준")`
@@ -179,6 +223,9 @@ Goal Contract 슬롯이 없는 PRD는 기존 7-phase 단방향 흐름 (Phase 0~6
 Phase 6 완료 후:
 - `engine.notifyCompletion(sessionId)` 호출.
 - 보고서 경로 + 큐된 질문 요약을 사용자에게 출력.
+- 비용 요약: `engine.renderCostBlock(engine.getSessionCost(sessionId))` 마크다운 테이블을 사용자에게 노출 (Phase별 토큰/$ + Budget 사용률).
+- pre-flight 경고가 있었다면 `engine.renderPreflightSummary(state.preflightResult)` 출력 (참고용).
+- abort/완료 시 `engine.releaseAllForSession(sessionId)`로 잔존 lock 일괄 해제.
 
 ### `/autopilot:tail` Live Telemetry (PRD v4.1 P0-2)
 

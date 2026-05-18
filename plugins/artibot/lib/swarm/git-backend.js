@@ -26,7 +26,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { execSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -42,6 +42,14 @@ const MACHINE_HASH_PATH = path.join(ARTIBOT_DIR, 'swarm-machine-hash.json');
 
 /** Git command timeout (ms) */
 const GIT_TIMEOUT_MS = 30_000;
+
+/**
+ * Maximum commit message length. v4.8.0 audit L-2: spawnSync is shell-safe,
+ * but unbounded message length (e.g. a stack trace mistakenly piped through)
+ * can balloon `git commit -m` argv beyond the OS limit (Windows CreateProcess
+ * tops out at ~32K). Hard-cap at 8KB to keep argv well below that bound.
+ */
+const COMMIT_MESSAGE_MAX_BYTES = 8 * 1024;
 
 // ---------------------------------------------------------------------------
 // Machine identity
@@ -79,13 +87,75 @@ export async function ensureMachineHash() {
 // Git helpers
 // ---------------------------------------------------------------------------
 
-function runGit(args, cwd) {
-  return execSync(`git ${args}`, {
+// Strict allowlist for git remote URLs. Rejects anything containing shell
+// metachars or whitespace so the URL is safe to pass as an argv slot even
+// when downstream tooling re-emits it via a shell.
+//   - scheme URL: https://host/path , git://host/path , ssh://user@host/path
+//   - scp-style:  git@host:owner/repo.git
+const GIT_URL_SCHEME_RE = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\/[A-Za-z0-9._~%@:/?#\-+]+$/;
+const GIT_URL_SCP_RE = /^[A-Za-z0-9._-]+@[A-Za-z0-9._-]+:[A-Za-z0-9._/~\-+]+$/;
+const GIT_URL_FORBIDDEN_RE = /[\s;`$|&<>(){}\\"']/;
+
+/**
+ * Validate that a string is a safe git remote URL.
+ * Throws on shell metachars or unrecognized format. Returns the URL on success.
+ *
+ * @param {unknown} url
+ * @returns {string}
+ */
+export function assertSafeGitUrl(url) {
+  if (typeof url !== 'string' || url.length === 0) {
+    throw new Error('assertSafeGitUrl: url must be a non-empty string');
+  }
+  if (url.length > 2048) {
+    throw new Error('assertSafeGitUrl: url too long');
+  }
+  if (GIT_URL_FORBIDDEN_RE.test(url)) {
+    throw new Error(`assertSafeGitUrl: url contains forbidden characters: ${url}`);
+  }
+  if (!GIT_URL_SCHEME_RE.test(url) && !GIT_URL_SCP_RE.test(url)) {
+    throw new Error(`assertSafeGitUrl: url is not a recognized git remote: ${url}`);
+  }
+  return url;
+}
+
+/**
+ * Run a git subcommand with argv (no shell). Mirrors the prior `runGit` API
+ * (string output, trimmed) but is immune to shell metachar injection because
+ * `shell: false` and each token is a discrete argv slot.
+ *
+ * @param {string[]} argv - git subcommand + args (e.g. ['clone', url, dir])
+ * @param {string} cwd
+ * @returns {string}
+ */
+function runGit(argv, cwd) {
+  if (!Array.isArray(argv) || argv.length === 0) {
+    throw new Error('runGit: argv must be a non-empty array');
+  }
+  for (const a of argv) {
+    if (typeof a !== 'string') {
+      throw new Error('runGit: every argv slot must be a string');
+    }
+  }
+  const result = spawnSync('git', argv, {
     cwd,
     encoding: 'utf-8',
     stdio: ['ignore', 'pipe', 'pipe'],
     timeout: GIT_TIMEOUT_MS,
-  }).trim();
+    shell: false,
+    windowsHide: true,
+  });
+  if (result.error) {
+    throw result.error;
+  }
+  if (typeof result.status === 'number' && result.status !== 0) {
+    const stderr = (result.stderr || '').toString().trim();
+    const stdout = (result.stdout || '').toString().trim();
+    throw new Error(
+      `git ${argv[0]} exited with status ${result.status}: ${stderr || stdout || '(no output)'}`,
+    );
+  }
+  return (result.stdout || '').toString().trim();
 }
 
 /**
@@ -99,9 +169,10 @@ export async function ensureSwarmClone(repoUrl) {
   if (existsSync(path.join(SWARM_CLONE_DIR, '.git'))) {
     return { cloneDir: SWARM_CLONE_DIR, freshClone: false };
   }
+  assertSafeGitUrl(repoUrl);
   mkdirSync(SWARM_CLONE_DIR, { recursive: true });
   try {
-    runGit(`clone --depth 20 ${repoUrl} "${SWARM_CLONE_DIR}"`, ARTIBOT_DIR);
+    runGit(['clone', '--depth', '20', '--', repoUrl, SWARM_CLONE_DIR], ARTIBOT_DIR);
   } catch (err) {
     throw new Error(`swarm clone failed: ${err.message || String(err)}`, { cause: err });
   }
@@ -117,11 +188,11 @@ export async function ensureSwarmClone(repoUrl) {
  */
 export function pullSwarm(cloneDir) {
   try {
-    runGit('pull --rebase --autostash origin main', cloneDir);
+    runGit(['pull', '--rebase', '--autostash', 'origin', 'main'], cloneDir);
     return true;
   } catch {
     try {
-      runGit('pull --rebase --autostash origin master', cloneDir);
+      runGit(['pull', '--rebase', '--autostash', 'origin', 'master'], cloneDir);
       return true;
     } catch {
       return false;
@@ -138,12 +209,20 @@ export function pullSwarm(cloneDir) {
  */
 export function commitAndPushSwarm(cloneDir, message) {
   try {
-    runGit('add -A', cloneDir);
-    const status = runGit('status --porcelain', cloneDir);
+    runGit(['add', '-A'], cloneDir);
+    const status = runGit(['status', '--porcelain'], cloneDir);
     if (!status) return true; // nothing to commit
-    runGit(`commit -m "${message.replace(/"/g, '\\"')}"`, cloneDir);
+    // -m takes the message as a single argv slot — no shell escaping needed.
+    // L-2: enforce a hard cap (COMMIT_MESSAGE_MAX_BYTES) so a runaway caller
+    // can't blow past the OS argv limit. Slice on character count is a safe
+    // upper bound for UTF-8 byte count at our 8KB ceiling.
+    const rawMessage = typeof message === 'string' ? message : String(message);
+    const safeMessage = rawMessage.length > COMMIT_MESSAGE_MAX_BYTES
+      ? rawMessage.slice(0, COMMIT_MESSAGE_MAX_BYTES) + '\n... (truncated)'
+      : rawMessage;
+    runGit(['commit', '-m', safeMessage], cloneDir);
     try {
-      runGit('push origin HEAD', cloneDir);
+      runGit(['push', 'origin', 'HEAD'], cloneDir);
       return true;
     } catch {
       // Push may fail if remote moved; caller will retry on next sync.

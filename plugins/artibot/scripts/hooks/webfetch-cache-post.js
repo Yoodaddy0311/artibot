@@ -17,6 +17,7 @@
 
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { getPluginRoot, parseJSON, readStdin, writeStdout } from '../utils/index.js';
 import { createErrorHandler } from '../../lib/core/hook-utils.js';
 import { cacheDir, cacheKey } from './webfetch-cache-pre.js';
@@ -137,7 +138,7 @@ async function main() {
 const isMain = (() => {
   try {
     const argv1 = process.argv[1] ? path.resolve(process.argv[1]) : '';
-    const here = path.resolve(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'));
+    const here = path.resolve(fileURLToPath(import.meta.url));
     return argv1 === here;
   } catch {
     return false;

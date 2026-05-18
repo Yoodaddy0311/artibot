@@ -54,14 +54,14 @@ const MIN_PATTERN_MATCH_SCORE = 0.3;
 // Internal State
 // ---------------------------------------------------------------------------
 
-/** In-memory pattern cache for fast lookups */
-const _patternCache = new Cache(PATTERN_CACHE_TTL);
+/** In-memory pattern cache for fast lookups (LRU-bounded to cap long-session memory growth) */
+const _patternCache = new Cache(PATTERN_CACHE_TTL, { maxSize: 500 });
 
 /** In-memory cache for memory search results */
-const _memoryCache = new Cache(MEMORY_CACHE_TTL);
+const _memoryCache = new Cache(MEMORY_CACHE_TTL, { maxSize: 500 });
 
 /** In-memory cache for tool suggestions */
-const _toolCache = new Cache(TOOL_CACHE_TTL);
+const _toolCache = new Cache(TOOL_CACHE_TTL, { maxSize: 500 });
 
 /** Loaded patterns from disk (populated by warmCache) */
 let _loadedPatterns = [];

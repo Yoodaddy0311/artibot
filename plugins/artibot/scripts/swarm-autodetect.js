@@ -17,16 +17,23 @@
  * @module scripts/swarm-autodetect
  */
 
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
-import { execSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
 import { getPluginRoot } from '../lib/core/platform.js';
 import { getSwarmConfig, loadConsent } from '../lib/swarm/swarm-config.js';
 import { ARTIBOT_DIR } from '../lib/core/config.js';
 import { readJsonFile, writeJsonFile } from '../lib/core/file.js';
+import { assertSafeGitUrl } from '../lib/swarm/git-backend.js';
 
 const PROFILE_REL = path.join('.claude-plugin', 'swarm-profile.json');
 const AUTO_APPLIED_MARKER = path.join(ARTIBOT_DIR, 'swarm-autoapplied.json');
+
+// v4.8.0 audit M-2: cap swarm-profile.json at 64KB. Legitimate profiles are
+// <1KB; anything larger is either corrupt or an attempt to OOM the autodetect
+// run via a giant JSON document that crashes JSON.parse downstream.
+const PROFILE_MAX_BYTES = 64 * 1024;
 
 /**
  * Read the auto-applied marker. If present, auto-apply has already run for
@@ -53,13 +60,20 @@ function log(line) {
   process.stderr.write(line + '\n');
 }
 
-function readProfile(pluginRoot) {
+export function readProfile(pluginRoot) {
   const profilePath = path.join(pluginRoot, PROFILE_REL);
   if (!existsSync(profilePath)) return null;
   try {
+    // M-2: enforce size cap BEFORE reading the whole file into memory.
+    const stats = statSync(profilePath);
+    if (stats.size > PROFILE_MAX_BYTES) return null;
     const raw = readFileSync(profilePath, 'utf-8');
     const profile = JSON.parse(raw);
-    if (!profile.repoUrl) return null;
+    // Schema check: must be a plain object with a string repoUrl. Anything
+    // else (arrays, primitives, repoUrl as number/object) is rejected so
+    // downstream assertSafeGitUrl never sees non-string input.
+    if (!profile || typeof profile !== 'object' || Array.isArray(profile)) return null;
+    if (typeof profile.repoUrl !== 'string' || profile.repoUrl.length === 0) return null;
     return { path: profilePath, ...profile };
   } catch {
     return null;
@@ -114,18 +128,36 @@ async function classifyState(pluginRoot) {
  * @param {string} pluginRoot
  * @param {object} profile
  */
-function applyProfile(pluginRoot, profile) {
+export function applyProfile(pluginRoot, profile) {
   const initScript = path.join(pluginRoot, 'scripts', 'swarm-init.js');
+  let safeRepoUrl;
   try {
-    const stdout = execSync(`node "${initScript}" --repo=${profile.repoUrl}`, {
+    safeRepoUrl = assertSafeGitUrl(profile.repoUrl);
+  } catch (err) {
+    return { ok: false, error: `unsafe repoUrl: ${err.message || String(err)}` };
+  }
+  const result = spawnSync(
+    process.execPath,
+    [initScript, `--repo=${safeRepoUrl}`],
+    {
       cwd: pluginRoot,
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    return { ok: true, output: stdout };
-  } catch (err) {
-    return { ok: false, error: err.message || String(err), stderr: err.stderr?.toString() };
+      shell: false,
+      windowsHide: true,
+    },
+  );
+  if (result.error) {
+    return { ok: false, error: result.error.message || String(result.error) };
   }
+  if (typeof result.status === 'number' && result.status !== 0) {
+    return {
+      ok: false,
+      error: `swarm-init exited with status ${result.status}`,
+      stderr: (result.stderr || '').toString(),
+    };
+  }
+  return { ok: true, output: (result.stdout || '').toString() };
 }
 
 function printHint(state, profile) {
@@ -227,7 +259,22 @@ async function main() {
   printHint(classification.state, classification.profile);
 }
 
-main().catch((err) => {
-  process.stderr.write(`[swarm-autodetect] ${err.message || err}\n`);
-  process.exit(0); // advisory — never block
-});
+// Only auto-run when invoked directly via the Node CLI (not when imported by
+// a test or another module). Compares this module's URL to argv[1] resolved
+// as a file:// URL — matches Node's standard "main module" idiom.
+function isDirectInvocation() {
+  if (!process.argv[1]) return false;
+  try {
+    return import.meta.url === pathToFileURL(process.argv[1]).href;
+  } catch {
+    return false;
+  }
+}
+
+if (isDirectInvocation()) {
+  main().catch((err) => {
+    process.stderr.write(`[swarm-autodetect] ${err.message || err}\n`);
+    process.exit(0); // advisory — never block
+  });
+}
+

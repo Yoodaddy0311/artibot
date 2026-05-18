@@ -64,5 +64,35 @@
     "content": "Recurring fix pattern detected. Consider adding automated checks for: fix(coverage): lower branches threshold 77→76 for v4.1 P0 fallback paths",
     "formatted": "- [auto-learned] Recurring fix pattern detected. Consider adding automated checks for: fix(coverage): lower branches threshold 77→76 for v4.1 P0 fallback paths",
     "injectedAt": "2026-04-28T00:48:25.336Z"
+  },
+  {
+    "type": "auto-learned",
+    "content": "Recurring fix pattern detected. Consider adding automated checks for: fix(hooks): v4.8.2 — revert exec-form args[] to shell-form",
+    "formatted": "- [auto-learned] Recurring fix pattern detected. Consider adding automated checks for: fix(hooks): v4.8.2 — revert exec-form args[] to shell-form",
+    "injectedAt": "2026-05-16T18:01:08.549Z"
+  },
+  {
+    "type": "auto-learned",
+    "content": "Recurring fix pattern detected. Consider adding automated checks for: fix(hooks): prevent marketplace install drift + legacy stub for check-console-log",
+    "formatted": "- [auto-learned] Recurring fix pattern detected. Consider adding automated checks for: fix(hooks): prevent marketplace install drift + legacy stub for check-console-log",
+    "injectedAt": "2026-05-16T18:01:08.549Z"
+  },
+  {
+    "type": "auto-learned",
+    "content": "Recurring fix pattern detected. Consider adding automated checks for: fix(autopilot): cross-machine version coherence + WIP-pollution + squash-safety",
+    "formatted": "- [auto-learned] Recurring fix pattern detected. Consider adding automated checks for: fix(autopilot): cross-machine version coherence + WIP-pollution + squash-safety",
+    "injectedAt": "2026-05-16T18:01:08.549Z"
+  },
+  {
+    "type": "auto-learned",
+    "content": "Recurring fix pattern detected. Consider adding automated checks for: fix(readme): align skill/command counts with v4.7.3 additions",
+    "formatted": "- [auto-learned] Recurring fix pattern detected. Consider adding automated checks for: fix(readme): align skill/command counts with v4.7.3 additions",
+    "injectedAt": "2026-05-16T18:01:08.549Z"
+  },
+  {
+    "type": "auto-learned",
+    "content": "Recurring fix pattern detected. Consider adding automated checks for: fix(hooks): v4.7.4 — silence Artibot hooks in unrelated user repos",
+    "formatted": "- [auto-learned] Recurring fix pattern detected. Consider adding automated checks for: fix(hooks): v4.7.4 — silence Artibot hooks in unrelated user repos",
+    "injectedAt": "2026-05-16T18:01:08.549Z"
   }
 ]

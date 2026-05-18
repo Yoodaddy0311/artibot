@@ -15,10 +15,15 @@ import { generatePRD } from './prd-generator.js';
 import { generateReport } from './report-generator.js';
 import { parseGoalContract } from './prd-parser.js';
 import { runPhaseGoalEvaluate } from './goal-loop.js';
-import { makeInitialState, persist, recordPhase, tick } from './_engine-helpers.js';
+import { buildTuiInstruction, makeInitialState, maybeDangerNote, notePhaseProgress, persist, recordPhase, tick } from './_engine-helpers.js';
 import { loadSession } from './session-store.js';
 import { pauseReason, shouldPause } from './safety.js';
-import { notifyCompletion, notifyPause } from './notification.js';
+import {
+  notifyCompletion,
+  notifyDanger,
+  notifyPause,
+  notifyPhaseProgress,
+} from './notification.js';
 import { appendLesson, extractKey, recallLessons } from './memory.js';
 import {
   createWorktree,
@@ -91,11 +96,13 @@ function maybePause(state) {
     data: { reason },
   });
   const note = notifyPause(state.sessionId, reason);
+  const dangerNote = maybeDangerNote(state, reason);
   return {
     type: 'pause',
     sessionId: state.sessionId,
     reason,
     notification: note,
+    dangerNotification: dangerNote,
     instructions: [
       'Autopilot 세션이 자동 일시정지되었습니다.',
       `사유: ${reason}`,
@@ -170,6 +177,7 @@ export function runPhase0Intake(state) {
   recordPhase(state, { name: 'INTAKE', status: 'done', artifact: filePath, slug });
   persist(state);
   tick(state.sessionId, { phase: 'INTAKE', type: 'phase-end', level: 'info', message: 'Phase 0 INTAKE 완료', data: { prdPath: filePath } });
+  notePhaseProgress(state, 'START', 'INTAKE');
   return {
     type: 'phase-result',
     phase: 'INTAKE',
@@ -179,11 +187,7 @@ export function runPhase0Intake(state) {
   };
 }
 
-/**
- * Phase 1 — Plan: instruction for the main Claude to delegate to planner agent.
- * @param {object} state
- * @returns {object}
- */
+/** Phase 1 — Plan: instruction for main Claude to delegate to planner agent. */
 export function runPhase1Plan(state) {
   state.phase = 'PLAN';
   tick(state.sessionId, { phase: 'PLAN', type: 'phase-start', level: 'info', message: 'Phase 1 PLAN 시작' });
@@ -192,6 +196,7 @@ export function runPhase1Plan(state) {
   recordPhase(state, { name: 'PLAN', status: 'queued' });
   persist(state);
   tick(state.sessionId, { phase: 'PLAN', type: 'phase-end', level: 'info', message: 'Phase 1 PLAN 위임 완료' });
+  notePhaseProgress(state, 'INTAKE', 'PLAN');
   return {
     type: 'delegate',
     phase: 'PLAN',
@@ -257,6 +262,7 @@ export function runPhase2Execute(state) {
   recordPhase(state, { name: 'EXECUTE', status: 'queued' });
   persist(state);
   tick(state.sessionId, { phase: 'EXECUTE', type: 'phase-end', level: 'info', message: 'Phase 2 EXECUTE 위임 완료' });
+  notePhaseProgress(state, 'PLAN', 'EXECUTE');
   const instruction = {
     type: 'team-create',
     phase: 'EXECUTE',
@@ -290,6 +296,7 @@ export function runPhase3CrossCheck(state) {
   recordPhase(state, { name: 'CROSS_CHECK', status: 'queued' });
   persist(state);
   tick(state.sessionId, { phase: 'CROSS_CHECK', type: 'phase-end', level: 'info', message: 'Phase 3 CROSS_CHECK 위임 완료' });
+  notePhaseProgress(state, 'EXECUTE', 'CROSS_CHECK');
   return {
     type: 'delegate',
     phase: 'CROSS_CHECK',
@@ -352,6 +359,7 @@ export function runPhase4Verify(state) {
   recordPhase(state, { name: 'VERIFY', status: 'queued' });
   persist(state);
   tick(state.sessionId, { phase: 'VERIFY', type: 'phase-end', level: 'info', message: 'Phase 4 VERIFY 위임 완료' });
+  notePhaseProgress(state, 'CROSS_CHECK', 'VERIFY');
   const instruction = {
     type: 'verify',
     phase: 'VERIFY',
@@ -389,6 +397,7 @@ export function runPhase5Improve(state) {
   recordPhase(state, { name: 'IMPROVE', status: 'queued' });
   persist(state);
   tick(state.sessionId, { phase: 'IMPROVE', type: 'phase-end', level: 'info', message: 'Phase 5 IMPROVE 위임 완료' });
+  notePhaseProgress(state, 'VERIFY', 'IMPROVE');
   // v4.6.0 — when a Goal Contract is present, route through EVALUATE
   // instead of jumping straight to REPORT. Legacy sessions continue
   // straight to REPORT unchanged.
@@ -408,11 +417,7 @@ export function runPhase5Improve(state) {
   };
 }
 
-/**
- * Phase 6 — Report: generate completion report and notify.
- * @param {object} state
- * @returns {object}
- */
+/** Phase 6 — Report: generate completion report and notify. */
 export function runPhase6Report(state) {
   state.phase = 'REPORT';
   tick(state.sessionId, { phase: 'REPORT', type: 'phase-start', level: 'info', message: 'Phase 6 REPORT 시작' });
@@ -432,6 +437,7 @@ export function runPhase6Report(state) {
   persist(state);
   tick(state.sessionId, { phase: 'REPORT', type: 'phase-end', level: 'info', message: 'Phase 6 REPORT 완료', data: { reportPath: filePath } });
   tick(state.sessionId, { phase: 'COMPLETED', type: 'session-complete', level: 'info', message: 'Autopilot 세션 완료' });
+  notePhaseProgress(state, 'IMPROVE', 'REPORT');
   // Release the feature lock acquired in startAutopilot. Best-effort —
   // mirrors the cleanup pattern already used in abortAutopilot.
   try {
@@ -503,11 +509,13 @@ export async function startAutopilot({ task, mode, options, sessionId } = {}) {
   try {
     persist(state);
     const instruction = runPhase0Intake(state);
+    const tui = buildTuiInstruction(state, { isTTY: process.stdout.isTTY });
     const base = {
       sessionId: state.sessionId,
       prdPath: state.prdPath,
       phase: state.phase,
       instruction,
+      ...(tui ? { tui } : {}),
     };
     if (instruction.type === 'pause') {
       return { ...base, paused: true, reason: instruction.reason };
@@ -673,7 +681,7 @@ export async function abortAutopilot(sessionId, { graceful = true } = {}) {
   return { sessionId, status: 'ABORTED', reportPath };
 }
 
-export { notifyCompletion, notifyPause };
+export { notifyCompletion, notifyDanger, notifyPause, notifyPhaseProgress };
 
 /**
  * List active autopilot worktrees as a normalized array.

@@ -1,5 +1,5 @@
 {
-  "version": "4.7.5",
+  "version": "4.11.1",
   "agents": {
     "modelPolicy": {
       "high": {
@@ -1100,9 +1100,9 @@
         "deploy"
       ],
       "trigger": "analyze security vulnerabilities, then refactor auth flow, then deploy to production",
-      "createdAt": "2026-05-06T06:15:00.137Z",
+      "createdAt": "2026-05-18T00:28:59.117Z",
       "source": "macro-learner-auto",
-      "suggestionId": "macro-1777866809194"
+      "suggestionId": "macro-1778732940625"
     }
   }
 }

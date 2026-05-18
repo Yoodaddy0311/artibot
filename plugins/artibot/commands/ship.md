@@ -18,7 +18,36 @@ Routes the user's request to the appropriate specialist agent for the **ship** l
 
 ```
 /ship [your request]
+/ship --auto-description           # synthesize PR body from git + SESSION-NOTES
+/ship --auto-description --stats   # also append `git diff --stat` block
 ```
+
+## Options
+
+| Flag | Description |
+|------|-------------|
+| `--auto-description` | Run `scripts/build-pr-description.mjs` and pipe its markdown into `gh pr create --body`. Combines git history between base..HEAD with the most recent `.artibot/SESSION-NOTES.md` entry. |
+| `--stats` | Forwarded to the builder — appends a `git diff base...head --stat` block. Useful for large PRs. |
+
+### Auto-description workflow
+
+When `--auto-description` is passed, the ship agent should:
+
+1. Resolve the base branch (defaults to `master` if not specified)
+2. Invoke the builder:
+   ```bash
+   node plugins/artibot/scripts/build-pr-description.mjs \
+     --base master \
+     --head HEAD \
+     --session-notes .artibot/SESSION-NOTES.md \
+     [--stats]
+   ```
+3. Capture stdout into a heredoc variable
+4. Pass it to `gh pr create --body "$(...)"`
+
+The builder is fault-tolerant: git failures or a missing SESSION-NOTES.md
+collapse to an empty section rather than aborting. The default flow (no
+flag) is unchanged — agents still write the body by hand.
 
 ## Phase Mapping
 
