@@ -31,6 +31,25 @@ function extractNodes(memory) {
 }
 
 /**
+ * Run the auto-research stage. Returns `{ triggered, findings }` or `null`
+ * when the optional `autoResearch` dependency was not injected. Extracting
+ * this keeps `run()`'s cyclomatic complexity below the project budget.
+ *
+ * @param {object|null} autoResearch
+ * @param {object} routingResult
+ * @param {object|null} compressed
+ * @returns {Promise<{ triggered: boolean, findings: object|null }|null>}
+ */
+async function runResearchStage(autoResearch, routingResult, compressed) {
+  if (!autoResearch) return null;
+  if (!autoResearch.shouldResearch(routingResult)) return { triggered: false, findings: null };
+  const query = routingResult?.input || compressed?.summary || '';
+  const scopeResult = autoResearch.scope(query);
+  const gathered = await autoResearch.gather(scopeResult);
+  return { triggered: true, findings: autoResearch.synthesize(gathered) };
+}
+
+/**
  * Build edges between co-occurring keywords in a memory.
  * @param {Array<{id: string}>} nodes
  * @returns {Array<{from: string, to: string, relation: string}>}
@@ -160,18 +179,14 @@ export function createEvolutionLoop(options = {}) {
 
       // Stage 4: Auto-research if confidence was low. Skipped when caller did
       // not inject `autoResearch` (preserves Layer-3 isolation from Layer-4).
-      if (autoResearch) {
-        try {
-          if (autoResearch.shouldResearch(context.routingResult)) {
-            result.researchTriggered = true;
-            const query = context.routingResult?.input || result.compressed?.summary || '';
-            const scopeResult = autoResearch.scope(query);
-            const gathered = await autoResearch.gather(scopeResult);
-            result.researchFindings = autoResearch.synthesize(gathered);
-          }
-        } catch (err) {
-          result.errors.push({ stage: 'research', message: err.message });
+      try {
+        const research = await runResearchStage(autoResearch, context.routingResult, result.compressed);
+        if (research) {
+          result.researchTriggered = research.triggered;
+          result.researchFindings = research.findings;
         }
+      } catch (err) {
+        result.errors.push({ stage: 'research', message: err.message });
       }
 
       // Stage 5: Contribute qualified patterns to collective hub
