@@ -816,3 +816,17 @@
 <!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
 
 ---
+
+## 2026-05-18 07:09 UTC · `chore/release-yml-drop-skip-ci`
+
+- **Commits** (5):
+  - `e9aedb5` ci: re-trigger workflows (previous commit contained skip-ci substring)
+  - `6f874a2` ci: drop [skip ci] from sync-readmes commit message
+  - `b166f3a` docs(release): sync README badges to v4.11.3 [skip ci] (#26)
+  - `6afab9e` release: v4.11.3 — release-infra hardening (CI/docs only) (#25)
+  - `070b73a` ci: drop paths filter from plugin-validate PR trigger (#24)
+- **Files touched**: 10
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
