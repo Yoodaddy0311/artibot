@@ -29,19 +29,24 @@
  * @module scripts/squash-wip
  */
 
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { isWipSubject } from '../lib/autopilot/wip-stats.js';
 
 /**
  * Default git runner used by the CLI. Injectable for tests.
  *
+ * Uses `execFileSync` with an args array so user-supplied tokens
+ * (`--from <ref>`, `-m <msg>`) are passed as discrete argv entries and never
+ * interpolated into a shell string — backticks, semicolons, and other shell
+ * metacharacters are inert.
+ *
  * @param {string[]} args
  * @param {{ cwd?: string }} [opts]
  * @returns {string}
  */
 function defaultGit(args, opts = {}) {
-  return execSync(`git ${args.join(' ')}`, {
+  return execFileSync('git', args, {
     cwd: opts.cwd,
     encoding: 'utf-8',
     stdio: ['ignore', 'pipe', 'pipe'],
