@@ -10,6 +10,8 @@
 
 import { execFile as execFileCb } from 'node:child_process';
 import { promisify } from 'node:util';
+import { existsSync } from 'node:fs';
+import path from 'node:path';
 import { getPluginRoot } from '../core/platform.js';
 
 const execFile = promisify(execFileCb);
@@ -20,7 +22,25 @@ const execFile = promisify(execFileCb);
 
 const EXEC_TIMEOUT = 120_000;
 const MAX_BUFFER = 50 * 1024 * 1024; // 50 MB for large vitest JSON output
-const SHELL_OPTS = { shell: true, windowsHide: true }; // shell: npx resolution; windowsHide: suppress flashing cmd window on Windows
+// windowsHide: suppress the cmd window flash on Windows. We deliberately do
+// NOT set `shell: true` here — running through cmd.exe exposes any future
+// caller-supplied args/cwd to shell metacharacter injection. `npx` resolves
+// fine via execFile when we pick the right binary per platform (see
+// `resolveBin`).
+const SHELL_OPTS = { windowsHide: true };
+
+/**
+ * Resolve the platform-specific npm binary name. On Windows npm/npx ship as
+ * `*.cmd` shims that cannot be spawned directly by `execFile` without
+ * `shell: true`. Returning the `.cmd` form lets execFile launch the shim
+ * binary directly without invoking cmd.exe as a shell.
+ *
+ * @param {string} bin - logical name e.g. 'npx' or 'npm'
+ * @returns {string} platform-specific binary name
+ */
+function resolveBin(bin) {
+  return process.platform === 'win32' ? `${bin}.cmd` : bin;
+}
 
 // ---------------------------------------------------------------------------
 // Helpers

@@ -54,7 +54,7 @@ Competitive scoring (10-dim, see report Section 6.2):
 
 | Framework | Total / 100 |
 |---|---|
-| **Artibot v3.9.0** | **89** |
+| **Artibot v4.11.3** | **89** |
 | everything-claude-code | 87 |
 | LangGraph 1.1.3 | 74 |
 | AutoGen (AG2) | 65 |

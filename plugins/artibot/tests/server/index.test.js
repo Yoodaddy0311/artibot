@@ -426,15 +426,16 @@ describe('Rate Limiting Integration', () => {
   });
 
   it('returns 429 when rate limit exceeded', async () => {
-    // Fill up the rate limit for a remote IP
+    // Rate limit keys on the socket remote address by default (XFF is only
+    // honored behind a trusted proxy, see TRUST_PROXY). Fill against the
+    // address the next request will arrive from.
     for (let i = 0; i < 60; i++) {
-      checkRateLimit('203.0.113.1');
+      checkRateLimit('127.0.0.1');
     }
 
     const req = createMockRequest({
       method: 'GET',
       url: '/api/v1/health',
-      headers: { 'x-forwarded-for': '203.0.113.1' },
       remoteAddress: '127.0.0.1',
     });
     const res = createMockResponse();
@@ -444,6 +445,28 @@ describe('Rate Limiting Integration', () => {
     expect(res._statusCode).toBe(429);
     const body = res.getBody();
     expect(body.error).toMatch(/Rate limit/);
+  });
+
+  it('ignores X-Forwarded-For when TRUST_PROXY is unset', async () => {
+    // An attacker setting XFF should NOT be able to bypass the per-IP limit
+    // by rotating the header value when the server is not behind a trusted
+    // proxy. The socket peer address is the source of truth.
+    for (let i = 0; i < 60; i++) {
+      checkRateLimit('127.0.0.1');
+    }
+
+    const req = createMockRequest({
+      method: 'GET',
+      url: '/api/v1/health',
+      headers: { 'x-forwarded-for': '198.51.100.7' },
+      remoteAddress: '127.0.0.1',
+    });
+    const res = createMockResponse();
+
+    await handleRequest(req, res);
+
+    // Still 429 — XFF claim was ignored, peer address (127.0.0.1) is full.
+    expect(res._statusCode).toBe(429);
   });
 });
 

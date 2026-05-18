@@ -9,9 +9,12 @@
 import { createSessionMemory } from './session-memory.js';
 import { createKnowledgeGraph, EDGE_RELATIONS, NODE_TYPES } from './knowledge-graph.js';
 import { createSkillEvolver } from './skill-evolver.js';
-import { createAutoResearch } from '../cognitive/auto-research.js';
 import { buildContribution } from '../swarm/collective-hub.js';
 import { loadFromDisk, saveToDisk } from '../swarm/swarm-persistence.js';
+
+// Layer constraint: Layer-3 (learning) must not import Layer-4 (cognitive).
+// `autoResearch` is dependency-injected by the caller (e.g. session-end hook).
+// When not provided, Stage 4 (research) is skipped — pipeline stays best-effort.
 
 /**
  * Extract knowledge graph nodes from a compressed memory record.
@@ -61,7 +64,7 @@ export function createEvolutionLoop(options = {}) {
   const sessionMemory = options.sessionMemory || createSessionMemory({ now });
   const knowledgeGraph = options.knowledgeGraph || createKnowledgeGraph();
   const skillEvolver = options.skillEvolver || createSkillEvolver({ now });
-  const autoResearch = options.autoResearch || createAutoResearch();
+  const autoResearch = options.autoResearch || null;
   const hubConfig = options.hubConfig || { optIn: false, minSuccessRate: 0.6, minUsageCount: 5 };
 
   return Object.freeze({
@@ -155,9 +158,10 @@ export function createEvolutionLoop(options = {}) {
         result.errors.push({ stage: 'evaluate', message: err.message });
       }
 
-      // Stage 4: Auto-research if confidence was low
+      // Stage 4: Auto-research if confidence was low. Skipped when caller did
+      // not inject `autoResearch` (preserves Layer-3 isolation from Layer-4).
       try {
-        if (autoResearch.shouldResearch(context.routingResult)) {
+        if (autoResearch && autoResearch.shouldResearch(context.routingResult)) {
           result.researchTriggered = true;
           const query = context.routingResult?.input || result.compressed?.summary || '';
           const scopeResult = autoResearch.scope(query);
