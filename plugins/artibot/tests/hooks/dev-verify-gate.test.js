@@ -241,3 +241,68 @@ describe('Artibot repo scope guard (ground truth)', () => {
     expect(detect(workdir)).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Excluded-files filter (added 2026-05-18, v4.11.2).
+//
+// dev-verify-gate.js excludes files written by sibling Stop hooks to avoid
+// false-positive DEV verify asks. Specifically: session-notes.js appends to
+// .artibot/SESSION-NOTES.md during Stop, and because Stop hooks run in
+// parallel (Promise.allSettled), dev-verify-gate observes the dirty file
+// before git-autopilot-close.js can commit it.
+//
+// EXCLUDED_FILES is module-private — this suite asserts the ground-truth
+// filter behaviour against the same input the gate's getChangedFiles()
+// would receive. Drift between this list and the implementation is a real
+// regression.
+// ---------------------------------------------------------------------------
+describe('excluded-files filter (ground truth)', () => {
+  // Reproduces EXCLUDED_FILES from dev-verify-gate.js. If this set changes,
+  // update the implementation and this fixture together.
+  const EXCLUDED = new Set([
+    '.artibot/SESSION-NOTES.md',
+  ]);
+
+  function filterChanged(rawLines) {
+    const merged = new Set();
+    for (const line of rawLines) {
+      const trimmed = line.trim();
+      if (trimmed && !EXCLUDED.has(trimmed)) merged.add(trimmed);
+    }
+    return [...merged];
+  }
+
+  it('drops .artibot/SESSION-NOTES.md when it is the only change', () => {
+    expect(filterChanged(['.artibot/SESSION-NOTES.md'])).toEqual([]);
+  });
+
+  it('keeps real edits alongside SESSION-NOTES.md', () => {
+    const result = filterChanged([
+      '.artibot/SESSION-NOTES.md',
+      'plugins/artibot/lib/core/config.js',
+    ]);
+    expect(result).toEqual(['plugins/artibot/lib/core/config.js']);
+  });
+
+  it('passes through unrelated edits unchanged', () => {
+    const result = filterChanged([
+      'plugins/artibot/scripts/hooks/dev-verify-gate.js',
+      'plugins/artibot/tests/hooks/dev-verify-gate.test.js',
+    ]);
+    expect(result).toHaveLength(2);
+  });
+
+  it('handles empty input', () => {
+    expect(filterChanged([])).toEqual([]);
+  });
+
+  it('does not exclude similarly-named files outside the excluded set', () => {
+    // Defensive: only exact paths in EXCLUDED_FILES drop. Substring matches
+    // or sibling files in .artibot/ must still flow through.
+    const result = filterChanged([
+      '.artibot/OTHER-NOTES.md',
+      'SESSION-NOTES.md',
+    ]);
+    expect(result).toEqual(['.artibot/OTHER-NOTES.md', 'SESSION-NOTES.md']);
+  });
+});

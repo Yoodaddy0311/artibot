@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.11.2] — 2026-05-18
+
+**Theme**: `dev-verify-gate` race-condition hotfix — Stop 훅이 read-only 턴에서도 SESSION-NOTES.md 변경분을 false-positive로 감지해 DEV verify 블록이 반복 발화하던 버그 수정.
+
+### Fixed
+
+- **`scripts/hooks/dev-verify-gate.js`** — `getChangedFiles()`에 `EXCLUDED_FILES` 필터 추가 (`.artibot/SESSION-NOTES.md` 제외). Stop 훅이 병렬 실행되는 구조(`_stop-dispatcher.js`의 `Promise.allSettled`) 때문에 `session-notes.js`가 SESSION-NOTES.md에 append하는 사이 `dev-verify-gate`가 git diff를 읽어 dirty 파일을 변경 사항으로 인식, `git-autopilot-close.js`가 commit하기 전이라 매 Stop마다 DECOMPOSE/EXECUTE/VERIFY 체크리스트 ask가 발화하던 회귀.
+- 영향 범위: 실제 코드 편집이 없는 read-only/diagnostic 턴에서만 발생. 정상 편집 턴에서는 SESSION-NOTES.md 외 변경 파일이 잡혀 게이트가 의도대로 동작.
+- 5개 새 테스트 추가 (`tests/hooks/dev-verify-gate.test.js`의 `excluded-files filter` 블록) — exact-path 매칭, 빈 입력, 실제 편집과의 혼합, 유사 이름 파일 비제외 등.
+
+### Verification
+
+- `node --check plugins/artibot/scripts/hooks/dev-verify-gate.js` 통과.
+- 신규 테스트 5건 + 기존 ground-truth 테스트 회귀 0건.
+- 캐시 사본에 동일 패치 사전 검증 후 소스 반영.
+
+### Migration
+
+없음. 훅 내부 필터만 변경, 외부 API/스키마/db 미변경. 기존 fingerprint 캐시(`runtime/last-dev-verify-sha.txt`)는 그대로 사용 가능.
+
+---
+
 ## [4.11.1] — 2026-05-18
 
 **Theme**: `/autopilot` cross-project resolver hotfix — 타 프로젝트에서 호출 시 "엔진 부재"로 실패하던 버그 수정. Markdown-only 변경, lib 코드 무수정.

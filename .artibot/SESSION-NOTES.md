@@ -752,3 +752,67 @@
 <!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
 
 ---
+
+## 2026-05-18 01:49 UTC · `artibot/master`
+
+- **Commits** (3):
+  - `d67cecd` Merge pull request #21 from Yoodaddy0311/artibot/chore-dual-branch-deprecation
+  - `c904d94` chore: deprecate artibot/master integration branch + unblock release.yml on flaky tag-time tests
+  - `892deea` chore: artibot session close [2026-05-18 01:20:28]
+- **Files touched**: 3
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-05-18 02:03 UTC · `artibot/master`
+
+- **Commits** (1):
+  - `ebc5453` chore: artibot session close [2026-05-18 01:50:13]
+- **Files touched**: 1
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-05-18 02:11 UTC · `artibot/master`
+
+- **Commits** (1):
+  - `b02fc8e` chore: artibot session close [2026-05-18 02:03:21]
+- **Files touched**: 1
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-05-18 02:16 UTC · `artibot/master`
+
+- **Commits** (1):
+  - `c51b7f5` chore: artibot session close [2026-05-18 02:11:35]
+- **Files touched**: 1
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-05-18 02:26 UTC · `artibot/master`
+
+- **Commits** (3):
+  - `863c2dd` chore: sync AGENTS.md version pointer to 4.11.2
+  - `a5bcf10` fix(hooks): exclude SESSION-NOTES.md from dev-verify-gate to stop race-block
+  - `8eafe46` chore: artibot session close [2026-05-18 02:18:19]
+- **Files touched**: 9
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-05-18 02:26 UTC · `artibot/master`
+
+- **Commits** (1):
+  - `486376f` chore: artibot session close [2026-05-18 02:26:09]
+- **Files touched**: 2
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
