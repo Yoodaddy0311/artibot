@@ -962,3 +962,14 @@
 <!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
 
 ---
+
+## 2026-05-18 09:11 UTC · `artibot/chore-release-yml-drop-skip-ci`
+
+- **Commits** (2):
+  - `94f28b4` Merge remote-tracking branch 'origin/master' into artibot/chore-release-yml-drop-skip-ci
+  - `b596983` ci: drop [skip ci] from sync-readmes commit message (#27)
+- **Files touched**: 0
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
