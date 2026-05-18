@@ -12,17 +12,17 @@ on:
       - "plugins/artibot-cowork/skills/**"
       - "plugins/artibot-cowork/commands/**"
       - ".github/workflows/plugin-validate.yml"
+  # Note: no `paths` filter on pull_request. The two matrix jobs are listed
+  # as required checks in master's branch protection, so a PR that doesn't
+  # touch plugin/agent/skill/command files (e.g. README-only, workflow-only)
+  # would otherwise stay BLOCKED forever — the required check never runs and
+  # never reports a status. The validation itself is fast (~10s per matrix
+  # leg), so the cost of always running is negligible.
+  #
+  # `push` keeps its paths filter because direct pushes to master are blocked
+  # by branch protection anyway, and feature-branch pushes get covered by
+  # the PR's pull_request trigger.
   pull_request:
-    paths:
-      - "plugins/artibot/.claude-plugin/plugin.json"
-      - "plugins/artibot/agents/**"
-      - "plugins/artibot/skills/**"
-      - "plugins/artibot/commands/**"
-      - "plugins/artibot-cowork/.claude-plugin/plugin.json"
-      - "plugins/artibot-cowork/agents/**"
-      - "plugins/artibot-cowork/skills/**"
-      - "plugins/artibot-cowork/commands/**"
-      - ".github/workflows/plugin-validate.yml"
   workflow_dispatch:
 
 permissions:
