@@ -628,3 +628,32 @@
 <!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
 
 ---
+
+## 2026-05-18 00:28 UTC · `artibot/master`
+
+- **Commits** (20):
+  - `6352c6e` fix(readme): align skill/command/hook counts with v4.10/v4.11 additions
+  - `31830c7` release(v4.11.1): /autopilot cross-project resolver hotfix
+  - `d75a1c0` chore: artibot session close [2026-05-17 12:33:58]
+  - `7f4ee0c` chore: artibot session close [2026-05-17 11:47:57]
+  - `ccc97c3` style(v4.11.0): apply eslint sort-imports auto-fix on 4 test files
+  - `01563b9` chore: artibot session close [2026-05-17 11:41:27]
+  - `87b3182` chore: artibot session close [2026-05-17 11:38:38]
+  - `ef42814` chore: artibot session close [2026-05-17 11:35:21]
+  - `8c56eb3` chore: artibot session close [2026-05-17 11:34:59]
+  - `9f05591` release(v4.11.0): auto-invoke layer for v4.10.0 — 4 parallel tracks, 310 tests
+  - `6b8ffa1` chore: artibot session close [2026-05-17 11:25:45]
+  - `d36a653` chore: artibot session close [2026-05-17 11:25:25]
+  - `217ff03` chore: artibot session close [2026-05-17 11:19:44]
+  - `8fbe4a3` chore: artibot session close [2026-05-17 11:19:29]
+  - `95b7c39` chore: artibot session close [2026-05-17 11:18:58]
+  - `4bd0494` chore: artibot session close [2026-05-17 11:18:43]
+  - `580591e` chore: artibot session close [2026-05-17 11:14:36]
+  - `54a5bd5` chore: artibot session close [2026-05-17 11:14:15]
+  - `cd54110` chore: artibot session close [2026-05-17 11:04:46]
+  - `3895a10` chore: artibot session close [2026-05-17 10:27:43]
+- **Files touched**: 0
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
