@@ -157,17 +157,6 @@ function defaultSquashMessage(commits) {
 }
 
 /**
- * Quote a string for safe use as a single `-m` argument on the shell
- * `git commit -m "..."` call. Escapes embedded double quotes and backslashes.
- *
- * @param {string} s
- * @returns {string}
- */
-function shellQuoteDouble(s) {
-  return `"${String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\$/g, '\\$').replace(/`/g, '\\`')}"`;
-}
-
-/**
  * Run the squash. Returns a structured result for callers (tests + CLI).
  *
  * @param {{
