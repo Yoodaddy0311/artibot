@@ -794,3 +794,15 @@
 <!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
 
 ---
+
+## 2026-05-18 02:26 UTC · `artibot/master`
+
+- **Commits** (3):
+  - `863c2dd` chore: sync AGENTS.md version pointer to 4.11.2
+  - `a5bcf10` fix(hooks): exclude SESSION-NOTES.md from dev-verify-gate to stop race-block
+  - `8eafe46` chore: artibot session close [2026-05-18 02:18:19]
+- **Files touched**: 9
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
