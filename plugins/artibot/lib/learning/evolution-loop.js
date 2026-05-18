@@ -160,16 +160,18 @@ export function createEvolutionLoop(options = {}) {
 
       // Stage 4: Auto-research if confidence was low. Skipped when caller did
       // not inject `autoResearch` (preserves Layer-3 isolation from Layer-4).
-      try {
-        if (autoResearch && autoResearch.shouldResearch(context.routingResult)) {
-          result.researchTriggered = true;
-          const query = context.routingResult?.input || result.compressed?.summary || '';
-          const scopeResult = autoResearch.scope(query);
-          const gathered = await autoResearch.gather(scopeResult);
-          result.researchFindings = autoResearch.synthesize(gathered);
+      if (autoResearch) {
+        try {
+          if (autoResearch.shouldResearch(context.routingResult)) {
+            result.researchTriggered = true;
+            const query = context.routingResult?.input || result.compressed?.summary || '';
+            const scopeResult = autoResearch.scope(query);
+            const gathered = await autoResearch.gather(scopeResult);
+            result.researchFindings = autoResearch.synthesize(gathered);
+          }
+        } catch (err) {
+          result.errors.push({ stage: 'research', message: err.message });
         }
-      } catch (err) {
-        result.errors.push({ stage: 'research', message: err.message });
       }
 
       // Stage 5: Contribute qualified patterns to collective hub

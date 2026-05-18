@@ -217,7 +217,7 @@ export function runSquash(opts = {}) {
 
   try {
     git(['reset', '--soft', baseRef], { cwd });
-    git(['commit', '-m', shellQuoteDouble(message)], { cwd });
+    git(['commit', '-m', message], { cwd });
   } catch (err) {
     return {
       status: 'error',
