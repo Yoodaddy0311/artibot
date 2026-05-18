@@ -840,3 +840,13 @@
 <!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
 
 ---
+
+## 2026-05-18 08:24 UTC · `artibot/chore-release-yml-drop-skip-ci`
+
+- **Commits** (1):
+  - `a6bd1bf` chore: artibot session close [2026-05-18 08:22:10]
+- **Files touched**: 1
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
