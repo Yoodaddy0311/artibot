@@ -88,6 +88,22 @@ function getHeadSha(repoRoot) {
 }
 
 /**
+ * Files written by other Stop hooks that race with this gate. Excluded so
+ * the gate doesn't spuriously fire on its own dispatcher's side-effects.
+ *
+ * Background: session-notes.js appends to .artibot/SESSION-NOTES.md during
+ * Stop. Because Stop hooks run in parallel (Promise.allSettled in
+ * _stop-dispatcher.js), dev-verify-gate often observes the dirty file
+ * before git-autopilot-close.js commits it, producing a false-positive
+ * DECOMPOSE/EXECUTE/VERIFY ask on read-only turns.
+ *
+ * @type {Set<string>}
+ */
+const EXCLUDED_FILES = new Set([
+  '.artibot/SESSION-NOTES.md',
+]);
+
+/**
  * Collect changed files vs HEAD: working tree + staged.
  * Last-commit (HEAD~1..HEAD) is intentionally excluded — already-committed
  * changes from a prior turn shouldn't re-trigger DEV verify.
@@ -105,7 +121,7 @@ function getChangedFiles(repoRoot) {
     if (!out) continue;
     for (const line of out.split('\n')) {
       const trimmed = line.trim();
-      if (trimmed) merged.add(trimmed);
+      if (trimmed && !EXCLUDED_FILES.has(trimmed)) merged.add(trimmed);
     }
   }
   return [...merged];
