@@ -895,3 +895,13 @@
 <!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
 
 ---
+
+## 2026-05-19 06:32 UTC · `artibot/master`
+
+- **Commits** (1):
+  - `1ca8fd6` fix(learning): Stage B Area 1/2/3 — make GRPO success+team+swarm signals actually accumulate
+- **Files touched**: 6
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
