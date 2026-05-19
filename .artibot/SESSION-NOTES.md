@@ -925,3 +925,13 @@
 <!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
 
 ---
+
+## 2026-05-19 07:38 UTC · `artibot/master`
+
+- **Commits** (1):
+  - `e97edd4` feat(learning): Stage C — retroactive GRPO backfill + evolution-loop categorizer hook
+- **Files touched**: 2
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
