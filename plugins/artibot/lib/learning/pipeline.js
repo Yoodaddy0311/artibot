@@ -163,6 +163,24 @@ async function runSelfEvaluation(sessionData) {
       score: evalTrendScore(evalResult.overallTrend),
     });
 
+    // Synthesize a `success` experience when the session completed without
+    // errors. Reuses already-computed `sessionResult` so the data is real,
+    // not fabricated. Feeds `success-patterns.json` via lifelong-learner.
+    if (sessionResult.success) {
+      await collectExperience({
+        type: 'success',
+        category: sessionTask.type,
+        data: {
+          taskId: sessionTask.id,
+          duration: sessionResult.duration ?? null,
+          strategy: 'session',
+          filesModified: (sessionData.filesModified ?? []).length,
+          testsPass: sessionResult.testsPass ?? null,
+        },
+        sessionId: sessionData.sessionId,
+      });
+    }
+
     return evalResult;
   } catch (err) {
     process.stderr.write(`[learning] self-evaluation failed: ${err?.message ?? err}\n`);

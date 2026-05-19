@@ -10,9 +10,10 @@
  * Stdout: JSON { message, stop? }
  */
 
-import { atomicWriteSync, parseJSON, readStdin, resolveConfigPath, writeStdout } from '../utils/index.js';
+import { atomicWriteSync, getPluginRoot, parseJSON, readStdin, resolveConfigPath, toFileUrl, writeStdout } from '../utils/index.js';
 import { existsSync, readFileSync } from 'node:fs';
-import { createErrorHandler, extractAgentId, extractAgentRole, getStatePath } from '../../lib/core/hook-utils.js';
+import path from 'node:path';
+import { createErrorHandler, extractAgentId, extractAgentRole, getStatePath, logHookError } from '../../lib/core/hook-utils.js';
 import { withFileLock } from '../../lib/core/file-lock.js';
 
 /** Maximum consecutive idle events before auto-stop (0 = disabled). */
@@ -63,7 +64,7 @@ async function main() {
   const autoStopConfig = loadAutoStopConfig();
 
   // Read-modify-write under file lock
-  const { pendingTasks, shouldStop, idleCount } = withFileLock(statePath, () => {
+  const { pendingTasks, shouldStop, idleCount, teamState } = withFileLock(statePath, () => {
     let state = {};
     let pending = [];
 
@@ -97,8 +98,47 @@ async function main() {
     }
 
     atomicWriteSync(statePath, state);
-    return { pendingTasks: pending, shouldStop: stop, idleCount: count };
+    return { pendingTasks: pending, shouldStop: stop, idleCount: count, teamState: state };
   });
+
+  // When the team has finished (auto-stop triggered), record an aggregate
+  // team-composition outcome into GRPO team weights. Gated on the presence
+  // of `startedAt`, `teamId`, `domain` — without these fields the call
+  // degrades to a no-op rather than crashing (risk mitigation per
+  // .artibot/stage-b-side-diagnosis.md §2).
+  if (shouldStop) {
+    const hasRequiredFields =
+      teamState &&
+      teamState.startedAt !== undefined &&
+      teamState.teamId !== undefined &&
+      teamState.domain !== undefined;
+    if (hasRequiredFields) {
+      try {
+        const learningPath = path.join(getPluginRoot(), 'lib', 'learning', 'index.js');
+        const { generateTeamCandidates, evaluateTeamGroup, updateTeamWeights } =
+          await import(toFileUrl(learningPath));
+        const tasks = teamState.tasks ?? [];
+        const completed = tasks.filter((t) => t.status === 'completed');
+        const teamResult = {
+          taskCount: tasks.length,
+          successCount: completed.length,
+          completedCount: completed.length,
+          duration: Date.now() - teamState.startedAt,
+          teamSize: Object.keys(teamState.idleCounts ?? {}).length,
+        };
+        const cands = generateTeamCandidates({
+          id: teamState.teamId,
+          domain: teamState.domain,
+        });
+        cands.forEach((c) => {
+          c.result = teamResult;
+        });
+        await updateTeamWeights(evaluateTeamGroup(cands));
+      } catch (err) {
+        logHookError('team-idle', 'team-weights update failed', err);
+      }
+    }
+  }
 
   // Build output message (no state mutation needed)
   const parts = [`[team] Teammate idle: ${agentId}`];
