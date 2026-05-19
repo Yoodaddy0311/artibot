@@ -47,6 +47,60 @@ function buildEdges(nodes) {
 }
 
 /**
+ * Resolve the categorize function — either the injected override, or a lazy
+ * dynamic import of `categorizeAll` from `./failure-categorizer.js`.
+ * Returns null + records the error on load failure so Stage 6 can short-circuit.
+ *
+ * @param {Function|null} customCategorizer
+ * @param {string|null} patternsDictPath
+ * @param {{stage: string, message: string}[]} errors
+ * @returns {Promise<Function|null>}
+ */
+async function resolveCategorize(customCategorizer, patternsDictPath, errors) {
+  if (customCategorizer) return customCategorizer;
+  try {
+    const mod = await import('./failure-categorizer.js');
+    const baseOpts = patternsDictPath ? { cwd: patternsDictPath } : undefined;
+    return (failureContext) => mod.categorizeAll(failureContext, baseOpts);
+  } catch (err) {
+    errors.push({ stage: 'categorize', message: err.message });
+    return null;
+  }
+}
+
+/**
+ * Run Stage 6 — categorize each failure context, write top-1 per failure into
+ * `result.categorizedFailures` and a `{ categoryId: count }` distribution.
+ * Per-failure throws are caught and recorded; other failures keep processing.
+ *
+ * @param {object} result - Mutable result object being assembled by run().
+ * @param {Array} failures - context.failures (already array-checked, non-empty).
+ * @param {Function} categorize - Resolved categorizer function.
+ */
+async function runCategorizeStage(result, failures, categorize) {
+  const categorized = [];
+  const distribution = {};
+  for (const failure of failures) {
+    try {
+      const ranked = await categorize(failure);
+      if (Array.isArray(ranked) && ranked.length > 0) {
+        const top = ranked[0];
+        categorized.push(Object.freeze({
+          categoryId: top.categoryId,
+          confidence: top.confidence,
+          severity: top.severity,
+        }));
+        distribution[top.categoryId] = (distribution[top.categoryId] || 0) + 1;
+      }
+    } catch (err) {
+      result.errors.push({ stage: 'categorize', message: err.message });
+    }
+  }
+  result.categorizedFailures = Object.freeze(categorized);
+  result.categoryDistribution = Object.freeze(distribution);
+}
+
+/**
  * Create a self-evolution loop instance.
  * @param {object} [options]
  * @param {object} [options.sessionMemory] - Prebuilt session memory instance
@@ -54,6 +108,12 @@ function buildEdges(nodes) {
  * @param {object} [options.skillEvolver] - Prebuilt skill evolver instance
  * @param {object} [options.autoResearch] - Prebuilt auto research instance
  * @param {() => number} [options.now] - Clock injection
+ * @param {(failureContext: object, opts?: object) => Promise<Array>} [options.categorizer]
+ *   Async function returning ranked category results for a failure context.
+ *   Defaults to a lazy dynamic import of `categorizeAll` from
+ *   `./failure-categorizer.js`. Inject in tests to avoid filesystem I/O.
+ * @param {string} [options.patternsDictPath] - cwd override forwarded to the
+ *   default categorizer as `{ cwd }`. Ignored when a custom categorizer is supplied.
  * @returns {object} Evolution loop API
  */
 export function createEvolutionLoop(options = {}) {
@@ -63,6 +123,8 @@ export function createEvolutionLoop(options = {}) {
   const skillEvolver = options.skillEvolver || createSkillEvolver({ now });
   const autoResearch = options.autoResearch || createAutoResearch();
   const hubConfig = options.hubConfig || { optIn: false, minSuccessRate: 0.6, minUsageCount: 5 };
+  const customCategorizer = typeof options.categorizer === 'function' ? options.categorizer : null;
+  const patternsDictPath = typeof options.patternsDictPath === 'string' ? options.patternsDictPath : null;
 
   return Object.freeze({
     /**
@@ -73,9 +135,14 @@ export function createEvolutionLoop(options = {}) {
      * @param {Array} [context.events] - Session events to capture
      * @param {Array} [context.skillUsages] - Skill usage records [{name, invoked, success, userEdited, editDistance}]
      * @param {object} [context.routingResult] - Last routing result for auto-research trigger
+     * @param {Array<{stderr?: string, stdout?: string, diff?: string, files?: string[]}>} [context.failures]
+     *   Failure contexts from the session. Stage 6 categorizes each via the
+     *   injected `categorizer` and aggregates a per-category distribution.
+     *   When absent or empty, Stage 6 is skipped and the result stays identical
+     *   to pre-Stage-6 callers.
      * @returns {Promise<object>} Pipeline result with per-stage outcomes
      */
-     
+
     async run(context = {}) {
       const result = {
         compressed: null,
@@ -85,6 +152,8 @@ export function createEvolutionLoop(options = {}) {
         researchTriggered: false,
         researchFindings: null,
         contribution: null,
+        categorizedFailures: [],
+        categoryDistribution: {},
         errors: [],
         durationMs: 0,
       };
@@ -196,6 +265,15 @@ export function createEvolutionLoop(options = {}) {
         }
       } catch (err) {
         result.errors.push({ stage: 'contribute', message: err.message });
+      }
+
+      // Stage 6: Categorize session failures (per-category fix-pattern learning)
+      const failures = Array.isArray(context.failures) ? context.failures : [];
+      if (failures.length > 0) {
+        const categorize = await resolveCategorize(customCategorizer, patternsDictPath, result.errors);
+        if (categorize) {
+          await runCategorizeStage(result, failures, categorize);
+        }
       }
 
       result.durationMs = now() - start;
