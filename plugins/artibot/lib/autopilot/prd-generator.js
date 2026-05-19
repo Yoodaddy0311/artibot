@@ -202,17 +202,23 @@ ${goalContractSection}## 3. 범위 (Scope)
 
 /**
  * Generate a PRD file for the given task.
- * Writes to docs/PRD/{slug}-{sessionId}.md under the project root.
- * @param {{ task: string, sessionId: string, options?: object, priorLessons?: Array<object> }} args
+ * Writes to `<projectRoot>/docs/PRD/{slug}-{sessionId}.md`.
+ *
+ * `projectRoot` defaults to the resolved project root (one level above plugin root).
+ * Tests should pass an explicit `projectRoot` (e.g. tmpdir) to avoid touching
+ * the real project tree.
+ *
+ * @param {{ task: string, sessionId: string, options?: object, priorLessons?: Array<object>, projectRoot?: string }} args
  * @returns {{ filePath: string, content: string, slug: string }}
  */
-export function generatePRD({ task, sessionId, options = {}, priorLessons }) {
+export function generatePRD({ task, sessionId, options = {}, priorLessons, projectRoot }) {
   if (!sessionId || typeof sessionId !== 'string') {
     throw new TypeError('sessionId is required');
   }
   const slug = slugify(task);
   const fileName = `${slug}-${sessionId}.md`;
-  const filePath = path.join(getProjectRoot(), 'docs', 'PRD', fileName);
+  const baseRoot = typeof projectRoot === 'string' && projectRoot ? projectRoot : getProjectRoot();
+  const filePath = path.join(baseRoot, 'docs', 'PRD', fileName);
   const lessons = priorLessons ?? options.priorLessons;
   const content = renderPRD({ task, sessionId, options, priorLessons: lessons });
   ensureDirSync(dirname(filePath));
