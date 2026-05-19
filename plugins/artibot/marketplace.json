@@ -253,8 +253,8 @@
 
   "changelog": "./CHANGELOG.md",
   "release": {
-    "current": "4.11.3",
-    "releasedAt": "2026-05-18",
+    "current": "4.11.4",
+    "releasedAt": "2026-05-19",
     "channel": "stable"
   },
 
