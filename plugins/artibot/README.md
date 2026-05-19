@@ -1,6 +1,6 @@
 # Artibot
 
-[![Version](https://img.shields.io/badge/version-4.11.3-blue?style=flat-square)](./CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-4.11.4-blue?style=flat-square)](./CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](./LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen?style=flat-square)](./package.json)
 [![Tests](https://img.shields.io/badge/tests-passing-brightgreen?style=flat-square)](./tests/)
@@ -54,7 +54,7 @@ Competitive scoring (10-dim, see report Section 6.2):
 
 | Framework | Total / 100 |
 |---|---|
-| **Artibot v4.11.3** | **89** |
+| **Artibot v4.11.4** | **89** |
 | everything-claude-code | 87 |
 | LangGraph 1.1.3 | 74 |
 | AutoGen (AG2) | 65 |
