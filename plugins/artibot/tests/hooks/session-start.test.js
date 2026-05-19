@@ -16,6 +16,16 @@ const mockState = {
   mkdirSyncCalls: [],
   readFileSyncImpl: () => { throw new Error('ENOENT'); },
   existsSyncResult: false,
+  // Per-path existsSync override map (string → boolean). When set, takes
+  // precedence over `existsSyncResult` so a test can mark only `.artibot/HANDOFF.md`
+  // as present while keeping all other paths absent.
+  existsSyncByPath: null,
+  // Optional stub for fs.statSync — when set, called for any path containing
+  // `.artibot/HANDOFF.md`. Return shape: { mtimeMs, size }.
+  statSyncImpl: null,
+  // Optional stub for fs.openSync/readSync — handoff banner reads the head
+  // of the file via these APIs. We return a captured string + fd handle.
+  handoffHeadContent: null,
   // checkForUpdateFactory is called on each invocation, returning a fresh Promise.
   // Using a factory (thunk) avoids storing a rejected Promise in state, which would
   // trigger vitest's unhandled-rejection detection before the module's catch block runs.
@@ -42,9 +52,31 @@ vi.mock('node:fs', async () => {
   return {
     ...actual,
     readFileSync: vi.fn((...args) => mockState.readFileSyncImpl(...args)),
-    existsSync: vi.fn(() => mockState.existsSyncResult),
+    existsSync: vi.fn((p) => {
+      if (mockState.existsSyncByPath) {
+        const k = String(p);
+        for (const [key, val] of Object.entries(mockState.existsSyncByPath)) {
+          if (k.includes(key)) return val;
+        }
+      }
+      return mockState.existsSyncResult;
+    }),
     writeFileSync: vi.fn((...args) => { mockState.writeFileSyncCalls.push(args); }),
     mkdirSync: vi.fn((...args) => { mockState.mkdirSyncCalls.push(args); }),
+    statSync: vi.fn((p) => {
+      if (mockState.statSyncImpl) return mockState.statSyncImpl(p);
+      return { mtimeMs: 0, size: 0 };
+    }),
+    // openSync/readSync/closeSync — minimal stubs so appendHandoffBanner's
+    // readHeadSync path returns mockState.handoffHeadContent.
+    openSync: vi.fn(() => 999), // synthetic fd
+    readSync: vi.fn((_fd, buf) => {
+      const content = mockState.handoffHeadContent || '';
+      const bytes = Buffer.from(content, 'utf8');
+      bytes.copy(buf, 0, 0, Math.min(bytes.length, buf.length));
+      return Math.min(bytes.length, buf.length);
+    }),
+    closeSync: vi.fn(() => {}),
   };
 });
 
@@ -80,6 +112,9 @@ describe('session-start hook', () => {
     mockState.mkdirSyncCalls = [];
     mockState.readFileSyncImpl = () => { throw new Error('ENOENT'); };
     mockState.existsSyncResult = false;
+    mockState.existsSyncByPath = null;
+    mockState.statSyncImpl = null;
+    mockState.handoffHeadContent = null;
     mockState.checkForUpdateFactory = () => Promise.resolve({ hasUpdate: false });
     stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
     exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => {});
@@ -348,6 +383,126 @@ describe('session-start hook', () => {
         String(args[0]).includes('long-context-active.json'),
       );
       expect(longContextWrites).toHaveLength(0);
+    });
+  });
+
+  describe('handoff banner (Track B2 /save integration)', () => {
+    it('pushes [artibot:handoff] line when .artibot/HANDOFF.md exists and is older than session start', async () => {
+      mockState.existsSyncByPath = { 'HANDOFF.md': true };
+      mockState.statSyncImpl = () => ({
+        // 5 minutes before module load — guarantees mtimeMs < SESSION_START_MS
+        mtimeMs: Date.now() - 5 * 60_000,
+        size: 1024,
+      });
+      mockState.handoffHeadContent = [
+        '# HANDOFF — 2026-05-19 11:30',
+        '',
+        '> 다음 P0: Ship the release notes',
+        '',
+        '## 1. 지금 상태',
+        'WIP: 4',
+        '',
+        '## 5. 미해결 결정/질문',
+        '- item one',
+        '- item two',
+      ].join('\n');
+      mockState.readStdinResult = Promise.resolve(JSON.stringify({}));
+
+      await importAndWait();
+
+      const output = mockState.writeStdoutCalls[0][0];
+      expect(output.message).toContain('[artibot:handoff]');
+      expect(output.message).toContain('Ship the release notes');
+      expect(output.message).toContain('/resume');
+    });
+
+    it('omits handoff banner when .artibot/HANDOFF.md is absent (legacy behavior preserved)', async () => {
+      // existsSyncByPath unset → existsSyncResult=false applies → handoff bail-out.
+      mockState.readStdinResult = Promise.resolve(JSON.stringify({}));
+
+      await importAndWait();
+
+      const output = mockState.writeStdoutCalls[0][0];
+      expect(output.message).not.toContain('[artibot:handoff]');
+    });
+
+    it('parses banner fields correctly when HANDOFF.md begins with a YAML frontmatter block', async () => {
+      // Safety #2: v4.13.0 prepends YAML frontmatter to every /save handoff.
+      // The banner parser must skip it before scanning `## N.` headings.
+      mockState.existsSyncByPath = { 'HANDOFF.md': true };
+      mockState.statSyncImpl = () => ({
+        mtimeMs: Date.now() - 5 * 60_000,
+        size: 1024,
+      });
+      mockState.handoffHeadContent = [
+        '---',
+        'machineId: host_user',
+        "createdAt: '2026-05-19T11:30:00.000Z'",
+        'branch: feat/handoff',
+        'generator: artibot-handoff',
+        'schemaVersion: 1',
+        '---',
+        '',
+        '# HANDOFF — 2026-05-19 11:30',
+        '',
+        '> 다음 P0: Frontmatter parsing works',
+        '',
+        '## 1. 지금 상태',
+        'WIP: 2',
+        '',
+        '## 5. 미해결 결정/질문',
+        '- item one',
+      ].join('\n');
+      mockState.readStdinResult = Promise.resolve(JSON.stringify({}));
+
+      await importAndWait();
+
+      const output = mockState.writeStdoutCalls[0][0];
+      expect(output.message).toContain('[artibot:handoff]');
+      expect(output.message).toContain('Frontmatter parsing works');
+      // Unresolved count from § 5 must be 1, NOT 0 — proves the parser
+      // correctly skipped past frontmatter and located § 5.
+      expect(output.message).toContain('미해결 1');
+      expect(output.message).toContain('미커밋 2');
+    });
+
+    it('suppresses [artibot:pending-suggestions] line when handoff banner is pushed (dedup)', async () => {
+      // Arrange: HANDOFF.md exists AND pending suggestions also exist → without
+      // dedup the user would see two redundant lines surfacing the same info.
+      mockState.existsSyncByPath = { 'HANDOFF.md': true, 'next-session-suggestions.json': true };
+      mockState.statSyncImpl = () => ({ mtimeMs: Date.now() - 5 * 60_000, size: 1024 });
+      mockState.handoffHeadContent = [
+        '# HANDOFF — 2026-05-19 11:30',
+        '',
+        '> 다음 P0: Wire up the deduplication test',
+        '',
+        '## 1. 지금 상태',
+        'WIP: 1',
+        '',
+        '## 5. 미해결 결정/질문',
+        '- pending advisor item',
+      ].join('\n');
+      // surfaceAdvisoryMessages reads next-session-suggestions.json via
+      // readFileSyncImpl — return a payload with 1 unresolved suggestion so
+      // the [artibot:pending-suggestions] line would normally be pushed.
+      const previousImpl = mockState.readFileSyncImpl;
+      mockState.readFileSyncImpl = (filePath) => {
+        if (String(filePath).includes('next-session-suggestions.json')) {
+          return JSON.stringify({
+            suggestions: [
+              { id: 'a', resolved: false, consumed: false, summary: 'x' },
+            ],
+          });
+        }
+        return previousImpl(filePath);
+      };
+      mockState.readStdinResult = Promise.resolve(JSON.stringify({}));
+
+      await importAndWait();
+
+      const output = mockState.writeStdoutCalls[0][0];
+      expect(output.message).toContain('[artibot:handoff]');
+      expect(output.message).not.toContain('[artibot:pending-suggestions');
     });
   });
 });

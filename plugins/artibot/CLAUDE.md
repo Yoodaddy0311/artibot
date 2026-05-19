@@ -4,7 +4,7 @@ Auto-loads when Claude accesses `plugins/artibot/`.
 
 ## Stack
 
-Claude Native Agent Teams API (TeamCreate/SendMessage/TaskCreate) + 28 agents + 111 skills + 66 commands. ESM only, `"type": "module"`, zero runtime deps, Node >=20.
+Claude Native Agent Teams API (TeamCreate/SendMessage/TaskCreate) + 28 agents + 111 skills + 68 commands. ESM only, `"type": "module"`, zero runtime deps, Node >=20.
 
 ## 5-Layer Architecture
 

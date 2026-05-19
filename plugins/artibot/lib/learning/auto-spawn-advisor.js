@@ -29,7 +29,7 @@
  * @module lib/learning/auto-spawn-advisor
  */
 
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
 
@@ -103,7 +103,7 @@ export function buildSuggestion(signal, ctx) {
   const depth = Number.isFinite(signal.depth) ? signal.depth : 0;
   if (depth > ctx.maxDepth) return null;
 
-  return {
+  const built = {
     id: makeSuggestionId(ctx.seq),
     createdAt: new Date().toISOString(),
     reason: String(signal.reason ?? '').slice(0, 500),
@@ -114,6 +114,16 @@ export function buildSuggestion(signal, ctx) {
     depth,
     resolved: false,
   };
+
+  // Preserve passthrough consumed-state fields when the caller re-builds an
+  // existing suggestion (e.g., during a rewrite). `/save` writes these
+  // markers so the suggestion is hidden from `readPendingSuggestions` without
+  // mutating its `resolved` semantics — the two flags are orthogonal.
+  if (signal.consumed === true) built.consumed = true;
+  if (typeof signal.consumedAt === 'string') built.consumedAt = signal.consumedAt;
+  if (typeof signal.consumedBy === 'string') built.consumedBy = signal.consumedBy;
+
+  return built;
 }
 
 // ---------------------------------------------------------------------------
@@ -303,7 +313,11 @@ export async function readPendingSuggestions(pluginRoot) {
     const raw = await readFile(targetPath, 'utf8');
     const parsed = JSON.parse(raw);
     const list = Array.isArray(parsed?.suggestions) ? parsed.suggestions : [];
-    return list.filter((s) => s && s.resolved !== true);
+    // Hide both user-resolved AND `/save`-consumed suggestions. The two flags
+    // are independent: `resolved` records explicit user action, `consumed`
+    // records absorption by a handoff snapshot (so the suggestion will not
+    // be re-surfaced as a session-start banner).
+    return list.filter((s) => s && s.resolved !== true && s.consumed !== true);
   } catch {
     return [];
   }
@@ -349,6 +363,99 @@ export async function resolveSuggestion(pluginRoot, suggestionId) {
     return { resolved: true };
   } catch {
     return { resolved: false };
+  }
+}
+
+/**
+ * Mark suggestions as `consumed` by a handoff snapshot (e.g., `/save`).
+ *
+ * Distinct from `resolveSuggestion`: `consumed` indicates the suggestion was
+ * absorbed into a handoff document, not that the user took action. The
+ * `/save` flow calls this AFTER a successful `writeHandoff` so that:
+ *   - the next session-start banner does not re-surface the same item
+ *   - `resolved`-state is preserved (a consumed item can still be resolved
+ *     later, and a resolved item is already hidden anyway)
+ *
+ * The write follows a read+merge+write pattern (atomic at the OS level via
+ * a single writeFile call). Unknown ids are silently skipped — callers
+ * should treat skip count as a soft signal, not an error.
+ *
+ * Behavior:
+ *   - Returns `{ marked: 0, skipped: 0 }` when file missing or list empty.
+ *   - Idempotent: re-marking an already-consumed id increments `marked`
+ *     but the timestamp/by fields are only set on the first transition.
+ *   - Preserves all other fields (including `resolved`) untouched.
+ *
+ * @param {string} pluginRoot
+ * @param {string[]} suggestionIds
+ * @param {object} [options]
+ * @param {Date}   [options.now] - Override clock for tests.
+ * @returns {Promise<{marked: number, skipped: number}>}
+ */
+export async function markConsumed(pluginRoot, suggestionIds, { now = new Date() } = {}) {
+  if (!pluginRoot) return { marked: 0, skipped: 0 };
+  if (!Array.isArray(suggestionIds) || suggestionIds.length === 0) {
+    return { marked: 0, skipped: 0 };
+  }
+
+  const targetPath = path.join(pluginRoot, SUGGESTIONS_RELATIVE_PATH);
+  let parsed;
+  try {
+    const raw = await readFile(targetPath, 'utf8');
+    parsed = JSON.parse(raw);
+  } catch {
+    // File missing or corrupt — every requested id is a skip.
+    return { marked: 0, skipped: suggestionIds.length };
+  }
+
+  const list = Array.isArray(parsed?.suggestions) ? parsed.suggestions : [];
+  const idIndex = new Map();
+  list.forEach((s, i) => {
+    if (s && typeof s.id === 'string') idIndex.set(s.id, i);
+  });
+
+  let marked = 0;
+  let skipped = 0;
+  const consumedAt = now.toISOString();
+  const next = list.slice();
+
+  for (const id of suggestionIds) {
+    const idx = idIndex.get(id);
+    if (idx === undefined) {
+      skipped += 1;
+      continue;
+    }
+    const prev = next[idx];
+    // Only stamp metadata on first transition; idempotent re-marks count
+    // toward `marked` but preserve the original consumedAt/by.
+    next[idx] = prev.consumed === true
+      ? prev
+      : { ...prev, consumed: true, consumedAt, consumedBy: 'save' };
+    marked += 1;
+  }
+
+  if (marked === 0) {
+    return { marked: 0, skipped };
+  }
+
+  // Atomic write: tmp + rename. Guarantees no partial reader observes a
+  // half-written advisor file, and on rename failure the original is intact.
+  const dir = path.dirname(targetPath);
+  const tmp = path.join(dir, `.${path.basename(targetPath)}.${process.pid}.${Date.now()}.tmp`);
+  try {
+    await mkdir(dir, { recursive: true });
+    await writeFile(
+      tmp,
+      JSON.stringify({ ...parsed, suggestions: next }, null, 2) + '\n',
+      'utf8',
+    );
+    await rename(tmp, targetPath);
+    return { marked, skipped };
+  } catch {
+    // Write failed — surface as fully skipped so caller does not assume
+    // durability. Advisor file remains untouched. Clean stray tmp.
+    try { await rm(tmp, { force: true }); } catch { /* noop */ }
+    return { marked: 0, skipped: suggestionIds.length };
   }
 }
 

@@ -6,7 +6,7 @@
  */
 
 import { getPluginRoot, parseJSON, readStdin, resolveConfigPath, toFileUrl, writeStdout } from '../utils/index.js';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { checkForUpdate } from '../../lib/core/version-checker.js';
@@ -348,6 +348,187 @@ function appendWipAdvisory(lines) {
   }
 }
 
+// Max bytes to read from .artibot/HANDOFF.md when extracting banner fields.
+// Real handoffs are 4-16 KB; cap defensively so a corrupt/huge file never
+// blows session-start latency budget.
+const HANDOFF_HEAD_READ_BYTES = 32 * 1024;
+
+// Hard ceiling for banner extraction (read + regex). The /save flow runs at
+// session END, so a banner read at session START should never collide with
+// an in-flight writer — but the 800ms guard absorbs any FS hiccup and stays
+// well within the 5s hook budget shared with the rest of session-start.
+const HANDOFF_BANNER_TIMEOUT_MS = 800;
+
+/**
+ * Read the first N bytes of a file synchronously. Returns '' on any failure
+ * — never throws, since this runs inside the non-blocking banner path.
+ * @param {string} filePath
+ * @param {number} maxBytes
+ * @returns {string}
+ */
+function readHeadSync(filePath, maxBytes) {
+  let fd;
+  try {
+    fd = openSync(filePath, 'r');
+    const buf = Buffer.alloc(maxBytes);
+    const bytesRead = readSync(fd, buf, 0, maxBytes, 0);
+    return buf.subarray(0, bytesRead).toString('utf8');
+  } catch {
+    return '';
+  } finally {
+    if (fd !== undefined) {
+      try { closeSync(fd); } catch { /* ignore */ }
+    }
+  }
+}
+
+/**
+ * Parse the head of a HANDOFF.md to extract the three banner fields:
+ *   - next P0 line (## 4. 다음 P0 → first non-empty body line)
+ *   - unresolved count (## 5. 미해결 결정/질문 → count bullet items)
+ *   - WIP/uncommitted count (## 1. 지금 상태 → "변경 파일: N" or "WIP: N")
+ *
+ * Pure function (exported for unit testing); regex-driven, no I/O.
+ * @param {string} head
+ * @returns {{ p0: string|null, unresolved: number, wip: number }}
+ */
+export function parseHandoffBannerFields(head) {
+  if (typeof head !== 'string' || head.length === 0) {
+    return { p0: null, unresolved: 0, wip: 0 };
+  }
+
+  // v4.13.0 Safety #2: handoff markdown now starts with a YAML frontmatter
+  // block (`---\n…\n---\n`). Strip it before scanning so the `## N.` section
+  // regex never accidentally matches a frontmatter key/value. Frontmatter is
+  // optional — older handoffs without it remain parseable.
+  let body = head;
+  if (body.startsWith('---\n') || body.startsWith('---\r\n')) {
+    // Match closing fence on its own line. Cap the search to the first 8 KB
+    // of input so a malformed handoff (no closing fence) cannot stall the
+    // regex engine.
+    const fenceRe = /\r?\n---\s*(?:\r?\n|$)/;
+    const slice = body.slice(0, 8192);
+    const close = slice.search(fenceRe);
+    if (close >= 0) {
+      const m = slice.slice(close).match(fenceRe);
+      if (m) body = body.slice(close + m[0].length);
+    }
+  }
+
+  // Section delimiter: a heading starting with `## ` at line start. Capture
+  // body until the next `## ` heading or end of slice.
+  function sliceSection(re) {
+    const m = body.match(re);
+    if (!m) return '';
+    const start = m.index + m[0].length;
+    const rest = body.slice(start);
+    const nextHeading = rest.match(/^##\s+/m);
+    return nextHeading ? rest.slice(0, nextHeading.index) : rest;
+  }
+
+  // Next P0: prefer the top-of-document `> 다음 …` summary line written by
+  // handoff-builder.renderHandoffMarkdown(); fall back to first non-empty
+  // line under `## 4. 즉시 진행할 일` / `## 4. 다음 P0` / `## 4. Next P0`.
+  let p0 = null;
+  const summaryMatch = body.match(/^>\s*(다음\s+P\d+\s*:.*|Next\s+P\d+\s*:.*)$/m);
+  if (summaryMatch) {
+    p0 = summaryMatch[1].trim().slice(0, 160);
+  }
+  if (!p0) {
+    const p0Section = sliceSection(/^##\s+4\.[^\n]*?(?:즉시\s*진행|다음\s*P0|Next\s*P0|Immediate)[^\n]*$/im);
+    if (p0Section) {
+      const firstLine = p0Section
+        .split(/\r?\n/)
+        .map((l) => l.replace(/^[\s>*\-|]+/, '').trim())
+        .find((l) => l.length > 0 && !l.startsWith('우선순위') && !l.startsWith('---'));
+      if (firstLine) p0 = firstLine.slice(0, 160);
+    }
+  }
+
+  // Unresolved count: bullet items under `## 5. 미해결`. Count lines starting with - or * (after trim).
+  let unresolved = 0;
+  const unresolvedSection = sliceSection(/^##\s+5\.[^\n]*?(?:미해결|Unresolved)[^\n]*$/im);
+  if (unresolvedSection) {
+    unresolved = unresolvedSection
+      .split(/\r?\n/)
+      .filter((l) => /^\s*[-*]\s+\S/.test(l))
+      .length;
+  }
+
+  // WIP / uncommitted: look in `## 1. 지금 상태` for "WIP: N" or "변경 파일: N" or "Uncommitted: N".
+  let wip = 0;
+  const statusSection = sliceSection(/^##\s+1\.[^\n]*?(?:지금\s*상태|Now|Status)[^\n]*$/im);
+  if (statusSection) {
+    const wipMatch = statusSection.match(/(?:WIP|변경\s*파일|Uncommitted|미커밋)\D*?(\d+)/i);
+    if (wipMatch) wip = Math.max(0, Number.parseInt(wipMatch[1], 10) || 0);
+  }
+
+  return { p0, unresolved, wip };
+}
+
+/**
+ * Append `[artibot:handoff] …` banner line when `.artibot/HANDOFF.md` exists
+ * AND was not written during this process (mtime < startTimeMs). Reads only
+ * the first 32 KB to defend against unbounded files; 800ms outer timeout.
+ *
+ * Returns true if a banner line was pushed (so the caller can suppress the
+ * duplicate `[artibot:pending-suggestions count=N]` line — those signals are
+ * already absorbed into the handoff).
+ *
+ * @param {string[]} lines
+ * @param {object} [options]
+ * @param {number} [options.startTimeMs] - Reference start time (Date.now()).
+ * @returns {Promise<boolean>}
+ */
+async function appendHandoffBanner(lines, { startTimeMs = Date.now() } = {}) {
+  // Use Promise.race so a slow disk never stalls session-start. The inner
+  // work is fully sync; we wrap it in a microtask to participate in race.
+  let timeoutHandle;
+  const timeoutPromise = new Promise((resolve) => {
+    timeoutHandle = setTimeout(() => resolve(false), HANDOFF_BANNER_TIMEOUT_MS);
+  });
+
+  const workPromise = (async () => {
+    try {
+      const handoffPath = path.join(process.cwd(), '.artibot', 'HANDOFF.md');
+      if (!existsSync(handoffPath)) return false;
+
+      // Skip when the file was just written by THIS process (avoid noise on
+      // a /save -> immediately /resume cycle inside the same session).
+      let stat;
+      try { stat = statSync(handoffPath); } catch { return false; }
+      if (stat.mtimeMs >= startTimeMs) return false;
+      if (stat.size === 0) return false;
+
+      const head = readHeadSync(handoffPath, HANDOFF_HEAD_READ_BYTES);
+      const { p0, unresolved, wip } = parseHandoffBannerFields(head);
+
+      // Compute age string for context (∞ never possible — we already
+      // checked mtime, but guard against system-clock skew).
+      const ageMs = Math.max(0, startTimeMs - stat.mtimeMs);
+      const ageStr = ageMs < 60_000
+        ? `${Math.round(ageMs / 1000)}s ago`
+        : ageMs < 3_600_000
+          ? `${Math.round(ageMs / 60_000)}m ago`
+          : `${Math.round(ageMs / 3_600_000)}h ago`;
+
+      const p0Display = p0 ?? '(미정 — /resume 으로 확인)';
+      lines.push(
+        `[artibot:handoff] Next P0: ${p0Display} · 미해결 ${unresolved} · 미커밋 ${wip} · saved ${ageStr} — /resume 으로 전체 보기`,
+      );
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+
+  try {
+    return await Promise.race([workPromise, timeoutPromise]);
+  } finally {
+    clearTimeout(timeoutHandle);
+  }
+}
+
 /**
  * Non-blocking update notification — any error is swallowed. Wrapped with a
  * 2000ms outer timeout so the update check never consumes more than 2 seconds,
@@ -447,6 +628,11 @@ async function maybeSwarmAutodetect(pluginRoot) {
   }
 }
 
+// Captured once at module evaluation. Used by appendHandoffBanner to detect
+// "freshly written this session" handoffs (mtime >= SESSION_START_MS) and
+// to compute a human-readable "saved Nh ago" suffix in the banner.
+const SESSION_START_MS = Date.now();
+
 async function main() {
   const raw = await readStdin();
   parseJSON(raw);
@@ -476,6 +662,22 @@ async function main() {
   await appendKillSwitchStatus(env.pluginRoot, config, lines);
   appendTestStatus(env.pluginRoot, lines);
   appendWipAdvisory(lines);
+
+  // /save handoff banner: surfaces a single one-line summary of the previous
+  // session's /save snapshot. When present, the older `[artibot:pending-suggestions count=N]`
+  // line is suppressed — those advisor signals have already been absorbed
+  // into the handoff (marked `consumed: true` by `/save`'s markConsumed call),
+  // and re-surfacing the count would be misleading double-counting.
+  const handoffPushed = await appendHandoffBanner(lines, { startTimeMs: SESSION_START_MS });
+  if (handoffPushed) {
+    for (let i = lines.length - 2; i >= 0; i -= 1) {
+      if (typeof lines[i] === 'string' && lines[i].startsWith('[artibot:pending-suggestions')) {
+        lines.splice(i, 1);
+        break;
+      }
+    }
+  }
+
   await checkUpdateBounded(version, home, lines);
   await primeSkillCache(env.pluginRoot);
   await maybeInjectSkillDiscovery(env.pluginRoot, lines);

@@ -11,6 +11,7 @@ import {
   _internals,
   analyzeNextSession,
   buildSuggestion,
+  markConsumed,
   readPendingSuggestions,
   resolveAutoSpawnConfig,
   resolveSuggestion,
@@ -297,5 +298,96 @@ describe('auto-spawn-advisor / readPendingSuggestions + resolveSuggestion', () =
     );
     const r = await resolveSuggestion(root, 'nonexistent-id');
     expect(r.resolved).toBe(false);
+  });
+});
+
+describe('auto-spawn-advisor / markConsumed (/save absorption)', () => {
+  let root;
+
+  beforeEach(() => {
+    root = makeTempRoot();
+  });
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  async function seedAdvisorFile() {
+    const result = await analyzeNextSession(
+      {
+        testFailures: [{ name: 'a.test.js' }],
+        staleSkills: ['skill-one'],
+        driftWarnings: [{ agent: 'alpha', avg: 0.4, threshold: 0.65, confidence: 0.9 }],
+      },
+      {
+        pluginRoot: root,
+        config: { ago: { autoSpawn: { enabled: true, maxDepth: 2, minConfidence: 0.8, requireOptIn: true } } },
+      },
+    );
+    expect(result.written).toBe(true);
+    expect(result.suggestions.length).toBeGreaterThanOrEqual(2);
+    return result.suggestions;
+  }
+
+  it('hides consumed suggestions from readPendingSuggestions after markConsumed', async () => {
+    const seeded = await seedAdvisorFile();
+    const ids = seeded.map((s) => s.id);
+
+    const before = await readPendingSuggestions(root);
+    expect(before.length).toBe(seeded.length);
+
+    const r = await markConsumed(root, ids);
+    expect(r.marked).toBe(ids.length);
+    expect(r.skipped).toBe(0);
+
+    const after = await readPendingSuggestions(root);
+    expect(after).toEqual([]);
+
+    // File should retain the entries with consumed/consumedAt/consumedBy stamps
+    const file = readSuggestionsFile(root);
+    expect(file.suggestions.every((s) => s.consumed === true)).toBe(true);
+    expect(file.suggestions.every((s) => typeof s.consumedAt === 'string')).toBe(true);
+    expect(file.suggestions.every((s) => s.consumedBy === 'save')).toBe(true);
+  });
+
+  it('keeps consumed and resolved orthogonal — resolveSuggestion still flips resolved on a consumed entry', async () => {
+    const seeded = await seedAdvisorFile();
+    const target = seeded[0];
+
+    const m = await markConsumed(root, [target.id]);
+    expect(m.marked).toBe(1);
+
+    const r = await resolveSuggestion(root, target.id);
+    expect(r.resolved).toBe(true);
+
+    const file = readSuggestionsFile(root);
+    const entry = file.suggestions.find((s) => s.id === target.id);
+    expect(entry).toBeDefined();
+    expect(entry.consumed).toBe(true);
+    expect(entry.resolved).toBe(true);
+    expect(entry.resolvedAt).toBeTypeOf('string');
+    expect(entry.consumedAt).toBeTypeOf('string');
+  });
+
+  it('silently skips unknown ids — marked decrements, skipped increments', async () => {
+    const seeded = await seedAdvisorFile();
+    const knownId = seeded[0].id;
+
+    const r = await markConsumed(root, [knownId, 'ghost-1', 'ghost-2']);
+    expect(r.marked).toBe(1);
+    expect(r.skipped).toBe(2);
+
+    const file = readSuggestionsFile(root);
+    const stamped = file.suggestions.find((s) => s.id === knownId);
+    expect(stamped.consumed).toBe(true);
+    // Untouched entries must not gain a consumed flag.
+    expect(file.suggestions.filter((s) => s.consumed === true)).toHaveLength(1);
+  });
+
+  it('returns {marked:0, skipped:N} when advisor file is missing', async () => {
+    // No seedAdvisorFile() call — runtime/next-session-suggestions.json does not exist.
+    const r = await markConsumed(root, ['any-id-1', 'any-id-2']);
+    expect(r.marked).toBe(0);
+    expect(r.skipped).toBe(2);
   });
 });
