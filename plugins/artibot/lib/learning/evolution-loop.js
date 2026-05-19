@@ -101,6 +101,172 @@ async function runCategorizeStage(result, failures, categorize) {
 }
 
 /**
+ * Stage 1 — capture session events into memory and compress into a summary.
+ * Writes `result.compressed` on success, pushes to `result.errors` on failure.
+ *
+ * @param {object} result - Mutable result object being assembled by run().
+ * @param {object} sessionMemory - Session memory instance.
+ * @param {object} context - run() context with optional `events`.
+ */
+async function runCompressStage(result, sessionMemory, context) {
+  try {
+    if (context.events?.length > 0) {
+      for (const event of context.events) {
+        sessionMemory.capture(event);
+      }
+    }
+    result.compressed = await sessionMemory.compress();
+  } catch (err) {
+    result.errors.push({ stage: 'compress', message: err.message });
+  }
+}
+
+/**
+ * Stage 2 — ingest compressed memory into the knowledge graph and persist.
+ * No-op when `result.compressed` is null.
+ *
+ * @param {object} result - Mutable result object being assembled by run().
+ * @param {object} knowledgeGraph - Knowledge graph instance.
+ */
+async function runIngestStage(result, knowledgeGraph) {
+  try {
+    if (result.compressed) {
+      const nodes = extractNodes(result.compressed);
+      const edges = buildEdges(nodes);
+
+      for (const node of nodes) {
+        knowledgeGraph.addNode(node.id, node.type, node.data);
+      }
+      for (const edge of edges) {
+        knowledgeGraph.addEdge(edge.from, edge.to, edge.relation);
+      }
+
+      result.graphNodes = nodes.length;
+      result.graphEdges = edges.length;
+
+      // Persist graph
+      if (typeof knowledgeGraph.save === 'function') {
+        await knowledgeGraph.save();
+      }
+    }
+  } catch (err) {
+    result.errors.push({ stage: 'ingest', message: err.message });
+  }
+}
+
+/**
+ * Stage 3 — evaluate skill usage patterns, append per-skill frozen evaluations
+ * to `result.skillEvaluations`.
+ *
+ * @param {object} result - Mutable result object being assembled by run().
+ * @param {object} skillEvolver - Skill evolver instance.
+ * @param {object} context - run() context with optional `skillUsages`.
+ */
+function runEvaluateStage(result, skillEvolver, context) {
+  try {
+    if (context.skillUsages?.length > 0) {
+      for (const usage of context.skillUsages) {
+        skillEvolver.track(usage.name, {
+          invoked: usage.invoked ?? true,
+          success: usage.success ?? true,
+          userEdited: usage.userEdited ?? false,
+          editDistance: usage.editDistance ?? 0,
+        });
+
+        const metrics = skillEvolver.evaluate(usage.name);
+        const classification = skillEvolver.classify(metrics);
+        const suggestion = skillEvolver.suggest(usage.name);
+
+        result.skillEvaluations.push(Object.freeze({
+          name: usage.name,
+          metrics,
+          classification,
+          suggestion,
+        }));
+      }
+    }
+  } catch (err) {
+    result.errors.push({ stage: 'evaluate', message: err.message });
+  }
+}
+
+/**
+ * Stage 4 — trigger auto-research when routing confidence was low.
+ *
+ * @param {object} result - Mutable result object being assembled by run().
+ * @param {object} autoResearch - Auto-research instance.
+ * @param {object} context - run() context with optional `routingResult`.
+ */
+async function runResearchStage(result, autoResearch, context) {
+  try {
+    if (autoResearch.shouldResearch(context.routingResult)) {
+      result.researchTriggered = true;
+      const query = context.routingResult?.input || result.compressed?.summary || '';
+      const scopeResult = autoResearch.scope(query);
+      const gathered = await autoResearch.gather(scopeResult);
+      result.researchFindings = autoResearch.synthesize(gathered);
+    }
+  } catch (err) {
+    result.errors.push({ stage: 'research', message: err.message });
+  }
+}
+
+/**
+ * Stage 5 — contribute qualified skill patterns to the collective hub.
+ *
+ * @param {object} result - Mutable result object being assembled by run().
+ * @param {object} hubConfig - Hub configuration (optIn, minUsageCount, ...).
+ */
+async function runContributeStage(result, hubConfig) {
+  try {
+    if (hubConfig.optIn && result.skillEvaluations.length > 0) {
+      const localPatterns = result.skillEvaluations
+        .filter((ev) => ev.metrics.usageCount >= (hubConfig.minUsageCount || 5))
+        .map((ev) => ({
+          type: 'skill',
+          name: ev.name,
+          signature: ev.name,
+          successRate: ev.metrics.successRate,
+          usageCount: ev.metrics.usageCount,
+          metadata: { classification: ev.classification, trend: ev.metrics.trend },
+        }));
+
+      const batch = buildContribution(localPatterns, hubConfig);
+      if (batch) {
+        // Load existing patterns, append new, save
+        const existing = await loadFromDisk().catch(() => ({ patterns: [] }));
+        const allPatterns = [...(existing.patterns || []), ...batch.patterns];
+        await saveToDisk({ patterns: allPatterns });
+        result.contribution = Object.freeze({
+          patternsShared: batch.patterns.length,
+          batchId: batch.batchId,
+        });
+      }
+    }
+  } catch (err) {
+    result.errors.push({ stage: 'contribute', message: err.message });
+  }
+}
+
+/**
+ * Stage 6 wrapper — short-circuits when context has no failures or categorizer
+ * cannot be resolved; otherwise delegates to {@link runCategorizeStage}.
+ *
+ * @param {object} result - Mutable result object being assembled by run().
+ * @param {object} context - run() context with optional `failures`.
+ * @param {Function|null} customCategorizer - Injected categorizer override.
+ * @param {string|null} patternsDictPath - cwd override for default categorizer.
+ */
+async function runCategorizationStage(result, context, customCategorizer, patternsDictPath) {
+  const failures = Array.isArray(context.failures) ? context.failures : [];
+  if (failures.length === 0) return;
+  const categorize = await resolveCategorize(customCategorizer, patternsDictPath, result.errors);
+  if (categorize) {
+    await runCategorizeStage(result, failures, categorize);
+  }
+}
+
+/**
  * Create a self-evolution loop instance.
  * @param {object} [options]
  * @param {object} [options.sessionMemory] - Prebuilt session memory instance
@@ -160,121 +326,12 @@ export function createEvolutionLoop(options = {}) {
 
       const start = now();
 
-      // Stage 1: Compress session events into memory
-      try {
-        if (context.events?.length > 0) {
-          for (const event of context.events) {
-            sessionMemory.capture(event);
-          }
-        }
-        result.compressed = await sessionMemory.compress();
-      } catch (err) {
-        result.errors.push({ stage: 'compress', message: err.message });
-      }
-
-      // Stage 2: Ingest into knowledge graph
-      try {
-        if (result.compressed) {
-          const nodes = extractNodes(result.compressed);
-          const edges = buildEdges(nodes);
-
-          for (const node of nodes) {
-            knowledgeGraph.addNode(node.id, node.type, node.data);
-          }
-          for (const edge of edges) {
-            knowledgeGraph.addEdge(edge.from, edge.to, edge.relation);
-          }
-
-          result.graphNodes = nodes.length;
-          result.graphEdges = edges.length;
-
-          // Persist graph
-          if (typeof knowledgeGraph.save === 'function') {
-            await knowledgeGraph.save();
-          }
-        }
-      } catch (err) {
-        result.errors.push({ stage: 'ingest', message: err.message });
-      }
-
-      // Stage 3: Evaluate skill usage patterns
-      try {
-        if (context.skillUsages?.length > 0) {
-          for (const usage of context.skillUsages) {
-            skillEvolver.track(usage.name, {
-              invoked: usage.invoked ?? true,
-              success: usage.success ?? true,
-              userEdited: usage.userEdited ?? false,
-              editDistance: usage.editDistance ?? 0,
-            });
-
-            const metrics = skillEvolver.evaluate(usage.name);
-            const classification = skillEvolver.classify(metrics);
-            const suggestion = skillEvolver.suggest(usage.name);
-
-            result.skillEvaluations.push(Object.freeze({
-              name: usage.name,
-              metrics,
-              classification,
-              suggestion,
-            }));
-          }
-        }
-      } catch (err) {
-        result.errors.push({ stage: 'evaluate', message: err.message });
-      }
-
-      // Stage 4: Auto-research if confidence was low
-      try {
-        if (autoResearch.shouldResearch(context.routingResult)) {
-          result.researchTriggered = true;
-          const query = context.routingResult?.input || result.compressed?.summary || '';
-          const scopeResult = autoResearch.scope(query);
-          const gathered = await autoResearch.gather(scopeResult);
-          result.researchFindings = autoResearch.synthesize(gathered);
-        }
-      } catch (err) {
-        result.errors.push({ stage: 'research', message: err.message });
-      }
-
-      // Stage 5: Contribute qualified patterns to collective hub
-      try {
-        if (hubConfig.optIn && result.skillEvaluations.length > 0) {
-          const localPatterns = result.skillEvaluations
-            .filter((ev) => ev.metrics.usageCount >= (hubConfig.minUsageCount || 5))
-            .map((ev) => ({
-              type: 'skill',
-              name: ev.name,
-              signature: ev.name,
-              successRate: ev.metrics.successRate,
-              usageCount: ev.metrics.usageCount,
-              metadata: { classification: ev.classification, trend: ev.metrics.trend },
-            }));
-
-          const batch = buildContribution(localPatterns, hubConfig);
-          if (batch) {
-            // Load existing patterns, append new, save
-            const existing = await loadFromDisk().catch(() => ({ patterns: [] }));
-            const allPatterns = [...(existing.patterns || []), ...batch.patterns];
-            await saveToDisk({ patterns: allPatterns });
-            result.contribution = Object.freeze({
-              patternsShared: batch.patterns.length,
-              batchId: batch.batchId,
-            });
-          }
-        }
-      } catch (err) {
-        result.errors.push({ stage: 'contribute', message: err.message });
-      }
-
-      // Stage 6: Categorize session failures (per-category fix-pattern learning)
-      const failures = Array.isArray(context.failures) ? context.failures : [];
-      if (failures.length > 0) {
-        const categorize = await resolveCategorize(customCategorizer, patternsDictPath, result.errors);
-        if (categorize) {
-          await runCategorizeStage(result, failures, categorize);
-        }
-      }
+      await runCompressStage(result, sessionMemory, context);
+      await runIngestStage(result, knowledgeGraph);
+      runEvaluateStage(result, skillEvolver, context);
+      await runResearchStage(result, autoResearch, context);
+      await runContributeStage(result, hubConfig);
+      await runCategorizationStage(result, context, customCategorizer, patternsDictPath);
 
       result.durationMs = now() - start;
       return Object.freeze(result);
