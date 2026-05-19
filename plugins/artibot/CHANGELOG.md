@@ -9,6 +9,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+---
+
+## [4.13.0] — 2026-05-19
+
+### Added
+
+- **feat(commands): `/save`** — 단일 핸드오프 커맨드. 재부팅·세션 종료 직전 30~60초 안에 git 상태, WIP 커밋, advisor 신호, TaskList, 테스트 상태를 병렬 수집·합성해 `.artibot/HANDOFF.md` 한 파일로 저장합니다. 다음 세션 5초 컨텍스트 복원 (`--keep N` 회전 보관, `--prune` 강제 청소, `--quick` advisor 흡수 스킵, `--no-advisor` 마킹만 스킵, `--dry-run` 미리보기).
+- **feat(commands): `/resume`** — 이전 핸드오프 복원. 전체 `HANDOFF.md` 마크다운 + 권장 첫 프롬프트 1~3개를 박스로 강조 출력. `--list` 로 아카이브 목록, `--run` 으로 1번 후보 confirm 실행 (push/deploy/release/force/delete/rm/reset 키워드는 강제 confirm).
+- **feat(lib): `lib/handoff/`** — 핸드오프 모듈 3종 (`handoff-builder.js`, `handoff-store.js`, `next-prompt-suggester.js`). 순수 데이터 수집 + GFM 렌더 + 회전 보관 + 첫 프롬프트 제안.
+- **feat(hooks): `session-start.js` 핸드오프 배너** — `appendHandoffBanner()` 가 `.artibot/HANDOFF.md` 존재 시 1줄 `[artibot:handoff] Next P0: … · 미해결 N · 미커밋 N · saved Nh ago — /resume` 으로 surface. 800ms Promise.race 타임아웃 + head 32KB read 가드 (R2 hook latency 보호).
+- **safety: YAML frontmatter** — `renderHandoffMarkdown` 이 `machineId / createdAt / branch / generator / schemaVersion` 5개 필드를 핸드오프 최상단에 박제. cross-machine/cross-session 진단 가능. `parseHandoffBannerFields` 가 frontmatter 자동 skip.
+- **safety: git lock graceful fail** — `handoff-builder.js` 의 모든 git 호출에 5s timeout + lockedOut 감지 (`ETIMEDOUT` / `SIGTERM` / `index.lock`). 잠금 발생 시 §1 상단에 `[!WARNING] Git 잠금 감지` 행 추가하고 나머지 섹션은 정상 수집.
+- **safety: 10분 archive throttle** — `writeHandoff({ throttleMs })` 가 직전 archive 가 10분 이내면 회전 디렉토리에 새 파일을 만들지 않고 in-place 갱신. `.artibot/HANDOFF.md` 는 무조건 갱신. env `ARTIBOT_HANDOFF_THROTTLE_MS` 로 override.
+
+### Changed
+
+- **lib/learning/auto-spawn-advisor.js**: 신규 `markConsumed(pluginRoot, ids, { now })` export (tmp+rename atomic write). `/save` 가 핸드오프 작성 성공 후 흡수된 advisor 신호를 `consumed: true` + `consumedAt` + `consumedBy: 'save'` 로 마킹. `readPendingSuggestions` 가 이제 `resolved !== true && consumed !== true` 둘 다 필터링 → 다음 세션 배너에서 중복 surface 제거. `consumed` 와 `resolved` 는 직교 (resolve는 사용자 액션, consume은 핸드오프 흡수). `buildSuggestion` 도 passthrough 시 consumed 메타데이터 보존.
+- **scripts/hooks/session-start.js**: 핸드오프 배너가 push 되면 동일 정보가 담긴 `[artibot:pending-suggestions count=N]` 라인을 splice 로 제거 (double-count 방지). 8KB YAML frontmatter 자동 skip.
+
+### Tests
+
+- `tests/learning/auto-spawn-advisor.test.js`: +4 케이스 (markConsumed 동작, resolve 직교성, unknown id silent skip, 파일 부재 처리).
+- `tests/handoff/handoff-builder.test.js`: 13 케이스 (timeout, partial-fail, frontmatter, machineId fallback 포함).
+- `tests/handoff/handoff-store.test.js`: 9 케이스 (throttle in-window, throttle=0, empty dir 포함).
+- `tests/handoff/save-flow.integration.test.js`: 통합 시나리오 + `parseHandoffBannerFields` regex 5건 + frontmatter-skip 1건.
+- `tests/hooks/session-start.test.js`: +3 케이스 (핸드오프 존재 시 배너 push, pending-suggestions suppress, frontmatter end-to-end).
+- 합계: 53 신규/확장 케이스, 전체 9,205 tests pass.
+
+### Known Issues
+
+- `tests/scripts/update.test.js` CLI smoke (`--check`) 가 Windows 에서 libuv `UV_HANDLE_CLOSING` 어설션으로 실패하여 `it.skip` 처리 (`update.js` 의 child-process handle teardown 강화 필요 — v4.13.1 patch 예정). v4.8.3 이래 변경되지 않은 사전 존재 flake 로 `/save` 와 무관.
+
+---
+
 ## [4.12.0] — 2026-05-19
 
 ### Added
