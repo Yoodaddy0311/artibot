@@ -53,15 +53,18 @@ async function main() {
 
     const swarmCfg = getSwarmConfig(config);
 
-    // DATA POLICY gate: only proceed if the configured swarm server URL is on
-    // the egress allowlist (localhost is auto-allowed for self-hosted swarms).
-    // swarm-client.js already enforces an internal SSRF allowlist, but we
-    // surface the DATA POLICY check at the hook level so deployment-time
-    // misconfiguration is logged and blocked before any network I/O.
-    const serverUrl =
-      process.env.ARTIBOT_SWARM_SERVER || swarmCfg?.serverUrl || 'http://localhost:3000';
+    // DATA POLICY gate: only proceed if the actual outbound host is on the
+    // egress allowlist. The host depends on `backend`: HTTP backends hit
+    // `serverUrl`, git backends hit `gitRepoUrl`. Checking serverUrl for a
+    // git deployment would block on the wrong domain (asymmetry bug —
+    // pre-fix, github.com pushes were silently blocked because the cloud-run
+    // serverUrl was the only thing tested, even though no traffic went there).
+    const isGitBackend = swarmCfg?.backend === 'git';
+    const checkUrl = isGitBackend
+      ? swarmCfg?.gitRepoUrl
+      : (process.env.ARTIBOT_SWARM_SERVER || swarmCfg?.serverUrl || 'http://localhost:3000');
     try {
-      assertEgressAllowed(serverUrl, {
+      assertEgressAllowed(checkUrl, {
         allowlist: loadAllowlist(),
         reason: 'swarm-sync',
       });

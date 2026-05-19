@@ -139,10 +139,18 @@ async function runSelfEvaluation(sessionData) {
       type: 'session',
       description: `Session in ${sessionData.project ?? 'unknown'}`,
     };
+    // Success criterion (Stage B Area 1 fix): a session counts as "success"
+    // when it actually completed work AND completions outnumber errors.
+    // Pre-fix: `errors.length === 0` required zero transient errors (failed
+    // greps, ENOENT lookups, hook misfires...) which made real-world success
+    // a luxury — 1000 daily-experience records yielded only 3 success rows.
+    // The new gate rewards productive sessions even when noise creeps in.
+    const completedCount = sessionData.completedTasks?.length ?? 0;
+    const errorCount = sessionData.errors?.length ?? 0;
     const sessionResult = {
-      success: (sessionData.errors?.length ?? 0) === 0,
+      success: completedCount > 0 && errorCount <= completedCount,
       duration: sessionData.duration ?? undefined,
-      testsPass: sessionData.completedTasks?.length > 0 ? true : undefined,
+      testsPass: completedCount > 0 ? true : undefined,
       filesModified: sessionData.filesModified,
     };
     await evaluateResult(sessionTask, sessionResult);

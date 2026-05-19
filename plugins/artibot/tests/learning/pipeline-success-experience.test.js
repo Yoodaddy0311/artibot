@@ -95,14 +95,14 @@ describe('shutdownLearning — success experience synthesis', () => {
     expect(payload.data.testsPass).toBe(true);
   });
 
-  it('does NOT record a success experience when session has errors', async () => {
+  it('does NOT record a success experience when errors outnumber completions', async () => {
     const sessionData = {
       sessionId: 'sess-2',
       project: 'artibot',
-      errors: [{ message: 'boom' }],
+      errors: [{ message: 'boom' }, { message: 'bam' }],
       duration: 999,
       filesModified: [],
-      completedTasks: [],
+      completedTasks: [{ id: 't1' }],
     };
 
     await shutdownLearning(sessionData);
@@ -118,7 +118,7 @@ describe('shutdownLearning — success experience synthesis', () => {
       errors: [],
       duration: 1,
       filesModified: [],
-      completedTasks: [],
+      completedTasks: [{ id: 't1' }],
     };
 
     await shutdownLearning(sessionData);
@@ -133,7 +133,7 @@ describe('shutdownLearning — success experience synthesis', () => {
       sessionId: 'sess-4',
       project: 'artibot',
       errors: [],
-      completedTasks: [],
+      completedTasks: [{ id: 't1' }],
     };
 
     await shutdownLearning(sessionData);
@@ -142,7 +142,56 @@ describe('shutdownLearning — success experience synthesis', () => {
     expect(successCall).toBeDefined();
     expect(successCall[0].data.duration).toBeNull();
     expect(successCall[0].data.filesModified).toBe(0);
-    expect(successCall[0].data.testsPass).toBeNull();
+    expect(successCall[0].data.testsPass).toBe(true);
+  });
+
+  it('does NOT record success when no tasks were completed (even with zero errors)', async () => {
+    // Stage B Area 1 fix — idle sessions (no completion) should not pollute
+    // the success-pattern feed. Pre-fix this counted as success because
+    // `errors.length === 0` was the only check.
+    const sessionData = {
+      sessionId: 'sess-idle',
+      project: 'artibot',
+      errors: [],
+      completedTasks: [],
+    };
+
+    await shutdownLearning(sessionData);
+
+    expect(calledWithType('success')).toBeUndefined();
+    expect(calledWithType('self-evaluation')).toBeDefined();
+  });
+
+  it('records success when completions outnumber transient errors', async () => {
+    // Stage B Area 1 fix — productive sessions are recoverable from noise.
+    const sessionData = {
+      sessionId: 'sess-productive',
+      project: 'artibot',
+      errors: [{ message: 'transient ENOENT' }],
+      duration: 5000,
+      filesModified: ['x.js', 'y.js'],
+      completedTasks: [{ id: 't1' }, { id: 't2' }, { id: 't3' }],
+    };
+
+    await shutdownLearning(sessionData);
+
+    const successCall = calledWithType('success');
+    expect(successCall).toBeDefined();
+    expect(successCall[0].data.filesModified).toBe(2);
+  });
+
+  it('records success when errors equal completions (boundary)', async () => {
+    // Gate is `errorCount <= completedCount` — equal counts still qualify.
+    const sessionData = {
+      sessionId: 'sess-boundary',
+      project: 'artibot',
+      errors: [{ message: 'one' }],
+      completedTasks: [{ id: 't1' }],
+    };
+
+    await shutdownLearning(sessionData);
+
+    expect(calledWithType('success')).toBeDefined();
   });
 
   it('skips success synthesis when self-evaluator throws (fail-soft)', async () => {

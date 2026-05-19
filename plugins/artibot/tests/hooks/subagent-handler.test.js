@@ -149,6 +149,92 @@ describe('subagent-handler hook', () => {
     });
   });
 
+  describe('team-context initialization (Area 2 fix)', () => {
+    it('initializes top-level teamId/domain/startedAt on first start', async () => {
+      process.argv = ['node', 'subagent-handler.js', 'start'];
+      readStdin.mockResolvedValue(makeHookData({
+        agent_id: 'builder-01',
+        role: 'builder',
+        session_id: 'sess-abc',
+      }));
+
+      await import('../../scripts/hooks/subagent-handler.js');
+      await new Promise((r) => setTimeout(r, 50));
+
+      const savedState = atomicWriteSync.mock.calls[0][1];
+      expect(savedState.teamId).toBe('team-sess-abc');
+      expect(savedState.domain).toBe('builder');
+      expect(typeof savedState.startedAt).toBe('number');
+    });
+
+    it('derives domain from explicit hookData.domain when present', async () => {
+      process.argv = ['node', 'subagent-handler.js', 'start'];
+      readStdin.mockResolvedValue(makeHookData({
+        agent_id: 'fe-01',
+        role: 'frontend-developer',
+        domain: 'frontend',
+        session_id: 'sess-1',
+      }));
+
+      await import('../../scripts/hooks/subagent-handler.js');
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(atomicWriteSync.mock.calls[0][1].domain).toBe('frontend');
+    });
+
+    it('falls back to agent_type then role then "general" for domain', async () => {
+      process.argv = ['node', 'subagent-handler.js', 'start'];
+      readStdin.mockResolvedValue(makeHookData({ agent_id: 'x', agent_type: 'qa' }));
+
+      await import('../../scripts/hooks/subagent-handler.js');
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(atomicWriteSync.mock.calls[0][1].domain).toBe('qa');
+    });
+
+    it('does not overwrite existing teamId/domain on subsequent starts', async () => {
+      process.argv = ['node', 'subagent-handler.js', 'start'];
+      existsSync.mockReturnValue(true);
+      readFileSync.mockReturnValue(JSON.stringify({
+        teamId: 'team-existing',
+        domain: 'backend',
+        startedAt: 1700000000000,
+        agents: { 'a': { role: 'r', active: true } },
+      }));
+      readStdin.mockResolvedValue(makeHookData({
+        agent_id: 'b',
+        role: 'frontend',
+        session_id: 'sess-new',
+      }));
+
+      await import('../../scripts/hooks/subagent-handler.js');
+      await new Promise((r) => setTimeout(r, 50));
+
+      const savedState = atomicWriteSync.mock.calls[0][1];
+      expect(savedState.teamId).toBe('team-existing');
+      expect(savedState.domain).toBe('backend');
+      expect(savedState.startedAt).toBe(1700000000000);
+    });
+
+    it('rewrites non-numeric startedAt left over from prior session-end snapshot', async () => {
+      process.argv = ['node', 'subagent-handler.js', 'start'];
+      existsSync.mockReturnValue(true);
+      // session-end.js writes startedAt as ISO string or null — both
+      // unusable for `Date.now() - startedAt`. New start must replace.
+      readFileSync.mockReturnValue(JSON.stringify({
+        startedAt: '2026-05-01T00:00:00Z',
+        agents: {},
+      }));
+      readStdin.mockResolvedValue(makeHookData({ agent_id: 'x', role: 'r' }));
+
+      await import('../../scripts/hooks/subagent-handler.js');
+      await new Promise((r) => setTimeout(r, 50));
+
+      const savedState = atomicWriteSync.mock.calls[0][1];
+      expect(typeof savedState.startedAt).toBe('number');
+    });
+  });
+
   describe('stop action', () => {
     it('deregisters a known agent (sets active to false)', async () => {
       process.argv = ['node', 'subagent-handler.js', 'stop'];
