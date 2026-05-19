@@ -18,7 +18,7 @@
  */
 
 import { existsSync, statSync } from 'node:fs';
-import { mkdir, readdir, readFile, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rename, rm, stat, unlink, utimes, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
 
@@ -190,6 +190,17 @@ export async function writeHandoff(markdown, options) {
   // in-place overwrite is crash-safe.
   await atomicWrite(archivePath, markdown);
   await atomicWrite(pointerPath, markdown);
+
+  // Force archive mtime to match `now()` so the throttle decision is driven
+  // by the caller's clock rather than filesystem-recorded write time. This
+  // makes the behavior deterministic across timezones (CI runs UTC, local
+  // dev runs KST) and immune to clock skew between Date.now() and fs mtime.
+  // Best-effort: swallow utimes failures (e.g. read-only filesystem) — the
+  // mtime mismatch only hurts the next call's throttle decision.
+  try {
+    const ts = now();
+    await utimes(archivePath, ts, ts);
+  } catch { /* noop */ }
 
   // Throttled writes never increase archive cardinality, so skip the prune.
   const pruned = throttled ? 0 : (await pruneHandoffs(projectRoot, { keep })).removed;
