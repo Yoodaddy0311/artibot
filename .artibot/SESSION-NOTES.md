@@ -855,3 +855,13 @@
 <!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
 
 ---
+
+## 2026-05-19 05:06 UTC · `artibot/master`
+
+- **Commits** (1):
+  - `2db53d7` feat(learning): Stage B — failure-categorizer + dormant diagnosis + activations
+- **Files touched**: 0
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
