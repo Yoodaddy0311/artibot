@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.12.0] — 2026-05-19
+
+### Added
+
+- **`/autopilot` now prevents OS sleep during execution** — cross-platform `lib/system/keep-awake.js` spawns a long-lived child at user privilege (Windows `SetThreadExecutionState` via PowerShell loop / macOS `caffeinate -i` / Linux `systemd-inhibit --mode=block` with `xset` fallback). Toggle with `--keep-awake` / `--no-keep-awake` (default on); `--keep-display` keeps the monitor on (default off — battery saver). Idempotent refcount lets multiple acquires share one child; the child is killed automatically on session complete, abort, or parent process exit. No admin/sudo required, no network calls, zero new runtime deps.
+
+> v4.11.4 의 ⚠️ Breaking auth change (K_SERVICE bypass 제거)도 v4.12.0 에 그대로 포함됩니다. Cloud Run 운영자는 아래 v4.11.4 섹션의 Migration guide 를 따라주세요.
+
+---
+
 ## [4.11.4] — 2026-05-19
 
 ### ⚠️ Breaking changes

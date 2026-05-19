@@ -195,6 +195,40 @@ Artibot collects **zero usage statistics** by default. If telemetry is enabled b
 
 ---
 
+## Keep-Awake Child Process / 슬립 방지 자식 프로세스
+
+When `/autopilot` runs with `--keep-awake` (the default in v4.12.0+), Artibot spawns a long-lived helper child process to prevent the OS from entering sleep / suspend / hibernate during the session:
+
+| OS | Helper | Privilege |
+|----|--------|-----------|
+| Windows | `powershell` (or `pwsh`) loop calling `SetThreadExecutionState` | User-level — no admin |
+| macOS | `caffeinate -i` (`-d` added when `--keep-display`) | User-level — no sudo |
+| Linux | `systemd-inhibit --who=artibot --mode=block --what=sleep:idle sleep infinity` (or `xset s off` fallback) | User-level — no root |
+
+Security properties:
+- **No network calls** — the helper is a pure local OS API call.
+- **No data sent or stored** — keep-awake holds no session data.
+- **Refcount + auto-cleanup** — only one child runs per process even with concurrent acquires; child is killed on session complete, abort, or parent exit (`exit`/`SIGINT`/`SIGTERM`).
+- **Silent no-op when missing** — if the helper binary is absent (e.g. minimal Linux container without systemd), Artibot logs a warning and continues without sleep prevention. It never throws.
+- **Source visible** — implementation at `lib/system/keep-awake.js`.
+
+Verifying the child is gone after a session:
+
+```bash
+# Windows
+powercfg /requests
+
+# macOS
+pmset -g assertions | grep caffeinate
+
+# Linux
+systemd-inhibit --list
+```
+
+Disable globally with `--no-keep-awake` if your environment forbids long-lived helper processes.
+
+---
+
 ## Hook Security / 훅 보안
 
 The hook system (`scripts/hooks/`) includes built-in protections:

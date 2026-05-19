@@ -1,6 +1,6 @@
 # Artibot
 
-[![Version](https://img.shields.io/badge/version-4.11.4-blue?style=flat-square)](plugins/artibot/CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-4.12.0-blue?style=flat-square)](plugins/artibot/CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-18%2B-brightgreen?style=flat-square)](package.json)
 [![Tests](https://img.shields.io/badge/tests-passing-brightgreen?style=flat-square)](plugins/artibot/tests/)
@@ -16,7 +16,7 @@ This repository ships **two complementary plugins** under one marketplace:
 
 | Plugin | Target | Version | Best for |
 |---|---|---|---|
-| [`artibot`](./plugins/artibot/) | Claude Code (developer CLI) | **4.11.4** | full Agent Teams orchestration, TDD, code review, security audits, GRPO learning, MCP server, **Goal-driven autopilot**, **`/learning` diagnostics**, **measurement-bug fix + exec-form hooks**, **OTEL agent_id propagation**, **v4.11 auto-invoke layer** |
+| [`artibot`](./plugins/artibot/) | Claude Code (developer CLI) | **4.12.0** | full Agent Teams orchestration, TDD, code review, security audits, GRPO learning, MCP server, **Goal-driven autopilot**, **`/learning` diagnostics**, **measurement-bug fix + exec-form hooks**, **OTEL agent_id propagation**, **v4.11 auto-invoke layer** |
 | [`artibot-cowork`](./plugins/artibot-cowork/) | Claude Cowork (knowledge workers) | **3.1.0** | marketing campaigns, long-form writing, AEO/GEO content, KR-market SEO, AI-slop detection, **Claude Design, Routines, Ultraplan, Monitor** |
 
 Both plugins share the same DEV protocol, Korean market expertise, data-sovereignty policy, and 6-stage content quality pipeline. They differ only in **target environment** and **skill mix**.
@@ -857,7 +857,7 @@ You can install **both** in the same Anthropic account — `artibot` runs in you
 
 ## Version
 
-**4.11.4** (2026-05-19) — Comprehensive audit fixes: security hardening (timing-safe auth, K_SERVICE bypass removed, shell-injection surfaces eliminated), manifest drift sync, layer-cycle fix. See [CHANGELOG](./plugins/artibot/CHANGELOG.md) for full history.
+**4.12.0** (2026-05-19) — Comprehensive audit fixes: security hardening (timing-safe auth, K_SERVICE bypass removed, shell-injection surfaces eliminated), manifest drift sync, layer-cycle fix. See [CHANGELOG](./plugins/artibot/CHANGELOG.md) for full history.
 
 [📖 Full release notes (비개발자용)](./RELEASE_NOTES_4.7_KO.md) · [CHANGELOG](./plugins/artibot/CHANGELOG.md)
 
