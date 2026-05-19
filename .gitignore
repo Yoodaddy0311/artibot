@@ -61,3 +61,7 @@ reports/
 **/_proposals/
 *-design-spec.md
 *-analysis-report.md
+
+# Session handoffs — committed for cross-session/cross-machine visibility
+!.artibot/HANDOFF.md
+!.artibot/handoffs/

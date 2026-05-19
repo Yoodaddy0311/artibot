@@ -15,7 +15,7 @@ import { generatePRD } from './prd-generator.js';
 import { generateReport } from './report-generator.js';
 import { parseGoalContract } from './prd-parser.js';
 import { runPhaseGoalEvaluate } from './goal-loop.js';
-import { buildTuiInstruction, makeInitialState, maybeDangerNote, notePhaseProgress, persist, recordPhase, tick } from './_engine-helpers.js';
+import { acquireSessionKeepAwake, buildTuiInstruction, makeInitialState, maybeDangerNote, notePhaseProgress, persist, recordPhase, releaseSessionKeepAwake, tick } from './_engine-helpers.js';
 import { loadSession } from './session-store.js';
 import { pauseReason, shouldPause } from './safety.js';
 import {
@@ -66,8 +66,6 @@ export const PHASES = Object.freeze([
   'EVALUATE',
   'REPORT',
 ]);
-
-
 
 /**
  * Check if the session should freeze; returns a pause instruction when true.
@@ -438,13 +436,12 @@ export function runPhase6Report(state) {
   tick(state.sessionId, { phase: 'REPORT', type: 'phase-end', level: 'info', message: 'Phase 6 REPORT 완료', data: { reportPath: filePath } });
   tick(state.sessionId, { phase: 'COMPLETED', type: 'session-complete', level: 'info', message: 'Autopilot 세션 완료' });
   notePhaseProgress(state, 'IMPROVE', 'REPORT');
-  // Release the feature lock acquired in startAutopilot. Best-effort —
-  // mirrors the cleanup pattern already used in abortAutopilot.
+  // Release the feature lock + keep-awake acquired in startAutopilot.
+  // Best-effort — mirrors the cleanup pattern already used in abortAutopilot.
   try {
     if (state.featureKey) releaseLock(state.featureKey, state.sessionId);
-  } catch {
-    /* cleanup non-blocking */
-  }
+  } catch { /* cleanup non-blocking */ }
+  releaseSessionKeepAwake(state.sessionId).catch(() => {});
   const note = notifyCompletion(state.sessionId, 'COMPLETED');
   return {
     type: 'phase-result',
@@ -507,6 +504,7 @@ export async function startAutopilot({ task, mode, options, sessionId } = {}) {
   state.lockPath = lockResult.lockPath;
 
   try {
+    await acquireSessionKeepAwake(state);
     persist(state);
     const instruction = runPhase0Intake(state);
     const tui = buildTuiInstruction(state, { isTTY: process.stdout.isTTY });
@@ -526,6 +524,7 @@ export async function startAutopilot({ task, mode, options, sessionId } = {}) {
     // we must release the feature lock before propagating, otherwise the holder
     // appears stuck and blocks future sessions on the same feature.
     try { releaseLock(featureKey, state.sessionId); } catch { /* best-effort */ }
+    releaseSessionKeepAwake(state.sessionId).catch(() => {});
     throw err;
   }
 }
@@ -675,9 +674,8 @@ export async function abortAutopilot(sessionId, { graceful = true } = {}) {
   }
   try {
     if (state.featureKey) releaseLock(state.featureKey, sessionId);
-  } catch {
-    /* cleanup non-blocking */
-  }
+  } catch { /* cleanup non-blocking */ }
+  releaseSessionKeepAwake(sessionId).catch(() => {});
   return { sessionId, status: 'ABORTED', reportPath };
 }
 

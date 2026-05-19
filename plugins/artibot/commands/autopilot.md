@@ -46,8 +46,35 @@ Autonomous long-running mode for **3~4시간 자리 비움 / 야간 자율 작�
 | `--goal "<stopping-condition>"` | off | **v4.6.0 Goal-driven mode** — verifiable stopping condition shorthand. PRD에 `## 2.5 Goal Contract` JSON 블록으로 삽입되며 Phase 5 후 evaluator가 `validationCommand` 결과로 자동 종료 결정. 미충족 시 Phase 2로 재진입 (cap = maxIterations, default 3, hard 10). |
 | `--validation-command <cmd>` | `npm run ci` | Goal Contract의 `validationCommand` 오버라이드. evaluator가 exit code 0 → met 판정. |
 | `--max-iterations <n>` | `3` | Phase 2 → 5 → evaluator 재진입 횟수 cap. 1~10 범위. |
-| `--report-all` | off | Phase 6 REPORT에서 모든 profile 생성 (dev + pm + exec + casual = 4 md). 기본은 `dev` 1개만 생성하여 산출물 클러터 방지. |
-| `--report-profiles <list>` | `dev` | 콤마 구분 profile 목록 (`dev,pm` 등). `--report-all`보다 우선. |
+| `--keep-awake` / `--no-keep-awake` | `--keep-awake` (on) | OS sleep 방지 (Win SetThreadExecutionState / macOS caffeinate / Linux systemd-inhibit). 세션 시작 시 acquire, 완료/abort 시 release. |
+| `--keep-display` | off | 모니터까지 켜둠 (배터리 소모↑). 기본은 시스템만 깨움(디스플레이는 OS 설정대로 어두워질 수 있음). |
+
+## Sleep Prevention (v4.12.0)
+
+장시간 실행되는 `/autopilot` 세션이 OS 절전(sleep / suspend / hibernate)에 의해 중단되지 않도록 보장합니다.
+
+| 모드 | 시스템 sleep | 모니터 | 사용 시점 |
+|------|--------------|--------|-----------|
+| `--keep-awake` (기본) | 차단 | OS 설정대로 어두워질 수 있음 | 일반 자율 작업 — 배터리/전력 최적 |
+| `--keep-awake --keep-display` | 차단 | 항상 켜짐 | 진행 상황을 실시간으로 보고 싶을 때 |
+| `--no-keep-awake` | 차단하지 않음 | OS 설정대로 | OS 절전 설정에 완전히 위임 (legacy 동작) |
+
+플랫폼별 구현:
+- **Windows**: PowerShell 자식 프로세스가 `SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_AWAYMODE_REQUIRED [| ES_DISPLAY_REQUIRED])` 호출. 자식 종료 시 OS가 기본값 복원.
+- **macOS**: `caffeinate -i` (또는 `-d -i` for keepDisplay) backgrounded.
+- **Linux**: `systemd-inhibit --who=artibot --why=<reason> --mode=block --what=sleep:idle sleep infinity`. `systemd-inhibit` 부재 시 `xset s off`로 fallback (display-only, warning emit).
+
+권한 / 안전:
+- **모두 user-level**. admin/sudo 불필요.
+- 네트워크 호출 없음. 외부 데이터 송신 없음.
+- 세션 완료(`COMPLETED`), abort(`ABORTED`), 부모 프로세스 종료(`exit`/`SIGINT`/`SIGTERM`) 시 자식 자동 종료. orphan 방지.
+- Refcount idempotent — 여러 번 acquire 해도 단일 자식 공유.
+- helper 부재 시 silent no-op + stderr warning. 절대 throw하지 않음.
+
+검증:
+- Windows: `powercfg /requests` 출력에서 `SYSTEM` 또는 `DISPLAY` 행에 PowerShell PID 확인.
+- macOS: `pmset -g assertions | grep caffeinate`.
+- Linux: `systemd-inhibit --list`에서 `artibot` who 행 확인.
 
 ## Arguments
 

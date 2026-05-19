@@ -817,210 +817,465 @@
 
 ---
 
-## 2026-05-19 04:46 UTC · `artibot/master`
+## 2026-05-18 07:09 UTC · `chore/release-yml-drop-skip-ci`
 
-- **Commits** (10):
-  - `e36a661` chore: artibot session close [2026-05-18 02:26:15]
-  - `486376f` chore: artibot session close [2026-05-18 02:26:09]
-  - `46e0664` chore: artibot session close [2026-05-18 02:26:04]
-  - `863c2dd` chore: sync AGENTS.md version pointer to 4.11.2
-  - `a5bcf10` fix(hooks): exclude SESSION-NOTES.md from dev-verify-gate to stop race-block
-  - `8eafe46` chore: artibot session close [2026-05-18 02:18:19]
-  - `c51b7f5` chore: artibot session close [2026-05-18 02:11:35]
-  - `b02fc8e` chore: artibot session close [2026-05-18 02:03:21]
-  - `0edf0c9` chore: artibot session close [2026-05-18 02:03:06]
-  - `ebc5453` chore: artibot session close [2026-05-18 01:50:13]
-- **Files touched**: 51
+- **Commits** (5):
+  - `e9aedb5` ci: re-trigger workflows (previous commit contained skip-ci substring)
+  - `6f874a2` ci: drop [skip ci] from sync-readmes commit message
+  - `b166f3a` docs(release): sync README badges to v4.11.3 [skip ci] (#26)
+  - `6afab9e` release: v4.11.3 — release-infra hardening (CI/docs only) (#25)
+  - `070b73a` ci: drop paths filter from plugin-validate PR trigger (#24)
+- **Files touched**: 10
 
 <!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
 
 ---
 
-## 2026-05-19 04:58 UTC · `artibot/master`
+## 2026-05-18 08:19 UTC · `artibot/chore-release-yml-drop-skip-ci`
 
 - **Commits** (1):
-  - `645141a` chore: artibot session close [2026-05-19 04:52:02]
-- **Files touched**: 4
-
-<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
-
----
-
-## 2026-05-19 05:01 UTC · `artibot/master`
-
-- **Commits** (1):
-  - `42f855f` chore: artibot session close [2026-05-19 05:01:52]
-- **Files touched**: 5
-
-<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
-
----
-
-## 2026-05-19 05:06 UTC · `artibot/master`
-
-- **Commits** (1):
-  - `2db53d7` feat(learning): Stage B — failure-categorizer + dormant diagnosis + activations
-- **Files touched**: 0
-
-<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
-
----
-
-## 2026-05-19 05:09 UTC · `artibot/master`
-
-- **Commits** (1):
-  - `0b3ce43` test(learning): add success-experience tests for pipeline.js (Stage B Area 1)
+  - `9863144` chore: artibot session close [2026-05-18 07:13:29]
 - **Files touched**: 1
 
 <!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
 
 ---
 
-## 2026-05-19 05:20 UTC · `artibot/master`
+## 2026-05-18 08:24 UTC · `artibot/chore-release-yml-drop-skip-ci`
 
 - **Commits** (1):
-  - `9c5e243` chore: artibot session close [2026-05-19 05:14:20]
+  - `a6bd1bf` chore: artibot session close [2026-05-18 08:22:10]
 - **Files touched**: 1
 
 <!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
 
 ---
 
-## 2026-05-19 05:40 UTC · `artibot/master`
+## 2026-05-18 08:24 UTC · `artibot/chore-release-yml-drop-skip-ci`
 
 - **Commits** (1):
-  - `a2ad5d3` chore: artibot session close [2026-05-19 05:23:13]
+  - `5fa1b7a` chore: artibot session close [2026-05-18 08:24:39]
 - **Files touched**: 1
 
 <!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
 
 ---
 
-## 2026-05-19 06:32 UTC · `artibot/master`
+## 2026-05-18 08:25 UTC · `artibot/chore-release-yml-drop-skip-ci`
 
 - **Commits** (1):
-  - `1ca8fd6` fix(learning): Stage B Area 1/2/3 — make GRPO success+team+swarm signals actually accumulate
+  - `232aa68` chore: artibot session close [2026-05-18 08:25:22]
+- **Files touched**: 1
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-05-18 08:37 UTC · `artibot/chore-release-yml-drop-skip-ci`
+
+- **Commits** (1):
+  - `98230a7` chore: artibot session close [2026-05-18 08:30:03]
+- **Files touched**: 1
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-05-18 09:00 UTC · `artibot/chore-release-yml-drop-skip-ci`
+
+- **Commits** (1):
+  - `e32b440` chore: artibot session close [2026-05-18 08:38:25]
+- **Files touched**: 1
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-05-18 09:05 UTC · `artibot/chore-release-yml-drop-skip-ci`
+
+- **Commits** (2):
+  - `dff19d8` chore: artibot session close [2026-05-18 09:05:05]
+  - `3d11746` chore: artibot session close [2026-05-18 09:04:14]
+- **Files touched**: 15
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-05-18 09:05 UTC · `artibot/chore-release-yml-drop-skip-ci`
+
+- **Commits** (2):
+  - `dff19d8` chore: artibot session close [2026-05-18 09:05:05]
+  - `3d11746` chore: artibot session close [2026-05-18 09:04:14]
+- **Files touched**: 15
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-05-18 09:05 UTC · `artibot/chore-release-yml-drop-skip-ci`
+
+- **Commits** (1):
+  - `4a04978` chore: artibot session close [2026-05-18 09:05:28]
+- **Files touched**: 2
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-05-18 09:07 UTC · `artibot/chore-release-yml-drop-skip-ci`
+
+- **Commits** (1):
+  - `246a706` chore: artibot session close [2026-05-18 09:07:31]
 - **Files touched**: 6
 
 <!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
 
 ---
 
-## 2026-05-19 07:22 UTC · `artibot/master`
+## 2026-05-18 09:07 UTC · `artibot/chore-release-yml-drop-skip-ci`
 
 - **Commits** (1):
-  - `531b587` chore: artibot session close [2026-05-19 06:42:26]
+  - `63ae7cc` chore: artibot session close [2026-05-18 09:07:49]
 - **Files touched**: 1
 
 <!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
 
 ---
 
-## 2026-05-19 07:33 UTC · `artibot/master`
+## 2026-05-18 09:11 UTC · `artibot/chore-release-yml-drop-skip-ci`
 
 - **Commits** (1):
-  - `4327ec6` chore: artibot session close [2026-05-19 07:27:57]
+  - `0a942c5` chore: artibot session close [2026-05-18 09:10:23]
+- **Files touched**: 3
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-05-18 09:11 UTC · `artibot/chore-release-yml-drop-skip-ci`
+
+- **Commits** (1):
+  - `d5af4bc` chore: artibot session close [2026-05-18 09:11:18]
 - **Files touched**: 1
 
 <!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
 
 ---
 
-## 2026-05-19 07:38 UTC · `artibot/master`
+## 2026-05-18 09:11 UTC · `artibot/chore-release-yml-drop-skip-ci`
+
+- **Commits** (2):
+  - `94f28b4` Merge remote-tracking branch 'origin/master' into artibot/chore-release-yml-drop-skip-ci
+  - `b596983` ci: drop [skip ci] from sync-readmes commit message (#27)
+- **Files touched**: 0
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-05-18 09:12 UTC · `artibot/chore-release-yml-drop-skip-ci`
 
 - **Commits** (1):
-  - `e97edd4` feat(learning): Stage C — retroactive GRPO backfill + evolution-loop categorizer hook
+  - `0dc780e` chore: artibot session close [2026-05-18 09:11:54]
+- **Files touched**: 1
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-05-18 23:56 UTC · `artibot/chore-release-yml-drop-skip-ci`
+
+- **Commits** (1):
+  - `47dc79b` wip: artibot auto-save [2026-05-18 23:54:47]
+- **Files touched**: 1
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-05-19 00:04 UTC · `artibot/chore-release-yml-drop-skip-ci`
+
+- **Commits** (1):
+  - `34105b4` chore: artibot session close [2026-05-19 00:02:47]
+- **Files touched**: 3
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-05-19 00:49 UTC · `artibot/chore-release-yml-drop-skip-ci`
+
+- **Commits** (20):
+  - `b908838` chore: artibot session close [2026-05-19 00:07:19]
+  - `34105b4` chore: artibot session close [2026-05-19 00:02:47]
+  - `47dc79b` wip: artibot auto-save [2026-05-18 23:54:47]
+  - `0dc780e` chore: artibot session close [2026-05-18 09:11:54]
+  - `9fb317d` chore: artibot session close [2026-05-18 09:11:46]
+  - `94f28b4` Merge remote-tracking branch 'origin/master' into artibot/chore-release-yml-drop-skip-ci
+  - `d5af4bc` chore: artibot session close [2026-05-18 09:11:18]
+  - `87e6280` chore: artibot session close [2026-05-18 09:11:10]
+  - `0a942c5` chore: artibot session close [2026-05-18 09:10:23]
+  - `63ae7cc` chore: artibot session close [2026-05-18 09:07:49]
+  - `246a706` chore: artibot session close [2026-05-18 09:07:31]
+  - `284cdae` chore: artibot session close [2026-05-18 09:06:23]
+  - `4a04978` chore: artibot session close [2026-05-18 09:05:28]
+  - `03e1033` chore: artibot session close [2026-05-18 09:05:19]
+  - `dff19d8` chore: artibot session close [2026-05-18 09:05:05]
+  - `3d11746` chore: artibot session close [2026-05-18 09:04:14]
+  - `e32b440` chore: artibot session close [2026-05-18 08:38:25]
+  - `98230a7` chore: artibot session close [2026-05-18 08:30:03]
+  - `232aa68` chore: artibot session close [2026-05-18 08:25:22]
+  - `5fa1b7a` chore: artibot session close [2026-05-18 08:24:39]
+- **Files touched**: 28
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-05-19 00:51 UTC · `artibot/chore-release-yml-drop-skip-ci`
+
+- **Commits** (1):
+  - `6d70347` chore: artibot session close [2026-05-19 00:49:57]
+- **Files touched**: 1
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-05-19 00:52 UTC · `artibot/chore-release-yml-drop-skip-ci`
+
+- **Commits** (1):
+  - `f663262` chore: artibot session close [2026-05-19 00:52:11]
+- **Files touched**: 4
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-05-19 00:52 UTC · `artibot/chore-release-yml-drop-skip-ci`
+
+- **Commits** (1):
+  - `5dbcd62` chore: artibot session close [2026-05-19 00:52:33]
+- **Files touched**: 1
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-05-19 00:53 UTC · `artibot/chore-release-yml-drop-skip-ci`
+
+- **Commits** (1):
+  - `edf58a5` chore: artibot session close [2026-05-19 00:52:39]
+- **Files touched**: 1
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-05-19 00:53 UTC · `artibot/chore-release-yml-drop-skip-ci`
+
+- **Commits** (1):
+  - `bf318e6` chore: artibot session close [2026-05-19 00:53:19]
+- **Files touched**: 1
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-05-19 00:53 UTC · `artibot/chore-release-yml-drop-skip-ci`
+
+- **Commits** (1):
+  - `5ec168c` chore: artibot session close [2026-05-19 00:53:31]
+- **Files touched**: 1
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-05-19 00:55 UTC · `artibot/chore-release-yml-drop-skip-ci`
+
+- **Commits** (1):
+  - `9c1316c` chore: artibot session close [2026-05-19 00:55:10]
+- **Files touched**: 1
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-05-19 00:55 UTC · `artibot/chore-release-yml-drop-skip-ci`
+
+- **Commits** (1):
+  - `8d17a22` chore: artibot session close [2026-05-19 00:55:22]
+- **Files touched**: 1
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-05-19 01:27 UTC · `artibot/feat-autopilot-keep-awake`
+
+- **Commits** (8):
+  - `c2b09dc` release: v4.12.0 — autopilot keep-awake (cross-platform OS sleep prevention)
+  - `7f6f3ab` merge master (v4.11.4) into feat-autopilot-keep-awake
+  - `4248f47` release: v4.11.4 — comprehensive audit fixes (security + K_SERVICE BREAKING + manifest sync + arch cycle fix)
+  - `09b31ca` chore: artibot session close [2026-05-19 00:33:59]
+  - `57f72a0` chore: artibot session close [2026-05-19 00:28:11]
+  - `2c3221b` chore: artibot session close [2026-05-19 00:20:36]
+  - `ce38d69` chore: artibot session close [2026-05-19 00:20:32]
+  - `8d55416` chore: artibot session close [2026-05-19 00:20:26]
+- **Files touched**: 16
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-05-19 01:55 UTC · `artibot/feat-autopilot-keep-awake`
+
+- **Commits** (2):
+  - `b519fc2` Merge remote-tracking branch 'origin/master' into artibot/feat-autopilot-keep-awake
+  - `764a024` release: v4.12.0 — autopilot keep-awake (cross-platform OS sleep prevention)
+- **Files touched**: 0
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-05-19 02:02 UTC · `artibot/feat-autopilot-keep-awake`
+
+- **Commits** (1):
+  - `c2ab4bd` wip: artibot auto-save [2026-05-19 01:55:43]
+- **Files touched**: 1
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-05-19 02:03 UTC · `artibot/feat-autopilot-keep-awake`
+
+- **Commits** (1):
+  - `be20605` chore: artibot session close [2026-05-19 02:02:09]
 - **Files touched**: 2
 
 <!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
 
 ---
 
-## 2026-05-19 07:50 UTC · `artibot/master`
+## 2026-05-19 02:03 UTC · `artibot/feat-autopilot-keep-awake`
 
 - **Commits** (1):
-  - `d5d838a` chore: artibot session close [2026-05-19 07:38:52]
-- **Files touched**: 1
-
-<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
-
----
-
-## 2026-05-19 07:52 UTC · `artibot/master`
-
-- **Commits** (1):
-  - `807c8ab` chore: artibot session close [2026-05-19 07:52:00]
-- **Files touched**: 1
-
-<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
-
----
-
-## 2026-05-19 07:53 UTC · `artibot/master`
-
-- **Commits** (1):
-  - `9f2a88c` chore: artibot session close [2026-05-19 07:53:29]
-- **Files touched**: 1
-
-<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
-
----
-
-## 2026-05-19 08:03 UTC · `artibot/master`
-
-- **Commits** (1):
-  - `ff7da55` chore: artibot session close [2026-05-19 08:01:06]
-- **Files touched**: 1
-
-<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
-
----
-
-## 2026-05-19 08:03 UTC · `artibot/master`
-
-- **Commits** (1):
-  - `939c991` chore: artibot session close [2026-05-19 08:03:11]
+  - `c7aabf2` chore: artibot session close [2026-05-19 02:03:04]
 - **Files touched**: 2
 
 <!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
 
 ---
 
-## 2026-05-19 08:03 UTC · `artibot/master`
+## 2026-05-19 02:04 UTC · `artibot/feat-autopilot-keep-awake`
 
 - **Commits** (1):
-  - `d20f31a` chore: artibot session close [2026-05-19 08:03:18]
+  - `3a723c5` chore: artibot session close [2026-05-19 02:03:51]
+- **Files touched**: 2
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-05-19 02:06 UTC · `artibot/feat-autopilot-keep-awake`
+
+- **Commits** (1):
+  - `4de0582` chore: artibot session close [2026-05-19 02:04:28]
+- **Files touched**: 3
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-05-19 02:09 UTC · `artibot/feat-autopilot-keep-awake`
+
+- **Commits** (1):
+  - `294af89` chore: artibot session close [2026-05-19 02:06:37]
+- **Files touched**: 6
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-05-19 02:27 UTC · `artibot/feat-autopilot-keep-awake`
+
+- **Commits** (1):
+  - `6fec68d` chore: artibot session close [2026-05-19 02:09:37]
+- **Files touched**: 4
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-05-19 02:28 UTC · `artibot/feat-autopilot-keep-awake`
+
+- **Commits** (1):
+  - `2c8b993` chore: artibot session close [2026-05-19 02:27:59]
 - **Files touched**: 1
 
 <!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
 
 ---
 
-## 2026-05-19 08:05 UTC · `artibot/master`
+## 2026-05-19 02:28 UTC · `artibot/feat-autopilot-keep-awake`
 
 - **Commits** (1):
-  - `0c5e8e4` chore: artibot session close [2026-05-19 08:03:33]
+  - `eecb612` chore: artibot session close [2026-05-19 02:28:05]
 - **Files touched**: 1
 
 <!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
 
 ---
 
-## 2026-05-19 08:29 UTC · `artibot/master`
+## 2026-05-19 03:34 UTC · `artibot/feat-autopilot-keep-awake`
 
 - **Commits** (1):
-  - `91c815d` chore: artibot session close [2026-05-19 08:11:22]
+  - `7655a79` chore: artibot session close [2026-05-19 03:26:27]
+- **Files touched**: 3
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-05-19 03:35 UTC · `artibot/feat-autopilot-keep-awake`
+
+- **Commits** (1):
+  - `a962cec` chore: artibot session close [2026-05-19 03:35:04]
 - **Files touched**: 1
 
 <!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
 
 ---
 
-## 2026-05-19 08:29 UTC · `artibot/master`
+## 2026-05-19 03:48 UTC · `feat/save-handoff`
 
 - **Commits** (1):
-  - `4ff6c91` chore: artibot session close [2026-05-19 08:29:15]
-- **Files touched**: 13
+  - `c21a92f` feat: /save single-shot session handoff command (v4.13.0)
+- **Files touched**: 12
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-05-19 04:00 UTC · `master`
+
+- **Commits** (1):
+  - `fc4363e` feat: /save single-shot session handoff command (v4.13.0) (#30)
+- **Files touched**: 2
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-05-19 04:09 UTC · `master`
+
+- **Commits** (1):
+  - `8453a61` wip: artibot auto-save [2026-05-19 04:08:49]
+- **Files touched**: 1
 
 <!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
 

@@ -14,3 +14,9 @@ export {
   parseTscOutput,
   resetDiagnostics,
 } from './lsp-client.js';
+
+export {
+  acquireKeepAwake,
+  isKeepAwakeSupported,
+  KeepAwakeError,
+} from './keep-awake.js';

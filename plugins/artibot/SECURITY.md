@@ -195,6 +195,40 @@ Artibot collects **zero usage statistics** by default. If telemetry is enabled b
 
 ---
 
+## Keep-Awake Child Process / 슬립 방지 자식 프로세스
+
+When `/autopilot` runs with `--keep-awake` (the default in v4.12.0+), Artibot spawns a long-lived helper child process to prevent the OS from entering sleep / suspend / hibernate during the session:
+
+| OS | Helper | Privilege |
+|----|--------|-----------|
+| Windows | `powershell` (or `pwsh`) loop calling `SetThreadExecutionState` | User-level — no admin |
+| macOS | `caffeinate -i` (`-d` added when `--keep-display`) | User-level — no sudo |
+| Linux | `systemd-inhibit --who=artibot --mode=block --what=sleep:idle sleep infinity` (or `xset s off` fallback) | User-level — no root |
+
+Security properties:
+- **No network calls** — the helper is a pure local OS API call.
+- **No data sent or stored** — keep-awake holds no session data.
+- **Refcount + auto-cleanup** — only one child runs per process even with concurrent acquires; child is killed on session complete, abort, or parent exit (`exit`/`SIGINT`/`SIGTERM`).
+- **Silent no-op when missing** — if the helper binary is absent (e.g. minimal Linux container without systemd), Artibot logs a warning and continues without sleep prevention. It never throws.
+- **Source visible** — implementation at `lib/system/keep-awake.js`.
+
+Verifying the child is gone after a session:
+
+```bash
+# Windows
+powercfg /requests
+
+# macOS
+pmset -g assertions | grep caffeinate
+
+# Linux
+systemd-inhibit --list
+```
+
+Disable globally with `--no-keep-awake` if your environment forbids long-lived helper processes.
+
+---
+
 ## Hook Security / 훅 보안
 
 The hook system (`scripts/hooks/`) includes built-in protections:
@@ -254,6 +288,25 @@ When using Artibot:
 - Use `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` only in trusted environments
 - Regularly review the contents of `~/.claude/artibot/` to understand what data is being stored
 - Do not disable the PII scrubber when configuring Federated Swarm
+
+### Narrow Auto-Approve Permission Patterns / 자동 승인 권한 패턴 좁히기
+
+Claude Code's `.claude/settings.json` (and `.claude/settings.local.json`) supports an `allow` list that auto-approves tool calls matching the listed patterns. Broad wildcards turn auto-approve into effective arbitrary-code execution.
+
+- Avoid `Bash(node *)` / `PowerShell(node *)` — `node -e "..."` can run any code, including `child_process.exec(...)`.
+- Avoid `Bash(npm *)` / `PowerShell(npm *)` — `npm exec`, `npm run <arbitrary-script>`, and `npm config` can launch arbitrary commands.
+- Avoid `Bash(npx *)` — `npx <package>` will download and execute arbitrary packages.
+- Avoid `Bash(python3 -c '...')` and similar `-c` / `-e` evaluator flags.
+
+Prefer specific subcommands you actually use, e.g.:
+
+- `Bash(node --version)`
+- `Bash(npm test)` / `Bash(npm run lint)` / `Bash(npm run build)`
+- `Bash(git status)` / `Bash(git diff *)`
+
+If you need a broader policy, scope it to a directory (`Bash(npm run *:/path/to/project)`) or to a single repo via the project-local `settings.json` rather than the global allowlist.
+
+The Artibot `permission-auto-approve` hook (`scripts/hooks/permission-auto-approve.js`) accepts regex patterns from `artibot.config.json.permissions.autoApprove[].commandPattern`. Patterns like `.*` or unanchored `.+` for high-risk tools (`Bash`, `PowerShell`, `Write`) effectively disable approval prompts entirely — anchor them (`^git status$`) and keep them as narrow as possible.
 
 ---
 

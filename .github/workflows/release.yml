@@ -129,6 +129,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      pull-requests: write
 
     steps:
       - name: Checkout master
@@ -179,14 +180,36 @@ jobs:
           # Root README plugin table row — scoped to artibot row only.
           sed -i -E "s#(\[\`artibot\`\]\(\./plugins/artibot/\) [|] Claude Code \(developer CLI\) [|] )\*\*[0-9]+\.[0-9]+\.[0-9]+\*\*#\1**${VERSION}**#" README.md
 
-      - name: Commit and push README updates
+      - name: Open PR for README badge updates
+        # Previous flow pushed directly to master with the default GITHUB_TOKEN.
+        # Branch protection requires PR + required status checks, which blocked
+        # every recent release's badge sync. Switching to a PR via the gh CLI:
+        # tokens authored by GITHUB_TOKEN appear as github-actions[bot] and
+        # cannot bypass protection, so the PR is the supported path. Auto-merge
+        # is enabled so badges flow without manual intervention once required
+        # checks pass.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.counts.outputs.version }}
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add README.md plugins/artibot/README.md
-          if git diff --cached --quiet; then
-            echo "No README changes to commit."
+          if git diff --quiet README.md plugins/artibot/README.md; then
+            echo "No README changes to PR."
             exit 0
           fi
-          git commit -m "docs(release): sync README badges to ${GITHUB_REF_NAME} [skip ci]"
-          git push origin master
+          BRANCH="chore/sync-readme-badges-${GITHUB_REF_NAME}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "${BRANCH}"
+          git add README.md plugins/artibot/README.md
+          # No [skip ci] — the badge PR needs required CI checks to run so
+          # auto-merge can proceed. Adding [skip ci] would block both the push
+          # AND pull_request triggers, leaving the PR permanently BLOCKED.
+          git commit -m "docs(release): sync README badges to ${GITHUB_REF_NAME}"
+          git push origin "${BRANCH}"
+          gh pr create \
+            --base master \
+            --head "${BRANCH}" \
+            --title "docs(release): sync README badges to ${GITHUB_REF_NAME}" \
+            --body "Automated badge sync triggered by release ${GITHUB_REF_NAME}. Auto-merges once required CI checks pass."
+          gh pr merge --auto --squash --delete-branch "${BRANCH}" || \
+            echo "::warning::Auto-merge could not be enabled — falling back to manual merge."

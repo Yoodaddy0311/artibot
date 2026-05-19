@@ -1,6 +1,6 @@
 # Artibot
 
-[![Version](https://img.shields.io/badge/version-4.8.0-blue?style=flat-square)](plugins/artibot/CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-4.13.0-blue?style=flat-square)](plugins/artibot/CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-18%2B-brightgreen?style=flat-square)](package.json)
 [![Tests](https://img.shields.io/badge/tests-passing-brightgreen?style=flat-square)](plugins/artibot/tests/)
@@ -16,7 +16,7 @@ This repository ships **two complementary plugins** under one marketplace:
 
 | Plugin | Target | Version | Best for |
 |---|---|---|---|
-| [`artibot`](./plugins/artibot/) | Claude Code (developer CLI) | **4.11.1** | full Agent Teams orchestration, TDD, code review, security audits, GRPO learning, MCP server, **Goal-driven autopilot**, **`/learning` diagnostics**, **measurement-bug fix + exec-form hooks**, **OTEL agent_id propagation**, **v4.11 auto-invoke layer** |
+| [`artibot`](./plugins/artibot/) | Claude Code (developer CLI) | **4.13.0** | full Agent Teams orchestration, TDD, code review, security audits, GRPO learning, MCP server, **Goal-driven autopilot**, **`/learning` diagnostics**, **`/save` + `/resume` single-shot handoff**, **safety boost (machineId frontmatter, git-lock fail, 10m throttle)** |
 | [`artibot-cowork`](./plugins/artibot-cowork/) | Claude Cowork (knowledge workers) | **3.1.0** | marketing campaigns, long-form writing, AEO/GEO content, KR-market SEO, AI-slop detection, **Claude Design, Routines, Ultraplan, Monitor** |
 
 Both plugins share the same DEV protocol, Korean market expertise, data-sovereignty policy, and 6-stage content quality pipeline. They differ only in **target environment** and **skill mix**.
@@ -48,7 +48,7 @@ Most Claude Code plugins use simple sub-agent (`Task()`) delegation -- fire-and-
 - **Intelligent Delegation** -- Auto-selects Sub-Agent (simple) vs Agent Team (complex) based on cognitive complexity scoring
 - **5 Orchestration Patterns** -- Leader, Council, Swarm, Pipeline, Watchdog
 - **8 DAG Playbooks** -- Feature, Bugfix, Refactor, Security + Marketing Campaign, Marketing Audit, Content Launch, Competitive Analysis (DAG-based with parallel node execution, topological sort, and cycle detection)
-- **66 Slash Commands** -- `/sc` smart router, `/daily`, `/team`, `/orchestrate`, `/spawn`, `/implement`, `/visual-check`, `/sc playbook`, `/learning`, `/ultrareview`, `/ultraplan`, `/audit-claude-md`, and more
+- **68 Slash Commands** -- `/sc` smart router, `/save`, `/resume`, `/daily`, `/team`, `/orchestrate`, `/spawn`, `/implement`, `/visual-check`, `/sc playbook`, `/learning`, `/ultrareview`, `/ultraplan`, `/audit-claude-md`, and more
 - **28 Specialized Agents** -- Architecture, security, frontend, backend, testing, DevOps, marketing, SEO, analytics, and more (opus 73%, sonnet 27%)
 - **111 Domain Skills** -- 11 persona skills, 8 core skills, 16 language skills, 8 utility skills, 35 marketing skills, visual-validation, daily, team, session-worklog, vibe-coding, repo-benchmarking, auto-learning-pipeline, git-worktree, dynamic-context-injection, claude-md-auditor (all enhanced with Anthropic best-practice descriptions, workflow checklists, HITL v2 conversational checkpoints, output templates, and freedom levels)
 - **8 Auto-Activating Rules** -- DEV protocol, quality gates, agent coordination, config safety, frontend/backend/test patterns, clean state enforcement
@@ -675,7 +675,7 @@ plugins/artibot/
 |   +-- orchestrator.md          #   CTO / Team leader (Agent Teams API)
 |   +-- [17 dev specialists].md  #   Development teammates
 |   +-- [8 marketing agents].md  #   Marketing specialists
-+-- commands/                    # 66 slash commands
++-- commands/                    # 68 slash commands
 |   +-- sc.md                    #   Smart router
 |   +-- daily.md                 #   Daily work recap and retrospective
 |   +-- team.md                  #   Parallel team orchestration
@@ -835,10 +835,10 @@ node scripts/ci/validate-hooks.js     # Hook validation
 | **artibot plugin README** (Claude Code) | [`plugins/artibot/README.md`](./plugins/artibot/README.md) |
 | **artibot-cowork plugin README** (Claude Cowork) | [`plugins/artibot-cowork/README.md`](./plugins/artibot-cowork/README.md) |
 | **CHANGELOG** | [`plugins/artibot/CHANGELOG.md`](./plugins/artibot/CHANGELOG.md) |
-| **Architecture deep dive** | [`plugins/artibot/docs/ARCHITECTURE.md`](./plugins/artibot/docs/ARCHITECTURE.md) |
-| **Competitive evaluation** | [`plugins/artibot/_reports/market-competitive-eval-2026-04-24.md`](./plugins/artibot/_reports/market-competitive-eval-2026-04-24.md) |
-| **AI ecosystem research** | [`plugins/artibot/_reports/ai-ecosystem-research-2026-04-24.md`](./plugins/artibot/_reports/ai-ecosystem-research-2026-04-24.md) |
-| **MCP server usage** | [`plugins/artibot/docs/mcp-server-usage.md`](./plugins/artibot/docs/mcp-server-usage.md) |
+| **Architecture deep dive** | `plugins/artibot/docs/ARCHITECTURE.md` (see CHANGELOG for module map) |
+| **Competitive evaluation** | `plugins/artibot/_reports/market-competitive-eval-2026-04-24.md` (not yet published) |
+| **AI ecosystem research** | `plugins/artibot/_reports/ai-ecosystem-research-2026-04-24.md` (not yet published) |
+| **MCP server usage** | `plugins/artibot/docs/MCP-SETUP.md` |
 | **Marketplace submission package** | [`plugins/artibot/_marketplace/`](./plugins/artibot/_marketplace/) |
 
 ## When to use which
@@ -857,32 +857,11 @@ You can install **both** in the same Anthropic account — `artibot` runs in you
 
 ## Version
 
-**3.9.0** (2026-04-24) — OTEL exporter (opt-in, loopback-preferred), multi-session dashboard, session aggregator with daily rollups, session capture middleware. See [CHANGELOG](./plugins/artibot/CHANGELOG.md) for full list.
+**4.13.0** (2026-05-19) — feat: `/save` single-shot session handoff command (+`/resume`) — `.artibot/HANDOFF.md` produces 5s next-session context restore. Safety boost: YAML frontmatter (machineId/createdAt/branch), git-lock graceful fail (5s timeout), 10m archive throttle, atomic advisor consumed marking. See [CHANGELOG](./plugins/artibot/CHANGELOG.md) for full history.
 
-**3.8.0** (2026-04-24) — MCP server implementation (stdio transport, JSON-RPC 2.0, MCP handshake). Bridges for skills / agents / memory / git. `artibot-mcp` bin for Claude Desktop integration.
-
-**3.7.0** (2026-04-24) — Joint Agent-Skill GRPO policy (correlation-aware joint selection).
-
-**3.6.0** (2026-04-24) — Neural GRPO policy (2-layer MLP opt-in, group-relative advantage + backprop).
-
-**2.8.0** (2026-04-20) — Auto-cleanup of Claude Code's pasted-image files (`image.png` / `image copy.png` …). Conservative 4-gate sweep on SessionStart: filename pattern + size < 10 MB + age < 48 h + not git-tracked. Opt-out via `ARTIBOT_IMAGE_CLEANUP=off` or `~/.claude/artibot/config.json`.
-
-**2.7.1** (2026-04-20) — **Critical scope-guard patch.** `git-autopilot-setup` no longer auto-creates `.git/autopilot.json` in unrelated repos — activation is strictly opt-in via `--init` flag or Artibot self-detection. Fixes cross-project git history pollution that was silently injecting `artibot/` branch prefixes and `wip: artibot auto-save` commits into other projects. See [CHANGELOG migration guide](./plugins/artibot/CHANGELOG.md) for cleanup steps.
-
-**2.7.0** (2026-04-20) — Version-aligned with Claude **4.7**. Includes the full Claude 4.7 migration work: EFFORT_POLICY auto-routing (xhigh/high/medium/low per command), Task Budget (beta) opt-in, 1M context zones (400k/700k/900k), 2576px high-res image support, Claude Design integration for /ppt. Sampling-params rule flipped (4.7 breaking fix), DNA override for fewer-subagent default, auto-invoke extended to all commands. Plus a ghost middleware bug fix surfaced by Linux CI and coverage threshold realignment (85→80) to match the documented policy. **5,203 tests passing on CI.**
+**4.12.0** (2026-05-19) — Comprehensive audit fixes: security hardening (timing-safe auth, K_SERVICE bypass removed, shell-injection surfaces eliminated), manifest drift sync, layer-cycle fix.
 
 [📖 Full release notes (비개발자용)](./RELEASE_NOTES_4.7_KO.md) · [CHANGELOG](./plugins/artibot/CHANGELOG.md)
-
-<details>
-<summary>Version history</summary>
-
-- **2.6.0** (2026-04-20) — Initial Claude 4.7 migration tag (superseded by 2.7.0 for version-alignment)
-- **2.5.0** (2026-04-15) — GRPO reactivation + auto-invoke hardening + retention policy
-- **2.4.0** — Git-based swarm + cross-device activation
-- **2.3.0** (2026-04-08) — Rationalizations, source_hash, toolset consolidation
-- **1.14.3** — Auto-learning pipeline, runtime middleware engine (9 stages)
-
-</details>
 
 ## License
 
