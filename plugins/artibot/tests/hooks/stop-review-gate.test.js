@@ -307,8 +307,19 @@ describe('stop-review-gate — checkMissingTests suffix variant', () => {
     expect(mockState.writeStdoutCalls).toHaveLength(1);
     const payload = mockState.writeStdoutCalls[0];
     const reason = String(payload.reason ?? '');
+    // The contract under test: hyphen-suffixed tests count toward the
+    // missing-test gate. The only invariant we assert is that the
+    // "Code without tests" warning does NOT fire for this case.
+    //
+    // The previous version also asserted `reason` could not contain the
+    // string 'git-backend.js' at all. That was over-specified: other
+    // detectors (e.g. Bracket mismatch syntax check) are free to flag the
+    // same file for unrelated reasons, and on CI Linux one such detector
+    // did, producing "Bracket mismatch: git-backend.js: syntax error" and
+    // failing the assertion even though the missing-test gate worked
+    // correctly. Windows local did not exhibit the same detector path,
+    // hiding the over-specification until CI surfaced it.
     expect(reason).not.toContain('Code without tests');
-    expect(reason).not.toContain('git-backend.js');
   });
 
 });

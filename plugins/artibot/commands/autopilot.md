@@ -46,6 +46,8 @@ Autonomous long-running mode for **3~4시간 자리 비움 / 야간 자율 작�
 | `--goal "<stopping-condition>"` | off | **v4.6.0 Goal-driven mode** — verifiable stopping condition shorthand. PRD에 `## 2.5 Goal Contract` JSON 블록으로 삽입되며 Phase 5 후 evaluator가 `validationCommand` 결과로 자동 종료 결정. 미충족 시 Phase 2로 재진입 (cap = maxIterations, default 3, hard 10). |
 | `--validation-command <cmd>` | `npm run ci` | Goal Contract의 `validationCommand` 오버라이드. evaluator가 exit code 0 → met 판정. |
 | `--max-iterations <n>` | `3` | Phase 2 → 5 → evaluator 재진입 횟수 cap. 1~10 범위. |
+| `--report-all` | off | Phase 6 REPORT에서 모든 profile 생성 (dev + pm + exec + casual = 4 md). 기본은 `dev` 1개만 생성하여 산출물 클러터 방지. |
+| `--report-profiles <list>` | `dev` | 콤마 구분 profile 목록 (`dev,pm` 등). `--report-all`보다 우선. |
 
 ## Arguments
 

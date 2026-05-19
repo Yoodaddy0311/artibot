@@ -235,3 +235,10 @@ export {
   promoteSkill,
   sweepLifecycle,
 } from './skill-lifecycle-autopilot.js';
+
+// Failure Categorizer (GRPO Stage B — sub-categorize "fix" actions by failure pattern)
+export {
+  loadFailurePatterns,
+  categorizeFailure,
+  categorizeAll as categorizeAllFailures,
+} from './failure-categorizer.js';

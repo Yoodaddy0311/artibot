@@ -411,7 +411,11 @@ export async function onSessionEnd(options = {}) {
     return { uploaded: false, version: state.currentVersion, queued: false };
   }
 
-  const result = await uploadWeights(
+  // Honour `config.backend` so git-backed installs use git push instead of
+  // attempting an HTTP POST (which would fail-closed on the egress allowlist).
+  // Mirrors the resolution already done by `performSync` at line 245.
+  const upload = resolveUpload(options.config);
+  const result = await upload(
     packaged.weights,
     {
       version: state.currentVersion,

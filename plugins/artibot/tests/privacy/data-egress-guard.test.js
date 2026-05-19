@@ -143,6 +143,22 @@ describe('loadAllowlist()', () => {
     expect(list.has('api.github.com')).toBe(true);
   });
 
+  it('includes hosts required by the git swarm backend', () => {
+    // Area 3 fix: SessionEnd swarm-sync.js routes to gitRepoUrl when
+    // backend === 'git'. Without github.com in the disk allowlist the
+    // automatic sync was blocked by DATA POLICY (manual swarm-sync-now
+    // bypasses the check, so the regression was invisible).
+    delete process.env.ARTIBOT_ALLOW_EGRESS;
+    const list = loadAllowlist();
+    expect(list.has('github.com')).toBe(true);
+  });
+
+  it('includes the artibot-swarm Cloud Run host for HTTP-backend sync', () => {
+    delete process.env.ARTIBOT_ALLOW_EGRESS;
+    const list = loadAllowlist();
+    expect(list.has('artibot-swarm-154860486472.asia-northeast3.run.app')).toBe(true);
+  });
+
   it('merges the ARTIBOT_ALLOW_EGRESS env var with on-disk entries', () => {
     process.env.ARTIBOT_ALLOW_EGRESS = 'example.com, extra.host';
     const list = loadAllowlist();

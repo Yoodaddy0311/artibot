@@ -1,20 +1,22 @@
 /**
  * Integration tests for lib/autopilot/report-generator.js generateReport()
- * Covers style selection: default (dev + deriveAll), 'all', 'exec', deriveAll=false.
+ * Covers style selection: default (dev only), 'all', 'exec', deriveAll=true opt-in.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { existsSync, unlinkSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, unlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { generateReport } from '../../lib/autopilot/report-generator.js';
 import { deleteSession, saveSession } from '../../lib/autopilot/session-store.js';
-import { getPluginRoot } from '../../lib/core/platform.js';
+
+let projectRoot = null;
 
 /**
- * Resolve reports/AUTOPILOT under the project root (one level above plugin).
+ * Resolve reports/AUTOPILOT under the test-scoped project root (tmpdir).
  * @returns {string}
  */
 function reportsDir() {
-  return path.resolve(getPluginRoot(), '..', '..', 'reports', 'AUTOPILOT');
+  return path.join(projectRoot, 'reports', 'AUTOPILOT');
 }
 
 /** Build a minimally complete dummy session state for rendering. */
@@ -53,34 +55,39 @@ function cleanup() {
     try { deleteSession(trackedSession); } catch { /* ignore */ }
     trackedSession = null;
   }
+  if (projectRoot) {
+    try { rmSync(projectRoot, { recursive: true, force: true }); } catch { /* ignore */ }
+    projectRoot = null;
+  }
 }
 
 describe('generateReport — style selection', () => {
   beforeEach(() => {
+    projectRoot = mkdtempSync(path.join(tmpdir(), 'artibot-report-gen-'));
     trackedSession = `ap-test-style-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     saveSession(dummyState(trackedSession));
   });
 
   afterEach(cleanup);
 
-  it('default (no opts) renders dev .md + derives all 4 styles', () => {
-    const out = generateReport(trackedSession);
+  it('default (no opts beyond projectRoot) renders only dev .md (pm/exec/casual are opt-in)', () => {
+    const out = generateReport(trackedSession, { projectRoot });
     const dir = reportsDir();
     const expectedDev = path.join(dir, `${trackedSession}.md`);
     expect(out.filePath).toBe(expectedDev);
     expect(existsSync(expectedDev)).toBe(true);
     expect(out.results.dev.filePath).toBe(expectedDev);
     trackReport(expectedDev);
-    // deriveAll defaults to true → pm/exec/casual also rendered
+    // deriveAll defaults to false → pm/exec/casual NOT rendered
     for (const s of ['pm', 'exec', 'casual']) {
       const p = path.join(dir, `${trackedSession}.${s}.md`);
-      expect(existsSync(p), `${s} should exist`).toBe(true);
-      trackReport(p);
+      expect(existsSync(p), `${s} should NOT exist by default`).toBe(false);
+      expect(out.results[s], `${s} should be undefined`).toBeUndefined();
     }
   });
 
   it("style 'all' produces 4 files (dev/pm/exec/casual)", () => {
-    const out = generateReport(trackedSession, { style: 'all' });
+    const out = generateReport(trackedSession, { style: 'all', projectRoot });
     const dir = reportsDir();
     expect(existsSync(path.join(dir, `${trackedSession}.md`))).toBe(true);
     trackReport(path.join(dir, `${trackedSession}.md`));
@@ -94,7 +101,7 @@ describe('generateReport — style selection', () => {
   });
 
   it("style 'exec' generates only exec.md (no dev/pm/casual)", () => {
-    const out = generateReport(trackedSession, { style: 'exec' });
+    const out = generateReport(trackedSession, { style: 'exec', projectRoot });
     const dir = reportsDir();
     const execPath = path.join(dir, `${trackedSession}.exec.md`);
     expect(existsSync(execPath)).toBe(true);
@@ -106,8 +113,23 @@ describe('generateReport — style selection', () => {
     expect(out.results.casual).toBeUndefined();
   });
 
-  it('deriveAll:false renders only the dev style', () => {
-    const out = generateReport(trackedSession, { deriveAll: false });
+  it('deriveAll:true renders all 4 profiles (opt-in)', () => {
+    const out = generateReport(trackedSession, { deriveAll: true, projectRoot });
+    const dir = reportsDir();
+    const devPath = path.join(dir, `${trackedSession}.md`);
+    expect(existsSync(devPath)).toBe(true);
+    expect(out.results.dev.filePath).toBe(devPath);
+    trackReport(devPath);
+    for (const s of ['pm', 'exec', 'casual']) {
+      const p = path.join(dir, `${trackedSession}.${s}.md`);
+      expect(existsSync(p), `${s} should exist when deriveAll:true`).toBe(true);
+      expect(out.results[s].filePath).toBe(p);
+      trackReport(p);
+    }
+  });
+
+  it('deriveAll:false (legacy explicit) still renders only dev (matches new default)', () => {
+    const out = generateReport(trackedSession, { deriveAll: false, projectRoot });
     const dir = reportsDir();
     const devPath = path.join(dir, `${trackedSession}.md`);
     expect(existsSync(devPath)).toBe(true);
