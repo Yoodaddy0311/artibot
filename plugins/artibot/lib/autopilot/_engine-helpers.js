@@ -14,6 +14,55 @@
 import { newSessionId, saveSession } from './session-store.js';
 import { appendEvent } from './telemetry.js';
 import { notifyDanger, notifyPause, notifyPhaseProgress } from './notification.js';
+import { acquireKeepAwake } from '../system/keep-awake.js';
+
+/**
+ * Live keep-awake handles by sessionId. Engine acquires in startAutopilot
+ * and releases in runPhase6Report / abortAutopilot. Kept out of engine.js
+ * to stay under the 800-line quality gate.
+ * @type {Map<string, {active: boolean, since: string, platform: string, reason: string|null, release: () => Promise<void>}>}
+ */
+const KEEP_AWAKE_HANDLES = new Map();
+
+/**
+ * Acquire a keep-awake lease for the given session and remember it.
+ * No-op when state.options.keepAwake === false. Errors are swallowed.
+ * @param {object} state - live session state
+ * @returns {Promise<object|null>} the handle (also stored in state.keepAwake) or null
+ */
+export async function acquireSessionKeepAwake(state) {
+  if (!state || !state.sessionId) return null;
+  if (state.options?.keepAwake === false) return null;
+  try {
+    const handle = await acquireKeepAwake({
+      reason: `artibot-autopilot ${state.sessionId}`,
+      keepDisplay: state.options?.keepDisplay === true,
+    });
+    KEEP_AWAKE_HANDLES.set(state.sessionId, handle);
+    state.keepAwake = {
+      active: handle.active,
+      since: handle.since,
+      platform: handle.platform,
+      reason: handle.reason,
+    };
+    return handle;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Release the keep-awake lease tied to a session, if any. Idempotent.
+ * @param {string} sessionId
+ * @returns {Promise<void>}
+ */
+export async function releaseSessionKeepAwake(sessionId) {
+  if (!sessionId) return;
+  const handle = KEEP_AWAKE_HANDLES.get(sessionId);
+  if (!handle) return;
+  KEEP_AWAKE_HANDLES.delete(sessionId);
+  try { await handle.release(); } catch { /* best-effort */ }
+}
 import { shouldActivateTui } from './tui.js';
 import { recordPhaseUsage } from './cost-tracker.js';
 

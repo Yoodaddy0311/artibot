@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.12.0] — TBD
+
+### Added
+
+- **`/autopilot` now prevents OS sleep during execution** — cross-platform `lib/system/keep-awake.js` spawns a long-lived child at user privilege (Windows `SetThreadExecutionState` via PowerShell loop / macOS `caffeinate -i` / Linux `systemd-inhibit --mode=block` with `xset` fallback). Toggle with `--keep-awake` / `--no-keep-awake` (default on); `--keep-display` keeps the monitor on (default off — battery saver). Idempotent refcount lets multiple acquires share one child; the child is killed automatically on session complete, abort, or parent process exit. No admin/sudo required, no network calls, zero new runtime deps.
+
+---
+
 ## [4.11.3] — 2026-05-18
 
 **Theme**: Release-infra patch — 배지 동기와 required-check 누락을 영구 해결. 런타임 코드 변경 없음, CI/문서만 수정.
