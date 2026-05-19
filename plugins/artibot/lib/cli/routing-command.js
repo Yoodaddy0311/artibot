@@ -18,7 +18,7 @@ import {
   getGrpoRoutingConfig,
   resetGrpoRoutingConfigCache,
 } from '../cognitive/grpo-routing-config.js';
-import { resetRoutingBiasCache } from '../cognitive/grpo-bridge.js';
+import { resetRoutingBiasCache } from '../cognitive/index.js';
 
 const SUBCOMMANDS = Object.freeze(['status', 'rollback', 'enable', 'disable']);
 

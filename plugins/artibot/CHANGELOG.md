@@ -9,11 +9,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+<<<<<<< HEAD
 ## [4.12.0] — TBD
 
 ### Added
 
 - **`/autopilot` now prevents OS sleep during execution** — cross-platform `lib/system/keep-awake.js` spawns a long-lived child at user privilege (Windows `SetThreadExecutionState` via PowerShell loop / macOS `caffeinate -i` / Linux `systemd-inhibit --mode=block` with `xset` fallback). Toggle with `--keep-awake` / `--no-keep-awake` (default on); `--keep-display` keeps the monitor on (default off — battery saver). Idempotent refcount lets multiple acquires share one child; the child is killed automatically on session complete, abort, or parent process exit. No admin/sudo required, no network calls, zero new runtime deps.
+=======
+## [4.11.4] — 2026-05-19
+
+### ⚠️ Breaking changes
+- **`server/index.js` authentication**: `K_SERVICE` env var alone no longer auto-grants auth. Cloud Run deployments now REQUIRE `X-Goog-IAP-JWT-Assertion` header to authenticate when no `ARTIBOT_SERVER_TOKEN` is set. Operators must enable Cloud IAP/IAM policy on their Cloud Run service before upgrading, OR set `ARTIBOT_SERVER_TOKEN` to maintain bearer-token auth. Without either, the server falls back to localhost-only mode.
+
+### Fixed (Security)
+- `server/index.js`: Bearer token comparison now uses `crypto.timingSafeEqual` (SHA-256 hash) — was vulnerable to timing attacks.
+- `server/index.js`: New `TRUST_PROXY` env flag gates `X-Forwarded-For` header trust for rate-limit keying (default: trust only behind Cloud Run via `K_SERVICE`).
+- `lib/learning/auto-learning-scanner.js`: Dropped `shell: true` from spawn options; resolves binary via `node_modules/<pkg>` JS entry + `process.execPath` to eliminate cmd.exe metacharacter injection surface.
+- `scripts/squash-wip.mjs`: Switched from `execSync(\`git ${args.join(' ')}\`)` to `execFileSync('git', args, …)` array form.
+- `SECURITY.md`: New "Narrow Auto-Approve Permission Patterns" subsection warning about `Bash(node *)`, `Bash(npm *)`, etc.
+
+### Fixed (Architecture)
+- `lib/learning/evolution-loop.js`: Removed Layer-3 → Layer-4 import of `cognitive/auto-research.js`. `autoResearch` is now dependency-injected by the Layer-5 `session-end.js` composition root.
+- `lib/cli/routing-command.js`: Replaced direct import of `cognitive/grpo-bridge.js` with `cognitive/index.js` facade re-export of `resetRoutingBiasCache`.
+
+### Fixed (Manifest drift)
+- `.claude-plugin/marketplace.json` (root): artibot 4.7.5 → 4.11.4, artibot-cowork 0.4.0 → 3.1.0.
+- `plugins/artibot/marketplace.json`: version 3.9.1 → 4.11.4 + 8 fields synced.
+- Counts corrected across manifests: 100 skills → 111, 56 commands → 66.
+
+### Fixed (Documentation)
+- `CITATION.cff`: version 2.5.0 → 4.11.4, date 2026-04-15 → 2026-05-19, "119 domain skills" → "111 domain skills".
+- Root `README.md`: 4 dead internal links fixed (`_reports/*`, `docs/ARCHITECTURE.md`, `docs/mcp-server-usage.md`). Stale v1.14.x and v3.9.0 changelog blocks removed.
+- `plugins/artibot/README.md`: competitive scoring row updated to v4.11.4.
+- `plugins/artibot/AGENTS.md`, `plugins/artibot/CLAUDE.md`: skill/command counts corrected to 28/111/66.
+
+### Removed
+- 3 unused barrel `index.js` files: `lib/adapters/index.js`, `lib/tui/index.js`, `lib/visual/index.js` (no external imports).
+- `plugins/artibot/hooks/hooks.json.before-dispatcher` stale backup.
+- Root `package.json`: removed unused `framer-motion` dependency.
+
+### Verification
+- Tests: 9146 / 9148 pass (1 pre-existing Windows libuv `UV_HANDLE_CLOSING` flake in `tests/scripts/update.test.js`).
+- Lint: 0 errors / 0 warnings.
+- Knip: 49 → 46 unused files.
+- All 16 verified HIGH/CRITICAL audit findings from full-repo audit addressed.
+
+### Migration guide (Cloud Run operators)
+If your server runs on Cloud Run with no `ARTIBOT_SERVER_TOKEN`, BEFORE upgrading do ONE of:
+1. **Recommended**: Enable Cloud IAP on your Cloud Run service so `X-Goog-IAP-JWT-Assertion` is injected by GCP.
+2. Set `ARTIBOT_SERVER_TOKEN` env var and have callers send `Authorization: Bearer <token>`.
+3. Accept localhost-only mode (server will reject all non-localhost without auth proof).
+>>>>>>> origin/master
 
 ---
 

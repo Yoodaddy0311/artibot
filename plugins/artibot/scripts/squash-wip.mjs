@@ -29,19 +29,24 @@
  * @module scripts/squash-wip
  */
 
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { isWipSubject } from '../lib/autopilot/wip-stats.js';
 
 /**
  * Default git runner used by the CLI. Injectable for tests.
  *
+ * Uses `execFileSync` with an args array so user-supplied tokens
+ * (`--from <ref>`, `-m <msg>`) are passed as discrete argv entries and never
+ * interpolated into a shell string — backticks, semicolons, and other shell
+ * metacharacters are inert.
+ *
  * @param {string[]} args
  * @param {{ cwd?: string }} [opts]
  * @returns {string}
  */
 function defaultGit(args, opts = {}) {
-  return execSync(`git ${args.join(' ')}`, {
+  return execFileSync('git', args, {
     cwd: opts.cwd,
     encoding: 'utf-8',
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -152,17 +157,6 @@ function defaultSquashMessage(commits) {
 }
 
 /**
- * Quote a string for safe use as a single `-m` argument on the shell
- * `git commit -m "..."` call. Escapes embedded double quotes and backslashes.
- *
- * @param {string} s
- * @returns {string}
- */
-function shellQuoteDouble(s) {
-  return `"${String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\$/g, '\\$').replace(/`/g, '\\`')}"`;
-}
-
-/**
  * Run the squash. Returns a structured result for callers (tests + CLI).
  *
  * @param {{
@@ -223,7 +217,7 @@ export function runSquash(opts = {}) {
 
   try {
     git(['reset', '--soft', baseRef], { cwd });
-    git(['commit', '-m', shellQuoteDouble(message)], { cwd });
+    git(['commit', '-m', message], { cwd });
   } catch (err) {
     return {
       status: 'error',
