@@ -983,3 +983,13 @@
 <!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
 
 ---
+
+## 2026-05-18 23:56 UTC · `artibot/chore-release-yml-drop-skip-ci`
+
+- **Commits** (1):
+  - `47dc79b` wip: artibot auto-save [2026-05-18 23:54:47]
+- **Files touched**: 1
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
