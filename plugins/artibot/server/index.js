@@ -20,7 +20,7 @@
  */
 
 import { createServer } from 'node:http';
-import { createHash } from 'node:crypto';
+import { createHash, timingSafeEqual } from 'node:crypto';
 import {
   flushStore,
   getClientStats,
@@ -56,6 +56,17 @@ const CORS_ALLOWED_ORIGINS = process.env.CORS_ALLOWED_ORIGINS
 
 // Authentication: shared-secret bearer token. If not set, only localhost connections are allowed.
 const AUTH_TOKEN = process.env.ARTIBOT_SERVER_TOKEN ?? null;
+
+// Trust the X-Forwarded-For header only when this server sits behind a known
+// reverse proxy (Cloud Run, IAP, etc.). Set `TRUST_PROXY=1` (or `true`) to
+// honor the first IP in XFF for rate-limit keying; otherwise we use the
+// socket peer address, which a remote client cannot spoof. Cloud Run sets
+// `K_SERVICE`, so the proxy is implicitly trusted in that environment.
+const TRUST_PROXY = (() => {
+  const v = (process.env.TRUST_PROXY ?? '').toLowerCase();
+  if (v === '1' || v === 'true' || v === 'yes') return true;
+  return Boolean(process.env.K_SERVICE);
+})();
 
 // ---------------------------------------------------------------------------
 // HTTP Helpers
@@ -217,9 +228,32 @@ function isLocalhost(req) {
 }
 
 /**
- * Authenticate the request via Bearer token or localhost check.
- * When AUTH_TOKEN is set, a matching Authorization header is required.
- * When AUTH_TOKEN is not set, only localhost connections are permitted.
+ * Constant-time comparison of two strings. Hashes both sides first so the
+ * comparison is constant-time even when inputs differ in length. Returns
+ * false for any non-string input.
+ *
+ * @param {string} a
+ * @param {string} b
+ * @returns {boolean}
+ */
+function safeStringEquals(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string') return false;
+  const ha = createHash('sha256').update(a).digest();
+  const hb = createHash('sha256').update(b).digest();
+  return timingSafeEqual(ha, hb);
+}
+
+/**
+ * Authenticate the request.
+ *   - When AUTH_TOKEN is set, the request must carry a matching Bearer token.
+ *     The comparison is timing-safe.
+ *   - Otherwise, on Cloud Run the request must carry a non-empty
+ *     `X-Goog-IAP-JWT-Assertion` (the IAP/IAM-signed header injected by GCP).
+ *     The signature is not verified here; presence is required so plain
+ *     unauthenticated traffic from a sidecar that merely shares `K_SERVICE`
+ *     cannot bypass auth. Verify the JWT upstream (e.g. via Cloud Run IAM
+ *     `allUsers`/`allAuthenticatedUsers` policy) to harden further.
+ *   - Otherwise, only localhost connections are permitted.
  *
  * @param {import('node:http').IncomingMessage} req
  * @returns {boolean}
@@ -227,10 +261,14 @@ function isLocalhost(req) {
 function authenticate(req) {
   if (AUTH_TOKEN) {
     const authHeader = req.headers['authorization'] ?? '';
-    return authHeader === `Bearer ${AUTH_TOKEN}`;
+    return safeStringEquals(authHeader, `Bearer ${AUTH_TOKEN}`);
   }
-  // Cloud Run: trust IAM-authenticated requests (K_SERVICE is set by Cloud Run)
-  if (process.env.K_SERVICE) return true;
+  // Cloud Run: require a Google IAP/IAM-signed assertion header rather than
+  // trusting K_SERVICE alone — K_SERVICE is just an env hint, not auth proof.
+  if (process.env.K_SERVICE) {
+    const iap = req.headers['x-goog-iap-jwt-assertion'];
+    return typeof iap === 'string' && iap.length > 0;
+  }
   // No token configured, not Cloud Run: restrict to localhost only
   return isLocalhost(req);
 }
@@ -426,8 +464,11 @@ async function handleRequest(req, res) {
     return json(res, 401, { error: 'Unauthorized' }, req);
   }
 
-  // Rate limiting
-  const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() ?? req.socket.remoteAddress;
+  // Rate limiting — only honor X-Forwarded-For when sitting behind a trusted
+  // proxy. Otherwise the header is attacker-controlled and would let a single
+  // client evade the per-IP limit by rotating the value.
+  const xff = TRUST_PROXY ? req.headers['x-forwarded-for']?.split(',')[0]?.trim() : null;
+  const ip = xff || req.socket.remoteAddress;
   if (!checkRateLimit(ip)) {
     return json(res, 429, { error: 'Rate limit exceeded' }, req);
   }

@@ -10,6 +10,8 @@
 
 import { execFile as execFileCb } from 'node:child_process';
 import { promisify } from 'node:util';
+import { existsSync } from 'node:fs';
+import path from 'node:path';
 import { getPluginRoot } from '../core/platform.js';
 
 const execFile = promisify(execFileCb);
@@ -20,7 +22,29 @@ const execFile = promisify(execFileCb);
 
 const EXEC_TIMEOUT = 120_000;
 const MAX_BUFFER = 50 * 1024 * 1024; // 50 MB for large vitest JSON output
-const SHELL_OPTS = { shell: true, windowsHide: true }; // shell: npx resolution; windowsHide: suppress flashing cmd window on Windows
+// windowsHide: suppress the cmd window flash on Windows. We deliberately do
+// NOT set `shell: true` here — running through cmd.exe exposes any future
+// caller-supplied args/cwd to shell metacharacter injection. `npx` resolves
+// fine via execFile when we pick the right binary per platform (see
+// `resolveBin`).
+const SHELL_OPTS = { windowsHide: true };
+
+/**
+ * Resolve a locally-installed CLI's JS entry inside the plugin's
+ * `node_modules/.bin`-equivalent path. We deliberately spawn it via
+ * `process.execPath` (the running Node binary) rather than the platform
+ * shim (`npx`, `npm.cmd`, `.bat`) so cmd.exe / sh never interprets args.
+ *
+ * @param {string} cwd - directory to resolve from (plugin root)
+ * @param {string} pkg - npm package name (e.g. 'eslint', 'vitest')
+ * @param {string} relBin - relative JS entry inside the package
+ *   (e.g. 'bin/eslint.js', 'vitest.mjs')
+ * @returns {string|null} absolute path to the JS entry, or null if missing
+ */
+function resolvePackageBin(cwd, pkg, relBin) {
+  const candidate = path.join(cwd, 'node_modules', pkg, relBin);
+  return existsSync(candidate) ? candidate : null;
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -62,7 +86,11 @@ export function parseLintOutput(stdout) {
  * @returns {Promise<object>}
  */
 async function runLintCheck(cwd) {
-  const stdout = await execCapture('npx', ['eslint', '.', '--format', 'json'], {
+  const eslintJs = resolvePackageBin(cwd, 'eslint', 'bin/eslint.js');
+  if (!eslintJs) {
+    return { errorCount: 0, warningCount: 0, passed: true, skipped: 'eslint not installed' };
+  }
+  const stdout = await execCapture(process.execPath, [eslintJs, '.', '--format', 'json'], {
     cwd,
     timeout: EXEC_TIMEOUT,
     encoding: 'utf-8',
@@ -89,7 +117,11 @@ export function parseTestOutput(stdout) {
  * @returns {Promise<object>}
  */
 async function runTestCheck(cwd) {
-  const stdout = await execCapture('npx', ['vitest', 'run', '--reporter=json'], {
+  const vitestJs = resolvePackageBin(cwd, 'vitest', 'vitest.mjs');
+  if (!vitestJs) {
+    return { passed: 0, failed: 0, total: 0, allPassed: true, skipped: 'vitest not installed' };
+  }
+  const stdout = await execCapture(process.execPath, [vitestJs, 'run', '--reporter=json'], {
     cwd,
     timeout: EXEC_TIMEOUT,
     encoding: 'utf-8',

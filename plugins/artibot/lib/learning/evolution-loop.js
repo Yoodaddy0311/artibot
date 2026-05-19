@@ -9,9 +9,12 @@
 import { createSessionMemory } from './session-memory.js';
 import { createKnowledgeGraph, EDGE_RELATIONS, NODE_TYPES } from './knowledge-graph.js';
 import { createSkillEvolver } from './skill-evolver.js';
-import { createAutoResearch } from '../cognitive/auto-research.js';
 import { buildContribution } from '../swarm/collective-hub.js';
 import { loadFromDisk, saveToDisk } from '../swarm/swarm-persistence.js';
+
+// Layer constraint: Layer-3 (learning) must not import Layer-4 (cognitive).
+// `autoResearch` is dependency-injected by the caller (e.g. session-end hook).
+// When not provided, Stage 4 (research) is skipped — pipeline stays best-effort.
 
 /**
  * Extract knowledge graph nodes from a compressed memory record.
@@ -25,6 +28,25 @@ function extractNodes(memory) {
     type: NODE_TYPES.CONCEPT,
     data: { label: keyword, source: memory.sessionId, eventCount: memory.eventCount },
   }));
+}
+
+/**
+ * Run the auto-research stage. Returns `{ triggered, findings }` or `null`
+ * when the optional `autoResearch` dependency was not injected. Extracting
+ * this keeps `run()`'s cyclomatic complexity below the project budget.
+ *
+ * @param {object|null} autoResearch
+ * @param {object} routingResult
+ * @param {object|null} compressed
+ * @returns {Promise<{ triggered: boolean, findings: object|null }|null>}
+ */
+async function runResearchStage(autoResearch, routingResult, compressed) {
+  if (!autoResearch) return null;
+  if (!autoResearch.shouldResearch(routingResult)) return { triggered: false, findings: null };
+  const query = routingResult?.input || compressed?.summary || '';
+  const scopeResult = autoResearch.scope(query);
+  const gathered = await autoResearch.gather(scopeResult);
+  return { triggered: true, findings: autoResearch.synthesize(gathered) };
 }
 
 /**
@@ -61,7 +83,7 @@ export function createEvolutionLoop(options = {}) {
   const sessionMemory = options.sessionMemory || createSessionMemory({ now });
   const knowledgeGraph = options.knowledgeGraph || createKnowledgeGraph();
   const skillEvolver = options.skillEvolver || createSkillEvolver({ now });
-  const autoResearch = options.autoResearch || createAutoResearch();
+  const autoResearch = options.autoResearch || null;
   const hubConfig = options.hubConfig || { optIn: false, minSuccessRate: 0.6, minUsageCount: 5 };
 
   return Object.freeze({
@@ -155,14 +177,13 @@ export function createEvolutionLoop(options = {}) {
         result.errors.push({ stage: 'evaluate', message: err.message });
       }
 
-      // Stage 4: Auto-research if confidence was low
+      // Stage 4: Auto-research if confidence was low. Skipped when caller did
+      // not inject `autoResearch` (preserves Layer-3 isolation from Layer-4).
       try {
-        if (autoResearch.shouldResearch(context.routingResult)) {
-          result.researchTriggered = true;
-          const query = context.routingResult?.input || result.compressed?.summary || '';
-          const scopeResult = autoResearch.scope(query);
-          const gathered = await autoResearch.gather(scopeResult);
-          result.researchFindings = autoResearch.synthesize(gathered);
+        const research = await runResearchStage(autoResearch, context.routingResult, result.compressed);
+        if (research) {
+          result.researchTriggered = research.triggered;
+          result.researchFindings = research.findings;
         }
       } catch (err) {
         result.errors.push({ stage: 'research', message: err.message });

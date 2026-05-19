@@ -190,7 +190,12 @@ async function runEvolutionLoop(hookData) {
     const { createEvolutionLoop } = await import(toFileUrl(evolutionPath));
     const hubConfig = await readHubConfig();
 
-    const loop = createEvolutionLoop({ hubConfig });
+    // Layer-3 evolution-loop cannot import Layer-4 cognitive; wire autoResearch here.
+    const autoResearchPath = path.join(plugRoot, 'lib', 'cognitive', 'auto-research.js');
+    const { createAutoResearch } = await import(toFileUrl(autoResearchPath));
+    const autoResearch = createAutoResearch();
+
+    const loop = createEvolutionLoop({ hubConfig, autoResearch });
     const evolutionResult = await loop.run({
       events: hookData.events || [],
       skillUsages: hookData.skill_usages || [],
