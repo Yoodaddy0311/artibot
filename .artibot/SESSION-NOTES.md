@@ -1250,3 +1250,13 @@
 <!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
 
 ---
+
+## 2026-05-19 03:48 UTC · `feat/save-handoff`
+
+- **Commits** (1):
+  - `c21a92f` feat: /save single-shot session handoff command (v4.13.0)
+- **Files touched**: 12
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
