@@ -36,6 +36,34 @@ function readArtibotBypassFlags() {
   }
 }
 
+/**
+ * Read the `closeOnStop` opt-in flag.
+ *
+ * Precedence (per-repo overrides plugin-wide, matching the bypass-flag pattern):
+ *   1. `.git/autopilot.json` `closeOnStop === true` → enabled
+ *   2. `artibot.config.json` `git.autopilot.closeOnStop === true` → enabled
+ *   3. Otherwise (missing/false/undefined) → disabled (default)
+ *
+ * v4.11.3: default is `false`. Before v4.11.3 this hook fired on every Stop
+ * (every agent turn) and produced a `chore: artibot session close [...]`
+ * commit + push, creating dozens of noise commits per session. The
+ * interval-based WIP save (`git-autopilot-save.js`) still provides crash
+ * safety; this hook is now opt-in for users who specifically want a turn-end
+ * commit/squash/push pipeline.
+ *
+ * @param {object|null} perRepoConfig parsed `.git/autopilot.json` (may be null)
+ * @returns {boolean} true if the close pipeline should run
+ */
+function readCloseOnStopFlag(perRepoConfig) {
+  if (perRepoConfig?.closeOnStop === true) return true;
+  try {
+    const cfg = JSON.parse(readFileSync(resolveConfigPath('artibot.config.json'), 'utf-8'));
+    return cfg?.git?.autopilot?.closeOnStop === true;
+  } catch {
+    return false;
+  }
+}
+
 // -------------------------------------------------------------------------
 // Constants
 // -------------------------------------------------------------------------
@@ -285,6 +313,16 @@ async function main() {
   if (!config) return;
 
   const log = (msg) => process.stderr.write(`[artibot:git-autopilot-close] ${msg}\n`);
+
+  // v4.11.3 gate: turn-end commit/squash/push is opt-in. When disabled, log
+  // once (so users can see why nothing happened) and return without touching
+  // git state. Crash safety is still provided by `git-autopilot-save.js`
+  // (interval-based WIP), which is independent of this hook.
+  if (!readCloseOnStopFlag(config)) {
+    log('closeOnStop=false — skipping commit/squash/push (set git.autopilot.closeOnStop=true to enable)');
+    return;
+  }
+
   const branch = getCurrentBranch(repoRoot);
   const branchPrefix = config.branchPrefix ?? 'artibot/';
   const baseBranch = resolveBaseBranch(repoRoot, config);

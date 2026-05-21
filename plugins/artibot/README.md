@@ -1610,7 +1610,8 @@ Claude Code 하네스 아키텍처에서 영감받은 13개 신규 모듈 도입
 
 ### Git Autopilot 훅 시스템
 - 5개 git-autopilot 훅 등록: setup(SessionStart), session(SessionStart), guard(PreToolUse), save(UserPromptSubmit), close(Stop)
-- WIP 인터벌 자동 커밋, 원격 미병합 파일 쓰기 경고, 세션 종료 시 스쿼시+푸시
+- WIP 인터벌 자동 커밋(기본 120분), 원격 미병합 파일 쓰기 경고, 세션 종료 시 스쿼시+푸시
+- **v4.11.3부터**: `close(Stop)` 의 turn-end 자동 commit/squash/push는 **opt-in**. 매 agent turn마다 `chore: artibot session close` commit이 누적되던 노이즈 폭주 차단. 이전 동작 복원: `.git/autopilot.json` 또는 `artibot.config.json` 의 `git.autopilot.closeOnStop: true` 토글. **WIP interval save(작업 분실 방지)는 영향 없음.**
 
 ### Worktree 격리 모드
 - `team.worktreeIsolation` 설정 추가 (`enabled: false` 기본, opt-in)

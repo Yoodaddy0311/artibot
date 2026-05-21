@@ -87,6 +87,12 @@ function setupEnabledRepo(overrides = {}) {
     autoPushOnStop: true,
     squashWipOnClose: true,
     branchPrefix: 'artibot/',
+    // v4.11.3: existing test cases assume the full close pipeline runs.
+    // The new closeOnStop gate defaults to false in production; we opt in
+    // here so the legacy expectations (commit / squash / push) stay valid.
+    // Individual tests can override by passing `closeOnStop: false` (or
+    // omitting via a fresh config object) to exercise the new gate.
+    closeOnStop: true,
     ...overrides,
   };
 
@@ -438,5 +444,96 @@ describe('git-autopilot-close — squashWipCommits safety guards', () => {
     await import('../../scripts/hooks/git-autopilot-close.js');
     // No reset issued because guard short-circuits.
     expect(recorded.some((a) => a[0] === 'reset')).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v4.11.3 — closeOnStop opt-in gate
+// ---------------------------------------------------------------------------
+describe('git-autopilot-close — closeOnStop gate (v4.11.3)', () => {
+  let stderrSpy;
+
+  beforeEach(() => {
+    vi.resetModules();
+    resetState();
+    stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+  });
+
+  afterEach(() => {
+    stderrSpy.mockRestore();
+    vi.restoreAllMocks();
+  });
+
+  it('should skip commit/squash/push when closeOnStop is false (default)', async () => {
+    // Per-repo config has closeOnStop omitted → falls through to artibot.config
+    // → also missing → readCloseOnStopFlag returns false → early return.
+    setupEnabledRepo({ closeOnStop: false });
+    const recorded = [];
+    mockState.execFileSyncImpl = (file, args) => {
+      recorded.push(args);
+      const joined = (args || []).join(' ');
+      if (joined === 'rev-parse --show-toplevel') return '/repo';
+      if (joined === 'config --get remote.origin.url') {
+        return 'https://github.com/Yoodaddy0311/artibot.git';
+      }
+      if (joined === 'branch --show-current') return 'artibot/master';
+      if (joined.startsWith('status --porcelain')) return 'M file.js\n';
+      return '';
+    };
+
+    await import('../../scripts/hooks/git-autopilot-close.js');
+
+    const logs = stderrSpy.mock.calls.map(([m]) => m).join('');
+    expect(logs).toContain('closeOnStop=false — skipping');
+    // Verify no commit/push/reset was attempted: the only git invocations
+    // allowed are repo-detection (rev-parse) and the allowlist probe
+    // (config --get remote.origin.url). Anything else means the gate leaked.
+    const writeAttempts = recorded.filter((args) => {
+      const cmd = (args && args[0]) || '';
+      return ['add', 'commit', 'push', 'reset', 'status'].includes(cmd);
+    });
+    expect(writeAttempts).toEqual([]);
+  });
+
+  it('should respect per-repo closeOnStop=true even when artibot.config sets false', async () => {
+    // Per-repo true takes precedence over plugin-wide false → pipeline runs.
+    setupEnabledRepo({ closeOnStop: true, autoPushOnStop: false, squashWipOnClose: false });
+    mockState.readFileSyncImpl = (p) => {
+      const ps = String(p);
+      if (ps.includes('autopilot.json')) {
+        return JSON.stringify({
+          enabled: true,
+          closeOnStop: true,
+          autoPullOnSession: true,
+          autoPushOnStop: false,
+          squashWipOnClose: false,
+          branchPrefix: 'artibot/',
+        });
+      }
+      if (ps.includes('artibot.config.json')) {
+        return JSON.stringify({
+          git: { autopilot: { closeOnStop: false } },
+        });
+      }
+      throw new Error('ENOENT');
+    };
+
+    const recorded = [];
+    mockState.execFileSyncImpl = (file, args) => {
+      recorded.push(args);
+      const joined = (args || []).join(' ');
+      if (joined === 'rev-parse --show-toplevel') return '/repo';
+      if (joined === 'config --get remote.origin.url') {
+        return 'https://github.com/Yoodaddy0311/artibot.git';
+      }
+      if (joined === 'branch --show-current') return 'main';
+      if (joined.startsWith('status --porcelain')) return 'M file.js\n';
+      return '';
+    };
+
+    await import('../../scripts/hooks/git-autopilot-close.js');
+    const logs = stderrSpy.mock.calls.map(([m]) => m).join('');
+    expect(logs).toContain('Final changes committed');
+    expect(recorded.some((a) => a.join(' ') === 'add -A')).toBe(true);
   });
 });

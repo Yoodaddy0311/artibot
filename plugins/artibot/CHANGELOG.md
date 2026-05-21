@@ -13,6 +13,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.13.1] — 2026-05-21
+
+**Theme**: turn-end auto-commit 폭주 차단 — Stop 훅의 `git-autopilot-close.js`가 매 agent turn마다 `chore: artibot session close [...]` commit + push를 만들어 history의 86%가 자동 노이즈가 되던 문제. WIP interval save(crash safety net)는 영향 없음.
+
+### Changed (opt-in default flip — non-breaking)
+
+- **`scripts/hooks/git-autopilot-close.js`** — `readCloseOnStopFlag()` 추가, `main()` 초입에 gate 삽입. `closeOnStop`이 명시적으로 `true`가 아니면 stderr 로그 1줄 출력 후 early return. commit/squash/push 단계 전부 건너뜀.
+- **`scripts/hooks/git-autopilot-setup.js`** — `DEFAULT_CONFIG`에 `closeOnStop: false` 추가. 새 `.git/autopilot.json` 생성 시 default false로 stamp.
+- **`artibot.config.json`** — `git.autopilot.closeOnStop: false` 추가, comment 갱신.
+
+### Why
+
+사용자 보고: 19분 작업 세션 중 13건의 `chore: artibot session close` 노이즈 commit 자동 생성. 최근 50 commit 중 86%(43건)가 의미 없는 turn-end 자동 commit으로 묻혀 실제 작업 신호(feat/fix/refactor)가 보이지 않음. WIP interval save(`git-autopilot-save.js`, default 120분)만으로 crash safety net이 충분하므로, turn-end commit pipeline은 opt-in으로 전환.
+
+### Migration
+
+기존 동작(turn-end auto commit + squash + push)을 유지하려면 둘 중 하나로 명시적 opt-in:
+
+1. **Per-repo (이 저장소만)**: `.git/autopilot.json`에 `"closeOnStop": true` 추가
+2. **Plugin-wide (모든 저장소)**: `artibot.config.json`의 `git.autopilot.closeOnStop`을 `true`로 변경
+
+per-repo override가 plugin-wide 값보다 우선합니다 (기존 `bypassPreCommitHooks` 패턴과 동일).
+
+### Verification
+
+- 신규 테스트 2건 (`tests/hooks/git-autopilot-close.test.js`의 `closeOnStop gate (v4.11.3)` describe 블록): default skip, per-repo override precedence.
+- 기존 13개 close 테스트는 `setupEnabledRepo()` 헬퍼에 `closeOnStop: true` 기본값 주입으로 회귀 0건.
+- ESLint 0 errors / 0 warnings.
+
+---
+
 ## [4.13.0] — 2026-05-19
 
 ### Added
