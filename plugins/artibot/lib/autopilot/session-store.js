@@ -225,9 +225,10 @@ export function deleteSession(sessionId) {
 }
 
 /**
- * Generate a fresh session id of form ap-YYYYMMDD-HHmmss-xxxx.
- * The 4-char random suffix prevents collisions when multiple sessions are
- * created within the same UTC second (e.g., parallel tests).
+ * Generate a fresh session id of form ap-YYYYMMDD-HHmmss-xxxxxx.
+ * The 6-char random suffix prevents collisions when multiple sessions are
+ * created within the same UTC second (e.g., parallel tests). 36^6 ≈ 2.18B
+ * keyspace makes a 200-sample collision ~0.0009%/run (vs ~1.18%/run at 4 char).
  * @returns {string}
  */
 export function newSessionId() {
@@ -235,6 +236,6 @@ export function newSessionId() {
   const pad = (n) => String(n).padStart(2, '0');
   const ymd = `${d.getUTCFullYear()}${pad(d.getUTCMonth() + 1)}${pad(d.getUTCDate())}`;
   const hms = `${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}${pad(d.getUTCSeconds())}`;
-  const suffix = Math.random().toString(36).slice(2, 6).padEnd(4, '0');
+  const suffix = Math.random().toString(36).slice(2, 8).padEnd(6, '0');
   return `ap-${ymd}-${hms}-${suffix}`;
 }
