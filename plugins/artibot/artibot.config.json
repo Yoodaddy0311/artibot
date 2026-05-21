@@ -760,7 +760,8 @@
     "autopilot": {
       "bypassPreCommitHooks": false,
       "bypassPrePushHooks": false,
-      "comment": "v4.7.2 (issue-scanner W4 P1-3/P1-4): defaults to false. The autopilot save/close hooks honour the user's pre-commit / pre-push hooks unless these flags are explicitly set to true. Restoring the pre-v4.7.2 behaviour (silent --no-verify) requires explicit opt-in here."
+      "closeOnStop": false,
+      "comment": "v4.7.2: bypass*Hooks default false (honour user pre-commit/pre-push hooks). v4.11.3: closeOnStop default false — Stop hook의 git-autopilot-close.js가 매 turn마다 commit/push를 만들어 history를 오염시키던 문제 차단. WIP interval save(git-autopilot-save.js)는 영향 없음. 이전 동작 복원: closeOnStop을 true로 토글."
     }
   },
   "swarm": {
