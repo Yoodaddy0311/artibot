@@ -94,5 +94,11 @@
     "content": "Recurring fix pattern detected. Consider adding automated checks for: fix(hooks): v4.7.4 — silence Artibot hooks in unrelated user repos",
     "formatted": "- [auto-learned] Recurring fix pattern detected. Consider adding automated checks for: fix(hooks): v4.7.4 — silence Artibot hooks in unrelated user repos",
     "injectedAt": "2026-05-16T18:01:08.549Z"
+  },
+  {
+    "type": "auto-learned",
+    "content": "Recurring fix pattern detected. Consider adding automated checks for: fix(learning): Stage B Area 1/2/3 — make GRPO success+team+swarm signals actually accumulate",
+    "formatted": "- [auto-learned] Recurring fix pattern detected. Consider adding automated checks for: fix(learning): Stage B Area 1/2/3 — make GRPO success+team+swarm signals actually accumulate",
+    "injectedAt": "2026-05-19T18:00:51.829Z"
   }
 ]
