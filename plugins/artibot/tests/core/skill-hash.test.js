@@ -92,6 +92,56 @@ describe('skill-hash', () => {
         cleanup();
       }
     });
+
+    it('returns stage: experimental when frontmatter has stage: experimental', async () => {
+      const file = makeFile('---\nname: alpha\nstage: experimental\n---\nbody');
+      try {
+        const { frontmatter } = await readSkillFrontmatter(file);
+        expect(frontmatter.stage).toBe('experimental');
+      } finally {
+        cleanup();
+      }
+    });
+
+    it('returns stage: stable when frontmatter has stage: stable', async () => {
+      const file = makeFile('---\nname: prod\nstage: stable\n---\nbody');
+      try {
+        const { frontmatter } = await readSkillFrontmatter(file);
+        expect(frontmatter.stage).toBe('stable');
+      } finally {
+        cleanup();
+      }
+    });
+
+    it('returns stage: deprecated when frontmatter has stage: deprecated', async () => {
+      const file = makeFile('---\nname: old\nstage: deprecated\n---\nbody');
+      try {
+        const { frontmatter } = await readSkillFrontmatter(file);
+        expect(frontmatter.stage).toBe('deprecated');
+      } finally {
+        cleanup();
+      }
+    });
+
+    it('defaults stage to stable when stage field is absent', async () => {
+      const file = makeFile('---\nname: noflag\n---\nbody');
+      try {
+        const { frontmatter } = await readSkillFrontmatter(file);
+        expect(frontmatter.stage).toBe('stable');
+      } finally {
+        cleanup();
+      }
+    });
+
+    it('defaults stage to stable when stage value is invalid', async () => {
+      const file = makeFile('---\nname: bad\nstage: banana\n---\nbody');
+      try {
+        const { frontmatter } = await readSkillFrontmatter(file);
+        expect(frontmatter.stage).toBe('stable');
+      } finally {
+        cleanup();
+      }
+    });
   });
 
   describe('verifyHash', () => {

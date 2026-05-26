@@ -128,6 +128,45 @@ export const configSchema = {
         defaultStyle: { type: 'string' },
       },
     },
+    git: {
+      type: 'object',
+      properties: {
+        autopilot: {
+          type: 'object',
+          properties: {
+            bypassPreCommitHooks: { type: 'boolean' },
+            bypassPrePushHooks: { type: 'boolean' },
+            closeOnStop: { type: 'boolean' },
+            commitStrategy: {
+              type: 'string',
+              enum: ['semantic', 'interval', 'none'],
+            },
+            stashCheckpoint: {
+              type: 'object',
+              properties: {
+                enabled: { type: 'boolean' },
+                intervalMinutes: { type: 'number', minimum: 1 },
+                maxStashes: { type: 'number', minimum: 1, maximum: 100 },
+                includeUntracked: { type: 'boolean' },
+              },
+            },
+            semanticCommit: {
+              type: 'object',
+              properties: {
+                enabled: { type: 'boolean' },
+                commitOnPhases: {
+                  type: 'array',
+                  items: { type: 'string' },
+                },
+                requireTestPass: { type: 'boolean' },
+                requireLintClean: { type: 'boolean' },
+              },
+            },
+            comment: { type: 'string' },
+          },
+        },
+      },
+    },
   },
 };
 
@@ -237,6 +276,12 @@ function validateProperty(value, schemaProp, propPath, errors) {
   if (!expectedTypes.includes(actualType)) {
     errors.push(`${propPath}: expected ${expectedTypes.join('|')}, got ${actualType}`);
     return; // Skip further checks if type is wrong
+  }
+
+  // Enum check (applies to any type, but typically string)
+  if (schemaProp.enum && !schemaProp.enum.includes(value)) {
+    errors.push(`${propPath}: value "${value}" is not one of [${schemaProp.enum.join(', ')}]`);
+    return;
   }
 
   if (actualType === 'string') validateStringConstraints(value, schemaProp, propPath, errors);

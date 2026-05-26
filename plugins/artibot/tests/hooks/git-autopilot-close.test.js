@@ -33,6 +33,7 @@ vi.mock('../../scripts/utils/index.js', () => ({
     try { return JSON.parse(str); }
     catch { return null; }
   }),
+  resolveConfigPath: vi.fn((...segments) => ['__plugin_root__', ...segments].join('/')),
 }));
 
 vi.mock('../../lib/core/hook-utils.js', () => ({
@@ -61,6 +62,8 @@ vi.mock('node:fs', async () => {
       return false;
     }),
     readFileSync: vi.fn((...args) => mockState.readFileSyncImpl(...args)),
+    writeFileSync: vi.fn(),
+    mkdirSync: vi.fn(),
   };
 });
 
@@ -98,7 +101,11 @@ function setupEnabledRepo(overrides = {}) {
 
   mockState.existsSyncResults = { 'autopilot.json': true };
   mockState.readFileSyncImpl = (p) => {
-    if (String(p).includes('autopilot.json')) return JSON.stringify(config);
+    const ps = String(p);
+    if (ps.includes('autopilot.json') && !ps.includes('artibot.config')) return JSON.stringify(config);
+    if (ps.includes('artibot.config.json')) {
+      return JSON.stringify({ git: { autopilot: { commitStrategy: 'interval' } } });
+    }
     throw new Error('ENOENT');
   };
 
@@ -535,5 +542,291 @@ describe('git-autopilot-close — closeOnStop gate (v4.11.3)', () => {
     const logs = stderrSpy.mock.calls.map(([m]) => m).join('');
     expect(logs).toContain('Final changes committed');
     expect(recorded.some((a) => a.join(' ') === 'add -A')).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v4.14.0 — commitStrategy: "semantic" (phase-based semantic commits)
+// ---------------------------------------------------------------------------
+describe('git-autopilot-close — commitStrategy: "semantic"', () => {
+  let stderrSpy;
+
+  beforeEach(() => {
+    vi.resetModules();
+    resetState();
+    stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+  });
+
+  afterEach(() => {
+    stderrSpy.mockRestore();
+    vi.restoreAllMocks();
+  });
+
+  /**
+   * Set up a repo with commitStrategy: "semantic" in per-repo config.
+   * hookData is passed via readStdin. Phase state file is controlled via
+   * readFileSyncImpl returning the autopilot-state.json contents.
+   */
+  function setupSemanticRepo(hookData = {}, overrides = {}) {
+    const config = {
+      enabled: true,
+      autoPullOnSession: true,
+      autoPushOnStop: false,
+      squashWipOnClose: false,
+      branchPrefix: 'artibot/',
+      commitStrategy: 'semantic',
+      semanticCommit: {
+        enabled: true,
+        commitOnPhases: ['PLAN', 'EXECUTE', 'VERIFY', 'REPORT'],
+        requireTestPass: true,
+        requireLintClean: true,
+      },
+      ...overrides,
+    };
+
+    mockState.readStdinResult = Promise.resolve(JSON.stringify(hookData));
+    mockState.existsSyncResults = { 'autopilot.json': true };
+    mockState.stateFileContent = null;
+    mockState.readFileSyncImpl = (p) => {
+      const ps = String(p);
+      if (ps.includes('autopilot-state.json')) {
+        if (mockState.stateFileContent) return mockState.stateFileContent;
+        throw new Error('ENOENT');
+      }
+      if (ps.includes('autopilot.json') && !ps.includes('artibot.config')) return JSON.stringify(config);
+      if (ps.includes('artibot.config.json')) {
+        return JSON.stringify({ git: { autopilot: {} } });
+      }
+      throw new Error('ENOENT');
+    };
+
+    return config;
+  }
+
+  it('should skip commit when hookData has no phase (non-autopilot turn)', async () => {
+    setupSemanticRepo({}); // no phase in hookData
+    mockState.execFileSyncImpl = makeExec([
+      ['rev-parse --show-toplevel', '/repo'],
+      ['branch --show-current', 'main'],
+      ['status --porcelain', 'M file.js\n'],
+    ]);
+
+    await import('../../scripts/hooks/git-autopilot-close.js');
+    const logs = stderrSpy.mock.calls.map(([m]) => m).join('');
+    expect(logs).toContain('no phase transition — skipping commit');
+  });
+
+  it('should skip commit on first phase entry (no completed phase yet)', async () => {
+    setupSemanticRepo({ phase: 'PLAN' }); // first run, no state file
+    mockState.execFileSyncImpl = makeExec([
+      ['rev-parse --show-toplevel', '/repo'],
+      ['branch --show-current', 'main'],
+      ['status --porcelain', 'M file.js\n'],
+    ]);
+
+    await import('../../scripts/hooks/git-autopilot-close.js');
+    const logs = stderrSpy.mock.calls.map(([m]) => m).join('');
+    expect(logs).toContain('first phase entered');
+  });
+
+  it('should create semantic commit when phase transitions (PLAN -> EXECUTE)', async () => {
+    setupSemanticRepo({ phase: 'EXECUTE' });
+    mockState.stateFileContent = JSON.stringify({ lastPhase: 'PLAN' });
+
+    const recorded = [];
+    mockState.execFileSyncImpl = (file, args) => {
+      recorded.push(args);
+      const joined = (args || []).join(' ');
+      if (joined === 'rev-parse --show-toplevel') return '/repo';
+      if (joined === 'config --get remote.origin.url') {
+        return 'https://github.com/Yoodaddy0311/artibot.git';
+      }
+      if (joined === 'branch --show-current') return 'main';
+      if (joined.startsWith('status --porcelain')) return 'M file.js\n';
+      if (joined.includes('diff --stat')) return ' src/app.js | 3 +++\n 1 file changed, 3 insertions(+)';
+      return '';
+    };
+
+    await import('../../scripts/hooks/git-autopilot-close.js');
+    const logs = stderrSpy.mock.calls.map(([m]) => m).join('');
+    expect(logs).toContain('Semantic commit: PLAN phase complete');
+    expect(recorded.some((a) => a.join(' ') === 'add -A')).toBe(true);
+    expect(recorded.some((a) => a[0] === 'commit')).toBe(true);
+    const commitArgs = recorded.find((a) => a[0] === 'commit');
+    expect(commitArgs).toBeTruthy();
+    expect(commitArgs[2]).toContain('docs(autopilot)');
+    expect(commitArgs[2]).toContain('[PLAN complete]');
+  });
+
+  it('should use feat(autopilot) for EXECUTE phase completion', async () => {
+    setupSemanticRepo({ phase: 'VERIFY' });
+    mockState.stateFileContent = JSON.stringify({ lastPhase: 'EXECUTE' });
+
+    const recorded = [];
+    mockState.execFileSyncImpl = (file, args) => {
+      recorded.push(args);
+      const joined = (args || []).join(' ');
+      if (joined === 'rev-parse --show-toplevel') return '/repo';
+      if (joined === 'config --get remote.origin.url') {
+        return 'https://github.com/Yoodaddy0311/artibot.git';
+      }
+      if (joined === 'branch --show-current') return 'main';
+      if (joined.startsWith('status --porcelain')) return 'M file.js\n';
+      if (joined.includes('diff --stat')) return ' src/index.js | 10 +++++++\n 1 file changed';
+      return '';
+    };
+
+    await import('../../scripts/hooks/git-autopilot-close.js');
+    const commitArgs = recorded.find((a) => a[0] === 'commit');
+    expect(commitArgs).toBeTruthy();
+    expect(commitArgs[2]).toContain('feat(autopilot)');
+    expect(commitArgs[2]).toContain('[EXECUTE complete]');
+  });
+
+  it('should skip commit when phase not in commitOnPhases', async () => {
+    setupSemanticRepo({ phase: 'PLAN' });
+    mockState.stateFileContent = JSON.stringify({ lastPhase: 'INTAKE' });
+
+    mockState.execFileSyncImpl = makeExec([
+      ['rev-parse --show-toplevel', '/repo'],
+      ['branch --show-current', 'main'],
+      ['status --porcelain', 'M file.js\n'],
+    ]);
+
+    await import('../../scripts/hooks/git-autopilot-close.js');
+    const logs = stderrSpy.mock.calls.map(([m]) => m).join('');
+    expect(logs).toContain('phase INTAKE not in commitOnPhases');
+  });
+
+  it('should skip commit when no changes (workspace clean)', async () => {
+    setupSemanticRepo({ phase: 'EXECUTE' });
+    mockState.stateFileContent = JSON.stringify({ lastPhase: 'PLAN' });
+
+    mockState.execFileSyncImpl = makeExec([
+      ['rev-parse --show-toplevel', '/repo'],
+      ['branch --show-current', 'main'],
+      ['status --porcelain', ''],
+    ]);
+
+    await import('../../scripts/hooks/git-autopilot-close.js');
+    const logs = stderrSpy.mock.calls.map(([m]) => m).join('');
+    expect(logs).toContain('completed but no changes to commit');
+  });
+
+  it('should skip commit when same phase repeated (no transition)', async () => {
+    setupSemanticRepo({ phase: 'EXECUTE' });
+    mockState.stateFileContent = JSON.stringify({ lastPhase: 'EXECUTE' });
+
+    mockState.execFileSyncImpl = makeExec([
+      ['rev-parse --show-toplevel', '/repo'],
+      ['branch --show-current', 'main'],
+      ['status --porcelain', 'M file.js\n'],
+    ]);
+
+    await import('../../scripts/hooks/git-autopilot-close.js');
+    const logs = stderrSpy.mock.calls.map(([m]) => m).join('');
+    expect(logs).toContain('no phase transition — skipping commit');
+  });
+
+  it('should ignore closeOnStop flag for semantic strategy', async () => {
+    setupSemanticRepo({ phase: 'EXECUTE' }, { closeOnStop: false });
+    mockState.stateFileContent = JSON.stringify({ lastPhase: 'PLAN' });
+
+    const recorded = [];
+    mockState.execFileSyncImpl = (file, args) => {
+      recorded.push(args);
+      const joined = (args || []).join(' ');
+      if (joined === 'rev-parse --show-toplevel') return '/repo';
+      if (joined === 'config --get remote.origin.url') {
+        return 'https://github.com/Yoodaddy0311/artibot.git';
+      }
+      if (joined === 'branch --show-current') return 'main';
+      if (joined.startsWith('status --porcelain')) return 'M file.js\n';
+      if (joined.includes('diff --stat')) return ' file.js | 1 +\n 1 file changed';
+      return '';
+    };
+
+    await import('../../scripts/hooks/git-autopilot-close.js');
+    const logs = stderrSpy.mock.calls.map(([m]) => m).join('');
+    expect(logs).not.toContain('closeOnStop=false');
+    expect(logs).toContain('Semantic commit: PLAN phase complete');
+    expect(recorded.some((a) => a[0] === 'commit')).toBe(true);
+  });
+
+  it('should push after semantic commit when autoPushOnStop=true', async () => {
+    setupSemanticRepo({ phase: 'EXECUTE' }, { autoPushOnStop: true });
+    mockState.stateFileContent = JSON.stringify({ lastPhase: 'PLAN' });
+
+    const recorded = [];
+    mockState.execFileSyncImpl = (file, args) => {
+      recorded.push(args);
+      const joined = (args || []).join(' ');
+      if (joined === 'rev-parse --show-toplevel') return '/repo';
+      if (joined === 'config --get remote.origin.url') {
+        return 'https://github.com/Yoodaddy0311/artibot.git';
+      }
+      if (joined === 'branch --show-current') return 'main';
+      if (joined.startsWith('status --porcelain')) return 'M file.js\n';
+      if (joined.includes('diff --stat')) return ' file.js | 1 +\n 1 file changed';
+      return '';
+    };
+
+    await import('../../scripts/hooks/git-autopilot-close.js');
+    const logs = stderrSpy.mock.calls.map(([m]) => m).join('');
+    expect(logs).toContain('Pushed');
+    expect(recorded.some((a) => a[0] === 'push')).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v4.14.0 — commitStrategy: "none"
+// ---------------------------------------------------------------------------
+describe('git-autopilot-close — commitStrategy: "none"', () => {
+  let stderrSpy;
+
+  beforeEach(() => {
+    vi.resetModules();
+    resetState();
+    stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+  });
+
+  afterEach(() => {
+    stderrSpy.mockRestore();
+    vi.restoreAllMocks();
+  });
+
+  it('should skip all git writes when commitStrategy is "none"', async () => {
+    const config = {
+      enabled: true,
+      commitStrategy: 'none',
+    };
+    mockState.existsSyncResults = { 'autopilot.json': true };
+    mockState.readFileSyncImpl = (p) => {
+      const ps = String(p);
+      if (ps.includes('autopilot.json') && !ps.includes('artibot.config')) return JSON.stringify(config);
+      if (ps.includes('artibot.config.json')) return JSON.stringify({});
+      throw new Error('ENOENT');
+    };
+
+    const recorded = [];
+    mockState.execFileSyncImpl = (file, args) => {
+      recorded.push(args);
+      const joined = (args || []).join(' ');
+      if (joined === 'rev-parse --show-toplevel') return '/repo';
+      if (joined === 'config --get remote.origin.url') {
+        return 'https://github.com/Yoodaddy0311/artibot.git';
+      }
+      if (joined.startsWith('status --porcelain')) return 'M file.js\n';
+      return '';
+    };
+
+    await import('../../scripts/hooks/git-autopilot-close.js');
+    const logs = stderrSpy.mock.calls.map(([m]) => m).join('');
+    expect(logs).toContain('commitStrategy=none — skipping all git writes');
+    const writeAttempts = recorded.filter((args) => {
+      const cmd = (args && args[0]) || '';
+      return ['add', 'commit', 'push', 'reset'].includes(cmd);
+    });
+    expect(writeAttempts).toEqual([]);
   });
 });

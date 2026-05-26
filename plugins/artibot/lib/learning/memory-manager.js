@@ -6,6 +6,7 @@
  */
 
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { ensureDir, readJsonFile, writeJsonFile } from '../core/file.js';
 import { ARTIBOT_DIR } from '../core/config.js';
 import { createMemoryDispatcher } from './memory/dispatch.js';
@@ -40,6 +41,35 @@ const MAX_ERROR_PATTERNS = 200;
 const MAX_PREFERENCE_ENTRIES = 500;
 const MAX_CONTEXT_ENTRIES = 1000;
 const MAX_SUMMARY_LENGTH = 500;
+
+// ---------------------------------------------------------------------------
+// Content-Hash Deduplication
+// ---------------------------------------------------------------------------
+
+/**
+ * SHA-256 content hash truncated to 16 hex chars.
+ * Matches session-memory.js convention for consistency.
+ * @param {string} text
+ * @returns {string}
+ */
+function hashContent(text) {
+  return createHash('sha256').update(text).digest('hex').slice(0, 16);
+}
+
+/**
+ * Build a Set of content hashes from existing store entries (lazy, one-shot).
+ * @param {object[]} entries
+ * @returns {Set<string>}
+ */
+function buildHashSet(entries) {
+  const set = new Set();
+  for (const entry of entries) {
+    if (entry._contentHash) {
+      set.add(entry._contentHash);
+    }
+  }
+  return set;
+}
 
 // ---------------------------------------------------------------------------
 // Path Helpers
@@ -227,6 +257,7 @@ function createEntry(type, data, options = {}) {
     expiresAt: ttl === Infinity ? null : new Date(now + ttl).toISOString(),
     accessCount: 0,
     lastAccessedAt: null,
+    _contentHash: hashContent(JSON.stringify(data)),
   };
 }
 
@@ -379,6 +410,12 @@ export async function saveMemory(type, data, options = {}) {
     source: validated.source,
     tags: validated.tags,
   });
+
+  // Global content-hash dedup: skip write if identical content already exists
+  const hashSet = buildHashSet(store.entries);
+  if (hashSet.has(entry._contentHash)) {
+    return entry;
+  }
 
   // For preferences, deduplicate by data.key if present
   let entries = store.entries;

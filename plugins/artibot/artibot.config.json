@@ -761,7 +761,20 @@
       "bypassPreCommitHooks": false,
       "bypassPrePushHooks": false,
       "closeOnStop": false,
-      "comment": "v4.7.2: bypass*Hooks default false (honour user pre-commit/pre-push hooks). v4.11.3: closeOnStop default false — Stop hook의 git-autopilot-close.js가 매 turn마다 commit/push를 만들어 history를 오염시키던 문제 차단. WIP interval save(git-autopilot-save.js)는 영향 없음. 이전 동작 복원: closeOnStop을 true로 토글."
+      "commitStrategy": "semantic",
+      "stashCheckpoint": {
+        "enabled": true,
+        "intervalMinutes": 30,
+        "maxStashes": 10,
+        "includeUntracked": true
+      },
+      "semanticCommit": {
+        "enabled": true,
+        "commitOnPhases": ["PLAN", "EXECUTE", "VERIFY", "REPORT"],
+        "requireTestPass": true,
+        "requireLintClean": true
+      },
+      "comment": "v4.7.2: bypass*Hooks default false (honour user pre-commit/pre-push hooks). v4.11.3: closeOnStop default false — Stop hook의 git-autopilot-close.js가 매 turn마다 commit/push를 만들어 history를 오염시키던 문제 차단. WIP interval save(git-autopilot-save.js)는 영향 없음. 이전 동작 복원: closeOnStop을 true로 토글. v4.14.0: commitStrategy 'semantic' — phase 완료 시에만 의미 커밋, stash checkpoint로 크래시 안전망 유지."
     }
   },
   "swarm": {

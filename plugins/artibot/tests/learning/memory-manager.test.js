@@ -250,6 +250,34 @@ describe('memory-manager', () => {
       const writeCall = writeJsonFile.mock.calls[0];
       expect(writeCall[0]).toContain('project-contexts');
     });
+
+    it('skips write when identical content hash already exists', async () => {
+      // First write: creates entry with _contentHash
+      const first = await saveMemory('context', { project: 'dedup-test', lang: 'js' });
+      const written1 = writeJsonFile.mock.calls[0][1];
+
+      // Simulate store containing the first entry (with _contentHash)
+      readJsonFile.mockResolvedValue(written1);
+      vi.mocked(writeJsonFile).mockClear();
+
+      // Second write: identical data should be skipped
+      const second = await saveMemory('context', { project: 'dedup-test', lang: 'js' });
+      expect(second).toHaveProperty('_contentHash', first._contentHash);
+      expect(writeJsonFile).not.toHaveBeenCalled();
+    });
+
+    it('writes when content differs even for same type', async () => {
+      const first = await saveMemory('context', { project: 'alpha' });
+      const written1 = writeJsonFile.mock.calls[0][1];
+
+      readJsonFile.mockResolvedValue(written1);
+      vi.mocked(writeJsonFile).mockClear();
+
+      await saveMemory('context', { project: 'beta' });
+      expect(writeJsonFile).toHaveBeenCalledTimes(1);
+      const written2 = writeJsonFile.mock.calls[0][1];
+      expect(written2.entries).toHaveLength(2);
+    });
   });
 
   // ---------------------------------------------------------------------------
