@@ -21,6 +21,7 @@ import { tmpdir } from 'node:os';
 import {
   CONVERTERS,
   collectAgents,
+  convertAntigravity,
   convertCodex,
   convertCursor,
   convertOpenCode,
@@ -387,6 +388,95 @@ describe('export-to-tool/convertOpenCode', () => {
 });
 
 // ---------------------------------------------------------------------------
+// convertAntigravity
+// ---------------------------------------------------------------------------
+
+describe('export-to-tool/convertAntigravity', () => {
+  it('produces YAML frontmatter with name/description/model/tools', () => {
+    const parsed = parseFrontmatter(FIX_STANDARD);
+    const agent = {
+      name: parsed.frontmatter.name,
+      description: parsed.frontmatter.description,
+      model: parsed.frontmatter.model,
+      modelTier: '',
+      category: parsed.frontmatter.category,
+      tools: parsed.frontmatter.tools,
+      permissionMode: '',
+      maxTurns: '',
+      skills: [],
+      body: parsed.body,
+    };
+    const { fileName, content } = convertAntigravity(agent);
+    expect(fileName).toBe('standard-agent.md');
+    expect(content).toMatch(/^---\nname: standard-agent\n/);
+    expect(content).toContain('description: "Standard agent with tools and model info."');
+    expect(content).toContain('model: sonnet');
+    expect(content).toContain('tools:\n  - Read\n  - Write\n  - Edit');
+  });
+
+  it('strips Team Collaboration section and adds Agent Manager note', () => {
+    const parsed = parseFrontmatter(FIX_RICH);
+    const agent = {
+      name: parsed.frontmatter.name,
+      description: parsed.frontmatter.description,
+      model: parsed.frontmatter.model,
+      modelTier: parsed.frontmatter.modelTier,
+      category: parsed.frontmatter.category,
+      tools: parsed.frontmatter.tools,
+      permissionMode: parsed.frontmatter.permissionMode,
+      maxTurns: parsed.frontmatter.maxTurns,
+      skills: parsed.frontmatter.skills,
+      body: parsed.body,
+    };
+    const { content } = convertAntigravity(agent);
+    expect(content).not.toContain('## Team Collaboration');
+    expect(content).toContain('not available in Antigravity');
+    expect(content).toContain('Agent Manager');
+    expect(content).toContain('## Anti-Patterns');
+  });
+
+  it('replaces Claude Code references with Google Antigravity', () => {
+    const agent = {
+      name: 'test-agent',
+      description: 'test',
+      model: 'opus',
+      modelTier: '',
+      category: '',
+      tools: [],
+      permissionMode: '',
+      maxTurns: '',
+      skills: [],
+      body: 'Use Claude Code to run tests.\n\nCall TaskCreate() to spawn work.',
+    };
+    const { content } = convertAntigravity(agent);
+    expect(content).toContain('Google Antigravity');
+    expect(content).not.toContain('Claude Code');
+    expect(content).toContain('Create task in Agent Manager');
+    expect(content).not.toContain('TaskCreate()');
+  });
+
+  it('preserves Claude-specific fields as HTML comments', () => {
+    const parsed = parseFrontmatter(FIX_RICH);
+    const agent = {
+      name: parsed.frontmatter.name,
+      description: parsed.frontmatter.description,
+      model: parsed.frontmatter.model,
+      modelTier: parsed.frontmatter.modelTier,
+      category: parsed.frontmatter.category,
+      tools: parsed.frontmatter.tools,
+      permissionMode: parsed.frontmatter.permissionMode,
+      maxTurns: parsed.frontmatter.maxTurns,
+      skills: parsed.frontmatter.skills,
+      body: parsed.body,
+    };
+    const { content } = convertAntigravity(agent);
+    expect(content).toContain('<!-- Claude-specific: modelTier=premium -->');
+    expect(content).toContain('<!-- Claude-specific: permissionMode=delegate -->');
+    expect(content).toContain('<!-- Claude-specific: skills=orchestration, delegation -->');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // collectAgents + runExport (end-to-end)
 // ---------------------------------------------------------------------------
 
@@ -479,6 +569,20 @@ describe('export-to-tool/collectAgents + runExport', () => {
     expect(md).not.toMatch(/^permissionMode:/m);
   });
 
+  it('runExport writes antigravity files with Agent Manager refs', async () => {
+    const summary = await runExport(
+      { tool: 'antigravity', out: outDir, agents: 'rich-agent', dryRun: false },
+      fixturesDir,
+    );
+    expect(summary.agentCount).toBe(1);
+    const files = await readdir(outDir);
+    expect(files).toEqual(['rich-agent.md']);
+    const md = await readFile(path.join(outDir, 'rich-agent.md'), 'utf8');
+    expect(md).toContain('name: rich-agent');
+    expect(md).toContain('not available in Antigravity');
+    expect(md).not.toContain('Claude Code');
+  });
+
   it('runExport rejects unsupported tool', async () => {
     await expect(
       runExport({ tool: 'nonsense', out: outDir, agents: null, dryRun: true }, fixturesDir),
@@ -503,10 +607,11 @@ describe('export-to-tool/collectAgents + runExport', () => {
     expect(files).toEqual(['minimal-agent.md']);
   });
 
-  it('CONVERTERS registry exposes all three converters', () => {
+  it('CONVERTERS registry exposes all four converters', () => {
     expect(typeof CONVERTERS.cursor).toBe('function');
     expect(typeof CONVERTERS.codex).toBe('function');
     expect(typeof CONVERTERS.opencode).toBe('function');
+    expect(typeof CONVERTERS.antigravity).toBe('function');
   });
 });
 
@@ -527,7 +632,7 @@ describe('export-to-tool/real-agents smoke', () => {
 
   it('runExport dry-run succeeds on all real agents for every tool', async () => {
     const agentsDir = path.join(PLUGIN_ROOT, 'agents');
-    for (const tool of ['cursor', 'codex', 'opencode']) {
+    for (const tool of ['cursor', 'codex', 'opencode', 'antigravity']) {
       const summary = await runExport(
         { tool, out: null, agents: null, dryRun: true },
         agentsDir,

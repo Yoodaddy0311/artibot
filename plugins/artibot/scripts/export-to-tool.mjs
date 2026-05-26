@@ -1,14 +1,15 @@
 #!/usr/bin/env node
 /**
- * export-to-tool.mjs — Cross-tool parity exporter (v0.5.1).
+ * export-to-tool.mjs — Cross-tool parity exporter (v0.6.0).
  *
  * Reads Artibot's source-of-truth agents under `plugins/artibot/agents/{name}.md`
  * and projects them into the format each supported tool expects.
  *
  * Supported --tool values:
- *   cursor    -> <out>/{name}.mdc           Cursor Rules-for-AI file
- *   codex     -> <out>/{name}.md            OpenAI Codex CLI agent spec
- *   opencode  -> <out>/{name}.md            OpenCode agent markdown
+ *   cursor      -> <out>/{name}.mdc           Cursor Rules-for-AI file
+ *   codex       -> <out>/{name}.md            OpenAI Codex CLI agent spec
+ *   opencode    -> <out>/{name}.md            OpenCode agent markdown
+ *   antigravity -> <out>/{name}.md            Google Antigravity agent spec
  *
  * USAGE
  *   node plugins/artibot/scripts/export-to-tool.mjs --tool cursor --out ./cursor-export/
@@ -26,7 +27,7 @@ import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const SUPPORTED_TOOLS = new Set(["cursor", "codex", "opencode"]);
+const SUPPORTED_TOOLS = new Set(["cursor", "codex", "opencode", "antigravity"]);
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const PLUGIN_ROOT = resolve(SCRIPT_DIR, "..");
 const AGENTS_DIR = join(PLUGIN_ROOT, "agents");
@@ -63,7 +64,7 @@ function printHelp() {
       "  node export-to-tool.mjs --tool <cursor|codex|opencode> --out <dir> [options]",
       "",
       "Required:",
-      "  --tool      Target tool: cursor, codex, opencode",
+      "  --tool      Target tool: cursor, codex, opencode, antigravity",
       "  --out       Output directory (created if missing)",
       "",
       "Options:",
@@ -369,6 +370,61 @@ export function convertOpenCode(agent) {
 }
 
 // ---------------------------------------------------------------------------
+// Antigravity converter
+// Target: <out>/<name>.md (user will drop into .antigravity/agents/)
+//   - YAML frontmatter: name, description, model, tools
+//   - Agent Teams API refs replaced with Agent Manager equivalents
+//   - Team Collaboration section replaced with Agent Manager guidance
+// ---------------------------------------------------------------------------
+
+export function convertAntigravity(agent) {
+  const fileName = `${toKebabCase(agent.name)}.md`;
+  const description = String(agent.description).replace(/\n/g, " ").trim();
+
+  const fmLines = ["---"];
+  fmLines.push(`name: ${agent.name}`);
+  fmLines.push(`description: "${description.replace(/"/g, '\\"')}"`);
+  if (agent.model) fmLines.push(`model: ${agent.model}`);
+  if (agent.tools.length) {
+    fmLines.push("tools:");
+    for (const t of agent.tools) fmLines.push(`  - ${t}`);
+  }
+  fmLines.push("---");
+
+  const claudeSpecificComments = [];
+  if (agent.modelTier) claudeSpecificComments.push(`Claude-specific: modelTier=${agent.modelTier}`);
+  if (agent.permissionMode) claudeSpecificComments.push(`Claude-specific: permissionMode=${agent.permissionMode}`);
+  if (agent.maxTurns) claudeSpecificComments.push(`Claude-specific: maxTurns=${agent.maxTurns}`);
+  if (agent.skills.length) claudeSpecificComments.push(`Claude-specific: skills=${agent.skills.join(", ")}`);
+
+  const commentBlock = claudeSpecificComments.length
+    ? claudeSpecificComments.map((c) => `<!-- ${c} -->`).join("\n") + "\n"
+    : "";
+
+  let transformedBody = stripTeamCollaboration(agent.body, [
+    "Claude Code Teams API (TeamCreate/SendMessage/TaskCreate) — not available in Antigravity.",
+    "Use Agent Manager to spawn and orchestrate parallel agents instead.",
+  ]);
+
+  transformedBody = replaceAgentTeamsRefs(transformedBody);
+
+  const content = `${fmLines.join("\n")}\n\n${commentBlock}${transformedBody.trimEnd()}\n`;
+  return { fileName, content };
+}
+
+function replaceAgentTeamsRefs(body) {
+  return body
+    .replace(/TeamCreate\([^)]*\)/g, "Spawn agents via Agent Manager")
+    .replace(/TeamDelete\([^)]*\)/g, "Close agent workspaces when done")
+    .replace(/SendMessage\([^)]*\)/g, "Leave feedback on agent Artifact")
+    .replace(/TaskCreate\([^)]*\)/g, "Create task in Agent Manager")
+    .replace(/TaskList\(\)/g, "Review Agent Manager task board")
+    .replace(/TaskGet\([^)]*\)/g, "Review agent Artifact")
+    .replace(/TaskUpdate\([^)]*\)/g, "Update task status")
+    .replace(/Claude Code/g, "Google Antigravity");
+}
+
+// ---------------------------------------------------------------------------
 // Converter registry
 // ---------------------------------------------------------------------------
 
@@ -376,6 +432,7 @@ export const CONVERTERS = {
   cursor: convertCursor,
   codex: convertCodex,
   opencode: convertOpenCode,
+  antigravity: convertAntigravity,
 };
 
 // ---------------------------------------------------------------------------
