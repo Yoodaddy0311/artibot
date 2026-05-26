@@ -267,7 +267,7 @@ describe('memory-manager', () => {
     });
 
     it('writes when content differs even for same type', async () => {
-      const first = await saveMemory('context', { project: 'alpha' });
+      await saveMemory('context', { project: 'alpha' });
       const written1 = writeJsonFile.mock.calls[0][1];
 
       readJsonFile.mockResolvedValue(written1);
