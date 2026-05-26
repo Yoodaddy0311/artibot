@@ -5,7 +5,7 @@
 
 .DESCRIPTION
   Installs the Artibot Claude Code plugin.
-  Usage: irm https://raw.githubusercontent.com/Artience/artibot/main/plugins/artibot/scripts/install.ps1 | iex
+  Usage: irm https://raw.githubusercontent.com/Yoodaddy0311/artibot/main/plugins/artibot/scripts/install.ps1 | iex
   or:    .\scripts\install.ps1 [-PluginDir <path>]
 
   Idempotent: safe to re-run. Will update in-place if already installed.
@@ -28,7 +28,7 @@ $ErrorActionPreference = "Stop"
 $ARTIBOT_VERSION = "1.3.0"
 $MIN_NODE_MAJOR   = 18
 $DEFAULT_PLUGIN_DIR = Join-Path $env:USERPROFILE ".claude\plugins\artibot"
-$REPO_URL = "https://github.com/Artience/artibot"
+$REPO_URL = "https://github.com/Yoodaddy0311/artibot"
 
 # ---------------------------------------------------------------------------
 # Helpers

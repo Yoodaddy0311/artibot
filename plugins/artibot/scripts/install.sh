@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Artibot - One-click installer for Linux/macOS
-# Usage: curl -fsSL https://raw.githubusercontent.com/Artience/artibot/main/plugins/artibot/scripts/install.sh | bash
+# Usage: curl -fsSL https://raw.githubusercontent.com/Yoodaddy0311/artibot/main/plugins/artibot/scripts/install.sh | bash
 #    or: bash scripts/install.sh [--plugin-dir <path>]
 #
 # Idempotent: safe to re-run. Will update in-place if already installed.
@@ -13,7 +13,7 @@ set -euo pipefail
 ARTIBOT_VERSION="2.0.0"
 MIN_NODE_MAJOR=18
 DEFAULT_PLUGIN_DIR="$HOME/.claude/plugins/artibot"
-REPO_URL="https://github.com/Artience/artibot"
+REPO_URL="https://github.com/Yoodaddy0311/artibot"
 
 # ANSI color helpers (no-op when not a tty)
 if [ -t 1 ]; then
