@@ -22,7 +22,6 @@ import { tmpdir } from 'node:os';
 /* eslint-disable sort-imports */
 import {
   CONVERTERS,
-  PLATFORM_REFS,
   collectAgents,
   collectCommands,
   collectSkills,
@@ -792,7 +791,7 @@ describe('export-to-tool/skills+commands export', () => {
   });
 
   it('skills content has platform-specific refs (codex)', async () => {
-    const summary = await runExport(
+    await runExport(
       { tool: 'codex', out: outDir, agents: null, include: 'skills', dryRun: false },
       { agentsDir, skillsDir, commandsDir },
     );
@@ -805,7 +804,7 @@ describe('export-to-tool/skills+commands export', () => {
   });
 
   it('commands content has platform-specific refs (antigravity)', async () => {
-    const summary = await runExport(
+    await runExport(
       { tool: 'antigravity', out: outDir, agents: null, include: 'commands', dryRun: false },
       { agentsDir, skillsDir, commandsDir },
     );
