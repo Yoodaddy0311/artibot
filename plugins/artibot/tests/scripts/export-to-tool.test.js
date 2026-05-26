@@ -4,10 +4,12 @@
  * Covers:
  *   1. parseFrontmatter (scalar / block-scalar / nested-list / inline-array)
  *   2. parseArgs (all CLI flags, including --agents and --dry-run)
- *   3. convertCursor / convertCodex / convertOpenCode (pure functions)
+ *   3. convertCursor / convertCodex / convertOpenCode / convertAntigravity (pure functions)
  *   4. runExport end-to-end with both --dry-run and real file writes
  *   5. Error cases: unsupported tool, missing agent, missing --out without --dry-run
  *   6. Team Collaboration stripping for codex + opencode
+ *   7. Skills + commands export via --include flag
+ *   8. Platform-specific ref replacement in skills/commands
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -20,14 +22,21 @@ import { tmpdir } from 'node:os';
 /* eslint-disable sort-imports */
 import {
   CONVERTERS,
+  PLATFORM_REFS,
   collectAgents,
+  collectCommands,
+  collectSkills,
   convertAntigravity,
   convertCodex,
+  convertCommandForPlatform,
   convertCursor,
   convertOpenCode,
+  convertSkillForPlatform,
   parseArgs,
   parseFrontmatter,
+  parseInclude,
   runExport,
+  stripPlatformRefs,
   stripTeamCollaboration,
   toKebabCase,
 } from '../../scripts/export-to-tool.mjs';
@@ -172,10 +181,11 @@ body`;
 
 describe('export-to-tool/parseArgs', () => {
   it('parses all flags', () => {
-    const args = parseArgs(['--tool', 'cursor', '--out', './foo', '--agents', 'a,b', '--dry-run']);
+    const args = parseArgs(['--tool', 'cursor', '--out', './foo', '--agents', 'a,b', '--include', 'all', '--dry-run']);
     expect(args.tool).toBe('cursor');
     expect(args.out).toBe('./foo');
     expect(args.agents).toBe('a,b');
+    expect(args.include).toBe('all');
     expect(args.dryRun).toBe(true);
     expect(args.help).toBe(false);
   });
@@ -185,6 +195,7 @@ describe('export-to-tool/parseArgs', () => {
     expect(args.tool).toBeNull();
     expect(args.out).toBeNull();
     expect(args.agents).toBeNull();
+    expect(args.include).toBe('agents');
     expect(args.dryRun).toBe(false);
   });
 
@@ -477,6 +488,80 @@ describe('export-to-tool/convertAntigravity', () => {
 });
 
 // ---------------------------------------------------------------------------
+// parseInclude
+// ---------------------------------------------------------------------------
+
+describe('export-to-tool/parseInclude', () => {
+  it('defaults to agents-only', () => {
+    expect(parseInclude(undefined)).toEqual(new Set(['agents']));
+    expect(parseInclude('agents')).toEqual(new Set(['agents']));
+  });
+
+  it('"all" expands to agents+skills+commands', () => {
+    expect(parseInclude('all')).toEqual(new Set(['agents', 'skills', 'commands']));
+  });
+
+  it('parses comma-separated values', () => {
+    expect(parseInclude('skills,commands')).toEqual(new Set(['skills', 'commands']));
+  });
+
+  it('rejects invalid values', () => {
+    expect(() => parseInclude('agents,bogus')).toThrow(/invalid --include value: bogus/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// stripPlatformRefs + convertSkillForPlatform + convertCommandForPlatform
+// ---------------------------------------------------------------------------
+
+describe('export-to-tool/stripPlatformRefs', () => {
+  it('replaces Claude paths with platform-specific equivalents', () => {
+    const input = 'Load from .claude/skills/foo. See CLAUDE.md. Use Claude Code.';
+    const out = stripPlatformRefs(input, 'codex');
+    expect(out).toContain('.codex/skills/foo');
+    expect(out).toContain('AGENTS.md');
+    expect(out).toContain('Codex CLI');
+    expect(out).not.toContain('Claude Code');
+    expect(out).not.toContain('CLAUDE.md');
+  });
+
+  it('handles antigravity mapping', () => {
+    const input = 'See .claude/skills/bar and CLAUDE.md for Claude Code.';
+    const out = stripPlatformRefs(input, 'antigravity');
+    expect(out).toContain('.antigravity/skills/bar');
+    expect(out).toContain('.antigravity/rules.md');
+    expect(out).toContain('Google Antigravity');
+  });
+});
+
+describe('export-to-tool/convertSkillForPlatform', () => {
+  it('places skill in skills/<dirName>/SKILL.md with platform refs', () => {
+    const skill = {
+      dirName: 'my-skill',
+      name: 'my-skill',
+      content: '---\nname: my-skill\n---\nUse .claude/skills/my-skill in Claude Code.',
+    };
+    const result = convertSkillForPlatform(skill, 'codex');
+    expect(result.fileName).toMatch(/skills[\\/]my-skill[\\/]SKILL\.md$/);
+    expect(result.content).toContain('.codex/skills/my-skill');
+    expect(result.content).not.toContain('.claude/skills/');
+  });
+});
+
+describe('export-to-tool/convertCommandForPlatform', () => {
+  it('places command in commands/<name>.md with platform refs', () => {
+    const command = {
+      name: 'build',
+      content: '---\ndescription: Build project\n---\nRun Claude Code build.',
+    };
+    const result = convertCommandForPlatform(command, 'antigravity');
+    expect(result.fileName).toMatch(/commands[\\/]build\.md$/);
+    expect(result.content).toContain('Google Antigravity');
+    expect(result.content).not.toContain('Claude Code');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // collectAgents + runExport (end-to-end)
 // ---------------------------------------------------------------------------
 
@@ -522,7 +607,7 @@ describe('export-to-tool/collectAgents + runExport', () => {
   it('runExport dry-run does not write files', async () => {
     const summary = await runExport(
       { tool: 'cursor', out: null, agents: null, dryRun: true },
-      fixturesDir,
+      { agentsDir: fixturesDir },
     );
     expect(summary.agentCount).toBe(3);
     expect(summary.dryRun).toBe(true);
@@ -535,7 +620,7 @@ describe('export-to-tool/collectAgents + runExport', () => {
   it('runExport writes cursor files with .mdc extension', async () => {
     const summary = await runExport(
       { tool: 'cursor', out: outDir, agents: null, dryRun: false },
-      fixturesDir,
+      { agentsDir: fixturesDir },
     );
     expect(summary.agentCount).toBe(3);
     const files = (await readdir(outDir)).sort();
@@ -548,7 +633,7 @@ describe('export-to-tool/collectAgents + runExport', () => {
   it('runExport writes codex files with .md extension', async () => {
     const summary = await runExport(
       { tool: 'codex', out: outDir, agents: 'rich-agent', dryRun: false },
-      fixturesDir,
+      { agentsDir: fixturesDir },
     );
     expect(summary.agentCount).toBe(1);
     const files = await readdir(outDir);
@@ -561,7 +646,7 @@ describe('export-to-tool/collectAgents + runExport', () => {
   it('runExport writes opencode files with minimal frontmatter', async () => {
     const summary = await runExport(
       { tool: 'opencode', out: outDir, agents: null, dryRun: false },
-      fixturesDir,
+      { agentsDir: fixturesDir },
     );
     expect(summary.agentCount).toBe(3);
     const md = await readFile(path.join(outDir, 'rich-agent.md'), 'utf8');
@@ -572,7 +657,7 @@ describe('export-to-tool/collectAgents + runExport', () => {
   it('runExport writes antigravity files with Agent Manager refs', async () => {
     const summary = await runExport(
       { tool: 'antigravity', out: outDir, agents: 'rich-agent', dryRun: false },
-      fixturesDir,
+      { agentsDir: fixturesDir },
     );
     expect(summary.agentCount).toBe(1);
     const files = await readdir(outDir);
@@ -585,13 +670,13 @@ describe('export-to-tool/collectAgents + runExport', () => {
 
   it('runExport rejects unsupported tool', async () => {
     await expect(
-      runExport({ tool: 'nonsense', out: outDir, agents: null, dryRun: true }, fixturesDir),
+      runExport({ tool: 'nonsense', out: outDir, agents: null, dryRun: true }, { agentsDir: fixturesDir }),
     ).rejects.toThrow(/unsupported tool: nonsense/);
   });
 
   it('runExport requires --out unless --dry-run', async () => {
     await expect(
-      runExport({ tool: 'cursor', out: null, agents: null, dryRun: false }, fixturesDir),
+      runExport({ tool: 'cursor', out: null, agents: null, dryRun: false }, { agentsDir: fixturesDir }),
     ).rejects.toThrow(/--out is required/);
   });
 
@@ -600,7 +685,7 @@ describe('export-to-tool/collectAgents + runExport', () => {
     expect(existsSync(nestedOut)).toBe(false);
     await runExport(
       { tool: 'opencode', out: nestedOut, agents: 'minimal-agent', dryRun: false },
-      fixturesDir,
+      { agentsDir: fixturesDir },
     );
     expect(existsSync(nestedOut)).toBe(true);
     const files = await readdir(nestedOut);
@@ -612,6 +697,133 @@ describe('export-to-tool/collectAgents + runExport', () => {
     expect(typeof CONVERTERS.codex).toBe('function');
     expect(typeof CONVERTERS.opencode).toBe('function');
     expect(typeof CONVERTERS.antigravity).toBe('function');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Skills + commands export (--include)
+// ---------------------------------------------------------------------------
+
+describe('export-to-tool/skills+commands export', () => {
+  let agentsDir;
+  let skillsDir;
+  let commandsDir;
+  let outDir;
+
+  beforeEach(async () => {
+    agentsDir = await makeTmpDir('artibot-export-agents');
+    skillsDir = await makeTmpDir('artibot-export-skills');
+    commandsDir = await makeTmpDir('artibot-export-commands');
+    outDir = await makeTmpDir('artibot-export-out');
+
+    // agents
+    await writeFile(path.join(agentsDir, 'test-agent.md'), FIX_MINIMAL, 'utf8');
+
+    // skills: create skill directories with SKILL.md
+    await mkdir(path.join(skillsDir, 'coding-standards'));
+    await writeFile(
+      path.join(skillsDir, 'coding-standards', 'SKILL.md'),
+      '---\nname: coding-standards\ndescription: Standards\n---\nUse .claude/skills/coding-standards in Claude Code.',
+      'utf8',
+    );
+    await mkdir(path.join(skillsDir, 'tdd-workflow'));
+    await writeFile(
+      path.join(skillsDir, 'tdd-workflow', 'SKILL.md'),
+      '---\nname: tdd-workflow\ndescription: TDD\n---\nSee CLAUDE.md for Claude Code workflow.',
+      'utf8',
+    );
+
+    // commands
+    await writeFile(
+      path.join(commandsDir, 'build.md'),
+      '---\ndescription: Build project\n---\nRun Claude Code build pipeline.',
+      'utf8',
+    );
+    await writeFile(
+      path.join(commandsDir, 'test.md'),
+      '---\ndescription: Run tests\n---\nExecute Claude Code tests.',
+      'utf8',
+    );
+    await writeFile(path.join(commandsDir, 'index.md'), '# index (should be skipped)', 'utf8');
+  });
+
+  afterEach(async () => {
+    await rm(agentsDir, { recursive: true, force: true });
+    await rm(skillsDir, { recursive: true, force: true });
+    await rm(commandsDir, { recursive: true, force: true });
+    await rm(outDir, { recursive: true, force: true });
+  });
+
+  it('collectSkills discovers skill directories with SKILL.md', async () => {
+    const skills = await collectSkills(skillsDir);
+    const names = skills.map((s) => s.name).sort();
+    expect(names).toEqual(['coding-standards', 'tdd-workflow']);
+  });
+
+  it('collectCommands discovers .md files, ignores index.md', async () => {
+    const commands = await collectCommands(commandsDir);
+    const names = commands.map((c) => c.name).sort();
+    expect(names).toEqual(['build', 'test']);
+  });
+
+  it('runExport with --include all exports agents+skills+commands', async () => {
+    const summary = await runExport(
+      { tool: 'codex', out: outDir, agents: null, include: 'all', dryRun: false },
+      { agentsDir, skillsDir, commandsDir },
+    );
+    expect(summary.agentCount).toBe(1);
+    expect(summary.skillCount).toBe(2);
+    expect(summary.commandCount).toBe(2);
+    expect(summary.include).toEqual(['agents', 'skills', 'commands']);
+    expect(summary.files).toHaveLength(5);
+
+    // agents go in agents/ subdir when include > 1 type
+    const agentFiles = summary.files.filter((f) => f.type === 'agent');
+    expect(agentFiles[0].fileName).toMatch(/^agents[\\/]/);
+
+    // skills go in skills/<dir>/SKILL.md
+    const skillFiles = summary.files.filter((f) => f.type === 'skill');
+    expect(skillFiles).toHaveLength(2);
+    expect(skillFiles.some((f) => f.fileName.includes('coding-standards'))).toBe(true);
+
+    // commands go in commands/<name>.md
+    const cmdFiles = summary.files.filter((f) => f.type === 'command');
+    expect(cmdFiles).toHaveLength(2);
+  });
+
+  it('skills content has platform-specific refs (codex)', async () => {
+    const summary = await runExport(
+      { tool: 'codex', out: outDir, agents: null, include: 'skills', dryRun: false },
+      { agentsDir, skillsDir, commandsDir },
+    );
+    const skillFile = path.join(outDir, 'skills', 'coding-standards', 'SKILL.md');
+    const content = await readFile(skillFile, 'utf8');
+    expect(content).toContain('.codex/skills/coding-standards');
+    expect(content).toContain('Codex CLI');
+    expect(content).not.toContain('.claude/skills/');
+    expect(content).not.toContain('Claude Code');
+  });
+
+  it('commands content has platform-specific refs (antigravity)', async () => {
+    const summary = await runExport(
+      { tool: 'antigravity', out: outDir, agents: null, include: 'commands', dryRun: false },
+      { agentsDir, skillsDir, commandsDir },
+    );
+    const cmdFile = path.join(outDir, 'commands', 'build.md');
+    const content = await readFile(cmdFile, 'utf8');
+    expect(content).toContain('Google Antigravity');
+    expect(content).not.toContain('Claude Code');
+  });
+
+  it('--include skills only does not export agents or commands', async () => {
+    const summary = await runExport(
+      { tool: 'cursor', out: outDir, agents: null, include: 'skills', dryRun: true },
+      { agentsDir, skillsDir, commandsDir },
+    );
+    expect(summary.agentCount).toBe(0);
+    expect(summary.skillCount).toBe(2);
+    expect(summary.commandCount).toBe(0);
+    expect(summary.files.every((f) => f.type === 'skill')).toBe(true);
   });
 });
 
@@ -631,14 +843,29 @@ describe('export-to-tool/real-agents smoke', () => {
   });
 
   it('runExport dry-run succeeds on all real agents for every tool', async () => {
-    const agentsDir = path.join(PLUGIN_ROOT, 'agents');
+    const realAgentsDir = path.join(PLUGIN_ROOT, 'agents');
     for (const tool of ['cursor', 'codex', 'opencode', 'antigravity']) {
       const summary = await runExport(
         { tool, out: null, agents: null, dryRun: true },
-        agentsDir,
+        { agentsDir: realAgentsDir },
       );
       expect(summary.agentCount).toBeGreaterThanOrEqual(20);
       expect(summary.files.every((f) => f.bytes > 0)).toBe(true);
     }
+  });
+
+  it('runExport --include all dry-run succeeds on real plugin', async () => {
+    const summary = await runExport(
+      { tool: 'codex', out: null, agents: null, include: 'all', dryRun: true },
+      {
+        agentsDir: path.join(PLUGIN_ROOT, 'agents'),
+        skillsDir: path.join(PLUGIN_ROOT, 'skills'),
+        commandsDir: path.join(PLUGIN_ROOT, 'commands'),
+      },
+    );
+    expect(summary.agentCount).toBeGreaterThanOrEqual(20);
+    expect(summary.skillCount).toBeGreaterThanOrEqual(100);
+    expect(summary.commandCount).toBeGreaterThanOrEqual(60);
+    expect(summary.files.every((f) => f.bytes > 0)).toBe(true);
   });
 });
