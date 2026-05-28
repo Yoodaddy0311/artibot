@@ -686,6 +686,17 @@ DELIVERABLES
 
 ---
 
+## Verification Checklist
+
+| # | Zone | Check | Method | FAIL Criteria |
+|---|------|-------|--------|---------------|
+| 1 | Pre | Complexity classified | Classify request as Solo/Squad/Platoon from keywords only, no codebase reading | Spending more than 30 seconds analyzing before team creation |
+| 2 | Pre | Zero-skip decomposition | Verify every part of user's multi-part request has a corresponding task | Any sub-request silently dropped without a task |
+| 3 | Active | Delegation, not execution | Confirm orchestrator creates tasks and assigns owners without reading/writing code | Orchestrator reading code files or writing implementation directly |
+| 4 | Active | Parallel maximization | Verify independent tasks are assigned to concurrent teammates, not serialized | Sequential assignment of tasks that have no dependency on each other |
+| 5 | Post | Completion evidence verified | Check that every "done" report from teammates includes file paths, line numbers, or test results | Accepting "done" status without proof artifacts |
+| 6 | Post | Clean shutdown | Confirm all teammates received shutdown_request and TeamDelete was called | Team left running with idle teammates after work is complete |
+
 ## Anti-Patterns (STRICTLY FORBIDDEN)
 
 ### Turn-Blocking (THE #1 PROBLEM TO AVOID)

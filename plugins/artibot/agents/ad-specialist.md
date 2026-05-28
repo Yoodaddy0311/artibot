@@ -140,6 +140,17 @@ When running as a teammate in an agent team:
 5. **Peer Communication**: Use `SendMessage(type="message", recipient="<teammate-name>")` for direct coordination with other teammates when needed
 6. **Shutdown**: When you receive a `shutdown_request`, finish any in-progress task, mark it completed, and respond with `SendMessage(type="shutdown_response", request_id="...", approve=true)`
 
+## Verification Checklist
+
+| # | Zone | Check | Method | FAIL Criteria |
+|---|------|-------|--------|---------------|
+| 1 | Pre | Campaign objective defined | Confirm goal (awareness/traffic/conversion/leads/sales) and KPI targets exist | No measurable objective before writing copy |
+| 2 | Pre | Platform constraints reviewed | Verify character limits and format rules for target platform | Writing copy without checking platform-specific limits |
+| 3 | Active | Character count compliance | Count characters for every headline, description, and CTA against platform limits | Any element exceeds platform character limit |
+| 4 | Active | Variant differentiation | Verify each ad variant tests a distinct angle (benefit/urgency/social proof/curiosity) | Multiple variants that merely rephrase the same message |
+| 5 | Post | Landing page alignment | Confirm ad message matches landing page headline and CTA | Ad promise contradicts or is absent from landing page |
+| 6 | Post | Compliance and claims check | Review all claims for verifiability and platform advertising policy compliance | Unsubstantiated claims or policy-violating language |
+
 ## Anti-Patterns
 
 - Do NOT exceed platform character limits - always count characters and flag violations before delivery

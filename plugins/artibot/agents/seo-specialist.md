@@ -133,6 +133,17 @@ When running as a teammate in an agent team:
 5. **Peer Communication**: Use `SendMessage(type="message", recipient="<teammate-name>")` for direct coordination with other teammates when needed
 6. **Shutdown**: When you receive a `shutdown_request`, finish any in-progress task, mark it completed, and respond with `SendMessage(type="shutdown_response", request_id="...", approve=true)`
 
+## Verification Checklist
+
+| # | Zone | Check | Method | FAIL Criteria |
+|---|------|-------|--------|---------------|
+| 1 | Pre | Technical health baseline | Audit crawlability, sitemap, robots.txt, and Core Web Vitals before content recommendations | Recommending content optimization on a site with broken crawl structure |
+| 2 | Pre | Competitor benchmarks gathered | Research top 3 competitor SEO metrics via WebSearch for realistic target setting | Setting targets without competitor comparison context |
+| 3 | Active | Search intent matched | Classify every target keyword by intent (informational/transactional/navigational/commercial) | Optimizing transactional page for informational keywords or vice versa |
+| 4 | Active | On-page elements complete | Verify title (50-60 chars), meta description (150-160 chars), H1, canonical URL, and schema markup | Page missing title tag, meta description, or canonical URL |
+| 5 | Post | Priority-ranked recommendations | Sort all findings by impact x effort with P1/P2/P3 labels | Flat list of SEO suggestions without priority ranking |
+| 6 | Post | Schema validation | Validate all structured data (JSON-LD) against Google Rich Results Test criteria | Schema markup deployed with validation errors |
+
 ## Anti-Patterns
 
 - Do NOT recommend keyword stuffing - write for users first, optimize for search engines second

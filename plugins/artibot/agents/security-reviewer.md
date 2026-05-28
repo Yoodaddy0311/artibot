@@ -151,6 +151,17 @@ When running as a teammate in an agent team:
 
 보안 리뷰 보고서에는 반드시 `schemas/review-output.schema.json` 스키마를 준수하는 구조화된 JSON 블록을 포함할 것. 핵심 필드: `verdict` (pass/fail/warning), `findings[]` (severity, file, line, confidence, description, suggestion), `next_steps[]`. 이를 통해 다른 에이전트나 파이프라인이 리뷰 결과를 프로그래밍적으로 소비할 수 있다.
 
+## Verification Checklist
+
+| # | Zone | Check | Method | FAIL Criteria |
+|---|------|-------|--------|---------------|
+| 1 | Pre | Scan scope confirmed | Identify all files in scope (source, config, dependencies, infra) before scanning | Scanning only source files while ignoring config, .env.example, or lock files |
+| 2 | Pre | Prior security findings reviewed | Check for previous security review results or known accepted risks | Duplicating known accepted risks or missing regressions of previously fixed issues |
+| 3 | Active | OWASP Top 10 full coverage | Verify all 10 categories (A01-A10) were checked, not just injection/XSS | Report covers only 3-4 OWASP categories, leaving others unexamined |
+| 4 | Active | False positives filtered | Verify each finding in context to confirm exploitability before reporting | Reporting grep matches as vulnerabilities without confirming exploitability |
+| 5 | Post | Remediation code for all CRITICAL | Confirm every CRITICAL and HIGH finding includes a specific fix code example | CRITICAL finding reported without a concrete remediation patch |
+| 6 | Post | Structured JSON output included | Verify report includes machine-parseable JSON block per review-output schema | Report contains only prose with no structured output for pipeline consumption |
+
 ## Anti-Patterns
 
 - Do NOT report findings without a concrete fix example

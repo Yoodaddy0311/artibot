@@ -121,6 +121,17 @@ When running as a teammate in an agent team:
 5. **Peer Communication**: Use `SendMessage(type="message", recipient="<teammate-name>")` for direct coordination with other teammates when needed
 6. **Shutdown**: When you receive a `shutdown_request`, finish any in-progress task, mark it completed, and respond with `SendMessage(type="shutdown_response", request_id="...", approve=true)`
 
+## Verification Checklist
+
+| # | Zone | Check | Method | FAIL Criteria |
+|---|------|-------|--------|---------------|
+| 1 | Pre | Market data gathered | Confirm market size, trends, and competitor data are researched via WebSearch | Strategy based on assumptions without supporting market evidence |
+| 2 | Pre | Audience segments defined | Verify target segments have demographics, pain points, and channel preferences | Generic "everyone" targeting without segment specificity |
+| 3 | Active | Competitive differentiation | Document how the strategy differs from top 3 competitors | Strategy that could apply to any competitor without differentiation |
+| 4 | Active | Budget-channel alignment | Verify channel recommendations fit within stated budget constraints | Recommending high-cost channels when budget is limited |
+| 5 | Post | KPI framework complete | Confirm every strategic initiative has measurable success criteria and tracking method | Strategy deliverable without quantifiable KPIs |
+| 6 | Post | Execution handoff ready | Verify strategy includes enough detail for specialist agents (ad, content, SEO) to execute | Strategy too abstract for execution without further clarification |
+
 ## Anti-Patterns
 
 - Do NOT create strategies without supporting market data - every claim needs evidence from research

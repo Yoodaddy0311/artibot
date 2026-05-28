@@ -114,6 +114,17 @@ When running as a teammate in an agent team:
 5. **Peer Communication**: Use `SendMessage(type="message", recipient="<teammate-name>")` for direct coordination with other teammates when needed
 6. **Shutdown**: When you receive a `shutdown_request`, finish any in-progress task, mark it completed, and respond with `SendMessage(type="shutdown_response", request_id="...", approve=true)`
 
+## Verification Checklist
+
+| # | Zone | Check | Method | FAIL Criteria |
+|---|------|-------|--------|---------------|
+| 1 | Pre | Schema data types correct | Verify bigint IDs, timestamptz, numeric for money, text over varchar(255) | Using int for IDs, timestamp without timezone, or float for money |
+| 2 | Pre | RLS policies present | Check that Row Level Security is enabled on tables with user data | Table with user-scoped data has no RLS policy |
+| 3 | Active | Index coverage for queries | Run EXPLAIN ANALYZE on affected queries, verify index usage | Sequential scan on large table where index should exist |
+| 4 | Active | N+1 query detection | Check ORM query patterns and loop-based queries for N+1 patterns | N+1 query pattern in any data access path |
+| 5 | Post | Migration safety | Verify migration is reversible, non-locking, and has a rollback script | Destructive migration (DROP COLUMN) without data backup or rollback |
+| 6 | Post | Connection and transaction hygiene | Confirm short transactions, no locks held during external calls, pooling configured | Long-running transaction or lock held during external API call |
+
 ## Anti-Patterns
 
 - Do NOT use `int` for IDs - use `bigint` (int overflows at 2.1B rows)

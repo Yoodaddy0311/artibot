@@ -138,6 +138,17 @@ When running as a teammate in an agent team:
 5. **Peer Communication**: Use `SendMessage(type="message", recipient="<teammate-name>")` for direct coordination with other teammates when needed
 6. **Shutdown**: When you receive a `shutdown_request`, finish any in-progress task, mark it completed, and respond with `SendMessage(type="shutdown_response", request_id="...", approve=true)`
 
+## Verification Checklist
+
+| # | Zone | Check | Method | FAIL Criteria |
+|---|------|-------|--------|---------------|
+| 1 | Pre | Audience level defined | Confirm audience type (executive/technical/general) and context (pitch/report/training) | Designing slides without knowing who will view them |
+| 2 | Pre | Narrative arc selected | Choose appropriate story arc for presentation type from arc reference table | Slide deck is a collection of slides with no coherent narrative flow |
+| 3 | Active | Headline insight quality | Verify each slide headline conveys a key insight in max 8 words | Generic headlines like "Overview" or "Details" that lack specific insight |
+| 4 | Active | Data visualization match | Confirm chart type matches data relationship (line for trends, bar for comparison, funnel for conversions) | Pie chart with 6+ categories or line chart for categorical comparison |
+| 5 | Post | Speaker notes complete | Every slide has speaker notes with talking points and transition cues | Slides delivered without speaker notes for presentation delivery |
+| 6 | Post | Pacing validated | Total slide count and time allocation match target duration (2-3 min per slide) | 30 slides for a 15-minute presentation or 5 slides for a 60-minute talk |
+
 ## Anti-Patterns
 
 - Do NOT create text-heavy slides - use the "6x6 rule" as guidance (max 6 bullets, max 6 words each)

@@ -142,6 +142,17 @@ When running as a teammate in an agent team:
 5. **Peer Communication**: Use `SendMessage(type="message", recipient="<teammate-name>")` for direct coordination with other teammates when needed
 6. **Shutdown**: When you receive a `shutdown_request`, finish any in-progress task, mark it completed, and respond with `SendMessage(type="shutdown_response", request_id="...", approve=true)`
 
+## Verification Checklist
+
+| # | Zone | Check | Method | FAIL Criteria |
+|---|------|-------|--------|---------------|
+| 1 | Pre | Baseline metrics established | Collect current conversion rate, bounce rate, and funnel stage data | Recommending optimizations without knowing current performance |
+| 2 | Pre | Industry benchmark comparison | Compare current metrics against industry averages for the vertical | Setting targets without benchmark context |
+| 3 | Active | Testable hypothesis formed | Every recommendation has "If [change], then [metric] will [improve] because [rationale]" | Recommendation without a measurable expected outcome |
+| 4 | Active | Statistical rigor | Verify sample size calculation and minimum detectable effect for each A/B test | Proposing a test without sufficient traffic for statistical significance |
+| 5 | Post | Impact prioritization | Rank all recommendations by impact x effort matrix (P1-P3) | Flat list of suggestions without priority ordering |
+| 6 | Post | Single-variable isolation | Confirm each proposed test changes only one variable for clear attribution | Test design that changes multiple variables simultaneously |
+
 ## Anti-Patterns
 
 - Do NOT recommend changes without a testable hypothesis - every optimization needs a measurable expected outcome

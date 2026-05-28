@@ -79,6 +79,17 @@ When running as a teammate in an agent team:
 5. **Peer Communication**: Use `SendMessage(type="message", recipient="<teammate-name>")` for direct coordination with other teammates when needed
 6. **Shutdown**: When you receive a `shutdown_request`, finish any in-progress task, mark it completed, and respond with `SendMessage(type="shutdown_response", request_id="...", approve=true)`
 
+## Verification Checklist
+
+| # | Zone | Check | Method | FAIL Criteria |
+|---|------|-------|--------|---------------|
+| 1 | Pre | Existing infra inventory | Review current CI/CD, hosting, containers, and monitoring setup | Implementing new infra without knowing what already exists |
+| 2 | Pre | Secret management verified | Confirm secrets use platform secret store, not config files or env literals | Secrets hardcoded in CI config, Dockerfile, or source code |
+| 3 | Active | Image versioning pinned | Check all base images and dependencies use specific version tags | Using `latest` tag or unpinned versions in Dockerfile or CI |
+| 4 | Active | Health check configured | Verify containerized services expose health endpoints and CI checks them | Container deployed without health check or readiness probe |
+| 5 | Post | Rollback mechanism tested | Confirm rollback procedure exists and has been validated end-to-end | Deployment has no tested rollback path |
+| 6 | Post | Monitoring and alerting active | Verify structured logging, metrics collection, and alert rules are in place | Service deployed to production without monitoring or alerting |
+
 ## Anti-Patterns
 
 - Do NOT use `latest` tag for base images - pin specific versions for reproducible builds

@@ -126,6 +126,17 @@ When running as a teammate in an agent team:
 5. **Peer Communication**: Use `SendMessage(type="message", recipient="<teammate-name>")` for direct coordination with other teammates when needed
 6. **Shutdown**: When you receive a `shutdown_request`, finish any in-progress task, mark it completed, and respond with `SendMessage(type="shutdown_response", request_id="...", approve=true)`
 
+## Verification Checklist
+
+| # | Zone | Check | Method | FAIL Criteria |
+|---|------|-------|--------|---------------|
+| 1 | Pre | Data quality validated | Check for missing values, outliers, type mismatches, and duplicate rows | Analyzing data with unchecked quality issues |
+| 2 | Pre | Baseline period defined | Confirm comparison period, target benchmarks, or historical baseline exists | Presenting metrics without any comparison reference |
+| 3 | Active | Statistical significance | Verify sample size is sufficient and flag when conclusions lack confidence | Drawing conclusions from statistically insignificant sample |
+| 4 | Active | Correct visualization type | Match chart type to data relationship (line for trends, bar for comparison, funnel for conversions) | Using misleading chart type (e.g., pie chart with 10+ categories) |
+| 5 | Post | Actionable recommendations | Every insight is paired with a "so what" and a concrete next-step recommendation | Report ends with raw numbers but no recommended actions |
+| 6 | Post | Reproducibility check | Confirm data sources, filters, and date ranges are documented for audit trail | Analysis cannot be reproduced because parameters are undocumented |
+
 ## Anti-Patterns
 
 - Do NOT present data without context - always include comparison baselines (previous period, targets, benchmarks)

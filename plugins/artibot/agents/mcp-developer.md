@@ -96,6 +96,17 @@ When running as a teammate in an agent team:
 5. **Peer Communication**: Use `SendMessage(type="message", recipient="<teammate-name>")` for direct coordination with other teammates when needed
 6. **Shutdown**: When you receive a `shutdown_request`, finish any in-progress task, mark it completed, and respond with `SendMessage(type="shutdown_response", request_id="...", approve=true)`
 
+## Verification Checklist
+
+| # | Zone | Check | Method | FAIL Criteria |
+|---|------|-------|--------|---------------|
+| 1 | Pre | Tool requirements scoped | Identify required tools, resources, and transport protocol before implementation | Building MCP server without defined tool inventory |
+| 2 | Pre | Existing MCP servers reviewed | Check .mcp.json and running servers for overlap or conflicts | Duplicating functionality already provided by an existing server |
+| 3 | Active | Input schema validation | Verify every tool has Zod/JSON Schema validation on all parameters | Tool accepts unvalidated input parameters |
+| 4 | Active | Error response structure | Confirm all errors return MCP-compliant error codes and structured messages | Tool returns unstructured error strings or swallows errors |
+| 5 | Post | Tool discovery verified | Test that MCP client correctly discovers and lists all server tools | Server starts but tools are not discoverable by client |
+| 6 | Post | Graceful shutdown tested | Verify server handles SIGTERM/SIGINT with proper cleanup and connection close | Server leaks resources or hangs on shutdown signal |
+
 ## Anti-Patterns
 
 - Do NOT skip input validation on tool parameters - always use Zod/JSON Schema

@@ -110,6 +110,17 @@ When running as a teammate in an agent team:
 5. **Peer Communication**: Use `SendMessage(type="message", recipient="<teammate-name>")` for direct coordination with other teammates when needed
 6. **Shutdown**: When you receive a `shutdown_request`, finish any in-progress task, mark it completed, and respond with `SendMessage(type="shutdown_response", request_id="...", approve=true)`
 
+## Verification Checklist
+
+| # | Zone | Check | Method | FAIL Criteria |
+|---|------|-------|--------|---------------|
+| 1 | Pre | Detection tools run | Execute `npx knip`, `npx depcheck`, or `npx ts-prune` before any manual removal | Removing code based on gut feeling without tool-backed detection |
+| 2 | Pre | Risk classification done | Categorize each finding as SAFE/CAREFUL/RISKY based on reference analysis | Removing RISKY items (public API surface) without explicit review |
+| 3 | Active | Grep verification | Run grep for every symbol name to confirm zero remaining references | Removing code that is referenced via dynamic import or string pattern |
+| 4 | Active | One batch per commit | Remove one risk category at a time, run build+test between batches | Bulk-removing SAFE and CAREFUL items in a single commit |
+| 5 | Post | Build and tests pass | Run `npm run build && npm test` after each removal batch | Tests fail or build breaks after removal |
+| 6 | Post | Bundle size impact measured | Record before/after bundle size delta and log in deletion report | Cleanup completed without measuring actual size reduction |
+
 ## Anti-Patterns
 
 - Do NOT remove code without running detection tools first - gut feeling is not evidence

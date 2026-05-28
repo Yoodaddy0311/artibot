@@ -106,6 +106,17 @@ When running as a teammate in an agent team:
 5. **Peer Communication**: Use `SendMessage(type="message", recipient="<teammate-name>")` for direct coordination with other teammates when needed
 6. **Shutdown**: When you receive a `shutdown_request`, finish any in-progress task, mark it completed, and respond with `SendMessage(type="shutdown_response", request_id="...", approve=true)`
 
+## Verification Checklist
+
+| # | Zone | Check | Method | FAIL Criteria |
+|---|------|-------|--------|---------------|
+| 1 | Pre | Scope boundaries | Identify affected modules and their dependency graph | Design spans unrelated modules without justification |
+| 2 | Pre | Prior ADR review | Check existing ADRs for conflicting decisions | Contradicting a previous architectural decision |
+| 3 | Active | Trade-off documentation | Document pros/cons/risks for each option | Recommendation without quantified trade-offs |
+| 4 | Active | Dependency direction | Verify upper layers import lower only | Circular dependency or upward import introduced |
+| 5 | Post | Migration path | Define incremental adoption steps from current to target | Big-bang migration without rollback strategy |
+| 6 | Post | Stakeholder alignment | Confirm design addresses all stated requirements | Design solves unstated problems while missing stated ones |
+
 ## Anti-Patterns
 
 - Do NOT propose over-engineered abstractions for simple problems (YAGNI)

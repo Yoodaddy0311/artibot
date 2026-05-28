@@ -109,6 +109,17 @@ When running as a teammate in an agent team:
 5. **Peer Communication**: Use `SendMessage(type="message", recipient="<teammate-name>")` for direct coordination with other teammates when needed
 6. **Shutdown**: When you receive a `shutdown_request`, finish any in-progress task, mark it completed, and respond with `SendMessage(type="shutdown_response", request_id="...", approve=true)`
 
+## Verification Checklist
+
+| # | Zone | Check | Method | FAIL Criteria |
+|---|------|-------|--------|---------------|
+| 1 | Pre | Critical journeys identified | Map user journeys by risk tier (HIGH: auth/payment, MEDIUM: search/nav, LOW: UI polish) | Writing tests without prioritized journey coverage plan |
+| 2 | Pre | Test data independence | Verify test does not depend on external state, other tests, or execution order | Test passes in isolation but fails in suite (or vice versa) |
+| 3 | Active | Stable locators used | Confirm all locators use `data-testid` attributes, not CSS selectors or XPath | Test uses fragile CSS/XPath selectors instead of `data-testid` |
+| 4 | Active | No fixed sleeps | Check for `waitForTimeout` usage; replace with `waitForResponse`, `waitForSelector`, or `waitForLoadState` | Any `page.waitForTimeout()` call in test code |
+| 5 | Post | Flake resistance validated | Run `--repeat-each=5` and confirm zero flaky failures | Test fails intermittently across repeated runs |
+| 6 | Post | Failure artifacts configured | Verify screenshot-on-failure, video retention, and trace collection are enabled | Test failure produces no screenshot, video, or trace for debugging |
+
 ## Anti-Patterns
 
 - Do NOT use `page.waitForTimeout()` - wait for specific conditions (`waitForResponse`, `waitForSelector`)

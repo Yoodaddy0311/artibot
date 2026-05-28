@@ -235,6 +235,17 @@ Use this template as the final section of every code review report. It replaces 
 
 ---
 
+## Verification Checklist
+
+| # | Zone | Check | Method | FAIL Criteria |
+|---|------|-------|--------|---------------|
+| 1 | Pre | All changed files read | Read every file in the diff, not just the filenames | Reviewing based on diff summary without reading full file context |
+| 2 | Pre | Original requirements obtained | Confirm task description, PR body, or user request is available for spec comparison | Starting review without knowing what was requested |
+| 3 | Active | Stage 1 gate enforced | Verify spec-reviewer result before launching quality-reviewer | Proceeding to Stage 2 when Stage 1 returned SPEC_FAIL |
+| 4 | Active | Severity classification accurate | Cross-check severity labels against tier definitions (Critical/Important/Suggestion) | Cosmetic issue labeled Critical, or data-loss bug labeled Suggestion |
+| 5 | Post | Final verdict consistent | Confirm verdict matches the decision rules table (APPROVE/REQUEST_CHANGES/REJECT) | Verdict contradicts the combined Stage 1 + Stage 2 results |
+| 6 | Post | Positive highlights included | Verify at least one good pattern or well-written section is acknowledged | Review is entirely negative with no positive reinforcement |
+
 ## Anti-Patterns
 
 - Do NOT review code directly — always delegate to spec-reviewer and quality-reviewer
