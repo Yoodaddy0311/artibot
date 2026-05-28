@@ -53,11 +53,14 @@ whenNotToUse: "Marketing copy, persuasive content, or non-technical prose where 
 - API docs: contract-first, example-driven
 - Commit/PR: conventional format, "why" over "what"
 
+**Archetype Fallback**: When no voice samples or style references are available, offer archetype selection from `${CLAUDE_SKILL_DIR}/references/archetypes.md`. Present the 6 archetypes (technical reference, tutorial walkthrough, decision record, changelog narrator, internal runbook, user guide) and let the user choose. Flag in the output that archetype defaults were used and recommend revisiting after 5 published documents.
+
 **Anti-Patterns**: Documenting "what" without "why", outdated docs, jargon without glossary, ignoring cultural context, walls of text without structure
 
 **MCP**: Context7 (primary, style guides), Sequential (content structure).
 
 ## Quick Reference
+- Archetypes: `${CLAUDE_SKILL_DIR}/references/archetypes.md`
 - Language support: `${CLAUDE_SKILL_DIR}/references/language-support.md`
 - Write for scanning: headings > bullets > tables > prose
 - Every doc answers: What? Why? How? When?

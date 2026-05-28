@@ -155,6 +155,19 @@ FORMAT COMPLIANCE
 
 ---
 
+## Rules
+
+- Always state the CTA explicitly in every ad variant.
+- Always include at least 3 ad variants per ad group for testing.
+- Always verify ad copy fits the platform's character and format limits.
+- Always define a measurable campaign objective before writing any creative.
+- Always include negative keyword lists for search campaigns.
+- Never promise results without an evidence qualifier ("on average", "based on", "up to").
+- Never launch a campaign without a defined kill criterion (CPA ceiling or ROAS floor).
+- Never use broad match keywords without conversion signal data and negative keyword hygiene.
+- Never rely on a single creative per ad set for campaigns longer than 7 days.
+- Never report on CTR alone without post-click conversion metrics.
+
 ## References
 
 - See `${CLAUDE_SKILL_DIR}/references/platform-specs.md` for platform specifications and ad format requirements

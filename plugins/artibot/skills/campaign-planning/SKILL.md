@@ -162,6 +162,19 @@ KPI            | Target  | Tracking Method
 
 ---
 
+## Rules
+
+- Always define success metrics and KPI targets before launch.
+- Always complete a competitive landscape check during the planning phase.
+- Always set UTM parameters for every trackable link before go-live.
+- Always include a written kill criterion (stop-loss trigger) in the campaign brief.
+- Always allocate budget by phase, not as a single lump sum.
+- Never launch without a measurement plan that includes baselines and tracking methods.
+- Never skip the competitive check during the planning phase.
+- Never approve creative in the final week without localization and legal review.
+- Never allocate budget by copying the previous quarter without re-evaluating channel CAC.
+- Never run a campaign without cross-channel coordination documented in the brief.
+
 ## References
 
 - See `${CLAUDE_SKILL_DIR}/references/campaign-brief-template.md` for campaign brief template

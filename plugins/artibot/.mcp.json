@@ -9,6 +9,10 @@
       "command": "npx",
       "args": ["-y", "@executeautomation/playwright-mcp-server"]
     },
+    "chrome-devtools": {
+      "command": "npx",
+      "args": ["-y", "chrome-devtools-mcp@latest"]
+    },
     "github": {
       "type": "http",
       "url": "https://api.githubcopilot.com/mcp/",

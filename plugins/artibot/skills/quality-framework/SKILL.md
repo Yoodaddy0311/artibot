@@ -330,6 +330,41 @@ P1       | [area]      | [action]             | [L/M/H]
 ```
 
 
+## Content Quality Validation
+
+When ATLAS is applied to content outputs (marketing copy, documentation, reports, presentations), add this dimension to the validation cycle between Step 7 (Documentation) and Step 8 (Integration).
+
+### Content Quality Gate
+
+| Check | What to Validate | PASS Criteria | REVISE Criteria |
+|-------|------------------|---------------|-----------------|
+| Voice Consistency | Compare output against project brand voice file (`brand-voice.md` or equivalent) | Tone, register, and vocabulary align with defined brand voice | Deviations in formality level, jargon usage, or persona voice |
+| Factual Accuracy | Every claim, statistic, and assertion has a cited source or verifiable basis | All claims grounded in evidence; no unsupported superlatives or invented data | Any claim lacking a source, or using unverifiable numbers |
+| Audience Fit | Content matches the target persona's knowledge level, pain points, and context | Reader can act on the content without external clarification | Content assumes wrong expertise level, uses insider jargon for general audience, or oversimplifies for experts |
+| Actionability | Content includes a clear next step the reader can take | At least one concrete, specific call to action or recommendation | Vague conclusions ("consider your options"), missing next steps, or passive endings |
+| Originality | Content avoids generic AI-generated filler patterns | No hollow adjectives ("robust", "cutting-edge"), no filler sentences, no structural laziness | Detectable AI slop patterns (see `ai-slop-reviewer` skill for the full pattern list) |
+
+### Content Quality Verdict
+
+Apply the same PASS/REVISE system used by the rest of ATLAS:
+
+- **PASS**: All 5 checks pass. Content is ready for publication or delivery.
+- **REVISE-1**: 1 check fails. Flag the specific check, provide fix guidance, re-validate after correction.
+- **REVISE-2+**: 2 or more checks fail. Content requires substantial rework before re-validation.
+
+### When to Apply
+
+- Marketing copy, ad creatives, email campaigns
+- Technical documentation, README updates, API docs
+- Reports, presentations, case studies
+- Any content output produced by a content-marketer, doc-updater, or presentation-designer agent
+
+### When NOT to Apply
+
+- Pure code changes (use the standard 8-step cycle)
+- Internal notes or scratch documents not intended for external audiences
+- Git commit messages or PR descriptions
+
 ## Quick Reference
 
 **Validation order**: Syntax -> Types -> Lint -> Security -> Tests -> Performance -> Docs -> Integration

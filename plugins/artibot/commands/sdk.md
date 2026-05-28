@@ -11,7 +11,7 @@ Artibot SDK — create custom extensions for the Artibot ecosystem.
 ## Arguments
 
 Parse $ARGUMENTS:
-- `action`: Required. One of: `create-skill`, `create-agent`, `create-hook`, `create-middleware`, `validate`
+- `action`: Required. One of: `create-skill`, `create-agent`, `create-hook`, `create-middleware`, `validate`, `scaffold`
 - `name`: Required for create actions. Must be kebab-case (e.g. `my-custom-skill`)
 - `--category [name]`: Skill category (default: 'custom')
 - `--model [tier]`: Agent model tier: opus, sonnet, haiku (default: 'sonnet')
@@ -178,7 +178,7 @@ Validates all custom extensions in the current project.
 ## Error Handling
 
 - **Invalid kebab-case name**: Show error with valid example: `"my-custom-skill" is valid, "myCustomSkill" is not`
-- **Missing action**: Show available actions: `create-skill`, `create-agent`, `create-hook`, `create-middleware`, `validate`
+- **Missing action**: Show available actions: `create-skill`, `create-agent`, `create-hook`, `create-middleware`, `validate`, `scaffold`
 - **Missing name for create actions**: Show error: `Name is required. Usage: /sdk create-skill my-tool`
 - **Invalid --model value**: Show valid options: `opus, sonnet, haiku`
 - **Invalid --event value**: Show valid options: `PreToolUse, PostToolUse, PreCompact, SessionStart, SessionEnd, UserPromptSubmit, SubagentSpawned, InstructionsLoaded`
@@ -200,6 +200,81 @@ NEXT STEPS
 [Context-specific guidance for what to do after creation]
 ```
 
+### scaffold
+
+Creates a complete project scaffolding from a template. All scaffolding is performed via command `.md` logic — no shell scripts.
+
+**Steps:**
+1. Parse `--template` flag. Must be one of: `feature`, `security-audit`, `migration`, `marketing-campaign`
+2. Parse `name` argument. Must be kebab-case.
+3. If `--dry-run`, display the directory tree and CLAUDE.md preview — do NOT write files.
+4. Create the directory structure and template files (see below).
+5. Re-read created files to verify correctness.
+6. Report: created file paths, validation status.
+
+**Templates:**
+
+#### `feature`
+```
+{name}/
+  CLAUDE.md           — Project context with feature spec reference
+  spec.md             — Requirements, acceptance criteria, edge cases
+  tests/              — Test files directory
+    {name}.test.ts    — Test scaffold with describe/it blocks
+  src/                — Source files directory
+    {name}.ts         — Implementation scaffold with TODO markers
+```
+
+#### `security-audit`
+```
+{name}/
+  CLAUDE.md           — Engagement context with scope and workflow
+  scope.md            — In-scope assets, OOS list, bounty bands
+  findings/           — One markdown file per finding
+    README.md         — Finding naming convention and template
+  evidence/           — Screenshots, HARs (gitignored)
+  .gitignore          — Excludes evidence/, *.har, *.pem, .env
+```
+
+#### `migration`
+```
+{name}/
+  CLAUDE.md           — Migration context with rollback reference
+  rollback.md         — Step-by-step rollback procedure
+  scripts/            — Migration and verification scripts
+    migrate.ts        — Migration entry point with TODO markers
+    verify.ts         — Post-migration verification checks
+  verification/       — Verification evidence and reports
+    checklist.md      — Pre/post migration verification checklist
+```
+
+#### `marketing-campaign`
+```
+{name}/
+  CLAUDE.md           — Campaign context with brief reference
+  brief.md            — Campaign brief: objective, audience, channels, KPIs
+  assets/             — Creative assets directory
+    copy.md           — Ad copy variants and A/B test versions
+  metrics/            — Performance tracking
+    dashboard.md      — KPI definitions and measurement plan
+```
+
+**CLAUDE.md generation for all templates:**
+Each generated `CLAUDE.md` includes:
+- Project name and creation date
+- Template type and purpose
+- File inventory with descriptions
+- Relevant workflow commands (`/test`, `/verify`, `/code-review`, etc.)
+- Links to related Artibot skills
+
+**Usage:**
+```
+/sdk scaffold my-feature --template feature
+/sdk scaffold q2-launch --template marketing-campaign
+/sdk scaffold db-v3 --template migration --dry-run
+/sdk scaffold api-pentest --template security-audit
+```
+
 ## Examples
 
 ```
@@ -208,6 +283,8 @@ NEXT STEPS
 /sdk create-agent security-checker --model opus
 /sdk create-hook pre-deploy --event PreToolUse
 /sdk create-middleware rate-limiter
+/sdk scaffold my-feature --template feature
+/sdk scaffold api-pentest --template security-audit --dry-run
 /sdk validate
 ```
 

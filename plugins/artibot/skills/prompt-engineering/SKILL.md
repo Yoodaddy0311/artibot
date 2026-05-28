@@ -5,7 +5,7 @@ name: prompt-engineering
 description: |
   프롬프트 엔지니어링 패턴 - Few-shot, Chain-of-Thought, 시스템 프롬프트 설계, 템플릿 시스템, 최적화 기법.
   Auto-activates when: prompt optimization, system prompt design, few-shot learning, CoT prompting.
-  Triggers: prompt engineering, few-shot, chain of thought, system prompt, 프롬프트 설계
+  Triggers: prompt engineering, few-shot, chain of thought, system prompt, 프롬프트 설계, prompt audit, 프롬프트 감사, 프롬프트 품질
 lang: [en, ko]
 platforms: [claude-code]
 level: progressive
@@ -21,6 +21,9 @@ triggers:
   - "프롬프트 설계"
   - "프롬프트 최적화"
   - "CoT"
+  - "prompt audit"
+  - "프롬프트 감사"
+  - "프롬프트 품질"
 allowed-tools: [Read, Grep, Glob]
 agents:
   - "llm-architect"

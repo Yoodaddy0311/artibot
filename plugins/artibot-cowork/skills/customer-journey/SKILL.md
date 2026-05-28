@@ -160,6 +160,16 @@ P1       | [stage]     | [pain point]     | [improvement]
 
 ---
 
+## Cold Start
+
+When the user has no existing customer data, journey map, or persona document:
+1. What does the business do? (one sentence)
+2. Who is the target customer? (demographics + psychographics)
+3. What differentiates from competitors? (one sentence)
+4. What is the primary goal? (awareness/leads/sales/retention)
+
+Use answers to bootstrap the workflow. Mark assumptions with [ASSUMED].
+
 ## References
 
 - See `${CLAUDE_SKILL_DIR}/references/lifecycle-stages.md` for lifecycle stages

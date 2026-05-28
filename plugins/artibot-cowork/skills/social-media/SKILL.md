@@ -199,6 +199,27 @@ CALENDAR (if applicable)
 
 ---
 
+## Rules
+
+- Always match brand voice and tone guidelines before drafting any post.
+- Always research platform-specific hashtag performance before selecting tags.
+- Always include a clear call-to-action or engagement prompt in every post.
+- Always verify character counts against platform limits before delivering.
+- Always adapt content format to the target platform's native conventions.
+- Never use generic hashtags without checking current volume and relevance.
+- Never cross-post identical content across platforms without format adaptation.
+- Never publish without confirming the posting time aligns with audience activity data.
+- Never prioritize follower count over engagement rate as a success metric.
+- Never skip the content pillar balance check across the weekly calendar.
+
+## Iteration
+
+After delivering the first draft:
+1. Ask if changes are needed
+2. Apply feedback and regenerate
+3. Maximum 3 revision rounds
+4. On round 3, deliver final with "this is the final version" note
+
 ## References
 
 - See `${CLAUDE_SKILL_DIR}/references/platform-specifications.md` for platform specifications

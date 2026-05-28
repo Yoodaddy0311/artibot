@@ -98,6 +98,8 @@ REJECTED ingestion paths (DATA POLICY): external chat APIs (Slack/Feishu/DingTal
 
 Open `references/six-layer-persona.md` and fill each layer from source evidence. Quote the source line that justifies each Layer 0 rule. Layer 0 rules MUST be behaviors, not adjectives — see `references/tag-behavior-map.md` for the tag → behavior mapping.
 
+For Layer 2 (Voice), always complete the Absence Signals sub-section: identify words, punctuation, hook types, tones, and structures consistently absent across all source samples. Absence signals prevent drift as effectively as presence signals.
+
 If a layer has fewer than 2 source quotes supporting it, mark it with `(source-thin: refresh after collecting more material)`.
 
 ### Step 4: GENERATE the artifact

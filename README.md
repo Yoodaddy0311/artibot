@@ -141,6 +141,73 @@ node --input-type=module -e "import { exportForGemini } from './plugins/artibot/
 >
 > For the full cross-platform guide including Cursor IDE and batch export, see [plugins/artibot/README.md](plugins/artibot/README.md).
 
+## What can Artibot do?
+
+### `/implement` -- Feature Implementation Pipeline
+
+**Before (manual):**
+```
+You: "implement user authentication"
+Claude: writes code in one file, misses edge cases, no tests, no review
+You: manually request tests, then review, then fix issues found in review
+-> 4+ back-and-forth prompts, inconsistent coverage
+```
+
+**After (with Artibot):**
+```
+You: "implement user authentication"
+Artibot: /implement triggers automatically
+  -> planner agent: decomposes into 5 subtasks
+  -> architect agent: designs auth flow + data model
+  -> backend-developer + frontend-developer: implement in parallel (Agent Teams)
+  -> tdd-guide agent: writes tests (80%+ coverage)
+  -> code-reviewer agent: reviews with 4-severity classification
+  -> result: complete feature with tests, reviewed, ready to merge
+-> 1 prompt, full pipeline
+```
+
+### `/team` -- Parallel Team Execution
+
+**Before (manual):**
+```
+You: "refactor the payment module and update the API docs"
+Claude: does refactoring first (10 min), then docs (5 min) = 15 min sequential
+No cross-check between the two tasks
+```
+
+**After (with Artibot):**
+```
+You: "refactor the payment module and update the API docs"
+Artibot: /team triggers automatically
+  -> refactor-cleaner agent: refactoring (teammate A)
+  -> doc-updater agent: documentation (teammate B)
+  -> both run in parallel via Agent Teams API (P2P messaging)
+  -> cross-check phase: each reviews the other's output
+  -> result: 7 min total, cross-verified
+```
+
+### `/export` -- Cross-Platform Export
+
+**Before (manual):**
+```
+You want to use Artibot agents in Cursor IDE
+-> manually rewrite each agent .md file to .mdc format
+-> figure out Cursor Rules-for-AI conventions
+-> repeat for 28 agents = hours of tedious work
+```
+
+**After (with Artibot):**
+```
+/export cursor
+  -> auto-converts all 28 agents to .mdc format
+  -> places them in .cursor/rules/ with correct frontmatter
+  -> preserves agent expertise and tool permissions
+  -> supports: cursor, codex, opencode, antigravity, all
+-> 1 command, all platforms
+```
+
+---
+
 ## Usage
 
 ### Smart Routing
@@ -375,6 +442,11 @@ Load System 1 cache          (routing decisions +            Knowledge transfer
 
 ### Playbooks
 
+8 DAG playbooks (4 dev + 4 marketing) with parallel node execution.
+
+<details>
+<summary>View all 8 playbooks</summary>
+
 **Feature:**
 ```
 TeamCreate -> [Leader] plan -> [Council] design -> [Swarm] implement -> [Council] review -> [Leader] merge -> TeamDelete
@@ -415,9 +487,14 @@ TeamCreate -> [Leader] plan -> [Swarm] create -> [Council] review -> [Leader] pu
 TeamCreate -> [Council] research -> [Swarm] analyze -> [Council] synthesize -> [Leader] report -> TeamDelete
 ```
 
+</details>
+
 ## Agents
 
-### Orchestrator (Team Leader / CTO)
+28 specialized agents: 1 orchestrator (CTO) + 27 specialist teammates. Opus 73%, Sonnet 27%.
+
+<details>
+<summary>Orchestrator (Team Leader / CTO)</summary>
 
 | Agent | Model | Role | Team API Tools |
 |-------|-------|------|----------------|
@@ -425,7 +502,10 @@ TeamCreate -> [Council] research -> [Swarm] analyze -> [Council] synthesize -> [
 
 The orchestrator **never writes code directly**. It assembles the team, distributes tasks, coordinates between teammates, and synthesizes results.
 
-### Specialist Agents (27 Teammates)
+</details>
+
+<details>
+<summary>Specialist Agents (27 Teammates)</summary>
 
 All teammates have their specialist tools + team collaboration tools (`SendMessage`, `TaskList`, `TaskGet`, `TaskUpdate`).
 
@@ -484,9 +564,14 @@ All teammates have their specialist tools + team collaboration tools (`SendMessa
 |-------|-------|-----------|
 | performance-engineer | opus | Performance profiling, bottleneck analysis |
 
+</details>
+
 ## Commands
 
-### Development
+70+ slash commands across development, marketing, and workflow automation. Key commands: `/sc` (smart router), `/implement`, `/team`, `/code-review`, `/save`/`/resume`.
+
+<details>
+<summary>Development Commands</summary>
 
 | Command | Description |
 |---------|-------------|
@@ -497,7 +582,10 @@ All teammates have their specialist tools + team collaboration tools (`SendMessa
 | `/improve [target]` | Evidence-based code enhancement |
 | `/design [domain]` | System design and architecture |
 
-### Analysis & Debugging
+</details>
+
+<details>
+<summary>Analysis and Debugging Commands</summary>
 
 | Command | Description |
 |---------|-------------|
@@ -505,7 +593,10 @@ All teammates have their specialist tools + team collaboration tools (`SendMessa
 | `/troubleshoot [symptoms]` | Root cause analysis |
 | `/explain [topic]` | Educational explanations |
 
-### Quality
+</details>
+
+<details>
+<summary>Quality Commands</summary>
 
 | Command | Description |
 |---------|-------------|
@@ -515,22 +606,21 @@ All teammates have their specialist tools + team collaboration tools (`SendMessa
 | `/verify` | Validation pipeline (lint->type->test->build) |
 | `/refactor-clean [target]` | Refactoring and dead code removal |
 
-### Team Orchestration
+</details>
+
+<details>
+<summary>Team Orchestration Commands</summary>
 
 | Command | Description |
 |---------|-------------|
 | `/orchestrate [workflow]` | Agent Teams multi-agent workflow |
 | `/spawn [mode]` | Team spawn with parallel task execution |
+| `/team [task]` | Parallel team orchestration with cross-check |
 
-### Visual & Validation
+</details>
 
-| Command | Description |
-|---------|-------------|
-| `/visual-check [url]` | Visual validation with SSIM screenshot comparison |
-| `/sc playbook list` | Browse and discover playbooks |
-| `/sc playbook info [name]` | Show playbook details and phase diagram |
-
-### Workflow
+<details>
+<summary>Workflow Commands</summary>
 
 | Command | Description |
 |---------|-------------|
@@ -539,9 +629,15 @@ All teammates have their specialist tools + team collaboration tools (`SendMessa
 | `/git [operation]` | Git workflow automation |
 | `/checkpoint` | State snapshot save/restore |
 | `/daily` | Daily work recap and retrospective |
-| `/team [task]` | Parallel team orchestration with cross-check |
+| `/save` | Session handoff save (context restore in next session) |
+| `/resume` | Restore previous session handoff |
+| `/visual-check [url]` | Visual validation with SSIM screenshot comparison |
+| `/sc playbook list` | Browse and discover playbooks |
 
-### Documentation & Content
+</details>
+
+<details>
+<summary>Documentation and Content Commands</summary>
 
 | Command | Description |
 |---------|-------------|
@@ -549,7 +645,10 @@ All teammates have their specialist tools + team collaboration tools (`SendMessa
 | `/content [type]` | Content marketing and SEO |
 | `/learn [pattern]` | Pattern extraction and memory storage |
 
-### Marketing
+</details>
+
+<details>
+<summary>Marketing Commands</summary>
 
 | Command | Description |
 |---------|-------------|
@@ -564,7 +663,10 @@ All teammates have their specialist tools + team collaboration tools (`SendMessa
 | `/analytics [report]` | Marketing analytics and performance reporting |
 | `/funnel [stage]` | Conversion funnel analysis and optimization |
 
-### Utilities
+</details>
+
+<details>
+<summary>Utility Commands</summary>
 
 | Command | Description |
 |---------|-------------|
@@ -572,26 +674,63 @@ All teammates have their specialist tools + team collaboration tools (`SendMessa
 | `/estimate [target]` | Evidence-based estimation |
 | `/index [query]` | Command catalog search |
 | `/load [path]` | Project context loading |
+| `/doctor` | Automated health check |
+| `/export [platform]` | Cross-platform agent/skill export |
+
+</details>
 
 ## Skills
 
-98 auto-activating domain skills organized in six categories:
+111 auto-activating domain skills organized in six categories.
 
-**Core Skills (8):** orchestration, cognitive-routing, lifelong-learning, token-efficiency, principles, coding-standards, security-standards, testing-standards
+<details>
+<summary>Core Skills (8)</summary>
 
-**Persona Skills (11):** architect, frontend, backend, security, analyzer, performance, qa, refactorer, devops, mentor, scribe
+orchestration, cognitive-routing, lifelong-learning, token-efficiency, principles, coding-standards, security-standards, testing-standards
 
-**Utility Skills (8):** git-workflow, tdd-workflow, delegation, mcp-context7, mcp-playwright, mcp-coordination, continuous-learning, strategic-compact
+</details>
 
-**Language Skills (16):** TypeScript, JavaScript, Python, Go, Rust, Java, Kotlin, Swift, C++, C#, Ruby, PHP, Scala, Elixir, R, Flutter/Dart
+<details>
+<summary>Persona Skills (11)</summary>
 
-**Marketing Skills (34):** marketing-strategy, campaign-planning, seo-strategy, technical-seo, content-seo, social-media, email-marketing, competitive-intelligence, advertising, ab-testing, brand-guidelines, copywriting, customer-journey, data-analysis, data-visualization, lead-management, marketing-analytics, presentation-design, report-generation, segmentation, cro-page, cro-funnel, cro-forms, and more
+architect, frontend, backend, security, analyzer, performance, qa, refactorer, devops, mentor, scribe
 
-**Workflow Skills (8):** daily (work recap/retrospective), team (parallel orchestration), session-worklog (auto session tracking), vibe-coding (natural language coding protocol), repo-benchmarking (external repo analysis and comparison), auto-learning-pipeline (zero-config nightly self-improvement), git-worktree (worktree isolation), dynamic-context-injection (runtime context management)
+</details>
+
+<details>
+<summary>Utility Skills (8)</summary>
+
+git-workflow, tdd-workflow, delegation, mcp-context7, mcp-playwright, mcp-coordination, continuous-learning, strategic-compact
+
+</details>
+
+<details>
+<summary>Language Skills (16)</summary>
+
+TypeScript, JavaScript, Python, Go, Rust, Java, Kotlin, Swift, C++, C#, Ruby, PHP, Scala, Elixir, R, Flutter/Dart
+
+</details>
+
+<details>
+<summary>Marketing Skills (34)</summary>
+
+marketing-strategy, campaign-planning, seo-strategy, technical-seo, content-seo, social-media, email-marketing, competitive-intelligence, advertising, ab-testing, brand-guidelines, copywriting, customer-journey, data-analysis, data-visualization, lead-management, marketing-analytics, presentation-design, report-generation, segmentation, cro-page, cro-funnel, cro-forms, and more
+
+</details>
+
+<details>
+<summary>Workflow Skills (8)</summary>
+
+daily (work recap/retrospective), team (parallel orchestration), session-worklog (auto session tracking), vibe-coding (natural language coding protocol), repo-benchmarking (external repo analysis and comparison), auto-learning-pipeline (zero-config nightly self-improvement), git-worktree (worktree isolation), dynamic-context-injection (runtime context management)
+
+</details>
 
 ## Hooks
 
-23 hook registrations across 15 event types (v4.8.0 consolidated 5 spawn-based slots into single dispatcher entries: SessionStart 9→1, PostToolUse 10→1, Stop 5→1, SessionEnd 5→1, SubagentStop 3→1):
+23 hook registrations across 15 event types.
+
+<details>
+<summary>Hook Event Table</summary>
 
 | Event | Script | Purpose |
 |-------|--------|---------|
@@ -609,6 +748,8 @@ All teammates have their specialist tools + team collaboration tools (`SendMessa
 | SessionEnd | `session-end.js` | Persist session state |
 | SessionEnd | `nightly-learner.js` | Batch learning (GRPO) + knowledge transfer |
 | SessionEnd | `http-notify.js` | HTTP webhook notifications (Slack/Discord/generic) |
+
+</details>
 
 ## Auto-Update
 
@@ -667,6 +808,9 @@ Each adapter translates Artibot's Agent Teams API calls into the target platform
 
 ## Plugin Structure
 
+<details>
+<summary>View directory tree</summary>
+
 ```
 plugins/artibot/
 +-- .claude-plugin/
@@ -719,6 +863,8 @@ plugins/artibot/
 +-- package.json                 # Node.js ESM runtime
 +-- .mcp.json                    # MCP server configuration
 ```
+
+</details>
 
 ## Configuration
 
@@ -818,10 +964,12 @@ node scripts/ci/validate-hooks.js     # Hook validation
 
 ## Contributing
 
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide on adding skills, agents, and commands.
+
 1. Fork this repository
 2. Create a feature branch
 3. Follow the existing plugin structure and conventions
-4. Test with `node scripts/validate.js`
+4. Run `npm run ci` to validate
 5. Submit a pull request
 
 ## Author
@@ -832,12 +980,13 @@ node scripts/ci/validate-hooks.js     # Hook validation
 
 | Resource | Path |
 |---|---|
+| **Installation guide** | [`INSTALL.md`](./INSTALL.md) |
+| **Contributing guide** | [`CONTRIBUTING.md`](./CONTRIBUTING.md) |
+| **CHANGELOG** (root summary) | [`CHANGELOG.md`](./CHANGELOG.md) |
+| **CHANGELOG** (full detail) | [`plugins/artibot/CHANGELOG.md`](./plugins/artibot/CHANGELOG.md) |
 | **artibot plugin README** (Claude Code) | [`plugins/artibot/README.md`](./plugins/artibot/README.md) |
 | **artibot-cowork plugin README** (Claude Cowork) | [`plugins/artibot-cowork/README.md`](./plugins/artibot-cowork/README.md) |
-| **CHANGELOG** | [`plugins/artibot/CHANGELOG.md`](./plugins/artibot/CHANGELOG.md) |
 | **Architecture deep dive** | `plugins/artibot/docs/ARCHITECTURE.md` (see CHANGELOG for module map) |
-| **Competitive evaluation** | `plugins/artibot/_reports/market-competitive-eval-2026-04-24.md` (not yet published) |
-| **AI ecosystem research** | `plugins/artibot/_reports/ai-ecosystem-research-2026-04-24.md` (not yet published) |
 | **MCP server usage** | `plugins/artibot/docs/MCP-SETUP.md` |
 | **Marketplace submission package** | [`plugins/artibot/_marketplace/`](./plugins/artibot/_marketplace/) |
 

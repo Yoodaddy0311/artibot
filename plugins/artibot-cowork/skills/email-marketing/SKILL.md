@@ -150,6 +150,27 @@ GDPR:     [PASS|ISSUE]
 
 ---
 
+## Rules
+
+- Always include a functional unsubscribe link and physical mailing address in every email.
+- Always verify subject lines are under 50 characters.
+- Always declare compliance status (CAN-SPAM, GDPR) in the output.
+- Always segment the audience before sending; batch-and-blast is never acceptable.
+- Always include a plain-text alternative alongside HTML.
+- Never exceed 50-word subject lines.
+- Never send to purchased or scraped email lists.
+- Never skip SPF, DKIM, and DMARC verification for the sending domain.
+- Never omit A/B test variants for subject lines in campaigns over 1,000 recipients.
+- Never design an automation sequence without explicit exit criteria.
+
+## Iteration
+
+After delivering the first draft:
+1. Ask if changes are needed
+2. Apply feedback and regenerate
+3. Maximum 3 revision rounds
+4. On round 3, deliver final with "this is the final version" note
+
 ## References
 
 - See `${CLAUDE_SKILL_DIR}/references/campaign-types-guide.md` for campaign types guide

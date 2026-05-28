@@ -152,6 +152,27 @@ CTA OPTIONS
 
 ---
 
+## Rules
+
+- Always lead with benefit, not feature.
+- Always select a persuasion framework (AIDA, PAS, BAB, 4Ps) before writing.
+- Always verify copy fits platform character limits before delivering.
+- Always include at least one specific proof point (number, timeframe, or result).
+- Always write the CTA as an action verb plus benefit statement.
+- Never open with a question cliche ("Did you know...?", "Have you ever...?").
+- Never use passive voice in headlines or CTAs.
+- Never deliver copy without a tone declaration matching the target audience.
+- Never exceed the platform's character constraint without flagging the overage.
+- Never list features without translating each to a reader benefit.
+
+## Iteration
+
+After delivering the first draft:
+1. Ask if changes are needed
+2. Apply feedback and regenerate
+3. Maximum 3 revision rounds
+4. On round 3, deliver final with "this is the final version" note
+
 ## References
 
 - See `${CLAUDE_SKILL_DIR}/references/persuasion-frameworks.md` for persuasion frameworks
