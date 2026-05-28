@@ -13,6 +13,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.16.0] — 2026-05-28
+
+**Theme**: social-media 프로덕션 워크플로 + PAC2026 3-Zone 전체 에이전트 확산
+
+### Added
+
+- **Social-media skill depth 4**: 9개 프로덕션 섹션 추가 — Production Workflow, Campaign Integration, A/B Testing, Performance Measurement, Competitor Analysis, Audience Segmentation, Content Quality Checklist, Crisis Management, Tool Stack. artibot-cowork에 한국 플랫폼(네이버/카카오/밴드) 워크플로 통합.
+- **PAC2026 3-Zone Verification Checklist**: 28개 전체 에이전트에 도메인 특화 Pre/Active/Post 검증 체크리스트 적용 (pilot 3개 → 전체 28개 확산).
+- **Production workflow references**: `references/production-workflow.md` 12-phase pipeline (양 플러그인).
+- **Social command expansion**: `--workflow`, `--audit`, `--compete`, `--crisis` 인자 + `workflow`, `audit`, `competitor-report` 콘텐츠 타입.
+- **3-repo benchmark adoptions** (v4.15.0→4.16.0): CONTRIBUTING.md, INSTALL.md, 7-Question Gate, 50 OWASP patterns, SDK scaffold, marketing skill Rules/Iteration/Cold Start, progress renderer, advisor strategy.
+
+### Changed
+
+- Social-media skill level 3 → 4 (depth 2 spec tables → depth 4 production workflow).
+- **33 files**, +1,156 lines.
+
+---
+
 ## [4.13.1] — 2026-05-21
 
 **Theme**: turn-end auto-commit 폭주 차단 — Stop 훅의 `git-autopilot-close.js`가 매 agent turn마다 `chore: artibot session close [...]` commit + push를 만들어 history의 86%가 자동 노이즈가 되던 문제. WIP interval save(crash safety net)는 영향 없음.

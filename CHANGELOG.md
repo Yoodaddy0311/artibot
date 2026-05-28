@@ -11,6 +11,10 @@ For the full version history including detailed technical notes, migration guide
 
 ## Recent Releases
 
+### [4.16.0] -- 2026-05-28
+
+Social-media skill depth 4 production workflow (9 sections, Korean platforms). PAC2026 3-Zone Verification Checklist expanded to all 28 agents. 3-repo benchmark patterns adopted.
+
 ### [4.15.0] -- 2026-05-27
 
 Cross-platform export extended to skills and commands via `--include`. Install URL fix and command count sync.
