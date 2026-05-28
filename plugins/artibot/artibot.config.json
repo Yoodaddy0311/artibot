@@ -39,6 +39,18 @@
           "cro-specialist",
           "ad-specialist"
         ]
+      },
+      "advisorStrategy": {
+        "enabled": true,
+        "executorModel": "sonnet",
+        "advisorModel": "opus",
+        "maxUses": 3,
+        "triggerConditions": [
+          "architecture-decision",
+          "security-assessment",
+          "complex-debugging",
+          "cross-domain-analysis"
+        ]
       }
     },
     "categories": {

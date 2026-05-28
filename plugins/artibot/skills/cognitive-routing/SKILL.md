@@ -137,6 +137,73 @@ Route decision -> Execute -> Outcome -> Feedback -> Adjust threshold
                               failure -> threshold loosens + log pattern
 ```
 
+## Advisor Routing
+
+When a Sonnet-tier agent encounters any of the following conditions, recommend advisor escalation
+instead of full System 2 routing. The executor continues work with advisor guidance rather than
+handing off entirely.
+
+### Escalation Triggers
+
+| Condition | Description | Example |
+|-----------|-------------|---------|
+| Architecture decision | Trade-off analysis between 2+ approaches with long-term consequences | Choosing between monolith decomposition strategies |
+| Security assessment | Severity validation of findings that may be false positives or require contextual judgment | OWASP finding that needs exploitability assessment |
+| Complex debugging | Root cause analysis spanning 3+ modules or layers | Race condition across frontend, API, and database |
+| Cross-domain analysis | Impact assessment where a change in one domain affects another | Frontend state management change affecting backend API contract |
+
+### When NOT to Escalate
+
+- Routine code review on single-file changes
+- Documentation updates or README edits
+- Single-file bug fixes with clear root cause
+- Formatting, linting, or style-only changes
+- Test additions for existing code
+
+### Routing Integration
+
+```
+Cognitive Router -> Complexity Score -> Route Decision
+                                        |
+                    System 1 -----------> Fast response (no advisor)
+                    System 2 -----------> Deep analysis
+                    System 2 + Advisor -> Sonnet executes, Opus advises
+```
+
+The advisor pattern sits within System 2 routing. When complexity is high but the executor is
+Sonnet-tier (per `modelPolicy.medium`), the router checks `advisorStrategy.triggerConditions`.
+If the request matches a trigger condition, the executor invokes the advisor tool for guidance
+while retaining execution control.
+
+### Cost Profile
+
+| Mode | Relative Cost | Quality | Use When |
+|------|--------------|---------|----------|
+| Sonnet only | 1x | Good | Routine tasks, documentation, single-domain |
+| Sonnet + Opus advisor | ~1.5-2x | Near-Opus | Complex judgment calls within Sonnet execution |
+| Opus only | 3-5x | Best | Orchestration, architecture, security-critical |
+
+### Configuration
+
+Settings in `artibot.config.json` under `agents.modelPolicy.advisorStrategy`:
+
+```json
+{
+  "advisorStrategy": {
+    "enabled": true,
+    "executorModel": "sonnet",
+    "advisorModel": "opus",
+    "maxUses": 3,
+    "triggerConditions": [
+      "architecture-decision",
+      "security-assessment",
+      "complex-debugging",
+      "cross-domain-analysis"
+    ]
+  }
+}
+```
+
 ## Configuration
 
 Settings in `artibot.config.json` under `cognitive.router` and `cognitive.system1/system2`:
