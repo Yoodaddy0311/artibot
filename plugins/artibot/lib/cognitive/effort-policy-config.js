@@ -90,6 +90,24 @@ export function __setCachedConfigForTests(rawFragment) {
   return value;
 }
 
+/**
+ * Inject a raw on-disk overlay into the overlay memo for deterministic tests.
+ * The value is run through {@link normalizeOverlay} (so bandShifts are clamped
+ * to int [-1,+1] and budgetMultipliers to [0.5,1.5]) + frozen; TTL is set to
+ * now. Mirrors {@link __setCachedConfigForTests}. NEVER call in production.
+ *
+ * Cleared by {@link resetEffortPolicyConfigCache}.
+ *
+ * @param {object|undefined} rawOverlay - Raw overlay shape (needs `version: 1`
+ *   to enable; anything malformed yields the identity overlay).
+ * @returns {object} the normalized value now in the cache
+ */
+export function __setCachedOverlayForTests(rawOverlay) {
+  const value = normalizeOverlay(rawOverlay);
+  _overlayCache = { loadedAt: Date.now(), value };
+  return value;
+}
+
 // ---------------------------------------------------------------------------
 // Coercion helpers (never throw)
 // ---------------------------------------------------------------------------

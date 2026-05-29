@@ -7,10 +7,13 @@
  * (2) prove the P3 learned-overlay path is dormant by default — overlay cold/
  * disabled must yield byte-identical results to the P1 heuristic.
  */
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { EFFORT_BANDS, resolveEffort } from '../../lib/cognitive/effort-resolver.js';
 import { getEffortForCommand } from '../../lib/cognitive/router.js';
-import { resetEffortPolicyConfigCache } from '../../lib/cognitive/effort-policy-config.js';
+import {
+  __setCachedOverlayForTests,
+  resetEffortPolicyConfigCache,
+} from '../../lib/cognitive/effort-policy-config.js';
 
 describe('effort-resolver (direct import)', () => {
   it('exports EFFORT_BANDS frozen, 5 levels ascending', () => {
@@ -64,6 +67,49 @@ describe('effort-resolver (direct import)', () => {
     it('never throws when the overlay cache is cold', () => {
       resetEffortPolicyConfigCache();
       expect(() => resolveEffort('plan', { score: 0.5 })).not.toThrow();
+    });
+  });
+
+  // The hysteresis-hold path has a learned sub-branch (effort-resolver.js:79-81):
+  // when score is in the hysteresis dead-band AND prevEffort==baseline, the
+  // heuristic shift is suppressed — but a NON-ZERO learned overlay shift still
+  // overrides the hold. Exercising it requires an enabled overlay, injected via
+  // the sync test seam. afterEach MUST reset so the enabled overlay does not leak
+  // into the dormant-by-default assumptions of router-resolve-effort.test.js.
+  describe('hysteresis-hold x learnedShift override (overlay injected)', () => {
+    afterEach(() => {
+      // CRITICAL: clear the injected overlay so other suites stay dormant.
+      resetEffortPolicyConfigCache();
+    });
+
+    it('applies the learned shift instead of holding when learned !== 0', () => {
+      // content baseline = medium (idx 1). score 0.72 -> heuristic +1, but
+      // |0.72-0.7| = 0.02 <= 0.05 hysteresis band, prevEffort == baseline ->
+      // hysteresis would hold at medium. Enabled overlay biases content +1.
+      __setCachedOverlayForTests({ version: 1, bandShifts: { content: 1 }, budgetMultipliers: {} });
+      const r = resolveEffort('content', { score: 0.72, prevEffort: 'medium' });
+      expect(r.baseline).toBe('medium');
+      expect(r.effort).toBe('high'); // medium + learned(+1), NOT held at medium
+      expect(r.shift).toBe(1);
+      expect(r.reason).toContain('hysteresis-hold');
+      expect(r.reason).toContain('learnedShift (+1)');
+    });
+
+    it('holds at baseline (pure hysteresis-hold) when overlay disabled', () => {
+      resetEffortPolicyConfigCache(); // overlay dormant -> learned == 0
+      const r = resolveEffort('content', { score: 0.72, prevEffort: 'medium' });
+      expect(r.effort).toBe('medium'); // held at baseline
+      expect(r.shift).toBe(0);
+      expect(r.reason).toBe('hysteresis-hold');
+      expect(r.reason).not.toContain('learnedShift');
+    });
+
+    it('holds at baseline when overlay enabled but learned == 0 for the command', () => {
+      // Overlay enabled, but no bandShift for `content` -> learnedShiftFor == 0.
+      __setCachedOverlayForTests({ version: 1, bandShifts: { implement: 1 }, budgetMultipliers: {} });
+      const r = resolveEffort('content', { score: 0.72, prevEffort: 'medium' });
+      expect(r.effort).toBe('medium');
+      expect(r.reason).toBe('hysteresis-hold');
     });
   });
 });

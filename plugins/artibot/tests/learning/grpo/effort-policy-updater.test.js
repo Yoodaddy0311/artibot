@@ -175,11 +175,17 @@ describe('saveEffortPolicy + loadEffortPolicy', () => {
 
   it('retains only snapshotCount snapshots after 4 saves', async () => {
     const overlay = { bandShifts: { implement: 1 }, budgetMultipliers: {} };
+    // Injected monotonic fake clock -> distinct ISO stamps + snapshot ids per
+    // save, no real sleep. Each tick advances 1s so trainedAt/snapshotId differ.
+    let t = Date.UTC(2026, 0, 1, 0, 0, 0);
+    const now = () => new Date((t += 1000));
+    const ids = [];
     for (let i = 0; i < 4; i++) {
-      await saveEffortPolicy(overlay, { policyPath, snapshotCount: 3 });
-      // ensure distinct mtimes for deterministic prune ordering
-      await new Promise((r) => setTimeout(r, 5));
+      const saved = await saveEffortPolicy(overlay, { policyPath, snapshotCount: 3, now });
+      ids.push(saved.snapshotId);
     }
+    // Clock injection makes the four snapshot ids distinct (no collision).
+    expect(new Set(ids).size).toBe(4);
     const snaps = readdirSync(path.join(tmp, 'snapshots')).filter((f) => f.endsWith('.json'));
     expect(snaps.length).toBe(3);
   });

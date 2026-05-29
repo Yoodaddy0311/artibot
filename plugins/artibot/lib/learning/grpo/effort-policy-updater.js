@@ -302,19 +302,23 @@ async function pruneSnapshots(snapshotDir, retain) {
  * @param {string} [options.policyPath]
  * @param {number} [options.trainedOnEpisodes]
  * @param {number} [options.snapshotCount=EFFORT_TRAINER_DEFAULTS.snapshotCount]
+ * @param {() => Date} [options.now] - injectable clock for deterministic tests
+ *   (default `() => new Date()`); production behaviour is unchanged.
  * @returns {Promise<{ policy: object, snapshotId: string, policyFile: string }>}
  */
 export async function saveEffortPolicy(overlay, options = {}) {
   const { policyFile, snapshotDir } = resolveEffortPolicyPaths(options.policyPath);
   const retain = options.snapshotCount ?? EFFORT_TRAINER_DEFAULTS.snapshotCount;
+  const now = typeof options.now === 'function' ? options.now : () => new Date();
   await ensureDir(path.dirname(policyFile));
   await ensureDir(snapshotDir);
-  const snapshotId = makeSnapshotId();
+  const stamp = now();
+  const snapshotId = makeSnapshotId(stamp);
   const policy = {
     version: POLICY_VERSION,
     bandShifts: { ...overlay.bandShifts },
     budgetMultipliers: { ...overlay.budgetMultipliers },
-    trainedAt: new Date().toISOString(),
+    trainedAt: stamp.toISOString(),
     trainedOnEpisodes: options.trainedOnEpisodes ?? 0,
     snapshotId,
   };
@@ -335,6 +339,8 @@ export async function saveEffortPolicy(overlay, options = {}) {
  * @param {string} [options.policyPath]
  * @param {object} [options.config] - effort-policy config block (coldStartEpisodes, snapshotCount, ...)
  * @param {{ info: Function, warn: Function, error: Function }} [options.logger]
+ * @param {() => Date} [options.now] - injectable clock for deterministic tests
+ *   (default `() => new Date()`); production behaviour is unchanged.
  * @returns {{
  *   loadPolicy: () => Promise<object|null>,
  *   trainFromEpisodes: (episodes: object[]) =>
@@ -345,6 +351,7 @@ export function createEffortPolicyUpdater(options = {}) {
   const policyPath = options.policyPath;
   const config = { ...EFFORT_TRAINER_DEFAULTS, ...(options.config ?? {}) };
   const logger = options.logger ?? { info() {}, warn() {}, error() {} };
+  const now = typeof options.now === 'function' ? options.now : undefined;
 
   return {
     loadPolicy: () => loadEffortPolicy(policyPath),
@@ -370,6 +377,7 @@ export function createEffortPolicyUpdater(options = {}) {
         policyPath,
         trainedOnEpisodes: usable.length,
         snapshotCount: config.snapshotCount,
+        ...(now ? { now } : {}),
       });
       return {
         policy: saved.policy,
