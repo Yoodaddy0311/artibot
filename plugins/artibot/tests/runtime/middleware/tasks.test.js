@@ -1,4 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { createTasksMiddleware } from '../../../lib/runtime/middleware/tasks.js';
 
 function makeState(overrides = {}) {
@@ -128,5 +131,71 @@ describe('middleware/tasks', () => {
 
     // ID starts with rt- and contains base36 of timestamp
     expect(result.context.tasks.id).toMatch(/^rt-[a-z0-9]+-[a-z0-9]+$/);
+  });
+});
+
+describe('middleware/tasks — Score-Aware effort meta propagation', () => {
+  let pluginRoot;
+
+  beforeEach(() => {
+    pluginRoot = mkdtempSync(path.join(tmpdir(), 'artibot-tasks-'));
+    mkdirSync(path.join(pluginRoot, 'runtime'), { recursive: true });
+  });
+
+  afterEach(() => {
+    rmSync(pluginRoot, { recursive: true, force: true });
+  });
+
+  function writeEffortFixture(meta) {
+    writeFileSync(
+      path.join(pluginRoot, 'runtime', 'current-effort.json'),
+      JSON.stringify(meta) + '\n',
+    );
+  }
+
+  it('propagates shift + reason from current-effort.json into task.meta', async () => {
+    writeEffortFixture({
+      command: 'implement', effort: 'max', baseline: 'xhigh',
+      shift: 1, reason: 'score>=0.7 (+1)',
+    });
+    const mw = createTasksMiddleware({ now: () => 1700000000000 });
+    const state = makeState({ input: { prompt: 'x', pluginRoot } });
+    const result = await mw(state);
+
+    expect(result.context.tasks.meta).toEqual({
+      effort: 'max', command: 'implement', taskBudget: null,
+      shift: 1, reason: 'score>=0.7 (+1)',
+    });
+  });
+
+  it('defaults shift to null and reason to null when fields are absent', async () => {
+    writeEffortFixture({ command: 'daily', effort: 'medium' });
+    const mw = createTasksMiddleware({ now: () => 1700000000000 });
+    const state = makeState({ input: { prompt: 'x', pluginRoot } });
+    const result = await mw(state);
+
+    expect(result.context.tasks.meta.shift).toBeNull();
+    expect(result.context.tasks.meta.reason).toBeNull();
+  });
+
+  it('preserves a negative shift value (does not coerce to null)', async () => {
+    writeEffortFixture({
+      command: 'daily', effort: 'low', baseline: 'medium',
+      shift: -1, reason: 'score<=0.25 (-1)',
+    });
+    const mw = createTasksMiddleware({ now: () => 1700000000000 });
+    const state = makeState({ input: { prompt: 'x', pluginRoot } });
+    const result = await mw(state);
+
+    expect(result.context.tasks.meta.shift).toBe(-1);
+    expect(result.context.tasks.meta.reason).toBe('score<=0.25 (-1)');
+  });
+
+  it('omits task.meta entirely when no effort file exists', async () => {
+    const mw = createTasksMiddleware({ now: () => 1700000000000 });
+    const state = makeState({ input: { prompt: 'x', pluginRoot } });
+    const result = await mw(state);
+
+    expect(result.context.tasks.meta).toBeUndefined();
   });
 });

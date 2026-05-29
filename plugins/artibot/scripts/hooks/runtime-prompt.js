@@ -56,7 +56,7 @@ async function resolveCommandEffort(commandName, pluginRoot) {
 /**
  * Persist the detected command + effort to runtime/ for downstream consumers
  * (statusline, observability, future native effort API wiring).
- * @param {{ command: string, effort: string } | null} meta
+ * @param {{ command: string, effort: string, baseline?: string, shift?: number, reason?: string } | null} meta
  * @param {string} pluginRoot
  */
 function persistEffortMeta(meta, pluginRoot) {
@@ -87,9 +87,9 @@ async function applyNativeEffortHint(effortLevel, pluginRoot) {
   try {
     const routerPath = path.join(pluginRoot, 'lib', 'cognitive', 'router.js');
     const { setNativeEffortHint } = await import(toFileUrl(routerPath));
-    // Router maps 'xhigh' into the 'high' effort band (system 2 override).
-    const normalized = effortLevel === 'xhigh' ? 'high' : effortLevel;
-    setNativeEffortHint({ effortLevel: normalized });
+    const NATIVE_API_FALLBACK = { max: 'high', xhigh: 'high', high: 'high', medium: 'medium', low: 'low' };
+    const known = NATIVE_API_FALLBACK[effortLevel] ?? 'high';
+    setNativeEffortHint({ effortLevel: known, band: effortLevel });
   } catch {
     // Non-critical: fall back to heuristic routing
   }
@@ -326,17 +326,77 @@ function persistTokenUsage(context, pluginRoot) {
 }
 
 /**
+ * Derive Score-Aware effort signals from the prompt + hook payload.
+ * Both inputs are best-effort: a missing context_window simply omits the
+ * remainingContextRatio, and any router import failure yields an empty score.
+ *
+ * @param {string} prompt
+ * @param {object} hookData - Parsed hook payload (may lack context_window).
+ * @param {string} pluginRoot
+ * @returns {Promise<{ score?: number, remainingContextRatio?: number }>}
+ */
+async function deriveEffortSignals(prompt, hookData, pluginRoot) {
+  const signals = {};
+  const cw = hookData?.context_window;
+  if (cw && typeof cw.max_tokens === 'number' && cw.max_tokens > 0 && typeof cw.current_tokens === 'number') {
+    signals.remainingContextRatio = Math.max(0, (cw.max_tokens - cw.current_tokens) / cw.max_tokens);
+  }
+  try {
+    const routerPath = path.join(pluginRoot, 'lib', 'cognitive', 'router.js');
+    const { classifyComplexity } = await import(toFileUrl(routerPath));
+    const c = classifyComplexity(prompt);
+    if (typeof c?.score === 'number') signals.score = c.score;
+  } catch { /* heuristic-free fallback */ }
+  return signals;
+}
+
+/**
+ * Resolve a Score-Aware effort decision for a command. Falls back to the
+ * baseline EFFORT_POLICY effort when the resolver import fails.
+ *
+ * @param {string} commandName
+ * @param {object} signals
+ * @param {string} pluginRoot
+ * @returns {Promise<{ effort: string, baseline: string, shift: number, reason: string } | null>}
+ */
+async function resolveScoredEffort(commandName, signals, pluginRoot) {
+  try {
+    const routerPath = path.join(pluginRoot, 'lib', 'cognitive', 'router.js');
+    const { resolveEffort } = await import(toFileUrl(routerPath));
+    return resolveEffort(commandName, signals);
+  } catch {
+    const effort = await resolveCommandEffort(commandName, pluginRoot);
+    return effort ? { effort, baseline: effort, shift: 0, reason: 'baseline' } : null;
+  }
+}
+
+/**
  * Resolve the effort metadata for a prompt. Persists the result to
- * runtime/current-effort.json and returns `{ command, effort } | null`.
+ * runtime/current-effort.json and returns
+ * `{ command, effort, baseline, shift, reason } | null`.
  *
  * @param {string} prompt
  * @param {string} pluginRoot
- * @returns {Promise<{ command: string, effort: string } | null>}
+ * @param {object} [hookData] - Hook payload used to derive Score-Aware signals.
+ * @returns {Promise<{ command: string, effort: string, baseline: string, shift: number, reason: string } | null>}
  */
-async function resolveEffortMeta(prompt, pluginRoot) {
+async function resolveEffortMeta(prompt, pluginRoot, hookData = {}) {
   const commandName = detectSlashCommand(prompt);
-  const effort = await resolveCommandEffort(commandName, pluginRoot);
-  const effortMeta = commandName && effort ? { command: commandName, effort } : null;
+  if (!commandName) {
+    persistEffortMeta(null, pluginRoot);
+    return null;
+  }
+  const signals = await deriveEffortSignals(prompt, hookData, pluginRoot);
+  const resolved = await resolveScoredEffort(commandName, signals, pluginRoot);
+  const effortMeta = resolved
+    ? {
+      command: commandName,
+      effort: resolved.effort,
+      baseline: resolved.baseline,
+      shift: resolved.shift,
+      reason: resolved.reason,
+    }
+    : null;
   persistEffortMeta(effortMeta, pluginRoot);
   return effortMeta;
 }
@@ -477,7 +537,7 @@ export async function handleUserPromptSubmit(hookData) {
 
   persistTokenUsage(prepared.context, pluginRoot);
 
-  const effortMeta = await resolveEffortMeta(prompt, pluginRoot);
+  const effortMeta = await resolveEffortMeta(prompt, pluginRoot, hookData);
   await recordEffortDecision(effortMeta, pluginRoot);
   await recordPromptSignals(prompt, effortMeta?.command || null, pluginRoot, runtimeConfig);
 

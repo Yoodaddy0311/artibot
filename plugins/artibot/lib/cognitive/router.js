@@ -813,3 +813,6 @@ export function getEffortForCommand(commandName) {
   const key = String(commandName || '').replace(/^\//, '').trim();
   return EFFORT_POLICY[key] ?? 'medium';
 }
+
+// Re-export Score-Aware resolver (same-layer cognitive dependency).
+export { resolveEffort, EFFORT_BANDS } from './effort-resolver.js';

@@ -31,6 +31,8 @@ function readEffortMeta(pluginRoot) {
     effort: effortRaw.effort || null,
     command: effortRaw.command || null,
     taskBudget: null,
+    shift: typeof effortRaw.shift === 'number' ? effortRaw.shift : null,
+    reason: effortRaw.reason || null,
   };
 
   const budgetRaw = readJsonFileSync(path.join(runtimeDir, 'current-task-budget.json'));
@@ -82,6 +84,8 @@ export function createTasksMiddleware(options = {}) {
         effort: effortMeta.effort,
         command: effortMeta.command,
         taskBudget: effortMeta.taskBudget,
+        shift: effortMeta.shift,
+        reason: effortMeta.reason,
       };
     }
 
