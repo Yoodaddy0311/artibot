@@ -3,9 +3,11 @@
  * release-check.js — Verify release readiness before publishing.
  *
  * Checks:
- *   1. Version consistency across 5 files in lockstep (per AGENTS.md §8):
+ *   1. Version consistency across the lockstep set (per AGENTS.md §8):
  *        package.json, artibot.config.json, .claude-plugin/plugin.json,
- *        .well-known/mcp-server.json, AGENTS.md ("Current plugin version: **X**")
+ *        .well-known/mcp-server.json, AGENTS.md ("Current plugin version: **X**"),
+ *        plus the README version badges (root README.md — GitHub-visible —
+ *        and plugins/artibot/README.md) which used to drift silently.
  *   2. CHANGELOG.md has an entry for the current version
  *   3. Installed copy at ~/.claude/artibot/ is in sync (warns if drift)
  *
@@ -68,6 +70,26 @@ if (existsSync(agentsPath)) {
 } else {
   errors.push('Missing version file: AGENTS.md');
   versions.push({ label: 'AGENTS.md', version: null });
+}
+
+// README version badges participate in the lockstep too. These are markdown
+// (not JSON) and the GitHub-visible root README in particular drifted silently
+// across releases because nothing enforced it. Now it does.
+const READMES = [
+  ['README.md (root)', path.resolve(PLUGIN_ROOT, '..', '..', 'README.md')],
+  ['plugins/artibot/README.md', path.join(PLUGIN_ROOT, 'README.md')],
+];
+for (const [label, file] of READMES) {
+  if (!existsSync(file)) {
+    errors.push(`Missing version file: ${label}`);
+    versions.push({ label, version: null });
+    continue;
+  }
+  const badge = readFileSync(file, 'utf-8').match(/badge\/version-([0-9]+\.[0-9]+\.[0-9]+)-/);
+  versions.push({ label, version: badge ? badge[1] : null });
+  if (!badge) {
+    errors.push(`${label} missing version badge "badge/version-X.Y.Z-"`);
+  }
 }
 
 const distinct = new Set(versions.map((v) => v.version).filter(Boolean));
