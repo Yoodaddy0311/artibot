@@ -1,5 +1,5 @@
 {
-  "version": "4.16.0",
+  "version": "4.17.0",
   "agents": {
     "modelPolicy": {
       "high": {
@@ -935,13 +935,15 @@
     ],
     "effort": {
       "injectPrompt": true,
-      "nativeApi": false,
+      "nativeApi": true,
       "budgetMap": {
+        "max": 200000,
         "xhigh": 128000,
         "high": 64000,
         "medium": 32000,
         "low": 16000
-      }
+      },
+      "comment": "v4.17.0: nativeApi true — Claude Opus 4.8 exposes effort as a first-class output_config.effort level (max/xhigh/high/medium/low, default high; no beta header). The Messages API caller now sets output_config:{effort} directly instead of relying on prompt injection alone; injectPrompt stays true as the cross-platform fallback for non-4.8 backends. budgetMap maps each native level to a recommended max_tokens; 'max' (200k) is the new ceiling tier for the deepest agentic runs (ultracode), xhigh/high/medium/low remain 1:1 with the native levels."
     },
     "longContext": {
       "enabled": false,

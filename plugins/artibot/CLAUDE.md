@@ -38,7 +38,7 @@ Orchestrator delegates by default. Teammates execute and cross-check.
 
 Violation symptom: "all work done inline by main thread" = DNA breach. Opt-out: `--no-team` in prompt, or `team.autoApply: false` in `artibot.config.json`.
 
-**Claude 4.7 override**: 4.7 reduces sub-agents by default. This policy explicitly reverses that default for this repo.
+**Claude 4.8 dynamic workflows**: 4.8 natively supports dynamic workflows — ultracode (xhigh effort + always-on multi-agent permission via mid-conversation system messages) makes large-scale parallel delegation a model-level capability. Artibot's Operator-Waits DNA still owns the *automatic* trigger: parallel teams fire on intent without the user typing `/team`.
 
 ## Auto-invoke Principle
 

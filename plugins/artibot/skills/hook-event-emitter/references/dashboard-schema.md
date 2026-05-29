@@ -33,7 +33,7 @@
 | Field | Type | Required | 설명 |
 |-------|------|----------|-----|
 | `cwd` | string | yes | 작업 디렉토리 (redacted) |
-| `model` | string | yes | 모델 id (예: `claude-opus-4-7`) |
+| `model` | string | yes | 모델 id (예: `claude-opus-4-8`) |
 | `source` | string | no | `"cli"` / `"ide"` / `"api"` |
 
 ### 3.2 SessionEnd

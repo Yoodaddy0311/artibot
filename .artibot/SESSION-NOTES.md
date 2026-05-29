@@ -1280,3 +1280,122 @@
 <!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
 
 ---
+
+## 2026-05-21 06:57 UTC · `master`
+
+- **Commits** (15):
+  - `67717e4` fix(autopilot): expand session ID suffix 4→6 char to eliminate RNG collision (closes #33) (#36)
+  - `0162c7a` chore(release): v4.13.1 — sync artibot.config.json version (#35)
+  - `1f9dfb8` chore(release): v4.13.1 — sync 6-file version metadata + CITATION.cff catch-up (#32)
+  - `8c055f1` feat(autopilot): v4.13.1 closeOnStop opt-in gate — stop turn-end auto-commit storm (#31)
+  - `5fa13c0` chore: artibot session close [2026-05-19 04:37:51]
+  - `8453a61` wip: artibot auto-save [2026-05-19 04:08:49]
+  - `fc4363e` feat: /save single-shot session handoff command (v4.13.0) (#30)
+  - `764a024` release: v4.12.0 — autopilot keep-awake (cross-platform OS sleep prevention)
+  - `4248f47` release: v4.11.4 — comprehensive audit fixes (security + K_SERVICE BREAKING + manifest sync + arch cycle fix)
+  - `b596983` ci: drop [skip ci] from sync-readmes commit message (#27)
+  - `b166f3a` docs(release): sync README badges to v4.11.3 [skip ci] (#26)
+  - `6afab9e` release: v4.11.3 — release-infra hardening (CI/docs only) (#25)
+  - `070b73a` ci: drop paths filter from plugin-validate PR trigger (#24)
+  - `231b24a` docs(release): sync README badges to v4.11.2 + switch sync to PR flow (#23)
+  - `cde8095` fix(hooks): dev-verify-gate race-block hotfix (v4.11.2) (#22)
+- **Files touched**: 81
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-05-21 07:16 UTC · `master`
+
+- **Commits** (1):
+  - `1cb6a4b` docs(release): sync README badges to v4.13.1 (#34)
+- **Files touched**: 2
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-05-26 01:36 UTC · `master`
+
+- **Commits** (2):
+  - `3c00f1f` chore(release): v4.14.0 — sync version metadata across 6 files
+  - `b1c07e2` feat(v4.14.0): 8-repo benchmark adoption + semantic autopilot commits (#37)
+- **Files touched**: 22
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-05-26 01:58 UTC · `master`
+
+- **Commits** (2):
+  - `241d188` feat(export): add Antigravity support + /export command (v0.6.0)
+  - `a2637ae` fix(install): unify repo URL from Artience to Yoodaddy0311 in install scripts
+- **Files touched**: 5
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-05-26 02:22 UTC · `master`
+
+- **Commits** (1):
+  - `4f7482b` feat(export): extend cross-platform export to skills + commands via --include
+- **Files touched**: 2
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-05-26 02:45 UTC · `master`
+
+- **Commits** (3):
+  - `6c0fc40` fix(lint): remove unused variable in memory-manager test
+  - `2be795b` fix(lint): remove unused imports in export-to-tool test
+  - `d93fa32` chore(release): v4.15.0 — cross-platform export, install URL fix, command count sync
+- **Files touched**: 11
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-05-28 01:25 UTC · `master`
+
+- **Commits** (1):
+  - `7a0cecb` feat(benchmark): adopt patterns from 3 repos — docs, security, skills, framework
+- **Files touched**: 32
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-05-28 01:31 UTC · `master`
+
+- **Commits** (1):
+  - `ec92ae6` feat: add progress renderer + advisor strategy integration
+- **Files touched**: 5
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-05-28 02:13 UTC · `master`
+
+- **Commits** (2):
+  - `9564b1b` chore(release): v4.16.0 — social-media production workflow, PAC2026 3-Zone full expansion
+  - `4de50ca` feat: social-media production workflow + PAC2026 3-Zone expansion
+- **Files touched**: 42
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-05-28 02:25 UTC · `master`
+
+- **Commits** (1):
+  - `38a12ac` chore(release): sync remaining version files to 4.16.0
+- **Files touched**: 2
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---

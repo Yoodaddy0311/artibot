@@ -185,11 +185,11 @@ For all platforms with sub-agent support, the orchestrator should:
 
 This achieves ~80% of Team Mode's capability without the P2P messaging and shared task list.
 
-**Model Assignment** (Cowork v3.1 Policy — Claude 4.7 / Opus 4.7):
+**Model Assignment** (Cowork v3.1 Policy — Claude 4.8 / Opus 4.8):
 | Role | Model | Effort | Rationale |
 |------|-------|--------|-----------|
-| Orchestrator (this agent) | opus (4.7) | xhigh | Strategic decisions, team coordination, marketing playbooks |
-| Core teammates (2 agents) | opus (4.7) | high | Maximum reasoning: planner, marketing-strategist |
+| Orchestrator (this agent) | opus (4.8) | xhigh | Strategic decisions, team coordination, marketing playbooks |
+| Core teammates (2 agents) | opus (4.8) | high | Maximum reasoning: planner, marketing-strategist |
 | Content teammates (7 agents) | sonnet | medium | Content generation & analysis: content-marketer, data-analyst, presentation-designer, seo-specialist, cro-specialist, ad-specialist, doc-updater |
 
 **Effort Level Policy** (Cowork):

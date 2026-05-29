@@ -767,18 +767,24 @@ function detectTrend(entries) {
 }
 
 // ---------------------------------------------------------------------------
-// Effort Level Policy (Claude Opus 4.7 effort parameter)
+// Effort Level Policy (Claude Opus 4.8 native effort levels)
 // ---------------------------------------------------------------------------
 // Official guide: https://platform.claude.com/docs/ko/build-with-claude/effort
-// 'xhigh' is the 4.7-introduced level recommended for agentic coding.
-// Messages API caller reads EFFORT_POLICY to auto-inject `effort` per command.
+// Native levels (4.8): max | xhigh | high | medium | low. Default is 'high' on
+// every surface; no beta header is required. The Messages API caller sets
+// output_config:{ effort } directly from EFFORT_POLICY (native API) and also
+// keeps the prompt-injected directive as a cross-platform fallback. 'xhigh' is
+// the recommended floor for agentic coding; 'max' is reserved for the deepest
+// multi-agent orchestration (ultracode: xhigh + always-on team workflows).
 
-/** @type {Readonly<Record<string, 'xhigh'|'high'|'medium'|'low'>>} */
+/** @type {Readonly<Record<string, 'max'|'xhigh'|'high'|'medium'|'low'>>} */
 export const EFFORT_POLICY = Object.freeze({
-  // xhigh — agentic coding / multi-file implementation (4.7 official recommendation)
+  // max — deepest multi-agent orchestration / long-horizon autonomy (ultracode-class)
+  orchestrate: 'max', swarm: 'max', autopilot: 'max',
+  // xhigh — agentic coding / multi-file implementation (official coding recommendation)
   implement: 'xhigh', team: 'xhigh', tdd: 'xhigh',
   'build-fix': 'xhigh', cleanup: 'xhigh', 'refactor-clean': 'xhigh',
-  orchestrate: 'xhigh', spawn: 'xhigh', swarm: 'xhigh',
+  spawn: 'xhigh',
   // high — focused reasoning / review / design
   'code-review': 'high', 'adversarial-review': 'high', review: 'high',
   plan: 'high', troubleshoot: 'high', analyze: 'high', design: 'high',
@@ -801,7 +807,7 @@ export const EFFORT_POLICY = Object.freeze({
 /**
  * Resolve effort level for a slash command name.
  * @param {string} commandName - e.g. 'implement', 'code-review' (leading '/' optional)
- * @returns {'xhigh'|'high'|'medium'|'low'} Defaults to 'medium' for unknown commands.
+ * @returns {'max'|'xhigh'|'high'|'medium'|'low'} Defaults to 'medium' for unknown commands.
  */
 export function getEffortForCommand(commandName) {
   const key = String(commandName || '').replace(/^\//, '').trim();

@@ -16,11 +16,11 @@ Parse $ARGUMENTS:
 - `--depth [level]`: `shallow` (structure + config only) | `deep` (full dependency mapping)
 - `--focus [area]`: Limit context loading to specific area (e.g., `src/api`, `packages/core`)
 - `--delegate`: Enable sub-agent delegation for monorepo/multi-directory scanning
-- `--full-context`: (Claude Opus 4.7+) 대형 코드베이스 전체를 1M 컨텍스트에 로드
+- `--full-context`: (Claude Opus 4.8) 대형 코드베이스 전체를 1M 컨텍스트에 로드
 
-### `--full-context` (Claude Opus 4.7+ only)
+### `--full-context` (Claude Opus 4.8 only)
 대형 코드베이스 전체를 1M 컨텍스트에 로드. 프로젝트 전체(<500k 토큰 추정)에 권장.
-- 활성화 조건: 모델이 `opus-4-7`이고 `--full-context` 플래그 명시
+- 활성화 조건: 모델이 `opus-4-8`이고 `--full-context` 플래그 명시
 - 대안: 기본 동작은 선택적 로드 (framework 감지 + 핵심 파일만)
 - 토큰 추정: `find src -type f | xargs wc -c` 결과 / 3 (conservative)
 

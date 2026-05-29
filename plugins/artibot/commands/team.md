@@ -1,5 +1,5 @@
 ---
-description: (Artibot) Parallel team execution with cross-check — persistent team mode, leader delegates only, implementation on opus 4.7 (xhigh effort 권장), review phases on sonnet 4.6
+description: (Artibot) Parallel team execution with cross-check — persistent team mode, leader delegates only, implementation on opus 4.8 (xhigh effort 권장), review phases on sonnet 4.6
 argument-hint: '[task] e.g. "이 기능 구현하고 테스트도 작성해줘"'
 allowed-tools: [Read, Glob, Grep, Bash, TeamCreate, SendMessage, TaskCreate, TaskUpdate, TaskList, TaskGet, Task, TeamDelete]
 toolset: team
@@ -7,7 +7,7 @@ toolset: team
 
 # /team
 
-Parallel team execution with mandatory cross-check and **persistent team mode**. The leader (YOU) delegates work and receives results ONLY — never does the work yourself. Implementation teammates (Phase 3) run on **opus 4.7** for maximum code quality. Review teammates (Phase 4 cross-check, Phase 4.5 inspection) run on **sonnet 4.6** for faster turnaround. By default, the team **persists** after task completion and awaits the next assignment. Use `--one-shot` to revert to single-task-then-shutdown behavior.
+Parallel team execution with mandatory cross-check and **persistent team mode**. The leader (YOU) delegates work and receives results ONLY — never does the work yourself. Implementation teammates (Phase 3) run on **opus 4.8** for maximum code quality. Review teammates (Phase 4 cross-check, Phase 4.5 inspection) run on **sonnet 4.6** for faster turnaround. By default, the team **persists** after task completion and awaits the next assignment. Use `--one-shot` to revert to single-task-then-shutdown behavior.
 
 ## Arguments
 
@@ -43,8 +43,16 @@ Parse $ARGUMENTS:
 - 애매하면 유지 — idle 상태 팀원은 토큰을 소비하지 않는다
 - 셧다운 판단 기준: 다음 작업의 도메인이 완전히 달라져서 해당 전문성이 0% 필요할 때만
 
-### Task Budget (Beta, Opus 4.7+) ⚗️ research preview — API 변경 가능
-에이전트 루프 토큰 폭주 방지용 옵트인. 팀 전체 작업 예산을 모델에 권고한다.
+### Effort & Task Budget (Opus 4.8 native)
+Opus 4.8은 effort를 네이티브 레벨로 노출한다: **max / xhigh / high / medium / low** (기본 high, 베타 헤더 불필요). `/team` 구현 phase는 **xhigh**가 기본 권장값이고, 대규모 멀티에이전트 오케스트레이션은 **max**까지 올린다. 호출 측은 `output_config.effort`로 직접 지정한다.
+
+```json
+{
+  "output_config": { "effort": "xhigh" }
+}
+```
+
+작업 예산(task budget)은 에이전트 루프 토큰 폭주 방지용 옵트인으로, 팀 전체 작업 예산을 모델에 권고한다.
 
 ```json
 {
@@ -53,12 +61,13 @@ Parse $ARGUMENTS:
 }
 ```
 
-| 상황 | 권장 task_budget |
-|---|---|
-| `/team` 구현 phase | 128,000 |
-| `/team` 리뷰 phase | 40,000 |
-| 짧은 배치 | 20,000 (최소) |
-| 개방형 탐색 | 설정하지 말 것 |
+| 상황 | 권장 effort | 권장 task_budget |
+|---|---|---|
+| `/team` 대규모 오케스트레이션 | max | 200,000 |
+| `/team` 구현 phase | xhigh | 128,000 |
+| `/team` 리뷰 phase | high / medium | 40,000 |
+| 짧은 배치 | medium | 20,000 (최소) |
+| 개방형 탐색 | high (기본) | 설정하지 말 것 |
 
 주의: 하드 캡 아님. `max_tokens`(요청별 상한)와 역할이 다름.
 
@@ -76,10 +85,10 @@ Break the user's request into independent work units:
 - Each unit should be independently completable
 - Choose the best specialist agent for each unit
 
-### Auto-Effort Pre-injection (4.7 Agentic)
+### Auto-Effort Pre-injection (4.8 Agentic)
 
 Before spawning teammates, `scripts/hooks/runtime-prompt.js` has already written:
-- `runtime/current-effort.json` — 현재 커맨드의 effort level (xhigh/high/medium/low)
+- `runtime/current-effort.json` — 현재 커맨드의 effort level (max/xhigh/high/medium/low)
 - `runtime/current-task-budget.json` — 해당 effort에 매핑된 max_tokens budget
 
 The orchestrator MUST:

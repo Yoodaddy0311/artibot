@@ -25,13 +25,13 @@ Parse $ARGUMENTS:
 3. **Select Route**: Pick highest-confidence match
 4. **Delegate**: Execute the selected command/agent with original arguments
 
-## Effort Level Policy (Claude Opus 4.7+)
+## Effort Level Policy (Claude Opus 4.8)
 
 라우터는 커맨드 식별 후 `lib/cognitive/router.js`의 `EFFORT_POLICY`를 참조해 Messages API 호출 시 `effort` 파라미터를 자동 주입한다.
 
 | Effort | 대상 커맨드 / 상황 | 이유 |
 |---|---|---|
-| `xhigh` | `/implement`, `/team` (구현 phase), `/tdd`, `/build-fix`, `/cleanup` | 에이전틱 코딩 — 4.7 공식 권장 |
+| `xhigh` | `/implement`, `/team` (구현 phase), `/tdd`, `/build-fix`, `/cleanup` | 에이전틱 코딩 — 4.8 공식 권장 |
 | `high` | `/code-review`, `/adversarial-review`, `/plan`, `/troubleshoot`, `/analyze`, `/design` | 집중 추론 |
 | `medium` | `/daily`, `/load`, `/index`, `/explain`, `/document` | 균형 |
 | `low` | `/permissions`, `/update`, `/quickstart`, status/UI 응답 | 비용 절감 |

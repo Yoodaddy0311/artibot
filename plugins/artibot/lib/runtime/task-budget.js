@@ -13,6 +13,7 @@ import path from 'node:path';
 import { mkdirSync, writeFileSync } from 'node:fs';
 
 const DEFAULT_BUDGET_MAP = Object.freeze({
+  max: 200000,
   xhigh: 128000,
   high: 64000,
   medium: 32000,
@@ -24,7 +25,7 @@ const DEFAULT_BETA_HEADER = 'context-1m-2025-08-01';
 /**
  * Resolve max_tokens budget for a given effort level.
  *
- * @param {'xhigh'|'high'|'medium'|'low'|string|null|undefined} effortLevel
+ * @param {'max'|'xhigh'|'high'|'medium'|'low'|string|null|undefined} effortLevel
  * @param {object} [config] - artibot.config.json object (optional).
  * @returns {number|null} Budget in tokens, or null if level is unknown.
  */
@@ -48,7 +49,7 @@ export function getTaskBudgetForEffort(effortLevel, config = {}) {
  *
  * The beta header is appended only when long-context is enabled in config.
  *
- * @param {'xhigh'|'high'|'medium'|'low'|string|null|undefined} effortLevel
+ * @param {'max'|'xhigh'|'high'|'medium'|'low'|string|null|undefined} effortLevel
  * @param {number|null} budget
  * @param {object} [config] - artibot.config.json object (optional).
  * @returns {string} Directive string (empty when inputs are invalid).
