@@ -25,6 +25,7 @@ plugins/artibot/docs/*
 !plugins/artibot/docs/MCP-SETUP.md
 !plugins/artibot/docs/PRD-TELEGRAM-MCP.md
 !plugins/artibot/docs/PRD-EFFORT-DYNAMIC-WORKFLOW.md
+!plugins/artibot/docs/PRD-LEARNING-ACTIVATION.md
 !plugins/artibot/docs/adr/
 !plugins/artibot/docs/adr/**
 plugins/artibot/coverage/
