@@ -1,0 +1,59 @@
+/**
+ * Static Effort Level Policy (cognitive layer, pure L4 leaf — no imports).
+ *
+ * Maps slash-command names to Claude Opus 4.8 native effort levels. Extracted
+ * verbatim from router.js so the static mapping can be imported without pulling
+ * in the System 1/2 routing graph (breaks the router↔effort-resolver cycle and
+ * keeps router.js under the <800-line quality gate). Logic is byte-identical to
+ * the previous in-router definition.
+ *
+ * @module lib/cognitive/effort-policy
+ */
+
+// ---------------------------------------------------------------------------
+// Effort Level Policy (Claude Opus 4.8 native effort levels)
+// ---------------------------------------------------------------------------
+// Official guide: https://platform.claude.com/docs/ko/build-with-claude/effort
+// Native levels (4.8): max | xhigh | high | medium | low. Default is 'high' on
+// every surface; no beta header is required. The Messages API caller sets
+// output_config:{ effort } directly from EFFORT_POLICY (native API) and also
+// keeps the prompt-injected directive as a cross-platform fallback. 'xhigh' is
+// the recommended floor for agentic coding; 'max' is reserved for the deepest
+// multi-agent orchestration (ultracode: xhigh + always-on team workflows).
+
+/** @type {Readonly<Record<string, 'max'|'xhigh'|'high'|'medium'|'low'>>} */
+export const EFFORT_POLICY = Object.freeze({
+  // max — deepest multi-agent orchestration / long-horizon autonomy (ultracode-class)
+  orchestrate: 'max', swarm: 'max', autopilot: 'max',
+  // xhigh — agentic coding / multi-file implementation (official coding recommendation)
+  implement: 'xhigh', team: 'xhigh', tdd: 'xhigh',
+  'build-fix': 'xhigh', cleanup: 'xhigh', 'refactor-clean': 'xhigh',
+  spawn: 'xhigh',
+  // high — focused reasoning / review / design
+  'code-review': 'high', 'adversarial-review': 'high', review: 'high',
+  plan: 'high', troubleshoot: 'high', analyze: 'high', design: 'high',
+  estimate: 'high', spec: 'high', verify: 'high', improve: 'high', repo: 'high',
+  // medium — balanced content / domain work
+  daily: 'medium', load: 'medium', index: 'medium',
+  explain: 'medium', document: 'medium', checkpoint: 'medium', learn: 'medium',
+  git: 'medium', playbook: 'medium', build: 'medium', ship: 'medium',
+  test: 'medium', 'visual-check': 'medium',
+  ad: 'medium', analytics: 'medium', content: 'medium',
+  crm: 'medium', cro: 'medium', email: 'medium', excel: 'medium',
+  marketing: 'medium', mkt: 'medium', ppt: 'medium',
+  seo: 'medium', social: 'medium',
+  // low — cost-saving / lookup / config
+  permissions: 'low', update: 'low', quickstart: 'low',
+  sc: 'low', sdk: 'low', setup: 'low', task: 'low',
+  assemble: 'low', codex: 'low',
+});
+
+/**
+ * Resolve effort level for a slash command name.
+ * @param {string} commandName - e.g. 'implement', 'code-review' (leading '/' optional)
+ * @returns {'max'|'xhigh'|'high'|'medium'|'low'} Defaults to 'medium' for unknown commands.
+ */
+export function getEffortForCommand(commandName) {
+  const key = String(commandName || '').replace(/^\//, '').trim();
+  return EFFORT_POLICY[key] ?? 'medium';
+}

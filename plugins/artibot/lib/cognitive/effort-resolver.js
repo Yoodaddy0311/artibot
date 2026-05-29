@@ -2,7 +2,7 @@
  * Score-Aware Effort Resolution (cognitive layer, pure).
  * @module lib/cognitive/effort-resolver
  */
-import { getEffortForCommand } from './router.js';
+import { getEffortForCommand } from './effort-policy.js';
 import { getCachedEffortPolicyOverlay } from './effort-policy-config.js';
 
 export const EFFORT_BANDS = Object.freeze(['low', 'medium', 'high', 'xhigh', 'max']);

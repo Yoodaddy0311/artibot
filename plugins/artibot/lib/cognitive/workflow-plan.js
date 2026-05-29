@@ -5,10 +5,11 @@
  * from a single source so the auto-team decision and each teammate's
  * `[artibot:effort][artibot:task-budget]` prefix stay consistent.
  *
- * Layer integrity: imports router.js ONLY. `resolveEffort`/`budgetResolver`
- * are injected via `deps` by the L5 composition root (tasks.js); when absent
- * the planner falls back to the static `getEffortForCommand` mapping and a
- * zero budget so it runs standalone.
+ * Layer integrity: imports effort-policy.js ONLY (the static effort mapping;
+ * no routing-graph dependency). `resolveEffort`/`budgetResolver` are injected
+ * via `deps` by the L5 composition root (tasks.js); when absent the planner
+ * falls back to the static `getEffortForCommand` mapping and a zero budget so
+ * it runs standalone.
  *
  * Live-intent note: the runtime `intent` object has no `subObjectives` field.
  * Each `intent.recommendations[]` entry is treated as one sub-objective, and
@@ -18,7 +19,7 @@
  * @module lib/cognitive/workflow-plan
  */
 
-import { getEffortForCommand } from './router.js';
+import { getEffortForCommand } from './effort-policy.js';
 
 /** Ordered effort ladder (low → max). Index used for clamping. */
 export const EFFORT_LADDER = Object.freeze(['low', 'medium', 'high', 'xhigh', 'max']);
