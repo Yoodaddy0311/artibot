@@ -13,6 +13,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.18.0] — 2026-05-29
+
+**Theme**: Effort × Dynamic-Workflow Fusion — effort가 정적 매핑에서 복잡도·컨텍스트 적응형으로 진화
+
+See `docs/PRD-EFFORT-DYNAMIC-WORKFLOW.md` and `docs/adr/ADR-001-effort-workflow-fusion.md`.
+
+### Added
+
+- **Score-Aware Effort Resolution (P1)** — `lib/cognitive/effort-resolver.js`의 `resolveEffort(command, signals)`. effort를 `명령어 베이스라인 × 복잡도 score × 남은 컨텍스트`로 ±1 밴드 시프트(히스테리시스 포함). 신호 없으면 `getEffortForCommand`와 byte-identical(zero-risk fallback). hook이 `classifyComplexity` + `context_window`로 신호를 도출하고 손실 `xhigh→high` 다운그레이드 제거.
+- **Unified Effort×Team Trigger (P2)** — `lib/cognitive/workflow-plan.js`. 단일 복잡도 분류가 자동 팀 트리거와 per-teammate effort/budget를 함께 구동. teammate effort는 `[parent−1, parent]` clamp. 순수 L4(주입형 budgetResolver). orchestrator가 `task.meta.workflowPlan`으로 per-teammate `[artibot:effort][artibot:task-budget]` prefix.
+- **GRPO-Tuned Adaptive Policy (P3, dormant)** — `effort-policy-config.js`(L4 reader) + `effort-policy-updater.js`(L3 nightly trainer). GRPO 보상으로 effort 베이스라인·budget를 야간 튜닝하는 학습 overlay. **기본 `enabled:false` — 동작 무변화**. bandShift `[−1,+1]`, budgetMultiplier `[0.5,1.5]`, KL-capped delta, cold-start 게이팅, snapshot 회전. 트레이너↔reader는 디스크로만 통신.
+
+### Changed
+
+- `lib/runtime/task-budget.js` — `getTaskBudgetForEffort`에 optional overlay 인자(학습 multiplier + ceiling 재clamp).
+- `lib/learning/grpo/reward-metrics.js` — `recordReward`가 effort/command/budget/tokensUsed를 additive 기록(back-compat).
+- `lib/cognitive/router.js` 818→776줄 — `EFFORT_POLICY`/`getEffortForCommand`를 `lib/cognitive/effort-policy.js`로 분리(re-export로 하위호환), `file<800` 게이트 충족.
+
+---
+
+## [4.17.0] — 2026-05-28
+
+**Theme**: Claude Opus 4.8 native effort 레벨 도입
+
+### Added
+
+- **`max` effort 레벨** — `EFFORT_POLICY`에 native `max` 레벨 추가. `orchestrate`/`swarm`/`autopilot`을 `xhigh`→`max`로 승격(최심 다중 에이전트 오케스트레이션). `task-budget.js`에 `max: 200000` 예산 추가. effort 타입을 `max|xhigh|high|medium|low`로 확장.
+
+---
+
 ## [4.16.0] — 2026-05-28
 
 **Theme**: social-media 프로덕션 워크플로 + PAC2026 3-Zone 전체 에이전트 확산
