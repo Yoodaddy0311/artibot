@@ -62,6 +62,49 @@ describe('getTaskBudgetForEffort', () => {
   });
 });
 
+describe('getTaskBudgetForEffort P3 overlay multiplier', () => {
+  const config = {
+    runtime: {
+      effort: {
+        budgetMap: { max: 200000, xhigh: 128000, high: 64000, medium: 32000, low: 16000 },
+      },
+    },
+  };
+
+  it('returns the base value when overlay is null/absent', () => {
+    expect(getTaskBudgetForEffort('high', config)).toBe(64000);
+    expect(getTaskBudgetForEffort('high', config, null)).toBe(64000);
+    expect(getTaskBudgetForEffort('high', config, {})).toBe(64000);
+  });
+
+  it('multiplies the base budget by a valid multiplier', () => {
+    const overlay = { budgetMultipliers: { high: 1.2 } };
+    expect(getTaskBudgetForEffort('high', config, overlay)).toBe(Math.round(64000 * 1.2));
+  });
+
+  it('re-clamps a boosted budget to the budgetMap ceiling (max)', () => {
+    // xhigh=128000 * 1.5 = 192000 (< max 200000) — stays under ceiling.
+    expect(getTaskBudgetForEffort('xhigh', config, { budgetMultipliers: { xhigh: 1.5 } }))
+      .toBe(192000);
+    // max=200000 * 1.5 = 300000 -> clamped down to ceiling 200000.
+    expect(getTaskBudgetForEffort('max', config, { budgetMultipliers: { max: 1.5 } }))
+      .toBe(200000);
+  });
+
+  it('ignores zero / NaN / negative / out-of-range multipliers', () => {
+    expect(getTaskBudgetForEffort('high', config, { budgetMultipliers: { high: 0 } })).toBe(64000);
+    expect(getTaskBudgetForEffort('high', config, { budgetMultipliers: { high: NaN } })).toBe(64000);
+    expect(getTaskBudgetForEffort('high', config, { budgetMultipliers: { high: -1 } })).toBe(64000);
+    expect(getTaskBudgetForEffort('high', config, { budgetMultipliers: { high: 2 } })).toBe(64000);
+    expect(getTaskBudgetForEffort('high', config, { budgetMultipliers: { high: 0.4 } })).toBe(64000);
+  });
+
+  it('reduces budget for a multiplier below 1', () => {
+    expect(getTaskBudgetForEffort('high', config, { budgetMultipliers: { high: 0.5 } }))
+      .toBe(32000);
+  });
+});
+
 describe('buildTaskBudgetDirective', () => {
   it('emits max_tokens directive without beta header by default', () => {
     const out = buildTaskBudgetDirective('xhigh', 128000, {});

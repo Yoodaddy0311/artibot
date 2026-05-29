@@ -854,7 +854,8 @@
       "nightlyGrpoTrainer": "30 2 * * *",
       "nightlyAgentPolicyTrainer": "45 2 * * *",
       "nightlySkillPolicyTrainer": "0 3 * * *",
-      "nightlyJointPolicyTrainer": "15 3 * * *"
+      "nightlyJointPolicyTrainer": "15 3 * * *",
+      "nightlyEffortPolicyTrainer": "30 3 * * *"
     },
     "hierarchicalMemory": {
       "enabled": true,
@@ -911,6 +912,13 @@
         "enabled": false,
         "policyPath": "~/.claude/artibot/policies/joint-policy-v1.json",
         "correlationWeight": 0.5
+      },
+      "effortPolicy": {
+        "enabled": false,
+        "policyPath": "~/.claude/artibot/policies/effort-policy-v1.json",
+        "coldStartEpisodes": 150,
+        "bandShiftClamp": 1,
+        "snapshotCount": 3
       }
     }
   },

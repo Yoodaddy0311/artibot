@@ -259,6 +259,26 @@ Task(backend-developer, team_name="feature-auth", name="be-dev")
 Task(tdd-guide, team_name="feature-auth", name="test-lead")
 ```
 
+#### Per-Teammate Effort & Budget (unified workflow plan)
+
+The canonical evaluator for the team trigger AND per-teammate effort/budget is
+`lib/cognitive/workflow-plan.js#buildWorkflowPlan` — a single complexity
+classification drives both. When the runtime attaches it, read
+`task.meta.workflowPlan.teammates[i].effort` / `.budget` and prefix that
+teammate's spawn prompt:
+
+```
+[artibot:effort level=<teammates[i].effort>][artibot:task-budget max_tokens=<teammates[i].budget>]
+```
+
+- Each teammate's effort is clamped to `[parent−1, parent]`, so no teammate
+  ever exceeds the parent command's effort band.
+- **Fallback**: when `workflowPlan` is absent (or has no matching teammate),
+  use the parent effort from `task.meta.effort` instead.
+- Numeric thresholds are NEVER hardcoded here — they live only in
+  `artibot.config.json#/team/autoApplyTriggers`. This doc is a summary; the
+  evaluator is the source of truth.
+
 ### 3. Create Work Items
 
 ```

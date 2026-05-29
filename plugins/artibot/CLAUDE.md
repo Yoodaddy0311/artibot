@@ -40,6 +40,8 @@ Violation symptom: "all work done inline by main thread" = DNA breach. Opt-out: 
 
 **Claude 4.8 dynamic workflows**: 4.8 natively supports dynamic workflows — ultracode (xhigh effort + always-on multi-agent permission via mid-conversation system messages) makes large-scale parallel delegation a model-level capability. Artibot's Operator-Waits DNA still owns the *automatic* trigger: parallel teams fire on intent without the user typing `/team`.
 
+**Canonical evaluator**: the team trigger AND per-teammate effort/budget are both derived from one complexity classification by `lib/cognitive/workflow-plan.js#buildWorkflowPlan`; the numeric thresholds live only in `artibot.config.json#/team/autoApplyTriggers` (the table above is a summary).
+
 ## Auto-invoke Principle
 
 Never tell the user to type slash-commands. Detect intent → trigger command/skill/agent silently. Users include non-developers. Applies to `/team`, `/implement`, `/plan`, `/code-review`, `/verify`, `/daily` — all commands. Inner command workflows (phases, checklists) must run in full, never shortened.

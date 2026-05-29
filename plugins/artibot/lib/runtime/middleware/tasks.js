@@ -7,6 +7,8 @@
 
 import path from 'node:path';
 import { readJsonFileSync } from '../../core/file.js';
+import { buildWorkflowPlan } from '../../cognitive/workflow-plan.js';
+import { getTaskBudgetForEffort } from '../task-budget.js';
 
 function makeTaskId(nowFn) {
   const now = nowFn();
@@ -87,6 +89,24 @@ export function createTasksMiddleware(options = {}) {
         shift: effortMeta.shift,
         reason: effortMeta.reason,
       };
+    }
+
+    // P2: derive a unified workflow plan (team trigger + per-teammate
+    // effort/budget) from the single complexity classification. Attached only
+    // for agentTeam mode so the orchestrator can prefix each teammate with
+    // `[artibot:effort][artibot:task-budget]` from the SAME source as the
+    // trigger decision. workflow-plan.js is pure L4 (router-only); the L5
+    // budgetResolver port is injected here.
+    if (mode === 'agentTeam') {
+      const cfg = readJsonFileSync(path.join(pluginRoot || '', 'artibot.config.json')) || {};
+      const classification = {
+        score: state.context.routing?.score ?? 0,
+        factors: state.context.routing?.classification?.factors,
+      };
+      const plan = buildWorkflowPlan(classification, intent, cfg, {
+        budgetResolver: (e) => getTaskBudgetForEffort(e, cfg) || 0,
+      });
+      task.meta = { ...(task.meta || {}), workflowPlan: plan };
     }
 
     state.context.tasks = task;

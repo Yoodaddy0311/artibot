@@ -219,3 +219,71 @@ describe('snapshot() / rollup()', () => {
     expect(snap.recentEpisodes).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// P3 — optional effort/budget meta on recorded episodes (additive only).
+// ---------------------------------------------------------------------------
+
+describe('recordReward() P3 meta', () => {
+  it('loads a legacy file (no effort meta) without crashing', async () => {
+    const { atomicWriteJson } = await import('../../../lib/core/file.js');
+    await atomicWriteJson('/tmp/rm-legacy.json', {
+      updatedAt: '2026-04-22T00:00:00.000Z',
+      dailyRollups: {},
+      recentEpisodes: [{ sessionId: 'old', ts: 1, reward: 0.2, components: {} }],
+    });
+    const m = createRewardMetrics({
+      metricsPath: '/tmp/rm-legacy.json',
+      now: () => Date.parse('2026-04-23T12:00:00Z'),
+    });
+    const entry = await m.recordReward('new', 0.4);
+    expect(entry).not.toBeNull();
+    const snap = await m.snapshot();
+    expect(snap.recentEpisodes[0].sessionId).toBe('old');
+    expect(snap.recentEpisodes[0].effort).toBeUndefined();
+  });
+
+  it('attaches all four meta fields when valid', async () => {
+    const m = createRewardMetrics({
+      metricsPath: '/tmp/rm-meta.json',
+      now: () => Date.parse('2026-04-23T12:00:00Z'),
+    });
+    const entry = await m.recordReward('s', 0.5, {}, {
+      effort: 'xhigh',
+      command: 'implement',
+      budget: 128000,
+      tokensUsed: 42000,
+    });
+    expect(entry.effort).toBe('xhigh');
+    expect(entry.command).toBe('implement');
+    expect(entry.budget).toBe(128000);
+    expect(entry.tokensUsed).toBe(42000);
+  });
+
+  it('omits meta fields entirely when meta is absent', async () => {
+    const m = createRewardMetrics({
+      metricsPath: '/tmp/rm-nometa.json',
+      now: () => Date.parse('2026-04-23T12:00:00Z'),
+    });
+    const entry = await m.recordReward('s', 0.5);
+    expect('effort' in entry).toBe(false);
+    expect('command' in entry).toBe(false);
+    expect('budget' in entry).toBe(false);
+    expect('tokensUsed' in entry).toBe(false);
+  });
+
+  it('omits NaN/non-finite budget while keeping valid fields', async () => {
+    const m = createRewardMetrics({
+      metricsPath: '/tmp/rm-nanbudget.json',
+      now: () => Date.parse('2026-04-23T12:00:00Z'),
+    });
+    const entry = await m.recordReward('s', 0.5, {}, {
+      effort: 'high',
+      budget: NaN,
+      tokensUsed: Infinity,
+    });
+    expect(entry.effort).toBe('high');
+    expect('budget' in entry).toBe(false);
+    expect('tokensUsed' in entry).toBe(false);
+  });
+});

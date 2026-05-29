@@ -149,7 +149,7 @@ function applyReward(rollup, reward, components) {
  * @param {string} options.metricsPath - Absolute path to `reward-metrics.json`
  * @param {() => number} [options.now] - Clock injector for tests
  * @returns {{
- *   recordReward: (sessionId: string, reward: number, components?: object) => Promise<object>,
+ *   recordReward: (sessionId: string, reward: number, components?: object, meta?: object) => Promise<object>,
  *   snapshot: () => Promise<object>,
  *   rollup: (date: string) => Promise<object>
  * }}
@@ -164,7 +164,7 @@ export function createRewardMetrics({ metricsPath, now = () => Date.now() } = {}
     return coerceState(raw);
   }
 
-  async function recordReward(sessionId, reward, components = {}) {
+  async function recordReward(sessionId, reward, components = {}, meta = {}) {
     if (!Number.isFinite(reward)) return null;
     const state = await load();
     const date = isoDate(now);
@@ -177,6 +177,13 @@ export function createRewardMetrics({ metricsPath, now = () => Date.now() } = {}
       reward,
       components: components && typeof components === 'object' ? { ...components } : {},
     };
+    // P3 effort/budget overlay metadata — additive only, never breaks legacy entries.
+    if (meta && typeof meta === 'object') {
+      if (typeof meta.effort === 'string') entry.effort = meta.effort;
+      if (typeof meta.command === 'string') entry.command = meta.command;
+      if (Number.isFinite(meta.budget)) entry.budget = meta.budget;
+      if (Number.isFinite(meta.tokensUsed)) entry.tokensUsed = meta.tokensUsed;
+    }
     state.recentEpisodes = [...state.recentEpisodes, entry].slice(-RECENT_CAP);
     state.updatedAt = new Date(now()).toISOString();
     await atomicWriteJson(metricsPath, state);
