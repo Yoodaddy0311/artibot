@@ -68,6 +68,13 @@ const TRAINERS = [
     script: 'scripts/hooks/nightly-session-rollup.mjs',
     purpose: 'Roll up yesterday\'s sessions, prune originals > 30d',
   },
+  {
+    name: 'nightly-dream-consolidate',
+    cron: '0 5 * * *',
+    schtasks: '05:00',
+    script: 'scripts/hooks/nightly-dream-consolidate.mjs',
+    purpose: 'Phase-1 memory consolidation candidates + wakeup marker (no LLM, no MD writes)',
+  },
 ];
 
 // ---------------------------------------------------------------------------

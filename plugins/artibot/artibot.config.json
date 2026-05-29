@@ -879,6 +879,35 @@
         "failureThreshold": 2
       }
     },
+    "dream": {
+      "enabled": false,
+      "comment": "Non-destructive memory consolidation (PRD-DREAMING). Conservative defaults: feature gated OFF, dry-run default, autoAccept OFF. Input memory/*.md is NEVER modified; output lands in memory/.dream-staging/, replaced originals move to memory/.dream-archive/ (hard-delete 0). LLM Phase-2 runs only in sessions (/dreaming); nightly is Phase-1 (candidates) + wakeup marker only — zero LLM, zero MD writes (ADR-3).",
+      "nightly": {
+        "enabled": true,
+        "comment": "Allows the 05:00 hook to produce inert candidates.json + a wakeup marker. Set false to disable the nightly slot entirely."
+      },
+      "distill": {
+        "mergeThreshold": 0.82,
+        "contradictThreshold": 0.6,
+        "staleDays": 180
+      },
+      "promotion": {
+        "minOccurrences": 2,
+        "confidenceFloor": 0.85,
+        "distinctSessions": 2,
+        "rejectionWindowDays": 30
+      },
+      "autoAccept": {
+        "enabled": false,
+        "comment": "When enabled: insert-only, confidence >= 0.95, external-signal-backed. merge/replace always require human review. rules/CLAUDE.md are never auto-applied."
+      },
+      "paths": {
+        "staging": "memory/.dream-staging/",
+        "archive": "memory/.dream-archive/",
+        "rejections": "runtime/dream-rejections.json",
+        "transitions": "runtime/dream-transitions.log"
+      }
+    },
     "grpoRouting": {
       "enabled": true,
       "modelType": "linear",
