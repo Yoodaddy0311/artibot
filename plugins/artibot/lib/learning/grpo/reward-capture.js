@@ -14,6 +14,19 @@
  *
  * Zero external deps. ESM only.
  *
+ * ---------------------------------------------------------------------------
+ * WIRING NOTE (2026-05-30). The pure extractor `computeReward` /
+ * `computeRewardComponents` IS live — it is called synchronously from
+ * `lib/learning/memory/episodic.js` to stamp a reward onto each episode. What
+ * is DORMANT BY DESIGN is the downstream *reward emitter* in the sibling
+ * module {@link module:lib/learning/grpo/reward-metrics} (recordReward →
+ * `runtime/reward-metrics.json`), which currently has no production caller.
+ * That dormancy is intentional, not a deprecation: GRPO (policy learning) and
+ * Dreaming (memory consolidation) are separate, coexisting systems. Preserve
+ * the GRPO name, structure, exports and signatures as-is — do not delete or
+ * prune. See reward-metrics.js header + docs/WIRING-AUDIT-2026-05-30.md.
+ * ---------------------------------------------------------------------------
+ *
  * @module lib/learning/grpo/reward-capture
  */
 

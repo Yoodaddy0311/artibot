@@ -152,6 +152,14 @@ export function resolveMetricsPath() {
  * reward-metrics state object with a `recentEpisodes` array. Returns `[]` on
  * missing/malformed input — never throws.
  *
+ * DORMANT-SAFE: the GRPO reward emitter
+ * ({@link module:lib/learning/grpo/reward-metrics} recordReward) is intentionally
+ * unwired, so `runtime/reward-metrics.json` typically does not exist. That is a
+ * deliberate no-op, not an error: a missing/empty source yields `[]` here, the
+ * window/eligibility filters produce zero usable episodes, and the updater's
+ * cold-start guard then performs no disk write. See the reward-metrics.js header
+ * and docs/WIRING-AUDIT-2026-05-30.md ("Intentional dormant").
+ *
  * @param {string} filePath
  * @returns {Promise<object[]>}
  */
