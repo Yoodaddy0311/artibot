@@ -241,14 +241,25 @@ function rankableEntries(state) {
   for (const [bucket, label] of [['tools', 'tool'], ['agents', 'agent']]) {
     const cat = merged[bucket] ?? {};
     for (const [name, w] of Object.entries(cat)) {
-      const success = Number(w.successRate ?? 0);
+      // Distinguish an absent successRate measurement from a measured 0%.
+      // Packaged weights only carry successRate when a real measurement exists
+      // (pattern-packager v4.6.4 omits it otherwise); treating a missing field
+      // as 0% fabricates "consistent failure" risk signals for entries that
+      // were never actually scored on success — e.g. PowerShell, teammate,
+      // and agent patterns whose bestData has no successRate field.
+      const successMeasured = typeof w.successRate === 'number'
+        && Number.isFinite(w.successRate);
       const conf = Number(w.confidence ?? 0);
+      // When success is unmeasured, fall back to confidence as the signal
+      // (the pattern's groupMean-derived confidence is the only quality proxy
+      // we have) rather than fabricating 0.
+      const success = successMeasured ? Number(w.successRate) : conf;
       const cert = typeof w.certainty === 'number' ? w.certainty : null;
       const n = Number(w.sampleSize ?? 0);
       // Combined score: prefer success × certainty when certainty present
       // (sample-size-aware), else fall back to success × confidence.
       const score = success * (cert ?? conf);
-      rows.push({ type: label, name, success, conf, cert, n, score });
+      rows.push({ type: label, name, success, successMeasured, conf, cert, n, score });
     }
   }
   return rows;
@@ -272,12 +283,16 @@ function renderTopPerformers(rows, args) {
 
 function renderRiskSignals(rows, args) {
   if (rows.length === 0) return '';
-  // Risk = consistent failure: high confidence + low success + non-trivial sample
+  // Risk = consistent failure: high confidence + low MEASURED success + non-trivial
+  // sample. Entries whose successRate was never measured (successMeasured === false)
+  // are excluded: a missing measurement is not evidence of failure, and including
+  // them surfaced false "0% critical" signals for tools/agents (PowerShell,
+  // teammate, …) that simply lack a successRate field in the packaged weights.
   const risk = rows
-    .filter((r) => r.conf >= 0.5 && r.success < 0.35 && r.n >= 6)
+    .filter((r) => r.successMeasured && r.conf >= 0.5 && r.success < 0.35 && r.n >= 6)
     .sort((a, b) => a.success - b.success);
   if (risk.length === 0) {
-    return '## Risk Signals\n\n_none detected (no entries with conf ≥ 0.5, success < 35%, n ≥ 6)_\n';
+    return '## Risk Signals\n\n_none detected (no entries with measured success < 35%, conf ≥ 0.5, n ≥ 6)_\n';
   }
   const out = ['## Risk Signals (high confidence + low success — consistent failures)', ''];
   out.push('| Type | Name | success | conf | n | note |');
@@ -341,7 +356,7 @@ function renderRecommendations(state, rows) {
     }
   }
 
-  const critical = rows.filter((r) => r.conf >= 0.8 && r.success < 0.25 && r.n >= 10);
+  const critical = rows.filter((r) => r.successMeasured && r.conf >= 0.8 && r.success < 0.25 && r.n >= 10);
   if (critical.length > 0) {
     bullets.push(`${critical.length} entries with success < 25% and conf ≥ 0.8 (n ≥ 10) — investigate: ${critical.slice(0, 3).map((r) => r.name).join(', ')}${critical.length > 3 ? '…' : ''}`);
   }

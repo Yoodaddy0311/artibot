@@ -571,18 +571,80 @@ async function loadAllPatterns() {
 
   for (const type of PATTERN_TYPES) {
     const filePath = path.join(PATTERNS_DIR, `${type}-patterns.json`);
-    let data = await readJsonFile(filePath);
-    // Fallback: error patterns may live in memory/ (written by memory-manager)
-    if (!data && type === 'error') {
-      const fallbackPath = path.join(MEMORY_DIR, 'error-patterns.json');
-      data = await readJsonFile(fallbackPath);
-    }
+    const data = await readJsonFile(filePath);
     if (data?.patterns && Array.isArray(data.patterns)) {
       allPatterns.push(...data.patterns);
+      continue;
+    }
+    // Fallback: error patterns may live in memory/ (written by memory-manager).
+    // The fallback file can be either the analyzed `{ patterns: [...] }` shape
+    // or the memory-tracker `{ entries: [...] }` shape. Accept both — the entries
+    // shape is adapted into packageable patterns, otherwise the swarm errors
+    // bucket stays empty despite real captured data.
+    if (type === 'error') {
+      const fallbackPath = path.join(MEMORY_DIR, 'error-patterns.json');
+      const memData = await readJsonFile(fallbackPath);
+      if (memData?.patterns && Array.isArray(memData.patterns)) {
+        allPatterns.push(...memData.patterns);
+      } else if (Array.isArray(memData?.entries)) {
+        allPatterns.push(...adaptErrorEntries(memData.entries));
+      }
     }
   }
 
   return allPatterns;
+}
+
+/**
+ * Adapt memory-tracker error entries into packageable error patterns.
+ *
+ * The memory store records one raw entry per observed error
+ * (`{ id, type, data: { message, ... } }`). The packager expects analyzed
+ * patterns keyed `error::<signature>` with `sampleSize`/`confidence`. This
+ * groups entries by their anonymized message signature (the same truncation
+ * `packageErrorPattern` applies) and emits one pattern per signature, with
+ * `sampleSize` = occurrence count. Signatures below MIN_SAMPLE_SIZE are still
+ * emitted here and filtered downstream by the shared packaging threshold, so
+ * the filter policy lives in exactly one place.
+ *
+ * @param {object[]} entries - Memory-tracker error entries
+ * @returns {object[]} Error patterns in the analyzed shape
+ */
+function adaptErrorEntries(entries) {
+  const bySignature = new Map();
+
+  for (const entry of entries) {
+    const message = entry?.data?.message;
+    if (typeof message !== 'string' || message.length === 0) continue;
+
+    const signature = message.slice(0, 50);
+    const existing = bySignature.get(signature);
+    if (existing) {
+      existing.sampleSize += 1;
+    } else {
+      bySignature.set(signature, {
+        sampleSize: 1,
+        recoverable: entry?.data?.recoverable ?? null,
+        message: signature,
+      });
+    }
+  }
+
+  const patterns = [];
+  for (const [signature, agg] of bySignature) {
+    patterns.push({
+      key: `error::${signature}`,
+      type: 'error',
+      category: signature,
+      // More recurrences ⇒ higher confidence the signature is real, capped at
+      // 0.9 to leave headroom and stay clear of the "fabricated 1.0" smell.
+      confidence: clamp01(Math.min(0.9, 0.4 + agg.sampleSize / 50)),
+      sampleSize: agg.sampleSize,
+      bestData: { message: agg.message, recoverable: agg.recoverable },
+    });
+  }
+
+  return patterns;
 }
 
 // ---------------------------------------------------------------------------
