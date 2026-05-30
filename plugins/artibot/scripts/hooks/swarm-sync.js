@@ -58,21 +58,26 @@ async function main() {
     // swarm-client.js already enforces an internal SSRF allowlist, but we
     // surface the DATA POLICY check at the hook level so deployment-time
     // misconfiguration is logged and blocked before any network I/O.
-    const serverUrl =
-      process.env.ARTIBOT_SWARM_SERVER || swarmCfg?.serverUrl || 'http://localhost:3000';
-    try {
-      assertEgressAllowed(serverUrl, {
-        allowlist: loadAllowlist(),
-        reason: 'swarm-sync',
-      });
-    } catch (egressErr) {
-      if (egressErr instanceof EgressBlockedError) {
-        process.stderr.write(
-          `[swarm-sync] Skipped by DATA POLICY: ${egressErr.message}\n`,
-        );
-        return;
+    // Git backend transport uses the git binary (push/pull), not the fetch
+    // egress guard, so the HTTP allowlist check is only meaningful for the
+    // HTTP backend. Skip it for git to avoid blocking a valid git sync path.
+    if (swarmCfg?.backend !== 'git') {
+      const serverUrl =
+        process.env.ARTIBOT_SWARM_SERVER || swarmCfg?.serverUrl || 'http://localhost:3000';
+      try {
+        assertEgressAllowed(serverUrl, {
+          allowlist: loadAllowlist(),
+          reason: 'swarm-sync',
+        });
+      } catch (egressErr) {
+        if (egressErr instanceof EgressBlockedError) {
+          process.stderr.write(
+            `[swarm-sync] Skipped by DATA POLICY: ${egressErr.message}\n`,
+          );
+          return;
+        }
+        throw egressErr;
       }
-      throw egressErr;
     }
 
     // Build noise function if differential privacy is enabled

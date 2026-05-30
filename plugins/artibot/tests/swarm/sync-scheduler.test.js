@@ -20,6 +20,11 @@ vi.mock('../../lib/swarm/swarm-client.js', () => ({
   flushOfflineQueue: vi.fn(() => Promise.resolve({ flushed: 0, remaining: 0, errors: [] })),
 }));
 
+vi.mock('../../lib/swarm/git-backend.js', () => ({
+  gitUploadWeights: vi.fn(() => Promise.resolve({ success: true, version: 'git-v2' })),
+  gitDownloadLatestWeights: vi.fn(() => Promise.resolve({ success: true, weights: { tools: {}, errors: {}, commands: {}, teams: {} }, version: 'git-v2' })),
+}));
+
 vi.mock('../../lib/swarm/pattern-packager.js', () => ({
   packagePatterns: vi.fn(() => Promise.resolve({
     weights: { tools: {}, errors: {}, commands: {}, teams: {} },
@@ -32,6 +37,7 @@ vi.mock('../../lib/swarm/pattern-packager.js', () => ({
 
 const { readJsonFile, writeJsonFile } = await import('../../lib/core/file.js');
 const { uploadWeights, downloadLatestWeights, flushOfflineQueue } = await import('../../lib/swarm/swarm-client.js');
+const { gitUploadWeights, gitDownloadLatestWeights } = await import('../../lib/swarm/git-backend.js');
 const { packagePatterns, unpackWeights, mergeWeights } = await import('../../lib/swarm/pattern-packager.js');
 
 beforeEach(() => {
@@ -335,5 +341,49 @@ describe('scheduleSync() timer re-schedule branch', () => {
     const result = await scheduleSync();
     expect(result.scheduled).toBe(false);
     expect(result.interval).toBe('session');
+  });
+});
+
+describe('git backend routing (regression lock for swarm 9-day stale)', () => {
+  const gitConfig = { backend: 'git', gitRepoUrl: 'https://github.com/x/y.git' };
+
+  it('onSessionStart routes through git backend, not HTTP download', async () => {
+    const result = await onSessionStart({ config: gitConfig });
+    expect(gitDownloadLatestWeights).toHaveBeenCalledTimes(1);
+    expect(downloadLatestWeights).not.toHaveBeenCalled();
+    expect(result.downloaded).toBe(true);
+    expect(result.version).toBe('git-v2');
+  });
+
+  it('onSessionStart passes repoUrl to the git download', async () => {
+    await onSessionStart({ config: gitConfig });
+    const [, opts] = gitDownloadLatestWeights.mock.calls[0];
+    expect(opts.repoUrl).toBe('https://github.com/x/y.git');
+  });
+
+  it('onSessionEnd routes through git backend, not HTTP upload', async () => {
+    const result = await onSessionEnd({ config: gitConfig });
+    expect(gitUploadWeights).toHaveBeenCalledTimes(1);
+    expect(uploadWeights).not.toHaveBeenCalled();
+    expect(result.uploaded).toBe(true);
+    expect(result.version).toBe('git-v2');
+  });
+
+  it('onSessionEnd skips HTTP flushOfflineQueue for git backend', async () => {
+    await onSessionEnd({ config: gitConfig });
+    expect(flushOfflineQueue).not.toHaveBeenCalled();
+  });
+
+  it('onSessionEnd passes repoUrl to the git upload', async () => {
+    await onSessionEnd({ config: gitConfig });
+    const [, , opts] = gitUploadWeights.mock.calls[0];
+    expect(opts.repoUrl).toBe('https://github.com/x/y.git');
+  });
+
+  it('still uses HTTP backend when config.backend is not git', async () => {
+    await onSessionEnd({ config: { backend: 'http' } });
+    expect(uploadWeights).toHaveBeenCalledTimes(1);
+    expect(gitUploadWeights).not.toHaveBeenCalled();
+    expect(flushOfflineQueue).toHaveBeenCalled();
   });
 });

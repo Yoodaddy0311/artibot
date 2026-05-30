@@ -359,7 +359,8 @@ async function performSync(options = {}) {
 export async function onSessionStart(options = {}) {
   const state = await loadSyncState();
 
-  const result = await downloadLatestWeights(
+  const download = resolveDownload(options.config);
+  const result = await download(
     state.currentVersion,
     { config: options.config },
   );
@@ -402,16 +403,20 @@ export async function onSessionStart(options = {}) {
  */
 export async function onSessionEnd(options = {}) {
   const state = await loadSyncState();
+  const isGitBackend = options.config?.backend === 'git';
+  const upload = resolveUpload(options.config);
 
-  // Flush offline queue first
-  await flushOfflineQueue({ config: options.config });
+  // Flush offline queue first (http only — git backend commits immediately)
+  if (!isGitBackend) {
+    await flushOfflineQueue({ config: options.config });
+  }
 
   const packaged = await packagePatterns();
   if (packaged.metadata.packagedCount === 0) {
     return { uploaded: false, version: state.currentVersion, queued: false };
   }
 
-  const result = await uploadWeights(
+  const result = await upload(
     packaged.weights,
     {
       version: state.currentVersion,
