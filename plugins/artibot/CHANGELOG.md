@@ -13,6 +13,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.18.1] — 2026-05-30
+
+**Theme**: 기능 감사 — 사용자 보고 2증상(진행률 % 깨짐, 병렬 팀 미소환) 근본수정
+
+5-유닛 병렬 기능 감사(Opus)로 두 증상의 수렴된 근본원인을 진단·수정.
+
+### Fixed
+
+- **진행률 % 중간에 멈춤** — autopilot이 중간 phase를 `status:'queued'`로만 기록해 `countCompletedPhases`가 1/8에 고착됐다가 REPORT에서 점프하던 문제. `tui.js`가 positional + unique-done-Set의 max + clamp로 **단조 증가** 보장. goal-loop met 경로 0% 고착(→pct:100), statusline progress 필드 통과/파생, progress-renderer 막대 경계(1%/99%) + 미확정 시 `--%`, `recordPhaseResult` 시그니처 정정.
+- **병렬 팀 미소환** — 키스톤: `pluginRoot`가 `state.input`에 안 들어가 effort-meta·workflowPlan config가 production에서 죽어있던 문제(P1/P2/P3 effort도 함께 부활). workflowPlan이 `composePromptOutput`에서 폐기되던 것 → `[artibot:team ...]` + per-teammate effort/budget 디렉티브 주입. router 미들웨어가 shallow intent(recommendations 누락)를 보내 teammates가 항상 0이던 것 → `recommendations` 보존(문자열 best 소비자 무회귀). effort write 순서 정정, auto-team 트리거 임계값을 workflow-plan과 통일(3/3/high 단일 소스). full-chain 실증: 멀티도메인 → teammates=3.
+
+### Tests
+
+- +51 (full-chain teammates>0, 단조 progress, 키스톤 production 경로 등).
+
+---
+
 ## [4.18.0] — 2026-05-29
 
 **Theme**: Effort × Dynamic-Workflow Fusion — effort가 정적 매핑에서 복잡도·컨텍스트 적응형으로 진화
