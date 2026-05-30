@@ -13,6 +13,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.19.2] — 2026-05-31
+
+**Theme**: Swarm 9일 sync stale 해소 — 세션 훅이 git 백엔드를 우회하던 근본원인 수정
+
+### Fixed
+
+- **세션 훅 git 백엔드 우회 근본원인** (`lib/swarm/sync-scheduler.js`) — `onSessionStart`/`onSessionEnd`가 하드코딩된 HTTP 함수(`downloadLatestWeights`/`uploadWeights`)를 직접 호출해 `backend:"git"` 설정이 세션 라이프사이클에서 무시되고 egress 게이트(Cloud Run serverUrl 차단)에 막혀 **9일간 sync stale**. `resolveDownload`/`resolveUpload` 경유로 변경해 `performSync`와 동일하게 git 백엔드를 honor. git 백엔드에서는 HTTP 전용 `flushOfflineQueue`도 스킵.
+- **git 백엔드 egress/health 게이트 분기** (`scripts/hooks/swarm-sync.js`, `scripts/hooks/swarm-download.js`) — git 백엔드일 때 HTTP egress allowlist 검사와 pre-flight health 체크를 스킵. git push/pull은 git 바이너리 자체 전송 경로로 fetch 게이트를 경유하지 않으므로 정상. **egress allowlist 미확장**(정책 구멍 아님). 미초기화 clone이 health `ok:false`를 반환해 첫 부트스트랩을 막던 문제도 회피.
+
+### Tests
+
+- swarm-download 헬퍼 추출(`checkHttpEgressAllowed`/`checkHttpServerHealthy`) + `isMainEntry` 가드로 테스트가능화. **+16**(sync-scheduler git 라우팅 6, swarm-download 헬퍼 10). 회귀: 전체 **9585 pass** / lint 0. 런타임 검증: `forceSync` success/uploaded/downloaded 전부 true.
+
+---
+
 ## [4.19.1] — 2026-05-30
 
 **Theme**: MCP bridge silent-boot 버그 수정 + 배선 감사 후속(트리아지 도구·GRPO dormant 정리)
