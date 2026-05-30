@@ -76,22 +76,49 @@ function phaseIndex(phase) {
 }
 
 /**
- * Count completed phases by inspecting state.phases[] for status='done'.
- * Falls back to phaseIndex when phases[] is missing.
+ * Compute a monotonic count of completed phases (0..PHASE_ORDER.length).
+ *
+ * Two signals are combined and the larger is used so the bar never stalls
+ * when intermediate phases record status='queued' (delegation) instead of
+ * 'done':
+ *   - positional: the current phase's index implies every prior phase is
+ *     complete (PLAN running ⇒ INTAKE done). Terminal phases count as the
+ *     position they finished at; COMPLETED counts as fully done.
+ *   - explicit: unique phase-names in state.phases[] with status='done'
+ *     (a Set so a phase recorded twice never double-counts into 9/8).
+ *
+ * The result is clamped to [0, total] so progress is always monotonic and
+ * never exceeds 100%.
+ *
  * @param {object} state
  * @returns {number}
  */
 function countCompletedPhases(state) {
+  const total = PHASE_ORDER.length;
   const phases = Array.isArray(state?.phases) ? state.phases : [];
-  let done = 0;
+
+  // Explicit done — unique phase names only (dedupe re-records).
+  const doneNames = new Set();
   for (const p of phases) {
-    if (p && p.status === 'done') done += 1;
+    if (p && p.status === 'done' && PHASE_ORDER.includes(p.name)) {
+      doneNames.add(p.name);
+    }
   }
-  if (done === 0) {
+  const explicitDone = doneNames.size;
+
+  // Positional progress derived from the current phase label. COMPLETED
+  // counts as fully done; otherwise the idx phases preceding the in-flight
+  // one are complete (e.g. PLAN running ⇒ idx=1 ⇒ INTAKE done).
+  let positional;
+  if (state?.phase === 'COMPLETED') {
+    positional = total;
+  } else {
     const idx = phaseIndex(state?.phase);
-    return idx > 0 ? idx : 0;
+    positional = idx > 0 ? idx : 0;
   }
-  return done;
+
+  const merged = Math.max(explicitDone, positional);
+  return Math.max(0, Math.min(total, merged));
 }
 
 /**

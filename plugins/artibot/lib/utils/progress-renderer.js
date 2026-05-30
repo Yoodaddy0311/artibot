@@ -27,7 +27,12 @@ const MAX_MEMBERS = 50;
  */
 export function renderProgressBar(percent, width = DEFAULT_BAR_WIDTH) {
   const clamped = Math.max(0, Math.min(100, percent));
-  const filled = Math.round((clamped / 100) * width);
+  let filled = Math.round((clamped / 100) * width);
+  // Boundary correction: a non-zero percentage must show at least one filled
+  // cell, and any percentage below 100 must leave at least one empty cell —
+  // otherwise rounding makes 1% look like 0% and 99% look like 100%.
+  if (clamped > 0 && filled === 0) filled = 1;
+  if (clamped < 100 && filled === width) filled = width - 1;
   const empty = width - filled;
   return FULL.repeat(filled) + EMPTY.repeat(empty);
 }
@@ -88,7 +93,11 @@ export function renderTeamProgress(teamName, members) {
 export function renderAutopilotProgress(goal, iterations) {
   const total = iterations.length;
   const completed = iterations.filter((it) => it.status === 'completed').length;
-  const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
+  // total===0 means no iterations are defined yet — render `--%` so an
+  // undetermined run is visually distinct from a genuine 0/N at 0%.
+  const known = total > 0;
+  const percent = known ? Math.round((completed / total) * 100) : 0;
+  const pctLabel = known ? `${percent}%` : '--%';
 
   const lines = [
     `AUTOPILOT — ${goal}`,
@@ -102,7 +111,7 @@ export function renderAutopilotProgress(goal, iterations) {
   }
 
   lines.push('');
-  lines.push(`진행: ${renderProgressBar(percent)}  ${completed}/${total} (${percent}%)`);
+  lines.push(`진행: ${renderProgressBar(percent)}  ${completed}/${total} (${pctLabel})`);
 
   return lines.join('\n');
 }

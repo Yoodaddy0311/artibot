@@ -46,6 +46,28 @@ describe('renderProgressBar', () => {
       expect(['█', '░']).toContain(ch);
     }
   });
+
+  it('shows at least one filled cell for a tiny non-zero percentage', () => {
+    // 1% of 16 rounds to 0 cells without boundary correction.
+    const bar = renderProgressBar(1);
+    expect(bar.indexOf('█')).toBe(0);
+    expect(bar).toBe('█' + '░'.repeat(15));
+  });
+
+  it('leaves at least one empty cell for a near-complete percentage', () => {
+    // 99% of 16 rounds to 16 cells without boundary correction.
+    const bar = renderProgressBar(99);
+    expect(bar.endsWith('░')).toBe(true);
+    expect(bar).toBe('█'.repeat(15) + '░');
+  });
+
+  it('still renders a fully empty bar at exactly 0%', () => {
+    expect(renderProgressBar(0)).toBe('░'.repeat(16));
+  });
+
+  it('still renders a fully filled bar at exactly 100%', () => {
+    expect(renderProgressBar(100)).toBe('█'.repeat(16));
+  });
 });
 
 // ─────────────────────────────────────────────
@@ -132,9 +154,10 @@ describe('renderAutopilotProgress', () => {
     expect(output).toContain('2/3 (67%)');
   });
 
-  it('handles empty iterations', () => {
+  it('handles empty iterations with an undetermined (--%) marker', () => {
     const output = renderAutopilotProgress('Empty goal', []);
     expect(output).toContain('AUTOPILOT — Empty goal');
-    expect(output).toContain('0/0 (0%)');
+    // total===0 is undetermined, not a genuine 0% — distinguish via --%.
+    expect(output).toContain('0/0 (--%)');
   });
 });

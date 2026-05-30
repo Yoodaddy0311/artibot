@@ -152,11 +152,20 @@ export function runPhaseGoalEvaluate(state, evaluatorOpts = {}) {
     progress: buildProgress(state, contract, evalResult),
   });
 
-  // Met → proceed to REPORT.
+  // Met → proceed to REPORT. Emit a 100% progress heartbeat so the goal
+  // path lands at full bar instead of sticking at the first-iteration 0%
+  // (goalIterations is intentionally not incremented on the met path, so
+  // buildProgress alone would report pct=0 — force 100% on completion).
   if (evalResult.met) {
     recordPhase(state, { name: 'EVALUATE', status: 'done', met: true });
     persist(state);
-    tick(state.sessionId, { phase: 'EVALUATE', type: 'phase-end', level: 'info', message: 'EVALUATE met → REPORT' });
+    tick(state.sessionId, {
+      phase: 'EVALUATE',
+      type: 'phase-end',
+      level: 'info',
+      message: 'EVALUATE met → REPORT',
+      progress: { ...buildProgress(state, contract, evalResult), pct: 100 },
+    });
     return {
       type: 'phase-result',
       phase: 'EVALUATE',

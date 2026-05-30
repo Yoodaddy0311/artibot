@@ -78,6 +78,23 @@ function extractSubObjectives(intent) {
 }
 
 /**
+ * Resolve the parent command from either intent shape:
+ * - raw detectIntent shape: `best` is an object → `best.commands[0]`
+ * - router-middleware shallow shape: `best` is a string, `commands` is a
+ *   top-level array → `intent.commands[0]`
+ * Falls back to 'team' (→ xhigh baseline) when neither carries a command.
+ * @param {object} intent
+ * @returns {string}
+ */
+function parentCommand(intent) {
+  const fromBestObject = intent?.best && typeof intent.best === 'object'
+    ? (Array.isArray(intent.best.commands) ? intent.best.commands[0] : undefined)
+    : undefined;
+  const fromTopLevel = Array.isArray(intent?.commands) ? intent.commands[0] : undefined;
+  return fromBestObject || fromTopLevel || 'team';
+}
+
+/**
  * Evaluate whether the auto-team trigger fires for this classification/intent.
  * Numeric thresholds live in config (`team.autoApplyTriggers`); this is a pure
  * evaluator. `subtasks`/`files` both proxy off `recommendations.length`.
@@ -100,13 +117,24 @@ function evaluateTrigger(classification, intent, triggers) {
   const minComplexity = typeof t.minComplexity === 'string' ? t.minComplexity : 'high';
   const tier = complexityTier(classification?.score);
 
+  // Three thresholds, but only TWO distinct signals: `subtasks` and `files`
+  // both proxy off recommendations.length (the live intent has no separate
+  // file count), so they collapse into one "size" signal. Counting them as two
+  // double-counts and makes the AND path (which needs every distinct signal)
+  // unreachable whenever minSubtasks !== minFiles. We gate AND on distinct
+  // signals met, not on the length of the human-readable reasons[] array.
+  const sizeThreshold = Math.max(minSubtasks, minFiles);
+  const sizeSignal = proxy >= sizeThreshold;
+  const complexitySignal = TIER_ORDER.indexOf(tier) >= TIER_ORDER.indexOf(minComplexity);
+
   const reasons = [];
   if (proxy >= minSubtasks) reasons.push(`subtasks>=${minSubtasks}`);
   if (proxy >= minFiles) reasons.push(`files>=${minFiles}`);
-  if (TIER_ORDER.indexOf(tier) >= TIER_ORDER.indexOf(minComplexity)) reasons.push(`complexity>=${minComplexity}`);
+  if (complexitySignal) reasons.push(`complexity>=${minComplexity}`);
 
   const logic = String(t.logic || 'OR').toUpperCase();
-  const fired = !isBypassed && (logic === 'AND' ? reasons.length === 3 : reasons.length > 0);
+  const signalsMet = (sizeSignal ? 1 : 0) + (complexitySignal ? 1 : 0);
+  const fired = !isBypassed && (logic === 'AND' ? signalsMet === 2 : signalsMet > 0);
   return { fired, runner: fired ? 'team' : 'inline', reasons, bypassed: isBypassed };
 }
 
@@ -159,7 +187,7 @@ export function buildWorkflowPlan(classification, intent, config, deps = {}) {
   const resolveFn = makeResolveFn(deps, cls);
   const budgetResolver = typeof deps.budgetResolver === 'function' ? deps.budgetResolver : () => 0;
 
-  const parentCmd = safeIntent.best?.commands?.[0] || 'team';
+  const parentCmd = parentCommand(safeIntent);
   const parentEffort = resolveFn(parentCmd);
   const trigger = evaluateTrigger(cls, safeIntent, triggers);
 

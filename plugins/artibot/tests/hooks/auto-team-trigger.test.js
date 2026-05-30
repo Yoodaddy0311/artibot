@@ -112,3 +112,45 @@ describe('auto-team-trigger — fail-closed on malformed config (C-3)', () => {
     expect(stderr).not.toMatch(/WARN: malformed config/);
   });
 });
+
+describe('auto-team-trigger — thresholds unified with workflow-plan defaults (FIX-4)', () => {
+  it('missing-config defaults are 3/3/high (matches workflow-plan), not 2/2/medium', () => {
+    // A 2-domain, single-verb prompt that the OLD 2/2 defaults would have
+    // fired on but the unified 3/3 defaults must NOT.
+    mockState.existsSyncResults = { 'artibot.config.json': false };
+    const result = handleUserPromptSubmit({
+      user_prompt: 'update the server endpoint and the react component styling here',
+    });
+    // 2 domains (backend + frontend), 1 conjunction → subtasks 2, no complexity
+    // keyword → below the unified 3/3/high bar → no suggestion.
+    expect(result).toBeNull();
+  });
+
+  it('config thresholds are the single source — a config of 2/2 fires the same 2-domain prompt', () => {
+    mockState.existsSyncResults = { 'artibot.config.json': true };
+    mockState.readFileSyncImpl = (p) => {
+      if (String(p).includes('artibot.config.json')) {
+        return JSON.stringify({
+          team: { autoApply: true, autoApplyTriggers: { minSubtasks: 2, minFiles: 2 } },
+        });
+      }
+      throw new Error('ENOENT');
+    };
+    const result = handleUserPromptSubmit({
+      user_prompt: 'update the server endpoint and the react component styling here',
+    });
+    // With explicit 2/2 from config, the SAME prompt now fires — proving config
+    // overrides the (3/3) defaults rather than a hard-coded 2/2 default.
+    expect(result).not.toBeNull();
+    expect(result.hookSpecificOutput.additionalContext).toContain('[auto-team-suggested]');
+  });
+
+  it('still fires for a genuine 3-domain multi-verb prompt under the unified defaults', () => {
+    mockState.existsSyncResults = { 'artibot.config.json': false };
+    const result = handleUserPromptSubmit({
+      user_prompt: '프론트와 백엔드 시스템을 마이그레이션하고 테스트도 추가해줘',
+    });
+    expect(result).not.toBeNull();
+    expect(result.hookSpecificOutput.additionalContext).toContain('[auto-team-suggested]');
+  });
+});

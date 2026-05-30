@@ -228,7 +228,16 @@ if [ -f "$TEAM_FILE" ] && command -v node >/dev/null 2>&1; then
       else {
         const first = t[0].name;
         const extra = t.length > 1 ? '+' + (t.length - 1) : '';
-        process.stdout.write('👥 ' + first + extra);
+        // Derive overall progress when teammates carry a progress signal
+        // (explicit .progress, or .tasksCompleted/.tasksTotal). Omitted otherwise.
+        const pcts = t.map(x => {
+          if (typeof x.progress === 'number' && isFinite(x.progress)) return Math.max(0, Math.min(100, Math.round(x.progress)));
+          const tot = Number(x.tasksTotal), dn = Number(x.tasksCompleted);
+          if (isFinite(tot) && tot > 0 && isFinite(dn) && dn >= 0) return Math.max(0, Math.min(100, Math.round(dn / tot * 100)));
+          return null;
+        }).filter(p => p !== null);
+        const prog = pcts.length ? ' ' + Math.round(pcts.reduce((a, b) => a + b, 0) / pcts.length) + '%' : '';
+        process.stdout.write('👥 ' + first + extra + prog);
       }
     } catch { process.stdout.write(''); }
   " 2>/dev/null || true)

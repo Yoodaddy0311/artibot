@@ -175,6 +175,29 @@ describe('renderStatusLine', () => {
     expect(out).toBe('');
   });
 
+  it('surfaces overall team progress when teammates carry a progress signal', async () => {
+    writeRuntime(root, 'current-effort.json', { effort: 'high', command: '/team' });
+    writeRuntime(root, 'current-teammates.json', {
+      teammates: [
+        { name: 'w1', progress: 100 },
+        { name: 'w2', progress: 50 },
+      ],
+    });
+    const out = await renderStatusLine({ pluginRoot: root, config: ENABLED });
+    expect(out).toContain('team=');
+    expect(out).toContain('prog=75%');
+  });
+
+  it('omits the progress field when no teammate carries a progress signal', async () => {
+    writeRuntime(root, 'current-effort.json', { effort: 'high', command: '/team' });
+    writeRuntime(root, 'current-teammates.json', {
+      teammates: [{ name: 'w1' }, { name: 'w2' }],
+    });
+    const out = await renderStatusLine({ pluginRoot: root, config: ENABLED });
+    expect(out).toContain('team=');
+    expect(out).not.toContain('prog=');
+  });
+
   it('does not throw when a runtime JSON file is malformed', async () => {
     writeFileSync(path.join(root, 'runtime', 'current-effort.json'), '{not valid json');
     writeRuntime(root, 'token-usage-session.json', { totalTokens: 1234 });
@@ -215,6 +238,20 @@ describe('readDashboardState', () => {
     expect(state.tokens.used).toBe(1500);
     expect(state.longContext).toBe(true);
     expect(state.teammates).toHaveLength(2);
+  });
+
+  it('preserves explicit teammate progress and derives it from task counts', async () => {
+    writeRuntime(root, 'current-teammates.json', {
+      teammates: [
+        { name: 'a', progress: 80 },
+        { name: 'b', tasksCompleted: 1, tasksTotal: 4 }, // → 25
+        { name: 'c' }, // no signal → null
+      ],
+    });
+    const state = await readDashboardState(root);
+    expect(state.teammates[0].progress).toBe(80);
+    expect(state.teammates[1].progress).toBe(25);
+    expect(state.teammates[2].progress).toBeNull();
   });
 });
 

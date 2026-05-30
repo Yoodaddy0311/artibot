@@ -120,13 +120,35 @@ function pickTokens(tokenJson) {
 }
 
 /**
- * Extract and normalize the teammate roster.
+ * Derive a 0..100 progress percentage for a single teammate.
+ * Priority: explicit numeric `progress`, else `tasksCompleted/tasksTotal`.
+ * Returns null when neither is available (so callers can omit the figure).
+ * @param {object} t
+ * @returns {number|null}
+ */
+function deriveProgress(t) {
+  if (typeof t.progress === 'number' && Number.isFinite(t.progress)) {
+    return Math.max(0, Math.min(100, Math.round(t.progress)));
+  }
+  const total = Number(t.tasksTotal);
+  const done = Number(t.tasksCompleted);
+  if (Number.isFinite(total) && total > 0 && Number.isFinite(done) && done >= 0) {
+    return Math.max(0, Math.min(100, Math.round((done / total) * 100)));
+  }
+  return null;
+}
+
+/**
+ * Extract and normalize the teammate roster, preserving the progress signal
+ * (`progress` field, or derived from `tasksCompleted/tasksTotal`).
  * @param {object|null} teammatesJson
- * @returns {Array<{name: string, status?: string}>}
+ * @returns {Array<{name: string, status?: string, progress: number|null}>}
  */
 function pickTeammates(teammatesJson) {
   if (!teammatesJson || !Array.isArray(teammatesJson.teammates)) return [];
-  return teammatesJson.teammates.filter((t) => t && typeof t.name === 'string');
+  return teammatesJson.teammates
+    .filter((t) => t && typeof t.name === 'string')
+    .map((t) => ({ name: t.name, status: t.status, progress: deriveProgress(t) }));
 }
 
 /**
@@ -176,6 +198,22 @@ export async function readDashboardState(pluginRoot) {
   };
 }
 
+/**
+ * Average the known per-teammate progress values into a single 0..100 figure.
+ * Teammates without a progress signal are ignored. Returns null when none of
+ * them carry progress (so the statusline can omit the field entirely).
+ * @param {Array<{progress: number|null}>} teammates
+ * @returns {number|null}
+ */
+function overallTeamProgress(teammates) {
+  const known = teammates
+    .map((t) => t.progress)
+    .filter((p) => typeof p === 'number' && Number.isFinite(p));
+  if (known.length === 0) return null;
+  const sum = known.reduce((acc, p) => acc + p, 0);
+  return Math.max(0, Math.min(100, Math.round(sum / known.length)));
+}
+
 // ─────────────────────────────────────────────
 // Section builders
 // ─────────────────────────────────────────────
@@ -218,6 +256,10 @@ function buildSections(state, flags) {
     const names = state.teammates.map((t) => t.name).slice(0, 3).join(',');
     const suffix = state.teammates.length > 3 ? `+${state.teammates.length - 3}` : '';
     out.push(`team=${paint(`${names}${suffix}`, 'cyan')}`);
+    const overall = overallTeamProgress(state.teammates);
+    if (overall !== null) {
+      out.push(`prog=${paint(`${overall}%`, 'green')}`);
+    }
   }
 
   return out;
@@ -286,9 +328,15 @@ export async function renderFullDashboard({ pluginRoot, config } = {}) {
   lines.push(`longCtx   : ${state.longContext ? paint('on', 'green') : paint('off', 'dim')}`);
   if (flags.showTeammates) {
     const tm = state.teammates.length > 0
-      ? state.teammates.map((t) => t.name).join(', ')
+      ? state.teammates
+        .map((t) => (typeof t.progress === 'number' ? `${t.name} ${t.progress}%` : t.name))
+        .join(', ')
       : paint('(none)', 'dim');
     lines.push(`teammates : ${tm}`);
+    const overall = overallTeamProgress(state.teammates);
+    if (overall !== null) {
+      lines.push(`progress  : ${paint(`${overall}%`, 'green')}`);
+    }
   }
   return lines.join('\n');
 }

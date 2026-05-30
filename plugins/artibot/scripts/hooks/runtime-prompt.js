@@ -112,6 +112,36 @@ function buildEffortDirective(meta) {
 }
 
 /**
+ * Build the team directive injected when the unified workflow plan elects a
+ * parallel runner. Mirrors the effort/budget prefix pattern so the spawn
+ * signal reaches the model on the same leading line:
+ *   [artibot:team runner=team teammates=N][artibot:effort level=X][artibot:task-budget max_tokens=Y]…
+ *
+ * One effort+budget pair is serialized per teammate from the SAME source as the
+ * trigger decision (workflow-plan.js). Returns '' for non-team plans, an empty
+ * teammates list, or a missing/invalid plan so non-team prompts are untouched.
+ *
+ * @param {object|null|undefined} workflowPlan - tasks.meta.workflowPlan
+ * @returns {string}
+ */
+export function buildTeamDirective(workflowPlan) {
+  if (!workflowPlan || workflowPlan.runner !== 'team') return '';
+  const teammates = Array.isArray(workflowPlan.teammates) ? workflowPlan.teammates : [];
+  if (teammates.length === 0) return '';
+  const head = `[artibot:team runner=team teammates=${teammates.length}]`;
+  const perTeammate = teammates
+    .map((tm) => {
+      const effort = tm?.effort ? `[artibot:effort level=${tm.effort}]` : '';
+      const budget = typeof tm?.budget === 'number' && tm.budget > 0
+        ? `[artibot:task-budget max_tokens=${tm.budget}]`
+        : '';
+      return `${effort}${budget}`;
+    })
+    .join('');
+  return `${head}${perTeammate}`;
+}
+
+/**
  * Prepend one or more artibot directives to the user prompt on a single
  * leading line, separated from the original prompt by a blank line.
  *
@@ -498,11 +528,17 @@ async function resolveTaskBudgetDirective(effortMeta, pluginRoot, runtimeConfig)
  * @param {object} params
  * @returns {{ user_prompt: string, message: string }}
  */
-function composePromptOutput({ prepared, prompt, effortMeta, taskBudgetDirective, injectPrompt }) {
+export function composePromptOutput({ prepared, prompt, effortMeta, taskBudgetDirective, injectPrompt }) {
   const basePrompt = prepared.userPrompt ?? prompt;
   const effortDirective = buildEffortDirective(effortMeta);
+  // P2: the pipeline's tasks middleware derives a unified workflow plan
+  // (team trigger + per-teammate effort/budget). When it elects a parallel
+  // runner, surface the team directive on the same leading line so the spawn
+  // signal actually reaches the model — without this the plan was built then
+  // discarded ("parallel-not-spawned" symptom).
+  const teamDirective = buildTeamDirective(prepared.context?.tasks?.meta?.workflowPlan);
   const finalUserPrompt = injectPrompt
-    ? applyPromptPrefix(basePrompt, [effortDirective, taskBudgetDirective])
+    ? applyPromptPrefix(basePrompt, [teamDirective, effortDirective, taskBudgetDirective])
     : basePrompt;
 
   const baseMessage = prepared.message ?? '[runtime] prompt prepared';
@@ -532,16 +568,20 @@ export async function handleUserPromptSubmit(hookData) {
   const injectPrompt = effortConfig.injectPrompt !== false; // default true
   const useNativeApi = effortConfig.nativeApi === true;     // default false
 
-  const prepared = await fallbackPreparePrompt(prompt, pluginRoot, hookData);
-  if (!prepared) return null;
-
-  persistTokenUsage(prepared.context, pluginRoot);
-
+  // Resolve + persist effort BEFORE preparing the prompt: the runtime pipeline's
+  // tasks middleware reads runtime/current-effort.json to attach effort meta and
+  // build the workflow plan. If preparePrompt ran first it would read the PRIOR
+  // prompt's effort file (stale off-by-one), so the write must precede the read.
   const effortMeta = await resolveEffortMeta(prompt, pluginRoot, hookData);
   await recordEffortDecision(effortMeta, pluginRoot);
   await recordPromptSignals(prompt, effortMeta?.command || null, pluginRoot, runtimeConfig);
 
   const taskBudgetDirective = await resolveTaskBudgetDirective(effortMeta, pluginRoot, runtimeConfig);
+
+  const prepared = await fallbackPreparePrompt(prompt, pluginRoot, hookData);
+  if (!prepared) return null;
+
+  persistTokenUsage(prepared.context, pluginRoot);
 
   if (useNativeApi && effortMeta) {
     await applyNativeEffortHint(effortMeta.effort, pluginRoot);

@@ -224,6 +224,7 @@ export function createArtibotAgent(options = {}) {
         input: {
           prompt: normalizedPrompt,
           hookData: hookData || {},
+          pluginRoot: options.pluginRoot,
         },
         userPrompt: normalizedPrompt,
         messageParts: [],
