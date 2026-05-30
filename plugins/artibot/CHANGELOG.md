@@ -13,6 +13,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.19.0] — 2026-05-30
+
+**Theme**: 모델 정책 중앙 강제(single source-of-truth) + Artibot 브랜드 테마
+
+흩어져 있던 모델 정책을 코드가 읽는 단일 진실원으로 통합하고, 드리프트를 CI·런타임에서 강제한다. 브랜드 테마(Dark/Light)도 함께 릴리스.
+
+### Added
+
+- **모델 정책 단일 source-of-truth** (`lib/core/model-policy.js`) — `artibot.config.json#/agents/modelPolicy`를 읽는 유일한 리졸버. `resolveModel` / `getPolicyModel` / `resolveModelForPhase` / `listAgentsByModel` / `normalizeAgentType` / `isKnownAgent` / `loadModelPolicy` 노출. never-throws, Korean-path safe. 정책이 config / 28개 agent frontmatter / 전역 rules 3곳에 흩어져 코드 강제가 없던 문제를 해소.
+- **모델 정책 드리프트 CI 게이트** (`scripts/ci/validate-model-policy.js` + `scripts/validate.js` 배선) — agent frontmatter `model:`과 config 정책 불일치 시 `npm run ci` 실패. 이전엔 frontmatter 존재만 검사하고 정책 대조는 없었음.
+- **SubagentStart 런타임 강제** (`scripts/hooks/subagent-handler.js`) — 모든 teammate 스폰에서 canonical 모델과 대조해 불일치 advisory 경고. config 하이드레이트 후 `getPolicyModel(agentType, config)` 사용, 정책 미로드 시 경고 억제로 거짓양성 방지.
+- **Artibot 브랜드 테마** (Dark / Light) — `experimental.themes` 등록, `/theme` 피커에서 선택 가능.
+
+### Changed
+
+- `lib/core/config-schema.js` — `modelPolicy` 스키마 타입 형상화(high / medium / advisorStrategy).
+- `commands/team.md`, `AGENTS.md` — 단일 진실원 = `lib/core/model-policy.js` 포인터 명시(산문 표는 코드의 투영임을 선언).
+
+### Tests
+
+- +43 (model-policy 37, drift-gate 6). 통합 82 통과, lint 0.
+
+---
+
 ## [4.18.1] — 2026-05-30
 
 **Theme**: 기능 감사 — 사용자 보고 2증상(진행률 % 깨짐, 병렬 팀 미소환) 근본수정
