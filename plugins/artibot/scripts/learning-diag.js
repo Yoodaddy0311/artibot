@@ -27,6 +27,7 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { homedir } from 'node:os';
+import { fileURLToPath } from 'node:url';
 
 // ---------------------------------------------------------------------------
 // Arg parsing
@@ -234,7 +235,7 @@ function renderSwarm(state) {
 // Section: Top performers + risk signals (across swarm-merged tools+agents)
 // ---------------------------------------------------------------------------
 
-function rankableEntries(state) {
+export function rankableEntries(state) {
   const merged = state.swarmWeights?.weights;
   if (!merged) return [];
   const rows = [];
@@ -265,7 +266,7 @@ function rankableEntries(state) {
   return rows;
 }
 
-function renderTopPerformers(rows, args) {
+export function renderTopPerformers(rows, args) {
   if (rows.length === 0) return '';
   const sorted = [...rows].sort((a, b) => b.score - a.score);
   const top = sorted.slice(0, Math.min(args.top, sorted.length));
@@ -281,7 +282,7 @@ function renderTopPerformers(rows, args) {
   return out.join('\n');
 }
 
-function renderRiskSignals(rows, args) {
+export function renderRiskSignals(rows, args) {
   if (rows.length === 0) return '';
   // Risk = consistent failure: high confidence + low MEASURED success + non-trivial
   // sample. Entries whose successRate was never measured (successMeasured === false)
@@ -471,4 +472,11 @@ function main() {
   process.stdout.write(sections.filter(Boolean).join('\n'));
 }
 
-main();
+// Run as CLI only when invoked directly (`node scripts/learning-diag.js`),
+// not when imported by tests. Keeps CLI behavior identical while allowing
+// the pure ranking/render helpers above to be unit-tested in-memory.
+const thisFile = fileURLToPath(import.meta.url);
+const invokedFile = process.argv[1] ? path.resolve(process.argv[1]) : '';
+if (invokedFile && path.resolve(thisFile) === invokedFile) {
+  main();
+}
