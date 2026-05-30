@@ -20,7 +20,27 @@ export const configSchema = {
     agents: {
       type: 'object',
       properties: {
-        modelPolicy: { type: 'object' },
+        modelPolicy: {
+          type: 'object',
+          description: 'Agent→model assignment tiers. Authoritative resolver: lib/core/model-policy.js',
+          properties: {
+            high: {
+              type: 'object',
+              properties: {
+                model: { type: 'string' },
+                agents: { type: 'array', items: { type: 'string' } },
+              },
+            },
+            medium: {
+              type: 'object',
+              properties: {
+                model: { type: 'string' },
+                agents: { type: 'array', items: { type: 'string' } },
+              },
+            },
+            advisorStrategy: { type: 'object' },
+          },
+        },
         categories: { type: 'object' },
         taskBased: { type: 'object' },
       },

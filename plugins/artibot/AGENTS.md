@@ -128,6 +128,8 @@ tools:
 
 Exporters that target non-Anthropic runtimes substitute a sane default; users override in the destination tool's config.
 
+> **Single source of truth:** the per-agent tier→model resolution is owned by `lib/core/model-policy.js` (`resolveModel` / `resolveModelForPhase`), reading `artibot.config.json#/agents/modelPolicy`. The table above is a projection of that resolver for export targets — do not treat it as an independent source.
+
 ---
 
 ## 4. Constraints & non-portable surface

@@ -8,6 +8,7 @@
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { getPolicyModel, listAgentsByModel, normalizeAgentType } from '../lib/core/model-policy.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PLUGIN_ROOT = resolve(__dirname, '..');
@@ -274,6 +275,85 @@ async function validateConfig() {
   }
 }
 
+/**
+ * Read an agent file's frontmatter `model:` value.
+ * Mirrors scripts/ci/ci-utils.js#extractFrontmatter (CRLF-normalized, simple
+ * key:value) so parsing stays consistent across validators.
+ *
+ * @param {string} content - Raw agent .md content.
+ * @returns {string|null} The trimmed model value, or null if absent.
+ */
+function readModelField(content) {
+  const normalized = String(content).replace(/\r\n/g, '\n');
+  const match = normalized.match(/^---\n([\s\S]*?)\n---/);
+  if (!match) return null;
+  for (const line of match[1].split('\n')) {
+    const kv = line.match(/^model\s*:\s*(.+)$/);
+    if (kv) return kv[1].trim();
+  }
+  return null;
+}
+
+/**
+ * Cross-check agent frontmatter `model:` against the central modelPolicy
+ * (artibot.config.json#/agents/modelPolicy) via lib/core/model-policy.js.
+ * Catches silent drift between frontmatter, config, and the rules doc.
+ *
+ * ERROR: frontmatter↔config mismatch, or a policy agent with no file.
+ * WARN:  an agent file whose name is in no policy bucket.
+ */
+async function validateModelPolicy() {
+  const agentsDir = join(PLUGIN_ROOT, 'agents');
+  if (!await exists(agentsDir)) return; // validateAgents already warns on absence
+
+  // Read config directly and pass it explicitly to the resolver — avoids
+  // depending on the loadConfig() cache lifecycle inside this standalone script.
+  let config = null;
+  const configPath = join(PLUGIN_ROOT, 'artibot.config.json');
+  if (await exists(configPath)) {
+    try { config = await readJson(configPath); } catch { /* validateConfig reports JSON errors */ }
+  }
+
+  const files = await readdir(agentsDir);
+  const mdFiles = files.filter(
+    f => f.endsWith('.md') && f.toLowerCase() !== 'index.md' && f.toLowerCase() !== 'readme.md'
+  );
+
+  const fileNames = new Set();
+  for (const file of mdFiles) {
+    const name = normalizeAgentType(file.replace(/\.md$/, ''));
+    fileNames.add(name);
+    const content = await readFile(join(agentsDir, file), 'utf-8');
+    const model = readModelField(content);
+    const policyModel = getPolicyModel(name, config);
+
+    if (policyModel === null) {
+      warn(`[model-policy] agents/${name}.md is in no policy bucket (model: ${model ?? 'unset'})`);
+      continue;
+    }
+    if (model === null) {
+      error(`[model-policy] agents/${name}.md has no "model:" field, policy expects "${policyModel}"`);
+      continue;
+    }
+    if (model !== policyModel) {
+      error(`[model-policy] agents/${name}.md model "${model}" != policy "${policyModel}"`);
+    }
+  }
+
+  // Policy lists an agent that has no file.
+  const policyAgents = new Set();
+  for (const m of ['opus', 'sonnet']) {
+    for (const a of listAgentsByModel(m, config)) policyAgents.add(a);
+  }
+  for (const name of policyAgents) {
+    if (!fileNames.has(name)) {
+      error(`[model-policy] "${name}" is in the policy but agents/${name}.md does not exist`);
+    }
+  }
+
+  console.log(`  [model-policy] ${mdFiles.length} agent(s) cross-checked against config policy`);
+}
+
 // --- Main ---
 
 console.log('Artibot Plugin Validation');
@@ -285,6 +365,7 @@ await validateSkills();
 await validateCommands();
 await validateHooks();
 await validateConfig();
+await validateModelPolicy();
 
 console.log('');
 

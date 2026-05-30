@@ -37,6 +37,8 @@ Parse $ARGUMENTS:
 - **Each teammate works independently** on their assigned scope
 - After main work: cross-check another teammate's output (on sonnet)
 
+> **Single source of truth:** the phase→model mapping above is a prose summary. The authoritative resolver is `lib/core/model-policy.js` (`resolveModelForPhase` / `resolveModel`), backed by `artibot.config.json#/agents/modelPolicy`. The SubagentStart hook (`scripts/hooks/subagent-handler.js`) calls `resolveModel` to flag spawns that drift from policy.
+
 ### Token Conservation Rule (CRITICAL)
 - **작업 완료 후 팀원을 임의로 셧다운하지 마라** — 재소환 시 토큰이 발생한다
 - 다음 작업에서 해당 팀원의 전문성이 **확실히 불필요**할 때만 교체
