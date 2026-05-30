@@ -13,6 +13,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.19.1] — 2026-05-30
+
+**Theme**: MCP bridge silent-boot 버그 수정 + 배선 감사 후속(트리아지 도구·GRPO dormant 정리)
+
+### Fixed
+
+- **MCP bridge silent-boot** — `bin/artibot-mcp.mjs`가 `lib/mcp/bridges/`(복수, 부재)를 import해 `loadServerModules`의 try/catch가 에러를 삼키고 **bridge 0개로 silent 부팅**하던 버그. 복합 원인으로 `createArtibotMcpServer`가 `builtinTools()`도 미등록이라 standalone tool 5개마저 비등록 상태였음. `lib/mcp/bridge/index.js` barrel(`wireBridges`) 신규 + import 경로 수정으로 **tools/list 0→10 복구**(builtins 5 + bridge 5). read-only·idempotent·never-throws.
+
+### Added
+
+- **배선갭 트리아지 도구** (`scripts/ci/triage-wiring-gaps.mjs`) — 배선 감사의 57 unverified 갭을 production caller grep(정의/tests/barrel/주석/orphan-chain 제외)으로 `dead`/`wired-suspect`/`config-only` 자동 분류. 결과: **dead 44 / wired-suspect 7 / config-only 6** → P1 배선 백로그 진짜 크기 = 44. 순수함수 export + 16 단위 테스트.
+
+### Changed
+
+- **GRPO dormant 일관 명시** (이름·구조 유지, 삭제 0) — reward emitter(`reward-metrics.js`)를 `DORMANT BY DESIGN`(deprecated 아님)으로, `reward-capture.js`의 `computeReward`는 live(`episodic.js:31` 실호출)로 구분 명시. nightly trainer는 빈/없는 입력 cold-start no-op임을 문서화. GRPO(정책 학습)와 dreaming(메모리 consolidation)의 역할 분리 기록. 동작 변경 0.
+
+### Tests
+
+- +24 (triage 16, wire-bridges 8). 회귀: MCP 136 / GRPO 426 통과, lint 0.
+
+---
+
 ## [4.19.0] — 2026-05-30
 
 **Theme**: 모델 정책 중앙 강제(single source-of-truth) + Artibot 브랜드 테마
