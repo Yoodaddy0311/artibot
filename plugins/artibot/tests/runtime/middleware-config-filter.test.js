@@ -25,8 +25,8 @@ describe('runtime/middleware config filtering', () => {
     });
 
     const names = result.context.runtime.middleware;
-    // All 10 default middleware should be present
-    expect(names.length).toBe(10);
+    // All 11 default middleware should be present
+    expect(names.length).toBe(11);
   });
 
   it('loads all default middleware when config.runtime.middleware is empty array', async () => {
@@ -37,7 +37,7 @@ describe('runtime/middleware config filtering', () => {
     });
 
     const names = result.context.runtime.middleware;
-    expect(names.length).toBe(10);
+    expect(names.length).toBe(11);
   });
 
   it('filters middleware to only those listed in config.runtime.middleware', async () => {
@@ -154,7 +154,7 @@ describe('runtime/middleware config filtering', () => {
       });
 
       // Should fall back to all defaults
-      expect(result.context.runtime.middleware.length).toBe(10);
+      expect(result.context.runtime.middleware.length).toBe(11);
     }
   });
 });
