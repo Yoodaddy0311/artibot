@@ -18,6 +18,8 @@ export {
   runPhase5Improve,
   runPhase6Report,
   listActiveWorktrees,
+  notePhaseCost,
+  buildCostWarningInstruction,
   PHASES,
 } from './engine.js';
 
