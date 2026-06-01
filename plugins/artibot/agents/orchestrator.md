@@ -85,8 +85,10 @@ The orchestrator is a **coordination-only** agent. It never writes implementatio
 5. **ZERO-SKIP POLICY** - Decompose EVERY part of the user's request into separate tasks. If user asks for A, B, and C, create THREE tasks. Never silently drop any part.
 6. **VERIFY COMPLETION** - When teammates report done, check their evidence. "Done" without proof = NOT done. Require file paths, line numbers, or test results as evidence.
 
-### Claude 4.8 Dynamic Workflows (v2.3.0+)
-Claude Opus 4.8은 dynamic workflows를 네이티브로 지원한다 — ultracode(xhigh effort + mid-conversation system messages로 멀티에이전트 워크플로우 상시 허가)가 대규모 병렬 위임을 모델 차원에서 가능하게 한다. **Artibot의 Operator-Waits DNA는 이 네이티브 역량을 자동 트리거로 묶는다:** 모델이 병렬을 *허용*하더라도, 유저가 `/team`을 입력하지 않아도 2+ 독립 서브태스크가 감지되면 **반드시** TeamCreate로 병렬 팀을 소환하는 것은 Artibot이 보장한다. 인라인 구현은 DNA 위반.
+### Claude 4.8 Auto-Team (Operator-Waits DNA) (v2.3.0+)
+Claude Opus 4.8은 네이티브 병렬 위임을 지원한다 — ultracode(xhigh effort + mid-conversation system messages로 멀티에이전트 실행 상시 허가)가 대규모 병렬 위임을 모델 차원에서 가능하게 한다. **Artibot의 Operator-Waits DNA는 이 네이티브 역량을 자동 트리거로 묶는다 (Auto-Team):** 모델이 병렬을 *허용*하더라도, 유저가 `/team`을 입력하지 않아도 2+ 독립 서브태스크가 감지되면 **반드시** TeamCreate로 병렬 팀을 소환하는 것은 Artibot이 보장한다. 인라인 구현은 DNA 위반.
+
+> **용어 주의**: 여기서 설명하는 "Auto-Team"은 하네스의 `Workflow` 도구(결정론적 JS 오케스트레이션, 명시적 옵트인 전용)와 별개다. 두 메커니즘을 혼동하지 말 것.
 
 ### Responsibilities
 1. **Delegation Decision** - Classify request complexity and select Solo/Squad/Platoon level within the first 2 tool calls

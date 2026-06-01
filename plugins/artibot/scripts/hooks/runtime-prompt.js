@@ -142,6 +142,27 @@ export function buildTeamDirective(workflowPlan) {
 }
 
 /**
+ * Build the ADVISORY recommendation directive injected when the unified
+ * workflow plan elects to SUGGEST (but not auto-fire) a heavier runner.
+ *
+ * Mirrors buildTeamDirective's style. Output format:
+ *   [artibot:hint recommend=workflow] | [artibot:hint recommend=autopilot]
+ *
+ * This is advisory ONLY — it surfaces workflowPlan.recommendation as text so the
+ * model/user can choose to opt in. It must NEVER spawn or auto-fire anything:
+ * the harness rule is that only inline|team auto-fire, while workflow|autopilot
+ * require explicit user opt-in. Returns '' when there is no plan or no
+ * recommendation so non-recommending prompts stay byte-identical.
+ *
+ * @param {object|null|undefined} workflowPlan - tasks.meta.workflowPlan
+ * @returns {string}
+ */
+export function buildRecommendationDirective(workflowPlan) {
+  if (!workflowPlan || !workflowPlan.recommendation) return '';
+  return `[artibot:hint recommend=${workflowPlan.recommendation}]`;
+}
+
+/**
  * Prepend one or more artibot directives to the user prompt on a single
  * leading line, separated from the original prompt by a blank line.
  *
@@ -537,8 +558,12 @@ export function composePromptOutput({ prepared, prompt, effortMeta, taskBudgetDi
   // signal actually reaches the model — without this the plan was built then
   // discarded ("parallel-not-spawned" symptom).
   const teamDirective = buildTeamDirective(prepared.context?.tasks?.meta?.workflowPlan);
+  // P3: surface an ADVISORY runner recommendation (workflow|autopilot) at the
+  // front door. Same source as buildTeamDirective. This only adds text so the
+  // user/model can opt in — it never auto-fires (honors the harness opt-in rule).
+  const recommendationDirective = buildRecommendationDirective(prepared.context?.tasks?.meta?.workflowPlan);
   const finalUserPrompt = injectPrompt
-    ? applyPromptPrefix(basePrompt, [teamDirective, effortDirective, taskBudgetDirective])
+    ? applyPromptPrefix(basePrompt, [teamDirective, effortDirective, taskBudgetDirective, recommendationDirective])
     : basePrompt;
 
   const baseMessage = prepared.message ?? '[runtime] prompt prepared';

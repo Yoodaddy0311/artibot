@@ -201,6 +201,70 @@ describe('deriveTeammateEfforts()', () => {
   });
 });
 
+// --- Advisory recommendation / autoFire (P2) ------------------------------
+
+/** Build an intent whose every recommendation uses the SAME command. */
+function homogeneousIntentWith(n, command = '/implement') {
+  const recommendations = Array.from({ length: n }, (_, i) => ({
+    intent: `action:r${i}`,
+    type: 'action',
+    description: `rec ${i}`,
+    agents: [`agent-${i}`],
+    commands: [command],
+  }));
+  return {
+    intents: recommendations.map((r) => r.intent),
+    matches: [],
+    recommendations,
+    best: { intent: 'action:implement', commands: [command], agents: ['planner'] },
+    ambiguity: { ambiguous: false, score: 0, clarification: null },
+  };
+}
+
+describe('buildWorkflowPlan() — advisory recommendation & autoFire', () => {
+  it('homogeneous fan-out (3x same command) firing team → workflow + autoFire', () => {
+    const plan = buildWorkflowPlan({ score: 0.2 }, homogeneousIntentWith(3), CONFIG);
+    expect(plan.runner).toBe('team');
+    expect(plan.recommendation).toBe('workflow');
+    expect(plan.autoFire).toBe(true);
+  });
+
+  it('plain inline case → recommendation null & autoFire false', () => {
+    const plan = buildWorkflowPlan({ score: 0.1 }, intentWith(1), CONFIG);
+    expect(plan.runner).toBe('inline');
+    expect(plan.recommendation).toBeNull();
+    expect(plan.autoFire).toBe(false);
+  });
+
+  it('high tier + >=6 heterogeneous sub-objectives → autopilot', () => {
+    // 6 recs cycling 3 distinct commands → each appears twice (maxRepeat 2),
+    // so the homogeneity branch does NOT fire; tier high + 6 subs → autopilot.
+    const cmds = ['/implement', '/code-review', '/verify'];
+    const recommendations = Array.from({ length: 6 }, (_, i) => ({
+      intent: `action:r${i}`, type: 'action', description: `rec ${i}`,
+      agents: [`agent-${i}`], commands: [cmds[i % 3]],
+    }));
+    const intent = {
+      intents: recommendations.map((r) => r.intent), matches: [], recommendations,
+      best: { intent: 'action:implement', commands: ['/implement'], agents: ['planner'] },
+      ambiguity: { ambiguous: false, score: 0, clarification: null },
+    };
+    const plan = buildWorkflowPlan({ score: 0.8 }, intent, CONFIG);
+    expect(plan.runner).toBe('team');
+    expect(plan.recommendation).toBe('autopilot');
+    expect(plan.autoFire).toBe(true);
+  });
+
+  it('mixed-command team plan with no homogeneity/size signal → recommendation null (purely additive fallback)', () => {
+    // intentWith(3) alternates /implement,/code-review,/implement → maxRepeat 2,
+    // only 3 subs so no autopilot either → recommendation must stay null.
+    const plan = buildWorkflowPlan({ score: 0.8 }, intentWith(3), CONFIG);
+    expect(plan.runner).toBe('team');
+    expect(plan.recommendation).toBeNull();
+    expect(plan.autoFire).toBe(true);
+  });
+});
+
 // --- Edge cases -----------------------------------------------------------
 
 describe('buildWorkflowPlan() — edge cases', () => {

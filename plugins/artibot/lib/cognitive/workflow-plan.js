@@ -139,6 +139,36 @@ function evaluateTrigger(classification, intent, triggers) {
 }
 
 /**
+ * Derive an ADVISORY runner recommendation (NOT an auto-fire decision).
+ *
+ * Purely additive signal for the classifier to SURFACE to the user; it never
+ * changes runner selection. Only `inline`/`team` auto-fire — `workflow` and
+ * `autopilot` require explicit user opt-in, so this layer can only suggest.
+ *
+ * - Homogeneous fan-out (>=3 sub-objectives, largest same-command group >=3)
+ *   → 'workflow' (a deterministic pipeline fits a repeated-command batch).
+ * - Else a big multi-domain high-tier job (tier 'high', >=6 sub-objectives)
+ *   → 'autopilot' (worth an unattended session).
+ * - Else → null (no signal).
+ *
+ * @param {{ command: string }[]} subObjectives
+ * @param {'low'|'medium'|'high'} tier
+ * @returns {'workflow'|'autopilot'|null}
+ */
+function deriveRecommendation(subObjectives, tier) {
+  const subs = Array.isArray(subObjectives) ? subObjectives : [];
+  const counts = new Map();
+  for (const sub of subs) {
+    const cmd = sub?.command || '';
+    counts.set(cmd, (counts.get(cmd) || 0) + 1);
+  }
+  const maxRepeat = counts.size > 0 ? Math.max(...counts.values()) : 0;
+  if (subs.length >= 3 && maxRepeat >= 3) return 'workflow';
+  if (tier === 'high' && subs.length >= 6) return 'autopilot';
+  return null;
+}
+
+/**
  * Resolve a per-teammate effort for each sub-objective, clamped to
  * [parent−1, parent] so teammates never exceed the parent's effort band.
  *
@@ -191,6 +221,9 @@ export function buildWorkflowPlan(classification, intent, config, deps = {}) {
   const parentEffort = resolveFn(parentCmd);
   const trigger = evaluateTrigger(cls, safeIntent, triggers);
 
+  const subObjectives = extractSubObjectives(safeIntent);
+  const recommendation = deriveRecommendation(subObjectives, complexityTier(cls.score));
+
   if (trigger.runner !== 'team') {
     return Object.freeze({
       runner: 'inline',
@@ -198,10 +231,11 @@ export function buildWorkflowPlan(classification, intent, config, deps = {}) {
       perAgentBudget: 0,
       teammates: Object.freeze([]),
       trigger: Object.freeze({ ...trigger }),
+      recommendation,
+      autoFire: false,
     });
   }
 
-  const subObjectives = extractSubObjectives(safeIntent);
   const efforts = deriveTeammateEfforts(subObjectives, parentEffort, resolveFn);
   const teammates = subObjectives.map((sub, i) => Object.freeze({
     agent: sub.agent,
@@ -222,5 +256,7 @@ export function buildWorkflowPlan(classification, intent, config, deps = {}) {
     perAgentBudget,
     teammates: Object.freeze(teammates),
     trigger: Object.freeze({ ...trigger }),
+    recommendation,
+    autoFire: true,
   });
 }
