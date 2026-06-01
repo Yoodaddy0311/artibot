@@ -180,6 +180,13 @@ jobs:
           # Root README plugin table row — scoped to artibot row only.
           sed -i -E "s#(\[\`artibot\`\]\(\./plugins/artibot/\) [|] Claude Code \(developer CLI\) [|] )\*\*[0-9]+\.[0-9]+\.[0-9]+\*\*#\1**${VERSION}**#" README.md
 
+      - name: Sync README count prose
+        # Self-heal count prose ("N slash commands", "N skills", …) so a release
+        # that changes a count never leaves drift for the validate-readme-claims
+        # gate to fail on later (the manual hotfix that release ea8a3b9 was).
+        # Idempotent: a no-op when prose already matches file-system counts.
+        run: node plugins/artibot/scripts/ci/sync-readme-claims.js
+
       - name: Open PR for README badge updates
         # Previous flow pushed directly to master with the default GITHUB_TOKEN.
         # Branch protection requires PR + required status checks, which blocked
