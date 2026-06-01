@@ -13,6 +13,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.19.4] — 2026-06-01
+
+**Theme**: 병렬 실행 메커니즘(team/workflow/autopilot) 경계 명확화 + 단일 4-way 분류기 (Option A)
+
+세 가지 "병렬 업무 처리" 방식이 혼재처럼 느껴지던 원인 — (1) `autopilot`이 `team`의 경쟁자가 아니라 *소비자*(EXECUTE phase가 team을 호출), (2) "workflow" 단어가 하니스 Workflow 툴과 Artibot 레거시 "dynamic-workflow"(=auto-team) 양쪽을 가리키던 충돌 — 을 엔진 병합 없이 경계 명확화로 해소한다. 세 메커니즘은 2개 직교 축(적응적 team ↔ 결정론 workflow) + 세션 래퍼(autopilot)에 놓인다.
+
+### Added
+
+- **4-way 분류기 advisory 레이어** (`lib/cognitive/workflow-plan.js`) — `buildWorkflowPlan`이 순수 additive 필드 `recommendation`(`'workflow'`|`'autopilot'`|`null`) + `autoFire`(team일 때만 true)를 반환. 신규 순수 헬퍼 `deriveRecommendation` — 동질 fan-out(같은 command ≥3 & subs ≥3)→`workflow`, high tier & subs ≥6→`autopilot`. runner/effort/budget/teammates는 byte-identical fallback. **`inline`|`team`만 자동 발사, `workflow`|`autopilot`은 recommend-only**(하니스 opt-in 규칙 준수).
+- **추천 표면화 directive** (`scripts/hooks/runtime-prompt.js`) — `buildRecommendationDirective`가 추천을 `[artibot:hint recommend=…]` 텍스트로만 노출. 자동 발사 없음. 미추천 시 `''`로 기존 프롬프트 byte-identical.
+- **정본 라우팅 문서** (`docs/ORCHESTRATION-ROUTING.md`) — 2축 모델·결정 트리·auto-fire 규칙 단일 진실원. `docs/ORCHESTRATION-GLOSSARY.md` — 4-term 정의 + 이름 충돌 주의.
+
+### Changed
+
+- **이름 충돌 제거** (`agents/orchestrator.md`·`CLAUDE.md`) — 사용자향 산문 "dynamic workflow" → "Auto-Team". 하니스 `Workflow` 툴(결정론 JS, 명시 opt-in)과 별개 메커니즘임을 명시. `commands/autopilot.md`·`skills/team/SKILL.md`를 라우팅 문서로 교차링크.
+
+### Verification
+
+- `vitest` 42/42 (workflow-plan 27 + runtime-prompt 15), 변경 소스 ESLint 0 errors. PR #47.
+
+---
+
 ## [4.19.3] — 2026-06-01
 
 **Theme**: 배선 백로그 일부 적용(WIRE-04/06/08/12) + 라이프사이클 명령 라우터 배선 + CI 산문 드리프트 영구 차단
