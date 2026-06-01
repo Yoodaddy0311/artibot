@@ -224,6 +224,7 @@ if (pfInstr?.suppress) { /* warnings: state.preflightWarnings에 누적 + 계속
 - `Task(subagent_type="artibot:planner", model="opus", prompt="[Autopilot Phase 1] PRD: {prdPath}\n\n분해 + 위험 식별 + 병렬 팀 구성 제안")`
 
 #### Phase 2 — PARALLEL EXECUTE
+- EXECUTE 러너는 통합 분류기(`lib/cognitive/workflow-plan.js`)가 선출한다: 현재 기본값은 `TeamCreate` (adaptive 팀)이며, 결정적 workflow-runner 로의 교체는 향후 Option-B 단계의 pluggable 러너다 (현 동작 불변).
 - `--no-team` 미설정 시: `TeamCreate(team_name="autopilot-{sessionId}", description="{task}")` → 병렬 `Task()` 스폰.
 - 30분(또는 `--checkpoint`)마다 WIP commit: `git commit -m "wip(autopilot): phase2 checkpoint {sessionId}"`. SHA를 `engine.recordCheckpoint(sessionId, sha)`로 기록.
 

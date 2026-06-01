@@ -38,9 +38,11 @@ Orchestrator delegates by default. Teammates execute and cross-check.
 
 Violation symptom: "all work done inline by main thread" = DNA breach. Opt-out: `--no-team` in prompt, or `team.autoApply: false` in `artibot.config.json`.
 
-**Claude 4.8 dynamic workflows**: 4.8 natively supports dynamic workflows — ultracode (xhigh effort + always-on multi-agent permission via mid-conversation system messages) makes large-scale parallel delegation a model-level capability. Artibot's Operator-Waits DNA still owns the *automatic* trigger: parallel teams fire on intent without the user typing `/team`.
+**Claude 4.8 Auto-Team**: 4.8 natively supports large-scale parallel delegation — ultracode (xhigh effort + always-on multi-agent permission via mid-conversation system messages) makes this a model-level capability. Artibot's Operator-Waits DNA still owns the *automatic* trigger: parallel teams fire on intent without the user typing `/team`. Note: the harness `Workflow` tool (deterministic JS orchestration via `agent()`/`parallel()`/`pipeline()`) is a SEPARATE, explicit-opt-in mechanism — it does not auto-fire.
 
 **Canonical evaluator**: the team trigger AND per-teammate effort/budget are both derived from one complexity classification by `lib/cognitive/workflow-plan.js#buildWorkflowPlan`; the numeric thresholds live only in `artibot.config.json#/team/autoApplyTriggers` (the table above is a summary).
+
+Routing: see [docs/ORCHESTRATION-ROUTING.md](docs/ORCHESTRATION-ROUTING.md) — canonical decision tree, 2-axis model, and auto-fire rules for all four mechanisms.
 
 ## Auto-invoke Principle
 

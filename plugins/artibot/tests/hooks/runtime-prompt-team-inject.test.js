@@ -12,7 +12,11 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { buildTeamDirective, composePromptOutput } from '../../scripts/hooks/runtime-prompt.js';
+import {
+  buildRecommendationDirective,
+  buildTeamDirective,
+  composePromptOutput,
+} from '../../scripts/hooks/runtime-prompt.js';
 
 function teamPlan() {
   return {
@@ -57,6 +61,32 @@ describe('buildTeamDirective()', () => {
       teammates: [{ effort: 'medium', budget: 0 }],
     });
     expect(d).toBe('[artibot:team runner=team teammates=1][artibot:effort level=medium]');
+  });
+});
+
+describe('buildRecommendationDirective()', () => {
+  it('emits an advisory hint when the plan recommends workflow', () => {
+    const d = buildRecommendationDirective({ recommendation: 'workflow' });
+    expect(d).toBe('[artibot:hint recommend=workflow]');
+    expect(d).toContain('recommend=workflow');
+  });
+
+  it('emits an advisory hint when the plan recommends autopilot', () => {
+    const d = buildRecommendationDirective({ recommendation: 'autopilot' });
+    expect(d).toBe('[artibot:hint recommend=autopilot]');
+  });
+
+  it('returns empty string when recommendation is null', () => {
+    expect(buildRecommendationDirective({ recommendation: null })).toBe('');
+  });
+
+  it('returns empty string when recommendation is absent', () => {
+    expect(buildRecommendationDirective({})).toBe('');
+  });
+
+  it('returns empty string for a missing/invalid plan', () => {
+    expect(buildRecommendationDirective(null)).toBe('');
+    expect(buildRecommendationDirective(undefined)).toBe('');
   });
 });
 
