@@ -13,6 +13,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.19.3] — 2026-06-01
+
+**Theme**: 배선 백로그 일부 적용(WIRE-04/06/08/12) + 라이프사이클 명령 라우터 배선 + CI 산문 드리프트 영구 차단
+
+배선 감사(v4.19.1) 후속으로 안전 검증된 4개 갭을 적용하고, 5개 라이프사이클 명령을 `route-lifecycle` CLI 브리지에 실제 배선했다. 또한 v4.19.2 직후 발생한 README command-count 핫픽스(ea8a3b9)의 근본원인 — 릴리스 sync가 배지만 갱신하고 카운트 산문은 방치하던 것 — 을 자가치유 스크립트로 영구 차단한다.
+
+### Added
+
+- **배선 갭 4건 적용** (배선 감사 백로그) — WIRE-04 cache-roi 미들웨어(`createCacheRoiMiddleware`, 프롬프트 캐시 ROI 측정), WIRE-06 smart-pipeline Zero-Waste 조건부 미들웨어 선택, WIRE-08 Autopilot cost-tracker(`notePhaseCost`/`buildCostWarningInstruction`를 `engine.*` 네임스페이스에 재노출), WIRE-12 lifecycle-router CLI 브리지(`scripts/route-lifecycle.mjs` — `routeLifecycle`/`routeByContext`/`suggestNext` 노출). 커밋 `8003662`/`3e2cbdc`/`61dde1f`.
+- **README 카운트 산문 자가치유** (`scripts/ci/sync-readme-claims.js` + `scripts/ci/readme-claims-registry.js`) — 릴리스 배지 sync가 버전 배지만 갱신하고 "N slash commands" 등 카운트 산문은 방치해 드리프트가 재발(핫픽스 ea8a3b9)하던 문제 차단. validator와 동일한 카운트 로직·정규식을 공유 레지스트리로 추출하고, 멱등 자가치유 스크립트가 릴리스 파이프라인(`release.yml`)에서 산문을 파일시스템 카운트로 재작성. `--check` 모드는 CI dry-run. coverage는 임계치 claim이라 자동치환 대상에서 의도적 제외.
+
+### Changed
+
+- **5개 라이프사이클 명령을 route-lifecycle 브리지에 배선** (`commands/design.md`·`marketing.md`·`review.md`·`ship.md`·`spec.md`) — 하드코딩된 `Task(<agent>)` 위임을 `node scripts/route-lifecycle.mjs <phase> "$ARGUMENTS"` 호출 후 결과 agent로 위임하도록 변경. `routeLifecycle`이 `{agent, toolset, skills, candidates}`를 단일 JSON 라인으로 해석(design→architect, ship→devops-engineer, review→code-reviewer, marketing→marketing-strategist). WIRE-12 브리지의 실제 production 소비자 확보.
+- **README claim 로직 단일 진실원화** (`scripts/ci/validate-readme-claims.js`) — 복제됐던 `collectActuals()`/`CLAIM_PATTERNS`를 `readme-claims-registry.js`로 추출하고 validator·sync 양쪽이 import. 둘 중 하나만 패턴을 갱신하는 silent-drift를 구조적으로 차단(약 -75 lines 중복 제거). `collectActuals({ full })`로 coverage 게이팅 파라미터화. 동작 100% 보존.
+- **릴리스 워크플로 산문 sync 스텝** (`.github/workflows/release.yml`) — 배지 갱신 직후·PR 생성 직전에 "Sync README count prose" 스텝 추가(멱등 no-op 보장).
+
+### Fixed
+
+- **README slash-command 카운트 70→71** (`README.md` 산문, 커밋 `ea8a3b9`) — v4.19.2 직후 P0 핫픽스. validator는 산문 카운트를 검증하지만 릴리스 sync가 산문을 자동갱신하지 않아 드리프트가 발생했던 것 → 위 자가치유 스크립트가 재발 차단.
+
+### Docs
+
+- **WIRE 백로그 트리아지 결정 문서** (`.artibot/WIRE-BACKLOG-TRIAGE.md`) — 배선 감사 22개 갭 후보를 적용완료 4 / dormant 재분류 3(WIRE-01·02·19, dormant-by-design) / needs-rework 14(spec 결함으로 blind 적용 불가)로 분류. **추가 적용 가능 항목 0** — 나머지는 spec의 경로·라인 드리프트, 가짜 테스트 케이스, 스키마 불일치 등 결함 해소 후에만 안전 적용 가능함을 항목별 근거와 함께 기록.
+
+### Tests
+
+- route-lifecycle CLI 브리지 테스트 강화(5개 라이프사이클 phase의 결정론적 해석 단언, +5 케이스). README claim 공유 레지스트리 단위 테스트 신규(`tests/ci/readme-claims-registry.test.js`, 6 케이스 — 카운트 정수성·full 게이팅·모든 패턴 key의 산출 가능성·정규식 group1/group2 contract·`70+`/`1 command` 미매칭 parity). swarm-sync http-backend 테스트 케이스를 real egress 계약에 정렬(커밋 `6e279df`). 회귀: lint 0, validator `--full` exit 0, sync 멱등 no-op 확인.
+
+---
+
 ## [4.19.2] — 2026-05-31
 
 **Theme**: Swarm 9일 sync stale 해소 — 세션 훅이 git 백엔드를 우회하던 근본원인 수정
