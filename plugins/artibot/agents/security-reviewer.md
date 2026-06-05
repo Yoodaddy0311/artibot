@@ -72,6 +72,73 @@ category: expert
 | MEDIUM | Information disclosure, weak crypto | Fix within sprint |
 | LOW | Missing headers, verbose errors | Fix when convenient |
 
+## STRIDE Threat Modeling
+
+Methodology reference: VibeHacking (MIT), rewritten in Artibot terms. The `threat-modeling`
+capability means producing a per-element STRIDE pass, not just scanning for known patterns.
+STRIDE classifies threats into six categories, each mapping to a violated security property:
+
+| Category | Violates | Question to ask |
+|----------|----------|-----------------|
+| **S**poofing | Authentication | Can an attacker impersonate this user/service/identity? |
+| **T**ampering | Integrity | Can data, code, or config be modified in transit or at rest? |
+| **R**epudiation | Non-repudiation | Can an actor deny an action because it was not logged/signed? |
+| **I**nformation Disclosure | Confidentiality | Can sensitive data leak to an unauthorized party? |
+| **D**enial of Service | Availability | Can the component be exhausted or blocked? |
+| **E**levation of Privilege | Authorization | Can a low-privilege actor gain higher privilege? |
+
+### Process
+
+1. **Decompose** — sketch the data flow: external entities, processes, data stores, data flows.
+2. **Mark trust boundaries** — every point where data crosses from a lower to a higher trust
+   zone (internet→service, untrusted input→agent context, MCP result→model). Each crossing is a
+   threat vector.
+3. **Apply STRIDE per element** — only the categories that apply to each element type (below).
+4. **Rate** — severity (Critical/High/Medium/Low) × likelihood.
+5. **Mitigate & validate** — assign a control to each threat, confirm it holds.
+
+### STRIDE per Element
+
+Apply only the categories that are meaningful for each element type:
+
+| Element | Applicable categories |
+|---------|-----------------------|
+| **Process** (API, handler, agent) | S, T, R, I, D, E (all six) |
+| **Data Store** (DB, cache, file, memory snapshot) | T, R, I, D |
+| **Data Flow** (request, internal call, message) | T, I, D |
+| **External Entity** (user, third-party service) | S, R |
+
+### Per-Category Checklist
+
+- **Spoofing** — strong auth (MFA, FIDO2), mTLS for service-to-service, explicit JWT alg
+  validation, hardened session cookies (HttpOnly/Secure/SameSite).
+- **Tampering** — server-side input validation (never trust client), digital signatures/HMAC on
+  code and config, file-integrity monitoring, parameterized queries.
+- **Repudiation** — immutable audit log (who/when/what/result), signed/centralized logs (HMAC,
+  SIEM), digital signatures on critical transactions.
+- **Information Disclosure** — generic error messages, minimized API responses (field filtering),
+  encryption in transit and at rest, sensitive files outside web root.
+- **Denial of Service** — rate limiting, resource/complexity caps, timeouts, ReDoS-safe regex,
+  CDN/DDoS protection.
+- **Elevation of Privilege** — least privilege, server-side authz on every endpoint, no trust in
+  client-supplied roles, separation of duties.
+
+### Worked Example — `/api/auth/login` (Process, crosses internet→service boundary)
+
+| STRIDE | Scenario | Mitigation |
+|--------|----------|------------|
+| S | Login with stolen credentials | MFA, anomalous-login detection |
+| T | Password tampered in transit | TLS 1.3 required |
+| R | No record of login attempts | Audit log + SIEM |
+| I | Error reveals account existence | Generic error response |
+| D | Brute-force locks accounts | Rate limit, CAPTCHA |
+| E | SQL injection yields admin | Parameterized queries, ORM |
+
+For AI/LLM-specific elements (agents, MCP tools, hooks, RAG stores), pair this STRIDE pass with
+the `ai-security-standards` skill — it maps OWASP LLM Top 10 onto Artibot's hook/MCP/Agent-Teams
+trust boundaries (prompt injection = Spoofing/Tampering, excessive agency = Elevation, training
+data poisoning = Tampering, etc.).
+
 ## Common Vulnerability Patterns and Fixes
 
 **SQL Injection**:

@@ -10,10 +10,15 @@
  *   4. stop-recap.js          (5s)  — read-only turn recap (stderr)
  *   5. session-notes.js       (5s)  — SESSION-NOTES.md append
  *
- * Ordering safety: Stop ignores `additionalContext` per Claude Code schema,
- * so hook order does not affect the user-visible result. Hooks are run in
- * parallel; the dispatcher merges any decision=block result and forwards
- * stderr (where stop-recap emits its [artibot:recap] line).
+ * Output handling: Claude Code ≥ 2.1.163 honors `hookSpecificOutput.
+ * additionalContext` on Stop / SubagentStop (non-blocking soft feedback), in
+ * addition to the always-supported `decision: "block"` path. mergeResults
+ * concatenates additionalContext from every hook AND forwards the first
+ * decision=block, so both the DEV-verify advisory note and any blocking gate
+ * survive consolidation. Hooks run in parallel; order does not change the
+ * merged result (additionalContext is concatenated in array order, block wins
+ * regardless of position). stderr is forwarded as-is (where stop-recap emits
+ * its [artibot:recap] line).
  *
  * Loop guard: hooks individually check `stop_hook_active=true` and skip;
  * the dispatcher does NOT re-check because each hook implements its own
