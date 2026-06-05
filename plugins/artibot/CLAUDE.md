@@ -38,7 +38,9 @@ Orchestrator delegates by default. Teammates execute and cross-check.
 
 Violation symptom: "all work done inline by main thread" = DNA breach. Opt-out: `--no-team` in prompt, or `team.autoApply: false` in `artibot.config.json`.
 
-**Claude 4.8 Auto-Team**: 4.8 natively supports large-scale parallel delegation — ultracode (xhigh effort + always-on multi-agent permission via mid-conversation system messages) makes this a model-level capability. Artibot's Operator-Waits DNA still owns the *automatic* trigger: parallel teams fire on intent without the user typing `/team`. Note: the harness `Workflow` tool (deterministic JS orchestration via `agent()`/`parallel()`/`pipeline()`) is a SEPARATE, explicit-opt-in mechanism — it does not auto-fire.
+**Claude 4.8 Auto-Team**: 4.8 natively supports large-scale parallel delegation — ultracode (xhigh effort + always-on multi-agent permission via mid-conversation system messages) makes this a model-level capability. (`ultracode` is the official Claude Code **2.1.160** rename of the former "workflow" trigger keyword.) Artibot's Operator-Waits DNA still owns the *automatic* trigger: parallel teams fire on intent without the user typing `/team`. Note: the harness `Workflow` tool (deterministic JS orchestration via `agent()`/`parallel()`/`pipeline()`) is a SEPARATE, explicit-opt-in mechanism — it does not auto-fire.
+
+> **Naming collision (external)** — Claude Code **2.1.154** shipped a platform feature called **"Dynamic Workflows"** (auto-orchestration across tens–hundreds of background agents). It is NOT the same as the harness `Workflow` tool, NOT Artibot's `team`/Auto-Team, and NOT `ultracode`. Three distinct concepts share the word "workflow" — see [docs/ORCHESTRATION-GLOSSARY.md](docs/ORCHESTRATION-GLOSSARY.md).
 
 **Canonical evaluator**: the team trigger AND per-teammate effort/budget are both derived from one complexity classification by `lib/cognitive/workflow-plan.js#buildWorkflowPlan`; the numeric thresholds live only in `artibot.config.json#/team/autoApplyTriggers` (the table above is a summary).
 

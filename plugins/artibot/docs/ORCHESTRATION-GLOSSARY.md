@@ -14,7 +14,7 @@ Four parallel-execution mechanisms in Artibot. Their engines are distinct and mu
 
 ---
 
-## Naming Note
+## Naming Notes
 
 Artibot's legacy term **"dynamic-workflow"** (used in older docs and in the source file
 `lib/cognitive/workflow-plan.js`) refers to the **Auto-Team** trigger described under **team**
@@ -22,6 +22,17 @@ above — it is NOT the harness `Workflow` tool (the deterministic JS orchestrat
 The file `lib/cognitive/workflow-plan.js` retains its legacy name but its runtime purpose is to
 build the **team plan** (complexity classification + per-teammate effort/budget). Do not rename
 that file; do not confuse its name with the harness Workflow tool.
+
+### Claude Code platform terms (external — do not conflate)
+
+- **`ultracode`** (Claude Code 2.1.160) — a model-invocation mode (xhigh effort + always-on
+  multi-agent permission); the official rename of the former "workflow" trigger keyword. It is a
+  platform capability, NOT an Artibot mechanism.
+- **Dynamic Workflows** (Claude Code 2.1.154) — a platform feature that auto-orchestrates work
+  across tens–hundreds of background agents. It is distinct from the harness `Workflow` tool,
+  from Artibot's `team`/Auto-Team, and from `ultracode`. Four things now share the word
+  "workflow": Artibot legacy "dynamic-workflow" (=Auto-Team), the harness `Workflow` tool, the
+  `/orchestrate` user entry point, and this platform "Dynamic Workflows" — keep them separate.
 
 ---
 

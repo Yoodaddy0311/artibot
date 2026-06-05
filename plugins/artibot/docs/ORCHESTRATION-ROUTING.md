@@ -15,6 +15,11 @@ All other files that discuss routing summarize and link here; do not duplicate t
 > autopilot is not a third axis — it is a session-lifetime wrapper whose EXECUTE phase delegates
 > to team and/or workflow depending on the sub-task shape. It never auto-fires.
 
+> **Naming collision (external)** — none of the four above is Claude Code's platform **"Dynamic
+> Workflows"** (2.1.154, auto-orchestration across many background agents) or the `ultracode`
+> mode (2.1.160 rename of the old "workflow" trigger). Those are platform-level concepts, separate
+> from Artibot's mechanisms — see [ORCHESTRATION-GLOSSARY.md](ORCHESTRATION-GLOSSARY.md).
+
 ---
 
 ## Decision Tree
