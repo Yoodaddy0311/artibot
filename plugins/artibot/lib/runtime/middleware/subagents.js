@@ -43,6 +43,18 @@ export function createSubagentsMiddleware(options = {}) {
     const bestAgent = state.context.intent?.agents?.[0] || task.recommendedAgent || null;
     const bestCommand = state.context.intent?.commands?.[0] || task.recommendedCommand || null;
 
+    // WIRE-03: surface the per-teammate plan from buildWorkflowPlan
+    // (lib/cognitive/workflow-plan.js) on the structured contract so object
+    // consumers — not just the prompt-string directive (runtime-prompt.js
+    // buildTeamDirective:127) — get planned effort/budget. The team branch of
+    // buildWorkflowPlan (workflow-plan.js:254-261) emits runner/effort/
+    // perAgentBudget/teammates[{agent,command,effort,budget}]; inline returns
+    // teammates:[] (workflow-plan.js:232).
+    const plan = task.meta?.workflowPlan;
+    const planTeammates = (plan?.runner === 'team' && Array.isArray(plan.teammates))
+      ? plan.teammates
+      : [];
+
     const contract = {
       mode,
       shouldParallelize: mode === 'agentTeam',
@@ -51,6 +63,14 @@ export function createSubagentsMiddleware(options = {}) {
       targetCommand: bestCommand,
       tools: policy.tools || [],
       communication: policy.communication || 'unspecified',
+      parentEffort: plan?.effort ?? null,
+      perAgentBudget: typeof plan?.perAgentBudget === 'number' ? plan.perAgentBudget : 0,
+      teammates: planTeammates.map((t) => ({
+        agent: t.agent,
+        command: t.command,
+        effort: t.effort,
+        budget: t.budget,
+      })),
     };
 
     state.context.subagents = {

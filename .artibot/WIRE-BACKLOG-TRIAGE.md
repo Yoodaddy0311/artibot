@@ -12,16 +12,16 @@
 
 | Category | Count | Action |
 |---|---|---|
-| Applied this session | 4 | Done — WIRE-04, 06, 08, 12 |
+| Applied | 5 | Done — WIRE-04, 06, 08, 12, **03** (03 applied 2026-06-05) |
 | Reclassify dormant | 3 | WIRE-01, 02, 19 — no wiring needed |
-| needs-rework | 14 | Spec defects block safe application |
+| needs-rework | 13 | Spec defects block safe application |
 | **Total accounted** | **21** | WIRE-07 produced no spec (see gap note) |
 
 ---
 
-## Table 1 — Applied (4)
+## Table 1 — Applied (5)
 
-These four were verified, committed, and are live on `master`.
+These were verified, committed, and are live on `master` (WIRE-03 pending push at time of writing).
 
 | ID | Capability | Commit | Status |
 |---|---|---|---|
@@ -29,6 +29,7 @@ These four were verified, committed, and are live on `master`.
 | WIRE-06 | smart-pipeline Zero-Waste condition-based middleware selection — dynamic pipeline filter | `8003662` | Applied |
 | WIRE-08 | Autopilot cost-tracker — `notePhaseCost` + `buildCostWarningInstruction` re-exported onto `engine.*` namespace | `3e2cbdc` | Applied |
 | WIRE-12 | lifecycle-router CLI bridge — new `scripts/route-lifecycle.mjs` exposing `routeLifecycle` / `routeByContext` / `suggestNext` | `61dde1f` | Applied |
+| WIRE-03 | Per-teammate workflow plan attachment — `subagents.js` contract surfaces `parentEffort`/`perAgentBudget`/`teammates[]` from `task.meta.workflowPlan`. Spec line citations corrected (workflow-plan.js inline 227-237 / teammates 240-246; runtime-prompt.js 560). | _2026-06-05_ | Applied |
 
 ---
 
@@ -48,11 +49,12 @@ These items have `isRealGap=false` and are intentional-dormant, not defects. The
 
 Fourteen items carry verified or unverified spec defects that make blind application unsafe (guardrail risk, broken tests, or unresolvable call sites). Items with `isRealGap=false` are separately flagged as dormant candidates.
 
-### 3a — realGap=true (6 items): genuine gaps, but spec must be fixed before applying
+### 3a — realGap=true (5 items): genuine gaps, but spec must be fixed before applying
+
+> WIRE-03 (was here) applied 2026-06-05 — moved to Table 1.
 
 | ID | Capability | risk | conf | Core rework reason |
 |---|---|---|---|---|
-| WIRE-03 | Per-teammate workflow plan attachment (`task.meta.workflowPlan` → subagents contract) | low | 0.78 | Spec cites wrong file path: `lib/workflow/workflow-plan.js` does not exist; real file is `lib/cognitive/workflow-plan.js`. Line numbers also drift. Logic is correct; fix the path/line citations only. |
 | WIRE-09 | phase-replay `replayPhase` — re-runs single autopilot phase for recovery | low | — | Blocking defect: `PHASE_TO_RUNNER` functions take a full `state` object and return an instruction, not the `{status,sha}` contract `replayPhase` expects from `opts.phaseRunner`. No adapter is provided. Happy-path testStub assertion will fail on correct wiring. `editSketch` field referenced as "see editSketch field" but omitted. |
 | WIRE-10 | `createFeatureTracker` — Session Intelligence Report feature-usage instantiation | low | 0.88 | Core mechanism fictional: `create-artibot-agent.js` has no event bus and middleware emit no `feature:*` events. Tracker would subscribe to a bus nothing publishes to, recording zero activations. The key testStub assertion (`totalActivations >= 1`) would fail immediately. |
 | WIRE-11 | marketplace `detectConflicts` — conflict detection in `installFromUrl` | low | 0.78 | `detectConflicts` keys on a `files[]` array from a PackageManifest. Extension manifests (`artibot.ext.json`) likely carry no `files[]` field — spec admits the guard would be a permanent no-op in production. Schema mismatch must be resolved before wiring is meaningful. |
@@ -90,16 +92,17 @@ The 8 items in Table 3b (WIRE-05, 13, 14, 17, 18, 20, 21, 22) should be reviewed
 
 Priority order for review: WIRE-21 (lowest risk, single field rename, high confidence once confirmed) → WIRE-18 (advisory hook enhancement) → WIRE-17 (auth lifecycle) → rest.
 
-### (c) Spec rework — 6 realGap=true needs-rework items
+### (c) Spec rework — 5 realGap=true needs-rework items
 
 Priority order based on confidence and risk:
 
-1. **WIRE-03** (conf 0.78, low risk) — Easiest fix: correct the `workflow-plan.js` file path from `lib/workflow/` to `lib/cognitive/` and update line citations. Logic is verified correct; this is documentation-only rework.
-2. **WIRE-16** (conf 0.82, medium risk) — Fix the non-discriminating test case and update line references. The homoglyph normalization logic is sound; only the test needs to be made meaningful.
-3. **WIRE-11** (conf 0.78, low risk) — Resolve the extension manifest schema question: does `artibot.ext.json` carry a `files[]` field? If not, rework to derive file sets from disk rather than manifest.
-4. **WIRE-09** (conf unknown, low risk) — Write the `phaseRunner` adapter that bridges `PHASE_TO_RUNNER(state)` → `{status,sha}`. Rewrite the happy-path test to inject a stub runner.
-5. **WIRE-10** (conf 0.88, low risk) — Either introduce `feature:*` event-bus emissions in the middleware pipeline first, or replace the subscription approach with explicit `featureTracker.record(...)` calls at middleware-completion points.
-6. **WIRE-15** (conf 0.55, medium risk) — Re-read `bin/artibot.js` to confirm the startup path and whether `pluginRoot`/`config` exist in scope at the chosen insertion point. Confidence is too low to proceed without file confirmation.
+- ~~**WIRE-03**~~ ✅ **Applied 2026-06-05** — path/line citations corrected (`lib/cognitive/workflow-plan.js`, inline 227-237 / teammates 240-246; `runtime-prompt.js:560`), surgical wire landed in `subagents.js` contract + 3 regression tests. See Table 1.
+
+1. **WIRE-16** (conf 0.82, medium risk) — Fix the non-discriminating test case and update line references. The homoglyph normalization logic is sound; only the test needs to be made meaningful.
+2. **WIRE-11** (conf 0.78, low risk) — Resolve the extension manifest schema question: does `artibot.ext.json` carry a `files[]` field? If not, rework to derive file sets from disk rather than manifest.
+3. **WIRE-09** (conf unknown, low risk) — Write the `phaseRunner` adapter that bridges `PHASE_TO_RUNNER(state)` → `{status,sha}`. Rewrite the happy-path test to inject a stub runner.
+4. **WIRE-10** (conf 0.88, low risk) — Either introduce `feature:*` event-bus emissions in the middleware pipeline first, or replace the subscription approach with explicit `featureTracker.record(...)` calls at middleware-completion points.
+5. **WIRE-15** (conf 0.55, medium risk) — Re-read `bin/artibot.js` to confirm the startup path and whether `pluginRoot`/`config` exist in scope at the chosen insertion point. Confidence is too low to proceed without file confirmation.
 
 ---
 
@@ -109,7 +112,7 @@ Priority order based on confidence and risk:
 |---|---|---|
 | Table 1 — Applied | WIRE-04, 06, 08, 12 | 4 |
 | Table 2 — Dormant | WIRE-01, 02, 19 | 3 |
-| Table 3a — rework, realGap=true | WIRE-03, 09, 10, 11, 15, 16 | 6 |
+| Table 3a — rework, realGap=true | WIRE-09, 10, 11, 15, 16 (WIRE-03 applied 2026-06-05) | 5 |
 | Table 3b — rework, realGap=false | WIRE-05, 13, 14, 17, 18, 20, 21, 22 | 8 |
 | **Subtotal (specs produced)** | | **21** |
 | **WIRE-07 — spec not produced** | | **1** |

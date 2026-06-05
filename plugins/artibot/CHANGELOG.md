@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **WIRE-03 적용** — 구조화된 delegation 계약에 per-teammate effort/budget 노출 (`lib/runtime/middleware/subagents.js`). `subagentsMiddleware`가 `task.meta.workflowPlan`(`buildWorkflowPlan` 산출, `runner==='team'`)을 읽어 `contract`에 `parentEffort`/`perAgentBudget`/`teammates[{agent,command,effort,budget}]`를 추가. 기존엔 프롬프트 문자열 directive(`runtime-prompt.js` `buildTeamDirective`)만 이 정보를 노출하고 객체 계약은 비노출이던 dormant surface 해소. inline plan·plan 부재 시 안전 폴백(빈 배열/null/0). 회귀 테스트 3종(`tests/runtime/subagents-workflow-plan.test.js`).
+
 ---
 
 ## [4.19.4] — 2026-06-01
