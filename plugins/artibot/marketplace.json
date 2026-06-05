@@ -4,14 +4,12 @@
   "_specStatus": "draft",
   "_specSource": "https://github.com/anthropics/claude-plugins-official",
   "_lastReviewed": "2026-04-24",
-
   "name": "artibot",
   "displayName": "Artibot — Autonomous Agent OS for Claude Code",
   "version": "4.19.5",
   "description": "Cognitive orchestration framework with dual-process routing, lifelong learning, expert agent teams, and workflow automation for Claude Code. 28 agents, 113 skills, 71 commands, 9,600+ tests.",
   "shortDescription": "Autonomous Agent OS — 28 agents, 113 skills, dual-process cognition, lifelong learning, parallel teams.",
   "tagline": "Production-grade autonomous agent OS that orchestrates the work for you.",
-
   "author": {
     "name": "Artience",
     "email": "artience.ads.team.tf@gmail.com",
@@ -25,7 +23,6 @@
       "role": "primary"
     }
   ],
-
   "license": "MIT",
   "licenseFile": "./LICENSE",
   "repository": {
@@ -44,7 +41,6 @@
     "security": "./SECURITY.md",
     "architecture": "./docs/ARCHITECTURE.md"
   },
-
   "categories": [
     "orchestration",
     "agents",
@@ -81,13 +77,11 @@
     "lifelong-learning",
     "autonomous-agent"
   ],
-
   "minimumClaudeCodeVersion": "1.0.0",
   "engines": {
     "node": ">=20.0.0",
     "claude-code": ">=1.0.0"
   },
-
   "supportedPlatforms": [
     "claude-code",
     "cursor",
@@ -101,9 +95,11 @@
     "codex-cli": "Subset — agents exported (Team Collaboration sections stripped) via `scripts/export-to-tool.mjs --tool=codex`.",
     "opencode": "Subset — agents exported (Team Collaboration sections stripped) via `scripts/export-to-tool.mjs --tool=opencode`."
   },
-
-  "operatingSystems": ["windows", "macos", "linux"],
-
+  "operatingSystems": [
+    "windows",
+    "macos",
+    "linux"
+  ],
   "entryPoints": {
     "manifest": "./.claude-plugin/plugin.json",
     "mcpServer": "./.well-known/mcp-server.json",
@@ -128,7 +124,6 @@
       "count": 8
     }
   },
-
   "features": [
     {
       "id": "agent-teams",
@@ -161,7 +156,6 @@
       "description": "AGENTS.md alias + export adapters (Cursor, Codex CLI, OpenCode) — write once, run on multiple AI dev tools."
     }
   ],
-
   "screenshots": [
     {
       "path": "_marketplace/screenshots/01-orchestrator-overview.png",
@@ -189,14 +183,12 @@
       "alt": "Test-driven development flow with tdd-guide agent"
     }
   ],
-
   "media": {
     "icon": "_marketplace/screenshots/icon-256.png",
     "banner": "_marketplace/screenshots/banner-1280x640.png",
     "demoVideo": null,
     "demoUrl": null
   },
-
   "pricing": {
     "model": "free",
     "tier": "open-source",
@@ -205,7 +197,6 @@
     "subscriptionRequired": false,
     "byok": false
   },
-
   "safetyCompliance": {
     "dataPolicy": "local-only",
     "externalDatabaseAccess": "forbidden",
@@ -216,18 +207,23 @@
     "complianceNotes": "Strict CRITICAL data policy — no external DB, no third-party forwarding. OTEL exporter opt-in with loopback-preferred enforcement.",
     "vulnerabilityDisclosure": "./SECURITY.md"
   },
-
   "permissions": {
-    "filesystem": ["read", "write"],
-    "network": ["loopback-only-by-default"],
-    "shell": ["execute"],
+    "filesystem": [
+      "read",
+      "write"
+    ],
+    "network": [
+      "loopback-only-by-default"
+    ],
+    "shell": [
+      "execute"
+    ],
     "claudeAgentTeamsApi": true,
     "mcpTools": true,
     "thirdPartyApis": "user-configured-only"
   },
-
   "qualityMetrics": {
-    "tests": 9600,
+    "tests": 9634,
     "coverage": {
       "statements": 90,
       "branches": 85,
@@ -238,7 +234,6 @@
     "ciStatus": "passing",
     "selfBenchmarkScore": 89
   },
-
   "installation": {
     "method": "git-clone",
     "command": "git clone https://github.com/Yoodaddy0311/artibot.git",
@@ -246,24 +241,20 @@
     "windowsInstaller": "./install.sh (bash) or ../../install-artibot-codex-global.ps1",
     "documentation": "./README.md"
   },
-
   "preview": false,
   "experimental": false,
   "deprecated": false,
-
   "changelog": "./CHANGELOG.md",
   "release": {
     "current": "4.19.5",
     "releasedAt": "2026-06-05",
     "channel": "stable"
   },
-
   "support": {
     "email": "artience.ads.team.tf@gmail.com",
     "issues": "https://github.com/Yoodaddy0311/artibot/issues",
     "discussions": "https://github.com/Yoodaddy0311/artibot/discussions"
   },
-
   "tags": [
     "verified-publisher",
     "open-source",
