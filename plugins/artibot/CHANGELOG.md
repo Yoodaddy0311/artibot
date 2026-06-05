@@ -13,6 +13,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.19.6] — 2026-06-05
+
+**Theme**: cross-machine `/update` 신뢰성 (self-copy 가드 + pull 자동 stash)
+
+다른 머신에서 `/update`가 실패하던 2가지 근본원인 수정.
+
+### Fixed
+
+- **`/update` cross-machine 실패 2건 근본수정**:
+  1. **git pull 차단** — `.artibot/SESSION-NOTES.md`(추적 + 훅 자동수정)가 working tree를 dirty로 만들어 `git pull`이 "local changes would be overwritten"로 거부, `update.js`는 경고만 하고 진행해 소스가 구버전에 멈추던 문제. → `update.js`에 `stashIfDirty()`(dirty일 때만 `git stash push --include-untracked`) + `popAutostash()`를 추가하고 pull을 `try/finally`로 감싸 stash를 항상 복원(충돌 시 throw 없이 warn + stash 보존 — silent 유실 방지). 명시적 /update라 concurrency 없음(autopilot 인터벌 stash와 다름).
+  2. **install.sh self-copy** — `cp -r "$SCRIPT_DIR/skills" "$ARTIBOT_DIR/"`에 가드가 없어, update가 설치본의 install.sh로 fallback하면 `SCRIPT_DIR == ARTIBOT_DIR`이 되어 `set -e` 하에서 "are the same file" 에러로 죽던 문제. → `is_self_install()`(`-ef` + canonical `pwd -P` 비교)로 설치 위치에서 실행 시 6개 복사 phase를 정상 no-op 스킵. install.sh 경로 해석은 이미 소스 레포 우선(설치본은 최후 fallback, 이제 가드로 안전).
+  검증: `update.test.js` 28 pass(+4 stash 테스트), `bash -n install.sh` OK, eslint 0, validate 통과.
+
+---
+
 ## [4.19.5] — 2026-06-05
 
 **Theme**: 공식 문서 정합 + 보안 차별축 + 진행률 부활 + 안전성(데이터 유실 방지)
