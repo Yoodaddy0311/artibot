@@ -1718,3 +1718,13 @@
 <!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
 
 ---
+
+## 2026-06-05 03:51 UTC · `master`
+
+- **Commits** (1):
+  - `0fa2655` feat(hooks): wire workflow-status progress (Opt-A+B) + orchestration routing docs
+- **Files touched**: 8
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
