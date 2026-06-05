@@ -9,7 +9,9 @@
  */
 
 import { atomicWriteSync, parseJSON, readStdin, writeStdout } from '../utils/index.js';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { cleanupStaleStateTmpFiles, createErrorHandler, extractAgentId, extractAgentRole, getStatePath as getStateFilePath } from '../../lib/core/hook-utils.js';
 import { withFileLock } from '../../lib/core/file-lock.js';
 
@@ -175,6 +177,55 @@ function reconcileTasks(current, hookData) {
     : [...byId.values()];
 }
 
+/**
+ * Resolve the Agent Teams task-list directory for the current team.
+ *
+ * The real progress data lives in `~/.claude/tasks/<team>/<N>.json` (written by
+ * TaskCreate/TaskUpdate), NOT in the subagent-lifecycle hook payload — which is
+ * why phase/percent never rendered before this wiring. Team identity MUST come
+ * from the payload/env (`team_name`/`teamName`/`CLAUDE_TEAM_NAME`); we never
+ * guess by "most recent dir" because that would read a DIFFERENT team's progress
+ * (wrong-team data is worse than no data) and would also make unit tests read the
+ * real filesystem. No explicit team → return null (degrade to payload counts).
+ *
+ * @param {object} hookData
+ * @returns {string|null} absolute task dir, or null if no explicit team resolves
+ */
+function resolveTeamTaskDir(hookData) {
+  const named = hookData?.team_name || hookData?.teamName || process.env.CLAUDE_TEAM_NAME;
+  if (!named) return null;
+  const dir = join(homedir(), '.claude', 'tasks', named);
+  try {
+    if (existsSync(dir) && readdirSync(dir).some((f) => /^\d+\.json$/.test(f))) return dir;
+  } catch { return null; }
+  return null;
+}
+
+/**
+ * Read team tasks from the on-disk Agent Teams task list. Returns `[]` on any
+ * error so the caller degrades to whatever the payload carried (never throws).
+ * @param {object} hookData
+ * @returns {{ id: string, status: string }[]}
+ */
+function readTeamTasksFromDisk(hookData) {
+  try {
+    const dir = resolveTeamTaskDir(hookData);
+    if (!dir) return [];
+    const out = [];
+    for (const f of readdirSync(dir)) {
+      if (!/^\d+\.json$/.test(f)) continue;
+      try {
+        const t = JSON.parse(readFileSync(join(dir, f), 'utf-8'));
+        if (!t || t.status === 'deleted') continue;
+        out.push({ id: String(t.id ?? f.replace('.json', '')), status: t.status || 'pending' });
+      } catch { /* skip unreadable task file */ }
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
 function buildTeammateList(agents) {
   return Object.entries(agents || {}).map(([name, info]) => ({
     name,
@@ -190,7 +241,17 @@ function buildTeammateList(agents) {
 async function main() {
   const eventType = process.argv[2] || 'teammate-update';
   const raw = await readStdin();
-  const hookData = parseJSON(raw);
+  const hookData = parseJSON(raw) || {};
+
+  // WIRE: Claude Code's subagent-lifecycle payload carries no team task counts,
+  // so phase/percent stayed empty. When the payload has no task data, hydrate it
+  // from the real source — the on-disk Agent Teams task list — so reconcileTasks
+  // → deriveTeamProgress → deriveWorkflow see actual totals. Best-effort: an empty
+  // read leaves the payload untouched (no fabrication when there is no team).
+  if (!Array.isArray(hookData.tasks) || hookData.tasks.length === 0) {
+    const diskTasks = readTeamTasksFromDisk(hookData);
+    if (diskTasks.length > 0) hookData.tasks = diskTasks;
+  }
 
   const agentId = extractAgentId(hookData);
   const agentRole = extractAgentRole(hookData, '');

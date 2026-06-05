@@ -1799,3 +1799,14 @@
 <!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
 
 ---
+
+## 2026-06-05 06:59 UTC · `master`
+
+- **Commits** (2):
+  - `5542c21` chore(release): v4.19.6
+  - `17bedcc` fix(update): self-copy guard + auto-stash before pull (cross-machine /update)
+- **Files touched**: 13
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
