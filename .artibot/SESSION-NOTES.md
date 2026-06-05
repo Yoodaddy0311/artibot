@@ -1399,3 +1399,292 @@
 <!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
 
 ---
+
+## 2026-05-29 08:54 UTC · `master`
+
+- **Commits** (1):
+  - `282e2d1` feat: add 'max' effort level for Opus 4.8 native effort (v4.17.0)
+- **Files touched**: 29
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-05-29 09:28 UTC · `master`
+
+- **Commits** (1):
+  - `1ebe9dc` docs: PRD + ADR for effort × dynamic-workflow fusion (P1/P2/P3)
+- **Files touched**: 3
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-05-29 09:40 UTC · `master`
+
+- **Commits** (1):
+  - `e9bf60b` feat(effort): Score-Aware Effort Resolution — P1 (task #1)
+- **Files touched**: 8
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-05-29 10:04 UTC · `master`
+
+- **Commits** (1):
+  - `7de4ac3` feat(effort): Unified Team Trigger (P2) + GRPO-Tuned Policy (P3)
+- **Files touched**: 16
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-05-29 11:58 UTC · `master`
+
+- **Commits** (1):
+  - `0fe0a2f` refactor(cognitive): extract EFFORT_POLICY to effort-policy.js (router.js <800)
+- **Files touched**: 4
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-05-29 12:01 UTC · `master`
+
+- **Commits** (1):
+  - `4c7435e` test(effort): harden P3 — clock injection + hysteresis×learnedShift branch (task #5)
+- **Files touched**: 4
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-05-29 12:26 UTC · `master`
+
+- **Commits** (1):
+  - `3475136` chore(release): v4.18.0 — effort × dynamic-workflow fusion
+- **Files touched**: 9
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-05-29 12:38 UTC · `master`
+
+- **Commits** (1):
+  - `9c7d0a0` fix(readme): sync root README to v4.18.0 + 112 skills; enforce README badges in release-check
+- **Files touched**: 2
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-05-29 14:30 UTC · `master`
+
+- **Commits** (1):
+  - `df45caf` docs: PRD for staged learning-policy activation rollout
+- **Files touched**: 2
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-05-29 14:34 UTC · `master`
+
+- **Commits** (1):
+  - `55013ff` feat(learning): S1 — wire effortPolicy nightly trainer (shadow mode)
+- **Files touched**: 3
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-05-29 15:39 UTC · `master`
+
+- **Commits** (1):
+  - `d3231cc` docs: wiring audit report (2026-05-30) — 79 confirmed gaps classified
+- **Files touched**: 2
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-05-29 16:41 UTC · `master`
+
+- **Commits** (1):
+  - `fe26ea7` feat(memory): Dreaming consolidation loop — non-destructive memory distillation (dormant)
+- **Files touched**: 16
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-05-30 04:35 UTC · `master`
+
+- **Commits** (2):
+  - `a6ae959` chore(release): v4.18.1 — progress % + parallel-spawn fixes
+  - `8e45756` fix(runtime,autopilot): repair progress % display + parallel team spawn (2 user-reported symptoms)
+- **Files touched**: 30
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-05-30 04:48 UTC · `master`
+
+- **Commits** (1):
+  - `693585b` feat(theme): Artibot brand themes (Artibot Dark / Light) for /theme picker
+- **Files touched**: 3
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-05-30 05:20 UTC · `master`
+
+- **Commits** (1):
+  - `8f2ff62` feat(model-policy): 모델 정책 중앙 강제 — 단일 리졸버 + 드리프트 게이트 + 런타임 강제
+- **Files touched**: 9
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-05-30 05:29 UTC · `master`
+
+- **Commits** (1):
+  - `535f476` chore(release): v4.19.0 — 모델 정책 중앙 강제 + 브랜드 테마
+- **Files touched**: 8
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-05-30 06:25 UTC · `master`
+
+- **Commits** (2):
+  - `193c7a1` chore(audit,grpo): 배선갭 트리아지 도구 + GRPO dormant 일관 명시
+  - `a8f44c0` fix(mcp): bridge silent-boot 복구 — tools/list 0→10
+- **Files touched**: 8
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-05-30 06:37 UTC · `master`
+
+- **Commits** (1):
+  - `78b8324` chore(audit,grpo): 배선갭 트리아지 도구 + GRPO dormant 일관 명시
+- **Files touched**: 2
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-05-30 08:55 UTC · `master`
+
+- **Commits** (1):
+  - `2c4903e` chore(release): v4.19.1 — MCP bridge 버그 수정 + 배선 트리아지/GRPO
+- **Files touched**: 8
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-05-30 09:26 UTC · `master`
+
+- **Commits** (1):
+  - `72bb5e2` fix(learning,swarm): risk 오탐 제거 + swarm errors 버킷 어댑터 복구
+- **Files touched**: 3
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-05-30 09:38 UTC · `master`
+
+- **Commits** (1):
+  - `149b892` test(learning): learning-diag risk 스코어링 회귀 테스트 (9건)
+- **Files touched**: 2
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-05-30 15:00 UTC · `master`
+
+- **Commits** (1):
+  - `af89006` fix(swarm): 세션 훅 git 백엔드 배선 — 9일 stale 근본원인 해소
+- **Files touched**: 5
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-05-30 15:06 UTC · `master`
+
+- **Commits** (1):
+  - `0af2591` chore(release): v4.19.2 — Swarm 9일 sync stale 해소
+- **Files touched**: 8
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-06-01 00:47 UTC · `master`
+
+- **Commits** (2):
+  - `6e279df` test(swarm): align swarm-sync http-backend case to real egress contract
+  - `ea8a3b9` fix(readme): command count 70 -> 71
+- **Files touched**: 2
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-06-01 01:00 UTC · `master`
+
+- **Commits** (3):
+  - `61dde1f` feat(scripts): add lifecycle-router CLI bridge (WIRE-12)
+  - `8003662` feat(runtime): wire cache-roi middleware + smart-pipeline producer (WIRE-04, WIRE-06)
+  - `3e2cbdc` feat(autopilot): wire cost-tracker helpers onto engine namespace (WIRE-08)
+- **Files touched**: 6
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-06-01 02:40 UTC · `master`
+
+- **Commits** (4):
+  - `1422e2a` chore(release): v4.19.3
+  - `9599f9c` docs(triage): WIRE backlog triage decision (22 items)
+  - `71ff05c` feat(ci): self-healing README count-prose sync + shared claim registry
+  - `693c48a` feat(commands): wire lifecycle-router CLI into 5 phase commands (WIRE-12)
+- **Files touched**: 20
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-06-01 04:52 UTC · `feat/orchestration-routing-option-a`
+
+- **Commits** (1):
+  - `bfdbc60` feat(cognitive): 4-way orchestration router + boundary clarification (Option A)
+- **Files touched**: 10
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-06-01 05:01 UTC · `master`
+
+- **Commits** (2):
+  - `b281bf1` chore(release): v4.19.4
+  - `ce4840d` feat(cognitive): 4-way orchestration router + boundary clarification (Option A)
+- **Files touched**: 8
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
