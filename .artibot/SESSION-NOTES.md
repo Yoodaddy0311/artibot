@@ -1758,3 +1758,14 @@
 <!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
 
 ---
+
+## 2026-06-05 05:31 UTC · `master`
+
+- **Commits** (2):
+  - `ff71a48` docs(orchestration): align terminology with Claude Code 2.1.x (P1a)
+  - `ecb1bc2` feat(security+hooks): ai-security-standards skill, STRIDE body, Stop-hook 2.1.163 mode toggle, marketplace meta sync
+- **Files touched**: 16
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---

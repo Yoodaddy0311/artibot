@@ -196,8 +196,24 @@ function createWipCommit(cwd, opts = {}) {
 
 /**
  * Create a stash-based checkpoint. The stash entry persists in the reflog for
- * crash recovery, but `git stash pop` immediately restores the working tree so
- * the user's workflow is unaffected.
+ * crash recovery.
+ *
+ * NON-DESTRUCTIVE by design: uses `git stash create` + `git stash store`, which
+ * build and record a stash commit object WITHOUT ever touching the working tree.
+ *
+ * History: the previous implementation used `git stash push --include-untracked`
+ * followed by `git stash pop`. `git stash push` internally hard-resets the
+ * working tree to HEAD (visible in the reflog as "reset: moving to HEAD") before
+ * popping it back. That left a window where the tree was at HEAD and a concurrent
+ * teammate's uncommitted edits lived only in the stash — and on a `pop` conflict
+ * (or two interleaved checkpoint cycles) the edits silently vanished from the
+ * working tree. `create` + `store` removes that entire failure class: the tree is
+ * never reset, so concurrent agent work on disk is never disturbed.
+ *
+ * Trade-off: `git stash create` snapshots tracked changes only (not untracked
+ * files). That is acceptable here — untracked files are never removed from disk
+ * (the tree is untouched), so they stay safe; full-capture recovery is the job of
+ * the "interval" WIP-commit strategy (`git add -A`), not this checkpoint.
  *
  * @param {string} cwd
  * @param {{ phase?: string }} [opts]
@@ -207,50 +223,41 @@ function createStashCheckpoint(cwd, opts = {}) {
   const phase = opts.phase ?? 'unknown';
   const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
   const label = `artibot-checkpoint-${phase}-${timestamp}`;
+  let sha;
   try {
-    // Stage everything first so --include-untracked captures the full picture.
-    execSync('git stash push --include-untracked -m "' + label + '"', {
+    // `git stash create` builds a stash commit from the current tracked changes
+    // and prints its SHA WITHOUT modifying the working tree. Empty output means
+    // there was nothing to checkpoint (clean tree).
+    sha = execSync('git stash create', {
       cwd,
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'ignore'],
       timeout: 5000,
-      windowsHide: true,
-    });
-  } catch {
-    // stash push can fail if git is not initialized or on a bare repo.
-    return false;
-  }
-
-  // Check whether stash actually created an entry (no changes → nothing stashed).
-  try {
-    const list = execSync('git stash list -1', {
-      cwd,
-      encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-      timeout: 2000,
       windowsHide: true,
     }).trim();
-    if (!list.includes(label)) {
-      // Nothing was stashed — working tree was clean.
-      return false;
-    }
   } catch {
+    // create can fail if git is not initialized or on a bare repo.
     return false;
   }
 
-  // Immediately pop to restore the working directory.
+  if (!sha) {
+    // Nothing to checkpoint — working tree had no tracked changes.
+    return false;
+  }
+
+  // Record the snapshot in the stash reflog for crash recovery. `store` does not
+  // touch the working tree either.
   try {
-    execSync('git stash pop', {
+    execSync(`git stash store -m "${label}" ${sha}`, {
       cwd,
       stdio: 'ignore',
-      timeout: 5000,
+      timeout: 2000,
       windowsHide: true,
     });
   } catch {
-    // Pop conflict — leave stash in place; user can recover manually.
-    process.stderr.write(
-      '[artibot:git-autopilot-save] stash pop conflict — checkpoint preserved in stash list\n',
-    );
+    // Snapshot object still exists in the object DB even if store fails; the
+    // working tree is unaffected, so this is non-fatal.
+    return false;
   }
 
   return true;

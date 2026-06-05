@@ -347,62 +347,55 @@ describe('git-autopilot-save', () => {
   // Stash checkpoint tests (commitStrategy: "semantic")
   // -------------------------------------------------------------------------
 
-  it('default (semantic) strategy runs stash push + pop instead of git commit', async () => {
+  it('default (semantic) strategy runs non-destructive stash create + store (never push/pop)', async () => {
     const commands = setupRepo();
-    // Capture the label from stash push and echo it back in stash list.
-    let capturedLabel = '';
     mockState.execSyncImpl = (cmd, _opts) => {
       commands.push({ cmd, opts: _opts });
       if (cmd === 'git rev-parse --show-toplevel') return '/repo\n';
       if (cmd === 'git status --porcelain') return ' M file.js\n';
-      if (cmd.startsWith('git stash push')) {
-        const m = cmd.match(/-m "([^"]+)"/);
-        if (m) capturedLabel = m[1];
-        return '';
-      }
-      if (cmd.startsWith('git stash list')) return `stash@{0}: On main: ${capturedLabel}\n`;
-      if (cmd === 'git stash pop') return '';
+      if (cmd === 'git stash create') return 'deadbeefcafe\n';
+      if (cmd.startsWith('git stash store')) return '';
       return '';
     };
 
     await import('../../scripts/hooks/git-autopilot-save.js');
     await new Promise((r) => setTimeout(r, 30));
 
-    expect(commands.some((c) => c.cmd.startsWith('git stash push'))).toBe(true);
-    expect(commands.some((c) => c.cmd === 'git stash pop')).toBe(true);
-    // No git commit should have been issued.
+    // Non-destructive snapshot: create + store, NEVER push/pop (which would
+    // hard-reset the working tree and could lose a concurrent teammate's edits).
+    expect(commands.some((c) => c.cmd === 'git stash create')).toBe(true);
+    expect(commands.some((c) => c.cmd.startsWith('git stash store'))).toBe(true);
+    expect(commands.some((c) => c.cmd.startsWith('git stash push'))).toBe(false);
+    expect(commands.some((c) => c.cmd === 'git stash pop')).toBe(false);
+    // No git commit / add -A either.
     expect(commands.some((c) => c.cmd.startsWith('git commit'))).toBe(false);
     expect(commands.some((c) => c.cmd.startsWith('git add -A'))).toBe(false);
     // State should be saved.
     expect(mockState.atomicWrites).toHaveLength(1);
   });
 
-  it('semantic strategy includes --include-untracked in stash push', async () => {
+  it('semantic strategy never touches the working tree (no push/pop/reset)', async () => {
     const commands = setupRepo();
-    let capturedLabel = '';
     mockState.execSyncImpl = (cmd, _opts) => {
       commands.push({ cmd, opts: _opts });
       if (cmd === 'git rev-parse --show-toplevel') return '/repo\n';
       if (cmd === 'git status --porcelain') return ' M file.js\n';
-      if (cmd.startsWith('git stash push')) {
-        const m = cmd.match(/-m "([^"]+)"/);
-        if (m) capturedLabel = m[1];
-        return '';
-      }
-      if (cmd.startsWith('git stash list')) return `stash@{0}: On main: ${capturedLabel}\n`;
-      if (cmd === 'git stash pop') return '';
+      if (cmd === 'git stash create') return 'deadbeefcafe\n';
+      if (cmd.startsWith('git stash store')) return '';
       return '';
     };
 
     await import('../../scripts/hooks/git-autopilot-save.js');
     await new Promise((r) => setTimeout(r, 30));
 
-    const stashPush = commands.find((c) => c.cmd.startsWith('git stash push'));
-    expect(stashPush).toBeDefined();
-    expect(stashPush.cmd).toContain('--include-untracked');
+    // None of the tree-mutating git commands should ever appear.
+    expect(commands.some((c) => c.cmd.startsWith('git stash push'))).toBe(false);
+    expect(commands.some((c) => c.cmd === 'git stash pop')).toBe(false);
+    expect(commands.some((c) => c.cmd.startsWith('git reset'))).toBe(false);
+    expect(commands.some((c) => c.cmd.startsWith('git checkout'))).toBe(false);
   });
 
-  it('semantic strategy uses currentPhase from config in stash label', async () => {
+  it('semantic strategy uses currentPhase from config in stash store label', async () => {
     const commands = setupRepo({
       config: {
         enabled: true,
@@ -410,53 +403,45 @@ describe('git-autopilot-save', () => {
         currentPhase: 'EXECUTE',
       },
     });
-    let capturedLabel = '';
     mockState.execSyncImpl = (cmd, _opts) => {
       commands.push({ cmd, opts: _opts });
       if (cmd === 'git rev-parse --show-toplevel') return '/repo\n';
       if (cmd === 'git status --porcelain') return ' M file.js\n';
-      if (cmd.startsWith('git stash push')) {
-        const m = cmd.match(/-m "([^"]+)"/);
-        if (m) capturedLabel = m[1];
-        return '';
-      }
-      if (cmd.startsWith('git stash list')) return `stash@{0}: On main: ${capturedLabel}\n`;
-      if (cmd === 'git stash pop') return '';
+      if (cmd === 'git stash create') return 'deadbeefcafe\n';
+      if (cmd.startsWith('git stash store')) return '';
       return '';
     };
 
     await import('../../scripts/hooks/git-autopilot-save.js');
     await new Promise((r) => setTimeout(r, 30));
 
-    const stashPush = commands.find((c) => c.cmd.startsWith('git stash push'));
-    expect(stashPush).toBeDefined();
-    expect(stashPush.cmd).toContain('artibot-checkpoint-EXECUTE-');
+    const stashStore = commands.find((c) => c.cmd.startsWith('git stash store'));
+    expect(stashStore).toBeDefined();
+    expect(stashStore.cmd).toContain('artibot-checkpoint-EXECUTE-');
   });
 
-  it('semantic strategy handles stash pop conflict gracefully', async () => {
+  it('semantic strategy: store failure is non-fatal and never disturbs the tree', async () => {
     const commands = setupRepo();
-    let capturedLabel = '';
     mockState.execSyncImpl = (cmd, _opts) => {
       commands.push({ cmd, opts: _opts });
       if (cmd === 'git rev-parse --show-toplevel') return '/repo\n';
       if (cmd === 'git status --porcelain') return ' M file.js\n';
-      if (cmd.startsWith('git stash push')) {
-        const m = cmd.match(/-m "([^"]+)"/);
-        if (m) capturedLabel = m[1];
-        return '';
-      }
-      if (cmd.startsWith('git stash list')) return `stash@{0}: On main: ${capturedLabel}\n`;
-      if (cmd === 'git stash pop') throw new Error('CONFLICT');
+      if (cmd === 'git stash create') return 'deadbeefcafe\n';
+      if (cmd.startsWith('git stash store')) throw new Error('store failed');
       return '';
     };
 
     await import('../../scripts/hooks/git-autopilot-save.js');
     await new Promise((r) => setTimeout(r, 30));
 
-    // Should still succeed (checkpoint created, pop conflict logged).
+    // State still saved (timestamp update is independent of checkpoint success).
     expect(mockState.atomicWrites).toHaveLength(1);
+    // No tree-mutating recovery attempted — the snapshot object is harmless.
+    expect(commands.some((c) => c.cmd === 'git stash pop')).toBe(false);
+    expect(commands.some((c) => c.cmd.startsWith('git reset'))).toBe(false);
+    // "skipped" message emitted (checkpoint returned false).
     expect(stderrSpy).toHaveBeenCalledWith(
-      expect.stringContaining('stash pop conflict'),
+      expect.stringContaining('stash checkpoint skipped'),
     );
   });
 
@@ -466,16 +451,16 @@ describe('git-autopilot-save', () => {
       commands.push({ cmd, opts: _opts });
       if (cmd === 'git rev-parse --show-toplevel') return '/repo\n';
       if (cmd === 'git status --porcelain') return ' M file.js\n';
-      if (cmd.startsWith('git stash push')) return '';
-      // stash list returns empty — nothing was actually stashed (label mismatch).
-      if (cmd.startsWith('git stash list')) return '';
+      // create returns empty — no tracked changes to snapshot.
+      if (cmd === 'git stash create') return '';
       return '';
     };
 
     await import('../../scripts/hooks/git-autopilot-save.js');
     await new Promise((r) => setTimeout(r, 30));
 
-    // No pop attempted since nothing was stashed.
+    // create returned empty → no store attempted, no tree mutation.
+    expect(commands.some((c) => c.cmd.startsWith('git stash store'))).toBe(false);
     expect(commands.some((c) => c.cmd === 'git stash pop')).toBe(false);
     // State still saved (timestamp updated).
     expect(mockState.atomicWrites).toHaveLength(1);
@@ -502,19 +487,12 @@ describe('git-autopilot-save', () => {
 
   it('semantic strategy triggers cleanup of old stashes', async () => {
     const commands = setupRepo();
-    let capturedLabel = '';
     mockState.execSyncImpl = (cmd, _opts) => {
       commands.push({ cmd, opts: _opts });
       if (cmd === 'git rev-parse --show-toplevel') return '/repo\n';
       if (cmd === 'git status --porcelain') return ' M file.js\n';
-      if (cmd.startsWith('git stash push')) {
-        const m = cmd.match(/-m "([^"]+)"/);
-        if (m) capturedLabel = m[1];
-        return '';
-      }
-      if (cmd === 'git stash list -1') {
-        return `stash@{0}: On main: ${capturedLabel}\n`;
-      }
+      if (cmd === 'git stash create') return 'deadbeefcafe\n';
+      if (cmd.startsWith('git stash store')) return '';
       if (cmd === 'git stash list') {
         // Simulate 12 artibot checkpoints (max default is 10, so 2 should be dropped).
         const lines = [];
