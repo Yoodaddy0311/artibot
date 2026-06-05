@@ -681,7 +681,7 @@ All teammates have their specialist tools + team collaboration tools (`SendMessa
 
 ## Skills
 
-112 auto-activating domain skills organized in six categories.
+113 auto-activating domain skills organized in six categories.
 
 <details>
 <summary>Core Skills (8)</summary>
