@@ -1,5 +1,8 @@
 {
-  "version": "4.19.4",
+  "version": "4.19.5",
+  "devProtocol": {
+    "verifyMode": "advisory"
+  },
   "agents": {
     "modelPolicy": {
       "high": {

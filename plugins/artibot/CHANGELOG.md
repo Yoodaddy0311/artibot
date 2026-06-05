@@ -11,15 +11,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
+---
 
-- **WIRE-21 — swarm-sync 버전 표시 수정** (`scripts/hooks/swarm-sync.js:98-99`) — session-end sync 로그가 존재하지 않는 `result.uploadVersion`/`result.downloadVersion` 필드를 읽어 항상 `uploaded: v?` / `downloaded: v?`를 출력하던 버그. `onSessionEnd`(→`performSync`)의 실제 반환은 `{ uploaded, downloaded, version }`(`lib/swarm/sync-scheduler.js:324-330`)이므로 두 곳 모두 `result.version`으로 교정. stderr 표시 전용(cosmetic). dormant 백로그 정리(2026-06-05) 중 phantom-path false negative로 재분류되어 발견.
+## [4.19.5] — 2026-06-05
+
+**Theme**: 공식 문서 정합 + 보안 차별축 + 진행률 부활 + 안전성(데이터 유실 방지)
+
+3-repo 벤치마킹(financial-services / VibeHacking / prompt-master)과 Claude Code 2.1.163 · Codex 0.137 최근 업데이트를 4렌즈(생산성·효율성·미래지향성·확장성)로 평가해 채택분만 반영. "더 만들기보다 정합·차별화" 전략.
 
 ### Added
 
-- **WIRE-16 적용 — PII 스크러버 homoglyph 방어** (`lib/privacy/pii-scrubber.js`) — `scrub()`가 regex 매칭 전에 `checkMixedScript`로 혼합 스크립트(Latin + Cyrillic/Greek 룩어라이크)를 감지하면 `normalizeHomoglyphs`로 정규화. 위장 PII(예: Cyrillic `а`를 쓴 `аdmin@corp.io`)가 그대로 새던 것을 차단 — `scrub()`은 `scrubPattern`/`scrubPatterns`가 모든 문자열 값에 재귀하는 egress chokepoint라 전(全) pre-egress 경로를 커버. 순수 Latin·순수 non-Latin(정상 한국어/러시아어/CJK)은 미변경. 정규화 발생은 `byCategory` 오염 없이 전용 `stats.homoglyphNormalized` 카운터로 집계. 판별 가능한 회귀 테스트 6종(`tests/privacy/pii-scrubber-homoglyph.test.js`). 원 스펙의 비판별 테스트·라인 드리프트(140/176/327)·stats 혼동을 rework 단계에서 교정.
+- **`ai-security-standards` 스킬 신규** — OWASP LLM Top 10 + Artibot 자기 위협모델(hooks=arbitrary stdin / MCP=tool result / Agent Teams=external input의 3개 trust boundary) + Input-Sanitization 규칙("붙여넣은/검색된 텍스트 = inert data") + reasoning-native(o3/R1/Qwen3-thinking) CoT 가드. 방어/탐지 관점 전용. 방법론 참고: VibeHacking(MIT). `agents/security-reviewer.md`에 STRIDE 6범주 per-element 방법론 본문 추가(`threat-modeling` capability 선언만 있던 광고-구현 갭 해소).
+- **진행률 대시보드 부활** (`scripts/hooks/workflow-status.js`) — 단계 진행률 `Phase X/6`이 `workflow-advance` 발화자 0개로 한 번도 작동 안 하던 것 + 팀원 `%` 공백을, 기존 `teammate-update` 경로 내 파생(`derivePhaseFromProgress`/`deriveWorkflow`/`reconcileTasks`)으로 해결. 데이터 없으면 진행률 날조 안 함. +6 회귀 테스트.
+- **Stop/SubagentStop 훅 2.1.163 모드 토글** (`lib/core/dev-verify-output.js` 신규) — `devProtocol.verifyMode` config로 `enforce`(차단, 전 버전 호환) ↔ `advisory`(2.1.163 `hookSpecificOutput.additionalContext` 비차단 피드백) 선택. **기본 `advisory`**로 부드러운 비차단 UX(코드 fallback은 안전한 enforce 유지). `_stop-dispatcher.js`의 stale 주석 교정.
+- **WIRE-16 적용 — PII 스크러버 homoglyph 방어** (`lib/privacy/pii-scrubber.js`) — `scrub()`가 regex 매칭 전에 `checkMixedScript`로 혼합 스크립트(Latin + Cyrillic/Greek 룩어라이크)를 감지하면 `normalizeHomoglyphs`로 정규화. 위장 PII(`аdmin@corp.io` 등)가 새던 것 차단. 전용 `stats.homoglyphNormalized` 카운터. 판별 테스트 6종.
+- **WIRE-03 적용** — 구조화된 delegation 계약에 per-teammate effort/budget 노출 (`subagents.js`). `task.meta.workflowPlan`을 읽어 `contract`에 `parentEffort`/`perAgentBudget`/`teammates[]` 추가. 회귀 테스트 3종.
 
-- **WIRE-03 적용** — 구조화된 delegation 계약에 per-teammate effort/budget 노출 (`lib/runtime/middleware/subagents.js`). `subagentsMiddleware`가 `task.meta.workflowPlan`(`buildWorkflowPlan` 산출, `runner==='team'`)을 읽어 `contract`에 `parentEffort`/`perAgentBudget`/`teammates[{agent,command,effort,budget}]`를 추가. 기존엔 프롬프트 문자열 directive(`runtime-prompt.js` `buildTeamDirective`)만 이 정보를 노출하고 객체 계약은 비노출이던 dormant surface 해소. inline plan·plan 부재 시 안전 폴백(빈 배열/null/0). 회귀 테스트 3종(`tests/runtime/subagents-workflow-plan.test.js`).
+### Changed
+
+- **오케스트레이션 용어 공식 정합** (`CLAUDE.md`, `docs/ORCHESTRATION-ROUTING.md`, `docs/ORCHESTRATION-GLOSSARY.md`) — `ultracode`(Claude Code 2.1.160 "workflow" 트리거 리네임) + 플랫폼 "Dynamic Workflows"(2.1.154)를 harness Workflow tool·Artibot Auto-Team과 구분 명시. recommend-hint 한국어 surface 규칙 + `/orchestrate`를 workflow 축 사용자 진입점으로 매핑.
+- **marketplace.json 메타 동기화 + 자동화** — stale 메타(version 4.18.1, tests 4918, "112 skills/69 commands")를 실측(4.19.5, 9,600+, 113 skills/71 commands)으로 교정 + `scripts/ci/sync-marketplace-meta.mjs`로 릴리즈 시 자동 동기화(stale 재발 방지). `marketplace-validate.mjs` 게이트 2개 추가.
+
+### Fixed
+
+- **git-autopilot 체크포인트 데이터 유실 방지** (`scripts/hooks/git-autopilot-save.js`) — semantic 자동저장이 `git stash push --include-untracked` + `pop`을 쓰는데, `stash push`가 내부적으로 working tree를 HEAD로 hard-reset(reflog "reset: moving to HEAD")해, push~pop 창 또는 pop 충돌 시 동시 작업 중인 teammate의 미커밋 변경이 working tree에서 silent 유실되던 버그. 비파괴 `git stash create` + `git stash store`(tree 무변경)로 교체해 유실 클래스 제거. 6 semantic 테스트 갱신.
+- **WIRE-21 — swarm-sync 버전 표시 수정** (`scripts/hooks/swarm-sync.js:98-99`) — session-end sync 로그가 존재하지 않는 `result.uploadVersion`/`result.downloadVersion` 필드를 읽어 항상 `uploaded: v?` / `downloaded: v?`를 출력하던 버그. `onSessionEnd`(→`performSync`)의 실제 반환은 `{ uploaded, downloaded, version }`(`lib/swarm/sync-scheduler.js:324-330`)이므로 두 곳 모두 `result.version`으로 교정. stderr 표시 전용(cosmetic). dormant 백로그 정리(2026-06-05) 중 phantom-path false negative로 재분류되어 발견.
+
+### Removed
+
+- **N4 rate-sentinel orphan 삭제** (`lib/orchestration/rate-sentinel.js` + 테스트, −492 LOC) — 순수 미배선(skill/command/JS importer 0). 죽은코드 전수조사 후 안전삭제. N3 tool-guardrails는 문서화 skill API로 판명되어 보존(dormant 재분류, `.artibot/DEADCODE-BACKLOG-2026-06-05.md`).
+
+### Docs
+
+- 죽은코드/미배선 기능 전수조사 백로그(`.artibot/DEADCODE-BACKLOG-2026-06-05.md`, N1~N6) + WIRE 백로그 트리아지 업데이트. WIRING-AUDIT dormant 재분류(2026-06-05 follow-up).
 
 ---
 
