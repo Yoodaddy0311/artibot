@@ -15,6 +15,7 @@ import {
   hintMatches,
   VALIDATION_CHECKS,
 } from './pii-detector.js';
+import { checkMixedScript, normalizeHomoglyphs } from './homoglyph-detector.js';
 
 // ---------------------------------------------------------------------------
 // Platform-Aware Path Detection
@@ -68,15 +69,20 @@ function rebuildSortedPatterns() {
   sortedPatterns = [...activePatterns].sort((a, b) => a.priority - b.priority);
 }
 
-/** @type {{ totalScrubs: number, byCategory: Record<string, number>, byPattern: Record<string, number> }} */
+/** @type {{ totalScrubs: number, byCategory: Record<string, number>, byPattern: Record<string, number>, homoglyphNormalized: number }} */
 let stats = createEmptyStats();
 
 /**
  * Create empty statistics object.
- * @returns {{ totalScrubs: number, byCategory: Record<string, number>, byPattern: Record<string, number> }}
+ *
+ * `homoglyphNormalized` counts mixed-script normalization passes separately
+ * from `byCategory` so PII-category consumers are never polluted by a
+ * "normalization fired" signal (WIRE-16).
+ *
+ * @returns {{ totalScrubs: number, byCategory: Record<string, number>, byPattern: Record<string, number>, homoglyphNormalized: number }}
  */
 function createEmptyStats() {
-  return { totalScrubs: 0, byCategory: {}, byPattern: {} };
+  return { totalScrubs: 0, byCategory: {}, byPattern: {}, homoglyphNormalized: 0 };
 }
 
 // ---------------------------------------------------------------------------
@@ -99,6 +105,20 @@ function createEmptyStats() {
  */
 export function scrub(text) {
   if (!text || typeof text !== 'string') return text ?? '';
+
+  // WIRE-16: defeat homoglyph / mixed-script spoofing before regex matching.
+  // checkMixedScript().mixed is true only when Latin AND a known Cyrillic/Greek
+  // lookalike co-occur, so disguised PII (e.g. 'usеr@evil.com' with Cyrillic е)
+  // is normalized to Latin and then caught by the pattern pass below. Pure-Latin
+  // or pure-non-Latin text (legit Korean/Russian/CJK) is left untouched, so
+  // non-spoofing multilingual data is never corrupted. Counted on a dedicated
+  // stat (not byCategory) so PII-category consumers stay clean.
+  // scrub() is the egress chokepoint: scrubPattern (line 144) and scrubPatterns
+  // (line 176) both recurse here for every string value.
+  if (checkMixedScript(text).mixed) {
+    text = normalizeHomoglyphs(text);
+    stats.homoglyphNormalized += 1;
+  }
 
   let result = text;
   let lower = text.toLowerCase();
@@ -232,11 +252,12 @@ export function removeCustomPattern(name) {
 /**
  * Get current scrubbing statistics.
  *
- * @returns {{ totalScrubs: number, byCategory: Record<string, number>, byPattern: Record<string, number>, patternCount: number }}
+ * @returns {{ totalScrubs: number, byCategory: Record<string, number>, byPattern: Record<string, number>, homoglyphNormalized: number, patternCount: number }}
  * @example
  * const stats = getScrubStats();
  * // stats.totalScrubs === 15
  * // stats.byCategory === { auth: 8, personal: 5, paths: 2 }
+ * // stats.homoglyphNormalized === 2
  * // stats.patternCount === 43
  */
 export function getScrubStats() {

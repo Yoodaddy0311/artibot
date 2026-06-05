@@ -1698,3 +1698,13 @@
 <!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
 
 ---
+
+## 2026-06-05 02:04 UTC · `master`
+
+- **Commits** (1):
+  - `0501b88` docs(wire): dormant backlog cleanup (11 items) + WIRE-21 swarm-sync fix
+- **Files touched**: 5
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---

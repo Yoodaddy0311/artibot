@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **WIRE-16 적용 — PII 스크러버 homoglyph 방어** (`lib/privacy/pii-scrubber.js`) — `scrub()`가 regex 매칭 전에 `checkMixedScript`로 혼합 스크립트(Latin + Cyrillic/Greek 룩어라이크)를 감지하면 `normalizeHomoglyphs`로 정규화. 위장 PII(예: Cyrillic `а`를 쓴 `аdmin@corp.io`)가 그대로 새던 것을 차단 — `scrub()`은 `scrubPattern`/`scrubPatterns`가 모든 문자열 값에 재귀하는 egress chokepoint라 전(全) pre-egress 경로를 커버. 순수 Latin·순수 non-Latin(정상 한국어/러시아어/CJK)은 미변경. 정규화 발생은 `byCategory` 오염 없이 전용 `stats.homoglyphNormalized` 카운터로 집계. 판별 가능한 회귀 테스트 6종(`tests/privacy/pii-scrubber-homoglyph.test.js`). 원 스펙의 비판별 테스트·라인 드리프트(140/176/327)·stats 혼동을 rework 단계에서 교정.
+
 - **WIRE-03 적용** — 구조화된 delegation 계약에 per-teammate effort/budget 노출 (`lib/runtime/middleware/subagents.js`). `subagentsMiddleware`가 `task.meta.workflowPlan`(`buildWorkflowPlan` 산출, `runner==='team'`)을 읽어 `contract`에 `parentEffort`/`perAgentBudget`/`teammates[{agent,command,effort,budget}]`를 추가. 기존엔 프롬프트 문자열 directive(`runtime-prompt.js` `buildTeamDirective`)만 이 정보를 노출하고 객체 계약은 비노출이던 dormant surface 해소. inline plan·plan 부재 시 안전 폴백(빈 배열/null/0). 회귀 테스트 3종(`tests/runtime/subagents-workflow-plan.test.js`).
 
 ---
