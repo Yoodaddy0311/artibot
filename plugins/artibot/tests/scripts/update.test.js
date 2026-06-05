@@ -28,9 +28,11 @@ import {
   findBash,
   findInstallScript,
   findSourceRepo,
+  popAutostash,
   readCurrentVersion,
   resolveHome,
   saveBackupInfo,
+  stashIfDirty,
 } from '../../scripts/update.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -199,6 +201,68 @@ describe('findSourceRepo', () => {
       if (originalUserProfile === undefined) delete process.env.USERPROFILE;
       else process.env.USERPROFILE = originalUserProfile;
     }
+  });
+});
+
+describe('stashIfDirty / popAutostash', () => {
+  // Build a throwaway git repo with one committed file so we can dirty it.
+  function initRepo() {
+    const repo = join(tmpRoot, 'stash-repo');
+    mkdirSync(repo, { recursive: true });
+    const run = (args) => execFileSync('git', args, { cwd: repo, stdio: 'ignore' });
+    run(['init']);
+    run(['config', 'user.email', 'test@artibot.local']);
+    run(['config', 'user.name', 'artibot-test']);
+    writeFileSync(join(repo, 'tracked.txt'), 'original\n');
+    run(['add', '.']);
+    run(['commit', '-m', 'init']);
+    return repo;
+  }
+
+  function status(repo) {
+    return execFileSync('git', ['status', '--porcelain'], { cwd: repo, encoding: 'utf-8' }).trim();
+  }
+
+  it('returns false and makes no stash when the tree is clean', () => {
+    const repo = initRepo();
+    expect(stashIfDirty(repo)).toBe(false);
+    const stashes = execFileSync('git', ['stash', 'list'], { cwd: repo, encoding: 'utf-8' }).trim();
+    expect(stashes).toBe('');
+  });
+
+  it('stashes a dirty tracked file and pop restores it', () => {
+    const repo = initRepo();
+    writeFileSync(join(repo, 'tracked.txt'), 'dirty edit\n');
+    expect(status(repo)).not.toBe('');
+
+    const stashed = stashIfDirty(repo);
+    expect(stashed).toBe(true);
+    // After stash the working tree is clean again (pull would now succeed).
+    expect(status(repo)).toBe('');
+
+    popAutostash(repo);
+    // The dirty edit is restored (normalize CRLF — git autocrlf may rewrite
+    // line endings on Windows checkouts).
+    expect(readFileSync(join(repo, 'tracked.txt'), 'utf-8').replace(/\r\n/g, '\n'))
+      .toBe('dirty edit\n');
+  });
+
+  it('includes untracked files in the stash', () => {
+    const repo = initRepo();
+    writeFileSync(join(repo, 'untracked.txt'), 'new file\n');
+    expect(status(repo)).toContain('untracked.txt');
+
+    expect(stashIfDirty(repo)).toBe(true);
+    expect(existsSync(join(repo, 'untracked.txt'))).toBe(false); // stashed away
+
+    popAutostash(repo);
+    expect(existsSync(join(repo, 'untracked.txt'))).toBe(true); // restored
+  });
+
+  it('returns false when git status fails (not a repo)', () => {
+    const notRepo = join(tmpRoot, 'not-a-repo');
+    mkdirSync(notRepo, { recursive: true });
+    expect(stashIfDirty(notRepo)).toBe(false);
   });
 });
 

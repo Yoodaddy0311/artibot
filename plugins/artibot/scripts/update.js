@@ -165,6 +165,63 @@ function findSourceRepo(installScriptDir) {
 }
 
 /**
+ * Stash a dirty working tree before pull, returning whether a stash was made.
+ *
+ * Root cause this addresses: tracked files that hooks auto-edit during a
+ * session (e.g. `.artibot/SESSION-NOTES.md`) leave the working tree dirty, so
+ * `git pull` refuses with "local changes would be overwritten". Because
+ * `/update` is an explicit, user-initiated action (not the git-autopilot
+ * interval auto-save), there is no concurrent stash to race with — a scoped
+ * stash here is safe.
+ *
+ * @param {string} gitRoot
+ * @returns {boolean} true when a stash entry was created (caller must pop)
+ */
+function stashIfDirty(gitRoot) {
+  let dirty;
+  try {
+    dirty = execFileSync('git', ['status', '--porcelain'], {
+      cwd: gitRoot, encoding: 'utf-8', timeout: 5000,
+    }).trim();
+  } catch {
+    return false; // git status failed — don't risk a stash we can't reason about
+  }
+  if (!dirty) return false;
+
+  try {
+    execFileSync('git', ['stash', 'push', '--include-untracked', '-m', 'artibot-update-autostash'], {
+      cwd: gitRoot, stdio: 'inherit', timeout: 15_000,
+    });
+    console.log('  Stashed local changes before pull (artibot-update-autostash).');
+    return true;
+  } catch (err) {
+    console.warn(`  Warning: could not stash local changes: ${err.message}`);
+    return false;
+  }
+}
+
+/**
+ * Restore a previously-created auto-stash after pull. A pop conflict is
+ * surfaced as a warning (never thrown) and the stash is intentionally left on
+ * the stack so the user can resolve it manually — losing their changes
+ * silently would be worse than a noisy warning.
+ *
+ * @param {string} gitRoot
+ */
+function popAutostash(gitRoot) {
+  try {
+    execFileSync('git', ['stash', 'pop'], {
+      cwd: gitRoot, stdio: 'inherit', timeout: 15_000,
+    });
+    console.log('  Restored local changes (stash pop).');
+  } catch (err) {
+    console.warn(`  Warning: stash pop hit a conflict: ${err.message}`);
+    console.warn('  Your changes are preserved in `git stash list` (artibot-update-autostash).');
+    console.warn('  Resolve manually with: git stash pop');
+  }
+}
+
+/**
  * Pull latest source from the remote repository.
  *
  * Uses findSourceRepo() to locate the git repo, then runs `git pull`.
@@ -222,13 +279,21 @@ function pullLatestSource(installScriptDir) {
       }
     }
 
-    console.log(`  Pulling latest source from ${repo.gitRoot}...`);
-    execFileSync('git', pullArgs, {
-      cwd: repo.gitRoot,
-      stdio: 'inherit',
-      timeout: 30_000,
-    });
-    console.log('  Source updated.');
+    // Auto-stash a dirty working tree so hook-edited tracked files (e.g.
+    // .artibot/SESSION-NOTES.md) don't block the pull. Pop afterwards in the
+    // finally so the stash is always restored even if the pull throws.
+    const stashed = stashIfDirty(repo.gitRoot);
+    try {
+      console.log(`  Pulling latest source from ${repo.gitRoot}...`);
+      execFileSync('git', pullArgs, {
+        cwd: repo.gitRoot,
+        stdio: 'inherit',
+        timeout: 30_000,
+      });
+      console.log('  Source updated.');
+    } finally {
+      if (stashed) popAutostash(repo.gitRoot);
+    }
     return { pulled: true, pluginDir: repo.pluginDir };
   } catch (err) {
     console.warn(`  Warning: git pull failed: ${err.message}`);
@@ -616,4 +681,6 @@ export {
   clearCache,
   detectHookDrift,
   fileHash,
+  stashIfDirty,
+  popAutostash,
 };

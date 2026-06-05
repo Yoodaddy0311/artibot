@@ -1789,3 +1789,13 @@
 <!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
 
 ---
+
+## 2026-06-05 06:00 UTC · `master`
+
+- **Commits** (1):
+  - `0b15dcd` docs(readme): sync residual skill count 112->113 (auto-activating prose)
+- **Files touched**: 2
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
