@@ -9,7 +9,7 @@ All other files that discuss routing summarize and link here; do not duplicate t
 
 |  | **Adaptive (model-driven)** | **Deterministic (code-driven)** |
 |---|---|---|
-| **Single attended session** | **team** — Agent Teams API; auto-fires when ≥2 independent subtasks are detected (Operator-Waits DNA) | **workflow** — `agent()`/`parallel()`/`pipeline()` primitives; explicit opt-in only, never auto-fires |
+| **Single attended session** | **team** — Agent Teams API; auto-fires when ≥2 independent subtasks are detected (Operator-Waits DNA) | **workflow** — `agent()`/`parallel()`/`pipeline()` primitives; explicit opt-in only, never auto-fires. User-facing slash entry point: **`/orchestrate`** (predefined pipelines: feature / bugfix / refactor / security) |
 | **Long unattended session** | **autopilot** (CONSUMES team internally) | **autopilot** (CONSUMES workflow internally) |
 
 > autopilot is not a third axis — it is a session-lifetime wrapper whose EXECUTE phase delegates

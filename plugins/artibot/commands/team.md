@@ -20,6 +20,10 @@ Parse $ARGUMENTS:
 - `--one-shot`: Disband team after single task completion (legacy behavior)
 - `--shutdown`: Explicitly disband a persistent team
 
+## Recommend-hint Reception
+
+When the prompt contains `[artibot:hint recommend=workflow]`, surface to the user: "이 작업은 같은 패턴 반복이라 워크플로우로 돌리면 더 빠르고 결과가 일정해요. 그렇게 할까요?" and wait for confirmation before invoking `/orchestrate`. This is advisory — see `CLAUDE.md` "Recommend-hint surfacing rule" and `docs/ORCHESTRATION-ROUTING.md`.
+
 ## Core Rules
 
 ### Leader Role (YOU)

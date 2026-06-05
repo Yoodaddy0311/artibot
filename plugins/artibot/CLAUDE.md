@@ -48,6 +48,13 @@ Routing: see [docs/ORCHESTRATION-ROUTING.md](docs/ORCHESTRATION-ROUTING.md) — 
 
 Never tell the user to type slash-commands. Detect intent → trigger command/skill/agent silently. Users include non-developers. Applies to `/team`, `/implement`, `/plan`, `/code-review`, `/verify`, `/daily` — all commands. Inner command workflows (phases, checklists) must run in full, never shortened.
 
+**Recommend-hint surfacing rule**: When the model receives an `[artibot:hint recommend=X]` directive (injected by `scripts/hooks/runtime-prompt.js`), it **must** surface the recommendation to the user as a single Korean sentence and wait for confirmation before acting. This is advisory only — the hint never auto-fires `/workflow` or `/autopilot`. Example phrasings:
+
+- `recommend=workflow` (동형 반복 감지): "이 작업은 같은 패턴 반복이라 워크플로우로 돌리면 더 빠르고 결과가 일정해요. 그렇게 할까요?"
+- `recommend=autopilot` (대형 무인작업 적합): "자리 비우셔도 되면 오토파일럿으로 돌릴 수 있어요."
+
+See also: `commands/team.md` (hint cross-reference), `commands/autopilot.md` (hint cross-reference), `docs/ORCHESTRATION-ROUTING.md` (advisory-only rule).
+
 ## Quality Gates
 
 - Read before write (no blind modifications)

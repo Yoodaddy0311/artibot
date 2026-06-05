@@ -8,7 +8,7 @@ Four parallel-execution mechanisms in Artibot. Their engines are distinct and mu
 
 **team** — Adaptive, model-driven orchestration using the Agent Teams API (TeamCreate / SendMessage / P2P messaging); fires automatically when 2+ independent subtasks are detected (Operator-Waits DNA). Also called "Auto-Team".
 
-**workflow** — Deterministic, code-driven JS orchestration expressed through `agent()` / `parallel()` / `pipeline()` primitives; requires explicit user opt-in and never auto-fires.
+**workflow** — Deterministic, code-driven JS orchestration expressed through `agent()` / `parallel()` / `pipeline()` primitives; requires explicit user opt-in and never auto-fires. User-facing slash entry point: **`/orchestrate`** — provides predefined pipelines (feature / bugfix / refactor / security) that execute the workflow mechanism without the user needing to write primitives directly.
 
 **autopilot** — Long-running unattended session wrapper; its EXECUTE phase consumes `team` and/or `workflow` as sub-mechanisms; never auto-fires without explicit opt-in.
 

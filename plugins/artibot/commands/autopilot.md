@@ -9,6 +9,10 @@ toolset: team
 
 Autonomous long-running mode for **3~4시간 자리 비움 / 야간 자율 작업**. Runs Phase 0~6 (INTAKE → PLAN → EXECUTE → CROSS_CHECK → VERIFY → IMPROVE → REPORT) without user intervention. Pauses automatically on dangerous actions (PRD §5.5). DATA POLICY 엄격 준수 — 외부 DB / 외부 플러그인 / 외부 데이터 송신 금지.
 
+## Recommend-hint Reception
+
+When the prompt contains `[artibot:hint recommend=autopilot]`, surface to the user: "자리 비우셔도 되면 오토파일럿으로 돌릴 수 있어요." and wait for confirmation before starting a session. This is advisory — see `CLAUDE.md` "Recommend-hint surfacing rule" and `docs/ORCHESTRATION-ROUTING.md`.
+
 ## Subcommands
 
 | 명령 | 설명 | Phase |

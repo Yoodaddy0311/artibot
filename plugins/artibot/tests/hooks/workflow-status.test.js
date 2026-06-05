@@ -204,4 +204,125 @@ describe('workflow-status', () => {
     expect(lockAfterFirst).toBe(1);
     expect(lockAfterSecond).toBe(2);
   });
+
+  // -------------------------------------------------------------------------
+  // Opt-B: aggregate task counts surfaced on the teammate record
+  // -------------------------------------------------------------------------
+  describe('teammate task counts (Opt-B)', () => {
+    it('injects tasksTotal/tasksCompleted on teammate-update from state.tasks', async () => {
+      process.argv = ['node', 'workflow-status.js', 'teammate-update'];
+      setExistingState({
+        agents: {},
+        tasks: [
+          { id: '1', status: 'completed' },
+          { id: '2', status: 'completed' },
+          { id: '3', status: 'in_progress' },
+          { id: '4', status: 'pending' },
+        ],
+        events: [],
+        workflow: null,
+      });
+      setStdin({ agent_id: 'a1', role: 'backend' });
+
+      await runHookFresh();
+
+      const agent = mockState.writes[0].data.agents.a1;
+      expect(agent.tasksTotal).toBe(4);
+      expect(agent.tasksCompleted).toBe(2);
+    });
+
+    it('reconciles tasks from the hook payload (tasks + completed_tasks)', async () => {
+      process.argv = ['node', 'workflow-status.js', 'teammate-update'];
+      mockState.fileExists = false;
+      setStdin({
+        agent_id: 'a1',
+        tasks: [
+          { id: '1', status: 'pending' },
+          { id: '2', status: 'in_progress' },
+        ],
+        completed_tasks: [{ id: '1' }],
+      });
+
+      await runHookFresh();
+
+      const tasks = mockState.writes[0].data.tasks;
+      expect(tasks).toHaveLength(2);
+      expect(tasks.find((t) => t.id === '1').status).toBe('completed');
+      expect(tasks.find((t) => t.id === '2').status).toBe('in_progress');
+    });
+
+    it('synthesizes placeholder rows from an explicit tasks_total', async () => {
+      process.argv = ['node', 'workflow-status.js', 'teammate-update'];
+      mockState.fileExists = false;
+      setStdin({ agent_id: 'a1', tasks_total: 3 });
+
+      await runHookFresh();
+
+      const agent = mockState.writes[0].data.agents.a1;
+      expect(agent.tasksTotal).toBe(3);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Opt-A: workflow phase derived from task-completion ratio
+  // -------------------------------------------------------------------------
+  describe('derived workflow phase (Opt-A)', () => {
+    it('leaves workflow null when there is no task data', async () => {
+      process.argv = ['node', 'workflow-status.js', 'teammate-update'];
+      mockState.fileExists = false;
+      setStdin({ agent_id: 'a1' });
+
+      await runHookFresh();
+
+      expect(mockState.writes[0].data.workflow).toBeNull();
+    });
+
+    it('derives an early phase when few tasks are complete', async () => {
+      process.argv = ['node', 'workflow-status.js', 'teammate-update'];
+      // 1/6 complete → ratio 0.167 → floor(0.167 * 5) = 0 (Plan)
+      setExistingState({
+        agents: {},
+        tasks: [
+          { id: '1', status: 'completed' },
+          { id: '2', status: 'pending' },
+          { id: '3', status: 'pending' },
+          { id: '4', status: 'pending' },
+          { id: '5', status: 'pending' },
+          { id: '6', status: 'pending' },
+        ],
+        events: [],
+        workflow: null,
+      });
+      setStdin({ agent_id: 'a1' });
+
+      await runHookFresh();
+
+      const wf = mockState.writes[0].data.workflow;
+      expect(wf).not.toBeNull();
+      expect(wf.playbook).toBe('feature');
+      expect(wf.currentPhase).toBe(0);
+      expect(wf.derived).toBe(true);
+    });
+
+    it('reaches the final phase only when all tasks are complete', async () => {
+      process.argv = ['node', 'workflow-status.js', 'task-complete'];
+      // 3/3 complete after the event → ratio 1 → last phase index (5, Merge)
+      setExistingState({
+        agents: { a1: { role: 'backend', tasksCompleted: 0 } },
+        tasks: [
+          { id: '1', status: 'completed' },
+          { id: '2', status: 'completed' },
+          { id: '3', status: 'in_progress' },
+        ],
+        events: [],
+        workflow: { playbook: 'feature', currentPhase: 2 },
+      });
+      setStdin({ agent_id: 'a1', task_id: '3', subject: 'final' });
+
+      await runHookFresh();
+
+      const wf = mockState.writes[0].data.workflow;
+      expect(wf.currentPhase).toBe(5); // Merge
+    });
+  });
 });
