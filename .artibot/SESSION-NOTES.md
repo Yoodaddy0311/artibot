@@ -1728,3 +1728,13 @@
 <!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
 
 ---
+
+## 2026-06-05 03:58 UTC · `master`
+
+- **Commits** (1):
+  - `4d4bba0` docs(audit): dead-code / unwired-feature backlog (N1-N6 triage)
+- **Files touched**: 2
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---

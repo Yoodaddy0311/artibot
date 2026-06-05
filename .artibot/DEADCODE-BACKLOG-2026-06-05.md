@@ -16,9 +16,9 @@
 |---|---|---|---|---|
 | **N1** | HIGH | 1 — emit→void | event-bus: 15 emitter files fire `feature:*`/`skill:*`/`context:*`, sole `on()` subscriber (`feature-tracker`) is dormant | **needs-decision** (activate tracker ↔ gate/remove 15 emits) — *leader-verified ✅* |
 | **N2** | MEDIUM | 2 — dead export | `metrics-collector` observability aggregator unwired at both ends (no `registerSource` caller, dashboard reads its own path) | **dormant-by-design** (observability backbone awaiting a consumer surface) — *leader-verified ✅* |
-| **N3** | MEDIUM | 2 — dead export | `lib/orchestration/tool-guardrails.js` — parallel second guardrail impl, never wired | **consolidate** (vs live `guardrails.js`) |
+| **N3** | MEDIUM | 2 — dead export | `lib/orchestration/tool-guardrails.js` — per-tool guardrail registry | ~~consolidate~~ → **RECLASSIFIED `dormant-by-documented-design`** (2026-06-05 Task #4): documented public-skill API + unique capability + data-policy test contract — NOT safe-delete. See N3 detail. |
 | **N4** | LOW-MED | 2 — dead export | `lib/orchestration/rate-sentinel.js` — rate-limit guard, orphan | **needs-decision** (activate vs drop) |
-| **N5** | LOW-MED | 2 — dead export | `lib/orchestration/handoff-filter.js` — handoff history filter, orphan | **needs-decision** (activate vs drop) |
+| **N5** | LOW-MED | 2 — dead export | `lib/orchestration/handoff-filter.js` — handoff history filter, orphan | **needs-decision** — ⚠️ in same Squad-A allowlist as N3 (`no-egress.test.js:28`); re-verify skill refs before any drop. |
 | **N6** | LOW | 2 — dead export | `lib/tools/ast-search.js` — ast-grep wrapper, orphan | **dormant-by-design** (capability library, consumer optional) |
 
 **Net**: 6 NEW (beyond WIRE catalog). 2 are `workflow-status`-grade "fully built, zero consumer" (N1, N2). 1 is a duplicate-implementation (N3). 3 are simple orphans (N4–N6). **No code changes made — report/document only.**
@@ -72,7 +72,13 @@
 
 **Evidence**: the **live** guardrail path is `lib/orchestration/guardrails.js` (`runAll` L35 / `runOrThrow` L60), consumed by `lib/runtime/create-artibot-agent.js` + `lib/runtime/middleware/guardrail.js` + `scripts/evals/harness-ablation.js`. `tool-guardrails.js` is a *second*, registry-based guardrail design (per-tool `registerToolGuardrail` + `evaluateToolInput`) that was never wired in.
 
-**Triage: `consolidate`** — two implementations of the same concept; one is canonical and wired, the other is orphaned. Candidate to either (a) fold any unique capability (per-tool registry, `evaluateToolInput` async behavior) into `guardrails.js` then remove `tool-guardrails.js`, or (b) delete outright if `guardrails.js` already covers the need. Maintainer decides which capability set survives. Low risk (no production caller to break).
+**Triage: ~~`consolidate`~~ → RECLASSIFIED `dormant-by-documented-design` (2026-06-05, Task #4 deep-dive).** The initial `consolidate` verdict assumed pure JS-import orphanhood; a deeper read for the consolidation pass refuted that:
+
+1. **Documented public-skill API.** `skills/guardrails/SKILL.md` (shipped, level-2, platforms `[claude-code, gemini-cli, codex-cli, cursor]`) names `tool-guardrails.js` as one of its **two** implementation pillars (L22) and teaches agents to call `registerToolGuardrail` (L43) and `evaluateToolInput` (L45, L67). `skills/tool-approval/SKILL.md:35` cross-references it as the preferred alternative ("use `tool-guardrails.js` instead"). Per the WIRING-AUDIT false-positive rule, a skill that surfaces a function as its taught API **is a consumer** — agents invoke it when the skill activates.
+2. **Unique capability the live module lacks.** `guardrails.js` (`runAll`/`runOrThrow`) only runs a caller-supplied array against ctx/input with a single throw behavior. `tool-guardrails.js` adds a **stateful per-tool registry** keyed by tool name + **two distinct behaviors** (`reject_content` → returns `{allowed:false, refusal}`; `raise_exception` → throws `ToolGuardrailRejection`). The live policy-rule `middleware/guardrail.js` does per-tool authorization but from *static allow/deny/ask rules*, not a registry of input-inspecting functions. No live module replaces the registry capability.
+3. **Explicit data-policy test contract.** `tests/lib/observability/no-egress.test.js:26-34` lists `tool-guardrails.js` in a deliberate **"Squad A owned-files allowlist"** (Phase 2 §4.1) that enforces no-egress on it as a shipped orchestration primitive — alongside `guardrails.js`, `agent-as-tool.js`, `handoff-filter.js`. These were shipped together as a primitive set, not accidental dead code.
+
+**Action taken: NO deletion, NO code change.** Deleting would break the shipped `guardrails` skill contract, the `tool-approval` cross-reference, and remove a capability `guardrails.js` cannot provide. This is dormant-by-design (a documented library/skill primitive awaiting a JS wire-in), functionally identical to N6 (ast-search) and the WIRE-14 skill-exporter precedent (parallel library API, dormant-by-design). Baseline tests confirmed green (14/14) before stopping. If the team still wants zero documented-but-JS-unwired primitives, the correct path is a **product decision to either (a) wire `evaluateToolInput` into the tool-call path, or (b) deprecate the skill section + remove the module together** — never a silent code-only delete.
 
 ---
 
