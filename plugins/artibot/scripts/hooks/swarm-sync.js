@@ -95,8 +95,8 @@ async function main() {
     });
 
     const parts = ['[swarm-sync] Session sync complete'];
-    if (result?.uploaded) parts.push(`uploaded: v${result.uploadVersion ?? '?'}`);
-    if (result?.downloaded) parts.push(`downloaded: v${result.downloadVersion ?? '?'}`);
+    if (result?.uploaded) parts.push(`uploaded: v${result.version ?? '?'}`);
+    if (result?.downloaded) parts.push(`downloaded: v${result.version ?? '?'}`);
     if (result?.queued) parts.push('queued offline');
     if (result?.error) parts.push(`error: ${result.error}`);
 

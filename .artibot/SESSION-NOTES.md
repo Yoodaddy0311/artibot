@@ -1688,3 +1688,13 @@
 <!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
 
 ---
+
+## 2026-06-05 01:50 UTC · `master`
+
+- **Commits** (1):
+  - `defba70` feat(runtime): WIRE-03 — surface per-teammate effort/budget on subagents contract
+- **Files touched**: 4
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---

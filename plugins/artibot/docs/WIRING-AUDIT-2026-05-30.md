@@ -82,3 +82,44 @@
 - commands routability: /codex command (disable-model-invocation:true, absent from sc router table)
 - model-policy enforcement: assemble.md 에이전트 스폰 model 지정
 - model-policy enforcement: agent-resolver.js model 필드 노출 (frontmatter model 런타임 해석)
+
+---
+
+## Dormant Reclassification (2026-06-05 follow-up)
+
+Re-verified the 11 WIRE-backlog items the v4.19.1 triage left open — 3 confirmed dormant + 8 `realGap=false` candidates — now with full repo file access (several original verifications ran in a sandbox where the repo was not mounted, so they reported tool failures). Evidence-based dispositions, single source = `.artibot/WIRE-BACKLOG-TRIAGE.md`.
+
+### Confirmed intentional-dormant — formal, no wiring
+
+| WIRE | Capability | Evidence | Why dormant |
+|---|---|---|---|
+| WIRE-01 | GRPO reward-pipeline emitter (`createRewardMetrics.recordReward`) | `lib/learning/grpo/reward-metrics.js` carries an explicit `DORMANT BY DESIGN` banner; 0 production callers | GRPO CLOSED (v4.19.1). Activation = explicit human decision, not a gap-fix. |
+| WIRE-02 | knowledge-transfer `promoteToSystem1` / `bootstrapPromote` | Upstream `hotSwap()` itself has 0 production callers; WIRE-02 is an internal dedup, not a wiring | Wiring leaves dormancy unchanged and breaks `knowledge-demotion-promote.test.js` (spy contract). |
+| WIRE-19 | lifecycle middleware config gating (`createLifecycleMiddleware`) | Spec anchors confirmed nonexistent (Glob/Read 0 matches) | Phantom spec — nothing to wire. |
+
+### Reviewed `realGap=false` candidates → 6 dormant · 1 fixed · 1 already-live
+
+| WIRE | Disposition | Evidence (file:line) |
+|---|---|---|
+| WIRE-05 | **Dormant** | `lib/core/feature-tracker.js` exists; `createFeatureTracker` 0 production callers; no `ux.featureIndicator` flag in `artibot.config.json`. Awaiting a Session Intelligence Report surface. (= WIRE-10) |
+| WIRE-13 | **Dormant** | `lib/core/playbook-registry.js` `listPlaybooks`/`getPlaybook` exported via `index.js` barrel but 0 production consumers; spec remedy = a NEW `scripts/playbook-diag.js` (absent) = feature add, not a wire. |
+| WIRE-14 | **Dormant-by-design** | `skill-exporter.js` `exportForGemini/Codex/Cursor` (373/383/393) only re-exported (`lib/core/index.js:39`); shipped `/export` runs `scripts/export-to-tool.mjs`, which does NOT import skill-exporter (node builtins only) = confirmed bypass = parallel library API. |
+| WIRE-17 | **Dormant-by-design** | `lib/privacy/token-rotation.js` `generateToken`/`rotateToken` exist; `lib/swarm/swarm-client.js#buildHeaders:160` does not import them; minted tokens are not server-validated = client-only bookkeeping, no auth benefit until a server counterpart exists. |
+| WIRE-18 | **Dormant-by-design** | `lib/system/lsp-client.js#collectDiagnostics` + `scripts/hooks/clean-state-check.js` both exist; wiring converts an advisory hook into a per-tool tsc/eslint spawner (~30s/tool) — intentionally kept advisory. |
+| WIRE-20 | **Dormant** | `createExtensionRegistry` IS wired into the agent factory (`lib/runtime/create-artibot-agent.js:200,209`), but `discoverExtensions` (`lib/core/extension-loader.js:160`) has 0 callers → registry is consumed via explicit option injection, auto-discovery is a separate unwired feature. Spec "registry write-only" premise refuted. |
+| WIRE-21 | **✅ Fixed (realGap=true)** | Reclassified from dormant: triage looked for `lib/swarm/swarm-sync.js` but the file is `scripts/hooks/swarm-sync.js:98-99`, which read non-existent `result.uploadVersion`/`downloadVersion`. `onSessionEnd` returns `{ uploaded, downloaded, version }` (`lib/swarm/sync-scheduler.js:324-330`). Changed both to `result.version` — cosmetic stderr only. |
+| WIRE-22 | **Not a gap — already live** | `lib/adapters/adapter-utils.js` `buildSkillFrontmatter:64`/`stripAgentTeamsRefs:131`/`stripClaudeSpecificRefs:155` are consumed by 5 production files (antigravity/codex/cursor/gemini adapters + skill-exporter). Fully wired; close. |
+
+**Net**: dormant list grows by 9 (WIRE-01/02/19 + 05/13/14/17/18/20). WIRE-21 fixed and shipped. WIRE-22 closed as already-live. Remaining `realGap=true` rework backlog: WIRE-09/10/11/15/16.
+
+### Appended to intentional-dormant list (by this follow-up)
+
+- learning/grpo reward pipeline: createRewardMetrics.recordReward (WIRE-01 — DORMANT BY DESIGN banner)
+- learning knowledge-transfer: promoteToSystem1 / bootstrapPromote (WIRE-02 — upstream hotSwap dormant)
+- runtime middleware: lifecycle config gating createLifecycleMiddleware (WIRE-19 — phantom spec)
+- core feature-tracker: createFeatureTracker (WIRE-05/10 — no consumer, no flag)
+- core playbook-registry: listPlaybooks / getPlaybook (WIRE-13 — exported, unconsumed)
+- core skill-exporter: exportForGemini/Codex/Cursor (WIRE-14 — bypassed by export-to-tool.mjs)
+- privacy token-rotation: generateToken / rotateToken (WIRE-17 — client-only, no server validation)
+- system lsp-client: collectDiagnostics (WIRE-18 — advisory hook kept advisory)
+- core extension auto-discovery: discoverExtensions drain (WIRE-20 — registry wired, discovery unwired)

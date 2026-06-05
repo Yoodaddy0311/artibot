@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **WIRE-21 — swarm-sync 버전 표시 수정** (`scripts/hooks/swarm-sync.js:98-99`) — session-end sync 로그가 존재하지 않는 `result.uploadVersion`/`result.downloadVersion` 필드를 읽어 항상 `uploaded: v?` / `downloaded: v?`를 출력하던 버그. `onSessionEnd`(→`performSync`)의 실제 반환은 `{ uploaded, downloaded, version }`(`lib/swarm/sync-scheduler.js:324-330`)이므로 두 곳 모두 `result.version`으로 교정. stderr 표시 전용(cosmetic). dormant 백로그 정리(2026-06-05) 중 phantom-path false negative로 재분류되어 발견.
+
 ### Added
 
 - **WIRE-03 적용** — 구조화된 delegation 계약에 per-teammate effort/budget 노출 (`lib/runtime/middleware/subagents.js`). `subagentsMiddleware`가 `task.meta.workflowPlan`(`buildWorkflowPlan` 산출, `runner==='team'`)을 읽어 `contract`에 `parentEffort`/`perAgentBudget`/`teammates[{agent,command,effort,budget}]`를 추가. 기존엔 프롬프트 문자열 directive(`runtime-prompt.js` `buildTeamDirective`)만 이 정보를 노출하고 객체 계약은 비노출이던 dormant surface 해소. inline plan·plan 부재 시 안전 폴백(빈 배열/null/0). 회귀 테스트 3종(`tests/runtime/subagents-workflow-plan.test.js`).
