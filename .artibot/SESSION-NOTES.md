@@ -1748,3 +1748,13 @@
 <!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
 
 ---
+
+## 2026-06-05 04:16 UTC · `master`
+
+- **Commits** (1):
+  - `f54d579` refactor(orchestration): remove rate-sentinel orphan (N4)
+- **Files touched**: 3
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
