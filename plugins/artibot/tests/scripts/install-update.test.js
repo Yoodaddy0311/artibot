@@ -57,12 +57,18 @@ describe('install/install.sh covers new file directories', () => {
   for (const relPath of V1_15_NEW_FILES) {
     const topDir = relPath.split('/')[0]; // lib, scripts, output-styles, etc.
     it(`install.sh가 ${topDir}/ 디렉토리를 재귀 복사`, () => {
-      // install.sh uses: cp -r "${SCRIPT_DIR}/<dir>" "${ARTIBOT_DIR}/"
-      const pattern = new RegExp(`cp\\s+-r\\s+.*["']?\\$\\{?SCRIPT_DIR\\}?["']?/${topDir}["']?\\s`);
-      const hasRecursiveCopy = pattern.test(installShContent);
-      // Also accept patterns like cp -r "${SCRIPT_DIR}/output-styles" "${ARTIBOT_DIR}/"
-      const altPattern = new RegExp(`cp\\s+-r\\s+.*${topDir}.*ARTIBOT_DIR`);
-      expect(hasRecursiveCopy || altPattern.test(installShContent)).toBe(true);
+      // install.sh recursively copies via either:
+      //   - direct: cp -r "${SCRIPT_DIR}/<dir>" "${ARTIBOT_DIR}/"
+      //   - helper: safe_copy_dir "${SCRIPT_DIR}/<dir>" "${ARTIBOT_DIR}/<dir>"
+      // (helper wraps cp -r / rsync with --exclude=node_modules --exclude=.git)
+      const cpPattern = new RegExp(`cp\\s+-r\\s+.*["']?\\$\\{?SCRIPT_DIR\\}?["']?/${topDir}["']?\\s`);
+      const cpAltPattern = new RegExp(`cp\\s+-r\\s+.*${topDir}.*ARTIBOT_DIR`);
+      const safeCopyPattern = new RegExp(`safe_copy_dir\\s+["']?\\$\\{?SCRIPT_DIR\\}?["']?/${topDir}["']?`);
+      const hasRecursiveCopy =
+        cpPattern.test(installShContent) ||
+        cpAltPattern.test(installShContent) ||
+        safeCopyPattern.test(installShContent);
+      expect(hasRecursiveCopy).toBe(true);
     });
   }
 });
@@ -112,11 +118,15 @@ describe('install/SKILL.md field preservation', () => {
     expect(content).toMatch(/name:/);
   });
 
-  it('install.sh가 skills를 cp -r로 복사 (원본 그대로 보존)', () => {
+  it('install.sh가 skills를 재귀 복사 (원본 그대로 보존)', () => {
     const installPath = path.join(PLUGIN_ROOT, 'install.sh');
     const content = readFileSync(installPath, 'utf-8');
-    // install_skills() uses cp -r to copy the entire skills directory
-    expect(content).toMatch(/cp\s+-r\s+.*skills.*ARTIBOT_DIR/);
+    // install_skills() copies the entire skills directory recursively via
+    // either direct `cp -r` or the `safe_copy_dir` helper (which wraps
+    // cp -r / rsync with --exclude=node_modules --exclude=.git).
+    const cpPattern = /cp\s+-r\s+.*skills.*ARTIBOT_DIR/;
+    const safeCopyPattern = /safe_copy_dir\s+["']?\$\{?SCRIPT_DIR\}?["']?\/skills/;
+    expect(cpPattern.test(content) || safeCopyPattern.test(content)).toBe(true);
   });
 });
 
