@@ -27,7 +27,7 @@ const VALID_CONTEXTS = ['fork', 'forked', 'native', 'shared'];
 const VALID_PLATFORMS = ['claude-code', 'gemini-cli', 'codex-cli', 'cursor', 'antigravity'];
 const VALID_CATEGORIES = [
   'analysis', 'architecture', 'code-quality', 'core', 'debugging',
-  'design', 'development', 'devops', 'infrastructure', 'integration',
+  'decision', 'design', 'development', 'devops', 'infrastructure', 'integration',
   'intent', 'language', 'learning', 'library', 'marketing',
   'meta', 'observability', 'onboarding', 'optimization', 'orchestration',
   'persona', 'platform', 'quality', 'safety', 'security',
