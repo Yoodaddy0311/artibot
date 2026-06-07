@@ -96,6 +96,33 @@ function extractPendingWork(messages) {
 }
 
 /**
+ * Extract decision statements from assistant messages.
+ * Looks for messages containing decision keywords and captures the
+ * surrounding sentence for compaction-survival context.
+ * @param {object[]} messages
+ * @returns {string[]}
+ */
+function extractDecisionContext(messages) {
+  const DECISION_KEYWORDS = /\b(decided|chose|locked|established|confirmed|selected|agreed)\b/i;
+  const decisions = [];
+
+  for (const msg of messages) {
+    if ((msg.role || msg.type) !== 'assistant') continue;
+    const text = typeof msg.content === 'string' ? msg.content : '';
+    if (!DECISION_KEYWORDS.test(text)) continue;
+
+    const lines = text.split('\n');
+    for (const line of lines) {
+      if (DECISION_KEYWORDS.test(line)) {
+        const trimmed = line.trim().slice(0, TRUNCATE_LEN);
+        if (trimmed.length > 10) decisions.push(trimmed);
+      }
+    }
+  }
+  return [...new Set(decisions)].slice(0, 5);
+}
+
+/**
  * Extract file paths mentioned in messages (max 8).
  * @param {object[]} messages
  * @returns {string[]}
@@ -176,6 +203,7 @@ function buildCompactionSummary(messages) {
     pending_work: extractPendingWork(processed),
     key_files: extractKeyFiles(processed),
     current_work: extractCurrentWork(processed),
+    decisions: extractDecisionContext(processed),
   };
 }
 
@@ -197,6 +225,10 @@ function formatSummaryMessage(summary, tokenEstimate) {
 
   if (summary.current_work) {
     lines.push(`  Current work: ${summary.current_work.slice(0, 80)}...`);
+  }
+
+  if (summary.decisions && summary.decisions.length > 0) {
+    lines.push(`  Decisions: ${summary.decisions.length} captured`);
   }
 
   return lines.join('\n');

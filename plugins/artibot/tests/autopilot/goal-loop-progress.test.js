@@ -70,6 +70,20 @@ describe('progress heartbeat — emission paths', () => {
     expect(evt.progress.confidence).toBe(1.0);
   });
 
+  it('emits a 100% progress heartbeat on the met phase-end tick', () => {
+    const state = makeState();
+    runPhaseGoalEvaluate(state, {
+      runCommand: () => ({ exitCode: 0, stdout: '', stderr: '' }),
+    });
+    const evt = findEvent((e) => e.type === 'phase-end' && e.phase === 'EVALUATE');
+    expect(evt).toBeTruthy();
+    expect(evt.progress).toBeTruthy();
+    // Met path does not increment goalIterations, so without the override the
+    // pct would stick at the first-iteration 0%. Completion must read 100%.
+    expect(evt.progress.pct).toBe(100);
+    expect(evt.progress.met).toBe(true);
+  });
+
   it('attaches progress to the iterate phase-end tick (not met, under cap)', () => {
     const state = makeState();
     runPhaseGoalEvaluate(state, {

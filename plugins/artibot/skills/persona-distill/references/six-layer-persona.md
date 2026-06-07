@@ -72,6 +72,23 @@ Conclusion: top of message; reasons follow
 Transitions: rarely uses "however"; prefers "but" or new bullet
 ```
 
+### Absence Signals
+What the persona consistently does NOT do. Derived from patterns absent across all source samples:
+
+- Words and punctuation consistently absent (e.g., em dashes in 0 of 5 samples, semicolons never used)
+- Hook types the author never uses (e.g., never opens with rhetorical questions)
+- Tones the author never hits (e.g., never sarcastic, never self-deprecating)
+- Structures the author avoids (e.g., never uses tricolons, never writes bulleted lists)
+
+```
+Absent punctuation: em dashes, ellipses
+Absent hooks: rhetorical questions, "imagine this" openings
+Absent tones: sarcasm, false modesty
+Absent structures: tricolons, nested lists deeper than 2 levels
+```
+
+Absence signals are as important as presence signals for behavioral fidelity. A persona that avoids what the source avoids will drift less than one that only copies what the source does.
+
 ### Sample exchanges (mandatory)
 At least 5 worked sample exchanges showing the persona's voice in different scenarios:
 

@@ -1,6 +1,6 @@
 # Artibot
 
-[![Version](https://img.shields.io/badge/version-4.13.0-blue?style=flat-square)](./CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-4.19.6-blue?style=flat-square)](./CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](./LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen?style=flat-square)](./package.json)
 [![Tests](https://img.shields.io/badge/tests-passing-brightgreen?style=flat-square)](./tests/)
@@ -380,7 +380,7 @@ Artibot의 핵심 엔진은 Claude Code의 **Agent Teams API**입니다. 단순�
 | **토큰 비용** | 1x | ~5x |
 | **적합 작업** | 단일 파일 분석, 검색, 빠른 위임 | 복잡한 기능 구현, 멀티 에이전트 협업 |
 
-### 68개 슬래시 커맨드
+### 71개 슬래시 커맨드
 
 - `/sc`로 자연어 의도를 분석하여 최적 커맨드로 자동 라우팅
 - 개발, 분석, 품질, 테스트, 문서화, 배포, 마케팅 전 영역 커버
@@ -498,7 +498,7 @@ Artibot은 Claude Code 외에도 **Gemini CLI**, **OpenAI Codex CLI**, **Cursor 
 | Sub-Agent (단방향 위임) | ✅ | ✅ | ✅ | ⚠️ 제한적 | ✅ |
 | 27개 전문 에이전트 | ✅ | ✅ 자동변환 | ✅ 자동변환 | ✅ 자동변환 | ✅ 자동변환 |
 | 117개 스킬 (SKILL.md) | ✅ | ✅ | ✅ | ✅ | ✅ |
-| 슬래시 커맨드 | ✅ 68개 | ✅ TOML | → Workflows | → Prompts | → Workflows |
+| 슬래시 커맨드 | ✅ 70개 | ✅ TOML | → Workflows | → Prompts | → Workflows |
 | Hooks 자동작동 | ✅ 15이벤트 | ✅ 동일패턴 | ⚠️ 제한적 | ❌ | ✅ Agent Manager |
 | 인지 라우터 (System 1/2) | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 자가학습 (GRPO) | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -1452,7 +1452,7 @@ plugins/artibot/
 ├── agents/                      # 28개 에이전트 정의 (orchestrator 1 + 팀원 27)
 │   ├── orchestrator.md          #   CTO / 팀 리더 (Agent Teams API)
 │   └── [27개 전문 에이전트].md    #   팀원 (SendMessage + TaskUpdate)
-├── commands/                    # 68개 슬래시 커맨드
+├── commands/                    # 71개 슬래시 커맨드
 │   ├── sc.md                    #   메인 라우터
 │   ├── orchestrate.md           #   팀 오케스트레이션 (TeamCreate)
 │   ├── spawn.md                 #   팀 스폰 (병렬 실행)
@@ -1610,7 +1610,8 @@ Claude Code 하네스 아키텍처에서 영감받은 13개 신규 모듈 도입
 
 ### Git Autopilot 훅 시스템
 - 5개 git-autopilot 훅 등록: setup(SessionStart), session(SessionStart), guard(PreToolUse), save(UserPromptSubmit), close(Stop)
-- WIP 인터벌 자동 커밋, 원격 미병합 파일 쓰기 경고, 세션 종료 시 스쿼시+푸시
+- WIP 인터벌 자동 커밋(기본 120분), 원격 미병합 파일 쓰기 경고, 세션 종료 시 스쿼시+푸시
+- **v4.11.3부터**: `close(Stop)` 의 turn-end 자동 commit/squash/push는 **opt-in**. 매 agent turn마다 `chore: artibot session close` commit이 누적되던 노이즈 폭주 차단. 이전 동작 복원: `.git/autopilot.json` 또는 `artibot.config.json` 의 `git.autopilot.closeOnStop: true` 토글. **WIP interval save(작업 분실 방지)는 영향 없음.**
 
 ### Worktree 격리 모드
 - `team.worktreeIsolation` 설정 추가 (`enabled: false` 기본, opt-in)

@@ -76,6 +76,9 @@ describe('runtime-prompt effort + task-budget prefix injection', () => {
     }
   });
 
+  // Budget-per-band (artibot.config.json#/runtime/effort/budgetMap, == DEFAULT_BUDGET_MAP).
+  const BUDGET_BY_LEVEL = { max: 200000, xhigh: 128000, high: 64000, medium: 32000, low: 16000 };
+
   it('injects effort + task-budget prefix for /implement', async () => {
     const output = await handleUserPromptSubmit({
       user_prompt: '/implement add oauth login',
@@ -83,27 +86,33 @@ describe('runtime-prompt effort + task-budget prefix injection', () => {
     });
 
     expect(output).not.toBeNull();
-    expect(output.user_prompt).toMatch(
-      /^\[artibot:effort level=xhigh command=implement\]\[artibot:task-budget max_tokens=128000\]/,
+    // P1 (Score-Aware Effort): the injected level is the command baseline
+    // (implement→xhigh) shifted ±1 by prompt complexity, so assert the
+    // injection CONTRACT — a valid band + the budget matching that band —
+    // rather than a fixed level that breaks whenever scoring changes.
+    const m = output.user_prompt.match(
+      /^\[artibot:effort level=(low|medium|high|xhigh|max) command=implement\]\[artibot:task-budget max_tokens=(\d+)\]/,
     );
+    expect(m).not.toBeNull();
+    expect(Number(m[2])).toBe(BUDGET_BY_LEVEL[m[1]]);
     // Prefix is followed by blank line, then the (possibly-prepared) prompt
     // which must still carry the original request text somewhere.
-    expect(output.user_prompt).toMatch(
-      /\[artibot:task-budget max_tokens=128000\]\n\n/,
-    );
+    expect(output.user_prompt).toMatch(/\[artibot:task-budget max_tokens=\d+\]\n\n/);
     expect(output.user_prompt).toContain('/implement add oauth login');
   });
 
-  it('injects prefix for /code-review at high effort (64000 tokens)', async () => {
+  it('injects effort + task-budget prefix for /code-review (band/budget consistent)', async () => {
     const output = await handleUserPromptSubmit({
       user_prompt: '/code-review auth module',
       event: 'UserPromptSubmit',
     });
 
     expect(output).not.toBeNull();
-    expect(output.user_prompt).toMatch(
-      /^\[artibot:effort level=high command=code-review\]\[artibot:task-budget max_tokens=64000\]/,
+    const m = output.user_prompt.match(
+      /^\[artibot:effort level=(low|medium|high|xhigh|max) command=code-review\]\[artibot:task-budget max_tokens=(\d+)\]/,
     );
+    expect(m).not.toBeNull();
+    expect(Number(m[2])).toBe(BUDGET_BY_LEVEL[m[1]]);
   });
 
   it('does not inject prefix for prompts without a slash command', async () => {

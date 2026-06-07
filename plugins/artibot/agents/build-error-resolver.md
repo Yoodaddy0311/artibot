@@ -139,6 +139,17 @@ When running as a teammate in an agent team:
 5. **Peer Communication**: Use `SendMessage(type="message", recipient="<teammate-name>")` for direct coordination with other teammates when needed
 6. **Shutdown**: When you receive a `shutdown_request`, finish any in-progress task, mark it completed, and respond with `SendMessage(type="shutdown_response", request_id="...", approve=true)`
 
+## Verification Checklist
+
+| # | Zone | Check | Method | FAIL Criteria |
+|---|------|-------|--------|---------------|
+| 1 | Pre | Full error output captured | Run build command and collect complete error log | Diagnosing from partial or truncated error output |
+| 2 | Pre | Root cause vs cascade separated | Identify unique root errors vs cascading downstream errors | Fixing cascading errors individually instead of root cause |
+| 3 | Active | Minimal fix scope | Verify each fix changes only what is needed to resolve the error | Fix alters business logic or introduces unrelated changes |
+| 4 | Active | No type-escape hatch used | Confirm fix uses correct types, not `any`, `@ts-ignore`, or unsafe casts | Using `any`, `as` cast, or `@ts-ignore` to silence errors |
+| 5 | Post | Clean build verification | Re-run build command and confirm zero errors remain | Build still has errors after applying fixes |
+| 6 | Post | No new errors introduced | Run full test suite to confirm no regressions from fix | Fix resolves original error but breaks existing tests |
+
 ## Anti-Patterns
 
 - Do NOT use `any` to silence type errors - find the correct type

@@ -43,6 +43,32 @@ check_prerequisites() {
 }
 
 # ──────────────────────────────────────────────
+# Self-install guard
+# ──────────────────────────────────────────────
+# When update.js falls back to the INSTALLED copy of install.sh
+# (~/.claude/artibot/install.sh) — e.g. the source repo pull failed — then
+# SCRIPT_DIR resolves to ARTIBOT_DIR itself. Every `cp -r "${SCRIPT_DIR}/X"
+# "${ARTIBOT_DIR}/"` becomes a copy-onto-self ("cp: 'a' and 'a' are the same
+# file") which `set -e` turns into a hard install failure.
+#
+# Detect that case and skip the file-copy phases (the files are already in
+# place — it's a no-op, not an error). Config/settings/seed steps below still
+# run normally.
+#
+# Uses `-ef` (same inode/device) when available; falls back to canonicalized
+# `pwd -P` comparison for Git Bash on Windows where `-ef` semantics can differ
+# across mounted drives.
+is_self_install() {
+  if [ "${SCRIPT_DIR}" -ef "${ARTIBOT_DIR}" ] 2>/dev/null; then
+    return 0
+  fi
+  local src_real dst_real
+  src_real="$(cd "${SCRIPT_DIR}" 2>/dev/null && pwd -P)" || return 1
+  dst_real="$(cd "${ARTIBOT_DIR}" 2>/dev/null && pwd -P)" || return 1
+  [ -n "$src_real" ] && [ "$src_real" = "$dst_real" ]
+}
+
+# ──────────────────────────────────────────────
 # Directory Setup
 # ──────────────────────────────────────────────
 setup_directories() {
@@ -855,13 +881,18 @@ main() {
     install)
       check_prerequisites
       setup_directories
-      install_agents
-      install_commands
-      install_skills
-      install_hooks
-      install_marketplace_mirror
-      install_plugin_cache
-      install_rules
+      if is_self_install; then
+        warn "Running from the installed location (${ARTIBOT_DIR}) — files already in place."
+        warn "Skipping copy phase (no-op); continuing with config & seed steps."
+      else
+        install_agents
+        install_commands
+        install_skills
+        install_hooks
+        install_marketplace_mirror
+        install_plugin_cache
+        install_rules
+      fi
       install_mcp
       configure_settings
       seed_project_claude_md

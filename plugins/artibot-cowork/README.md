@@ -120,9 +120,9 @@ The full `artibot` plugin is a 122-skill, 28-agent orchestration framework built
 
 | Agent | Model | Role |
 |-------|-------|------|
-| `orchestrator` | Opus 4.7 | CTO-level team coordinator (marketing playbooks) |
-| `planner` | Opus 4.7 | Campaign & project planning specialist |
-| `marketing-strategist` | Opus 4.7 | Market analysis, GTM, growth strategy |
+| `orchestrator` | Opus 4.8 | CTO-level team coordinator (marketing playbooks) |
+| `planner` | Opus 4.8 | Campaign & project planning specialist |
+| `marketing-strategist` | Opus 4.8 | Market analysis, GTM, growth strategy |
 | `content-marketer` | Sonnet | Blog, social, email, brand voice |
 | `long-form-writer` | Sonnet | Pipeline stages 3-4 — deep-dive drafts, self-scores via quality rubric |
 | `case-study-writer` | Sonnet | 5-block case studies with quote-approval workflow |
@@ -206,12 +206,12 @@ The full `artibot` plugin is a 122-skill, 28-agent orchestration framework built
 /monitor SEO keyword rankings --interval daily
 ```
 
-### Opus 4.7 모델 정책 업데이트
+### Opus 4.8 모델 정책 업데이트
 
 | 역할 | 모델 | Effort |
 |------|------|--------|
-| Orchestrator | Opus 4.7 | xhigh (팀 오케스트레이션) |
-| Planner, Marketing-Strategist | Opus 4.7 | high |
+| Orchestrator | Opus 4.8 | xhigh (팀 오케스트레이션) |
+| Planner, Marketing-Strategist | Opus 4.8 | high |
 | 나머지 9개 에이전트 | Sonnet | medium |
 
 ### Auto Mode 안전 가이드
@@ -309,7 +309,7 @@ Cowork SDK supports `create-skill` and `create-agent`. Hook and middleware creat
 
 | Version | Notes |
 |---------|-------|
-| **v3.1.0** | 2026-04 Claude features — Claude Design, Routines, Ultraplan, Monitor, Opus 4.7 policy, Auto Mode guide |
+| **v3.1.0** | 2026-04 Claude features — Claude Design, Routines, Ultraplan, Monitor, Opus 4.8 policy, Auto Mode guide |
 | **v3.0.0** | CLI v3.0 parity — swarm intelligence, evolution loop, SDK for Cowork, team model policy, marketing playbooks |
 | **v0.4.0** | Content pipeline — content-pipeline, schema-generator, long-form-writer + case-study-writer agents, AEO/GEO tooling |
 | **v0.3.0** | Long-form writing pack — blog, case-study, column, thought-leadership, interview, voice-reference |

@@ -27,6 +27,32 @@
  * Zero external deps. All public methods are factory-instance-local and the
  * factory returns a frozen object.
  *
+ * ---------------------------------------------------------------------------
+ * DORMANT BY DESIGN (intentional, not deprecated) — as of 2026-05-30.
+ *
+ * This module is the GRPO reward *emitter*: `createRewardMetrics(...).recordReward`
+ * is the only thing that writes `runtime/reward-metrics.json`. There is currently
+ * NO production caller wiring it into a hot path — the emitter is deliberately
+ * left unwired (see docs/WIRING-AUDIT-2026-05-30.md → "Intentional dormant").
+ * The downstream reader (`scripts/hooks/nightly-effort-policy-trainer.mjs`) is
+ * graceful when the file is absent: missing/empty input yields zero usable
+ * episodes and the cold-start guard performs no disk write, so the "reader with
+ * no emitter" shape is a deliberate no-op rather than a contradiction.
+ *
+ * Per the maintainer decision, the GRPO name, structure, exports and function
+ * signatures are PRESERVED as-is. Do not delete this file or remove exports;
+ * to reactivate, wire a production caller to `recordReward` (re-arming the
+ * pipeline is a separate, explicit task).
+ *
+ * GRPO vs. Dreaming — separate systems, NOT a replacement relationship:
+ *   - GRPO (this module + lib/learning/grpo/*): verifiable-reward *policy
+ *     learning* for routing / effort-budget decisions.
+ *   - Dreaming (lib/learning/memory + /dreaming): non-destructive *memory
+ *     consolidation* (dedup / merge / stale-replace) with a human review gate.
+ * The learning center of gravity shifted toward Dreaming, which is why this
+ * emitter is dormant — but the two solve different problems and coexist.
+ * ---------------------------------------------------------------------------
+ *
  * @module lib/learning/grpo/reward-metrics
  */
 
@@ -149,7 +175,7 @@ function applyReward(rollup, reward, components) {
  * @param {string} options.metricsPath - Absolute path to `reward-metrics.json`
  * @param {() => number} [options.now] - Clock injector for tests
  * @returns {{
- *   recordReward: (sessionId: string, reward: number, components?: object) => Promise<object>,
+ *   recordReward: (sessionId: string, reward: number, components?: object, meta?: object) => Promise<object>,
  *   snapshot: () => Promise<object>,
  *   rollup: (date: string) => Promise<object>
  * }}
@@ -164,7 +190,7 @@ export function createRewardMetrics({ metricsPath, now = () => Date.now() } = {}
     return coerceState(raw);
   }
 
-  async function recordReward(sessionId, reward, components = {}) {
+  async function recordReward(sessionId, reward, components = {}, meta = {}) {
     if (!Number.isFinite(reward)) return null;
     const state = await load();
     const date = isoDate(now);
@@ -177,6 +203,13 @@ export function createRewardMetrics({ metricsPath, now = () => Date.now() } = {}
       reward,
       components: components && typeof components === 'object' ? { ...components } : {},
     };
+    // P3 effort/budget overlay metadata — additive only, never breaks legacy entries.
+    if (meta && typeof meta === 'object') {
+      if (typeof meta.effort === 'string') entry.effort = meta.effort;
+      if (typeof meta.command === 'string') entry.command = meta.command;
+      if (Number.isFinite(meta.budget)) entry.budget = meta.budget;
+      if (Number.isFinite(meta.tokensUsed)) entry.tokensUsed = meta.tokensUsed;
+    }
     state.recentEpisodes = [...state.recentEpisodes, entry].slice(-RECENT_CAP);
     state.updatedAt = new Date(now()).toISOString();
     await atomicWriteJson(metricsPath, state);

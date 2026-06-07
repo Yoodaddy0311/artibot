@@ -141,6 +141,17 @@ When running as a teammate in an agent team:
 5. **Peer Communication**: Use `SendMessage(type="message", recipient="<teammate-name>")` for direct coordination with other teammates when needed
 6. **Shutdown**: When you receive a `shutdown_request`, finish any in-progress task, mark it completed, and respond with `SendMessage(type="shutdown_response", request_id="...", approve=true)`
 
+## Verification Checklist
+
+| # | Zone | Check | Method | FAIL Criteria |
+|---|------|-------|--------|---------------|
+| 1 | Pre | Repo structure mapped | Clone/navigate target repo and map directory structure, file counts, config files | Scoring based on README claims without reading actual code |
+| 2 | Pre | Evaluation dimensions calibrated | Confirm all 10 scoring dimensions apply to the target repo type | Applying irrelevant dimensions (e.g., Hook System to a non-plugin repo) |
+| 3 | Active | Evidence-backed scoring | Every dimension score cites specific files, patterns, or metrics as evidence | Score assigned without supporting evidence from code reading |
+| 4 | Active | Objective comparison | Score both repos independently using identical criteria before comparing | Biasing scores toward Artibot or the target repo |
+| 5 | Post | Adoptable elements identified | Extract concrete patterns with adoption effort estimates (LOW/MEDIUM/HIGH) | Benchmark report with no actionable adoption recommendations |
+| 6 | Post | Gap analysis complete | Document features present in target but missing from Artibot, and vice versa | One-sided analysis that ignores the other repo's advantages |
+
 ## Anti-Patterns
 
 - Do NOT score without reading actual code - every score must have evidence

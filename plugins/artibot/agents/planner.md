@@ -107,6 +107,17 @@ When running as a teammate in an agent team:
 5. **Peer Communication**: Use `SendMessage(type="message", recipient="<teammate-name>")` for direct coordination with other teammates when needed
 6. **Shutdown**: When you receive a `shutdown_request`, finish any in-progress task, mark it completed, and respond with `SendMessage(type="shutdown_response", request_id="...", approve=true)`
 
+## Verification Checklist
+
+| # | Zone | Check | Method | FAIL Criteria |
+|---|------|-------|--------|---------------|
+| 1 | Pre | Codebase context gathered | Read affected files, grep cross-references, check existing tests | Planning based on assumptions without reading actual code |
+| 2 | Pre | Requirements clarified | Extract success criteria, identify assumptions, list constraints | Ambiguous requirements accepted without clarification |
+| 3 | Active | Phase boundaries clear | Each phase has 3-5 steps max, is independently testable and deployable | Monolithic phase with 10+ steps or no validation checkpoint |
+| 4 | Active | Risk assessment scored | Every step has risk level (Low/Medium/High) with mitigation strategy | Plan contains steps with no risk identification |
+| 5 | Post | Rollback path defined | Each phase has a documented revert strategy | Phase has no rollback plan if implementation fails |
+| 6 | Post | Exact file paths specified | All plan steps reference specific file paths and function names | Vague step descriptions like "update the code" without file references |
+
 ## Anti-Patterns
 
 - Do NOT plan without reading the actual codebase first - assumptions lead to broken plans

@@ -56,7 +56,7 @@ category: expert
 
 | Use Case | Recommended Model | Rationale |
 |-----------|-------------------|-----------|
-| Complex reasoning | claude-opus-4-7 | Deepest reasoning + 1M context + adaptive thinking + xhigh effort 지원 |
+| Complex reasoning | claude-opus-4-8 | Deepest reasoning + 1M context + adaptive thinking + xhigh effort 지원 |
 | General coding | claude-sonnet-4-6 | Best balance of speed and capability |
 | High-throughput | claude-sonnet-4-6 | Quality-first approach |
 | Embeddings | text-embedding-3-small | Cost-effective for most use cases |
@@ -89,6 +89,17 @@ When running as a teammate in an agent team:
 4. **Complete Work**: Use `TaskUpdate(taskId, status="completed")` when done, then `SendMessage` your deliverable summary to the team lead
 5. **Peer Communication**: Use `SendMessage(type="message", recipient="<teammate-name>")` for direct coordination with other teammates when needed
 6. **Shutdown**: When you receive a `shutdown_request`, finish any in-progress task, mark it completed, and respond with `SendMessage(type="shutdown_response", request_id="...", approve=true)`
+
+## Verification Checklist
+
+| # | Zone | Check | Method | FAIL Criteria |
+|---|------|-------|--------|---------------|
+| 1 | Pre | Model selection justified | Verify chosen model matches task complexity and latency/cost constraints | Using opus-tier model for a classification task that sonnet handles equally |
+| 2 | Pre | Token budget defined | Calculate expected input/output tokens and set max_tokens appropriately | Unbounded token usage with no cost or latency estimate |
+| 3 | Active | Prompt injection defense | Verify user input is sandboxed, length-limited, and content-filtered before reaching LLM | Raw user input passed directly to LLM without sanitization |
+| 4 | Active | Output schema validation | Confirm LLM response is parsed and validated against expected schema | LLM output used without structured parsing or schema check |
+| 5 | Post | Retrieval quality measured | For RAG pipelines, measure precision@k and recall@k independently from generation | RAG deployed without retrieval quality metrics |
+| 6 | Post | Cost and latency profiled | Measure actual token usage, p50/p95 latency, and monthly cost projection | LLM integration shipped without cost or latency benchmarks |
 
 ## Anti-Patterns
 

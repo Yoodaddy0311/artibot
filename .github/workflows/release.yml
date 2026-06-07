@@ -151,15 +151,16 @@ jobs:
           AGENTS=$(find plugins/artibot/agents -maxdepth 1 -type f -name '*.md' | wc -l | tr -d ' ')
           COMMANDS=$(find plugins/artibot/commands -maxdepth 1 -type f -name '*.md' | wc -l | tr -d ' ')
           SKILLS=$(find plugins/artibot/skills -maxdepth 1 -mindepth 1 -type d | wc -l | tr -d ' ')
-          TESTS=$(find plugins/artibot/tests -type f \( -name '*.test.js' -o -name '*.spec.js' \) | wc -l | tr -d ' ')
+          # TESTFILES = number of test *files* (README badge granularity).
+          TESTFILES=$(find plugins/artibot/tests -type f \( -name '*.test.js' -o -name '*.spec.js' \) | wc -l | tr -d ' ')
           {
             echo "version=${VERSION}"
             echo "agents=${AGENTS}"
             echo "commands=${COMMANDS}"
             echo "skills=${SKILLS}"
-            echo "tests=${TESTS}"
+            echo "testfiles=${TESTFILES}"
           } >> "$GITHUB_OUTPUT"
-          echo "Computed: v${VERSION} | agents=${AGENTS} commands=${COMMANDS} skills=${SKILLS} tests=${TESTS}"
+          echo "Computed: v${VERSION} | agents=${AGENTS} commands=${COMMANDS} skills=${SKILLS} testfiles=${TESTFILES}"
 
       - name: Update version badges in READMEs
         env:
@@ -180,6 +181,48 @@ jobs:
           # Root README plugin table row — scoped to artibot row only.
           sed -i -E "s#(\[\`artibot\`\]\(\./plugins/artibot/\) [|] Claude Code \(developer CLI\) [|] )\*\*[0-9]+\.[0-9]+\.[0-9]+\*\*#\1**${VERSION}**#" README.md
 
+      - name: Sync README count prose
+        # Self-heal count prose ("N slash commands", "N skills", …) so a release
+        # that changes a count never leaves drift for the validate-readme-claims
+        # gate to fail on later (the manual hotfix that release ea8a3b9 was).
+        # Idempotent: a no-op when prose already matches file-system counts.
+        run: node plugins/artibot/scripts/ci/sync-readme-claims.js
+
+      - name: Install plugin dependencies (for test count)
+        working-directory: plugins/artibot
+        run: npm ci --ignore-scripts || npm install
+
+      - name: Count test cases
+        # marketplace.json `qualityMetrics.tests` is a test-CASE count, not a
+        # file count. Derive it authoritatively from vitest's numTotalTests so a
+        # release self-corrects the metric. Informational: a vitest failure here
+        # must never block the release (mirrors the validate job's policy), so we
+        # fall back to leaving the field unchanged when the count can't be read.
+        id: testcount
+        continue-on-error: true
+        working-directory: plugins/artibot
+        run: |
+          mkdir -p runtime
+          npx vitest run --reporter=json --outputFile=runtime/vitest-report.json || true
+          TESTS=$(node -e "try{console.log(JSON.parse(require('fs').readFileSync('runtime/vitest-report.json','utf-8')).numTotalTests||'')}catch{console.log('')}")
+          echo "tests=${TESTS}" >> "$GITHUB_OUTPUT"
+          echo "Counted test cases: ${TESTS:-<unavailable>}"
+
+      - name: Sync marketplace.json metadata
+        # Self-heal marketplace.json version / release.current / qualityMetrics.tests
+        # so a release never leaves these stale (audit 2026-06-05 found all three
+        # behind). Pulls version from plugin.json; tests from the count above when
+        # available, otherwise leaves the field untouched (never fabricated).
+        # Idempotent: a no-op when already in sync.
+        env:
+          TESTS: ${{ steps.testcount.outputs.tests }}
+        run: |
+          if [ -n "${TESTS}" ]; then
+            node plugins/artibot/scripts/ci/sync-marketplace-meta.mjs --tests="${TESTS}"
+          else
+            node plugins/artibot/scripts/ci/sync-marketplace-meta.mjs
+          fi
+
       - name: Open PR for README badge updates
         # Previous flow pushed directly to master with the default GITHUB_TOKEN.
         # Branch protection requires PR + required status checks, which blocked
@@ -192,24 +235,24 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.counts.outputs.version }}
         run: |
-          if git diff --quiet README.md plugins/artibot/README.md; then
-            echo "No README changes to PR."
+          if git diff --quiet README.md plugins/artibot/README.md plugins/artibot/marketplace.json; then
+            echo "No README / marketplace changes to PR."
             exit 0
           fi
           BRANCH="chore/sync-readme-badges-${GITHUB_REF_NAME}"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -b "${BRANCH}"
-          git add README.md plugins/artibot/README.md
+          git add README.md plugins/artibot/README.md plugins/artibot/marketplace.json
           # No [skip ci] — the badge PR needs required CI checks to run so
           # auto-merge can proceed. Adding [skip ci] would block both the push
           # AND pull_request triggers, leaving the PR permanently BLOCKED.
-          git commit -m "docs(release): sync README badges to ${GITHUB_REF_NAME}"
+          git commit -m "docs(release): sync README badges + marketplace meta to ${GITHUB_REF_NAME}"
           git push origin "${BRANCH}"
           gh pr create \
             --base master \
             --head "${BRANCH}" \
-            --title "docs(release): sync README badges to ${GITHUB_REF_NAME}" \
-            --body "Automated badge sync triggered by release ${GITHUB_REF_NAME}. Auto-merges once required CI checks pass."
+            --title "docs(release): sync README badges + marketplace meta to ${GITHUB_REF_NAME}" \
+            --body "Automated badge + marketplace metadata sync triggered by release ${GITHUB_REF_NAME}. Auto-merges once required CI checks pass."
           gh pr merge --auto --squash --delete-branch "${BRANCH}" || \
             echo "::warning::Auto-merge could not be enabled — falling back to manual merge."

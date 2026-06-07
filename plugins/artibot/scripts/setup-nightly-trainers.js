@@ -2,8 +2,8 @@
 /**
  * Nightly Trainers Setup Script.
  *
- * Helps users register the 5 nightly mjs trainers that populate Artibot's
- * GRPO / skill / agent / joint policies and the session rollup. The script
+ * Helps users register the 6 nightly mjs trainers that populate Artibot's
+ * GRPO / skill / agent / joint / effort policies and the session rollup. The script
  * prints the equivalent crontab / schtasks / claude schedule commands —
  * actual registration is delegated to the user's OS (no shell exec of
  * destructive commands).
@@ -55,11 +55,25 @@ const TRAINERS = [
     purpose: 'Refresh joint (skill x agent) policy',
   },
   {
+    name: 'nightly-effort-policy-trainer',
+    cron: '30 3 * * *',
+    schtasks: '03:30',
+    script: 'scripts/hooks/nightly-effort-policy-trainer.mjs',
+    purpose: 'Refresh effort/budget overlay weights (P3, dormant until enabled)',
+  },
+  {
     name: 'nightly-session-rollup',
     cron: '30 4 * * *',
     schtasks: '04:30',
     script: 'scripts/hooks/nightly-session-rollup.mjs',
     purpose: 'Roll up yesterday\'s sessions, prune originals > 30d',
+  },
+  {
+    name: 'nightly-dream-consolidate',
+    cron: '0 5 * * *',
+    schtasks: '05:00',
+    script: 'scripts/hooks/nightly-dream-consolidate.mjs',
+    purpose: 'Phase-1 memory consolidation candidates + wakeup marker (no LLM, no MD writes)',
   },
 ];
 

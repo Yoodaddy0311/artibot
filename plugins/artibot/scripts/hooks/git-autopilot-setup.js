@@ -44,6 +44,11 @@ const DEFAULT_CONFIG = {
   wipIntervalMinutes: 120,
   autoPullOnSession: true,
   autoPushOnStop: true,
+  // v4.11.3: per-turn `chore: artibot session close` 커밋 폭주 방지 — Stop hook의
+  // git-autopilot-close.js가 commit/push 단계를 실행하기 전에 이 플래그를 검사.
+  // false 면 close hook이 no-op로 종료. WIP interval save는 영향 없음(crash safety 보존).
+  // 이전 동작(매 turn auto-commit)을 원하면 `.git/autopilot.json`에서 true로 토글.
+  closeOnStop: false,
   squashWipOnClose: true,
   branchPrefix: 'artibot/',
   conflictStrategy: 'union',

@@ -22,6 +22,8 @@ import { createGuardrailMiddleware } from './middleware/guardrail.js';
 import { createTokenUsageMiddleware } from './middleware/token-usage.js';
 import { createCheckpointMiddleware } from './middleware/checkpoint.js';
 import { createLifecycleMiddleware } from './middleware/lifecycle.js';
+import { createCacheRoiMiddleware } from './middleware/cache-roi.js';
+import { createSmartPipeline } from './smart-pipeline.js';
 
 const FALLBACK_CONFIG = Object.freeze({
   automation: { supportedLanguages: ['en', 'ko', 'ja'], ambiguityThreshold: 50 },
@@ -104,6 +106,50 @@ async function runParallel(entries, state) {
 }
 
 /**
+ * Compute the smart-pipeline skip list after the router has populated
+ * state.context.routing. Returns the array of middleware names to skip
+ * (router/lifecycle excluded — they already executed). Pure helper so the
+ * preparePrompt pipeline stays within complexity limits.
+ *
+ * @param {object} smartPipeline - createSmartPipeline() instance
+ * @param {string[]} defaultPipeline - ordered default middleware names
+ * @param {object} state - Pipeline state (reads state.context.routing/planMode/mode)
+ * @returns {string[]} middleware names to skip
+ */
+function computeSmartSkips(smartPipeline, defaultPipeline, state) {
+  const selected = new Set(smartPipeline.selectMiddlewares({
+    intent: state.context.routing?.intent || '',
+    system: state.context.routing?.system || 'system1',
+    mode: state.context.planMode?.active ? 'plan' : (state.context.mode || 'dev'),
+    complexity: state.context.routing?.score ?? 0,
+  }).map((m) => m.name));
+  return defaultPipeline.filter((n) => n !== 'router' && n !== 'lifecycle' && !selected.has(n));
+}
+
+/**
+ * Apply the smart-pipeline skip list onto state (no-op when disabled or when a
+ * custom middleware chain is in use). Kept as a helper so preparePrompt stays
+ * within complexity limits.
+ */
+function applySmartPipeline(state, { smartEnabled, customMiddleware, smartPipeline, defaultPipeline }) {
+  if (!smartEnabled || customMiddleware) return;
+  state.context.smartPipeline = {
+    skipped: computeSmartSkips(smartPipeline, defaultPipeline, state),
+  };
+}
+
+/**
+ * Build [name, fn] entries for a parallel phase, filtered by the enabled set.
+ * specs are [enabledKey, entryName, fn] tuples; enabledKey gates inclusion and
+ * entryName labels the middleware for runParallel/runMiddleware.
+ */
+function buildParallelEntries(isEnabled, specs) {
+  return specs
+    .filter(([enabledKey]) => isEnabled(enabledKey))
+    .map(([, entryName, fn]) => [entryName, fn]);
+}
+
+/**
  * Execute extension hooks registered for a given event.
  * Each handler receives the pipeline state and runs with an error boundary.
  * Failures are logged but do not break the pipeline (graceful degradation).
@@ -174,6 +220,7 @@ export function createArtibotAgent(options = {}) {
     ...(options.checkpointOptions || {}),
   });
   const mwLifecycle = createLifecycleMiddleware({ now, ...(middlewareOptions.lifecycle || {}) });
+  const mwCacheRoi = createCacheRoiMiddleware({ now, ...(middlewareOptions.cacheRoi || {}) });
 
   // Middleware registry — maps config names to instances for config-driven filtering.
   const middlewareRegistry = Object.freeze({
@@ -187,6 +234,7 @@ export function createArtibotAgent(options = {}) {
     'summarization': mwSummarization,
     'token-usage': mwTokenUsage,
     'checkpoint': mwCheckpoint,
+    'cache-roi': mwCacheRoi,
   });
 
   // Default pipeline names (determines execution order).
@@ -194,8 +242,16 @@ export function createArtibotAgent(options = {}) {
     'lifecycle',
     'router', 'memory', 'skills', 'tasks',
     'subagents', 'guardrail', 'summarization',
-    'token-usage', 'checkpoint',
+    'token-usage', 'checkpoint', 'cache-roi',
   ];
+
+  // Smart pipeline (Zero-Waste): opt-in condition-based middleware selection.
+  // Default OFF — behavior unchanged unless options.smart or config.runtime.smartPipeline is true.
+  const smartConditions = options.config?.runtime?.middlewareConditions || {};
+  const smartPipeline = createSmartPipeline(
+    defaultPipeline.map((name) => ({ name, fn: middlewareRegistry[name], conditions: smartConditions[name] })),
+  );
+  const smartEnabled = options.smart === true || options.config?.runtime?.smartPipeline === true;
 
   // Resolve enabled middleware set from config.
   // When config.runtime.middleware is a non-empty array, only listed middleware runs.
@@ -224,6 +280,7 @@ export function createArtibotAgent(options = {}) {
         input: {
           prompt: normalizedPrompt,
           hookData: hookData || {},
+          pluginRoot: options.pluginRoot,
         },
         userPrompt: normalizedPrompt,
         messageParts: [],
@@ -264,6 +321,9 @@ export function createArtibotAgent(options = {}) {
         if (isEnabled('lifecycle')) await runMiddleware('lifecycle', mwLifecycle, state);
         // Phase 1: router (all others depend on routing/intent)
         if (isEnabled('router')) await runMiddleware('router', mwRouter, state);
+        // Phase 1.5: smart-pipeline PRODUCER — after router populates state.context.routing,
+        // compute the skip list the runMiddleware() guard consumes (default OFF).
+        applySmartPipeline(state, { smartEnabled, customMiddleware, smartPipeline, defaultPipeline });
         // Phase 2: memory, skills, tasks (independent, only read router output)
         const phase2 = [
           ['memory', mwMemory],
@@ -279,11 +339,12 @@ export function createArtibotAgent(options = {}) {
         if (isEnabled('guardrail')) await runMiddleware('guardrail', mwGuardrail, state);
         // Phase 5: summarization (reads final userPrompt)
         if (isEnabled('summarization')) await runMiddleware('summarization', mwSummarization, state);
-        // Phase 6: token-usage + checkpoint (independent, read all context)
-        const phase6 = [
-          isEnabled('token-usage') && ['tokenUsage', mwTokenUsage],
-          isEnabled('checkpoint') && ['checkpoint', mwCheckpoint],
-        ].filter(Boolean);
+        // Phase 6: token-usage + checkpoint + cache-roi (independent, read all context)
+        const phase6 = buildParallelEntries(isEnabled, [
+          ['token-usage', 'tokenUsage', mwTokenUsage],
+          ['checkpoint', 'checkpoint', mwCheckpoint],
+          ['cache-roi', 'cacheRoi', mwCacheRoi],
+        ]);
         if (phase6.length > 0) await runParallel(phase6, state);
       }
 

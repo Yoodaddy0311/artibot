@@ -10,9 +10,15 @@
  * Replaces the previous `prompt`-type Stop hook entry which fired
  * unconditionally on every Stop.
  *
- * Schema:
- *   - `decision: "block" + reason`  → block stop, model gets reason as feedback
- *   - no output                     → allow stop (read-only turn)
+ * Schema (mode-dependent — see lib/core/dev-verify-output.js):
+ *   - enforce (default): `decision: "block" + reason` → block stop, model gets
+ *     reason as feedback. Always-supported shape (every Claude Code version).
+ *   - advisory: `hookSpecificOutput.additionalContext` → non-blocking soft
+ *     feedback (Claude Code ≥ 2.1.163; silently dropped on older versions).
+ *   - no output → allow stop (read-only turn)
+ *
+ * Mode source: ARTIBOT_DEV_VERIFY_MODE env > config.devProtocol.verifyMode >
+ * 'enforce'. Default preserves the prior enforcing behavior.
  *
  * Loop guards:
  *   - `stop_hook_active === true` → bail (Claude Code retry after block)
@@ -31,6 +37,7 @@ import {
   getPluginRoot,
   parseJSON,
   readStdin,
+  resolveConfigPath,
   writeStdout,
 } from '../utils/index.js';
 import { createErrorHandler, isArtibotRepo, logHookError } from '../../lib/core/hook-utils.js';
@@ -38,6 +45,7 @@ import {
   getHeadSha as getCachedHeadSha,
   getRepoRoot as getCachedRepoRoot,
 } from '../../lib/git/repo-root-cache.js';
+import { buildDevVerifyOutput, resolveDevVerifyMode } from '../../lib/core/dev-verify-output.js';
 
 const HOOK_NAME = 'dev-verify-gate';
 const STATE_FILE = 'last-dev-verify-sha.txt';
@@ -211,6 +219,35 @@ function hasNewerMainAgentEdit(pluginRoot) {
   }
 }
 
+/**
+ * Resolve the DEV-verify enforcement mode from config + env. Best-effort: a
+ * missing/unreadable config falls back to the env override or the 'enforce'
+ * default — config IO must never break the Stop slot.
+ *
+ * @returns {'enforce'|'advisory'}
+ */
+function loadVerifyMode() {
+  let config = {};
+  try {
+    const configPath = resolveConfigPath('artibot.config.json');
+    config = JSON.parse(readFileSync(configPath, 'utf-8'));
+  } catch {
+    // No config / unreadable — resolveDevVerifyMode applies env + default.
+  }
+  return resolveDevVerifyMode(config);
+}
+
+/**
+ * Pick the hookSpecificOutput event name from the inbound payload. Stop and
+ * SubagentStop share this gate; advisory output must echo the right event.
+ *
+ * @param {object} hookData
+ * @returns {'Stop'|'SubagentStop'}
+ */
+function resolveHookEventName(hookData) {
+  return hookData?.hook_event_name === 'SubagentStop' ? 'SubagentStop' : 'Stop';
+}
+
 async function main() {
   // v4.5.8: emergency disable removed. The marker-file pattern below now
   // distinguishes main-agent edits (gate fires) from teammate edits and
@@ -250,7 +287,12 @@ async function main() {
   if (readLastFingerprint(pluginRoot) === fingerprint) return; // already verified
 
   saveFingerprint(pluginRoot, fingerprint);
-  writeStdout({ decision: 'block', reason: DEV_VERIFY_REASON });
+
+  // Mode-aware output: 'enforce' (default) blocks the stop; 'advisory' surfaces
+  // the same checklist as non-blocking 2.1.163 additionalContext feedback.
+  const mode = loadVerifyMode();
+  const hookEventName = resolveHookEventName(hookData);
+  writeStdout(buildDevVerifyOutput(DEV_VERIFY_REASON, { mode, hookEventName }));
 }
 
 main().catch(createErrorHandler(HOOK_NAME, { exit: false }));

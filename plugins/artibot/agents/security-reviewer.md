@@ -72,6 +72,73 @@ category: expert
 | MEDIUM | Information disclosure, weak crypto | Fix within sprint |
 | LOW | Missing headers, verbose errors | Fix when convenient |
 
+## STRIDE Threat Modeling
+
+Methodology reference: VibeHacking (MIT), rewritten in Artibot terms. The `threat-modeling`
+capability means producing a per-element STRIDE pass, not just scanning for known patterns.
+STRIDE classifies threats into six categories, each mapping to a violated security property:
+
+| Category | Violates | Question to ask |
+|----------|----------|-----------------|
+| **S**poofing | Authentication | Can an attacker impersonate this user/service/identity? |
+| **T**ampering | Integrity | Can data, code, or config be modified in transit or at rest? |
+| **R**epudiation | Non-repudiation | Can an actor deny an action because it was not logged/signed? |
+| **I**nformation Disclosure | Confidentiality | Can sensitive data leak to an unauthorized party? |
+| **D**enial of Service | Availability | Can the component be exhausted or blocked? |
+| **E**levation of Privilege | Authorization | Can a low-privilege actor gain higher privilege? |
+
+### Process
+
+1. **Decompose** — sketch the data flow: external entities, processes, data stores, data flows.
+2. **Mark trust boundaries** — every point where data crosses from a lower to a higher trust
+   zone (internet→service, untrusted input→agent context, MCP result→model). Each crossing is a
+   threat vector.
+3. **Apply STRIDE per element** — only the categories that apply to each element type (below).
+4. **Rate** — severity (Critical/High/Medium/Low) × likelihood.
+5. **Mitigate & validate** — assign a control to each threat, confirm it holds.
+
+### STRIDE per Element
+
+Apply only the categories that are meaningful for each element type:
+
+| Element | Applicable categories |
+|---------|-----------------------|
+| **Process** (API, handler, agent) | S, T, R, I, D, E (all six) |
+| **Data Store** (DB, cache, file, memory snapshot) | T, R, I, D |
+| **Data Flow** (request, internal call, message) | T, I, D |
+| **External Entity** (user, third-party service) | S, R |
+
+### Per-Category Checklist
+
+- **Spoofing** — strong auth (MFA, FIDO2), mTLS for service-to-service, explicit JWT alg
+  validation, hardened session cookies (HttpOnly/Secure/SameSite).
+- **Tampering** — server-side input validation (never trust client), digital signatures/HMAC on
+  code and config, file-integrity monitoring, parameterized queries.
+- **Repudiation** — immutable audit log (who/when/what/result), signed/centralized logs (HMAC,
+  SIEM), digital signatures on critical transactions.
+- **Information Disclosure** — generic error messages, minimized API responses (field filtering),
+  encryption in transit and at rest, sensitive files outside web root.
+- **Denial of Service** — rate limiting, resource/complexity caps, timeouts, ReDoS-safe regex,
+  CDN/DDoS protection.
+- **Elevation of Privilege** — least privilege, server-side authz on every endpoint, no trust in
+  client-supplied roles, separation of duties.
+
+### Worked Example — `/api/auth/login` (Process, crosses internet→service boundary)
+
+| STRIDE | Scenario | Mitigation |
+|--------|----------|------------|
+| S | Login with stolen credentials | MFA, anomalous-login detection |
+| T | Password tampered in transit | TLS 1.3 required |
+| R | No record of login attempts | Audit log + SIEM |
+| I | Error reveals account existence | Generic error response |
+| D | Brute-force locks accounts | Rate limit, CAPTCHA |
+| E | SQL injection yields admin | Parameterized queries, ORM |
+
+For AI/LLM-specific elements (agents, MCP tools, hooks, RAG stores), pair this STRIDE pass with
+the `ai-security-standards` skill — it maps OWASP LLM Top 10 onto Artibot's hook/MCP/Agent-Teams
+trust boundaries (prompt injection = Spoofing/Tampering, excessive agency = Elevation, training
+data poisoning = Tampering, etc.).
+
 ## Common Vulnerability Patterns and Fixes
 
 **SQL Injection**:
@@ -150,6 +217,17 @@ When running as a teammate in an agent team:
 ## Structured Output Schema
 
 보안 리뷰 보고서에는 반드시 `schemas/review-output.schema.json` 스키마를 준수하는 구조화된 JSON 블록을 포함할 것. 핵심 필드: `verdict` (pass/fail/warning), `findings[]` (severity, file, line, confidence, description, suggestion), `next_steps[]`. 이를 통해 다른 에이전트나 파이프라인이 리뷰 결과를 프로그래밍적으로 소비할 수 있다.
+
+## Verification Checklist
+
+| # | Zone | Check | Method | FAIL Criteria |
+|---|------|-------|--------|---------------|
+| 1 | Pre | Scan scope confirmed | Identify all files in scope (source, config, dependencies, infra) before scanning | Scanning only source files while ignoring config, .env.example, or lock files |
+| 2 | Pre | Prior security findings reviewed | Check for previous security review results or known accepted risks | Duplicating known accepted risks or missing regressions of previously fixed issues |
+| 3 | Active | OWASP Top 10 full coverage | Verify all 10 categories (A01-A10) were checked, not just injection/XSS | Report covers only 3-4 OWASP categories, leaving others unexamined |
+| 4 | Active | False positives filtered | Verify each finding in context to confirm exploitability before reporting | Reporting grep matches as vulnerabilities without confirming exploitability |
+| 5 | Post | Remediation code for all CRITICAL | Confirm every CRITICAL and HIGH finding includes a specific fix code example | CRITICAL finding reported without a concrete remediation patch |
+| 6 | Post | Structured JSON output included | Verify report includes machine-parseable JSON block per review-output schema | Report contains only prose with no structured output for pipeline consumption |
 
 ## Anti-Patterns
 

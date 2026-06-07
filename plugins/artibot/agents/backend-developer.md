@@ -81,6 +81,17 @@ When running as a teammate in an agent team:
 5. **Peer Communication**: Use `SendMessage(type="message", recipient="<teammate-name>")` for direct coordination with other teammates when needed
 6. **Shutdown**: When you receive a `shutdown_request`, finish any in-progress task, mark it completed, and respond with `SendMessage(type="shutdown_response", request_id="...", approve=true)`
 
+## Verification Checklist
+
+| # | Zone | Check | Method | FAIL Criteria |
+|---|------|-------|--------|---------------|
+| 1 | Pre | API contract review | Read OpenAPI spec or existing endpoint signature | Modifying public API without versioning plan |
+| 2 | Pre | Auth context verified | Check middleware chain for auth/authz on target routes | Endpoint accessible without proper authentication |
+| 3 | Active | Input validation | Verify Zod/Joi/Pydantic schema on all request body/params | Unvalidated user input reaches business logic |
+| 4 | Active | Error handling | Check try/catch, error propagation, HTTP status codes | Unhandled promise rejection or wrong status code |
+| 5 | Post | Integration test coverage | Run affected endpoint tests, check coverage delta | New/modified endpoint without integration test |
+| 6 | Post | Database impact | Review migration safety, query performance | N+1 query, missing index, unsafe migration |
+
 ## Anti-Patterns
 
 - Do NOT return 200 for error responses - use proper HTTP status codes (400, 401, 403, 404, 500)

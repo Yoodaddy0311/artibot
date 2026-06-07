@@ -103,9 +103,13 @@ function hasComplexity(prompt) {
  * @returns {{ enabled: boolean, triggers: object }}
  */
 function loadTeamConfig(pluginRoot) {
+  // Defaults MUST match lib/cognitive/workflow-plan.js#evaluateTrigger so the two
+  // trigger evaluators never disagree on the same prompt. Config
+  // (team.autoApplyTriggers) is the single source of truth; these defaults only
+  // apply when a key is absent there.
   const defaults = {
     enabled: true,
-    triggers: { minSubtasks: 2, minFiles: 2, minComplexity: 'medium' },
+    triggers: { minSubtasks: 3, minFiles: 3, minComplexity: 'high' },
   };
   const cfgPath = path.join(pluginRoot, 'artibot.config.json');
   try {
@@ -146,8 +150,11 @@ function evaluatePrompt(prompt, triggers) {
   const trivial = length < TRIVIAL_MAX_CHARS && domainCount <= 1 && subtasks <= 1;
   if (trivial) return null;
 
-  const minSubtasks = triggers.minSubtasks ?? 2;
-  const minFiles = triggers.minFiles ?? 2;
+  // Fallbacks mirror loadTeamConfig defaults (== workflow-plan.js) so callers
+  // that pass a partial triggers object stay consistent with the canonical
+  // evaluator.
+  const minSubtasks = triggers.minSubtasks ?? 3;
+  const minFiles = triggers.minFiles ?? 3;
 
   const reasons = [];
   if (subtasks >= minSubtasks) reasons.push(`subtasks=${subtasks}`);

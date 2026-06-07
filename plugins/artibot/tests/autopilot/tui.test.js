@@ -320,6 +320,55 @@ describe('renderFrame — edge cases', () => {
     expect(out).toContain('(no events yet)');
   });
 
+  it('progress is monotonic across phases even when intermediate phases are queued', () => {
+    // Engine records INTAKE/REPORT as done but PLAN..IMPROVE as queued.
+    // The bar must still climb monotonically and never stall at 1/8.
+    const order = [
+      'INTAKE', 'PLAN', 'EXECUTE', 'CROSS_CHECK',
+      'VERIFY', 'IMPROVE', 'EVALUATE', 'REPORT',
+    ];
+    const pull = (out) => {
+      const m = out.match(/(\d+)\/8 phases/);
+      return m ? Number(m[1]) : -1;
+    };
+    let prev = -1;
+    order.forEach((phase, i) => {
+      // Realistic phases[]: only INTAKE done, rest queued up to current.
+      const phases = order.slice(0, i + 1).map((name) => ({
+        name,
+        status: name === 'INTAKE' ? 'done' : 'queued',
+        ts: new Date().toISOString(),
+      }));
+      const out = renderFrame({ state: makeState({ phase, phases }), events: [], width: 80 });
+      const done = pull(out);
+      expect(done).toBeGreaterThanOrEqual(prev); // monotonic
+      expect(done).toBeGreaterThanOrEqual(0);
+      expect(done).toBeLessThanOrEqual(8); // clamp — never 9/8
+      prev = done;
+    });
+  });
+
+  it('reaches 8/8 only when phase is COMPLETED', () => {
+    const completed = renderFrame({
+      state: makeState({ phase: 'COMPLETED', phases: [{ name: 'REPORT', status: 'done' }] }),
+      events: [],
+      width: 80,
+    });
+    expect(completed).toContain('8/8 phases');
+  });
+
+  it('never reports more than total even when phases[] has duplicate done records', () => {
+    const phases = [
+      { name: 'INTAKE', status: 'done' },
+      { name: 'INTAKE', status: 'done' }, // duplicate must not double-count
+      { name: 'PLAN', status: 'done' },
+    ];
+    const out = renderFrame({ state: makeState({ phase: 'EXECUTE', phases }), events: [], width: 80 });
+    const m = out.match(/(\d+)\/8 phases/);
+    expect(Number(m[1])).toBeLessThanOrEqual(8);
+    expect(Number(m[1])).toBe(2); // unique INTAKE+PLAN
+  });
+
   it('clamps width below 40 to 40 minimum', () => {
     const out = renderFrame({ state: makeState(), events: [], width: 10 });
     // First line is the top border; should be at least 40 chars long including corners.

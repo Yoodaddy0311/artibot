@@ -138,6 +138,17 @@ When running as a teammate in an agent team:
 5. **Peer Communication**: Use `SendMessage(type="message", recipient="<teammate-name>")` for direct coordination with other teammates when needed
 6. **Shutdown**: When you receive a `shutdown_request`, finish any in-progress task, mark it completed, and respond with `SendMessage(type="shutdown_response", request_id="...", approve=true)`
 
+## Verification Checklist
+
+| # | Zone | Check | Method | FAIL Criteria |
+|---|------|-------|--------|---------------|
+| 1 | Pre | Requirement clarity | Verify testable acceptance criteria exist | Writing tests against ambiguous requirements |
+| 2 | Pre | Test isolation | Check test does not depend on external state or order | Test passes alone but fails in suite (or vice versa) |
+| 3 | Active | RED phase valid | Confirm test fails for the right reason before writing code | Test fails due to syntax error, not missing behavior |
+| 4 | Active | GREEN minimal | Verify implementation is minimal to pass, no premature abstraction | Code added beyond what the failing test requires |
+| 5 | Post | Coverage delta | Check coverage diff meets 80%+ target | New code has coverage below 80% threshold |
+| 6 | Post | REFACTOR clean | Review for duplication, naming, single responsibility after green | Refactor step skipped, leaving test-driven mess |
+
 ## Anti-Patterns
 
 - Do NOT write implementation before the test - always RED first

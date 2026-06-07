@@ -44,6 +44,14 @@ export function createRouterMiddleware(options = {}) {
       best: intent.best?.intent || null,
       commands: intent.best?.commands || [],
       agents: intent.best?.agents || [],
+      // Preserve the full per-recommendation list so the downstream tasks
+      // middleware can derive parallel teammates via
+      // workflow-plan.js#extractSubObjectives. Without this the workflow plan
+      // always saw zero sub-objectives → empty teammates → no team directive
+      // ("parallel-not-spawned"). `best` stays a string and commands/agents
+      // stay top-level so existing string consumers (bin/artibot.js, eval
+      // suite) are unaffected.
+      recommendations: Array.isArray(intent.recommendations) ? intent.recommendations : [],
       ambiguous: Boolean(intent.ambiguity?.ambiguous),
       ambiguityScore: intent.ambiguity?.score ?? 0,
     };

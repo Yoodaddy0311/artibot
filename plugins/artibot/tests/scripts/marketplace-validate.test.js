@@ -22,7 +22,9 @@ import {
   checkChangelogEntry,
   checkKeywordsCoverage,
   checkPricingShape,
+  checkQualityMetricsTests,
   checkReadmeSections,
+  checkReleaseCurrentSync,
   checkRequiredFields,
   checkSafetyCompliance,
   checkVersionSync,
@@ -72,6 +74,8 @@ async function buildValidFixture() {
       dataPolicy: 'local-only',
       externalDatabaseAccess: 'forbidden',
     },
+    qualityMetrics: { tests: 9600 },
+    release: { current: '3.9.0', channel: 'stable' },
   });
 
   await writeJson(path.join(pluginRoot, '.claude-plugin', 'plugin.json'), {
@@ -288,6 +292,60 @@ describe('marketplace-validate/checkSafetyCompliance', () => {
 });
 
 // ---------------------------------------------------------------------------
+// checkReleaseCurrentSync
+// ---------------------------------------------------------------------------
+
+describe('marketplace-validate/checkReleaseCurrentSync', () => {
+  it('passes when release.current matches version', () => {
+    expect(checkReleaseCurrentSync('4.19.4', '4.19.4').status).toBe('pass');
+  });
+
+  it('fails when release.current lags the version', () => {
+    const r = checkReleaseCurrentSync('4.13.0', '4.19.4');
+    expect(r.status).toBe('fail');
+    expect(r.detail).toContain('release.current=4.13.0');
+    expect(r.detail).toContain('version=4.19.4');
+  });
+
+  it('fails when version is missing', () => {
+    expect(checkReleaseCurrentSync('4.19.4', undefined).status).toBe('fail');
+  });
+
+  it('fails when release.current is undefined', () => {
+    expect(checkReleaseCurrentSync(undefined, '4.19.4').status).toBe('fail');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// checkQualityMetricsTests
+// ---------------------------------------------------------------------------
+
+describe('marketplace-validate/checkQualityMetricsTests', () => {
+  it('passes when tests count is at or above the staleness floor', () => {
+    expect(checkQualityMetricsTests({ tests: 9600 }).status).toBe('pass');
+  });
+
+  it('passes exactly at the floor', () => {
+    expect(checkQualityMetricsTests({ tests: 5000 }).status).toBe('pass');
+  });
+
+  it('warns (not fails) when count is below the floor — likely stale', () => {
+    const r = checkQualityMetricsTests({ tests: 4918 });
+    expect(r.status).toBe('warn');
+    expect(r.detail).toContain('4918');
+    expect(r.detail).toContain('sync-marketplace-meta');
+  });
+
+  it('fails when tests is not an integer', () => {
+    expect(checkQualityMetricsTests({ tests: 'lots' }).status).toBe('fail');
+  });
+
+  it('fails when qualityMetrics is missing', () => {
+    expect(checkQualityMetricsTests(undefined).status).toBe('fail');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // summarize
 // ---------------------------------------------------------------------------
 
@@ -389,5 +447,20 @@ describe('marketplace-validate/runChecks (e2e)', () => {
     });
     const lic = results.find((r) => r.id === 'docs.license-exists');
     expect(lic.status).toBe('fail');
+  });
+
+  it('reports failure when release.current lags the manifest version', async () => {
+    const manifestPath = path.join(fixture.pluginRoot, 'marketplace.json');
+    const manifest = JSON.parse(
+      await (await import('node:fs/promises')).readFile(manifestPath, 'utf8'),
+    );
+    manifest.release.current = '3.7.0'; // stale vs version 3.9.0
+    await writeJson(manifestPath, manifest);
+    const results = await runChecks({
+      pluginRoot: fixture.pluginRoot,
+      repoRoot: fixture.repoRoot,
+    });
+    const rel = results.find((r) => r.id === 'manifest.release-current-sync');
+    expect(rel.status).toBe('fail');
   });
 });

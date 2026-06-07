@@ -24,6 +24,12 @@ plugins/artibot/docs/*
 !plugins/artibot/docs/SCHEDULED-JOBS.md
 !plugins/artibot/docs/MCP-SETUP.md
 !plugins/artibot/docs/PRD-TELEGRAM-MCP.md
+!plugins/artibot/docs/PRD-EFFORT-DYNAMIC-WORKFLOW.md
+!plugins/artibot/docs/PRD-LEARNING-ACTIVATION.md
+!plugins/artibot/docs/WIRING-AUDIT-2026-05-30.md
+!plugins/artibot/docs/PRD-DREAMING.md
+!plugins/artibot/docs/adr/
+!plugins/artibot/docs/adr/**
 plugins/artibot/coverage/
 plugins/artibot/image.png
 # Runtime state files (token usage, sessions, hashes) — never commit; caused rebase corruption v3.9.0→v3.9.1

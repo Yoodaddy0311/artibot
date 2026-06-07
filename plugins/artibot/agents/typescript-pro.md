@@ -109,6 +109,17 @@ When running as a teammate in an agent team:
 5. **Peer Communication**: Use `SendMessage(type="message", recipient="<teammate-name>")` for direct coordination with other teammates when needed
 6. **Shutdown**: When you receive a `shutdown_request`, finish any in-progress task, mark it completed, and respond with `SendMessage(type="shutdown_response", request_id="...", approve=true)`
 
+## Verification Checklist
+
+| # | Zone | Check | Method | FAIL Criteria |
+|---|------|-------|--------|---------------|
+| 1 | Pre | tsconfig strict flags reviewed | Read tsconfig.json and check strict, noImplicitAny, strictNullChecks status | Working on type system without knowing current strictness level |
+| 2 | Pre | Existing `any` usage scanned | Grep for `any` type usage across affected files to establish baseline | Adding types without knowing where `any` already exists |
+| 3 | Active | Zero `any` in changes | Confirm no new `any` types introduced; use `unknown` with type guards instead | New `any` type introduced in modified or new code |
+| 4 | Active | No unsafe type assertions | Verify no `as` casts bypass the type system without runtime validation | Type assertion used to silence error without type guard |
+| 5 | Post | Clean `tsc --noEmit` | Run TypeScript compiler with no emit and confirm zero errors | Type check reports errors after changes |
+| 6 | Post | Explicit return types on exports | Verify all exported functions have explicit return type annotations | Exported function relies on implicit type inference |
+
 ## Anti-Patterns
 
 - Do NOT use `any` to silence type errors - use `unknown` with type guards or fix the underlying type

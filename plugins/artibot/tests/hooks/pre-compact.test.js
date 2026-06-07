@@ -121,6 +121,60 @@ describe('pre-compact hook', () => {
     });
   });
 
+  describe('decision context extraction', () => {
+    it('captures decision keywords from assistant messages', async () => {
+      readStdin.mockResolvedValue(JSON.stringify({
+        messages: [
+          { role: 'assistant', content: 'I decided to use TypeScript for this module.' },
+          { role: 'assistant', content: 'We chose ESM over CommonJS for consistency.' },
+          { role: 'user', content: 'Sounds good' },
+        ],
+      }));
+
+      await import('../../scripts/hooks/pre-compact.js');
+      await new Promise((r) => setTimeout(r, 50));
+
+      const writtenContent = writeFileSync.mock.calls[0][1];
+      const snapshot = JSON.parse(writtenContent);
+      expect(snapshot.summary.decisions).toBeDefined();
+      expect(snapshot.summary.decisions.length).toBe(2);
+      expect(snapshot.summary.decisions[0]).toContain('decided');
+      expect(snapshot.summary.decisions[1]).toContain('chose');
+    });
+
+    it('returns empty array when no decision keywords found', async () => {
+      readStdin.mockResolvedValue(JSON.stringify({
+        messages: [
+          { role: 'assistant', content: 'Here is the code you requested.' },
+          { role: 'user', content: 'Thanks' },
+        ],
+      }));
+
+      await import('../../scripts/hooks/pre-compact.js');
+      await new Promise((r) => setTimeout(r, 50));
+
+      const writtenContent = writeFileSync.mock.calls[0][1];
+      const snapshot = JSON.parse(writtenContent);
+      expect(snapshot.summary.decisions).toEqual([]);
+    });
+
+    it('ignores decision keywords in user messages', async () => {
+      readStdin.mockResolvedValue(JSON.stringify({
+        messages: [
+          { role: 'user', content: 'I decided to use Python instead.' },
+          { role: 'assistant', content: 'OK, switching to Python.' },
+        ],
+      }));
+
+      await import('../../scripts/hooks/pre-compact.js');
+      await new Promise((r) => setTimeout(r, 50));
+
+      const writtenContent = writeFileSync.mock.calls[0][1];
+      const snapshot = JSON.parse(writtenContent);
+      expect(snapshot.summary.decisions).toEqual([]);
+    });
+  });
+
   describe('writeStdout confirmation', () => {
     it('writes a confirmation message on success', async () => {
       readStdin.mockResolvedValue(JSON.stringify({}));

@@ -38,7 +38,11 @@ No legacy alias.
 
 When invoked, this command:
 1. Parses the user's request (text after the slash command)
-2. Calls `routeLifecycle('spec', { hint: requestText })` from `lib/core/lifecycle-router.js`
+2. Resolves the route via the CLI bridge:
+   ```bash
+   node "${CLAUDE_PLUGIN_ROOT}/scripts/route-lifecycle.mjs" spec "$ARGUMENTS"
+   ```
+   This calls `routeLifecycle('spec', { hint })` from `lib/core/lifecycle-router.js` and prints the `{agent, toolset, skills, candidates}` resolution as a single JSON line.
 3. Spawns the resolved agent via Task() tool with the appropriate prompt
 4. Reports back with the agent's findings
 

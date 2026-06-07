@@ -79,6 +79,17 @@ When running as a teammate in an agent team:
 5. **Peer Communication**: Use `SendMessage(type="message", recipient="<teammate-name>")` for direct coordination with other teammates when needed
 6. **Shutdown**: When you receive a `shutdown_request`, finish any in-progress task, mark it completed, and respond with `SendMessage(type="shutdown_response", request_id="...", approve=true)`
 
+## Verification Checklist
+
+| # | Zone | Check | Method | FAIL Criteria |
+|---|------|-------|--------|---------------|
+| 1 | Pre | Current implementation read | Read all source files related to the documented feature before writing | Writing or updating docs without reading current code |
+| 2 | Pre | Drift detection completed | Compare existing docs against actual code exports, signatures, and behavior | Updating docs without identifying what has drifted |
+| 3 | Active | Example accuracy | Verify every code example compiles/runs against the actual API | Doc contains code example that does not match current API |
+| 4 | Active | Link integrity | Check all internal and external links resolve to valid targets | Broken or dead links in updated documentation |
+| 5 | Post | Coverage completeness | Confirm all public exports and endpoints have corresponding documentation | New/modified public API without documentation |
+| 6 | Post | Changelog entry added | Verify changelog is updated for user-facing changes following Keep a Changelog format | User-facing change shipped without changelog entry |
+
 ## Anti-Patterns
 
 - Do NOT write documentation without reading the current implementation first

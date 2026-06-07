@@ -766,44 +766,11 @@ function detectTrend(entries) {
   return 'stable';
 }
 
-// ---------------------------------------------------------------------------
-// Effort Level Policy (Claude Opus 4.7 effort parameter)
-// ---------------------------------------------------------------------------
-// Official guide: https://platform.claude.com/docs/ko/build-with-claude/effort
-// 'xhigh' is the 4.7-introduced level recommended for agentic coding.
-// Messages API caller reads EFFORT_POLICY to auto-inject `effort` per command.
+// Re-export the static Effort Level Policy (extracted to effort-policy.js to
+// keep router.js under the <800-line gate). Back-compat: existing
+// `from './router.js'` imports of EFFORT_POLICY / getEffortForCommand are
+// preserved unchanged.
+export { EFFORT_POLICY, getEffortForCommand } from './effort-policy.js';
 
-/** @type {Readonly<Record<string, 'xhigh'|'high'|'medium'|'low'>>} */
-export const EFFORT_POLICY = Object.freeze({
-  // xhigh — agentic coding / multi-file implementation (4.7 official recommendation)
-  implement: 'xhigh', team: 'xhigh', tdd: 'xhigh',
-  'build-fix': 'xhigh', cleanup: 'xhigh', 'refactor-clean': 'xhigh',
-  orchestrate: 'xhigh', spawn: 'xhigh', swarm: 'xhigh',
-  // high — focused reasoning / review / design
-  'code-review': 'high', 'adversarial-review': 'high', review: 'high',
-  plan: 'high', troubleshoot: 'high', analyze: 'high', design: 'high',
-  estimate: 'high', spec: 'high', verify: 'high', improve: 'high', repo: 'high',
-  // medium — balanced content / domain work
-  daily: 'medium', load: 'medium', index: 'medium',
-  explain: 'medium', document: 'medium', checkpoint: 'medium', learn: 'medium',
-  git: 'medium', playbook: 'medium', build: 'medium', ship: 'medium',
-  test: 'medium', 'visual-check': 'medium',
-  ad: 'medium', analytics: 'medium', content: 'medium',
-  crm: 'medium', cro: 'medium', email: 'medium', excel: 'medium',
-  marketing: 'medium', mkt: 'medium', ppt: 'medium',
-  seo: 'medium', social: 'medium',
-  // low — cost-saving / lookup / config
-  permissions: 'low', update: 'low', quickstart: 'low',
-  sc: 'low', sdk: 'low', setup: 'low', task: 'low',
-  assemble: 'low', codex: 'low',
-});
-
-/**
- * Resolve effort level for a slash command name.
- * @param {string} commandName - e.g. 'implement', 'code-review' (leading '/' optional)
- * @returns {'xhigh'|'high'|'medium'|'low'} Defaults to 'medium' for unknown commands.
- */
-export function getEffortForCommand(commandName) {
-  const key = String(commandName || '').replace(/^\//, '').trim();
-  return EFFORT_POLICY[key] ?? 'medium';
-}
+// Re-export Score-Aware resolver (same-layer cognitive dependency).
+export { resolveEffort, EFFORT_BANDS } from './effort-resolver.js';

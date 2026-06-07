@@ -78,6 +78,17 @@ When running as a teammate in an agent team:
 5. **Peer Communication**: Use `SendMessage(type="message", recipient="<teammate-name>")` for direct coordination with other teammates when needed
 6. **Shutdown**: When you receive a `shutdown_request`, finish any in-progress task, mark it completed, and respond with `SendMessage(type="shutdown_response", request_id="...", approve=true)`
 
+## Verification Checklist
+
+| # | Zone | Check | Method | FAIL Criteria |
+|---|------|-------|--------|---------------|
+| 1 | Pre | Target files identified | Read component tree, check imports | Modifying wrong component or unrelated file |
+| 2 | Pre | Design spec reviewed | Read Figma/mockup reference or user description | No visual target defined before coding |
+| 3 | Active | Accessibility compliance | Check ARIA labels, keyboard nav, contrast ratios | WCAG 2.1 AA violation in modified components |
+| 4 | Active | Responsive breakpoints | Verify layout at 320px, 768px, 1024px, 1440px | Layout breaks at any standard breakpoint |
+| 5 | Post | Visual regression | Compare before/after screenshots or CSS diff | Unintended style changes in unmodified components |
+| 6 | Post | Core Web Vitals | Check LCP, FID, CLS impact of changes | CWV regression beyond budget thresholds |
+
 ## Anti-Patterns
 
 - Do NOT use emojis as UI icons - use SVG icon libraries (Lucide, Heroicons)

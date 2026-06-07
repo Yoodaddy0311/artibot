@@ -8,9 +8,9 @@
  * @module scripts/hooks/git-autopilot-close
  */
 
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import path from 'node:path';
+import path, { dirname } from 'node:path';
 import { parseJSON, readStdin, resolveConfigPath } from '../utils/index.js';
 import { createErrorHandler } from '../../lib/core/hook-utils.js';
 import { isMergeBaseFresh, resolveBaseBranch } from '../../lib/git/resolve-base.js';
@@ -33,6 +33,229 @@ function readArtibotBypassFlags() {
     };
   } catch {
     return { bypassPreCommitHooks: false, bypassPrePushHooks: false };
+  }
+}
+
+/**
+ * Read the `closeOnStop` opt-in flag.
+ *
+ * Precedence (per-repo overrides plugin-wide, matching the bypass-flag pattern):
+ *   1. `.git/autopilot.json` `closeOnStop === true` → enabled
+ *   2. `artibot.config.json` `git.autopilot.closeOnStop === true` → enabled
+ *   3. Otherwise (missing/false/undefined) → disabled (default)
+ *
+ * v4.11.3: default is `false`. Before v4.11.3 this hook fired on every Stop
+ * (every agent turn) and produced a `chore: artibot session close [...]`
+ * commit + push, creating dozens of noise commits per session. The
+ * interval-based WIP save (`git-autopilot-save.js`) still provides crash
+ * safety; this hook is now opt-in for users who specifically want a turn-end
+ * commit/squash/push pipeline.
+ *
+ * @param {object|null} perRepoConfig parsed `.git/autopilot.json` (may be null)
+ * @returns {boolean} true if the close pipeline should run
+ */
+function readCloseOnStopFlag(perRepoConfig) {
+  if (perRepoConfig?.closeOnStop === true) return true;
+  try {
+    const cfg = JSON.parse(readFileSync(resolveConfigPath('artibot.config.json'), 'utf-8'));
+    return cfg?.git?.autopilot?.closeOnStop === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Read the `commitStrategy` setting from config.
+ *
+ * Precedence (per-repo overrides plugin-wide):
+ *   1. `.git/autopilot.json` `commitStrategy`
+ *   2. `artibot.config.json` `git.autopilot.commitStrategy`
+ *   3. Default: `"interval"` (backward-compatible existing behavior)
+ *
+ * @param {object|null} perRepoConfig parsed `.git/autopilot.json` (may be null)
+ * @returns {{ strategy: string, commitOnPhases: string[], requireTestPass: boolean, requireLintClean: boolean }}
+ */
+function readCommitStrategy(perRepoConfig) {
+  const defaults = {
+    strategy: 'interval',
+    commitOnPhases: ['PLAN', 'EXECUTE', 'VERIFY', 'REPORT'],
+    requireTestPass: true,
+    requireLintClean: true,
+  };
+
+  // Check per-repo config first
+  if (perRepoConfig?.commitStrategy) {
+    const semantic = perRepoConfig.semanticCommit ?? {};
+    return {
+      strategy: perRepoConfig.commitStrategy,
+      commitOnPhases: Array.isArray(semantic.commitOnPhases)
+        ? semantic.commitOnPhases : defaults.commitOnPhases,
+      requireTestPass: semantic.requireTestPass ?? defaults.requireTestPass,
+      requireLintClean: semantic.requireLintClean ?? defaults.requireLintClean,
+    };
+  }
+
+  // Fall back to artibot.config.json
+  try {
+    const cfg = JSON.parse(readFileSync(resolveConfigPath('artibot.config.json'), 'utf-8'));
+    const gitAP = cfg?.git?.autopilot;
+    if (gitAP?.commitStrategy) {
+      const semantic = gitAP.semanticCommit ?? {};
+      return {
+        strategy: gitAP.commitStrategy,
+        commitOnPhases: Array.isArray(semantic.commitOnPhases)
+          ? semantic.commitOnPhases : defaults.commitOnPhases,
+        requireTestPass: semantic.requireTestPass ?? defaults.requireTestPass,
+        requireLintClean: semantic.requireLintClean ?? defaults.requireLintClean,
+      };
+    }
+  } catch { /* fall through to defaults */ }
+
+  return defaults;
+}
+
+/**
+ * Detect whether the autopilot phase has transitioned since the last check.
+ *
+ * Reads the current phase from `hookData.phase` (set by the autopilot
+ * runtime) and compares against the last recorded phase in
+ * `.git/autopilot-state.json`.
+ *
+ * @param {object} hookData - The hook payload (may contain `phase`)
+ * @param {string} repoRoot - Repository root path
+ * @returns {{ transitioned: boolean, completedPhase: string|null }}
+ */
+function detectPhaseTransition(hookData, repoRoot) {
+  const currentPhase = hookData?.phase ?? null;
+  if (!currentPhase || typeof currentPhase !== 'string') {
+    return { transitioned: false, completedPhase: null };
+  }
+
+  const statePath = path.join(repoRoot, '.git', 'autopilot-state.json');
+  let lastPhase = null;
+
+  try {
+    const raw = readFileSync(statePath, 'utf-8');
+    const state = JSON.parse(raw);
+    lastPhase = state?.lastPhase ?? null;
+  } catch {
+    // No state file yet — first run; lastPhase stays null (initialized above).
+  }
+
+  const transitioned = currentPhase !== lastPhase;
+  // The "completed" phase is the PREVIOUS phase (the one that just ended),
+  // which is lastPhase when a transition occurs. On the very first run
+  // (lastPhase is null), the current phase is being entered but nothing has
+  // completed yet — so completedPhase is null.
+  const completedPhase = transitioned && lastPhase ? lastPhase : null;
+
+  return { transitioned, completedPhase };
+}
+
+/**
+ * Persist the current phase to `.git/autopilot-state.json`.
+ *
+ * @param {string} repoRoot
+ * @param {string|null} phase
+ */
+function savePhaseState(repoRoot, phase) {
+  const statePath = path.join(repoRoot, '.git', 'autopilot-state.json');
+  const state = { lastPhase: phase, updatedAt: new Date().toISOString() };
+  try {
+    mkdirSync(dirname(statePath), { recursive: true });
+    writeFileSync(statePath, JSON.stringify(state, null, 2), 'utf-8');
+  } catch {
+    // Best-effort — state loss means at worst an extra commit next time.
+  }
+}
+
+/**
+ * Generate a semantic commit message based on the completed autopilot phase.
+ *
+ * Phase → commit-type mapping:
+ *   PLAN    → docs(autopilot)
+ *   EXECUTE → feat(autopilot)
+ *   VERIFY  → fix(autopilot) (if changes exist) / chore(autopilot) (if clean)
+ *   REPORT  → docs(autopilot)
+ *   IMPROVE → refactor(autopilot)
+ *
+ * The summary includes `git diff --stat HEAD` info (file count + top 3 names).
+ *
+ * @param {string} completedPhase
+ * @param {string} cwd - Working directory (repo root)
+ * @returns {string} formatted commit message
+ */
+function generateSemanticMessage(completedPhase, cwd) {
+  /** @type {Record<string, string>} */
+  const phaseTypeMap = {
+    PLAN: 'docs(autopilot)',
+    EXECUTE: 'feat(autopilot)',
+    VERIFY: 'chore(autopilot)',
+    REPORT: 'docs(autopilot)',
+    IMPROVE: 'refactor(autopilot)',
+  };
+
+  // For VERIFY, check whether there are actual code changes staged;
+  // if so, upgrade to fix(autopilot).
+  let commitType = phaseTypeMap[completedPhase] ?? 'chore(autopilot)';
+  if (completedPhase === 'VERIFY') {
+    try {
+      const diffStat = gitRun(['diff', '--stat', '--cached'], { cwd });
+      if (diffStat.length > 0) {
+        commitType = 'fix(autopilot)';
+      }
+    } catch { /* keep chore */ }
+  }
+
+  // Build summary from diff --stat HEAD
+  let summary = `${completedPhase.toLowerCase()} phase work`;
+  try {
+    const diffOutput = gitRun(['diff', '--stat', 'HEAD'], { cwd });
+    if (diffOutput) {
+      const lines = diffOutput.split('\n').filter(Boolean);
+      // Last line is typically the summary like "3 files changed, 10 insertions(+), 2 deletions(-)"
+      const summaryLine = lines[lines.length - 1] || '';
+      const fileCountMatch = summaryLine.match(/(\d+)\s+file/);
+      const fileCount = fileCountMatch ? fileCountMatch[1] : '0';
+
+      // Extract top 3 file names from diff lines (format: " path/to/file | 3 +++")
+      const fileNames = lines
+        .slice(0, -1) // exclude summary line
+        .map((l) => l.trim().split(/\s+\|/)[0]?.trim())
+        .filter(Boolean)
+        .slice(0, 3);
+
+      const fileList = fileNames.length > 0 ? fileNames.join(', ') : '';
+      summary = fileList
+        ? `${fileCount} file(s): ${fileList}`
+        : `${fileCount} file(s) changed`;
+    }
+  } catch {
+    // Fallback: use generic summary (already set above)
+  }
+
+  return `${commitType}: ${summary} [${completedPhase} complete]`;
+}
+
+/**
+ * Create a semantic commit for a completed autopilot phase.
+ * Stages all changes and commits with the semantic message.
+ *
+ * @param {string} cwd
+ * @param {string} completedPhase
+ * @param {{ bypassPreCommitHooks?: boolean }} [opts]
+ * @returns {boolean} true if commit succeeded
+ */
+function commitSemantic(cwd, completedPhase, opts = {}) {
+  try {
+    gitSilent(['add', '-A'], { cwd });
+    const message = generateSemanticMessage(completedPhase, cwd);
+    const args = ['commit', '-m', message];
+    if (opts.bypassPreCommitHooks === true) args.push('--no-verify');
+    gitSilent(args, { cwd });
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -285,6 +508,89 @@ async function main() {
   if (!config) return;
 
   const log = (msg) => process.stderr.write(`[artibot:git-autopilot-close] ${msg}\n`);
+
+  // Determine commit strategy: "semantic" | "interval" | "none"
+  const strategyConfig = readCommitStrategy(config);
+  const { strategy } = strategyConfig;
+
+  // -----------------------------------------------------------------------
+  // Strategy: "none" — skip all git writes
+  // -----------------------------------------------------------------------
+  if (strategy === 'none') {
+    log('commitStrategy=none — skipping all git writes');
+    return;
+  }
+
+  // -----------------------------------------------------------------------
+  // Strategy: "semantic" — phase-transition-driven commits
+  // closeOnStop flag is IGNORED for semantic strategy.
+  // -----------------------------------------------------------------------
+  if (strategy === 'semantic') {
+    const { transitioned, completedPhase } = detectPhaseTransition(hookData, repoRoot);
+
+    // Always persist current phase so next invocation can detect transition.
+    savePhaseState(repoRoot, hookData?.phase ?? null);
+
+    if (!transitioned || !completedPhase) {
+      log(transitioned
+        ? 'Semantic commit: first phase entered — no completed phase yet'
+        : 'Semantic commit: no phase transition — skipping commit');
+      return;
+    }
+
+    // Only commit on configured phases.
+    if (!strategyConfig.commitOnPhases.includes(completedPhase)) {
+      log(`Semantic commit: phase ${completedPhase} not in commitOnPhases — skipping`);
+      return;
+    }
+
+    const artibotFlags = readArtibotBypassFlags();
+    const bypassPreCommitHooks = config?.bypassPreCommitHooks === true
+      || artibotFlags.bypassPreCommitHooks;
+    const bypassPrePushHooks = config?.bypassPrePushHooks === true
+      || artibotFlags.bypassPrePushHooks;
+    const branch = getCurrentBranch(repoRoot);
+
+    // Only commit if there are actual changes.
+    if (hasDirtyWorkspace(repoRoot)) {
+      const committed = commitSemantic(repoRoot, completedPhase, { bypassPreCommitHooks });
+      if (!committed && !bypassPreCommitHooks) {
+        log(`Semantic commit failed for ${completedPhase} — pre-commit hook may have rejected`);
+      } else {
+        log(committed
+          ? `Semantic commit: ${completedPhase} phase complete`
+          : `Semantic commit failed for ${completedPhase} — check git status`);
+      }
+    } else {
+      log(`Semantic commit: ${completedPhase} completed but no changes to commit`);
+    }
+
+    // Push if configured.
+    if (config.autoPushOnStop) {
+      const pushed = pushBranch(repoRoot, branch, { bypassPrePushHooks });
+      if (!pushed && !bypassPrePushHooks) {
+        log(`Push failed — pre-push hook may have rejected; run: git push origin ${branch}, or set git.autopilot.bypassPrePushHooks=true`);
+      } else {
+        log(pushed ? `Pushed "${branch}" to origin` : `Push failed — run: git push origin ${branch}`);
+      }
+    }
+
+    return;
+  }
+
+  // -----------------------------------------------------------------------
+  // Strategy: "interval" (default) — existing closeOnStop-gated behavior
+  // -----------------------------------------------------------------------
+
+  // v4.11.3 gate: turn-end commit/squash/push is opt-in. When disabled, log
+  // once (so users can see why nothing happened) and return without touching
+  // git state. Crash safety is still provided by `git-autopilot-save.js`
+  // (interval-based WIP), which is independent of this hook.
+  if (!readCloseOnStopFlag(config)) {
+    log('closeOnStop=false — skipping commit/squash/push (set git.autopilot.closeOnStop=true to enable)');
+    return;
+  }
+
   const branch = getCurrentBranch(repoRoot);
   const branchPrefix = config.branchPrefix ?? 'artibot/';
   const baseBranch = resolveBaseBranch(repoRoot, config);

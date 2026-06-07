@@ -1,7 +1,7 @@
 # AGENTS.md — Cross-Tool Parity Seed
 
 **Scope:** Artibot plugin (`plugins/artibot/`)
-**Purpose:** make Artibot's 28 agents + 111 skills + 68 commands usable not just from Claude Code but also from Cursor, Codex CLI, OpenCode, Windsurf, and Antigravity.
+**Purpose:** make Artibot's 28 agents + 111 skills + 70 commands usable not just from Claude Code but also from Cursor, Codex CLI, OpenCode, Windsurf, and Antigravity.
 
 `AGENTS.md` is a cross-tool convention adopted by `everything-claude-code` and similar ecosystems. Each consumer tool reads this file (directly or via export) to register agents locally. Artibot's source of truth remains `plugins/artibot/agents/*.md` with Claude Code–style frontmatter; everything else is a projection of that.
 
@@ -128,6 +128,8 @@ tools:
 
 Exporters that target non-Anthropic runtimes substitute a sane default; users override in the destination tool's config.
 
+> **Single source of truth:** the per-agent tier→model resolution is owned by `lib/core/model-policy.js` (`resolveModel` / `resolveModelForPhase`), reading `artibot.config.json#/agents/modelPolicy`. The table above is a projection of that resolver for export targets — do not treat it as an independent source.
+
 ---
 
 ## 4. Constraints & non-portable surface
@@ -227,7 +229,7 @@ All contributions must respect Artibot's **local-only data policy** — exports 
 | `plugins/artibot/.well-known/mcp-server.json` | `version` | plugin version |
 | `plugins/artibot/AGENTS.md` | this section | plugin version |
 
-Current plugin version: **4.11.3**. Keep the five in lockstep — `scripts/release-check.js` enforces all five.
+Current plugin version: **4.19.4**. Keep the five in lockstep — `scripts/release-check.js` enforces all five.
 
 ---
 

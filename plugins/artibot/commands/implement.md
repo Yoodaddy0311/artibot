@@ -61,8 +61,16 @@ If `--type` not specified, detect from feature description:
 - **Evidence-Based**: Completion claims require file paths, line numbers, or test results.
 - **Ask-When-Unclear**: If any requirement is ambiguous, ask the user BEFORE implementing.
 
-### Task Budget (Beta, Opus 4.7+)
-구현 작업 전체에 예산을 부여해 에이전트 무한 루프를 방지한다. 베타 헤더 `task-budgets-2026-03-13` 필요. 기본 **64,000** 토큰, 대형 리팩토링은 **128,000**, 최소값은 **20,000** (20k 미만 설정 불가). 개방형 탐색에는 설정 금지 (작업 거부 유발 가능).
+### Effort & Task Budget (Opus 4.8 native)
+Opus 4.8은 effort를 네이티브 레벨(**max / xhigh / high / medium / low**, 기본 high, 베타 헤더 불필요)로 노출한다. 구현 작업은 **xhigh**가 기본 권장값이며 호출 측은 `output_config.effort`로 직접 지정한다.
+
+```json
+{
+  "output_config": { "effort": "xhigh" }
+}
+```
+
+작업 예산(task budget)은 에이전트 무한 루프를 방지하기 위해 구현 작업 전체에 부여하는 옵트인 권고치다. 베타 헤더 `task-budgets-2026-03-13` 필요. 기본 **64,000** 토큰, 대형 리팩토링은 **128,000**, 최소값은 **20,000** (20k 미만 설정 불가). 개방형 탐색에는 설정 금지 (작업 거부 유발 가능).
 
 ```json
 {

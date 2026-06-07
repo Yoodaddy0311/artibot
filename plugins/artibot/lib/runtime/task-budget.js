@@ -13,6 +13,7 @@ import path from 'node:path';
 import { mkdirSync, writeFileSync } from 'node:fs';
 
 const DEFAULT_BUDGET_MAP = Object.freeze({
+  max: 200000,
   xhigh: 128000,
   high: 64000,
   medium: 32000,
@@ -24,17 +25,32 @@ const DEFAULT_BETA_HEADER = 'context-1m-2025-08-01';
 /**
  * Resolve max_tokens budget for a given effort level.
  *
- * @param {'xhigh'|'high'|'medium'|'low'|string|null|undefined} effortLevel
+ * The optional `overlay` is the L4 learned effort-policy overlay (P3). When it
+ * carries a valid budget multiplier for `level` (a finite number in [0.5, 1.5]),
+ * the base budget is multiplied by it and re-clamped to the map ceiling
+ * (`budgetMap.max`) so a learned boost can never exceed the hard cap. Any
+ * missing / zero / NaN / out-of-range multiplier is ignored, leaving the base
+ * budget unchanged — overlay-absent behaviour is byte-identical to before.
+ *
+ * @param {'max'|'xhigh'|'high'|'medium'|'low'|string|null|undefined} effortLevel
  * @param {object} [config] - artibot.config.json object (optional).
+ * @param {{ budgetMultipliers?: Record<string, number> }|null} [overlay] - learned overlay (optional).
  * @returns {number|null} Budget in tokens, or null if level is unknown.
  */
-export function getTaskBudgetForEffort(effortLevel, config = {}) {
+export function getTaskBudgetForEffort(effortLevel, config = {}, overlay = null) {
   if (!effortLevel) return null;
   const level = String(effortLevel).toLowerCase();
   const map = config?.runtime?.effort?.budgetMap || DEFAULT_BUDGET_MAP;
   const value = map[level];
   if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
     return null;
+  }
+  const mult = overlay?.budgetMultipliers?.[level];
+  if (typeof mult === 'number' && Number.isFinite(mult) && mult >= 0.5 && mult <= 1.5) {
+    const ceiling = typeof map.max === 'number' && Number.isFinite(map.max) && map.max > 0
+      ? map.max
+      : DEFAULT_BUDGET_MAP.max;
+    return Math.min(Math.round(value * mult), ceiling);
   }
   return value;
 }
@@ -48,7 +64,7 @@ export function getTaskBudgetForEffort(effortLevel, config = {}) {
  *
  * The beta header is appended only when long-context is enabled in config.
  *
- * @param {'xhigh'|'high'|'medium'|'low'|string|null|undefined} effortLevel
+ * @param {'max'|'xhigh'|'high'|'medium'|'low'|string|null|undefined} effortLevel
  * @param {number|null} budget
  * @param {object} [config] - artibot.config.json object (optional).
  * @returns {string} Directive string (empty when inputs are invalid).

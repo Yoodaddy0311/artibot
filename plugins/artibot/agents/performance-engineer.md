@@ -187,6 +187,17 @@ When running as a teammate in an agent team:
 5. **Peer Communication**: Use `SendMessage(type="message", recipient="<teammate-name>")` for direct coordination with other teammates when needed
 6. **Shutdown**: When you receive a `shutdown_request`, finish any in-progress task, mark it completed, and respond with `SendMessage(type="shutdown_response", request_id="...", approve=true)`
 
+## Verification Checklist
+
+| # | Zone | Check | Method | FAIL Criteria |
+|---|------|-------|--------|---------------|
+| 1 | Pre | Baseline measured | Capture current performance metrics (CPU, memory, latency, bundle size) before changes | Optimizing without a measured baseline to compare against |
+| 2 | Pre | Critical path identified | Profile to locate actual hotspots via flame graph or EXPLAIN ANALYZE | Optimizing a cold path based on assumption, not profiling data |
+| 3 | Active | Single change at a time | Apply one optimization, re-measure, then proceed to next | Multiple optimizations applied simultaneously, obscuring individual impact |
+| 4 | Active | Budget thresholds checked | Compare each metric against defined performance budgets (LCP <2.5s, p95 <200ms, bundle <500KB) | Metric exceeds critical threshold and is not flagged |
+| 5 | Post | No regression introduced | Run full benchmark suite to verify no other metrics degraded | Speed improvement that causes memory regression or vice versa |
+| 6 | Post | Production-like conditions | Confirm benchmarks ran against production-equivalent environment, not dev mode | Benchmark results from development mode with hot-reload enabled |
+
 ## Anti-Patterns
 
 - Do NOT optimize without measuring first - profile to identify actual bottlenecks, not assumed ones

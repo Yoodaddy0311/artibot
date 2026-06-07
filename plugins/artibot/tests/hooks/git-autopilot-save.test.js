@@ -180,9 +180,15 @@ describe('git-autopilot-save', () => {
     expect(commands.some((c) => c.cmd.startsWith('git add'))).toBe(false);
   });
 
-  it('default config does NOT pass --no-verify to git commit', async () => {
+  it('default config does NOT pass --no-verify to git commit (interval strategy)', async () => {
     // No bypassPreCommitHooks anywhere → Git Safety Protocol default
-    const commands = setupRepo();
+    const commands = setupRepo({
+      config: {
+        enabled: true,
+        wipIntervalMinutes: 30,
+        commitStrategy: 'interval',
+      },
+    });
 
     await import('../../scripts/hooks/git-autopilot-save.js');
     await new Promise((r) => setTimeout(r, 30));
@@ -192,11 +198,12 @@ describe('git-autopilot-save', () => {
     expect(commitCmd.cmd).not.toContain('--no-verify');
   });
 
-  it('bypassPreCommitHooks=true (per-repo) appends --no-verify', async () => {
+  it('bypassPreCommitHooks=true (per-repo) appends --no-verify (interval strategy)', async () => {
     const commands = setupRepo({
       config: {
         enabled: true,
         wipIntervalMinutes: 30,
+        commitStrategy: 'interval',
         bypassPreCommitHooks: true,
       },
     });
@@ -209,11 +216,12 @@ describe('git-autopilot-save', () => {
     expect(commitCmd.cmd).toContain('--no-verify');
   });
 
-  it('per-repo bypassPreCommitHooks=true wins over artibot.config.json=false', async () => {
+  it('per-repo bypassPreCommitHooks=true wins over artibot.config.json=false (interval strategy)', async () => {
     const commands = setupRepo({
       config: {
         enabled: true,
         wipIntervalMinutes: 30,
+        commitStrategy: 'interval',
         bypassPreCommitHooks: true, // per-repo override
       },
       artibotConfig: { git: { autopilot: { bypassPreCommitHooks: false } } },
@@ -272,8 +280,14 @@ describe('git-autopilot-save', () => {
     expect(mockState.atomicWrites).toHaveLength(1);
   });
 
-  it('fires WIP commit when auto-generated AND real files are both dirty', async () => {
-    const commands = setupRepo();
+  it('fires WIP commit when auto-generated AND real files are both dirty (interval strategy)', async () => {
+    const commands = setupRepo({
+      config: {
+        enabled: true,
+        wipIntervalMinutes: 30,
+        commitStrategy: 'interval',
+      },
+    });
     mockState.execSyncImpl = (cmd, _opts) => {
       commands.push({ cmd, opts: _opts });
       if (cmd === 'git rev-parse --show-toplevel') return '/repo\n';
@@ -307,10 +321,12 @@ describe('git-autopilot-save', () => {
     expect(commands.some((c) => c.cmd.startsWith('git commit'))).toBe(false);
   });
 
-  it('uses --no-verify only as a deliberate opt-in (metadata assert)', async () => {
+  it('uses --no-verify only as a deliberate opt-in (metadata assert, interval strategy)', async () => {
     // Twin run: default = no flag; bypass = flag present.
     // This guards against any future refactor that flips the default.
-    const cmds1 = setupRepo();
+    const cmds1 = setupRepo({
+      config: { enabled: true, wipIntervalMinutes: 30, commitStrategy: 'interval' },
+    });
     await import('../../scripts/hooks/git-autopilot-save.js');
     await new Promise((r) => setTimeout(r, 30));
     const commit1 = cmds1.find((c) => c.cmd.startsWith('git commit'));
@@ -319,11 +335,184 @@ describe('git-autopilot-save', () => {
     vi.resetModules();
     resetState();
     const cmds2 = setupRepo({
-      config: { enabled: true, wipIntervalMinutes: 30, bypassPreCommitHooks: true },
+      config: { enabled: true, wipIntervalMinutes: 30, commitStrategy: 'interval', bypassPreCommitHooks: true },
     });
     await import('../../scripts/hooks/git-autopilot-save.js');
     await new Promise((r) => setTimeout(r, 30));
     const commit2 = cmds2.find((c) => c.cmd.startsWith('git commit'));
     expect(commit2.cmd).toContain('--no-verify');
+  });
+
+  // -------------------------------------------------------------------------
+  // Stash checkpoint tests (commitStrategy: "semantic")
+  // -------------------------------------------------------------------------
+
+  it('default (semantic) strategy runs non-destructive stash create + store (never push/pop)', async () => {
+    const commands = setupRepo();
+    mockState.execSyncImpl = (cmd, _opts) => {
+      commands.push({ cmd, opts: _opts });
+      if (cmd === 'git rev-parse --show-toplevel') return '/repo\n';
+      if (cmd === 'git status --porcelain') return ' M file.js\n';
+      if (cmd === 'git stash create') return 'deadbeefcafe\n';
+      if (cmd.startsWith('git stash store')) return '';
+      return '';
+    };
+
+    await import('../../scripts/hooks/git-autopilot-save.js');
+    await new Promise((r) => setTimeout(r, 30));
+
+    // Non-destructive snapshot: create + store, NEVER push/pop (which would
+    // hard-reset the working tree and could lose a concurrent teammate's edits).
+    expect(commands.some((c) => c.cmd === 'git stash create')).toBe(true);
+    expect(commands.some((c) => c.cmd.startsWith('git stash store'))).toBe(true);
+    expect(commands.some((c) => c.cmd.startsWith('git stash push'))).toBe(false);
+    expect(commands.some((c) => c.cmd === 'git stash pop')).toBe(false);
+    // No git commit / add -A either.
+    expect(commands.some((c) => c.cmd.startsWith('git commit'))).toBe(false);
+    expect(commands.some((c) => c.cmd.startsWith('git add -A'))).toBe(false);
+    // State should be saved.
+    expect(mockState.atomicWrites).toHaveLength(1);
+  });
+
+  it('semantic strategy never touches the working tree (no push/pop/reset)', async () => {
+    const commands = setupRepo();
+    mockState.execSyncImpl = (cmd, _opts) => {
+      commands.push({ cmd, opts: _opts });
+      if (cmd === 'git rev-parse --show-toplevel') return '/repo\n';
+      if (cmd === 'git status --porcelain') return ' M file.js\n';
+      if (cmd === 'git stash create') return 'deadbeefcafe\n';
+      if (cmd.startsWith('git stash store')) return '';
+      return '';
+    };
+
+    await import('../../scripts/hooks/git-autopilot-save.js');
+    await new Promise((r) => setTimeout(r, 30));
+
+    // None of the tree-mutating git commands should ever appear.
+    expect(commands.some((c) => c.cmd.startsWith('git stash push'))).toBe(false);
+    expect(commands.some((c) => c.cmd === 'git stash pop')).toBe(false);
+    expect(commands.some((c) => c.cmd.startsWith('git reset'))).toBe(false);
+    expect(commands.some((c) => c.cmd.startsWith('git checkout'))).toBe(false);
+  });
+
+  it('semantic strategy uses currentPhase from config in stash store label', async () => {
+    const commands = setupRepo({
+      config: {
+        enabled: true,
+        wipIntervalMinutes: 30,
+        currentPhase: 'EXECUTE',
+      },
+    });
+    mockState.execSyncImpl = (cmd, _opts) => {
+      commands.push({ cmd, opts: _opts });
+      if (cmd === 'git rev-parse --show-toplevel') return '/repo\n';
+      if (cmd === 'git status --porcelain') return ' M file.js\n';
+      if (cmd === 'git stash create') return 'deadbeefcafe\n';
+      if (cmd.startsWith('git stash store')) return '';
+      return '';
+    };
+
+    await import('../../scripts/hooks/git-autopilot-save.js');
+    await new Promise((r) => setTimeout(r, 30));
+
+    const stashStore = commands.find((c) => c.cmd.startsWith('git stash store'));
+    expect(stashStore).toBeDefined();
+    expect(stashStore.cmd).toContain('artibot-checkpoint-EXECUTE-');
+  });
+
+  it('semantic strategy: store failure is non-fatal and never disturbs the tree', async () => {
+    const commands = setupRepo();
+    mockState.execSyncImpl = (cmd, _opts) => {
+      commands.push({ cmd, opts: _opts });
+      if (cmd === 'git rev-parse --show-toplevel') return '/repo\n';
+      if (cmd === 'git status --porcelain') return ' M file.js\n';
+      if (cmd === 'git stash create') return 'deadbeefcafe\n';
+      if (cmd.startsWith('git stash store')) throw new Error('store failed');
+      return '';
+    };
+
+    await import('../../scripts/hooks/git-autopilot-save.js');
+    await new Promise((r) => setTimeout(r, 30));
+
+    // State still saved (timestamp update is independent of checkpoint success).
+    expect(mockState.atomicWrites).toHaveLength(1);
+    // No tree-mutating recovery attempted — the snapshot object is harmless.
+    expect(commands.some((c) => c.cmd === 'git stash pop')).toBe(false);
+    expect(commands.some((c) => c.cmd.startsWith('git reset'))).toBe(false);
+    // "skipped" message emitted (checkpoint returned false).
+    expect(stderrSpy).toHaveBeenCalledWith(
+      expect.stringContaining('stash checkpoint skipped'),
+    );
+  });
+
+  it('semantic strategy returns false when nothing was stashed (no changes)', async () => {
+    const commands = setupRepo();
+    mockState.execSyncImpl = (cmd, _opts) => {
+      commands.push({ cmd, opts: _opts });
+      if (cmd === 'git rev-parse --show-toplevel') return '/repo\n';
+      if (cmd === 'git status --porcelain') return ' M file.js\n';
+      // create returns empty — no tracked changes to snapshot.
+      if (cmd === 'git stash create') return '';
+      return '';
+    };
+
+    await import('../../scripts/hooks/git-autopilot-save.js');
+    await new Promise((r) => setTimeout(r, 30));
+
+    // create returned empty → no store attempted, no tree mutation.
+    expect(commands.some((c) => c.cmd.startsWith('git stash store'))).toBe(false);
+    expect(commands.some((c) => c.cmd === 'git stash pop')).toBe(false);
+    // State still saved (timestamp updated).
+    expect(mockState.atomicWrites).toHaveLength(1);
+  });
+
+  it('commitStrategy "none" skips all auto-save activity', async () => {
+    const commands = setupRepo({
+      config: {
+        enabled: true,
+        wipIntervalMinutes: 30,
+        commitStrategy: 'none',
+      },
+    });
+
+    await import('../../scripts/hooks/git-autopilot-save.js');
+    await new Promise((r) => setTimeout(r, 30));
+
+    // No stash, no commit, no state write.
+    expect(commands.some((c) => c.cmd.startsWith('git stash'))).toBe(false);
+    expect(commands.some((c) => c.cmd.startsWith('git commit'))).toBe(false);
+    expect(commands.some((c) => c.cmd.startsWith('git add'))).toBe(false);
+    expect(mockState.atomicWrites).toHaveLength(0);
+  });
+
+  it('semantic strategy triggers cleanup of old stashes', async () => {
+    const commands = setupRepo();
+    mockState.execSyncImpl = (cmd, _opts) => {
+      commands.push({ cmd, opts: _opts });
+      if (cmd === 'git rev-parse --show-toplevel') return '/repo\n';
+      if (cmd === 'git status --porcelain') return ' M file.js\n';
+      if (cmd === 'git stash create') return 'deadbeefcafe\n';
+      if (cmd.startsWith('git stash store')) return '';
+      if (cmd === 'git stash list') {
+        // Simulate 12 artibot checkpoints (max default is 10, so 2 should be dropped).
+        const lines = [];
+        for (let i = 0; i < 12; i++) {
+          lines.push(`stash@{${i}}: On main: artibot-checkpoint-autopilot-2026-05-${String(26 - i).padStart(2, '0')} 10:00:00`);
+        }
+        return lines.join('\n') + '\n';
+      }
+      if (cmd === 'git stash pop') return '';
+      if (cmd.startsWith('git stash drop')) return '';
+      return '';
+    };
+
+    await import('../../scripts/hooks/git-autopilot-save.js');
+    await new Promise((r) => setTimeout(r, 30));
+
+    // Two stash drop commands should have been issued (indices 11 and 10, in descending order).
+    const drops = commands.filter((c) => c.cmd.startsWith('git stash drop'));
+    expect(drops).toHaveLength(2);
+    expect(drops[0].cmd).toContain('stash@{11}');
+    expect(drops[1].cmd).toContain('stash@{10}');
   });
 });

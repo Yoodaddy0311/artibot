@@ -93,7 +93,18 @@ export function executeChain(phase, toolName, hookData, opts = {}) {
   const warnings = [];
 
   for (const guard of matching) {
-    const result = guard.check(ctx);
+    let result;
+    try {
+      result = guard.check(ctx);
+    } catch (err) {
+      // Fail-closed: a broken guard must never silently pass
+      return {
+        decision: 'block',
+        reason: `Guard '${guard.name}' threw: ${err.message}`,
+        guardName: guard.name,
+        warnings,
+      };
+    }
     if (!result) continue;
 
     if (result.decision === 'block') {
@@ -256,6 +267,21 @@ const INSPECTABLE_EXTS = new Set([
 ]);
 
 const MAX_FILE_LINES = 800;
+
+/** Sensitive environment variable names that must not leak in tool output. */
+const ENV_VAR_BLOCKLIST = new Set([
+  'ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'GITHUB_TOKEN', 'GITHUB_PAT',
+  'AWS_SECRET_ACCESS_KEY', 'AWS_SESSION_TOKEN', 'AZURE_CLIENT_SECRET',
+  'GCP_SERVICE_ACCOUNT_KEY', 'GOOGLE_APPLICATION_CREDENTIALS',
+  'STRIPE_SECRET_KEY', 'TWILIO_AUTH_TOKEN', 'SENDGRID_API_KEY',
+  'DATABASE_URL', 'REDIS_URL', 'MONGODB_URI',
+  'JWT_SECRET', 'SESSION_SECRET', 'ENCRYPTION_KEY',
+  'SLACK_TOKEN', 'DISCORD_TOKEN', 'TELEGRAM_BOT_TOKEN',
+  'SSH_PRIVATE_KEY', 'GPG_PASSPHRASE',
+  'FIREBASE_API_KEY', 'SUPABASE_SERVICE_ROLE_KEY',
+  'VERCEL_TOKEN', 'NETLIFY_AUTH_TOKEN',
+  'NPM_TOKEN', 'PYPI_TOKEN', 'DOCKER_PASSWORD',
+]);
 
 // -------------------------------------------------------------------------
 // Built-in Guard Implementations
@@ -441,6 +467,38 @@ function checkBashQuoteBalance(ctx) {
   };
 }
 
+/** Check tool output for sensitive env var name exposure (post phase). */
+function checkEnvVarExposure(ctx) {
+  const output = typeof ctx.toolResult === 'string'
+    ? ctx.toolResult
+    : JSON.stringify(ctx.toolResult ?? '');
+  if (!output) return null;
+
+  const found = [];
+  for (const name of ENV_VAR_BLOCKLIST) {
+    const pattern = new RegExp(
+      `(?:^|\\s|["'\`])(?:export\\s+)?` +
+      name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') +
+      `(?:\\s*=|\\b)` +
+      `|\\$\\{?` +
+      name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') +
+      `\\}?`,
+    );
+    if (pattern.test(output)) {
+      found.push(name);
+    }
+  }
+
+  if (found.length > 0) {
+    return {
+      decision: 'warn',
+      reason: `Sensitive env var name detected in output: ${found.join(', ')}. Avoid exposing secret variable names.`,
+      guardName: 'env-var-exposure',
+    };
+  }
+  return null;
+}
+
 /** Check file size exceeds maximum (post phase). */
 function checkFileSize(ctx) {
   if (!ctx.fileContent) return null;
@@ -548,5 +606,13 @@ export function registerBuiltinGuards() {
     tools: ['Edit', 'Write'],
     category: 'artibot-policy',
     check: checkFileSize,
+  });
+
+  registerGuard({
+    name: 'env-var-exposure',
+    phase: 'post',
+    tools: ['Bash'],
+    category: 'security-critical',
+    check: checkEnvVarExposure,
   });
 }

@@ -1,6 +1,6 @@
 {
   "name": "artibot",
-  "version": "4.13.0",
+  "version": "4.19.6",
   "description": "Cognitive orchestration framework with dual-process routing, lifelong learning, expert agent teams, and workflow automation for Claude Code",
   "author": {
     "name": "Artience"
@@ -18,6 +18,9 @@
   "compatibility": {
     "claudeCode": ">=1.0",
     "node": ">=20"
+  },
+  "experimental": {
+    "themes": "./themes/"
   },
   "keywords": [
     "claude-code-plugin",

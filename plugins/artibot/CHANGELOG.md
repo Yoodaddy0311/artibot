@@ -13,6 +13,266 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.19.6] — 2026-06-05
+
+**Theme**: cross-machine `/update` 신뢰성 (self-copy 가드 + pull 자동 stash)
+
+다른 머신에서 `/update`가 실패하던 2가지 근본원인 수정.
+
+### Fixed
+
+- **`/update` cross-machine 실패 2건 근본수정**:
+  1. **git pull 차단** — `.artibot/SESSION-NOTES.md`(추적 + 훅 자동수정)가 working tree를 dirty로 만들어 `git pull`이 "local changes would be overwritten"로 거부, `update.js`는 경고만 하고 진행해 소스가 구버전에 멈추던 문제. → `update.js`에 `stashIfDirty()`(dirty일 때만 `git stash push --include-untracked`) + `popAutostash()`를 추가하고 pull을 `try/finally`로 감싸 stash를 항상 복원(충돌 시 throw 없이 warn + stash 보존 — silent 유실 방지). 명시적 /update라 concurrency 없음(autopilot 인터벌 stash와 다름).
+  2. **install.sh self-copy** — `cp -r "$SCRIPT_DIR/skills" "$ARTIBOT_DIR/"`에 가드가 없어, update가 설치본의 install.sh로 fallback하면 `SCRIPT_DIR == ARTIBOT_DIR`이 되어 `set -e` 하에서 "are the same file" 에러로 죽던 문제. → `is_self_install()`(`-ef` + canonical `pwd -P` 비교)로 설치 위치에서 실행 시 6개 복사 phase를 정상 no-op 스킵. install.sh 경로 해석은 이미 소스 레포 우선(설치본은 최후 fallback, 이제 가드로 안전).
+  검증: `update.test.js` 28 pass(+4 stash 테스트), `bash -n install.sh` OK, eslint 0, validate 통과.
+
+---
+
+## [4.19.5] — 2026-06-05
+
+**Theme**: 공식 문서 정합 + 보안 차별축 + 진행률 부활 + 안전성(데이터 유실 방지)
+
+3-repo 벤치마킹(financial-services / VibeHacking / prompt-master)과 Claude Code 2.1.163 · Codex 0.137 최근 업데이트를 4렌즈(생산성·효율성·미래지향성·확장성)로 평가해 채택분만 반영. "더 만들기보다 정합·차별화" 전략.
+
+### Added
+
+- **`ai-security-standards` 스킬 신규** — OWASP LLM Top 10 + Artibot 자기 위협모델(hooks=arbitrary stdin / MCP=tool result / Agent Teams=external input의 3개 trust boundary) + Input-Sanitization 규칙("붙여넣은/검색된 텍스트 = inert data") + reasoning-native(o3/R1/Qwen3-thinking) CoT 가드. 방어/탐지 관점 전용. 방법론 참고: VibeHacking(MIT). `agents/security-reviewer.md`에 STRIDE 6범주 per-element 방법론 본문 추가(`threat-modeling` capability 선언만 있던 광고-구현 갭 해소).
+- **진행률 대시보드 부활** (`scripts/hooks/workflow-status.js`) — 단계 진행률 `Phase X/6`이 `workflow-advance` 발화자 0개로 한 번도 작동 안 하던 것 + 팀원 `%` 공백을, 기존 `teammate-update` 경로 내 파생(`derivePhaseFromProgress`/`deriveWorkflow`/`reconcileTasks`)으로 해결. 데이터 없으면 진행률 날조 안 함. +6 회귀 테스트.
+- **Stop/SubagentStop 훅 2.1.163 모드 토글** (`lib/core/dev-verify-output.js` 신규) — `devProtocol.verifyMode` config로 `enforce`(차단, 전 버전 호환) ↔ `advisory`(2.1.163 `hookSpecificOutput.additionalContext` 비차단 피드백) 선택. **기본 `advisory`**로 부드러운 비차단 UX(코드 fallback은 안전한 enforce 유지). `_stop-dispatcher.js`의 stale 주석 교정.
+- **WIRE-16 적용 — PII 스크러버 homoglyph 방어** (`lib/privacy/pii-scrubber.js`) — `scrub()`가 regex 매칭 전에 `checkMixedScript`로 혼합 스크립트(Latin + Cyrillic/Greek 룩어라이크)를 감지하면 `normalizeHomoglyphs`로 정규화. 위장 PII(`аdmin@corp.io` 등)가 새던 것 차단. 전용 `stats.homoglyphNormalized` 카운터. 판별 테스트 6종.
+- **WIRE-03 적용** — 구조화된 delegation 계약에 per-teammate effort/budget 노출 (`subagents.js`). `task.meta.workflowPlan`을 읽어 `contract`에 `parentEffort`/`perAgentBudget`/`teammates[]` 추가. 회귀 테스트 3종.
+
+### Changed
+
+- **오케스트레이션 용어 공식 정합** (`CLAUDE.md`, `docs/ORCHESTRATION-ROUTING.md`, `docs/ORCHESTRATION-GLOSSARY.md`) — `ultracode`(Claude Code 2.1.160 "workflow" 트리거 리네임) + 플랫폼 "Dynamic Workflows"(2.1.154)를 harness Workflow tool·Artibot Auto-Team과 구분 명시. recommend-hint 한국어 surface 규칙 + `/orchestrate`를 workflow 축 사용자 진입점으로 매핑.
+- **marketplace.json 메타 동기화 + 자동화** — stale 메타(version 4.18.1, tests 4918, "112 skills/69 commands")를 실측(4.19.5, 9,600+, 113 skills/71 commands)으로 교정 + `scripts/ci/sync-marketplace-meta.mjs`로 릴리즈 시 자동 동기화(stale 재발 방지). `marketplace-validate.mjs` 게이트 2개 추가.
+
+### Fixed
+
+- **git-autopilot 체크포인트 데이터 유실 방지** (`scripts/hooks/git-autopilot-save.js`) — semantic 자동저장이 `git stash push --include-untracked` + `pop`을 쓰는데, `stash push`가 내부적으로 working tree를 HEAD로 hard-reset(reflog "reset: moving to HEAD")해, push~pop 창 또는 pop 충돌 시 동시 작업 중인 teammate의 미커밋 변경이 working tree에서 silent 유실되던 버그. 비파괴 `git stash create` + `git stash store`(tree 무변경)로 교체해 유실 클래스 제거. 6 semantic 테스트 갱신.
+- **WIRE-21 — swarm-sync 버전 표시 수정** (`scripts/hooks/swarm-sync.js:98-99`) — session-end sync 로그가 존재하지 않는 `result.uploadVersion`/`result.downloadVersion` 필드를 읽어 항상 `uploaded: v?` / `downloaded: v?`를 출력하던 버그. `onSessionEnd`(→`performSync`)의 실제 반환은 `{ uploaded, downloaded, version }`(`lib/swarm/sync-scheduler.js:324-330`)이므로 두 곳 모두 `result.version`으로 교정. stderr 표시 전용(cosmetic). dormant 백로그 정리(2026-06-05) 중 phantom-path false negative로 재분류되어 발견.
+
+### Removed
+
+- **N4 rate-sentinel orphan 삭제** (`lib/orchestration/rate-sentinel.js` + 테스트, −492 LOC) — 순수 미배선(skill/command/JS importer 0). 죽은코드 전수조사 후 안전삭제. N3 tool-guardrails는 문서화 skill API로 판명되어 보존(dormant 재분류, `.artibot/DEADCODE-BACKLOG-2026-06-05.md`).
+
+### Docs
+
+- 죽은코드/미배선 기능 전수조사 백로그(`.artibot/DEADCODE-BACKLOG-2026-06-05.md`, N1~N6) + WIRE 백로그 트리아지 업데이트. WIRING-AUDIT dormant 재분류(2026-06-05 follow-up).
+
+---
+
+## [4.19.4] — 2026-06-01
+
+**Theme**: 병렬 실행 메커니즘(team/workflow/autopilot) 경계 명확화 + 단일 4-way 분류기 (Option A)
+
+세 가지 "병렬 업무 처리" 방식이 혼재처럼 느껴지던 원인 — (1) `autopilot`이 `team`의 경쟁자가 아니라 *소비자*(EXECUTE phase가 team을 호출), (2) "workflow" 단어가 하니스 Workflow 툴과 Artibot 레거시 "dynamic-workflow"(=auto-team) 양쪽을 가리키던 충돌 — 을 엔진 병합 없이 경계 명확화로 해소한다. 세 메커니즘은 2개 직교 축(적응적 team ↔ 결정론 workflow) + 세션 래퍼(autopilot)에 놓인다.
+
+### Added
+
+- **4-way 분류기 advisory 레이어** (`lib/cognitive/workflow-plan.js`) — `buildWorkflowPlan`이 순수 additive 필드 `recommendation`(`'workflow'`|`'autopilot'`|`null`) + `autoFire`(team일 때만 true)를 반환. 신규 순수 헬퍼 `deriveRecommendation` — 동질 fan-out(같은 command ≥3 & subs ≥3)→`workflow`, high tier & subs ≥6→`autopilot`. runner/effort/budget/teammates는 byte-identical fallback. **`inline`|`team`만 자동 발사, `workflow`|`autopilot`은 recommend-only**(하니스 opt-in 규칙 준수).
+- **추천 표면화 directive** (`scripts/hooks/runtime-prompt.js`) — `buildRecommendationDirective`가 추천을 `[artibot:hint recommend=…]` 텍스트로만 노출. 자동 발사 없음. 미추천 시 `''`로 기존 프롬프트 byte-identical.
+- **정본 라우팅 문서** (`docs/ORCHESTRATION-ROUTING.md`) — 2축 모델·결정 트리·auto-fire 규칙 단일 진실원. `docs/ORCHESTRATION-GLOSSARY.md` — 4-term 정의 + 이름 충돌 주의.
+
+### Changed
+
+- **이름 충돌 제거** (`agents/orchestrator.md`·`CLAUDE.md`) — 사용자향 산문 "dynamic workflow" → "Auto-Team". 하니스 `Workflow` 툴(결정론 JS, 명시 opt-in)과 별개 메커니즘임을 명시. `commands/autopilot.md`·`skills/team/SKILL.md`를 라우팅 문서로 교차링크.
+
+### Verification
+
+- `vitest` 42/42 (workflow-plan 27 + runtime-prompt 15), 변경 소스 ESLint 0 errors. PR #47.
+
+---
+
+## [4.19.3] — 2026-06-01
+
+**Theme**: 배선 백로그 일부 적용(WIRE-04/06/08/12) + 라이프사이클 명령 라우터 배선 + CI 산문 드리프트 영구 차단
+
+배선 감사(v4.19.1) 후속으로 안전 검증된 4개 갭을 적용하고, 5개 라이프사이클 명령을 `route-lifecycle` CLI 브리지에 실제 배선했다. 또한 v4.19.2 직후 발생한 README command-count 핫픽스(ea8a3b9)의 근본원인 — 릴리스 sync가 배지만 갱신하고 카운트 산문은 방치하던 것 — 을 자가치유 스크립트로 영구 차단한다.
+
+### Added
+
+- **배선 갭 4건 적용** (배선 감사 백로그) — WIRE-04 cache-roi 미들웨어(`createCacheRoiMiddleware`, 프롬프트 캐시 ROI 측정), WIRE-06 smart-pipeline Zero-Waste 조건부 미들웨어 선택, WIRE-08 Autopilot cost-tracker(`notePhaseCost`/`buildCostWarningInstruction`를 `engine.*` 네임스페이스에 재노출), WIRE-12 lifecycle-router CLI 브리지(`scripts/route-lifecycle.mjs` — `routeLifecycle`/`routeByContext`/`suggestNext` 노출). 커밋 `8003662`/`3e2cbdc`/`61dde1f`.
+- **README 카운트 산문 자가치유** (`scripts/ci/sync-readme-claims.js` + `scripts/ci/readme-claims-registry.js`) — 릴리스 배지 sync가 버전 배지만 갱신하고 "N slash commands" 등 카운트 산문은 방치해 드리프트가 재발(핫픽스 ea8a3b9)하던 문제 차단. validator와 동일한 카운트 로직·정규식을 공유 레지스트리로 추출하고, 멱등 자가치유 스크립트가 릴리스 파이프라인(`release.yml`)에서 산문을 파일시스템 카운트로 재작성. `--check` 모드는 CI dry-run. coverage는 임계치 claim이라 자동치환 대상에서 의도적 제외.
+
+### Changed
+
+- **5개 라이프사이클 명령을 route-lifecycle 브리지에 배선** (`commands/design.md`·`marketing.md`·`review.md`·`ship.md`·`spec.md`) — 하드코딩된 `Task(<agent>)` 위임을 `node scripts/route-lifecycle.mjs <phase> "$ARGUMENTS"` 호출 후 결과 agent로 위임하도록 변경. `routeLifecycle`이 `{agent, toolset, skills, candidates}`를 단일 JSON 라인으로 해석(design→architect, ship→devops-engineer, review→code-reviewer, marketing→marketing-strategist). WIRE-12 브리지의 실제 production 소비자 확보.
+- **README claim 로직 단일 진실원화** (`scripts/ci/validate-readme-claims.js`) — 복제됐던 `collectActuals()`/`CLAIM_PATTERNS`를 `readme-claims-registry.js`로 추출하고 validator·sync 양쪽이 import. 둘 중 하나만 패턴을 갱신하는 silent-drift를 구조적으로 차단(약 -75 lines 중복 제거). `collectActuals({ full })`로 coverage 게이팅 파라미터화. 동작 100% 보존.
+- **릴리스 워크플로 산문 sync 스텝** (`.github/workflows/release.yml`) — 배지 갱신 직후·PR 생성 직전에 "Sync README count prose" 스텝 추가(멱등 no-op 보장).
+
+### Fixed
+
+- **README slash-command 카운트 70→71** (`README.md` 산문, 커밋 `ea8a3b9`) — v4.19.2 직후 P0 핫픽스. validator는 산문 카운트를 검증하지만 릴리스 sync가 산문을 자동갱신하지 않아 드리프트가 발생했던 것 → 위 자가치유 스크립트가 재발 차단.
+
+### Docs
+
+- **WIRE 백로그 트리아지 결정 문서** (`.artibot/WIRE-BACKLOG-TRIAGE.md`) — 배선 감사 22개 갭 후보를 적용완료 4 / dormant 재분류 3(WIRE-01·02·19, dormant-by-design) / needs-rework 14(spec 결함으로 blind 적용 불가)로 분류. **추가 적용 가능 항목 0** — 나머지는 spec의 경로·라인 드리프트, 가짜 테스트 케이스, 스키마 불일치 등 결함 해소 후에만 안전 적용 가능함을 항목별 근거와 함께 기록.
+
+### Tests
+
+- route-lifecycle CLI 브리지 테스트 강화(5개 라이프사이클 phase의 결정론적 해석 단언, +5 케이스). README claim 공유 레지스트리 단위 테스트 신규(`tests/ci/readme-claims-registry.test.js`, 6 케이스 — 카운트 정수성·full 게이팅·모든 패턴 key의 산출 가능성·정규식 group1/group2 contract·`70+`/`1 command` 미매칭 parity). swarm-sync http-backend 테스트 케이스를 real egress 계약에 정렬(커밋 `6e279df`). 회귀: lint 0, validator `--full` exit 0, sync 멱등 no-op 확인.
+
+---
+
+## [4.19.2] — 2026-05-31
+
+**Theme**: Swarm 9일 sync stale 해소 — 세션 훅이 git 백엔드를 우회하던 근본원인 수정
+
+### Fixed
+
+- **세션 훅 git 백엔드 우회 근본원인** (`lib/swarm/sync-scheduler.js`) — `onSessionStart`/`onSessionEnd`가 하드코딩된 HTTP 함수(`downloadLatestWeights`/`uploadWeights`)를 직접 호출해 `backend:"git"` 설정이 세션 라이프사이클에서 무시되고 egress 게이트(Cloud Run serverUrl 차단)에 막혀 **9일간 sync stale**. `resolveDownload`/`resolveUpload` 경유로 변경해 `performSync`와 동일하게 git 백엔드를 honor. git 백엔드에서는 HTTP 전용 `flushOfflineQueue`도 스킵.
+- **git 백엔드 egress/health 게이트 분기** (`scripts/hooks/swarm-sync.js`, `scripts/hooks/swarm-download.js`) — git 백엔드일 때 HTTP egress allowlist 검사와 pre-flight health 체크를 스킵. git push/pull은 git 바이너리 자체 전송 경로로 fetch 게이트를 경유하지 않으므로 정상. **egress allowlist 미확장**(정책 구멍 아님). 미초기화 clone이 health `ok:false`를 반환해 첫 부트스트랩을 막던 문제도 회피.
+
+### Tests
+
+- swarm-download 헬퍼 추출(`checkHttpEgressAllowed`/`checkHttpServerHealthy`) + `isMainEntry` 가드로 테스트가능화. **+16**(sync-scheduler git 라우팅 6, swarm-download 헬퍼 10). 회귀: 전체 **9585 pass** / lint 0. 런타임 검증: `forceSync` success/uploaded/downloaded 전부 true.
+
+---
+
+## [4.19.1] — 2026-05-30
+
+**Theme**: MCP bridge silent-boot 버그 수정 + 배선 감사 후속(트리아지 도구·GRPO dormant 정리)
+
+### Fixed
+
+- **MCP bridge silent-boot** — `bin/artibot-mcp.mjs`가 `lib/mcp/bridges/`(복수, 부재)를 import해 `loadServerModules`의 try/catch가 에러를 삼키고 **bridge 0개로 silent 부팅**하던 버그. 복합 원인으로 `createArtibotMcpServer`가 `builtinTools()`도 미등록이라 standalone tool 5개마저 비등록 상태였음. `lib/mcp/bridge/index.js` barrel(`wireBridges`) 신규 + import 경로 수정으로 **tools/list 0→10 복구**(builtins 5 + bridge 5). read-only·idempotent·never-throws.
+
+### Added
+
+- **배선갭 트리아지 도구** (`scripts/ci/triage-wiring-gaps.mjs`) — 배선 감사의 57 unverified 갭을 production caller grep(정의/tests/barrel/주석/orphan-chain 제외)으로 `dead`/`wired-suspect`/`config-only` 자동 분류. 결과: **dead 44 / wired-suspect 7 / config-only 6** → P1 배선 백로그 진짜 크기 = 44. 순수함수 export + 16 단위 테스트.
+
+### Changed
+
+- **GRPO dormant 일관 명시** (이름·구조 유지, 삭제 0) — reward emitter(`reward-metrics.js`)를 `DORMANT BY DESIGN`(deprecated 아님)으로, `reward-capture.js`의 `computeReward`는 live(`episodic.js:31` 실호출)로 구분 명시. nightly trainer는 빈/없는 입력 cold-start no-op임을 문서화. GRPO(정책 학습)와 dreaming(메모리 consolidation)의 역할 분리 기록. 동작 변경 0.
+
+### Tests
+
+- +24 (triage 16, wire-bridges 8). 회귀: MCP 136 / GRPO 426 통과, lint 0.
+
+---
+
+## [4.19.0] — 2026-05-30
+
+**Theme**: 모델 정책 중앙 강제(single source-of-truth) + Artibot 브랜드 테마
+
+흩어져 있던 모델 정책을 코드가 읽는 단일 진실원으로 통합하고, 드리프트를 CI·런타임에서 강제한다. 브랜드 테마(Dark/Light)도 함께 릴리스.
+
+### Added
+
+- **모델 정책 단일 source-of-truth** (`lib/core/model-policy.js`) — `artibot.config.json#/agents/modelPolicy`를 읽는 유일한 리졸버. `resolveModel` / `getPolicyModel` / `resolveModelForPhase` / `listAgentsByModel` / `normalizeAgentType` / `isKnownAgent` / `loadModelPolicy` 노출. never-throws, Korean-path safe. 정책이 config / 28개 agent frontmatter / 전역 rules 3곳에 흩어져 코드 강제가 없던 문제를 해소.
+- **모델 정책 드리프트 CI 게이트** (`scripts/ci/validate-model-policy.js` + `scripts/validate.js` 배선) — agent frontmatter `model:`과 config 정책 불일치 시 `npm run ci` 실패. 이전엔 frontmatter 존재만 검사하고 정책 대조는 없었음.
+- **SubagentStart 런타임 강제** (`scripts/hooks/subagent-handler.js`) — 모든 teammate 스폰에서 canonical 모델과 대조해 불일치 advisory 경고. config 하이드레이트 후 `getPolicyModel(agentType, config)` 사용, 정책 미로드 시 경고 억제로 거짓양성 방지.
+- **Artibot 브랜드 테마** (Dark / Light) — `experimental.themes` 등록, `/theme` 피커에서 선택 가능.
+
+### Changed
+
+- `lib/core/config-schema.js` — `modelPolicy` 스키마 타입 형상화(high / medium / advisorStrategy).
+- `commands/team.md`, `AGENTS.md` — 단일 진실원 = `lib/core/model-policy.js` 포인터 명시(산문 표는 코드의 투영임을 선언).
+
+### Tests
+
+- +43 (model-policy 37, drift-gate 6). 통합 82 통과, lint 0.
+
+---
+
+## [4.18.1] — 2026-05-30
+
+**Theme**: 기능 감사 — 사용자 보고 2증상(진행률 % 깨짐, 병렬 팀 미소환) 근본수정
+
+5-유닛 병렬 기능 감사(Opus)로 두 증상의 수렴된 근본원인을 진단·수정.
+
+### Fixed
+
+- **진행률 % 중간에 멈춤** — autopilot이 중간 phase를 `status:'queued'`로만 기록해 `countCompletedPhases`가 1/8에 고착됐다가 REPORT에서 점프하던 문제. `tui.js`가 positional + unique-done-Set의 max + clamp로 **단조 증가** 보장. goal-loop met 경로 0% 고착(→pct:100), statusline progress 필드 통과/파생, progress-renderer 막대 경계(1%/99%) + 미확정 시 `--%`, `recordPhaseResult` 시그니처 정정.
+- **병렬 팀 미소환** — 키스톤: `pluginRoot`가 `state.input`에 안 들어가 effort-meta·workflowPlan config가 production에서 죽어있던 문제(P1/P2/P3 effort도 함께 부활). workflowPlan이 `composePromptOutput`에서 폐기되던 것 → `[artibot:team ...]` + per-teammate effort/budget 디렉티브 주입. router 미들웨어가 shallow intent(recommendations 누락)를 보내 teammates가 항상 0이던 것 → `recommendations` 보존(문자열 best 소비자 무회귀). effort write 순서 정정, auto-team 트리거 임계값을 workflow-plan과 통일(3/3/high 단일 소스). full-chain 실증: 멀티도메인 → teammates=3.
+
+### Tests
+
+- +51 (full-chain teammates>0, 단조 progress, 키스톤 production 경로 등).
+
+---
+
+## [4.18.0] — 2026-05-29
+
+**Theme**: Effort × Dynamic-Workflow Fusion — effort가 정적 매핑에서 복잡도·컨텍스트 적응형으로 진화
+
+See `docs/PRD-EFFORT-DYNAMIC-WORKFLOW.md` and `docs/adr/ADR-001-effort-workflow-fusion.md`.
+
+### Added
+
+- **Score-Aware Effort Resolution (P1)** — `lib/cognitive/effort-resolver.js`의 `resolveEffort(command, signals)`. effort를 `명령어 베이스라인 × 복잡도 score × 남은 컨텍스트`로 ±1 밴드 시프트(히스테리시스 포함). 신호 없으면 `getEffortForCommand`와 byte-identical(zero-risk fallback). hook이 `classifyComplexity` + `context_window`로 신호를 도출하고 손실 `xhigh→high` 다운그레이드 제거.
+- **Unified Effort×Team Trigger (P2)** — `lib/cognitive/workflow-plan.js`. 단일 복잡도 분류가 자동 팀 트리거와 per-teammate effort/budget를 함께 구동. teammate effort는 `[parent−1, parent]` clamp. 순수 L4(주입형 budgetResolver). orchestrator가 `task.meta.workflowPlan`으로 per-teammate `[artibot:effort][artibot:task-budget]` prefix.
+- **GRPO-Tuned Adaptive Policy (P3, dormant)** — `effort-policy-config.js`(L4 reader) + `effort-policy-updater.js`(L3 nightly trainer). GRPO 보상으로 effort 베이스라인·budget를 야간 튜닝하는 학습 overlay. **기본 `enabled:false` — 동작 무변화**. bandShift `[−1,+1]`, budgetMultiplier `[0.5,1.5]`, KL-capped delta, cold-start 게이팅, snapshot 회전. 트레이너↔reader는 디스크로만 통신.
+
+### Changed
+
+- `lib/runtime/task-budget.js` — `getTaskBudgetForEffort`에 optional overlay 인자(학습 multiplier + ceiling 재clamp).
+- `lib/learning/grpo/reward-metrics.js` — `recordReward`가 effort/command/budget/tokensUsed를 additive 기록(back-compat).
+- `lib/cognitive/router.js` 818→776줄 — `EFFORT_POLICY`/`getEffortForCommand`를 `lib/cognitive/effort-policy.js`로 분리(re-export로 하위호환), `file<800` 게이트 충족.
+
+---
+
+## [4.17.0] — 2026-05-28
+
+**Theme**: Claude Opus 4.8 native effort 레벨 도입
+
+### Added
+
+- **`max` effort 레벨** — `EFFORT_POLICY`에 native `max` 레벨 추가. `orchestrate`/`swarm`/`autopilot`을 `xhigh`→`max`로 승격(최심 다중 에이전트 오케스트레이션). `task-budget.js`에 `max: 200000` 예산 추가. effort 타입을 `max|xhigh|high|medium|low`로 확장.
+
+---
+
+## [4.16.0] — 2026-05-28
+
+**Theme**: social-media 프로덕션 워크플로 + PAC2026 3-Zone 전체 에이전트 확산
+
+### Added
+
+- **Social-media skill depth 4**: 9개 프로덕션 섹션 추가 — Production Workflow, Campaign Integration, A/B Testing, Performance Measurement, Competitor Analysis, Audience Segmentation, Content Quality Checklist, Crisis Management, Tool Stack. artibot-cowork에 한국 플랫폼(네이버/카카오/밴드) 워크플로 통합.
+- **PAC2026 3-Zone Verification Checklist**: 28개 전체 에이전트에 도메인 특화 Pre/Active/Post 검증 체크리스트 적용 (pilot 3개 → 전체 28개 확산).
+- **Production workflow references**: `references/production-workflow.md` 12-phase pipeline (양 플러그인).
+- **Social command expansion**: `--workflow`, `--audit`, `--compete`, `--crisis` 인자 + `workflow`, `audit`, `competitor-report` 콘텐츠 타입.
+- **3-repo benchmark adoptions** (v4.15.0→4.16.0): CONTRIBUTING.md, INSTALL.md, 7-Question Gate, 50 OWASP patterns, SDK scaffold, marketing skill Rules/Iteration/Cold Start, progress renderer, advisor strategy.
+
+### Changed
+
+- Social-media skill level 3 → 4 (depth 2 spec tables → depth 4 production workflow).
+- **33 files**, +1,156 lines.
+
+---
+
+## [4.13.1] — 2026-05-21
+
+**Theme**: turn-end auto-commit 폭주 차단 — Stop 훅의 `git-autopilot-close.js`가 매 agent turn마다 `chore: artibot session close [...]` commit + push를 만들어 history의 86%가 자동 노이즈가 되던 문제. WIP interval save(crash safety net)는 영향 없음.
+
+### Changed (opt-in default flip — non-breaking)
+
+- **`scripts/hooks/git-autopilot-close.js`** — `readCloseOnStopFlag()` 추가, `main()` 초입에 gate 삽입. `closeOnStop`이 명시적으로 `true`가 아니면 stderr 로그 1줄 출력 후 early return. commit/squash/push 단계 전부 건너뜀.
+- **`scripts/hooks/git-autopilot-setup.js`** — `DEFAULT_CONFIG`에 `closeOnStop: false` 추가. 새 `.git/autopilot.json` 생성 시 default false로 stamp.
+- **`artibot.config.json`** — `git.autopilot.closeOnStop: false` 추가, comment 갱신.
+
+### Why
+
+사용자 보고: 19분 작업 세션 중 13건의 `chore: artibot session close` 노이즈 commit 자동 생성. 최근 50 commit 중 86%(43건)가 의미 없는 turn-end 자동 commit으로 묻혀 실제 작업 신호(feat/fix/refactor)가 보이지 않음. WIP interval save(`git-autopilot-save.js`, default 120분)만으로 crash safety net이 충분하므로, turn-end commit pipeline은 opt-in으로 전환.
+
+### Migration
+
+기존 동작(turn-end auto commit + squash + push)을 유지하려면 둘 중 하나로 명시적 opt-in:
+
+1. **Per-repo (이 저장소만)**: `.git/autopilot.json`에 `"closeOnStop": true` 추가
+2. **Plugin-wide (모든 저장소)**: `artibot.config.json`의 `git.autopilot.closeOnStop`을 `true`로 변경
+
+per-repo override가 plugin-wide 값보다 우선합니다 (기존 `bypassPreCommitHooks` 패턴과 동일).
+
+### Verification
+
+- 신규 테스트 2건 (`tests/hooks/git-autopilot-close.test.js`의 `closeOnStop gate (v4.11.3)` describe 블록): default skip, per-repo override precedence.
+- 기존 13개 close 테스트는 `setupEnabledRepo()` 헬퍼에 `closeOnStop: true` 기본값 주입으로 회귀 0건.
+- ESLint 0 errors / 0 warnings.
+
+---
+
 ## [4.13.0] — 2026-05-19
 
 ### Added

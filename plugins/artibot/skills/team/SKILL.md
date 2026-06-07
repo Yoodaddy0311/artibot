@@ -18,7 +18,7 @@ category: orchestration
 tokens: 2500
 agents: [orchestrator, planner]
 source_hash: cd022fd3
-whenNotToUse: "Single-file edits under 30 lines, simple single-domain tasks, or requests explicitly flagged with --no-team where inline execution is more efficient than parallel team overhead."
+whenNotToUse: "Single-file edits under 30 lines, simple single-domain tasks, or requests explicitly flagged with --no-team where inline execution is more efficient than parallel team overhead. Deterministic homogeneous fan-out (the same command repeated across many inputs) should prefer the harness Workflow tool over /team, since /team is adaptive model-driven orchestration while a repeated-command batch fits a deterministic pipeline."
 ---
 
 # /team
@@ -95,6 +95,8 @@ When enabled, Claude automatically uses /team workflow for requests that meet AL
 | Prompt | Per-request | Include `--no-team` in the prompt |
 
 ## Guardrails
+
+See: [docs/ORCHESTRATION-ROUTING.md](../../docs/ORCHESTRATION-ROUTING.md) — canonical routing reference; explains when team auto-fires vs. when workflow/autopilot require explicit opt-in.
 
 - 리더는 직접 구현보다 분해와 조정에 집중합니다.
 - 실제 의존성이 없는 작업만 병렬화합니다.

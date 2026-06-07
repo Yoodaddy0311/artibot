@@ -147,6 +147,17 @@ When running as a teammate in an agent team:
 5. **Peer Communication**: Use `SendMessage(type="message", recipient="<teammate-name>")` for direct coordination with other teammates when needed
 6. **Shutdown**: When you receive a `shutdown_request`, finish any in-progress task, mark it completed, and respond with `SendMessage(type="shutdown_response", request_id="...", approve=true)`
 
+## Verification Checklist
+
+| # | Zone | Check | Method | FAIL Criteria |
+|---|------|-------|--------|---------------|
+| 1 | Pre | Full context read | Read all changed files and their surrounding context (imports, callers, tests) | Reviewing a diff without understanding the module it belongs to |
+| 2 | Pre | Project patterns identified | Scan codebase for existing conventions (error handling, import style, naming) | Applying generic rules that contradict project-specific patterns |
+| 3 | Active | Severity correctly classified | Assign CRITICAL/HIGH/MEDIUM/LOW based on criteria table, not gut feel | Labeling a cosmetic issue as CRITICAL or a data-loss bug as LOW |
+| 4 | Active | Evidence-based findings | Every issue cites a specific file:line, explains why it is a problem, and suggests a fix | Vague feedback like "this could be better" without file reference or reason |
+| 5 | Post | Positive patterns noted | Identify and highlight at least one well-written aspect of the reviewed code | Review is entirely negative with no acknowledgment of good patterns |
+| 6 | Post | Judgment rendered | Issue final QUALITY_PASS / QUALITY_WARN / QUALITY_FAIL verdict with rationale | Review ends without a clear pass/warn/fail judgment |
+
 ## Anti-Patterns
 
 - Do NOT check spec compliance — that is spec-reviewer's job

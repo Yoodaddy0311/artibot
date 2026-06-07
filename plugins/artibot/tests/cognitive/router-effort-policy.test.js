@@ -1,17 +1,24 @@
 import { describe, expect, it } from 'vitest';
 import { EFFORT_POLICY, getEffortForCommand } from '../../lib/cognitive/router.js';
 
-const VALID_LEVELS = new Set(['xhigh', 'high', 'medium', 'low']);
+const VALID_LEVELS = new Set(['max', 'xhigh', 'high', 'medium', 'low']);
 
 describe('EFFORT_POLICY constant', () => {
   it('is a frozen object', () => {
     expect(Object.isFrozen(EFFORT_POLICY)).toBe(true);
   });
 
+  it('classifies deepest multi-agent orchestration commands as max', () => {
+    const maxKeys = ['orchestrate', 'swarm', 'autopilot'];
+    for (const key of maxKeys) {
+      expect(EFFORT_POLICY[key]).toBe('max');
+    }
+  });
+
   it('classifies agentic-coding / multi-file commands as xhigh', () => {
     const xhighKeys = [
       'implement', 'team', 'tdd', 'build-fix', 'cleanup',
-      'refactor-clean', 'orchestrate', 'spawn', 'swarm',
+      'refactor-clean', 'spawn',
     ];
     for (const key of xhighKeys) {
       expect(EFFORT_POLICY[key]).toBe('xhigh');
@@ -52,11 +59,11 @@ describe('EFFORT_POLICY constant', () => {
     }
   });
 
-  it('covers every slash command with a classification (55 total)', () => {
-    expect(Object.keys(EFFORT_POLICY)).toHaveLength(55);
+  it('covers every slash command with a classification (56 total)', () => {
+    expect(Object.keys(EFFORT_POLICY)).toHaveLength(56);
   });
 
-  it('uses only the four valid effort levels for every value', () => {
+  it('uses only the five valid effort levels for every value', () => {
     for (const [key, value] of Object.entries(EFFORT_POLICY)) {
       expect(VALID_LEVELS.has(value), `key=${key} value=${value}`).toBe(true);
     }

@@ -9,6 +9,10 @@ toolset: team
 
 Autonomous long-running mode for **3~4시간 자리 비움 / 야간 자율 작업**. Runs Phase 0~6 (INTAKE → PLAN → EXECUTE → CROSS_CHECK → VERIFY → IMPROVE → REPORT) without user intervention. Pauses automatically on dangerous actions (PRD §5.5). DATA POLICY 엄격 준수 — 외부 DB / 외부 플러그인 / 외부 데이터 송신 금지.
 
+## Recommend-hint Reception
+
+When the prompt contains `[artibot:hint recommend=autopilot]`, surface to the user: "자리 비우셔도 되면 오토파일럿으로 돌릴 수 있어요." and wait for confirmation before starting a session. This is advisory — see `CLAUDE.md` "Recommend-hint surfacing rule" and `docs/ORCHESTRATION-ROUTING.md`.
+
 ## Subcommands
 
 | 명령 | 설명 | Phase |
@@ -209,7 +213,7 @@ if (pfInstr?.suppress) { /* warnings: state.preflightWarnings에 누적 + 계속
 
 ### Step 3 — Phase Execution Loop
 
-엔진이 반환한 `instruction` 객체를 따라 **Phase 0 ~ 6을 순차 실행**한다. 각 Phase 완료 시 `engine.recordPhaseResult(sessionId, phase, result)`로 session-store 업데이트.
+엔진이 반환한 `instruction` 객체를 따라 **Phase 0 ~ 6을 순차 실행**한다. 각 Phase 완료 시 `engine.recordPhaseResult(state, { phase, status, ...result })`로 session-store 업데이트 (1번 인자는 `loadSession(sessionId)`로 얻은 **state 객체**, 2번 인자에 `phase`/`status` 포함 payload).
 
 **자동 통합 (default 모드 기본 ON)**:
 - 각 Phase 완료 직후 `engine.notePhaseCost(state, phase, { tokensIn, tokensOut, costUsd, model })` 호출 — Phase별 토큰/비용을 telemetry + state.usage에 기록
@@ -224,6 +228,7 @@ if (pfInstr?.suppress) { /* warnings: state.preflightWarnings에 누적 + 계속
 - `Task(subagent_type="artibot:planner", model="opus", prompt="[Autopilot Phase 1] PRD: {prdPath}\n\n분해 + 위험 식별 + 병렬 팀 구성 제안")`
 
 #### Phase 2 — PARALLEL EXECUTE
+- EXECUTE 러너는 통합 분류기(`lib/cognitive/workflow-plan.js`)가 선출한다: 현재 기본값은 `TeamCreate` (adaptive 팀)이며, 결정적 workflow-runner 로의 교체는 향후 Option-B 단계의 pluggable 러너다 (현 동작 불변).
 - `--no-team` 미설정 시: `TeamCreate(team_name="autopilot-{sessionId}", description="{task}")` → 병렬 `Task()` 스폰.
 - 30분(또는 `--checkpoint`)마다 WIP commit: `git commit -m "wip(autopilot): phase2 checkpoint {sessionId}"`. SHA를 `engine.recordCheckpoint(sessionId, sha)`로 기록.
 

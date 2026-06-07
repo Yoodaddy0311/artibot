@@ -9,6 +9,49 @@ import { atomicWriteSync, parseJSON, readStdin, writeStdout } from '../utils/ind
 import { existsSync, readFileSync } from 'node:fs';
 import { cleanupStaleStateTmpFiles, createErrorHandler, extractAgentId, extractAgentRole, getStatePath } from '../../lib/core/hook-utils.js';
 import { withFileLock } from '../../lib/core/file-lock.js';
+import { getPolicyModel } from '../../lib/core/model-policy.js';
+import { loadConfig } from '../../lib/core/config.js';
+
+/**
+ * Read an explicitly-requested model from the hook payload, if present.
+ * Spawn payloads carry the model under varying keys depending on the caller;
+ * check all known locations defensively.
+ * @param {object} hookData - Parsed hook data
+ * @returns {string|null} The requested model, or null when none was specified
+ */
+function extractRequestedModel(hookData) {
+  return hookData?.model || hookData?.tool_input?.model || hookData?.agent_model || null;
+}
+
+/**
+ * Resolve the policy-canonical model for an agent type and compare it against
+ * any explicitly-requested model.
+ *
+ * Best-effort and advisory only — must NEVER throw (teammate registration
+ * runs regardless). Hooks run as a fresh Node process with an empty config
+ * cache, so the policy is hydrated explicitly via loadConfig(); if hydration
+ * fails or the agent is not listed in any populated policy bucket
+ * (getPolicyModel → null), the canonical model is untrustworthy and the
+ * advisory is suppressed rather than emitting a false-positive warning.
+ *
+ * @param {string} agentType - The spawning agent's type
+ * @param {string|null} requestedModel - Model explicitly requested in the payload
+ * @returns {Promise<{ canonicalModel: string|null, modelMismatch: boolean }>}
+ */
+async function checkModelPolicy(agentType, requestedModel) {
+  try {
+    const config = await loadConfig();
+    // getPolicyModel returns the bucket model only when the agent is listed in
+    // a populated policy; null means empty/unloaded policy OR unknown agent —
+    // either way the canonical is not trustworthy, so we don't warn.
+    const canonicalModel = getPolicyModel(agentType, config);
+    if (!canonicalModel) return { canonicalModel: null, modelMismatch: false };
+    const modelMismatch = Boolean(requestedModel) && requestedModel !== canonicalModel;
+    return { canonicalModel, modelMismatch };
+  } catch {
+    return { canonicalModel: null, modelMismatch: false };
+  }
+}
 
 function loadState() {
   const statePath = getStatePath();
@@ -75,6 +118,8 @@ async function main() {
   cleanupStaleStateTmpFiles(statePath);
 
   if (action === 'start') {
+    const requestedModel = extractRequestedModel(hookData);
+    const { canonicalModel, modelMismatch } = await checkModelPolicy(agentType, requestedModel);
     withFileLock(statePath, () => {
       const loaded = loadState();
       const teamCtx = initTeamContext(loaded, hookData, agentRole);
@@ -88,14 +133,18 @@ async function main() {
             agentType,
             active: true,
             startedAt: new Date().toISOString(),
+            canonicalModel,
+            modelMismatch,
           },
         },
       };
       saveState(updatedState);
     });
-    writeStdout({
-      message: `[team] Agent registered: ${agentId} (${agentRole})`,
-    });
+    let message = `[team] Agent registered: ${agentId} (${agentRole})`;
+    if (modelMismatch) {
+      message += `\n[model-policy] '${agentType}' spawned with ${requestedModel} but policy says ${canonicalModel}`;
+    }
+    writeStdout({ message });
   } else if (action === 'stop') {
     withFileLock(statePath, () => {
       const loaded = loadState();

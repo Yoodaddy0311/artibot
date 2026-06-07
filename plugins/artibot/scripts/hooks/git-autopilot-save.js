@@ -30,6 +30,23 @@ function readArtibotBypassPreCommitHooks() {
   }
 }
 
+/**
+ * Read `git.autopilot.commitStrategy` from artibot.config.json.
+ * Values: "semantic" (stash checkpoint, default), "interval" (legacy WIP
+ * commits), "none" (skip all auto-saves).
+ * @returns {"semantic"|"interval"|"none"}
+ */
+function readCommitStrategy() {
+  try {
+    const cfg = JSON.parse(readFileSync(resolveConfigPath('artibot.config.json'), 'utf-8'));
+    const strategy = cfg?.git?.autopilot?.commitStrategy;
+    if (strategy === 'interval' || strategy === 'none') return strategy;
+    return 'semantic';
+  } catch {
+    return 'semantic';
+  }
+}
+
 // -------------------------------------------------------------------------
 // Helpers
 // -------------------------------------------------------------------------
@@ -177,6 +194,117 @@ function createWipCommit(cwd, opts = {}) {
   }
 }
 
+/**
+ * Create a stash-based checkpoint. The stash entry persists in the reflog for
+ * crash recovery.
+ *
+ * NON-DESTRUCTIVE by design: uses `git stash create` + `git stash store`, which
+ * build and record a stash commit object WITHOUT ever touching the working tree.
+ *
+ * History: the previous implementation used `git stash push --include-untracked`
+ * followed by `git stash pop`. `git stash push` internally hard-resets the
+ * working tree to HEAD (visible in the reflog as "reset: moving to HEAD") before
+ * popping it back. That left a window where the tree was at HEAD and a concurrent
+ * teammate's uncommitted edits lived only in the stash — and on a `pop` conflict
+ * (or two interleaved checkpoint cycles) the edits silently vanished from the
+ * working tree. `create` + `store` removes that entire failure class: the tree is
+ * never reset, so concurrent agent work on disk is never disturbed.
+ *
+ * Trade-off: `git stash create` snapshots tracked changes only (not untracked
+ * files). That is acceptable here — untracked files are never removed from disk
+ * (the tree is untouched), so they stay safe; full-capture recovery is the job of
+ * the "interval" WIP-commit strategy (`git add -A`), not this checkpoint.
+ *
+ * @param {string} cwd
+ * @param {{ phase?: string }} [opts]
+ * @returns {boolean} true if a checkpoint was created
+ */
+function createStashCheckpoint(cwd, opts = {}) {
+  const phase = opts.phase ?? 'unknown';
+  const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
+  const label = `artibot-checkpoint-${phase}-${timestamp}`;
+  let sha;
+  try {
+    // `git stash create` builds a stash commit from the current tracked changes
+    // and prints its SHA WITHOUT modifying the working tree. Empty output means
+    // there was nothing to checkpoint (clean tree).
+    sha = execSync('git stash create', {
+      cwd,
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: 5000,
+      windowsHide: true,
+    }).trim();
+  } catch {
+    // create can fail if git is not initialized or on a bare repo.
+    return false;
+  }
+
+  if (!sha) {
+    // Nothing to checkpoint — working tree had no tracked changes.
+    return false;
+  }
+
+  // Record the snapshot in the stash reflog for crash recovery. `store` does not
+  // touch the working tree either.
+  try {
+    execSync(`git stash store -m "${label}" ${sha}`, {
+      cwd,
+      stdio: 'ignore',
+      timeout: 2000,
+      windowsHide: true,
+    });
+  } catch {
+    // Snapshot object still exists in the object DB even if store fails; the
+    // working tree is unaffected, so this is non-fatal.
+    return false;
+  }
+
+  return true;
+}
+
+/**
+ * Remove old artibot checkpoint stashes beyond the retention limit.
+ * Keeps the most recent entries and drops the oldest.
+ *
+ * @param {string} cwd
+ * @param {number} maxStashes maximum checkpoint stashes to retain (default 10)
+ */
+function cleanupOldStashes(cwd, maxStashes = 10) {
+  try {
+    const raw = execSync('git stash list', {
+      cwd,
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: 2000,
+      windowsHide: true,
+    });
+    const lines = raw.trim().split('\n').filter(Boolean);
+    // Collect indices of artibot checkpoint entries (in reflog order, 0 = newest).
+    const checkpoints = [];
+    for (const line of lines) {
+      if (!line.includes('artibot-checkpoint-')) continue;
+      const match = line.match(/^stash@\{(\d+)\}/);
+      if (match) checkpoints.push(Number(match[1]));
+    }
+    if (checkpoints.length <= maxStashes) return;
+
+    // Drop oldest first. Dropping shifts indices, so we process from highest
+    // index to lowest to avoid invalidation.
+    const toDrop = checkpoints.slice(maxStashes).sort((a, b) => b - a);
+    for (const idx of toDrop) {
+      execSync(`git stash drop stash@{${idx}}`, {
+        cwd,
+        stdio: 'ignore',
+        timeout: 2000,
+        windowsHide: true,
+      });
+    }
+  } catch {
+    // Non-critical — silently ignore cleanup failures.
+  }
+}
+
 // -------------------------------------------------------------------------
 // Main
 // -------------------------------------------------------------------------
@@ -195,9 +323,16 @@ async function main() {
   const config = loadConfig(repoRoot);
   if (!config) return;
 
-  // Default 120m (v4.7.8): memory + SESSION-NOTES.md handle context preservation;
-  // git WIP is now strictly a crash safety net, not a per-half-hour log.
-  const intervalMs = (config.wipIntervalMinutes ?? 120) * 60 * 1000;
+  const strategy = config.commitStrategy ?? readCommitStrategy();
+
+  // commitStrategy: "none" — disable all auto-save activity.
+  if (strategy === 'none') return;
+
+  // Default interval depends on strategy:
+  //   "semantic" (stash) → 30 min — lightweight, no history pollution.
+  //   "interval" (WIP commit) → 120 min — heavier, legacy crash safety.
+  const defaultInterval = strategy === 'semantic' ? 30 : 120;
+  const intervalMs = (config.wipIntervalMinutes ?? defaultInterval) * 60 * 1000;
   const state = loadState(repoRoot);
   const now = Date.now();
   const lastWip = state.lastWipAt ? new Date(state.lastWipAt).getTime() : 0;
@@ -205,24 +340,42 @@ async function main() {
   if (now - lastWip < intervalMs) return; // Not yet time
 
   if (!hasMeaningfulChanges(repoRoot)) {
-    // Only auto-generated files dirty (or fully clean) — skip WIP commit.
+    // Only auto-generated files dirty (or fully clean) — skip save.
     // Update timestamp to avoid rechecking immediately.
     saveState(repoRoot, { ...state, lastWipAt: new Date(now).toISOString() });
     return;
   }
 
-  // bypassPreCommitHooks: per-repo override (.git/autopilot.json) takes
-  // precedence; falls back to artibot.config.json git.autopilot.bypassPreCommitHooks.
-  const bypassPreCommitHooks = config?.bypassPreCommitHooks === true
-    || readArtibotBypassPreCommitHooks();
-  const saved = createWipCommit(repoRoot, { bypassPreCommitHooks });
   const newTimestamp = new Date(now).toISOString();
-  saveState(repoRoot, { ...state, lastWipAt: newTimestamp });
 
-  if (saved) {
-    process.stderr.write(`[artibot:git-autopilot-save] WIP auto-saved at ${newTimestamp}\n`);
+  if (strategy === 'semantic') {
+    // Stash-based checkpoint — no git history pollution.
+    const phase = config.currentPhase ?? 'autopilot';
+    const saved = createStashCheckpoint(repoRoot, { phase });
+    saveState(repoRoot, { ...state, lastWipAt: newTimestamp });
+
+    if (saved) {
+      cleanupOldStashes(repoRoot, config.maxStashes ?? 10);
+      process.stderr.write(
+        `[artibot:git-autopilot-save] stash checkpoint created at ${newTimestamp}\n`,
+      );
+    } else {
+      process.stderr.write(
+        '[artibot:git-autopilot-save] stash checkpoint skipped — no changes or git error\n',
+      );
+    }
   } else {
-    process.stderr.write('[artibot:git-autopilot-save] WIP commit failed — check git status\n');
+    // strategy === "interval" — legacy WIP commit behavior.
+    const bypassPreCommitHooks = config?.bypassPreCommitHooks === true
+      || readArtibotBypassPreCommitHooks();
+    const saved = createWipCommit(repoRoot, { bypassPreCommitHooks });
+    saveState(repoRoot, { ...state, lastWipAt: newTimestamp });
+
+    if (saved) {
+      process.stderr.write(`[artibot:git-autopilot-save] WIP auto-saved at ${newTimestamp}\n`);
+    } else {
+      process.stderr.write('[artibot:git-autopilot-save] WIP commit failed — check git status\n');
+    }
   }
 
   // Do not write to stdout — pass prompt through unchanged

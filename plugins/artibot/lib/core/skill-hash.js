@@ -15,6 +15,9 @@ import { readFile } from 'node:fs/promises';
 const FRONTMATTER_FENCE = '---';
 const HASH_LENGTH = 8;
 
+/** Valid lifecycle stage values for SKILL.md frontmatter. */
+const VALID_STAGES = new Set(['experimental', 'stable', 'deprecated']);
+
 /**
  * Compute the deterministic 8-char hash of arbitrary content.
  * Normalizes line endings (CRLF -> LF) and trims trailing whitespace
@@ -92,6 +95,9 @@ export async function readSkillFrontmatter(skillPath) {
     const value = line.slice(colonIdx + 1).trim();
     if (key) frontmatter[key] = value;
   }
+  // Lifecycle stage: default to 'stable', reject invalid values silently.
+  const rawStage = frontmatter.stage;
+  frontmatter.stage = (rawStage && VALID_STAGES.has(rawStage)) ? rawStage : 'stable';
   return {
     frontmatter,
     body: lines.slice(closingIdx + 1).join('\n'),

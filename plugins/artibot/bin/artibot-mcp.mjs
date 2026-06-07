@@ -107,7 +107,7 @@ async function loadServerModules() {
   }
   try {
     const bridgesMod = await import(
-      new URL('../lib/mcp/bridges/index.js', import.meta.url).href
+      new URL('../lib/mcp/bridge/index.js', import.meta.url).href
     );
     mods.wireBridges = bridgesMod.wireBridges;
   } catch (err) {

@@ -26,7 +26,11 @@ Parse $ARGUMENTS:
    - Current dependency graph
    - Existing design patterns in use
    - Technology stack and framework constraints
-3. **Delegate**: Route to Task(architect) for:
+3. **Delegate**: Resolve the route via the CLI bridge, then spawn the agent:
+   ```bash
+   node "${CLAUDE_PLUGIN_ROOT}/scripts/route-lifecycle.mjs" design "$ARGUMENTS"
+   ```
+   This calls `routeLifecycle('design', { hint })` from `lib/core/lifecycle-router.js` and prints the `{agent, toolset, skills, candidates}` resolution as a single JSON line (default agent: `architect`). Route to Task(<resolved agent>) for:
    - Requirements analysis from target description
    - Design alternative generation (N options)
    - Trade-off matrix evaluation per alternative

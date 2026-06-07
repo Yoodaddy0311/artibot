@@ -70,7 +70,7 @@ Compare the current render against the baseline:
 
 Always use the **lowest acceptable threshold** for your use case to avoid false positives.
 
-### Claude Opus 4.7 고해상도 가이드
+### Claude Opus 4.7+/4.8 고해상도 가이드
 - Playwright 스크린샷 기본 해상도: **2576px** (이전 1568px) — 3.75MP 이내
 - 모델 좌표는 실제 픽셀과 1:1 매핑 → 스케일 팩터 계산 불필요
 - 고해상도는 토큰을 더 소모 — 고충실도가 불필요한 경우 다운샘플 권장

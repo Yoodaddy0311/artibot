@@ -4,7 +4,7 @@ Auto-loads when Claude accesses `plugins/artibot/`.
 
 ## Stack
 
-Claude Native Agent Teams API (TeamCreate/SendMessage/TaskCreate) + 28 agents + 111 skills + 68 commands. ESM only, `"type": "module"`, zero runtime deps, Node >=20.
+Claude Native Agent Teams API (TeamCreate/SendMessage/TaskCreate) + 28 agents + 111 skills + 70 commands. ESM only, `"type": "module"`, zero runtime deps, Node >=20.
 
 ## 5-Layer Architecture
 
@@ -38,11 +38,24 @@ Orchestrator delegates by default. Teammates execute and cross-check.
 
 Violation symptom: "all work done inline by main thread" = DNA breach. Opt-out: `--no-team` in prompt, or `team.autoApply: false` in `artibot.config.json`.
 
-**Claude 4.7 override**: 4.7 reduces sub-agents by default. This policy explicitly reverses that default for this repo.
+**Claude 4.8 Auto-Team**: 4.8 natively supports large-scale parallel delegation — ultracode (xhigh effort + always-on multi-agent permission via mid-conversation system messages) makes this a model-level capability. (`ultracode` is the official Claude Code **2.1.160** rename of the former "workflow" trigger keyword.) Artibot's Operator-Waits DNA still owns the *automatic* trigger: parallel teams fire on intent without the user typing `/team`. Note: the harness `Workflow` tool (deterministic JS orchestration via `agent()`/`parallel()`/`pipeline()`) is a SEPARATE, explicit-opt-in mechanism — it does not auto-fire.
+
+> **Naming collision (external)** — Claude Code **2.1.154** shipped a platform feature called **"Dynamic Workflows"** (auto-orchestration across tens–hundreds of background agents). It is NOT the same as the harness `Workflow` tool, NOT Artibot's `team`/Auto-Team, and NOT `ultracode`. Three distinct concepts share the word "workflow" — see [docs/ORCHESTRATION-GLOSSARY.md](docs/ORCHESTRATION-GLOSSARY.md).
+
+**Canonical evaluator**: the team trigger AND per-teammate effort/budget are both derived from one complexity classification by `lib/cognitive/workflow-plan.js#buildWorkflowPlan`; the numeric thresholds live only in `artibot.config.json#/team/autoApplyTriggers` (the table above is a summary).
+
+Routing: see [docs/ORCHESTRATION-ROUTING.md](docs/ORCHESTRATION-ROUTING.md) — canonical decision tree, 2-axis model, and auto-fire rules for all four mechanisms.
 
 ## Auto-invoke Principle
 
 Never tell the user to type slash-commands. Detect intent → trigger command/skill/agent silently. Users include non-developers. Applies to `/team`, `/implement`, `/plan`, `/code-review`, `/verify`, `/daily` — all commands. Inner command workflows (phases, checklists) must run in full, never shortened.
+
+**Recommend-hint surfacing rule**: When the model receives an `[artibot:hint recommend=X]` directive (injected by `scripts/hooks/runtime-prompt.js`), it **must** surface the recommendation to the user as a single Korean sentence and wait for confirmation before acting. This is advisory only — the hint never auto-fires `/workflow` or `/autopilot`. Example phrasings:
+
+- `recommend=workflow` (동형 반복 감지): "이 작업은 같은 패턴 반복이라 워크플로우로 돌리면 더 빠르고 결과가 일정해요. 그렇게 할까요?"
+- `recommend=autopilot` (대형 무인작업 적합): "자리 비우셔도 되면 오토파일럿으로 돌릴 수 있어요."
+
+See also: `commands/team.md` (hint cross-reference), `commands/autopilot.md` (hint cross-reference), `docs/ORCHESTRATION-ROUTING.md` (advisory-only rule).
 
 ## Quality Gates
 

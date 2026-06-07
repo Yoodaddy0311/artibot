@@ -108,6 +108,45 @@ export function checkVersionSync(marketplaceVersion, pluginVersion, packageVersi
   };
 }
 
+export function checkReleaseCurrentSync(releaseCurrent, version) {
+  const inSync = Boolean(version) && releaseCurrent === version;
+  return {
+    id: 'manifest.release-current-sync',
+    label: 'release.current matches manifest version',
+    status: inSync ? 'pass' : 'fail',
+    detail: inSync ? null : `release.current=${releaseCurrent} version=${version}`,
+  };
+}
+
+// qualityMetrics.tests is a release-synced count (see sync-marketplace-meta.mjs).
+// We can't recompute the exact test-case count cheaply here, but we CAN catch the
+// classic staleness failure mode: a count left frozen across many releases until
+// it is wildly below reality. Floor guards against the 4918-while-actually-9600
+// drift the 2026-06-05 audit found, without coupling the validator to an exact
+// (and constantly moving) number.
+const MIN_EXPECTED_TESTS = 5000;
+
+export function checkQualityMetricsTests(qualityMetrics) {
+  const tests = qualityMetrics?.tests;
+  if (typeof tests !== 'number' || !Number.isInteger(tests)) {
+    return {
+      id: 'manifest.quality-tests',
+      label: 'qualityMetrics.tests is a positive integer',
+      status: 'fail',
+      detail: `tests=${tests} (expected positive integer)`,
+    };
+  }
+  const ok = tests >= MIN_EXPECTED_TESTS;
+  return {
+    id: 'manifest.quality-tests',
+    label: `qualityMetrics.tests is present and not obviously stale (>= ${MIN_EXPECTED_TESTS})`,
+    status: ok ? 'pass' : 'warn',
+    detail: ok
+      ? null
+      : `tests=${tests} below floor ${MIN_EXPECTED_TESTS} — likely stale; run sync-marketplace-meta.mjs`,
+  };
+}
+
 export function checkReadmeSections(readmeText) {
   if (!readmeText) {
     return {
@@ -230,6 +269,12 @@ export async function runChecks({ pluginRoot = PLUGIN_ROOT, repoRoot = REPO_ROOT
     pluginManifestRead.ok ? pluginManifestRead.data.version : null,
     packageJsonRead.ok ? packageJsonRead.data.version : null,
   ));
+
+  // Release / metrics freshness (auto-healed by sync-marketplace-meta.mjs).
+  if (manifestRead.ok) {
+    results.push(checkReleaseCurrentSync(manifest.release?.current, manifest.version));
+    results.push(checkQualityMetricsTests(manifest.qualityMetrics));
+  }
 
   // README
   const readmeRead = await readTextSafe(resolve(pluginRoot, 'README.md'));

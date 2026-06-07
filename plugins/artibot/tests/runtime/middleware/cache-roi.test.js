@@ -39,6 +39,7 @@ describe('_safeInt', () => {
 
 describe('_resolvePricing', () => {
   it('matches opus / sonnet / haiku by substring', () => {
+    expect(_resolvePricing('claude-opus-4-8')).toBe(_PRICING.opus);
     expect(_resolvePricing('claude-opus-4-7')).toBe(_PRICING.opus);
     expect(_resolvePricing('claude-sonnet-4-6')).toBe(_PRICING.sonnet);
     expect(_resolvePricing('claude-haiku-4-5-20251001')).toBe(_PRICING.haiku);

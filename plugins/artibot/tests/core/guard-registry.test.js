@@ -140,16 +140,16 @@ describe('guard-registry', () => {
   });
 
   describe('registerBuiltinGuards', () => {
-    it('registers 8 guards', () => { registerBuiltinGuards(); expect(listGuards()).toHaveLength(8); });
+    it('registers 9 guards', () => { registerBuiltinGuards(); expect(listGuards()).toHaveLength(9); });
     it('has correct names', () => {
       registerBuiltinGuards();
       const names = listGuards().map(g => g.name).sort();
-      expect(names).toEqual(['bash-lint', 'console-log', 'content-secret', 'dangerous-command', 'file-size', 'hardcoded-secret', 'path-portability', 'sensitive-file']);
+      expect(names).toEqual(['bash-lint', 'console-log', 'content-secret', 'dangerous-command', 'env-var-exposure', 'file-size', 'hardcoded-secret', 'path-portability', 'sensitive-file']);
     });
-    it('5 pre + 3 post', () => {
+    it('5 pre + 4 post', () => {
       registerBuiltinGuards();
       expect(listGuards('pre')).toHaveLength(5);
-      expect(listGuards('post')).toHaveLength(3);
+      expect(listGuards('post')).toHaveLength(4);
     });
   });
 
@@ -225,6 +225,61 @@ describe('guard-registry', () => {
       readFileSync.mockReturnValue(Array.from({ length: 850 }, (_, i) => 'line' + i).join('\n'));
       const r = executeChain('post', 'Edit', makeHookData('Edit', { tool_input: { file_path: '/p/big.js' } }));
       expect(r.warnings.some(w => w.includes('800 lines'))).toBe(true);
+    });
+  });
+
+  describe('env-var-exposure guard (post Bash)', () => {
+    beforeEach(() => registerBuiltinGuards());
+
+    it('warns on assignment like ANTHROPIC_API_KEY=sk-xxx', () => {
+      const r = executeChain('post', 'Bash', makeHookData('Bash', {
+        tool_result: 'ANTHROPIC_API_KEY=sk-ant-abc123',
+      }));
+      expect(r.warnings.some(w => w.includes('ANTHROPIC_API_KEY'))).toBe(true);
+    });
+
+    it('warns on export GITHUB_TOKEN', () => {
+      const r = executeChain('post', 'Bash', makeHookData('Bash', {
+        tool_result: 'export GITHUB_TOKEN=ghp_abc123',
+      }));
+      expect(r.warnings.some(w => w.includes('GITHUB_TOKEN'))).toBe(true);
+    });
+
+    it('warns on shell expansion $AWS_SECRET_ACCESS_KEY', () => {
+      const r = executeChain('post', 'Bash', makeHookData('Bash', {
+        tool_result: 'using $AWS_SECRET_ACCESS_KEY for auth',
+      }));
+      expect(r.warnings.some(w => w.includes('AWS_SECRET_ACCESS_KEY'))).toBe(true);
+    });
+
+    it('warns on braced expansion ${JWT_SECRET}', () => {
+      const r = executeChain('post', 'Bash', makeHookData('Bash', {
+        tool_result: 'value is ${JWT_SECRET}',
+      }));
+      expect(r.warnings.some(w => w.includes('JWT_SECRET'))).toBe(true);
+    });
+
+    it('passes on non-blocklisted var NODE_ENV=production', () => {
+      const r = executeChain('post', 'Bash', makeHookData('Bash', {
+        tool_result: 'NODE_ENV=production',
+      }));
+      expect(r.warnings).toHaveLength(0);
+    });
+
+    it('passes on safe env reference like HOME=/Users/dev', () => {
+      const r = executeChain('post', 'Bash', makeHookData('Bash', {
+        tool_result: 'HOME=/Users/dev PATH=/usr/bin',
+      }));
+      expect(r.warnings).toHaveLength(0);
+    });
+
+    it('reports multiple blocklisted vars in one warning', () => {
+      const r = executeChain('post', 'Bash', makeHookData('Bash', {
+        tool_result: 'OPENAI_API_KEY=sk-xxx\nDATABASE_URL=postgres://host/db',
+      }));
+      const w = r.warnings.join(' ');
+      expect(w).toMatch(/OPENAI_API_KEY/);
+      expect(w).toMatch(/DATABASE_URL/);
     });
   });
 
@@ -314,7 +369,7 @@ describe('guard-registry', () => {
     it('alongside builtins', () => {
       registerBuiltinGuards();
       registerGuard({ name: 'custom', phase: 'pre', tools: ['Bash'], check: () => null });
-      expect(listGuards()).toHaveLength(9);
+      expect(listGuards()).toHaveLength(10);
     });
     it('blocks before builtins', () => {
       registerGuard({ name: 'first', phase: 'pre', tools: ['Bash'],
@@ -378,6 +433,18 @@ describe('guard-registry', () => {
     });
   });
 
+  describe('fail-closed on guard exception', () => {
+    it('returns block when a guard throws', () => {
+      registerGuard({ name: 'exploding', phase: 'pre', tools: ['Bash'],
+        check: () => { throw new Error('unexpected failure'); } });
+      const r = executeChain('pre', 'Bash', makeHookData('Bash', { tool_input: { command: 'ls' } }));
+      expect(r.decision).toBe('block');
+      expect(r.reason).toContain("Guard 'exploding' threw");
+      expect(r.reason).toContain('unexpected failure');
+      expect(r.guardName).toBe('exploding');
+    });
+  });
+
   describe('guard category metadata', () => {
     it('defaults to artibot-policy when category omitted', () => {
       registerGuard({ name: 'untagged', phase: 'pre', tools: ['Bash'], check: () => null });
@@ -389,12 +456,12 @@ describe('guard-registry', () => {
         name: 'bad', phase: 'pre', tools: ['Bash'], category: 'unknown', check: () => null,
       })).toThrow('invalid category');
     });
-    it('builtin categories: 3 security-critical, 5 artibot-policy', () => {
+    it('builtin categories: 4 security-critical, 5 artibot-policy', () => {
       registerBuiltinGuards();
       const all = listGuards();
       const sec = all.filter((g) => g.category === 'security-critical').map((g) => g.name).sort();
       const pol = all.filter((g) => g.category === 'artibot-policy').map((g) => g.name).sort();
-      expect(sec).toEqual(['bash-lint', 'dangerous-command', 'path-portability']);
+      expect(sec).toEqual(['bash-lint', 'dangerous-command', 'env-var-exposure', 'path-portability']);
       expect(pol).toEqual(['console-log', 'content-secret', 'file-size', 'hardcoded-secret', 'sensitive-file']);
     });
   });

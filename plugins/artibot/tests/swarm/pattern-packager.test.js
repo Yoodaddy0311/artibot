@@ -797,6 +797,35 @@ describe('loadAllPatterns() - error fallback + agent type', () => {
     expect(errorKeys).toHaveLength(1);
   });
 
+  it('adapts memory-tracker { entries } shape into packageable error patterns', async () => {
+    // memory/error-patterns.json uses the raw { entries: [...] } shape, not
+    // { patterns: [...] }. Three entries share one message signature so they
+    // aggregate to sampleSize=3 and clear MIN_SAMPLE_SIZE; a lone entry does not.
+    const mkEntry = (message) => ({ type: 'error', data: { message } });
+    const memEntries = {
+      entries: [
+        mkEntry('Connection refused on port 5432'),
+        mkEntry('Connection refused on port 5432'),
+        mkEntry('Connection refused on port 5432'),
+        mkEntry('Some other one-off failure'),
+      ],
+    };
+    // tool=null, error(primary)=null, error(fallback)=entries, success/team/agent/quality=null
+    readJsonFile
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(memEntries)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null);
+    const result = await packagePatterns();
+    const errorKeys = Object.keys(result.weights.errors);
+    // Only the recurring signature (sampleSize 3) survives MIN_SAMPLE_SIZE.
+    expect(errorKeys).toHaveLength(1);
+    expect(result.weights.errors[errorKeys[0]].sampleSize).toBe(3);
+  });
+
   it('does not fall back for non-error types', async () => {
     // All return null -> no fallback attempted for tool/success/team/agent/quality
     readJsonFile.mockResolvedValue(null);

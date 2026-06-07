@@ -15,7 +15,7 @@ import { generatePRD } from './prd-generator.js';
 import { generateReport } from './report-generator.js';
 import { parseGoalContract } from './prd-parser.js';
 import { runPhaseGoalEvaluate } from './goal-loop.js';
-import { acquireSessionKeepAwake, buildTuiInstruction, makeInitialState, maybeDangerNote, notePhaseProgress, persist, recordPhase, releaseSessionKeepAwake, tick } from './_engine-helpers.js';
+import { acquireSessionKeepAwake, buildCostWarningInstruction, buildTuiInstruction, makeInitialState, maybeDangerNote, notePhaseCost, notePhaseProgress, persist, recordPhase, releaseSessionKeepAwake, tick } from './_engine-helpers.js';
 import { loadSession } from './session-store.js';
 import { pauseReason, shouldPause } from './safety.js';
 import {
@@ -680,6 +680,7 @@ export async function abortAutopilot(sessionId, { graceful = true } = {}) {
 }
 
 export { notifyCompletion, notifyDanger, notifyPause, notifyPhaseProgress };
+export { notePhaseCost, buildCostWarningInstruction };
 
 /**
  * List active autopilot worktrees as a normalized array.

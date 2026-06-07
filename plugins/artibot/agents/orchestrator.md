@@ -85,8 +85,10 @@ The orchestrator is a **coordination-only** agent. It never writes implementatio
 5. **ZERO-SKIP POLICY** - Decompose EVERY part of the user's request into separate tasks. If user asks for A, B, and C, create THREE tasks. Never silently drop any part.
 6. **VERIFY COMPLETION** - When teammates report done, check their evidence. "Done" without proof = NOT done. Require file paths, line numbers, or test results as evidence.
 
-### Claude 4.7 Override (v2.2.1+)
-Claude Opus 4.7은 기본적으로 서브에이전트 생성을 줄이는 경향이 있다. **Artibot의 Operator-Waits DNA는 이 기본값을 명시적으로 오버라이드한다.** 2+ 독립 서브태스크가 감지되면 유저가 `/team`을 입력하지 않아도 **반드시** TeamCreate로 병렬 팀을 소환한다. 인라인 구현은 DNA 위반.
+### Claude 4.8 Auto-Team (Operator-Waits DNA) (v2.3.0+)
+Claude Opus 4.8은 네이티브 병렬 위임을 지원한다 — ultracode(xhigh effort + mid-conversation system messages로 멀티에이전트 실행 상시 허가)가 대규모 병렬 위임을 모델 차원에서 가능하게 한다. **Artibot의 Operator-Waits DNA는 이 네이티브 역량을 자동 트리거로 묶는다 (Auto-Team):** 모델이 병렬을 *허용*하더라도, 유저가 `/team`을 입력하지 않아도 2+ 독립 서브태스크가 감지되면 **반드시** TeamCreate로 병렬 팀을 소환하는 것은 Artibot이 보장한다. 인라인 구현은 DNA 위반.
+
+> **용어 주의**: 여기서 설명하는 "Auto-Team"은 하네스의 `Workflow` 도구(결정론적 JS 오케스트레이션, 명시적 옵트인 전용)와 별개다. 두 메커니즘을 혼동하지 말 것.
 
 ### Responsibilities
 1. **Delegation Decision** - Classify request complexity and select Solo/Squad/Platoon level within the first 2 tool calls
@@ -258,6 +260,26 @@ Task(frontend-developer, team_name="feature-auth", name="fe-dev")
 Task(backend-developer, team_name="feature-auth", name="be-dev")
 Task(tdd-guide, team_name="feature-auth", name="test-lead")
 ```
+
+#### Per-Teammate Effort & Budget (unified workflow plan)
+
+The canonical evaluator for the team trigger AND per-teammate effort/budget is
+`lib/cognitive/workflow-plan.js#buildWorkflowPlan` — a single complexity
+classification drives both. When the runtime attaches it, read
+`task.meta.workflowPlan.teammates[i].effort` / `.budget` and prefix that
+teammate's spawn prompt:
+
+```
+[artibot:effort level=<teammates[i].effort>][artibot:task-budget max_tokens=<teammates[i].budget>]
+```
+
+- Each teammate's effort is clamped to `[parent−1, parent]`, so no teammate
+  ever exceeds the parent command's effort band.
+- **Fallback**: when `workflowPlan` is absent (or has no matching teammate),
+  use the parent effort from `task.meta.effort` instead.
+- Numeric thresholds are NEVER hardcoded here — they live only in
+  `artibot.config.json#/team/autoApplyTriggers`. This doc is a summary; the
+  evaluator is the source of truth.
 
 ### 3. Create Work Items
 
@@ -685,6 +707,17 @@ DELIVERABLES
 ```
 
 ---
+
+## Verification Checklist
+
+| # | Zone | Check | Method | FAIL Criteria |
+|---|------|-------|--------|---------------|
+| 1 | Pre | Complexity classified | Classify request as Solo/Squad/Platoon from keywords only, no codebase reading | Spending more than 30 seconds analyzing before team creation |
+| 2 | Pre | Zero-skip decomposition | Verify every part of user's multi-part request has a corresponding task | Any sub-request silently dropped without a task |
+| 3 | Active | Delegation, not execution | Confirm orchestrator creates tasks and assigns owners without reading/writing code | Orchestrator reading code files or writing implementation directly |
+| 4 | Active | Parallel maximization | Verify independent tasks are assigned to concurrent teammates, not serialized | Sequential assignment of tasks that have no dependency on each other |
+| 5 | Post | Completion evidence verified | Check that every "done" report from teammates includes file paths, line numbers, or test results | Accepting "done" status without proof artifacts |
+| 6 | Post | Clean shutdown | Confirm all teammates received shutdown_request and TeamDelete was called | Team left running with idle teammates after work is complete |
 
 ## Anti-Patterns (STRICTLY FORBIDDEN)
 

@@ -56,7 +56,7 @@ async function resolveCommandEffort(commandName, pluginRoot) {
 /**
  * Persist the detected command + effort to runtime/ for downstream consumers
  * (statusline, observability, future native effort API wiring).
- * @param {{ command: string, effort: string } | null} meta
+ * @param {{ command: string, effort: string, baseline?: string, shift?: number, reason?: string } | null} meta
  * @param {string} pluginRoot
  */
 function persistEffortMeta(meta, pluginRoot) {
@@ -87,9 +87,9 @@ async function applyNativeEffortHint(effortLevel, pluginRoot) {
   try {
     const routerPath = path.join(pluginRoot, 'lib', 'cognitive', 'router.js');
     const { setNativeEffortHint } = await import(toFileUrl(routerPath));
-    // Router maps 'xhigh' into the 'high' effort band (system 2 override).
-    const normalized = effortLevel === 'xhigh' ? 'high' : effortLevel;
-    setNativeEffortHint({ effortLevel: normalized });
+    const NATIVE_API_FALLBACK = { max: 'high', xhigh: 'high', high: 'high', medium: 'medium', low: 'low' };
+    const known = NATIVE_API_FALLBACK[effortLevel] ?? 'high';
+    setNativeEffortHint({ effortLevel: known, band: effortLevel });
   } catch {
     // Non-critical: fall back to heuristic routing
   }
@@ -109,6 +109,57 @@ function buildEffortDirective(meta) {
   if (!meta || !meta.effort) return '';
   const command = meta.command ? ` command=${meta.command}` : '';
   return `[artibot:effort level=${meta.effort}${command}]`;
+}
+
+/**
+ * Build the team directive injected when the unified workflow plan elects a
+ * parallel runner. Mirrors the effort/budget prefix pattern so the spawn
+ * signal reaches the model on the same leading line:
+ *   [artibot:team runner=team teammates=N][artibot:effort level=X][artibot:task-budget max_tokens=Y]…
+ *
+ * One effort+budget pair is serialized per teammate from the SAME source as the
+ * trigger decision (workflow-plan.js). Returns '' for non-team plans, an empty
+ * teammates list, or a missing/invalid plan so non-team prompts are untouched.
+ *
+ * @param {object|null|undefined} workflowPlan - tasks.meta.workflowPlan
+ * @returns {string}
+ */
+export function buildTeamDirective(workflowPlan) {
+  if (!workflowPlan || workflowPlan.runner !== 'team') return '';
+  const teammates = Array.isArray(workflowPlan.teammates) ? workflowPlan.teammates : [];
+  if (teammates.length === 0) return '';
+  const head = `[artibot:team runner=team teammates=${teammates.length}]`;
+  const perTeammate = teammates
+    .map((tm) => {
+      const effort = tm?.effort ? `[artibot:effort level=${tm.effort}]` : '';
+      const budget = typeof tm?.budget === 'number' && tm.budget > 0
+        ? `[artibot:task-budget max_tokens=${tm.budget}]`
+        : '';
+      return `${effort}${budget}`;
+    })
+    .join('');
+  return `${head}${perTeammate}`;
+}
+
+/**
+ * Build the ADVISORY recommendation directive injected when the unified
+ * workflow plan elects to SUGGEST (but not auto-fire) a heavier runner.
+ *
+ * Mirrors buildTeamDirective's style. Output format:
+ *   [artibot:hint recommend=workflow] | [artibot:hint recommend=autopilot]
+ *
+ * This is advisory ONLY — it surfaces workflowPlan.recommendation as text so the
+ * model/user can choose to opt in. It must NEVER spawn or auto-fire anything:
+ * the harness rule is that only inline|team auto-fire, while workflow|autopilot
+ * require explicit user opt-in. Returns '' when there is no plan or no
+ * recommendation so non-recommending prompts stay byte-identical.
+ *
+ * @param {object|null|undefined} workflowPlan - tasks.meta.workflowPlan
+ * @returns {string}
+ */
+export function buildRecommendationDirective(workflowPlan) {
+  if (!workflowPlan || !workflowPlan.recommendation) return '';
+  return `[artibot:hint recommend=${workflowPlan.recommendation}]`;
 }
 
 /**
@@ -326,17 +377,77 @@ function persistTokenUsage(context, pluginRoot) {
 }
 
 /**
+ * Derive Score-Aware effort signals from the prompt + hook payload.
+ * Both inputs are best-effort: a missing context_window simply omits the
+ * remainingContextRatio, and any router import failure yields an empty score.
+ *
+ * @param {string} prompt
+ * @param {object} hookData - Parsed hook payload (may lack context_window).
+ * @param {string} pluginRoot
+ * @returns {Promise<{ score?: number, remainingContextRatio?: number }>}
+ */
+async function deriveEffortSignals(prompt, hookData, pluginRoot) {
+  const signals = {};
+  const cw = hookData?.context_window;
+  if (cw && typeof cw.max_tokens === 'number' && cw.max_tokens > 0 && typeof cw.current_tokens === 'number') {
+    signals.remainingContextRatio = Math.max(0, (cw.max_tokens - cw.current_tokens) / cw.max_tokens);
+  }
+  try {
+    const routerPath = path.join(pluginRoot, 'lib', 'cognitive', 'router.js');
+    const { classifyComplexity } = await import(toFileUrl(routerPath));
+    const c = classifyComplexity(prompt);
+    if (typeof c?.score === 'number') signals.score = c.score;
+  } catch { /* heuristic-free fallback */ }
+  return signals;
+}
+
+/**
+ * Resolve a Score-Aware effort decision for a command. Falls back to the
+ * baseline EFFORT_POLICY effort when the resolver import fails.
+ *
+ * @param {string} commandName
+ * @param {object} signals
+ * @param {string} pluginRoot
+ * @returns {Promise<{ effort: string, baseline: string, shift: number, reason: string } | null>}
+ */
+async function resolveScoredEffort(commandName, signals, pluginRoot) {
+  try {
+    const routerPath = path.join(pluginRoot, 'lib', 'cognitive', 'router.js');
+    const { resolveEffort } = await import(toFileUrl(routerPath));
+    return resolveEffort(commandName, signals);
+  } catch {
+    const effort = await resolveCommandEffort(commandName, pluginRoot);
+    return effort ? { effort, baseline: effort, shift: 0, reason: 'baseline' } : null;
+  }
+}
+
+/**
  * Resolve the effort metadata for a prompt. Persists the result to
- * runtime/current-effort.json and returns `{ command, effort } | null`.
+ * runtime/current-effort.json and returns
+ * `{ command, effort, baseline, shift, reason } | null`.
  *
  * @param {string} prompt
  * @param {string} pluginRoot
- * @returns {Promise<{ command: string, effort: string } | null>}
+ * @param {object} [hookData] - Hook payload used to derive Score-Aware signals.
+ * @returns {Promise<{ command: string, effort: string, baseline: string, shift: number, reason: string } | null>}
  */
-async function resolveEffortMeta(prompt, pluginRoot) {
+async function resolveEffortMeta(prompt, pluginRoot, hookData = {}) {
   const commandName = detectSlashCommand(prompt);
-  const effort = await resolveCommandEffort(commandName, pluginRoot);
-  const effortMeta = commandName && effort ? { command: commandName, effort } : null;
+  if (!commandName) {
+    persistEffortMeta(null, pluginRoot);
+    return null;
+  }
+  const signals = await deriveEffortSignals(prompt, hookData, pluginRoot);
+  const resolved = await resolveScoredEffort(commandName, signals, pluginRoot);
+  const effortMeta = resolved
+    ? {
+      command: commandName,
+      effort: resolved.effort,
+      baseline: resolved.baseline,
+      shift: resolved.shift,
+      reason: resolved.reason,
+    }
+    : null;
   persistEffortMeta(effortMeta, pluginRoot);
   return effortMeta;
 }
@@ -438,11 +549,21 @@ async function resolveTaskBudgetDirective(effortMeta, pluginRoot, runtimeConfig)
  * @param {object} params
  * @returns {{ user_prompt: string, message: string }}
  */
-function composePromptOutput({ prepared, prompt, effortMeta, taskBudgetDirective, injectPrompt }) {
+export function composePromptOutput({ prepared, prompt, effortMeta, taskBudgetDirective, injectPrompt }) {
   const basePrompt = prepared.userPrompt ?? prompt;
   const effortDirective = buildEffortDirective(effortMeta);
+  // P2: the pipeline's tasks middleware derives a unified workflow plan
+  // (team trigger + per-teammate effort/budget). When it elects a parallel
+  // runner, surface the team directive on the same leading line so the spawn
+  // signal actually reaches the model — without this the plan was built then
+  // discarded ("parallel-not-spawned" symptom).
+  const teamDirective = buildTeamDirective(prepared.context?.tasks?.meta?.workflowPlan);
+  // P3: surface an ADVISORY runner recommendation (workflow|autopilot) at the
+  // front door. Same source as buildTeamDirective. This only adds text so the
+  // user/model can opt in — it never auto-fires (honors the harness opt-in rule).
+  const recommendationDirective = buildRecommendationDirective(prepared.context?.tasks?.meta?.workflowPlan);
   const finalUserPrompt = injectPrompt
-    ? applyPromptPrefix(basePrompt, [effortDirective, taskBudgetDirective])
+    ? applyPromptPrefix(basePrompt, [teamDirective, effortDirective, taskBudgetDirective, recommendationDirective])
     : basePrompt;
 
   const baseMessage = prepared.message ?? '[runtime] prompt prepared';
@@ -472,16 +593,20 @@ export async function handleUserPromptSubmit(hookData) {
   const injectPrompt = effortConfig.injectPrompt !== false; // default true
   const useNativeApi = effortConfig.nativeApi === true;     // default false
 
-  const prepared = await fallbackPreparePrompt(prompt, pluginRoot, hookData);
-  if (!prepared) return null;
-
-  persistTokenUsage(prepared.context, pluginRoot);
-
-  const effortMeta = await resolveEffortMeta(prompt, pluginRoot);
+  // Resolve + persist effort BEFORE preparing the prompt: the runtime pipeline's
+  // tasks middleware reads runtime/current-effort.json to attach effort meta and
+  // build the workflow plan. If preparePrompt ran first it would read the PRIOR
+  // prompt's effort file (stale off-by-one), so the write must precede the read.
+  const effortMeta = await resolveEffortMeta(prompt, pluginRoot, hookData);
   await recordEffortDecision(effortMeta, pluginRoot);
   await recordPromptSignals(prompt, effortMeta?.command || null, pluginRoot, runtimeConfig);
 
   const taskBudgetDirective = await resolveTaskBudgetDirective(effortMeta, pluginRoot, runtimeConfig);
+
+  const prepared = await fallbackPreparePrompt(prompt, pluginRoot, hookData);
+  if (!prepared) return null;
+
+  persistTokenUsage(prepared.context, pluginRoot);
 
   if (useNativeApi && effortMeta) {
     await applyNativeEffortHint(effortMeta.effort, pluginRoot);

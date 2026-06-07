@@ -13,9 +13,9 @@ import {
 } from '../../lib/autopilot/session-store.js';
 
 describe('newSessionId', () => {
-  it('returns ap-YYYYMMDD-HHMMSS-xxxx format with random suffix', () => {
+  it('returns ap-YYYYMMDD-HHMMSS-xxxxxx format with random suffix', () => {
     const id = newSessionId();
-    expect(id).toMatch(/^ap-\d{8}-\d{6}-[a-z0-9]{4}$/);
+    expect(id).toMatch(/^ap-\d{8}-\d{6}-[a-z0-9]{6}$/);
   });
 
   it('returns a string starting with "ap-"', () => {

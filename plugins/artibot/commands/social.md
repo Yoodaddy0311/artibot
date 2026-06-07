@@ -7,7 +7,7 @@ toolset: content
 
 # /social
 
-Creates platform-optimized social media content with scheduling recommendations, hashtag strategies, and engagement optimization. Handles multi-platform adaptation from a single content brief.
+Creates platform-optimized social media content with scheduling recommendations, hashtag strategies, and engagement optimization. Handles multi-platform adaptation from a single content brief. Supports full production workflows, content auditing, competitor analysis, and crisis response.
 
 ## Arguments
 
@@ -20,6 +20,10 @@ Parse $ARGUMENTS:
 - `--schedule`: Include optimal posting time recommendations
 - `--hashtags`: Generate hashtag strategy per platform
 - `--repurpose [source]`: Repurpose content from source (blog URL, article path, etc.)
+- `--workflow [phase]`: Run production workflow phase - `brief` | `research` | `draft` | `review` | `optimize` | `full`
+- `--audit`: Run Content Quality Checklist on existing draft or scheduled post
+- `--compete [brand]`: Run competitor analysis workflow for specified brand(s)
+- `--crisis [level]`: Activate crisis management protocol - `1` | `2` | `3`
 
 ## Content Types
 
@@ -31,6 +35,9 @@ Parse $ARGUMENTS:
 | story | Ephemeral short-form content | Instagram, TikTok |
 | reel-script | Short video script with hooks | TikTok, Instagram, YouTube Shorts |
 | calendar | Weekly/monthly content plan | All |
+| workflow | End-to-end production pipeline | All |
+| audit | Content quality pre-publish check | All |
+| competitor-report | Competitor analysis output | All |
 
 ## Platform Specs
 
@@ -54,21 +61,24 @@ Parse $ARGUMENTS:
 
 ## Execution Flow
 
-1. **Parse**: Extract content type, platform targets, campaign context
-2. **Research**: Current trending topics, hashtags, competitor posts via WebSearch
-3. **Create**: Generate platform-specific content:
+1. **Parse**: Extract content type, platform targets, campaign context, workflow flags
+2. **Route**: If `--workflow`, enter production pipeline; if `--audit`, run quality checklist; if `--compete`, run competitor analysis; if `--crisis`, activate crisis protocol
+3. **Research**: Current trending topics, hashtags, competitor posts via WebSearch
+4. **Create**: Generate platform-specific content:
    - **Twitter/X**: 280-char posts, thread hooks, quote-tweet suggestions
    - **LinkedIn**: Professional posts, document carousels, poll ideas
    - **Instagram**: Caption + visual concept, carousel slides, story sequence
    - **TikTok**: Script with hooks (first 3 seconds), trending sounds, CTA
-4. **Optimize**: Platform-specific enhancements:
+5. **Optimize**: Platform-specific enhancements:
    - Character count compliance
    - Hashtag research and placement
    - Emoji strategy (per platform norms)
    - CTA placement
-5. **Schedule** (if `--schedule`): Recommend posting times based on platform best practices
-6. **Calendar** (if content-type is `calendar`): Generate weekly/monthly content calendar
-7. **Report**: Output content package per platform
+   - UTM parameter attachment
+6. **Quality Gate**: Run Content Quality Checklist (8 checks) before scheduling
+7. **Schedule** (if `--schedule`): Recommend posting times based on platform best practices
+8. **Calendar** (if content-type is `calendar`): Generate weekly/monthly content calendar
+9. **Report**: Output content package per platform with A/B test recommendations
 
 ## Output Format
 
@@ -107,6 +117,14 @@ HASHTAG STRATEGY
 Platform    | Primary (3-5)    | Secondary (5-10)  | Niche (3-5)
 ------------|------------------|-------------------|------------
 [platform]  | [high-volume]    | [mid-volume]      | [targeted]
+
+QUALITY GATE (if --audit)
+-------------------------
+[8-point checklist with pass/fail per item]
+
+COMPETITOR ANALYSIS (if --compete)
+----------------------------------
+[Benchmarking table + gap analysis]
 ```
 
 ## Example Usage
@@ -116,6 +134,10 @@ Platform    | Primary (3-5)    | Secondary (5-10)  | Niche (3-5)
 /social thread --platform twitter --series 7 --tone educational
 /social calendar --platform linkedin,twitter --campaign "Thought Leadership" --schedule
 /social carousel --platform instagram,linkedin --repurpose @blog/latest-post.md
+/social --workflow full --platform all --campaign "Q3 Launch"
+/social --audit
+/social --compete "CompetitorA,CompetitorB" --platform linkedin
+/social --crisis 2
 ```
 
 ## Next Steps
@@ -127,3 +149,5 @@ Platform    | Primary (3-5)    | Secondary (5-10)  | Niche (3-5)
 | 1 | 성과 분석 | `/analytics` | 소셜 미디어 성과 분석 |
 | 2 | 콘텐츠 제작 | `/content` | 소셜 콘텐츠 추가 제작 |
 | 3 | 유료 프로모션 | `/ad` | 소셜 광고 캠페인 생성 |
+| 4 | A/B 테스트 설계 | `/ab-testing` | 소셜 콘텐츠 실험 설계 |
+| 5 | 경쟁사 분석 | `/competitive-intelligence` | 심층 경쟁사 조사 |

@@ -1,14 +1,15 @@
 #!/usr/bin/env node
 /**
- * export-to-tool.mjs — Cross-tool parity exporter (v0.5.1).
+ * export-to-tool.mjs — Cross-tool parity exporter (v0.6.0).
  *
  * Reads Artibot's source-of-truth agents under `plugins/artibot/agents/{name}.md`
  * and projects them into the format each supported tool expects.
  *
  * Supported --tool values:
- *   cursor    -> <out>/{name}.mdc           Cursor Rules-for-AI file
- *   codex     -> <out>/{name}.md            OpenAI Codex CLI agent spec
- *   opencode  -> <out>/{name}.md            OpenCode agent markdown
+ *   cursor      -> <out>/{name}.mdc           Cursor Rules-for-AI file
+ *   codex       -> <out>/{name}.md            OpenAI Codex CLI agent spec
+ *   opencode    -> <out>/{name}.md            OpenCode agent markdown
+ *   antigravity -> <out>/{name}.md            Google Antigravity agent spec
  *
  * USAGE
  *   node plugins/artibot/scripts/export-to-tool.mjs --tool cursor --out ./cursor-export/
@@ -26,10 +27,13 @@ import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const SUPPORTED_TOOLS = new Set(["cursor", "codex", "opencode"]);
+const SUPPORTED_TOOLS = new Set(["cursor", "codex", "opencode", "antigravity"]);
+const VALID_INCLUDES = new Set(["agents", "skills", "commands"]);
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const PLUGIN_ROOT = resolve(SCRIPT_DIR, "..");
 const AGENTS_DIR = join(PLUGIN_ROOT, "agents");
+const SKILLS_DIR = join(PLUGIN_ROOT, "skills");
+const COMMANDS_DIR = join(PLUGIN_ROOT, "commands");
 
 // ---------------------------------------------------------------------------
 // CLI parsing
@@ -40,6 +44,7 @@ export function parseArgs(argv) {
     tool: null,
     out: null,
     agents: null,
+    include: "agents",
     dryRun: false,
     help: false,
   };
@@ -48,6 +53,7 @@ export function parseArgs(argv) {
     if (a === "--tool") args.tool = argv[++i];
     else if (a === "--out") args.out = argv[++i];
     else if (a === "--agents") args.agents = argv[++i];
+    else if (a === "--include") args.include = argv[++i];
     else if (a === "--dry-run") args.dryRun = true;
     else if (a === "--help" || a === "-h") args.help = true;
   }
@@ -63,11 +69,12 @@ function printHelp() {
       "  node export-to-tool.mjs --tool <cursor|codex|opencode> --out <dir> [options]",
       "",
       "Required:",
-      "  --tool      Target tool: cursor, codex, opencode",
+      "  --tool      Target tool: cursor, codex, opencode, antigravity",
       "  --out       Output directory (created if missing)",
       "",
       "Options:",
-      "  --agents    Comma-separated subset (default: all discovered agents)",
+      "  --agents    Comma-separated agent subset (default: all discovered agents)",
+      "  --include   Comma-separated artifact types: agents,skills,commands,all (default: agents)",
       "  --dry-run   Convert only; do not write files (summary to stderr)",
       "  --help      Show this help",
       "",
@@ -232,6 +239,116 @@ export async function collectAgents(dir = AGENTS_DIR, filter = null) {
 }
 
 // ---------------------------------------------------------------------------
+// Skill discovery
+// ---------------------------------------------------------------------------
+
+export async function collectSkills(dir = SKILLS_DIR) {
+  let entries;
+  try {
+    entries = await readdir(dir, { withFileTypes: true });
+  } catch (err) {
+    throw new Error(`cannot read skills dir ${dir}: ${err.message}`, { cause: err });
+  }
+  const out = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const skillFile = join(dir, entry.name, "SKILL.md");
+    let src;
+    try {
+      src = await readFile(skillFile, "utf8");
+    } catch (err) {
+      if (err.code === "ENOENT") continue;
+      throw err;
+    }
+    const { frontmatter, body } = parseFrontmatter(src);
+    out.push({
+      dirName: entry.name,
+      name: frontmatter.name || entry.name,
+      description: frontmatter.description || "",
+      content: src,
+      frontmatter,
+      body,
+    });
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Command discovery
+// ---------------------------------------------------------------------------
+
+export async function collectCommands(dir = COMMANDS_DIR) {
+  let entries;
+  try {
+    entries = await readdir(dir);
+  } catch (err) {
+    throw new Error(`cannot read commands dir ${dir}: ${err.message}`, { cause: err });
+  }
+  const out = [];
+  for (const file of entries) {
+    if (!file.endsWith(".md")) continue;
+    if (file === "index.md") continue;
+    const full = join(dir, file);
+    let src;
+    try {
+      src = await readFile(full, "utf8");
+    } catch (err) {
+      if (err.code === "ENOENT") continue;
+      throw err;
+    }
+    const name = basename(file, ".md");
+    const { frontmatter, body } = parseFrontmatter(src);
+    out.push({ name, content: src, frontmatter, body });
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Platform reference mappings (for skill/command text replacement)
+// ---------------------------------------------------------------------------
+
+export const PLATFORM_REFS = {
+  cursor: { skillsPath: ".cursor/skills/", platformName: "Cursor", instructionFile: ".cursorrules" },
+  codex: { skillsPath: ".codex/skills/", platformName: "Codex CLI", instructionFile: "AGENTS.md" },
+  opencode: { skillsPath: ".opencode/skills/", platformName: "OpenCode", instructionFile: "AGENTS.md" },
+  antigravity: { skillsPath: ".antigravity/skills/", platformName: "Google Antigravity", instructionFile: ".antigravity/rules.md" },
+};
+
+export function stripPlatformRefs(content, tool) {
+  const refs = PLATFORM_REFS[tool];
+  if (!refs) return content;
+  return content
+    .replace(/\$\{CLAUDE_SKILL_DIR\}\//g, refs.skillsPath)
+    .replace(/\.claude\/skills\//g, refs.skillsPath)
+    .replace(/CLAUDE\.md/g, refs.instructionFile)
+    .replace(/Claude Code/g, refs.platformName);
+}
+
+// ---------------------------------------------------------------------------
+// Skill converter (generic, platform-aware)
+// ---------------------------------------------------------------------------
+
+export function convertSkillForPlatform(skill, tool) {
+  const content = stripPlatformRefs(skill.content, tool);
+  return {
+    fileName: join("skills", skill.dirName, "SKILL.md"),
+    content,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Command converter (generic, platform-aware)
+// ---------------------------------------------------------------------------
+
+export function convertCommandForPlatform(command, tool) {
+  const content = stripPlatformRefs(command.content, tool);
+  return {
+    fileName: join("commands", `${command.name}.md`),
+    content,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Helpers: kebab-case, comment block, body transforms
 // ---------------------------------------------------------------------------
 
@@ -369,6 +486,61 @@ export function convertOpenCode(agent) {
 }
 
 // ---------------------------------------------------------------------------
+// Antigravity converter
+// Target: <out>/<name>.md (user will drop into .antigravity/agents/)
+//   - YAML frontmatter: name, description, model, tools
+//   - Agent Teams API refs replaced with Agent Manager equivalents
+//   - Team Collaboration section replaced with Agent Manager guidance
+// ---------------------------------------------------------------------------
+
+export function convertAntigravity(agent) {
+  const fileName = `${toKebabCase(agent.name)}.md`;
+  const description = String(agent.description).replace(/\n/g, " ").trim();
+
+  const fmLines = ["---"];
+  fmLines.push(`name: ${agent.name}`);
+  fmLines.push(`description: "${description.replace(/"/g, '\\"')}"`);
+  if (agent.model) fmLines.push(`model: ${agent.model}`);
+  if (agent.tools.length) {
+    fmLines.push("tools:");
+    for (const t of agent.tools) fmLines.push(`  - ${t}`);
+  }
+  fmLines.push("---");
+
+  const claudeSpecificComments = [];
+  if (agent.modelTier) claudeSpecificComments.push(`Claude-specific: modelTier=${agent.modelTier}`);
+  if (agent.permissionMode) claudeSpecificComments.push(`Claude-specific: permissionMode=${agent.permissionMode}`);
+  if (agent.maxTurns) claudeSpecificComments.push(`Claude-specific: maxTurns=${agent.maxTurns}`);
+  if (agent.skills.length) claudeSpecificComments.push(`Claude-specific: skills=${agent.skills.join(", ")}`);
+
+  const commentBlock = claudeSpecificComments.length
+    ? claudeSpecificComments.map((c) => `<!-- ${c} -->`).join("\n") + "\n"
+    : "";
+
+  let transformedBody = stripTeamCollaboration(agent.body, [
+    "Claude Code Teams API (TeamCreate/SendMessage/TaskCreate) — not available in Antigravity.",
+    "Use Agent Manager to spawn and orchestrate parallel agents instead.",
+  ]);
+
+  transformedBody = replaceAgentTeamsRefs(transformedBody);
+
+  const content = `${fmLines.join("\n")}\n\n${commentBlock}${transformedBody.trimEnd()}\n`;
+  return { fileName, content };
+}
+
+function replaceAgentTeamsRefs(body) {
+  return body
+    .replace(/TeamCreate\([^)]*\)/g, "Spawn agents via Agent Manager")
+    .replace(/TeamDelete\([^)]*\)/g, "Close agent workspaces when done")
+    .replace(/SendMessage\([^)]*\)/g, "Leave feedback on agent Artifact")
+    .replace(/TaskCreate\([^)]*\)/g, "Create task in Agent Manager")
+    .replace(/TaskList\(\)/g, "Review Agent Manager task board")
+    .replace(/TaskGet\([^)]*\)/g, "Review agent Artifact")
+    .replace(/TaskUpdate\([^)]*\)/g, "Update task status")
+    .replace(/Claude Code/g, "Google Antigravity");
+}
+
+// ---------------------------------------------------------------------------
 // Converter registry
 // ---------------------------------------------------------------------------
 
@@ -376,35 +548,84 @@ export const CONVERTERS = {
   cursor: convertCursor,
   codex: convertCodex,
   opencode: convertOpenCode,
+  antigravity: convertAntigravity,
 };
+
+// ---------------------------------------------------------------------------
+// Include set parsing
+// ---------------------------------------------------------------------------
+
+export function parseInclude(raw) {
+  if (!raw || raw === "agents") return new Set(["agents"]);
+  if (raw === "all") return new Set(["agents", "skills", "commands"]);
+  const parts = raw.split(",").map((s) => s.trim()).filter(Boolean);
+  for (const p of parts) {
+    if (!VALID_INCLUDES.has(p)) {
+      throw new Error(`invalid --include value: ${p} (valid: agents, skills, commands, all)`);
+    }
+  }
+  return new Set(parts);
+}
 
 // ---------------------------------------------------------------------------
 // Orchestrator: run conversion, optionally write
 // ---------------------------------------------------------------------------
 
-export async function runExport({ tool, out, agents, dryRun }, agentsDir = AGENTS_DIR) {
+export async function runExport({ tool, out, agents, include, dryRun }, dirs = {}) {
   if (!SUPPORTED_TOOLS.has(tool)) {
     throw new Error(`unsupported tool: ${tool} (supported: ${[...SUPPORTED_TOOLS].join(", ")})`);
   }
-  const converter = CONVERTERS[tool];
-  const collected = await collectAgents(agentsDir, agents);
-  if (collected.length === 0) {
-    throw new Error(`no agents discovered under ${agentsDir}`);
+
+  const includeSet = parseInclude(include);
+  const agentsDir = dirs.agentsDir || AGENTS_DIR;
+  const skillsDir = dirs.skillsDir || SKILLS_DIR;
+  const commandsDir = dirs.commandsDir || COMMANDS_DIR;
+
+  const allFiles = [];
+  let agentCount = 0;
+  let skillCount = 0;
+  let commandCount = 0;
+
+  if (includeSet.has("agents")) {
+    const converter = CONVERTERS[tool];
+    const collected = await collectAgents(agentsDir, agents);
+    agentCount = collected.length;
+    for (const a of collected) {
+      const { fileName, content } = converter(a);
+      const filePath = includeSet.size > 1 ? join("agents", fileName) : fileName;
+      allFiles.push({ name: a.name, type: "agent", fileName: filePath, content });
+    }
   }
 
-  const results = collected.map((a) => ({ agent: a, ...converter(a) }));
+  if (includeSet.has("skills")) {
+    const collected = await collectSkills(skillsDir);
+    skillCount = collected.length;
+    for (const s of collected) {
+      const { fileName, content } = convertSkillForPlatform(s, tool);
+      allFiles.push({ name: s.name, type: "skill", fileName, content });
+    }
+  }
+
+  if (includeSet.has("commands")) {
+    const collected = await collectCommands(commandsDir);
+    commandCount = collected.length;
+    for (const c of collected) {
+      const { fileName, content } = convertCommandForPlatform(c, tool);
+      allFiles.push({ name: c.name, type: "command", fileName, content });
+    }
+  }
+
+  if (allFiles.length === 0) {
+    throw new Error(`no artifacts discovered (include: ${[...includeSet].join(",")})`);
+  }
 
   if (!dryRun) {
     if (!out) throw new Error("--out is required unless --dry-run is specified");
     const absOut = resolve(out);
-    try {
-      await mkdir(absOut, { recursive: true });
-    } catch (err) {
-      throw new Error(`output dir creation failed: ${absOut}: ${err.message}`, { cause: err });
-    }
-    for (const r of results) {
-      const target = join(absOut, r.fileName);
-      await writeFile(target, r.content, "utf8");
+    for (const f of allFiles) {
+      const target = join(absOut, f.fileName);
+      await mkdir(dirname(target), { recursive: true });
+      await writeFile(target, f.content, "utf8");
     }
   }
 
@@ -412,8 +633,16 @@ export async function runExport({ tool, out, agents, dryRun }, agentsDir = AGENT
     tool,
     out: out ? resolve(out) : null,
     dryRun: Boolean(dryRun),
-    agentCount: collected.length,
-    files: results.map((r) => ({ name: r.agent.name, fileName: r.fileName, bytes: Buffer.byteLength(r.content, "utf8") })),
+    include: [...includeSet],
+    agentCount,
+    skillCount,
+    commandCount,
+    files: allFiles.map((f) => ({
+      name: f.name,
+      type: f.type,
+      fileName: f.fileName,
+      bytes: Buffer.byteLength(f.content, "utf8"),
+    })),
   };
 }
 
@@ -446,14 +675,18 @@ async function main() {
 
   try {
     const summary = await runExport(args);
+    const counts = [];
+    if (summary.agentCount) counts.push(`agents=${summary.agentCount}`);
+    if (summary.skillCount) counts.push(`skills=${summary.skillCount}`);
+    if (summary.commandCount) counts.push(`commands=${summary.commandCount}`);
     const mode = summary.dryRun ? "dry-run" : "written";
     process.stderr.write(
-      `[export] tool=${summary.tool} agents=${summary.agentCount} mode=${mode}` +
+      `[export] tool=${summary.tool} ${counts.join(" ")} mode=${mode}` +
         (summary.out ? ` out=${summary.out}` : "") +
         "\n"
     );
     for (const f of summary.files) {
-      process.stderr.write(`[export]   ${f.name} -> ${f.fileName} (${f.bytes}B)\n`);
+      process.stderr.write(`[export]   [${f.type}] ${f.name} -> ${f.fileName} (${f.bytes}B)\n`);
     }
     process.exit(0);
   } catch (err) {

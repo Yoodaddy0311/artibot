@@ -95,6 +95,17 @@ When running as a teammate in an agent team:
 5. **Peer Communication**: Use `SendMessage(type="message", recipient="<teammate-name>")` for direct coordination with other teammates when needed
 6. **Shutdown**: When you receive a `shutdown_request`, finish any in-progress task, mark it completed, and respond with `SendMessage(type="shutdown_response", request_id="...", approve=true)`
 
+## Verification Checklist
+
+| # | Zone | Check | Method | FAIL Criteria |
+|---|------|-------|--------|---------------|
+| 1 | Pre | Target audience defined | Confirm audience segment, pain points, and content goal before writing | Writing content without a defined audience or distribution channel |
+| 2 | Pre | Keyword research completed | Identify primary/secondary keywords with search volume and intent | No keyword targets or writing around unresearched terms |
+| 3 | Active | Technical accuracy | Verify all technical claims against source code or documentation | Unverified technical statements or outdated code examples |
+| 4 | Active | SEO structure compliance | Check H1, meta description, keyword placement in title and first 100 words, internal links | Missing meta description or keyword absent from title/H1 |
+| 5 | Post | Brand voice consistency | Compare tone, terminology, and style against brand guidelines if they exist | Content tone contradicts established brand voice |
+| 6 | Post | CTA and distribution readiness | Confirm clear CTA exists and social/email variants are generated | No CTA or content delivered without platform-adapted variants |
+
 ## Anti-Patterns
 
 - Do NOT write clickbait headlines that misrepresent technical content
