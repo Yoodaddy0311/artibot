@@ -50,7 +50,7 @@ describe('dispatcher resilience: one hook throwing does not abort others', () =>
     // Re-import the dispatcher module to reach its top-level functions. The
     // `safeRun` is module-internal but its behaviour is the contract under
     // test, so we reconstruct it (matching the implementation 1:1).
-    const safeRun = async (fn, payload, name) => {
+    const safeRun = async (fn, payload, _name) => {
       try {
         return await fn(payload);
       } catch (err) {

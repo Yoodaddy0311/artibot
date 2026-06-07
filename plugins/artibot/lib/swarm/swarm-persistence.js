@@ -116,16 +116,33 @@ export async function loadFromDisk() {
  * Ensures the parent directory exists before writing. Updates the
  * `updatedAt` timestamp on save.
  *
+ * Optional `data` argument merges a `{patterns, weights}` payload into the
+ * in-memory _db before flushing. Patterns may be passed either as a plain
+ * map ({key: pattern}) or as an array of `{id, ...}` entries (the array
+ * shape is what `evolution-loop` Stage 5 builds). Without this merge the
+ * caller's payload was silently dropped (BUG-1 in
+ * `.artibot/REPORTS/audit-learning-cognitive-2026-06-08.md`).
+ *
+ * @param {{ patterns?: object|Array, weights?: object }} [data]
  * @returns {Promise<void>}
  */
-export async function saveToDisk() {
+export async function saveToDisk(data) {
   if (_debounceTimer) {
     clearTimeout(_debounceTimer);
     _debounceTimer = null;
   }
 
+  // No-arg path preserves original semantics: if nothing was loaded, do not
+  // create a phantom db on disk. Only synthesize an empty db when the caller
+  // actually supplies a payload to merge.
   if (!_db) {
-    return;
+    if (!data || typeof data !== 'object') return;
+    _db = createEmptyDb();
+  }
+
+  if (data && typeof data === 'object') {
+    applyPatternsPayload(_db, data.patterns);
+    applyWeightsPayload(_db, data.weights);
   }
 
   _db.updatedAt = new Date().toISOString();
@@ -368,6 +385,40 @@ export function _resetForTesting() {
 // ---------------------------------------------------------------------------
 // Utilities
 // ---------------------------------------------------------------------------
+
+/**
+ * Merge a patterns payload into the db. Accepts an array of `{id, ...}`
+ * entries (the shape evolution-loop Stage 5 builds) or a plain map.
+ * No-op when payload is missing or wrong shape — keeps caller flat.
+ *
+ * @param {SwarmDb} db
+ * @param {object|Array|undefined} patterns
+ * @returns {void}
+ */
+function applyPatternsPayload(db, patterns) {
+  if (!patterns) return;
+  if (Array.isArray(patterns)) {
+    for (const p of patterns) {
+      if (p && p.id) db.patterns[p.id] = { ...p, storedAt: new Date().toISOString() };
+    }
+    return;
+  }
+  if (typeof patterns === 'object') {
+    db.patterns = { ...db.patterns, ...patterns };
+  }
+}
+
+/**
+ * Merge a weights payload into the db. No-op when missing or wrong shape.
+ *
+ * @param {SwarmDb} db
+ * @param {object|undefined} weights
+ * @returns {void}
+ */
+function applyWeightsPayload(db, weights) {
+  if (!weights || typeof weights !== 'object') return;
+  db.weights = { ...db.weights, ...weights };
+}
 
 /**
  * Prune a collection object to stay within size limits.

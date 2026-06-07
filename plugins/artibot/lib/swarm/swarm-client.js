@@ -142,7 +142,18 @@ function validateUrl(urlString) {
  * @returns {string}
  */
 function resolveServerUrl(config) {
-  const raw = process.env.ARTIBOT_SWARM_SERVER || config?.serverUrl || 'http://localhost:3000';
+  const envOverride = process.env.ARTIBOT_SWARM_SERVER;
+  const raw = envOverride || config?.serverUrl || 'http://localhost:3000';
+
+  // DATA POLICY: warn when an env-var overrides the configured endpoint so the
+  // user is aware that data may be sent to a non-default external host.
+  if (envOverride) {
+    process.stderr.write(
+      `[artibot:swarm] WARNING: ARTIBOT_SWARM_SERVER env var overrides swarm endpoint to '${envOverride}'. ` +
+      `Ensure this host is trusted before enabling swarm (DATA POLICY).\n`,
+    );
+  }
+
   try {
     validateUrl(raw);
   } catch {

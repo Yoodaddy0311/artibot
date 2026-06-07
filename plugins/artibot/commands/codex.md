@@ -13,6 +13,11 @@ toolset: team
 
 # /codex
 
+> **선택적 외부 연동** — 이 커맨드는 `github.com/openai/codex-plugin-cc` 외부 플러그인을 설치하고 OpenAI Codex API를 사용합니다.
+> - **설치 전 동의 필수**: `setup` 액션 실행 시 외부 플러그인 설치임을 명시하고 사용자 확인을 받아야 함
+> - **DATA POLICY**: codex-plugin-cc가 전송하는 데이터는 Artibot 제어 범위 밖. 코드 데이터가 OpenAI 서버로 전송될 수 있음
+> - **격리 원칙**: Artibot 코어 데이터는 codex-plugin-cc로 전달하지 않음. 리뷰 대상 경로만 전달
+
 OpenAI Codex 연동 커맨드. **codex-plugin-cc** Claude Code 플러그인을 통해 Codex를 활용한다.
 Artibot `/codex` 커맨드는 얇은 라우터 + 모드 관리만 담당하고, 실제 Codex 실행은 codex-plugin-cc에 위임한다.
 
@@ -44,10 +49,13 @@ Parse $ARGUMENTS:
 
 현재 Codex 연동 상태를 확인한다.
 
+**Fast-fail guard** — `review`, `idea` 액션 실행 전 반드시 아래 순서로 확인:
 1. codex-plugin-cc 설치 여부 확인:
    - `codex.pluginPath` 경로 존재 확인
    - 또는 `which codex 2>/dev/null` / `npx codex --version 2>/dev/null`
+   - **미설치 시 즉시 abort** — "codex-plugin-cc가 설치되지 않았습니다. `/codex setup`으로 설치 후 다시 시도하세요." 출력 후 종료
 2. 현재 모드 확인: `artibot.config.json` → `codex.mode` 읽기
+   - `codex.mode === "off"` 이면 **즉시 abort** — "Codex 연동이 비활성화 상태입니다. `/codex mode review` 또는 `/codex mode dev`로 활성화하세요."
 3. 연결 상태: `OPENAI_API_KEY` 환경변수 존재 여부
 4. 기본 모델: `codex.defaultModel` 값
 
@@ -66,6 +74,16 @@ ReviewOn:  [Stop-Review-Gate 활성/비활성]
 ```
 
 ### `/codex setup` — 설치 & 설정 가이드
+
+> **[DATA POLICY 경고]** codex-plugin-cc는 외부 OpenAI 서버(`api.openai.com`)와 통신하는 서드파티 플러그인입니다.
+> `review` / `dev` 모드 활성화 시 코드 스니펫이 OpenAI API로 전송됩니다.
+> Artibot DATA POLICY상 외부 전송은 사용자 명시 동의가 필요합니다.
+> **설치 전 반드시 아래를 확인하세요:**
+> - 민감한 코드(API 키, 비밀번호, 내부 로직)가 전송 범위에 포함되지 않도록 할 것
+> - 기업/팀 환경에서는 보안 정책을 먼저 검토할 것
+> - 동의하지 않는 경우 mode를 `off`로 유지할 것
+>
+> 계속 진행하려면 사용자 확인 메시지를 표시하고 명시적 동의(yes/no)를 받은 후에만 Step 1 이후를 실행하세요.
 
 codex-plugin-cc 설치 및 인증을 단계별로 안내한다.
 

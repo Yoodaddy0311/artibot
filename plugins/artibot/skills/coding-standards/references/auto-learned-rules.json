@@ -100,5 +100,17 @@
     "content": "Recurring fix pattern detected. Consider adding automated checks for: fix(learning): Stage B Area 1/2/3 — make GRPO success+team+swarm signals actually accumulate",
     "formatted": "- [auto-learned] Recurring fix pattern detected. Consider adding automated checks for: fix(learning): Stage B Area 1/2/3 — make GRPO success+team+swarm signals actually accumulate",
     "injectedAt": "2026-05-19T18:00:51.829Z"
+  },
+  {
+    "type": "auto-learned",
+    "content": "Recurring fix pattern detected. Consider adding automated checks for: fix(tests): accept safe_copy_dir in install.sh recursive-copy tripwire",
+    "formatted": "- [auto-learned] Recurring fix pattern detected. Consider adding automated checks for: fix(tests): accept safe_copy_dir in install.sh recursive-copy tripwire",
+    "injectedAt": "2026-06-07T18:00:58.267Z"
+  },
+  {
+    "type": "auto-learned",
+    "content": "Recurring fix pattern detected. Consider adding automated checks for: fix(install): unblock fresh-machine install + UserPromptSubmit resilience",
+    "formatted": "- [auto-learned] Recurring fix pattern detected. Consider adding automated checks for: fix(install): unblock fresh-machine install + UserPromptSubmit resilience",
+    "injectedAt": "2026-06-07T18:00:58.267Z"
   }
 ]

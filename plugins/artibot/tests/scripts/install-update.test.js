@@ -190,18 +190,24 @@ describe('update/branch fallback order', () => {
   });
 
   it('artibot/master를 첫 번째 fallback으로 시도', () => {
-    const artibotMasterIdx = updateContent.indexOf('origin/artibot/master');
-    const masterIdx = updateContent.indexOf('origin/master', artibotMasterIdx + 1);
-    expect(artibotMasterIdx).toBeGreaterThan(-1);
-    expect(masterIdx).toBeGreaterThan(artibotMasterIdx);
+    // v4.19.7+: fallback list lives in resolveDefaultBranchPull() as a single
+    // string array iterated in order. Earlier versions emitted three discrete
+    // try/catch blocks; this asserts the ordering at the data-structure level.
+    const fallbackArr = updateContent.match(/for \(const ref of \[([^\]]+)\]\)/);
+    expect(fallbackArr, 'resolveDefaultBranchPull fallback array missing').not.toBeNull();
+    const refs = fallbackArr[1].split(',').map((s) => s.trim().replace(/['"]/g, ''));
+    expect(refs[0]).toBe('artibot/master');
+    expect(refs[1]).toBe('master');
   });
 
   it('master를 두 번째 fallback으로 시도', () => {
-    // v4.5.3+: pull args are passed as an array to execFileSync (no shell
-    // interpolation). The fallback order remains origin/master before
-    // origin/main; we now match the array literal form.
-    const masterIdx = updateContent.indexOf("['pull', 'origin', 'master']");
-    const mainIdx = updateContent.indexOf("['pull', 'origin', 'main']");
+    // v4.19.7+: ordering is encoded as positions in the resolveDefaultBranchPull
+    // ref list (asserted above). master must appear before main.
+    const fallbackArr = updateContent.match(/for \(const ref of \[([^\]]+)\]\)/);
+    expect(fallbackArr).not.toBeNull();
+    const refs = fallbackArr[1].split(',').map((s) => s.trim().replace(/['"]/g, ''));
+    const masterIdx = refs.indexOf('master');
+    const mainIdx = refs.indexOf('main');
     expect(masterIdx).toBeGreaterThan(-1);
     expect(mainIdx).toBeGreaterThan(masterIdx);
   });

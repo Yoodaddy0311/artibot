@@ -57,7 +57,11 @@ permissions:
   contents: read
 
 concurrency:
-  group: self-control-${{ github.workflow }}
+  # Per-task concurrency: schedule cron picks task from cron string; manual
+  # dispatch picks from the input. Without per-task granularity, an in-flight
+  # weekly self-benchmark blocks the daily auto-cleanup cron from queuing on
+  # the same workflow file (audit 2026-06-08 caught the missed-cron pattern).
+  group: self-control-${{ github.workflow }}-${{ github.event.inputs.task || github.event.schedule || 'default' }}
   cancel-in-progress: false
 
 jobs:

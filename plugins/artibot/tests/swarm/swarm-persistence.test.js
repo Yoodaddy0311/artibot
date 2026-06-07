@@ -168,6 +168,28 @@ describe('saveToDisk()', () => {
     await vi.runAllTimersAsync();
     expect(writeJsonFile).toHaveBeenCalledTimes(1);
   });
+
+  it('merges a {patterns: array} payload into _db before flushing (BUG-1 fix)', async () => {
+    await loadFromDisk();
+    await saveToDisk({
+      patterns: [
+        { id: 'pat-a', successRate: 0.9 },
+        { id: 'pat-b', successRate: 0.7 },
+      ],
+    });
+
+    expect(writeJsonFile).toHaveBeenCalledTimes(1);
+    const writtenDb = writeJsonFile.mock.calls[0][1];
+    expect(writtenDb.patterns['pat-a']).toMatchObject({ id: 'pat-a', successRate: 0.9 });
+    expect(writtenDb.patterns['pat-b']).toMatchObject({ id: 'pat-b', successRate: 0.7 });
+  });
+
+  it('merges a {patterns: object} payload into _db before flushing', async () => {
+    await loadFromDisk();
+    await saveToDisk({ patterns: { existing: { v: 1 } } });
+    const writtenDb = writeJsonFile.mock.calls[0][1];
+    expect(writtenDb.patterns.existing).toEqual({ v: 1 });
+  });
 });
 
 // ---------------------------------------------------------------------------

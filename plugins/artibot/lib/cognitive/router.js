@@ -685,9 +685,14 @@ function estimateRisk(lower) {
 function estimateNovelty(lower, context) {
   let novelty = 0;
 
-  // If no session context, moderate novelty
+  // If no session context, moderate novelty. The 0.3 default is configurable
+  // via `context.noveltyDefault` (caller passes through from
+  // `artibot.config.json#/cognitive/router/noveltyDefault`); when omitted we
+  // keep the historical 0.3 so router test snapshots stay stable. Audit ref:
+  // `.artibot/REPORTS/audit-learning-cognitive-2026-06-08.md` finding #9.
   if (!context.sessionDepth && context.sessionDepth !== 0) {
-    return 0.3;
+    const fallback = typeof context.noveltyDefault === 'number' ? context.noveltyDefault : 0.3;
+    return fallback;
   }
 
   // First request in a session is somewhat novel

@@ -9,8 +9,8 @@ description: |
   surface: hooks (arbitrary stdin), MCP servers, and native Agent Teams.
   Auto-activates when: authoring hooks, MCP tools, agents that read external input,
   RAG pipelines, or any code that feeds untrusted text into a model context.
-  Triggers: LLM security, prompt injection, jailbreak, RAG, agent security, tool output, MCP, hook input, guardrail, excessive agency
-lang: [en]
+  Triggers: LLM security, prompt injection, jailbreak, RAG, agent security, tool output, MCP, hook input, guardrail, excessive agency, LLM 보안, 프롬프트 인젝션, 에이전트 보안, 훅 보안
+lang: [en, ko]
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 3
 triggers:
@@ -24,6 +24,10 @@ triggers:
   - "hook input"
   - "LLM guardrail"
   - "excessive agency"
+  - "LLM 보안"
+  - "프롬프트 인젝션"
+  - "에이전트 보안"
+  - "훅 보안"
 allowed-tools: [Read, Grep, Glob]
 agents:
   - "security-reviewer"

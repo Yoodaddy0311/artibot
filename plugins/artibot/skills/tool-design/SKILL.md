@@ -29,7 +29,7 @@ tokens: "~3.5K"
 category: "architecture"
 version: "1.0.0"
 risk: safe
-lastVerified: "2026-03-31"
+lastVerified: "2026-06-08"
 source_hash: cdb68458
 whenNotToUse: "Do not apply tool consolidation and description engineering to one-off automation scripts or internal test helpers. This skill is for tools that will be invoked by an agent repeatedly or exposed in an MCP server — ephemeral tools do not justify the design overhead."
 ---

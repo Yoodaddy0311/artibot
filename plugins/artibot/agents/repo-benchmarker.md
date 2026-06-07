@@ -8,7 +8,7 @@ description: |
   frameworks) and compares them against the current Artibot build. Produces quantified
   scoring reports with actionable improvement suggestions.
 
-  Use when evaluating external repositories, comparing architectural patterns,
+  Use proactively when evaluating external repositories, comparing architectural patterns,
   benchmarking features, or identifying adoptable elements from reference projects.
 
   Triggers: benchmark, compare repo, analyze repo, score, evaluate, reference,

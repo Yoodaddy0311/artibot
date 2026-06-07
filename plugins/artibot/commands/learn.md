@@ -7,6 +7,8 @@ toolset: analysis
 
 # /learn
 
+> **vs /learning**: `/learn` **extracts and saves patterns** from code or session to memory. `/learning` **diagnoses the learning system** (GRPO weights, swarm sync stats) — read-only, never mutates state.
+
 Extract reusable patterns, conventions, and insights from the codebase or current session. Saves learned patterns to memory for future reference across sessions.
 
 ## Arguments

@@ -1,6 +1,6 @@
 {
-  "version": 2,
-  "description": "Single source of truth for dispatcher hook tables. Each slot lists the child-process hooks that the corresponding dispatcher fans out in parallel. Loaded by lib/dispatcher/dispatch-table-loader.js and consumed by the *-dispatcher.js scripts. Adding a new hook = appending one entry here (no dispatcher code change).",
+  "version": 3,
+  "description": "Single source of truth for dispatcher hook tables. Each slot lists the child-process hooks that the corresponding dispatcher fans out in parallel. Loaded by lib/dispatcher/dispatch-table-loader.js and consumed by the *-dispatcher.js scripts. Adding a new hook = appending one entry here (no dispatcher code change). `single-hook` strategy slots (e.g. PreCompact) intentionally have no dispatcher and must stay in sync with the matching entry in hooks.json — keep `singleHookCommand` populated and matching hooks.json so loaders can detect drift.",
   "slots": {
     "SessionStart": {
       "label": "Session Initialization",
@@ -88,7 +88,9 @@
       "label": "Before Context Compaction",
       "dispatcher": null,
       "strategy": "single-hook",
-      "note": "Not dispatcher-consolidated. PreCompact remains a single direct hook registration in hooks.json.",
+      "note": "Not dispatcher-consolidated. PreCompact remains a single direct hook registration in hooks.json. The `singleHookCommand` and `singleHookTimeoutMs` below MUST match the PreCompact entry in hooks.json — loaders/tests use them as a drift tripwire. If you change either side, update the other in the same PR.",
+      "singleHookCommand": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-compact.js",
+      "singleHookTimeoutMs": 8000,
       "handlers": []
     }
   }

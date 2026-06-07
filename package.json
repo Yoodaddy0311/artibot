@@ -1,1 +1,10 @@
-{}
+{
+  "name": "artibot-repo",
+  "private": true,
+  "version": "4.19.6",
+  "description": "Artibot monorepo root — see plugins/artibot/ for the published plugin.",
+  "engines": {
+    "node": ">=20"
+  },
+  "type": "module"
+}

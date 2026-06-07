@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  _resetGitConsentWarnedForTesting,
   cancelSync,
   forceSync,
   getSyncStatus,
@@ -385,5 +386,38 @@ describe('git backend routing (regression lock for swarm 9-day stale)', () => {
     expect(uploadWeights).toHaveBeenCalledTimes(1);
     expect(gitUploadWeights).not.toHaveBeenCalled();
     expect(flushOfflineQueue).toHaveBeenCalled();
+  });
+});
+
+describe('git backend DATA POLICY confirm gate (audit #11)', () => {
+  let warnSpy;
+  beforeEach(() => {
+    _resetGitConsentWarnedForTesting();
+    warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+  afterEach(() => {
+    warnSpy.mockRestore();
+  });
+
+  it('warns on first git-backend upload when gitConsent is missing', async () => {
+    await onSessionEnd({ config: { backend: 'git', gitRepoUrl: 'https://github.com/x/y.git' } });
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy.mock.calls[0][0]).toMatch(/DATA POLICY/);
+    expect(warnSpy.mock.calls[0][0]).toMatch(/https:\/\/github\.com\/x\/y\.git/);
+  });
+
+  it('only warns once per process even across multiple syncs', async () => {
+    const cfg = { backend: 'git', gitRepoUrl: 'https://github.com/x/y.git' };
+    await onSessionEnd({ config: cfg });
+    await onSessionStart({ config: cfg });
+    await onSessionEnd({ config: cfg });
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('stays silent when gitConsent is true', async () => {
+    await onSessionEnd({
+      config: { backend: 'git', gitRepoUrl: 'https://github.com/x/y.git', gitConsent: true },
+    });
+    expect(warnSpy).not.toHaveBeenCalled();
   });
 });

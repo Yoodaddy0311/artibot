@@ -7,6 +7,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CLAUDE_DIR="${HOME:-${USERPROFILE:-$(eval echo ~)}}/.claude"
 ARTIBOT_DIR="${CLAUDE_DIR}/artibot"
 
+# Minimum Node major. Lockstep with package.json#/engines/node (">=20") and
+# scripts/install.sh / scripts/install.ps1 MIN_NODE_MAJOR. Bumped 18 -> 20 to
+# match the per-plugin installer and prevent split-policy installs where the
+# bootstrap rejects the runtime that this installer would accept.
+MIN_NODE_MAJOR=20
+
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -28,14 +34,14 @@ check_prerequisites() {
   fi
 
   if ! command -v node &>/dev/null; then
-    err "Node.js not found. Install: https://nodejs.org/ (v18+)"
+    err "Node.js not found. Install: https://nodejs.org/ (v${MIN_NODE_MAJOR}+)"
     exit 1
   fi
 
   local node_version
   node_version=$(node -v | sed 's/v//' | cut -d. -f1)
-  if [ "$node_version" -lt 18 ]; then
-    err "Node.js 18+ required. Current: $(node -v)"
+  if [ "$node_version" -lt "$MIN_NODE_MAJOR" ]; then
+    err "Node.js ${MIN_NODE_MAJOR}+ required. Current: $(node -v)"
     exit 1
   fi
 

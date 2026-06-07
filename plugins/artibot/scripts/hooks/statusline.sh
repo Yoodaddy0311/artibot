@@ -105,7 +105,7 @@ if [ -f "$EVAL_FILE" ]; then
 fi
 
 # ─── Git info with 5s cache ───────────────────────────────────────────────────
-CACHE_FILE="/tmp/artibot-statusline-cache"
+CACHE_FILE="${TMPDIR:-/tmp}/artibot-statusline-cache"
 CACHE_TTL=5
 GIT_BRANCH=''
 GIT_DIRTY=''

@@ -27,6 +27,14 @@ whenNotToUse: "Isolated single-instance deployments where federated sharing is d
 
 # Federated Swarm Intelligence
 
+## DATA POLICY Notice
+
+> **외부 서버 데이터 전송 포함** — 이 스킬은 Artibot 외부 swarm 서버(`ARTIBOT_SWARM_SERVER` 또는 config `swarm.serverUrl`)로 익명화된 패턴을 업로드합니다.
+> - **opt-in 명시 동의 없이 데이터 전송 금지** (`swarm.optIn: false` 기본값 유지)
+> - `ARTIBOT_SWARM_SERVER` 환경변수가 설정된 경우, 해당 외부 엔드포인트로 전송됨을 사용자에게 반드시 고지
+> - DATA POLICY 예외 조건: 사용자가 직접 `/swarm opt-in`을 실행한 경우에만 허용 (자동 트리거 금지)
+> - 데이터는 익명화(SHA-256, 12자 prefix) + Differential Privacy(ε=1.0) 적용 후 전송
+
 ## When This Skill Applies
 - User wants to participate in collective learning across Artibot instances
 - Syncing local patterns with global swarm intelligence

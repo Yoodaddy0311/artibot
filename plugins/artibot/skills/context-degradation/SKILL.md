@@ -29,7 +29,7 @@ tokens: "~3.5K"
 category: "quality"
 version: "1.0.0"
 risk: safe
-lastVerified: "2026-03-31"
+lastVerified: "2026-06-08"
 source_hash: 8e3bbe6d
 whenNotToUse: "Short, fresh sessions without context loss symptoms; do not apply as a preventive measure when no degradation signal (irrelevant outputs, lost instructions, contradictions) has been observed."
 ---

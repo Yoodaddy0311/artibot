@@ -1,9 +1,7 @@
 ---
 description: (Artibot) Federated Swarm Intelligence - manage collective learning participation
-argument-hint: '<action> e.g. "status", "sync", "health", "stats", "opt-in", "opt-out"'
-allowed-tools: [Read, Bash, Glob, Grep]
-argument-hint: '[action] e.g. "스웜 동기화 상태 확인"'
-allowed-tools: [Read, Bash, TaskCreate]
+argument-hint: '<action> e.g. "status" | "sync" | "opt-in" | "스웜 동기화 상태 확인"'
+allowed-tools: [Read, Bash, Glob, Grep, TaskCreate]
 disable-model-invocation: true
 toolset: team
 ---
@@ -11,6 +9,11 @@ toolset: team
 # /swarm
 
 Manage Artibot's federated swarm intelligence — cross-machine pattern sharing.
+
+> **DATA POLICY**: 이 커맨드는 외부 swarm 서버로 데이터를 업로드합니다.
+> - `sync` / `opt-in` 실행 전 사용자 명시 동의 필수
+> - `ARTIBOT_SWARM_SERVER` 환경변수가 설정된 경우 해당 외부 엔드포인트로 전송됨을 고지
+> - opt-in 상태가 아니면 `sync`, `stats` 동작을 거부하고 `opt-in` 안내만 제공
 
 ## Arguments
 

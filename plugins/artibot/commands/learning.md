@@ -7,6 +7,8 @@ toolset: meta
 
 # /learning
 
+> **vs /learn**: `/learning` **diagnoses the learning system** (GRPO weights, swarm sync) — pure read-only inspection. `/learn` **extracts and saves patterns** from code or session to memory.
+
 Inspect the on-disk state of the Artibot auto-learning + swarm federation system. Pure observation — never mutates state.
 
 The command runs `scripts/learning-diag.js` which reads (in order):

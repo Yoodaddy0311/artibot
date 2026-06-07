@@ -154,3 +154,14 @@ jobs:
             *Cowork-optimized slim build of Artibot — marketing, content, data, design skills for knowledge workers using Claude Cowork.*
           draft: false
           prerelease: ${{ contains(github.ref_name, '-rc') || contains(github.ref_name, '-beta') || contains(github.ref_name, '-alpha') }}
+
+  # NOTE on qualityMetrics sync: the cowork build does NOT carry its own
+  # qualityMetrics.tests counter (cowork plugin.json has no qualityMetrics
+  # block — verified 2026-06-08). The root .claude-plugin/marketplace.json
+  # `plugins[name=artibot-cowork].version` field IS the only cross-file
+  # lockstep target, and it is kept in sync by the operator bumping the same
+  # version field in both plugins/artibot-cowork/.claude-plugin/plugin.json
+  # AND .claude-plugin/marketplace.json before tagging cowork-vX.Y.Z.
+  # release-check.js does not currently watch the cowork lockstep; a future
+  # extension could add it, but for now this comment is the canonical
+  # documentation of why no auto-sync step lives here.

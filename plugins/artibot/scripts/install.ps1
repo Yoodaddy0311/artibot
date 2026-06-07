@@ -16,11 +16,17 @@
 #>
 [CmdletBinding()]
 param(
-  [string]$PluginDir = ""
+  [string]$PluginDir = "",
+  [switch]$DryRun,
+  [switch]$NoColor
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+
+# Color cmdlet shim: when -NoColor passed, swap colored Write-Host for plain.
+# This is checked once at top-level so each Write-* call stays a one-liner.
+$script:UseColor = -not $NoColor
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -34,7 +40,16 @@ if ($_pluginJson -and (Test-Path $_pluginJson)) {
 } elseif ($_pkgJson -and (Test-Path $_pkgJson)) {
   $ARTIBOT_VERSION = (Get-Content $_pkgJson -Raw | ConvertFrom-Json).version
 } else {
-  $ARTIBOT_VERSION = "unknown"
+  # Last-resort fallback for `irm | iex` pipe installs where $PSScriptRoot is empty.
+  # Fetch plugin.json from GitHub raw so the banner shows a real version instead
+  # of a misleading "unknown".
+  try {
+    $rawUrl = "https://raw.githubusercontent.com/Yoodaddy0311/artibot/master/plugins/artibot/.claude-plugin/plugin.json"
+    $remote = Invoke-RestMethod -Uri $rawUrl -TimeoutSec 5 -ErrorAction Stop
+    $ARTIBOT_VERSION = if ($remote.version) { $remote.version } else { "unknown" }
+  } catch {
+    $ARTIBOT_VERSION = "unknown"
+  }
 }
 $MIN_NODE_MAJOR   = 20
 $DEFAULT_PLUGIN_DIR = Join-Path $env:USERPROFILE ".claude\plugins\artibot"
@@ -43,8 +58,14 @@ $REPO_URL = "https://github.com/Yoodaddy0311/artibot"
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-function Write-Info    { param($msg) Write-Host "[artibot] $msg" -ForegroundColor Cyan }
-function Write-Ok      { param($msg) Write-Host "[artibot] $msg" -ForegroundColor Green }
+function Write-Info    {
+  param($msg)
+  if ($script:UseColor) { Write-Host "[artibot] $msg" -ForegroundColor Cyan } else { Write-Host "[artibot] $msg" }
+}
+function Write-Ok      {
+  param($msg)
+  if ($script:UseColor) { Write-Host "[artibot] $msg" -ForegroundColor Green } else { Write-Host "[artibot] $msg" }
+}
 function Write-Warn    { param($msg) Write-Warning "[artibot] $msg" }
 function Write-Fail    { param($msg) Write-Error "[artibot] ERROR: $msg"; exit 1 }
 
@@ -105,6 +126,10 @@ function Install-Files {
 
   if ($pluginJson -and (Test-Path $pluginJson)) {
     Write-Info "Installing from local source: $sourceRoot"
+    if ($DryRun) {
+      Write-Info "[dry-run] would copy $sourceRoot -> $Target (excl node_modules, .git)"
+      return
+    }
     if (-not (Test-Path $Target)) {
       New-Item -ItemType Directory -Path $Target -Force | Out-Null
     }
@@ -121,14 +146,22 @@ function Install-Files {
 
     if (Test-Path (Join-Path $Target ".git")) {
       Write-Info "Updating existing installation..."
-      & git -C $Target pull --ff-only
+      if ($DryRun) {
+        Write-Info "[dry-run] would git -C $Target pull --ff-only"
+      } else {
+        & git -C $Target pull --ff-only
+      }
     } else {
       Write-Info "Cloning repository..."
-      $parentDir = Split-Path -Parent $Target
-      if (-not (Test-Path $parentDir)) {
-        New-Item -ItemType Directory -Path $parentDir -Force | Out-Null
+      if ($DryRun) {
+        Write-Info "[dry-run] would git clone --depth 1 $REPO_URL $Target"
+      } else {
+        $parentDir = Split-Path -Parent $Target
+        if (-not (Test-Path $parentDir)) {
+          New-Item -ItemType Directory -Path $parentDir -Force | Out-Null
+        }
+        & git clone --depth 1 $REPO_URL $Target
       }
-      & git clone --depth 1 $REPO_URL $Target
     }
   }
 
@@ -148,6 +181,10 @@ function Install-Deps {
   }
 
   Write-Info "Installing dependencies..."
+  if ($DryRun) {
+    Write-Info "[dry-run] would run npm ci/install in $Target"
+    return
+  }
   $lockFile = Join-Path $Target "package-lock.json"
   Push-Location $Target
   try {
@@ -175,11 +212,128 @@ function Invoke-Validation {
   }
 
   Write-Info "Running validation..."
+  if ($DryRun) {
+    Write-Info "[dry-run] would run node $validateScript"
+    return
+  }
   & node $validateScript
   if ($LASTEXITCODE -ne 0) {
     Write-Fail "Validation failed. Check errors above."
   }
   Write-Ok "Validation passed"
+}
+
+# ---------------------------------------------------------------------------
+# 6a. Mirror to Claude Code marketplace install (parity with install.sh:196-225)
+# ---------------------------------------------------------------------------
+# Claude Code's plugin system maintains its own install copy at
+#   ~/.claude/plugins/marketplaces/artibot/plugins/artibot/
+# Every project session reads hooks from THAT path (via CLAUDE_PLUGIN_ROOT),
+# not from $Target. Skipping this mirror leaves the marketplace at whatever
+# version Claude Code last fetched, causing silent hook regressions in other
+# projects after a manual update here.
+function Install-MarketplaceMirror {
+  param([string]$SourceRoot, [string]$Target)
+
+  $claudeDir = Join-Path $env:USERPROFILE ".claude"
+  $mktRoot   = Join-Path $claudeDir "plugins\marketplaces\artibot\plugins\artibot"
+
+  if (-not (Test-Path $mktRoot)) {
+    Write-Info "Marketplace install not present (skip mirror)"
+    return
+  }
+  if ($DryRun) {
+    Write-Info "[dry-run] would mirror $Target -> $mktRoot"
+    return
+  }
+
+  # Mirror the hot paths from the direct install we just wrote.
+  # Same clean-before-copy contract as install.sh:install_marketplace_mirror.
+  foreach ($dir in @('scripts', 'hooks', 'lib', 'skills', 'output-styles', '.claude-plugin')) {
+    $srcDir = Join-Path $Target $dir
+    $dstDir = Join-Path $mktRoot $dir
+    if (Test-Path $srcDir) {
+      if (Test-Path $dstDir) { Remove-Item -Path $dstDir -Recurse -Force -ErrorAction SilentlyContinue }
+      Copy-Item -Path $srcDir -Destination $dstDir -Recurse -Force -Exclude @('node_modules', '.git')
+    }
+  }
+
+  # Commands and agents live only in the source repo. Pull from $SourceRoot.
+  if ($SourceRoot) {
+    foreach ($dir in @('commands', 'agents')) {
+      $srcDir = Join-Path $SourceRoot $dir
+      $dstDir = Join-Path $mktRoot $dir
+      if (Test-Path $srcDir) {
+        if (Test-Path $dstDir) { Remove-Item -Path $dstDir -Recurse -Force -ErrorAction SilentlyContinue }
+        Copy-Item -Path $srcDir -Destination $dstDir -Recurse -Force -Exclude @('node_modules', '.git')
+      }
+    }
+
+    $cfgSrc = Join-Path $SourceRoot "artibot.config.json"
+    if (Test-Path $cfgSrc) { Copy-Item -Path $cfgSrc -Destination $mktRoot -Force }
+    $pkgSrc = Join-Path $SourceRoot "package.json"
+    if (Test-Path $pkgSrc) { Copy-Item -Path $pkgSrc -Destination $mktRoot -Force }
+  }
+
+  Write-Ok "Marketplace mirror updated -> $mktRoot"
+}
+
+# ---------------------------------------------------------------------------
+# 6b. Mirror to Claude Code plugin cache (parity with install.sh:248-284)
+# ---------------------------------------------------------------------------
+# Claude Code maintains a per-version plugin cache at
+#   ~/.claude/plugins/cache/artibot/artibot/<version>/
+# At session start it loads hooks.json from THE CACHE DIR. The v4.6.4 -> v4.8.2
+# hook regression went unnoticed for so long precisely because users' caches
+# held v4.6.4 args[] schema while the marketplace mirror had moved on. We do
+# NOT touch .claude-plugin/plugin.json inside the cache (its version field is
+# the cache routing key — overwriting it would orphan the cache entry).
+function Install-PluginCache {
+  param([string]$SourceRoot, [string]$Target)
+
+  $claudeDir = Join-Path $env:USERPROFILE ".claude"
+  $cacheRoot = Join-Path $claudeDir "plugins\cache\artibot\artibot"
+
+  if (-not (Test-Path $cacheRoot)) {
+    Write-Info "Plugin cache not present (skip cache sync)"
+    return
+  }
+  if ($DryRun) {
+    Write-Info "[dry-run] would sync $Target -> $cacheRoot per-version dirs"
+    return
+  }
+
+  $synced = 0
+  $versionDirs = Get-ChildItem -Path $cacheRoot -Directory -ErrorAction SilentlyContinue
+  foreach ($vDir in $versionDirs) {
+    $vRoot = $vDir.FullName
+
+    # Mirror runtime hot paths only (NOT .claude-plugin — preserve plugin.json
+    # version routing key).
+    foreach ($dir in @('scripts', 'hooks', 'lib', 'output-styles')) {
+      $srcDir = Join-Path $Target $dir
+      $dstDir = Join-Path $vRoot $dir
+      if (Test-Path $srcDir) {
+        if (Test-Path $dstDir) { Remove-Item -Path $dstDir -Recurse -Force -ErrorAction SilentlyContinue }
+        Copy-Item -Path $srcDir -Destination $dstDir -Recurse -Force -Exclude @('node_modules', '.git')
+      }
+    }
+
+    if ($SourceRoot) {
+      $cfgSrc = Join-Path $SourceRoot "artibot.config.json"
+      if (Test-Path $cfgSrc) { Copy-Item -Path $cfgSrc -Destination $vRoot -Force }
+      $pkgSrc = Join-Path $SourceRoot "package.json"
+      if (Test-Path $pkgSrc) { Copy-Item -Path $pkgSrc -Destination $vRoot -Force }
+    }
+
+    $synced++
+  }
+
+  if ($synced -gt 0) {
+    Write-Ok "Plugin cache synced: $synced version dir(s) -> $cacheRoot"
+  } else {
+    Write-Info "Plugin cache directory present but contained no version dirs (skip)"
+  }
 }
 
 # ---------------------------------------------------------------------------
@@ -206,8 +360,15 @@ function Write-SuccessMessage {
 # Main
 # ---------------------------------------------------------------------------
 Write-Host ""
-Write-Host "  Artibot v$ARTIBOT_VERSION Installer" -ForegroundColor Cyan
-Write-Host "  ==================================" -ForegroundColor Cyan
+$_bannerColor = if ($script:UseColor) { 'Cyan' } else { $null }
+$_bannerSuffix = if ($DryRun) { "  [DRY-RUN]" } else { "" }
+if ($_bannerColor) {
+  Write-Host "  Artibot v$ARTIBOT_VERSION Installer$_bannerSuffix" -ForegroundColor $_bannerColor
+  Write-Host "  ==================================" -ForegroundColor $_bannerColor
+} else {
+  Write-Host "  Artibot v$ARTIBOT_VERSION Installer$_bannerSuffix"
+  Write-Host "  =================================="
+}
 Write-Host ""
 
 Test-NodeVersion
@@ -218,4 +379,9 @@ Write-Info "Plugin directory: $resolvedPluginDir"
 Install-Files -Target $resolvedPluginDir
 Install-Deps  -Target $resolvedPluginDir
 Invoke-Validation -Target $resolvedPluginDir
+# Mirror to Claude Code marketplace + per-version cache (closes the
+# Windows-side gap that caused the v4.6.4 -> v4.8.2 hook regression to persist
+# silently for users running the per-plugin installer).
+Install-MarketplaceMirror -SourceRoot $_sourceDir -Target $resolvedPluginDir
+Install-PluginCache       -SourceRoot $_sourceDir -Target $resolvedPluginDir
 Write-SuccessMessage -Target $resolvedPluginDir

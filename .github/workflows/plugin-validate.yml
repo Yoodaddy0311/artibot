@@ -29,8 +29,47 @@ permissions:
   contents: read
 
 jobs:
+  # Fast-skip detector: docs-only / workflow-only PRs do not touch plugin
+  # assets, but plugin-structure is a required check so it must still report.
+  # We compute a "plugin_changed" flag here in ~5s and let plugin-structure
+  # short-circuit when the flag is false. The required check still reports
+  # success, but the matrix avoids redundant Node setup + validation passes.
+  fast-skip:
+    name: Detect plugin-asset changes
+    runs-on: ubuntu-latest
+    outputs:
+      plugin_changed: ${{ steps.detect.outputs.plugin_changed }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Detect plugin changes
+        id: detect
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "plugin_changed=true" >> "$GITHUB_OUTPUT"
+            echo "Non-PR event — full validation."
+            exit 0
+          fi
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          if ! CHANGED=$(git diff --name-only "${BASE_SHA}...${HEAD_SHA}" 2>/dev/null); then
+            echo "plugin_changed=true" >> "$GITHUB_OUTPUT"
+            echo "git diff failed — falling back to full validation."
+            exit 0
+          fi
+          if echo "$CHANGED" | grep -qE '^(plugins/artibot(-cowork)?/(\.claude-plugin/plugin\.json|agents/|skills/|commands/)|\.github/workflows/plugin-validate\.yml)'; then
+            echo "plugin_changed=true" >> "$GITHUB_OUTPUT"
+            echo "Plugin assets changed — full validation."
+          else
+            echo "plugin_changed=false" >> "$GITHUB_OUTPUT"
+            echo "Docs/workflow-only PR — fast-skip enabled."
+          fi
+
   plugin-structure:
     name: Validate ${{ matrix.plugin }} plugin.json structure
+    needs: fast-skip
     runs-on: ubuntu-latest
 
     strategy:
@@ -43,15 +82,22 @@ jobs:
         working-directory: plugins/${{ matrix.plugin }}
 
     steps:
+      - name: Fast-skip notice
+        if: needs.fast-skip.outputs.plugin_changed == 'false'
+        run: echo "PR touched no plugin assets — validation skipped (required check still reports green)."
+
       - name: Checkout repository
+        if: needs.fast-skip.outputs.plugin_changed == 'true'
         uses: actions/checkout@v5
 
       - name: Setup Node.js 22
+        if: needs.fast-skip.outputs.plugin_changed == 'true'
         uses: actions/setup-node@v5
         with:
           node-version: 22
 
       - name: Validate plugin.json schema
+        if: needs.fast-skip.outputs.plugin_changed == 'true'
         run: |
           node -e "
           const fs = require('fs');
@@ -97,6 +143,7 @@ jobs:
           "
 
       - name: Validate agent file references
+        if: needs.fast-skip.outputs.plugin_changed == 'true'
         run: |
           node -e "
           const fs = require('fs');
@@ -126,6 +173,7 @@ jobs:
           "
 
       - name: Validate skills directory structure
+        if: needs.fast-skip.outputs.plugin_changed == 'true'
         run: |
           node -e "
           const fs = require('fs');
@@ -165,6 +213,7 @@ jobs:
           "
 
       - name: Validate commands directory
+        if: needs.fast-skip.outputs.plugin_changed == 'true'
         run: |
           node -e "
           const fs = require('fs');

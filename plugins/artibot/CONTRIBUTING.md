@@ -318,7 +318,16 @@ cp plugins/artibot/templates/command-template.md \
    plugins/artibot/commands/my-command.md
 ```
 
-### Step 2: Fill in required sections / 필수 섹션 작성
+### Step 2: Fill in required frontmatter / 필수 frontmatter 작성
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `description` | **Yes** | One-line description shown in auto-complete and `/index` |
+| `argument-hint` | Yes | Hint string shown to user |
+| `allowed-tools` | Yes | Array of permitted tool names |
+| `name` | **No** | Commands intentionally omit `name:` — the filename is the canonical name. Agents and SKILL.md files require `name:`, but commands use the H1 heading (`# /command-name`) as the display name. Do not add `name:` to command files. |
+
+> **Convention note**: The absence of `name:` in command frontmatter is intentional and consistent across all 70+ commands. The filename (without `.md`) is the command name, and the H1 heading provides the display label. Adding `name:` to commands is unnecessary and should be avoided to keep frontmatter minimal.
 
 | Section | Description |
 |---------|-------------|

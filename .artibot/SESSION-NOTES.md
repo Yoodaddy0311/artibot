@@ -1309,3 +1309,62 @@
 <!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
 
 ---
+
+## 2026-06-07 15:09 UTC · `artibot/master`
+
+- **Commits** (20):
+  - `be590c8` Merge branch 'master' of https://github.com/Yoodaddy0311/artibot into artibot/master
+  - `76c1b6e` fix(hooks): wire workflow-status to real team task list (~/.claude/tasks/<team>/)
+  - `5542c21` chore(release): v4.19.6
+  - `17bedcc` fix(update): self-copy guard + auto-stash before pull (cross-machine /update)
+  - `0b15dcd` docs(readme): sync residual skill count 112->113 (auto-activating prose)
+  - `a52e421` chore(release): v4.19.5
+  - `e688ffa` fix(hooks): non-destructive git-autopilot checkpoint (stash create+store)
+  - `ff71a48` docs(orchestration): align terminology with Claude Code 2.1.x (P1a)
+  - `ecb1bc2` feat(security+hooks): ai-security-standards skill, STRIDE body, Stop-hook 2.1.163 mode toggle, marketplace meta sync
+  - `dee6013` chore(session): sync session notes
+  - `f54d579` refactor(orchestration): remove rate-sentinel orphan (N4)
+  - `e874c7e` docs(audit): reclassify N3 tool-guardrails -> dormant-by-documented-design
+  - `4d4bba0` docs(audit): dead-code / unwired-feature backlog (N1-N6 triage)
+  - `0fa2655` feat(hooks): wire workflow-status progress (Opt-A+B) + orchestration routing docs
+  - `9f3a187` feat(privacy): WIRE-16 — homoglyph defense in PII scrubber
+  - `0501b88` docs(wire): dormant backlog cleanup (11 items) + WIRE-21 swarm-sync fix
+  - `defba70` feat(runtime): WIRE-03 — surface per-teammate effort/budget on subagents contract
+  - `6acbf7c` chore(session): sync session notes, handoffs, and Track-B verification for cross-machine work
+  - `b281bf1` chore(release): v4.19.4
+  - `ce4840d` feat(cognitive): 4-way orchestration router + boundary clarification (Option A)
+- **Files touched**: 253
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-06-07 16:08 UTC · `artibot/master`
+
+- **Commits** (1):
+  - `b9942d8` fix(install): unblock fresh-machine install + UserPromptSubmit resilience
+- **Files touched**: 9
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-06-07 16:20 UTC · `artibot/master`
+
+- **Commits** (1):
+  - `d52c12a` test(hooks): update schema fingerprint for UserPromptSubmit timeout bump
+- **Files touched**: 1
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-06-07 16:24 UTC · `artibot/master`
+
+- **Commits** (1):
+  - `49f3e75` fix(tests): accept safe_copy_dir in install.sh recursive-copy tripwire
+- **Files touched**: 1
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
