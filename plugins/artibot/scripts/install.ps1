@@ -25,8 +25,18 @@ $ErrorActionPreference = "Stop"
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-$ARTIBOT_VERSION = "1.3.0"
-$MIN_NODE_MAJOR   = 18
+# Resolve plugin source dir (works for both local invocation and irm | iex pipe)
+$_sourceDir = if ($PSScriptRoot) { Split-Path -Parent $PSScriptRoot } else { $null }
+$_pluginJson = if ($_sourceDir) { Join-Path $_sourceDir ".claude-plugin\plugin.json" } else { $null }
+$_pkgJson    = if ($_sourceDir) { Join-Path $_sourceDir "package.json" } else { $null }
+if ($_pluginJson -and (Test-Path $_pluginJson)) {
+  $ARTIBOT_VERSION = (Get-Content $_pluginJson -Raw | ConvertFrom-Json).version
+} elseif ($_pkgJson -and (Test-Path $_pkgJson)) {
+  $ARTIBOT_VERSION = (Get-Content $_pkgJson -Raw | ConvertFrom-Json).version
+} else {
+  $ARTIBOT_VERSION = "unknown"
+}
+$MIN_NODE_MAJOR   = 20
 $DEFAULT_PLUGIN_DIR = Join-Path $env:USERPROFILE ".claude\plugins\artibot"
 $REPO_URL = "https://github.com/Yoodaddy0311/artibot"
 
@@ -39,7 +49,7 @@ function Write-Warn    { param($msg) Write-Warning "[artibot] $msg" }
 function Write-Fail    { param($msg) Write-Error "[artibot] ERROR: $msg"; exit 1 }
 
 # ---------------------------------------------------------------------------
-# 1. Check Node.js >= 18
+# 1. Check Node.js >= MIN_NODE_MAJOR
 # ---------------------------------------------------------------------------
 function Test-NodeVersion {
   Write-Info "Checking Node.js..."
@@ -98,7 +108,10 @@ function Install-Files {
     if (-not (Test-Path $Target)) {
       New-Item -ItemType Directory -Path $Target -Force | Out-Null
     }
-    Copy-Item -Path "$sourceRoot\*" -Destination $Target -Recurse -Force
+    # Exclude node_modules and .git: copying them on fresh-machine install can
+    # hang or fail with EPERM (Windows symlink semantics). They are rebuilt by
+    # `npm install` post-install anyway.
+    Copy-Item -Path "$sourceRoot\*" -Destination $Target -Recurse -Force -Exclude @('node_modules', '.git')
   } else {
     # Running via pipe — use git clone
     $gitPath = Get-Command git -ErrorAction SilentlyContinue

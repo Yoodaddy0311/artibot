@@ -191,7 +191,9 @@ async function main() {
   // Step 1: rewriter (sync ordering — its output mutates the payload that the
   // parallel contributors classify on, so they see the rewritten prompt).
   const rewriterResult = await safeRun(userPromptHandler, payload, 'user-prompt-handler');
-  if (rewriterResult?.user_prompt) {
+  // Use typeof string check so empty string "" (a legitimate rewriter output)
+  // is preserved instead of being treated as missing by a truthy check.
+  if (typeof rewriterResult?.user_prompt === 'string') {
     payload.user_prompt = rewriterResult.user_prompt;
   }
 

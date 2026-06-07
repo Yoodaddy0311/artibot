@@ -43,6 +43,35 @@ check_prerequisites() {
 }
 
 # ──────────────────────────────────────────────
+# Safe recursive copy (exclude node_modules / .git)
+# ──────────────────────────────────────────────
+# Fresh-machine install used to copy node_modules/ (hundreds of MB, sometimes
+# with Windows-incompatible symlinks) which hung or failed with EPERM. Always
+# exclude node_modules and .git from recursive copies. Prefer rsync when
+# available; fall back to a find+cp loop that respects the exclude list.
+safe_copy_dir() {
+  local src="$1"
+  local dst="$2"
+  if command -v rsync &>/dev/null; then
+    rsync -a --exclude='node_modules' --exclude='.git' "${src}/" "${dst}/"
+    return $?
+  fi
+  mkdir -p "${dst}"
+  local base
+  base="$(cd "${src}" && pwd)"
+  find "${base}" -mindepth 1 \( -name node_modules -o -name .git \) -prune -o -print 2>/dev/null | while IFS= read -r entry; do
+    local rel="${entry#${base}/}"
+    [ "${rel}" = "${base}" ] && continue
+    if [ -d "${entry}" ]; then
+      mkdir -p "${dst}/${rel}"
+    else
+      mkdir -p "$(dirname "${dst}/${rel}")"
+      cp "${entry}" "${dst}/${rel}"
+    fi
+  done
+}
+
+# ──────────────────────────────────────────────
 # Self-install guard
 # ──────────────────────────────────────────────
 # When update.js falls back to the INSTALLED copy of install.sh
@@ -111,7 +140,7 @@ install_commands() {
 install_skills() {
   local count=0
   if [ -d "${SCRIPT_DIR}/skills" ]; then
-    cp -r "${SCRIPT_DIR}/skills" "${ARTIBOT_DIR}/"
+    safe_copy_dir "${SCRIPT_DIR}/skills" "${ARTIBOT_DIR}/skills"
     count=$(find "${SCRIPT_DIR}/skills" -maxdepth 1 -type d | wc -l)
     count=$((count - 1))
   fi
@@ -127,16 +156,15 @@ install_hooks() {
     [ -d "${ARTIBOT_DIR}/${dir}" ] && rm -rf "${ARTIBOT_DIR}/${dir}"
   done
 
-  cp -r "${SCRIPT_DIR}/hooks" "${ARTIBOT_DIR}/"
-  cp -r "${SCRIPT_DIR}/scripts" "${ARTIBOT_DIR}/"
-  cp -r "${SCRIPT_DIR}/lib" "${ARTIBOT_DIR}/"
-  [ -d "${SCRIPT_DIR}/output-styles" ] && cp -r "${SCRIPT_DIR}/output-styles" "${ARTIBOT_DIR}/"
+  safe_copy_dir "${SCRIPT_DIR}/hooks" "${ARTIBOT_DIR}/hooks"
+  safe_copy_dir "${SCRIPT_DIR}/scripts" "${ARTIBOT_DIR}/scripts"
+  safe_copy_dir "${SCRIPT_DIR}/lib" "${ARTIBOT_DIR}/lib"
+  [ -d "${SCRIPT_DIR}/output-styles" ] && safe_copy_dir "${SCRIPT_DIR}/output-styles" "${ARTIBOT_DIR}/output-styles"
 
   # Copy .claude-plugin metadata (plugin.json, swarm-profile.json, etc.)
   # This is needed so swarm-autodetect can find swarm-profile.json after update.
   if [ -d "${SCRIPT_DIR}/.claude-plugin" ]; then
-    mkdir -p "${ARTIBOT_DIR}/.claude-plugin"
-    cp -r "${SCRIPT_DIR}/.claude-plugin/." "${ARTIBOT_DIR}/.claude-plugin/"
+    safe_copy_dir "${SCRIPT_DIR}/.claude-plugin" "${ARTIBOT_DIR}/.claude-plugin"
   fi
 
   # Copy config files
@@ -177,7 +205,7 @@ install_marketplace_mirror() {
   for dir in scripts hooks lib skills output-styles .claude-plugin; do
     if [ -d "${ARTIBOT_DIR}/${dir}" ]; then
       [ -d "${mkt_root}/${dir}" ] && rm -rf "${mkt_root}/${dir}"
-      cp -r "${ARTIBOT_DIR}/${dir}" "${mkt_root}/"
+      safe_copy_dir "${ARTIBOT_DIR}/${dir}" "${mkt_root}/${dir}"
     fi
   done
 
@@ -187,7 +215,7 @@ install_marketplace_mirror() {
   for dir in commands agents; do
     if [ -d "${SCRIPT_DIR}/${dir}" ]; then
       [ -d "${mkt_root}/${dir}" ] && rm -rf "${mkt_root}/${dir}"
-      cp -r "${SCRIPT_DIR}/${dir}" "${mkt_root}/"
+      safe_copy_dir "${SCRIPT_DIR}/${dir}" "${mkt_root}/${dir}"
     fi
   done
 
@@ -235,7 +263,7 @@ install_plugin_cache() {
     for dir in scripts hooks lib output-styles; do
       if [ -d "${ARTIBOT_DIR}/${dir}" ]; then
         [ -d "${v_root}/${dir}" ] && rm -rf "${v_root}/${dir}"
-        cp -r "${ARTIBOT_DIR}/${dir}" "${v_root}/"
+        safe_copy_dir "${ARTIBOT_DIR}/${dir}" "${v_root}/${dir}"
       fi
     done
 
@@ -372,6 +400,8 @@ seed_local_config() {
     else
       warn "No .gitignore found — CLAUDE.local.md may be accidentally committed"
     fi
+  else
+    warn "CLAUDE.local.md.template not found at ${SCRIPT_DIR}/templates/ — skipping seed"
   fi
 }
 
@@ -388,7 +418,10 @@ seed_auto_memory() {
     normalized_path="${BASH_REMATCH[1]^^}:${normalized_path:2}"
   fi
   local project_hash
-  project_hash=$(echo "$normalized_path" | sed 's/[\/:\\]/-/g' | sed 's/^-//')
+  # Include space in the char class — Claude Code's projects/ hash also
+  # replaces spaces (Korean paths like "바탕 화면" contain a space + non-ASCII).
+  # Without this, the computed hash dir won't exist and seeding silently misses.
+  project_hash=$(echo "$normalized_path" | sed 's/[ \/:\\]/-/g' | sed 's/^-//')
 
   # Fallback: if computed hash dir doesn't exist, search for existing match
   if [ ! -d "${memory_dir}/${project_hash}" ] && [ -d "$memory_dir" ]; then

@@ -10,8 +10,16 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-ARTIBOT_VERSION="2.0.0"
-MIN_NODE_MAJOR=18
+# Resolve plugin source dir (works for both `bash install.sh` and curl pipe)
+_SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." 2>/dev/null && pwd || echo "")"
+if [ -n "$_SOURCE_DIR" ] && [ -f "${_SOURCE_DIR}/.claude-plugin/plugin.json" ]; then
+  ARTIBOT_VERSION=$(node -p "require('${_SOURCE_DIR}/.claude-plugin/plugin.json').version" 2>/dev/null || echo "unknown")
+elif [ -n "$_SOURCE_DIR" ] && [ -f "${_SOURCE_DIR}/package.json" ]; then
+  ARTIBOT_VERSION=$(node -p "require('${_SOURCE_DIR}/package.json').version" 2>/dev/null || echo "unknown")
+else
+  ARTIBOT_VERSION="unknown"
+fi
+MIN_NODE_MAJOR=20
 DEFAULT_PLUGIN_DIR="$HOME/.claude/plugins/artibot"
 REPO_URL="https://github.com/Yoodaddy0311/artibot"
 
@@ -28,7 +36,7 @@ warn()    { echo -e "${YELLOW}[artibot] WARN${RESET} $*" >&2; }
 fail()    { echo -e "${RED}[artibot] ERROR${RESET} $*" >&2; exit 1; }
 
 # ---------------------------------------------------------------------------
-# 1. Check Node.js >= 18
+# 1. Check Node.js >= MIN_NODE_MAJOR
 # ---------------------------------------------------------------------------
 check_node() {
   info "Checking Node.js..."
