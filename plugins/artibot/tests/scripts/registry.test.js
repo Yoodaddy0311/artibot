@@ -2,7 +2,7 @@
  * Tests for the /theme registry (scripts/theme/registry.js).
  * Apply-engine helpers are tested in theme-apply.test.js.
  *
- * @module tests/scripts/theme-registry
+ * @module tests/scripts/registry
  */
 
 import { describe, expect, it } from 'vitest';
