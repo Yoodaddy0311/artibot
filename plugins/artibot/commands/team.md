@@ -171,8 +171,13 @@ hook/statusline이 아니라 **리더의 채팅 출력**이라 항상 보이고,
 작업이 추가되면 total 을 갱신해 다시 렌더. **반드시 마지막엔 100%(done==total) 바로
 끝맺어 "완료됐다"를 시각적으로 확정**한다.
 
-> 도구로 자동화하려면: `node ${CLAUDE_PLUGIN_ROOT}/scripts/render-progress.js <done> <total> "<phaseLabel>"`
-> 가 위 박스를 그대로 출력한다(리더가 Bash로 호출해 결과를 그대로 채팅에 표시해도 됨).
+> **기본(가장 안전·이식성 100%)**: 리더가 위 박스 마크다운을 **채팅에 직접(인라인) 출력**한다.
+> 스크립트·환경변수 의존이 없어 어떤 컴퓨터에서도 작동한다. 바 계산만 위 공식대로 하면 된다.
+>
+> 선택(자동화): 일관된 바 계산이 필요하면 헬퍼를 호출해 그 출력을 그대로 표시해도 된다.
+> 설치본 경로(모든 머신 공통): `node "$HOME/.claude/artibot/scripts/render-progress.js" <done> <total> "<phaseLabel>"`.
+> (소스 레포에선 `node plugins/artibot/scripts/render-progress.js ...`.) `${CLAUDE_PLUGIN_ROOT}`는
+> Bash 셸에서 비어있을 수 있으니 쓰지 마라. 헬퍼 호출이 실패하면 즉시 인라인 출력으로 폴백한다.
 
 ### Phase 4: CROSS-CHECK (Sonnet 4.6)
 After ALL main tasks complete, spawn cross-check agents on **sonnet** for fast review:
