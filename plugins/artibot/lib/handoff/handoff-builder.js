@@ -221,6 +221,19 @@ function msToDays(ms) {
 }
 
 /**
+ * Normalize a caller-supplied `now` into a clock function returning a Date.
+ * Internally this module treats `now` as a clock (`now()` → Date), but callers
+ * naturally reach for `Date.now()` (a number) — accept function | number | Date
+ * | undefined so neither convention crashes.
+ */
+function asClock(now) {
+  if (typeof now === 'function') return now;
+  if (typeof now === 'number' && Number.isFinite(now)) return () => new Date(now);
+  if (now instanceof Date) return () => now;
+  return () => new Date();
+}
+
+/**
  * Derive the git-sync dashboard + recommended actions from a collected
  * gitState. Pure function — no git, no I/O — so the exact warning/action logic
  * is unit-testable. Every field is defensive against partial/degraded state.
@@ -247,7 +260,7 @@ function msToDays(ms) {
  */
 export function deriveGitSyncStatus(gitState, opts = {}) {
   const g = gitState ?? ZERO_GIT_STATE;
-  const now = (opts.now ?? (() => new Date()))().getTime();
+  const now = asClock(opts.now)().getTime();
 
   const dirtyCount = (g.modified || 0) + (g.staged || 0) + (g.untracked || 0);
   const dirty = dirtyCount > 0;
@@ -501,7 +514,7 @@ export async function collectHandoffData(options) {
   const git = options?.gitRunner ?? DEFAULT_GIT_RUNNER;
   const taskList = Array.isArray(options?.taskList) ? options.taskList : [];
   const firstPrompts = Array.isArray(options?.firstPrompts) ? options.firstPrompts : [];
-  const now = options?.now ?? (() => new Date());
+  const now = asClock(options?.now);
   const tsStart = Date.now();
   const cwd = projectRoot || pluginRoot;
 
@@ -740,7 +753,7 @@ function renderFrontmatter(meta) {
  * @returns {string}
  */
 export function renderHandoffMarkdown(data, options = {}) {
-  const now = options.now ?? (() => new Date());
+  const now = asClock(options.now);
   const ts = formatHeaderTimestamp(now());
   const summary = summaryLineFromPrompts(data?.firstPrompts);
   const frontmatter = renderFrontmatter(data?.meta);

@@ -363,6 +363,20 @@ describe('handoff-builder / deriveGitSyncStatus', () => {
     expect(s.actions).toEqual([]);
   });
 
+  it('accepts now as a number, Date, function, or undefined without throwing (footgun guard)', () => {
+    // Regression: callers naturally pass Date.now() (a number); the module treats
+    // `now` as a clock function internally. asClock() must bridge both so /save
+    // never crashes on the intuitive number input.
+    const stale = baseState({ modified: 0, staged: 0, untracked: 0, localHeadAtMs: nowMs - 3 * DAY });
+    const fromNumber = deriveGitSyncStatus(stale, { now: nowMs });
+    const fromDate = deriveGitSyncStatus(stale, { now: new Date(nowMs) });
+    const fromFn = deriveGitSyncStatus(stale, { now: NOW });
+    expect(fromNumber.staleDays).toBe(3);
+    expect(fromNumber.staleDays).toBe(fromFn.staleDays);
+    expect(fromDate.staleDays).toBe(fromFn.staleDays);
+    expect(() => deriveGitSyncStatus(stale, {})).not.toThrow();
+  });
+
   it('flags a dirty working tree and proposes a commit action', () => {
     const s = deriveGitSyncStatus(baseState({ modified: 2, untracked: 1 }), { now: NOW });
     expect(s.dirty).toBe(true);
