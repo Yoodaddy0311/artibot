@@ -9,6 +9,7 @@ import path from 'node:path';
 
 import {
   collectHandoffData,
+  deriveGitSyncStatus,
   estimateStepDuration,
   renderHandoffMarkdown,
   toProjectSlug,
@@ -321,5 +322,229 @@ describe('handoff-builder / full render', () => {
     };
     const md = renderHandoffMarkdown(synthetic, { now: FROZEN_NOW });
     expect(md).toMatch(/^machineId:\s+(unknown|'')/m);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// deriveGitSyncStatus (pure — the commit/push guard core, v4.20)
+// ---------------------------------------------------------------------------
+
+describe('handoff-builder / deriveGitSyncStatus', () => {
+  const DAY = 24 * 60 * 60 * 1000;
+  // Fixed clock so staleDays math is deterministic.
+  const NOW = () => new Date(Date.UTC(2026, 5, 8, 12, 0, 0));
+  const nowMs = NOW().getTime();
+
+  function baseState(over = {}) {
+    return {
+      branch: 'master',
+      shortHash: 'abc1234',
+      modified: 0,
+      staged: 0,
+      untracked: 0,
+      recentCommits: [],
+      unpushed: 0,
+      hasUpstream: true,
+      behind: 0,
+      localHeadAtMs: nowMs - 60_000, // fresh
+      upstreamHeadAtMs: nowMs - 60_000,
+      lockedOut: false,
+      ...over,
+    };
+  }
+
+  it('reports a fully clean, in-sync repo with no warnings or actions', () => {
+    const s = deriveGitSyncStatus(baseState(), { now: NOW });
+    expect(s.dirty).toBe(false);
+    expect(s.ahead).toBe(0);
+    expect(s.behind).toBe(0);
+    expect(s.otherMachineRisk).toBe(false);
+    expect(s.warnings).toEqual([]);
+    expect(s.actions).toEqual([]);
+  });
+
+  it('flags a dirty working tree and proposes a commit action', () => {
+    const s = deriveGitSyncStatus(baseState({ modified: 2, untracked: 1 }), { now: NOW });
+    expect(s.dirty).toBe(true);
+    expect(s.dirtyCount).toBe(3);
+    expect(s.warnings.some((w) => /커밋되지 않은 변경 3개/.test(w))).toBe(true);
+    const commit = s.actions.find((a) => a.kind === 'commit');
+    expect(commit).toBeTruthy();
+    expect(commit.confirm).toBe(true);
+  });
+
+  it('flags unpushed (ahead) commits and proposes a confirm-gated push action', () => {
+    const s = deriveGitSyncStatus(baseState({ unpushed: 4 }), { now: NOW });
+    expect(s.ahead).toBe(4);
+    expect(s.warnings.some((w) => /미푸시 커밋 4개/.test(w))).toBe(true);
+    const push = s.actions.find((a) => a.kind === 'push');
+    expect(push).toBeTruthy();
+    expect(push.confirm).toBe(true);
+  });
+
+  it('flags behind and proposes a pull action', () => {
+    const s = deriveGitSyncStatus(baseState({ behind: 2 }), { now: NOW });
+    expect(s.behind).toBe(2);
+    expect(s.warnings.some((w) => /origin이 로컬보다 2개 앞섬/.test(w))).toBe(true);
+    expect(s.actions.find((a) => a.kind === 'pull')).toBeTruthy();
+  });
+
+  it('surfaces a "GitHub is N days behind" warning when local HEAD outruns upstream', () => {
+    const s = deriveGitSyncStatus(baseState({
+      unpushed: 3,
+      localHeadAtMs: nowMs,
+      upstreamHeadAtMs: nowMs - 3 * DAY,
+    }), { now: NOW });
+    expect(s.githubLagDays).toBe(3);
+    expect(s.warnings.some((w) => /GitHub가 로컬보다 약 3일 전/.test(w))).toBe(true);
+  });
+
+  it('detects the cross-machine risk: clean tree + nothing to push + stale local HEAD', () => {
+    const s = deriveGitSyncStatus(baseState({
+      modified: 0,
+      staged: 0,
+      untracked: 0,
+      unpushed: 0,
+      localHeadAtMs: nowMs - 3 * DAY,
+      upstreamHeadAtMs: nowMs - 3 * DAY,
+    }), { now: NOW });
+    expect(s.otherMachineRisk).toBe(true);
+    expect(s.staleDays).toBe(3);
+    expect(s.warnings.some((w) => /다른 컴퓨터의 미푸시 작업/.test(w))).toBe(true);
+    const fetch = s.actions.find((a) => a.kind === 'fetch');
+    expect(fetch).toBeTruthy();
+    expect(fetch.confirm).toBe(false); // advisory only, never auto-writes
+  });
+
+  it('does NOT flag cross-machine risk when the tree is dirty (active local work)', () => {
+    const s = deriveGitSyncStatus(baseState({
+      modified: 1,
+      localHeadAtMs: nowMs - 5 * DAY,
+    }), { now: NOW });
+    expect(s.otherMachineRisk).toBe(false);
+  });
+
+  it('handles a missing upstream gracefully and advises -u push', () => {
+    const s = deriveGitSyncStatus(baseState({
+      hasUpstream: false,
+      unpushed: 0,
+      behind: 0,
+      upstreamHeadAtMs: null,
+    }), { now: NOW });
+    expect(s.hasUpstream).toBe(false);
+    expect(s.warnings.some((w) => /upstream\(origin\) 추적 브랜치 없음/.test(w))).toBe(true);
+  });
+
+  it('returns safe zeros for a null/degraded gitState', () => {
+    const s = deriveGitSyncStatus(null, { now: NOW });
+    expect(s.dirty).toBe(false);
+    expect(s.ahead).toBe(0);
+    expect(s.behind).toBe(0);
+    expect(s.otherMachineRisk).toBe(false);
+    expect(s.warnings).toEqual([]);
+    expect(s.actions).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Git sync collection + dashboard render (end-to-end through collectHandoffData)
+// ---------------------------------------------------------------------------
+
+describe('handoff-builder / git sync collection + render', () => {
+  let pluginRoot;
+  let projectRoot;
+
+  beforeEach(() => {
+    pluginRoot = makeTempRoot();
+    projectRoot = makeTempRoot();
+  });
+
+  afterEach(() => {
+    rmSync(pluginRoot, { recursive: true, force: true });
+    rmSync(projectRoot, { recursive: true, force: true });
+  });
+
+  it('collects ahead/behind/timestamps and renders the §1 sync dashboard', async () => {
+    const ahead2Git = mockGit({
+      'rev-parse --abbrev-ref HEAD': 'master\n',
+      'rev-parse --short HEAD': 'abc1234\n',
+      'status --porcelain': '',
+      'log -5 --format=%h|%s|%ar': 'abc1234|feat: x|2 hours ago\n',
+      'rev-parse --abbrev-ref --symbolic-full-name @{u}': 'origin/master\n',
+      'rev-list --count @{u}..HEAD': '2\n',
+      'rev-list --count HEAD..@{u}': '0\n',
+      'log -1 --format=%ct @{u}': '1000\n',
+      'log -1 --format=%ct HEAD': '1000\n',
+      'log -5 --name-only --pretty=format:': '',
+    });
+    const data = await collectHandoffData({
+      pluginRoot,
+      projectRoot,
+      gitRunner: ahead2Git,
+      taskList: [],
+      firstPrompts: [],
+      now: FROZEN_NOW,
+    });
+    expect(data.gitState.hasUpstream).toBe(true);
+    expect(data.gitState.unpushed).toBe(2);
+    expect(data.gitState.behind).toBe(0);
+    expect(data.gitSync.ahead).toBe(2);
+
+    const md = renderHandoffMarkdown(data, { now: FROZEN_NOW });
+    expect(md).toContain('### Git 동기화 상태');
+    expect(md).toContain('미푸시 커밋 (ahead)');
+    expect(md).toMatch(/미푸시 커밋 2개/);
+  });
+
+  it('renders the in-sync affirmation when everything is clean', async () => {
+    const cleanGit = mockGit({
+      'rev-parse --abbrev-ref HEAD': 'master\n',
+      'rev-parse --short HEAD': 'abc1234\n',
+      'status --porcelain': '',
+      'log -5 --format=%h|%s|%ar': 'abc1234|feat: x|2 hours ago\n',
+      'rev-parse --abbrev-ref --symbolic-full-name @{u}': 'origin/master\n',
+      'rev-list --count @{u}..HEAD': '0\n',
+      'rev-list --count HEAD..@{u}': '0\n',
+      'log -1 --format=%ct @{u}': String(Math.floor(FROZEN_NOW().getTime() / 1000)) + '\n',
+      'log -1 --format=%ct HEAD': String(Math.floor(FROZEN_NOW().getTime() / 1000)) + '\n',
+      'log -5 --name-only --pretty=format:': '',
+    });
+    const data = await collectHandoffData({
+      pluginRoot,
+      projectRoot,
+      gitRunner: cleanGit,
+      taskList: [],
+      firstPrompts: [],
+      now: FROZEN_NOW,
+    });
+    expect(data.gitSync.warnings).toEqual([]);
+    const md = renderHandoffMarkdown(data, { now: FROZEN_NOW });
+    expect(md).toContain('커밋·푸시 동기화 정상');
+  });
+
+  it('degrades to a safe dashboard when git has no upstream', async () => {
+    const noUpstreamGit = mockGit({
+      'rev-parse --abbrev-ref HEAD': 'feat/local\n',
+      'rev-parse --short HEAD': 'abc1234\n',
+      'status --porcelain': ' M foo.js\n',
+      'log -5 --format=%h|%s|%ar': 'abc1234|wip|1 hour ago\n',
+      'rev-parse --abbrev-ref --symbolic-full-name @{u}': () => {
+        throw new Error('fatal: no upstream configured for branch');
+      },
+      'log -1 --format=%ct HEAD': String(Math.floor(FROZEN_NOW().getTime() / 1000)) + '\n',
+      'log -5 --name-only --pretty=format:': '',
+    });
+    const data = await collectHandoffData({
+      pluginRoot,
+      projectRoot,
+      gitRunner: noUpstreamGit,
+      taskList: [],
+      firstPrompts: [],
+      now: FROZEN_NOW,
+    });
+    expect(data.gitState.hasUpstream).toBe(false);
+    const md = renderHandoffMarkdown(data, { now: FROZEN_NOW });
+    expect(md).toContain('### Git 동기화 상태');
+    expect(md).toMatch(/upstream 추적 \| ⚠️ 없음/);
   });
 });

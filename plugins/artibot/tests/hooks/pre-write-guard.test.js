@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import path from 'node:path';
 
 // ---------------------------------------------------------------------------
@@ -20,6 +20,8 @@ vi.mock('../../scripts/utils/index.js', () => ({
   }),
   // v4.7.4: pre-write-guard fingerprint cache writes to <pluginRoot>/runtime/.
   getPluginRoot: vi.fn(() => '/plugin-root'),
+  // P0 advisory-mode toggle: resolveWriteGuardMode reads artibot.config.json.
+  resolveConfigPath: vi.fn((...segs) => ['/plugin-root', ...segs].join('/')),
 }));
 
 // v4.7.4: shouldEnforceGuard now anchors the Artibot marker check on the
@@ -458,6 +460,110 @@ describe('pre-write-guard hook', () => {
       readStdin.mockResolvedValue(
         makePreWriteData('/workspace/plugins/artibot/lib/core/config.js'),
       );
+
+      await import('../../scripts/hooks/pre-write-guard.js');
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(writeStdout).toHaveBeenCalledWith(
+        expect.objectContaining({ decision: 'block' }),
+      );
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // P0 new-user UX — write-guard advisory mode toggle
+  //
+  // devProtocol.writeGuardMode = 'advisory' (or env ARTIBOT_WRITE_GUARD_MODE)
+  // downgrades the write-before-read BLOCK to an APPROVE (warn-only). Default
+  // 'block' preserves strict DEV-protocol enforcement (regression-safe).
+  // -------------------------------------------------------------------------
+  describe('write-guard advisory mode (config toggle)', () => {
+    const ORIG_ENV = process.env.ARTIBOT_WRITE_GUARD_MODE;
+    afterEach(() => {
+      if (ORIG_ENV === undefined) delete process.env.ARTIBOT_WRITE_GUARD_MODE;
+      else process.env.ARTIBOT_WRITE_GUARD_MODE = ORIG_ENV;
+    });
+
+    it('approves (warn-only) when config writeGuardMode=advisory', async () => {
+      delete process.env.ARTIBOT_WRITE_GUARD_MODE;
+      const filePath = '/workspace/plugins/artibot/lib/core/config.js';
+
+      existsSync.mockImplementation((p) => {
+        const s = String(p);
+        if (s.includes('artibot-read-tracking')) return true;
+        if (s.includes('last-pre-write-block.txt')) return false;
+        return true;
+      });
+      // Tracking returns empty list; config returns advisory mode.
+      readFileSync.mockImplementation((p) => {
+        const s = String(p);
+        if (s.includes('artibot.config.json')) {
+          return JSON.stringify({ devProtocol: { writeGuardMode: 'advisory' } });
+        }
+        return '[]';
+      });
+
+      readStdin.mockResolvedValue(makePreWriteData(filePath));
+
+      await import('../../scripts/hooks/pre-write-guard.js');
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(writeStdout).toHaveBeenCalledWith(
+        expect.objectContaining({ decision: 'approve' }),
+      );
+      // Advisory path must NOT persist a block fingerprint.
+      const fpPath = path.join('/plugin-root', 'runtime', 'last-pre-write-block.txt');
+      expect(writtenFiles[fpPath]).toBeUndefined();
+    });
+
+    it('env ARTIBOT_WRITE_GUARD_MODE=advisory overrides config block', async () => {
+      process.env.ARTIBOT_WRITE_GUARD_MODE = 'advisory';
+      const filePath = '/workspace/plugins/artibot/lib/core/cache.js';
+
+      existsSync.mockImplementation((p) => {
+        const s = String(p);
+        if (s.includes('artibot-read-tracking')) return true;
+        if (s.includes('last-pre-write-block.txt')) return false;
+        return true;
+      });
+      // Config explicitly block, but env says advisory → advisory wins.
+      readFileSync.mockImplementation((p) => {
+        const s = String(p);
+        if (s.includes('artibot.config.json')) {
+          return JSON.stringify({ devProtocol: { writeGuardMode: 'block' } });
+        }
+        return '[]';
+      });
+
+      readStdin.mockResolvedValue(makePreWriteData(filePath));
+
+      await import('../../scripts/hooks/pre-write-guard.js');
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(writeStdout).toHaveBeenCalledWith(
+        expect.objectContaining({ decision: 'approve' }),
+      );
+    });
+
+    it('still blocks when config writeGuardMode=block (default preserved)', async () => {
+      delete process.env.ARTIBOT_WRITE_GUARD_MODE;
+      const filePath = '/workspace/plugins/artibot/lib/core/config.js';
+
+      existsSync.mockImplementation((p) => {
+        const s = String(p);
+        if (s.includes('artibot-read-tracking')) return true;
+        if (s.includes('last-pre-write-block.txt')) return false;
+        return true;
+      });
+      readFileSync.mockImplementation((p) => {
+        const s = String(p);
+        if (s.includes('artibot.config.json')) {
+          return JSON.stringify({ devProtocol: { writeGuardMode: 'block' } });
+        }
+        return '[]';
+      });
+
+      readStdin.mockResolvedValue(makePreWriteData(filePath));
 
       await import('../../scripts/hooks/pre-write-guard.js');
       await new Promise((r) => setTimeout(r, 50));

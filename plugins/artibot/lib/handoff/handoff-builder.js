@@ -56,8 +56,20 @@ const ZERO_GIT_STATE = Object.freeze({
   untracked: 0,
   recentCommits: [],
   unpushed: null,
+  // Sync-safety fields (v4.20 — /save commit+push guard). Each is null when the
+  // corresponding git probe failed or there is no upstream, so the renderer can
+  // distinguish "no upstream" from "in sync".
+  hasUpstream: false,
+  behind: null,
+  localHeadAtMs: null,
+  upstreamHeadAtMs: null,
   lockedOut: false,
 });
+
+// Heuristic threshold for the cross-machine staleness warning. A local HEAD
+// older than STALE_HEAD_MS with a clean working tree is the exact shape of the
+// "I worked on another machine and forgot to push" incident this guard targets.
+const STALE_HEAD_MS = 24 * 60 * 60 * 1000; // 1 day
 
 // Heuristic: identify a git failure caused by a timeout or an index lock so
 // the renderer can flag §1 with a "잠금 감지" warning. Other failures (e.g.
@@ -160,12 +172,146 @@ function collectGitState(git, cwd) {
     const log = git(['log', '-5', '--format=%h|%s|%ar'], { cwd });
     state.recentCommits = parseRecentCommits(log);
   });
+  // Detect whether the current branch has an upstream. `rev-parse @{u}` exits
+  // non-zero with "no upstream configured" when none exists — we treat the
+  // success path as the upstream gate for all subsequent ahead/behind probes.
   trap(() => {
-    const ahead = git(['rev-list', '--count', '@{u}..HEAD'], { cwd }).trim();
-    const n = Number(ahead);
-    state.unpushed = Number.isFinite(n) ? n : null;
+    const upstream = git(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'], { cwd }).trim();
+    state.hasUpstream = upstream.length > 0;
+  });
+  if (state.hasUpstream) {
+    trap(() => {
+      const ahead = git(['rev-list', '--count', '@{u}..HEAD'], { cwd }).trim();
+      const n = Number(ahead);
+      state.unpushed = Number.isFinite(n) ? n : null;
+    });
+    trap(() => {
+      const behind = git(['rev-list', '--count', 'HEAD..@{u}'], { cwd }).trim();
+      const n = Number(behind);
+      state.behind = Number.isFinite(n) ? n : null;
+    });
+    trap(() => {
+      // Committer date (epoch seconds) of the upstream tip — used to surface a
+      // "GitHub is N days behind" message without a network fetch (reflects the
+      // last-fetched remote-tracking ref, which is exactly what /resume sees).
+      const sec = Number(git(['log', '-1', '--format=%ct', '@{u}'], { cwd }).trim());
+      state.upstreamHeadAtMs = Number.isFinite(sec) && sec > 0 ? sec * 1000 : null;
+    });
+  }
+  trap(() => {
+    const sec = Number(git(['log', '-1', '--format=%ct', 'HEAD'], { cwd }).trim());
+    state.localHeadAtMs = Number.isFinite(sec) && sec > 0 ? sec * 1000 : null;
   });
   return state;
+}
+
+// ---------------------------------------------------------------------------
+// Sync status derivation (pure — testable without git)
+// ---------------------------------------------------------------------------
+
+/**
+ * Pluralize a millisecond gap into a coarse day count, floored. Sub-day gaps
+ * return 0. Used for human-readable "N일 전" messaging.
+ * @param {number} ms
+ * @returns {number}
+ */
+function msToDays(ms) {
+  if (!Number.isFinite(ms) || ms <= 0) return 0;
+  return Math.floor(ms / (24 * 60 * 60 * 1000));
+}
+
+/**
+ * Derive the git-sync dashboard + recommended actions from a collected
+ * gitState. Pure function — no git, no I/O — so the exact warning/action logic
+ * is unit-testable. Every field is defensive against partial/degraded state.
+ *
+ * The cross-machine heuristic (`otherMachineRisk`) targets the real incident:
+ * a clean working tree whose local HEAD is older than STALE_HEAD_MS while the
+ * upstream tip is OLDER STILL (or unknown) strongly suggests work was committed
+ * on another machine and never pushed here — so this checkout cannot see it.
+ *
+ * @param {object} gitState — shape of {@link ZERO_GIT_STATE}
+ * @param {{ now?: () => Date }} [opts]
+ * @returns {{
+ *   dirty: boolean,
+ *   dirtyCount: number,
+ *   ahead: number,
+ *   behind: number,
+ *   hasUpstream: boolean,
+ *   staleDays: number,
+ *   githubLagDays: number,
+ *   otherMachineRisk: boolean,
+ *   warnings: string[],
+ *   actions: Array<{ kind: string, label: string, confirm: boolean }>,
+ * }}
+ */
+export function deriveGitSyncStatus(gitState, opts = {}) {
+  const g = gitState ?? ZERO_GIT_STATE;
+  const now = (opts.now ?? (() => new Date()))().getTime();
+
+  const dirtyCount = (g.modified || 0) + (g.staged || 0) + (g.untracked || 0);
+  const dirty = dirtyCount > 0;
+  const ahead = Number.isFinite(g.unpushed) ? g.unpushed : 0;
+  const behind = Number.isFinite(g.behind) ? g.behind : 0;
+  const hasUpstream = g.hasUpstream === true;
+
+  const staleDays = Number.isFinite(g.localHeadAtMs)
+    ? msToDays(now - g.localHeadAtMs)
+    : 0;
+  const githubLagDays = (Number.isFinite(g.localHeadAtMs) && Number.isFinite(g.upstreamHeadAtMs))
+    ? msToDays(g.localHeadAtMs - g.upstreamHeadAtMs)
+    : 0;
+
+  // Cross-machine risk: clean tree + nothing to push here + a stale local HEAD.
+  // If upstream is also stale (or unknown), the freshest work is likely sitting
+  // unpushed on another machine. We never assert it — we flag it for a manual
+  // check (git fetch / log on the other box).
+  const localHeadAgeMs = Number.isFinite(g.localHeadAtMs) ? now - g.localHeadAtMs : -1;
+  const otherMachineRisk = !dirty
+    && ahead === 0
+    && localHeadAgeMs >= STALE_HEAD_MS;
+
+  const warnings = [];
+  const actions = [];
+
+  if (dirty) {
+    warnings.push(`커밋되지 않은 변경 ${dirtyCount}개 — 세션 종료 전 커밋 권장`);
+    actions.push({ kind: 'commit', label: `변경 ${dirtyCount}개 커밋하기`, confirm: true });
+  }
+  if (ahead > 0) {
+    warnings.push(`로컬에 미푸시 커밋 ${ahead}개 — GitHub에 아직 올라가지 않음`);
+    actions.push({ kind: 'push', label: `미푸시 커밋 ${ahead}개 푸시하기`, confirm: true });
+  }
+  if (behind > 0) {
+    warnings.push(`origin이 로컬보다 ${behind}개 앞섬 — pull 필요`);
+    actions.push({ kind: 'pull', label: `origin에서 ${behind}개 가져오기 (pull)`, confirm: true });
+  }
+  if (githubLagDays >= 1) {
+    warnings.push(`GitHub가 로컬보다 약 ${githubLagDays}일 전 상태 — 푸시 누락 가능성`);
+  }
+  if (otherMachineRisk) {
+    warnings.push(
+      `로컬 HEAD가 ${staleDays}일 전인데 워킹트리는 깨끗 — 다른 컴퓨터의 미푸시 작업이 있을 수 있음. `
+      + '`git fetch` 후 다른 머신 상태 확인 권장',
+    );
+    actions.push({ kind: 'fetch', label: '다른 머신 작업 확인 (git fetch + 비교)', confirm: false });
+  }
+  if (!hasUpstream && (dirty || (g.localHeadAtMs !== null && g.localHeadAtMs !== undefined))) {
+    warnings.push('upstream(origin) 추적 브랜치 없음 — 푸시 시 `-u`로 upstream 설정 필요');
+  }
+
+  return {
+    dirty,
+    dirtyCount,
+    ahead,
+    behind,
+    hasUpstream,
+    staleDays,
+    githubLagDays,
+    otherMachineRisk,
+    warnings,
+    actions,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -360,6 +506,7 @@ export async function collectHandoffData(options) {
   const cwd = projectRoot || pluginRoot;
 
   const gitState = collectGitState(git, cwd);
+  const gitSync = deriveGitSyncStatus(gitState, { now });
   const wip = collectWipState(cwd);
   const quality = collectQualityState(pluginRoot);
   const advisor = await collectAdvisorState(pluginRoot);
@@ -371,6 +518,7 @@ export async function collectHandoffData(options) {
   return {
     meta,
     gitState,
+    gitSync,
     wip,
     quality,
     tasks: taskList,
@@ -436,6 +584,60 @@ function renderStateTable(data) {
     ].join('\n');
   }
   return rows.join('\n');
+}
+
+/**
+ * Render the Git 동기화 상태 dashboard + recommended actions. Lives inside §1
+ * so the existing `## 1.` / `## 5.` banner regex stays stable. Returns an empty
+ * string only when there is genuinely nothing to report AND no upstream data —
+ * otherwise it always emits a one-line "in sync" affirmation so the user gets a
+ * positive signal that the push state was checked.
+ *
+ * @param {{ gitSync?: object, gitState?: object }} data
+ * @returns {string}
+ */
+function renderSyncDashboard(data) {
+  const sync = data.gitSync;
+  if (!sync) return '';
+
+  const cell = (v) => (v === true ? '⚠️ 예' : '아니오');
+  const aheadCell = sync.ahead > 0 ? `⚠️ ${sync.ahead}` : '0';
+  const behindCell = sync.behind > 0 ? `⚠️ ${sync.behind}` : '0';
+  const upstreamCell = sync.hasUpstream ? '있음' : '⚠️ 없음';
+  const lagCell = sync.githubLagDays >= 1 ? `⚠️ ~${sync.githubLagDays}일` : '최신';
+
+  const table = [
+    '### Git 동기화 상태',
+    '',
+    '| 점검 항목 | 상태 |',
+    '|---|---|',
+    `| 커밋 안 된 변경 | ${cell(sync.dirty)}${sync.dirty ? ` (${sync.dirtyCount}개)` : ''} |`,
+    `| 미푸시 커밋 (ahead) | ${aheadCell} |`,
+    `| pull 필요 (behind) | ${behindCell} |`,
+    `| upstream 추적 | ${upstreamCell} |`,
+    `| GitHub 최신성 | ${lagCell} |`,
+    `| 다른 머신 미동기화 의심 | ${cell(sync.otherMachineRisk)} |`,
+  ];
+
+  const blocks = [table.join('\n')];
+
+  if (sync.warnings.length > 0) {
+    const warnLines = sync.warnings.map((w) => `> [!WARNING] ${w}`);
+    blocks.push(warnLines.join('\n'));
+  }
+
+  if (sync.actions.length > 0) {
+    const actLines = ['**권장 액션** (push/commit은 반드시 확인 후 실행):'];
+    for (const a of sync.actions) {
+      const guard = a.confirm ? ' _(확인 필요)_' : '';
+      actLines.push(`- ${a.label}${guard}`);
+    }
+    blocks.push(actLines.join('\n'));
+  } else if (sync.warnings.length === 0) {
+    blocks.push('> ✅ 커밋·푸시 동기화 정상 — 유실 위험 없음');
+  }
+
+  return blocks.join('\n\n');
 }
 
 function renderRecentCommits(commits) {
@@ -552,6 +754,8 @@ export function renderHandoffMarkdown(data, options = {}) {
     '## 1. 지금 상태',
     '',
     renderStateTable(data),
+    '',
+    renderSyncDashboard(data),
     '',
     '## 2. 이번 세션 한 일',
     '',

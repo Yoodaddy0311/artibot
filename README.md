@@ -78,20 +78,39 @@ Most Claude Code plugins use simple sub-agent (`Task()`) delegation -- fire-and-
 
 ### Installation
 
-**Option A: Plugin Marketplace (Recommended)**
+**Recommended: `install.sh` (flat install — no command prefix)**
+```bash
+git clone https://github.com/Yoodaddy0311/artibot.git
+cd artibot/plugins/artibot
+bash install.sh          # macOS / Linux / Git Bash on Windows
+```
+
+This flat-copies agents and commands into `~/.claude/`, so slash commands are
+called **without a prefix** (`/save`, `/sc`, `/daily`). It enables Agent Teams
+and seeds a conservative read-only permission allowlist (`Read`/`Glob`/`Grep`)
+into `~/.claude/settings.json`, removing the repeated approval prompts new users
+hit on first run. To uninstall: `bash install.sh uninstall`.
+
+> **Windows:** run `install.sh` from **Git Bash** ([Git for Windows](https://gitforwindows.org/)),
+> or use the native PowerShell installer: `powershell -ExecutionPolicy Bypass -File install.ps1`.
+
+**Command invocation differs by install method:**
+
+| Install method | Command form | Example |
+|---|---|---|
+| **`install.sh` / `install.ps1`** (recommended) | flat (no prefix) | `/save`, `/sc`, `/daily` |
+| `claude plugin install` (marketplace) | namespaced `artibot:` | `/artibot:save`, `/artibot:sc` |
+
+**Alternative (advanced): Claude Code marketplace**
 ```bash
 claude plugin marketplace add https://github.com/Yoodaddy0311/artibot
 claude plugin install artibot@artibot
 ```
 
-**Option B: Manual Install**
-```bash
-git clone https://github.com/Yoodaddy0311/artibot.git
-cd artibot/plugins/artibot
-bash install.sh
-```
-
-Both methods copy agents, commands, skills, hooks, and MCP config to `~/.claude/`. Agent Teams is auto-enabled on first session start. To uninstall: `bash install.sh uninstall`
+Marketplace install namespaces **every** command under the `artibot:` prefix
+(e.g. `/save` → `/artibot:save`). Use it only for plugin-managed updates via
+`claude plugin`. Agent Teams auto-enables on first session start. To uninstall:
+`claude plugin uninstall artibot`.
 
 ### Requirements
 
@@ -761,7 +780,7 @@ Session start:
   ✅ You are running the latest version
 ```
 
-**`/artibot:update` command:**
+**`/update` command** (flat install; `/artibot:update` if installed via marketplace)**:**
 
 | Flag | Behavior |
 |------|----------|

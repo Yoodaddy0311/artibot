@@ -141,6 +141,52 @@ describe('install/CLAUDE.local.md protection', () => {
 });
 
 // ---------------------------------------------------------------------------
+// 5b. P0 new-user UX: read-only permission seed + Windows installer
+// ---------------------------------------------------------------------------
+
+describe('install/permission seed (read-only allowlist)', () => {
+  it('install.sh seeds Read/Glob/Grep into permissions.allow', () => {
+    const content = readFileSync(path.join(PLUGIN_ROOT, 'install.sh'), 'utf-8');
+    // Conservative safe set declared and merge helper present.
+    expect(content).toMatch(/ARTIBOT_SAFE_ALLOW=\(Read Glob Grep\)/);
+    expect(content).toMatch(/_seed_permission_allow/);
+    // Fresh settings.json template includes the allow list.
+    expect(content).toMatch(/"permissions":/);
+    expect(content).toMatch(/"allow":/);
+  });
+
+  it('install.sh does NOT auto-approve Bash/Write/Edit', () => {
+    const content = readFileSync(path.join(PLUGIN_ROOT, 'install.sh'), 'utf-8');
+    // Safety: write/exec tools must not appear in the seeded allow set.
+    expect(content).not.toMatch(/ARTIBOT_SAFE_ALLOW=\([^)]*\bBash\b/);
+    expect(content).not.toMatch(/ARTIBOT_SAFE_ALLOW=\([^)]*\bWrite\b/);
+    expect(content).not.toMatch(/ARTIBOT_SAFE_ALLOW=\([^)]*\bEdit\b/);
+  });
+
+  it('install.sh merges (does not overwrite) existing permissions', () => {
+    const content = readFileSync(path.join(PLUGIN_ROOT, 'install.sh'), 'utf-8');
+    // jq path unions + uniques; node path appends only missing entries.
+    expect(content).toMatch(/permissions\.allow.*unique/s);
+    expect(content).toMatch(/if \(!merged\.includes\(entry\)\) merged\.push\(entry\)/);
+  });
+});
+
+describe('install/windows PowerShell installer', () => {
+  it('plugins/artibot/install.ps1 exists', () => {
+    expect(existsSync(path.join(PLUGIN_ROOT, 'install.ps1'))).toBe(true);
+  });
+
+  it('install.ps1 flat-copies commands/agents into ~/.claude (no prefix)', () => {
+    const content = readFileSync(path.join(PLUGIN_ROOT, 'install.ps1'), 'utf-8');
+    expect(content).toMatch(/Copy-MdFiles/);
+    expect(content).toMatch(/'commands'/);
+    expect(content).toMatch(/'agents'/);
+    // Same read-only permission seed as install.sh.
+    expect(content).toMatch(/\$SafeAllow\s*=\s*@\('Read',\s*'Glob',\s*'Grep'\)/);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // 6. update.js 구조 검증
 // ---------------------------------------------------------------------------
 

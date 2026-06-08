@@ -457,7 +457,19 @@ install_mcp() {
 }
 
 # ──────────────────────────────────────────────
-# Configure Settings (Agent Teams env var)
+# Read-only permission allowlist seeded into settings.json
+# ──────────────────────────────────────────────
+# Conservative, read-only tools only. Seeding these into the NATIVE Claude Code
+# `permissions.allow` list removes the repetitive "Allow Read?/Glob?/Grep?"
+# prompts new users hit on first session — Artibot's hooks and routing fan out
+# dozens of these safe reads per turn. Write/Edit/Bash are deliberately EXCLUDED
+# (they can mutate the filesystem or run arbitrary commands); users who want
+# broader auto-approval opt in explicitly via /permissions or settings
+# defaultMode. Keep this list minimal and side-effect-free.
+ARTIBOT_SAFE_ALLOW=(Read Glob Grep)
+
+# ──────────────────────────────────────────────
+# Configure Settings (Agent Teams env var + read-only permission seed)
 # ──────────────────────────────────────────────
 configure_settings() {
   local settings_file="${CLAUDE_DIR}/settings.json"
@@ -472,11 +484,20 @@ configure_settings() {
     fi
     # Register statusLine if not already present
     _register_statusline "$settings_file"
+    # Merge read-only permission allowlist (idempotent, preserves existing)
+    _seed_permission_allow "$settings_file"
   else
     cat > "$settings_file" <<'SETTINGS'
 {
   "env": {
     "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
+  },
+  "permissions": {
+    "allow": [
+      "Read",
+      "Glob",
+      "Grep"
+    ]
   },
   "statusLine": {
     "type": "command",
@@ -486,7 +507,59 @@ configure_settings() {
 }
 SETTINGS
     chmod 600 "$settings_file"
-    log "Settings created with Agent Teams enabled and statusLine registered"
+    log "Settings created with Agent Teams enabled, read-only permissions seeded, and statusLine registered"
+  fi
+
+  # Advisory: how to broaden auto-approval beyond the safe read-only set.
+  echo -e "${BLUE}  Tip:${NC} only read-only tools (Read/Glob/Grep) auto-approve by default."
+  echo -e "       For broader auto-approval (e.g. Bash/Edit) run ${BLUE}/permissions${NC} in a"
+  echo -e "       session, or set ${BLUE}\"defaultMode\"${NC} under \"permissions\" in ~/.claude/settings.json."
+}
+
+# ──────────────────────────────────────────────
+# Merge read-only allowlist into an existing settings.json
+# Idempotent: existing permissions.allow entries are preserved; only the
+# missing safe entries are appended. Prefers jq, falls back to node, then a
+# manual hint. Never overwrites or reorders user-defined entries.
+# ──────────────────────────────────────────────
+_seed_permission_allow() {
+  local settings_file="$1"
+  local allow_csv
+  # Build a JSON array literal "Read","Glob","Grep" for jq/node injection.
+  allow_csv=$(printf '"%s",' "${ARTIBOT_SAFE_ALLOW[@]}")
+  allow_csv="[${allow_csv%,}]"
+
+  if command -v jq &>/dev/null; then
+    local tmp_file="${settings_file}.tmp.$$"
+    # Ensure .permissions.allow exists, then union with the safe set, dedupe.
+    if jq --argjson seed "$allow_csv" '
+      .permissions = (.permissions // {})
+      | .permissions.allow = ((.permissions.allow // []) + $seed | unique)
+    ' "$settings_file" > "$tmp_file" 2>/dev/null && mv "$tmp_file" "$settings_file"; then
+      log "Read-only permissions merged into settings.json (via jq)"
+    else
+      rm -f "$tmp_file"
+      warn "Could not merge permissions via jq — add manually: \"permissions\": { \"allow\": ${allow_csv} }"
+    fi
+  elif command -v node &>/dev/null; then
+    ARTIBOT_SETTINGS="$settings_file" ARTIBOT_ALLOW_SEED="$allow_csv" node --input-type=commonjs -e "
+      const fs = require('fs');
+      const path = process.env.ARTIBOT_SETTINGS;
+      const seed = JSON.parse(process.env.ARTIBOT_ALLOW_SEED);
+      const cfg = JSON.parse(fs.readFileSync(path, 'utf8'));
+      const perms = cfg.permissions && typeof cfg.permissions === 'object' ? cfg.permissions : {};
+      const existing = Array.isArray(perms.allow) ? perms.allow : [];
+      const merged = [...existing];
+      for (const entry of seed) { if (!merged.includes(entry)) merged.push(entry); }
+      const next = { ...cfg, permissions: { ...perms, allow: merged } };
+      const tmp = path + '.tmp.' + process.pid;
+      fs.writeFileSync(tmp, JSON.stringify(next, null, 2) + '\n');
+      fs.renameSync(tmp, path);
+    " && log "Read-only permissions merged into settings.json (via node)" \
+      || warn "Could not merge permissions via node — add manually: \"permissions\": { \"allow\": ${allow_csv} }"
+  else
+    warn "Neither jq nor node available — add manually to ~/.claude/settings.json:"
+    echo -e "${BLUE}  \"permissions\": { \"allow\": ${allow_csv} }${NC}"
   fi
 }
 

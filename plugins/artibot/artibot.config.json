@@ -1,7 +1,9 @@
 {
   "version": "4.19.6",
   "devProtocol": {
-    "verifyMode": "advisory"
+    "verifyMode": "advisory",
+    "writeGuardMode": "block",
+    "writeGuardModeComment": "pre-write-guard.js write-before-read enforcement. 'block' (default) = strict DEV protocol: existing files must be Read before Write/Edit (regression-safe, mirrors prior behavior). 'advisory' = warn-only (approve) — friendlier for non-developer/vibe-coding users at the cost of the strict read-before-write guarantee. Env override: ARTIBOT_WRITE_GUARD_MODE."
   },
   "agents": {
     "modelPolicy": {

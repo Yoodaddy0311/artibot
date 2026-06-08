@@ -19,11 +19,11 @@ Artibot은 Claude Code의 네이티브 **Agent Teams API**를 핵심 엔진으�
 ## Quick Demo (30초 안에 결과 보기 / 30-Second First Win)
 
 ```bash
-# 1. Install (Claude Code marketplace)
-claude plugin marketplace add https://github.com/Yoodaddy0311/artibot
-claude plugin install artibot@artibot
+# 1. Install (recommended: flat install — no command prefix)
+git clone https://github.com/Yoodaddy0311/artibot.git
+cd artibot/plugins/artibot && bash install.sh
 
-# 2. Smart-route a natural-language request
+# 2. Smart-route a natural-language request (flat install → no prefix)
 /sc 로그인 기능을 TDD로 구현해줘
 #  → routes to /implement → Agent Team spawns planner + architect + backend + tdd-guide
 #  → P2P coordination → result returned
@@ -116,22 +116,48 @@ Full feature breakdown is in [핵심 특징](#핵심-특징) below.
 
 ## Installation
 
-### Claude Code (Recommended)
+### Recommended: `install.sh` (flat install, no command prefix)
+
+```bash
+git clone https://github.com/Yoodaddy0311/artibot.git
+cd artibot/plugins/artibot
+bash install.sh          # macOS / Linux / Git Bash on Windows
+```
+
+This is the recommended path. It flat-copies commands and agents into
+`~/.claude/`, so slash commands are called **without a namespace prefix**
+(`/save`, `/sc`, `/daily`). It also enables Agent Teams and seeds a
+conservative read-only permission allowlist (`Read`/`Glob`/`Grep`) into
+`~/.claude/settings.json`, so you won't be re-prompted to approve routine
+safe reads. To uninstall: `bash install.sh uninstall`.
+
+> **Windows:** run `install.sh` from **Git Bash** (ships with
+> [Git for Windows](https://gitforwindows.org/)). A native PowerShell
+> installer is also provided: `powershell -ExecutionPolicy Bypass -File install.ps1`.
+
+### Command invocation: flat install vs marketplace
+
+The two install methods differ in how you call commands:
+
+| Install method | Command form | Example | Prefix |
+|---|---|---|---|
+| **`install.sh` / `install.ps1`** (recommended) | flat | `/save`, `/sc`, `/daily` | none |
+| `claude plugin install` (marketplace) | namespaced | `/artibot:save`, `/artibot:sc`, `/artibot:daily` | `artibot:` |
+
+All examples in this README use the **flat** form (`/save`). If you install
+via the marketplace, prepend `artibot:` to every command (`/artibot:save`).
+
+### Alternative (advanced): Claude Code marketplace
 
 ```bash
 claude plugin marketplace add https://github.com/Yoodaddy0311/artibot
 claude plugin install artibot@artibot
 ```
 
-Agent Teams auto-enables on first session start. To uninstall: `claude plugin uninstall artibot`.
-
-### Manual
-
-```bash
-git clone https://github.com/Yoodaddy0311/artibot.git
-cd artibot/plugins/artibot
-bash install.sh
-```
+Marketplace install namespaces **every** command under the `artibot:` prefix —
+e.g. `/save` becomes `/artibot:save`. Use this only if you specifically want
+plugin-managed updates via `claude plugin`. Agent Teams still auto-enables on
+first session start. To uninstall: `claude plugin uninstall artibot`.
 
 ### Other Platforms (auto-converted)
 
@@ -459,22 +485,45 @@ Artibot의 핵심 엔진은 Claude Code의 **Agent Teams API**입니다. 단순�
 
 ## 설치
 
-### 설치
+### 권장: `install.sh` (flat 설치, 커맨드 프리픽스 없음)
 
-**방법 A: Plugin Marketplace (권장)**
+```bash
+git clone https://github.com/Yoodaddy0311/artibot.git
+cd artibot/plugins/artibot
+bash install.sh          # macOS / Linux / Windows의 Git Bash
+```
+
+이것이 **권장 경로**입니다. 커맨드·에이전트를 `~/.claude/`에 flat 복사하므로
+슬래시 커맨드를 **프리픽스 없이** 호출합니다 (`/save`, `/sc`, `/daily`).
+Agent Teams 자동 활성화 + `~/.claude/settings.json`에 보수적인 읽기 전용
+허용목록(`Read`/`Glob`/`Grep`)을 시드해서, 안전한 읽기 작업마다 권한 prompt가
+반복되지 않습니다. 제거: `bash install.sh uninstall`
+
+> **Windows:** `install.sh`는 **Git Bash**([Git for Windows](https://gitforwindows.org/) 동봉)에서 실행하세요.
+> 네이티브 PowerShell 설치 스크립트도 제공됩니다: `powershell -ExecutionPolicy Bypass -File install.ps1`.
+
+### 커맨드 호출 형식: flat vs marketplace
+
+두 설치 방식은 커맨드 호출 형식이 다릅니다:
+
+| 설치 방식 | 커맨드 형식 | 예시 | 프리픽스 |
+|---|---|---|---|
+| **`install.sh` / `install.ps1`** (권장) | flat | `/save`, `/sc`, `/daily` | 없음 |
+| `claude plugin install` (마켓플레이스) | 네임스페이스 | `/artibot:save`, `/artibot:sc`, `/artibot:daily` | `artibot:` |
+
+이 README의 모든 예제는 **flat** 형식(`/save`)을 사용합니다. 마켓플레이스로
+설치하면 모든 커맨드 앞에 `artibot:`를 붙여야 합니다 (`/artibot:save`).
+
+### 대안 (advanced): Claude Code 마켓플레이스
 ```bash
 claude plugin marketplace add https://github.com/Yoodaddy0311/artibot
 claude plugin install artibot@artibot
 ```
 
-**방법 B: 수동 설치**
-```bash
-git clone https://github.com/Yoodaddy0311/artibot.git
-cd artibot/plugins/artibot
-bash install.sh
-```
-
-에이전트, 커맨드, 스킬, 훅, MCP 설정을 `~/.claude/`에 복사합니다. Agent Teams는 첫 세션 시작 시 자동 활성화됩니다. 제거: `bash install.sh uninstall`
+마켓플레이스 설치는 **모든** 커맨드를 `artibot:` 프리픽스로 네임스페이스합니다 —
+예: `/save` → `/artibot:save`. `claude plugin`을 통한 플러그인 관리형 업데이트가
+필요한 경우에만 사용하세요. Agent Teams는 첫 세션에서 자동 활성화됩니다.
+제거: `claude plugin uninstall artibot`
 
 ### 요구사항
 - Claude Code CLI

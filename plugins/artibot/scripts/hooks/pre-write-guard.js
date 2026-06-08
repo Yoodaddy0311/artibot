@@ -94,10 +94,39 @@ function shouldEnforceGuard(filePath) {
   if (cwdNorm && norm.startsWith(cwdNorm)) return true;
   return norm.includes('plugins/artibot/');
 }
-import { atomicWriteSync, getPluginRoot, parseJSON, readStdin, writeStdout } from '../utils/index.js';
+import { atomicWriteSync, getPluginRoot, parseJSON, readStdin, resolveConfigPath, writeStdout } from '../utils/index.js';
 import { createErrorHandler, extractFilePath, extractToolName, normalizePath } from '../../lib/core/hook-utils.js';
 
 const BLOCK_FINGERPRINT_FILE = 'last-pre-write-block.txt';
+
+/**
+ * Resolve the write-before-read enforcement mode.
+ *
+ * Precedence: ARTIBOT_WRITE_GUARD_MODE env > config.devProtocol.writeGuardMode
+ * > 'block' (default). Default is 'block' to preserve the prior DEV-protocol
+ * enforcing behavior (regression-safe); set to 'advisory' for a non-blocking
+ * warning — friendlier for non-developer/vibe-coding users at the cost of the
+ * strict read-before-write guarantee.
+ *
+ * Best-effort: a missing/unreadable config never breaks the guard; we fall
+ * back to env then the 'block' default.
+ *
+ * @returns {'block'|'advisory'}
+ */
+function resolveWriteGuardMode() {
+  const envMode = (process.env.ARTIBOT_WRITE_GUARD_MODE || '').trim().toLowerCase();
+  if (envMode === 'advisory' || envMode === 'block') return envMode;
+
+  try {
+    const configPath = resolveConfigPath('artibot.config.json');
+    const config = JSON.parse(readFileSync(configPath, 'utf-8'));
+    const cfgMode = String(config?.devProtocol?.writeGuardMode || '').trim().toLowerCase();
+    if (cfgMode === 'advisory' || cfgMode === 'block') return cfgMode;
+  } catch {
+    // No config / unreadable — fall through to default.
+  }
+  return 'block';
+}
 
 /**
  * Build a fingerprint that uniquely identifies a (sessionId, toolName,
@@ -330,6 +359,20 @@ function handleWriteGuard(hookData) {
     process.stderr.write(
       `[pre-write-guard] duplicate block bypassed (loop guard) — file: ${filePath}\n`,
     );
+    writeStdout({ decision: 'approve' });
+    return;
+  }
+
+  // Advisory mode (config devProtocol.writeGuardMode='advisory' or env
+  // ARTIBOT_WRITE_GUARD_MODE='advisory'): warn but approve. Friendlier for
+  // non-developer/vibe-coding users — surfaces the read-before-write reminder
+  // without blocking the edit. Default 'block' preserves strict DEV protocol.
+  const mode = resolveWriteGuardMode();
+  if (mode === 'advisory') {
+    const warning = `[WRITE-BEFORE-READ] ${toolName} for "${filePath}": `
+      + 'file exists but was not Read in this session. '
+      + 'Reading first is recommended to avoid blind modifications.';
+    process.stderr.write(`[artibot:pre-write-guard] (advisory) ${warning}\n`);
     writeStdout({ decision: 'approve' });
     return;
   }
