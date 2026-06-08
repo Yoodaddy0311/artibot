@@ -61,6 +61,17 @@ describe('buildStatuslinePalette', () => {
 });
 
 describe('buildOutputStyle', () => {
+  it('frontmatter name equals the theme label for every theme (= settings.outputStyle activation value)', () => {
+    // theme-apply sets settings.outputStyle = THEMES[name].label, which Claude Code
+    // matches against the output-style file's frontmatter `name`. They must agree.
+    for (const name of THEME_NAMES) {
+      const md = buildOutputStyle(name);
+      const m = md.match(/^---\nname: (.+)$/m);
+      expect(m, name).toBeTruthy();
+      expect(m[1].trim()).toBe(THEMES[name].label);
+    }
+  });
+
   it('emits frontmatter with the theme label and uses its glyphs', () => {
     const md = buildOutputStyle('neon-city');
     expect(md).toMatch(/^---\nname: NEON CITY/);

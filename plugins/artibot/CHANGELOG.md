@@ -13,6 +13,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.22.3] — 2026-06-08
+
+**Theme**: `/theme` output-style 자동 활성화
+
+### Added
+- **`/theme <name>` 적용 시 output-style도 자동 활성화** — 이제 `settings.json#/outputStyle`을 테마 라벨로 설정(예: `"MATRIX"`)해 응답 포맷(박스아트/네온글리프)이 색상과 **한 번에** 바뀐다. 이전엔 `/output-style`로 따로 활성화해야 했음. (적용: `/clear` 또는 새 세션 — output-style은 세션 시작 시 1회 로드)
+- **`/theme reset`이 outputStyle도 원복** — `theme-backup.json`에 `prevOutputStyle` 백업 → 원래 스타일(또는 기본)로 복원.
+- 일관성 테스트: 모든 테마의 output-style frontmatter `name` = `settings.outputStyle` 활성화 값 일치 보장.
+
+---
+
 ## [4.22.2] — 2026-06-08
 
 **Theme**: `/theme` statusline 색상 전환 fix (크로스머신)

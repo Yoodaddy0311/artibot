@@ -83,17 +83,20 @@ function captureBackup() {
   const wtPath = findWtSettings();
   const wt = wtPath ? readJson(wtPath, {}) : null;
   const prevColorScheme = wt && wt.profiles && wt.profiles.defaults ? (wt.profiles.defaults.colorScheme ?? null) : null;
-  writeJson(BACKUP, { prevStatus, prevColorScheme, savedAt: new Date().toISOString() });
+  const prevOutputStyle = settings.outputStyle ?? null;
+  writeJson(BACKUP, { prevStatus, prevColorScheme, prevOutputStyle, savedAt: new Date().toISOString() });
 }
 
 function applyTheme(name) {
   const notes = [];
   captureBackup();
 
-  // 1. statusline palette + command
+  // 1. statusline palette + command + output-style activation (one settings write)
   writeJson(join(RUNTIME, 'current-theme.json'), buildStatuslinePalette(name));
   const settings = readJson(SETTINGS, {});
-  writeJson(SETTINGS, withStatusLine(settings, THEMED_STATUSLINE));
+  const nextSettings = withStatusLine(settings, THEMED_STATUSLINE);
+  nextSettings.outputStyle = THEMES[name].label; // matches output-style frontmatter `name`
+  writeJson(SETTINGS, nextSettings);
   notes.push('statusLine → themed (재시작 또는 화면 갱신 시 반영)');
 
   // 2. Windows Terminal scheme (best-effort)
@@ -109,10 +112,10 @@ function applyTheme(name) {
     notes.push('Windows Terminal 미발견 — 색상 스킵 (다른 터미널은 컬러 스킴 수동 적용)');
   }
 
-  // 3. output-style
+  // 3. output-style file (active selection already set on settings.outputStyle above)
   mkdirSync(OUTPUT_STYLES, { recursive: true });
   writeFileSync(join(OUTPUT_STYLES, `${name}.md`), buildOutputStyle(name));
-  notes.push(`output-style 생성 → /output-style 로 "${THEMES[name].label}" 활성화`);
+  notes.push(`output-style → "${THEMES[name].label}" 자동 활성화 (적용: /clear 또는 새 세션)`);
 
   return notes;
 }
@@ -121,8 +124,11 @@ function resetTheme() {
   const notes = [];
   const b = readJson(BACKUP, {});
   const settings = readJson(SETTINGS, {});
-  writeJson(SETTINGS, withStatusLine(settings, b.prevStatus || DEFAULT_STATUSLINE));
-  notes.push('statusLine → 기본 복원');
+  const restored = withStatusLine(settings, b.prevStatus || DEFAULT_STATUSLINE);
+  if (b.prevOutputStyle === null || b.prevOutputStyle === undefined) delete restored.outputStyle;
+  else restored.outputStyle = b.prevOutputStyle;
+  writeJson(SETTINGS, restored);
+  notes.push('statusLine + output-style → 기본 복원');
 
   const wtPath = findWtSettings();
   if (wtPath) {
@@ -137,7 +143,6 @@ function resetTheme() {
       notes.push('Windows Terminal colorScheme → 이전값 복원');
     }
   }
-  notes.push('output-style → /output-style default 로 복귀');
   return notes;
 }
 
