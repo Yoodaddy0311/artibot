@@ -209,7 +209,7 @@ if (pfInstr?.suppress) { /* warnings: state.preflightWarnings에 누적 + 계속
 | `status` | `engine.getStatus(sessionId?)` → `SessionState` | 상태 표 출력 후 종료 |
 | `abort` | `engine.abortAutopilot(sessionId, { graceful: true })` → `AbortResult` | 결과 표 출력 후 종료 |
 | `tail` | `engine.readEvents(sessionId, { tail: lines })` → `Event[]` | 이벤트 표 출력 후 종료 (PRD v4.1 P0-2 Live Telemetry) |
-| `list` | `engine.listActiveWorktrees()` + `engine.listSessions()` 조합 → GFM 표 출력 후 종료 |
+| `list` | `engine.listActiveWorktrees()` + `engine.listSessions()` 조합 | GFM 표 출력 후 종료 |
 
 ### Step 3 — Phase Execution Loop
 

@@ -14,7 +14,7 @@ Build defensible market position by clearly articulating audience, problem, solu
 | **[category]** | Market category for context | Agent orchestration platform | New/undefined categories confuse buyers |
 | **[benefit]** | Outcome user achieves, not features | Deploy teams of AI agents in hours not weeks | Feature-focused ("has APIs") |
 | **[competitor]** | Direct alternative buyer would consider | Manual team coordination scripts | Weak or irrelevant comparisons |
-| **[differentiator]** | Unique capability competitor lacks | Native Agent Teams API with zero runtime dependencies | Sustainable and defensible | Marginal/easily copied advantages |
+| **[differentiator]** | Unique capability competitor lacks | Native Agent Teams API with zero runtime dependencies, sustainable and defensible | Marginal/easily copied advantages |
 
 ## Porter's Five Forces Competitive Analysis
 

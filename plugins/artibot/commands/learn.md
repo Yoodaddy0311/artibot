@@ -46,7 +46,7 @@ Parse $ARGUMENTS:
    - 3+ occurrences = confirmed pattern worth persisting
 5. **Diff Preview**: For every pattern that would touch an existing memory file, render the proposed change before writing:
    - File path + `Why:` one-liner (which criterion / signal triggered the change)
-   - Use a ```diff fenced block — `-` for removed lines, `+` for added
+   - Use a `` ```diff `` fenced block — `-` for removed lines, `+` for added
    - Group diffs by file. No `Write`/`Edit` calls in this step.
    - Prompt: *"Apply the N diffs above? (yes / no / select N1,N2,...)"*
 6. **Persist**: Only after user approval (`yes` or explicit `select`):

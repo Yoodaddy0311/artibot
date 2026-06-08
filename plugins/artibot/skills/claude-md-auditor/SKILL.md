@@ -22,7 +22,7 @@ agents:
 tokens: "~3K"
 category: "quality"
 whenNotToUse: "Single CLAUDE.md edit requests where the user already specified the change. Skip when no CLAUDE.md file exists in the repository — run `/learn` to bootstrap one instead."
-tools: Read, Glob, Grep, Edit
+tools: Read, Glob, Grep, Edit
 ---
 
 # CLAUDE.md Auditor
@@ -93,9 +93,8 @@ The nightly session rollup picks this file up next run and feeds `summary.avgSco
 
 ### Phase 4 — Diff Preview (no Edit yet)
 
-For every file with grade ≤ C, propose one minimal diff (≤ 40 lines changed). Use the same shape as `commands/revise-claude-md.md`:
+For every file with grade ≤ C, propose one minimal diff (≤ 40 lines changed). Use the same shape as `commands/revise-claude-md.md` — a `**File:**` / `**Why:**` header followed by a `diff` block:
 
-```
 **File:** CLAUDE.md
 **Why:** Currency criterion 5/15 — last touched 2025-11 and references retired `/old-cmd`.
 

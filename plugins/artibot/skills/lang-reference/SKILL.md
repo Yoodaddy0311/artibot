@@ -217,7 +217,7 @@ platforms: [claude-code, gemini-cli, codex-cli, cursor]
 - [When This Skill Applies](#when-this-skill-applies)
 - [Language Reference Index](#language-reference-index)
 - [Routing Rule](#routing-rule)
-- [Shared Anti-Patterns](#shared-anti-patterns)
+- [Shared Anti-Patterns](#shared-anti-patterns-공통)
 
 ## When This Skill Applies
 

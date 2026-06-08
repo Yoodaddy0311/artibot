@@ -39,6 +39,9 @@ jobs:
       - name: Validate plugin structure
         run: node scripts/validate.js
 
+      - name: Validate docs (links + rendering)
+        run: npm run docs:check
+
       - name: Lint
         run: npm run lint
 

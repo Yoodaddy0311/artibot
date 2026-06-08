@@ -101,7 +101,7 @@ Scan the draft against two pattern sets:
 
 - **멱등성**: 이미 polished된 텍스트 재입력 시 no-op (변경률 <5%로 탐지)
 - **길이 보존**: ±10% 이내 (과도한 축약·팽창 금지)
-- **코드 보존**: ``` 코드블록, `inline code`, URL은 절대 건드리지 않음
+- **코드 보존**: `` ``` `` 코드블록, `inline code`, URL은 절대 건드리지 않음
 - **무한 루프 방지**: polish 출력이 다시 polish의 트리거가 되지 않음 (`already-polished` 플래그)
 
 ## Trigger by Agent (자동 체인)

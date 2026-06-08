@@ -105,7 +105,7 @@ Git 관련 9개 서브툴을 통합한 엔트리포인트. 사용자 의도에 �
 ## Contents
 - [When This Skill Applies](#when-this-skill-applies)
 - [Sub-Tool Routing](#sub-tool-routing)
-- [Cross-Tool Safety Rules](#cross-tool-safety-rules)
+- [Cross-Tool Safety Rules](#cross-tool-safety-rules-공통)
 
 ## When This Skill Applies
 

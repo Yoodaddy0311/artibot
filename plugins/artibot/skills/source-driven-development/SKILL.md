@@ -40,7 +40,7 @@ whenNotToUse: "Pure business logic with no framework dependency (data structures
 ## Contents
 - [When This Skill Applies](#when-this-skill-applies)
 - [When NOT to Use](#when-not-to-use)
-- [The Process: DETECT → FETCH → IMPLEMENT → CITE](#the-process)
+- [The Process: DETECT → FETCH → IMPLEMENT → CITE](#the-process-detect--fetch--implement--cite)
 - [Cache-Aware Operation (sdd-cache hook)](#cache-aware-operation)
 - [Source Hierarchy](#source-hierarchy)
 - [Citation Rules](#citation-rules)
