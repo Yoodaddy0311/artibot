@@ -135,6 +135,45 @@ TaskUpdate(taskId="{id}", owner="{teammate-name}", status="in_progress")
 - Teammates work independently
 - Leader monitors via TaskList but does NOT intervene unless blocked
 
+### ★ Phase 3.5: 진행률 렌더링 (MANDATORY — 채팅에 눈에 띄게)
+
+리더는 작업이 진행되는 동안 **대화(채팅)에 진행률 바를 직접 출력**한다. 이건
+hook/statusline이 아니라 **리더의 채팅 출력**이라 항상 보이고, 사용자가 한눈에
+"지금 몇 %"를 확인할 수 있다. **이 렌더링을 생략하지 마라.**
+
+**언제 출력하나 (이 시점마다 1회씩):**
+1. Phase 3에서 작업 배정 직후 → **0%** 바 (작업 시작 신호)
+2. 팀원 결과를 받을 때마다 / TaskList에서 완료가 늘 때마다 → 갱신된 % 바
+3. Phase 4(크로스체크) 진입 시 → "구현 100% · 검수 시작" 바
+4. Phase 5에서 최종 → **100%** 완료 바
+
+**출력 템플릿 (그대로 렌더 — 20칸 바):**
+```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  📊 작업 진행률   {bar}  {pct}%
+  ✅ 완료 {done} / 전체 {total}   🔄 진행 {inflight}   ⏳ 대기 {pending}
+  └ 현재 단계: {phaseLabel}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+```
+
+최종(100%) 시:
+```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  🎉 작업 완료   ████████████████████  100%
+  ✅ 완료 {total} / 전체 {total}   (전 작업 검수 통과)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+```
+
+**바 계산:** 20칸 기준 `filled = round(pct / 5)` 개의 `█`, 나머지는 `░`.
+`pct = round(done / total * 100)`. 예) 7/10 → 70% → `██████████████░░░░░░`.
+
+**PRD/대규모 작업:** total 은 TaskList의 전체 작업 수(또는 PRD의 Phase 수). 중간에
+작업이 추가되면 total 을 갱신해 다시 렌더. **반드시 마지막엔 100%(done==total) 바로
+끝맺어 "완료됐다"를 시각적으로 확정**한다.
+
+> 도구로 자동화하려면: `node ${CLAUDE_PLUGIN_ROOT}/scripts/render-progress.js <done> <total> "<phaseLabel>"`
+> 가 위 박스를 그대로 출력한다(리더가 Bash로 호출해 결과를 그대로 채팅에 표시해도 됨).
+
 ### Phase 4: CROSS-CHECK (Sonnet 4.6)
 After ALL main tasks complete, spawn cross-check agents on **sonnet** for fast review:
 
