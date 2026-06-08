@@ -1388,3 +1388,13 @@
 <!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
 
 ---
+
+## 2026-06-08 08:42 UTC · `master`
+
+- **Commits** (1):
+  - `ef8770a` test(theme): theme-registry.test.js → registry.test.js (리뷰 게이트 stem 매칭)
+- **Files touched**: 2
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
