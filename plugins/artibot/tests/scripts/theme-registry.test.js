@@ -1,0 +1,106 @@
+/**
+ * Tests for the /theme registry + apply-engine pure helpers.
+ *
+ * @module tests/scripts/theme-registry
+ */
+
+import { describe, expect, it } from 'vitest';
+import {
+  buildOutputStyle,
+  buildStatuslinePalette,
+  buildWtScheme,
+  isTheme,
+  THEME_NAMES,
+  THEMES,
+} from '../../scripts/theme/registry.js';
+import { findWtSettings, withStatusLine, withWtScheme } from '../../scripts/theme-apply.js';
+
+describe('theme registry', () => {
+  it('ships neon-city, matrix and vaporwave', () => {
+    expect(THEME_NAMES).toEqual(expect.arrayContaining(['neon-city', 'matrix', 'vaporwave']));
+  });
+
+  it('isTheme recognizes only registered themes', () => {
+    expect(isTheme('neon-city')).toBe(true);
+    expect(isTheme('nope')).toBe(false);
+  });
+
+  it('every theme has a full 16-color ANSI palette + signals + glyphs', () => {
+    const keys = ['black', 'red', 'green', 'yellow', 'blue', 'purple', 'cyan', 'white',
+      'brightBlack', 'brightRed', 'brightGreen', 'brightYellow', 'brightBlue', 'brightPurple', 'brightCyan', 'brightWhite'];
+    for (const name of THEME_NAMES) {
+      const t = THEMES[name];
+      for (const k of keys) expect(t.ansi[k], `${name}.${k}`).toMatch(/^#[0-9A-Fa-f]{6}$/);
+      expect(t.signals.primary).toHaveLength(3);
+      expect(t.signals.accent).toHaveLength(3);
+      expect(t.glyphs.fill).toBeTruthy();
+    }
+  });
+});
+
+describe('buildWtScheme', () => {
+  it('builds an ARTIBOT-prefixed scheme with all colors', () => {
+    const s = buildWtScheme('neon-city');
+    expect(s.name).toBe('ARTIBOT NEON CITY');
+    expect(s.background).toBe('#0A0014');
+    expect(s.cyan).toMatch(/^#[0-9A-Fa-f]{6}$/);
+    expect(s.brightWhite).toMatch(/^#[0-9A-Fa-f]{6}$/);
+  });
+  it('returns null for unknown theme', () => {
+    expect(buildWtScheme('nope')).toBeNull();
+  });
+});
+
+describe('buildStatuslinePalette', () => {
+  it('exposes signals + glyphs for the bash statusline', () => {
+    const p = buildStatuslinePalette('matrix');
+    expect(p.theme).toBe('matrix');
+    expect(p.signals.primary).toEqual([0, 255, 65]);
+    expect(p.glyphs.fill).toBe('▮');
+  });
+});
+
+describe('buildOutputStyle', () => {
+  it('emits frontmatter with the theme label and uses its glyphs', () => {
+    const md = buildOutputStyle('neon-city');
+    expect(md).toMatch(/^---\nname: NEON CITY/);
+    expect(md).toContain('◢◤');
+    expect(md).toContain('Do NOT decorate inside code blocks');
+  });
+});
+
+describe('withStatusLine', () => {
+  it('sets the command immutably and preserves other keys', () => {
+    const before = { env: { X: '1' }, statusLine: { type: 'command', command: 'old' } };
+    const after = withStatusLine(before, 'new');
+    expect(after.statusLine.command).toBe('new');
+    expect(after.env.X).toBe('1');
+    expect(before.statusLine.command).toBe('old'); // immutable
+  });
+  it('handles missing statusLine', () => {
+    expect(withStatusLine({}, 'cmd').statusLine).toEqual({ type: 'command', command: 'cmd' });
+  });
+});
+
+describe('withWtScheme', () => {
+  const scheme = { name: 'ARTIBOT NEON CITY', background: '#000' };
+  it('appends the scheme and selects it on profiles.defaults', () => {
+    const wt = { schemes: [{ name: 'Campbell' }], profiles: { defaults: { fontFace: 'Cascadia' }, list: [] } };
+    const next = withWtScheme(wt, scheme);
+    expect(next.schemes.map((s) => s.name)).toEqual(['Campbell', 'ARTIBOT NEON CITY']);
+    expect(next.profiles.defaults.colorScheme).toBe('ARTIBOT NEON CITY');
+    expect(next.profiles.defaults.fontFace).toBe('Cascadia'); // preserved
+  });
+  it('dedups by scheme name (idempotent re-apply)', () => {
+    const wt = { schemes: [{ name: 'ARTIBOT NEON CITY', background: '#old' }] };
+    const next = withWtScheme(wt, scheme);
+    expect(next.schemes.filter((s) => s.name === 'ARTIBOT NEON CITY')).toHaveLength(1);
+    expect(next.schemes[0].background).toBe('#000'); // replaced with new
+  });
+});
+
+describe('findWtSettings', () => {
+  it('returns null when LOCALAPPDATA is unset', () => {
+    expect(findWtSettings({})).toBeNull();
+  });
+});

@@ -13,6 +13,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.22.0] — 2026-06-08
+
+**Theme**: `/theme` 터미널 테마 시스템 (사이버펑크/매트릭스/베이퍼웨이브)
+
+### Added
+- **`/theme` 커맨드** — 터미널 테마를 한 번에 3개 표면에 적용/원복:
+  1. **statusLine** — 테마 팔레트의 truecolor 그라데이션 바(시안→마젠타 등) + 네온 글리프
+  2. **Windows Terminal** — `ARTIBOT <THEME>` 컬러 스킴 주입 + 전 프로필 선택 (모든 터미널 텍스트 색 변경, 적용 전 자동 백업)
+  3. **output-style** — 박스아트/네온글리프 응답 포맷(`/output-style`로 활성화)
+- **테마 3종** (`neon-city` 사이버펑크 · `matrix` 해커그린 · `vaporwave` 레트로파스텔) — `scripts/theme/registry.js`에 데이터로 정의(추가는 엔트리 1개).
+- `scripts/theme-apply.js` (apply/reset/list 엔진, 백업·멱등) + `scripts/hooks/statusline-themed.sh` (팔레트 기반 truecolor statusline). 12 tests.
+
+### Notes
+- truecolor는 최신 터미널(Windows Terminal/iTerm/Konsole)에서만 색 렌더. 채팅 본문 색은 터미널 컬러 스킴이 결정(Claude Code는 본문 truecolor 미지원).
+- 모든 변경 백업 → `/theme reset`으로 원복.
+
+---
+
 ## [4.21.1] — 2026-06-08
 
 **Theme**: 진행률 바 이식성 fix (크로스머신)
