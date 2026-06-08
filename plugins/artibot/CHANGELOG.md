@@ -13,6 +13,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.21.1] — 2026-06-08
+
+**Theme**: 진행률 바 이식성 fix (크로스머신)
+
+### Fixed
+- **진행률 박스가 다른 컴퓨터에서 헬퍼 호출로는 실패하던 문제** — `team.md`/`autopilot.md`가 `node ${CLAUDE_PLUGIN_ROOT}/scripts/render-progress.js`를 안내했으나 `CLAUDE_PLUGIN_ROOT`는 Bash 셸에서 비어 있어 어느 머신에서도 그 형태로는 실패. **인라인 마크다운 출력을 기본 방법으로 명확화**(스크립트·환경변수 의존 0 → 모든 컴퓨터에서 작동) + 선택적 헬퍼 경로를 `$HOME/.claude/artibot/scripts/render-progress.js`(설치본 공통)로 교정 + 실패 시 인라인 폴백 명시.
+
+---
+
 ## [4.21.0] — 2026-06-08
 
 **Theme**: 채팅에 눈에 띄는 작업 진행률 바 (`/team` + autopilot PRD)

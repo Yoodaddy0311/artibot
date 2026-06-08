@@ -1,7 +1,7 @@
 {
   "name": "artibot-repo",
   "private": true,
-  "version": "4.21.0",
+  "version": "4.21.1",
   "description": "Artibot monorepo root — see plugins/artibot/ for the published plugin.",
   "engines": {
     "node": ">=20"
