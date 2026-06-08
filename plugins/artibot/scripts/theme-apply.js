@@ -73,6 +73,39 @@ export function findWtSettings(env = process.env) {
   return cands.find((p) => existsSync(p)) || null;
 }
 
+/** Return a new settings object with the active output style set. Immutable. */
+export function withOutputStyle(settings, style) {
+  const s = settings && typeof settings === 'object' ? settings : {};
+  return { ...s, outputStyle: style };
+}
+
+/**
+ * Restore statusLine + outputStyle on a settings object from a backup. Immutable.
+ * A null/undefined `prevOutputStyle` means "had none" → the key is removed so the
+ * default style returns (rather than being pinned to an empty value).
+ */
+export function restoreSettings(settings, backup, defaultStatusLine) {
+  const s = settings && typeof settings === 'object' ? settings : {};
+  const b = backup && typeof backup === 'object' ? backup : {};
+  const next = withStatusLine(s, b.prevStatus || defaultStatusLine);
+  if (b.prevOutputStyle === null || b.prevOutputStyle === undefined) delete next.outputStyle;
+  else next.outputStyle = b.prevOutputStyle;
+  return next;
+}
+
+/**
+ * Restore profiles.defaults.colorScheme on a WT settings object. Immutable.
+ * null/undefined `prevColorScheme` → remove the key (back to WT's built-in default).
+ */
+export function restoreWtDefaults(wt, prevColorScheme) {
+  const o = wt && typeof wt === 'object' ? wt : {};
+  const profiles = o.profiles && typeof o.profiles === 'object' ? o.profiles : {};
+  const defaults = { ...(profiles.defaults && typeof profiles.defaults === 'object' ? profiles.defaults : {}) };
+  if (prevColorScheme === null || prevColorScheme === undefined) delete defaults.colorScheme;
+  else defaults.colorScheme = prevColorScheme;
+  return { ...o, profiles: { ...profiles, defaults } };
+}
+
 // ── I/O actions ──────────────────────────────────────────────────────────────
 
 function captureBackup() {
@@ -94,9 +127,8 @@ function applyTheme(name) {
   // 1. statusline palette + command + output-style activation (one settings write)
   writeJson(join(RUNTIME, 'current-theme.json'), buildStatuslinePalette(name));
   const settings = readJson(SETTINGS, {});
-  const nextSettings = withStatusLine(settings, THEMED_STATUSLINE);
-  nextSettings.outputStyle = THEMES[name].label; // matches output-style frontmatter `name`
-  writeJson(SETTINGS, nextSettings);
+  // outputStyle matches the output-style file's frontmatter `name` (= theme label)
+  writeJson(SETTINGS, withOutputStyle(withStatusLine(settings, THEMED_STATUSLINE), THEMES[name].label));
   notes.push('statusLine → themed (재시작 또는 화면 갱신 시 반영)');
 
   // 2. Windows Terminal scheme (best-effort)
@@ -124,22 +156,14 @@ function resetTheme() {
   const notes = [];
   const b = readJson(BACKUP, {});
   const settings = readJson(SETTINGS, {});
-  const restored = withStatusLine(settings, b.prevStatus || DEFAULT_STATUSLINE);
-  if (b.prevOutputStyle === null || b.prevOutputStyle === undefined) delete restored.outputStyle;
-  else restored.outputStyle = b.prevOutputStyle;
-  writeJson(SETTINGS, restored);
+  writeJson(SETTINGS, restoreSettings(settings, b, DEFAULT_STATUSLINE));
   notes.push('statusLine + output-style → 기본 복원');
 
   const wtPath = findWtSettings();
   if (wtPath) {
     const wt = readJson(wtPath, null);
     if (wt) {
-      const profiles = wt.profiles || {};
-      const defaults = profiles.defaults || {};
-      if (b.prevColorScheme === null || b.prevColorScheme === undefined) delete defaults.colorScheme;
-      else defaults.colorScheme = b.prevColorScheme;
-      const next = { ...wt, profiles: { ...profiles, defaults } };
-      writeFileSync(wtPath, JSON.stringify(next, null, 4));
+      writeFileSync(wtPath, JSON.stringify(restoreWtDefaults(wt, b.prevColorScheme), null, 4));
       notes.push('Windows Terminal colorScheme → 이전값 복원');
     }
   }

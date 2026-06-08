@@ -13,7 +13,14 @@ import {
   THEME_NAMES,
   THEMES,
 } from '../../scripts/theme/registry.js';
-import { findWtSettings, withStatusLine, withWtScheme } from '../../scripts/theme-apply.js';
+import {
+  findWtSettings,
+  restoreSettings,
+  restoreWtDefaults,
+  withOutputStyle,
+  withStatusLine,
+  withWtScheme,
+} from '../../scripts/theme-apply.js';
 
 describe('theme registry', () => {
   it('ships neon-city, matrix and vaporwave', () => {
@@ -113,5 +120,52 @@ describe('withWtScheme', () => {
 describe('findWtSettings', () => {
   it('returns null when LOCALAPPDATA is unset', () => {
     expect(findWtSettings({})).toBeNull();
+  });
+});
+
+describe('withOutputStyle', () => {
+  it('sets outputStyle immutably', () => {
+    const before = { statusLine: { command: 'x' } };
+    const after = withOutputStyle(before, 'MATRIX');
+    expect(after.outputStyle).toBe('MATRIX');
+    expect(after.statusLine.command).toBe('x');
+    expect(before.outputStyle).toBeUndefined(); // immutable
+  });
+});
+
+describe('restoreSettings (reset side)', () => {
+  const DEF = 'bash ~/.claude/artibot/scripts/hooks/statusline.sh';
+
+  it('restores statusLine + outputStyle from backup', () => {
+    const cur = { statusLine: { command: 'themed' }, outputStyle: 'MATRIX' };
+    const out = restoreSettings(cur, { prevStatus: 'orig.sh', prevOutputStyle: 'Explanatory' }, DEF);
+    expect(out.statusLine.command).toBe('orig.sh');
+    expect(out.outputStyle).toBe('Explanatory');
+  });
+
+  it('DELETES outputStyle when backup had none (null/undefined) → back to default style', () => {
+    const cur = { statusLine: { command: 'themed' }, outputStyle: 'MATRIX' };
+    expect('outputStyle' in restoreSettings(cur, { prevOutputStyle: null }, DEF)).toBe(false);
+    expect('outputStyle' in restoreSettings(cur, {}, DEF)).toBe(false); // missing field
+  });
+
+  it('falls back to the default statusLine when backup lacks prevStatus', () => {
+    expect(restoreSettings({}, {}, DEF).statusLine.command).toBe(DEF);
+  });
+});
+
+describe('restoreWtDefaults (reset side)', () => {
+  it('restores a previous colorScheme and preserves schemes', () => {
+    const wt = { schemes: [{ name: 'ARTIBOT MATRIX' }], profiles: { defaults: { colorScheme: 'ARTIBOT MATRIX', fontFace: 'X' } } };
+    const out = restoreWtDefaults(wt, 'Campbell');
+    expect(out.profiles.defaults.colorScheme).toBe('Campbell');
+    expect(out.profiles.defaults.fontFace).toBe('X');
+    expect(out.schemes).toHaveLength(1); // schemes left intact
+  });
+
+  it('removes colorScheme when original had none (null/undefined)', () => {
+    const wt = { profiles: { defaults: { colorScheme: 'ARTIBOT MATRIX' } } };
+    expect('colorScheme' in restoreWtDefaults(wt, null).profiles.defaults).toBe(false);
+    expect('colorScheme' in restoreWtDefaults(wt, undefined).profiles.defaults).toBe(false);
   });
 });
