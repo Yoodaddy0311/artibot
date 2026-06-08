@@ -69,13 +69,28 @@ jq_get() {
 }
 
 # ─── Parse stdin fields ───────────────────────────────────────────────────────
-MODEL=$(jq_get '.model' '')
-CTX_USED=$(jq_get '.context_window.current_tokens' '0')
-CTX_MAX=$(jq_get '.context_window.max_tokens' '0')
-COST=$(jq_get '.cost.total_cost' '')
-ELAPSED=$(jq_get '.cost.elapsed_seconds' '')
-AGENT=$(jq_get '.agent' '')
-WORKTREE=$(jq_get '.worktree' '')
+# Field names follow the official Claude Code statusLine schema. Older/alternate
+# names are read as fallbacks so the bar keeps working across CC versions.
+MODEL=$(jq_get '.model.display_name' '')
+[ -z "$MODEL" ] && MODEL=$(jq_get '.model.id' '')
+[ -z "$MODEL" ] && MODEL=$(jq_get '.model' '')           # legacy: model as string
+
+# Context usage: Claude Code already computes used_percentage — prefer it.
+# Fallback to total_input_tokens / context_window_size, then legacy fields.
+CTX_PCT=$(jq_get '.context_window.used_percentage' '')
+CTX_USED=$(jq_get '.context_window.total_input_tokens' '')
+[ -z "$CTX_USED" ] && CTX_USED=$(jq_get '.context_window.current_tokens' '0')   # legacy
+CTX_MAX=$(jq_get '.context_window.context_window_size' '')
+[ -z "$CTX_MAX" ] && CTX_MAX=$(jq_get '.context_window.max_tokens' '0')         # legacy
+
+COST=$(jq_get '.cost.total_cost_usd' '')
+[ -z "$COST" ] && COST=$(jq_get '.cost.total_cost' '')   # legacy
+ELAPSED_MS=$(jq_get '.cost.total_duration_ms' '')
+ELAPSED=$(jq_get '.cost.elapsed_seconds' '')             # legacy (already seconds)
+AGENT=$(jq_get '.agent.name' '')
+[ -z "$AGENT" ] && AGENT=$(jq_get '.agent' '')           # legacy
+WORKTREE=$(jq_get '.worktree.path' '')
+[ -z "$WORKTREE" ] && WORKTREE=$(jq_get '.worktree' '')  # legacy
 
 # ─── Resolve plugin root (script lives at <plugin>/scripts/hooks/) ────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -132,14 +147,25 @@ if command -v git >/dev/null 2>&1; then
 fi
 
 # ─── Context bar ─────────────────────────────────────────────────────────────
+# Accepts a percentage directly (Claude Code's context_window.used_percentage),
+# or derives it from used/max when only token counts are available.
 build_ctx_bar() {
-  local used="$1" max="$2"
-  if [ -z "$used" ] || [ -z "$max" ] || [ "$max" -eq 0 ] 2>/dev/null; then
-    echo ''
-    return
+  local pct="$1" used="${2:-}" max="${3:-}"
+  # Derive pct from tokens when a direct percentage wasn't supplied.
+  if [ -z "$pct" ]; then
+    if [ -n "$used" ] && [ -n "$max" ] && [ "$max" -gt 0 ] 2>/dev/null; then
+      pct=$(( used * 100 / max ))
+    else
+      echo ''
+      return
+    fi
   fi
+  # Normalize: strip any decimal (used_percentage may be a float like 8.5).
+  pct=${pct%%.*}
+  [ -z "$pct" ] && { echo ''; return; }
+  case "$pct" in (*[!0-9]*) echo ''; return ;; esac
+  [ "$pct" -gt 100 ] 2>/dev/null && pct=100
 
-  local pct=$(( used * 100 / max ))
   local bar_width=20
   local filled=$(( pct * bar_width / 100 ))
   local empty=$(( bar_width - filled ))
@@ -286,8 +312,12 @@ fi
 [ -n "$AGENT" ] && LINE1="${LINE1}  | 🤖 ${BOLD}${AGENT}${RESET}"
 
 # ─── Assemble Line 2 ─────────────────────────────────────────────────────────
-CTX_BAR=$(build_ctx_bar "$CTX_USED" "$CTX_MAX")
+CTX_BAR=$(build_ctx_bar "$CTX_PCT" "$CTX_USED" "$CTX_MAX")
 COST_FMT=$(format_cost "$COST")
+# Prefer ms-based duration (official schema); fall back to legacy seconds.
+if [ -z "$ELAPSED" ] && [ -n "$ELAPSED_MS" ]; then
+  ELAPSED=$(( ELAPSED_MS / 1000 )) 2>/dev/null || ELAPSED=''
+fi
 ELAPSED_FMT=$(format_elapsed "$ELAPSED")
 
 LINE2=''
