@@ -13,6 +13,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.20.2] — 2026-06-08
+
+**Theme**: statusLine 진행률 복구 — 컨텍스트 % 바 + 팀 진행률 세그먼트
+
+statusline의 두 가지 진행률 표시가 모두 작동하지 않던 것을 근본 수정.
+
+### Fixed
+- **컨텍스트 % 바가 안 뜨던 문제** — `statusline.sh`가 존재하지 않는 stdin 필드(`.context_window.current_tokens`/`.max_tokens`/`.cost.total_cost`/`.cost.elapsed_seconds`/`.model` 문자열)를 읽고 있었음. 공식 Claude Code statusLine 스키마로 교정: `.context_window.used_percentage`(이미 계산된 %) / `.context_window_size` / `.cost.total_cost_usd` / `.cost.total_duration_ms`(ms→s) / `.model.display_name`. 구필드 fallback 유지(CC 버전 호환), float % 정규화 + 100 클램프.
+- **팀 진행률 세그먼트(`👥 <name>+N XX%`)가 안 뜨던 문제** — `runtime/current-teammates.json`을 쓰는 코드가 없었음. `workflow-status.js`에 `persistTeammates()` 추가 — 매 이벤트마다 non-idle 팀원 로스터를 영속(solo=빈 로스터로 자동 클리어). 10분 freshness 필터로 크로스세션 잔재 제외.
+
+### Added
+- `tests/ci/statusline-schema.test.js` — statusLine 필드명 회귀 가드(6 tests).
+- workflow-status 팀원 영속 테스트(roster + idle 제외).
+
+---
+
 ## [4.20.1] — 2026-06-08
 
 **Theme**: 문서 QA 게이트 (claude-howto 벤치마킹) + 문서 버그 27건 fix
