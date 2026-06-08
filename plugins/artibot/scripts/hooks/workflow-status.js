@@ -9,11 +9,12 @@
  */
 
 import { atomicWriteSync, parseJSON, readStdin, writeStdout } from '../utils/index.js';
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { cleanupStaleStateTmpFiles, createErrorHandler, extractAgentId, extractAgentRole, getStatePath as getStateFilePath } from '../../lib/core/hook-utils.js';
 import { withFileLock } from '../../lib/core/file-lock.js';
+import { getPluginRoot } from '../../lib/core/platform.js';
 
 const PHASE_NAMES = {
   feature: ['Plan', 'Design', 'Implement', 'Review', 'Test', 'Merge'],
@@ -235,7 +236,46 @@ function buildTeammateList(agents) {
     progress: info.progress,
     tasksCompleted: info.tasksCompleted,
     tasksTotal: info.tasksTotal,
+    updatedAt: info.updatedAt,
   }));
+}
+
+// Only teammates touched within this window count as "the current team". Older
+// records are cross-session residue accumulated in the state file and must not
+// inflate the statusline roster.
+const TEAMMATE_FRESH_WINDOW_MS = 10 * 60 * 1000;
+
+/**
+ * Persist the live teammate roster (with progress signals) to
+ * runtime/current-teammates.json so statusline.sh can render its
+ * `👥 <name>+N XX%` team-progress segment.
+ *
+ * Nothing wrote this file before, which is why that segment never appeared.
+ * Only non-idle teammates are written, so when a team disbands (every agent
+ * goes idle on SubagentStop) the file becomes an empty roster and the segment
+ * self-clears rather than showing a stale team. Best-effort: any failure is
+ * swallowed (the segment is advisory, never load-bearing).
+ *
+ * @param {object[]} teammates - buildTeammateList() output
+ */
+function persistTeammates(teammates) {
+  try {
+    const now = Date.now();
+    const active = (Array.isArray(teammates) ? teammates : []).filter((t) => {
+      if (!t || t.status === 'idle') return false;
+      // Drop stale cross-session residue; keep records without a timestamp.
+      const ts = t.updatedAt ? Date.parse(t.updatedAt) : NaN;
+      return !Number.isFinite(ts) || (now - ts) <= TEAMMATE_FRESH_WINDOW_MS;
+    });
+    const runtimeDir = join(getPluginRoot(), 'runtime');
+    mkdirSync(runtimeDir, { recursive: true });
+    atomicWriteSync(join(runtimeDir, 'current-teammates.json'), {
+      teammates: active,
+      updatedAt: new Date().toISOString(),
+    });
+  } catch {
+    // Non-critical: statusline team segment is advisory.
+  }
 }
 
 async function main() {
@@ -393,6 +433,11 @@ async function main() {
 
   // Build dashboard message
   const teammates = buildTeammateList(finalState.agents);
+
+  // Persist the roster so statusline.sh can render the live team-progress
+  // segment. Done for BOTH solo (empty roster → segment clears) and team paths.
+  persistTeammates(teammates);
+
   // Construct a summary message
   const activeCnt = teammates.filter((t) => t.status === 'in_progress').length;
   const blockedCnt = teammates.filter((t) => t.status === 'blocked').length;

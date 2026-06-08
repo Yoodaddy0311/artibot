@@ -119,7 +119,7 @@ describe('workflow-status', () => {
 
     await runHookFresh();
 
-    expect(mockState.writes).toHaveLength(1);
+    expect(mockState.writes.filter((w) => w.path === '/state/workflow-status.json')).toHaveLength(1);
     const written = mockState.writes[0].data;
     expect(written.agents.a1).toBeDefined();
     expect(written.agents.a1.role).toBe('planner');
@@ -133,7 +133,7 @@ describe('workflow-status', () => {
 
     await runHookFresh();
 
-    expect(mockState.writes).toHaveLength(1);
+    expect(mockState.writes.filter((w) => w.path === '/state/workflow-status.json')).toHaveLength(1);
     expect(mockState.writes[0].data.agents.a1).toBeDefined();
   });
 
@@ -149,14 +149,38 @@ describe('workflow-status', () => {
     expect(written.agents.a1.active).toBe(true);
   });
 
-  it('uses atomicWriteSync exactly once per invocation', async () => {
+  it('writes the workflow state exactly once per invocation', async () => {
     process.argv = ['node', 'workflow-status.js', 'teammate-update'];
     setStdin({ agent_id: 'a1' });
 
     await runHookFresh();
 
-    expect(mockState.writes).toHaveLength(1);
+    expect(mockState.writes.filter((w) => w.path === '/state/workflow-status.json')).toHaveLength(1);
     expect(mockState.writes[0].path).toBe('/state/workflow-status.json');
+  });
+
+  it('persists the non-idle teammate roster to runtime/current-teammates.json', async () => {
+    process.argv = ['node', 'workflow-status.js', 'teammate-update'];
+    setExistingState({
+      agents: {
+        a1: { role: 'planner', active: true, currentTask: 'plan' }, // in_progress
+        old: { role: 'tester', active: false },                     // idle → excluded
+      },
+      tasks: [{ id: 't1', status: 'completed' }, { id: 't2', status: 'pending' }],
+    });
+    setStdin({ agent_id: 'a1', current_task: 'plan' });
+
+    await runHookFresh();
+
+    const teamWrite = mockState.writes.find((w) => /current-teammates\.json$/.test(w.path));
+    expect(teamWrite).toBeDefined();
+    expect(Array.isArray(teamWrite.data.teammates)).toBe(true);
+    const names = teamWrite.data.teammates.map((t) => t.name);
+    expect(names).toContain('a1');
+    expect(names).not.toContain('old'); // idle agent excluded → segment self-clears on disband
+    const a1 = teamWrite.data.teammates.find((t) => t.name === 'a1');
+    expect(a1.tasksTotal).toBe(2);
+    expect(a1.tasksCompleted).toBe(1);
   });
 
   it('routes through all 4 hook event types without throwing', async () => {
@@ -182,7 +206,7 @@ describe('workflow-status', () => {
 
       await runHookFresh();
 
-      expect(mockState.writes.length).toBe(1);
+      expect(mockState.writes.filter((w) => w.path === '/state/workflow-status.json').length).toBe(1);
       const ev = mockState.writes[0].data.events;
       expect(Array.isArray(ev)).toBe(true);
       expect(ev.length).toBeGreaterThan(0);
