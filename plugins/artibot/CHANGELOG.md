@@ -13,6 +13,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.21.0] — 2026-06-08
+
+**Theme**: 채팅에 눈에 띄는 작업 진행률 바 (`/team` + autopilot PRD)
+
+`/team`·autopilot PRD 작업 중 "지금 몇 % 진행됐는지"가 대화에 한 번도 안 뜨던
+문제 해결. 원인: 진행률을 채팅에 출력하라는 지시가 없었고, hook 출력은 대화에
+눈에 띄게 표시되지 않았음. 해법은 **리더가 채팅에 직접** 진행률 박스를 출력(항상 보임).
+
+### Added
+- **`scripts/render-progress.js`** — done/total → 진행률 박스 출력 헬퍼(zero-dep, pure 함수 export). 20칸 `█`/`░` 바 + %, done>=total 시 🎉 100% 완료 박스. `node render-progress.js <done> <total> "<phase>"`. (11 tests)
+- **`commands/team.md`** "★ Phase 3.5 진행률 렌더링 (MANDATORY)" — 작업 배정 0% → 완료마다 갱신 → 최종 100% 박스를 리더가 채팅에 의무 출력.
+- **`commands/autopilot.md`** — Step 3 각 Phase 완료 시 진행률 박스(Phase X/7) + Step 5 최종 100% 박스 의무 렌더.
+
+예시:
+```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  📊 작업 진행률   ██████████████░░░░░░  70%
+  ✅ 완료 7 / 전체 10   🔄 진행 3   ⏳ 대기 0
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+```
+
+---
+
 ## [4.20.2] — 2026-06-08
 
 **Theme**: statusLine 진행률 복구 — 컨텍스트 % 바 + 팀 진행률 세그먼트

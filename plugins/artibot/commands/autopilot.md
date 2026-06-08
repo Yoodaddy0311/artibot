@@ -216,6 +216,7 @@ if (pfInstr?.suppress) { /* warnings: state.preflightWarnings에 누적 + 계속
 엔진이 반환한 `instruction` 객체를 따라 **Phase 0 ~ 6을 순차 실행**한다. 각 Phase 완료 시 `engine.recordPhaseResult(state, { phase, status, ...result })`로 session-store 업데이트 (1번 인자는 `loadSession(sessionId)`로 얻은 **state 객체**, 2번 인자에 `phase`/`status` 포함 payload).
 
 **자동 통합 (default 모드 기본 ON)**:
+- **★ 진행률 렌더 (MANDATORY — 채팅에 눈에 띄게)**: 각 Phase 완료 직후, 리더는 **대화에 진행률 박스를 출력**한다. PRD 작업이 "지금 몇 %"인지 한눈에 보이게 하는 핵심 UX다. `Bash("node ${CLAUDE_PLUGIN_ROOT}/scripts/render-progress.js {완료Phase수} 7 \"{PhaseName}\"")` 결과를 그대로 채팅에 표시 (완료 Phase수 = 방금 끝난 phase index + 1, 총 7 phases: INTAKE/PLAN/EXECUTE/CROSS_CHECK/VERIFY/IMPROVE/REPORT). 이건 hook/TUI가 아니라 **리더의 채팅 출력**이라 항상 보인다. 생략 금지.
 - 각 Phase 완료 직후 `engine.notePhaseCost(state, phase, { tokensIn, tokensOut, costUsd, model })` 호출 — Phase별 토큰/비용을 telemetry + state.usage에 기록
 - `engine.checkBudgetThreshold(sessionId, { limitUsd: options.budget })` 결과 `crossed === 95`면 `engine.buildCostWarningInstruction(state, threshold)`로 `notifyDanger` 발사
 - TUI 활성 세션은 footer에 `engine.renderCostInline(getSessionCost(sessionId))` 자동 표시
@@ -255,6 +256,7 @@ if (pfInstr?.suppress) { /* warnings: state.preflightWarnings에 누적 + 계속
 ### Step 5 — Completion
 
 Phase 6 완료 후:
+- **★ 최종 진행률 100% 렌더 (MANDATORY)**: `Bash("node ${CLAUDE_PLUGIN_ROOT}/scripts/render-progress.js 7 7")` 결과(🎉 작업 완료 박스)를 채팅에 출력해 PRD 작업이 **100% 완료됐음을 시각 확정**한다.
 - `engine.notifyCompletion(sessionId)` 호출.
 - 보고서 경로 + 큐된 질문 요약을 사용자에게 출력.
 - 비용 요약: `engine.renderCostBlock(engine.getSessionCost(sessionId))` 마크다운 테이블을 사용자에게 노출 (Phase별 토큰/$ + Budget 사용률).
