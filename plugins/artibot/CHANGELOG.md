@@ -13,6 +13,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.20.1] — 2026-06-08
+
+**Theme**: 문서 QA 게이트 (claude-howto 벤치마킹) + 문서 버그 27건 fix
+
+`luongnv89/claude-howto` 코드레벨 벤치마크에서 채택한 2개 문서 검증기. Artibot은 113 SKILL.md + 71 command.md + docs/를 운영하나 문서 검증이 frontmatter만 있어 broken-link/렌더깨짐 게이트가 0이던 갭을 메움.
+
+### Added
+- **`scripts/ci/validate-doc-links.js`** — 내부 `.md` 링크 존재 + `#anchor` 매칭(GitHub 슬러그 근사) + 홀수 code-fence 탐지. 코드펜스 마스킹으로 오탐 방지. (zero-dep, 31 tests)
+- **`scripts/ci/validate-md-rendering.js`** — `backtick-in-inline-code` + `table-pipe-column-mismatch` 룰(CommonMark 코드스팬 근사). (zero-dep, 18 tests)
+- `package.json#/scripts/docs:check` + `ci` 체인 배선, `.github/workflows/ci.yml` "Validate docs" 게이트.
+
+### Fixed
+- 새 검증기가 잡은 **실제 문서 버그 27건** — autopilot.md/positioning-template.md 테이블 컬럼 불일치, learn.md/polish 백틱 런, claude-md-auditor 홀수 fence, git-unified/lang-reference/source-driven + docs/ TOC anchor 불일치(bilingual heading 슬러그).
+
+---
+
 ## [4.20.0] — 2026-06-08
 
 **Theme**: `/save` Git 동기화 체크 + 설치 UX 대수술 + 크로스머신 작업 통합
