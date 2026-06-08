@@ -16,22 +16,41 @@
   allowlist (Read/Glob/Grep) into ~/.claude/settings.json so new users don't
   face repeated permission prompts. Write/Edit/Bash are deliberately excluded.
 
+  This installer never clones the repo nor relies on the marketplace plugin
+  loader — that path produces namespaced (`/artibot:save`) commands, which is
+  exactly the UX regression this flat-copy installer exists to avoid. Keep it in
+  lockstep with install.sh.
+
   Idempotent: safe to re-run. Existing settings.json keys are preserved.
 
-  Usage:  .\install.ps1            # install
-          .\install.ps1 uninstall  # remove
+  Usage:  .\install.ps1                    # install
+          .\install.ps1 uninstall          # remove
+          .\install.ps1 -DryRun            # preview without writing
+          .\install.ps1 -NoColor           # plain (CI) output
 
 .PARAMETER Action
   install (default) or uninstall.
+
+.PARAMETER DryRun
+  Print the actions that would be taken without mutating the filesystem.
+
+.PARAMETER NoColor
+  Disable colored console output (CI / non-ANSI terminals).
 #>
 [CmdletBinding()]
 param(
   [ValidateSet('install', 'uninstall')]
-  [string]$Action = 'install'
+  [string]$Action = 'install',
+  [switch]$DryRun,
+  [switch]$NoColor
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+# Color shim: when -NoColor passed, drop -ForegroundColor. Checked once here so
+# each logging call stays a one-liner.
+$script:UseColor = -not $NoColor
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -40,28 +59,50 @@ $ScriptDir  = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ClaudeDir  = Join-Path $env:USERPROFILE '.claude'
 $ArtibotDir = Join-Path $ClaudeDir 'artibot'
 
+# Minimum supported Node major (lockstep with install.sh MIN_NODE_MAJOR=20).
+$MIN_NODE_MAJOR = 20
+
 # Read-only tools auto-approved by default. Write/Edit/Bash excluded for safety.
 $SafeAllow = @('Read', 'Glob', 'Grep')
 
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
-function Write-Log  { param($msg) Write-Host "[artibot] $msg" -ForegroundColor Green }
-function Write-Warn2 { param($msg) Write-Host "[artibot] $msg" -ForegroundColor Yellow }
-function Write-Err2 { param($msg) Write-Host "[artibot] $msg" -ForegroundColor Red }
+function Write-Log   { param($msg) if ($script:UseColor) { Write-Host "[artibot] $msg" -ForegroundColor Green } else { Write-Host "[artibot] $msg" } }
+function Write-Warn2 { param($msg) if ($script:UseColor) { Write-Host "[artibot] $msg" -ForegroundColor Yellow } else { Write-Host "[artibot] $msg" } }
+function Write-Err2  { param($msg) if ($script:UseColor) { Write-Host "[artibot] $msg" -ForegroundColor Red } else { Write-Host "[artibot] $msg" } }
+function Write-Tip   { param($msg) if ($script:UseColor) { Write-Host "[artibot] $msg" -ForegroundColor Cyan } else { Write-Host "[artibot] $msg" } }
+
+# ---------------------------------------------------------------------------
+# Version resolution (dynamic — never hardcode)
+# ---------------------------------------------------------------------------
+# Prefer .claude-plugin/plugin.json (the manifest CI guards), fall back to
+# artibot.config.json, then package.json. No literal version string anywhere.
+function Get-ArtibotVersion {
+  foreach ($rel in @('.claude-plugin\plugin.json', 'artibot.config.json', 'package.json')) {
+    $p = Join-Path $ScriptDir $rel
+    if (Test-Path $p) {
+      try {
+        $v = (Get-Content $p -Raw | ConvertFrom-Json).version
+        if ($v) { return $v }
+      } catch { }
+    }
+  }
+  return 'unknown'
+}
 
 # ---------------------------------------------------------------------------
 # Prerequisites
 # ---------------------------------------------------------------------------
 function Test-Prerequisites {
   if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
-    Write-Err2 'Node.js not found. Install from https://nodejs.org/ (v18+)'
+    Write-Err2 "Node.js not found. Install from https://nodejs.org/ (v$MIN_NODE_MAJOR+)"
     exit 1
   }
   $nodeVersion = (node -v) -replace '^v', ''
   $major = [int]($nodeVersion.Split('.')[0])
-  if ($major -lt 18) {
-    Write-Err2 "Node.js 18+ required. Current: v$nodeVersion"
+  if ($major -lt $MIN_NODE_MAJOR) {
+    Write-Err2 "Node.js $MIN_NODE_MAJOR+ required. Current: v$nodeVersion"
     exit 1
   }
   Write-Log "Prerequisites OK (Node.js v$nodeVersion)"
@@ -77,7 +118,10 @@ function Initialize-Directories {
     (Join-Path $ClaudeDir 'rules\artibot'),
     $ArtibotDir
   )) {
-    if (-not (Test-Path $d)) { New-Item -ItemType Directory -Path $d -Force | Out-Null }
+    if (-not (Test-Path $d)) {
+      if ($DryRun) { Write-Log "[dry-run] would create $d" }
+      else { New-Item -ItemType Directory -Path $d -Force | Out-Null }
+    }
   }
   Write-Log 'Directories ready'
 }
@@ -90,16 +134,19 @@ function Copy-MdFiles {
   if (-not (Test-Path $SrcDir)) { return }
   $count = 0
   Get-ChildItem -Path $SrcDir -Filter '*.md' -File | ForEach-Object {
+    if ($DryRun) { $count++; return }
     Copy-Item -Path $_.FullName -Destination $DstDir -Force
     $count++
   }
-  Write-Log "$Label installed: $count files -> $DstDir"
+  $prefix = if ($DryRun) { '[dry-run] would install' } else { 'installed' }
+  Write-Log "$Label ${prefix}: $count files -> $DstDir"
 }
 
 function Copy-Tree {
   param([string]$SrcDir, [string]$DstDir)
   if (-not (Test-Path $SrcDir)) { return }
   $target = Join-Path $DstDir (Split-Path -Leaf $SrcDir)
+  if ($DryRun) { Write-Log "[dry-run] would copy $SrcDir -> $target"; return }
   if (Test-Path $target) { Remove-Item -Path $target -Recurse -Force }
   Copy-Item -Path $SrcDir -Destination $DstDir -Recurse -Force
 }
@@ -118,14 +165,22 @@ function Install-Assets {
   $srcMeta = Join-Path $ScriptDir '.claude-plugin'
   if (Test-Path $srcMeta) {
     $dstMeta = Join-Path $ArtibotDir '.claude-plugin'
-    if (-not (Test-Path $dstMeta)) { New-Item -ItemType Directory -Path $dstMeta -Force | Out-Null }
-    Copy-Item -Path (Join-Path $srcMeta '*') -Destination $dstMeta -Recurse -Force
+    if ($DryRun) {
+      Write-Log "[dry-run] would copy $srcMeta -> $dstMeta"
+    } else {
+      if (-not (Test-Path $dstMeta)) { New-Item -ItemType Directory -Path $dstMeta -Force | Out-Null }
+      Copy-Item -Path (Join-Path $srcMeta '*') -Destination $dstMeta -Recurse -Force
+    }
   }
 
   # Config files
-  Copy-Item -Path (Join-Path $ScriptDir 'artibot.config.json') -Destination $ArtibotDir -Force
-  $pkg = Join-Path $ScriptDir 'package.json'
-  if (Test-Path $pkg) { Copy-Item -Path $pkg -Destination $ArtibotDir -Force }
+  if ($DryRun) {
+    Write-Log "[dry-run] would copy artibot.config.json + package.json -> $ArtibotDir"
+  } else {
+    Copy-Item -Path (Join-Path $ScriptDir 'artibot.config.json') -Destination $ArtibotDir -Force
+    $pkg = Join-Path $ScriptDir 'package.json'
+    if (Test-Path $pkg) { Copy-Item -Path $pkg -Destination $ArtibotDir -Force }
+  }
 
   Write-Log "Hooks & scripts installed -> $ArtibotDir"
 
@@ -138,6 +193,11 @@ function Install-Assets {
 # ---------------------------------------------------------------------------
 function Set-Settings {
   $settingsFile = Join-Path $ClaudeDir 'settings.json'
+
+  if ($DryRun) {
+    Write-Log "[dry-run] would enable Agent Teams + seed read-only permissions (Read/Glob/Grep) in $settingsFile"
+    return
+  }
 
   if (Test-Path $settingsFile) {
     # Merge into existing settings via Node (preserves user keys, idempotent).
@@ -189,9 +249,9 @@ fs.renameSync(tmp, path);
     Write-Log 'settings.json created: Agent Teams enabled + read-only permissions seeded'
   }
 
-  Write-Host '[artibot]   Tip: only read-only tools (Read/Glob/Grep) auto-approve by default.' -ForegroundColor Cyan
-  Write-Host '            For broader auto-approval run /permissions in a session, or set' -ForegroundColor Cyan
-  Write-Host '            "defaultMode" under "permissions" in ~/.claude/settings.json.' -ForegroundColor Cyan
+  Write-Tip '  Tip: only read-only tools (Read/Glob/Grep) auto-approve by default.'
+  Write-Tip '       For broader auto-approval run /permissions in a session, or set'
+  Write-Tip '       "defaultMode" under "permissions" in ~/.claude/settings.json.'
 }
 
 # ---------------------------------------------------------------------------
@@ -221,36 +281,44 @@ function Uninstall-Artibot {
   if (Test-Path $srcAgents) {
     Get-ChildItem $srcAgents -Filter '*.md' -File | ForEach-Object {
       $t = Join-Path (Join-Path $ClaudeDir 'agents') $_.Name
-      if (Test-Path $t) { Remove-Item $t -Force }
+      if (Test-Path $t) {
+        if ($DryRun) { Write-Log "[dry-run] would remove $t" } else { Remove-Item $t -Force }
+      }
     }
   }
   $srcCmds = Join-Path $ScriptDir 'commands'
   if (Test-Path $srcCmds) {
     Get-ChildItem $srcCmds -Filter '*.md' -File | ForEach-Object {
       $t = Join-Path (Join-Path $ClaudeDir 'commands') $_.Name
-      if (Test-Path $t) { Remove-Item $t -Force }
+      if (Test-Path $t) {
+        if ($DryRun) { Write-Log "[dry-run] would remove $t" } else { Remove-Item $t -Force }
+      }
     }
   }
   $rulesDir = Join-Path $ClaudeDir 'rules\artibot'
-  if (Test-Path $rulesDir) { Remove-Item $rulesDir -Recurse -Force }
-  if (Test-Path $ArtibotDir) { Remove-Item $ArtibotDir -Recurse -Force }
+  if (Test-Path $rulesDir) {
+    if ($DryRun) { Write-Log "[dry-run] would remove $rulesDir" } else { Remove-Item $rulesDir -Recurse -Force }
+  }
+  if (Test-Path $ArtibotDir) {
+    if ($DryRun) { Write-Log "[dry-run] would remove $ArtibotDir" } else { Remove-Item $ArtibotDir -Recurse -Force }
+  }
   Write-Log 'Artibot uninstalled. settings.json, CLAUDE.md, and auto-memory left unchanged.'
 }
 
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
-$version = 'unknown'
-try {
-  $cfgPath = Join-Path $ScriptDir 'artibot.config.json'
-  if (Test-Path $cfgPath) {
-    $version = (Get-Content $cfgPath -Raw | ConvertFrom-Json).version
-  }
-} catch { }
+$version = Get-ArtibotVersion
+$bannerSuffix = if ($DryRun) { '  [DRY-RUN]' } else { '' }
 
 Write-Host ''
-Write-Host "  Artibot Installer v$version (Windows / PowerShell)" -ForegroundColor Cyan
-Write-Host '  =================================================' -ForegroundColor Cyan
+if ($script:UseColor) {
+  Write-Host "  Artibot Installer v$version (Windows / PowerShell)$bannerSuffix" -ForegroundColor Cyan
+  Write-Host '  =================================================' -ForegroundColor Cyan
+} else {
+  Write-Host "  Artibot Installer v$version (Windows / PowerShell)$bannerSuffix"
+  Write-Host '  ================================================='
+}
 Write-Host ''
 
 switch ($Action) {

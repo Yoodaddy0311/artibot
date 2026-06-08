@@ -188,11 +188,37 @@ describe('install/windows PowerShell installer', () => {
 
   it('install.ps1 flat-copies commands/agents into ~/.claude (no prefix)', () => {
     const content = readFileSync(path.join(PLUGIN_ROOT, 'install.ps1'), 'utf-8');
+    // Flat-copy contract (lockstep with install.sh): commands/agents land in
+    // ~/.claude/{commands,agents} so slash commands have NO `artibot:` prefix.
     expect(content).toMatch(/Copy-MdFiles/);
     expect(content).toMatch(/'commands'/);
     expect(content).toMatch(/'agents'/);
     // Same read-only permission seed as install.sh.
     expect(content).toMatch(/\$SafeAllow\s*=\s*@\('Read',\s*'Glob',\s*'Grep'\)/);
+  });
+
+  it('install.ps1 does NOT clone or use marketplace `/plugins load` (prefix-regression guard)', () => {
+    const content = readFileSync(path.join(PLUGIN_ROOT, 'install.ps1'), 'utf-8');
+    // The git-clone + `/plugins load` path produces namespaced `/artibot:save`
+    // commands — the exact UX bug new users reported. Guard against its return.
+    expect(content).not.toMatch(/git clone/);
+    expect(content).not.toMatch(/plugins load/);
+    expect(content).not.toMatch(/Install-MarketplaceMirror/);
+    expect(content).not.toMatch(/Install-PluginCache/);
+  });
+
+  it('install.ps1 supports -DryRun / -NoColor and dynamic version (no hardcode)', () => {
+    const content = readFileSync(path.join(PLUGIN_ROOT, 'install.ps1'), 'utf-8');
+    expect(content).toMatch(/\[switch\]\$DryRun/);
+    expect(content).toMatch(/\[switch\]\$NoColor/);
+    expect(content).not.toMatch(/\$ARTIBOT_VERSION\s*=\s*"[\d.]+"/);
+    expect(content).toMatch(/\$MIN_NODE_MAJOR\s*=\s*20\b/);
+  });
+
+  it('scripts/install.ps1 is a thin shim forwarding all args to the canonical installer', () => {
+    const shim = readFileSync(path.join(PLUGIN_ROOT, 'scripts', 'install.ps1'), 'utf-8');
+    expect(shim).toMatch(/&\s*\$Canonical\s*@args/);
+    expect(shim).toMatch(/install\.ps1/);
   });
 });
 

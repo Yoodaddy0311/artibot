@@ -69,7 +69,9 @@ describe('marketplace.json version sync', () => {
 
 describe('install scripts do not hardcode stale versions', () => {
   const installSh = readText(join(PLUGIN_ROOT, 'scripts', 'install.sh'));
-  const installPs1 = readText(join(PLUGIN_ROOT, 'scripts', 'install.ps1'));
+  // Canonical Windows installer lives at the plugin root, not under scripts/
+  // (scripts/install.ps1 is now a thin pass-through shim).
+  const installPs1 = readText(join(PLUGIN_ROOT, 'install.ps1'));
 
   it('install.sh does not hardcode ARTIBOT_VERSION literal', () => {
     expect(installSh).not.toMatch(/ARTIBOT_VERSION="[\d.]+"/);
@@ -90,7 +92,8 @@ describe('install scripts do not hardcode stale versions', () => {
 
 describe('install scripts support --dry-run / --no-color', () => {
   const installSh = readText(join(PLUGIN_ROOT, 'scripts', 'install.sh'));
-  const installPs1 = readText(join(PLUGIN_ROOT, 'scripts', 'install.ps1'));
+  // Canonical Windows installer lives at the plugin root (see note above).
+  const installPs1 = readText(join(PLUGIN_ROOT, 'install.ps1'));
 
   it('install.sh parses --dry-run flag', () => {
     expect(installSh).toMatch(/--dry-run\)\s*DRY_RUN=1/);
@@ -110,6 +113,30 @@ describe('install scripts support --dry-run / --no-color', () => {
 
   it('install.ps1 declares -NoColor param', () => {
     expect(installPs1).toMatch(/\[switch\]\$NoColor/);
+  });
+});
+
+describe('canonical install.ps1 seeds read-only permissions', () => {
+  // The canonical Windows installer must enable Agent Teams and seed a
+  // conservative read-only allowlist (Read/Glob/Grep) into settings.json so
+  // first-run users aren't prompted for every read. Write/Edit/Bash excluded.
+  const installPs1 = readText(join(PLUGIN_ROOT, 'install.ps1'));
+
+  it('seeds Read/Glob/Grep into permissions.allow', () => {
+    expect(installPs1).toMatch(/\$SafeAllow\s*=\s*@\(\s*'Read',\s*'Glob',\s*'Grep'\s*\)/);
+  });
+
+  it('enables Agent Teams in settings.json', () => {
+    expect(installPs1).toMatch(/CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS/);
+  });
+
+  it('flat-copies commands/agents and does NOT clone/`plugins load` (prefix-regression guard)', () => {
+    // Lockstep with install.sh: flat-copy yields prefix-free `/save`. The
+    // git-clone + `/plugins load` path yields namespaced `/artibot:save`, the
+    // UX regression we must never reintroduce.
+    expect(installPs1).toMatch(/Copy-MdFiles/);
+    expect(installPs1).not.toMatch(/git clone/);
+    expect(installPs1).not.toMatch(/plugins load/);
   });
 });
 
