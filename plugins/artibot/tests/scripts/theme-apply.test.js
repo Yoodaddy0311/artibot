@@ -7,13 +7,17 @@
 
 import { describe, expect, it } from 'vitest';
 import {
+  findVscodeSettings,
   findWtSettings,
   restoreSettings,
+  restoreVscodeTerminal,
   restoreWtDefaults,
   withOutputStyle,
   withStatusLine,
+  withVscodeTerminal,
   withWtScheme,
 } from '../../scripts/theme-apply.js';
+import { VSCODE_TERMINAL_KEYS } from '../../scripts/theme/registry.js';
 
 describe('withStatusLine', () => {
   it('sets the command immutably and preserves other keys', () => {
@@ -95,5 +99,48 @@ describe('restoreWtDefaults (reset side)', () => {
     const wt = { profiles: { defaults: { colorScheme: 'ARTIBOT MATRIX' } } };
     expect('colorScheme' in restoreWtDefaults(wt, null).profiles.defaults).toBe(false);
     expect('colorScheme' in restoreWtDefaults(wt, undefined).profiles.defaults).toBe(false);
+  });
+});
+
+describe('findVscodeSettings', () => {
+  it('returns null when APPDATA is unset', () => {
+    expect(findVscodeSettings({})).toBeNull();
+  });
+});
+
+describe('withVscodeTerminal', () => {
+  it('merges terminal colors into workbench.colorCustomizations, preserving other keys', () => {
+    const before = { 'editor.fontSize': 14, 'workbench.colorCustomizations': { 'editor.background': '#111' } };
+    const after = withVscodeTerminal(before, { 'terminal.foreground': '#00FF41' });
+    expect(after['workbench.colorCustomizations']['terminal.foreground']).toBe('#00FF41');
+    expect(after['workbench.colorCustomizations']['editor.background']).toBe('#111'); // preserved
+    expect(after['editor.fontSize']).toBe(14);
+    expect(before['workbench.colorCustomizations']['terminal.foreground']).toBeUndefined(); // immutable
+  });
+  it('creates colorCustomizations when absent', () => {
+    expect(withVscodeTerminal({}, { 'terminal.background': '#000' })['workbench.colorCustomizations'])
+      .toEqual({ 'terminal.background': '#000' });
+  });
+});
+
+describe('restoreVscodeTerminal (reset side)', () => {
+  it('removes the managed terminal keys but keeps unrelated customizations', () => {
+    const cur = { 'workbench.colorCustomizations': { 'terminal.foreground': '#00FF41', 'terminal.background': '#020A02', 'editor.background': '#111' } };
+    const out = restoreVscodeTerminal(cur, {});
+    expect(out['workbench.colorCustomizations']).toEqual({ 'editor.background': '#111' });
+  });
+  it('restores previous values for managed keys', () => {
+    const cur = { 'workbench.colorCustomizations': { 'terminal.foreground': '#00FF41' } };
+    const out = restoreVscodeTerminal(cur, { 'terminal.foreground': '#ABCDEF' });
+    expect(out['workbench.colorCustomizations']['terminal.foreground']).toBe('#ABCDEF');
+  });
+  it('drops an emptied colorCustomizations object entirely', () => {
+    const cur = { 'editor.fontSize': 14, 'workbench.colorCustomizations': Object.fromEntries(VSCODE_TERMINAL_KEYS.map((k) => [k, '#000'])) };
+    const out = restoreVscodeTerminal(cur, {});
+    expect('workbench.colorCustomizations' in out).toBe(false);
+    expect(out['editor.fontSize']).toBe(14);
+  });
+  it('is a no-op when there is no colorCustomizations', () => {
+    expect(restoreVscodeTerminal({ 'editor.fontSize': 14 }, {})).toEqual({ 'editor.fontSize': 14 });
   });
 });

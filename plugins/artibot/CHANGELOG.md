@@ -13,6 +13,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.23.0] — 2026-06-08
+
+**Theme**: `/theme`에 VS Code 통합 터미널 색 추가 (4번째 표면)
+
+### Added
+- **`/theme`가 VS Code 통합 터미널 색도 적용** — `~/.claude` 가 아니라 VS Code 사용자 설정(`%APPDATA%/Code/User/settings.json`)의 `workbench.colorCustomizations`에 터미널 전경/배경/커서 + 16 ANSI 색을 테마 팔레트로 주입. 저장 시 자동 반영. (VS Code 통합 터미널을 쓰는 경우 — Windows Terminal 컬러 스킴이 적용 안 되던 환경을 커버.)
+- **`/theme reset`이 VS Code 색도 원복** — 관리하는 20개 터미널 키만 제거/복원(다른 커스터마이즈는 보존), 적용 전 `settings.json.artibot-backup` 백업.
+- `registry.js`: `buildVscodeTerminalColors` + `VSCODE_TERMINAL_KEYS`. `theme-apply.js`: `findVscodeSettings`/`withVscodeTerminal`/`restoreVscodeTerminal`. 테스트 +10 (총 29).
+
+이제 `/theme`는 **4표면**: statusLine + Windows Terminal + VS Code 터미널 + output-style.
+
+---
+
 ## [4.22.3] — 2026-06-08
 
 **Theme**: `/theme` output-style 자동 활성화

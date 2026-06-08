@@ -1,18 +1,19 @@
 ---
-description: (Artibot) 터미널 테마 전환 — 사이버펑크/매트릭스/베이퍼웨이브 (statusline + Windows Terminal 색상 + output-style)
+description: (Artibot) 터미널 테마 전환 — 사이버펑크/매트릭스/베이퍼웨이브 (statusline + Windows Terminal + VS Code 터미널 색 + output-style)
 argument-hint: '[neon-city|matrix|vaporwave|list|reset]'
 allowed-tools: [Read, Bash]
 ---
 
 # /theme
 
-Artibot 터미널 테마를 전환한다. 한 번에 **3개 표면**을 바꾼다:
+Artibot 터미널 테마를 전환한다. 한 번에 **4개 표면**을 바꾼다:
 
 1. **statusLine** — 하단바를 테마 팔레트의 truecolor 그라데이션 바로 (시안→마젠타 등)
-2. **Windows Terminal 색상** — `ARTIBOT <THEME>` 컬러 스킴 주입 + 전 프로필 적용 (모든 터미널 텍스트 색 변경)
-3. **output-style** — 응답 포맷을 박스아트/네온글리프로 (`/output-style`로 활성화)
+2. **Windows Terminal 색상** — `ARTIBOT <THEME>` 컬러 스킴 주입 + 전 프로필 적용 (WT 터미널 텍스트 색 변경)
+3. **VS Code 통합 터미널 색** — `workbench.colorCustomizations`의 터미널 전경/배경/16 ANSI 색 적용 (VS Code 통합 터미널 텍스트 색 변경, 저장 시 자동 반영)
+4. **output-style** — 응답 포맷을 박스아트/네온글리프로 + `settings.outputStyle` 자동 활성화 (적용: `/clear` 또는 새 세션)
 
-> 모든 변경은 백업되며 `/theme reset`으로 원복된다. truecolor는 최신 터미널(Windows Terminal/iTerm/Konsole)에서만 색이 제대로 나온다.
+> 모든 변경은 백업되며 `/theme reset`으로 4표면 전부 원복된다. truecolor는 최신 터미널(Windows Terminal/iTerm/Konsole)에서만 색이 제대로 나온다. WT/VS Code는 각자 쓰는 환경에만 적용(미발견 시 자동 스킵).
 
 ## Arguments
 

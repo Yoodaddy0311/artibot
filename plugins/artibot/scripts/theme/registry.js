@@ -120,3 +120,38 @@ You format every response in the "${t.label}" terminal aesthetic — flashy fram
 - Flashy on headers/dividers/status; plain on body prose.
 `;
 }
+
+/**
+ * The exact set of VS Code `workbench.colorCustomizations` keys this theme
+ * system manages. Reset removes precisely these (and restores any prior values),
+ * so user customizations of OTHER keys are never touched.
+ */
+export const VSCODE_TERMINAL_KEYS = [
+  'terminal.background', 'terminal.foreground', 'terminalCursor.foreground', 'terminalCursor.background',
+  'terminal.ansiBlack', 'terminal.ansiRed', 'terminal.ansiGreen', 'terminal.ansiYellow',
+  'terminal.ansiBlue', 'terminal.ansiMagenta', 'terminal.ansiCyan', 'terminal.ansiWhite',
+  'terminal.ansiBrightBlack', 'terminal.ansiBrightRed', 'terminal.ansiBrightGreen', 'terminal.ansiBrightYellow',
+  'terminal.ansiBrightBlue', 'terminal.ansiBrightMagenta', 'terminal.ansiBrightCyan', 'terminal.ansiBrightWhite',
+];
+
+/**
+ * Build the VS Code integrated-terminal color customizations for a theme.
+ * (VS Code uses "Magenta" where the ANSI palette names the slot "purple".)
+ * @param {string} name
+ * @returns {Record<string,string>|null}
+ */
+export function buildVscodeTerminalColors(name) {
+  const t = THEMES[name];
+  if (!t) return null;
+  const a = t.ansi;
+  return {
+    'terminal.background': t.bg,
+    'terminal.foreground': t.fg,
+    'terminalCursor.foreground': t.cursor,
+    'terminalCursor.background': t.bg,
+    'terminal.ansiBlack': a.black, 'terminal.ansiRed': a.red, 'terminal.ansiGreen': a.green, 'terminal.ansiYellow': a.yellow,
+    'terminal.ansiBlue': a.blue, 'terminal.ansiMagenta': a.purple, 'terminal.ansiCyan': a.cyan, 'terminal.ansiWhite': a.white,
+    'terminal.ansiBrightBlack': a.brightBlack, 'terminal.ansiBrightRed': a.brightRed, 'terminal.ansiBrightGreen': a.brightGreen, 'terminal.ansiBrightYellow': a.brightYellow,
+    'terminal.ansiBrightBlue': a.brightBlue, 'terminal.ansiBrightMagenta': a.brightPurple, 'terminal.ansiBrightCyan': a.brightCyan, 'terminal.ansiBrightWhite': a.brightWhite,
+  };
+}

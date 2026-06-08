@@ -9,10 +9,12 @@ import { describe, expect, it } from 'vitest';
 import {
   buildOutputStyle,
   buildStatuslinePalette,
+  buildVscodeTerminalColors,
   buildWtScheme,
   isTheme,
   THEME_NAMES,
   THEMES,
+  VSCODE_TERMINAL_KEYS,
 } from '../../scripts/theme/registry.js';
 
 describe('theme registry', () => {
@@ -77,5 +79,25 @@ describe('buildOutputStyle', () => {
     expect(md).toMatch(/^---\nname: NEON CITY/);
     expect(md).toContain('◢◤');
     expect(md).toContain('Do NOT decorate inside code blocks');
+  });
+});
+
+describe('buildVscodeTerminalColors', () => {
+  it('maps every theme palette onto exactly the managed VS Code terminal keys', () => {
+    for (const name of THEME_NAMES) {
+      const c = buildVscodeTerminalColors(name);
+      expect(Object.keys(c).sort()).toEqual([...VSCODE_TERMINAL_KEYS].sort());
+      for (const v of Object.values(c)) expect(v).toMatch(/^#[0-9A-Fa-f]{6}$/);
+    }
+  });
+  it('uses fg/bg and maps ansi purple → ansiMagenta', () => {
+    const c = buildVscodeTerminalColors('matrix');
+    expect(c['terminal.foreground']).toBe(THEMES.matrix.fg);
+    expect(c['terminal.background']).toBe(THEMES.matrix.bg);
+    expect(c['terminal.ansiMagenta']).toBe(THEMES.matrix.ansi.purple);
+    expect(c['terminal.ansiGreen']).toBe(THEMES.matrix.ansi.green);
+  });
+  it('returns null for unknown theme', () => {
+    expect(buildVscodeTerminalColors('nope')).toBeNull();
   });
 });

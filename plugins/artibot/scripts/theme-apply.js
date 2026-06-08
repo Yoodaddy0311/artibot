@@ -18,7 +18,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildOutputStyle, buildStatuslinePalette, buildWtScheme, isTheme, THEME_NAMES, THEMES } from './theme/registry.js';
+import { buildOutputStyle, buildStatuslinePalette, buildVscodeTerminalColors, buildWtScheme, isTheme, THEME_NAMES, THEMES, VSCODE_TERMINAL_KEYS } from './theme/registry.js';
 
 const HOME = homedir();
 const ARTIBOT = join(HOME, '.claude', 'artibot');
@@ -106,6 +106,54 @@ export function restoreWtDefaults(wt, prevColorScheme) {
   return { ...o, profiles: { ...profiles, defaults } };
 }
 
+/** First existing VS Code (or Insiders/VSCodium) user settings.json path, or null. */
+export function findVscodeSettings(env = process.env) {
+  const appdata = env.APPDATA;
+  if (!appdata) return null;
+  const cands = [
+    join(appdata, 'Code', 'User', 'settings.json'),
+    join(appdata, 'Code - Insiders', 'User', 'settings.json'),
+    join(appdata, 'VSCodium', 'User', 'settings.json'),
+  ];
+  return cands.find((p) => existsSync(p)) || null;
+}
+
+/** Merge terminal `colors` into workbench.colorCustomizations. Immutable. */
+export function withVscodeTerminal(settings, colors) {
+  const s = settings && typeof settings === 'object' ? settings : {};
+  const cc = s['workbench.colorCustomizations'];
+  const base = cc && typeof cc === 'object' ? cc : {};
+  return { ...s, 'workbench.colorCustomizations': { ...base, ...colors } };
+}
+
+/**
+ * Reset side: remove the managed terminal keys from workbench.colorCustomizations,
+ * then restore any values present in `prevColors`. Other custom keys are untouched;
+ * an emptied colorCustomizations object is dropped entirely. Immutable.
+ */
+export function restoreVscodeTerminal(settings, prevColors) {
+  const s = settings && typeof settings === 'object' ? settings : {};
+  const cc = s['workbench.colorCustomizations'];
+  if (!cc || typeof cc !== 'object') return s;
+  const next = { ...cc };
+  for (const k of VSCODE_TERMINAL_KEYS) delete next[k];
+  const prev = prevColors && typeof prevColors === 'object' ? prevColors : {};
+  for (const k of Object.keys(prev)) next[k] = prev[k];
+  const out = { ...s };
+  if (Object.keys(next).length === 0) delete out['workbench.colorCustomizations'];
+  else out['workbench.colorCustomizations'] = next;
+  return out;
+}
+
+/** Subset of a VS Code settings' colorCustomizations matching our managed keys. */
+function captureVscodeColors(settings) {
+  const cc = settings && settings['workbench.colorCustomizations'];
+  if (!cc || typeof cc !== 'object') return {};
+  const out = {};
+  for (const k of VSCODE_TERMINAL_KEYS) if (k in cc) out[k] = cc[k];
+  return out;
+}
+
 // ── I/O actions ──────────────────────────────────────────────────────────────
 
 function captureBackup() {
@@ -117,7 +165,9 @@ function captureBackup() {
   const wt = wtPath ? readJson(wtPath, {}) : null;
   const prevColorScheme = wt && wt.profiles && wt.profiles.defaults ? (wt.profiles.defaults.colorScheme ?? null) : null;
   const prevOutputStyle = settings.outputStyle ?? null;
-  writeJson(BACKUP, { prevStatus, prevColorScheme, prevOutputStyle, savedAt: new Date().toISOString() });
+  const vsPath = findVscodeSettings();
+  const prevVscodeColors = vsPath ? captureVscodeColors(readJson(vsPath, {})) : {};
+  writeJson(BACKUP, { prevStatus, prevColorScheme, prevOutputStyle, prevVscodeColors, savedAt: new Date().toISOString() });
 }
 
 function applyTheme(name) {
@@ -144,7 +194,18 @@ function applyTheme(name) {
     notes.push('Windows Terminal 미발견 — 색상 스킵 (다른 터미널은 컬러 스킴 수동 적용)');
   }
 
-  // 3. output-style file (active selection already set on settings.outputStyle above)
+  // 3. VS Code integrated-terminal colors (best-effort)
+  const vsPath = findVscodeSettings();
+  if (vsPath) {
+    const vs = readJson(vsPath, null);
+    if (vs) {
+      if (!existsSync(vsPath + '.artibot-backup')) writeFileSync(vsPath + '.artibot-backup', readFileSync(vsPath, 'utf8'));
+      writeJson(vsPath, withVscodeTerminal(vs, buildVscodeTerminalColors(name)));
+      notes.push('VS Code 통합 터미널 색 적용 (저장 시 자동 반영)');
+    } else { notes.push('VS Code settings.json 파싱 실패 — 색상 스킵 (주석 있으면 수동)'); }
+  }
+
+  // 4. output-style file (active selection already set on settings.outputStyle above)
   mkdirSync(OUTPUT_STYLES, { recursive: true });
   writeFileSync(join(OUTPUT_STYLES, `${name}.md`), buildOutputStyle(name));
   notes.push(`output-style → "${THEMES[name].label}" 자동 활성화 (적용: /clear 또는 새 세션)`);
@@ -165,6 +226,15 @@ function resetTheme() {
     if (wt) {
       writeFileSync(wtPath, JSON.stringify(restoreWtDefaults(wt, b.prevColorScheme), null, 4));
       notes.push('Windows Terminal colorScheme → 이전값 복원');
+    }
+  }
+
+  const vsPath = findVscodeSettings();
+  if (vsPath) {
+    const vs = readJson(vsPath, null);
+    if (vs) {
+      writeJson(vsPath, restoreVscodeTerminal(vs, b.prevVscodeColors));
+      notes.push('VS Code 통합 터미널 색 → 이전값 복원');
     }
   }
   return notes;
