@@ -25,14 +25,14 @@ PCT=$(jget '.context_window.used_percentage' '0'); PCT=${PCT%%.*}; [ -z "$PCT" ]
 COST=$(jget '.cost.total_cost_usd' '')
 DIR=$(basename "$PWD"); BRANCH=$(git branch --show-current 2>/dev/null || true)
 VER=''; PKG="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/package.json"
-[ -f "$PKG" ] && command -v node >/dev/null 2>&1 && VER=$(node -e "try{process.stdout.write(require('$PKG').version)}catch{}" 2>/dev/null || true)
+[ -f "$PKG" ] && command -v node >/dev/null 2>&1 && VER=$(ARTIBOT_PKG_JSON="$(cat "$PKG" 2>/dev/null)" node -e "try{process.stdout.write(JSON.parse(process.env.ARTIBOT_PKG_JSON||'{}').version||'')}catch{}" 2>/dev/null || true)
 
 # ── Theme palette (node emits shell-eval vars; defaults = neon-city) ──────────
 PR=0; PG=245; PB=255; AR=255; AG=0; AB=110; DR=70; DG=40; DB=90; XR=255; XG=23; XB=68
 GL_FILL='▰'; GL_EMPTY='▱'; GL_SEP='◢◤'; GL_WL='⟨'; GL_WR='⟩'; GL_BL='⟦'; GL_BR='⟧'; GL_ML='▓▒░'; GL_MR='░▒▓'; GL_SPARK='⚡'; LABEL=''
 if [ -f "$THEME_FILE" ] && command -v node >/dev/null 2>&1; then
-  eval "$(node -e "
-    try { const t=require('$THEME_FILE'); const s=t.signals||{}, g=t.glyphs||{};
+  eval "$(ARTIBOT_THEME_JSON="$(cat "$THEME_FILE" 2>/dev/null)" node -e "
+    try { const t=JSON.parse(process.env.ARTIBOT_THEME_JSON||'{}'); const s=t.signals||{}, g=t.glyphs||{};
       const a=(x,d)=>Array.isArray(x)?x:d;
       const [pr,pg,pb]=a(s.primary,[0,245,255]); const [ar,ag,ab]=a(s.accent,[255,0,110]);
       const [dr,dg,db]=a(s.dim,[70,40,90]); const [xr,xg,xb]=a(s.danger,[255,23,68]);

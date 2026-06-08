@@ -13,6 +13,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.22.2] — 2026-06-08
+
+**Theme**: `/theme` statusline 색상 전환 fix (크로스머신)
+
+### Fixed
+- **테마 전환 시 statusline 색이 안 바뀌던 문제** — `statusline-themed.sh`가 `require('$THEME_FILE')`로 팔레트를 읽었는데 `$HOME`이 msys 경로(`/c/Users/...`)라 Node `require`가 실패 → 항상 기본(neon-city) 색으로 fallback. matrix/vaporwave를 적용해도 statusline은 시안/마젠타였음. 파일을 bash `cat` + env 변수로 전달해 Node가 내용을 파싱하도록 수정(경로 의존 제거). `VER` 읽기도 동일 패턴으로 견고화.
+
+---
+
 ## [4.22.1] — 2026-06-08
 
 **Theme**: `/theme` 커맨드 검증 fix
