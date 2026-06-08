@@ -1,6 +1,7 @@
 ---
-name: theme
 description: (Artibot) 터미널 테마 전환 — 사이버펑크/매트릭스/베이퍼웨이브 (statusline + Windows Terminal 색상 + output-style)
+argument-hint: '[neon-city|matrix|vaporwave|list|reset]'
+allowed-tools: [Read, Bash]
 ---
 
 # /theme

@@ -13,6 +13,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.22.1] — 2026-06-08
+
+**Theme**: `/theme` 커맨드 검증 fix
+
+### Fixed
+- **`commands/theme.md` 필수 frontmatter 누락** — CI 커맨드 validator(`validate-commands.js`)가 요구하는 `argument-hint` 필드가 빠져 v4.22.0 Release 워크플로가 실패. `argument-hint` + `allowed-tools` 추가. (런타임 동작엔 영향 없었음 — CI 검증만.)
+
+---
+
 ## [4.22.0] — 2026-06-08
 
 **Theme**: `/theme` 터미널 테마 시스템 (사이버펑크/매트릭스/베이퍼웨이브)
