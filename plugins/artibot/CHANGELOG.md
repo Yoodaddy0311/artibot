@@ -13,6 +13,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.20.0] — 2026-06-08
+
+**Theme**: `/save` Git 동기화 체크 + 설치 UX 대수술 + 크로스머신 작업 통합
+
+신규 유저 설치 마찰을 근본 수정하고, `/save`에 커밋·푸시 유실 방지 장치를 추가하고, 다른 머신의 06-08 전수검수 작업(65 audit findings)을 통합한 릴리즈.
+
+### Added
+- **`/save` Git 동기화 대시보드** — 핸드오프 저장 시 미커밋/미푸시(ahead)/behind/GitHub 지연일/**다른 머신 미동기화 의심** 휴리스틱을 감지해 유실 위험을 표면화. push/commit은 자동 실행 없이 단계별 확인. (`lib/handoff/handoff-builder.js`: `deriveGitSyncStatus`/`renderSyncDashboard`)
+- **`install.ps1` (Windows flat-copy)** — install.sh와 동작 동등한 PowerShell 설치기. 커맨드를 `~/.claude/commands/`로 flat-copy(프리픽스 없는 `/save`). DryRun/NoColor/plugin.json 동적 버전 지원.
+- **write-guard advisory 토글** — `devProtocol.writeGuardMode`(block 기본 / advisory 선택)로 write-before-read 가드를 비개발 유저 친화 모드로 전환 가능.
+
+### Fixed
+- **설치 반복 권한 prompt 제거** — install.sh/install.ps1이 settings.json에 보수적 read-only 권한(Read/Glob/Grep) 멱등 시드. Bash/Write/Edit는 보안상 제외.
+- **`artibot:` 프리픽스 혼란** — README에서 install.sh를 1순위 권장 경로로 승격(flat=프리픽스 없음), marketplace는 강등 + 프리픽스 차이 명시.
+- **`/save` now 풋건** — `deriveGitSyncStatus`가 `now`를 함수로만 받아 `Date.now()`(숫자) 입력 시 크래시하던 것을 `asClock` 정규화로 수정(function|number|Date|undefined 허용).
+- **install.ps1 프리픽스 회귀 차단** — 병합으로 유입된 clone-load 설치기(`/artibot:save` 유발)를 flat-copy로 역전 복원 + CI 회귀 가드 추가.
+
+### Merged (from cross-machine 06-08 work)
+- fix(autopilot): 65 audit findings + 3 regressions to zero
+- fix(install): fresh-machine install unblock + UserPromptSubmit resilience (`safe_copy_dir`)
+- skills 대규모 정리(delegation/orchestration/quality-framework 등) + learning/swarm 테스트 추가
+
+---
+
 ## [4.19.6] — 2026-06-05
 
 **Theme**: cross-machine `/update` 신뢰성 (self-copy 가드 + pull 자동 stash)
