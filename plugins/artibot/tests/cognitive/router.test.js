@@ -82,6 +82,22 @@ describe('router', () => {
       expect(result.factors.novelty).toBe(0.3);
     });
 
+    it('novelty respects context.noveltyDefault override when no session depth (audit #9)', () => {
+      const lo = classifyComplexity('do something', { noveltyDefault: 0.1 });
+      expect(lo.factors.novelty).toBe(0.1);
+      const hi = classifyComplexity('do something', { noveltyDefault: 0.5 });
+      expect(hi.factors.novelty).toBe(0.5);
+    });
+
+    it('noveltyDefault is ignored once sessionDepth is provided', () => {
+      const result = classifyComplexity('create a react component', {
+        sessionDepth: 5,
+        recentDomains: ['frontend'],
+        noveltyDefault: 0.9,
+      });
+      expect(result.factors.novelty).toBeLessThan(0.5);
+    });
+
     it('novelty is lower for deep sessions with known domains', () => {
       const result = classifyComplexity('create a react component', {
         sessionDepth: 5,

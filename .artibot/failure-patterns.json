@@ -1,0 +1,124 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-05-19T00:00:00.000Z",
+  "categories": [
+    {
+      "id": "ci-exit-mask",
+      "label": "CI exit code 위장 (테스트 실패가 exit 0으로 삼켜짐)",
+      "domain": "ci",
+      "severity": "high",
+      "signals": [
+        { "type": "regex", "pattern": "test-status-reporter|reporter\\s+swallow|exit\\s+code\\s+0[\\s\\S]{0,80}FAIL|failures?>0\\s*\\?\\s*1\\s*:\\s*0", "scope": "stderr" },
+        { "type": "regex", "pattern": "vitest[\\s\\S]{0,40}reporter[\\s\\S]{0,40}(exit|process\\.exit)", "scope": "stdout" },
+        { "type": "file", "pattern": "tests/reporters/*-reporter.js" },
+        { "type": "file", "pattern": "**/test-status-reporter*.js" }
+      ],
+      "fixHints": [
+        "vitest custom reporter 가 onFinished/onTestRunEnd 에서 process.exit(failures>0?1:0) 를 명시적으로 호출하는지 확인",
+        "package.json 의 vitest run 스크립트에 --reporter 가 중복 지정되어 마지막 reporter 가 success 로 덮어쓰는지 점검",
+        "CI 워크플로우에서 npx vitest run || exit 1 형태로 명시적 short-circuit 추가",
+        "reporter teardown 에서 unhandled rejection 이 silently swallow 되지 않도록 process.on('exit') hook 추가"
+      ],
+      "examples": ["v4.13.0 PR #30 첫 CI — vitest reporter 가 fail 케이스를 exit 0 으로 반환"],
+      "weight": 1.0
+    },
+    {
+      "id": "tz-mismatch-mtime",
+      "label": "타임존 불일치 (Linux UTC CI vs Windows local KST — fs mtime / Date.now() 격차)",
+      "domain": "ci",
+      "severity": "high",
+      "signals": [
+        { "type": "regex", "pattern": "(mtime|ctime|atime)[\\s\\S]{0,80}(UTC|KST|GMT|TZ)|process\\.env\\.TZ|new\\s+Date\\(\\)[\\s\\S]{0,40}getHours", "scope": "stderr" },
+        { "type": "regex", "pattern": "expected\\s+\\d{4}-\\d{2}-\\d{2}[\\s\\S]{0,80}received\\s+\\d{4}-\\d{2}-\\d{2}|off\\s+by\\s+(9|24)\\s*hours?", "scope": "stdout" },
+        { "type": "regex", "pattern": "Asia/Seoul|Etc/UTC|TZ=UTC", "scope": "any" }
+      ],
+      "fixHints": [
+        "테스트 시작 부분에 process.env.TZ = 'UTC' 강제하거나 vitest.config.ts env.TZ 설정",
+        "fs.statSync().mtime 비교 대신 mtimeMs 정수 비교 + 허용 오차 (>= 1000ms) 적용",
+        "Date.now() 직접 비교 금지 — vi.useFakeTimers() + vi.setSystemTime() 로 결정론 확보",
+        "Korean local time(KST=UTC+9) 가정 코드를 Intl.DateTimeFormat({ timeZone: 'UTC' }) 로 변경"
+      ],
+      "examples": ["mtime drift 테스트가 로컬 Windows 통과 / GitHub Actions Ubuntu 실패"],
+      "weight": 1.0
+    },
+    {
+      "id": "libuv-handle-closing",
+      "label": "libuv UV_HANDLE_CLOSING (child_process / pipe handle teardown 미흡)",
+      "domain": "runtime",
+      "severity": "high",
+      "signals": [
+        { "type": "regex", "pattern": "UV_HANDLE_CLOSING|Assertion failed:[\\s\\S]{0,80}handle->flags|uv__finish_close|libuv", "scope": "stderr" },
+        { "type": "regex", "pattern": "child[_\\s-]?process[\\s\\S]{0,80}(unref|close|kill)|spawn[\\s\\S]{0,40}exit", "scope": "stderr" },
+        { "type": "regex", "pattern": "node:internal/child_process|stdio.*pipe.*destroy", "scope": "stderr" }
+      ],
+      "fixHints": [
+        "spawn() 반환 child 에 대해 ['close','exit','error'] 모두 await 후 process 종료",
+        "child.stdio[0..2].destroy() 명시 호출 — 자동 GC 에 의존하지 말 것",
+        "ref/unref 사용 시 unref 한 handle 을 다시 ref 하지 않도록 lifecycle 정리",
+        "테스트에서 child 를 spawn 한 경우 afterEach 에서 await child.exitedPromise + child.removeAllListeners() 보장"
+      ],
+      "examples": ["worker pool 테스트 종료 시 random crash, Node 24 에서 빈도 증가"],
+      "weight": 1.0
+    },
+    {
+      "id": "manifest-count-drift",
+      "label": "Manifest 카운트 동기화 누락 (README/CLAUDE.md/AGENTS.md/marketplace.json 6 위치 수동 sync)",
+      "domain": "release",
+      "severity": "medium",
+      "signals": [
+        { "type": "regex", "pattern": "(\\d+)\\s+(agents?|skills?|commands?)[\\s\\S]{0,200}(\\d+)\\s+\\2", "scope": "diff" },
+        { "type": "regex", "pattern": "manifest[\\s\\S]{0,40}(mismatch|drift|out\\s+of\\s+sync|stale\\s+count)", "scope": "stderr" },
+        { "type": "file", "pattern": ".claude-plugin/marketplace.json" },
+        { "type": "file", "pattern": "AGENTS.md" },
+        { "type": "file", "pattern": "plugins/artibot/README.md" }
+      ],
+      "fixHints": [
+        "scripts/sync-manifest-counts.js 같은 단일 source-of-truth 스크립트로 카운트 일괄 갱신",
+        "pre-commit hook 에서 manifest 카운트 검증 (count(agents/*.md) === README badge number)",
+        "CI 에 npm run validate:manifest 단계 추가하여 drift 시 fail-fast",
+        "버전 release 시 .claude-plugin/plugin.json + marketplace.json + README + CLAUDE.md + AGENTS.md + plugins/artibot/CLAUDE.md 6 위치 모두 grep -l '<old-count>' 로 사전 점검"
+      ],
+      "examples": ["v4.11.4 release — agents 카운트 27/28 불일치"],
+      "weight": 0.8
+    },
+    {
+      "id": "action-deprecation-node",
+      "label": "GitHub Actions deprecation (Node 20 → 24 마이그레이션 미수행)",
+      "domain": "ci",
+      "severity": "medium",
+      "signals": [
+        { "type": "regex", "pattern": "actions/\\w+@v\\d+[\\s\\S]{0,80}(deprecated|will\\s+stop\\s+working|set-output|::set-env)", "scope": "stderr" },
+        { "type": "regex", "pattern": "Node\\.?js\\s+(16|18|20)[\\s\\S]{0,80}(deprecated|end\\s+of\\s+life|EOL)", "scope": "stderr" },
+        { "type": "regex", "pattern": "save-state|set-output|GITHUB_STATE|GITHUB_OUTPUT", "scope": "stderr" },
+        { "type": "file", "pattern": ".github/workflows/*.yml" }
+      ],
+      "fixHints": [
+        "actions/checkout@v4, actions/setup-node@v4 등 최신 major 로 일괄 bump",
+        "node-version 입력값을 '24' 또는 'lts/*' 로 통일 (matrix 가 있다면 [20, 22, 24])",
+        "GITHUB_OUTPUT echo 형식 (echo \"key=value\" >> $GITHUB_OUTPUT) 로 set-output 대체",
+        "release.yml 에 npm_config_engine_strict 환경변수 + .nvmrc 동기화 확인"
+      ],
+      "examples": ["release.yml — actions/setup-node@v3 deprecation warning 누적"],
+      "weight": 0.7
+    },
+    {
+      "id": "coverage-threshold-variance",
+      "label": "커버리지 임계치 분산 (Linux v8 coverage가 Windows 대비 5-10% 낮음)",
+      "domain": "ci",
+      "severity": "low",
+      "signals": [
+        { "type": "regex", "pattern": "coverage threshold[\\s\\S]{0,80}(not\\s+met|below|failed)|c8|@vitest/coverage-v8", "scope": "stderr" },
+        { "type": "regex", "pattern": "(statements|branches|functions|lines)\\s*:?\\s*\\d{1,2}\\.\\d+\\s*%[\\s\\S]{0,80}(threshold|required)", "scope": "stdout" },
+        { "type": "regex", "pattern": "Windows[\\s\\S]{0,80}Linux|local[\\s\\S]{0,80}CI[\\s\\S]{0,80}coverage", "scope": "any" }
+      ],
+      "fixHints": [
+        "vitest.config 의 coverage.thresholdAutoUpdate=false 확인하고 OS 별 차이가 5% 미만이 되도록 .gitignored runtime 파일 exclude 추가",
+        "coverage.exclude 에 Windows-only 분기 (process.platform === 'win32') 가 들어간 파일 추가",
+        "임계치를 절대값 대신 'previous-1%' 형식으로 dynamic (CI 캐시 사용)",
+        "@vitest/coverage-v8 vs istanbul 차이 — coverage.provider 를 통일하고 매번 동일 provider 사용"
+      ],
+      "examples": ["로컬 Statements 92% / Ubuntu CI 87% — branches threshold fail"],
+      "weight": 0.6
+    }
+  ]
+}

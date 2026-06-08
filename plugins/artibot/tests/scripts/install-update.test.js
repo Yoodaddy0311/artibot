@@ -57,12 +57,18 @@ describe('install/install.sh covers new file directories', () => {
   for (const relPath of V1_15_NEW_FILES) {
     const topDir = relPath.split('/')[0]; // lib, scripts, output-styles, etc.
     it(`install.sh가 ${topDir}/ 디렉토리를 재귀 복사`, () => {
-      // install.sh uses: cp -r "${SCRIPT_DIR}/<dir>" "${ARTIBOT_DIR}/"
-      const pattern = new RegExp(`cp\\s+-r\\s+.*["']?\\$\\{?SCRIPT_DIR\\}?["']?/${topDir}["']?\\s`);
-      const hasRecursiveCopy = pattern.test(installShContent);
-      // Also accept patterns like cp -r "${SCRIPT_DIR}/output-styles" "${ARTIBOT_DIR}/"
-      const altPattern = new RegExp(`cp\\s+-r\\s+.*${topDir}.*ARTIBOT_DIR`);
-      expect(hasRecursiveCopy || altPattern.test(installShContent)).toBe(true);
+      // install.sh recursively copies via either:
+      //   - direct: cp -r "${SCRIPT_DIR}/<dir>" "${ARTIBOT_DIR}/"
+      //   - helper: safe_copy_dir "${SCRIPT_DIR}/<dir>" "${ARTIBOT_DIR}/<dir>"
+      // (helper wraps cp -r / rsync with --exclude=node_modules --exclude=.git)
+      const cpPattern = new RegExp(`cp\\s+-r\\s+.*["']?\\$\\{?SCRIPT_DIR\\}?["']?/${topDir}["']?\\s`);
+      const cpAltPattern = new RegExp(`cp\\s+-r\\s+.*${topDir}.*ARTIBOT_DIR`);
+      const safeCopyPattern = new RegExp(`safe_copy_dir\\s+["']?\\$\\{?SCRIPT_DIR\\}?["']?/${topDir}["']?`);
+      const hasRecursiveCopy =
+        cpPattern.test(installShContent) ||
+        cpAltPattern.test(installShContent) ||
+        safeCopyPattern.test(installShContent);
+      expect(hasRecursiveCopy).toBe(true);
     });
   }
 });
@@ -112,11 +118,15 @@ describe('install/SKILL.md field preservation', () => {
     expect(content).toMatch(/name:/);
   });
 
-  it('install.sh가 skills를 cp -r로 복사 (원본 그대로 보존)', () => {
+  it('install.sh가 skills를 재귀 복사 (원본 그대로 보존)', () => {
     const installPath = path.join(PLUGIN_ROOT, 'install.sh');
     const content = readFileSync(installPath, 'utf-8');
-    // install_skills() uses cp -r to copy the entire skills directory
-    expect(content).toMatch(/cp\s+-r\s+.*skills.*ARTIBOT_DIR/);
+    // install_skills() copies the entire skills directory recursively via
+    // either direct `cp -r` or the `safe_copy_dir` helper (which wraps
+    // cp -r / rsync with --exclude=node_modules --exclude=.git).
+    const cpPattern = /cp\s+-r\s+.*skills.*ARTIBOT_DIR/;
+    const safeCopyPattern = /safe_copy_dir\s+["']?\$\{?SCRIPT_DIR\}?["']?\/skills/;
+    expect(cpPattern.test(content) || safeCopyPattern.test(content)).toBe(true);
   });
 });
 
@@ -226,18 +236,24 @@ describe('update/branch fallback order', () => {
   });
 
   it('artibot/master를 첫 번째 fallback으로 시도', () => {
-    const artibotMasterIdx = updateContent.indexOf('origin/artibot/master');
-    const masterIdx = updateContent.indexOf('origin/master', artibotMasterIdx + 1);
-    expect(artibotMasterIdx).toBeGreaterThan(-1);
-    expect(masterIdx).toBeGreaterThan(artibotMasterIdx);
+    // v4.19.7+: fallback list lives in resolveDefaultBranchPull() as a single
+    // string array iterated in order. Earlier versions emitted three discrete
+    // try/catch blocks; this asserts the ordering at the data-structure level.
+    const fallbackArr = updateContent.match(/for \(const ref of \[([^\]]+)\]\)/);
+    expect(fallbackArr, 'resolveDefaultBranchPull fallback array missing').not.toBeNull();
+    const refs = fallbackArr[1].split(',').map((s) => s.trim().replace(/['"]/g, ''));
+    expect(refs[0]).toBe('artibot/master');
+    expect(refs[1]).toBe('master');
   });
 
   it('master를 두 번째 fallback으로 시도', () => {
-    // v4.5.3+: pull args are passed as an array to execFileSync (no shell
-    // interpolation). The fallback order remains origin/master before
-    // origin/main; we now match the array literal form.
-    const masterIdx = updateContent.indexOf("['pull', 'origin', 'master']");
-    const mainIdx = updateContent.indexOf("['pull', 'origin', 'main']");
+    // v4.19.7+: ordering is encoded as positions in the resolveDefaultBranchPull
+    // ref list (asserted above). master must appear before main.
+    const fallbackArr = updateContent.match(/for \(const ref of \[([^\]]+)\]\)/);
+    expect(fallbackArr).not.toBeNull();
+    const refs = fallbackArr[1].split(',').map((s) => s.trim().replace(/['"]/g, ''));
+    const masterIdx = refs.indexOf('master');
+    const mainIdx = refs.indexOf('main');
     expect(masterIdx).toBeGreaterThan(-1);
     expect(mainIdx).toBeGreaterThan(masterIdx);
   });

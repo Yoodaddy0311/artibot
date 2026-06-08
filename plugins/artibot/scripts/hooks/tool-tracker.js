@@ -10,8 +10,8 @@
 
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { parseJSON, readStdin, toFileUrl } from '../utils/index.js';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { atomicWriteSync, parseJSON, readStdin, toFileUrl } from '../utils/index.js';
 import { createErrorHandler, extractAgentId, extractAgentRole, getArtibotDataDir, logHookError } from '../../lib/core/hook-utils.js';
 import { createLoopDetector } from '../../lib/cognitive/loop-detector.js';
 
@@ -54,7 +54,7 @@ function loadLoopState() {
 function saveLoopState(detector) {
   try {
     mkdirSync(path.dirname(LOOP_STATE_FILE), { recursive: true });
-    writeFileSync(LOOP_STATE_FILE, JSON.stringify({
+    atomicWriteSync(LOOP_STATE_FILE, JSON.stringify({
       history: detector.getLoopHistory(),
       lastUpdated: Date.now(),
     }, null, 2));

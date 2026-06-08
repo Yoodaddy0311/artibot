@@ -2,8 +2,10 @@
  * Unit tests for lib/autopilot/prd-generator.js
  * Covers slugify and generatePRD (with real I/O via tmpdir).
  */
-import { afterEach, describe, expect, it } from 'vitest';
-import { existsSync, readFileSync, rmSync } from 'node:fs';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import {
   generatePRD,
   renderPRD,
@@ -51,12 +53,16 @@ describe('renderPRD', () => {
 });
 
 describe('generatePRD', () => {
-  const created = [];
+  let projectRoot = null;
+
+  beforeEach(() => {
+    projectRoot = mkdtempSync(path.join(tmpdir(), 'artibot-prd-gen-'));
+  });
 
   afterEach(() => {
-    while (created.length) {
-      const p = created.pop();
-      try { rmSync(p, { force: true }); } catch { /* ignore */ }
+    if (projectRoot) {
+      try { rmSync(projectRoot, { recursive: true, force: true }); } catch { /* ignore */ }
+      projectRoot = null;
     }
   });
 
@@ -65,9 +71,11 @@ describe('generatePRD', () => {
     const result = generatePRD({
       task: 'autopilot 단위 테스트 케이스',
       sessionId,
+      projectRoot,
     });
-    created.push(result.filePath);
     expect(existsSync(result.filePath)).toBe(true);
+    // Verify the file is rooted at the tmpdir (no real-project leak)
+    expect(result.filePath.startsWith(projectRoot)).toBe(true);
     const fileContent = readFileSync(result.filePath, 'utf-8');
     expect(fileContent).toContain('# PRD:');
     expect(fileContent).toContain(sessionId);
@@ -75,7 +83,7 @@ describe('generatePRD', () => {
   });
 
   it('throws when sessionId missing', () => {
-    expect(() => generatePRD({ task: 'x' })).toThrow();
+    expect(() => generatePRD({ task: 'x', projectRoot })).toThrow();
   });
 });
 

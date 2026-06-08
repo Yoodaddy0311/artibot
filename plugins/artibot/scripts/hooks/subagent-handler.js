@@ -68,6 +68,41 @@ function saveState(state) {
   atomicWriteSync(statePath, state);
 }
 
+/**
+ * Derive a deterministic teamId from session context. Stable for the
+ * duration of one Claude Code session so team-weight rounds aggregate
+ * under a single id.
+ */
+function deriveTeamId(hookData) {
+  const sessionId = hookData?.session_id || hookData?.sessionId || null;
+  return sessionId ? `team-${sessionId}` : `team-${Date.now()}`;
+}
+
+/**
+ * Pick a coarse domain bucket from hook payload. Falls back to the
+ * teammate role; finally to `general` so downstream GRPO bucketing has
+ * a non-undefined key.
+ */
+function deriveDomain(hookData, agentRole) {
+  return hookData?.domain || hookData?.agent_type || agentRole || 'general';
+}
+
+/**
+ * Idempotent team-context initializer. Only writes top-level fields
+ * (`teamId`, `domain`, `startedAt`) when missing or carrying stale
+ * non-numeric `startedAt` left over from a previous session-end snapshot.
+ * `startedAt` is stored as numeric ms — team-idle-handler computes
+ * `Date.now() - teamState.startedAt`.
+ */
+function initTeamContext(loaded, hookData, agentRole) {
+  const teamId = loaded.teamId ?? deriveTeamId(hookData);
+  const domain = loaded.domain ?? deriveDomain(hookData, agentRole);
+  const startedAt = typeof loaded.startedAt === 'number'
+    ? loaded.startedAt
+    : Date.now();
+  return { teamId, domain, startedAt };
+}
+
 async function main() {
   const action = process.argv[2]; // 'start' or 'stop'
   const raw = await readStdin();
@@ -87,8 +122,10 @@ async function main() {
     const { canonicalModel, modelMismatch } = await checkModelPolicy(agentType, requestedModel);
     withFileLock(statePath, () => {
       const loaded = loadState();
+      const teamCtx = initTeamContext(loaded, hookData, agentRole);
       const updatedState = {
         ...loaded,
+        ...teamCtx,
         agents: {
           ...(loaded.agents || {}),
           [agentId]: {

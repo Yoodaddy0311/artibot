@@ -5,8 +5,8 @@ name: security-standards
 description: |
   Security standards and checklist enforcing OWASP Top 10, secret management, and input validation.
   Auto-activates when: API endpoints, authentication, user input handling, data storage, deployment.
-  Triggers: security, auth, password, token, secret, API key, input, validate, sanitize, encrypt
-lang: [en]
+  Triggers: security, auth, password, token, secret, API key, input, validate, sanitize, encrypt, 보안, 인증, 비밀번호, 토큰, API 키, 입력 검증, 암호화
+lang: [en, ko]
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 3
 triggers:
@@ -20,6 +20,12 @@ triggers:
   - "validate"
   - "sanitize"
   - "encrypt"
+  - "보안"
+  - "인증"
+  - "비밀번호"
+  - "토큰"
+  - "입력 검증"
+  - "암호화"
 allowed-tools: [Read, Grep, Glob]
 agents:
   - "security-reviewer"

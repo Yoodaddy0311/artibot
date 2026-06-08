@@ -8,6 +8,7 @@
 
 import path from 'node:path';
 import { ARTIBOT_DIR } from '../core/config.js';
+import { ensureDir, readJsonFile, writeJsonFile } from '../core/file.js';
 
 // ---------------------------------------------------------------------------
 // Enums
@@ -364,6 +365,37 @@ class KnowledgeGraph {
       this._entries.get(edge.from).outEdges.push(record);
       this._entries.get(edge.to).inEdges.push(record);
     }
+  }
+
+  /**
+   * Persist the current graph to disk at `storagePath`.
+   * Writes the same shape `export()` produces so a later `import()` can
+   * round-trip the result. Best-effort: parent dir is created first.
+   *
+   * @returns {Promise<{ path: string, nodeCount: number, edgeCount: number }>}
+   */
+  async save() {
+    const snapshot = this.export();
+    await ensureDir(path.dirname(this._storagePath));
+    await writeJsonFile(this._storagePath, snapshot);
+    return Object.freeze({
+      path: this._storagePath,
+      nodeCount: snapshot.nodes.length,
+      edgeCount: snapshot.edges.length,
+    });
+  }
+
+  /**
+   * Hydrate the graph from `storagePath`. Returns false when no file
+   * exists yet (first run). Throws on schema mismatch via `import()`.
+   *
+   * @returns {Promise<boolean>}
+   */
+  async load() {
+    const data = await readJsonFile(this._storagePath);
+    if (!data || typeof data !== 'object' || !Array.isArray(data.nodes)) return false;
+    this.import(data);
+    return true;
   }
 
   /**

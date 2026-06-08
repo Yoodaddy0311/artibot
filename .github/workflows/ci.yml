@@ -25,7 +25,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node-version: [22, 24]
+        # Node 20 is the floor (package.json#/engines/node >=20). 22 is the
+        # primary LTS gate (uploads coverage + runtime evals). 24 is the
+        # forward smoke. Drift detection: keep this list lockstep with
+        # plugins/artibot/scripts/install.sh#MIN_NODE_MAJOR (=20).
+        node-version: [20, 22, 24]
 
     defaults:
       run:
@@ -40,7 +44,14 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
           cache: npm
-          cache-dependency-path: plugins/artibot/package-lock.json
+          # Cache key derives from the lockfile + extra hashed inputs so that
+          # changes to coverage/runtime config trigger a fresh cache. Without
+          # this, stale node_modules + a stale vitest binary produced false
+          # green runs after `tests/` or `_reports/` schema bumps.
+          cache-dependency-path: |
+            plugins/artibot/package-lock.json
+            plugins/artibot/runtime/**/*.json
+            plugins/artibot/_reports/**/*.json
 
       - name: Install dependencies
         run: npm ci --ignore-scripts || npm install

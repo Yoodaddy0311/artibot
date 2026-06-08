@@ -8,6 +8,8 @@ toolset: team
 
 # /spawn
 
+> **vs /orchestrate**: `/spawn` is **free-form meta-orchestration** — decomposes arbitrary tasks into parallel/sequential/pipeline execution modes. `/orchestrate` runs **predefined workflow patterns** (feature, bugfix, refactor, security).
+
 Meta-orchestration command for complex multi-domain operations. Creates an Agent Team, decomposes work into shared tasks, and spawns specialized teammates that coordinate through task dependencies and direct messaging. Supports parallel, sequential, and pipeline execution modes mapped to task dependency graphs.
 
 ## Arguments

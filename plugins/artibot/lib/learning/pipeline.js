@@ -139,10 +139,18 @@ async function runSelfEvaluation(sessionData) {
       type: 'session',
       description: `Session in ${sessionData.project ?? 'unknown'}`,
     };
+    // Success criterion (Stage B Area 1 fix): a session counts as "success"
+    // when it actually completed work AND completions outnumber errors.
+    // Pre-fix: `errors.length === 0` required zero transient errors (failed
+    // greps, ENOENT lookups, hook misfires...) which made real-world success
+    // a luxury — 1000 daily-experience records yielded only 3 success rows.
+    // The new gate rewards productive sessions even when noise creeps in.
+    const completedCount = sessionData.completedTasks?.length ?? 0;
+    const errorCount = sessionData.errors?.length ?? 0;
     const sessionResult = {
-      success: (sessionData.errors?.length ?? 0) === 0,
+      success: completedCount > 0 && errorCount <= completedCount,
       duration: sessionData.duration ?? undefined,
-      testsPass: sessionData.completedTasks?.length > 0 ? true : undefined,
+      testsPass: completedCount > 0 ? true : undefined,
       filesModified: sessionData.filesModified,
     };
     await evaluateResult(sessionTask, sessionResult);
@@ -162,6 +170,24 @@ async function runSelfEvaluation(sessionData) {
       sessionId: sessionData.sessionId,
       score: evalTrendScore(evalResult.overallTrend),
     });
+
+    // Synthesize a `success` experience when the session completed without
+    // errors. Reuses already-computed `sessionResult` so the data is real,
+    // not fabricated. Feeds `success-patterns.json` via lifelong-learner.
+    if (sessionResult.success) {
+      await collectExperience({
+        type: 'success',
+        category: sessionTask.type,
+        data: {
+          taskId: sessionTask.id,
+          duration: sessionResult.duration ?? null,
+          strategy: 'session',
+          filesModified: (sessionData.filesModified ?? []).length,
+          testsPass: sessionResult.testsPass ?? null,
+        },
+        sessionId: sessionData.sessionId,
+      });
+    }
 
     return evalResult;
   } catch (err) {

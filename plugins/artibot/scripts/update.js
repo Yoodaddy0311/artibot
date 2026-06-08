@@ -130,6 +130,11 @@ function findSourceRepo(installScriptDir) {
   }
 
   // 1.5. Auto-detect from common clone locations (handles cross-machine git pull)
+  // Includes Windows OneDrive-redirected Desktop paths (English + Korean
+  // localized "바탕 화면") because OneDrive silently relocates ~/Desktop to
+  // ~/OneDrive/Desktop on consumer setups — the primary maintainer's clone
+  // lives at "OneDrive/바탕 화면/AI/artibot" exactly because of this.
+  const oneDriveBase = path.join(home, 'OneDrive');
   const commonLocations = [
     path.join(home, 'Projects', 'Artibot'),
     path.join(home, 'projects', 'Artibot'),
@@ -139,6 +144,12 @@ function findSourceRepo(installScriptDir) {
     path.join(home, 'projects', 'artibot'),
     path.join(home, 'src', 'Artibot'),
     path.join(home, 'src', 'artibot'),
+    path.join(home, 'Desktop', 'AI', 'artibot'),
+    path.join(home, 'Desktop', 'artibot'),
+    path.join(oneDriveBase, 'Desktop', 'AI', 'artibot'),
+    path.join(oneDriveBase, 'Desktop', 'artibot'),
+    path.join(oneDriveBase, '바탕 화면', 'AI', 'artibot'),
+    path.join(oneDriveBase, '바탕 화면', 'artibot'),
   ];
   for (const loc of commonLocations) {
     const pluginDir = path.join(loc, 'plugins', 'artibot');
@@ -230,6 +241,49 @@ function popAutostash(gitRoot) {
  * @param {string} [installScriptDir] - Directory containing install.sh
  * @returns {{ pulled: boolean, pluginDir: string | null }}
  */
+/**
+ * Resolve a fallback pull target when neither @{u} nor origin/<HEAD-branch>
+ * resolves. Probes (in order): origin/artibot/master, origin/master,
+ * origin/main. Last fall-through uses origin/main even when unverified so the
+ * caller still gets a deterministic pullArgs array.
+ *
+ * @param {string} gitRoot
+ * @returns {string[]} ['pull', remote, branch]
+ */
+function resolveDefaultBranchPull(gitRoot) {
+  for (const ref of ['artibot/master', 'master', 'main']) {
+    try {
+      execFileSync('git', ['rev-parse', '--verify', `origin/${ref}`], {
+        cwd: gitRoot, stdio: 'ignore', timeout: 5000,
+      });
+      return ['pull', 'origin', ref];
+    } catch { /* try next */ }
+  }
+  return ['pull', 'origin', 'main'];
+}
+
+/**
+ * Probe whether `origin/<branch>` exists locally, returning the matching
+ * `git pull` args when it does and falling back to the default-branch
+ * resolver otherwise. Extracted from pullLatestSource() to keep the
+ * upstream-detection try/catch nest under max-depth=4 (eslint cap).
+ *
+ * @param {string} gitRoot
+ * @param {string} branch
+ * @returns {string[]} pull args
+ */
+function resolveBranchPullArgs(gitRoot, branch) {
+  try {
+    execFileSync('git', ['rev-parse', '--verify', `origin/${branch}`], {
+      cwd: gitRoot, stdio: 'ignore', timeout: 5000,
+    });
+    return ['pull', 'origin', branch];
+  } catch {
+    // origin/<current-branch> doesn't exist — try default branches.
+    return resolveDefaultBranchPull(gitRoot);
+  }
+}
+
 function pullLatestSource(installScriptDir) {
   const repo = findSourceRepo(installScriptDir);
 
@@ -247,35 +301,41 @@ function pullLatestSource(installScriptDir) {
     // metachars (semicolons, backticks). String interpolation would let a
     // malicious origin (or a tampered local repo) inject arbitrary shell.
     let pullArgs = ['pull'];
+    // Upstream-first resolution: read the actual configured upstream of HEAD
+    // via `git rev-parse --abbrev-ref @{u}`. This returns "remote/branch"
+    // (e.g. "origin/artibot/master") and is the authoritative source — only
+    // fall back to candidate branches when no upstream is configured.
+    //
+    // The previous fallback ordering (origin/artibot/master -> origin/master
+    // -> origin/main) ran unconditionally on rev-parse HEAD failure and could
+    // pull a non-tracked branch INTO the current HEAD, fabricating divergent
+    // history. The autopilot-drift-fix-2026-05-16 incident hit exactly this.
     try {
-      const branch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+      const upstream = execFileSync('git', ['rev-parse', '--abbrev-ref', '@{u}'], {
         cwd: repo.gitRoot, encoding: 'utf-8', timeout: 5000,
       }).trim();
-      let remote = 'origin';
-      try {
-        remote = execFileSync('git', ['config', '--get', `branch.${branch}.remote`], {
-          cwd: repo.gitRoot, encoding: 'utf-8', timeout: 5000,
-        }).trim() || 'origin';
-      } catch {
-        // No upstream configured — default to origin
+      const slashIdx = upstream.indexOf('/');
+      if (slashIdx > 0) {
+        const remote = upstream.slice(0, slashIdx);
+        const branch = upstream.slice(slashIdx + 1);
+        pullArgs = ['pull', remote, branch];
+      } else {
+        // Malformed upstream (no slash) — treat as no-upstream case
+        throw new Error('upstream lacks remote/ prefix');
       }
-      pullArgs = ['pull', remote, branch];
     } catch {
-      // Fallback: try origin artibot/master (default branch), then origin main
+      // No upstream configured. Resolve current branch and try matching
+      // remote refs first; only fall back to default branches if HEAD itself
+      // is detached or untracked.
       try {
-        execFileSync('git', ['rev-parse', '--verify', 'origin/artibot/master'], {
-          cwd: repo.gitRoot, stdio: 'ignore', timeout: 5000,
-        });
-        pullArgs = ['pull', 'origin', 'artibot/master'];
+        const branch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+          cwd: repo.gitRoot, encoding: 'utf-8', timeout: 5000,
+        }).trim();
+        pullArgs = (branch && branch !== 'HEAD')
+          ? resolveBranchPullArgs(repo.gitRoot, branch)
+          : resolveDefaultBranchPull(repo.gitRoot);
       } catch {
-        try {
-          execFileSync('git', ['rev-parse', '--verify', 'origin/master'], {
-            cwd: repo.gitRoot, stdio: 'ignore', timeout: 5000,
-          });
-          pullArgs = ['pull', 'origin', 'master'];
-        } catch {
-          pullArgs = ['pull', 'origin', 'main'];
-        }
+        pullArgs = resolveDefaultBranchPull(repo.gitRoot);
       }
     }
 
@@ -426,29 +486,48 @@ function detectHookDrift(pluginRoot, home) {
  * so we check the source repo path first, then the installed copy, then the env var.
  */
 function findInstallScript() {
+  // Candidates are labelled by ACTUAL origin (source repo vs installed copy
+  // vs plugin cache). When update.js runs from the per-version plugin cache
+  // (~/.claude/plugins/cache/artibot/artibot/<v>/scripts/), the "source repo"
+  // candidate previously labelled here is actually the cache itself —
+  // mislabelling pointed debuggers at the wrong directory during hook-drift
+  // postmortems.
   const candidates = [];
+  const home = resolveHome();
+  const claudeCacheRoot = path.join(home, '.claude', 'plugins', 'cache', 'artibot');
 
-  // 1. Source repo: this file lives in <repo>/plugins/artibot/scripts/update.js
-  //    install.sh is at <repo>/plugins/artibot/install.sh
+  // 1. <this-file>/../install.sh — could be source repo OR cache. Detect by
+  //    whether the resolved path sits under the Claude plugin cache root.
   const scriptDir = path.dirname(fileURLToPath(import.meta.url));
-  const repoRoot = path.resolve(scriptDir, '..');
-  candidates.push(path.join(repoRoot, 'install.sh'));
+  const localRoot = path.resolve(scriptDir, '..');
+  const localCandidate = path.join(localRoot, 'install.sh');
+  const localIsCache = localCandidate.startsWith(claudeCacheRoot);
+  candidates.push({
+    path: localCandidate,
+    label: localIsCache ? 'plugin cache' : 'source repo',
+  });
 
   // 2. Installed copy in ~/.claude/artibot/
-  const home = resolveHome();
-  candidates.push(path.join(home, '.claude', 'artibot', 'install.sh'));
+  candidates.push({
+    path: path.join(home, '.claude', 'artibot', 'install.sh'),
+    label: 'installed copy (~/.claude/artibot/)',
+  });
 
   // 3. CLAUDE_PLUGIN_ROOT (may be stale after cache clear, checked last)
   try {
     const envRoot = getPluginRoot();
-    candidates.push(path.join(envRoot, 'install.sh'));
+    candidates.push({
+      path: path.join(envRoot, 'install.sh'),
+      label: 'CLAUDE_PLUGIN_ROOT',
+    });
   } catch {
     // getPluginRoot may fail if env var points to deleted dir
   }
 
-  for (const candidate of candidates) {
-    if (existsSync(candidate)) {
-      return candidate;
+  for (const c of candidates) {
+    if (existsSync(c.path)) {
+      console.log(`  install.sh resolved via ${c.label}: ${c.path}`);
+      return c.path;
     }
   }
 

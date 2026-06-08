@@ -22,7 +22,7 @@ argument-hint: "[target] e.g., auth-service, utils, login-form"
 tokens: "~3K"
 category: "testing"
 version: "1.0.0"
-lastVerified: "2026-03-27"
+lastVerified: "2026-06-08"
 source_hash: b0104fec
 whenNotToUse: "Do not apply the full RED-GREEN-REFACTOR cycle to throwaway scripts, one-off data migrations, or exploratory code that will be deleted within 24 hours. Also skip when adding tests to already-running legacy code under time pressure — defer to a dedicated coverage sprint instead."
 ---

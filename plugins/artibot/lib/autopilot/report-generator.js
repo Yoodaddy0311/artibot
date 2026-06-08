@@ -364,8 +364,16 @@ export function buildReportData(state) {
  * Generate the report file(s) for a session.
  * Multi-style aware: when style='all' or style='dev' with deriveAll, renders all 4 styles.
  * Backwards compatible — returns `{ filePath, content }` for the dev style.
+ *
+ * Notes:
+ * - `deriveAll` defaults to **false** as of the autopilot cleanup pass —
+ *   pm/exec/casual profiles are opt-in (set `deriveAll: true` or `style: 'all'`).
+ *   Old callers expecting all four profiles must now pass `deriveAll: true`.
+ * - `projectRoot` defaults to the resolved project root. Tests should pass an
+ *   explicit `projectRoot` (e.g. tmpdir) to avoid touching the real project tree.
+ *
  * @param {string} sessionId
- * @param {{ style?: string, deriveAll?: boolean }} [opts]
+ * @param {{ style?: string, deriveAll?: boolean, projectRoot?: string }} [opts]
  * @returns {{ filePath: string|null, content: string|null, results?: object }}
  */
 export function generateReport(sessionId, opts = {}) {
@@ -377,13 +385,16 @@ export function generateReport(sessionId, opts = {}) {
     throw new Error(`session not found: ${sessionId}`);
   }
   const style = opts.style || 'dev';
-  const deriveAll = opts.deriveAll !== false;
+  const deriveAll = opts.deriveAll === true;
   const data = buildReportData(state);
   const styles = style === 'all' || (style === 'dev' && deriveAll)
     ? ['dev', 'pm', 'exec', 'casual']
     : [style];
 
-  const reportsDir = path.join(getProjectRoot(), 'reports', 'AUTOPILOT');
+  const baseRoot = typeof opts.projectRoot === 'string' && opts.projectRoot
+    ? opts.projectRoot
+    : getProjectRoot();
+  const reportsDir = path.join(baseRoot, 'reports', 'AUTOPILOT');
   try {
     mkdirSync(reportsDir, { recursive: true });
   } catch (err) {

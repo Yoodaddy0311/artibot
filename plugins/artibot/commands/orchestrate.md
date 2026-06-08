@@ -8,6 +8,8 @@ toolset: team
 
 # /orchestrate
 
+> **vs /spawn**: `/orchestrate` runs **predefined workflow patterns** (feature, bugfix, refactor, security) with structured phases. `/spawn` is **free-form meta-orchestration** for arbitrary task decomposition without a pattern template.
+
 Coordinate multi-agent workflows for complex operations that span multiple domains. Creates an Agent Team, spawns specialized teammates, and sequences them through a defined pipeline using shared tasks and direct messaging for handoffs between phases.
 
 ## Arguments

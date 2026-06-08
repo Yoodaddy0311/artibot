@@ -190,6 +190,7 @@ export function mergeResults(results, hookEventName) {
 
   for (const r of results || []) {
     if (!r || typeof r !== 'object') continue;
+    if (Array.isArray(r)) continue;
 
     const ctx = r?.hookSpecificOutput?.additionalContext;
     if (typeof ctx === 'string' && ctx.length > 0) additions.push(ctx);

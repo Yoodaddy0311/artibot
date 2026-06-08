@@ -8,8 +8,6 @@
 import { emit } from '../../core/event-bus.js';
 import { classifyComplexity } from '../../cognitive/router.js';
 import { detectIntent } from '../../intent/index.js';
-// eslint-disable-next-line no-unused-vars
-import { applyMode, detectMode, MODES } from '../../cognitive/context-modes.js';
 
 /**
  * @param {object} [options]

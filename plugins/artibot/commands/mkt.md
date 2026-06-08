@@ -7,6 +7,8 @@ toolset: marketing
 
 # /mkt
 
+> **vs /marketing**: `/mkt` produces **a complete marketing strategy plan** (market analysis, competitive intelligence, budget allocation). `/marketing` is a **lifecycle router** — routes to the best specialist agent based on context without producing a plan itself.
+
 End-to-end marketing strategy command. Analyzes market conditions, competitive landscape, and audience segments to produce actionable marketing plans with budget allocation and channel strategy.
 
 ## Arguments

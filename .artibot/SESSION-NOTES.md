@@ -1281,531 +1281,99 @@
 
 ---
 
-## 2026-05-21 06:57 UTC · `master`
+## 2026-06-07 15:07 UTC · `artibot/master`
 
-- **Commits** (15):
-  - `67717e4` fix(autopilot): expand session ID suffix 4→6 char to eliminate RNG collision (closes #33) (#36)
-  - `0162c7a` chore(release): v4.13.1 — sync artibot.config.json version (#35)
-  - `1f9dfb8` chore(release): v4.13.1 — sync 6-file version metadata + CITATION.cff catch-up (#32)
-  - `8c055f1` feat(autopilot): v4.13.1 closeOnStop opt-in gate — stop turn-end auto-commit storm (#31)
-  - `5fa13c0` chore: artibot session close [2026-05-19 04:37:51]
-  - `8453a61` wip: artibot auto-save [2026-05-19 04:08:49]
-  - `fc4363e` feat: /save single-shot session handoff command (v4.13.0) (#30)
-  - `764a024` release: v4.12.0 — autopilot keep-awake (cross-platform OS sleep prevention)
-  - `4248f47` release: v4.11.4 — comprehensive audit fixes (security + K_SERVICE BREAKING + manifest sync + arch cycle fix)
-  - `b596983` ci: drop [skip ci] from sync-readmes commit message (#27)
-  - `b166f3a` docs(release): sync README badges to v4.11.3 [skip ci] (#26)
-  - `6afab9e` release: v4.11.3 — release-infra hardening (CI/docs only) (#25)
-  - `070b73a` ci: drop paths filter from plugin-validate PR trigger (#24)
-  - `231b24a` docs(release): sync README badges to v4.11.2 + switch sync to PR flow (#23)
-  - `cde8095` fix(hooks): dev-verify-gate race-block hotfix (v4.11.2) (#22)
-- **Files touched**: 81
-
-<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
-
----
-
-## 2026-05-21 07:16 UTC · `master`
-
-- **Commits** (1):
-  - `1cb6a4b` docs(release): sync README badges to v4.13.1 (#34)
-- **Files touched**: 2
+- **Commits** (20):
+  - `69202cf` wip: artibot auto-save [2026-05-24 18:00:18]
+  - `4d82a2f` Merge origin/master v4.13.0 (theirs wins)
+  - `a979d2a` Merge artibot/master v4.13.0 update
+  - `33e1ba6` chore: artibot session close [2026-05-19 08:29:22]
+  - `4ff6c91` chore: artibot session close [2026-05-19 08:29:15]
+  - `91c815d` chore: artibot session close [2026-05-19 08:11:22]
+  - `0c5e8e4` chore: artibot session close [2026-05-19 08:03:33]
+  - `d20f31a` chore: artibot session close [2026-05-19 08:03:18]
+  - `939c991` chore: artibot session close [2026-05-19 08:03:11]
+  - `57e2912` chore: artibot session close [2026-05-19 08:03:06]
+  - `ff7da55` chore: artibot session close [2026-05-19 08:01:06]
+  - `9f2a88c` chore: artibot session close [2026-05-19 07:53:29]
+  - `807c8ab` chore: artibot session close [2026-05-19 07:52:00]
+  - `d5d838a` chore: artibot session close [2026-05-19 07:38:52]
+  - `e97edd4` feat(learning): Stage C — retroactive GRPO backfill + evolution-loop categorizer hook
+  - `531b587` chore: artibot session close [2026-05-19 06:42:26]
+  - `1ca8fd6` fix(learning): Stage B Area 1/2/3 — make GRPO success+team+swarm signals actually accumulate
+  - `a2ad5d3` chore: artibot session close [2026-05-19 05:23:13]
+  - `9c5e243` chore: artibot session close [2026-05-19 05:14:20]
+  - `3a0617a` chore: artibot session close [2026-05-19 05:09:43]
+- **Files touched**: 85
 
 <!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
 
 ---
 
-## 2026-05-26 01:36 UTC · `master`
-
-- **Commits** (2):
-  - `3c00f1f` chore(release): v4.14.0 — sync version metadata across 6 files
-  - `b1c07e2` feat(v4.14.0): 8-repo benchmark adoption + semantic autopilot commits (#37)
-- **Files touched**: 22
-
-<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
-
----
-
-## 2026-05-26 01:58 UTC · `master`
-
-- **Commits** (2):
-  - `241d188` feat(export): add Antigravity support + /export command (v0.6.0)
-  - `a2637ae` fix(install): unify repo URL from Artience to Yoodaddy0311 in install scripts
-- **Files touched**: 5
-
-<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
-
----
-
-## 2026-05-26 02:22 UTC · `master`
-
-- **Commits** (1):
-  - `4f7482b` feat(export): extend cross-platform export to skills + commands via --include
-- **Files touched**: 2
-
-<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
-
----
-
-## 2026-05-26 02:45 UTC · `master`
-
-- **Commits** (3):
-  - `6c0fc40` fix(lint): remove unused variable in memory-manager test
-  - `2be795b` fix(lint): remove unused imports in export-to-tool test
-  - `d93fa32` chore(release): v4.15.0 — cross-platform export, install URL fix, command count sync
-- **Files touched**: 11
-
-<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
-
----
-
-## 2026-05-28 01:25 UTC · `master`
-
-- **Commits** (1):
-  - `7a0cecb` feat(benchmark): adopt patterns from 3 repos — docs, security, skills, framework
-- **Files touched**: 32
-
-<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
-
----
-
-## 2026-05-28 01:31 UTC · `master`
-
-- **Commits** (1):
-  - `ec92ae6` feat: add progress renderer + advisor strategy integration
-- **Files touched**: 5
-
-<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
-
----
-
-## 2026-05-28 02:13 UTC · `master`
-
-- **Commits** (2):
-  - `9564b1b` chore(release): v4.16.0 — social-media production workflow, PAC2026 3-Zone full expansion
-  - `4de50ca` feat: social-media production workflow + PAC2026 3-Zone expansion
-- **Files touched**: 42
-
-<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
-
----
-
-## 2026-05-28 02:25 UTC · `master`
-
-- **Commits** (1):
-  - `38a12ac` chore(release): sync remaining version files to 4.16.0
-- **Files touched**: 2
-
-<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
-
----
-
-## 2026-05-29 08:54 UTC · `master`
-
-- **Commits** (1):
-  - `282e2d1` feat: add 'max' effort level for Opus 4.8 native effort (v4.17.0)
-- **Files touched**: 29
-
-<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
-
----
-
-## 2026-05-29 09:28 UTC · `master`
-
-- **Commits** (1):
-  - `1ebe9dc` docs: PRD + ADR for effort × dynamic-workflow fusion (P1/P2/P3)
-- **Files touched**: 3
-
-<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
-
----
-
-## 2026-05-29 09:40 UTC · `master`
-
-- **Commits** (1):
-  - `e9bf60b` feat(effort): Score-Aware Effort Resolution — P1 (task #1)
-- **Files touched**: 8
-
-<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
-
----
-
-## 2026-05-29 10:04 UTC · `master`
-
-- **Commits** (1):
-  - `7de4ac3` feat(effort): Unified Team Trigger (P2) + GRPO-Tuned Policy (P3)
-- **Files touched**: 16
-
-<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
-
----
-
-## 2026-05-29 11:58 UTC · `master`
-
-- **Commits** (1):
-  - `0fe0a2f` refactor(cognitive): extract EFFORT_POLICY to effort-policy.js (router.js <800)
-- **Files touched**: 4
-
-<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
-
----
-
-## 2026-05-29 12:01 UTC · `master`
-
-- **Commits** (1):
-  - `4c7435e` test(effort): harden P3 — clock injection + hysteresis×learnedShift branch (task #5)
-- **Files touched**: 4
-
-<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
-
----
-
-## 2026-05-29 12:26 UTC · `master`
-
-- **Commits** (1):
-  - `3475136` chore(release): v4.18.0 — effort × dynamic-workflow fusion
-- **Files touched**: 9
-
-<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
-
----
-
-## 2026-05-29 12:38 UTC · `master`
-
-- **Commits** (1):
-  - `9c7d0a0` fix(readme): sync root README to v4.18.0 + 112 skills; enforce README badges in release-check
-- **Files touched**: 2
-
-<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
-
----
-
-## 2026-05-29 14:30 UTC · `master`
-
-- **Commits** (1):
-  - `df45caf` docs: PRD for staged learning-policy activation rollout
-- **Files touched**: 2
-
-<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
-
----
-
-## 2026-05-29 14:34 UTC · `master`
-
-- **Commits** (1):
-  - `55013ff` feat(learning): S1 — wire effortPolicy nightly trainer (shadow mode)
-- **Files touched**: 3
-
-<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
-
----
-
-## 2026-05-29 15:39 UTC · `master`
-
-- **Commits** (1):
-  - `d3231cc` docs: wiring audit report (2026-05-30) — 79 confirmed gaps classified
-- **Files touched**: 2
-
-<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
-
----
-
-## 2026-05-29 16:41 UTC · `master`
-
-- **Commits** (1):
-  - `fe26ea7` feat(memory): Dreaming consolidation loop — non-destructive memory distillation (dormant)
-- **Files touched**: 16
-
-<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
-
----
-
-## 2026-05-30 04:35 UTC · `master`
-
-- **Commits** (2):
-  - `a6ae959` chore(release): v4.18.1 — progress % + parallel-spawn fixes
-  - `8e45756` fix(runtime,autopilot): repair progress % display + parallel team spawn (2 user-reported symptoms)
-- **Files touched**: 30
-
-<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
-
----
-
-## 2026-05-30 04:48 UTC · `master`
-
-- **Commits** (1):
-  - `693585b` feat(theme): Artibot brand themes (Artibot Dark / Light) for /theme picker
-- **Files touched**: 3
-
-<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
-
----
-
-## 2026-05-30 05:20 UTC · `master`
-
-- **Commits** (1):
-  - `8f2ff62` feat(model-policy): 모델 정책 중앙 강제 — 단일 리졸버 + 드리프트 게이트 + 런타임 강제
-- **Files touched**: 9
-
-<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
-
----
-
-## 2026-05-30 05:29 UTC · `master`
-
-- **Commits** (1):
-  - `535f476` chore(release): v4.19.0 — 모델 정책 중앙 강제 + 브랜드 테마
-- **Files touched**: 8
-
-<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
-
----
-
-## 2026-05-30 06:25 UTC · `master`
-
-- **Commits** (2):
-  - `193c7a1` chore(audit,grpo): 배선갭 트리아지 도구 + GRPO dormant 일관 명시
-  - `a8f44c0` fix(mcp): bridge silent-boot 복구 — tools/list 0→10
-- **Files touched**: 8
-
-<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
-
----
-
-## 2026-05-30 06:37 UTC · `master`
-
-- **Commits** (1):
-  - `78b8324` chore(audit,grpo): 배선갭 트리아지 도구 + GRPO dormant 일관 명시
-- **Files touched**: 2
-
-<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
-
----
-
-## 2026-05-30 08:55 UTC · `master`
-
-- **Commits** (1):
-  - `2c4903e` chore(release): v4.19.1 — MCP bridge 버그 수정 + 배선 트리아지/GRPO
-- **Files touched**: 8
-
-<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
-
----
-
-## 2026-05-30 09:26 UTC · `master`
-
-- **Commits** (1):
-  - `72bb5e2` fix(learning,swarm): risk 오탐 제거 + swarm errors 버킷 어댑터 복구
-- **Files touched**: 3
-
-<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
-
----
-
-## 2026-05-30 09:38 UTC · `master`
-
-- **Commits** (1):
-  - `149b892` test(learning): learning-diag risk 스코어링 회귀 테스트 (9건)
-- **Files touched**: 2
-
-<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
-
----
-
-## 2026-05-30 15:00 UTC · `master`
-
-- **Commits** (1):
-  - `af89006` fix(swarm): 세션 훅 git 백엔드 배선 — 9일 stale 근본원인 해소
-- **Files touched**: 5
-
-<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
-
----
-
-## 2026-05-30 15:06 UTC · `master`
-
-- **Commits** (1):
-  - `0af2591` chore(release): v4.19.2 — Swarm 9일 sync stale 해소
-- **Files touched**: 8
-
-<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
-
----
-
-## 2026-06-01 00:47 UTC · `master`
-
-- **Commits** (2):
-  - `6e279df` test(swarm): align swarm-sync http-backend case to real egress contract
-  - `ea8a3b9` fix(readme): command count 70 -> 71
-- **Files touched**: 2
-
-<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
-
----
-
-## 2026-06-01 01:00 UTC · `master`
-
-- **Commits** (3):
-  - `61dde1f` feat(scripts): add lifecycle-router CLI bridge (WIRE-12)
-  - `8003662` feat(runtime): wire cache-roi middleware + smart-pipeline producer (WIRE-04, WIRE-06)
-  - `3e2cbdc` feat(autopilot): wire cost-tracker helpers onto engine namespace (WIRE-08)
-- **Files touched**: 6
-
-<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
-
----
-
-## 2026-06-01 02:40 UTC · `master`
-
-- **Commits** (4):
-  - `1422e2a` chore(release): v4.19.3
-  - `9599f9c` docs(triage): WIRE backlog triage decision (22 items)
-  - `71ff05c` feat(ci): self-healing README count-prose sync + shared claim registry
-  - `693c48a` feat(commands): wire lifecycle-router CLI into 5 phase commands (WIRE-12)
-- **Files touched**: 20
-
-<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
-
----
-
-## 2026-06-01 04:52 UTC · `feat/orchestration-routing-option-a`
-
-- **Commits** (1):
-  - `bfdbc60` feat(cognitive): 4-way orchestration router + boundary clarification (Option A)
-- **Files touched**: 10
-
-<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
-
----
-
-## 2026-06-01 05:01 UTC · `master`
-
-- **Commits** (2):
-  - `b281bf1` chore(release): v4.19.4
-  - `ce4840d` feat(cognitive): 4-way orchestration router + boundary clarification (Option A)
-- **Files touched**: 8
-
-<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
-
----
-
-## 2026-06-05 01:50 UTC · `master`
-
-- **Commits** (1):
-  - `defba70` feat(runtime): WIRE-03 — surface per-teammate effort/budget on subagents contract
-- **Files touched**: 4
-
-<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
-
----
-
-## 2026-06-05 02:04 UTC · `master`
-
-- **Commits** (1):
-  - `0501b88` docs(wire): dormant backlog cleanup (11 items) + WIRE-21 swarm-sync fix
-- **Files touched**: 5
-
-<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
-
----
-
-## 2026-06-05 02:17 UTC · `master`
-
-- **Commits** (1):
-  - `9f3a187` feat(privacy): WIRE-16 — homoglyph defense in PII scrubber
-- **Files touched**: 5
-
-<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
-
----
-
-## 2026-06-05 03:51 UTC · `master`
-
-- **Commits** (1):
-  - `0fa2655` feat(hooks): wire workflow-status progress (Opt-A+B) + orchestration routing docs
-- **Files touched**: 8
-
-<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
-
----
-
-## 2026-06-05 03:58 UTC · `master`
-
-- **Commits** (1):
-  - `4d4bba0` docs(audit): dead-code / unwired-feature backlog (N1-N6 triage)
-- **Files touched**: 2
-
-<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
-
----
-
-## 2026-06-05 04:10 UTC · `master`
-
-- **Commits** (1):
-  - `e874c7e` docs(audit): reclassify N3 tool-guardrails -> dormant-by-documented-design
-- **Files touched**: 2
-
-<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
-
----
-
-## 2026-06-05 04:16 UTC · `master`
-
-- **Commits** (1):
-  - `f54d579` refactor(orchestration): remove rate-sentinel orphan (N4)
-- **Files touched**: 3
-
-<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
-
----
-
-## 2026-06-05 05:31 UTC · `master`
-
-- **Commits** (2):
-  - `ff71a48` docs(orchestration): align terminology with Claude Code 2.1.x (P1a)
-  - `ecb1bc2` feat(security+hooks): ai-security-standards skill, STRIDE body, Stop-hook 2.1.163 mode toggle, marketplace meta sync
-- **Files touched**: 16
-
-<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
-
----
-
-## 2026-06-05 05:39 UTC · `master`
-
-- **Commits** (1):
-  - `e688ffa` fix(hooks): non-destructive git-autopilot checkpoint (stash create+store)
-- **Files touched**: 3
-
-<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
-
----
-
-## 2026-06-05 05:58 UTC · `master`
-
-- **Commits** (1):
-  - `a52e421` chore(release): v4.19.5
-- **Files touched**: 8
-
-<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
-
----
-
-## 2026-06-05 06:00 UTC · `master`
-
-- **Commits** (1):
-  - `0b15dcd` docs(readme): sync residual skill count 112->113 (auto-activating prose)
-- **Files touched**: 2
-
-<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
-
----
-
-## 2026-06-05 06:59 UTC · `master`
-
-- **Commits** (2):
+## 2026-06-07 15:09 UTC · `artibot/master`
+
+- **Commits** (20):
+  - `be590c8` Merge branch 'master' of https://github.com/Yoodaddy0311/artibot into artibot/master
+  - `76c1b6e` fix(hooks): wire workflow-status to real team task list (~/.claude/tasks/<team>/)
   - `5542c21` chore(release): v4.19.6
   - `17bedcc` fix(update): self-copy guard + auto-stash before pull (cross-machine /update)
-- **Files touched**: 13
+  - `0b15dcd` docs(readme): sync residual skill count 112->113 (auto-activating prose)
+  - `a52e421` chore(release): v4.19.5
+  - `e688ffa` fix(hooks): non-destructive git-autopilot checkpoint (stash create+store)
+  - `ff71a48` docs(orchestration): align terminology with Claude Code 2.1.x (P1a)
+  - `ecb1bc2` feat(security+hooks): ai-security-standards skill, STRIDE body, Stop-hook 2.1.163 mode toggle, marketplace meta sync
+  - `dee6013` chore(session): sync session notes
+  - `f54d579` refactor(orchestration): remove rate-sentinel orphan (N4)
+  - `e874c7e` docs(audit): reclassify N3 tool-guardrails -> dormant-by-documented-design
+  - `4d4bba0` docs(audit): dead-code / unwired-feature backlog (N1-N6 triage)
+  - `0fa2655` feat(hooks): wire workflow-status progress (Opt-A+B) + orchestration routing docs
+  - `9f3a187` feat(privacy): WIRE-16 — homoglyph defense in PII scrubber
+  - `0501b88` docs(wire): dormant backlog cleanup (11 items) + WIRE-21 swarm-sync fix
+  - `defba70` feat(runtime): WIRE-03 — surface per-teammate effort/budget on subagents contract
+  - `6acbf7c` chore(session): sync session notes, handoffs, and Track-B verification for cross-machine work
+  - `b281bf1` chore(release): v4.19.4
+  - `ce4840d` feat(cognitive): 4-way orchestration router + boundary clarification (Option A)
+- **Files touched**: 253
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-06-07 16:08 UTC · `artibot/master`
+
+- **Commits** (1):
+  - `b9942d8` fix(install): unblock fresh-machine install + UserPromptSubmit resilience
+- **Files touched**: 9
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-06-07 16:20 UTC · `artibot/master`
+
+- **Commits** (1):
+  - `d52c12a` test(hooks): update schema fingerprint for UserPromptSubmit timeout bump
+- **Files touched**: 1
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-06-07 16:24 UTC · `artibot/master`
+
+- **Commits** (1):
+  - `49f3e75` fix(tests): accept safe_copy_dir in install.sh recursive-copy tripwire
+- **Files touched**: 1
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-06-07 18:12 UTC · `artibot/master`
+
+- **Commits** (1):
+  - `beba0ed` fix(autopilot): drive 65 audit findings + 3 regressions to zero
+- **Files touched**: 81
 
 <!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
 

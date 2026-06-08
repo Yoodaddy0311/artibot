@@ -42,12 +42,17 @@ function readJson(file) {
   return JSON.parse(readFileSync(file, 'utf-8'));
 }
 
-// 1. Version consistency — 5-file lockstep (AGENTS.md §8)
+// 1. Version consistency — lockstep set (AGENTS.md §8)
+// Includes the repo-root package.json + both marketplace.json files because
+// drift on those silently routes Claude Code's marketplace cache to the wrong
+// plugin version (incident: 4.13.1 vs 4.19.6 mismatch surfaced 2026-06-08).
+const REPO_ROOT = path.resolve(PLUGIN_ROOT, '..', '..');
 const sources = [
   ['package.json', path.join(PLUGIN_ROOT, 'package.json')],
   ['artibot.config.json', path.join(PLUGIN_ROOT, 'artibot.config.json')],
   ['.claude-plugin/plugin.json', path.join(PLUGIN_ROOT, '.claude-plugin', 'plugin.json')],
   ['.well-known/mcp-server.json', path.join(PLUGIN_ROOT, '.well-known', 'mcp-server.json')],
+  ['<repo>/package.json', path.join(REPO_ROOT, 'package.json')],
 ];
 
 const versions = sources.map(([label, file]) => {
@@ -90,6 +95,30 @@ for (const [label, file] of READMES) {
   if (!badge) {
     errors.push(`${label} missing version badge "badge/version-X.Y.Z-"`);
   }
+}
+
+// Marketplace JSON files participate in the lockstep but use nested key paths
+// (plugin entry version + release.current). Drift here routes Claude Code's
+// per-version plugin cache to stale code (2026-06-08 incident).
+const rootMarketplacePath = path.join(REPO_ROOT, '.claude-plugin', 'marketplace.json');
+if (existsSync(rootMarketplacePath)) {
+  const mkt = readJson(rootMarketplacePath);
+  const artibotEntry = Array.isArray(mkt.plugins) ? mkt.plugins.find((p) => p?.name === 'artibot') : null;
+  versions.push({ label: '<repo>/.claude-plugin/marketplace.json#/plugins[artibot].version', version: artibotEntry?.version ?? null });
+  if (!artibotEntry) {
+    errors.push('<repo>/.claude-plugin/marketplace.json missing artibot plugin entry');
+  }
+} else {
+  errors.push('Missing version file: <repo>/.claude-plugin/marketplace.json');
+}
+
+const publicMarketplacePath = path.join(PLUGIN_ROOT, 'marketplace.json');
+if (existsSync(publicMarketplacePath)) {
+  const pub = readJson(publicMarketplacePath);
+  versions.push({ label: 'marketplace.json#/version', version: pub.version ?? null });
+  versions.push({ label: 'marketplace.json#/release.current', version: pub.release?.current ?? null });
+} else {
+  errors.push('Missing version file: plugins/artibot/marketplace.json');
 }
 
 const distinct = new Set(versions.map((v) => v.version).filter(Boolean));

@@ -84,7 +84,7 @@
           {
             "type": "command",
             "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/webfetch-cache-pre.js",
-            "timeout": 3000
+            "timeout": 5000
           }
         ],
         "priority": "optional",
@@ -140,7 +140,7 @@
           {
             "type": "command",
             "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/_userprompt-dispatcher.js",
-            "timeout": 8000
+            "timeout": 15000
           }
         ],
         "priority": "operational",
@@ -232,7 +232,7 @@
           {
             "type": "command",
             "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/permission-auto-approve.js",
-            "timeout": 3000
+            "timeout": 5000
           }
         ],
         "priority": "operational",
@@ -286,7 +286,7 @@
           {
             "type": "command",
             "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/workflow-status.js notification",
-            "timeout": 3000
+            "timeout": 5000
           }
         ],
         "priority": "observability",
@@ -298,7 +298,7 @@
           {
             "type": "command",
             "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/context-tracker.js",
-            "timeout": 3000
+            "timeout": 5000
           }
         ],
         "priority": "observability",

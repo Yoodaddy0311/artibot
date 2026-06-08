@@ -30,7 +30,7 @@ tokens: "~3.5K"
 category: "development"
 version: "1.0.0"
 risk: safe
-lastVerified: "2026-03-31"
+lastVerified: "2026-06-08"
 source_hash: 59d3e5ea
 whenNotToUse: "Do not apply fp-ts patterns to simple CRUD handlers, scripts with no error branching, or codebases where the team has no FP experience and no budget for the learning curve. The abstraction cost exceeds the benefit in these contexts."
 ---

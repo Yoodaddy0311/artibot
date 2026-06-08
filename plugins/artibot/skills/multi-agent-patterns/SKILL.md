@@ -30,7 +30,7 @@ tokens: "~4K"
 category: "orchestration"
 version: "1.0.0"
 risk: safe
-lastVerified: "2026-03-31"
+lastVerified: "2026-06-08"
 source_hash: 15f3c060
 whenNotToUse: "Do not use multi-agent architecture for tasks that fit within a single agent's context window with no parallelism benefit. A single agent with good tools outperforms a poorly coordinated multi-agent system — only scale out when context isolation or parallel execution provides a measurable benefit."
 ---

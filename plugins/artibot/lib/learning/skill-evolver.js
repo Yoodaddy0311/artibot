@@ -21,7 +21,14 @@ export const CLASSIFICATION = Object.freeze({
   DEPRECATED: 'deprecated',
 });
 
-/** Default classification thresholds */
+/**
+ * Default classification thresholds. Override per-instance via
+ * `createSkillEvolver({ thresholds })`. Operations can also tune these
+ * without code edits by setting `learning.skillEvolver.thresholds` in
+ * `artibot.config.json` and forwarding the value at construction time
+ * (the caller is responsible for the config read; this module stays
+ * Layer-3 pure and has no Layer-1 config dependency).
+ */
 export const DEFAULT_THRESHOLDS = Object.freeze({
   provenSuccessRate: 0.9,
   provenMinUsage: 10,

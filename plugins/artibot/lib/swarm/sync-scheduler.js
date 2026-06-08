@@ -17,12 +17,34 @@ import { gitDownloadLatestWeights, gitUploadWeights } from './git-backend.js';
 import { mergeWeights, packagePatterns, unpackWeights } from './pattern-packager.js';
 
 /**
+ * Confirm-gate state for git backend. We never block — the gate is advisory —
+ * but we warn loudly once per process so users notice when weights are about
+ * to leave the local clone for an external GitHub repo without explicit
+ * `swarm.gitConsent: true`. Audit:
+ * `.artibot/REPORTS/audit-learning-cognitive-2026-06-08.md` finding #11.
+ */
+let _gitConsentWarned = false;
+
+function warnGitConsentIfMissing(config) {
+  if (_gitConsentWarned) return;
+  if (config?.gitConsent === true) return;
+  _gitConsentWarned = true;
+  const repo = config?.gitRepoUrl || '(unset)';
+  // eslint-disable-next-line no-console
+  console.warn(
+    `[swarm] DATA POLICY: backend='git' is pushing/pulling weights to ${repo}. `
+      + 'Set swarm.gitConsent=true in artibot.config.json to acknowledge this is your own repo.',
+  );
+}
+
+/**
  * Resolve the upload function based on config.backend.
  * @param {object} config
  * @returns {Function}
  */
 function resolveUpload(config) {
   if (config?.backend === 'git') {
+    warnGitConsentIfMissing(config);
     return (weights, metadata, options) =>
       gitUploadWeights(weights, metadata, { ...options, repoUrl: config.gitRepoUrl });
   }
@@ -36,10 +58,19 @@ function resolveUpload(config) {
  */
 function resolveDownload(config) {
   if (config?.backend === 'git') {
+    warnGitConsentIfMissing(config);
     return (currentVersion, options) =>
       gitDownloadLatestWeights(currentVersion, { ...options, repoUrl: config.gitRepoUrl });
   }
   return downloadLatestWeights;
+}
+
+/**
+ * Test-only: reset the warned-once latch.
+ * @returns {void}
+ */
+export function _resetGitConsentWarnedForTesting() {
+  _gitConsentWarned = false;
 }
 
 // ---------------------------------------------------------------------------

@@ -235,7 +235,11 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.counts.outputs.version }}
         run: |
-          if git diff --quiet README.md plugins/artibot/README.md plugins/artibot/marketplace.json; then
+          # Include root .claude-plugin/marketplace.json — it is the Claude
+          # Code marketplace routing file and drifted to 4.13.1 vs plugin.json
+          # 4.19.6 (incident 2026-06-08) because nothing wrote to it. The
+          # sync-marketplace-meta.mjs step above now updates both files.
+          if git diff --quiet README.md plugins/artibot/README.md plugins/artibot/marketplace.json .claude-plugin/marketplace.json; then
             echo "No README / marketplace changes to PR."
             exit 0
           fi
@@ -243,7 +247,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -b "${BRANCH}"
-          git add README.md plugins/artibot/README.md plugins/artibot/marketplace.json
+          git add README.md plugins/artibot/README.md plugins/artibot/marketplace.json .claude-plugin/marketplace.json
           # No [skip ci] — the badge PR needs required CI checks to run so
           # auto-merge can proceed. Adding [skip ci] would block both the push
           # AND pull_request triggers, leaving the PR permanently BLOCKED.
@@ -254,5 +258,14 @@ jobs:
             --head "${BRANCH}" \
             --title "docs(release): sync README badges + marketplace meta to ${GITHUB_REF_NAME}" \
             --body "Automated badge + marketplace metadata sync triggered by release ${GITHUB_REF_NAME}. Auto-merges once required CI checks pass."
-          gh pr merge --auto --squash --delete-branch "${BRANCH}" || \
-            echo "::warning::Auto-merge could not be enabled — falling back to manual merge."
+          # P1 escalation: if --auto fails (auto-merge disabled at repo level,
+          # required-check misconfig, etc.) the PR previously stayed open
+          # indefinitely. Now we open a tracking issue so the human can act.
+          if ! gh pr merge --auto --squash --delete-branch "${BRANCH}"; then
+            echo "::warning::Auto-merge could not be enabled for ${BRANCH} — opening tracking issue."
+            gh issue create \
+              --title "chore(release): badge-sync PR ${GITHUB_REF_NAME} needs manual merge" \
+              --body "Auto-merge was not enabled on \`${BRANCH}\` (release ${GITHUB_REF_NAME}). Please review and merge the PR manually so the README badges + marketplace.json reach master." \
+              --label "automation,release" \
+              || echo "::warning::Could not open tracking issue either — manual cleanup required."
+          fi

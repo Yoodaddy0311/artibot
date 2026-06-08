@@ -237,7 +237,21 @@ export function createArtibotAgent(options = {}) {
     'cache-roi': mwCacheRoi,
   });
 
-  // Default pipeline names (determines execution order).
+  // Default pipeline names (determines execution order). Order is intentional:
+  //   1. lifecycle  — telemetry / session housekeeping (no state mutation).
+  //   2. router     — classifies System 1/2 and intent. Writes state.context.routing
+  //                   and state.context.intent that downstream stages depend on.
+  //   3. memory     — loads relevant memory before skills/tasks build context.
+  //   4. skills     — uses routing.intent to select skill bundles.
+  //   5. tasks      — derives workflowPlan from routing + intent.recommendations
+  //                   (so it MUST come after router; see workflow-plan.js).
+  //   6. subagents  — chooses teammate fan-out from the workflowPlan.
+  //   7. guardrail  — clips/sanitizes the (possibly very long) composed prompt
+  //                   BEFORE summarization to bound token spend.
+  //   8. summarization — compacts the guarded prompt for the final assistant call.
+  //   9. token-usage — records the post-summarization token estimate.
+  //  10. checkpoint  — persists durable state once the prompt is finalized.
+  //  11. cache-roi   — emits cache-hit telemetry (read-only, last to run).
   const defaultPipeline = [
     'lifecycle',
     'router', 'memory', 'skills', 'tasks',

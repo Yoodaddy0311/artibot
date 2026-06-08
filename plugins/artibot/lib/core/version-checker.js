@@ -8,6 +8,7 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { assertEgressAllowed } from '../privacy/data-egress-guard.js';
 
 const CACHE_FILE = 'update-check.json';
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
@@ -118,6 +119,10 @@ export async function checkForUpdate(currentVersion, cacheDir) {
 
   // 2. Fetch the latest release from GitHub
   try {
+    // DATA POLICY: assertEgressAllowed enforces that only the allowlisted GitHub
+    // API host can be reached; any other host throws EgressBlockedError.
+    assertEgressAllowed(GITHUB_API_URL, { reason: 'version-check' });
+
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 

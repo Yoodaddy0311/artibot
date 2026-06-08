@@ -44,7 +44,10 @@ import { handleUserPromptSubmit as ambiguityGuard } from './ambiguity-guard.js';
 const HOOK_NAME = '_userprompt-dispatcher';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const GIT_AUTOPILOT_SAVE = path.join(HERE, 'git-autopilot-save.js');
-const GIT_AUTOPILOT_TIMEOUT_MS = 5000;
+// 8s: fresh repos can hit init/index lock on the semantic strategy's two
+// git invocations (stash + commit). Failure here is observable via stderr
+// only — the user's prompt still proceeds.
+const GIT_AUTOPILOT_TIMEOUT_MS = 8000;
 
 /**
  * Read the entire stdin payload and JSON-parse it. Returns {} on empty/invalid.
@@ -130,8 +133,13 @@ function runGitAutopilotSave(payload) {
     try {
       child.stdin.end(JSON.stringify(payload));
     } catch (err) {
-      process.stderr.write(`[artibot:${HOOK_NAME}] git-autopilot-save stdin write failed: ${err.message}\n`);
-      // Let the timer / exit handler complete the promise.
+      // If the child already exited, the exit handler will have resolved.
+      // Suppress noisy 'spawn already exited' style errors and short-circuit.
+      if (!/already (closed|exited|ended)|EPIPE/i.test(err.message)) {
+        process.stderr.write(`[artibot:${HOOK_NAME}] git-autopilot-save stdin write failed: ${err.message}\n`);
+      }
+      clearTimeout(timer);
+      finish();
     }
   });
 }
@@ -157,6 +165,7 @@ export function mergeHookResults(rewriterResult, parallelResults) {
 
   function ingest(value) {
     if (!value || typeof value !== 'object') return;
+    if (Array.isArray(value)) return;
     const ctx = value?.hookSpecificOutput?.additionalContext;
     if (typeof ctx === 'string' && ctx.length > 0) additions.push(ctx);
     for (const [key, val] of Object.entries(value)) {
@@ -190,8 +199,15 @@ async function main() {
 
   // Step 1: rewriter (sync ordering — its output mutates the payload that the
   // parallel contributors classify on, so they see the rewritten prompt).
+  // Contract: rewriter is all-or-nothing. If it throws, safeRun returns null
+  // and any partial additionalContext it would have emitted is lost on purpose
+  // — the parallel contributors still run unaffected. If rewriter ever needs
+  // to deliver partial results, change safeRun to capture intermediate state
+  // and merge here before the parallel fan-out.
   const rewriterResult = await safeRun(userPromptHandler, payload, 'user-prompt-handler');
-  if (rewriterResult?.user_prompt) {
+  // Use typeof string check so empty string "" (a legitimate rewriter output)
+  // is preserved instead of being treated as missing by a truthy check.
+  if (typeof rewriterResult?.user_prompt === 'string') {
     payload.user_prompt = rewriterResult.user_prompt;
   }
 
@@ -209,7 +225,7 @@ async function main() {
 
   const merged = mergeHookResults(rewriterResult, parallelResults);
   if (merged) {
-    process.stdout.write(JSON.stringify(merged));
+    try { process.stdout.write(JSON.stringify(merged)); } catch { /* ignore */ }
   }
 }
 

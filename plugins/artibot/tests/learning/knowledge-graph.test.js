@@ -346,6 +346,35 @@ describe('export / import', () => {
 });
 
 // ---------------------------------------------------------------------------
+// save / load (audit fix #8 — stub previously missing)
+// ---------------------------------------------------------------------------
+
+describe('save / load', () => {
+  const tmpdir = process.env.TMPDIR || process.env.TEMP || '/tmp';
+  const savePath = `${tmpdir}/kg-save-roundtrip-${Date.now()}.json`;
+
+  it('save() writes a snapshot that load() can round-trip', async () => {
+    const g1 = createKnowledgeGraph({ storagePath: savePath });
+    seedTriangle(g1);
+    const meta = await g1.save();
+    expect(meta.nodeCount).toBe(3);
+    expect(meta.edgeCount).toBe(3);
+    expect(meta.path).toBe(savePath);
+
+    const g2 = createKnowledgeGraph({ storagePath: savePath });
+    const loaded = await g2.load();
+    expect(loaded).toBe(true);
+    expect(g2.getStats().nodes).toBe(3);
+    expect(g2.getStats().edges).toBe(3);
+  });
+
+  it('load() returns false when no file exists yet', async () => {
+    const g = createKnowledgeGraph({ storagePath: `${tmpdir}/kg-missing-${Date.now()}.json` });
+    expect(await g.load()).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // getStats
 // ---------------------------------------------------------------------------
 

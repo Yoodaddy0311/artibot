@@ -135,6 +135,64 @@ describe('createEvolutionLoop', () => {
       expect(edges[1]).toMatchObject({ from: 'kw-frontend', to: 'kw-react' });
       expect(edges[2]).toMatchObject({ from: 'kw-component', to: 'kw-react' });
     });
+
+    it('invokes knowledgeGraph.prune() with configured maxAgeDays before save (audit #2)', async () => {
+      const calls = [];
+      const kg = {
+        addNode() {},
+        addEdge() {},
+        prune(days) { calls.push({ op: 'prune', days }); return 2; },
+        async save() { calls.push({ op: 'save' }); },
+      };
+      const loop = createEvolutionLoop({
+        sessionMemory: createMockSessionMemory(),
+        knowledgeGraph: kg,
+        skillEvolver: createMockSkillEvolver(),
+        autoResearch: createMockAutoResearch(false),
+        graphPruneMaxAgeDays: 30,
+      });
+
+      const result = await loop.run({ events: [{ type: 'edit' }] });
+
+      const pruneIdx = calls.findIndex((c) => c.op === 'prune');
+      const saveIdx = calls.findIndex((c) => c.op === 'save');
+      expect(pruneIdx).toBeGreaterThanOrEqual(0);
+      expect(saveIdx).toBeGreaterThan(pruneIdx);
+      expect(calls[pruneIdx].days).toBe(30);
+      expect(result.graphPruned).toBe(2);
+    });
+
+    it('defaults prune maxAgeDays to 90 when not supplied', async () => {
+      const calls = [];
+      const kg = {
+        addNode() {}, addEdge() {},
+        prune(days) { calls.push(days); return 0; },
+      };
+      const loop = createEvolutionLoop({
+        sessionMemory: createMockSessionMemory(),
+        knowledgeGraph: kg,
+        skillEvolver: createMockSkillEvolver(),
+        autoResearch: createMockAutoResearch(false),
+      });
+      await loop.run({ events: [{ type: 'edit' }] });
+      expect(calls[0]).toBe(90);
+    });
+
+    it('records prune error and continues when prune throws', async () => {
+      const kg = {
+        addNode() {}, addEdge() {},
+        prune() { throw new Error('graph corrupted'); },
+        async save() {},
+      };
+      const loop = createEvolutionLoop({
+        sessionMemory: createMockSessionMemory(),
+        knowledgeGraph: kg,
+        skillEvolver: createMockSkillEvolver(),
+        autoResearch: createMockAutoResearch(false),
+      });
+      const result = await loop.run({ events: [{ type: 'edit' }] });
+      expect(result.errors.some((e) => e.stage === 'prune')).toBe(true);
+    });
   });
 
   // -----------------------------------------------------------------------
@@ -243,6 +301,35 @@ describe('createEvolutionLoop', () => {
       const result = await loop.run({});
 
       expect(Object.isFrozen(result)).toBe(true);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  describe('run() — research stage PII scrubbing', () => {
+    it('scrubs the user-supplied query before passing it to scope()', async () => {
+      const scopeCalls = [];
+      const ar = {
+        shouldResearch() { return true; },
+        scope(q) { scopeCalls.push(q); return { keywords: [], sources: new Set(), query: q }; },
+        async gather() { return { web: [], codebase: [], memory: [], durationMs: 0 }; },
+        synthesize() { return null; },
+      };
+      const loop = createEvolutionLoop({
+        sessionMemory: createMockSessionMemory(),
+        knowledgeGraph: createMockKnowledgeGraph(),
+        skillEvolver: createMockSkillEvolver(),
+        autoResearch: ar,
+      });
+
+      // Use a path that PII scrubber must catch.
+      const homePath = process.platform === 'win32'
+        ? 'C:\\Users\\alice\\project\\foo.js error'
+        : '/home/alice/project/foo.js error';
+      await loop.run({ routingResult: { input: homePath, confidence: 0.1 } });
+
+      expect(scopeCalls).toHaveLength(1);
+      // Raw username must not survive into the searchFn-bound query.
+      expect(scopeCalls[0]).not.toContain('alice');
     });
   });
 

@@ -138,13 +138,46 @@ export function applyDesired(manifest, desired) {
   return { next, edits };
 }
 
+/**
+ * Apply desired version to the root .claude-plugin/marketplace.json (the
+ * Claude Code marketplace routing file). Returns edit list (pure).
+ */
+export function applyDesiredToRoot(rootManifest, desired) {
+  const next = structuredClone(rootManifest);
+  const edits = [];
+
+  if (Array.isArray(next.plugins)) {
+    for (let i = 0; i < next.plugins.length; i++) {
+      const entry = next.plugins[i];
+      if (entry?.name === 'artibot' && entry.version !== desired.version) {
+        edits.push({ field: `plugins[${i}].version`, from: entry.version, to: desired.version });
+        next.plugins[i] = { ...entry, version: desired.version };
+      }
+    }
+  }
+
+  return { next, edits };
+}
+
 function main() {
   const opts = parseArgs(process.argv.slice(2));
   const manifestPath = path.join(PLUGIN_ROOT, 'marketplace.json');
+  // Root .claude-plugin/marketplace.json is the Claude Code marketplace routing
+  // entry. It drifted to 4.13.1 while plugin.json was 4.19.6 (incident
+  // 2026-06-08) because nothing wrote to it. Include it here so the same
+  // version sync covers both files in one pass.
+  const REPO_ROOT = path.resolve(PLUGIN_ROOT, '..', '..');
+  const rootManifestPath = path.join(REPO_ROOT, '.claude-plugin', 'marketplace.json');
 
   const manifestRead = readJsonSafe(manifestPath);
   if (!manifestRead.ok) {
     console.error(`${RED}marketplace.json unreadable: ${manifestRead.error}${NC}`);
+    process.exit(2);
+  }
+
+  const rootManifestRead = readJsonSafe(rootManifestPath);
+  if (!rootManifestRead.ok) {
+    console.error(`${RED}root .claude-plugin/marketplace.json unreadable: ${rootManifestRead.error}${NC}`);
     process.exit(2);
   }
 
@@ -164,15 +197,20 @@ function main() {
   console.log('');
 
   const { next, edits } = applyDesired(manifestRead.data, desired);
+  const { next: rootNext, edits: rootEdits } = applyDesiredToRoot(rootManifestRead.data, desired);
 
-  if (edits.length === 0) {
+  if (edits.length === 0 && rootEdits.length === 0) {
     console.log(`${GREEN}marketplace.json metadata already in sync — no changes.${NC}`);
     process.exit(0);
   }
 
   for (const e of edits) {
     const verb = opts.check ? 'would rewrite' : 'rewrote';
-    console.log(`  ${YELLOW}${verb}${NC} ${e.field}: ${e.from} -> ${e.to}`);
+    console.log(`  ${YELLOW}${verb}${NC} marketplace.json ${e.field}: ${e.from} -> ${e.to}`);
+  }
+  for (const e of rootEdits) {
+    const verb = opts.check ? 'would rewrite' : 'rewrote';
+    console.log(`  ${YELLOW}${verb}${NC} <repo>/.claude-plugin/marketplace.json ${e.field}: ${e.from} -> ${e.to}`);
   }
   console.log('');
 
@@ -181,8 +219,13 @@ function main() {
     process.exit(1);
   }
 
-  // Preserve trailing newline (the file ends with one).
-  writeFileSync(manifestPath, `${JSON.stringify(next, null, 2)}\n`);
+  // Preserve trailing newline (the files end with one).
+  if (edits.length > 0) {
+    writeFileSync(manifestPath, `${JSON.stringify(next, null, 2)}\n`);
+  }
+  if (rootEdits.length > 0) {
+    writeFileSync(rootManifestPath, `${JSON.stringify(rootNext, null, 2)}\n`);
+  }
   console.log(`${GREEN}marketplace.json metadata synced to sources of truth.${NC}`);
   process.exit(0);
 }

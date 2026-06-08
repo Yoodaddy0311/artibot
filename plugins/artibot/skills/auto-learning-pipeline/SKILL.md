@@ -5,7 +5,11 @@ name: auto-learning-pipeline
 description: |
   Fully autonomous nightly learning pipeline — self-scan, pattern extraction, knowledge update,
   skill refinement, and auto-commit without human intervention.
-  Integrates with claude schedule, Git server webhooks, and existing lib/learning/ modules.
+  Integrates with claude schedule, Git server webhooks (inbound: external server → Artibot only),
+  and existing lib/learning/ modules.
+  DATA POLICY: auto-commit to local repo is allowed; auto-push to remote (Artibot → external git server)
+  requires explicit opt-in (autoPush: true). Default is autoPush: false.
+  Git server webhooks are receive-only (external server POSTs to Claude endpoint) — no outbound data egress.
   Triggers: auto learning, nightly pipeline, 자동 학습 파이프라인, autonomous learning, unattended learning
 lang: [en, ko]
 platforms: [claude-code]
@@ -124,7 +128,7 @@ Settings in `artibot.config.json` under `autoLearning`:
     "schedule": "0 3 * * *",
     "pipeline": ["self-scan", "pattern-extract", "knowledge-update", "skill-refinement"],
     "autoCommit": true,
-    "autoPush": true,
+    "autoPush": false,
     "maxChangesPerRun": 10,
     "dryRun": false
   }
@@ -136,8 +140,8 @@ Settings in `artibot.config.json` under `autoLearning`:
 | `enabled` | `false` | Master switch for the auto-learning pipeline |
 | `schedule` | `"0 3 * * *"` | Cron expression (default: 3 AM daily) |
 | `pipeline` | `[all 4 stages]` | Which stages to run (subset allowed) |
-| `autoCommit` | `true` | Auto-commit pipeline output |
-| `autoPush` | `true` | Auto-push after commit |
+| `autoCommit` | `true` | Auto-commit pipeline output (local repo only) |
+| `autoPush` | `false` | **DATA POLICY**: Artibot → 외부 git 서버 push. 기본 off — 명시적 opt-in(`true`) 필요 |
 | `maxChangesPerRun` | `10` | Max files changed per run (safety limit) |
 | `dryRun` | `false` | Log changes without writing to disk |
 
@@ -171,6 +175,10 @@ User says "자동 학습 파이프라인 실행" or "run auto-learning pipeline"
 
 Configure a webhook on the Git server to POST to Claude's endpoint after push events.
 The webhook payload triggers a pipeline run scoped to the changed files.
+
+> **DATA POLICY 방향성**: Git webhook은 외부 서버 → Artibot 수신 방향입니다 (inbound only).
+> Artibot이 외부로 데이터를 전송하지 않으므로 DATA POLICY 위반이 아닙니다.
+> 반대 방향(Artibot → 외부 서버 push)은 `autoPush: true` opt-in이 필요합니다.
 
 ## Integration with Existing Modules
 

@@ -8,6 +8,8 @@ lifecycle: marketing
 
 # /marketing
 
+> **vs /mkt**: `/marketing` is a **lifecycle router** — routes to the best specialist agent for the current context. `/mkt` produces a **full marketing strategy document** (market analysis, competitive intelligence, campaign architecture).
+
 Marketing strategy, content, ads, CRO, SEO, analytics.
 
 ## What this command does

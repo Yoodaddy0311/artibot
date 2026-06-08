@@ -55,6 +55,7 @@ C:Users*
 # Squad C (AD-23/24/37/38/40): hook-managed runtime data — never commit
 runtime/cache/
 runtime/state/
+runtime/autopilot/
 !runtime/cache/webfetch/.gitkeep
 !runtime/state/.gitkeep
 

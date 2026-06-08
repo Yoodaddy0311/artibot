@@ -11,6 +11,7 @@ import { createKnowledgeGraph, EDGE_RELATIONS, NODE_TYPES } from './knowledge-gr
 import { createSkillEvolver } from './skill-evolver.js';
 import { buildContribution } from '../swarm/collective-hub.js';
 import { loadFromDisk, saveToDisk } from '../swarm/swarm-persistence.js';
+import { scrub as scrubPii } from '../privacy/pii-scrubber.js';
 
 // Layer constraint: Layer-3 (learning) must not import Layer-4 (cognitive).
 // `autoResearch` is dependency-injected by the caller (e.g. session-end hook).
@@ -43,10 +44,91 @@ function extractNodes(memory) {
 async function runResearchStage(autoResearch, routingResult, compressed) {
   if (!autoResearch) return null;
   if (!autoResearch.shouldResearch(routingResult)) return { triggered: false, findings: null };
-  const query = routingResult?.input || compressed?.summary || '';
+  // Scrub PII (paths, emails, tokens, homes) before any query leaves Layer-3.
+  // router.input is verbatim user prompt — never feed it to searchFn/grepFn raw.
+  const rawQuery = routingResult?.input || compressed?.summary || '';
+  const query = rawQuery ? scrubPii(rawQuery) : '';
   const scopeResult = autoResearch.scope(query);
   const gathered = await autoResearch.gather(scopeResult);
   return { triggered: true, findings: autoResearch.synthesize(gathered) };
+}
+
+/**
+ * Pick the highest-confidence category from a categorizer's result list.
+ * Returns a frozen entry exposing only the public-contract fields
+ * (`categoryId`, `confidence`, `severity`) — `matchedSignals` and `weight`
+ * are categorizer-internal and must not leak into the pipeline result.
+ *
+ * @param {Array<object>} categories
+ * @returns {Readonly<{categoryId: string, confidence: number, severity: string}>|null}
+ */
+function pickTopCategory(categories) {
+  if (!Array.isArray(categories) || categories.length === 0) return null;
+  let top = categories[0];
+  for (let i = 1; i < categories.length; i++) {
+    if ((categories[i].confidence ?? 0) > (top.confidence ?? 0)) top = categories[i];
+  }
+  return Object.freeze({
+    categoryId: top.categoryId,
+    confidence: top.confidence,
+    severity: top.severity,
+  });
+}
+
+/**
+ * Run Stage 5 contribution. Returns `null` when nothing was shared (skipped
+ * stage, no qualifying patterns, or empty batch). Extracted from `run()` to
+ * keep that function's cyclomatic complexity below the project budget.
+ *
+ * @param {Array<object>} skillEvaluations
+ * @param {object} hubConfig
+ * @returns {Promise<{patternsShared: number, batchId: string}|null>}
+ */
+async function runContributionStage(skillEvaluations, hubConfig) {
+  if (!hubConfig.optIn || skillEvaluations.length === 0) return null;
+  const minUsage = hubConfig.minUsageCount || 5;
+  const localPatterns = skillEvaluations
+    .filter((ev) => ev.metrics.usageCount >= minUsage)
+    .map((ev) => ({
+      type: 'skill',
+      name: ev.name,
+      signature: ev.name,
+      successRate: ev.metrics.successRate,
+      usageCount: ev.metrics.usageCount,
+      metadata: { classification: ev.classification, trend: ev.metrics.trend },
+    }));
+  const batch = buildContribution(localPatterns, hubConfig);
+  if (!batch) return null;
+  const existing = await loadFromDisk().catch(() => ({ patterns: [] }));
+  const allPatterns = [...(existing.patterns || []), ...batch.patterns];
+  await saveToDisk({ patterns: allPatterns });
+  return { patternsShared: batch.patterns.length, batchId: batch.batchId };
+}
+
+/**
+ * Run Stage 6 categorization. Per-failure isolation: a single throw is
+ * captured into `errors` and the loop continues. Extracted from `run()` to
+ * keep that function's cyclomatic complexity below the project budget.
+ *
+ * @param {(failure: object) => Promise<Array<object>>} categorizer
+ * @param {Array<object>} failures
+ * @returns {Promise<{entries: Array<object>, distribution: object, errors: Array<{stage: string, message: string}>}>}
+ */
+async function runCategorizationStage(categorizer, failures) {
+  const entries = [];
+  const distribution = {};
+  const errors = [];
+  for (const failure of failures) {
+    try {
+      const top = pickTopCategory(await categorizer(failure));
+      if (!top) continue;
+      entries.push(top);
+      distribution[top.categoryId] = (distribution[top.categoryId] || 0) + 1;
+    } catch (err) {
+      errors.push({ stage: 'categorize', message: err.message });
+    }
+  }
+  return { entries, distribution, errors };
 }
 
 /**
@@ -75,6 +157,7 @@ function buildEdges(nodes) {
  * @param {object} [options.knowledgeGraph] - Prebuilt knowledge graph instance
  * @param {object} [options.skillEvolver] - Prebuilt skill evolver instance
  * @param {object} [options.autoResearch] - Prebuilt auto research instance
+ * @param {(failure: object) => Promise<Array<{categoryId: string, confidence: number, severity: string}>>} [options.categorizer] - Stage 6 failure categorizer (DI). When omitted, Stage 6 is skipped.
  * @param {() => number} [options.now] - Clock injection
  * @returns {object} Evolution loop API
  */
@@ -84,7 +167,11 @@ export function createEvolutionLoop(options = {}) {
   const knowledgeGraph = options.knowledgeGraph || createKnowledgeGraph();
   const skillEvolver = options.skillEvolver || createSkillEvolver({ now });
   const autoResearch = options.autoResearch || null;
+  const categorizer = typeof options.categorizer === 'function' ? options.categorizer : null;
   const hubConfig = options.hubConfig || { optIn: false, minSuccessRate: 0.6, minUsageCount: 5 };
+  const graphPruneMaxAgeDays = typeof options.graphPruneMaxAgeDays === 'number'
+    ? options.graphPruneMaxAgeDays
+    : 90;
 
   return Object.freeze({
     /**
@@ -103,10 +190,13 @@ export function createEvolutionLoop(options = {}) {
         compressed: null,
         graphNodes: 0,
         graphEdges: 0,
+        graphPruned: 0,
         skillEvaluations: [],
         researchTriggered: false,
         researchFindings: null,
         contribution: null,
+        categorizedFailures: Object.freeze([]),
+        categoryDistribution: Object.freeze({}),
         errors: [],
         durationMs: 0,
       };
@@ -140,6 +230,17 @@ export function createEvolutionLoop(options = {}) {
 
           result.graphNodes = nodes.length;
           result.graphEdges = edges.length;
+
+          // Bound graph growth before persistence. Pruning here (after ingest,
+          // before save) keeps the saved snapshot trimmed and matches the
+          // audit fix in `.artibot/REPORTS/audit-learning-cognitive-2026-06-08.md`.
+          if (typeof knowledgeGraph.prune === 'function') {
+            try {
+              result.graphPruned = knowledgeGraph.prune(graphPruneMaxAgeDays);
+            } catch (pruneErr) {
+              result.errors.push({ stage: 'prune', message: pruneErr.message });
+            }
+          }
 
           // Persist graph
           if (typeof knowledgeGraph.save === 'function') {
@@ -189,34 +290,26 @@ export function createEvolutionLoop(options = {}) {
         result.errors.push({ stage: 'research', message: err.message });
       }
 
-      // Stage 5: Contribute qualified patterns to collective hub
+      // Stage 5: Contribute qualified patterns to collective hub. Logic
+      // lives in `runContributionStage()` — keeps run() under the project's
+      // cyclomatic-complexity budget. BUG-1 fix preserved: saveToDisk() now
+      // accepts a `{patterns}` payload that gets merged before flush.
       try {
-        if (hubConfig.optIn && result.skillEvaluations.length > 0) {
-          const localPatterns = result.skillEvaluations
-            .filter((ev) => ev.metrics.usageCount >= (hubConfig.minUsageCount || 5))
-            .map((ev) => ({
-              type: 'skill',
-              name: ev.name,
-              signature: ev.name,
-              successRate: ev.metrics.successRate,
-              usageCount: ev.metrics.usageCount,
-              metadata: { classification: ev.classification, trend: ev.metrics.trend },
-            }));
-
-          const batch = buildContribution(localPatterns, hubConfig);
-          if (batch) {
-            // Load existing patterns, append new, save
-            const existing = await loadFromDisk().catch(() => ({ patterns: [] }));
-            const allPatterns = [...(existing.patterns || []), ...batch.patterns];
-            await saveToDisk({ patterns: allPatterns });
-            result.contribution = Object.freeze({
-              patternsShared: batch.patterns.length,
-              batchId: batch.batchId,
-            });
-          }
-        }
+        const shared = await runContributionStage(result.skillEvaluations, hubConfig);
+        if (shared) result.contribution = Object.freeze(shared);
       } catch (err) {
         result.errors.push({ stage: 'contribute', message: err.message });
+      }
+
+      // Stage 6: Categorize failures via injected categorizer (DI). Skipped
+      // entirely when no failures supplied or no categorizer injected.
+      // Logic lives in `runCategorizationStage()` — keeps run() under the
+      // project's cyclomatic-complexity budget.
+      if (context.failures?.length > 0 && categorizer) {
+        const stage6 = await runCategorizationStage(categorizer, context.failures);
+        result.categorizedFailures = Object.freeze(stage6.entries);
+        result.categoryDistribution = Object.freeze(stage6.distribution);
+        if (stage6.errors.length > 0) result.errors.push(...stage6.errors);
       }
 
       result.durationMs = now() - start;

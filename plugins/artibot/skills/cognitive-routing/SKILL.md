@@ -7,8 +7,8 @@ description: |
   Routes user requests through fast intuitive pattern matching (System 1) or deep deliberative reasoning (System 2)
   based on complexity scoring, confidence thresholds, and adaptive learning.
   Auto-activates on every user request via the cognitive-router hook.
-  Triggers: route, classify, cognitive, system1, system2, fast, deep, escalate, think, intuition
-lang: [en]
+  Triggers: route, classify, cognitive, system1, system2, fast, deep, escalate, think, intuition, 라우팅, 분류, 인지, 빠른 사고, 깊은 사고, 에스컬레이션
+lang: [en, ko]
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 2
 progressive_disclosure:
@@ -25,6 +25,11 @@ triggers:
   - "deep"
   - "escalate"
   - "think"
+  - "라우팅"
+  - "분류"
+  - "인지"
+  - "빠른 사고"
+  - "깊은 사고"
 agents:
   - "orchestrator"
 tokens: "~3K"

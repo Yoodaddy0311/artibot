@@ -209,6 +209,16 @@ export function evaluateGroup(candidates, rules) {
  * @param {number} [options.learningRate=0.1] - How fast weights adapt (0-1).
  * @param {boolean} [options.persist=true] - Whether to save updated weights to disk.
  * @returns {Promise<object>} Updated weights map `{ strategy: weight }`.
+ * Concurrency: this function reads, mutates, and writes `history` without
+ * holding a lock. Audit
+ * `.artibot/REPORTS/audit-learning-cognitive-2026-06-08.md` finding #6
+ * confirmed this is safe because the load/mutate/save chain runs in a single
+ * Node.js event-loop turn for any one caller: the only `await` between read
+ * and write is inside `saveHistory()`, by which point all in-memory mutation
+ * has completed. Parallel callers would still need an advisory lock; the
+ * pipeline does not currently invoke `updateWeights` concurrently (one round
+ * per session-end). Revisit if a multi-process workflow appears.
+ *
  * @example
  * const group = evaluateGroup(candidates);
  * const weights = await updateWeights(group, { learningRate: 0.05 });
