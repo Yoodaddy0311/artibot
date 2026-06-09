@@ -19,11 +19,20 @@ import {
   writeSync,
 } from 'node:fs';
 import { ensureDirSync } from '../core/file.js';
-import { getStoreDir } from './session-store.js';
+import { getSessionPath, getStoreDir, loadSession } from './session-store.js';
 
 const STALE_MS = 24 * 60 * 60 * 1000; // 24 hours
 const POLL_MS = 100;
 const DEFAULT_TIMEOUT_MS = 5000;
+
+/** Phases after which a holder can never legitimately keep its lock. */
+const TERMINAL_PHASES = new Set(['COMPLETED', 'ABORTED']);
+/**
+ * Grace period before a lock whose session file is absent is treated as
+ * leaked. Protects the acquire→saveSession race: a just-acquired lock whose
+ * session has not yet been persisted must not be stolen by a racing process.
+ */
+const SESSION_GRACE_MS = 60 * 1000;
 
 /**
  * Resolve the absolute lock file path for a feature key.
@@ -71,7 +80,45 @@ export function readLock(featureKey) {
 }
 
 /**
- * Determine whether a holder record is stale (dead PID or older than 24h).
+ * Determine whether the holder's owning session is inactive, independent of
+ * pid liveness. Two cases close the PID-reuse / lock-leak gaps:
+ *   1. The session reached a terminal phase (COMPLETED/ABORTED) → stale now.
+ *   2. The session file is gone AND the lock predates the grace window →
+ *      leaked lock (e.g. deleteSession ran, or a crash before persist) → stale.
+ *
+ * Returns false (not inactive) when the holder lacks a usable sessionId so the
+ * legacy age/pid checks remain the sole authority for such records.
+ *
+ * @param {object} holder
+ * @returns {boolean}
+ */
+function isHolderSessionInactive(holder) {
+  if (!holder || typeof holder.sessionId !== 'string' || !holder.sessionId) return false;
+  // Terminal sessions are stale regardless of age or pid liveness.
+  // loadSession returns null for a missing OR corrupt file; the existsSync
+  // re-check below distinguishes them, so a present-but-corrupt session file
+  // is treated as live (protected), never over-reclaimed.
+  const session = loadSession(holder.sessionId);
+  if (session && TERMINAL_PHASES.has(session.phase)) return true;
+  // Missing session file = leaked lock, but only after the grace window so the
+  // acquire→persist race cannot be mis-detected as a leak.
+  const ageMs = Date.now() - (holder.acquiredAt ?? 0);
+  if (ageMs > SESSION_GRACE_MS) {
+    try {
+      // existsSync false => file truly gone (not just unparseable) => leaked.
+      if (!existsSync(getSessionPath(holder.sessionId))) return true;
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
+/**
+ * Determine whether a holder record is stale: dead PID, older than 24h, or
+ * its owning session is inactive (terminal phase, or leaked lock past grace).
+ * The session check closes the PID-reuse hole (a recycled pid reads as alive)
+ * and the lock-leak hole (session file deleted but lock file lingered).
  * @param {object} holder
  * @returns {boolean}
  */
@@ -80,6 +127,7 @@ function isStale(holder) {
   const ageMs = Date.now() - (holder.acquiredAt ?? 0);
   if (ageMs > STALE_MS) return true;
   if (!isPidAlive(holder.pid)) return true;
+  if (isHolderSessionInactive(holder)) return true;
   return false;
 }
 
@@ -134,6 +182,8 @@ function attemptAcquire(featureKey, sessionId) {
   // EEXIST: inspect, possibly reclaim stale
   const existing = readLock(featureKey);
   if (existing && isStale(existing)) {
+    // ignore: a concurrent reclaimer may have unlinked first (ENOENT harmless);
+    // the O_EXCL tryWriteLock below is the real arbiter of who wins the lock.
     try { unlinkSync(lockPath); } catch { /* ignore */ }
     if (tryWriteLock(lockPath, state)) return { ok: true, lockPath };
   }

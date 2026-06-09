@@ -18,15 +18,38 @@ import {
   readLock,
   releaseLock,
 } from '../../lib/autopilot/lock.js';
+import {
+  deleteSession,
+  saveSession,
+} from '../../lib/autopilot/session-store.js';
 
 /**
  * Per-test cleanup tracker so concurrent suites don't trample each other.
  */
 const created = [];
+const createdSessions = [];
 
 function track(featureKey) {
   created.push(featureKey);
   return featureKey;
+}
+
+function trackSession(sessionId) {
+  createdSessions.push(sessionId);
+  return sessionId;
+}
+
+/**
+ * Forge a lock file on disk for `featureKey` owned by `holder` fields.
+ * Defaults to the current (alive) pid so the legacy dead-pid path is bypassed,
+ * isolating the session-liveness branch under test.
+ */
+function forgeLock(featureKey, { sessionId, acquiredAt = Date.now(), pid = process.pid } = {}) {
+  const lockPath = getLockPath(featureKey);
+  mkdirSync(path.dirname(lockPath), { recursive: true });
+  const holder = { pid, sessionId, acquiredAt, featureKey };
+  writeFileSync(lockPath, JSON.stringify(holder), 'utf-8');
+  return lockPath;
 }
 
 afterEach(() => {
@@ -34,6 +57,10 @@ afterEach(() => {
     const key = created.pop();
     const lockPath = getLockPath(key);
     try { if (existsSync(lockPath)) unlinkSync(lockPath); } catch { /* ignore */ }
+  }
+  while (createdSessions.length) {
+    const sid = createdSessions.pop();
+    try { deleteSession(sid); } catch { /* ignore */ }
   }
 });
 
@@ -114,6 +141,134 @@ describe('stale lock recovery', () => {
     expect(result.ok).toBe(true);
     expect(readLock(key).sessionId).toBe('live-session');
     expect(readLock(key).pid).toBe(process.pid);
+  });
+});
+
+describe('stale lock recovery — holder session liveness', () => {
+  // 1. Alive PID but the owning session file is gone, and the lock is older
+  //    than the grace window → leaked lock → stale → reclaimable.
+  it('reclaims a lock whose session file is missing and is past the grace window', () => {
+    const key = track(`unit-leak-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`);
+    const ghostSession = `ap-ghost-${Math.random().toString(36).slice(2, 8)}`;
+    // No saveSession() call → session file never exists.
+    forgeLock(key, {
+      sessionId: ghostSession,
+      pid: process.pid, // alive on purpose: exercises the leak path, not dead-pid path
+      acquiredAt: Date.now() - 120 * 1000, // 2 min ago → past 60s grace
+    });
+
+    const status = isLocked(key);
+    expect(status.stale).toBe(true);
+    expect(status.locked).toBe(false);
+
+    const result = acquireLock(key, 'live-session');
+    expect(result.ok).toBe(true);
+    expect(readLock(key).sessionId).toBe('live-session');
+  });
+
+  // 2. Session file missing but lock just acquired (< grace) → NOT yet stale.
+  //    Protects the acquire→persist race from premature theft.
+  it('does NOT reclaim a missing-session lock still inside the grace window', () => {
+    const key = track(`unit-grace-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`);
+    const ghostSession = `ap-fresh-${Math.random().toString(36).slice(2, 8)}`;
+    forgeLock(key, {
+      sessionId: ghostSession,
+      pid: process.pid,
+      acquiredAt: Date.now(), // just now → inside 60s grace
+    });
+
+    const status = isLocked(key);
+    expect(status.stale).toBe(false);
+    expect(status.locked).toBe(true);
+
+    const result = acquireLock(key, 'racing-session');
+    expect(result.ok).toBe(false);
+    expect(result.holder.sessionId).toBe(ghostSession);
+  });
+
+  // 3. Session exists but is in a terminal phase (COMPLETED) → stale regardless
+  //    of age or pid liveness → reclaimable.
+  it('reclaims a lock whose session is in a terminal phase (COMPLETED)', () => {
+    const key = track(`unit-terminal-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`);
+    const sessionId = trackSession(`ap-done-${Math.random().toString(36).slice(2, 8)}`);
+    saveSession({ sessionId, phase: 'COMPLETED' });
+    forgeLock(key, {
+      sessionId,
+      pid: process.pid,
+      acquiredAt: Date.now(), // fresh: proves terminal short-circuits grace+age
+    });
+
+    const status = isLocked(key);
+    expect(status.stale).toBe(true);
+
+    const result = acquireLock(key, 'next-session');
+    expect(result.ok).toBe(true);
+    expect(readLock(key).sessionId).toBe('next-session');
+  });
+
+  // 3b. Terminal phase ABORTED is reclaimable too (second TERMINAL_PHASES value).
+  it('reclaims a lock whose session is in a terminal phase (ABORTED)', () => {
+    const key = track(`unit-aborted-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`);
+    const sessionId = trackSession(`ap-abort-${Math.random().toString(36).slice(2, 8)}`);
+    saveSession({ sessionId, phase: 'ABORTED' });
+    forgeLock(key, {
+      sessionId,
+      pid: process.pid,
+      acquiredAt: Date.now(), // fresh: proves terminal short-circuits grace+age
+    });
+
+    expect(isLocked(key).stale).toBe(true);
+
+    const result = acquireLock(key, 'next-session');
+    expect(result.ok).toBe(true);
+    expect(readLock(key).sessionId).toBe('next-session');
+  });
+
+  // 4. Session exists, active phase (EXECUTE), alive pid → healthy → protected.
+  it('does NOT reclaim a lock whose session is active (EXECUTE) with an alive pid', () => {
+    const key = track(`unit-active-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`);
+    const sessionId = trackSession(`ap-active-${Math.random().toString(36).slice(2, 8)}`);
+    saveSession({ sessionId, phase: 'EXECUTE' });
+    forgeLock(key, {
+      sessionId,
+      pid: process.pid,
+      acquiredAt: Date.now() - 120 * 1000, // old enough to clear grace, still healthy
+    });
+
+    const status = isLocked(key);
+    expect(status.stale).toBe(false);
+    expect(status.locked).toBe(true);
+
+    const result = acquireLock(key, 'intruder-session');
+    expect(result.ok).toBe(false);
+    expect(result.holder.sessionId).toBe(sessionId);
+  });
+
+  // 5a. Regression: dead pid is still stale even with a fresh acquiredAt and an
+  //     active session file present (legacy guarantee preserved).
+  it('still treats a dead pid as stale even when the session is active', () => {
+    const key = track(`unit-deadpid-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`);
+    const sessionId = trackSession(`ap-deadpid-${Math.random().toString(36).slice(2, 8)}`);
+    saveSession({ sessionId, phase: 'EXECUTE' });
+    forgeLock(key, { sessionId, pid: 99999999, acquiredAt: Date.now() });
+
+    expect(isLocked(key).stale).toBe(true);
+    expect(acquireLock(key, 'reclaimer').ok).toBe(true);
+  });
+
+  // 5b. Regression: age > 24h is still stale (legacy guarantee preserved).
+  it('still treats a >24h-old lock as stale', () => {
+    const key = track(`unit-old-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`);
+    const sessionId = trackSession(`ap-old-${Math.random().toString(36).slice(2, 8)}`);
+    saveSession({ sessionId, phase: 'EXECUTE' }); // active session, alive pid
+    forgeLock(key, {
+      sessionId,
+      pid: process.pid,
+      acquiredAt: Date.now() - 25 * 60 * 60 * 1000, // 25h ago
+    });
+
+    expect(isLocked(key).stale).toBe(true);
+    expect(acquireLock(key, 'reclaimer-old').ok).toBe(true);
   });
 });
 
