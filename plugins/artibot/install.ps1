@@ -21,6 +21,18 @@
   exactly the UX regression this flat-copy installer exists to avoid. Keep it in
   lockstep with install.sh.
 
+  Feature-parity with install.sh (verified against install.sh function names):
+    - check_prerequisites  : claude CLI + Node >=20 detection (Test-Prerequisites)
+    - is_self_install      : skip copy phase when run from the installed copy
+    - install_agents/...    : flat-copy commands/agents (no namespace prefix)
+    - install.sh self-copy : copy install.sh -> ~/.claude/artibot/ (update.js fallback)
+    - install_marketplace_mirror : refresh ~/.claude/plugins/marketplaces/... hot paths
+    - install_plugin_cache : refresh per-version ~/.claude/plugins/cache/... hot paths
+    - install_mcp          : seed ~/.claude/.mcp.json (skip if present)
+    - save_source_path     : write ~/.claude/artibot/source-repo.json (update.js #1 strategy)
+    - seed_project_claude_md / seed_local_config / seed_auto_memory
+    - setup_swarm_consent / setup_auto_learning : non-interactive safe (skip/default)
+
   Idempotent: safe to re-run. Existing settings.json keys are preserved.
 
   Usage:  .\install.ps1                    # install
@@ -95,6 +107,14 @@ function Get-ArtibotVersion {
 # Prerequisites
 # ---------------------------------------------------------------------------
 function Test-Prerequisites {
+  # claude CLI check — parity with install.sh check_prerequisites (L31-34).
+  # install.sh hard-exits when `claude` is absent; match that to keep a single
+  # cross-platform contract (an install with no Claude Code CLI cannot run the
+  # plugin at all).
+  if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
+    Write-Err2 'Claude Code CLI not found. Install: https://docs.anthropic.com/en/docs/claude-code'
+    exit 1
+  }
   if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
     Write-Err2 "Node.js not found. Install from https://nodejs.org/ (v$MIN_NODE_MAJOR+)"
     exit 1
@@ -105,7 +125,27 @@ function Test-Prerequisites {
     Write-Err2 "Node.js $MIN_NODE_MAJOR+ required. Current: v$nodeVersion"
     exit 1
   }
-  Write-Log "Prerequisites OK (Node.js v$nodeVersion)"
+  Write-Log "Prerequisites OK (Claude Code + Node.js v$nodeVersion)"
+}
+
+# ---------------------------------------------------------------------------
+# Self-install guard — parity with install.sh is_self_install (L96-104)
+# ---------------------------------------------------------------------------
+# update.js falls back to the INSTALLED copy of install.sh (it runs
+# `bash ~/.claude/artibot/install.sh` when the source repo cannot be found).
+# Claude Code on Windows ships Git Bash, so update.js invokes install.sh — not
+# install.ps1 — and this guard primarily exists for the case where a user
+# manually re-runs install.ps1 from inside ~/.claude/artibot. When ScriptDir is
+# ArtibotDir itself, every Copy-Item becomes copy-onto-self; skip the copy phase
+# (files already in place — a no-op, not an error). Config/seed steps still run.
+function Test-SelfInstall {
+  try {
+    $src = (Resolve-Path -LiteralPath $ScriptDir -ErrorAction Stop).ProviderPath.TrimEnd('\', '/')
+    $dst = (Resolve-Path -LiteralPath $ArtibotDir -ErrorAction Stop).ProviderPath.TrimEnd('\', '/')
+  } catch {
+    return $false
+  }
+  return ($src -ieq $dst)
 }
 
 # ---------------------------------------------------------------------------
@@ -182,6 +222,22 @@ function Install-Assets {
     if (Test-Path $pkg) { Copy-Item -Path $pkg -Destination $ArtibotDir -Force }
   }
 
+  # Copy install.sh itself into ~/.claude/artibot/ — parity with install.sh L181.
+  # update.js (findInstallScript / findSourceRepo fallback #2) looks for
+  # ~/.claude/artibot/install.sh after the plugin cache is cleared. On Windows,
+  # update.js drives the actual update via Git Bash + install.sh, so this copy is
+  # what makes cross-machine `/update` work even when install.ps1 was the entry.
+  if ($DryRun) {
+    Write-Log "[dry-run] would copy install.sh -> $ArtibotDir"
+  } else {
+    $srcInstallSh = Join-Path $ScriptDir 'install.sh'
+    if (Test-Path $srcInstallSh) {
+      Copy-Item -Path $srcInstallSh -Destination $ArtibotDir -Force
+    } else {
+      Write-Warn2 'install.sh not found beside install.ps1 - update.js fallback may fail to find it'
+    }
+  }
+
   Write-Log "Hooks & scripts installed -> $ArtibotDir"
 
   # Rules: into ~/.claude/rules/artibot (auto-activate on file access)
@@ -255,6 +311,386 @@ fs.renameSync(tmp, path);
 }
 
 # ---------------------------------------------------------------------------
+# Clean-before-copy of a single dir from a source root into a dest root.
+# Excludes node_modules/.git for parity with install.sh safe_copy_dir. Used by
+# the marketplace + plugin-cache mirrors.
+# ---------------------------------------------------------------------------
+function Copy-DirClean {
+  param([string]$SrcDir, [string]$DstDir)
+  if (-not (Test-Path $SrcDir)) { return }
+  if ($DryRun) { Write-Log "[dry-run] would mirror $SrcDir -> $DstDir"; return }
+  if (Test-Path $DstDir) { Remove-Item -Path $DstDir -Recurse -Force }
+  New-Item -ItemType Directory -Path $DstDir -Force | Out-Null
+  # Copy children of SrcDir into DstDir, skipping node_modules/.git at the top.
+  Get-ChildItem -Path $SrcDir -Force | Where-Object {
+    $_.Name -ne 'node_modules' -and $_.Name -ne '.git'
+  } | ForEach-Object {
+    Copy-Item -Path $_.FullName -Destination $DstDir -Recurse -Force
+  }
+}
+
+# ---------------------------------------------------------------------------
+# Marketplace mirror — parity with install.sh install_marketplace_mirror (L202)
+# ---------------------------------------------------------------------------
+# Claude Code reads hooks from ~/.claude/plugins/marketplaces/artibot/... via
+# CLAUDE_PLUGIN_ROOT, not from ~/.claude/artibot/. Skipping this leaves the
+# marketplace at whatever version Claude Code last fetched (often stale),
+# causing silent hook regressions in other projects after a manual update.
+function Update-MarketplaceMirror {
+  $mktRoot = Join-Path $ClaudeDir 'plugins\marketplaces\artibot\plugins\artibot'
+  if (-not (Test-Path $mktRoot)) {
+    Write-Log 'Marketplace install not present (skip mirror)'
+    return
+  }
+
+  # Hot runtime paths come from the direct install we just wrote.
+  foreach ($dir in @('scripts', 'hooks', 'lib', 'skills', 'output-styles', '.claude-plugin')) {
+    $src = Join-Path $ArtibotDir $dir
+    if (Test-Path $src) { Copy-DirClean -SrcDir $src -DstDir (Join-Path $mktRoot $dir) }
+  }
+
+  # Commands + agents live only in the source repo (the direct install omits
+  # them — Claude Code reads them straight from the marketplace path). Pull from
+  # the source repo, not ArtibotDir.
+  foreach ($dir in @('commands', 'agents')) {
+    $src = Join-Path $ScriptDir $dir
+    if (Test-Path $src) { Copy-DirClean -SrcDir $src -DstDir (Join-Path $mktRoot $dir) }
+  }
+
+  if (-not $DryRun) {
+    Copy-Item -Path (Join-Path $ScriptDir 'artibot.config.json') -Destination $mktRoot -Force
+    $pkg = Join-Path $ScriptDir 'package.json'
+    if (Test-Path $pkg) { Copy-Item -Path $pkg -Destination $mktRoot -Force }
+  }
+  Write-Log "Marketplace mirror updated -> $mktRoot"
+}
+
+# ---------------------------------------------------------------------------
+# Plugin cache mirror — parity with install.sh install_plugin_cache (L254)
+# ---------------------------------------------------------------------------
+# Claude Code loads hooks.json from the per-version cache dir at session start.
+# Mirroring the hot paths into every cache version dir keeps post-restart
+# sessions consistent. We deliberately do NOT touch .claude-plugin/plugin.json
+# inside the cache (its version field is the cache routing key) and do NOT delete
+# the cache dir (clearCache() in update.js owns invalidation).
+function Update-PluginCache {
+  $cacheRoot = Join-Path $ClaudeDir 'plugins\cache\artibot\artibot'
+  if (-not (Test-Path $cacheRoot)) {
+    Write-Log 'Plugin cache not present (skip cache sync)'
+    return
+  }
+
+  $synced = 0
+  Get-ChildItem -Path $cacheRoot -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+    $vRoot = $_.FullName
+    foreach ($dir in @('scripts', 'hooks', 'lib', 'output-styles')) {
+      $src = Join-Path $ArtibotDir $dir
+      if (Test-Path $src) { Copy-DirClean -SrcDir $src -DstDir (Join-Path $vRoot $dir) }
+    }
+    if (-not $DryRun) {
+      $cfg = Join-Path $ScriptDir 'artibot.config.json'
+      if (Test-Path $cfg) { Copy-Item -Path $cfg -Destination $vRoot -Force }
+      $pkg = Join-Path $ScriptDir 'package.json'
+      if (Test-Path $pkg) { Copy-Item -Path $pkg -Destination $vRoot -Force }
+    }
+    $synced++
+  }
+
+  if ($synced -gt 0) {
+    Write-Log "Plugin cache synced: $synced version dir(s) -> $cacheRoot"
+  } else {
+    Write-Log 'Plugin cache directory present but contained no version dirs (skip)'
+  }
+}
+
+# ---------------------------------------------------------------------------
+# MCP config — parity with install.sh install_mcp (L484)
+# ---------------------------------------------------------------------------
+function Install-Mcp {
+  $mcpFile = Join-Path $ClaudeDir '.mcp.json'
+  $srcMcp  = Join-Path $ScriptDir '.mcp.json'
+
+  if (Test-Path $mcpFile) {
+    Write-Warn2 'MCP config exists at ~/.claude/.mcp.json - merge manually recommended'
+    Write-Warn2 "Artibot MCP config: $srcMcp"
+    return
+  }
+  if (Test-Path $srcMcp) {
+    if ($DryRun) { Write-Log "[dry-run] would copy .mcp.json -> $mcpFile"; return }
+    Copy-Item -Path $srcMcp -Destination $mcpFile -Force
+    Write-Log 'MCP servers configured (Context7, Playwright)'
+  }
+}
+
+# ---------------------------------------------------------------------------
+# source-repo.json — parity with install.sh save_source_path (L891)
+# ---------------------------------------------------------------------------
+# This is update.js findSourceRepo()'s #1 (most reliable) strategy. Written to
+# ~/.claude/artibot/source-repo.json with { repoRoot, pluginDir, savedAt } —
+# the exact shape update.js reads (repoRoot + .git existence check, pluginDir).
+function Save-SourcePath {
+  $gitRoot = $null
+  try {
+    Push-Location $ScriptDir
+    $gitRoot = (git rev-parse --show-toplevel 2>$null)
+  } catch {
+    $gitRoot = $null
+  } finally {
+    Pop-Location
+  }
+
+  if ([string]::IsNullOrWhiteSpace($gitRoot)) {
+    Write-Warn2 'Not a git repo - source path not saved (manual git pull needed for updates)'
+    return
+  }
+  # git returns forward slashes; normalize to a native path so update.js's
+  # existsSync(path.join(repoRoot, '.git')) resolves on Windows.
+  $gitRoot = $gitRoot.Trim() -replace '/', '\'
+
+  $sourceJson = Join-Path $ArtibotDir 'source-repo.json'
+  if ($DryRun) { Write-Log "[dry-run] would save source-repo.json -> $sourceJson"; return }
+
+  $payload = [ordered]@{
+    repoRoot  = $gitRoot
+    pluginDir = $ScriptDir
+    savedAt   = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+  }
+  ($payload | ConvertTo-Json) + "`n" | Set-Content -Path $sourceJson -Encoding utf8 -NoNewline
+  Write-Log "Source repo path saved for auto-updates: $gitRoot"
+}
+
+# ---------------------------------------------------------------------------
+# Seed project CLAUDE.md — parity with install.sh seed_project_claude_md (L311)
+# ---------------------------------------------------------------------------
+$script:ArtibotSection = @'
+
+## Artibot Integration
+
+### DEV Protocol (Mandatory for all code changes)
+1. **DECOMPOSE**: Break request into numbered atomic items before any action
+2. **EXECUTE**: Read target file -> Make change -> Re-read to confirm
+3. **VERIFY**: Report with evidence per item (file:line + what changed)
+
+### Zero-Skip Policy
+- Never silently skip any part of a multi-part request
+- Never claim completion without re-reading the modified file
+- If blocked, explain WHY and propose alternatives
+
+### Agent Delegation
+- Complex features: use planner agent first
+- After writing code: use code-reviewer agent
+- Bug fixes / new features: use tdd-guide agent
+- Architecture decisions: use architect agent
+- Multiple independent tasks: launch agents in parallel
+
+### Quality Gates
+- Read before write (no blind modifications)
+- Functions < 50 lines, files < 800 lines
+- Immutable patterns (create new objects, never mutate)
+- 80%+ test coverage target
+'@
+
+function Initialize-ProjectClaudeMd {
+  $claudeMd = Join-Path (Get-Location).Path 'CLAUDE.md'
+
+  if (Test-Path $claudeMd) {
+    if (Select-String -Path $claudeMd -Pattern '## Artibot Integration' -Quiet -ErrorAction SilentlyContinue) {
+      Write-Log 'Project CLAUDE.md already has Artibot section - skipping'
+      return
+    }
+    if ($DryRun) { Write-Log '[dry-run] would append Artibot section to CLAUDE.md'; return }
+    Add-Content -Path $claudeMd -Value $script:ArtibotSection -Encoding utf8
+    Write-Log 'Artibot section appended to existing CLAUDE.md'
+  } else {
+    if ($DryRun) { Write-Log '[dry-run] would create CLAUDE.md with Artibot methodology'; return }
+    Set-Content -Path $claudeMd -Value ("# Project Instructions`n" + $script:ArtibotSection) -Encoding utf8
+    Write-Log 'Project CLAUDE.md created with Artibot methodology'
+  }
+}
+
+# ---------------------------------------------------------------------------
+# Seed CLAUDE.local.md — parity with install.sh seed_local_config (L386)
+# ---------------------------------------------------------------------------
+function Initialize-LocalConfig {
+  $cwd       = (Get-Location).Path
+  $localMd   = Join-Path $cwd 'CLAUDE.local.md'
+  $gitignore = Join-Path $cwd '.gitignore'
+  $template  = Join-Path $ScriptDir 'templates\CLAUDE.local.md.template'
+
+  if (Test-Path $localMd) {
+    Write-Log 'CLAUDE.local.md already exists - skipping'
+    return
+  }
+  if (-not (Test-Path $template)) {
+    Write-Warn2 "CLAUDE.local.md.template not found at $ScriptDir\templates\ - skipping seed"
+    return
+  }
+  if ($DryRun) { Write-Log '[dry-run] would seed CLAUDE.local.md from template + gitignore it'; return }
+
+  Copy-Item -Path $template -Destination $localMd -Force
+  Write-Log 'CLAUDE.local.md created from template (personalize it!)'
+
+  if (Test-Path $gitignore) {
+    if (-not (Select-String -Path $gitignore -Pattern 'CLAUDE.local.md' -Quiet -ErrorAction SilentlyContinue)) {
+      Add-Content -Path $gitignore -Value 'CLAUDE.local.md' -Encoding utf8
+      Write-Log 'Added CLAUDE.local.md to .gitignore'
+    }
+  } else {
+    Write-Warn2 'No .gitignore found - CLAUDE.local.md may be accidentally committed'
+  }
+}
+
+# ---------------------------------------------------------------------------
+# Seed auto-memory — parity with install.sh seed_auto_memory (L417)
+# ---------------------------------------------------------------------------
+# Claude Code hashes the project path into ~/.claude/projects/<hash>/memory/.
+# The hash replaces space / \ : with '-' and strips a leading '-'.
+function Initialize-AutoMemory {
+  $memoryDir = Join-Path $ClaudeDir 'projects'
+  $cwd = (Get-Location).Path
+
+  # Build the path hash the same way Claude Code does (space, /, \, : -> -).
+  $projectHash = ($cwd -replace '[ /:\\]', '-') -replace '^-', ''
+
+  # Fallback: if the computed hash dir is absent, match by trailing basename.
+  $candidate = Join-Path $memoryDir $projectHash
+  if ((-not (Test-Path $candidate)) -and (Test-Path $memoryDir)) {
+    $leaf = Split-Path -Leaf $cwd
+    $match = Get-ChildItem -Path $memoryDir -Directory -ErrorAction SilentlyContinue |
+      Where-Object { $_.Name -like "*$leaf" } | Select-Object -First 1
+    if ($match) { $projectHash = $match.Name }
+  }
+  $projectMemory = Join-Path (Join-Path $memoryDir $projectHash) 'memory'
+
+  if ((Test-Path (Join-Path $projectMemory 'MEMORY.md'))) {
+    Write-Log 'Auto-memory already exists - skipping seed'
+    return
+  }
+  if ($DryRun) { Write-Log "[dry-run] would seed MEMORY.md -> $projectMemory"; return }
+
+  $agentCount = (Get-ChildItem (Join-Path $ClaudeDir 'agents')   -Filter '*.md' -File -ErrorAction SilentlyContinue | Measure-Object).Count
+  $cmdCount   = (Get-ChildItem (Join-Path $ClaudeDir 'commands') -Filter '*.md' -File -ErrorAction SilentlyContinue | Measure-Object).Count
+  $skillsDir  = Join-Path $ArtibotDir 'skills'
+  $skillCount = if (Test-Path $skillsDir) { (Get-ChildItem $skillsDir -Directory -ErrorAction SilentlyContinue | Measure-Object).Count } else { 0 }
+
+  New-Item -ItemType Directory -Path $projectMemory -Force | Out-Null
+  $seed = @"
+# Project Memory (Seeded by Artibot)
+
+## Artibot Quick Reference
+- **Agents**: $agentCount specialized agents - use ``Task()`` to delegate
+- **Commands**: ``/sc`` routes to optimal command/agent/skill automatically
+- **DEV Protocol**: Decompose -> Execute -> Verify (mandatory for all code changes)
+- **Quality**: 80%+ test coverage, immutable patterns, functions < 50 lines
+
+## Workflow Tips
+- Complex features: start with ``/sc plan [feature]`` or use planner agent
+- After implementation: code-reviewer agent runs automatically via rules
+- Parallel work: launch multiple agents with ``Task()`` for independent tasks
+- Vibe coding: rules auto-activate on file access (no /sc needed after install)
+
+## Key Paths
+- Agents: ``~/.claude/agents/`` ($agentCount .md files)
+- Commands: ``~/.claude/commands/`` ($cmdCount .md files)
+- Skills: ``~/.claude/artibot/skills/`` ($skillCount skill directories)
+- Rules: ``~/.claude/rules/artibot/`` (auto-activate on file access)
+- Config: ``~/.claude/artibot/artibot.config.json``
+"@
+  Set-Content -Path (Join-Path $projectMemory 'MEMORY.md') -Value $seed -Encoding utf8
+  Write-Log "Auto-memory seeded with Artibot quickstart -> $projectMemory\MEMORY.md"
+}
+
+# ---------------------------------------------------------------------------
+# Swarm consent — parity with install.sh setup_swarm_consent (L650)
+# ---------------------------------------------------------------------------
+# install.sh prompts interactively; PowerShell installs here are treated as
+# non-interactive by default (this script is the unattended Windows path). To
+# match install.sh's `[ ! -t 0 ]` non-interactive branch, swarm is left disabled
+# unless a consent file already exists. Users opt in later via '/sc swarm opt-in'.
+function Set-SwarmConsent {
+  $consentFile = Join-Path $ArtibotDir 'swarm-consent.json'
+  if (Test-Path $consentFile) {
+    Write-Log 'Swarm consent already configured - skipping'
+    return
+  }
+  Write-Warn2 "Swarm disabled by default (non-interactive install). Use '/sc swarm opt-in' later."
+}
+
+# ---------------------------------------------------------------------------
+# Auto-learning — parity with install.sh setup_auto_learning (L826)
+# ---------------------------------------------------------------------------
+# install.sh tries claude-schedule -> crontab -> schtasks. On Windows the
+# relevant path is schtasks. We honor the same gating: skip if a marker exists,
+# skip if autoLearning is disabled in config, else register a daily 03:00 task
+# via schtasks (idempotent) and write the marker regardless to avoid re-prompts.
+function Set-AutoLearning {
+  $marker = Join-Path $ArtibotDir 'auto-learning-registered.json'
+  if (Test-Path $marker) {
+    Write-Log 'Auto-learning schedule already registered - skipping'
+    return
+  }
+
+  # Read autoLearning.enabled + schedule from the installed config via Node
+  # (mirrors install.sh _is_auto_learning_enabled / _get_auto_learning_schedule).
+  $cfgFile = Join-Path $ArtibotDir 'artibot.config.json'
+  $enabled = $false
+  $schedule = '0 3 * * *'
+  if ((Test-Path $cfgFile) -and (Get-Command node -ErrorAction SilentlyContinue)) {
+    try {
+      $env:ARTIBOT_CFG = $cfgFile
+      $enabled = (node --input-type=commonjs -e "const c=JSON.parse(require('fs').readFileSync(process.env.ARTIBOT_CFG,'utf8'));process.stdout.write(c.autoLearning&&c.autoLearning.enabled===true?'1':'0')") -eq '1'
+      $sched = node --input-type=commonjs -e "const c=JSON.parse(require('fs').readFileSync(process.env.ARTIBOT_CFG,'utf8'));process.stdout.write((c.autoLearning&&c.autoLearning.schedule)||'0 3 * * *')"
+      if ($sched) { $schedule = $sched }
+    } catch { }
+  }
+
+  if (-not $enabled) {
+    Write-Log 'Auto-learning pipeline disabled in config - skipping'
+    return
+  }
+
+  if ($DryRun) { Write-Log "[dry-run] would register auto-learning ($schedule) via schtasks"; return }
+
+  $method = 'hint-only'
+  $runner = Join-Path $ArtibotDir 'scripts\run-auto-learning.js'
+  $nodeCmd = Get-Command node -ErrorAction SilentlyContinue
+  $schtasks = Get-Command schtasks.exe -ErrorAction SilentlyContinue
+
+  if ($schtasks -and $nodeCmd -and (Test-Path $runner)) {
+    $taskName = 'ArtibotAutoLearning'
+    $already = $false
+    & schtasks.exe /Query /TN $taskName *> $null
+    if ($LASTEXITCODE -eq 0) { $already = $true }
+
+    if ($already) {
+      $method = 'schtasks'
+      Write-Log 'Auto-learning already registered in Task Scheduler'
+    } else {
+      $tr = '"{0}" "{1}"' -f $nodeCmd.Source, $runner
+      & schtasks.exe /Create /TN $taskName /TR $tr /SC DAILY /ST 03:00 /F *> $null
+      if ($LASTEXITCODE -eq 0) {
+        $method = 'schtasks'
+        Write-Log 'Auto-learning registered via Windows Task Scheduler'
+      }
+    }
+  }
+
+  if ($method -eq 'hint-only') {
+    Write-Warn2 'Could not auto-register schedule. Manual options:'
+    Write-Tip '  1) In Claude session: use CronCreate tool'
+    Write-Tip '  2) node ~/.claude/artibot/scripts/setup-auto-learning.js --schedule'
+  }
+
+  # Write marker regardless (prevents re-prompting) — mirrors install.sh.
+  $markerPayload = [ordered]@{
+    registeredAt = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+    schedule     = $schedule
+    method       = $method
+  }
+  ($markerPayload | ConvertTo-Json) + "`n" | Set-Content -Path $marker -Encoding utf8 -NoNewline
+}
+
+# ---------------------------------------------------------------------------
 # Verify
 # ---------------------------------------------------------------------------
 function Show-Summary {
@@ -262,12 +698,23 @@ function Show-Summary {
   $cmdCount   = (Get-ChildItem (Join-Path $ClaudeDir 'commands') -Filter '*.md' -File -ErrorAction SilentlyContinue | Measure-Object).Count
   $skillsDir  = Join-Path $ArtibotDir 'skills'
   $skillCount = if (Test-Path $skillsDir) { (Get-ChildItem $skillsDir -Directory -ErrorAction SilentlyContinue | Measure-Object).Count } else { 0 }
+  $rulesDir   = Join-Path $ClaudeDir 'rules\artibot'
+  $ruleCount  = if (Test-Path $rulesDir) { (Get-ChildItem $rulesDir -Filter '*.md' -File -ErrorAction SilentlyContinue | Measure-Object).Count } else { 0 }
+  $hooksDir   = Join-Path $ArtibotDir 'scripts\hooks'
+  $hookCount  = if (Test-Path $hooksDir) { (Get-ChildItem $hooksDir -Filter '*.js' -File -ErrorAction SilentlyContinue | Measure-Object).Count } else { 0 }
 
   Write-Host ''
   Write-Log '--- Installation Summary ---'
   Write-Host "  Agents:   $agentCount files in ~/.claude/agents/"
   Write-Host "  Commands: $cmdCount files in ~/.claude/commands/ (no prefix -> /save, /sc, /daily)"
   Write-Host "  Skills:   $skillCount dirs in ~/.claude/artibot/skills/"
+  Write-Host "  Rules:    $ruleCount files in ~/.claude/rules/artibot/ (auto-activate)"
+  Write-Host "  Hooks:    $hookCount scripts in ~/.claude/artibot/scripts/"
+  Write-Host ''
+
+  $cwd = (Get-Location).Path
+  if (Test-Path (Join-Path $cwd 'CLAUDE.md'))       { Write-Host '  Project:  CLAUDE.md seeded with Artibot methodology' }
+  if (Test-Path (Join-Path $cwd 'CLAUDE.local.md')) { Write-Host '  Local:    CLAUDE.local.md ready for personalization' }
   Write-Host ''
   Write-Log 'Installation complete! Start Claude Code and type: /sc hello'
 }
@@ -325,8 +772,25 @@ switch ($Action) {
   'install' {
     Test-Prerequisites
     Initialize-Directories
-    Install-Assets
+    # Self-install guard (parity with install.sh main L996): when run from the
+    # installed copy, skip the copy/mirror phase (no-op) but still run config +
+    # seed steps below.
+    if (Test-SelfInstall) {
+      Write-Warn2 "Running from the installed location ($ArtibotDir) - files already in place."
+      Write-Warn2 'Skipping copy phase (no-op); continuing with config & seed steps.'
+    } else {
+      Install-Assets
+      Update-MarketplaceMirror
+      Update-PluginCache
+    }
+    Install-Mcp
     Set-Settings
+    Initialize-ProjectClaudeMd
+    Initialize-LocalConfig
+    Initialize-AutoMemory
+    Set-SwarmConsent
+    Set-AutoLearning
+    Save-SourcePath
     Show-Summary
   }
   'uninstall' {

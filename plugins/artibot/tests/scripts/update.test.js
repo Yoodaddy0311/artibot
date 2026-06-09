@@ -26,7 +26,9 @@ import {
   detectHookDrift,
   fileHash,
   findBash,
+  findInstallPs1,
   findInstallScript,
+  findPowerShell,
   findSourceRepo,
   popAutostash,
   readCurrentVersion,
@@ -121,6 +123,70 @@ describe('findBash', () => {
       expect(result === null || typeof result === 'string').toBe(true);
     } else {
       expect(findBash()).toBe('bash');
+    }
+  });
+
+  it('returns a string path or null (never throws) regardless of platform', () => {
+    // The expanded Windows candidate list (Scoop, Chocolatey, git --exec-path,
+    // where bash) must degrade gracefully — a missing candidate is skipped, not
+    // fatal. On every platform the contract is: string | null, no throw.
+    let result;
+    expect(() => { result = findBash(); }).not.toThrow();
+    expect(result === null || typeof result === 'string').toBe(true);
+  });
+});
+
+describe('findPowerShell', () => {
+  it('returns null on non-Windows platforms', () => {
+    if (process.platform !== 'win32') {
+      expect(findPowerShell()).toBeNull();
+    } else {
+      // Win10/11 always ship Windows PowerShell, so a string is expected, but
+      // the contract permits null on a stripped-down host.
+      const result = findPowerShell();
+      expect(result === null || typeof result === 'string').toBe(true);
+    }
+  });
+
+  it('never throws', () => {
+    expect(() => findPowerShell()).not.toThrow();
+  });
+});
+
+describe('findInstallPs1', () => {
+  it('finds install.ps1 in the source repo when present, else returns null', () => {
+    // The source repo may or may not ship install.ps1 (authored by a separate
+    // task). The contract is: an existing-file path or null, never a throw.
+    let result;
+    expect(() => { result = findInstallPs1(); }).not.toThrow();
+    if (result !== null) {
+      expect(existsSync(result)).toBe(true);
+      expect(result.endsWith('install.ps1')).toBe(true);
+    }
+  });
+
+  it('resolves install.ps1 from the installed copy (~/.claude/artibot/)', () => {
+    const claudeDir = join(tmpRoot, '.claude', 'artibot');
+    mkdirSync(claudeDir, { recursive: true });
+    writeFileSync(join(claudeDir, 'install.ps1'), '# fake installer');
+
+    const originalHome = process.env.HOME;
+    const originalUserProfile = process.env.USERPROFILE;
+    // Point HOME at tmpRoot. The source-repo candidate is checked first; it
+    // only matches if the real repo ships install.ps1. Either way the result is
+    // a valid install.ps1 path, which is what we assert.
+    process.env.HOME = tmpRoot;
+    process.env.USERPROFILE = tmpRoot;
+    try {
+      const result = findInstallPs1();
+      expect(result).toBeTruthy();
+      expect(result.endsWith('install.ps1')).toBe(true);
+      expect(existsSync(result)).toBe(true);
+    } finally {
+      if (originalHome === undefined) delete process.env.HOME;
+      else process.env.HOME = originalHome;
+      if (originalUserProfile === undefined) delete process.env.USERPROFILE;
+      else process.env.USERPROFILE = originalUserProfile;
     }
   });
 });
