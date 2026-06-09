@@ -231,6 +231,22 @@ All contributions must respect Artibot's **local-only data policy** — exports 
 
 Current plugin version: **4.24.0**. Keep the five in lockstep — `scripts/release-check.js` enforces all five.
 
+### Release gate: install & update verification
+
+Every release MUST also pass install/update integrity checks — `npm run ci`
+(and therefore `npm run release`) runs `scripts/ci/validate-install.js`, which:
+
+- asserts **install.sh ↔ install.ps1 feature parity** (a capability matrix — adding
+  a post-install step to one installer without the other fails the release; this
+  is the drift that historically broke cross-machine `/update` on Windows)
+- verifies `scripts/update.js` / `scripts/update-platform.js` still reference both
+  installers and pass `node --check`
+- best-effort `bash -n install.sh` and PowerShell parse of `install.ps1` when those
+  hosts are available (skipped with a warning on CI runners that lack them)
+
+When you add or rename an install/update step, update `PARITY_MATRIX` in
+`scripts/ci/validate-install.js` so the parity check stays meaningful.
+
 ---
 
 ## 9. References
