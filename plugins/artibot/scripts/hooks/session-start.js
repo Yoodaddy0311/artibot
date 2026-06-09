@@ -552,7 +552,7 @@ async function checkUpdateBounded(version, home, lines) {
       if (updateInfo.hasUpdate) {
         lines.push(
           `\u2b06\ufe0f New version available: v${updateInfo.latestVersion} (current: v${version})`,
-          `   Update: /artibot:update --force`
+          `   Update: /update --force`
         );
       }
     } finally {

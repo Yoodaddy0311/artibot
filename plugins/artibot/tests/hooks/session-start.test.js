@@ -266,7 +266,7 @@ describe('session-start hook', () => {
 
       const output = mockState.writeStdoutCalls[0][0];
       expect(output.message).toContain('9.9.9');
-      expect(output.message).toContain('/artibot:update --force');
+      expect(output.message).toContain('/update --force');
     });
 
     it('does not append update notice when already on the latest version', async () => {
@@ -277,7 +277,7 @@ describe('session-start hook', () => {
       await importAndWait();
 
       const output = mockState.writeStdoutCalls[0][0];
-      expect(output.message).not.toContain('/artibot:update');
+      expect(output.message).not.toContain('/update --force');
     });
 
     it('still writes output when checkForUpdate rejects', async () => {

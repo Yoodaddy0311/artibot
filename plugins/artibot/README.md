@@ -1174,7 +1174,7 @@ Federated Swarm 서버 (옵트인 필요)
 | `/estimate [target]` | 증거 기반 작업 추정 | `--breakdown` |
 | `/index [query]` | 커맨드 카탈로그 검색 | -- |
 | `/load [path]` | 프로젝트 컨텍스트 로딩 | `--deep` |
-| `/artibot:update` | 자동 업데이트 관리 | `--check`, `--force`, `--dry-run` |
+| `/update` | 자동 업데이트 관리 | `--check`, `--force`, `--dry-run` |
 
 ---
 
@@ -1187,10 +1187,10 @@ Artibot은 매 세션 시작 시 자동으로 최신 버전을 확인합니다. 
 ```
 Artibot v1.5.0 initialized
 ⬆️ New version available: v1.6.0 (current: v1.5.0)
-   Update: /artibot:update --force
+   Update: /update --force
 ```
 
-### `/artibot:update` 커맨드
+### `/update` 커맨드
 
 버전 확인 및 업데이트를 관리합니다.
 
@@ -1213,13 +1213,13 @@ Artibot v1.5.0 initialized
 
 ```bash
 # 버전 확인만
-/artibot:update --check
+/update --check
 
 # 강제 업데이트 (캐시 무효화)
-/artibot:update --force
+/update --force
 
 # 계획 확인 후 수동 실행
-/artibot:update --dry-run
+/update --dry-run
 ```
 
 ---
