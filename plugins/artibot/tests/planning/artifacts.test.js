@@ -4,11 +4,28 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { ensureADR, syncTodo, writePRD } from '../../lib/planning/artifacts.js';
+import {
+  archiveStale,
+  ensureADR,
+  indexArtifacts,
+  listArtifacts,
+  supersede,
+  syncTodo,
+  writePRD,
+} from '../../lib/planning/artifacts.js';
 
 const FIXED = new Date(2026, 5, 9, 14, 30); // 2026-06-09 14:30 local
 const fixedNow = () => FIXED;
@@ -46,13 +63,26 @@ describe('artifacts / writePRD', () => {
     expect(body).toContain('## 수락기준'); // empty section still rendered
   });
 
-  it('is non-destructive: re-call adds -NN suffix', async () => {
-    const a = await writePRD({ projectRoot: root, slug: 'x', title: 'X', sections: {}, now: fixedNow });
-    const b = await writePRD({ projectRoot: root, slug: 'x', title: 'X', sections: {}, now: fixedNow });
-    expect(a.prdPath).not.toBe(b.prdPath);
-    expect(b.prdPath).toBe(path.join(root, 'docs', 'PRD', 'x-20260609-2.md'));
-    expect(existsSync(a.prdPath)).toBe(true);
-    expect(existsSync(b.prdPath)).toBe(true);
+  it('writes status:active + created frontmatter', async () => {
+    const res = await writePRD({
+      projectRoot: root, slug: 'fm', title: 'FM', sections: {}, now: fixedNow,
+    });
+    const body = readFileSync(res.prdPath, 'utf-8');
+    expect(body.startsWith('---\n')).toBe(true);
+    expect(body).toContain('status: active');
+    expect(body).toContain('created: 2026-06-09');
+    expect(body).toContain('slug: fm');
+  });
+
+  it('dedup guard: same active slug returns deduped:true, no new file', async () => {
+    const a = await writePRD({ projectRoot: root, slug: 'dup', title: 'Dup', sections: {}, now: fixedNow });
+    const b = await writePRD({ projectRoot: root, slug: 'dup', title: 'Dup', sections: {}, now: fixedNow });
+    expect(a.deduped).toBeUndefined();
+    expect(b.ok).toBe(true);
+    expect(b.deduped).toBe(true);
+    expect(b.prdPath).toBe(a.prdPath);
+    const files = readdirSync(path.join(root, 'docs', 'PRD')).filter((f) => f.endsWith('.md'));
+    expect(files).toHaveLength(1);
   });
 
   it('returns {ok:false} when projectRoot missing', async () => {
@@ -160,5 +190,172 @@ describe('artifacts / syncTodo', () => {
     const res = await syncTodo({ planMarkdown: PLAN });
     expect(res.ok).toBe(false);
     expect(res.error).toMatch(/projectRoot/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Document lifecycle: list / index / archive / supersede
+// ---------------------------------------------------------------------------
+
+/** Write a PRD fixture with optional frontmatter + age (mtime back-dated). */
+function seedPrd(root, name, { status, created, body = 'x', ageDays } = {}) {
+  const dir = path.join(root, 'docs', 'PRD');
+  mkdirSync(dir, { recursive: true });
+  const fm = status
+    ? `---\nstatus: ${status}\n${created ? `created: ${created}\n` : ''}---\n\n`
+    : '';
+  const file = path.join(dir, `${name}.md`);
+  writeFileSync(file, `${fm}# ${name}\n\n${body}\n`, 'utf-8');
+  if (typeof ageDays === 'number') {
+    const t = new Date(FIXED.getTime() - ageDays * 86400000);
+    utimesSync(file, t, t);
+  }
+  return file;
+}
+
+describe('artifacts / listArtifacts', () => {
+  let root;
+  beforeEach(() => { root = tmpRoot(); });
+  afterEach(() => { rmSync(root, { recursive: true, force: true }); });
+
+  it('classifies active / done / legacy and computes ageDays', async () => {
+    seedPrd(root, 'a-active', { status: 'active', created: '2026-06-08' });
+    seedPrd(root, 'b-done', { status: 'done', created: '2026-01-01' });
+    seedPrd(root, 'c-legacy', { ageDays: 5 }); // no frontmatter → legacy
+
+    const res = await listArtifacts({ projectRoot: root, filter: 'all', now: fixedNow });
+    expect(res.ok).toBe(true);
+    const bySlug = Object.fromEntries(res.items.map((i) => [i.slug, i]));
+    expect(bySlug['a-active'].status).toBe('active');
+    expect(bySlug['b-done'].status).toBe('done');
+    expect(bySlug['c-legacy'].status).toBe('legacy');
+    expect(bySlug['a-active'].ageDays).toBe(1);
+    expect(bySlug['c-legacy'].ageDays).toBe(5);
+  });
+
+  it('filter=active includes legacy; filter=done excludes active', async () => {
+    seedPrd(root, 'a-active', { status: 'active', created: '2026-06-09' });
+    seedPrd(root, 'b-done', { status: 'done', created: '2026-06-09' });
+    seedPrd(root, 'c-legacy', { ageDays: 1 });
+
+    const act = await listArtifacts({ projectRoot: root, filter: 'active', now: fixedNow });
+    expect(act.items.map((i) => i.slug).sort()).toEqual(['a-active', 'c-legacy']);
+
+    const done = await listArtifacts({ projectRoot: root, filter: 'done', now: fixedNow });
+    expect(done.items.map((i) => i.slug)).toEqual(['b-done']);
+  });
+
+  it('filter=stale = active/legacy older than 90 days', async () => {
+    seedPrd(root, 'fresh', { status: 'active', created: '2026-06-01' });
+    seedPrd(root, 'old-active', { status: 'active', created: '2026-01-01' }); // >90d
+    seedPrd(root, 'old-legacy', { ageDays: 200 });
+    seedPrd(root, 'old-done', { status: 'done', created: '2026-01-01' }); // done ≠ stale
+
+    const res = await listArtifacts({ projectRoot: root, filter: 'stale', now: fixedNow });
+    expect(res.items.map((i) => i.slug).sort()).toEqual(['old-active', 'old-legacy']);
+  });
+});
+
+describe('artifacts / indexArtifacts', () => {
+  let root;
+  beforeEach(() => { root = tmpRoot(); });
+  afterEach(() => { rmSync(root, { recursive: true, force: true }); });
+
+  it('writes INDEX.md with only active docs', async () => {
+    seedPrd(root, 'keep', { status: 'active', created: '2026-06-09' });
+    seedPrd(root, 'drop', { status: 'done', created: '2026-06-09' });
+
+    const res = await indexArtifacts({ projectRoot: root, now: fixedNow });
+    expect(res.ok).toBe(true);
+    expect(res.count).toBe(1);
+    const idx = readFileSync(res.indexPath, 'utf-8');
+    expect(idx).toContain('| slug | status | date | ageDays | link |');
+    expect(idx).toContain('keep');
+    expect(idx).not.toContain('| drop |');
+  });
+
+  it('does not include INDEX.md itself as an item', async () => {
+    seedPrd(root, 'one', { status: 'active', created: '2026-06-09' });
+    await indexArtifacts({ projectRoot: root, now: fixedNow });
+    const res2 = await listArtifacts({ projectRoot: root, filter: 'all', now: fixedNow });
+    expect(res2.items.map((i) => i.slug)).not.toContain('INDEX');
+  });
+});
+
+describe('artifacts / archiveStale', () => {
+  let root;
+  beforeEach(() => { root = tmpRoot(); });
+  afterEach(() => { rmSync(root, { recursive: true, force: true }); });
+
+  it('dryRun=true reports moves without touching disk', async () => {
+    seedPrd(root, 'done-doc', { status: 'done', created: '2026-06-09' });
+    const before = readdirSync(path.join(root, 'docs', 'PRD'));
+
+    const res = await archiveStale({ projectRoot: root, dryRun: true, now: fixedNow });
+    expect(res.ok).toBe(true);
+    expect(res.dryRun).toBe(true);
+    expect(res.moved).toHaveLength(1);
+    expect(res.moved[0].reason).toMatch(/done/);
+    expect(existsSync(path.join(root, 'docs', 'PRD', '_archive'))).toBe(false);
+    expect(readdirSync(path.join(root, 'docs', 'PRD'))).toEqual(before);
+  });
+
+  it('dryRun=false moves to _archive without deleting (rename only)', async () => {
+    const src = seedPrd(root, 'done-doc', { status: 'done', created: '2026-06-09' });
+    seedPrd(root, 'active-doc', { status: 'active', created: '2026-06-09' });
+
+    const res = await archiveStale({ projectRoot: root, dryRun: false, now: fixedNow });
+    expect(res.dryRun).toBe(false);
+    expect(res.moved).toHaveLength(1);
+    expect(existsSync(src)).toBe(false); // moved away
+    const dest = path.join(root, 'docs', 'PRD', '_archive', 'done-doc.md');
+    expect(existsSync(dest)).toBe(true); // present in archive (not deleted)
+    // active doc untouched
+    expect(existsSync(path.join(root, 'docs', 'PRD', 'active-doc.md'))).toBe(true);
+  });
+
+  it('archives legacy/active only when older than threshold', async () => {
+    seedPrd(root, 'old-legacy', { ageDays: 200 });
+    seedPrd(root, 'fresh-legacy', { ageDays: 3 });
+
+    const res = await archiveStale({ projectRoot: root, dryRun: true, now: fixedNow });
+    expect(res.moved.map((m) => path.basename(m.from))).toEqual(['old-legacy.md']);
+  });
+});
+
+describe('artifacts / supersede', () => {
+  let root;
+  beforeEach(() => { root = tmpRoot(); });
+  afterEach(() => { rmSync(root, { recursive: true, force: true }); });
+
+  it('sets status superseded + adds link (frontmatter doc)', async () => {
+    seedPrd(root, 'old', { status: 'active', created: '2026-06-09' });
+    const res = await supersede({
+      projectRoot: root, oldSlug: 'old', newPath: 'docs/PRD/new.md', now: fixedNow,
+    });
+    expect(res.ok).toBe(true);
+    const body = readFileSync(res.oldPath, 'utf-8');
+    expect(body).toContain('status: superseded');
+    expect(body).toContain('Superseded by: docs/PRD/new.md');
+    expect(body).not.toContain('status: active');
+  });
+
+  it('adds frontmatter block to a legacy doc', async () => {
+    seedPrd(root, 'legacy', { ageDays: 1 });
+    const res = await supersede({
+      projectRoot: root, oldSlug: 'legacy', newPath: 'new.md', now: fixedNow,
+    });
+    expect(res.ok).toBe(true);
+    const body = readFileSync(res.oldPath, 'utf-8');
+    expect(body.startsWith('---\nstatus: superseded')).toBe(true);
+    expect(body).toContain('Superseded by: new.md');
+  });
+
+  it('returns {ok:false} when oldSlug not found', async () => {
+    const res = await supersede({
+      projectRoot: root, oldSlug: 'nope', newPath: 'new.md', now: fixedNow,
+    });
+    expect(res.ok).toBe(false);
+    expect(res.error).toMatch(/not found/);
   });
 });

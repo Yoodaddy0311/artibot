@@ -27,6 +27,9 @@ Parse $ARGUMENTS:
 - `--adr`: 플랜에 either/or 결정이 있으면 ADR로 기록 (opt-in — 절대 기본 자동 아님)
 - `--status`: 현재 플랜의 TODO 진행률 표 출력 (PlanTracker `.plan-state.json` 조회)
 - `--done <n>`: 태스크 인덱스 `<n>`을 완료로 마킹 (PlanTracker markCompleted → state 갱신)
+- `--list [active|done|stale|all]`: PRD/플랜 문서 인덱스 조회 (기본 `all`). 조회 전용 — 플랜 생성 안 함
+- `--archive [--older-than <Nd>]`: stale/done/legacy 문서를 `_archive/`로 회전. **기본 dry-run**(이동 예정 목록만 미리보기), `--apply` 추가 시에만 실제 이동. 삭제 아님(이동), 비파괴
+- `--supersede <oldSlug> <newPath>`: 옛 문서를 새 문서로 승계(superseded) 표식
 
 ## Execution Flow
 
@@ -52,7 +55,11 @@ Parse $ARGUMENTS:
 7. **Status / Done (조회·마킹 흐름)**:
    - `--status` 지정 시: PlanTracker를 `.plan-state.json`에서 복원 → `getProgress()` 결과를 진행률 표로 출력 (플랜 생성·신규 산출물 없음).
    - `--done <n>` 지정 시: PlanTracker 복원 → `markCompleted(n)` → `syncTodo()`로 state 재기록.
-8. **Report**: Output structured plan with TaskCreate integration
+8. **Lifecycle 관리 (문서 라이프사이클 — 조회·아카이브·승계)**: 아래 플래그는 플랜을 새로 만들지 않고 기존 PRD/플랜 문서를 관리한다 (상세 호출은 "Artifacts Integration §6~8" 참조):
+   - `--list [filter]` 지정 시: `listArtifacts({filter})` 결과를 표로 출력 (조회 전용 — 플랜 생성·이동 없음).
+   - `--archive` 지정 시: 기본 `archiveStale({dryRun:true})`로 **이동 예정 목록만** 미리보기 → 사용자가 `--apply`를 추가하면 `dryRun:false`로 실제 `_archive/` 이동 + `indexArtifacts()`로 INDEX.md 갱신. **삭제 아님(이동), git 추적이라 복구 가능**.
+   - `--supersede <oldSlug> <newPath>` 지정 시: `supersede()`로 옛 문서에 superseded 표식.
+9. **Report**: Output structured plan with TaskCreate integration
 
 ## Plan Structure
 
@@ -101,6 +108,19 @@ ensureADR({ projectRoot, title, options, decision, rationale, now }) → { ok, a
   // docs/adr/ADR-NNN-slug.md 생성 (멱등 — 동일 결정 재호출 시 기존 ADR 재사용)
 syncTodo({ projectRoot, planMarkdown, planFile, sessionId, now }) → { ok, stateFile, progress }
   // .plan-state.json 기록 (내부적으로 PlanTracker 사용). progress = { total, completed, percentage }
+```
+
+문서 라이프사이클 관리(조회·인덱스·아카이브·승계)도 **같은 레이어**의 다음 함수로 수행한다 (직접 재구현 금지 — 호출만):
+
+```
+listArtifacts({ projectRoot, kind, filter, now }) → { ok, items }
+  // filter: active|done|stale|all. items = 각 문서의 slug/status/date/ageDays/progress/link
+indexArtifacts({ projectRoot, kind, now }) → { ok, indexPath, count }
+  // docs/<KIND>/INDEX.md 생성·갱신. writePRD/ensureADR/archiveStale 이후 자동 호출
+archiveStale({ projectRoot, kind, olderThanDays, statuses, dryRun, now }) → { ok, moved, dryRun }
+  // stale/done 문서를 docs/<KIND>/_archive/ 로 이동 (삭제 아님). dryRun:true 면 이동 예정만 반환
+supersede({ projectRoot, kind, oldSlug, newPath, now }) → { ok, oldPath }
+  // 옛 문서(oldSlug)에 newPath 로의 superseded 표식
 ```
 
 ### 호출 방법 (동적 import — 절대경로)
@@ -167,6 +187,8 @@ const { ok, prdPath } = writePRD({
 });
 ```
 
+`writePRD()` 호출 직후 항상 `indexArtifacts({ projectRoot, kind: 'PRD', now })`를 호출해 `docs/PRD/INDEX.md`를 자동 갱신한다 (신규 PRD가 인덱스에 즉시 반영되도록). 마찬가지로 `ensureADR()` 직후 `indexArtifacts({ kind: 'adr' })`로 ADR 인덱스를 갱신한다.
+
 ### 5. `--adr` — 결정 기록 (옵트인 + 결정 존재 시에만)
 
 `--adr` 플래그가 있고 플랜에 either/or 결정(2개 이상 실선택지 비교)이 실제로 있을 때만 호출한다. 결정이 없으면 ADR을 만들지 않는다.
@@ -191,6 +213,86 @@ const { ok, adrPath, number } = ensureADR({
   "sessions": [{ "id": "session-abc", "completedIndices": [0, 2], "startedAt": "..." }],
   "lastUpdated": "2026-03-29T..."
 }
+```
+
+### 6. `--list` — 문서 인덱스 조회 (조회 전용)
+
+`listArtifacts({ filter })`로 PRD/플랜 문서를 나열한다. 플랜을 새로 만들지 않으며, 어떤 문서도 이동·삭제하지 않는다. `filter`는 `active`(진행중) | `done`(완료) | `stale`(오래됨) | `all`(기본).
+
+```js
+const { ok, items } = listArtifacts({
+  projectRoot: process.cwd(),
+  kind: 'PRD',
+  filter: 'all',           // --list 인자 (기본 all)
+  now: new Date(),
+});
+// items[i] = { slug, status, date, ageDays, progress, link }
+```
+
+출력 예시:
+
+```
+ARTIFACT INDEX (filter: all)
+----------------------------
+SLUG                 STATUS      DATE        AGE   PROGRESS  LINK
+payment-system       active      2026-06-01    8d   5/12 42%  docs/PRD/payment-system-2026-06-01.md
+auth-refresh         done        2026-05-10   30d  9/9 100%   docs/PRD/auth-refresh-2026-05-10.md
+legacy-import        stale       2026-02-14  115d  0/6   0%   docs/PRD/legacy-import-2026-02-14.md
+
+3 artifact(s). index: docs/PRD/INDEX.md
+```
+
+### 7. `--archive` — stale/done 문서 회전 (기본 dry-run, 비파괴)
+
+기본 동작은 **미리보기**다. `archiveStale({ dryRun: true })`로 어떤 문서가 `_archive/`로 이동될지 목록만 보여주고 **아무것도 옮기지 않는다**. 사용자가 결과를 확인하고 `--apply`를 추가했을 때만 `dryRun: false`로 실제 이동한다.
+
+```js
+// 1단계 — 기본: 미리보기 (이동 없음)
+const preview = archiveStale({
+  projectRoot: process.cwd(),
+  kind: 'PRD',
+  olderThanDays: 90,       // --older-than <Nd> (기본 90)
+  statuses: ['done', 'stale'],
+  dryRun: true,            // 기본값 — --apply 없으면 항상 true
+  now: new Date(),
+});
+// preview = { ok, moved: [{ from, to }], dryRun: true }
+
+// 2단계 — --apply 가 있을 때만: 실제 이동 + 인덱스 갱신
+if (userPassedApply) {
+  const result = archiveStale({ projectRoot: process.cwd(), kind: 'PRD',
+    olderThanDays: 90, statuses: ['done', 'stale'], dryRun: false, now: new Date() });
+  indexArtifacts({ projectRoot: process.cwd(), kind: 'PRD', now: new Date() }); // INDEX.md 갱신
+}
+```
+
+dry-run 출력 예시:
+
+```
+ARCHIVE PREVIEW (dry-run — 아무것도 이동되지 않았습니다)
+-------------------------------------------------------
+older-than: 90d   statuses: done, stale
+WILL MOVE:
+  docs/PRD/auth-refresh-2026-05-10.md   ->  docs/PRD/_archive/auth-refresh-2026-05-10.md
+  docs/PRD/legacy-import-2026-02-14.md  ->  docs/PRD/_archive/legacy-import-2026-02-14.md
+
+2 file(s) would move. 실제 이동하려면 --apply 를 추가하세요.
+```
+
+> **안전**: `--archive`는 기본 dry-run이라 명령만으로는 파일이 바뀌지 않는다. 실제 동작도 **삭제가 아니라 `_archive/`로 이동**이며, 문서가 git으로 추적되므로 언제든 `git mv`/`git checkout`으로 복구할 수 있다. 실이동은 사용자가 미리보기를 확인하고 `--apply`를 명시한 뒤에만 일어난다.
+
+### 8. `--supersede` — 옛 문서 승계 표식
+
+옛 문서(`oldSlug`)를 새 문서(`newPath`)로 승계됨(superseded)을 표시한다. 파일을 삭제하지 않고 승계 표식만 추가한다.
+
+```js
+const { ok, oldPath } = supersede({
+  projectRoot: process.cwd(),
+  kind: 'PRD',
+  oldSlug: 'payment-system-v1',     // --supersede 첫 인자
+  newPath: 'docs/PRD/payment-system-2026-06-01.md', // --supersede 둘째 인자
+  now: new Date(),
+});
 ```
 
 ## Next Steps

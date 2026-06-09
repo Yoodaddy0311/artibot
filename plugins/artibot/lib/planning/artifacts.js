@@ -21,6 +21,11 @@ import { PlanTracker } from '../core/plan-tracker.js';
 
 /** @typedef {() => Date} NowFn */
 
+const KIND_DIRS = { prd: 'PRD', adr: 'adr' };
+const ARCHIVE_DIRNAME = '_archive';
+const STALE_DAYS = 90;
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
 const PRD_SECTION_ORDER = [
   '배경',
   '목표',
@@ -145,6 +150,99 @@ async function highestAdrNumber(adrDir) {
 }
 
 // ---------------------------------------------------------------------------
+// Frontmatter (zero-dep line parser — mirrors handoff / skill-hash convention)
+// ---------------------------------------------------------------------------
+
+/**
+ * Parse a leading `---` YAML-ish frontmatter block into a flat string map.
+ * Only top-level `key: value` lines are recognized (no nesting). Returns
+ * `{ data: null }` when no frontmatter block is present.
+ *
+ * @param {string} text
+ * @returns {{ data: Record<string,string>|null, body: string }}
+ */
+function parseFrontmatter(text) {
+  const src = typeof text === 'string' ? text : '';
+  if (!src.startsWith('---')) return { data: null, body: src };
+  const end = src.indexOf('\n---', 3);
+  if (end === -1) return { data: null, body: src };
+  const block = src.slice(src.indexOf('\n') + 1, end);
+  const data = {};
+  for (const line of block.split('\n')) {
+    const m = /^([A-Za-z0-9_-]+)\s*:\s*(.*)$/.exec(line);
+    if (m) data[m[1]] = m[2].trim().replace(/^["']|["']$/g, '');
+  }
+  const after = src.slice(end + 4);
+  return { data, body: after.replace(/^\s*\n/, '') };
+}
+
+/**
+ * Resolve the on-disk directory for an artifact kind.
+ * @param {string} projectRoot
+ * @param {string} kind - 'prd' | 'adr'
+ * @returns {string}
+ */
+function kindDir(projectRoot, kind) {
+  const sub = KIND_DIRS[kind] || KIND_DIRS.prd;
+  return path.join(projectRoot, 'docs', sub);
+}
+
+/**
+ * Format a Date as `YYYY-MM-DD`.
+ * @param {Date} d
+ * @returns {string}
+ */
+function isoDate(d) {
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+/**
+ * Read one artifact file into a normalized record. `null` on read failure.
+ * @param {string} filePath
+ * @param {Date} nowDate
+ * @returns {Promise<object|null>}
+ */
+async function readArtifact(filePath, nowDate) {
+  let raw;
+  try {
+    raw = await fs.readFile(filePath, 'utf-8');
+  } catch {
+    return null;
+  }
+  const { data } = parseFrontmatter(raw);
+  const slug = path.basename(filePath, '.md');
+  let mtimeMs = nowDate.getTime();
+  try { mtimeMs = (await fs.stat(filePath)).mtimeMs; } catch { /* keep now */ }
+
+  const isLegacy = !data || !data.status;
+  const status = isLegacy ? 'legacy' : data.status;
+  const dateIso = (data && (data.created || data.date)) || isoDate(new Date(mtimeMs));
+  const refMs = data && (data.created || data.date)
+    ? new Date(dateIso).getTime()
+    : mtimeMs;
+  const ageDays = Math.max(0, Math.floor((nowDate.getTime() - refMs) / MS_PER_DAY));
+  const rec = { slug, status, dateIso, path: filePath, ageDays };
+  if (data && data.progress !== undefined) rec.progress = data.progress;
+  return rec;
+}
+
+/**
+ * Decide whether a record matches the requested filter.
+ * @param {object} rec
+ * @param {string} filter - active | done | stale | all
+ * @returns {boolean}
+ */
+function matchesFilter(rec, filter) {
+  if (filter === 'all') return true;
+  if (filter === 'stale') {
+    return (rec.status === 'active' || rec.status === 'legacy') && rec.ageDays > STALE_DAYS;
+  }
+  if (filter === 'active') return rec.status === 'active' || rec.status === 'legacy';
+  return rec.status === filter; // 'done' (or any explicit status)
+}
+
+// ---------------------------------------------------------------------------
 // PRD
 // ---------------------------------------------------------------------------
 
@@ -172,24 +270,38 @@ function renderPrdSections(sections) {
  *   시나리오, 설계, 산출물, 실행계획, 위험, 수락기준 }. Empty values allowed.
  * @param {string[]} [args.linkedAdrs=[]] - ADR ids/paths to link in header.
  * @param {NowFn|Date} [args.now] - Injectable clock.
- * @returns {Promise<{ ok: boolean, prdPath?: string, error?: string }>}
+ * @returns {Promise<{ ok: boolean, prdPath?: string, deduped?: boolean,
+ *   error?: string }>}
  */
 export async function writePRD({ projectRoot, slug, title, sections, linkedAdrs = [], now }) {
   try {
     if (!projectRoot) return { ok: false, error: 'projectRoot required' };
     const when = resolveNow(now);
     const dir = path.join(projectRoot, 'docs', 'PRD');
-    const base = `${slugify(slug || title)}-${ymd(when)}`;
+    const wantSlug = slugify(slug || title);
+
+    // Dedup guard: if an active PRD with the same base slug already exists, do
+    // not create a new file — return the existing path with deduped:true.
+    const existing = await findActiveBySlug(dir, wantSlug);
+    if (existing) return { ok: true, prdPath: existing, deduped: true };
+
+    const base = `${wantSlug}-${ymd(when)}`;
     const prdPath = await nonCollidingPath(dir, base, '.md');
 
     const links = Array.isArray(linkedAdrs) ? linkedAdrs.filter(Boolean) : [];
     const linkLine = links.length
-      ? `**연관 ADR**: ${links.map((a) => `\`${a}\``).join(', ')}\n`
+      ? `linked_adrs: ${links.join(', ')}\n`
       : '';
     const content =
-      `# PRD: ${(title || slug || 'Untitled').toString().trim()}\n\n`
-      + `생성: ${humanStamp(when)}\n`
+      '---\n'
+      + 'status: active\n'
+      + `created: ${isoDate(when)}\n`
+      + `slug: ${wantSlug}\n`
       + linkLine
+      + '---\n\n'
+      + `# PRD: ${(title || slug || 'Untitled').toString().trim()}\n\n`
+      + `생성: ${humanStamp(when)}\n`
+      + (links.length ? `**연관 ADR**: ${links.map((a) => `\`${a}\``).join(', ')}\n` : '')
       + '\n---\n\n'
       + renderPrdSections(sections);
 
@@ -198,6 +310,29 @@ export async function writePRD({ projectRoot, slug, title, sections, linkedAdrs 
   } catch (err) {
     return { ok: false, error: err?.message || String(err) };
   }
+}
+
+/**
+ * Find an existing PRD whose frontmatter `slug` (or filename slug-prefix)
+ * matches `wantSlug` AND whose status is `active`. Scans the top-level dir
+ * only (not `_archive`). Returns the first match's path, or `null`.
+ *
+ * @param {string} dir
+ * @param {string} wantSlug
+ * @returns {Promise<string|null>}
+ */
+async function findActiveBySlug(dir, wantSlug) {
+  const files = await listFiles(dir, '.md');
+  for (const file of files) {
+    if (path.basename(file).toUpperCase() === 'INDEX.MD') continue;
+    let raw;
+    try { raw = await fs.readFile(file, 'utf-8'); } catch { continue; }
+    const { data } = parseFrontmatter(raw);
+    if (!data || data.status !== 'active') continue;
+    const fileSlug = data.slug || path.basename(file, '.md').replace(/-\d{8}(-\d+)?$/, '');
+    if (fileSlug === wantSlug) return file;
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -329,4 +464,236 @@ async function readState(stateFile) {
   } catch {
     return null;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Document lifecycle: list / index / archive / supersede
+// ---------------------------------------------------------------------------
+
+/**
+ * List artifacts under `docs/<KIND>/` (excluding `_archive/`) as normalized
+ * records, filtered by lifecycle status. Frontmatter-less legacy docs are
+ * surfaced with `status: 'legacy'` and mtime-based `ageDays`.
+ *
+ * @param {object} args
+ * @param {string} args.projectRoot - Absolute repo root.
+ * @param {'prd'|'adr'} [args.kind='prd']
+ * @param {'active'|'done'|'stale'|'all'} [args.filter='all']
+ * @param {NowFn|Date} [args.now] - Injectable clock.
+ * @returns {Promise<{ ok: boolean, items?: Array<object>, error?: string }>}
+ */
+export async function listArtifacts({ projectRoot, kind = 'prd', filter = 'all', now }) {
+  try {
+    if (!projectRoot) return { ok: false, error: 'projectRoot required' };
+    const nowDate = resolveNow(now);
+    const dir = kindDir(projectRoot, kind);
+    const files = await listFiles(dir, '.md');
+    const items = [];
+    for (const file of files) {
+      if (path.basename(file).toUpperCase() === 'INDEX.MD') continue;
+      const rec = await readArtifact(file, nowDate);
+      if (rec && matchesFilter(rec, filter)) items.push(rec);
+    }
+    items.sort((a, b) => (a.dateIso < b.dateIso ? 1 : -1));
+    return { ok: true, items };
+  } catch (err) {
+    return { ok: false, error: err?.message || String(err) };
+  }
+}
+
+/**
+ * Render an INDEX.md table from records (full regeneration, not incremental).
+ * @param {string} kind
+ * @param {Array<object>} items
+ * @param {Date} nowDate
+ * @returns {string}
+ */
+function renderIndex(kind, items, nowDate) {
+  const head = `# ${KIND_DIRS[kind] || kind} Index\n\n`
+    + `생성: ${humanStamp(nowDate)} · ${items.length}건\n\n`
+    + '| slug | status | date | ageDays | link |\n'
+    + '|------|--------|------|---------|------|\n';
+  const rows = items
+    .map((r) => `| ${r.slug} | ${r.status} | ${r.dateIso} | ${r.ageDays} | [${r.slug}](./${path.basename(r.path)}) |`)
+    .join('\n');
+  return head + rows + (rows ? '\n' : '');
+}
+
+/**
+ * Regenerate `docs/<KIND>/INDEX.md` (active + recent, excluding `_archive`)
+ * plus, when present, `docs/<KIND>/_archive/INDEX.md` for archived docs.
+ *
+ * @param {object} args
+ * @param {string} args.projectRoot - Absolute repo root.
+ * @param {'prd'|'adr'} [args.kind='prd']
+ * @param {NowFn|Date} [args.now] - Injectable clock.
+ * @returns {Promise<{ ok: boolean, indexPath?: string, count?: number, error?: string }>}
+ */
+export async function indexArtifacts({ projectRoot, kind = 'prd', now }) {
+  try {
+    if (!projectRoot) return { ok: false, error: 'projectRoot required' };
+    const nowDate = resolveNow(now);
+    const dir = kindDir(projectRoot, kind);
+
+    // Main index: active records only (excludes done/superseded/archive).
+    const active = await listArtifacts({ projectRoot, kind, filter: 'active', now });
+    const items = active.ok ? active.items : [];
+    const indexPath = path.join(dir, 'INDEX.md');
+    await atomicWriteText(indexPath, renderIndex(kind, items, nowDate));
+
+    // Archive index (only when an _archive dir exists).
+    const archiveDir = path.join(dir, ARCHIVE_DIRNAME);
+    if (await exists(archiveDir)) {
+      const archFiles = await listFiles(archiveDir, '.md');
+      const archItems = [];
+      for (const file of archFiles) {
+        if (path.basename(file).toUpperCase() === 'INDEX.MD') continue;
+        const rec = await readArtifact(file, nowDate);
+        if (rec) archItems.push(rec);
+      }
+      archItems.sort((a, b) => (a.dateIso < b.dateIso ? 1 : -1));
+      await atomicWriteText(
+        path.join(archiveDir, 'INDEX.md'),
+        renderIndex(kind, archItems, nowDate),
+      );
+    }
+
+    return { ok: true, indexPath, count: items.length };
+  } catch (err) {
+    return { ok: false, error: err?.message || String(err) };
+  }
+}
+
+/**
+ * Move (rename) stale/done/legacy artifacts into `docs/<KIND>/_archive/`.
+ * Strictly non-destructive: files are renamed, never deleted. `dryRun` (the
+ * default) reports the would-move list without touching disk.
+ *
+ * @param {object} args
+ * @param {string} args.projectRoot - Absolute repo root.
+ * @param {'prd'|'adr'} [args.kind='prd']
+ * @param {number} [args.olderThanDays=90] - Min age for legacy/active sweep.
+ * @param {string[]} [args.statuses=['done','superseded','legacy']]
+ * @param {boolean} [args.dryRun=true]
+ * @param {NowFn|Date} [args.now] - Injectable clock.
+ * @returns {Promise<{ ok: boolean, moved?: Array<object>, dryRun: boolean, error?: string }>}
+ */
+export async function archiveStale({
+  projectRoot, kind = 'prd', olderThanDays = STALE_DAYS,
+  statuses = ['done', 'superseded', 'legacy'], dryRun = true, now,
+}) {
+  try {
+    if (!projectRoot) return { ok: false, error: 'projectRoot required', dryRun };
+    const nowDate = resolveNow(now);
+    const dir = kindDir(projectRoot, kind);
+    const archiveDir = path.join(dir, ARCHIVE_DIRNAME);
+    const wanted = new Set(statuses);
+    const files = await listFiles(dir, '.md');
+
+    const moved = [];
+    for (const file of files) {
+      if (path.basename(file).toUpperCase() === 'INDEX.MD') continue;
+      const rec = await readArtifact(file, nowDate);
+      if (!rec) continue;
+      const reason = archiveReason(rec, wanted, olderThanDays);
+      if (!reason) continue;
+      const to = path.join(archiveDir, path.basename(file));
+      moved.push({ from: file, to, reason });
+    }
+
+    if (!dryRun && moved.length) {
+      await ensureDir(archiveDir);
+      for (const m of moved) {
+        const dest = await nonCollidingPath(
+          archiveDir, path.basename(m.to, '.md'), '.md',
+        );
+        m.to = dest;
+        await fs.rename(m.from, dest);
+      }
+      await indexArtifacts({ projectRoot, kind, now });
+    }
+
+    return { ok: true, moved, dryRun };
+  } catch (err) {
+    return { ok: false, error: err?.message || String(err), dryRun };
+  }
+}
+
+/**
+ * Decide if/why a record should be archived. Status-match wins immediately;
+ * active/legacy docs also qualify once older than `olderThanDays`.
+ * @param {object} rec
+ * @param {Set<string>} wanted
+ * @param {number} olderThanDays
+ * @returns {string|null}
+ */
+function archiveReason(rec, wanted, olderThanDays) {
+  if (wanted.has(rec.status)) {
+    if ((rec.status === 'legacy' || rec.status === 'active') && rec.ageDays <= olderThanDays) {
+      return null;
+    }
+    return `status=${rec.status}`;
+  }
+  if ((rec.status === 'active' || rec.status === 'legacy') && rec.ageDays > olderThanDays) {
+    return `stale ${rec.ageDays}d`;
+  }
+  return null;
+}
+
+/**
+ * Mark `oldSlug` as superseded by `newPath`. Non-destructively rewrites the
+ * doc: sets frontmatter `status: superseded` (adding a block if absent) and
+ * appends a `Superseded by: <newPath>` note to the body.
+ *
+ * @param {object} args
+ * @param {string} args.projectRoot - Absolute repo root.
+ * @param {'prd'|'adr'} [args.kind='prd']
+ * @param {string} args.oldSlug - Filename slug (no extension) of the old doc.
+ * @param {string} args.newPath - Path/ref of the superseding doc.
+ * @param {NowFn|Date} [args.now] - Injectable clock.
+ * @returns {Promise<{ ok: boolean, oldPath?: string, error?: string }>}
+ */
+export async function supersede({ projectRoot, kind = 'prd', oldSlug, newPath, now }) {
+  try {
+    if (!projectRoot) return { ok: false, error: 'projectRoot required' };
+    if (!oldSlug) return { ok: false, error: 'oldSlug required' };
+    if (!newPath) return { ok: false, error: 'newPath required' };
+    resolveNow(now); // validate clock arg for call-site consistency
+    const dir = kindDir(projectRoot, kind);
+    const oldPath = path.join(dir, `${oldSlug}.md`);
+    let raw;
+    try { raw = await fs.readFile(oldPath, 'utf-8'); } catch {
+      return { ok: false, error: `not found: ${oldSlug}` };
+    }
+
+    const updated = applySupersede(raw, newPath);
+    await atomicWriteText(oldPath, updated);
+    return { ok: true, oldPath };
+  } catch (err) {
+    return { ok: false, error: err?.message || String(err) };
+  }
+}
+
+/**
+ * Pure transform: set `status: superseded` in frontmatter (creating the block
+ * if missing) and append a body note. Idempotent on status.
+ * @param {string} raw
+ * @param {string} newPath
+ * @returns {string}
+ */
+function applySupersede(raw, newPath) {
+  const note = `\n\n> Superseded by: ${newPath}\n`;
+  if (raw.startsWith('---') && raw.indexOf('\n---', 3) !== -1) {
+    const end = raw.indexOf('\n---', 3);
+    let block = raw.slice(0, end);
+    if (/\nstatus\s*:/i.test(block)) {
+      block = block.replace(/\nstatus\s*:.*/i, '\nstatus: superseded');
+    } else {
+      block += '\nstatus: superseded';
+    }
+    block += `\nsuperseded_by: ${newPath}`;
+    return block + raw.slice(end) + note;
+  }
+  // No frontmatter — prepend a fresh block.
+  return `---\nstatus: superseded\nsuperseded_by: ${newPath}\n---\n\n${raw}${note}`;
 }
