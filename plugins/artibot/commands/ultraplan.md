@@ -44,6 +44,8 @@ Parse $ARGUMENTS:
 리더가 후보 N개를 비교·채점(가치/위험/비용/장기성)하고 **최선안으로 종합**하되 각 후보의 강점을 접목한다.
 단일 후보 채택이 아니라 **best-of-all** 합성.
 
+- **결정 기록 (조건부 — 스팸 방지)**: 이 단계에서 **2개 이상의 실선택지를 실제로 비교**해 하나를 채택한 경우에만 `ensureADR()`로 결정을 기록한다 (아래 "Artifacts Integration" 참조). 후보가 사실상 단일이거나 명백한 한 길뿐이면 ADR을 만들지 않는다. ADR은 ultraplan에서도 **기본 자동이 아니라 "결정 감지 시"만**이다.
+
 ### Phase 4 — ADVERSARIAL REVIEW (적대적 검증)  ·  `--no-adversarial` 시 스킵
 공격자 관점 검증: `Task(subagent_type="artibot:code-reviewer", model="sonnet", name="plan-critic", prompt="[Plan 적대 검증] 이 계획의 순환 의존, 누락된 테스트 단계, 숨은 비용, 2년 뒤 기술부채, 실존하지 않는 파일 참조, 비현실적 의존 순서를 전부 찾아내라")`.
 발견 항목은 종합안에 반영(재조정) 후 통과시킨다.
@@ -53,11 +55,65 @@ Parse $ARGUMENTS:
 - 되돌리기 어려운 단계는 `/migrate` 체크리스트 또는 `/adr` 기록을 권고.
 
 ### Phase 6 — HANDOFF (실행 인계)
-- `PlanTracker`(`lib/core/plan-tracker.js`)로 태스크 파싱 + `.plan-state.json` 저장 → 세션 간 추적.
+- **PRD 기본 생성 (ultraplan 기본 산출)**: `writePRD()`로 종합된 플랜을 PRD 문서(`docs/PRD/<slug>-<date>.md`)로 저장한다. ultraplan은 철저 모드이므로 PRD가 **기본 산출물**이다 (`/plan`과 달리 옵트인 아님). Phase 3에서 ADR을 만들었다면 그 번호/경로를 `linkedAdrs`로 PRD 헤더에 cross-link한다.
+- **TODO 추적 기본**: `syncTodo()`로 `.plan-state.json` 저장 → 세션 간 추적. PRD 본문에 이 state 경로를 cross-link로 명시한다.
+- 두 호출 모두 공유 산출물 레이어 `lib/planning/artifacts.js`를 통해 수행한다 (아래 "Artifacts Integration" 참조 — 직접 재구현 금지).
 - 실행 경로 추천(직교 2축):
   - **자리 비움/대형 무인작업** → `/autopilot "<task>" --goal "<검증가능 종료조건>"`
   - **병렬 협업/교차검증** → `/team` (Operator-Waits DNA로 자동 발화되기도 함)
   - **단순/단일 파일** → 인라인 즉시 구현
+
+## Artifacts Integration
+
+문서 산출물(PRD / ADR / TODO 추적)은 **공유 산출물 레이어** `lib/planning/artifacts.js`를 호출해 생성한다 (직접 재구현 금지 — `/plan`과 동일 레이어 공유). 세 함수의 정확한 시그니처:
+
+```
+writePRD({ projectRoot, slug, title, sections, linkedAdrs, now }) → { ok, prdPath }
+  // docs/PRD/<slug>-<date>.md 생성. linkedAdrs로 ADR 헤더 cross-link.
+ensureADR({ projectRoot, title, options, decision, rationale, now }) → { ok, adrPath, number }
+  // docs/adr/ADR-NNN-slug.md 생성 (멱등). options=비교한 실선택지(2개 이상).
+syncTodo({ projectRoot, planMarkdown, planFile, sessionId, now }) → { ok, stateFile, progress }
+  // .plan-state.json 기록. progress = { total, completed, percentage }
+```
+
+동적 import는 `CLAUDE_PLUGIN_ROOT` 기준 절대경로로 해석한다 (cwd 상대경로 금지 — `commands/autopilot.md` Step 1의 `toFileUrl`/`pluginRoot` 패턴 참고). `lib/planning/artifacts.js`를 후보 경로에서 찾아 `import()`한다.
+
+### Phase 3 — 결정 기록 (조건부)
+
+```js
+// 2개 이상 실선택지를 비교해 채택한 경우에만
+const { ok, adrPath, number } = ensureADR({
+  projectRoot: process.cwd(),
+  title: '<decision title>',
+  options: ['렌즈-mvp 안', '렌즈-arch 안'],  // 비교한 실선택지 (2개 이상)
+  decision: '<채택안>',
+  rationale: '<근거 — EVIDENCE/LENS SYNTHESIS 인용>',
+  now: new Date(),
+});
+const linkedAdrs = ok ? [{ number, adrPath }] : [];
+```
+
+### Phase 6 — PRD 생성 (기본) + TODO 추적 (기본)
+
+```js
+const { ok: prdOk, prdPath } = writePRD({
+  projectRoot: process.cwd(),
+  slug: '<feature-slug>',
+  title: '<task title>',
+  sections: { 배경, 목표, 비목표, 설계, 산출물, 실행계획, 위험, 수락기준, 근거 },
+  linkedAdrs,              // Phase 3에서 ADR 생성 시 cross-link (없으면 [])
+  now: new Date(),
+});
+
+const { stateFile, progress } = syncTodo({
+  projectRoot: process.cwd(),
+  planMarkdown,            // 종합된 최종 플랜 마크다운
+  planFile: prdPath,       // PRD 경로를 plan 원본으로 연결
+  sessionId: '<current-session>',
+  now: new Date(),
+});
+// PRD 본문에 stateFile(.plan-state.json) 경로를 cross-link로 명시한다.
+```
 
 ## Output Format
 
@@ -97,7 +153,7 @@ RISKS / ROLLBACK
 EXECUTION HANDOFF
 -----------------
 > 추천: /autopilot | /team | inline  +  근거
-> PlanTracker: .plan-state.json 저장됨 (N tasks)
+> PRD: docs/PRD/<slug>-<date>.md · ADR: docs/adr/ADR-NNN-slug.md|none · TODO: .plan-state.json (N tasks)
 ```
 
 ## Anti-Patterns
