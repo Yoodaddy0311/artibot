@@ -22,6 +22,7 @@ Parse $ARGUMENTS:
 - `feature-or-task`: Description of what needs to be implemented or changed
 - `--depth [level]`: `shallow` (high-level phases) | `deep` (detailed task breakdown)
 - `--scope [level]`: `file` | `module` | `project` | `system`
+- `--size [quick|session|epic]`: 계획을 **autopilot 자율실행 풋프린트 밴드**에 맞춰 사이징. **기본 `session`** = 2~4h autopilot 밴드(토큰 쓰며 도는 시간 기준, 사람 공수 아님). `quick` = 가벼움(<2h, 단발 작업), `epic` = 대형(>4h, 분할 권장). /plan은 가벼운 용도이므로 `--size quick`로 경량 유지 가능
 - `--risks`: Emphasize risk identification and mitigation strategies
 - `--prd`: 플랜을 PRD 문서로도 저장 (opt-in — /plan 기본은 PRD 미생성, 가벼움 유지)
 - `--adr`: 플랜에 either/or 결정이 있으면 ADR로 기록 (opt-in — 절대 기본 자동 아님)
@@ -48,18 +49,24 @@ Parse $ARGUMENTS:
    - Circular dependencies between phases
    - Missing test phases
    - Unreferenced files in the codebase
-5. **Persist (기본 — TODO 추적)**: 플랜 생성 직후 공유 산출물 레이어를 호출해 `.plan-state.json`에 진행상태를 기록한다 (아래 "Artifacts Integration" 참조). 이것이 `/plan`의 유일한 기본 산출물이다 (PRD/ADR은 옵트인).
-6. **Optional artifacts (옵트인)**:
+5. **Size (autopilot 풋프린트 사이징)**: 분해된 태스크를 `{type,complexity}` 배열로 매핑해 공유 사이저 `sizePlan()`을 호출하고 (아래 "Artifacts Integration §0" 참조), 결과에 따라 계획을 밴드에 맞춘다:
+   - 한 줄 요약: **"예상 autopilot 풋프린트: ~X.XM tokens / ~Y.Yh (tier, confidence)"**.
+   - `recommendation==='expand'`(밴드 미달): **품질축으로 확장** — 엣지케이스·테스트·하드닝·관측·문서 단계를 추가한다. **기능 스코프를 억지로 확대하지 않는다** (없던 기능 끼워넣기 금지).
+   - `recommendation==='split'`(밴드 초과): `splitInto` 개 autopilot 세션으로 **분할**하고 각 세션의 goal을 제시한다.
+   - `recommendation==='ok'`: 그대로 진행.
+   - `--size quick`이면 quick 밴드로(<2h) 경량 사이징, `--size epic`이면 epic(>4h, 분할 전제)으로 호출한다 (기본 `session`).
+6. **Persist (기본 — TODO 추적)**: 플랜 생성 직후 공유 산출물 레이어를 호출해 `.plan-state.json`에 진행상태를 기록한다 (아래 "Artifacts Integration" 참조). 이것이 `/plan`의 유일한 기본 산출물이다 (PRD/ADR은 옵트인).
+7. **Optional artifacts (옵트인)**:
    - `--prd` 지정 시: `writePRD()`로 플랜을 PRD 문서(`docs/PRD/<slug>-<date>.md`)로 저장.
    - `--adr` 지정 시 **그리고** 플랜에 either/or 결정(2개 이상 실선택지 비교)이 있을 때만: `ensureADR()`로 결정 기록. 결정이 없으면 ADR을 만들지 않는다 (스팸 방지).
-7. **Status / Done (조회·마킹 흐름)**:
+8. **Status / Done (조회·마킹 흐름)**:
    - `--status` 지정 시: PlanTracker를 `.plan-state.json`에서 복원 → `getProgress()` 결과를 진행률 표로 출력 (플랜 생성·신규 산출물 없음).
    - `--done <n>` 지정 시: PlanTracker 복원 → `markCompleted(n)` → `syncTodo()`로 state 재기록.
-8. **Lifecycle 관리 (문서 라이프사이클 — 조회·아카이브·승계)**: 아래 플래그는 플랜을 새로 만들지 않고 기존 PRD/플랜 문서를 관리한다 (상세 호출은 "Artifacts Integration §6~8" 참조):
+9. **Lifecycle 관리 (문서 라이프사이클 — 조회·아카이브·승계)**: 아래 플래그는 플랜을 새로 만들지 않고 기존 PRD/플랜 문서를 관리한다 (상세 호출은 "Artifacts Integration §6~8" 참조):
    - `--list [filter]` 지정 시: `listArtifacts({filter})` 결과를 표로 출력 (조회 전용 — 플랜 생성·이동 없음).
    - `--archive` 지정 시: 기본 `archiveStale({dryRun:true})`로 **이동 예정 목록만** 미리보기 → 사용자가 `--apply`를 추가하면 `dryRun:false`로 실제 `_archive/` 이동 + `indexArtifacts()`로 INDEX.md 갱신. **삭제 아님(이동), git 추적이라 복구 가능**.
    - `--supersede <oldSlug> <newPath>` 지정 시: `supersede()`로 옛 문서에 superseded 표식.
-9. **Report**: Output structured plan with TaskCreate integration
+10. **Report**: Output structured plan with TaskCreate integration. 마지막에 autopilot 핸드오프 라인을 사이징 결과(`autopilot.maxHint`/`autopilot.budgetHint`)에 맞춰 출력한다 (아래 Output Format 참조).
 
 ## Plan Structure
 
@@ -95,9 +102,49 @@ PHASE 2: [name]
 RISKS
 -----
 [severity] [description] -> [mitigation]
+
+SIZING (autopilot 풋프린트)
+---------------------------
+예상 autopilot 풋프린트: ~X.XM tokens / ~Y.Yh (tier, confidence)
+밴드: [quick|session|epic]  추천: [ok|expand|split(→N 세션)]
+
+HANDOFF
+-------
+> 자율실행: /autopilot "<task>" --goal "<검증가능 종료조건>" --max {autopilot.maxHint} --budget {autopilot.budgetHint}
 ```
 
+> **정직성**: 토큰→시간 환산은 밴드+confidence 기반 **휴리스틱 추정**이며 보장값이 아니다. 실제 하드스톱은 autopilot의 `--max`/`--budget`이다 (사이징은 그 값을 추천할 뿐 강제하지 않는다).
+
 ## Artifacts Integration
+
+### 0. autopilot 풋프린트 사이징 (`sizePlan`)
+
+계획 분해(Execution Flow Step 5) 직후, 공유 사이저 `lib/planning/session-sizer.js`를 호출해 autopilot 자율실행 풋프린트를 추정한다. 이 레이어를 재구현하지 않고 **호출만** 한다. 정확한 시그니처:
+
+```
+sizePlan(tasks, opts) → { footprint:{tokens,hours,tier,confidence}, sizing:{band,recommendation,splitInto,target}, autopilot:{maxHint,budgetHint} }
+estimateFootprint(tasks, opts) → { tokens, hours, tier, confidence, perTask }
+classifySize(hours, opts) → { band, target, recommendation, splitInto }
+// tasks = [{ type:'impl'|'test'|'review'|'docs'|'other', complexity?:'low'|'medium'|'high' }]
+```
+
+`sizePlan`은 `lib/planning/artifacts.js`와 **동일한 동적 import 패턴**(아래 "호출 방법" — `CLAUDE_PLUGIN_ROOT` 기준 절대경로)으로 `lib/planning/session-sizer.js`에서 import한다.
+
+```js
+const { sizePlan } = await import(toFileUrl(path.join(pluginRoot, 'lib/planning/session-sizer.js')));
+const tasks = phases.flatMap((p) => p.tasks.map((t) => ({ type: t.kind, complexity: t.complexity })));
+const { footprint, sizing, autopilot } = sizePlan(tasks, { size: sizeFlag /* quick|session|epic, 기본 session */ });
+// footprint = { tokens, hours, tier, confidence }
+// sizing = { band, recommendation: 'ok'|'expand'|'split', splitInto, target }
+// autopilot = { maxHint, budgetHint }   ← /autopilot --max / --budget 에 그대로 매칭
+```
+
+- `recommendation==='expand'`(밴드 미달): 품질축(엣지케이스·테스트·하드닝·관측·문서)으로 확장. **기능 스코프 억지 확대 금지**.
+- `recommendation==='split'`(밴드 초과): `splitInto` 개 autopilot 세션으로 분할 + 각 세션 goal 제시.
+- `recommendation==='ok'`: 그대로 진행.
+- 출력은 Output Format의 `SIZING` 블록과 `HANDOFF` 라인에 반영한다. **토큰→시간은 휴리스틱 추정**이며 autopilot의 `--max`/`--budget`이 실제 하드스톱이다.
+
+### 산출물 함수
 
 문서 산출물(TODO 추적 / PRD / ADR)은 **공유 산출물 레이어** `lib/planning/artifacts.js`를 호출해 생성한다. `/plan`은 이 레이어를 직접 재구현하지 않고 **호출만** 한다. 세 함수의 정확한 시그니처:
 

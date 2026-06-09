@@ -25,6 +25,7 @@ Parse $ARGUMENTS:
 - `--lenses N`: 2단계 council 관점 수 (기본 3, 범위 2~4)
 - `--scope [file|module|project|system]`: 분석 범위 (기본 project)
 - `--no-adversarial`: 4단계 적대적 검증 스킵 (비권장)
+- `--size [quick|session|epic]`: 계획을 **autopilot 자율실행 풋프린트 밴드**에 맞춰 사이징. **기본 `session`** = 2~4h autopilot 밴드(토큰 쓰며 도는 시간 기준, 사람 공수 아님). `quick` = 가벼움(<2h), `epic` = 대형(>4h, 분할 권장)
 
 ## 6-Phase Pipeline
 
@@ -55,15 +56,45 @@ Parse $ARGUMENTS:
 - 되돌리기 어려운 단계는 `/migrate` 체크리스트 또는 `/adr` 기록을 권고.
 
 ### Phase 6 — HANDOFF (실행 인계)
+- **autopilot 풋프린트 사이징 (기본)**: 종합된 최종 플랜의 태스크를 `{type,complexity}` 배열로 매핑해 공유 사이저 `sizePlan()`을 호출한다 (아래 "Artifacts Integration §0" 참조). 결과를 EXECUTION HANDOFF에 반영한다:
+  - 한 줄 요약: **"예상 autopilot 풋프린트: ~X.XM tokens / ~Y.Yh (tier, confidence)"**.
+  - `recommendation==='expand'`(밴드 미달): 품질축(엣지케이스·테스트·하드닝·관측·문서)으로 **확장 지시**. **기능 스코프 억지 확대 금지**.
+  - `recommendation==='split'`(밴드 초과): `splitInto` 개 autopilot 세션으로 **분할** + 각 세션 goal 제시.
+  - `recommendation==='ok'`: 그대로 진행. 기본 밴드는 `session`(2~4h), `--size`로 조정.
 - **PRD 기본 생성 (ultraplan 기본 산출)**: `writePRD()`로 종합된 플랜을 PRD 문서(`docs/PRD/<slug>-<date>.md`)로 저장한다. ultraplan은 철저 모드이므로 PRD가 **기본 산출물**이다 (`/plan`과 달리 옵트인 아님). Phase 3에서 ADR을 만들었다면 그 번호/경로를 `linkedAdrs`로 PRD 헤더에 cross-link한다.
 - **TODO 추적 기본**: `syncTodo()`로 `.plan-state.json` 저장 → 세션 간 추적. PRD 본문에 이 state 경로를 cross-link로 명시한다.
-- 두 호출 모두 공유 산출물 레이어 `lib/planning/artifacts.js`를 통해 수행한다 (아래 "Artifacts Integration" 참조 — 직접 재구현 금지).
+- 세 호출(`sizePlan`/`writePRD`/`syncTodo`) 모두 공유 레이어(`lib/planning/session-sizer.js` · `lib/planning/artifacts.js`)를 통해 수행한다 (아래 "Artifacts Integration" 참조 — 직접 재구현 금지).
 - 실행 경로 추천(직교 2축):
-  - **자리 비움/대형 무인작업** → `/autopilot "<task>" --goal "<검증가능 종료조건>"`
+  - **자리 비움/대형 무인작업** → `/autopilot "<task>" --goal "<검증가능 종료조건>" --max {autopilot.maxHint} --budget {autopilot.budgetHint}` (사이징 결과를 max/budget에 매칭)
   - **병렬 협업/교차검증** → `/team` (Operator-Waits DNA로 자동 발화되기도 함)
   - **단순/단일 파일** → 인라인 즉시 구현
 
 ## Artifacts Integration
+
+### 0. autopilot 풋프린트 사이징 (`sizePlan`)
+
+Phase 6에서 종합된 플랜의 태스크를 `{type,complexity}` 배열로 매핑해 공유 사이저 `lib/planning/session-sizer.js`를 호출한다 (재구현 금지 — 호출만). 정확한 시그니처:
+
+```
+sizePlan(tasks, opts) → { footprint:{tokens,hours,tier,confidence}, sizing:{band,recommendation,splitInto,target}, autopilot:{maxHint,budgetHint} }
+estimateFootprint(tasks, opts) → { tokens, hours, tier, confidence, perTask }
+classifySize(hours, opts) → { band, target, recommendation, splitInto }
+// tasks = [{ type:'impl'|'test'|'review'|'docs'|'other', complexity?:'low'|'medium'|'high' }]
+```
+
+import은 `artifacts.js`와 **동일한 동적 import 패턴**(`CLAUDE_PLUGIN_ROOT` 기준 절대경로)으로 `session-sizer.js`에서 한다.
+
+```js
+const { sizePlan } = await import(toFileUrl(path.join(pluginRoot, 'lib/planning/session-sizer.js')));
+const tasks = phases.flatMap((p) => p.tasks.map((t) => ({ type: t.kind, complexity: t.complexity })));
+const { footprint, sizing, autopilot } = sizePlan(tasks, { size: sizeFlag /* quick|session|epic, 기본 session */ });
+// autopilot.maxHint / autopilot.budgetHint → EXECUTION HANDOFF의 /autopilot --max / --budget
+// sizing.recommendation: 'ok'(진행) | 'expand'(품질축 확장) | 'split'(splitInto 세션 분할)
+```
+
+> **정직성**: 토큰→시간 환산은 밴드+confidence 기반 **휴리스틱 추정**이며 보장값이 아니다. 실제 하드스톱은 autopilot의 `--max`/`--budget`이다 (사이징은 그 값을 추천만 한다).
+
+### 산출물 함수
 
 문서 산출물(PRD / ADR / TODO 추적)은 **공유 산출물 레이어** `lib/planning/artifacts.js`를 호출해 생성한다 (직접 재구현 금지 — `/plan`과 동일 레이어 공유). 세 함수의 정확한 시그니처:
 
@@ -152,9 +183,14 @@ RISKS / ROLLBACK
 
 EXECUTION HANDOFF
 -----------------
-> 추천: /autopilot | /team | inline  +  근거
+> 풋프린트: ~X.XM tokens / ~Y.Yh (tier, confidence)  ·  밴드: [quick|session|epic]  ·  추천: [ok|expand|split(→N 세션)]
+> 추천 경로: /autopilot | /team | inline  +  근거
+> 자율실행: /autopilot "<task>" --goal "<검증가능 종료조건>" --max {autopilot.maxHint} --budget {autopilot.budgetHint}
+> (split 시) 세션 1: <goal> · 세션 2: <goal> · …
 > PRD: docs/PRD/<slug>-<date>.md · ADR: docs/adr/ADR-NNN-slug.md|none · TODO: .plan-state.json (N tasks)
 ```
+
+> **정직성**: 토큰→시간은 휴리스틱 추정(밴드+confidence)이며 보장 아님. autopilot의 `--max`/`--budget`이 실제 하드스톱이다.
 
 ## Anti-Patterns
 
