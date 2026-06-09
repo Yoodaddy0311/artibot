@@ -10,6 +10,12 @@ lifecycle: plan
 
 Create structured implementation plans using the planner agent. Decomposes complex work into phases with dependency tracking and risk assessment.
 
+> **/plan vs /ultraplan vs deep-research — 헷갈리지 않기**
+> - **/plan** (여기) — 빠른 구현 설계. 단일 planner가 단계·의존성·리스크를 분해. 범위가 명확할 때.
+> - **/ultraplan** — 상위 등급. 근거수집(deep-research) + 다관점 의회 + 적대적 검증 + 실행 핸드오프. 위험·비용·장기부채 큰 결정, 마이그레이션, 아키텍처 변경에.
+> - **deep-research 스킬** — "무엇이 진실인가"(사실 조사) 자체가 목적일 때. 구현 계획이 아니라 조사. (`/ultraplan`이 1단계로 내부 호출)
+> 정리: **계획=/plan, 철저한 계획=/ultraplan, 조사=deep-research.**
+
 ## Arguments
 
 Parse $ARGUMENTS:
