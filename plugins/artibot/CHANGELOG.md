@@ -13,6 +13,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.25.0] — 2026-06-09
+
+**Theme**: `/ultraplan` 재설계 + 문서 산출 통합 + autopilot 사이징 + 릴리즈 게이트 install 검증
+
+### Added
+- **`/ultraplan` 최상위 플래닝 모드 재설계** — 6-phase: GROUND→DIVERGE→JUDGE→ADVERSARIAL→HARDEN→HANDOFF. plan/ultraplan/deep 개념 명확화
+- **plan/ultraplan 문서 산출 통합** — 공유 아티팩트 레이어(`lib/planning/artifacts.js`): PRD·ADR·TODO 생성(`writePRD`/`ensureADR`/`syncTodo`)
+- **문서 라이프사이클 관리** — `listArtifacts`/`indexArtifacts`/`archiveStale`/`supersede` + 중복 가드(`/plan --list/--archive/--supersede`). 1,914개 PRD 누적 정리 인프라
+- **autopilot-sized 플래닝** (`lib/planning/session-sizer.js`) — 자율빌드 2~4h 밴드 사이징(`--size quick|session|epic`) + autopilot `--max`/`--budget` 핸드오프
+- **릴리즈 게이트 install/update 검증** (`scripts/ci/validate-install.js` + PARITY_MATRIX, ci/release 편입)
+
+### Fixed
+- **autopilot `git-autopilot-session` base 브랜치 강제 전환 버그** — direct-on-base 가드로 sibling 브랜치 강제 전환 차단
+- **statusline 버전 표기 복원** — `package.json` 경로 fix
+
+---
+
 ## [4.24.0] — 2026-06-09
 
 **Theme**: github MCP 제거·명칭 통일·lifecycle 활성화·autopilot 락 수정·install 패리티
