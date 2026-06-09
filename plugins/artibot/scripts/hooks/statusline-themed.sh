@@ -24,8 +24,11 @@ MODEL=$(jget '.model.display_name' ''); [ -z "$MODEL" ] && MODEL=$(jget '.model.
 PCT=$(jget '.context_window.used_percentage' '0'); PCT=${PCT%%.*}; [ -z "$PCT" ] && PCT=0
 COST=$(jget '.cost.total_cost_usd' '')
 DIR=$(basename "$PWD"); BRANCH=$(git branch --show-current 2>/dev/null || true)
-VER=''; PKG="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/package.json"
-[ -f "$PKG" ] && command -v node >/dev/null 2>&1 && VER=$(ARTIBOT_PKG_JSON="$(cat "$PKG" 2>/dev/null)" node -e "try{process.stdout.write(JSON.parse(process.env.ARTIBOT_PKG_JSON||'{}').version||'')}catch{}" 2>/dev/null || true)
+# Plugin root is two levels up from scripts/hooks/. Prefer package.json, fall
+# back to artibot.config.json so the version still renders if either is absent.
+VER=''; PLUGROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+VERSRC="${PLUGROOT}/package.json"; [ -f "$VERSRC" ] || VERSRC="${PLUGROOT}/artibot.config.json"
+[ -f "$VERSRC" ] && command -v node >/dev/null 2>&1 && VER=$(ARTIBOT_PKG_JSON="$(cat "$VERSRC" 2>/dev/null)" node -e "try{process.stdout.write(JSON.parse(process.env.ARTIBOT_PKG_JSON||'{}').version||'')}catch{}" 2>/dev/null || true)
 
 # ── Theme palette (node emits shell-eval vars; defaults = neon-city) ──────────
 PR=0; PG=245; PB=255; AR=255; AG=0; AB=110; DR=70; DG=40; DB=90; XR=255; XG=23; XB=68
