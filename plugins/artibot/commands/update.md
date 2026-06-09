@@ -5,7 +5,7 @@ allowed-tools: [Bash, Read]
 toolset: meta
 ---
 
-# /artibot:update
+# /update
 
 Check the current Artibot version against the latest GitHub release and auto-update if a newer version is available.
 

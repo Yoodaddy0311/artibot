@@ -44,16 +44,19 @@ Parse $ARGUMENTS:
 
 ### Phase B: 합성 (~0.5s)
 
-1. `lib/handoff/handoff-builder.js` 의 `collectHandoffData({ pluginRoot, projectRoot, gitRunner, taskList, now })` 호출
-2. 결과를 `renderHandoffMarkdown(data, { now })` 로 GFM 마크다운 변환 (ANSI 금지)
-3. 마크다운에 다음 섹션 포함:
-   - `# Handoff: <project> @ <timestamp>` 헤더
+1. **첫 프롬프트 후보 생성**: Phase A에서 모은 신호로 `lib/handoff/next-prompt-suggester.js` 의 `suggestFirstPrompts(signals, { max: 3 })` 호출. `signals` 는 실제 시그니처에 맞춰 `{ tasks, recentCommits, wip, gitStatus, unresolved, advisorSignals }` 로 구성 (`tasks`=TaskList 결과, `recentCommits`=git log 10개, `wip`=`{ count, oldestAgeMs }`, `gitStatus`=`{ untracked }`. `unresolved`/`advisorSignals` 는 현재 reserved). 반환 배열 `firstPrompts` = `[{ prompt, rationale, priority }]`.
+2. `lib/handoff/handoff-builder.js` 의 `collectHandoffData({ pluginRoot, projectRoot, gitRunner, taskList, firstPrompts, now })` 호출 — Step 1에서 만든 `firstPrompts` 를 반드시 전달해야 §4·§6 이 채워짐 (생략 시 빈 배열 → "자동 생성됨" placeholder만 출력)
+3. 결과를 `renderHandoffMarkdown(data, { now })` 로 GFM 마크다운 변환 (ANSI 금지)
+4. 마크다운에 다음 8개 섹션 포함 (헤더 문자열은 `handoff-builder.js` `renderHandoffMarkdown` 출력과 정확히 일치):
+   - `# HANDOFF — <timestamp>` 헤더 + `> 다음 P0: …` 요약 한 줄
    - `## 1. 지금 상태` — 브랜치, HEAD, 변경 파일 수, WIP, 테스트 + **`### Git 동기화 상태` 서브섹션**(커밋안됨/ahead/behind/upstream/GitHub 최신성/다른 머신 의심 표 + 경고 + 권장 액션). `renderSyncDashboard` 가 §1 내부에 출력하므로 기존 `## 1.`/`## 5.` 배너 정규식은 그대로 유지됨
-   - `## 2. 최근 커밋` — top 10
-   - `## 3. 진행 중 작업` — TaskList in_progress + pending(blocker 없음)
-   - `## 4. 다음 P0` — `next-prompt-suggester` 결과 1줄 (rationale 포함)
-   - `## 5. 미해결 결정/질문` — advisor pending + worklog 보류
-   - `## 6. 권장 첫 프롬프트 1~3개` — `suggestFirstPrompts({ unresolved, wip, advisorSignals, tasks, gitStatus, recentCommits }, { max: 3 })`
+   - `## 2. 이번 세션 한 일` — 최근 커밋 top 10
+   - `## 3. 의도/현재 가설` — 다음 세션 시작 시 채우거나 git/task에서 추론
+   - `## 4. 즉시 진행할 일` — `firstPrompts` 우선순위 표 (우선순위·항목·근거·예상)
+   - `## 5. 미해결 결정/질문` — advisor pending + worklog 보류 + WIP advisory
+   - `## 6. 다음 세션 첫 프롬프트 후보` — `firstPrompts` 1~3개 (priority + prompt + rationale)
+   - `## 7. 컨텍스트 복원 핵심 파일` — 최근 변경된 핵심 파일 경로
+   - `## 8. 메타` — 생성 시각·소요·sources
 
 ### Phase C: 저장 (~0.2s)
 
