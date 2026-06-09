@@ -761,8 +761,7 @@
       "enabled": false,
       "allowList": [
         "plugin:artibot:playwright",
-        "plugin:artibot:context7",
-        "mcp__github__*"
+        "plugin:artibot:context7"
       ],
       "blockExternal": true,
       "allowedPrefix": "plugin:artibot:",
@@ -770,7 +769,7 @@
         "https?://(?!localhost|127\\.0\\.0\\.1|::1|0\\.0\\.0\\.0|api\\.githubcopilot\\.com)",
         "\\.(s3|amazonaws|googleapis|blob\\.core\\.windows|firebaseio)\\."
       ],
-      "comment": "MCP-driven Verification (P0-4): Artibot self-plugin MCPs + official GitHub MCP (api.githubcopilot.com) allowed. External MCP/host blocked. opt-in via --mcp-verify. v4.7.5: github (read-only via PAT, mcp__github__*)."
+      "comment": "MCP-driven Verification (P0-4): Artibot self-plugin MCPs allowed. External MCP/host blocked. opt-in via --mcp-verify."
     }
   },
   "git": {
@@ -982,6 +981,7 @@
   },
   "runtime": {
     "middleware": [
+      "lifecycle",
       "router",
       "subagents",
       "tasks",
