@@ -68,6 +68,9 @@ jobs:
       - name: Validate hooks
         run: node scripts/ci/validate-hooks.js
 
+      - name: Validate docs
+        run: node scripts/ci/validate-doc-links.js && node scripts/ci/validate-md-rendering.js
+
       - name: Validate README claims (structural — PR fast gate)
         if: github.event_name == 'pull_request'
         run: node scripts/ci/validate-readme-claims.js

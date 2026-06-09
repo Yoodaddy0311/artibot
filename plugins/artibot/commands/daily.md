@@ -163,13 +163,14 @@ All body sections use pure GFM markdown (NO ANSI colors inside tables — they b
 | 지표 | 값 | 상태 |
 |------|-----|------|
 | 테스트 | **N개** 통과 / N 실패 | ✅ or ❌ |
-| 커버리지 | **N%** stmt · **N%** branch | ✅ (>=90%) or ⚠️ |
+| 커버리지 | **N%** stmt · **N%** branch | ✅ (>=85% stmt) or ⚠️ |
 | ESLint | **N** error · **N** warning | ✅ (0 errors) or ❌ |
 ```
 
-- ✅ when: 0 test failures, coverage >= 90% stmt, 0 lint errors
+- CI gate (`scripts/ci/validate-coverage.js`): Statements 85 / Branches 76 / Functions 85 / Lines 85 (vitest.config.js local gate: 80/76/80/80)
+- ✅ when: 0 test failures, coverage >= 85% stmt, 0 lint errors
 - ❌ when: any test failures or lint errors
-- ⚠️ when: coverage < 90% but > 80%, or warnings only
+- ⚠️ when: coverage < 85% stmt but > 80%, or warnings only
 - If `--quick`: show `> 품질 현황: --quick 모드로 생략됨`
 - If past date: show `> 품질 현황: 과거 날짜는 지원하지 않습니다`
 

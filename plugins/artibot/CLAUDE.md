@@ -62,7 +62,7 @@ See also: `commands/team.md` (hint cross-reference), `commands/autopilot.md` (hi
 - Read before write (no blind modifications)
 - Functions < 50 lines, files < 800 lines
 - Immutable patterns (spread/create new, never mutate)
-- 80%+ coverage target; current thresholds: Statements 90 / Branches 85 / Functions 88 / Lines 90
+- 80%+ coverage target; CI gate (`scripts/ci/validate-coverage.js`): Statements 85 / Branches 76 / Functions 85 / Lines 85 (vitest.config.js local gate is 80/76/80/80)
 
 ## Context Efficiency
 
