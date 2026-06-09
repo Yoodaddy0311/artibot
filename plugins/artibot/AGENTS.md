@@ -13,8 +13,8 @@
 |---|---|
 | Source of truth | `plugins/artibot/agents/*.md` (YAML frontmatter + body) |
 | Agent count | 28 (21 opus / 7 sonnet) |
-| Skill count | 111 |
-| Command count | 66 |
+| Skill count | 113 |
+| Command count | 71 |
 | Native orchestration | Claude Agent Teams API (`TeamCreate`, `SendMessage`, `TaskCreate/Update/List/Get`) |
 | Cross-tool export | `scripts/export-to-tool.mjs` |
 | Graceful-degradation modes | `agent-teams` → `sub-agent` → `direct` (see `artibot.config.json`) |
@@ -229,7 +229,7 @@ All contributions must respect Artibot's **local-only data policy** — exports 
 | `plugins/artibot/.well-known/mcp-server.json` | `version` | plugin version |
 | `plugins/artibot/AGENTS.md` | this section | plugin version |
 
-Current plugin version: **4.23.0**. Keep the five in lockstep — `scripts/release-check.js` enforces all five.
+Current plugin version: **4.24.0**. Keep the five in lockstep — `scripts/release-check.js` enforces all five.
 
 ---
 

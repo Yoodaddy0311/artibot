@@ -13,6 +13,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.24.0] — 2026-06-09
+
+**Theme**: github MCP 제거·명칭 통일·lifecycle 활성화·autopilot 락 수정·install 패리티
+
+### Fixed
+- **github MCP 서버 완전 제거** — `.mcp.json` / 에이전트 frontmatter / docs / `artibot.config.json` `allowList`+`denyHostPatterns` 잔존 참조 정리; playwright `@latest` → 버전 핀; mcp-config 회귀 가드 테스트 추가
+- **`/artibot:update` → `/update` 명칭 통일** — flat-copy 설치 정합성 복구; `/save`·`/resume` 핸드오프 복구 (첫 프롬프트 후보 생성·섹션 정렬·resume 정규식 수정)
+- **lifecycle 미들웨어 활성화** — 10→11 stage (defaultPipeline·테스트 정렬 포함)
+- **autopilot 락 staleness 해소** — 세션 생존 확인 로직 추가로 PID 재사용·락 누수에 의한 영구 PAUSE 버그 수정
+
+### Added
+- **install.ps1 ↔ install.sh 기능 패리티** — self-install 가드, source-repo.json, install.sh 복사, MCP/메모리 시딩, marketplace/cache 미러; `update.js` Windows PowerShell-우선 폴백 → 크로스머신 `/update` 실패 근본 수정
+
+### Changed
+- `_deprecated` 훅 4파일 제거 (-389줄), `update.js` 978→741줄 분할 (`scripts/update-platform.js` 신규), CI `docs:check` 추가, 커버리지 문서 임계값 정정 (85/76/85/85)
+
+---
+
 ## [4.23.0] — 2026-06-08
 
 **Theme**: `/theme`에 VS Code 통합 터미널 색 추가 (4번째 표면)
