@@ -29,8 +29,6 @@ tools:
   - TaskUpdate
   - TaskList
   - TaskGet
-availableMcps:
-  - github        # read-only via GITHUB_TOKEN PAT — fetch PR diff/files/comments for review
 permissionMode: acceptEdits
 maxTurns: 25
 skills:

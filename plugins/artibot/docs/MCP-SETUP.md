@@ -1,110 +1,79 @@
 # MCP Setup Guide
 
-Artibot ships three MCP servers via `plugins/artibot/.mcp.json`:
+Artibot ships three MCP servers via `plugins/artibot/.mcp.json`. All three run
+locally over stdio through `npx`, require **no authentication**, and work out of
+the box — Claude Code installs each package on first use.
 
 | Server | Transport | Auth | Purpose |
 |---|---|---|---|
-| `context7` | stdio (npx) | none | Library/framework documentation lookup |
-| `playwright` | stdio (npx) | none | Browser automation for E2E |
-| `github` | http (remote) | PAT | Read GitHub repos / issues / PRs / code-scanning alerts |
-
-`context7` and `playwright` work out of the box. `github` requires one-time PAT setup.
+| `context7` | stdio (npx) | none | Library / framework documentation lookup |
+| `playwright` | stdio (npx) | none | Browser automation for E2E and UI checks |
+| `chrome-devtools` | stdio (npx) | none | Chrome DevTools protocol — DOM, network, performance traces |
 
 ---
 
-## GitHub MCP — One-Time PAT Setup
+## Configuration
 
-The official GitHub MCP server (`github/github-mcp-server`) is hosted by GitHub at `https://api.githubcopilot.com/mcp/`. Artibot configures it via the `http` transport and authenticates with your Personal Access Token, read from the `GITHUB_TOKEN` environment variable.
+The servers are declared in `plugins/artibot/.mcp.json`:
 
-**Read-only by design.** Allow-list (`mcp__github__*`) and recommended PAT scopes are scoped to read operations. Do not grant write scopes unless you explicitly need them.
-
-### 1. Create a Fine-grained PAT (recommended)
-
-1. Open <https://github.com/settings/personal-access-tokens/new>
-2. Token name: `artibot-mcp-readonly`
-3. Expiration: 90 days (rotate regularly)
-4. Repository access: select the repos Artibot agents should see
-5. Repository permissions (Read only):
-   - **Contents**: Read
-   - **Issues**: Read
-   - **Pull requests**: Read
-   - **Metadata**: Read (auto-enabled)
-   - **Code scanning alerts**: Read (optional, for `security-reviewer`)
-   - **Dependabot alerts**: Read (optional, for `security-reviewer`)
-6. Click **Generate token** and copy the value (`github_pat_...`).
-
-### 2. Set the `GITHUB_TOKEN` environment variable
-
-**Windows (PowerShell — persistent for current user):**
-```powershell
-[System.Environment]::SetEnvironmentVariable("GITHUB_TOKEN", "github_pat_xxxxx", "User")
-```
-Open a new shell after running. Verify with `$env:GITHUB_TOKEN`.
-
-**macOS / Linux (zsh):**
-```bash
-echo 'export GITHUB_TOKEN=github_pat_xxxxx' >> ~/.zshrc
-source ~/.zshrc
+```json
+{
+  "mcpServers": {
+    "context7": {
+      "command": "npx",
+      "args": ["-y", "@upstash/context7-mcp@latest"]
+    },
+    "playwright": {
+      "command": "npx",
+      "args": ["-y", "@executeautomation/playwright-mcp-server@latest"]
+    },
+    "chrome-devtools": {
+      "command": "npx",
+      "args": ["-y", "chrome-devtools-mcp@latest"]
+    }
+  }
+}
 ```
 
-**macOS / Linux (bash):**
-```bash
-echo 'export GITHUB_TOKEN=github_pat_xxxxx' >> ~/.bashrc
-source ~/.bashrc
-```
+> **Note (Claude Code v2.1.69 bug #30989):** do not set `defer_loading` and
+> `cache_control` simultaneously on the same server entry — MCP fails to load.
 
-**Per-project `.env` (alternative — keep out of git):**
-```
-GITHUB_TOKEN=github_pat_xxxxx
-```
-Confirm `.env` is in `.gitignore` before saving.
+---
 
-### 3. Verify
+## Verify
 
 Restart Claude Code so it re-reads `.mcp.json`, then run:
+
 ```bash
 claude mcp list
 ```
-The `github` entry should appear without error. If it shows missing-auth, the env var did not propagate — open a fresh shell and retry.
+
+All three entries (`context7`, `playwright`, `chrome-devtools`) should appear
+without error. On first invocation `npx` downloads each package; subsequent runs
+use the npm cache.
 
 ---
 
-## Security Notes
+## Usage
 
-- **Never commit a PAT.** Treat it like a password. If leaked, revoke immediately at <https://github.com/settings/tokens>.
-- **Prefer fine-grained PATs** over classic tokens — they scope to specific repos and individual permissions.
-- **Rotate every 60–90 days.** Generate a new PAT, update `GITHUB_TOKEN`, then revoke the old one.
-- **Read-only is the default.** Artibot's `autopilot.mcp.allowList` permits `mcp__github__*` reads; write tools (create issue/PR, push) are blocked at the MCP layer regardless of PAT scope.
+- **context7** — fetch up-to-date docs for a library before implementing against it.
+- **playwright** — drive a headless browser for end-to-end flows and screenshots.
+- **chrome-devtools** — inspect DOM, capture network requests, and profile pages.
 
----
-
-## Which Agents Use the GitHub MCP
-
-Only agents with `availableMcps: [github]` in their frontmatter can call GitHub tools:
-
-- `orchestrator` — delegation context (which PRs/issues are open)
-- `code-reviewer` — fetch PR diffs, files, review threads
-- `security-reviewer` — read code-scanning / Dependabot alerts
-- `frontend-developer`, `backend-developer` — fetch issue/PR context for the work they implement
-
-Other agents (data-analyst, content-marketer, presentation-designer, …) cannot access GitHub MCP tools. To extend access, add `availableMcps: [github]` to that agent's frontmatter and re-load.
+No environment variables or tokens are required for any server.
 
 ---
 
 ## Disabling
 
-To disable the GitHub MCP entirely without removing the entry, simply unset `GITHUB_TOKEN`:
-```powershell
-[System.Environment]::SetEnvironmentVariable("GITHUB_TOKEN", $null, "User")
-```
-The `.mcp.json` entry will still be parsed but the server will fail authentication and Claude Code will skip it. Other MCPs (context7, playwright) are unaffected.
-
-To remove permanently, delete the `"github"` block from `plugins/artibot/.mcp.json`.
+To disable a server temporarily, remove (or comment out) its block from
+`plugins/artibot/.mcp.json` and restart Claude Code. The remaining servers are
+unaffected.
 
 ---
 
 ## References
 
-- Official server source: <https://github.com/github/github-mcp-server>
-- Claude Code install guide: <https://github.com/github/github-mcp-server/blob/main/docs/installation-guides/install-claude.md>
-- Fine-grained PAT docs: <https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-fine-grained-personal-access-token>
+- context7: <https://github.com/upstash/context7>
+- playwright MCP: <https://github.com/executeautomation/mcp-playwright>
+- chrome-devtools MCP: <https://github.com/ChromeDevTools/chrome-devtools-mcp>

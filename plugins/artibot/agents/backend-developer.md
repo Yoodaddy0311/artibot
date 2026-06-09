@@ -28,8 +28,6 @@ tools:
   - TaskUpdate
   - TaskList
   - TaskGet
-availableMcps:
-  - github        # read-only via GITHUB_TOKEN PAT — fetch issue/PR context for backend work
 permissionMode: acceptEdits
 maxTurns: 25
 skills:

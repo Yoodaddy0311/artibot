@@ -29,8 +29,6 @@ tools:
   - TaskUpdate
   - TaskList
   - TaskGet
-availableMcps:
-  - github        # read-only via GITHUB_TOKEN PAT — code-scanning/secret-scanning/dependabot alerts read for audits
 permissionMode: acceptEdits
 maxTurns: 25
 skills:
