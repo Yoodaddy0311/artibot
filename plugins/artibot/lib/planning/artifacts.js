@@ -217,10 +217,19 @@ async function readArtifact(filePath, nowDate) {
 
   const isLegacy = !data || !data.status;
   const status = isLegacy ? 'legacy' : data.status;
-  const dateIso = (data && (data.created || data.date)) || isoDate(new Date(mtimeMs));
-  const refMs = data && (data.created || data.date)
+  const fmDate = data && (data.created || data.date);
+  // Autopilot PRDs embed their real date in the filename (ap-YYYYMMDD). mtime is
+  // unreliable here — it gets reset by clone/sync — so when there is no
+  // frontmatter date, prefer the filename-embedded date over mtime for age.
+  const nameMatch = slug.match(/ap-(\d{4})(\d{2})(\d{2})/);
+  const nameMs = nameMatch
+    ? Date.parse(`${nameMatch[1]}-${nameMatch[2]}-${nameMatch[3]}T00:00:00Z`)
+    : NaN;
+  const dateIso = fmDate
+    || (Number.isFinite(nameMs) ? isoDate(new Date(nameMs)) : isoDate(new Date(mtimeMs)));
+  const refMs = fmDate
     ? new Date(dateIso).getTime()
-    : mtimeMs;
+    : (Number.isFinite(nameMs) ? nameMs : mtimeMs);
   const ageDays = Math.max(0, Math.floor((nowDate.getTime() - refMs) / MS_PER_DAY));
   const rec = { slug, status, dateIso, path: filePath, ageDays };
   if (data && data.progress !== undefined) rec.progress = data.progress;
