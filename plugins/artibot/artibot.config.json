@@ -766,7 +766,7 @@
       "blockExternal": true,
       "allowedPrefix": "plugin:artibot:",
       "denyHostPatterns": [
-        "https?://(?!localhost|127\\.0\\.0\\.1|::1|0\\.0\\.0\\.0|api\\.githubcopilot\\.com)",
+        "https?://(?!localhost|127\\.0\\.0\\.1|::1|0\\.0\\.0\\.0)",
         "\\.(s3|amazonaws|googleapis|blob\\.core\\.windows|firebaseio)\\."
       ],
       "comment": "MCP-driven Verification (P0-4): Artibot self-plugin MCPs allowed. External MCP/host blocked. opt-in via --mcp-verify."
