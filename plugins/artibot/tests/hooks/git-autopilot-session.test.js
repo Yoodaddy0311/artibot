@@ -360,6 +360,44 @@ describe('git-autopilot-session', () => {
     expect(logs).not.toContain('Switched to autopilot branch');
   });
 
+  // Direct-on-base guard: when the working branch IS the repo's base/default
+  // branch (master), the hook must NOT relocate HEAD onto an artibot/ sibling.
+  // Regression for the SessionStart force-switch that yanked HEAD off master.
+  it('stays on the base branch and does NOT switch to an autopilot sibling', async () => {
+    const commands = [];
+    mockState.execSyncImpl = (cmd) => {
+      commands.push(cmd);
+      if (cmd === 'git rev-parse --show-toplevel') return '/repo';
+      if (cmd === 'git config --get remote.origin.url') {
+        return 'https://github.com/Yoodaddy0311/artibot.git';
+      }
+      if (cmd === 'git branch --show-current') return 'master';
+      if (cmd === 'git rev-parse --git-dir') return '.git';
+      if (cmd.startsWith('git pull')) return '';
+      // resolveBaseBranch: origin/HEAD → origin/master (default branch = master)
+      if (cmd === 'git rev-parse --abbrev-ref HEAD') return 'master';
+      if (cmd === 'git rev-parse --abbrev-ref --symbolic-full-name @{upstream}') {
+        return 'origin/master';
+      }
+      if (cmd === 'git symbolic-ref --short refs/remotes/origin/HEAD') {
+        return 'origin/master';
+      }
+      return '';
+    };
+    mockState.existsSyncResults = { 'autopilot.json': true };
+    mockState.readFileSyncImpl = () => JSON.stringify({
+      enabled: true,
+      autoPullOnSession: true,
+      branchPrefix: 'artibot/',
+    });
+
+    await import('../../scripts/hooks/git-autopilot-session.js');
+    const logs = stderrSpy.mock.calls.map(([msg]) => msg).join('');
+    expect(logs).not.toContain('Switched to autopilot branch');
+    expect(commands.some((c) => c.includes('checkout artibot/master'))).toBe(false);
+    expect(commands.some((c) => c.includes('checkout -b artibot/'))).toBe(false);
+  });
+
   // -------------------------------------------------------------------------
   // syncFromBaseBranch — cross-machine version drift fix
   //

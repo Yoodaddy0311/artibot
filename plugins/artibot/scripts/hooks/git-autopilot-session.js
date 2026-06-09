@@ -212,13 +212,27 @@ function syncFromBaseBranch(cwd, currentBranch, config) {
 /**
  * Ensure the autopilot branch exists and is checked out.
  * Creates from current HEAD if new.
+ *
+ * Direct-on-base guard: when the working branch IS the repo's base/default
+ * branch (e.g. `master`), we do NOT relocate HEAD onto an `artibot/<base>`
+ * sibling. Workflows that commit directly to the default branch would
+ * otherwise have HEAD silently yanked away on every SessionStart, risking
+ * commits landing on a stale sibling base. Autopilot-branch creation still
+ * happens when the session starts on a non-base branch.
+ *
  * @param {string} cwd
  * @param {string} branchPrefix
  * @param {string} currentBranch
+ * @param {object} [config] - Parsed autopilot config (for base-branch resolution)
  * @returns {string} Name of the branch switched to (or current if already correct)
  */
-function ensureAutopilotBranch(cwd, branchPrefix, currentBranch) {
+function ensureAutopilotBranch(cwd, branchPrefix, currentBranch, config) {
   if (currentBranch.startsWith(branchPrefix)) return currentBranch;
+
+  // Stay put when already on the canonical base/default branch.
+  const base = resolveBaseBranch(cwd, config);
+  const baseLocal = base && base.startsWith('origin/') ? base.slice('origin/'.length) : base;
+  if (baseLocal && currentBranch === baseLocal) return currentBranch;
 
   const baseName = currentBranch.replace(/[^a-zA-Z0-9_-]/g, '-');
   const autopilotBranch = `${branchPrefix}${baseName}`;
@@ -302,7 +316,7 @@ async function main() {
 
   // Step 2: Ensure autopilot branch
   const branchPrefix = config.branchPrefix ?? 'artibot/';
-  const activeBranch = ensureAutopilotBranch(repoRoot, branchPrefix, currentBranch);
+  const activeBranch = ensureAutopilotBranch(repoRoot, branchPrefix, currentBranch, config);
   if (activeBranch !== currentBranch) {
     log(`Switched to autopilot branch "${activeBranch}"`);
   }
