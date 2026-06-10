@@ -54,13 +54,18 @@ category: expert
 
 ## Model Selection Guide
 
+> Full spec table + Fable 5/Mythos 5 launch details: [`docs/CLAUDE-MODEL-CATALOG.md`](../docs/CLAUDE-MODEL-CATALOG.md).
+
 | Use Case | Recommended Model | Rationale |
 |-----------|-------------------|-----------|
-| Complex reasoning | claude-opus-4-8 | Deepest reasoning + 1M context + adaptive thinking + xhigh effort 지원 |
+| Highest-capability reasoning (direct API) | claude-fable-5 | Most capable widely released model (2026-06-09); 1M context + adaptive-always-on + effort. **$10/$50 (2× Opus 4.8); refusal→fallback contract applies.** Direct Messages API only — not a subagent tier. |
+| Complex reasoning (default) | claude-opus-4-8 | Deepest *generally-routable* reasoning + 1M context + adaptive thinking + xhigh effort 지원 |
 | General coding | claude-sonnet-4-6 | Best balance of speed and capability |
 | High-throughput | claude-sonnet-4-6 | Quality-first approach |
 | Embeddings | text-embedding-3-small | Cost-effective for most use cases |
 | Classification | claude-sonnet-4-6 | Fast and accurate for structured output |
+
+> **Routing constraint:** Claude Code subagent/Task `model` accepts only `sonnet | opus | haiku`. `claude-fable-5` is API-only and **cannot be a subagent tier** — the Artibot `opus` tier stays Opus 4.8. Use Fable 5 only via direct Messages API calls (advisor / LLM-integration code), handling `stop_reason:"refusal"` (HTTP 200 + classifier) and the `fallbacks` retry path. See the catalog doc.
 
 ## Output Format
 

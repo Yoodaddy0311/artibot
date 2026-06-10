@@ -13,6 +13,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.25.1] — 2026-06-10
+
+**Theme**: Claude Fable 5 / Mythos 5 모델 지식 반영 (docs-only)
+
+### Added
+- **Claude 모델 카탈로그 레퍼런스 신설** (`docs/CLAUDE-MODEL-CATALOG.md`) — Fable 5(`claude-fable-5`)/Mythos 5 + 현행 모델 전체표(ID·컨텍스트·출력·단가·thinking) 단일 정본. 출시일 2026-06-09 기준 검증.
+- **Fable 5 핵심 신규 API 기능 문서화** — refusal=HTTP 200+분류기 명시, refusal→fallback(서버사이드 `fallbacks` 베타 / SDK 미들웨어), fallback credit(거절 미과금 + prompt-cache 환급).
+
+### Changed
+- **`agents/llm-architect.md` 모델 셀렉션 가이드 갱신** — Fable 5를 최상위 추론 옵션으로 추가하되 **API 전용**(서브에이전트 `model` enum=`sonnet|opus|haiku`)임을 명시. Artibot `opus` 티어 라우팅은 Opus 4.8 유지 — 라우팅·비용 무변경.
+
+### Notes
+- 모델 정책(`artibot.config.json#/agents/modelPolicy`)·서브에이전트 라우팅·비용은 변경 없음. Fable 5는 직접 Messages API 호출에서만 사용 가능(2× Opus 4.8 단가, 민감주제는 Opus 4.8로 폴백).
+
+---
+
 ## [4.25.0] — 2026-06-09
 
 **Theme**: `/ultraplan` 재설계 + 문서 산출 통합 + autopilot 사이징 + 릴리즈 게이트 install 검증
