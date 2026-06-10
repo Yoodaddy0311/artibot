@@ -1398,3 +1398,198 @@
 <!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
 
 ---
+
+## 2026-06-08 09:02 UTC · `master`
+
+- **Commits** (1):
+  - `ae3120d` chore(session): /save 핸드오프 + 세션노트 (v4.23.0 post-release, master 정렬)
+- **Files touched**: 3
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-06-09 01:31 UTC · `master`
+
+- **Commits** (5):
+  - `545b21f` feat(install): install.ps1 패리티 + update.js Windows 폴백 견고화
+  - `fac9f05` refactor: _deprecated 훅 제거(-389줄) + CI docs:check + 커버리지 문서 정정
+  - `38318e7` fix(commands): /update 명칭 통일 + save/resume 핸드오프 복구
+  - `5254574` fix(config): lifecycle 미들웨어 활성화 + autopilot allowList github 제거
+  - `bff0f5a` fix(mcp): github MCP 서버 잔존 참조 완전 제거 + playwright 버전 핀
+- **Files touched**: 24
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-06-09 01:46 UTC · `master`
+
+- **Commits** (1):
+  - `eeca91f` fix(autopilot): 락 staleness에 세션 생존 확인 추가 (PID 재사용·락 누수 해소)
+- **Files touched**: 2
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-06-09 01:56 UTC · `master`
+
+- **Commits** (1):
+  - `d0ac628` refactor(update): 플랫폼 탐지 헬퍼를 update-platform.js로 추출
+- **Files touched**: 2
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-06-09 01:58 UTC · `master`
+
+- **Commits** (1):
+  - `3d4893e` test(update): update-platform.js 직접 단위 테스트 추가 (리뷰 게이트 stem 매칭)
+- **Files touched**: 1
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-06-09 02:05 UTC · `master`
+
+- **Commits** (2):
+  - `e6b3a8d` fix: 잔존 /artibot:update 표기를 /update로 통일
+  - `0b031b1` fix(config): autopilot denyHostPatterns의 github 호스트 예외 제거
+- **Files touched**: 5
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-06-09 02:11 UTC · `artibot/master`
+
+- **Commits**: none
+- **Files touched**: 32
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-06-09 02:15 UTC · `artibot/master`
+
+- **Commits** (10):
+  - `e6b3a8d` fix: 잔존 /artibot:update 표기를 /update로 통일
+  - `0b031b1` fix(config): autopilot denyHostPatterns의 github 호스트 예외 제거
+  - `3d4893e` test(update): update-platform.js 직접 단위 테스트 추가 (리뷰 게이트 stem 매칭)
+  - `d0ac628` refactor(update): 플랫폼 탐지 헬퍼를 update-platform.js로 추출
+  - `eeca91f` fix(autopilot): 락 staleness에 세션 생존 확인 추가 (PID 재사용·락 누수 해소)
+  - `545b21f` feat(install): install.ps1 패리티 + update.js Windows 폴백 견고화
+  - `fac9f05` refactor: _deprecated 훅 제거(-389줄) + CI docs:check + 커버리지 문서 정정
+  - `38318e7` fix(commands): /update 명칭 통일 + save/resume 핸드오프 복구
+  - `5254574` fix(config): lifecycle 미들웨어 활성화 + autopilot allowList github 제거
+  - `bff0f5a` fix(mcp): github MCP 서버 잔존 참조 완전 제거 + playwright 버전 핀
+- **Files touched**: 32
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-06-09 03:50 UTC · `master`
+
+- **Commits** (11):
+  - `16b0800` chore(release): v4.24.0
+  - `e6b3a8d` fix: 잔존 /artibot:update 표기를 /update로 통일
+  - `0b031b1` fix(config): autopilot denyHostPatterns의 github 호스트 예외 제거
+  - `3d4893e` test(update): update-platform.js 직접 단위 테스트 추가 (리뷰 게이트 stem 매칭)
+  - `d0ac628` refactor(update): 플랫폼 탐지 헬퍼를 update-platform.js로 추출
+  - `eeca91f` fix(autopilot): 락 staleness에 세션 생존 확인 추가 (PID 재사용·락 누수 해소)
+  - `545b21f` feat(install): install.ps1 패리티 + update.js Windows 폴백 견고화
+  - `fac9f05` refactor: _deprecated 훅 제거(-389줄) + CI docs:check + 커버리지 문서 정정
+  - `38318e7` fix(commands): /update 명칭 통일 + save/resume 핸드오프 복구
+  - `5254574` fix(config): lifecycle 미들웨어 활성화 + autopilot allowList github 제거
+  - `bff0f5a` fix(mcp): github MCP 서버 잔존 참조 완전 제거 + playwright 버전 핀
+- **Files touched**: 41
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-06-09 03:59 UTC · `master`
+
+- **Commits** (1):
+  - `e42e9eb` fix(autopilot): git-autopilot-session이 base 브랜치에서 sibling으로 강제 전환하던 버그
+- **Files touched**: 2
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-06-09 06:57 UTC · `master`
+
+- **Commits** (1):
+  - `9c5f8d4` feat(ci): 릴리즈 게이트에 설치/업데이트 검증 추가
+- **Files touched**: 4
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-06-09 07:13 UTC · `master`
+
+- **Commits** (1):
+  - `e854512` fix(theme): statusline 버전 표기 복원 (package.json 경로 오류)
+- **Files touched**: 1
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-06-09 07:42 UTC · `master`
+
+- **Commits** (1):
+  - `2174fff` feat(plan): /ultraplan을 최상위 플래닝 모드로 재설계 + plan/ultraplan/deep 개념 명확화
+- **Files touched**: 2
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-06-09 08:14 UTC · `master`
+
+- **Commits** (3):
+  - `dedb7fc` feat(plan): archiveStale가 파일명 ap-YYYYMMDD를 age로 우선 사용
+  - `6628f15` feat(plan): 문서 라이프사이클 관리 (인덱스·아카이브·승계 + 중복 가드)
+  - `5f6a177` feat(plan): PRD·ADR·TODO 문서 산출을 plan/ultraplan에 통합 (공유 아티팩트 레이어)
+- **Files touched**: 4
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-06-09 08:33 UTC · `master`
+
+- **Commits** (1):
+  - `30e0b27` feat(plan): autopilot-sized 플래닝 — 자율빌드 2~4h 밴드 사이징
+- **Files touched**: 4
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-06-09 08:49 UTC · `master`
+
+- **Commits** (1):
+  - `2709d64` chore(release): v4.25.0
+- **Files touched**: 11
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-06-10 04:04 UTC · `master`
+
+- **Commits** (1):
+  - `86b309e` chore(release): v4.25.1 — Claude Fable 5 / Mythos 5 모델 지식 반영
+- **Files touched**: 7
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
