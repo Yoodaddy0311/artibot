@@ -15,6 +15,30 @@ import { ARTIBOT_DIR } from '../core/config.js';
 import { downloadLatestWeights, flushOfflineQueue, uploadWeights } from './swarm-client.js';
 import { gitDownloadLatestWeights, gitUploadWeights } from './git-backend.js';
 import { mergeWeights, packagePatterns, unpackWeights } from './pattern-packager.js';
+import { scrubPattern as defaultScrubPii } from '../privacy/pii-scrubber.js';
+import { createNoiseFunction } from '../privacy/differential-privacy.js';
+
+/**
+ * Build the privacy chain (PII scrub + DP noise) once, from config, so EVERY
+ * sync path (force-sync, scheduled timer, SessionEnd hook) applies it
+ * consistently — not just the SessionEnd hook. Honours an explicit caller
+ * override; otherwise defaults scrub on and builds noise from
+ * `config.differentialPrivacy` only when `enabled`.
+ *
+ * @param {object} options - performSync options ({ config, scrubPii?, addNoise? })
+ * @returns {{ scrubPii: Function, addNoise: (Function|undefined) }}
+ */
+export function resolvePrivacyChain(options = {}) {
+  const dp = options.config?.differentialPrivacy;
+  const scrubPii = typeof options.scrubPii === 'function' ? options.scrubPii : defaultScrubPii;
+  const addNoise =
+    typeof options.addNoise === 'function'
+      ? options.addNoise
+      : dp?.enabled
+        ? createNoiseFunction(dp)
+        : undefined;
+  return { scrubPii, addNoise };
+}
 
 /**
  * Confirm-gate state for git backend. We never block — the gate is advisory —
@@ -287,6 +311,8 @@ async function performSync(options = {}) {
     // Step 2: Package and upload local patterns
     const packaged = await packagePatterns();
     if (packaged.metadata.packagedCount > 0) {
+      // Build PII-scrub + DP-noise once from config so all sync paths apply it.
+      const { scrubPii, addNoise } = resolvePrivacyChain(options);
       const uploadResult = await upload(
         packaged.weights,
         {
@@ -296,8 +322,8 @@ async function performSync(options = {}) {
         },
         {
           config: options.config,
-          scrubPii: options.scrubPii,
-          addNoise: options.addNoise,
+          scrubPii,
+          addNoise,
         },
       );
 

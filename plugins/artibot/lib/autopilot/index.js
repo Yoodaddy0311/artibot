@@ -20,8 +20,22 @@ export {
   listActiveWorktrees,
   notePhaseCost,
   buildCostWarningInstruction,
+  recordPhaseResult,
+  recordCheckpoint,
+  classifyFailure,
+  recordSecretLeak,
   PHASES,
 } from './engine.js';
+
+// Preflight / recovery helpers referenced by commands/autopilot.md.
+// These live in _engine-helpers.js; re-exported here so the documented
+// autopilot orchestration API is actually present on the public barrel.
+export {
+  buildPreflightInstruction,
+  renderPreflightSummary,
+  detectInterruptedPhase,
+  buildRecoveryNote,
+} from './_engine-helpers.js';
 
 export {
   getLockPath,

@@ -32,6 +32,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { ensureDir, readJsonFile, writeJsonFile } from '../core/file.js';
 import { ARTIBOT_DIR } from '../core/config.js';
+import { scrubPattern as defaultScrubPii } from '../privacy/pii-scrubber.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -268,6 +269,16 @@ export async function gitUploadWeights(weights, metadata = {}, options = {}) {
       `weights-${version.replace(/[:.]/g, '-')}.json`,
     );
 
+    // Privacy chain — mirror swarm-client.uploadWeights so the git backend
+    // (the multi-device default) honours the same PII-scrub + DP-noise contract
+    // its README and config promise. Step 1 scrub is default-on; Step 2 noise
+    // only when the caller (sync-scheduler) supplies an addNoise fn from config.
+    const scrubber = typeof options.scrubPii === 'function' ? options.scrubPii : defaultScrubPii;
+    let processedWeights = scrubber(weights);
+    if (typeof options.addNoise === 'function') {
+      processedWeights = options.addNoise(processedWeights);
+    }
+
     const payload = {
       machineHash,
       version,
@@ -276,7 +287,7 @@ export async function gitUploadWeights(weights, metadata = {}, options = {}) {
         sampleSize: metadata.sampleSize ?? 0,
         checksum: metadata.checksum ?? null,
       },
-      weights,
+      weights: processedWeights,
     };
 
     await writeJsonFile(latestPath, payload);
