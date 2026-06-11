@@ -3,9 +3,10 @@ context: fork
 user-invocable: false
 name: fp-refactor
 description: |
-  함수형 프로그래밍 마이그레이션 패턴 - try-catch→Either, null→Option, callbacks→Task, class DI→Reader.
-  Auto-activates when: refactoring to FP patterns, fp-ts migration, functional error handling.
-  Triggers: fp refactor, Either, Option, TaskEither, fp-ts, 함수형 리팩토링
+  명령형 코드를 함수형 패턴으로 전환하는 마이그레이션 가이드.
+  Auto-activates when: fp-ts 도입, 함수형 에러 핸들링 전환, 또는 Either/Option/Task 패턴 적용 요청 시.
+  Triggers: fp refactor, Either, Option, TaskEither, fp-ts, functional programming, 함수형 리팩토링,
+  함수형 프로그래밍, try-catch 없애고 싶어, fp-ts 써보고 싶어, 함수형으로 바꿔줘
 lang: [en, ko]
 platforms: [claude-code]
 level: progressive

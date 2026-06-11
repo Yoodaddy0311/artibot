@@ -2,13 +2,11 @@
 context: fork
 name: clarify
 description: |
-  Hypothesis-based clarification pipeline that transforms ambiguous user requests
-  into precise, actionable specifications through structured MCQ (multiple-choice questions).
-  Classifies ambiguity into three types: vague (unclear intent), unknown (missing information),
-  metamedium (scope/boundary undefined). Generates targeted questions per type.
-  Auto-activates when: ambiguity score >= threshold, multi-intent conflicts detected,
-  or user explicitly asks for clarification.
-  Triggers: clarify, unclear, what do you mean, ambiguous, vague, specify, 명확히, 구체적으로, 뭘 원하시는지
+  Turns ambiguous user requests into precise, actionable specifications using hypothesis-based MCQ clarification.
+  Auto-activates when ambiguity score exceeds threshold, multi-intent conflicts are detected,
+  or the user explicitly requests clarification on scope, target, or constraints.
+  Triggers: clarify, unclear, what do you mean, ambiguous, vague, specify, 명확히, 구체적으로,
+  뭘 원하시는지, 좀 더 자세히 말해줘, 어떤 걸 원하는 건지 모르겠어, 범위가 너무 넓어
 lang: [en, ko]
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 2

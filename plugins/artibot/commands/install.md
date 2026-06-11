@@ -1,6 +1,6 @@
 ---
-description: Install an Artibot extension from a local path or (future) URL
-argument-hint: "<file://path-to-extension | https://github.com/Yoodaddy0311/...>"
+description: Install an Artibot extension from a local path, or activate a preset pack
+argument-hint: "<file://path-to-extension | https://github.com/Yoodaddy0311/...> | --pack <name> | --list-packs"
 allowed-tools: [Read, Bash]
 toolset: code
 lifecycle: install
@@ -9,16 +9,24 @@ lifecycle: install
 # /install
 
 Install a third-party Artibot extension (agents, skills, hooks, middleware)
-into `~/.claude/plugins/artibot-ext-<name>/`. All installs go through the
-Artibot marketplace installer, which enforces the DATA POLICY before any
-files are copied.
+into `~/.claude/plugins/artibot-ext-<name>/`, **or** activate a built-in
+**preset pack** — a purpose-grouped bundle of skills/commands that already
+ship inside the plugin. All installs go through the Artibot marketplace
+installer / preset resolver, which enforces the DATA POLICY (100% local, no
+network) before anything happens.
 
 ## Usage
 
 ```
+# Single extension (local dir that already contains artibot.ext.json)
 /install file:///C:/dev/my-ext
 /install file:///home/user/my-ext
 /install https://github.com/Yoodaddy0311/artibot-ext-korean-ecom-pack   # pending tarball support
+
+# Preset packs (in-plugin skill/command bundles — no download)
+/install --list-packs            # show available packs
+/install --pack vibe             # verify/activate the "vibe" pack
+/install --pack quality --dry-run
 ```
 
 ## Arguments
@@ -32,6 +40,70 @@ files are copied.
 
 Optional flags parsed from `$ARGUMENTS`:
 - `--force` — overwrite an existing install with the same name.
+- `--list-packs` — list the available preset packs (no `<url>` needed).
+- `--pack <name>` — activate a preset pack instead of installing a URL.
+- `--dry-run` — with `--pack`, report what would be activated without side
+  effects. (Preset application is already side-effect-free in the current
+  local-only architecture, so this flag is informational today.)
+
+## Preset Packs
+
+A **preset pack** is a named, purpose-grouped list of skills and commands that
+**already ship inside the Artibot plugin** — there is nothing to download. It
+lets a vibe-coder verify/activate a curated set in one shot. The pack DATA
+lives in `artibot.config.json > packs` (data only); the logic lives in
+`lib/core/preset-packs.js`.
+
+Built-in packs:
+
+| Pack | Description | Members |
+|------|-------------|---------|
+| `vibe` | 바이브코딩 필수 — 자연어 빌드·명확화·온보딩·테마 | skills: vibe-coding, clarify, quickstart · commands: sc, doctor, theme |
+| `quality` | 품질 게이트 — 검증·리뷰·테스트 | skills: verification-completion, tdd-workflow, quality-framework · commands: verify, code-review, test |
+| `marketing` | 마케팅 — 콘텐츠·SEO·캠페인 | skills: marketing-strategy, content-seo, social-media · commands: mkt, content, seo |
+
+"Activating" a pack in the current local-only architecture means: confirm each
+member exists on disk, report any missing member (warn + skip, never fail),
+and return a summary. No files are copied and no network is contacted. If a
+future remote-extension installer is added, pack application can drive it — a
+separate, explicit task.
+
+### Call procedure (Korean-path-safe import)
+
+The user's plugin path can contain non-ASCII characters (e.g. `바탕 화면`), so
+import the module via a manually-constructed `file://` URL rather than a bare
+specifier. From a Node ESM context:
+
+```js
+import { pathToFileURL } from 'node:url';
+import path from 'node:path';
+
+const root = process.env.CLAUDE_PLUGIN_ROOT; // plugin root
+const modUrl = pathToFileURL(
+  path.join(root, 'lib', 'core', 'preset-packs.js')
+).href;
+const { listPacks, resolvePack, applyPack } = await import(modUrl);
+const { loadConfig } = await import(
+  pathToFileURL(path.join(root, 'lib', 'core', 'config.js')).href
+);
+
+const config = await loadConfig();
+
+// --list-packs
+console.log(listPacks(config));
+
+// --pack vibe (or --pack vibe --dry-run)
+const report = applyPack('vibe', config, { dryRun: true });
+// report = { ok, pack, dryRun, description, applied[], missing[], warnings[] }
+```
+
+- `listPacks(config)` → `[{ name, description, skillCount, commandCount }]`
+  (empty `[]` when the config has no `packs` section — backward compatible).
+- `resolvePack(name, config)` → full member list tagged with `exists`, or
+  `null` for an unknown pack.
+- `applyPack(name, config, { dryRun })` → verification summary. `ok:false`
+  with a warning for an unknown pack; missing members land in `missing[]` +
+  `warnings[]` (skipped, never thrown).
 
 ## DATA POLICY (read before running)
 

@@ -3,14 +3,13 @@ context: fork
 disable-model-invocation: true
 name: auto-learning-pipeline
 description: |
-  Fully autonomous nightly learning pipeline — self-scan, pattern extraction, knowledge update,
-  skill refinement, and auto-commit without human intervention.
-  Integrates with claude schedule, Git server webhooks (inbound: external server → Artibot only),
-  and existing lib/learning/ modules.
-  DATA POLICY: auto-commit to local repo is allowed; auto-push to remote (Artibot → external git server)
-  requires explicit opt-in (autoPush: true). Default is autoPush: false.
-  Git server webhooks are receive-only (external server POSTs to Claude endpoint) — no outbound data egress.
-  Triggers: auto learning, nightly pipeline, 자동 학습 파이프라인, autonomous learning, unattended learning
+  Runs a fully autonomous nightly learning pipeline that evaluates code quality, extracts patterns from recent commits,
+  updates knowledge stores, refines skills, and auto-commits improvements — all without human intervention.
+  DATA POLICY: auto-commit to local repo is allowed; auto-push to remote requires explicit opt-in (autoPush: true).
+  Git webhooks are inbound-only (external server → Artibot). Auto-activates when: autonomous learning pipeline requested,
+  nightly learning setup, scheduled skill refinement, or first-run pipeline configuration.
+  Triggers: auto learning, nightly pipeline, 자동 학습 파이프라인, autonomous learning, unattended learning,
+  자동으로 매일 밤 학습시켜줘, 스킬 자동 개선 설정해줘, 학습 파이프라인 켜줘
 lang: [en, ko]
 platforms: [claude-code]
 level: 3

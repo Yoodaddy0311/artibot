@@ -1027,6 +1027,24 @@
       "artibot-swarm"
     ]
   },
+  "packs": {
+    "_comment": "Preset packs — purpose-grouped activation presets of skills/commands that already ship inside the Artibot plugin. DATA POLICY: 100% local, no network. A pack is NOT a download bundle; it is a named list of in-plugin skill/command members a vibe-coder can verify/activate in one shot via /install --pack <name>. Members reference plugins/artibot/skills/<name>/ and plugins/artibot/commands/<name>.md. Consumed read-only by lib/core/preset-packs.js (frozen-data, never-throw). Drift guard: tests/core/preset-packs.test.js asserts every member below exists on disk.",
+    "vibe": {
+      "description": "바이브코딩 필수 — 자연어 빌드·명확화·온보딩·테마",
+      "skills": ["vibe-coding", "clarify", "quickstart"],
+      "commands": ["sc", "doctor", "theme"]
+    },
+    "quality": {
+      "description": "품질 게이트 — 검증·리뷰·테스트",
+      "skills": ["verification-completion", "tdd-workflow", "quality-framework"],
+      "commands": ["verify", "code-review", "test"]
+    },
+    "marketing": {
+      "description": "마케팅 — 콘텐츠·SEO·캠페인",
+      "skills": ["marketing-strategy", "content-seo", "social-media"],
+      "commands": ["mkt", "content", "seo"]
+    }
+  },
   "ux": {
     "plainLanguage": {
       "enabled": false,
