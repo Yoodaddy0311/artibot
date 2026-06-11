@@ -1593,3 +1593,15 @@
 <!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
 
 ---
+
+## 2026-06-11 00:37 UTC · `artibot/master`
+
+- **Commits** (3):
+  - `4818c81` fix(release): v4.25.1 버전 lockstep 동기화 누락 보정
+  - `f8e4895` chore(handoff): 세션 핸드오프 노트 2026-06-09
+  - `86b309e` chore(release): v4.25.1 — Claude Fable 5 / Mythos 5 모델 지식 반영
+- **Files touched**: 19
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
