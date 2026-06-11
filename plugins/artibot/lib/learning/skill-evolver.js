@@ -204,6 +204,7 @@ export function generateRefactorSuggestion(skillName, metrics) {
  *   track: (skillName: string, outcome: object) => void,
  *   evaluate: (skillName: string) => object,
  *   classify: (metrics: object) => string,
+ *   suggest: (skillName: string) => string,
  *   evolve: (skillName: string, diffs: Array) => Array,
  *   getReport: () => object,
  *   runBatch: (allSkillNames: string[]) => Map,
@@ -272,6 +273,26 @@ export function createSkillEvolver(options = {}) {
      */
     classify(metrics) {
       return classifyMetrics(metrics, thresholds);
+    },
+
+    /**
+     * Generate a human-readable refactor suggestion for a skill, derived from
+     * its currently-tracked metrics. Thin instance-level wrapper around the
+     * pure `generateRefactorSuggestion()` helper so callers can ask for a
+     * suggestion by name alone (matching the evolution-loop call site).
+     *
+     * @param {string} skillName
+     * @returns {string}
+     */
+    suggest(skillName) {
+      if (typeof skillName !== 'string' || skillName.length === 0) {
+        throw new Error('Skill name must be a non-empty string');
+      }
+      const skillRecords = records.get(skillName);
+      const metrics = (!skillRecords || skillRecords.length === 0)
+        ? Object.freeze({ successRate: 0, usageCount: 0, avgEditDistance: 0, trend: 0 })
+        : computeMetrics(skillRecords, alpha);
+      return generateRefactorSuggestion(skillName, metrics);
     },
 
     /**

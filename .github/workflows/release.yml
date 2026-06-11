@@ -43,6 +43,22 @@ jobs:
           fi
           echo "Version verified: $TAG_VERSION"
 
+      # Lockstep version gate — fail the release if any file in the version
+      # lockstep set (plugin.json, package.json, both marketplace.json files,
+      # README badges, AGENTS.md, mcp-server.json) has drifted. This is the
+      # gate that, while unwired, let a marketplace lockstep miss ship.
+      # --no-sync-check skips the ~/.claude/artibot install-drift check, which
+      # is irrelevant on a fresh CI runner (and would only ever warn, exit 2).
+      - name: Verify lockstep versions (release-check)
+        run: node scripts/release-check.js --no-sync-check
+
+      # marketplace.json metadata drift gate. No standalone marketplace-validate
+      # script exists; sync-marketplace-meta.mjs --check is the authoritative
+      # dry-run that exits non-zero when marketplace version / release.current
+      # drift from plugin.json.
+      - name: Verify marketplace metadata (no drift)
+        run: node scripts/ci/sync-marketplace-meta.mjs --check
+
       - name: Validate agents
         run: node scripts/ci/validate-agents.js
 

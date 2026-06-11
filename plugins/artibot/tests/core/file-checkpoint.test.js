@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 
 vi.mock('node:fs', async () => {
   const actual = await vi.importActual('node:fs');
@@ -53,6 +54,14 @@ describe('FileCheckpoint', () => {
     const cp = new FileCheckpoint();
 
     expect(cp.dir).toContain('artibot-file-checkpoints-test-uuid-1234');
+  });
+
+  it('roots the checkpoint dir under os.tmpdir() (no hardcoded /tmp)', () => {
+    const cp = new FileCheckpoint('sess-1');
+
+    // Must be inside the OS temp dir (Windows-correct), not a literal POSIX /tmp.
+    expect(cp.dir.startsWith(tmpdir())).toBe(true);
+    expect(cp.dir).not.toMatch(/^\/tmp\//);
   });
 
   // ─── snapshot() ──────────────────────────────────────────────────

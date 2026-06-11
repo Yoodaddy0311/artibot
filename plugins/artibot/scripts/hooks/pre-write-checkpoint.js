@@ -6,14 +6,25 @@
  */
 
 import { existsSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { parseJSON, readStdin, writeStdout } from '../utils/index.js';
 import { extractToolName } from '../../lib/core/hook-utils.js';
 import { createErrorHandler } from '../../lib/core/hook-utils.js';
 import { FileCheckpoint } from '../../lib/core/file-checkpoint.js';
 
-/** Session-scoped checkpoint instance (reused across invocations via same session). */
-const SESSION_ID = process.env.CLAUDE_SESSION_ID || 'default';
-const checkpoint = new FileCheckpoint(SESSION_ID);
+/**
+ * Resolve the session id for this invocation. The hook stdin payload carries
+ * `session_id`; the env var is only a fallback. Without the payload value every
+ * checkpoint collapsed under 'default' and collided across sessions.
+ * @param {object|null} hookData - Parsed hook input
+ * @returns {string}
+ */
+export function resolveSessionId(hookData) {
+  return hookData?.session_id
+    || process.env.CLAUDE_SESSION_ID
+    || 'default';
+}
 
 async function main() {
   const raw = await readStdin();
@@ -31,6 +42,7 @@ async function main() {
 
   if (filePath && existsSync(filePath)) {
     try {
+      const checkpoint = new FileCheckpoint(resolveSessionId(hookData));
       checkpoint.snapshot(filePath);
       process.stderr.write(
         `[pre-write-checkpoint] Snapshot saved: ${filePath}\n`,
@@ -45,7 +57,19 @@ async function main() {
   writeStdout({ decision: 'approve' });
 }
 
-main().catch(createErrorHandler('pre-write-checkpoint', {
-  writeStdout,
-  blockReason: 'File checkpoint hook error. Approving by default.',
-}));
+const isMain = (() => {
+  try {
+    const argv1 = process.argv[1] ? path.resolve(process.argv[1]) : '';
+    const here = path.resolve(fileURLToPath(import.meta.url));
+    return argv1 === here;
+  } catch {
+    return false;
+  }
+})();
+
+if (isMain) {
+  main().catch(createErrorHandler('pre-write-checkpoint', {
+    writeStdout,
+    blockReason: 'File checkpoint hook error. Approving by default.',
+  }));
+}

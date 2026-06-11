@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createEvolutionLoop } from '../../lib/learning/evolution-loop.js';
+import { createSkillEvolver } from '../../lib/learning/skill-evolver.js';
 
 // ---------------------------------------------------------------------------
 // Mock factories
@@ -223,6 +224,45 @@ describe('createEvolutionLoop', () => {
       expect(tracked).toHaveLength(2);
       expect(tracked[0].name).toBe('tdd-workflow');
       expect(tracked[1].name).toBe('coding-standards');
+    });
+
+    // audit #7-1: the evaluate stage called skillEvolver.suggest(), which did
+    // NOT exist on the REAL factory — it only existed on the test mock. With a
+    // real createSkillEvolver() instance, any non-empty skillUsages threw and
+    // was swallowed into result.errors, leaving skillEvaluations empty. This
+    // test uses the real evolver to prove the call site works end-to-end.
+    it('evaluates skills with the REAL skill-evolver (no throw, suggestions populated)', async () => {
+      const loop = createEvolutionLoop({
+        sessionMemory: createMockSessionMemory(),
+        knowledgeGraph: createMockKnowledgeGraph(),
+        skillEvolver: createSkillEvolver({ now: () => 1_700_000_000_000 }),
+        autoResearch: createMockAutoResearch(false),
+      });
+
+      const result = await loop.run({
+        skillUsages: [
+          // Succeeds but every output is heavily edited -> "heavy editing" path.
+          { name: 'tdd-workflow', invoked: true, success: true, userEdited: true, editDistance: 80 },
+          // Consistently fails -> "very low success" path.
+          { name: 'coding-standards', invoked: true, success: false, userEdited: true, editDistance: 5 },
+        ],
+      });
+
+      // No 'evaluate' stage error must be recorded (the missing-method throw).
+      expect(result.errors.some((e) => e.stage === 'evaluate')).toBe(false);
+
+      // skillEvaluations is populated, with a non-empty string suggestion each.
+      expect(result.skillEvaluations).toHaveLength(2);
+      for (const ev of result.skillEvaluations) {
+        expect(typeof ev.suggestion).toBe('string');
+        expect(ev.suggestion.length).toBeGreaterThan(0);
+      }
+      // High edit distance (80) on a successful skill -> "heavy editing".
+      const heavy = result.skillEvaluations.find((ev) => ev.name === 'tdd-workflow');
+      expect(heavy.suggestion).toMatch(/heavy editing/i);
+      // Zero success -> "very low success".
+      const failing = result.skillEvaluations.find((ev) => ev.name === 'coding-standards');
+      expect(failing.suggestion).toMatch(/low success/i);
     });
   });
 

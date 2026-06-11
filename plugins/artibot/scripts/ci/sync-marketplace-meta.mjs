@@ -141,19 +141,40 @@ export function applyDesired(manifest, desired) {
 /**
  * Apply desired version to the root .claude-plugin/marketplace.json (the
  * Claude Code marketplace routing file). Returns edit list (pure).
+ *
+ * Throws on a structurally malformed manifest (no `plugins` array, or no
+ * `artibot` plugin entry) instead of silently returning zero edits. A silent
+ * no-op here is exactly how the routing file drifted to 4.13.1 while
+ * plugin.json was 4.19.6 (incident 2026-06-08): the sync ran, found nothing to
+ * write, and reported "in sync". Fail loudly so a malformed routing file is a
+ * release-blocking error, not a quiet pass.
  */
 export function applyDesiredToRoot(rootManifest, desired) {
   const next = structuredClone(rootManifest);
   const edits = [];
 
-  if (Array.isArray(next.plugins)) {
-    for (let i = 0; i < next.plugins.length; i++) {
-      const entry = next.plugins[i];
-      if (entry?.name === 'artibot' && entry.version !== desired.version) {
+  if (!Array.isArray(next.plugins)) {
+    throw new Error(
+      'root .claude-plugin/marketplace.json has no "plugins" array — cannot sync artibot version'
+    );
+  }
+
+  let foundArtibot = false;
+  for (let i = 0; i < next.plugins.length; i++) {
+    const entry = next.plugins[i];
+    if (entry?.name === 'artibot') {
+      foundArtibot = true;
+      if (entry.version !== desired.version) {
         edits.push({ field: `plugins[${i}].version`, from: entry.version, to: desired.version });
         next.plugins[i] = { ...entry, version: desired.version };
       }
     }
+  }
+
+  if (!foundArtibot) {
+    throw new Error(
+      'root .claude-plugin/marketplace.json has no "artibot" plugin entry — cannot sync version'
+    );
   }
 
   return { next, edits };
@@ -197,7 +218,16 @@ function main() {
   console.log('');
 
   const { next, edits } = applyDesired(manifestRead.data, desired);
-  const { next: rootNext, edits: rootEdits } = applyDesiredToRoot(rootManifestRead.data, desired);
+  let rootNext;
+  let rootEdits;
+  try {
+    ({ next: rootNext, edits: rootEdits } = applyDesiredToRoot(rootManifestRead.data, desired));
+  } catch (err) {
+    // Structurally malformed routing file — fail loudly (exit 2 = invocation
+    // error) instead of silently treating it as "in sync".
+    console.error(`${RED}${err.message}${NC}`);
+    process.exit(2);
+  }
 
   if (edits.length === 0 && rootEdits.length === 0) {
     console.log(`${GREEN}marketplace.json metadata already in sync — no changes.${NC}`);

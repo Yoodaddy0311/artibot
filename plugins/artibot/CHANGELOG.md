@@ -360,7 +360,7 @@ statusline의 두 가지 진행률 표시가 모두 작동하지 않던 것을 �
 ### Added
 
 - **모델 정책 단일 source-of-truth** (`lib/core/model-policy.js`) — `artibot.config.json#/agents/modelPolicy`를 읽는 유일한 리졸버. `resolveModel` / `getPolicyModel` / `resolveModelForPhase` / `listAgentsByModel` / `normalizeAgentType` / `isKnownAgent` / `loadModelPolicy` 노출. never-throws, Korean-path safe. 정책이 config / 28개 agent frontmatter / 전역 rules 3곳에 흩어져 코드 강제가 없던 문제를 해소.
-- **모델 정책 드리프트 CI 게이트** (`scripts/ci/validate-model-policy.js` + `scripts/validate.js` 배선) — agent frontmatter `model:`과 config 정책 불일치 시 `npm run ci` 실패. 이전엔 frontmatter 존재만 검사하고 정책 대조는 없었음.
+- **모델 정책 드리프트 CI 게이트** (`scripts/ci/validate-model-policy.js`, `scripts/validate.js`가 `findModelPolicyDrift`를 import해 공유) — agent frontmatter `model:`과 config 정책 불일치 시 `npm run ci` 실패. 이전엔 frontmatter 존재만 검사하고 정책 대조는 없었음. 드리프트 비교 로직은 `validate-model-policy.js`가 단일 진실원이며 `validate.js`는 이를 재사용(중복 구현 제거).
 - **SubagentStart 런타임 강제** (`scripts/hooks/subagent-handler.js`) — 모든 teammate 스폰에서 canonical 모델과 대조해 불일치 advisory 경고. config 하이드레이트 후 `getPolicyModel(agentType, config)` 사용, 정책 미로드 시 경고 억제로 거짓양성 방지.
 - **Artibot 브랜드 테마** (Dark / Light) — `experimental.themes` 등록, `/theme` 피커에서 선택 가능.
 

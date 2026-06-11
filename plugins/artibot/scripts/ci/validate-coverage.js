@@ -40,7 +40,10 @@ function main() {
       execSync('npx vitest run --coverage', {
         cwd: pluginRoot,
         stdio: 'inherit',
-        timeout: 120_000,
+        // 300s, comfortably above the measured ~146s full-suite + coverage
+        // runtime. The previous 120s budget aborted the run before vitest
+        // finished, producing a false "test suite failed" on a healthy suite.
+        timeout: 300_000,
       });
     } catch {
       console.error('\nFAIL: Test suite failed. Coverage validation aborted.');

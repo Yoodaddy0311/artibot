@@ -254,6 +254,43 @@ describe('createSkillEvolver', () => {
   });
 
   // -------------------------------------------------------------------------
+  // audit #7-1: factory must expose suggest() — evolution-loop calls it by name.
+  describe('suggest()', () => {
+    it('returns a non-empty string for a tracked skill', () => {
+      evolver.track('s1', { invoked: true, success: true, userEdited: false, editDistance: 0 });
+      const s = evolver.suggest('s1');
+      expect(typeof s).toBe('string');
+      expect(s).toContain('s1');
+    });
+
+    it('flags heavy editing when avg edit distance is high', () => {
+      evolver.track('s1', { invoked: true, success: true, userEdited: true, editDistance: 80 });
+      expect(evolver.suggest('s1')).toMatch(/heavy editing/i);
+    });
+
+    it('flags very low success for a consistently failing skill', () => {
+      evolver.track('s1', { invoked: true, success: false, userEdited: false, editDistance: 0 });
+      expect(evolver.suggest('s1')).toMatch(/low success/i);
+    });
+
+    it('handles an untracked skill without throwing (zero metrics)', () => {
+      const s = evolver.suggest('never-seen');
+      expect(typeof s).toBe('string');
+      expect(s).toMatch(/low success/i); // successRate 0 <= 0.3
+    });
+
+    it('throws on empty skill name', () => {
+      expect(() => evolver.suggest('')).toThrow('non-empty string');
+    });
+
+    it('matches the pure generateRefactorSuggestion() for the same metrics', () => {
+      evolver.track('s1', { invoked: true, success: true, userEdited: true, editDistance: 60 });
+      const metrics = evolver.evaluate('s1');
+      expect(evolver.suggest('s1')).toBe(generateRefactorSuggestion('s1', metrics));
+    });
+  });
+
+  // -------------------------------------------------------------------------
   describe('evolve()', () => {
     it('throws on empty skill name', () => {
       expect(() => evolver.evolve('', [])).toThrow('non-empty string');

@@ -335,8 +335,10 @@ async function _processPromotions(cache) {
     });
   }
 
+  // Cache persistence is handled once by the caller (_hotSwapImpl) after both
+  // demotion and promotion phases run, so a demote-only run is not lost. Here
+  // we only emit the promotion transfer-log entries.
   if (promotedKeys.length > 0) {
-    await persistSystem1Cache();
     for (const logEntry of promotionLogEntries) {
       await appendTransferLog(logEntry);
     }
@@ -357,7 +359,12 @@ async function _hotSwapImpl() {
 
   const timestamp = new Date().toISOString();
 
+  // Persist the cache whenever anything changed — demotions OR promotions.
+  // Previously only promotions triggered persistence, so a demote-only run
+  // mutated the in-memory cache but never reached disk (data loss). Flushing
+  // once here, after both phases, keeps the on-disk snapshot consistent.
   if (promotedKeys.length > 0 || demotedKeys.length > 0) {
+    await persistSystem1Cache();
     await appendTransferLog({
       action: 'hot-swap',
       promoted: promotedKeys,

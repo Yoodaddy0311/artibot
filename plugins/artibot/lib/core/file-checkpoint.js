@@ -8,6 +8,7 @@
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 
 /** Maximum number of snapshots retained per instance (FIFO eviction). */
@@ -33,7 +34,7 @@ export class FileCheckpoint {
   constructor(sessionId, options = {}) {
     this._sessionId = sessionId || randomUUID();
     this._maxSnapshots = options.maxSnapshots || MAX_SNAPSHOTS;
-    this._dir = join('/tmp', `artibot-file-checkpoints-${this._sessionId}`);
+    this._dir = join(tmpdir(), `artibot-file-checkpoints-${this._sessionId}`);
     this._ensureDir();
   }
 
@@ -82,6 +83,12 @@ export class FileCheckpoint {
 
   /**
    * Restore a file from its most recent snapshot.
+   *
+   * Retained intentionally for a future `/rollback`-style restore path:
+   * the PreToolUse `pre-write-checkpoint` hook continuously snapshots, but
+   * no command currently calls `restore()`. It is exercised by unit tests
+   * and kept as the consumer-facing recovery API. Do NOT remove without
+   * also removing the snapshot hot path.
    *
    * @param {string} filePath - Absolute path to the file to restore.
    * @returns {boolean} True if restored, false if no snapshot found.
