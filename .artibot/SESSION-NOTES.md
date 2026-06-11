@@ -1605,3 +1605,34 @@
 <!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
 
 ---
+
+## 2026-06-11 01:24 UTC · `artibot/master`
+
+- **Commits** (2):
+  - `c29c604` wip(autopilot): phase2 checkpoint ap-20260611-010942-z18m26 — wave1 model-catalog 레지스트리
+  - `d2d76d2` chore(session): 세션 노트/핸드오프 정리 — ultraplan fable5 사전 베이스라인
+- **Files touched**: 7
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-06-11 01:32 UTC · `artibot/master`
+
+- **Commits** (1):
+  - `b956c2b` wip(autopilot): phase2 checkpoint ap-20260611-010942-z18m26 — wave2 economy/policy/commands/guards
+- **Files touched**: 16
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-06-11 01:46 UTC · `artibot/master`
+
+- **Commits** (1):
+  - `37a1fe1` wip(autopilot): phase3-4 checkpoint ap-20260611-010942-z18m26 — 리뷰 반영(precedence 문서화+테스트, costFactor dead field 제거) + EPERM rename 재시도 가드
+- **Files touched**: 5
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
