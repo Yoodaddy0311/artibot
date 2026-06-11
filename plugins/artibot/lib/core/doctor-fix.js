@@ -130,7 +130,7 @@ function backupPathFor(target, ts) {
  * @returns {object}
  */
 function fixBrokenJson(ctx) {
-  const { target, fs, now, dryRun, code, defaultValue } = ctx;
+  const { target, fs, dryRun, code, defaultValue } = ctx;
   if (!target || typeof target !== 'string') {
     return record('skipped', code, 'no target file supplied');
   }
@@ -165,8 +165,6 @@ function fixBrokenJson(ctx) {
     backup,
     restored: target,
   });
-  // note: `now` destructured above is unused on the success path by design
-  // (ctx.now() is the single source) — kept in signature for symmetry.
 }
 
 /**

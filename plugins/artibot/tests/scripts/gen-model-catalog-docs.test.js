@@ -3,7 +3,7 @@
  * generator. The doc is GENERATED output; these tests pin the renderer so a
  * catalog data change cannot silently produce a stale or malformed doc.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import * as catalog from '../../lib/core/model-catalog.js';
 import { renderDoc, specTable, toFileUrl } from '../../scripts/gen-model-catalog-docs.js';

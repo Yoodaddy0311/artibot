@@ -75,16 +75,21 @@ import the module via a manually-constructed `file://` URL rather than a bare
 specifier. From a Node ESM context:
 
 ```js
-import { pathToFileURL } from 'node:url';
 import path from 'node:path';
 
+// toFileUrl: 한글 경로 안전 (pathToFileURL은 percent-encoding 때문에
+// Windows 한글 경로에서 import() 실패 — scripts/utils/index.js#toFileUrl 참고)
+const toFileUrl = (p) => {
+  const f = p.replace(/\\/g, '/');
+  return /^[A-Z]:/i.test(f) ? `file:///${f}` : `file://${f}`;
+};
+
 const root = process.env.CLAUDE_PLUGIN_ROOT; // plugin root
-const modUrl = pathToFileURL(
-  path.join(root, 'lib', 'core', 'preset-packs.js')
-).href;
-const { listPacks, resolvePack, applyPack } = await import(modUrl);
+const { listPacks, resolvePack, applyPack } = await import(
+  toFileUrl(path.join(root, 'lib', 'core', 'preset-packs.js'))
+);
 const { loadConfig } = await import(
-  pathToFileURL(path.join(root, 'lib', 'core', 'config.js')).href
+  toFileUrl(path.join(root, 'lib', 'core', 'config.js'))
 );
 
 const config = await loadConfig();

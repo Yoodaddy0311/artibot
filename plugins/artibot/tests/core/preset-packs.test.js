@@ -10,7 +10,7 @@
  * @module tests/core/preset-packs
  */
 
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -48,8 +48,8 @@ const fixtureConfig = {
 };
 
 afterAll(() => {
-  // 픽스처는 OS 임시 디렉토리에 생성 — 명시적 정리 불필요(테스트 종료 시 OS가 회수).
-  // 명세상 부작용 0 단언을 위해 별도 작업 없음.
+  // Windows에서는 OS 임시 디렉토리가 세션 간 잔류할 수 있어 명시적으로 정리한다.
+  rmSync(fixtureRoot, { recursive: true, force: true });
 });
 
 describe('listPacks', () => {

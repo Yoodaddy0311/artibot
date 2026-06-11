@@ -18,8 +18,8 @@ import os from 'node:os';
 
 import {
   FIX_ACTIONS,
-  SEVERITY,
   runDoctorFix,
+  SEVERITY,
 } from '../../lib/core/doctor-fix.js';
 
 // ---------------------------------------------------------------------------

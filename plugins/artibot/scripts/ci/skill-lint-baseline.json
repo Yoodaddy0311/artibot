@@ -1,7 +1,6 @@
 {
   "skills": [
     "agent-memory-snapshot",
-    "auto-learning-pipeline",
     "compaction-survival",
     "daily",
     "guardrails",
@@ -18,5 +17,5 @@
     "team",
     "tool-approval"
   ],
-  "generatedAt": "2026-06-11T05:29:00.706Z"
+  "generatedAt": "2026-06-11T05:42:40.302Z"
 }
