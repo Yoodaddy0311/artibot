@@ -1,7 +1,7 @@
 ---
 context: fork
 name: platform-auth
-description: "Provides authentication and authorization patterns including JWT, OAuth2, RBAC, session management, and managed auth services like Auth0 and Clerk. Use when implementing login flows, designing access control, configuring OAuth or OIDC, working with JWT tokens, or asking about authentication, authorization, or CSRF protection."
+description: "Provides authentication and authorization patterns including JWT, OAuth2, RBAC, session management, and managed auth services like Auth0 and Clerk. Use when the user asks about login flows, access control, OAuth or OIDC, JWT tokens, or CSRF protection. Triggers: authentication, authorization, OAuth, JWT, RBAC, session, Auth0, Clerk."
 lang: [en]
 level: 2
 triggers: ["authentication", "auth", "OAuth", "JWT", "RBAC", "session", "Auth0", "Clerk"]

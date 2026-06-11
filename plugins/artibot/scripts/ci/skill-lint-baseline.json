@@ -1,21 +1,4 @@
 {
-  "skills": [
-    "agent-memory-snapshot",
-    "compaction-survival",
-    "daily",
-    "guardrails",
-    "hook-event-emitter",
-    "library-shadcn",
-    "orchestration-patterns",
-    "persona-devops",
-    "platform-auth",
-    "quality-framework",
-    "report-generation",
-    "seo-strategy",
-    "spec-format",
-    "tdd-workflow",
-    "team",
-    "tool-approval"
-  ],
-  "generatedAt": "2026-06-11T05:42:40.302Z"
+  "skills": [],
+  "generatedAt": "2026-06-11T06:42:46.123Z"
 }

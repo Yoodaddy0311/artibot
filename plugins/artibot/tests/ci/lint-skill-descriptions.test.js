@@ -7,10 +7,10 @@
  *   - detectWorkflowSummary (R2): pipeline tokens, arrows, numbered steps, verb chains
  *   - lintDescription: rule composition + severities (R3 = warn)
  *   - runRatchet: new-violation fail / baseline pass / shrink (fixed) branches
- *   - Calibration: still-violating real skills must FAIL R2 (verb-chain + pipeline-token
- *     branches); image-generation + quickstart PASS. (vibe-coding and clarify were the
- *     original verb-chain exemplars; both are now CSO-compliant, so the calibration is
- *     re-pointed at report-generation/tdd-workflow to keep detector coverage live.)
+ *   - Calibration: every detectWorkflowSummary branch is exercised by SYNTHETIC
+ *     fixture strings, never by real skill descriptions. Real-skill coupling broke
+ *     this twice (each time the ratchet legitimately fixed the example skill), so it
+ *     is banned here — synthetic fixtures keep detector coverage live and stable.
  *
  * @module tests/ci/lint-skill-descriptions
  */
@@ -33,11 +33,6 @@ import { getPluginRoot } from '../../scripts/ci/ci-utils.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PLUGIN_ROOT = join(__dirname, '..', '..');
-
-/** Read a real skill's extracted description for calibration assertions. */
-function realDesc(name) {
-  return extractDescription(readFileSync(join(PLUGIN_ROOT, 'skills', name, 'SKILL.md'), 'utf8'));
-}
 
 describe('extractDescription', () => {
   it('reads an inline quoted description', () => {
@@ -164,30 +159,55 @@ describe('runRatchet', () => {
   });
 });
 
-describe('calibration against real skills', () => {
-  it('report-generation is an R2 violation (verb chain in description)', () => {
-    expect(detectWorkflowSummary(realDesc('report-generation'))).toContain('verb-chain');
+// Detector branch calibration — SYNTHETIC FIXTURES ONLY. Do NOT couple these
+// assertions to real skill descriptions: skill content is mutable, and a
+// legitimate description fix would silently break detector coverage. That coupling
+// already broke twice (vibe-coding/clarify, then report-generation/tdd-workflow/daily,
+// each fixed by the description-lint ratchet). Synthetic strings exercise every
+// detectWorkflowSummary branch directly and never go stale.
+describe('detectWorkflowSummary branch coverage (synthetic fixtures)', () => {
+  it('flags a 3+ procedural verb chain (verb-chain branch)', () => {
+    const desc = 'Decomposes the request, executes each step, and verifies the result.';
+    expect(detectWorkflowSummary(desc)).toContain('verb-chain');
   });
 
-  it('tdd-workflow is an R2 violation (pipeline token)', () => {
-    expect(detectWorkflowSummary(realDesc('tdd-workflow')).length).toBeGreaterThan(0);
+  it('flags an uppercase pipeline token (pipeline-token branch)', () => {
+    const desc = 'Runs the DECOMPOSE-EXECUTE-VERIFY loop on the input.';
+    expect(detectWorkflowSummary(desc)).toContain('pipeline-token');
   });
 
-  it('vibe-coding and clarify are now CSO-compliant (no workflow summary)', () => {
-    expect(detectWorkflowSummary(realDesc('vibe-coding'))).toEqual([]);
-    expect(detectWorkflowSummary(realDesc('clarify'))).toEqual([]);
+  it('flags numbered / phased steps (numbered-step branch)', () => {
+    const desc = 'Phase 1 gathers context. Step 2 plans the work.';
+    expect(detectWorkflowSummary(desc)).toContain('numbered-step');
   });
 
-  it('daily is an R2 violation', () => {
-    expect(detectWorkflowSummary(realDesc('daily')).length).toBeGreaterThan(0);
+  it('flags an arrow chain (arrow-chain branch)', () => {
+    const desc = 'Pipeline: gather -> plan -> build.';
+    expect(detectWorkflowSummary(desc)).toContain('arrow-chain');
   });
 
-  it('image-generation passes (trigger enumeration only)', () => {
-    expect(lintDescription(realDesc('image-generation')).violations).toEqual([]);
+  it('flags a Korean procedural verb chain (KO verb-chain branch)', () => {
+    const desc = '입력을 분해하고 실행하고 검증한다.';
+    expect(detectWorkflowSummary(desc)).toContain('verb-chain');
   });
 
-  it('quickstart passes (Use-when enumeration clears R1, no workflow)', () => {
-    expect(lintDescription(realDesc('quickstart')).violations).toEqual([]);
+  it('returns no hits for a CSO-compliant Use-when description', () => {
+    const desc = 'Use when the user wants a daily recap or retrospective.';
+    expect(detectWorkflowSummary(desc)).toEqual([]);
+  });
+});
+
+describe('lintDescription calibration (synthetic fixtures)', () => {
+  it('passes a trigger-enumeration description with no workflow summary', () => {
+    const desc =
+      'Use when generating, editing, or refining images. Triggers: image generate, ' +
+      'create image, edit image, modify image, refine image.';
+    expect(lintDescription(desc).violations).toEqual([]);
+  });
+
+  it('passes a Use-when enumeration that clears R1 and has no workflow', () => {
+    const desc = 'Use when the user wants project detection, framework hints, or command suggestions.';
+    expect(lintDescription(desc).violations).toEqual([]);
   });
 });
 

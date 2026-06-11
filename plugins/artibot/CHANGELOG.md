@@ -13,6 +13,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.26.0] — 2026-06-11
+
+**Theme**: 두 자율 세션 통합 — Fable 5 커맨드 업그레이드 + 바이브코딩 특화 (description-lint ratchet·doctor --fix·install 프리셋 팩·메타스킬)
+
+### Added
+- **model-catalog 단일 진실원** — Claude 모델 메타데이터(ID·컨텍스트·출력·단가·thinking·fallback)를 코드 레지스트리(`lib/core/model-catalog.js`)로 통합. 문서·라우팅·이코노미가 같은 출처를 참조해 모델 정보 drift 제거.
+- **Fable 5 격리 opt-in** — Fable 5는 직접 Messages API 호출에서만 사용하는 격리 경로로 opt-in. 서브에이전트 라우팅(`model` enum=`sonnet|opus|haiku`)·`opus` 티어(Opus 4.8)·비용 정책 무변경.
+- **description-lint ratchet 게이트** — 스킬 description 품질을 정적 검사하는 lint 엔진 + baseline ratchet(`scripts/ci/skill-lint-baseline.json`). 신규 위반 0 강제, 기존 위반은 단조 감소만 허용(역행 차단). 16종 잔여 위반 0 달성.
+- **doctor --fix** — `/doctor` 헬스체크에 자동 수선 모드 추가. 탐지된 설정·메타데이터 문제를 안전 범위 내에서 자동 교정.
+- **install 프리셋 팩** — 설치 시 용도별 프리셋 번들 선택 지원.
+- **skill-authoring 메타스킬** — 스킬 저작을 가이드하는 메타스킬 신설(바이브코딩 특화).
+- **Unicode/drift 게이트** — Unicode 정규화·lockstep drift를 릴리스 전에 차단하는 CI 게이트.
+
+### Changed
+- **tokenizerCoeff 가드레일** — 토크나이저 계수에 가드레일 추가로 토큰 추정 이상치 방지.
+
+### Fixed
+- **EPERM 재시도 가드** — 런타임 상태 파일 tmp→rename 시 EPERM(파일 잠금) 발생 시 재시도. 추가로 `runtime/`를 OneDrive 동기화 폴더 밖(`%LOCALAPPDATA%\artibot\runtime`)으로 이전하고 NTFS junction으로 원위치 유지 — CI EPERM 플레이크의 구조적 원인 제거.
+
+### Notes
+- 모델 정책(`artibot.config.json#/agents/modelPolicy`)·서브에이전트 라우팅·비용은 변경 없음. Fable 5는 직접 API 호출 전용(2× Opus 4.8 단가, 민감주제는 Opus 4.8로 폴백).
+
+---
+
 ## [4.25.1] — 2026-06-10
 
 **Theme**: Claude Fable 5 / Mythos 5 모델 지식 반영 (docs-only)

@@ -1,7 +1,7 @@
 ---
 context: fork
 name: guardrails
-description: "Input/output and per-tool guardrails with tripwire semantics. Use when an agent processes untrusted input, calls a sensitive tool, or must short-circuit on policy violations."
+description: "Input/output and per-tool guardrails with tripwire semantics. Auto-activates when: an agent processes untrusted input, calls a sensitive tool, or must short-circuit on a policy violation. Triggers: guardrail, input validation, tripwire, tool guardrail, policy check, refusal, agent safety."
 lang: [en]
 level: 2
 triggers: ["guardrail", "input validation", "tripwire", "tool guardrail", "policy check", "refusal", "agent safety"]
