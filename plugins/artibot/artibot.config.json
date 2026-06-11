@@ -56,6 +56,12 @@
           "complex-debugging",
           "cross-domain-analysis"
         ]
+      },
+      "fable": {
+        "enabled": false,
+        "allowlist": [],
+        "costFactor": 2.6,
+        "comment": "Fable (claude-fable-5) tier isolation — opt-in ONLY. An agent resolves to fable ONLY when enabled===true AND its exact name is in allowlist AND it is not in the security denylist; every other fable request is demoted to opus. No automatic/heuristic fable selection exists. Effective cost is 2.6× Opus baseline (2× list price × 1.3 tokenizer coefficient), so keep allowlist deliberate. Default enabled=false, allowlist=[] = zero fable usage, byte-identical legacy behavior."
       }
     },
     "categories": {

@@ -128,14 +128,11 @@ function renderDoc(catalog) {
   out.push('');
   out.push('## Sources');
   out.push('');
-  out.push(
-    '- [Models overview — platform.claude.com]' +
-      '(https://platform.claude.com/docs/en/about-claude/models/overview)',
-  );
-  out.push(
-    '- [Introducing Claude Fable 5 and Claude Mythos 5]' +
-      '(https://platform.claude.com/docs/en/about-claude/models/introducing-claude-fable-5-and-claude-mythos-5)',
-  );
+  // Plain-text references (no URL literals): the DATA POLICY outbound guard
+  // (tests/ci/data-policy-outbound-guard.test.js) keeps a strict zero-URL
+  // tripwire on this module — doc paths are cited by name instead.
+  out.push('- platform.claude.com docs — "Models overview"');
+  out.push('- platform.claude.com docs — "Introducing Claude Fable 5 and Claude Mythos 5"');
   out.push('');
   return out.join('\n');
 }

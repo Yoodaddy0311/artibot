@@ -222,11 +222,13 @@ if (pfInstr?.suppress) { /* warnings: state.preflightWarnings에 누적 + 계속
 - TUI 활성 세션은 footer에 `engine.renderCostInline(getSessionCost(sessionId))` 자동 표시
 
 #### Phase 0 — INTAKE (PRD 생성)
-- `Task(subagent_type="artibot:planner", model="opus", prompt="[Autopilot Phase 0] 사용자 요청: {task}\n\n`docs/PRD/<feature>-<sessionId>.md` 작성. PRD 템플릿: 배경/목표/비목표/시나리오/설계/산출물/실행계획/위험/수락기준")`
+- `Task(subagent_type="artibot:planner", prompt="[Autopilot Phase 0] 사용자 요청: {task}\n\n\`docs/PRD/<feature>-<sessionId>.md\` 작성. PRD 템플릿: 배경/목표/비목표/시나리오/설계/산출물/실행계획/위험/수락기준")`
+  <!-- model: model-policy 해석 — 역할 frontier 티어 -->
 - `mode === 'plan'`: PRD 경로 보고 후 종료. `:resume <sessionId>` 안내.
 
 #### Phase 1 — PLAN
-- `Task(subagent_type="artibot:planner", model="opus", prompt="[Autopilot Phase 1] PRD: {prdPath}\n\n분해 + 위험 식별 + 병렬 팀 구성 제안")`
+- `Task(subagent_type="artibot:planner", prompt="[Autopilot Phase 1] PRD: {prdPath}\n\n분해 + 위험 식별 + 병렬 팀 구성 제안")`
+  <!-- model: model-policy 해석 — 역할 frontier 티어 -->
 
 #### Phase 2 — PARALLEL EXECUTE
 - EXECUTE 러너는 통합 분류기(`lib/cognitive/workflow-plan.js`)가 선출한다: 현재 기본값은 `TeamCreate` (adaptive 팀)이며, 결정적 workflow-runner 로의 교체는 향후 Option-B 단계의 pluggable 러너다 (현 동작 불변).
@@ -234,7 +236,8 @@ if (pfInstr?.suppress) { /* warnings: state.preflightWarnings에 누적 + 계속
 - 30분(또는 `--checkpoint`)마다 WIP commit: `git commit -m "wip(autopilot): phase2 checkpoint {sessionId}"`. SHA를 `engine.recordCheckpoint(sessionId, sha)`로 기록.
 
 #### Phase 3 — CROSS_CHECK
-- 팀원 간 원형 검증 (A→B→C→A). 추가로 `Task(subagent_type="artibot:spec-reviewer", model="sonnet")` 소환.
+- 팀원 간 원형 검증 (A→B→C→A). 추가로 `Task(subagent_type="artibot:spec-reviewer")` 소환.
+  <!-- model: model-policy 해석 — 역할 balanced 티어 -->
 
 #### Phase 4 — VERIFY
 - `Bash("npm run ci")` 실행. 실패 시 `engine.classifyFailure(error)` → `build-error-resolver` 자동 소환. **3회 재시도 후에도 실패하면 PAUSED**.
@@ -243,7 +246,8 @@ if (pfInstr?.suppress) { /* warnings: state.preflightWarnings에 누적 + 계속
 - 병렬 소환: `Task(subagent_type="artibot:refactor-cleaner")` + `Task(subagent_type="artibot:performance-engineer")`. 결과는 보고서 §7~8.
 
 #### Phase 6 — REPORT
-- `Task(subagent_type="artibot:doc-updater", model="sonnet", prompt="[Autopilot Phase 6] reports/AUTOPILOT/{sessionId}.md 작성. 템플릿: PRD §13.5 (요약/PRD링크/Phase표/커밋SHA/Cross-check/검증/개선/미래/큐/Next)")`
+- `Task(subagent_type="artibot:doc-updater", prompt="[Autopilot Phase 6] reports/AUTOPILOT/{sessionId}.md 작성. 템플릿: PRD §13.5 (요약/PRD링크/Phase표/커밋SHA/Cross-check/검증/개선/미래/큐/Next)")`
+  <!-- model: model-policy 해석 — 역할 balanced 티어 -->
 - `engine.notifyCompletion(sessionId)` 호출 (`--no-notify` 시 skip, `night` 모드는 PushNotification 차단).
 
 ### Step 4 — PAUSED Handling
@@ -262,6 +266,32 @@ Phase 6 완료 후:
 - 비용 요약: `engine.renderCostBlock(engine.getSessionCost(sessionId))` 마크다운 테이블을 사용자에게 노출 (Phase별 토큰/$ + Budget 사용률).
 - pre-flight 경고가 있었다면 `engine.renderPreflightSummary(state.preflightResult)` 출력 (참고용).
 - abort/완료 시 `engine.releaseAllForSession(sessionId)`로 잔존 lock 일괄 해제.
+
+## Fable-mode (조건부 — config fable.enabled 시)
+
+이 섹션은 `artibot.config.json#/fable.enabled` + `fable.allowlist` opt-in 에이전트가 존재할 때만 적용되는 부록이다. model-policy fable 게이트를 통과한 에이전트에게만 아래 원칙·스니펫·휴리스틱이 적용된다. 게이트 미통과 에이전트(보안 계열 등 denylist)에는 적용하지 않는다.
+
+### de-prescribe 원칙
+
+fable 티어 에이전트 프롬프트는 단계 나열 대신 "목표 + 불변식 + 검증 기준" 서술로 작성한다. 세부 절차를 열거하면 과잉처방(over-prescription)으로 인해 품질이 저하된다.
+
+### 스니펫 4종
+
+> **① anti-overplanning**: 행동할 정보가 충분하면 행동하라; 이미 결정된 사항 재론 금지.
+
+> **② grounded-progress**: 진행 보고 전 각 주장을 이 세션의 도구 결과와 대조; 검증 안 된 것은 명시.
+
+> **③ boundaries**: 문제 서술/질문은 평가가 산출물 — 요청 전 수정 금지; 상태 변경 명령 전 증거 확인.
+
+> **④ autonomous-no-asking**: 자율 모드 — 되돌릴 수 있는 행동은 묻지 말고 진행, 턴 종료 전 마지막 문단이 계획/질문이면 지금 도구로 실행.
+
+### 빈-결과 휴리스틱
+
+fable 에이전트 결과가 빈(empty) 또는 이상(refusal 추정)이면, 동일 프롬프트를 frontier 티어로 1회 재시도 후 결과를 큐에 기록한다. 재시도도 빈 결과이면 PAUSED 처리.
+
+### 장시간 턴 안내
+
+fable 단일 턴은 수 분이 정상이다. checkpoint 주기 내 무진행으로 오판하지 말 것 — fable 에이전트가 응답 중인 동안 phase 타이머를 별도 카운팅한다.
 
 ### `/autopilot:tail` Live Telemetry (PRD v4.1 P0-2)
 

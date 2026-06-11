@@ -65,6 +65,41 @@ The classifier MAY only recommend them (advisory text). Only `inline` and `team`
 
 ---
 
+## Model-Era Assumptions (Single Source)
+
+All model knowledge — names, pricing, tokenizer limits, context windows, and tier
+constraints — lives exclusively in **`lib/core/model-catalog.js`** (the single source
+of truth). `docs/CLAUDE-MODEL-CATALOG.md` is a generated artifact derived from that
+catalog; never edit it by hand.
+
+**Role aliases used by commands and agents**
+
+| Alias | Purpose |
+|---|---|
+| `frontier` | Highest-capability tier (e.g., Opus class) |
+| `deep-async` | Long-horizon async work |
+| `balanced` | General-purpose mid-tier |
+| `fast` | Low-latency, high-volume tier |
+
+Command `.md` files reference these aliases only — never hardcode model names or
+version strings in prose. This keeps every command decoupled from the model
+generation cycle.
+
+**Fable tier**
+
+`fable` (and any analogous experimental tier) is an **opt-in allowlist** controlled
+by `artibot.config.json#/fable`. Security-adjacent agents (security-reviewer,
+guardrail, pii-scrubber, blocked-patterns) are on a **denylist** and cannot be
+assigned a fable-tier model regardless of config.
+
+**Upgrade path**
+
+When a model generation rolls over, the only required edit is the catalog data in
+`lib/core/model-catalog.js`. No command `.md`, agent frontmatter, or routing rule
+needs to change — aliases remain stable across generations.
+
+---
+
 ## See Also
 
 - [ORCHESTRATION-GLOSSARY.md](ORCHESTRATION-GLOSSARY.md) — term definitions for all four mechanisms

@@ -98,6 +98,67 @@ describe('estimateFootprint', () => {
     expect(r.tokens).toBe(100000);
     expect(r.hours).toBe(1);
   });
+
+  it('accepts throughputTokensPerHour as a throughput alias', () => {
+    const r = estimateFootprint([{ type: 'impl' }], {
+      throughputTokensPerHour: 120000,
+    });
+    expect(r.hours).toBeCloseTo(120000 / 120000, 6); // 120000 tok / 120000 = 1h
+    // throughput wins over the alias when both are present.
+    const both = estimateFootprint([{ type: 'impl' }], {
+      throughput: 240000,
+      throughputTokensPerHour: 120000,
+    });
+    expect(both.hours).toBeCloseTo(120000 / 240000, 6);
+  });
+});
+
+describe('estimateFootprint — tokenizerCoeff injection', () => {
+  const tasks = [{ type: 'impl' }, { type: 'test' }, { type: 'review' }];
+  const base = 240000; // 120000 + 70000 + 50000 at medium
+
+  it('is byte-identical to the default when coeff is 1.0 or unspecified', () => {
+    expect(estimateFootprint(tasks).tokens).toBe(base);
+    expect(estimateFootprint(tasks, {}).tokens).toBe(base);
+    expect(estimateFootprint(tasks, { tokenizerCoeff: 1.0 }).tokens).toBe(base);
+  });
+
+  it('multiplies per-task tokens by an explicit coefficient (1.3×)', () => {
+    const r = estimateFootprint(tasks, { tokenizerCoeff: 1.3 });
+    // Per-task rounding: round(120000*1.3)+round(70000*1.3)+round(50000*1.3).
+    const expected = Math.round(120000 * 1.3)
+      + Math.round(70000 * 1.3)
+      + Math.round(50000 * 1.3);
+    expect(r.tokens).toBe(expected);
+    expect(r.tokens).toBeCloseTo(base * 1.3, -2);
+  });
+
+  it('resolves modelTier "fable" to the catalog coefficient (1.3)', () => {
+    const fable = estimateFootprint(tasks, { modelTier: 'fable' });
+    const explicit = estimateFootprint(tasks, { tokenizerCoeff: 1.3 });
+    expect(fable.tokens).toBe(explicit.tokens);
+  });
+
+  it('lets explicit tokenizerCoeff win over modelTier', () => {
+    const r = estimateFootprint(tasks, { modelTier: 'fable', tokenizerCoeff: 2.0 });
+    const expected = Math.round(120000 * 2.0)
+      + Math.round(70000 * 2.0)
+      + Math.round(50000 * 2.0);
+    expect(r.tokens).toBe(expected);
+  });
+
+  it('treats opus/unknown tiers as coefficient 1.0', () => {
+    expect(estimateFootprint(tasks, { modelTier: 'opus' }).tokens).toBe(base);
+    expect(estimateFootprint(tasks, { modelTier: 'nope' }).tokens).toBe(base);
+  });
+
+  it('degrades NaN / negative / string coefficients to 1.0', () => {
+    expect(estimateFootprint(tasks, { tokenizerCoeff: NaN }).tokens).toBe(base);
+    expect(estimateFootprint(tasks, { tokenizerCoeff: -1 }).tokens).toBe(base);
+    expect(estimateFootprint(tasks, { tokenizerCoeff: 0 }).tokens).toBe(base);
+    expect(estimateFootprint(tasks, { tokenizerCoeff: '1.3' }).tokens).toBe(base);
+    expect(estimateFootprint(tasks, { tokenizerCoeff: Infinity }).tokens).toBe(base);
+  });
 });
 
 describe('classifySize', () => {
@@ -171,5 +232,16 @@ describe('sizePlan', () => {
     expect(r.footprint.tokens).toBe(0);
     expect(r.sizing.band).toBe('quick');
     expect(r.sizing.recommendation).toBe('expand');
+  });
+
+  it('flows tokenizerCoeff into the footprint without changing the budget cap', () => {
+    const tasks = [{ type: 'impl' }, { type: 'test' }];
+    const plain = sizePlan(tasks);
+    const fable = sizePlan(tasks, { modelTier: 'fable' });
+    // Footprint scales with the 1.3 coefficient.
+    expect(fable.footprint.tokens).toBeGreaterThan(plain.footprint.tokens);
+    expect(fable.footprint.tokens).toBeCloseTo(plain.footprint.tokens * 1.3, -2);
+    // budgetHint is a band×throughput cap, independent of the coefficient.
+    expect(fable.autopilot.budgetHint).toBe(plain.autopilot.budgetHint);
   });
 });

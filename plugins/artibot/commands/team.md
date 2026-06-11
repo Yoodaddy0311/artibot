@@ -1,5 +1,5 @@
 ---
-description: (Artibot) Parallel team execution with cross-check — persistent team mode, leader delegates only, implementation on opus 4.8 (xhigh effort 권장), review phases on sonnet 4.6
+description: (Artibot) Parallel team execution with cross-check — persistent team mode, leader delegates only, implementation on frontier 티어(model-policy 해석, xhigh effort 권장), review phases on balanced 티어
 argument-hint: '[task] e.g. "이 기능 구현하고 테스트도 작성해줘"'
 allowed-tools: [Read, Glob, Grep, Bash, TeamCreate, SendMessage, TaskCreate, TaskUpdate, TaskList, TaskGet, Task, TeamDelete]
 toolset: team
@@ -7,7 +7,7 @@ toolset: team
 
 # /team
 
-Parallel team execution with mandatory cross-check and **persistent team mode**. The leader (YOU) delegates work and receives results ONLY — never does the work yourself. Implementation teammates (Phase 3) run on **opus 4.8** for maximum code quality. Review teammates (Phase 4 cross-check, Phase 4.5 inspection) run on **sonnet 4.6** for faster turnaround. By default, the team **persists** after task completion and awaits the next assignment. Use `--one-shot` to revert to single-task-then-shutdown behavior.
+Parallel team execution with mandatory cross-check and **persistent team mode**. The leader (YOU) delegates work and receives results ONLY — never does the work yourself. Implementation teammates (Phase 3) run on the **frontier 티어(model-policy 해석, xhigh effort 권장)** for maximum code quality. Review teammates (Phase 4 cross-check, Phase 4.5 inspection) run on the **balanced 티어** for faster turnaround. By default, the team **persists** after task completion and awaits the next assignment. Use `--one-shot` to revert to single-task-then-shutdown behavior.
 
 ## Arguments
 
@@ -35,11 +35,11 @@ When the prompt contains `[artibot:hint recommend=workflow]`, surface to the use
 - You are the CTO — teammates are your engineers
 
 ### Teammate Rules & Model Policy
-- **Implementation teammates (Phase 3)**: `model="opus"` — 코드 작성/구현은 최고 품질 필수
-- **Review teammates (Phase 4, 4.5)**: `model="sonnet"` — 읽기+검증은 sonnet으로 충분, 속도 우선
+- **Implementation teammates (Phase 3)**: `frontier` 티어(model-policy 해석) — 코드 작성/구현은 최고 품질 필수
+- **Review teammates (Phase 4, 4.5)**: `balanced` 티어(model-policy 해석) — 읽기+검증은 balanced 티어로 충분, 속도 우선
 - **ALL work in parallel** (no blockedBy unless truly sequential dependency)
 - **Each teammate works independently** on their assigned scope
-- After main work: cross-check another teammate's output (on sonnet)
+- After main work: cross-check another teammate's output (balanced 티어)
 
 > **Single source of truth:** the phase→model mapping above is a prose summary. The authoritative resolver is `lib/core/model-policy.js` (`resolveModelForPhase` / `resolveModel`), backed by `artibot.config.json#/agents/modelPolicy`. The SubagentStart hook (`scripts/hooks/subagent-handler.js`) calls `resolveModel` to flag spawns that drift from policy.
 
@@ -49,8 +49,8 @@ When the prompt contains `[artibot:hint recommend=workflow]`, surface to the use
 - 애매하면 유지 — idle 상태 팀원은 토큰을 소비하지 않는다
 - 셧다운 판단 기준: 다음 작업의 도메인이 완전히 달라져서 해당 전문성이 0% 필요할 때만
 
-### Effort & Task Budget (Opus 4.8 native)
-Opus 4.8은 effort를 네이티브 레벨로 노출한다: **max / xhigh / high / medium / low** (기본 high, 베타 헤더 불필요). `/team` 구현 phase는 **xhigh**가 기본 권장값이고, 대규모 멀티에이전트 오케스트레이션은 **max**까지 올린다. 호출 측은 `output_config.effort`로 직접 지정한다.
+### Effort & Task Budget (frontier 티어 native)
+frontier 티어 모델은 effort를 네이티브 레벨로 노출한다: **max / xhigh / high / medium / low** (기본 high, 베타 헤더 불필요). `/team` 구현 phase는 **xhigh**가 기본 권장값이고, 대규모 멀티에이전트 오케스트레이션은 **max**까지 올린다. 호출 측은 `output_config.effort`로 직접 지정한다.
 
 ```json
 {
@@ -119,7 +119,8 @@ TeamCreate(
 
 Spawn ALL teammates in a single message (parallel):
 ```
-Task(subagent_type="artibot:{agent-type}", team_name="team-*", name="{role}", model="opus",
+Task(subagent_type="artibot:{agent-type}", team_name="team-*", name="{role}",
+     /* model: model-policy 해석 — 구현 역할은 frontier 티어, 검토 역할은 balanced 티어 */
      prompt="[DEV Protocol 준수]\n\n작업:\n{specific work unit}\n\n완료 후 결과를 리더에게 보고해주세요.")
 ```
 
@@ -179,11 +180,12 @@ hook/statusline이 아니라 **리더의 채팅 출력**이라 항상 보이고,
 > (소스 레포에선 `node plugins/artibot/scripts/render-progress.js ...`.) `${CLAUDE_PLUGIN_ROOT}`는
 > Bash 셸에서 비어있을 수 있으니 쓰지 마라. 헬퍼 호출이 실패하면 즉시 인라인 출력으로 폴백한다.
 
-### Phase 4: CROSS-CHECK (Sonnet 4.6)
-After ALL main tasks complete, spawn cross-check agents on **sonnet** for fast review:
+### Phase 4: CROSS-CHECK (balanced 티어)
+After ALL main tasks complete, spawn cross-check agents on the **balanced 티어** for fast review:
 
 ```
-Task(subagent_type="code-reviewer", team_name="team-*", name="checker-{n}", model="sonnet",
+Task(subagent_type="code-reviewer", team_name="team-*", name="checker-{n}",
+     /* model: model-policy 해석 — 역할 balanced 티어 */
      prompt="[Cross-check Mode]\n\n{teammate-A}의 작업물을 검증해주세요.
      변경 파일: {list}\n요구사항: {original requirements}\n
      코드 동작, 테스트 통과, 리그레션 없음, 프로젝트 패턴 준수 여부 확인 후 APPROVE 또는 REQUEST_CHANGES 보고.")
@@ -197,12 +199,13 @@ Each cross-checker:
 3. Run relevant tests if applicable
 4. Report: APPROVE or REQUEST_CHANGES with specifics
 
-### Phase 4.5: INSPECTION (Sonnet 4.6)
-Cross-check 완료 후, **code-reviewer 에이전트(sonnet)가 전체 작업물을 최종 검수**한다.
+### Phase 4.5: INSPECTION (balanced 티어)
+Cross-check 완료 후, **code-reviewer 에이전트(balanced 티어)가 전체 작업물을 최종 검수**한다.
 
 팀에 code-reviewer가 없으면 이 단계에서 소환:
 ```
-Task(subagent_type="artibot:code-reviewer", team_name="team-*", name="inspector", model="sonnet",
+Task(subagent_type="artibot:code-reviewer", team_name="team-*", name="inspector",
+     /* model: model-policy 해석 — 역할 balanced 티어 */
      prompt="[Inspection Mode 활성화]\n\n원본 요청: {original user request}\n\n
 각 팀원의 작업물을 검수해주세요:
 1. {teammate-1}: {작업 내용} — 변경 파일: {files}
@@ -352,7 +355,8 @@ When the user gives a new task to a persistent team:
 2. **기존 팀원 우선 재활용** — 전문성이 조금이라도 겹치면 유지하고 새 작업 배정
 3. **신규 팀원은 기존 팀에 없는 전문성이 필요할 때만** 추가:
    ```
-   Task(subagent_type="artibot:{new-agent-type}", team_name="team-*", name="{role}", model="opus",
+   Task(subagent_type="artibot:{new-agent-type}", team_name="team-*", name="{role}",
+        /* model: model-policy 해석 — 구현 역할은 frontier 티어 */
         prompt="[DEV Protocol 준수]\n\n작업:\n{new work unit}\n\n완료 후 결과를 리더에게 보고해주세요.")
    ```
 4. **팀원 교체는 다음 작업 배정 시에만** — 현재 작업 완료 후 임의 셧다운 금지 (Token Conservation Rule)
@@ -390,12 +394,16 @@ This runs the original flow: Phase 1 through 6, with automatic shutdown after re
 - Leader doing implementation work directly
 - Sequential execution when parallel is possible
 - Skipping cross-check phase
-- Using sonnet/haiku for **implementation** teammates (Phase 3 must be opus)
-- Using opus for review-only phases (Phase 4/4.5 — sonnet is faster and sufficient)
+- Using balanced/fast 티어 for **implementation** teammates (Phase 3 must be frontier 티어)
+- Using frontier 티어 for review-only phases (Phase 4/4.5 — balanced 티어가 빠르고 충분)
 - Single teammate for multi-domain work
 - Cross-checker reviewing their own work
 - **작업 완료 후 팀원을 임의로 셧다운** — 재소환 토큰 낭비 (idle 유지가 더 저렴)
 - **"혹시 모르니까" 셧다운** — 애매하면 유지가 정답
+
+## Fable opt-in
+
+최고난도 장기 추론 작업은 config `fable.allowlist` opt-in 시 `deep-async` 역할로 라우팅 가능(실효 비용 ~2.6× — model-catalog 참조).
 
 ## Next Steps
 

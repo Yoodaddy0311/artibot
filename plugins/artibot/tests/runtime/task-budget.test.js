@@ -105,6 +105,80 @@ describe('getTaskBudgetForEffort P3 overlay multiplier', () => {
   });
 });
 
+describe('getTaskBudgetForEffort model coefficient (opts)', () => {
+  const config = {
+    runtime: {
+      effort: {
+        budgetMap: { max: 200000, xhigh: 128000, high: 64000, medium: 32000, low: 16000 },
+      },
+    },
+  };
+
+  it('is byte-identical when opts is absent or coeff is 1.0', () => {
+    expect(getTaskBudgetForEffort('high', config)).toBe(64000);
+    expect(getTaskBudgetForEffort('high', config, null, null)).toBe(64000);
+    expect(getTaskBudgetForEffort('high', config, null, {})).toBe(64000);
+    expect(getTaskBudgetForEffort('high', config, null, { tokenizerCoeff: 1.0 })).toBe(64000);
+    expect(getTaskBudgetForEffort('high', config, null, { modelTier: 'opus' })).toBe(64000);
+  });
+
+  it('multiplies the budget by an explicit coefficient (1.3×)', () => {
+    expect(getTaskBudgetForEffort('high', config, null, { tokenizerCoeff: 1.3 }))
+      .toBe(Math.round(64000 * 1.3)); // 83200
+  });
+
+  it('resolves modelTier "fable" to the catalog coefficient (1.3)', () => {
+    // medium=32000 * 1.3 = 41600 (well above the 20k floor).
+    expect(getTaskBudgetForEffort('medium', config, null, { modelTier: 'fable' }))
+      .toBe(Math.round(32000 * 1.3));
+  });
+
+  it('clamps fable budgets up to the 20k beta floor for low effort', () => {
+    // low=16000 * 1.3 = 20800 → already >= 20000.
+    expect(getTaskBudgetForEffort('low', config, null, { modelTier: 'fable' }))
+      .toBeGreaterThanOrEqual(20000);
+    // With a tiny custom budgetMap, the floor is what saves us.
+    const tinyConfig = {
+      runtime: { effort: { budgetMap: { max: 200000, low: 1000 } } },
+    };
+    expect(getTaskBudgetForEffort('low', tinyConfig, null, { modelTier: 'fable' }))
+      .toBe(20000);
+  });
+
+  it('lets explicit coefficient win over modelTier', () => {
+    expect(getTaskBudgetForEffort('high', config, null, { modelTier: 'fable', tokenizerCoeff: 2.0 }))
+      .toBe(Math.min(Math.round(64000 * 2.0), 200000)); // 128000
+  });
+
+  it('re-clamps a coefficient-boosted budget to the map ceiling', () => {
+    // xhigh=128000 * 1.3 = 166400 (< 200000) stays under ceiling.
+    expect(getTaskBudgetForEffort('xhigh', config, null, { tokenizerCoeff: 1.3 }))
+      .toBe(166400);
+    // max=200000 * 1.3 = 260000 → clamped down to ceiling 200000.
+    expect(getTaskBudgetForEffort('max', config, null, { tokenizerCoeff: 1.3 }))
+      .toBe(200000);
+  });
+
+  it('stacks the overlay multiplier and the model coefficient', () => {
+    // high=64000 * 1.2 (overlay) = 76800, then * 1.3 (coeff) = 99840.
+    const out = getTaskBudgetForEffort(
+      'high',
+      config,
+      { budgetMultipliers: { high: 1.2 } },
+      { tokenizerCoeff: 1.3 },
+    );
+    expect(out).toBe(Math.round(Math.round(64000 * 1.2) * 1.3));
+  });
+
+  it('degrades NaN / negative / string coefficients to 1.0', () => {
+    expect(getTaskBudgetForEffort('high', config, null, { tokenizerCoeff: NaN })).toBe(64000);
+    expect(getTaskBudgetForEffort('high', config, null, { tokenizerCoeff: -1 })).toBe(64000);
+    expect(getTaskBudgetForEffort('high', config, null, { tokenizerCoeff: 0 })).toBe(64000);
+    expect(getTaskBudgetForEffort('high', config, null, { tokenizerCoeff: '1.3' })).toBe(64000);
+    expect(getTaskBudgetForEffort('high', config, null, { modelTier: 'nope' })).toBe(64000);
+  });
+});
+
 describe('buildTaskBudgetDirective', () => {
   it('emits max_tokens directive without beta header by default', () => {
     const out = buildTaskBudgetDirective('xhigh', 128000, {});

@@ -59,5 +59,5 @@ Tier → role aliases live in `model-catalog.js#ROLE_ALIASES` (`frontier→opus`
 
 ## Sources
 
-- [Models overview — platform.claude.com](https://platform.claude.com/docs/en/about-claude/models/overview)
-- [Introducing Claude Fable 5 and Claude Mythos 5](https://platform.claude.com/docs/en/about-claude/models/introducing-claude-fable-5-and-claude-mythos-5)
+- platform.claude.com docs — "Models overview"
+- platform.claude.com docs — "Introducing Claude Fable 5 and Claude Mythos 5"

@@ -4,7 +4,9 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_MODEL,
+  FABLE_DENYLIST,
   getPolicyModel,
+  isFableAllowed,
   isKnownAgent,
   listAgentsByModel,
   loadModelPolicy,
@@ -255,6 +257,159 @@ describe('model-policy', () => {
       expect(getPolicyModel(42, realConfig)).toBeNull();
       expect(resolveModel(null, {}, realConfig)).toBe(DEFAULT_MODEL);
       expect(isKnownAgent(42, realConfig)).toBe(false);
+    });
+  });
+
+  // ---- Fable tier isolation (opt-in routing) ----
+
+  /** Build a config whose modelPolicy carries a custom fable gate block. */
+  const withFable = (fable) => ({
+    agents: { modelPolicy: { ...policy, fable } },
+  });
+  /** Same, but with no fable block at all (legacy-shaped config). */
+  const withoutFable = () => {
+    const mp = { ...policy };
+    delete mp.fable;
+    return { agents: { modelPolicy: mp } };
+  };
+
+  describe('fable gate — backward compatibility (no fable / disabled)', () => {
+    it('a config without a fable block resolves every agent unchanged', () => {
+      const cfg = withoutFable();
+      for (const agent of [...opusAgents, ...sonnetAgents]) {
+        const expected = opusAgents.includes(agent) ? 'opus' : 'sonnet';
+        expect(resolveModel(agent, {}, cfg)).toBe(expected);
+      }
+    });
+
+    it('never resolves any policy agent to fable when block is absent', () => {
+      const cfg = withoutFable();
+      const fableHits = [...opusAgents, ...sonnetAgents].filter(
+        (a) => resolveModel(a, {}, cfg) === 'fable',
+      );
+      expect(fableHits).toEqual([]);
+    });
+
+    it('enabled=false yields zero fable hits even with a populated allowlist', () => {
+      const cfg = withFable({ enabled: false, allowlist: ['architect'] });
+      expect(resolveModel('architect', {}, cfg)).toBe('opus');
+      const fableHits = [...opusAgents, ...sonnetAgents].filter(
+        (a) => resolveModel(a, {}, cfg) === 'fable',
+      );
+      expect(fableHits).toEqual([]);
+    });
+  });
+
+  describe('fable gate — enabled but empty allowlist', () => {
+    it('enabled=true + allowlist=[] still produces zero fable hits', () => {
+      const cfg = withFable({ enabled: true, allowlist: [] });
+      const fableHits = [...opusAgents, ...sonnetAgents].filter(
+        (a) => resolveModel(a, {}, cfg) === 'fable',
+      );
+      expect(fableHits).toEqual([]);
+    });
+  });
+
+  describe('fable gate — opt-in allowlist', () => {
+    it('allowlist=[architect] routes only architect to fable', () => {
+      const cfg = withFable({ enabled: true, allowlist: ['architect'] });
+      expect(isFableAllowed('architect', cfg)).toBe(true);
+
+      const others = [...opusAgents, ...sonnetAgents].filter(
+        (a) => a !== 'architect',
+      );
+      for (const agent of others) {
+        const expected = opusAgents.includes(agent) ? 'opus' : 'sonnet';
+        expect(resolveModel(agent, {}, cfg)).toBe(expected);
+      }
+    });
+
+    it('a prefixed allowlist entry still matches the bare agent name', () => {
+      const cfg = withFable({
+        enabled: true,
+        allowlist: ['artibot:architect'],
+      });
+      expect(isFableAllowed('architect', cfg)).toBe(true);
+    });
+  });
+
+  describe('fable gate — security denylist (hard opus pin)', () => {
+    it('exports a frozen denylist containing security-reviewer', () => {
+      expect(FABLE_DENYLIST).toContain('security-reviewer');
+      expect(FABLE_DENYLIST).toContain('artibot:security-reviewer');
+      expect(Object.isFrozen(FABLE_DENYLIST)).toBe(true);
+    });
+
+    it('denylisted agent is forced to opus even when allowlisted', () => {
+      const cfg = withFable({
+        enabled: true,
+        allowlist: ['security-reviewer', 'architect'],
+      });
+      expect(isFableAllowed('security-reviewer', cfg)).toBe(false);
+      // architect (non-denylisted) still opts in, proving the gate is live.
+      expect(isFableAllowed('architect', cfg)).toBe(true);
+    });
+
+    it('denylist applies to the prefixed form too', () => {
+      const cfg = withFable({
+        enabled: true,
+        allowlist: ['artibot:security-reviewer'],
+      });
+      expect(isFableAllowed('artibot:security-reviewer', cfg)).toBe(false);
+    });
+  });
+
+  describe('role-alias resolution (catalog roles → tier)', () => {
+    it("'frontier' resolves to opus", () => {
+      expect(resolveModel('frontier', {}, realConfig)).toBe('opus');
+    });
+
+    it("'balanced' resolves to sonnet", () => {
+      expect(resolveModel('balanced', {}, realConfig)).toBe('sonnet');
+    });
+
+    it("'fast' resolves to haiku", () => {
+      expect(resolveModel('fast', {}, realConfig)).toBe('haiku');
+    });
+
+    it("'deep-async' demotes to opus when fable gate is closed", () => {
+      const cfg = withFable({ enabled: false, allowlist: [] });
+      expect(resolveModel('deep-async', {}, cfg)).toBe('opus');
+    });
+
+    it("'deep-async' resolves to fable only when that alias is opted in", () => {
+      const cfg = withFable({ enabled: true, allowlist: ['deep-async'] });
+      expect(resolveModel('deep-async', {}, cfg)).toBe('fable');
+    });
+
+    it('raw fable tier still passes through the opt-in gate', () => {
+      const open = withFable({ enabled: true, allowlist: ['fable'] });
+      expect(resolveModel('fable', {}, open)).toBe('fable');
+      const closed = withFable({ enabled: false, allowlist: [] });
+      expect(resolveModel('fable', {}, closed)).toBe('opus');
+    });
+  });
+
+  describe('fable gate — never throws on bad input', () => {
+    it('isFableAllowed tolerates malformed config/agent input', () => {
+      expect(isFableAllowed('architect', null)).toBe(false);
+      expect(isFableAllowed(42, realConfig)).toBe(false);
+      expect(isFableAllowed('architect', { agents: 'nope' })).toBe(false);
+      expect(
+        isFableAllowed('architect', {
+          agents: { modelPolicy: { fable: 'bad' } },
+        }),
+      ).toBe(false);
+      expect(
+        isFableAllowed('architect', {
+          agents: { modelPolicy: { fable: { enabled: true, allowlist: 'x' } } },
+        }),
+      ).toBe(false);
+    });
+
+    it('resolveModel never throws on role-alias + malformed config', () => {
+      expect(() => resolveModel('deep-async', {}, { agents: null })).not.toThrow();
+      expect(resolveModel('frontier', null, undefined)).toBe('opus');
     });
   });
 });
