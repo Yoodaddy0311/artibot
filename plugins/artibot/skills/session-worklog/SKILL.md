@@ -2,7 +2,7 @@
 context: fork
 disable-model-invocation: true
 name: session-worklog
-description: "Automatic session work journal maintained in auto-memory. Records tasks, decisions, and pending items at session end or after significant work blocks. Use when logging completed work, recording decisions, or preserving session context for recovery."
+description: "Automatic session work journal maintained in auto-memory, recording tasks, decisions, and pending items for recovery. 자연어 트리거: '작업 기록해줘', '세션 로그 남겨줘', '오늘 한 일 정리', '결정 사항 기록'."
 lang: [en]
 level: 2
 triggers:

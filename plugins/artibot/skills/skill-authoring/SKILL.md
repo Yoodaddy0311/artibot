@@ -2,7 +2,7 @@
 context: fork
 user-invocable: false
 name: skill-authoring
-description: "Use when creating or editing a SKILL.md, 스킬 만들어줘, 새 스킬 추가, 스킬 작성, skill 만들기."
+description: "Use when creating or editing a SKILL.md. 자연어 트리거: '스킬 만들어줘', '새 스킬 추가', '스킬 작성해줘', 'skill 만들기', '스킬 프론트매터 고쳐줘', 'create a skill', 'edit SKILL.md'."
 lang: [en, ko]
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 2

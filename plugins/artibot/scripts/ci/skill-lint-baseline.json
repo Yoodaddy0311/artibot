@@ -2,36 +2,21 @@
   "skills": [
     "agent-memory-snapshot",
     "auto-learning-pipeline",
-    "ci-cd-pipelines",
-    "clarify",
-    "claude-md-auditor",
     "compaction-survival",
     "daily",
-    "design-system-reference",
-    "fp-refactor",
     "guardrails",
     "hook-event-emitter",
-    "library-mermaid",
     "library-shadcn",
-    "load-testing",
-    "observability",
     "orchestration-patterns",
     "persona-devops",
     "platform-auth",
-    "platform-database-cloud",
-    "platform-deployment",
-    "prompt-caching-strategy",
     "quality-framework",
     "report-generation",
     "seo-strategy",
-    "session-worklog",
-    "source-driven-development",
     "spec-format",
     "tdd-workflow",
     "team",
-    "tool-approval",
-    "vibe-coding",
-    "zero-downtime-migration"
+    "tool-approval"
   ],
-  "generatedAt": "2026-06-11T02:54:34.933Z"
+  "generatedAt": "2026-06-11T05:29:00.706Z"
 }

@@ -1,7 +1,7 @@
 ---
 context: fork
 name: library-mermaid
-description: "Provides Mermaid diagramming patterns for technical documentation including flowcharts, sequence diagrams, ERDs, class diagrams, state diagrams, Gantt charts, and mindmaps. Use when creating architecture diagrams, documenting API sequences, illustrating database schemas, building project timelines, or asking about Mermaid syntax."
+description: "Provides Mermaid diagramming patterns for technical documentation including flowcharts, sequence diagrams, ERDs, class diagrams, state diagrams, Gantt charts, and mindmaps. Use when creating architecture diagrams or documenting API sequences. 자연어 트리거: '다이어그램 그려줘', '머메이드로 그려줘', '시퀀스 다이어그램 만들어', '플로우차트 그려줘'."
 lang: [en]
 level: 2
 triggers: ["mermaid", "diagram", "flowchart", "sequence diagram", "ERD", "class diagram", "Gantt", "mindmap"]

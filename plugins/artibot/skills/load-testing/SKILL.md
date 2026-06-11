@@ -2,7 +2,7 @@
 context: fork
 user-invocable: false
 name: load-testing
-description: "k6 기반 성능/부하 테스트 가이드 — 시나리오 설계, 임계값 설정, CI/CD 통합. Use when designing load tests, stress tests, performance benchmarks, or k6 scripts."
+description: "k6 기반 성능·부하 테스트 가이드 — 시나리오 설계, 임계값 설정, CI/CD 통합. Use when designing load tests, stress tests, or performance benchmarks. 자연어 트리거: '부하 테스트 해줘', '성능 테스트 만들어줘', 'k6 스크립트 작성', '스트레스 테스트'."
 lang: [en, ko]
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: progressive

@@ -2,11 +2,7 @@
 context: fork
 user-invocable: true
 name: claude-md-auditor
-description: |
-  Audit CLAUDE.md files in repository against 6-criteria quality rubric.
-  Auto-activates when: user mentions CLAUDE.md / project memory quality / audit memory.
-  Outputs scored report (A-F grade) + diff preview, requires user approval before Edit.
-  Triggers: claude.md, audit memory, memory quality, project context, 메모리 품질
+description: "Audit CLAUDE.md files in a repository against a 6-criteria quality rubric, output a scored report and diff preview, and require user approval before any Edit. 자연어 트리거: 'CLAUDE.md 점검해줘', '메모리 품질 감사', '프로젝트 메모리 검토해줘', 'claude.md audit'."
 lang: [en, ko]
 platforms: [claude-code]
 level: 2

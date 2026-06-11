@@ -2,7 +2,7 @@
 context: fork
 user-invocable: false
 name: prompt-caching-strategy
-description: "프롬프트 캐시 최적화 전략 — Dynamic Boundary 배치, 토큰 예산 관리, 정적/동적 영역 분리. Use when optimizing prompt structure, managing token budgets, or configuring CLAUDE.md layout for cache efficiency."
+description: "프롬프트 캐시 최적화 전략 — Dynamic Boundary 배치, 토큰 예산 관리, 정적·동적 영역 분리. 자연어 트리거: '프롬프트 캐시 최적화해줘', '토큰 예산 관리', '캐시 효율 높여줘', 'CLAUDE.md 레이아웃 정리'."
 lang: [en, ko]
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: progressive

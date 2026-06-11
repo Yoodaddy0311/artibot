@@ -22,6 +22,8 @@ Parse $ARGUMENTS:
 - `memory`: Check 6 only — memory store health
 - `--verbose`: Show per-item details (not just summary lines)
 - `--json`: Output results as a JSON object instead of the formatted report
+- `--fix`: After diagnosing, apply SAFE automatic repairs for fixable failures (see Self-Heal below)
+- `--dry-run`: Preview the repairs `--fix` would make without writing anything (this is the **default** for the self-heal layer — repairs only mutate the filesystem when `--fix` is passed explicitly)
 
 ## Paths
 
@@ -152,6 +154,48 @@ If `--json` is set, output a structured JSON object:
 - If `artibot.config.json` cannot be read or parsed, abort all checks and report a critical error — config is the foundation for checks 2-6
 - If a specific check fails mid-execution (e.g., file I/O error), mark that check as FAIL and continue to the next check
 - Never let a single check failure prevent the remaining checks from running
+
+## Self-Heal (`--fix` / `--dry-run`)
+
+When `--fix` (or `--dry-run`) is passed, after the 6 diagnostic checks above complete, route the collected failures through the self-heal layer in `lib/core/doctor-fix.js`. This is built for the non-developer ("vibe coder") who hits a sudden "it stopped working" wall and wants a one-shot recovery.
+
+### Invocation
+
+Import the module with a Korean-path-safe `file://` URL (the plugin root contains non-ASCII path segments — never pass a bare relative path to `import()`; build `file:///` manually as in `scripts/utils/index.js > toFileUrl()`):
+
+```js
+const { runDoctorFix } = await import(toFileUrl(join(pluginRoot, 'lib/core/doctor-fix.js')));
+// dryRun defaults to TRUE — pass { dryRun: false } only under --fix.
+const report = runDoctorFix(diagnostics, { dryRun: !hasFixFlag });
+```
+
+`diagnostics` is the array of failed-check codes (or `{ code, ...payload }` objects) gathered from checks 1-6. Map each failure to its self-heal code:
+
+| Diagnostic code | From check | Severity | Repair action |
+|---|---|---|---|
+| `missing-runtime-dir` / `missing-memory-dir` / `missing-dir` | 1, 6 | auto | Recreate the directory (mkdir recursive) |
+| `broken-config-json` / `broken-json` | 1, 6 | auto | Back up the corrupt file to `<file>.broken-<ts>`, then rewrite the default |
+| `marketplace-mirror-stale` | 4 | auto | Re-sync the marketplace mirror (degrades to manual guidance if no mirror routine is injected) |
+| `orphan-lock` | 4 | auto | Release a stale autopilot lock (degrades to manual guidance if no releaser is injected) |
+| `hook-registration-missing` | 4 | **manual** | NEVER auto-applied — surfaces candidate `settings.json` paths for the user to wire |
+
+### Safety contract (hard rules)
+
+- **dryRun defaults to TRUE** — the filesystem is mutated only when `--fix` is passed (i.e. `{ dryRun: false }`). `--dry-run` and bare invocation both preview only.
+- **Never destructive** — no deletes, no overwrite-without-backup, no git operations. Corrupt JSON is always backed up to `<file>.broken-<ts>` before any rewrite.
+- **Never touches user settings** — `~/.claude/settings.json` is read-only to the self-heal layer; hook-registration gaps are surfaced as MANUAL guidance only.
+- **100% local** — zero external network calls (DATA POLICY).
+- **Never throws** — each repair is try-isolated; one failure cannot abort the rest of the pass.
+
+### Output
+
+`runDoctorFix` returns `{ dryRun, fixed[], skipped[], manual[] }`. Render it as a Korean-facing summary after the health-check report:
+
+- `fixed[]` — repairs applied (or, under dry-run, what would be applied)
+- `skipped[]` — no-ops (already healthy / no mapped action / unknown code)
+- `manual[]` — actions requiring the user (hook registration, missing mirror/lock routines)
+
+Under `--dry-run`, prefix the section with a clear "미리보기 (아무것도 변경하지 않음)" banner so the user knows nothing was written.
 
 ## Next Steps
 

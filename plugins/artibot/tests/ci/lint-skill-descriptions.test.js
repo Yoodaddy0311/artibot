@@ -7,7 +7,10 @@
  *   - detectWorkflowSummary (R2): pipeline tokens, arrows, numbered steps, verb chains
  *   - lintDescription: rule composition + severities (R3 = warn)
  *   - runRatchet: new-violation fail / baseline pass / shrink (fixed) branches
- *   - Calibration: vibe-coding + clarify must FAIL R2; image-generation + quickstart PASS
+ *   - Calibration: still-violating real skills must FAIL R2 (verb-chain + pipeline-token
+ *     branches); image-generation + quickstart PASS. (vibe-coding and clarify were the
+ *     original verb-chain exemplars; both are now CSO-compliant, so the calibration is
+ *     re-pointed at report-generation/tdd-workflow to keep detector coverage live.)
  *
  * @module tests/ci/lint-skill-descriptions
  */
@@ -162,12 +165,17 @@ describe('runRatchet', () => {
 });
 
 describe('calibration against real skills', () => {
-  it('vibe-coding is an R2 violation (verb chain in description)', () => {
-    expect(detectWorkflowSummary(realDesc('vibe-coding'))).toContain('verb-chain');
+  it('report-generation is an R2 violation (verb chain in description)', () => {
+    expect(detectWorkflowSummary(realDesc('report-generation'))).toContain('verb-chain');
   });
 
-  it('clarify is an R2 violation (prose pipeline)', () => {
-    expect(detectWorkflowSummary(realDesc('clarify')).length).toBeGreaterThan(0);
+  it('tdd-workflow is an R2 violation (pipeline token)', () => {
+    expect(detectWorkflowSummary(realDesc('tdd-workflow')).length).toBeGreaterThan(0);
+  });
+
+  it('vibe-coding and clarify are now CSO-compliant (no workflow summary)', () => {
+    expect(detectWorkflowSummary(realDesc('vibe-coding'))).toEqual([]);
+    expect(detectWorkflowSummary(realDesc('clarify'))).toEqual([]);
   });
 
   it('daily is an R2 violation', () => {

@@ -1,7 +1,7 @@
 ---
 context: fork
 name: platform-deployment
-description: "Provides deployment patterns for modern applications including cloud platforms, Docker containers, Kubernetes orchestration, and CI/CD pipelines. Use when setting up deployment pipelines, configuring Vercel or Railway, writing Dockerfiles, designing zero-downtime strategies, or asking about blue-green deployments, GitHub Actions, or container security."
+description: "Provides deployment patterns for modern applications: cloud platforms, Docker, Kubernetes, and CI/CD. 자연어 트리거: '배포 파이프라인 설정해줘', 'Vercel 배포해줘', 'Dockerfile 작성해줘', '쿠버네티스 배포 구성'."
 lang: [en]
 level: 2
 triggers: ["deploy", "deployment", "Vercel", "Railway", "Docker", "Kubernetes", "CI/CD", "blue-green", "zero-downtime"]

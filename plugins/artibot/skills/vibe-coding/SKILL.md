@@ -1,7 +1,7 @@
 ---
 context: fork
 name: vibe-coding
-description: "Quality enforcement for casual/natural language coding requests. Ensures every part of the user's request is decomposed, executed, verified, and reported. Use when handling natural language coding requests, multi-part instructions, or casual Korean/English coding commands."
+description: "Quality enforcement for casual or natural-language coding requests. Use when handling natural language coding requests, multi-part instructions, or casual Korean/English coding commands like '해줘', '만들어', '수정해', '바꿔', '고쳐'."
 lang: [en]
 level: 1
 triggers:
@@ -40,6 +40,16 @@ Quality enforcement for ALL coding requests, especially casual/natural language 
 - Requests without explicit slash commands
 - Multi-part requests ("A 해주고 B도 해줘")
 - Casual Korean/English coding instructions
+
+## 모호한 빌드 요청: 설계 합의 게이트 (HARD-GATE)
+
+모호하거나 범위가 넓은 빌드 요청("앱 만들어줘", "시스템 구축해줘", "전체적으로 개선해줘")을 받으면:
+
+- **설계 합의 전 코드 작성 금지** — 무엇을, 어떤 범위로, 어떤 제약 아래 만들지 사용자와 합의하기 전에는 단 한 줄도 작성하지 않는다.
+- **질문은 한 번에 하나** — 여러 질문을 한꺼번에 쏟아내지 말고, 가장 영향이 큰 차원 하나씩 묻는다. 사용자가 답하면 다음 질문으로 넘어간다.
+- **"너무 단순해서 설계가 불필요하다"는 합리화다** — 단순해 보이는 요청일수록 숨은 요구사항이 많다. 단순함은 설계 생략의 근거가 아니라 오히려 암묵적 가정을 노출시켜야 할 신호다.
+
+이 게이트는 Zero-Skip Mandate보다 우선한다: 분해할 요청 자체가 모호하면 분해 전에 설계 합의부터 한다.
 
 ## MANDATORY Protocol: DEV (Decompose-Execute-Verify)
 

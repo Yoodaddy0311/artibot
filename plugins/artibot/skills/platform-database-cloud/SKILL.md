@@ -1,7 +1,7 @@
 ---
 context: fork
 name: platform-database-cloud
-description: "Provides cloud database patterns for serverless PostgreSQL, real-time databases, and edge-compatible data access with Neon, Supabase, Firebase, and PlanetScale. Use when selecting a cloud database, configuring connection pooling, implementing real-time subscriptions, optimizing edge function database access, or asking about serverless databases."
+description: "Provides cloud database patterns for serverless PostgreSQL, real-time databases, and edge-compatible data access (Neon, Supabase, Firebase, PlanetScale). 자연어 트리거: '클라우드 DB 골라줘', 'Supabase 연동해줘', '서버리스 데이터베이스 설정', '커넥션 풀링 구성'."
 lang: [en]
 level: 2
 triggers: ["Neon", "Supabase", "Firebase", "Firestore", "PlanetScale", "serverless database", "connection pooling", "edge functions", "real-time"]
