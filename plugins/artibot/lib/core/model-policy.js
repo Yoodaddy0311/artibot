@@ -236,6 +236,15 @@ export function getPolicyModel(agentType, config) {
  *
  * Never throws.
  *
+ * Precedence:
+ * 0. Role-alias / raw-tier input (frontier|deep-async|balanced|fast or a tier
+ *    name) — resolved immediately via the catalog; `opts.advisor` and
+ *    `opts.role` are IGNORED on this path (the caller asked for a tier family,
+ *    not an agent). Fable still passes the opt-in gate.
+ * 1. opts.advisor — advisorStrategy.advisorModel.
+ * 2. opts.role — phase-role mapping (implementation/review/...).
+ * 3. Policy bucket lookup, then defaultModel.
+ *
  * @param {string} agentType - Agent name (prefixed or bare).
  * @param {object} [opts] - { advisor?:boolean, role?:string }.
  * @param {object} [config] - Explicit config; falls back to getConfig().
@@ -247,6 +256,7 @@ export function getPolicyModel(agentType, config) {
  * resolveModel('doc-updater', { advisor: true }); // 'opus' (advisorModel)
  * resolveModel('frontier'); // 'opus'  (role alias)
  * resolveModel('deep-async'); // 'opus' unless fable gate opts the agent in
+ * resolveModel('deep-async', { role: 'review' }); // 'opus' — alias wins, role ignored
  */
 export function resolveModel(agentType, opts = {}, config) {
   const options = opts && typeof opts === 'object' ? opts : {};

@@ -382,6 +382,15 @@ describe('model-policy', () => {
       expect(resolveModel('deep-async', {}, cfg)).toBe('fable');
     });
 
+    it('alias input wins over opts.role/advisor (documented precedence step 0)', () => {
+      const closed = withFable({ enabled: false, allowlist: [] });
+      // alias fast path ignores opts entirely — role 'review' would map to
+      // sonnet for an agent name, but 'deep-async' is a tier-family request.
+      expect(resolveModel('deep-async', { role: 'review' }, closed)).toBe('opus');
+      expect(resolveModel('frontier', { role: 'review' }, closed)).toBe('opus');
+      expect(resolveModel('balanced', { advisor: true }, closed)).toBe('sonnet');
+    });
+
     it('raw fable tier still passes through the opt-in gate', () => {
       const open = withFable({ enabled: true, allowlist: ['fable'] });
       expect(resolveModel('fable', {}, open)).toBe('fable');
