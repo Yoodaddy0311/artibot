@@ -1636,3 +1636,44 @@
 <!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
 
 ---
+
+## 2026-06-11 01:57 UTC · `artibot/master`
+
+- **Commits** (1):
+  - `3e8fe39` feat(autopilot): ap-20260611-010942-z18m26 완료 — Fable 5 6대 커맨드 업그레이드 보고서
+- **Files touched**: 1
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-06-11 03:00 UTC · `artibot/master`
+
+- **Commits** (1):
+  - `d481e9b` wip(autopilot): phase2 checkpoint ap-20260611-024451-pz38f5 — wave1 description-lint 엔진+ratchet baseline(32 violations frozen)
+- **Files touched**: 4
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-06-11 05:36 UTC · `artibot/master`
+
+- **Commits** (2):
+  - `1818b27` wip(autopilot): phase2 checkpoint ap-20260611-024451-pz38f5 — wave2 완료 (lint NEW 0·baseline 32→17·게이트 4종·doctor-fix·packs)
+  - `e0f85d0` wip(autopilot): phase2 partial ap-20260611-024451-pz38f5 — wave2 부분 작업물 보존 (세션 한도 중단)
+- **Files touched**: 32
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-06-11 05:44 UTC · `artibot/master`
+
+- **Commits** (1):
+  - `a6dc37a` wip(autopilot): phase3-5 checkpoint ap-20260611-024451-pz38f5 — 리뷰 APPROVE 반영 (toFileUrl 예시·arrow 제거 baseline 16·temp 정리)
+- **Files touched**: 8
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
