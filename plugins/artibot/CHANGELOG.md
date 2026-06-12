@@ -13,6 +13,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.26.1] — 2026-06-12
+
+**Theme**: 패치 릴리즈 — 감사(audit) 결함 수정 + CI 테스트 OS 이식성 + 메타데이터 정합·레포 위생
+
+### Fixed
+- **CI RED 복구 (file-checkpoint OS-aware)** — `tests/core/file-checkpoint.test.js`의 `no hardcoded /tmp` 단언이 Linux CI에서 `os.tmpdir()===/tmp`를 정당한 경로임에도 실패 처리하던 문제 수정. 깨진 negative 단언(`not.toMatch(/^\/tmp\//)`)을 제거하고 OS 무관 positive 단언(`startsWith(os.tmpdir())`)만 유지 (`ce550bc`).
+- **감사 Critical/High 결함** — swarm privacy Critical #1, autopilot barrel #2, High #4/#7/#11 (CI/hooks/learning) 수정 (`b5a8248`, `cfaf627`).
+
+### Changed
+- **메타데이터 카운트 정합** — README/marketplace/AGENTS의 skills 카운트를 권위 기준(`validate-readme-claims.js`)인 **114 skills / 28 agents / 72 commands**로 동기화. `agents/INDEX.md`는 카탈로그 파일로 에이전트 카운트에서 제외 (`3769e93`, `24be9f5`, `1c551ff`).
+
+### Removed
+- **v4.8 일회성 릴리즈 노트 제거** — `RELEASE_NOTES_4.8_KO.md` 제거. 릴리즈 기록 정본은 본 CHANGELOG.md (`ccd7f7f`).
+
+### Notes
+- 기능 변경 없는 패치 릴리즈. 코드 동작·모델 정책·라우팅·비용 무변경.
+
+---
+
 ## [4.26.0] — 2026-06-11
 
 **Theme**: 두 자율 세션 통합 — Fable 5 커맨드 업그레이드 + 바이브코딩 특화 (description-lint ratchet·doctor --fix·install 프리셋 팩·메타스킬)
