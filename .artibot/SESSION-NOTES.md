@@ -1731,3 +1731,49 @@
 <!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
 
 ---
+
+## 2026-06-12 04:16 UTC · `master`
+
+- **Commits** (4):
+  - `d344e35` docs(release): sync README badges + marketplace meta to v4.26.0
+  - `fc078be` Merge remote-tracking branch 'origin/artibot/master'
+  - `888edf6` chore(session): 세션노트 2026-06-12 워크로그 항목 추가
+  - `783de84` chore(handoff): 세션 핸드오프 노트 2026-06-11 — v4.26.0 릴리즈 세션
+- **Files touched**: 5
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-06-12 05:08 UTC · `master`
+
+- **Commits** (3):
+  - `3769e93` docs(readme): revert agent count to 28 — INDEX.md is not an agent
+  - `5827d15` docs(readme): sync agent count 28->29 in export examples
+  - `ce550bc` fix(tests): make file-checkpoint tmpdir assertion OS-aware
+- **Files touched**: 1
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-06-12 05:24 UTC · `master`
+
+- **Commits** (2):
+  - `24be9f5` docs(meta): sync skills count 113->114 in marketplace + AGENTS
+  - `ccd7f7f` chore(cleanup): v4.8 일회성 릴리즈 노트 제거 — CHANGELOG.md가 정본
+- **Files touched**: 3
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-06-12 05:34 UTC · `master`
+
+- **Commits** (1):
+  - `1c551ff` docs(agents): AGENTS.md skill count 테이블 셀 113->114 누락 보정
+- **Files touched**: 1
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
