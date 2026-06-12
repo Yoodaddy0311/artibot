@@ -212,13 +212,13 @@ Artibot: /team triggers automatically
 You want to use Artibot agents in Cursor IDE
 -> manually rewrite each agent .md file to .mdc format
 -> figure out Cursor Rules-for-AI conventions
--> repeat for 29 agents = hours of tedious work
+-> repeat for 28 agents = hours of tedious work
 ```
 
 **After (with Artibot):**
 ```
 /export cursor
-  -> auto-converts all 29 agents to .mdc format
+  -> auto-converts all 28 agents to .mdc format
   -> places them in .cursor/rules/ with correct frontmatter
   -> preserves agent expertise and tool permissions
   -> supports: cursor, codex, opencode, antigravity, all
