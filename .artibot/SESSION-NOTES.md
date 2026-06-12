@@ -1677,3 +1677,26 @@
 <!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
 
 ---
+
+## 2026-06-12 01:57 UTC · `master`
+
+- **Commits** (14):
+  - `ace36f1` Merge branch 'master' of https://github.com/Yoodaddy0311/artibot
+  - `2976496` docs(readme): 스킬 카운트 113→114 동기화 — skill-authoring 메타스킬 반영 (CI claim-validator fix)
+  - `4a790cc` chore(release): v4.26.0 — Fable 5 커맨드 업그레이드 + 바이브코딩 특화
+  - `4a8dc3b` chore(session): 일회용 autopilot 헬퍼 제거 (커밋 혼입 정정)
+  - `151aa0d` feat(autopilot): ap-20260611-024451-pz38f5 완료 — 바이브코딩 특화 업그레이드 (lint 게이트·doctor-fix·프리셋 팩·메타스킬)
+  - `a6dc37a` wip(autopilot): phase3-5 checkpoint ap-20260611-024451-pz38f5 — 리뷰 APPROVE 반영 (toFileUrl 예시·arrow 제거 baseline 16·temp 정리)
+  - `1818b27` wip(autopilot): phase2 checkpoint ap-20260611-024451-pz38f5 — wave2 완료 (lint NEW 0·baseline 32→17·게이트 4종·doctor-fix·packs)
+  - `e0f85d0` wip(autopilot): phase2 partial ap-20260611-024451-pz38f5 — wave2 부분 작업물 보존 (세션 한도 중단)
+  - `d481e9b` wip(autopilot): phase2 checkpoint ap-20260611-024451-pz38f5 — wave1 description-lint 엔진+ratchet baseline(32 violations frozen)
+  - `3e8fe39` feat(autopilot): ap-20260611-010942-z18m26 완료 — Fable 5 6대 커맨드 업그레이드 보고서
+  - `37a1fe1` wip(autopilot): phase3-4 checkpoint ap-20260611-010942-z18m26 — 리뷰 반영(precedence 문서화+테스트, costFactor dead field 제거) + EPERM rename 재시도 가드
+  - `b956c2b` wip(autopilot): phase2 checkpoint ap-20260611-010942-z18m26 — wave2 economy/policy/commands/guards
+  - `c29c604` wip(autopilot): phase2 checkpoint ap-20260611-010942-z18m26 — wave1 model-catalog 레지스트리
+  - `d2d76d2` chore(session): 세션 노트/핸드오프 정리 — ultraplan fable5 사전 베이스라인
+- **Files touched**: 77
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
