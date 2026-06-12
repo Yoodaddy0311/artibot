@@ -59,9 +59,12 @@ describe('FileCheckpoint', () => {
   it('roots the checkpoint dir under os.tmpdir() (no hardcoded /tmp)', () => {
     const cp = new FileCheckpoint('sess-1');
 
-    // Must be inside the OS temp dir (Windows-correct), not a literal POSIX /tmp.
+    // Must be rooted at the OS temp dir (Windows- and Linux-correct), proving
+    // the implementation derives the path from os.tmpdir() rather than a
+    // hardcoded '/tmp' literal. On Linux os.tmpdir() legitimately IS '/tmp',
+    // so we assert derivation via startsWith() instead of forbidding a '/tmp'
+    // prefix (which would wrongly fail on Linux CI).
     expect(cp.dir.startsWith(tmpdir())).toBe(true);
-    expect(cp.dir).not.toMatch(/^\/tmp\//);
   });
 
   // ─── snapshot() ──────────────────────────────────────────────────
