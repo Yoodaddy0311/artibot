@@ -58,14 +58,14 @@ category: expert
 
 | Use Case | Recommended Model | Rationale |
 |-----------|-------------------|-----------|
-| Highest-capability reasoning (direct API) | claude-fable-5 | Most capable widely released model (2026-06-09); 1M context + adaptive-always-on + effort. **$10/$50 (2× Opus 4.8); refusal→fallback contract applies.** Direct Messages API only — not a subagent tier. |
+| Highest-capability reasoning (opt-in only) | claude-fable-5 | Most capable widely released model (2026-06-09); 1M context + always-on thinking + effort. **~2.6× Opus 4.8 effective cost (price 2× × tokenizer 1.3×); refusal→fallback contract applies.** Now in the subagent enum, but Artibot routes here only via explicit allowlist opt-in. |
 | Complex reasoning (default) | claude-opus-4-8 | Deepest *generally-routable* reasoning + 1M context + adaptive thinking + xhigh effort 지원 |
 | General coding | claude-sonnet-4-6 | Best balance of speed and capability |
 | High-throughput | claude-sonnet-4-6 | Quality-first approach |
 | Embeddings | text-embedding-3-small | Cost-effective for most use cases |
 | Classification | claude-sonnet-4-6 | Fast and accurate for structured output |
 
-> **Routing constraint:** Claude Code subagent/Task `model` accepts only `sonnet | opus | haiku`. `claude-fable-5` is API-only and **cannot be a subagent tier** — the Artibot `opus` tier stays Opus 4.8. Use Fable 5 only via direct Messages API calls (advisor / LLM-integration code), handling `stop_reason:"refusal"` (HTTP 200 + classifier) and the `fallbacks` retry path. See the catalog doc.
+> **Routing constraint:** The Claude Code subagent/Task `model` enum now includes `fable` (`sonnet | opus | haiku | fable`), so Fable 5 **can** be a subagent tier. Artibot policy, however, keeps it **opt-in (allowlist) only** — default routing stays Opus 4.8 (`opus` tier), and **security-class agents (denylist) must not route to `fable`** (planned). Effective cost is **~2.6× Opus 4.8** (price 2× × tokenizer 1.3×), so budget before opting in. When calling Fable 5 directly, handle `stop_reason:"refusal"` (HTTP 200 + classifier) and the `fallbacks` retry path; note no-prefill, always-on thinking, 30-day retention, and Task Budget min 20k. See the catalog doc.
 
 ## Output Format
 

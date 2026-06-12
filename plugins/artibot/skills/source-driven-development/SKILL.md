@@ -1,7 +1,7 @@
 ---
 context: fork
 name: source-driven-development
-description: "DETECT → FETCH → IMPLEMENT → CITE for framework, library, and SDK work. Grounds every implementation decision in current official documentation, not training data. Pairs with sdd-cache hook for cheap revalidation."
+description: "Grounds every framework, library, and SDK implementation decision in current official documentation rather than training data. Auto-activates when framework-specific code is requested, a version migration is underway, or best-practice verification is needed. Pairs with sdd-cache hook for cheap revalidation. Triggers: framework, library, SDK, current best practice, official docs, MDN, deprecated, migration, API reference, version migration, 공식 문서, 마이그레이션, 최신 문서, API 레퍼런스, 공식 문서 보고 짜줘, 이 라이브러리 최신 방식으로 써줘, 마이그레이션 가이드 따라줘"
 lang: [en]
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 2

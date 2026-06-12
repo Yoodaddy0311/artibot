@@ -1,7 +1,7 @@
 ---
 context: fork
 name: report-generation
-description: "Creates structured marketing reports including executive summaries, performance reports, and data narratives with templates for weekly, monthly, and quarterly cadences. Use when user asks about report generation, executive summary, performance report, weekly report, monthly report, marketing report, 리포트, 성과 보고서, 주간 보고서, or 월간 보고서."
+description: "Executive summaries and data narratives with templates for weekly, monthly, and quarterly cadences. Use when user asks about executive summary, performance recap, weekly digest, monthly rollup, marketing report, 리포트, 성과 보고서, 주간 보고서, 월간 보고서, 성과 리포트 만들어줘, 이번 달 마케팅 보고서 써줘, or 임원 요약 만들어줘."
 lang: [en, ko]
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 3

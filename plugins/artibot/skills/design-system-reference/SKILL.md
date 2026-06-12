@@ -2,7 +2,7 @@
 context: fork
 name: design-system-reference
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
-description: "Provides structured DESIGN.md schema and curated brand references for AI-native visual design specification. Use when user asks about design system, DESIGN.md, visual design, UI design language, design tokens, color palette, typography system, 디자인 시스템, 비주얼 디자인, 디자인 토큰, or UI 디자인."
+description: "Provides a structured DESIGN.md schema and curated brand references for AI-native visual design specification. 자연어 트리거: '디자인 시스템 만들어줘', 'DESIGN.md 작성', '디자인 토큰 정의해줘', '비주얼 디자인 가이드', '컬러 팔레트 정해줘'."
 lang: [en, ko]
 level: 3
 triggers:

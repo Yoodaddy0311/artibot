@@ -2,13 +2,11 @@
 context: fork
 name: clarify
 description: |
-  Hypothesis-based clarification pipeline that transforms ambiguous user requests
-  into precise, actionable specifications through structured MCQ (multiple-choice questions).
-  Classifies ambiguity into three types: vague (unclear intent), unknown (missing information),
-  metamedium (scope/boundary undefined). Generates targeted questions per type.
-  Auto-activates when: ambiguity score >= threshold, multi-intent conflicts detected,
-  or user explicitly asks for clarification.
-  Triggers: clarify, unclear, what do you mean, ambiguous, vague, specify, 명확히, 구체적으로, 뭘 원하시는지
+  Turns ambiguous user requests into precise, actionable specifications using hypothesis-based MCQ clarification.
+  Auto-activates when ambiguity score exceeds threshold, multi-intent conflicts are detected,
+  or the user explicitly requests clarification on scope, target, or constraints.
+  Triggers: clarify, unclear, what do you mean, ambiguous, vague, specify, 명확히, 구체적으로,
+  뭘 원하시는지, 좀 더 자세히 말해줘, 어떤 걸 원하는 건지 모르겠어, 범위가 너무 넓어
 lang: [en, ko]
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 2
@@ -46,6 +44,14 @@ Use `$ARGUMENTS` to provide the ambiguous request to clarify.
 - Critical dimensions are missing (target, scope, constraints, acceptance criteria)
 - User explicitly asks to clarify or refine a requirement
 - Cognitive router detects System 2 complexity but intent remains unclear
+
+## 모호한 빌드 요청: 설계 합의 게이트 (HARD-GATE)
+
+모호하거나 범위가 넓은 빌드 요청("앱 만들어줘", "시스템 구축해줘", "전체적으로 개선해줘")을 받으면:
+
+- **설계 합의 전 코드 작성 금지** — 무엇을, 어떤 범위로, 어떤 제약 아래 만들지 사용자와 합의하기 전에는 단 한 줄도 작성하지 않는다.
+- **질문은 한 번에 하나** — 여러 질문을 한꺼번에 쏟아내지 말고, 가장 영향이 큰 차원 하나씩 묻는다. 사용자가 답하면 다음 질문으로 넘어간다.
+- **"너무 단순해서 설계가 불필요하다"는 합리화다** — 단순해 보이는 요청일수록 숨은 요구사항이 많다. 단순함은 설계 생략의 근거가 아니라 오히려 암묵적 가정을 노출시켜야 할 신호다.
 
 ## The Three Ambiguity Types
 

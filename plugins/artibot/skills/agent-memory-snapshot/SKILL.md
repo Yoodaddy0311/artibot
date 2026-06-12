@@ -1,7 +1,7 @@
 ---
 context: fork
 name: agent-memory-snapshot
-description: "세션 상태를 압축 스냅샷으로 변환하여 서브에이전트 프롬프트에 주입. Use when spawning sub-agents, delegating tasks, or needing session context transfer between agents."
+description: "세션 상태를 압축 스냅샷으로 변환하여 서브에이전트 프롬프트에 주입. Auto-activates when: spawning sub-agents, delegating tasks, transferring session context between agents. Triggers: snapshot, session context, agent context, sub-agent, 스냅샷, 세션 컨텍스트, 서브에이전트, 컨텍스트 주입."
 lang: [en, ko]
 platforms: [claude-code]
 level: progressive

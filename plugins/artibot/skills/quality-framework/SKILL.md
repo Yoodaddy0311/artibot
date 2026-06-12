@@ -2,7 +2,7 @@
 context: fork
 user-invocable: false
 name: quality-framework
-description: "ATLAS Quality Framework for Artibot: Automated, Tested, Learned, Adaptive, Secure. Defines 8-step validation cycle, coverage targets, and GRPO-driven continuous quality improvement. Use when performing code review, setting quality gates, running validation cycles, or assessing coverage. 코드 리뷰, 품질 게이트 설정, 커버리지 분석, 보안 검증 시 자동 활성화."
+description: "ATLAS Quality Framework for Artibot: Automated, Tested, Learned, Adaptive, Secure. Defines the validation cycle, coverage targets, and GRPO-driven continuous quality improvement. Auto-activates when: reviewing code, setting quality gates, running a validation cycle, or assessing coverage. Triggers: quality framework, ATLAS, validation cycle, quality gate, coverage threshold, 품질 게이트, 커버리지, 품질 검토."
 lang: [en, ko]
 
 level: 3

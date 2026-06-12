@@ -1,7 +1,7 @@
 ---
 name: team
 context: fork
-description: "Parallel team execution with cross-check. Leader delegates, teammates work independently, then verify each other. Use when parallel independent work with cross-verification is needed."
+description: "Parallel team execution with cross-check — the leader delegates, teammates work independently, then verify each other. Use when the user asks for parallel independent work with cross-verification. Triggers: team, parallel team, cross-check, verification, 팀, 병렬 팀, 팀원들, 병렬로."
 lang: [en]
 triggers:
   - team

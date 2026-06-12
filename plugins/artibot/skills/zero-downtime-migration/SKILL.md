@@ -2,7 +2,7 @@
 context: fork
 user-invocable: false
 name: zero-downtime-migration
-description: "Production 무중단 마이그레이션 6섹션 체크리스트 (Pre-migration / Rollout / Validation / Rollback / Communication / Worst-Case) — production 매출·고객 데이터가 걸린 작업. 자연어 트리거: 마이그레이션, 이전, 교체, 롤아웃, 무중단 배포, 점진 전환, DB 이전, 결제 시스템 교체, Postgres→Mongo, MySQL→PostgreSQL, Auth0→Cognito, Node 16→20, Python 2→3, Stripe→Toss, migrate from X to Y, switch from X to Y, replace X with Y, cutover, dual write, canary rollout, feature flag rollout, rolling deployment, blue-green deployment."
+description: "Production 무중단 마이그레이션 6섹션 체크리스트 — production 매출·고객 데이터가 걸린 작업. 자연어 트리거: '마이그레이션 해줘', 'DB 이전', '결제 시스템 교체', '무중단 배포', '점진 전환', 'Postgres를 Mongo로 바꿔', 'migrate from X to Y', 'switch from X to Y', 'cutover', 'canary rollout', 'blue-green deployment'."
 lang: [en, ko]
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: progressive

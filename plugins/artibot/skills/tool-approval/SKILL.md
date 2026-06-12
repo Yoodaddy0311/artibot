@@ -1,7 +1,7 @@
 ---
 context: fork
 name: tool-approval
-description: "Dynamic tool approval predicates and the bash command allowlist. Use when wiring HITL approvals or tightening the pre-bash gate."
+description: "Dynamic tool approval predicates and the bash command allowlist. Use when the user asks about HITL approvals or tightening the pre-bash gate. Triggers: tool approval, approval predicate, bash allowlist, pre-bash, permission gate, HITL."
 lang: [en]
 level: 2
 triggers: ["tool approval", "approval predicate", "bash allowlist", "pre-bash", "permission gate", "hitl"]

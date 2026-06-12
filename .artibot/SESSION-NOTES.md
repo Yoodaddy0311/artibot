@@ -1593,3 +1593,87 @@
 <!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
 
 ---
+
+## 2026-06-11 00:37 UTC · `artibot/master`
+
+- **Commits** (3):
+  - `4818c81` fix(release): v4.25.1 버전 lockstep 동기화 누락 보정
+  - `f8e4895` chore(handoff): 세션 핸드오프 노트 2026-06-09
+  - `86b309e` chore(release): v4.25.1 — Claude Fable 5 / Mythos 5 모델 지식 반영
+- **Files touched**: 19
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-06-11 01:24 UTC · `artibot/master`
+
+- **Commits** (2):
+  - `c29c604` wip(autopilot): phase2 checkpoint ap-20260611-010942-z18m26 — wave1 model-catalog 레지스트리
+  - `d2d76d2` chore(session): 세션 노트/핸드오프 정리 — ultraplan fable5 사전 베이스라인
+- **Files touched**: 7
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-06-11 01:32 UTC · `artibot/master`
+
+- **Commits** (1):
+  - `b956c2b` wip(autopilot): phase2 checkpoint ap-20260611-010942-z18m26 — wave2 economy/policy/commands/guards
+- **Files touched**: 16
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-06-11 01:46 UTC · `artibot/master`
+
+- **Commits** (1):
+  - `37a1fe1` wip(autopilot): phase3-4 checkpoint ap-20260611-010942-z18m26 — 리뷰 반영(precedence 문서화+테스트, costFactor dead field 제거) + EPERM rename 재시도 가드
+- **Files touched**: 5
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-06-11 01:57 UTC · `artibot/master`
+
+- **Commits** (1):
+  - `3e8fe39` feat(autopilot): ap-20260611-010942-z18m26 완료 — Fable 5 6대 커맨드 업그레이드 보고서
+- **Files touched**: 1
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-06-11 03:00 UTC · `artibot/master`
+
+- **Commits** (1):
+  - `d481e9b` wip(autopilot): phase2 checkpoint ap-20260611-024451-pz38f5 — wave1 description-lint 엔진+ratchet baseline(32 violations frozen)
+- **Files touched**: 4
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-06-11 05:36 UTC · `artibot/master`
+
+- **Commits** (2):
+  - `1818b27` wip(autopilot): phase2 checkpoint ap-20260611-024451-pz38f5 — wave2 완료 (lint NEW 0·baseline 32→17·게이트 4종·doctor-fix·packs)
+  - `e0f85d0` wip(autopilot): phase2 partial ap-20260611-024451-pz38f5 — wave2 부분 작업물 보존 (세션 한도 중단)
+- **Files touched**: 32
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-06-11 05:44 UTC · `artibot/master`
+
+- **Commits** (1):
+  - `a6dc37a` wip(autopilot): phase3-5 checkpoint ap-20260611-024451-pz38f5 — 리뷰 APPROVE 반영 (toFileUrl 예시·arrow 제거 baseline 16·temp 정리)
+- **Files touched**: 8
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---

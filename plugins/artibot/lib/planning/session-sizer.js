@@ -19,6 +19,8 @@
  * @module lib/planning/session-sizer
  */
 
+import { getTokenizerCoeff } from '../core/model-catalog.js';
+
 /**
  * Autopilot autonomous throughput in tokens/hour. Derived from the config
  * anchor 2M tokens / 4h. Override via `opts.throughput` to recalibrate against
@@ -62,9 +64,77 @@ export const MAX_BUDGET_TOKENS = 2000000;
 const DEFAULT_TYPE = 'other';
 const DEFAULT_COMPLEXITY = 'medium';
 
+/** Default tokenizer coefficient (baseline = Opus 4.8 tokens-per-content). */
+const DEFAULT_TOKENIZER_COEFF = 1.0;
+
 // ---------------------------------------------------------------------------
 // Internal helpers (small, pure)
 // ---------------------------------------------------------------------------
+
+/**
+ * Resolve the autonomous throughput (tokens/hour) from `opts`. Accepts either
+ * `opts.throughput` or its alias `opts.throughputTokensPerHour`; the former
+ * wins. Non-finite / ≤ 0 values fall back to the default constant.
+ *
+ * @param {object} opts
+ * @returns {number} Throughput in tokens/hour (> 0).
+ */
+function resolveThroughput(opts) {
+  const primary = opts?.throughput;
+  if (typeof primary === 'number' && Number.isFinite(primary) && primary > 0) {
+    return primary;
+  }
+  const alias = opts?.throughputTokensPerHour;
+  if (typeof alias === 'number' && Number.isFinite(alias) && alias > 0) {
+    return alias;
+  }
+  return THROUGHPUT_TOKENS_PER_HOUR;
+}
+
+/**
+ * Resolve the tokenizer coefficient from `opts`. Precedence:
+ *   1. explicit numeric `opts.tokenizerCoeff` (finite, > 0) wins,
+ *   2. else `opts.modelTier` is looked up in the model catalog (lazy, safe),
+ *   3. else 1.0.
+ * Any non-finite / ≤ 0 value degrades to 1.0 (never-throw house style). The
+ * catalog import is lazy + guarded so the planning→core edge is one-way and a
+ * missing/broken catalog can never break sizing.
+ *
+ * @param {object} opts
+ * @returns {number} Coefficient (>= a small positive number); 1.0 on any issue.
+ */
+function resolveTokenizerCoeff(opts) {
+  const explicit = opts?.tokenizerCoeff;
+  if (typeof explicit === 'number' && Number.isFinite(explicit) && explicit > 0) {
+    return explicit;
+  }
+  const tier = opts?.modelTier;
+  if (typeof tier === 'string' && tier) {
+    const coeff = lookupCatalogCoeff(tier);
+    if (typeof coeff === 'number' && Number.isFinite(coeff) && coeff > 0) {
+      return coeff;
+    }
+  }
+  return DEFAULT_TOKENIZER_COEFF;
+}
+
+/**
+ * Resolve a tier's tokenizer coefficient via the model catalog. The catalog is
+ * a pure, zero-dep, never-throw core module (allowed planning→core downward
+ * edge); the lookup is only invoked when a caller supplies `opts.modelTier`, so
+ * the default code path never touches it. Guarded so any unexpected failure
+ * degrades to 1.0 instead of throwing.
+ *
+ * @param {string} tier
+ * @returns {number}
+ */
+function lookupCatalogCoeff(tier) {
+  try {
+    return getTokenizerCoeff(tier);
+  } catch {
+    return DEFAULT_TOKENIZER_COEFF;
+  }
+}
 
 /**
  * Resolve a task type to a known key, falling back to 'other'.
@@ -122,8 +192,12 @@ function deriveTier(resolved) {
  * @param {Array<{ type?: string, complexity?: string }>} tasks
  * @param {object} [opts]
  * @param {number} [opts.throughput=THROUGHPUT_TOKENS_PER_HOUR]
+ * @param {number} [opts.throughputTokensPerHour] - alias for `opts.throughput`.
  * @param {Record<string, number>} [opts.perTaskTokens=PER_TASK_TOKENS]
  * @param {Record<string, number>} [opts.complexityMult=COMPLEXITY_MULT]
+ * @param {number} [opts.tokenizerCoeff=1.0] - per-task token multiplier; non-finite/≤0 → 1.0.
+ * @param {string} [opts.modelTier] - tier whose catalog coefficient applies when
+ *   `opts.tokenizerCoeff` is absent (e.g. 'fable' → 1.3). Explicit coeff wins.
  * @returns {{ tokens: number, hours: number, tier: 'simple'|'moderate'|'complex',
  *   confidence: 'low'|'medium', perTask: Array<object> }}
  */
@@ -131,14 +205,13 @@ export function estimateFootprint(tasks, opts = {}) {
   const list = Array.isArray(tasks) ? tasks : [];
   const table = opts.perTaskTokens || PER_TASK_TOKENS;
   const mults = opts.complexityMult || COMPLEXITY_MULT;
-  const throughput = typeof opts.throughput === 'number' && opts.throughput > 0
-    ? opts.throughput
-    : THROUGHPUT_TOKENS_PER_HOUR;
+  const throughput = resolveThroughput(opts);
+  const coeff = resolveTokenizerCoeff(opts);
 
   const resolved = list.map((task) => {
     const type = resolveType(task?.type, table);
     const complexity = resolveComplexity(task?.complexity, mults);
-    const tokens = Math.round(table[type] * mults[complexity]);
+    const tokens = Math.round(table[type] * mults[complexity] * coeff);
     return { type, complexity, tokens };
   });
 
@@ -201,9 +274,7 @@ export function classifySize(hours, opts = {}) {
 export function sizePlan(tasks, opts = {}) {
   const footprint = estimateFootprint(tasks, opts);
   const sizing = classifySize(footprint.hours, opts);
-  const throughput = typeof opts.throughput === 'number' && opts.throughput > 0
-    ? opts.throughput
-    : THROUGHPUT_TOKENS_PER_HOUR;
+  const throughput = resolveThroughput(opts);
 
   const bandMax = sizing.target.maxHours;
   const budgetHint = Math.min(

@@ -2,7 +2,7 @@
 name: daily
 context: fork
 disable-model-invocation: true
-description: "일일 회고 리포트. 오늘의 커밋, 품질 상태, 작업 현황, 다음 단계를 구조화된 대시보드로 정리한다. Use when reviewing daily progress, generating a retrospective, or planning the next actions."
+description: "End-of-day retrospective dashboard of today's commits, quality, work status, and next steps. Use when the user wants a daily recap or retrospective. Triggers: daily, recap, 회고, 일일 보고, 오늘 작업, 오늘 뭐 했지, retrospective, daily report, 오늘 뭐 했는지 정리해줘, 일일 리뷰 해줘, 오늘 작업 요약해줘"
 lang: [en, ko]
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 2

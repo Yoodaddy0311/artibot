@@ -1,7 +1,7 @@
 ---
 context: fork
 name: spec-format
-description: "SPEC format for structured requirements, acceptance criteria, and technical specifications. Use when writing requirements, defining acceptance criteria, or creating technical specs."
+description: "SPEC format for structured requirements, acceptance criteria, and technical specifications. Use when the user asks about requirements, acceptance criteria, or technical specs. Triggers: spec, requirements, specification, acceptance criteria, EARS, user story."
 lang: [en]
 level: 2
 triggers: ["spec", "requirements", "specification", "acceptance criteria", "EARS", "user story"]

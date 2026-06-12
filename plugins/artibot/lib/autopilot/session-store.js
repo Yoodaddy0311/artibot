@@ -24,6 +24,55 @@ import { getPluginRoot } from '../core/platform.js';
 export const CURRENT_SCHEMA_VERSION = 2;
 
 /**
+ * Filesystem error codes that indicate a transient lock on a freshly-written
+ * file (antivirus / OneDrive / search-indexer holding a momentary handle on
+ * Windows) rather than a hard failure. These are safe to retry.
+ * @type {ReadonlySet<string>}
+ */
+const TRANSIENT_RENAME_CODES = new Set(['EPERM', 'EBUSY', 'EACCES']);
+
+/**
+ * Max number of rename attempts before giving up and propagating the error.
+ * @type {number}
+ */
+const MAX_RENAME_ATTEMPTS = 5;
+
+/**
+ * Block the current thread for {@link ms} milliseconds without busy-looping.
+ * Uses Atomics.wait on a throwaway SharedArrayBuffer so the synchronous
+ * saveSession path can back off between retries without spinning the CPU.
+ * @param {number} ms - non-negative milliseconds to sleep
+ * @returns {void}
+ */
+function sleepSync(ms) {
+  if (ms <= 0) return;
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/**
+ * Atomically rename {@link tmp} to {@link filePath} with bounded retry on
+ * transient Windows file locks (EPERM/EBUSY/EACCES). Backoff is exponential
+ * (~10 → 160ms) across up to {@link MAX_RENAME_ATTEMPTS} attempts. Non-transient
+ * errors propagate immediately. After the final failed attempt the original
+ * error is re-thrown so the caller's cleanup contract is unchanged.
+ * @param {string} tmp - source temp path
+ * @param {string} filePath - destination final path
+ * @returns {void}
+ */
+function renameWithRetry(tmp, filePath) {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      renameSync(tmp, filePath);
+      return;
+    } catch (err) {
+      const transient = TRANSIENT_RENAME_CODES.has(err.code);
+      if (!transient || attempt >= MAX_RENAME_ATTEMPTS) throw err;
+      sleepSync(10 * 2 ** (attempt - 1));
+    }
+  }
+}
+
+/**
  * Resolve the autopilot runtime directory inside the plugin root.
  * Path is constructed via path.join so Korean / spaced paths are preserved.
  * @returns {string} absolute directory path
@@ -53,6 +102,10 @@ export function getSessionPath(sessionId) {
  * cleanup before re-throwing, so a corrupt half-written file is never
  * left behind on disk (atomic rename is the only path to the final name).
  *
+ * The final rename is retried via {@link renameWithRetry} to absorb transient
+ * Windows file locks (antivirus / OneDrive). After retries are exhausted the
+ * original error still propagates with tmp cleanup, so the contract is unchanged.
+ *
  * @param {object} state - Session state matching PRD section 13.4
  * @returns {string} absolute file path written
  */
@@ -77,7 +130,7 @@ export function saveSession(state) {
   const payload = JSON.stringify(state, null, 2);
   try {
     writeFileSync(tmp, payload, 'utf-8');
-    renameSync(tmp, filePath);
+    renameWithRetry(tmp, filePath);
   } catch (err) {
     try { unlinkSync(tmp); } catch { /* ignore — tmp may not exist if writeFileSync threw early */ }
     throw err;

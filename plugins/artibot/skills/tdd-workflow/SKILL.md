@@ -2,9 +2,10 @@
 context: fork
 name: tdd-workflow
 description: |
-  Test-driven development workflow enforcing RED-GREEN-REFACTOR cycle.
-  Auto-activates when: writing new features, fixing bugs, refactoring code with tests needed.
-  Triggers: test, TDD, test-driven, coverage, unit test, RED GREEN REFACTOR, 테스트, TDD, 커버리지
+  Test-first discipline for new features, bug fixes, and coverage work.
+  Auto-activates when tests are requested, TDD is mentioned, or refactoring needs a safety net.
+  Triggers: test, TDD, test-driven, coverage, unit test, red green refactor, 테스트, 커버리지,
+  테스트 먼저 써줘, TDD로 짜줘, 테스트 커버리지 올려줘
 lang: [en, ko]
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 2
