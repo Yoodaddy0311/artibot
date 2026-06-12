@@ -13,7 +13,7 @@
 |---|---|
 | Source of truth | `plugins/artibot/agents/*.md` (YAML frontmatter + body) |
 | Agent count | 28 (21 opus / 7 sonnet) |
-| Skill count | 113 |
+| Skill count | 114 |
 | Command count | 72 |
 | Native orchestration | Claude Agent Teams API (`TeamCreate`, `SendMessage`, `TaskCreate/Update/List/Get`) |
 | Cross-tool export | `scripts/export-to-tool.mjs` |
