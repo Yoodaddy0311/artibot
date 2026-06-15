@@ -1808,3 +1808,43 @@
 <!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
 
 ---
+
+## 2026-06-15 00:10 UTC · `master`
+
+- **Commits** (1):
+  - `6075c93` chore(notes): append v4.26.0/v4.26.1 release session log
+- **Files touched**: 1
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-06-15 01:09 UTC · `master`
+
+- **Commits** (1):
+  - `c5bac5a` chore(audit): Tier 1 lightweight cleanup — count drift gate, stale removal, manifest sync
+- **Files touched**: 5
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-06-15 01:12 UTC · `master`
+
+- **Commits** (1):
+  - `a5b3416` test(ci): cover CLAUDE.md count-claim gate + make validator importable
+- **Files touched**: 2
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-06-15 01:34 UTC · `master`
+
+- **Commits** (1):
+  - `ffb1865` feat(audit): Tier 2 — GRPO forward-pass dedup + SKILL.md size gate
+- **Files touched**: 4
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
