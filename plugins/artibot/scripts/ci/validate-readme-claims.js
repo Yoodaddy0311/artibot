@@ -22,7 +22,17 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { CLAIM_PATTERNS, collectActuals, PLUGIN_ROOT, REPO_ROOT } from './readme-claims-registry.js';
+
+// Files scanned for count claims. README badges/prose + the plugin CLAUDE.md
+// (whose Stack line carries skills/commands/agents counts that were previously
+// outside any gate — the self-validation gap this list closes).
+export const SCAN_TARGETS = [
+  path.join(REPO_ROOT, 'README.md'),
+  path.join(PLUGIN_ROOT, 'README.md'),
+  path.join(PLUGIN_ROOT, 'CLAUDE.md'),
+];
 
 const args = process.argv.slice(2);
 const MODE = args.includes('--full') ? 'full' : 'structural';
@@ -57,11 +67,7 @@ function scanFile(file, actuals) {
 
 function main() {
   const actuals = collectActuals({ full: MODE === 'full' });
-  const targets = [
-    path.join(REPO_ROOT, 'README.md'),
-    path.join(PLUGIN_ROOT, 'README.md'),
-    path.join(PLUGIN_ROOT, 'CLAUDE.md'),
-  ];
+  const targets = SCAN_TARGETS;
 
   console.log(`Artibot README claim validator (mode: ${MODE})`);
   console.log('Actual counts:');
@@ -101,4 +107,8 @@ function main() {
   process.exit(1);
 }
 
-main();
+// Run only when invoked directly (node validate-readme-claims.js), not on import
+// — tests import SCAN_TARGETS without triggering the process.exit path.
+const invokedDirectly =
+  process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (invokedDirectly) main();
