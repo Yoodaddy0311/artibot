@@ -29,7 +29,7 @@
     "test:coverage:check": "node scripts/ci/validate-coverage.js --check",
     "eval:runtime": "node scripts/evals/run-runtime-task-suite.js",
     "eval:runtime:check": "node scripts/ci/validate-runtime-evals.js",
-    "skill:check": "node scripts/gen-skill-docs.js --check && node scripts/ci/lint-skill-descriptions.js",
+    "skill:check": "node scripts/gen-skill-docs.js --check && node scripts/ci/lint-skill-descriptions.js && node scripts/ci/lint-skill-size.js",
     "skill:check:json": "node scripts/gen-skill-docs.js --json",
     "skill:report": "node scripts/gen-skill-docs.js --report",
     "skill:lint:desc": "node scripts/ci/lint-skill-descriptions.js",

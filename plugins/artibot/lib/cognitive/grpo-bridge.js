@@ -275,6 +275,34 @@ export async function getLearnedSignalSummary() {
 }
 
 /**
+ * Evaluate a linear logistic routing policy — sigmoid(theta·x) — and map the
+ * result to the shared `{ p_s2, confidence, source }` reading. The forward pass
+ * lives here once so the sync cache reader and the async policy reader cannot
+ * drift. Returns `fallback` for any malformed policy or feature vector. The
+ * caller owns the try/catch (toFeatureVector may throw on malformed input).
+ * @param {{ theta?: number[] }|null} policy
+ * @param {RoutingFeatures} features
+ * @param {{ p_s2: number, confidence: number, source: string }} fallback
+ * @returns {{ p_s2: number, confidence: number, source: 'policy'|'fallback' }}
+ */
+function evaluateLinearPolicy(policy, features, fallback) {
+  if (!policy || !Array.isArray(policy.theta)) return fallback;
+  const theta = policy.theta;
+  const x = toFeatureVector(features);
+  if (theta.length !== x.length) return fallback;
+  let z = 0;
+  for (let i = 0; i < theta.length; i++) {
+    const t = theta[i];
+    if (typeof t !== 'number' || !Number.isFinite(t)) return fallback;
+    z += t * x[i];
+  }
+  const p = sigmoid(z);
+  if (!Number.isFinite(p)) return fallback;
+  const confidence = Math.max(0, Math.min(1, Math.abs(p - 0.5) * 2));
+  return { p_s2: p, confidence, source: 'policy' };
+}
+
+/**
  * Synchronous peek at the most recently memoized policy. Returns the same
  * `{ p_s2, confidence, source }` shape as {@link getRoutingBias} but never
  * awaits IO — if the memo is cold or stale beyond TTL, returns the neutral
@@ -293,23 +321,8 @@ export function getCachedRoutingBias(features) {
   ) {
     return fallback;
   }
-  const policy = _routingPolicyCache.policy;
-  if (!policy || !Array.isArray(policy.theta)) return fallback;
-
   try {
-    const theta = policy.theta;
-    const x = toFeatureVector(features);
-    if (theta.length !== x.length) return fallback;
-    let z = 0;
-    for (let i = 0; i < theta.length; i++) {
-      const t = theta[i];
-      if (typeof t !== 'number' || !Number.isFinite(t)) return fallback;
-      z += t * x[i];
-    }
-    const p = sigmoid(z);
-    if (!Number.isFinite(p)) return fallback;
-    const confidence = Math.max(0, Math.min(1, Math.abs(p - 0.5) * 2));
-    return { p_s2: p, confidence, source: 'policy' };
+    return evaluateLinearPolicy(_routingPolicyCache.policy, features, fallback);
   } catch {
     return fallback;
   }
@@ -355,24 +368,7 @@ export async function getRoutingBias(features, options = {}) {
   const fallback = { p_s2: 0.5, confidence: 0, source: 'fallback' };
   try {
     const policy = await readPolicy(options.policyPath ?? DEFAULT_POLICY_PATH);
-    if (!policy || !Array.isArray(policy.theta)) return fallback;
-
-    const theta = policy.theta;
-    const x = toFeatureVector(features);
-    if (theta.length !== x.length) return fallback;
-
-    let z = 0;
-    for (let i = 0; i < theta.length; i++) {
-      const t = theta[i];
-      if (typeof t !== 'number' || !Number.isFinite(t)) return fallback;
-      z += t * x[i];
-    }
-
-    const p = sigmoid(z);
-    if (!Number.isFinite(p)) return fallback;
-    // Distance-from-0.5 maps to confidence; clamp to [0, 1].
-    const confidence = Math.max(0, Math.min(1, Math.abs(p - 0.5) * 2));
-    return { p_s2: p, confidence, source: 'policy' };
+    return evaluateLinearPolicy(policy, features, fallback);
   } catch {
     return fallback;
   }
