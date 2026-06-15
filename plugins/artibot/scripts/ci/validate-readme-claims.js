@@ -2,9 +2,9 @@
 /**
  * validate-readme-claims.js — Verify README count claims match reality.
  *
- * Scans both README.md (root) and plugins/artibot/README.md for numeric claims
- * about skills, commands, agents, hooks, tests, and coverage. Compares each
- * claim against the actual file-system count and fails on drift.
+ * Scans README.md (root), plugins/artibot/README.md, and plugins/artibot/CLAUDE.md
+ * for numeric claims about skills, commands, agents, hooks, tests, and coverage.
+ * Compares each claim against the actual file-system count and fails on drift.
  *
  * Modes:
  *   structural (default)  — Counts files only. Fast (<1s). PR gate.
@@ -60,6 +60,7 @@ function main() {
   const targets = [
     path.join(REPO_ROOT, 'README.md'),
     path.join(PLUGIN_ROOT, 'README.md'),
+    path.join(PLUGIN_ROOT, 'CLAUDE.md'),
   ];
 
   console.log(`Artibot README claim validator (mode: ${MODE})`);

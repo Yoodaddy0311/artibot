@@ -174,7 +174,7 @@
     },
     {
       "path": "_marketplace/screenshots/04-skill-marketplace-view.png",
-      "caption": "111 skills with frontmatter, triggers, and rationalizations",
+      "caption": "114 skills with frontmatter, triggers, and rationalizations",
       "alt": "Skill catalogue overview"
     },
     {
@@ -223,12 +223,12 @@
     "thirdPartyApis": "user-configured-only"
   },
   "qualityMetrics": {
-    "tests": 10610,
+    "tests": 10593,
     "coverage": {
-      "statements": 90,
-      "branches": 85,
-      "functions": 88,
-      "lines": 90
+      "statements": 85,
+      "branches": 76,
+      "functions": 85,
+      "lines": 85
     },
     "lintErrors": 0,
     "ciStatus": "passing",

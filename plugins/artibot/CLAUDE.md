@@ -4,7 +4,7 @@ Auto-loads when Claude accesses `plugins/artibot/`.
 
 ## Stack
 
-Claude Native Agent Teams API (TeamCreate/SendMessage/TaskCreate) + 28 agents + 111 skills + 70 commands. ESM only, `"type": "module"`, zero runtime deps, Node >=20.
+Claude Native Agent Teams API (TeamCreate/SendMessage/TaskCreate) + 28 agents + 114 skills + 72 commands. ESM only, `"type": "module"`, zero runtime deps, Node >=20.
 
 ## 5-Layer Architecture
 
@@ -73,7 +73,7 @@ See also: `commands/team.md` (hint cross-reference), `commands/autopilot.md` (hi
 ## Testing
 
 ```
-npm test               # 4,918 tests via vitest
+npm test               # 10,600+ tests via vitest
 npm run test:coverage
 npm run lint           # 0 errors/warnings target
 npm run ci             # validate + skill:check + lint + test + eval:runtime
