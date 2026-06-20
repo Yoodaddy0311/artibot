@@ -74,11 +74,40 @@ function persistEffortMeta(meta, pluginRoot) {
 }
 
 /**
+ * Read the native effort band Claude Code (the host) may expose. PRODUCER half
+ * of TODO (#30806). Precedence (native-effort.js#resolveNativeEffort):
+ *   1) stdin `effort.level`  — ONLY present on tool-use hook events
+ *      (PreToolUse|PostToolUse|Stop|SubagentStop), per hooks.md.
+ *   2) `$CLAUDE_EFFORT` env  — inherited by every hook process; this is the
+ *      operative source for runtime-prompt (a UserPromptSubmit hook, where the
+ *      stdin effort field is absent).
+ *   3) null → caller falls back to the heuristic (byte-identical, regression-0).
+ *
+ * LOCAL ONLY: reads process.env + the already-parsed stdin payload via
+ * lib/cognitive/native-effort.js. No network, no external API. Any import
+ * failure is swallowed and treated as "no signal".
+ *
+ * @param {string} pluginRoot
+ * @param {object} [hookData] - Parsed hook stdin JSON (may carry `effort.level`).
+ * @returns {Promise<'max'|'xhigh'|'high'|'medium'|'low'|null>}
+ */
+async function readNativeEffortBand(pluginRoot, hookData = {}) {
+  try {
+    const modPath = path.join(pluginRoot, 'lib', 'cognitive', 'native-effort.js');
+    const { resolveNativeEffort } = await import(toFileUrl(modPath));
+    return resolveNativeEffort({ payload: hookData, env: process.env });
+  } catch {
+    // Non-critical: absence of the producer module = no native signal.
+    return null;
+  }
+}
+
+/**
  * Notify the cognitive router of the current session-wide effort hint.
  * Only invoked when `runtime.effort.nativeApi` is enabled in config.
  * Swallows all errors — this is advisory-only wiring.
  *
- * @param {'xhigh'|'high'|'medium'|'low'|null} effortLevel
+ * @param {'max'|'xhigh'|'high'|'medium'|'low'|null} effortLevel
  * @param {string} pluginRoot
  * @returns {Promise<void>}
  */
@@ -426,6 +455,14 @@ async function resolveScoredEffort(commandName, signals, pluginRoot) {
  * runtime/current-effort.json and returns
  * `{ command, effort, baseline, shift, reason } | null`.
  *
+ * Native-signal priority (TODO #30806): when Claude Code exposes a native
+ * effort band via a local env var, it OVERRIDES the heuristic-resolved band
+ * before the result is persisted to runtime/current-effort.json. Because hooks
+ * run in isolated processes, the in-memory router setter does not propagate
+ * across hook invocations — so the file write is where cross-process priority
+ * must be applied. When no native signal is present the heuristic result is
+ * passed through unchanged (regression-zero).
+ *
  * @param {string} prompt
  * @param {string} pluginRoot
  * @param {object} [hookData] - Hook payload used to derive Score-Aware signals.
@@ -439,7 +476,7 @@ async function resolveEffortMeta(prompt, pluginRoot, hookData = {}) {
   }
   const signals = await deriveEffortSignals(prompt, hookData, pluginRoot);
   const resolved = await resolveScoredEffort(commandName, signals, pluginRoot);
-  const effortMeta = resolved
+  let effortMeta = resolved
     ? {
       command: commandName,
       effort: resolved.effort,
@@ -448,6 +485,16 @@ async function resolveEffortMeta(prompt, pluginRoot, hookData = {}) {
       reason: resolved.reason,
     }
     : null;
+
+  // Native effort signal (if any) wins over the heuristic band. Absent/empty/
+  // unrecognized → readNativeEffortBand() returns null → heuristic untouched.
+  if (effortMeta) {
+    const nativeBand = await readNativeEffortBand(pluginRoot, hookData);
+    if (nativeBand) {
+      effortMeta = { ...effortMeta, effort: nativeBand, reason: 'native-effort' };
+    }
+  }
+
   persistEffortMeta(effortMeta, pluginRoot);
   return effortMeta;
 }
@@ -609,7 +656,12 @@ export async function handleUserPromptSubmit(hookData) {
   persistTokenUsage(prepared.context, pluginRoot);
 
   if (useNativeApi && effortMeta) {
-    await applyNativeEffortHint(effortMeta.effort, pluginRoot);
+    // Prefer a real native signal (stdin effort.level > $CLAUDE_EFFORT) over the
+    // heuristic band for the in-process router hint. readNativeEffortBand()
+    // returns null when no signal is present, so this falls back to the
+    // heuristic-resolved effort (regression-zero).
+    const nativeBand = await readNativeEffortBand(pluginRoot, hookData);
+    await applyNativeEffortHint(nativeBand ?? effortMeta.effort, pluginRoot);
   }
 
   return composePromptOutput({
