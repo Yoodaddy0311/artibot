@@ -14,16 +14,15 @@ import { round as _coreRound } from '../core/index.js';
 import { routeWithPolicy } from './grpo-routing.js';
 import { getCachedRoutingBias } from './grpo-bridge.js';
 import { getCachedGrpoRoutingConfig } from './grpo-routing-config.js';
+import { readNativeEffortLevel } from './native-effort.js';
 // Router uses 2 decimal precision for display values
 const round = (n) => _coreRound(n, 2);
 
-// Native Effort Level API Integration (extension point)
-// TODO (#30806): When Claude Code exposes a native model/effort level API,
-// integrate here. Expected shape: { model, effortLevel: 'low'|'medium'|'high',
-// reasoning_budget? }. Plan: (1) accept via configure()/setNativeEffort(),
-// (2) map low->S1, medium->threshold, high->S2, (3) override or blend with
-// heuristic, (4) expose in route() metadata. Heuristic stays as fallback.
-/** @type {{ model?: string, effortLevel?: string, reasoningBudget?: number } | null} */
+// Native Effort Level integration (TODO #30806). CONSUMER: classifyComplexity
+// blends nativeEffortHint with the heuristic. PRODUCER: syncNativeEffortFromEnv()
+// reads a host env var (native-effort.js) and installs the hint; absent → null →
+// pure-heuristic fallback. Shape: { effortLevel:'low'|'medium'|'high', band? }.
+/** @type {{ model?: string, effortLevel?: string, band?: string, reasoningBudget?: number } | null} */
 let nativeEffortHint = null;
 
 /**
@@ -46,6 +45,23 @@ export function setNativeEffortHint(hint) {
  */
 export function getNativeEffortHint() {
   return nativeEffortHint;
+}
+
+/**
+ * PRODUCER (TODO #30806): read Claude Code's native effort signal from the local
+ * env (via native-effort.js) and install it as the router hint. Band max|xhigh|
+ * high → 'high', medium → 'medium', low → 'low'. SAFE FALLBACK: no recognized env
+ * var → clears the hint to null → pure-heuristic (regression-zero). LOCAL ONLY.
+ * @param {NodeJS.ProcessEnv} [env] - Defaults to `process.env`. Injectable for tests.
+ * @returns {'high'|'medium'|'low'|null} Applied effortLevel, or null when no signal.
+ */
+export function syncNativeEffortFromEnv(env = process.env) {
+  const band = readNativeEffortLevel(env);
+  if (!band) { nativeEffortHint = null; return null; }
+  const BAND_TO_LEVEL = { max: 'high', xhigh: 'high', high: 'high', medium: 'medium', low: 'low' };
+  const effortLevel = BAND_TO_LEVEL[band] ?? 'medium';
+  nativeEffortHint = { effortLevel, band };
+  return effortLevel;
 }
 
 // ---------------------------------------------------------------------------
