@@ -132,6 +132,34 @@ const SKIP_TOOLS = new Set([
 /** Minimum output length to consider a result substantive */
 const MIN_SUBSTANTIVE_LENGTH = 10;
 
+/**
+ * Extract the tool result object from a Claude Code PostToolUse payload.
+ *
+ * Field-name resolution (newest → oldest):
+ *   1. `tool_response` — canonical Claude Code field (object OR string).
+ *   2. `tool_result`   — legacy alias kept for older payloads / tests.
+ *   3. `tool_output` / `output` — defensive fallbacks seen in sibling hooks.
+ *
+ * Claude Code sends `tool_response` as a plain string for some tools (e.g.
+ * Bash stdout). scoreResult() inspects object fields (error, exit_code,
+ * stderr), so a bare string is normalised into `{ output: <string> }` — that
+ * keeps getResultContent() working while leaving the structured branches
+ * (exit_code/stderr/is_error) safely undefined.
+ *
+ * @param {object} hookData
+ * @returns {object}
+ */
+function extractToolResult(hookData) {
+  const raw = hookData?.tool_response
+    ?? hookData?.tool_result
+    ?? hookData?.tool_output
+    ?? hookData?.output
+    ?? {};
+  if (typeof raw === 'string') return { output: raw };
+  if (raw && typeof raw === 'object') return raw;
+  return {};
+}
+
 async function main() {
   const raw = await readStdin();
   const hookData = parseJSON(raw);
@@ -140,7 +168,13 @@ async function main() {
 
   const toolName = hookData?.tool_name || hookData?.tool;
   const toolInput = hookData?.tool_input || {};
-  const toolResult = hookData?.tool_result || {};
+  // Claude Code's PostToolUse payload exposes the tool output under
+  // `tool_response` (see scripts/hooks/event-emitter.mjs:84 and the sibling
+  // hooks post-bash.js / post-edit-recovery.js). The legacy `tool_result`
+  // field is never populated by Claude Code, which silently starved
+  // scoreResult of output/exit_code and collapsed every score to a per-tool
+  // constant (Read→0.2, Bash→1.0, …). Accept all known aliases, newest first.
+  const toolResult = extractToolResult(hookData);
 
   if (!toolName || SKIP_TOOLS.has(toolName)) return;
 

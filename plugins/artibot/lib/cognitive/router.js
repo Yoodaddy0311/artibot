@@ -11,9 +11,6 @@
  */
 
 import { round as _coreRound } from '../core/index.js';
-import { routeWithPolicy } from './grpo-routing.js';
-import { getCachedRoutingBias } from './grpo-bridge.js';
-import { getCachedGrpoRoutingConfig } from './grpo-routing-config.js';
 import { readNativeEffortLevel } from './native-effort.js';
 // Router uses 2 decimal precision for display values
 const round = (n) => _coreRound(n, 2);
@@ -316,15 +313,6 @@ export function classifyComplexity(input, context = {}) {
   const clampedScore = Math.max(0, Math.min(1, score));
   let system = clampedScore < threshold ? 1 : 2;
 
-  // GRPO-RLVR flag-gated blending (design §5.3 + §8.3). Disabled by default.
-  let grpoMeta = null;
-  const grpoCfg = getCachedGrpoRoutingConfig();
-  if (grpoCfg.enabled) {
-    const bias = getCachedRoutingBias({ ...factors, ...(context.runtimeFeatures ?? {}) });
-    const r = routeWithPolicy({ heuristicSystem: system, heuristicScore: clampedScore, bias, alpha: grpoCfg.blendAlpha, epsilon: grpoCfg.epsilonExplore });
-    system = r.system; grpoMeta = r.meta;
-  }
-
   // TODO (#30806): When native effort API is available, blend or override here.
   // Current behavior: native hint overrides heuristic system assignment.
   let nativeOverride = false;
@@ -348,7 +336,6 @@ export function classifyComplexity(input, context = {}) {
     ),
     threshold: round(threshold),
     nativeEffort: nativeEffortHint ? nativeEffortHint.effortLevel : null,
-    grpoRouting: grpoMeta,
   };
 }
 

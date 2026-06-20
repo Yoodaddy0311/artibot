@@ -28,10 +28,33 @@ import { appendLesson, extractKey, recallLessons } from './memory.js';
 import {
   createWorktree,
   listWorktrees,
+  pruneOrphans,
   removeWorktree,
 } from './worktree-manager.js';
 import { acquireLock, isLocked, releaseLock } from './lock.js';
 import { loadAllowList } from './mcp-verifier.js';
+
+/**
+ * Best-effort orphan reaper. Removes the session's own worktree+branch, then
+ * sweeps any leftover orphaned `autopilot/*` worktrees and branches. Wired into
+ * both finalize (REPORT) and abort paths so sessions never leak branches at
+ * their boundaries. Never throws into phase/abort logic.
+ * @param {object} state
+ * @param {{ force?: boolean }} [opts]
+ */
+function reapSessionArtifacts(state, { force = false } = {}) {
+  const cwd = state?.options?.worktreeCwd;
+  try {
+    if (state?.worktreePath) removeWorktree(state.sessionId, { force, cwd });
+  } catch {
+    /* cleanup non-blocking */
+  }
+  try {
+    pruneOrphans({ cwd });
+  } catch {
+    /* prune non-blocking */
+  }
+}
 
 /**
  * Best-effort lesson append. Skips when state.featureKey is unset (Phase 0
@@ -219,7 +242,9 @@ export function runPhase1Plan(state) {
 function attemptCreateWorktree(state) {
   if (!state.options?.useWorktree) return null;
   try {
-    const r = createWorktree(state.sessionId);
+    // worktreeCwd lets callers/tests pin git invocations to an isolated repo
+    // (no process.chdir). Undefined → git inherits process.cwd() (default).
+    const r = createWorktree(state.sessionId, { cwd: state.options?.worktreeCwd });
     if (r.ok) {
       state.worktreePath = r.path;
       tick(state.sessionId, {
@@ -441,6 +466,9 @@ export function runPhase6Report(state) {
   try {
     if (state.featureKey) releaseLock(state.featureKey, state.sessionId);
   } catch { /* cleanup non-blocking */ }
+  // Finalize cleanup: remove this session's worktree+branch and sweep any
+  // orphaned autopilot/* artifacts so a completed run never leaks branches.
+  reapSessionArtifacts(state, { force: false });
   releaseSessionKeepAwake(state.sessionId).catch(() => {});
   const note = notifyCompletion(state.sessionId, 'COMPLETED');
   return {
@@ -667,11 +695,9 @@ export async function abortAutopilot(sessionId, { graceful = true } = {}) {
       /* report generation best-effort on abort */
     }
   }
-  try {
-    if (state.worktreePath) removeWorktree(sessionId, { force: !graceful });
-  } catch {
-    /* cleanup non-blocking */
-  }
+  // Abort cleanup: remove this session's worktree + autopilot branch (forced
+  // when non-graceful) and sweep orphaned autopilot/* artifacts.
+  reapSessionArtifacts(state, { force: !graceful });
   try {
     if (state.featureKey) releaseLock(state.featureKey, sessionId);
   } catch { /* cleanup non-blocking */ }

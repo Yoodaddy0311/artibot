@@ -176,6 +176,19 @@ function extractMeta(input) {
   return meta;
 }
 
+// Exact copy of tool-tracker.js extractToolResult — resolves the tool output
+// from a Claude Code PostToolUse payload across all known field aliases.
+function extractToolResult(hookData) {
+  const raw = hookData?.tool_response
+    ?? hookData?.tool_result
+    ?? hookData?.tool_output
+    ?? hookData?.output
+    ?? {};
+  if (typeof raw === 'string') return { output: raw };
+  if (raw && typeof raw === 'object') return raw;
+  return {};
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -405,6 +418,49 @@ describe('tool-tracker hook (pure function tests)', () => {
       it('returns 0.0 when mcp__* result has explicit is_error', () => {
         expect(scoreResult('mcp__server__call', { is_error: true }, {})).toBe(0.0);
       });
+    });
+  });
+
+  // Wiring regression guard (Track T3 ①): Claude Code's PostToolUse payload
+  // carries tool output under `tool_response`, NOT `tool_result`. Reading only
+  // `tool_result` starved scoreResult of output/exit_code and collapsed every
+  // score to a per-tool constant. These tests pin the field resolution so a
+  // silent regression to `tool_result`-only fails CI.
+  describe('extractToolResult() payload wiring', () => {
+    it('reads canonical tool_response object', () => {
+      const r = extractToolResult({ tool_response: { content: 'hello world data' } });
+      expect(scoreResult('Read', r, {})).toBe(1.0);
+    });
+
+    it('normalises a string tool_response into { output }', () => {
+      const r = extractToolResult({ tool_response: 'some stdout text' });
+      expect(r).toEqual({ output: 'some stdout text' });
+      expect(getResultContent(r)).toBe('some stdout text');
+    });
+
+    it('falls back to legacy tool_result', () => {
+      const r = extractToolResult({ tool_result: { exit_code: 1 } });
+      expect(scoreResult('Bash', r, {})).toBe(0.1);
+    });
+
+    it('falls back to tool_output then output', () => {
+      expect(extractToolResult({ tool_output: { content: 'x' } })).toEqual({ content: 'x' });
+      expect(extractToolResult({ output: { content: 'y' } })).toEqual({ content: 'y' });
+    });
+
+    it('returns {} for empty / missing payloads (no crash)', () => {
+      expect(extractToolResult({})).toEqual({});
+      expect(extractToolResult(null)).toEqual({});
+      expect(extractToolResult({ tool_response: 123 })).toEqual({});
+    });
+
+    it('regression: tool_response Bash exit_code now scores (was constant 1.0)', () => {
+      // Pre-fix, tool_result was always {} → exit_code undefined → always 1.0.
+      // Post-fix, a real failing Bash result scores 0.1.
+      const failing = extractToolResult({ tool_response: { exit_code: 2, stderr: 'boom' } });
+      expect(scoreResult('Bash', failing, {})).toBe(0.1);
+      const passing = extractToolResult({ tool_response: { exit_code: 0 } });
+      expect(scoreResult('Bash', passing, {})).toBe(1.0);
     });
   });
 

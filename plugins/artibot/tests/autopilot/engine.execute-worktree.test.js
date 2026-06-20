@@ -1,21 +1,71 @@
 /**
  * Integration tests for autopilot engine + worktree-manager wiring (Wave C).
  * Validates Phase 2 EXECUTE worktree branching, abort cleanup, and the
- * listActiveWorktrees export. Real git calls are tolerated to either succeed
- * or gracefully fall back; both branches are accepted as healthy outcomes.
+ * listActiveWorktrees export.
+ *
+ * ISOLATION CONTRACT (branch-leak guard): when a test exercises real git
+ * worktree creation it injects `options.worktreeCwd` pointing at an isolated
+ * temp repo (mkdtempSync + git init). The engine threads that cwd through
+ * createWorktree/removeWorktree/pruneOrphans, so no `autopilot/*` branch is
+ * ever created in the operator's real checkout. No process.chdir (vitest
+ * parallel safety).
  */
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
 import {
   abortAutopilot,
   getStatus,
   listActiveWorktrees,
-  listWorktrees,
   removeWorktree,
   runPhase1Plan,
   runPhase2Execute,
   startAutopilot,
 } from '../../lib/autopilot/index.js';
 import { deleteSession, loadSession } from '../../lib/autopilot/session-store.js';
+
+function gitAvailable() {
+  try {
+    return spawnSync('git', ['--version'], { encoding: 'utf-8' }).status === 0;
+  } catch {
+    return false;
+  }
+}
+
+function makeTempRepo() {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'artibot-eng-wt-'));
+  const opts = { cwd: dir, encoding: 'utf-8' };
+  spawnSync('git', ['init', '-b', 'main'], opts);
+  spawnSync('git', ['config', 'user.email', 'test@artibot.local'], opts);
+  spawnSync('git', ['config', 'user.name', 'artibot-test'], opts);
+  spawnSync('git', ['config', 'commit.gpgsign', 'false'], opts);
+  writeFileSync(path.join(dir, 'README.md'), '# temp\n');
+  spawnSync('git', ['add', '-A'], opts);
+  spawnSync('git', ['commit', '-m', 'init', '--no-gpg-sign'], opts);
+  return dir;
+}
+
+function countAutopilotBranches(repo) {
+  const r = spawnSync(
+    'git',
+    ['for-each-ref', '--format=%(refname:short)', 'refs/heads/autopilot/'],
+    { cwd: repo, encoding: 'utf-8' },
+  );
+  if (r.status !== 0) return 0;
+  return (r.stdout || '').split(/\r?\n/).map((s) => s.trim()).filter(Boolean).length;
+}
+
+let tempRepo = null;
+beforeAll(() => {
+  if (gitAvailable()) tempRepo = makeTempRepo();
+});
+afterAll(() => {
+  if (tempRepo) {
+    try { rmSync(tempRepo, { recursive: true, force: true }); } catch { /* ignore */ }
+  }
+});
 
 const sessionsToClean = new Set();
 function track(id) {
@@ -32,7 +82,7 @@ function uniqueId(label) {
 afterEach(async () => {
   for (const id of sessionsToClean) {
     try { await abortAutopilot(id, { graceful: true }); } catch { /* ignore */ }
-    try { removeWorktree(id, { force: true }); } catch { /* ignore */ }
+    try { removeWorktree(id, { force: true, cwd: tempRepo }); } catch { /* ignore */ }
     try { deleteSession(id); } catch { /* ignore */ }
   }
   sessionsToClean.clear();
@@ -56,58 +106,51 @@ describe('engine + worktree integration — Phase 2 EXECUTE', () => {
     expect(inst.type).toBe('team-create');
   });
 
-  it('case 2: useWorktree=true → either real worktree created OR graceful fallback (no throw)', async () => {
+  it('case 2: useWorktree=true (isolated repo) → worktree+branch created in temp repo, none in operator repo', async () => {
+    if (!gitAvailable()) return;
+    const before = countAutopilotBranches(tempRepo);
     const r = await startAutopilot({
       task: 'wave-c case2 worktree attempt',
       mode: 'default',
-      options: { useWorktree: true },
+      options: { useWorktree: true, worktreeCwd: tempRepo },
       sessionId: uniqueId('c2'),
     });
     track(r.sessionId);
     const state = loadSession(r.sessionId);
     runPhase1Plan(state);
-    // Phase 2 must not throw regardless of git worktree creation outcome.
     const inst = runPhase2Execute(state);
     expect(inst.type).toBe('team-create');
-    // Either path acceptable — instruction shape stays consistent with state.
     if (inst.worktreePath) {
       expect(typeof inst.worktreePath).toBe('string');
       expect(inst.cwdHint).toBe(inst.worktreePath);
       expect(state.worktreePath).toBe(inst.worktreePath);
+      // The branch must land in the ISOLATED temp repo, not the operator repo.
+      expect(countAutopilotBranches(tempRepo)).toBe(before + 1);
     } else {
       expect(inst.cwdHint).toBeUndefined();
       expect(state.worktreePath === null || state.worktreePath === undefined).toBe(true);
     }
   });
 
-  it('case 3: abortAutopilot graceful cleans up worktree from active list', async () => {
+  it('case 3: abortAutopilot graceful removes worktree+branch from the temp repo', async () => {
+    if (!gitAvailable()) return;
+    const before = countAutopilotBranches(tempRepo);
     const r = await startAutopilot({
       task: 'wave-c case3 abort cleanup',
       mode: 'default',
-      options: { useWorktree: true },
+      options: { useWorktree: true, worktreeCwd: tempRepo },
       sessionId: uniqueId('c3'),
     });
     track(r.sessionId);
     const state = loadSession(r.sessionId);
     runPhase1Plan(state);
-    runPhase2Execute(state);
+    const inst = runPhase2Execute(state);
     const result = await abortAutopilot(r.sessionId, { graceful: true });
     expect(result.status).toBe('ABORTED');
-    // v4.5.9 singleFork removed cross-process worktree races, but graceful
-    // `git worktree remove` is still an OS-level operation that can lag
-    // behind the JS abortAutopilot promise resolution under heavy load.
-    // First v4.5.10 fix used 5000ms — reproduced 2/11 in the second
-    // verification matrix (Windows `git worktree remove` under saturated
-    // workers can take 10s+). Extended to 15000ms with 100ms interval
-    // to fully absorb the OS-level race.
-    await vi.waitFor(
-      () => {
-        const remaining = listWorktrees({ autopilotOnly: true });
-        const stillThere = remaining.some((w) => w.sessionId === r.sessionId);
-        expect(stillThere).toBe(false);
-      },
-      { timeout: 15000, interval: 100 },
-    );
+    // If a worktree was actually created, abort must leave net-zero branches.
+    if (inst.worktreePath) {
+      expect(countAutopilotBranches(tempRepo)).toBe(before);
+    }
     const post = await getStatus(r.sessionId);
     expect(post.phase).toBe('ABORTED');
   });

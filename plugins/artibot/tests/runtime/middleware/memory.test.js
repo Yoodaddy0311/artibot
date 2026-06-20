@@ -70,11 +70,11 @@ describe('middleware/memory', () => {
     expect(result.userPrompt).toContain('Preference hint:');
   });
 
-  it('system1 라우팅 시 프롬프트에 메모리 컨텍스트 추가하지 않음', async () => {
+  it('system1 라우팅 시 capped top-K 메모리 컨텍스트 주입 (fast-path)', async () => {
     getRelevantContext.mockResolvedValue({
       preferences: [{ key: 'lang', value: 'ko' }],
-      projectContext: [],
-      errorPatterns: [],
+      projectContext: [{ name: 'artibot' }],
+      errorPatterns: [{ pattern: 'EPERM retry' }],
       recentCommands: [],
     });
 
@@ -87,7 +87,35 @@ describe('middleware/memory', () => {
     });
     const result = await mw(state);
 
-    expect(result.userPrompt).not.toContain('Relevant memory context:');
+    // system1 now injects, but capped to SYSTEM1_MAX_LINES (=1) bullet to
+    // protect the fast-path. The first summary line is the Preference hint.
+    expect(result.userPrompt).toContain('Relevant memory context:');
+    expect(result.userPrompt).toContain('Preference hint:');
+    // Only one bullet — Project/Error lines are dropped by the cap.
+    const bullets = result.userPrompt.split('\n- ').length - 1;
+    expect(bullets).toBe(1);
+    expect(result.userPrompt).not.toContain('Project context:');
+  });
+
+  it('system1 라우팅 시 hit 0개면 주입 없음', async () => {
+    getRelevantContext.mockResolvedValue({
+      preferences: [],
+      projectContext: [],
+      errorPatterns: [],
+      recentCommands: [],
+    });
+
+    const mw = createMemoryMiddleware();
+    const state = makeState({
+      context: {
+        routing: { system: 'system1' },
+        intent: { intents: [] },
+      },
+    });
+    const originalPrompt = state.userPrompt;
+    const result = await mw(state);
+
+    expect(result.userPrompt).toBe(originalPrompt);
   });
 
   it('hit 0개일 때 프롬프트 변경 없음', async () => {

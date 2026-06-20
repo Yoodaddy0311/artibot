@@ -27,6 +27,10 @@ import {
   fileHeader,
   shouldSkipEntry,
 } from '../../lib/learning/session-notes.js';
+import {
+  buildFailurePatternSurface,
+  replaceSurfaceBlock,
+} from '../../lib/learning/failure-pattern-surfacer.js';
 
 // Cap commits per entry — guards against the first-ever run after a fresh
 // clone where `git log` could otherwise dump hundreds of historical entries.
@@ -175,6 +179,56 @@ function getHeadSha(repoRoot) {
   return git(['rev-parse', 'HEAD'], repoRoot) || null;
 }
 
+/**
+ * A↔B bridge: surface the curated top-N failure patterns into the
+ * model-visible SESSION-NOTES.md. The block sits directly under the file
+ * header and is refreshed (not stacked) on every write via sentinel markers.
+ *
+ * Best-effort + read-only on the dictionary — any failure here must not block
+ * the timeline append that already happened.
+ *
+ * @param {string} notesFile absolute path to SESSION-NOTES.md
+ * @param {string} repoRoot repo root (dictionary lives at <root>/.artibot/...)
+ */
+async function surfaceFailurePatterns(notesFile, repoRoot) {
+  let block;
+  try {
+    block = await buildFailurePatternSurface({ cwd: repoRoot });
+  } catch {
+    return; // dictionary missing/unreadable — surface nothing
+  }
+  if (!block) return;
+
+  let current;
+  try {
+    current = readFileSync(notesFile, 'utf-8');
+  } catch {
+    return;
+  }
+
+  // Refresh an existing block in place (idempotent), else insert after the
+  // header explainer (first '---\n\n' boundary) so it stays near the top.
+  const replaced = replaceSurfaceBlock(current, block);
+  let next;
+  if (replaced !== null) {
+    next = replaced;
+  } else {
+    const marker = '---\n\n';
+    const idx = current.indexOf(marker);
+    next = idx === -1
+      ? `${current}\n${block}\n`
+      : `${current.slice(0, idx + marker.length)}${block}\n\n${current.slice(idx + marker.length)}`;
+  }
+
+  if (next !== current) {
+    try {
+      writeFileSync(notesFile, next, 'utf-8');
+    } catch {
+      // non-fatal
+    }
+  }
+}
+
 // -------------------------------------------------------------------------
 // Main
 // -------------------------------------------------------------------------
@@ -214,6 +268,9 @@ async function main() {
 
   appendFileSync(notesFile, buildAppendBlock(meta), 'utf-8');
 
+  // Persist state + emit the observability line BEFORE the async bridge so the
+  // critical timeline bookkeeping is fully synchronous and cannot be lost to a
+  // bridge await (losing lastSeenSha would duplicate the entry next run).
   const headSha = getHeadSha(repoRoot);
   if (headSha) saveState(stateFile, { lastSeenSha: headSha });
 
@@ -221,6 +278,14 @@ async function main() {
     `[artibot:session-notes] Appended entry to ${notesFile} `
     + `(${commits.length} commit(s), ${filesChanged} file(s))\n`,
   );
+
+  // A↔B bridge (last, best-effort): refresh the model-visible failure-patterns
+  // block. Wrapped so a bridge failure never propagates out of main().
+  try {
+    await surfaceFailurePatterns(notesFile, repoRoot);
+  } catch {
+    // non-fatal
+  }
 
   void hookData;
 }

@@ -20,6 +20,13 @@ const MAX_WORKING_LINES = 3;
 const WORKING_LINE_TOKEN_CAP = 40; // chars ≈ 4 per token → ~160 chars per line
 const WORKING_LINE_CHAR_CAP = WORKING_LINE_TOKEN_CAP * 4;
 
+// system1 is the fast-path. Memory injection is now allowed there (it was
+// gated to system2 only), but capped to top-K lines so the prompt-construction
+// cost stays negligible. system2 keeps the full budget. The getRelevantContext
+// lookup already ran for both systems before this gate, so enabling system1
+// injection adds only a string-slice + concat — no extra I/O.
+const SYSTEM1_MAX_LINES = 1;
+
 function summariseWorkingEntry(entry) {
   if (!entry) return '';
   const body = typeof entry.body === 'string'
@@ -95,10 +102,16 @@ function countRelevantHits(relevant) {
 }
 
 function attachMemoryContextToPrompt(state, relevant, hitCount, workingLines) {
-  if (state.context.routing?.system !== 'system2') return;
+  const system = state.context.routing?.system;
+  // system1 = fast-path: inject a capped top-K slice to keep latency flat.
+  // system2 = deliberative: full budget. Any other/unknown routing is treated
+  // conservatively as system1 (capped) rather than skipped, so injection
+  // surfaces broadly without ever dumping the full set onto a hot path.
+  const isSystem2 = system === 'system2';
   if (hitCount <= 0 && (!workingLines || workingLines.length === 0)) return;
 
-  const lines = [...(workingLines || []), ...toSummaryLines(relevant)];
+  let lines = [...(workingLines || []), ...toSummaryLines(relevant)];
+  if (!isSystem2) lines = lines.slice(0, SYSTEM1_MAX_LINES);
   if (lines.length > 0) {
     state.userPrompt += `\n\nRelevant memory context:\n- ${lines.join('\n- ')}`;
   }
