@@ -29,6 +29,13 @@ import {
   printManualInstructionsKo,
   resolveHome,
 } from './update-platform.js';
+import {
+  assertPostInstall,
+  assertUpdatePrecondition,
+  collectPostInstallInvariants,
+  installLanded,
+  renderInvariantTable,
+} from './update-verify.js';
 
 // ---------------------------------------------------------------------------
 // Argument parsing
@@ -620,26 +627,12 @@ function runInstall(preResolvedPath, preResolvedPs1) {
 // ---------------------------------------------------------------------------
 // Post-install verification
 // ---------------------------------------------------------------------------
-
-/**
- * Decide whether a just-run install actually landed the expected version.
- *
- * Guards against the silent no-op update: when the source git pull fails AND
- * install.sh runs from the installed copy (~/.claude/artibot), its self-install
- * guard skips the file-copy phase — the installer exits 0 but NOTHING changed.
- * Reporting "Update complete" there is a false success (the artibot/master
- * dead-branch incident). A forced/drift reinstall legitimately keeps the same
- * version, so only a pending real update (updateAvailable) is held to the bar.
- *
- * @param {string} installedVersion - version on disk AFTER install
- * @param {string} latestVersion    - latest release tag (may carry a 'v' prefix)
- * @param {boolean} updateAvailable - whether a newer release was pending
- * @returns {boolean} true when the install is considered successful
- */
-function installLanded(installedVersion, latestVersion, updateAvailable) {
-  if (!updateAvailable) return true; // forced/drift reinstall — no version bump expected
-  return !isNewerVersion(installedVersion, latestVersion);
-}
+//
+// The pre/post-condition gates (installLanded, assertUpdatePrecondition,
+// collectPostInstallInvariants, assertPostInstall, renderInvariantTable) live in
+// ./update-verify.js — extracted to keep this file under the 800-line guideline
+// and to give the "never silently no-op" invariants a single unit-testable home.
+// They are imported at the top and wired into main() below.
 
 // ---------------------------------------------------------------------------
 // Main
@@ -773,6 +766,31 @@ async function main() {
     }
   }
 
+  // Step 2.5: Pre-condition gate (INV-2) — refuse a guaranteed no-op BEFORE
+  // running the installer. If a real update is pending but no fresh source was
+  // pulled AND the only installer we can run lives under the installed copy
+  // (~/.claude/artibot, i.e. self-install), the copy phase will be skipped and
+  // the installer exits 0 having changed nothing. Block here with a clear,
+  // recoverable message instead of running it and falsely reporting success.
+  const installerPluginDir = path.dirname((isWin && finalPs1Path) ? finalPs1Path : finalInstallPath);
+  const pre = assertUpdatePrecondition({
+    updateAvailable,
+    pulled,
+    sourcePluginDir: pulled ? pluginDir : null,
+    installTargetDir: installerPluginDir,
+    home,
+  });
+  if (!pre.ok) {
+    console.error('');
+    console.error(`Refusing to run a no-op install (${pre.reason}): an update to ${latestVersion} is`);
+    console.error('  pending, but no fresh source was pulled and the only available installer is the');
+    console.error('  already-installed copy — running it would change nothing yet report success.');
+    console.error('  Most likely the source git pull failed (deleted/renamed remote branch) or no');
+    console.error('  source clone exists on this machine.');
+    printManualInstructions();
+    process.exit(1);
+  }
+
   // Step 3: Run install BEFORE clearing cache (prevents broken state on failure)
   console.log(`  Installing via: ${(isWin && finalPs1Path) ? finalPs1Path : finalInstallPath}`);
   try {
@@ -787,20 +805,36 @@ async function main() {
   // Step 4: Clear cache AFTER successful install
   clearCache(home);
 
-  // Step 4.5: Post-install verification — guard against the silent no-op.
-  // Re-read the version from the INSTALLED copy (~/.claude/artibot), not the
-  // source pluginRoot. If a real update was pending but the on-disk version is
-  // still behind the latest release, the installer ran without copying new
-  // files (failed source pull + self-install no-op). Surface a clear failure +
-  // manual recovery instead of a false "Update complete".
+  // Step 4.5: Post-install verification — assert the termination invariants
+  // before claiming success. Re-read the version from the INSTALLED copy
+  // (~/.claude/artibot), not the source pluginRoot, then collect INV-1/3/4/5/6
+  // (version landing, hooks-copy completeness, marketplace-mirror consistency,
+  // cache no-drift, no-op marker) and render a from->to self-check table. Any
+  // failure is a false-success risk (the artibot/master dead-branch incident) —
+  // surface it loudly with manual recovery instead of a quiet "Update complete".
   const installedRoot = path.join(home, '.claude', 'artibot');
   const installedNow = readCurrentVersion(installedRoot);
-  if (!installLanded(installedNow, latestVersion, updateAvailable)) {
+  const invariants = collectPostInstallInvariants({
+    home,
+    installedRoot,
+    sourcePluginRoot: pulled ? pluginDir : null,
+    installedVersion: installedNow,
+    latestVersion,
+    updateAvailable,
+  });
+  const postCheck = assertPostInstall(invariants);
+  console.log('');
+  console.log('Post-install self-check:');
+  console.log(renderInvariantTable(invariants));
+  if (!postCheck.ok) {
     console.error('');
-    console.error(`Update did NOT land: installed version is still v${installedNow} (expected ${latestVersion}).`);
-    console.error('  The installer ran but copied no new files — most likely the source git');
-    console.error('  pull failed (deleted/renamed remote branch) and install.sh fell back to');
-    console.error('  the already-installed copy (self-install no-op).');
+    console.error(`Update did NOT land cleanly — ${postCheck.failures.length} invariant(s) failed:`);
+    for (const f of postCheck.failures) {
+      console.error(`  ${f.id} ${f.label}: ${f.detail}`);
+    }
+    console.error('  The installer most likely copied no new files — e.g. the source git pull');
+    console.error('  failed (deleted/renamed remote branch) and install fell back to the');
+    console.error('  already-installed copy (self-install no-op).');
     printManualInstructions();
     process.exit(1);
   }
