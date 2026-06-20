@@ -18,6 +18,7 @@
  */
 
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { getPluginRoot } from '../lib/core/platform.js';
 
 // ---------------------------------------------------------------------------
@@ -165,4 +166,13 @@ function main() {
   console.log('See docs/SCHEDULED-JOBS.md for purpose, troubleshooting, and disable instructions.');
 }
 
-main();
+// Only run as a CLI; stay importable and side-effect-free so the registry can be
+// unit-tested (it prints guides on run, which a test import must not trigger).
+const isCliEntrypoint = process.argv[1] &&
+  fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
+if (isCliEntrypoint) {
+  main();
+}
+
+// Named exports for unit testing. Leaves CLI behaviour unchanged.
+export { TRAINERS, absScript };
