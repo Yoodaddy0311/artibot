@@ -18,8 +18,14 @@ async function main() {
   const raw = await readStdin();
   const hookData = parseJSON(raw);
 
-  const stdout = hookData?.tool_result?.stdout || '';
-  const stderr = hookData?.tool_result?.stderr || '';
+  // Claude Code's PostToolUse payload exposes Bash output under `tool_response`
+  // (see scripts/hooks/event-emitter.mjs:84 and tool-tracker.js:153). For Bash
+  // this is frequently a bare string (combined stdout), so the string branch is
+  // mandatory — the legacy `tool_result` object is never populated by Claude
+  // Code, which previously starved this hook (always no-op / DEAD).
+  const tr = hookData?.tool_response ?? hookData?.tool_result ?? '';
+  const stdout = typeof tr === 'string' ? tr : (tr?.stdout || '');
+  const stderr = typeof tr === 'string' ? '' : (tr?.stderr || '');
   const combined = `${stdout}\n${stderr}`;
 
   const urls = [];

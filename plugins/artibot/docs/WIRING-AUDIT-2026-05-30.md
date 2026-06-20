@@ -12,12 +12,12 @@
 | medium | learning voyager/lifelong/knowledge | knowledge-transfer: promoteToSystem1() + bootstrapPromote() | knowledge-demotion.js#_processPromotions가 인라인 승급 대신 knowledge-transfer.js#promoteToSystem1을 호출하도록 배선하거나, 두 함수를 dead export로 제거. 현재는 동일 로직이 두 |
 | medium | runtime middleware | tasks.js workflowPlan attachment (task.meta.workflowPlan via buildWork | runtime-prompt.js (or subagents.js) must read state.context.tasks.meta.workflowPlan and serialize the per-teammate effort/budget into the in |
 | medium | runtime middleware | cache-roi middleware (createCacheRoiMiddleware) | Two fixes needed: (1) register cache-roi in create-artibot-agent.js middlewareRegistry + defaultPipeline (import createCacheRoiMiddleware, a |
-| medium | runtime middleware | feature-indicator / feature activation tracker (createFeatureTracker) | A long-lived process (e.g. a session-start hook or the statusline/observability path) must call createFeatureTracker({}) once at startup so  |
+| ~~medium~~ RESOLVED | runtime middleware | feature-indicator / feature activation tracker (createFeatureTracker) | REMOVED (B2, 2026-06-20). createFeatureTracker deleted: 0 production callers AND session-level aggregation is architecturally impossible (per-prompt short-lived hook processes + in-memory bus can't survive process exit). The runtime middleware `feature:*` emits remain as honest fire-and-forget observability points (zero-subscriber emit = intentional no-op). |
 | medium | runtime core | lib/runtime/smart-pipeline.js (Zero-Waste condition-based middleware s | create-artibot-agent.js must import smart-pipeline and use it to build/filter the middleware list (or a hook/middleware must populate state. |
 | medium | runtime core | lib/runtime/sprint-contract.js (pre-agreement done-criteria protocol) | A production caller (e.g. /team or /implement orchestration, or a SubagentStart/TaskCreate hook) must import sprint-contract and create+agre |
 | medium | autopilot aux | cost-tracker.js — per-phase recording & budget-danger gate (engine.not | Either (a) re-export notePhaseCost + buildCostWarningInstruction from engine.js/index.js so the orchestrator-facing 'engine.*' namespace res |
 | medium | autopilot aux | phase-replay.js (replayPhase) | No command/engine entry point invokes replayPhase. Needs a CLI/command subcommand (e.g. ':replay <sessionId> <phase>') or an engine resume b |
-| medium | core hooks/dispatch | feature-tracker.js createFeatureTracker (Session Intelligence Report / | Need a production instantiation: some long-lived runtime surface (e.g. the runtime middleware pipeline in lib/runtime/, a SessionStart hook, |
+| ~~medium~~ RESOLVED | core hooks/dispatch | feature-tracker.js createFeatureTracker (Session Intelligence Report / | REMOVED (B2, 2026-06-20). See runtime-middleware row above — deleted as unreachable theater rather than wired. |
 | medium | core marketplace/playbook/router | marketplace.js semver/diff/plan engine (createInstallPlan, computeUpda | An /install or /update execution path must actually import and call createInstallPlan(profile)/computeUpdateDiff(installed,incoming)/detectC |
 | medium | core marketplace/playbook/router | lifecycle-router.js routing API (routeLifecycle, routeByContext, sugge | The lifecycle commands need an executable bridge (a scripts/ entry invoked via Bash, or a runtime middleware/dispatcher) that imports routeL |
 | medium | core marketplace/playbook/router | playbook-registry.js loaders (listPlaybooks, getPlaybook, loadSystemPl | /playbook command (or an orchestration runner) must call listPlaybooks()/getPlaybook() via an executable script instead of re-implementing l |
@@ -101,7 +101,7 @@ Re-verified the 11 WIRE-backlog items the v4.19.1 triage left open — 3 confirm
 
 | WIRE | Disposition | Evidence (file:line) |
 |---|---|---|
-| WIRE-05 | **Dormant** | `lib/core/feature-tracker.js` exists; `createFeatureTracker` 0 production callers; no `ux.featureIndicator` flag in `artibot.config.json`. Awaiting a Session Intelligence Report surface. (= WIRE-10) |
+| WIRE-05 | **Resolved → removed (B2, 2026-06-20)** | `lib/core/feature-tracker.js` had `createFeatureTracker` with 0 production callers. Wiring rejected: the in-memory event-bus is per-process and runtime `feature:*` emits fire inside short-lived per-prompt hook processes, so session-level aggregation (the tracker's stated purpose) cannot survive process exit. Deleted the subscriber + its 2 theater tests; event-bus doc made honest (fire-and-forget, zero-subscriber = no-op). (= WIRE-10) |
 | WIRE-13 | **Dormant** | `lib/core/playbook-registry.js` `listPlaybooks`/`getPlaybook` exported via `index.js` barrel but 0 production consumers; spec remedy = a NEW `scripts/playbook-diag.js` (absent) = feature add, not a wire. |
 | WIRE-14 | **Dormant-by-design** | `skill-exporter.js` `exportForGemini/Codex/Cursor` (373/383/393) only re-exported (`lib/core/index.js:39`); shipped `/export` runs `scripts/export-to-tool.mjs`, which does NOT import skill-exporter (node builtins only) = confirmed bypass = parallel library API. |
 | WIRE-17 | **Dormant-by-design** | `lib/privacy/token-rotation.js` `generateToken`/`rotateToken` exist; `lib/swarm/swarm-client.js#buildHeaders:160` does not import them; minted tokens are not server-validated = client-only bookkeeping, no auth benefit until a server counterpart exists. |
@@ -117,7 +117,7 @@ Re-verified the 11 WIRE-backlog items the v4.19.1 triage left open — 3 confirm
 - learning/grpo reward pipeline: createRewardMetrics.recordReward (WIRE-01 — DORMANT BY DESIGN banner)
 - learning knowledge-transfer: promoteToSystem1 / bootstrapPromote (WIRE-02 — upstream hotSwap dormant)
 - runtime middleware: lifecycle config gating createLifecycleMiddleware (WIRE-19 — phantom spec)
-- core feature-tracker: createFeatureTracker (WIRE-05/10 — no consumer, no flag)
+- ~~core feature-tracker: createFeatureTracker (WIRE-05/10 — no consumer, no flag)~~ REMOVED (B2, 2026-06-20 — unreachable theater, see WIRE-05)
 - core playbook-registry: listPlaybooks / getPlaybook (WIRE-13 — exported, unconsumed)
 - core skill-exporter: exportForGemini/Codex/Cursor (WIRE-14 — bypassed by export-to-tool.mjs)
 - privacy token-rotation: generateToken / rotateToken (WIRE-17 — client-only, no server validation)

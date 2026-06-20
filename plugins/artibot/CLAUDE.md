@@ -6,11 +6,13 @@ Auto-loads when Claude accesses `plugins/artibot/`.
 
 Claude Native Agent Teams API (TeamCreate/SendMessage/TaskCreate) + 28 agents + 113 skills + 72 commands. ESM only, `"type": "module"`, zero runtime deps, Node >=20.
 
+> **Honesty note (runtime middleware):** the default prompt pipeline runs an **11-stage** chain (`create-artibot-agent.js#defaultPipeline`) composed from **18 middleware module files** in `lib/runtime/middleware/`. "11-stage" = the assembled default chain, not the module count; 7 modules (plan-mode, aci-constraint, context-reset, otel, session-capture, skill-trigger, upgrade-check) are wired by other entry points or opt-in, not the default chain.
+
 ## 5-Layer Architecture
 
 | Layer | Dir | Responsibility |
 |---|---|---|
-| 5 Runtime | `lib/runtime/` | 11-stage middleware, agent factory |
+| 5 Runtime | `lib/runtime/` | 11-stage default middleware chain (of 18 modules), agent factory |
 | 4 Cognitive | `lib/cognitive/` | System 1/2 routing, EFFORT_POLICY |
 | 3 Learning | `lib/learning/` | memory, lifelong, knowledge-transfer, swarm sync |
 | 2 Auxiliary | `lib/{adapters,swarm,privacy,visual,git,...}/` | Domain services |
@@ -48,7 +50,14 @@ Routing: see [docs/ORCHESTRATION-ROUTING.md](docs/ORCHESTRATION-ROUTING.md) — 
 
 ## Auto-invoke Principle
 
-Never tell the user to type slash-commands. Detect intent → trigger command/skill/agent silently. Users include non-developers. Applies to `/team`, `/implement`, `/plan`, `/code-review`, `/verify`, `/daily` — all commands. Inner command workflows (phases, checklists) must run in full, never shortened.
+Never tell the user to type slash-commands. Detect intent and trigger the right command/skill/agent without surfacing the slash syntax. Users include non-developers. Applies to `/team`, `/implement`, `/plan`, `/code-review`, `/verify`, `/daily` — all commands. Inner command workflows (phases, checklists) must run in full, never shortened.
+
+**How it actually fires (hybrid, not pure code-autofire).** There is no hook that deterministically executes a command from a regex. "Auto-invoke" is two cooperating mechanisms:
+
+1. **Native skill activation** — Claude Code matches the user's request against each skill's frontmatter `description` and loads matching skills on its own. The skill `description` quality is therefore the *real* lever: a precise, trigger-rich description is what makes a skill fire; a vague one silently won't. (This is why the description linter — R1 trigger floor, R2 anti-CSO — is a load-bearing gate, not cosmetics.)
+2. **Meta-prose injection** — `scripts/hooks/runtime-prompt.js` injects advisory directives (e.g. `[artibot:hint recommend=X]`) into the prompt. These are *advisory*: the model surfaces a recommendation and acts on intent; they never force-execute `/workflow` or `/autopilot`.
+
+So "Claude auto-triggers without the user typing a slash" is accurate at the behavior level, but the engine is description-driven model activation + advisory hints — not a hidden dispatcher that runs commands from keywords.
 
 **Recommend-hint surfacing rule**: When the model receives an `[artibot:hint recommend=X]` directive (injected by `scripts/hooks/runtime-prompt.js`), it **must** surface the recommendation to the user as a single Korean sentence and wait for confirmation before acting. This is advisory only — the hint never auto-fires `/workflow` or `/autopilot`. Example phrasings:
 

@@ -24,8 +24,10 @@ import {
   countTriggers,
   detectWorkflowSummary,
   extractDescription,
+  hasRedFlagsSection,
   lintAllSkills,
   lintDescription,
+  redFlagViolatingSkillNames,
   runRatchet,
   violatingSkillNames,
 } from '../../scripts/ci/lint-skill-descriptions.js';
@@ -211,6 +213,57 @@ describe('lintDescription calibration (synthetic fixtures)', () => {
   });
 });
 
+describe('hasRedFlagsSection (R4 body-rule)', () => {
+  it('detects a `## Red Flags` body heading', () => {
+    const md = '---\nname: x\ndescription: "d"\n---\n# Title\n\n## Red Flags\n- never do X';
+    expect(hasRedFlagsSection(md)).toBe(true);
+  });
+
+  it('detects a deeper `### Red Flags` heading with trailing decoration', () => {
+    const md = '---\nname: x\n---\nbody\n### Red Flags (anti-patterns)\n- foo';
+    expect(hasRedFlagsSection(md)).toBe(true);
+  });
+
+  it('is case-insensitive and tolerant of spacing', () => {
+    const md = '---\nname: x\n---\n##  red flags\n- foo';
+    expect(hasRedFlagsSection(md)).toBe(true);
+  });
+
+  it('returns false when no Red Flags heading exists in the body', () => {
+    const md = '---\nname: x\ndescription: "d"\n---\n# Title\n\n## Usage\nsteps';
+    expect(hasRedFlagsSection(md)).toBe(false);
+  });
+
+  it('does NOT count a "Red Flags" mention inside the frontmatter description', () => {
+    const md = '---\nname: x\ndescription: "Use when listing Red Flags, warnings, antipatterns."\n---\n# Title\nbody';
+    expect(hasRedFlagsSection(md)).toBe(false);
+  });
+
+  it('does NOT match an inline (non-heading) "Red Flags" mention in the body', () => {
+    const md = '---\nname: x\n---\nWatch for Red Flags during review.';
+    expect(hasRedFlagsSection(md)).toBe(false);
+  });
+});
+
+describe('redFlagViolatingSkillNames (R4 reducer)', () => {
+  it('selects only skills carrying an R4 violation, sorted', () => {
+    const results = [
+      { name: 'beta', violations: [{ rule: 'R4', severity: 'warn', detail: 'x' }] },
+      { name: 'alpha', violations: [{ rule: 'R4', severity: 'warn', detail: 'x' }] },
+      { name: 'gamma', violations: [{ rule: 'R1', severity: 'error', detail: 'x' }] },
+      { name: 'delta', violations: [] },
+    ];
+    expect(redFlagViolatingSkillNames(results)).toEqual(['alpha', 'beta']);
+  });
+
+  it('keeps R4 (warn) out of the error-severity description ratchet', () => {
+    const results = [{ name: 'x', violations: [{ rule: 'R4', severity: 'warn', detail: 'x' }] }];
+    // R4 must not promote a skill into the description (error) violator set.
+    expect(violatingSkillNames(results)).toEqual([]);
+    expect(redFlagViolatingSkillNames(results)).toEqual(['x']);
+  });
+});
+
 describe('lintAllSkills + ratchet against committed baseline', () => {
   it('produces a stable result set and the committed baseline keeps CI green', () => {
     const results = lintAllSkills(getPluginRoot());
@@ -221,5 +274,28 @@ describe('lintAllSkills + ratchet against committed baseline', () => {
     ).skills;
     // The committed baseline must already cover every current violation → no NEW violations.
     expect(runRatchet(current, baseline).pass).toBe(true);
+  });
+
+  it('keeps the Red Flags ratchet green against its committed baseline', () => {
+    const results = lintAllSkills(getPluginRoot());
+    const current = redFlagViolatingSkillNames(results);
+    const baseline = JSON.parse(
+      readFileSync(join(PLUGIN_ROOT, 'scripts', 'ci', 'skill-redflags-baseline.json'), 'utf8')
+    ).skills;
+    // Every skill currently missing a Red Flags section must already be baselined.
+    expect(runRatchet(current, baseline).pass).toBe(true);
+    // Sanity: the convention's adopters are NOT in the regression baseline.
+    expect(baseline).not.toContain('coding-standards');
+    expect(baseline).not.toContain('tdd-workflow');
+  });
+
+  it('attaches an R4 warn to skills without a Red Flags section', () => {
+    const results = lintAllSkills(getPluginRoot());
+    const withR4 = results.filter((r) => r.violations.some((v) => v.rule === 'R4'));
+    // R4 must always be warn-severity (ratchet, never a hard error).
+    for (const r of withR4) {
+      const r4 = r.violations.find((v) => v.rule === 'R4');
+      expect(r4.severity).toBe('warn');
+    }
   });
 });

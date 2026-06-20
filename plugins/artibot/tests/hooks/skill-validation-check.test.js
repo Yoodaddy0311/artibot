@@ -160,6 +160,50 @@ describe('skill-validation-check', () => {
     expect(msg).toContain('and 3 more');
   });
 
+  it('should flag a retired skill that reappeared on disk (phantom)', async () => {
+    mockState.readdirResult = ['voyager-curation'];
+    mockState.statResults = { 'voyager-curation': { isDirectory: () => true } };
+    // Give it a fully valid SKILL.md so the only issue is the phantom guard.
+    mockState.readFileResults = {
+      'SKILL.md': [
+        '---',
+        'name: voyager-curation',
+        'description: revived',
+        'context: test',
+        'triggers: test',
+        'whenNotToUse: never',
+        '---',
+        'Content',
+      ].join('\n'),
+    };
+
+    await import('../../scripts/hooks/skill-validation-check.js');
+    expect(mockState.writeStdoutCalls).toHaveLength(1);
+    const msg = mockState.writeStdoutCalls[0][0].message;
+    expect(msg).toContain('voyager-curation');
+    expect(msg).toContain('phantom');
+  });
+
+  it('should NOT flag a phantom when no retired skill is present', async () => {
+    mockState.readdirResult = ['git-unified'];
+    mockState.statResults = { 'git-unified': { isDirectory: () => true } };
+    mockState.readFileResults = {
+      'SKILL.md': [
+        '---',
+        'name: git-unified',
+        'description: hub',
+        'context: fork',
+        'triggers: git',
+        'whenNotToUse: never',
+        '---',
+        'Content',
+      ].join('\n'),
+    };
+
+    await import('../../scripts/hooks/skill-validation-check.js');
+    expect(mockState.writeStdoutCalls).toHaveLength(0);
+  });
+
   it('should report unclosed frontmatter', async () => {
     mockState.readdirResult = ['unclosed'];
     mockState.statResults = { unclosed: { isDirectory: () => true } };

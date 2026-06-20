@@ -13,10 +13,17 @@
  *   R2 (no workflow, CSO) — no pipeline tokens / arrow chains / numbered steps
  *                            / 3-verb procedural chains. severity: error.
  *   R3 (length)           — description > 1024 chars. severity: warn.
+ *   R4 (Red Flags body)   — SKILL.md *body* lacks a `## Red Flags` section.
+ *                            severity: warn. Body-rule (reads markdown body, not
+ *                            the frontmatter description). Ratcheted against its
+ *                            own frozen baseline so only NEW/edited skills must
+ *                            ship a Red Flags section; the 85+ legacy skills that
+ *                            predate the convention are regression-frozen.
  *
- * Ships with a ratchet gate (see runRatchet) that freezes the current set of
- * violating skills in `skill-lint-baseline.json`: only NEW violations (skills
- * not in the baseline) fail CI. Mirrors the validate-doc-links.js style.
+ * Two independent ratchet gates (see runRatchet) freeze the current violating
+ * sets so only NEW violations fail CI. Mirrors the validate-doc-links.js style.
+ *   - description gate (R1/R2 errors) → `skill-lint-baseline.json`
+ *   - Red Flags gate (R4 warns)       → `skill-redflags-baseline.json`
  *
  * Zero external dependencies (node:fs / node:path / node:url only).
  * Never-throw: a skill that fails to parse is reported as a warning and skipped.
@@ -143,6 +150,23 @@ function detectVerbChain(text) {
 }
 
 /**
+ * Detect whether a SKILL.md body carries a `## Red Flags` heading (R4).
+ * Reads the markdown body (everything after the frontmatter block), so a literal
+ * "Red Flags" mention inside the frontmatter `description` does not count.
+ * Matches an ATX heading at any depth (`##`/`###`) case-insensitively, allowing
+ * trailing decoration (e.g. `## Red Flags (anti-patterns)`).
+ *
+ * @param {string} content - Raw SKILL.md file content.
+ * @returns {boolean} True when a `Red Flags` section heading is present in body.
+ */
+export function hasRedFlagsSection(content) {
+  const text = String(content).replace(/\r\n/g, '\n');
+  // Strip the leading frontmatter block so a description mention does not count.
+  const body = text.replace(/^---\n[\s\S]*?\n---/, '');
+  return /^#{2,}\s+red\s*flags\b/im.test(body);
+}
+
+/**
  * Lint a single description against R1/R2/R3. Pure — no I/O.
  *
  * @param {string|null} desc - Extracted description (null if absent).
@@ -225,9 +249,31 @@ export function lintAllSkills(root) {
     }
     const desc = extractDescription(content);
     const { violations, triggerCount, length } = lintDescription(desc);
+    // R4 (body-rule, warn): flag a missing `## Red Flags` body section.
+    if (!hasRedFlagsSection(content)) {
+      violations.push({
+        rule: 'R4',
+        severity: 'warn',
+        detail: 'SKILL.md body has no `## Red Flags` section',
+      });
+    }
     results.push({ name, violations, triggerCount, length });
   }
   return results;
+}
+
+/**
+ * Reduce per-skill results to the set of skill names that lack a `## Red Flags`
+ * body section (R4). Used by the dedicated Red Flags ratchet gate.
+ *
+ * @param {Array} results - Output of lintAllSkills.
+ * @returns {string[]} Sorted skill names missing a Red Flags section.
+ */
+export function redFlagViolatingSkillNames(results) {
+  return results
+    .filter((r) => r.violations.some((v) => v.rule === 'R4'))
+    .map((r) => r.name)
+    .sort();
 }
 
 /**
@@ -261,10 +307,11 @@ export function runRatchet(current, baseline) {
   return { newViolations, stillViolating, fixed, pass: newViolations.length === 0 };
 }
 
-/** Resolve baseline path (committed) and report path (runtime, gitignored). */
+/** Resolve baseline paths (committed) and report path (runtime, gitignored). */
 function paths(root) {
   return {
     baseline: path.join(root, 'scripts', 'ci', 'skill-lint-baseline.json'),
+    redFlagsBaseline: path.join(root, 'scripts', 'ci', 'skill-redflags-baseline.json'),
     report: path.join(root, 'runtime', 'skill-lint-report.json'),
   };
 }
@@ -322,20 +369,24 @@ function printTable(results) {
  */
 function main() {
   const root = getPluginRoot();
-  const { baseline: baselineFile, report: reportFile } = paths(root);
+  const { baseline: baselineFile, redFlagsBaseline: redFlagsFile, report: reportFile } = paths(root);
   const update = process.argv.includes('--update-baseline');
 
   const results = lintAllSkills(root);
   const current = violatingSkillNames(results);
   const baseline = readBaseline(baselineFile);
+  const redFlagCurrent = redFlagViolatingSkillNames(results);
+  const redFlagBaseline = readBaseline(redFlagsFile);
 
   const r1 = results.reduce((n, r) => n + r.violations.filter((v) => v.rule === 'R1').length, 0);
   const r2 = results.reduce((n, r) => n + r.violations.filter((v) => v.rule === 'R2').length, 0);
   const r3 = results.reduce((n, r) => n + r.violations.filter((v) => v.rule === 'R3').length, 0);
+  const r4 = redFlagCurrent.length;
 
   printTable(results);
   console.log(
-    `\nSkills: ${results.length} · violating(error): ${current.length} · R1=${r1} R2=${r2} R3(warn)=${r3}`
+    `\nSkills: ${results.length} · violating(error): ${current.length} · ` +
+      `R1=${r1} R2=${r2} R3(warn)=${r3} R4(warn)=${r4}`
   );
 
   if (update) {
@@ -344,27 +395,50 @@ function main() {
       JSON.stringify({ skills: current, generatedAt: new Date().toISOString() }, null, 2) + '\n',
       'utf8'
     );
-    console.log(`\nBaseline updated → ${current.length} skill(s) frozen.`);
-    writeReport(reportFile, { results, current, baseline: current });
+    writeFileSync(
+      redFlagsFile,
+      JSON.stringify({ skills: redFlagCurrent, generatedAt: new Date().toISOString() }, null, 2) + '\n',
+      'utf8'
+    );
+    console.log(
+      `\nBaselines updated → ${current.length} description + ${redFlagCurrent.length} Red Flags skill(s) frozen.`
+    );
+    writeReport(reportFile, { results, current, baseline: current, redFlagCurrent, redFlagBaseline: redFlagCurrent });
     process.exit(0);
   }
 
   const ratchet = runRatchet(current, baseline);
-  writeReport(reportFile, { results, current, baseline, ratchet });
+  const redFlagRatchet = runRatchet(redFlagCurrent, redFlagBaseline);
+  writeReport(reportFile, { results, current, baseline, ratchet, redFlagCurrent, redFlagBaseline, redFlagRatchet });
 
   if (ratchet.fixed.length > 0) {
     console.log(
-      `\nFixed (remove from baseline): ${ratchet.fixed.join(', ')} — run with --update-baseline.`
+      `\nFixed descriptions (remove from baseline): ${ratchet.fixed.join(', ')} — run with --update-baseline.`
     );
   }
+  if (redFlagRatchet.fixed.length > 0) {
+    console.log(
+      `\nAdded Red Flags (remove from baseline): ${redFlagRatchet.fixed.join(', ')} — run with --update-baseline.`
+    );
+  }
+
+  const failed = !ratchet.pass || !redFlagRatchet.pass;
   if (!ratchet.pass) {
-    console.error(`\nFAIL: ${ratchet.newViolations.length} NEW violating skill(s):`);
+    console.error(`\nFAIL: ${ratchet.newViolations.length} NEW description-violating skill(s):`);
     for (const n of ratchet.newViolations) console.error(`  - ${n}`);
     console.error('Fix the description or justify, then re-run.');
-    process.exit(1);
   }
+  if (!redFlagRatchet.pass) {
+    console.error(`\nFAIL: ${redFlagRatchet.newViolations.length} NEW/edited skill(s) missing a \`## Red Flags\` section:`);
+    for (const n of redFlagRatchet.newViolations) console.error(`  - ${n}`);
+    console.error('Add a `## Red Flags` section to the SKILL.md body, then re-run.');
+  }
+  if (failed) process.exit(1);
+
   console.log(
-    `\nPASS: no new violations (${ratchet.stillViolating.length} baselined, ${ratchet.fixed.length} fixed).`
+    `\nPASS: no new violations ` +
+      `(desc: ${ratchet.stillViolating.length} baselined/${ratchet.fixed.length} fixed · ` +
+      `Red Flags: ${redFlagRatchet.stillViolating.length} baselined/${redFlagRatchet.fixed.length} added).`
   );
   process.exit(0);
 }

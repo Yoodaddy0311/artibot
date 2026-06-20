@@ -8,11 +8,13 @@
 [![Coverage](https://img.shields.io/badge/coverage-90%25%2B-brightgreen?style=flat-square)](./tests/)
 [![Claude Code](https://img.shields.io/badge/Claude_Code-Plugin-7C3AED?style=flat-square)](https://github.com/anthropics/claude-code)
 
-> **Cognitive orchestration OS for Claude Code** — hierarchical memory, GRPO-RLVR self-learning, MCP server, and multi-platform agent teams.
+> **Cognitive orchestration OS for Claude Code** — hierarchical memory, verifiable-reward learning (RLVR), MCP server, and multi-platform agent teams.
 >
-> **Claude Code를 위한 인지 오케스트레이션 OS** — 계층 메모리, GRPO-RLVR 자가 학습, MCP 서버, 멀티 플랫폼 에이전트 팀.
+> **Claude Code를 위한 인지 오케스트레이션 OS** — 계층 메모리, 검증가능-보상(RLVR) 학습, MCP 서버, 멀티 플랫폼 에이전트 팀.
 
-Artibot은 Claude Code의 네이티브 **Agent Teams API**를 핵심 엔진으로 사용하여 28개 전문 에이전트, 100+ 도메인 스킬, 11단계 런타임 미들웨어, 37개 학습 모듈, 9개 스웜 모듈을 통합한 **5-layer 오케스트레이션 OS**입니다. System 1/2 인지 라우팅과 GRPO 기반 자가 학습으로 매 세션마다 라우팅 정확도가 향상됩니다.
+Artibot은 Claude Code의 네이티브 **Agent Teams API**를 핵심 엔진으로 사용하여 28개 전문 에이전트, 100+ 도메인 스킬, 11단계 런타임 미들웨어, 계층 메모리·규칙 추출 학습 모듈, 스웜 동기화 모듈을 통합한 **5-layer 오케스트레이션 OS**입니다. System 1/2 인지 라우팅과 검증가능 보상(테스트 통과·타입체크) 기반 학습으로 라우팅·스킬 선택을 점진 보정합니다.
+
+> **참고(2026-06 lean redesign):** 기존 GRPO 정책 옵티마이저는 측정 가능한 개선이 없어 철거되었습니다. 현재 학습은 **검증가능 보상(RLVR)** 신호(테스트 통과·타입체크·no-revisit)로 라우팅/스킬 승격과 계층 메모리를 보정하는 방식이며, 별도 외부 보상 모델·강화학습 옵티마이저는 사용하지 않습니다.
 
 ---
 
@@ -44,8 +46,8 @@ That's it. No manual config. Agent Teams auto-enables on first session start.
 |---|---|---|
 | 1 | **Dual-Process Cognitive Router (System 1 / System 2)** — production implementation of 2026 DPA architecture | `lib/cognitive/router.js`, `system1.js`, `system2-core.js` |
 | 2 | **Hierarchical Memory** — working / episodic / semantic with active curation | `lib/learning/memory-manager.js`, `lib/learning/lifelong.js` |
-| 3 | **37-Module Lifelong Learning** — GRPO + RLVR + drift-detector + skill-lifecycle-autopilot | `lib/learning/` (auto-learning-*, evolution-loop, grpo-optimizer, ...) |
-| 4 | **11-Stage Runtime Middleware** — router → subagents → tasks → checkpoint → memory → skills → guardrail → token-usage → summarization → lifecycle → plan-mode | `lib/runtime/middleware/` |
+| 3 | **Lifelong Learning (RLVR)** — verifiable-reward signals (test-pass / typecheck / no-revisit) feed drift-detector + rule-extractor + skill promotion. *No GRPO/RL optimizer — removed in the 2026-06 lean redesign.* | `lib/learning/` (lifelong-learner, rule-extractor, drift-detector, knowledge-graph, ...) |
+| 4 | **11-Stage Runtime Middleware** — default chain: lifecycle → router → memory → skills → tasks → subagents → guardrail → summarization → token-usage → checkpoint → cache-roi (assembled from 18 middleware modules) | `lib/runtime/middleware/`, `create-artibot-agent.js#defaultPipeline` |
 | 5 | **MCP Server (v3.8+)** — Artibot exposes its own MCP server so Claude Desktop/Code can consume Artibot inventory | `lib/mcp/server.js`, `bin/artibot-mcp.mjs` |
 | 6 | **Data Sovereignty** — outbound to external DBs is hard-blocked. Memory, learning, swarm all stay on disk | `CLAUDE.md` DATA POLICY + `lib/privacy/` |
 | 7 | **Native Agent Teams API** — TeamCreate / SendMessage / TaskCreate, not Task() one-shot delegation | `lib/runtime/middleware/subagents.js`, `lib/runtime/middleware/tasks.js` |
@@ -78,7 +80,7 @@ flowchart TD
     SUB --> RT[Runtime Middleware Pipeline<br/>11 stages]
     TM --> RT
     RT --> AG[28 Specialist Agents<br/>orchestrator + 27 teammates]
-    AG --> LL[Lifelong Learning<br/>GRPO + RLVR + memory transfer]
+    AG --> LL[Lifelong Learning<br/>RLVR signals + memory transfer]
     LL --> CR
 ```
 
@@ -86,9 +88,9 @@ flowchart TD
 
 | # | Layer | Directory | Responsibility |
 |---|---|---|---|
-| 5 | Runtime | `lib/runtime/` | 11-stage middleware, agent factory |
+| 5 | Runtime | `lib/runtime/` | 11-stage default middleware chain (of 18 modules), agent factory |
 | 4 | Cognitive | `lib/cognitive/` | System 1/2 routing, EFFORT_POLICY |
-| 3 | Learning | `lib/learning/` | GRPO, hierarchical memory, knowledge transfer |
+| 3 | Learning | `lib/learning/` | RLVR-signal learning, hierarchical memory, knowledge transfer |
 | 2 | Auxiliary | `lib/{adapters,swarm,privacy,visual,mcp,observability,git,...}/` | Domain services |
 | 1 | Core | `lib/core/` | Config, I/O, cache, event-bus, guards |
 
@@ -102,7 +104,7 @@ Detailed module map: `docs/ARCHITECTURE.md`.
 |---|---|
 | **Cognitive Routing** | System 1 (fast pattern match, <100ms) vs System 2 (sandboxed deliberation), auto-escalation rules |
 | **Hierarchical Memory** | working / episodic / semantic layers with promotion/demotion, MEMORY.md index, 3-scope (user / project / session) |
-| **GRPO + RLVR Self-Learning** | Group-Relative Policy Optimization with verifiable rewards (test pass / typecheck / no-revisit) — no external reward model |
+| **RLVR Self-Learning** | Verifiable-reward signals (test pass / typecheck / no-revisit) bias routing and skill promotion — no external reward model, no RL policy optimizer (the GRPO optimizer was removed in the 2026-06 lean redesign) |
 | **MCP Server** | Artibot publishes its own MCP server (skills, agents, memory, git bridges); also consumes Context7 + Playwright |
 | **Multi-Platform Agent Teams** | Native Claude Code; auto-export adapters for Gemini CLI / Codex CLI / Cursor / Antigravity (graceful degradation) |
 | **Observability** | OTEL exporter (opt-in, loopback-preferred), multi-session dashboard, token-usage middleware, hook event fan-out |
@@ -550,9 +552,9 @@ Artibot은 Claude Code 외에도 **Gemini CLI**, **OpenAI Codex CLI**, **Cursor 
 | 슬래시 커맨드 | ✅ 70개 | ✅ TOML | → Workflows | → Prompts | → Workflows |
 | Hooks 자동작동 | ✅ 15이벤트 | ✅ 동일패턴 | ⚠️ 제한적 | ❌ | ✅ Agent Manager |
 | 인지 라우터 (System 1/2) | ✅ | ✅ | ✅ | ✅ | ✅ |
-| 자가학습 (GRPO) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| 자가학습 (RLVR 신호) | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 메모리 (3-scope) | ✅ | ✅ | ✅ | ✅ | ✅ |
-| 집단지성 (Swarm) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| 집단지성 (Swarm, opt-in/dormant) | ✅ | ✅ | ✅ | ✅ | ✅ |
 | MCP: Context7 | ✅ 자동 | ⚠️ 수동설정 | ⚠️ 제한적 | ⚠️ 수동설정 | ⚠️ 수동설정 |
 | MCP: Playwright | ✅ 자동 | ⚠️ 수동설정 | ⚠️ 제한적 | ⚠️ 수동설정 | ⚠️ 수동설정 |
 
@@ -1062,7 +1064,8 @@ Cognitive Router (threshold: 0.4)
 ```
 세션 종료 → Self Evaluator (응답 품질 평가)
     ↓
-GRPO Optimizer (그룹 상대 정책 최적화)
+RLVR 신호 집계 (검증가능 보상: 테스트 통과·타입체크·no-revisit)
+    │   ※ 기존 GRPO 정책 옵티마이저는 2026-06 lean redesign에서 철거
     ↓
 Knowledge Transfer (메모리 스코프 간 승격/강등)
     │   promotionThreshold: 3회 성공 → user 스코프로 승격
@@ -1076,7 +1079,9 @@ Memory Manager
 
 ### 개인정보 보호 (Privacy Architecture)
 
-연합 학습(Federated Swarm)에서 패턴을 공유할 때 자동으로 PII가 제거됩니다:
+> **참고:** 스웜(swarm) 동기화는 **옵트인·기본 비활성(현재 dormant)**입니다. 아래는 활성화 시 적용되는 PII 보호 파이프라인 설계이며, 기본 설치에서는 어떤 패턴도 외부로 나가지 않습니다(로컬 전용).
+
+스웜 동기화(opt-in)로 패턴을 공유할 때 자동으로 PII가 제거됩니다:
 
 ```
 학습 데이터
@@ -1401,8 +1406,8 @@ orchestrator는 **코드를 직접 작성하지 않습니다**. 팀을 구성하
 | `lifelong-learning` | 평생 학습, 경험 축적 |
 | `memory-management` | 메모리 관리, 3-scope 시스템 |
 | `self-evaluation` | 자기 평가, Meta Self-Rewarding |
-| `self-learning` | 자기 학습, GRPO 최적화 |
-| `swarm-intelligence` | 연합 지능, Federated Swarm |
+| `self-learning` | 자기 학습, RLVR 검증가능-보상 신호 (GRPO 옵티마이저는 2026-06 철거) |
+| `swarm-intelligence` | 집단 지성 동기화 (opt-in·기본 비활성/dormant) |
 | `quality-framework` | 품질 프레임워크, 게이트 관리 |
 | `spec-format` | 스펙 포맷, 문서 표준 |
 | `platform-auth` | 인증/인가 플랫폼 패턴 |

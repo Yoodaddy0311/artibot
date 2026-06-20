@@ -84,7 +84,12 @@ async function main() {
   const toolName = extractToolName(hookData);
   if (toolName !== 'Edit' && toolName !== 'Write') return;
 
-  const toolOutput = hookData.tool_output
+  // `tool_response` is the canonical Claude Code PostToolUse field (see
+  // event-emitter.mjs:84 / tool-tracker.js:153). It was missing here, so the
+  // hook silently no-op'd in production — the legacy keys below are never
+  // populated by Claude Code. Canonical key must come first.
+  const toolOutput = hookData.tool_response
+    ?? hookData.tool_output
     ?? hookData.tool_result
     ?? hookData.output
     ?? '';

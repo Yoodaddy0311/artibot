@@ -198,6 +198,43 @@ describe('clean-state-check hook', () => {
       const call = writeStdout.mock.calls[0][0];
       expect(call.message).toContain('utils.ts');
     });
+
+    it('reads from camelCase changedFiles field', async () => {
+      readStdin.mockResolvedValue(makeHookData(['/src/app.js'], 'changedFiles'));
+
+      await import('../../scripts/hooks/clean-state-check.js');
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(writeStdout).toHaveBeenCalledTimes(1);
+      const call = writeStdout.mock.calls[0][0];
+      expect(call.message).toContain('app.js');
+    });
+
+    it('reads from nested task.changed_files envelope', async () => {
+      readStdin.mockResolvedValue(JSON.stringify({
+        task: { changed_files: ['/src/nested.ts'] },
+      }));
+
+      await import('../../scripts/hooks/clean-state-check.js');
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(writeStdout).toHaveBeenCalledTimes(1);
+      const call = writeStdout.mock.calls[0][0];
+      expect(call.message).toContain('nested.ts');
+    });
+
+    it('reads from nested result.files envelope', async () => {
+      readStdin.mockResolvedValue(JSON.stringify({
+        result: { files: ['/src/r.jsx'] },
+      }));
+
+      await import('../../scripts/hooks/clean-state-check.js');
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(writeStdout).toHaveBeenCalledTimes(1);
+      const call = writeStdout.mock.calls[0][0];
+      expect(call.message).toContain('r.jsx');
+    });
   });
 
   describe('result object structure', () => {

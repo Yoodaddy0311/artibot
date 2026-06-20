@@ -20,6 +20,7 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'; // eslint-disable-line sort-imports
 import path from 'node:path';
 import { ARTIBOT_DIR } from '../../lib/core/config.js';
+import { createErrorHandler } from '../../lib/core/hook-utils.js';
 import { readStdin, writeStdout } from '../utils/index.js';
 
 const PATHS = {
@@ -98,4 +99,4 @@ async function main() {
   }
 }
 
-main();
+main().catch(createErrorHandler('session-digest', { exit: true }));

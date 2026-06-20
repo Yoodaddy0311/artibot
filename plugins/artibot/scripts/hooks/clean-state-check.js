@@ -15,14 +15,39 @@ const CODE_EXTENSIONS = new Set(['.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs']);
 
 /**
  * Extract the list of changed files from hook data.
- * Supports multiple field names used by different event sources.
+ *
+ * Supports multiple field names used by different event sources. The exact
+ * Claude Code TaskCompleted payload shape is NOT documented (no sibling hook
+ * reads a file list from it), so this resolver is a conservative superset:
+ * the originally-supported snake_case keys come first, followed by camelCase
+ * variants and a nested `task` / `result` container (the common Claude Code
+ * envelope shapes). No payload structure is invented beyond plausible key
+ * aliases — when none match, the hook degrades to its existing "nothing to
+ * verify" no-op rather than guessing.
+ *
  * @param {object} hookData - Parsed hook input
  * @returns {string[]}
  */
 function extractChangedFiles(hookData) {
-  const files = hookData?.changed_files
-    ?? hookData?.modified_files
-    ?? hookData?.files
+  if (!hookData || typeof hookData !== 'object') return [];
+  // Nested envelopes Claude Code may wrap task data in.
+  const task = (hookData.task && typeof hookData.task === 'object') ? hookData.task : {};
+  const result = (hookData.result && typeof hookData.result === 'object') ? hookData.result : {};
+  const files = hookData.changed_files
+    ?? hookData.modified_files
+    ?? hookData.files
+    ?? hookData.changedFiles
+    ?? hookData.modifiedFiles
+    ?? task.changed_files
+    ?? task.changedFiles
+    ?? task.modified_files
+    ?? task.modifiedFiles
+    ?? task.files
+    ?? result.changed_files
+    ?? result.changedFiles
+    ?? result.modified_files
+    ?? result.modifiedFiles
+    ?? result.files
     ?? [];
   return Array.isArray(files) ? files : [];
 }

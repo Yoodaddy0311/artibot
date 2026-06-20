@@ -3,7 +3,7 @@ name: using-agent-skills
 context: fork
 user-invocable: false
 level: 1
-description: "Discovery flowchart for Artibot's 102 skills. Use this as orientation when the user asks 'what skills do you have', 'how do I do X', 'what commands are available', or when picking the right tool for an unfamiliar task."
+description: "Discovery flowchart for Artibot's skill library. Use this as orientation when the user asks 'what skills do you have', 'how do I do X', 'what commands are available', or when picking the right tool for an unfamiliar task."
 lang: [en]
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 triggers:
@@ -68,7 +68,7 @@ These are **auto-invoked** — users never need to type them. The meta-rule from
 | Marketing / Growth | Ads, SEO, content | `advertising`, `content-seo`, `cro-forms` |
 | Meta | Discovery, this file | `using-agent-skills` |
 
-Full count: 102 skills under `plugins/artibot/skills/`. Use `Glob "plugins/artibot/skills/*/SKILL.md"` to enumerate.
+Enumerate the full set with `Glob "plugins/artibot/skills/*/SKILL.md"` — the directory scan is the single source of truth for the count.
 
 ## Decision flowchart
 
@@ -96,7 +96,7 @@ that skill        │
 
 - Re-reading this file mid-task ("just to double-check"). Pick once, leave.
 - Asking the user "which skill do you want?" — that violates the auto-invoke principle. Detect intent and trigger silently.
-- Listing all 102 skills to the user. Show only the 3-5 relevant ones with one-line descriptions.
+- Listing every skill to the user. Show only the 3-5 relevant ones with one-line descriptions.
 
 ## Where to look next
 

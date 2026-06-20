@@ -211,6 +211,51 @@ describe('post-bash hook', () => {
     });
   });
 
+  describe('tool_response payload (canonical Claude Code field) — DEAD-hook regression guard', () => {
+    it('detects a PR URL from a bare-string tool_response (Bash combined stdout)', async () => {
+      // Claude Code sends Bash output as a bare string under tool_response.
+      // Before the fix this hook read tool_result.stdout only → always no-op.
+      readStdin.mockResolvedValue(JSON.stringify({
+        tool_response: 'remote: https://github.com/user/repo/pull/77\n',
+      }));
+
+      await import('../../scripts/hooks/post-bash.js');
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(writeStdout).toHaveBeenCalledTimes(1);
+      const output = writeStdout.mock.calls[0][0];
+      expect(output.message).toContain('https://github.com/user/repo/pull/77');
+    });
+
+    it('detects a PR URL from an object-shaped tool_response (stdout/stderr)', async () => {
+      readStdin.mockResolvedValue(JSON.stringify({
+        tool_response: { stdout: '', stderr: 'https://github.com/org/p/pull/88\n' },
+      }));
+
+      await import('../../scripts/hooks/post-bash.js');
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(writeStdout).toHaveBeenCalledTimes(1);
+      const output = writeStdout.mock.calls[0][0];
+      expect(output.message).toContain('https://github.com/org/p/pull/88');
+    });
+
+    it('prefers tool_response over legacy tool_result when both present', async () => {
+      readStdin.mockResolvedValue(JSON.stringify({
+        tool_response: 'https://github.com/new/repo/pull/1',
+        tool_result: { stdout: 'https://github.com/legacy/repo/pull/2', stderr: '' },
+      }));
+
+      await import('../../scripts/hooks/post-bash.js');
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(writeStdout).toHaveBeenCalledTimes(1);
+      const output = writeStdout.mock.calls[0][0];
+      expect(output.message).toContain('pull/1');
+      expect(output.message).not.toContain('pull/2');
+    });
+  });
+
   describe('error handling', () => {
     it('exits gracefully when readStdin rejects', async () => {
       readStdin.mockRejectedValue(new Error('stdin read failed'));

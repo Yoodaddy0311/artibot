@@ -196,6 +196,42 @@ describe('post-edit-recovery hook', () => {
     expect(writeStdout).not.toHaveBeenCalled();
   });
 
+  it('reads from tool_response (canonical Claude Code field) — DEAD-hook regression guard', async () => {
+    // Before the fix, tool_response was absent from the resolver chain, so the
+    // hook silently no-op'd in production (the legacy keys are never populated).
+    readStdin.mockResolvedValue(
+      JSON.stringify({
+        tool_name: 'Edit',
+        tool_input: { file_path: '/project/app.js' },
+        tool_response: 'Error: old_string not found in file',
+      })
+    );
+
+    await import('../../scripts/hooks/post-edit-recovery.js');
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(writeStdout).toHaveBeenCalledTimes(1);
+    const call = writeStdout.mock.calls[0][0];
+    expect(call.message).toContain('Edit failed');
+  });
+
+  it('prefers tool_response over legacy tool_output when both present', async () => {
+    readStdin.mockResolvedValue(
+      JSON.stringify({
+        tool_name: 'Edit',
+        tool_input: { file_path: '/project/app.js' },
+        tool_response: 'old_string not found',
+        tool_output: 'File updated successfully',
+      })
+    );
+
+    await import('../../scripts/hooks/post-edit-recovery.js');
+    await new Promise((r) => setTimeout(r, 50));
+
+    // tool_response (failure) wins → recovery message emitted.
+    expect(writeStdout).toHaveBeenCalledTimes(1);
+  });
+
   it('handles tool_result field as fallback for output', async () => {
     readStdin.mockResolvedValue(
       JSON.stringify({
