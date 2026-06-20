@@ -778,10 +778,28 @@ switch ($Action) {
     if (Test-SelfInstall) {
       Write-Warn2 "Running from the installed location ($ArtibotDir) - files already in place."
       Write-Warn2 'Skipping copy phase (no-op); continuing with config & seed steps.'
+      # INV-6 marker (parity with install.sh): record that THIS install skipped
+      # the file-copy phase so update.js can detect a self-install no-op when a
+      # real update was due and refuse to falsely report success. Best-effort.
+      $noopMarker = Join-Path $ArtibotDir '.last-install-noop'
+      if ($DryRun) {
+        Write-Log "[dry-run] would write no-op marker -> $noopMarker"
+      } else {
+        try { New-Item -ItemType File -Path $noopMarker -Force | Out-Null } catch { }
+      }
     } else {
       Install-Assets
       Update-MarketplaceMirror
       Update-PluginCache
+      # INV-6 marker cleanup (parity with install.sh): a real copy happened, so
+      # clear any stale no-op marker from a previous self-install run; otherwise
+      # the next post-install check false-fails on an outdated marker.
+      $noopMarker = Join-Path $ArtibotDir '.last-install-noop'
+      if ($DryRun) {
+        Write-Log "[dry-run] would remove stale no-op marker -> $noopMarker"
+      } elseif (Test-Path $noopMarker) {
+        try { Remove-Item -Path $noopMarker -Force } catch { }
+      }
     }
     Install-Mcp
     Set-Settings

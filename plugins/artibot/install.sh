@@ -996,6 +996,10 @@ main() {
       if is_self_install; then
         warn "Running from the installed location (${ARTIBOT_DIR}) — files already in place."
         warn "Skipping copy phase (no-op); continuing with config & seed steps."
+        # INV-6 marker: record that THIS install skipped the file-copy phase, so
+        # update.js can detect a self-install no-op when a real update was due
+        # and refuse to falsely report "Update complete". Best-effort write.
+        : > "${ARTIBOT_DIR}/.last-install-noop" 2>/dev/null || true
       else
         install_agents
         install_commands
@@ -1004,6 +1008,10 @@ main() {
         install_marketplace_mirror
         install_plugin_cache
         install_rules
+        # INV-6 marker cleanup: a real copy happened, so clear any stale no-op
+        # marker from a previous self-install run — otherwise the next post-install
+        # check would false-fail on a marker that no longer reflects reality.
+        rm -f "${ARTIBOT_DIR}/.last-install-noop" 2>/dev/null || true
       fi
       install_mcp
       configure_settings
