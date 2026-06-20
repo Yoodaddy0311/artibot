@@ -173,19 +173,22 @@ describe('install.sh curl-pipe fallback fetches plugin.json from GitHub raw', ()
   });
 });
 
-describe('update.js auto-detects Windows OneDrive/Desktop clone paths', () => {
-  const updateJs = readText(join(PLUGIN_ROOT, 'scripts', 'update.js'));
+describe('update-git.js auto-detects Windows OneDrive/Desktop clone paths', () => {
+  // findSourceRepo (with the OneDrive/Desktop auto-detection list) moved from
+  // update.js into update-git.js in B4 (the git machinery extraction). These
+  // source-location greps follow the code to its new home.
+  const updateGitJs = readText(join(PLUGIN_ROOT, 'scripts', 'update-git.js'));
 
   it('includes OneDrive/Desktop English path', () => {
-    expect(updateJs).toContain("path.join(oneDriveBase, 'Desktop'");
+    expect(updateGitJs).toContain("path.join(oneDriveBase, 'Desktop'");
   });
 
   it('includes OneDrive/바탕 화면 Korean-localized Desktop path', () => {
-    expect(updateJs).toContain("'바탕 화면'");
+    expect(updateGitJs).toContain("'바탕 화면'");
   });
 
   it('includes Desktop/AI/artibot subpath', () => {
-    expect(updateJs).toMatch(/path\.join\(home, 'Desktop', 'AI', 'artibot'\)/);
+    expect(updateGitJs).toMatch(/path\.join\(home, 'Desktop', 'AI', 'artibot'\)/);
   });
 });
 
