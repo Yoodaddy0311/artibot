@@ -2,11 +2,10 @@
 /**
  * Nightly Trainers Setup Script.
  *
- * Helps users register the 6 nightly mjs trainers that populate Artibot's
- * GRPO / skill / agent / joint / effort policies and the session rollup. The script
- * prints the equivalent crontab / schtasks / claude schedule commands —
- * actual registration is delegated to the user's OS (no shell exec of
- * destructive commands).
+ * Helps users register the nightly mjs jobs (session rollup + memory
+ * consolidation). The script prints the equivalent crontab / schtasks /
+ * claude schedule commands — actual registration is delegated to the user's
+ * OS (no shell exec of destructive commands).
  *
  * Usage:
  *   node scripts/setup-nightly-trainers.js              # status + all guides
@@ -26,41 +25,6 @@ import { getPluginRoot } from '../lib/core/platform.js';
 // ---------------------------------------------------------------------------
 
 const TRAINERS = [
-  {
-    name: 'nightly-grpo-trainer',
-    cron: '30 2 * * *',
-    schtasks: '02:30',
-    script: 'scripts/hooks/nightly-grpo-trainer.mjs',
-    purpose: 'Update GRPO routing policy from yesterday\'s episodes',
-  },
-  {
-    name: 'nightly-agent-policy-trainer',
-    cron: '45 2 * * *',
-    schtasks: '02:45',
-    script: 'scripts/hooks/nightly-agent-policy-trainer.mjs',
-    purpose: 'Refresh per-agent success/latency weights',
-  },
-  {
-    name: 'nightly-skill-policy-trainer',
-    cron: '0 3 * * *',
-    schtasks: '03:00',
-    script: 'scripts/hooks/nightly-skill-policy-trainer.mjs',
-    purpose: 'Refresh skill activation policy weights',
-  },
-  {
-    name: 'nightly-joint-policy-trainer',
-    cron: '15 3 * * *',
-    schtasks: '03:15',
-    script: 'scripts/hooks/nightly-joint-policy-trainer.mjs',
-    purpose: 'Refresh joint (skill x agent) policy',
-  },
-  {
-    name: 'nightly-effort-policy-trainer',
-    cron: '30 3 * * *',
-    schtasks: '03:30',
-    script: 'scripts/hooks/nightly-effort-policy-trainer.mjs',
-    purpose: 'Refresh effort/budget overlay weights (P3, dormant until enabled)',
-  },
   {
     name: 'nightly-session-rollup',
     cron: '30 4 * * *',

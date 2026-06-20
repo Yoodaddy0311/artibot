@@ -61,13 +61,6 @@ export {
   createAutoResearch,
 } from './auto-research.js';
 
-// GRPO bridge — public surface for CLI/runtime callers. Internal cognitive
-// modules (router, system1/2) still import grpo-bridge directly; this re-export
-// only exists so non-cognitive layers (Layer 2/3) avoid deep-reaching imports.
-export {
-  resetRoutingBiasCache,
-} from './grpo-bridge.js';
-
 // v4.11.0 — Track I: Autopilot intent auto-routing (silent intent detection)
 export {
   detectQueueIntent,

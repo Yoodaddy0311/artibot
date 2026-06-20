@@ -362,23 +362,15 @@ function renderRecommendations(state, rows) {
     bullets.push(`${critical.length} entries with success < 25% and conf ≥ 0.8 (n ≥ 10) — investigate: ${critical.slice(0, 3).map((r) => r.name).join(', ')}${critical.length > 3 ? '…' : ''}`);
   }
 
-  const grpoRounds = state.grpo?.rounds?.length ?? 0;
-  if (grpoRounds === 0) {
-    bullets.push('GRPO has no rounds — auto-learning may not be running. Check `auto-learning-registered.json` and the nightly hook.');
-  } else if (grpoRounds < 30) {
-    bullets.push(`GRPO has only ${grpoRounds} rounds — early stage, signal will sharpen with more sessions.`);
-  }
+  // The GRPO reward/policy subsystem was retired in the 2026-06 lean redesign
+  // (no production reward emitter — it was a dormant no-op). grpo-history.json is
+  // no longer written, so any rounds/teamWeights signals here would be stale.
 
   const lastSyncAge = state.swarmSync?.lastUpload
     ? Date.now() - new Date(state.swarmSync.lastUpload).getTime()
     : Infinity;
   if (lastSyncAge > 7 * 24 * 60 * 60 * 1000) {
     bullets.push('Swarm last sync was over 7 days ago — federated learning is stale.');
-  }
-
-  const teamW = Object.keys(state.grpo?.teamWeights ?? {}).length;
-  if (teamW === 0 && grpoRounds > 50) {
-    bullets.push('`teamWeights` is empty despite mature GRPO history — `updateTeamWeights()` is dormant. Wire into runtime if team-level orchestration learning is desired.');
   }
 
   if (bullets.length === 0) {

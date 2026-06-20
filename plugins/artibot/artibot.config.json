@@ -936,23 +936,12 @@
     },
     "grpoRouting": {
       "enabled": true,
-      "comment": "T4β-min (2026-06-20): the System1/2 ROUTING-BIAS family (family A) was RETIRED. The cognitive router (lib/cognitive/router.js) is now pure-heuristic; lib/cognitive/grpo-routing.js + grpo-routing-config.js were deleted, and the routing-bias scalar keys (policyPath/blendAlpha/alpha*/epsilon*/coldStartEpisodes/klPenalty/learningRate/snapshotCount/groupingLevels) were removed from this block — they had no consumer left after retirement. PRESERVED: the {agentPolicy,skillPolicy,jointPolicy,effortPolicy} sub-blocks below (family C) plus `modelType` (referenced by lib/learning/grpo/policy-factory.js). Those sub-block .enabled flags stay intentionally false (dormant): the GRPO reward EMITTER (lib/learning/grpo/reward-metrics.js recordReward → runtime/reward-metrics.json) has no production caller, so nightly *-policy-trainers run graceful shadow no-op. GRPO policy learning and Dreaming remain separate coexisting systems. See docs/WIRING-AUDIT-2026-05-30.md.",
-      "modelType": "linear",
-      "agentPolicy": {
-        "enabled": false,
-        "policyPath": "~/.claude/artibot/policies/agent-policy-v1.json",
-        "temperature": 1
-      },
+      "comment": "T4β-min (2026-06-20) + family B/C retirement (2026-06-20): the System1/2 ROUTING-BIAS family (family A) AND the candidate-eval reward/policy infra (family B/C) were RETIRED. lib/learning/grpo-optimizer.js + lib/learning/grpo/ (11 modules) + lib/cognitive/grpo-bridge.js + the nightly *-policy-trainers were deleted (theater: the GRPO reward EMITTER had no production caller, so the whole subsystem was already a no-op). REMOVED: {modelType,agentPolicy,jointPolicy} — their only readers (the deleted grpo/ policy-factory.js, agent-policy.js, joint-policy.js) are gone. PRESERVED: `skillPolicy` (read LIVE by lib/runtime/middleware/skill-trigger.js via config.learning.grpoRouting.skillPolicy) and `effortPolicy` (read LIVE by lib/cognitive/effort-policy-config.js ← effort-resolver.js). Both stay `enabled:false` (dormant identity behaviour) — kept explicit because their live out-of-scope readers still consult the config. See docs/WIRING-AUDIT-2026-05-30.md.",
       "skillPolicy": {
         "enabled": false,
         "policyPath": "~/.claude/artibot/policies/skill-policy-v1.json",
         "threshold": 0.5,
         "maxTriggers": 3
-      },
-      "jointPolicy": {
-        "enabled": false,
-        "policyPath": "~/.claude/artibot/policies/joint-policy-v1.json",
-        "correlationWeight": 0.5
       },
       "effortPolicy": {
         "enabled": false,

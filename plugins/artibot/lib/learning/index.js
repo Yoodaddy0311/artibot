@@ -2,7 +2,7 @@
  * Learning system barrel file — pure re-exports only.
  * No business logic. All orchestration lives in pipeline.js.
  *
- * Learning loop: experience -> batch GRPO -> pattern extraction -> System 1 promotion -> faster next time
+ * Learning loop: experience -> batch learning -> pattern extraction -> System 1 promotion -> faster next time
  * @module lib/learning
  */
 
@@ -37,21 +37,7 @@ export {
   getLearningTrends,
 } from './self-evaluator.js';
 
-// GRPO Optimizer (Group Relative Policy Optimization)
-export {
-  generateCandidates,
-  evaluateGroup,
-  updateWeights,
-  generateTeamCandidates,
-  evaluateTeamGroup,
-  updateTeamWeights,
-  getRecommendation,
-  getGrpoStats,
-  CLI_RULES,
-  TEAM_EVALUATION_RULES,
-} from './grpo-optimizer.js';
-
-// Lifelong Learner (Daily experience -> GRPO batch learning pipeline)
+// Lifelong Learner (Daily experience -> batch learning pipeline)
 export {
   collectExperience,
   collectDailyExperiences,
@@ -136,7 +122,6 @@ export {
   processUserMessage,
   initLearning,
   shutdownLearning,
-  runLearningCycle,
 } from './pipeline.js';
 
 // Skill Auto-Promotion (Voyager pattern)

@@ -10,10 +10,9 @@
  * Stdout: JSON { message, stop? }
  */
 
-import { atomicWriteSync, getPluginRoot, parseJSON, readStdin, resolveConfigPath, toFileUrl, writeStdout } from '../utils/index.js';
+import { atomicWriteSync, parseJSON, readStdin, resolveConfigPath, writeStdout } from '../utils/index.js';
 import { existsSync, readFileSync } from 'node:fs';
-import path from 'node:path';
-import { createErrorHandler, extractAgentId, extractAgentRole, getStatePath, logHookError } from '../../lib/core/hook-utils.js';
+import { createErrorHandler, extractAgentId, extractAgentRole, getStatePath } from '../../lib/core/hook-utils.js';
 import { withFileLock } from '../../lib/core/file-lock.js';
 
 /** Maximum consecutive idle events before auto-stop (0 = disabled). */
@@ -64,7 +63,7 @@ async function main() {
   const autoStopConfig = loadAutoStopConfig();
 
   // Read-modify-write under file lock
-  const { pendingTasks, shouldStop, idleCount, teamState, shouldRecord } = withFileLock(statePath, () => {
+  const { pendingTasks, shouldStop, idleCount } = withFileLock(statePath, () => {
     let state = {};
     let pending = [];
 
@@ -79,41 +78,22 @@ async function main() {
 
     let stop = false;
     let count = 0;
-    let record = false;
 
     if (pending.length > 0) {
-      // Reset idle count and the weight-recording marker when new work
-      // appears so the next "all done" burst records a fresh round.
+      // Reset idle count when new work appears.
       const newIdleCounts = state.idleCounts
         ? { ...state.idleCounts, [agentId]: 0 }
         : state.idleCounts;
       state = {
         ...state,
         ...(newIdleCounts ? { idleCounts: newIdleCounts } : {}),
-        teamWeightsRecorded: false,
       };
-    } else {
-      // pending === 0 — candidate for team-weights recording.
-      // Recording is decoupled from auto-stop: any time the team drains
-      // its task list we want one GRPO round captured, even when
-      // autoStopIdle is disabled.
-      const hasRequiredFields =
-        state &&
-        typeof state.startedAt === 'number' &&
-        state.teamId !== undefined &&
-        state.domain !== undefined;
-      if (hasRequiredFields && !state.teamWeightsRecorded) {
-        record = true;
-        state = { ...state, teamWeightsRecorded: true };
-      }
-
-      if (autoStopConfig.enabled && autoStopConfig.maxIdleCount > 0) {
-        const tracked = trackIdleCount(agentId, state);
-        state = tracked.state;
-        count = tracked.count;
-        if (count >= autoStopConfig.maxIdleCount) {
-          stop = true;
-        }
+    } else if (autoStopConfig.enabled && autoStopConfig.maxIdleCount > 0) {
+      const tracked = trackIdleCount(agentId, state);
+      state = tracked.state;
+      count = tracked.count;
+      if (count >= autoStopConfig.maxIdleCount) {
+        stop = true;
       }
     }
 
@@ -123,39 +103,8 @@ async function main() {
       shouldStop: stop,
       idleCount: count,
       teamState: state,
-      shouldRecord: record,
     };
   });
-
-  // Record an aggregate team-composition outcome into GRPO team weights
-  // whenever the task list drains. Idempotent within a single drain
-  // burst via `teamWeightsRecorded` marker; reset when new work arrives.
-  if (shouldRecord) {
-    try {
-      const learningPath = path.join(getPluginRoot(), 'lib', 'learning', 'index.js');
-      const { generateTeamCandidates, evaluateTeamGroup, updateTeamWeights } =
-        await import(toFileUrl(learningPath));
-      const tasks = teamState.tasks ?? [];
-      const completed = tasks.filter((t) => t.status === 'completed');
-      const teamResult = {
-        taskCount: tasks.length,
-        successCount: completed.length,
-        completedCount: completed.length,
-        duration: Date.now() - teamState.startedAt,
-        teamSize: Object.keys(teamState.idleCounts ?? {}).length,
-      };
-      const cands = generateTeamCandidates({
-        id: teamState.teamId,
-        domain: teamState.domain,
-      });
-      cands.forEach((c) => {
-        c.result = teamResult;
-      });
-      await updateTeamWeights(evaluateTeamGroup(cands));
-    } catch (err) {
-      logHookError('team-idle', 'team-weights update failed', err);
-    }
-  }
 
   // Build output message (no state mutation needed)
   const parts = [`[team] Teammate idle: ${agentId}`];

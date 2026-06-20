@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- **Voyager skill auto-curation** — removed the non-functional `voyager-curation` skill, its `docs/voyager-curation-guide.md` guide, and remaining README/marketplace blurbs after the underlying `lib/learning/voyager/` implementation was deleted in the lean redesign (2026-06). Skill count 114 → 113; all count claims (README, plugin CLAUDE.md, AGENTS.md, marketplace.json) resynced. Historical references in `docs/WIRING-AUDIT-2026-05-30.md` are preserved as an audit record.
+
 ---
 
 ## [4.26.1] — 2026-06-12

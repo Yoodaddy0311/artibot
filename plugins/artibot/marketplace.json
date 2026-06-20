@@ -7,8 +7,8 @@
   "name": "artibot",
   "displayName": "Artibot — Autonomous Agent OS for Claude Code",
   "version": "4.26.1",
-  "description": "Cognitive orchestration framework with dual-process routing, lifelong learning, expert agent teams, and workflow automation for Claude Code. 28 agents, 114 skills, 72 commands, 9,900+ tests.",
-  "shortDescription": "Autonomous Agent OS — 28 agents, 114 skills, dual-process cognition, lifelong learning, parallel teams.",
+  "description": "Cognitive orchestration framework with dual-process routing, lifelong learning, expert agent teams, and workflow automation for Claude Code. 28 agents, 113 skills, 72 commands, 9,900+ tests.",
+  "shortDescription": "Autonomous Agent OS — 28 agents, 113 skills, dual-process cognition, lifelong learning, parallel teams.",
   "tagline": "Production-grade autonomous agent OS that orchestrates the work for you.",
   "author": {
     "name": "Artience",
@@ -109,7 +109,7 @@
     },
     "skills": {
       "directory": "./skills/",
-      "count": 114
+      "count": 113
     },
     "commands": {
       "directory": "./commands/",
@@ -174,7 +174,7 @@
     },
     {
       "path": "_marketplace/screenshots/04-skill-marketplace-view.png",
-      "caption": "114 skills with frontmatter, triggers, and rationalizations",
+      "caption": "113 skills with frontmatter, triggers, and rationalizations",
       "alt": "Skill catalogue overview"
     },
     {
