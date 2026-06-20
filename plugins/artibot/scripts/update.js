@@ -30,6 +30,15 @@ import {
   resolveHome,
 } from './update-platform.js';
 import {
+  assertGitHealth,
+  findSourceRepo,
+  popAutostash,
+  pullLatestSource,
+  resolveDefaultBranchPull,
+  resolveRemoteDefaultBranch,
+  stashIfDirty,
+} from './update-git.js';
+import {
   assertPostInstall,
   assertUpdatePrecondition,
   collectPostInstallInvariants,
@@ -102,342 +111,13 @@ async function fetchLatestRelease() {
 // ---------------------------------------------------------------------------
 // Source update (git pull)
 // ---------------------------------------------------------------------------
-
-/**
- * Find the git source repo root.
- *
- * Strategy (ordered by priority):
- *   1. source-repo.json — saved by install.sh during initial install
- *   2. installScriptPath — walk up from install.sh looking for .git
- *   3. give up — return null (tarball install or deleted repo)
- *
- * @param {string} [installScriptDir] - Directory containing install.sh
- * @returns {{ gitRoot: string, pluginDir: string } | null}
- */
-function findSourceRepo(installScriptDir) {
-  // 1. Saved source-repo.json (most reliable)
-  const home = resolveHome();
-  const sourceJson = path.join(home, '.claude', 'artibot', 'source-repo.json');
-  try {
-    const data = JSON.parse(readFileSync(sourceJson, 'utf-8'));
-    if (data.repoRoot && existsSync(path.join(data.repoRoot, '.git'))) {
-      return { gitRoot: data.repoRoot, pluginDir: data.pluginDir || path.join(data.repoRoot, 'plugins', 'artibot') };
-    }
-    // source-repo.json exists but path is stale (different machine or moved repo)
-    if (data.repoRoot) {
-      console.warn(`  Warning: source-repo.json points to ${data.repoRoot} which no longer exists.`);
-      console.warn('  Searching common locations...');
-    }
-  } catch {
-    // source-repo.json not found or invalid — fall through
-  }
-
-  // 1.5. Auto-detect from common clone locations (handles cross-machine git pull)
-  // Includes Windows OneDrive-redirected Desktop paths (English + Korean
-  // localized "바탕 화면") because OneDrive silently relocates ~/Desktop to
-  // ~/OneDrive/Desktop on consumer setups — the primary maintainer's clone
-  // lives at "OneDrive/바탕 화면/AI/artibot" exactly because of this.
-  const oneDriveBase = path.join(home, 'OneDrive');
-  const commonLocations = [
-    path.join(home, 'Projects', 'Artibot'),
-    path.join(home, 'projects', 'Artibot'),
-    path.join(home, 'dev', 'Artibot'),
-    path.join(home, 'artibot'),
-    path.join(home, 'Projects', 'artibot'),
-    path.join(home, 'projects', 'artibot'),
-    path.join(home, 'src', 'Artibot'),
-    path.join(home, 'src', 'artibot'),
-    path.join(home, 'Desktop', 'AI', 'artibot'),
-    path.join(home, 'Desktop', 'artibot'),
-    path.join(oneDriveBase, 'Desktop', 'AI', 'artibot'),
-    path.join(oneDriveBase, 'Desktop', 'artibot'),
-    path.join(oneDriveBase, '바탕 화면', 'AI', 'artibot'),
-    path.join(oneDriveBase, '바탕 화면', 'artibot'),
-  ];
-  for (const loc of commonLocations) {
-    const pluginDir = path.join(loc, 'plugins', 'artibot');
-    if (existsSync(path.join(loc, '.git')) && existsSync(path.join(pluginDir, 'package.json'))) {
-      console.log(`  Found source repo at ${loc} (auto-detected)`);
-      return { gitRoot: loc, pluginDir };
-    }
-  }
-
-  // 2. Walk up from install.sh location
-  if (installScriptDir) {
-    let dir = path.resolve(installScriptDir);
-    for (let i = 0; i < 5; i++) {
-      if (existsSync(path.join(dir, '.git'))) {
-        return { gitRoot: dir, pluginDir: installScriptDir };
-      }
-      const parent = path.dirname(dir);
-      if (parent === dir) break;
-      dir = parent;
-    }
-  }
-
-  return null;
-}
-
-/**
- * Stash a dirty working tree before pull, returning whether a stash was made.
- *
- * Root cause this addresses: tracked files that hooks auto-edit during a
- * session (e.g. `.artibot/SESSION-NOTES.md`) leave the working tree dirty, so
- * `git pull` refuses with "local changes would be overwritten". Because
- * `/update` is an explicit, user-initiated action (not the git-autopilot
- * interval auto-save), there is no concurrent stash to race with — a scoped
- * stash here is safe.
- *
- * @param {string} gitRoot
- * @returns {boolean} true when a stash entry was created (caller must pop)
- */
-function stashIfDirty(gitRoot) {
-  let dirty;
-  try {
-    dirty = execFileSync('git', ['status', '--porcelain'], {
-      cwd: gitRoot, encoding: 'utf-8', timeout: 5000,
-    }).trim();
-  } catch {
-    return false; // git status failed — don't risk a stash we can't reason about
-  }
-  if (!dirty) return false;
-
-  try {
-    execFileSync('git', ['stash', 'push', '--include-untracked', '-m', 'artibot-update-autostash'], {
-      cwd: gitRoot, stdio: 'inherit', timeout: 15_000,
-    });
-    console.log('  Stashed local changes before pull (artibot-update-autostash).');
-    return true;
-  } catch (err) {
-    console.warn(`  Warning: could not stash local changes: ${err.message}`);
-    return false;
-  }
-}
-
-/**
- * Restore a previously-created auto-stash after pull. A pop conflict is
- * surfaced as a warning (never thrown) and the stash is intentionally left on
- * the stack so the user can resolve it manually — losing their changes
- * silently would be worse than a noisy warning.
- *
- * @param {string} gitRoot
- */
-function popAutostash(gitRoot) {
-  try {
-    execFileSync('git', ['stash', 'pop'], {
-      cwd: gitRoot, stdio: 'inherit', timeout: 15_000,
-    });
-    console.log('  Restored local changes (stash pop).');
-  } catch (err) {
-    console.warn(`  Warning: stash pop hit a conflict: ${err.message}`);
-    console.warn('  Your changes are preserved in `git stash list` (artibot-update-autostash).');
-    console.warn('  Resolve manually with: git stash pop');
-  }
-}
-
-/**
- * Pull latest source from the remote repository.
- *
- * Uses findSourceRepo() to locate the git repo, then runs `git pull`.
- * Non-fatal: if the repo is not found or pull fails, we log and continue.
- *
- * @param {string} [installScriptDir] - Directory containing install.sh
- * @returns {{ pulled: boolean, pluginDir: string | null }}
- */
-/**
- * Resolve the remote's actual default branch via origin/HEAD — the
- * authoritative answer to "which branch should this clone track?". When a remote
- * branch is renamed or deleted (e.g. the artibot/master -> master rename that
- * broke /update), a clone's configured upstream and any hardcoded guess list go
- * stale, but origin/HEAD follows the rename. If origin/HEAD was never populated
- * on this clone, ask the remote once via `git remote set-head --auto`, then
- * re-read.
- *
- * @param {string} gitRoot
- * @returns {string | null} bare branch name (e.g. 'master'), or null when offline/undeterminable
- */
-function resolveRemoteDefaultBranch(gitRoot) {
-  const readHead = () => {
-    try {
-      const ref = execFileSync('git', ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'], {
-        cwd: gitRoot, encoding: 'utf-8', timeout: 5000,
-      }).trim();
-      return ref.startsWith('origin/') ? ref.slice('origin/'.length) : null;
-    } catch {
-      return null;
-    }
-  };
-
-  const existing = readHead();
-  if (existing) return existing;
-
-  // origin/HEAD not set on this clone — ask the remote, then retry the read.
-  try {
-    execFileSync('git', ['remote', 'set-head', 'origin', '--auto'], {
-      cwd: gitRoot, stdio: 'ignore', timeout: 10_000,
-    });
-  } catch {
-    return null;
-  }
-  return readHead();
-}
-
-/**
- * Resolve a fallback pull target when neither @{u} nor origin/<HEAD-branch>
- * resolves. Prefers the remote's real default branch (origin/HEAD); only when
- * that is undeterminable (e.g. offline) does it probe a minimal guess list
- * (master, main). The dead 'artibot/master' guess is intentionally dropped —
- * keeping it is what made /update pull a deleted remote ref and silently no-op.
- *
- * @param {string} gitRoot
- * @returns {string[]} ['pull', remote, branch]
- */
-function resolveDefaultBranchPull(gitRoot) {
-  const defaultBranch = resolveRemoteDefaultBranch(gitRoot);
-  if (defaultBranch) return ['pull', 'origin', defaultBranch];
-
-  for (const ref of ['master', 'main']) {
-    try {
-      execFileSync('git', ['rev-parse', '--verify', `origin/${ref}`], {
-        cwd: gitRoot, stdio: 'ignore', timeout: 5000,
-      });
-      return ['pull', 'origin', ref];
-    } catch { /* try next */ }
-  }
-  return ['pull', 'origin', 'main'];
-}
-
-/**
- * Probe whether `origin/<branch>` exists locally, returning the matching
- * `git pull` args when it does and falling back to the default-branch
- * resolver otherwise. Extracted from pullLatestSource() to keep the
- * upstream-detection try/catch nest under max-depth=4 (eslint cap).
- *
- * @param {string} gitRoot
- * @param {string} branch
- * @returns {string[]} pull args
- */
-function resolveBranchPullArgs(gitRoot, branch) {
-  try {
-    execFileSync('git', ['rev-parse', '--verify', `origin/${branch}`], {
-      cwd: gitRoot, stdio: 'ignore', timeout: 5000,
-    });
-    return ['pull', 'origin', branch];
-  } catch {
-    // origin/<current-branch> doesn't exist — try default branches.
-    return resolveDefaultBranchPull(gitRoot);
-  }
-}
-
-/**
- * Run a single `git pull` attempt with dirty-tree auto-stash/restore.
- * Never throws: a failed pull is caught, logged, and reported as `false` so the
- * caller can decide whether to retry against a different branch.
- *
- * @param {string} gitRoot
- * @param {string[]} pullArgs - e.g. ['pull', 'origin', 'master']
- * @returns {boolean} true when the pull succeeded
- */
-function attemptPull(gitRoot, pullArgs) {
-  // Auto-stash a dirty working tree so hook-edited tracked files (e.g.
-  // .artibot/SESSION-NOTES.md) don't block the pull. Pop in the finally so the
-  // stash is always restored even if the pull throws.
-  const stashed = stashIfDirty(gitRoot);
-  try {
-    console.log(`  Pulling latest source from ${gitRoot} (${pullArgs.slice(1).join(' ')})...`);
-    execFileSync('git', pullArgs, { cwd: gitRoot, stdio: 'inherit', timeout: 30_000 });
-    console.log('  Source updated.');
-    return true;
-  } catch (err) {
-    console.warn(`  Warning: git pull failed: ${err.message}`);
-    return false;
-  } finally {
-    if (stashed) popAutostash(gitRoot);
-  }
-}
-
-function pullLatestSource(installScriptDir) {
-  const repo = findSourceRepo(installScriptDir);
-
-  if (!repo) {
-    console.log('  Source repo not found. The update will use currently installed files.');
-    console.log('  For full updates, clone the repo: git clone https://github.com/Yoodaddy0311/artibot.git');
-    return { pulled: false, pluginDir: null };
-  }
-
-  try {
-    // Detect current branch + upstream remote for smart pull.
-    //
-    // Security: pullArgs MUST be passed to execFileSync as an array — never
-    // interpolated into a shell string. Branch names CAN contain shell
-    // metachars (semicolons, backticks). String interpolation would let a
-    // malicious origin (or a tampered local repo) inject arbitrary shell.
-    let pullArgs = ['pull'];
-    // Upstream-first resolution: read the actual configured upstream of HEAD
-    // via `git rev-parse --abbrev-ref @{u}`. This returns "remote/branch"
-    // (e.g. "origin/artibot/master") and is the authoritative source — only
-    // fall back to candidate branches when no upstream is configured.
-    //
-    // The previous fallback ordering (origin/artibot/master -> origin/master
-    // -> origin/main) ran unconditionally on rev-parse HEAD failure and could
-    // pull a non-tracked branch INTO the current HEAD, fabricating divergent
-    // history. The autopilot-drift-fix-2026-05-16 incident hit exactly this.
-    try {
-      const upstream = execFileSync('git', ['rev-parse', '--abbrev-ref', '@{u}'], {
-        cwd: repo.gitRoot, encoding: 'utf-8', timeout: 5000,
-      }).trim();
-      const slashIdx = upstream.indexOf('/');
-      if (slashIdx > 0) {
-        const remote = upstream.slice(0, slashIdx);
-        const branch = upstream.slice(slashIdx + 1);
-        pullArgs = ['pull', remote, branch];
-      } else {
-        // Malformed upstream (no slash) — treat as no-upstream case
-        throw new Error('upstream lacks remote/ prefix');
-      }
-    } catch {
-      // No upstream configured. Resolve current branch and try matching
-      // remote refs first; only fall back to default branches if HEAD itself
-      // is detached or untracked.
-      try {
-        const branch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
-          cwd: repo.gitRoot, encoding: 'utf-8', timeout: 5000,
-        }).trim();
-        pullArgs = (branch && branch !== 'HEAD')
-          ? resolveBranchPullArgs(repo.gitRoot, branch)
-          : resolveDefaultBranchPull(repo.gitRoot);
-      } catch {
-        pullArgs = resolveDefaultBranchPull(repo.gitRoot);
-      }
-    }
-
-    // First attempt with the resolved pull args (upstream or current-branch).
-    if (attemptPull(repo.gitRoot, pullArgs)) {
-      return { pulled: true, pluginDir: repo.pluginDir };
-    }
-
-    // Self-heal: the configured target may be a deleted/renamed remote branch
-    // (the artibot/master -> master rename hit exactly this — the pull fails on
-    // "couldn't find remote ref"). Retry once against the remote's ACTUAL
-    // default branch (origin/HEAD) before giving up, unless that's the same
-    // target we just tried.
-    const fallbackArgs = resolveDefaultBranchPull(repo.gitRoot);
-    const sameTarget = fallbackArgs[1] === pullArgs[1] && fallbackArgs[2] === pullArgs[2];
-    if (!sameTarget) {
-      console.warn(`  Retrying against remote default branch: origin/${fallbackArgs[2]}`);
-      if (attemptPull(repo.gitRoot, fallbackArgs)) {
-        return { pulled: true, pluginDir: repo.pluginDir };
-      }
-    }
-
-    console.warn('  Continuing with current local files.');
-    return { pulled: false, pluginDir: repo.pluginDir };
-  } catch (err) {
-    console.warn(`  Warning: git pull failed: ${err.message}`);
-    console.warn('  Continuing with current local files.');
-    return { pulled: false, pluginDir: repo.pluginDir };
-  }
-}
+//
+// The git source-repo discovery + pull machinery (findSourceRepo, stashIfDirty,
+// popAutostash, resolveRemoteDefaultBranch, resolveDefaultBranchPull,
+// resolveBranchPullArgs, attemptPull, pullLatestSource) plus the INV-7 pre-pull
+// health gate (assertGitHealth) live in ./update-git.js — extracted to keep this
+// file under the 800-line guideline. They are imported at the top, re-exported
+// below for the existing unit tests, and wired into main() via pullLatestSource.
 
 // ---------------------------------------------------------------------------
 // Manual instructions (shown when automated update fails)
@@ -748,6 +428,24 @@ async function main() {
   //         Find source repo via the installer's directory (sh path when
   //         available, otherwise the ps1 path on Windows).
   const installerDir = path.dirname(installScriptPath || installPs1Path);
+
+  // Step 2.0: Pre-pull git health gate (INV-7). Asserts .git presence + a
+  // knowable working-tree state + a resolvable remote pull target BEFORE the
+  // pull. This is advisory diagnostics: a failed check is logged (the pull may
+  // still no-op), and the post-install invariants are the hard gate. Surfacing
+  // it here turns the silent "pull found no remote ref" case into a visible
+  // reason early in the run.
+  const healthRepo = findSourceRepo(installerDir);
+  if (healthRepo) {
+    const health = assertGitHealth(healthRepo.gitRoot);
+    if (health.ok) {
+      console.log(`  Git health OK (pull target: origin/${health.pullTarget}${health.dirty ? ', working tree dirty — will auto-stash' : ''}).`);
+    } else {
+      console.warn(`  Git health check flagged: ${health.reason} (at ${healthRepo.gitRoot}).`);
+      console.warn('  The pull may fail or no-op; post-install invariants will catch a false success.');
+    }
+  }
+
   const { pulled, pluginDir } = pullLatestSource(installerDir);
 
   // If pull succeeded and the source repo has fresh installers, prefer them.
@@ -874,6 +572,12 @@ if (isCliEntrypoint) {
 }
 
 // Named exports for unit testing. Leaves CLI behavior unchanged.
+//
+// Git helpers (findSourceRepo, stashIfDirty, popAutostash,
+// resolveRemoteDefaultBranch, resolveDefaultBranchPull) and the INV-7 health
+// gate (assertGitHealth) now live in ./update-git.js — they are imported at the
+// top and RE-EXPORTED here so the existing update.test.js / install-update.test.js
+// import sites keep working unchanged (single public surface = update.js).
 export {
   readCurrentVersion,
   resolveHome,
@@ -890,5 +594,6 @@ export {
   popAutostash,
   resolveRemoteDefaultBranch,
   resolveDefaultBranchPull,
+  assertGitHealth,
   installLanded,
 };
