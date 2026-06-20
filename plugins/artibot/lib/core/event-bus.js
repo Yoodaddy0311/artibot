@@ -1,6 +1,19 @@
 /**
- * In-memory event bus for intra-session hook communication.
- * Enables hooks to share data without re-reading files.
+ * In-memory, per-process event bus for fire-and-forget observability signals.
+ *
+ * SCOPE & CONTRACT (read before adding emit calls):
+ * - Per-process only. Each hook / runtime invocation is a separate short-lived
+ *   Node process, so listeners registered in one process never see emits from
+ *   another. This bus does NOT carry data across prompts, hooks, or sessions.
+ * - Fire-and-forget. `emit()` to a type with no subscriber is an intentional
+ *   no-op (returns 0), not an error. Producers must not assume delivery.
+ * - Not for session-level aggregation. Cross-prompt/session stats must be
+ *   persisted to disk (see runtime/token-usage-session.json) — the in-memory
+ *   bus cannot survive process exit.
+ *
+ * A subscriber must be instantiated in the SAME process as the producer to
+ * receive events (e.g. an observability sink attached within preparePrompt()).
+ *
  * @module lib/core/event-bus
  */
 

@@ -13,6 +13,44 @@ import { parseJSON, readStdin, writeStdout } from '../utils/index.js';
 import { createErrorHandler } from '../../lib/core/hook-utils.js';
 
 /**
+ * Retired skills that were physically removed from `skills/` in past redesigns.
+ * If any of these reappears as a directory it is almost certainly a stale
+ * restore / merge artifact (a "phantom") rather than an intentional revival, so
+ * we surface it loudly. Keep this list short and append-only.
+ *
+ * - voyager-curation: removed in the 2026-06 lean redesign together with
+ *   `lib/learning/voyager/`; its skill count claims were resynced 114 -> 113.
+ *
+ * @type {ReadonlyArray<string>}
+ */
+const RETIRED_SKILLS = Object.freeze(['voyager-curation']);
+
+/**
+ * Reverse-validation: detect skill names that should NOT be present on disk.
+ *
+ * The skill "registry" is a live `skills/*` directory scan, so a classic
+ * "registry entry without a directory" phantom can only originate from a
+ * retired skill being re-materialised. This guard flags any retired skill whose
+ * directory has crept back, preventing silent phantom recurrence.
+ *
+ * @param {string[]} entries - directory entries under `skills/`.
+ * @returns {Array<{ name: string, issues: string[] }>}
+ */
+function checkPhantoms(entries) {
+  const present = new Set(entries);
+  const phantoms = [];
+  for (const retired of RETIRED_SKILLS) {
+    if (present.has(retired)) {
+      phantoms.push({
+        name: retired,
+        issues: ['retired skill reappeared (phantom — should not exist on disk)'],
+      });
+    }
+  }
+  return phantoms;
+}
+
+/**
  * Check if a skill directory has a valid SKILL.md with required frontmatter.
  *
  * @param {string} skillDir
@@ -76,7 +114,17 @@ async function main() {
   }
 
   const broken = [];
+
+  // Reverse-validation first: flag retired skills that crept back onto disk.
+  for (const phantom of checkPhantoms(entries)) {
+    broken.push(phantom);
+  }
+
   for (const entry of entries) {
+    // Retired skills are already reported by checkPhantoms above — skip here so a
+    // revived-but-malformed retired dir is not double-counted in `broken`.
+    if (RETIRED_SKILLS.includes(entry)) continue;
+
     const fullPath = path.join(skillsDir, entry);
     try {
       if (!statSync(fullPath).isDirectory()) continue;

@@ -14,6 +14,23 @@ function run(stdinJson) {
   });
 }
 
+function runCapture(stdinJson) {
+  try {
+    const stdout = execFileSync('node', [HOOK], {
+      input: stdinJson,
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    return { stdout, stderr: '', status: 0 };
+  } catch (err) {
+    return {
+      stdout: err.stdout?.toString() ?? '',
+      stderr: err.stderr?.toString() ?? '',
+      status: err.status ?? 1,
+    };
+  }
+}
+
 describe('session-digest hook/safety contract', () => {
   it('빈 stdin이어도 crash 없이 SessionStart additionalContext 출력', () => {
     const out = run('{}');
@@ -47,5 +64,19 @@ describe('session-digest hook/safety contract', () => {
   it('출력은 유효한 JSON', () => {
     const out = run('{}');
     expect(() => JSON.parse(out)).not.toThrow();
+  });
+
+  // Regression guard: bare `main()` previously had no `.catch`, risking an
+  // unhandled promise rejection that prints a stack trace and exits non-zero.
+  // It is now wrapped with createErrorHandler('session-digest', { exit: true }).
+  it('main()은 .catch 가드로 unhandled rejection 트레이스를 흘리지 않음', () => {
+    const { stderr } = runCapture('not-json-garbage');
+    expect(stderr).not.toContain('UnhandledPromiseRejection');
+    expect(stderr).not.toMatch(/at\s+main\b/);
+  });
+
+  it('비정상 입력에도 프로세스가 비정상 종료 코드로 죽지 않음', () => {
+    const { status } = runCapture('not-json-garbage');
+    expect(status).toBe(0);
   });
 });

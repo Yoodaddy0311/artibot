@@ -2,8 +2,11 @@
 /**
  * SessionStart helper hook — injects the using-agent-skills meta-skill prose
  * into systemContext exactly once per local-day so the agent rediscovers
- * Artibot's 102 skills at the top of each fresh day without bloating every
- * session start.
+ * Artibot's full skill catalogue at the top of each fresh day without bloating
+ * every session start. (Exact count is intentionally not hard-coded here — it
+ * lives only in scripts/ci/readme-claims-registry.js#collectActuals, derived
+ * from a live scan of the `skills/` SKILL.md directories, so it never goes
+ * stale.)
  *
  * Gating: `runtime/state/last-session-date.txt` holds today's local date
  * (YYYY-MM-DD). When the file already contains today's value, this hook

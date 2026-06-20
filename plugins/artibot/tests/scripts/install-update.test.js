@@ -22,7 +22,6 @@ const V1_15_NEW_FILES = [
   'lib/learning/eval-calibrator.js',
   'lib/learning/skill-freshness.js',
   'lib/learning/skill-promoter.js',
-  'lib/core/feature-tracker.js',
   'output-styles/artibot-intelligence.md',
   'scripts/evals/harness-ablation.js',
   'scripts/evals/skill-effectiveness.js',
