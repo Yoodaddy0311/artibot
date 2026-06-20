@@ -238,16 +238,58 @@ function popAutostash(gitRoot) {
  * @returns {{ pulled: boolean, pluginDir: string | null }}
  */
 /**
+ * Resolve the remote's actual default branch via origin/HEAD — the
+ * authoritative answer to "which branch should this clone track?". When a remote
+ * branch is renamed or deleted (e.g. the artibot/master -> master rename that
+ * broke /update), a clone's configured upstream and any hardcoded guess list go
+ * stale, but origin/HEAD follows the rename. If origin/HEAD was never populated
+ * on this clone, ask the remote once via `git remote set-head --auto`, then
+ * re-read.
+ *
+ * @param {string} gitRoot
+ * @returns {string | null} bare branch name (e.g. 'master'), or null when offline/undeterminable
+ */
+function resolveRemoteDefaultBranch(gitRoot) {
+  const readHead = () => {
+    try {
+      const ref = execFileSync('git', ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'], {
+        cwd: gitRoot, encoding: 'utf-8', timeout: 5000,
+      }).trim();
+      return ref.startsWith('origin/') ? ref.slice('origin/'.length) : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const existing = readHead();
+  if (existing) return existing;
+
+  // origin/HEAD not set on this clone — ask the remote, then retry the read.
+  try {
+    execFileSync('git', ['remote', 'set-head', 'origin', '--auto'], {
+      cwd: gitRoot, stdio: 'ignore', timeout: 10_000,
+    });
+  } catch {
+    return null;
+  }
+  return readHead();
+}
+
+/**
  * Resolve a fallback pull target when neither @{u} nor origin/<HEAD-branch>
- * resolves. Probes (in order): origin/artibot/master, origin/master,
- * origin/main. Last fall-through uses origin/main even when unverified so the
- * caller still gets a deterministic pullArgs array.
+ * resolves. Prefers the remote's real default branch (origin/HEAD); only when
+ * that is undeterminable (e.g. offline) does it probe a minimal guess list
+ * (master, main). The dead 'artibot/master' guess is intentionally dropped —
+ * keeping it is what made /update pull a deleted remote ref and silently no-op.
  *
  * @param {string} gitRoot
  * @returns {string[]} ['pull', remote, branch]
  */
 function resolveDefaultBranchPull(gitRoot) {
-  for (const ref of ['artibot/master', 'master', 'main']) {
+  const defaultBranch = resolveRemoteDefaultBranch(gitRoot);
+  if (defaultBranch) return ['pull', 'origin', defaultBranch];
+
+  for (const ref of ['master', 'main']) {
     try {
       execFileSync('git', ['rev-parse', '--verify', `origin/${ref}`], {
         cwd: gitRoot, stdio: 'ignore', timeout: 5000,
@@ -277,6 +319,33 @@ function resolveBranchPullArgs(gitRoot, branch) {
   } catch {
     // origin/<current-branch> doesn't exist — try default branches.
     return resolveDefaultBranchPull(gitRoot);
+  }
+}
+
+/**
+ * Run a single `git pull` attempt with dirty-tree auto-stash/restore.
+ * Never throws: a failed pull is caught, logged, and reported as `false` so the
+ * caller can decide whether to retry against a different branch.
+ *
+ * @param {string} gitRoot
+ * @param {string[]} pullArgs - e.g. ['pull', 'origin', 'master']
+ * @returns {boolean} true when the pull succeeded
+ */
+function attemptPull(gitRoot, pullArgs) {
+  // Auto-stash a dirty working tree so hook-edited tracked files (e.g.
+  // .artibot/SESSION-NOTES.md) don't block the pull. Pop in the finally so the
+  // stash is always restored even if the pull throws.
+  const stashed = stashIfDirty(gitRoot);
+  try {
+    console.log(`  Pulling latest source from ${gitRoot} (${pullArgs.slice(1).join(' ')})...`);
+    execFileSync('git', pullArgs, { cwd: gitRoot, stdio: 'inherit', timeout: 30_000 });
+    console.log('  Source updated.');
+    return true;
+  } catch (err) {
+    console.warn(`  Warning: git pull failed: ${err.message}`);
+    return false;
+  } finally {
+    if (stashed) popAutostash(gitRoot);
   }
 }
 
@@ -335,22 +404,27 @@ function pullLatestSource(installScriptDir) {
       }
     }
 
-    // Auto-stash a dirty working tree so hook-edited tracked files (e.g.
-    // .artibot/SESSION-NOTES.md) don't block the pull. Pop afterwards in the
-    // finally so the stash is always restored even if the pull throws.
-    const stashed = stashIfDirty(repo.gitRoot);
-    try {
-      console.log(`  Pulling latest source from ${repo.gitRoot}...`);
-      execFileSync('git', pullArgs, {
-        cwd: repo.gitRoot,
-        stdio: 'inherit',
-        timeout: 30_000,
-      });
-      console.log('  Source updated.');
-    } finally {
-      if (stashed) popAutostash(repo.gitRoot);
+    // First attempt with the resolved pull args (upstream or current-branch).
+    if (attemptPull(repo.gitRoot, pullArgs)) {
+      return { pulled: true, pluginDir: repo.pluginDir };
     }
-    return { pulled: true, pluginDir: repo.pluginDir };
+
+    // Self-heal: the configured target may be a deleted/renamed remote branch
+    // (the artibot/master -> master rename hit exactly this — the pull fails on
+    // "couldn't find remote ref"). Retry once against the remote's ACTUAL
+    // default branch (origin/HEAD) before giving up, unless that's the same
+    // target we just tried.
+    const fallbackArgs = resolveDefaultBranchPull(repo.gitRoot);
+    const sameTarget = fallbackArgs[1] === pullArgs[1] && fallbackArgs[2] === pullArgs[2];
+    if (!sameTarget) {
+      console.warn(`  Retrying against remote default branch: origin/${fallbackArgs[2]}`);
+      if (attemptPull(repo.gitRoot, fallbackArgs)) {
+        return { pulled: true, pluginDir: repo.pluginDir };
+      }
+    }
+
+    console.warn('  Continuing with current local files.');
+    return { pulled: false, pluginDir: repo.pluginDir };
   } catch (err) {
     console.warn(`  Warning: git pull failed: ${err.message}`);
     console.warn('  Continuing with current local files.');
@@ -544,6 +618,30 @@ function runInstall(preResolvedPath, preResolvedPs1) {
 }
 
 // ---------------------------------------------------------------------------
+// Post-install verification
+// ---------------------------------------------------------------------------
+
+/**
+ * Decide whether a just-run install actually landed the expected version.
+ *
+ * Guards against the silent no-op update: when the source git pull fails AND
+ * install.sh runs from the installed copy (~/.claude/artibot), its self-install
+ * guard skips the file-copy phase — the installer exits 0 but NOTHING changed.
+ * Reporting "Update complete" there is a false success (the artibot/master
+ * dead-branch incident). A forced/drift reinstall legitimately keeps the same
+ * version, so only a pending real update (updateAvailable) is held to the bar.
+ *
+ * @param {string} installedVersion - version on disk AFTER install
+ * @param {string} latestVersion    - latest release tag (may carry a 'v' prefix)
+ * @param {boolean} updateAvailable - whether a newer release was pending
+ * @returns {boolean} true when the install is considered successful
+ */
+function installLanded(installedVersion, latestVersion, updateAvailable) {
+  if (!updateAvailable) return true; // forced/drift reinstall — no version bump expected
+  return !isNewerVersion(installedVersion, latestVersion);
+}
+
+// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
@@ -689,6 +787,24 @@ async function main() {
   // Step 4: Clear cache AFTER successful install
   clearCache(home);
 
+  // Step 4.5: Post-install verification — guard against the silent no-op.
+  // Re-read the version from the INSTALLED copy (~/.claude/artibot), not the
+  // source pluginRoot. If a real update was pending but the on-disk version is
+  // still behind the latest release, the installer ran without copying new
+  // files (failed source pull + self-install no-op). Surface a clear failure +
+  // manual recovery instead of a false "Update complete".
+  const installedRoot = path.join(home, '.claude', 'artibot');
+  const installedNow = readCurrentVersion(installedRoot);
+  if (!installLanded(installedNow, latestVersion, updateAvailable)) {
+    console.error('');
+    console.error(`Update did NOT land: installed version is still v${installedNow} (expected ${latestVersion}).`);
+    console.error('  The installer ran but copied no new files — most likely the source git');
+    console.error('  pull failed (deleted/renamed remote branch) and install.sh fell back to');
+    console.error('  the already-installed copy (self-install no-op).');
+    printManualInstructions();
+    process.exit(1);
+  }
+
   // Step 5: Swarm autodetect — auto-activate federated learning from the
   // committed swarm-profile.json (if present). One-time per repoUrl+machine.
   try {
@@ -738,4 +854,7 @@ export {
   fileHash,
   stashIfDirty,
   popAutostash,
+  resolveRemoteDefaultBranch,
+  resolveDefaultBranchPull,
+  installLanded,
 };

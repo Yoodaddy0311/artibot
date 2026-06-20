@@ -30,9 +30,12 @@ import {
   findInstallScript,
   findPowerShell,
   findSourceRepo,
+  installLanded,
   popAutostash,
   readCurrentVersion,
+  resolveDefaultBranchPull,
   resolveHome,
+  resolveRemoteDefaultBranch,
   saveBackupInfo,
   stashIfDirty,
 } from '../../scripts/update.js';
@@ -466,6 +469,83 @@ describe('fileHash', () => {
     writeFileSync(join(tmpRoot, 'a.txt'), 'one');
     writeFileSync(join(tmpRoot, 'b.txt'), 'two');
     expect(fileHash(join(tmpRoot, 'a.txt'))).not.toBe(fileHash(join(tmpRoot, 'b.txt')));
+  });
+});
+
+describe('resolveRemoteDefaultBranch / resolveDefaultBranchPull (B1 dead-branch self-heal)', () => {
+  // Build a bare "origin" with default branch master + a working clone.
+  function initRemoteAndClone() {
+    const origin = join(tmpRoot, 'origin.git');
+    const seed = join(tmpRoot, 'seed');
+    execFileSync('git', ['init', '--bare', '-b', 'master', origin], { stdio: 'ignore' });
+
+    mkdirSync(seed, { recursive: true });
+    const runSeed = (args) => execFileSync('git', args, { cwd: seed, stdio: 'ignore' });
+    runSeed(['init', '-b', 'master']);
+    runSeed(['config', 'user.email', 'test@artibot.local']);
+    runSeed(['config', 'user.name', 'artibot-test']);
+    writeFileSync(join(seed, 'f.txt'), 'x\n');
+    runSeed(['add', '.']);
+    runSeed(['commit', '-m', 'init']);
+    runSeed(['remote', 'add', 'origin', origin]);
+    runSeed(['push', '-u', 'origin', 'master']);
+
+    const clone = join(tmpRoot, 'clone');
+    execFileSync('git', ['clone', origin, clone], { stdio: 'ignore' });
+    execFileSync('git', ['config', 'user.email', 'test@artibot.local'], { cwd: clone, stdio: 'ignore' });
+    execFileSync('git', ['config', 'user.name', 'artibot-test'], { cwd: clone, stdio: 'ignore' });
+    return { origin, clone };
+  }
+
+  it('reads the remote default branch from origin/HEAD', () => {
+    const { clone } = initRemoteAndClone();
+    expect(resolveRemoteDefaultBranch(clone)).toBe('master');
+  });
+
+  it('returns null on a non-git directory (graceful)', () => {
+    const notRepo = join(tmpRoot, 'not-a-repo');
+    mkdirSync(notRepo, { recursive: true });
+    expect(resolveRemoteDefaultBranch(notRepo)).toBeNull();
+  });
+
+  it('resolves the pull target to the remote default branch', () => {
+    const { clone } = initRemoteAndClone();
+    expect(resolveDefaultBranchPull(clone)).toEqual(['pull', 'origin', 'master']);
+  });
+
+  it('self-repairs origin/HEAD via set-head --auto when it was deleted', () => {
+    const { clone } = initRemoteAndClone();
+    // Simulate a clone whose origin/HEAD symref is missing (older clones, or a
+    // branch rename). The resolver must re-populate it from the remote.
+    execFileSync('git', ['remote', 'set-head', 'origin', '-d'], { cwd: clone, stdio: 'ignore' });
+    expect(resolveDefaultBranchPull(clone)).toEqual(['pull', 'origin', 'master']);
+  });
+
+  it('never includes the dead artibot/master guess', () => {
+    const { clone } = initRemoteAndClone();
+    const args = resolveDefaultBranchPull(clone);
+    expect(args[2]).not.toBe('artibot/master');
+  });
+});
+
+describe('installLanded (B2 silent no-op guard)', () => {
+  it('treats a forced/drift reinstall (no pending update) as landed', () => {
+    expect(installLanded('4.26.0', 'v4.26.0', false)).toBe(true);
+    // Even if versions differ, a non-pending reinstall is not held to the bar.
+    expect(installLanded('4.26.0', 'v4.27.0', false)).toBe(true);
+  });
+
+  it('reports NOT landed when a real update stayed behind on disk', () => {
+    expect(installLanded('4.26.0', 'v4.26.1', true)).toBe(false);
+  });
+
+  it('reports landed when the installed version reached the latest', () => {
+    expect(installLanded('4.26.1', 'v4.26.1', true)).toBe(true);
+  });
+
+  it('tolerates a v-prefixed latest tag', () => {
+    expect(installLanded('4.26.1', 'v4.26.1', true)).toBe(true);
+    expect(installLanded('4.26.0', 'v4.26.1', true)).toBe(false);
   });
 });
 
