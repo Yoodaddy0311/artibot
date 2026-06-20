@@ -1,10 +1,11 @@
 /**
  * Skill Trigger Middleware (GRPO v3.5 §5.5).
  *
- * Decides which candidate skills actually fire for a given request. When the
- * GRPO-trained skill policy is enabled (`config.learning.grpoRouting.skillPolicy.enabled`),
- * scores come from `lib/learning/grpo/skill-policy.js`; otherwise we fall back
- * to the supplied regex/keyword matcher.
+ * Decides which candidate skills actually fire for a given request. Policy-based
+ * scoring (`config.learning.grpoRouting.skillPolicy.enabled`) was retired with the
+ * GRPO reward/policy subsystem in the 2026-06 lean redesign — the config flag is
+ * kept (default off) but no policy producer remains, so scoring falls back to the
+ * supplied regex/keyword matcher.
  *
  * The middleware runs AFTER the `skills` middleware has populated
  * `state.context.skills.suggested`, trimming that list to the set that

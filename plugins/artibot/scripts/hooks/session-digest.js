@@ -3,7 +3,7 @@
  * SessionStart digest hook.
  *
  * Emits a one-line "What changed since last session?" summary covering:
- *   - last auto-learning run timestamp + best strategy from GRPO
+ *   - latest auto-learning pattern timestamp
  *   - swarm sync status
  *   - team mode (auto-team triggers)
  *   - count of pending tasks
@@ -24,7 +24,6 @@ import { readStdin, writeStdout } from '../utils/index.js';
 
 const PATHS = {
   swarmState: path.join(ARTIBOT_DIR, 'swarm-sync-state.json'),
-  grpoHistory: path.join(ARTIBOT_DIR, 'grpo-history.json'),
   patternsDir: path.join(ARTIBOT_DIR, 'patterns'),
 };
 
@@ -49,19 +48,6 @@ function formatRelative(isoOrTs) {
   const m = Math.floor(diff / 60000);
   if (m > 0) return `${m}m ago`;
   return 'just now';
-}
-
-function summarizeGrpo() {
-  const hist = safeReadJson(PATHS.grpoHistory);
-  if (!hist || !Array.isArray(hist.rounds) || hist.rounds.length === 0) {
-    return { rounds: 0, last: 'none', best: 'n/a' };
-  }
-  const last = hist.rounds[hist.rounds.length - 1];
-  return {
-    rounds: hist.rounds.length,
-    last: formatRelative(last?.timestamp),
-    best: last?.bestStrategy ?? 'n/a',
-  };
 }
 
 function summarizeSwarm() {
@@ -91,11 +77,10 @@ async function main() {
   try {
     await readStdin();
 
-    const grpo = summarizeGrpo();
     const swarm = summarizeSwarm();
     const pat = summarizeLatestPattern();
 
-    const line = `[Artibot] Learning: ${grpo.rounds} GRPO rounds (last ${grpo.last}, best=${grpo.best}) | Patterns: last ${pat.last} | Swarm: ${swarm.uploads} uploads (last ${swarm.lastUpload})`;
+    const line = `[Artibot] Learning: Patterns last ${pat.last} | Swarm: ${swarm.uploads} uploads (last ${swarm.lastUpload})`;
 
     writeStdout({
       hookSpecificOutput: {

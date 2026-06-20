@@ -21,8 +21,6 @@ const collectDailyExperiences = vi.fn(async () => {});
 const batchLearn = vi.fn(async () => null);
 const extractRules = vi.fn(() => []);
 const injectRules = vi.fn(async () => []);
-const evaluateGroup = vi.fn(() => ({ candidates: [], avgScore: 0, bestScore: 0 }));
-const updateWeights = vi.fn(async () => ({}));
 
 vi.mock('../../lib/learning/lifelong-learner.js', () => ({
   collectExperience,
@@ -42,10 +40,6 @@ vi.mock('../../lib/learning/rule-extractor.js', () => ({
 }));
 vi.mock('../../lib/learning/skill-injector.js', () => ({
   injectRules,
-}));
-vi.mock('../../lib/learning/grpo-optimizer.js', () => ({
-  evaluateGroup,
-  updateWeights,
 }));
 vi.mock('../../lib/learning/knowledge-demotion.js', () => ({
   hotSwap: vi.fn(async () => null),

@@ -277,7 +277,7 @@ All trainer state stays on disk under `~/.claude/artibot/`. Nothing is uploaded 
 | Pick | Theme | Target | Detail |
 |---|---|---|---|
 | #1 | Hierarchical 3-layer memory (working / episodic / semantic) | v0.5 successor | promote / consolidate / retrieve API; weekly cron episodic→semantic |
-| #2 | Voyager-style skill auto-curation loop | next | candidate skills in `skills-candidate/`, GRPO-shadow validation, auto-promote |
+| #2 | Voyager-style skill auto-curation loop | removed (lean redesign 2026-06) | implementation pulled; macro-learner + skill-lifecycle-autopilot cover the need |
 | #3 | Local federated swarm w/ GRPO-RLVR | long horizon | per-task-family routing weights, verifiable signals only, no cross-user data |
 
 Detailed planning lives in `_reports/horizon-2-3-roadmap.md` (kept in `_reports/` to avoid bloating the README).
@@ -1510,7 +1510,7 @@ plugins/artibot/
 │   ├── orchestration/           #   위임 모드 선택 + 팀 라우팅
 │   ├── delegation/              #   Sub-Agent/Team 위임 전략
 │   ├── auto-learning-pipeline/  #   제로 설정 야간 자기 개선
-│   └── [114개 스킬]/
+│   └── [113개 스킬]/
 ├── hooks/
 │   └── hooks.json               # 훅 이벤트 매핑
 ├── scripts/

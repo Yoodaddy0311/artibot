@@ -5,7 +5,6 @@
  *   - processUserMessage: conversation → memory pipeline
  *   - initLearning: system startup
  *   - shutdownLearning: session-end pipeline
- *   - runLearningCycle: hybrid GRPO + self-rewarding cycle
  *
  * Extracted from index.js to keep barrel files pure re-exports.
  * Zero runtime deps. ESM only.
@@ -21,7 +20,6 @@ import { extractRules } from './rule-extractor.js';
 import { saveMemory, summarizeSession } from './memory-manager.js';
 import { injectRules } from './skill-injector.js';
 import { evaluateResult, getImprovementSuggestions } from './self-evaluator.js';
-import { evaluateGroup, updateWeights } from './grpo-optimizer.js';
 import { batchLearn, collectDailyExperiences, collectExperience } from './lifelong-learner.js';
 
 // ---------------------------------------------------------------------------
@@ -197,33 +195,6 @@ async function runSelfEvaluation(sessionData) {
 }
 
 /**
- * Record a GRPO round from learned patterns.
- * @param {object} learned - Result from batchLearn
- * @returns {Promise<void>}
- */
-async function recordGrpoRound(learned) {
-  try {
-    const candidates = learned.patterns.map((p, i) => ({
-      id: `learn-cand-${Date.now()}-${i}`,
-      strategy: p.category ?? 'default',
-      result: {
-        exitCode: p.bestComposite > 0.5 ? 0 : 1,
-        errors: p.bestComposite > 0.5 ? 0 : 1,
-        duration: 1000,
-        commandLength: 10,
-        sideEffects: 0,
-      },
-    }));
-    if (candidates.length >= 2) {
-      const groupResult = evaluateGroup(candidates);
-      await updateWeights(groupResult);
-    }
-  } catch (grpoErr) {
-    process.stderr.write(`[learning] GRPO recording failed: ${grpoErr?.message ?? grpoErr}\n`);
-  }
-}
-
-/**
  * Run the lifelong learning pipeline for the session.
  * @param {object} sessionData - Session context
  * @returns {Promise<object | null>} learned result or null on failure
@@ -232,11 +203,6 @@ async function runLifelongLearning(sessionData) {
   try {
     await collectDailyExperiences(sessionData);
     const learned = await batchLearn();
-
-    if (learned && learned.patternsExtracted > 0) {
-      await recordGrpoRound(learned);
-    }
-
     return learned;
   } catch (err) {
     process.stderr.write(`[learning] lifelong learning pipeline failed: ${err?.message ?? err}\n`);
@@ -285,64 +251,4 @@ export async function shutdownLearning(sessionData) {
   }
 
   return { summarized, evaluated, learned, hotSwapped };
-}
-
-// ---------------------------------------------------------------------------
-// runLearningCycle
-// ---------------------------------------------------------------------------
-
-/**
- * Execute a full hybrid learning cycle:
- *   1. Generate candidates (GRPO)
- *   2. Evaluate group with rules (GRPO)
- *   3. Update strategy weights (GRPO)
- *   4. Evaluate best result (Self-Rewarding)
- *   5. Store insights in memory (BlenderBot)
- *
- * @param {object} task - { id, type, description, domain }
- * @param {object[]} candidateResults - Array of { ...candidate, result: { exitCode, errors, duration, ... } }
- * @param {object} [options]
- * @param {object} [options.rules] - Custom evaluation rules
- * @returns {Promise<{ rankings: object[], weights: object, evaluation: object, memorySaved: boolean }>}
- */
-export async function runLearningCycle(task, candidateResults, options = {}) {
-  // Step 1-2: GRPO group evaluation
-  const groupResult = evaluateGroup(candidateResults, options.rules);
-
-  // Step 3: Update weights
-  const weights = await updateWeights(groupResult);
-
-  // Step 4: Self-evaluate the best candidate
-  const best = groupResult.best;
-  const bestCandidate = candidateResults.find((c) => c.id === best?.candidateId);
-  const evaluation = bestCandidate
-    ? await evaluateResult(task, {
-        success: (bestCandidate.result?.exitCode ?? 1) === 0,
-        duration: bestCandidate.result?.duration,
-        testsPass: (bestCandidate.result?.errors ?? 1) === 0,
-      })
-    : null;
-
-  // Step 5: Store learning in memory
-  let memorySaved = false;
-  try {
-    await saveMemory('learning', {
-      taskId: task.id,
-      domain: task.domain,
-      bestStrategy: best?.strategy,
-      bestScore: best?.composite,
-      spread: groupResult.spread,
-      evaluation: evaluation ? { overall: evaluation.overall, grade: evaluation.grade } : null,
-    });
-    memorySaved = true;
-  } catch (err) {
-    process.stderr.write(`[learning] memory save failed for task ${task?.id ?? 'unknown'}: ${err?.message ?? err}\n`);
-  }
-
-  return {
-    rankings: groupResult.rankings,
-    weights,
-    evaluation,
-    memorySaved,
-  };
 }

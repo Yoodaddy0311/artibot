@@ -24,52 +24,14 @@ import {
   notifyPause,
   notifyPhaseProgress,
 } from './notification.js';
-import { appendLesson, extractKey, recallLessons } from './memory.js';
+import { extractKey, recallLessons } from './memory.js';
 import {
-  createWorktree,
-  listWorktrees,
-  pruneOrphans,
-  removeWorktree,
-} from './worktree-manager.js';
+  attemptCreateWorktree,
+  reapSessionArtifacts,
+} from './engine-cleanup.js';
+import { safeAppendLesson } from './engine-state.js';
 import { acquireLock, isLocked, releaseLock } from './lock.js';
 import { loadAllowList } from './mcp-verifier.js';
-
-/**
- * Best-effort orphan reaper. Removes the session's own worktree+branch, then
- * sweeps any leftover orphaned `autopilot/*` worktrees and branches. Wired into
- * both finalize (REPORT) and abort paths so sessions never leak branches at
- * their boundaries. Never throws into phase/abort logic.
- * @param {object} state
- * @param {{ force?: boolean }} [opts]
- */
-function reapSessionArtifacts(state, { force = false } = {}) {
-  const cwd = state?.options?.worktreeCwd;
-  try {
-    if (state?.worktreePath) removeWorktree(state.sessionId, { force, cwd });
-  } catch {
-    /* cleanup non-blocking */
-  }
-  try {
-    pruneOrphans({ cwd });
-  } catch {
-    /* prune non-blocking */
-  }
-}
-
-/**
- * Best-effort lesson append. Skips when state.featureKey is unset (Phase 0
- * has not run yet) and never throws into Phase logic.
- * @param {object} state
- * @param {object} payload - lesson body sans sessionId (auto-attached)
- */
-function safeAppendLesson(state, payload) {
-  try {
-    if (!state || !state.featureKey) return;
-    appendLesson(state.featureKey, { sessionId: state.sessionId, ...payload });
-  } catch {
-    /* learn non-blocking */
-  }
-}
 
 /**
  * Phase names in canonical order.
@@ -239,41 +201,6 @@ export function runPhase1Plan(state) {
  * @param {object} state
  * @returns {object}
  */
-function attemptCreateWorktree(state) {
-  if (!state.options?.useWorktree) return null;
-  try {
-    // worktreeCwd lets callers/tests pin git invocations to an isolated repo
-    // (no process.chdir). Undefined → git inherits process.cwd() (default).
-    const r = createWorktree(state.sessionId, { cwd: state.options?.worktreeCwd });
-    if (r.ok) {
-      state.worktreePath = r.path;
-      tick(state.sessionId, {
-        phase: 'EXECUTE',
-        type: 'worktree-created',
-        level: 'info',
-        message: `worktree=${r.path}`,
-        data: { branch: r.branch },
-      });
-      return r.path;
-    }
-    tick(state.sessionId, {
-      phase: 'EXECUTE',
-      type: 'worktree-fallback',
-      level: 'warn',
-      message: r.error || 'worktree create failed',
-    });
-    return null;
-  } catch (err) {
-    tick(state.sessionId, {
-      phase: 'EXECUTE',
-      type: 'worktree-fallback',
-      level: 'warn',
-      message: err?.message || 'worktree create threw',
-    });
-    return null;
-  }
-}
-
 export function runPhase2Execute(state) {
   state.phase = 'EXECUTE';
   tick(state.sessionId, { phase: 'EXECUTE', type: 'phase-start', level: 'info', message: 'Phase 2 EXECUTE 시작' });
@@ -708,117 +635,13 @@ export async function abortAutopilot(sessionId, { graceful = true } = {}) {
 export { notifyCompletion, notifyDanger, notifyPause, notifyPhaseProgress };
 export { notePhaseCost, buildCostWarningInstruction };
 
-/**
- * List active autopilot worktrees as a normalized array.
- * @returns {Array<{path: string, branch: string|null, sessionId: string|null}>}
- */
-export function listActiveWorktrees() {
-  try {
-    const trees = listWorktrees({ autopilotOnly: true });
-    return trees.map((t) => ({
-      path: t.path,
-      branch: t.branch,
-      sessionId: t.sessionId || null,
-    }));
-  } catch {
-    return [];
-  }
-}
-
-/**
- * Append a labeled phase result to state.phases. Surfaced for commands/autopilot.md.
- * @param {object} state
- * @param {{ phase: string, status: string, [k: string]: any }} payload
- * @returns {object} mutated state
- */
-export function recordPhaseResult(state, payload = {}) {
-  if (!state) throw new TypeError('state required');
-  const { phase, status, ...rest } = payload;
-  recordPhase(state, { name: phase, status, ...rest });
-  if (phase === 'IMPROVE') {
-    const improvements = Array.isArray(rest.improvements) ? rest.improvements : [];
-    for (const item of improvements) {
-      safeAppendLesson(state, {
-        lesson: `Improvement: ${String(item).slice(0, 200)}`,
-        successPattern: 'improve-suggestion',
-        sourcePhase: 'IMPROVE',
-      });
-    }
-    const futurePlans = Array.isArray(rest.futurePlans) ? rest.futurePlans : [];
-    for (const plan of futurePlans) {
-      safeAppendLesson(state, {
-        lesson: `FuturePlan: ${String(plan).slice(0, 200)}`,
-        successPattern: 'future-plan',
-        sourcePhase: 'IMPROVE',
-      });
-    }
-  }
-  persist(state);
-  return state;
-}
-
-/**
- * Append a checkpoint (typically a git SHA) to state.checkpoints.
- * @param {object} state
- * @param {{ sha?: string, label?: string, [k: string]: any }} payload
- * @returns {object} mutated state
- */
-export function recordCheckpoint(state, payload = {}) {
-  if (!state) throw new TypeError('state required');
-  const { sha = null, label = null, ...rest } = payload;
-  state.checkpoints = Array.isArray(state.checkpoints) ? state.checkpoints : [];
-  state.checkpoints.push({
-    ts: new Date().toISOString(),
-    sha,
-    phase: state.phase,
-    label,
-    ...rest,
-  });
-  persist(state);
-  return state;
-}
-
-/**
- * Classify a verify failure for downstream agent routing (Phase 4 onFailure path).
- * @param {{ command?: string, exitCode?: number|null, stderr?: string, stdout?: string }} payload
- * @returns {'typecheck'|'test'|'lint'|'build'|'unknown-failure'|'unknown'}
- */
-export function classifyFailure(payload = {}) {
-  const out = String(payload.stderr || payload.stdout || '').toLowerCase();
-  if (/(?:typescript|\btsc\b|type error|ts\d{4})/i.test(out)) return 'typecheck';
-  if (/(?:vitest|jest|\bspec\b|\btest\b)/i.test(out)) return 'test';
-  if (/(?:eslint|lint error)/i.test(out)) return 'lint';
-  if (/(?:webpack|rollup|esbuild|tsup|next build|\bbuild\b)/i.test(out)) return 'build';
-  if (typeof payload.exitCode === 'number' && payload.exitCode !== 0) return 'unknown-failure';
-  return 'unknown';
-}
-
-/**
- * Record a secret-leak event and freeze the session (PAUSED).
- * @param {object} state
- * @param {{ kind?: string, detail?: any, location?: string }} leak
- * @returns {object} mutated state
- */
-export function recordSecretLeak(state, leak = {}) {
-  if (!state) throw new TypeError('state required');
-  const { kind = 'secret', detail = null, location = null } = leak;
-  state.errors = Array.isArray(state.errors) ? state.errors : [];
-  state.errors.push({
-    ts: new Date().toISOString(),
-    kind,
-    detail,
-    location,
-  });
-  if (state.phase && state.phase !== 'PAUSED') {
-    state.lastPhase = state.phase;
-  }
-  state.phase = 'PAUSED';
-  state.pausedReason = `secret-leak: ${kind}`;
-  safeAppendLesson(state, {
-    lesson: `SecretLeak at ${state.lastPhase || 'unknown'}: ${kind}`,
-    errorPattern: `secret-leak:${kind}`,
-    sourcePhase: state.lastPhase || null,
-  });
-  persist(state);
-  return state;
-}
+// Public surface preserved via re-export after extraction (no behavior change).
+// Worktree lifecycle / reaping → engine-cleanup.js
+export { listActiveWorktrees } from './engine-cleanup.js';
+// State record/mutation helpers → engine-state.js
+export {
+  classifyFailure,
+  recordCheckpoint,
+  recordPhaseResult,
+  recordSecretLeak,
+} from './engine-state.js';

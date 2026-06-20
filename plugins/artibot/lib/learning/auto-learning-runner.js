@@ -48,7 +48,6 @@ export {
 import { runSelfScan } from './auto-learning-scanner.js';
 import { collectProvenance, runPatternExtract } from './auto-learning-extractor.js';
 import { runAutoCommit } from './auto-learning-committer.js';
-import { evaluateGroup, updateWeights } from './grpo-optimizer.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -63,7 +62,6 @@ const VALID_STAGES = [
   'pattern-extract',
   'knowledge-update',
   'skill-refinement',
-  'grpo',
 ];
 
 // NOTE: config.learning.schedule (nightlyLearner/driftCheck cron fields) is
@@ -336,17 +334,6 @@ export async function runAutoLearningPipeline(overrideConfig = {}) {
     result.stagesRun.push('skill-refinement');
   }
 
-  // Stage 4b: GRPO — group-relative policy optimization over extracted patterns.
-  // Synthesizes candidate strategies from the day's patterns, evaluates them
-  // relatively, and updates grpo-history.json. Safe no-op when <2 patterns.
-  if (shouldRun('grpo')) {
-    result.stages.grpo = await runGrpoStage(
-      result.stages.patternExtract ?? null,
-      result.stages.selfScan ?? null,
-    );
-    result.stagesRun.push('grpo');
-  }
-
   // Attach provenance from pattern-extract (or collect fresh)
   result.provenance = result.stages.patternExtract?.provenance
     ?? await collectProvenance();
@@ -362,83 +349,6 @@ export async function runAutoLearningPipeline(overrideConfig = {}) {
   await appendPipelineLog(result);
 
   return result;
-}
-
-/**
- * Run the GRPO stage: convert extracted patterns into GRPO candidates,
- * evaluate them as a group, and persist updated strategy weights.
- * Safe no-op when fewer than 2 patterns exist (GRPO requires group comparison).
- *
- * @param {object|null} patternExtract - Result from runPatternExtract stage.
- * @param {object|null} selfScan - Result from runSelfScan stage (for lint/test signal).
- * @returns {Promise<object>} stage report
- */
-/**
- * Build the scan signal used by every candidate (exitCode + error count).
- * @param {object|null} selfScan
- * @returns {{ exitCode: number, errors: number }}
- */
-function buildScanSignal(selfScan) {
-  const lintOk = (selfScan?.lintErrors ?? 0) === 0;
-  const testOk = selfScan?.testsPassed === true;
-  return {
-    exitCode: lintOk && testOk ? 0 : 1,
-    errors: selfScan?.lintErrors ?? 0,
-  };
-}
-
-/**
- * Convert extracted commit patterns into GRPO candidate objects.
- * @param {object[]} patterns
- * @param {{ exitCode: number, errors: number }} signal
- * @returns {object[]}
- */
-function patternsToCandidates(patterns, signal) {
-  const ts = Date.now();
-  return patterns.map((p, i) => ({
-    id: `auto-learn-cand-${ts}-${i}`,
-    strategy: (p?.type && typeof p.type === 'string') ? p.type : 'default',
-    result: {
-      exitCode: signal.exitCode,
-      errors: signal.errors,
-      duration: 1000,
-      commandLength: typeof p?.subject === 'string' ? p.subject.length : 0,
-      sideEffects: 0,
-    },
-  }));
-}
-
-/**
- * Summarize a GRPO group result into the stage report shape.
- * @param {object} groupResult
- * @param {number} candidateCount
- * @returns {object}
- */
-function summarizeGrpoResult(groupResult, candidateCount) {
-  const best = groupResult?.best ?? null;
-  const spread = typeof groupResult?.spread === 'number' ? groupResult.spread : 0;
-  return {
-    candidateCount,
-    bestStrategy: best?.strategy ?? null,
-    bestScore: typeof best?.composite === 'number' ? Math.round(best.composite * 1000) / 1000 : null,
-    spread: Math.round(spread * 1000) / 1000,
-  };
-}
-
-export async function runGrpoStage(patternExtract, selfScan) {
-  try {
-    const patterns = Array.isArray(patternExtract?.patterns) ? patternExtract.patterns : [];
-    if (patterns.length < 2) {
-      return { skipped: true, reason: 'insufficient-patterns', minimumNeeded: 2, got: patterns.length };
-    }
-    const signal = buildScanSignal(selfScan);
-    const candidates = patternsToCandidates(patterns, signal);
-    const groupResult = evaluateGroup(candidates);
-    await updateWeights(groupResult);
-    return summarizeGrpoResult(groupResult, candidates.length);
-  } catch (err) {
-    return { error: err?.message ?? String(err) };
-  }
 }
 
 /**
