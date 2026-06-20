@@ -29,6 +29,22 @@ import {
   printManualInstructionsKo,
   resolveHome,
 } from './update-platform.js';
+import {
+  assertGitHealth,
+  findSourceRepo,
+  popAutostash,
+  pullLatestSource,
+  resolveDefaultBranchPull,
+  resolveRemoteDefaultBranch,
+  stashIfDirty,
+} from './update-git.js';
+import {
+  assertPostInstall,
+  assertUpdatePrecondition,
+  collectPostInstallInvariants,
+  installLanded,
+  renderInvariantTable,
+} from './update-verify.js';
 
 // ---------------------------------------------------------------------------
 // Argument parsing
@@ -95,268 +111,13 @@ async function fetchLatestRelease() {
 // ---------------------------------------------------------------------------
 // Source update (git pull)
 // ---------------------------------------------------------------------------
-
-/**
- * Find the git source repo root.
- *
- * Strategy (ordered by priority):
- *   1. source-repo.json — saved by install.sh during initial install
- *   2. installScriptPath — walk up from install.sh looking for .git
- *   3. give up — return null (tarball install or deleted repo)
- *
- * @param {string} [installScriptDir] - Directory containing install.sh
- * @returns {{ gitRoot: string, pluginDir: string } | null}
- */
-function findSourceRepo(installScriptDir) {
-  // 1. Saved source-repo.json (most reliable)
-  const home = resolveHome();
-  const sourceJson = path.join(home, '.claude', 'artibot', 'source-repo.json');
-  try {
-    const data = JSON.parse(readFileSync(sourceJson, 'utf-8'));
-    if (data.repoRoot && existsSync(path.join(data.repoRoot, '.git'))) {
-      return { gitRoot: data.repoRoot, pluginDir: data.pluginDir || path.join(data.repoRoot, 'plugins', 'artibot') };
-    }
-    // source-repo.json exists but path is stale (different machine or moved repo)
-    if (data.repoRoot) {
-      console.warn(`  Warning: source-repo.json points to ${data.repoRoot} which no longer exists.`);
-      console.warn('  Searching common locations...');
-    }
-  } catch {
-    // source-repo.json not found or invalid — fall through
-  }
-
-  // 1.5. Auto-detect from common clone locations (handles cross-machine git pull)
-  // Includes Windows OneDrive-redirected Desktop paths (English + Korean
-  // localized "바탕 화면") because OneDrive silently relocates ~/Desktop to
-  // ~/OneDrive/Desktop on consumer setups — the primary maintainer's clone
-  // lives at "OneDrive/바탕 화면/AI/artibot" exactly because of this.
-  const oneDriveBase = path.join(home, 'OneDrive');
-  const commonLocations = [
-    path.join(home, 'Projects', 'Artibot'),
-    path.join(home, 'projects', 'Artibot'),
-    path.join(home, 'dev', 'Artibot'),
-    path.join(home, 'artibot'),
-    path.join(home, 'Projects', 'artibot'),
-    path.join(home, 'projects', 'artibot'),
-    path.join(home, 'src', 'Artibot'),
-    path.join(home, 'src', 'artibot'),
-    path.join(home, 'Desktop', 'AI', 'artibot'),
-    path.join(home, 'Desktop', 'artibot'),
-    path.join(oneDriveBase, 'Desktop', 'AI', 'artibot'),
-    path.join(oneDriveBase, 'Desktop', 'artibot'),
-    path.join(oneDriveBase, '바탕 화면', 'AI', 'artibot'),
-    path.join(oneDriveBase, '바탕 화면', 'artibot'),
-  ];
-  for (const loc of commonLocations) {
-    const pluginDir = path.join(loc, 'plugins', 'artibot');
-    if (existsSync(path.join(loc, '.git')) && existsSync(path.join(pluginDir, 'package.json'))) {
-      console.log(`  Found source repo at ${loc} (auto-detected)`);
-      return { gitRoot: loc, pluginDir };
-    }
-  }
-
-  // 2. Walk up from install.sh location
-  if (installScriptDir) {
-    let dir = path.resolve(installScriptDir);
-    for (let i = 0; i < 5; i++) {
-      if (existsSync(path.join(dir, '.git'))) {
-        return { gitRoot: dir, pluginDir: installScriptDir };
-      }
-      const parent = path.dirname(dir);
-      if (parent === dir) break;
-      dir = parent;
-    }
-  }
-
-  return null;
-}
-
-/**
- * Stash a dirty working tree before pull, returning whether a stash was made.
- *
- * Root cause this addresses: tracked files that hooks auto-edit during a
- * session (e.g. `.artibot/SESSION-NOTES.md`) leave the working tree dirty, so
- * `git pull` refuses with "local changes would be overwritten". Because
- * `/update` is an explicit, user-initiated action (not the git-autopilot
- * interval auto-save), there is no concurrent stash to race with — a scoped
- * stash here is safe.
- *
- * @param {string} gitRoot
- * @returns {boolean} true when a stash entry was created (caller must pop)
- */
-function stashIfDirty(gitRoot) {
-  let dirty;
-  try {
-    dirty = execFileSync('git', ['status', '--porcelain'], {
-      cwd: gitRoot, encoding: 'utf-8', timeout: 5000,
-    }).trim();
-  } catch {
-    return false; // git status failed — don't risk a stash we can't reason about
-  }
-  if (!dirty) return false;
-
-  try {
-    execFileSync('git', ['stash', 'push', '--include-untracked', '-m', 'artibot-update-autostash'], {
-      cwd: gitRoot, stdio: 'inherit', timeout: 15_000,
-    });
-    console.log('  Stashed local changes before pull (artibot-update-autostash).');
-    return true;
-  } catch (err) {
-    console.warn(`  Warning: could not stash local changes: ${err.message}`);
-    return false;
-  }
-}
-
-/**
- * Restore a previously-created auto-stash after pull. A pop conflict is
- * surfaced as a warning (never thrown) and the stash is intentionally left on
- * the stack so the user can resolve it manually — losing their changes
- * silently would be worse than a noisy warning.
- *
- * @param {string} gitRoot
- */
-function popAutostash(gitRoot) {
-  try {
-    execFileSync('git', ['stash', 'pop'], {
-      cwd: gitRoot, stdio: 'inherit', timeout: 15_000,
-    });
-    console.log('  Restored local changes (stash pop).');
-  } catch (err) {
-    console.warn(`  Warning: stash pop hit a conflict: ${err.message}`);
-    console.warn('  Your changes are preserved in `git stash list` (artibot-update-autostash).');
-    console.warn('  Resolve manually with: git stash pop');
-  }
-}
-
-/**
- * Pull latest source from the remote repository.
- *
- * Uses findSourceRepo() to locate the git repo, then runs `git pull`.
- * Non-fatal: if the repo is not found or pull fails, we log and continue.
- *
- * @param {string} [installScriptDir] - Directory containing install.sh
- * @returns {{ pulled: boolean, pluginDir: string | null }}
- */
-/**
- * Resolve a fallback pull target when neither @{u} nor origin/<HEAD-branch>
- * resolves. Probes (in order): origin/artibot/master, origin/master,
- * origin/main. Last fall-through uses origin/main even when unverified so the
- * caller still gets a deterministic pullArgs array.
- *
- * @param {string} gitRoot
- * @returns {string[]} ['pull', remote, branch]
- */
-function resolveDefaultBranchPull(gitRoot) {
-  for (const ref of ['artibot/master', 'master', 'main']) {
-    try {
-      execFileSync('git', ['rev-parse', '--verify', `origin/${ref}`], {
-        cwd: gitRoot, stdio: 'ignore', timeout: 5000,
-      });
-      return ['pull', 'origin', ref];
-    } catch { /* try next */ }
-  }
-  return ['pull', 'origin', 'main'];
-}
-
-/**
- * Probe whether `origin/<branch>` exists locally, returning the matching
- * `git pull` args when it does and falling back to the default-branch
- * resolver otherwise. Extracted from pullLatestSource() to keep the
- * upstream-detection try/catch nest under max-depth=4 (eslint cap).
- *
- * @param {string} gitRoot
- * @param {string} branch
- * @returns {string[]} pull args
- */
-function resolveBranchPullArgs(gitRoot, branch) {
-  try {
-    execFileSync('git', ['rev-parse', '--verify', `origin/${branch}`], {
-      cwd: gitRoot, stdio: 'ignore', timeout: 5000,
-    });
-    return ['pull', 'origin', branch];
-  } catch {
-    // origin/<current-branch> doesn't exist — try default branches.
-    return resolveDefaultBranchPull(gitRoot);
-  }
-}
-
-function pullLatestSource(installScriptDir) {
-  const repo = findSourceRepo(installScriptDir);
-
-  if (!repo) {
-    console.log('  Source repo not found. The update will use currently installed files.');
-    console.log('  For full updates, clone the repo: git clone https://github.com/Yoodaddy0311/artibot.git');
-    return { pulled: false, pluginDir: null };
-  }
-
-  try {
-    // Detect current branch + upstream remote for smart pull.
-    //
-    // Security: pullArgs MUST be passed to execFileSync as an array — never
-    // interpolated into a shell string. Branch names CAN contain shell
-    // metachars (semicolons, backticks). String interpolation would let a
-    // malicious origin (or a tampered local repo) inject arbitrary shell.
-    let pullArgs = ['pull'];
-    // Upstream-first resolution: read the actual configured upstream of HEAD
-    // via `git rev-parse --abbrev-ref @{u}`. This returns "remote/branch"
-    // (e.g. "origin/artibot/master") and is the authoritative source — only
-    // fall back to candidate branches when no upstream is configured.
-    //
-    // The previous fallback ordering (origin/artibot/master -> origin/master
-    // -> origin/main) ran unconditionally on rev-parse HEAD failure and could
-    // pull a non-tracked branch INTO the current HEAD, fabricating divergent
-    // history. The autopilot-drift-fix-2026-05-16 incident hit exactly this.
-    try {
-      const upstream = execFileSync('git', ['rev-parse', '--abbrev-ref', '@{u}'], {
-        cwd: repo.gitRoot, encoding: 'utf-8', timeout: 5000,
-      }).trim();
-      const slashIdx = upstream.indexOf('/');
-      if (slashIdx > 0) {
-        const remote = upstream.slice(0, slashIdx);
-        const branch = upstream.slice(slashIdx + 1);
-        pullArgs = ['pull', remote, branch];
-      } else {
-        // Malformed upstream (no slash) — treat as no-upstream case
-        throw new Error('upstream lacks remote/ prefix');
-      }
-    } catch {
-      // No upstream configured. Resolve current branch and try matching
-      // remote refs first; only fall back to default branches if HEAD itself
-      // is detached or untracked.
-      try {
-        const branch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
-          cwd: repo.gitRoot, encoding: 'utf-8', timeout: 5000,
-        }).trim();
-        pullArgs = (branch && branch !== 'HEAD')
-          ? resolveBranchPullArgs(repo.gitRoot, branch)
-          : resolveDefaultBranchPull(repo.gitRoot);
-      } catch {
-        pullArgs = resolveDefaultBranchPull(repo.gitRoot);
-      }
-    }
-
-    // Auto-stash a dirty working tree so hook-edited tracked files (e.g.
-    // .artibot/SESSION-NOTES.md) don't block the pull. Pop afterwards in the
-    // finally so the stash is always restored even if the pull throws.
-    const stashed = stashIfDirty(repo.gitRoot);
-    try {
-      console.log(`  Pulling latest source from ${repo.gitRoot}...`);
-      execFileSync('git', pullArgs, {
-        cwd: repo.gitRoot,
-        stdio: 'inherit',
-        timeout: 30_000,
-      });
-      console.log('  Source updated.');
-    } finally {
-      if (stashed) popAutostash(repo.gitRoot);
-    }
-    return { pulled: true, pluginDir: repo.pluginDir };
-  } catch (err) {
-    console.warn(`  Warning: git pull failed: ${err.message}`);
-    console.warn('  Continuing with current local files.');
-    return { pulled: false, pluginDir: repo.pluginDir };
-  }
-}
+//
+// The git source-repo discovery + pull machinery (findSourceRepo, stashIfDirty,
+// popAutostash, resolveRemoteDefaultBranch, resolveDefaultBranchPull,
+// resolveBranchPullArgs, attemptPull, pullLatestSource) plus the INV-7 pre-pull
+// health gate (assertGitHealth) live in ./update-git.js — extracted to keep this
+// file under the 800-line guideline. They are imported at the top, re-exported
+// below for the existing unit tests, and wired into main() via pullLatestSource.
 
 // ---------------------------------------------------------------------------
 // Manual instructions (shown when automated update fails)
@@ -544,6 +305,16 @@ function runInstall(preResolvedPath, preResolvedPs1) {
 }
 
 // ---------------------------------------------------------------------------
+// Post-install verification
+// ---------------------------------------------------------------------------
+//
+// The pre/post-condition gates (installLanded, assertUpdatePrecondition,
+// collectPostInstallInvariants, assertPostInstall, renderInvariantTable) live in
+// ./update-verify.js — extracted to keep this file under the 800-line guideline
+// and to give the "never silently no-op" invariants a single unit-testable home.
+// They are imported at the top and wired into main() below.
+
+// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
@@ -657,6 +428,24 @@ async function main() {
   //         Find source repo via the installer's directory (sh path when
   //         available, otherwise the ps1 path on Windows).
   const installerDir = path.dirname(installScriptPath || installPs1Path);
+
+  // Step 2.0: Pre-pull git health gate (INV-7). Asserts .git presence + a
+  // knowable working-tree state + a resolvable remote pull target BEFORE the
+  // pull. This is advisory diagnostics: a failed check is logged (the pull may
+  // still no-op), and the post-install invariants are the hard gate. Surfacing
+  // it here turns the silent "pull found no remote ref" case into a visible
+  // reason early in the run.
+  const healthRepo = findSourceRepo(installerDir);
+  if (healthRepo) {
+    const health = assertGitHealth(healthRepo.gitRoot);
+    if (health.ok) {
+      console.log(`  Git health OK (pull target: origin/${health.pullTarget}${health.dirty ? ', working tree dirty — will auto-stash' : ''}).`);
+    } else {
+      console.warn(`  Git health check flagged: ${health.reason} (at ${healthRepo.gitRoot}).`);
+      console.warn('  The pull may fail or no-op; post-install invariants will catch a false success.');
+    }
+  }
+
   const { pulled, pluginDir } = pullLatestSource(installerDir);
 
   // If pull succeeded and the source repo has fresh installers, prefer them.
@@ -675,6 +464,31 @@ async function main() {
     }
   }
 
+  // Step 2.5: Pre-condition gate (INV-2) — refuse a guaranteed no-op BEFORE
+  // running the installer. If a real update is pending but no fresh source was
+  // pulled AND the only installer we can run lives under the installed copy
+  // (~/.claude/artibot, i.e. self-install), the copy phase will be skipped and
+  // the installer exits 0 having changed nothing. Block here with a clear,
+  // recoverable message instead of running it and falsely reporting success.
+  const installerPluginDir = path.dirname((isWin && finalPs1Path) ? finalPs1Path : finalInstallPath);
+  const pre = assertUpdatePrecondition({
+    updateAvailable,
+    pulled,
+    sourcePluginDir: pulled ? pluginDir : null,
+    installTargetDir: installerPluginDir,
+    home,
+  });
+  if (!pre.ok) {
+    console.error('');
+    console.error(`Refusing to run a no-op install (${pre.reason}): an update to ${latestVersion} is`);
+    console.error('  pending, but no fresh source was pulled and the only available installer is the');
+    console.error('  already-installed copy — running it would change nothing yet report success.');
+    console.error('  Most likely the source git pull failed (deleted/renamed remote branch) or no');
+    console.error('  source clone exists on this machine.');
+    printManualInstructions();
+    process.exit(1);
+  }
+
   // Step 3: Run install BEFORE clearing cache (prevents broken state on failure)
   console.log(`  Installing via: ${(isWin && finalPs1Path) ? finalPs1Path : finalInstallPath}`);
   try {
@@ -688,6 +502,40 @@ async function main() {
 
   // Step 4: Clear cache AFTER successful install
   clearCache(home);
+
+  // Step 4.5: Post-install verification — assert the termination invariants
+  // before claiming success. Re-read the version from the INSTALLED copy
+  // (~/.claude/artibot), not the source pluginRoot, then collect INV-1/3/4/5/6
+  // (version landing, hooks-copy completeness, marketplace-mirror consistency,
+  // cache no-drift, no-op marker) and render a from->to self-check table. Any
+  // failure is a false-success risk (the artibot/master dead-branch incident) —
+  // surface it loudly with manual recovery instead of a quiet "Update complete".
+  const installedRoot = path.join(home, '.claude', 'artibot');
+  const installedNow = readCurrentVersion(installedRoot);
+  const invariants = collectPostInstallInvariants({
+    home,
+    installedRoot,
+    sourcePluginRoot: pulled ? pluginDir : null,
+    installedVersion: installedNow,
+    latestVersion,
+    updateAvailable,
+  });
+  const postCheck = assertPostInstall(invariants);
+  console.log('');
+  console.log('Post-install self-check:');
+  console.log(renderInvariantTable(invariants));
+  if (!postCheck.ok) {
+    console.error('');
+    console.error(`Update did NOT land cleanly — ${postCheck.failures.length} invariant(s) failed:`);
+    for (const f of postCheck.failures) {
+      console.error(`  ${f.id} ${f.label}: ${f.detail}`);
+    }
+    console.error('  The installer most likely copied no new files — e.g. the source git pull');
+    console.error('  failed (deleted/renamed remote branch) and install fell back to the');
+    console.error('  already-installed copy (self-install no-op).');
+    printManualInstructions();
+    process.exit(1);
+  }
 
   // Step 5: Swarm autodetect — auto-activate federated learning from the
   // committed swarm-profile.json (if present). One-time per repoUrl+machine.
@@ -724,6 +572,12 @@ if (isCliEntrypoint) {
 }
 
 // Named exports for unit testing. Leaves CLI behavior unchanged.
+//
+// Git helpers (findSourceRepo, stashIfDirty, popAutostash,
+// resolveRemoteDefaultBranch, resolveDefaultBranchPull) and the INV-7 health
+// gate (assertGitHealth) now live in ./update-git.js — they are imported at the
+// top and RE-EXPORTED here so the existing update.test.js / install-update.test.js
+// import sites keep working unchanged (single public surface = update.js).
 export {
   readCurrentVersion,
   resolveHome,
@@ -738,4 +592,8 @@ export {
   fileHash,
   stashIfDirty,
   popAutostash,
+  resolveRemoteDefaultBranch,
+  resolveDefaultBranchPull,
+  assertGitHealth,
+  installLanded,
 };

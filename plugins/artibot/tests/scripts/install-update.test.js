@@ -253,29 +253,49 @@ describe('update/structure', () => {
 
 describe('update/branch fallback order', () => {
   let updateContent;
+  // B4 (2026-06-20): the git pull/branch resolution machinery was extracted from
+  // update.js into scripts/update-git.js (update.js re-exports it to keep the
+  // public import surface unchanged). The B1 structural invariants below now live
+  // in update-git.js, so this block reads that module for them; the manual-
+  // recovery message test still asserts against update.js (printManualInstructions
+  // stayed there).
+  let gitContent;
 
   it('update.js를 읽을 수 있음', () => {
     updateContent = readFileSync(
       path.join(PLUGIN_ROOT, 'scripts', 'update.js'), 'utf-8',
     );
     expect(updateContent).toBeTruthy();
+    gitContent = readFileSync(
+      path.join(PLUGIN_ROOT, 'scripts', 'update-git.js'), 'utf-8',
+    );
+    expect(gitContent).toBeTruthy();
   });
 
-  it('artibot/master를 첫 번째 fallback으로 시도', () => {
-    // v4.19.7+: fallback list lives in resolveDefaultBranchPull() as a single
-    // string array iterated in order. Earlier versions emitted three discrete
-    // try/catch blocks; this asserts the ordering at the data-structure level.
-    const fallbackArr = updateContent.match(/for \(const ref of \[([^\]]+)\]\)/);
+  it('원격 실제 default 브랜치(origin/HEAD)를 우선 해석', () => {
+    // B1 (2026-06-20): resolveDefaultBranchPull now prefers the remote's actual
+    // default branch via resolveRemoteDefaultBranch(origin/HEAD) BEFORE any
+    // hardcoded guess. The dead artibot/master->master rename is exactly why a
+    // guess list goes stale; origin/HEAD follows the rename.
+    expect(gitContent).toContain('resolveRemoteDefaultBranch');
+    expect(gitContent).toMatch(/const defaultBranch = resolveRemoteDefaultBranch\(gitRoot\)/);
+  });
+
+  it('죽은 artibot/master 추측을 fallback 리스트에서 제거', () => {
+    // B1 (2026-06-20): the guess list previously led with 'artibot/master',
+    // which made /update pull a deleted remote ref and silently no-op. The guess
+    // list is now minimal (master, main) and is only reached when origin/HEAD is
+    // undeterminable (offline).
+    const fallbackArr = gitContent.match(/for \(const ref of \[([^\]]+)\]\)/);
     expect(fallbackArr, 'resolveDefaultBranchPull fallback array missing').not.toBeNull();
     const refs = fallbackArr[1].split(',').map((s) => s.trim().replace(/['"]/g, ''));
-    expect(refs[0]).toBe('artibot/master');
-    expect(refs[1]).toBe('master');
+    expect(refs).not.toContain('artibot/master');
+    expect(refs[0]).toBe('master');
   });
 
-  it('master를 두 번째 fallback으로 시도', () => {
-    // v4.19.7+: ordering is encoded as positions in the resolveDefaultBranchPull
-    // ref list (asserted above). master must appear before main.
-    const fallbackArr = updateContent.match(/for \(const ref of \[([^\]]+)\]\)/);
+  it('master를 main보다 먼저 시도 (guess list 순서)', () => {
+    // master must appear before main in the offline guess list.
+    const fallbackArr = gitContent.match(/for \(const ref of \[([^\]]+)\]\)/);
     expect(fallbackArr).not.toBeNull();
     const refs = fallbackArr[1].split(',').map((s) => s.trim().replace(/['"]/g, ''));
     const masterIdx = refs.indexOf('master');
@@ -284,11 +304,9 @@ describe('update/branch fallback order', () => {
     expect(mainIdx).toBeGreaterThan(masterIdx);
   });
 
-  it('수동 안내 메시지가 master를 참조 (v4.7.1+ artibot/master deprecation start)', () => {
-    // v4.7.1: switched manual recommendation to `master` so that when
-    // origin/artibot/master is removed (eligible 2026-06-13), the printed
-    // advice still works. The auto-fallback chain still tries artibot/master
-    // first as a no-op for now.
+  it('수동 안내 메시지가 master를 참조 (artibot/master 하드코딩 없음)', () => {
+    // Manual recovery advice points at `master`; no path pulls the dead
+    // artibot/master branch anymore.
     expect(updateContent).toContain('git pull origin master');
     expect(updateContent).not.toContain('git pull origin artibot/master');
   });
