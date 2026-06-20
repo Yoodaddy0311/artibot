@@ -84,6 +84,11 @@ jobs:
     steps:
       - name: Fast-skip notice
         if: needs.fast-skip.outputs.plugin_changed == 'false'
+        # Override the job-level `working-directory: plugins/${{ matrix.plugin }}`:
+        # in the fast-skip path no checkout runs, so that dir does not exist on the
+        # runner and the step would crash with "No such file or directory" — failing
+        # a required check. ${{ github.workspace }} always exists.
+        working-directory: ${{ github.workspace }}
         run: echo "PR touched no plugin assets — validation skipped (required check still reports green)."
 
       - name: Checkout repository
