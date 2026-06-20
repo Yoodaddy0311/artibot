@@ -8,8 +8,7 @@
  * overlay (`enabled: false`, empty maps), which is a guaranteed zero-behaviour-
  * change no-op. Both the config block and the resolved overlay memoize for 60s.
  *
- * This module is a direct structural mirror of
- * {@link module:lib/cognitive/grpo-routing-config}: frozen defaults with
+ * This module follows the frozen-config-overlay pattern: frozen defaults with
  * `enabled: false`, 60s memo, never-throws `normalize*`, synchronous
  * `getCached*` peeks, and a `__setCachedConfigForTests` injection seam.
  *

@@ -8,174 +8,18 @@ import {
   primeRoutingBiasCache,
   resetRoutingBiasCache,
 } from '../../lib/cognitive/grpo-bridge.js';
-import {
-  ALPHA_FLOOR,
-  applyExploration,
-  applyGrpoBlending,
-  DEFAULT_BLEND_ALPHA,
-  isDeterministicEnv,
-  routeWithPolicy,
-} from '../../lib/cognitive/grpo-routing.js';
 
 // ---------------------------------------------------------------------------
-// GR-C Phase C — bridge + routing helper coverage
+// GR-C Phase C — bridge coverage (family B/C — grpo-bridge.js)
 // Contract: every function must return safe values when the policy file is
 // missing, malformed, or the feature vector is invalid; never throw.
-// NODE_ENV=test forces deterministic exploration (epsilon=0).
+//
+// NOTE: The family-A routing-bias blending helpers (grpo-routing.js:
+// applyGrpoBlending / applyExploration / routeWithPolicy) were retired in the
+// T4β-min routing-bias retirement. Their describe blocks were removed with the
+// module. The grpo-bridge.js policy-reader surface below is preserved (it is
+// family B/C: getRoutingBias / getCachedRoutingBias remain part of the bridge).
 // ---------------------------------------------------------------------------
-
-describe('grpo-routing/applyGrpoBlending', () => {
-  it('뉴트럴 bias(confidence=0) → 휴리스틱 통과', () => {
-    const out = applyGrpoBlending({
-      heuristicScore: 0.42,
-      bias: { p_s2: 0.5, confidence: 0 },
-    });
-    expect(out.blended).toBe(false);
-    expect(out.finalScore).toBe(0.42);
-    expect(out.alphaApplied).toBe(1.0);
-  });
-
-  it('blended=true 시 finalScore는 선형 결합', () => {
-    const out = applyGrpoBlending({
-      heuristicScore: 0.2,
-      bias: { p_s2: 0.8, confidence: 0.9 },
-      alpha: 0.7,
-    });
-    expect(out.blended).toBe(true);
-    // 0.7 * 0.2 + 0.3 * 0.8 = 0.14 + 0.24 = 0.38
-    expect(out.finalScore).toBeCloseTo(0.38, 5);
-  });
-
-  it('alpha는 [ALPHA_FLOOR, 1.0]으로 clamp된다', () => {
-    const tooLow = applyGrpoBlending({
-      heuristicScore: 0.5,
-      bias: { p_s2: 0.9, confidence: 0.5 },
-      alpha: 0.01,
-    });
-    expect(tooLow.alphaApplied).toBe(ALPHA_FLOOR);
-    const tooHigh = applyGrpoBlending({
-      heuristicScore: 0.5,
-      bias: { p_s2: 0.9, confidence: 0.5 },
-      alpha: 5.0,
-    });
-    expect(tooHigh.alphaApplied).toBe(1.0);
-  });
-
-  it('heuristicScore는 [0,1]로 clamp된다', () => {
-    const out = applyGrpoBlending({
-      heuristicScore: 2.5,
-      bias: { p_s2: 0.0, confidence: 0.9 },
-    });
-    // heuristic clamped to 1.0 → 0.7 * 1 + 0.3 * 0 = 0.7
-    expect(out.finalScore).toBeCloseTo(0.7, 5);
-  });
-
-  it('bias가 null/undefined → 휴리스틱만', () => {
-    expect(applyGrpoBlending({ heuristicScore: 0.3, bias: null }).blended).toBe(false);
-    expect(applyGrpoBlending({ heuristicScore: 0.3, bias: undefined }).blended).toBe(false);
-  });
-
-  it('bias.p_s2가 NaN → fallback', () => {
-    const out = applyGrpoBlending({
-      heuristicScore: 0.4,
-      bias: { p_s2: Number.NaN, confidence: 0.8 },
-    });
-    expect(out.blended).toBe(false);
-    expect(out.finalScore).toBe(0.4);
-  });
-
-  it('DEFAULT_BLEND_ALPHA 적용', () => {
-    const out = applyGrpoBlending({
-      heuristicScore: 0.4,
-      bias: { p_s2: 0.6, confidence: 0.5 },
-    });
-    // 0.7 * 0.4 + 0.3 * 0.6 = 0.46
-    expect(out.alphaApplied).toBe(DEFAULT_BLEND_ALPHA);
-    expect(out.finalScore).toBeCloseTo(0.46, 5);
-  });
-});
-
-describe('grpo-routing/applyExploration (determinism in tests)', () => {
-  it('NODE_ENV=test면 epsilon=0 강제', () => {
-    expect(isDeterministicEnv()).toBe(true);
-    const out = applyExploration({ system: 1 }, 0.9, () => 0);
-    expect(out.explored).toBe(false);
-    expect(out.epsilonApplied).toBe(0);
-    expect(out.system).toBe(1);
-  });
-
-  it('system이 2일 때도 explored=false', () => {
-    const out = applyExploration({ system: 2 }, 0.9);
-    expect(out.system).toBe(2);
-    expect(out.explored).toBe(false);
-  });
-
-  it('decision 객체가 이상해도 안전하게 1로 fallback', () => {
-    const out = applyExploration({}, 0);
-    expect([1, 2]).toContain(out.system);
-  });
-});
-
-describe('grpo-routing/applyExploration (non-test env simulation)', () => {
-  const originalNodeEnv = process.env.NODE_ENV;
-  const originalVitest = process.env.VITEST;
-  beforeEach(() => {
-    // Force non-deterministic env for this block only
-    delete process.env.NODE_ENV;
-    delete process.env.VITEST;
-  });
-  afterEach(() => {
-    if (originalNodeEnv !== undefined) process.env.NODE_ENV = originalNodeEnv;
-    if (originalVitest !== undefined) process.env.VITEST = originalVitest;
-  });
-
-  it('RNG=0.01, epsilon=0.05 → explored 발생', () => {
-    const out = applyExploration({ system: 1 }, 0.05, () => 0.01);
-    expect(out.explored).toBe(true);
-    expect(out.system).toBe(2);
-  });
-
-  it('RNG=0.99, epsilon=0.05 → 유지', () => {
-    const out = applyExploration({ system: 1 }, 0.05, () => 0.99);
-    expect(out.explored).toBe(false);
-    expect(out.system).toBe(1);
-  });
-
-  it('epsilon=0이면 어떤 RNG에서도 explored=false', () => {
-    const out = applyExploration({ system: 2 }, 0, () => 0);
-    expect(out.explored).toBe(false);
-  });
-});
-
-describe('grpo-routing/routeWithPolicy', () => {
-  it('낮은 bias confidence → heuristicSystem passthrough', () => {
-    const r = routeWithPolicy({
-      heuristicSystem: 1, heuristicScore: 0.2,
-      bias: { p_s2: 0.99, confidence: 0 },
-    });
-    expect(r.system).toBe(1);
-    expect(r.meta).toBeNull();
-  });
-
-  it('blended finalScore >= 0.5 → system 2', () => {
-    const r = routeWithPolicy({
-      heuristicSystem: 1, heuristicScore: 0.45,
-      bias: { p_s2: 0.95, confidence: 0.9 }, alpha: 0.5,
-    });
-    // 0.5 * 0.45 + 0.5 * 0.95 = 0.7 → S2
-    expect(r.system).toBe(2);
-    expect(r.meta.p_s2).toBeCloseTo(0.95, 5);
-    expect(r.meta.blendedScore).toBeCloseTo(0.7, 5);
-  });
-
-  it('meta에 explored 플래그 포함', () => {
-    const r = routeWithPolicy({
-      heuristicSystem: 1, heuristicScore: 0.1,
-      bias: { p_s2: 0.9, confidence: 0.8 }, alpha: 0.5, epsilon: 0,
-    });
-    expect(r.meta).toHaveProperty('explored', false);
-  });
-});
 
 describe('grpo-bridge/getRoutingBias', () => {
   let tmpDir;

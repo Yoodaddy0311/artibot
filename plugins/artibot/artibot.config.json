@@ -936,23 +936,8 @@
     },
     "grpoRouting": {
       "enabled": true,
-      "comment": "GRPO routing policy learning stays enabled. The {agentPolicy,skillPolicy,jointPolicy,effortPolicy}.enabled flags below are intentionally false (dormant): the GRPO reward EMITTER (lib/learning/grpo/reward-metrics.js recordReward → runtime/reward-metrics.json) currently has no production caller, so the nightly *-policy-trainers run in graceful shadow no-op (cold-start guard = no disk write). This is by design, not deprecation — GRPO (policy learning) and Dreaming (memory consolidation) are separate coexisting systems. Names/structure/exports preserved; reactivating means wiring a recordReward caller (a separate explicit task). See docs/WIRING-AUDIT-2026-05-30.md.",
+      "comment": "T4β-min (2026-06-20): the System1/2 ROUTING-BIAS family (family A) was RETIRED. The cognitive router (lib/cognitive/router.js) is now pure-heuristic; lib/cognitive/grpo-routing.js + grpo-routing-config.js were deleted, and the routing-bias scalar keys (policyPath/blendAlpha/alpha*/epsilon*/coldStartEpisodes/klPenalty/learningRate/snapshotCount/groupingLevels) were removed from this block — they had no consumer left after retirement. PRESERVED: the {agentPolicy,skillPolicy,jointPolicy,effortPolicy} sub-blocks below (family C) plus `modelType` (referenced by lib/learning/grpo/policy-factory.js). Those sub-block .enabled flags stay intentionally false (dormant): the GRPO reward EMITTER (lib/learning/grpo/reward-metrics.js recordReward → runtime/reward-metrics.json) has no production caller, so nightly *-policy-trainers run graceful shadow no-op. GRPO policy learning and Dreaming remain separate coexisting systems. See docs/WIRING-AUDIT-2026-05-30.md.",
       "modelType": "linear",
-      "policyPath": "~/.claude/artibot/policies/routing-policy-v1.json",
-      "blendAlpha": 0.7,
-      "alphaDecayPerWeek": 0.05,
-      "alphaFloor": 0.3,
-      "epsilonExplore": 0.05,
-      "epsilonFloor": 0.01,
-      "coldStartEpisodes": 200,
-      "klPenalty": 0.01,
-      "learningRate": 0.02,
-      "snapshotCount": 3,
-      "groupingLevels": [
-        "fine",
-        "medium",
-        "coarse"
-      ],
       "agentPolicy": {
         "enabled": false,
         "policyPath": "~/.claude/artibot/policies/agent-policy-v1.json",

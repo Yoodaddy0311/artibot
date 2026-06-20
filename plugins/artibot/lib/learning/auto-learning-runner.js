@@ -261,7 +261,7 @@ export async function runSkillRefinement(patternReport, options = {}) {
       }));
 
       const result = await injectRules(rules, 'coding-standards');
-      report.injectionsApplied = result?.injectedCount ?? 0;
+      report.injectionsApplied = result?.injected ?? 0;
     } catch {
       // Non-critical
     }

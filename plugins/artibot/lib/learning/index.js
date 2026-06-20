@@ -228,14 +228,6 @@ export {
   resetRateLimit,
 } from './wakeup-scheduler.js';
 
-// Skill Lifecycle Autopilot (deprecation / promotion sweep)
-export {
-  analyzeLifecycle,
-  deprecateSkill,
-  promoteSkill,
-  sweepLifecycle,
-} from './skill-lifecycle-autopilot.js';
-
 // Failure Categorizer (GRPO Stage B — sub-categorize "fix" actions by failure pattern)
 export {
   loadFailurePatterns,
