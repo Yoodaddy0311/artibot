@@ -7,7 +7,7 @@
  * @module lib/learning/pattern-analyzer
  */
 
-import { round, clamp01 } from '../core/index.js';
+import { clamp01, round } from '../core/index.js';
 
 // ---------------------------------------------------------------------------
 // Constants

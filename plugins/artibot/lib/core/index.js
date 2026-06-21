@@ -46,7 +46,10 @@ export { Cache, defaultCache } from './cache.js';
 export { readStdinJSON, readStdin, writeJSON, writeText, writeError, writeHookResult } from './io.js';
 export { debug, createDebugger, isDebugEnabled } from './debug.js';
 export { exists, readJsonFile, writeJsonFile, readTextFile, ensureDir, ensureDirSync, listFiles, listDirs } from './file.js';
-export { parseFrontmatter, loadSkills, exportForGemini, exportForCodex, exportForCursor, exportForAll } from './skill-exporter.js';
+export { parseFrontmatter, loadSkills } from './skill-exporter.js';
+// Platform export API (exportForGemini/Codex/Cursor/Antigravity/All) lives in
+// lib/adapters/skill-export.js (L2) — not re-exported here to keep core (L1)
+// free of any upward dependency on the adapter layer.
 export {
   progressBar, statusLight, teamDashboard, workflowVisualizer, playbookVisualizer,
   taskBoard, timeline, fullDashboard, sectionHeader,
