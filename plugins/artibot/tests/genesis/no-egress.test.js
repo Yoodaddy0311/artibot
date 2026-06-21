@@ -18,6 +18,7 @@ import net from 'node:net';
 import { writeFileTree } from '../../lib/genesis/tree-gen.js';
 import { writeWorkflow } from '../../lib/genesis/flow-gen.js';
 import { writeDatasets } from '../../lib/genesis/dataset-gen.js';
+import { writeClaudeScaffold } from '../../lib/genesis/scaffold-gen.js';
 
 const FIXED = new Date(2026, 5, 21, 9, 5);
 const fixedNow = () => FIXED;
@@ -84,6 +85,25 @@ describe('genesis / no network egress (DATA POLICY)', () => {
     const res = await writeDatasets({
       projectRoot: root,
       schemas: [{ entity: 'User', fields: [{ name: 'id', type: 'uuid' }] }],
+      now: fixedNow,
+    });
+    expect(res.ok).toBe(true);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(httpSpy).not.toHaveBeenCalled();
+    expect(httpsSpy).not.toHaveBeenCalled();
+    expect(netSpy).not.toHaveBeenCalled();
+  });
+
+  it('writeClaudeScaffold performs no egress', async () => {
+    const res = await writeClaudeScaffold({
+      projectRoot: root,
+      spec: {
+        projectName: 'p',
+        domain: 'd',
+        skills: [{ name: 's' }],
+        hooks: [{ event: 'PostToolUse' }],
+        mcp: [{ name: 'x', url: 'https://evil.example.com' }],
+      },
       now: fixedNow,
     });
     expect(res.ok).toBe(true);

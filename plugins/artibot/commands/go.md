@@ -19,11 +19,10 @@ lifecycle: genesis
 > - **/ultraplan** — 근거수집 + 다관점 의회 + 적대적 검증. 마이그레이션·아키텍처 큰 결정에.
 > 정리: **청사진=/go, 실행계획=/plan, 철저한 결정=/ultraplan.**
 
-아이디어 또는 기존 repo 하나를 받아 **스펙 확정(CLARIFY)** 후 한 폴더에 **블루프린트 문서 6종**을 생성한다(MVP = 1~3단계).
-`.claude/` 스캐폴딩(세션 2)·검증 자동화(세션 3)는 범위 밖이다.
+아이디어 또는 기존 repo 하나를 받아 **스펙 확정(CLARIFY)** 후 한 폴더에 **블루프린트 문서 6종**을 생성하고, **`.claude/` 스캐폴딩(Phase 6)** 및 **검증(Phase 7)**까지 한 흐름으로 완료한다.
 
 **DATA POLICY**: 외부 서비스 0·로컬 파일시스템만. DATASETS는 스키마만(실데이터 X).
-세션 2에서 `.mcp.json` 생성 시 `lib/privacy/index.js` egress allowlist 적용 필수.
+hooks는 `.mjs` 확장자(Windows 호환). `.mcp.json` 외부 MCP 자동배선 금지 — warnings 표시 후 수동 검수.
 
 ## Arguments
 
@@ -347,16 +346,101 @@ REVISE 라운드 <N>/3
 
 ---
 
-## Phase 6 — SCAFFOLD (세션 2 — 범위 밖)
+## Phase 6 — SCAFFOLD: `.claude/` 디렉토리 생성
 
-`.claude/{rules,skills,agents,hooks,commands}` 스캐폴딩 = `/sdk` 오케스트레이션 위임.
-hooks는 `.mjs` 확장자 필수. `.mcp.json` 생성 시 `lib/privacy/index.js` egress allowlist 적용.
-**이 커맨드의 MVP 범위에 포함되지 않는다.**
+CLARIFY에서 채운 enriched spec을 구성해 `lib/genesis/scaffold-gen.js#writeClaudeScaffold()`를 호출한다.
 
-## Phase 7 — VERIFY (세션 3 — 범위 밖)
+**enriched spec 구성:**
 
-생성된 blueprint 기반 자동 검증(lint·link check·schema validation).
-**이 커맨드의 MVP 범위에 포함되지 않는다.**
+```js
+const spec = {
+  projectName,                        // INTAKE에서 추론한 프로젝트명
+  domain:      spec.domain,           // INTAKE 결과
+  rules:       spec.rules ?? [],      // CLARIFY에서 확정된 rules 목록
+  skills:      spec.skills ?? [],     // CLARIFY에서 확정된 skills 목록
+  agents:      spec.agents ?? [],     // CLARIFY에서 확정된 agents 목록
+  hooks:       spec.hooks ?? [],      // CLARIFY에서 확정된 hooks 목록
+  commands:    spec.commands ?? [],   // CLARIFY에서 확정된 commands 목록
+  settings:    spec.settings ?? {},   // CLARIFY에서 확정된 settings
+};
+```
+
+**호출 (Phase 3 동적 import 규약 재사용):**
+
+```js
+const { writeClaudeScaffold } = await import(
+  toFileUrl(path.join(pluginRoot, 'lib/genesis/scaffold-gen.js'))
+);
+
+const scaffoldResult = await writeClaudeScaffold({
+  projectRoot: outDir,
+  spec,
+  now: new Date(),
+});
+// writeClaudeScaffold 시그니처:
+// writeClaudeScaffold({ projectRoot, spec, now }) → { ok, written, warnings }
+```
+
+**생성물:**
+
+```
+<outDir>/
+  CLAUDE.md                     ← 이미 Phase 3에서 생성; scaffold-gen은 덮어쓰지 않음
+  .claude/
+    rules/                      ← spec.rules 기반
+    skills/                     ← spec.skills 기반
+    agents/                     ← spec.agents 기반
+    hooks/                      ← spec.hooks 기반 (.mjs 확장자 — Windows 호환)
+    commands/                   ← spec.commands 기반
+    settings.json               ← spec.settings 기반
+```
+
+**DATA POLICY 적용:**
+- hooks는 반드시 `.mjs` 확장자. 외부 네트워크 호출 없는 로컬 전용 스크립트만 생성.
+- `.mcp.json`이 포함되는 경우 외부 MCP 서버 자동배선 **금지** — `warnings`에 해당 항목을 기록하고 사용자에게 수동 검수를 요청한다.
+- 외부 서비스·DB 호출 코드 생성 금지.
+
+**결과 처리:**
+
+```
+scaffoldResult.ok === true  → 생성된 파일 목록(written)을 GFM 테이블로 출력 후 Phase 7로 진행.
+scaffoldResult.warnings.length > 0 → warnings를 사용자에게 표시 후 진행.
+scaffoldResult.ok === false → 오류 내용 보고 후 AskUserQuestion으로 재시도 여부 확인.
+```
+
+---
+
+## Phase 7 — VERIFY: 생성 파일 검증
+
+> Phase 4 COHERENCE는 SPEC 객체 정합(문서 간 논리 충돌)을 검사하고, Phase 7 VERIFY는 **실제로 쓰여진 파일**의 구조·링크·스키마를 검증한다.
+
+SCAFFOLD에서 생성된 파일을 `lib/genesis/verify-gen.js#verifyGenerated()`로 검증한다.
+
+```js
+const { verifyGenerated } = await import(
+  toFileUrl(path.join(pluginRoot, 'lib/genesis/verify-gen.js'))
+);
+
+const verifyResult = await verifyGenerated({ projectRoot: outDir });
+// verifyGenerated 시그니처:
+// verifyGenerated({ projectRoot }) → { ok, checks: [{ name, pass, severity, detail }] }
+```
+
+**결과를 GFM 테이블로 출력:**
+
+```
+| 검증 항목 | 통과 | 심각도 | 상세 |
+|-----------|------|--------|------|
+| claude-md-exists | ✓ | info | CLAUDE.md 확인 |
+| hooks-ext-mjs    | ✓ | info | 모든 hooks .mjs 확장자 |
+| settings-schema  | ✗ | error | settings.json 필수 키 누락: model |
+```
+
+**결과 처리:**
+
+- `severity: 'error'` 항목 존재 시 → 해당 항목을 사용자에게 보고하고, `AskUserQuestion`으로 **자동 보정** 또는 **Phase 5(REVISE) 회귀** 여부를 확인한다.
+- `severity: 'warn'` 항목만 존재 시 → 표로 보고 후 자동 진행.
+- 모든 checks 통과(`ok: true`) → GENESIS COMPLETE 출력.
 
 ---
 
@@ -394,13 +478,37 @@ WILL CREATE:
 ```
 GENESIS COMPLETE
 ================
-Project:  <name>
-Domain:   <domain>
-Out:      <outDir>
+Project:   <name>
+Domain:    <domain>
+Out:       <outDir>
 Documents: 6/6 created
+Scaffold:  .claude/{rules,skills,agents,hooks,commands,settings.json}
+Verified:  <N> checks passed
 
 Next: /plan "<feature>" to decompose the first implementation sprint.
 ```
+
+**생성 트리 요약 (100% 완료):**
+
+```
+<outDir>/
+  CLAUDE.md                          ← 도메인 컨텍스트
+  docs/
+    PRD/<slug>-<date>.md             ← 제품 요구사항
+    ARCHITECTURE.md                  ← 고수준 아키텍처
+    FILE-TREE.md                     ← 파일트리 설계
+    WORKFLOW.md                      ← 핵심 워크플로우
+    DATASETS.md                      ← 데이터 스키마 정의
+  .claude/
+    rules/                           ← 프로젝트 rules
+    skills/                          ← 프로젝트 skills
+    agents/                          ← 프로젝트 agents
+    hooks/                           ← 이벤트 hooks (.mjs)
+    commands/                        ← 슬래시 커맨드
+    settings.json                    ← 모델/팀 설정
+```
+
+**진행률: 7/7 phases — 100%**
 
 ## Next Steps
 
@@ -408,5 +516,4 @@ Next: /plan "<feature>" to decompose the first implementation sprint.
 |---|------|--------|------|
 | 1 | 구현 단계 분해 | `/plan` | 첫 스프린트 실행 계획 |
 | 2 | 아키텍처 심화 | `/design` | architect agent에게 상세 설계 위임 |
-| 3 | 스캐폴딩 | `/sdk` | `.claude/` 디렉토리 생성 (세션 2) |
-| 4 | 자율 실행 | `/autopilot` | 청사진 기반 무인 구현 |
+| 3 | 자율 실행 | `/autopilot` | 청사진 기반 무인 구현 |
