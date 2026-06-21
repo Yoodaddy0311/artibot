@@ -4,7 +4,7 @@ Auto-loads when Claude accesses `plugins/artibot/`.
 
 ## Stack
 
-Claude Native Agent Teams API (TeamCreate/SendMessage/TaskCreate) + 28 agents + 113 skills + 72 commands. ESM only, `"type": "module"`, zero runtime deps, Node >=20.
+Claude Native Agent Teams API (TeamCreate/SendMessage/TaskCreate) + 28 agents + 114 skills + 72 commands. ESM only, `"type": "module"`, zero runtime deps, Node >=20.
 
 > **Honesty note (runtime middleware):** the default prompt pipeline runs an **11-stage** chain (`create-artibot-agent.js#defaultPipeline`) composed from the **15 middleware module files** in `lib/runtime/middleware/`. "11-stage" = the assembled default chain, not the module count; the remaining modules (aci-constraint, cache-roi, context-reset, otel-middleware, skill-trigger) are wired by other entry points or opt-in, not the default chain.
 
@@ -27,6 +27,12 @@ Upper layers import lower only (5 → 4 → 3 → 2 → 1). Detailed module map:
 3. **VERIFY** — report per item with `file:line` evidence
 
 **Zero-Skip**: never silently drop any part of a multi-part request. If blocked, explain why + propose alternative.
+
+## Problem-First Gate (Mandatory — 제안/개선/감사 작업)
+
+제안·개선·감사 작업은 제시 **전에** `problem-validation` 스킬 검증 게이트를 통과해야 한다. null-result("변경 불필요")는 정당한 결과다. 사용자가 재검증을 지시하게 만들지 마라.
+
+적용 범위: `/team` Phase 0, `/improve` Proposal Gate, `/analyze` Proposal Gate, `/ultraplan` Phase 0 — 모두 동일 규율(공유 진실원: `problem-validation` 스킬).
 
 ## Operator-Waits DNA (auto-team)
 

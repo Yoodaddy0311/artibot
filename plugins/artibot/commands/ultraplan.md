@@ -30,6 +30,8 @@ Parse $ARGUMENTS:
 ## 6-Phase Pipeline
 
 ### Phase 0 — VALIDATE (문제 검증 게이트)  ·  발산 전 필수, null-result 가능
+> **공유 규율**: 이 게이트는 `problem-validation` 스킬로 재사용됨 — `/team`, `/improve`, `/analyze`도 동일 체크리스트를 적용한다(DRY). 규율 변경 시 스킬 파일을 먼저 수정한다.
+
 DIVERGE(발산) 엔진을 돌리기 **전에** "이 작업이 진짜 필요한가"부터 확정한다. 이 게이트가 없으면 발산 엔진이 **없는 문제도 만들어낸다** (2026-06 실증 — 트렌드 기반 v4.27.0 계획 전량이 코드 검증에서 불필요로 판명. 메모리 `audit-problem-first`).
 - **입력 분류**:
   - **구체적 작업이 주어짐**("X 마이그레이션", "Y 구현", "이 버그 고쳐") → 문제는 사용자가 이미 준 것 → 통과(pass-through), Phase 1로.
