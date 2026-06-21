@@ -11,9 +11,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+---
+
+## [4.27.0] — 2026-06-21
+
+**Theme**: Project genesis (`/go`) + self-validating workflow + lean cleanup (net −10k LOC)
+
+### Added
+
+- **`/go` — project genesis command (#80–#83)**: turns a single idea (or existing repo) into a complete blueprint folder in one shot — PRD, full file-tree, workflow/feature-flow diagrams, dataset schemas — then scaffolds an executable `.claude/` project (rules/skills/agents/hooks/commands/settings) and verifies it. 7-phase flow: INTAKE → CLARIFY → BLUEPRINT → COHERENCE → REVISE → SCAFFOLD → VERIFY. CLARIFY is research-backed (hypothesis-based MCQ via the `clarify` skill, ≤5 questions, recommended-option-first, skip-if-inferable) so it elicits the spec instead of hallucinating it. All generation is **local-only**: no network, datasets are schema-only, generated hooks are `.mjs` (Windows-safe), and `.mcp.json` never auto-wires external servers. New `lib/genesis/` renderers (tree/flow/dataset/scaffold/coherence/verify) with `no-egress` + `schema-only` test gates.
+- **`problem-validation` skill + workflow gate (#79)**: a skeptical pre-flight gate (default = REJECT) that runs before proposing improvements/audit findings — each candidate must pass "already exists? / hard evidence? / not YAGNI?". Auto-activates on improve/enhance/audit/보완/발전방안 intent and is wired as a mandatory step into `/team`, `/improve`, `/analyze`, and `/ultraplan`. A null result ("nothing to change") is a first-class outcome.
+- **ESLint 5-layer architecture enforcement (#73)**: built-in `no-restricted-imports` rules (zero new deps) enforce the documented layer model (upper imports lower only) across every `lib/` directory — turning a doc convention into a CI gate. It immediately caught a missed `handoff/` violation (reclassified to L3).
+
+### Changed
+
+- **Layer-violation cleanup — cycle2 (#72/#73)**: `clamp01` moved learning→core; `cli-adapter` moved adapters→runtime; `skill-exporter` split so the platform export API lives in the adapters layer. `lib/core` now has **zero upward imports**.
+- **Claim honesty (#74–#77)**: README / plugin `CLAUDE.md` / `/learning` reconciled with code — GRPO "removed" messaging made consistent, middleware module count 18→15, root README pipeline 9→11 stage, swarm row de-GRPO'd; autopilot phase-count doc, theme output-style doc, and orphaned GRPO nightly-trainer config keys corrected.
+
 ### Removed
 
-- **Voyager skill auto-curation** — removed the non-functional `voyager-curation` skill, its `docs/voyager-curation-guide.md` guide, and remaining README/marketplace blurbs after the underlying `lib/learning/voyager/` implementation was deleted in the lean redesign (2026-06). Skill count 114 → 113; all count claims (README, plugin CLAUDE.md, AGENTS.md, marketplace.json) resynced. Historical references in `docs/WIRING-AUDIT-2026-05-30.md` are preserved as an audit record.
+- **16 dead/dormant modules retired (#72)** — universal-harness, multi-step-loop, auto-fixer, context-recovery, hook-dispatcher, rules-resolver, style-registry, toolset-loader, migration-runner, complexity-budget, agent-resolver, plan-mode/session-capture/upgrade-check middleware, auto-skill-registrar, ast-search (plus their tests). Net **−7.7k LOC**.
+- **Dead GRPO comparison API (#78)** — removed the cold/unwired GRPO comparison path in `tool-learner.js` (`suggestToolCandidates`/`recordGroupComparison`/`getGrpoHistory`/`getGrpoScores` + `tool-history` helpers). **−1.2k LOC**. The live Toolformer path (`suggestTool`/`recordUsage`) is untouched; `/learning`'s GRPO section relabeled from "Live" to "Retired / dormant".
+- **Voyager skill auto-curation** — removed the non-functional `voyager-curation` skill, its `docs/voyager-curation-guide.md` guide, and remaining README/marketplace blurbs after the underlying `lib/learning/voyager/` implementation was deleted in the lean redesign (2026-06). Historical references in `docs/WIRING-AUDIT-2026-05-30.md` are preserved as an audit record.
 
 ---
 
