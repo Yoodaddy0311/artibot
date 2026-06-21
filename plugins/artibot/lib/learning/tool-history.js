@@ -1,7 +1,7 @@
 /**
- * Tool history persistence, scoring, and GRPO internal helpers.
- * Manages disk I/O, time-decayed scoring, aggregate computation,
- * and GRPO composite score calculation for tool-learner.js.
+ * Tool history persistence and scoring helpers.
+ * Manages disk I/O, time-decayed scoring, and aggregate computation
+ * for tool-learner.js.
  *
  * Zero dependencies beyond node built-ins. ESM only.
  * @module lib/learning/tool-history
@@ -23,20 +23,6 @@ export const MIN_SAMPLES = 3;
 
 /** Decay factor for older observations (exponential decay) */
 const DECAY_HALF_LIFE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
-
-/** Weight factors for GRPO multi-criteria scoring */
-export const GRPO_WEIGHTS = {
-  success: 0.35,
-  speed: 0.25,
-  accuracy: 0.25,
-  brevity: 0.15,
-};
-
-/** Learning rate for GRPO relative ranking updates */
-export const GRPO_LEARNING_RATE = 0.1;
-
-/** Maximum GRPO comparison groups stored per context */
-export const MAX_GRPO_GROUPS_PER_KEY = 50;
 
 /** Debounce interval for batched writes (ms) */
 export const FLUSH_INTERVAL_MS = 5000;
@@ -71,12 +57,9 @@ export async function loadHistory() {
     if (!_history.version || _history.version < 1) {
       _history = createEmptyHistory();
     }
-    // Migrate v1 -> v2: add GRPO fields
-    if (_history.version < 2) {
-      _history.version = 2;
-      _history.grpoGroups = _history.grpoGroups || {};
-      _history.grpoScores = _history.grpoScores || {};
-    }
+    // Ensure required buckets exist on older histories (defensive).
+    _history.contexts = _history.contexts || {};
+    _history.aggregates = _history.aggregates || {};
   } catch {
     _history = createEmptyHistory();
   }
@@ -137,8 +120,6 @@ export function createEmptyHistory() {
     version: 2,
     contexts: {},
     aggregates: {},
-    grpoGroups: {},
-    grpoScores: {},
     lastUpdated: Date.now(),
   };
 }
@@ -185,94 +166,6 @@ export function rebuildAggregates(history) {
       updateAggregate(history, rec.tool, rec);
     }
   }
-}
-
-// ---------------------------------------------------------------------------
-// GRPO Internals
-// ---------------------------------------------------------------------------
-
-/**
- * Compute a composite GRPO score for a single tool result,
- * normalizing speed and brevity relative to the group.
- *
- * @param {import('./tool-learner.js').GRPOResult} result - The tool result to score
- * @param {import('./tool-learner.js').GRPOResult[]} group - All results in the comparison group
- * @returns {number} Composite score 0.0-1.0
- */
-export function computeGrpoComposite(result, group) {
-  // Success: binary
-  const successScore = result.success ? 1.0 : 0.0;
-
-  // Speed: normalized inversely (fastest = 1.0, slowest = 0.0)
-  const durations = group.map((r) => r.durationMs).filter((d) => d > 0);
-  let speedScore = 0.5;
-  if (durations.length > 1 && result.durationMs > 0) {
-    const maxDur = Math.max(...durations);
-    const minDur = Math.min(...durations);
-    speedScore =
-      maxDur === minDur
-        ? 1.0
-        : 1.0 - (result.durationMs - minDur) / (maxDur - minDur);
-  } else if (result.durationMs > 0 && durations.length === 1) {
-    speedScore = 1.0; // Only one with duration data
-  }
-
-  // Accuracy: directly from caller's assessment
-  const accuracyScore = clampScore(result.accuracy);
-
-  // Brevity: directly from caller's assessment
-  const brevityScore = clampScore(result.brevity);
-
-  return (
-    GRPO_WEIGHTS.success * successScore +
-    GRPO_WEIGHTS.speed * speedScore +
-    GRPO_WEIGHTS.accuracy * accuracyScore +
-    GRPO_WEIGHTS.brevity * brevityScore
-  );
-}
-
-/** Build a GRPO storage key */
-export function makeGrpoKey(context, tool) {
-  return `${context}::${tool}`;
-}
-
-/** Split a GRPO storage key back into [context, tool] */
-export function splitGrpoKey(key) {
-  const idx = key.indexOf('::');
-  if (idx === -1) return [key, ''];
-  return [key.slice(0, idx), key.slice(idx + 2)];
-}
-
-/** Count how many GRPO comparisons a tool participated in for a context */
-export function countGrpoComparisons(history, context, tool) {
-  const groups = history.grpoGroups[context] || [];
-  let count = 0;
-  for (const group of groups) {
-    if (group.rankings.some((r) => r.tool === tool)) count++;
-  }
-  return count;
-}
-
-/** Gather tool scores from related contexts (same operation prefix) */
-export function gatherRelatedTools(history, context) {
-  const parts = context.split(':');
-  if (parts.length < 2) return new Map();
-
-  const prefix = parts[0] + ':';
-  const toolScoreMap = new Map();
-
-  for (const [ctx, records] of Object.entries(history.contexts)) {
-    if (ctx.startsWith(prefix) && ctx !== context) {
-      for (const rec of records) {
-        const existing = toolScoreMap.get(rec.tool);
-        if (!existing || rec.score > existing) {
-          toolScoreMap.set(rec.tool, rec.score);
-        }
-      }
-    }
-  }
-
-  return toolScoreMap;
 }
 
 // ---------------------------------------------------------------------------

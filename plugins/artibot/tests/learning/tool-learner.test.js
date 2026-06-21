@@ -4,15 +4,11 @@ import {
   _getBufferState,
   buildContextKey,
   flushToDisk,
-  getGrpoHistory,
-  getGrpoScores,
   getToolStats,
   pruneOldRecords,
-  recordGroupComparison,
   recordUsage,
   shutdownToolLearner,
   suggestTool,
-  suggestToolCandidates,
 } from '../../lib/learning/tool-learner.js';
 
 // tool-learner uses node:fs/promises directly, so mock it
@@ -79,8 +75,6 @@ describe('tool-learner', () => {
           ],
         },
         aggregates: {},
-        grpoGroups: {},
-        grpoScores: {},
         lastUpdated: Date.now(),
       };
       fs.readFile.mockResolvedValueOnce(JSON.stringify(existing));
@@ -117,8 +111,6 @@ describe('tool-learner', () => {
           })),
         },
         aggregates: {},
-        grpoGroups: {},
-        grpoScores: {},
         lastUpdated: Date.now(),
       };
       fs.readFile.mockResolvedValueOnce(JSON.stringify(existing));
@@ -281,16 +273,6 @@ describe('tool-learner', () => {
       expect(_getBufferState().hasTimer).toBe(false);
     });
 
-    it('recordGroupComparison uses batch buffer (no immediate write)', async () => {
-      const results = [
-        { tool: 'Read', success: true, durationMs: 100, accuracy: 0.9, brevity: 0.8 },
-        { tool: 'Grep', success: false, durationMs: 500, accuracy: 0.3, brevity: 0.5 },
-      ];
-      await recordGroupComparison('search:file', results);
-      expect(fs.writeFile).not.toHaveBeenCalled();
-      expect(_getBufferState().dirty).toBe(true);
-    });
-
     it('pruneOldRecords uses batch buffer when records are pruned', async () => {
       const oldTimestamp = Date.now() - (100 * 24 * 60 * 60 * 1000);
       const existing = {
@@ -301,8 +283,6 @@ describe('tool-learner', () => {
           ],
         },
         aggregates: {},
-        grpoGroups: {},
-        grpoScores: {},
         lastUpdated: Date.now(),
       };
       fs.readFile.mockResolvedValueOnce(JSON.stringify(existing));
@@ -333,8 +313,6 @@ describe('tool-learner', () => {
         version: 2,
         contexts: { 'search:file': records },
         aggregates: {},
-        grpoGroups: {},
-        grpoScores: {},
         lastUpdated: Date.now(),
       };
       fs.readFile.mockResolvedValueOnce(JSON.stringify(existing));
@@ -363,8 +341,6 @@ describe('tool-learner', () => {
         version: 2,
         contexts: { 'search:file': records },
         aggregates: {},
-        grpoGroups: {},
-        grpoScores: {},
         lastUpdated: Date.now(),
       };
       fs.readFile.mockResolvedValueOnce(JSON.stringify(existing));
@@ -386,8 +362,6 @@ describe('tool-learner', () => {
         version: 2,
         contexts: { 'search:file': records },
         aggregates: {},
-        grpoGroups: {},
-        grpoScores: {},
         lastUpdated: Date.now(),
       };
       fs.readFile.mockResolvedValueOnce(JSON.stringify(existing));
@@ -405,8 +379,6 @@ describe('tool-learner', () => {
         version: 2,
         contexts: { 'search:file': records },
         aggregates: {},
-        grpoGroups: {},
-        grpoScores: {},
         lastUpdated: Date.now(),
       };
       fs.readFile.mockResolvedValueOnce(JSON.stringify(existing));
@@ -424,8 +396,6 @@ describe('tool-learner', () => {
         version: 2,
         contexts: { 'search:file': records },
         aggregates: {},
-        grpoGroups: {},
-        grpoScores: {},
         lastUpdated: Date.now(),
       };
       fs.readFile.mockResolvedValueOnce(JSON.stringify(existing));
@@ -455,8 +425,6 @@ describe('tool-learner', () => {
           ],
         },
         aggregates: {},
-        grpoGroups: {},
-        grpoScores: {},
         lastUpdated: Date.now(),
       };
       fs.readFile.mockResolvedValueOnce(JSON.stringify(existing));
@@ -476,8 +444,6 @@ describe('tool-learner', () => {
           ],
         },
         aggregates: {},
-        grpoGroups: {},
-        grpoScores: {},
         lastUpdated: Date.now(),
       };
       fs.readFile.mockResolvedValueOnce(JSON.stringify(existing));
@@ -499,8 +465,6 @@ describe('tool-learner', () => {
           ],
         },
         aggregates: {},
-        grpoGroups: {},
-        grpoScores: {},
         lastUpdated: Date.now(),
       };
       fs.readFile.mockResolvedValueOnce(JSON.stringify(existing));
@@ -509,27 +473,6 @@ describe('tool-learner', () => {
       // 30-day retention: 3-day-old record should survive
       const pruned = await pruneOldRecords(30 * 24 * 60 * 60 * 1000);
       expect(pruned).toBe(0);
-    });
-
-    it('prunes GRPO groups older than retention period', async () => {
-      const oldTimestamp = Date.now() - (100 * 24 * 60 * 60 * 1000);
-      const existing = {
-        version: 2,
-        contexts: {},
-        aggregates: {},
-        grpoGroups: {
-          'search:file': [
-            { context: 'search:file', rankings: [], timestamp: oldTimestamp },
-          ],
-        },
-        grpoScores: {},
-        lastUpdated: Date.now(),
-      };
-      fs.readFile.mockResolvedValueOnce(JSON.stringify(existing));
-      _clearCache();
-
-      const pruned = await pruneOldRecords(90 * 24 * 60 * 60 * 1000);
-      expect(pruned).toBeGreaterThan(0);
     });
 
     it('does not mark dirty when no records were pruned', async () => {
@@ -541,8 +484,6 @@ describe('tool-learner', () => {
           ],
         },
         aggregates: {},
-        grpoGroups: {},
-        grpoScores: {},
         lastUpdated: Date.now(),
       };
       fs.readFile.mockResolvedValueOnce(JSON.stringify(existing));
@@ -588,8 +529,6 @@ describe('tool-learner', () => {
         version: 2,
         contexts: { 'decay:test': records },
         aggregates: {},
-        grpoGroups: {},
-        grpoScores: {},
         lastUpdated: now,
       };
       fs.readFile.mockResolvedValueOnce(JSON.stringify(existing));
@@ -674,294 +613,6 @@ describe('tool-learner', () => {
   });
 
   // ---------------------------------------------------------------------------
-  describe('recordGroupComparison()', () => {
-    it('throws when given fewer than 2 results', async () => {
-      await expect(recordGroupComparison('search:file', [{ tool: 'Read' }])).rejects.toThrow(
-        'GRPO requires at least 2 tool results to compare',
-      );
-    });
-
-    it('throws when given null results', async () => {
-      await expect(recordGroupComparison('search:file', null)).rejects.toThrow();
-    });
-
-    it('records a group comparison and returns rankings', async () => {
-      const results = [
-        { tool: 'Read', success: true, durationMs: 100, accuracy: 0.9, brevity: 0.8 },
-        { tool: 'Grep', success: false, durationMs: 500, accuracy: 0.3, brevity: 0.5 },
-      ];
-      const group = await recordGroupComparison('search:file', results);
-      expect(group).toHaveProperty('context', 'search:file');
-      expect(group).toHaveProperty('rankings');
-      expect(group).toHaveProperty('timestamp');
-      expect(group.rankings).toHaveLength(2);
-    });
-
-    it('ranks successful tool higher than failed tool', async () => {
-      const results = [
-        { tool: 'Read', success: true, durationMs: 100, accuracy: 0.9, brevity: 0.8 },
-        { tool: 'Grep', success: false, durationMs: 500, accuracy: 0.3, brevity: 0.5 },
-      ];
-      const group = await recordGroupComparison('search:file', results);
-      expect(group.rankings[0].tool).toBe('Read');
-      expect(group.rankings[0].rank).toBe(1);
-    });
-
-    it('each ranking entry has compositeScore, relativeAdvantage, and rank', async () => {
-      const results = [
-        { tool: 'Read', success: true, durationMs: 50, accuracy: 0.9, brevity: 0.9 },
-        { tool: 'Grep', success: true, durationMs: 200, accuracy: 0.7, brevity: 0.6 },
-      ];
-      const group = await recordGroupComparison('search:file', results);
-      for (const r of group.rankings) {
-        expect(r).toHaveProperty('tool');
-        expect(r).toHaveProperty('compositeScore');
-        expect(r).toHaveProperty('relativeAdvantage');
-        expect(r).toHaveProperty('rank');
-      }
-    });
-
-    it('marks buffer dirty after recording (deferred write)', async () => {
-      const results = [
-        { tool: 'Read', success: true, durationMs: 100, accuracy: 0.8, brevity: 0.7 },
-        { tool: 'Grep', success: true, durationMs: 300, accuracy: 0.6, brevity: 0.5 },
-      ];
-      await recordGroupComparison('search:file', results);
-      expect(fs.writeFile).not.toHaveBeenCalled();
-      expect(_getBufferState().dirty).toBe(true);
-    });
-
-    it('writes to disk after flush', async () => {
-      const results = [
-        { tool: 'Read', success: true, durationMs: 100, accuracy: 0.8, brevity: 0.7 },
-        { tool: 'Grep', success: true, durationMs: 300, accuracy: 0.6, brevity: 0.5 },
-      ];
-      await recordGroupComparison('search:file', results);
-      await flushToDisk();
-      expect(fs.writeFile).toHaveBeenCalled();
-    });
-
-    it('updates GRPO cumulative scores in history', async () => {
-      const results = [
-        { tool: 'Read', success: true, durationMs: 100, accuracy: 0.9, brevity: 0.8 },
-        { tool: 'Grep', success: false, durationMs: 800, accuracy: 0.2, brevity: 0.4 },
-      ];
-      await recordGroupComparison('search:file', results);
-      await flushToDisk();
-      const content = JSON.parse(fs.writeFile.mock.calls[0][1]);
-      expect(content.grpoScores['search:file::Read']).toBeDefined();
-      expect(content.grpoScores['search:file::Grep']).toBeDefined();
-    });
-  });
-
-  // ---------------------------------------------------------------------------
-  describe('suggestToolCandidates()', () => {
-    it('returns empty array when no data exists', async () => {
-      const candidates = await suggestToolCandidates('unknown:context');
-      expect(Array.isArray(candidates)).toBe(true);
-      expect(candidates).toHaveLength(0);
-    });
-
-    it('returns candidates with required fields', async () => {
-      const existing = {
-        version: 2,
-        contexts: {
-          'search:file': Array.from({ length: 5 }, () => ({
-            tool: 'Read', context: 'search:file', score: 0.9, timestamp: Date.now(),
-          })),
-        },
-        aggregates: {},
-        grpoGroups: {},
-        grpoScores: {},
-        lastUpdated: Date.now(),
-      };
-      fs.readFile.mockResolvedValueOnce(JSON.stringify(existing));
-      _clearCache();
-
-      const candidates = await suggestToolCandidates('search:file');
-      if (candidates.length > 0) {
-        expect(candidates[0]).toHaveProperty('tool');
-        expect(candidates[0]).toHaveProperty('toolformerScore');
-        expect(candidates[0]).toHaveProperty('grpoScore');
-        expect(candidates[0]).toHaveProperty('combinedScore');
-      }
-    });
-
-    it('respects count parameter', async () => {
-      const existing = {
-        version: 2,
-        contexts: {
-          'search:file': [
-            ...Array.from({ length: 5 }, () => ({ tool: 'Read', context: 'search:file', score: 0.9, timestamp: Date.now() })),
-            ...Array.from({ length: 5 }, () => ({ tool: 'Grep', context: 'search:file', score: 0.8, timestamp: Date.now() })),
-            ...Array.from({ length: 5 }, () => ({ tool: 'Task', context: 'search:file', score: 0.7, timestamp: Date.now() })),
-          ],
-        },
-        aggregates: {},
-        grpoGroups: {},
-        grpoScores: {},
-        lastUpdated: Date.now(),
-      };
-      fs.readFile.mockResolvedValueOnce(JSON.stringify(existing));
-      _clearCache();
-
-      const candidates = await suggestToolCandidates('search:file', 2);
-      expect(candidates.length).toBeLessThanOrEqual(2);
-    });
-
-    it('combines GRPO and Toolformer scores', async () => {
-      const existing = {
-        version: 2,
-        contexts: {
-          'search:file': Array.from({ length: 5 }, () => ({
-            tool: 'Read', context: 'search:file', score: 0.9, timestamp: Date.now(),
-          })),
-        },
-        aggregates: {},
-        grpoGroups: {
-          'search:file': [
-            { context: 'search:file', rankings: [{ tool: 'Read', compositeScore: 0.8, relativeAdvantage: 0.2, rank: 1 }], timestamp: Date.now() },
-            { context: 'search:file', rankings: [{ tool: 'Read', compositeScore: 0.9, relativeAdvantage: 0.3, rank: 1 }], timestamp: Date.now() },
-          ],
-        },
-        grpoScores: { 'search:file::Read': 0.8 },
-        lastUpdated: Date.now(),
-      };
-      fs.readFile.mockResolvedValueOnce(JSON.stringify(existing));
-      _clearCache();
-
-      const candidates = await suggestToolCandidates('search:file');
-      const readCandidate = candidates.find((c) => c.tool === 'Read');
-      expect(readCandidate).toBeDefined();
-      expect(readCandidate.combinedScore).toBeGreaterThan(0);
-    });
-
-    it('pulls from related contexts when few candidates', async () => {
-      const existing = {
-        version: 2,
-        contexts: {
-          'search:config': Array.from({ length: 5 }, () => ({
-            tool: 'Grep', context: 'search:config', score: 0.85, timestamp: Date.now(),
-          })),
-        },
-        aggregates: {},
-        grpoGroups: {},
-        grpoScores: {},
-        lastUpdated: Date.now(),
-      };
-      fs.readFile.mockResolvedValueOnce(JSON.stringify(existing));
-      _clearCache();
-
-      // search:file has no data, but search:config does (same prefix "search:")
-      const candidates = await suggestToolCandidates('search:file');
-      // Should discover Grep from the related context
-      const grepCandidate = candidates.find((c) => c.tool === 'Grep');
-      expect(grepCandidate).toBeDefined();
-    });
-  });
-
-  // ---------------------------------------------------------------------------
-  describe('getGrpoHistory()', () => {
-    it('returns empty array when no GRPO history exists', async () => {
-      const history = await getGrpoHistory('unknown:context');
-      expect(history).toEqual([]);
-    });
-
-    it('returns stored GRPO groups for a context', async () => {
-      const group = {
-        context: 'search:file',
-        rankings: [
-          { tool: 'Read', compositeScore: 0.9, relativeAdvantage: 0.2, rank: 1 },
-        ],
-        timestamp: Date.now(),
-      };
-      const existing = {
-        version: 2,
-        contexts: {},
-        aggregates: {},
-        grpoGroups: { 'search:file': [group] },
-        grpoScores: {},
-        lastUpdated: Date.now(),
-      };
-      fs.readFile.mockResolvedValueOnce(JSON.stringify(existing));
-      _clearCache();
-
-      const history = await getGrpoHistory('search:file');
-      expect(history).toHaveLength(1);
-      expect(history[0].context).toBe('search:file');
-    });
-
-    it('respects limit parameter', async () => {
-      const groups = Array.from({ length: 20 }, (_, i) => ({
-        context: 'search:file',
-        rankings: [{ tool: 'Read', compositeScore: 0.9, relativeAdvantage: 0.1, rank: 1 }],
-        timestamp: Date.now() - i * 1000,
-      }));
-      const existing = {
-        version: 2,
-        contexts: {},
-        aggregates: {},
-        grpoGroups: { 'search:file': groups },
-        grpoScores: {},
-        lastUpdated: Date.now(),
-      };
-      fs.readFile.mockResolvedValueOnce(JSON.stringify(existing));
-      _clearCache();
-
-      const history = await getGrpoHistory('search:file', 5);
-      expect(history).toHaveLength(5);
-    });
-  });
-
-  // ---------------------------------------------------------------------------
-  describe('getGrpoScores()', () => {
-    it('returns empty object when no scores exist', async () => {
-      const scores = await getGrpoScores('unknown:context');
-      expect(scores).toEqual({});
-    });
-
-    it('returns tool-to-score map for a context', async () => {
-      const existing = {
-        version: 2,
-        contexts: {},
-        aggregates: {},
-        grpoGroups: {},
-        grpoScores: {
-          'search:file::Read': 0.75,
-          'search:file::Grep': 0.55,
-          'other:context::Read': 0.9,
-        },
-        lastUpdated: Date.now(),
-      };
-      fs.readFile.mockResolvedValueOnce(JSON.stringify(existing));
-      _clearCache();
-
-      const scores = await getGrpoScores('search:file');
-      expect(scores).toEqual({ Read: 0.75, Grep: 0.55 });
-    });
-
-    it('does not include scores from other contexts', async () => {
-      const existing = {
-        version: 2,
-        contexts: {},
-        aggregates: {},
-        grpoGroups: {},
-        grpoScores: {
-          'search:file::Read': 0.75,
-          'other:context::Read': 0.9,
-        },
-        lastUpdated: Date.now(),
-      };
-      fs.readFile.mockResolvedValueOnce(JSON.stringify(existing));
-      _clearCache();
-
-      const scores = await getGrpoScores('search:file');
-      expect(Object.keys(scores)).toHaveLength(1);
-      expect(scores.Read).toBe(0.75);
-    });
-  });
-
-  // ---------------------------------------------------------------------------
   describe('loadHistory() migration paths', () => {
     it('resets history when version is 0 (invalid)', async () => {
       const existing = {
@@ -991,7 +642,7 @@ describe('tool-learner', () => {
       expect(Object.keys(stats)).toHaveLength(0);
     });
 
-    it('migrates v1 history to v2 by adding GRPO fields', async () => {
+    it('loads a v1 history and preserves its contexts (no GRPO fields added)', async () => {
       const existing = {
         version: 1,
         contexts: {
@@ -1007,68 +658,11 @@ describe('tool-learner', () => {
       await recordUsage('Grep', 'search:file', 0.8);
       await flushToDisk();
       const content = JSON.parse(fs.writeFile.mock.calls[0][1]);
-      expect(content.version).toBe(2);
-      expect(content.grpoGroups).toBeDefined();
-      expect(content.grpoScores).toBeDefined();
+      // GRPO comparison storage was retired — no grpo fields are written.
+      expect(content.grpoGroups).toBeUndefined();
+      expect(content.grpoScores).toBeUndefined();
       // Original contexts should be preserved
       expect(content.contexts['search:file'].length).toBeGreaterThanOrEqual(2);
-    });
-
-    it('migrates v1 history preserving existing grpoGroups if present', async () => {
-      const existing = {
-        version: 1,
-        contexts: {},
-        aggregates: {},
-        grpoGroups: { 'test:ctx': [{ context: 'test:ctx', rankings: [], timestamp: Date.now() }] },
-        lastUpdated: Date.now(),
-      };
-      fs.readFile.mockResolvedValueOnce(JSON.stringify(existing));
-      _clearCache();
-
-      await recordUsage('Read', 'test:ctx', 0.9);
-      await flushToDisk();
-      const content = JSON.parse(fs.writeFile.mock.calls[0][1]);
-      expect(content.version).toBe(2);
-      // Existing grpoGroups should be preserved
-      expect(content.grpoGroups['test:ctx']).toHaveLength(1);
-    });
-  });
-
-  // ---------------------------------------------------------------------------
-  describe('computeGrpoComposite speed branches', () => {
-    it('handles equal durations (maxDur === minDur) giving speedScore 1.0', async () => {
-      const results = [
-        { tool: 'Read', success: true, durationMs: 200, accuracy: 0.5, brevity: 0.5 },
-        { tool: 'Grep', success: true, durationMs: 200, accuracy: 0.5, brevity: 0.5 },
-      ];
-      const group = await recordGroupComparison('speed:equal', results);
-      // With equal durations, both tools should get identical compositeScores
-      expect(group.rankings[0].compositeScore).toBe(group.rankings[1].compositeScore);
-    });
-
-    it('handles single tool with positive duration and one with zero duration', async () => {
-      // When one tool has durationMs=0 and the other has positive, only one valid duration
-      const results = [
-        { tool: 'Read', success: true, durationMs: 100, accuracy: 0.7, brevity: 0.7 },
-        { tool: 'Grep', success: true, durationMs: 0, accuracy: 0.7, brevity: 0.7 },
-      ];
-      const group = await recordGroupComparison('speed:single', results);
-      // Read has the only positive duration, so durations.length === 1 for it
-      // Grep has 0 duration so it gets default 0.5 speed
-      expect(group.rankings).toHaveLength(2);
-      // Read should rank higher due to speedScore = 1.0 vs Grep's 0.5
-      expect(group.rankings[0].tool).toBe('Read');
-    });
-
-    it('handles all tools with zero duration (default speedScore 0.5)', async () => {
-      const results = [
-        { tool: 'Read', success: true, durationMs: 0, accuracy: 0.9, brevity: 0.8 },
-        { tool: 'Grep', success: false, durationMs: 0, accuracy: 0.3, brevity: 0.5 },
-      ];
-      const group = await recordGroupComparison('speed:zero', results);
-      expect(group.rankings).toHaveLength(2);
-      // Read should still rank first due to success + accuracy + brevity
-      expect(group.rankings[0].tool).toBe('Read');
     });
   });
 
@@ -1088,8 +682,6 @@ describe('tool-learner', () => {
           })),
         },
         aggregates: {},
-        grpoGroups: {},
-        grpoScores: {},
         lastUpdated: Date.now(),
       };
       fs.readFile.mockResolvedValueOnce(JSON.stringify(existing));
@@ -1111,8 +703,6 @@ describe('tool-learner', () => {
           })),
         },
         aggregates: {},
-        grpoGroups: {},
-        grpoScores: {},
         lastUpdated: Date.now(),
       };
       fs.readFile.mockResolvedValueOnce(JSON.stringify(existing));
@@ -1131,8 +721,6 @@ describe('tool-learner', () => {
           })),
         },
         aggregates: {},
-        grpoGroups: {},
-        grpoScores: {},
         lastUpdated: Date.now(),
       };
       fs.readFile.mockResolvedValueOnce(JSON.stringify(existing));
@@ -1140,226 +728,6 @@ describe('tool-learner', () => {
 
       const suggestions = await suggestTool('search:file');
       expect(suggestions).toHaveLength(0);
-    });
-  });
-
-  // ---------------------------------------------------------------------------
-  describe('gatherRelatedTools() branches', () => {
-    it('returns empty Map for single-part context key', async () => {
-      // Single-part context should return no related tool candidates
-      const existing = {
-        version: 2,
-        contexts: {
-          'search:config': Array.from({ length: 5 }, () => ({
-            tool: 'Grep', context: 'search:config', score: 0.9, timestamp: Date.now(),
-          })),
-        },
-        aggregates: {},
-        grpoGroups: {},
-        grpoScores: {},
-        lastUpdated: Date.now(),
-      };
-      fs.readFile.mockResolvedValueOnce(JSON.stringify(existing));
-      _clearCache();
-
-      // 'noprefix' has no colon, so gatherRelatedTools returns empty Map
-      const candidates = await suggestToolCandidates('noprefix');
-      expect(candidates).toHaveLength(0);
-    });
-
-    it('picks higher score when same tool appears in multiple related contexts', async () => {
-      const existing = {
-        version: 2,
-        contexts: {
-          'search:config': [
-            { tool: 'Grep', context: 'search:config', score: 0.6, timestamp: Date.now() },
-          ],
-          'search:docs': [
-            { tool: 'Grep', context: 'search:docs', score: 0.9, timestamp: Date.now() },
-          ],
-        },
-        aggregates: {},
-        grpoGroups: {},
-        grpoScores: {},
-        lastUpdated: Date.now(),
-      };
-      fs.readFile.mockResolvedValueOnce(JSON.stringify(existing));
-      _clearCache();
-
-      // search:file has no data; should pull Grep from related with highest score
-      const candidates = await suggestToolCandidates('search:file');
-      const grepCandidate = candidates.find((c) => c.tool === 'Grep');
-      expect(grepCandidate).toBeDefined();
-      // toolformerScore should use highest related score (0.9) * 0.5 discount
-      expect(grepCandidate.toolformerScore).toBeCloseTo(0.9 * 0.5, 2);
-    });
-  });
-
-  // ---------------------------------------------------------------------------
-  describe('suggestToolCandidates() combined score branches', () => {
-    it('uses GRPO-only score when tool has >= 2 grpoComparisons but < 3 toolformer samples', async () => {
-      const existing = {
-        version: 2,
-        contexts: {
-          'test:ctx': [
-            { tool: 'Read', context: 'test:ctx', score: 0.9, timestamp: Date.now() },
-            { tool: 'Read', context: 'test:ctx', score: 0.8, timestamp: Date.now() },
-          ],
-        },
-        aggregates: {},
-        grpoGroups: {
-          'test:ctx': [
-            { context: 'test:ctx', rankings: [{ tool: 'Read', compositeScore: 0.8, relativeAdvantage: 0.1, rank: 1 }], timestamp: Date.now() },
-            { context: 'test:ctx', rankings: [{ tool: 'Read', compositeScore: 0.9, relativeAdvantage: 0.2, rank: 1 }], timestamp: Date.now() },
-          ],
-        },
-        grpoScores: { 'test:ctx::Read': 0.75 },
-        lastUpdated: Date.now(),
-      };
-      fs.readFile.mockResolvedValueOnce(JSON.stringify(existing));
-      _clearCache();
-
-      const candidates = await suggestToolCandidates('test:ctx');
-      const readCandidate = candidates.find((c) => c.tool === 'Read');
-      expect(readCandidate).toBeDefined();
-      // grpoComparisons >= 2 but toolformerSamples < 3, so uses GRPO-only
-      expect(readCandidate.combinedScore).toBe(readCandidate.grpoScore);
-    });
-
-    it('uses Toolformer-only score when tool has >= 3 samples but < 2 grpoComparisons', async () => {
-      const existing = {
-        version: 2,
-        contexts: {
-          'test:ctx': Array.from({ length: 5 }, () => ({
-            tool: 'Read', context: 'test:ctx', score: 0.85, timestamp: Date.now(),
-          })),
-        },
-        aggregates: {},
-        grpoGroups: {},
-        grpoScores: {},
-        lastUpdated: Date.now(),
-      };
-      fs.readFile.mockResolvedValueOnce(JSON.stringify(existing));
-      _clearCache();
-
-      const candidates = await suggestToolCandidates('test:ctx');
-      const readCandidate = candidates.find((c) => c.tool === 'Read');
-      expect(readCandidate).toBeDefined();
-      // hasTf but no GRPO, so combinedScore == toolformerScore
-      expect(readCandidate.combinedScore).toBe(readCandidate.toolformerScore);
-    });
-
-    it('uses cold-start score (max of signals or 0.1) when neither GRPO nor Toolformer meet thresholds', async () => {
-      const existing = {
-        version: 2,
-        contexts: {
-          'test:ctx': [
-            { tool: 'Read', context: 'test:ctx', score: 0.9, timestamp: Date.now() },
-          ],
-        },
-        aggregates: {},
-        grpoGroups: {},
-        grpoScores: {},
-        lastUpdated: Date.now(),
-      };
-      fs.readFile.mockResolvedValueOnce(JSON.stringify(existing));
-      _clearCache();
-
-      const candidates = await suggestToolCandidates('test:ctx');
-      const readCandidate = candidates.find((c) => c.tool === 'Read');
-      expect(readCandidate).toBeDefined();
-      // 1 sample < MIN_SAMPLES(3) and 0 grpoComparisons < 2 -> cold start
-      expect(readCandidate.combinedScore).toBeGreaterThanOrEqual(0.1);
-    });
-
-    it('blends GRPO 60% + Toolformer 40% when both signals are strong', async () => {
-      const existing = {
-        version: 2,
-        contexts: {
-          'test:ctx': Array.from({ length: 5 }, () => ({
-            tool: 'Read', context: 'test:ctx', score: 0.8, timestamp: Date.now(),
-          })),
-        },
-        aggregates: {},
-        grpoGroups: {
-          'test:ctx': [
-            { context: 'test:ctx', rankings: [{ tool: 'Read', compositeScore: 0.85, relativeAdvantage: 0.15, rank: 1 }], timestamp: Date.now() },
-            { context: 'test:ctx', rankings: [{ tool: 'Read', compositeScore: 0.9, relativeAdvantage: 0.2, rank: 1 }], timestamp: Date.now() },
-            { context: 'test:ctx', rankings: [{ tool: 'Read', compositeScore: 0.8, relativeAdvantage: 0.1, rank: 1 }], timestamp: Date.now() },
-          ],
-        },
-        grpoScores: { 'test:ctx::Read': 0.85 },
-        lastUpdated: Date.now(),
-      };
-      fs.readFile.mockResolvedValueOnce(JSON.stringify(existing));
-      _clearCache();
-
-      const candidates = await suggestToolCandidates('test:ctx');
-      const readCandidate = candidates.find((c) => c.tool === 'Read');
-      expect(readCandidate).toBeDefined();
-      // Both have enough data: 60% GRPO + 40% Toolformer
-      expect(readCandidate.combinedScore).toBeGreaterThan(0);
-      // Verify it is not just GRPO or just Toolformer
-      expect(readCandidate.combinedScore).not.toBe(readCandidate.grpoScore);
-      expect(readCandidate.combinedScore).not.toBe(readCandidate.toolformerScore);
-    });
-
-    it('creates GRPO-only entry when tool exists in grpoScores but not in contexts', async () => {
-      const existing = {
-        version: 2,
-        contexts: {},
-        aggregates: {},
-        grpoGroups: {
-          'test:ctx': [
-            { context: 'test:ctx', rankings: [{ tool: 'TaskAgent', compositeScore: 0.7, relativeAdvantage: 0.1, rank: 1 }], timestamp: Date.now() },
-            { context: 'test:ctx', rankings: [{ tool: 'TaskAgent', compositeScore: 0.8, relativeAdvantage: 0.2, rank: 1 }], timestamp: Date.now() },
-          ],
-        },
-        grpoScores: { 'test:ctx::TaskAgent': 0.65 },
-        lastUpdated: Date.now(),
-      };
-      fs.readFile.mockResolvedValueOnce(JSON.stringify(existing));
-      _clearCache();
-
-      const candidates = await suggestToolCandidates('test:ctx');
-      const agent = candidates.find((c) => c.tool === 'TaskAgent');
-      expect(agent).toBeDefined();
-      expect(agent.toolformerScore).toBe(0);
-      expect(agent.grpoScore).toBe(0.65);
-    });
-  });
-
-  // ---------------------------------------------------------------------------
-  describe('pruneOldRecords() GRPO score cleanup', () => {
-    it('removes orphaned GRPO scores when contexts and groups are pruned', async () => {
-      const oldTimestamp = Date.now() - (100 * 24 * 60 * 60 * 1000);
-      const existing = {
-        version: 2,
-        contexts: {
-          'old:ctx': [
-            { tool: 'Read', context: 'old:ctx', score: 0.9, timestamp: oldTimestamp },
-          ],
-        },
-        aggregates: {},
-        grpoGroups: {
-          'old:ctx': [
-            { context: 'old:ctx', rankings: [{ tool: 'Read', compositeScore: 0.8, relativeAdvantage: 0.1, rank: 1 }], timestamp: oldTimestamp },
-          ],
-        },
-        grpoScores: {
-          'old:ctx::Read': 0.75,
-          'fresh:ctx::Grep': 0.6,
-        },
-        lastUpdated: Date.now(),
-      };
-      fs.readFile.mockResolvedValueOnce(JSON.stringify(existing));
-      _clearCache();
-
-      await pruneOldRecords(90 * 24 * 60 * 60 * 1000);
-      await flushToDisk();
-      const content = JSON.parse(fs.writeFile.mock.calls[0][1]);
-      // Orphaned score for 'old:ctx::Read' should be removed
-      expect(content.grpoScores['old:ctx::Read']).toBeUndefined();
     });
   });
 
@@ -1412,8 +780,6 @@ describe('tool-learner', () => {
         version: 2,
         contexts: { 'confidence:test': records },
         aggregates: {},
-        grpoGroups: {},
-        grpoScores: {},
         lastUpdated: Date.now(),
       };
       fs.readFile.mockResolvedValueOnce(JSON.stringify(existing));
@@ -1432,8 +798,6 @@ describe('tool-learner', () => {
         version: 2,
         contexts: { 'confidence:test': records },
         aggregates: {},
-        grpoGroups: {},
-        grpoScores: {},
         lastUpdated: Date.now(),
       };
       fs.readFile.mockResolvedValueOnce(JSON.stringify(existing));
@@ -1444,7 +808,7 @@ describe('tool-learner', () => {
       expect(suggestions[0].confidence).toBe('medium');
     });
 
-    it('returns "low" confidence for fewer than 3 samples', async () => {
+    it('suppresses tools with fewer than MIN_SAMPLES observations', async () => {
       const records = Array.from({ length: 2 }, (_, i) => ({
         tool: 'Read', context: 'confidence:test', score: 0.9, timestamp: Date.now() - i * 1000,
       }));
@@ -1452,19 +816,16 @@ describe('tool-learner', () => {
         version: 2,
         contexts: { 'confidence:test': records },
         aggregates: {},
-        grpoGroups: {},
-        grpoScores: {},
         lastUpdated: Date.now(),
       };
       fs.readFile.mockResolvedValueOnce(JSON.stringify(existing));
       _clearCache();
 
-      // low confidence tools still show if minScore=0, but filtered by MIN_SAMPLES in suggestTool
-      // Use suggestToolCandidates which doesn't filter by MIN_SAMPLES
-      const candidates = await suggestToolCandidates('confidence:test');
-      const readCandidate = candidates.find((c) => c.tool === 'Read');
-      expect(readCandidate).toBeDefined();
-      expect(readCandidate.toolformerSamples).toBe(2);
+      // Only 2 samples (< MIN_SAMPLES=3), so suggestTool returns nothing even
+      // with minScore=0. (getConfidence's "low" branch is covered directly in
+      // tool-history.test.js.)
+      const suggestions = await suggestTool('confidence:test', { minScore: 0 });
+      expect(suggestions).toHaveLength(0);
     });
   });
 
@@ -1481,39 +842,6 @@ describe('tool-learner', () => {
   });
 
   // ---------------------------------------------------------------------------
-  describe('recordGroupComparison() GRPO groups cap', () => {
-    it('caps stored GRPO groups at MAX_GRPO_GROUPS_PER_KEY (50)', async () => {
-      const groups = Array.from({ length: 50 }, (_, i) => ({
-        context: 'cap:test',
-        rankings: [
-          { tool: 'Read', compositeScore: 0.8, relativeAdvantage: 0.1, rank: 1 },
-          { tool: 'Grep', compositeScore: 0.6, relativeAdvantage: -0.1, rank: 2 },
-        ],
-        timestamp: Date.now() - i * 1000,
-      }));
-      const existing = {
-        version: 2,
-        contexts: {},
-        aggregates: {},
-        grpoGroups: { 'cap:test': groups },
-        grpoScores: {},
-        lastUpdated: Date.now(),
-      };
-      fs.readFile.mockResolvedValueOnce(JSON.stringify(existing));
-      _clearCache();
-
-      const results = [
-        { tool: 'Read', success: true, durationMs: 100, accuracy: 0.9, brevity: 0.8 },
-        { tool: 'Grep', success: true, durationMs: 200, accuracy: 0.7, brevity: 0.6 },
-      ];
-      await recordGroupComparison('cap:test', results);
-      await flushToDisk();
-      const content = JSON.parse(fs.writeFile.mock.calls[0][1]);
-      expect(content.grpoGroups['cap:test'].length).toBeLessThanOrEqual(50);
-    });
-  });
-
-  // ---------------------------------------------------------------------------
   describe('saveHistory() / flushToDisk() edge cases', () => {
     it('flushToDisk is a no-op when history is null and not dirty', async () => {
       _clearCache();
@@ -1522,23 +850,4 @@ describe('tool-learner', () => {
     });
   });
 
-  // ---------------------------------------------------------------------------
-  describe('splitGrpoKey() edge cases', () => {
-    it('handles key without :: separator in pruneOldRecords', async () => {
-      const existing = {
-        version: 2,
-        contexts: {},
-        aggregates: {},
-        grpoGroups: {},
-        grpoScores: { 'malformed-key': 0.5 },
-        lastUpdated: Date.now(),
-      };
-      fs.readFile.mockResolvedValueOnce(JSON.stringify(existing));
-      _clearCache();
-
-      // Should not throw; malformed key should be handled gracefully
-      const pruned = await pruneOldRecords();
-      expect(pruned).toBe(0);
-    });
-  });
 });
