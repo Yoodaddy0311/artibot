@@ -1,43 +1,34 @@
 /**
- * Toolformer + GRPO self-learning tool selection module.
- * Tracks tool usage history, learns success rates per context,
- * recommends optimal tools, and applies Group Relative Policy
- * Optimization for comparative tool ranking within candidate groups.
+ * Toolformer self-learning tool selection module.
+ * Tracks tool usage history, learns time-decayed success rates per
+ * context, and recommends optimal tools for a given task pattern.
  *
  * History persistence and scoring internals are in tool-history.js.
  *
  * Storage: ~/.claude/artibot/tool-history.json
  * Zero dependencies - uses node:fs, node:path, node:os only.
  *
- * Write-back buffer: recordUsage() and recordGroupComparison() do NOT
- * write to disk immediately. Changes are batched and flushed after
- * FLUSH_INTERVAL_MS (5 seconds) or on explicit flushToDisk() call.
+ * Write-back buffer: recordUsage() does NOT write to disk immediately.
+ * Changes are batched and flushed after FLUSH_INTERVAL_MS (5 seconds)
+ * or on explicit flushToDisk() call.
  *
  * @module lib/learning/tool-learner
  */
 
-import { round } from '../core/index.js';
 import {
   clampScore,
   clearCache,
   clearDirtyState,
-  computeGrpoComposite,
   computeToolScores,
-  countGrpoComparisons,
   createEmptyHistory,
-  gatherRelatedTools,
   getBufferState,
   getDirtyState,
-  GRPO_LEARNING_RATE,
   loadHistory,
-  makeGrpoKey,
   markDirty,
-  MAX_GRPO_GROUPS_PER_KEY,
   MIN_SAMPLES,
   rebuildAggregates,
   saveHistory,
   setHistory,
-  splitGrpoKey,
   suggestFromRelated,
   updateAggregate,
 } from './tool-history.js';
@@ -67,8 +58,6 @@ const MAX_RECORDS_PER_KEY = 200;
  * @property {number} version - Schema version
  * @property {Object<string, UsageRecord[]>} contexts - Keyed by context string
  * @property {Object<string, ToolStats>} aggregates - Pre-computed per-tool aggregates
- * @property {Object<string, GRPOGroup[]>} grpoGroups - GRPO comparison groups per context
- * @property {Object<string, number>} grpoScores - GRPO cumulative scores per "context::tool" key
  * @property {number} lastUpdated - Unix ms
  */
 
@@ -78,31 +67,6 @@ const MAX_RECORDS_PER_KEY = 200;
  * @property {number} totalScore
  * @property {number} avgScore
  * @property {number} lastUsed
- */
-
-/**
- * @typedef {Object} GRPOResult
- * @property {string} tool - Tool or command name
- * @property {boolean} success - Did it succeed? (exit code 0, result found)
- * @property {number} durationMs - Execution time in ms
- * @property {number} accuracy - Output accuracy/usefulness 0.0-1.0
- * @property {number} brevity - Command brevity 0.0-1.0 (shorter = higher)
- * @property {string} [output] - Raw output for reference
- */
-
-/**
- * @typedef {Object} GRPOGroup
- * @property {string} context - Context key
- * @property {GRPORankedEntry[]} rankings - Entries ranked by composite score
- * @property {number} timestamp - When this comparison was recorded
- */
-
-/**
- * @typedef {Object} GRPORankedEntry
- * @property {string} tool - Tool name
- * @property {number} compositeScore - Weighted multi-criteria score 0.0-1.0
- * @property {number} relativeAdvantage - Advantage over group mean (-1 to +1)
- * @property {number} rank - 1-based rank in group
  */
 
 // ---------------------------------------------------------------------------
@@ -271,25 +235,6 @@ export async function pruneOldRecords(retentionMs = 90 * 24 * 60 * 60 * 1000) {
     }
   }
 
-  // Prune GRPO groups
-  for (const [ctx, groups] of Object.entries(history.grpoGroups)) {
-    const before = groups.length;
-    history.grpoGroups[ctx] = groups.filter((g) => g.timestamp >= cutoff);
-    pruned += before - history.grpoGroups[ctx].length;
-
-    if (history.grpoGroups[ctx].length === 0) {
-      delete history.grpoGroups[ctx];
-    }
-  }
-
-  // Remove orphaned GRPO scores (contexts with no groups or records)
-  for (const key of Object.keys(history.grpoScores)) {
-    const [ctx] = splitGrpoKey(key);
-    if (!history.contexts[ctx] && !history.grpoGroups[ctx]) {
-      delete history.grpoScores[key];
-    }
-  }
-
   // Rebuild aggregates from remaining data
   if (pruned > 0) {
     rebuildAggregates(history);
@@ -306,212 +251,6 @@ export async function pruneOldRecords(retentionMs = 90 * 24 * 60 * 60 * 1000) {
 export async function resetHistory() {
   setHistory(createEmptyHistory());
   await saveHistory();
-}
-
-// ---------------------------------------------------------------------------
-// GRPO API - Group Relative Policy Optimization
-// ---------------------------------------------------------------------------
-
-/**
- * Generate ranked tool candidates for a context using GRPO cumulative scores
- * combined with Toolformer success history. Returns tools ordered by
- * combined GRPO + Toolformer ranking.
- *
- * @param {string} context - Context key
- * @param {number} [count=5] - Number of candidates to return
- * @returns {Promise<GRPOCandidate[]>}
- */
-export async function suggestToolCandidates(context, count = 5) {
-  const history = await loadHistory();
-
-  // Gather all known tools for this context from both Toolformer and GRPO data
-  const toolScores = new Map();
-
-  // 1. Toolformer scores (time-decayed success rate)
-  const records = history.contexts[context] || [];
-  if (records.length > 0) {
-    const tfScored = computeToolScores(records);
-    for (const s of tfScored) {
-      toolScores.set(s.tool, {
-        tool: s.tool,
-        toolformerScore: s.weightedScore,
-        toolformerSamples: s.samples,
-        grpoScore: 0,
-        grpoComparisons: 0,
-        combinedScore: 0,
-      });
-    }
-  }
-
-  // 2. GRPO cumulative scores
-  for (const [key, score] of Object.entries(history.grpoScores)) {
-    const [ctx, tool] = splitGrpoKey(key);
-    if (ctx !== context) continue;
-
-    let entry = toolScores.get(tool);
-    if (!entry) {
-      entry = {
-        tool,
-        toolformerScore: 0,
-        toolformerSamples: 0,
-        grpoScore: 0,
-        grpoComparisons: 0,
-        combinedScore: 0,
-      };
-      toolScores.set(tool, entry);
-    }
-    entry.grpoScore = score;
-    entry.grpoComparisons = countGrpoComparisons(history, context, tool);
-  }
-
-  // 3. Also pull from related contexts if we have few candidates
-  if (toolScores.size < count) {
-    const relatedTools = gatherRelatedTools(history, context);
-    for (const [tool, relScore] of relatedTools) {
-      if (!toolScores.has(tool)) {
-        toolScores.set(tool, {
-          tool,
-          toolformerScore: relScore * 0.5, // Discount related context scores
-          toolformerSamples: 0,
-          grpoScore: 0,
-          grpoComparisons: 0,
-          combinedScore: 0,
-        });
-      }
-    }
-  }
-
-  // 4. Compute combined score: blend Toolformer + GRPO
-  for (const entry of toolScores.values()) {
-    const hasGrpo = entry.grpoComparisons >= 2;
-    const hasTf = entry.toolformerSamples >= MIN_SAMPLES;
-
-    if (hasGrpo && hasTf) {
-      // Both signals: GRPO 60%, Toolformer 40% (GRPO is more informative for ranking)
-      entry.combinedScore = round(entry.grpoScore * 0.6 + entry.toolformerScore * 0.4);
-    } else if (hasGrpo) {
-      entry.combinedScore = round(entry.grpoScore);
-    } else if (hasTf) {
-      entry.combinedScore = round(entry.toolformerScore);
-    } else {
-      // Cold start: use whatever signal we have
-      entry.combinedScore = round(
-        Math.max(entry.grpoScore, entry.toolformerScore, 0.1)
-      );
-    }
-  }
-
-  // Sort by combined score descending
-  const candidates = [...toolScores.values()];
-  candidates.sort((a, b) => b.combinedScore - a.combinedScore);
-
-  return candidates.slice(0, count);
-}
-
-/**
- * @typedef {Object} GRPOCandidate
- * @property {string} tool - Tool name
- * @property {number} toolformerScore - Toolformer time-decayed score
- * @property {number} toolformerSamples - Number of Toolformer observations
- * @property {number} grpoScore - GRPO cumulative relative score
- * @property {number} grpoComparisons - Number of GRPO group comparisons
- * @property {number} combinedScore - Blended final score
- */
-
-/**
- * Record a group of tool execution results for GRPO relative comparison.
- * Computes composite scores, ranks tools within the group, and updates
- * cumulative GRPO scores using relative advantage.
- *
- * @param {string} context - Context key
- * @param {GRPOResult[]} results - Array of tool execution results to compare
- * @returns {Promise<GRPOGroup>} The recorded comparison group with rankings
- */
-export async function recordGroupComparison(context, results) {
-  if (!results || results.length < 2) {
-    throw new Error('GRPO requires at least 2 tool results to compare');
-  }
-
-  const history = await loadHistory();
-
-  // 1. Compute composite score for each tool
-  const entries = results.map((r) => {
-    const compositeScore = computeGrpoComposite(r, results);
-    return { tool: r.tool, compositeScore };
-  });
-
-  // 2. Compute group mean
-  const groupMean =
-    entries.reduce((sum, e) => sum + e.compositeScore, 0) / entries.length;
-
-  // 3. Rank and compute relative advantage
-  entries.sort((a, b) => b.compositeScore - a.compositeScore);
-  const rankings = entries.map((e, i) => ({
-    tool: e.tool,
-    compositeScore: round(e.compositeScore),
-    relativeAdvantage: round(e.compositeScore - groupMean),
-    rank: i + 1,
-  }));
-
-  // 4. Store the comparison group
-  const group = { context, rankings, timestamp: Date.now() };
-
-  if (!history.grpoGroups[context]) {
-    history.grpoGroups[context] = [];
-  }
-  history.grpoGroups[context].push(group);
-
-  // Cap stored groups
-  if (history.grpoGroups[context].length > MAX_GRPO_GROUPS_PER_KEY) {
-    history.grpoGroups[context] = history.grpoGroups[context].slice(
-      -MAX_GRPO_GROUPS_PER_KEY
-    );
-  }
-
-  // 5. Update cumulative GRPO scores using relative advantage
-  for (const ranked of rankings) {
-    const grpoKey = makeGrpoKey(context, ranked.tool);
-    const current = history.grpoScores[grpoKey] ?? 0.5; // Start at neutral 0.5
-    const updated = current + GRPO_LEARNING_RATE * ranked.relativeAdvantage;
-    history.grpoScores[grpoKey] = clampScore(updated);
-  }
-
-  markDirty(flushToDisk);
-  return group;
-}
-
-/**
- * Get GRPO comparison history for a context.
- *
- * @param {string} context - Context key
- * @param {number} [limit=10] - Max groups to return
- * @returns {Promise<GRPOGroup[]>}
- */
-export async function getGrpoHistory(context, limit = 10) {
-  const history = await loadHistory();
-  const groups = history.grpoGroups[context] || [];
-  return groups.slice(-limit);
-}
-
-/**
- * Get GRPO cumulative scores for all tools in a context.
- *
- * @param {string} context - Context key
- * @returns {Promise<Object<string, number>>} Tool -> GRPO score map
- */
-export async function getGrpoScores(context) {
-  const history = await loadHistory();
-  const result = {};
-  const prefix = context + '::';
-
-  for (const [key, score] of Object.entries(history.grpoScores)) {
-    if (key.startsWith(prefix)) {
-      const tool = key.slice(prefix.length);
-      result[tool] = score;
-    }
-  }
-
-  return result;
 }
 
 // ---------------------------------------------------------------------------

@@ -145,7 +145,7 @@ function renderGrpo(state, args) {
   const out = [
     '## GRPO Self-Learning (tool selection)',
     '',
-    '_Live: group-relative scoring over tool-use comparisons. This is distinct from the GRPO routing-policy optimizer, which was retired in the 2026-06 lean redesign._',
+    '_Retired / dormant — no live writer. The `rounds`/`weights`/`teamWeights` schema read here was produced by the GRPO routing-policy optimizer that was torn down in the 2026-06 lean redesign; the tool-selection GRPO comparison API (`recordGroupComparison` et al.) was removed as dead code in a later pass. Any numbers below are stale historical data from a `grpo-history.json` left on disk._',
     '',
   ];
   out.push(`- Total rounds: **${rounds.length}**`);

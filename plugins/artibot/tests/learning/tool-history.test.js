@@ -1,5 +1,5 @@
 /**
- * Tests for tool-history.js — persistence, scoring, and GRPO helpers.
+ * Tests for tool-history.js — persistence and scoring helpers.
  *
  * @module tests/learning/tool-history
  */
@@ -22,26 +22,18 @@ import {
   clampScore,
   clearCache,
   clearDirtyState,
-  computeGrpoComposite,
   computeToolScores,
-  countGrpoComparisons,
   createEmptyHistory,
   FLUSH_INTERVAL_MS,
-  gatherRelatedTools,
   getBufferState,
   getConfidence,
   getDirtyState,
-  GRPO_LEARNING_RATE,
-  GRPO_WEIGHTS,
   loadHistory,
-  makeGrpoKey,
   markDirty,
-  MAX_GRPO_GROUPS_PER_KEY,
   MIN_SAMPLES,
   rebuildAggregates,
   saveHistory,
   setHistory,
-  splitGrpoKey,
   suggestFromRelated,
   updateAggregate,
 } from '../../lib/learning/tool-history.js';
@@ -69,20 +61,6 @@ describe('constants', () => {
     expect(Number.isInteger(MIN_SAMPLES)).toBe(true);
   });
 
-  it('GRPO_WEIGHTS sum to 1.0', () => {
-    const sum = Object.values(GRPO_WEIGHTS).reduce((a, b) => a + b, 0);
-    expect(sum).toBeCloseTo(1.0, 5);
-  });
-
-  it('GRPO_LEARNING_RATE is between 0 and 1', () => {
-    expect(GRPO_LEARNING_RATE).toBeGreaterThan(0);
-    expect(GRPO_LEARNING_RATE).toBeLessThanOrEqual(1);
-  });
-
-  it('MAX_GRPO_GROUPS_PER_KEY is a positive number', () => {
-    expect(MAX_GRPO_GROUPS_PER_KEY).toBeGreaterThan(0);
-  });
-
   it('FLUSH_INTERVAL_MS is a positive number', () => {
     expect(FLUSH_INTERVAL_MS).toBeGreaterThan(0);
   });
@@ -97,8 +75,8 @@ describe('createEmptyHistory()', () => {
     expect(h.version).toBe(2);
     expect(h.contexts).toEqual({});
     expect(h.aggregates).toEqual({});
-    expect(h.grpoGroups).toEqual({});
-    expect(h.grpoScores).toEqual({});
+    expect(h.grpoGroups).toBeUndefined();
+    expect(h.grpoScores).toBeUndefined();
     expect(h.lastUpdated).toBeGreaterThan(0);
   });
 });
@@ -120,7 +98,7 @@ describe('loadHistory()', () => {
   });
 
   it('parses valid JSON from disk', async () => {
-    const saved = { version: 2, contexts: { x: [] }, aggregates: {}, grpoGroups: {}, grpoScores: {}, lastUpdated: 1 };
+    const saved = { version: 2, contexts: { x: [] }, aggregates: {}, lastUpdated: 1 };
     fs.readFile.mockResolvedValueOnce(JSON.stringify(saved));
     clearCache();
     const h = await loadHistory();
@@ -128,14 +106,15 @@ describe('loadHistory()', () => {
     expect(h.contexts).toEqual({ x: [] });
   });
 
-  it('migrates v1 to v2 by adding GRPO fields', async () => {
+  it('loads a v1 history without injecting GRPO fields', async () => {
     const v1 = { version: 1, contexts: {}, aggregates: {}, lastUpdated: 1 };
     fs.readFile.mockResolvedValueOnce(JSON.stringify(v1));
     clearCache();
     const h = await loadHistory();
-    expect(h.version).toBe(2);
-    expect(h.grpoGroups).toEqual({});
-    expect(h.grpoScores).toEqual({});
+    // GRPO comparison storage was retired — load must not synthesize it.
+    expect(h.grpoGroups).toBeUndefined();
+    expect(h.grpoScores).toBeUndefined();
+    expect(h.contexts).toEqual({});
   });
 
   it('resets to empty when version < 1', async () => {
@@ -277,126 +256,6 @@ describe('rebuildAggregates()', () => {
     h.contexts = {};
     rebuildAggregates(h);
     expect(h.aggregates.OldTool).toBeUndefined();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// computeGrpoComposite()
-// ---------------------------------------------------------------------------
-describe('computeGrpoComposite()', () => {
-  it('returns 1.0 for perfect result in single-member group', () => {
-    const result = { success: true, durationMs: 100, accuracy: 1.0, brevity: 1.0 };
-    const score = computeGrpoComposite(result, [result]);
-    expect(score).toBeCloseTo(1.0, 2);
-  });
-
-  it('returns lower score for failed result', () => {
-    const fail = { success: false, durationMs: 100, accuracy: 0.5, brevity: 0.5 };
-    const pass = { success: true, durationMs: 100, accuracy: 0.5, brevity: 0.5 };
-    const failScore = computeGrpoComposite(fail, [fail, pass]);
-    const passScore = computeGrpoComposite(pass, [fail, pass]);
-    expect(failScore).toBeLessThan(passScore);
-  });
-
-  it('normalizes speed across group', () => {
-    const fast = { success: true, durationMs: 50, accuracy: 0.8, brevity: 0.8 };
-    const slow = { success: true, durationMs: 500, accuracy: 0.8, brevity: 0.8 };
-    const group = [fast, slow];
-    const fastScore = computeGrpoComposite(fast, group);
-    const slowScore = computeGrpoComposite(slow, group);
-    expect(fastScore).toBeGreaterThan(slowScore);
-  });
-
-  it('handles equal durations in group', () => {
-    const r1 = { success: true, durationMs: 100, accuracy: 0.8, brevity: 0.8 };
-    const r2 = { success: true, durationMs: 100, accuracy: 0.8, brevity: 0.8 };
-    const score = computeGrpoComposite(r1, [r1, r2]);
-    expect(score).toBeGreaterThan(0);
-  });
-
-  it('handles zero durations gracefully', () => {
-    const r = { success: true, durationMs: 0, accuracy: 0.8, brevity: 0.8 };
-    const score = computeGrpoComposite(r, [r]);
-    expect(score).toBeGreaterThan(0);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// makeGrpoKey() / splitGrpoKey()
-// ---------------------------------------------------------------------------
-describe('makeGrpoKey() / splitGrpoKey()', () => {
-  it('creates a key from context and tool', () => {
-    expect(makeGrpoKey('search:file', 'Read')).toBe('search:file::Read');
-  });
-
-  it('splits key back into context and tool', () => {
-    expect(splitGrpoKey('search:file::Read')).toEqual(['search:file', 'Read']);
-  });
-
-  it('handles key without :: separator', () => {
-    expect(splitGrpoKey('noseparator')).toEqual(['noseparator', '']);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// countGrpoComparisons()
-// ---------------------------------------------------------------------------
-describe('countGrpoComparisons()', () => {
-  it('returns 0 for empty context', () => {
-    const h = createEmptyHistory();
-    expect(countGrpoComparisons(h, 'ctx', 'Read')).toBe(0);
-  });
-
-  it('counts groups containing the tool', () => {
-    const h = createEmptyHistory();
-    h.grpoGroups.ctx = [
-      { rankings: [{ tool: 'Read' }, { tool: 'Write' }] },
-      { rankings: [{ tool: 'Write' }, { tool: 'Grep' }] },
-      { rankings: [{ tool: 'Read' }, { tool: 'Grep' }] },
-    ];
-    expect(countGrpoComparisons(h, 'ctx', 'Read')).toBe(2);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// gatherRelatedTools()
-// ---------------------------------------------------------------------------
-describe('gatherRelatedTools()', () => {
-  it('returns empty map for single-part context', () => {
-    const h = createEmptyHistory();
-    expect(gatherRelatedTools(h, 'noseparator').size).toBe(0);
-  });
-
-  it('gathers tools from related contexts by prefix', () => {
-    const h = createEmptyHistory();
-    h.contexts = {
-      'search:file': [{ tool: 'Read', score: 0.8 }],
-      'search:code': [{ tool: 'Grep', score: 0.9 }],
-      'build:app': [{ tool: 'Write', score: 0.7 }],
-    };
-    const related = gatherRelatedTools(h, 'search:new');
-    expect(related.size).toBe(2);
-    expect(related.get('Read')).toBe(0.8);
-    expect(related.get('Grep')).toBe(0.9);
-  });
-
-  it('excludes exact matching context', () => {
-    const h = createEmptyHistory();
-    h.contexts = {
-      'search:file': [{ tool: 'Read', score: 0.8 }],
-    };
-    const related = gatherRelatedTools(h, 'search:file');
-    expect(related.size).toBe(0);
-  });
-
-  it('keeps highest score for duplicate tools', () => {
-    const h = createEmptyHistory();
-    h.contexts = {
-      'search:a': [{ tool: 'Read', score: 0.6 }],
-      'search:b': [{ tool: 'Read', score: 0.9 }],
-    };
-    const related = gatherRelatedTools(h, 'search:new');
-    expect(related.get('Read')).toBe(0.9);
   });
 });
 
