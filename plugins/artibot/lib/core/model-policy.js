@@ -6,7 +6,7 @@
  * validators, SubagentStart hooks) imports to stay consistent. Today the policy
  * is declared but unread; this module makes it authoritative.
  *
- * Design constraints (mirror lib/runtime/agent-resolver.js):
+ * Design constraints:
  *   - Zero new deps
  *   - Pure resolution logic, no side effects
  *   - Never throws: returns a safe default/null/[] on any error

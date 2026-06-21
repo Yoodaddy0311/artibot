@@ -6,13 +6,13 @@ Auto-loads when Claude accesses `plugins/artibot/`.
 
 Claude Native Agent Teams API (TeamCreate/SendMessage/TaskCreate) + 28 agents + 113 skills + 72 commands. ESM only, `"type": "module"`, zero runtime deps, Node >=20.
 
-> **Honesty note (runtime middleware):** the default prompt pipeline runs an **11-stage** chain (`create-artibot-agent.js#defaultPipeline`) composed from **18 middleware module files** in `lib/runtime/middleware/`. "11-stage" = the assembled default chain, not the module count; 7 modules (plan-mode, aci-constraint, context-reset, otel, session-capture, skill-trigger, upgrade-check) are wired by other entry points or opt-in, not the default chain.
+> **Honesty note (runtime middleware):** the default prompt pipeline runs an **11-stage** chain (`create-artibot-agent.js#defaultPipeline`) composed from the **15 middleware module files** in `lib/runtime/middleware/`. "11-stage" = the assembled default chain, not the module count; the remaining modules (aci-constraint, cache-roi, context-reset, otel-middleware, skill-trigger) are wired by other entry points or opt-in, not the default chain.
 
 ## 5-Layer Architecture
 
 | Layer | Dir | Responsibility |
 |---|---|---|
-| 5 Runtime | `lib/runtime/` | 11-stage default middleware chain (of 18 modules), agent factory |
+| 5 Runtime | `lib/runtime/` | 11-stage default middleware chain (of 15 modules), agent factory |
 | 4 Cognitive | `lib/cognitive/` | System 1/2 routing, EFFORT_POLICY |
 | 3 Learning | `lib/learning/` | memory, lifelong, knowledge-transfer, swarm sync |
 | 2 Auxiliary | `lib/{adapters,swarm,privacy,visual,git,...}/` | Domain services |

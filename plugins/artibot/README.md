@@ -427,12 +427,11 @@ Artibot의 핵심 엔진은 Claude Code의 **Agent Teams API**입니다. 단순�
 
 ### 런타임 미들웨어 파이프라인 (v1.14.0+)
 
-- 11단계 미들웨어 엔진: router → subagents → tasks → checkpoint → memory → skills → guardrail → token-usage → summarization → lifecycle → plan-mode
+- 미들웨어 엔진: router → subagents → tasks → checkpoint → memory → skills → guardrail → token-usage → summarization → lifecycle
 - GuardrailMiddleware: 런타임 안전 가드레일 (위험 패턴 차단, 리소스 제한)
 - TokenUsageMiddleware: 토큰 사용량 추적 및 최적화 제안
 - SummarizationMiddleware: 응답 자동 요약 및 컨텍스트 압축
 - LifecycleMiddleware: Setup/Teardown 3-phase 에이전트 생명주기
-- PlanModeMiddleware: 읽기 전용 guardrail로 안전한 분석 단계 보장
 
 ### 자동 학습 파이프라인 (v1.14.0+)
 
@@ -1524,8 +1523,8 @@ plugins/artibot/
 │   ├── evals/                   # 런타임 eval 스위트
 │   └── utils/
 ├── lib/                         # 79개 모듈
-│   ├── core/                    # 코어 (27): platform, config, cache, lifecycle, extension, auto-fixer, error-codes, hook-utils, quickstart, style-registry, guard-registry, file-lock, event-bus, blocked-patterns 등
-│   ├── runtime/                 # 런타임 (14): create-artibot-agent, evaluator, middleware/ (11: router, subagents, tasks, checkpoint, memory, skills, guardrail, token-usage, summarization, lifecycle, plan-mode)
+│   ├── core/                    # 코어: platform, config, cache, lifecycle, extension, error-codes, hook-utils, quickstart, guard-registry, file-lock, event-bus, blocked-patterns 등
+│   ├── runtime/                 # 런타임: create-artibot-agent, evaluator, middleware/ (router, subagents, tasks, checkpoint, memory, skills, guardrail, token-usage, summarization, lifecycle 등)
 │   ├── cognitive/               # 인지 엔진 (8): router, system1, system2 (core+strategies), sandbox, loop-detector
 │   ├── learning/                # 학습 (15): memory, grpo, knowledge-transfer, knowledge-demotion, lifelong, tool-learner, self-evaluator, vault 등
 │   ├── adapters/                # 멀티모델 어댑터 (7): base, gemini, codex, cursor, antigravity, adapter-utils
