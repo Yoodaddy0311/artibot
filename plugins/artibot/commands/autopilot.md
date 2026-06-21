@@ -213,10 +213,14 @@ if (pfInstr?.suppress) { /* warnings: state.preflightWarnings에 누적 + 계속
 
 ### Step 3 — Phase Execution Loop
 
-엔진이 반환한 `instruction` 객체를 따라 **Phase 0 ~ 6을 순차 실행**한다. 각 Phase 완료 시 `engine.recordPhaseResult(state, { phase, status, ...result })`로 session-store 업데이트 (1번 인자는 `loadSession(sessionId)`로 얻은 **state 객체**, 2번 인자에 `phase`/`status` 포함 payload).
+엔진이 반환한 `instruction` 객체를 따라 **Phase를 순차 실행**한다. 엔진 `lib/autopilot/engine.js`의 `PHASES`는 8개(INTAKE/PLAN/EXECUTE/CROSS_CHECK/VERIFY/IMPROVE/**EVALUATE**/REPORT)이며, 실행 갯수는 모드에 따라 다르다:
+- **legacy(비-goal) PRD** = Goal Contract 부재 → IMPROVE 다음 EVALUATE를 건너뛰고 바로 REPORT (`engine.js` 라인 354 `state.goalContract ? 'EVALUATE' : 'REPORT'`). 실효 **7 phase (0~6)**.
+- **goal-driven PRD** = Goal Contract 존재 → IMPROVE 다음 **EVALUATE 실행**(수락기준 미달 시 re-EXECUTE로 재반복, 충족 시 REPORT). 실효 **EVALUATE 추가**.
+
+각 Phase 완료 시 `engine.recordPhaseResult(state, { phase, status, ...result })`로 session-store 업데이트 (1번 인자는 `loadSession(sessionId)`로 얻은 **state 객체**, 2번 인자에 `phase`/`status` 포함 payload).
 
 **자동 통합 (default 모드 기본 ON)**:
-- **★ 진행률 렌더 (MANDATORY — 채팅에 눈에 띄게)**: 각 Phase 완료 직후, 리더는 **대화에 진행률 박스를 직접(인라인) 출력**한다. PRD 작업이 "지금 몇 %"인지 한눈에 보이게 하는 핵심 UX다. `commands/team.md`의 "Phase 3.5 진행률 렌더링" 박스 템플릿을 그대로 쓰되 done=방금 끝난 phase index+1, total=7 (INTAKE/PLAN/EXECUTE/CROSS_CHECK/VERIFY/IMPROVE/REPORT), phaseLabel=Phase명. 인라인 출력이라 스크립트·환경변수 의존이 없어 **모든 컴퓨터에서 작동**한다. (선택: `node "$HOME/.claude/artibot/scripts/render-progress.js" <done> 7 "<Phase>"` 헬퍼로 자동화 가능 — 실패 시 인라인 폴백. `${CLAUDE_PLUGIN_ROOT}`는 쓰지 마라.) hook/TUI가 아니라 리더 채팅 출력이라 항상 보인다. 생략 금지.
+- **★ 진행률 렌더 (MANDATORY — 채팅에 눈에 띄게)**: 각 Phase 완료 직후, 리더는 **대화에 진행률 박스를 직접(인라인) 출력**한다. PRD 작업이 "지금 몇 %"인지 한눈에 보이게 하는 핵심 UX다. `commands/team.md`의 "Phase 3.5 진행률 렌더링" 박스 템플릿을 그대로 쓰되 done=방금 끝난 phase index+1, **total은 모드에 따라 7(legacy: EVALUATE 생략) 또는 EVALUATE 포함(goal-driven)**, phaseLabel=Phase명. legacy면 phase 순서 INTAKE/PLAN/EXECUTE/CROSS_CHECK/VERIFY/IMPROVE/REPORT(=7), goal-driven이면 IMPROVE 뒤 EVALUATE가 추가된다. 인라인 출력이라 스크립트·환경변수 의존이 없어 **모든 컴퓨터에서 작동**한다. (선택: `node "$HOME/.claude/artibot/scripts/render-progress.js" <done> 7 "<Phase>"` 헬퍼로 자동화 가능 — 실패 시 인라인 폴백. `${CLAUDE_PLUGIN_ROOT}`는 쓰지 마라.) hook/TUI가 아니라 리더 채팅 출력이라 항상 보인다. 생략 금지.
 - 각 Phase 완료 직후 `engine.notePhaseCost(state, phase, { tokensIn, tokensOut, costUsd, model })` 호출 — Phase별 토큰/비용을 telemetry + state.usage에 기록
 - `engine.checkBudgetThreshold(sessionId, { limitUsd: options.budget })` 결과 `crossed === 95`면 `engine.buildCostWarningInstruction(state, threshold)`로 `notifyDanger` 발사
 - TUI 활성 세션은 footer에 `engine.renderCostInline(getSessionCost(sessionId))` 자동 표시
@@ -231,7 +235,7 @@ if (pfInstr?.suppress) { /* warnings: state.preflightWarnings에 누적 + 계속
   <!-- model: model-policy 해석 — 역할 frontier 티어 -->
 
 #### Phase 2 — PARALLEL EXECUTE
-- EXECUTE 러너는 통합 분류기(`lib/cognitive/workflow-plan.js`)가 선출한다: 현재 기본값은 `TeamCreate` (adaptive 팀)이며, 결정적 workflow-runner 로의 교체는 향후 Option-B 단계의 pluggable 러너다 (현 동작 불변).
+- EXECUTE 러너는 통합 분류기(`lib/cognitive/workflow-plan.js`)가 선출한다: 현재 기본값은 `TeamCreate` (adaptive 팀)이다. 결정적 workflow-runner 로의 교체(Option-B pluggable 러너)는 **미구현·향후** 단계다 (현 동작 불변 — 항상 TeamCreate).
 - `--no-team` 미설정 시: `TeamCreate(team_name="autopilot-{sessionId}", description="{task}")` → 병렬 `Task()` 스폰.
 - 30분(또는 `--checkpoint`)마다 WIP commit: `git commit -m "wip(autopilot): phase2 checkpoint {sessionId}"`. SHA를 `engine.recordCheckpoint(sessionId, sha)`로 기록.
 
@@ -260,7 +264,7 @@ if (pfInstr?.suppress) { /* warnings: state.preflightWarnings에 누적 + 계속
 ### Step 5 — Completion
 
 Phase 6 완료 후:
-- **★ 최종 진행률 100% 렌더 (MANDATORY)**: 🎉 작업 완료 박스(`██████...██ 100%`, done=total=7)를 채팅에 **인라인 출력**해 PRD 작업이 **100% 완료됐음을 시각 확정**한다. (선택: `node "$HOME/.claude/artibot/scripts/render-progress.js" 7 7`.)
+- **★ 최종 진행률 100% 렌더 (MANDATORY)**: 🎉 작업 완료 박스(`██████...██ 100%`, done=total — legacy면 7, goal-driven이면 EVALUATE 포함 total)를 채팅에 **인라인 출력**해 PRD 작업이 **100% 완료됐음을 시각 확정**한다. (선택: `node "$HOME/.claude/artibot/scripts/render-progress.js" <total> <total>`.)
 - `engine.notifyCompletion(sessionId)` 호출.
 - 보고서 경로 + 큐된 질문 요약을 사용자에게 출력.
 - 비용 요약: `engine.renderCostBlock(engine.getSessionCost(sessionId))` 마크다운 테이블을 사용자에게 노출 (Phase별 토큰/$ + Budget 사용률).

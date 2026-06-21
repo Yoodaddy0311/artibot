@@ -878,12 +878,7 @@
     "schedule": {
       "enabled": true,
       "nightlyLearner": "3 2 * * *",
-      "driftCheck": "7 6 * * 1",
-      "nightlyGrpoTrainer": "30 2 * * *",
-      "nightlyAgentPolicyTrainer": "45 2 * * *",
-      "nightlySkillPolicyTrainer": "0 3 * * *",
-      "nightlyJointPolicyTrainer": "15 3 * * *",
-      "nightlyEffortPolicyTrainer": "30 3 * * *"
+      "driftCheck": "7 6 * * 1"
     },
     "hierarchicalMemory": {
       "enabled": true,

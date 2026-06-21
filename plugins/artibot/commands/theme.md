@@ -37,14 +37,14 @@ Bash: node "$HOME/.claude/artibot/scripts/theme-apply.js" list
 2. 엔진 출력(적용된 3표면)을 사용자에게 보여준다.
 3. **반드시 사용자에게 다음 3가지를 안내**:
    - statusLine/색상은 **화면 갱신 또는 Claude Code 재시작 시** 완전 반영
-   - output-style은 **사용자가 `/output-style` 실행 후 해당 테마 선택**해야 활성화
+   - output-style은 엔진이 `settings.outputStyle`에 **자동 설정**하므로 별도 수동 선택 불필요 — `/clear` 또는 새 세션부터 즉시 적용
    - 마음에 안 들면 `/theme reset`
 
 ### `/theme reset` (원복)
 ```
 Bash: node "$HOME/.claude/artibot/scripts/theme-apply.js" reset
 ```
-+ "output-style은 `/output-style default`로 별도 복귀" 안내.
++ "output-style은 엔진이 이전 값(또는 기본)으로 **자동 복원**한다 — 별도 명령 불필요" 안내.
 
 ## 테마 (registry.js에 데이터로 정의 — 추가 쉬움)
 
