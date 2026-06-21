@@ -79,6 +79,22 @@ frontier 티어 모델은 effort를 네이티브 레벨로 노출한다: **max /
 
 ## Execution Flow
 
+### Phase 0: VALIDATE (제안검증 게이트)  ·  제안/개선/감사형 작업 시 필수, null-result 가능
+
+**적용 조건**: 작업 요청이 제안·개선·감사형인 경우 — "보완해줘", "발전방안", "개선점", "전수조사", "최신 트렌드 맞나" 등 열린 요청 → **DECOMPOSE 전에 이 게이트를 반드시 통과**한다.  
+**구체적 작업 지시**("X 구현", "Y 버그 수정", "이 파일 바꿔줘") → 문제는 사용자가 이미 준 것 → pass-through, Phase 1로 직행.
+
+**검증 절차**: 각 후보를 다음 체크리스트로 대조한다 (`problem-validation` 스킬 참조):
+1. **이미 존재하는가?** — 코드·설정·문서에서 `file:line`으로 확인
+2. **하드 증거가 있는가?** — incident 기록, 실패 테스트, 문서화된 통증 (트렌드 추론 금지)
+3. **YAGNI 아닌가?** — 현재 실제로 필요하지 않으면 REJECT
+
+**기본값 = REJECT.** 통과한 후보만 NECESSARY로 분류해 Phase 1로 넘긴다.
+
+**null-result (1급 결과)**: 통과 후보가 0개면 계획/제안을 만들지 않고 "변경 불필요"로 종료한다. 억지 제안은 부채다.
+
+제안 시 **NECESSARY 목록 + REJECT/DEFER 목록을 함께** 제시한다.
+
 ### Phase 1: DECOMPOSE (Leader only)
 Break the user's request into independent work units:
 ```
@@ -400,6 +416,7 @@ This runs the original flow: Phase 1 through 6, with automatic shutdown after re
 - Cross-checker reviewing their own work
 - **작업 완료 후 팀원을 임의로 셧다운** — 재소환 토큰 낭비 (idle 유지가 더 저렴)
 - **"혹시 모르니까" 셧다운** — 애매하면 유지가 정답
+- **검증 없이 제안 쏟아내기** — 사용자가 재검증을 지시해야만 걸러지는 건 게이트 부재 (Phase 0 VALIDATE 필수)
 
 ## Fable opt-in
 

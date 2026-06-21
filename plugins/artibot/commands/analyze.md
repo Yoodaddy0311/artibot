@@ -18,6 +18,15 @@ Parse $ARGUMENTS:
 - `--delegate`: Enable sub-agent delegation for large codebases
 - `--think` | `--think-hard` | `--ultrathink`: Analysis depth control
 
+## Proposal Validation Gate (분석→제안 시 필수)
+
+분석 결과를 바탕으로 제안·개선안을 제시하기 **전에** 각 후보를 `problem-validation` 스킬 체크리스트로 검증한다:
+1. 이미 존재하는가? (`file:line`으로 확인)
+2. 하드 증거(실패테스트·측정값·incident)가 있는가? (분석 모델 추론만으로 NECESSARY 판정 금지)
+3. YAGNI 아닌가? (현재 실제로 필요하지 않으면 REJECT)
+
+기본값 = REJECT. 통과 후보가 0개면 "변경 불필요"로 종료. 제안 시 NECESSARY + REJECT 목록을 함께 제시한다.
+
 ## Execution Flow
 
 1. **Parse**: Resolve target path(s). Default scope = `module` if directory, `file` if single file

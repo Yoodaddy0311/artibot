@@ -19,6 +19,15 @@ Parse $ARGUMENTS:
 - `--interactive`: Pause for confirmation between iterations
 - `--scope [level]`: `file` | `module` | `project`
 
+## Proposal Validation Gate (필수)
+
+개선안을 생성하기 **전에** 각 후보를 `problem-validation` 스킬 체크리스트로 검증한다:
+1. 이미 존재하는가? (`file:line`으로 확인)
+2. 하드 증거(incident·실패테스트·측정값)가 있는가? (트렌드 추론 금지)
+3. YAGNI 아닌가? (현재 실제로 필요하지 않으면 REJECT)
+
+기본값 = REJECT. 통과 후보가 0개면 "변경 불필요"로 종료. 제안 시 NECESSARY + REJECT 목록을 함께 제시한다.
+
 ## Execution Flow
 
 1. **Decompose**: Break user request into numbered atomic improvement items. Every item MUST be tracked.
