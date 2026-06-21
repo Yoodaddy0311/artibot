@@ -76,7 +76,7 @@ Team auto-boost: "전체", "all", "comprehensive", "audit", "병렬", "parallel"
 
 ## Complexity Budget Pre-Check
 
-Before delegation, check `ComplexityBudget.shouldSplit(taskDescription)` from `lib/orchestration/complexity-budget.js`. Split if: lines >150, subtasks >5, files >7. Use `suggestSplits()` to find natural break points.
+Before delegation, gauge whether the task should be split. Split when any threshold is exceeded: lines >150, subtasks >5, or files >7. Break at natural seams (independent files, distinct domains, separable subtasks).
 
 ## Result Aggregation
 

@@ -85,9 +85,10 @@ function writeFixture(root) {
 
   // data-egress-guard.js — a faithful stub: assertEgressAllowed throws an
   // EgressBlockedError for anything not on the (empty) allowlist. This is what
-  // the git branch must SKIP and the http branch must HIT.
+  // the git branch must SKIP and the http branch must HIT. The guard now lives
+  // in lib/core (Layer 1), so the stub is written there.
   writeFileSync(
-    path.join(libPrivacy, 'data-egress-guard.js'),
+    path.join(libCore, 'data-egress-guard.js'),
     [
       'export class EgressBlockedError extends Error {',
       '  constructor(message) {',

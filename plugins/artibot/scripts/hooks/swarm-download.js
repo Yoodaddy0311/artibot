@@ -20,7 +20,7 @@ import {
   assertEgressAllowed,
   EgressBlockedError,
   loadAllowlist,
-} from '../../lib/privacy/data-egress-guard.js';
+} from '../../lib/core/data-egress-guard.js';
 
 /**
  * Safely import a module via dynamic import. Returns null on failure

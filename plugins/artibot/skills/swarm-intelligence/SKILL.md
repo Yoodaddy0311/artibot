@@ -103,7 +103,7 @@ Local and global weights are merged using weighted averaging:
 {
   "swarm": {
     "enabled": false,
-    "serverUrl": "https://artibot-swarm.run.app",
+    "serverUrl": "http://localhost:3000",
     "syncInterval": "session",
     "optIn": false,
     "localGlobalRatio": [0.3, 0.7],

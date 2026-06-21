@@ -16,6 +16,16 @@ export function round(n, precision = 3) {
   return Math.round(n * factor) / factor;
 }
 
+/**
+ * Clamp a value into the [0, 1] range. Non-numbers and NaN coerce to 0.
+ * @param {number} value - Value to clamp
+ * @returns {number}
+ */
+export function clamp01(value) {
+  if (typeof value !== 'number' || Number.isNaN(value)) return 0;
+  return Math.max(0, Math.min(1, value));
+}
+
 /** Approximate characters per token for budget estimation. */
 export const CHARS_PER_TOKEN = 4;
 

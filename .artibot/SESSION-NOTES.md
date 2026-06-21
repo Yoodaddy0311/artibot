@@ -1878,3 +1878,95 @@
 <!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
 
 ---
+
+## 2026-06-20 00:40 UTC · `master`
+
+- **Commits** (20):
+  - `dda3832` chore(session): 세션 핸드오프 갱신 — /update 메커니즘 조사 + 다른 머신 미결 스레드 기록
+  - `d1a7480` chore(session): 세션 핸드오프 갱신 + 워크플로 수정 세션 마감
+  - `0f98b74` feat(plan): /ultraplan 문제-검증 게이트(Phase 0) + /plan 감사형 주의
+  - `3ecf284` chore(session): /save 핸드오프 + artibot/master 화석 브랜치 제거 세션
+  - `ffb1865` feat(audit): Tier 2 — GRPO forward-pass dedup + SKILL.md size gate
+  - `a5b3416` test(ci): cover CLAUDE.md count-claim gate + make validator importable
+  - `c5bac5a` chore(audit): Tier 1 lightweight cleanup — count drift gate, stale removal, manifest sync
+  - `6075c93` chore(notes): append v4.26.0/v4.26.1 release session log
+  - `9b5e257` Merge pull request #64 from Yoodaddy0311/chore/sync-readme-badges-v4.26.1
+  - `5256b24` docs(release): sync README badges + marketplace meta to v4.26.1
+  - `01294b1` chore(release): v4.26.1 — audit fix 패치(swarm privacy·autopilot barrel·High 3건) + CI 테스트 fix + 메타 정합
+  - `e9cce85` chore(handoff): 세션 핸드오프 2026-06-12 — GitHub 대청소·v4.26.0 동기화 세션
+  - `1c551ff` docs(agents): AGENTS.md skill count 테이블 셀 113->114 누락 보정
+  - `24be9f5` docs(meta): sync skills count 113->114 in marketplace + AGENTS
+  - `ccd7f7f` chore(cleanup): v4.8 일회성 릴리즈 노트 제거 — CHANGELOG.md가 정본
+  - `3769e93` docs(readme): revert agent count to 28 — INDEX.md is not an agent
+  - `5827d15` docs(readme): sync agent count 28->29 in export examples
+  - `ce550bc` fix(tests): make file-checkpoint tmpdir assertion OS-aware
+  - `d344e35` docs(release): sync README badges + marketplace meta to v4.26.0
+  - `fc078be` Merge remote-tracking branch 'origin/artibot/master'
+- **Files touched**: 49
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-06-20 01:42 UTC · `artibot/autopilot-update-hardening`
+
+- **Commits** (1):
+  - `95b2f28` fix(update): harden /update against silent no-op false-success (B1+B2)
+- **Files touched**: 3
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-06-20 01:55 UTC · `artibot/autopilot-update-hardening`
+
+- **Commits** (1):
+  - `67234a3` refactor(update): wire update-verify module into /update (B3)
+- **Files touched**: 3
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-06-20 04:45 UTC · `artibot/autopilot-update-hardening`
+
+- **Commits** (1):
+  - `766b722` refactor(update): extract update-git.js + wire INV-6/7 gates (B4)
+- **Files touched**: 7
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-06-20 05:59 UTC · `master`
+
+- **Commits** (3):
+  - `9bfc2e0` feat(cognitive): wire native effort signal producer (#30806) (#66)
+  - `3d5160f` fix(update): harden /update against silent no-op false-success (B1-B4) (#65)
+  - `de55a1c` fix(ci): keep fast-skip notice off the missing plugin working-directory (#67)
+- **Files touched**: 7
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-06-20 08:03 UTC · `master`
+
+- **Commits** (2):
+  - `daebf8d` refactor(learning): lean redesign follow-ups — voyager cleanup, engine split, GRPO teardown (#69)
+  - `be7b6fa` refactor(learning): lean self-learning redesign — fix leaks, retire theater, strengthen working channel (#68)
+- **Files touched**: 93
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+## 2026-06-20 08:11 UTC · `master`
+
+- **Commits** (1):
+  - `33141af` test(scripts): guard nightly-trainer registry + make it import-safe (#70)
+- **Files touched**: 2
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---

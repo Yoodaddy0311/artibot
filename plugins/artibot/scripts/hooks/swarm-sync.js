@@ -21,7 +21,7 @@ import {
   assertEgressAllowed,
   EgressBlockedError,
   loadAllowlist,
-} from '../../lib/privacy/data-egress-guard.js';
+} from '../../lib/core/data-egress-guard.js';
 
 async function main() {
   const raw = await readStdin();

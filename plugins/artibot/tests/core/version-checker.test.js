@@ -20,7 +20,7 @@ vi.mock('node:fs', () => ({
 
 // Mock egress guard so node:fs mock does not break allowlist loading.
 // The actual DATA POLICY gate is tested in version-checker-egress.test.js.
-vi.mock('../../lib/privacy/data-egress-guard.js', () => ({
+vi.mock('../../lib/core/data-egress-guard.js', () => ({
   assertEgressAllowed: vi.fn(), // no-op: allow all in unit tests
   EgressBlockedError: class EgressBlockedError extends Error {
     constructor(msg) { super(msg); this.name = 'EgressBlockedError'; }
