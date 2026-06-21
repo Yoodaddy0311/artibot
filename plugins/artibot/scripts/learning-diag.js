@@ -135,14 +135,19 @@ function fmtNum(x, digits = 2) {
 function renderGrpo(state, args) {
   const grpo = state.grpo;
   if (!grpo || typeof grpo !== 'object') {
-    return '## GRPO Self-Learning\n\n_no `grpo-history.json` found_\n';
+    return '## GRPO Self-Learning (tool selection)\n\n_no `grpo-history.json` found_\n';
   }
 
   const rounds = Array.isArray(grpo.rounds) ? grpo.rounds : [];
   const weights = grpo.weights && typeof grpo.weights === 'object' ? grpo.weights : {};
   const teamWeights = grpo.teamWeights && typeof grpo.teamWeights === 'object' ? grpo.teamWeights : {};
 
-  const out = ['## GRPO Self-Learning', ''];
+  const out = [
+    '## GRPO Self-Learning (tool selection)',
+    '',
+    '_Live: group-relative scoring over tool-use comparisons. This is distinct from the GRPO routing-policy optimizer, which was retired in the 2026-06 lean redesign._',
+    '',
+  ];
   out.push(`- Total rounds: **${rounds.length}**`);
   if (rounds.length > 0) {
     out.push(`- First: ${rounds[0]?.timestamp ?? 'n/a'}`);
