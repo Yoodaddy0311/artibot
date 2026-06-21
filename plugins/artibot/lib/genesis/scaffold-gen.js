@@ -270,7 +270,7 @@ export function renderHookStub(event) {
     'async function main() {',
     '  const payload = await readStdin();',
     `  // event: ${ev}`,
-    '  // TODO: inspect the payload and implement local-only logic here.',
+    '  // Add local-only hook logic here: inspect payload, no network/external calls.',
     '  void payload;',
     "  process.stdout.write(JSON.stringify({ continue: true }) + '\\n');",
     '}',
