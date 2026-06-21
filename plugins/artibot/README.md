@@ -47,7 +47,7 @@ That's it. No manual config. Agent Teams auto-enables on first session start.
 | 1 | **Dual-Process Cognitive Router (System 1 / System 2)** — production implementation of 2026 DPA architecture | `lib/cognitive/router.js`, `system1.js`, `system2-core.js` |
 | 2 | **Hierarchical Memory** — working / episodic / semantic with active curation | `lib/learning/memory-manager.js`, `lib/learning/lifelong.js` |
 | 3 | **Lifelong Learning (RLVR)** — verifiable-reward signals (test-pass / typecheck / no-revisit) feed drift-detector + rule-extractor + skill promotion. *No GRPO/RL optimizer — removed in the 2026-06 lean redesign.* | `lib/learning/` (lifelong-learner, rule-extractor, drift-detector, knowledge-graph, ...) |
-| 4 | **11-Stage Runtime Middleware** — default chain: lifecycle → router → memory → skills → tasks → subagents → guardrail → summarization → token-usage → checkpoint → cache-roi (assembled from 18 middleware modules) | `lib/runtime/middleware/`, `create-artibot-agent.js#defaultPipeline` |
+| 4 | **11-Stage Runtime Middleware** — default chain: lifecycle → router → memory → skills → tasks → subagents → guardrail → summarization → token-usage → checkpoint → cache-roi (assembled from 15 middleware modules) | `lib/runtime/middleware/`, `create-artibot-agent.js#defaultPipeline` |
 | 5 | **MCP Server (v3.8+)** — Artibot exposes its own MCP server so Claude Desktop/Code can consume Artibot inventory | `lib/mcp/server.js`, `bin/artibot-mcp.mjs` |
 | 6 | **Data Sovereignty** — outbound to external DBs is hard-blocked. Memory, learning, swarm all stay on disk | `CLAUDE.md` DATA POLICY + `lib/privacy/` |
 | 7 | **Native Agent Teams API** — TeamCreate / SendMessage / TaskCreate, not Task() one-shot delegation | `lib/runtime/middleware/subagents.js`, `lib/runtime/middleware/tasks.js` |
@@ -88,7 +88,7 @@ flowchart TD
 
 | # | Layer | Directory | Responsibility |
 |---|---|---|---|
-| 5 | Runtime | `lib/runtime/` | 11-stage default middleware chain (of 18 modules), agent factory |
+| 5 | Runtime | `lib/runtime/` | 11-stage default middleware chain (of 15 modules), agent factory |
 | 4 | Cognitive | `lib/cognitive/` | System 1/2 routing, EFFORT_POLICY |
 | 3 | Learning | `lib/learning/` | RLVR-signal learning, hierarchical memory, knowledge transfer |
 | 2 | Auxiliary | `lib/{adapters,swarm,privacy,visual,mcp,observability,git,...}/` | Domain services |
@@ -198,9 +198,7 @@ Key fields in `artibot.config.json` (file is auto-validated against schema):
 | `version` | `4.8.0` | Synced across plugin.json / package.json / artibot.config.json |
 | `cognitive.router.threshold` | `0.4` | System 1 ↔ System 2 boundary |
 | `cognitive.system1.maxLatency` | `100` | ms — System 1 response cap before escalation |
-| `learning.lifelong.batchSize` | `50` | Experiences per GRPO batch |
-| `learning.grpoRouting.modelType` | `"linear"` | `"linear"` or `"mlp"` (v3.6+ neural policy) |
-| `learning.grpoRouting.jointPolicy.enabled` | `false` | v3.7+ joint agent×skill correlation policy |
+| `learning.lifelong.batchSize` | `50` | Experiences per lifelong-learning batch |
 | `team.engine` | `"claude-agent-teams"` | Native Claude Code Agent Teams |
 | `team.delegationMode` | `true` | Orchestrator coordinates only, never writes code |
 | `team.autoApply` | `true` | Auto-trigger `/team` when 3 conditions met |
@@ -214,7 +212,7 @@ Full configuration reference: [설정](#설정) section.
 
 ## Optional: Background Learning Schedules
 
-Artibot ships five nightly trainers (GRPO, agent-policy, skill-policy, joint-policy, session-rollup). They are **opt-in** — the plugin works without them. Enabling them sharpens routing accuracy and feeds the swarm `quality` bucket session-over-session.
+Artibot ships two nightly trainers (session-rollup, dream-consolidate). They are **opt-in** — the plugin works without them. Enabling them sharpens memory consolidation and feeds the session-rollup pipeline session-over-session.
 
 Generate the OS-specific install commands (printed only, never executed by this script):
 
@@ -226,15 +224,12 @@ node plugins/artibot/scripts/setup-nightly-trainers.js --schedule   # `claude sc
 node plugins/artibot/scripts/setup-nightly-trainers.js --dry-run    # preview without copy-paste prompt
 ```
 
-Recommended schedules (UTC; 15-minute gaps avoid file lock contention):
+Recommended schedules (UTC):
 
 | Job | Cron |
 |---|---|
-| `nightly-grpo-trainer` | `30 2 * * *` |
-| `nightly-agent-policy-trainer` | `45 2 * * *` |
-| `nightly-skill-policy-trainer` | `0 3 * * *` |
-| `nightly-joint-policy-trainer` | `15 3 * * *` |
 | `nightly-session-rollup` | `30 4 * * *` |
+| `nightly-dream-consolidate` | `0 5 * * *` |
 
 Full purpose / troubleshooting / disable instructions: [`docs/SCHEDULED-JOBS.md`](./docs/SCHEDULED-JOBS.md).
 

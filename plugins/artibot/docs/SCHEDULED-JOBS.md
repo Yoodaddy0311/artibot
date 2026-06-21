@@ -1,24 +1,19 @@
 # Optional: Background Learning Schedules
 
-Artibot's nightly trainers and session rollup are **opt-in**. The plugin works without them — they only sharpen GRPO routing, skill activation, and the swarm `quality` bucket over time. Skip this doc if you do not want background processes.
+Artibot's nightly trainers and session rollup are **opt-in**. The plugin works without them — they sharpen memory consolidation and the session-rollup pipeline over time. Skip this doc if you do not want background processes.
 
 ## When To Enable
 
-- You run Artibot daily and want routing accuracy to improve session-over-session
-- You audit CLAUDE.md with `/audit-claude-md` and want the score fed into GRPO
+- You run Artibot daily and want session data consolidated automatically
+- You audit CLAUDE.md with `/audit-claude-md` and want the score fed into the session rollup
 - You participate in the swarm and want your `quality` bucket populated
 
 ## Trainers
 
 | Job | Cron (UTC) | Purpose |
 |---|---|---|
-| `nightly-grpo-trainer` | `30 2 * * *` | Update GRPO routing policy from yesterday's episodes |
-| `nightly-agent-policy-trainer` | `45 2 * * *` | Refresh per-agent success/latency weights |
-| `nightly-skill-policy-trainer` | `0 3 * * *` | Refresh skill activation policy weights |
-| `nightly-joint-policy-trainer` | `15 3 * * *` | Refresh joint (skill × agent) policy |
 | `nightly-session-rollup` | `30 4 * * *` | Roll up sessions, archive originals > 30d, feed `claudeMdQuality` |
-
-The 15-minute gaps avoid file lock contention on shared state files under `~/.claude/artibot/`.
+| `nightly-dream-consolidate` | `0 5 * * *` | Phase-1 memory consolidation candidates + wakeup marker (no LLM, no MD writes) |
 
 ## Setup
 
