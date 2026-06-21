@@ -15,7 +15,7 @@ vi.mock('node:fs', () => ({
 
 // Spy on assertEgressAllowed from data-egress-guard
 const mockAssertEgress = vi.fn();
-vi.mock('../../lib/privacy/data-egress-guard.js', () => ({
+vi.mock('../../lib/core/data-egress-guard.js', () => ({
   assertEgressAllowed: (...args) => mockAssertEgress(...args),
   EgressBlockedError: class EgressBlockedError extends Error {
     constructor(msg) { super(msg); this.name = 'EgressBlockedError'; }

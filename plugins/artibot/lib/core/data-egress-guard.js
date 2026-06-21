@@ -12,7 +12,7 @@
  *   - Malformed URLs = throw EgressBlockedError (never silently pass).
  *
  * Allowlist sources (merged + deduped, case-insensitive):
- *   1. `lib/privacy/allowlist.json` → `{ "domains": ["api.github.com"] }`
+ *   1. `lib/core/allowlist.json` → `{ "domains": ["api.github.com"] }`
  *   2. Environment variable `ARTIBOT_ALLOW_EGRESS=host1,host2,host3`
  *
  * Hostname match is EXACT only — `api.github.com` in the allowlist does
@@ -20,7 +20,9 @@
  * intentional: wildcard matching has historically been the source of
  * SSRF-style policy bypasses.
  *
- * @module lib/privacy/data-egress-guard
+ * Layer 1 (core) module: pure policy guard with zero non-builtin imports. Lives in core so lower-layer modules (e.g. version-checker) can enforce egress without an upward L1->L2 dependency.
+ *
+ * @module lib/core/data-egress-guard
  */
 
 import { readFileSync } from 'node:fs';
@@ -251,7 +253,7 @@ export function assertEgressAllowed(url, options = {}) {
 
   throw new EgressBlockedError(
     `egress blocked${reason}: host '${hostname}' not in allowlist (DATA POLICY). ` +
-      `Set ARTIBOT_ALLOW_EGRESS or edit lib/privacy/allowlist.json to permit.`,
+      `Set ARTIBOT_ALLOW_EGRESS or edit lib/core/allowlist.json to permit.`,
   );
 }
 

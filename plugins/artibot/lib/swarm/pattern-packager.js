@@ -16,8 +16,7 @@
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { readJsonFile } from '../core/file.js';
-import { clamp01 } from '../learning/pattern-analyzer.js';
-import { ARTIBOT_DIR, round } from '../core/index.js';
+import { ARTIBOT_DIR, clamp01, round } from '../core/index.js';
 
 // PII fields to strip from provenance when packaging for Swarm sharing
 const PROVENANCE_PII_FIELDS = ['user', 'emailHash', 'machineHash'];

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createCliAdapter } from '../../lib/adapters/cli-adapter.js';
+import { createCliAdapter } from '../../lib/runtime/cli-adapter.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 

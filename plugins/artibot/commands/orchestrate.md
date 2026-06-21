@@ -8,7 +8,7 @@ toolset: team
 
 # /orchestrate
 
-> **vs /spawn**: `/orchestrate` runs **predefined workflow patterns** (feature, bugfix, refactor, security) with structured phases. `/spawn` is **free-form meta-orchestration** for arbitrary task decomposition without a pattern template.
+> **vs /spawn**: `/orchestrate` runs **predefined workflow patterns** (feature, bugfix, refactor, security) with structured phases via `--pattern`. `/spawn` is **free-form meta-orchestration** for arbitrary task decomposition without a pattern template. **Pick rule:** known dev workflow with a named lifecycle → `/orchestrate`; ad-hoc multi-domain work that doesn't fit a template → `/spawn`. Both share the same Agent Teams primitives, so neither is an alias of the other.
 
 Coordinate multi-agent workflows for complex operations that span multiple domains. Creates an Agent Team, spawns specialized teammates, and sequences them through a defined pipeline using shared tasks and direct messaging for handoffs between phases.
 

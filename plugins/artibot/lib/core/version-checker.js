@@ -8,7 +8,7 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { assertEgressAllowed } from '../privacy/data-egress-guard.js';
+import { assertEgressAllowed } from './data-egress-guard.js';
 
 const CACHE_FILE = 'update-check.json';
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours

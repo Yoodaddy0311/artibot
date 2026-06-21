@@ -137,7 +137,7 @@ Artibot works beyond Claude Code. Built-in adapters auto-convert agents, skills,
 ```bash
 git clone https://github.com/Yoodaddy0311/artibot.git
 cd artibot
-node --input-type=module -e "import { exportForGemini } from './plugins/artibot/lib/core/skill-exporter.js'; const r = await exportForGemini({ pluginRoot: './plugins/artibot' }); console.log(r.summary);"
+node --input-type=module -e "import { exportForGemini } from './plugins/artibot/lib/adapters/skill-export.js'; const r = await exportForGemini({ pluginRoot: './plugins/artibot' }); console.log(r.summary);"
 ```
 
 #### OpenAI Codex CLI
@@ -145,7 +145,7 @@ node --input-type=module -e "import { exportForGemini } from './plugins/artibot/
 ```bash
 git clone https://github.com/Yoodaddy0311/artibot.git
 cd artibot
-node --input-type=module -e "import { exportForCodex } from './plugins/artibot/lib/core/skill-exporter.js'; const r = await exportForCodex({ pluginRoot: './plugins/artibot' }); console.log(r.summary);"
+node --input-type=module -e "import { exportForCodex } from './plugins/artibot/lib/adapters/skill-export.js'; const r = await exportForCodex({ pluginRoot: './plugins/artibot' }); console.log(r.summary);"
 ```
 
 #### Google Antigravity
@@ -153,7 +153,7 @@ node --input-type=module -e "import { exportForCodex } from './plugins/artibot/l
 ```bash
 git clone https://github.com/Yoodaddy0311/artibot.git
 cd artibot
-node --input-type=module -e "import { exportForGemini } from './plugins/artibot/lib/core/skill-exporter.js'; const r = await exportForGemini({ pluginRoot: './plugins/artibot' }); console.log(r.summary);"
+node --input-type=module -e "import { exportForGemini } from './plugins/artibot/lib/adapters/skill-export.js'; const r = await exportForGemini({ pluginRoot: './plugins/artibot' }); console.log(r.summary);"
 ```
 
 > **Note:** Agent Teams API is exclusive to Claude Code. Other platforms automatically fall back to Sub-Agent mode (one-way delegation). Learning, memory, and swarm intelligence work identically across all platforms.

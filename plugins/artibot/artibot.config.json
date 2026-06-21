@@ -801,7 +801,8 @@
   "swarm": {
     "enabled": false,
     "optIn": false,
-    "serverUrl": "https://artibot-swarm-154860486472.asia-northeast3.run.app",
+    "serverUrl": "http://localhost:3000",
+    "_serverUrlPolicy": "DATA POLICY: 기본값은 localhost(self-hosted)로 고정합니다. 외부 swarm 서버로 데이터를 보내려면 (a) 직접 self-host 하거나 (b) ARTIBOT_SWARM_SERVER 환경변수로 명시 지정 + lib/privacy/allowlist.json 또는 ARTIBOT_ALLOW_EGRESS로 해당 호스트를 명시 허용해야 합니다. 어떤 외부 엔드포인트도 기본값으로 출하하지 않습니다(과거 run.app 기본값은 v4.x에서 제거됨, CHANGELOG 참조).",
     "syncInterval": "session",
     "localGlobalRatio": [
       0.3,
@@ -812,9 +813,10 @@
       "epsilon": 1,
       "delta": 0.00001
     },
-    "backend": "git",
-    "gitRepoUrl": "https://github.com/Yoodaddy0311/artibot-swarm.git",
-    "_gitRepoUrlWarning": "DATA POLICY: git backend 활성화(enabled:true + backend:'git') 시 이 repo로 데이터가 push됩니다. 활성화 전 반드시 개인/내부 데이터 포함 여부를 확인하세요."
+    "backend": "http",
+    "_backendPolicy": "DATA POLICY: 기본 backend는 'http'(localhost self-hosted)로 고정해 출하합니다. 'git' backend는 HTTP egress guard를 우회(git 바이너리 push/pull)하므로 기본값으로 두지 않습니다. git 동기화를 쓰려면 backend를 'git'으로 명시 전환하고 gitRepoUrl에 본인 소유 private repo를 직접 지정하세요(SWARM_DEFAULTS와 일치).",
+    "gitRepoUrl": null,
+    "_gitRepoUrlWarning": "DATA POLICY: git backend 활성화(enabled:true + backend:'git') 시 여기 지정한 repo로 데이터가 push됩니다. 반드시 본인/내부 소유 private repo만 지정하고, 활성화 전 개인 데이터 포함 여부를 확인하세요. 기본값 null = 미설정(외부 전송 경로 없음)."
   },
   "automation": {
     "intentDetection": true,

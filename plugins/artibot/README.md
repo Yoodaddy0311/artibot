@@ -583,7 +583,7 @@ cd artibot
 
 # 2. Gemini CLI용 내보내기 (Node.js >= 18 필요)
 node --input-type=module -e "
-  import { exportForGemini } from './plugins/artibot/lib/core/skill-exporter.js';
+  import { exportForGemini } from './plugins/artibot/lib/adapters/skill-export.js';
   const result = await exportForGemini({ pluginRoot: './plugins/artibot' });
   console.log('Files:', result.files.length, '| Warnings:', result.warnings.length);
   // result.files 배열의 각 { path, content }를 프로젝트에 저장
@@ -629,7 +629,7 @@ cd artibot
 
 # 2. Codex CLI용 내보내기
 node --input-type=module -e "
-  import { exportForCodex } from './plugins/artibot/lib/core/skill-exporter.js';
+  import { exportForCodex } from './plugins/artibot/lib/adapters/skill-export.js';
   const result = await exportForCodex({ pluginRoot: './plugins/artibot' });
   console.log('Files:', result.files.length, '| Warnings:', result.warnings.length);
 "
@@ -671,7 +671,7 @@ cd artibot
 
 # 2. Cursor용 내보내기
 node --input-type=module -e "
-  import { exportForCursor } from './plugins/artibot/lib/core/skill-exporter.js';
+  import { exportForCursor } from './plugins/artibot/lib/adapters/skill-export.js';
   const result = await exportForCursor({ pluginRoot: './plugins/artibot' });
   console.log('Files:', result.files.length, '| Warnings:', result.warnings.length);
 "
@@ -716,7 +716,7 @@ cd artibot
 # Antigravity 어댑터는 skill-exporter에 아직 통합되지 않았습니다.
 # Gemini CLI 내보내기를 기반으로 수동 조정하세요:
 node --input-type=module -e "
-  import { exportForGemini } from './plugins/artibot/lib/core/skill-exporter.js';
+  import { exportForGemini } from './plugins/artibot/lib/adapters/skill-export.js';
   const result = await exportForGemini({ pluginRoot: './plugins/artibot' });
   console.log('Files:', result.files.length, '| Warnings:', result.warnings.length);
 "
@@ -746,7 +746,7 @@ cp plugins/artibot/artibot.config.json <your-project>/.antigravity/
 
 ```bash
 node --input-type=module -e "
-  import { exportForAll } from './plugins/artibot/lib/core/skill-exporter.js';
+  import { exportForAll } from './plugins/artibot/lib/adapters/skill-export.js';
   const results = await exportForAll({ pluginRoot: './plugins/artibot' });
   for (const [platform, result] of Object.entries(results)) {
     console.log(platform + ':', result.files.length, 'files,', result.warnings.length, 'warnings');

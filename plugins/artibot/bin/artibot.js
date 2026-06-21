@@ -99,7 +99,7 @@ async function cmdRun(prompt, flags) {
     return;
   }
 
-  const { createCliAdapter } = await import('../lib/adapters/cli-adapter.js');
+  const { createCliAdapter } = await import('../lib/runtime/cli-adapter.js');
   const adapter = createCliAdapter({ pluginRoot: PLUGIN_ROOT });
   const result = await adapter.runPrompt(prompt);
 
@@ -123,7 +123,7 @@ async function cmdTeam(prompt, flags) {
     return;
   }
 
-  const { createCliAdapter } = await import('../lib/adapters/cli-adapter.js');
+  const { createCliAdapter } = await import('../lib/runtime/cli-adapter.js');
   const adapter = createCliAdapter({ pluginRoot: PLUGIN_ROOT, teamMode: true });
   const result = await adapter.runPrompt(prompt);
 

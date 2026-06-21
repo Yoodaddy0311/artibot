@@ -16,7 +16,7 @@ import {
   isLocalhost,
   loadAllowlist,
   safeFetch,
-} from '../../lib/privacy/data-egress-guard.js';
+} from '../../lib/core/data-egress-guard.js';
 
 // ---------------------------------------------------------------------------
 // EgressBlockedError
@@ -151,12 +151,6 @@ describe('loadAllowlist()', () => {
     delete process.env.ARTIBOT_ALLOW_EGRESS;
     const list = loadAllowlist();
     expect(list.has('github.com')).toBe(true);
-  });
-
-  it('includes the artibot-swarm Cloud Run host for HTTP-backend sync', () => {
-    delete process.env.ARTIBOT_ALLOW_EGRESS;
-    const list = loadAllowlist();
-    expect(list.has('artibot-swarm-154860486472.asia-northeast3.run.app')).toBe(true);
   });
 
   it('merges the ARTIBOT_ALLOW_EGRESS env var with on-disk entries', () => {

@@ -7,6 +7,8 @@ toolset: design
 
 # /visual-check
 
+> **Status: skill-invoked utility — NOT auto-wired.** The visual subsystem (`lib/visual/visual-validator.js`, `screenshot-differ.js`, `style-fixer.js`) is a manually-invoked toolkit driven by this command's instructions. It is **not** triggered by any runtime hook or middleware; the SSIM compare/fix functions only run when an agent follows the Execution Flow below (i.e. when you invoke `/visual-check`). There is no automatic screenshot-on-render wiring. (Future option: auto-wire via a Playwright MCP post-render hook — tracked as a follow-up recommendation, out of scope here.)
+
 Compare a live URL or component screenshot against a stored baseline using SSIM-based pixel comparison. Generates CSS fix suggestions when differences are detected.
 
 ## Arguments

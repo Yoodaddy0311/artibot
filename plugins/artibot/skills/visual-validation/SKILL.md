@@ -34,6 +34,8 @@ whenNotToUse: "Non-UI code paths (APIs, business logic, CLI tools) or environmen
 
 # Visual Validation
 
+> **Wiring note:** the SSIM toolkit (`lib/visual/visual-validator.js`, `screenshot-differ.js`, `style-fixer.js`) is a **skill-invoked utility**, not a runtime-hooked subsystem. It runs only when this skill activates or `/visual-check` is invoked and the agent follows the workflow below — there is no middleware/hook that captures screenshots automatically. Screenshot capture itself goes through Playwright MCP instructions emitted by the validator. (Auto-wiring via a Playwright MCP post-render hook is a possible future enhancement, not currently implemented.)
+
 ## When This Skill Applies
 - Comparing UI screenshots against approved baselines
 - Detecting visual regressions after CSS or layout changes

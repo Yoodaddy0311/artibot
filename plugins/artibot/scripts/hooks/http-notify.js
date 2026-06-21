@@ -17,7 +17,7 @@ import {
   assertEgressAllowed,
   EgressBlockedError,
   loadAllowlist,
-} from '../../lib/privacy/data-egress-guard.js';
+} from '../../lib/core/data-egress-guard.js';
 import { readFileSync } from 'node:fs';
 
 /** @typedef {'slack' | 'discord' | 'generic'} WebhookFormat */

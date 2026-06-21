@@ -7,7 +7,7 @@
  * @module lib/learning/pattern-analyzer
  */
 
-import { round } from '../core/index.js';
+import { clamp01, round } from '../core/index.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -330,12 +330,6 @@ export function generateInsight(type, category, bestEntry, groupMean) {
 // Utilities
 // ---------------------------------------------------------------------------
 
-/**
- * Clamp a value between 0 and 1.
- * @param {number} value - Value to clamp
- * @returns {number}
- */
-export function clamp01(value) {
-  if (typeof value !== 'number' || Number.isNaN(value)) return 0;
-  return Math.max(0, Math.min(1, value));
-}
+// clamp01 is a pure [0,1] math util — canonical home is lib/core (sibling of
+// round). Re-exported here for backward-compatible imports from this module.
+export { clamp01 };

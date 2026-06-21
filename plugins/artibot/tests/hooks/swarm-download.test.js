@@ -20,7 +20,7 @@ vi.mock('../../lib/core/hook-utils.js', () => ({
   logHookError: vi.fn(),
 }));
 
-vi.mock('../../lib/privacy/data-egress-guard.js', () => {
+vi.mock('../../lib/core/data-egress-guard.js', () => {
   class EgressBlockedError extends Error {
     constructor(message) {
       super(message);
@@ -36,7 +36,7 @@ vi.mock('../../lib/privacy/data-egress-guard.js', () => {
 
 const { logHookError } = await import('../../lib/core/hook-utils.js');
 const { assertEgressAllowed, EgressBlockedError } = await import(
-  '../../lib/privacy/data-egress-guard.js'
+  '../../lib/core/data-egress-guard.js'
 );
 const { checkHttpEgressAllowed, checkHttpServerHealthy } = await import(
   '../../scripts/hooks/swarm-download.js'

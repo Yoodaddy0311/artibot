@@ -3,12 +3,12 @@
  * Provides a stdin/stdout interface for running prompts through the runtime pipeline
  * without requiring Claude Code or any other AI coding assistant host.
  *
- * @module lib/adapters/cli-adapter
+ * @module lib/runtime/cli-adapter
  */
 
 import path from 'node:path';
 import { readFileSync } from 'node:fs';
-import { createArtibotAgent } from '../runtime/create-artibot-agent.js';
+import { createArtibotAgent } from './create-artibot-agent.js';
 
 /**
  * Load artibot.config.json from the plugin root.

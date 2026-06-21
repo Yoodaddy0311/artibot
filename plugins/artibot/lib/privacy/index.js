@@ -65,4 +65,4 @@ export {
   isLocalhost,
   loadAllowlist,
   safeFetch,
-} from './data-egress-guard.js';
+} from '../core/data-egress-guard.js';
