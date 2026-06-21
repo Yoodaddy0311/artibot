@@ -8,15 +8,10 @@ Every script registered in either of those files MUST emit **at most one** JSON 
 
 ## `nightly-*.mjs` policy — DO NOT register in dispatch-table.json
 
-The seven `nightly-*.mjs` scripts:
+The two `nightly-*.mjs` scripts:
 
-- `nightly-agent-policy-trainer.mjs`
 - `nightly-dream-consolidate.mjs`
-- `nightly-effort-policy-trainer.mjs`
-- `nightly-grpo-trainer.mjs`
-- `nightly-joint-policy-trainer.mjs`
 - `nightly-session-rollup.mjs`
-- `nightly-skill-policy-trainer.mjs`
 
 are NDJSON entry points (one JSON object per line, e.g. `process.stdout.write(JSON.stringify(res) + '\n')`). They are designed to be invoked by cron / scheduler / manual operator, **not** by any dispatcher. Adding them to `dispatch-table.json` slot `handlers[]` would cause `parseHookStdout()` to silently drop their output (NDJSON ≠ single JSON), which the dispatcher cannot recover from.
 

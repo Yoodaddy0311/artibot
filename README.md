@@ -10,13 +10,13 @@
 [![Cowork Plugin](https://img.shields.io/badge/Claude_Cowork-Plugin-orange?style=flat-square)](https://claude.com/cowork)
 [![Agent Teams](https://img.shields.io/badge/Agent_Teams-Native-orange?style=flat-square)](plugins/artibot/lib/runtime/middleware/subagents.js)
 
-> **Cognitive orchestration OS for Claude Code with hierarchical memory, GRPO-RLVR self-learning, MCP server, and multi-platform agent teams.**
+> **Cognitive orchestration OS for Claude Code with hierarchical memory, RLVR self-learning, MCP server, and multi-platform agent teams.**
 
 This repository ships **two complementary plugins** under one marketplace:
 
 | Plugin | Target | Version | Best for |
 |---|---|---|---|
-| [`artibot`](./plugins/artibot/) | Claude Code (developer CLI) | **4.26.1** | full Agent Teams orchestration, TDD, code review, security audits, GRPO learning, MCP server, **Goal-driven autopilot**, **`/learning` diagnostics**, **`/save` + `/resume` single-shot handoff**, **safety boost (machineId frontmatter, git-lock fail, 10m throttle)** |
+| [`artibot`](./plugins/artibot/) | Claude Code (developer CLI) | **4.26.1** | full Agent Teams orchestration, TDD, code review, security audits, RLVR learning, MCP server, **Goal-driven autopilot**, **`/learning` diagnostics**, **`/save` + `/resume` single-shot handoff**, **safety boost (machineId frontmatter, git-lock fail, 10m throttle)** |
 | [`artibot-cowork`](./plugins/artibot-cowork/) | Claude Cowork (knowledge workers) | **3.1.0** | marketing campaigns, long-form writing, AEO/GEO content, KR-market SEO, AI-slop detection, **Claude Design, Routines, Ultraplan, Monitor** |
 
 Both plugins share the same DEV protocol, Korean market expertise, data-sovereignty policy, and 6-stage content quality pipeline. They differ only in **target environment** and **skill mix**.
@@ -62,7 +62,7 @@ Most Claude Code plugins use simple sub-agent (`Task()`) delegation -- fire-and-
 - **Visual Validation Pipeline** -- SSIM-based screenshot comparison, auto-fix suggestion, iterative correction loop via Playwright MCP
 - **Conversation-to-Memory** -- Auto-extracts rules and decisions from user messages (Korean/English), injects into skills dynamically
 - **Project CLAUDE.md Seeding** -- `install.sh` auto-generates project-level CLAUDE.md with Artibot methodology and DEV protocol
-- **Runtime Middleware Pipeline** -- 9-stage middleware engine (router, subagents, tasks, checkpoint, memory, skills, guardrail, token-usage, summarization) for runtime context injection
+- **Runtime Middleware Pipeline** -- 11-stage middleware engine (lifecycle, router, memory, skills, tasks, subagents, guardrail, summarization, token-usage, checkpoint, cache-roi) for runtime context injection
 - **Auto-Learning Pipeline** -- Zero-config nightly self-improvement: self-scan, pattern-extract, knowledge-update, skill-refinement with auto-commit/push
 - **Output Design System** -- 7 output styles with design tokens (tokens.md) and narrative template for consistent formatting
 - **Forked Context Skills** -- All 113 skills run in isolated forked context for clean execution without cross-contamination
@@ -409,17 +409,12 @@ Artibot continuously improves its routing accuracy through a session-based learn
 Session Start                    Session Active                    Session End
      |                                |                                |
      v                                v                                v
-Load thresholds              Record experiences              Batch learning (GRPO)
+Load thresholds              Record experiences              Batch learning (RLVR)
 Load System 1 cache          (routing decisions +            Knowledge transfer
                               outcomes)                      Persist updated state
 ```
 
-### GRPO (Group Relative Policy Optimization)
-
-1. Group similar experiences (group size: 5)
-2. Compare System 1 vs System 2 success rates per group
-3. Compute relative advantage
-4. Adjust routing threshold (step: 0.05, clamped to [-0.1, 0.1])
+> **Note (2026-06 lean redesign):** The GRPO policy optimizer was removed (no measurable improvement). Learning now uses **verifiable-reward (RLVR)** signals (test-pass / typecheck / no-revisit) to adjust routing thresholds and promote/demote patterns between System 1 and System 2 caches. No external reward model or RL policy optimizer is used.
 
 ### Knowledge Transfer
 
@@ -869,7 +864,7 @@ plugins/artibot/
 |   +-- utils/
 +-- lib/
 |   +-- core/                    # Core modules (platform, config, cache, playbook-parser, playbook-registry, guard-registry, event-bus, blocked-patterns)
-|   +-- runtime/                 # Runtime pipeline (12 files, 9 middlewares: router, subagents, tasks, checkpoint, memory, skills, guardrail, token-usage, summarization)
+|   +-- runtime/                 # Runtime pipeline (15 middleware modules; 11-stage default chain: lifecycle, router, memory, skills, tasks, subagents, guardrail, summarization, token-usage, checkpoint, cache-roi)
 |   +-- visual/                  # Visual validation (SSIM differ, style-fixer, validator)
 |   +-- intent/                  # Intent detection (language, trigger)
 |   +-- context/                 # Context management (session)
@@ -898,7 +893,7 @@ Key settings in `artibot.config.json`:
 | `cognitive.system1.minConfidence` | System 1 minimum confidence | `0.6` |
 | `cognitive.system2.maxRetries` | System 2 max retry attempts | `3` |
 | `cognitive.system2.sandboxEnabled` | Enable sandbox for high-risk ops | `true` |
-| `learning.lifelong.batchSize` | Experiences per GRPO batch | `50` |
+| `learning.lifelong.batchSize` | Experiences per lifelong-learning batch | `50` |
 | `learning.lifelong.grpoGroupSize` | Experiences per comparison group | `5` |
 | `learning.knowledgeTransfer.promotionThreshold` | Consecutive successes to promote | `3` |
 | `learning.knowledgeTransfer.demotionThreshold` | Consecutive failures to demote | `2` |
