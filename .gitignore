@@ -71,3 +71,9 @@ reports/
 # Session handoffs — committed for cross-session/cross-machine visibility
 !.artibot/HANDOFF.md
 !.artibot/handoffs/
+
+# Auto-generated per-session timeline log — hooks rewrite it every session,
+# so it only adds dirty-tree noise to git status / /save. Read from the working
+# tree by hooks (session-notes.js, dev-verify-gate.js, pr-description-builder.js);
+# no consumer requires it to be git-tracked. Not cross-machine state (unlike HANDOFF.md).
+.artibot/SESSION-NOTES.md

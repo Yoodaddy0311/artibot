@@ -13,9 +13,9 @@
 | Category | Count | Action |
 |---|---|---|
 | Applied | 7 | Done — WIRE-04, 06, 08, 12, **03**, **21**, **16** (03/21/16 applied 2026-06-05) |
-| Reclassify dormant | 9 | WIRE-01, 02, 19 + **05, 13, 14, 17, 18, 20** (2026-06-05 review) — no wiring needed |
+| Reclassify dormant | 10 | WIRE-01, 02, 19 + **05, 13, 14, 17, 18, 20** (2026-06-05 review) + **11** (2026-06-22 — schema-design precedes wiring) — no wiring needed |
 | Not a gap (already live) | 1 | **WIRE-22** — adapter-utils consumed by 5 adapters |
-| needs-rework | 4 | WIRE-09, 10, 11, 15 — spec defects block safe application |
+| needs-rework | 3 | WIRE-09, 10, 15 — spec defects block safe application |
 | **Total accounted** | **21** | WIRE-07 produced no spec (see gap note) |
 
 > **2026-06-05 dormant-cleanup review**: the 8 `realGap=false` candidates were re-verified with full repo access. Dispositions — 6 dormant (05/13/14/17/18/20), 1 fixed (**WIRE-21**: was a phantom-path false negative; real bug at `scripts/hooks/swarm-sync.js:98-99`, now fixed), 1 already-live (**WIRE-22**). Full evidence: `plugins/artibot/docs/WIRING-AUDIT-2026-05-30.md` → "Dormant Reclassification (2026-06-05 follow-up)".
@@ -38,9 +38,9 @@ These were verified, committed, and are live on `master`.
 
 ---
 
-## Table 2 — Reclassify Dormant (9)
+## Table 2 — Reclassify Dormant (10)
 
-> 3 original (WIRE-01/02/19) + 6 added by the 2026-06-05 dormant-cleanup review (WIRE-05/13/14/17/18/20). Full evidence in `plugins/artibot/docs/WIRING-AUDIT-2026-05-30.md`.
+> 3 original (WIRE-01/02/19) + 6 added by the 2026-06-05 dormant-cleanup review (WIRE-05/13/14/17/18/20) + 1 added 2026-06-22 (WIRE-11 — schema-design precedes wiring). Full evidence in `plugins/artibot/docs/WIRING-AUDIT-2026-05-30.md`.
 
 These items have `isRealGap=false` and are intentional-dormant, not defects. They align with the project's dormant-by-design philosophy (see memory: `project-learning-activation` — GRPO overlays dormant-by-design, not deprecated; reactivation is a separate explicit human decision).
 
@@ -55,24 +55,25 @@ These items have `isRealGap=false` and are intentional-dormant, not defects. The
 | WIRE-17 | token-rotation → swarm-client.buildHeaders | false | `lib/privacy/token-rotation.js` exists; `swarm-client.js#buildHeaders:160` does not import it; minted tokens not server-validated = client-only bookkeeping, no auth benefit until server counterpart exists. |
 | WIRE-18 | lsp-client `collectDiagnostics` → clean-state-check hook | false | `lib/system/lsp-client.js` + `scripts/hooks/clean-state-check.js` both exist; wiring converts an advisory hook into a per-tool tsc/eslint spawner (~30s/tool) — intentionally advisory. |
 | WIRE-20 | extension registry population (`discoverExtensions` → `createExtensionRegistry`) | false | `createExtensionRegistry` IS wired (create-artibot-agent.js:200/209) but `discoverExtensions` (extension-loader.js:160) has 0 callers → registry consumed via explicit injection; auto-discovery is a separate unwired feature. Spec "write-only" premise refuted. |
+| WIRE-11 | marketplace `detectConflicts` → `installFromUrl` conflict guard | false (2026-06-22 reclassify) | **Schema-design precedes wiring.** `detectConflicts` keys entirely on a `files[]` string-array (`marketplace.js:186-197`, type `PackageManifest` at `marketplace.js:80-88`), but `installFromUrl` consumes a different manifest — `artibot.ext.json` — whose fixed schema has **no `files` field** (REQUIRED+OPTIONAL fields at `extension-loader.js:25-30`). Even deriving `files[]` from the cloned disk is structurally a no-op: each extension installs under its own namespace `~/.claude/plugins/artibot-ext-<name>/` (`marketplace-installer.js:24,122`), so two extensions can never own the same path → conflict set is permanently empty. `listInstalled` also returns no `files` (`marketplace-installer.js:170-193`). Wiring requires a prior ADR unifying `PackageManifest.files[]` ↔ `artibot.ext.json` schema — not a wire. |
 
 > WIRE-21 and WIRE-22 were also in the original `realGap=false` set but reclassified on 2026-06-05: **WIRE-21 → applied** (real bug, see Table 1); **WIRE-22 → not a gap** (adapter-utils consumed by 5 adapters, already live).
 
 ---
 
-## Table 3 — Needs Rework (4)
+## Table 3 — Needs Rework (3)
 
-Four `realGap=true` items carry verified spec defects that make blind application unsafe (guardrail risk, broken tests, or unresolvable call sites). WIRE-03 and WIRE-16 were reworked and applied 2026-06-05 (→ Table 1). The 8 original `realGap=false` needs-rework items were dispositioned in the 2026-06-05 review (6 → Table 2 dormant, WIRE-21 → applied, WIRE-22 → not-a-gap).
+Three `realGap=true` items carry verified spec defects that make blind application unsafe (guardrail risk, broken tests, or unresolvable call sites). WIRE-03 and WIRE-16 were reworked and applied 2026-06-05 (→ Table 1). WIRE-11 was reclassified dormant 2026-06-22 (→ Table 2 — schema-design precedes wiring). The 8 original `realGap=false` needs-rework items were dispositioned in the 2026-06-05 review (6 → Table 2 dormant, WIRE-21 → applied, WIRE-22 → not-a-gap).
 
-### 3a — realGap=true (4 items): genuine gaps, but spec must be fixed before applying
+### 3a — realGap=true (3 items): genuine gaps, but spec must be fixed before applying
 
 > WIRE-03 & WIRE-16 (were here) applied 2026-06-05 — moved to Table 1.
+> WIRE-11 (was here) reclassified dormant 2026-06-22 — moved to Table 2 (the `detectConflicts`/`installFromUrl` schema mismatch makes any wire a permanent no-op; ADR-level schema unification must precede it).
 
 | ID | Capability | risk | conf | Core rework reason |
 |---|---|---|---|---|
 | WIRE-09 | phase-replay `replayPhase` — re-runs single autopilot phase for recovery | low | — | Blocking defect: `PHASE_TO_RUNNER` functions take a full `state` object and return an instruction, not the `{status,sha}` contract `replayPhase` expects from `opts.phaseRunner`. No adapter is provided. Happy-path testStub assertion will fail on correct wiring. `editSketch` field referenced as "see editSketch field" but omitted. |
 | WIRE-10 | `createFeatureTracker` — Session Intelligence Report feature-usage instantiation | low | 0.88 | Core mechanism fictional: `create-artibot-agent.js` has no event bus and middleware emit no `feature:*` events. Tracker would subscribe to a bus nothing publishes to, recording zero activations. The key testStub assertion (`totalActivations >= 1`) would fail immediately. NOTE: WIRE-05 (same capability) reclassified dormant 2026-06-05 — reconcile before reworking. |
-| WIRE-11 | marketplace `detectConflicts` — conflict detection in `installFromUrl` | low | 0.78 | `detectConflicts` keys on a `files[]` array from a PackageManifest. Extension manifests (`artibot.ext.json`) likely carry no `files[]` field — spec admits the guard would be a permanent no-op in production. Schema mismatch must be resolved before wiring is meaningful. |
 | WIRE-15 | `detectHarness` / `UniversalHarnessAdapter` — auto-detect host harness at CLI bootstrap | medium | 0.55 | `bin/artibot.js` call-site not re-confirmed (tool output failed mid-session). Spec reuses `pluginRoot`/`config` "already resolved in bootstrap" but their presence in that scope is unverified. Low confidence (0.55) explicitly flagged by spec author. |
 
 ### 3b — realGap=false (8 items): DISPOSITIONED 2026-06-05 ✅
@@ -102,23 +103,24 @@ WIRE-01, WIRE-02, WIRE-19 documented in `plugins/artibot/docs/WIRING-AUDIT-2026-
 
 All 8 re-verified with full repo access. Outcome: 6 dormant (WIRE-05/13/14/17/18/20 → Table 2), 1 fixed (WIRE-21 — was a phantom-path false negative; real bug at `scripts/hooks/swarm-sync.js:98-99`, now applied → Table 1), 1 closed as already-live (WIRE-22 — adapter-utils consumed by 5 adapters). Full evidence in the audit doc reclassification section.
 
-### (c) Spec rework — 4 realGap=true needs-rework items
+### (c) Spec rework — 3 realGap=true needs-rework items
 
 Priority order based on confidence and risk:
 
 - ~~**WIRE-03**~~ ✅ **Applied 2026-06-05** — path/line citations corrected (`lib/cognitive/workflow-plan.js`, inline 227-237 / teammates 240-246; `runtime-prompt.js:560`), surgical wire landed in `subagents.js` contract + 3 regression tests. See Table 1.
 - ~~**WIRE-16**~~ ✅ **Applied 2026-06-05** — homoglyph normalization wired into `pii-scrubber.scrub()` with a dedicated `stats.homoglyphNormalized` counter; non-discriminating flagship test replaced with 6 discriminating cases; line drift (140/176/327) corrected; data-egress-guard "unused import" was already absent (stale verdict note). See Table 1.
 
-1. **WIRE-11** (conf 0.78, low risk) — Resolve the extension manifest schema question: does `artibot.ext.json` carry a `files[]` field? If not, rework to derive file sets from disk rather than manifest.
-2. **WIRE-09** (conf unknown, low risk) — Write the `phaseRunner` adapter that bridges `PHASE_TO_RUNNER(state)` → `{status,sha}`. Rewrite the happy-path test to inject a stub runner.
-3. **WIRE-10** (conf 0.88, low risk) — Either introduce `feature:*` event-bus emissions in the middleware pipeline first, or replace the subscription approach with explicit `featureTracker.record(...)` calls at middleware-completion points. Reconcile with WIRE-05 (same capability, reclassified dormant 2026-06-05).
-4. **WIRE-15** (conf 0.55, medium risk) — Re-read `bin/artibot.js` to confirm the startup path and whether `pluginRoot`/`config` exist in scope at the chosen insertion point. Confidence is too low to proceed without file confirmation.
+- ~~**WIRE-11**~~ ✅ **Dormant confirmed 2026-06-22** (→ Table 2) — investigation showed any wire would be a permanent no-op: `detectConflicts` keys on `PackageManifest.files[]` (`marketplace.js:186-197`) while `installFromUrl` consumes the `artibot.ext.json` manifest, which has no `files` field (`extension-loader.js:25-30`); per-extension namespace install (`marketplace-installer.js:24,122`) makes path conflicts structurally impossible. Wiring requires an ADR-level unification of `PackageManifest.files[]` ↔ `artibot.ext.json` schema before it is meaningful.
+
+1. **WIRE-09** (conf unknown, low risk) — Write the `phaseRunner` adapter that bridges `PHASE_TO_RUNNER(state)` → `{status,sha}`. Rewrite the happy-path test to inject a stub runner.
+2. **WIRE-10** (conf 0.88, low risk) — Either introduce `feature:*` event-bus emissions in the middleware pipeline first, or replace the subscription approach with explicit `featureTracker.record(...)` calls at middleware-completion points. Reconcile with WIRE-05 (same capability, reclassified dormant 2026-06-05).
+3. **WIRE-15** (conf 0.55, medium risk) — Re-read `bin/artibot.js` to confirm the startup path and whether `pluginRoot`/`config` exist in scope at the chosen insertion point. Confidence is too low to proceed without file confirmation.
 
 ---
 
 ## Verification: 22-item count reconciliation
 
-> This table is the **immutable original-parse record** (where each of the 21 produced specs sat at triage time, 2026-06-01). Current dispositions have since changed — see the "Current status (2026-06-05)" note below.
+> This table is the **immutable original-parse record** (where each of the 21 produced specs sat at triage time, 2026-06-01). Current dispositions have since changed — see the "Current status (2026-06-05 → 2026-06-22 갱신)" note below.
 
 | Range | IDs present in `full[]` | Count |
 |---|---|---|
@@ -130,7 +132,7 @@ Priority order based on confidence and risk:
 | **WIRE-07 — spec not produced** | | **1** |
 | **Total parsed** | | **22** |
 
-**Current status (2026-06-05)** — Applied **7** (04/06/08/12 + 03/16/21) · Dormant **9** (01/02/19 + 05/13/14/17/18/20) · Not-a-gap **1** (22) · needs-rework **4** (09/10/11/15) · WIRE-07 spec missing **1**. Sum = 22.
+**Current status (2026-06-05 → 2026-06-22 갱신)** — Applied **7** (04/06/08/12 + 03/16/21) · Dormant **10** (01/02/19 + 05/13/14/17/18/20 + 11) · Not-a-gap **1** (22) · needs-rework **3** (09/10/15) · WIRE-07 spec missing **1**. Sum = 22.
 
 ### WIRE-07 missing spec — root cause
 
