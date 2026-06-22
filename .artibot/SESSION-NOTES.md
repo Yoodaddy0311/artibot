@@ -1982,3 +1982,61 @@
 <!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
 
 ---
+
+## 2026-06-21 23:53 UTC · `master`
+
+- **Commits** (20):
+  - `da1bd5a` release(v4.27.0): Project genesis (/go) + self-validating workflow + lean cleanup (#84)
+  - `3e1aa7c` fix(go): generated hook stub uses descriptive placeholder, not literal TODO (#83)
+  - `ab3bf1c` feat(go): sessions 2+3 — .claude scaffolding + verify gate (full 7-phase /go) (#82)
+  - `f75a937` feat(go): research-backed CLARIFY/COHERENCE/REVISE — no more idea→PRD in one shot (#81)
+  - `6f656da` feat(go): /go command MVP — idea → 6-doc blueprint folder (one-shot project genesis) (#80)
+  - `a27a917` feat(workflow): problem-first validation gate — stop over-proposing unvalidated changes (#79)
+  - `3ec47ec` refactor(learning): remove dead GRPO comparison API from tool-learner (−1.2k LOC) (#78)
+  - `3ef2490` fix(commands): clear verified command residuals (GRPO config orphans, doc drift) (#77)
+  - `f090ae3` docs(learning): clarify /learning GRPO section is live tool-selection, not the retired router (#76)
+  - `6f8fa66` docs(plugin): drop residual "GRPO" in swarm learning-innovations row (#75)
+  - `a4d713b` docs(plugin): claim honesty — reconcile GRPO/pipeline overstatements with code (#74)
+  - `0036754` ci(plugin): enforce 5-layer architecture via ESLint + sweep dead module refs (#73)
+  - `fe9f802` refactor(plugin): cycle2 — retire dead modules + zero layer violations + cover split (#72)
+  - `0c453ed` fix(plugin): repair dead hooks, retire measurement theater, ratchet skill quality (#71)
+  - `33141af` test(scripts): guard nightly-trainer registry + make it import-safe (#70)
+  - `daebf8d` refactor(learning): lean redesign follow-ups — voyager cleanup, engine split, GRPO teardown (#69)
+  - `be7b6fa` refactor(learning): lean self-learning redesign — fix leaks, retire theater, strengthen working channel (#68)
+  - `9bfc2e0` feat(cognitive): wire native effort signal producer (#30806) (#66)
+  - `3d5160f` fix(update): harden /update against silent no-op false-success (B1-B4) (#65)
+  - `de55a1c` fix(ci): keep fast-skip notice off the missing plugin working-directory (#67)
+- **Files touched**: 227
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
+
+<!-- artibot:failure-patterns:begin -->
+## ⚠️ Known failure patterns (top 5)
+
+> Curated by the artibot learning loop (`.artibot/failure-patterns.json`).
+> Avoid re-introducing these; the fix hint shows the canonical remedy.
+
+- **[HIGH] ci-exit-mask** — CI exit code 위장 (테스트 실패가 exit 0으로 삼켜짐)
+  - ↳ vitest custom reporter 가 onFinished/onTestRunEnd 에서 process.exit(failures>0?1:0) 를 명시적으로 호출하는지 확인
+- **[HIGH] libuv-handle-closing** — libuv UV_HANDLE_CLOSING (child_process / pipe handle teardown 미흡)
+  - ↳ spawn() 반환 child 에 대해 ['close','exit','error'] 모두 await 후 process 종료
+- **[HIGH] tz-mismatch-mtime** — 타임존 불일치 (Linux UTC CI vs Windows local KST — fs mtime / Date.now() 격차)
+  - ↳ 테스트 시작 부분에 process.env.TZ = 'UTC' 강제하거나 vitest.config.ts env.TZ 설정
+- **[MEDIUM] manifest-count-drift** — Manifest 카운트 동기화 누락 (README/CLAUDE.md/AGENTS.md/marketplace.json 6 위치 수동 sync)
+  - ↳ scripts/sync-manifest-counts.js 같은 단일 source-of-truth 스크립트로 카운트 일괄 갱신
+- **[MEDIUM] action-deprecation-node** — GitHub Actions deprecation (Node 20 → 24 마이그레이션 미수행)
+  - ↳ actions/checkout@v4, actions/setup-node@v4 등 최신 major 로 일괄 bump
+
+<!-- artibot:failure-patterns:end -->
+
+## 2026-06-22 00:04 UTC · `master`
+
+- **Commits** (1):
+  - `e03e7ea` docs(release): sync README badges + marketplace meta to v4.27.0 (#85)
+- **Files touched**: 1
+
+<!-- 메모: 결정·의도를 한 줄로 여기에 추가 가능 -->
+
+---
