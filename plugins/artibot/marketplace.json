@@ -223,7 +223,7 @@
     "thirdPartyApis": "user-configured-only"
   },
   "qualityMetrics": {
-    "tests": 9659,
+    "tests": 9677,
     "coverage": {
       "statements": 85,
       "branches": 76,
