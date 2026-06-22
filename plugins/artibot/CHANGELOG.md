@@ -13,6 +13,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.28.0] — 2026-06-22
+
+**Theme**: `/go` blueprint depth — full ADRs, per-feature acceptance criteria, doc-index governance
+
+Triangulated audit of a real `/go` output (internal quality audit + Ontology
+Developer Center benchmark + existing-docs comparison) found generated
+blueprints strong on engineering docs but missing structural slots. `/go` now
+renders them:
+
+### Added
+- `lib/genesis/index-gen.js` — `writeDocsIndex({ projectRoot, docs, now })`
+  generates `docs/DOCS-INDEX.md` with a status legend (🟢 generated / 🟡 stub /
+  ⚫ pending) and a doc-tracking table; wired into the `/go` BLUEPRINT phase.
+- `verify-gen.js` check 7 `docs-map-complete` — verifies the doc map / DOCS-INDEX
+  enumerates every generated doc (warn severity).
+
+### Changed
+- `commands/go.md` rendering instructions:
+  - **DECISIONS.md** now mandates full ADR structure (Context / Decision Drivers /
+    Considered Options with Pros·Cons·cost / Decision / Risks table / Acceptance
+    checklist / Next Actions with owner+date) plus an open-decisions table
+    (blocker-impact, decision owner). Template sourced from Ontology
+    `ADR-DEVCENTER-CONCEPTS`.
+  - **PRD feature section** must expand P0 features into sub-sections with
+    detailed requirements + Acceptance Criteria (EARS / GIVEN-WHEN-THEN) — no
+    more one-line F-ID tables (restores Developer Center "Feature Map" depth).
+  - NFR numeric values and ROADMAP per-phase durations now mandatory.
+  - Doc-map enumerates all generated docs (no partial lists, no phantom links).
+
+### Tests
+- `tests/genesis` 109 pass (index-gen 12 new, verify-gen 14→19, no-egress
+  +writeDocsIndex egress guard). ESLint 0. No `lib/*` network egress (node:fs only).
+
+---
+
 ## [4.27.0] — 2026-06-21
 
 **Theme**: Project genesis (`/go`) + self-validating workflow + lean cleanup (net −10k LOC)
