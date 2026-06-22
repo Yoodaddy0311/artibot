@@ -24,6 +24,8 @@ lifecycle: genesis
 **DATA POLICY**: 외부 서비스 0·로컬 파일시스템만. DATASETS는 스키마만(실데이터 X).
 hooks는 `.mjs` 확장자(Windows 호환). `.mcp.json` 외부 MCP 자동배선 금지 — warnings 표시 후 수동 검수.
 
+**출력 표기 규칙**: 사용자 노출 헤더·배너·진행 표시는 커맨드명 **`/go`**로 표기한다. 내부 lifecycle id(`genesis`)와 `lib/genesis/*` 모듈명은 코드 내부용이며 사용자 출력에 "GENESIS" 단어로 노출하지 않는다 (예: 페이즈 헤더는 `GENESIS // PHASE 1`이 아니라 `/go // PHASE 1` 또는 `Phase 1 — INTAKE`).
+
 ## Arguments
 
 Parse $ARGUMENTS:
@@ -187,14 +189,50 @@ const { writeDatasets } = await import(toFileUrl(path.join(pluginRoot, 'lib/gene
 ## 관련 커맨드
 /go (blueprint), /plan (실행계획), /implement (구현)
 
-## PRD 링크
+## 문서맵
+<생성된 모든 문서를 빠짐없이 열거 — 아래 전수 규칙 참조>
 docs/PRD/<slug>-<date>.md
+docs/ARCHITECTURE.md
+docs/FILE-TREE.md
+docs/WORKFLOW.md
+docs/DATASETS.md
+docs/DECISIONS.md        ← 생성된 경우
+docs/ROADMAP.md          ← 생성된 경우
+docs/API-SPEC.md         ← 생성된 경우
+... <그 외 생성된 확장 문서 전부>
 ```
+
+**문서맵 전수 규칙(누락 금지)**: 문서맵/PRD 링크 섹션은 이번 `/go` 실행에서 **실제로 생성한 모든 문서**를 열거한다 — 코어 6종(CLAUDE.md 제외, PRD/ARCHITECTURE/FILE-TREE/WORKFLOW/DATASETS) + 생성된 확장 문서(DECISIONS/ROADMAP/API-SPEC 등) 전부. 일부만 추려 적지 말 것. 생성하지 않은 문서는 적지 않는다(존재하지 않는 링크 금지). Phase 3 BLUEPRINT 마지막에 `docs[]` 메타(아래 DOCS-INDEX 호출부)와 **동일한 목록**을 사용해 일치시킨다.
 
 ### 문서 2 — docs/PRD/`<slug>.md`
 
 `lib/planning/artifacts.js#writePRD()` 호출 — 재구현 금지.
 PRD는 반드시 **비목표(out-of-scope) 섹션**을 포함한다: CLARIFY에서 명시적으로 제외된 항목과 현 MVP 범위 밖 기능을 "하지 않을 것" 목록으로 기술한다. 이는 PM 표준이며 생략 불가.
+
+**기능별 상세 요구사항 + Acceptance Criteria 강제 (한 줄 테이블 금지)**: PRD의 기능 섹션(`기능요구사항`)은 F-ID 한 줄 요약 테이블로 끝내지 않는다. P0/핵심 기능마다 **개별 sub-section**으로 전개하며, 각 기능은 (1) 세부 요구사항 목록(무엇을·어떻게)과 (2) Acceptance Criteria를 포함한다. AC는 EARS(`WHEN <트리거> THE SYSTEM SHALL <동작>`) 또는 GIVEN/WHEN/THEN 형식으로 검증 가능하게 작성한다. 이 깊이가 없으면 개발자가 "어떻게 구현하는가"를 직접 추측해야 하므로 생략 불가. (출처 기준선: 기존 설계의 `03_Feature_Requirements.md` 수준 — 기능당 다수 요구사항 + 복수 AC.) 문서 폭증 방지를 위해 P1 이하 기능은 요약 테이블로 두되, 적어도 P0 기능 전부는 sub-section으로 전개한다.
+
+```
+## 기능 요구사항
+
+### F-01 — <기능명>  (P0)
+**세부 요구사항**
+- R1. <무엇을 — 입력/처리/출력>
+- R2. <엣지/예외 처리 요건>
+- ...
+**Acceptance Criteria**
+- AC1. WHEN <사용자가 X를 한다> THE SYSTEM SHALL <Y를 한다>
+- AC2. GIVEN <상태> WHEN <행동> THEN <기대 결과>
+
+### F-02 — <기능명>  (P0)
+...
+
+## 기능 요약 (P1 이하)
+| ID | 기능 | 우선순위 |
+|----|------|---------|
+| F-09 | ... | P1 |
+```
+
+**핵심 플로우 시나리오 서술**: PRD(또는 UX 문서)에는 핵심 사용 플로우 2~3개를 **구체 예시로 서술**한다 — bullet 요약만으로 끝내지 말고 실제 대화 예시·화면/카드 목업·단계별 사용자 행동을 묘사해 흐름을 생생하게 전달한다.
 
 ```js
 const { ok, prdPath } = await writePRD({
@@ -205,6 +243,8 @@ const { ok, prdPath } = await writePRD({
     배경: '...domain context...',
     목표: '...goals from spec.features...',
     비목표: '...spec.nonGoals — 하지 않을 것 목록...',
+    기능요구사항: '...P0 기능마다 F-ID sub-section: 세부 요구사항 + AC(EARS/GWT). 한 줄 테이블 금지...',
+    시나리오: '...핵심 플로우 2~3개를 대화 예시·화면 목업으로 구체 서술...',
     설계: '...high-level design...',
     산출물: '6종 blueprint documents',
     실행계획: 'Session 1: blueprint / Session 2: scaffold / Session 3: verify',
@@ -226,6 +266,13 @@ Task(architect, prompt="<domain> 프로젝트의 고수준 아키텍처 설계. 
 ```
 
 MVP에서는 모델이 간결한 레이어 다이어그램(텍스트)을 `Write`로 직접 생성해도 된다. 위임 여부는 복잡도 판단에 따른다.
+
+**NFR 수치 강제** — ARCHITECTURE.md의 비기능 요구사항(NFR) 섹션은 제약을 **구체 수치/기본값**으로 명시한다. "제한 있음" 같은 모호한 서술 금지. 최소한 다음을 수치로 적는다:
+- 파일 업로드 크기 상한 (예: `이미지 ≤ 5 MB, 문서 ≤ 20 MB`)
+- 허용 MIME 타입 allowlist (예: `image/png, image/jpeg, application/pdf`)
+- 응답시간·동시접속·요청율 등 해당되는 성능 한계 (예: `p95 API 응답 < 300 ms`, `rate limit 100 req/min/IP`)
+
+값이 CLARIFY에서 확정되지 않았으면 **권장 기본값을 제시**하되, 그 항목을 DECISIONS.md의 "미확정 항목" 표로 연결해 결정 주체가 추후 확정하도록 한다(추론값을 사실처럼 단정하지 말 것).
 
 ### 문서 4 — docs/FILE-TREE.md
 
@@ -275,6 +322,103 @@ const { ok, datasetsPath } = await writeDatasets({
   now: new Date(),
 });
 // writeDatasets 시그니처: writeDatasets({ projectRoot, schemas, now }) → { ok, datasetsPath }
+```
+
+### 확장 문서 (조건부 생성 — 모델이 `Write`로 직접 작성)
+
+코어 6종 외에, 프로젝트가 요구하면 아래 확장 문서를 생성한다. **확장 문서도 즉흥 작성 금지 — 아래 렌더 스펙을 따른다.** 생성한 확장 문서는 반드시 문서맵(문서 1)과 DOCS-INDEX(`docs[]`)에 함께 등록한다.
+
+#### docs/DECISIONS.md (ADR 후보 — 풀 ADR 구조 강제)
+
+기술 선택·아키텍처 결정이 하나라도 있으면 생성한다. **각 ADR 후보는 결정값만 적지 말고 반드시 다음 풀 구조로 작성한다** (표준 예시: `temp-repos/Ontology/docs/adr/ADR-DEVCENTER-CONCEPTS.md` — Context / Decision Drivers / Considered Options 각 Pros·Cons·비용 / Decision / Risks 표 / Acceptance 체크리스트 / Next Actions):
+
+```
+## ADR-NNN — <결정 제목>
+> Status: Proposed   Date: <YYYY-MM-DD>
+
+### Context
+<왜 이 결정이 필요한가 — 배경·제약>
+
+### Decision Drivers
+1. <가중치 높은 순으로 — 비용/성능/팀역량/일정/보안 등>
+2. ...
+
+### Considered Options
+#### Option A — <이름>
+- What: <무엇인가>
+- Pros: <장점>
+- Cons: <단점>
+- 비용: <러닝커브·번들·운영비·라이선스 등 숨은 비용>
+#### Option B — <이름>
+- What / Pros / Cons / 비용
+<선택지는 최소 2개 — 단일안이면 "대안 없음" 사유를 명시>
+
+### Decision
+**채택: Option X** — <근거를 Decision Drivers와 연결>
+
+### Risks & Mitigations
+| 위험 | 영향 | Mitigation |
+|------|------|-----------|
+| ... | ... | ... |
+
+### Acceptance Criteria
+- [ ] <검증 가능한 완료 조건>
+- [ ] ...
+
+### Next Actions
+1. <담당자/역할> — <할 일> — 목표시점 <날짜 또는 Phase>
+```
+
+**미확정 항목**은 나열로 끝내지 말고 표로 — 각 항목에 **블로커 영향**과 **결정 주체**를 명시한다:
+
+```
+## 미확정 항목 (Open Decisions)
+| 항목 | 블로커 영향 | 결정 주체 |
+|------|------------|----------|
+| 인증 방식 (JWT vs 세션) | 백엔드 API 설계 차단 | 백엔드 리드 |
+| 파일 저장소 (S3 vs 로컬) | DATASETS 스키마 미확정 | 아키텍트 |
+```
+
+**다음 액션**은 담당자(역할)와 목표시점(날짜 또는 Phase) 없이 적지 않는다.
+
+#### docs/ROADMAP.md (Phase별 기간 강제)
+
+생성 시 각 Phase에 **예상 기간(주차 또는 스프린트 수)**을 명시한다. 기간 없는 Phase 나열 금지. 의존성이 있으면 의존성 맵(어느 Phase가 무엇을 선행으로 요구하는지)과 Phase별 수락 기준도 함께 적는다(참고 패턴: `temp-repos/Ontology/archive/deprecated-plans/PLAN_DEVELOPER_CENTER.md`의 Wave별 수락기준·의존성 맵·파일 소유권표).
+
+```
+## Phase 1 — <이름>  (예상: 1주 / Sprint 1)
+- 목표: ...
+- 수락 기준: ...
+## Phase 2 — <이름>  (예상: 2주 / Sprint 2-3)
+- 선행: Phase 1 완료
+- ...
+```
+
+#### docs/API-SPEC.md · 기타 확장 문서
+
+API 표면이 있으면 엔드포인트·요청/응답 스키마·에러 코드를 표로 명시한다. 그 외 확장 문서도 "값만 나열"이 아니라 근거·대안·검증 기준을 포함하는 동일 원칙을 따른다.
+
+### DOCS-INDEX 생성 (BLUEPRINT 마지막 — 모든 문서 등록)
+
+코어 + 확장 문서를 모두 생성한 뒤, 마지막에 문서 인덱스를 생성한다. `docs`는 이번 실행에서 생성한 **모든** 문서의 메타 배열이며, 문서 1의 문서맵과 동일한 목록이어야 한다:
+
+```js
+const { writeDocsIndex } = await import(toFileUrl(path.join(pluginRoot, 'lib/genesis/index-gen.js')));
+
+// docs: 이번 /go 실행에서 생성한 모든 문서 메타 (코어 6종 + 생성된 확장 문서 전부)
+const docs = [
+  { name: 'CLAUDE.md',      path: 'CLAUDE.md',            status: 'created', description: '도메인 컨텍스트' },
+  { name: 'PRD',            path: 'docs/PRD/<slug>.md',   status: 'created', description: '제품 요구사항' },
+  { name: 'ARCHITECTURE',   path: 'docs/ARCHITECTURE.md', status: 'created', description: '고수준 아키텍처' },
+  { name: 'FILE-TREE',      path: 'docs/FILE-TREE.md',    status: 'created', description: '파일트리 설계' },
+  { name: 'WORKFLOW',       path: 'docs/WORKFLOW.md',     status: 'created', description: '핵심 워크플로우' },
+  { name: 'DATASETS',       path: 'docs/DATASETS.md',     status: 'created', description: '데이터 스키마' },
+  // ...생성된 경우에만 추가: DECISIONS / ROADMAP / API-SPEC 등
+];
+
+await writeDocsIndex({ projectRoot: outDir, docs, now: new Date() });
+// writeDocsIndex 시그니처: writeDocsIndex({ projectRoot, docs, now }) → { ok, indexPath }
+// (index-gen.js는 T2/backend-wire11이 구현 중 — 위 계약 시그니처에 맞춰 호출부만 작성한다)
 ```
 
 ---
@@ -340,7 +484,7 @@ REVISE 라운드 <N>/3
   E) 전체 재생성 (스펙부터 다시)
 ```
 
-- **A 선택 또는 3회 소진** → GENESIS COMPLETE 출력 후 종료.
+- **A 선택 또는 3회 소진** → GO COMPLETE 출력 후 종료.
 - **B/C/D 선택** → 해당 문서만 재생성 후 다음 REVISE 라운드.
 - **E 선택** → Phase 1(INTAKE)부터 재시작.
 
@@ -440,7 +584,7 @@ const verifyResult = await verifyGenerated({ projectRoot: outDir });
 
 - `severity: 'error'` 항목 존재 시 → 해당 항목을 사용자에게 보고하고, `AskUserQuestion`으로 **자동 보정** 또는 **Phase 5(REVISE) 회귀** 여부를 확인한다.
 - `severity: 'warn'` 항목만 존재 시 → 표로 보고 후 자동 진행.
-- 모든 checks 통과(`ok: true`) → GENESIS COMPLETE 출력.
+- 모든 checks 통과(`ok: true`) → GO COMPLETE 출력.
 
 ---
 
@@ -449,8 +593,8 @@ const verifyResult = await verifyGenerated({ projectRoot: outDir });
 `--dry-run` 시:
 
 ```
-GENESIS DRY-RUN
-===============
+/go DRY-RUN
+===========
 Project: <name>    Domain: <domain>    Out: <outDir>
 
 WILL CREATE:
@@ -476,8 +620,8 @@ WILL CREATE:
 | DATASETS | `<outDir>/docs/DATASETS.md` | CREATED |
 
 ```
-GENESIS COMPLETE
-================
+/go COMPLETE
+============
 Project:   <name>
 Domain:    <domain>
 Out:       <outDir>

@@ -41,6 +41,17 @@ async function writeValidProject(root) {
   await fs.writeFile(path.join(docs, 'FILE-TREE.md'), '# FILE-TREE\n', 'utf-8');
   await fs.writeFile(path.join(docs, 'WORKFLOW.md'), '# WORKFLOW\n', 'utf-8');
   await fs.writeFile(path.join(docs, 'DATASETS.md'), '# DATASETS\n', 'utf-8');
+  // A docs-map that enumerates every generated doc under docs/ (check 7).
+  await fs.writeFile(
+    path.join(docs, 'DOCS-INDEX.md'),
+    '# DOCS-INDEX\n\n'
+    + '| 상태 | 경로 |\n|---|---|\n'
+    + '| 🟢 | `docs/PRD/my-app-2026-06-21.md` |\n'
+    + '| 🟢 | `docs/FILE-TREE.md` |\n'
+    + '| 🟢 | `docs/WORKFLOW.md` |\n'
+    + '| 🟢 | `docs/DATASETS.md` |\n',
+    'utf-8',
+  );
 
   const claude = path.join(root, '.claude');
   await fs.mkdir(claude, { recursive: true });
@@ -253,6 +264,71 @@ describe('verify-gen / check 6 — hooks loadable (error)', () => {
     await fs.rm(path.join(root, '.claude', 'hooks', 'notify.mjs'));
     const res = await verifyGenerated({ projectRoot: root });
     expect(findCheck(res, 'hooks-loadable').pass).toBe(true);
+  });
+});
+
+describe('verify-gen / check 7 — docs-map complete (warn)', () => {
+  let root;
+  beforeEach(() => { root = tmpRoot(); });
+  afterEach(() => { rmSync(root, { recursive: true, force: true }); });
+
+  it('passes docs-map-complete for a valid project whose DOCS-INDEX lists every doc', async () => {
+    await writeValidProject(root);
+    const res = await verifyGenerated({ projectRoot: root });
+    const c = findCheck(res, 'docs-map-complete');
+    expect(c.pass).toBe(true);
+    expect(c.severity).toBe('warn');
+    expect(c.detail).toContain('전수 일치');
+    expect(res.ok).toBe(true);
+  });
+
+  it('warns (pass:false) when a generated doc is absent from DOCS-INDEX, keeps ok:true', async () => {
+    await writeValidProject(root);
+    // Add an extra doc that the docs-map does NOT enumerate.
+    await fs.writeFile(path.join(root, 'docs', 'API-SPEC.md'), '# API\n', 'utf-8');
+    const res = await verifyGenerated({ projectRoot: root });
+    const c = findCheck(res, 'docs-map-complete');
+    expect(c.pass).toBe(false);
+    expect(c.severity).toBe('warn');
+    expect(c.detail).toContain('API-SPEC.md');
+    // warn-only ⇒ blueprint still ok.
+    expect(res.ok).toBe(true);
+  });
+
+  it('falls back to CLAUDE.md as the docs-map when DOCS-INDEX is absent', async () => {
+    await writeValidProject(root);
+    await fs.rm(path.join(root, 'docs', 'DOCS-INDEX.md'));
+    // CLAUDE.md (the fallback map) does NOT list the docs → warn.
+    const res = await verifyGenerated({ projectRoot: root });
+    const c = findCheck(res, 'docs-map-complete');
+    expect(c.pass).toBe(false);
+    expect(c.detail).toContain('CLAUDE.md');
+    expect(res.ok).toBe(true);
+  });
+
+  it('passes vacuously when docs/ has no markdown to track', async () => {
+    // .claude scaffold only, no docs/ markdown.
+    const claude = path.join(root, '.claude');
+    await fs.mkdir(claude, { recursive: true });
+    const res = await verifyGenerated({ projectRoot: root });
+    const c = findCheck(res, 'docs-map-complete');
+    expect(c.pass).toBe(true);
+    expect(c.detail).toContain('생략');
+  });
+
+  it('matches docs listed by bare filename only (not full relative path)', async () => {
+    await writeValidProject(root);
+    await fs.writeFile(path.join(root, 'docs', 'EXTRA.md'), '# extra\n', 'utf-8');
+    // Map references the new doc by bare filename only.
+    await fs.writeFile(
+      path.join(root, 'docs', 'DOCS-INDEX.md'),
+      '# DOCS-INDEX\n\n'
+      + '`docs/PRD/my-app-2026-06-21.md` `docs/FILE-TREE.md` `docs/WORKFLOW.md` '
+      + '`docs/DATASETS.md` `EXTRA.md`\n',
+      'utf-8',
+    );
+    const res = await verifyGenerated({ projectRoot: root });
+    expect(findCheck(res, 'docs-map-complete').pass).toBe(true);
   });
 });
 

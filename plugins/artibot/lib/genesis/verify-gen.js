@@ -319,6 +319,96 @@ async function checkHooksLoadable(root, checks) {
 }
 
 /**
+ * Recursively collect every `.md` file under `dir` as paths relative to
+ * `relTo`, using POSIX separators (so they match the way docs are referenced
+ * inside a markdown index). Returns `[]` if the directory is absent/unreadable.
+ * @param {string} dir - Directory to walk.
+ * @param {string} relTo - Base directory the returned paths are relative to.
+ * @returns {Promise<string[]>}
+ */
+async function listMarkdownRecursive(dir, relTo) {
+  const out = [];
+  let entries;
+  try {
+    entries = await fs.readdir(dir, { withFileTypes: true });
+  } catch {
+    return out;
+  }
+  for (const entry of entries) {
+    const abs = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      out.push(...await listMarkdownRecursive(abs, relTo));
+    } else if (entry.name.toLowerCase().endsWith('.md')) {
+      out.push(path.relative(relTo, abs).split(path.sep).join('/'));
+    }
+  }
+  return out;
+}
+
+/**
+ * Check 7 — docs-map completeness. Every generated `.md` under `docs/` must be
+ * enumerated by the document map: `docs/DOCS-INDEX.md` if present, else
+ * `CLAUDE.md` as the fallback map. A doc that exists on disk but is absent from
+ * the map is a "stale map" hazard (the project's own index lies about itself).
+ *
+ * Matching is by relative path token (e.g. `docs/PRD/foo.md`) OR bare filename
+ * (e.g. `foo.md`), since maps sometimes link by filename only. The map file
+ * itself (DOCS-INDEX.md) is never required to list itself.
+ *
+ * Severity: warn — an incomplete map degrades context restore but does not
+ * break the project. No `docs/` markdown ⇒ vacuously pass.
+ * @param {string} root
+ * @param {VerifyCheck[]} checks - mutated.
+ * @returns {Promise<void>}
+ */
+async function checkDocsMapComplete(root, checks) {
+  const docsDir = path.join(root, 'docs');
+  const indexPath = path.join(docsDir, 'DOCS-INDEX.md');
+  const hasIndex = await exists(indexPath);
+  const mapPath = hasIndex ? indexPath : path.join(root, 'CLAUDE.md');
+  const mapName = hasIndex ? 'docs/DOCS-INDEX.md' : 'CLAUDE.md';
+
+  const allDocs = await listMarkdownRecursive(docsDir, root);
+  // The index never needs to list itself.
+  const tracked = allDocs.filter((rel) => rel !== 'docs/DOCS-INDEX.md');
+
+  if (tracked.length === 0) {
+    checks.push(check(
+      'docs-map-complete',
+      true,
+      'warn',
+      'docs/ 하위 생성 문서 없음 — 문서맵 검사 생략(통과)',
+    ));
+    return;
+  }
+
+  const mapText = await readTextOrNull(mapPath);
+  if (mapText === null) {
+    checks.push(check(
+      'docs-map-complete',
+      false,
+      'warn',
+      `문서맵(${mapName}) 부재/읽기 불가 — 생성 문서 ${tracked.length}건 미열거`,
+    ));
+    return;
+  }
+
+  const missing = tracked.filter((rel) => {
+    const base = rel.split('/').pop();
+    return !mapText.includes(rel) && !mapText.includes(base);
+  });
+
+  checks.push(check(
+    'docs-map-complete',
+    missing.length === 0,
+    'warn',
+    missing.length === 0
+      ? `문서맵(${mapName}) 전수 일치 — docs/ 생성 문서 ${tracked.length}건 모두 열거됨`
+      : `문서맵(${mapName}) 누락 ${missing.length}건: ${missing.join(', ')}`,
+  ));
+}
+
+/**
  * Verify the files actually written by `/go` (blueprint + `.claude/` scaffold).
  *
  * Local-filesystem verification only — IO allowed, ZERO network (DATA POLICY).
@@ -331,6 +421,7 @@ async function checkHooksLoadable(root, checks) {
  *  4. `hook-mjs-extension` (warn) — no Windows-incompatible `.sh`/`.bat` hooks.
  *  5. `agent-command-frontmatter` (warn) — agents/commands docs have frontmatter.
  *  6. `hooks-loadable` (error) — every `.mjs` hook stub imports cleanly.
+ *  7. `docs-map-complete` (warn) — docs-map enumerates every generated doc.
  *
  * @param {object} args
  * @param {string} args.projectRoot - Absolute path to the generated project root.
@@ -352,6 +443,7 @@ export async function verifyGenerated({ projectRoot } = {}) {
     await checkHookExtensions(projectRoot, checks);
     await checkAgentCommandFrontmatter(projectRoot, checks);
     await checkHooksLoadable(projectRoot, checks);
+    await checkDocsMapComplete(projectRoot, checks);
   } catch (err) {
     // Defensive: no check above should throw, but never let one escape.
     checks.push(check(

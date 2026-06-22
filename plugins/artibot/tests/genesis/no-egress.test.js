@@ -1,6 +1,6 @@
 /**
- * DATA POLICY regression: the three genesis renderers must perform ZERO network
- * egress. Imports all three modules and runs each write path while spying on
+ * DATA POLICY regression: the genesis renderers must perform ZERO network
+ * egress. Imports each module and runs its write path while spying on
  * `globalThis.fetch`, `node:http.request`, `node:https.request`, and
  * `node:net.connect` — asserting none are ever called.
  *
@@ -19,6 +19,7 @@ import { writeFileTree } from '../../lib/genesis/tree-gen.js';
 import { writeWorkflow } from '../../lib/genesis/flow-gen.js';
 import { writeDatasets } from '../../lib/genesis/dataset-gen.js';
 import { writeClaudeScaffold } from '../../lib/genesis/scaffold-gen.js';
+import { writeDocsIndex } from '../../lib/genesis/index-gen.js';
 
 const FIXED = new Date(2026, 5, 21, 9, 5);
 const fixedNow = () => FIXED;
@@ -85,6 +86,19 @@ describe('genesis / no network egress (DATA POLICY)', () => {
     const res = await writeDatasets({
       projectRoot: root,
       schemas: [{ entity: 'User', fields: [{ name: 'id', type: 'uuid' }] }],
+      now: fixedNow,
+    });
+    expect(res.ok).toBe(true);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(httpSpy).not.toHaveBeenCalled();
+    expect(httpsSpy).not.toHaveBeenCalled();
+    expect(netSpy).not.toHaveBeenCalled();
+  });
+
+  it('writeDocsIndex performs no egress', async () => {
+    const res = await writeDocsIndex({
+      projectRoot: root,
+      docs: [{ name: 'PRD', path: 'docs/PRD/p.md', status: 'generated', description: 'd' }],
       now: fixedNow,
     });
     expect(res.ok).toBe(true);
