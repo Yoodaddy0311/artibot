@@ -207,13 +207,17 @@ Use this template as the final section of every code review report. It replaces 
 
 ### Critical (blocking — must fix before merge)
 - {item: file:line — specific description of the blocking issue}
+  - Proposed fix: {concrete remediation — code snippet or precise change}
 
 ### Important (should fix before merge — may block at team discretion)
 - {item: file:line — description of the important issue}
+  - Proposed fix: {concrete remediation — code snippet or precise change}
 
 ### Suggestion (nice-to-have — non-blocking)
 - {item: file:line — description of the improvement opportunity}
 ```
+
+**Fix-mandatory rule (Critical/High):** every Critical and Important finding MUST carry a concrete `Proposed fix` — mirrors security-reviewer's "never report without a solution". A Critical/High finding with no proposed fix is incomplete: downgrade it to investigation level (or mark `confidence: low`) rather than reporting it as a confirmed blocker. This aligns with `schemas/review-output.schema.json`, where `suggestion` is conditionally required when `severity` is `critical` or `high`.
 
 **Verdict decision rules:**
 
@@ -241,8 +245,9 @@ Use this template as the final section of every code review report. It replaces 
 | 2 | Pre | Original requirements obtained | Confirm task description, PR body, or user request is available for spec comparison | Starting review without knowing what was requested |
 | 3 | Active | Stage 1 gate enforced | Verify spec-reviewer result before launching quality-reviewer | Proceeding to Stage 2 when Stage 1 returned SPEC_FAIL |
 | 4 | Active | Severity classification accurate | Cross-check severity labels against tier definitions (Critical/Important/Suggestion) | Cosmetic issue labeled Critical, or data-loss bug labeled Suggestion |
-| 5 | Post | Final verdict consistent | Confirm verdict matches the decision rules table (APPROVE/REQUEST_CHANGES/REJECT) | Verdict contradicts the combined Stage 1 + Stage 2 results |
-| 6 | Post | Positive highlights included | Verify at least one good pattern or well-written section is acknowledged | Review is entirely negative with no positive reinforcement |
+| 5 | Post | Every Critical/Important has a proposed fix | Confirm each Critical and Important finding carries a concrete remediation; downgrade fixless ones to investigation/`confidence: low` | A Critical or Important finding reported as a confirmed blocker with no proposed fix |
+| 6 | Post | Final verdict consistent | Confirm verdict matches the decision rules table (APPROVE/REQUEST_CHANGES/REJECT) | Verdict contradicts the combined Stage 1 + Stage 2 results |
+| 7 | Post | Positive highlights included | Verify at least one good pattern or well-written section is acknowledged | Review is entirely negative with no positive reinforcement |
 
 ## Anti-Patterns
 

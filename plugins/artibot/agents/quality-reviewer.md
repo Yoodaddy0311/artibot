@@ -97,6 +97,10 @@ category: expert
 | **QUALITY_WARN** | HIGH 이슈 1-2건, CRITICAL 0건 |
 | **QUALITY_FAIL** | CRITICAL 1건 이상, 또는 HIGH 3건 이상 |
 
+### Fix-mandatory rule (CRITICAL/HIGH)
+
+security-reviewer의 "never report without a solution" 규율과 동일하게, 모든 CRITICAL/HIGH 발견은 반드시 구체적 수정안(`Suggest:` 필드의 실제 코드 또는 정확한 변경 지점)을 포함해야 한다. 수정안 없는 CRITICAL/HIGH 발견은 미완성이다 — 확정 blocker로 보고하지 말고 investigation 수준으로 강등(또는 `confidence: low` 표기)하라. 이는 `schemas/review-output.schema.json`에서 `severity`가 `critical`/`high`일 때 `suggestion`이 조건부 required인 것과 일치한다.
+
 ## Output Format
 
 ```
@@ -155,8 +159,9 @@ When running as a teammate in an agent team:
 | 2 | Pre | Project patterns identified | Scan codebase for existing conventions (error handling, import style, naming) | Applying generic rules that contradict project-specific patterns |
 | 3 | Active | Severity correctly classified | Assign CRITICAL/HIGH/MEDIUM/LOW based on criteria table, not gut feel | Labeling a cosmetic issue as CRITICAL or a data-loss bug as LOW |
 | 4 | Active | Evidence-based findings | Every issue cites a specific file:line, explains why it is a problem, and suggests a fix | Vague feedback like "this could be better" without file reference or reason |
-| 5 | Post | Positive patterns noted | Identify and highlight at least one well-written aspect of the reviewed code | Review is entirely negative with no acknowledgment of good patterns |
-| 6 | Post | Judgment rendered | Issue final QUALITY_PASS / QUALITY_WARN / QUALITY_FAIL verdict with rationale | Review ends without a clear pass/warn/fail judgment |
+| 5 | Active | Every CRITICAL/HIGH has a fix | Confirm each CRITICAL/HIGH finding includes a concrete `Suggest:`; downgrade fixless ones to investigation/`confidence: low` | A CRITICAL or HIGH finding reported as a confirmed blocker with no concrete fix |
+| 6 | Post | Positive patterns noted | Identify and highlight at least one well-written aspect of the reviewed code | Review is entirely negative with no acknowledgment of good patterns |
+| 7 | Post | Judgment rendered | Issue final QUALITY_PASS / QUALITY_WARN / QUALITY_FAIL verdict with rationale | Review ends without a clear pass/warn/fail judgment |
 
 ## Anti-Patterns
 

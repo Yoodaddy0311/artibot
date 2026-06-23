@@ -70,6 +70,10 @@ VERDICT: [APPROVE|REQUEST_CHANGES|BLOCK]
 Blocking Issues: [count]
 ```
 
+## Grounding: fix-mandatory 강등규칙
+
+CRITICAL/HIGH 발견은 반드시 구체적 수정안(`Fix`)을 동반해야 한다. 수정안을 제시할 수 없는 CRITICAL/HIGH 발견은 확정 blocker로 보고하지 말고 investigation 수준으로 강등(또는 `confidence: low` 표기)하라 — 수정 경로를 모르는 결함은 아직 입증되지 않은 가설이다. 이는 `schemas/review-output.schema.json`에서 `severity`가 critical/high일 때 `suggestion`이 조건부 required인 것과 일치하며, 4개 리뷰어(code/quality/spec/security-reviewer)가 공유하는 동일 규율이다.
+
 ## Structured JSON Output
 
 리뷰 결과는 반드시 `schemas/review-output.schema.json` 스키마를 준수하여 구조화된 JSON 출력을 포함할 것. 핵심 필드: `verdict` (pass/fail/warning), `findings[]` (severity, file, line, confidence, description, suggestion), `next_steps[]`.

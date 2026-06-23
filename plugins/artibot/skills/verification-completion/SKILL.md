@@ -90,8 +90,9 @@ Before marking ANY task as complete, execute this checklist:
 1. **RE-READ**: Open every modified file and confirm the change is present
 2. **RE-RUN**: Execute tests covering the changed code
 3. **RE-CHECK**: Verify no new warnings/errors were introduced
-4. **EVIDENCE**: Collect concrete output (command results, file contents)
-5. **REPORT**: Include evidence in your completion message
+4. **COMPLETE-CLASS**: When you find one issue, scan the rest of its class before claiming done — every site of the same pattern, every member of the same function family, every caller of the changed signature. One fixed instance of a recurring bug is not a fixed bug; it is a fixed symptom. A "done" claim covers the class, not the single instance you happened to notice first.
+5. **EVIDENCE**: Collect concrete output (command results, file contents)
+6. **REPORT**: Include evidence in your completion message
 
 ## Workflow Checklist
 
@@ -102,9 +103,10 @@ Verification:
 - [ ] Step 1: RE-READ every modified file (confirm changes exist)
 - [ ] Step 2: RE-RUN relevant tests (paste pass/fail output)
 - [ ] Step 3: RE-CHECK for new warnings or errors
-- [ ] Step 4: Collect EVIDENCE (command output, file:line references)
-- [ ] Step 5: Write completion REPORT with evidence attached
-- [ ] Step 6: Self-check for Red Flag expressions in report
+- [ ] Step 4: COMPLETE-CLASS — scan every other site of the same pattern/function family/caller
+- [ ] Step 5: Collect EVIDENCE (command output, file:line references)
+- [ ] Step 6: Write completion REPORT with evidence attached
+- [ ] Step 7: Self-check for Red Flag expressions in report
 ```
 
 ## Human Checkpoints
@@ -146,6 +148,7 @@ Verification:
 | Re-read files | LOW | Mandatory for every modified file |
 | Re-run tests | LOW | Must execute, not assume |
 | Check for errors | LOW | Must verify clean output |
+| Complete the class | LOW | When one issue is found, every other site of the same pattern/family must be scanned before "done" |
 | Collect evidence | MEDIUM | Choose relevant evidence types |
 | Write report | MEDIUM | Format flexible, evidence mandatory |
 | Self-check language | LOW | All red flag expressions must be eliminated |
@@ -201,3 +204,4 @@ The following table captures common excuses agents make to skip critical steps i
 - "Done" claim made before `npm test` or equivalent has been run
 - Verification section says "tests should pass" rather than "tests passed — [output]"
 - Agent TaskUpdate status set to "completed" before evidence is collected
+- One instance of a recurring issue fixed while sibling sites of the same pattern/function family went unscanned (COMPLETE-CLASS skipped)

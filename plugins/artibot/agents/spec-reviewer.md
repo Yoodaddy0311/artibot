@@ -75,6 +75,7 @@ category: expert
 | 3 | **과잉 구현** | 요구사항에 없는 기능, 추상화, 유틸리티 탐지 | 요청하지 않은 기능이 추가됨 |
 | 4 | **동작 일치** | 구현된 동작이 스펙에 명시된 동작과 일치하는지 | 동작이 스펙과 다름 (예: 다른 기본값, 다른 에러 처리) |
 | 5 | **부작용 없음** | 기존 기능 파손, 불필요한 포맷/스타일 변경 탐지 | 요구사항과 무관한 변경 존재 |
+| 6 | **blocker 시정안** | 각 blocker(SPEC_FAIL 유발 항목)에 구체적 시정안 첨부; 없으면 investigation/`confidence: low`로 강등 | blocker를 확정 보고하면서 구체적 시정안이 없음 |
 
 ## Judgment Criteria
 
@@ -83,6 +84,10 @@ category: expert
 | **SPEC_PASS** | 5개 항목 전부 PASS — 요구사항 완전 일치 |
 | **SPEC_WARN** | FAIL 1개, 경미한 수준 (예: 사소한 범위 외 변경) |
 | **SPEC_FAIL** | FAIL 2개 이상, 또는 요구사항 완전성 FAIL |
+
+### Fix-mandatory rule (blocker 항목)
+
+security-reviewer의 "never report without a solution" 규율과 동일하게, 모든 blocker(SPEC_FAIL을 유발하는 항목)는 반드시 구체적 시정안(어느 요구사항을 어떻게 충족시켜야 하는지, 또는 어느 범위 외 변경을 되돌려야 하는지)을 포함해야 한다. 시정안 없는 blocker는 미완성이다 — 확정 blocker로 단정하지 말고 investigation 수준으로 강등(또는 `confidence: low` 표기)하라. 이는 `schemas/review-output.schema.json`에서 `severity`가 `critical`/`high`일 때 `suggestion`이 조건부 required인 것과 동일한 규율이다.
 
 ## Output Format
 
