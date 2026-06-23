@@ -10,6 +10,8 @@ toolset: team
 
 > **vs /spawn**: `/orchestrate` runs **predefined workflow patterns** (feature, bugfix, refactor, security) with structured phases via `--pattern`. `/spawn` is **free-form meta-orchestration** for arbitrary task decomposition without a pattern template. **Pick rule:** known dev workflow with a named lifecycle → `/orchestrate`; ad-hoc multi-domain work that doesn't fit a template → `/spawn`. Both share the same Agent Teams primitives, so neither is an alias of the other.
 
+> **vs /workflows — launcher ≠ monitor**: `/orchestrate` *starts* a run; it does not show status. It executes on **Agent Teams** (`toolset: team` → `TeamCreate`/`Task`), **not** the harness `Workflow` tool. Consequently the native **`/workflows`** command — which only *watches* already-running harness `Workflow`-tool runs — does **not** track `/orchestrate` runs. Follow an `/orchestrate` run's progress via its team tasks (`TaskList`/`TaskGet`, step 5). To start a **new** run while one is active, just invoke `/orchestrate` again — Agent Teams runs are independent and can run concurrently.
+
 Coordinate multi-agent workflows for complex operations that span multiple domains. Creates an Agent Team, spawns specialized teammates, and sequences them through a defined pipeline using shared tasks and direct messaging for handoffs between phases.
 
 ## Arguments
