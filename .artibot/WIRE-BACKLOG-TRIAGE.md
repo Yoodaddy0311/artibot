@@ -139,3 +139,15 @@ Priority order based on confidence and risk:
 Top-level `logs[1]` in `workflow-wk29hwny0-result.json` records: `"pipeline[6] failed: agent({schema}): subagent completed without calling StructuredOutput (after 2 in-conversation nudges)"`. Pipeline slots are 0-indexed, so pipeline[6] is the 7th agent slot — inferred to correspond to WIRE-07 based on pipeline ordering (the JSON string "WIRE-07" does not appear anywhere in the result file; this is an inference, not a confirmed mapping). That subagent exhausted its turn budget without emitting a `StructuredOutput` call, so no spec was written to the `full[]` array. `totalParsed=22` reflects that the gap candidate was identified and dispatched; `specsProduced=21` reflects that the spec for WIRE-07 was never delivered. The capability WIRE-07 targeted is not captured anywhere in this result file.
 
 **Recommended action**: re-run a single-agent spec generation pass for WIRE-07 to recover the missing spec, then triage it normally.
+
+---
+
+## External Benchmark Candidates (separate provenance — not from wk29hwny0)
+
+> Items surfaced by `/repo` external-repo benchmarking, code-level inspected + leader-verified. Numbered `EXT-NN` to keep them out of the WIRE-NN workflow series. DEFER ≠ committed work — these are parked for explicit future decision.
+
+| ID | Capability | Source | Disposition | Evidence & caveat |
+|---|---|---|---|---|
+| EXT-01 | **OTEL span taxonomy enrichment** — adopt a lifecycle-segmented span model (Agent / Turn / Function / Handoff / Guardrail / MCPListTools …) instead of the current single pipeline-scope span | `openai/openai-agents-python` benchmark (2026-06-23) — `src/agents/tracing/span_data.py` defines **14** `*SpanData` classes incl. `HandoffSpanData`/`GuardrailSpanData` | **DEFER (reference taxonomy, NOT low-budget)** | Real granularity gap: `lib/runtime/middleware/otel-middleware.js` emits only `buildPipelineSpan` (single span, `:104`/`:299`) with agent/token/cache attrs — no per-lifecycle spans. **Architectural caveat**: our OTEL is a *pipeline-accounting* exporter (converts token-usage/cache-roi middleware state → OTLP), not an agent-loop tracer, so Handoff/Guardrail spans have **no event source** today. Adopting requires NEW runtime event instrumentation first → exceeds complexity-budget=low. Use the 14-span list purely as a design reference if/when agent-lifecycle tracing is built. |
+
+> **Benchmarks that yielded null-result (no adoption)** — recorded so future scans don't re-litigate: `openai/swarm` (archived/educational, stateless, 0 learning loop — handoff already inferior to our Agent Teams); `openai/openai-agents-python` Guardrail tripwire (already a superset in `skills/guardrails` + `lib/orchestration/{guardrails,tool-guardrails}.js`); Sessions (= conversation-memory CRUD, NOT learning — `lib/learning/memory/*` is already a superset).
