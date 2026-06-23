@@ -100,6 +100,8 @@ If a step in this skill is skipped, state explicitly: which step, why it was blo
 | `whenNotToUse` | Recommended | Single sentence scoping when NOT to load this skill |
 | `tokens` | Recommended | Estimated token cost string, e.g. `"~2K"` |
 | `agents` | Recommended | Which agents most benefit from this skill |
+| `disable-model-invocation: true` | Situational | 릴리즈·스케줄·세션로그류처럼 모델이 임의 자동호출하면 안 되는 스킬에 추가 — 자동호출 차단 |
+| `allowed-tools: [...]` | Recommended | 스킬이 실제 사용하는 도구만 최소 화이트리스트로 명시 — 과다권한 차단 |
 
 ## Verification Before Committing
 

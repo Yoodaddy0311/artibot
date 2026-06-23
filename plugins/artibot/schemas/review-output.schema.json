@@ -2,7 +2,6 @@
   "$schema": "https://json-schema.org/draft-07/schema#",
   "title": "ReviewOutput",
   "description": "Structured output schema for adversarial and code review findings. Skill verdict template: APPROVE | REQUEST CHANGES | REJECT with Critical/Important/Suggestion tiers.",
-  "description": "Structured output schema for adversarial and code review findings",
   "type": "object",
   "required": ["verdict", "findings", "next_steps"],
   "properties": {
@@ -17,6 +16,19 @@
       "items": {
         "type": "object",
         "required": ["severity", "file", "description"],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "severity": { "enum": ["critical", "high"] }
+              },
+              "required": ["severity"]
+            },
+            "then": {
+              "required": ["suggestion"]
+            }
+          }
+        ],
         "properties": {
           "severity": {
             "type": "string",

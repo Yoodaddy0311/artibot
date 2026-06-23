@@ -103,6 +103,7 @@ whenNotToUse: "Green-field feature development with no existing code to review, 
 - **코드 증거 필수**: 모든 발견사항에 `file:line` 형태의 코드 위치를 포함한다
 - **재현 가능성**: 가능한 경우 공격 시나리오를 구체적으로 기술한다
 - **오탐 최소화**: confidence level을 명시하여 불확실한 발견사항을 구분한다
+- **수정안 없는 critical/high 강등**: critical 또는 high 발견인데 구체적 `Fix`(remediation)를 제시할 수 없다면, 확정 발견으로 보고하지 말고 investigation 수준으로 강등하거나 `confidence: low`로 표기한다. 수정 경로를 모르는 위협은 아직 입증되지 않은 가설이다. (`schemas/review-output.schema.json`: `severity`가 critical/high이면 `suggestion`이 조건부 required)
 - **Severity 분류**:
   | Level | Definition | Response |
   |-------|-----------|----------|
