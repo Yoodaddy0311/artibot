@@ -13,6 +13,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.28.1] — 2026-06-24
+
+**Theme**: `/go` Next Steps surfaces the build-sequence hand-off + PRD-compliance review
+
+`/go` produced a blueprint but its closing guidance only pointed at `/plan`, so
+users hand-stitched the implementation steps and never discovered that the
+situation-keyed bundles (`/orchestrate feature|bugfix|refactor`) already exist
+in `artibot.config.json#team.playbooks`. This release closes that discovery gap.
+
+### Changed
+- `commands/go.md` Next Steps — promotes `/orchestrate feature` as the recommended
+  post-blueprint step and adds the situation→playbook mapping
+  (feature / bugfix / refactor). The COMPLETE banner's `Next:` line now leads with
+  `/orchestrate feature` instead of `/plan`.
+- `commands/go.md` — adds a "verify the built MVP against the PRD" pointer:
+  `/code-review` (or `/review`) runs **spec-reviewer** to check the PRD's
+  `F-ID`·Acceptance Criteria (missing / over-built / spec-drift) plus
+  quality-reviewer; `/verify` covers the mechanical lint/typecheck/test/build gate.
+- Root `README.md` plugin table — notes the `/go` → `/orchestrate` build-sequence
+  hand-off.
+
+---
+
 ## [4.28.0] — 2026-06-22
 
 **Theme**: `/go` blueprint depth — full ADRs, per-feature acceptance criteria, doc-index governance

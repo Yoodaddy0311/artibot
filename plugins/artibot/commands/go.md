@@ -629,7 +629,8 @@ Documents: 6/6 created
 Scaffold:  .claude/{rules,skills,agents,hooks,commands,settings.json}
 Verified:  <N> checks passed
 
-Next: /plan "<feature>" to decompose the first implementation sprint.
+Next: /orchestrate feature  — 청사진대로 구현 묶음 발동 (plan→design→구현→review→merge).
+      또는 /plan "<feature>" 로 단일 단계만 분해, /autopilot 로 무인 실행.
 ```
 
 **생성 트리 요약 (100% 완료):**
@@ -656,8 +657,15 @@ Next: /plan "<feature>" to decompose the first implementation sprint.
 
 ## Next Steps
 
+청사진이 준비되면 **상황별 묶음 커맨드**로 다음 단계를 한 번에 발동한다. 각 묶음은 `artibot.config.json#team.playbooks`에 단계 DAG로 정의돼 있고 `/orchestrate <name>`로 실행된다 (`commands/orchestrate.md`).
+
 | # | 상황 | 커맨드 | 설명 |
 |---|------|--------|------|
-| 1 | 구현 단계 분해 | `/plan` | 첫 스프린트 실행 계획 |
-| 2 | 아키텍처 심화 | `/design` | architect agent에게 상세 설계 위임 |
-| 3 | 자율 실행 | `/autopilot` | 청사진 기반 무인 구현 |
+| 1 | 청사진대로 구현 (권장) | `/orchestrate feature` | plan→design→구현(fe∥be)→review→merge 묶음 자동 발동 |
+| 2 | 자율 실행 (무인) | `/autopilot "<feature>"` | 청사진 기반 Phase 0~6 무인 구현 + Goal 루프 |
+| 3 | 구현 단계 분해 (단일) | `/plan` | 첫 스프린트 실행 계획만 분해 |
+| 4 | 아키텍처 심화 | `/design` | architect agent에게 상세 설계 위임 |
+
+> **상황별 묶음 매핑**: 신규 빌딩 후 구현=`/orchestrate feature` · 버그 수정=`/orchestrate bugfix` · 구조 개선=`/orchestrate refactor`.
+>
+> **구현 후 PRD 대조 검증**: MVP를 구축한 뒤 PRD대로 됐는지 확인하려면 `/code-review`(또는 `/review`) — `code-reviewer`가 **spec-reviewer**(PRD의 F-ID·Acceptance Criteria 대조: 과잉구현·누락기능·스펙이탈 탐지)와 quality-reviewer를 순차 실행한다. 기계적 통과(lint/typecheck/test/build)는 `/verify`. PRD의 `F-01… AC(EARS/GWT)`를 검증 입력으로 넘긴다.
