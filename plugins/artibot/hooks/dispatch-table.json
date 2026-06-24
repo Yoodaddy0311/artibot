@@ -59,7 +59,8 @@
         { "name": "dev-verify-gate",     "script": "dev-verify-gate.js",     "timeoutMs": 8000 },
         { "name": "git-autopilot-close", "script": "git-autopilot-close.js", "timeoutMs": 15000 },
         { "name": "stop-recap",          "script": "stop-recap.js",          "timeoutMs": 5000 },
-        { "name": "session-notes",       "script": "session-notes.js",       "timeoutMs": 5000 }
+        { "name": "session-notes",       "script": "session-notes.js",       "timeoutMs": 5000 },
+        { "name": "session-ledger",      "script": "session-ledger.mjs",     "timeoutMs": 5000 }
       ]
     },
     "SessionEnd": {
@@ -71,7 +72,8 @@
         { "name": "swarm-sync",      "script": "swarm-sync.js",      "timeoutMs": 15000 },
         { "name": "rotation-runner", "script": "rotation-runner.js", "timeoutMs": 8000 },
         { "name": "memory-tracker",  "script": "memory-tracker.js",  "timeoutMs": 8000, "args": ["SessionEnd"] },
-        { "name": "http-notify",     "script": "http-notify.js",     "timeoutMs": 8000 }
+        { "name": "http-notify",     "script": "http-notify.js",     "timeoutMs": 8000 },
+        { "name": "session-ledger",  "script": "session-ledger.mjs", "timeoutMs": 8000, "args": ["SessionEnd"] }
       ]
     },
     "SubagentStop": {

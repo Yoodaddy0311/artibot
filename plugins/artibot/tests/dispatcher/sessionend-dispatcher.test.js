@@ -85,15 +85,16 @@ describe('_sessionend-dispatcher (integration)', () => {
     }
   });
 
-  it('registers all 5 wrapped hooks', async () => {
+  it('registers all 6 wrapped hooks', async () => {
     const mod = await import('../../scripts/hooks/_sessionend-dispatcher.js');
-    expect(mod.HOOKS).toHaveLength(5);
+    expect(mod.HOOKS).toHaveLength(6);
     const names = mod.HOOKS.map((h) => h.name);
     expect(names).toContain('session-end');
     expect(names).toContain('swarm-sync');
     expect(names).toContain('rotation-runner');
     expect(names).toContain('memory-tracker');
     expect(names).toContain('http-notify');
+    expect(names).toContain('session-ledger');
   });
 
   it('passes "SessionEnd" arg to memory-tracker', async () => {

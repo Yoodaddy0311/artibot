@@ -36,8 +36,8 @@ const EXPECTED_HANDLER_COUNTS = {
   // prompts (alongside the existing auto-team-trigger and autopilot-nlu).
   UserPromptSubmit: 7,
   PostToolUse: 10,
-  Stop: 5,
-  SessionEnd: 5,
+  Stop: 6,
+  SessionEnd: 6,
   SubagentStop: 3,
   PreCompact: 0,
 };

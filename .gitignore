@@ -77,3 +77,10 @@ reports/
 # tree by hooks (session-notes.js, dev-verify-gate.js, pr-description-builder.js);
 # no consumer requires it to be git-tracked. Not cross-machine state (unlike HANDOFF.md).
 .artibot/SESSION-NOTES.md
+
+# Ambient Conversation Ledger — per-session denoised conversation archive.
+# Local-only (DATA POLICY): contains verbatim user/assistant conversation text
+# (secret-redacted, but still private). NEVER commit — keep out of git entirely.
+# `**/` so it matches whether the hook's projectRoot is the repo root or a
+# nested cwd (e.g. plugins/artibot/.artibot/ledger/ during in-repo dev).
+**/.artibot/ledger/
