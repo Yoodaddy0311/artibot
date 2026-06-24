@@ -13,6 +13,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.29.0] — 2026-06-24
+
+**Theme**: Ambient Conversation Ledger — no-command session capture (paradigm convergence with Claude Tag)
+
+A Stop/SessionEnd hook that fires every turn with NO user command, slims the
+transcript to denoised user/assistant conversation, redacts secrets, and
+incrementally appends to a gitignored local store. Always exit 0, zero stdout —
+never blocks the session. DATA POLICY: local files only, nothing leaves the box.
+
+### Added
+- `lib/learning/ledger/slim.js` — conversation denoise (ports the claude-code
+  branch of the downloaded log-hooks `save_log.py`): keeps only user/assistant
+  text, drops tool_use / thinking / isMeta / skill-listing noise.
+- `lib/learning/ledger/redact.js` — secret scrubbing via the verified
+  `lib/privacy/pii-scrubber` (scoped to credentials/auth/secrets/env; emails,
+  IPs, paths preserved for context).
+- `lib/learning/ledger/store.js` — incremental append + line-count watermark
+  (`.cursor.json`) + keep-N rotation (default 50) + 4 MB read cap. SessionEnd
+  runs an authoritative dedup reconcile.
+- `scripts/hooks/session-ledger.mjs` — the Stop/SessionEnd hook (no stdout,
+  always exit 0); registered in `hooks/dispatch-table.json` on both slots.
+- Tests: per-module `tests/learning/{slim,redact,store}.test.js` + hook
+  non-block `tests/hooks/session-ledger.test.js` (spawnSync exit 0 / 0-stdout).
+- Docs: `docs/PRD-AMBIENT-CONVERSATION-LEDGER.md` (full PRD) and
+  `docs/ROADMAP-CLAUDE-TAG-CONVERGENCE.md` (honest paradigm-convergence roadmap:
+  Claude Tag is Slack-only, Enterprise/Team-beta-only, no Claude Code surface —
+  Max 20x is ineligible; no fake integration invented).
+
+### Changed
+- `.gitignore`: `**/.artibot/ledger/` (covers repo root + nested in-repo dev cwd).
+- `hooks/dispatch-table.json`: Stop + SessionEnd each gain the `session-ledger`
+  handler (5 → 6 per slot); dispatcher count assertions synced.
+
+---
+
 ## [4.28.1] — 2026-06-24
 
 **Theme**: `/go` Next Steps surfaces the build-sequence hand-off + PRD-compliance review
