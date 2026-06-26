@@ -94,9 +94,9 @@ describe('_sessionstart-dispatcher (integration)', () => {
     expect(stdout).toBe('');
   });
 
-  it('registers all 9 wrapped hooks in HOOKS table', async () => {
+  it('registers all 10 wrapped hooks in HOOKS table', async () => {
     const mod = await import('../../scripts/hooks/_sessionstart-dispatcher.js');
-    expect(mod.HOOKS).toHaveLength(9);
+    expect(mod.HOOKS).toHaveLength(10);
     const names = mod.HOOKS.map((h) => h.name);
     expect(names).toContain('session-start');
     expect(names).toContain('memory-tracker');
@@ -107,6 +107,7 @@ describe('_sessionstart-dispatcher (integration)', () => {
     expect(names).toContain('git-autopilot-session');
     expect(names).toContain('auto-learning-check');
     expect(names).toContain('skill-validation-check');
+    expect(names).toContain('session-readback');
   });
 
   it('passes "SessionStart" arg to memory-tracker so it routes to the right handler', async () => {

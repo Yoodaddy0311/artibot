@@ -30,7 +30,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PLUGIN_ROOT = path.resolve(HERE, '..', '..');
 
 const EXPECTED_HANDLER_COUNTS = {
-  SessionStart: 9,
+  SessionStart: 10,
   // Bumped 6 → 7 in v4.8.0 backlog: auto-command-suggest.js joined the
   // UserPromptSubmit slot to suggest /adr and /migrate from natural-language
   // prompts (alongside the existing auto-team-trigger and autopilot-nlu).

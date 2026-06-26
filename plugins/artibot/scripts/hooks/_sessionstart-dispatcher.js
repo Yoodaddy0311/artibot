@@ -2,7 +2,7 @@
 /**
  * SessionStart dispatcher.
  *
- * Consolidates 9 previously-separate SessionStart hook entries into a single
+ * Consolidates 10 previously-separate SessionStart hook entries into a single
  * node invocation:
  *
  *   1. session-start.js              (5s)  — environment, config, banner
@@ -14,6 +14,7 @@
  *   7. git-autopilot-session.js      (10s) — autopilot session marker
  *   8. auto-learning-check.js        (5s)  — learning state surfacing
  *   9. skill-validation-check.js     (5s)  — skill index health check
+ *  10. session-readback.mjs          (5s)  — prior-session read-back advisory
  *
  * Each hook is spawned in parallel as a child process so a crash, slow IO, or
  * long timeout in any one hook never blocks the others. stdout JSON outputs

@@ -15,7 +15,8 @@
         { "name": "session-digest",         "script": "session-digest.js",         "timeoutMs": 3000 },
         { "name": "git-autopilot-session",  "script": "git-autopilot-session.js",  "timeoutMs": 10000 },
         { "name": "auto-learning-check",    "script": "auto-learning-check.js",    "timeoutMs": 5000 },
-        { "name": "skill-validation-check", "script": "skill-validation-check.js", "timeoutMs": 5000 }
+        { "name": "skill-validation-check", "script": "skill-validation-check.js", "timeoutMs": 5000 },
+        { "name": "session-readback",       "script": "session-readback.mjs",      "timeoutMs": 5000 }
       ]
     },
     "UserPromptSubmit": {
