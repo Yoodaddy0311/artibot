@@ -148,6 +148,36 @@ describe('BUILTIN_PATTERNS', () => {
     const jwt = 'eyJhbGciOiJIUzI1.eyJzdWIiOiIxMjM0.SflKxwRJSMeKKF2Q';
     expect(jwt).toMatch(pattern.regex);
   });
+
+  describe('azure_key regex (88-char base64 account key)', () => {
+    const azure = () => BUILTIN_PATTERNS.find((p) => p.name === 'azure_key');
+    // Real Azure keys = 86 base64 data chars + '==' and routinely contain '+'/'/'.
+    const realKey = `${'A'.repeat(40)}+/${'B'.repeat(44)}==`; // 86 data + '=='
+
+    it('matches a base64 key containing + and / chars (regression: old class dropped them)', () => {
+      const p = azure();
+      p.regex.lastIndex = 0;
+      expect(realKey).toMatch(p.regex);
+    });
+
+    it('matches mid-string, not only at end-of-line (regression: old `\\s*$` anchor)', () => {
+      const p = azure();
+      p.regex.lastIndex = 0;
+      expect(`AccountKey=${realKey};Other=1`).toMatch(p.regex);
+    });
+
+    it('does NOT match short base64 (Basic-auth payloads stay for basic_auth)', () => {
+      const p = azure();
+      p.regex.lastIndex = 0;
+      expect('dXNlcjpwYXNzd29yZA==').not.toMatch(p.regex);
+    });
+
+    it('does NOT match a 44-char single-= block (SHA-256 hashes preserved as context)', () => {
+      const p = azure();
+      p.regex.lastIndex = 0;
+      expect(`${'a'.repeat(43)}=`).not.toMatch(p.regex);
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------

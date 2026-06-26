@@ -144,7 +144,14 @@ export const BUILTIN_PATTERNS = [
   {
     name: 'azure_key',
     category: 'auth',
-    regex: /[a-zA-Z0-9]{32,}==\s*$/gm,
+    // Azure Storage / Cosmos account keys = base64 of 64 bytes = 86 data chars
+    // + '=='. The char class includes base64 '+'/'/' (the old [a-zA-Z0-9] class
+    // dropped them, so real keys leaked), and there is NO end-of-line anchor so
+    // the key is matched mid-string — e.g. inside a JSON-serialized ledger line
+    // (the old `\s*$` never matched there). min 86 keeps short base64 out:
+    // Basic-auth payloads and 44-char SHA-256 single-'=' hashes are intentionally
+    // NOT matched here (handled by basic_auth / preserved as context elsewhere).
+    regex: /[A-Za-z0-9+/]{86,}==/g,
     replacement: TOKENS.REDACTED_KEY,
     priority: 18,
     hint: '==',

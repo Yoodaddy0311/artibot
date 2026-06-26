@@ -106,6 +106,30 @@ describe('scrub() - auth (API keys & tokens)', () => {
     const result = scrub(text);
     expect(result).toContain('[REDACTED_KEY]');
   });
+
+  describe('azure_key (88-char base64 account key)', () => {
+    // Built at runtime: 86 base64 data chars (incl. '+'/'/') + '=='.
+    const realKey = `${'A'.repeat(40)}+/${'B'.repeat(44)}==`;
+
+    it('redacts an Azure account key containing + and / chars', () => {
+      const result = scrub(`AccountKey=${realKey}`);
+      expect(result).toContain('[REDACTED_KEY]');
+      expect(result).not.toContain(realKey);
+    });
+
+    it('redacts the key when wrapped inside a JSON string (ledger line shape)', () => {
+      const line = JSON.stringify({ content: `key=${realKey}` });
+      const result = scrub(line);
+      expect(result).toContain('[REDACTED_KEY]');
+      expect(result).not.toContain(realKey);
+    });
+
+    it('does NOT clobber a short Basic-auth payload (stays [REDACTED_TOKEN])', () => {
+      const result = scrub('Authorization: Basic dXNlcjpwYXNzd29yZA==');
+      expect(result).toContain('Basic [REDACTED_TOKEN]');
+      expect(result).not.toContain('[REDACTED_KEY]');
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------
