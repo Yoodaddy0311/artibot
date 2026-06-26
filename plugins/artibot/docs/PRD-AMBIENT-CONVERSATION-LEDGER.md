@@ -177,7 +177,7 @@
 
 ## 8. 실행계획 (단계)
 - **Phase 1 (P0 코어)**: `.gitignore` 게이트 → `session-ledger.mjs`(F-01) + slim 포팅(F-02) + 증분 store(F-03) + redaction(F-04) + 회귀 테스트(slim/redact/append/non-block). `npm run ci` green.
-- **Phase 2 (P1 환류)**: `/resume`·handoff 컨텍스트 주입(F-05) + 학습 입력 어댑터(F-06, privacy 경유).
+- **Phase 2 (P1 환류)**: `/resume`·handoff 컨텍스트 주입(F-05) + 학습 입력 어댑터(F-06, privacy 경유). **[부분 SHIPPED `f33d705`, 2026-06-26]** Roadmap N1 = SessionStart read-back advisory(`scripts/hooks/session-readback.mjs` + `lib/learning/ledger/readback.js`)로 첫 환류 증분 출하 — 세션 시작 시 직전 handoff `다음 P0`(→wakeup→ledger) 1줄 표면화(advisory-only). F-06(학습 환류)는 미착수.
 - **Phase 3 (P2)**: Codex 분기(F-07) · `/dreaming` 연결(F-08) · `/learning` 통계(F-09).
 
 ## 9. 수락 기준 (전체)

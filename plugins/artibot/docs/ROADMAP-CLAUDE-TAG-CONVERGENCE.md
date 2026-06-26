@@ -92,7 +92,7 @@ Anthropic은 2026-06-23 **Claude Tag**를 발표했다 (출처: `anthropic.com/n
 
 | # | 항목 | 3-게이트 판정 | 비고 |
 |---|---|---|---|
-| N1 | **크로스세션 앰비언트 read-back advisory** — 세션 시작 시 로컬 원장/메모리/wakeup 마커를 읽어 "지난 세션 미해결 X" 1줄 advisory 표면화 (강제 실행 없음) | (a) 미존재(캡처는 있으나 read-back 능동 루프 약함) (b) 로컬 read + advisory = 적합 (c) §3에서 유일 고가치 갭 → YAGNI 통과 | **유일한 실질 NOW 후보.** 기존 `runtime-prompt.js` hint 패턴 확장. speculative 아님 — 데이터(`.artibot/ledger/`, wakeup 마커)는 이미 존재 |
+| N1 | **크로스세션 앰비언트 read-back advisory** — 세션 시작 시 로컬 원장/메모리/wakeup 마커를 읽어 "지난 세션 미해결 X" 1줄 advisory 표면화 (강제 실행 없음) | (a) 미존재(캡처는 있으나 read-back 능동 루프 약함) (b) 로컬 read + advisory = 적합 (c) §3에서 유일 고가치 갭 → YAGNI 통과 | **유일한 실질 NOW 후보.** 기존 `runtime-prompt.js` hint 패턴 확장. speculative 아님 — 데이터(`.artibot/ledger/`, wakeup 마커)는 이미 존재. **✅ SHIPPED `f33d705` (2026-06-26)** — `scripts/hooks/session-readback.mjs` SessionStart 훅 + `lib/learning/ledger/readback.js`. 소스 1순위=handoff `> 다음 P0`(→wakeup→ledger 폴백). |
 | N2 | **본 로드맵 문서화 + 모니터링 트리거 등록** | (a) 미존재 (b) 로컬 문서 (c) 통합 전 "감시 대상" 명시는 향후 over-build 방지 | 이 문서 자체 = N2의 산출물 |
 
 ### NOW에서 **제외**한 것 (정직성 기록)
