@@ -18,14 +18,16 @@ The command runs `scripts/learning-diag.js` which reads (in order):
 - `~/.claude/artibot/swarm-merged-weights.json` — peer-merged tool/agent weights
 - `~/.claude/artibot/patterns/{tool,agent,error,success,team,self-evaluation}-patterns.json`
 - `~/.claude/artibot/memory/error-patterns.json` (fallback for error type)
+- `<cwd>/.artibot/ledger/` — project-local ambient conversation ledger (capture/redaction/review metrics)
 
-Then renders a markdown dashboard with **5 sections**:
+Then renders a markdown dashboard with **6 sections**:
 
 1. **GRPO Self-Learning** — round count, top learned strategy weights, recent strategy distribution
 2. **Swarm (Federated Learning)** — sync state, merged-bucket sizes (tools / agents / errors / commands / teams)
 3. **Top Performers** — ranked by `success × certainty` (or `success × confidence` when certainty absent)
 4. **Risk Signals** — high confidence + low success entries (consistent failure patterns worth investigating)
 5. **Pattern File Health** — per-type count + most-recent extraction timestamp
+6. **Ledger (Ambient Capture)** — F-09 — sessions/lines captured, secrets redacted (count + % of lines), corpus reviewed into learning (consumed + %), pending review-queue size, on-disk size. Read from the **project-local** `<cwd>/.artibot/ledger/` (not the global install base). Empty-state line when no ledger exists.
 
 A final **Recommendations** section calls out actionable findings (empty buckets, stale syncs, critical failure rates).
 

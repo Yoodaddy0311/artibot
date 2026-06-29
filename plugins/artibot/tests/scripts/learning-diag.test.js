@@ -15,9 +15,39 @@
 import { describe, expect, it } from 'vitest';
 import {
   rankableEntries,
+  renderLedgerStats,
   renderRiskSignals,
   renderTopPerformers,
 } from '../../scripts/learning-diag.js';
+
+// ---------------------------------------------------------------------------
+// renderLedgerStats() — F-09 ledger section
+// ---------------------------------------------------------------------------
+
+describe('renderLedgerStats() — ambient capture section', () => {
+  it('shows an empty-state line when no ledger data exists', () => {
+    const out = renderLedgerStats({ sessions: 0 });
+    expect(out).toContain('Ledger (Ambient Capture)');
+    expect(out).toContain('No ledger data');
+  });
+
+  it('renders counts and derived rates when data is present', () => {
+    const out = renderLedgerStats({
+      sessions: 2, lines: 10, redactions: 3, bytes: 2048, consumed: 5, pending: 4,
+    });
+    expect(out).toContain('| Sessions captured | 2 |');
+    expect(out).toContain('| Conversation lines | 10 |');
+    expect(out).toContain('3 (30% of lines)'); // redaction rate
+    expect(out).toContain('5 (50%)'); // review rate
+    expect(out).toContain('| Pending review | 4 |');
+    expect(out).toContain('2.0 KB');
+  });
+
+  it('handles missing/zero-line stats without dividing by zero', () => {
+    const out = renderLedgerStats(undefined);
+    expect(out).toContain('No ledger data');
+  });
+});
 
 // ---------------------------------------------------------------------------
 // Helpers

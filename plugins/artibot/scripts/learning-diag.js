@@ -28,6 +28,7 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { computeLedgerStats } from '../lib/learning/ledger/stats.js';
 
 // ---------------------------------------------------------------------------
 // Arg parsing
@@ -339,6 +340,38 @@ function renderPatterns(state) {
 }
 
 // ---------------------------------------------------------------------------
+// Section: Ledger (Ambient Capture) — F-09
+// ---------------------------------------------------------------------------
+
+/**
+ * Render the ambient-ledger capture/redaction/review metrics. Pure: takes the
+ * stats object from {@link computeLedgerStats} so it is unit-testable in-memory.
+ * @param {{ sessions, lines, redactions, bytes, consumed, pending }} stats
+ * @returns {string}
+ */
+export function renderLedgerStats(stats) {
+  const s = stats ?? {};
+  const out = ['## Ledger (Ambient Capture)', ''];
+  if (!s.sessions) {
+    out.push('_No ledger data captured yet (`.artibot/ledger/`)._', '');
+    return out.join('\n');
+  }
+  const redRate = s.lines > 0 ? s.redactions / s.lines : 0;
+  const reviewRate = s.lines > 0 ? s.consumed / s.lines : 0;
+  const kb = (s.bytes / 1024).toFixed(1);
+  out.push('| Metric | Value |');
+  out.push('|---|--:|');
+  out.push(`| Sessions captured | ${s.sessions} |`);
+  out.push(`| Conversation lines | ${s.lines} |`);
+  out.push(`| Secrets redacted | ${s.redactions} (${fmtPct(redRate)} of lines) |`);
+  out.push(`| Reviewed into learning | ${s.consumed} (${fmtPct(reviewRate)}) |`);
+  out.push(`| Pending review | ${s.pending} |`);
+  out.push(`| On-disk size | ${kb} KB |`);
+  out.push('');
+  return out.join('\n');
+}
+
+// ---------------------------------------------------------------------------
 // Section: Recommendations
 // ---------------------------------------------------------------------------
 
@@ -416,7 +449,7 @@ function renderHelp() {
 `;
 }
 
-function main() {
+async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.help) {
     process.stdout.write(renderHelp());
@@ -463,6 +496,8 @@ function main() {
   }
 
   if (args.section === 'all') {
+    // Ledger is project-local (cwd/.artibot/ledger), not the global install base.
+    sections.push(renderLedgerStats(await computeLedgerStats(process.cwd())));
     sections.push(renderRecommendations(state, rows));
   }
 
@@ -475,5 +510,8 @@ function main() {
 const thisFile = fileURLToPath(import.meta.url);
 const invokedFile = process.argv[1] ? path.resolve(process.argv[1]) : '';
 if (invokedFile && path.resolve(thisFile) === invokedFile) {
-  main();
+  main().catch((err) => {
+    process.stderr.write(`learning-diag failed: ${err?.message || err}\n`);
+    process.exitCode = 1;
+  });
 }

@@ -153,7 +153,7 @@
 |----|------|---------|
 | F-07 | Codex 분기(event_msg/response_item) 동등 지원 | P2 |
 | F-08 | `/dreaming` 메모리 통합 입력으로 ledger 연결 | P2 |
-| F-09 | ledger 통계(`/learning` 표면에 캡처율·redaction 카운트) | P2 |
+| ~~F-09~~ | ledger 통계(`/learning` 표면에 캡처율·redaction 카운트) | ✅ **SHIPPED** — `lib/learning/ledger/stats.js#computeLedgerStats` + `learning-diag.js#renderLedgerStats` 6번째 섹션 (sessions/lines/redactions+%/consumed+%/pending/bytes, 프로젝트-로컬 read) |
 
 ## 5. 핵심 플로우 시나리오
 
