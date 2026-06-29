@@ -20,9 +20,14 @@
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { listFiles, readTextFile } from '../../../core/file.js';
+import { readSessionCorpus } from '../../ledger/corpus.js';
 import { createMemoryMdAdapter } from './memory-md-adapter.js';
 
 const DEFAULT_RECENT = 10;
+// Bound ledger ingestion: cap total entries pulled and per-session signal text
+// so a long ambient ledger never bloats the consolidation input (PRD F-08 위험).
+const LEDGER_MAX_ENTRIES = 200;
+const LEDGER_TEXT_CAP = 4000;
 
 /** @param {string} text */
 function hash(text) {
@@ -66,6 +71,34 @@ async function readOptionalFile(filePath, kind) {
 }
 
 /**
+ * Read the ambient ledger as provenance-tagged signals (one per session). Reuses
+ * the denoised corpus reader (F-06 D1) — read-only, never throws. Each session's
+ * conversation is flattened to `role: text` lines, capped at LEDGER_TEXT_CAP.
+ * @param {string} projectDir
+ * @returns {Promise<Array<object>>}
+ */
+async function readLedgerSignals(projectDir) {
+  let corpus;
+  try {
+    corpus = await readSessionCorpus(projectDir, { limit: LEDGER_MAX_ENTRIES });
+  } catch {
+    return []; // defense-in-depth: readSessionCorpus is already never-throw
+  }
+  const bySession = new Map();
+  for (const e of corpus.entries) {
+    if (!bySession.has(e.session)) bySession.set(e.session, []);
+    bySession.get(e.session).push(`${e.role}: ${e.text}`);
+  }
+  const out = [];
+  for (const [session, lines] of bySession) {
+    const text = lines.join('\n').slice(0, LEDGER_TEXT_CAP);
+    const source = path.join(projectDir, '.artibot', 'ledger', `${session}.jsonl`);
+    out.push({ kind: 'ledger', source, externalSignal: true, text, hash: hash(text) });
+  }
+  return out;
+}
+
+/**
  * Create a collector bound to injected directories.
  *
  * @param {object} options
@@ -100,6 +133,7 @@ export function createCollector(options = {}) {
         path.join(projectDir, '.artibot', 'SESSION-NOTES.md'), 'session-notes',
       );
       if (notes) signals.push(notes);
+      signals.push(...await readLedgerSignals(projectDir));
     }
     if (correctionsDir) {
       signals.push(...await readRecentDocs(correctionsDir, recent, 'correction', true));

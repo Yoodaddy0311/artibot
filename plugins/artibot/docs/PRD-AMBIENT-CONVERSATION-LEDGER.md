@@ -152,7 +152,15 @@
 | ID | 기능 | 우선순위 |
 |----|------|---------|
 | F-07 | Codex 분기(event_msg/response_item) 동등 지원 | P2 |
-| F-08 | `/dreaming` 메모리 통합 입력으로 ledger 연결 | P2 |
+| ~~F-08~~ | `/dreaming` 메모리 통합 입력으로 ledger 연결 | ✅ **SHIPPED** (2026-06-29) — 연결+소비(전체). D1 collector ledger signal + D3 nightly 배선(projectDir/signals) + D2 distiller freshness 보호(`freshTermsVector`+archive 필터, signals와 cosine≥0.3 겹치는 stale memory archive 제외). 기존 unwired-signals 갭 동시 해소. |
+
+**F-08 구현 스코프 (2026-06-29 확정 — 연결+소비)**
+- **발견**: `/dreaming` collector(`collector.js`)는 handoffs/notes/corrections를 `signals`로 수집하나 **distiller가 미소비**(`nightly-dream-consolidate.mjs:186`은 `memories`만 distill에 전달; `distillCandidates(memories, opts)`에 signals 파라미터 없음). 기존 unwired-signals 갭 → ledger 단순 추가만으론 no-op. 사용자 결정 = 갭까지 동시 해소.
+- **D1** `collector.js` ledger 소스: `if(projectDir)` 블록에 D1 `readSessionCorpus(projectDir,{limit})` 재사용, 세션당 `{kind:'ledger', source, externalSignal:true, text, hash}` provenance, read-only.
+- **D2** distiller signal 소비: `distillCandidates(memories, {signals, config, now})` — **freshness 보호**(archive-candidate(stale memory)의 핵심 용어가 recent signal 텍스트와 임계 이상 겹치면 archive 후보에서 제외 = "지금 대화 중인 건 보관처리 안 함"). 모순-from-signals 강등은 stretch.
+- **D3** `nightly-dream-consolidate.mjs`: `collect()`의 `signals`를 `distillCandidates`에 전달(기존 갭 배선).
+- **D4** 회귀 테스트: collector ledger 소스 + distiller freshness 보호(TDD).
+- **위험**: consolidation 판정 변경 → `/dreaming` human-review 게이트가 안전망. ledger 길이 캡 + recent N 필요.
 | ~~F-09~~ | ledger 통계(`/learning` 표면에 캡처율·redaction 카운트) | ✅ **SHIPPED** — `lib/learning/ledger/stats.js#computeLedgerStats` + `learning-diag.js#renderLedgerStats` 6번째 섹션 (sessions/lines/redactions+%/consumed+%/pending/bytes, 프로젝트-로컬 read) |
 
 ## 5. 핵심 플로우 시나리오

@@ -91,6 +91,43 @@ describe('createCollector', () => {
     // Read-only proof
     expect(await hashAll(memDir)).toEqual(before);
   });
+
+  it('includes ambient ledger conversation as a read-only signal (F-08 D1)', async () => {
+    const memDir = path.join(tmpDir, 'memory');
+    const projDir = path.join(tmpDir, 'proj');
+    await fs.mkdir(memDir, { recursive: true });
+    await fs.mkdir(path.join(projDir, '.artibot', 'ledger'), { recursive: true });
+    const line = (role, text) => JSON.stringify({
+      type: role,
+      message: { role, content: role === 'user' ? text : [{ type: 'text', text }] },
+    });
+    await fs.writeFile(
+      path.join(projDir, '.artibot', 'ledger', 's1.jsonl'),
+      `${line('user', 'how do I ship a release')}\n${line('assistant', 'use the /ship command')}\n`,
+      'utf-8',
+    );
+
+    const collector = createCollector({ memoryDir: memDir, projectDir: projDir });
+    const result = await collector.collect();
+
+    const ledger = result.signals.filter((s) => s.kind === 'ledger');
+    expect(ledger).toHaveLength(1);
+    expect(ledger[0].externalSignal).toBe(true);
+    expect(ledger[0].text).toContain('how do I ship a release');
+    expect(ledger[0].text).toContain('use the /ship command');
+    expect(ledger[0].source).toContain('s1.jsonl');
+    expect(typeof ledger[0].hash).toBe('string');
+  });
+
+  it('adds NO ledger signal when the ledger dir is absent', async () => {
+    const memDir = path.join(tmpDir, 'memory');
+    const projDir = path.join(tmpDir, 'proj');
+    await fs.mkdir(memDir, { recursive: true });
+    await fs.mkdir(path.join(projDir, '.artibot'), { recursive: true });
+    const collector = createCollector({ memoryDir: memDir, projectDir: projDir });
+    const result = await collector.collect();
+    expect(result.signals.some((s) => s.kind === 'ledger')).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -142,6 +179,65 @@ describe('distillCandidates', () => {
     expect(resolveDistillConfig({}).mergeThreshold).toBe(0.82);
     expect(resolveDistillConfig({ learning: { dream: { distill: { mergeThreshold: 0.9 } } } }).mergeThreshold).toBe(0.9);
     expect(resolveDistillConfig({ learning: { dream: { distill: { mergeThreshold: 5 } } } }).mergeThreshold).toBe(0.82);
+  });
+
+  it('resolveDistillConfig exposes freshnessThreshold with safe defaults (F-08 D2)', () => {
+    expect(resolveDistillConfig({}).freshnessThreshold).toBe(0.3);
+    expect(resolveDistillConfig({ learning: { dream: { distill: { freshnessThreshold: 0.5 } } } }).freshnessThreshold).toBe(0.5);
+    // out-of-range → clamp back to default
+    expect(resolveDistillConfig({ learning: { dream: { distill: { freshnessThreshold: 9 } } } }).freshnessThreshold).toBe(0.3);
+  });
+
+  // --- F-08 D2: freshness protection from recent-conversation signals --------
+
+  it('protects a stale memory whose terms appear in recent signals (freshness)', () => {
+    const stale = parseMemoryDoc(doc({ name: 'topic', type: 'project', body: 'nightly trainer schedule cron registration os scheduler 2020-01-01' }), 'topic.md');
+    const now = () => Date.parse('2026-05-30T00:00:00Z');
+    const signals = [{
+      kind: 'ledger', source: 's1.jsonl',
+      text: 'how should we change the nightly trainer schedule cron registration os scheduler',
+    }];
+    const out = distillCandidates([stale], { now, signals });
+    expect(out.archiveCandidates).toHaveLength(0);
+  });
+
+  it('still archives a stale memory unrelated to the recent signals', () => {
+    const stale = parseMemoryDoc(doc({ name: 'old', type: 'project', body: 'one-off note 2020-01-01 never referenced legacy' }), 'old.md');
+    const now = () => Date.parse('2026-05-30T00:00:00Z');
+    const signals = [{
+      kind: 'ledger', source: 's1.jsonl',
+      text: 'discussing react component accessibility and responsive design today',
+    }];
+    const out = distillCandidates([stale], { now, signals });
+    expect(out.archiveCandidates).toHaveLength(1);
+    expect(out.archiveCandidates[0].kind).toBe('archive');
+  });
+
+  it('is a no-op when signals are absent (regression guard)', () => {
+    const stale = parseMemoryDoc(doc({ name: 'old', type: 'project', body: 'one-off note 2020-01-01 never referenced' }), 'old.md');
+    const now = () => Date.parse('2026-05-30T00:00:00Z');
+    const baseline = distillCandidates([stale], { now });
+    const withUndefined = distillCandidates([stale], { now, signals: undefined });
+    const withEmpty = distillCandidates([stale], { now, signals: [] });
+    expect(baseline.archiveCandidates).toHaveLength(1);
+    expect(withUndefined.archiveCandidates).toEqual(baseline.archiveCandidates);
+    expect(withEmpty.archiveCandidates).toEqual(baseline.archiveCandidates);
+  });
+
+  it('honors a custom freshnessThreshold boundary', () => {
+    const stale = parseMemoryDoc(doc({ name: 'topic', type: 'project', body: 'alpha beta gamma delta epsilon 2020-01-01' }), 'topic.md');
+    const now = () => Date.parse('2026-05-30T00:00:00Z');
+    const signals = [{ kind: 'ledger', source: 's1.jsonl', text: 'alpha beta gamma delta epsilon' }];
+    // High threshold (1.0) → partial overlap < 1.0 → NOT protected → archived
+    const strict = distillCandidates([stale], {
+      now, signals, config: { learning: { dream: { distill: { freshnessThreshold: 1 } } } },
+    });
+    // Low threshold (0.01) → any overlap protects → kept fresh
+    const loose = distillCandidates([stale], {
+      now, signals, config: { learning: { dream: { distill: { freshnessThreshold: 0.01 } } } },
+    });
+    expect(strict.archiveCandidates).toHaveLength(1);
+    expect(loose.archiveCandidates).toHaveLength(0);
   });
 
   it('writeCandidates writes only to staging dir', async () => {

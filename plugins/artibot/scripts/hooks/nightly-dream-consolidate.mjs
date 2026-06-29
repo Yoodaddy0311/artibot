@@ -43,12 +43,13 @@ const __filename = fileURLToPath(import.meta.url);
  * @returns {{dryRun:boolean, memoryDir:string|null, pluginRoot:string|null, help:boolean}}
  */
 export function parseArgs(argv) {
-  const out = { dryRun: false, memoryDir: null, pluginRoot: null, help: false };
+  const out = { dryRun: false, memoryDir: null, pluginRoot: null, projectDir: null, help: false };
   for (let i = 0; i < argv.length; i++) {
     switch (argv[i]) {
       case '--dry-run': out.dryRun = true; break;
       case '--memory-dir': out.memoryDir = argv[++i] ?? null; break;
       case '--plugin-root': out.pluginRoot = argv[++i] ?? null; break;
+      case '--project-dir': out.projectDir = argv[++i] ?? null; break;
       case '--help': case '-h': out.help = true; break;
       default: break;
     }
@@ -166,6 +167,10 @@ export async function runNightlyDream(opts = {}) {
   const config = opts.config || {};
   const pluginRoot = opts.pluginRoot || resolveDefaultPluginRoot();
   const memoryDir = opts.memoryDir || resolveDefaultMemoryDir();
+  // projectDir holds `.artibot/` (handoffs/notes/ledger signals). Default null so
+  // callers/tests that don't supply it collect no external signals (no surprise
+  // reads of the cwd); the CLI passes process.cwd() explicitly. (F-08 D3)
+  const projectDir = opts.projectDir || null;
   const now = typeof opts.now === 'function' ? opts.now : () => Date.now();
 
   // No place to read memory from → safe no-op.
@@ -182,9 +187,12 @@ export async function runNightlyDream(opts = {}) {
     }
 
     // Phase-1 ONLY: collect (read-only) + deterministic distill. No LLM.
-    const collector = createCollector({ memoryDir });
-    const { memories } = await collector.collect();
-    const candidates = distillCandidates(memories, { config, now });
+    // Signals (handoffs / session-notes / ledger) flow into distill so it can
+    // protect actively-discussed memories from archival (F-08 D3 wiring; the
+    // distiller consumes `signals` in D2).
+    const collector = createCollector({ memoryDir, projectDir });
+    const { memories, signals } = await collector.collect();
+    const candidates = distillCandidates(memories, { config, now, signals });
     const total = candidates.mergeCandidates.length
       + candidates.contradictCandidates.length
       + candidates.archiveCandidates.length;
@@ -255,6 +263,7 @@ if (invokedDirect) {
     dryRun: args.dryRun,
     memoryDir: args.memoryDir,
     pluginRoot: args.pluginRoot,
+    projectDir: args.projectDir || process.cwd(),
     config,
   })
     .then((res) => {

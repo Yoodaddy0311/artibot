@@ -28,6 +28,13 @@ const DEFAULTS = Object.freeze({
   contradictThreshold: 0.6,
   staleDays: 180,
   minDescTokens: 1,
+  // Archive-protection knob: a stale memory whose vector cosine-similarity to the
+  // aggregated recent-conversation signals is >= this is kept "fresh" (never
+  // archived). Range [0,1]. 0 = protect ALL stale memories when signals are present
+  // (maximum protection, NOT disabled). 1 = protect only near-identical matches.
+  // To fully disable freshness protection, supply no signals (opts.signals absent
+  // or []). (F-08 D2)
+  freshnessThreshold: 0.3,
 });
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -43,7 +50,7 @@ const CONTRADICTION_MARKERS = Object.freeze([
  * Resolve distiller config from the artibot config block, applying safe
  * conservative defaults.
  * @param {object} [config]
- * @returns {{mergeThreshold:number, contradictThreshold:number, staleDays:number}}
+ * @returns {{mergeThreshold:number, contradictThreshold:number, staleDays:number, freshnessThreshold:number}}
  */
 export function resolveDistillConfig(config) {
   const block = config?.learning?.dream?.distill;
@@ -53,6 +60,7 @@ export function resolveDistillConfig(config) {
     contradictThreshold: clamp01(safe.contradictThreshold, DEFAULTS.contradictThreshold),
     staleDays: Number.isFinite(safe.staleDays) && safe.staleDays > 0
       ? safe.staleDays : DEFAULTS.staleDays,
+    freshnessThreshold: clamp01(safe.freshnessThreshold, DEFAULTS.freshnessThreshold),
   };
 }
 
@@ -67,6 +75,28 @@ function vectorOf(record) {
   const source = [record.name, record.description, heading, record.body]
     .filter(Boolean).join(' ');
   return tokenize(source);
+}
+
+/**
+ * Aggregate recent-conversation signal texts into one "fresh terms" TF vector,
+ * reusing the SAME tokenizer (`vectorOf`) applied to memories so the cosine
+ * comparison is apples-to-apples. Signals are wrapped as `{ body: text }` —
+ * the only field `vectorOf` needs. Empty/undefined input → empty vector.
+ *
+ * @param {Array<{text?:string}>|undefined} signals
+ * @returns {Record<string, number>}
+ */
+function freshTermsVector(signals) {
+  const agg = {};
+  for (const sig of Array.isArray(signals) ? signals : []) {
+    const text = sig?.text;
+    if (!text || typeof text !== 'string') continue;
+    const vec = vectorOf({ body: text });
+    for (const [term, count] of Object.entries(vec)) {
+      agg[term] = (agg[term] || 0) + count;
+    }
+  }
+  return agg;
 }
 
 /** Detect a contradiction marker in either body of an overlapping pair. */
@@ -115,12 +145,18 @@ function parseRecordDate(rec) {
  * @param {object} [opts]
  * @param {object} [opts.config]
  * @param {() => number} [opts.now]
+ * @param {Array<{kind?:string, source?:string, text?:string}>} [opts.signals]
+ *   Recent-conversation signals (ledger/handoff/session-notes). A stale memory
+ *   whose terms overlap these signals is protected from archiving (freshness).
+ *   Absent/empty → archive output is byte-identical to the pre-F-08 behavior.
  * @returns {{generatedAt:string, mergeCandidates:object[], contradictCandidates:object[], archiveCandidates:object[]}}
  */
 export function distillCandidates(memories, opts = {}) {
   const cfg = resolveDistillConfig(opts.config);
   const now = typeof opts.now === 'function' ? opts.now() : Date.now();
   const staleMs = cfg.staleDays * DAY_MS;
+  const freshVec = freshTermsVector(opts.signals);
+  const hasFresh = Object.keys(freshVec).length > 0;
 
   const enriched = memories.map((rec) => ({ rec, vec: vectorOf(rec) }));
   const linkedNames = new Set();
@@ -149,6 +185,10 @@ export function distillCandidates(memories, opts = {}) {
 
   const archiveCandidates = enriched
     .filter(({ rec }) => isLowUtility(rec, linkedNames, now, staleMs))
+    // Freshness protection: drop stale memories still echoed by recent signals.
+    // No-op when no signals were supplied (hasFresh === false).
+    .filter(({ vec }) =>
+      !(hasFresh && cosineSimilarity(vec, freshVec) >= cfg.freshnessThreshold))
     .map(({ rec }) => ({
       kind: 'archive', target: ref(rec),
       reason: 'stale+unreferenced+low-utility',
@@ -189,4 +229,4 @@ export async function writeCandidates(stagingDir, candidates) {
   return target;
 }
 
-export const _internals = Object.freeze({ DEFAULTS, CONTRADICTION_MARKERS, vectorOf });
+export const _internals = Object.freeze({ DEFAULTS, CONTRADICTION_MARKERS, vectorOf, freshTermsVector });

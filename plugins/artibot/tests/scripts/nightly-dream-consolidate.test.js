@@ -119,6 +119,27 @@ describe('runNightlyDream — Phase-1 only (ADR-3 invariants)', () => {
     expect(stagingFiles).toEqual(['candidates.json']); // no proposals, no proposed.md
   });
 
+  it('accepts a projectDir with a ledger and completes (F-08 D3 signal wiring)', async () => {
+    // projectDir carries .artibot/ledger → collector gathers ledger signals and
+    // forwards them to distill. Until D2 consumes them this is inert plumbing, so
+    // candidate generation must be unaffected (no crash, still produces merges).
+    const projDir = path.join(tmpDir, 'proj');
+    await fs.mkdir(path.join(projDir, '.artibot', 'ledger'), { recursive: true });
+    const line = (role, text) => JSON.stringify({
+      type: role, message: { role, content: role === 'user' ? text : [{ type: 'text', text }] },
+    });
+    await fs.writeFile(
+      path.join(projDir, '.artibot', 'ledger', 's1.jsonl'),
+      `${line('user', 'nightly trainer schedule')}\n`, 'utf-8',
+    );
+
+    const res = await runNightlyDream({
+      memoryDir: memDir, pluginRoot, projectDir: projDir, logger: silent(),
+    });
+    expect(res.status).toBe('completed');
+    expect(res.candidates).toBeGreaterThanOrEqual(1);
+  });
+
   it('--dry-run computes but writes NO candidates.json and NO marker', async () => {
     const res = await runNightlyDream({ memoryDir: memDir, pluginRoot, dryRun: true, logger: silent() });
     expect(res.status).toBe('dry-run');
