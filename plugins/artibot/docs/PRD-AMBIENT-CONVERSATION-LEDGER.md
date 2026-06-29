@@ -141,6 +141,13 @@
 **Acceptance Criteria**
 - AC1. WHEN 학습이 ledger를 입력으로 쓴다 THE SYSTEM SHALL privacy 레이어를 거치지 않은 raw를 swarm으로 보내지 않는다.
 
+**구현 스코프 (2026-06-26 확정 — 검토 게이트 채택)**
+- D1. `lib/learning/ledger/corpus.js` — `readSessionCorpus(projectRoot,{sessionId?,limit?,sinceCursor?})` → denoised 대화 라인[]. `slim.js` 재사용, never-throw, 로컬 read only, 세션당 watermark(store.js cursor 패턴 재사용)로 중복 소비 방지.
+- D2. **검토 대기열** — corpus를 학습 승격 전 검토 큐에 적재(자동), 사용자 승인 후에만 `lifelong-learner.collectExperience` 공급. `/dreaming` human-review 게이트(F-08) 패턴 재사용 후보.
+- D3. **R2 enforcement** — ledger-유래 패턴이 `swarm-client` `scrubPattern`+`addNoise`(ε=1.0) 미경유 송신 불가 가드 + AC1 테스트.
+- D4. 회귀 테스트 — corpus 리더 / 검토 큐 / privacy 우회 차단(80%+).
+- Note: R2 privacy 체인은 기존 swarm 경로가 이미 충족 — 신규는 corpus 리더·검토 큐·우회 가드뿐. Codex 분기(F-07)·`/learning` 통계(F-09)는 범위 밖.
+
 ### 기능 요약 (P2 이하)
 | ID | 기능 | 우선순위 |
 |----|------|---------|
@@ -197,5 +204,5 @@
 | ~~`lib/privacy/` redactor 존재 여부~~ | F-04 재사용 vs 신규 | planner 코드대조 | ✅ **해소** — `pii-scrubber.js#scrub` 재사용 |
 | ~~저장 위치 `.artibot/ledger/` vs `runtime/ledger/`~~ | 회전·정리 정합 | 코드 확인 | ✅ **해소** — `.artibot/ledger/`(루트 `.gitignore` 관리) |
 | ~~redact 토큰 형식~~ | AC 정합 | 사용자 | ✅ **해소** — 기존 `[REDACTED_KEY]` 채택 |
-| 학습 입력 승격을 자동 vs 검토 게이트 | F-06 자율성 범위 | 사용자(프라이버시 민감) | 미결(Phase 2) |
+| ~~학습 입력 승격을 자동 vs 검토 게이트~~ | F-06 자율성 범위 | 사용자(프라이버시 민감) | ✅ **해소**(2026-06-26) — **검토 게이트**. ledger 코퍼스는 자동으로 검토 대기열에 적재하되, 학습 승격은 사용자 승인 후. 우회 송신 금지(scrub+DP 강제). |
 | keep N 기본값 50 적정성 | 디스크 사용량 | 사용 패턴 관측 후 | 미결 |

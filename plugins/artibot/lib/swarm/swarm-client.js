@@ -371,6 +371,14 @@ export async function uploadWeights(weights, metadata = {}, options = {}) {
     return { success: false, error: 'Invalid weights data' };
   }
 
+  // F-06 R2 / AC1: ledger-derived payloads MUST carry differential privacy.
+  // Refuse to send raw (un-noised) ledger data even if config left DP optional —
+  // this guard fires before any network/queue path so nothing leaves the host.
+  // Non-ledger callers (no metadata.source === 'ledger') are unaffected.
+  if (metadata?.source === 'ledger' && typeof options.addNoise !== 'function') {
+    return { success: false, error: 'differential privacy required for ledger-derived data' };
+  }
+
   const serialized = JSON.stringify(weights);
   if (serialized.length > MAX_UPLOAD_BYTES) {
     return { success: false, error: `Payload exceeds ${MAX_UPLOAD_BYTES / 1024 / 1024}MB limit` };
