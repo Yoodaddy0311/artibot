@@ -54,3 +54,33 @@ describe('redact — secret scrubbing (F-04)', () => {
     expect([...SECRET_CATEGORIES].sort()).toEqual(['auth', 'credentials', 'env', 'secrets']);
   });
 });
+
+describe('redact — URL-embedded credentials (IMP-03)', () => {
+  it('masks a basic-auth password embedded in an http(s) URL', () => {
+    const out = redactSecrets('clone https://user:secretpw@internal.example.com/path');
+    expect(out).not.toContain('secretpw');
+    expect(out).toContain('[CONNECTION_STRING]');
+  });
+
+  it('masks URL creds inside a JSON-wrapped ledger line', () => {
+    const line = JSON.stringify({
+      type: 'user',
+      message: { role: 'user', content: 'git remote add origin https://bob:hunter2@git.internal/repo.git' },
+    });
+    const out = redactSecrets(line);
+    expect(out).not.toContain('hunter2');
+    expect(out).toContain('[CONNECTION_STRING]');
+  });
+
+  it('preserves a normal URL without credentials (context retention)', () => {
+    const out = redactSecrets('see https://api.example.com/v1/data for the schema');
+    expect(out).toContain('https://api.example.com/v1/data');
+    expect(out).not.toContain('[CONNECTION_STRING]');
+  });
+
+  it('does not over-redact a git@ SSH remote (no false positive)', () => {
+    const out = redactSecrets('remote is git@github.com:acme/widgets.git');
+    expect(out).toContain('git@github.com:acme/widgets.git');
+    expect(out).not.toContain('[CONNECTION_STRING]');
+  });
+});

@@ -358,7 +358,14 @@ export const BUILTIN_PATTERNS = [
   // ----- Network: URLs & Domains (Priority 50-54) -----
   {
     name: 'url_with_credentials',
-    category: 'network',
+    // Categorized as a SECRET (not network) because a userinfo `user:pass@`
+    // segment embeds a basic-auth password. This keeps it inside the scoped
+    // secret scrubber used by the ambient ledger (lib/learning/ledger/redact.js)
+    // so the password never lands on disk, while sibling network patterns (IP,
+    // hostname, query params) stay OUT of that scope as useful context. Full
+    // scrub() applies every pattern regardless of category, so this move does
+    // not change unscoped scrubbing — only which categories catch it.
+    category: 'secrets',
     regex: /https?:\/\/[^:]+:[^@]+@[^\s'"]+/g,
     replacement: TOKENS.CONNECTION_STRING,
     priority: 50,
