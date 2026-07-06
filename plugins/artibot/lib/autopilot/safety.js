@@ -138,6 +138,11 @@ export function shouldPause(state) {
     if (Number.isFinite(started) && Date.now() - started > maxDur) return true;
   }
 
+  // Runtime feeder: severity-tagged errors are written by engine-state.js
+  // #recordRiskEvent, which the Bash PreToolUse risk guard
+  // (scripts/hooks/bash-risk-guard.js) calls when classifyRisk returns
+  // 'danger' during an active autopilot session. Before that wiring this
+  // branch was unreachable (no code path recorded `severity`).
   if (Array.isArray(state.errors) && state.errors.some((e) => e?.severity === 'danger')) {
     return true;
   }

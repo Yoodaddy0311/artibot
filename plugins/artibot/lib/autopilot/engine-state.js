@@ -123,3 +123,34 @@ export function recordSecretLeak(state, leak = {}) {
   persist(state);
   return state;
 }
+
+/**
+ * Record a runtime risk event surfaced by the Bash PreToolUse risk guard
+ * (scripts/hooks/bash-risk-guard.js → lib/autopilot/safety.js#classifyRisk).
+ *
+ * Pushes an error carrying a `severity` field so shouldPause()'s
+ * `severity === 'danger'` trigger becomes reachable — this is the runtime
+ * feeder for the previously-dead branch in safety.js (audit ap-20260702 I-04).
+ * Unlike {@link recordSecretLeak} this is a pure record: it does NOT mutate
+ * `state.phase`. The pause decision stays owned by shouldPause()/maybePause()
+ * so a single tick applies it consistently with the other pause triggers.
+ *
+ * @param {object} state
+ * @param {{ level?: string, reason?: string, matchedId?: string, command?: string }} risk
+ * @returns {object} mutated state
+ */
+export function recordRiskEvent(state, risk = {}) {
+  if (!state) throw new TypeError('state required');
+  const { level = 'danger', reason = null, matchedId = null, command = null } = risk;
+  state.errors = Array.isArray(state.errors) ? state.errors : [];
+  state.errors.push({
+    ts: new Date().toISOString(),
+    kind: 'risk',
+    severity: level,
+    reason,
+    matchedId,
+    command: command ? String(command).slice(0, 200) : null,
+  });
+  persist(state);
+  return state;
+}

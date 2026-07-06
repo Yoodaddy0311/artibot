@@ -644,4 +644,5 @@ export {
   recordCheckpoint,
   recordPhaseResult,
   recordSecretLeak,
+  recordRiskEvent,
 } from './engine-state.js';

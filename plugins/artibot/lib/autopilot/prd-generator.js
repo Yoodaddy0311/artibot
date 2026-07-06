@@ -182,7 +182,7 @@ ${goalContractSection}## 3. 범위 (Scope)
 | 잘못된 방향 자율 진행 | 大 | 30분 WIP commit + ${maxDuration} timeout |
 | 컨텍스트 압축 손실 | 中 | PRD/세션 상태 파일 영속 |
 | 비용 초과 | 中 | 토큰 예산 ${budget} 초과 시 pause |
-| 위험 액션 발생 | 大 | safety.classifyRisk 자동 차단 |
+| 위험 액션 발생 | 大 | Bash PreToolUse 가드(classifyRisk)가 danger 차단·caution 경고, 위험 기록 시 세션 pause |
 
 ## 7. 수락 기준 (Acceptance Criteria)
 

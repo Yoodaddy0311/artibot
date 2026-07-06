@@ -24,6 +24,7 @@ export {
   recordCheckpoint,
   classifyFailure,
   recordSecretLeak,
+  recordRiskEvent,
   PHASES,
 } from './engine.js';
 

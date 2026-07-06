@@ -13,8 +13,10 @@ import {
   classifyFailure,
   recordCheckpoint,
   recordPhaseResult,
+  recordRiskEvent,
   recordSecretLeak,
 } from '../../lib/autopilot/engine-state.js';
+import { shouldPause } from '../../lib/autopilot/safety.js';
 
 function makeState(overrides = {}) {
   return {
@@ -115,5 +117,52 @@ describe('recordSecretLeak', () => {
     const state = makeState({ phase: 'PAUSED', lastPhase: 'EXECUTE' });
     recordSecretLeak(state, { kind: 'token' });
     expect(state.lastPhase).toBe('EXECUTE');
+  });
+});
+
+describe('recordRiskEvent (I-04 dead-branch feeder)', () => {
+  it('throws when state is missing', () => {
+    expect(() => recordRiskEvent(null, {})).toThrow(TypeError);
+  });
+
+  it('pushes a severity-tagged risk error and persists', () => {
+    const state = makeState({ phase: 'EXECUTE' });
+    recordRiskEvent(state, {
+      level: 'danger',
+      reason: 'Destructive git push --force',
+      matchedId: 'git-force-push',
+      command: 'git push --force origin main',
+    });
+    expect(state.errors).toHaveLength(1);
+    expect(state.errors[0]).toMatchObject({
+      kind: 'risk',
+      severity: 'danger',
+      matchedId: 'git-force-push',
+    });
+  });
+
+  it('does NOT mutate phase (pause stays owned by shouldPause)', () => {
+    const state = makeState({ phase: 'EXECUTE' });
+    recordRiskEvent(state, { level: 'danger', reason: 'x', matchedId: 'y' });
+    expect(state.phase).toBe('EXECUTE');
+  });
+
+  it('makes shouldPause() return true — the branch was previously unreachable', () => {
+    const state = makeState({ phase: 'EXECUTE' });
+    expect(shouldPause(state)).toBe(false);
+    recordRiskEvent(state, { level: 'danger', reason: 'rm -rf', matchedId: 'rm-rf-broad' });
+    expect(shouldPause(state)).toBe(true);
+  });
+
+  it('truncates long commands to 200 chars', () => {
+    const state = makeState();
+    recordRiskEvent(state, { level: 'danger', command: 'x'.repeat(500) });
+    expect(state.errors[0].command).toHaveLength(200);
+  });
+
+  it('defaults level to danger and null fields', () => {
+    const state = makeState();
+    recordRiskEvent(state, {});
+    expect(state.errors[0]).toMatchObject({ severity: 'danger', reason: null, matchedId: null, command: null });
   });
 });
