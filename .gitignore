@@ -28,6 +28,8 @@ plugins/artibot/docs/*
 !plugins/artibot/docs/PRD-LEARNING-ACTIVATION.md
 !plugins/artibot/docs/WIRING-AUDIT-2026-05-30.md
 !plugins/artibot/docs/PRD-DREAMING.md
+!plugins/artibot/docs/IMPROVEMENT-DESIGN-2026-07-02.md
+!plugins/artibot/docs/MARKETPLACE-SUBMISSION.md
 !plugins/artibot/docs/adr/
 !plugins/artibot/docs/adr/**
 plugins/artibot/coverage/

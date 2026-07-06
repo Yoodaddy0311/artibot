@@ -52,7 +52,7 @@ That's it. No manual config. Agent Teams auto-enables on first session start.
 | 6 | **Data Sovereignty** — outbound to external DBs is hard-blocked. Memory, learning, swarm all stay on disk | `CLAUDE.md` DATA POLICY + `lib/privacy/` |
 | 7 | **Native Agent Teams API** — TeamCreate / SendMessage / TaskCreate, not Task() one-shot delegation | `lib/runtime/middleware/subagents.js`, `lib/runtime/middleware/tasks.js` |
 
-Competitive scoring (10-dim, see report Section 6.2):
+Competitive scoring (10-dim, see report Section 6.2; snapshot as of v4.13.0, 2026-05 — not re-measured since):
 
 | Framework | Total / 100 |
 |---|---|
@@ -118,7 +118,37 @@ Full feature breakdown is in [핵심 특징](#핵심-특징) below.
 
 ## Installation
 
-### Recommended: `install.sh` (flat install, no command prefix)
+### Native marketplace install (recommended — no clone)
+
+Run these two commands from inside any Claude Code session:
+
+```text
+/plugin marketplace add Yoodaddy0311/artibot
+/plugin install artibot@artibot
+```
+
+Claude Code fetches the plugin straight from GitHub into its own plugin cache —
+no `git clone`, no copy step, no shell script. Commands, agents, skills, and
+hooks all load through `${CLAUDE_PLUGIN_ROOT}`, and updates are managed for you
+via `/plugin marketplace update artibot`. Agent Teams auto-enables on first
+session start.
+
+Native install **namespaces every command** under the `artibot:` prefix — call
+`/artibot:save`, `/artibot:sc`, `/artibot:daily`. (CLI equivalent for scripts:
+`claude plugin marketplace add Yoodaddy0311/artibot` then
+`claude plugin install artibot@artibot`.)
+
+> **Note — native install does not deliver the 8 auto-activating rules** (DEV
+> Protocol, Quality Gates, agent-coordination, config-safety, clean-state, and the
+> frontend/backend/test patterns). Claude Code's plugin schema has no `rules` field,
+> so `claude plugin validate` flags it as an ignored field; the rules load only when
+> `install.sh` copies them to `~/.claude/rules/artibot/`. If you want that automatic
+> DEV-protocol / quality-gate enforcement, use the full install below. A few
+> convenience commands (`/theme`, `/update`) and the themed statusline also still
+> assume the flat layout and are being migrated to `${CLAUDE_PLUGIN_ROOT}`. Commands,
+> agents, skills, and hooks themselves work identically on both paths.
+
+### Full install: `install.sh` (flat commands, no prefix)
 
 ```bash
 git clone https://github.com/Yoodaddy0311/artibot.git
@@ -126,40 +156,26 @@ cd artibot/plugins/artibot
 bash install.sh          # macOS / Linux / Git Bash on Windows
 ```
 
-This is the recommended path. It flat-copies commands and agents into
-`~/.claude/`, so slash commands are called **without a namespace prefix**
-(`/save`, `/sc`, `/daily`). It also enables Agent Teams and seeds a
-conservative read-only permission allowlist (`Read`/`Glob`/`Grep`) into
-`~/.claude/settings.json`, so you won't be re-prompted to approve routine
-safe reads. To uninstall: `bash install.sh uninstall`.
+This path flat-copies commands and agents into `~/.claude/`, so slash commands
+are called **without a namespace prefix** (`/save`, `/sc`, `/daily`). It also
+enables Agent Teams, wires the themed statusline, and seeds a conservative
+read-only permission allowlist (`Read`/`Glob`/`Grep`) into
+`~/.claude/settings.json`, so you won't be re-prompted to approve routine safe
+reads. To uninstall: `bash install.sh uninstall`.
 
 > **Windows:** run `install.sh` from **Git Bash** (ships with
 > [Git for Windows](https://gitforwindows.org/)). A native PowerShell
 > installer is also provided: `powershell -ExecutionPolicy Bypass -File install.ps1`.
 
-### Command invocation: flat install vs marketplace
-
-The two install methods differ in how you call commands:
+### Command invocation: native vs flat install
 
 | Install method | Command form | Example | Prefix |
 |---|---|---|---|
-| **`install.sh` / `install.ps1`** (recommended) | flat | `/save`, `/sc`, `/daily` | none |
-| `claude plugin install` (marketplace) | namespaced | `/artibot:save`, `/artibot:sc`, `/artibot:daily` | `artibot:` |
+| Native marketplace (`/plugin install`) | namespaced | `/artibot:save`, `/artibot:sc`, `/artibot:daily` | `artibot:` |
+| `install.sh` / `install.ps1` (flat) | flat | `/save`, `/sc`, `/daily` | none |
 
-All examples in this README use the **flat** form (`/save`). If you install
-via the marketplace, prepend `artibot:` to every command (`/artibot:save`).
-
-### Alternative (advanced): Claude Code marketplace
-
-```bash
-claude plugin marketplace add https://github.com/Yoodaddy0311/artibot
-claude plugin install artibot@artibot
-```
-
-Marketplace install namespaces **every** command under the `artibot:` prefix —
-e.g. `/save` becomes `/artibot:save`. Use this only if you specifically want
-plugin-managed updates via `claude plugin`. Agent Teams still auto-enables on
-first session start. To uninstall: `claude plugin uninstall artibot`.
+All examples in this README use the **flat** form (`/save`). If you installed
+via the native marketplace, prepend `artibot:` to every command (`/artibot:save`).
 
 ### Other Platforms (auto-converted)
 
@@ -195,7 +211,7 @@ Key fields in `artibot.config.json` (file is auto-validated against schema):
 
 | Field | Default | Purpose |
 |---|---|---|
-| `version` | `4.8.0` | Synced across plugin.json / package.json / artibot.config.json |
+| `version` | `4.29.0` | Synced across plugin.json / package.json / artibot.config.json |
 | `cognitive.router.threshold` | `0.4` | System 1 ↔ System 2 boundary |
 | `cognitive.system1.maxLatency` | `100` | ms — System 1 response cap before escalation |
 | `learning.lifelong.batchSize` | `50` | Experiences per lifelong-learning batch |
@@ -411,7 +427,7 @@ Artibot의 핵심 엔진은 Claude Code의 **Agent Teams API**입니다. 단순�
 
 ### 99개 도메인 스킬
 
-- 11개 페르소나 스킬 (architect, frontend, backend, security 등)
+- 12개 페르소나 스킬 (architect, frontend, backend, security, distill 등)
 - 6개 코어 스킬 (orchestration, principles, coding/security/testing standards)
 - 1개 Git 통합 스킬 (git-unified — 9개 서브툴: autopilot, collab, conflict, guide, safe, strategy, sync, workflow, worktree 통합)
 - 1개 언어 통합 스킬 (lang-reference — 16개 언어 통합 허브)
@@ -467,7 +483,7 @@ Artibot의 핵심 엔진은 Claude Code의 **Agent Teams API**입니다. 단순�
 
 ### 지능형 훅 시스템
 
-- 15개 이벤트에 39개 훅 등록 (HTTP webhook 알림 포함)
+- 15개 이벤트에 24개 훅 등록 (HTTP webhook 알림 포함)
 - **Guard Registry**: 중앙 집중식 가드 파이프라인 (`registerGuard()`/`executeChain()` API), 6개 내장 가드, 훅 코드 75% 감소
 - **Advisory File Lock**: 동시 훅 실행 시 상태 파일 경합 방지 (spin-lock, fail-open)
 - 위험 명령 차단, 민감 파일 보호, 자동 포맷, PR 감지, 팀원 생명주기 추적
@@ -1294,8 +1310,8 @@ orchestrator는 **코드를 직접 작성하지 않습니다**. 팀을 구성하
 
 | 모델 | 용도 | 에이전트 수 |
 |------|------|------------|
-| **opus** | 깊은 추론, 아키텍처 결정, 보안 분석 | 19개 (73%) |
-| **sonnet** | 콘텐츠, 분석, 디자인 | 7개 (27%) |
+| **opus** | 깊은 추론, 아키텍처 결정, 보안 분석 | 21개 (75%) |
+| **sonnet** | 콘텐츠, 분석, 디자인 | 7개 (25%) |
 
 ### 팀원 행동 프로토콜
 
@@ -1329,7 +1345,7 @@ orchestrator는 **코드를 직접 작성하지 않습니다**. 팀을 구성하
 | `security-standards` | 시크릿 관리, OWASP 체크리스트, 인증 패턴 |
 | `testing-standards` | TDD, 테스트 피라미드, 커버리지 매트릭스 |
 
-### 페르소나 스킬 (11개)
+### 페르소나 스킬 (12개)
 
 | 스킬 | 전문 영역 | 우선순위 |
 |------|-----------|----------|
@@ -1344,6 +1360,7 @@ orchestrator는 **코드를 직접 작성하지 않습니다**. 팀을 구성하
 | `persona-devops` | 인프라, CI/CD | 자동화 > 관측성 > 신뢰성 |
 | `persona-mentor` | 지식 전달, 교육 | 이해 > 전달 > 교육 |
 | `persona-scribe` | 문서화, 로컬라이제이션 | 명확성 > 독자 > 문화적 감수성 |
+| `persona-distill` | 인물/역할/캐릭터를 6-레이어 스키마로 페르소나 스킬화 | 정확성 > 재사용성 > 압축 |
 
 ### 유틸리티 스킬 (8개)
 
@@ -1392,7 +1409,7 @@ orchestrator는 **코드를 직접 작성하지 않습니다**. 팀을 구성하
 | `report-generation` | 리포트 생성, 데이터 요약 |
 | `segmentation` | 시장/고객 세그멘테이션 |
 
-### 기타 스킬 (16개)
+### 기타 스킬 (15개)
 
 | 스킬 | 설명 |
 |------|------|
@@ -1410,13 +1427,13 @@ orchestrator는 **코드를 직접 작성하지 않습니다**. 팀을 구성하
 | `library-mermaid` | Mermaid 다이어그램 패턴 |
 | `library-shadcn` | shadcn/ui 컴포넌트 패턴 |
 | `auto-learning-pipeline` | 제로 설정 야간 자기 개선 파이프라인 |
-| `dynamic-context-injection` | 런타임 동적 컨텍스트 주입 |
+| `guardrails` | 런타임 안전 가드레일, 위험 패턴 차단·리소스 제한 |
 
 ---
 
 ## 훅 시스템
 
-15개 이벤트에 39개 훅이 등록되어 있습니다.
+15개 이벤트에 24개 훅이 등록되어 있습니다.
 
 ### 이벤트별 훅
 

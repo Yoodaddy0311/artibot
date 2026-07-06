@@ -78,7 +78,29 @@ Most Claude Code plugins use simple sub-agent (`Task()`) delegation -- fire-and-
 
 ### Installation
 
-**Recommended: `install.sh` (flat install — no command prefix)**
+**Recommended: native marketplace (no clone)** — run inside any Claude Code session:
+```text
+/plugin marketplace add Yoodaddy0311/artibot
+/plugin install artibot@artibot
+```
+
+Claude Code fetches the plugin straight from GitHub into its plugin cache — no
+`git clone`, no shell script. Commands, agents, skills, and hooks load via
+`${CLAUDE_PLUGIN_ROOT}`; updates come through `/plugin marketplace update artibot`.
+Native install **namespaces every command** under the `artibot:` prefix (call
+`/artibot:save`, `/artibot:sc`). Agent Teams auto-enables on first session start.
+To uninstall: `/plugin uninstall artibot@artibot`.
+
+> **Native install does not deliver the 8 auto-activating rules** (DEV Protocol,
+> Quality Gates, agent-coordination, config-safety, clean-state, frontend/backend/test
+> patterns). Claude Code's plugin schema has no `rules` field, so they load only
+> when `install.sh` copies them to `~/.claude/rules/artibot/`. If you want that
+> automatic DEV-protocol / quality-gate enforcement, use the full install below.
+> A few convenience commands (`/theme`, `/update`) and the themed statusline also
+> still assume the flat layout and are being migrated. Commands, agents, skills,
+> and hooks themselves work identically on both paths.
+
+**Full install: `install.sh` (flat commands, no prefix)**
 ```bash
 git clone https://github.com/Yoodaddy0311/artibot.git
 cd artibot/plugins/artibot
@@ -86,10 +108,11 @@ bash install.sh          # macOS / Linux / Git Bash on Windows
 ```
 
 This flat-copies agents and commands into `~/.claude/`, so slash commands are
-called **without a prefix** (`/save`, `/sc`, `/daily`). It enables Agent Teams
-and seeds a conservative read-only permission allowlist (`Read`/`Glob`/`Grep`)
-into `~/.claude/settings.json`, removing the repeated approval prompts new users
-hit on first run. To uninstall: `bash install.sh uninstall`.
+called **without a prefix** (`/save`, `/sc`, `/daily`). It enables Agent Teams,
+wires the themed statusline, and seeds a conservative read-only permission
+allowlist (`Read`/`Glob`/`Grep`) into `~/.claude/settings.json`, removing the
+repeated approval prompts new users hit on first run. To uninstall:
+`bash install.sh uninstall`.
 
 > **Windows:** run `install.sh` from **Git Bash** ([Git for Windows](https://gitforwindows.org/)),
 > or use the native PowerShell installer: `powershell -ExecutionPolicy Bypass -File install.ps1`.
@@ -98,19 +121,8 @@ hit on first run. To uninstall: `bash install.sh uninstall`.
 
 | Install method | Command form | Example |
 |---|---|---|
-| **`install.sh` / `install.ps1`** (recommended) | flat (no prefix) | `/save`, `/sc`, `/daily` |
-| `claude plugin install` (marketplace) | namespaced `artibot:` | `/artibot:save`, `/artibot:sc` |
-
-**Alternative (advanced): Claude Code marketplace**
-```bash
-claude plugin marketplace add https://github.com/Yoodaddy0311/artibot
-claude plugin install artibot@artibot
-```
-
-Marketplace install namespaces **every** command under the `artibot:` prefix
-(e.g. `/save` → `/artibot:save`). Use it only for plugin-managed updates via
-`claude plugin`. Agent Teams auto-enables on first session start. To uninstall:
-`claude plugin uninstall artibot`.
+| Native marketplace (`/plugin install`) | namespaced `artibot:` | `/artibot:save`, `/artibot:sc` |
+| `install.sh` / `install.ps1` (flat) | flat (no prefix) | `/save`, `/sc`, `/daily` |
 
 ### Requirements
 
@@ -741,7 +753,7 @@ daily (work recap/retrospective), team (parallel orchestration), session-worklog
 
 ## Hooks
 
-23 hook registrations across 15 event types.
+24 hook registrations across 15 event types.
 
 <details>
 <summary>Hook Event Table</summary>
@@ -751,6 +763,7 @@ daily (work recap/retrospective), team (parallel orchestration), session-worklog
 | SessionStart | `session-start.js` | Environment detection, config loading |
 | PreToolUse (Write) | `pre-write.js` | Block writes to sensitive files (.env, .pem) |
 | PreToolUse (Bash) | `pre-bash.js` | Block dangerous commands (rm -rf, force push) |
+| PreToolUse (Bash) | `bash-risk-guard.js` | Classify command risk (classifyRisk): block danger, warn caution, feed autopilot pause |
 | PostToolUse (Edit) | `post-edit-format.js` | Auto-format suggestion for JS/TS |
 | PostToolUse (Bash) | `post-bash.js` | Auto-detect PR URLs after git push |
 | PreCompact | `pre-compact.js` | State snapshot before context compression |
@@ -858,7 +871,7 @@ plugins/artibot/
 +-- hooks/
 |   +-- hooks.json               # Hook event mappings
 +-- scripts/
-|   +-- hooks/                   # 59 hook scripts (ESM)
+|   +-- hooks/                   # 60 hook scripts (ESM)
 |   +-- ci/                      # 6 CI validation scripts
 |   +-- evals/                   # Runtime eval suite
 |   +-- utils/

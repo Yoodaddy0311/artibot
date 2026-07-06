@@ -1,7 +1,9 @@
 # PRD: Effort × Dynamic-Workflow Fusion
 
-> **Status**: Approved · **Created**: 2026-05-29 · **Owner**: Artibot core
+> **Status**: Shipped (P1/P2) / Superseded (P3) · **Created**: 2026-05-29 · **Owner**: Artibot core
 > **Target**: v4.18.0 (P1+P2), v4.19.0 (P3) · **Task list**: #1 (P1), #2 (P2), #3 (P3)
+>
+> **정정 (2026-07)**: P1(Score-Aware Effort Resolution)과 P2(Unified Effort×Team Trigger)는 v4.18.0에서 배포 완료됨 (`CHANGELOG.md:562-564`). P3(GRPO-Tuned Adaptive Policy)는 기반 서브시스템인 `lib/learning/grpo/` 전체가 family A/B/C retirement로 삭제되어 폐기됨 (`artibot.config.json:936` 코멘트 참조).
 
 ## 1. 배경
 
