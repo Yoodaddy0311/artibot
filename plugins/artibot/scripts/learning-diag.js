@@ -368,6 +368,9 @@ export function renderLedgerStats(stats) {
   out.push(`| Pending review | ${s.pending} |`);
   out.push(`| On-disk size | ${kb} KB |`);
   out.push('');
+  if (s.pending > 0) {
+    out.push(`_${s.pending} item(s) awaiting review — run \`/learning review\` to approve or reject._`, '');
+  }
   return out.join('\n');
 }
 

@@ -11,6 +11,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **F-06 ledger review gate wired to `/learning review`** — the ambient-ledger
+  learning-signal review queue (`lib/learning/ledger/review-queue.js`), previously
+  library+tests only (audit IMP-02 / L-01 HIGH: end-to-end dormant), now has a
+  runtime consumer. New `scripts/ledger-review.js` (a mutating CLI kept separate
+  from the read-only `learning-diag.js`) drives `enqueueFromCorpus` → `listPending`
+  → `renderReviewReport`, and `approve`/`reject` (approval promotes via
+  `collectExperience`). Surfaced as the `review` subcommand of `/learning`.
+  **Pull-model**: corpus is staged only when the user runs `/learning review` —
+  no SessionEnd auto-enqueue — keeping the privacy-sensitive promotion an explicit
+  human gate. The `/learning` dashboard now nudges toward `/learning review` when
+  the Ledger section shows a non-zero pending count.
+- Tests: `tests/scripts/ledger-review.test.js` (real temp-ledger stage + injected-
+  deps approve/reject dispatch); `tests/scripts/learning-diag.test.js` extended for
+  the pending-review nudge.
+
 ---
 
 ## [4.29.0] — 2026-06-24

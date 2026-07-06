@@ -1,6 +1,6 @@
 ---
 description: (Artibot) Diagnose the learning system — GRPO weights, swarm sync, top/bottom tools by performance
-argument-hint: 'e.g. "--top 5", "--swarm", "--raw"'
+argument-hint: 'e.g. "--top 5", "--swarm", "--raw", "review", "review approve <id>"'
 allowed-tools: [Bash, Read]
 toolset: meta
 ---
@@ -46,7 +46,42 @@ Parse `$ARGUMENTS`:
 - `--by-agent` — **v4.7.0** — group Risk Signals and Top Performers by `callingAgent` so failures can be attributed to the spawning agent (e.g., "tool X is fine for orchestrator but failing every time `frontend-developer` calls it"). Records without attribution metadata appear under `__unattributed__`. Requires v4.7.0+ data; pre-v4.7.0 records render entirely under `__unattributed__`.
 - `--help`, `-h` — print the script's own flag reference and exit
 
+### `review` subcommand (F-06 — ledger learning-signal review gate)
+
+The diagnostic above is **read-only**. The `review` subcommand is the **human
+approval gate** that promotes denoised ambient-ledger corpus into the learning
+store — the mutating counterpart, so it runs a separate script
+(`scripts/ledger-review.js`) rather than the read-only `learning-diag.js`.
+
+- `review` — stage any NEW conversation corpus from `<cwd>/.artibot/ledger/`
+  into the review queue (advances the corpus watermark so nothing re-stages),
+  then list what is pending approval.
+- `review approve <id> [<id>…]` — promote those queue items into learning
+  (`collectExperience`) and dequeue them.
+- `review approve --all` — promote every pending item.
+- `review reject <id> [<id>…]` / `review reject --all` — dequeue WITHOUT
+  promoting (the corpus stays discarded, never fed to learning).
+- `review --session <sid>` — stage only that session's corpus.
+
+**Pull-model**: staging happens only when you run `review`; there is no
+background/SessionEnd auto-enqueue (privacy-sensitive promotion stays explicit).
+
 ## Execution Flow
+
+**If `$ARGUMENTS` begins with `review`** — run the review gate instead of the
+dashboard. Pass everything AFTER the `review` token to the review script:
+
+```bash
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/artibot}"
+node "${PLUGIN_ROOT}/scripts/ledger-review.js" $ARGUMENTS
+```
+
+`$ARGUMENTS` is forwarded verbatim — the script ignores the leading `review`
+token, so `review`, `review approve <id>`, and `review reject --all` all work.
+Display the script output **exactly as printed**. When items are pending, remind
+the user they can `approve`/`reject` by id (the output already prints the hint).
+
+**Otherwise** (default — no `review` token):
 
 1. Run the diagnostic script via Bash:
 
@@ -57,7 +92,7 @@ node "${PLUGIN_ROOT}/scripts/learning-diag.js" $ARGUMENTS
 
 2. Display the full output of the script to the user **exactly as printed** (it is already formatted markdown).
 
-3. If the dashboard's Recommendations section contains any critical-flagged entries or the empty-bucket / stale-sync warnings, briefly highlight them in a one-sentence summary at the end (do NOT re-format the dashboard itself).
+3. If the dashboard's Recommendations section contains any critical-flagged entries or the empty-bucket / stale-sync warnings, briefly highlight them in a one-sentence summary at the end (do NOT re-format the dashboard itself). If the **Ledger (Ambient Capture)** section shows a non-zero "Pending review" count, mention that `/learning review` can approve or reject those items.
 
 ## Interpretation Guide
 

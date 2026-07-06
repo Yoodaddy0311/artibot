@@ -143,7 +143,8 @@
 
 **구현 스코프 (2026-06-26 확정 — 검토 게이트 채택)**
 - D1. `lib/learning/ledger/corpus.js` — `readSessionCorpus(projectRoot,{sessionId?,limit?,sinceCursor?})` → denoised 대화 라인[]. `slim.js` 재사용, never-throw, 로컬 read only, 세션당 watermark(store.js cursor 패턴 재사용)로 중복 소비 방지.
-- D2. **검토 대기열** — corpus를 학습 승격 전 검토 큐에 적재(자동), 사용자 승인 후에만 `lifelong-learner.collectExperience` 공급. `/dreaming` human-review 게이트(F-08) 패턴 재사용 후보.
+- D2. **검토 대기열** — corpus를 학습 승격 전 검토 큐에 적재, 사용자 승인 후에만 `lifelong-learner.collectExperience` 공급. `/dreaming` human-review 게이트(F-08) 패턴 재사용 후보.
+  - **[SHIPPED 2026-07-03 — 커맨드 표면 배선]** `lib/learning/ledger/review-queue.js`(enqueue/list/approve/reject)를 `/learning review` 서브커맨드(`scripts/ledger-review.js`)로 실배선. **pull-model**(리더 결정): 적재는 `review` 호출 시점에 발생(SessionEnd 훅 자동 enqueue 아님 — 프라이버시 민감 승격은 명시적 휴먼 게이트 유지). `review`=신규 corpus 적재+대기 목록, `review approve <id|--all>`=collectExperience 승격+dequeue, `review reject`=미승격 dequeue. 감사 IMP-02 L-01(HIGH, end-to-end dormant) 해소.
 - D3. **R2 enforcement** — ledger-유래 패턴이 `swarm-client` `scrubPattern`+`addNoise`(ε=1.0) 미경유 송신 불가 가드 + AC1 테스트.
 - D4. 회귀 테스트 — corpus 리더 / 검토 큐 / privacy 우회 차단(80%+).
 - Note: R2 privacy 체인은 기존 swarm 경로가 이미 충족 — 신규는 corpus 리더·검토 큐·우회 가드뿐. Codex 분기(F-07)·`/learning` 통계(F-09)는 범위 밖.
@@ -192,7 +193,7 @@
 
 ## 8. 실행계획 (단계)
 - **Phase 1 (P0 코어)**: `.gitignore` 게이트 → `session-ledger.mjs`(F-01) + slim 포팅(F-02) + 증분 store(F-03) + redaction(F-04) + 회귀 테스트(slim/redact/append/non-block). `npm run ci` green.
-- **Phase 2 (P1 환류)**: `/resume`·handoff 컨텍스트 주입(F-05) + 학습 입력 어댑터(F-06, privacy 경유). **[부분 SHIPPED `f33d705`, 2026-06-26]** Roadmap N1 = SessionStart read-back advisory(`scripts/hooks/session-readback.mjs` + `lib/learning/ledger/readback.js`)로 첫 환류 증분 출하 — 세션 시작 시 직전 handoff `다음 P0`(→wakeup→ledger) 1줄 표면화(advisory-only). F-06(학습 환류)는 미착수.
+- **Phase 2 (P1 환류)**: `/resume`·handoff 컨텍스트 주입(F-05) + 학습 입력 어댑터(F-06, privacy 경유). **[부분 SHIPPED `f33d705`, 2026-06-26]** Roadmap N1 = SessionStart read-back advisory(`scripts/hooks/session-readback.mjs` + `lib/learning/ledger/readback.js`)로 첫 환류 증분 출하 — 세션 시작 시 직전 handoff `다음 P0`(→wakeup→ledger) 1줄 표면화(advisory-only). F-06(학습 환류) corpus 리더(D1)·검토 큐(D2)·egress 가드(D3)는 구현 완료, **[SHIPPED 2026-07-03]** `/learning review` 커맨드 표면으로 실배선(pull-model, IMP-02 L-01 해소).
 - **Phase 3 (P2)**: Codex 분기(F-07) · `/dreaming` 연결(F-08) · `/learning` 통계(F-09).
 
 ## 9. 수락 기준 (전체)

@@ -43,6 +43,21 @@ describe('renderLedgerStats() — ambient capture section', () => {
     expect(out).toContain('2.0 KB');
   });
 
+  it('nudges toward `/learning review` when items are pending', () => {
+    const out = renderLedgerStats({
+      sessions: 1, lines: 4, redactions: 0, bytes: 100, consumed: 0, pending: 2,
+    });
+    expect(out).toContain('2 item(s) awaiting review');
+    expect(out).toContain('/learning review');
+  });
+
+  it('omits the review nudge when nothing is pending', () => {
+    const out = renderLedgerStats({
+      sessions: 1, lines: 4, redactions: 0, bytes: 100, consumed: 4, pending: 0,
+    });
+    expect(out).not.toContain('awaiting review');
+  });
+
   it('handles missing/zero-line stats without dividing by zero', () => {
     const out = renderLedgerStats(undefined);
     expect(out).toContain('No ledger data');
