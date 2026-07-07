@@ -9,6 +9,7 @@ import { describe, expect, it } from 'vitest';
 import {
   findVscodeSettings,
   findWtSettings,
+  resolveStatuslineCommand,
   restoreSettings,
   restoreVscodeTerminal,
   restoreWtDefaults,
@@ -18,6 +19,45 @@ import {
   withWtScheme,
 } from '../../scripts/theme-apply.js';
 import { VSCODE_TERMINAL_KEYS } from '../../scripts/theme/registry.js';
+
+describe('resolveStatuslineCommand (install-method-aware)', () => {
+  it('LEGACY: returns the byte-identical tilde command when the script exists under ~/.claude/artibot', () => {
+    const cmd = resolveStatuslineCommand('statusline.sh', { home: '/home/me', exists: () => true });
+    expect(cmd).toBe('bash ~/.claude/artibot/scripts/hooks/statusline.sh');
+  });
+
+  it('LEGACY: works for the themed script too (byte-identical)', () => {
+    const cmd = resolveStatuslineCommand('statusline-themed.sh', { home: '/home/me', exists: () => true });
+    expect(cmd).toBe('bash ~/.claude/artibot/scripts/hooks/statusline-themed.sh');
+  });
+
+  it('LEGACY: probes the script under the given home + hooks dir', () => {
+    const seen = [];
+    resolveStatuslineCommand('statusline.sh', {
+      home: '/opt/home',
+      exists: (p) => { seen.push(p.replace(/\\/g, '/')); return true; },
+    });
+    expect(seen[0]).toBe('/opt/home/.claude/artibot/scripts/hooks/statusline.sh');
+  });
+
+  it('NATIVE fallback: quotes the plugin-root path with forward slashes when the legacy script is absent', () => {
+    const cmd = resolveStatuslineCommand('statusline.sh', {
+      home: '/home/me',
+      exists: () => false,
+      pluginRoot: () => '/opt/x',
+    });
+    expect(cmd).toBe('bash "/opt/x/scripts/hooks/statusline.sh"');
+  });
+
+  it('NATIVE fallback: normalizes a Windows-style plugin root to forward slashes', () => {
+    const cmd = resolveStatuslineCommand('statusline-themed.sh', {
+      home: 'C:/Users/me',
+      exists: () => false,
+      pluginRoot: () => 'C:\\cache\\artibot\\artibot\\4.29.0',
+    });
+    expect(cmd).toBe('bash "C:/cache/artibot/artibot/4.29.0/scripts/hooks/statusline-themed.sh"');
+  });
+});
 
 describe('withStatusLine', () => {
   it('sets the command immutably and preserves other keys', () => {

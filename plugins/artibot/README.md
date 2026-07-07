@@ -143,10 +143,11 @@ Native install **namespaces every command** under the `artibot:` prefix — call
 > frontend/backend/test patterns). Claude Code's plugin schema has no `rules` field,
 > so `claude plugin validate` flags it as an ignored field; the rules load only when
 > `install.sh` copies them to `~/.claude/rules/artibot/`. If you want that automatic
-> DEV-protocol / quality-gate enforcement, use the full install below. A few
-> convenience commands (`/theme`, `/update`) and the themed statusline also still
-> assume the flat layout and are being migrated to `${CLAUDE_PLUGIN_ROOT}`. Commands,
-> agents, skills, and hooks themselves work identically on both paths.
+> DEV-protocol / quality-gate enforcement, use the full install below. `/theme` and
+> the themed statusline now auto-resolve both layouts (native install included) — a
+> native-only install may just need `/theme` re-run after a major `/plugin` update.
+> `/update` still assumes the flat layout and is being migrated to `${CLAUDE_PLUGIN_ROOT}`.
+> Commands, agents, skills, and hooks themselves work identically on both paths.
 
 ### Full install: `install.sh` (flat commands, no prefix)
 

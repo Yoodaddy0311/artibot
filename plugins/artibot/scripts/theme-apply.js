@@ -18,6 +18,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { getPluginRoot } from '../lib/core/platform.js';
 import { buildOutputStyle, buildStatuslinePalette, buildVscodeTerminalColors, buildWtScheme, isTheme, THEME_NAMES, THEMES, VSCODE_TERMINAL_KEYS } from './theme/registry.js';
 
 const HOME = homedir();
@@ -26,8 +27,53 @@ const RUNTIME = join(ARTIBOT, 'runtime');
 const SETTINGS = join(HOME, '.claude', 'settings.json');
 const OUTPUT_STYLES = join(HOME, '.claude', 'output-styles');
 const BACKUP = join(RUNTIME, 'theme-backup.json');
-const DEFAULT_STATUSLINE = 'bash ~/.claude/artibot/scripts/hooks/statusline.sh';
-const THEMED_STATUSLINE = 'bash ~/.claude/artibot/scripts/hooks/statusline-themed.sh';
+
+/**
+ * Resolve the shell command that `settings.json#statusLine.command` should run
+ * for a statusline hook script, in an install-method-aware way.
+ *
+ * Two install layouts exist for the hook SCRIPTS (code, not data):
+ *   - Legacy / full install (install.sh): scripts live at the STABLE path
+ *     `~/.claude/artibot/scripts/hooks/`, which never changes across updates.
+ *   - Native marketplace install: scripts live only inside the VERSIONED plugin
+ *     cache (`…/plugins/cache/artibot/artibot/<version>/scripts/hooks/`), exposed
+ *     to this process via `CLAUDE_PLUGIN_ROOT` / import.meta resolution.
+ *
+ * Because `statusLine.command` is PERSISTED into settings.json and re-run on
+ * every render, we prefer the stable legacy path whenever the script exists
+ * there: that keeps the command byte-identical for install.sh users AND immune
+ * to version-dir churn on `/plugin` updates. Only when the legacy path is absent
+ * (native-only install) do we fall back to the resolved plugin root — accepting
+ * that a major update may require re-running `/theme` (documented in
+ * commands/theme.md and the README install notes). Embedding a runtime resolver
+ * in the persisted command was rejected: it would itself need a stable code path
+ * to live at, which native install does not provide, so it moves the staleness
+ * rather than removing it.
+ *
+ * @param {string} script - Hook script basename (e.g. `'statusline.sh'`).
+ * @param {object} [deps] - Injectable dependencies (for tests).
+ * @param {string} [deps.home] - Home directory (default: `os.homedir()`).
+ * @param {() => string} [deps.pluginRoot] - Plugin-root resolver (default: `getPluginRoot`).
+ * @param {(p: string) => boolean} [deps.exists] - Existence probe (default: `existsSync`).
+ * @returns {string} The `bash …` command string to store in `statusLine.command`.
+ */
+export function resolveStatuslineCommand(script, deps = {}) {
+  const home = deps.home ?? HOME;
+  const existsFn = deps.exists ?? existsSync;
+  const legacyScript = join(home, '.claude', 'artibot', 'scripts', 'hooks', script);
+  if (existsFn(legacyScript)) {
+    // Byte-identical to the historical hardcoded command; tilde stays literal.
+    return `bash ~/.claude/artibot/scripts/hooks/${script}`;
+  }
+  const rootFn = deps.pluginRoot ?? getPluginRoot;
+  // Forward-slash the absolute path so the `bash` invocation works on Git Bash
+  // (Windows) as well as POSIX shells; quote it to tolerate spaces in the path.
+  const abs = join(rootFn(), 'scripts', 'hooks', script).replace(/\\/g, '/');
+  return `bash "${abs}"`;
+}
+
+const DEFAULT_STATUSLINE = resolveStatuslineCommand('statusline.sh');
+const THEMED_STATUSLINE = resolveStatuslineCommand('statusline-themed.sh');
 
 function readJson(p, fallback = null) {
   try { return JSON.parse(readFileSync(p, 'utf8')); } catch { return fallback; }
