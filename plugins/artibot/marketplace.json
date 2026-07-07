@@ -12,14 +12,14 @@
   "tagline": "Production-grade autonomous agent OS that orchestrates the work for you.",
   "author": {
     "name": "Artience",
-    "email": "artience.ads.team.tf@gmail.com",
+    "email": "ad-display@artience.com",
     "url": "https://github.com/Yoodaddy0311"
   },
   "publisher": "artience",
   "maintainers": [
     {
       "name": "Artibot Maintainer",
-      "email": "artience.ads.team.tf@gmail.com",
+      "email": "ad-display@artience.com",
       "role": "primary"
     }
   ],
@@ -251,7 +251,7 @@
     "channel": "stable"
   },
   "support": {
-    "email": "artience.ads.team.tf@gmail.com",
+    "email": "ad-display@artience.com",
     "issues": "https://github.com/Yoodaddy0311/artibot/issues",
     "discussions": "https://github.com/Yoodaddy0311/artibot/discussions"
   },

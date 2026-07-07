@@ -339,7 +339,7 @@ extension manifest validation, and CI gates:
 <https://github.com/Yoodaddy0311/artibot/issues>. Issues are public; do not
 include credentials, internal paths, or proprietary code.
 
-**Author contact** — `artience.ads.team.tf@gmail.com`.
+**Author contact** — `ad-display@artience.com`.
 
 ---
 

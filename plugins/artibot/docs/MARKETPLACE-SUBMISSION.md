@@ -2,7 +2,7 @@
 
 **Status:** DRAFT — do not submit without explicit user approval (submission is an
 external, public-facing action).
-**Owner:** artience.ads.team.tf@gmail.com
+**Owner:** ad-display@artience.com
 **Last verified against Claude Code docs:** 2026-07-03
 **Manifest source of truth:** repo-root [`.claude-plugin/marketplace.json`](../.claude-plugin/marketplace.json)
 
@@ -105,7 +105,7 @@ Ran the §4 checklist top-to-bottom this session. Per-item PASS/FAIL with eviden
 | # | Item | Result | Evidence |
 |---|---|---|---|
 | 1 | `claude plugin validate .` | **PASS** | 0 errors. 4 pre-existing warnings only (`$comment`, `categories`, `compatibility`, `rules` — all previously documented as intentionally-kept or a known, disclosed gap; none newly introduced). |
-| 2 | `marketplace.json` parses, required fields | **PASS** | `name: "artibot"`, `owner: {name: "Artience", email: "artience.ads.team.tf@gmail.com"}`, `plugins[]` length 2, both `source` values start with `./`. |
+| 2 | `marketplace.json` parses, required fields | **PASS** | `name: "artibot"`, `owner: {name: "Artience", email: "ad-display@artience.com"}`, `plugins[]` length 2, both `source` values start with `./`. |
 | 3 | Marketplace name not reserved/impersonation | **CARRIED FORWARD** | Requires an external lookup against Anthropic's reserved-name list; not re-verified this session (no external checks were made — see constraints). Last verified 2026-07-03 per header. |
 | 4 | Plugin names kebab-case | **PASS** | `artibot`, `artibot-cowork` — both already lowercase-hyphenated. |
 | 5 | Version lockstep | **PASS** | `plugins[].version` == `plugin.json.version` for both: artibot `4.29.0` == `4.29.0`; artibot-cowork `3.1.0` == `3.1.0`. |
