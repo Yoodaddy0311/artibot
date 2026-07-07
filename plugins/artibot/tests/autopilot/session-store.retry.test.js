@@ -3,11 +3,14 @@
  * absorption: EPERM/EBUSY/EACCES from antivirus / OneDrive holding a fresh
  * .tmp handle). Covers:
  *   - retry succeeds after N transient failures (call-count asserted)
+ *   - the enlarged budget (S3: MAX_RENAME_ATTEMPTS 5 → 8) makes attempts 6-8
+ *     reachable — a 7th-attempt success would have thrown under the old max=5
  *   - retries exhausted => original error propagates + tmp cleanup attempted
  *   - non-transient error (ENOENT) => no retry, immediate propagation
  *
  * node:fs is mocked so renameSync behaviour is fully controlled. Atomics.wait
- * backoff runs for real but is bounded (10..160ms) so the suite stays fast.
+ * backoff runs for real but is bounded (per-sleep capped at 250ms) so the suite
+ * stays fast.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -69,11 +72,24 @@ describe('saveSession rename retry', () => {
     expect(unlinkSync).not.toHaveBeenCalled();
   });
 
-  it('propagates the original error and cleans up tmp after 5 EPERM attempts', () => {
+  it('retries on EPERM and succeeds on the 7th attempt (enlarged budget — would throw at old max=5)', () => {
+    for (let i = 0; i < 6; i += 1) {
+      renameSync.mockImplementationOnce(() => { throw fsError('EPERM'); });
+    }
+    renameSync.mockImplementationOnce(() => {});
+
+    const result = saveSession(baseState());
+
+    expect(renameSync).toHaveBeenCalledTimes(7);
+    expect(result).toContain('ap-retry-test.json');
+    expect(unlinkSync).not.toHaveBeenCalled();
+  });
+
+  it('propagates the original error and cleans up tmp after 8 EPERM attempts', () => {
     renameSync.mockImplementation(() => { throw fsError('EPERM'); });
 
     expect(() => saveSession(baseState())).toThrow(/EPERM/);
-    expect(renameSync).toHaveBeenCalledTimes(5);
+    expect(renameSync).toHaveBeenCalledTimes(8);
     expect(unlinkSync).toHaveBeenCalledTimes(1);
   });
 

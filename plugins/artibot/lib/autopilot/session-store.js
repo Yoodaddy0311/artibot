@@ -33,9 +33,24 @@ const TRANSIENT_RENAME_CODES = new Set(['EPERM', 'EBUSY', 'EACCES']);
 
 /**
  * Max number of rename attempts before giving up and propagating the error.
+ *
+ * Raised 5 → 8 (S3, 2026-07): under full-suite cross-project worker saturation
+ * the `main` pool's parallel FS churn competes with the autopilot fork, and a
+ * transient Windows rename lock (EPERM/EBUSY) intermittently outlived the old
+ * 5-attempt / ~310ms budget — surfacing as `renameWithRetry` throwing out of
+ * `saveSession` → `persist` → `runPhase2Execute` (engine.execute-worktree
+ * case 3 flake). 8 attempts with a capped backoff give a bounded ~810ms budget.
  * @type {number}
  */
-const MAX_RENAME_ATTEMPTS = 5;
+const MAX_RENAME_ATTEMPTS = 8;
+
+/**
+ * Upper bound (ms) for a single inter-attempt backoff sleep. Caps the
+ * exponential growth so a late attempt cannot block the synchronous save path
+ * for an unbounded stretch (8 uncapped attempts would sleep 640ms before the
+ * last try alone). @type {number}
+ */
+const MAX_RENAME_BACKOFF_MS = 250;
 
 /**
  * Block the current thread for {@link ms} milliseconds without busy-looping.
@@ -52,9 +67,10 @@ function sleepSync(ms) {
 /**
  * Atomically rename {@link tmp} to {@link filePath} with bounded retry on
  * transient Windows file locks (EPERM/EBUSY/EACCES). Backoff is exponential
- * (~10 → 160ms) across up to {@link MAX_RENAME_ATTEMPTS} attempts. Non-transient
- * errors propagate immediately. After the final failed attempt the original
- * error is re-thrown so the caller's cleanup contract is unchanged.
+ * (~10ms doubling) but capped at {@link MAX_RENAME_BACKOFF_MS} per sleep, across
+ * up to {@link MAX_RENAME_ATTEMPTS} attempts. Non-transient errors propagate
+ * immediately. After the final failed attempt the original error is re-thrown so
+ * the caller's cleanup contract is unchanged.
  * @param {string} tmp - source temp path
  * @param {string} filePath - destination final path
  * @returns {void}
@@ -67,7 +83,7 @@ function renameWithRetry(tmp, filePath) {
     } catch (err) {
       const transient = TRANSIENT_RENAME_CODES.has(err.code);
       if (!transient || attempt >= MAX_RENAME_ATTEMPTS) throw err;
-      sleepSync(10 * 2 ** (attempt - 1));
+      sleepSync(Math.min(10 * 2 ** (attempt - 1), MAX_RENAME_BACKOFF_MS));
     }
   }
 }

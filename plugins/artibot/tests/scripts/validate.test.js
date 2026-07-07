@@ -18,6 +18,14 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const PLUGIN_ROOT = resolve(HERE, '..', '..');
 const VALIDATOR = resolve(PLUGIN_ROOT, 'scripts', 'validate.js');
 
+// EVERY test here cold-starts a fresh `node validate.js` subprocess via
+// runValidator(). Under full-suite worker saturation that cold-start alone can
+// exceed the global 30s testTimeout — previously only the first test carried a
+// 60s override, leaving the other five exposed to the exact same timeout flake.
+// Apply the same realistic-but-bounded 60s budget to all of them. Env headroom
+// only — assertions are unchanged.
+const SUBPROCESS_TIMEOUT_MS = 60_000;
+
 function runValidator() {
   // Captures stdout+stderr; throws if exit != 0
   return execFileSync('node', [VALIDATOR], {
@@ -28,31 +36,28 @@ function runValidator() {
 }
 
 describe('validate.js — Phase 2 follow-up fixes', () => {
-  // First test triggers cold-start of the node validator subprocess; under
-  // full-suite worker saturation the global 30s testTimeout is insufficient.
-  // 60s gives realistic headroom while still bounding runaway processes.
   it('runs successfully against the live Artibot tree', () => {
     const output = runValidator();
     expect(output).toContain('Validation passed');
-  }, 60000);
+  }, SUBPROCESS_TIMEOUT_MS);
 
   it('does not warn on extension events on_handoff / on_llm_start / on_llm_end (AD-07)', () => {
     const output = runValidator();
     expect(output).not.toMatch(/Unknown hook event:\s*"on_handoff"/);
     expect(output).not.toMatch(/Unknown hook event:\s*"on_llm_start"/);
     expect(output).not.toMatch(/Unknown hook event:\s*"on_llm_end"/);
-  });
+  }, SUBPROCESS_TIMEOUT_MS);
 
   it('does not warn about missing "command" field for Stop or UserPromptSubmit type:prompt blocks (AD-37)', () => {
     const output = runValidator();
     expect(output).not.toMatch(/\[hooks\]\s+Stop:\s+hook missing "command" field/);
     expect(output).not.toMatch(/\[hooks\]\s+UserPromptSubmit:\s+hook missing "command" field/);
-  });
+  }, SUBPROCESS_TIMEOUT_MS);
 
   it('skips agents/INDEX.md as a catalog file', () => {
     const output = runValidator();
     expect(output).not.toMatch(/\[agents\]\s+INDEX\.md\s+missing/i);
-  });
+  }, SUBPROCESS_TIMEOUT_MS);
 
   it('reports a non-zero agent count (sanity: the skip filter does not over-skip)', () => {
     const output = runValidator();
@@ -60,7 +65,7 @@ describe('validate.js — Phase 2 follow-up fixes', () => {
     expect(match).not.toBeNull();
     const count = Number(match[1]);
     expect(count).toBeGreaterThan(20);
-  });
+  }, SUBPROCESS_TIMEOUT_MS);
 
   it('reports the expected counts for hooks, skills, commands, manifest', () => {
     const output = runValidator();
@@ -69,5 +74,5 @@ describe('validate.js — Phase 2 follow-up fixes', () => {
     expect(output).toMatch(/\[commands\]\s+\d+\s+command\(s\)\s+validated/);
     expect(output).toMatch(/\[hooks\]\s+\d+\s+hook event\(s\),\s+\d+\s+hook\(s\)\s+validated/);
     expect(output).toMatch(/\[config\]\s+artibot\.config\.json\s+validated/);
-  });
+  }, SUBPROCESS_TIMEOUT_MS);
 });
