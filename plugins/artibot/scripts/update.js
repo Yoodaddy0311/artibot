@@ -21,6 +21,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isNewerVersion } from '../lib/core/version-checker.js';
 import { getPluginRoot } from '../lib/core/platform.js';
+import { detectInstallMode, NATIVE_UPDATE_HINT } from '../lib/core/install-mode.js';
 import {
   findBash,
   findInstallPs1,
@@ -326,6 +327,25 @@ async function main() {
   console.log(`Artibot Update Check`);
   console.log(`====================`);
   console.log(`Installed version : v${currentVersion}`);
+
+  // Install-mode gate (B3): the git-pull + install.sh flow below assumes the
+  // LEGACY flat install (~/.claude/artibot + git source). A NATIVE marketplace
+  // install runs from the plugin cache and is updated by Claude Code itself, so
+  // running the legacy flow there makes wrong path assumptions. Detect and, for
+  // a confident native install, print the correct command and exit cleanly.
+  // Ambiguous layouts stay conservative: warn once and fall through to legacy.
+  const installMode = detectInstallMode({ pluginRoot, home });
+  if (installMode.mode === 'native') {
+    console.log('');
+    console.log('Status: Native marketplace install detected.');
+    console.log('This copy runs from the Claude plugin cache — update it with:');
+    console.log(`  ${NATIVE_UPDATE_HINT}`);
+    console.log('(The built-in git-pull + install.sh updater is for the legacy flat install only.)');
+    process.exit(0);
+  }
+  if (installMode.mode === 'ambiguous') {
+    console.warn(`  [warn] Install layout ambiguous (${installMode.reason}); proceeding with the legacy updater.`);
+  }
 
   // Fetch latest release tag from GitHub
   let latestVersion;
