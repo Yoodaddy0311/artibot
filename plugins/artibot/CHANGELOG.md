@@ -26,6 +26,82 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tests: `tests/scripts/ledger-review.test.js` (real temp-ledger stage + injected-
   deps approve/reject dispatch); `tests/scripts/learning-diag.test.js` extended for
   the pending-review nudge.
+- **`bash-risk-guard` wires `classifyRisk` into the Bash PreToolUse path**
+  (audit W-01) — new `scripts/hooks/bash-risk-guard.js` hook classifies every
+  Bash command via `lib/autopilot/safety.js#classifyRisk`: `danger` blocks,
+  `caution` warns, and the hook fails open on its own error. `recordRiskEvent`
+  feeds the previously dead `severity:'danger'` branch in `shouldPause`
+  (`engine-state.js`), so autopilot now actually pauses on danger-classified
+  commands instead of the unwired promise `prd-generator.js` used to describe.
+  Its wording was corrected to match the real (guard, not full auto-block)
+  behavior.
+- Tests: `tests/hooks/bash-risk-guard.test.js` (13 cases) + `tests/autopilot/
+  engine-state.test.js` (+6); `hooks.json` fingerprint updated.
+- **Install-mode detection** (`lib/core/install-mode.js#detectInstallMode()`) —
+  classifies the running install as `native`/`legacy`/`ambiguous` by checking
+  whether the resolved plugin root sits under the marketplace plugin cache
+  versus the flat `~/.claude/artibot` `install.sh` payload. Two callers now
+  branch on it instead of assuming the legacy layout: `/update` (B3) prints
+  `/plugin marketplace update artibot` and exits cleanly on a confident
+  `native` install instead of running the git-pull + `install.sh` flow (an
+  `ambiguous` layout warns once and falls through to the legacy path,
+  conservatively); the `auto-learning-check` hook (B4) points its manual
+  schedule-registration hints at the native update command (or `CronCreate`)
+  instead of the nonexistent `~/.claude/artibot/install.sh` /
+  `setup-auto-learning.js` paths.
+- Tests: `tests/core/install-mode.test.js`, `tests/scripts/update-install-mode
+  .test.js`, `tests/hooks/auto-learning-check.test.js`.
+- **`/theme` and the themed statusline get an install-mode-aware path
+  resolver** (B1+B2) — `resolveStatuslineCommand()` in `theme-apply.js`
+  prefers the stable legacy path (`~/.claude/artibot/scripts/hooks/<script>`)
+  whenever it exists, keeping the persisted `statusLine.command` byte-identical
+  for `install.sh` users across updates, and only falls back to the resolved
+  plugin-cache root for native-only installs. `commands/theme.md`'s Bash
+  snippets get a matching second-layer guard (`[ -f ]` check before invoking
+  `node`, since `CLAUDE_PLUGIN_ROOT` can be empty in the Bash tool context even
+  under a native install) with a plain "run the full install" message when
+  neither path resolves.
+- Tests: `tests/scripts/theme-apply.test.js` extended.
+- **`scripts/ledger-rescrub.js`** — a one-time, manually-run maintenance tool
+  that retroactively re-applies the current secret redactor to already-
+  persisted ambient-ledger lines. Needed because redaction is a write-time
+  chokepoint (`lib/learning/ledger/store.js`), so the IMP-03 URL-credential
+  fix above does not reach lines appended before it. Applies the exact same
+  whole-line `redactSecrets` transform the store uses at write time
+  (idempotent — re-scrubbing already-redacted text is a no-op), with a
+  per-file `.bak` backup and atomic tmp+rename per touched file. Output is
+  counts-only; verbatim ledger text is never printed.
+- Tests: `tests/scripts/ledger-rescrub.test.js`.
+
+### Fixed
+- **URL-embedded credentials now redacted in the ambient ledger** (audit L-03) —
+  `url_with_credentials` moved from the `network` category to `secrets`
+  (`lib/privacy/pii-detector.js`), so the ledger's scoped scrubber masks
+  `https://user:pass@host` basic-auth passwords instead of storing them in
+  plaintext. Regex/replacement unchanged; no other scope consumed `network`
+  (verified by two independent greps). Plain URLs and `git@` SSH remotes are
+  left untouched.
+- Tests: `tests/learning/redact.test.js` (+4, including negative cases for
+  plain URLs and SSH remotes).
+
+### Docs
+- **README leads with the native marketplace install path** (`/plugin
+  marketplace add Yoodaddy0311/artibot` → `/plugin install artibot@artibot`)
+  and honestly discloses that the 8 auto-activating rules (DEV Protocol,
+  Quality Gates, agent-coordination, config-safety, clean-state, frontend/
+  backend/test patterns) do **not** transfer to a native install — `plugin.json`'s
+  `rules` field sits outside the official plugin manifest schema and is
+  silently ignored (`claude plugin validate` flags it as an unknown field).
+  `install.sh`/`install.ps1` remain the full install path for that automation.
+  New `docs/MARKETPLACE-SUBMISSION.md` runbook (in-app submission form, not a
+  PR) and `docs/IMPROVEMENT-DESIGN-2026-07-02.md` (6-team parallel audit:
+  7.8/10, 20-item improvement backlog).
+- **README drift fixes** — version example, opus/sonnet agent model split
+  (21/7, 75%/25%), 12 persona skills (was 11, `persona-distill` missing), a
+  ghost skill entry replaced with the real `guardrails` skill, hook counts
+  (24 registrations / 60 scripts, was stale at 23/59/39), a timestamp caveat
+  on the competitive-benchmark table, and GRPO-retirement footnotes on two
+  PRDs (status flipped to Shipped/Superseded).
 
 ---
 
