@@ -1,7 +1,9 @@
 # Marketplace Submission — Artibot
 
-**Status:** DRAFT — do not submit without explicit user approval (submission is an
-external, public-facing action).
+**Status:** SUBMITTED — the owner completed the in-app review form on 2026-07-07
+(Claude Code platform only; artibot-cowork to be submitted separately after
+approval). Awaiting Anthropic community-marketplace review; notices go to the
+owner email below.
 **Owner:** ad-display@artience.com
 **Last verified against Claude Code docs:** 2026-07-03
 **Manifest source of truth:** repo-root [`.claude-plugin/marketplace.json`](../.claude-plugin/marketplace.json)
@@ -237,3 +239,36 @@ that automation. Separately, /theme and /update currently assume the
 full-install file layout and may need /theme re-run after a native-install
 update; the project tracks a path-resolver fix for full native parity.
 ```
+
+**Use-case examples (form field "사용 사례 예시" — required on the 2026-07 form,
+absent from the original draft; authored live during submission)**
+```text
+예시 1: "/team 이 기능 구현해줘" — 리더가 작업을 분해해 전문 에이전트 팀(backend/frontend/tdd 등)을 병렬 스폰하고, 상호 크로스체크와 최종 검수(inspector)까지 자동으로 거친 뒤 결과를 보고합니다.
+
+예시 2: "/autopilot 리팩터링 돌려놔" — 자리를 비우는 동안 PRD 생성→계획→병렬 실행→교차검증→테스트 검증→완료 보고서까지 7단계를 무인으로 수행하며, 위험 명령(force-push, rm -rf)은 안전 가드가 차단합니다.
+
+예시 3: "/learning" — 세션에서 축적된 학습 신호(테스트 통과율, 도구 성과)를 대시보드로 진단하고, "/learning review"로 대화에서 추출된 학습 후보를 사람이 승인/거절하는 검토 게이트를 거쳐 반영합니다.
+
+예시 4: "/seo 우리 랜딩페이지 감사해줘" — 개발 외에도 SEO 감사, 광고 카피, CRO, 프레젠테이션 설계 등 마케팅 전문 에이전트 7종이 같은 오케스트레이션 위에서 동작합니다.
+```
+
+## 9. Submission record (2026-07-07)
+
+Form filled and submitted by the owner via the in-app flow (step 2 "Plugin
+information" + step 3 "Submission details"):
+
+| Form field | Value used |
+|---|---|
+| 플러그인 링크 / 홈페이지 | `https://github.com/Yoodaddy0311/artibot` (both) |
+| 플러그인 이름 | `artibot` (form's duplicate-name check served as the §4 item-3 reserved-name lookup) |
+| 플러그인 설명 | §8 detailed description, verbatim |
+| 사용 사례 예시 | §8 use-case examples, verbatim |
+| 지원 플랫폼 | Claude Code only (artibot-cowork deferred to a separate submission) |
+| 라이선스 유형 | `BUSL-1.1` |
+| 개인정보 처리방침 URL | left blank (no standalone privacy doc yet; plugin is local-only — PRIVACY.md tracked as follow-up) |
+| 이메일 주소 | `ad-display@artience.com` (matches manifest owner email as of commit `b6d7c75`) |
+
+Next: review notices arrive at the owner email. On approval the plugin is
+pinned by commit SHA in `anthropics/claude-plugins-community` and the public
+catalog syncs nightly. If changes are requested, update the repo and re-submit
+per §3.
