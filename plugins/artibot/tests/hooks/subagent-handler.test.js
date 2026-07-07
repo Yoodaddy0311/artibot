@@ -56,11 +56,32 @@ describe('subagent-handler hook', () => {
     exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => {});
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    // Isolation drain: subagent-handler.js#main() is fire-and-forget (invoked
+    // at import) and on the `start` path its atomicWriteSync lands only AFTER
+    // an UNMOCKED real loadConfig() resolves. Wait for this test's main() to
+    // reach a terminal effect before teardown so its late atomicWriteSync is
+    // NOT recorded past the next test's vi.clearAllMocks() (the observed
+    // "spy leak"). Returns immediately once the effect already happened.
+    await waitForSettle();
     process.argv = originalArgv;
     stderrSpy.mockRestore();
     exitSpy.mockRestore();
   });
+
+  // Poll until main() produced a terminal side-effect (state write / stdout /
+  // exit). Replaces the flaky fixed `setTimeout(50)` that was routinely shorter
+  // than a cold real loadConfig() under full-suite parallel saturation. 5s
+  // ceiling sits well under the 30s vitest testTimeout.
+  async function waitForSettle(ceilingMs = 5000) {
+    const deadline = Date.now() + ceilingMs;
+    while (Date.now() < deadline) {
+      if (atomicWriteSync.mock.calls.length > 0
+        || writeStdout.mock.calls.length > 0
+        || exitSpy.mock.calls.length > 0) return;
+      await new Promise((r) => setTimeout(r, 10));
+    }
+  }
 
   describe('start action', () => {
     it('registers an agent with agent_id and role', async () => {
@@ -71,7 +92,7 @@ describe('subagent-handler hook', () => {
       }));
 
       await import('../../scripts/hooks/subagent-handler.js');
-      await new Promise((r) => setTimeout(r, 50));
+      await waitForSettle();
 
       expect(atomicWriteSync).toHaveBeenCalledTimes(1);
       const savedState = atomicWriteSync.mock.calls[0][1];
@@ -96,7 +117,7 @@ describe('subagent-handler hook', () => {
       }));
 
       await import('../../scripts/hooks/subagent-handler.js');
-      await new Promise((r) => setTimeout(r, 50));
+      await waitForSettle();
 
       const savedState = atomicWriteSync.mock.calls[0][1];
       expect(savedState.agents['qa-agent']).toBeDefined();
@@ -110,7 +131,7 @@ describe('subagent-handler hook', () => {
       }));
 
       await import('../../scripts/hooks/subagent-handler.js');
-      await new Promise((r) => setTimeout(r, 50));
+      await waitForSettle();
 
       const savedState = atomicWriteSync.mock.calls[0][1];
       expect(savedState.agents['architect-agent']).toBeDefined();
@@ -122,7 +143,7 @@ describe('subagent-handler hook', () => {
       readStdin.mockResolvedValue(makeHookData({}));
 
       await import('../../scripts/hooks/subagent-handler.js');
-      await new Promise((r) => setTimeout(r, 50));
+      await waitForSettle();
 
       const savedState = atomicWriteSync.mock.calls[0][1];
       expect(savedState.agents['unknown']).toBeDefined();
@@ -141,7 +162,7 @@ describe('subagent-handler hook', () => {
       }));
 
       await import('../../scripts/hooks/subagent-handler.js');
-      await new Promise((r) => setTimeout(r, 50));
+      await waitForSettle();
 
       const savedState = atomicWriteSync.mock.calls[0][1];
       expect(savedState.agents['existing-agent']).toBeDefined();
@@ -159,7 +180,7 @@ describe('subagent-handler hook', () => {
       }));
 
       await import('../../scripts/hooks/subagent-handler.js');
-      await new Promise((r) => setTimeout(r, 50));
+      await waitForSettle();
 
       const savedState = atomicWriteSync.mock.calls[0][1];
       expect(savedState.teamId).toBe('team-sess-abc');
@@ -177,7 +198,7 @@ describe('subagent-handler hook', () => {
       }));
 
       await import('../../scripts/hooks/subagent-handler.js');
-      await new Promise((r) => setTimeout(r, 50));
+      await waitForSettle();
 
       expect(atomicWriteSync.mock.calls[0][1].domain).toBe('frontend');
     });
@@ -187,7 +208,7 @@ describe('subagent-handler hook', () => {
       readStdin.mockResolvedValue(makeHookData({ agent_id: 'x', agent_type: 'qa' }));
 
       await import('../../scripts/hooks/subagent-handler.js');
-      await new Promise((r) => setTimeout(r, 50));
+      await waitForSettle();
 
       expect(atomicWriteSync.mock.calls[0][1].domain).toBe('qa');
     });
@@ -208,7 +229,7 @@ describe('subagent-handler hook', () => {
       }));
 
       await import('../../scripts/hooks/subagent-handler.js');
-      await new Promise((r) => setTimeout(r, 50));
+      await waitForSettle();
 
       const savedState = atomicWriteSync.mock.calls[0][1];
       expect(savedState.teamId).toBe('team-existing');
@@ -228,7 +249,7 @@ describe('subagent-handler hook', () => {
       readStdin.mockResolvedValue(makeHookData({ agent_id: 'x', role: 'r' }));
 
       await import('../../scripts/hooks/subagent-handler.js');
-      await new Promise((r) => setTimeout(r, 50));
+      await waitForSettle();
 
       const savedState = atomicWriteSync.mock.calls[0][1];
       expect(typeof savedState.startedAt).toBe('number');
@@ -247,7 +268,7 @@ describe('subagent-handler hook', () => {
       readStdin.mockResolvedValue(makeHookData({ agent_id: 'builder-01' }));
 
       await import('../../scripts/hooks/subagent-handler.js');
-      await new Promise((r) => setTimeout(r, 50));
+      await waitForSettle();
 
       const savedState = atomicWriteSync.mock.calls[0][1];
       expect(savedState.agents['builder-01'].active).toBe(false);
@@ -266,7 +287,7 @@ describe('subagent-handler hook', () => {
       readStdin.mockResolvedValue(makeHookData({ agent_id: 'nonexistent' }));
 
       await import('../../scripts/hooks/subagent-handler.js');
-      await new Promise((r) => setTimeout(r, 50));
+      await waitForSettle();
 
       // Should still save state and write output
       expect(atomicWriteSync).toHaveBeenCalledTimes(1);
@@ -285,7 +306,7 @@ describe('subagent-handler hook', () => {
       readStdin.mockResolvedValue(makeHookData({ agent_id: 'agent-1' }));
 
       await import('../../scripts/hooks/subagent-handler.js');
-      await new Promise((r) => setTimeout(r, 50));
+      await waitForSettle();
 
       const savedState = atomicWriteSync.mock.calls[0][1];
       expect(savedState.agents).toBeDefined();
@@ -299,7 +320,7 @@ describe('subagent-handler hook', () => {
       readStdin.mockResolvedValue(makeHookData({ agent_id: 'agent-1' }));
 
       await import('../../scripts/hooks/subagent-handler.js');
-      await new Promise((r) => setTimeout(r, 50));
+      await waitForSettle();
 
       // Falls back to default state
       const savedState = atomicWriteSync.mock.calls[0][1];
@@ -312,7 +333,7 @@ describe('subagent-handler hook', () => {
       readStdin.mockResolvedValue(makeHookData({ agent_id: 'agent-1' }));
 
       await import('../../scripts/hooks/subagent-handler.js');
-      await new Promise((r) => setTimeout(r, 50));
+      await waitForSettle();
 
       const statePath = atomicWriteSync.mock.calls[0][0];
       expect(statePath).toContain('artibot-state.json');
@@ -325,7 +346,7 @@ describe('subagent-handler hook', () => {
       readStdin.mockResolvedValue(makeHookData({ agent_id: 'agent-1' }));
 
       await import('../../scripts/hooks/subagent-handler.js');
-      await new Promise((r) => setTimeout(r, 50));
+      await waitForSettle();
 
       // Neither start nor stop branch executes
       expect(writeStdout).not.toHaveBeenCalled();
@@ -338,7 +359,7 @@ describe('subagent-handler hook', () => {
       readStdin.mockRejectedValue(new Error('stdin failed'));
 
       await import('../../scripts/hooks/subagent-handler.js');
-      await new Promise((r) => setTimeout(r, 50));
+      await waitForSettle();
 
       expect(exitSpy).toHaveBeenCalledWith(0);
       const stderrOutput = stderrSpy.mock.calls.map((c) => c[0]).join('');
@@ -350,7 +371,7 @@ describe('subagent-handler hook', () => {
       readStdin.mockResolvedValue('<<<invalid>>>');
 
       await import('../../scripts/hooks/subagent-handler.js');
-      await new Promise((r) => setTimeout(r, 50));
+      await waitForSettle();
 
       // Should still work with defaults (unknown agent)
       const savedState = atomicWriteSync.mock.calls[0][1];

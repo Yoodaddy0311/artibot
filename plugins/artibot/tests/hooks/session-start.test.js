@@ -98,7 +98,16 @@ vi.mock('../../lib/core/version-checker.js', () => ({
 // ---------------------------------------------------------------------------
 
 const POLL_MS = 25;
-const SETTLE_TIMEOUT_MS = 3000;
+// session-start.js#main() is fire-and-forget (invoked at module import) and its
+// terminal writeStdout lands only after a long chain of UNMOCKED dynamic imports
+// (session-memory, collective-hub, kill-switch, skill-hash-cache, …). Under the
+// full-suite parallel run these re-transform/re-evaluate per vi.resetModules(),
+// so a single main() can take multiple seconds. The old 3000ms ceiling was
+// routinely exceeded → the in-test wait gave up (empty writeStdoutCalls → `[0][0]`
+// TypeError) AND the straggler main() then bled its write into the NEXT test's
+// freshly-reset shared array (wrong-message assertion failure). 15s sits well
+// under the 30s vitest testTimeout while absorbing heavy cold-start saturation.
+const SETTLE_TIMEOUT_MS = 15_000;
 
 describe('session-start hook', () => {
   let stderrSpy;
@@ -120,7 +129,14 @@ describe('session-start hook', () => {
     exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => {});
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    // Isolation drain: if this test's fire-and-forget main() has not yet
+    // flushed its single terminal writeStdout, wait for it HERE so its late
+    // write is consumed in THIS test rather than bleeding into the next test's
+    // freshly-reset mockState.writeStdoutCalls. Returns immediately once the
+    // write already happened (the common case). `waitForStdout` is a hoisted
+    // function declaration in this describe scope, so it is in scope here.
+    await waitForStdout(SETTLE_TIMEOUT_MS);
     stderrSpy.mockRestore();
     exitSpy.mockRestore();
     delete process.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS;
