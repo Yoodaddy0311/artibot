@@ -91,10 +91,39 @@ Run top-to-bottom. All must pass before the user submits.
 - [ ] `cd plugins/artibot && npm run release:check && npm run ci` pass. (These
       scripts live in `plugins/artibot/package.json`; the repo-root `package.json`
       has an empty `scripts` block, so running them from the repo root fails.)
-- [ ] `LICENSE` (MIT) present at repo root; `repository`/`homepage` URLs resolve.
+- [ ] `LICENSE` (Business Source License 1.1, SPDX `BUSL-1.1`) present at repo
+      root, and `plugin.json`/`marketplace.json` `license` fields match it;
+      `repository`/`homepage` URLs resolve.
 - [ ] No secrets in tracked files (`git diff` review). DATA POLICY: local-only,
       OTEL opt-in — reflect this in listing copy.
 - [ ] README leads with the native install path (done — root + plugin READMEs).
+
+## 4a. Pre-submission check results (2026-07-07)
+
+Ran the §4 checklist top-to-bottom this session. Per-item PASS/FAIL with evidence:
+
+| # | Item | Result | Evidence |
+|---|---|---|---|
+| 1 | `claude plugin validate .` | **PASS** | 0 errors. 4 pre-existing warnings only (`$comment`, `categories`, `compatibility`, `rules` — all previously documented as intentionally-kept or a known, disclosed gap; none newly introduced). |
+| 2 | `marketplace.json` parses, required fields | **PASS** | `name: "artibot"`, `owner: {name: "Artience", email: "artience.ads.team.tf@gmail.com"}`, `plugins[]` length 2, both `source` values start with `./`. |
+| 3 | Marketplace name not reserved/impersonation | **CARRIED FORWARD** | Requires an external lookup against Anthropic's reserved-name list; not re-verified this session (no external checks were made — see constraints). Last verified 2026-07-03 per header. |
+| 4 | Plugin names kebab-case | **PASS** | `artibot`, `artibot-cowork` — both already lowercase-hyphenated. |
+| 5 | Version lockstep | **PASS** | `plugins[].version` == `plugin.json.version` for both: artibot `4.29.0` == `4.29.0`; artibot-cowork `3.1.0` == `3.1.0`. |
+| 6 | `npm run release:check` + `npm run ci` | **PARTIAL** | `cd plugins/artibot && npm run release:check` run live this session → `✓ All checks passed`. `npm run ci` **skipped** (10+ min runtime, out of session budget) — citing the most recent green CI run instead: commit `bd7eac4` (2026-07-07, "docs(changelog): backfill [Unreleased] — risk guard, redact fix, native install, install-mode, theme resolver, ledger re-scrub"). This is a substitution, not an independent re-run — flagging so it isn't mistaken for a fresh pass. |
+| 7 | `LICENSE` (BUSL-1.1) present; declared `license` fields match; repo/homepage resolve | **RESOLVED (2026-07-07)** | The repo owner confirmed **Business Source License 1.1 is the intended license** — the `LICENSE` file itself was correct all along and was **not modified**. Every place that had declared `"license": "MIT"` was corrected to `"BUSL-1.1"` (the SPDX identifier): `plugins/artibot/.claude-plugin/plugin.json`, `plugins/artibot-cowork/.claude-plugin/plugin.json`, both `.claude-plugin/marketplace.json` plugin entries, the legacy `plugins/artibot/marketplace.json` (both its top-level `license`/`licenseFile` and its `pricing.license` field), `plugins/artibot/.well-known/mcp-server.json`, `plugins/artibot/server/package.json` (`@artibot/swarm-server`, `private: true` — found on a follow-up cross-check, missed by the initial grep pass), and both READMEs' badges + License section prose (root `README.md:4,1045`; `plugins/artibot/README.md:4,348,1733`; `plugins/artibot-cowork/README.md:4,325`). Prose now states the actual terms (non-production use, production use short of a Commercial Competing Product, Apache-2.0 conversion on 2030-02-20) instead of a bare "MIT" claim. **Not touched, flagged for a separate decision**: `plugins/artibot/marketplace.json`'s `pricing.tier: "open-source"` and `pricing.commercialUse: true` — BUSL-1.1 is source-available rather than strictly OSI "open-source," and `commercialUse: true` is directionally right (production use is allowed short of building a competing product) but doesn't capture the restriction; changing those values is a business-copy judgment call beyond a license-identifier fix, left for the owner/marketing pass. `repository`/`homepage` URLs are still only structurally verified against `git remote -v`, not fetched live. |
+| 8 | No secrets in tracked files | **PARTIAL** | Spot-checked this session's own diffs only — no secrets found there. A full-repo secret scan was **not** run this session (out of the assigned scope); DATA POLICY prose (local-only, OTEL opt-in) is otherwise accurate per prior audits. |
+| 9 | README leads with native install path | **PASS** | Confirmed in the IMP-08 cross-check (2026-07-06) — both root and plugin READMEs lead Installation with the native `/plugin marketplace add` flow. |
+
+**Net result (updated 2026-07-07): the license blocker is resolved.** Item 7 was
+the only FAIL and has been corrected repo-wide per the owner's decision (BUSL-1.1
+is correct; every "MIT" claim was fixed to match). Two items remain
+carried-forward/unverified rather than failed, and still need a live check
+before the user actually submits: item 3 (reserved/impersonation name lookup)
+and the URL-resolution half of item 7 (an actual HTTP fetch of `repository`/
+`homepage`, not just the structural `git remote -v` match done this session).
+Item 6 (`npm run ci`) was substituted with a cited recent green run rather than
+independently re-executed. None of these three require a code change — they're
+live checks to run once, ideally right before submission.
 
 ## 5. Post-approval behavior
 
@@ -131,3 +160,80 @@ legacy package only for listing copy and media specs.
 - Provide media assets (demo video, screenshots, icon) — deferred per
   `_marketplace/NEXT_ACTIONS.md` §A.
 - Approve any git tag/release push tied to submission.
+
+## 8. Submission draft (copy-paste ready)
+
+> §4a item 7 (license mismatch) is resolved as of 2026-07-07 — the repo owner
+> confirmed Business Source License 1.1 is correct, and every `license` field
+> plus README prose now says so. The license field below reflects that.
+
+Numbers below are pulled live from `scripts/ci/validate-readme-claims.js`
+(2026-07-07 run) and `CLAUDE.md`'s documented test count — no marketing
+rounding or embellishment.
+
+**Plugin name**
+```text
+artibot
+```
+
+**One-line description (English)**
+```text
+Cognitive orchestration framework with dual-process routing, hierarchical
+memory, self-learning, and native Agent Teams for Claude Code.
+```
+
+**Detailed description**
+```text
+Artibot is a 5-layer orchestration framework for Claude Code built on the
+native Agent Teams API (TeamCreate/SendMessage/TaskCreate — not one-shot
+Task() delegation). It ships 28 specialized agents, 73 slash commands, and
+114 domain skills, backed by 10,600+ automated tests.
+
+Core capabilities:
+- Dual-process cognitive routing (System 1 fast pattern-match / System 2
+  deliberative reasoning) that escalates by measured complexity.
+- Hierarchical memory (working / episodic / semantic) with active curation
+  and cross-session continuity.
+- Verifiable-reward self-learning (test-pass / typecheck / no-revisit signals)
+  that biases routing and skill selection over time — no data leaves the
+  local machine (local-only by default; OpenTelemetry export is opt-in).
+- A marketing/knowledge-work skill set (SEO, CRO, ad copy, analytics,
+  presentations) alongside the developer-focused agents.
+
+Known limitations of the native marketplace install path: the 8
+auto-activating rule files (DEV Protocol, Quality Gates, and related
+coordination patterns) are not delivered natively — Claude Code's plugin
+manifest schema has no field for them, so they load only via the full
+`install.sh`/`install.ps1` path. A handful of convenience commands (`/theme`,
+`/update`) and the themed statusline currently assume the full-install layout
+and may need `/theme` re-run after a native update. Everything else (agents,
+skills, commands, hooks) loads identically either way.
+```
+
+**Category**
+```text
+development
+```
+
+**License**
+```text
+Business Source License 1.1 (BUSL-1.1) — source-available, free for
+non-production use and for production use that is not a Commercial Competing
+Product. Converts to Apache License 2.0 on 2030-02-20.
+```
+
+**Repository URL**
+```text
+https://github.com/Yoodaddy0311/artibot
+```
+
+**Known limitations disclosure (form field, if offered separately from the description)**
+```text
+Native marketplace install does not deliver 8 auto-activating rule files
+(DEV Protocol / Quality Gates enforcement) — Claude Code's plugin schema has
+no "rules" field, so `claude plugin validate` reports it as unrecognized and
+ignores it. Use the repo's full install.sh/install.ps1 path if you rely on
+that automation. Separately, /theme and /update currently assume the
+full-install file layout and may need /theme re-run after a native-install
+update; the project tracks a path-resolver fix for full native parity.
+```

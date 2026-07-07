@@ -1,7 +1,7 @@
 # Artibot
 
 [![Version](https://img.shields.io/badge/version-4.29.0-blue?style=flat-square)](./CHANGELOG.md)
-[![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](./LICENSE)
+[![License](https://img.shields.io/badge/license-BUSL--1.1-blue?style=flat-square)](./LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen?style=flat-square)](./package.json)
 [![Tests](https://img.shields.io/badge/tests-passing-brightgreen?style=flat-square)](./tests/)
 [![Lint](https://img.shields.io/badge/lint-clean-brightgreen?style=flat-square)](./eslint.config.js)
@@ -345,7 +345,9 @@ include credentials, internal paths, or proprietary code.
 
 ## License
 
-MIT © Artience. See [LICENSE](./LICENSE).
+Business Source License 1.1 © Artience. Free for non-production use and for
+production use that is not a Commercial Competing Product; converts to
+Apache License 2.0 on 2030-02-20. See [LICENSE](./LICENSE) for the full text.
 
 ---
 
@@ -1730,4 +1732,4 @@ Claude Code 하네스 아키텍처에서 영감받은 13개 신규 모듈 도입
 
 ## 라이선스
 
-MIT License - Artience
+Business Source License 1.1 - Artience (2030-02-20 Apache License 2.0로 전환)

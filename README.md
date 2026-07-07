@@ -1,7 +1,7 @@
 # Artibot
 
 [![Version](https://img.shields.io/badge/version-4.29.0-blue?style=flat-square)](plugins/artibot/CHANGELOG.md)
-[![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
+[![License](https://img.shields.io/badge/license-BUSL--1.1-blue?style=flat-square)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-18%2B-brightgreen?style=flat-square)](package.json)
 [![Tests](https://img.shields.io/badge/tests-passing-brightgreen?style=flat-square)](plugins/artibot/tests/)
 [![Coverage](https://img.shields.io/badge/coverage-90%25%2B-brightgreen?style=flat-square)](plugins/artibot/tests/)
@@ -1042,4 +1042,9 @@ You can install **both** in the same Anthropic account — `artibot` runs in you
 
 ## License
 
-MIT License — see [LICENSE](LICENSE) for details. Both `plugins/artibot/` and `plugins/artibot-cowork/` ship under MIT, matching the upstream marketplace policy.
+Business Source License 1.1 — see [LICENSE](LICENSE) for the full text. Free for
+non-production use and for production use that is not a Commercial Competing
+Product (a paid/commercial product substantially similar to Artibot). Converts
+to Apache License 2.0 on 2030-02-20 (or the fourth anniversary of a given
+version's first public release, whichever comes first). Both `plugins/artibot/`
+and `plugins/artibot-cowork/` ship under the same license.

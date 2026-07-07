@@ -4,7 +4,7 @@
   "name": "artibot",
   "version": "4.29.0",
   "description": "Artibot — autonomous agent OS with 28 agents, 100 skills, and Claude Agent Teams orchestration.",
-  "license": "MIT",
+  "license": "BUSL-1.1",
   "homepage": "https://github.com/Yoodaddy0311/artibot",
   "capabilities": {
     "tools": {

@@ -1,7 +1,7 @@
 # Artibot for Cowork — v3.1
 
 [![Version](https://img.shields.io/badge/version-3.1.0-blue?style=flat-square)](./CHANGELOG.md)
-[![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](../../LICENSE)
+[![License](https://img.shields.io/badge/license-BUSL--1.1-blue?style=flat-square)](../../LICENSE)
 [![Skills](https://img.shields.io/badge/skills-46-7C3AED?style=flat-square)](./skills/)
 [![Agents](https://img.shields.io/badge/agents-12-7C3AED?style=flat-square)](./agents/)
 [![Cowork](https://img.shields.io/badge/Claude_Cowork-Plugin-orange?style=flat-square)](https://claude.com/cowork)
@@ -322,4 +322,4 @@ This package tracks the upstream `artibot` content but with its own release cade
 
 ## License
 
-MIT (matches upstream `artibot`).
+Business Source License 1.1 (matches upstream `artibot`).

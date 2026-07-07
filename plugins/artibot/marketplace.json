@@ -23,7 +23,7 @@
       "role": "primary"
     }
   ],
-  "license": "MIT",
+  "license": "BUSL-1.1",
   "licenseFile": "./LICENSE",
   "repository": {
     "type": "git",
@@ -192,7 +192,7 @@
   "pricing": {
     "model": "free",
     "tier": "open-source",
-    "license": "MIT",
+    "license": "BUSL-1.1",
     "commercialUse": true,
     "subscriptionRequired": false,
     "byok": false
