@@ -23,6 +23,33 @@ The `direct` degradation mode already lists the supported non–Claude Code plat
 
 ---
 
+## Setup & Testing
+
+> Non–Claude Code tools do not read `CLAUDE.md`. This section mirrors the contributor-facing build/test/quality rules from `CLAUDE.md` so a tool that reads only `AGENTS.md` still knows how to verify a change. `CLAUDE.md` remains canonical — if the two ever disagree, `CLAUDE.md` wins.
+
+### Commands
+
+| Command | Purpose |
+|---|---|
+| `npm test` | Run the suite (10,600+ tests via vitest) |
+| `npm run test:coverage` | Run tests with coverage reporting |
+| `npm run lint` | ESLint — 0 errors/warnings target |
+| `npm run ci` | Full gate: validate + skill:check + lint + test + eval:runtime |
+
+Run these from `plugins/artibot/`.
+
+### Quality gates
+
+- Read before write (no blind modifications)
+- Functions < 50 lines, files < 800 lines
+- Immutable patterns (spread/create new, never mutate)
+- No hardcoded secrets or credentials (use env vars / `${ENV_VAR}` placeholders)
+- Coverage CI gate (`scripts/ci/validate-coverage.js`): Statements 85 / Branches 76 / Functions 85 / Lines 85 (the `vitest.config.js` local gate is 80/76/80/80)
+
+Full contributor rules: see `CLAUDE.md` (Quality Gates + Testing sections) — this section is a projection of it, not an independent source.
+
+---
+
 ## 2. Tool-by-tool mapping
 
 | Tool | Reads | Writes-back | Supports Tasks API? | Notes |
@@ -229,7 +256,7 @@ All contributions must respect Artibot's **local-only data policy** — exports 
 | `plugins/artibot/.well-known/mcp-server.json` | `version` | plugin version |
 | `plugins/artibot/AGENTS.md` | this section | plugin version |
 
-Current plugin version: **4.29.0**. Keep the five in lockstep — `scripts/release-check.js` enforces all five.
+Current plugin version: **4.30.0**. Keep the five in lockstep — `scripts/release-check.js` enforces all five.
 
 ### Release gate: install & update verification
 

@@ -11,7 +11,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+---
+
+## [4.30.0] — 2026-07-08
+
 ### Added
+- **Post-work Stop 훅 2종 (config-gated, 기본 off → 이번 릴리스에서 기본 on)** —
+  `scripts/hooks/blindspot-check.js` (사각지대 점검: 검증이 끝난 뒤 원 요구사항을
+  필수 구성요소로 분해 → 각 구성요소의 증거 스캔 → 증거가 없는 슬롯을
+  earliest-blocking-hop 순으로 리스트업, recommend-only) + `scripts/hooks/teach-back.js`
+  (교육 학습 루프: 12세 눈높이 핵심 원리 해설 + 접근 추론 공개 + 이해 확인 퀴즈
+  3문항, 틀리면 정답·해설만 제공하고 재시도 요구·만점 게이트 없음). 둘 다 공유 모듈
+  `lib/core/post-work-pass.js` 위에서 advisory-only (never `decision:block`,
+  `hookSpecificOutput.additionalContext`로만 주입), 각 훅 독립 fingerprint dedup +
+  `stop_hook_active` 루프 가드 + per-hook env kill-switch
+  (`ARTIBOT_DISABLE_BLINDSPOT` / `ARTIBOT_DISABLE_TEACHBACK`). `postWork` config
+  섹션 + `lib/core/config-schema.js` 검증 확장, `hooks/dispatch-table.json` Stop
+  슬롯 등록.
+- Tests: 33건 (`tests/core/post-work-pass.test.js` 17 + `tests/hooks/post-work-hooks.test.js`
+  16) + dispatch-table / stop-dispatcher 핸들러 카운트 게이트 6→8 갱신.
+- **AGENTS.md 운영 섹션** — non-Claude 툴(Cursor / Codex CLI / Windsurf)이
+  `AGENTS.md`만 읽어도 빌드·테스트·품질 게이트를 알 수 있도록 `## Setup & Testing`
+  섹션(`npm test` / `npm run lint` / `npm run ci` 커맨드 + Quality Gates 요약) 추가
+  및 `CLAUDE.md` 정본 포인터 2곳 삽입. cross-tool 사용을 목적으로 선언하면서 정작
+  운영 정보가 없던 자기모순 해소 (기존 cross-tool 매핑/변환은 순수 additive, 무손상).
 - **F-06 ledger review gate wired to `/learning review`** — the ambient-ledger
   learning-signal review queue (`lib/learning/ledger/review-queue.js`), previously
   library+tests only (audit IMP-02 / L-01 HIGH: end-to-end dormant), now has a

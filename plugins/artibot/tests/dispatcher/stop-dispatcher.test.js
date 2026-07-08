@@ -97,9 +97,9 @@ describe('_stop-dispatcher (integration)', () => {
     }
   });
 
-  it('registers all 6 wrapped hooks', async () => {
+  it('registers all 8 wrapped hooks', async () => {
     const mod = await import('../../scripts/hooks/_stop-dispatcher.js');
-    expect(mod.HOOKS).toHaveLength(6);
+    expect(mod.HOOKS).toHaveLength(8);
     const names = mod.HOOKS.map((h) => h.name);
     expect(names).toContain('stop-review-gate');
     expect(names).toContain('dev-verify-gate');
@@ -107,5 +107,7 @@ describe('_stop-dispatcher (integration)', () => {
     expect(names).toContain('stop-recap');
     expect(names).toContain('session-notes');
     expect(names).toContain('session-ledger');
+    expect(names).toContain('blindspot-check');
+    expect(names).toContain('teach-back');
   });
 });

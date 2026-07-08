@@ -36,7 +36,9 @@ const EXPECTED_HANDLER_COUNTS = {
   // prompts (alongside the existing auto-team-trigger and autopilot-nlu).
   UserPromptSubmit: 7,
   PostToolUse: 10,
-  Stop: 6,
+  // Bumped 6 → 8: blindspot-check.js + teach-back.js joined the Stop slot as
+  // advisory-only post-work passes (config.postWork.*, default off).
+  Stop: 8,
   SessionEnd: 6,
   SubagentStop: 3,
   PreCompact: 0,
