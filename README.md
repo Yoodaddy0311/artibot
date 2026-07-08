@@ -903,10 +903,10 @@ Key settings in `artibot.config.json`:
 | `version` | Plugin version | `1.14.1` |
 | `cognitive.router.threshold` | System 1/2 boundary | `0.4` |
 | `cognitive.router.adaptRate` | Per-feedback adjustment step | `0.05` |
-| `cognitive.system1.maxLatency` | System 1 max response time (ms) | `100` |
-| `cognitive.system1.minConfidence` | System 1 minimum confidence | `0.6` |
-| `cognitive.system2.maxRetries` | System 2 max retry attempts | `3` |
-| `cognitive.system2.sandboxEnabled` | Enable sandbox for high-risk ops | `true` |
+| `cognitive.system1.maxLatency` | System 1 max response time (ms) (unused — engine removed) | `100` |
+| `cognitive.system1.minConfidence` | System 1 minimum confidence (unused — engine removed) | `0.6` |
+| `cognitive.system2.maxRetries` | System 2 max retry attempts (unused — engine removed) | `3` |
+| `cognitive.system2.sandboxEnabled` | Enable sandbox for high-risk ops (unused — engine removed) | `true` |
 | `learning.lifelong.batchSize` | Experiences per lifelong-learning batch | `50` |
 | `learning.lifelong.grpoGroupSize` | Experiences per comparison group | `5` |
 | `learning.knowledgeTransfer.promotionThreshold` | Consecutive successes to promote | `3` |
