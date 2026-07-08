@@ -49,6 +49,7 @@ import {
   renderMarkdownReport,
   runSelfBenchmark,
 } from '../../lib/learning/self-benchmark.js';
+import { configureProfilePath, resolveProfilePath } from '../../lib/core/user-profile.js';
 
 // ---------------------------------------------------------------------------
 // Fixture builder — creates a minimal artibot-like tree in a tmp dir
@@ -248,6 +249,35 @@ describe('self-benchmark/gatherRepoStats', () => {
       expect(presentScore - absentScore).toBeCloseTo(3, 2);
     } finally {
       await rm(absentDir, { recursive: true, force: true }).catch(() => {});
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// userProfileSignals — read path must match the writer's path (regression)
+// ---------------------------------------------------------------------------
+
+describe('self-benchmark/userProfileSignals path agreement', () => {
+  afterAll(() => {
+    configureProfilePath(null);
+  });
+
+  it('counts the profile written to resolveProfilePath() (writer/reader share one resolver)', async () => {
+    // Point the shared resolver at a temp profile, then write a JSON with a
+    // known key count to the *exact* path resolveProfilePath() returns. If the
+    // benchmark reader ever drifts back to a hardcoded <root>/runtime path,
+    // this count would fall to 0 and the test fails.
+    const tmp = await mkdtemp(path.join(os.tmpdir(), 'artibot-profile-'));
+    const profilePath = path.join(tmp, 'user-profile.json');
+    configureProfilePath(profilePath);
+    expect(resolveProfilePath()).toBe(profilePath);
+
+    await writeFile(profilePath, JSON.stringify({ skill: 'pro', locale: 'ko', signals: [] }));
+    try {
+      const s = await gatherRepoStats(fx.dir);
+      expect(s.userProfileSignals).toBe(3);
+    } finally {
+      await rm(tmp, { recursive: true, force: true }).catch(() => {});
     }
   });
 });

@@ -81,6 +81,33 @@ export function buildRegistrationLines(marker, mode) {
   return [`[auto-learn] Registered via ${marker.method}`];
 }
 
+/**
+ * Build the pipeline status header line. The config being `enabled: true` does
+ * NOT mean the nightly schedule is actually registered with the OS — that only
+ * holds when the marker records an active method (claude-schedule|crontab|
+ * schtasks). When there is no marker, or the marker is a hint-only/inactive
+ * fallback, the header is honest about the gap and points at the manual runner
+ * instead of implying an active nightly pipeline. Pipeline logic is unchanged;
+ * this only fixes what the user is told.
+ *
+ * @param {{ method: string } | null} marker
+ * @param {{ schedule: string, stages: string, maxChanges: number, dryRun: string }} meta
+ * @returns {string}
+ */
+export function buildStatusHeader(marker, meta) {
+  const { schedule, stages, maxChanges, dryRun } = meta;
+  const tail = `schedule: ${schedule} | stages: ${stages} | max: ${maxChanges}${dryRun}`;
+  const active = marker ? isActiveMethod(marker.method) : false;
+  if (active) {
+    return `[auto-learn] Pipeline ON | ${tail}`;
+  }
+  return (
+    '[auto-learn] Pipeline enabled in config but nightly schedule is NOT OS-registered ' +
+    '— run manually: node scripts/run-auto-learning.js | ' +
+    tail
+  );
+}
+
 async function main() {
   const raw = await readStdin();
   parseJSON(raw);
@@ -122,7 +149,7 @@ async function main() {
   const { mode } = detectInstallMode({ pluginRoot: artibotDir, home: getHomeDir() });
 
   const lines = [
-    `[auto-learn] Pipeline ON | schedule: ${schedule} | stages: ${stages} | max: ${maxChanges}${dryRun}`,
+    buildStatusHeader(marker, { schedule, stages, maxChanges, dryRun }),
     ...buildRegistrationLines(marker, mode),
   ];
 

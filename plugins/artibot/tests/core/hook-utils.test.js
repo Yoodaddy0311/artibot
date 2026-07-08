@@ -271,10 +271,14 @@ describe('hook-utils / Environment Checks', () => {
       expect(getHomeDir()).toBe('/home/test');
     });
 
-    it('returns empty string when neither is set', () => {
+    it('falls back to os.homedir() when neither is set (never empty)', () => {
+      // Unified with platform.getHomeDir: env-stripped hook spawns must still
+      // resolve an absolute home so getClaudeDir() is never a relative `.claude`.
       delete process.env.USERPROFILE;
       delete process.env.HOME;
-      expect(getHomeDir()).toBe('');
+      const home = getHomeDir();
+      expect(typeof home).toBe('string');
+      expect(home.length).toBeGreaterThan(0);
     });
   });
 
