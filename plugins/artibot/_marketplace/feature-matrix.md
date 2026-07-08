@@ -20,7 +20,7 @@ pass); revisit before each submission.
 | Multi-session dashboard | Yes (built-in) | No | No | No |
 | Cross-tool export (Cursor / Codex / OpenCode) | Yes | No | No | No |
 | Local-only data policy (enforced) | Yes (CRITICAL rule) | N/A | N/A | N/A |
-| Test count | 10,600+ | varies | varies | varies |
+| Test count | 9,300+ | varies | varies | varies |
 | Runtime dependencies | 0 | many | many | many |
 | License | BUSL-1.1 | MIT | MIT | MIT |
 

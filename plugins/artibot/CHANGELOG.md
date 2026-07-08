@@ -13,6 +13,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.31.0] — 2026-07-08
+
+### Removed
+- **Self-learning 서브시스템 dead-code 정리 — 33파일 / 10,767줄 제거.** pre-lean
+  인지 엔진 잔재(System 1/2 라우팅 엔진 + sandbox), goal 클러스터, 런타임에
+  배선되지 않은 memory 모듈들, orphan 훅을 일괄 제거. 모두 어떤 활성 경로에서도
+  import되지 않던 죽은 코드로, 제거 후 전체 테스트 그린 유지 — 동작 변화 없음.
+
+### Fixed
+- **`getHomeDir` 단일 진실원화.** `lib/core/hook-utils.js`의 중복 구현이
+  `USERPROFILE || HOME || ''` 빈 문자열로 폴백해, env-stripped 훅 스폰에서
+  `getClaudeDir()`이 상대경로 `.claude`로 붕괴하던 문제. `lib/core/platform.js`의
+  구현(`|| os.homedir()` 폴백)으로 re-export해 일원화.
+- **self-benchmark의 user-profile 경로 불일치 (`userProfileSignals` 상시 0).**
+  self-benchmark가 존재하지 않는 `<root>/runtime/user-profile.json`을 읽던 것을,
+  writer(`lib/core/user-profile.js`)가 실제로 쓰는 경로를 공유 resolver
+  `resolveProfilePath()`로 해석하도록 일치시킴 (경로 문자열 복제 제거).
+- **auto-learning 스케줄 상태 정직 표시.** `scripts/hooks/auto-learning-check.js`가
+  OS 스케줄 미등록(hint-only 폴백) 상태에서도 "Pipeline ON"으로 표기하던 것을,
+  실제 활성 등록(claude-schedule|crontab|schtasks)일 때만 ON으로 표시하고,
+  그 외에는 "nightly schedule is NOT OS-registered — run manually:
+  node scripts/run-auto-learning.js"로 정직하게 안내. 파이프라인 로직은 무변경.
+
+### Changed
+- **삭제 모듈 참조 정리** — 제거된 인지/goal/memory 모듈을 가리키던 문서·주석
+  참조를 함께 정리.
+- **marketplace 소개 문서를 v4.30 실측치로 갱신** — elevator-pitch 등 소개 패키지의
+  카운트/버전 표기를 실제 값으로 재동기화.
+- **`package.json` license 선언** — 루트·플러그인 `package.json`에 `BUSL-1.1`
+  라이선스를 명시.
+
+---
+
 ## [4.30.0] — 2026-07-08
 
 ### Added

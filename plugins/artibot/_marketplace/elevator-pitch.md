@@ -10,7 +10,7 @@ cross-verifies results — no slash commands required. Lifelong learning
 strict local-only data policy keeps every byte inside your machine. Post-work
 Stop hooks catch blind spots and reinforce learning automatically. Built-in
 observability (token usage, multi-session dashboard, opt-in OTEL) gives you
-production-grade visibility from day one. 10,600+ tests. BUSL-1.1. Zero
+production-grade visibility from day one. 9,300+ tests. BUSL-1.1. Zero
 runtime dependencies. Ready for serious work.
 
 > Word count: 100
@@ -21,16 +21,16 @@ Autonomous agent for Claude Code — 28 agents, parallel teams, lifelong learnin
 
 ## Tweet-length (≤ 280 chars)
 
-Artibot v4.30.0 — the autonomous agent OS for Claude Code. 28 agents, 114 skills,
+Artibot v4.31.0 — the autonomous agent OS for Claude Code. 28 agents, 114 skills,
 parallel teams, dual-process cognition, lifelong learning, opt-in OTEL,
-local-only data policy, 10,600+ tests. BUSL-1.1. Zero runtime deps. Production-grade.
+local-only data policy, 9,300+ tests. BUSL-1.1. Zero runtime deps. Production-grade.
 
 ## Hook variants (A/B test inputs)
 
 | Variant | Headline |
 |---|---|
 | Builder | "Stop writing prompts. Start delegating work." |
-| Reliability | "10,600+ tests. Zero runtime deps. One BUSL-1.1 license." |
+| Reliability | "9,300+ tests. Zero runtime deps. One BUSL-1.1 license." |
 | Privacy | "Your data never leaves your machine. Period." |
 | Power user | "Parallel agent teams that cross-verify each other's work." |
 | Cognitive | "System 1 for trivia. System 2 for everything that matters." |
@@ -41,4 +41,4 @@ local-only data policy, 10,600+ tests. BUSL-1.1. Zero runtime deps. Production-g
 2. **Data sovereignty** — no external DB, no third-party telemetry, ever.
 3. **Self-improving** — RLVR + skill-evolver + drift-detector loop keeps quality climbing.
 4. **Cross-tool** — AGENTS.md alias and export adapters for Cursor / Codex CLI / OpenCode.
-5. **Production receipts** — 10,600+ vitest tests, 90 %+ statement coverage, 0 lint errors.
+5. **Production receipts** — 9,300+ vitest tests, 90 %+ statement coverage, 0 lint errors.

@@ -31,7 +31,7 @@ The `direct` degradation mode already lists the supported non–Claude Code plat
 
 | Command | Purpose |
 |---|---|
-| `npm test` | Run the suite (10,600+ tests via vitest) |
+| `npm test` | Run the suite (9,300+ tests via vitest) |
 | `npm run test:coverage` | Run tests with coverage reporting |
 | `npm run lint` | ESLint — 0 errors/warnings target |
 | `npm run ci` | Full gate: validate + skill:check + lint + test + eval:runtime |
@@ -256,7 +256,7 @@ All contributions must respect Artibot's **local-only data policy** — exports 
 | `plugins/artibot/.well-known/mcp-server.json` | `version` | plugin version |
 | `plugins/artibot/AGENTS.md` | this section | plugin version |
 
-Current plugin version: **4.30.0**. Keep the five in lockstep — `scripts/release-check.js` enforces all five.
+Current plugin version: **4.31.0**. Keep the five in lockstep — `scripts/release-check.js` enforces all five.
 
 ### Release gate: install & update verification
 
