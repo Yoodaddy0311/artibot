@@ -105,9 +105,13 @@ function resolveConfiguredPath(newPath) {
  * Resolve the profile file path. Uses the override if `configureProfilePath`
  * has been called, otherwise falls back to the default under the home dir.
  *
+ * Exported so readers (e.g. self-benchmark's userProfileSignals) resolve the
+ * exact same path the writer uses, instead of duplicating the path string and
+ * drifting apart.
+ *
  * @returns {string}
  */
-function resolveProfilePath() {
+export function resolveProfilePath() {
   if (cachedProfilePath) return cachedProfilePath;
   const defaultPath = path.join(getHomeDir(), '.claude', 'artibot', 'user-profile.json');
   return defaultPath;

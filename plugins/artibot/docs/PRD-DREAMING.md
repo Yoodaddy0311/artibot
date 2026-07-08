@@ -12,7 +12,7 @@
 **학계 검증된 consolidation 5단계** (가중치 비변경, 외부 텍스트 메모리 distill→다음 프롬프트 주입 — Artibot `.md` 시스템과 동일 패러다임): Collect → Distill → Prune → Promote → Apply.
 
 **재사용 자산 (코드 확인 완료)**:
-- `lib/learning/memory/promoter.js#createPromoter` — gated 승급 엔진. occurrences≥3 / confidence≥0.85 / distinctSessions≥2, rejection ledger(`runtime/promotion-rejections.json`), append-only transition log(`runtime/memory-transitions.log`), **archive-never-delete**. 알고리즘 코어가 사실상 완성돼 있으나 **호출자 0개(dormant)**.
+- `lib/learning/memory/promoter.js#createPromoter` — gated 승급 엔진. occurrences≥3 / confidence≥0.85 / distinctSessions≥2, rejection ledger(`runtime/promotion-rejections.json`), append-only transition log(`runtime/memory-transitions.log`), **archive-never-delete**. 알고리즘 코어가 사실상 완성돼 있으나 **호출자 0개(dormant)**. (2026-07-08 dead-code 정리에서 제거됨 — dreaming 활성화 시 재도입 또는 대체 필요, git 7b4c1e4에서 복원 가능)
 - `lib/learning/memory/episodic.js#createEpisodicStore` — append-only, 중복 hash dedup, `pruneBefore`가 hard-delete 대신 `archive/YYYY-MM/`로 이동.
 - `lib/learning/wakeup-scheduler.js` — marker-only(다음 세션 깨움 신호). 4-gate + rate-limit. on-demand/세션연계 트리거에 재사용.
 - nightly 인프라: `scripts/setup-nightly-trainers.js`의 `TRAINERS` 배열 + `scripts/hooks/nightly-*.mjs`. 6개 작업 OS 등록(02:30~04:30). `nightly-session-rollup.mjs`(04:30)가 가장 가까운 형제(`never throws` + 구조화 status 반환 패턴).

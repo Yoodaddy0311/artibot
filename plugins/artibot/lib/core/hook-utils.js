@@ -7,6 +7,7 @@
 
 import path from 'node:path';
 import { existsSync, readdirSync, statSync, unlinkSync } from 'node:fs';
+import { getHomeDir } from './platform.js';
 
 // -------------------------------------------------------------------------
 // Path Validation
@@ -119,13 +120,14 @@ export function createErrorHandler(hookName, options = {}) {
 // -------------------------------------------------------------------------
 
 /**
- * Get the user's home directory from environment variables.
- * Checks USERPROFILE (Windows) then HOME (Unix).
+ * Get the user's home directory. Re-exported from platform.js to keep a single
+ * source of truth for home resolution. platform.getHomeDir falls back to
+ * os.homedir() when neither USERPROFILE nor HOME is set, so env-stripped hook
+ * spawns never yield a relative `.claude` path (the empty-string fallback this
+ * replaces). Checks USERPROFILE (Windows) then HOME (Unix) then os.homedir().
  * @returns {string}
  */
-export function getHomeDir() {
-  return process.env.USERPROFILE || process.env.HOME || '';
-}
+export { getHomeDir };
 
 /**
  * Get the path to the Claude configuration directory (~/.claude).

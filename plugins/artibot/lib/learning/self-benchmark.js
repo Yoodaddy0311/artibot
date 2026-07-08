@@ -28,6 +28,7 @@ import {
   writeJsonFile,
 } from '../core/file.js';
 import { getPluginRoot } from '../core/platform.js';
+import { resolveProfilePath } from '../core/user-profile.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -149,7 +150,10 @@ export async function gatherRepoStats(pluginRoot) {
   const plainLangPath = path.join(root, 'lib', 'core', 'plain-language.js');
   const plainLangEntries = await countExportLike(plainLangPath);
 
-  const userProfileSignals = await countJsonKeys(path.join(root, 'runtime', 'user-profile.json'));
+  // Read the profile from the same path the writer (user-profile.js) uses —
+  // the home-dir location, NOT a phantom `<root>/runtime/user-profile.json`
+  // that is never written (which pinned userProfileSignals at 0).
+  const userProfileSignals = await countJsonKeys(resolveProfilePath());
   const dashboardEnabled = Boolean(config?.dashboard?.enabled);
 
   const autoApply = Boolean(config?.team?.autoApply);

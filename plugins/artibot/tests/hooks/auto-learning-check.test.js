@@ -4,7 +4,7 @@
  * importing the module here does not consume stdin.
  */
 import { describe, expect, it } from 'vitest';
-import { buildRegistrationLines } from '../../scripts/hooks/auto-learning-check.js';
+import { buildRegistrationLines, buildStatusHeader } from '../../scripts/hooks/auto-learning-check.js';
 
 describe('buildRegistrationLines — no marker (never registered)', () => {
   it('legacy → points at install.sh', () => {
@@ -57,5 +57,40 @@ describe('buildRegistrationLines — active marker', () => {
       const text = buildRegistrationLines({ method: 'crontab' }, mode).join('\n');
       expect(text).toBe('[auto-learn] Registered via crontab');
     }
+  });
+});
+
+describe('buildStatusHeader — honest schedule status', () => {
+  const meta = { schedule: '0 3 * * *', stages: 'all', maxChanges: 10, dryRun: '' };
+
+  it('says "Pipeline ON" only when the marker records an active method', () => {
+    for (const method of ['claude-schedule', 'crontab', 'schtasks']) {
+      const header = buildStatusHeader({ method }, meta);
+      expect(header).toContain('[auto-learn] Pipeline ON |');
+      expect(header).toContain('schedule: 0 3 * * *');
+      expect(header).not.toContain('NOT OS-registered');
+    }
+  });
+
+  it('hint-only marker → NOT OS-registered, points at the manual runner', () => {
+    const header = buildStatusHeader({ method: 'hint-only' }, meta);
+    expect(header).not.toContain('Pipeline ON');
+    expect(header).toContain('NOT OS-registered');
+    expect(header).toContain('node scripts/run-auto-learning.js');
+    // still surfaces the pipeline params tail
+    expect(header).toContain('stages: all');
+    expect(header).toContain('max: 10');
+  });
+
+  it('no marker → NOT OS-registered (never implies an active pipeline)', () => {
+    const header = buildStatusHeader(null, meta);
+    expect(header).not.toContain('Pipeline ON');
+    expect(header).toContain('NOT OS-registered');
+    expect(header).toContain('node scripts/run-auto-learning.js');
+  });
+
+  it('propagates the DRY RUN marker into the header tail', () => {
+    const header = buildStatusHeader({ method: 'crontab' }, { ...meta, dryRun: ' (DRY RUN)' });
+    expect(header).toContain('(DRY RUN)');
   });
 });

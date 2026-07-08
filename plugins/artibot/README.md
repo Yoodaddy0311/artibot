@@ -44,7 +44,7 @@ That's it. No manual config. Agent Teams auto-enables on first session start.
 
 | # | Differentiator | Evidence |
 |---|---|---|
-| 1 | **Dual-Process Cognitive Router (System 1 / System 2)** — production implementation of 2026 DPA architecture | `lib/cognitive/router.js`, `system1.js`, `system2-core.js` |
+| 1 | **Dual-Process Cognitive Router (System 1 / System 2)** — production implementation of 2026 DPA architecture | `lib/cognitive/router.js`, `effort-resolver.js`, `lib/runtime/middleware/router.js` |
 | 2 | **Hierarchical Memory** — working / episodic / semantic with active curation | `lib/learning/memory-manager.js`, `lib/learning/lifelong.js` |
 | 3 | **Lifelong Learning (RLVR)** — verifiable-reward signals (test-pass / typecheck / no-revisit) feed drift-detector + rule-extractor + skill promotion. *No GRPO/RL optimizer — removed in the 2026-06 lean redesign.* | `lib/learning/` (lifelong-learner, rule-extractor, drift-detector, knowledge-graph, ...) |
 | 4 | **11-Stage Runtime Middleware** — default chain: lifecycle → router → memory → skills → tasks → subagents → guardrail → summarization → token-usage → checkpoint → cache-roi (assembled from 15 middleware modules) | `lib/runtime/middleware/`, `create-artibot-agent.js#defaultPipeline` |
@@ -102,7 +102,7 @@ Detailed module map: `docs/ARCHITECTURE.md`.
 
 | Pillar | What you get |
 |---|---|
-| **Cognitive Routing** | System 1 (fast pattern match, <100ms) vs System 2 (sandboxed deliberation), auto-escalation rules |
+| **Cognitive Routing** | System 1 (fast pattern match, <100ms) vs System 2 (deliberate-tier routing), auto-escalation rules |
 | **Hierarchical Memory** | working / episodic / semantic layers with promotion/demotion, MEMORY.md index, 3-scope (user / project / session) |
 | **RLVR Self-Learning** | Verifiable-reward signals (test pass / typecheck / no-revisit) bias routing and skill promotion — no external reward model, no RL policy optimizer (the GRPO optimizer was removed in the 2026-06 lean redesign) |
 | **MCP Server** | Artibot publishes its own MCP server (skills, agents, memory, git bridges); also consumes Context7 + Playwright |
@@ -1064,13 +1064,13 @@ Cognitive Router (threshold: 0.4)
     ├── confidence >= 0.6 → System 1 (빠른 직관 처리, <100ms)
     │       → 패턴 매칭 → 즉시 응답
     └── confidence < 0.6 → System 2 (심층 분석 처리)
-            → Sandbox 평가 → 최대 3회 재시도 → 정밀 응답
+            → 심층 분석 → 정밀 응답
 ```
 
 | 시스템 | 방식 | 최대 지연 | 적용 상황 |
 |--------|------|-----------|-----------|
 | **System 1** | 직관적, 패턴 기반 | 100ms | 반복 작업, 명확한 의도 |
-| **System 2** | 분석적, 샌드박스 | 제한 없음 | 복잡한 추론, 불확실한 의도 |
+| **System 2** | 분석적, 심층 추론 | 제한 없음 | 복잡한 추론, 불확실한 의도 |
 
 ### 지속 학습 시스템
 
