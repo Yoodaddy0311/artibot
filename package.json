@@ -3,6 +3,7 @@
   "private": true,
   "version": "4.30.0",
   "description": "Artibot monorepo root — see plugins/artibot/ for the published plugin.",
+  "license": "BUSL-1.1",
   "engines": {
     "node": ">=20"
   },

@@ -291,7 +291,7 @@ All trainer state stays on disk under `~/.claude/artibot/`. Nothing is uploaded 
 | Pick | Theme | Target | Detail |
 |---|---|---|---|
 | #1 | Hierarchical 3-layer memory (working / episodic / semantic) | v0.5 successor | promote / consolidate / retrieve API; weekly cron episodic→semantic |
-| #2 | Voyager-style skill auto-curation loop | removed (lean redesign 2026-06) | implementation pulled; macro-learner + skill-lifecycle-autopilot cover the need |
+| #2 | Voyager-style skill auto-curation loop | removed (lean redesign 2026-06) | implementation pulled; macro-learner covers the need |
 | #3 | Local federated swarm w/ RLVR | long horizon | per-task-family routing weights, verifiable signals only, no cross-user data |
 
 Detailed planning lives in `_reports/horizon-2-3-roadmap.md` (kept in `_reports/` to avoid bloating the README).
