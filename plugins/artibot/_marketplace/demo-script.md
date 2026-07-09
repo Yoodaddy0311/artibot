@@ -17,7 +17,7 @@ calm, technical, no marketing fluff.
 |---|---|---|---|
 | 1 | 0:00–0:08 | Title card: "Artibot — Autonomous Agent OS for Claude Code" | "Artibot turns Claude Code into an autonomous agent OS." |
 | 2 | 0:08–0:18 | Terminal: `git clone … && cd plugins/artibot && npm install` | "Clone, install, you're done. Zero runtime dependencies." |
-| 3 | 0:18–0:30 | Editor showing `marketplace.json`, then `agents/` directory tree | "28 specialist agents, 100 skills, 56 commands — all first-class." |
+| 3 | 0:18–0:30 | Editor showing `marketplace.json`, then `agents/` directory tree | "28 specialist agents, 113 skills, 73 commands — all first-class." |
 | 4 | 0:30–0:45 | Claude Code session: user types a multi-domain request, orchestrator auto-delegates to parallel teammates | "You don't type slash commands. The orchestrator decomposes the work, spins up parallel teammates, and cross-verifies their results." |
 | 5 | 0:45–1:00 | Multi-session dashboard at `runtime/dashboard/multi-session.html` | "Every action is observable — token usage, tool aggregates, error trends. Local-first. Opt-in OTEL when you need it." |
 | 6 | 1:00–1:15 | Terminal: `npm test` showing 4,918 passing tests | "Five thousand tests. Ninety percent statement coverage. Zero lint errors." |

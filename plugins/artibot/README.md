@@ -12,7 +12,7 @@
 >
 > **Claude Code를 위한 인지 오케스트레이션 OS** — 계층 메모리, 검증가능-보상(RLVR) 학습, MCP 서버, 멀티 플랫폼 에이전트 팀.
 
-Artibot은 Claude Code의 네이티브 **Agent Teams API**를 핵심 엔진으로 사용하여 28개 전문 에이전트, 100+ 도메인 스킬, 11단계 런타임 미들웨어, 계층 메모리·규칙 추출 학습 모듈, 스웜 동기화 모듈을 통합한 **5-layer 오케스트레이션 OS**입니다. System 1/2 인지 라우팅과 검증가능 보상(테스트 통과·타입체크) 기반 학습으로 라우팅·스킬 선택을 점진 보정합니다.
+Artibot은 Claude Code의 네이티브 **Agent Teams API**를 핵심 엔진으로 사용하여 28개 전문 에이전트, 113개 도메인 스킬, 11단계 런타임 미들웨어, 계층 메모리·규칙 추출 학습 모듈, 스웜 동기화 모듈을 통합한 **5-layer 오케스트레이션 OS**입니다. System 1/2 인지 라우팅과 검증가능 보상(테스트 통과·타입체크) 기반 학습으로 라우팅·스킬 선택을 점진 보정합니다.
 
 > **참고(2026-06 lean redesign):** 기존 GRPO 정책 옵티마이저는 측정 가능한 개선이 없어 철거되었습니다. 현재 학습은 **검증가능 보상(RLVR)** 신호(테스트 통과·타입체크·no-revisit)로 라우팅/스킬 승격과 계층 메모리를 보정하는 방식이며, 별도 외부 보상 모델·강화학습 옵티마이저는 사용하지 않습니다.
 
@@ -428,16 +428,16 @@ Artibot의 핵심 엔진은 Claude Code의 **Agent Teams API**입니다. 단순�
 - 개발, 분석, 품질, 테스트, 문서화, 배포, 마케팅 전 영역 커버
 - **비개발자도 자연어로 트리거 가능** — "ADR 작성해줘", "마이그레이션 전략 짜줘" 입력 시 자동으로 적합한 커맨드 제안
 
-### 99개 도메인 스킬
+### 113개 도메인 스킬
 
 - 12개 페르소나 스킬 (architect, frontend, backend, security, distill 등)
 - 6개 코어 스킬 (orchestration, principles, coding/security/testing standards)
-- 1개 Git 통합 스킬 (git-unified — 9개 서브툴: autopilot, collab, conflict, guide, safe, strategy, sync, workflow, worktree 통합)
+- 8개 유틸리티 스킬 (git-unified — 9개 서브툴: autopilot, collab, conflict, guide, safe, strategy, sync, workflow, worktree 통합 / tdd-workflow, delegation, MCP 연동 등)
 - 1개 언어 통합 스킬 (lang-reference — 16개 언어 통합 허브)
-- 8개 유틸리티 스킬 (tdd, delegation, MCP 연동 등)
 - 23개 마케팅 스킬 (SEO, CRO, A/B 테스트, 이메일 마케팅 등)
-- 15개 기타 스킬 (cognitive-routing, platform, library, quality, dynamic-context-injection 등)
-- 10개 신규 스킬 (v2.1.0): load-testing, observability, ci-cd-pipelines, codex-integration, agent-memory-snapshot, compaction-survival, prompt-caching-strategy, hook-feedback-merge, api-security, event-sourcing
+- 63개 기타 스킬 (오케스트레이션 패턴, DDD, 자가학습/메모리, 관측성, 플랫폼 auth/deployment/DB, 프롬프트·도구 설계, 품질 게이트, 온보딩/운영 등 — 전체 목록은 [스킬 시스템](#스킬-시스템) 참고)
+
+실측 기준: `skills/*/SKILL.md` 보유 디렉토리 카운트 (113개, 2026-07-09 기준). 카테고리는 이름 패턴(`persona-*` 등) 및 frontmatter 기준 분류.
 
 ### 런타임 미들웨어 파이프라인 (v1.14.0+)
 
@@ -555,8 +555,8 @@ Artibot은 Claude Code 외에도 **Gemini CLI**, **OpenAI Codex CLI**, **Cursor 
 | Agent Teams (P2P 메시징) | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Sub-Agent (단방향 위임) | ✅ | ✅ | ✅ | ⚠️ 제한적 | ✅ |
 | 27개 전문 에이전트 | ✅ | ✅ 자동변환 | ✅ 자동변환 | ✅ 자동변환 | ✅ 자동변환 |
-| 117개 스킬 (SKILL.md) | ✅ | ✅ | ✅ | ✅ | ✅ |
-| 슬래시 커맨드 | ✅ 70개 | ✅ TOML | → Workflows | → Prompts | → Workflows |
+| 113개 스킬 (SKILL.md) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| 슬래시 커맨드 | ✅ 73개 | ✅ TOML | → Workflows | → Prompts | → Workflows |
 | Hooks 자동작동 | ✅ 15이벤트 | ✅ 동일패턴 | ⚠️ 제한적 | ❌ | ✅ Agent Manager |
 | 인지 라우터 (System 1/2) | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 자가학습 (RLVR 신호) | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -824,7 +824,7 @@ Agent Teams (Full P2P)  →  Sub-Agent (단방향)  →  Direct (직접 실행)
 | 1 | **Agent Teams** | Claude의 네이티브 Agent Teams API로 전문 에이전트를 팀으로 구성. P2P 통신, 공유 태스크, 자기 할당 지원 |
 | 2 | **Cognitive Routing** | System 1(직관적 빠른 판단) / System 2(심층 분석) 이중 프로세스로 요청 복잡도에 따라 자동 라우팅 |
 | 3 | **Guard Registry** | 중앙 집중식 안전 파이프라인. 위험 명령 차단, 민감 파일 보호, Stop-Review-Gate로 코드 리뷰 강제 |
-| 4 | **Skills** | 117개 도메인 스킬이 컨텍스트에 따라 자동 활성화. 페르소나, 코딩 표준, 언어별 패턴, 마케팅 전략 등 |
+| 4 | **Skills** | 113개 도메인 스킬이 컨텍스트에 따라 자동 활성화. 페르소나, 코딩 표준, 언어별 패턴, 마케팅 전략 등 |
 | 5 | **Hooks** | 15개 이벤트에 연결된 자동화 파이프라인. 포맷팅, 검증, 추적, 외부 알림을 코드 변경 없이 처리 |
 
 ### 최소 실행 흐름
@@ -1406,24 +1406,75 @@ orchestrator는 **코드를 직접 작성하지 않습니다**. 팀을 구성하
 | `report-generation` | 리포트 생성, 데이터 요약 |
 | `segmentation` | 시장/고객 세그멘테이션 |
 
-### 기타 스킬 (15개)
+### 기타 스킬 (63개)
+
+페르소나·코어·유틸리티·언어·마케팅 5개 상위 카테고리 밖의 나머지 스킬입니다.
 
 | 스킬 | 설명 |
 |------|------|
-| `cognitive-routing` | 인지 라우팅, System 1/2 분류 |
-| `lifelong-learning` | 평생 학습, 경험 축적 |
-| `memory-management` | 메모리 관리, 3-scope 시스템 |
-| `self-evaluation` | 자기 평가, Meta Self-Rewarding |
-| `self-learning` | 자기 학습, RLVR 검증가능-보상 신호 (GRPO 옵티마이저는 2026-06 철거) |
-| `swarm-intelligence` | 집단 지성 동기화 (opt-in·기본 비활성/dormant) |
-| `quality-framework` | 품질 프레임워크, 게이트 관리 |
-| `spec-format` | 스펙 포맷, 문서 표준 |
-| `platform-auth` | 인증/인가 플랫폼 패턴 |
-| `platform-deployment` | 배포 플랫폼 패턴 |
-| `platform-database-cloud` | DB/클라우드 플랫폼 패턴 |
-| `library-mermaid` | Mermaid 다이어그램 패턴 |
-| `library-shadcn` | shadcn/ui 컴포넌트 패턴 |
-| `guardrails` | 런타임 안전 가드레일, 위험 패턴 차단·리소스 제한 |
+| `adr-format` | ADR(아키텍처 결정 기록) 작성 — 옵션 비교, 추천안, 기술 부채 평가 |
+| `adversarial-review` | 공격자 관점 코드 리뷰, 취약점·엣지 케이스·설계 결함 탐지 |
+| `advisor-strategy` | Sonnet executor + Opus advisor 비용 최적화 패턴 |
+| `agent-memory-snapshot` | 세션 상태 압축 스냅샷 → 서브에이전트 프롬프트 주입 |
+| `ai-security-standards` | AI/LLM 보안 표준 — OWASP LLM Top 10, 프롬프트 인젝션, RAG 오염 |
+| `ci-cd-pipelines` | GitHub Actions 심화 패턴 — matrix, reusable workflows, 시크릿 관리 |
+| `claude-md-auditor` | CLAUDE.md 6기준 품질 감사, 스코어 리포트 + diff 프리뷰 |
+| `clarify` | 모호한 요청을 가설 기반 MCQ로 정밀 스펙화 |
+| `code-slop-reviewer` | AI 생성 코드 슬롭 패턴 탐지, 0-100 5단계 스코어링 |
+| `codex-integration` | OpenAI Codex 크로스체크/개발 위임 연동 |
+| `cognitive-routing` | System 1/2 이중 프로세스 인지 라우팅 엔진 |
+| `compaction-survival` | 컨텍스트 압축 시 핵심 상태(pending work, key files) 보존 전략 |
+| `context-degradation` | LLM 컨텍스트 실패 모드(lost-in-middle, poisoning 등) 진단·완화 |
+| `daily` | 일일 회고 대시보드 — 커밋, 품질, 작업 상태, 다음 단계 |
+| `ddd-strategic-design` | DDD 전략적 설계 — 바운디드 컨텍스트, 유비쿼터스 언어 |
+| `ddd-tactical-design` | DDD 전술적 설계 — Entity, Value Object, Aggregate, Repository |
+| `design-system-reference` | DESIGN.md 스키마 + 브랜드 레퍼런스 큐레이션 |
+| `feedback` | 버그/기능요청 자동 인터뷰 → GitHub 이슈 생성 |
+| `fp-refactor` | 명령형 코드 → 함수형 패턴(Either/Option/Task) 전환 가이드 |
+| `guardrails` | 입출력/툴 가드레일, tripwire 시맨틱, 정책 위반 단락 처리 |
+| `hook-event-emitter` | 훅 이벤트 로컬 관측성 — JSONL fan-out + localhost WebSocket 대시보드 |
+| `hook-feedback-merge` | 훅 피드백(경고/차단/제안)을 툴 결과에 인라인 병합하는 패턴 |
+| `image-generation` | AI 이미지 프롬프트 엔지니어링 및 생성/수정 워크플로 |
+| `library-mermaid` | Mermaid 다이어그램 패턴 (flowchart, sequence, ERD 등) |
+| `library-shadcn` | shadcn/ui 컴포넌트 패턴 (React/Radix) |
+| `lifelong-learning` | 세션 경험 축적 + GRPO 배치 학습, System 1/2 캐시 간 지식 전이 |
+| `load-testing` | k6 기반 부하/성능 테스트 설계·CI 통합 |
+| `memory-management` | 장기 메모리 + RAG 검색 시스템 (3-scope) |
+| `memory-safety-patterns` | 메모리 안전 패턴 — RAII, 소유권, 스마트 포인터, use-after-free 방지 |
+| `multi-agent-patterns` | 멀티에이전트 아키텍처 패턴 — supervisor/swarm/hierarchical, 토큰 multiplier |
+| `observability` | Prometheus/Grafana/분산 트레이싱/SLI-SLO 통합 관측성 가이드 |
+| `orchestration-patterns` | 에이전트 오케스트레이션 패턴 카탈로그 — agents-as-tools, handoff, parallelize |
+| `oss-ai-catalog` | 오픈소스 AI 도구/모델/프레임워크 카탈로그 (14개 도메인 색인) |
+| `platform-auth` | JWT/OAuth2/RBAC 인증·인가 패턴, Auth0/Clerk 연동 |
+| `platform-database-cloud` | 서버리스/엣지 클라우드 DB 패턴 (Neon, Supabase, Firebase, PlanetScale) |
+| `platform-deployment` | 클라우드/Docker/K8s/CI-CD 배포 패턴 |
+| `polish` | AI-slop 자동 탐지 + 자연스러운 문체 재작성 (콘텐츠 생성 에이전트 출력용) |
+| `problem-validation` | 구체적 문제 없는 개선/제안 요청에 대한 문제 검증 게이트 |
+| `production-code-audit` | 자율 코드베이스 스캔, 보안/성능/아키텍처 이슈 탐지, 프로덕션 준비도 감사 |
+| `prompt-caching-strategy` | 프롬프트 캐시 최적화 — Dynamic Boundary 배치, 토큰 예산 관리 |
+| `prompt-engineering` | 프롬프트 엔지니어링 패턴 — Few-shot, Chain-of-Thought, 시스템 프롬프트 설계 |
+| `quality-framework` | ATLAS 품질 프레임워크 (Automated/Tested/Learned/Adaptive/Secure) |
+| `quickstart` | 인터랙티브 첫 실행 온보딩 가이드, 프로젝트 타입 감지 |
+| `repo-benchmarking` | 외부 git 레포 클론 + 10차원 정량 벤치마킹, 채택 권고 |
+| `scheduled-learning` | 야간 학습 파이프라인/드리프트 체크 CronCreate 스케줄링 |
+| `self-evaluation` | Self-Rewarding + GRPO 하이브리드 자기 평가 시스템 |
+| `self-learning` | Toolformer + GRPO 도구 선택 자기학습, 성공률 기반 랭킹 |
+| `session-worklog` | 세션 작업 자동 일지 (auto-memory) — 태스크·결정·미완료 항목 기록 |
+| `setup` | Artibot 초기 설정 인터랙티브 위저드 (언어, MCP, 권한, Git 자동화) |
+| `skill-authoring` | SKILL.md 신규 작성/편집 지원 |
+| `source-driven-development` | 공식 문서 기반 프레임워크/SDK 구현 결정 근거화 |
+| `spec-format` | 구조화된 요구사항/수용기준(SPEC, EARS) 포맷 |
+| `swarm-intelligence` | 인스턴스 간 익명화 학습 패턴 공유 (opt-in·기본 비활성/dormant) |
+| `systematic-debugging` | 근본원인 우선 체계적 디버깅 방법론 |
+| `team` | 리더 위임 + 팀원 독립 작업 + 교차검증 병렬 실행 |
+| `tool-approval` | 동적 도구 승인 predicate + bash 명령 허용목록 |
+| `tool-design` | 에이전트 도구 설계 아키텍처 패턴 — 통합 vs 분리, description engineering |
+| `using-agent-skills` | 스킬 라이브러리 디스커버리 플로우차트 (어떤 스킬을 쓸지 안내) |
+| `verification-completion` | "완료" 주장 전 증거 기반 검증 강제 |
+| `vibe-coding` | 캐주얼/자연어 코딩 요청에 대한 품질 강제 |
+| `visual-validation` | SSIM 기반 스크린샷 비교 시각 회귀 테스트 |
+| `yes-md` | Evidence-before-claims 거버넌스 엔진, 6개 safety gate |
+| `zero-downtime-migration` | 프로덕션 무중단 마이그레이션 6섹션 체크리스트 |
 
 ---
 
@@ -1518,14 +1569,14 @@ plugins/artibot/
 │   ├── orchestrate.md           #   팀 오케스트레이션 (TeamCreate)
 │   ├── spawn.md                 #   팀 스폰 (병렬 실행)
 │   └── [47개 커맨드].md
-├── skills/                      # 127개 스킬 디렉토리 (forked context 격리)
+├── skills/                      # 113개 스킬 디렉토리 (forked context 격리)
 │   ├── orchestration/           #   위임 모드 선택 + 팀 라우팅
 │   ├── delegation/              #   Sub-Agent/Team 위임 전략
 │   └── [113개 스킬]/
 ├── hooks/
 │   └── hooks.json               # 훅 이벤트 매핑
 ├── scripts/
-│   ├── hooks/                   # 37개 훅 스크립트 (ESM, file-lock 포함)
+│   ├── hooks/                   # 67개 훅 스크립트 파일 (.js 61 + .mjs 6, ESM, file-lock 포함)
 │   ├── ci/                      # 6개 CI 검증 스크립트
 │   ├── evals/                   # 런타임 eval 스위트
 │   └── utils/

@@ -24,6 +24,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   consolidation은 무손상 유지.** skills/auto-learning-pipeline/ 스킬도 함께 제거.
   스킬 카운트 114→113으로 CLAUDE.md·README·marketplace 소개 문서 전건 동기화,
   README 파이프라인 서술 정리 완료.
+- **`learning.schedule` dead config 키 제거** — autoLearning 파이프라인 제거의
+  후속 정리. `artibot.config.json`의 `learning.schedule.nightlyLearner`("3 2 * * *")·
+  `learning.schedule.driftCheck`("7 6 * * 1") cron 키를 삭제(읽는 코드 0건,
+  3회 독립 grep 교차검증). `learning.schedule.enabled`는 잔존 — 역시 소비자 0으로
+  판명되어 차기 정리 후보.
+
+### Docs
+- **plugins README 선재 drift 전면 실측 동기화.** 스킬 113 / 커맨드 73 /
+  에이전트 28 / 훅 matcher 24(15 이벤트) / 훅 스크립트 파일 67(.js 61 + .mjs 6)
+  실측 후 `README.md` 8개소 수정("127개 스킬"→113, "99개 도메인 스킬" 섹션
+  재작성, "117"→113, "70"→73 커맨드, "37"→67 훅 스크립트). 레퍼런스에 누락돼
+  있던 스킬 49개를 "기타 스킬(63개)" 섹션에 전수 추가해 113개 전량 문서화.
+  `marketplace.json` 72→73 commands, `_marketplace/demo-script.md` 100/56→113/73
+  동기화. 역사적 changelog 섹션의 시점 스냅샷 수치는 의도적으로 보존.
 
 ---
 
