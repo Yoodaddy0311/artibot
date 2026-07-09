@@ -71,7 +71,11 @@ export function buildDevVerifyOutput(reason, opts = {}) {
   const { mode = DEFAULT_DEV_VERIFY_MODE, hookEventName = 'Stop' } = opts;
 
   if (mode === 'advisory') {
+    // suppressOutput keeps the checklist out of the terminal transcript while
+    // the model still receives it via additionalContext (enforce mode stays
+    // visible on purpose — a block the user can't see is undebuggable).
     return {
+      suppressOutput: true,
       hookSpecificOutput: {
         hookEventName,
         additionalContext: reason,

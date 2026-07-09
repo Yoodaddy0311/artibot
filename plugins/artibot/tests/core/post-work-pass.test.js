@@ -62,6 +62,12 @@ describe('buildBlindspotContext', () => {
     expect(text).toContain('earliest blocking hop');
     expect(text).toContain('이상 없음');
   });
+
+  it('demands a visually distinct header block (not inline prose)', () => {
+    const text = buildBlindspotContext();
+    expect(text).toContain('### 🔍 사각지대 점검');
+    expect(text).toContain('---');
+  });
 });
 
 describe('resolveTeachBackQuestions', () => {
@@ -91,15 +97,32 @@ describe('buildTeachBackContext', () => {
     const text = buildTeachBackContext();
     expect(text).toContain('퀴즈 3문항');
     expect(text).toContain('만점 게이트 금지');
-    expect(text).toContain('12세');
+  });
+
+  it('teaches general concepts with a distinct header, never age-framed or change-specific', () => {
+    const text = buildTeachBackContext();
+    expect(text).toContain('### 📚 학습 코너');
+    expect(text).toContain('일반 개념');
+    expect(text).toContain('기본 개념 지식');
+    // Age framing must be forbidden in the OUTPUT, so the directive mentions
+    // it only inside the "do not use" clause.
+    expect(text).toContain("수준 표현은 쓰지 마라");
+    expect(text).toContain('세부사항·경위를 묻지 마라');
   });
 });
 
 describe('buildAdditionalContextOutput', () => {
   it('wraps advisory context under hookSpecificOutput (never decision:block)', () => {
     const out = buildAdditionalContextOutput('hi', 'Stop');
-    expect(out).toEqual({ hookSpecificOutput: { hookEventName: 'Stop', additionalContext: 'hi' } });
+    expect(out).toEqual({
+      suppressOutput: true,
+      hookSpecificOutput: { hookEventName: 'Stop', additionalContext: 'hi' },
+    });
     expect(out.decision).toBeUndefined();
+  });
+
+  it('suppresses terminal transcript output while keeping model-facing context', () => {
+    expect(buildAdditionalContextOutput('x').suppressOutput).toBe(true);
   });
 
   it('defaults the event name to Stop', () => {

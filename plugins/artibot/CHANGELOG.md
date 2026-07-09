@@ -11,6 +11,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+---
+
+## [4.31.1] — 2026-07-09
+
+### Changed
+- **post-work 훅 지시문 개편 (사용자 피드백 반영).** blindspot: 출력이 일반
+  문단처럼 보여 눈에 안 띄던 문제 — 수평선 + `### 🔍 사각지대 점검` 헤더의
+  별도 블록 출력을 지시문에 강제. teach-back: '12세' 수준 표현 금지, '접근
+  선택 사유 공개' 항목 삭제, 설명·퀴즈를 이번 변경의 구현 경과/세부사항이
+  아닌 **바탕 일반 개념 지식** 중심으로 재정의(`### 📚 학습 코너` 헤더 포함).
+  `lib/core/post-work-pass.js` 지시문 빌더 2곳 + 테스트 재작성.
+
+### Fixed
+- **install.sh 동시 실행 시 플러그인 캐시 파괴 방지 — mkdir 뮤텍스 도입.**
+  `install_marketplace_mirror`/`install_plugin_cache`가 살아있는 플러그인
+  디렉터리에 rm-rf-후-복사를 수행하는데, 인스톨러 2개가 겹치면 rm과 copy가
+  인터리빙되며 캐시가 반쯤 비워짐 (2026-07-09 실사고: cache lib/core가 14개
+  파일로 축소 → 전 세션 훅 스폰이 ERR_MODULE_NOT_FOUND). `acquire_install_lock`
+  (원자적 mkdir 락, 10분 초과 stale 락 회수, EXIT trap 해제, GNU/BSD stat
+  폴백)을 복사 단계 진입 전에 강제.
+- **Stop 훅 advisory 지시문의 터미널 노이즈 제거.** blindspot-check·teach-back·
+  dev-verify(advisory 모드)가 주입하는 `additionalContext` 전문이 터미널에
+  "Stop hook feedback"으로 그대로 노출되던 문제. 공식 훅 스키마의
+  `suppressOutput: true`를 advisory 출력 빌더 2곳(`lib/core/post-work-pass.js`
+  `buildAdditionalContextOutput`, `lib/core/dev-verify-output.js` advisory 분기)에
+  추가 — 모델에는 지시문이 동일하게 주입되고 트랜스크립트 표시만 사라진다.
+  enforce(`decision: block`) 분기는 의도적으로 표시 유지(보이지 않는 차단은
+  디버깅 불가). 테스트 2건 추가.
+- **README 훅 스크립트 카운트 드리프트로 인한 CI 실패 해소.** autoLearning
+  제거로 훅 스크립트가 62→61이 됐는데 루트 README 파일트리 주석이 62로 남아
+  `validate-readme-claims.js --full`(main strict gate)이 master 푸시 2회 연속
+  실패. 루트 `README.md` 카운트를 61로 실측 동기화 (1e0b659).
+
 ### Removed
 - **야간 자동학습(autoLearning) 파이프라인 전체 제거 — 13파일 삭제.** 2026-05-18
   이후 OS 스케줄 미등록으로 자동 실행 0회, 실손실 없이 유지 비용만 발생하던

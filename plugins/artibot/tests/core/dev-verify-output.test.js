@@ -75,6 +75,11 @@ describe('buildDevVerifyOutput', () => {
     });
   });
 
+  it('advisory mode suppresses transcript output; enforce mode stays visible', () => {
+    expect(buildDevVerifyOutput(REASON, { mode: 'advisory' }).suppressOutput).toBe(true);
+    expect(buildDevVerifyOutput(REASON, { mode: 'enforce' }).suppressOutput).toBeUndefined();
+  });
+
   it('advisory mode echoes SubagentStop when provided', () => {
     const out = buildDevVerifyOutput(REASON, { mode: 'advisory', hookEventName: 'SubagentStop' });
     expect(out.hookSpecificOutput.hookEventName).toBe('SubagentStop');

@@ -25,6 +25,38 @@ warn() { echo -e "${YELLOW}[artibot]${NC} $1"; }
 err()  { echo -e "${RED}[artibot]${NC} $1" >&2; }
 
 # ──────────────────────────────────────────────
+# Concurrency lock
+# ──────────────────────────────────────────────
+# install_marketplace_mirror / install_plugin_cache do rm-rf-then-copy into
+# LIVE plugin dirs. Two installers interleaving those steps half-empties the
+# Claude Code plugin cache (2026-07-09 incident: cache lib/core reduced to 14
+# files, every hook spawn failing with ERR_MODULE_NOT_FOUND in all sessions).
+# mkdir is atomic on every platform bash runs on, so it serves as the mutex.
+# A stale lock older than 10 minutes is reclaimed (crashed installer).
+INSTALL_LOCK_DIR="${CLAUDE_DIR}/.artibot-install.lock"
+acquire_install_lock() {
+  if mkdir "${INSTALL_LOCK_DIR}" 2>/dev/null; then
+    trap 'rmdir "${INSTALL_LOCK_DIR}" 2>/dev/null || true' EXIT
+    return 0
+  fi
+  local lock_mtime lock_age
+  # GNU stat (Linux / Git Bash) first, BSD stat (macOS) fallback. If both fail
+  # treat as mtime 0 → age is huge → reclaim path (fail-open beats deadlock).
+  lock_mtime=$(stat -c %Y "${INSTALL_LOCK_DIR}" 2>/dev/null || stat -f %m "${INSTALL_LOCK_DIR}" 2>/dev/null || echo 0)
+  lock_age=$(( $(date +%s) - lock_mtime ))
+  if [ "${lock_age}" -gt 600 ]; then
+    warn "Reclaiming stale install lock (age ${lock_age}s)"
+    rmdir "${INSTALL_LOCK_DIR}" 2>/dev/null || true
+    if mkdir "${INSTALL_LOCK_DIR}" 2>/dev/null; then
+      trap 'rmdir "${INSTALL_LOCK_DIR}" 2>/dev/null || true' EXIT
+      return 0
+    fi
+  fi
+  err "Another install is already running (lock: ${INSTALL_LOCK_DIR}). Retry after it finishes."
+  exit 1
+}
+
+# ──────────────────────────────────────────────
 # Prerequisites
 # ──────────────────────────────────────────────
 check_prerequisites() {
@@ -1001,6 +1033,7 @@ main() {
         # and refuse to falsely report "Update complete". Best-effort write.
         : > "${ARTIBOT_DIR}/.last-install-noop" 2>/dev/null || true
       else
+        acquire_install_lock
         install_agents
         install_commands
         install_skills

@@ -74,7 +74,9 @@ export const DEFAULT_TEACHBACK_QUESTIONS = 3;
 /**
  * Blindspot ("사각지대 점검") directive injected after DEV verify. Instructs the
  * model to decompose the turn's requirement, scan for missing evidence, and
- * report gaps earliest-blocking-first — recommend-only, no auto-fix.
+ * report gaps earliest-blocking-first — recommend-only, no auto-fix. The report
+ * must open with a horizontal rule + emoji header so it never reads as ordinary
+ * prose (user feedback 2026-07-09: plain-paragraph output was invisible).
  * @returns {string}
  */
 export function buildBlindspotContext() {
@@ -84,7 +86,8 @@ export function buildBlindspotContext() {
     '(2) 각 구성요소에 대해 실제 산출물/검증 증거가 있는지 스캔하라 ' +
     "(3) 증거가 없거나 불충분한 구성요소를 '가장 먼저 막히는 지점(earliest blocking hop)'부터 순서대로 리스트업하라 " +
     '(4) 발견된 사각지대는 보고만 하고 자동으로 수정하지 마라(recommend-only). ' +
-    "사각지대가 없으면 '사각지대 점검: 이상 없음' 한 줄만 출력하라."
+    "출력 형식: 반드시 수평선(---) 다음 '### 🔍 사각지대 점검' 헤더로 시작하는 별도 블록으로 작성하라 — 본문 문단에 섞지 마라. " +
+    "사각지대가 없으면 그 헤더 아래 '이상 없음' 한 줄만 출력하라."
   );
 }
 
@@ -102,18 +105,24 @@ export function resolveTeachBackQuestions(config) {
 
 /**
  * Teach-back ("교육적 학습 루프") directive appended after the work report:
- * a 12-year-old-level summary, the reasoning behind the approach, and a
- * comprehension quiz. Wrong answers get answer+explanation only — no retry
- * demand, no perfect-score gate, and answering is never forced.
+ * a plain-language explanation of the general concepts underlying the change,
+ * plus a comprehension quiz on those concepts. Deliberately NOT about this
+ * turn's implementation details, chosen approach, or rationale (user feedback
+ * 2026-07-09: teach transferable concept knowledge, not change-specific
+ * narrative; no age framing in the output). Wrong answers get
+ * answer+explanation only — no retry demand, no perfect-score gate, and
+ * answering is never forced.
  * @param {number} [questions=DEFAULT_TEACHBACK_QUESTIONS] - Quiz question count
  * @returns {string}
  */
 export function buildTeachBackContext(questions = DEFAULT_TEACHBACK_QUESTIONS) {
   return (
-    '작업 보고를 마친 뒤 학습 코너를 덧붙여라: ' +
-    '(1) 이번 변경의 핵심 원리를 12세에게 설명하듯 요약하라 — 단, 핵심 원리는 생략하지 마라 ' +
-    '(2) 왜 이 접근을 택했는지 추론 과정을 한 단락 공개하라 ' +
-    `(3) 이해 확인 퀴즈 ${questions}문항을 제시하라. ` +
+    '작업 보고를 마친 뒤 학습 코너를 덧붙여라. ' +
+    "출력 형식: 수평선(---) 다음 '### 📚 학습 코너' 헤더로 시작하는 별도 블록. " +
+    '(1) 이번 작업의 바탕이 되는 일반 개념·원리를 쉬운 말로 설명하라 — ' +
+    "'12세', '어린이용' 같은 수준 표현은 쓰지 마라. " +
+    '이번 변경의 구현 경과·선택 사유·세부사항이 아니라, 그 주제를 처음 접하는 사람에게 필요한 기본 개념 지식만 다뤄라 ' +
+    `(2) 이해 확인 퀴즈 ${questions}문항을 제시하라 — 퀴즈도 일반 개념을 묻는 기초 문제로 하고, 이번 작업의 세부사항·경위를 묻지 마라. ` +
     '사용자가 답하면 채점하되, 틀린 문항은 정답과 해설만 알려주고 끝내라 — 재시도 요구·만점 게이트 금지. ' +
     '사용자가 퀴즈에 답하지 않아도 되며 강요하지 마라.'
   );
@@ -237,12 +246,15 @@ export function resolveHookEventName(hookData) {
 
 /**
  * Build the advisory (non-blocking) Stop-hook stdout envelope.
+ * `suppressOutput: true` keeps the directive out of the terminal transcript —
+ * the model still receives additionalContext, but the user no longer sees the
+ * full Korean directive dumped as "Stop hook feedback" noise.
  * @param {string} additionalContext
  * @param {'Stop'|'SubagentStop'} [hookEventName='Stop']
  * @returns {object}
  */
 export function buildAdditionalContextOutput(additionalContext, hookEventName = 'Stop') {
-  return { hookSpecificOutput: { hookEventName, additionalContext } };
+  return { suppressOutput: true, hookSpecificOutput: { hookEventName, additionalContext } };
 }
 
 /**
