@@ -886,9 +886,7 @@
       "ewmaAlpha": 0.3
     },
     "schedule": {
-      "enabled": true,
-      "nightlyLearner": "3 2 * * *",
-      "driftCheck": "7 6 * * 1"
+      "enabled": true
     },
     "hierarchicalMemory": {
       "enabled": true,
