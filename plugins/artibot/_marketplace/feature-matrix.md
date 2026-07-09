@@ -14,7 +14,7 @@ pass); revisit before each submission.
 | Auto-decomposition + cross-verify | Yes (operator-waits DNA) | Manual | Partial | Partial |
 | Dual-process (System 1 / 2) routing | Yes (EFFORT_POLICY) | No | No | No |
 | Lifelong learning (RLVR + drift) | Yes | No | No | No |
-| Skill registry with frontmatter | Yes (114 skills) | No | No | Limited |
+| Skill registry with frontmatter | Yes (113 skills) | No | No | Limited |
 | MCP server integration | Yes (`.well-known/mcp-server.json`) | Plug-in | Plug-in | Plug-in |
 | OTEL export (opt-in) | Yes | Manual | Manual | Manual |
 | Multi-session dashboard | Yes (built-in) | No | No | No |

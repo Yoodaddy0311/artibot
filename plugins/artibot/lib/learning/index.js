@@ -101,22 +101,6 @@ export {
   CATEGORIES as VAULT_CATEGORIES,
 } from './vault.js';
 
-// Auto-Learning Pipeline Runner
-export {
-  runAutoLearningPipeline,
-  loadAutoLearningConfig,
-  validateConfig as validateAutoLearningConfig,
-  runSelfScan,
-  runPatternExtract,
-  runKnowledgeUpdate,
-  runSkillRefinement,
-  runAutoCommit,
-  checkBranchSafety,
-  countChanges,
-  collectProvenance,
-  stripProvenancePII,
-} from './auto-learning-runner.js';
-
 // Learning Pipeline Orchestration (business logic)
 export {
   processUserMessage,

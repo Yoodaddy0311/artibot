@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { spawnSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -10,16 +9,14 @@ import { fileURLToPath } from 'node:url';
  * hooks that previously swallowed config-load failures (issue-scanner A2 #10).
  *
  *   - runtime-prompt.js: malformed artibot.config.json → stderr line + defaults
- *   - auto-learning-check.js: unreadable artibot.config.json → stderr line + return
  *   - swarm-sync.js: reportTelemetry rejects → logHookError invoked (unit-tested
  *     via mock instead of child process)
  *
- * The runtime-prompt check now drives the exported handler in-process: the
+ * The runtime-prompt check drives the exported handler in-process: the
  * legacy child-process path relied on the script's `isMain` guard, which
  * fails on filesystem paths containing non-ASCII characters (e.g. Korean
  * `바탕 화면`) because `import.meta.url` percent-encodes those segments
- * while `process.argv[1]` does not. The auto-learning-check pair still
- * uses spawnSync — its hook always calls `main()` unconditionally.
+ * while `process.argv[1]` does not.
  */
 
 const PLUGIN_ROOT = path.resolve(
@@ -61,20 +58,6 @@ describe('silent fail → stderr (issue-scanner A2 #10)', () => {
     }
     vi.restoreAllMocks();
   });
-
-  function runHook(scriptRelPath, payload, env = {}, cwd = PLUGIN_ROOT) {
-    const result = spawnSync(
-      process.execPath,
-      [path.join(PLUGIN_ROOT, scriptRelPath)],
-      {
-        cwd,
-        env: { ...process.env, ...env },
-        input: JSON.stringify(payload),
-        encoding: 'utf-8',
-      },
-    );
-    return { stderr: String(result.stderr || ''), stdout: String(result.stdout || '') };
-  }
 
   /**
    * Capture stderr written by an in-process async call. We replace
@@ -127,36 +110,6 @@ describe('silent fail → stderr (issue-scanner A2 #10)', () => {
     });
 
     expect(stderr).not.toContain('config parse failed');
-  });
-
-  it('auto-learning-check emits stderr when artibot.config.json is corrupt', () => {
-    const brokenRoot = makeBrokenPluginRoot();
-    tmpRoots.push(brokenRoot);
-    writeFileSync(path.join(brokenRoot, 'artibot.config.json'), '{ corrupt');
-
-    const { stderr } = runHook(
-      'scripts/hooks/auto-learning-check.js',
-      {},
-      { CLAUDE_PLUGIN_ROOT: brokenRoot },
-      brokenRoot,
-    );
-
-    expect(stderr).toContain('[auto-learn]');
-    expect(stderr).toContain('config unreadable');
-  });
-
-  it('auto-learning-check stays silent when config is valid but autoLearning unset', () => {
-    const okRoot = makeBrokenPluginRoot();
-    tmpRoots.push(okRoot);
-    writeFileSync(path.join(okRoot, 'artibot.config.json'), JSON.stringify({}));
-
-    const { stderr } = runHook(
-      'scripts/hooks/auto-learning-check.js',
-      {},
-      { CLAUDE_PLUGIN_ROOT: okRoot },
-      okRoot,
-    );
-    expect(stderr).not.toContain('config unreadable');
   });
 });
 

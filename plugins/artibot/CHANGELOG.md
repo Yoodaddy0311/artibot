@@ -11,6 +11,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+- **야간 자동학습(autoLearning) 파이프라인 전체 제거 — 13파일 삭제.** 2026-05-18
+  이후 OS 스케줄 미등록으로 자동 실행 0회, 실손실 없이 유지 비용만 발생하던
+  인프라를 정리. 삭제: `scripts/run-auto-learning.js`, `scripts/setup-auto-learning.js`,
+  `scripts/hooks/auto-learning-check.js`, `lib/learning/auto-learning-{runner,scanner,
+  extractor,committer}.js` + 대응 테스트 5개 + `skills/auto-learning-pipeline/SKILL.md`.
+  `artibot.config.json`의 `autoLearning`
+  섹션과 `lib/learning/index.js`의 auto-learning-runner re-export 블록, SessionStart
+  dispatch-table 슬롯도 제거(핸들러 10→9). **세션 단위 학습(tool-tracker,
+  agent-evaluator, lifelong-learner, session-ledger/notes, post-work 훅)과 dreaming
+  consolidation은 무손상 유지.** skills/auto-learning-pipeline/ 스킬도 함께 제거.
+  스킬 카운트 114→113으로 CLAUDE.md·README·marketplace 소개 문서 전건 동기화,
+  README 파이프라인 서술 정리 완료.
+
 ---
 
 ## [4.31.0] — 2026-07-08

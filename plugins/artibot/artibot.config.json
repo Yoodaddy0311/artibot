@@ -1141,22 +1141,6 @@
       "suggestionsPath": "runtime/macro-suggestions.json"
     }
   },
-  "autoLearning": {
-    "enabled": true,
-    "schedule": "0 3 * * *",
-    "pipeline": [
-      "self-scan",
-      "pattern-extract",
-      "knowledge-update",
-      "skill-refinement",
-      "grpo"
-    ],
-    "autoCommit": true,
-    "autoPush": true,
-    "maxChangesPerRun": 10,
-    "dryRun": false,
-    "allowedPaths": null
-  },
   "skills": {
     "lazyLoading": {
       "enabled": true,

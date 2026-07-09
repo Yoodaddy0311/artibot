@@ -436,7 +436,7 @@ Artibot의 핵심 엔진은 Claude Code의 **Agent Teams API**입니다. 단순�
 - 1개 언어 통합 스킬 (lang-reference — 16개 언어 통합 허브)
 - 8개 유틸리티 스킬 (tdd, delegation, MCP 연동 등)
 - 23개 마케팅 스킬 (SEO, CRO, A/B 테스트, 이메일 마케팅 등)
-- 16개 기타 스킬 (cognitive-routing, platform, library, quality, auto-learning-pipeline, dynamic-context-injection 등)
+- 15개 기타 스킬 (cognitive-routing, platform, library, quality, dynamic-context-injection 등)
 - 10개 신규 스킬 (v2.1.0): load-testing, observability, ci-cd-pipelines, codex-integration, agent-memory-snapshot, compaction-survival, prompt-caching-strategy, hook-feedback-merge, api-security, event-sourcing
 
 ### 런타임 미들웨어 파이프라인 (v1.14.0+)
@@ -446,12 +446,6 @@ Artibot의 핵심 엔진은 Claude Code의 **Agent Teams API**입니다. 단순�
 - TokenUsageMiddleware: 토큰 사용량 추적 및 최적화 제안
 - SummarizationMiddleware: 응답 자동 요약 및 컨텍스트 압축
 - LifecycleMiddleware: Setup/Teardown 3-phase 에이전트 생명주기
-
-### 자동 학습 파이프라인 (v1.14.0+)
-
-- 제로 설정 야간 자기 개선: self-scan → pattern-extract → knowledge-update → skill-refinement
-- `autoLearning` 설정: 스케줄 (cron), 자동 커밋/푸시, 실행당 최대 변경 수 제한
-- SessionStart 훅으로 스케줄 체크 및 자동 트리거
 
 ### Output Design System (v1.14.0+)
 
@@ -1429,7 +1423,6 @@ orchestrator는 **코드를 직접 작성하지 않습니다**. 팀을 구성하
 | `platform-database-cloud` | DB/클라우드 플랫폼 패턴 |
 | `library-mermaid` | Mermaid 다이어그램 패턴 |
 | `library-shadcn` | shadcn/ui 컴포넌트 패턴 |
-| `auto-learning-pipeline` | 제로 설정 야간 자기 개선 파이프라인 |
 | `guardrails` | 런타임 안전 가드레일, 위험 패턴 차단·리소스 제한 |
 
 ---
@@ -1528,7 +1521,6 @@ plugins/artibot/
 ├── skills/                      # 127개 스킬 디렉토리 (forked context 격리)
 │   ├── orchestration/           #   위임 모드 선택 + 팀 라우팅
 │   ├── delegation/              #   Sub-Agent/Team 위임 전략
-│   ├── auto-learning-pipeline/  #   제로 설정 야간 자기 개선
 │   └── [113개 스킬]/
 ├── hooks/
 │   └── hooks.json               # 훅 이벤트 매핑

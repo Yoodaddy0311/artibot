@@ -30,7 +30,9 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PLUGIN_ROOT = path.resolve(HERE, '..', '..');
 
 const EXPECTED_HANDLER_COUNTS = {
-  SessionStart: 10,
+  // 10 → 9: auto-learning-check.js removed with the nightly autoLearning
+  // pipeline retirement (OS-unregistered since 2026-05-18, zero auto-runs).
+  SessionStart: 9,
   // Bumped 6 → 7 in v4.8.0 backlog: auto-command-suggest.js joined the
   // UserPromptSubmit slot to suggest /adr and /migrate from natural-language
   // prompts (alongside the existing auto-team-trigger and autopilot-nlu).

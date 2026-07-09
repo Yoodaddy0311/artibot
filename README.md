@@ -50,12 +50,12 @@ Most Claude Code plugins use simple sub-agent (`Task()`) delegation -- fire-and-
 - **8 DAG Playbooks** -- Feature, Bugfix, Refactor, Security + Marketing Campaign, Marketing Audit, Content Launch, Competitive Analysis (DAG-based with parallel node execution, topological sort, and cycle detection)
 - **73 Slash Commands** -- `/sc` smart router, `/save`, `/resume`, `/daily`, `/team`, `/orchestrate`, `/spawn`, `/implement`, `/visual-check`, `/sc playbook`, `/learning`, `/ultrareview`, `/ultraplan`, `/audit-claude-md`, `/export`, and more
 - **28 Specialized Agents** -- Architecture, security, frontend, backend, testing, DevOps, marketing, SEO, analytics, and more (opus 73%, sonnet 27%)
-- **114 Domain Skills** -- 11 persona skills, 8 core skills, 16 language skills, 8 utility skills, 35 marketing skills, visual-validation, daily, team, session-worklog, vibe-coding, repo-benchmarking, auto-learning-pipeline, git-worktree, dynamic-context-injection, claude-md-auditor, skill-authoring (all enhanced with Anthropic best-practice descriptions, workflow checklists, HITL v2 conversational checkpoints, output templates, and freedom levels)
+- **113 Domain Skills** -- 11 persona skills, 8 core skills, 16 language skills, 8 utility skills, 35 marketing skills, visual-validation, daily, team, session-worklog, vibe-coding, repo-benchmarking, git-worktree, dynamic-context-injection, claude-md-auditor, skill-authoring (all enhanced with Anthropic best-practice descriptions, workflow checklists, HITL v2 conversational checkpoints, output templates, and freedom levels)
 - **8 Auto-Activating Rules** -- DEV protocol, quality gates, agent coordination, config safety, frontend/backend/test patterns, clean state enforcement
 - **Guard Registry** -- Centralized guard pipeline with `registerGuard()`/`executeChain()` API, 6 built-in guards extracted from hook scripts (75% code reduction)
 - **Loop Detection** -- Circular buffer-based agent loop detection with fingerprint matching, automatic warn/block on repeated tool calls
 - **Clean State Enforcement** -- TaskCompleted hook ensures lint+test verification at feature completion boundaries
-- **57 Event Hook Registrations** -- Cognitive routing, lifelong learning, session lifecycle, dangerous command blocking, auto-formatting, team tracking, loop detection, clean state checks, HTTP webhook notifications, git autopilot, auto-learning scheduler
+- **57 Event Hook Registrations** -- Cognitive routing, lifelong learning, session lifecycle, dangerous command blocking, auto-formatting, team tracking, loop detection, clean state checks, HTTP webhook notifications, git autopilot
 - **Advisory File Locking** -- Spin-lock based file locking for concurrent hook state access, fail-open pattern prevents workflow blocking
 - **DEV Protocol** -- Mandatory Decompose-Execute-Verify workflow with zero-skip policy for all code changes
 - **Vibe Coding Support** -- Natural language request handling with read-first, verify-after, evidence-based completion
@@ -63,9 +63,8 @@ Most Claude Code plugins use simple sub-agent (`Task()`) delegation -- fire-and-
 - **Conversation-to-Memory** -- Auto-extracts rules and decisions from user messages (Korean/English), injects into skills dynamically
 - **Project CLAUDE.md Seeding** -- `install.sh` auto-generates project-level CLAUDE.md with Artibot methodology and DEV protocol
 - **Runtime Middleware Pipeline** -- 11-stage middleware engine (lifecycle, router, memory, skills, tasks, subagents, guardrail, summarization, token-usage, checkpoint, cache-roi) for runtime context injection
-- **Auto-Learning Pipeline** -- Zero-config nightly self-improvement: self-scan, pattern-extract, knowledge-update, skill-refinement with auto-commit/push
 - **Output Design System** -- 7 output styles with design tokens (tokens.md) and narrative template for consistent formatting
-- **Forked Context Skills** -- All 114 skills run in isolated forked context for clean execution without cross-contamination
+- **Forked Context Skills** -- All 113 skills run in isolated forked context for clean execution without cross-contamination
 - **HTTP Webhook Notifications** -- Session events sent to Slack, Discord, or custom endpoints via configurable webhooks
 - **Cross-Platform Compatible** -- Works with Gemini CLI, OpenAI Codex, and Cursor via platform adapters
 - **Zero Dependencies** -- Pure Node.js built-in modules only (`node:fs`, `node:path`, `node:os`)
@@ -746,9 +745,9 @@ marketing-strategy, campaign-planning, seo-strategy, technical-seo, content-seo,
 </details>
 
 <details>
-<summary>Workflow Skills (8)</summary>
+<summary>Workflow Skills (7)</summary>
 
-daily (work recap/retrospective), team (parallel orchestration), session-worklog (auto session tracking), vibe-coding (natural language coding protocol), repo-benchmarking (external repo analysis and comparison), auto-learning-pipeline (zero-config nightly self-improvement), git-worktree (worktree isolation), dynamic-context-injection (runtime context management)
+daily (work recap/retrospective), team (parallel orchestration), session-worklog (auto session tracking), vibe-coding (natural language coding protocol), repo-benchmarking (external repo analysis and comparison), git-worktree (worktree isolation), dynamic-context-injection (runtime context management)
 
 </details>
 
@@ -855,12 +854,11 @@ plugins/artibot/
 |   +-- spawn.md                 #   Team spawn (parallel execution)
 |   +-- [25 dev commands].md
 |   +-- [10 marketing commands].md
-+-- skills/                      # 114 skill directories
++-- skills/                      # 113 skill directories
 |   +-- orchestration/           #   Delegation mode + team routing
 |   +-- cognitive-routing/       #   System 1/2 dual-process routing
 |   +-- lifelong-learning/       #   GRPO batch learning + knowledge transfer
 |   +-- delegation/              #   Sub-Agent/Team strategies
-|   +-- auto-learning-pipeline/  #   Zero-config nightly self-improvement
 |   +-- [23 dev skills]/
 |   +-- [23 marketing skills]/
 |   +-- [7 workflow skills]/
