@@ -60,9 +60,7 @@
         { "name": "git-autopilot-close", "script": "git-autopilot-close.js", "timeoutMs": 15000 },
         { "name": "stop-recap",          "script": "stop-recap.js",          "timeoutMs": 5000 },
         { "name": "session-notes",       "script": "session-notes.js",       "timeoutMs": 5000 },
-        { "name": "session-ledger",      "script": "session-ledger.mjs",     "timeoutMs": 5000 },
-        { "name": "blindspot-check",     "script": "blindspot-check.js",     "timeoutMs": 5000 },
-        { "name": "teach-back",          "script": "teach-back.js",          "timeoutMs": 5000 }
+        { "name": "session-ledger",      "script": "session-ledger.mjs",     "timeoutMs": 5000 }
       ]
     },
     "SessionEnd": {

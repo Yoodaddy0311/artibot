@@ -187,26 +187,6 @@ export const configSchema = {
         },
       },
     },
-    postWork: {
-      type: 'object',
-      description: 'Advisory-only Stop-hook post-work passes. Resolver: lib/core/post-work-pass.js',
-      properties: {
-        blindspot: {
-          type: 'object',
-          properties: {
-            enabled: { type: 'boolean' },
-          },
-        },
-        teachBack: {
-          type: 'object',
-          properties: {
-            enabled: { type: 'boolean' },
-            questions: { type: 'number', minimum: 1 },
-          },
-        },
-        comment: { type: 'string' },
-      },
-    },
   },
 };
 

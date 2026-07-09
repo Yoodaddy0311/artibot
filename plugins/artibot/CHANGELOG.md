@@ -13,6 +13,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.32.0] — 2026-07-09
+
+### Changed
+- **post-work 사각지대 점검·학습 코너: Stop 훅 자동발화 → 온디맨드 슬래시
+  커맨드로 전환.** 매 턴 종료마다 `blindspot-check`·`teach-back` Stop 훅이
+  자동 발화해 터미널이 지저분해지던 문제. 자동발화(on/off 토글)를 완전히
+  제거하고 사용자가 원할 때만 부르는 커맨드 2개로 대체 —
+  `commands/blindspot.md`(사각지대 점검, recommend-only), `commands/teach-back.md`
+  (학습 코너, 일반 개념 설명 + 이해 확인 퀴즈). 훅이 주입하던 개념 중심
+  지시문(`### 🔍 사각지대 점검` / `### 📚 학습 코너` 헤더 블록)을 커맨드
+  본문으로 마이그레이션. 커맨드 카운트 73→75.
+
+### Removed
+- **Stop 슬롯의 post-work 자동발화 2종 제거.** `hooks/dispatch-table.json`
+  Stop 핸들러에서 `blindspot-check`·`teach-back` 엔트리 삭제(8→6). 훅 스크립트
+  `scripts/hooks/blindspot-check.js`·`scripts/hooks/teach-back.js`와 공유 로직
+  `lib/core/post-work-pass.js` 삭제(유일 소비자였던 두 훅과 함께 제거;
+  `dev-verify-output.js`는 미참조로 무관·존치). `artibot.config.json`의
+  `postWork` 섹션(blindspot/teachBack on/off 키)과 `lib/core/config-schema.js`의
+  대응 스키마 제거. 관련 테스트(`tests/core/post-work-pass.test.js`,
+  `tests/hooks/post-work-hooks.test.js`) 삭제, dispatcher 테스트 기대치 8→6
+  갱신, 신규 커맨드 프론트매터 검증 테스트 추가. 훅 스크립트 카운트 61→59.
+
+---
+
 ## [4.31.1] — 2026-07-09
 
 ### Changed

@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 /**
  * Stop dispatcher integration tests.
  *
- * The 5 wrapped Stop hooks each implement their own stop_hook_active loop
+ * The 6 wrapped Stop hooks each implement their own stop_hook_active loop
  * guard. The dispatcher's responsibility is only to spawn them, never block
  * the Stop slot, and forward additionalContext / decision=block.
  */
@@ -97,9 +97,9 @@ describe('_stop-dispatcher (integration)', () => {
     }
   });
 
-  it('registers all 8 wrapped hooks', async () => {
+  it('registers all 6 wrapped hooks', async () => {
     const mod = await import('../../scripts/hooks/_stop-dispatcher.js');
-    expect(mod.HOOKS).toHaveLength(8);
+    expect(mod.HOOKS).toHaveLength(6);
     const names = mod.HOOKS.map((h) => h.name);
     expect(names).toContain('stop-review-gate');
     expect(names).toContain('dev-verify-gate');
@@ -107,7 +107,9 @@ describe('_stop-dispatcher (integration)', () => {
     expect(names).toContain('stop-recap');
     expect(names).toContain('session-notes');
     expect(names).toContain('session-ledger');
-    expect(names).toContain('blindspot-check');
-    expect(names).toContain('teach-back');
+    // blindspot-check + teach-back were removed from the Stop slot when they
+    // became on-demand slash commands (commands/blindspot.md, teach-back.md).
+    expect(names).not.toContain('blindspot-check');
+    expect(names).not.toContain('teach-back');
   });
 });

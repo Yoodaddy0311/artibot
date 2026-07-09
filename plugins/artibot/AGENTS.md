@@ -256,7 +256,7 @@ All contributions must respect Artibot's **local-only data policy** — exports 
 | `plugins/artibot/.well-known/mcp-server.json` | `version` | plugin version |
 | `plugins/artibot/AGENTS.md` | this section | plugin version |
 
-Current plugin version: **4.31.1**. Keep the five in lockstep — `scripts/release-check.js` enforces all five.
+Current plugin version: **4.32.0**. Keep the five in lockstep — `scripts/release-check.js` enforces all five.
 
 ### Release gate: install & update verification
 
