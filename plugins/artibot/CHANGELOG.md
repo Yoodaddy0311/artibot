@@ -13,6 +13,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.36.3] — 2026-07-10
+
+### Fixed
+- **statusline 숫자 소수점 1자리 정리.** CLI가 보내는 원시 float
+  (`$22.165807150000013`, `5h 28.000000000000004%`)를 그대로 출력하던 문제.
+  `f1()` 헬퍼(1자리 반올림 + 뒤따르는 `.0` 제거)를 비용·5h%·7d% 3곳에 적용
+  → `$22.2 · 5h 28% · 7d 19.6%` (`scripts/hooks/statusline-themed.sh`).
+
+---
+
 ## [4.36.2] — 2026-07-10
 
 ### Changed

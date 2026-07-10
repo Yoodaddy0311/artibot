@@ -19,6 +19,10 @@ if command -v node >/dev/null 2>&1; then
   eval "$(ARTIBOT_SL_JSON="$input" node -e "
     try { const o=JSON.parse(process.env.ARTIBOT_SL_JSON||'{}');
       const q=v=>String(v==null?'':v).replace(/'/g,'');
+      // Round to 1 decimal and drop a trailing .0 — the CLI sends raw floats
+      // (e.g. 28.000000000000004, 22.165807150000013) unfit for display.
+      const f1=v=>{const n=Number(v);if(!Number.isFinite(n))return '';
+        const s=n.toFixed(1);return s.endsWith('.0')?s.slice(0,-2):s};
       const m=o.model||{}, cw=o.context_window||{}, cost=o.cost||{};
       const rl=o.rate_limits||{}, h5=rl.five_hour||{}, d7=rl.seven_day||{};
       const eff=o.effort||{}, th=o.thinking||{};
@@ -30,14 +34,14 @@ if command -v node >/dev/null 2>&1; then
       process.stdout.write([
         \"MODEL='\"+q(m.display_name||m.id||'')+\"'\",
         \"PCT='\"+q(pct)+\"'\",
-        \"COST='\"+q(cost.total_cost_usd!=null?cost.total_cost_usd:'')+\"'\",
+        \"COST='\"+q(cost.total_cost_usd!=null?f1(cost.total_cost_usd):'')+\"'\",
         \"EFFORT='\"+q(eff.level||'')+\"'\",
         \"THINKING_ON='\"+q(th.enabled===true?'1':'')+\"'\",
         \"FAST_ON='\"+q(o.fast_mode===true?'1':'')+\"'\",
         \"HAS_RL='\"+q(hasRl)+\"'\",
-        \"RL5='\"+q(h5.used_percentage!=null?h5.used_percentage:'')+\"'\",
+        \"RL5='\"+q(h5.used_percentage!=null?f1(h5.used_percentage):'')+\"'\",
         \"RL5_RESET='\"+q(r5reset)+\"'\",
-        \"RL7='\"+q(d7.used_percentage!=null?d7.used_percentage:'')+\"'\"
+        \"RL7='\"+q(d7.used_percentage!=null?f1(d7.used_percentage):'')+\"'\"
       ].join('\n')); }
     catch {}" 2>/dev/null || true)"
 fi
