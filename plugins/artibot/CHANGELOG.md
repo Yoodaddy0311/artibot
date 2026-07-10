@@ -13,6 +13,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.33.0] — 2026-07-10
+
+### Added
+- **statusline: 사용량 한도 게이지 (5h/7d).** Claude Code 2.1.172 statusLine
+  stdin의 `rate_limits.five_hour/seven_day.used_percentage`를 렌더 —
+  `5h 5% ~13:50 · 7d 1%` (5h는 `resets_at` 로컬시각 병기). 색상 임계
+  <70 dim · ≥70 accent · ≥90 danger+BOLD. 구독 플랜에선 `$` 환산치보다
+  이 게이지가 실질 사용량 지표. `rate_limits` 부재(구버전 CLI) 시 세그먼트
+  전체 생략 (`scripts/hooks/statusline-themed.sh`).
+- **statusline: 계정 배지.** `~/.claude.json` `oauthAccount`에서
+  `displayName`+플랜 티어(`/max_(\d+)x/` → `Max Nx`)를 읽어 L1 끝에
+  `⟨ AD Display·Max 20x ⟩` 렌더. 66KB 파일 매 렌더 파싱 방지를 위해
+  `runtime/account-badge.json` 24h TTL 캐시. 로컬 파일 읽기만 — 네트워크
+  호출 0 (DATA POLICY 준수).
+- **statusline: effort·thinking·fast 배지.** stdin `effort.level` /
+  `thinking.enabled` / `fast_mode` → `⚡high·think` 형태로 L2에 표시.
+  `effort` 부재 시 생략.
+
+### Changed
+- **statusline stdin 파싱을 node 1회 호출로 리팩터.** 필드당 node 프로세스를
+  띄우던 `jget()` 제거(필드 증가로 렌더당 ~9회가 될 지연 요인) — theme eval과
+  동일한 단일 eval-emit 패턴으로 통합, 전 변수 `q()` sanitize(eval 인젝션
+  차단, 적대 페이로드 실험 검증).
+- **statusline 스키마 트립와이어를 themed 스크립트로 확장.**
+  `tests/ci/statusline-schema.test.js`가 `statusline.sh`만 검사하고 실제
+  settings.json이 쓰는 `statusline-themed.sh`는 미검사이던 CI 갭 해소 —
+  신규 describe 블록(9필드 계약 + bash 문법 스모크, bash 부재 시 skip).
+  mutation 실험으로 키 삭제 시 실제 RED 됨을 실증. 테스트 16/16.
+
+---
+
 ## [4.32.0] — 2026-07-09
 
 ### Changed

@@ -9,20 +9,40 @@ input=$(cat)
 R='\033[0m'; BOLD='\033[1m'
 THEME_FILE="$HOME/.claude/artibot/runtime/current-theme.json"
 
-# ── stdin fields (official statusLine schema) ────────────────────────────────
-jget() {
-  local key="$1" def="${2:-}"
-  if command -v node >/dev/null 2>&1; then
-    ARTIBOT_SL_JSON="$input" node -e "
-      try { const o=JSON.parse(process.env.ARTIBOT_SL_JSON||'{}');
-        let v=o; for (const k of '$key'.replace(/^\./,'').split('.')) v=v&&v[k];
-        process.stdout.write(v==null||typeof v==='object'?'$def':String(v)); }
-      catch { process.stdout.write('$def'); }" 2>/dev/null || echo "$def"
-  else echo "$def"; fi
-}
-MODEL=$(jget '.model.display_name' ''); [ -z "$MODEL" ] && MODEL=$(jget '.model.id' 'claude')
-PCT=$(jget '.context_window.used_percentage' '0'); PCT=${PCT%%.*}; [ -z "$PCT" ] && PCT=0
-COST=$(jget '.cost.total_cost_usd' '')
+# ── stdin fields (official statusLine schema) — one node call emits all vars ──
+# Parses the stdin JSON payload once and emits shell-eval assignments (same
+# pattern as the theme eval below). Every value is sanitized with q() to strip
+# single quotes so the eval can't be injection-exploited. Missing fields → ''.
+MODEL=''; PCT=0; COST=''; EFFORT=''; THINKING_ON=''; FAST_ON=''
+RL5=''; RL5_RESET=''; RL7=''; HAS_RL=''
+if command -v node >/dev/null 2>&1; then
+  eval "$(ARTIBOT_SL_JSON="$input" node -e "
+    try { const o=JSON.parse(process.env.ARTIBOT_SL_JSON||'{}');
+      const q=v=>String(v==null?'':v).replace(/'/g,'');
+      const m=o.model||{}, cw=o.context_window||{}, cost=o.cost||{};
+      const rl=o.rate_limits||{}, h5=rl.five_hour||{}, d7=rl.seven_day||{};
+      const eff=o.effort||{}, th=o.thinking||{};
+      let pct=cw.used_percentage; pct=(pct==null?'0':String(pct)).split('.')[0]||'0';
+      const hasRl=(h5.used_percentage!=null||d7.used_percentage!=null)?'1':'';
+      let r5reset='';
+      if (h5.resets_at!=null){ const d=new Date(Number(h5.resets_at)*1000);
+        if(!isNaN(d)) r5reset=String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
+      process.stdout.write([
+        \"MODEL='\"+q(m.display_name||m.id||'')+\"'\",
+        \"PCT='\"+q(pct)+\"'\",
+        \"COST='\"+q(cost.total_cost_usd!=null?cost.total_cost_usd:'')+\"'\",
+        \"EFFORT='\"+q(eff.level||'')+\"'\",
+        \"THINKING_ON='\"+q(th.enabled===true?'1':'')+\"'\",
+        \"FAST_ON='\"+q(o.fast_mode===true?'1':'')+\"'\",
+        \"HAS_RL='\"+q(hasRl)+\"'\",
+        \"RL5='\"+q(h5.used_percentage!=null?h5.used_percentage:'')+\"'\",
+        \"RL5_RESET='\"+q(r5reset)+\"'\",
+        \"RL7='\"+q(d7.used_percentage!=null?d7.used_percentage:'')+\"'\"
+      ].join('\n')); }
+    catch {}" 2>/dev/null || true)"
+fi
+[ -z "$MODEL" ] && MODEL='claude'
+PCT=${PCT%%.*}; [ -z "$PCT" ] && PCT=0
 DIR=$(basename "$PWD"); BRANCH=$(git branch --show-current 2>/dev/null || true)
 # Plugin root is two levels up from scripts/hooks/. Prefer package.json, fall
 # back to artibot.config.json so the version still renders if either is absent.
@@ -55,6 +75,37 @@ fi
 neon() { printf '\033[38;2;%d;%d;%dm' "$1" "$2" "$3"; }
 C_PRIM="$(neon $PR $PG $PB)"; C_ACC="$(neon $AR $AG $AB)"; C_DIM="$(neon $DR $DG $DB)"; C_DANGER="$(neon $XR $XG $XB)"
 
+# ── account badge (local-only; DATA POLICY: no network) ──────────────────────
+# Cached label from ~/.claude.json oauthAccount, refreshed every 24h. Reads
+# local files only — never a network call. All failures degrade to an empty
+# badge; the statusline must never die on account-lookup errors.
+BADGE=''
+account_badge() {
+  local cache="$HOME/.claude/artibot/runtime/account-badge.json"
+  command -v node >/dev/null 2>&1 || return 0
+  ARTIBOT_BADGE_CACHE="$cache" node -e "
+    const fs=require('fs'); const cache=process.env.ARTIBOT_BADGE_CACHE;
+    const q=v=>String(v==null?'':v).replace(/'/g,'');
+    const fresh=()=>{ try { const c=JSON.parse(fs.readFileSync(cache,'utf8'));
+      if (c && c.label!=null && (Date.now()-(c.ts||0))<864e5) return String(c.label); } catch {} return null; };
+    let label=fresh();
+    if (label==null) {
+      try { const o=JSON.parse(fs.readFileSync(process.env.HOME+'/.claude.json','utf8'));
+        const a=o.oauthAccount||{};
+        const name=a.displayName||a.emailAddress||'';
+        const tierRaw=String(a.organizationRateLimitTier||'');
+        const mm=tierRaw.match(/max_(\d+)x/);
+        let tier = mm ? ('Max '+mm[1]+'x') : (a.organizationType==='claude_max' ? 'Max' : '');
+        label = name ? (tier ? (name+'·'+tier) : name) : '';
+        try { fs.mkdirSync(require('path').dirname(cache),{recursive:true});
+          fs.writeFileSync(cache, JSON.stringify({label, ts:Date.now()})); } catch {}
+      } catch { label=''; }
+    }
+    if (label) process.stdout.write(\"BADGE='\"+q(label)+\"'\");
+  " 2>/dev/null || true
+}
+eval "$(account_badge)" || true
+
 # ── primary→accent gradient bar ──────────────────────────────────────────────
 bar() {
   local pct="$1" w=18 i fill t r g b out=''
@@ -75,10 +126,39 @@ else
   BARSEG="$(bar "$PCT") ${C_PRIM}${PCT}%${R}"
 fi
 
+# ── rate-limit gauge color: <70 dim, ≥70 accent, ≥90 danger+BOLD ─────────────
+rl_color() {
+  local p="${1%%.*}"; [ -z "$p" ] && p=0
+  if [ "$p" -ge 90 ] 2>/dev/null; then printf '%s' "${C_DANGER}${BOLD}"
+  elif [ "$p" -ge 70 ] 2>/dev/null; then printf '%s' "${C_ACC}"
+  else printf '%s' "${C_DIM}"; fi
+}
+
 L1="${BOLD}${C_ACC}${GL_ML} ${MODEL} ${GL_MR}${R}  ${C_PRIM}${GL_WL} ${DIR} ${GL_WR}${R}"
 [ -n "$BRANCH" ] && L1="${L1}  ${C_ACC}${GL_BL} ${BRANCH} ${GL_BR}${R}"
+[ -n "$BADGE" ] && L1="${L1}  ${C_DIM}${GL_WL} ${BADGE} ${GL_WR}${R}"
 L2="${C_DIM}${GL_SEP}${R} ${C_PRIM}CTX${R} ${BARSEG}  ${C_DIM}${GL_SEP}${R}"
 [ -n "$COST" ] && L2="${L2}  ${C_ACC}${GL_SPARK} \$${COST}${R}"
+# effort·thinking·fast badge (omitted entirely when effort absent)
+if [ -n "$EFFORT" ]; then
+  EFFSEG="${C_ACC}${GL_SPARK}${EFFORT}"
+  [ -n "$THINKING_ON" ] && EFFSEG="${EFFSEG}·think"
+  [ -n "$FAST_ON" ] && EFFSEG="${EFFSEG}·fast"
+  L2="${L2}  ${EFFSEG}${R}"
+fi
+# rate-limit gauge (omitted entirely when the CLI doesn't send rate_limits)
+if [ -n "$HAS_RL" ]; then
+  RLSEG=''
+  if [ -n "$RL5" ]; then
+    RLSEG="$(rl_color "$RL5")5h ${RL5}%${R}"
+    [ -n "$RL5_RESET" ] && RLSEG="${RLSEG} ${C_DIM}~${RL5_RESET}${R}"
+  fi
+  if [ -n "$RL7" ]; then
+    [ -n "$RLSEG" ] && RLSEG="${RLSEG} ${C_DIM}·${R} "
+    RLSEG="${RLSEG}$(rl_color "$RL7")7d ${RL7}%${R}"
+  fi
+  [ -n "$RLSEG" ] && L2="${L2}  ${RLSEG}"
+fi
 [ -n "$VER" ] && L2="${L2}  ${C_DIM}${GL_WL}v${VER}${GL_WR}${R}"
 [ -n "$LABEL" ] && L2="${L2}  ${C_DIM}${LABEL}${R}"
 

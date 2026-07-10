@@ -13,9 +13,17 @@
  *   cost.total_cost_usd | cost.total_duration_ms
  *   model.display_name | model.id
  *
+ * The themed variant (statusline-themed.sh) is the script settings.json actually
+ * wires, so it gets its own tripwire covering both the shared fields above and
+ * the richer stdin surface captured from Claude Code 2.1.172:
+ *   rate_limits.five_hour.used_percentage | rate_limits.seven_day.used_percentage
+ *   effort.level | thinking.enabled | fast_mode
+ * plus the account-badge cache path string it reads.
+ *
  * @module tests/ci/statusline-schema
  */
 
+import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -25,6 +33,9 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const PLUGIN_ROOT = join(__dirname, '..', '..');
 const statusline = readFileSync(join(PLUGIN_ROOT, 'scripts', 'hooks', 'statusline.sh'), 'utf8');
+const themedPath = join(PLUGIN_ROOT, 'scripts', 'hooks', 'statusline-themed.sh');
+const themed = readFileSync(themedPath, 'utf8');
+const hasBash = spawnSync('bash', ['--version']).status === 0;
 
 describe('statusline.sh reads the official Claude Code statusLine schema', () => {
   it('reads context_window.used_percentage (the pre-computed %)', () => {
@@ -50,5 +61,64 @@ describe('statusline.sh reads the official Claude Code statusLine schema', () =>
   it('reads model.display_name / model.id (model is an object, not a string)', () => {
     expect(statusline).toMatch(/\.model\.display_name/);
     expect(statusline).toMatch(/\.model\.id/);
+  });
+});
+
+/*
+ * The themed script parses the stdin JSON once via object destructuring
+ * (e.g. `const cw=o.context_window` then `cw.used_percentage`) rather than
+ * repeated dotted-path lookups, so these tripwires assert on the official JSON
+ * key bindings (`o.context_window`, `.used_percentage`, ...) — the thing that
+ * regresses if a field name is dropped — not on a single dotted-path string.
+ */
+describe('statusline-themed.sh reads the official Claude Code statusLine schema', () => {
+  it('reads context_window.used_percentage (the pre-computed %)', () => {
+    expect(themed).toMatch(/o\.context_window/);
+    expect(themed).toMatch(/\.used_percentage/);
+  });
+
+  it('reads cost.total_cost_usd', () => {
+    expect(themed).toMatch(/o\.cost/);
+    expect(themed).toMatch(/\.total_cost_usd/);
+  });
+
+  it('reads model.display_name / model.id (model is an object, not a string)', () => {
+    expect(themed).toMatch(/o\.model/);
+    expect(themed).toMatch(/\.display_name/);
+    expect(themed).toMatch(/\.id\b/);
+  });
+
+  it('reads rate_limits.five_hour.used_percentage', () => {
+    expect(themed).toMatch(/o\.rate_limits/);
+    expect(themed).toMatch(/\.five_hour/);
+  });
+
+  it('reads rate_limits.seven_day.used_percentage', () => {
+    expect(themed).toMatch(/\.seven_day/);
+  });
+
+  it('reads effort.level', () => {
+    expect(themed).toMatch(/o\.effort/);
+    expect(themed).toMatch(/\.level/);
+  });
+
+  it('reads thinking.enabled', () => {
+    expect(themed).toMatch(/o\.thinking/);
+    expect(themed).toMatch(/\.enabled/);
+  });
+
+  it('reads fast_mode', () => {
+    expect(themed).toMatch(/\.fast_mode/);
+  });
+
+  it('references the account-badge cache path', () => {
+    expect(themed).toMatch(/runtime\/account-badge\.json/);
+  });
+});
+
+describe('statusline-themed.sh is syntactically valid bash', () => {
+  it.skipIf(!hasBash)('passes bash -n (parse-only) syntax check', () => {
+    const result = spawnSync('bash', ['-n', themedPath], { encoding: 'utf8' });
+    expect(result.status, result.stderr).toBe(0);
   });
 });
