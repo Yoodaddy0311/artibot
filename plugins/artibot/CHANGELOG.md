@@ -13,6 +13,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.36.0] — 2026-07-10
+
+### Added
+- **`/scorecard` — 기능 완성도 스코어카드 (커맨드 76→77).** 프로젝트를 기능
+  영역으로 분해해 file:line 증거와 함께 0~100 채점, 스냅샷을
+  `.artibot/scorecard.json`에 비파괴 누적, 전후를 "평가 항목 | 작업 전 |
+  작업 후 | 상승폭 | 남은 갭" 표로 비교(유저 레퍼런스: OBS 평가표).
+  - 엔진 `lib/planning/scorecard.js`(380줄, zero-deps): `addSnapshot`(불변,
+    score clamp, **빈 evidence→unverified `*` 정직 마킹**) ·
+    `diffSnapshots`(remaining=100−after, 신규/소멸 영역 처리) ·
+    `renderScorecard`(GFM+▰▱ 게이지) · atomic 저장. CLI
+    `add`(stdin JSON)/`diff`(기본 last-2, `--from/--to` 라벨 쌍)/`list`.
+  - **NEON THEMED 터미널 렌더러**: `renderScorecardTty` — isTTY 자동 감지
+    (파이프=GFM 유지), `current-theme.json` 팔레트로 primary→accent
+    truecolor 그라데이션 게이지·CJK 폭 보정 고정폭 정렬·▲그린/▼레드 델타·
+    `{sep} SCORECARD {sep}` 배너 — 테마 전환 시 게이지가 자동 변신
+    (SAKURA=❀, RETRO TERMINAL=앰버 █). 부재/corrupt 테마 파일→neon-city 폴백.
+  - 테스트 25개(`tests/planning/scorecard.test.js`) — mutation 실증 트립와이어
+    (unverified 제거→3 RED 등). 증거 규율은 커맨드 레이어가 강제
+    ("증거 없는 점수 금지"), 라이브러리는 관대(unverified 마킹).
+
+---
+
 ## [4.35.0] — 2026-07-10
 
 ### Added
