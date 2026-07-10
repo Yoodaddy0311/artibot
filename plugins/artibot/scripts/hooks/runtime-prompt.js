@@ -192,6 +192,29 @@ export function buildRecommendationDirective(workflowPlan) {
 }
 
 /**
+ * Detect a YouTube link in the user's prompt and surface an ADVISORY hint that
+ * the `/watch` ingest command fits. Deterministic (regex) counterpart to the
+ * probabilistic skill/description activation — the model still surfaces a
+ * recommendation and waits for intent; this never auto-fires `/watch`.
+ *
+ * Matches youtube.com / *.youtube.com (www/m/music) watch·shorts·embed URLs and
+ * youtu.be short links — the same host contract watch-ingest.js enforces; the
+ * host boundary rejects spoofs like youtube.com.evil.com. A bare 11-char id is
+ * NOT matched (too ambiguous for a front-door hint). On a hit, the first matched
+ * URL rides along as `url=<URL>`. Returns '' when no link is present so
+ * non-YouTube prompts stay byte-identical.
+ *
+ * @param {string} text - The user prompt text.
+ * @returns {string} `[artibot:hint recommend=watch url=<URL>]` or ''.
+ */
+export function buildWatchDirective(text) {
+  if (typeof text !== 'string' || !text) return '';
+  const yt = /https?:\/\/(?:(?:www|m|music)\.)?youtube\.com\/(?:watch\?[\w=&%-]*\bv=|shorts\/|embed\/)[\w-]{11}|https?:\/\/youtu\.be\/[\w-]{11}/i;
+  const hit = text.match(yt);
+  return hit ? `[artibot:hint recommend=watch url=${hit[0]}]` : '';
+}
+
+/**
  * Prepend one or more artibot directives to the user prompt on a single
  * leading line, separated from the original prompt by a blank line.
  *
@@ -609,8 +632,12 @@ export function composePromptOutput({ prepared, prompt, effortMeta, taskBudgetDi
   // front door. Same source as buildTeamDirective. This only adds text so the
   // user/model can opt in — it never auto-fires (honors the harness opt-in rule).
   const recommendationDirective = buildRecommendationDirective(prepared.context?.tasks?.meta?.workflowPlan);
+  // P4: deterministic front-door hint — a YouTube link in the prompt suggests the
+  // /watch ingest command. Advisory only (the model surfaces it and waits); never
+  // auto-fires. Built from the user text, so it's '' for non-YouTube prompts.
+  const watchDirective = buildWatchDirective(basePrompt);
   const finalUserPrompt = injectPrompt
-    ? applyPromptPrefix(basePrompt, [teamDirective, effortDirective, taskBudgetDirective, recommendationDirective])
+    ? applyPromptPrefix(basePrompt, [teamDirective, effortDirective, taskBudgetDirective, recommendationDirective, watchDirective])
     : basePrompt;
 
   const baseMessage = prepared.message ?? '[runtime] prompt prepared';

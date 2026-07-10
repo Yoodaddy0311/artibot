@@ -13,6 +13,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.35.0] — 2026-07-10
+
+### Added
+- **`/watch` — 유튜브 영상 로컬 인제스트 커맨드 (커맨드 75→76).**
+  벤치마킹(Claude Video) 부분채택 산물. `scripts/media/watch-ingest.js`
+  (243줄, zero-deps): yt-dlp 공개 자막 추출(transcript 기본, ko>en) +
+  ffmpeg 장면전환 키프레임(balanced, 기본 24장·하드캡 50) — **전부 로컬
+  바이너리, 외부 API·업로드·클라우드 STT 0** (DATA POLICY 인바운드 전용).
+  유튜브 host 화이트리스트(`isYouTubeHost`, `youtube.com.evil.com` 스푸핑
+  차단), 경로 traversal 가드, spawn DI(테스트 시임), 바이너리 미설치 시
+  graceful 한국어 설치 안내. 테스트 24개(`tests/scripts/watch-ingest.test.js`).
+  전제: `winget install yt-dlp.yt-dlp` (+프레임은 `Gyan.FFmpeg`).
+  **자동발화**: 프롬프트에 유튜브 링크가 보이면 `runtime-prompt.js`가
+  `[artibot:hint recommend=watch]`를 결정적으로 주입(watch·shorts·embed·
+  youtu.be, 스푸핑 host 비매치) + watch.md description URL 트리거 —
+  transcript 모드는 확인 없이 즉시 실행하는 명시적 예외로 승인(CLAUDE.md
+  힌트 규칙), 프레임 모드는 토큰 비용 보호를 위해 opt-in 유지. 훅 테스트
+  10개 추가(`tests/hooks/runtime-prompt-watch-inject.test.js`).
+- **`/implement` Phase 0 구현 전 검증 게이트.** 벤치마킹(Ponytail) 채택 —
+  코드 생성 전 3확인(기존 유사구현?/범위 내?/최소 설계?)을
+  `problem-validation` 스킬의 구현-시점 적용판으로 신설
+  (`commands/implement.md:29-38`). `skills/coding-standards`에
+  "Minimum code only"(YAGNI) 룰 추가.
+
+### Changed
+- **벤치마킹 방법론: 덩어리-REJECT 방지 배선.** 같은 세션 실사고(Claude
+  Video 통짜 기각 → 유저 지적으로 분해하니 부분채택 가능) 재발 방지 —
+  `commands/repo.md`에 Decompose-before-Verdict(step 5)·REJECT 되물음·
+  Verdict Grades 표(고아였던 TRANSFORM 등급 정식화),
+  `skills/problem-validation`에 Pre-step 분해 + **PARTIAL verdict** 등급,
+  `commands/blindspot.md`에 REJECT-side 분해 스캔. #79(과잉제안 방어)와
+  대칭인 과잉기각 방어 완성. 4개 제안 경로(repo·improve·analyze·ultraplan)
+  공유 진실원 1곳 수정으로 전파.
+
+---
+
 ## [4.34.0] — 2026-07-10
 
 ### Added

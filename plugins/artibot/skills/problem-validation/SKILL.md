@@ -56,6 +56,14 @@ Every candidate problem must survive this gate before it reaches the user.
 Each candidate starts at REJECT and must earn NECESSARY through evidence.
 Presenting a proposal without passing this gate is a quality violation.
 
+## Pre-step: Decompose the Proposal List First
+
+Before running the 4-check gate, enumerate every candidate as a discrete, named item. A vague "improve X" is not a candidate — split it until each item names one specific change. Candidates that cannot be named specifically at this stage are not ready for validation and must be clarified before proceeding.
+
+If a candidate is a compound feature, decompose it into independent sub-functions first, then apply the checklist to each sub-function separately. A "bulk REJECT" on a compound candidate is a signal that check 1 was not run per sub-function. When sub-functions yield different verdicts, report them as PARTIAL adoption rather than collapsing to a single verdict.
+
+복합 후보는 named 확인 후 **독립 하위기능으로 더 분해**해 각 조각에 체크리스트를 개별 적용한다. 덩어리 REJECT는 조각별 check 1을 안 돌린 신호다.
+
 ## Checklist (per candidate — all four must pass for NECESSARY)
 
 Run each check with actual tooling (Grep, Read, Glob) — never from memory.
@@ -72,6 +80,7 @@ Run each check with actual tooling (Grep, Read, Glob) — never from memory.
 | Verdict | Meaning | Condition |
 |---------|---------|-----------|
 | NECESSARY | Include in proposal | All 4 checks pass with evidence |
+| PARTIAL | Adopt only the NECESSARY sub-functions | 분해 시 일부 조각만 4-check 통과 — 통과 조각 ADOPT, 나머지 REJECT/DEFER 병기 |
 | DEFER | Value exists but no current demand | Checks 1/2/4 pass, check 3 weak |
 | REJECT | Drop — do not present | Fails check 1 (already done), 2 (no evidence), or 3+4 (YAGNI/too costly) |
 

@@ -4,7 +4,7 @@ Auto-loads when Claude accesses `plugins/artibot/`.
 
 ## Stack
 
-Claude Native Agent Teams API (TeamCreate/SendMessage/TaskCreate) + 28 agents + 113 skills + 75 commands. ESM only, `"type": "module"`, zero runtime deps, Node >=20.
+Claude Native Agent Teams API (TeamCreate/SendMessage/TaskCreate) + 28 agents + 113 skills + 76 commands. ESM only, `"type": "module"`, zero runtime deps, Node >=20.
 
 > **Honesty note (runtime middleware):** the default prompt pipeline runs an **11-stage** chain (`create-artibot-agent.js#defaultPipeline`) composed from the **15 middleware module files** in `lib/runtime/middleware/`. "11-stage" = the assembled default chain, not the module count; the remaining modules (aci-constraint, cache-roi, context-reset, otel-middleware, skill-trigger) are wired by other entry points or opt-in, not the default chain.
 
@@ -69,8 +69,9 @@ So "Claude auto-triggers without the user typing a slash" is accurate at the beh
 
 - `recommend=workflow` (동형 반복 감지): "이 작업은 같은 패턴 반복이라 워크플로우로 돌리면 더 빠르고 결과가 일정해요. 그렇게 할까요?"
 - `recommend=autopilot` (대형 무인작업 적합): "자리 비우셔도 되면 오토파일럿으로 돌릴 수 있어요."
+- `recommend=watch` (유튜브 URL 감지): **명시적 예외 — 확인 없이 즉시 실행** (workflow/autopilot과 달리 사전 확인 불필요). transcript 모드는 경량·로컬·인바운드 전용(공개 자막 텍스트만)이라 advisory-only 원칙의 예외로 승인된 동작. frames(프레임 판독)는 여전히 opt-in — 토큰 비용이 있으므로 자동 실행 금지, 필요 시 한 줄 제안. yt-dlp 미설치 시 실행 대신 설치 안내만 출력.
 
-See also: `commands/team.md` (hint cross-reference), `commands/autopilot.md` (hint cross-reference), `docs/ORCHESTRATION-ROUTING.md` (advisory-only rule).
+See also: `commands/team.md` (hint cross-reference), `commands/autopilot.md` (hint cross-reference), `commands/watch.md` (watch hint cross-reference), `docs/ORCHESTRATION-ROUTING.md` (advisory-only rule).
 
 ## Quality Gates
 

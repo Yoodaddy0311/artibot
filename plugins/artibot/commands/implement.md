@@ -26,6 +26,16 @@ If `--type` not specified, detect from feature description:
 - Service/worker/queue/scheduler keywords -> `service`
 - Default -> `feature`
 
+## Phase 0: Pre-Implementation Validation
+
+Before writing a single line of code, verify three things (use Grep/Read — no guessing from memory):
+
+1. **Exists?** Search the codebase for a similar function, component, or module that already satisfies the request. If found, prefer reuse or extension over new code.
+2. **In scope?** Confirm the feature is explicitly requested. Do not add helper utilities, extra options, or "nice-to-have" abstractions that were not asked for.
+3. **Minimal design?** Identify the most compact implementation path that meets the requirement. Choose the simplest data structure and fewest new files.
+
+> Cross-ref: this gate is the implementation-time application of the `problem-validation` skill (single source of truth for the 4-check validation framework). If Phase 0 reveals no new code is needed, report that as the outcome — do not implement anyway.
+
 ## Execution Flow
 
 1. **Decompose**: Break user request into numbered atomic requirements. EVERY requirement MUST be tracked.

@@ -21,7 +21,7 @@ Autonomous agent for Claude Code — 28 agents, parallel teams, lifelong learnin
 
 ## Tweet-length (≤ 280 chars)
 
-Artibot v4.34.0 — the autonomous agent OS for Claude Code. 28 agents, 113 skills,
+Artibot v4.35.0 — the autonomous agent OS for Claude Code. 28 agents, 113 skills,
 parallel teams, dual-process cognition, lifelong learning, opt-in OTEL,
 local-only data policy, 9,300+ tests. BUSL-1.1. Zero runtime deps. Production-grade.
 

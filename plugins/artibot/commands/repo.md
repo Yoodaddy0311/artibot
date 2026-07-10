@@ -50,6 +50,20 @@ Every spawned `repo-benchmarker` teammate MUST:
 
 **Orchestrator verification**: before aggregating, sample 3 random claims from each teammate's report and confirm the cited `file_path:line_number` exists in the cloned tree. Reject any teammate whose citations don't check out — re-run with stricter instructions.
 
+## Pre-Analysis: Inspect Structure Before You Judge
+
+> Skip this section only if `--quick` is passed.
+
+Before scoring, decompose the target repo into observable units so judgments are anchored to specific evidence rather than gestalt impressions.
+
+1. **List top-level dirs** — enumerate every directory (Bash `ls`), note the overall shape.
+2. **Map entry points** — identify main executable(s), plugin manifests, or `package.json`/`pyproject.toml` scripts.
+3. **Enumerate domain modules** — list key source files (≥10) across agents/commands/skills/hooks/tests; note file sizes.
+4. **Surface architectural signals** — note language, module system (ESM/CJS/etc.), test framework, CI config.
+5. **Flag inspection gaps** — if any major directory was not read, mark it `UNINSPECTED` in the report rather than inferring.
+
+Only after completing steps 1–5, proceed to the Execution Flow below.
+
 ## Execution Flow
 
 1. **Parse & Validate** — tokenize URLs, validate each, dedupe
@@ -60,11 +74,12 @@ Every spawned `repo-benchmarker` teammate MUST:
    - If ≥2 URLs → spawn N `repo-benchmarker` teammates **in parallel** (orchestrator aggregates). **This is the default; do not inline-analyze sequentially when more than one repo is given.**
    - If `--deep` → add `architect` + `code-reviewer` teammates for design & quality passes
    - If `--domain-check` → add `marketing-strategist` teammate for vertical coverage comparison
-5. **Score** — 10 dimensions per repo (see below)
-6. **Complexity-Filter Adoption** — drop any suggestion that violates `--complexity-budget`
-7. **Don't-Replace-If-Better Rule** — if Artibot's score on dimension D exceeds target's, label as "ADVANTAGE — keep as-is"; never recommend swap
-8. **Validate claims** *(inspired by awesome-opensource-ai/validate_awesome.py)* — for each adoption suggestion, verify the referenced file/pattern actually exists in the target repo (grep/read check) before listing
-9. **Aggregate Report** — single multi-repo table if N≥2
+5. **Decompose candidates** *(skip if `--quick`)* — Before assigning ADOPT/REJECT verdicts, decompose each proposal into independent sub-functions (e.g. "video awareness" → frame extraction · subtitle STT · ingest pipeline). Issue verdicts at the sub-function level — a single verdict on a compound proposal is forbidden; at least one decomposition attempt is required. If sub-functions fall under different policies or complexity tiers, split their verdicts accordingly (partial adoption allowed). For each candidate marked REJECT, ask once whether decomposition surfaces an adoptable piece; REJECT is final only after this check.
+6. **Score** — 10 dimensions per repo (see below)
+7. **Complexity-Filter Adoption** — drop any suggestion that violates `--complexity-budget`
+8. **Don't-Replace-If-Better Rule** — if Artibot's score on dimension D exceeds target's, label as "ADVANTAGE — keep as-is"; never recommend swap
+9. **Validate claims** *(inspired by awesome-opensource-ai/validate_awesome.py)* — for each adoption suggestion, verify the referenced file/pattern actually exists in the target repo (grep/read check) before listing
+10. **Aggregate Report** — single multi-repo table if N≥2
 
 ## 10 Scoring Dimensions
 
@@ -111,6 +126,15 @@ if artibot_score[D] >= target_score[D]:
 else:
     evaluate_adoption(target_pattern, complexity_budget)
 ```
+
+## Verdict Grades
+
+| Grade | Meaning |
+|-------|---------|
+| ADOPT | Sub-function passes all complexity and quality checks — implement as-is |
+| TRANSFORM | Compound candidate with mixed sub-verdicts (some ADOPT + some REJECT/DEFER); list each piece's grade separately |
+| DEFER | Value exists but no current demand or blocked by complexity budget |
+| REJECT | Drop — fails evidence, YAGNI, or complexity checks on all sub-functions |
 
 ## Output Format (multi-repo)
 

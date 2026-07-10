@@ -85,6 +85,7 @@ See `${CLAUDE_SKILL_DIR}/references/file-organization.md` for rules.
 
 ### Code Quality Checklist
 - [ ] Functions <50 lines, files <800 lines
+- [ ] Minimum code only: generate exactly what the request requires. No unrequested abstractions, helper utilities, or extra options (YAGNI).
 - [ ] No deep nesting (>4 levels)
 - [ ] Proper error handling on all operations
 - [ ] No `console.log` (use structured logging)
