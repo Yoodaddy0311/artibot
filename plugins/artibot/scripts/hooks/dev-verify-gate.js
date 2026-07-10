@@ -51,16 +51,14 @@ const HOOK_NAME = 'dev-verify-gate';
 const STATE_FILE = 'last-dev-verify-sha.txt';
 const MARKER_FILE = 'last-main-agent-edit.timestamp';
 
+// Single line on purpose: Claude Code ≥ 2.1.172 renders Stop-hook
+// additionalContext verbatim in the terminal ("Stop hook feedback:") and
+// suppressOutput cannot hide it (upstream anthropics/claude-code#67193).
+// The full DECOMPOSE/EXECUTE/VERIFY checklist lives in plugins/artibot/
+// CLAUDE.md (DEV Protocol), which the model already has in context.
 const DEV_VERIFY_REASON =
-  'Run the DEV verify checklist before finalising. ' +
-  '(1) DECOMPOSE: was every numbered item from the original request addressed? ' +
-  'List any silently dropped items. ' +
-  '(2) EXECUTE: was each modified file re-read after the change to confirm ' +
-  'the edit landed at the intended line? ' +
-  '(3) VERIFY: produce evidence per item (file:line + what changed). ' +
-  "If any item lacks evidence, surface a 'Pending verification' note BEFORE " +
-  'the user sees the response. ' +
-  'Reference: plugins/artibot/CLAUDE.md (DEV Protocol section).';
+  'DEV verify (CLAUDE.md DEV Protocol): report per-item evidence (file:line); ' +
+  "flag anything unproven as 'Pending verification'.";
 
 /**
  * Run a git command in the given cwd, returning trimmed stdout.

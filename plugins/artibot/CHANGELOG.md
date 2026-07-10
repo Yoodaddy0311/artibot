@@ -13,6 +13,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.36.2] — 2026-07-10
+
+### Changed
+- **dev-verify Stop 훅 피드백 1줄 축약.** Claude Code 2.1.172부터 Stop 훅
+  `hookSpecificOutput.additionalContext`가 터미널에 "Stop hook feedback:"으로
+  그대로 노출되고 `suppressOutput`으로도 숨길 수 없어(업스트림
+  anthropics/claude-code#67193), 9줄 DECOMPOSE/EXECUTE/VERIFY 전문을 1줄로
+  축약. 전체 체크리스트는 CLAUDE.md DEV Protocol 섹션이 상주하므로 모델 행동
+  손실 없음 (`scripts/hooks/dev-verify-gate.js`).
+
+---
+
 ## [4.36.1] — 2026-07-10
 
 ### Fixed
