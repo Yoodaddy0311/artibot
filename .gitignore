@@ -86,3 +86,7 @@ reports/
 # `**/` so it matches whether the hook's projectRoot is the repo root or a
 # nested cwd (e.g. plugins/artibot/.artibot/ledger/ during in-repo dev).
 **/.artibot/ledger/
+
+# Claude Code plan-mode ephemeral state — machine-local absolute paths, stale
+# across sessions. Never commit.
+.plan-state.json
