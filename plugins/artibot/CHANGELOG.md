@@ -13,6 +13,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.34.0] — 2026-07-10
+
+### Added
+- **`/theme` 신규 테마 2종 — `crt-amber` "RETRO TERMINAL" + `sakura` "SAKURA".**
+  리서치 기반 확장(앰버 포스퍼 CRT 1982 / 벚꽃 파스텔). 레지스트리 데이터
+  엔트리만 추가, 엔진(theme-apply.js) 무변경 (`scripts/theme/registry.js`).
+  - **RETRO TERMINAL**: bg `#1A1000`·fg `#FFB000` 앰버 모노크롬, 시맨틱
+    red/green 시인성 유지(red 5.11:1 vs green 9.46:1). fg/bg 대비 10.25:1
+    WCAG AA. 글리프 블록/ASCII(`█░ ══ [ ] ▮`).
+  - **SAKURA**: 벚꽃 핑크 `#FFB7C5` × 다크 플럼 `#2A1B26` × 크림 fg —
+    파스텔인데 14.70:1 AA 확보. 게이지 fill `❀`(단일셀 검증), 새잎 그린
+    accent. 아기자기 컨셉.
+  - 두 테마 모두 statusline 18셀 바 정렬 실렌더 검증, 적용→reset 4표면
+    왕복 검증 완료. `commands/theme.md` argument-hint·표 5종 반영.
+
+### Changed
+- **registry 트립와이어 확장.** `tests/scripts/registry.test.js` ship 테스트
+  5종 + 신규 스팟 assert(label 정본·signals 3-tuple·단일 코드포인트 fill
+  글리프·buildStatuslinePalette 라운드트립). 37/37 PASS.
+
+---
+
 ## [4.33.0] — 2026-07-10
 
 ### Added

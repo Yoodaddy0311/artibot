@@ -55,6 +55,38 @@ export const THEMES = {
       brightBlue: '#B49CFF', brightPurple: '#FF9CE6', brightCyan: '#9CE6FF', brightWhite: '#FFFFFF',
     },
   },
+
+  'crt-amber': {
+    label: 'RETRO TERMINAL',
+    desc: '1982 앰버 포스퍼 CRT — 호박색 모노크롬 (시맨틱 red/green 시인성 유지)',
+    bg: '#1A1000', fg: '#FFB000', cursor: '#FFCC33', selection: '#4D3300',
+    // amber monochrome ramp; danger stays a true red so error/success never blurs.
+    // fg/bg = 10.25:1, danger 5.11:1, red↔green separable (5.11 vs 9.46:1). WCAG AA.
+    signals: { primary: [255, 176, 0], accent: [255, 140, 26], danger: [255, 48, 48], dim: [77, 51, 0], warn: [255, 204, 51] },
+    glyphs: { wrapL: '[', wrapR: ']', brL: '<', brR: '>', sep: '══', fill: '█', empty: '░', modL: '▓▒░', modR: '░▒▓', spark: '▮' },
+    ansi: {
+      black: '#241800', red: '#FF3030', green: '#B8C000', yellow: '#FFB000',
+      blue: '#C89000', purple: '#FF8C1A', cyan: '#E0A828', white: '#FFD98C',
+      brightBlack: '#4D3300', brightRed: '#FF6060', brightGreen: '#D8E040', brightYellow: '#FFCC33',
+      brightBlue: '#E0B030', brightPurple: '#FFB050', brightCyan: '#FFD878', brightWhite: '#FFF3D0',
+    },
+  },
+
+  sakura: {
+    label: 'SAKURA',
+    desc: '벚꽃 파스텔 — 체리 핑크×새잎 그린, 크림 텍스트 (퍼플틴트 다크)',
+    bg: '#2A1B26', fg: '#FFF0E6', cursor: '#FFB7C5', selection: '#4A2E42',
+    // cherry-blossom pink primary + new-leaf green accent on a purple-tinted dark.
+    // cream fg/bg = 14.70:1, primary 10.00:1, accent 10.13:1. WCAG AA.
+    signals: { primary: [255, 183, 197], accent: [168, 216, 160], danger: [255, 122, 154], dim: [74, 46, 66], warn: [255, 217, 160] },
+    glyphs: { wrapL: '❨', wrapR: '❩', brL: '❲', brR: '❳', sep: '✿✿', fill: '❀', empty: '·', modL: '❁❀✿', modR: '✿❀❁', spark: '✿' },
+    ansi: {
+      black: '#2A1B26', red: '#FF7A9A', green: '#A8D8A0', yellow: '#FFD9A0',
+      blue: '#C0A8E8', purple: '#FFB7C5', cyan: '#A0D8D8', white: '#FFF0E6',
+      brightBlack: '#4A2E42', brightRed: '#FF9DB5', brightGreen: '#C0E8B8', brightYellow: '#FFE8C0',
+      brightBlue: '#D0C0F0', brightPurple: '#FFCDD8', brightCyan: '#B8E8E8', brightWhite: '#FFFAF5',
+    },
+  },
 };
 
 export const THEME_NAMES = Object.keys(THEMES);

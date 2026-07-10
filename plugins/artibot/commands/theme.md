@@ -1,6 +1,6 @@
 ---
-description: (Artibot) 터미널 테마 전환 — 사이버펑크/매트릭스/베이퍼웨이브 (statusline + Windows Terminal + VS Code 터미널 색 + output-style)
-argument-hint: '[neon-city|matrix|vaporwave|list|reset]'
+description: (Artibot) 터미널 테마 전환 — 사이버펑크/매트릭스/베이퍼웨이브/앰버CRT/벚꽃 (statusline + Windows Terminal + VS Code 터미널 색 + output-style)
+argument-hint: '[neon-city|matrix|vaporwave|crt-amber|sakura|list|reset]'
 allowed-tools: [Read, Bash]
 ---
 
@@ -19,7 +19,7 @@ Artibot 터미널 테마를 전환한다. 한 번에 **4개 표면**을 바꾼�
 
 Parse `$ARGUMENTS`:
 - (없음) 또는 `list` → 사용 가능한 테마 목록 표시
-- `<name>` → 테마 적용 (`neon-city` | `matrix` | `vaporwave`)
+- `<name>` → 테마 적용 (`neon-city` | `matrix` | `vaporwave` | `crt-amber` | `sakura`)
 - `reset` → 기본 테마로 원복
 
 ## 실행 (엔진 호출)
@@ -57,6 +57,8 @@ Bash: ENGINE="$HOME/.claude/artibot/scripts/theme-apply.js"; [ -f "$ENGINE" ] ||
 | `neon-city` | 사이버펑크 2077 | 시안 → 마젠타 |
 | `matrix` | 해커 그린 코드레인 | 그린 모노크롬 |
 | `vaporwave` | 레트로 파스텔 석양 | 핑크 → 퍼플 |
+| `crt-amber` | RETRO TERMINAL — 1982 앰버 CRT 모노크롬 | 앰버 → 오렌지 |
+| `sakura` | 벚꽃 파스텔 — 체리 핑크×새잎 그린 | 핑크 → 그린 |
 
 ## 제약 / 안전
 

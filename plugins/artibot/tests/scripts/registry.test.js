@@ -18,8 +18,10 @@ import {
 } from '../../scripts/theme/registry.js';
 
 describe('theme registry', () => {
-  it('ships neon-city, matrix and vaporwave', () => {
-    expect(THEME_NAMES).toEqual(expect.arrayContaining(['neon-city', 'matrix', 'vaporwave']));
+  it('ships neon-city, matrix, vaporwave, crt-amber and sakura', () => {
+    expect(THEME_NAMES).toEqual(
+      expect.arrayContaining(['neon-city', 'matrix', 'vaporwave', 'crt-amber', 'sakura']),
+    );
   });
 
   it('isTheme recognizes only registered themes', () => {
@@ -59,6 +61,42 @@ describe('buildStatuslinePalette', () => {
     expect(p.theme).toBe('matrix');
     expect(p.signals.primary).toEqual([0, 255, 65]);
     expect(p.glyphs.fill).toBe('▮');
+  });
+});
+
+describe('new themes: crt-amber & sakura', () => {
+  // Spot-asserts on the two themes shipped in this batch. The generic loops
+  // above (16-color palette, output-style, VS Code map) already cover them via
+  // THEME_NAMES; these pin the theme-specific label + signal + glyph contract.
+  it('crt-amber has the RETRO TERMINAL label, 3-tuple signals, and a single-cell fill glyph', () => {
+    const t = THEMES['crt-amber'];
+    expect(t.label).toBe('RETRO TERMINAL');
+    expect(t.signals.primary).toHaveLength(3);
+    expect(t.signals.accent).toHaveLength(3);
+    expect(t.signals.danger).toHaveLength(3);
+    expect(t.signals.dim).toHaveLength(3);
+    expect([...t.glyphs.fill]).toHaveLength(1);
+    expect(isTheme('crt-amber')).toBe(true);
+  });
+
+  it('sakura has the SAKURA label, 3-tuple signals, and a single-cell fill glyph', () => {
+    const t = THEMES.sakura;
+    expect(t.label).toBe('SAKURA');
+    expect(t.signals.primary).toHaveLength(3);
+    expect(t.signals.accent).toHaveLength(3);
+    expect(t.signals.danger).toHaveLength(3);
+    expect(t.signals.dim).toHaveLength(3);
+    expect([...t.glyphs.fill]).toHaveLength(1);
+    expect(isTheme('sakura')).toBe(true);
+  });
+
+  it('buildStatuslinePalette exposes both new themes with their signals', () => {
+    for (const name of ['crt-amber', 'sakura']) {
+      const p = buildStatuslinePalette(name);
+      expect(p.theme).toBe(name);
+      expect(p.signals.primary).toEqual(THEMES[name].signals.primary);
+      expect(p.glyphs.fill).toBe(THEMES[name].glyphs.fill);
+    }
   });
 });
 
