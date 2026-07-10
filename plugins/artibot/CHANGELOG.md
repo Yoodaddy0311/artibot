@@ -13,6 +13,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.36.1] — 2026-07-10
+
+### Fixed
+- **statusline 한도 게이지 비가시 수정.** `rl_color`가 사용량 70% 미만 구간에서
+  테마 `dim` 색을 사용해 RETRO TERMINAL(dim=77,51,0) 등 어두운 팔레트에서
+  5h/7d 한도 게이지가 배경에 묻혀 보이지 않던 문제. 저사용 구간을 primary 색으로
+  전환하고 리셋 시각(`~HH:MM`)도 함께 primary로 변경. ≥70% accent / ≥90%
+  danger+bold 단계 로직은 유지 (`scripts/hooks/statusline-themed.sh`).
+
+---
+
 ## [4.36.0] — 2026-07-10
 
 ### Added

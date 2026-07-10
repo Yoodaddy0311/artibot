@@ -126,12 +126,15 @@ else
   BARSEG="$(bar "$PCT") ${C_PRIM}${PCT}%${R}"
 fi
 
-# ── rate-limit gauge color: <70 dim, ≥70 accent, ≥90 danger+BOLD ─────────────
+# ── rate-limit gauge color: <70 primary, ≥70 accent, ≥90 danger+BOLD ─────────
+# Low usage renders in primary, not dim: several theme palettes (e.g. RETRO
+# TERMINAL dim = 77,51,0) make dim unreadable on dark backgrounds, which hid
+# the gauge entirely below 70%.
 rl_color() {
   local p="${1%%.*}"; [ -z "$p" ] && p=0
   if [ "$p" -ge 90 ] 2>/dev/null; then printf '%s' "${C_DANGER}${BOLD}"
   elif [ "$p" -ge 70 ] 2>/dev/null; then printf '%s' "${C_ACC}"
-  else printf '%s' "${C_DIM}"; fi
+  else printf '%s' "${C_PRIM}"; fi
 }
 
 L1="${BOLD}${C_ACC}${GL_ML} ${MODEL} ${GL_MR}${R}  ${C_PRIM}${GL_WL} ${DIR} ${GL_WR}${R}"
@@ -151,7 +154,7 @@ if [ -n "$HAS_RL" ]; then
   RLSEG=''
   if [ -n "$RL5" ]; then
     RLSEG="$(rl_color "$RL5")5h ${RL5}%${R}"
-    [ -n "$RL5_RESET" ] && RLSEG="${RLSEG} ${C_DIM}~${RL5_RESET}${R}"
+    [ -n "$RL5_RESET" ] && RLSEG="${RLSEG} ${C_PRIM}~${RL5_RESET}${R}"
   fi
   if [ -n "$RL7" ]; then
     [ -n "$RLSEG" ] && RLSEG="${RLSEG} ${C_DIM}·${R} "
