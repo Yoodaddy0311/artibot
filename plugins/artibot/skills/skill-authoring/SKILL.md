@@ -86,6 +86,24 @@ If a step in this skill is skipped, state explicitly: which step, why it was blo
 | "I'll add triggers later when the skill is more mature" | A skill with weak triggers is invisible to the model — it never fires, so it never matures |
 | "@-links make the skill self-contained and easy to use" | Self-contained at the cost of context window is a net loss; reference by name, load on demand |
 
+## 6. Failure-Mode Diagnostic Vocabulary
+
+When a skill misbehaves, name the failure precisely before fixing it — a vague complaint produces a vague fix.
+
+- **Premature completion** — the agent stops before finishing a step because the completion criterion was ambiguous. First defense: sharpen the criterion into something checkable (a command that exits 0, a count that matches). Splitting the step into smaller pieces is a last resort, not the first move.
+- **Duplication** — the same guidance restated in multiple places. Costs tokens twice and distorts the section's apparent importance relative to the rest of the skill.
+- **Sediment** — old instructions nobody removes because deletion feels risky and addition feels safe. The default fate of any skill without active pruning discipline.
+- **Sprawl** — every line is individually justified but the whole is too long to hold in attention. Fix with progressive disclosure (move reference material to a separate file the agent reads on demand) or split into a branch skill. Artibot's 500-line cap is a partial backstop, not a cure.
+- **No-op** — a line that states behavior the model already does by default ("be thorough", "write clean code"). Test: does this sentence change behavior relative to the model's baseline? If it can't, delete it.
+- **Negation** — steering by prohibition backfires ("don't think of an elephant" summons the elephant). State the target behavior positively. Reserve prohibition for hard guardrails that genuinely cannot be phrased as a positive instruction, and pair each one with the alternative action to take instead.
+
+## 7. Leading Words
+
+Anchor behavior with single words the model already has compressed meaning for from pretraining (*tight*, *idempotent*, *tracer bullet*) instead of multi-sentence restatements.
+
+- If a phrase takes three sentences to say what one trained-in word already means — "fast, deterministic, low-overhead" collapses to *tight* — use the word.
+- Repeat the same leading word in both `description` and body: in the description it raises activation confidence (the model recognizes the concept and fires the skill); in the body the same word keeps execution consistent with what the description promised.
+
 ## Frontmatter Checklist
 
 | Field | Required | Rule |
