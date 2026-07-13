@@ -12,7 +12,7 @@
     {
       "name": "artibot",
       "description": "Cognitive orchestration framework with dual-process routing, hierarchical 3-layer memory, GRPO-RLVR self-learning, expert agent teams, and workflow automation for Claude Code",
-      "version": "4.36.6",
+      "version": "4.37.0",
       "author": {
         "name": "Artience"
       },

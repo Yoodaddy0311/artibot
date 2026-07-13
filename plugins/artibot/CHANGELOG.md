@@ -13,6 +13,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.37.0] — 2026-07-13
+
+### Changed
+- **스킬 invocation 축 1차 배치 — 저작·설정 세리머니 5종 user-invoked 전환**
+  (mattpocock/skills 벤치마킹 도입 후보 1). `persona-distill`, `tool-approval`,
+  `prompt-caching-strategy`, `skill-authoring`, `hook-event-emitter`에
+  `disable-model-invocation: true` — 자동발동 대신 슬래시 호출 전용.
+  뒤 3종은 `user-invocable: false`(모델 전용)에서 **반전** — DMI만 추가하면
+  양방향 차단으로 죽은 스킬이 되는 함정 회피. 주 효과는 컨텍스트 절감
+  (이론 상한 ≈2.9%)이 아니라 오발동 억제·의도적 호출화. 분류 전수:
+  KEEP-MODEL 97 / TO-USER 5 / BORDERLINE 7(보류 — 오발동 관측 시에만) / 기적용 4.
+
+### Added
+- **skill-authoring: 실패 모드 진단 어휘 + leading words 원칙** (도입 후보 2·3).
+  6절 — premature completion / duplication / sediment / sprawl / no-op /
+  negation. 7절 — 사전학습 압축 개념어로 발동 신뢰도·실행 일관성 동시 앵커링.
+- `.gitignore`: `.artibot/media/` (/watch 인제스트 산출물 — 로컬 전용).
+
+---
+
 ## [4.36.6] — 2026-07-13
 
 ### Fixed
