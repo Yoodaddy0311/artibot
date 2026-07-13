@@ -152,6 +152,35 @@ describe('collectPostInstallInvariants (INV-3/4/5/6)', () => {
     expect(res.failures.map((f) => f.id)).toContain('INV-3');
   });
 
+  it('INV-4 fails when a non-git marketplace mirror diverges from installed', () => {
+    const { home, installedRoot } = setup();
+    const mirrorRoot = join(home, '.claude', 'plugins', 'marketplaces', 'artibot', 'plugins', 'artibot');
+    writeHooks(mirrorRoot, '{"v":2}'); // differs from installed {"v":1}
+    const inv = collectPostInstallInvariants({
+      home, installedRoot, sourcePluginRoot: null,
+      installedVersion: '4.26.1', latestVersion: 'v4.26.1', updateAvailable: true,
+    });
+    const res = assertPostInstall(inv);
+    expect(res.ok).toBe(false);
+    expect(res.failures.map((f) => f.id)).toContain('INV-4');
+  });
+
+  it('INV-4 is skipped for a git-managed marketplace (mirror intentionally not written)', () => {
+    // Regression (2026-07-13 v4.32.0-stuck incident): install.sh/ps1 never
+    // write into a git-managed marketplace, so a version gap there is
+    // expected — comparing it would be a guaranteed false failure.
+    const { home, installedRoot } = setup();
+    const marketplaceRoot = join(home, '.claude', 'plugins', 'marketplaces', 'artibot');
+    mkdirSync(join(marketplaceRoot, '.git'), { recursive: true });
+    writeHooks(join(marketplaceRoot, 'plugins', 'artibot'), '{"v":2}'); // stale clone content
+    const inv = collectPostInstallInvariants({
+      home, installedRoot, sourcePluginRoot: null,
+      installedVersion: '4.26.1', latestVersion: 'v4.26.1', updateAvailable: true,
+    });
+    expect(inv.map((i) => i.id)).not.toContain('INV-4');
+    expect(assertPostInstall(inv).ok).toBe(true);
+  });
+
   it('INV-6 fails when the .last-install-noop marker is present for a pending update', () => {
     const { home, installedRoot } = setup();
     writeFileSync(join(installedRoot, '.last-install-noop'), new Date(0).toISOString());

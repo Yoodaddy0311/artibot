@@ -218,12 +218,20 @@ install_hooks() {
 # ──────────────────────────────────────────────
 # Mirror to Claude Code marketplace install
 # ──────────────────────────────────────────────
-# Claude Code's plugin system maintains its own install copy at
+# Claude Code's plugin system keeps a marketplace copy at
 #   ~/.claude/plugins/marketplaces/artibot/plugins/artibot/
-# Every project session reads hooks from THAT path (via CLAUDE_PLUGIN_ROOT),
-# not from ~/.claude/artibot/. Skipping this mirror leaves the marketplace
-# at whatever version Claude Code last fetched (often months stale), causing
-# silent hook regressions in other projects after a manual update here.
+# Sessions load hooks/skills from the per-version PLUGIN CACHE
+# (~/.claude/plugins/cache/..., see install_plugin_cache below) — the
+# marketplace copy is only the install SOURCE Claude Code pulls from.
+#
+# GIT-MANAGED GUARD (v4.36.4): when the marketplace copy is git-managed
+# (github-sourced marketplace), Claude Code refreshes it with git pull.
+# Writing into that worktree leaves it dirty/diverged, the pull then fails
+# silently, and `claude plugin update` reports a stale version as
+# "latest" forever (2026-07-13 v4.32.0-stuck incident). Never write into
+# a git-managed marketplace — `claude plugin marketplace update artibot`
+# owns that path. The mirror below only runs for non-git (directory-
+# sourced) marketplace layouts.
 #
 # Legacy-stub policy: when a hook file is removed across versions (e.g.
 # check-console-log.js was consolidated into dev-verify-gate.js in v4.7.2),
@@ -232,9 +240,14 @@ install_hooks() {
 # file on the next Stop event — MODULE_NOT_FOUND crashes the dispatcher.
 # Stubs keep those in-flight sessions alive until they restart.
 install_marketplace_mirror() {
-  local mkt_root="${CLAUDE_DIR}/plugins/marketplaces/artibot/plugins/artibot"
+  local mkt_clone="${CLAUDE_DIR}/plugins/marketplaces/artibot"
+  local mkt_root="${mkt_clone}/plugins/artibot"
   if [ ! -d "${mkt_root}" ]; then
     log "Marketplace install not present (skip mirror)"
+    return 0
+  fi
+  if [ -e "${mkt_clone}/.git" ]; then
+    log "Marketplace is git-managed by Claude Code (skip mirror — use 'claude plugin marketplace update artibot')"
     return 0
   fi
 

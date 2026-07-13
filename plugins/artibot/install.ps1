@@ -332,14 +332,22 @@ function Copy-DirClean {
 # ---------------------------------------------------------------------------
 # Marketplace mirror — parity with install.sh install_marketplace_mirror (L202)
 # ---------------------------------------------------------------------------
-# Claude Code reads hooks from ~/.claude/plugins/marketplaces/artibot/... via
-# CLAUDE_PLUGIN_ROOT, not from ~/.claude/artibot/. Skipping this leaves the
-# marketplace at whatever version Claude Code last fetched (often stale),
-# causing silent hook regressions in other projects after a manual update.
+# Sessions load hooks/skills from the per-version plugin CACHE — the
+# marketplace copy is only the install source Claude Code pulls from.
+# GIT-MANAGED GUARD (v4.36.4): when the marketplace copy is git-managed,
+# writing into it leaves the worktree dirty/diverged, Claude Code's refresh
+# pull then fails silently, and `claude plugin update` reports a stale
+# version as "latest" forever (2026-07-13 v4.32.0-stuck incident). The
+# mirror only runs for non-git (directory-sourced) marketplace layouts.
 function Update-MarketplaceMirror {
-  $mktRoot = Join-Path $ClaudeDir 'plugins\marketplaces\artibot\plugins\artibot'
+  $mktClone = Join-Path $ClaudeDir 'plugins\marketplaces\artibot'
+  $mktRoot = Join-Path $mktClone 'plugins\artibot'
   if (-not (Test-Path $mktRoot)) {
     Write-Log 'Marketplace install not present (skip mirror)'
+    return
+  }
+  if (Test-Path (Join-Path $mktClone '.git')) {
+    Write-Log "Marketplace is git-managed by Claude Code (skip mirror - use 'claude plugin marketplace update artibot')"
     return
   }
 

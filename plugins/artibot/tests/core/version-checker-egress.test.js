@@ -34,7 +34,7 @@ describe('version-checker: assertEgressAllowed gate', () => {
       Promise.resolve({
         ok: true,
         status: 200,
-        json: () => Promise.resolve({ tag_name: 'v99.0.0' }),
+        json: () => Promise.resolve({ version: '99.0.0', tag_name: 'v99.0.0' }),
       }),
     );
   });
@@ -43,16 +43,29 @@ describe('version-checker: assertEgressAllowed gate', () => {
     globalThis.fetch = originalFetch;
   });
 
-  it('calls assertEgressAllowed with the GitHub API URL before fetch', async () => {
+  it('calls assertEgressAllowed with the master manifest URL before fetch', async () => {
+    // Primary source since v4.36.4 is master's plugin.json on
+    // raw.githubusercontent.com; the Releases API is only the fallback.
     await checkForUpdate('1.0.0', '/fake/cache');
     expect(mockAssertEgress).toHaveBeenCalledTimes(1);
     const [url, opts] = mockAssertEgress.mock.calls[0];
-    expect(url).toMatch(/api\.github\.com/);
+    expect(url).toMatch(/raw\.githubusercontent\.com/);
     expect(opts?.reason).toBe('version-check');
   });
 
+  it('gates the Releases-API fallback through assertEgressAllowed too', async () => {
+    globalThis.fetch = vi.fn(() =>
+      Promise.resolve({ ok: false, status: 404, json: () => Promise.resolve({}) }),
+    );
+    await checkForUpdate('1.0.0', '/fake/cache');
+    expect(mockAssertEgress).toHaveBeenCalledTimes(2);
+    expect(mockAssertEgress.mock.calls[0][0]).toMatch(/raw\.githubusercontent\.com/);
+    expect(mockAssertEgress.mock.calls[1][0]).toMatch(/api\.github\.com/);
+  });
+
   it('does NOT call fetch when assertEgressAllowed throws EgressBlockedError', async () => {
-    mockAssertEgress.mockImplementationOnce(() => {
+    // Block EVERY egress attempt — primary and fallback alike must respect it.
+    mockAssertEgress.mockImplementation(() => {
       const err = new Error('egress blocked');
       err.name = 'EgressBlockedError';
       throw err;

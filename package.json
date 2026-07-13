@@ -1,7 +1,7 @@
 {
   "name": "artibot-repo",
   "private": true,
-  "version": "4.36.3",
+  "version": "4.36.4",
   "description": "Artibot monorepo root — see plugins/artibot/ for the published plugin.",
   "license": "BUSL-1.1",
   "engines": {

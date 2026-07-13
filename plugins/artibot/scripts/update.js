@@ -46,6 +46,11 @@ import {
   installLanded,
   renderInvariantTable,
 } from './update-verify.js';
+import {
+  fetchLatestMasterVersion,
+  inspectMarketplaceClone,
+  renderMarketplaceDiagnosis,
+} from './update-marketplace.js';
 
 // ---------------------------------------------------------------------------
 // Argument parsing
@@ -107,6 +112,35 @@ async function fetchLatestRelease() {
   } finally {
     clearTimeout(timer);
   }
+}
+
+/**
+ * Resolve the latest version, honestly.
+ *
+ * Primary: master's plugin.json (what `claude plugin update` actually
+ * installs). Fallback: the Releases API. The releases feed alone is NOT
+ * trustworthy — publishing stopped after v4.30.0 while master moved on,
+ * which made /update report stale versions as "latest" (2026-07-13).
+ *
+ * @returns {Promise<{ version: string, source: 'master'|'release' }>}
+ * @throws when both sources fail
+ */
+async function resolveLatestVersion() {
+  // Hermetic-test / air-gapped escape hatch: skip every network source.
+  // Callers already handle the failure gracefully (native mode prints
+  // "unreachable", legacy mode prints manual instructions).
+  if (process.env.ARTIBOT_UPDATE_OFFLINE === '1') {
+    throw new Error('offline mode (ARTIBOT_UPDATE_OFFLINE=1) — network version check skipped');
+  }
+  const masterVersion = await fetchLatestMasterVersion();
+  if (masterVersion) {
+    return { version: masterVersion, source: 'master' };
+  }
+  const tag = await fetchLatestRelease();
+  if (!tag) {
+    throw new Error('No release tag found in API response.');
+  }
+  return { version: String(tag).replace(/^v/, ''), source: 'release' };
 }
 
 // ---------------------------------------------------------------------------
@@ -338,29 +372,60 @@ async function main() {
   if (installMode.mode === 'native') {
     console.log('');
     console.log('Status: Native marketplace install detected.');
+
+    // Even in native mode, report the honest latest version and check that
+    // the marketplace clone `claude plugin update` installs from is not
+    // stuck (stale/dirty clone = the 2026-07-13 v4.32.0-stuck incident).
+    let nativeLatest = null;
+    try {
+      nativeLatest = (await resolveLatestVersion()).version;
+      console.log(`Latest version    : v${nativeLatest}`);
+      if (isNewerVersion(currentVersion, nativeLatest)) {
+        console.log(`Update available  : v${currentVersion} -> v${nativeLatest}`);
+      } else {
+        console.log('Already up to date.');
+      }
+    } catch {
+      console.log('Latest version    : (unreachable — network check skipped)');
+    }
+
+    if (nativeLatest) {
+      const clone = inspectMarketplaceClone(home);
+      const diagnosis = renderMarketplaceDiagnosis(clone, {
+        latestVersion: nativeLatest,
+        isNewerVersion,
+      });
+      for (const line of diagnosis) console.log(line);
+    }
+
+    console.log('');
     console.log('This copy runs from the Claude plugin cache — update it with:');
     console.log(`  ${NATIVE_UPDATE_HINT}`);
     console.log('(The built-in git-pull + install.sh updater is for the legacy flat install only.)');
-    process.exit(0);
+    // exitCode + return (not process.exit): after a fetch, process.exit
+    // trips a libuv assertion on Windows/Node 24 (UV_HANDLE_CLOSING) and
+    // turns a clean run into exit 127. Applies to every exit below main()'s
+    // fetch as well.
+    process.exitCode = 0;
+    return;
   }
   if (installMode.mode === 'ambiguous') {
     console.warn(`  [warn] Install layout ambiguous (${installMode.reason}); proceeding with the legacy updater.`);
   }
 
-  // Fetch latest release tag from GitHub
+  // Fetch the latest version — master plugin.json primary, Releases API fallback
   let latestVersion;
   try {
-    latestVersion = await fetchLatestRelease();
-    if (!latestVersion) {
-      throw new Error('No release tag found in API response.');
-    }
-    console.log(`Latest version    : ${latestVersion}`);
+    const latest = await resolveLatestVersion();
+    latestVersion = latest.version;
+    console.log(`Latest version    : v${latestVersion} (source: ${latest.source})`);
   } catch (err) {
     const isTimeout = err.name === 'AbortError';
-    console.error(`\nError fetching latest release: ${isTimeout ? 'request timed out after 5s' : err.message}`);
+    console.error(`\nError fetching latest version: ${isTimeout ? 'request timed out after 5s' : err.message}`);
     console.error('Could not determine whether an update is available.');
     printManualInstructions();
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   const updateAvailable = isNewerVersion(currentVersion, latestVersion);
@@ -375,12 +440,23 @@ async function main() {
     console.log(`\nStatus: Update available (${currentVersion} -> ${latestVersion})`);
   }
 
+  // Marketplace-clone health matters on the legacy/ambiguous path too:
+  // `claude plugin update` installs new cache versions from that clone, so a
+  // stale or dirty clone silently pins other sessions to an old version even
+  // after the flat install here succeeds. Only prints when something is wrong.
+  const marketplaceDiagnosis = renderMarketplaceDiagnosis(inspectMarketplaceClone(home), {
+    latestVersion,
+    isNewerVersion,
+  });
+  for (const line of marketplaceDiagnosis) console.log(line);
+
   // --check mode: stop here (explicit --check flag only)
   if (CHECK_ONLY && !FORCE) {
     if (updateAvailable) {
       console.log('\nRun `/update --force` to force reinstall, or just `/update` to auto-update.');
     }
-    process.exit(0);
+    process.exitCode = 0;
+    return;
   }
 
   // Drift detection: even when the version matches, the plugin cache at
@@ -403,7 +479,8 @@ async function main() {
 
   if (!shouldInstall) {
     console.log('\nNothing to install. Use --force to reinstall anyway.');
-    process.exit(0);
+    process.exitCode = 0;
+    return;
   }
 
   // Show update plan
@@ -417,7 +494,8 @@ async function main() {
 
   if (DRY_RUN) {
     console.log('\n[dry-run] No changes made. Remove --dry-run to execute.');
-    process.exit(0);
+    process.exitCode = 0;
+    return;
   }
 
   // Execute update
@@ -435,7 +513,8 @@ async function main() {
   if (!haveAnyInstaller) {
     console.error('\nCannot find install.sh (or install.ps1) before cache clear. Aborting to avoid broken state.');
     printManualInstructions();
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
   if (installScriptPath) console.log(`  install.sh found: ${installScriptPath}`);
   if (isWin && installPs1Path) console.log(`  install.ps1 found: ${installPs1Path}`);
@@ -506,7 +585,8 @@ async function main() {
     console.error('  Most likely the source git pull failed (deleted/renamed remote branch) or no');
     console.error('  source clone exists on this machine.');
     printManualInstructions();
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   // Step 3: Run install BEFORE clearing cache (prevents broken state on failure)
@@ -517,7 +597,8 @@ async function main() {
     console.error(`\nInstall command failed: ${err.message}`);
     console.error('Cache was preserved. Please complete the update manually:');
     printManualInstructions();
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   // Step 4: Clear cache AFTER successful install
@@ -554,7 +635,8 @@ async function main() {
     console.error('  failed (deleted/renamed remote branch) and install fell back to the');
     console.error('  already-installed copy (self-install no-op).');
     printManualInstructions();
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   // Step 5: Swarm autodetect — auto-activate federated learning from the
@@ -587,7 +669,7 @@ const isCliEntrypoint = process.argv[1] && fileURLToPath(import.meta.url) === pa
 if (isCliEntrypoint) {
   main().catch((err) => {
     console.error(`[update] Unexpected error: ${err.message}`);
-    process.exit(1);
+    process.exitCode = 1;
   });
 }
 

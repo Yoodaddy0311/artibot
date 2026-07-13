@@ -14,6 +14,14 @@ const CACHE_FILE = 'update-check.json';
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 const GITHUB_API_URL =
   'https://api.github.com/repos/Yoodaddy0311/artibot/releases/latest';
+// Primary version source: master's plugin.json — the exact content
+// `claude plugin update` installs. The Releases API is only a fallback:
+// publishing stopped after v4.30.0 while master moved on, so the release
+// feed alone under-reports the latest version (2026-07-13 incident).
+// URL is duplicated in scripts/update-marketplace.js on purpose — lib/core
+// must not import from scripts/ (layer rule).
+const MASTER_PLUGIN_JSON_URL =
+  'https://raw.githubusercontent.com/Yoodaddy0311/artibot/master/plugins/artibot/.claude-plugin/plugin.json';
 // Shorter timeout than update.js (5s) because this runs at session start and must not block.
 // update.js uses 5s because the user explicitly requested a version check.
 const FETCH_TIMEOUT_MS = 3000;
@@ -89,11 +97,53 @@ function writeCache(cacheFilePath, result) {
 }
 
 /**
+ * Fetch a version string from one JSON endpoint, or null on any failure.
+ * Shared by the master-manifest primary and Releases-API fallback paths.
+ *
+ * @param {string} url          - Allowlisted JSON endpoint
+ * @param {string} currentVersion - Used only for the User-Agent header
+ * @param {function(object): string|undefined} pick - Extract the raw version field
+ * @returns {Promise<string|null>} bare semver (no 'v' prefix) or null
+ */
+async function fetchVersionFrom(url, currentVersion, pick) {
+  try {
+    // DATA POLICY: assertEgressAllowed enforces that only allowlisted GitHub
+    // hosts can be reached; any other host throws EgressBlockedError.
+    assertEgressAllowed(url, { reason: 'version-check' });
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+
+    let response;
+    try {
+      response = await fetch(url, {
+        signal: controller.signal,
+        headers: { 'User-Agent': `artibot/${currentVersion}` },
+      });
+    } finally {
+      clearTimeout(timeoutId);
+    }
+
+    if (!response.ok) {
+      // Non-2xx (e.g. rate-limit 403, repo 404) — let the caller fall back
+      return null;
+    }
+
+    const data = await response.json();
+    const version = String(pick(data) || '').replace(/^v/, '');
+    return version || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Check whether a newer release of Artibot is available on GitHub.
  *
  * Algorithm:
  *  1. Look for a fresh on-disk cache entry (< 24 h old).
- *  2. If the cache is stale or absent, query the GitHub Releases API with a
+ *  2. If the cache is stale or absent, read master's plugin.json version
+ *     (primary), falling back to the GitHub Releases API — each with a
  *     3-second timeout.
  *  3. Persist the result back to disk for the next session.
  *  4. On any error (network, JSON parse, FS), return { hasUpdate: false } so
@@ -117,33 +167,11 @@ export async function checkForUpdate(currentVersion, cacheDir) {
     }
   }
 
-  // 2. Fetch the latest release from GitHub
+  // 2. Fetch the latest version — master plugin.json primary, Releases API fallback
   try {
-    // DATA POLICY: assertEgressAllowed enforces that only the allowlisted GitHub
-    // API host can be reached; any other host throws EgressBlockedError.
-    assertEgressAllowed(GITHUB_API_URL, { reason: 'version-check' });
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-
-    let response;
-    try {
-      response = await fetch(GITHUB_API_URL, {
-        signal: controller.signal,
-        headers: { 'User-Agent': `artibot/${currentVersion}` },
-      });
-    } finally {
-      clearTimeout(timeoutId);
-    }
-
-    if (!response.ok) {
-      // Non-2xx from GitHub (e.g. rate-limit 403, repo 404) — skip silently
-      return { hasUpdate: false };
-    }
-
-    const data = await response.json();
-    // GitHub returns tag_name like "v1.5.0" or "1.5.0"
-    const latestVersion = String(data.tag_name || '').replace(/^v/, '');
+    const latestVersion =
+      (await fetchVersionFrom(MASTER_PLUGIN_JSON_URL, currentVersion, (d) => d.version)) ||
+      (await fetchVersionFrom(GITHUB_API_URL, currentVersion, (d) => d.tag_name));
 
     if (!latestVersion) {
       return { hasUpdate: false };

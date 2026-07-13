@@ -172,12 +172,17 @@ describe('version-checker', () => {
 
   // =========================================================================
   // checkForUpdate() - stale / missing cache -> network fetch
+  //
+  // Since v4.36.4 the PRIMARY source is master's plugin.json ({ version })
+  // with the Releases API ({ tag_name }) as fallback. Mocks carry BOTH
+  // fields so the primary succeeds in one fetch; fallback semantics get
+  // their own dedicated tests below.
   // =========================================================================
   describe('checkForUpdate() - network fetch', () => {
     it('fetches from network when cache file does not exist', async () => {
       fsMock.existsSync.mockReturnValue(false);
       globalThis.fetch = vi.fn(() =>
-        makeFetchResponse({ tag_name: 'v2.0.0' }),
+        makeFetchResponse({ version: '2.0.0', tag_name: 'v2.0.0' }),
       );
 
       const result = await checkForUpdate(CURRENT_VERSION, CACHE_DIR);
@@ -186,6 +191,38 @@ describe('version-checker', () => {
       expect(result.hasUpdate).toBe(true);
       expect(result.latestVersion).toBe('2.0.0');
       expect(result.currentVersion).toBe(CURRENT_VERSION);
+    });
+
+    it('reads the version from master plugin.json as the primary source', async () => {
+      fsMock.existsSync.mockReturnValue(false);
+      globalThis.fetch = vi.fn(() =>
+        makeFetchResponse({ version: '2.0.0' }),
+      );
+
+      const result = await checkForUpdate(CURRENT_VERSION, CACHE_DIR);
+
+      expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+      expect(globalThis.fetch.mock.calls[0][0]).toMatch(/raw\.githubusercontent\.com/);
+      expect(result.latestVersion).toBe('2.0.0');
+    });
+
+    it('falls back to the Releases API when the master manifest fails', async () => {
+      // Regression (2026-07-13): releases stopped being published after
+      // v4.30.0, so neither source may be trusted alone — primary is master,
+      // fallback is the release feed.
+      fsMock.existsSync.mockReturnValue(false);
+      globalThis.fetch = vi.fn((url) =>
+        String(url).includes('raw.githubusercontent.com')
+          ? makeFetchResponse({}, false, 404)
+          : makeFetchResponse({ tag_name: 'v2.0.0' }),
+      );
+
+      const result = await checkForUpdate(CURRENT_VERSION, CACHE_DIR);
+
+      expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+      expect(globalThis.fetch.mock.calls[1][0]).toMatch(/api\.github\.com/);
+      expect(result.hasUpdate).toBe(true);
+      expect(result.latestVersion).toBe('2.0.0');
     });
 
     it('fetches from network when cache is stale (>24h)', async () => {
@@ -197,7 +234,7 @@ describe('version-checker', () => {
       fsMock.existsSync.mockReturnValue(true);
       fsMock.readFileSync.mockReturnValue(JSON.stringify(cachedData));
       globalThis.fetch = vi.fn(() =>
-        makeFetchResponse({ tag_name: 'v1.5.0' }),
+        makeFetchResponse({ version: '1.5.0', tag_name: 'v1.5.0' }),
       );
 
       const result = await checkForUpdate(CURRENT_VERSION, CACHE_DIR);
@@ -210,7 +247,7 @@ describe('version-checker', () => {
     it('returns { hasUpdate: false } when current matches latest', async () => {
       fsMock.existsSync.mockReturnValue(false);
       globalThis.fetch = vi.fn(() =>
-        makeFetchResponse({ tag_name: 'v1.4.0' }),
+        makeFetchResponse({ version: '1.4.0', tag_name: 'v1.4.0' }),
       );
 
       const result = await checkForUpdate(CURRENT_VERSION, CACHE_DIR);
@@ -222,7 +259,7 @@ describe('version-checker', () => {
     it('writes cache to disk after successful fetch', async () => {
       fsMock.existsSync.mockReturnValue(false);
       globalThis.fetch = vi.fn(() =>
-        makeFetchResponse({ tag_name: 'v2.0.0' }),
+        makeFetchResponse({ version: '2.0.0', tag_name: 'v2.0.0' }),
       );
 
       await checkForUpdate(CURRENT_VERSION, CACHE_DIR);
@@ -243,7 +280,7 @@ describe('version-checker', () => {
     it('sends User-Agent header with current version', async () => {
       fsMock.existsSync.mockReturnValue(false);
       globalThis.fetch = vi.fn(() =>
-        makeFetchResponse({ tag_name: 'v1.4.0' }),
+        makeFetchResponse({ version: '1.4.0', tag_name: 'v1.4.0' }),
       );
 
       await checkForUpdate(CURRENT_VERSION, CACHE_DIR);
@@ -255,7 +292,7 @@ describe('version-checker', () => {
     it('passes an AbortSignal for timeout', async () => {
       fsMock.existsSync.mockReturnValue(false);
       globalThis.fetch = vi.fn(() =>
-        makeFetchResponse({ tag_name: 'v1.4.0' }),
+        makeFetchResponse({ version: '1.4.0', tag_name: 'v1.4.0' }),
       );
 
       await checkForUpdate(CURRENT_VERSION, CACHE_DIR);
@@ -358,7 +395,7 @@ describe('version-checker', () => {
       fsMock.existsSync.mockReturnValue(true);
       fsMock.readFileSync.mockReturnValue('not valid json {{{');
       globalThis.fetch = vi.fn(() =>
-        makeFetchResponse({ tag_name: 'v1.5.0' }),
+        makeFetchResponse({ version: '1.5.0', tag_name: 'v1.5.0' }),
       );
 
       const result = await checkForUpdate(CURRENT_VERSION, CACHE_DIR);
@@ -371,7 +408,7 @@ describe('version-checker', () => {
       fsMock.existsSync.mockReturnValue(true);
       fsMock.readFileSync.mockReturnValue(JSON.stringify({ hasUpdate: false }));
       globalThis.fetch = vi.fn(() =>
-        makeFetchResponse({ tag_name: 'v1.4.0' }),
+        makeFetchResponse({ version: '1.4.0', tag_name: 'v1.4.0' }),
       );
 
       await checkForUpdate(CURRENT_VERSION, CACHE_DIR);
@@ -385,7 +422,7 @@ describe('version-checker', () => {
         JSON.stringify({ hasUpdate: false, checkedAt: 'not-a-date' }),
       );
       globalThis.fetch = vi.fn(() =>
-        makeFetchResponse({ tag_name: 'v1.4.0' }),
+        makeFetchResponse({ version: '1.4.0', tag_name: 'v1.4.0' }),
       );
 
       await checkForUpdate(CURRENT_VERSION, CACHE_DIR);
@@ -399,7 +436,7 @@ describe('version-checker', () => {
         throw new Error('EACCES: permission denied');
       });
       globalThis.fetch = vi.fn(() =>
-        makeFetchResponse({ tag_name: 'v1.4.0' }),
+        makeFetchResponse({ version: '1.4.0', tag_name: 'v1.4.0' }),
       );
 
       await checkForUpdate(CURRENT_VERSION, CACHE_DIR);
@@ -418,7 +455,7 @@ describe('version-checker', () => {
         throw new Error('EACCES: permission denied');
       });
       globalThis.fetch = vi.fn(() =>
-        makeFetchResponse({ tag_name: 'v2.0.0' }),
+        makeFetchResponse({ version: '2.0.0', tag_name: 'v2.0.0' }),
       );
 
       const result = await checkForUpdate(CURRENT_VERSION, CACHE_DIR);
@@ -433,7 +470,7 @@ describe('version-checker', () => {
         throw new Error('ENOSPC: no space left');
       });
       globalThis.fetch = vi.fn(() =>
-        makeFetchResponse({ tag_name: 'v2.0.0' }),
+        makeFetchResponse({ version: '2.0.0', tag_name: 'v2.0.0' }),
       );
 
       const result = await checkForUpdate(CURRENT_VERSION, CACHE_DIR);
@@ -450,7 +487,7 @@ describe('version-checker', () => {
     it('strips "v" prefix from tag_name', async () => {
       fsMock.existsSync.mockReturnValue(false);
       globalThis.fetch = vi.fn(() =>
-        makeFetchResponse({ tag_name: 'v2.0.0' }),
+        makeFetchResponse({ version: '2.0.0', tag_name: 'v2.0.0' }),
       );
 
       const result = await checkForUpdate(CURRENT_VERSION, CACHE_DIR);

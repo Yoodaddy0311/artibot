@@ -222,6 +222,28 @@ describe('install/windows PowerShell installer', () => {
 });
 
 // ---------------------------------------------------------------------------
+// 5.5 git-managed marketplace guard (2026-07-13 v4.32.0-stuck regression)
+// ---------------------------------------------------------------------------
+// Writing into a git-managed marketplace dirties the worktree, Claude Code's
+// refresh pull then fails silently, and `claude plugin update` pins users to
+// a stale version while claiming "latest". Both installers must skip the
+// mirror when ~/.claude/plugins/marketplaces/artibot is git-managed.
+
+describe('install/git-managed marketplace guard', () => {
+  it('install.sh skips the marketplace mirror when the marketplace is git-managed', () => {
+    const content = readFileSync(path.join(PLUGIN_ROOT, 'install.sh'), 'utf-8');
+    expect(content).toMatch(/mkt_clone.*\/\.git|"\$\{mkt_clone\}\/\.git"/);
+    expect(content).toMatch(/git-managed by Claude Code \(skip mirror/);
+  });
+
+  it('install.ps1 skips the marketplace mirror when the marketplace is git-managed', () => {
+    const content = readFileSync(path.join(PLUGIN_ROOT, 'install.ps1'), 'utf-8');
+    expect(content).toMatch(/Join-Path \$mktClone '\.git'/);
+    expect(content).toMatch(/git-managed by Claude Code \(skip mirror/);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // 6. update.js 구조 검증
 // ---------------------------------------------------------------------------
 

@@ -13,6 +13,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.36.4] — 2026-07-13
+
+### Fixed
+- **/update가 구버전을 "최신"으로 오판하던 문제 (v4.32.0-stuck 사건) 3중 수정.**
+  (1) **버전 진실원 교체**: GitHub Releases API가 v4.30.0에서 발행 중단된 상태로
+  master는 v4.36.3까지 전진 → releases/latest 단독 판정이 거짓. master
+  `plugin.json`(raw.githubusercontent.com — `claude plugin update`가 실제 설치하는
+  내용)을 1차 진실원으로, Releases API는 폴백으로 강등
+  (`scripts/update-marketplace.js#fetchLatestMasterVersion`,
+  `lib/core/version-checker.js#fetchVersionFrom`, allowlist에
+  raw.githubusercontent.com 추가).
+  (2) **마켓플레이스 오염원 제거**: install.sh/install.ps1 미러가 Claude Code가
+  git으로 관리하는 `~/.claude/plugins/marketplaces/artibot` 워크트리에 직접
+  써서 dirty/diverged 상태를 만들고, 이후 marketplace refresh가 조용히 실패해
+  `claude plugin update`가 영구히 구버전을 최신이라 보고하던 근본 원인.
+  git-managed 감지 시 미러 skip (`install_marketplace_mirror`,
+  `Update-MarketplaceMirror`). INV-4(미러 일관성)도 git-managed에서는 skip
+  (`scripts/update-verify.js#findMirrorHooks`).
+  (3) **클론 건강 진단**: /update가 native·legacy 양 경로에서 마켓플레이스
+  클론의 stale/dirty를 감지해 정확한 복구 커맨드(`git fetch && git reset
+  --hard origin/master` → `claude plugin marketplace update artibot`)를 출력
+  (`scripts/update-marketplace.js#inspectMarketplaceClone/renderMarketplaceDiagnosis`).
+- **update.js 종료 크래시 (Windows/Node 24).** fetch 후 `process.exit()`가
+  libuv `UV_HANDLE_CLOSING` 어서션으로 죽어 정상 실행이 exit 127로 보고되던
+  문제 — main() 내 모든 exit을 `process.exitCode + return`으로 전환.
+- **native 모드 /update가 버전 비교 없이 힌트만 내고 종료하던 UX.** 이제
+  master 기준 최신 버전과 업데이트 가능 여부를 먼저 보고한다. 무네트워크
+  환경/테스트용 `ARTIBOT_UPDATE_OFFLINE=1` 이스케이프 해치 추가.
+
+### Tests
+- `tests/scripts/update-marketplace.test.js` 신규 10건(마스터 버전 소스·클론
+  진단), INV-4 skip 회귀 2건, git-managed 미러 가드 정적 검증 2건,
+  version-checker 폴백 체인 3건 추가/갱신.
+
+---
+
 ## [4.36.3] — 2026-07-10
 
 ### Fixed

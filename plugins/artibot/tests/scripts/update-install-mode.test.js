@@ -53,12 +53,18 @@ describe('update.js install-mode gate (B3)', () => {
     mkdirSync(cacheRoot, { recursive: true });
     writeFileSync(path.join(cacheRoot, 'artibot.config.json'), JSON.stringify({ version: '4.29.0' }), 'utf-8');
 
-    const { code, stdout } = runUpdate(['--check'], { CLAUDE_PLUGIN_ROOT: cacheRoot });
+    // ARTIBOT_UPDATE_OFFLINE keeps the run hermetic: since v4.36.4 native
+    // mode DOES attempt a version check (master plugin.json), and must
+    // degrade gracefully to the hint when the network is unavailable.
+    const { code, stdout } = runUpdate(['--check'], {
+      CLAUDE_PLUGIN_ROOT: cacheRoot,
+      ARTIBOT_UPDATE_OFFLINE: '1',
+    });
 
     expect(code).toBe(0);
     expect(stdout).toContain('Native marketplace install detected');
     expect(stdout).toContain('/plugin marketplace update artibot');
-    // Proof it short-circuited before the network fetch:
-    expect(stdout).not.toContain('Latest version');
+    // Offline → the version check degrades, never blocks the hint:
+    expect(stdout).toContain('unreachable — network check skipped');
   });
 });

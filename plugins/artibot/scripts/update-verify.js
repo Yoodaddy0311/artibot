@@ -116,6 +116,13 @@ export function assertUpdatePrecondition({ updateAvailable, pulled, sourcePlugin
 
 /**
  * Resolve the marketplace mirror's hooks.json path, or null when absent.
+ *
+ * Git-managed marketplace clones are excluded on purpose: install.sh /
+ * install.ps1 skip the mirror there (writing into a Claude Code-managed
+ * clone dirties it and silently blocks `claude plugin marketplace update`
+ * — the 2026-07-13 v4.32.0-stuck incident), so comparing it against the
+ * installed copy would be a guaranteed false INV-4 failure.
+ *
  * @param {string} home
  * @returns {string|null}
  */
@@ -130,6 +137,7 @@ function findMirrorHooks(home) {
   }
   for (const e of entries) {
     if (!e.isDirectory()) continue;
+    if (existsSync(path.join(mpRoot, e.name, '.git'))) continue; // git clone — mirror intentionally not written
     const candidate = path.join(mpRoot, e.name, 'plugins', 'artibot', 'hooks', 'hooks.json');
     if (existsSync(candidate)) return candidate;
   }
