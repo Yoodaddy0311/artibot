@@ -1,5 +1,6 @@
 ---
 context: fork
+disable-model-invocation: true
 name: persona-distill
 description: "Distill a person, role, or character into a reusable persona skill via the 6-layer schema. Use when the user wants to compile a colleague, an internal role archetype, or an authoring style into a persona-* skill — not when invoking an existing persona."
 lang: [en]
@@ -109,6 +110,7 @@ Create `plugins/artibot/skills/persona-{slug}/SKILL.md` with frontmatter:
 ```yaml
 ---
 context: fork
+disable-model-invocation: true
 name: persona-{slug}
 description: "..."
 level: 3
