@@ -13,6 +13,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.36.6] — 2026-07-13
+
+### Fixed
+- **v4.33.0 themed 전용 기능 잔여 2종을 plain statusline에 이식 — 기본 설치 완전 파리티.**
+  v4.36.5(계정 배지)에 이어, **사용량 한도 게이지**(`rate_limits.five_hour/seven_day`
+  → "5h N% ~HH:MM · 7d N%", <70 GREEN·≥70 YELLOW·≥90 RED+BOLD, rate_limits
+  미수신 시 세그먼트 전체 생략)와 **stdin effort 배지**(`effort.level` 우선 +
+  `current-effort.json` 폴백 유지, `thinking.enabled`/`fast_mode` →
+  `·think`/`·fast` 접미사)를 `statusline.sh`에 이식
+  (`scripts/hooks/statusline.sh#rl_color/format_pct1/format_reset_time`).
+  트립와이어 5종 추가(`tests/ci/statusline-schema.test.js` — rate_limits
+  five_hour/seven_day·effort.level·thinking.enabled·fast_mode).
+- **릴리스 메타 정합**: `marketplace.json#release.releasedAt` 4개 릴리스째
+  방치(2026-07-09) → 갱신. 테스트 헤더의 "themed가 settings 기본" 서술 교정
+  (실제 기본은 plain, themed는 /theme 적용 시).
+- **버전 진실원 폴백 복구**: v4.30.0에서 멈췄던 git tag/GitHub Release 발행
+  재개 — raw.githubusercontent 장애 시 Releases API 폴백이 구버전을 "최신"으로
+  보고하던 잔여 리스크 해소.
+
+---
+
 ## [4.36.5] — 2026-07-13
 
 ### Fixed

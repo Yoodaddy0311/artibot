@@ -92,6 +92,17 @@ AGENT=$(jq_get '.agent.name' '')
 WORKTREE=$(jq_get '.worktree.path' '')
 [ -z "$WORKTREE" ] && WORKTREE=$(jq_get '.worktree' '')  # legacy
 
+# Usage-limit gauge + effort/thinking/fast badge (parity with statusline-themed.sh).
+# rate_limits arrived in the Claude Code stdin schema (2.1.172); absent on older
+# CLIs, in which case RL5/RL7 stay empty and the whole gauge segment is omitted.
+RL5=$(jq_get '.rate_limits.five_hour.used_percentage' '')
+RL5_RESET=$(jq_get '.rate_limits.five_hour.resets_at' '')
+RL7=$(jq_get '.rate_limits.seven_day.used_percentage' '')
+# effort.level from stdin is preferred over the runtime file (resolved below).
+EFFORT_STDIN=$(jq_get '.effort.level' '')
+THINKING_ON=$(jq_get '.thinking.enabled' '')
+FAST_ON=$(jq_get '.fast_mode' '')
+
 # ─── Resolve plugin root (script lives at <plugin>/scripts/hooks/) ────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -222,6 +233,48 @@ format_elapsed() {
   fi
 }
 
+# ─── Format usage-limit percentage (1 decimal, trailing .0 dropped) ──────────
+# The CLI sends raw floats (e.g. 28.000000000000004); mirror the themed f1().
+format_pct1() {
+  local v="$1"
+  [ -z "$v" ] && { echo ''; return; }
+  if command -v awk >/dev/null 2>&1; then
+    echo "$v" | awk '{ s=sprintf("%.1f",$1); sub(/\.0$/,"",s); printf "%s", s }' 2>/dev/null || echo "$v"
+  else
+    echo "$v"
+  fi
+}
+
+# ─── Format resets_at epoch → local HH:MM (matches themed variant) ───────────
+format_reset_time() {
+  local epoch="$1"
+  [ -z "$epoch" ] && { echo ''; return; }
+  if command -v node >/dev/null 2>&1; then
+    ARTIBOT_SL_RESET="$epoch" node -e "
+      try {
+        const e = Number(process.env.ARTIBOT_SL_RESET);
+        if (!isFinite(e)) { process.stdout.write(''); }
+        else {
+          const d = new Date(e * 1000);
+          if (isNaN(d)) { process.stdout.write(''); }
+          else { process.stdout.write(String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0')); }
+        }
+      } catch { process.stdout.write(''); }
+    " 2>/dev/null || echo ''
+  else
+    echo ''
+  fi
+}
+
+# ─── Usage-limit gauge color: <70 green, ≥70 yellow, ≥90 red+bold ────────────
+rl_color() {
+  local p="${1%%.*}"; [ -z "$p" ] && p=0
+  case "$p" in (*[!0-9]*) p=0 ;; esac
+  if [ "$p" -ge 90 ] 2>/dev/null; then printf '%s' "${RED}${BOLD}"
+  elif [ "$p" -ge 70 ] 2>/dev/null; then printf '%s' "${YELLOW}"
+  else printf '%s' "${GREEN}"; fi
+}
+
 # ─── Determine working directory label ───────────────────────────────────────
 if [ -n "$WORKTREE" ]; then
   DIR_LABEL=$(basename "$WORKTREE")
@@ -232,14 +285,22 @@ fi
 # ─── Cognitive mode (System1 vs System2 via env or default) ──────────────────
 COG_MODE="${ARTIBOT_COG_MODE:-sys1}"
 
-# ─── Effort level (cognitive depth from current-effort.json) ─────────────────
+# ─── Effort level (cognitive depth) ──────────────────────────────────────────
+# Prefer stdin effort.level (official schema); fall back to current-effort.json
+# so the pre-stdin behavior is preserved when the CLI doesn't send it. When an
+# effort value is present, append ·think / ·fast from the stdin flags.
 EFFORT_LABEL=''
-EFFORT_FILE="$PLUGIN_ROOT/runtime/current-effort.json"
-if [ -f "$EFFORT_FILE" ]; then
-  EFFORT_VALUE=$(_json_file_get "$EFFORT_FILE" '.effort' '')
-  if [ -n "$EFFORT_VALUE" ]; then
-    EFFORT_LABEL="🎚 ${EFFORT_VALUE}"
+EFFORT_VALUE="$EFFORT_STDIN"
+if [ -z "$EFFORT_VALUE" ]; then
+  EFFORT_FILE="$PLUGIN_ROOT/runtime/current-effort.json"
+  if [ -f "$EFFORT_FILE" ]; then
+    EFFORT_VALUE=$(_json_file_get "$EFFORT_FILE" '.effort' '')
   fi
+fi
+if [ -n "$EFFORT_VALUE" ]; then
+  EFFORT_LABEL="🎚 ${EFFORT_VALUE}"
+  [ "$THINKING_ON" = "true" ] && EFFORT_LABEL="${EFFORT_LABEL}·think"
+  [ "$FAST_ON" = "true" ] && EFFORT_LABEL="${EFFORT_LABEL}·fast"
 fi
 
 # ─── Active teammates (parallel team mode) ───────────────────────────────────
@@ -384,6 +445,24 @@ LINE2="${LINE2}  | ⚡ ${COG_MODE}"
 
 # Token usage segment
 [ -n "$TOKEN_LABEL" ] && LINE2="${LINE2}  | ${TOKEN_LABEL}"
+
+# Usage-limit gauge segment: "5h N% ~HH:MM · 7d N%" (omitted when the CLI
+# doesn't send rate_limits). Colors escalate green → yellow → red per bucket.
+if [ -n "$RL5" ] || [ -n "$RL7" ]; then
+  RL5_FMT=$(format_pct1 "$RL5")
+  RL7_FMT=$(format_pct1 "$RL7")
+  RL5_RESET_FMT=$(format_reset_time "$RL5_RESET")
+  RLSEG=''
+  if [ -n "$RL5_FMT" ]; then
+    RLSEG="$(rl_color "$RL5_FMT")5h ${RL5_FMT}%${RESET}"
+    [ -n "$RL5_RESET_FMT" ] && RLSEG="${RLSEG} ${CYAN}~${RL5_RESET_FMT}${RESET}"
+  fi
+  if [ -n "$RL7_FMT" ]; then
+    [ -n "$RLSEG" ] && RLSEG="${RLSEG} · "
+    RLSEG="${RLSEG}$(rl_color "$RL7_FMT")7d ${RL7_FMT}%${RESET}"
+  fi
+  [ -n "$RLSEG" ] && LINE2="${LINE2}  | ${RLSEG}"
+fi
 
 # ─── Output ──────────────────────────────────────────────────────────────────
 printf '%b\n' "$LINE1"

@@ -13,12 +13,13 @@
  *   cost.total_cost_usd | cost.total_duration_ms
  *   model.display_name | model.id
  *
- * The themed variant (statusline-themed.sh) is the script settings.json actually
- * wires, so it gets its own tripwire covering both the shared fields above and
- * the richer stdin surface captured from Claude Code 2.1.172:
+ * Both variants are wired in the wild — install.sh/install.ps1 register the
+ * plain statusline.sh by default, and theme-apply.js swaps in the themed one
+ * when /theme is applied — so BOTH get tripwires covering the shared fields
+ * above and the richer stdin surface captured from Claude Code 2.1.172:
  *   rate_limits.five_hour.used_percentage | rate_limits.seven_day.used_percentage
  *   effort.level | thinking.enabled | fast_mode
- * plus the account-badge cache path string it reads.
+ * plus the account-badge cache path string each reads (shared cache = parity).
  *
  * @module tests/ci/statusline-schema
  */
@@ -68,6 +69,29 @@ describe('statusline.sh reads the official Claude Code statusLine schema', () =>
   // share the same cache file so the badge stays consistent across variants.
   it('references the account-badge cache path (parity with themed)', () => {
     expect(statusline).toMatch(/runtime\/account-badge\.json/);
+  });
+
+  // v4.37: the usage-limit gauge and the stdin effort/thinking/fast badge
+  // shipped themed-only in v4.33.0. Ported to the plain variant so default
+  // installs render the same rate-limit and effort surface.
+  it('reads rate_limits.five_hour.used_percentage', () => {
+    expect(statusline).toMatch(/\.rate_limits\.five_hour/);
+  });
+
+  it('reads rate_limits.seven_day.used_percentage', () => {
+    expect(statusline).toMatch(/\.rate_limits\.seven_day/);
+  });
+
+  it('reads effort.level from stdin (preferred over the runtime file)', () => {
+    expect(statusline).toMatch(/\.effort\.level/);
+  });
+
+  it('reads thinking.enabled', () => {
+    expect(statusline).toMatch(/\.thinking\.enabled/);
+  });
+
+  it('reads fast_mode', () => {
+    expect(statusline).toMatch(/\.fast_mode/);
   });
 });
 
