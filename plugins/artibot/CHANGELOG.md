@@ -13,6 +13,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.36.5] — 2026-07-13
+
+### Fixed
+- **계정 배지가 기본 설치에서 안 보이던 문제 — plain statusline에 이식.**
+  v4.33.0의 계정 배지(`displayName·Max Nx`)가 `statusline-themed.sh`에만
+  구현되어, install.sh/install.ps1이 기본 등록하는 `statusline.sh` 사용자는
+  업데이트를 받아도 배지가 나타나지 않았다 (증상: "업데이트했는데 statusline이
+  그대로"). themed와 동일한 로직을 `statusline.sh`에 이식 — 같은 캐시
+  (`runtime/account-badge.json`, 24h TTL) 공유, 로컬 파일만 읽음(네트워크
+  호출 없음), 실패 시 빈 배지로 무해 강등. Line 1 끝에 `👤 이름·티어`로 렌더
+  (`scripts/hooks/statusline.sh#account_badge`).
+  트립와이어: `tests/ci/statusline-schema.test.js`에 plain 배지 캐시 경로
+  parity 검사 + `statusline.sh` bash -n 구문 검사 추가.
+
+---
+
 ## [4.36.4] — 2026-07-13
 
 ### Fixed

@@ -62,6 +62,13 @@ describe('statusline.sh reads the official Claude Code statusLine schema', () =>
     expect(statusline).toMatch(/\.model\.display_name/);
     expect(statusline).toMatch(/\.model\.id/);
   });
+
+  // v4.36.5: the account badge shipped themed-only in v4.33.0, so default
+  // installs (which wire statusline.sh) never showed it. Both scripts must
+  // share the same cache file so the badge stays consistent across variants.
+  it('references the account-badge cache path (parity with themed)', () => {
+    expect(statusline).toMatch(/runtime\/account-badge\.json/);
+  });
 });
 
 /*
@@ -119,6 +126,13 @@ describe('statusline-themed.sh reads the official Claude Code statusLine schema'
 describe('statusline-themed.sh is syntactically valid bash', () => {
   it.skipIf(!hasBash)('passes bash -n (parse-only) syntax check', () => {
     const result = spawnSync('bash', ['-n', themedPath], { encoding: 'utf8' });
+    expect(result.status, result.stderr).toBe(0);
+  });
+});
+
+describe('statusline.sh is syntactically valid bash', () => {
+  it.skipIf(!hasBash)('passes bash -n (parse-only) syntax check', () => {
+    const result = spawnSync('bash', ['-n', join(PLUGIN_ROOT, 'scripts', 'hooks', 'statusline.sh')], { encoding: 'utf8' });
     expect(result.status, result.stderr).toBe(0);
   });
 });

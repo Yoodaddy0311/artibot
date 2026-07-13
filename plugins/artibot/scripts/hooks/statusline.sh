@@ -295,6 +295,38 @@ if [ -f "$TOKEN_FILE" ]; then
   fi
 fi
 
+# ─── Account badge (local-only; DATA POLICY: no network) ────────────────────
+# Cached label from ~/.claude.json oauthAccount, refreshed every 24h. Shares
+# runtime/account-badge.json with statusline-themed.sh so both variants render
+# the same label. Reads local files only — never a network call. All failures
+# degrade to an empty badge; the statusline must never die on account errors.
+BADGE=''
+account_badge() {
+  local cache="$HOME/.claude/artibot/runtime/account-badge.json"
+  command -v node >/dev/null 2>&1 || return 0
+  ARTIBOT_BADGE_CACHE="$cache" node -e "
+    const fs=require('fs'); const cache=process.env.ARTIBOT_BADGE_CACHE;
+    const q=v=>String(v==null?'':v).replace(/'/g,'');
+    const fresh=()=>{ try { const c=JSON.parse(fs.readFileSync(cache,'utf8'));
+      if (c && c.label!=null && (Date.now()-(c.ts||0))<864e5) return String(c.label); } catch {} return null; };
+    let label=fresh();
+    if (label==null) {
+      try { const o=JSON.parse(fs.readFileSync(process.env.HOME+'/.claude.json','utf8'));
+        const a=o.oauthAccount||{};
+        const name=a.displayName||a.emailAddress||'';
+        const tierRaw=String(a.organizationRateLimitTier||'');
+        const mm=tierRaw.match(/max_(\d+)x/);
+        let tier = mm ? ('Max '+mm[1]+'x') : (a.organizationType==='claude_max' ? 'Max' : '');
+        label = name ? (tier ? (name+'·'+tier) : name) : '';
+        try { fs.mkdirSync(require('path').dirname(cache),{recursive:true});
+          fs.writeFileSync(cache, JSON.stringify({label, ts:Date.now()})); } catch {}
+      } catch { label=''; }
+    }
+    if (label) process.stdout.write(\"BADGE='\"+q(label)+\"'\");
+  " 2>/dev/null || true
+}
+eval "$(account_badge)" || true
+
 # ─── Assemble Line 1 ─────────────────────────────────────────────────────────
 MODEL_LABEL=$(format_model "$MODEL")
 
@@ -310,6 +342,7 @@ if [ -n "$GIT_DIRTY" ] && [ "$GIT_DIRTY" -gt 0 ] 2>/dev/null; then
   fi
 fi
 [ -n "$AGENT" ] && LINE1="${LINE1}  | 🤖 ${BOLD}${AGENT}${RESET}"
+[ -n "$BADGE" ] && LINE1="${LINE1}  | 👤 ${BADGE}"
 
 # ─── Assemble Line 2 ─────────────────────────────────────────────────────────
 CTX_BAR=$(build_ctx_bar "$CTX_PCT" "$CTX_USED" "$CTX_MAX")
