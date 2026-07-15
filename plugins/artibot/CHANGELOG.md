@@ -13,6 +13,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.39.0] — 2026-07-15
+
+### Added
+- **`/dynamic` 커맨드 신설** (ce0ab53) — 하네스 `Workflow` 도구의 명시 옵트인
+  진입점. 프리셋 4종(review/research/migrate/sweep), 커맨드 호출 자체가 옵트인
+  계약. 커맨드 카운트 77→78.
+- **autopilot EXECUTE pluggable runner — ADR-003 Stage 1** (0c4b61d).
+  `--runner dynamic` 플래그로 Phase 2 EXECUTE를 TeamCreate 대신 하네스
+  `Workflow` 도구 런(`dynamic-run` instruction)으로 전환. 플래그 미지정 시
+  기본 경로 무변경(byte-identical). 세션 시작 시 1회 고정·resume 재평가 금지.
+  Stage 2(config `autopilot.runner.autoSelect` 자동선택)는 향후 —
+  `docs/adr/ADR-003` (Accepted) 참조.
+
+### Changed
+- **workflow 네이밍 규약(Canonical Naming Convention)** (ce0ab53) —
+  ORCHESTRATION-GLOSSARY에 정본 호칭 표 신설(맨몸 "workflow" 금지, 6개
+  지시대상 구분). ROUTING 2축 표·결정트리 라벨 `workflow`→`orchestrate`
+  (classifier label 병기). CLAUDE.md의 존재하지 않던 `/workflow` 오기 교정.
+
+### Fixed
+- **validate.js 커맨드 frontmatter 게이트 강화** (d66edd2) — 기존 게이트는
+  `'---'` 부분문자열 warn뿐이라 frontmatter 없는 커맨드도 통과. 선두 YAML
+  fence + `description` 필수(error)로 래칫(78개 전수 사전조사 — 기존 트리
+  전부 통과). 회귀 테스트는 `ARTIBOT_COMMANDS_DIR` fixture 심 사용(라이브
+  트리 임시 파일은 병렬 카운트 테스트와 레이스 — CI flake 관측 후 근본 교체).
+- 플러그인 README 한국어 커맨드 카운트("77개 슬래시 커맨드") 드리프트 교정 —
+  `sync:readme:claims`가 영어 패턴만 커버.
+
+---
+
 ## [4.38.0] — 2026-07-15
 
 ### Changed
