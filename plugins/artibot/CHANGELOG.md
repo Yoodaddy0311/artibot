@@ -13,6 +13,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.40.0] — 2026-07-15
+
+### Added
+- **autopilot 러너 자동선택 — ADR-003 Stage 2** (a08b8f5). config
+  `autopilot.runner.autoSelect=true`(기본 **OFF** — 출고 시 닫힌 kill-switch)
+  옵트인 시, 세션 시작 시 주입된 `options.recommendedRunner === 'workflow'`
+  (동형 반복 힌트)에서 EXECUTE가 `dynamic-run`을 자동 선택.
+  우선순위 사다리: 명시 `--runner`(미지 값은 team-create 정규화 — Stage 1
+  불변식 보존) > config 게이트 > 추천 신호 > team-create.
+  `loadRunnerConfig()`는 config 부재/파손 시 autoSelect off 안전 폴백.
+  L4(cognitive) import 없음 — 추천값 주입 소비만. 테스트 16/16.
+
+---
+
 ## [4.39.0] — 2026-07-15
 
 ### Added
