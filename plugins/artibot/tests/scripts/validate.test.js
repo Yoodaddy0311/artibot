@@ -11,8 +11,10 @@
 
 import { describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
+import { dirname, join as joinPath, resolve } from 'node:path';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PLUGIN_ROOT = resolve(HERE, '..', '..');
@@ -74,5 +76,47 @@ describe('validate.js — Phase 2 follow-up fixes', () => {
     expect(output).toMatch(/\[commands\]\s+\d+\s+command\(s\)\s+validated/);
     expect(output).toMatch(/\[hooks\]\s+\d+\s+hook event\(s\),\s+\d+\s+hook\(s\)\s+validated/);
     expect(output).toMatch(/\[config\]\s+artibot\.config\.json\s+validated/);
+  }, SUBPROCESS_TIMEOUT_MS);
+});
+
+describe('validate.js — command frontmatter gate (2026-07 test-gap fix)', () => {
+  // Guards the strengthened validateCommands(): a stray '---' in the body must
+  // NOT satisfy the gate; only a properly closed LEADING fence with a
+  // description passes. Uses the ARTIBOT_COMMANDS_DIR test seam with a tmpdir
+  // fixture — writing a temp file into the LIVE commands/ tree races parallel
+  // test workers that count commands/*.md (observed CI flake, 2026-07-15).
+  function runValidatorOnFixture(commandContent) {
+    const dir = mkdtempSync(joinPath(os.tmpdir(), 'artibot-cmd-gate-'));
+    writeFileSync(joinPath(dir, '__tmp-gate-check.md'), commandContent);
+    try {
+      execFileSync('node', [VALIDATOR], {
+        cwd: PLUGIN_ROOT,
+        encoding: 'utf-8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: { ...process.env, ARTIBOT_COMMANDS_DIR: dir },
+      });
+      return { failed: false, output: '' };
+    } catch (e) {
+      return { failed: true, output: String(e.stdout || '') + String(e.stderr || '') };
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  it('fails (exit 1) on a command whose only "---" is a stray body fence', () => {
+    const { failed, output } = runValidatorOnFixture('# no frontmatter\nbody with --- stray fence\n');
+    expect(failed).toBe(true);
+    expect(output).toMatch(/\[commands\]\s+__tmp-gate-check\.md\s+missing or unclosed leading YAML frontmatter block/);
+  }, SUBPROCESS_TIMEOUT_MS);
+
+  it('fails (exit 1) on a fenced command missing "description"', () => {
+    const { failed, output } = runValidatorOnFixture('---\nargument-hint: "[x]"\nallowed-tools: [Read]\n---\n\n# body\n');
+    expect(failed).toBe(true);
+    expect(output).toMatch(/\[commands\]\s+__tmp-gate-check\.md\s+missing "description" in frontmatter/);
+  }, SUBPROCESS_TIMEOUT_MS);
+
+  it('passes a well-formed fixture command (positive seam sanity)', () => {
+    const { failed } = runValidatorOnFixture('---\ndescription: ok\nargument-hint: "[x]"\nallowed-tools: [Read]\n---\n\n# body\n');
+    expect(failed).toBe(false);
   }, SUBPROCESS_TIMEOUT_MS);
 });

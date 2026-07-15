@@ -168,7 +168,10 @@ async function validateSkills() {
 }
 
 async function validateCommands() {
-  const commandsDir = join(PLUGIN_ROOT, 'commands');
+  // Test seam: lets the frontmatter-gate regression tests point this validator
+  // at a throwaway fixture dir instead of mutating the live commands/ tree
+  // (a live-tree temp file races parallel test workers that count commands).
+  const commandsDir = process.env.ARTIBOT_COMMANDS_DIR || join(PLUGIN_ROOT, 'commands');
   if (!await exists(commandsDir)) {
     warn('[commands] commands/ directory not found');
     return;
@@ -179,8 +182,22 @@ async function validateCommands() {
 
   for (const file of mdFiles) {
     const content = await readFile(join(commandsDir, file), 'utf-8');
-    if (!content.includes('---')) {
-      warn(`[commands] ${file} missing YAML frontmatter`);
+    // A command must OPEN with a properly closed YAML fence — a stray '---'
+    // anywhere in the body must not satisfy the gate (2026-07 test-gap scan).
+    const fence = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+    if (!fence) {
+      error(`[commands] ${file} missing or unclosed leading YAML frontmatter block`);
+      continue;
+    }
+    const frontmatter = fence[1];
+    if (!/^description\s*:/m.test(frontmatter)) {
+      error(`[commands] ${file} missing "description" in frontmatter`);
+    }
+    if (!/^allowed-tools\s*:/m.test(frontmatter)) {
+      warn(`[commands] ${file} missing "allowed-tools" in frontmatter`);
+    }
+    if (!/^argument-hint\s*:/m.test(frontmatter)) {
+      warn(`[commands] ${file} missing "argument-hint" in frontmatter`);
     }
   }
 
