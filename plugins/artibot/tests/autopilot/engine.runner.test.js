@@ -112,6 +112,44 @@ describe('resolveExecuteRunner (pure)', () => {
   });
 });
 
+describe('resolveExecuteRunner — Stage 2 auto-select ladder (config-injected)', () => {
+  it('should stay team-create when autoSelect is OFF even with a workflow recommendation', () => {
+    const state = { options: { recommendedRunner: 'workflow' } };
+    expect(resolveExecuteRunner(state, { autoSelect: false })).toBe('team-create');
+  });
+
+  it('should auto-select dynamic-run when autoSelect is ON and recommendation is workflow', () => {
+    const state = { options: { recommendedRunner: 'workflow' } };
+    expect(resolveExecuteRunner(state, { autoSelect: true })).toBe('dynamic-run');
+  });
+
+  it('should stay team-create when autoSelect is ON but no recommendation was injected', () => {
+    expect(resolveExecuteRunner({ options: {} }, { autoSelect: true })).toBe('team-create');
+    expect(resolveExecuteRunner({ options: { recommendedRunner: 'autopilot' } }, { autoSelect: true })).toBe('team-create');
+  });
+
+  it('should let an explicit --runner override beat auto-select in both directions', () => {
+    const rec = { recommendedRunner: 'workflow' };
+    expect(resolveExecuteRunner({ options: { runner: 'team', ...rec } }, { autoSelect: true })).toBe('team-create');
+    expect(resolveExecuteRunner({ options: { runner: 'dynamic' } }, { autoSelect: false })).toBe('dynamic-run');
+  });
+
+  it('should pin unknown explicit runner values to team-create even under auto-select (Stage 1 invariant)', () => {
+    const rec = { recommendedRunner: 'workflow' };
+    expect(resolveExecuteRunner({ options: { runner: 'dynamik', ...rec } }, { autoSelect: true })).toBe('team-create');
+    expect(resolveExecuteRunner({ options: { runner: 'workflow', ...rec } }, { autoSelect: true })).toBe('team-create');
+    // Empty string counts as "no explicit choice" and falls through the ladder.
+    expect(resolveExecuteRunner({ options: { runner: '', ...rec } }, { autoSelect: true })).toBe('dynamic-run');
+  });
+
+  it('should default to autoSelect OFF from the live config (kill-switch shipped closed)', () => {
+    // No config injected → loadRunnerConfig() reads artibot.config.json,
+    // whose shipped default is autoSelect:false.
+    const state = { options: { recommendedRunner: 'workflow' } };
+    expect(resolveExecuteRunner(state)).toBe('team-create');
+  });
+});
+
 describe('runPhase2Execute — runner branching (ADR-003 Stage 1)', () => {
   it('should emit the legacy team-create instruction when the flag is absent', async () => {
     const inst = await phase2Instruction({}, 'default');

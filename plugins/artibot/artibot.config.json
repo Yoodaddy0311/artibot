@@ -796,6 +796,10 @@
         "\\.(s3|amazonaws|googleapis|blob\\.core\\.windows|firebaseio)\\."
       ],
       "comment": "MCP-driven Verification (P0-4): Artibot self-plugin MCPs allowed. External MCP/host blocked. opt-in via --mcp-verify."
+    },
+    "runner": {
+      "autoSelect": false,
+      "comment": "ADR-003 Stage 2 gate: true = EXECUTE runner auto-selects dynamic-run when the classifier recommendation (options.recommendedRunner) is 'workflow'. Explicit --runner always wins. Kill-switch: set false."
     }
   },
   "git": {

@@ -4,7 +4,7 @@
 > **B 채택 — 단계 도입. Stage 1은 기본 동작 무변경(플래그), Stage 2는 config 옵트인 뒤에만 자동 선택. kill-switch = autopilot.runner.autoSelect=false 한 줄.을(를) 채택한다.** 교체 지점이 이미 존재(engine.js:216 instruction.type)하고 선택 신호도 이미 계산됨(workflow-plan.js deriveRecommendation — 현재 미소비). 신규 분류 로직 발명 없이 단일 진실원(buildWorkflowPlan)을 소비만 하므로 드리프트 위험 최소. 하네스 제약(workflow/autopilot auto-fire 금지)은 /autopilot 세션 시작이 이미 명시 옵트인이므로 세션 내부 러너 선택은 위반 아님(ORCHESTRATION-ROUTING.md 2축 표의 CONSUMES orchestrate internally 명문화 경로). C는 동형 반복 자동 최적화 가치를 영구 포기, A는 ROUTING 문서와 실물의 정합성 갭 방치.
 
 ## Status
-Accepted
+Accepted — **Stage 1 구현됨 (v4.39.0)** · **Stage 2 구현됨 (v4.39.0 직후, config `autopilot.runner.autoSelect` 기본 OFF)**
 
 작성일: 2026-07-15
 
@@ -74,5 +74,6 @@ Accepted
 ## 7. 2년 뒤 기술 부채 예상 포인트
 
 - instruction 소비자 분기가 코드가 아니라 **프롬프트 문서**(`commands/autopilot.md` Step 3)에 존재 — 소비자 드리프트가 조용히 발생할 수 있는 지점. 릴리스 게이트에 instruction-type ↔ 커맨드 문서 정합 체크 추가 권장.
+- **Stage 2 주입 경로도 동일 계열**: `options.recommendedRunner`를 세팅하는 JS 코드는 없고 프롬프트 계층(Step 1 파싱, `[artibot:hint recommend=workflow]` 감지)에만 의존 — 자동선택이 실발화하려면 프롬프트가 규칙대로 주입해야 함. dynamic-run 실배포 시 주입 경로 통합 테스트 권장 (Stage 2 리뷰 LOW-2, 2026-07-15).
 - `deriveRecommendation`의 임계값(서브목표 ≥3, 동일 그룹 ≥3)이 하드코딩 — config화하지 않으면 매직넘버로 잔존.
 - Workflow 도구는 플랫폼 API — 시그니처/기능 변화 시 dynamic-run 경로만 깨질 수 있어 플랫폼 버전 추적 필요(폴백이 있으므로 치명적이지는 않음).

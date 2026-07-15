@@ -10,7 +10,7 @@ All other files that discuss routing summarize and link here; do not duplicate t
 |  | **Adaptive (model-driven)** | **Deterministic (code-driven)** |
 |---|---|---|
 | **Single attended session** | **team** — Agent Teams API; auto-fires when ≥2 independent subtasks are detected (Operator-Waits DNA) | **orchestrate** (classifier label: `workflow`) — fixed control flow; explicit opt-in only, never auto-fires. User-facing slash entry point: **`/orchestrate`** (predefined pipelines: feature / bugfix / refactor / security) |
-| **Long unattended session** | **autopilot** (CONSUMES team internally — default EXECUTE runner) | **autopilot** (CONSUMES the deterministic runner via `--runner dynamic`, manual opt-in — ADR-003 Stage 1; config-gated auto-select is Stage 2, planned) |
+| **Long unattended session** | **autopilot** (CONSUMES team internally — default EXECUTE runner) | **autopilot** (CONSUMES the deterministic runner — ADR-003: `--runner dynamic` manual, or Stage 2 auto-select gated by `autopilot.runner.autoSelect` config, default OFF) |
 
 > autopilot is not a third axis — it is a session-lifetime wrapper whose EXECUTE phase delegates
 > to team and/or orchestrate depending on the sub-task shape. It never auto-fires.

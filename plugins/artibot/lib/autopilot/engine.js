@@ -11,6 +11,8 @@
  */
 
 import { readFileSync } from 'node:fs';
+import nodePath from 'node:path';
+import { getPluginRoot } from '../core/platform.js';
 import { generatePRD } from './prd-generator.js';
 import { generateReport } from './report-generator.js';
 import { parseGoalContract } from './prd-parser.js';
@@ -197,18 +199,52 @@ export function runPhase1Plan(state) {
 }
 
 /**
- * Resolve the Phase 2 EXECUTE runner from session options (ADR-003 Stage 1).
- * Manual opt-in only: `options.runner === 'dynamic'` selects the deterministic
- * Workflow-tool runner; anything else keeps the adaptive team runner, so
- * sessions without the flag behave exactly as before. Stage 2 (config-gated
- * auto-select from the classifier recommendation) is deliberately not wired
- * here — see docs/adr/ADR-003. The runner is fixed at session start and never
- * re-evaluated on resume.
+ * Load the ADR-003 runner config block from artibot.config.json.
+ * Same direct-read + safe-default pattern as mcp-verifier's loadAllowList;
+ * a broken or absent config always degrades to auto-select OFF.
+ * @returns {{ autoSelect: boolean }}
+ */
+export function loadRunnerConfig() {
+  try {
+    const cfgPath = nodePath.join(getPluginRoot(), 'artibot.config.json');
+    const cfg = JSON.parse(readFileSync(cfgPath, 'utf8'));
+    return { autoSelect: cfg?.autopilot?.runner?.autoSelect === true };
+  } catch {
+    return { autoSelect: false };
+  }
+}
+
+/**
+ * Resolve the Phase 2 EXECUTE runner (ADR-003).
+ *
+ * Priority ladder:
+ *   1. Explicit `options.runner` — 'dynamic' | 'team' (Stage 1, always wins).
+ *   2. Config gate `autopilot.runner.autoSelect` OFF (default) → team-create.
+ *   3. Auto-select (Stage 2): the classifier recommendation injected at
+ *      session start as `options.recommendedRunner === 'workflow'` (homogeneous
+ *      fan-out per lib/cognitive/workflow-plan.js deriveRecommendation —
+ *      consumed here, never recomputed: L2 must not import L4) → dynamic-run.
+ *   4. Everything else (legacy states included) → team-create.
+ *
+ * The runner is fixed at session start and never re-evaluated on resume.
  * @param {object} state
+ * @param {{ autoSelect?: boolean }} [config] - injectable for tests; defaults
+ *   to loadRunnerConfig().
  * @returns {'team-create'|'dynamic-run'}
  */
-export function resolveExecuteRunner(state) {
-  return state?.options?.runner === 'dynamic' ? 'dynamic-run' : 'team-create';
+export function resolveExecuteRunner(state, config) {
+  const explicit = state?.options?.runner;
+  if (explicit === 'dynamic') return 'dynamic-run';
+  // Any other non-empty explicit value ('team', typos, unknown strings) pins
+  // the adaptive runner — preserves the Stage 1 invariant that only the exact
+  // literal 'dynamic' can select the deterministic runner, even under
+  // auto-select. Absent/empty falls through to the config-gated ladder.
+  if (typeof explicit === 'string' && explicit.length > 0) return 'team-create';
+  const cfg = config || loadRunnerConfig();
+  if (cfg.autoSelect === true && state?.options?.recommendedRunner === 'workflow') {
+    return 'dynamic-run';
+  }
+  return 'team-create';
 }
 
 /**
