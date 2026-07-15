@@ -9,11 +9,15 @@ All other files that discuss routing summarize and link here; do not duplicate t
 
 |  | **Adaptive (model-driven)** | **Deterministic (code-driven)** |
 |---|---|---|
-| **Single attended session** | **team** — Agent Teams API; auto-fires when ≥2 independent subtasks are detected (Operator-Waits DNA) | **workflow** — `agent()`/`parallel()`/`pipeline()` primitives; explicit opt-in only, never auto-fires. User-facing slash entry point: **`/orchestrate`** (predefined pipelines: feature / bugfix / refactor / security) |
-| **Long unattended session** | **autopilot** (CONSUMES team internally) | **autopilot** (CONSUMES workflow internally) |
+| **Single attended session** | **team** — Agent Teams API; auto-fires when ≥2 independent subtasks are detected (Operator-Waits DNA) | **orchestrate** (classifier label: `workflow`) — fixed control flow; explicit opt-in only, never auto-fires. User-facing slash entry point: **`/orchestrate`** (predefined pipelines: feature / bugfix / refactor / security) |
+| **Long unattended session** | **autopilot** (CONSUMES team internally — default EXECUTE runner) | **autopilot** (CONSUMES the deterministic runner via `--runner dynamic`, manual opt-in — ADR-003 Stage 1; config-gated auto-select is Stage 2, planned) |
 
 > autopilot is not a third axis — it is a session-lifetime wrapper whose EXECUTE phase delegates
-> to team and/or workflow depending on the sub-task shape. It never auto-fires.
+> to team and/or orchestrate depending on the sub-task shape. It never auto-fires.
+>
+> **Naming**: bare "workflow" is banned in orchestration prose — see the
+> [Canonical Naming Convention](ORCHESTRATION-GLOSSARY.md#canonical-naming-convention).
+> `workflow` appears below only as the **classifier output label** (a code identifier).
 
 > **Naming collision (external)** — none of the four above is Claude Code's platform **"Dynamic
 > Workflows"** (2.1.154, auto-orchestration across many background agents) or the `ultracode`
@@ -26,7 +30,11 @@ All other files that discuss routing summarize and link here; do not duplicate t
 
 ```
 Is the worklist known up-front AND is control flow fixed / repeatable?
-  YES → workflow  (fan-out, adversarial panel, loop-until-dry, N-file migration)
+  YES → deterministic:
+        · /orchestrate — predefined dev patterns (feature / bugfix / refactor / security)
+        · /dynamic     — harness Workflow-tool scripts (fan-out, adversarial panel,
+                         loop-until-dry, N-file migration)
+        (classifier label for this branch: workflow)
 
 Does decomposition require reasoning, OR must sub-agents coordinate / approve plans?
   YES → team  (adaptive model-driven; auto-fires on Operator-Waits DNA)
@@ -46,7 +54,7 @@ Otherwise (<30 lines, single domain, no delegation needed)?
 |---|---|---|
 | `inline` | Yes — orchestrator executes directly | No team creation overhead |
 | `team` | Yes — Operator-Waits DNA triggers automatically | Threshold: `artibot.config.json#/team/autoApplyTriggers`; opt-out via `--no-team` or `team.autoApply: false` |
-| `workflow` | **No — advisory only (opt-in)** | Classifier emits a recommendation text; user or orchestrator must explicitly invoke |
+| `workflow` (= orchestrate mechanism) | **No — advisory only (opt-in)** | Classifier emits a recommendation text; user or orchestrator must explicitly invoke `/orchestrate` (pattern pipelines) or `/dynamic` (Workflow-tool scripts) |
 | `autopilot` | **No — advisory only (opt-in)** | Same advisory surface; never starts an unattended session silently |
 
 **Single source of truth for classification logic:**
@@ -60,7 +68,7 @@ workflow/autopilot recommendations into prompt text.
 
 ## Harness Constraint (do not violate)
 
-`workflow` and `autopilot` MUST NEVER auto-fire without explicit user opt-in.
+`orchestrate` (classifier label `workflow`) and `autopilot` MUST NEVER auto-fire without explicit user opt-in.
 The classifier MAY only recommend them (advisory text). Only `inline` and `team` auto-fire.
 
 ---
