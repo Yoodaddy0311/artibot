@@ -197,7 +197,47 @@ export function runPhase1Plan(state) {
 }
 
 /**
- * Phase 2 — Execute: instruction to spin up a parallel team.
+ * Resolve the Phase 2 EXECUTE runner from session options (ADR-003 Stage 1).
+ * Manual opt-in only: `options.runner === 'dynamic'` selects the deterministic
+ * Workflow-tool runner; anything else keeps the adaptive team runner, so
+ * sessions without the flag behave exactly as before. Stage 2 (config-gated
+ * auto-select from the classifier recommendation) is deliberately not wired
+ * here — see docs/adr/ADR-003. The runner is fixed at session start and never
+ * re-evaluated on resume.
+ * @param {object} state
+ * @returns {'team-create'|'dynamic-run'}
+ */
+export function resolveExecuteRunner(state) {
+  return state?.options?.runner === 'dynamic' ? 'dynamic-run' : 'team-create';
+}
+
+/**
+ * Build the deterministic EXECUTE instruction (harness Workflow-tool run).
+ * @param {object} state
+ * @returns {object}
+ */
+function buildDynamicRunInstruction(state) {
+  return {
+    type: 'dynamic-run',
+    phase: 'EXECUTE',
+    sessionId: state.sessionId,
+    nextPhase: 'CROSS_CHECK',
+    runner: 'dynamic-run',
+    instructions: [
+      `Autopilot 세션 ${state.sessionId} Phase 2 (deterministic runner).`,
+      'Workflow 도구로 스크립트를 작성·실행. Phase 1 PLAN 의 작업 단위를 워크리스트로 매핑, pipeline() 기본.',
+      '세션 잔여 토큰 예산을 Workflow budget 으로 전달 (이중 계상 금지).',
+      'checkpoint 는 run 경계(시작 전/완료 후) WIP commit. 각 agent 는 본 작업 디렉토리만 수정, 외부 송신/destructive action 금지.',
+      '실패/빈 결과 시 같은 Phase 를 team-create 로 1회 폴백하고 runner-fallback 이벤트를 기록.',
+    ],
+  };
+}
+
+/**
+ * Phase 2 — Execute: instruction to spin up a parallel team, or (when the
+ * session opted into the deterministic runner via `--runner dynamic`) a
+ * harness Workflow-tool run. Default path is byte-identical to the legacy
+ * team-create instruction (ADR-003 Stage 1 contract).
  * @param {object} state
  * @returns {object}
  */
@@ -208,12 +248,20 @@ export function runPhase2Execute(state) {
   if (paused) return paused;
 
   const worktreePath = attemptCreateWorktree(state);
+  const runner = resolveExecuteRunner(state);
 
   recordPhase(state, { name: 'EXECUTE', status: 'queued' });
   persist(state);
-  tick(state.sessionId, { phase: 'EXECUTE', type: 'phase-end', level: 'info', message: 'Phase 2 EXECUTE 위임 완료' });
+  tick(state.sessionId, {
+    phase: 'EXECUTE',
+    type: 'phase-end',
+    level: 'info',
+    message: runner === 'dynamic-run'
+      ? 'Phase 2 EXECUTE 위임 완료 (runner=dynamic-run)'
+      : 'Phase 2 EXECUTE 위임 완료',
+  });
   notePhaseProgress(state, 'PLAN', 'EXECUTE');
-  const instruction = {
+  const instruction = runner === 'dynamic-run' ? buildDynamicRunInstruction(state) : {
     type: 'team-create',
     phase: 'EXECUTE',
     sessionId: state.sessionId,

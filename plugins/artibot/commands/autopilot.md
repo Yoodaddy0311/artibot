@@ -45,6 +45,7 @@ When the prompt contains `[artibot:hint recommend=autopilot]`, surface to the us
 | `--no-team` | off | 병렬 팀 비활성화 (단일 메인 실행) |
 | `--checkpoint <interval>` | `30m` | 체크포인트(WIP commit) 주기 |
 | `--worktree` | off | git worktree 격리 사용 (P0-3, 기본 브랜치: `autopilot/<sessionId>`) |
+| `--runner [team\|dynamic]` | `team` | **ADR-003 Stage 1** — Phase 2 EXECUTE 러너 수동 선택. `dynamic` = 하네스 `Workflow` 도구 스크립트 런(결정론, 동형 반복 작업용). 미지정 시 현행 team-create와 완전 동일. 세션 시작 시 1회 고정 — resume에서 재평가 없음 |
 | `--detached` | off | worktree를 detached HEAD로 생성 (advanced) |
 | `--mcp-verify` | off | Phase 4 VERIFY에서 자체 plugin MCP 화이트리스트 호출 (P0-4) |
 | `--goal "<stopping-condition>"` | off | **v4.6.0 Goal-driven mode** — verifiable stopping condition shorthand. PRD에 `## 2.5 Goal Contract` JSON 블록으로 삽입되며 Phase 5 후 evaluator가 `validationCommand` 결과로 자동 종료 결정. 미충족 시 Phase 2로 재진입 (cap = maxIterations, default 3, hard 10). |
@@ -85,7 +86,7 @@ When the prompt contains `[artibot:hint recommend=autopilot]`, surface to the us
 Parse `$ARGUMENTS`:
 - `task-description`: 자율 처리할 작업 설명 (필수, `:resume`/`:status`/`:abort` 제외)
 - subcommand 접미어: `night` / `plan` / `resume` / `status` / `abort` / `list` 중 하나 (없으면 `default`)
-- `--max`, `--budget`, `--no-notify`, `--no-tui`, `--no-team`, `--checkpoint`, `--worktree`, `--detached`: 위 표 참조
+- `--max`, `--budget`, `--no-notify`, `--no-tui`, `--no-team`, `--checkpoint`, `--worktree`, `--detached`, `--runner`: 위 표 참조
 - `session-id`: `:resume` / `:abort` / `:status` 에서 사용 (`ap-YYYYMMDD-HHMMSS` 형식)
 - `--goal`, `--validation-command`, `--max-iterations`: v4.6.0 Goal-driven mode (아래 "Goal-driven Mode" 섹션 참조)
 
@@ -235,9 +236,9 @@ if (pfInstr?.suppress) { /* warnings: state.preflightWarnings에 누적 + 계속
   <!-- model: model-policy 해석 — 역할 frontier 티어 -->
 
 #### Phase 2 — PARALLEL EXECUTE
-- EXECUTE 러너는 통합 분류기(`lib/cognitive/workflow-plan.js`)가 선출한다: 현재 기본값은 `TeamCreate` (adaptive 팀)이다. 결정적 workflow-runner 로의 교체(Option-B pluggable 러너)는 **미구현·향후** 단계다 (현 동작 불변 — 항상 TeamCreate).
-- `--no-team` 미설정 시: `TeamCreate(team_name="autopilot-{sessionId}", description="{task}")` → 병렬 `Task()` 스폰.
-- 30분(또는 `--checkpoint`)마다 WIP commit: `git commit -m "wip(autopilot): phase2 checkpoint {sessionId}"`. SHA를 `engine.recordCheckpoint(sessionId, sha)`로 기록.
+- EXECUTE 러너는 `engine.resolveExecuteRunner(state)`가 결정한다 (**ADR-003 Stage 1**): `--runner dynamic` 명시 시 `instruction.type === 'dynamic-run'`, 그 외 항상 `'team-create'`(현행 동일). config 게이트 기반 자동 선택(Stage 2 — `buildWorkflowPlan.recommendation` 소비)은 향후 단계다.
+- **`type: 'team-create'`** (기본): `TeamCreate(team_name="autopilot-{sessionId}", description="{task}")` → 병렬 `Task()` 스폰. 30분(또는 `--checkpoint`)마다 WIP commit: `git commit -m "wip(autopilot): phase2 checkpoint {sessionId}"`. SHA를 `engine.recordCheckpoint(sessionId, sha)`로 기록.
+- **`type: 'dynamic-run'`** (`--runner dynamic`): TeamCreate 대신 **하네스 `Workflow` 도구**로 스크립트 런 — Phase 1 PLAN의 작업 단위를 워크리스트로 매핑(pipeline() 기본), 세션 잔여 예산을 Workflow budget으로 전달(이중 계상 금지), checkpoint는 **run 경계**(시작 전/완료 후) WIP commit. **폴백**: 실패/빈 결과 시 같은 Phase를 team-create로 1회 재시도 + `runner-fallback` 이벤트 기록, 재시도도 실패 시 기존 PAUSED 경로.
 
 #### Phase 3 — CROSS_CHECK
 - 팀원 간 원형 검증 (A→B→C→A). 추가로 `Task(subagent_type="artibot:spec-reviewer")` 소환.

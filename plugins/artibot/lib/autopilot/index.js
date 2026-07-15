@@ -13,6 +13,7 @@ export {
   runPhase0Intake,
   runPhase1Plan,
   runPhase2Execute,
+  resolveExecuteRunner,
   runPhase3CrossCheck,
   runPhase4Verify,
   runPhase5Improve,
