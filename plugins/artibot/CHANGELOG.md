@@ -13,6 +13,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.38.0] — 2026-07-15
+
+### Changed
+- **모델 정책 — Fable-5 메인 티어 전환** (cfdbd63). high 버킷 `opus`→`fable`
+  (옵트인 게이트: `fable.enabled=true` + allowlist 20종, `security-reviewer`는
+  allowlist 제외 **및** `FABLE_DENYLIST` 2중 고정 — refusal classifier 오탐 회피).
+  medium 버킷(구 sonnet 7종) `sonnet`→`opus`. `advisorStrategy.executorModel`→`opus`
+  (executor=advisor=opus — 비용 절감 아닌 escalation 규율 패턴으로 재정의).
+  `DEFAULT_MODEL`·`REVIEW_ROLES`→`opus` (`EMPTY_POLICY`는 config-유실 폴백으로 보수 유지).
+- **gate-aware 소비자 3곳**: `scripts/ci/validate-model-policy.js`(+fable 버킷
+  커버리지), `scripts/validate.js`, `scripts/hooks/subagent-handler.js` — raw 버킷
+  (`getPolicyModel`) 대신 게이트 적용 유효 티어(`resolveModel`) 비교. security-reviewer
+  (버킷=fable, 유효=opus)가 드리프트 오탐 없이 통과.
+- 에이전트 frontmatter 27종 동기화: fable 20 / opus 8 / sonnet 0.
+- `cache-roi` 미들웨어에 fable 단가 추가 — **2× opus per-token** (토크나이저 계수
+  1.3은 usage 실토큰에 이미 반영되므로 단가 이중계산 배제). SDK `VALID_MODELS`에 `fable`.
+
+### Rollback
+- **kill-switch**: `artibot.config.json#/agents/modelPolicy/fable/enabled=false` 한 줄로
+  전량 opus 강등 (코드 수정 0, 리허설 검증). 완전 원복은 마이그레이션 커밋(cfdbd63) revert.
+- 발동 기준: 정상 작업 refusal 오탐 / task-budget-min-20k 에러 / 모델 가용성 에러 /
+  비용 폭증 (fable 실효 비용 = opus 대비 2.6×).
+
+---
+
 ## [4.37.0] — 2026-07-13
 
 ### Changed
