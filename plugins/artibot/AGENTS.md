@@ -12,7 +12,7 @@
 | Fact | Value |
 |---|---|
 | Source of truth | `plugins/artibot/agents/*.md` (YAML frontmatter + body) |
-| Agent count | 28 (21 opus / 7 sonnet) |
+| Agent count | 28 (20 fable / 8 opus — security-reviewer는 denylist로 opus 고정) |
 | Skill count | 113 |
 | Command count | 72 |
 | Native orchestration | Claude Agent Teams API (`TeamCreate`, `SendMessage`, `TaskCreate/Update/List/Get`) |
@@ -150,8 +150,8 @@ tools:
 
 | Artibot tier | Claude Code model | Cursor | Codex CLI | OpenCode | Windsurf |
 |---|---|---|---|---|---|
-| `high` | `opus` | (user-controlled) | `gpt-5` (or user-pref) | `opus` literal | (user-controlled) |
-| `medium` | `sonnet` | (user-controlled) | `gpt-5-mini` | `sonnet` literal | (user-controlled) |
+| `high` | `fable` (security-reviewer는 denylist로 `opus`) | (user-controlled) | `gpt-5` (or user-pref) | `fable` literal | (user-controlled) |
+| `medium` | `opus` | (user-controlled) | `gpt-5-mini` | `opus` literal | (user-controlled) |
 
 Exporters that target non-Anthropic runtimes substitute a sane default; users override in the destination tool's config.
 

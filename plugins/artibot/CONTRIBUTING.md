@@ -243,8 +243,9 @@ Every agent that participates in Agent Teams must include:
 
 | Model | Use case | Cost |
 |-------|----------|------|
-| `opus` | Deep reasoning, architecture decisions, security analysis | Highest |
-| `sonnet` | General coding, balanced tasks, API development | Medium |
+| `fable` | High-bucket default (deep reasoning, architecture, implementation) — opt-in allowlist + security denylist 필수, `lib/core/model-policy.js` 게이트 경유 | Highest (2.6× opus) |
+| `opus` | Medium-bucket default (docs/marketing/analysis, 구 sonnet 작업), security-reviewer (denylist 고정) | High |
+| `sonnet` | 정책 미사용 (fable 마이그레이션으로 전량 opus 상향) — 외부/실험 에이전트용 | Medium |
 | `haiku` | Lightweight tasks, documentation sync, content generation | Lowest |
 
 ### Step 5: Register the agent / 에이전트 등록

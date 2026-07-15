@@ -14,7 +14,7 @@ description: |
   문서, 문서화, 변경이력, API 문서, 가이드
 
   Do NOT use for: code implementation, testing, deployment, architecture design
-model: sonnet
+model: opus
 modelTier: standard
 tools:
   - Read

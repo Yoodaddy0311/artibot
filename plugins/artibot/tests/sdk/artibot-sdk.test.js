@@ -203,6 +203,7 @@ describe('artibot-sdk', () => {
 
   describe('constants', () => {
     it('VALID_MODELS has expected models', () => {
+      expect(_VALID_MODELS.has('fable')).toBe(true);
       expect(_VALID_MODELS.has('opus')).toBe(true);
       expect(_VALID_MODELS.has('sonnet')).toBe(true);
       expect(_VALID_MODELS.has('haiku')).toBe(true);

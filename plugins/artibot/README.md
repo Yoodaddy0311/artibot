@@ -1242,7 +1242,7 @@ Artibot v1.5.0 initialized
 
 | 에이전트 | 모델 | 역할 | Team API 도구 |
 |----------|------|------|--------------|
-| **orchestrator** | opus | CTO급 팀 리더. 조율 전용 (delegation mode) | TeamCreate, SendMessage, TaskCreate, TaskUpdate, TaskList, TaskGet, TeamDelete, Task() |
+| **orchestrator** | fable | CTO급 팀 리더. 조율 전용 (delegation mode) | TeamCreate, SendMessage, TaskCreate, TaskUpdate, TaskList, TaskGet, TeamDelete, Task() |
 
 orchestrator는 **코드를 직접 작성하지 않습니다**. 팀을 구성하고, 태스크를 분배하고, 팀원간 조율하고, 결과를 종합하는 역할만 수행합니다.
 
@@ -1257,58 +1257,58 @@ orchestrator는 **코드를 직접 작성하지 않습니다**. 팀을 구성하
 
 | 에이전트 | 모델 | 역할 |
 |----------|------|------|
-| **architect** | opus | 시스템 아키텍처, ADR, 트레이드오프 분석 |
-| **planner** | opus | 구현 계획, 위험 평가, 단계 분해 |
-| **llm-architect** | opus | LLM 아키텍처, 프롬프트 설계, RAG |
+| **architect** | fable | 시스템 아키텍처, ADR, 트레이드오프 분석 |
+| **planner** | fable | 구현 계획, 위험 평가, 단계 분해 |
+| **llm-architect** | fable | LLM 아키텍처, 프롬프트 설계, RAG |
 
 #### 품질/보안 (4개)
 
 | 에이전트 | 모델 | 역할 |
 |----------|------|------|
-| **code-reviewer** | opus | 코드 리뷰 (4단계 심각도, 5개 차원) |
+| **code-reviewer** | fable | 코드 리뷰 (4단계 심각도, 5개 차원) |
 | **security-reviewer** | opus | OWASP Top 10, 위협 모델링 |
-| **tdd-guide** | opus | TDD (RED→GREEN→REFACTOR), 80%+ 커버리지 |
-| **e2e-runner** | opus | Playwright E2E 테스트 |
+| **tdd-guide** | fable | TDD (RED→GREEN→REFACTOR), 80%+ 커버리지 |
+| **e2e-runner** | fable | Playwright E2E 테스트 |
 
 #### 개발 (6개)
 
 | 에이전트 | 모델 | 역할 |
 |----------|------|------|
-| **frontend-developer** | opus | UI/UX, WCAG 접근성, Core Web Vitals |
-| **backend-developer** | opus | API, 데이터베이스, 서비스 |
-| **database-reviewer** | opus | SQL 최적화, 스키마 설계 |
-| **typescript-pro** | opus | 고급 타입, strict mode, 마이그레이션 |
-| **build-error-resolver** | opus | 빌드 오류 자동 진단/수정 |
-| **performance-engineer** | opus | 성능 분석, 병목 제거, 최적화 |
+| **frontend-developer** | fable | UI/UX, WCAG 접근성, Core Web Vitals |
+| **backend-developer** | fable | API, 데이터베이스, 서비스 |
+| **database-reviewer** | fable | SQL 최적화, 스키마 설계 |
+| **typescript-pro** | fable | 고급 타입, strict mode, 마이그레이션 |
+| **build-error-resolver** | fable | 빌드 오류 자동 진단/수정 |
+| **performance-engineer** | fable | 성능 분석, 병목 제거, 최적화 |
 
 #### 유틸리티 (5개)
 
 | 에이전트 | 모델 | 역할 |
 |----------|------|------|
-| **refactor-cleaner** | opus | 데드 코드 제거, 리팩토링 |
-| **doc-updater** | sonnet | 문서 동기화, 변경 이력 |
-| **content-marketer** | sonnet | 블로그, SEO, 소셜 미디어 |
-| **devops-engineer** | opus | CI/CD, Docker, 모니터링 |
-| **mcp-developer** | opus | MCP 서버 개발, 도구 오케스트레이션 |
+| **refactor-cleaner** | fable | 데드 코드 제거, 리팩토링 |
+| **doc-updater** | opus | 문서 동기화, 변경 이력 |
+| **content-marketer** | opus | 블로그, SEO, 소셜 미디어 |
+| **devops-engineer** | fable | CI/CD, Docker, 모니터링 |
+| **mcp-developer** | fable | MCP 서버 개발, 도구 오케스트레이션 |
 
 #### 마케팅 (7개)
 
 | 에이전트 | 모델 | 역할 |
 |----------|------|------|
-| **marketing-strategist** | opus | 마케팅 전략, 캠페인 기획 |
-| **data-analyst** | sonnet | 데이터 분석, 시각화, KPI 추적 |
-| **seo-specialist** | sonnet | SEO 전략, 키워드 분석, 기술 SEO |
-| **cro-specialist** | sonnet | 전환율 최적화, A/B 테스트 |
-| **ad-specialist** | sonnet | 광고 캠페인, 예산 최적화 |
-| **presentation-designer** | sonnet | 프레젠테이션 디자인, 시각 자료 |
-| **repo-benchmarker** | opus | 레포지토리 벤치마크, 비교 분석 |
+| **marketing-strategist** | fable | 마케팅 전략, 캠페인 기획 |
+| **data-analyst** | opus | 데이터 분석, 시각화, KPI 추적 |
+| **seo-specialist** | opus | SEO 전략, 키워드 분석, 기술 SEO |
+| **cro-specialist** | opus | 전환율 최적화, A/B 테스트 |
+| **ad-specialist** | opus | 광고 캠페인, 예산 최적화 |
+| **presentation-designer** | opus | 프레젠테이션 디자인, 시각 자료 |
+| **repo-benchmarker** | fable | 레포지토리 벤치마크, 비교 분석 |
 
 ### 모델 선택 기준
 
 | 모델 | 용도 | 에이전트 수 |
 |------|------|------------|
-| **opus** | 깊은 추론, 아키텍처 결정, 보안 분석 | 21개 (75%) |
-| **sonnet** | 콘텐츠, 분석, 디자인 | 7개 (25%) |
+| **fable** | 깊은 추론, 아키텍처 결정, 구현 (high 버킷 옵트인 게이트) | 20개 (71%) |
+| **opus** | 보안 분석 (security-reviewer denylist 고정) + 콘텐츠·분석·디자인 (구 sonnet 버킷) | 8개 (29%) |
 
 ### 팀원 행동 프로토콜
 
@@ -1414,7 +1414,7 @@ orchestrator는 **코드를 직접 작성하지 않습니다**. 팀을 구성하
 |------|------|
 | `adr-format` | ADR(아키텍처 결정 기록) 작성 — 옵션 비교, 추천안, 기술 부채 평가 |
 | `adversarial-review` | 공격자 관점 코드 리뷰, 취약점·엣지 케이스·설계 결함 탐지 |
-| `advisor-strategy` | Sonnet executor + Opus advisor 비용 최적화 패턴 |
+| `advisor-strategy` | Executor + Advisor 이원화 패턴 (fable 마이그레이션 후 executor/advisor 모두 opus) |
 | `agent-memory-snapshot` | 세션 상태 압축 스냅샷 → 서브에이전트 프롬프트 주입 |
 | `ai-security-standards` | AI/LLM 보안 표준 — OWASP LLM Top 10, 프롬프트 인젝션, RAG 오염 |
 | `ci-cd-pipelines` | GitHub Actions 심화 패턴 — matrix, reusable workflows, 시크릿 관리 |

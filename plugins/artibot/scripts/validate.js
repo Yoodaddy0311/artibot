@@ -8,7 +8,7 @@
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { getPolicyModel } from '../lib/core/model-policy.js';
+import { getPolicyModel, resolveModel } from '../lib/core/model-policy.js';
 import {
   collectPolicyAgents,
   findModelPolicyDrift,
@@ -310,7 +310,13 @@ async function validateModelPolicy() {
   const policyAgents = collectPolicyAgents(config);
   const { errors: driftErrors, warnings: driftWarnings } = findModelPolicyDrift({
     agentModels,
-    resolvePolicyModel: (name) => getPolicyModel(name, config),
+    // Gate-aware: getPolicyModel keeps the strict "unlisted → null" semantics,
+    // but the comparison model must be the EFFECTIVE tier after the fable
+    // opt-in gate/denylist (e.g. security-reviewer in a fable bucket → opus).
+    resolvePolicyModel: (name) =>
+      getPolicyModel(name, config) === null
+        ? null
+        : resolveModel(name, {}, config),
     policyAgents,
   });
 

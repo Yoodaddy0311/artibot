@@ -27,6 +27,10 @@ import { emit } from '../../core/event-bus.js';
 // ---------------------------------------------------------------------------
 
 const PRICING_USD_PER_M = Object.freeze({
+  // fable per-token price = 2x opus (model-catalog.js price ratio 10/5). The
+  // 1.3 tokenizer coefficient is NOT applied here: this table prices actual
+  // token counts from the usage payload, which already reflect the coefficient.
+  fable: { input: 30.0, output: 150.0, cacheRead: 3.0, cacheWrite: 37.5 },
   opus: { input: 15.0, output: 75.0, cacheRead: 1.5, cacheWrite: 18.75 },
   sonnet: { input: 3.0, output: 15.0, cacheRead: 0.3, cacheWrite: 3.75 },
   haiku: { input: 0.8, output: 4.0, cacheRead: 0.08, cacheWrite: 1.0 },
@@ -37,6 +41,7 @@ const PRICING_USD_PER_M = Object.freeze({
 function resolvePricing(model) {
   if (!model || typeof model !== 'string') return PRICING_USD_PER_M.unknown;
   const lower = model.toLowerCase();
+  if (lower.includes('fable')) return PRICING_USD_PER_M.fable;
   if (lower.includes('opus')) return PRICING_USD_PER_M.opus;
   if (lower.includes('sonnet')) return PRICING_USD_PER_M.sonnet;
   if (lower.includes('haiku')) return PRICING_USD_PER_M.haiku;

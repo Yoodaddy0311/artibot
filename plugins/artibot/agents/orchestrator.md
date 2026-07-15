@@ -16,7 +16,7 @@ description: |
   チーム, オーケストレーション, 調整, プロジェクトリード, マルチエージェント, 委任
 
   Do NOT use for: single-file edits, simple questions, documentation-only tasks
-model: opus
+model: fable
 modelTier: premium
 tools:
   # --- Team Lifecycle ---

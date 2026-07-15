@@ -38,11 +38,19 @@ describe('_safeInt', () => {
 // ---------------------------------------------------------------------------
 
 describe('_resolvePricing', () => {
-  it('matches opus / sonnet / haiku by substring', () => {
+  it('matches fable / opus / sonnet / haiku by substring', () => {
+    expect(_resolvePricing('claude-fable-5')).toBe(_PRICING.fable);
     expect(_resolvePricing('claude-opus-4-8')).toBe(_PRICING.opus);
     expect(_resolvePricing('claude-opus-4-7')).toBe(_PRICING.opus);
     expect(_resolvePricing('claude-sonnet-4-6')).toBe(_PRICING.sonnet);
     expect(_resolvePricing('claude-haiku-4-5-20251001')).toBe(_PRICING.haiku);
+  });
+
+  it('prices fable at 2x opus per token (tokenizer coeff excluded — usage tokens already reflect it)', () => {
+    expect(_PRICING.fable.input).toBe(_PRICING.opus.input * 2);
+    expect(_PRICING.fable.output).toBe(_PRICING.opus.output * 2);
+    expect(_PRICING.fable.cacheRead).toBe(_PRICING.opus.cacheRead * 2);
+    expect(_PRICING.fable.cacheWrite).toBe(_PRICING.opus.cacheWrite * 2);
   });
 
   it('falls back to unknown for invalid / unrecognized', () => {

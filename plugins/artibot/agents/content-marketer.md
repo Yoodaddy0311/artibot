@@ -14,7 +14,7 @@ description: |
   콘텐츠, 블로그, 소셜미디어, SEO, 캠페인, 이메일 마케팅
 
   Do NOT use for: code implementation, testing, infrastructure, database design
-model: sonnet
+model: opus
 modelTier: standard
 tools:
   - Read

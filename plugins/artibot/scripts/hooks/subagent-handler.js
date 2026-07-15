@@ -9,7 +9,7 @@ import { atomicWriteSync, parseJSON, readStdin, writeStdout } from '../utils/ind
 import { existsSync, readFileSync } from 'node:fs';
 import { cleanupStaleStateTmpFiles, createErrorHandler, extractAgentId, extractAgentRole, getStatePath } from '../../lib/core/hook-utils.js';
 import { withFileLock } from '../../lib/core/file-lock.js';
-import { getPolicyModel } from '../../lib/core/model-policy.js';
+import { getPolicyModel, resolveModel } from '../../lib/core/model-policy.js';
 import { loadConfig } from '../../lib/core/config.js';
 
 /**
@@ -43,9 +43,14 @@ async function checkModelPolicy(agentType, requestedModel) {
     const config = await loadConfig();
     // getPolicyModel returns the bucket model only when the agent is listed in
     // a populated policy; null means empty/unloaded policy OR unknown agent —
-    // either way the canonical is not trustworthy, so we don't warn.
-    const canonicalModel = getPolicyModel(agentType, config);
-    if (!canonicalModel) return { canonicalModel: null, modelMismatch: false };
+    // either way the canonical is not trustworthy, so we don't warn. When it
+    // IS listed, the canonical must be the EFFECTIVE tier after the fable
+    // opt-in gate/denylist (e.g. security-reviewer in a fable bucket → opus),
+    // so the advisory compares against resolveModel, not the raw bucket.
+    if (getPolicyModel(agentType, config) === null) {
+      return { canonicalModel: null, modelMismatch: false };
+    }
+    const canonicalModel = resolveModel(agentType, {}, config);
     const modelMismatch = Boolean(requestedModel) && requestedModel !== canonicalModel;
     return { canonicalModel, modelMismatch };
   } catch {

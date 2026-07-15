@@ -20,8 +20,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const configPath = path.join(__dirname, '..', '..', 'artibot.config.json');
 const realConfig = JSON.parse(await readFile(configPath, 'utf8'));
 const policy = realConfig.agents.modelPolicy;
-const opusAgents = policy.high.agents;
-const sonnetAgents = policy.medium.agents;
+// high bucket = fable (security-reviewer demoted to opus by the denylist);
+// medium bucket = opus (formerly sonnet, pre-fable-migration).
+const highAgents = policy.high.agents;
+const mediumAgents = policy.medium.agents;
 
 describe('model-policy', () => {
   describe('normalizeAgentType()', () => {
@@ -52,21 +54,26 @@ describe('model-policy', () => {
   });
 
   describe('getPolicyModel()', () => {
-    it('returns opus for a known high-bucket agent', () => {
-      expect(getPolicyModel('orchestrator', realConfig)).toBe('opus');
-      expect(getPolicyModel('planner', realConfig)).toBe('opus');
+    it('returns fable (raw bucket) for a known high-bucket agent', () => {
+      expect(getPolicyModel('orchestrator', realConfig)).toBe('fable');
+      expect(getPolicyModel('planner', realConfig)).toBe('fable');
+    });
+
+    it('returns the UNGATED bucket even for a denylisted agent', () => {
+      // Raw bucket lookup — the denylist demotion happens in resolveModel.
+      expect(getPolicyModel('security-reviewer', realConfig)).toBe('fable');
     });
 
     it('resolves prefixed names the same as bare names', () => {
-      expect(getPolicyModel('artibot:planner', realConfig)).toBe('opus');
+      expect(getPolicyModel('artibot:planner', realConfig)).toBe('fable');
       expect(getPolicyModel('artibot:planner', realConfig)).toBe(
         getPolicyModel('planner', realConfig),
       );
     });
 
-    it('returns sonnet for a known medium-bucket agent', () => {
-      expect(getPolicyModel('doc-updater', realConfig)).toBe('sonnet');
-      expect(getPolicyModel('seo-specialist', realConfig)).toBe('sonnet');
+    it('returns opus for a known medium-bucket agent', () => {
+      expect(getPolicyModel('doc-updater', realConfig)).toBe('opus');
+      expect(getPolicyModel('seo-specialist', realConfig)).toBe('opus');
     });
 
     it('returns null for an unknown agent', () => {
@@ -82,8 +89,8 @@ describe('model-policy', () => {
   describe('loadModelPolicy()', () => {
     it('normalizes the real config policy shape', () => {
       const p = loadModelPolicy(realConfig);
-      expect(p.high.model).toBe('opus');
-      expect(p.medium.model).toBe('sonnet');
+      expect(p.high.model).toBe('fable');
+      expect(p.medium.model).toBe('opus');
       expect(p.defaultModel).toBe(DEFAULT_MODEL);
       expect(p.advisorStrategy).toMatchObject({
         enabled: true,
@@ -113,21 +120,28 @@ describe('model-policy', () => {
   });
 
   describe('resolveModel()', () => {
-    it('resolves a bucket agent to its policy model', () => {
-      expect(resolveModel('planner', {}, realConfig)).toBe('opus');
-      expect(resolveModel('doc-updater', {}, realConfig)).toBe('sonnet');
+    it('resolves a bucket agent to its effective (gated) policy model', () => {
+      expect(resolveModel('planner', {}, realConfig)).toBe('fable');
+      expect(resolveModel('doc-updater', {}, realConfig)).toBe('opus');
+    });
+
+    it('denylisted security-reviewer resolves to opus, never fable', () => {
+      expect(resolveModel('security-reviewer', {}, realConfig)).toBe('opus');
+      expect(resolveModel('artibot:security-reviewer', {}, realConfig)).toBe(
+        'opus',
+      );
     });
 
     it('falls back to DEFAULT_MODEL for unknown agents', () => {
       expect(resolveModel('nobody-here', {}, realConfig)).toBe(DEFAULT_MODEL);
     });
 
-    it('role review/inspect overrides bucket to sonnet', () => {
+    it('role review/inspect overrides bucket to opus', () => {
       expect(resolveModel('planner', { role: 'review' }, realConfig)).toBe(
-        'sonnet',
+        'opus',
       );
       expect(resolveModel('orchestrator', { role: 'inspect' }, realConfig)).toBe(
-        'sonnet',
+        'opus',
       );
     });
 
@@ -142,7 +156,7 @@ describe('model-policy', () => {
 
     it('unknown role falls through to bucket resolution', () => {
       expect(resolveModel('planner', { role: 'mystery' }, realConfig)).toBe(
-        'opus',
+        'fable',
       );
     });
 
@@ -161,14 +175,14 @@ describe('model-policy', () => {
           },
         },
       };
-      // advisor ignored → falls through to bucket (sonnet for doc-updater)
+      // advisor ignored → falls through to bucket (opus for doc-updater)
       expect(resolveModel('doc-updater', { advisor: true }, disabled)).toBe(
-        'sonnet',
+        'opus',
       );
     });
 
     it('handles non-object opts safely', () => {
-      expect(resolveModel('planner', null, realConfig)).toBe('opus');
+      expect(resolveModel('planner', null, realConfig)).toBe('fable');
     });
   });
 
@@ -179,9 +193,9 @@ describe('model-policy', () => {
       }
     });
 
-    it('maps review-side roles to sonnet', () => {
+    it('maps review-side roles to opus', () => {
       for (const role of ['review', 'inspect', 'crosscheck']) {
-        expect(resolveModelForPhase(role)).toBe('sonnet');
+        expect(resolveModelForPhase(role)).toBe('opus');
       }
     });
 
@@ -196,23 +210,27 @@ describe('model-policy', () => {
   });
 
   describe('listAgentsByModel()', () => {
-    it('lists all opus agents matching config count', () => {
-      const list = listAgentsByModel('opus', realConfig);
-      expect(list).toHaveLength(opusAgents.length);
+    it('lists all fable (high-bucket) agents matching config count', () => {
+      const list = listAgentsByModel('fable', realConfig);
+      expect(list).toHaveLength(highAgents.length);
       expect(list).toContain('orchestrator');
       expect(list).toContain('planner');
     });
 
-    it('lists all sonnet agents matching config count', () => {
-      const list = listAgentsByModel('sonnet', realConfig);
-      expect(list).toHaveLength(sonnetAgents.length);
+    it('lists all opus (medium-bucket) agents matching config count', () => {
+      const list = listAgentsByModel('opus', realConfig);
+      expect(list).toHaveLength(mediumAgents.length);
       expect(list).toContain('doc-updater');
     });
 
+    it('lists no sonnet agents after the fable migration', () => {
+      expect(listAgentsByModel('sonnet', realConfig)).toEqual([]);
+    });
+
     it('returns a copy, not the original array', () => {
-      const list = listAgentsByModel('opus', realConfig);
+      const list = listAgentsByModel('fable', realConfig);
       list.push('mutant');
-      expect(listAgentsByModel('opus', realConfig)).not.toContain('mutant');
+      expect(listAgentsByModel('fable', realConfig)).not.toContain('mutant');
     });
 
     it('returns [] for an unknown model', () => {
@@ -274,26 +292,27 @@ describe('model-policy', () => {
   };
 
   describe('fable gate — backward compatibility (no fable / disabled)', () => {
-    it('a config without a fable block resolves every agent unchanged', () => {
+    it('a config without a fable block demotes every agent to opus (kill-switch)', () => {
+      // high bucket declares fable but the gate is absent → demote to opus;
+      // medium bucket is opus already. Everything lands on opus.
       const cfg = withoutFable();
-      for (const agent of [...opusAgents, ...sonnetAgents]) {
-        const expected = opusAgents.includes(agent) ? 'opus' : 'sonnet';
-        expect(resolveModel(agent, {}, cfg)).toBe(expected);
+      for (const agent of [...highAgents, ...mediumAgents]) {
+        expect(resolveModel(agent, {}, cfg)).toBe('opus');
       }
     });
 
     it('never resolves any policy agent to fable when block is absent', () => {
       const cfg = withoutFable();
-      const fableHits = [...opusAgents, ...sonnetAgents].filter(
+      const fableHits = [...highAgents, ...mediumAgents].filter(
         (a) => resolveModel(a, {}, cfg) === 'fable',
       );
       expect(fableHits).toEqual([]);
     });
 
-    it('enabled=false yields zero fable hits even with a populated allowlist', () => {
+    it('enabled=false yields zero fable hits even with a populated allowlist (kill-switch)', () => {
       const cfg = withFable({ enabled: false, allowlist: ['architect'] });
       expect(resolveModel('architect', {}, cfg)).toBe('opus');
-      const fableHits = [...opusAgents, ...sonnetAgents].filter(
+      const fableHits = [...highAgents, ...mediumAgents].filter(
         (a) => resolveModel(a, {}, cfg) === 'fable',
       );
       expect(fableHits).toEqual([]);
@@ -303,7 +322,7 @@ describe('model-policy', () => {
   describe('fable gate — enabled but empty allowlist', () => {
     it('enabled=true + allowlist=[] still produces zero fable hits', () => {
       const cfg = withFable({ enabled: true, allowlist: [] });
-      const fableHits = [...opusAgents, ...sonnetAgents].filter(
+      const fableHits = [...highAgents, ...mediumAgents].filter(
         (a) => resolveModel(a, {}, cfg) === 'fable',
       );
       expect(fableHits).toEqual([]);
@@ -314,13 +333,21 @@ describe('model-policy', () => {
     it('allowlist=[architect] routes only architect to fable', () => {
       const cfg = withFable({ enabled: true, allowlist: ['architect'] });
       expect(isFableAllowed('architect', cfg)).toBe(true);
+      expect(resolveModel('architect', {}, cfg)).toBe('fable');
 
-      const others = [...opusAgents, ...sonnetAgents].filter(
+      const others = [...highAgents, ...mediumAgents].filter(
         (a) => a !== 'architect',
       );
       for (const agent of others) {
-        const expected = opusAgents.includes(agent) ? 'opus' : 'sonnet';
-        expect(resolveModel(agent, {}, cfg)).toBe(expected);
+        // non-allowlisted high agents demote to opus; medium is opus anyway.
+        expect(resolveModel(agent, {}, cfg)).toBe('opus');
+      }
+    });
+
+    it('the real config allowlist opts in every high agent except security-reviewer', () => {
+      for (const agent of highAgents) {
+        const expected = agent === 'security-reviewer' ? 'opus' : 'fable';
+        expect(resolveModel(agent, {}, realConfig)).toBe(expected);
       }
     });
 

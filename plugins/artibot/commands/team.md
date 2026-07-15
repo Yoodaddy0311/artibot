@@ -1,5 +1,5 @@
 ---
-description: (Artibot) Parallel team execution with cross-check — persistent team mode, leader delegates only, implementation on frontier 티어(model-policy 해석, xhigh effort 권장), review phases on balanced 티어
+description: (Artibot) Parallel team execution with cross-check — persistent team mode, leader delegates only, implementation on frontier 티어(model-policy 해석, xhigh effort 권장), review phases도 frontier 티어(fable 마이그레이션 이후 model-policy 해석)
 argument-hint: '[task] e.g. "이 기능 구현하고 테스트도 작성해줘"'
 allowed-tools: [Read, Glob, Grep, Bash, TeamCreate, SendMessage, TaskCreate, TaskUpdate, TaskList, TaskGet, Task, TeamDelete]
 toolset: team
@@ -7,7 +7,7 @@ toolset: team
 
 # /team
 
-Parallel team execution with mandatory cross-check and **persistent team mode**. The leader (YOU) delegates work and receives results ONLY — never does the work yourself. Implementation teammates (Phase 3) run on the **frontier 티어(model-policy 해석, xhigh effort 권장)** for maximum code quality. Review teammates (Phase 4 cross-check, Phase 4.5 inspection) run on the **balanced 티어** for faster turnaround. By default, the team **persists** after task completion and awaits the next assignment. Use `--one-shot` to revert to single-task-then-shutdown behavior.
+Parallel team execution with mandatory cross-check and **persistent team mode**. The leader (YOU) delegates work and receives results ONLY — never does the work yourself. Implementation teammates (Phase 3) run on the **frontier 티어(model-policy 해석, xhigh effort 권장)** for maximum code quality. Review teammates (Phase 4 cross-check, Phase 4.5 inspection) also resolve to the **frontier 티어** via model-policy (fable 마이그레이션 이후 review 역할도 frontier로 상향). By default, the team **persists** after task completion and awaits the next assignment. Use `--one-shot` to revert to single-task-then-shutdown behavior.
 
 ## Arguments
 
@@ -36,10 +36,10 @@ When the prompt contains `[artibot:hint recommend=workflow]`, surface to the use
 
 ### Teammate Rules & Model Policy
 - **Implementation teammates (Phase 3)**: `frontier` 티어(model-policy 해석) — 코드 작성/구현은 최고 품질 필수
-- **Review teammates (Phase 4, 4.5)**: `balanced` 티어(model-policy 해석) — 읽기+검증은 balanced 티어로 충분, 속도 우선
+- **Review teammates (Phase 4, 4.5)**: `frontier` 티어(model-policy 해석) — fable 마이그레이션 이후 review 역할도 frontier로 상향 (`resolveModelForPhase('review')`)
 - **ALL work in parallel** (no blockedBy unless truly sequential dependency)
 - **Each teammate works independently** on their assigned scope
-- After main work: cross-check another teammate's output (balanced 티어)
+- After main work: cross-check another teammate's output (frontier 티어)
 
 > **Single source of truth:** the phase→model mapping above is a prose summary. The authoritative resolver is `lib/core/model-policy.js` (`resolveModelForPhase` / `resolveModel`), backed by `artibot.config.json#/agents/modelPolicy`. The SubagentStart hook (`scripts/hooks/subagent-handler.js`) calls `resolveModel` to flag spawns that drift from policy.
 
@@ -136,7 +136,7 @@ TeamCreate(
 Spawn ALL teammates in a single message (parallel):
 ```
 Task(subagent_type="artibot:{agent-type}", team_name="team-*", name="{role}",
-     /* model: model-policy 해석 — 구현 역할은 frontier 티어, 검토 역할은 balanced 티어 */
+     /* model: model-policy 해석 — 구현/검토 역할 모두 frontier 티어 (fable 마이그레이션 이후) */
      prompt="[DEV Protocol 준수]\n\n작업:\n{specific work unit}\n\n완료 후 결과를 리더에게 보고해주세요.")
 ```
 
@@ -196,12 +196,12 @@ hook/statusline이 아니라 **리더의 채팅 출력**이라 항상 보이고,
 > (소스 레포에선 `node plugins/artibot/scripts/render-progress.js ...`.) `${CLAUDE_PLUGIN_ROOT}`는
 > Bash 셸에서 비어있을 수 있으니 쓰지 마라. 헬퍼 호출이 실패하면 즉시 인라인 출력으로 폴백한다.
 
-### Phase 4: CROSS-CHECK (balanced 티어)
-After ALL main tasks complete, spawn cross-check agents on the **balanced 티어** for fast review:
+### Phase 4: CROSS-CHECK (frontier 티어)
+After ALL main tasks complete, spawn cross-check agents on the **frontier 티어** (model-policy 해석):
 
 ```
 Task(subagent_type="code-reviewer", team_name="team-*", name="checker-{n}",
-     /* model: model-policy 해석 — 역할 balanced 티어 */
+     /* model: model-policy 해석 — 역할 frontier 티어 */
      prompt="[Cross-check Mode]\n\n{teammate-A}의 작업물을 검증해주세요.
      변경 파일: {list}\n요구사항: {original requirements}\n
      코드 동작, 테스트 통과, 리그레션 없음, 프로젝트 패턴 준수 여부 확인 후 APPROVE 또는 REQUEST_CHANGES 보고.")
@@ -215,13 +215,13 @@ Each cross-checker:
 3. Run relevant tests if applicable
 4. Report: APPROVE or REQUEST_CHANGES with specifics
 
-### Phase 4.5: INSPECTION (balanced 티어)
-Cross-check 완료 후, **code-reviewer 에이전트(balanced 티어)가 전체 작업물을 최종 검수**한다.
+### Phase 4.5: INSPECTION (frontier 티어)
+Cross-check 완료 후, **code-reviewer 에이전트(frontier 티어)가 전체 작업물을 최종 검수**한다.
 
 팀에 code-reviewer가 없으면 이 단계에서 소환:
 ```
 Task(subagent_type="artibot:code-reviewer", team_name="team-*", name="inspector",
-     /* model: model-policy 해석 — 역할 balanced 티어 */
+     /* model: model-policy 해석 — 역할 frontier 티어 */
      prompt="[Inspection Mode 활성화]\n\n원본 요청: {original user request}\n\n
 각 팀원의 작업물을 검수해주세요:
 1. {teammate-1}: {작업 내용} — 변경 파일: {files}
@@ -411,7 +411,7 @@ This runs the original flow: Phase 1 through 6, with automatic shutdown after re
 - Sequential execution when parallel is possible
 - Skipping cross-check phase
 - Using balanced/fast 티어 for **implementation** teammates (Phase 3 must be frontier 티어)
-- Using frontier 티어 for review-only phases (Phase 4/4.5 — balanced 티어가 빠르고 충분)
+- Using balanced/fast 티어 for review phases (Phase 4/4.5 — fable 마이그레이션 이후 review도 frontier 티어가 정책)
 - Single teammate for multi-domain work
 - Cross-checker reviewing their own work
 - **작업 완료 후 팀원을 임의로 셧다운** — 재소환 토큰 낭비 (idle 유지가 더 저렴)

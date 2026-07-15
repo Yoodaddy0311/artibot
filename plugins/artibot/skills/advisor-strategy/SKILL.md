@@ -28,6 +28,8 @@ whenNotToUse: "Do not apply when the task is already routed to an Opus-tier agen
 
 # Advisor Strategy
 
+> **현재 정책 (fable 마이그레이션 이후)**: `artibot.config.json`의 `advisorStrategy.executorModel`은 `opus`다 (구 `sonnet`). 아래 Sonnet-executor 서술과 Cost Benchmark 수치는 **일반 패턴 설명**이며 sonnet-executor 구성 기준의 참고치다 — 현재 구성(executor=advisor=opus)에서는 비용 절감 효과가 없고, 패턴의 가치는 판단 분리(escalation 규율)에 있다.
+
 ## When This Skill Applies
 
 - Evaluating cost vs quality trade-offs for model routing
@@ -117,7 +119,7 @@ advisor-pattern delegation:
     "modelPolicy": {
       "advisorStrategy": {
         "enabled": true,
-        "executorModel": "sonnet",
+        "executorModel": "opus",
         "advisorModel": "opus",
         "maxUses": 3,
         "triggerConditions": [

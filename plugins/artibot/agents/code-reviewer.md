@@ -14,7 +14,7 @@ description: |
   리뷰, 코드 품질, 풀 리퀘스트, 코드 리뷰
 
   Do NOT use for: implementation, writing new code, security audits (use security-reviewer), testing
-model: opus
+model: fable
 modelTier: premium
 tools:
   - Read

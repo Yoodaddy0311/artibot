@@ -32,6 +32,7 @@ import {
   getPolicyModel,
   listAgentsByModel,
   normalizeAgentType,
+  resolveModel,
 } from '../../lib/core/model-policy.js';
 
 /** Files that live under agents/ for discoverability but are NOT agent definitions. */
@@ -71,8 +72,10 @@ export function readAgentModels(agentsDir) {
  * @param {object} params
  * @param {{ name: string, model: string|null }[]} params.agentModels -
  *   Frontmatter models keyed by normalized agent name (from {@link readAgentModels}).
- * @param {(name: string) => ('opus'|'sonnet'|null)} params.resolvePolicyModel -
- *   Strict policy lookup (e.g. `(n) => getPolicyModel(n, config)`); null if unlisted.
+ * @param {(name: string) => (string|null)} params.resolvePolicyModel -
+ *   Gate-aware policy lookup: null if unlisted, otherwise the EFFECTIVE model
+ *   after the fable opt-in gate/denylist (a denylisted agent in a fable bucket
+ *   resolves to opus, matching its frontmatter).
  * @param {string[]} params.policyAgents - Every agent name listed in the policy
  *   (union of all buckets), normalized.
  * @returns {{ errors: string[], warnings: string[] }} Human-readable drift lines.
@@ -129,7 +132,7 @@ export function findModelPolicyDrift({ agentModels, resolvePolicyModel, policyAg
  */
 export function collectPolicyAgents(config) {
   const names = new Set();
-  for (const model of ['opus', 'sonnet']) {
+  for (const model of ['opus', 'sonnet', 'fable']) {
     for (const name of listAgentsByModel(model, config)) names.add(name);
   }
   return [...names];
@@ -188,7 +191,13 @@ async function main() {
   const policyAgents = collectPolicyAgents(config);
   const { errors, warnings } = findModelPolicyDrift({
     agentModels,
-    resolvePolicyModel: (name) => getPolicyModel(name, config),
+    // Gate-aware: getPolicyModel keeps the strict "unlisted → null" semantics,
+    // but the comparison model must be the EFFECTIVE tier after the fable
+    // opt-in gate/denylist (e.g. security-reviewer in a fable bucket → opus).
+    resolvePolicyModel: (name) =>
+      getPolicyModel(name, config) === null
+        ? null
+        : resolveModel(name, {}, config),
     policyAgents,
   });
 

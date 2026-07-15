@@ -19,8 +19,11 @@
 import { getConfig } from './config.js';
 import { resolveRole } from './model-catalog.js';
 
-/** Conservative fallback model for agents not listed in any policy bucket. */
-export const DEFAULT_MODEL = 'sonnet';
+/**
+ * Fallback model for agents not listed in any policy bucket. Opus (not fable)
+ * so unlisted agents never route to the gated premium tier by accident.
+ */
+export const DEFAULT_MODEL = 'opus';
 
 /** Tier every blocked/un-opted fable request is demoted to. */
 const FABLE_FALLBACK_MODEL = 'opus';
@@ -175,7 +178,7 @@ function normalizeBucket(bucket, fallbackModel) {
  *
  * @example
  * const policy = loadModelPolicy();
- * policy.high.model; // 'opus'
+ * policy.high.model; // 'fable'
  */
 export function loadModelPolicy(config) {
   let src = config;
@@ -208,11 +211,13 @@ export function loadModelPolicy(config) {
  *
  * @param {string} agentType - Agent name (prefixed or bare).
  * @param {object} [config] - Explicit config; falls back to getConfig().
- * @returns {'opus'|'sonnet'|null}
+ * @returns {string|null} Raw bucket model ('fable'|'opus'|...), or null if unlisted.
+ *   NOTE: this is the UNGATED bucket value — a denylisted agent in a fable
+ *   bucket still returns 'fable' here; use resolveModel for the effective tier.
  *
  * @example
- * getPolicyModel('artibot:planner'); // 'opus'
- * getPolicyModel('doc-updater'); // 'sonnet'
+ * getPolicyModel('artibot:planner'); // 'fable'
+ * getPolicyModel('doc-updater'); // 'opus'
  * getPolicyModel('unknown'); // null
  */
 export function getPolicyModel(agentType, config) {
@@ -230,7 +235,7 @@ export function getPolicyModel(agentType, config) {
  * Precedence:
  *   1. `opts.advisor === true` → advisorStrategy.advisorModel (if enabled),
  *      else fall through to bucket/default.
- *   2. `opts.role` 'review'|'inspect' → 'sonnet';
+ *   2. `opts.role` 'review'|'inspect' → 'opus';
  *      'implementation'|'build' → 'opus' (overrides bucket).
  *   3. Otherwise → getPolicyModel(agentType) ?? DEFAULT_MODEL.
  *
@@ -248,11 +253,12 @@ export function getPolicyModel(agentType, config) {
  * @param {string} agentType - Agent name (prefixed or bare).
  * @param {object} [opts] - { advisor?:boolean, role?:string }.
  * @param {object} [config] - Explicit config; falls back to getConfig().
- * @returns {'opus'|'sonnet'}
+ * @returns {'fable'|'opus'|'sonnet'|'haiku'}
  *
  * @example
- * resolveModel('planner'); // 'opus'
- * resolveModel('planner', { role: 'review' }); // 'sonnet'
+ * resolveModel('planner'); // 'fable' (high bucket, allowlisted)
+ * resolveModel('security-reviewer'); // 'opus' (denylisted, never fable)
+ * resolveModel('planner', { role: 'review' }); // 'opus'
  * resolveModel('doc-updater', { advisor: true }); // 'opus' (advisorModel)
  * resolveModel('frontier'); // 'opus'  (role alias)
  * resolveModel('deep-async'); // 'opus' unless fable gate opts the agent in
@@ -305,7 +311,7 @@ function gateFableTier(tier, agentType, config) {
 
 /** Phase roles mapped to opus (build-side). */
 const BUILD_ROLES = new Set(['implementation', 'build', 'impl']);
-/** Phase roles mapped to sonnet (review-side). */
+/** Phase roles mapped to opus (review-side; formerly sonnet pre-fable-migration). */
 const REVIEW_ROLES = new Set(['review', 'inspect', 'crosscheck']);
 
 /**
@@ -322,18 +328,18 @@ function isKnownPhaseRole(role) {
  * Map a team phase-role to a model, decoupled from any specific agent.
  *
  * @param {string} role - 'implementation'|'build'|'impl' → opus;
- *   'review'|'inspect'|'crosscheck' → sonnet; unknown → DEFAULT_MODEL.
- * @returns {'opus'|'sonnet'}
+ *   'review'|'inspect'|'crosscheck' → opus; unknown → DEFAULT_MODEL.
+ * @returns {string}
  *
  * @example
  * resolveModelForPhase('build'); // 'opus'
- * resolveModelForPhase('review'); // 'sonnet'
- * resolveModelForPhase('mystery'); // 'sonnet' (DEFAULT_MODEL)
+ * resolveModelForPhase('review'); // 'opus'
+ * resolveModelForPhase('mystery'); // 'opus' (DEFAULT_MODEL)
  */
 export function resolveModelForPhase(role) {
   if (typeof role !== 'string') return DEFAULT_MODEL;
   if (BUILD_ROLES.has(role)) return 'opus';
-  if (REVIEW_ROLES.has(role)) return 'sonnet';
+  if (REVIEW_ROLES.has(role)) return 'opus';
   return DEFAULT_MODEL;
 }
 

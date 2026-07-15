@@ -49,7 +49,7 @@ Most Claude Code plugins use simple sub-agent (`Task()`) delegation -- fire-and-
 - **5 Orchestration Patterns** -- Leader, Council, Swarm, Pipeline, Watchdog
 - **8 DAG Playbooks** -- Feature, Bugfix, Refactor, Security + Marketing Campaign, Marketing Audit, Content Launch, Competitive Analysis (DAG-based with parallel node execution, topological sort, and cycle detection)
 - **77 Slash Commands** -- `/sc` smart router, `/save`, `/resume`, `/daily`, `/team`, `/orchestrate`, `/spawn`, `/implement`, `/visual-check`, `/sc playbook`, `/learning`, `/ultrareview`, `/ultraplan`, `/audit-claude-md`, `/export`, and more
-- **28 Specialized Agents** -- Architecture, security, frontend, backend, testing, DevOps, marketing, SEO, analytics, and more (opus 73%, sonnet 27%)
+- **28 Specialized Agents** -- Architecture, security, frontend, backend, testing, DevOps, marketing, SEO, analytics, and more (fable 71%, opus 29%)
 - **113 Domain Skills** -- 11 persona skills, 8 core skills, 16 language skills, 8 utility skills, 35 marketing skills, visual-validation, daily, team, session-worklog, vibe-coding, repo-benchmarking, git-worktree, dynamic-context-injection, claude-md-auditor, skill-authoring (all enhanced with Anthropic best-practice descriptions, workflow checklists, HITL v2 conversational checkpoints, output templates, and freedom levels)
 - **8 Auto-Activating Rules** -- DEV protocol, quality gates, agent coordination, config safety, frontend/backend/test patterns, clean state enforcement
 - **Guard Registry** -- Centralized guard pipeline with `registerGuard()`/`executeChain()` API, 6 built-in guards extracted from hook scripts (75% code reduction)
@@ -517,14 +517,14 @@ TeamCreate -> [Council] research -> [Swarm] analyze -> [Council] synthesize -> [
 
 ## Agents
 
-28 specialized agents: 1 orchestrator (CTO) + 27 specialist teammates. Opus 73%, Sonnet 27%.
+28 specialized agents: 1 orchestrator (CTO) + 27 specialist teammates. Fable 71%, Opus 29% (security-reviewer stays opus via denylist).
 
 <details>
 <summary>Orchestrator (Team Leader / CTO)</summary>
 
 | Agent | Model | Role | Team API Tools |
 |-------|-------|------|----------------|
-| **orchestrator** | opus | CTO-level team leader. Coordination only (delegation mode). | TeamCreate, SendMessage, TaskCreate, TaskUpdate, TaskList, TaskGet, TeamDelete, Task() |
+| **orchestrator** | fable | CTO-level team leader. Coordination only (delegation mode). | TeamCreate, SendMessage, TaskCreate, TaskUpdate, TaskList, TaskGet, TeamDelete, Task() |
 
 The orchestrator **never writes code directly**. It assembles the team, distributes tasks, coordinates between teammates, and synthesizes results.
 
@@ -539,56 +539,56 @@ All teammates have their specialist tools + team collaboration tools (`SendMessa
 
 | Agent | Model | Specialty |
 |-------|-------|-----------|
-| architect | opus | System architecture, ADR, trade-off analysis |
-| planner | opus | Implementation planning, risk assessment |
-| llm-architect | opus | LLM architecture, prompt design, RAG |
+| architect | fable | System architecture, ADR, trade-off analysis |
+| planner | fable | Implementation planning, risk assessment |
+| llm-architect | fable | LLM architecture, prompt design, RAG |
 
 **Quality & Security:**
 
 | Agent | Model | Specialty |
 |-------|-------|-----------|
-| code-reviewer | opus | Code review (4 severity levels, 5 dimensions) |
+| code-reviewer | fable | Code review (4 severity levels, 5 dimensions) |
 | security-reviewer | opus | OWASP Top 10, threat modeling |
-| tdd-guide | opus | TDD (RED->GREEN->REFACTOR), 80%+ coverage |
-| e2e-runner | opus | Playwright E2E testing |
+| tdd-guide | fable | TDD (RED->GREEN->REFACTOR), 80%+ coverage |
+| e2e-runner | fable | Playwright E2E testing |
 
 **Development:**
 
 | Agent | Model | Specialty |
 |-------|-------|-----------|
-| frontend-developer | opus | UI/UX, WCAG accessibility, Core Web Vitals |
-| backend-developer | opus | API, database, services |
-| database-reviewer | opus | SQL optimization, schema design |
-| typescript-pro | opus | Advanced types, strict mode |
-| build-error-resolver | opus | Build error diagnosis and auto-fix |
+| frontend-developer | fable | UI/UX, WCAG accessibility, Core Web Vitals |
+| backend-developer | fable | API, database, services |
+| database-reviewer | fable | SQL optimization, schema design |
+| typescript-pro | fable | Advanced types, strict mode |
+| build-error-resolver | fable | Build error diagnosis and auto-fix |
 
 **Utilities:**
 
 | Agent | Model | Specialty |
 |-------|-------|-----------|
-| refactor-cleaner | opus | Dead code removal, refactoring |
-| doc-updater | sonnet | Documentation sync, changelog |
-| content-marketer | sonnet | Blog, SEO, social media |
-| devops-engineer | opus | CI/CD, Docker, monitoring |
-| mcp-developer | opus | MCP server development |
+| refactor-cleaner | fable | Dead code removal, refactoring |
+| doc-updater | opus | Documentation sync, changelog |
+| content-marketer | opus | Blog, SEO, social media |
+| devops-engineer | fable | CI/CD, Docker, monitoring |
+| mcp-developer | fable | MCP server development |
 
 **Marketing:**
 
 | Agent | Model | Specialty |
 |-------|-------|-----------|
-| marketing-strategist | opus | Campaign strategy, market positioning, brand architecture |
-| data-analyst | sonnet | Marketing analytics, attribution modeling, KPI dashboards |
-| presentation-designer | sonnet | Pitch decks, marketing collateral, visual storytelling |
-| seo-specialist | sonnet | Technical SEO, keyword strategy, SERP optimization |
-| cro-specialist | sonnet | Conversion optimization, A/B testing, funnel analysis |
-| ad-specialist | sonnet | PPC campaigns, ad creative, ROAS optimization |
-| repo-benchmarker | opus | Repository analysis, competitive benchmarking |
+| marketing-strategist | fable | Campaign strategy, market positioning, brand architecture |
+| data-analyst | opus | Marketing analytics, attribution modeling, KPI dashboards |
+| presentation-designer | opus | Pitch decks, marketing collateral, visual storytelling |
+| seo-specialist | opus | Technical SEO, keyword strategy, SERP optimization |
+| cro-specialist | opus | Conversion optimization, A/B testing, funnel analysis |
+| ad-specialist | opus | PPC campaigns, ad creative, ROAS optimization |
+| repo-benchmarker | fable | Repository analysis, competitive benchmarking |
 
 **Performance & Infrastructure:**
 
 | Agent | Model | Specialty |
 |-------|-------|-----------|
-| performance-engineer | opus | Performance profiling, bottleneck analysis |
+| performance-engineer | fable | Performance profiling, bottleneck analysis |
 
 </details>
 

@@ -23,8 +23,8 @@ const SKILL_REQUIRED_FIELDS = ['name', 'description', 'category'];
 /** Required fields for an agent definition */
 const AGENT_REQUIRED_FIELDS = ['name', 'role', 'model'];
 
-/** Valid model tiers */
-const VALID_MODELS = new Set(['opus', 'sonnet', 'haiku']);
+/** Valid model tiers (fable is opt-in via the model-policy gate) */
+const VALID_MODELS = new Set(['fable', 'opus', 'sonnet', 'haiku']);
 
 /** Valid hook event types */
 const VALID_HOOK_EVENTS = new Set([
@@ -153,7 +153,7 @@ export function createSkill(spec) {
  * @typedef {object} AgentSpec
  * @property {string} name - Agent name (kebab-case)
  * @property {string} role - Agent role/title
- * @property {string} model - Model tier ('opus' | 'sonnet' | 'haiku')
+ * @property {string} model - Model tier ('fable' | 'opus' | 'sonnet' | 'haiku')
  * @property {string} [systemPrompt] - System-level instructions
  * @property {string[]} [tools] - Allowed tools
  * @property {string[]} [skills] - Skills this agent can invoke

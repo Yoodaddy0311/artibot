@@ -14,7 +14,7 @@ description: |
   프롬프트, 임베딩, AI 아키텍처, 벡터 DB
 
   Do NOT use for: traditional backend logic, CSS styling, database schema without AI context
-model: opus
+model: fable
 modelTier: premium
 tools:
   - Read

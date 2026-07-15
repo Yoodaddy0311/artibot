@@ -49,11 +49,11 @@ DIVERGE(발산) 엔진을 돌리기 **전에** "이 작업이 진짜 필요한�
 ### Phase 2 — DIVERGE (다관점 의회, 병렬)
 서로 다른 렌즈의 planner/architect를 **병렬 소환**(`--lenses` 개, 기본 3). 각자 독립 계획 후보를 낸다:
 - `Task(subagent_type="artibot:planner", name="lens-mvp", prompt="[ULTRAPLAN 렌즈: MVP·최단경로] 근거:{ground}\n작업:{task}\n가장 빠르게 가치 내는 단계 계획")`
-  <!-- model: model-policy 해석 — 역할 `frontier`; fable opt-in 활성 시 `deep-async` 별칭 선택 가능 -->
+  <!-- model: model-policy 해석 — 역할 `frontier`; fable opt-in 게이트 활성(현재 기본) 시 `deep-async` 별칭 선택 가능 -->
 - `Task(subagent_type="artibot:architect", name="lens-risk", prompt="[ULTRAPLAN 렌즈: 위험·견고성 우선] ... 실패모드·롤백·테스트를 최우선으로 한 계획")`
-  <!-- model: model-policy 해석 — 역할 `frontier`; fable opt-in 활성 시 `deep-async` 별칭 선택 가능 -->
+  <!-- model: model-policy 해석 — 역할 `frontier`; fable opt-in 게이트 활성(현재 기본) 시 `deep-async` 별칭 선택 가능 -->
 - `Task(subagent_type="artibot:architect", name="lens-arch", prompt="[ULTRAPLAN 렌즈: 장기 아키텍처] ... 2년 뒤 유지보수·확장성·기술부채 최소화 계획")`
-  <!-- model: model-policy 해석 — 역할 `frontier`; fable opt-in 활성 시 `deep-async` 별칭 선택 가능 -->
+  <!-- model: model-policy 해석 — 역할 `frontier`; fable opt-in 게이트 활성(현재 기본) 시 `deep-async` 별칭 선택 가능 -->
 
 ### Phase 3 — JUDGE & SYNTHESIZE (종합)
 리더가 후보 N개를 비교·채점(가치/위험/비용/장기성)하고 **최선안으로 종합**하되 각 후보의 강점을 접목한다.

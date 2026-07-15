@@ -17,7 +17,7 @@ description: |
 
   Do NOT use for: code implementation, organic content, SEO, infrastructure,
   CRM workflows, data analysis
-model: sonnet
+model: opus
 modelTier: standard
 tools:
   - Read
