@@ -96,9 +96,11 @@ generation cycle.
 **Fable tier**
 
 `fable` (and any analogous experimental tier) is an **opt-in allowlist** controlled
-by `artibot.config.json#/fable`. Security-adjacent agents (security-reviewer,
-guardrail, pii-scrubber, blocked-patterns) are on a **denylist** and cannot be
-assigned a fable-tier model regardless of config.
+by `artibot.config.json#/agents/modelPolicy/fable`. It currently ships **off**
+(`enabled: false`), so every tier resolution — bucket, role alias, advisor — lands
+on `opus`. Security-adjacent agents (security-reviewer, guardrail, pii-scrubber,
+blocked-patterns) are additionally on a **denylist** and cannot be assigned a
+fable-tier model regardless of config.
 
 **Upgrade path**
 

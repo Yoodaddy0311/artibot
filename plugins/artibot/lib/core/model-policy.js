@@ -103,8 +103,11 @@ function loadFableGate(config) {
  * @param {object} [config] - Explicit config; falls back to getConfig().
  * @returns {boolean}
  *
+ * NOTE: as shipped, `fable.enabled` is false (single-tier opus fleet), so this
+ * returns false for EVERY agent until an operator flips the kill-switch back on.
+ *
  * @example
- * isFableAllowed('architect', cfg); // true  (if enabled + allowlisted)
+ * isFableAllowed('architect', cfg); // true  (only if enabled + allowlisted)
  * isFableAllowed('security-reviewer', cfg); // false (denylisted, always)
  */
 export function isFableAllowed(agentType, config) {
@@ -256,7 +259,7 @@ export function getPolicyModel(agentType, config) {
  * @returns {'fable'|'opus'|'sonnet'|'haiku'}
  *
  * @example
- * resolveModel('planner'); // 'fable' (high bucket, allowlisted)
+ * resolveModel('planner'); // 'opus' (high bucket declares fable; gate is off)
  * resolveModel('security-reviewer'); // 'opus' (denylisted, never fable)
  * resolveModel('planner', { role: 'review' }); // 'opus'
  * resolveModel('doc-updater', { advisor: true }); // 'opus' (advisorModel)

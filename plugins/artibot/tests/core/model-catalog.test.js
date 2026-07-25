@@ -40,7 +40,7 @@ describe('model-catalog', () => {
         thinkingMode: 'always-on',
         promptStyle: 'declarative',
       });
-      expect(getModel('opus').id).toBe('claude-opus-4-8');
+      expect(getModel('opus').id).toBe('claude-opus-5');
       expect(getModel('sonnet').id).toBe('claude-sonnet-4-6');
       expect(getModel('haiku').id).toBe('claude-haiku-4-5');
     });

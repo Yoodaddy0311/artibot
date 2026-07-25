@@ -243,9 +243,9 @@ Every agent that participates in Agent Teams must include:
 
 | Model | Use case | Cost |
 |-------|----------|------|
-| `fable` | High-bucket default (deep reasoning, architecture, implementation) — opt-in allowlist + security denylist 필수, `lib/core/model-policy.js` 게이트 경유 | Highest (2.6× opus) |
-| `opus` | Medium-bucket default (docs/marketing/analysis, 구 sonnet 작업), security-reviewer (denylist 고정) | High |
-| `sonnet` | 정책 미사용 (fable 마이그레이션으로 전량 opus 상향) — 외부/실험 에이전트용 | Medium |
+| `opus` | **신규 에이전트의 기본값** (`claude-opus-5`) — 설계·구현·검수·마케팅 전 영역. 현재 28개 에이전트 전량이 이 티어 | High |
+| `fable` | 현재 OFF (`modelPolicy.fable.enabled=false`). 켜더라도 allowlist 등재 + security denylist 회피 조건을 `lib/core/model-policy.js` 게이트로 통과해야 실효 | Highest (2.6× opus) |
+| `sonnet` | 정책 미사용 (전량 opus 상향) — 외부/실험 에이전트용 | Medium |
 | `haiku` | Lightweight tasks, documentation sync, content generation | Lowest |
 
 ### Step 5: Register the agent / 에이전트 등록

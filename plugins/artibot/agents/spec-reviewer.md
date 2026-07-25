@@ -15,7 +15,7 @@ description: |
 
   Do NOT use for: code quality, performance, security (use quality-reviewer or security-reviewer),
   writing code, implementation
-model: fable
+model: opus
 modelTier: premium
 tools:
   - Read

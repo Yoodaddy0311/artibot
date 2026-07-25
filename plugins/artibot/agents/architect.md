@@ -15,7 +15,7 @@ description: |
   아키텍처, 설계, 확장성, 시스템 설계, 모듈 경계
 
   Do NOT use for: implementation details, bug fixes, styling, test writing, DevOps
-model: fable
+model: opus
 modelTier: premium
 tools:
   - Read

@@ -20,8 +20,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const configPath = path.join(__dirname, '..', '..', 'artibot.config.json');
 const realConfig = JSON.parse(await readFile(configPath, 'utf8'));
 const policy = realConfig.agents.modelPolicy;
-// high bucket = fable (security-reviewer demoted to opus by the denylist);
-// medium bucket = opus (formerly sonnet, pre-fable-migration).
+// Shipped state (v4.41): single-tier opus fleet. The high bucket still DECLARES
+// model=fable, but `fable.enabled=false` is the kill-switch, so every agent's
+// EFFECTIVE tier is opus. Raw-bucket lookups (getPolicyModel/listAgentsByModel)
+// still report the declaration; resolveModel reports the gated reality.
 const highAgents = policy.high.agents;
 const mediumAgents = policy.medium.agents;
 
@@ -121,7 +123,8 @@ describe('model-policy', () => {
 
   describe('resolveModel()', () => {
     it('resolves a bucket agent to its effective (gated) policy model', () => {
-      expect(resolveModel('planner', {}, realConfig)).toBe('fable');
+      // high bucket declares fable, but the kill-switch demotes it to opus.
+      expect(resolveModel('planner', {}, realConfig)).toBe('opus');
       expect(resolveModel('doc-updater', {}, realConfig)).toBe('opus');
     });
 
@@ -156,7 +159,7 @@ describe('model-policy', () => {
 
     it('unknown role falls through to bucket resolution', () => {
       expect(resolveModel('planner', { role: 'mystery' }, realConfig)).toBe(
-        'fable',
+        'opus',
       );
     });
 
@@ -182,7 +185,7 @@ describe('model-policy', () => {
     });
 
     it('handles non-object opts safely', () => {
-      expect(resolveModel('planner', null, realConfig)).toBe('fable');
+      expect(resolveModel('planner', null, realConfig)).toBe('opus');
     });
   });
 
@@ -344,10 +347,22 @@ describe('model-policy', () => {
       }
     });
 
-    it('the real config allowlist opts in every high agent except security-reviewer', () => {
+    it('the shipped config keeps the kill-switch off — every agent is opus', () => {
+      // Guards the single-tier fleet decision: flipping fable.enabled back to
+      // true without re-syncing agent frontmatter must fail here first.
+      expect(policy.fable.enabled).toBe(false);
+      for (const agent of [...highAgents, ...mediumAgents]) {
+        expect(resolveModel(agent, {}, realConfig)).toBe('opus');
+      }
+    });
+
+    it('the allowlist is preserved so re-enabling restores the fable split', () => {
+      // The stored opt-in set stays intact while disabled; re-enabling routes
+      // every allowlisted (non-denylisted) agent back to fable.
+      const reenabled = withFable({ ...policy.fable, enabled: true });
       for (const agent of highAgents) {
         const expected = agent === 'security-reviewer' ? 'opus' : 'fable';
-        expect(resolveModel(agent, {}, realConfig)).toBe(expected);
+        expect(resolveModel(agent, {}, reenabled)).toBe(expected);
       }
     });
 

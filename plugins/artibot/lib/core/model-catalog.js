@@ -79,7 +79,7 @@ export const MODELS = deepFreeze({
     constraints: [],
   },
   opus: {
-    id: 'claude-opus-4-8',
+    id: 'claude-opus-5',
     priceInPerMTok: 5,
     priceOutPerMTok: 25,
     tokenizerCoeff: 1.0,

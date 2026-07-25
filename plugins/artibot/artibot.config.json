@@ -1,5 +1,5 @@
 {
-  "version": "4.40.0",
+  "version": "4.41.0",
   "devProtocol": {
     "verifyMode": "advisory",
     "writeGuardMode": "block",
@@ -58,7 +58,7 @@
         ]
       },
       "fable": {
-        "enabled": true,
+        "enabled": false,
         "allowlist": [
           "orchestrator",
           "architect",
@@ -81,7 +81,7 @@
           "quality-reviewer",
           "spec-reviewer"
         ],
-        "comment": "Fable (claude-fable-5) main-tier migration — the high bucket resolves to fable via this deliberate opt-in allowlist (20 agents; security-reviewer is EXCLUDED here AND hard-pinned to opus by the FABLE_DENYLIST in lib/core/model-policy.js because fable's refusal classifier false-positives on legit security work). An agent resolves to fable ONLY when enabled===true AND its exact name is in allowlist AND it is not denylisted; every other fable request is demoted to opus. KILL-SWITCH: set enabled=false to instantly demote ALL fable traffic to opus with zero other edits (rollback layer a; layer b is git revert of the migration commit). Effective cost vs Opus baseline is computed by lib/core/model-catalog.js#getCostFactor('fable') — do not duplicate the number here."
+        "comment": "OFF by design — the operator chose a single-tier fleet: every agent runs on opus (claude-opus-5). enabled=false is the kill-switch, so ALL fable requests are demoted to opus regardless of this allowlist; the high bucket still DECLARES model=fable, but its effective tier is opus. The allowlist is kept as the pre-approved opt-in set: flipping enabled back to true restores the v4.38 fable split (20 agents; security-reviewer is EXCLUDED here AND hard-pinned to opus by the FABLE_DENYLIST in lib/core/model-policy.js because fable's refusal classifier false-positives on legit security work). Re-enabling requires re-syncing agents/<name>.md frontmatter model: fields — scripts/ci/validate-model-policy.js is the drift gate. Effective cost vs Opus baseline is computed by lib/core/model-catalog.js#getCostFactor('fable') — do not duplicate the number here."
       }
     },
     "categories": {

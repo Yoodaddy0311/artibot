@@ -40,6 +40,8 @@ describe('_safeInt', () => {
 describe('_resolvePricing', () => {
   it('matches fable / opus / sonnet / haiku by substring', () => {
     expect(_resolvePricing('claude-fable-5')).toBe(_PRICING.fable);
+    // claude-opus-5 is the shipped `opus` tier ID (model-catalog.js#MODELS).
+    expect(_resolvePricing('claude-opus-5')).toBe(_PRICING.opus);
     expect(_resolvePricing('claude-opus-4-8')).toBe(_PRICING.opus);
     expect(_resolvePricing('claude-opus-4-7')).toBe(_PRICING.opus);
     expect(_resolvePricing('claude-sonnet-4-6')).toBe(_PRICING.sonnet);
