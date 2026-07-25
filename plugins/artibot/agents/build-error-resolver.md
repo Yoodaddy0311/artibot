@@ -14,7 +14,7 @@ description: |
   빌드 오류, 타입 에러, 컴파일 실패, 빌드 실패
 
   Do NOT use for: runtime bugs, logic errors, performance issues, feature implementation
-model: fable
+model: opus
 modelTier: premium
 tools:
   - Read

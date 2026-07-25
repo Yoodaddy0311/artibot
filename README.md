@@ -1,6 +1,6 @@
 # Artibot
 
-[![Version](https://img.shields.io/badge/version-4.40.0-blue?style=flat-square)](plugins/artibot/CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-4.41.0-blue?style=flat-square)](plugins/artibot/CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-BUSL--1.1-blue?style=flat-square)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-18%2B-brightgreen?style=flat-square)](package.json)
 [![Tests](https://img.shields.io/badge/tests-passing-brightgreen?style=flat-square)](plugins/artibot/tests/)
@@ -16,7 +16,7 @@ This repository ships **two complementary plugins** under one marketplace:
 
 | Plugin | Target | Version | Best for |
 |---|---|---|---|
-| [`artibot`](./plugins/artibot/) | Claude Code (developer CLI) | **4.40.0** | full Agent Teams orchestration, TDD, code review, security audits, RLVR learning, MCP server, **Goal-driven autopilot**, **`/learning` diagnostics**, **`/save` + `/resume` single-shot handoff**, **`/go` → `/orchestrate` build-sequence hand-off**, **ambient conversation ledger (no-command capture)**, **safety boost (machineId frontmatter, git-lock fail, 10m throttle)** |
+| [`artibot`](./plugins/artibot/) | Claude Code (developer CLI) | **4.41.0** | full Agent Teams orchestration, TDD, code review, security audits, RLVR learning, MCP server, **Goal-driven autopilot**, **`/learning` diagnostics**, **`/save` + `/resume` single-shot handoff**, **`/go` → `/orchestrate` build-sequence hand-off**, **ambient conversation ledger (no-command capture)**, **safety boost (machineId frontmatter, git-lock fail, 10m throttle)** |
 | [`artibot-cowork`](./plugins/artibot-cowork/) | Claude Cowork (knowledge workers) | **3.1.0** | marketing campaigns, long-form writing, AEO/GEO content, KR-market SEO, AI-slop detection, **Claude Design, Routines, Ultraplan, Monitor** |
 
 Both plugins share the same DEV protocol, Korean market expertise, data-sovereignty policy, and 6-stage content quality pipeline. They differ only in **target environment** and **skill mix**.
@@ -49,7 +49,7 @@ Most Claude Code plugins use simple sub-agent (`Task()`) delegation -- fire-and-
 - **5 Orchestration Patterns** -- Leader, Council, Swarm, Pipeline, Watchdog
 - **8 DAG Playbooks** -- Feature, Bugfix, Refactor, Security + Marketing Campaign, Marketing Audit, Content Launch, Competitive Analysis (DAG-based with parallel node execution, topological sort, and cycle detection)
 - **78 Slash Commands** -- `/sc` smart router, `/save`, `/resume`, `/daily`, `/team`, `/orchestrate`, `/spawn`, `/implement`, `/visual-check`, `/sc playbook`, `/learning`, `/ultrareview`, `/ultraplan`, `/audit-claude-md`, `/export`, and more
-- **28 Specialized Agents** -- Architecture, security, frontend, backend, testing, DevOps, marketing, SEO, analytics, and more (fable 71%, opus 29%)
+- **28 Specialized Agents** -- Architecture, security, frontend, backend, testing, DevOps, marketing, SEO, analytics, and more (all on `claude-opus-5`)
 - **113 Domain Skills** -- 11 persona skills, 8 core skills, 16 language skills, 8 utility skills, 35 marketing skills, visual-validation, daily, team, session-worklog, vibe-coding, repo-benchmarking, git-worktree, dynamic-context-injection, claude-md-auditor, skill-authoring (all enhanced with Anthropic best-practice descriptions, workflow checklists, HITL v2 conversational checkpoints, output templates, and freedom levels)
 - **8 Auto-Activating Rules** -- DEV protocol, quality gates, agent coordination, config safety, frontend/backend/test patterns, clean state enforcement
 - **Guard Registry** -- Centralized guard pipeline with `registerGuard()`/`executeChain()` API, 6 built-in guards extracted from hook scripts (75% code reduction)
@@ -524,7 +524,7 @@ TeamCreate -> [Council] research -> [Swarm] analyze -> [Council] synthesize -> [
 
 | Agent | Model | Role | Team API Tools |
 |-------|-------|------|----------------|
-| **orchestrator** | fable | CTO-level team leader. Coordination only (delegation mode). | TeamCreate, SendMessage, TaskCreate, TaskUpdate, TaskList, TaskGet, TeamDelete, Task() |
+| **orchestrator** | opus | CTO-level team leader. Coordination only (delegation mode). | TeamCreate, SendMessage, TaskCreate, TaskUpdate, TaskList, TaskGet, TeamDelete, Task() |
 
 The orchestrator **never writes code directly**. It assembles the team, distributes tasks, coordinates between teammates, and synthesizes results.
 
@@ -539,56 +539,56 @@ All teammates have their specialist tools + team collaboration tools (`SendMessa
 
 | Agent | Model | Specialty |
 |-------|-------|-----------|
-| architect | fable | System architecture, ADR, trade-off analysis |
-| planner | fable | Implementation planning, risk assessment |
-| llm-architect | fable | LLM architecture, prompt design, RAG |
+| architect | opus | System architecture, ADR, trade-off analysis |
+| planner | opus | Implementation planning, risk assessment |
+| llm-architect | opus | LLM architecture, prompt design, RAG |
 
 **Quality & Security:**
 
 | Agent | Model | Specialty |
 |-------|-------|-----------|
-| code-reviewer | fable | Code review (4 severity levels, 5 dimensions) |
+| code-reviewer | opus | Code review (4 severity levels, 5 dimensions) |
 | security-reviewer | opus | OWASP Top 10, threat modeling |
-| tdd-guide | fable | TDD (RED->GREEN->REFACTOR), 80%+ coverage |
-| e2e-runner | fable | Playwright E2E testing |
+| tdd-guide | opus | TDD (RED->GREEN->REFACTOR), 80%+ coverage |
+| e2e-runner | opus | Playwright E2E testing |
 
 **Development:**
 
 | Agent | Model | Specialty |
 |-------|-------|-----------|
-| frontend-developer | fable | UI/UX, WCAG accessibility, Core Web Vitals |
-| backend-developer | fable | API, database, services |
-| database-reviewer | fable | SQL optimization, schema design |
-| typescript-pro | fable | Advanced types, strict mode |
-| build-error-resolver | fable | Build error diagnosis and auto-fix |
+| frontend-developer | opus | UI/UX, WCAG accessibility, Core Web Vitals |
+| backend-developer | opus | API, database, services |
+| database-reviewer | opus | SQL optimization, schema design |
+| typescript-pro | opus | Advanced types, strict mode |
+| build-error-resolver | opus | Build error diagnosis and auto-fix |
 
 **Utilities:**
 
 | Agent | Model | Specialty |
 |-------|-------|-----------|
-| refactor-cleaner | fable | Dead code removal, refactoring |
+| refactor-cleaner | opus | Dead code removal, refactoring |
 | doc-updater | opus | Documentation sync, changelog |
 | content-marketer | opus | Blog, SEO, social media |
-| devops-engineer | fable | CI/CD, Docker, monitoring |
-| mcp-developer | fable | MCP server development |
+| devops-engineer | opus | CI/CD, Docker, monitoring |
+| mcp-developer | opus | MCP server development |
 
 **Marketing:**
 
 | Agent | Model | Specialty |
 |-------|-------|-----------|
-| marketing-strategist | fable | Campaign strategy, market positioning, brand architecture |
+| marketing-strategist | opus | Campaign strategy, market positioning, brand architecture |
 | data-analyst | opus | Marketing analytics, attribution modeling, KPI dashboards |
 | presentation-designer | opus | Pitch decks, marketing collateral, visual storytelling |
 | seo-specialist | opus | Technical SEO, keyword strategy, SERP optimization |
 | cro-specialist | opus | Conversion optimization, A/B testing, funnel analysis |
 | ad-specialist | opus | PPC campaigns, ad creative, ROAS optimization |
-| repo-benchmarker | fable | Repository analysis, competitive benchmarking |
+| repo-benchmarker | opus | Repository analysis, competitive benchmarking |
 
 **Performance & Infrastructure:**
 
 | Agent | Model | Specialty |
 |-------|-------|-----------|
-| performance-engineer | fable | Performance profiling, bottleneck analysis |
+| performance-engineer | opus | Performance profiling, bottleneck analysis |
 
 </details>
 

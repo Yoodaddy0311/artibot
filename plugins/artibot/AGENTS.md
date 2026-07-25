@@ -12,7 +12,7 @@
 | Fact | Value |
 |---|---|
 | Source of truth | `plugins/artibot/agents/*.md` (YAML frontmatter + body) |
-| Agent count | 28 (20 fable / 8 opus — security-reviewer는 denylist로 opus 고정) |
+| Agent count | 28 (전량 opus — `claude-opus-5`. fable 게이트는 `enabled=false`로 OFF) |
 | Skill count | 113 |
 | Command count | 72 |
 | Native orchestration | Claude Agent Teams API (`TeamCreate`, `SendMessage`, `TaskCreate/Update/List/Get`) |
@@ -150,7 +150,7 @@ tools:
 
 | Artibot tier | Claude Code model | Cursor | Codex CLI | OpenCode | Windsurf |
 |---|---|---|---|---|---|
-| `high` | `fable` (security-reviewer는 denylist로 `opus`) | (user-controlled) | `gpt-5` (or user-pref) | `fable` literal | (user-controlled) |
+| `high` | `opus` (버킷 선언은 `fable`이나 게이트 OFF로 실효 `opus`) | (user-controlled) | `gpt-5` (or user-pref) | `opus` literal | (user-controlled) |
 | `medium` | `opus` | (user-controlled) | `gpt-5-mini` | `opus` literal | (user-controlled) |
 
 Exporters that target non-Anthropic runtimes substitute a sane default; users override in the destination tool's config.
@@ -256,7 +256,7 @@ All contributions must respect Artibot's **local-only data policy** — exports 
 | `plugins/artibot/.well-known/mcp-server.json` | `version` | plugin version |
 | `plugins/artibot/AGENTS.md` | this section | plugin version |
 
-Current plugin version: **4.40.0**. Keep the five in lockstep — `scripts/release-check.js` enforces all five.
+Current plugin version: **4.41.0**. Keep the five in lockstep — `scripts/release-check.js` enforces all five.
 
 ### Release gate: install & update verification
 

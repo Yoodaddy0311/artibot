@@ -87,7 +87,7 @@ Enforcement pattern:
 
 ## Reasoning-Native Model Guard (CoT)
 
-For reasoning-native models (`claude-opus-4-8`, o3, R1, Qwen3-thinking), **do not** instruct the
+For reasoning-native models (`claude-opus-5`, o3, R1, Qwen3-thinking), **do not** instruct the
 model to emit step-by-step chain-of-thought as visible output, and **do not** build prompts that
 ask it to "show your full reasoning" when that reasoning may contain or leak the trusted system
 channel. Reasoning is internal; expose conclusions and evidence, not the raw CoT. Injecting

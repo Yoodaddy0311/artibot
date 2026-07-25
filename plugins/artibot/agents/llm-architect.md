@@ -14,7 +14,7 @@ description: |
   프롬프트, 임베딩, AI 아키텍처, 벡터 DB
 
   Do NOT use for: traditional backend logic, CSS styling, database schema without AI context
-model: fable
+model: opus
 modelTier: premium
 tools:
   - Read
@@ -58,14 +58,14 @@ category: expert
 
 | Use Case | Recommended Model | Rationale |
 |-----------|-------------------|-----------|
-| Highest-capability reasoning (opt-in only) | claude-fable-5 | Most capable widely released model (2026-06-09); 1M context + always-on thinking + effort. **~2.6× Opus 4.8 effective cost (price 2× × tokenizer 1.3×); refusal→fallback contract applies.** Now in the subagent enum, but Artibot routes here only via explicit allowlist opt-in. |
-| Complex reasoning (default) | claude-opus-4-8 | Deepest *generally-routable* reasoning + 1M context + adaptive thinking + xhigh effort 지원 |
+| Highest-capability reasoning (currently OFF) | claude-fable-5 | Most capable widely released model; 1M context + always-on thinking + effort. **~2.6× Opus effective cost (price 2× × tokenizer 1.3×); refusal→fallback contract applies.** In the subagent enum, but Artibot's fable gate ships `enabled=false` — no agent routes here today. |
+| Complex reasoning (default) | claude-opus-5 | Artibot의 유일한 라우팅 티어. 1M context + adaptive thinking(기본 ON) + xhigh/max effort. `thinking:{type:"disabled"}`는 effort `xhigh`/`max`에서 400 |
 | General coding | claude-sonnet-4-6 | Best balance of speed and capability |
 | High-throughput | claude-sonnet-4-6 | Quality-first approach |
 | Embeddings | text-embedding-3-small | Cost-effective for most use cases |
 | Classification | claude-sonnet-4-6 | Fast and accurate for structured output |
 
-> **Routing constraint:** The Claude Code subagent/Task `model` enum now includes `fable` (`sonnet | opus | haiku | fable`), so Fable 5 **can** be a subagent tier. Artibot policy, however, keeps it **opt-in (allowlist) only** — default routing stays Opus 4.8 (`opus` tier), and **security-class agents (denylist) must not route to `fable`** (planned). Effective cost is **~2.6× Opus 4.8** (price 2× × tokenizer 1.3×), so budget before opting in. When calling Fable 5 directly, handle `stop_reason:"refusal"` (HTTP 200 + classifier) and the `fallbacks` retry path; note no-prefill, always-on thinking, 30-day retention, and Task Budget min 20k. See the catalog doc.
+> **Routing constraint:** The Claude Code subagent/Task `model` enum includes `fable` (`sonnet | opus | haiku | fable`), so Fable 5 **can** be a subagent tier. Artibot policy, however, currently ships the fable gate **off** (`modelPolicy.fable.enabled=false`) — every agent routes to Opus 5 (`opus` tier), and **security-class agents (denylist) must not route to `fable`** even if it is re-enabled. Effective cost is **~2.6× Opus** (price 2× × tokenizer 1.3×), so budget before opting in. When calling Fable 5 directly, handle `stop_reason:"refusal"` (HTTP 200 + classifier) and the `fallbacks` retry path; note no-prefill, always-on thinking, 30-day retention, and Task Budget min 20k. See the catalog doc.
 
 ## Output Format
 

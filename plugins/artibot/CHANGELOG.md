@@ -13,6 +13,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.41.0] — 2026-07-25
+
+### Changed
+- **모델 정책 — 단일 티어(Opus 5) 편성.** `artibot.config.json#/agents/modelPolicy/fable/enabled`
+  을 `true` → **`false`** (출고 kill-switch 닫음). high 버킷은 여전히
+  `model: fable`을 **선언**하지만 게이트가 닫혀 버킷·role alias·advisor 등 모든
+  fable 경로가 `opus`로 강등된다 → **28/28 에이전트가 `opus` 티어**.
+  `agents/*.md` frontmatter `model:` 20종을 `fable` → `opus`로 동기화
+  (`scripts/ci/validate-model-policy.js` 드리프트 0 확인).
+  allowlist 20종은 **보존** — `enabled=true` 한 줄로 v4.38 분리 복원 가능
+  (단 frontmatter 재동기화 필요, 드리프트 게이트가 강제).
+- **`opus` 티어 모델 ID 갱신**: `claude-opus-4-8` → **`claude-opus-5`**
+  (`lib/core/model-catalog.js#MODELS.opus.id`). 단가($5/$25)·컨텍스트(1M)·
+  출력(128K)·tokenizerCoeff(1.0) 불변이므로 `cache-roi` 요금표는 무변경
+  (`resolvePricing`이 substring `opus`로 매칭 — 회귀 테스트 추가).
+- 문서 동기화: 루트/플러그인 README 에이전트 표, `AGENTS.md`(카운트 + export
+  티어 매핑), `CONTRIBUTING.md` 모델 선택표, `docs/CLAUDE-MODEL-CATALOG.md`
+  (Opus 5 주의사항 — thinking 기본 ON, `disabled`는 effort `xhigh`/`max`에서
+  400, prompt-cache 최소 512토큰, Opus 4.x와 별도 rate-limit 버킷),
+  `docs/ORCHESTRATION-ROUTING.md`, `rules/agent-coordination.md`,
+  `agents/llm-architect.md`, `commands/load.md`.
+
+### Notes
+- `docs/PRD-DREAMING.md`의 "opus-4-8 지원"은 Anthropic Managed Agents dreams API의
+  외부 사실 기술이라 미변경 (Artibot 라우팅과 무관).
+
+---
+
 ## [4.40.0] — 2026-07-15
 
 ### Added

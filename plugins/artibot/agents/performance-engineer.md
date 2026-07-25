@@ -15,7 +15,7 @@ description: |
   성능, 프로파일링, 병목, 지연시간, 메모리 누수, 최적화, 벤치마크
 
   Do NOT use for: feature implementation, UI styling, content creation, security audits, documentation
-model: fable
+model: opus
 modelTier: premium
 tools:
   - Read

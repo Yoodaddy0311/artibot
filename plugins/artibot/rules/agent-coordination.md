@@ -3,11 +3,12 @@
 ## Available Agents
 28 specialized agents in `~/.claude/agents/`. Use Task() to delegate.
 
-## Model Policy (fable 마이그레이션 — v4.38)
-- **Fable** (20, high 버킷 옵트인): orchestrator, architect, frontend/backend-developer, code-reviewer, tdd-guide, database-reviewer, mcp-developer, typescript-pro, planner, refactor-cleaner, build-error-resolver, llm-architect, devops-engineer, performance-engineer, e2e-runner, marketing-strategist, repo-benchmarker, quality-reviewer, spec-reviewer
-- **Opus** (8): security-reviewer (FABLE_DENYLIST로 opus 고정 — fable refusal classifier 오탐 회피) + doc-updater, content-marketer, data-analyst, presentation-designer, seo-specialist, cro-specialist, ad-specialist (구 sonnet 버킷)
-- **Sonnet**: 0 (전량 opus로 상향)
-- **Kill-switch (원복)**: `artibot.config.json#/agents/modelPolicy/fable/enabled=false` → 모든 fable 요청이 즉시 opus로 강등 (코드 수정 불필요). 완전 원복은 마이그레이션 커밋 git revert.
+## Model Policy (단일 티어 — Opus 5)
+- **Opus (28/28)**: 모든 에이전트가 `opus` 티어 = `claude-opus-5`. 설계·계획·검수·구현·마케팅 구분 없이 동일 티어.
+- **Fable**: 0. `artibot.config.json#/agents/modelPolicy/fable/enabled=false`로 게이트 OFF — high 버킷이 `model: fable`을 선언해도 실효 티어는 opus로 강등된다. allowlist 20종은 보존(재활성 대비).
+- **Sonnet / Haiku**: 정책 미사용.
+- **되돌리기**: `fable.enabled=true` 한 줄 → v4.38 fable/opus 분리 복원. 단 `agents/<name>.md` frontmatter `model:`도 함께 되돌려야 한다 (`scripts/ci/validate-model-policy.js`가 드리프트 게이트).
+- **단일 진실원**: `lib/core/model-policy.js#resolveModel`. 티어→모델 ID는 `lib/core/model-catalog.js#MODELS`. 문서·프롬프트에 모델 ID를 하드코딩하지 말 것.
 
 ## Delegation Rules
 - Complex features → use planner agent first
