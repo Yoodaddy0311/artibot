@@ -26,6 +26,7 @@
 
 import { createReadStream, readdirSync, statSync } from 'node:fs';
 import { createInterface } from 'node:readline';
+import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import os from 'node:os';
 
@@ -372,7 +373,26 @@ async function main() {
   printReport(rows, files.length);
 }
 
-main().catch((err) => {
-  process.stderr.write(`model-attribution failed: ${err?.message ?? err}\n`);
-  process.exitCode = 1;
-});
+// Direct-run guard: importing this module (tests) must not start a full scan
+// of every transcript on the machine.
+const isDirectRun = process.argv[1]
+  && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
+
+if (isDirectRun) {
+  main().catch((err) => {
+    process.stderr.write(`model-attribution failed: ${err?.message ?? err}\n`);
+    process.exitCode = 1;
+  });
+}
+
+export {
+  emptyBucket,
+  foldAssistant,
+  foldToolResults,
+  listTranscripts,
+  messageText,
+  parseArgs,
+  sessionKeyOf,
+  toRows,
+  CORRECTION_RE,
+};
