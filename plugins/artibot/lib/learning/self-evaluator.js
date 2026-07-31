@@ -67,11 +67,24 @@ async function saveEvaluations(evaluations) {
  * @param {object} [result.metrics] - Additional metrics
  * @param {object} [options]
  * @param {boolean} [options.persist=true] - Whether to save to disk
+ * @param {string|null} [options.model] - Effective model id that produced the
+ *   work, as read from the session transcript. Omit rather than guess: a null
+ *   model records "unattributed", which is honest, while a declared-but-unverified
+ *   id (e.g. from settings.json) would silently poison per-model comparisons.
+ * @param {Record<string, number>} [options.modelMix] - Main-thread model -> turn count
+ * @param {Record<string, number>} [options.subagentMix] - Subagent model -> turn count.
+ *   Kept separate from `model`: once agent tiers diverge from the session tier,
+ *   most of a delegated session's work belongs to these models, not the leader.
+ * @param {string} [options.modelSource] - Provenance of the attribution
  * @returns {Promise<{
  *   id: string,
  *   taskId: string,
  *   taskType: string,
  *   timestamp: string,
+ *   model: string | null,
+ *   modelMix: Record<string, number>,
+ *   subagentMix: Record<string, number>,
+ *   modelSource: string,
  *   dimensions: Record<string, { score: number, weight: number }>,
  *   overall: number,
  *   grade: string,
@@ -79,7 +92,13 @@ async function saveEvaluations(evaluations) {
  * }>}
  */
 export async function evaluateResult(task, result, options = {}) {
-  const { persist = true } = options;
+  const {
+    persist = true,
+    model = null,
+    modelMix = {},
+    subagentMix = {},
+    modelSource = model ? 'caller' : 'none',
+  } = options;
 
   const dimensions = {
     accuracy: {
@@ -113,6 +132,10 @@ export async function evaluateResult(task, result, options = {}) {
     taskId: task.id,
     taskType: task.type,
     timestamp: new Date().toISOString(),
+    model,
+    modelMix,
+    subagentMix,
+    modelSource,
     dimensions,
     overall: Math.round(overall * 100) / 100,
     grade,
@@ -205,6 +228,72 @@ export async function getTeamPerformance(options = {}) {
     ),
     topPerformers: sorted.slice(0, 3),
     bottomPerformers: sorted.slice(-3).reverse(),
+    totalEvaluations: recent.length,
+  };
+}
+
+/**
+ * Compare evaluation scores grouped by the model that produced them.
+ *
+ * Rows written before model attribution shipped carry no `model` field; they
+ * are reported under `unattributed` instead of being dropped, so the caller can
+ * see how much of the history is uncomparable.
+ *
+ * **This is a correlation, not a controlled comparison.** Different models ran
+ * in different periods on different tasks, so a score gap is a prompt to
+ * investigate, never on its own evidence that one model is worse. `minSamples`
+ * exists to keep thin groups out of the ranked lists for that reason.
+ *
+ * @param {object} [options]
+ * @param {number} [options.lookback=500] - Number of recent evaluations to analyze
+ * @param {number} [options.minSamples=5] - Minimum rows before a model is ranked
+ * @returns {Promise<{
+ *   byModel: Record<string, { count: number, avgScore: number, dimensions: Record<string, number> }>,
+ *   ranked: { model: string, count: number, avgScore: number }[],
+ *   attributedCount: number,
+ *   unattributedCount: number,
+ *   totalEvaluations: number
+ * }>}
+ */
+export async function getModelPerformance(options = {}) {
+  const { lookback = 500, minSamples = 5 } = options;
+  const recent = (await loadEvaluations()).slice(-lookback);
+
+  const groups = {};
+  for (const ev of recent) {
+    const key = ev.model || 'unattributed';
+    if (!groups[key]) groups[key] = { count: 0, totalScore: 0, dims: {} };
+    groups[key].count += 1;
+    groups[key].totalScore += ev.overall;
+    for (const [dim, d] of Object.entries(ev.dimensions ?? {})) {
+      groups[key].dims[dim] = (groups[key].dims[dim] ?? 0) + (d?.score ?? 0);
+    }
+  }
+
+  const byModel = Object.fromEntries(
+    Object.entries(groups).map(([model, g]) => [model, {
+      count: g.count,
+      avgScore: Math.round((g.totalScore / g.count) * 100) / 100,
+      dimensions: Object.fromEntries(
+        Object.entries(g.dims).map(([d, sum]) => [
+          d, Math.round((sum / g.count) * 100) / 100,
+        ]),
+      ),
+    }]),
+  );
+
+  const ranked = Object.entries(byModel)
+    .filter(([model, g]) => model !== 'unattributed' && g.count >= minSamples)
+    .map(([model, g]) => ({ model, count: g.count, avgScore: g.avgScore }))
+    .sort((a, b) => b.avgScore - a.avgScore);
+
+  const unattributedCount = byModel.unattributed?.count ?? 0;
+
+  return {
+    byModel,
+    ranked,
+    attributedCount: recent.length - unattributedCount,
+    unattributedCount,
     totalEvaluations: recent.length,
   };
 }

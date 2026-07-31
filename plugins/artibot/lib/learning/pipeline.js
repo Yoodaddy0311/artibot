@@ -21,6 +21,7 @@ import { saveMemory, summarizeSession } from './memory-manager.js';
 import { injectRules } from './skill-injector.js';
 import { evaluateResult, getImprovementSuggestions } from './self-evaluator.js';
 import { batchLearn, collectDailyExperiences, collectExperience } from './lifelong-learner.js';
+import { toRecordFields } from './model-identity.js';
 
 // ---------------------------------------------------------------------------
 // processUserMessage
@@ -151,7 +152,12 @@ async function runSelfEvaluation(sessionData) {
       testsPass: completedCount > 0 ? true : undefined,
       filesModified: sessionData.filesModified,
     };
-    await evaluateResult(sessionTask, sessionResult);
+    // Model attribution is resolved upstream (SessionEnd hook reads the
+    // transcript). Absent it, rows persist as `modelSource: 'none'` — an
+    // explicit "unattributed" beats inferring a model from config, which
+    // would look like data while being a guess.
+    const modelFields = toRecordFields(sessionData.modelAttribution);
+    await evaluateResult(sessionTask, sessionResult, modelFields);
 
     const evalResult = await getImprovementSuggestions();
 
@@ -164,7 +170,9 @@ async function runSelfEvaluation(sessionData) {
         suggestions: evalResult.suggestions,
         sessionId: sessionData.sessionId,
         project: sessionData.project,
+        modelSource: modelFields.modelSource,
       },
+      model: modelFields.model,
       sessionId: sessionData.sessionId,
       score: evalTrendScore(evalResult.overallTrend),
     });
@@ -183,6 +191,7 @@ async function runSelfEvaluation(sessionData) {
           filesModified: (sessionData.filesModified ?? []).length,
           testsPass: sessionResult.testsPass ?? null,
         },
+        model: modelFields.model,
         sessionId: sessionData.sessionId,
       });
     }

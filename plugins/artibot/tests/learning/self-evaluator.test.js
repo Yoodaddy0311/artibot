@@ -3,6 +3,7 @@ import {
   evaluateResult,
   getImprovementSuggestions,
   getLearningTrends,
+  getModelPerformance,
   getTeamPerformance,
 } from '../../lib/learning/self-evaluator.js';
 
@@ -349,6 +350,106 @@ describe('self-evaluator', () => {
       readJsonFile.mockResolvedValue(evaluations);
       const result = await getLearningTrends({ windowSize: 5 });
       expect(result.trend).toBe('stable');
+    });
+  });
+
+  describe('model attribution', () => {
+    const baseTask = { id: 'task-m', type: 'session' };
+    const okResult = { success: true, testsPass: true, duration: 25000 };
+
+    it('모델 정보를 주지 않으면 미귀속 상태로 기록된다', async () => {
+      const ev = await evaluateResult(baseTask, okResult);
+      expect(ev.model).toBeNull();
+      expect(ev.modelMix).toEqual({});
+      expect(ev.modelSource).toBe('none');
+    });
+
+    it('전달된 실효 모델을 레코드에 남긴다', async () => {
+      const ev = await evaluateResult(baseTask, okResult, {
+        model: 'claude-opus-5',
+        modelMix: { 'claude-opus-5': 12 },
+        modelSource: 'transcript',
+      });
+      expect(ev.model).toBe('claude-opus-5');
+      expect(ev.modelMix).toEqual({ 'claude-opus-5': 12 });
+      expect(ev.modelSource).toBe('transcript');
+    });
+
+    it('저장된 레코드에도 모델 필드가 포함된다', async () => {
+      await evaluateResult(baseTask, okResult, { model: 'claude-fable-5' });
+      const [, saved] = writeJsonFile.mock.calls.at(-1);
+      expect(saved.at(-1).model).toBe('claude-fable-5');
+      expect(saved.at(-1).modelSource).toBe('caller');
+    });
+  });
+
+  describe('getModelPerformance()', () => {
+    const row = (model, overall, dims = {}) => ({
+      model, overall, dimensions: dims,
+    });
+
+    it('모델별 평균 점수를 낸다', async () => {
+      readJsonFile.mockResolvedValue([
+        row('m-a', 4.0), row('m-a', 5.0), row('m-b', 2.0),
+      ]);
+      const got = await getModelPerformance({ minSamples: 1 });
+      expect(got.byModel['m-a'].avgScore).toBe(4.5);
+      expect(got.byModel['m-a'].count).toBe(2);
+      expect(got.byModel['m-b'].avgScore).toBe(2);
+    });
+
+    it('점수순으로 랭크한다', async () => {
+      readJsonFile.mockResolvedValue([
+        row('lo', 2.0), row('hi', 5.0),
+      ]);
+      const got = await getModelPerformance({ minSamples: 1 });
+      expect(got.ranked.map(r => r.model)).toEqual(['hi', 'lo']);
+    });
+
+    it('model 없는 과거 레코드는 버리지 않고 unattributed 로 센다', async () => {
+      readJsonFile.mockResolvedValue([
+        { overall: 3.0, dimensions: {} },
+        { overall: 3.0, dimensions: {} },
+        row('m-a', 4.0),
+      ]);
+      const got = await getModelPerformance({ minSamples: 1 });
+      expect(got.unattributedCount).toBe(2);
+      expect(got.attributedCount).toBe(1);
+      expect(got.totalEvaluations).toBe(3);
+    });
+
+    it('unattributed 는 랭킹에 오르지 않는다', async () => {
+      readJsonFile.mockResolvedValue([
+        { overall: 5.0, dimensions: {} }, row('m-a', 1.0),
+      ]);
+      const got = await getModelPerformance({ minSamples: 1 });
+      expect(got.ranked.map(r => r.model)).toEqual(['m-a']);
+    });
+
+    it('표본이 minSamples 미만인 모델은 랭킹에서 뺀다', async () => {
+      readJsonFile.mockResolvedValue([
+        row('thin', 5.0),
+        ...Array.from({ length: 5 }, () => row('thick', 3.0)),
+      ]);
+      const got = await getModelPerformance({ minSamples: 5 });
+      expect(got.ranked.map(r => r.model)).toEqual(['thick']);
+      expect(got.byModel.thin.count).toBe(1);
+    });
+
+    it('차원별 평균도 모델별로 낸다', async () => {
+      readJsonFile.mockResolvedValue([
+        row('m-a', 4.0, { accuracy: { score: 5 } }),
+        row('m-a', 4.0, { accuracy: { score: 3 } }),
+      ]);
+      const got = await getModelPerformance({ minSamples: 1 });
+      expect(got.byModel['m-a'].dimensions.accuracy).toBe(4);
+    });
+
+    it('평가가 없으면 빈 결과', async () => {
+      readJsonFile.mockResolvedValue(null);
+      const got = await getModelPerformance();
+      expect(got.ranked).toEqual([]);
+      expect(got.totalEvaluations).toBe(0);
     });
   });
 });

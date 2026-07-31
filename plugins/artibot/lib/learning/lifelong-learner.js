@@ -14,6 +14,7 @@
 import path from 'node:path';
 import { ensureDir, readJsonFile, writeJsonFile } from '../core/file.js';
 import { ARTIBOT_DIR, round } from '../core/index.js';
+import { toRecordFields } from './model-identity.js';
 import {
   extractPattern,
   groupExperiences,
@@ -74,6 +75,7 @@ export async function collectExperience(experience) {
     data,
     timestamp: Date.now(),
     sessionId: experience.sessionId ?? null,
+    model: experience.model ?? null,
   };
 
   const existing = await loadExperiences();
@@ -206,6 +208,10 @@ export async function collectDailyExperiences(sessionData = {}) {
   await ensureDir(ARTIBOT_DIR);
 
   const sid = sessionId ?? null;
+  // Provenance stamped on every row, not just the session-level ones: these
+  // bulk entries are what GRPO learns from, so leaving them unlabeled would
+  // make per-model analysis cover only a rounding-error slice of the store.
+  const { model } = toRecordFields(sessionData.modelAttribution);
 
   // Build all new entries in memory first (no disk I/O per entry)
   const newEntries = [];
@@ -224,6 +230,10 @@ export async function collectDailyExperiences(sessionData = {}) {
 
   if (teamConfig) {
     newEntries.push(_buildTeamEntry(teamConfig, sid));
+  }
+
+  for (let i = 0; i < newEntries.length; i += 1) {
+    newEntries[i] = { ...newEntries[i], model };
   }
 
   // Read existing once, merge all new entries, write once

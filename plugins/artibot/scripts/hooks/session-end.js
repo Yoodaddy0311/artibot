@@ -99,17 +99,49 @@ function saveSessionState(hookData) {
 }
 
 /**
+ * Resolve which model actually served this session by reading the transcript
+ * the hook payload points at. Returns an unattributed record on any failure —
+ * model attribution is telemetry, never a reason to fail SessionEnd.
+ *
+ * @param {object} hookData
+ * @returns {Promise<object>} attribution from lib/learning/model-identity.js
+ */
+async function resolveModelAttribution(hookData) {
+  try {
+    const modelIdPath = path.join(
+      getPluginRoot(), 'lib', 'learning', 'model-identity.js',
+    );
+    const mod = await import(toFileUrl(modelIdPath));
+    const attribution = await mod.resolveTranscriptModels(hookData?.transcript_path);
+    // Surfaced on stderr like the learning summary: a silent 'none' is the
+    // failure mode that would otherwise leave every row unattributed forever.
+    const subag = attribution.sidechainTurns ?? 0;
+    process.stderr.write(
+      `[learning] model attribution: ${attribution.primary ?? 'none'} `
+      + `(source=${attribution.source}, turns=${attribution.turns}`
+      + `[main ${attribution.turns - subag}/subag ${subag}])\n`,
+    );
+    return attribution;
+  } catch (err) {
+    logHookError('session-end', 'model attribution failed', err);
+    process.stderr.write(`[learning] model attribution failed: ${err?.message ?? err}\n`);
+    return null;
+  }
+}
+
+/**
  * Extract the session data payload consumed by shutdownLearning().
  * @param {object} hookData
- * @returns {object}
+ * @returns {Promise<object>}
  */
-function buildSessionData(hookData) {
+async function buildSessionData(hookData) {
   return {
     sessionId: hookData.session_id || `session-${Date.now()}`,
     toolUsage: hookData.tool_usage || {},
     errors: hookData.errors || [],
     completedTasks: hookData.completed_tasks || [],
     teamConfig: hookData.team_config || null,
+    modelAttribution: await resolveModelAttribution(hookData),
   };
 }
 
@@ -287,7 +319,7 @@ async function main() {
 
   if (!hookData) return;
 
-  const sessionData = buildSessionData(hookData);
+  const sessionData = await buildSessionData(hookData);
   await runLearningStage(sessionData);
   await runEvolutionLoop(hookData);
   await runAdvisors(hookData);

@@ -13,6 +13,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.42.0] — 2026-07-31
+
+### Added
+- **모델 귀속(attribution) 계측 — 학습 저장소가 "어느 모델이 한 작업인지"를 기록하기 시작.**
+  그동안 `evaluations.json`/`daily-experiences.json`은 *무엇이* 일어났는지만 남기고
+  *어느 모델이* 했는지는 한 건도 남기지 않았다(전 파일 `"model"` 필드 0건).
+  그래서 "모델 X가 Y보다 오판이 많은가" 류 질문이 사후에 **구조적으로 답할 수 없는** 상태였다.
+- `lib/learning/model-identity.js` (신규) — 세션 transcript JSONL의
+  `assistant.message.model`을 읽어 실효 모델을 해석. **`settings.json#model`은 선언이지
+  실측이 아니다** — 세션·서브에이전트·모델피커가 덮어쓸 수 있어 transcript가 유일한 진실원.
+  `<synthetic>`은 primary 후보에서 제외.
+  **메인 스레드 파일 하나만 읽으면 위임 작업이 통째로 안 보인다**: 서브에이전트 턴은
+  인라인 `isSidechain` 이 아니라 형제 파일
+  `<project>/<session-id>/subagents/*.jsonl` 에 저장된다. 리졸버가 이 파일들까지 읽어
+  `sidechainMix` 로 분리 집계한다. 실측 예 — 리더 `fable-5` 338턴인 세션에서 서브에이전트가
+  `opus-4-8` 561턴 + `sonnet-5` 232턴을 수행(작업의 70%가 리더와 다른 모델).
+  이걸 읽지 않으면 그 세션 점수가 전부 리더 모델로 오귀속된다.
+- `self-evaluator.js#getModelPerformance` — 모델별 평균/차원별 점수 조회. 계측 이전 행은
+  버리지 않고 `unattributed`로 세어 **비교 불가능한 히스토리의 비중**을 호출자가 볼 수 있게 한다.
+  `minSamples` 미만 그룹은 랭킹에서 제외 (얇은 표본이 순위를 만들지 않도록).
+- `scripts/model-attribution.js` (신규) — 기존 transcript 소급 리포트.
+  `--since` / `--project` / `--scope main|subagent` / `--json`.
+  **서브에이전트 transcript는 `<project>/<session-id>/subagents/` 아래에 있어 1단계 스캔으로는
+  대부분 누락된다** (실측 1,225개 중 1,114개 = 91%) → 재귀 수집.
+  `toolErrorRate`는 `tool_use_id → model` 역귀속으로 낸 직접 카운트,
+  `correctionRate`는 **텍스트 프록시** — 리포트 출력이 이 구분을 명시한다.
+  `sess`(고유 세션)와 `files`(transcript 파일)를 분리 표기 — 서브에이전트 파일을 세션으로
+  세면 세션 수가 부풀고 turn/session 평균이 함께 왜곡된다(실측 7 세션 → 32 파일).
+  잘못된 `--since`/`--scope`는 조용히 무시하지 않고 **exit 1**로 죽는다: `Date.parse`의 NaN은
+  falsy라 필터가 스스로 꺼지고, 기간 한정이라 믿는 전체 통계가 출력된다.
+
+### Changed
+- **평가 레코드 스키마에 `model`/`modelMix`/`subagentMix`/`modelSource` 추가**
+  (`lib/learning/self-evaluator.js`). `model`은 **세션 리더** 모델이고, 위임 작업은
+  `subagentMix`로 함께 남긴다 — 28/28 단일 티어인 지금은 둘이 일치하지만 티어가 갈리는 순간
+  리더만 적힌 레코드는 작업의 대부분을 조용히 오귀속한다.
+  귀속 실패 시 추정값으로 메우지 않고 `model: null, modelSource: 'none'`으로
+  **명시적 미귀속**을 남긴다 — 설정에서 모델을 유추해 채우면 데이터처럼 보이는 추측이 되어
+  이후 비교를 통째로 오염시킨다.
+- **`daily-experiences.json` 전 행에 `model` 스탬프** (`lib/learning/lifelong-learner.js`).
+  `collectDailyExperiences`가 만드는 tool/error/success/team 대량 행이 GRPO 학습의 입력인데,
+  세션 수준 2종만 라벨하면 모델별 분석이 저장소의 극히 일부만 덮는다.
+- `scripts/hooks/session-end.js` — `buildSessionData`가 async가 되고, 훅 페이로드의
+  `transcript_path`로 모델을 해석해 학습 파이프라인에 전달. 결과를
+  `[learning] model attribution: <model> (source=…, turns=…)`로 stderr에 남긴다:
+  조용한 `source=none`이 이 기능의 유일한 실패 모드라, 로그 없이는 **모든 행이 영영 미귀속인
+  채로 그린**이 된다. 귀속 실패는 SessionEnd를 실패시키지 않는다.
+
+### Notes
+- 이 릴리스는 **라벨링만** 추가한다. 모델별 *정답률* 비교는 데이터가 쌓인 뒤에 가능하며,
+  소급 리포트의 `correctionRate`는 결함 카운트가 아니다.
+- 소급 집계 시 **관측창을 맞추지 않으면 결론이 뒤집힌다**: 전체 기간에서는 특정 모델의
+  자기정정률이 높아 보였으나 동일 기간·동일 effort로 슬라이스하면 순위가 역전됐다.
+  기간·effort 믹스가 교란변수다 — `--since` 없이 모델을 비교하지 말 것.
+
+---
+
 ## [4.41.0] — 2026-07-25
 
 ### Changed

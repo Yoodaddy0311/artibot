@@ -34,8 +34,17 @@ export {
   evaluateResult,
   getImprovementSuggestions,
   getTeamPerformance,
+  getModelPerformance,
   getLearningTrends,
 } from './self-evaluator.js';
+
+// Model Identity (effective-model attribution read from session transcripts)
+export {
+  resolveTranscriptModels,
+  toRecordFields,
+  pickPrimary,
+  emptyAttribution,
+} from './model-identity.js';
 
 // Lifelong Learner (Daily experience -> batch learning pipeline)
 export {

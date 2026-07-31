@@ -39,6 +39,16 @@ describe('lifelong-learner', () => {
       expect(typeof exp.timestamp).toBe('number');
     });
 
+    it('top-level model 을 기록하고, 없으면 null 로 남긴다', async () => {
+      const labeled = await collectExperience({
+        type: 'success', category: 'session', model: 'claude-opus-5',
+      });
+      expect(labeled.model).toBe('claude-opus-5');
+
+      const unlabeled = await collectExperience({ type: 'success', category: 'session' });
+      expect(unlabeled.model).toBeNull();
+    });
+
     it('persists experience to disk', async () => {
       await collectExperience({ type: 'tool', category: 'Write', data: {} });
       expect(writeJsonFile).toHaveBeenCalledTimes(1);
@@ -168,6 +178,37 @@ describe('lifelong-learner', () => {
         },
       });
       expect(collected.filter((e) => e.type === 'tool')).toHaveLength(2);
+    });
+
+    it('네 종류 행 전부에 리더 모델을 스탬프한다', async () => {
+      const collected = await collectDailyExperiences({
+        sessionId: 'sess-m',
+        modelAttribution: {
+          source: 'transcript',
+          primary: 'claude-opus-5',
+          mix: { 'claude-opus-5': 12 },
+          sidechainMix: { 'claude-fable-5': 40 },
+        },
+        toolUsage: { Read: { calls: 5, successes: 5, totalMs: 1000 } },
+        errors: [{ type: 'NetworkError', message: 'timeout' }],
+        completedTasks: [{ id: 't1', type: 'build', success: true }],
+        teamConfig: { pattern: 'parallel', size: 3 },
+      });
+
+      // 네 빌더가 각각 한 행씩 — 하나라도 미라벨이면 모델별 분석이 그만큼 빈다.
+      expect(new Set(collected.map(e => e.type)))
+        .toEqual(new Set(['tool', 'error', 'success', 'team']));
+      expect(collected).toHaveLength(4);
+      for (const entry of collected) {
+        expect(entry.model).toBe('claude-opus-5');
+      }
+    });
+
+    it('모델 귀속이 없으면 스탬프는 null — 추측으로 채우지 않는다', async () => {
+      const collected = await collectDailyExperiences({
+        toolUsage: { Read: { calls: 1, successes: 1, totalMs: 10 } },
+      });
+      expect(collected[0].model).toBeNull();
     });
 
     it('collects error experiences', async () => {
