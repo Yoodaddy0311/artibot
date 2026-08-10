@@ -258,8 +258,27 @@ async function main() {
   // toolLearnerModulePromise / lifelongLearnerModulePromise — first call
   // pays the import cost, subsequent calls hit the cached promise).
   try {
-    const { recordUsage } = await loadToolLearner();
+    const { recordUsage, flushToDisk } = await loadToolLearner();
     await recordUsage(toolName, context, score, { ...meta, agentId, agentType });
+
+    // Persist NOW rather than letting the learner's debounce decide.
+    //
+    // recordUsage only marks the history dirty and arms a FLUSH_INTERVAL_MS
+    // (5000ms) timer — a sensible batching policy for a long-lived library
+    // host, and the wrong one for a hook. This process is spawned per tool call
+    // by _posttooluse-dispatcher.js and SIGTERM'd at the `tool-tracker` timeout
+    // in hooks/dispatch-table.json, which is 3000ms. The timer therefore never
+    // reached its deadline and every row was lost.
+    //
+    // Measured 2026-08-10 (isolated HOME, real script, one Grep payload):
+    //   SIGTERM @3000ms -> exits 3037ms, signal SIGTERM, tool-history.json ABSENT
+    //   no kill         -> exits 5114ms, code 0,         tool-history.json present
+    // `beforeExit` does not rescue it: the armed timer keeps the loop non-empty
+    // until 5s, and it does not run on SIGTERM at all.
+    //
+    // Flushing here also clears the timer, so the process exits as soon as its
+    // work is done instead of idling for the rest of the debounce window.
+    await flushToDisk();
 
     // Bridge: feed tool usage into the lifelong learning pipeline
     const { collectExperience } = await loadLifelongLearner();

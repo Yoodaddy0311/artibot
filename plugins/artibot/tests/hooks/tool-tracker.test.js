@@ -21,7 +21,7 @@ import { describe, expect, it } from 'vitest';
 // ---------------------------------------------------------------------------
 
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
@@ -732,11 +732,16 @@ describe('real captured payloads -> real tool-tracker.js (integration)', () => {
     for (const f of failures) expect('tool_response' in f.parsed).toBe(false);
   });
 
-  // Each case spawns a real node process (~5s here), so CI runs one payload per
-  // direction rather than all five — enough to catch drift between this file's
-  // mirrored helpers and the real module, without adding ~25s to every suite
-  // run. The remaining fixture rows are exercised by the shape assertion above
-  // and by scratchpad/score-harness.mjs during manual verification.
+  // Each case spawns a real node process, so CI runs one payload per direction
+  // rather than all five — enough to catch drift between this file's mirrored
+  // helpers and the real module. The remaining fixture rows are exercised by the
+  // shape assertion above and by scratchpad/score-harness.mjs during manual
+  // verification.
+  //
+  // These spawns used to take ~5s each: the hook idled out the learner's 5000ms
+  // write debounce before exiting. tool-tracker.js now flushes explicitly, so a
+  // run is ~150ms — see the 'persists within its dispatcher timeout' block below
+  // for why that delay was a production bug and not just slow tests.
   const [firstFailure] = failures;
   const [firstSuccess] = successes;
 
@@ -751,4 +756,76 @@ describe('real captured payloads -> real tool-tracker.js (integration)', () => {
     expect(rows).toHaveLength(1);
     expect(rows[0].score).toBe(1.0);
   });
+});
+
+// ---------------------------------------------------------------------------
+// Regression: the hook must persist within the budget the dispatcher gives it.
+//
+// tool-learner.recordUsage() only marks history dirty and arms a 5000ms flush
+// timer. _posttooluse-dispatcher.js spawns this hook and SIGTERMs it at the
+// `tool-tracker` timeout in hooks/dispatch-table.json (3000ms), so the timer
+// never fired and NOTHING was ever written in production — measured 2026-08-10:
+// SIGTERM@3000ms left no tool-history.json at all.
+//
+// The budget is read from dispatch-table.json rather than hardcoded, so raising
+// or lowering the timeout re-tests the real invariant instead of a stale number.
+// ---------------------------------------------------------------------------
+describe('tool-tracker persists within its dispatcher timeout', () => {
+  const HERE = path.dirname(fileURLToPath(import.meta.url));
+  const TRACKER = path.resolve(HERE, '..', '..', 'scripts', 'hooks', 'tool-tracker.js');
+  const TABLE = path.resolve(HERE, '..', '..', 'hooks', 'dispatch-table.json');
+
+  /** The exact timeout production gives this hook. */
+  function dispatcherTimeoutMs() {
+    const table = JSON.parse(readFileSync(TABLE, 'utf-8'));
+    const handler = table.slots.PostToolUse.handlers
+      .find((h) => h.name === 'tool-tracker');
+    return handler.timeoutMs;
+  }
+
+  /**
+   * Spawn the real hook and SIGTERM it exactly like the dispatcher does.
+   * @param {number} killAfterMs
+   * @returns {Promise<{written: boolean, signal: string|null}>}
+   */
+  function runUnderTimeout(killAfterMs) {
+    const home = mkdtempSync(path.join(tmpdir(), 'tt-timeout-'));
+    return new Promise((resolve) => {
+      const child = spawn(process.execPath, [TRACKER], {
+        stdio: ['pipe', 'pipe', 'pipe'],
+        env: { ...process.env, USERPROFILE: home, HOME: home },
+      });
+      const timer = setTimeout(() => {
+        try { child.kill('SIGTERM'); } catch { /* already gone */ }
+      }, killAfterMs);
+      child.stdin.end(JSON.stringify({
+        hook_event_name: 'PostToolUse',
+        tool_name: 'Grep',
+        tool_input: { pattern: 'resolveModel', output_mode: 'content' },
+        tool_response: { mode: 'content', numFiles: 0, filenames: [], content: '', numLines: 0 },
+        session_id: 'timeout-regression',
+      }));
+      child.on('exit', (_code, signal) => {
+        clearTimeout(timer);
+        const store = path.join(home, '.claude', 'artibot', 'tool-history.json');
+        const written = existsSync(store);
+        rmSync(home, { recursive: true, force: true });
+        resolve({ written, signal });
+      });
+    });
+  }
+
+  it('reads a real timeout from the dispatch table', () => {
+    const ms = dispatcherTimeoutMs();
+    expect(Number.isFinite(ms)).toBe(true);
+    expect(ms).toBeGreaterThan(0);
+  });
+
+  it('writes tool-history.json before the dispatcher kills it', async () => {
+    const { written, signal } = await runUnderTimeout(dispatcherTimeoutMs());
+    // Exiting on its own (no signal) is the fix working: the explicit flush
+    // clears the armed timer, so the process does not idle out the debounce.
+    expect(signal).toBeNull();
+    expect(written).toBe(true);
+  }, 20000);
 });

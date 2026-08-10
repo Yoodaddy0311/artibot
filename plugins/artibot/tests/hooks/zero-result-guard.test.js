@@ -16,24 +16,25 @@ const {
   formatScopeReminder,
   handlePostToolUse,
   isIdentifierLike,
+  isStructuralZeroResult,
   isZeroResult,
 } = await import('../../scripts/hooks/zero-result-guard.js');
 
 // ---------------------------------------------------------------------------
-// Zero-result strings — MEASURED, not invented.
+// Zero-result STRINGS — the fallback path, not the live one.
 //
-// Captured 2026-08-10 by issuing live Grep/Glob tool calls for the identifier
-// `zzz_nonexistent_identifier_probe` / `**/zzzNonexistentProbe.*` against
-// plugins/artibot/lib:
+// CORRECTION (2026-08-10, raw hook-stdin capture): the block that stood here
+// claimed these strings are what `tool_response` carries, citing "131/131 Grep
+// tool_response values measured as strings". That is wrong, and the guard built
+// on it fired on nothing in production. Live Grep/Glob deliver a structured
+// OBJECT with no marker string anywhere; the phrasings below are what the MODEL
+// is shown, never what the hook receives.
 //
-//   Grep output_mode:'content'            -> 'No matches found'
-//   Grep output_mode:'files_with_matches' -> 'No files found'
-//   Grep output_mode:'count'              -> 'No matches found\n\nFound 0 total occurrences across 0 files.'
-//   Glob                                  -> 'No files found'
-//
-// The response arrives as a PLAIN STRING, not an object (WP-3 brief: 131/131
-// Grep tool_response values measured as strings). The object branch below is
-// defensive only — it has never been observed live.
+// The real captured payloads live in
+// tests/fixtures/zero-result-guard-hook-payloads.jsonl and drive the
+// 'real captured payloads' describe at the bottom of this file. The constants
+// below are retained because the string path itself is retained — they exercise
+// isZeroResult()'s anchoring, which still guards string-valued responses.
 // ---------------------------------------------------------------------------
 const MEASURED = {
   grepContent: 'No matches found',
@@ -430,5 +431,115 @@ describe('zero-result-guard hook (subprocess)', () => {
     // reached this line.
     const mod = await import('../../scripts/hooks/zero-result-guard.js');
     expect(typeof mod.handlePostToolUse).toBe('function');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Integration: REAL captured payloads -> the REAL guard
+//
+// Every fixture row below is verbatim hook stdin, captured 2026-08-10 by
+// registering a dump script in the plugin cache's PostToolUse dispatch table and
+// issuing the tool calls by hand. Only identifying fields are redacted
+// (session_id, transcript_path, cwd, prompt_id, tool_use_id, agent_id); every
+// `tool_input` and `tool_response` is untouched.
+//
+// This block exists because the previous fixtures were invented strings that
+// matched no live payload, so a guard that fired on nothing passed its whole
+// suite. Rows here are the real shapes, including the one that makes the
+// obvious fix wrong (see 'numFiles is 0 on content-mode HITS').
+// ---------------------------------------------------------------------------
+describe('real captured payloads -> real guard (integration)', () => {
+  const FIXTURE = path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    '..', 'fixtures', 'zero-result-guard-hook-payloads.jsonl',
+  );
+
+  const rows = readFileSync(FIXTURE, 'utf-8')
+    .trim().split('\n').map((l) => JSON.parse(l));
+
+  it('fixture carries all four response shapes, zero and hit', () => {
+    expect(rows).toHaveLength(8);
+    // The property the whole fix rests on: no row carries a marker string.
+    for (const r of rows) {
+      expect(typeof r.tool_response).toBe('object');
+      expect(JSON.stringify(r.tool_response)).not.toContain('No matches found');
+      expect(JSON.stringify(r.tool_response)).not.toContain('No files found');
+    }
+  });
+
+  it('the old string path extracts NOTHING from any live payload', () => {
+    // Why the guard was silent in production: every live response flattens to
+    // '' under extractResponseText, so isZeroResult never saw anything to match.
+    for (const r of rows) {
+      expect(isZeroResult(extractResponseText(r))).toBe(false);
+    }
+  });
+
+  describe('zero-result rows fire', () => {
+    const zeroRows = rows.filter((r) => r.tool_input.pattern.includes('zzz'));
+
+    it('covers content, files_with_matches, count and glob', () => {
+      expect(zeroRows).toHaveLength(4);
+    });
+
+    for (const r of zeroRows) {
+      const label = `${r.tool_name} ${r.tool_input.output_mode ?? '(glob)'}`;
+      it(`${label}: structurally detected as zero`, () => {
+        expect(isStructuralZeroResult(r)).toBe(true);
+      });
+    }
+
+    it('an identifier-shaped zero Grep produces the scope reminder', () => {
+      const r = zeroRows.find((x) => x.tool_input.output_mode === 'content');
+      const out = handlePostToolUse(r);
+      expect(out).not.toBeNull();
+      expect(out.hookSpecificOutput.additionalContext).toContain('returned zero results');
+      expect(out.hookSpecificOutput.additionalContext).toContain(r.tool_input.pattern);
+    });
+  });
+
+  describe('hit rows stay silent', () => {
+    const hitRows = rows.filter((r) => !r.tool_input.pattern.includes('zzz'));
+
+    it('covers all four shapes', () => {
+      expect(hitRows).toHaveLength(4);
+    });
+
+    for (const r of hitRows) {
+      const label = `${r.tool_name} ${r.tool_input.output_mode ?? '(glob)'}`;
+      it(`${label}: not treated as zero`, () => {
+        expect(isStructuralZeroResult(r)).toBe(false);
+        expect(handlePostToolUse(r)).toBeNull();
+      });
+    }
+
+    it('numFiles is 0 on content-mode HITS — the trap a numFiles test falls into', () => {
+      // Measured: grepping this repo for MIN_IDENTIFIER_LENGTH returned 2 lines
+      // with numFiles:0. Judging content mode on numFiles would fire the guard
+      // on a successful search and tell the model its hits were absent.
+      const hit = hitRows.find((r) => r.tool_response.mode === 'content');
+      expect(hit.tool_response.numFiles).toBe(0);
+      expect(hit.tool_response.numLines).toBeGreaterThan(0);
+      expect(isStructuralZeroResult(hit)).toBe(false);
+    });
+  });
+
+  it('unknown mode and non-object responses degrade to silence, not a guess', () => {
+    const base = rows[0];
+    expect(isStructuralZeroResult({ ...base, tool_response: { mode: 'future_mode', numFiles: 0 } }))
+      .toBe(false);
+    expect(isStructuralZeroResult({ ...base, tool_response: null })).toBe(false);
+    expect(isStructuralZeroResult({ ...base, tool_response: [] })).toBe(false);
+    expect(isStructuralZeroResult({ ...base, tool_name: 'Read' })).toBe(false);
+  });
+
+  it('a missing counter never reads as zero (strict === 0, not falsy)', () => {
+    const base = rows[0];
+    expect(isStructuralZeroResult({
+      ...base, tool_response: { mode: 'files_with_matches', filenames: [] },
+    })).toBe(false);
+    expect(isStructuralZeroResult({
+      ...base, tool_name: 'Glob', tool_response: { filenames: [] },
+    })).toBe(false);
   });
 });

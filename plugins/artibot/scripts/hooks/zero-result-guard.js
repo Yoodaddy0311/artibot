@@ -20,13 +20,30 @@
  * A regex or a glob is left alone — those are searches whose author already
  * knows they are pattern-matching, not name lookups.
  *
- * MEASURED RESPONSE SHAPE (2026-08-10, live Grep/Glob calls):
- *   Grep output_mode 'content'            -> 'No matches found'
- *   Grep output_mode 'files_with_matches' -> 'No files found'
- *   Grep output_mode 'count'              -> 'No matches found\n\nFound 0 total occurrences across 0 files.'
- *   Glob                                  -> 'No files found'
- *   The value is a plain STRING. The object/array branches in
- *   {@link extractResponseText} are defensive and have never been observed.
+ * MEASURED RESPONSE SHAPE (2026-08-10, re-captured from live hook stdin):
+ *   `tool_response` is an OBJECT for every Grep and Glob call. It is never a
+ *   string, and it carries NO 'No matches found' / 'No files found' marker —
+ *   those phrasings are what the MODEL is shown, not what the hook receives.
+ *
+ *     Grep 'content'            zero -> { mode:'content', numFiles:0, filenames:[],
+ *                                         content:'', numLines:0, totalLines:0 }
+ *     Grep 'files_with_matches' zero -> { mode:'files_with_matches', filenames:[],
+ *                                         numFiles:0, totalFiles:0 }
+ *     Grep 'count'              zero -> { mode:'count', numFiles:0, filenames:[],
+ *                                         content:'', numMatches:0 }
+ *     Glob                      zero -> { filenames:[], numFiles:0, totalMatches:0,
+ *                                         truncated:false, countIsComplete:true }
+ *
+ *   THE TRAP: in 'content' mode `numFiles` is 0 even when the query MATCHED
+ *   (measured: a 2-line hit returns numFiles:0, numLines:2). A `numFiles === 0`
+ *   test would therefore fire on successful searches. Content mode must be
+ *   judged on `numLines`, never on `numFiles` — see {@link isStructuralZeroResult}
+ *   and the captured fixture at tests/fixtures/zero-result-guard-hook-payloads.jsonl.
+ *
+ *   The earlier version of this comment asserted the opposite (plain STRING,
+ *   marker-bearing) and the guard was built on it, so it fired on nothing in
+ *   production. Corrected here from a raw-stdin capture; do not "restore" the
+ *   string claim without a fresh capture that shows it.
  *
  * WHAT THIS GUARD CANNOT SEE (do not read a non-firing as "scope was fine"):
  *   1. `grep ... || echo none` and friends — the shell masks the zero result,
@@ -65,16 +82,18 @@ const PREFIX = '[artibot:zero-result-guard]';
  * Response substrings that mean "this query matched nothing". Allowlist, never
  * a denylist: an unrecognised phrasing produces silence rather than a guess.
  * Exported so a platform wording change is a one-line diff with a failing test.
+ *
+ * NOT the live path. The 2026-08-10 capture shows Grep/Glob deliver a structured
+ * object with no marker string, so {@link isStructuralZeroResult} is what fires
+ * in production. These markers are retained for string-valued responses (other
+ * tools, older payload versions, hand-written tests) and cost one cheap
+ * `startsWith` when the response is not a string-bearing shape.
+ *
  * @type {string[]}
  */
 export const ZERO_RESULT_MARKERS = [
   'No matches found',
   'No files found',
-  // Count mode measured as 'No matches found\n\nFound 0 total occurrences…',
-  // so under the start-anchored test in isZeroResult() this entry matches
-  // nothing today — the first marker already covers that response. Retained
-  // for a future count-only response that omits the leading line; if you are
-  // auditing dead branches, this one is knowingly dead, not an oversight.
   'Found 0 total occurrences',
 ];
 
@@ -161,6 +180,41 @@ export function isZeroResult(text) {
 }
 
 /**
+ * Did this structured Grep/Glob response report zero results?
+ *
+ * The live payload carries no marker string (see the MEASURED block at the top
+ * of this file), so absence has to be read off the counters. Every branch is an
+ * ALLOWLIST keyed on the response's own `mode`: an unrecognised mode, a missing
+ * counter, or a non-object response all return false, so a payload shape change
+ * degrades this guard to silence rather than to guessing.
+ *
+ * Per-mode fields are deliberate, not interchangeable:
+ *   - 'content'            `numLines`, because `numFiles` is 0 even on hits.
+ *   - 'files_with_matches' `numFiles`, the only counter the mode reports.
+ *   - 'count'              `numMatches`, the total the mode exists to return.
+ *   - Glob                 `numFiles` + `totalMatches`, both present and honest.
+ * Strict `=== 0` (never `!count`) keeps `undefined` from reading as zero.
+ *
+ * @param {object} hookData - Parsed PostToolUse payload.
+ * @returns {boolean}
+ */
+export function isStructuralZeroResult(hookData) {
+  const res = hookData?.tool_response;
+  if (!res || typeof res !== 'object' || Array.isArray(res)) return false;
+
+  const tool = extractToolName(hookData);
+  if (tool === 'Glob') return res.numFiles === 0 && res.totalMatches === 0;
+  if (tool !== 'Grep') return false;
+
+  switch (res.mode) {
+    case 'content': return res.numLines === 0 && res.content === '';
+    case 'files_with_matches': return res.numFiles === 0;
+    case 'count': return res.numMatches === 0;
+    default: return false;
+  }
+}
+
+/**
  * Characters an identifier may contain. An ALLOWLIST, so every regex
  * metacharacter, path separator, quote and space is excluded by construction —
  * a denylist would fail open on the next metacharacter someone uses.
@@ -211,7 +265,11 @@ export function evaluateZeroResult(hookData) {
   const idle = { fired: false, tool: '', pattern: '', filters: {} };
   if (!hookData || typeof hookData !== 'object') return idle;
 
-  if (!isZeroResult(extractResponseText(hookData))) return idle;
+  // Structural first: it is the shape production actually delivers. The string
+  // test stays as a fallback for string-valued responses.
+  const zero = isStructuralZeroResult(hookData)
+    || isZeroResult(extractResponseText(hookData));
+  if (!zero) return idle;
 
   const pattern = extractQueryPattern(hookData).trim();
   if (!isIdentifierLike(pattern)) return idle;
