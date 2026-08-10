@@ -29,14 +29,20 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { announceBashSkip, probeBash, toBashPath } from '../../scripts/utils/bash-compat.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const PLUGIN_ROOT = join(__dirname, '..', '..');
-const statusline = readFileSync(join(PLUGIN_ROOT, 'scripts', 'hooks', 'statusline.sh'), 'utf8');
+const statuslinePath = join(PLUGIN_ROOT, 'scripts', 'hooks', 'statusline.sh');
+const statusline = readFileSync(statuslinePath, 'utf8');
 const themedPath = join(PLUGIN_ROOT, 'scripts', 'hooks', 'statusline-themed.sh');
 const themed = readFileSync(themedPath, 'utf8');
-const hasBash = spawnSync('bash', ['--version']).status === 0;
+
+// `bash --version` used to gate these — it succeeds under WSL bash, which then
+// cannot open a Windows path and returns 127. Probe path compatibility instead.
+const hasBash = probeBash().ok;
+if (!hasBash) announceBashSkip('statusline-schema: bash -n syntax checks');
 
 describe('statusline.sh reads the official Claude Code statusLine schema', () => {
   it('reads context_window.used_percentage (the pre-computed %)', () => {
@@ -149,14 +155,14 @@ describe('statusline-themed.sh reads the official Claude Code statusLine schema'
 
 describe('statusline-themed.sh is syntactically valid bash', () => {
   it.skipIf(!hasBash)('passes bash -n (parse-only) syntax check', () => {
-    const result = spawnSync('bash', ['-n', themedPath], { encoding: 'utf8' });
+    const result = spawnSync('bash', ['-n', toBashPath(themedPath)], { encoding: 'utf8' });
     expect(result.status, result.stderr).toBe(0);
   });
 });
 
 describe('statusline.sh is syntactically valid bash', () => {
   it.skipIf(!hasBash)('passes bash -n (parse-only) syntax check', () => {
-    const result = spawnSync('bash', ['-n', join(PLUGIN_ROOT, 'scripts', 'hooks', 'statusline.sh')], { encoding: 'utf8' });
+    const result = spawnSync('bash', ['-n', toBashPath(statuslinePath)], { encoding: 'utf8' });
     expect(result.status, result.stderr).toBe(0);
   });
 });

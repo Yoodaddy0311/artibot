@@ -7,6 +7,7 @@ import {
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { announceBashSkip, probeBash, toBashPath } from '../../scripts/utils/bash-compat.js';
 
 // ---------------------------------------------------------------------------
 // install.sh acquire_install_lock — 동시성 뮤텍스 스모크 테스트 (v4.31.1)
@@ -20,17 +21,17 @@ const PLUGIN_ROOT = path.resolve(fileURLToPath(import.meta.url), '..', '..', '..
 const INSTALL_SH = path.join(PLUGIN_ROOT, 'install.sh');
 const installShContent = readFileSync(INSTALL_SH, 'utf-8');
 
-/** Windows 경로를 Git Bash가 받아들이는 forward-slash 형태로 변환 */
-const toBashPath = (p) => p.replace(/\\/g, '/');
-
 /** INSTALL_LOCK_DIR 선언부터 acquire_install_lock 함수 끝(컬럼 0의 `}`)까지 추출 */
 function extractLockBlock(content) {
   const match = content.match(/^INSTALL_LOCK_DIR=[\s\S]*?^\}/m);
   return match ? match[0] : null;
 }
 
-const bashProbe = spawnSync('bash', ['-c', 'echo ok'], { encoding: 'utf8' });
-const hasBash = bashProbe.status === 0 && (bashProbe.stdout || '').includes('ok');
+// `bash -c 'echo ok'` 로 가드하던 자리. 그 프로브는 WSL bash 에서도 성공하는데
+// WSL 은 toBashPath 가 만드는 `C:/...` 경로를 열지 못해 하네스가 127 로 죽었다.
+// 존재가 아니라 경로 호환성을 재는 프로브로 교체한다.
+const hasBash = probeBash().ok;
+if (!hasBash) announceBashSkip('install-lock/behavioral smoke');
 
 // ---------------------------------------------------------------------------
 // 1. 정적 검증 — bash 없이도 항상 실행

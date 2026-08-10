@@ -6,6 +6,7 @@ import {
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { announceBashSkip, probeBash, toBashPath } from '../../scripts/utils/bash-compat.js';
 
 // ---------------------------------------------------------------------------
 // 인스톨러 rules 비파괴 설치 — install.sh install_rules / install.ps1 Copy-MdFiles
@@ -24,8 +25,6 @@ const INSTALL_PS1 = path.join(PLUGIN_ROOT, 'install.ps1');
 const installShContent = readFileSync(INSTALL_SH, 'utf-8');
 const installPs1Content = readFileSync(INSTALL_PS1, 'utf-8');
 
-const toBashPath = (p) => p.replace(/\\/g, '/');
-
 /** 컬럼 0의 여는 토큰부터 컬럼 0의 닫는 `}` 까지 추출 (중첩 블록은 들여쓰기됨) */
 function extractBlock(content, header) {
   const re = new RegExp(`^${header}[\\s\\S]*?^\\}`, 'm');
@@ -33,8 +32,11 @@ function extractBlock(content, header) {
   return match ? match[0] : null;
 }
 
-const bashProbe = spawnSync('bash', ['-c', 'echo ok'], { encoding: 'utf8' });
-const hasBash = bashProbe.status === 0 && (bashProbe.stdout || '').includes('ok');
+// `bash -c 'echo ok'` 로 가드하던 자리. WSL bash 는 그 프로브를 통과하면서도
+// toBashPath 가 만드는 `C:/...` 경로를 열지 못해 하네스가 127 로 죽는다.
+// 존재가 아니라 경로 호환성을 재는 프로브로 교체.
+const hasBash = probeBash().ok;
+if (!hasBash) announceBashSkip('install-rules/install.sh behavior');
 
 const psProbe = spawnSync(
   'powershell',

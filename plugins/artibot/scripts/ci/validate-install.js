@@ -22,6 +22,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { probeBash, toBashPath } from '../utils/bash-compat.js';
 
 const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
@@ -117,8 +118,9 @@ export function runInstallChecks(root = PLUGIN_ROOT) {
     else errors.push('update.js/update-platform.js no longer references install.ps1 (Windows path)');
   }
 
-  // 4. Syntax checks (best-effort; skipped with a warning if the toolchain
-  //    is unavailable, e.g. bash absent on a Windows CI runner).
+  // 4. Syntax checks (best-effort; skipped with a warning when the toolchain
+  //    is unusable — bash absent, or a bash that cannot open native paths such
+  //    as WSL bash when this process was launched from PowerShell).
   const node = process.execPath;
   for (const rel of ['scripts/update.js', 'scripts/update-platform.js']) {
     const full = path.join(root, rel);
@@ -131,16 +133,20 @@ export function runInstallChecks(root = PLUGIN_ROOT) {
     }
   }
   if (sh) {
-    const bash = whichBash();
-    if (bash) {
+    // probeBash() checks that bash can OPEN a converted native path, not just
+    // that a bash exists. `bash --version` succeeds under WSL bash, which then
+    // reports "syntax error" on every Windows path it cannot open — turning an
+    // environment mismatch into a fake install.sh defect. See bash-compat.js.
+    const { ok: bashOk, reason: bashReason } = probeBash();
+    if (bashOk) {
       try {
-        execFileSync(bash, ['-n', shPath], { stdio: 'pipe' });
+        execFileSync('bash', ['-n', toBashPath(shPath)], { stdio: 'pipe' });
         passed.push('bash -n: install.sh');
       } catch (err) {
         errors.push(`Syntax error in install.sh: ${String(err.stderr || err.message).split('\n')[0]}`);
       }
     } else {
-      warnings.push('bash unavailable — skipped install.sh syntax check');
+      warnings.push(`skipped install.sh syntax check — ${bashReason}`);
     }
   }
 
@@ -166,16 +172,6 @@ export function runInstallChecks(root = PLUGIN_ROOT) {
   }
 
   return { errors, warnings, passed };
-}
-
-function whichBash() {
-  for (const cmd of ['bash']) {
-    try {
-      execFileSync(cmd, ['--version'], { stdio: 'pipe' });
-      return cmd;
-    } catch { /* try next */ }
-  }
-  return null;
 }
 
 function whichPwsh() {
