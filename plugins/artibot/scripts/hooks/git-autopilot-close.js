@@ -11,6 +11,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import path, { dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { parseJSON, readStdin, resolveConfigPath } from '../utils/index.js';
 import { createErrorHandler } from '../../lib/core/hook-utils.js';
 import { isMergeBaseFresh, resolveBaseBranch } from '../../lib/git/resolve-base.js';
@@ -494,7 +495,7 @@ function pushBranch(cwd, branch, opts = {}) {
 // Main
 // -------------------------------------------------------------------------
 
-async function main() {
+export async function main() {
   const raw = await readStdin();
   const hookData = parseJSON(raw) ?? {};
 
@@ -651,4 +652,13 @@ async function main() {
   void hookData;
 }
 
-main().catch(createErrorHandler('git-autopilot-close', { exit: true }));
+// Direct-run guard: importing this module (tests) must not execute a real
+// session close — main() blocks on stdin and, past its gates, commits, resets
+// history (`reset --soft` during WIP squash) and pushes to origin. Production
+// is unaffected: `_stop-dispatcher.js` spawns this file as argv[1].
+const isDirectRun = process.argv[1]
+  && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
+
+if (isDirectRun) {
+  main().catch(createErrorHandler('git-autopilot-close', { exit: true }));
+}

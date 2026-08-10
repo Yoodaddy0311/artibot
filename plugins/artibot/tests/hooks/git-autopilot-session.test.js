@@ -112,6 +112,18 @@ function setupEnabledRepo() {
   return config;
 }
 
+/**
+ * Import the hook and run its entry point. The module carries a direct-run
+ * guard, so importing it no longer executes `main()` — the call has to be
+ * explicit here, exactly as the spawned production process makes it.
+ *
+ * @returns {Promise<void>}
+ */
+async function runHook() {
+  const mod = await import('../../scripts/hooks/git-autopilot-session.js');
+  await mod.main();
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -136,7 +148,7 @@ describe('git-autopilot-session', () => {
       return '';
     };
 
-    await import('../../scripts/hooks/git-autopilot-session.js');
+    await runHook();
     // Should not throw, no stderr output about pull
     const pullLogs = stderrSpy.mock.calls
       .map(([msg]) => msg)
@@ -151,7 +163,7 @@ describe('git-autopilot-session', () => {
     };
     mockState.existsSyncResults = { 'autopilot.json': false };
 
-    await import('../../scripts/hooks/git-autopilot-session.js');
+    await runHook();
     const pullLogs = stderrSpy.mock.calls
       .map(([msg]) => msg)
       .filter((m) => m.includes('pull'));
@@ -166,7 +178,7 @@ describe('git-autopilot-session', () => {
     mockState.existsSyncResults = { 'autopilot.json': true };
     mockState.readFileSyncImpl = () => JSON.stringify({ enabled: false });
 
-    await import('../../scripts/hooks/git-autopilot-session.js');
+    await runHook();
     const pullLogs = stderrSpy.mock.calls
       .map(([msg]) => msg)
       .filter((m) => m.includes('pull'));
@@ -176,7 +188,7 @@ describe('git-autopilot-session', () => {
   it('should log success when pull succeeds', async () => {
     setupEnabledRepo();
 
-    await import('../../scripts/hooks/git-autopilot-session.js');
+    await runHook();
     const logs = stderrSpy.mock.calls.map(([msg]) => msg).join('');
     expect(logs).toContain('Pulled latest changes');
   });
@@ -200,7 +212,7 @@ describe('git-autopilot-session', () => {
       'rebase-apply': false,
     };
 
-    await import('../../scripts/hooks/git-autopilot-session.js');
+    await runHook();
     const logs = stderrSpy.mock.calls.map(([msg]) => msg).join('');
     expect(logs).toContain('no rebase in progress');
     expect(logs).not.toContain('attempting conflict auto-resolution');
@@ -230,7 +242,7 @@ describe('git-autopilot-session', () => {
       allResolved: true,
     };
 
-    await import('../../scripts/hooks/git-autopilot-session.js');
+    await runHook();
     const logs = stderrSpy.mock.calls.map(([msg]) => msg).join('');
     expect(logs).toContain('attempting conflict auto-resolution');
     expect(logs).toContain('Auto-resolved 1 conflict(s)');
@@ -258,7 +270,7 @@ describe('git-autopilot-session', () => {
     };
     mockState.autoResolveResult = { results: [], allResolved: true };
 
-    await import('../../scripts/hooks/git-autopilot-session.js');
+    await runHook();
     const logs = stderrSpy.mock.calls.map(([msg]) => msg).join('');
     expect(logs).toContain('aborting stale rebase');
     expect(commands).toContain('git rebase --abort');
@@ -289,7 +301,7 @@ describe('git-autopilot-session', () => {
       allResolved: true,
     };
 
-    await import('../../scripts/hooks/git-autopilot-session.js');
+    await runHook();
     const logs = stderrSpy.mock.calls.map(([msg]) => msg).join('');
     expect(logs).toContain('rebase --continue failed');
     expect(commands).toContain('git rebase --abort');
@@ -319,7 +331,7 @@ describe('git-autopilot-session', () => {
       allResolved: false,
     };
 
-    await import('../../scripts/hooks/git-autopilot-session.js');
+    await runHook();
     const logs = stderrSpy.mock.calls.map(([msg]) => msg).join('');
     expect(logs).toContain('Could not auto-resolve');
     expect(logs).toContain('b.js');
@@ -346,7 +358,7 @@ describe('git-autopilot-session', () => {
       branchPrefix: 'artibot/',
     });
 
-    await import('../../scripts/hooks/git-autopilot-session.js');
+    await runHook();
     const logs = stderrSpy.mock.calls.map(([msg]) => msg).join('');
     expect(logs).toContain('Switched to autopilot branch');
     expect(commands.some((c) => c.includes('checkout -b artibot/main'))).toBe(true);
@@ -355,7 +367,7 @@ describe('git-autopilot-session', () => {
   it('should stay on current branch if already on autopilot branch', async () => {
     setupEnabledRepo();
 
-    await import('../../scripts/hooks/git-autopilot-session.js');
+    await runHook();
     const logs = stderrSpy.mock.calls.map(([msg]) => msg).join('');
     expect(logs).not.toContain('Switched to autopilot branch');
   });
@@ -391,7 +403,7 @@ describe('git-autopilot-session', () => {
       branchPrefix: 'artibot/',
     });
 
-    await import('../../scripts/hooks/git-autopilot-session.js');
+    await runHook();
     const logs = stderrSpy.mock.calls.map(([msg]) => msg).join('');
     expect(logs).not.toContain('Switched to autopilot branch');
     expect(commands.some((c) => c.includes('checkout artibot/master'))).toBe(false);
@@ -435,7 +447,7 @@ describe('git-autopilot-session', () => {
       branchPrefix: 'artibot/',
     });
 
-    await import('../../scripts/hooks/git-autopilot-session.js');
+    await runHook();
     const logs = stderrSpy.mock.calls.map(([msg]) => msg).join('');
     expect(logs).toContain('Merged 3 commit(s) from base branch');
     expect(commands.some((c) => c.startsWith('git merge origin/master'))).toBe(true);
@@ -463,7 +475,7 @@ describe('git-autopilot-session', () => {
       branchPrefix: 'artibot/',
     });
 
-    await import('../../scripts/hooks/git-autopilot-session.js');
+    await runHook();
     // No merge attempted — feature/foo is not autopilot-prefixed
     expect(commands.some((c) => c.startsWith('git rev-list --count HEAD..origin/'))).toBe(false);
     expect(commands.some((c) => c.startsWith('git merge origin/'))).toBe(false);
@@ -496,7 +508,7 @@ describe('git-autopilot-session', () => {
       branchPrefix: 'artibot/',
     });
 
-    await import('../../scripts/hooks/git-autopilot-session.js');
+    await runHook();
     expect(commands.some((c) => c.startsWith('git merge origin/'))).toBe(false);
   });
 
@@ -526,7 +538,7 @@ describe('git-autopilot-session', () => {
       branchPrefix: 'artibot/',
     });
 
-    await import('../../scripts/hooks/git-autopilot-session.js');
+    await runHook();
     expect(commands.some((c) => c.startsWith('git merge origin/'))).toBe(false);
     const logs = stderrSpy.mock.calls.map(([msg]) => msg).join('');
     expect(logs).not.toContain('Merged ');
@@ -560,9 +572,29 @@ describe('git-autopilot-session', () => {
       branchPrefix: 'artibot/',
     });
 
-    await import('../../scripts/hooks/git-autopilot-session.js');
+    await runHook();
     expect(commands).toContain('git merge --abort');
     const logs = stderrSpy.mock.calls.map(([msg]) => msg).join('');
     expect(logs).toContain('Base-branch sync had conflicts');
+  });
+
+  it('direct-run guard: importing the module runs no git command', async () => {
+    // setupEnabledRepo() leaves a state where the SessionStart pipeline WOULD
+    // pull, merge and relocate HEAD. Importing must still touch nothing:
+    // without the guard, `main()` blocks on stdin and then rewrites the real
+    // repo's history. Only the mocks stood between an import and a live
+    // `git pull --rebase` before this.
+    setupEnabledRepo();
+    const passthrough = mockState.execSyncImpl;
+    const commands = [];
+    mockState.execSyncImpl = (cmd) => {
+      commands.push(cmd);
+      return passthrough(cmd);
+    };
+
+    await import('../../scripts/hooks/git-autopilot-session.js');
+    await new Promise((r) => setTimeout(r, 30));
+
+    expect(commands).toEqual([]);
   });
 });

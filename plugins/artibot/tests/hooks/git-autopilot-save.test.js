@@ -129,6 +129,18 @@ function setupRepo(opts = {}) {
   return commands;
 }
 
+/**
+ * Import the hook and run its entry point. The module carries a direct-run
+ * guard, so importing it no longer executes `main()` — the call has to be
+ * explicit here, exactly as the spawned production process makes it.
+ *
+ * @returns {Promise<void>}
+ */
+async function runHook() {
+  const mod = await import('../../scripts/hooks/git-autopilot-save.js');
+  await mod.main();
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -160,7 +172,7 @@ describe('git-autopilot-save', () => {
       return '{}';
     };
 
-    await import('../../scripts/hooks/git-autopilot-save.js');
+    await runHook();
     await new Promise((r) => setTimeout(r, 30));
 
     // No commit attempt, no state write.
@@ -170,7 +182,7 @@ describe('git-autopilot-save', () => {
   it('refreshes state and exits when workspace is clean', async () => {
     const commands = setupRepo({ dirty: false });
 
-    await import('../../scripts/hooks/git-autopilot-save.js');
+    await runHook();
     await new Promise((r) => setTimeout(r, 30));
 
     // State timestamp refreshed exactly once
@@ -190,7 +202,7 @@ describe('git-autopilot-save', () => {
       },
     });
 
-    await import('../../scripts/hooks/git-autopilot-save.js');
+    await runHook();
     await new Promise((r) => setTimeout(r, 30));
 
     const commitCmd = commands.find((c) => c.cmd.startsWith('git commit'));
@@ -208,7 +220,7 @@ describe('git-autopilot-save', () => {
       },
     });
 
-    await import('../../scripts/hooks/git-autopilot-save.js');
+    await runHook();
     await new Promise((r) => setTimeout(r, 30));
 
     const commitCmd = commands.find((c) => c.cmd.startsWith('git commit'));
@@ -227,7 +239,7 @@ describe('git-autopilot-save', () => {
       artibotConfig: { git: { autopilot: { bypassPreCommitHooks: false } } },
     });
 
-    await import('../../scripts/hooks/git-autopilot-save.js');
+    await runHook();
     await new Promise((r) => setTimeout(r, 30));
 
     const commitCmd = commands.find((c) => c.cmd.startsWith('git commit'));
@@ -238,7 +250,7 @@ describe('git-autopilot-save', () => {
     const commands = setupRepo();
     mockState.allowed = false;
 
-    await import('../../scripts/hooks/git-autopilot-save.js');
+    await runHook();
     await new Promise((r) => setTimeout(r, 30));
 
     expect(commands.some((c) => c.cmd.startsWith('git add'))).toBe(false);
@@ -249,7 +261,7 @@ describe('git-autopilot-save', () => {
   it('passes a 2000ms timeout option to git status invocation', async () => {
     const commands = setupRepo();
 
-    await import('../../scripts/hooks/git-autopilot-save.js');
+    await runHook();
     await new Promise((r) => setTimeout(r, 30));
 
     const statusCall = commands.find((c) => c.cmd === 'git status --porcelain');
@@ -271,7 +283,7 @@ describe('git-autopilot-save', () => {
       return '';
     };
 
-    await import('../../scripts/hooks/git-autopilot-save.js');
+    await runHook();
     await new Promise((r) => setTimeout(r, 30));
 
     expect(commands.some((c) => c.cmd.startsWith('git add'))).toBe(false);
@@ -297,7 +309,7 @@ describe('git-autopilot-save', () => {
       return '';
     };
 
-    await import('../../scripts/hooks/git-autopilot-save.js');
+    await runHook();
     await new Promise((r) => setTimeout(r, 30));
 
     expect(commands.some((c) => c.cmd.startsWith('git add'))).toBe(true);
@@ -315,7 +327,7 @@ describe('git-autopilot-save', () => {
       return '';
     };
 
-    await import('../../scripts/hooks/git-autopilot-save.js');
+    await runHook();
     await new Promise((r) => setTimeout(r, 30));
 
     expect(commands.some((c) => c.cmd.startsWith('git commit'))).toBe(false);
@@ -327,7 +339,7 @@ describe('git-autopilot-save', () => {
     const cmds1 = setupRepo({
       config: { enabled: true, wipIntervalMinutes: 30, commitStrategy: 'interval' },
     });
-    await import('../../scripts/hooks/git-autopilot-save.js');
+    await runHook();
     await new Promise((r) => setTimeout(r, 30));
     const commit1 = cmds1.find((c) => c.cmd.startsWith('git commit'));
     expect(commit1.cmd).not.toContain('--no-verify');
@@ -337,7 +349,7 @@ describe('git-autopilot-save', () => {
     const cmds2 = setupRepo({
       config: { enabled: true, wipIntervalMinutes: 30, commitStrategy: 'interval', bypassPreCommitHooks: true },
     });
-    await import('../../scripts/hooks/git-autopilot-save.js');
+    await runHook();
     await new Promise((r) => setTimeout(r, 30));
     const commit2 = cmds2.find((c) => c.cmd.startsWith('git commit'));
     expect(commit2.cmd).toContain('--no-verify');
@@ -358,7 +370,7 @@ describe('git-autopilot-save', () => {
       return '';
     };
 
-    await import('../../scripts/hooks/git-autopilot-save.js');
+    await runHook();
     await new Promise((r) => setTimeout(r, 30));
 
     // Non-destructive snapshot: create + store, NEVER push/pop (which would
@@ -385,7 +397,7 @@ describe('git-autopilot-save', () => {
       return '';
     };
 
-    await import('../../scripts/hooks/git-autopilot-save.js');
+    await runHook();
     await new Promise((r) => setTimeout(r, 30));
 
     // None of the tree-mutating git commands should ever appear.
@@ -412,7 +424,7 @@ describe('git-autopilot-save', () => {
       return '';
     };
 
-    await import('../../scripts/hooks/git-autopilot-save.js');
+    await runHook();
     await new Promise((r) => setTimeout(r, 30));
 
     const stashStore = commands.find((c) => c.cmd.startsWith('git stash store'));
@@ -431,7 +443,7 @@ describe('git-autopilot-save', () => {
       return '';
     };
 
-    await import('../../scripts/hooks/git-autopilot-save.js');
+    await runHook();
     await new Promise((r) => setTimeout(r, 30));
 
     // State still saved (timestamp update is independent of checkpoint success).
@@ -456,7 +468,7 @@ describe('git-autopilot-save', () => {
       return '';
     };
 
-    await import('../../scripts/hooks/git-autopilot-save.js');
+    await runHook();
     await new Promise((r) => setTimeout(r, 30));
 
     // create returned empty → no store attempted, no tree mutation.
@@ -475,7 +487,7 @@ describe('git-autopilot-save', () => {
       },
     });
 
-    await import('../../scripts/hooks/git-autopilot-save.js');
+    await runHook();
     await new Promise((r) => setTimeout(r, 30));
 
     // No stash, no commit, no state write.
@@ -506,7 +518,7 @@ describe('git-autopilot-save', () => {
       return '';
     };
 
-    await import('../../scripts/hooks/git-autopilot-save.js');
+    await runHook();
     await new Promise((r) => setTimeout(r, 30));
 
     // Two stash drop commands should have been issued (indices 11 and 10, in descending order).
@@ -514,5 +526,19 @@ describe('git-autopilot-save', () => {
     expect(drops).toHaveLength(2);
     expect(drops[0].cmd).toContain('stash@{11}');
     expect(drops[1].cmd).toContain('stash@{10}');
+  });
+
+  it('direct-run guard: importing the module runs no git command', async () => {
+    // setupRepo() leaves a state where an auto-save WOULD fire (interval long
+    // elapsed, workspace dirty). Importing must still write nothing: without
+    // the guard, `main()` blocks on stdin and then mutates the real repo. Only
+    // the mocks stood between an import and a live `git add -A` before this.
+    const commands = setupRepo({ dirty: true });
+
+    await import('../../scripts/hooks/git-autopilot-save.js');
+    await new Promise((r) => setTimeout(r, 30));
+
+    expect(commands).toHaveLength(0);
+    expect(mockState.atomicWrites).toHaveLength(0);
   });
 });

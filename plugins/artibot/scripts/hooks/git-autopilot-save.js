@@ -10,6 +10,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { atomicWriteSync, parseJSON, readStdin, resolveConfigPath } from '../utils/index.js';
 import { createErrorHandler } from '../../lib/core/hook-utils.js';
 import { isAutopilotAllowed } from '../../lib/autopilot/repo-identity.js';
@@ -309,7 +310,7 @@ function cleanupOldStashes(cwd, maxStashes = 10) {
 // Main
 // -------------------------------------------------------------------------
 
-async function main() {
+export async function main() {
   const raw = await readStdin();
   const hookData = parseJSON(raw) ?? {};
 
@@ -382,4 +383,13 @@ async function main() {
   void hookData;
 }
 
-main().catch(createErrorHandler('git-autopilot-save', { exit: true }));
+// Direct-run guard: importing this module (tests) must not execute a real
+// auto-save — main() blocks on stdin and, past its gates, writes git state
+// (`git add -A`, WIP commit, `git stash create`/`store`). Production is
+// unaffected: `_userprompt-dispatcher.js` spawns this file as argv[1].
+const isDirectRun = process.argv[1]
+  && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
+
+if (isDirectRun) {
+  main().catch(createErrorHandler('git-autopilot-save', { exit: true }));
+}

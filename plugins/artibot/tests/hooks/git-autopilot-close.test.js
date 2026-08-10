@@ -137,6 +137,18 @@ function makeExec(rules, fallback = '') {
   };
 }
 
+/**
+ * Import the hook and run its entry point. The module carries a direct-run
+ * guard, so importing it no longer executes `main()` — the call has to be
+ * explicit here, exactly as the spawned production process makes it.
+ *
+ * @returns {Promise<void>}
+ */
+async function runHook() {
+  const mod = await import('../../scripts/hooks/git-autopilot-close.js');
+  await mod.main();
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -162,7 +174,7 @@ describe('git-autopilot-close', () => {
       return '';
     };
 
-    await import('../../scripts/hooks/git-autopilot-close.js');
+    await runHook();
     const logs = stderrSpy.mock.calls.map(([m]) => m).join('');
     expect(logs).not.toContain('commit');
   });
@@ -173,7 +185,7 @@ describe('git-autopilot-close', () => {
     ]);
     mockState.existsSyncResults = { 'autopilot.json': false };
 
-    await import('../../scripts/hooks/git-autopilot-close.js');
+    await runHook();
     const logs = stderrSpy.mock.calls.map(([m]) => m).join('');
     expect(logs).not.toContain('commit');
   });
@@ -193,7 +205,7 @@ describe('git-autopilot-close', () => {
       return '';
     };
 
-    await import('../../scripts/hooks/git-autopilot-close.js');
+    await runHook();
     const logs = stderrSpy.mock.calls.map(([m]) => m).join('');
     expect(logs).toContain('Final changes committed');
     expect(recorded.some((a) => a.join(' ') === 'add -A')).toBe(true);
@@ -207,7 +219,7 @@ describe('git-autopilot-close', () => {
       ['status --porcelain', ''],
     ]);
 
-    await import('../../scripts/hooks/git-autopilot-close.js');
+    await runHook();
     const logs = stderrSpy.mock.calls.map(([m]) => m).join('');
     expect(logs).toContain('No uncommitted changes');
   });
@@ -231,7 +243,7 @@ describe('git-autopilot-close', () => {
       return '';
     };
 
-    await import('../../scripts/hooks/git-autopilot-close.js');
+    await runHook();
     const logs = stderrSpy.mock.calls.map(([m]) => m).join('');
     expect(logs).toContain('Squashed');
     expect(recorded.some((a) => a[0] === 'reset' && a[1] === '--soft')).toBe(true);
@@ -245,7 +257,7 @@ describe('git-autopilot-close', () => {
       ['status --porcelain', ''],
     ]);
 
-    await import('../../scripts/hooks/git-autopilot-close.js');
+    await runHook();
     const logs = stderrSpy.mock.calls.map(([m]) => m).join('');
     expect(logs).not.toContain('Squashed');
   });
@@ -267,7 +279,7 @@ describe('git-autopilot-close', () => {
       return '';
     };
 
-    await import('../../scripts/hooks/git-autopilot-close.js');
+    await runHook();
     const logs = stderrSpy.mock.calls.map(([m]) => m).join('');
     expect(logs).toContain('Pushed');
     expect(recorded.some((a) => a[0] === 'push' && a.includes('origin'))).toBe(true);
@@ -295,7 +307,7 @@ describe('git-autopilot-close', () => {
       return '';
     };
 
-    await import('../../scripts/hooks/git-autopilot-close.js');
+    await runHook();
     const logs = stderrSpy.mock.calls.map(([m]) => m).join('');
     expect(logs).toContain('Pushed');
   });
@@ -316,7 +328,7 @@ describe('git-autopilot-close', () => {
       return '';
     };
 
-    await import('../../scripts/hooks/git-autopilot-close.js');
+    await runHook();
     const logs = stderrSpy.mock.calls.map(([m]) => m).join('');
     expect(logs).toContain('Push failed');
   });
@@ -360,7 +372,7 @@ describe('git-autopilot-close — squashWipCommits safety guards', () => {
       return '';
     };
 
-    await import('../../scripts/hooks/git-autopilot-close.js');
+    await runHook();
     // squash MUST refuse to reset when totalCommits > MAX_SQUASH_COMMITS.
     expect(recorded.some((a) => a[0] === 'reset')).toBe(false);
     const logs = stderrSpy.mock.calls.map(([m]) => m).join('');
@@ -391,7 +403,7 @@ describe('git-autopilot-close — squashWipCommits safety guards', () => {
       return '';
     };
 
-    await import('../../scripts/hooks/git-autopilot-close.js');
+    await runHook();
     const logs = stderrSpy.mock.calls.map(([m]) => m).join('');
     expect(logs).toContain('WIP squash failed');
     expect(logs).toContain('Push skipped');
@@ -419,7 +431,7 @@ describe('git-autopilot-close — squashWipCommits safety guards', () => {
       return '';
     };
 
-    await import('../../scripts/hooks/git-autopilot-close.js');
+    await runHook();
     const logs = stderrSpy.mock.calls.map(([m]) => m).join('');
     expect(logs).toContain('Squashed');
     expect(logs).not.toContain('Push skipped');
@@ -448,7 +460,7 @@ describe('git-autopilot-close — squashWipCommits safety guards', () => {
       return '';
     };
 
-    await import('../../scripts/hooks/git-autopilot-close.js');
+    await runHook();
     // No reset issued because guard short-circuits.
     expect(recorded.some((a) => a[0] === 'reset')).toBe(false);
   });
@@ -488,7 +500,7 @@ describe('git-autopilot-close — closeOnStop gate (v4.11.3)', () => {
       return '';
     };
 
-    await import('../../scripts/hooks/git-autopilot-close.js');
+    await runHook();
 
     const logs = stderrSpy.mock.calls.map(([m]) => m).join('');
     expect(logs).toContain('closeOnStop=false — skipping');
@@ -538,7 +550,7 @@ describe('git-autopilot-close — closeOnStop gate (v4.11.3)', () => {
       return '';
     };
 
-    await import('../../scripts/hooks/git-autopilot-close.js');
+    await runHook();
     const logs = stderrSpy.mock.calls.map(([m]) => m).join('');
     expect(logs).toContain('Final changes committed');
     expect(recorded.some((a) => a.join(' ') === 'add -A')).toBe(true);
@@ -611,7 +623,7 @@ describe('git-autopilot-close — commitStrategy: "semantic"', () => {
       ['status --porcelain', 'M file.js\n'],
     ]);
 
-    await import('../../scripts/hooks/git-autopilot-close.js');
+    await runHook();
     const logs = stderrSpy.mock.calls.map(([m]) => m).join('');
     expect(logs).toContain('no phase transition — skipping commit');
   });
@@ -624,7 +636,7 @@ describe('git-autopilot-close — commitStrategy: "semantic"', () => {
       ['status --porcelain', 'M file.js\n'],
     ]);
 
-    await import('../../scripts/hooks/git-autopilot-close.js');
+    await runHook();
     const logs = stderrSpy.mock.calls.map(([m]) => m).join('');
     expect(logs).toContain('first phase entered');
   });
@@ -647,7 +659,7 @@ describe('git-autopilot-close — commitStrategy: "semantic"', () => {
       return '';
     };
 
-    await import('../../scripts/hooks/git-autopilot-close.js');
+    await runHook();
     const logs = stderrSpy.mock.calls.map(([m]) => m).join('');
     expect(logs).toContain('Semantic commit: PLAN phase complete');
     expect(recorded.some((a) => a.join(' ') === 'add -A')).toBe(true);
@@ -676,7 +688,7 @@ describe('git-autopilot-close — commitStrategy: "semantic"', () => {
       return '';
     };
 
-    await import('../../scripts/hooks/git-autopilot-close.js');
+    await runHook();
     const commitArgs = recorded.find((a) => a[0] === 'commit');
     expect(commitArgs).toBeTruthy();
     expect(commitArgs[2]).toContain('feat(autopilot)');
@@ -693,7 +705,7 @@ describe('git-autopilot-close — commitStrategy: "semantic"', () => {
       ['status --porcelain', 'M file.js\n'],
     ]);
 
-    await import('../../scripts/hooks/git-autopilot-close.js');
+    await runHook();
     const logs = stderrSpy.mock.calls.map(([m]) => m).join('');
     expect(logs).toContain('phase INTAKE not in commitOnPhases');
   });
@@ -708,7 +720,7 @@ describe('git-autopilot-close — commitStrategy: "semantic"', () => {
       ['status --porcelain', ''],
     ]);
 
-    await import('../../scripts/hooks/git-autopilot-close.js');
+    await runHook();
     const logs = stderrSpy.mock.calls.map(([m]) => m).join('');
     expect(logs).toContain('completed but no changes to commit');
   });
@@ -723,7 +735,7 @@ describe('git-autopilot-close — commitStrategy: "semantic"', () => {
       ['status --porcelain', 'M file.js\n'],
     ]);
 
-    await import('../../scripts/hooks/git-autopilot-close.js');
+    await runHook();
     const logs = stderrSpy.mock.calls.map(([m]) => m).join('');
     expect(logs).toContain('no phase transition — skipping commit');
   });
@@ -746,7 +758,7 @@ describe('git-autopilot-close — commitStrategy: "semantic"', () => {
       return '';
     };
 
-    await import('../../scripts/hooks/git-autopilot-close.js');
+    await runHook();
     const logs = stderrSpy.mock.calls.map(([m]) => m).join('');
     expect(logs).not.toContain('closeOnStop=false');
     expect(logs).toContain('Semantic commit: PLAN phase complete');
@@ -771,7 +783,7 @@ describe('git-autopilot-close — commitStrategy: "semantic"', () => {
       return '';
     };
 
-    await import('../../scripts/hooks/git-autopilot-close.js');
+    await runHook();
     const logs = stderrSpy.mock.calls.map(([m]) => m).join('');
     expect(logs).toContain('Pushed');
     expect(recorded.some((a) => a[0] === 'push')).toBe(true);
@@ -820,7 +832,7 @@ describe('git-autopilot-close — commitStrategy: "none"', () => {
       return '';
     };
 
-    await import('../../scripts/hooks/git-autopilot-close.js');
+    await runHook();
     const logs = stderrSpy.mock.calls.map(([m]) => m).join('');
     expect(logs).toContain('commitStrategy=none — skipping all git writes');
     const writeAttempts = recorded.filter((args) => {
@@ -828,5 +840,23 @@ describe('git-autopilot-close — commitStrategy: "none"', () => {
       return ['add', 'commit', 'push', 'reset'].includes(cmd);
     });
     expect(writeAttempts).toEqual([]);
+  });
+
+  it('direct-run guard: importing the module runs no git command', async () => {
+    // setupEnabledRepo() opts into the full close pipeline (commit, WIP squash
+    // via `reset --soft`, push). Importing must still run nothing: without the
+    // guard, `main()` blocks on stdin and then rewrites and publishes the real
+    // repo. Only the mocks stood between an import and a live `git push`.
+    setupEnabledRepo();
+    const recorded = [];
+    mockState.execFileSyncImpl = (_file, args) => {
+      recorded.push(args);
+      return '';
+    };
+
+    await import('../../scripts/hooks/git-autopilot-close.js');
+    await new Promise((r) => setTimeout(r, 30));
+
+    expect(recorded).toEqual([]);
   });
 });

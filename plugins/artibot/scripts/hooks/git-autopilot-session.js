@@ -11,6 +11,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { parseJSON, readStdin } from '../utils/index.js';
 import { createErrorHandler } from '../../lib/core/hook-utils.js';
 import { autoResolveAll } from './git-autopilot-merge.js';
@@ -257,7 +258,7 @@ function ensureAutopilotBranch(cwd, branchPrefix, currentBranch, config) {
 // Main
 // -------------------------------------------------------------------------
 
-async function main() {
+export async function main() {
   const raw = await readStdin();
   const hookData = parseJSON(raw) ?? {};
 
@@ -325,4 +326,14 @@ async function main() {
   void hookData;
 }
 
-main().catch(createErrorHandler('git-autopilot-session', { exit: true }));
+// Direct-run guard: importing this module (tests, or anything reaching for
+// `git-autopilot-merge.js` through here) must not execute a real SessionStart —
+// main() blocks on stdin and, past its gates, relocates HEAD (`checkout`) and
+// rewrites history (`pull --rebase`, `merge`). Production is unaffected:
+// `_sessionstart-dispatcher.js` spawns this file as argv[1].
+const isDirectRun = process.argv[1]
+  && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
+
+if (isDirectRun) {
+  main().catch(createErrorHandler('git-autopilot-session', { exit: true }));
+}
