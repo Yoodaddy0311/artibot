@@ -8,7 +8,7 @@
  *   - findBash: returns 'bash' on non-Windows; null on Windows when no candidate works
  *   - findSourceRepo: source-repo.json → common locations → walk-up
  *   - saveBackupInfo: writes JSON with previousVersion + timestamp
- *   - clearCache: removes ~/.claude/plugins/cache/artibot when present
+ *   - clearCache: prunes stale cache versions while sparing the live one
  *
  * Black-box smoke: `node scripts/update.js --check` exits 0 and reports versions.
  */
@@ -355,19 +355,122 @@ describe('saveBackupInfo', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// clearCache — regression cover for the 2026-08-10 live-cache wipe.
+//
+// The test that stood here asserted `~/.claude/plugins/cache/artibot` was gone
+// after the call, i.e. it asserted the defect: that path is the MARKETPLACE
+// directory, hook script paths are re-resolved per event, and nothing in this
+// repo recreates it (install.sh `install_plugin_cache` / install.ps1
+// `Update-PluginCache` only copy into version dirs that already exist). Removing
+// it took every live session's hooks down and took the sibling plugin
+// `artibot-cowork` with it. The contract below is the replacement: prune old
+// versions, never touch the live one, never touch anything outside the artibot
+// plugin directory.
+//
+// `.in_use` is treated as read-only input. It is Claude Code's marker, not
+// Artibot's — a repo-wide search for `in_use` / `last_inuse_sweep` finds no
+// implementation here (only an unrelated EADDRINUSE regex), so what the sweep
+// does when a marker is missing is UNVERIFIED from this codebase. These tests
+// therefore pin only what is ours to guarantee: a marked directory survives.
+// ---------------------------------------------------------------------------
 describe('clearCache', () => {
-  it('removes ~/.claude/plugins/cache/artibot when present', () => {
-    const cachePath = join(tmpRoot, '.claude', 'plugins', 'cache', 'artibot');
-    mkdirSync(cachePath, { recursive: true });
-    writeFileSync(join(cachePath, 'sentinel'), 'data');
+  const PLUGIN_CACHE = ['.claude', 'plugins', 'cache', 'artibot', 'artibot'];
 
-    clearCache(tmpRoot);
+  /** Create a cache version dir with a sentinel file; optionally mark it in-use. */
+  function seedVersion(version, { inUse = false } = {}) {
+    const dir = join(tmpRoot, ...PLUGIN_CACHE, version);
+    mkdirSync(join(dir, 'hooks'), { recursive: true });
+    writeFileSync(join(dir, 'hooks', 'hooks.json'), '{"v":1}');
+    if (inUse) mkdirSync(join(dir, '.in_use'), { recursive: true });
+    return dir;
+  }
 
-    expect(existsSync(cachePath)).toBe(false);
+  const versionDir = (version) => join(tmpRoot, ...PLUGIN_CACHE, version);
+
+  it('keeps the installed version — the live hook path is never removed', () => {
+    seedVersion('4.42.0');
+
+    const result = clearCache(tmpRoot, '4.42.0');
+
+    expect(existsSync(join(versionDir('4.42.0'), 'hooks', 'hooks.json'))).toBe(true);
+    expect(result.removed).toEqual([]);
+    expect(result.kept).toContain('4.42.0');
+  });
+
+  it('removes stale versions the installed one has superseded', () => {
+    seedVersion('4.40.0');
+    seedVersion('4.41.0');
+    seedVersion('4.42.0');
+
+    const result = clearCache(tmpRoot, '4.42.0');
+
+    expect(existsSync(versionDir('4.40.0'))).toBe(false);
+    expect(existsSync(versionDir('4.41.0'))).toBe(false);
+    expect(existsSync(versionDir('4.42.0'))).toBe(true);
+    expect(result.removed.sort()).toEqual(['4.40.0', '4.41.0']);
+  });
+
+  it('spares a stale version that still carries an .in_use marker', () => {
+    seedVersion('4.41.0', { inUse: true });
+    seedVersion('4.42.0');
+
+    const result = clearCache(tmpRoot, '4.42.0');
+
+    expect(existsSync(versionDir('4.41.0'))).toBe(true);
+    expect(result.removed).toEqual([]);
+    expect(result.kept.sort()).toEqual(['4.41.0', '4.42.0']);
+  });
+
+  it('never deletes the marketplace root or a sibling plugin', () => {
+    // `cache/artibot` is the marketplace; `artibot-cowork` lives beside the
+    // artibot plugin under it and no installer here would ever restore it.
+    seedVersion('4.42.0');
+    const sibling = join(tmpRoot, '.claude', 'plugins', 'cache', 'artibot', 'artibot-cowork', '3.1.0');
+    mkdirSync(sibling, { recursive: true });
+    writeFileSync(join(sibling, 'sentinel'), 'data');
+
+    clearCache(tmpRoot, '4.42.0');
+
+    expect(existsSync(join(sibling, 'sentinel'))).toBe(true);
+    expect(existsSync(join(tmpRoot, ...PLUGIN_CACHE))).toBe(true);
+  });
+
+  it('prunes nothing when the version to keep is not in the cache yet', () => {
+    // Reproduced before the guard existed: with 4.41.0 and 4.42.0 cached, no
+    // .in_use markers, and keepVersion 4.43.0 (a bump Claude Code has not
+    // populated yet), every dir looked stale and the loop emptied the cache —
+    // the outage this function exists to prevent. Knowing the version is not
+    // the same as that version being on disk.
+    seedVersion('4.41.0');
+    seedVersion('4.42.0');
+
+    const result = clearCache(tmpRoot, '4.43.0');
+
+    expect(result.removed).toEqual([]);
+    expect(result.reason).toBe('keep target v4.43.0 not present in cache');
+    expect(existsSync(versionDir('4.41.0'))).toBe(true);
+    expect(existsSync(versionDir('4.42.0'))).toBe(true);
+  });
+
+  it('prunes nothing when the installed version cannot be resolved', () => {
+    // readCurrentVersion() returns '0.0.0' when it cannot read the installed
+    // copy. Guessing which directory is live would risk deleting the live one.
+    seedVersion('4.41.0');
+    seedVersion('4.42.0');
+
+    for (const unknown of ['0.0.0', undefined]) {
+      const result = clearCache(tmpRoot, unknown);
+      expect(result.removed).toEqual([]);
+      expect(result.reason).toBe('installed version unknown');
+    }
+    expect(existsSync(versionDir('4.41.0'))).toBe(true);
+    expect(existsSync(versionDir('4.42.0'))).toBe(true);
   });
 
   it('does not throw when cache directory does not exist', () => {
-    expect(() => clearCache(tmpRoot)).not.toThrow();
+    expect(() => clearCache(tmpRoot, '4.42.0')).not.toThrow();
+    expect(clearCache(tmpRoot, '4.42.0').reason).toBe('no plugin cache present');
   });
 });
 

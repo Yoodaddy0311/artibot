@@ -191,14 +191,110 @@ function saveBackupInfo(home, currentVersion) {
 // Cache clearing
 // ---------------------------------------------------------------------------
 
-function clearCache(home) {
-  const cachePath = path.join(home, '.claude', 'plugins', 'cache', 'artibot');
-  if (existsSync(cachePath)) {
-    rmSync(cachePath, { recursive: true, force: true });
-    console.log(`  Cache cleared: ${cachePath}`);
-  } else {
+/**
+ * Retire stale plugin-cache versions without disturbing the running ones.
+ *
+ * Claude Code re-resolves hook script paths on every event, so a cache dir that
+ * disappears mid-session is not "invalidated" — it is an outage for every
+ * session on the machine until something repopulates it. The previous version
+ * `rmSync`'d `~/.claude/plugins/cache/artibot`, the MARKETPLACE directory, which
+ * nothing here recreates: `install_plugin_cache` (install.sh) /
+ * `Update-PluginCache` (install.ps1) only copy INTO version dirs that already
+ * exist. One `/update` thus killed every live session's hooks (measured
+ * 2026-08-10) and destroyed the sibling plugin `artibot-cowork` besides.
+ *
+ * What needs invalidating is narrower: by the time this runs the installers have
+ * already mirrored the hot paths (scripts, hooks, lib, output-styles + config)
+ * into every existing version dir, so the current version is current in place.
+ * Only OLD version dirs are stale, and no restarted session routes to those.
+ *
+ * So: prune old versions, never the live one. Kept unconditionally are
+ * `keepVersion`; any dir holding a `.in_use` marker (Claude Code's own signal
+ * that a process is still bound to it); and the plugin/marketplace roots with
+ * every sibling plugin. Nothing live is deleted, so there is no delete-recreate
+ * window to shorten — the window is gone rather than smaller.
+ *
+ * `.in_use` is read, never written: it is the harness's marker and this repo
+ * holds no definition of the sweep that consumes it (see tests/scripts/
+ * update.test.js). Honouring a marker we do not own is safe; forging one would
+ * be inventing semantics.
+ *
+ * Ownership is unchanged — install.sh:295 / install.ps1:416 both delegate cache
+ * invalidation here, and this is still the only place that performs it.
+ *
+ * @param {string} home - Home directory containing `.claude/`.
+ * @param {string} [keepVersion] - Version that must survive. When absent or
+ *   unresolvable ('0.0.0'), nothing is pruned: without knowing which directory
+ *   is live, silence beats deleting the wrong one.
+ * @returns {{ removed: string[], kept: string[], reason: string|null }}
+ */
+function clearCache(home, keepVersion) {
+  const pluginCache = path.join(home, '.claude', 'plugins', 'cache', 'artibot', 'artibot');
+
+  if (!existsSync(pluginCache)) {
     console.log('  Cache directory not found (skipped).');
+    return { removed: [], kept: [], reason: 'no plugin cache present' };
   }
+
+  if (!keepVersion || keepVersion === '0.0.0') {
+    console.log('  Installed version unresolved — keeping every cache version (nothing pruned).');
+    return { removed: [], kept: [], reason: 'installed version unknown' };
+  }
+
+  // Knowing the version is not the same as that version being cached. Right
+  // after a bump, `keepVersion` names a dir Claude Code has not created yet (it
+  // populates lazily), so every existing dir looks stale and the loop empties
+  // the cache — this function's own outage, in its narrowest form. Measured:
+  // 4.41.0 + 4.42.0 present, keepVersion 4.43.0, unguarded loop removed both.
+  // No survivor means nothing safe to prune against, so prune nothing. `.in_use`
+  // is no substitute: it is an external signal that may legitimately be absent.
+  if (!existsSync(path.join(pluginCache, keepVersion))) {
+    console.log(`  Cache has no v${keepVersion} directory yet — keeping every version (nothing pruned).`);
+    return { removed: [], kept: [], reason: `keep target v${keepVersion} not present in cache` };
+  }
+
+  let entries;
+  try {
+    entries = readdirSync(pluginCache, { withFileTypes: true });
+  } catch (err) {
+    console.warn(`  Cache root unreadable (${err.message}); nothing pruned.`);
+    return { removed: [], kept: [], reason: 'cache root unreadable' };
+  }
+
+  const removed = [];
+  const kept = [];
+
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const versionDir = path.join(pluginCache, entry.name);
+
+    if (entry.name === keepVersion) {
+      kept.push(entry.name);
+      continue;
+    }
+    if (existsSync(path.join(versionDir, '.in_use'))) {
+      kept.push(entry.name);
+      console.log(`  Cache v${entry.name} still in use — kept.`);
+      continue;
+    }
+
+    try {
+      rmSync(versionDir, { recursive: true, force: true });
+      removed.push(entry.name);
+    } catch (err) {
+      kept.push(entry.name);
+      console.warn(`  Could not remove stale cache v${entry.name}: ${err.message}`);
+    }
+  }
+
+  if (removed.length > 0) {
+    console.log(`  Stale cache versions removed: ${removed.map((v) => `v${v}`).join(', ')}`);
+  } else {
+    console.log('  No stale cache versions to remove.');
+  }
+  console.log(`  Cache kept for live sessions: ${kept.map((v) => `v${v}`).join(', ') || '(none)'}`);
+
+  return { removed, kept, reason: null };
 }
 
 // ---------------------------------------------------------------------------
@@ -490,7 +586,7 @@ async function main() {
   console.log(`  1. Save backup metadata to ~/.claude/artibot/update-backup.json`);
   console.log(`  2. Pull latest source from git (if available)`);
   console.log(`  3. Run: bash install.sh`);
-  console.log(`  4. Clear plugin cache at ~/.claude/plugins/cache/artibot/`);
+  console.log(`  4. Retire stale plugin-cache versions (the live one is kept)`);
 
   if (DRY_RUN) {
     console.log('\n[dry-run] No changes made. Remove --dry-run to execute.');
@@ -601,18 +697,20 @@ async function main() {
     return;
   }
 
-  // Step 4: Clear cache AFTER successful install
-  clearCache(home);
+  // Step 4: Retire stale cache versions AFTER a successful install.
+  //         The installed version is resolved first because clearCache needs to
+  //         know which directory live sessions route to in order to spare it.
+  const installedRoot = path.join(home, '.claude', 'artibot');
+  const installedNow = readCurrentVersion(installedRoot);
+  clearCache(home, installedNow);
 
   // Step 4.5: Post-install verification — assert the termination invariants
-  // before claiming success. Re-read the version from the INSTALLED copy
-  // (~/.claude/artibot), not the source pluginRoot, then collect INV-1/3/4/5/6
+  // before claiming success. The version above is read from the INSTALLED copy
+  // (~/.claude/artibot), not the source pluginRoot; collect INV-1/3/4/5/6
   // (version landing, hooks-copy completeness, marketplace-mirror consistency,
   // cache no-drift, no-op marker) and render a from->to self-check table. Any
   // failure is a false-success risk (the artibot/master dead-branch incident) —
   // surface it loudly with manual recovery instead of a quiet "Update complete".
-  const installedRoot = path.join(home, '.claude', 'artibot');
-  const installedNow = readCurrentVersion(installedRoot);
   const invariants = collectPostInstallInvariants({
     home,
     installedRoot,
