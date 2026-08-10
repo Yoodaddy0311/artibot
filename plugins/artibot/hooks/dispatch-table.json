@@ -47,7 +47,8 @@
         { "name": "post-write-tdd",       "script": "post-write-tdd.js",       "timeoutMs": 2000,  "tools": ["Edit", "Write"] },
         { "name": "mark-main-agent-edit", "script": "mark-main-agent-edit.js", "timeoutMs": 3000,  "tools": ["Edit", "Write", "MultiEdit"] },
         { "name": "tool-tracker",         "script": "tool-tracker.js",         "timeoutMs": 3000,  "tools": ["*"] },
-        { "name": "webfetch-cache-post",  "script": "webfetch-cache-post.js",  "timeoutMs": 5000,  "tools": ["WebFetch"] }
+        { "name": "webfetch-cache-post",  "script": "webfetch-cache-post.js",  "timeoutMs": 5000,  "tools": ["WebFetch"] },
+        { "name": "zero-result-guard",    "script": "zero-result-guard.js",    "timeoutMs": 3000,  "tools": ["Grep", "Glob"] }
       ]
     },
     "Stop": {

@@ -81,6 +81,8 @@
     "./rules/dev-protocol.md",
     "./rules/frontend-patterns.md",
     "./rules/quality-gates.md",
-    "./rules/test-patterns.md"
+    "./rules/question-recommendations.md",
+    "./rules/test-patterns.md",
+    "./rules/verification-discipline.md"
   ]
 }

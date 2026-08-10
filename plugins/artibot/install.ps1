@@ -169,17 +169,49 @@ function Initialize-Directories {
 # ---------------------------------------------------------------------------
 # Copy helpers
 # ---------------------------------------------------------------------------
+# Byte-exact comparison — parity with `cmp -s` in install.sh install_rules().
+function Test-FileContentEqual {
+  param([string]$PathA, [string]$PathB)
+  try {
+    $a = [System.IO.File]::ReadAllBytes($PathA)
+    $b = [System.IO.File]::ReadAllBytes($PathB)
+  } catch {
+    return $false
+  }
+  if ($a.Length -ne $b.Length) { return $false }
+  for ($i = 0; $i -lt $a.Length; $i++) {
+    if ($a[$i] -ne $b[$i]) { return $false }
+  }
+  return $true
+}
+
+# -Preserve is for rules/ ONLY (see Install-Assets). Agents and commands must
+# keep overwriting unconditionally or a plugin update would never reach them.
+# Under -Preserve, an installed file that diverges from the repo copy is left
+# alone and the repo version is parked as <name>.md.artibot-new. That suffix
+# does not end in `.md`, so the rules loader and the verify count ignore it.
 function Copy-MdFiles {
-  param([string]$SrcDir, [string]$DstDir, [string]$Label)
+  param([string]$SrcDir, [string]$DstDir, [string]$Label, [switch]$Preserve)
   if (-not (Test-Path $SrcDir)) { return }
   $count = 0
+  $preserved = 0
   Get-ChildItem -Path $SrcDir -Filter '*.md' -File | ForEach-Object {
     if ($DryRun) { $count++; return }
+    $dst = Join-Path $DstDir $_.Name
+    if ($Preserve -and (Test-Path $dst) -and -not (Test-FileContentEqual $_.FullName $dst)) {
+      Copy-Item -Path $_.FullName -Destination "$dst.artibot-new" -Force
+      Write-Warn2 "  Kept your edited $($_.Name) - new version saved as $($_.Name).artibot-new"
+      $preserved++
+      return
+    }
     Copy-Item -Path $_.FullName -Destination $DstDir -Force
     $count++
   }
   $prefix = if ($DryRun) { '[dry-run] would install' } else { 'installed' }
   Write-Log "$Label ${prefix}: $count files -> $DstDir"
+  if ($preserved -gt 0) {
+    Write-Log "  Locally edited $Label kept as-is: $preserved (review the .artibot-new files to merge)"
+  }
 }
 
 function Copy-Tree {
@@ -241,7 +273,8 @@ function Install-Assets {
   Write-Log "Hooks & scripts installed -> $ArtibotDir"
 
   # Rules: into ~/.claude/rules/artibot (auto-activate on file access)
-  Copy-MdFiles -SrcDir (Join-Path $ScriptDir 'rules') -DstDir (Join-Path $ClaudeDir 'rules\artibot') -Label 'Rules'
+  # -Preserve: rules are hand-edited personal instructions, never clobber them.
+  Copy-MdFiles -SrcDir (Join-Path $ScriptDir 'rules') -DstDir (Join-Path $ClaudeDir 'rules\artibot') -Label 'Rules' -Preserve
 }
 
 # ---------------------------------------------------------------------------

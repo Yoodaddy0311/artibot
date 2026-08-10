@@ -166,6 +166,21 @@ if [ -n "$HAS_RL" ]; then
   fi
   [ -n "$RLSEG" ] && L2="${L2}  ${RLSEG}"
 fi
+# zero-result guard counter (parity with statusline.sh). Hidden entirely when the
+# counter file is absent — "file missing" ≠ "fired 0 times". HOME-anchored because
+# the writer (zero-result-guard.js#counterPath) builds from getHomeDir, which
+# prefers USERPROFILE over HOME; the two normally agree, and when they don't the
+# file is not found and the segment hides — the fail-safe direction.
+# Validation mirrors statusline.sh#_zg_label exactly so both renderers give the
+# same answer: only a finite, non-negative, safe-integer `fired` renders. No jq
+# branch here on purpose — this file is node-only throughout, and a lone jq
+# parser would be the odd one out; if node is missing the segment simply hides.
+ZG=''
+ZGFILE="$HOME/.claude/artibot/zero-result-guard-counter.json"
+if [ -f "$ZGFILE" ] && command -v node >/dev/null 2>&1; then
+  ZG=$(ARTIBOT_ZG_JSON="$(cat "$ZGFILE" 2>/dev/null)" node -e "try{const v=JSON.parse(process.env.ARTIBOT_ZG_JSON||'').fired;if(typeof v==='number'&&Number.isFinite(v)&&v>=0){const f=Math.floor(v);if(Number.isSafeInteger(f))process.stdout.write(String(f))}}catch{}" 2>/dev/null || true)
+fi
+[ -n "$ZG" ] && L2="${L2}  ${C_ACC}🛡 ${ZG}${R}"
 [ -n "$VER" ] && L2="${L2}  ${C_DIM}${GL_WL}v${VER}${GL_WR}${R}"
 [ -n "$LABEL" ] && L2="${L2}  ${C_DIM}${LABEL}${R}"
 

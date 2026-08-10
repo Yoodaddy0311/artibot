@@ -184,6 +184,120 @@ describe('scoreExperience()', () => {
 });
 
 // ---------------------------------------------------------------------------
+// errorRate polarity lock
+//
+// `errorRate` carries RELIABILITY (1 - error ratio), not an error ratio:
+// 1.0 = flawless, 0 = worst. It is summed with a positive weight and sorted
+// descending, so inverting any single branch misranks that branch's
+// experiences. On 2026-08-10 two reviewers read only the field name and
+// proposed inverting the default branch. These tests exist to turn that
+// proposal red instead of letting it land.
+// ---------------------------------------------------------------------------
+describe('errorRate polarity lock', () => {
+  // Each entry sweeps one branch's "goodness" input from worst to best.
+  const branchSweeps = [
+    {
+      name: 'tool + direct score',
+      build: (g) => makeExp('tool', 'Read', { score: g }),
+      inputs: [0, 0.2, 0.5, 0.51, 0.8, 1],
+    },
+    {
+      name: 'tool + structured calls/successes',
+      build: (g) => makeExp('tool', 'Read', { calls: 10, successes: Math.round(g * 10) }),
+      inputs: [0, 0.3, 0.7, 1],
+    },
+    {
+      name: 'team + successRate',
+      build: (g) => makeExp('team', 'deploy', { successRate: g, size: 3 }),
+      inputs: [0, 0.25, 0.6, 1],
+    },
+    {
+      name: 'default (unknown type) + direct score',
+      build: (g) => makeExp('agent', 'review', { score: g }),
+      inputs: [0, 0.25, 0.6, 1],
+    },
+  ];
+
+  it('never decreases errorRate as an experience gets better, in any branch', () => {
+    for (const { name, build, inputs } of branchSweeps) {
+      const rates = inputs.map((g) => scoreExperience(build(g)).errorRate);
+      for (let i = 1; i < rates.length; i += 1) {
+        expect(
+          rates[i],
+          `${name}: errorRate dropped from ${rates[i - 1]} to ${rates[i]} ` +
+            `when goodness rose ${inputs[i - 1]} -> ${inputs[i]}`,
+        ).toBeGreaterThanOrEqual(rates[i - 1]);
+      }
+      // Guard against a branch that is flat everywhere: a constant would pass
+      // the monotonicity check above while carrying no polarity at all.
+      expect(rates[rates.length - 1], `${name}: sweep is flat`).toBeGreaterThan(rates[0]);
+    }
+  });
+
+  it('scores a best-case experience above a worst-case one, in every branch', () => {
+    for (const { name, build, inputs } of branchSweeps) {
+      const worst = scoreExperience(build(inputs[0])).errorRate;
+      const best = scoreExperience(build(inputs[inputs.length - 1])).errorRate;
+      expect(best, `${name}: best(${best}) must beat worst(${worst})`).toBeGreaterThan(worst);
+      expect(best).toBeGreaterThanOrEqual(0.9);
+      expect(worst).toBeLessThanOrEqual(0.1);
+    }
+  });
+
+  it('tracks directScore upward for unknown types (agent, self-evaluation)', () => {
+    // This is the exact branch two reviewers proposed inverting.
+    expect(scoreExperience(makeExp('agent', 'review', { score: 0.9 })).errorRate)
+      .toBeCloseTo(0.9, 5);
+    expect(scoreExperience(makeExp('self-evaluation', 'x', { score: 0.1 })).errorRate)
+      .toBeCloseTo(0.1, 5);
+  });
+
+  it('puts known and unknown types on the same side of neutral for the same score', () => {
+    const high = 0.9;
+    const low = 0.2;
+    expect(scoreExperience(makeExp('tool', 'Read', { score: high })).errorRate)
+      .toBeGreaterThan(0.5);
+    expect(scoreExperience(makeExp('agent', 'review', { score: high })).errorRate)
+      .toBeGreaterThan(0.5);
+    expect(scoreExperience(makeExp('tool', 'Read', { score: low })).errorRate)
+      .toBeLessThan(0.5);
+    expect(scoreExperience(makeExp('agent', 'review', { score: low })).errorRate)
+      .toBeLessThan(0.5);
+  });
+
+  it('holds the fixed-value branches in worst < neutral < best order', () => {
+    const failure = scoreExperience(makeExp('error', 'timeout', { recoverable: true })).errorRate;
+    const testsFailed = scoreExperience(makeExp('success', 'build', { testsPass: false })).errorRate;
+    const noSignal = scoreExperience(makeExp('success', 'build', {})).errorRate;
+    const testsPassed = scoreExperience(makeExp('success', 'build', { testsPass: true })).errorRate;
+    const unknownNoScore = scoreExperience(makeExp('custom', 'misc', {})).errorRate;
+
+    expect(failure).toBe(0);
+    expect(failure).toBeLessThan(testsFailed);
+    expect(testsFailed).toBeLessThan(noSignal);
+    expect(noSignal).toBeLessThan(testsPassed);
+    expect(testsPassed).toBe(1.0);
+    expect(unknownNoScore).toBe(0.5);
+  });
+
+  it('lets a higher errorRate win the GRPO ranking, all else equal', () => {
+    // Same type, duration and filesModified, so success/speed/resourceEfficiency
+    // are identical and errorRate (via testsPass) is the only free variable.
+    const passed = makeExp('success', 'build', {
+      duration: 5000, filesModified: 3, testsPass: true,
+    });
+    const failed = makeExp('success', 'build', {
+      duration: 5000, filesModified: 3, testsPass: false,
+    });
+    const { entries, bestEntry } = grpoRankGroup([failed, passed]);
+
+    expect(entries[0].scores.errorRate).toBeGreaterThan(entries[1].scores.errorRate);
+    expect(bestEntry.experience.data.testsPass).toBe(true);
+    expect(bestEntry.relativeAdvantage).toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // grpoRankGroup()
 // ---------------------------------------------------------------------------
 describe('grpoRankGroup()', () => {

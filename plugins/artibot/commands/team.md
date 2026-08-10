@@ -137,8 +137,28 @@ Spawn ALL teammates in a single message (parallel):
 ```
 Task(subagent_type="artibot:{agent-type}", team_name="team-*", name="{role}",
      /* model: model-policy 해석 — 구현/검토 역할 모두 frontier 티어 (fable 마이그레이션 이후) */
-     prompt="[DEV Protocol 준수]\n\n작업:\n{specific work unit}\n\n완료 후 결과를 리더에게 보고해주세요.")
+     prompt="[DEV Protocol 준수]\n\n작업:\n{specific work unit}\n\n{보고 계약}")
 ```
+
+### 보고 계약 (MANDATORY — 모든 스폰 프롬프트의 `{보고 계약}` 자리에 그대로 삽입)
+
+리더는 아래 6줄을 **모든** 팀원 스폰 프롬프트 말미에 넣는다. `{리더 이름}` 은 리더 자신의
+팀원 이름으로 치환한다(고정 문자열이 아니다 — 팀마다 다르다).
+
+```
+[보고 계약]
+- 보고는 반드시 SendMessage(to="{리더 이름}") 로 보낸다. 일반 텍스트 출력은 리더에게 전달되지 않는다.
+- 수치에는 분모와 측정 시각을 붙인다: "3건"(X) → "38건 중 3건, {측정시각} 기준"(O).
+- 발생률과 도달률을 구분한다: "실패 38건 중 7.9%가 이 훅에 도달" ≠ "실패율 7.9%".
+- 근거는 file:line 으로 인용한다(DEV Protocol). 동시 편집 중인 트리에서는 심볼명과 측정 시각을 함께 적어라 — 줄번호는 남이 편집하면 썩는다.
+- 내 인용·지시·전제가 틀렸으면 그대로 따르지 말고 틀렸다고 보고하라. 교정도 정답이다.
+- 없는 것을 고치지 마라. 구멍이 없으면 "없다"고 보고하는 것도 완결된 결과다.
+- 마지막에 `미확인:` 줄을 반드시 포함한다. 확인 못 한 것을 추측으로 메우지 마라. 없으면 "미확인: 없음".
+```
+
+> 채널 명시 근거: 2026-07-27 에 **에이전트 7명 전원**이 작업을 끝내고도 일반 텍스트로 출력해
+> 리더에게 전달되지 않았다. 리더는 유휴 신호만 보고 "착수 실패"로 오판할 뻔했다. **유휴 ≠ 미착수.**
+> (`rules/verification-discipline.md` §8)
 
 ### Phase 3: PARALLEL EXECUTION (Teammates)
 - Create tasks with NO blockedBy (all parallel):
@@ -204,7 +224,7 @@ Task(subagent_type="code-reviewer", team_name="team-*", name="checker-{n}",
      /* model: model-policy 해석 — 역할 frontier 티어 */
      prompt="[Cross-check Mode]\n\n{teammate-A}의 작업물을 검증해주세요.
      변경 파일: {list}\n요구사항: {original requirements}\n
-     코드 동작, 테스트 통과, 리그레션 없음, 프로젝트 패턴 준수 여부 확인 후 APPROVE 또는 REQUEST_CHANGES 보고.")
+     코드 동작, 테스트 통과, 리그레션 없음, 프로젝트 패턴 준수 여부 확인 후 APPROVE 또는 REQUEST_CHANGES 보고.\n\n{보고 계약}")
 ```
 
 **Cross-check assignment rule**: Teammate A checks Teammate B's work, B checks C's, C checks A's (circular).
@@ -227,7 +247,7 @@ Task(subagent_type="artibot:code-reviewer", team_name="team-*", name="inspector"
 1. {teammate-1}: {작업 내용} — 변경 파일: {files}
 2. {teammate-2}: {작업 내용} — 변경 파일: {files}
 
-검수 체크리스트 5개 항목 전부 확인 후 INSPECTION REPORT 제출.")
+검수 체크리스트 5개 항목 전부 확인 후 INSPECTION REPORT 제출.\n\n{보고 계약}")
 ```
 
 **검수 체크리스트 (5개 항목 — 하나도 건너뛰지 마라):**
@@ -373,7 +393,7 @@ When the user gives a new task to a persistent team:
    ```
    Task(subagent_type="artibot:{new-agent-type}", team_name="team-*", name="{role}",
         /* model: model-policy 해석 — 구현 역할은 frontier 티어 */
-        prompt="[DEV Protocol 준수]\n\n작업:\n{new work unit}\n\n완료 후 결과를 리더에게 보고해주세요.")
+        prompt="[DEV Protocol 준수]\n\n작업:\n{new work unit}\n\n{보고 계약}")
    ```
 4. **팀원 교체는 다음 작업 배정 시에만** — 현재 작업 완료 후 임의 셧다운 금지 (Token Conservation Rule)
 5. Proceed through Phase 3 → 4 → 5 as normal
@@ -417,6 +437,7 @@ This runs the original flow: Phase 1 through 6, with automatic shutdown after re
 - **작업 완료 후 팀원을 임의로 셧다운** — 재소환 토큰 낭비 (idle 유지가 더 저렴)
 - **"혹시 모르니까" 셧다운** — 애매하면 유지가 정답
 - **검증 없이 제안 쏟아내기** — 사용자가 재검증을 지시해야만 걸러지는 건 게이트 부재 (Phase 0 VALIDATE 필수)
+- **보고 계약 없이 스폰** — 채널·분모·`미확인:` 이 빠진 프롬프트는 보고가 리더에 도달하지 않거나 반증 불가능한 수치를 낳는다
 
 ## Fable opt-in
 

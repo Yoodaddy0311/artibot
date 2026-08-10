@@ -379,13 +379,17 @@ describe('matchDuplicatedPathPrefix', () => {
 // buildAdvice — the allowlist dispatcher. Silence is the default.
 // ---------------------------------------------------------------------------
 describe('buildAdvice allowlist', () => {
-  it('exposes exactly the one shipped rule id', () => {
+  it('exposes exactly the shipped rule ids', () => {
     // duplicated-path-prefix is deliberately NOT here. Measured 2026-08-10 via
     // raw hook-stdin dumps: <tool_use_error> failures (Grep/Read "Path does not
     // exist", Edit "String to replace not found", PreToolUse blocks) emit no
     // PostToolUse and no PostToolUseFailure event, so that rule can never fire.
     // If a future platform version delivers such a payload, re-add it here.
-    expect(ADVICE_RULE_IDS).toEqual(['bash-cd-relative']);
+    //
+    // bash-grep-zero-result joined in WP-3 B-2: a `grep`/`rg` that exits 1 with
+    // no output is a zero-result identifier lookup, which is the Bash-side twin
+    // of the Grep/Glob tool guard in scripts/hooks/zero-result-guard.js.
+    expect(ADVICE_RULE_IDS).toEqual(['bash-cd-relative', 'bash-grep-zero-result']);
   });
 
   it('stays silent on a duplicated-prefix path failure (rule not wired — unreachable)', () => {
@@ -421,13 +425,23 @@ describe('buildAdvice allowlist', () => {
         path.resolve(path.dirname(advisorPath), '..', 'utils', 'index.js')).href))
       .replace("'../../lib/core/hook-utils.js'", JSON.stringify(pathToFileURL(
         path.resolve(path.dirname(advisorPath), '..', '..', 'lib', 'core', 'hook-utils.js')).href))
+      .replace("'./zero-result-guard.js'", JSON.stringify(pathToFileURL(
+        path.resolve(path.dirname(advisorPath), 'zero-result-guard.js')).href))
       // Drop the entry point: the variant is imported for buildAdvice only, and
-      // the real main() would block on stdin.
-      .replace(/^main\(\)\.catch\([\s\S]*?\);\s*$/m, '');
+      // the real main() would block on stdin. The call sits INSIDE the
+      // `if (isDirectRun) { … }` block, so the whole block goes — an earlier
+      // version anchored `^main\(\)\.catch` at line start, never matched the
+      // indented call, and was a permanent no-op whose companion assertion
+      // passed vacuously (cross-review finding 2).
+      .replace(/\nif \(isDirectRun\) \{[\s\S]*?\n\}/, '\n');
 
     expect(emptied).not.toBe(src);
     expect(emptied).toContain('const ADVICE_RULES = [];');
-    expect(emptied).not.toMatch(/^main\(\)\.catch/m);
+    // The strip must actually remove something. Asserting only the absence of
+    // a pattern lets a non-matching regex look like a successful strip, which
+    // is exactly how the previous no-op survived.
+    expect(src).toContain('main().catch');
+    expect(emptied).not.toContain('main().catch');
 
     const dir = mkdtempSync(path.join(tmpdir(), 'advisor-empty-'));
     try {

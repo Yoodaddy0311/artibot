@@ -356,6 +356,47 @@ if [ -f "$TOKEN_FILE" ]; then
   fi
 fi
 
+# ─── Zero-result guard counter ──────────────────────────────────────────────
+# Segment is HIDDEN when the counter file is absent — "file missing" and "fired
+# 0 times" are different states and must not render identically.
+#
+# The path is HOME-anchored rather than PLUGIN_ROOT-anchored like the segments
+# above. The writer (zero-result-guard.js#counterPath) builds its path from
+# lib/core/platform.js#getHomeDir, which prefers USERPROFILE over HOME, while
+# this reader uses bash `$HOME`. Those normally resolve to the same directory
+# but nothing structurally guarantees it; when they diverge the file simply is
+# not found and the segment hides, which is the fail-safe direction.
+# PLUGIN_ROOT was rejected because it matches only for the install.sh layout
+# (`~/.claude/artibot`) and misses for a native marketplace install, where the
+# guard runs from the versioned plugin cache.
+#
+# Deliberately NOT built on _json_file_get: its `|| echo "$default"` turns a
+# corrupt or unreadable file into a plausible-looking `0`, which is a confident
+# wrong state.
+#
+# Validation contract, identical in both backends so they never disagree:
+# render `floor(fired)` only when `fired` is a real number that is finite,
+# non-negative, and still a safe integer after flooring. Everything else —
+# a string, null, an object, a missing key, NaN/Infinity, a negative count, or
+# an absurd magnitude like 1e999 — emits nothing and hides the segment. A
+# contaminated counter must never render as a confident `0`; only a genuine
+# `fired: 0` renders `0`.
+_zg_label() {
+  local file="$1"
+  if command -v jq >/dev/null 2>&1; then
+    jq -r 'if (.fired|type) == "number" and (.fired|isnan|not) and (.fired|isinfinite|not) and .fired >= 0 and (.fired|floor) <= 9007199254740991 then (.fired|floor|tostring) else empty end' "$file" 2>/dev/null || true
+  elif command -v node >/dev/null 2>&1; then
+    ARTIBOT_ZG_JSON="$(cat "$file" 2>/dev/null || true)" node -e "try{const v=JSON.parse(process.env.ARTIBOT_ZG_JSON||'').fired;if(typeof v==='number'&&Number.isFinite(v)&&v>=0){const f=Math.floor(v);if(Number.isSafeInteger(f))process.stdout.write(String(f))}}catch{}" 2>/dev/null || true
+  fi
+}
+
+ZG_LABEL=''
+ZG_FILE="$HOME/.claude/artibot/zero-result-guard-counter.json"
+if [ -f "$ZG_FILE" ]; then
+  ZG_RAW=$(_zg_label "$ZG_FILE")
+  if [ -n "$ZG_RAW" ]; then ZG_LABEL="🛡 ${ZG_RAW}"; fi
+fi
+
 # ─── Account badge (local-only; DATA POLICY: no network) ────────────────────
 # Cached label from ~/.claude.json oauthAccount, refreshed every 24h. Shares
 # runtime/account-badge.json with statusline-themed.sh so both variants render
@@ -445,6 +486,9 @@ LINE2="${LINE2}  | ⚡ ${COG_MODE}"
 
 # Token usage segment
 [ -n "$TOKEN_LABEL" ] && LINE2="${LINE2}  | ${TOKEN_LABEL}"
+
+# Zero-result guard segment (parity with statusline-themed.sh)
+[ -n "$ZG_LABEL" ] && LINE2="${LINE2}  | ${ZG_LABEL}"
 
 # Usage-limit gauge segment: "5h N% ~HH:MM · 7d N%" (omitted when the CLI
 # doesn't send rate_limits). Colors escalate green → yellow → red per bucket.

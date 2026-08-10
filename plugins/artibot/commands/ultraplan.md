@@ -46,13 +46,31 @@ DIVERGE(발산) 엔진을 돌리기 **전에** "이 작업이 진짜 필요한�
 - 코드베이스 컨텍스트도 수집(`/plan` Phase 2와 동일): 기존 패턴·영향 파일·테스트 커버리지·의존 그래프.
 - 산출: **근거 노트**(출처/사실/제약) — 이후 모든 단계의 입력.
 
+### 보고 계약 (MANDATORY — 모든 스폰 프롬프트 말미에 삽입)
+
+아래 블록을 `{보고 계약}` 자리에 그대로 넣는다. `{리더 이름}` 은 리더 자신의 이름으로 치환한다.
+**`commands/team.md` 의 것과 문자 단위로 동일해야 한다** — /team 이 아닌 경로로 뜬 팀원이 더 약한
+계약으로 일하면 표준이 후퇴 기준선이 된다. 드리프트는
+`tests/commands/report-contract-parity.test.js` 가 잡는다.
+
+```
+[보고 계약]
+- 보고는 반드시 SendMessage(to="{리더 이름}") 로 보낸다. 일반 텍스트 출력은 리더에게 전달되지 않는다.
+- 수치에는 분모와 측정 시각을 붙인다: "3건"(X) → "38건 중 3건, {측정시각} 기준"(O).
+- 발생률과 도달률을 구분한다: "실패 38건 중 7.9%가 이 훅에 도달" ≠ "실패율 7.9%".
+- 근거는 file:line 으로 인용한다(DEV Protocol). 동시 편집 중인 트리에서는 심볼명과 측정 시각을 함께 적어라 — 줄번호는 남이 편집하면 썩는다.
+- 내 인용·지시·전제가 틀렸으면 그대로 따르지 말고 틀렸다고 보고하라. 교정도 정답이다.
+- 없는 것을 고치지 마라. 구멍이 없으면 "없다"고 보고하는 것도 완결된 결과다.
+- 마지막에 `미확인:` 줄을 반드시 포함한다. 확인 못 한 것을 추측으로 메우지 마라. 없으면 "미확인: 없음".
+```
+
 ### Phase 2 — DIVERGE (다관점 의회, 병렬)
 서로 다른 렌즈의 planner/architect를 **병렬 소환**(`--lenses` 개, 기본 3). 각자 독립 계획 후보를 낸다:
-- `Task(subagent_type="artibot:planner", name="lens-mvp", prompt="[ULTRAPLAN 렌즈: MVP·최단경로] 근거:{ground}\n작업:{task}\n가장 빠르게 가치 내는 단계 계획")`
+- `Task(subagent_type="artibot:planner", name="lens-mvp", prompt="[ULTRAPLAN 렌즈: MVP·최단경로] 근거:{ground}\n작업:{task}\n가장 빠르게 가치 내는 단계 계획\n\n{보고 계약}")`
   <!-- model: model-policy 해석 — 역할 `frontier`; fable opt-in 게이트 활성(현재 기본) 시 `deep-async` 별칭 선택 가능 -->
-- `Task(subagent_type="artibot:architect", name="lens-risk", prompt="[ULTRAPLAN 렌즈: 위험·견고성 우선] ... 실패모드·롤백·테스트를 최우선으로 한 계획")`
+- `Task(subagent_type="artibot:architect", name="lens-risk", prompt="[ULTRAPLAN 렌즈: 위험·견고성 우선] ... 실패모드·롤백·테스트를 최우선으로 한 계획\n\n{보고 계약}")`
   <!-- model: model-policy 해석 — 역할 `frontier`; fable opt-in 게이트 활성(현재 기본) 시 `deep-async` 별칭 선택 가능 -->
-- `Task(subagent_type="artibot:architect", name="lens-arch", prompt="[ULTRAPLAN 렌즈: 장기 아키텍처] ... 2년 뒤 유지보수·확장성·기술부채 최소화 계획")`
+- `Task(subagent_type="artibot:architect", name="lens-arch", prompt="[ULTRAPLAN 렌즈: 장기 아키텍처] ... 2년 뒤 유지보수·확장성·기술부채 최소화 계획\n\n{보고 계약}")`
   <!-- model: model-policy 해석 — 역할 `frontier`; fable opt-in 게이트 활성(현재 기본) 시 `deep-async` 별칭 선택 가능 -->
 
 ### Phase 3 — JUDGE & SYNTHESIZE (종합)
@@ -62,7 +80,7 @@ DIVERGE(발산) 엔진을 돌리기 **전에** "이 작업이 진짜 필요한�
 - **결정 기록 (조건부 — 스팸 방지)**: 이 단계에서 **2개 이상의 실선택지를 실제로 비교**해 하나를 채택한 경우에만 `ensureADR()`로 결정을 기록한다 (아래 "Artifacts Integration" 참조). 후보가 사실상 단일이거나 명백한 한 길뿐이면 ADR을 만들지 않는다. ADR은 ultraplan에서도 **기본 자동이 아니라 "결정 감지 시"만**이다.
 
 ### Phase 4 — ADVERSARIAL REVIEW (적대적 검증)  ·  `--no-adversarial` 시 스킵
-공격자 관점 검증: `Task(subagent_type="artibot:code-reviewer", name="plan-critic", prompt="[Plan 적대 검증] 이 계획의 순환 의존, 누락된 테스트 단계, 숨은 비용, 2년 뒤 기술부채, 실존하지 않는 파일 참조, 비현실적 의존 순서를 전부 찾아내라")`
+공격자 관점 검증: `Task(subagent_type="artibot:code-reviewer", name="plan-critic", prompt="[Plan 적대 검증] 이 계획의 순환 의존, 누락된 테스트 단계, 숨은 비용, 2년 뒤 기술부채, 실존하지 않는 파일 참조, 비현실적 의존 순서를 전부 찾아내라\n\n{보고 계약}")`
 <!-- model: model-policy 해석 — 역할 `balanced`(검증·읽기 전용 작업) -->.
 발견 항목은 종합안에 반영(재조정) 후 통과시킨다.
 

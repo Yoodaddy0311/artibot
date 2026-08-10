@@ -127,9 +127,41 @@ describe('_posttooluse-dispatcher (integration)', () => {
     }
   });
 
-  it('registers all 10 wrapped hooks', async () => {
+  it('registers all 11 wrapped hooks', async () => {
     const mod = await import('../../scripts/hooks/_posttooluse-dispatcher.js');
-    expect(mod.HOOKS).toHaveLength(10);
+    expect(mod.HOOKS).toHaveLength(11);
+  });
+
+  it('selectHooks() routes Grep and Glob to zero-result-guard + tool-tracker', async () => {
+    const mod = await import('../../scripts/hooks/_posttooluse-dispatcher.js');
+    for (const tool of ['Grep', 'Glob']) {
+      const selected = mod.selectHooks(tool).map((h) => h.name);
+      expect(selected).toContain('zero-result-guard');
+      expect(selected).toContain('tool-tracker');
+      expect(selected).not.toContain('quality-gate');
+      expect(selected).not.toContain('post-bash');
+    }
+    // The guard must not reach tools whose responses it cannot interpret.
+    expect(mod.selectHooks('Edit').map((h) => h.name)).not.toContain('zero-result-guard');
+  });
+
+  // Positive end-to-end assertion: the guard's advice must survive the
+  // dispatcher's spawn + mergeResults path, not merely exist in isolation.
+  // `No matches found` is the string a live Grep returns for a zero-result
+  // content-mode query (measured 2026-08-10).
+  it('surfaces zero-result-guard advice through the merged dispatcher output', () => {
+    const { stdout, status } = runDispatcher({
+      tool: 'Grep',
+      tool_name: 'Grep',
+      tool_input: { pattern: 'resolveModel', path: 'src/', output_mode: 'content' },
+      tool_response: 'No matches found',
+    });
+    expect(status).toBe(0);
+    const out = JSON.parse(stdout);
+    expect(out.hookSpecificOutput.hookEventName).toBe('PostToolUse');
+    expect(out.hookSpecificOutput.additionalContext).toContain('[artibot:zero-result-guard]');
+    expect(out.hookSpecificOutput.additionalContext).toContain('resolveModel');
+    expect(out.decision).toBeUndefined();
   });
 
   it('selectHooks() routes Edit tool to quality-gate, post-edit-format, etc. + universal tool-tracker', async () => {

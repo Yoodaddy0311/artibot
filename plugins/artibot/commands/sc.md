@@ -119,6 +119,24 @@ Target delegation ratio: **Simple ~25% | Sub-Agent ~35% | Team ~40%**
 | Evaluation/audit keywords | "평가", "감사", "audit", "evaluate", "점검", "검증", "verify" |
 | Multi-file hints | "여러 파일", "multiple files", "모듈별", "디렉토리별" |
 
+### 보고 계약 (MANDATORY — 모든 위임 프롬프트 말미에 삽입)
+
+아래 블록을 `{보고 계약}` 자리에 그대로 넣는다. `{리더 이름}` 은 리더 자신의 이름으로 치환한다.
+**`commands/team.md` 의 것과 문자 단위로 동일해야 한다** — /team 이 아닌 경로로 뜬 에이전트가 더 약한
+계약으로 일하면 표준이 후퇴 기준선이 된다. 드리프트는
+`tests/commands/report-contract-parity.test.js` 가 잡는다.
+
+```
+[보고 계약]
+- 보고는 반드시 SendMessage(to="{리더 이름}") 로 보낸다. 일반 텍스트 출력은 리더에게 전달되지 않는다.
+- 수치에는 분모와 측정 시각을 붙인다: "3건"(X) → "38건 중 3건, {측정시각} 기준"(O).
+- 발생률과 도달률을 구분한다: "실패 38건 중 7.9%가 이 훅에 도달" ≠ "실패율 7.9%".
+- 근거는 file:line 으로 인용한다(DEV Protocol). 동시 편집 중인 트리에서는 심볼명과 측정 시각을 함께 적어라 — 줄번호는 남이 편집하면 썩는다.
+- 내 인용·지시·전제가 틀렸으면 그대로 따르지 말고 틀렸다고 보고하라. 교정도 정답이다.
+- 없는 것을 고치지 마라. 구멍이 없으면 "없다"고 보고하는 것도 완결된 결과다.
+- 마지막에 `미확인:` 줄을 반드시 포함한다. 확인 못 한 것을 추측으로 메우지 마라. 없으면 "미확인: 없음".
+```
+
 ### Delegation Flow for Team Requests
 
 When ANY team trigger matches:
@@ -127,7 +145,7 @@ When ANY team trigger matches:
 1. Tell the user: "팀 오케스트레이션으로 처리합니다. 백그라운드에서 진행됩니다."
 2. Task(
      subagent_type="artibot:orchestrator",
-     prompt="[user's original request with full context]",
+     prompt="[user's original request with full context]\n\n{보고 계약}",
      run_in_background=true,
      description="Team orchestration: [brief summary]"
    )
@@ -143,7 +161,7 @@ When no team trigger matches AND complexity is Moderate (1-2 domains, 3-5 steps)
 1. Tell the user: "서브 에이전트에게 위임합니다. 백그라운드에서 진행됩니다."
 2. Task(
      subagent_type=[matched agent type],
-     prompt="[user's request with context]",
+     prompt="[user's request with context]\n\n{보고 계약}",
      run_in_background=true,
      description="[brief summary]"
    )

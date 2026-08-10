@@ -37,7 +37,9 @@ const EXPECTED_HANDLER_COUNTS = {
   // UserPromptSubmit slot to suggest /adr and /migrate from natural-language
   // prompts (alongside the existing auto-team-trigger and autopilot-nlu).
   UserPromptSubmit: 7,
-  PostToolUse: 10,
+  // 10 -> 11: zero-result-guard.js joined the slot on the Grep/Glob route to
+  // nudge on identifier lookups that returned nothing (WP-3 B-1).
+  PostToolUse: 11,
   // 8 → 6: blindspot-check.js + teach-back.js left the Stop slot when the
   // post-work passes were converted to on-demand slash commands
   // (commands/blindspot.md, commands/teach-back.md). No more auto-fire at Stop.

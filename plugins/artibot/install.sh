@@ -337,16 +337,36 @@ install_plugin_cache() {
 # ──────────────────────────────────────────────
 # Copy Rules (project-level .claude/rules/)
 # ──────────────────────────────────────────────
+# Non-destructive: rules files are meant to be hand-edited by the user (they are
+# personal always-on instructions), so an install must never silently overwrite
+# local edits. When the installed copy diverges from the repo copy we park the
+# repo version as <name>.md.artibot-new and leave the user's file alone.
+# `.artibot-new` deliberately does not end in `.md`: verify_install (:972) and
+# Claude Code's rules loader both glob `*.md`, so parked files are inert.
 install_rules() {
   local count=0
+  local preserved=0
   if [ -d "${SCRIPT_DIR}/rules" ]; then
     for rule in "${SCRIPT_DIR}"/rules/*.md; do
       [ -f "$rule" ] || continue
-      cp "$rule" "${CLAUDE_DIR}/rules/artibot/"
+      local name dest
+      name="$(basename "$rule")"
+      dest="${CLAUDE_DIR}/rules/artibot/${name}"
+      # A missing `cmp` makes this branch true, which errs toward preserving.
+      if [ -f "$dest" ] && ! cmp -s "$rule" "$dest"; then
+        cp "$rule" "${dest}.artibot-new"
+        warn "  Kept your edited ${name} — new version saved as ${name}.artibot-new"
+        preserved=$((preserved + 1))
+        continue
+      fi
+      cp "$rule" "$dest"
       count=$((count + 1))
     done
   fi
   log "Rules installed: ${count} files → ~/.claude/rules/artibot/"
+  if [ "$preserved" -gt 0 ]; then
+    log "  Locally edited rules kept as-is: ${preserved} (review the .artibot-new files to merge)"
+  fi
   log "  These rules auto-activate when Claude reads matching files (no /sc needed)"
 }
 

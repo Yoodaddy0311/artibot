@@ -81,9 +81,20 @@ import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { parseJSON, readStdin, writeStdout } from '../utils/index.js';
 import { createErrorHandler, extractToolName } from '../../lib/core/hook-utils.js';
+// The Grep/Glob tool guard owns both the identifier predicate and the shared
+// firing counter; this file is its Bash-channel twin and reuses them rather
+// than keeping a second copy that can drift. Importing it is safe — it carries
+// a direct-run guard, so nothing executes on import.
+import { isIdentifierLike, recordFire } from './zero-result-guard.js';
 
 /** Prefix for every emitted advice line. */
 const ADVICE_PREFIX = '[artibot:tool-advice]';
+
+/**
+ * Rule id whose firings are counted on the shared `b2` channel. Named here so
+ * the counter attribution in main() cannot drift from {@link ADVICE_RULES}.
+ */
+const ZERO_RESULT_RULE_ID = 'bash-grep-zero-result';
 
 // ---------------------------------------------------------------------------
 // Payload extraction (defensive — see module doc)
@@ -382,6 +393,144 @@ export function matchDuplicatedPathPrefix({ errorText, inputPath, cwd }) {
 }
 
 // ---------------------------------------------------------------------------
+// Rule 3 — `grep`/`rg` exited 1 with no output: a zero-result identifier lookup
+//
+// The Bash-channel twin of scripts/hooks/zero-result-guard.js. Same failure
+// ("0 hits therefore absent"), different door: there the model used the Grep
+// TOOL, here it shelled out.
+//
+// LIMITS OF THIS CHANNEL (do not read a non-firing as "the search was sound"):
+//   - `grep ... || true` / `|| echo none` exits 0, so it never reaches this
+//     hook at all. Masked zero-results are invisible on both channels.
+//   - Only Bash EXECUTION failures arrive here — 3 of 38 measured failures
+//     (7.9%), baseline 2026-08-10T00:47Z.
+//   - A pipeline or `&&` chain is rejected outright: the reported exit code
+//     belongs to the last stage, so `grep foo x | head` exiting 0 says nothing
+//     about whether grep matched.
+// ---------------------------------------------------------------------------
+
+/** grep/rg exit 1 = "no lines selected". 2 = a real error; 0 = matched. */
+const GREP_NO_MATCH_EXIT_CODE = 1;
+
+/** Only these leading binaries. `git grep` and pipelines are deliberately out. */
+const GREP_BINARIES = new Set(['grep', 'rg']);
+
+/** Any of these means the exit code no longer belongs to the leading command. */
+const SHELL_COMPOSITION_RE = /[;|&]/;
+
+/** Leading `Exit code N` line the Bash tool prepends to every failure text. */
+const EXIT_CODE_LINE_RE = /^Exit code (\d+)[^\n]*\n?/;
+
+/**
+ * Flags that consume the FOLLOWING token as their value. Without this the
+ * value would be mistaken for the search pattern (`grep -A 3 foo` → "3").
+ * Allowlist: an unknown flag is assumed valueless, which at worst makes the
+ * rule read the wrong token and then stay silent because it is not
+ * identifier-shaped.
+ */
+const VALUE_CONSUMING_FLAGS = new Set([
+  '-e', '-f', '-m', '-A', '-B', '-C', '-d', '-g', '-t', '-T',
+  '--regexp', '--file', '--max-count', '--context', '--after-context',
+  '--before-context', '--include', '--exclude', '--exclude-dir',
+  '--glob', '--type', '--type-not',
+]);
+
+/**
+ * Strip the `Exit code N` header and return whatever the command actually
+ * printed. An empty result is the signature of a clean grep no-match: grep
+ * prints nothing when it matches nothing, so any residual text means the
+ * exit 1 came from something else.
+ *
+ * @param {string} text
+ * @returns {string}
+ */
+export function residualAfterExitLine(text) {
+  if (typeof text !== 'string') return '';
+  return text.replace(EXIT_CODE_LINE_RE, '').trim();
+}
+
+/**
+ * Read the exit code out of the failure text. The live PostToolUseFailure
+ * envelope carries no structured exit code — it exists only inside the error
+ * string (module doc, 8 captured payloads).
+ * @param {string} text
+ * @returns {number|null}
+ */
+function exitCodeFromText(text) {
+  const m = typeof text === 'string' ? EXIT_CODE_LINE_RE.exec(text) : null;
+  return m ? Number(m[1]) : null;
+}
+
+/**
+ * Split a command line into tokens, honouring simple single/double quoting.
+ * Not a shell parser: `-e"foo"` and escaped quotes are not handled, and both
+ * degrade to a token that fails the identifier test, i.e. to silence.
+ * @param {string} command
+ * @returns {string[]}
+ */
+function tokenizeCommand(command) {
+  const tokens = [];
+  const re = /"([^"]*)"|'([^']*)'|(\S+)/g;
+  let m;
+  while ((m = re.exec(command)) !== null) {
+    tokens.push(m[1] ?? m[2] ?? m[3]);
+  }
+  return tokens;
+}
+
+/**
+ * Identify a leading `grep`/`rg` invocation and the pattern it searched for.
+ *
+ * @param {string} command - Raw `tool_input.command`.
+ * @returns {{ tool: string, pattern: string }} `tool` is '' when this is not a
+ *   bare leading grep/rg — the caller must treat that as "do not advise".
+ */
+export function parseGrepInvocation(command) {
+  const none = { tool: '', pattern: '' };
+  if (typeof command !== 'string' || command.trim().length === 0) return none;
+  if (SHELL_COMPOSITION_RE.test(command)) return none;
+
+  const tokens = tokenizeCommand(command);
+  const tool = tokens[0];
+  if (!GREP_BINARIES.has(tool)) return none;
+
+  let i = 1;
+  while (i < tokens.length) {
+    const t = tokens[i];
+    if (t === '--') { i += 1; break; }
+    if (!t.startsWith('-')) break;
+    // `-e PATTERN` names the pattern explicitly — take it and stop.
+    if (t === '-e' || t === '--regexp') return { tool, pattern: tokens[i + 1] ?? '' };
+    if (t.startsWith('--') && t.includes('=')) { i += 1; continue; }
+    if (VALUE_CONSUMING_FLAGS.has(t)) { i += 2; continue; }
+    i += 1;
+  }
+
+  const pattern = tokens[i];
+  return pattern ? { tool, pattern } : none;
+}
+
+/**
+ * Match a grep/rg that searched for an identifier and found nothing.
+ *
+ * Requires ALL of: exit 1, no printed output, a bare leading grep/rg, and an
+ * identifier-shaped pattern. A regex query is left alone on purpose — the
+ * advice is about search SCOPE, and someone writing a regex already knows they
+ * are pattern-matching rather than looking up a name.
+ *
+ * @param {{ errorText: string, command: string, exitCode: number|null }} input
+ * @returns {{ tool: string, pattern: string }|null}
+ */
+export function matchZeroResultScope({ errorText, command, exitCode }) {
+  if (exitCode !== GREP_NO_MATCH_EXIT_CODE) return null;
+  if (residualAfterExitLine(errorText) !== '') return null;
+
+  const { tool, pattern } = parseGrepInvocation(command);
+  if (!tool || !isIdentifierLike(pattern)) return null;
+  return { tool, pattern: pattern.trim() };
+}
+
+// ---------------------------------------------------------------------------
 // Message builders — received value → cause → concrete next call
 // ---------------------------------------------------------------------------
 
@@ -418,6 +567,30 @@ export function buildDuplicatedPrefixMessage(hit, toolName) {
     + `"${hit.correctedAbsolute}". Retry with that absolute path.`;
 }
 
+/**
+ * Advice for a zero-result identifier search.
+ *
+ * Aimed at SCOPE, never at pattern syntax. Every failure in the corpus behind
+ * this rule spelled the identifier correctly and searched the wrong place, so
+ * regex coaching would have helped none of them.
+ *
+ * @param {{ tool: string, pattern: string }} hit
+ * @param {string} toolName
+ * @returns {string}
+ */
+function buildZeroResultScopeMessage(hit, toolName) {
+  return `${ADVICE_PREFIX} ${toolName} ran \`${hit.tool}\` for "${hit.pattern}" and it exited 1 — `
+    + 'zero matches. That is a fact about THIS command\'s scope, not about the repository. '
+    + 'Verify the SCOPE, not the pattern: the repeated failures behind this rule all had a correct '
+    + 'pattern and a wrong search boundary. Before writing "does not exist" / "없음" / "0건", re-run '
+    + 'repo-wide with the path arguments and --include/-t filters dropped — identifiers hide in '
+    + 'infra/, scripts/, docs/, .github/ and root files, and inside comments, markdown and shell '
+    + 'strings that filtered scans never reach. Then try the other spelling axis: snake_case vs '
+    + 'camelCase, a distinctive substring, or the value instead of the key name. If you do not '
+    + 're-run, report "미확인" (unverified) rather than absent, and state the narrowing explicitly: '
+    + '"0 hits under <scope> — other locations unchecked".';
+}
+
 // ---------------------------------------------------------------------------
 // Allowlist dispatcher
 // ---------------------------------------------------------------------------
@@ -428,28 +601,35 @@ export function buildDuplicatedPrefixMessage(hit, toolName) {
  * First match wins.
  *
  * Only Bash execution failures reach this hook (see the Rule 2 banner above),
- * so this list holds exactly one rule. `matchDuplicatedPathPrefix` is
+ * so every rule here is Bash-shaped. `matchDuplicatedPathPrefix` is
  * intentionally absent: it targets `<tool_use_error>` failures, which emit no
  * hook event on this platform.
  * @type {Array<{ id: string, match: (ctx: object) => object|null, build: (hit: object, tool: string) => string }>}
  */
 const ADVICE_RULES = [
   { id: 'bash-cd-relative', match: matchRelativeCd, build: buildCdMessage },
+  { id: ZERO_RESULT_RULE_ID, match: matchZeroResultScope, build: buildZeroResultScopeMessage },
 ];
 
 /** Rule identifiers in dispatch order (exported so tests can pin the allowlist). */
 export const ADVICE_RULE_IDS = ADVICE_RULES.map((r) => r.id);
 
 /**
- * Produce corrective advice for a tool failure, or null to stay silent.
+ * Produce corrective advice AND the id of the rule that produced it, or null
+ * to stay silent. The id is what lets main() attribute a firing to the right
+ * counter channel without re-inspecting the message text.
+ *
  * @param {object} hookData - Parsed PostToolUseFailure payload
- * @returns {string|null}
+ * @returns {{ id: string, advice: string }|null}
  */
-export function buildAdvice(hookData) {
+export function selectAdvice(hookData) {
   const errorText = extractErrorText(hookData);
   if (!errorText) return null;
 
-  const exitCode = extractExitCode(hookData);
+  // The live envelope carries no structured exit code — fall back to the
+  // `Exit code N` header inside the error text (module doc).
+  const exitCode = extractExitCode(hookData) ?? exitCodeFromText(errorText);
+
   // Permission and sandbox denials are not something the model can call its
   // way out of — advising there would be noise.
   if (classifyPermissionDenial({ stderr: errorText, exitCode }).denied) return null;
@@ -459,13 +639,26 @@ export function buildAdvice(hookData) {
     errorText,
     cwd: hookData?.cwd || '',
     inputPath: extractInputPath(hookData),
+    command: hookData?.tool_input?.command || '',
+    exitCode,
   };
 
   for (const rule of ADVICE_RULES) {
     const hit = rule.match(ctx);
-    if (hit) return rule.build(hit, toolName);
+    if (hit) return { id: rule.id, advice: rule.build(hit, toolName) };
   }
   return null;
+}
+
+/**
+ * Produce corrective advice for a tool failure, or null to stay silent.
+ * Thin wrapper over {@link selectAdvice} — kept string-or-null so existing
+ * callers and tests are unaffected by the id being added.
+ * @param {object} hookData - Parsed PostToolUseFailure payload
+ * @returns {string|null}
+ */
+export function buildAdvice(hookData) {
+  return selectAdvice(hookData)?.advice ?? null;
 }
 
 // ---------------------------------------------------------------------------
@@ -477,21 +670,27 @@ async function main() {
   const hookData = parseJSON(raw);
   if (!hookData) return;
 
-  let advice;
+  let selected;
   try {
-    advice = buildAdvice(hookData);
+    selected = selectAdvice(hookData);
   } catch {
     // A classifier bug must never surface as a failed hook. Silence instead.
     return;
   }
-  if (!advice) return;
+  if (!selected) return;
 
   writeStdout({
     hookSpecificOutput: {
       hookEventName: 'PostToolUseFailure',
-      additionalContext: advice,
+      additionalContext: selected.advice,
     },
   });
+
+  // Emit first, count second, so `fired` means "advice was delivered". The
+  // counter is instrumentation only: it records FIRING, never whether the
+  // model acted on the advice, and it is a lower bound (see the limits list
+  // in zero-result-guard.js). recordFire swallows its own errors.
+  if (selected.id === ZERO_RESULT_RULE_ID) recordFire('b2');
 }
 
 // Direct-run guard: importing this module (tests) must not execute main() —

@@ -226,13 +226,31 @@ if (pfInstr?.suppress) { /* warnings: state.preflightWarnings에 누적 + 계속
 - `engine.checkBudgetThreshold(sessionId, { limitUsd: options.budget })` 결과 `crossed === 95`면 `engine.buildCostWarningInstruction(state, threshold)`로 `notifyDanger` 발사
 - TUI 활성 세션은 footer에 `engine.renderCostInline(getSessionCost(sessionId))` 자동 표시
 
+#### 보고 계약 (MANDATORY — 모든 Phase 의 스폰 프롬프트 말미에 삽입)
+
+아래 블록을 `{보고 계약}` 자리에 그대로 넣는다. `{리더 이름}` 은 리더 자신의 이름으로 치환한다.
+**`commands/team.md` 의 것과 문자 단위로 동일해야 한다** — /team 이 아닌 경로로 뜬 팀원이 더 약한
+계약으로 일하면 표준이 후퇴 기준선이 된다. 드리프트는
+`tests/commands/report-contract-parity.test.js` 가 잡는다.
+
+```
+[보고 계약]
+- 보고는 반드시 SendMessage(to="{리더 이름}") 로 보낸다. 일반 텍스트 출력은 리더에게 전달되지 않는다.
+- 수치에는 분모와 측정 시각을 붙인다: "3건"(X) → "38건 중 3건, {측정시각} 기준"(O).
+- 발생률과 도달률을 구분한다: "실패 38건 중 7.9%가 이 훅에 도달" ≠ "실패율 7.9%".
+- 근거는 file:line 으로 인용한다(DEV Protocol). 동시 편집 중인 트리에서는 심볼명과 측정 시각을 함께 적어라 — 줄번호는 남이 편집하면 썩는다.
+- 내 인용·지시·전제가 틀렸으면 그대로 따르지 말고 틀렸다고 보고하라. 교정도 정답이다.
+- 없는 것을 고치지 마라. 구멍이 없으면 "없다"고 보고하는 것도 완결된 결과다.
+- 마지막에 `미확인:` 줄을 반드시 포함한다. 확인 못 한 것을 추측으로 메우지 마라. 없으면 "미확인: 없음".
+```
+
 #### Phase 0 — INTAKE (PRD 생성)
-- `Task(subagent_type="artibot:planner", prompt="[Autopilot Phase 0] 사용자 요청: {task}\n\n\`docs/PRD/<feature>-<sessionId>.md\` 작성. PRD 템플릿: 배경/목표/비목표/시나리오/설계/산출물/실행계획/위험/수락기준")`
+- `Task(subagent_type="artibot:planner", prompt="[Autopilot Phase 0] 사용자 요청: {task}\n\n\`docs/PRD/<feature>-<sessionId>.md\` 작성. PRD 템플릿: 배경/목표/비목표/시나리오/설계/산출물/실행계획/위험/수락기준\n\n{보고 계약}")`
   <!-- model: model-policy 해석 — 역할 frontier 티어 -->
 - `mode === 'plan'`: PRD 경로 보고 후 종료. `:resume <sessionId>` 안내.
 
 #### Phase 1 — PLAN
-- `Task(subagent_type="artibot:planner", prompt="[Autopilot Phase 1] PRD: {prdPath}\n\n분해 + 위험 식별 + 병렬 팀 구성 제안")`
+- `Task(subagent_type="artibot:planner", prompt="[Autopilot Phase 1] PRD: {prdPath}\n\n분해 + 위험 식별 + 병렬 팀 구성 제안\n\n{보고 계약}")`
   <!-- model: model-policy 해석 — 역할 frontier 티어 -->
 
 #### Phase 2 — PARALLEL EXECUTE
@@ -256,7 +274,7 @@ if (pfInstr?.suppress) { /* warnings: state.preflightWarnings에 누적 + 계속
 - 병렬 소환: `Task(subagent_type="artibot:refactor-cleaner")` + `Task(subagent_type="artibot:performance-engineer")`. 결과는 보고서 §7~8.
 
 #### Phase 6 — REPORT
-- `Task(subagent_type="artibot:doc-updater", prompt="[Autopilot Phase 6] reports/AUTOPILOT/{sessionId}.md 작성. 템플릿: PRD §13.5 (요약/PRD링크/Phase표/커밋SHA/Cross-check/검증/개선/미래/큐/Next)")`
+- `Task(subagent_type="artibot:doc-updater", prompt="[Autopilot Phase 6] reports/AUTOPILOT/{sessionId}.md 작성. 템플릿: PRD §13.5 (요약/PRD링크/Phase표/커밋SHA/Cross-check/검증/개선/미래/큐/Next)\n\n{보고 계약}")`
   <!-- model: model-policy 해석 — 역할 frontier 티어 (fable 마이그레이션 이후 review/docs 역할도 frontier) -->
 - `engine.notifyCompletion(sessionId)` 호출 (`--no-notify` 시 skip, `night` 모드는 PushNotification 차단).
 

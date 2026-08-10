@@ -18,6 +18,18 @@ const MIN_GROUP_SIZE = 2;
 /**
  * GRPO weight factors for experience comparison.
  * Rule-based: no judge AI needed.
+ *
+ * POLARITY CONTRACT — every dimension here is "higher is better" and every
+ * weight is positive, because `grpoRankGroup` sums score×weight and sorts
+ * descending. `errorRate` is the trap: despite the name it carries
+ * RELIABILITY (1 − error ratio), so 1.0 = flawless and 0 = worst. Do not
+ * invert it. On 2026-08-10 two reviewers independently read only the name,
+ * concluded the default branch of `scoreExperience` was a sign bug, and
+ * proposed flipping it; both were wrong — flipping makes that branch the
+ * only inverted one in the file. Unrelated modules
+ * (dashboard/aggregator.js, knowledge-demotion.js) do use `errorRate` in
+ * the literal higher-is-worse sense; those are different variables and are
+ * probably what primes the misreading.
  */
 const EXPERIENCE_WEIGHTS = {
   success: 0.35,
@@ -107,6 +119,9 @@ function _scoreToolExperience(data, directScore) {
   return {
     success: clamp01(data.successRate ?? 0),
     speed: speedFromMs ?? 0.5,
+    // Reliability polarity: the explicit `1.0 -` makes 1.0 mean "no failures".
+    // This is the reference definition the other branches match — see the
+    // polarity contract on EXPERIENCE_WEIGHTS before changing any of them.
     errorRate: clamp01(1.0 - (data.calls > 0 ? (data.calls - (data.successes ?? 0)) / data.calls : 0)),
     resourceEfficiency: clamp01(data.calls > 0 ? Math.min(1, 10 / data.calls) : 0.5),
   };
@@ -152,7 +167,9 @@ function _scoreTeamExperience(data) {
  * Supports both structured fields (successRate, avgMs, calls) from
  * collectDailyExperiences and flat score field from tool-tracker bridge.
  * @param {import('./lifelong-learner.js').Experience} exp - Experience to score
- * @returns {object} Scores per dimension
+ * @returns {object} Scores per dimension. All four are higher-is-better,
+ *   including `errorRate` — read the polarity contract on EXPERIENCE_WEIGHTS
+ *   before touching it.
  */
 export function scoreExperience(exp) {
   const data = exp.data ?? {};
@@ -184,6 +201,11 @@ export function scoreExperience(exp) {
         return {
           success: clamp01(directScore),
           speed: 0.5,
+          // Rises with directScore, matching every other branch (reliability
+          // polarity, high = good). `clamp01(1 - directScore)` reads correct if
+          // you trust the field name, and is exactly what two reviewers proposed
+          // on 2026-08-10 — it would make this the only inverted branch and
+          // misrank high-scoring agent experiences. Do not invert.
           errorRate: clamp01(directScore),
           resourceEfficiency: 0.5,
         };
