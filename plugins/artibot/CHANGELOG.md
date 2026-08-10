@@ -11,7 +11,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+---
+
+## [4.43.0] — 2026-08-10
+
 ### Fixed
+- **zero-result-guard 발화율 0% — 페이로드 형상 결함.** 라이브 PostToolUse 의 `tool_response` 는
+  문자열이 아니라 **도구·모드별 구조화 객체**다(`No matches found` 는 모델용 렌더링일 뿐 훅에
+  도달하지 않는다). 문자열 마커 판정이라 가드는 도입 이래 한 번도 발화하지 못했고, 테스트는
+  허구 픽스처를 공유해 전건 그린인 채 아무것도 증명하지 않았다. 임시 덤프 훅으로 원시 stdin
+  12행을 실캡처해 `isStructuralZeroResult()` 모드별 allowlist 판정으로 교체했다 — content 모드는
+  **히트가 있어도 `numFiles:0`** 인 트랩이 있어 `numLines`/`content` 로 판정한다. 실캡처 8형상이
+  `tests/fixtures/zero-result-guard-hook-payloads.jsonl` 회귀 앵커로 고정됐고, 수정 직후 실세션
+  2곳에서 첫 라이브 발화를 관측했다.
+- **tool-tracker 성공 채널 기록 100% 손실.** 디스패처 timeout(3,000ms) < tool-history flush
+  디바운스(5,000ms) 라 훅이 플러시 전에 SIGTERM 으로 죽었다. `tool-history.json` 의 기존 행은
+  전부 PostToolUseFailure 직접 등록 채널의 것 — 학습 데이터가 실패 표본으로 편향돼 있었다.
+  main 종료 전 명시 `flushToDisk()` 로 수정(부수효과: 훅 체류 5.1s → 0.15s).
+- **isMainEntry 퍼센트 인코딩 결함 — 공백·비ASCII·`~`·`#` 경로에서 디스패처 5개가 조용히 죽음.**
+  `new URL().pathname` 이 인코딩을 남겨 `fileURLToPath` 기반 정본과 어긋났다. 현 설치 경로에선
+  잠복 상태였으나 프로필명에 공백·한글이 있으면 전 디스패처가 침묵한다. 경로 형태 6종 실프로세스
+  회귀 테스트와 함께 수정.
+- **clearCache 라이브 파괴성 — 마켓플레이스 전체 삭제를 버전 가지치기로.** update 1회가
+  `cache/artibot` 을 통째로 지워 실행 중인 모든 세션의 훅을 죽이고 형제 플러그인
+  (artibot-cowork)까지 파괴했다(2026-08-10 캐시 소실 사고의 근본 원인). 이제 구버전만 지우며
+  keepVersion·`.in_use` 보유 버전·형제 플러그인을 보존하고, 버전 미확인·keepVersion 캐시 부재
+  시 아무것도 지우지 않는다(교차검수가 발견한 빈 캐시 엣지 포함).
+- **bash 의존 테스트 4파일의 런처 의존 — PowerShell 상시 14건 실패 → 사유 명시 skip.**
+  PowerShell 은 `bash` 를 WSL 로 해석하고 WSL 은 `C:/` 경로를 못 읽어 127 이 났다. 기존 가드
+  4벌은 존재만 확인해(`bash -c 'echo ok'` 는 WSL 도 통과) skipIf 가 발동하지 않았다.
+  `scripts/utils/bash-compat.js` 의 `probeBash()` 2단계(존재 + 실파일 실행)로 교체 — Git Bash
+  에서는 전건 실행 그대로, POSIX CI 에서는 프로브 성공을 하드 단언해 상시-skip 회귀를 차단.
+
+### Added
+- **direct-run 가드 전수 적용 — 무가드 훅 0.** bare `main()` 31 + 약한 `endsWith` 가드 3 +
+  `check-console-log`(import 만으로 importer 를 죽이던 `process.exit` 스텁) + 1차 배치
+  git-autopilot 3종. import-발화 관례 테스트 20파일은 `runHook()` 명시 호출로 전환.
+- **import-안전성 게이트** `tests/hooks/import-safety.test.js` — 훅 61개 전수를 자식 프로세스
+  import 로 검사(열린 stdin 파이프 + exit 센티넬 + stdout 오염 검사). 위반 4종을 심으면 red 가
+  되는 자기검증 픽스처 포함 — 다음에 추가되는 무가드 훅이 조용히 회귀하지 않는다.
+
+### Fixed (2026-08-10 오전분)
 - **학습 저장소 채점기 상수화 해소 — 차원 시그니처 2종 → 9종.**
   `evaluations.json` 500행 전체가 단 2종의 시그니처(`3.8/B` 182건, `2.1/D` 318건)만 담고
   있었고 efficiency 는 전 행이 3이었다. 원인은 rubric 이 아니라 **입력 배관**이다 —
