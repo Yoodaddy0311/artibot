@@ -119,6 +119,18 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
+/**
+ * Import the hook and run its entry point. The module carries a direct-run
+ * guard, so importing it no longer executes `main()` — the call has to be
+ * explicit here, exactly as the spawned production process makes it.
+ *
+ * @returns {Promise<void>}
+ */
+async function runHook() {
+  const mod = await import('../../scripts/hooks/stop-review-gate.js');
+  await mod.main();
+}
+
 // ---------------------------------------------------------------------------
 // B-2 stop_hook_active recursion guard
 // ---------------------------------------------------------------------------
@@ -126,7 +138,7 @@ describe('stop-review-gate — stop_hook_active recursion guard', () => {
   it('returns immediately without writing stdout when stop_hook_active=true', async () => {
     mockState.readStdinResult = Promise.resolve(JSON.stringify({ stop_hook_active: true }));
     // No execSync responses defined — if main() proceeds it will throw.
-    await import('../../scripts/hooks/stop-review-gate.js');
+    await runHook();
     expect(mockState.writeStdoutCalls).toHaveLength(0);
     const logs = stderrSpy.mock.calls.map(([m]) => m).join('');
     // No "Not in a git repository" / "No changed files" / "Review gate" log either.
@@ -141,7 +153,7 @@ describe('stop-review-gate — stop_hook_active recursion guard', () => {
       // No changed files -> fast-path approve.
       ['git diff --name-status', ''],
     ];
-    await import('../../scripts/hooks/stop-review-gate.js');
+    await runHook();
     expect(mockState.writeStdoutCalls).toHaveLength(1);
     expect(mockState.writeStdoutCalls[0].decision).toBe('approve');
   });
@@ -171,7 +183,7 @@ describe('stop-review-gate — getChangedFiles --diff-filter=ACMR', () => {
     };
     mockState.readFileSyncImpl = () => 'export const x = 1;\n';
 
-    await import('../../scripts/hooks/stop-review-gate.js');
+    await runHook();
     // Source MUST embed --diff-filter=ACMR in its diff command (B-1 invariant).
     const diffCmds = mockState.execLog.filter((c) => c.includes('diff --name-status'));
     expect(diffCmds.length).toBeGreaterThan(0);
@@ -209,7 +221,7 @@ describe('stop-review-gate — getChangedFiles --diff-filter=ACMR', () => {
     };
 
     // Spy on the writeStdout call to inspect the post-aggregation file count.
-    await import('../../scripts/hooks/stop-review-gate.js');
+    await runHook();
     expect(mockState.writeStdoutCalls).toHaveLength(1);
     const payload = mockState.writeStdoutCalls[0];
     // The payload may use 'reason' or 'message' depending on decision path.
@@ -239,7 +251,7 @@ describe('stop-review-gate — isArtibotRepo guard', () => {
     ];
     mockState.readStdinResult = Promise.resolve(JSON.stringify({}));
 
-    await import('../../scripts/hooks/stop-review-gate.js');
+    await runHook();
 
     expect(mockState.writeStdoutCalls).toHaveLength(0);
     const logs = stderrSpy.mock.calls.map(([m]) => m).join('');
@@ -256,7 +268,7 @@ describe('stop-review-gate — isArtibotRepo guard', () => {
     ];
     mockState.readStdinResult = Promise.resolve(JSON.stringify({}));
 
-    await import('../../scripts/hooks/stop-review-gate.js');
+    await runHook();
 
     // No-changes path emits an approve decision.
     expect(mockState.writeStdoutCalls).toHaveLength(1);
@@ -302,7 +314,7 @@ describe('stop-review-gate — checkMissingTests suffix variant', () => {
       return [];
     });
 
-    await import('../../scripts/hooks/stop-review-gate.js');
+    await runHook();
 
     expect(mockState.writeStdoutCalls).toHaveLength(1);
     const payload = mockState.writeStdoutCalls[0];

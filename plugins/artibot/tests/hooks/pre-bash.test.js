@@ -13,6 +13,7 @@ vi.mock('../../scripts/utils/index.js', () => ({
 }));
 
 const { readStdin, writeStdout } = await import('../../scripts/utils/index.js');
+const { createErrorHandler } = await import('../../lib/core/hook-utils.js');
 
 // ---------------------------------------------------------------------------
 // Helper
@@ -22,6 +23,23 @@ function makeHookData(command) {
     tool_name: 'Bash',
     tool_input: { command },
   });
+}
+
+/**
+ * Import the hook and run its entry point. The module carries a direct-run
+ * guard, so importing it no longer executes `main()` — the call has to be
+ * explicit here, exactly as the spawned production process makes it.
+ *
+ * @returns {Promise<void>}
+ */
+async function runHook() {
+  const mod = await import('../../scripts/hooks/pre-bash.js');
+  // The `.catch` mirrors the module's direct-run tail so the error-handling
+  // test still reaches the real handler. Keep in sync with pre-bash.js.
+  await mod.main().catch(createErrorHandler('pre-bash', {
+    writeStdout,
+    blockReason: 'Safety check failed due to hook error. Blocking by default.',
+  }));
 }
 
 // ---------------------------------------------------------------------------
@@ -47,7 +65,7 @@ describe('pre-bash hook', () => {
     ])('approves: %s', async (command) => {
       readStdin.mockResolvedValue(makeHookData(command));
 
-      await import('../../scripts/hooks/pre-bash.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledWith(
@@ -61,7 +79,7 @@ describe('pre-bash hook', () => {
         tool_input: { command: '' },
       }));
 
-      await import('../../scripts/hooks/pre-bash.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledWith(
@@ -75,7 +93,7 @@ describe('pre-bash hook', () => {
         tool_input: {},
       }));
 
-      await import('../../scripts/hooks/pre-bash.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledWith(
@@ -94,7 +112,7 @@ describe('pre-bash hook', () => {
     ])('blocks: %s (%s)', async (command, _label) => {
       readStdin.mockResolvedValue(makeHookData(command));
 
-      await import('../../scripts/hooks/pre-bash.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledWith(
@@ -116,7 +134,7 @@ describe('pre-bash hook', () => {
     ])('blocks: %s (%s)', async (command, _label) => {
       readStdin.mockResolvedValue(makeHookData(command));
 
-      await import('../../scripts/hooks/pre-bash.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledWith(
@@ -140,7 +158,7 @@ describe('pre-bash hook', () => {
     ])('blocks: %s (%s)', async (command, _label) => {
       readStdin.mockResolvedValue(makeHookData(command));
 
-      await import('../../scripts/hooks/pre-bash.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledWith(
@@ -160,7 +178,7 @@ describe('pre-bash hook', () => {
     ])('blocks: %s (%s)', async (command, _label) => {
       readStdin.mockResolvedValue(makeHookData(command));
 
-      await import('../../scripts/hooks/pre-bash.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledWith(
@@ -178,7 +196,7 @@ describe('pre-bash hook', () => {
     ])('blocks: %s', async (command) => {
       readStdin.mockResolvedValue(makeHookData(command));
 
-      await import('../../scripts/hooks/pre-bash.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledWith(
@@ -194,7 +212,7 @@ describe('pre-bash hook', () => {
     ])('blocks: %s (%s)', async (command, _label) => {
       readStdin.mockResolvedValue(makeHookData(command));
 
-      await import('../../scripts/hooks/pre-bash.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledWith(
@@ -207,7 +225,7 @@ describe('pre-bash hook', () => {
     it('blocks by default when hook errors', async () => {
       readStdin.mockRejectedValue(new Error('stdin read failed'));
 
-      await import('../../scripts/hooks/pre-bash.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledWith(
@@ -220,7 +238,7 @@ describe('pre-bash hook', () => {
     it('includes label and command in reason', async () => {
       readStdin.mockResolvedValue(makeHookData('rm -rf /important'));
 
-      await import('../../scripts/hooks/pre-bash.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       const call = writeStdout.mock.calls[0][0];

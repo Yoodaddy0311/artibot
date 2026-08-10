@@ -32,6 +32,7 @@
  */
 
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   atomicWriteSync,
   getPluginRoot,
@@ -90,9 +91,16 @@ async function main() {
   atomicWriteSync(markerPath, new Date().toISOString() + '\n');
 }
 
-// CLI entry — only runs when invoked directly, not on import (test imports).
-const isCliEntry = process.argv[1] && process.argv[1].endsWith('mark-main-agent-edit.js');
-if (isCliEntry) {
+// Direct-run guard: importing this module (tests) must not execute the hook.
+// Production is unaffected — the dispatcher spawns this file as argv[1].
+//
+// Was `argv[1].endsWith('mark-main-agent-edit.js')`: a suffix test that any path
+// ending in that name satisfied, comparing a possibly-relative argv[1]
+// unresolved. Identity on the resolved path is the repo-wide check now.
+const isDirectRun = process.argv[1]
+  && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
+
+if (isDirectRun) {
   main().catch(createErrorHandler(HOOK_NAME, { exit: false }));
 }
 

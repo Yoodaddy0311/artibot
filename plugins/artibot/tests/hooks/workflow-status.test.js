@@ -88,8 +88,20 @@ function setExistingState(stateObj) {
 
 async function runHookFresh() {
   vi.resetModules();
-  await import('../../scripts/hooks/workflow-status.js');
+  await runHook();
   await new Promise((r) => setTimeout(r, 30));
+}
+
+/**
+ * Import the hook and run its entry point. The module carries a direct-run
+ * guard, so importing it no longer executes `main()` — the call has to be
+ * explicit here, exactly as the spawned production process makes it.
+ *
+ * @returns {Promise<void>}
+ */
+async function runHook() {
+  const mod = await import('../../scripts/hooks/workflow-status.js');
+  await mod.main();
 }
 
 // ---------------------------------------------------------------------------

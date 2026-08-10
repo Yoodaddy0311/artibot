@@ -24,7 +24,22 @@ vi.mock('node:fs', async () => {
 });
 
 const { readStdin, writeStdout } = await import('../../scripts/utils/index.js');
+const { createErrorHandler } = await import('../../lib/core/hook-utils.js');
 const { readFileSync, existsSync, writeFileSync, mkdirSync } = await import('node:fs');
+
+/**
+ * Import the hook and run its entry point. The module carries a direct-run
+ * guard, so importing it no longer executes `main()` — the call has to be
+ * explicit here, exactly as the spawned production process makes it.
+ *
+ * @returns {Promise<void>}
+ */
+async function runHook() {
+  const mod = await import('../../scripts/hooks/pre-compact.js');
+  // The `.catch` mirrors the module's direct-run tail so the error-handling
+  // test still reaches the real handler. Keep in sync with pre-compact.js.
+  await mod.main().catch(createErrorHandler('pre-compact'));
+}
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -50,7 +65,7 @@ describe('pre-compact hook', () => {
     it('creates a snapshot backup file before compaction', async () => {
       readStdin.mockResolvedValue(JSON.stringify({ reason: 'context full' }));
 
-      await import('../../scripts/hooks/pre-compact.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(mkdirSync).toHaveBeenCalledWith(
@@ -65,7 +80,7 @@ describe('pre-compact hook', () => {
     it('snapshot contains savedAt, reason, state, and hookData', async () => {
       readStdin.mockResolvedValue(JSON.stringify({ context_size: 95000 }));
 
-      await import('../../scripts/hooks/pre-compact.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       const writtenContent = writeFileSync.mock.calls[0][1];
@@ -85,7 +100,7 @@ describe('pre-compact hook', () => {
       }));
       readStdin.mockResolvedValue(JSON.stringify({}));
 
-      await import('../../scripts/hooks/pre-compact.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       const writtenContent = writeFileSync.mock.calls[0][1];
@@ -99,7 +114,7 @@ describe('pre-compact hook', () => {
       existsSync.mockReturnValue(false);
       readStdin.mockResolvedValue(JSON.stringify({}));
 
-      await import('../../scripts/hooks/pre-compact.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       const writtenContent = writeFileSync.mock.calls[0][1];
@@ -112,7 +127,7 @@ describe('pre-compact hook', () => {
       readFileSync.mockReturnValue('{{invalid json}}');
       readStdin.mockResolvedValue(JSON.stringify({}));
 
-      await import('../../scripts/hooks/pre-compact.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       const writtenContent = writeFileSync.mock.calls[0][1];
@@ -131,7 +146,7 @@ describe('pre-compact hook', () => {
         ],
       }));
 
-      await import('../../scripts/hooks/pre-compact.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       const writtenContent = writeFileSync.mock.calls[0][1];
@@ -150,7 +165,7 @@ describe('pre-compact hook', () => {
         ],
       }));
 
-      await import('../../scripts/hooks/pre-compact.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       const writtenContent = writeFileSync.mock.calls[0][1];
@@ -166,7 +181,7 @@ describe('pre-compact hook', () => {
         ],
       }));
 
-      await import('../../scripts/hooks/pre-compact.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       const writtenContent = writeFileSync.mock.calls[0][1];
@@ -179,7 +194,7 @@ describe('pre-compact hook', () => {
     it('writes a confirmation message on success', async () => {
       readStdin.mockResolvedValue(JSON.stringify({}));
 
-      await import('../../scripts/hooks/pre-compact.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledTimes(1);
@@ -196,7 +211,7 @@ describe('pre-compact hook', () => {
         compaction_reason: 'context limit reached',
       }));
 
-      await import('../../scripts/hooks/pre-compact.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       const writtenContent = writeFileSync.mock.calls[0][1];
@@ -208,7 +223,7 @@ describe('pre-compact hook', () => {
     it('stores empty hookData when parseJSON returns null', async () => {
       readStdin.mockResolvedValue('not valid json');
 
-      await import('../../scripts/hooks/pre-compact.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       const writtenContent = writeFileSync.mock.calls[0][1];
@@ -221,7 +236,7 @@ describe('pre-compact hook', () => {
     it('creates the .claude directory recursively', async () => {
       readStdin.mockResolvedValue(JSON.stringify({}));
 
-      await import('../../scripts/hooks/pre-compact.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(mkdirSync).toHaveBeenCalledWith(
@@ -233,7 +248,7 @@ describe('pre-compact hook', () => {
     it('writes the snapshot as formatted JSON with utf-8 encoding', async () => {
       readStdin.mockResolvedValue(JSON.stringify({}));
 
-      await import('../../scripts/hooks/pre-compact.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       const encoding = writeFileSync.mock.calls[0][2];
@@ -249,7 +264,7 @@ describe('pre-compact hook', () => {
       readStdin.mockResolvedValue(JSON.stringify({}));
       writeFileSync.mockImplementation(() => { throw new Error('EACCES: permission denied'); });
 
-      await import('../../scripts/hooks/pre-compact.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       const stderrOutput = stderrSpy.mock.calls.map((c) => c[0]).join('');
@@ -263,7 +278,7 @@ describe('pre-compact hook', () => {
       readStdin.mockResolvedValue(JSON.stringify({}));
       mkdirSync.mockImplementation(() => { throw new Error('EPERM'); });
 
-      await import('../../scripts/hooks/pre-compact.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       const stderrOutput = stderrSpy.mock.calls.map((c) => c[0]).join('');
@@ -273,7 +288,7 @@ describe('pre-compact hook', () => {
     it('handles readStdin rejection gracefully', async () => {
       readStdin.mockRejectedValue(new Error('stdin failed'));
 
-      await import('../../scripts/hooks/pre-compact.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       const stderrOutput = stderrSpy.mock.calls.map((c) => c[0]).join('');

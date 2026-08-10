@@ -13,6 +13,7 @@ import path from 'node:path';
 import { atomicWriteSync, getPluginRoot, parseJSON, readStdin, writeStdout } from '../utils/index.js';
 import { createErrorHandler, hasExtension, isArtibotRepo, isSkippablePath } from '../../lib/core/hook-utils.js';
 import { getHeadSha, getRepoRoot } from '../../lib/git/repo-root-cache.js';
+import { fileURLToPath } from 'node:url';
 
 const HOOK_NAME = 'stop-review-gate';
 const STATE_FILE = 'last-review-gate-sha.txt';
@@ -470,7 +471,7 @@ function buildResult(issues, changedFiles, codexMode, cacheCtx) {
 // Main
 // -------------------------------------------------------------------------
 
-async function main() {
+export async function main() {
   const raw = await readStdin();
   const hookData = parseJSON(raw) ?? {};
 
@@ -524,4 +525,13 @@ async function main() {
   void hookData;
 }
 
-main().catch(createErrorHandler(HOOK_NAME, { exit: true }));
+// Direct-run guard: importing this module (tests) must not execute the hook.
+// main() blocks on stdin, so an import both hangs the importer and fires the
+// hook's side effects. Production is unaffected — the dispatcher (or Claude
+// Code) spawns this file as argv[1], so the guard passes there.
+const isDirectRun = process.argv[1]
+  && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
+
+if (isDirectRun) {
+  main().catch(createErrorHandler(HOOK_NAME, { exit: true }));
+}

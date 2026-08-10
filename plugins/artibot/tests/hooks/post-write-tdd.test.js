@@ -62,6 +62,18 @@ function makeHookData(toolName, filePath) {
   });
 }
 
+/**
+ * Import the hook and run its entry point. The module carries a direct-run
+ * guard, so importing it no longer executes `main()` — the call has to be
+ * explicit here, exactly as the spawned production process makes it.
+ *
+ * @returns {Promise<void>}
+ */
+async function runHook() {
+  const mod = await import('../../scripts/hooks/post-write-tdd.js');
+  await mod.main();
+}
+
 // ---------------------------------------------------------------------------
 // Unit tests
 // ---------------------------------------------------------------------------
@@ -163,7 +175,7 @@ describe('post-write-tdd hook', () => {
     readStdin.mockResolvedValue(makeHookData('Write', '/user-project/lib/foo.js'));
     existsSync.mockReturnValue(false);
 
-    await import('../../scripts/hooks/post-write-tdd.js');
+    await runHook();
     await new Promise((r) => setTimeout(r, 30));
 
     // No advisory token emitted in user projects — the lib/ → tests/ mirror
@@ -175,7 +187,7 @@ describe('post-write-tdd hook', () => {
     readStdin.mockResolvedValue(makeHookData('Write', '/project/lib/foo/bar.js'));
     existsSync.mockReturnValue(false);
 
-    await import('../../scripts/hooks/post-write-tdd.js');
+    await runHook();
     await new Promise((r) => setTimeout(r, 30));
 
     expect(writeStdout).toHaveBeenCalledTimes(1);
@@ -189,7 +201,7 @@ describe('post-write-tdd hook', () => {
     readStdin.mockResolvedValue(makeHookData('Edit', '/project/lib/foo.js'));
     existsSync.mockReturnValue(true);
 
-    await import('../../scripts/hooks/post-write-tdd.js');
+    await runHook();
     await new Promise((r) => setTimeout(r, 30));
 
     expect(writeStdout).not.toHaveBeenCalled();
@@ -198,7 +210,7 @@ describe('post-write-tdd hook', () => {
   it('ignores non-lib files', async () => {
     readStdin.mockResolvedValue(makeHookData('Write', '/project/docs/README.md'));
 
-    await import('../../scripts/hooks/post-write-tdd.js');
+    await runHook();
     await new Promise((r) => setTimeout(r, 30));
 
     expect(writeStdout).not.toHaveBeenCalled();
@@ -207,7 +219,7 @@ describe('post-write-tdd hook', () => {
   it('ignores edits to test files themselves (recursion guard)', async () => {
     readStdin.mockResolvedValue(makeHookData('Edit', '/project/lib/foo.test.js'));
 
-    await import('../../scripts/hooks/post-write-tdd.js');
+    await runHook();
     await new Promise((r) => setTimeout(r, 30));
 
     expect(writeStdout).not.toHaveBeenCalled();
@@ -219,7 +231,7 @@ describe('post-write-tdd hook', () => {
       tool_input: { file_path: '/project/lib/foo.js' },
     }));
 
-    await import('../../scripts/hooks/post-write-tdd.js');
+    await runHook();
     await new Promise((r) => setTimeout(r, 30));
 
     expect(writeStdout).not.toHaveBeenCalled();
@@ -228,7 +240,7 @@ describe('post-write-tdd hook', () => {
   it('is a no-op when file_path missing', async () => {
     readStdin.mockResolvedValue(JSON.stringify({ tool_name: 'Write', tool_input: {} }));
 
-    await import('../../scripts/hooks/post-write-tdd.js');
+    await runHook();
     await new Promise((r) => setTimeout(r, 30));
 
     expect(writeStdout).not.toHaveBeenCalled();
@@ -237,7 +249,7 @@ describe('post-write-tdd hook', () => {
   it('handles invalid JSON gracefully', async () => {
     readStdin.mockResolvedValue('not json {{{');
 
-    await import('../../scripts/hooks/post-write-tdd.js');
+    await runHook();
     await new Promise((r) => setTimeout(r, 30));
 
     expect(writeStdout).not.toHaveBeenCalled();

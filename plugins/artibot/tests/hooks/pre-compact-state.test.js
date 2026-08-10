@@ -42,6 +42,18 @@ const { readStdin } = await import('../../scripts/utils/index.js');
 const { readFileSync, existsSync, writeFileSync, mkdirSync } = await import('node:fs');
 const { execSync } = await import('node:child_process');
 
+/**
+ * Import the hook and run its entry point. The module carries a direct-run
+ * guard, so importing it no longer executes `main()` — the call has to be
+ * explicit here, exactly as the spawned production process makes it.
+ *
+ * @returns {Promise<void>}
+ */
+async function runHook() {
+  const mod = await import('../../scripts/hooks/pre-compact.js');
+  await mod.main();
+}
+
 // ---------------------------------------------------------------------------
 // Tests — only the AD-40-specific extension. Existing snapshot tests live
 // in pre-compact.test.js.
@@ -68,7 +80,7 @@ describe('pre-compact state-save extension (AD-40)', () => {
     readStdin.mockResolvedValue(JSON.stringify({}));
     execSync.mockImplementationOnce(() => 'feature/x\n').mockImplementationOnce(() => ' M file.txt\n');
 
-    await import('../../scripts/hooks/pre-compact.js');
+    await runHook();
     await new Promise((r) => setTimeout(r, 50));
 
     // The hook makes 2 writes: artibot-pre-compact.json + runtime/state/pre-compact-*.md
@@ -89,7 +101,7 @@ describe('pre-compact state-save extension (AD-40)', () => {
     readStdin.mockResolvedValue(JSON.stringify({}));
     execSync.mockImplementationOnce(() => 'artibot/master\n').mockImplementationOnce(() => '');
 
-    await import('../../scripts/hooks/pre-compact.js');
+    await runHook();
     await new Promise((r) => setTimeout(r, 50));
 
     const calls = execSync.mock.calls.map((c) => c[0]);
@@ -101,7 +113,7 @@ describe('pre-compact state-save extension (AD-40)', () => {
     readStdin.mockResolvedValue(JSON.stringify({}));
     execSync.mockImplementation(() => { throw new Error('not a git repository'); });
 
-    await import('../../scripts/hooks/pre-compact.js');
+    await runHook();
     await new Promise((r) => setTimeout(r, 50));
 
     // The compact json snapshot still gets written; the markdown state file
@@ -114,7 +126,7 @@ describe('pre-compact state-save extension (AD-40)', () => {
     readStdin.mockResolvedValue(JSON.stringify({}));
     execSync.mockImplementationOnce(() => 'main\n').mockImplementationOnce(() => 'M  file.txt\n');
 
-    await import('../../scripts/hooks/pre-compact.js');
+    await runHook();
     await new Promise((r) => setTimeout(r, 50));
 
     const jsonWrite = writeFileSync.mock.calls.find((c) =>

@@ -25,6 +25,8 @@
 import { execSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { readStdin } from '../utils/index.js';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const HOOK_NAME = 'stop-recap';
 
@@ -139,7 +141,7 @@ function formatRecap(counts, dirty) {
   return segs.length ? segs.join(' · ') : '';
 }
 
-async function main() {
+export async function main() {
   let payload = {};
   try {
     const stdin = await readStdin();
@@ -159,7 +161,16 @@ async function main() {
   process.stderr.write(`[artibot:recap] ${line}\n`);
 }
 
-main().catch((err) => {
-  // Last-resort guard: never let a recap failure surface to Claude Code.
-  process.stderr.write(`[artibot:${HOOK_NAME}] ${err?.message || 'failed'}\n`);
-});
+// Direct-run guard: importing this module (tests) must not execute the hook.
+// main() blocks on stdin, so an import both hangs the importer and fires the
+// hook's side effects. Production is unaffected — the dispatcher (or Claude
+// Code) spawns this file as argv[1], so the guard passes there.
+const isDirectRun = process.argv[1]
+  && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
+
+if (isDirectRun) {
+  main().catch((err) => {
+    // Last-resort guard: never let a recap failure surface to Claude Code.
+    process.stderr.write(`[artibot:${HOOK_NAME}] ${err?.message || 'failed'}\n`);
+  });
+}

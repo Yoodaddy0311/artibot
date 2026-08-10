@@ -26,7 +26,13 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
  * There is no env kill switch for the git hooks — neither references
  * `process.env` at all — so cwd is the only lever. From a non-repo cwd,
  * `getRepoRoot()` returns null and the hook returns at
- * git-autopilot-save.js:317, before the allowlist and config gates are reached.
+ * git-autopilot-save.js:318, before the allowlist and config gates are reached.
+ *
+ * That covers the SPAWN vector, and still does: the dispatcher launches real
+ * child processes, which no import-time guard can reach. The separate IMPORT
+ * vector — a test importing the hook module and running its top-level body — is
+ * now closed by the direct-run guard in git-autopilot-save.js. The two cover
+ * different entry points; neither makes the other redundant.
  *
  * Verified equivalent, not assumed: every payload below was diffed between
  * cwd=PLUGIN_ROOT and cwd=<non-repo>; output was identical, including

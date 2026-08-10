@@ -11,6 +11,8 @@ import { cleanupStaleStateTmpFiles, createErrorHandler, extractAgentId, extractA
 import { withFileLock } from '../../lib/core/file-lock.js';
 import { getPolicyModel, resolveModel } from '../../lib/core/model-policy.js';
 import { loadConfig } from '../../lib/core/config.js';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 /**
  * Read an explicitly-requested model from the hook payload, if present.
@@ -108,7 +110,7 @@ function initTeamContext(loaded, hookData, agentRole) {
   return { teamId, domain, startedAt };
 }
 
-async function main() {
+export async function main() {
   const action = process.argv[2]; // 'start' or 'stop'
   const raw = await readStdin();
   const hookData = parseJSON(raw);
@@ -175,4 +177,13 @@ async function main() {
   }
 }
 
-main().catch(createErrorHandler('subagent-handler', { exit: true }));
+// Direct-run guard: importing this module (tests) must not execute the hook.
+// main() blocks on stdin, so an import both hangs the importer and fires the
+// hook's side effects. Production is unaffected — the dispatcher (or Claude
+// Code) spawns this file as argv[1], so the guard passes there.
+const isDirectRun = process.argv[1]
+  && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
+
+if (isDirectRun) {
+  main().catch(createErrorHandler('subagent-handler', { exit: true }));
+}

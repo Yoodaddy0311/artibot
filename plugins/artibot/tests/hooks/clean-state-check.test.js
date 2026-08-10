@@ -13,12 +13,29 @@ vi.mock('../../scripts/utils/index.js', () => ({
 }));
 
 const { readStdin, writeStdout } = await import('../../scripts/utils/index.js');
+const { createErrorHandler } = await import('../../lib/core/hook-utils.js');
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 function makeHookData(files, key = 'changed_files') {
   return JSON.stringify({ [key]: files });
+}
+
+/**
+ * Import the hook and run its entry point. The module carries a direct-run
+ * guard, so importing it no longer executes `main()` — the call has to be
+ * explicit here, exactly as the spawned production process makes it.
+ *
+ * @returns {Promise<void>}
+ */
+async function runHook() {
+  const mod = await import('../../scripts/hooks/clean-state-check.js');
+  // The `.catch` mirrors the module's direct-run tail. Without it the
+  // 'exits gracefully when readStdin rejects' case rejects into the test
+  // instead of reaching the real error handler — which is the behaviour that
+  // test exists to pin. Keep in sync with the tail in clean-state-check.js.
+  await mod.main().catch(createErrorHandler('clean-state-check', { exit: true }));
 }
 
 // ---------------------------------------------------------------------------
@@ -34,7 +51,7 @@ describe('clean-state-check hook', () => {
     it('warns when .js files were changed', async () => {
       readStdin.mockResolvedValue(makeHookData(['/project/src/app.js']));
 
-      await import('../../scripts/hooks/clean-state-check.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledTimes(1);
@@ -54,7 +71,7 @@ describe('clean-state-check hook', () => {
     it('warns when .ts files were changed', async () => {
       readStdin.mockResolvedValue(makeHookData(['/project/src/utils.ts']));
 
-      await import('../../scripts/hooks/clean-state-check.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledTimes(1);
@@ -66,7 +83,7 @@ describe('clean-state-check hook', () => {
       const files = ['/src/a.js', '/src/b.tsx', '/src/c.mjs'];
       readStdin.mockResolvedValue(makeHookData(files));
 
-      await import('../../scripts/hooks/clean-state-check.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledTimes(1);
@@ -82,7 +99,7 @@ describe('clean-state-check hook', () => {
     ])('detects %s files as code', async (ext) => {
       readStdin.mockResolvedValue(makeHookData([`/project/file${ext}`]));
 
-      await import('../../scripts/hooks/clean-state-check.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledTimes(1);
@@ -95,7 +112,7 @@ describe('clean-state-check hook', () => {
     it('skips when only .md files changed', async () => {
       readStdin.mockResolvedValue(makeHookData(['/project/README.md']));
 
-      await import('../../scripts/hooks/clean-state-check.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledTimes(1);
@@ -108,7 +125,7 @@ describe('clean-state-check hook', () => {
     ])('skips %s files', async (ext) => {
       readStdin.mockResolvedValue(makeHookData([`/project/file${ext}`]));
 
-      await import('../../scripts/hooks/clean-state-check.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledTimes(1);
@@ -122,7 +139,7 @@ describe('clean-state-check hook', () => {
       const files = ['/src/app.js', '/docs/README.md', '/src/style.css'];
       readStdin.mockResolvedValue(makeHookData(files));
 
-      await import('../../scripts/hooks/clean-state-check.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledTimes(1);
@@ -138,7 +155,7 @@ describe('clean-state-check hook', () => {
     it('handles empty file list', async () => {
       readStdin.mockResolvedValue(makeHookData([]));
 
-      await import('../../scripts/hooks/clean-state-check.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledTimes(1);
@@ -149,7 +166,7 @@ describe('clean-state-check hook', () => {
     it('handles null hookData gracefully', async () => {
       readStdin.mockResolvedValue('invalid json');
 
-      await import('../../scripts/hooks/clean-state-check.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).not.toHaveBeenCalled();
@@ -158,7 +175,7 @@ describe('clean-state-check hook', () => {
     it('handles missing files field (defaults to empty array)', async () => {
       readStdin.mockResolvedValue(JSON.stringify({ task: 'done' }));
 
-      await import('../../scripts/hooks/clean-state-check.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledTimes(1);
@@ -169,7 +186,7 @@ describe('clean-state-check hook', () => {
     it('handles non-array files field', async () => {
       readStdin.mockResolvedValue(JSON.stringify({ changed_files: 'not-array' }));
 
-      await import('../../scripts/hooks/clean-state-check.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledTimes(1);
@@ -180,7 +197,7 @@ describe('clean-state-check hook', () => {
     it('reads from modified_files field as fallback', async () => {
       readStdin.mockResolvedValue(makeHookData(['/src/app.js'], 'modified_files'));
 
-      await import('../../scripts/hooks/clean-state-check.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledTimes(1);
@@ -191,7 +208,7 @@ describe('clean-state-check hook', () => {
     it('reads from files field as fallback', async () => {
       readStdin.mockResolvedValue(makeHookData(['/src/utils.ts'], 'files'));
 
-      await import('../../scripts/hooks/clean-state-check.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledTimes(1);
@@ -202,7 +219,7 @@ describe('clean-state-check hook', () => {
     it('reads from camelCase changedFiles field', async () => {
       readStdin.mockResolvedValue(makeHookData(['/src/app.js'], 'changedFiles'));
 
-      await import('../../scripts/hooks/clean-state-check.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledTimes(1);
@@ -215,7 +232,7 @@ describe('clean-state-check hook', () => {
         task: { changed_files: ['/src/nested.ts'] },
       }));
 
-      await import('../../scripts/hooks/clean-state-check.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledTimes(1);
@@ -228,7 +245,7 @@ describe('clean-state-check hook', () => {
         result: { files: ['/src/r.jsx'] },
       }));
 
-      await import('../../scripts/hooks/clean-state-check.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledTimes(1);
@@ -241,7 +258,7 @@ describe('clean-state-check hook', () => {
     it('returns cleanState true with skip when no code files', async () => {
       readStdin.mockResolvedValue(makeHookData(['/docs/guide.md']));
 
-      await import('../../scripts/hooks/clean-state-check.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       // Non-code files get the skip message, no result object
@@ -253,7 +270,7 @@ describe('clean-state-check hook', () => {
     it('returns pending lint/tests when code files exist', async () => {
       readStdin.mockResolvedValue(makeHookData(['/src/index.js']));
 
-      await import('../../scripts/hooks/clean-state-check.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       const call = writeStdout.mock.calls[0][0];
@@ -270,7 +287,7 @@ describe('clean-state-check hook', () => {
       const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
       const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => {});
 
-      await import('../../scripts/hooks/clean-state-check.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(exitSpy).toHaveBeenCalledWith(0);

@@ -24,9 +24,16 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
  *    its only kill switches are cwd-derived: `getRepoRoot()` (null outside a
  *    repo) and an allowlist keyed on the git remote. There is no env disable.
  *    Running from a non-repo cwd makes `getRepoRoot()` return null so the hook
- *    returns at git-autopilot-close.js:502, before any git write. Relying on
+ *    returns at git-autopilot-close.js:503, before any git write. Relying on
  *    `.git/autopilot.json` `enabled:false` instead would be relying on a
  *    mutable runtime flag that `/autopilot` setup rewrites.
+ *
+ *    This is about the SPAWN vector and is still the only lever for it: the
+ *    dispatcher launches real child processes, which no import-time guard can
+ *    reach. The separate IMPORT vector — a test importing the hook module and
+ *    running its top-level body — is now closed by the direct-run guard in
+ *    git-autopilot-close.js. Do not read that guard as making this cwd
+ *    redirection redundant; they cover different entry points.
  *
  * Verified equivalent, not assumed: every payload below was diffed between
  * cwd=PLUGIN_ROOT and cwd=<non-repo> and the dispatcher output was identical.

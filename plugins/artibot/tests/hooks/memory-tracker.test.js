@@ -30,6 +30,18 @@ const { readFileSync, writeFileSync, mkdirSync, existsSync } = await import('nod
 // Tests
 // ---------------------------------------------------------------------------
 
+/**
+ * Import the hook and run its entry point. The module carries a direct-run
+ * guard, so importing it no longer executes `main()` — the call has to be
+ * explicit here, exactly as the spawned production process makes it.
+ *
+ * @returns {Promise<void>}
+ */
+async function runHook() {
+  const mod = await import('../../scripts/hooks/memory-tracker.js');
+  await mod.main();
+}
+
 describe('memory-tracker hook', () => {
   let originalEnv;
 
@@ -53,7 +65,7 @@ describe('memory-tracker hook', () => {
         JSON.stringify({ event_type: 'SessionStart' }),
       );
 
-      await import('../../scripts/hooks/memory-tracker.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledWith(
@@ -72,7 +84,7 @@ describe('memory-tracker hook', () => {
         JSON.stringify({ event_type: 'SessionStart' }),
       );
 
-      await import('../../scripts/hooks/memory-tracker.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledWith(
@@ -104,7 +116,7 @@ describe('memory-tracker hook', () => {
         JSON.stringify({ event_type: 'SessionStart' }),
       );
 
-      await import('../../scripts/hooks/memory-tracker.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledWith(
@@ -120,7 +132,7 @@ describe('memory-tracker hook', () => {
         JSON.stringify({ event_type: 'session_start' }),
       );
 
-      await import('../../scripts/hooks/memory-tracker.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledWith(
@@ -149,7 +161,7 @@ describe('memory-tracker hook', () => {
         JSON.stringify({ event_type: 'SessionStart' }),
       );
 
-      await import('../../scripts/hooks/memory-tracker.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledWith(
@@ -174,7 +186,7 @@ describe('memory-tracker hook', () => {
         }),
       );
 
-      await import('../../scripts/hooks/memory-tracker.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(mkdirSync).toHaveBeenCalledWith(
@@ -197,7 +209,7 @@ describe('memory-tracker hook', () => {
         JSON.stringify({ event_type: 'session_end', session_id: 'sess-456' }),
       );
 
-      await import('../../scripts/hooks/memory-tracker.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeFileSync).toHaveBeenCalled();
@@ -220,7 +232,7 @@ describe('memory-tracker hook', () => {
         }),
       );
 
-      await import('../../scripts/hooks/memory-tracker.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeFileSync).toHaveBeenCalled();
@@ -242,7 +254,7 @@ describe('memory-tracker hook', () => {
         }),
       );
 
-      await import('../../scripts/hooks/memory-tracker.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeFileSync).toHaveBeenCalled();
@@ -259,7 +271,7 @@ describe('memory-tracker hook', () => {
         }),
       );
 
-      await import('../../scripts/hooks/memory-tracker.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       // Default case: if hookData.error exists, handleError is called
@@ -279,7 +291,7 @@ describe('memory-tracker hook', () => {
         }),
       );
 
-      await import('../../scripts/hooks/memory-tracker.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeFileSync).toHaveBeenCalled();
@@ -300,7 +312,7 @@ describe('memory-tracker hook', () => {
         }),
       );
 
-      await import('../../scripts/hooks/memory-tracker.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeFileSync).toHaveBeenCalled();
@@ -332,7 +344,7 @@ describe('memory-tracker hook', () => {
         }),
       );
 
-      await import('../../scripts/hooks/memory-tracker.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeFileSync).toHaveBeenCalled();
@@ -352,7 +364,7 @@ describe('memory-tracker hook', () => {
         }),
       );
 
-      await import('../../scripts/hooks/memory-tracker.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(mkdirSync).toHaveBeenCalledWith(
@@ -366,7 +378,7 @@ describe('memory-tracker hook', () => {
     it('does nothing for invalid JSON input', async () => {
       readStdin.mockResolvedValue('not json');
 
-      await import('../../scripts/hooks/memory-tracker.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).not.toHaveBeenCalled();
@@ -378,7 +390,7 @@ describe('memory-tracker hook', () => {
         JSON.stringify({ event_type: 'unknown', data: 'something' }),
       );
 
-      await import('../../scripts/hooks/memory-tracker.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).not.toHaveBeenCalled();
@@ -394,7 +406,7 @@ describe('memory-tracker hook', () => {
         JSON.stringify({ event_type: 'SessionStart' }),
       );
 
-      await import('../../scripts/hooks/memory-tracker.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       // loadStoreSync catches JSON.parse errors and returns default

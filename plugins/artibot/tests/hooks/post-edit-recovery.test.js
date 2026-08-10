@@ -33,6 +33,18 @@ function makeHookData(toolName, toolOutput, overrides = {}) {
   });
 }
 
+/**
+ * Import the hook and run its entry point. The module carries a direct-run
+ * guard, so importing it no longer executes `main()` — the call has to be
+ * explicit here, exactly as the spawned production process makes it.
+ *
+ * @returns {Promise<void>}
+ */
+async function runHook() {
+  const mod = await import('../../scripts/hooks/post-edit-recovery.js');
+  await mod.main();
+}
+
 // ---------------------------------------------------------------------------
 // Unit tests for matchFailurePattern
 // ---------------------------------------------------------------------------
@@ -128,7 +140,7 @@ describe('post-edit-recovery hook', () => {
       makeHookData('Edit', 'Error: old_string not found in file')
     );
 
-    await import('../../scripts/hooks/post-edit-recovery.js');
+    await runHook();
     await new Promise((r) => setTimeout(r, 50));
 
     expect(writeStdout).toHaveBeenCalledTimes(1);
@@ -142,7 +154,7 @@ describe('post-edit-recovery hook', () => {
       makeHookData('Edit', 'old_string found multiple times in file')
     );
 
-    await import('../../scripts/hooks/post-edit-recovery.js');
+    await runHook();
     await new Promise((r) => setTimeout(r, 50));
 
     expect(writeStdout).toHaveBeenCalledTimes(1);
@@ -155,7 +167,7 @@ describe('post-edit-recovery hook', () => {
       makeHookData('Write', 'Error: file not found at /missing/path.js')
     );
 
-    await import('../../scripts/hooks/post-edit-recovery.js');
+    await runHook();
     await new Promise((r) => setTimeout(r, 50));
 
     expect(writeStdout).toHaveBeenCalledTimes(1);
@@ -168,7 +180,7 @@ describe('post-edit-recovery hook', () => {
       makeHookData('Edit', 'File updated successfully')
     );
 
-    await import('../../scripts/hooks/post-edit-recovery.js');
+    await runHook();
     await new Promise((r) => setTimeout(r, 50));
 
     expect(writeStdout).not.toHaveBeenCalled();
@@ -179,7 +191,7 @@ describe('post-edit-recovery hook', () => {
       makeHookData('Bash', 'old_string not found')
     );
 
-    await import('../../scripts/hooks/post-edit-recovery.js');
+    await runHook();
     await new Promise((r) => setTimeout(r, 50));
 
     expect(writeStdout).not.toHaveBeenCalled();
@@ -190,7 +202,7 @@ describe('post-edit-recovery hook', () => {
       makeHookData('Read', 'file not found')
     );
 
-    await import('../../scripts/hooks/post-edit-recovery.js');
+    await runHook();
     await new Promise((r) => setTimeout(r, 50));
 
     expect(writeStdout).not.toHaveBeenCalled();
@@ -207,7 +219,7 @@ describe('post-edit-recovery hook', () => {
       })
     );
 
-    await import('../../scripts/hooks/post-edit-recovery.js');
+    await runHook();
     await new Promise((r) => setTimeout(r, 50));
 
     expect(writeStdout).toHaveBeenCalledTimes(1);
@@ -225,7 +237,7 @@ describe('post-edit-recovery hook', () => {
       })
     );
 
-    await import('../../scripts/hooks/post-edit-recovery.js');
+    await runHook();
     await new Promise((r) => setTimeout(r, 50));
 
     // tool_response (failure) wins → recovery message emitted.
@@ -241,7 +253,7 @@ describe('post-edit-recovery hook', () => {
       })
     );
 
-    await import('../../scripts/hooks/post-edit-recovery.js');
+    await runHook();
     await new Promise((r) => setTimeout(r, 50));
 
     expect(writeStdout).toHaveBeenCalledTimes(1);
@@ -250,7 +262,7 @@ describe('post-edit-recovery hook', () => {
   it('handles null/missing hook data gracefully', async () => {
     readStdin.mockResolvedValue('invalid json {{{');
 
-    await import('../../scripts/hooks/post-edit-recovery.js');
+    await runHook();
     await new Promise((r) => setTimeout(r, 50));
 
     expect(writeStdout).not.toHaveBeenCalled();

@@ -48,6 +48,18 @@ const { readFileSync, existsSync } = await import('node:fs');
 // Tests
 // ---------------------------------------------------------------------------
 
+/**
+ * Import the hook and run its entry point. The module carries a direct-run
+ * guard, so importing it no longer executes `main()` — the call has to be
+ * explicit here, exactly as the spawned production process makes it.
+ *
+ * @returns {Promise<void>}
+ */
+async function runHook() {
+  const mod = await import('../../scripts/hooks/context-tracker.js');
+  await mod.main();
+}
+
 describe('context-tracker hook', () => {
   let stderrSpy;
 
@@ -288,7 +300,7 @@ describe('context-tracker hook', () => {
       readFileSync.mockReturnValue(JSON.stringify({ currentTokens: 45000, turnCount: 4 }));
 
       vi.resetModules();
-      await import('../../scripts/hooks/context-tracker.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       // Stdout pass-through
@@ -311,7 +323,7 @@ describe('context-tracker hook', () => {
       existsSync.mockReturnValue(false);
 
       vi.resetModules();
-      await import('../../scripts/hooks/context-tracker.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(stderrSpy).toHaveBeenCalledWith(
@@ -328,7 +340,7 @@ describe('context-tracker hook', () => {
       existsSync.mockReturnValue(false);
 
       vi.resetModules();
-      await import('../../scripts/hooks/context-tracker.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(stderrSpy).toHaveBeenCalledWith(
@@ -349,7 +361,7 @@ describe('context-tracker hook', () => {
       }));
 
       vi.resetModules();
-      await import('../../scripts/hooks/context-tracker.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(stderrSpy).toHaveBeenCalledWith(

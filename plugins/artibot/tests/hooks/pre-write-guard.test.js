@@ -55,6 +55,7 @@ vi.mock('node:os', async () => {
 });
 
 const { readStdin, writeStdout } = await import('../../scripts/utils/index.js');
+const { createErrorHandler } = await import('../../lib/core/hook-utils.js');
 const { existsSync, readFileSync } = await import('node:fs');
 
 // ---------------------------------------------------------------------------
@@ -87,6 +88,23 @@ function trackingPath(sessionId = 'test-session') {
 // Tests
 // ---------------------------------------------------------------------------
 
+/**
+ * Import the hook and run its entry point. The module carries a direct-run
+ * guard, so importing it no longer executes `main()` — the call has to be
+ * explicit here, exactly as the spawned production process makes it.
+ *
+ * @returns {Promise<void>}
+ */
+async function runHook() {
+  const mod = await import('../../scripts/hooks/pre-write-guard.js');
+  // The `.catch` mirrors the module's direct-run tail so the error-handling
+  // test still reaches the real handler. Keep in sync with pre-write-guard.js.
+  await mod.main().catch(createErrorHandler('pre-write-guard', {
+    writeStdout,
+    blockReason: 'Write-before-read guard failed. Blocking by default.',
+  }));
+}
+
 describe('pre-write-guard hook', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -106,7 +124,7 @@ describe('pre-write-guard hook', () => {
     it('records a read file path to tracking file (after debounce flush)', async () => {
       readStdin.mockResolvedValue(makePostReadData('/project/src/app.js'));
 
-      await import('../../scripts/hooks/pre-write-guard.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, DEBOUNCE_WAIT_MS));
 
       const tp = trackingPath();
@@ -125,7 +143,7 @@ describe('pre-write-guard hook', () => {
 
       readStdin.mockResolvedValue(makePostReadData('/project/src/app.js'));
 
-      await import('../../scripts/hooks/pre-write-guard.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, DEBOUNCE_WAIT_MS));
 
       // Path already in cache (seeded from disk) — recordReadPath skips
@@ -140,7 +158,7 @@ describe('pre-write-guard hook', () => {
       const session = 'batch-session';
 
       readStdin.mockResolvedValueOnce(makePostReadData('/project/src/a.js', session));
-      await import('../../scripts/hooks/pre-write-guard.js');
+      await runHook();
       // Reset module state would lose the cache; instead trigger a 2nd Read
       // via a fresh module import would also reset cache. Verify single-call
       // flush behaviour via the basic 1-record case above.
@@ -166,7 +184,7 @@ describe('pre-write-guard hook', () => {
 
       readStdin.mockResolvedValue(makePreWriteData(filePath));
 
-      await import('../../scripts/hooks/pre-write-guard.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledWith(
@@ -185,7 +203,7 @@ describe('pre-write-guard hook', () => {
 
       readStdin.mockResolvedValue(makePreWriteData(filePath, 'Edit'));
 
-      await import('../../scripts/hooks/pre-write-guard.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledWith(
@@ -207,7 +225,7 @@ describe('pre-write-guard hook', () => {
 
       readStdin.mockResolvedValue(makePreWriteData(filePath));
 
-      await import('../../scripts/hooks/pre-write-guard.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledWith(
@@ -235,7 +253,7 @@ describe('pre-write-guard hook', () => {
 
       readStdin.mockResolvedValue(makePreWriteData(filePath, 'Edit'));
 
-      await import('../../scripts/hooks/pre-write-guard.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledWith(
@@ -256,7 +274,7 @@ describe('pre-write-guard hook', () => {
 
       readStdin.mockResolvedValue(makePreWriteData(filePath));
 
-      await import('../../scripts/hooks/pre-write-guard.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledWith(
@@ -271,7 +289,7 @@ describe('pre-write-guard hook', () => {
 
       readStdin.mockResolvedValue(makePreWriteData(filePath));
 
-      await import('../../scripts/hooks/pre-write-guard.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledWith(
@@ -289,7 +307,7 @@ describe('pre-write-guard hook', () => {
         session_id: 'test-session',
       }));
 
-      await import('../../scripts/hooks/pre-write-guard.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledWith(
@@ -300,7 +318,7 @@ describe('pre-write-guard hook', () => {
     it('handles null hookData gracefully', async () => {
       readStdin.mockResolvedValue('invalid json');
 
-      await import('../../scripts/hooks/pre-write-guard.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       // Should not call writeStdout (early return)
@@ -315,7 +333,7 @@ describe('pre-write-guard hook', () => {
 
       readStdin.mockResolvedValue(makePreWriteData(filePath));
 
-      await import('../../scripts/hooks/pre-write-guard.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       // Corrupted tracking = empty read list = block existing file
@@ -336,7 +354,7 @@ describe('pre-write-guard hook', () => {
 
       readStdin.mockResolvedValue(makePreWriteData(filePath));
 
-      await import('../../scripts/hooks/pre-write-guard.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledWith(
@@ -358,7 +376,7 @@ describe('pre-write-guard hook', () => {
 
       readStdin.mockResolvedValue(makePreWriteData(filePath));
 
-      await import('../../scripts/hooks/pre-write-guard.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledWith(
@@ -377,7 +395,7 @@ describe('pre-write-guard hook', () => {
 
       readStdin.mockResolvedValue(makePreWriteData(filePath));
 
-      await import('../../scripts/hooks/pre-write-guard.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledWith(
@@ -396,7 +414,7 @@ describe('pre-write-guard hook', () => {
 
       readStdin.mockResolvedValue(makePreWriteData(filePath));
 
-      await import('../../scripts/hooks/pre-write-guard.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledWith(
@@ -409,7 +427,7 @@ describe('pre-write-guard hook', () => {
     it('blocks by default when hook errors', async () => {
       readStdin.mockRejectedValue(new Error('stdin read failed'));
 
-      await import('../../scripts/hooks/pre-write-guard.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledWith(
@@ -444,7 +462,7 @@ describe('pre-write-guard hook', () => {
 
       readStdin.mockResolvedValue(makePreWriteData('/workspace/sub-project/lib/foo.js'));
 
-      await import('../../scripts/hooks/pre-write-guard.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledWith(
@@ -468,7 +486,7 @@ describe('pre-write-guard hook', () => {
         makePreWriteData('/workspace/plugins/artibot/lib/core/config.js'),
       );
 
-      await import('../../scripts/hooks/pre-write-guard.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledWith(
@@ -512,7 +530,7 @@ describe('pre-write-guard hook', () => {
 
       readStdin.mockResolvedValue(makePreWriteData(filePath));
 
-      await import('../../scripts/hooks/pre-write-guard.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledWith(
@@ -544,7 +562,7 @@ describe('pre-write-guard hook', () => {
 
       readStdin.mockResolvedValue(makePreWriteData(filePath));
 
-      await import('../../scripts/hooks/pre-write-guard.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledWith(
@@ -572,7 +590,7 @@ describe('pre-write-guard hook', () => {
 
       readStdin.mockResolvedValue(makePreWriteData(filePath));
 
-      await import('../../scripts/hooks/pre-write-guard.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledWith(
@@ -603,7 +621,7 @@ describe('pre-write-guard hook', () => {
 
       readStdin.mockResolvedValue(makePreWriteData(filePath));
 
-      await import('../../scripts/hooks/pre-write-guard.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledWith(
@@ -640,7 +658,7 @@ describe('pre-write-guard hook', () => {
 
       readStdin.mockResolvedValue(makePreWriteData(filePath, 'Write', sessionId));
 
-      await import('../../scripts/hooks/pre-write-guard.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       // Second attempt: same fingerprint → approve, loop broken.

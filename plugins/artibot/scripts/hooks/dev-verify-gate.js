@@ -46,6 +46,7 @@ import {
   getRepoRoot as getCachedRepoRoot,
 } from '../../lib/git/repo-root-cache.js';
 import { buildDevVerifyOutput, resolveDevVerifyMode } from '../../lib/core/dev-verify-output.js';
+import { fileURLToPath } from 'node:url';
 
 const HOOK_NAME = 'dev-verify-gate';
 const STATE_FILE = 'last-dev-verify-sha.txt';
@@ -246,7 +247,7 @@ function resolveHookEventName(hookData) {
   return hookData?.hook_event_name === 'SubagentStop' ? 'SubagentStop' : 'Stop';
 }
 
-async function main() {
+export async function main() {
   // v4.5.8: emergency disable removed. The marker-file pattern below now
   // distinguishes main-agent edits (gate fires) from teammate edits and
   // working-tree drift (gate bails). See `mark-main-agent-edit.js` for the
@@ -293,4 +294,13 @@ async function main() {
   writeStdout(buildDevVerifyOutput(DEV_VERIFY_REASON, { mode, hookEventName }));
 }
 
-main().catch(createErrorHandler(HOOK_NAME, { exit: false }));
+// Direct-run guard: importing this module (tests) must not execute the hook.
+// main() blocks on stdin, so an import both hangs the importer and fires the
+// hook's side effects. Production is unaffected — the dispatcher (or Claude
+// Code) spawns this file as argv[1], so the guard passes there.
+const isDirectRun = process.argv[1]
+  && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
+
+if (isDirectRun) {
+  main().catch(createErrorHandler(HOOK_NAME, { exit: false }));
+}

@@ -29,6 +29,7 @@ import { existsSync, readdirSync, readFileSync, statSync, unlinkSync } from 'nod
 import { execSync } from 'node:child_process';
 import path from 'node:path';
 import os from 'node:os';
+import { fileURLToPath } from 'node:url';
 import { logHookError } from '../../lib/core/hook-utils.js';
 
 // -------------------------------------------------------------------------
@@ -187,8 +188,17 @@ export function main(opts = {}) {
 // CLI entry
 // -------------------------------------------------------------------------
 
-const isCliEntry = process.argv[1] && process.argv[1].endsWith('image-cleanup.js');
-if (isCliEntry) {
+// Direct-run guard: importing this module (tests) must not execute the hook —
+// note this branch calls process.exit(0), so an unguarded import would kill the
+// importing process outright. Production is unaffected: the dispatcher spawns
+// this file as argv[1].
+//
+// Was `argv[1].endsWith('image-cleanup.js')`: a suffix test that any path ending
+// in that name satisfied, comparing a possibly-relative argv[1] unresolved.
+const isDirectRun = process.argv[1]
+  && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
+
+if (isDirectRun) {
   try {
     main();
     process.exit(0);

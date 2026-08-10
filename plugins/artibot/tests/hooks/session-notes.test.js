@@ -78,6 +78,18 @@ function resetState() {
   mockState.allowed = true;
 }
 
+/**
+ * Import the hook and run its entry point. The module carries a direct-run
+ * guard, so importing it no longer executes `main()` — the call has to be
+ * explicit here, exactly as the spawned production process makes it.
+ *
+ * @returns {Promise<void>}
+ */
+async function runHook() {
+  const mod = await import('../../scripts/hooks/session-notes.js');
+  await mod.main();
+}
+
 describe('session-notes hook', () => {
   let stderrSpy;
 
@@ -98,7 +110,7 @@ describe('session-notes hook', () => {
       return '';
     };
 
-    await import('../../scripts/hooks/session-notes.js');
+    await runHook();
     expect(mockState.appendFiles).toHaveLength(0);
     expect(mockState.writeFiles).toHaveLength(0);
   });
@@ -110,7 +122,7 @@ describe('session-notes hook', () => {
       return '';
     };
 
-    await import('../../scripts/hooks/session-notes.js');
+    await runHook();
     expect(mockState.appendFiles).toHaveLength(0);
   });
 
@@ -126,7 +138,7 @@ describe('session-notes hook', () => {
     mockState.existsSyncResults = { 'session-notes-state.json': true };
     mockState.readFileSyncImpl = () => JSON.stringify({ lastSeenSha: 'oldsha123' });
 
-    await import('../../scripts/hooks/session-notes.js');
+    await runHook();
     expect(mockState.appendFiles).toHaveLength(0);
   });
 
@@ -147,7 +159,7 @@ describe('session-notes hook', () => {
     // No state file → first-run path; no notes file → header written
     mockState.existsSyncResults = {};
 
-    await import('../../scripts/hooks/session-notes.js');
+    await runHook();
 
     // Header was written on first ever run
     const headerWrite = mockState.writeFiles.find((w) => w.path.includes('SESSION-NOTES.md'));
@@ -179,7 +191,7 @@ describe('session-notes hook', () => {
     mockState.existsSyncResults = { 'session-notes-state.json': true };
     mockState.readFileSyncImpl = () => JSON.stringify({ lastSeenSha: 'oldsha' });
 
-    await import('../../scripts/hooks/session-notes.js');
+    await runHook();
 
     const entryAppend = mockState.appendFiles.find((a) => a.path.includes('SESSION-NOTES.md'));
     expect(entryAppend.data).toContain('**Files touched**: 3');
@@ -202,7 +214,7 @@ describe('session-notes hook', () => {
     mockState.existsSyncResults = { 'session-notes-state.json': true };
     mockState.readFileSyncImpl = () => JSON.stringify({ lastSeenSha: 'oldsha' });
 
-    await import('../../scripts/hooks/session-notes.js');
+    await runHook();
 
     const entryAppend = mockState.appendFiles.find((a) => a.path.includes('SESSION-NOTES.md'));
     expect(entryAppend.data).toContain('**WIP commits squashed**: 5');

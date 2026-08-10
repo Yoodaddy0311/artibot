@@ -13,6 +13,7 @@ vi.mock('../../scripts/utils/index.js', () => ({
 }));
 
 const { readStdin, writeStdout } = await import('../../scripts/utils/index.js');
+const { createErrorHandler } = await import('../../lib/core/hook-utils.js');
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -21,6 +22,22 @@ function makeHookData(stdout = '', stderr = '') {
   return JSON.stringify({
     tool_result: { stdout, stderr },
   });
+}
+
+/**
+ * Import the hook and run its entry point. The module carries a direct-run
+ * guard, so importing it no longer executes `main()` — the call has to be
+ * explicit here, exactly as the spawned production process makes it.
+ *
+ * @returns {Promise<void>}
+ */
+async function runHook() {
+  const mod = await import('../../scripts/hooks/post-bash.js');
+  // The `.catch` mirrors the module's direct-run tail. Without it the
+  // 'exits gracefully when readStdin rejects' case rejects into the test
+  // instead of reaching the real error handler — which is the behaviour that
+  // test exists to pin. Keep in sync with the tail in post-bash.js.
+  await mod.main().catch(createErrorHandler('post-bash', { exit: true }));
 }
 
 // ---------------------------------------------------------------------------
@@ -38,7 +55,7 @@ describe('post-bash hook', () => {
         'remote: Create a pull request for \'feature\' on GitHub by visiting:\nremote: https://github.com/user/repo/pull/42\n',
       ));
 
-      await import('../../scripts/hooks/post-bash.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledTimes(1);
@@ -53,7 +70,7 @@ describe('post-bash hook', () => {
         'remote: https://github.com/org/project/pull/123\n',
       ));
 
-      await import('../../scripts/hooks/post-bash.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledTimes(1);
@@ -68,7 +85,7 @@ describe('post-bash hook', () => {
         'https://gitlab.com/group/project/merge_requests/55',
       ));
 
-      await import('../../scripts/hooks/post-bash.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledTimes(1);
@@ -83,7 +100,7 @@ describe('post-bash hook', () => {
         'https://bitbucket.org/team/repo/pull-requests/99',
       ));
 
-      await import('../../scripts/hooks/post-bash.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledTimes(1);
@@ -98,7 +115,7 @@ describe('post-bash hook', () => {
         'https://dev.azure.com/org/project/pullrequest/7',
       ));
 
-      await import('../../scripts/hooks/post-bash.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledTimes(1);
@@ -113,7 +130,7 @@ describe('post-bash hook', () => {
         'https://github.com/user/repo/pull/1\nhttps://github.com/user/repo/pull/2',
       ));
 
-      await import('../../scripts/hooks/post-bash.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledTimes(1);
@@ -128,7 +145,7 @@ describe('post-bash hook', () => {
         `${url}\n${url}\n${url}`,
       ));
 
-      await import('../../scripts/hooks/post-bash.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledTimes(1);
@@ -144,7 +161,7 @@ describe('post-bash hook', () => {
         'https://gitlab.com/group/project/merge_requests/2',
       ));
 
-      await import('../../scripts/hooks/post-bash.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledTimes(1);
@@ -160,7 +177,7 @@ describe('post-bash hook', () => {
         'Counting objects: 3, done.\nWriting objects: 100%',
       ));
 
-      await import('../../scripts/hooks/post-bash.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).not.toHaveBeenCalled();
@@ -169,7 +186,7 @@ describe('post-bash hook', () => {
     it('does not call writeStdout when output is empty', async () => {
       readStdin.mockResolvedValue(makeHookData('', ''));
 
-      await import('../../scripts/hooks/post-bash.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).not.toHaveBeenCalled();
@@ -178,7 +195,7 @@ describe('post-bash hook', () => {
     it('does not call writeStdout when tool_result is missing', async () => {
       readStdin.mockResolvedValue(JSON.stringify({}));
 
-      await import('../../scripts/hooks/post-bash.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).not.toHaveBeenCalled();
@@ -191,7 +208,7 @@ describe('post-bash hook', () => {
         'https://github.com/very-long-org-name/very-long-repo-name/pull/999999',
       ));
 
-      await import('../../scripts/hooks/post-bash.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledTimes(1);
@@ -204,7 +221,7 @@ describe('post-bash hook', () => {
         'Visit https://github.com/user/repo for more info',
       ));
 
-      await import('../../scripts/hooks/post-bash.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).not.toHaveBeenCalled();
@@ -219,7 +236,7 @@ describe('post-bash hook', () => {
         tool_response: 'remote: https://github.com/user/repo/pull/77\n',
       }));
 
-      await import('../../scripts/hooks/post-bash.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledTimes(1);
@@ -232,7 +249,7 @@ describe('post-bash hook', () => {
         tool_response: { stdout: '', stderr: 'https://github.com/org/p/pull/88\n' },
       }));
 
-      await import('../../scripts/hooks/post-bash.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledTimes(1);
@@ -246,7 +263,7 @@ describe('post-bash hook', () => {
         tool_result: { stdout: 'https://github.com/legacy/repo/pull/2', stderr: '' },
       }));
 
-      await import('../../scripts/hooks/post-bash.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledTimes(1);
@@ -262,7 +279,7 @@ describe('post-bash hook', () => {
       const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
       const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => {});
 
-      await import('../../scripts/hooks/post-bash.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(exitSpy).toHaveBeenCalledWith(0);
@@ -276,7 +293,7 @@ describe('post-bash hook', () => {
     it('handles null parseJSON result gracefully', async () => {
       readStdin.mockResolvedValue('not valid json');
 
-      await import('../../scripts/hooks/post-bash.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       // No crash, no output

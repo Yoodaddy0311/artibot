@@ -17,6 +17,8 @@
 
 import { readFileSync } from 'node:fs';
 import { parseJSON, readStdin, resolveConfigPath, writeStdout } from '../utils/index.js';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 function loadAllowlist() {
   try {
@@ -51,7 +53,7 @@ export function matchesAllowEntry(entry, toolName, toolInput) {
   return true;
 }
 
-async function main() {
+export async function main() {
   const raw = await readStdin();
   let payload;
   try {
@@ -80,6 +82,15 @@ async function main() {
   });
 }
 
-main().catch(() => {
-  // Silent — never block on hook failure.
-});
+// Direct-run guard: importing this module (tests) must not execute the hook.
+// main() blocks on stdin, so an import both hangs the importer and fires the
+// hook's side effects. Production is unaffected — the dispatcher (or Claude
+// Code) spawns this file as argv[1], so the guard passes there.
+const isDirectRun = process.argv[1]
+  && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
+
+if (isDirectRun) {
+  main().catch(() => {
+    // Silent — never block on hook failure.
+  });
+}

@@ -109,6 +109,18 @@ const POLL_MS = 25;
 // under the 30s vitest testTimeout while absorbing heavy cold-start saturation.
 const SETTLE_TIMEOUT_MS = 15_000;
 
+/**
+ * Import the hook and run its entry point. The module carries a direct-run
+ * guard, so importing it no longer executes `main()` — the call has to be
+ * explicit here, exactly as the spawned production process makes it.
+ *
+ * @returns {Promise<void>}
+ */
+async function runHook() {
+  const mod = await import('../../scripts/hooks/session-start.js');
+  await mod.main();
+}
+
 describe('session-start hook', () => {
   let stderrSpy;
   let exitSpy;
@@ -154,7 +166,7 @@ describe('session-start hook', () => {
   }
 
   async function importAndWait(options = {}) {
-    await import('../../scripts/hooks/session-start.js');
+    await runHook();
     if (options.waitForStdout === false) {
       await new Promise((r) => setTimeout(r, POLL_MS));
       return;

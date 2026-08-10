@@ -26,6 +26,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { atomicWriteSync } from '../utils/index.js';
 import { logHookError } from '../../lib/core/hook-utils.js';
 import { isAutopilotAllowed } from '../../lib/autopilot/repo-identity.js';
@@ -230,9 +231,17 @@ export async function main(argv) {
   return hasExisting ? 'updated' : 'created';
 }
 
-// CLI entry — only runs when this file is invoked directly, not on import.
-const isCliEntry = process.argv[1] && process.argv[1].endsWith('git-autopilot-setup.js');
-if (isCliEntry) {
+// Direct-run guard: importing this module (tests) must not execute the hook.
+// Production is unaffected — the dispatcher spawns this file as argv[1].
+//
+// Was `argv[1].endsWith('git-autopilot-setup.js')`: a suffix test, so any path
+// ending in that name (a copy, a sibling checkout, `my-git-autopilot-setup.js`)
+// satisfied it, and a relative argv[1] was compared unresolved. Identity on the
+// resolved path is the check every other hook now uses.
+const isDirectRun = process.argv[1]
+  && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
+
+if (isDirectRun) {
   main().then((outcome) => {
     if (outcome === 'error') process.exit(1);
   }).catch((err) => {

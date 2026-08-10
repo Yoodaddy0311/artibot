@@ -36,6 +36,18 @@ function makeBashHookData({ command, exit_code }) {
   });
 }
 
+/**
+ * Import the hook and run its entry point. The module carries a direct-run
+ * guard, so importing it no longer executes `main()` — the call has to be
+ * explicit here, exactly as the spawned production process makes it.
+ *
+ * @returns {Promise<void>}
+ */
+async function runHook() {
+  const mod = await import('../../scripts/hooks/post-bash-failure.js');
+  await mod.main();
+}
+
 // ---------------------------------------------------------------------------
 // Unit tests
 // ---------------------------------------------------------------------------
@@ -151,7 +163,7 @@ describe('post-bash-failure hook', () => {
       makeBashHookData({ command: 'npm run build', exit_code: 0 }),
     );
 
-    await import('../../scripts/hooks/post-bash-failure.js');
+    await runHook();
     await new Promise((r) => setTimeout(r, 30));
 
     expect(writeStdout).not.toHaveBeenCalled();
@@ -162,7 +174,7 @@ describe('post-bash-failure hook', () => {
       makeBashHookData({ command: 'npm run build', exit_code: 1 }),
     );
 
-    await import('../../scripts/hooks/post-bash-failure.js');
+    await runHook();
     await new Promise((r) => setTimeout(r, 30));
 
     expect(writeStdout).toHaveBeenCalledTimes(1);
@@ -176,7 +188,7 @@ describe('post-bash-failure hook', () => {
       makeBashHookData({ command: 'npx vitest run', exit_code: 1 }),
     );
 
-    await import('../../scripts/hooks/post-bash-failure.js');
+    await runHook();
     await new Promise((r) => setTimeout(r, 30));
 
     expect(writeStdout).toHaveBeenCalledTimes(1);
@@ -189,7 +201,7 @@ describe('post-bash-failure hook', () => {
       makeBashHookData({ command: 'git push origin main', exit_code: 128 }),
     );
 
-    await import('../../scripts/hooks/post-bash-failure.js');
+    await runHook();
     await new Promise((r) => setTimeout(r, 30));
 
     expect(writeStdout).not.toHaveBeenCalled();
@@ -202,7 +214,7 @@ describe('post-bash-failure hook', () => {
       tool_response: { exit_code: 1 },
     }));
 
-    await import('../../scripts/hooks/post-bash-failure.js');
+    await runHook();
     await new Promise((r) => setTimeout(r, 30));
 
     expect(writeStdout).not.toHaveBeenCalled();
@@ -215,7 +227,7 @@ describe('post-bash-failure hook', () => {
       tool_response: { exit_code: 1 },
     }));
 
-    await import('../../scripts/hooks/post-bash-failure.js');
+    await runHook();
     await new Promise((r) => setTimeout(r, 30));
 
     expect(writeStdout).toHaveBeenCalledTimes(1);
@@ -230,7 +242,7 @@ describe('post-bash-failure hook', () => {
       tool_response: { exit_code: 0 },
     }));
 
-    await import('../../scripts/hooks/post-bash-failure.js');
+    await runHook();
     await new Promise((r) => setTimeout(r, 30));
 
     expect(writeStdout).not.toHaveBeenCalled();
@@ -243,7 +255,7 @@ describe('post-bash-failure hook', () => {
       tool_response: {},
     }));
 
-    await import('../../scripts/hooks/post-bash-failure.js');
+    await runHook();
     await new Promise((r) => setTimeout(r, 30));
 
     expect(writeStdout).not.toHaveBeenCalled();
@@ -252,7 +264,7 @@ describe('post-bash-failure hook', () => {
   it('handles null hook data gracefully', async () => {
     readStdin.mockResolvedValue('not json {{{');
 
-    await import('../../scripts/hooks/post-bash-failure.js');
+    await runHook();
     await new Promise((r) => setTimeout(r, 30));
 
     expect(writeStdout).not.toHaveBeenCalled();

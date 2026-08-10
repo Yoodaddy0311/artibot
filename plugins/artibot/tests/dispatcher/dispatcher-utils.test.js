@@ -1,6 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   extractToolName,
+  isMainEntry,
   mergeResults,
   parseHookStdout,
 } from '../../scripts/hooks/_dispatcher-utils.js';
@@ -145,5 +151,78 @@ describe('mergeResults', () => {
     const merged = mergeResults([{ decision: 'block' }], 'X');
     expect(merged.decision).toBe('block');
     expect(typeof merged.reason).toBe('string');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// isMainEntry — percent-encoding regression.
+//
+// Every dispatcher gates its main() on this helper, so a false negative here is
+// not a wrong boolean: it is five dispatchers silently doing nothing when Claude
+// Code spawns them. The old implementation compared `new URL(url).pathname` (a
+// percent-ENCODED string) against `process.argv[1]` (a raw filesystem path), so
+// it broke on any install path containing a space, a non-ASCII character, `~`
+// (Windows 8.3 short names) or `#`.
+//
+// These cases run the helper in a REAL child process under a real directory of
+// each shape, because that is the only way argv[1] and import.meta.url are
+// produced the way production produces them. Constructing the two strings by
+// hand in-process would test the test, not the hook.
+// ---------------------------------------------------------------------------
+describe('isMainEntry (path-encoding)', () => {
+  // A long-form base: the OS temp dir is `…\HEECHA~1\…` on Windows, whose tilde
+  // would itself trigger the bug and mask which case is under test.
+  const BASE = path.join(os.homedir(), 'AppData', 'Local', 'Temp', 'artibot-ime-test');
+
+  const PROBE = [
+    "import { isMainEntry } from %DUTILS%;",
+    'process.stdout.write(JSON.stringify({ main: isMainEntry(import.meta.url) }));',
+  ].join('\n');
+
+  const DUTILS = pathToFileURL(path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    '..', '..', 'scripts', 'hooks', '_dispatcher-utils.js',
+  )).href;
+
+  /** Write the probe into `<BASE>/<dirName>/probe.mjs`, run it, return its verdict. */
+  function runProbeIn(dirName) {
+    const dir = path.join(BASE, dirName);
+    mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, 'probe.mjs');
+    writeFileSync(file, PROBE.replace('%DUTILS%', JSON.stringify(DUTILS)), 'utf8');
+    const out = execFileSync(process.execPath, [file], { encoding: 'utf8' });
+    return JSON.parse(out).main;
+  }
+
+  afterAll(() => rmSync(BASE, { recursive: true, force: true }));
+
+  it.each([
+    ['plain', 'plain'],
+    ['a space', 'with space'],
+    ['non-ASCII (Korean)', '바탕 화면'],
+    ['a tilde (8.3 short name)', 'tilde~name'],
+    ['a hash (URL fragment)', 'hash#tag'],
+    ['parentheses', 'paren(1)'],
+  ])('resolves true when the path contains %s', (_label, dirName) => {
+    expect(runProbeIn(dirName)).toBe(true);
+  });
+
+  it('stays false when argv[1] is a different file in the same directory', () => {
+    // The helper must not degrade into "same folder" matching while fixing the
+    // encoding: identity is still the contract.
+    const dir = path.join(BASE, 'with space');
+    mkdirSync(dir, { recursive: true });
+    const probe = path.join(dir, 'other-entry.mjs');
+    writeFileSync(probe, PROBE.replace('%DUTILS%', JSON.stringify(DUTILS)), 'utf8');
+    const sibling = path.join(dir, 'sibling.mjs');
+    writeFileSync(sibling, `await import(${JSON.stringify(pathToFileURL(probe).href)});`, 'utf8');
+
+    const out = execFileSync(process.execPath, [sibling], { encoding: 'utf8' });
+    expect(JSON.parse(out).main).toBe(false);
+  });
+
+  it('returns false rather than throwing on a malformed url', () => {
+    expect(isMainEntry('not-a-url')).toBe(false);
+    expect(isMainEntry(undefined)).toBe(false);
   });
 });

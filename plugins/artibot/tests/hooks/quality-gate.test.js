@@ -40,6 +40,18 @@ function makeHookData(toolName, filePath, overrides = {}) {
 // Tests
 // ---------------------------------------------------------------------------
 
+/**
+ * Import the hook and run its entry point. The module carries a direct-run
+ * guard, so importing it no longer executes `main()` — the call has to be
+ * explicit here, exactly as the spawned production process makes it.
+ *
+ * @returns {Promise<void>}
+ */
+async function runHook() {
+  const mod = await import('../../scripts/hooks/quality-gate.js');
+  await mod.main();
+}
+
 describe('quality-gate hook', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -52,7 +64,7 @@ describe('quality-gate hook', () => {
       readStdin.mockResolvedValue(makeHookData('Read', '/project/src/app.js'));
       readFileSync.mockReturnValue('const x = 1;');
 
-      await import('../../scripts/hooks/quality-gate.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).not.toHaveBeenCalled();
@@ -62,7 +74,7 @@ describe('quality-gate hook', () => {
       readStdin.mockResolvedValue(makeHookData('Edit', '/project/src/app.js'));
       readFileSync.mockReturnValue('console.log("test");');
 
-      await import('../../scripts/hooks/quality-gate.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalled();
@@ -72,7 +84,7 @@ describe('quality-gate hook', () => {
       readStdin.mockResolvedValue(makeHookData('Write', '/project/src/app.js'));
       readFileSync.mockReturnValue('console.log("test");');
 
-      await import('../../scripts/hooks/quality-gate.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalled();
@@ -84,7 +96,7 @@ describe('quality-gate hook', () => {
       readStdin.mockResolvedValue(makeHookData('Edit', '/project/docs/readme.md'));
       readFileSync.mockReturnValue('console.log("test");');
 
-      await import('../../scripts/hooks/quality-gate.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).not.toHaveBeenCalled();
@@ -96,7 +108,7 @@ describe('quality-gate hook', () => {
       );
       readFileSync.mockReturnValue('const secret_key = "sk-12345678abcdefgh";');
 
-      await import('../../scripts/hooks/quality-gate.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).not.toHaveBeenCalled();
@@ -108,7 +120,7 @@ describe('quality-gate hook', () => {
       readStdin.mockResolvedValue(makeHookData('Edit', '/project/src/app.js'));
       readFileSync.mockReturnValue('function run() {\n  console.log("debug");\n}');
 
-      await import('../../scripts/hooks/quality-gate.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledWith(
@@ -124,7 +136,7 @@ describe('quality-gate hook', () => {
         'console.log("a");\nconsole.error("b");\nconsole.debug("c");',
       );
 
-      await import('../../scripts/hooks/quality-gate.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledWith(
@@ -140,7 +152,7 @@ describe('quality-gate hook', () => {
         'function add(a, b) {\n  return a + b;\n}\n',
       );
 
-      await import('../../scripts/hooks/quality-gate.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).not.toHaveBeenCalled();
@@ -154,7 +166,7 @@ describe('quality-gate hook', () => {
         'const api_key = "sk-proj-ABCDEFGHIJKLMNOPQRSTUVWXYZ123456";\n',
       );
 
-      await import('../../scripts/hooks/quality-gate.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledWith(
@@ -171,7 +183,7 @@ describe('quality-gate hook', () => {
         'const accessKey = "' + 'AKIA' + 'IOSFODNN7EXAMPLE";\n',
       );
 
-      await import('../../scripts/hooks/quality-gate.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledWith(
@@ -188,7 +200,7 @@ describe('quality-gate hook', () => {
         'const token = "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij";\n',
       );
 
-      await import('../../scripts/hooks/quality-gate.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledWith(
@@ -204,7 +216,7 @@ describe('quality-gate hook', () => {
         '// const api_key = "sk-proj-ABCDEFGHIJKLMNOPQRSTUVWXYZ123456";\nconst x = 1;\n',
       );
 
-      await import('../../scripts/hooks/quality-gate.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       // writeStdout either not called or called without 'block' decision
@@ -220,7 +232,7 @@ describe('quality-gate hook', () => {
       const bigFile = Array.from({ length: 850 }, (_, i) => `const line${i} = ${i};`).join('\n');
       readFileSync.mockReturnValue(bigFile);
 
-      await import('../../scripts/hooks/quality-gate.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledWith(
@@ -235,7 +247,7 @@ describe('quality-gate hook', () => {
       const smallFile = Array.from({ length: 50 }, (_, i) => `const line${i} = ${i};`).join('\n');
       readFileSync.mockReturnValue(smallFile);
 
-      await import('../../scripts/hooks/quality-gate.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).not.toHaveBeenCalled();
@@ -246,7 +258,7 @@ describe('quality-gate hook', () => {
     it('does nothing when hookData is null', async () => {
       readStdin.mockResolvedValue('not valid json {{');
 
-      await import('../../scripts/hooks/quality-gate.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).not.toHaveBeenCalled();
@@ -257,7 +269,7 @@ describe('quality-gate hook', () => {
         JSON.stringify({ tool_name: 'Edit', tool_input: {} }),
       );
 
-      await import('../../scripts/hooks/quality-gate.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).not.toHaveBeenCalled();
@@ -267,7 +279,7 @@ describe('quality-gate hook', () => {
       existsSync.mockReturnValue(false);
       readStdin.mockResolvedValue(makeHookData('Edit', '/project/src/ghost.js'));
 
-      await import('../../scripts/hooks/quality-gate.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).not.toHaveBeenCalled();
@@ -277,7 +289,7 @@ describe('quality-gate hook', () => {
       readStdin.mockResolvedValue(makeHookData('Edit', '/project/src/locked.js'));
       readFileSync.mockImplementation(() => { throw new Error('EACCES'); });
 
-      await import('../../scripts/hooks/quality-gate.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).not.toHaveBeenCalled();

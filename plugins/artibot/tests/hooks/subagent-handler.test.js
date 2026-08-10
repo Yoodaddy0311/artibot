@@ -28,6 +28,7 @@ vi.mock('../../lib/core/file-lock.js', () => ({
 }));
 
 const { readStdin, writeStdout, atomicWriteSync } = await import('../../scripts/utils/index.js');
+const { createErrorHandler } = await import('../../lib/core/hook-utils.js');
 const { readFileSync, existsSync } = await import('node:fs');
 
 // ---------------------------------------------------------------------------
@@ -35,6 +36,20 @@ const { readFileSync, existsSync } = await import('node:fs');
 // ---------------------------------------------------------------------------
 function makeHookData(data) {
   return JSON.stringify(data);
+}
+
+/**
+ * Import the hook and run its entry point. The module carries a direct-run
+ * guard, so importing it no longer executes `main()` — the call has to be
+ * explicit here, exactly as the spawned production process makes it.
+ *
+ * @returns {Promise<void>}
+ */
+async function runHook() {
+  const mod = await import('../../scripts/hooks/subagent-handler.js');
+  // The `.catch` mirrors the module's direct-run tail so the error-handling
+  // test still reaches the real handler. Keep in sync with subagent-handler.js.
+  await mod.main().catch(createErrorHandler('subagent-handler', { exit: true }));
 }
 
 // ---------------------------------------------------------------------------
@@ -91,7 +106,7 @@ describe('subagent-handler hook', () => {
         role: 'builder',
       }));
 
-      await import('../../scripts/hooks/subagent-handler.js');
+      await runHook();
       await waitForSettle();
 
       expect(atomicWriteSync).toHaveBeenCalledTimes(1);
@@ -116,7 +131,7 @@ describe('subagent-handler hook', () => {
         agent_type: 'qa',
       }));
 
-      await import('../../scripts/hooks/subagent-handler.js');
+      await runHook();
       await waitForSettle();
 
       const savedState = atomicWriteSync.mock.calls[0][1];
@@ -130,7 +145,7 @@ describe('subagent-handler hook', () => {
         name: 'architect-agent',
       }));
 
-      await import('../../scripts/hooks/subagent-handler.js');
+      await runHook();
       await waitForSettle();
 
       const savedState = atomicWriteSync.mock.calls[0][1];
@@ -142,7 +157,7 @@ describe('subagent-handler hook', () => {
       process.argv = ['node', 'subagent-handler.js', 'start'];
       readStdin.mockResolvedValue(makeHookData({}));
 
-      await import('../../scripts/hooks/subagent-handler.js');
+      await runHook();
       await waitForSettle();
 
       const savedState = atomicWriteSync.mock.calls[0][1];
@@ -161,7 +176,7 @@ describe('subagent-handler hook', () => {
         role: 'builder',
       }));
 
-      await import('../../scripts/hooks/subagent-handler.js');
+      await runHook();
       await waitForSettle();
 
       const savedState = atomicWriteSync.mock.calls[0][1];
@@ -179,7 +194,7 @@ describe('subagent-handler hook', () => {
         session_id: 'sess-abc',
       }));
 
-      await import('../../scripts/hooks/subagent-handler.js');
+      await runHook();
       await waitForSettle();
 
       const savedState = atomicWriteSync.mock.calls[0][1];
@@ -197,7 +212,7 @@ describe('subagent-handler hook', () => {
         session_id: 'sess-1',
       }));
 
-      await import('../../scripts/hooks/subagent-handler.js');
+      await runHook();
       await waitForSettle();
 
       expect(atomicWriteSync.mock.calls[0][1].domain).toBe('frontend');
@@ -207,7 +222,7 @@ describe('subagent-handler hook', () => {
       process.argv = ['node', 'subagent-handler.js', 'start'];
       readStdin.mockResolvedValue(makeHookData({ agent_id: 'x', agent_type: 'qa' }));
 
-      await import('../../scripts/hooks/subagent-handler.js');
+      await runHook();
       await waitForSettle();
 
       expect(atomicWriteSync.mock.calls[0][1].domain).toBe('qa');
@@ -228,7 +243,7 @@ describe('subagent-handler hook', () => {
         session_id: 'sess-new',
       }));
 
-      await import('../../scripts/hooks/subagent-handler.js');
+      await runHook();
       await waitForSettle();
 
       const savedState = atomicWriteSync.mock.calls[0][1];
@@ -248,7 +263,7 @@ describe('subagent-handler hook', () => {
       }));
       readStdin.mockResolvedValue(makeHookData({ agent_id: 'x', role: 'r' }));
 
-      await import('../../scripts/hooks/subagent-handler.js');
+      await runHook();
       await waitForSettle();
 
       const savedState = atomicWriteSync.mock.calls[0][1];
@@ -267,7 +282,7 @@ describe('subagent-handler hook', () => {
       }));
       readStdin.mockResolvedValue(makeHookData({ agent_id: 'builder-01' }));
 
-      await import('../../scripts/hooks/subagent-handler.js');
+      await runHook();
       await waitForSettle();
 
       const savedState = atomicWriteSync.mock.calls[0][1];
@@ -286,7 +301,7 @@ describe('subagent-handler hook', () => {
       process.argv = ['node', 'subagent-handler.js', 'stop'];
       readStdin.mockResolvedValue(makeHookData({ agent_id: 'nonexistent' }));
 
-      await import('../../scripts/hooks/subagent-handler.js');
+      await runHook();
       await waitForSettle();
 
       // Should still save state and write output
@@ -305,7 +320,7 @@ describe('subagent-handler hook', () => {
       existsSync.mockReturnValue(false);
       readStdin.mockResolvedValue(makeHookData({ agent_id: 'agent-1' }));
 
-      await import('../../scripts/hooks/subagent-handler.js');
+      await runHook();
       await waitForSettle();
 
       const savedState = atomicWriteSync.mock.calls[0][1];
@@ -319,7 +334,7 @@ describe('subagent-handler hook', () => {
       readFileSync.mockReturnValue('not valid json{{{');
       readStdin.mockResolvedValue(makeHookData({ agent_id: 'agent-1' }));
 
-      await import('../../scripts/hooks/subagent-handler.js');
+      await runHook();
       await waitForSettle();
 
       // Falls back to default state
@@ -332,7 +347,7 @@ describe('subagent-handler hook', () => {
       process.argv = ['node', 'subagent-handler.js', 'start'];
       readStdin.mockResolvedValue(makeHookData({ agent_id: 'agent-1' }));
 
-      await import('../../scripts/hooks/subagent-handler.js');
+      await runHook();
       await waitForSettle();
 
       const statePath = atomicWriteSync.mock.calls[0][0];
@@ -345,7 +360,7 @@ describe('subagent-handler hook', () => {
       process.argv = ['node', 'subagent-handler.js'];
       readStdin.mockResolvedValue(makeHookData({ agent_id: 'agent-1' }));
 
-      await import('../../scripts/hooks/subagent-handler.js');
+      await runHook();
       await waitForSettle();
 
       // Neither start nor stop branch executes
@@ -358,7 +373,7 @@ describe('subagent-handler hook', () => {
       process.argv = ['node', 'subagent-handler.js', 'start'];
       readStdin.mockRejectedValue(new Error('stdin failed'));
 
-      await import('../../scripts/hooks/subagent-handler.js');
+      await runHook();
       await waitForSettle();
 
       expect(exitSpy).toHaveBeenCalledWith(0);
@@ -370,7 +385,7 @@ describe('subagent-handler hook', () => {
       process.argv = ['node', 'subagent-handler.js', 'start'];
       readStdin.mockResolvedValue('<<<invalid>>>');
 
-      await import('../../scripts/hooks/subagent-handler.js');
+      await runHook();
       await waitForSettle();
 
       // Should still work with defaults (unknown agent)

@@ -74,6 +74,18 @@ function assistantToolUse(name) {
   };
 }
 
+/**
+ * Import the hook and run its entry point. The module carries a direct-run
+ * guard, so importing it no longer executes `main()` — the call has to be
+ * explicit here, exactly as the spawned production process makes it.
+ *
+ * @returns {Promise<void>}
+ */
+async function runHook() {
+  const mod = await import('../../scripts/hooks/stop-recap.js');
+  await mod.main();
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -99,7 +111,7 @@ describe('stop-recap', () => {
     mockState.existsSyncResults = { 't.jsonl': true };
     mockState.readFileSyncImpl = () => jsonl([userMsg(), assistantToolUse('Edit')]);
 
-    await import('../../scripts/hooks/stop-recap.js');
+    await runHook();
     await new Promise((r) => setTimeout(r, 30));
 
     const recapLines = stderrSpy.mock.calls
@@ -110,7 +122,7 @@ describe('stop-recap', () => {
 
   it('bails when transcript_path is missing', async () => {
     mockState.readStdinResult = Promise.resolve(JSON.stringify({}));
-    await import('../../scripts/hooks/stop-recap.js');
+    await runHook();
     await new Promise((r) => setTimeout(r, 30));
 
     const recapLines = stderrSpy.mock.calls
@@ -135,7 +147,7 @@ describe('stop-recap', () => {
       assistantToolUse('Task'),
     ]);
 
-    await import('../../scripts/hooks/stop-recap.js');
+    await runHook();
     await new Promise((r) => setTimeout(r, 30));
 
     const out = stderrSpy.mock.calls
@@ -160,7 +172,7 @@ describe('stop-recap', () => {
     mockState.existsSyncResults = { 't.jsonl': true };
     mockState.readFileSyncImpl = () => head + tail;
 
-    await import('../../scripts/hooks/stop-recap.js');
+    await runHook();
     await new Promise((r) => setTimeout(r, 30));
 
     const out = stderrSpy.mock.calls
@@ -182,7 +194,7 @@ describe('stop-recap', () => {
     ]);
     mockState.execSyncImpl = () => ''; // clean git status
 
-    await import('../../scripts/hooks/stop-recap.js');
+    await runHook();
     await new Promise((r) => setTimeout(r, 30));
 
     const recapLines = stderrSpy.mock.calls
@@ -201,7 +213,7 @@ describe('stop-recap', () => {
       + '{ this is not valid json\n'
       + jsonl([assistantToolUse('Bash')]);
 
-    await import('../../scripts/hooks/stop-recap.js');
+    await runHook();
     await new Promise((r) => setTimeout(r, 30));
 
     // No crash; legal line still counted.

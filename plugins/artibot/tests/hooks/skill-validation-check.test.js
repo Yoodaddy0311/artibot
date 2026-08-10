@@ -62,6 +62,18 @@ function resetState() {
   mockState.readFileResults = {};
 }
 
+/**
+ * Import the hook and run its entry point. The module carries a direct-run
+ * guard, so importing it no longer executes `main()` — the call has to be
+ * explicit here, exactly as the spawned production process makes it.
+ *
+ * @returns {Promise<void>}
+ */
+async function runHook() {
+  const mod = await import('../../scripts/hooks/skill-validation-check.js');
+  await mod.main();
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -79,7 +91,7 @@ describe('skill-validation-check', () => {
     const { readdirSync } = await import('node:fs');
     readdirSync.mockImplementationOnce(() => { throw new Error('ENOENT'); });
 
-    await import('../../scripts/hooks/skill-validation-check.js');
+    await runHook();
     expect(mockState.writeStdoutCalls).toHaveLength(0);
   });
 
@@ -98,7 +110,7 @@ describe('skill-validation-check', () => {
       ].join('\n'),
     };
 
-    await import('../../scripts/hooks/skill-validation-check.js');
+    await runHook();
     expect(mockState.writeStdoutCalls).toHaveLength(0);
   });
 
@@ -107,7 +119,7 @@ describe('skill-validation-check', () => {
     mockState.statResults = { 'broken-skill': { isDirectory: () => true } };
     // readFileSync will throw ENOENT for SKILL.md
 
-    await import('../../scripts/hooks/skill-validation-check.js');
+    await runHook();
     expect(mockState.writeStdoutCalls).toHaveLength(1);
     const msg = mockState.writeStdoutCalls[0][0].message;
     expect(msg).toContain('broken-skill');
@@ -119,7 +131,7 @@ describe('skill-validation-check', () => {
     mockState.statResults = { 'no-fm': { isDirectory: () => true } };
     mockState.readFileResults = { 'SKILL.md': 'Just content, no frontmatter' };
 
-    await import('../../scripts/hooks/skill-validation-check.js');
+    await runHook();
     expect(mockState.writeStdoutCalls).toHaveLength(1);
     const msg = mockState.writeStdoutCalls[0][0].message;
     expect(msg).toContain('missing frontmatter');
@@ -132,7 +144,7 @@ describe('skill-validation-check', () => {
       'SKILL.md': '---\nname: partial\n---\nContent',
     };
 
-    await import('../../scripts/hooks/skill-validation-check.js');
+    await runHook();
     expect(mockState.writeStdoutCalls).toHaveLength(1);
     const msg = mockState.writeStdoutCalls[0][0].message;
     expect(msg).toContain('missing field');
@@ -142,7 +154,7 @@ describe('skill-validation-check', () => {
     mockState.readdirResult = ['file.txt'];
     mockState.statResults = { 'file.txt': { isDirectory: () => false } };
 
-    await import('../../scripts/hooks/skill-validation-check.js');
+    await runHook();
     expect(mockState.writeStdoutCalls).toHaveLength(0);
   });
 
@@ -154,7 +166,7 @@ describe('skill-validation-check', () => {
     }
     // All skills have missing SKILL.md (readFileSync throws)
 
-    await import('../../scripts/hooks/skill-validation-check.js');
+    await runHook();
     expect(mockState.writeStdoutCalls).toHaveLength(1);
     const msg = mockState.writeStdoutCalls[0][0].message;
     expect(msg).toContain('and 3 more');
@@ -177,7 +189,7 @@ describe('skill-validation-check', () => {
       ].join('\n'),
     };
 
-    await import('../../scripts/hooks/skill-validation-check.js');
+    await runHook();
     expect(mockState.writeStdoutCalls).toHaveLength(1);
     const msg = mockState.writeStdoutCalls[0][0].message;
     expect(msg).toContain('voyager-curation');
@@ -200,7 +212,7 @@ describe('skill-validation-check', () => {
       ].join('\n'),
     };
 
-    await import('../../scripts/hooks/skill-validation-check.js');
+    await runHook();
     expect(mockState.writeStdoutCalls).toHaveLength(0);
   });
 
@@ -211,7 +223,7 @@ describe('skill-validation-check', () => {
       'SKILL.md': '---\nname: unclosed\nno closing delimiter',
     };
 
-    await import('../../scripts/hooks/skill-validation-check.js');
+    await runHook();
     expect(mockState.writeStdoutCalls).toHaveLength(1);
     const msg = mockState.writeStdoutCalls[0][0].message;
     expect(msg).toContain('unclosed frontmatter');

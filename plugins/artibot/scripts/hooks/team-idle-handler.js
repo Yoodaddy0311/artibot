@@ -14,6 +14,8 @@ import { atomicWriteSync, parseJSON, readStdin, resolveConfigPath, writeStdout }
 import { existsSync, readFileSync } from 'node:fs';
 import { createErrorHandler, extractAgentId, extractAgentRole, getStatePath } from '../../lib/core/hook-utils.js';
 import { withFileLock } from '../../lib/core/file-lock.js';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 /** Maximum consecutive idle events before auto-stop (0 = disabled). */
 const DEFAULT_MAX_IDLE_COUNT = 0;
@@ -52,7 +54,7 @@ function trackIdleCount(agentId, state) {
   };
 }
 
-async function main() {
+export async function main() {
   const raw = await readStdin();
   const hookData = parseJSON(raw);
 
@@ -132,4 +134,13 @@ async function main() {
   writeStdout(result);
 }
 
-main().catch(createErrorHandler('team-idle-handler', { exit: true }));
+// Direct-run guard: importing this module (tests) must not execute the hook.
+// main() blocks on stdin, so an import both hangs the importer and fires the
+// hook's side effects. Production is unaffected — the dispatcher (or Claude
+// Code) spawns this file as argv[1], so the guard passes there.
+const isDirectRun = process.argv[1]
+  && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
+
+if (isDirectRun) {
+  main().catch(createErrorHandler('team-idle-handler', { exit: true }));
+}

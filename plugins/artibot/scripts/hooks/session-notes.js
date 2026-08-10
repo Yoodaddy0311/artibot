@@ -31,6 +31,7 @@ import {
   buildFailurePatternSurface,
   replaceSurfaceBlock,
 } from '../../lib/learning/failure-pattern-surfacer.js';
+import { fileURLToPath } from 'node:url';
 
 // Cap commits per entry — guards against the first-ever run after a fresh
 // clone where `git log` could otherwise dump hundreds of historical entries.
@@ -233,7 +234,7 @@ async function surfaceFailurePatterns(notesFile, repoRoot) {
 // Main
 // -------------------------------------------------------------------------
 
-async function main() {
+export async function main() {
   const raw = await readStdin();
   const hookData = parseJSON(raw) ?? {};
 
@@ -290,4 +291,13 @@ async function main() {
   void hookData;
 }
 
-main().catch(createErrorHandler('session-notes', { exit: true }));
+// Direct-run guard: importing this module (tests) must not execute the hook.
+// main() blocks on stdin, so an import both hangs the importer and fires the
+// hook's side effects. Production is unaffected — the dispatcher (or Claude
+// Code) spawns this file as argv[1], so the guard passes there.
+const isDirectRun = process.argv[1]
+  && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
+
+if (isDirectRun) {
+  main().catch(createErrorHandler('session-notes', { exit: true }));
+}

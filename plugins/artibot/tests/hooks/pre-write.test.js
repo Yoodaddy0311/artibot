@@ -18,6 +18,7 @@ vi.mock('node:path', async () => {
 });
 
 const { readStdin, writeStdout } = await import('../../scripts/utils/index.js');
+const { createErrorHandler } = await import('../../lib/core/hook-utils.js');
 
 // ---------------------------------------------------------------------------
 // Helpers - build fake secrets dynamically to avoid hook self-blocking
@@ -62,6 +63,23 @@ function fakeGenericSecret() {
   return 'const api' + '_key = "supersecretkey12345678";';
 }
 
+/**
+ * Import the hook and run its entry point. The module carries a direct-run
+ * guard, so importing it no longer executes `main()` — the call has to be
+ * explicit here, exactly as the spawned production process makes it.
+ *
+ * @returns {Promise<void>}
+ */
+async function runHook() {
+  const mod = await import('../../scripts/hooks/pre-write.js');
+  // The `.catch` mirrors the module's direct-run tail so the error-handling
+  // test still reaches the real handler. Keep in sync with pre-write.js.
+  await mod.main().catch(createErrorHandler('pre-write', {
+    writeStdout,
+    blockReason: 'Safety check failed due to hook error. Blocking by default.',
+  }));
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -82,7 +100,7 @@ describe('pre-write hook', () => {
     ])('approves writing to: %s', async (filePath) => {
       readStdin.mockResolvedValue(makeHookData(filePath, 'const x = 1;'));
 
-      await import('../../scripts/hooks/pre-write.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledWith(
@@ -96,7 +114,7 @@ describe('pre-write hook', () => {
         tool_input: {},
       }));
 
-      await import('../../scripts/hooks/pre-write.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledWith(
@@ -132,7 +150,7 @@ describe('pre-write hook', () => {
     ])('blocks writing to sensitive file: %s (%s)', async (filePath, _desc) => {
       readStdin.mockResolvedValue(makeHookData(filePath, 'some content'));
 
-      await import('../../scripts/hooks/pre-write.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledWith(
@@ -158,7 +176,7 @@ describe('pre-write hook', () => {
     ])('blocks writing to: %s', async (filename) => {
       readStdin.mockResolvedValue(makeHookData(`/project/${filename}`, 'content'));
 
-      await import('../../scripts/hooks/pre-write.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledWith(
@@ -172,7 +190,7 @@ describe('pre-write hook', () => {
       const content = `const key = "${fakeAwsKey()}";`;
       readStdin.mockResolvedValue(makeHookData('/project/src/config.js', content));
 
-      await import('../../scripts/hooks/pre-write.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledWith(
@@ -184,7 +202,7 @@ describe('pre-write hook', () => {
       const content = `const token = "${fakeGhToken()}";`;
       readStdin.mockResolvedValue(makeHookData('/project/src/gh.js', content));
 
-      await import('../../scripts/hooks/pre-write.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledWith(
@@ -196,7 +214,7 @@ describe('pre-write hook', () => {
       const content = `const key = "${fakeAnthropicKey()}";`;
       readStdin.mockResolvedValue(makeHookData('/project/src/api.js', content));
 
-      await import('../../scripts/hooks/pre-write.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledWith(
@@ -208,7 +226,7 @@ describe('pre-write hook', () => {
       const content = `const key = "${fakeOpenAiKey()}";`;
       readStdin.mockResolvedValue(makeHookData('/project/src/openai.js', content));
 
-      await import('../../scripts/hooks/pre-write.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledWith(
@@ -221,7 +239,7 @@ describe('pre-write hook', () => {
         makeHookData('/project/src/config.js', fakeGenericSecret()),
       );
 
-      await import('../../scripts/hooks/pre-write.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledWith(
@@ -235,7 +253,7 @@ describe('pre-write hook', () => {
         makeHookData('/project/src/api.js', content, 'Edit'),
       );
 
-      await import('../../scripts/hooks/pre-write.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledWith(
@@ -250,7 +268,7 @@ describe('pre-write hook', () => {
         makeHookData('/project/src/app.js', 'function add(a, b) {\n  return a + b;\n}'),
       );
 
-      await import('../../scripts/hooks/pre-write.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledWith(
@@ -264,7 +282,7 @@ describe('pre-write hook', () => {
         makeHookData('/project/src/config.js', content),
       );
 
-      await import('../../scripts/hooks/pre-write.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledWith(
@@ -278,7 +296,7 @@ describe('pre-write hook', () => {
         makeHookData('/project/config.py', content),
       );
 
-      await import('../../scripts/hooks/pre-write.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledWith(
@@ -291,7 +309,7 @@ describe('pre-write hook', () => {
         makeHookData('/project/src/config.js', 'const key = process.env.API_KEY;'),
       );
 
-      await import('../../scripts/hooks/pre-write.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledWith(
@@ -304,7 +322,7 @@ describe('pre-write hook', () => {
     it('includes filename in reason for sensitive file', async () => {
       readStdin.mockResolvedValue(makeHookData('/project/.env', 'VAR=1'));
 
-      await import('../../scripts/hooks/pre-write.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       const call = writeStdout.mock.calls[0][0];
@@ -317,7 +335,7 @@ describe('pre-write hook', () => {
       const content = `const key = "${fakeAwsKey()}";`;
       readStdin.mockResolvedValue(makeHookData('/project/src/app.js', content));
 
-      await import('../../scripts/hooks/pre-write.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       const call = writeStdout.mock.calls[0][0];
@@ -330,7 +348,7 @@ describe('pre-write hook', () => {
     it('blocks by default when hook errors', async () => {
       readStdin.mockRejectedValue(new Error('stdin read failed'));
 
-      await import('../../scripts/hooks/pre-write.js');
+      await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).toHaveBeenCalledWith(

@@ -233,14 +233,35 @@ export function mergeResults(results, hookEventName) {
 /**
  * Detect whether the current module was invoked as the main entry point.
  * Cross-platform — handles Windows drive-letter URLs.
+ *
+ * Decodes with `fileURLToPath`, never `new URL(...).pathname`. A URL pathname is
+ * percent-ENCODED while `process.argv[1]` is a raw filesystem path, so the two
+ * stop matching the moment the install path holds anything URL-unsafe — and the
+ * hook then silently does nothing when spawned. Measured 2026-08-10 by
+ * comparing both forms from the same module under each path shape:
+ *
+ *   plain           current=true   fixed=true
+ *   "with space"    current=FALSE  fixed=true   (%20)
+ *   "바탕 화면"      current=FALSE  fixed=true   (%EB%B0%94…)
+ *   "tilde~name"    current=FALSE  fixed=true   (%7E — hits Windows 8.3 short
+ *                                                names such as HEECHA~1)
+ *   "hash#tag"      current=FALSE  fixed=true   (# opens a URL fragment, which
+ *                                                truncates the pathname)
+ *   "paren(1)"      current=true   fixed=true   (parens are not encoded)
+ *
+ * The default install path (`C:\Users\<name>\…`) is ASCII and space-free, so the
+ * bug was latent there — but every dispatcher routes through this helper, so a
+ * user whose profile name contains a space or non-ASCII character would lose all
+ * of them at once. `scripts/utils/index.js:136-140` documents the same trap from
+ * the opposite direction (path -> URL).
+ *
  * @param {string} importMetaUrl `import.meta.url` of the caller
  * @returns {boolean}
  */
 export function isMainEntry(importMetaUrl) {
   try {
     const argv1 = process.argv[1] ? path.resolve(process.argv[1]) : '';
-    const here = path.resolve(new URL(importMetaUrl).pathname.replace(/^\/([A-Za-z]:)/, '$1'));
-    return argv1 === here;
+    return argv1 === path.resolve(fileURLToPath(importMetaUrl));
   } catch {
     return false;
   }
