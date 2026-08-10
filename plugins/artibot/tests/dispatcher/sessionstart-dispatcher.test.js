@@ -1,7 +1,9 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
-import { describe, expect, it } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 /**
  * SessionStart dispatcher integration tests.
@@ -11,8 +13,11 @@ import { describe, expect, it } from 'vitest';
  * as grand-child processes inside the dispatcher, so each test triggers the
  * full process tree.
  *
- * Side-effects: the wrapped hooks may touch runtime/ and ~/.claude/artibot.
- * The dispatcher swallows any error from them; tests assert only on the
+ * Side-effects: the wrapped hooks touch runtime/ and `<home>/.claude/artibot`
+ * (measured: this file created `artibot/update-check.json` under a sandbox
+ * home). The home directory is therefore redirected to a throwaway temp dir
+ * for the whole file — same mechanism as `sessionend-dispatcher.test.js`.
+ * The dispatcher swallows any error from the hooks; tests assert only on the
  * dispatcher's own contract (exit code 0, valid JSON stdout or empty stdout,
  * env-disable behavior).
  */
@@ -22,6 +27,17 @@ const PLUGIN_ROOT = path.resolve(
   '..', '..',
 );
 const SCRIPT_PATH = path.join(PLUGIN_ROOT, 'scripts', 'hooks', '_sessionstart-dispatcher.js');
+
+/** Throwaway home for the spawned dispatcher. */
+let sandboxHome;
+
+beforeAll(() => {
+  sandboxHome = mkdtempSync(path.join(tmpdir(), 'artibot-sessionstart-'));
+});
+
+afterAll(() => {
+  if (sandboxHome) rmSync(sandboxHome, { recursive: true, force: true });
+});
 
 function runDispatcher(payload, env = {}) {
   let stdout;
@@ -35,6 +51,10 @@ function runDispatcher(payload, env = {}) {
         env: {
           ...process.env,
           CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT,
+          // getHomeDir() reads USERPROFILE then HOME — both must point at the
+          // sandbox or the real learning store gets the fixtures.
+          USERPROFILE: sandboxHome,
+          HOME: sandboxHome,
           ARTIBOT_RUNTIME_CHECKPOINT_DISABLE: '1',
           ARTIBOT_RUNTIME_MEMORY_DISABLE: '1',
           ...env,

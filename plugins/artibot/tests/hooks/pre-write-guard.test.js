@@ -216,6 +216,12 @@ describe('pre-write-guard hook', () => {
       const call = writeStdout.mock.calls[0][0];
       expect(call.reason).toContain('WRITE-BEFORE-READ');
       expect(call.reason).toContain(filePath);
+      // The block reason is the ONLY channel that reaches the model for this
+      // failure: a PreToolUse block means the tool never ran, so no
+      // PostToolUse/PostToolUseFailure event is emitted and no advisor hook can
+      // add the corrective step (measured 2026-08-10). The retry instruction
+      // therefore has to live in this string.
+      expect(call.reason).toContain('retry the same Write');
     });
 
     it('blocks Edit to existing file not Read in session', async () => {
@@ -237,6 +243,7 @@ describe('pre-write-guard hook', () => {
       );
       const call = writeStdout.mock.calls[0][0];
       expect(call.reason).toContain('WRITE-BEFORE-READ');
+      expect(call.reason).toContain('retry the same Edit');
     });
   });
 

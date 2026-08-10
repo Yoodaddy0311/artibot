@@ -1,7 +1,9 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
-import { describe, expect, it } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 /**
  * SubagentStop dispatcher integration tests.
@@ -11,6 +13,11 @@ import { describe, expect, it } from 'vitest';
  * own loop guards and graceful no-op paths. The dispatcher's responsibility
  * is only to spawn them, never block the SubagentStop slot, and forward
  * additionalContext / decision=block.
+ *
+ * The agent-evaluator hook appends to `<home>/.claude/artibot/` (measured:
+ * this file created `daily-experiences.json` and `artibot-state.json` under a
+ * sandbox home), so the home directory is redirected to a throwaway temp dir
+ * for the whole file — same mechanism as `sessionend-dispatcher.test.js`.
  */
 
 const PLUGIN_ROOT = path.resolve(
@@ -18,6 +25,17 @@ const PLUGIN_ROOT = path.resolve(
   '..', '..',
 );
 const SCRIPT_PATH = path.join(PLUGIN_ROOT, 'scripts', 'hooks', '_subagentstop-dispatcher.js');
+
+/** Throwaway home for the spawned dispatcher. */
+let sandboxHome;
+
+beforeAll(() => {
+  sandboxHome = mkdtempSync(path.join(tmpdir(), 'artibot-subagentstop-'));
+});
+
+afterAll(() => {
+  if (sandboxHome) rmSync(sandboxHome, { recursive: true, force: true });
+});
 
 function runDispatcher(payload, env = {}) {
   let stdout;
@@ -31,6 +49,10 @@ function runDispatcher(payload, env = {}) {
         env: {
           ...process.env,
           CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT,
+          // getHomeDir() reads USERPROFILE then HOME — both must point at the
+          // sandbox or the real learning store gets the fixtures.
+          USERPROFILE: sandboxHome,
+          HOME: sandboxHome,
           ARTIBOT_RUNTIME_CHECKPOINT_DISABLE: '1',
           ARTIBOT_RUNTIME_MEMORY_DISABLE: '1',
           ...env,

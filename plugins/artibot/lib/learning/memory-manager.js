@@ -588,11 +588,16 @@ export async function getRelevantContext(context = {}) {
 /**
  * Summarize a session into a compact memory entry.
  * Extracts key actions, decisions, and outcomes from session history.
+ *
+ * SessionEnd has no `history` (absent from the hook payload), so its summaries
+ * froze into one shape — the "field nobody populates" defect that also froze
+ * scoring. Such callers pass measured counts via `metadata` instead.
+ *
  * @param {object} sessionData
  * @param {string} [sessionData.sessionId]
  * @param {string} [sessionData.project]
  * @param {Array<{event: string, data?: object}>} [sessionData.history]
- * @param {object} [sessionData.metadata]
+ * @param {object} [sessionData.metadata] - `commandCount`/`errorCount`/`duration`
  * @returns {Promise<object>} The saved summary entry
  */
 export async function summarizeSession(sessionData = {}) {
@@ -606,11 +611,11 @@ export async function summarizeSession(sessionData = {}) {
   const summary = {
     sessionId,
     project,
-    commandCount: commands.length,
+    commandCount: commands.length || (metadata.commandCount ?? 0),
     uniqueCommands: [...new Set(commands)],
-    errorCount: errors.length,
+    errorCount: errors.length || (metadata.errorCount ?? 0),
     completedTasks: completions.length,
-    duration: metadata.duration || null,
+    duration: metadata.duration ?? null,
     timestamp: new Date().toISOString(),
   };
 

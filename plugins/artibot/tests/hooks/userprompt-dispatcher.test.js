@@ -1,7 +1,9 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync, spawn } from 'node:child_process';
-import { describe, expect, it } from 'vitest';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 /**
  * UserPromptSubmit dispatcher integration tests.
@@ -10,9 +12,25 @@ import { describe, expect, it } from 'vitest';
  * path that hooks.json uses (single node entry, stdin JSON in, stdout JSON
  * out). Unit-level tests for `mergeHookResults` cover the merging logic.
  *
- * git-autopilot-save is spawned by the dispatcher as a side-effect; we don't
- * have a test repo configured, so the child returns immediately without
- * touching git. This is the same path users hit in non-allowlisted repos.
+ * `git-autopilot-save` is one of the 7 hooks this slot fans out to, and it is
+ * the reason `cwd` is redirected to a throwaway NON-git directory.
+ *
+ * A previous version of this comment claimed the child "returns immediately
+ * without touching git ... the same path users hit in non-allowlisted repos".
+ * That was wrong: `isAutopilotAllowed()` resolves this repo's remote
+ * (`Yoodaddy0311/artibot`) and returns TRUE — it IS allowlisted. The only thing
+ * holding git writes back was `.git/autopilot.json` `enabled:false`, a mutable
+ * runtime flag that `/autopilot` setup rewrites. With it flipped, this suite
+ * would drive the semantic strategy's `git stash` against a shared worktree.
+ *
+ * There is no env kill switch for the git hooks — neither references
+ * `process.env` at all — so cwd is the only lever. From a non-repo cwd,
+ * `getRepoRoot()` returns null and the hook returns at
+ * git-autopilot-save.js:317, before the allowlist and config gates are reached.
+ *
+ * Verified equivalent, not assumed: every payload below was diffed between
+ * cwd=PLUGIN_ROOT and cwd=<non-repo>; output was identical, including
+ * `additionalContext` byte-for-byte (263 chars for the ambiguity-guard case).
  */
 
 const PLUGIN_ROOT = path.resolve(
@@ -21,17 +39,35 @@ const PLUGIN_ROOT = path.resolve(
 );
 const SCRIPT_PATH = path.join(PLUGIN_ROOT, 'scripts', 'hooks', '_userprompt-dispatcher.js');
 
+/** Throwaway home and working directory for the spawned dispatcher. */
+let sandboxHome;
+let sandboxCwd;
+
+beforeAll(() => {
+  sandboxHome = mkdtempSync(path.join(tmpdir(), 'artibot-userprompt-home-'));
+  sandboxCwd = mkdtempSync(path.join(tmpdir(), 'artibot-userprompt-cwd-'));
+});
+
+afterAll(() => {
+  if (sandboxHome) rmSync(sandboxHome, { recursive: true, force: true });
+  if (sandboxCwd) rmSync(sandboxCwd, { recursive: true, force: true });
+});
+
 function runDispatcher(payload, env = {}) {
   const stdout = execFileSync(
     process.execPath,
     [SCRIPT_PATH],
     {
-      cwd: PLUGIN_ROOT,
+      cwd: sandboxCwd,
       env: {
         ...process.env,
         CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT,
         // Disable downstream side-effects that would otherwise touch
         // network / disk / runtime caches during the test run.
+        // getHomeDir() reads USERPROFILE then HOME — both must point at the
+        // sandbox or the real learning store gets the fixtures.
+        USERPROFILE: sandboxHome,
+        HOME: sandboxHome,
         ARTIBOT_RUNTIME_CHECKPOINT_DISABLE: '1',
         ARTIBOT_RUNTIME_MEMORY_DISABLE: '1',
         ...env,
@@ -103,6 +139,27 @@ describe('_userprompt-dispatcher (integration)', () => {
     const elapsed = Date.now() - start;
     // Generous bound — the spec'd timeout is 8000ms, so we assert well under.
     expect(elapsed).toBeLessThan(15000);
+  });
+
+  /**
+   * Isolation self-check.
+   *
+   * Blind spots it does NOT cover: `CLAUDE_PLUGIN_ROOT` still points at the real
+   * plugin, so `runtime-prompt` keeps writing `plugins/artibot/runtime/*.json`
+   * in the repo. Those are gitignored (`plugins/artibot/.gitignore:10`) and so
+   * cannot dirty git, which is why they are deliberately left alone.
+   */
+  it('keeps every side effect inside the sandbox', () => {
+    // Structural proof the git path is shut, independent of the mutable
+    // `.git/autopilot.json` `enabled` flag: the hooks find the repo from cwd,
+    // and there is no repo here.
+    expect(() => execFileSync('git', ['rev-parse', '--show-toplevel'], {
+      cwd: sandboxCwd, stdio: ['pipe', 'pipe', 'pipe'],
+    })).toThrow();
+
+    // Canary: this slot writes no learning store today. A future hook that does
+    // will trip this in a temp dir rather than in the developer's real store.
+    expect(existsSync(path.join(sandboxHome, '.claude'))).toBe(false);
   });
 });
 

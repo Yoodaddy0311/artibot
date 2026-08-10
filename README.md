@@ -753,7 +753,7 @@ daily (work recap/retrospective), team (parallel orchestration), session-worklog
 
 ## Hooks
 
-24 hook registrations across 15 event types.
+25 hook registrations across 15 event types.
 
 <details>
 <summary>Hook Event Table</summary>
@@ -766,6 +766,7 @@ daily (work recap/retrospective), team (parallel orchestration), session-worklog
 | PreToolUse (Bash) | `bash-risk-guard.js` | Classify command risk (classifyRisk): block danger, warn caution, feed autopilot pause |
 | PostToolUse (Edit) | `post-edit-format.js` | Auto-format suggestion for JS/TS |
 | PostToolUse (Bash) | `post-bash.js` | Auto-detect PR URLs after git push |
+| PostToolUseFailure | `post-tool-failure-advisor.js` | Inject corrective context for recognised failure patterns (allowlist; silent otherwise) |
 | PreCompact | `pre-compact.js` | State snapshot before context compression |
 | Stop | `check-console-log.js` | Detect leftover console.log statements |
 | UserPromptSubmit | `user-prompt-handler.js` | Intent detection and agent suggestion |
@@ -870,7 +871,7 @@ plugins/artibot/
 +-- hooks/
 |   +-- hooks.json               # Hook event mappings
 +-- scripts/
-|   +-- hooks/                   # 59 hook scripts (ESM)
+|   +-- hooks/                   # 60 hook scripts (ESM)
 |   +-- ci/                      # 6 CI validation scripts
 |   +-- evals/                   # Runtime eval suite
 |   +-- utils/

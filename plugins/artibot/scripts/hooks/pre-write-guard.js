@@ -377,10 +377,17 @@ function handleWriteGuard(hookData) {
     return;
   }
 
-  // Block: existing file not read before write/edit
+  // Block: existing file not read before write/edit.
+  //
+  // This string is the only corrective channel available for this failure. A
+  // PreToolUse block means the tool never executed, so Claude Code emits no
+  // PostToolUse or PostToolUseFailure event and no advisor hook can append the
+  // missing step (measured 2026-08-10: deliberate Grep/Edit tool_use_error
+  // failures produced zero events on either). Stating the retry here is what
+  // turns "you did it wrong" into a recoverable instruction.
   const reason = `[WRITE-BEFORE-READ] ${toolName} blocked for "${filePath}". `
     + 'File exists but was not Read in this session. '
-    + 'Read the file first to understand its contents before modifying.';
+    + `Read the file first to understand its contents before modifying, then retry the same ${toolName}.`;
   process.stderr.write(`[artibot:pre-write-guard] ${reason}\n`);
   saveBlockFingerprint(fingerprint);
   writeStdout({ decision: 'block', reason });

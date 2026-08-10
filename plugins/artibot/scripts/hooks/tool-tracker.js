@@ -133,10 +133,12 @@ const SKIP_TOOLS = new Set([
 const MIN_SUBSTANTIVE_LENGTH = 10;
 
 /**
- * Extract the tool result object from a Claude Code PostToolUse payload.
+ * Extract the tool result object from a Claude Code PostToolUse /
+ * PostToolUseFailure payload.
  *
  * Field-name resolution (newest → oldest):
- *   1. `tool_response` — canonical Claude Code field (object OR string).
+ *   0. top-level `error` / `tool_error` — the PostToolUseFailure shape.
+ *   1. `tool_response` — canonical PostToolUse field (object OR string).
  *   2. `tool_result`   — legacy alias kept for older payloads / tests.
  *   3. `tool_output` / `output` — defensive fallbacks seen in sibling hooks.
  *
@@ -146,10 +148,46 @@ const MIN_SUBSTANTIVE_LENGTH = 10;
  * keeps getResultContent() working while leaving the structured branches
  * (exit_code/stderr/is_error) safely undefined.
  *
+ * ── Why the failure branch must map to `error`, never `output` ──
+ * Measured 2026-08-10 by dumping raw hook stdin: a PostToolUseFailure payload
+ * carries its text at TOP-LEVEL `error` as a plain string and has NO
+ * `tool_response`, NO `tool_result` and NO top-level `exit_code` (the status
+ * lives only inside the string, e.g. "Exit code 125\n…"). Before this branch
+ * existed every failing Bash call resolved to `{}` and fell through to the
+ * Bash arm of scoreResult, which found no exit_code and no stderr and returned
+ * **1.0 — a perfect success**. Failures were indistinguishable from successes
+ * in the learning store, so scoreResult's `return 0.0` was dead code.
+ *
+ * Routing the string through the normal `{ output: … }` normalisation would
+ * NOT fix it: scoreResult's 0.0 branch tests `result.error`, so an
+ * `output`-wrapped failure still scores 1.0. The key name is the whole fix.
+ *
+ * ── What this fix does NOT reach ──
+ * Only failures of commands that {@link classifyBashCommand} recognises get
+ * scored at all. That helper matches on the command's LEADING TOKEN, so
+ * `cd x && …`, `VAR=… ; …` and other compound forms return null, buildContext
+ * returns null, and main() returns before scoring — no row is written, with or
+ * without this branch. Those failures remain invisible to tool learning, and
+ * since `cd x && …` is the dominant command shape in this repo the blind spot
+ * is large. Tracked separately; do not infer from "0.0 rows now exist" that
+ * every failure is being captured.
+ *
  * @param {object} hookData
  * @returns {object}
  */
 function extractToolResult(hookData) {
+  const failure = hookData?.error ?? hookData?.tool_error;
+  if (typeof failure === 'string' && failure) return { error: failure };
+  if (failure && typeof failure === 'object') {
+    // `||` not `??`: scoreResult tests `result.error` for TRUTHINESS, so a
+    // falsy message ('' / 0 / false / NaN) parked on `error` would sail past
+    // the 0.0 branch and score the failure 1.0 again — the same leak this
+    // whole function exists to close. `??` only substitutes null/undefined.
+    // A present error OBJECT is itself the failure signal, so an empty message
+    // degrades to `true` rather than to "no error".
+    return { ...failure, error: failure.message || true };
+  }
+
   const raw = hookData?.tool_response
     ?? hookData?.tool_result
     ?? hookData?.tool_output

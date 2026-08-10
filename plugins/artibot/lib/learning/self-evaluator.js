@@ -5,50 +5,51 @@
  * @module lib/learning/self-evaluator
  */
 
-import path from 'node:path';
-import { readJsonFile, writeJsonFile } from '../core/file.js';
-import { getHomeDir } from '../core/platform.js';
+import {
+  hasAnySignal,
+  loadEvaluations,
+  RUBRIC_VERSION,
+  saveEvaluations,
+  selectByRubric,
+} from './evaluation-store.js';
+import { getScoreHealth } from './score-health.js';
+import {
+  DIMENSIONS,
+  fileCount,
+  scoreCompleteness,
+  scoreEfficiency,
+  scoreExecutionReliability,
+  scoreSatisfaction,
+} from './scoring.js';
 
-const EVALUATIONS_FILENAME = 'evaluations.json';
-const MAX_EVALUATIONS = 500;
-
-/**
- * Evaluation dimensions with weights.
- */
-const DIMENSIONS = {
-  accuracy: { weight: 0.35, description: 'Correctness of output vs requirements' },
-  completeness: { weight: 0.25, description: 'Coverage of all requested aspects' },
-  efficiency: { weight: 0.20, description: 'Resource usage and execution speed' },
-  satisfaction: { weight: 0.20, description: 'Implicit user satisfaction signals' },
-};
-
-/**
- * Get the evaluations file path (~/.claude/artibot/evaluations.json).
- * @returns {string}
- */
-function getEvaluationsPath() {
-  return path.join(getHomeDir(), '.claude', 'artibot', EVALUATIONS_FILENAME);
-}
+export { RUBRIC_VERSION, getScoreHealth };
 
 /**
- * Load persisted evaluations from disk storage.
- * @returns {Promise<object[]>}
+ * Record which scoring signals actually arrived.
+ *
+ * The point is to separate a broken input pipe from a genuine failure. Both
+ * currently score the same, and with the old records nobody can say how many of
+ * 318 consecutive D grades were real — this field is what makes that question
+ * answerable going forward.
+ *
+ * @param {object} result - Task result
+ * @param {string} signalSource - Provenance label supplied by the caller
+ * @returns {Record<string, boolean|string>}
  */
-async function loadEvaluations() {
-  const data = await readJsonFile(getEvaluationsPath());
-  return Array.isArray(data) ? data : [];
-}
-
-/**
- * Save evaluations to disk, pruning old entries beyond MAX_EVALUATIONS.
- * @param {object[]} evaluations - Evaluations to save
- * @returns {Promise<void>}
- */
-async function saveEvaluations(evaluations) {
-  const pruned = evaluations.length > MAX_EVALUATIONS
-    ? evaluations.slice(evaluations.length - MAX_EVALUATIONS)
-    : evaluations;
-  await writeJsonFile(getEvaluationsPath(), pruned);
+function buildInputsPresent(result, signalSource) {
+  return {
+    success: result.success !== undefined,
+    testsPass: result.testsPass !== undefined,
+    duration: result.duration !== undefined,
+    filesModified: fileCount(result.filesModified) !== null,
+    filesEngaged: fileCount(result.filesEngaged) !== null,
+    toolCalls: typeof result.toolCalls === 'number' && Number.isFinite(result.toolCalls),
+    // Tracked separately from `toolCalls`: the reliability score needs both, so
+    // seeing only the call count arrive would otherwise imply an error rate was
+    // computed when it was not.
+    toolErrors: typeof result.toolErrors === 'number' && Number.isFinite(result.toolErrors),
+    signalSource,
+  };
 }
 
 /**
@@ -61,12 +62,21 @@ async function saveEvaluations(evaluations) {
  * @param {string} [task.description] - Task description
  * @param {object} result - Task result
  * @param {boolean} result.success - Whether the task succeeded
- * @param {string[]} [result.filesModified] - Files that were modified
+ * @param {string[]|number} [result.filesModified] - Files modified (list or count)
+ * @param {string[]|number} [result.filesEngaged] - Distinct files the task
+ *   interacted with at all, read included. Kept separate from `filesModified`
+ *   so neither field has to mean two things; this is the efficiency denominator.
  * @param {number} [result.duration] - Duration in ms
+ * @param {number} [result.toolCalls] - Tool invocations spent on the task.
+ *   Forms the efficiency ratio with the file count; the scorer stays agnostic
+ *   about where either number came from.
  * @param {boolean} [result.testsPass] - Whether tests pass after changes
  * @param {object} [result.metrics] - Additional metrics
  * @param {object} [options]
  * @param {boolean} [options.persist=true] - Whether to save to disk
+ * @param {string} [options.signalSource='none'] - Provenance of the scoring
+ *   signals, recorded verbatim in `inputsPresent`. The vocabulary belongs to
+ *   whoever extracts the signals; this module only stores the label.
  * @param {string|null} [options.model] - Effective model id that produced the
  *   work, as read from the session transcript. Omit rather than guess: a null
  *   model records "unattributed", which is honest, while a declared-but-unverified
@@ -85,6 +95,8 @@ async function saveEvaluations(evaluations) {
  *   modelMix: Record<string, number>,
  *   subagentMix: Record<string, number>,
  *   modelSource: string,
+ *   rubricVersion: number,
+ *   inputsPresent: Record<string, boolean|string>,
  *   dimensions: Record<string, { score: number, weight: number }>,
  *   overall: number,
  *   grade: string,
@@ -98,34 +110,39 @@ export async function evaluateResult(task, result, options = {}) {
     modelMix = {},
     subagentMix = {},
     modelSource = model ? 'caller' : 'none',
+    signalSource = 'none',
   } = options;
 
-  const dimensions = {
-    accuracy: {
-      score: scoreAccuracy(result),
-      weight: DIMENSIONS.accuracy.weight,
-    },
-    completeness: {
-      score: scoreCompleteness(task, result),
-      weight: DIMENSIONS.completeness.weight,
-    },
-    efficiency: {
-      score: scoreEfficiency(result),
-      weight: DIMENSIONS.efficiency.weight,
-    },
-    satisfaction: {
-      score: scoreSatisfaction(result),
-      weight: DIMENSIONS.satisfaction.weight,
-    },
+  const scored = {
+    executionReliability: scoreExecutionReliability(result),
+    completeness: scoreCompleteness(task, result),
+    efficiency: scoreEfficiency(result),
+    satisfaction: scoreSatisfaction(result),
   };
 
-  const overall = Object.values(dimensions).reduce(
-    (sum, d) => sum + d.score * d.weight,
-    0,
-  );
+  // Only dimensions with a real signal enter the record. A dimension held at a
+  // constant by an absent input is not a low reading, it is no reading, and
+  // leaving it in gave two such placeholders 0.45 of the composite weight.
+  // Absence is represented by absence; `unmeasuredDimensions` names what is
+  // missing so a gap stays legible instead of looking like a schema change.
+  const dimensions = {};
+  const unmeasuredDimensions = [];
+  for (const [name, score] of Object.entries(scored)) {
+    if (score === null) unmeasuredDimensions.push(name);
+    else dimensions[name] = { score, weight: DIMENSIONS[name].weight };
+  }
 
-  const grade = scoreToGrade(overall);
-  const feedback = generateFeedback(dimensions, overall);
+  // Renormalise across what was measured, so `overall` stays on the 1-5 scale
+  // instead of shrinking toward zero as dimensions drop out.
+  const measuredWeight = Object.values(dimensions).reduce((sum, d) => sum + d.weight, 0);
+  const overall = measuredWeight > 0
+    ? Object.values(dimensions).reduce((sum, d) => sum + d.score * d.weight, 0) / measuredWeight
+    : null;
+
+  const grade = overall === null ? null : scoreToGrade(overall);
+  const feedback = overall === null
+    ? 'No scoring signal reached this evaluation; nothing was measured.'
+    : generateFeedback(dimensions, overall);
 
   const evaluation = {
     id: `eval-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -136,8 +153,11 @@ export async function evaluateResult(task, result, options = {}) {
     modelMix,
     subagentMix,
     modelSource,
+    rubricVersion: RUBRIC_VERSION,
+    inputsPresent: buildInputsPresent(result, signalSource),
     dimensions,
-    overall: Math.round(overall * 100) / 100,
+    unmeasuredDimensions,
+    overall: overall === null ? null : Math.round(overall * 100) / 100,
     grade,
     feedback,
   };
@@ -206,6 +226,8 @@ export async function getTeamPerformance(options = {}) {
 
   const byTaskType = {};
   for (const ev of recent) {
+    // Rows where nothing was measured carry a null score and no verdict to average.
+    if (typeof ev.overall !== 'number') continue;
     const type = ev.taskType || 'unknown';
     if (!byTaskType[type]) {
       byTaskType[type] = { count: 0, totalScore: 0 };
@@ -244,46 +266,72 @@ export async function getTeamPerformance(options = {}) {
  * investigate, never on its own evidence that one model is worse. `minSamples`
  * exists to keep thin groups out of the ranked lists for that reason.
  *
+ * Only one scoring regime is aggregated at a time — see {@link selectByRubric}.
+ * `excludedByRubric` reports what that dropped, because a silent exclusion is
+ * as misleading as the silent blend it prevents.
+ *
  * @param {object} [options]
  * @param {number} [options.lookback=500] - Number of recent evaluations to analyze
  * @param {number} [options.minSamples=5] - Minimum rows before a model is ranked
+ * @param {number} [options.rubricVersion] - Rubric to aggregate (default: newest present)
  * @returns {Promise<{
  *   byModel: Record<string, { count: number, avgScore: number, dimensions: Record<string, number> }>,
  *   ranked: { model: string, count: number, avgScore: number }[],
  *   attributedCount: number,
  *   unattributedCount: number,
- *   totalEvaluations: number
+ *   totalEvaluations: number,
+ *   rubricVersion: number,
+ *   excludedByRubric: number,
+ *   excludedUnmeasured: number
  * }>}
  */
 export async function getModelPerformance(options = {}) {
-  const { lookback = 500, minSamples = 5 } = options;
-  const recent = (await loadEvaluations()).slice(-lookback);
+  const { lookback = 500, minSamples = 5, rubricVersion } = options;
+  const window = (await loadEvaluations()).slice(-lookback);
+  const { version, selected: inRubric, excludedByRubric } = selectByRubric(window, rubricVersion);
+  // Unmeasured rows hold placeholders, not verdicts; averaging them in would
+  // pull every model toward the neutral score and hide the differences this
+  // function exists to surface.
+  const recent = inRubric.filter(hasAnySignal);
+  const excludedUnmeasured = inRubric.length - recent.length;
 
   const groups = {};
   for (const ev of recent) {
     const key = ev.model || 'unattributed';
-    if (!groups[key]) groups[key] = { count: 0, totalScore: 0, dims: {} };
+    if (!groups[key]) groups[key] = { count: 0, scored: 0, totalScore: 0, dims: {} };
     groups[key].count += 1;
-    groups[key].totalScore += ev.overall;
+    if (typeof ev.overall === 'number') {
+      groups[key].scored += 1;
+      groups[key].totalScore += ev.overall;
+    }
+    // Per-dimension tallies count only the rows that carried that dimension.
+    // Dividing by the group size instead would drag any optional dimension
+    // toward zero in proportion to how often it was unmeasured — an artefact of
+    // absence masquerading as a low score.
     for (const [dim, d] of Object.entries(ev.dimensions ?? {})) {
-      groups[key].dims[dim] = (groups[key].dims[dim] ?? 0) + (d?.score ?? 0);
+      if (typeof d?.score !== 'number') continue;
+      const tally = (groups[key].dims[dim] ??= { sum: 0, n: 0 });
+      tally.sum += d.score;
+      tally.n += 1;
     }
   }
 
   const byModel = Object.fromEntries(
     Object.entries(groups).map(([model, g]) => [model, {
       count: g.count,
-      avgScore: Math.round((g.totalScore / g.count) * 100) / 100,
+      avgScore: g.scored > 0 ? Math.round((g.totalScore / g.scored) * 100) / 100 : null,
       dimensions: Object.fromEntries(
-        Object.entries(g.dims).map(([d, sum]) => [
-          d, Math.round((sum / g.count) * 100) / 100,
+        Object.entries(g.dims).map(([d, { sum, n }]) => [
+          d, Math.round((sum / n) * 100) / 100,
         ]),
       ),
     }]),
   );
 
   const ranked = Object.entries(byModel)
-    .filter(([model, g]) => model !== 'unattributed' && g.count >= minSamples)
+    .filter(([model, g]) => model !== 'unattributed'
+      && g.count >= minSamples
+      && typeof g.avgScore === 'number')
     .map(([model, g]) => ({ model, count: g.count, avgScore: g.avgScore }))
     .sort((a, b) => b.avgScore - a.avgScore);
 
@@ -295,6 +343,9 @@ export async function getModelPerformance(options = {}) {
     attributedCount: recent.length - unattributedCount,
     unattributedCount,
     totalEvaluations: recent.length,
+    rubricVersion: version,
+    excludedByRubric,
+    excludedUnmeasured,
   };
 }
 
@@ -302,18 +353,35 @@ export async function getModelPerformance(options = {}) {
  * Get learning trends over time.
  * Shows how evaluation scores have changed across time windows.
  *
+ * Trends are computed within one scoring regime. A rubric change moves the
+ * scale, so a slope drawn across that boundary measures the rubric, not the work.
+ *
  * @param {object} [options]
  * @param {number} [options.windowSize=10] - Number of evaluations per window
+ * @param {number} [options.rubricVersion] - Rubric to analyze (default: newest present)
  * @returns {Promise<{
  *   windows: { index: number, avgScore: number, count: number }[],
  *   trend: string,
  *   latestAvg: number,
- *   earliestAvg: number
+ *   earliestAvg: number,
+ *   rubricVersion: number,
+ *   excludedByRubric: number,
+ *   excludedUnmeasured: number
  * }>}
  */
 export async function getLearningTrends(options = {}) {
-  const { windowSize = 10 } = options;
-  const all = await loadEvaluations();
+  const { windowSize = 10, rubricVersion } = options;
+  const { version, selected: inRubric, excludedByRubric } = selectByRubric(
+    await loadEvaluations(),
+    rubricVersion,
+  );
+  // A run of unmeasured rows would otherwise register as a flat, healthy trend.
+  // The score check is belt-and-braces: `hasAnySignal` should already have taken
+  // those rows out, but a null slipping into the sum would yield NaN averages —
+  // a silent wrong number, which is the failure mode this whole change exists
+  // to remove.
+  const all = inRubric.filter(ev => hasAnySignal(ev) && typeof ev.overall === 'number');
+  const excludedUnmeasured = inRubric.length - all.length;
 
   if (all.length < 2) {
     return {
@@ -321,6 +389,9 @@ export async function getLearningTrends(options = {}) {
       trend: 'insufficient_data',
       latestAvg: all.length === 1 ? all[0].overall : 0,
       earliestAvg: all.length === 1 ? all[0].overall : 0,
+      rubricVersion: version,
+      excludedByRubric,
+      excludedUnmeasured,
     };
   }
 
@@ -343,66 +414,14 @@ export async function getLearningTrends(options = {}) {
       ? 'declining'
       : 'stable';
 
-  return { windows, trend, latestAvg, earliestAvg };
+  return {
+    windows, trend, latestAvg, earliestAvg,
+    rubricVersion: version, excludedByRubric, excludedUnmeasured,
+  };
 }
 
 // --- Scoring functions ---
 
-/**
- * Score result accuracy on a scale of 1-5.
- * @param {object} result - Task result
- * @returns {number}
- */
-function scoreAccuracy(result) {
-  let score = result.success ? 4 : 1;
-  if (result.testsPass === true) score = Math.min(5, score + 1);
-  if (result.testsPass === false) score = Math.max(1, score - 1);
-  return score;
-}
-
-/**
- * Score result completeness on a scale of 1-5.
- * @param {object} task - Task metadata
- * @param {object} result - Task result
- * @returns {number}
- */
-function scoreCompleteness(task, result) {
-  let score = 3; // base: average
-  if (result.success) score += 1;
-  if (result.filesModified && result.filesModified.length > 0) score += 0.5;
-  if (task.description && result.metrics?.requirementsCovered) {
-    score = Math.min(5, 1 + 4 * result.metrics.requirementsCovered);
-  }
-  return Math.min(5, Math.max(1, Math.round(score * 10) / 10));
-}
-
-/**
- * Score result efficiency on a scale of 1-5 based on duration.
- * @param {object} result - Task result
- * @returns {number}
- */
-function scoreEfficiency(result) {
-  if (result.duration === undefined) return 3;
-  // Faster is better: <30s = 5, <60s = 4, <120s = 3, <300s = 2, else 1
-  if (result.duration < 30000) return 5;
-  if (result.duration < 60000) return 4;
-  if (result.duration < 120000) return 3;
-  if (result.duration < 300000) return 2;
-  return 1;
-}
-
-/**
- * Score result user satisfaction on a scale of 1-5.
- * @param {object} result - Task result
- * @returns {number}
- */
-function scoreSatisfaction(result) {
-  let score = result.success ? 4 : 2;
-  if (result.metrics?.userFeedback === 'positive') score = 5;
-  if (result.metrics?.userFeedback === 'negative') score = 1;
-  if (result.metrics?.revisionRequested) score = Math.max(1, score - 1);
-  return score;
-}
 
 /**
  * Convert overall score to letter grade.
@@ -457,7 +476,9 @@ function findWeakDimensions(evaluations, threshold) {
   const dimCounts = {};
 
   for (const ev of evaluations) {
-    for (const [dim, data] of Object.entries(ev.dimensions)) {
+    // Dimensions are optional: a record only carries the ones that had a signal.
+    for (const [dim, data] of Object.entries(ev.dimensions ?? {})) {
+      if (typeof data?.score !== 'number') continue;
       dimSums[dim] = (dimSums[dim] || 0) + data.score;
       dimCounts[dim] = (dimCounts[dim] || 0) + 1;
     }
@@ -499,6 +520,7 @@ function findWeakTaskTypes(evaluations, threshold) {
   const typeCounts = {};
 
   for (const ev of evaluations) {
+    if (typeof ev.overall !== 'number') continue; // unmeasured: no verdict to average
     const type = ev.taskType || 'unknown';
     typeSums[type] = (typeSums[type] || 0) + ev.overall;
     typeCounts[type] = (typeCounts[type] || 0) + 1;
@@ -530,10 +552,10 @@ function avgDimScore(evaluations, dim) {
   let sum = 0;
   let count = 0;
   for (const ev of evaluations) {
-    if (ev.dimensions[dim]) {
-      sum += ev.dimensions[dim].score;
-      count += 1;
-    }
+    const score = ev.dimensions?.[dim]?.score;
+    if (typeof score !== 'number') continue;
+    sum += score;
+    count += 1;
   }
   return count > 0 ? sum / count : 0;
 }
@@ -544,10 +566,11 @@ function avgDimScore(evaluations, dim) {
  * @returns {string}
  */
 function computeTrend(evaluations) {
-  if (evaluations.length < 4) return 'insufficient_data';
-  const half = Math.floor(evaluations.length / 2);
-  const firstAvg = evaluations.slice(0, half).reduce((s, e) => s + e.overall, 0) / half;
-  const secondAvg = evaluations.slice(half).reduce((s, e) => s + e.overall, 0) / (evaluations.length - half);
+  const scored = evaluations.filter(e => typeof e.overall === 'number');
+  if (scored.length < 4) return 'insufficient_data';
+  const half = Math.floor(scored.length / 2);
+  const firstAvg = scored.slice(0, half).reduce((s, e) => s + e.overall, 0) / half;
+  const secondAvg = scored.slice(half).reduce((s, e) => s + e.overall, 0) / (scored.length - half);
   if (secondAvg > firstAvg + 0.3) return 'improving';
   if (secondAvg < firstAvg - 0.3) return 'declining';
   return 'stable';
@@ -565,7 +588,11 @@ function buildSuggestions(weakDimensions, weakTaskTypes, trend) {
 
   for (const dim of weakDimensions) {
     const advice = {
-      accuracy: 'Increase test coverage and add validation checks before completing tasks.',
+      // Keyed on what the dimension measures. `executionReliability` counts
+      // failed tool calls, so advising "more test coverage" (the old `accuracy`
+      // text) would point at the wrong thing entirely.
+      executionReliability: 'Tool calls are failing often. Check paths before acting on them and prefer absolute paths in agent threads.',
+      accuracy: 'Increase test coverage and add validation checks before completing tasks.', // rubric v1 rows
       completeness: 'Review task requirements more carefully and create checklists before starting.',
       efficiency: 'Consider breaking large tasks into smaller sub-tasks for faster execution.',
       satisfaction: 'Seek explicit user feedback and align output format with expectations.',

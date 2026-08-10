@@ -1,7 +1,9 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
-import { describe, expect, it } from 'vitest';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 /**
  * Stop dispatcher integration tests.
@@ -9,6 +11,27 @@ import { describe, expect, it } from 'vitest';
  * The 6 wrapped Stop hooks each implement their own stop_hook_active loop
  * guard. The dispatcher's responsibility is only to spawn them, never block
  * the Stop slot, and forward additionalContext / decision=block.
+ *
+ * TWO redirections, for two different blast radii:
+ *
+ *  - HOME/USERPROFILE -> throwaway dir, the same mechanism as
+ *    `sessionend-dispatcher.test.js`. This file was measured NOT to write the
+ *    learning store today, but the slot fans out to 6 hooks and the dispatch
+ *    table is designed for appending more (`hooks/dispatch-table.json`), so the
+ *    sandbox is what keeps a future hook from silently reaching the real store.
+ *
+ *  - cwd -> throwaway NON-git dir. `git-autopilot-close` is one of the 6, and
+ *    its only kill switches are cwd-derived: `getRepoRoot()` (null outside a
+ *    repo) and an allowlist keyed on the git remote. There is no env disable.
+ *    Running from a non-repo cwd makes `getRepoRoot()` return null so the hook
+ *    returns at git-autopilot-close.js:502, before any git write. Relying on
+ *    `.git/autopilot.json` `enabled:false` instead would be relying on a
+ *    mutable runtime flag that `/autopilot` setup rewrites.
+ *
+ * Verified equivalent, not assumed: every payload below was diffed between
+ * cwd=PLUGIN_ROOT and cwd=<non-repo> and the dispatcher output was identical.
+ * (`ckpt=<id>` in `message` differs, but it differs run-to-run under a fixed
+ * cwd too — it is nondeterministic, not cwd-dependent.)
  */
 
 const PLUGIN_ROOT = path.resolve(
@@ -16,6 +39,20 @@ const PLUGIN_ROOT = path.resolve(
   '..', '..',
 );
 const SCRIPT_PATH = path.join(PLUGIN_ROOT, 'scripts', 'hooks', '_stop-dispatcher.js');
+
+/** Throwaway home and working directory for the spawned dispatcher. */
+let sandboxHome;
+let sandboxCwd;
+
+beforeAll(() => {
+  sandboxHome = mkdtempSync(path.join(tmpdir(), 'artibot-stop-home-'));
+  sandboxCwd = mkdtempSync(path.join(tmpdir(), 'artibot-stop-cwd-'));
+});
+
+afterAll(() => {
+  if (sandboxHome) rmSync(sandboxHome, { recursive: true, force: true });
+  if (sandboxCwd) rmSync(sandboxCwd, { recursive: true, force: true });
+});
 
 function runDispatcher(payload, env = {}) {
   let stdout;
@@ -25,10 +62,14 @@ function runDispatcher(payload, env = {}) {
       process.execPath,
       [SCRIPT_PATH],
       {
-        cwd: PLUGIN_ROOT,
+        cwd: sandboxCwd,
         env: {
           ...process.env,
           CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT,
+          // getHomeDir() reads USERPROFILE then HOME — both must point at the
+          // sandbox or the real learning store gets the fixtures.
+          USERPROFILE: sandboxHome,
+          HOME: sandboxHome,
           ARTIBOT_RUNTIME_CHECKPOINT_DISABLE: '1',
           ARTIBOT_RUNTIME_MEMORY_DISABLE: '1',
           ...env,
@@ -111,5 +152,28 @@ describe('_stop-dispatcher (integration)', () => {
     // became on-demand slash commands (commands/blindspot.md, teach-back.md).
     expect(names).not.toContain('blindspot-check');
     expect(names).not.toContain('teach-back');
+  });
+
+  /**
+   * Isolation self-check.
+   *
+   * Blind spots it does NOT cover: anything the hooks reach through an absolute
+   * path rather than HOME or cwd — `CLAUDE_PLUGIN_ROOT` still points at the real
+   * plugin, so writes under `plugins/artibot/runtime/` still land in the repo
+   * (they are gitignored via `plugins/artibot/.gitignore:10`, so they cannot
+   * dirty git, which is why they are left alone).
+   */
+  it('keeps every side effect inside the sandbox', () => {
+    // Structural proof the git path is shut: the hooks derive the repo from
+    // cwd, and there is no repo to find here. This is what makes the isolation
+    // independent of `.git/autopilot.json` `enabled`, a flag setup rewrites.
+    expect(() => execFileSync('git', ['rev-parse', '--show-toplevel'], {
+      cwd: sandboxCwd, stdio: ['pipe', 'pipe', 'pipe'],
+    })).toThrow();
+
+    // Canary: the suite currently writes no learning store at all. If a hook is
+    // later added to this slot that does, it lands here — failing loudly in a
+    // temp dir instead of silently appending to the developer's real store.
+    expect(existsSync(path.join(sandboxHome, '.claude'))).toBe(false);
   });
 });

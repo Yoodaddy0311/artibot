@@ -11,6 +11,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **학습 저장소 채점기 상수화 해소 — 차원 시그니처 2종 → 9종.**
+  `evaluations.json` 500행 전체가 단 2종의 시그니처(`3.8/B` 182건, `2.1/D` 318건)만 담고
+  있었고 efficiency 는 전 행이 3이었다. 원인은 rubric 이 아니라 **입력 배관**이다 —
+  `session-end.js` 가 `hookData.completed_tasks` 를 읽었는데 이 필드는 SessionEnd 페이로드에
+  **존재하지 않는다**. 따라서 `success` 는 영구 false, `duration` 은 공급된 적이 없고,
+  `testsPass` 는 `success` 와 같은 값에서 파생돼 독립 신호도 아니었다.
+  이제 세션 신호를 **transcript JSONL 에서 직접 추출**한다(`lib/learning/session-signals.js`,
+  메인 스레드 + `<session-id>/subagents/*.jsonl` 합산). 실측: 전 프로젝트 92개 세션에서
+  `accuracy 2 / completeness 3 / efficiency 5 / satisfaction 2` distinct, 시그니처 9종.
+  - `success` 는 도구 오류율 기반(임계 25%). 임계를 **관측 분포 바깥**에 둔 것은 의도적이다 —
+    분포 중앙(≈3%) 부근은 73세션 중 38개의 Wilson 95% 신뢰구간이 걸쳐 있어 노이즈를 가르고,
+    1%p 이동이 13~18세션의 판정을 뒤집는다(20~30% 구간은 0건).
+  - `testsPass` 는 `undefined` 로 남긴다. transcript 에 테스트 종료코드 신호가 없으므로
+    없는 신호를 만들어내는 대신 `inputsPresent.testsPass: false` 로 부재를 기록한다.
+  - `duration`(wall-clock)은 **채점 입력에서 제외**한다. 파일을 하나도 건드리지 않은 8개
+    세션이 efficiency 분모를 잃고 v1 duration 사다리로 떨어져 6건이 점수 1을 받았다 —
+    1~9회 호출짜리 세션이 오래 열려 있었을 뿐이다. wall-clock 은 success 경험 행에는 계속
+    기록된다.
+- **도구 실패가 만점으로 학습되던 문제.** `PostToolUseFailure` 페이로드는 오류를 최상위
+  `error` 문자열로 싣는데(`tool_response`/`tool_result` 키 자체가 없다) `tool-tracker.js` 가
+  이를 못 읽어 `{}` 로 정규화했고, Bash 분기가 **1.0(완전 성공)** 을 반환했다. 실패와 성공이
+  학습 저장소에서 구분되지 않았고 `scoreResult` 의 `return 0.0` 은 죽은 코드였다.
+  단 `classifyBashCommand` 가 선행 토큰으로만 매칭하므로 `cd x && …` 류 복합 명령의 실패는
+  **여전히 기록되지 않는다** — 별건으로 추적 중이며, "0.0 행이 생겼다"를 전수 포착으로 읽지 말 것.
+
+### Added
+- **채점 퇴화 자가감지의 SessionEnd 노출.** `getScoreHealth()`(`lib/learning/score-health.js`)가
+  세션 종료 시 stderr 에 한 줄을 출력한다:
+  `[learning] score health: <verdict> (samples=…, unmeasured=…, signatures=…, rubric v…)`.
+  318행이 두 달간 동일 시그니처로 쌓이는 동안 아무 신호도 없었던 것이 이 항목의 존재 이유다.
+  `unmeasured` 를 함께 싣는 이유는 "채점이 망가진 것"과 "신호가 끊긴 것"이 정반대 대응을
+  요구하기 때문이다. 저장소를 **읽기만** 하며(`loadEvaluations` → `readJsonFile`),
+  실패해도 세션 종료를 막지 않는다.
+- `inputsPresent` 필드 — 각 채점 신호가 실제로 도착했는지를 행마다 기록. 배관 장애와 저성능을
+  사후에 구분할 수 있게 한다.
+- `rubricVersion` 스탬프 — 채점 기준이 바뀐 경계를 넘어 평균이 섞이는 것을 차단.
+
+### Changed
+- 테스트 격리 — 일부 테스트가 **실제** 학습 저장소(`~/.claude/artibot/`)와 리포
+  `artibot.config.json` 에 쓰고 있었다. 디스패처 3종과 effort-inject 테스트를 격리했다.
+  이 오염은 본 변경의 근거 데이터를 파괴할 수 있었다.
+
 ---
 
 ## [4.42.0] — 2026-07-31

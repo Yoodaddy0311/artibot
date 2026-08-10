@@ -1,7 +1,9 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
-import { describe, expect, it } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 /**
  * PostToolUse dispatcher integration tests.
@@ -11,6 +13,14 @@ import { describe, expect, it } from 'vitest';
  *   - Exit 0 in every failure path.
  *   - Env-disable behavior (slot + global).
  *   - JSON merge correctness.
+ *
+ * These spawn the REAL dispatcher, whose universal `tool-tracker` hook appends
+ * every payload to `<home>/.claude/artibot/`. The home directory is therefore
+ * redirected to a throwaway temp dir for the whole file — same reasoning and
+ * same mechanism as `sessionend-dispatcher.test.js`. Without it the fixtures
+ * land in the developer's own learning store: `category:'NonexistentToolXYZ'`
+ * rows (a tool that does not exist) were measured there. Disabling
+ * checkpoint/memory below is not enough — the tracker writes elsewhere.
  */
 
 const PLUGIN_ROOT = path.resolve(
@@ -18,6 +28,17 @@ const PLUGIN_ROOT = path.resolve(
   '..', '..',
 );
 const SCRIPT_PATH = path.join(PLUGIN_ROOT, 'scripts', 'hooks', '_posttooluse-dispatcher.js');
+
+/** Throwaway home for the spawned dispatcher. */
+let sandboxHome;
+
+beforeAll(() => {
+  sandboxHome = mkdtempSync(path.join(tmpdir(), 'artibot-posttooluse-'));
+});
+
+afterAll(() => {
+  if (sandboxHome) rmSync(sandboxHome, { recursive: true, force: true });
+});
 
 function runDispatcher(payload, env = {}) {
   let stdout;
@@ -31,6 +52,10 @@ function runDispatcher(payload, env = {}) {
         env: {
           ...process.env,
           CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT,
+          // getHomeDir() reads USERPROFILE then HOME — both must point at the
+          // sandbox or the real learning store gets the fixtures.
+          USERPROFILE: sandboxHome,
+          HOME: sandboxHome,
           ARTIBOT_RUNTIME_CHECKPOINT_DISABLE: '1',
           ARTIBOT_RUNTIME_MEMORY_DISABLE: '1',
           ...env,

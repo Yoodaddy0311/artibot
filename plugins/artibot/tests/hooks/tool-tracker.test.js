@@ -21,6 +21,10 @@ import { describe, expect, it } from 'vitest';
 // ---------------------------------------------------------------------------
 
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { tmpdir } from 'node:os';
 
 const SKIP_TOOLS = new Set([
   'TodoRead', 'TodoWrite', 'TaskList', 'TaskGet', 'TaskUpdate',
@@ -179,6 +183,12 @@ function extractMeta(input) {
 // Exact copy of tool-tracker.js extractToolResult — resolves the tool output
 // from a Claude Code PostToolUse payload across all known field aliases.
 function extractToolResult(hookData) {
+  const failure = hookData?.error ?? hookData?.tool_error;
+  if (typeof failure === 'string' && failure) return { error: failure };
+  if (failure && typeof failure === 'object') {
+    return { ...failure, error: failure.message || true };
+  }
+
   const raw = hookData?.tool_response
     ?? hookData?.tool_result
     ?? hookData?.tool_output
@@ -454,6 +464,64 @@ describe('tool-tracker hook (pure function tests)', () => {
       expect(extractToolResult({ tool_response: 123 })).toEqual({});
     });
 
+    it('maps a top-level `error` string to { error } — the PostToolUseFailure shape', () => {
+      const r = extractToolResult({ error: 'Exit code 125\nunknown flag: --bogus' });
+      expect(r).toEqual({ error: 'Exit code 125\nunknown flag: --bogus' });
+      expect(scoreResult('Bash', r, {})).toBe(0.0);
+    });
+
+    it('TRAP GUARD: a failure must NOT be normalised into { output } (would score 1.0)', () => {
+      // The obvious "just add ?? hookData.error to the chain" fix routes the
+      // string through the { output: … } normaliser. scoreResult's 0.0 branch
+      // tests result.error, so the failure would score a perfect 1.0 again.
+      // This test pins the key name, which is the entire substance of the fix.
+      const r = extractToolResult({ error: 'Exit code 1\ncd: nope: No such file or directory' });
+      expect(r.output).toBeUndefined();
+      expect(r.error).toBeTruthy();
+      expect(scoreResult('Bash', r, {})).toBe(0.0);
+      expect(scoreResult('Bash', { output: 'Exit code 1\ncd: nope' }, {})).toBe(1.0); // the wrong shape
+    });
+
+    it('handles an object-shaped error payload', () => {
+      const r = extractToolResult({ error: { message: 'boom', code: 'EBOOM' } });
+      expect(r.error).toBe('boom');
+      expect(scoreResult('Bash', r, {})).toBe(0.0);
+    });
+
+    // Same failure family as the TRAP GUARD above: a falsy value parked on
+    // `error` sails through scoreResult's `if (result.error || ...)` and the
+    // failure scores a perfect 1.0 again. `??` only substitutes null/undefined,
+    // so an empty message stayed empty; `||` covers every falsy message.
+    it.each([
+      ['empty string', ''],
+      ['zero', 0],
+      ['false', false],
+    ])('object-shaped error with a %s message still scores 0.0', (_label, message) => {
+      const r = extractToolResult({ error: { message } });
+      expect(r.error).toBeTruthy();
+      expect(scoreResult('Bash', r, {})).toBe(0.0);
+    });
+
+    it('object-shaped error preserves a real message (|| does not clobber it)', () => {
+      expect(extractToolResult({ error: { message: 'real failure text' } }).error)
+        .toBe('real failure text');
+    });
+
+    it('reads the tool_error alias', () => {
+      expect(scoreResult('Bash', extractToolResult({ tool_error: 'failed' }), {})).toBe(0.0);
+    });
+
+    it('ignores an empty-string error and falls through to tool_response', () => {
+      const r = extractToolResult({ error: '', tool_response: { exit_code: 0 } });
+      expect(scoreResult('Bash', r, {})).toBe(1.0);
+    });
+
+    it('success payloads are unaffected (no error key present)', () => {
+      const r = extractToolResult({ tool_response: { exit_code: 0, stdout: 'ok' } });
+      expect(r.error).toBeUndefined();
+      expect(scoreResult('Bash', r, {})).toBe(1.0);
+    });
+
     it('regression: tool_response Bash exit_code now scores (was constant 1.0)', () => {
       // Pre-fix, tool_result was always {} → exit_code undefined → always 1.0.
       // Post-fix, a real failing Bash result scores 0.1.
@@ -606,5 +674,81 @@ describe('tool-tracker hook (pure function tests)', () => {
         expect(SKIP_TOOLS.has(skip)).toBe(true);
       }
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Integration: REAL captured payloads → the REAL tool-tracker.js
+//
+// Every other test in this file re-implements tool-tracker's internals (see the
+// file header: vite cannot parse the real module). Those copies can drift from
+// the source and still pass — which is exactly how a failed Bash call came to
+// score a perfect 1.0 unnoticed. This block spawns the actual script with an
+// isolated HOME and asserts what it really persists, so it cannot drift.
+//
+// Fixture payloads were captured live on 2026-08-10 by dumping raw hook stdin.
+// Only identifying fields are redacted (session_id, prompt_id, tool_use_id,
+// transcript_path, cwd, home paths inside commands). The load-bearing shape is
+// untouched: failures carry their text at top-level `error` with NO
+// `tool_response` key; successes carry `tool_response`.
+// ---------------------------------------------------------------------------
+describe('real captured payloads -> real tool-tracker.js (integration)', () => {
+  const HERE = path.dirname(fileURLToPath(import.meta.url));
+  const TRACKER = path.resolve(HERE, '..', '..', 'scripts', 'hooks', 'tool-tracker.js');
+  const FIXTURE = path.resolve(HERE, '..', 'fixtures', 'tool-tracker-hook-payloads.jsonl');
+
+  /**
+   * Run the real hook against one payload in a throwaway HOME.
+   * @param {string} rawPayload
+   * @returns {Array<{context: string, score: number}>}
+   */
+  function runTracker(rawPayload) {
+    const home = mkdtempSync(path.join(tmpdir(), 'tt-int-'));
+    try {
+      execFileSync(process.execPath, [TRACKER, 'failure'], {
+        input: rawPayload,
+        env: { ...process.env, USERPROFILE: home, HOME: home },
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      const store = path.join(home, '.claude', 'artibot', 'tool-history.json');
+      if (!existsSync(store)) return [];
+      const parsed = JSON.parse(readFileSync(store, 'utf-8'));
+      return Object.entries(parsed.contexts || {}).flatMap(([context, rows]) =>
+        rows.map((r) => ({ context, score: r.score })));
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  }
+
+  const payloads = readFileSync(FIXTURE, 'utf-8')
+    .trim().split('\n').map((l) => ({ raw: l, parsed: JSON.parse(l) }));
+  const failures = payloads.filter((p) => 'error' in p.parsed);
+  const successes = payloads.filter((p) => !('error' in p.parsed));
+
+  it('fixture holds both captured failures and captured successes', () => {
+    expect(failures.length).toBeGreaterThanOrEqual(3);
+    expect(successes.length).toBeGreaterThanOrEqual(2);
+    // Pin the property the fix depends on: real failures carry no tool_response.
+    for (const f of failures) expect('tool_response' in f.parsed).toBe(false);
+  });
+
+  // Each case spawns a real node process (~5s here), so CI runs one payload per
+  // direction rather than all five — enough to catch drift between this file's
+  // mirrored helpers and the real module, without adding ~25s to every suite
+  // run. The remaining fixture rows are exercised by the shape assertion above
+  // and by scratchpad/score-harness.mjs during manual verification.
+  const [firstFailure] = failures;
+  const [firstSuccess] = successes;
+
+  it(`scores real captured failure (${firstFailure.parsed.tool_input.command.slice(0, 30)}) as 0.0`, () => {
+    const rows = runTracker(firstFailure.raw);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].score).toBe(0.0);
+  });
+
+  it(`keeps real captured success (${firstSuccess.parsed.tool_input.command.slice(0, 30)}) at 1.0`, () => {
+    const rows = runTracker(firstSuccess.raw);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].score).toBe(1.0);
   });
 });

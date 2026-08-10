@@ -31,11 +31,13 @@ export {
 
 // Self Evaluator (Self-Rewarding pattern)
 export {
+  RUBRIC_VERSION,
   evaluateResult,
   getImprovementSuggestions,
   getTeamPerformance,
   getModelPerformance,
   getLearningTrends,
+  getScoreHealth,
 } from './self-evaluator.js';
 
 // Model Identity (effective-model attribution read from session transcripts)

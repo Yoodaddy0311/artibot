@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import os from 'node:os';
+import path from 'node:path';
 
 /**
  * Tests for the session-end hook's learning pipeline.
@@ -48,6 +50,8 @@ describe('session-end hook - learning pipeline', () => {
   let exitSpy;
   let runLearningPipeline;
   let runMacroAutoRegister;
+  let buildSessionData;
+  let reportScoreHealth;
 
   beforeEach(async () => {
     vi.resetModules();
@@ -60,6 +64,8 @@ describe('session-end hook - learning pipeline', () => {
     const mod = await import('../../scripts/hooks/session-end.js');
     runLearningPipeline = mod.runLearningPipeline;
     runMacroAutoRegister = mod.runMacroAutoRegister;
+    buildSessionData = mod.buildSessionData;
+    reportScoreHealth = mod.reportScoreHealth;
 
     // Allow the main() side-effect to complete
     await new Promise((r) => setTimeout(r, 100));
@@ -377,6 +383,153 @@ describe('session-end hook - learning pipeline', () => {
         sweepAutoRegister: sweep,
       });
       expect(result.registered).toBe(0);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // WP-D: session signals reach the learning pipeline
+  // ---------------------------------------------------------------------------
+  describe('buildSessionData()', () => {
+    it('carries a signals field into the pipeline payload', async () => {
+      // The whole defect was that nothing measurable reached the scorer. The
+      // key existing is the minimum bar; the values are covered by the
+      // session-signals and pipeline suites.
+      const data = await buildSessionData({ session_id: 's1', transcript_path: '/nope.jsonl' });
+      expect(data).toHaveProperty('signals');
+    });
+
+    it('survives signal extraction failure without throwing', async () => {
+      // getPluginRoot is mocked to a path with no modules, so the dynamic
+      // import inside signal extraction genuinely fails here. Instrumentation
+      // must never be the reason a session cannot end.
+      const data = await buildSessionData({ session_id: 's2', transcript_path: '/nope.jsonl' });
+      expect(data.signals).toBeNull();
+      expect(data.sessionId).toBe('s2');
+    });
+
+    it('tolerates a payload with no transcript_path at all', async () => {
+      const data = await buildSessionData({ session_id: 's3' });
+      expect(data.sessionId).toBe('s3');
+      expect(data).toHaveProperty('signals');
+    });
+
+    it('still forwards completed_tasks for other consumers', async () => {
+      // Scoring no longer depends on it, but it is deliberately not removed:
+      // a future payload may populate it, and inputsPresent records arrival.
+      const data = await buildSessionData({ session_id: 's4', completed_tasks: [{ id: 't1' }] });
+      expect(data.completedTasks).toEqual([{ id: 't1' }]);
+    });
+
+    it('defaults completed_tasks to an empty array when absent', async () => {
+      const data = await buildSessionData({ session_id: 's5' });
+      expect(data.completedTasks).toEqual([]);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // WP-D: score-health verdict is surfaced on stderr (PRD §5.2 B-3 / AC-4)
+  // ---------------------------------------------------------------------------
+  describe('reportScoreHealth()', () => {
+    /** Pull the emitted score-health line out of the stderr spy. */
+    function healthLine() {
+      const call = stderrSpy.mock.calls.find(
+        (c) => typeof c[0] === 'string' && c[0].includes('[learning] score health:'),
+      );
+      return call?.[0];
+    }
+
+    it('prints the verdict line for a healthy store', async () => {
+      stderrSpy.mockClear();
+      await reportScoreHealth({
+        getScoreHealth: async () => ({
+          samples: 40, distinctSignatures: 9, distinctByDimension: {},
+          degenerate: false, reason: null, rubricVersion: 2,
+          excludedByRubric: 0, unmeasured: 0,
+        }),
+      });
+      expect(healthLine()).toBe(
+        '[learning] score health: ok (samples=40, unmeasured=0, signatures=9, rubric v2)\n',
+      );
+    });
+
+    it('prints DEGENERATE with the reason when the store has collapsed', async () => {
+      stderrSpy.mockClear();
+      await reportScoreHealth({
+        getScoreHealth: async () => ({
+          samples: 318, distinctSignatures: 1, distinctByDimension: {},
+          degenerate: true, reason: 'constant dimension(s): efficiency',
+          rubricVersion: 2, excludedByRubric: 0, unmeasured: 300,
+        }),
+      });
+      const line = healthLine();
+      expect(line).toContain('DEGENERATE — constant dimension(s): efficiency');
+      // unmeasured separates "scoring broke" from "signals stopped arriving".
+      expect(line).toContain('unmeasured=300');
+      expect(line).toContain('samples=318');
+    });
+
+    it('surfaces the not-yet-judgeable verdict rather than implying health', async () => {
+      stderrSpy.mockClear();
+      await reportScoreHealth({
+        getScoreHealth: async () => ({
+          samples: 3, distinctSignatures: 2, distinctByDimension: {},
+          degenerate: false, reason: 'insufficient_samples', rubricVersion: 2,
+          excludedByRubric: 0, unmeasured: 0,
+        }),
+      });
+      expect(healthLine()).toContain('insufficient_samples');
+    });
+
+    it('never lets a health-check failure escape into session teardown', async () => {
+      stderrSpy.mockClear();
+      await expect(reportScoreHealth({
+        getScoreHealth: async () => { throw new Error('store unreadable'); },
+      })).resolves.toBeUndefined();
+      expect(healthLine()).toBeUndefined();
+    });
+
+    it('stays silent when the module cannot even be resolved', async () => {
+      // getPluginRoot is mocked to a path with no modules, so this exercises the
+      // real dynamic-import failure rather than a simulated one.
+      stderrSpy.mockClear();
+      await expect(reportScoreHealth()).resolves.toBeUndefined();
+      expect(healthLine()).toBeUndefined();
+    });
+
+    it('emits a real verdict from the real store reader (isolated HOME)', async () => {
+      // End-to-end through the actual degeneracy logic, pointed at a throwaway
+      // store. AC-4 asks for the line to appear, not merely for the call to
+      // happen — so this asserts on the emitted text.
+      const { mkdirSync, writeFileSync } = await import('node:fs');
+      const { getScoreHealth } = await import('../../lib/learning/score-health.js');
+      const home = path.join(os.tmpdir(), `artibot-health-${Date.now()}`);
+      mkdirSync(path.join(home, '.claude', 'artibot'), { recursive: true });
+      // 12 identical rows: past the sample floor, one signature -> degenerate.
+      const rows = Array.from({ length: 12 }, (_, i) => ({
+        id: `e${i}`, rubricVersion: 2,
+        dimensions: {
+          accuracy: { score: 1 }, completeness: { score: 3 },
+          efficiency: { score: 3 }, satisfaction: { score: 2 },
+        },
+      }));
+      writeFileSync(
+        path.join(home, '.claude', 'artibot', 'evaluations.json'),
+        JSON.stringify(rows), 'utf-8',
+      );
+
+      const prev = process.env.USERPROFILE;
+      process.env.USERPROFILE = home;
+      stderrSpy.mockClear();
+      try {
+        await reportScoreHealth({ getScoreHealth });
+      } finally {
+        process.env.USERPROFILE = prev;
+      }
+
+      const line = healthLine();
+      expect(line).toContain('[learning] score health: DEGENERATE');
+      expect(line).toContain('samples=12');
+      expect(line).toContain('signatures=1');
     });
   });
 });

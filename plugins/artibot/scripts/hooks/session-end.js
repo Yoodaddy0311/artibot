@@ -13,6 +13,7 @@
 
 import { atomicWriteSync, getPluginRoot, parseJSON, readStdin, toFileUrl } from '../utils/index.js';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createErrorHandler, getStatePath, logHookError } from '../../lib/core/hook-utils.js';
 
 /**
@@ -130,18 +131,63 @@ async function resolveModelAttribution(hookData) {
 }
 
 /**
+ * Read what actually happened this session out of the transcript: how many
+ * tools ran, how many failed, how many files were touched, how long it spanned.
+ *
+ * Same discipline as {@link resolveModelAttribution}: instrumentation never
+ * fails SessionEnd. A null return means "could not measure", which the pipeline
+ * turns into absent inputs rather than zeros — the whole point of this work is
+ * that "measured nothing" and "failed to measure" must stay distinguishable.
+ *
+ * The transcript path comes from the hook payload only. Assembling a guess from
+ * the session id would silently score the wrong file.
+ *
+ * @param {object} hookData
+ * @returns {Promise<object|null>} signals from lib/learning/session-signals.js
+ */
+async function resolveSessionSignals(hookData) {
+  try {
+    const signalsPath = path.join(
+      getPluginRoot(), 'lib', 'learning', 'session-signals.js',
+    );
+    const mod = await import(toFileUrl(signalsPath));
+    const signals = await mod.resolveSessionSignals(hookData?.transcript_path);
+    // Surfaced for the same reason as model attribution: a silent 'none' is how
+    // this pipe broke last time and stayed broken for 500 records.
+    process.stderr.write(
+      `[learning] session signals: source=${signals.source}, `
+      + `tools=${signals.toolCalls} (errors ${signals.toolErrors}), `
+      + `files=${signals.filesTouched} touched/${signals.filesSeen} seen\n`,
+    );
+    return signals;
+  } catch (err) {
+    logHookError('session-end', 'session signal extraction failed', err);
+    process.stderr.write(`[learning] session signals failed: ${err?.message ?? err}\n`);
+    return null;
+  }
+}
+
+/**
  * Extract the session data payload consumed by shutdownLearning().
+ *
+ * Exported for tests: this is the seam where measurement enters the learning
+ * pipeline, and it went unnoticed for 500 records that nothing was arriving.
+ *
  * @param {object} hookData
  * @returns {Promise<object>}
  */
-async function buildSessionData(hookData) {
+export async function buildSessionData(hookData) {
   return {
     sessionId: hookData.session_id || `session-${Date.now()}`,
     toolUsage: hookData.tool_usage || {},
     errors: hookData.errors || [],
+    // Kept even though the payload never populates it: a future schema may, and
+    // `inputsPresent.success` now records whether it actually arrived. What
+    // changed is that scoring no longer *depends* on it — that was the bug.
     completedTasks: hookData.completed_tasks || [],
     teamConfig: hookData.team_config || null,
     modelAttribution: await resolveModelAttribution(hookData),
+    signals: await resolveSessionSignals(hookData),
   };
 }
 
@@ -180,6 +226,66 @@ async function runLearningStage(sessionData) {
     process.stderr.write(`${formatLearningSummary(result)}\n`);
   } catch (err) {
     logHookError('session-end', 'learning pipeline failed', err);
+  }
+}
+
+/**
+ * Compose the stderr line for a score-health verdict.
+ *
+ * `unmeasured` rides along with `degenerate` on purpose: a store can flatten
+ * because scoring broke, or because the signals stopped arriving, and those call
+ * for opposite responses. Reporting only the collapse would leave the reader
+ * guessing which one they are looking at.
+ *
+ * @param {object} health - Result of getScoreHealth()
+ * @returns {string}
+ */
+function formatScoreHealth(health) {
+  const verdict = health.degenerate
+    ? `DEGENERATE — ${health.reason}`
+    : (health.reason ?? 'ok');
+  // `unmeasured` counts rows; `absent` counts dimensions. A rubric can be half
+  // dark with every row measured, and reporting a bare "ok" over that is the
+  // same silence this line exists to break.
+  const absent = health.absentDimensions?.length
+    ? `, absent=${health.absentDimensions.join('·')}`
+    : '';
+  return `[learning] score health: ${verdict} `
+    + `(samples=${health.samples}, unmeasured=${health.unmeasured}${absent}, `
+    + `signatures=${health.distinctSignatures}, rubric v${health.rubricVersion})`;
+}
+
+/**
+ * Surface the evaluation store's degeneracy verdict on stderr, next to the
+ * signal and attribution lines a human already reads at session end.
+ *
+ * This is the third leg of the anti-regression defence. `source:'none'` reports
+ * that one session went unmeasured and `inputsPresent` records which signals
+ * arrived, but neither notices a store that has been emitting the same row for
+ * weeks — which is exactly what happened for 318 consecutive rows. A verdict
+ * nobody prints is a verdict nobody acts on.
+ *
+ * Read-only: getScoreHealth() calls loadEvaluations() -> readJsonFile() and
+ * writes nothing, so running it every session cannot corrupt the store it
+ * inspects.
+ *
+ * @param {object} [deps] - Injection seam for tests
+ * @param {Function} [deps.getScoreHealth] - Override the health reader
+ * @param {string} [deps.pluginRoot] - Override the module search root
+ * @returns {Promise<void>}
+ */
+export async function reportScoreHealth(deps = {}) {
+  try {
+    let read = deps.getScoreHealth;
+    if (!read) {
+      const healthPath = path.join(
+        deps.pluginRoot || getPluginRoot(), 'lib', 'learning', 'score-health.js',
+      );
+      read = (await import(toFileUrl(healthPath))).getScoreHealth;
+    }
+    process.stderr.write(`${formatScoreHealth(await read())}\n`);
+  } catch (err) {
+    logHookError('session-end', 'score health check failed', err);
   }
 }
 
@@ -321,6 +427,9 @@ async function main() {
 
   const sessionData = await buildSessionData(hookData);
   await runLearningStage(sessionData);
+  // After the pipeline persists this session's row, so the verdict reflects the
+  // store the user is about to walk away from rather than its previous state.
+  await reportScoreHealth();
   await runEvolutionLoop(hookData);
   await runAdvisors(hookData);
 }
@@ -349,4 +458,12 @@ export async function runMacroAutoRegister(deps = {}) {
   return { registered: count };
 }
 
-main().catch(createErrorHandler('session-end', { exit: true }));
+// Direct-run guard: importing this module (tests) must not execute a real
+// SessionEnd — the pipeline writes to the live learning store and blocks on
+// stdin, so an import was both a data hazard and a hang.
+const isDirectRun = process.argv[1]
+  && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
+
+if (isDirectRun) {
+  main().catch(createErrorHandler('session-end', { exit: true }));
+}
