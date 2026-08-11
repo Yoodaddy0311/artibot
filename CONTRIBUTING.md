@@ -256,6 +256,88 @@ Before submitting, verify:
 
 Describe what changed and why. Include sample input/output if relevant. Link any related issue.
 
+## Landing changes on master
+
+Outside contributors use the PR flow above. Maintainers pushing to `master`
+directly should use the side-branch gate flow, for a reason worth understanding.
+
+### Why direct pushes are not gated
+
+`master` has branch protection with four required status checks. It also has
+`enforce_admins` turned off. A required status check can only pass on a commit
+that already exists on the server, and a commit being pushed does not exist yet,
+so every direct push reports this and lands anyway:
+
+```
+remote: Bypassed rule violations for refs/heads/master:
+remote: - 4 of 4 required status checks are expected.
+```
+
+This is not an occasional slip. Every direct push bypasses, by construction. CI
+still runs afterwards, so a red result arrives after the code is already on the
+remote. On 2026-08-11 commit `9f124441` failed CI and stayed on `master`.
+
+### The side-branch gate flow
+
+Check runs attach to a commit SHA, not to a branch. So if the SHA is already
+green when `master` fast-forwards onto it, the required checks are satisfied and
+the push is accepted with no bypass.
+
+```bash
+git switch -c ci/short-topic          # ci/** is the staging prefix
+git push -u origin ci/short-topic     # CI and Plugin Validation run here
+# wait for all four required contexts to go green on that SHA
+git switch master
+git merge --ff-only ci/short-topic
+git push origin master                # accepted without a bypass
+git push origin --delete ci/short-topic
+```
+
+The prefix matters. `.github/workflows/ci.yml` and
+`.github/workflows/plugin-validate.yml` both trigger on
+`[master, main, "artibot/**", "ci/**"]`. A branch outside that list produces no
+check runs, so the fast-forward would bypass exactly as a direct push does. Keep
+the two branch lists in lockstep when either changes.
+
+`--ff-only` is required. A merge commit is a new SHA with no check runs on it,
+which puts you back to bypassing.
+
+### Pre-push hook
+
+The hook runs the CI checks that are cheap enough to sit in front of every push.
+Enable it once per clone. `core.hooksPath` is local config and is not committed.
+
+```bash
+git config core.hooksPath plugins/artibot/scripts/git-hooks
+```
+
+If pushes go through without the hook printing anything, check that the file is
+executable. This repo is worked on with `core.filemode=false`, so a local
+`chmod +x` is not recorded, and the mode has to be committed deliberately with
+`git add --chmod=+x plugins/artibot/scripts/git-hooks/pre-push`.
+
+```bash
+chmod +x plugins/artibot/scripts/git-hooks/pre-push
+```
+
+It takes roughly 11-15 seconds and blocks the push on failure. ESLint dominates
+that, so the number moves with its cache state. Bypass with
+`git push --no-verify` or `ARTIBOT_SKIP_PREPUSH=1`.
+
+It does not run the vitest suite, coverage thresholds, the runtime eval gate, or
+the two plugin.json structure checks. The full list of what it does not cover is
+at the top of `plugins/artibot/scripts/git-hooks/pre-push`. Read it before
+treating a green hook as a green CI. The hook predicts CI, it does not replace
+it.
+
+### Plugin cache does not refresh without a version bump
+
+`claude plugin update artibot@artibot` compares versions and no-ops when they
+match, reporting `already at latest`. Editing a command, agent, or skill without
+bumping the version in `.claude-plugin/plugin.json` leaves the installed cache on
+the old definitions, so local edits will not appear in Claude Code. Bump the
+version, or reinstall, when you need the change to take effect before a release.
+
 ## Forbidden patterns
 
 | Pattern | Why | Instead |

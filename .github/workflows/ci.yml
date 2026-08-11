@@ -3,8 +3,13 @@
 name: CI
 
 on:
+  # `ci/**` is the staging prefix for the side-branch gate flow: push there
+  # first, wait for the four required contexts to go green on that SHA, then
+  # fast-forward master. Check runs attach to the SHA, so master's required
+  # checks are already satisfied when it moves and the push needs no bypass.
+  # See CONTRIBUTING.md "Landing changes on master".
   push:
-    branches: [master, main, "artibot/**"]
+    branches: [master, main, "artibot/**", "ci/**"]
   pull_request:
     branches: [master, main, "artibot/**"]
   workflow_dispatch:
@@ -71,12 +76,22 @@ jobs:
       - name: Validate docs
         run: node scripts/ci/validate-doc-links.js && node scripts/ci/validate-md-rendering.js
 
-      - name: Validate README claims (structural — PR fast gate)
-        if: github.event_name == 'pull_request'
-        run: node scripts/ci/validate-readme-claims.js
-
-      - name: Validate README claims (full — main strict gate)
-        if: github.event_name == 'push' && matrix.node-version == 22
+      # Runs on every event and every matrix leg. The previous split ran
+      # structural mode on PRs and --full only on push/Node 22, which left PRs
+      # and side-branch pushes on a weaker gate than master. That split bought
+      # nothing measurable: --full adds exactly one actual (statementCoverage,
+      # scripts/ci/readme-claims-registry.js:95-102) and that key is
+      # deliberately excluded from CLAIM_PATTERNS (same file, :110-112), so it
+      # is never compared against anything. Measured delta on 2026-08-11 was
+      # 422ms structural vs 553ms full, and the two produce byte-identical
+      # output apart from the mode banner.
+      #
+      # Blind spot this step does NOT cover: no coverage claim is verified by
+      # any mode today. If a coverage pattern is added to CLAIM_PATTERNS, this
+      # step must move below "Run tests with coverage" -- coverage-summary.json
+      # does not exist yet at this point in the job, and the registry skips
+      # absent actuals silently rather than failing.
+      - name: Validate README claims
         run: node scripts/ci/validate-readme-claims.js --full
 
       - name: Run tests with coverage

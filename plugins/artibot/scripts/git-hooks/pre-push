@@ -1,0 +1,142 @@
+#!/bin/sh
+#
+# Artibot pre-push gate.
+#
+# Runs the CI checks that are cheap enough to sit in front of every push, so a
+# broken tree is caught before it reaches the remote instead of after. This
+# exists because master's branch protection cannot gate a direct push at all:
+# required status checks can only run on a commit that already exists on the
+# server, so every direct push reports "N of N required status checks are
+# expected" and lands via the admin bypass.
+#
+# Enable once per clone (not committed, core.hooksPath is local config):
+#
+#   git config core.hooksPath plugins/artibot/scripts/git-hooks
+#
+# Bypass:
+#   git push --no-verify           one-off, git built-in
+#   ARTIBOT_SKIP_PREPUSH=1 git push  same, but greppable in shell history
+#
+# WHAT THIS HOOK DOES NOT COVER. Read this before trusting a green result:
+#   - The vitest suite (~9,900 tests). Far too slow for a push gate.
+#   - Coverage thresholds and the runtime eval gate. Both need artifacts that
+#     only exist after a full test run.
+#   - The two "plugin.json structure" required contexts. Their logic lives
+#     inline in .github/workflows/plugin-validate.yml, and duplicating it here
+#     would drift. CI is the only check for those.
+#   - Node 22 vs Node 24 differences. This runs on whatever node is on PATH.
+#   - Anything platform-specific. install.sh and install.ps1 take different
+#     paths on a Linux runner than they do here.
+# A green hook predicts, it does not guarantee, a green CI.
+
+set -u
+
+if [ "${ARTIBOT_SKIP_PREPUSH:-0}" = "1" ]; then
+	echo "pre-push: skipped via ARTIBOT_SKIP_PREPUSH=1"
+	exit 0
+fi
+
+# Deletions ("git push origin --delete x") carry an all-zero local sha and have
+# no tree to validate. Read stdin to tell them apart from real pushes. If every
+# ref on stdin is a deletion there is nothing to check.
+zero='0000000000000000000000000000000000000000'
+has_content=0
+while read -r _local_ref local_sha _remote_ref _remote_sha; do
+	[ -z "${local_sha:-}" ] && continue
+	if [ "$local_sha" != "$zero" ]; then
+		has_content=1
+	fi
+done
+
+if [ "$has_content" = "0" ]; then
+	echo "pre-push: deletion-only push, nothing to validate"
+	exit 0
+fi
+
+# Fail closed from here on. Every prerequisite problem is an error, never a
+# silent pass -- a hook that exits 0 when it could not run is worse than no
+# hook, because it manufactures confidence.
+repo_root=$(git rev-parse --show-toplevel 2>/dev/null) || {
+	echo "pre-push: FAIL - not inside a git work tree" >&2
+	exit 1
+}
+
+plugin_dir="$repo_root/plugins/artibot"
+[ -d "$plugin_dir" ] || {
+	echo "pre-push: FAIL - $plugin_dir not found" >&2
+	exit 1
+}
+
+command -v node >/dev/null 2>&1 || {
+	echo "pre-push: FAIL - node not on PATH" >&2
+	exit 1
+}
+
+cd "$plugin_dir" || {
+	echo "pre-push: FAIL - cannot enter $plugin_dir" >&2
+	exit 1
+}
+
+[ -d node_modules ] || {
+	echo "pre-push: FAIL - node_modules missing. Run 'npm ci' in $plugin_dir" >&2
+	echo "pre-push:        (refusing to pass a gate that cannot actually run)" >&2
+	exit 1
+}
+
+started=$(date +%s)
+failed=''
+
+# Ordered cheapest first so an obvious break reports in under a second.
+# Measured 2026-08-11 on this tree, in ms: validate 390, agents 685, skills 727,
+# commands 656, hooks 469, doc-links 557, md-rendering 913, model-policy 837,
+# readme-claims 553, eslint 7893. End-to-end wall clock landed between 10.8s and
+# 14.0s across runs, so quote it as a range rather than a single figure. Lint
+# dominates and its cache state is what moves the number.
+run_gate() {
+	label=$1
+	shift
+	if output=$("$@" 2>&1); then
+		echo "  ok    $label"
+	else
+		echo "  FAIL  $label"
+		echo "$output" | sed 's/^/        /'
+		failed="$failed $label"
+	fi
+}
+
+echo "pre-push: running Artibot gates in plugins/artibot"
+
+run_gate structure    node scripts/validate.js
+run_gate agents       node scripts/ci/validate-agents.js
+run_gate skills       node scripts/ci/validate-skills.js
+run_gate commands     node scripts/ci/validate-commands.js
+run_gate hooks        node scripts/ci/validate-hooks.js
+run_gate doc-links    node scripts/ci/validate-doc-links.js
+run_gate md-render    node scripts/ci/validate-md-rendering.js
+# Not run by ci.yml today. Kept here because agent frontmatter drifting from
+# artibot.config.json is exactly the class of break that only surfaces at
+# runtime otherwise.
+run_gate model-policy node scripts/ci/validate-model-policy.js
+# The gate that caught 9f124441 (README claimed 61 hook scripts, actual 62).
+run_gate readme       node scripts/ci/validate-readme-claims.js --full
+# Deliberately `.` and not a directory list, matching .github/workflows/ci.yml
+# exactly. `npm run lint` in package.json passes `bin/ lib/ scripts/ tests/`,
+# which silently misses server/ (4 lintable files), and any directory added
+# later would be missed the same way. Passing `.` cannot drift. It is also not
+# slower: measured 2026-08-11, `.` took 7893ms against 8852ms for the explicit
+# list. Do not "optimise" this into a directory list, and note that naming a
+# directory with no lintable files (hooks/) makes ESLint exit 2 outright.
+run_gate lint         npx eslint . --max-warnings=0
+
+elapsed=$(( $(date +%s) - started ))
+
+if [ -n "$failed" ]; then
+	echo ""
+	echo "pre-push: BLOCKED after ${elapsed}s. Failing gates:$failed" >&2
+	echo "pre-push: fix the above, or bypass with 'git push --no-verify' if you" >&2
+	echo "pre-push: have a reason and intend to fix it on the next push." >&2
+	exit 1
+fi
+
+echo "pre-push: all gates passed in ${elapsed}s"
+exit 0
