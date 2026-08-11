@@ -31,6 +31,7 @@ import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { createCollector } from '../../lib/learning/memory/dream/collector.js';
 import { distillCandidates, writeCandidates } from '../../lib/learning/memory/dream/distiller.js';
+import { isMainEntry } from './_main-entry.js';
 
 const __filename = fileURLToPath(import.meta.url);
 
@@ -240,12 +241,7 @@ export async function runNightlyDream(opts = {}) {
 // Entry
 // ---------------------------------------------------------------------------
 
-const invokedDirect = (() => {
-  if (typeof process === 'undefined' || !process.argv[1]) return false;
-  try { return path.resolve(process.argv[1]) === path.resolve(__filename); } catch { return false; }
-})();
-
-if (invokedDirect) {
+if (isMainEntry(import.meta.url)) {
   const args = parseArgs(process.argv.slice(2));
   if (args.help) {
     process.stdout.write(`${USAGE}\n`);

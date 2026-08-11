@@ -10,10 +10,10 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { atomicWriteSync, parseJSON, readStdin, resolveConfigPath } from '../utils/index.js';
 import { createErrorHandler } from '../../lib/core/hook-utils.js';
 import { isAutopilotAllowed } from '../../lib/autopilot/repo-identity.js';
+import { isMainEntry } from './_main-entry.js';
 
 /**
  * Read `git.autopilot.bypassPreCommitHooks` from artibot.config.json.
@@ -387,9 +387,6 @@ export async function main() {
 // auto-save — main() blocks on stdin and, past its gates, writes git state
 // (`git add -A`, WIP commit, `git stash create`/`store`). Production is
 // unaffected: `_userprompt-dispatcher.js` spawns this file as argv[1].
-const isDirectRun = process.argv[1]
-  && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
-
-if (isDirectRun) {
+if (isMainEntry(import.meta.url)) {
   main().catch(createErrorHandler('git-autopilot-save', { exit: true }));
 }

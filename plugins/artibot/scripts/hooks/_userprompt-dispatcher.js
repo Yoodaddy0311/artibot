@@ -40,6 +40,8 @@ import { handleUserPromptSubmit as runtimePrompt } from './runtime-prompt.js';
 import { handleUserPromptSubmit as autopilotNlu } from './autopilot-nlu-trigger.js';
 import { handleUserPromptSubmit as autoCommandSuggest } from './auto-command-suggest.js';
 import { handleUserPromptSubmit as ambiguityGuard } from './ambiguity-guard.js';
+import { isMainEntry } from './_main-entry.js';
+import { createFatalHandler } from './_dispatcher-utils.js';
 
 const HOOK_NAME = '_userprompt-dispatcher';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -229,19 +231,6 @@ async function main() {
   }
 }
 
-const isMain = (() => {
-  try {
-    const argv1 = process.argv[1] ? path.resolve(process.argv[1]) : '';
-    const here = path.resolve(fileURLToPath(import.meta.url));
-    return argv1 === here;
-  } catch {
-    return false;
-  }
-})();
-
-if (isMain) {
-  main().catch((err) => {
-    process.stderr.write(`[artibot:${HOOK_NAME}] fatal: ${err.message}\n`);
-    process.exit(0);
-  });
+if (isMainEntry(import.meta.url)) {
+  main().catch(createFatalHandler(HOOK_NAME));
 }

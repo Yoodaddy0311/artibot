@@ -26,6 +26,7 @@
  */
 
 import {
+  createFatalHandler,
   isMainEntry,
   mergeResults,
   parseHookStdout,
@@ -78,8 +79,5 @@ async function main() {
 }
 
 if (isMainEntry(import.meta.url)) {
-  main().catch((err) => {
-    process.stderr.write(`[artibot:${HOOK_NAME}] fatal: ${err.message}\n`);
-    process.exit(0);
-  });
+  main().catch(createFatalHandler(HOOK_NAME));
 }

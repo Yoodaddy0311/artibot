@@ -22,6 +22,7 @@
  */
 
 import { readStdin, writeStdout } from '../utils/index.js';
+import { isMainEntry } from './_main-entry.js';
 
 const HOOK_NAME = 'session-readback';
 
@@ -61,7 +62,13 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  // Last-resort guard: never let a read-back failure surface to the host.
-  process.stderr.write(`[artibot:${HOOK_NAME}] ${err?.message || 'failed'}\n`);
-});
+// Direct-run guard: importing this module must not run main(). Without it the
+// import holds stdin in the background — invisible to the old import-safety
+// probe, which exited the moment module evaluation finished. The dispatcher
+// spawns this file as argv[1], so production behavior is unchanged.
+if (isMainEntry(import.meta.url)) {
+  main().catch((err) => {
+    // Last-resort guard: never let a read-back failure surface to the host.
+    process.stderr.write(`[artibot:${HOOK_NAME}] ${err?.message || 'failed'}\n`);
+  });
+}

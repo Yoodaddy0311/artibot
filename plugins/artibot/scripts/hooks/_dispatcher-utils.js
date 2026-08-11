@@ -28,8 +28,16 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import { extractToolName } from '../../lib/core/hook-utils.js';
+import { isMainEntry } from './_main-entry.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
+
+// isMainEntry is owned by ./_main-entry.js — a zero-dependency leaf module, so
+// the ~50 hooks that need only the direct-run guard do not pull this file's
+// child_process + hook-utils graph onto the spawn hot path. Re-exported here so
+// the dispatchers (and tests) that already import it from this module are
+// unaffected.
+export { isMainEntry };
 
 // v4.8.0 H-2: extractToolName is owned by lib/core/hook-utils.js; we re-export
 // it so the dispatcher hot path keeps a single import line and downstream
@@ -231,38 +239,25 @@ export function mergeResults(results, hookEventName) {
 }
 
 /**
- * Detect whether the current module was invoked as the main entry point.
- * Cross-platform — handles Windows drive-letter URLs.
+ * Build the fatal handler every dispatcher attaches to `main().catch(...)`.
  *
- * Decodes with `fileURLToPath`, never `new URL(...).pathname`. A URL pathname is
- * percent-ENCODED while `process.argv[1]` is a raw filesystem path, so the two
- * stop matching the moment the install path holds anything URL-unsafe — and the
- * hook then silently does nothing when spawned. Measured 2026-08-10 by
- * comparing both forms from the same module under each path shape:
+ * Contract (design note 5 in the module header): a dispatcher must NEVER throw
+ * and NEVER exit non-zero — that would block the whole slot. So the handler
+ * reports on stderr, where the parent already forwards `[artibot:*]` markers,
+ * and then exits 0.
  *
- *   plain           current=true   fixed=true
- *   "with space"    current=FALSE  fixed=true   (%20)
- *   "바탕 화면"      current=FALSE  fixed=true   (%EB%B0%94…)
- *   "tilde~name"    current=FALSE  fixed=true   (%7E — hits Windows 8.3 short
- *                                                names such as HEECHA~1)
- *   "hash#tag"      current=FALSE  fixed=true   (# opens a URL fragment, which
- *                                                truncates the pathname)
- *   "paren(1)"      current=true   fixed=true   (parens are not encoded)
+ * Deliberately NOT `hook-utils.createErrorHandler(name, { exit: true })`: that
+ * one logs `[artibot:<name>] <message>` while dispatchers log
+ * `[artibot:<name>] fatal: <message>`. The `fatal:` marker distinguishes a dead
+ * dispatcher (every hook in the slot lost) from a single hook reporting an
+ * error, so it is load-bearing in logs rather than cosmetic.
  *
- * The default install path (`C:\Users\<name>\…`) is ASCII and space-free, so the
- * bug was latent there — but every dispatcher routes through this helper, so a
- * user whose profile name contains a space or non-ASCII character would lose all
- * of them at once. `scripts/utils/index.js:136-140` documents the same trap from
- * the opposite direction (path -> URL).
- *
- * @param {string} importMetaUrl `import.meta.url` of the caller
- * @returns {boolean}
+ * @param {string} hookName Dispatcher name, e.g. "posttooluse-dispatcher"
+ * @returns {(err: Error) => void}
  */
-export function isMainEntry(importMetaUrl) {
-  try {
-    const argv1 = process.argv[1] ? path.resolve(process.argv[1]) : '';
-    return argv1 === path.resolve(fileURLToPath(importMetaUrl));
-  } catch {
-    return false;
-  }
+export function createFatalHandler(hookName) {
+  return (err) => {
+    process.stderr.write(`[artibot:${hookName}] fatal: ${err.message}\n`);
+    process.exit(0);
+  };
 }

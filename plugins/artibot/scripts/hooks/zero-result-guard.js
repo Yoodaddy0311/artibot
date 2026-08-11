@@ -68,11 +68,11 @@
  */
 
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { readFileSync } from 'node:fs';
 import { atomicWriteSync, parseJSON, readStdin, writeStdout } from '../utils/index.js';
 import { createErrorHandler, extractToolName } from '../../lib/core/hook-utils.js';
 import { getHomeDir } from '../../lib/core/platform.js';
+import { isMainEntry } from './_main-entry.js';
 
 const HOOK_NAME = 'zero-result-guard';
 const EVENT_NAME = 'PostToolUse';
@@ -436,9 +436,6 @@ async function main() {
 // Direct-run guard: importing this module (tests, or the advisor reusing
 // recordFire) must not execute main() — it blocks on stdin and hangs the
 // importer until the suite times out. Regression fixed in 67adb5e.
-const isDirectRun = process.argv[1]
-  && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
-
-if (isDirectRun) {
+if (isMainEntry(import.meta.url)) {
   main().catch(createErrorHandler(HOOK_NAME, { exit: true }));
 }

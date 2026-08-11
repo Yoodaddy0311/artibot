@@ -27,6 +27,7 @@ import {
   createSessionAggregator,
   dayKey,
 } from '../../lib/observability/session-aggregator.js';
+import { isMainEntry } from './_main-entry.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -234,16 +235,7 @@ export async function runNightlyRollup(opts = {}) {
 // Entry
 // ---------------------------------------------------------------------------
 
-const invokedDirect = (() => {
-  if (typeof process === 'undefined' || !process.argv[1]) return false;
-  try {
-    return path.resolve(process.argv[1]) === path.resolve(__filename);
-  } catch {
-    return false;
-  }
-})();
-
-if (invokedDirect) {
+if (isMainEntry(import.meta.url)) {
   const args = parseArgs(process.argv.slice(2));
   if (args.help) {
     process.stdout.write(`${USAGE}\n`);

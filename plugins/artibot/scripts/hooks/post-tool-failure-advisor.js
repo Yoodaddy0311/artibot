@@ -78,7 +78,6 @@
 
 import path from 'node:path';
 import { existsSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import { parseJSON, readStdin, writeStdout } from '../utils/index.js';
 import { createErrorHandler, extractToolName } from '../../lib/core/hook-utils.js';
 // The Grep/Glob tool guard owns both the identifier predicate and the shared
@@ -86,6 +85,7 @@ import { createErrorHandler, extractToolName } from '../../lib/core/hook-utils.j
 // than keeping a second copy that can drift. Importing it is safe — it carries
 // a direct-run guard, so nothing executes on import.
 import { isIdentifierLike, recordFire } from './zero-result-guard.js';
+import { isMainEntry } from './_main-entry.js';
 
 /** Prefix for every emitted advice line. */
 const ADVICE_PREFIX = '[artibot:tool-advice]';
@@ -695,9 +695,6 @@ async function main() {
 
 // Direct-run guard: importing this module (tests) must not execute main() —
 // it blocks on stdin, which hangs the importer until the suite times out.
-const isDirectRun = process.argv[1]
-  && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
-
-if (isDirectRun) {
+if (isMainEntry(import.meta.url)) {
   main().catch(createErrorHandler('post-tool-failure-advisor', { exit: true }));
 }

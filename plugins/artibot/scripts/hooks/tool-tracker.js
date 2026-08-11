@@ -14,6 +14,7 @@ import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { atomicWriteSync, parseJSON, readStdin, toFileUrl } from '../utils/index.js';
 import { createErrorHandler, extractAgentId, extractAgentRole, getArtibotDataDir, logHookError } from '../../lib/core/hook-utils.js';
 import { createLoopDetector } from '../../lib/cognitive/loop-detector.js';
+import { isMainEntry } from './_main-entry.js';
 
 /** Path to the persisted loop detector state file. */
 const LOOP_STATE_FILE = path.join(getArtibotDataDir(), 'loop-state.json');
@@ -536,9 +537,6 @@ function getResultContent(result) {
 // main() blocks on stdin, so an import both hangs the importer and fires the
 // hook's side effects. Production is unaffected — the dispatcher (or Claude
 // Code) spawns this file as argv[1], so the guard passes there.
-const isDirectRun = process.argv[1]
-  && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
-
-if (isDirectRun) {
+if (isMainEntry(import.meta.url)) {
   main().catch(createErrorHandler('tool-tracker'));
 }

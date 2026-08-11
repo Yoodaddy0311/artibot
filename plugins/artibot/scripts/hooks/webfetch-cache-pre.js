@@ -19,9 +19,9 @@
 import { createHash } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { getPluginRoot, parseJSON, readStdin, writeStdout } from '../utils/index.js';
 import { createErrorHandler } from '../../lib/core/hook-utils.js';
+import { isMainEntry } from './_main-entry.js';
 
 const HOOK_NAME = 'webfetch-cache-pre';
 
@@ -109,16 +109,6 @@ async function main() {
   writeStdout(buildOutput({ url, key, meta }));
 }
 
-const isMain = (() => {
-  try {
-    const argv1 = process.argv[1] ? path.resolve(process.argv[1]) : '';
-    const here = path.resolve(fileURLToPath(import.meta.url));
-    return argv1 === here;
-  } catch {
-    return false;
-  }
-})();
-
-if (isMain) {
+if (isMainEntry(import.meta.url)) {
   main().catch(createErrorHandler(HOOK_NAME, { exit: true }));
 }

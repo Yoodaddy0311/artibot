@@ -20,6 +20,7 @@ import path from 'node:path';
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { createErrorHandler, extractAgentId, extractAgentRole, logHookError } from '../../lib/core/hook-utils.js';
+import { isMainEntry } from './_main-entry.js';
 
 // ---------------------------------------------------------------------------
 // Plugin root resolution (mirrors tool-tracker.js pattern)
@@ -295,9 +296,6 @@ export async function main() {
 // main() blocks on stdin, so an import both hangs the importer and fires the
 // hook's side effects. Production is unaffected — the dispatcher (or Claude
 // Code) spawns this file as argv[1], so the guard passes there.
-const isDirectRun = process.argv[1]
-  && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
-
-if (isDirectRun) {
+if (isMainEntry(import.meta.url)) {
   main().catch(createErrorHandler('agent-evaluator', { exit: true }));
 }

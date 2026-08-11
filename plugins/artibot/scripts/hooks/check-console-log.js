@@ -7,16 +7,12 @@
  * from sessions that loaded the v3.0.0 hooks.json before upgrade.
  * Safe to remove after all open sessions are restarted.
  */
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { isMainEntry } from './_main-entry.js';
 
 // Direct-run guard: this stub's whole body is a process.exit(0), so an
 // unguarded import terminates the importing process — the sharpest form of the
 // hazard this repo's guards exist for. Guarded, importing it is inert while a
 // stale in-memory hook registration still exits 0 as before.
-const isDirectRun = process.argv[1]
-  && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
-
-if (isDirectRun) {
+if (isMainEntry(import.meta.url)) {
   process.exit(0);
 }

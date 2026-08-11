@@ -30,6 +30,7 @@
 import { readdirSync, statSync, unlinkSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isMainEntry } from './_main-entry.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -88,7 +89,13 @@ async function main() {
   process.stdout.write(JSON.stringify({ continue: true }) + '\n');
 }
 
-main().catch(() => {
-  // Never block the session on a cleanup failure.
-  process.stdout.write(JSON.stringify({ continue: true }) + '\n');
-});
+// Direct-run guard: importing this module must not run main(). Without it the
+// import holds stdin in the background — invisible to the old import-safety
+// probe, which exited the moment module evaluation finished. The dispatcher
+// spawns this file as argv[1], so production behavior is unchanged.
+if (isMainEntry(import.meta.url)) {
+  main().catch(() => {
+    // Never block the session on a cleanup failure.
+    process.stdout.write(JSON.stringify({ continue: true }) + '\n');
+  });
+}

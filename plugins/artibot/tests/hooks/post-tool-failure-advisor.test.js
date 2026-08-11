@@ -427,13 +427,15 @@ describe('buildAdvice allowlist', () => {
         path.resolve(path.dirname(advisorPath), '..', '..', 'lib', 'core', 'hook-utils.js')).href))
       .replace("'./zero-result-guard.js'", JSON.stringify(pathToFileURL(
         path.resolve(path.dirname(advisorPath), 'zero-result-guard.js')).href))
+      .replace("'./_main-entry.js'", JSON.stringify(pathToFileURL(
+        path.resolve(path.dirname(advisorPath), '_main-entry.js')).href))
       // Drop the entry point: the variant is imported for buildAdvice only, and
       // the real main() would block on stdin. The call sits INSIDE the
-      // `if (isDirectRun) { … }` block, so the whole block goes — an earlier
-      // version anchored `^main\(\)\.catch` at line start, never matched the
-      // indented call, and was a permanent no-op whose companion assertion
-      // passed vacuously (cross-review finding 2).
-      .replace(/\nif \(isDirectRun\) \{[\s\S]*?\n\}/, '\n');
+      // `if (isMainEntry(import.meta.url)) { … }` block, so the whole block
+      // goes — an earlier version anchored `^main\(\)\.catch` at line start,
+      // never matched the indented call, and was a permanent no-op whose
+      // companion assertion passed vacuously (cross-review finding 2).
+      .replace(/\nif \(isMainEntry\(import\.meta\.url\)\) \{[\s\S]*?\n\}/, '\n');
 
     expect(emptied).not.toBe(src);
     expect(emptied).toContain('const ADVICE_RULES = [];');

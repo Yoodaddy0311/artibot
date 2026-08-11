@@ -32,7 +32,6 @@
  */
 
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import {
   atomicWriteSync,
   getPluginRoot,
@@ -40,6 +39,7 @@ import {
   readStdin,
 } from '../utils/index.js';
 import { createErrorHandler, extractToolName } from '../../lib/core/hook-utils.js';
+import { isMainEntry } from './_main-entry.js';
 
 const HOOK_NAME = 'mark-main-agent-edit';
 const MARKER_FILE = 'last-main-agent-edit.timestamp';
@@ -97,10 +97,7 @@ async function main() {
 // Was `argv[1].endsWith('mark-main-agent-edit.js')`: a suffix test that any path
 // ending in that name satisfied, comparing a possibly-relative argv[1]
 // unresolved. Identity on the resolved path is the repo-wide check now.
-const isDirectRun = process.argv[1]
-  && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
-
-if (isDirectRun) {
+if (isMainEntry(import.meta.url)) {
   main().catch(createErrorHandler(HOOK_NAME, { exit: false }));
 }
 

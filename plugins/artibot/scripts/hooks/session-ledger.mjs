@@ -24,6 +24,7 @@
 import { existsSync } from 'node:fs';
 import { readStdin } from '../utils/index.js';
 import { captureTurn, finalizeSession } from '../../lib/learning/ledger/store.js';
+import { isMainEntry } from './_main-entry.js';
 
 const HOOK_NAME = 'session-ledger';
 
@@ -51,7 +52,13 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  // Last-resort guard: never let a ledger failure surface to the host.
-  process.stderr.write(`[artibot:${HOOK_NAME}] ${err?.message || 'failed'}\n`);
-});
+// Direct-run guard: importing this module must not run main(). Without it the
+// import holds stdin in the background — invisible to the old import-safety
+// probe, which exited the moment module evaluation finished. The dispatcher
+// spawns this file as argv[1], so production behavior is unchanged.
+if (isMainEntry(import.meta.url)) {
+  main().catch((err) => {
+    // Last-resort guard: never let a ledger failure surface to the host.
+    process.stderr.write(`[artibot:${HOOK_NAME}] ${err?.message || 'failed'}\n`);
+  });
+}

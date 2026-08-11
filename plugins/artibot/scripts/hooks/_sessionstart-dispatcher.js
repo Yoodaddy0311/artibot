@@ -31,7 +31,7 @@
  * @module scripts/hooks/_sessionstart-dispatcher
  */
 
-import { isMainEntry, mergeResults, parseHookStdout, readPayload, spawnHook } from './_dispatcher-utils.js';
+import { createFatalHandler, isMainEntry, mergeResults, parseHookStdout, readPayload, spawnHook } from './_dispatcher-utils.js';
 import { loadDispatchTable } from '../../lib/dispatcher/dispatch-table-loader.js';
 
 const HOOK_NAME = '_sessionstart-dispatcher';
@@ -81,8 +81,5 @@ async function main() {
 }
 
 if (isMainEntry(import.meta.url)) {
-  main().catch((err) => {
-    process.stderr.write(`[artibot:${HOOK_NAME}] fatal: ${err.message}\n`);
-    process.exit(0);
-  });
+  main().catch(createFatalHandler(HOOK_NAME));
 }

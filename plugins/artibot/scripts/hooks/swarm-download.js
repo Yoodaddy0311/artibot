@@ -15,7 +15,7 @@
 import path from 'node:path';
 import { getPluginRoot, parseJSON, readStdin, toFileUrl } from '../utils/index.js';
 import { createErrorHandler, logHookError } from '../../lib/core/hook-utils.js';
-import { isMainEntry } from './_dispatcher-utils.js';
+import { isMainEntry } from './_main-entry.js';
 import {
   assertEgressAllowed,
   EgressBlockedError,

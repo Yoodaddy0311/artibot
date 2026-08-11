@@ -6,12 +6,11 @@
  */
 
 import { existsSync } from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { parseJSON, readStdin, writeStdout } from '../utils/index.js';
 import { extractToolName } from '../../lib/core/hook-utils.js';
 import { createErrorHandler } from '../../lib/core/hook-utils.js';
 import { FileCheckpoint } from '../../lib/core/file-checkpoint.js';
+import { isMainEntry } from './_main-entry.js';
 
 /**
  * Resolve the session id for this invocation. The hook stdin payload carries
@@ -57,17 +56,7 @@ async function main() {
   writeStdout({ decision: 'approve' });
 }
 
-const isMain = (() => {
-  try {
-    const argv1 = process.argv[1] ? path.resolve(process.argv[1]) : '';
-    const here = path.resolve(fileURLToPath(import.meta.url));
-    return argv1 === here;
-  } catch {
-    return false;
-  }
-})();
-
-if (isMain) {
+if (isMainEntry(import.meta.url)) {
   main().catch(createErrorHandler('pre-write-checkpoint', {
     writeStdout,
     blockReason: 'File checkpoint hook error. Approving by default.',

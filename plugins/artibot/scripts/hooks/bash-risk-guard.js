@@ -25,7 +25,7 @@
 import { parseJSON, readStdin, writeStdout } from '../utils/index.js';
 import { createErrorHandler, extractToolName } from '../../lib/core/hook-utils.js';
 import { classifyRisk } from '../../lib/autopilot/safety.js';
-import { isMainEntry } from './_dispatcher-utils.js';
+import { isMainEntry } from './_main-entry.js';
 
 /** Max command length echoed back in a message/reason (avoid flooding output). */
 const CMD_ECHO_MAX = 160;

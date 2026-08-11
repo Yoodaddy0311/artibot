@@ -18,6 +18,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseJSON, readStdin, writeStdout } from '../utils/index.js';
 import { redactObject } from '../../lib/core/redaction.js';
+import { isMainEntry } from './_main-entry.js';
 
 const ENVELOPE_VERSION = 1;
 const EMITTER_NAME = 'artibot';
@@ -223,10 +224,16 @@ async function main() {
   writeStdout({ continue: true });
 }
 
-main().catch((err) => {
-  process.stderr.write(
-    `[artibot:event-emitter] fatal: ${err?.message ?? String(err)}\n`
-  );
-  // Still keep the hook pipeline unblocked.
-  writeStdout({ continue: true });
-});
+// Direct-run guard: importing this module must not run main(). Without it the
+// import holds stdin in the background — invisible to the old import-safety
+// probe, which exited the moment module evaluation finished. The dispatcher
+// spawns this file as argv[1], so production behavior is unchanged.
+if (isMainEntry(import.meta.url)) {
+  main().catch((err) => {
+    process.stderr.write(
+      `[artibot:event-emitter] fatal: ${err?.message ?? String(err)}\n`
+    );
+    // Still keep the hook pipeline unblocked.
+    writeStdout({ continue: true });
+  });
+}

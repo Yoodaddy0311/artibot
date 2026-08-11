@@ -22,7 +22,7 @@ import {
   EgressBlockedError,
   loadAllowlist,
 } from '../../lib/core/data-egress-guard.js';
-import { fileURLToPath } from 'node:url';
+import { isMainEntry } from './_main-entry.js';
 
 export async function main() {
   const raw = await readStdin();
@@ -133,9 +133,6 @@ export async function main() {
 // main() blocks on stdin, so an import both hangs the importer and fires the
 // hook's side effects. Production is unaffected — the dispatcher (or Claude
 // Code) spawns this file as argv[1], so the guard passes there.
-const isDirectRun = process.argv[1]
-  && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
-
-if (isDirectRun) {
+if (isMainEntry(import.meta.url)) {
   main().catch(createErrorHandler('swarm-sync', { exit: true }));
 }

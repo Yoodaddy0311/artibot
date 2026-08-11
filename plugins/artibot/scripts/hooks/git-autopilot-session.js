@@ -11,12 +11,12 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { parseJSON, readStdin } from '../utils/index.js';
 import { createErrorHandler } from '../../lib/core/hook-utils.js';
 import { autoResolveAll } from './git-autopilot-merge.js';
 import { isAutopilotAllowed } from '../../lib/autopilot/repo-identity.js';
 import { resolveBaseBranch } from '../../lib/git/resolve-base.js';
+import { isMainEntry } from './_main-entry.js';
 
 // Throttle: skip `git pull` if a successful pull happened within this window.
 // 5 minutes is aggressive enough to save ~800ms on every rapid-fire session
@@ -331,9 +331,6 @@ export async function main() {
 // main() blocks on stdin and, past its gates, relocates HEAD (`checkout`) and
 // rewrites history (`pull --rebase`, `merge`). Production is unaffected:
 // `_sessionstart-dispatcher.js` spawns this file as argv[1].
-const isDirectRun = process.argv[1]
-  && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
-
-if (isDirectRun) {
+if (isMainEntry(import.meta.url)) {
   main().catch(createErrorHandler('git-autopilot-session', { exit: true }));
 }

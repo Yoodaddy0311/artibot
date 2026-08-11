@@ -13,8 +13,8 @@
 
 import { atomicWriteSync, getPluginRoot, parseJSON, readStdin, toFileUrl } from '../utils/index.js';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { createErrorHandler, getStatePath, logHookError } from '../../lib/core/hook-utils.js';
+import { isMainEntry } from './_main-entry.js';
 
 /**
  * Run the learning pipeline using shutdownLearning() which includes:
@@ -461,9 +461,6 @@ export async function runMacroAutoRegister(deps = {}) {
 // Direct-run guard: importing this module (tests) must not execute a real
 // SessionEnd — the pipeline writes to the live learning store and blocks on
 // stdin, so an import was both a data hazard and a hang.
-const isDirectRun = process.argv[1]
-  && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
-
-if (isDirectRun) {
+if (isMainEntry(import.meta.url)) {
   main().catch(createErrorHandler('session-end', { exit: true }));
 }

@@ -26,10 +26,10 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { atomicWriteSync } from '../utils/index.js';
 import { logHookError } from '../../lib/core/hook-utils.js';
 import { isAutopilotAllowed } from '../../lib/autopilot/repo-identity.js';
+import { isMainEntry } from './_main-entry.js';
 
 // -------------------------------------------------------------------------
 // Constants
@@ -238,10 +238,7 @@ export async function main(argv) {
 // ending in that name (a copy, a sibling checkout, `my-git-autopilot-setup.js`)
 // satisfied it, and a relative argv[1] was compared unresolved. Identity on the
 // resolved path is the check every other hook now uses.
-const isDirectRun = process.argv[1]
-  && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
-
-if (isDirectRun) {
+if (isMainEntry(import.meta.url)) {
   main().then((outcome) => {
     if (outcome === 'error') process.exit(1);
   }).catch((err) => {

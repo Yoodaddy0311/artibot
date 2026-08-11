@@ -29,8 +29,8 @@ import { existsSync, readdirSync, readFileSync, statSync, unlinkSync } from 'nod
 import { execSync } from 'node:child_process';
 import path from 'node:path';
 import os from 'node:os';
-import { fileURLToPath } from 'node:url';
 import { logHookError } from '../../lib/core/hook-utils.js';
+import { isMainEntry } from './_main-entry.js';
 
 // -------------------------------------------------------------------------
 // Constants
@@ -195,10 +195,7 @@ export function main(opts = {}) {
 //
 // Was `argv[1].endsWith('image-cleanup.js')`: a suffix test that any path ending
 // in that name satisfied, comparing a possibly-relative argv[1] unresolved.
-const isDirectRun = process.argv[1]
-  && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
-
-if (isDirectRun) {
+if (isMainEntry(import.meta.url)) {
   try {
     main();
     process.exit(0);

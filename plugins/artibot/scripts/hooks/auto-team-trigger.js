@@ -20,10 +20,10 @@
  */
 
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { existsSync, readFileSync } from 'node:fs';
 import { getPluginRoot, parseJSON, readStdin, writeStdout } from '../utils/index.js';
 import { createErrorHandler } from '../../lib/core/hook-utils.js';
+import { isMainEntry } from './_main-entry.js';
 
 const HOOK_NAME = 'auto-team-trigger';
 const NO_TEAM_FLAG = /--no-team\b/i;
@@ -213,16 +213,6 @@ async function main() {
   if (result) writeStdout(result);
 }
 
-const isMain = (() => {
-  try {
-    const argv1 = process.argv[1] ? path.resolve(process.argv[1]) : '';
-    const here = path.resolve(fileURLToPath(import.meta.url));
-    return argv1 === here;
-  } catch {
-    return false;
-  }
-})();
-
-if (isMain) {
+if (isMainEntry(import.meta.url)) {
   main().catch(createErrorHandler(HOOK_NAME, { exit: false }));
 }

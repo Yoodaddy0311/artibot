@@ -11,7 +11,6 @@
  */
 
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import {
   getPluginRoot,
@@ -21,6 +20,7 @@ import {
   writeStdout,
 } from '../utils/index.js';
 import { createErrorHandler } from '../../lib/core/hook-utils.js';
+import { isMainEntry } from './_main-entry.js';
 
 /**
  * Detect a leading slash command in the prompt and return its name.
@@ -703,16 +703,6 @@ async function main() {
   if (result) writeStdout(result);
 }
 
-const isMain = (() => {
-  try {
-    const argv1 = process.argv[1] ? path.resolve(process.argv[1]) : '';
-    const here = path.resolve(fileURLToPath(import.meta.url));
-    return argv1 === here;
-  } catch {
-    return false;
-  }
-})();
-
-if (isMain) {
+if (isMainEntry(import.meta.url)) {
   main().catch(createErrorHandler('runtime-prompt'));
 }
