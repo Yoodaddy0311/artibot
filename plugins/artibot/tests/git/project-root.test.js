@@ -57,6 +57,19 @@ describe('resolveProjectRoot', () => {
       expect([...answers]).toEqual([repo]);
     });
 
+    it('agrees with git rev-parse --show-toplevel', () => {
+      // The `.git` walk exists to keep a child process off the per-turn hook
+      // path; it is only safe while it returns what git returns. Pin that.
+      const nested = path.join(repo, 'a', 'b');
+      mkdirSync(nested, { recursive: true });
+      const viaGit = realpathSync.native(
+        execFileSync('git', ['rev-parse', '--show-toplevel'], {
+          cwd: nested, encoding: 'utf-8', windowsHide: true,
+        }).trim(),
+      );
+      expect(resolveProjectRoot(nested)).toBe(viaGit);
+    });
+
     it('is not fooled by a nested .artibot marker (this repo has one)', () => {
       // plugins/artibot/.artibot exists in the real repo; a nearest-marker walk
       // would anchor there instead of the repo root.

@@ -14,6 +14,7 @@ import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { atomicWriteSync, parseJSON, readStdin, toFileUrl } from '../utils/index.js';
 import { createErrorHandler, extractAgentId, extractAgentRole, getArtibotDataDir, logHookError } from '../../lib/core/hook-utils.js';
 import { createLoopDetector } from '../../lib/cognitive/loop-detector.js';
+import { resolveProjectRoot } from '../../lib/git/project-root.js';
 import { isMainEntry } from './_main-entry.js';
 
 /** Path to the persisted loop detector state file. */
@@ -233,7 +234,9 @@ export async function main() {
 
   // Extract session ID and project context from hook data
   const sessionId = hookData?.session_id ?? null;
-  const project = hookData?.cwd ? path.basename(hookData.cwd) : (process.cwd() ? path.basename(process.cwd()) : null);
+  // basename of the resolved project root, not of the raw cwd: the shell's
+  // directory moves mid-session, which split one project across several names.
+  const project = path.basename(resolveProjectRoot(hookData?.cwd)) || null;
 
   // Loop detection: check for repetitive tool call patterns
   const loopResult = loopDetector.detectLoop({ tool: toolName, args: toolInput });

@@ -13,6 +13,7 @@ import { parseJSON, readStdin, writeStdout } from '../utils/index.js';
 import path from 'node:path';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createErrorHandler, logHookError } from '../../lib/core/hook-utils.js';
+import { resolveProjectRoot } from '../../lib/git/project-root.js';
 import { isMainEntry } from './_main-entry.js';
 
 // ---------------------------------------------------------------------------
@@ -36,6 +37,21 @@ const MAX_ERROR_PATTERNS = 200;
 function getMemoryDir() {
   const home = process.env.USERPROFILE || process.env.HOME || '';
   return path.join(home, '.claude', 'artibot', 'memory');
+}
+
+/**
+ * Name used to group entries by project.
+ *
+ * Derived from the resolved project root, never from the raw cwd: the shell's
+ * directory moves during a session, and `basename` of it moved with it, so one
+ * project accumulated entries under several names (this repo had "Artibot" and
+ * "artibot" — the root and `plugins/artibot` — as separate projects).
+ *
+ * @param {object} [hookData]
+ * @returns {string}
+ */
+function projectName(hookData) {
+  return path.basename(resolveProjectRoot(hookData?.cwd));
 }
 
 function getStorePath(storeKey) {
@@ -113,7 +129,7 @@ function handleSessionStart(_hookData) {
 function handleSessionEnd(hookData) {
   const summary = {
     sessionId: hookData?.session_id || null,
-    project: hookData?.project || path.basename(process.cwd()),
+    project: hookData?.project || projectName(hookData),
     endedAt: new Date().toISOString(),
     cwd: process.cwd(),
     metadata: {
@@ -156,7 +172,7 @@ function handleError(hookData) {
       command: errorData?.command || null,
       file: errorData?.file || null,
       resolution: errorData?.resolution || null,
-      project: path.basename(process.cwd()),
+      project: projectName(hookData),
     },
     tags: extractErrorTags(errorData),
     source: 'memory-tracker',
@@ -184,7 +200,7 @@ function handleCommand(hookData) {
     data: {
       command: typeof commandData === 'string' ? commandData : commandData?.name || 'unknown',
       args: commandData?.args || null,
-      project: path.basename(process.cwd()),
+      project: projectName(hookData),
     },
     tags: extractCommandTags(commandData),
     source: 'memory-tracker',

@@ -12,6 +12,7 @@ import os from 'node:os';
 import { checkForUpdate } from '../../lib/core/version-checker.js';
 import { createErrorHandler } from '../../lib/core/hook-utils.js';
 import { getLastTestStatus } from '../../lib/core/test-status.js';
+import { resolveProjectRoot } from '../../lib/git/project-root.js';
 import {
   countWipCommits,
   formatAdvisoryLine as formatWipAdvisory,
@@ -491,7 +492,10 @@ async function appendHandoffBanner(lines, { startTimeMs = Date.now() } = {}) {
 
   const workPromise = (async () => {
     try {
-      const handoffPath = path.join(process.cwd(), '.artibot', 'HANDOFF.md');
+      // Project root, not cwd: `/save` writes the handoff at the repo root, so
+      // starting a session from a subdirectory would otherwise hide the banner.
+      // Same resolution session-readback uses, so both agree on one location.
+      const handoffPath = path.join(resolveProjectRoot(), '.artibot', 'HANDOFF.md');
       if (!existsSync(handoffPath)) return false;
 
       // Skip when the file was just written by THIS process (avoid noise on

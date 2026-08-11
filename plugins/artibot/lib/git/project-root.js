@@ -8,21 +8,30 @@
  * single session (repo root, `plugins/artibot/`, `plugins/artibot/scripts/hooks/`).
  *
  * Resolution order:
- *   1. `git rev-parse --show-toplevel` (memoized via repo-root-cache). This is
- *      authoritative for git projects and already handles nested repos,
- *      submodules and linked worktrees.
- *   2. Marker walk, for projects with no git or no `git` binary on PATH.
- *      Nearest ancestor holding `.git` wins (VCS beats heuristics); otherwise
- *      the OUTERMOST ancestor holding `.artibot` / `package.json`, so nested
- *      markers (this repo has `.artibot` at both the root and `plugins/artibot/`)
+ *   1. Nearest ancestor holding `.git`. This is the same answer
+ *      `git rev-parse --show-toplevel` gives for plain repos, linked worktrees
+ *      and submodules — all three put a `.git` entry (dir or file) at the root
+ *      it would report — but costs a few `existsSync` calls instead of a child
+ *      process. That matters: these callers are hooks, and session-ledger runs
+ *      on EVERY turn. Measured cold cost of the git subprocess on this machine
+ *      was 181-270ms (median ~217, n=7), all of it synchronous and therefore
+ *      not preemptible by a caller's timeout race.
+ *   2. `git rev-parse --show-toplevel` (memoized via repo-root-cache), for
+ *      layouts the marker cannot see — notably a `GIT_DIR`/`GIT_WORK_TREE`
+ *      override, where git's answer is authoritative and `.git` may be absent.
+ *   3. Weak-marker walk, for projects with no git at all. The OUTERMOST
+ *      ancestor holding `.artibot` / `package.json` wins, so nested markers
+ *      (this repo has `.artibot` at both the root and `plugins/artibot/`)
  *      collapse onto the same answer from any subdirectory.
- *   3. The starting directory, normalized.
+ *   4. The starting directory, normalized.
  *
- * HOME GUARD: the marker walk never accepts the user's home directory. `~/.artibot`
- * exists on any machine with Artibot installed and holds cross-project learning
- * data; without this guard every non-git project under the home directory would
- * resolve its root to the home directory and write session conversation into
- * that shared store.
+ * HOME GUARD: the WEAK-marker walk never accepts the user's home directory.
+ * `~/.artibot` exists on any machine with Artibot installed and holds
+ * cross-project learning data; without this guard every non-git project under
+ * the home directory would resolve its root to the home directory and write
+ * session conversation into that shared store. The guard deliberately does NOT
+ * apply to `.git` — a dotfiles repo really is rooted at the home directory, and
+ * git would say so too.
  *
  * @module lib/git/project-root
  */
@@ -74,21 +83,31 @@ function sameDir(a, b) {
 }
 
 /**
- * Ancestors of `start`, nearest-first, excluding the user's home directory.
+ * Every ancestor of `start`, nearest-first, including `start` itself.
  * @param {string} start absolute, normalized
  * @returns {string[]}
  */
-function candidateDirs(start) {
-  const home = path.resolve(os.homedir() || '');
+function ancestors(start) {
   const dirs = [];
   let dir = start;
   for (;;) {
-    if (!sameDir(dir, home)) dirs.push(dir);
+    dirs.push(dir);
     const parent = path.dirname(dir);
     if (parent === dir) break; // filesystem root
     dir = parent;
   }
   return dirs;
+}
+
+/**
+ * Ancestors of `start`, nearest-first, excluding the user's home directory.
+ * Used for WEAK markers only — see the HOME GUARD note in the module header.
+ * @param {string} start absolute, normalized
+ * @returns {string[]}
+ */
+function candidateDirs(start) {
+  const home = path.resolve(os.homedir() || '');
+  return ancestors(start).filter((dir) => !sameDir(dir, home));
 }
 
 /**
@@ -106,22 +125,26 @@ export function resolveProjectRoot(cwd) {
   // must agree on a single string.
   const start = canonical(path.resolve(cwd || process.cwd()));
 
-  // 1. git is authoritative when available.
+  // 1. Nearest `.git` — same answer as rev-parse, without the child process.
+  //    Not home-guarded: a dotfiles repo is legitimately rooted at $HOME.
+  const nearestVcs = ancestors(start).find((d) => existsSync(path.join(d, VCS_MARKER)));
+  if (nearestVcs) return nearestVcs;
+
+  // 2. Ask git for the layouts a marker cannot see (GIT_DIR override, …).
   const repoRoot = getRepoRoot(start);
   if (repoRoot) return canonical(path.resolve(repoRoot));
 
-  // 2. Marker walk. Nearest `.git` first, then outermost weak marker.
+  // 3. Non-git project: outermost weak marker, home excluded.
   const dirs = candidateDirs(start);
-  const nearestVcs = dirs.find((d) => existsSync(path.join(d, VCS_MARKER)));
-  if (nearestVcs) return nearestVcs;
-
   for (let i = dirs.length - 1; i >= 0; i -= 1) {
     if (WEAK_MARKERS.some((m) => existsSync(path.join(dirs[i], m)))) return dirs[i];
   }
 
-  // 3. No signal — keep today's behavior rather than guessing.
+  // 4. No signal — keep today's behavior rather than guessing.
   return start;
 }
 
 // Test introspection surface (never relied on outside tests).
-export const _internals = Object.freeze({ VCS_MARKER, WEAK_MARKERS, candidateDirs });
+export const _internals = Object.freeze({
+  VCS_MARKER, WEAK_MARKERS, ancestors, candidateDirs,
+});

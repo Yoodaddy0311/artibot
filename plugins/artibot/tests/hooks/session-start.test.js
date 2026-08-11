@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import path from 'node:path';
 
 /**
  * session-start.js initializes the Artibot plugin on every Claude Code session.
@@ -20,6 +21,9 @@ const mockState = {
   // precedence over `existsSyncResult` so a test can mark only `.artibot/HANDOFF.md`
   // as present while keeping all other paths absent.
   existsSyncByPath: null,
+  // Every path existsSync was asked about, in call order. Lets a test assert
+  // WHICH handoff path the hook looked at, not merely that it found one.
+  existsSyncPaths: [],
   // Optional stub for fs.statSync — when set, called for any path containing
   // `.artibot/HANDOFF.md`. Return shape: { mtimeMs, size }.
   statSyncImpl: null,
@@ -53,6 +57,7 @@ vi.mock('node:fs', async () => {
     ...actual,
     readFileSync: vi.fn((...args) => mockState.readFileSyncImpl(...args)),
     existsSync: vi.fn((p) => {
+      mockState.existsSyncPaths.push(String(p));
       if (mockState.existsSyncByPath) {
         const k = String(p);
         for (const [key, val] of Object.entries(mockState.existsSyncByPath)) {
@@ -134,6 +139,7 @@ describe('session-start hook', () => {
     mockState.readFileSyncImpl = () => { throw new Error('ENOENT'); };
     mockState.existsSyncResult = false;
     mockState.existsSyncByPath = null;
+    mockState.existsSyncPaths = [];
     mockState.statSyncImpl = null;
     mockState.handoffHeadContent = null;
     mockState.checkForUpdateFactory = () => Promise.resolve({ hasUpdate: false });
@@ -442,6 +448,28 @@ describe('session-start hook', () => {
       expect(output.message).toContain('[artibot:handoff]');
       expect(output.message).toContain('Ship the release notes');
       expect(output.message).toContain('/resume');
+    });
+
+    it('looks for HANDOFF.md at the project root, not at the cwd', async () => {
+      // `/save` writes the handoff at the repo root, and every handoff on disk
+      // lives there. Vitest runs with cwd = plugins/artibot — a SUBDIRECTORY of
+      // the repo root — so a cwd-relative lookup and a root-relative lookup
+      // resolve to visibly different paths right here.
+      mockState.existsSyncByPath = { 'HANDOFF.md': true };
+      mockState.statSyncImpl = () => ({ mtimeMs: Date.now() - 5 * 60_000, size: 1024 });
+      mockState.handoffHeadContent = '> 다음 P0: anything\n';
+      mockState.readStdinResult = Promise.resolve(JSON.stringify({}));
+
+      await importAndWait();
+
+      const probed = mockState.existsSyncPaths.filter((p) => p.includes('HANDOFF.md'));
+      expect(probed.length).toBeGreaterThan(0);
+      const cwdRelative = path.join(process.cwd(), '.artibot', 'HANDOFF.md');
+      expect(probed).not.toContain(cwdRelative);
+      // Every handoff probe sits above cwd — i.e. at the resolved project root.
+      for (const p of probed) {
+        expect(path.dirname(path.dirname(p)).length).toBeLessThan(process.cwd().length);
+      }
     });
 
     it('omits handoff banner when .artibot/HANDOFF.md is absent (legacy behavior preserved)', async () => {
