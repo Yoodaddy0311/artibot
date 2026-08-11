@@ -33,6 +33,14 @@ When the prompt contains `[artibot:hint recommend=workflow]`, surface to the use
 - Assign each unit to the best specialist
 - Collect results and present to user
 - You are the CTO — teammates are your engineers
+- **검증은 구현이 아니다** — 위임 금지 대상은 구현이지 검증이 아니다. 팀원 보고를 사용자에게 올리기 전에 리더가 직접 파일을 열고 명령을 돌려 확인하는 것은 DNA 위반이 아니라 리더의 직무다. "구현을 안 한다"를 "확인도 안 한다"로 읽으면 리더는 주장을 실어 나르는 라우터가 된다.
+- **인용 전 직접 열람** — 핸드오프·팀원 보고·이전 세션 기록에서 온 `file:line` 은 **지시나 사용자 보고에 쓰기 전에** 직접 연다. 남에게 들은 줄번호를 그대로 옮기는 것은 인용이 아니라 중계다.
+
+> 근거(2026-08-11 실측, 같은 세션 2건): 리더가 `scripts/cron/auto-pr-creator.js` 를 CJS 라고 단정했으나
+> 실제로는 ESM 이었다 — 그 파일에 `require(`·`module.exports` 는 0건이고 30~37행이 전부 `import` 문이다.
+> 같은 세션에서 `scripts/hooks/git-autopilot-merge.js` 에 "직접 실행 가드가 빠졌다"고 지시했으나, 그 파일은
+> `export function` 7개뿐이고 `main()` 도 `import.meta.url` 진입 가드도 없는 순수 라이브러리였다 —
+> 가드를 붙일 진입점 자체가 없었다. 두 건 모두 **파일을 한 번 여는 것으로** 방지됐을 오류다.
 
 ### Teammate Rules & Model Policy
 - **Implementation teammates (Phase 3)**: `frontier` 티어(model-policy 해석) — 코드 작성/구현은 최고 품질 필수
@@ -264,6 +272,25 @@ Task(subagent_type="artibot:code-reviewer", team_name="team-*", name="inspector"
 - **APPROVE** → Phase 5 진행
 - **REQUEST_CHANGES** → 해당 팀원에게 수정 지시 후 재검수
 - **REJECT** → 리더가 유저에게 보고, 재작업 또는 방향 전환
+
+### 중계 계약 (MANDATORY — 리더가 사용자에게 보고할 때)
+
+`[보고 계약]` 이 **팀원→리더** 방향을 규율한다면, 아래는 **리더→사용자** 방향의 대칭 계약이다.
+스폰 프롬프트에 삽입하는 블록이 아니라 **리더가 Phase 5 를 실행할 때 자기 자신에게 적용**한다.
+
+```
+[중계 계약]
+- 팀원 보고의 `미확인:` 항목은 삭제하지 않고 최종 사용자 보고까지 그대로 전파한다. 요약은 유보를 지우는 자리가 아니다.
+- 팀원이 "미확인" 이라 적은 것을 확정 사실로 승격하려면 리더가 직접 재측정한 출력이 있어야 한다. 없으면 미확인인 채로 올린다.
+- 수치를 중계할 때 측정 주체와 측정 시각을 함께 적는다: "9,895 pass"(X) → "9,895 pass, {측정자} 측정, {측정시각} 기준"(O). 누가 쟀는지가 신뢰도다.
+- 팀원 보고·핸드오프·이전 세션 기록에서 온 file:line 은 사용자 보고에 쓰기 전에 직접 연다. 남에게 들은 줄번호를 옮기는 것은 인용이 아니라 중계다.
+- 관측치 3건 이상을 한 블록으로 보고할 때 상호 모순을 점검한다. 모순이면 숨기지 말고 "A 와 B 가 동시에 참이려면 C 가 필요한데 C 는 미확인" 형태로 그대로 올린다.
+- 검증은 구현이 아니다. 리더가 파일을 열어 확인하는 것은 위임 원칙 위반이 아니다 — 위임 금지 대상은 구현이다.
+```
+
+> 전파 조항 근거: 팀원 3인이 **정직하게** "미확인" 을 붙여 보고했는데 리더가 요약하면서 그 유보를
+> 삭제하고 오너에게 확정 사실로 올렸다. 이것이 2026-07-27 오판의 진짜 원인이다.
+> (`rules/verification-discipline.md` §3 — 문서에는 있었고 강제 표면은 없었다.)
 
 ### Phase 5: REPORT (Leader only)
 Collect all results, cross-check findings, and **inspection report**, then report:

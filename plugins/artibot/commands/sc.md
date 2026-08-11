@@ -198,6 +198,27 @@ Before ANY routing, decompose the user's request into numbered action items:
 ```
 Every item MUST be addressed. No silent drops. No partial execution.
 
+### 중계 계약 (MANDATORY — 라우터가 사용자에게 보고할 때)
+
+`[보고 계약]` 이 **위임받은 에이전트→라우터** 방향을 규율한다면, 아래는 **라우터→사용자**
+방향의 대칭 계약이다. 위임 프롬프트에 삽입하는 블록이 아니라 **위임 결과를 사용자에게
+전달할 때 자기 자신에게 적용**한다. **`commands/team.md` 의 것과 문자 단위로 동일해야 한다** —
+/sc 만 실행한 세션은 team.md 를 읽지 않으므로, 여기 없으면 그 세션에는 이 계약이 없는 것이다.
+드리프트는 `tests/commands/report-contract-parity.test.js` 가 잡는다.
+
+```
+[중계 계약]
+- 팀원 보고의 `미확인:` 항목은 삭제하지 않고 최종 사용자 보고까지 그대로 전파한다. 요약은 유보를 지우는 자리가 아니다.
+- 팀원이 "미확인" 이라 적은 것을 확정 사실로 승격하려면 리더가 직접 재측정한 출력이 있어야 한다. 없으면 미확인인 채로 올린다.
+- 수치를 중계할 때 측정 주체와 측정 시각을 함께 적는다: "9,895 pass"(X) → "9,895 pass, {측정자} 측정, {측정시각} 기준"(O). 누가 쟀는지가 신뢰도다.
+- 팀원 보고·핸드오프·이전 세션 기록에서 온 file:line 은 사용자 보고에 쓰기 전에 직접 연다. 남에게 들은 줄번호를 옮기는 것은 인용이 아니라 중계다.
+- 관측치 3건 이상을 한 블록으로 보고할 때 상호 모순을 점검한다. 모순이면 숨기지 말고 "A 와 B 가 동시에 참이려면 C 가 필요한데 C 는 미확인" 형태로 그대로 올린다.
+- 검증은 구현이 아니다. 리더가 파일을 열어 확인하는 것은 위임 원칙 위반이 아니다 — 위임 금지 대상은 구현이다.
+```
+
+> `/sc` 의 Anti-Patterns "Do NOT analyze the codebase to determine complexity" 는 **라우팅 분류**
+> 한정 규칙이다. 위임 결과를 사용자에게 올리기 전 검증하는 것은 그 금지 대상이 아니다.
+
 ### Completion Verification Protocol
 After execution completes, verify EVERY action item:
 ```

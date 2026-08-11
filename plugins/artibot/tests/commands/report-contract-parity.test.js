@@ -23,11 +23,14 @@ const CARRIERS = ['team.md', 'autopilot.md', 'ultraplan.md', 'sc.md'];
 
 const read = (f) => readFileSync(path.join(COMMANDS_DIR, f), 'utf-8');
 
-/** ```-펜스 안의 `[보고 계약]` 블록을 추출 */
-function extractContract(src) {
-  const m = src.match(/```\r?\n(\[보고 계약\][\s\S]*?)\r?\n```/);
+/** ```-펜스 안의 `[{label}]` 블록을 추출 */
+function extractBlock(src, label) {
+  const m = src.match(new RegExp('```\\r?\\n(\\[' + label + '\\][\\s\\S]*?)\\r?\\n```'));
   return m ? m[1].replace(/\r\n/g, '\n').trim() : null;
 }
+
+const extractContract = (src) => extractBlock(src, '보고 계약');
+const extractRelay = (src) => extractBlock(src, '중계 계약');
 
 /**
  * `prompt="..."` 문자열 전체를 추출 (여러 줄에 걸친 것 포함).
@@ -42,6 +45,7 @@ function extractPrompts(src) {
 }
 
 const contracts = Object.fromEntries(CARRIERS.map((f) => [f, extractContract(read(f))]));
+const relays = Object.fromEntries(CARRIERS.map((f) => [f, extractRelay(read(f))]));
 
 describe('보고 계약/블록 존재', () => {
   it.each(CARRIERS)('%s 에 [보고 계약] 블록이 있다', (f) => {
@@ -95,5 +99,94 @@ describe('보고 계약/스폰 프롬프트 커버리지', () => {
     // team 4 + autopilot 3 + ultraplan 4 + sc 2 = 13.
     // 늘었는데 이 수가 안 맞으면 새 스폰 경로가 생겼다는 뜻 — 계약을 붙였는지 확인하라.
     expect(total).toBe(13);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 중계 계약 — 리더→사용자 방향 (보고 계약의 대칭)
+//
+// 보고 계약은 팀원→리더 한 방향만 규율했다. 그 결과: 팀원이 정직하게 붙인 "미확인" 을
+// 리더가 요약하면서 삭제하고 사용자에게 확정 사실로 올렸다. 계약이 없는 방향에서 사고가 났다.
+//
+// 스폰 프롬프트에 삽입되는 블록이 아니라 리더가 자기 자신에게 적용하는 블록이므로
+// prompt= 커버리지 테스트의 대상이 아니다. 대신 4개 파일 전부에 자기 완결적으로 존재해야
+// 한다 — /autopilot 만 실행한 리더는 team.md 를 읽지 않는다(보고 계약과 같은 이유).
+// ---------------------------------------------------------------------------
+
+describe('중계 계약/블록 존재', () => {
+  it.each(CARRIERS)('%s 에 [중계 계약] 블록이 있다', (f) => {
+    expect(relays[f], `${f} 에서 중계 계약 블록 추출 실패`).not.toBeNull();
+  });
+});
+
+describe('중계 계약/문구 파리티', () => {
+  it.each(CARRIERS.filter((f) => f !== CANONICAL))(
+    '%s 의 중계 계약이 team.md 와 문자 단위로 동일하다',
+    (f) => {
+      expect(relays[f]).toBe(relays[CANONICAL]);
+    },
+  );
+});
+
+describe('중계 계약/필수 조항', () => {
+  // 각 항목은 이 계약이 존재하는 이유 하나씩에 대응한다. 조용히 빠지는 것을 막는다.
+  const REQUIRED = [
+    ['미확인 전파', /`미확인:` 항목은 삭제하지 않고 최종 사용자 보고까지 그대로 전파/],
+    ['승격은 재측정 있을 때만', /확정 사실로 승격하려면 리더가 직접 재측정한 출력이 있어야/],
+    ['측정 주체+시각', /측정 주체와 측정 시각을 함께 적는다/],
+    ['인용 전 직접 열람', /사용자 보고에 쓰기 전에 직접 연다/],
+    ['3건 이상 모순 점검', /관측치 3건 이상을.*상호 모순을 점검/],
+    ['검증≠구현', /검증은 구현이 아니다/],
+  ];
+
+  it.each(REQUIRED)('정본 중계 계약에 "%s" 조항이 있다', (_label, re) => {
+    expect(relays[CANONICAL]).toMatch(re);
+  });
+
+  it('예시 타임스탬프는 실측처럼 보이는 값이 아니라 플레이스홀더다', () => {
+    // 실제 ISO 값이 박혀 있으면 리더가 그 시각을 그대로 복사해 보고한다.
+    expect(relays[CANONICAL]).not.toMatch(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/);
+    expect(relays[CANONICAL]).toMatch(/\{측정시각\}/);
+  });
+
+  it('보고 계약과 중계 계약은 서로 다른 블록이다 (복붙 사고 감지)', () => {
+    expect(relays[CANONICAL]).not.toBe(contracts[CANONICAL]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 리더 검증 의무 — team.md Leader Role
+//
+// "ONLY delegate / NEVER do implementation work yourself" 만 있던 동안 리더는 이것을
+// "확인도 하지 않는다" 로 읽고 주장을 실어 나르는 라우터가 됐다. 위임 금지 대상이 구현이지
+// 검증이 아니라는 것을 Leader Role 안에 명시해야 그 오독이 닫힌다.
+// ---------------------------------------------------------------------------
+
+describe('리더 검증 의무 조항', () => {
+  const leaderRole = () => {
+    const src = read(CANONICAL).replace(/\r\n/g, '\n');
+    const m = src.match(/### Leader Role \(YOU\)\n([\s\S]*?)\n### /);
+    return m ? m[1] : null;
+  };
+
+  it('team.md 에 Leader Role 섹션이 있다', () => {
+    expect(leaderRole()).not.toBeNull();
+  });
+
+  it('위임 금지 대상이 구현이지 검증이 아님을 명시한다', () => {
+    expect(leaderRole()).toMatch(/검증은 구현이 아니다/);
+    expect(leaderRole()).toMatch(/위임 금지 대상은 구현이지 검증이 아니다/);
+  });
+
+  it('인용 전 직접 열람 의무를 명시한다', () => {
+    expect(leaderRole()).toMatch(/인용 전 직접 열람/);
+    expect(leaderRole()).toMatch(/지시나 사용자 보고에 쓰기 전에\*\* 직접 연다/);
+  });
+
+  it('추상 규칙이 아니라 실측 사례를 근거로 든다', () => {
+    // 규칙만 있고 사례가 없으면 다음 리더는 "나는 해당 없다" 로 읽는다.
+    const body = leaderRole();
+    expect(body).toMatch(/scripts\/cron\/auto-pr-creator\.js/);
+    expect(body).toMatch(/scripts\/hooks\/git-autopilot-merge\.js/);
   });
 });

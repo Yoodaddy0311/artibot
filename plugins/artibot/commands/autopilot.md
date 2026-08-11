@@ -273,6 +273,24 @@ if (pfInstr?.suppress) { /* warnings: state.preflightWarnings에 누적 + 계속
 #### Phase 5 — IMPROVE
 - 병렬 소환: `Task(subagent_type="artibot:refactor-cleaner")` + `Task(subagent_type="artibot:performance-engineer")`. 결과는 보고서 §7~8.
 
+#### 중계 계약 (MANDATORY — 리더가 사용자에게 보고할 때)
+
+`[보고 계약]` 이 **팀원→리더** 방향을 규율한다면, 아래는 **리더→사용자** 방향의 대칭 계약이다.
+스폰 프롬프트에 삽입하는 블록이 아니라 **리더가 Phase 6 REPORT / Step 5 Completion 을 실행할 때
+자기 자신에게 적용**한다. **`commands/team.md` 의 것과 문자 단위로 동일해야 한다** — /autopilot 만
+실행한 리더는 team.md 를 읽지 않으므로, 여기 없으면 그 세션에는 이 계약이 없는 것이다. 드리프트는
+`tests/commands/report-contract-parity.test.js` 가 잡는다.
+
+```
+[중계 계약]
+- 팀원 보고의 `미확인:` 항목은 삭제하지 않고 최종 사용자 보고까지 그대로 전파한다. 요약은 유보를 지우는 자리가 아니다.
+- 팀원이 "미확인" 이라 적은 것을 확정 사실로 승격하려면 리더가 직접 재측정한 출력이 있어야 한다. 없으면 미확인인 채로 올린다.
+- 수치를 중계할 때 측정 주체와 측정 시각을 함께 적는다: "9,895 pass"(X) → "9,895 pass, {측정자} 측정, {측정시각} 기준"(O). 누가 쟀는지가 신뢰도다.
+- 팀원 보고·핸드오프·이전 세션 기록에서 온 file:line 은 사용자 보고에 쓰기 전에 직접 연다. 남에게 들은 줄번호를 옮기는 것은 인용이 아니라 중계다.
+- 관측치 3건 이상을 한 블록으로 보고할 때 상호 모순을 점검한다. 모순이면 숨기지 말고 "A 와 B 가 동시에 참이려면 C 가 필요한데 C 는 미확인" 형태로 그대로 올린다.
+- 검증은 구현이 아니다. 리더가 파일을 열어 확인하는 것은 위임 원칙 위반이 아니다 — 위임 금지 대상은 구현이다.
+```
+
 #### Phase 6 — REPORT
 - `Task(subagent_type="artibot:doc-updater", prompt="[Autopilot Phase 6] reports/AUTOPILOT/{sessionId}.md 작성. 템플릿: PRD §13.5 (요약/PRD링크/Phase표/커밋SHA/Cross-check/검증/개선/미래/큐/Next)\n\n{보고 계약}")`
   <!-- model: model-policy 해석 — 역할 frontier 티어 (fable 마이그레이션 이후 review/docs 역할도 frontier) -->
