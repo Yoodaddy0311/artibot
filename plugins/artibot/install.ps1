@@ -363,6 +363,53 @@ fs.renameSync(tmp, path);
 #
 # Every failure path leaves the previous directory in place: a stale mirror is
 # fixed by re-running the installer, a missing lib/ takes down live sessions.
+# Copy the CONTENTS of $Source into $Destination, one item at a time.
+#
+# `Copy-Item -Recurse` abandons the whole tree on the first TERMINATING error,
+# and a locked destination file raises exactly that: measured on PS 5.1, copying
+# over a file held with FileShare.None throws IOException which -ErrorAction
+# SilentlyContinue does NOT suppress (that switch only governs non-terminating
+# errors). Every caller below is a last-resort path that runs *because* the
+# destination is locked, so the lock that triggered the fallback would also kill
+# it — and install.ps1 runs under $ErrorActionPreference='Stop' with no handler
+# anywhere up to the action switch, so the escape took the whole installer down
+# before the marketplace/cache mirrors, MCP and settings steps ever ran.
+#
+# Per-item copying keeps one held file from abandoning the other 292, matching
+# what `cp -r` already does for install.sh#atomic_replace_dir. Returns the count
+# it could not copy so the caller can say so out loud. Never throws.
+function Copy-TreeContents {
+  param([string]$Source, [string]$Destination)
+  if (-not (Test-Path $Source)) { return 0 }
+
+  $failed = 0
+  $srcRoot = [System.IO.Path]::GetFullPath($Source)
+  # `foreach` (statement), not ForEach-Object: the pipeline form runs its block
+  # in a child scope, so `$failed++` there would increment a copy and always
+  # report 0.
+  foreach ($item in @(Get-ChildItem -Path $srcRoot -Recurse -Force -ErrorAction SilentlyContinue)) {
+    $rel = $item.FullName.Substring($srcRoot.Length).TrimStart('\')
+    if (-not $rel) { continue }
+    $target = Join-Path $Destination $rel
+    try {
+      if ($item.PSIsContainer) {
+        if (-not (Test-Path $target)) {
+          New-Item -ItemType Directory -Path $target -Force -ErrorAction Stop | Out-Null
+        }
+      } else {
+        $parent = Split-Path $target -Parent
+        if ($parent -and -not (Test-Path $parent)) {
+          New-Item -ItemType Directory -Path $parent -Force -ErrorAction Stop | Out-Null
+        }
+        Copy-Item -Path $item.FullName -Destination $target -Force -ErrorAction Stop
+      }
+    } catch {
+      $failed++
+    }
+  }
+  return $failed
+}
+
 function Copy-DirAtomic {
   param([string]$SrcDir, [string]$DstDir)
   if (-not (Test-Path $SrcDir)) { return }
@@ -380,7 +427,12 @@ function Copy-DirAtomic {
     }
   }
 
-  New-Item -ItemType Directory -Path $staging -Force | Out-Null
+  try {
+    New-Item -ItemType Directory -Path $staging -Force -ErrorAction Stop | Out-Null
+  } catch {
+    Write-Warn2 "Could not create staging dir for $dst - previous copy left in place ($($_.Exception.Message))"
+    return
+  }
   try {
     # Children only, skipping node_modules/.git at the top for parity with
     # install.sh safe_copy_dir.
@@ -407,8 +459,11 @@ function Copy-DirAtomic {
   # Nothing to displace: one move, no window at all.
   if (-not (Test-Path $dst)) {
     try { [System.IO.Directory]::Move($staging, $dst); return } catch { }
-    New-Item -ItemType Directory -Path $dst -Force | Out-Null
-    Copy-Item -Path (Join-Path $staging '*') -Destination $dst -Recurse -Force -ErrorAction SilentlyContinue
+    try { New-Item -ItemType Directory -Path $dst -Force -ErrorAction Stop | Out-Null } catch { }
+    $failed = Copy-TreeContents -Source $staging -Destination $dst
+    if ($failed -gt 0) {
+      Write-Warn2 "$dst - $failed item(s) could not be written after the move was refused"
+    }
     try { Remove-Item -Path $staging -Recurse -Force -ErrorAction Stop } catch { }
     return
   }
@@ -431,8 +486,11 @@ function Copy-DirAtomic {
       Write-Warn2 "Swap failed for $dst; restored the previous copy"
     } catch {
       Write-Warn2 "Swap failed for $dst and rename-back was refused; copying the previous copy back"
-      New-Item -ItemType Directory -Path $dst -Force | Out-Null
-      Copy-Item -Path (Join-Path $retired '*') -Destination $dst -Recurse -Force -ErrorAction SilentlyContinue
+      try { New-Item -ItemType Directory -Path $dst -Force -ErrorAction Stop | Out-Null } catch { }
+      $failed = Copy-TreeContents -Source $retired -Destination $dst
+      if ($failed -gt 0) {
+        Write-Warn2 "$dst - $failed item(s) of the previous copy could not be restored"
+      }
       try { Remove-Item -Path $retired -Recurse -Force -ErrorAction Stop } catch { }
     }
     try { Remove-Item -Path $staging -Recurse -Force -ErrorAction Stop } catch { }
@@ -440,8 +498,14 @@ function Copy-DirAtomic {
   }
 
   # Destination locked by an open handle. Overwrite in place: no path is ever
-  # removed before its replacement exists.
-  Copy-Item -Path (Join-Path $staging '*') -Destination $dst -Recurse -Force -ErrorAction SilentlyContinue
+  # removed before its replacement exists. The very lock that sent us here will
+  # refuse some of these writes, so this must report and continue rather than
+  # abort — see Copy-TreeContents.
+  $failed = Copy-TreeContents -Source $staging -Destination $dst
+  if ($failed -gt 0) {
+    Write-Warn2 "$dst - $failed item(s) are held by another process and stay at the previous version"
+    Write-Warn2 "Re-run the installer once that process exits; the previous files are intact."
+  }
   Get-ChildItem -Path $dst -Recurse -Force -ErrorAction SilentlyContinue | ForEach-Object {
     $rel = $_.FullName.Substring($dst.Length).TrimStart('\')
     if ($rel -and -not (Test-Path (Join-Path $staging $rel))) {

@@ -107,11 +107,118 @@ describe('install-atomic-replace/static contract', () => {
     expect(fn[0]).toMatch(/\[System\.IO\.Directory\]::Move\(\$staging, \$dst\)/);
     expect(fn[0]).toMatch(/\[System\.IO\.Directory\]::Move\(\$retired, \$dst\)/);
   });
+
+  it('Copy-DirAtomic 안의 모든 복사·생성이 try/catch 안에 있다', () => {
+    // 이 정적 단언만으로는 부족해서 결함을 놓쳤다(아래 실행형 테스트가 본체다).
+    // 그래도 회귀 시 즉시 red 가 되도록 남긴다: 맨몸 Copy-Item 은 잠긴 목적지에서
+    // terminating IOException 을 던지고 -ErrorAction SilentlyContinue 는 그걸
+    // 막지 못한다(PS 5.1 실측).
+    //
+    // Copy-Item 이 1개는 남아있는 게 맞다 — staging 으로의 복사다. 목적지가 아니라
+    // 방금 만든 staging 에 쓰고, 이미 try/catch 안에 있으므로 제3자가 잠글 수 없다.
+    // 목적지에 쓰는 3개 최후수단 경로만 Copy-TreeContents 를 거쳐야 한다.
+    const fn = installPs1Content.match(/function Copy-DirAtomic \{[\s\S]*?\r?\n\}/);
+    expect(fn[0].match(/Copy-Item/g) || []).toHaveLength(1);
+    expect(fn[0]).toMatch(/Copy-Item[^\r\n]*-Destination \$staging[^\r\n]*-ErrorAction Stop/);
+    // 호출부만 센다 — 주석의 언급까지 세면 개수가 어긋난다
+    expect(fn[0].match(/= Copy-TreeContents -Source/g) || []).toHaveLength(3);
+    const helper = installPs1Content.match(/function Copy-TreeContents \{[\s\S]*?\r?\n\}/);
+    expect(helper).not.toBeNull();
+    // 파이프라인 ForEach-Object 는 자식 스코프라 카운터가 항상 0이 된다
+    expect(helper[0]).toMatch(/foreach \(\$item in/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 3. install.ps1 실행형 — 잠긴 목적지에서 인스톨러가 죽지 않는다
+// ---------------------------------------------------------------------------
+// bash 쪽은 rename 거부 시나리오를 실행형으로 단언하는데(위 "rename 이 거부돼도")
+// PowerShell 쪽은 정적 정규식뿐이었고, 그 공백이 BLOCKER 를 가렸다. 실측한 결함:
+// 목적지 파일을 FileShare.None 으로 쥐면 Copy-Item 이 terminating IOException 을
+// 던지고, install.ps1 은 $ErrorActionPreference='Stop' + 핸들러 부재라 인스톨러가
+// 통째로 죽어 마켓플레이스·캐시 미러·MCP·설정 단계가 실행되지 않았다.
+// 가장 나쁜 점은 그 분기가 "목적지가 잠겨서" 진입하는 폴백이라는 것 — 폴백이
+// 자기 발동 조건에서 죽었다.
+// ---------------------------------------------------------------------------
+
+const canRunPwsh = process.platform === 'win32'
+  && spawnSync('powershell', ['-NoProfile', '-Command', 'exit 0'], { timeout: 20_000 }).status === 0;
+
+describe.skipIf(!canRunPwsh)('install-atomic-replace/powershell locked destination', () => {
+  let workDir;
+
+  beforeEach(() => { workDir = mkdtempSync(path.join(os.tmpdir(), 'artibot-pslock-')); });
+  afterEach(() => { rmSync(workDir, { recursive: true, force: true }); });
+
+  it('목적지가 잠겨 있어도 예외를 밖으로 던지지 않고, 잠기지 않은 파일은 갱신된다', () => {
+    const psPath = path.join(workDir, 'probe.ps1');
+    const script = `
+$ErrorActionPreference = 'Stop'
+$text = [System.IO.File]::ReadAllText('${INSTALL_PS1.replace(/\\/g, '\\\\')}')
+function Grab([string]$name) {
+  $m = [regex]::Match($text, "(?ms)^function $name \\{.*?^\\}")
+  if (-not $m.Success) { throw "cannot extract $name" }
+  return $m.Value
+}
+# 실제 install.ps1 의 함수를 그대로 끌어와 실행한다 (복사본이 아니다)
+Invoke-Expression (@(
+  'function Write-Warn2 { param($msg) Write-Output "[warn] $msg" }',
+  '$DryRun = $false',
+  (Grab 'Copy-TreeContents'),
+  (Grab 'Copy-DirAtomic')
+) -join "\`n")
+
+$root = '${workDir.replace(/\\/g, '\\\\')}'
+$dst = Join-Path $root 'dst'
+$src = Join-Path $root 'src'
+New-Item -ItemType Directory -Path (Join-Path $dst 'core') -Force | Out-Null
+New-Item -ItemType Directory -Path (Join-Path $src 'core') -Force | Out-Null
+Set-Content (Join-Path $dst 'index.js')       'v=old' -Encoding utf8
+Set-Content (Join-Path $dst 'core\\config.js') 'c=old' -Encoding utf8
+Set-Content (Join-Path $src 'index.js')       'v=new' -Encoding utf8
+Set-Content (Join-Path $src 'core\\config.js') 'c=new' -Encoding utf8
+
+# FileShare.None: Directory.Move 도 거부되고, 폴백의 이 파일 쓰기도 거부된다
+$locked = Join-Path $dst 'index.js'
+$fs = [System.IO.File]::Open($locked, [System.IO.FileMode]::Open,
+      [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+$survived = $true
+try { Copy-DirAtomic -SrcDir $src -DstDir $dst } catch { $survived = $false }
+$fs.Close()
+
+Write-Output "SURVIVED=$survived"
+Write-Output ("LOCKED=" + (Get-Content $locked -Raw).Trim())
+Write-Output ("UNLOCKED=" + (Get-Content (Join-Path $dst 'core\\config.js') -Raw).Trim())
+Write-Output ("DSTEXISTS=" + (Test-Path $dst))
+`;
+    writeFileSync(psPath, script);
+
+    const res = spawnSync(
+      'powershell',
+      ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', psPath],
+      { encoding: 'utf8', timeout: 90_000 },
+    );
+
+    // 핵심: 예외가 함수 밖으로 새어나가 인스톨러를 죽이지 않는다
+    expect(res.stdout).toContain('SURVIVED=True');
+    // 잠긴 파일은 이전 버전 그대로 — 절대 사라지지 않는다
+    expect(res.stdout).toContain('LOCKED=v=old');
+    // 잠기지 않은 파일은 갱신된다 — 한 파일의 잠금이 트리 전체를 포기시키지 않는다
+    expect(res.stdout).toContain('UNLOCKED=c=new');
+    expect(res.stdout).toContain('DSTEXISTS=True');
+    // 조용히 넘어가지 않고 사용자에게 알린다
+    expect(res.stdout).toMatch(/\[warn\].*held by another process/);
+  }, 120_000);
 });
 
 // ---------------------------------------------------------------------------
 // 2. 실행형 — bash 가용 환경에서만
 // ---------------------------------------------------------------------------
+
+/** 최상위 채움 파일 — 삭제→재복사의 중간 상태를 관측 가능하게 만드는 용도 */
+const TOP_FILLERS = ['a.js', 'b.js', 'c.js', 'd.js', 'e.js', 'f.js'];
+/** 완전한 최상위 목록 (readdir 스냅샷 1회로 검사한다) */
+const TOP_EXPECTED = ['index.js', ...TOP_FILLERS, 'core'];
 
 describe.skipIf(!hasBash)('install-atomic-replace/behavioral', () => {
   let workDir;
@@ -154,15 +261,20 @@ describe.skipIf(!hasBash)('install-atomic-replace/behavioral', () => {
     srcDir = path.join(workDir, 'src');
     dstDir = path.join(workDir, 'dst');
 
-    // 새 버전(src): 3파일 + 중첩 디렉터리
+    // 새 버전(src): 최상위 여러 파일 + 중첩 디렉터리
+    // 최상위 파일을 여러 개 두는 이유는 아래 스냅샷 테스트에 있다 — 삭제→재복사
+    // 방식이면 최상위 목록이 채워지는 도중이 관측돼야 하고, 파일이 1개뿐이면
+    // 그 중간 상태가 거의 잡히지 않아 테스트가 아무것도 증명하지 못한다.
     mkdirSync(path.join(srcDir, 'core'), { recursive: true });
     writeFileSync(path.join(srcDir, 'index.js'), 'export const v = "new";\n');
+    for (const n of TOP_FILLERS) writeFileSync(path.join(srcDir, n), `export const x = "new";\n`);
     writeFileSync(path.join(srcDir, 'core', 'config.js'), 'export const c = "new";\n');
     writeFileSync(path.join(srcDir, 'core', 'added.js'), 'export const a = 1;\n');
 
-    // 기존 버전(dst): 겹치는 2파일 + 신버전에 없는 stale 1파일
+    // 기존 버전(dst): 겹치는 파일 + 신버전에 없는 stale 1파일
     mkdirSync(path.join(dstDir, 'core'), { recursive: true });
     writeFileSync(path.join(dstDir, 'index.js'), 'export const v = "old";\n');
+    for (const n of TOP_FILLERS) writeFileSync(path.join(dstDir, n), `export const x = "old";\n`);
     writeFileSync(path.join(dstDir, 'core', 'config.js'), 'export const c = "old";\n');
     writeFileSync(path.join(dstDir, 'core', 'stale.js'), 'export const s = "gone";\n');
   });
@@ -251,7 +363,22 @@ describe.skipIf(!hasBash)('install-atomic-replace/behavioral', () => {
     expect(existsSync(path.join(dstDir, 'core', 'stale.js'))).toBe(false);
   });
 
-  it('교체 내내 목적지는 "없거나 완전" — 반쯤 찬 상태로 관측되지 않는다', async () => {
+  it('교체 내내 목적지는 "없거나 완전" — readdir 스냅샷이 반쯤 찬 트리를 보지 않는다', async () => {
+    // 샘플링은 반드시 syscall 1회여야 한다.
+    //
+    // 이전 판은 existsSync 를 3번(dst, index.js, core/config.js) 불러 비교했는데,
+    // 그 3회 사이에 rename 스왑이 끼면 "완전히 원자적인 교체"인데도 불일치가 나온다.
+    // 결정론적으로 재현했다(2026-08-11): dst 존재 확인 후 rename 이 일어나면
+    // hasIndex=true/hasConfig=false, 두 번째 rename 이 끼면 hasIndex=false/
+    // hasConfig=true — 두 신호 모두 반쯤 찬 디렉터리 없이 발생한다. 즉 그 단언은
+    // 제품이 아니라 자기 측정 방식을 재고 있었고, 전체 스위트 5회 중 1회 실패의
+    // 정체가 이것이다. 트레이스로도 확인: 실패 회차 3건 전부 두 rename 이 모두
+    // 성공했고 in-place 폴백은 실행되지 않았다.
+    //
+    // readdir 1회는 디렉터리 rename 을 중간에 볼 수 없다 — 스왑 전 트리이거나,
+    // 스왑 후 트리이거나, ENOENT(두 rename 사이의 짧은 부재 구간)뿐이다.
+    // ENOENT 는 설계가 인정하는 구간이므로 허용하고, "목록이 나왔다면 완전한가"만
+    // 단언한다. 이것이 훅이 실제로 의존하는 성질이다.
     writeHarness();
     const child = spawn(
       'bash',
@@ -265,22 +392,23 @@ describe.skipIf(!hasBash)('install-atomic-replace/behavioral', () => {
       child.on('close', () => { done = true; resolve(); });
     });
 
-    // 교체가 도는 동안 목적지를 계속 샘플링한다. 고치기 전 코드에서는 index.js 는
-    // 있는데 core/config.js 는 아직 없는 중간 상태가 관측된다.
-    const partial = [];
-    let samples = 0;
+    const partialSnapshots = [];
+    let listed = 0;
     while (!done) {
-      const hasIndex = existsSync(path.join(dstDir, 'index.js'));
-      const hasConfig = existsSync(path.join(dstDir, 'core', 'config.js'));
-      const exists = existsSync(dstDir);
-      samples += 1;
-      if (exists && hasIndex !== hasConfig) partial.push({ hasIndex, hasConfig });
-      await new Promise((r) => setTimeout(r, 2));
+      try {
+        const entries = readdirSync(dstDir); // ← syscall 1회
+        listed += 1;
+        const missing = TOP_EXPECTED.filter((n) => !entries.includes(n));
+        if (missing.length > 0) partialSnapshots.push({ missing, saw: entries });
+      } catch {
+        // ENOENT: 두 rename 사이. 설계상 인정되는 부재 구간이다.
+      }
+      await new Promise((r) => setTimeout(r, 1));
     }
     await closed;
 
-    expect(samples).toBeGreaterThan(0);
-    expect(partial).toEqual([]);
+    expect(listed).toBeGreaterThan(0);
+    expect(partialSnapshots).toEqual([]);
     expect(readIf(path.join(dstDir, 'index.js'))).toContain('"new"');
   }, 30_000);
 });

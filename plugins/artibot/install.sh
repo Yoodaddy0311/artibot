@@ -249,8 +249,14 @@ atomic_replace_dir() {
   fi
 
   # Destination locked by an open handle. Overwrite in place: no path is ever
-  # removed before its replacement exists.
-  cp -r "${staging}/." "${dst}/" 2>/dev/null || true
+  # removed before its replacement exists. `cp -r` keeps going past individual
+  # refusals, so this updates everything it can — but a partial result must be
+  # said out loud, not returned as success (parity with Copy-TreeContents in
+  # install.ps1, which reports the same condition as a count).
+  if ! cp -r "${staging}/." "${dst}/" 2>/dev/null; then
+    warn "Some files under ${dst} are held by another process and stay at the previous version"
+    warn "Re-run the installer once that process exits; the previous files are intact."
+  fi
   local stale
   stale="$( (cd "${dst}" && find . -mindepth 1 2>/dev/null) || true )"
   while IFS= read -r rel; do
