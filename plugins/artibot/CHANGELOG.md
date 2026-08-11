@@ -13,6 +13,85 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.44.0] — 2026-08-11
+
+### Added
+- **중계 계약 — 리더→사용자 방향 검증 규율 기계 강제.** 기존 보고 계약은 팀원→리더 방향만
+  규율했고, 리더가 그 보고를 사용자에게 올리는 단계에는 강제 표면이 **0개**였다. 그 결과 팀원이
+  정직하게 붙인 `미확인:` 유보가 요약 과정에서 삭제되고 확정 사실로 보고됐다 —
+  `verification-discipline.md` §3 에 글자 그대로 금지된 행위다. `commands/{team,autopilot,
+  ultraplan,sc}.md` 4파일에 문자 단위로 동일한 6줄을 삽입해, 팀원 보고의 `미확인:` 은 삭제하지
+  않고 최종 사용자 보고까지 전파하도록 못박았다.
+- **사이드 브랜치 게이트 플로우.** `master` 는 필수 검사 4종을 걸어 두고도 `enforce_admins=false`
+  라, 직푸시가 **구조적으로 항상** 우회한다(푸시 시점에 커밋이 서버에 없으므로 검사가 돌 수
+  없다 — 원격이 `4 of 4 required status checks are expected` 를 내고 통과시킨다). 2026-08-11
+  실측으로 그날 master 푸시 5회 **전부**가 우회했고, `9f124441` 은 CI 실패 후에도 원격에 남았다.
+  체크런이 브랜치가 아니라 **SHA** 에 붙는 성질을 이용해, `ci/**` 로 먼저 푸시하고 그 SHA 가
+  그린이 된 뒤 master 를 fast-forward 하면 우회 없이 통과한다. `ci.yml`·`plugin-validate.yml`
+  양쪽 push 트리거에 `ci/**` 를 추가했고 절차는 `CONTRIBUTING.md` "Landing changes on master"
+  에 정본화했다.
+- **pre-push 훅** (`scripts/git-hooks/pre-push`). 훅이 전무해 커밋 전 체크리스트가 순수 자율
+  준수였다. CI 게이트 10종을 푸시 앞에 세운다(실측 10.8~14.0s, ESLint 캐시 상태가 변동 요인).
+  `git config core.hooksPath plugins/artibot/scripts/git-hooks` 로 클론당 1회 활성화. 전제조건
+  부재(node·node_modules·work tree)는 전부 **fail-closed** — 돌 수 없었는데 통과하는 경로를
+  만들지 않는다. 미커버 항목(vitest 전량·커버리지·runtime eval·plugin.json 구조 검사 2종·Node
+  버전 차이·플랫폼 차이)을 훅 헤더에 명시했다. 훅 그린은 CI 그린을 **예측할 뿐 보장하지 않는다**.
+
+### Fixed
+- **direct-run 가드 import-safety 게이트의 거짓음성 — 게이트가 막겠다고 선언한 회귀를 통과시켰다.**
+  기존 프로브가 `import(url).then(() => process.exit(7))` 형태라 모듈 평가 직후 프로세스를 죽였다.
+  훅들은 `main()` 을 await 없이 top-level 에서 호출하므로, `main()` 이 백그라운드에서 stdin 을
+  잡고 있어도 프로브가 먼저 종료해 관측하지 못했다. `pre-bash.js` 에서 가드만 제거한 변종도
+  **PASS** 했다. sentinel 을 stderr 마커 + 자연종료로 교체해 이벤트 루프 점유가 타임아웃=FAIL 이
+  되게 했다. 가드 3형태(`isMainEntry` / 로컬 `isMain` IIFE / `isDirectRun`) 공존도 무의존 leaf
+  모듈 하나로 수렴했다.
+- **인스톨러 캐시 미러 비원자성 — 라이브 세션 훅이 최대 약 1분간 죽는 창.** 캐시 디렉터리를
+  `rm -rf` 후 재복사하는 동안 훅이 `ERR_MODULE_NOT_FOUND` 로 죽었다. 이 머신 실측(rsync 부재로
+  파일당 cp 폴백): 삭제 후 재복사 **54,640ms** 대 staging 후 스왑 **161ms**, 목적지 1곳당. 캐시
+  버전 디렉터리 2개 x lib/scripts/hooks + 마켓플레이스 + `ARTIBOT_DIR` 만큼 반복되므로 실노출은
+  그 배수였다. `install.sh` 에 `atomic_replace_dir()`, `install.ps1` 에 `Copy-DirAtomic` 을
+  신설해 삭제→재복사 4지점을 전부 대체했다. v4.43.0 의 `clearCache` 라이브 파괴성 제거와 같은
+  계열의 마지막 잔여 인스턴스다.
+- **`install.ps1` 의 `Copy-Item` terminating 오류가 인스톨러를 죽였다 (BLOCKER).**
+  `Copy-DirAtomic` 의 복사·생성 연산 3곳이 try/catch 밖에서 `-ErrorAction SilentlyContinue` 에
+  의존했다. 기전 정정 — `$ErrorActionPreference='Stop'` 이 파라미터를 덮은 것이 아니다. 잠긴
+  목적지의 IOException 이 **terminating** 이라 `-ErrorAction` 이 애초에 관여하지 못한다. 따라서
+  `-ErrorAction Stop` 으로 바꾸는 것으로는 해결되지 않고 try/catch 가 유일한 해법이다. 함께
+  발견된 원자성 테스트의 측정 결함도 교정했다.
+- **세션 원장 루트가 cwd 상대라 세션 중 `cd` 하면 다른 디렉터리에 쌓였다.**
+  `session-ledger.mjs`·`session-readback.mjs` 가 `payload?.cwd || process.cwd()` 를 썼다.
+  결함의 정체는 **분실이 아니라 중복 기록**이다 — `comm -23` 실측으로 C ⊂ B ⊂ A, 루트 사본이
+  상위집합이고 루트에 없는 줄은 0건이었다. `.cursor.json` 워터마크가 루트별로 따로 있어 새
+  디렉터리가 생기면 트랜스크립트를 처음부터 다시 읽는 2~3중 기록이었다. `resolveProjectRoot()`
+  로 수렴.
+- **프로젝트 루트 해석을 HANDOFF 경로·프로젝트명까지 확장 + 성능 회귀 교정.** 위 수정이 원장
+  쓰기·읽기만 옮겨 같은 계열의 나머지 소비자가 cwd 기준으로 남았다. 원인 귀속 정정 — 이 불일치는
+  그 커밋이 만든 것이 아니라 이전부터 `session-readback` 은 `payload.cwd`, `session-start` 는
+  `process.cwd()` 로 서로 달랐고, 한쪽만 고쳐 격차가 커진 것이다.
+
+### Changed
+- **README 카운트 주장 3건 교정 + `scripts/ci/` 를 게이트 안으로.** "6 CI validation scripts" 는
+  실측 어느 정의로도 틀렸다(21파일 / `.js`+`.mjs` 19 / `validate-*` 11). 범주가 아니라 명명
+  관습인 `validate-` 접두사 대신 `.js`+`.mjs` **19** 를 채택했다 — `sync-readme-claims.js`·
+  `triage-wiring-gaps.mjs` 도 똑같이 CI 를 게이트하는데 접두사로 세면 파일명만 바꿔도 수가
+  흔들린다. 3건 중 2건은 어떤 게이트에도 걸리지 않아 영구히 드리프트할 수 있었다.
+- **hook scripts 카운트 61 → 62** (이후 실측 68 로 재동기화).
+- **README 클레임 게이트 단일화.** `ci.yml` 이 PR 에는 structural, push/Node 22 에만 `--full` 을
+  돌려 PR 과 사이드 브랜치가 master 보다 약한 게이트를 받았다. 실측 결과 그 분기는 **아무것도
+  사지 못했다** — `--full` 이 추가하는 actual 은 `statementCoverage` 하나뿐이고
+  (`readme-claims-registry.js:95-102`) 그 키는 `CLAIM_PATTERNS` 에서 의도적으로 제외돼
+  (동 파일 `:110-112`) 무엇과도 비교되지 않는다. 두 모드 출력은 모드 배너 줄 하나만 다르다
+  (422ms 대 553ms). 조건 없는 단일 스텝으로 통합하고, 커버리지 클레임이 어떤 모드에서도 검증되지
+  않는다는 사각지대를 스텝 주석에 명시했다.
+- **`plugin-validate.yml` 의 `push:` paths 필터 제거.** 필터의 근거 주석("직푸시는 어차피 브랜치
+  보호로 차단된다")이 거짓 전제였다. 실측상 2026-08-11 master 푸시 5회 중 이 워크플로는 **1회만**
+  실행됐고, 나머지 4회는 필수 검사 2종이 어떤 형태로도 생성되지 않았다. 경로 필터가 걸린
+  워크플로는 neutral 을 보고하지 않고 **아무것도 보고하지 않는다**.
+- **`marketplace.json#/qualityMetrics.tests` 9,284 → 9,951.** 릴리스 후 자동 동기화 PR 이
+  머지되지 못한 채 누적돼 실제 테스트 수와 벌어져 있었다.
+
+---
+
 ## [4.43.0] — 2026-08-10
 
 ### Fixed
