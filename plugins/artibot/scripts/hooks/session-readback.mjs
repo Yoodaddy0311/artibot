@@ -22,6 +22,7 @@
  */
 
 import { readStdin, writeStdout } from '../utils/index.js';
+import { resolveProjectRoot } from '../../lib/git/project-root.js';
 import { isMainEntry } from './_main-entry.js';
 
 const HOOK_NAME = 'session-readback';
@@ -35,7 +36,9 @@ async function main() {
     payload = {}; // tolerate empty/malformed stdin — fall back to defaults
   }
 
-  const projectRoot = payload?.cwd || process.cwd();
+  // Must use the SAME resolution as session-ledger.mjs — a reader anchored on a
+  // different root than the writer would surface an unrelated (or empty) ledger.
+  const projectRoot = resolveProjectRoot(payload?.cwd);
   const currentSessionId = payload?.session_id;
 
   let buildReadbackAdvisory;

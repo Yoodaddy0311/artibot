@@ -24,6 +24,7 @@
 import { existsSync } from 'node:fs';
 import { readStdin } from '../utils/index.js';
 import { captureTurn, finalizeSession } from '../../lib/learning/ledger/store.js';
+import { resolveProjectRoot } from '../../lib/git/project-root.js';
 import { isMainEntry } from './_main-entry.js';
 
 const HOOK_NAME = 'session-ledger';
@@ -40,7 +41,9 @@ async function main() {
   const transcriptPath = payload?.transcript_path;
   if (!transcriptPath || !existsSync(transcriptPath)) return;
 
-  const projectRoot = payload?.cwd || process.cwd();
+  // Resolve to the project root, not the shell's cwd: a mid-session `cd` would
+  // otherwise start a second ledger tree under the new directory.
+  const projectRoot = resolveProjectRoot(payload?.cwd);
   const sessionId = payload?.session_id || 'session';
   const isSessionEnd = process.argv.includes('SessionEnd')
     || payload?.hook_event_name === 'SessionEnd';
