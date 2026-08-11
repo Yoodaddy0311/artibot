@@ -27,12 +27,19 @@ err()  { echo -e "${RED}[artibot]${NC} $1" >&2; }
 # ──────────────────────────────────────────────
 # Concurrency lock
 # ──────────────────────────────────────────────
-# install_marketplace_mirror / install_plugin_cache do rm-rf-then-copy into
-# LIVE plugin dirs. Two installers interleaving those steps half-empties the
-# Claude Code plugin cache (2026-07-09 incident: cache lib/core reduced to 14
-# files, every hook spawn failing with ERR_MODULE_NOT_FOUND in all sessions).
+# install_marketplace_mirror / install_plugin_cache write into LIVE plugin
+# dirs. Two installers interleaving those steps half-empties the Claude Code
+# plugin cache (2026-07-09 incident: cache lib/core reduced to 14 files, every
+# hook spawn failing with ERR_MODULE_NOT_FOUND in all sessions).
 # mkdir is atomic on every platform bash runs on, so it serves as the mutex.
 # A stale lock older than 10 minutes is reclaimed (crashed installer).
+#
+# This lock and atomic_replace_dir cover different readers and do not overlap:
+# the lock serializes installers against each other (and so also keeps their
+# per-destination `.artibot-new` staging paths from colliding), while
+# atomic_replace_dir protects LIVE SESSIONS reading a destination while one
+# installer rewrites it — which no amount of installer-side locking can fix.
+# It is acquired before install_hooks, so every staging path is under it.
 INSTALL_LOCK_DIR="${CLAUDE_DIR}/.artibot-install.lock"
 acquire_install_lock() {
   if mkdir "${INSTALL_LOCK_DIR}" 2>/dev/null; then
@@ -57,9 +64,57 @@ acquire_install_lock() {
 }
 
 # ──────────────────────────────────────────────
+# Environment sanity: is this bash able to reach the user's install at all?
+# ──────────────────────────────────────────────
+# `bash` resolves to different binaries depending on what launched it. In a Git
+# Bash session /usr/bin/bash wins; from PowerShell or cmd on Windows the first
+# hit is C:\WINDOWS\system32\bash.exe — the WSL launcher (measured 2026-08-11).
+# npm's default script shell on Windows is cmd, so `npm run sync:local` reaches
+# WSL even though the checkout is a Windows one.
+#
+# Inside WSL, HOME is /home/<user>, so CLAUDE_DIR below resolves to the LINUX
+# home while the Claude Code install this script exists to update lives on the
+# Windows drive. Nothing useful can happen from there.
+#
+# This already fails rather than silently succeeding — `command -v claude` misses,
+# because Claude Code is a Windows install — but it fails saying "Claude Code CLI
+# not found", which sends the user off to reinstall a CLI they already have.
+# Detect the real condition and say the real thing.
+#
+# Positive identification (WSL announces itself), not a denylist of launcher
+# paths: a denylist would fail open on the next entry point that reaches WSL.
+assert_supported_shell() {
+  [ "$(uname -s 2>/dev/null)" = "Linux" ] || return 0
+
+  local in_wsl=0
+  [ -n "${WSL_DISTRO_NAME:-}" ] && in_wsl=1
+  grep -qi microsoft /proc/version 2>/dev/null && in_wsl=1
+  [ "${in_wsl}" -eq 1 ] || return 0
+
+  # A Linux-side checkout under WSL is a legitimate Linux install; only a
+  # Windows-mounted source tree means the user meant to install on Windows.
+  case "${SCRIPT_DIR}" in
+    /mnt/*) ;;
+    *) return 0 ;;
+  esac
+
+  err "Running under WSL (${WSL_DISTRO_NAME:-linux}) against a Windows checkout:"
+  err "  ${SCRIPT_DIR}"
+  err "HOME here is ${HOME:-<unset>}, so this would install into the Linux home,"
+  err "not the Windows Claude Code install it needs to update."
+  err ""
+  err "Run it from Windows instead:"
+  err "  PowerShell:  powershell -ExecutionPolicy Bypass -File install.ps1"
+  err "  Git Bash:    '/c/Program Files/Git/bin/bash.exe' install.sh"
+  exit 1
+}
+
+# ──────────────────────────────────────────────
 # Prerequisites
 # ──────────────────────────────────────────────
 check_prerequisites() {
+  assert_supported_shell
+
   if ! command -v claude &>/dev/null; then
     err "Claude Code CLI not found. Install: https://docs.anthropic.com/en/docs/claude-code"
     exit 1
@@ -107,6 +162,103 @@ safe_copy_dir() {
       cp "${entry}" "${dst}/${rel}"
     fi
   done
+}
+
+# ──────────────────────────────────────────────
+# Crash-safe directory replace (stage, then swap by rename)
+# ──────────────────────────────────────────────
+# The three mirrors below used to `rm -rf "${dst}"` and then copy into it.
+# Between those two steps the directory is absent or half-populated, and every
+# hook a live session spawns out of it dies with ERR_MODULE_NOT_FOUND. That
+# window is not a flicker: with rsync absent — the default for Git Bash on
+# Windows — safe_copy_dir falls back to a per-file `cp` loop measured at 54.6s
+# for the 293-file lib/ tree, and it pays that once per destination.
+#
+# Instead, copy into a sibling staging dir (the destination stays intact and
+# complete for the whole copy) and swap by rename. The destination is then only
+# absent between two renames — measured 161ms.
+#
+# WINDOWS RENAME SEMANTICS (measured on Git Bash / Win 11, not assumed from
+# POSIX rename(2)):
+#   - `mv src dst` when dst EXISTS moves src INSIDE dst instead of replacing
+#     it. Hence the two-step swap; never a single mv onto a live path.
+#   - Renaming a directory fails with EACCES while any process holds an open
+#     handle to a file under it, whereas `rm -rf` on that same directory
+#     SUCCEEDS. Rename is therefore strictly less available than delete here
+#     and cannot be the only strategy.
+#
+# So when the swap is refused, fall back to overwriting in place from the
+# staging copy without deleting anything first, then prune the paths the new
+# tree no longer carries. Briefly mixed-version and slower, but every module
+# path stays resolvable — the property this whole function exists to protect.
+#
+# Every failure path leaves the previous directory in place. A stale mirror is
+# recoverable by re-running the installer; a missing lib/ takes down every live
+# session. Same fail-safe direction as clearCache() in scripts/update.js.
+atomic_replace_dir() {
+  local src="$1"
+  local dst="$2"
+  local staging="${dst}.artibot-new"
+  local retired="${dst}.artibot-old"
+
+  # Leftovers from a run that could not unlink them (see the cleanup step
+  # below). Inert — nothing loads a `.artibot-old` path — but prune on sight.
+  rm -rf "${staging}" "${retired}" 2>/dev/null || true
+
+  if ! safe_copy_dir "${src}" "${staging}"; then
+    rm -rf "${staging}" 2>/dev/null || true
+    warn "Staging copy failed for ${dst} — previous copy left in place"
+    return 1
+  fi
+
+  # A copy that silently produced nothing must never replace a good tree.
+  if [ -n "$(ls -A "${src}" 2>/dev/null)" ] && [ -z "$(ls -A "${staging}" 2>/dev/null)" ]; then
+    rm -rf "${staging}" 2>/dev/null || true
+    warn "Staging copy for ${dst} came out empty — previous copy left in place"
+    return 1
+  fi
+
+  # Nothing to displace: one rename, no window at all.
+  if [ ! -d "${dst}" ]; then
+    mv "${staging}" "${dst}" 2>/dev/null && return 0
+    mkdir -p "${dst}"
+    cp -r "${staging}/." "${dst}/" 2>/dev/null || true
+    rm -rf "${staging}" 2>/dev/null || true
+    return 0
+  fi
+
+  if mv "${dst}" "${retired}" 2>/dev/null; then
+    if mv "${staging}" "${dst}" 2>/dev/null; then
+      # Best-effort: a `.artibot-old` that will not unlink is harmless and the
+      # next run prunes it. Failing the install over it would be worse.
+      rm -rf "${retired}" 2>/dev/null || true
+      return 0
+    fi
+    # The destination is already moved aside — the one path that can leave a
+    # mirror with no directory at all. Put it back before anything else.
+    if mv "${retired}" "${dst}" 2>/dev/null; then
+      warn "Swap failed for ${dst}; restored the previous copy"
+    else
+      warn "Swap failed for ${dst} and rename-back was refused; copying the previous copy back"
+      mkdir -p "${dst}"
+      cp -r "${retired}/." "${dst}/" 2>/dev/null || true
+      rm -rf "${retired}" 2>/dev/null || true
+    fi
+    rm -rf "${staging}" 2>/dev/null || true
+    return 1
+  fi
+
+  # Destination locked by an open handle. Overwrite in place: no path is ever
+  # removed before its replacement exists.
+  cp -r "${staging}/." "${dst}/" 2>/dev/null || true
+  local stale
+  stale="$( (cd "${dst}" && find . -mindepth 1 2>/dev/null) || true )"
+  while IFS= read -r rel; do
+    [ -n "${rel}" ] || continue
+    [ -e "${staging}/${rel}" ] || rm -rf "${dst}/${rel}" 2>/dev/null || true
+  done <<< "${stale}"
+  rm -rf "${staging}" 2>/dev/null || true
+  return 0
 }
 
 # ──────────────────────────────────────────────
@@ -189,15 +341,15 @@ install_skills() {
 # Copy Hooks & Scripts
 # ──────────────────────────────────────────────
 install_hooks() {
-  # Clean before copy to prevent stale files from previous versions
-  for dir in hooks scripts lib output-styles; do
-    [ -d "${ARTIBOT_DIR}/${dir}" ] && rm -rf "${ARTIBOT_DIR}/${dir}"
-  done
-
-  safe_copy_dir "${SCRIPT_DIR}/hooks" "${ARTIBOT_DIR}/hooks"
-  safe_copy_dir "${SCRIPT_DIR}/scripts" "${ARTIBOT_DIR}/scripts"
-  safe_copy_dir "${SCRIPT_DIR}/lib" "${ARTIBOT_DIR}/lib"
-  [ -d "${SCRIPT_DIR}/output-styles" ] && safe_copy_dir "${SCRIPT_DIR}/output-styles" "${ARTIBOT_DIR}/output-styles"
+  # Replaced one dir at a time via atomic_replace_dir: still clean (stale files
+  # from previous versions are dropped) but without the interval where the dir
+  # is missing. statusline and the two mirrors below all read out of here.
+  atomic_replace_dir "${SCRIPT_DIR}/hooks" "${ARTIBOT_DIR}/hooks" || true
+  atomic_replace_dir "${SCRIPT_DIR}/scripts" "${ARTIBOT_DIR}/scripts" || true
+  atomic_replace_dir "${SCRIPT_DIR}/lib" "${ARTIBOT_DIR}/lib" || true
+  if [ -d "${SCRIPT_DIR}/output-styles" ]; then
+    atomic_replace_dir "${SCRIPT_DIR}/output-styles" "${ARTIBOT_DIR}/output-styles" || true
+  fi
 
   # Copy .claude-plugin metadata (plugin.json, swarm-profile.json, etc.)
   # This is needed so swarm-autodetect can find swarm-profile.json after update.
@@ -252,11 +404,10 @@ install_marketplace_mirror() {
   fi
 
   # Mirror the hot paths from the direct install we just wrote.
-  # Same clean-before-copy contract as install_hooks for parity.
+  # Same clean-replace contract as install_hooks for parity.
   for dir in scripts hooks lib skills output-styles .claude-plugin; do
     if [ -d "${ARTIBOT_DIR}/${dir}" ]; then
-      [ -d "${mkt_root}/${dir}" ] && rm -rf "${mkt_root}/${dir}"
-      safe_copy_dir "${ARTIBOT_DIR}/${dir}" "${mkt_root}/${dir}"
+      atomic_replace_dir "${ARTIBOT_DIR}/${dir}" "${mkt_root}/${dir}" || true
     fi
   done
 
@@ -265,8 +416,7 @@ install_marketplace_mirror() {
   # from the source repo, not from ${ARTIBOT_DIR}.
   for dir in commands agents; do
     if [ -d "${SCRIPT_DIR}/${dir}" ]; then
-      [ -d "${mkt_root}/${dir}" ] && rm -rf "${mkt_root}/${dir}"
-      safe_copy_dir "${SCRIPT_DIR}/${dir}" "${mkt_root}/${dir}"
+      atomic_replace_dir "${SCRIPT_DIR}/${dir}" "${mkt_root}/${dir}" || true
     fi
   done
 
@@ -309,12 +459,16 @@ install_plugin_cache() {
     local v_root="${version_dir%/}"
 
     # Mirror runtime hot paths only (NOT .claude-plugin to preserve plugin.json
-    # version routing key). Same clean-before-copy contract as the marketplace
+    # version routing key). Same clean-replace contract as the marketplace
     # mirror for parity.
+    #
+    # This is the destination live sessions actually execute out of, so it is
+    # the one that made atomic_replace_dir necessary: a session whose hook
+    # fires while this loop is mid-copy resolves its imports against whatever
+    # exists at that instant.
     for dir in scripts hooks lib output-styles; do
       if [ -d "${ARTIBOT_DIR}/${dir}" ]; then
-        [ -d "${v_root}/${dir}" ] && rm -rf "${v_root}/${dir}"
-        safe_copy_dir "${ARTIBOT_DIR}/${dir}" "${v_root}/${dir}"
+        atomic_replace_dir "${ARTIBOT_DIR}/${dir}" "${v_root}/${dir}" || true
       fi
     done
 

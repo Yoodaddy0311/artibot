@@ -121,6 +121,60 @@ export function probeBash() {
   }
 }
 
+/**
+ * Same capability question as {@link probeBash}, asked about a SPECIFIC binary
+ * instead of whatever `bash` resolves to on PATH.
+ *
+ * WHY THIS EXISTS: `findBash()` in scripts/update-platform.js picks the shell
+ * that runs install.sh, and it used to accept a candidate on `bash --version`
+ * alone — the exact probe this module's header documents as succeeding under
+ * WSL. Measured 2026-08-11: called from PowerShell it returned bare `'bash'`,
+ * which is C:\WINDOWS\system32\bash.exe, and that bash reports GNU/Linux and
+ * cannot open the `C:/...` paths the installer hands it.
+ *
+ * The check is deliberately a CAPABILITY test, not a denylist of known-bad
+ * launcher paths: "can this binary execute a script addressed the way we will
+ * address it". A path denylist fails open on the next launcher that appears;
+ * this cannot, because it asks for the property we actually depend on.
+ *
+ * Not memoized — callers probe several different candidates in one pass, and
+ * the answer is per-binary. Never throws, for the same reason probeBash does
+ * not: a probe that blows up must degrade to "unusable", not take the caller
+ * down with it.
+ *
+ * @param {string} bin - Path to (or name of) a bash executable.
+ * @returns {{ ok: boolean, reason: string }} `reason` is '' when ok.
+ */
+export function probeBashCandidate(bin) {
+  if (!bin) return { ok: false, reason: 'no candidate given' };
+
+  let dir = null;
+  try {
+    dir = mkdtempSync(path.join(os.tmpdir(), 'artibot-bashprobe-'));
+    const script = path.join(dir, 'probe.sh');
+    writeFileSync(script, `#!/usr/bin/env bash\necho ${PROBE_MARKER}\n`);
+
+    const run = spawnSync(bin, [toBashPath(script)], {
+      encoding: 'utf8', timeout: 5000,
+    });
+    if (run && run.status === 0 && (run.stdout || '').includes(PROBE_MARKER)) {
+      return { ok: true, reason: '' };
+    }
+    const detail = String((run && run.stderr) || '').trim().split('\n')[0]
+      || `exit ${run ? run.status : 'unknown'}`;
+    return {
+      ok: false,
+      reason: `cannot execute a script at a native path (likely WSL bash on Windows): ${detail}`,
+    };
+  } catch (err) {
+    return { ok: false, reason: `probe failed: ${err.message}` };
+  } finally {
+    if (dir) {
+      try { rmSync(dir, { recursive: true, force: true }); } catch { /* temp dir */ }
+    }
+  }
+}
+
 /** Labels already announced, so a multi-suite run prints each reason once. */
 const announced = new Set();
 

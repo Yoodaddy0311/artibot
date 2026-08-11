@@ -214,13 +214,14 @@ function Copy-MdFiles {
   }
 }
 
+# Replaces $DstDir/<leaf of SrcDir>. Delegates to Copy-DirAtomic so the direct
+# install gets the same no-missing-directory guarantee as the two mirrors —
+# statusline reads out of ~/.claude/artibot, and both mirrors copy FROM it.
 function Copy-Tree {
   param([string]$SrcDir, [string]$DstDir)
   if (-not (Test-Path $SrcDir)) { return }
   $target = Join-Path $DstDir (Split-Path -Leaf $SrcDir)
-  if ($DryRun) { Write-Log "[dry-run] would copy $SrcDir -> $target"; return }
-  if (Test-Path $target) { Remove-Item -Path $target -Recurse -Force }
-  Copy-Item -Path $SrcDir -Destination $DstDir -Recurse -Force
+  Copy-DirAtomic -SrcDir $SrcDir -DstDir $target
 }
 
 function Install-Assets {
@@ -344,22 +345,116 @@ fs.renameSync(tmp, path);
 }
 
 # ---------------------------------------------------------------------------
-# Clean-before-copy of a single dir from a source root into a dest root.
-# Excludes node_modules/.git for parity with install.sh safe_copy_dir. Used by
-# the marketplace + plugin-cache mirrors.
+# Clean replace of a single directory — parity with install.sh
+# atomic_replace_dir (see the long rationale there).
 # ---------------------------------------------------------------------------
-function Copy-DirClean {
+# Removing the destination and then copying into it leaves an interval where
+# the directory is absent or half-populated, and hooks a live session spawns
+# out of it die with ERR_MODULE_NOT_FOUND. Copy into a sibling staging dir
+# first (destination untouched for the whole copy), then swap by rename.
+#
+# Windows rename semantics, measured rather than assumed:
+#   - Moving onto an EXISTING directory puts the source inside it instead of
+#     replacing it, so the swap is always two moves, never one onto a live path.
+#   - A directory move fails with UnauthorizedAccessException while any process
+#     holds an open handle underneath it, while a recursive delete of that same
+#     directory succeeds. Rename is therefore less available than delete here
+#     and needs the in-place fallback below.
+#
+# Every failure path leaves the previous directory in place: a stale mirror is
+# fixed by re-running the installer, a missing lib/ takes down live sessions.
+function Copy-DirAtomic {
   param([string]$SrcDir, [string]$DstDir)
   if (-not (Test-Path $SrcDir)) { return }
   if ($DryRun) { Write-Log "[dry-run] would mirror $SrcDir -> $DstDir"; return }
-  if (Test-Path $DstDir) { Remove-Item -Path $DstDir -Recurse -Force }
-  New-Item -ItemType Directory -Path $DstDir -Force | Out-Null
-  # Copy children of SrcDir into DstDir, skipping node_modules/.git at the top.
-  Get-ChildItem -Path $SrcDir -Force | Where-Object {
-    $_.Name -ne 'node_modules' -and $_.Name -ne '.git'
-  } | ForEach-Object {
-    Copy-Item -Path $_.FullName -Destination $DstDir -Recurse -Force
+
+  $dst = [System.IO.Path]::GetFullPath($DstDir)
+  $staging = "$dst.artibot-new"
+  $retired = "$dst.artibot-old"
+
+  # Leftovers from a run that could not unlink them. Inert - nothing loads an
+  # `.artibot-old` path - but prune on sight.
+  foreach ($leftover in @($staging, $retired)) {
+    if (Test-Path $leftover) {
+      try { Remove-Item -Path $leftover -Recurse -Force -ErrorAction Stop } catch { }
+    }
   }
+
+  New-Item -ItemType Directory -Path $staging -Force | Out-Null
+  try {
+    # Children only, skipping node_modules/.git at the top for parity with
+    # install.sh safe_copy_dir.
+    Get-ChildItem -Path $SrcDir -Force | Where-Object {
+      $_.Name -ne 'node_modules' -and $_.Name -ne '.git'
+    } | ForEach-Object {
+      Copy-Item -Path $_.FullName -Destination $staging -Recurse -Force -ErrorAction Stop
+    }
+  } catch {
+    try { Remove-Item -Path $staging -Recurse -Force -ErrorAction Stop } catch { }
+    Write-Warn2 "Staging copy failed for $dst - previous copy left in place ($($_.Exception.Message))"
+    return
+  }
+
+  # A copy that silently produced nothing must never replace a good tree.
+  $srcHasContent = @(Get-ChildItem -Path $SrcDir -Force -ErrorAction SilentlyContinue).Count -gt 0
+  $stagingEmpty = @(Get-ChildItem -Path $staging -Force -ErrorAction SilentlyContinue).Count -eq 0
+  if ($srcHasContent -and $stagingEmpty) {
+    try { Remove-Item -Path $staging -Recurse -Force -ErrorAction Stop } catch { }
+    Write-Warn2 "Staging copy for $dst came out empty - previous copy left in place"
+    return
+  }
+
+  # Nothing to displace: one move, no window at all.
+  if (-not (Test-Path $dst)) {
+    try { [System.IO.Directory]::Move($staging, $dst); return } catch { }
+    New-Item -ItemType Directory -Path $dst -Force | Out-Null
+    Copy-Item -Path (Join-Path $staging '*') -Destination $dst -Recurse -Force -ErrorAction SilentlyContinue
+    try { Remove-Item -Path $staging -Recurse -Force -ErrorAction Stop } catch { }
+    return
+  }
+
+  $movedAside = $false
+  try { [System.IO.Directory]::Move($dst, $retired); $movedAside = $true } catch { }
+
+  if ($movedAside) {
+    try {
+      [System.IO.Directory]::Move($staging, $dst)
+      # Best-effort: an `.artibot-old` that will not unlink is harmless and the
+      # next run prunes it. Failing the install over it would be worse.
+      try { Remove-Item -Path $retired -Recurse -Force -ErrorAction Stop } catch { }
+      return
+    } catch { }
+    # The destination is already moved aside - the one path that can leave a
+    # mirror with no directory at all. Put it back before anything else.
+    try {
+      [System.IO.Directory]::Move($retired, $dst)
+      Write-Warn2 "Swap failed for $dst; restored the previous copy"
+    } catch {
+      Write-Warn2 "Swap failed for $dst and rename-back was refused; copying the previous copy back"
+      New-Item -ItemType Directory -Path $dst -Force | Out-Null
+      Copy-Item -Path (Join-Path $retired '*') -Destination $dst -Recurse -Force -ErrorAction SilentlyContinue
+      try { Remove-Item -Path $retired -Recurse -Force -ErrorAction Stop } catch { }
+    }
+    try { Remove-Item -Path $staging -Recurse -Force -ErrorAction Stop } catch { }
+    return
+  }
+
+  # Destination locked by an open handle. Overwrite in place: no path is ever
+  # removed before its replacement exists.
+  Copy-Item -Path (Join-Path $staging '*') -Destination $dst -Recurse -Force -ErrorAction SilentlyContinue
+  Get-ChildItem -Path $dst -Recurse -Force -ErrorAction SilentlyContinue | ForEach-Object {
+    $rel = $_.FullName.Substring($dst.Length).TrimStart('\')
+    if ($rel -and -not (Test-Path (Join-Path $staging $rel))) {
+      try { Remove-Item -Path $_.FullName -Recurse -Force -ErrorAction Stop } catch { }
+    }
+  }
+  try { Remove-Item -Path $staging -Recurse -Force -ErrorAction Stop } catch { }
+}
+
+# Name kept for the marketplace + plugin-cache mirror call sites.
+function Copy-DirClean {
+  param([string]$SrcDir, [string]$DstDir)
+  Copy-DirAtomic -SrcDir $SrcDir -DstDir $DstDir
 }
 
 # ---------------------------------------------------------------------------

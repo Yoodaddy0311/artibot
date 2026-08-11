@@ -56,17 +56,22 @@ describe('install/install.sh covers new file directories', () => {
   for (const relPath of V1_15_NEW_FILES) {
     const topDir = relPath.split('/')[0]; // lib, scripts, output-styles, etc.
     it(`install.sh가 ${topDir}/ 디렉토리를 재귀 복사`, () => {
-      // install.sh recursively copies via either:
+      // install.sh recursively copies via any of:
       //   - direct: cp -r "${SCRIPT_DIR}/<dir>" "${ARTIBOT_DIR}/"
       //   - helper: safe_copy_dir "${SCRIPT_DIR}/<dir>" "${ARTIBOT_DIR}/<dir>"
-      // (helper wraps cp -r / rsync with --exclude=node_modules --exclude=.git)
+      //   - helper: atomic_replace_dir "${SCRIPT_DIR}/<dir>" "${ARTIBOT_DIR}/<dir>"
+      // (safe_copy_dir wraps cp -r / rsync with --exclude=node_modules --exclude=.git;
+      //  atomic_replace_dir stages through safe_copy_dir and then swaps by rename,
+      //  so the recursive-copy guarantee this test encodes is unchanged)
       const cpPattern = new RegExp(`cp\\s+-r\\s+.*["']?\\$\\{?SCRIPT_DIR\\}?["']?/${topDir}["']?\\s`);
       const cpAltPattern = new RegExp(`cp\\s+-r\\s+.*${topDir}.*ARTIBOT_DIR`);
       const safeCopyPattern = new RegExp(`safe_copy_dir\\s+["']?\\$\\{?SCRIPT_DIR\\}?["']?/${topDir}["']?`);
+      const atomicPattern = new RegExp(`atomic_replace_dir\\s+["']?\\$\\{?SCRIPT_DIR\\}?["']?/${topDir}["']?`);
       const hasRecursiveCopy =
         cpPattern.test(installShContent) ||
         cpAltPattern.test(installShContent) ||
-        safeCopyPattern.test(installShContent);
+        safeCopyPattern.test(installShContent) ||
+        atomicPattern.test(installShContent);
       expect(hasRecursiveCopy).toBe(true);
     });
   }

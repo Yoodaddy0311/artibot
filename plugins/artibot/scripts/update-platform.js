@@ -18,6 +18,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { getPluginRoot } from '../lib/core/platform.js';
+import { probeBashCandidate } from './utils/bash-compat.js';
 
 // ---------------------------------------------------------------------------
 // Path helpers
@@ -170,6 +171,23 @@ export function inferBashFromWhere() {
  * Git for Windows (Program Files + LOCALAPPDATA), Scoop, Chocolatey, plus
  * `git --exec-path` inference and a PATH lookup via `where bash`.
  *
+ * WINDOWS CANDIDATE TEST — why not `--version` (fixed 2026-08-11):
+ * Candidates used to be accepted on `execFileSync(candidate, ['--version'])`.
+ * That is the precise probe scripts/utils/bash-compat.js documents as
+ * SUCCEEDING under WSL, so the first candidate — bare `'bash'` — was accepted
+ * whenever PATH resolved it to C:\WINDOWS\system32\bash.exe. Measured from
+ * PowerShell: findBash() returned `'bash'`, and that binary reports GNU/Linux,
+ * has HOME=/home/<user>, and cannot open the `C:/...` paths install.sh is
+ * handed. v4.43.0 introduced probeBash() for exactly this trap but never
+ * applied it here.
+ *
+ * Candidates are now admitted by CAPABILITY — can this binary execute a script
+ * addressed by a converted native path — rather than rejected by a denylist of
+ * known WSL launcher locations. A denylist fails open on the next launcher path
+ * that appears; this asks for the property the installer actually depends on,
+ * so an unknown-but-working bash still passes and an unknown-but-broken one
+ * still fails. Ordering is unchanged, so a usable PATH bash still wins.
+ *
  * @returns {string | null} Path to bash executable, or null if not found
  */
 export function findBash() {
@@ -188,23 +206,14 @@ export function findBash() {
   ];
 
   for (const candidate of candidates) {
-    try {
-      execFileSync(candidate, ['--version'], { stdio: 'ignore', timeout: 5000 });
-      return candidate;
-    } catch {
-      continue;
-    }
+    if (!candidate) continue;
+    if (probeBashCandidate(candidate).ok) return candidate;
   }
 
   // Fall back to dynamic discovery: infer from git's own exec-path, then PATH.
   for (const inferred of [inferBashFromGitExecPath(), inferBashFromWhere()]) {
     if (!inferred) continue;
-    try {
-      execFileSync(inferred, ['--version'], { stdio: 'ignore', timeout: 5000 });
-      return inferred;
-    } catch {
-      continue;
-    }
+    if (probeBashCandidate(inferred).ok) return inferred;
   }
 
   return null;

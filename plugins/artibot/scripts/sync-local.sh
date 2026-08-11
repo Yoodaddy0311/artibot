@@ -16,5 +16,11 @@ if [ ! -f "${PLUGIN_ROOT}/install.sh" ]; then
 fi
 
 echo "[sync-local] Re-installing from ${PLUGIN_ROOT} → ~/.claude/artibot/"
-bash "${PLUGIN_ROOT}/install.sh" "$@"
+# "${BASH}" (this interpreter), never a bare `bash`. A bare name re-resolves
+# against PATH, and on Windows that is not necessarily the shell running this
+# script: from PowerShell/cmd the first hit is C:\WINDOWS\system32\bash.exe, the
+# WSL launcher. Reusing $BASH keeps the child on the same shell as the parent,
+# so the run cannot silently change which filesystem/HOME it targets midway.
+# (install.sh#assert_supported_shell still catches an all-WSL invocation.)
+"${BASH:-bash}" "${PLUGIN_ROOT}/install.sh" "$@"
 echo "[sync-local] Done. statusLine will show the new version on next session."
