@@ -127,35 +127,36 @@ plugins/artibot/
 ├── package.json                 # ESM runtime, zero prod dependencies
 ├── .mcp.json                    # MCP server config (Context7, Playwright)
 │
-├── agents/          (18+ files) # Agent definitions (Markdown)
+├── agents/                      # Agent definitions (Markdown)
 │   ├── orchestrator.md          # CTO / team leader (TeamCreate, SendMessage, TaskCreate)
 │   └── [specialist agents]      # Teammates (SendMessage + TaskList/Update)
 │
-├── commands/        (27+ files) # Slash command definitions (Markdown)
+├── commands/                    # Slash command definitions (Markdown)
 │   ├── sc.md                    # Main router (/sc)
 │   └── [commands].md
 │
-├── skills/          (25+ dirs)  # Skill definitions (SKILL.md + references/)
+├── skills/                      # Skill definitions (SKILL.md + references/)
 │   ├── orchestration/           # Routing intelligence, delegation mode
 │   └── [skills]/
 │
-├── hooks/hooks.json             # Hook event mappings (12 event types)
-├── scripts/hooks/   (18 files)  # ESM hook scripts (3 types: command, prompt, agent)
-├── scripts/ci/      (4 files)   # Validation scripts
+├── hooks/hooks.json             # Claude Code event slots -> dispatcher entry points
+├── hooks/dispatch-table.json    # Source of truth for per-slot hook lists (add a hook here)
+├── scripts/hooks/               # ESM hook scripts (.js and .mjs)
+├── scripts/ci/                  # CI validation, lint, and sync scripts
 │
 ├── lib/
-│   ├── core/        (7 files)   # platform, config, cache, io, debug, file, tui
-│   ├── intent/      (4 files)   # language, trigger, ambiguity, index
-│   ├── context/     (2 files)   # hierarchy, session
-│   ├── cognitive/   (4 files)   # router, system1, system2, sandbox
-│   ├── learning/    (7 files)   # memory, grpo, knowledge-transfer, lifelong, tool-learner
-│   ├── privacy/     (1 file)    # pii-scrubber (50+ regex patterns)
-│   ├── swarm/       (4 files)   # swarm-client, pattern-packager, sync-scheduler
-│   ├── system/      (2 files)   # telemetry-collector, context-injector
-│   └── adapters/    (5 files)   # base, gemini, codex, cursor adapters
+│   ├── core/                    # platform, config, cache, io, debug, file, tui, ...
+│   ├── intent/                  # language, trigger, ambiguity, index
+│   ├── context/                 # index, session
+│   ├── cognitive/               # router, effort-policy, workflow-plan, loop-detector, ...
+│   ├── learning/                # memory-manager, scoring, knowledge-transfer, lifelong-learner, tool-learner, ...
+│   ├── privacy/                 # pii-scrubber, pii-detector, differential-privacy, ...
+│   ├── swarm/                   # swarm-client, pattern-packager, sync-scheduler, ...
+│   ├── system/                  # keep-awake, lsp-client
+│   └── adapters/                # base, gemini, codex, cursor, antigravity adapters
 │
-├── output-styles/   (3 files)   # default, compressed, mentor
-└── templates/       (3 files)   # agent-template, skill-template, command-template
+├── output-styles/               # default, compressed, mentor, report, ...
+└── templates/                   # agent, command, and skill templates
 ```
 
 **Key architectural constraint / 핵심 아키텍처 제약**: All JavaScript files under `lib/` and `scripts/` must use only Node.js built-in modules (`node:fs`, `node:path`, `node:crypto`, `node:os`). No npm runtime packages allowed.

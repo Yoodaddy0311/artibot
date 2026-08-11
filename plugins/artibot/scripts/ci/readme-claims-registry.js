@@ -39,10 +39,18 @@ function countDirsWith(dir, marker) {
   }).length;
 }
 
+/**
+ * Count files in `dir` matching one or more extensions.
+ * @param {string} dir - Directory to scan (missing dir counts 0).
+ * @param {string|string[]} ext - Extension or list of extensions to accept.
+ * @param {string[]} [exclude] - Exact filenames to skip.
+ * @returns {number} matching file count
+ */
 function countFiles(dir, ext, exclude = []) {
   if (!existsSync(dir)) return 0;
+  const exts = Array.isArray(ext) ? ext : [ext];
   return readdirSync(dir).filter(
-    (f) => f.endsWith(ext) && !exclude.includes(f)
+    (f) => exts.some((e) => f.endsWith(e)) && !exclude.includes(f)
   ).length;
 }
 
@@ -64,7 +72,15 @@ export function collectActuals(opts = {}) {
     skills: countDirsWith(path.join(PLUGIN_ROOT, 'skills'), 'SKILL.md'),
     commands: countFiles(path.join(PLUGIN_ROOT, 'commands'), '.md'),
     agents: countFiles(path.join(PLUGIN_ROOT, 'agents'), '.md', ['INDEX.md', 'README.md']),
-    hookScripts: countFiles(path.join(PLUGIN_ROOT, 'scripts', 'hooks'), '.js'),
+    // Script-file counts are "executable ESM modules in this directory", i.e.
+    // .js + .mjs. `.mjs` is NOT a separate category: hooks/dispatch-table.json
+    // registers session-readback.mjs (SessionStart) and session-ledger.mjs
+    // (Stop, SessionEnd) as live hooks, and the counts already include
+    // non-registered helpers like _main-entry.js — so an extension split would
+    // be the only inconsistent boundary here. Non-script files (.sh, .md, the
+    // *-baseline.json fixtures) are excluded by having no matching extension.
+    hookScripts: countFiles(path.join(PLUGIN_ROOT, 'scripts', 'hooks'), ['.js', '.mjs']),
+    ciScripts: countFiles(path.join(PLUGIN_ROOT, 'scripts', 'ci'), ['.js', '.mjs']),
   };
 
   // hooks.json registration count (sum of array lengths across event types).
@@ -102,4 +118,8 @@ export const CLAIM_PATTERNS = [
   { key: 'agents', regex: /(\d{2,3})(\s+agent\s+definitions?)/gi, label: 'agent defs' },
   { key: 'hookRegistrations', regex: /(\d{2,3})(\s+hook\s+registrations?)/gi, label: 'hook regs' },
   { key: 'hookScripts', regex: /(\d{2,3})(\s+hook\s+scripts?)/gi, label: 'hook scripts' },
+  // `validation` is optional so that rewording the prose ("19 CI scripts" <->
+  // "19 CI validation scripts") cannot silently unbind the gate — the failure
+  // mode that left this claim uncovered while it drifted to 6-vs-19.
+  { key: 'ciScripts', regex: /(\d{1,3})(\s+CI\s+(?:validation\s+)?scripts?\b)/gi, label: 'CI scripts' },
 ];

@@ -72,6 +72,7 @@ describe('CLAIM_PATTERNS contract', () => {
         'agent defs': '42 agent definitions',
         'hook regs': '42 hook registrations',
         'hook scripts': '42 hook scripts',
+        'CI scripts': '42 CI scripts',
       }[label];
       expect(probe, `no probe defined for label "${label}"`).toBeTruthy();
 
@@ -93,5 +94,17 @@ describe('CLAIM_PATTERNS contract', () => {
     expect(reA.exec('70+ slash commands')).toBeNull();
     const reB = new RegExp(cmd.regex.source, cmd.regex.flags);
     expect(reB.exec('1 command')).toBeNull();
+  });
+
+  it('ciScripts deliberately DOES match single digits (unlike the others)', () => {
+    // Divergence on purpose, not an oversight to "normalize" to \d{2,3}: the
+    // drift this key exists to catch was the single-digit "6 CI validation
+    // scripts" sitting next to an actual 19. A 2-digit floor would have let
+    // exactly that value through, so the floor is 1 digit here.
+    const ci = CLAIM_PATTERNS.find((p) => p.label === 'CI scripts');
+    const re = new RegExp(ci.regex.source, ci.regex.flags);
+    const m = re.exec('6 CI validation scripts');
+    expect(m, 'the historical drifted value must be matchable').not.toBeNull();
+    expect(m[1]).toBe('6');
   });
 });

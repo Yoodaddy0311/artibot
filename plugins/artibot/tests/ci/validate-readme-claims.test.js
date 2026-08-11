@@ -13,7 +13,7 @@
  * @module tests/ci/validate-readme-claims
  */
 
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { SCAN_TARGETS } from '../../scripts/ci/validate-readme-claims.js';
@@ -52,4 +52,68 @@ describe('CLAUDE.md count claims are gate-covered and consistent', () => {
       }
     });
   }
+});
+
+// ---------------------------------------------------------------------------
+// Script-file counts: definition + coverage.
+//
+// Two defects motivated these. (1) `hookScripts` counted only `.js`, so the six
+// `.mjs` files were invisible — including session-readback.mjs and
+// session-ledger.mjs, which hooks/dispatch-table.json registers as live hooks.
+// (2) The root README's "N CI validation scripts" claim had no registry key at
+// all, so it drifted to 6-vs-19 with nothing able to notice.
+//
+// What these tests do NOT cover: they check that the count claim in README
+// prose equals collectActuals(), not that either number describes something a
+// reader would call a "hook script". The definition itself (executable ESM
+// modules in the directory) is a judgement encoded in the registry comment —
+// no test can validate it.
+// ---------------------------------------------------------------------------
+
+describe('script-file counts count .js and .mjs alike', () => {
+  const HOOKS_DIR = path.join(PLUGIN_ROOT, 'scripts', 'hooks');
+  const CI_DIR = path.join(PLUGIN_ROOT, 'scripts', 'ci');
+  const actuals = collectActuals();
+
+  const countExt = (dir, ext) => readdirSync(dir).filter((f) => f.endsWith(ext)).length;
+
+  it('hookScripts equals the .js + .mjs file count, not .js alone', () => {
+    const js = countExt(HOOKS_DIR, '.js');
+    const mjs = countExt(HOOKS_DIR, '.mjs');
+    // Non-vacuous: if the directory ever holds no .mjs, this assertion passes
+    // trivially and proves nothing — fail loudly instead so the gap is visible.
+    expect(mjs, 'scripts/hooks/ should contain .mjs files for this test to mean anything').toBeGreaterThan(0);
+    expect(actuals.hookScripts).toBe(js + mjs);
+    expect(actuals.hookScripts).not.toBe(js);
+  });
+
+  it('ciScripts equals the .js + .mjs file count and excludes non-scripts', () => {
+    const js = countExt(CI_DIR, '.js');
+    const mjs = countExt(CI_DIR, '.mjs');
+    const all = readdirSync(CI_DIR).length;
+    expect(mjs, 'scripts/ci/ should contain .mjs files for this test to mean anything').toBeGreaterThan(0);
+    expect(actuals.ciScripts).toBe(js + mjs);
+    // The *-baseline.json fixtures are data, not scripts — they must not count.
+    expect(actuals.ciScripts).toBeLessThan(all);
+  });
+
+  it('the registry exposes a ciScripts pattern and the root README carries the claim', () => {
+    const pattern = CLAIM_PATTERNS.find((p) => p.key === 'ciScripts');
+    expect(pattern, 'registry must have a ciScripts pattern or the claim is ungated').toBeDefined();
+    const readme = readFileSync(path.join(REPO_ROOT, 'README.md'), 'utf-8');
+    const matches = [...readme.matchAll(pattern.regex)];
+    expect(matches.length, 'README should carry a CI scripts count claim').toBeGreaterThan(0);
+    for (const m of matches) {
+      expect(Number(m[1]), `CI scripts claim "${m[0].trim()}" should match actual`).toBe(actuals.ciScripts);
+    }
+  });
+
+  it('the ciScripts pattern still binds if the prose drops the word "validation"', () => {
+    // Guards the exact failure that left this claim ungated: prose wording moved
+    // and no pattern followed it.
+    const { regex } = CLAIM_PATTERNS.find((p) => p.key === 'ciScripts');
+    for (const prose of ['19 CI scripts', '19 CI validation scripts']) {
+      expect(new RegExp(regex.source, regex.flags).test(prose), `pattern should match "${prose}"`).toBe(true);
+    }
+  });
 });
