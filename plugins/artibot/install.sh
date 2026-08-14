@@ -25,6 +25,17 @@ warn() { echo -e "${YELLOW}[artibot]${NC} $1"; }
 err()  { echo -e "${RED}[artibot]${NC} $1" >&2; }
 
 # ──────────────────────────────────────────────
+# Partial-install accounting
+# ──────────────────────────────────────────────
+# Every atomic_replace_dir failure used to be swallowed by `|| true`, and
+# verify_install only counts files — so an install that could not replace lib/
+# still printed "Installation complete!" and exited 0, with the counts reading
+# the STALE tree that was left in place. The user is then told a security fix
+# landed when it did not. Each call site adds to this instead; verify_install
+# turns a non-zero total into a PARTIAL INSTALL banner and a non-zero exit.
+INSTALL_FAILURES=0
+
+# ──────────────────────────────────────────────
 # Concurrency lock
 # ──────────────────────────────────────────────
 # install_marketplace_mirror / install_plugin_cache write into LIVE plugin
@@ -35,11 +46,16 @@ err()  { echo -e "${RED}[artibot]${NC} $1" >&2; }
 # A stale lock older than 10 minutes is reclaimed (crashed installer).
 #
 # This lock and atomic_replace_dir cover different readers and do not overlap:
-# the lock serializes installers against each other (and so also keeps their
-# per-destination `.artibot-new` staging paths from colliding), while
-# atomic_replace_dir protects LIVE SESSIONS reading a destination while one
-# installer rewrites it — which no amount of installer-side locking can fix.
+# the lock serializes installers against each other, while atomic_replace_dir
+# protects LIVE SESSIONS reading a destination while one installer rewrites it
+# — which no amount of installer-side locking can fix.
 # It is acquired before install_hooks, so every staging path is under it.
+#
+# The lock is no longer the only thing keeping two runs' staging paths apart:
+# those carry a PID suffix now, because this lock cannot cover every case. It
+# is reclaimed after 600s, install.ps1 went without one entirely until the
+# parity fix, and a shared staging name turned either gap into a truncated
+# tree swapped onto a live destination.
 INSTALL_LOCK_DIR="${CLAUDE_DIR}/.artibot-install.lock"
 acquire_install_lock() {
   if mkdir "${INSTALL_LOCK_DIR}" 2>/dev/null; then
@@ -192,18 +208,50 @@ safe_copy_dir() {
 # tree no longer carries. Briefly mixed-version and slower, but every module
 # path stays resolvable — the property this whole function exists to protect.
 #
-# Every failure path leaves the previous directory in place. A stale mirror is
-# recoverable by re-running the installer; a missing lib/ takes down every live
-# session. Same fail-safe direction as clearCache() in scripts/update.js.
+# Every HANDLED failure path leaves the previous directory in place. A stale
+# mirror is recoverable by re-running the installer; a missing lib/ takes down
+# every live session. Same fail-safe direction as clearCache() in
+# scripts/update.js.
+#
+# What that promise does NOT cover: a signal (Ctrl-C), a kill, or a power loss
+# landing between the two renames below leaves the destination absent until the
+# next install. No trap restores it. The window is the ~161ms between
+# `mv "${dst}" "${retired}"` and `mv "${staging}" "${dst}"`, which is 340x
+# smaller than the rm-rf-then-copy window this replaced, but it is not zero and
+# stating otherwise would be false comfort.
 atomic_replace_dir() {
   local src="$1"
   local dst="$2"
-  local staging="${dst}.artibot-new"
-  local retired="${dst}.artibot-old"
+  # PID-suffixed so two installers can never share a staging path. The mutex in
+  # acquire_install_lock is the primary defence, but it does not cover every
+  # case: a stale lock reclaimed at the 600s mark, or install.ps1, which used to
+  # take no lock at all. Without unique names one run's leftover-prune deletes
+  # the other run's half-written staging dir, and the victim then swaps the
+  # remains into a live destination — the emptiness check below only sees the
+  # top level, so a tree missing whole subtrees sails through it.
+  local staging="${dst}.artibot-new.$$"
+  local retired="${dst}.artibot-old.$$"
 
-  # Leftovers from a run that could not unlink them (see the cleanup step
-  # below). Inert — nothing loads a `.artibot-old` path — but prune on sight.
+  # Our own leftovers (same PID, earlier run) are unconditionally ours to drop.
+  # Foreign ones are pruned only when older than the same 10-minute threshold
+  # acquire_install_lock uses for a stale lock: deleting a live installer's
+  # staging dir is precisely the failure the PID suffix exists to prevent.
+  # A leftover that survives is inert — nothing loads an `.artibot-new.*` or
+  # `.artibot-old.*` path — so keeping one costs disk, not correctness.
   rm -rf "${staging}" "${retired}" 2>/dev/null || true
+  local _leftover _lmtime _lage _now
+  _now=$(date +%s)
+  for _leftover in "${dst}.artibot-new."* "${dst}.artibot-old."*; do
+    [ -e "${_leftover}" ] || continue
+    _lmtime=$(stat -c %Y "${_leftover}" 2>/dev/null || stat -f %m "${_leftover}" 2>/dev/null || echo '')
+    # Unreadable mtime: leave it alone. The lock treats the same condition as
+    # fail-open because a deadlock is worse than a race; here the direction
+    # inverts, because the thing at risk is another run's live staging dir.
+    [ -n "${_lmtime}" ] || continue
+    _lage=$(( _now - _lmtime ))
+    [ "${_lage}" -gt 600 ] || continue
+    rm -rf "${_leftover}" 2>/dev/null || true
+  done
 
   if ! safe_copy_dir "${src}" "${staging}"; then
     rm -rf "${staging}" 2>/dev/null || true
@@ -218,12 +266,33 @@ atomic_replace_dir() {
     return 1
   fi
 
+  # ...and neither must a copy that produced only PART of one. `ls -A` reads
+  # one level, so a staging dir that lost entire subtrees passes the check
+  # above while being unloadable. Compare recursive file counts instead,
+  # excluding the same node_modules/.git that safe_copy_dir skips so the two
+  # sides are measured the same way.
+  local src_files staging_files
+  src_files=$(find "${src}" -mindepth 1 \( -name node_modules -o -name .git \) -prune -o -type f -print 2>/dev/null | wc -l | tr -d ' ') || true
+  staging_files=$(find "${staging}" -mindepth 1 -type f -print 2>/dev/null | wc -l | tr -d ' ') || true
+  [ -n "${src_files}" ] || src_files=0
+  [ -n "${staging_files}" ] || staging_files=0
+  if [ "${src_files}" -gt 0 ] && [ "${staging_files}" -lt "${src_files}" ]; then
+    rm -rf "${staging}" 2>/dev/null || true
+    warn "Staging copy for ${dst} is incomplete (${staging_files}/${src_files} files) — previous copy left in place"
+    return 1
+  fi
+
   # Nothing to displace: one rename, no window at all.
   if [ ! -d "${dst}" ]; then
     mv "${staging}" "${dst}" 2>/dev/null && return 0
     mkdir -p "${dst}"
-    cp -r "${staging}/." "${dst}/" 2>/dev/null || true
+    local fresh_failed=0
+    cp -r "${staging}/." "${dst}/" 2>/dev/null || fresh_failed=1
     rm -rf "${staging}" 2>/dev/null || true
+    if [ "${fresh_failed}" -ne 0 ]; then
+      warn "Could not fully populate ${dst} after the rename was refused"
+      return 1
+    fi
     return 0
   fi
 
@@ -253,7 +322,9 @@ atomic_replace_dir() {
   # refusals, so this updates everything it can — but a partial result must be
   # said out loud, not returned as success (parity with Copy-TreeContents in
   # install.ps1, which reports the same condition as a count).
+  local inplace_failed=0
   if ! cp -r "${staging}/." "${dst}/" 2>/dev/null; then
+    inplace_failed=1
     warn "Some files under ${dst} are held by another process and stay at the previous version"
     warn "Re-run the installer once that process exits; the previous files are intact."
   fi
@@ -264,6 +335,12 @@ atomic_replace_dir() {
     [ -e "${staging}/${rel}" ] || rm -rf "${dst}/${rel}" 2>/dev/null || true
   done <<< "${stale}"
   rm -rf "${staging}" 2>/dev/null || true
+  # A partial overwrite is a partial install, and the comment above says so out
+  # loud — but saying it in a warn() while returning 0 let main() print
+  # "Installation complete!" over a mixed-version tree. The caller counts this.
+  if [ "${inplace_failed}" -ne 0 ]; then
+    return 1
+  fi
   return 0
 }
 
@@ -350,11 +427,14 @@ install_hooks() {
   # Replaced one dir at a time via atomic_replace_dir: still clean (stale files
   # from previous versions are dropped) but without the interval where the dir
   # is missing. statusline and the two mirrors below all read out of here.
-  atomic_replace_dir "${SCRIPT_DIR}/hooks" "${ARTIBOT_DIR}/hooks" || true
-  atomic_replace_dir "${SCRIPT_DIR}/scripts" "${ARTIBOT_DIR}/scripts" || true
-  atomic_replace_dir "${SCRIPT_DIR}/lib" "${ARTIBOT_DIR}/lib" || true
+  # `${INSTALL_FAILURES:-0}` rather than a bare reference: this function is
+  # extracted and run on its own by tests/scripts/install-partial-failure.test.js,
+  # and install.sh runs under `set -u` where an unset name is fatal.
+  atomic_replace_dir "${SCRIPT_DIR}/hooks" "${ARTIBOT_DIR}/hooks" || INSTALL_FAILURES=$(( ${INSTALL_FAILURES:-0} + 1 ))
+  atomic_replace_dir "${SCRIPT_DIR}/scripts" "${ARTIBOT_DIR}/scripts" || INSTALL_FAILURES=$(( ${INSTALL_FAILURES:-0} + 1 ))
+  atomic_replace_dir "${SCRIPT_DIR}/lib" "${ARTIBOT_DIR}/lib" || INSTALL_FAILURES=$(( ${INSTALL_FAILURES:-0} + 1 ))
   if [ -d "${SCRIPT_DIR}/output-styles" ]; then
-    atomic_replace_dir "${SCRIPT_DIR}/output-styles" "${ARTIBOT_DIR}/output-styles" || true
+    atomic_replace_dir "${SCRIPT_DIR}/output-styles" "${ARTIBOT_DIR}/output-styles" || INSTALL_FAILURES=$(( ${INSTALL_FAILURES:-0} + 1 ))
   fi
 
   # Copy .claude-plugin metadata (plugin.json, swarm-profile.json, etc.)
@@ -413,7 +493,7 @@ install_marketplace_mirror() {
   # Same clean-replace contract as install_hooks for parity.
   for dir in scripts hooks lib skills output-styles .claude-plugin; do
     if [ -d "${ARTIBOT_DIR}/${dir}" ]; then
-      atomic_replace_dir "${ARTIBOT_DIR}/${dir}" "${mkt_root}/${dir}" || true
+      atomic_replace_dir "${ARTIBOT_DIR}/${dir}" "${mkt_root}/${dir}" || INSTALL_FAILURES=$(( ${INSTALL_FAILURES:-0} + 1 ))
     fi
   done
 
@@ -422,7 +502,7 @@ install_marketplace_mirror() {
   # from the source repo, not from ${ARTIBOT_DIR}.
   for dir in commands agents; do
     if [ -d "${SCRIPT_DIR}/${dir}" ]; then
-      atomic_replace_dir "${SCRIPT_DIR}/${dir}" "${mkt_root}/${dir}" || true
+      atomic_replace_dir "${SCRIPT_DIR}/${dir}" "${mkt_root}/${dir}" || INSTALL_FAILURES=$(( ${INSTALL_FAILURES:-0} + 1 ))
     fi
   done
 
@@ -474,7 +554,7 @@ install_plugin_cache() {
     # exists at that instant.
     for dir in scripts hooks lib output-styles; do
       if [ -d "${ARTIBOT_DIR}/${dir}" ]; then
-        atomic_replace_dir "${ARTIBOT_DIR}/${dir}" "${v_root}/${dir}" || true
+        atomic_replace_dir "${ARTIBOT_DIR}/${dir}" "${v_root}/${dir}" || INSTALL_FAILURES=$(( ${INSTALL_FAILURES:-0} + 1 ))
       fi
     done
 
@@ -1162,6 +1242,19 @@ verify_install() {
   [ -f "./CLAUDE.md" ] && echo -e "  Project:  ${GREEN}CLAUDE.md${NC} seeded with Artibot methodology"
   [ -f "./CLAUDE.local.md" ] && echo -e "  Local:    ${GREEN}CLAUDE.local.md${NC} ready for personalization"
   echo ""
+
+  # The counts above are read off whatever is on disk, so a directory that
+  # could not be replaced still counts — as its PREVIOUS version. Only the
+  # failure tally can tell the two apart, which is why the completion line is
+  # gated on it rather than printed unconditionally.
+  if [ "${INSTALL_FAILURES:-0}" -gt 0 ]; then
+    err "PARTIAL INSTALL — ${INSTALL_FAILURES} directory replacement(s) failed."
+    err "The previous copies were left in place, so the counts above may describe"
+    err "the OLD version. Re-run the installer once the files named in the"
+    err "warnings above are no longer held by another process."
+    return 1
+  fi
+
   log "Installation complete! Start Claude Code and type: /sc hello"
   log ""
   log "Memory extensions installed:"
@@ -1247,7 +1340,9 @@ main() {
       setup_swarm_consent
       setup_auto_learning
       save_source_path
-      verify_install
+      # Explicit rather than leaning on `set -e`: a partial install must reach
+      # the shell (and any `npm run sync:local` wrapping it) as a non-zero exit.
+      verify_install || exit 1
       ;;
     uninstall)
       uninstall

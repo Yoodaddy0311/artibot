@@ -46,15 +46,32 @@ export { extractToolName };
 
 /**
  * Read the entire stdin payload and JSON-parse it. Returns {} on empty/invalid.
+ *
+ * Chunks are collected and decoded ONCE at the end, never accumulated with
+ * `buf += chunk`. A Buffer chunk stringifies itself in isolation, so a UTF-8
+ * character straddling the 64KB stdin chunk boundary loses its tail and comes
+ * back as U+FFFD. Measured on a real pipe 2026-08-14: a 64,571-byte payload
+ * round-tripped intact, a 66,071-byte one came back with 3 replacement chars.
+ * That matters more here than in a single hook — spawnHook re-serializes this
+ * payload to every child, so one bad decode reaches every hook in the slot
+ * even though each of them reads its own stdin correctly.
+ * `lib/core/io.js#readStdin` closes the same gap from the other side, with
+ * `setEncoding`; this module cannot import it (leaf module — see header).
+ *
  * @returns {Promise<object>}
  */
 export async function readPayload() {
-  let buf = '';
+  const chunks = [];
   try {
-    for await (const chunk of process.stdin) buf += chunk;
+    for await (const chunk of process.stdin) chunks.push(chunk);
   } catch {
     return {};
   }
+  // String chunks are tolerated: an upstream setEncoding would already have
+  // decoded them correctly, but Buffer.concat throws on a string array.
+  const buf = Buffer.concat(
+    chunks.map((c) => (typeof c === 'string' ? Buffer.from(c, 'utf-8') : c)),
+  ).toString('utf-8');
   if (!buf) return {};
   try {
     return JSON.parse(buf);

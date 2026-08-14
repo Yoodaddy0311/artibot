@@ -15,6 +15,7 @@
  * @module scripts/hooks/_main-entry
  */
 
+import { realpathSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -43,14 +44,56 @@ import { fileURLToPath } from 'node:url';
  * them at once. `scripts\utils\index.js` documents the same trap from the
  * opposite direction (path -> URL).
  *
+ * Second spelling gap, same failure mode, found 2026-08-14: Node resolves the
+ * MAIN module to its realpath before handing it to `import.meta.url`, while
+ * `process.argv[1]` stays exactly as the command spelled it. Reach a hook
+ * through a symlink or a Windows junction and the two disagree, so the guard
+ * returns false and the hook exits 0 having done nothing — the same silent
+ * shape as the encoding bug above, from the opposite cause. Measured with a
+ * junction (link -> me) over one probe file:
+ *
+ *   node <dir>\me\probe.js     fired=true
+ *   node <dir>\link\probe.js   fired=FALSE  (argv[1] keeps `link`,
+ *                                             import.meta.url says `me`)
+ *
+ * So the string compare is a fast path and a miss falls through to a realpath
+ * compare of both sides. Identity remains the contract: a DIFFERENT file has a
+ * different realpath and still returns false. That direction is the one to
+ * protect — a false negative loses a hook, but a false positive would fire
+ * main() on a plain import, which is what this guard exists to prevent.
+ *
  * @param {string} importMetaUrl `import.meta.url` of the caller
  * @returns {boolean}
  */
 export function isMainEntry(importMetaUrl) {
   try {
-    const argv1 = process.argv[1] ? path.resolve(process.argv[1]) : '';
-    return argv1 === path.resolve(fileURLToPath(importMetaUrl));
+    if (!process.argv[1]) return false;
+    const self = path.resolve(fileURLToPath(importMetaUrl));
+    const argv1 = path.resolve(process.argv[1]);
+    if (argv1 === self) return true; // no fs call on the common path
+    return realpath(argv1) === realpath(self);
   } catch {
     return false;
+  }
+}
+
+/**
+ * Canonical spelling of a path, or the path as given when it cannot be resolved
+ * (does not exist yet, permission denied). `realpathSync.native` also collapses
+ * Windows 8.3 short names; it is not guaranteed on every platform, hence the
+ * fallback to the JS implementation.
+ *
+ * `node:fs` does not reintroduce the graph cost the module header guards
+ * against: the loader has already instantiated it in every Node process, unlike
+ * `node:child_process` and `lib/core/hook-utils.js`.
+ *
+ * @param {string} p
+ * @returns {string}
+ */
+function realpath(p) {
+  try {
+    return (realpathSync.native || realpathSync)(p);
+  } catch {
+    return p;
   }
 }

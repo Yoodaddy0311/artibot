@@ -41,7 +41,13 @@ import { handleUserPromptSubmit as autopilotNlu } from './autopilot-nlu-trigger.
 import { handleUserPromptSubmit as autoCommandSuggest } from './auto-command-suggest.js';
 import { handleUserPromptSubmit as ambiguityGuard } from './ambiguity-guard.js';
 import { isMainEntry } from './_main-entry.js';
-import { createFatalHandler } from './_dispatcher-utils.js';
+// readPayload is the shared one rather than a local copy: this file already
+// imports createFatalHandler from that module, so reusing it adds nothing to
+// the module graph — and the duplicate is exactly what let one stdin decode
+// bug (UTF-8 corruption at the 64KB chunk boundary) exist in two places at
+// once. The shared reader also wraps the `for await` in try/catch, which this
+// copy did not; behavior on a stdin error stays fail-open ({} then exit 0).
+import { createFatalHandler, readPayload } from './_dispatcher-utils.js';
 
 const HOOK_NAME = '_userprompt-dispatcher';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -50,21 +56,6 @@ const GIT_AUTOPILOT_SAVE = path.join(HERE, 'git-autopilot-save.js');
 // git invocations (stash + commit). Failure here is observable via stderr
 // only — the user's prompt still proceeds.
 const GIT_AUTOPILOT_TIMEOUT_MS = 8000;
-
-/**
- * Read the entire stdin payload and JSON-parse it. Returns {} on empty/invalid.
- * @returns {Promise<object>}
- */
-async function readPayload() {
-  let buf = '';
-  for await (const chunk of process.stdin) buf += chunk;
-  if (!buf) return {};
-  try {
-    return JSON.parse(buf);
-  } catch {
-    return {};
-  }
-}
 
 /**
  * Run a hook's named export with try/catch. Logs the failure to stderr but

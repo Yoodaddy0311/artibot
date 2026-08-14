@@ -78,6 +78,87 @@ $MIN_NODE_MAJOR = 20
 $SafeAllow = @('Read', 'Glob', 'Grep')
 
 # ---------------------------------------------------------------------------
+# Concurrency lock — parity with install.sh acquire_install_lock (L44-72)
+# ---------------------------------------------------------------------------
+# install.sh has had this mutex since v4.31.1; install.ps1 shipped without one,
+# so the two installers had NO mutual exclusion at all. That gap is reachable:
+# on Windows update.js drives the update through Git Bash + install.sh while
+# nothing stops a user from launching install.ps1 beside it.
+#
+# What goes wrong without it is the 2026-07-09 incident — two runs interleaving
+# writes into the LIVE plugin cache, leaving lib/core with 14 files and every
+# hook spawn failing with ERR_MODULE_NOT_FOUND in every open session.
+#
+# THE LOCK PATH MUST MATCH install.sh CHARACTER FOR CHARACTER. A different path
+# is not a weaker lock, it is no lock: each script would take its own and both
+# would proceed. install.sh:47 builds it as "${CLAUDE_DIR}/.artibot-install.lock"
+# with CLAUDE_DIR="${HOME:-${USERPROFILE:-...}}/.claude" — the same directory
+# $ClaudeDir resolves to here whenever Git Bash's HOME points at the Windows
+# profile, which is its default.
+$InstallLockDir = Join-Path $ClaudeDir '.artibot-install.lock'
+# Stale threshold in seconds. Lockstep with install.sh (`-gt 600`).
+$InstallLockStaleSecs = 600
+$script:InstallLockHeld = $false
+
+# Count of directory replacements that could not complete. Declared here because
+# Set-StrictMode -Version Latest (L60) makes reading an uninitialised variable a
+# terminating error.
+$script:InstallFailures = 0
+
+# Matches install.sh exactly: try once, reclaim only a lock older than the stale
+# threshold, otherwise ERROR OUT. install.sh does not wait or retry
+# (install.sh:62-63 errs and exits 1; tests/scripts/install-lock.test.js:145-152
+# pins that behaviour), so neither does this — a second installer that silently
+# waited would still be a second installer, just later.
+function Request-InstallLock {
+  if ($DryRun) {
+    Write-Log "[dry-run] would acquire install lock ($InstallLockDir)"
+    return
+  }
+
+  # New-Item WITHOUT -Force is the mutex: it fails when the directory already
+  # exists. -Force would succeed on an existing directory and silently defeat
+  # the whole mechanism, which is why it must never be added here.
+  try {
+    New-Item -ItemType Directory -Path $InstallLockDir -ErrorAction Stop | Out-Null
+    $script:InstallLockHeld = $true
+    return
+  } catch { }
+
+  # Unreadable mtime is treated as infinitely old, matching install.sh:52's
+  # `|| echo 0` — for a LOCK, fail-open beats deadlocking every future install.
+  $ageSecs = $InstallLockStaleSecs + 1
+  try {
+    $lockItem = Get-Item -LiteralPath $InstallLockDir -Force -ErrorAction Stop
+    $ageSecs = [int]((Get-Date) - $lockItem.LastWriteTime).TotalSeconds
+  } catch { }
+
+  if ($ageSecs -gt $InstallLockStaleSecs) {
+    Write-Warn2 "Reclaiming stale install lock (age ${ageSecs}s)"
+    try { Remove-Item -LiteralPath $InstallLockDir -Recurse -Force -ErrorAction Stop } catch { }
+    try {
+      New-Item -ItemType Directory -Path $InstallLockDir -ErrorAction Stop | Out-Null
+      $script:InstallLockHeld = $true
+      return
+    } catch { }
+  }
+
+  Write-Err2 "Another install is already running (lock: $InstallLockDir). Retry after it finishes."
+  exit 1
+}
+
+# Released from a finally block so an exception or Ctrl-C does not strand the
+# lock for the next 10 minutes. This is the counterpart to install.sh's
+# `trap ... EXIT`. Caveat worth knowing rather than pretending away: PowerShell
+# runs finally on Ctrl-C and on ordinary terminating errors, but a hard kill of
+# the host process skips it — that is what the stale-reclaim path above covers.
+function Remove-InstallLock {
+  if (-not $script:InstallLockHeld) { return }
+  try { Remove-Item -LiteralPath $InstallLockDir -Recurse -Force -ErrorAction Stop } catch { }
+  $script:InstallLockHeld = $false
+}
+
+# ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
 function Write-Log   { param($msg) if ($script:UseColor) { Write-Host "[artibot] $msg" -ForegroundColor Green } else { Write-Host "[artibot] $msg" } }
@@ -219,7 +300,7 @@ function Copy-MdFiles {
 # statusline reads out of ~/.claude/artibot, and both mirrors copy FROM it.
 function Copy-Tree {
   param([string]$SrcDir, [string]$DstDir)
-  if (-not (Test-Path $SrcDir)) { return }
+  if (-not (Test-Path $SrcDir)) { return $true }
   $target = Join-Path $DstDir (Split-Path -Leaf $SrcDir)
   Copy-DirAtomic -SrcDir $SrcDir -DstDir $target
 }
@@ -230,8 +311,11 @@ function Install-Assets {
   Copy-MdFiles -SrcDir (Join-Path $ScriptDir 'commands') -DstDir (Join-Path $ClaudeDir 'commands') -Label 'Commands'
 
   # Runtime trees: into ~/.claude/artibot (clean-before-copy for parity)
+  # `$null =` because Copy-Tree now returns a bool and an uncaptured return
+  # value would print "True" into the install log. Failures are tallied in
+  # $script:InstallFailures, so nothing here needs the value.
   foreach ($dir in @('skills', 'hooks', 'scripts', 'lib', 'output-styles')) {
-    Copy-Tree -SrcDir (Join-Path $ScriptDir $dir) -DstDir $ArtibotDir
+    $null = Copy-Tree -SrcDir (Join-Path $ScriptDir $dir) -DstDir $ArtibotDir
   }
 
   # .claude-plugin metadata (swarm-profile.json, plugin.json, ...)
@@ -410,20 +494,42 @@ function Copy-TreeContents {
   return $failed
 }
 
+# Returns $true when $DstDir ends up holding the new tree, $false when the
+# previous copy was kept or only partly overwritten. Every $false also bumps
+# $script:InstallFailures, so a caller that ignores the return value still
+# cannot report a clean install (see Show-Summary).
 function Copy-DirAtomic {
   param([string]$SrcDir, [string]$DstDir)
-  if (-not (Test-Path $SrcDir)) { return }
-  if ($DryRun) { Write-Log "[dry-run] would mirror $SrcDir -> $DstDir"; return }
+  if (-not (Test-Path $SrcDir)) { return $true }
+  if ($DryRun) { Write-Log "[dry-run] would mirror $SrcDir -> $DstDir"; return $true }
 
   $dst = [System.IO.Path]::GetFullPath($DstDir)
-  $staging = "$dst.artibot-new"
-  $retired = "$dst.artibot-old"
+  # PID-suffixed: see the rationale on install.sh#atomic_replace_dir. A shared
+  # fixed staging name means run B's leftover-prune deletes run A's half-written
+  # staging dir, after which A swaps the remains onto a live destination.
+  $staging = "$dst.artibot-new.$PID"
+  $retired = "$dst.artibot-old.$PID"
 
-  # Leftovers from a run that could not unlink them. Inert - nothing loads an
-  # `.artibot-old` path - but prune on sight.
+  # Our own leftovers are ours to drop. Foreign ones are pruned only past the
+  # same staleness threshold the install lock uses, because the alternative is
+  # deleting a concurrent run's staging dir mid-copy.
   foreach ($leftover in @($staging, $retired)) {
-    if (Test-Path $leftover) {
-      try { Remove-Item -Path $leftover -Recurse -Force -ErrorAction Stop } catch { }
+    if (Test-Path -LiteralPath $leftover) {
+      try { Remove-Item -LiteralPath $leftover -Recurse -Force -ErrorAction Stop } catch { }
+    }
+  }
+  $dstParent = Split-Path $dst -Parent
+  $dstLeaf = Split-Path $dst -Leaf
+  if ($dstParent) {
+    foreach ($sibling in @(Get-ChildItem -LiteralPath $dstParent -Force -Directory -ErrorAction SilentlyContinue)) {
+      # StartsWith, not -like: a destination leaf containing [ or ] would make
+      # -like treat it as a wildcard pattern and match the wrong directories.
+      if (-not ($sibling.Name.StartsWith("$dstLeaf.artibot-new.") -or $sibling.Name.StartsWith("$dstLeaf.artibot-old."))) { continue }
+      # 600 inline rather than $InstallLockStaleSecs: this function is extracted
+      # and run on its own by tests/scripts/install-atomic-replace.test.js, so it
+      # must not depend on script-scope state. Lockstep with that variable.
+      if (((Get-Date) - $sibling.LastWriteTime).TotalSeconds -le 600) { continue }
+      try { Remove-Item -LiteralPath $sibling.FullName -Recurse -Force -ErrorAction Stop } catch { }
     }
   }
 
@@ -431,7 +537,8 @@ function Copy-DirAtomic {
     New-Item -ItemType Directory -Path $staging -Force -ErrorAction Stop | Out-Null
   } catch {
     Write-Warn2 "Could not create staging dir for $dst - previous copy left in place ($($_.Exception.Message))"
-    return
+    $script:InstallFailures++
+    return $false
   }
   try {
     # Children only, skipping node_modules/.git at the top for parity with
@@ -442,30 +549,57 @@ function Copy-DirAtomic {
       Copy-Item -Path $_.FullName -Destination $staging -Recurse -Force -ErrorAction Stop
     }
   } catch {
-    try { Remove-Item -Path $staging -Recurse -Force -ErrorAction Stop } catch { }
+    try { Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction Stop } catch { }
     Write-Warn2 "Staging copy failed for $dst - previous copy left in place ($($_.Exception.Message))"
-    return
+    $script:InstallFailures++
+    return $false
   }
 
   # A copy that silently produced nothing must never replace a good tree.
-  $srcHasContent = @(Get-ChildItem -Path $SrcDir -Force -ErrorAction SilentlyContinue).Count -gt 0
-  $stagingEmpty = @(Get-ChildItem -Path $staging -Force -ErrorAction SilentlyContinue).Count -eq 0
+  $srcHasContent = @(Get-ChildItem -LiteralPath $SrcDir -Force -ErrorAction SilentlyContinue).Count -gt 0
+  $stagingEmpty = @(Get-ChildItem -LiteralPath $staging -Force -ErrorAction SilentlyContinue).Count -eq 0
   if ($srcHasContent -and $stagingEmpty) {
-    try { Remove-Item -Path $staging -Recurse -Force -ErrorAction Stop } catch { }
+    try { Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction Stop } catch { }
     Write-Warn2 "Staging copy for $dst came out empty - previous copy left in place"
-    return
+    $script:InstallFailures++
+    return $false
+  }
+
+  # ...and neither must a copy that produced only PART of one. The check above
+  # reads one level, so a staging dir that lost whole subtrees passes it while
+  # being unloadable. Count files on both sides, applying the same top-level
+  # node_modules/.git exclusion the staging copy above uses.
+  $srcFileCount = 0
+  foreach ($child in @(Get-ChildItem -LiteralPath $SrcDir -Force -ErrorAction SilentlyContinue)) {
+    if ($child.Name -eq 'node_modules' -or $child.Name -eq '.git') { continue }
+    if ($child.PSIsContainer) {
+      $srcFileCount += @(Get-ChildItem -LiteralPath $child.FullName -Recurse -Force -File -ErrorAction SilentlyContinue).Count
+    } else {
+      $srcFileCount++
+    }
+  }
+  $stagingFileCount = @(Get-ChildItem -LiteralPath $staging -Recurse -Force -File -ErrorAction SilentlyContinue).Count
+  if ($srcFileCount -gt 0 -and $stagingFileCount -lt $srcFileCount) {
+    try { Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction Stop } catch { }
+    Write-Warn2 "Staging copy for $dst is incomplete ($stagingFileCount/$srcFileCount files) - previous copy left in place"
+    $script:InstallFailures++
+    return $false
   }
 
   # Nothing to displace: one move, no window at all.
   if (-not (Test-Path $dst)) {
-    try { [System.IO.Directory]::Move($staging, $dst); return } catch { }
+    try { [System.IO.Directory]::Move($staging, $dst); return $true } catch { }
     try { New-Item -ItemType Directory -Path $dst -Force -ErrorAction Stop | Out-Null } catch { }
     $failed = Copy-TreeContents -Source $staging -Destination $dst
     if ($failed -gt 0) {
       Write-Warn2 "$dst - $failed item(s) could not be written after the move was refused"
     }
-    try { Remove-Item -Path $staging -Recurse -Force -ErrorAction Stop } catch { }
-    return
+    try { Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction Stop } catch { }
+    if ($failed -gt 0) {
+      $script:InstallFailures++
+      return $false
+    }
+    return $true
   }
 
   $movedAside = $false
@@ -476,8 +610,8 @@ function Copy-DirAtomic {
       [System.IO.Directory]::Move($staging, $dst)
       # Best-effort: an `.artibot-old` that will not unlink is harmless and the
       # next run prunes it. Failing the install over it would be worse.
-      try { Remove-Item -Path $retired -Recurse -Force -ErrorAction Stop } catch { }
-      return
+      try { Remove-Item -LiteralPath $retired -Recurse -Force -ErrorAction Stop } catch { }
+      return $true
     } catch { }
     # The destination is already moved aside - the one path that can leave a
     # mirror with no directory at all. Put it back before anything else.
@@ -491,10 +625,14 @@ function Copy-DirAtomic {
       if ($failed -gt 0) {
         Write-Warn2 "$dst - $failed item(s) of the previous copy could not be restored"
       }
-      try { Remove-Item -Path $retired -Recurse -Force -ErrorAction Stop } catch { }
+      try { Remove-Item -LiteralPath $retired -Recurse -Force -ErrorAction Stop } catch { }
     }
-    try { Remove-Item -Path $staging -Recurse -Force -ErrorAction Stop } catch { }
-    return
+    try { Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction Stop } catch { }
+    # Either branch above means the NEW tree never landed - the destination is
+    # back on the previous version. That is the safe outcome, not a successful
+    # install, and the summary has to say so.
+    $script:InstallFailures++
+    return $false
   }
 
   # Destination locked by an open handle. Overwrite in place: no path is ever
@@ -506,13 +644,19 @@ function Copy-DirAtomic {
     Write-Warn2 "$dst - $failed item(s) are held by another process and stay at the previous version"
     Write-Warn2 "Re-run the installer once that process exits; the previous files are intact."
   }
-  Get-ChildItem -Path $dst -Recurse -Force -ErrorAction SilentlyContinue | ForEach-Object {
+  Get-ChildItem -LiteralPath $dst -Recurse -Force -ErrorAction SilentlyContinue | ForEach-Object {
     $rel = $_.FullName.Substring($dst.Length).TrimStart('\')
-    if ($rel -and -not (Test-Path (Join-Path $staging $rel))) {
-      try { Remove-Item -Path $_.FullName -Recurse -Force -ErrorAction Stop } catch { }
+    if ($rel -and -not (Test-Path -LiteralPath (Join-Path $staging $rel))) {
+      try { Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction Stop } catch { }
     }
   }
-  try { Remove-Item -Path $staging -Recurse -Force -ErrorAction Stop } catch { }
+  try { Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction Stop } catch { }
+  # A mixed-version tree is not a completed replacement.
+  if ($failed -gt 0) {
+    $script:InstallFailures++
+    return $false
+  }
+  return $true
 }
 
 # Name kept for the marketplace + plugin-cache mirror call sites.
@@ -546,7 +690,7 @@ function Update-MarketplaceMirror {
   # Hot runtime paths come from the direct install we just wrote.
   foreach ($dir in @('scripts', 'hooks', 'lib', 'skills', 'output-styles', '.claude-plugin')) {
     $src = Join-Path $ArtibotDir $dir
-    if (Test-Path $src) { Copy-DirClean -SrcDir $src -DstDir (Join-Path $mktRoot $dir) }
+    if (Test-Path $src) { $null = Copy-DirClean -SrcDir $src -DstDir (Join-Path $mktRoot $dir) }
   }
 
   # Commands + agents live only in the source repo (the direct install omits
@@ -554,7 +698,7 @@ function Update-MarketplaceMirror {
   # the source repo, not ArtibotDir.
   foreach ($dir in @('commands', 'agents')) {
     $src = Join-Path $ScriptDir $dir
-    if (Test-Path $src) { Copy-DirClean -SrcDir $src -DstDir (Join-Path $mktRoot $dir) }
+    if (Test-Path $src) { $null = Copy-DirClean -SrcDir $src -DstDir (Join-Path $mktRoot $dir) }
   }
 
   if (-not $DryRun) {
@@ -585,7 +729,7 @@ function Update-PluginCache {
     $vRoot = $_.FullName
     foreach ($dir in @('scripts', 'hooks', 'lib', 'output-styles')) {
       $src = Join-Path $ArtibotDir $dir
-      if (Test-Path $src) { Copy-DirClean -SrcDir $src -DstDir (Join-Path $vRoot $dir) }
+      if (Test-Path $src) { $null = Copy-DirClean -SrcDir $src -DstDir (Join-Path $vRoot $dir) }
     }
     if (-not $DryRun) {
       $cfg = Join-Path $ScriptDir 'artibot.config.json'
@@ -916,6 +1060,18 @@ function Show-Summary {
   if (Test-Path (Join-Path $cwd 'CLAUDE.md'))       { Write-Host '  Project:  CLAUDE.md seeded with Artibot methodology' }
   if (Test-Path (Join-Path $cwd 'CLAUDE.local.md')) { Write-Host '  Local:    CLAUDE.local.md ready for personalization' }
   Write-Host ''
+
+  # The counts above are read off whatever is on disk, so a directory that could
+  # not be replaced still counts - as its PREVIOUS version. Only the failure
+  # tally separates the two, which is why the completion line is gated on it.
+  if ($script:InstallFailures -gt 0) {
+    Write-Err2 "PARTIAL INSTALL - $($script:InstallFailures) directory replacement(s) failed."
+    Write-Err2 'The previous copies were left in place, so the counts above may describe'
+    Write-Err2 'the OLD version. Re-run the installer once the files named in the'
+    Write-Err2 'warnings above are no longer held by another process.'
+    return
+  }
+
   Write-Log 'Installation complete! Start Claude Code and type: /sc hello'
 }
 
@@ -970,48 +1126,64 @@ Write-Host ''
 
 switch ($Action) {
   'install' {
-    Test-Prerequisites
-    Initialize-Directories
-    # Self-install guard (parity with install.sh main L996): when run from the
-    # installed copy, skip the copy/mirror phase (no-op) but still run config +
-    # seed steps below.
-    if (Test-SelfInstall) {
-      Write-Warn2 "Running from the installed location ($ArtibotDir) - files already in place."
-      Write-Warn2 'Skipping copy phase (no-op); continuing with config & seed steps.'
-      # INV-6 marker (parity with install.sh): record that THIS install skipped
-      # the file-copy phase so update.js can detect a self-install no-op when a
-      # real update was due and refuse to falsely report success. Best-effort.
-      $noopMarker = Join-Path $ArtibotDir '.last-install-noop'
-      if ($DryRun) {
-        Write-Log "[dry-run] would write no-op marker -> $noopMarker"
+    try {
+      Test-Prerequisites
+      Initialize-Directories
+      # Self-install guard (parity with install.sh main L996): when run from the
+      # installed copy, skip the copy/mirror phase (no-op) but still run config +
+      # seed steps below.
+      if (Test-SelfInstall) {
+        Write-Warn2 "Running from the installed location ($ArtibotDir) - files already in place."
+        Write-Warn2 'Skipping copy phase (no-op); continuing with config & seed steps.'
+        # INV-6 marker (parity with install.sh): record that THIS install skipped
+        # the file-copy phase so update.js can detect a self-install no-op when a
+        # real update was due and refuse to falsely report success. Best-effort.
+        $noopMarker = Join-Path $ArtibotDir '.last-install-noop'
+        if ($DryRun) {
+          Write-Log "[dry-run] would write no-op marker -> $noopMarker"
+        } else {
+          try { New-Item -ItemType File -Path $noopMarker -Force | Out-Null } catch { }
+        }
       } else {
-        try { New-Item -ItemType File -Path $noopMarker -Force | Out-Null } catch { }
+        # Acquired here, not at the top: the self-install branch writes nothing
+        # into the live trees, and install.sh takes the lock in exactly the same
+        # place (install.sh:1229, inside the non-self-install branch).
+        Request-InstallLock
+        Install-Assets
+        Update-MarketplaceMirror
+        Update-PluginCache
+        # INV-6 marker cleanup (parity with install.sh): a real copy happened, so
+        # clear any stale no-op marker from a previous self-install run; otherwise
+        # the next post-install check false-fails on an outdated marker.
+        $noopMarker = Join-Path $ArtibotDir '.last-install-noop'
+        if ($DryRun) {
+          Write-Log "[dry-run] would remove stale no-op marker -> $noopMarker"
+        } elseif (Test-Path $noopMarker) {
+          try { Remove-Item -Path $noopMarker -Force } catch { }
+        }
       }
-    } else {
-      Install-Assets
-      Update-MarketplaceMirror
-      Update-PluginCache
-      # INV-6 marker cleanup (parity with install.sh): a real copy happened, so
-      # clear any stale no-op marker from a previous self-install run; otherwise
-      # the next post-install check false-fails on an outdated marker.
-      $noopMarker = Join-Path $ArtibotDir '.last-install-noop'
-      if ($DryRun) {
-        Write-Log "[dry-run] would remove stale no-op marker -> $noopMarker"
-      } elseif (Test-Path $noopMarker) {
-        try { Remove-Item -Path $noopMarker -Force } catch { }
-      }
+      Install-Mcp
+      Set-Settings
+      Initialize-ProjectClaudeMd
+      Initialize-LocalConfig
+      Initialize-AutoMemory
+      Set-SwarmConsent
+      Set-AutoLearning
+      Save-SourcePath
+      Show-Summary
+    } finally {
+      # Runs on the success path, on a terminating error, and on Ctrl-C, so a
+      # failed install does not leave the next one blocked for ten minutes.
+      Remove-InstallLock
     }
-    Install-Mcp
-    Set-Settings
-    Initialize-ProjectClaudeMd
-    Initialize-LocalConfig
-    Initialize-AutoMemory
-    Set-SwarmConsent
-    Set-AutoLearning
-    Save-SourcePath
-    Show-Summary
   }
   'uninstall' {
     Uninstall-Artibot
   }
 }
+
+# A directory that could not be replaced means the tree on disk is not the tree
+# that was shipped. Saying so in a warning while exiting 0 is how a stale
+# install gets mistaken for a current one - `npm run sync:local` and update.js
+# both read this exit code.
+if ($script:InstallFailures -gt 0) { exit 1 }

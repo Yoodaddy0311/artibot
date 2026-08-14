@@ -45,10 +45,24 @@ describe('install-atomic-replace/static contract', () => {
     expect(extractShellFn(installShContent, 'atomic_replace_dir')).not.toBeNull();
   });
 
-  it('스테이징은 목적지 형제 경로 — 같은 볼륨이어야 rename 이 rename 으로 남는다', () => {
+  it('스테이징은 목적지 형제 경로 + PID 유일화 — 같은 볼륨이면서 두 실행이 같은 경로를 쓰지 않는다', () => {
+    // 형제 경로인 이유는 볼륨이다. 다른 볼륨이면 rename 이 복사로 퇴화해
+    // 이 함수의 전제(161ms 스왑)가 통째로 무너진다.
+    //
+    // `.$$` 접미사는 그와 별개의 계약이고, 고정 이름이 만든 실제 결함 때문에
+    // 생겼다. 두 인스톨러가 staging 경로를 공유하면 뒤에 시작한 쪽의
+    // leftover-prune 이 앞선 쪽의 반쯤 쓰인 staging 을 rm -rf 한다. 피해자는
+    // 남은 파일만 채워 넣고, 아래 `ls -A` 공백 가드는 "비어있지 않다"만 보므로
+    // 그대로 통과시켜 **잘린 트리를 라이브 목적지로 스왑**한다.
+    // 격리 복제본 실측(2026-08-15): 10파일 트리가 5파일로 교체되고 반환값은 0.
+    // acquire_install_lock 은 이걸 전부 막지 못한다 — 600s 에 회수되고,
+    // install.ps1 은 락 자체가 없었다(같은 릴리스에서 이식됨).
     const fn = extractShellFn(installShContent, 'atomic_replace_dir');
-    expect(fn).toMatch(/staging="\$\{dst\}\.artibot-new"/);
-    expect(fn).toMatch(/retired="\$\{dst\}\.artibot-old"/);
+    expect(fn).toMatch(/staging="\$\{dst\}\.artibot-new\.\$\$"/);
+    expect(fn).toMatch(/retired="\$\{dst\}\.artibot-old\.\$\$"/);
+    // 유일화가 사라지는 회귀를 red 로 만든다 — 접미사 없는 공유 이름은 금지.
+    expect(fn).not.toMatch(/staging="\$\{dst\}\.artibot-new"/);
+    expect(fn).not.toMatch(/retired="\$\{dst\}\.artibot-old"/);
   });
 
   it('스왑은 2단계 — 살아있는 경로 위로 단일 mv 를 하지 않는다', () => {
@@ -97,6 +111,27 @@ describe('install-atomic-replace/static contract', () => {
     expect(clean?.[0]).not.toMatch(/Remove-Item/);
     expect(tree?.[0]).toMatch(/Copy-DirAtomic/);
     expect(tree?.[0]).not.toMatch(/Remove-Item/);
+  });
+
+  it('install.ps1 스테이징도 PID 유일화 — sh 쪽과 같은 계약', () => {
+    // sh 쪽은 위 "스테이징은 목적지 형제 경로 + PID 유일화" 가 4중으로 고정하는데
+    // ps1 쪽은 아무도 고정하지 않아, 유일화를 되돌려도 스위트가 전부 green 이었다.
+    // 유일화가 필요한 이유는 sh 쪽 주석과 동일하다(고정 이름 공유 → 뒤 실행의
+    // leftover-prune 이 앞 실행의 반쯤 쓰인 staging 을 지움 → 잘린 트리가 라이브
+    // 목적지로 스왑). ps1 은 오히려 더 급했다 — 락 자체가 없던 시절이 있었다.
+    //
+    // 반드시 Copy-DirAtomic **블록 안에서만** 본다. install.ps1:283 의
+    // `"$dst.artibot-new"` 는 손편집된 .md 를 파킹하는 전혀 다른 용도라,
+    // 파일 전역에 음성 단언을 걸면 그쪽이 애먼 red 가 된다.
+    const fn = installPs1Content.match(/function Copy-DirAtomic \{[\s\S]*?\r?\n\}/);
+    expect(fn).not.toBeNull();
+    expect(fn[0]).toMatch(/\$staging = "\$dst\.artibot-new\.\$PID"/);
+    expect(fn[0]).toMatch(/\$retired = "\$dst\.artibot-old\.\$PID"/);
+    // 유일화가 사라지는 회귀를 red 로 만든다 — 접미사 없는 공유 이름은 금지.
+    // (구 코드 850b5682:install.ps1:419-420 가 정확히 이 형태였고, 이 두 줄이
+    //  거기 걸려 실제로 red 가 되는 것을 확인했다.)
+    expect(fn[0]).not.toMatch(/\$staging = "\$dst\.artibot-new"/);
+    expect(fn[0]).not.toMatch(/\$retired = "\$dst\.artibot-old"/);
   });
 
   it('install.ps1 스왑도 2단계 + 롤백', () => {
@@ -152,9 +187,10 @@ describe.skipIf(!canRunPwsh)('install-atomic-replace/powershell locked destinati
 
   it('목적지가 잠겨 있어도 예외를 밖으로 던지지 않고, 잠기지 않은 파일은 갱신된다', () => {
     const psPath = path.join(workDir, 'probe.ps1');
+    // 경로는 **본문에 박지 않고 환경변수로 넘긴다.** 아래 인코딩 주석 참조.
     const script = `
 $ErrorActionPreference = 'Stop'
-$text = [System.IO.File]::ReadAllText('${INSTALL_PS1.replace(/\\/g, '\\\\')}')
+$text = [System.IO.File]::ReadAllText($env:ARTIBOT_INSTALL_PS1)
 function Grab([string]$name) {
   $m = [regex]::Match($text, "(?ms)^function $name \\{.*?^\\}")
   if (-not $m.Success) { throw "cannot extract $name" }
@@ -168,7 +204,7 @@ Invoke-Expression (@(
   (Grab 'Copy-DirAtomic')
 ) -join "\`n")
 
-$root = '${workDir.replace(/\\/g, '\\\\')}'
+$root = $env:ARTIBOT_PROBE_ROOT
 $dst = Join-Path $root 'dst'
 $src = Join-Path $root 'src'
 New-Item -ItemType Directory -Path (Join-Path $dst 'core') -Force | Out-Null
@@ -191,13 +227,59 @@ Write-Output ("LOCKED=" + (Get-Content $locked -Raw).Trim())
 Write-Output ("UNLOCKED=" + (Get-Content (Join-Path $dst 'core\\config.js') -Raw).Trim())
 Write-Output ("DSTEXISTS=" + (Test-Path $dst))
 `;
-    writeFileSync(psPath, script);
+    // ─────────────────────────────────────────────────────────────────────
+    // 인코딩: BOM 없는 .ps1 + 한글 경로 = 조용한 하네스 고장
+    //
+    // PowerShell 5.1 은 BOM 없는 `.ps1` 을 UTF-8 이 아니라 **ANSI 코드페이지**로
+    // 읽는다(이 머신 실측: PSVersion 5.1.26100.9168, chcp 949,
+    // Encoding.Default = ks_c_5601-1987). 이 리포 경로에는 `바탕 화면` 이 있어서
+    // 경로를 본문에 문자열로 박으면 그 UTF-8 바이트가 949 로 오독된다.
+    // 2026-08-15 실측 (`install.ps1` 경로 = 68자):
+    //
+    //   본문에 박음 + BOM 없음   len=79  Test-Path=False  ReadAllText 예외
+    //                                     → Grab throw → stdout '' → 단언 실패
+    //   본문에 박음 + BOM        len=77  Test-Path=True   ReadAllText OK
+    //   환경변수 (BOM 무관)      len=68  Test-Path=True   보낸 문자열과 완전일치
+    //
+    // **프로덕션 `install.ps1` 은 멀쩡하다** — 깨진 건 이 하네스뿐이었다.
+    // ASCII 경로(=CI)에서는 BOM 없이도 통과하므로 로컬에서만 터졌다.
+    // MEMORY.md 의 "Korean path imports" 와 같은 뿌리(비ASCII 경로가 인코딩
+    // 경계를 건너다 깨진다)이고, 이번엔 방향이 Node→PowerShell 이다.
+    //
+    // 그래서 두 겹으로 막는다:
+    //   1. 경로는 **환경변수**로 넘긴다. 문자열이 파일 인코딩을 아예 거치지
+    //      않으므로 근본 해결이다(위 표에서 유일하게 완전일치).
+    //   2. 그럼에도 **BOM 을 붙여** 쓴다. 본문에 남은 다른 리터럴과, 앞으로
+    //      누가 추가할 비ASCII 문자까지 함께 지킨다.
+    // `Copy-DirAtomic` 본문의 비ASCII(em-dash 1자)는 PowerShell 안에서
+    // `ReadAllText` 로 읽으므로 이 파일의 인코딩을 타지 않는다.
+    // ─────────────────────────────────────────────────────────────────────
+    // `\ufeff` 는 이스케이프로 쓴다 — 리터럴 BOM 문자를 소스에 박으면 eslint
+    // `no-irregular-whitespace` 가 잡고, 눈으로는 보이지도 않는다.
+    writeFileSync(psPath, `\ufeff${script}`, 'utf8');
 
     const res = spawnSync(
       'powershell',
       ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', psPath],
-      { encoding: 'utf8', timeout: 90_000 },
+      {
+        encoding: 'utf8',
+        timeout: 90_000,
+        env: {
+          ...process.env,
+          ARTIBOT_INSTALL_PS1: INSTALL_PS1,
+          ARTIBOT_PROBE_ROOT: workDir,
+        },
+      },
     );
+
+    // 프로브가 실제로 돌았는지 먼저 확인한다. 이게 없어서 위 인코딩 고장이
+    // `expected '' to contain 'SURVIVED=True'` 라는 아무 정보 없는 실패로만
+    // 보였고, 원인을 찾는 데 사람 손이 필요했다. 하네스가 죽은 것과 계약이
+    // 깨진 것은 다른 사건이니 다른 메시지를 줘야 한다.
+    expect(
+      res.stdout,
+      `프로브가 출력을 내지 않았다 (status=${res.status}). stderr: ${(res.stderr || '(없음)').slice(0, 500)}`,
+    ).not.toBe('');
 
     // 핵심: 예외가 함수 밖으로 새어나가 인스톨러를 죽이지 않는다
     expect(res.stdout).toContain('SURVIVED=True');
