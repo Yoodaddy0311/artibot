@@ -29,18 +29,17 @@ Target ratio: **Simple ~25% | Sub-Agent ~35% | Team ~40%**
 | Scope | Mode | Tools | Orchestration |
 |-------|------|-------|---------------|
 | Single file edit, <3 steps | Direct | Edit, Write | No delegation |
-| Focused task (1-2 domains, 3-5 steps) | Sub-Agent | Task(subagent_type, run_in_background=true) | Background, non-blocking |
-| Multi-step feature (2+ domains, >5 steps) | Team | TeamCreate, TaskCreate, SendMessage | Full coordination |
-| Multi-domain operation (3+ domains) | Team | TeamCreate, TaskCreate, SendMessage | Full coordination |
-| Scope/audit keywords present | Team | TeamCreate, TaskCreate, SendMessage | Full coordination |
+| Focused task (1-2 domains, 3-5 steps) | Sub-Agent | Agent(subagent_type, run_in_background=true) | Background, non-blocking |
+| Multi-step feature (2+ domains, >5 steps) | Team | Agent spawns, TaskCreate, SendMessage | Full coordination |
+| Multi-domain operation (3+ domains) | Team | Agent spawns, TaskCreate, SendMessage | Full coordination |
+| Scope/audit keywords present | Team | Agent spawns, TaskCreate, SendMessage | Full coordination |
 | Enterprise operation (100+ files) | Team | Full Agent Teams API | Wave + team orchestration |
 
 ## Team Mode API Tools
 
 | Tool | When Used | Pattern |
 |------|-----------|---------|
-| `TeamCreate` | Start of complex operation | Create named team once |
-| `Task(type, team_name, name)` | After TeamCreate | Spawn each teammate |
+| `Agent(type, name)` | Per teammate | Spawn into the session's implicit team |
 | `TaskCreate` | Work distribution | Add items to shared list |
 | `TaskUpdate` | Assignment and progress | Assign, claim, complete |
 | `TaskList` | Coordination | View available/blocked tasks |
@@ -48,7 +47,7 @@ Target ratio: **Simple ~25% | Sub-Agent ~35% | Team ~40%**
 | `SendMessage(message)` | Coordination | DM a specific teammate |
 | `SendMessage(broadcast)` | Critical announcements | Message all teammates |
 | `SendMessage(shutdown_request)` | Completion | Request teammate exit |
-| `TeamDelete` | Cleanup | Remove team after done |
+| `SendMessage(shutdown_request)` | Cleanup | Shut down each teammate when done |
 
 ## Wave Mode Triggers
 

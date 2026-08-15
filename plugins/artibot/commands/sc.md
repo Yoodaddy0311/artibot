@@ -1,7 +1,7 @@
 ---
 description: (Artibot) Artibot router - analyzes intent and routes to optimal command/agent/skill
 argument-hint: '[request] e.g. "이 버그 분석해줘"'
-allowed-tools: [Read, Glob, Grep, Bash, Task, TaskCreate]
+allowed-tools: [Read, Glob, Grep, Bash, Agent, TaskCreate]
 toolset: meta
 ---
 
@@ -102,8 +102,8 @@ Target delegation ratio: **Simple ~25% | Sub-Agent ~35% | Team ~40%**
 | Complexity | Conditions | Delegation Mode |
 |------------|-----------|-----------------|
 | **Simple** | 1 domain AND <3 steps AND no team hints | Direct execution by current agent |
-| **Moderate** | 1-2 domains AND 3-5 steps AND no team hints | `Task(subagent_type, run_in_background=true)` — background sub-agent |
-| **Team** | ANY of the team triggers below | `Task(orchestrator, run_in_background=true)` — background team orchestration |
+| **Moderate** | 1-2 domains AND 3-5 steps AND no team hints | `Agent(subagent_type, run_in_background=true)` — background sub-agent |
+| **Team** | ANY of the team triggers below | `Agent(orchestrator, run_in_background=true)` — background team orchestration |
 
 ### Team Mode Triggers (ANY one is sufficient)
 
@@ -143,7 +143,7 @@ When ANY team trigger matches:
 
 ```
 1. Tell the user: "팀 오케스트레이션으로 처리합니다. 백그라운드에서 진행됩니다."
-2. Task(
+2. Agent(
      subagent_type="artibot:orchestrator",
      prompt="[user's original request with full context]\n\n{보고 계약}",
      run_in_background=true,
@@ -159,7 +159,7 @@ When no team trigger matches AND complexity is Moderate (1-2 domains, 3-5 steps)
 
 ```
 1. Tell the user: "서브 에이전트에게 위임합니다. 백그라운드에서 진행됩니다."
-2. Task(
+2. Agent(
      subagent_type=[matched agent type],
      prompt="[user's request with context]\n\n{보고 계약}",
      run_in_background=true,
@@ -247,7 +247,7 @@ When the user gives casual/natural language requests WITHOUT explicit commands:
 ## Anti-Patterns
 
 - ❌ Do NOT analyze the codebase (Read/Glob/Grep) to determine complexity - classify from request keywords only
-- ❌ Do NOT execute team-level tasks directly - delegate to orchestrator via `Task(orchestrator, run_in_background=true)`
+- ❌ Do NOT execute team-level tasks directly - delegate to orchestrator via `Agent(orchestrator, run_in_background=true)`
 - ❌ Do NOT block the user's session with long-running operations - use background delegation
 - ❌ Do NOT default to sub-agent when team triggers are present - prefer team mode (target ~40%)
 - ❌ Do NOT ignore `--team` / `--solo` flag overrides

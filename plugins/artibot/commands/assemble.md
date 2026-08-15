@@ -1,7 +1,7 @@
 ---
 description: "(Artibot) Avengers Assemble! - Easter egg that summons the full Artibot agent team using real Agent Teams API"
 argument-hint: '"어벤저스 어셈블!"'
-allowed-tools: [Read, Glob, Grep, TeamCreate, SendMessage, TaskCreate, TaskUpdate, TaskList, TaskGet, Task, TeamDelete]
+allowed-tools: [Read, Glob, Grep, Agent, SendMessage, TaskCreate, TaskUpdate, TaskList, TaskGet]
 toolset: team
 ---
 
@@ -16,11 +16,11 @@ Easter egg command. When triggered, creates a **real Agent Team** and spawns tea
 
 ## Execution Flow
 
-### Step 1: Create Team
+### Step 1: Name the Squad
 
-```
-TeamCreate(team_name="avengers", description="Artibot Avengers Assemble! Full team introduction.")
-```
+There is no team to create — the session already has one implicit team. Fix
+`avengers` as the name prefix for every teammate spawned below, so the roster is
+recognizable in `SendMessage` and in the task list.
 
 ### Step 2: Display Roster Banner
 
@@ -86,27 +86,27 @@ Show the full 26-agent roster to the user immediately:
 Spawn **one agent per category** (5 total, sonnet model for balance) into the "avengers" team. Each teammate introduces themselves with their role and specialty in plain Korean. Launch ALL 5 in parallel:
 
 ```
-Task(architect, team_name="avengers", name="architect", model="sonnet",
+Agent(architect, name="avengers-architect", model="sonnet",
   prompt="Artibot 팀에 소환되었습니다.
   한국어 1-2문장으로 자기소개해주세요. 역할: 시스템 설계 및 아키텍처 결정.
   담당 분야와 준비 상태를 간단히 말해주세요.")
 
-Task(code-reviewer, team_name="avengers", name="code-reviewer", model="sonnet",
+Agent(code-reviewer, name="avengers-code-reviewer", model="sonnet",
   prompt="Artibot 팀에 소환되었습니다.
   한국어 1-2문장으로 자기소개해주세요. 역할: 코드 리뷰 및 품질 검증.
   담당 분야와 준비 상태를 간단히 말해주세요.")
 
-Task(backend-developer, team_name="avengers", name="backend-dev", model="sonnet",
+Agent(backend-developer, name="avengers-backend-dev", model="sonnet",
   prompt="Artibot 팀에 소환되었습니다.
   한국어 1-2문장으로 자기소개해주세요. 역할: API 설계 및 서버 로직 구현.
   담당 분야와 준비 상태를 간단히 말해주세요.")
 
-Task(security-reviewer, team_name="avengers", name="security-reviewer", model="sonnet",
+Agent(security-reviewer, name="avengers-security-reviewer", model="sonnet",
   prompt="Artibot 팀에 소환되었습니다.
   한국어 1-2문장으로 자기소개해주세요. 역할: 보안 취약점 탐지 및 대응.
   담당 분야와 준비 상태를 간단히 말해주세요.")
 
-Task(tdd-guide, team_name="avengers", name="tdd-guide", model="sonnet",
+Agent(tdd-guide, name="avengers-tdd-guide", model="sonnet",
   prompt="Artibot 팀에 소환되었습니다.
   한국어 1-2문장으로 자기소개해주세요. 역할: 테스트 주도 개발 가이드.
   담당 분야와 준비 상태를 간단히 말해주세요.")
@@ -127,7 +127,8 @@ After all introductions, ask the user:
 ```
 
 If the user wants to proceed with work: keep the team alive and accept task instructions.
-If the user wants to dismiss: send shutdown_request to all teammates, then TeamDelete("avengers").
+If the user wants to dismiss: send shutdown_request to all teammates. That is the
+whole teardown — the team is implicit, so there is no disband call after it.
 
 ## Important Notes
 

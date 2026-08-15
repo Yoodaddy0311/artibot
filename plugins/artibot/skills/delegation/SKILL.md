@@ -54,16 +54,16 @@ Team auto-boost: "전체", "all", "comprehensive", "audit", "병렬", "parallel"
 
 ## Sub-Agent Mode
 
-- `Task(subagent_type)` — blocking (command pipelines)
-- `Task(subagent_type, run_in_background=true)` — non-blocking (responsive UX)
-- `Task(subagent_type, { isolation: "worktree" })` — worktree isolation for concurrent file edits
+- `Agent(subagent_type)` — blocking (command pipelines)
+- `Agent(subagent_type, run_in_background=true)` — non-blocking (responsive UX)
+- `Agent(subagent_type, { isolation: "worktree" })` — worktree isolation for concurrent file edits
 - Max concurrent: 7
 
 **Parallelization gains**: by directory >7 dirs ~65% | by file batch >50 files ~60% | by domain >2 areas ~70%
 
 ## Team Mode (Agent Teams API)
 
-**Lifecycle**: TeamCreate → Task(type, team, name) → TaskCreate → TaskUpdate → SendMessage → TaskUpdate(complete) → TeamDelete
+**Lifecycle**: Agent(type, name) -> TaskCreate -> TaskUpdate -> SendMessage -> TaskUpdate(complete) -> shutdown_request
 
 | Pattern | Use when | Coordination |
 |---------|----------|-------------|
@@ -93,5 +93,5 @@ Collect → Deduplicate → Cross-reference → Prioritize → Synthesize
 ## Red Flags
 - 메인 스레드가 3파일 이상 직접 편집
 - 위임 없이 30분 이상 단독 작업
-- Task() 없이 multi-domain 작업 진행
+- Agent() 없이 multi-domain 작업 진행
 - Sub-Agent 결과 검증 없이 바로 머지

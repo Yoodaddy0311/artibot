@@ -1,7 +1,7 @@
 ---
 description: (Artibot) Marketing strategy planning with market analysis, competitive intelligence, and campaign architecture
 argument-hint: '[topic] e.g. "GTM 전략 수립"'
-allowed-tools: [Read, Write, Glob, Grep, Task, WebSearch, TaskCreate]
+allowed-tools: [Read, Write, Glob, Grep, Agent, WebSearch, TaskCreate]
 toolset: marketing
 ---
 
@@ -53,7 +53,7 @@ Parse $ARGUMENTS:
    - Competitor positioning and messaging
    - Industry benchmarks and best practices
    - Channel performance data
-3. **Analyze**: Delegate to Task(marketing-strategist) for:
+3. **Analyze**: Delegate to Agent(marketing-strategist) for:
    - SWOT analysis of current position
    - Target audience segmentation and personas
    - Competitive differentiation mapping

@@ -50,7 +50,7 @@ That's it. No manual config. Agent Teams auto-enables on first session start.
 | 4 | **11-Stage Runtime Middleware** — default chain: lifecycle → router → memory → skills → tasks → subagents → guardrail → summarization → token-usage → checkpoint → cache-roi (assembled from 15 middleware modules) | `lib/runtime/middleware/`, `create-artibot-agent.js#defaultPipeline` |
 | 5 | **MCP Server (v3.8+)** — Artibot exposes its own MCP server so Claude Desktop/Code can consume Artibot inventory | `lib/mcp/server.js`, `bin/artibot-mcp.mjs` |
 | 6 | **Data Sovereignty** — outbound to external DBs is hard-blocked. Memory, learning, swarm all stay on disk | `CLAUDE.md` DATA POLICY + `lib/privacy/` |
-| 7 | **Native Agent Teams API** — TeamCreate / SendMessage / TaskCreate, not Task() one-shot delegation | `lib/runtime/middleware/subagents.js`, `lib/runtime/middleware/tasks.js` |
+| 7 | **Native Agent Teams API** - named `Agent` spawns / SendMessage / TaskCreate, not one-shot fire-and-forget delegation | `lib/runtime/middleware/subagents.js`, `lib/runtime/middleware/tasks.js` |
 
 Competitive scoring (10-dim, see report Section 6.2; snapshot as of v4.13.0, 2026-05 — not re-measured since):
 
@@ -76,7 +76,7 @@ flowchart TD
     CR -->|score &lt; 0.4| S1[System 1<br/>fast pattern match]
     CR -->|score &gt;= 0.4| S2[System 2<br/>deliberative reasoning]
     S1 --> SUB[Sub-Agent Mode<br/>Task one-way]
-    S2 --> TM[Agent Team Mode<br/>TeamCreate + P2P]
+    S2 --> TM[Agent Team Mode<br/>named spawns + P2P]
     SUB --> RT[Runtime Middleware Pipeline<br/>11 stages]
     TM --> RT
     RT --> AG[28 Specialist Agents<br/>orchestrator + 27 teammates]
@@ -389,11 +389,10 @@ Artibot의 핵심 엔진은 Claude Code의 **Agent Teams API**입니다. 단순�
 | 생명주기 | 일회성 | 생성 → 작업 → 종료 → 정리 |
 
 **사용하는 Agent Teams API 도구:**
-- `TeamCreate` - 팀 생성
 - `SendMessage` - DM, 브로드캐스트, 셧다운 요청/응답, 계획 승인
 - `TaskCreate` / `TaskUpdate` / `TaskList` / `TaskGet` - 공유 태스크 관리
-- `Task(type, team_name, name)` - 팀원 스폰
-- `TeamDelete` - 팀 리소스 정리
+- `Agent(type, name="{run-slug}-{role}")` - 팀원 스폰. 팀은 세션당 하나(암묵적)라 생성 호출이 없다
+- 해체 호출은 없다 — 팀원 전원에게 `SendMessage(shutdown_request)` 를 보내면 그것이 정리의 전부다
 
 ### CTO-Led 팀 오케스트레이션
 
@@ -406,14 +405,14 @@ Artibot의 핵심 엔진은 Claude Code의 **Agent Teams API**입니다. 단순�
 ### 지능형 위임 모드 선택
 
 복잡도에 따라 **Sub-Agent** vs **Agent Team** 자동 선택:
-- **Sub-Agent Mode** (complexity < 0.4): 단순 작업. Task() 단방향 위임, UI 비가시
-- **Agent Team Mode** (complexity >= 0.4): 복잡 작업. TeamCreate → P2P 협업, 공유 태스크 관리
+- **Sub-Agent Mode** (complexity < 0.4): 단순 작업. 이름 없는 단방향 위임, UI 비가시
+- **Agent Team Mode** (complexity >= 0.4): 복잡 작업. 네임드 스폰 -> P2P 협업, 공유 태스크 관리
 
 #### Sub-Agent vs Agent Teams 핵심 차이
 
 | 구분 | Sub-Agent | Agent Teams |
 |------|-----------|-------------|
-| **위임 방식** | Task() 1회 호출 | TeamCreate → Task(team_name) |
+| **위임 방식** | 이름 없는 1회 호출 | `Agent(name=…)` 네임드 스폰 |
 | **UI 표시** | 비가시 (백그라운드) | 프롬프트 하단에 팀원 표시 |
 | **통신** | 단방향 (결과만 반환) | P2P 양방향 (SendMessage) |
 | **태스크 관리** | 없음 | 공유 태스크 리스트 (TaskCreate/Update/List) |
@@ -807,7 +806,7 @@ Agent Teams (Full P2P)  →  Sub-Agent (단방향)  →  Direct (직접 실행)
 
 감지 순서:
 1. CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 → Agent Teams 모드
-2. Task() 도구 사용 가능 → Sub-Agent 모드
+2. Agent() 도구 사용 가능 -> Sub-Agent 모드
 3. 도구 없음 → Direct 모드 (오케스트레이터가 직접 실행)
 ```
 
@@ -878,7 +877,7 @@ cd artibot/plugins/artibot && bash install.sh
 
 ```
 /sc 로그인 기능을 구현해줘
-→ /implement로 라우팅 → TeamCreate → planner + architect + developer + reviewer 팀 구성
+-> /implement로 라우팅 -> planner + architect + developer + reviewer 네임드 스폰
 ```
 
 ```
@@ -901,19 +900,19 @@ cd artibot/plugins/artibot && bash install.sh
 
 ```
 /orchestrate 결제 시스템 구현 --pattern feature
-→ TeamCreate("payment-feature")
-→ Task(planner, team_name, "planner") + Task(architect, team_name, "architect") + ...
+-> 런 슬러그 "payment-feature" 확정 (팀 생성 호출 없음)
+-> Agent(planner, name="payment-feature-planner") + Agent(architect, name="payment-feature-architect") + ...
 → TaskCreate per phase (plan → design → implement → review)
 → TaskUpdate로 의존성 설정 + 팀원 할당
 → SendMessage로 팀원간 조율
-→ shutdown_request → TeamDelete
+-> shutdown_request (해체 호출은 없다)
 ```
 
 ### 4. 팀 스폰 (병렬 작업)
 
 ```
 /spawn 전체 코드베이스 보안 감사 --mode parallel --agents 5
-→ TeamCreate("security-audit")
+-> 런 슬러그 "security-audit" 확정
 → 5명 팀원 스폰 (각 디렉토리 담당)
 → 팀원이 TaskList에서 자기 할당 (self-claim)
 → SendMessage로 발견 사항 공유
@@ -941,16 +940,16 @@ cd artibot/plugins/artibot && bash install.sh
        ▼                               ▼
 ┌──────────────┐            ┌──────────────────────────┐
 │  Sub-Agent   │            │   Agent Teams Engine      │
-│  Task() 위임  │            │                          │
-│  결과 반환     │            │  TeamCreate              │
+│  단방향 위임   │            │                          │
+│  결과 반환     │            │  런 슬러그 확정            │
 │              │            │    ↓                      │
-│              │            │  Task(type, team, name)   │
+│              │            │  Agent(type, name=…)      │
 │              │            │    ↓                      │
 │              │            │  TaskCreate + TaskUpdate  │
 │              │            │    ↓                      │
 │              │            │  SendMessage (P2P)        │
 │              │            │    ↓                      │
-│              │            │  shutdown + TeamDelete    │
+│              │            │  shutdown_request         │
 └──────────────┘            └──────────────────────────┘
                                        ▼
                             ┌──────────────────────────┐
@@ -971,7 +970,7 @@ cd artibot/plugins/artibot && bash install.sh
 
 | 계층 | 역할 | Agent Teams API |
 |------|------|----------------|
-| **Commands** | 인터페이스 (사용자 진입점) | TeamCreate 트리거 |
+| **Commands** | 인터페이스 (사용자 진입점) | 팀원 스폰 트리거 |
 | **Agents** | 행동 (자율 실행 단위) | 팀원: SendMessage + TaskUpdate |
 | **Skills** | 지식 (도메인 전문성) | 위임 모드 결정 기준 |
 | **Hooks** | 자동화 (이벤트 반응) | SubagentStart/Stop, TeammateIdle |
@@ -979,8 +978,8 @@ cd artibot/plugins/artibot && bash install.sh
 ### 팀 생명주기
 
 ```
-1. TeamCreate(team_name, description)
-2. Task(subagent_type, team_name, name) × N  -- 팀원 스폰
+1. 런 슬러그 확정 -- 팀은 세션당 하나(암묵적)라 생성 호출이 없다
+2. Agent(subagent_type, name="{run-slug}-{role}") × N  -- 팀원 스폰
 3. TaskCreate(subject, description, activeForm) × M  -- 태스크 생성
 4. TaskUpdate(taskId, addBlockedBy)  -- 의존성 설정
 5. TaskUpdate(taskId, owner)  -- 팀원 할당 (또는 self-claim)
@@ -990,7 +989,7 @@ cd artibot/plugins/artibot && bash install.sh
    - SendMessage(type: "message") → 리더/동료에게 보고
    - TaskUpdate(status: "completed") → 완료
 7. SendMessage(type: "shutdown_request") × N  -- 종료 요청
-8. TeamDelete  -- 팀 리소스 정리
+8. shutdown_request 전원 발송  -- 이것이 정리의 전부
 ```
 
 ### 오케스트레이션 패턴
@@ -1015,22 +1014,22 @@ cd artibot/plugins/artibot && bash install.sh
 
 #### Feature (기능 구현)
 ```
-TeamCreate → [Leader] plan → [Council] design → [Swarm] implement → [Council] review → [Leader] merge → TeamDelete
+[Leader] plan → [Council] design → [Swarm] implement → [Council] review → [Leader] merge
 ```
 
 #### Bugfix (버그 수정)
 ```
-TeamCreate → [Leader] analyze → [Pipeline] fix → [Council] verify → TeamDelete
+[Leader] analyze → [Pipeline] fix → [Council] verify
 ```
 
 #### Refactor (리팩토링)
 ```
-TeamCreate → [Council] assess → [Pipeline] refactor → [Swarm] test → [Council] review → TeamDelete
+[Council] assess → [Pipeline] refactor → [Swarm] test → [Council] review
 ```
 
 #### Security (보안 감사)
 ```
-TeamCreate → [Leader] scan → [Council] assess → [Pipeline] fix → [Council] verify → TeamDelete
+[Leader] scan → [Council] assess → [Pipeline] fix → [Council] verify
 ```
 
 ### 품질 게이트
@@ -1242,7 +1241,7 @@ Artibot v1.5.0 initialized
 
 | 에이전트 | 모델 | 역할 | Team API 도구 |
 |----------|------|------|--------------|
-| **orchestrator** | opus | CTO급 팀 리더. 조율 전용 (delegation mode) | TeamCreate, SendMessage, TaskCreate, TaskUpdate, TaskList, TaskGet, TeamDelete, Task() |
+| **orchestrator** | opus | CTO급 팀 리더. 조율 전용 (delegation mode) | Agent(), SendMessage, TaskCreate, TaskUpdate, TaskList, TaskGet |
 
 orchestrator는 **코드를 직접 작성하지 않습니다**. 팀을 구성하고, 태스크를 분배하고, 팀원간 조율하고, 결과를 종합하는 역할만 수행합니다.
 
@@ -1566,7 +1565,7 @@ plugins/artibot/
 │   └── [27개 전문 에이전트].md    #   팀원 (SendMessage + TaskUpdate)
 ├── commands/                    # 78개 슬래시 커맨드
 │   ├── sc.md                    #   메인 라우터
-│   ├── orchestrate.md           #   팀 오케스트레이션 (TeamCreate)
+│   ├── orchestrate.md           #   팀 오케스트레이션 (네임드 Agent 스폰)
 │   ├── spawn.md                 #   팀 스폰 (병렬 실행)
 │   └── [47개 커맨드].md
 ├── skills/                      # 113개 스킬 디렉토리 (forked context 격리)

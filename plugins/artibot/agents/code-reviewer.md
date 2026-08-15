@@ -22,8 +22,8 @@ tools:
   - Glob
   - Bash
   # --- Sub-Agent Delegation ---
-  - Task(spec-reviewer)
-  - Task(quality-reviewer)
+  - Agent(spec-reviewer)
+  - Agent(quality-reviewer)
   # --- Team Collaboration ---
   - SendMessage
   - TaskUpdate
@@ -78,9 +78,9 @@ Final Verdict: APPROVE / REQUEST_CHANGES / REJECT
 | Step | Action | Tool |
 |------|--------|------|
 | 1. Gather Context | 리뷰 대상 파악 (변경 파일, 원본 요청, PR 설명) | Read, Bash (git diff) |
-| 2. Stage 1 Launch | spec-reviewer 호출 — 요구사항 + 변경 파일 전달 | Task(spec-reviewer) |
+| 2. Stage 1 Launch | spec-reviewer 호출 — 요구사항 + 변경 파일 전달 | Agent(spec-reviewer) |
 | 3. Stage 1 Gate | spec-reviewer 결과 확인. SPEC_FAIL이면 Stage 2 생략 | 결과 분석 |
-| 4. Stage 2 Launch | quality-reviewer 호출 — 변경 파일 전달 | Task(quality-reviewer) |
+| 4. Stage 2 Launch | quality-reviewer 호출 — 변경 파일 전달 | Agent(quality-reviewer) |
 | 5. Stage 2 Gate | quality-reviewer 결과 확인 | 결과 분석 |
 | 6. Synthesize | 두 리뷰 결과를 통합하여 최종 판정 | 최종 보고서 작성 |
 

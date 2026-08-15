@@ -1,7 +1,7 @@
 ---
 description: (Artibot) Parallel team execution with cross-check — persistent team mode, leader delegates only, implementation on frontier 티어(model-policy 해석, xhigh effort 권장), review phases도 frontier 티어(fable 마이그레이션 이후 model-policy 해석)
 argument-hint: '[task] e.g. "이 기능 구현하고 테스트도 작성해줘"'
-allowed-tools: [Read, Glob, Grep, Bash, TeamCreate, SendMessage, TaskCreate, TaskUpdate, TaskList, TaskGet, Task, TeamDelete]
+allowed-tools: [Read, Glob, Grep, Bash, Agent, SendMessage, TaskCreate, TaskUpdate, TaskList, TaskGet]
 toolset: team
 ---
 
@@ -134,19 +134,20 @@ The orchestrator MUST:
 5. `lib/runtime/middleware/tasks.js`는 위 파일을 자동 Read해 `task.meta.effort`, `task.meta.taskBudget`을 채워주므로, TaskCreate 시 meta를 그대로 넘기면 된다
 
 ### Phase 2: TEAM SETUP (Leader only)
-```
-TeamCreate(
-  team_name="team-{task-slug}",
-  description="Parallel: {task description}"
-)
-```
+
+생성할 팀이 없다. 세션에는 **암묵적 단일 팀**이 하나 있을 뿐이라, 여기서 정하는 건
+팀이 아니라 **런 슬러그**다. `team-{task-slug}`를 팀원 이름 접두사로 고정해 이번
+런의 팀원을 다른 런과 구분한다.
 
 Spawn ALL teammates in a single message (parallel):
 ```
-Task(subagent_type="artibot:{agent-type}", team_name="team-*", name="{role}",
-     /* model: model-policy 해석 — 구현/검토 역할 모두 frontier 티어 (fable 마이그레이션 이후) */
-     prompt="[DEV Protocol 준수]\n\n작업:\n{specific work unit}\n\n{보고 계약}")
+Agent(subagent_type="artibot:{agent-type}", name="team-{task-slug}-{role}",
+      /* model: model-policy 해석 — 구현/검토 역할 모두 frontier 티어 (fable 마이그레이션 이후) */
+      prompt="[DEV Protocol 준수]\n\n작업:\n{specific work unit}\n\n{보고 계약}")
 ```
+
+`name`이 있어야 `SendMessage(to="{name}")`로 주소가 잡힌다. 역할이 자명해 보여도
+이름 없이 스폰하지 마라 — 이름 없는 팀원에게는 중간 지시를 보낼 수 없다.
 
 ### 보고 계약 (MANDATORY — 모든 스폰 프롬프트의 `{보고 계약}` 자리에 그대로 삽입)
 
@@ -228,7 +229,7 @@ hook/statusline이 아니라 **리더의 채팅 출력**이라 항상 보이고,
 After ALL main tasks complete, spawn cross-check agents on the **frontier 티어** (model-policy 해석):
 
 ```
-Task(subagent_type="code-reviewer", team_name="team-*", name="checker-{n}",
+Agent(subagent_type="code-reviewer", name="team-*-checker-{n}",
      /* model: model-policy 해석 — 역할 frontier 티어 */
      prompt="[Cross-check Mode]\n\n{teammate-A}의 작업물을 검증해주세요.
      변경 파일: {list}\n요구사항: {original requirements}\n
@@ -248,7 +249,7 @@ Cross-check 완료 후, **code-reviewer 에이전트(frontier 티어)가 전체 
 
 팀에 code-reviewer가 없으면 이 단계에서 소환:
 ```
-Task(subagent_type="artibot:code-reviewer", team_name="team-*", name="inspector",
+Agent(subagent_type="artibot:code-reviewer", name="team-*-inspector",
      /* model: model-policy 해석 — 역할 frontier 티어 */
      prompt="[Inspection Mode 활성화]\n\n원본 요청: {original user request}\n\n
 각 팀원의 작업물을 검수해주세요:
@@ -379,7 +380,7 @@ Then wait for the user's next instruction. When a new task arrives, go back to *
 SendMessage(type="shutdown_request", recipient="{teammate}")
 ```
 - Shutdown all teammates after explicit user request
-- TeamDelete to clean up
+- 그게 정리의 전부다 — 팀이 암묵적이라 뒤에 붙는 해체 호출이 없다
 - Triggered by: user says "해체", "종료", "shutdown", or passes `--shutdown` flag
 - In `--one-shot` mode: triggered automatically after Phase 5
 
@@ -418,7 +419,7 @@ When the user gives a new task to a persistent team:
 2. **기존 팀원 우선 재활용** — 전문성이 조금이라도 겹치면 유지하고 새 작업 배정
 3. **신규 팀원은 기존 팀에 없는 전문성이 필요할 때만** 추가:
    ```
-   Task(subagent_type="artibot:{new-agent-type}", team_name="team-*", name="{role}",
+   Agent(subagent_type="artibot:{new-agent-type}", name="team-*-{role}",
         /* model: model-policy 해석 — 구현 역할은 frontier 티어 */
         prompt="[DEV Protocol 준수]\n\n작업:\n{new work unit}\n\n{보고 계약}")
    ```
@@ -443,7 +444,7 @@ The team is disbanded ONLY when the user explicitly requests it:
 - English: "shutdown"
 - Flag: `--shutdown`
 
-Upon disbanding, execute full Phase 6 SHUTDOWN — send shutdown to all remaining teammates and call TeamDelete.
+Upon disbanding, execute full Phase 6 SHUTDOWN — 남은 팀원 전원에게 shutdown 을 보내면 끝이다. 팀이 암묵적이라 이후 해체 호출은 없다.
 
 ### Reverting to Single-Task Mode
 Use `--one-shot` to disable persistent mode for a single invocation:

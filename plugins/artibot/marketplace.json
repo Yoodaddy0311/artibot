@@ -128,7 +128,7 @@
     {
       "id": "agent-teams",
       "name": "Parallel Agent Teams",
-      "description": "Native Claude Agent Teams API integration (TeamCreate / SendMessage / TaskCreate) with automatic decomposition and cross-verification."
+      "description": "Native Claude Agent Teams API integration (named Agent spawns / SendMessage / TaskCreate) with automatic decomposition and cross-verification."
     },
     {
       "id": "dual-process",

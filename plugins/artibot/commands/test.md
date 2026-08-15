@@ -1,7 +1,7 @@
 ---
 description: (Artibot) Test execution, analysis, and coverage reporting
 argument-hint: '[type] e.g. "단위 테스트 실행"'
-allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, Task, TaskCreate]
+allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, Agent, TaskCreate]
 toolset: code
 ---
 
@@ -30,7 +30,7 @@ Parse $ARGUMENTS:
    - `*.test.ts` / `*.spec.ts` patterns -> framework from config
 3. **Execute**: Run tests with appropriate command:
    - Unit/Integration: Run via detected framework
-   - E2E: Delegate to Task(e2e-runner) for Playwright-based testing
+   - E2E: Delegate to Agent(e2e-runner) for Playwright-based testing
 4. **Analyze Results**: Parse test output for:
    - Pass/fail counts and failure details
    - Slow tests (>1s unit, >5s integration)

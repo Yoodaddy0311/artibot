@@ -6,7 +6,7 @@ Four parallel-execution mechanisms in Artibot. Their engines are distinct and mu
 
 **inline** — Single-file, trivial work executed directly by the main thread; no delegation, no team creation.
 
-**team** — Adaptive, model-driven orchestration using the Agent Teams API (TeamCreate / SendMessage / P2P messaging); fires automatically when 2+ independent subtasks are detected (Operator-Waits DNA). Also called "Auto-Team".
+**team** — Adaptive, model-driven orchestration using the Agent Teams API (named `Agent` spawns / SendMessage / P2P messaging); fires automatically when 2+ independent subtasks are detected (Operator-Waits DNA). Also called "Auto-Team".
 
 **orchestrate** (classifier label: `workflow`) — Deterministic, code-driven orchestration with a fixed control flow; requires explicit user opt-in and never auto-fires. User-facing slash entry point: **`/orchestrate`** — provides predefined pipelines (feature / bugfix / refactor / security). The classifier and config keys retain the legacy label `workflow`; prose must say **orchestrate**.
 

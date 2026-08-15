@@ -29,7 +29,7 @@ A cognitive orchestration plugin for [Claude Code](https://github.com/anthropics
 
 ## Overview
 
-Most Claude Code plugins use simple sub-agent (`Task()`) delegation -- fire-and-forget with one-way result reporting. Artibot takes a fundamentally different approach by using Claude's **native Agent Teams API** as its core engine, enabling true team orchestration:
+Most Claude Code plugins use simple sub-agent (unnamed, fire-and-forget) delegation -- fire-and-forget with one-way result reporting. Artibot takes a fundamentally different approach by using Claude's **native Agent Teams API** as its core engine, enabling true team orchestration:
 
 | Capability | Sub-Agent (Task) | Agent Teams (Artibot) |
 |------------|------------------|----------------------|
@@ -247,7 +247,7 @@ The `/sc` command analyzes natural language intent and routes to the optimal com
 
 ```
 /sc implement login feature
--> routes to /implement -> TeamCreate -> spawns planner + architect + developer + reviewer
+-> routes to /implement -> spawns named planner + architect + developer + reviewer
 ```
 
 ```
@@ -257,7 +257,7 @@ The `/sc` command analyzes natural language intent and routes to the optimal com
 
 ```
 /sc launch email marketing campaign for product launch
--> routes to /campaign -> TeamCreate -> spawns marketing-strategist + data-analyst + ad-specialist
+-> routes to /campaign -> spawns named marketing-strategist + data-analyst + ad-specialist
 ```
 
 ### Direct Commands
@@ -280,12 +280,12 @@ For complex tasks, Artibot assembles a full Agent Team:
 ```
 
 This triggers the full team lifecycle:
-1. `TeamCreate("payment-feature")` -- create the team
-2. `Task(planner, team, "planner")` + `Task(architect, team, "architect")` + ... -- spawn teammates
+1. Fix the run slug `payment-feature` -- no team is created; the session has one implicit team
+2. `Agent(planner, name="payment-feature-planner")` + `Agent(architect, name="payment-feature-architect")` + ... -- spawn teammates
 3. `TaskCreate` per phase (plan -> design -> implement -> review) -- populate task list
 4. `TaskUpdate` -- set dependencies and assign teammates
 5. `SendMessage` -- P2P coordination between teammates
-6. `shutdown_request` -> `TeamDelete` -- graceful cleanup
+6. `shutdown_request` to every teammate -- that is the whole cleanup
 
 ### Marketing Orchestration
 
@@ -330,12 +330,12 @@ Spawns 5 teammates that self-claim tasks from the shared task list and report fi
         v                                 v
 +---------------+         +-----------------------+
 |   Sub-Agent   |         |   Agent Teams Engine   |
-|   Task()      |         |                       |
-|   one-way     |         |  TeamCreate           |
-|               |         |    -> Task(spawn)     |
+|   unnamed     |         |                       |
+|   one-way     |         |  run slug fixed       |
+|               |         |    -> Agent(name=...) |
 |               |         |    -> TaskCreate      |
 |               |         |    -> SendMessage(P2P)|
-|               |         |    -> TeamDelete      |
+|               |         |    -> shutdown_request|
 +---------------+         +-----------+-----------+
                                       |
                                       v
@@ -404,7 +404,7 @@ The cognitive router feeds directly into the orchestration delegation mode:
 
 | Aspect | Sub-Agent | Agent Teams |
 |--------|-----------|-------------|
-| **Delegation** | Task() single call | TeamCreate → Task(team_name) |
+| **Delegation** | unnamed single call | named `Agent(name=...)` spawns |
 | **UI Visibility** | Hidden (background) | Teammates shown below prompt |
 | **Communication** | One-way (result only) | P2P bidirectional (SendMessage) |
 | **Task Management** | None | Shared task list (TaskCreate/Update/List) |
@@ -450,13 +450,12 @@ Load System 1 cache          (routing decisions +            Knowledge transfer
 
 | Tool | Purpose |
 |------|---------|
-| `TeamCreate` | Create a named team with description |
-| `Task(type, team_name, name)` | Spawn teammates into the team |
+| `Agent(type, name)` | Spawn a named teammate into the session's implicit team |
 | `TaskCreate` | Add work items to shared task list |
 | `TaskUpdate` | Set status, owner, dependencies (blockedBy/blocks) |
 | `TaskList` / `TaskGet` | View and read tasks |
 | `SendMessage` | DM, broadcast, shutdown request/response, plan approval |
-| `TeamDelete` | Clean up team resources |
+| `SendMessage(shutdown_request)` | Shut a teammate down; this IS the cleanup |
 
 ### Team Levels
 
@@ -475,42 +474,42 @@ Load System 1 cache          (routing decisions +            Knowledge transfer
 
 **Feature:**
 ```
-TeamCreate -> [Leader] plan -> [Council] design -> [Swarm] implement -> [Council] review -> [Leader] merge -> TeamDelete
+[Leader] plan -> [Council] design -> [Swarm] implement -> [Council] review -> [Leader] merge
 ```
 
 **Bugfix:**
 ```
-TeamCreate -> [Leader] analyze -> [Pipeline] fix -> [Council] verify -> TeamDelete
+[Leader] analyze -> [Pipeline] fix -> [Council] verify
 ```
 
 **Refactor:**
 ```
-TeamCreate -> [Council] assess -> [Pipeline] refactor -> [Swarm] test -> [Council] review -> TeamDelete
+[Council] assess -> [Pipeline] refactor -> [Swarm] test -> [Council] review
 ```
 
 **Security:**
 ```
-TeamCreate -> [Leader] scan -> [Council] assess -> [Pipeline] fix -> [Council] verify -> TeamDelete
+[Leader] scan -> [Council] assess -> [Pipeline] fix -> [Council] verify
 ```
 
 **Marketing Campaign:**
 ```
-TeamCreate -> [Leader] strategy -> [Council] plan -> [Swarm] create -> [Council] review -> [Leader] launch -> TeamDelete
+[Leader] strategy -> [Council] plan -> [Swarm] create -> [Council] review -> [Leader] launch
 ```
 
 **Marketing Audit:**
 ```
-TeamCreate -> [Leader] scan -> [Council] assess -> [Pipeline] optimize -> [Council] verify -> TeamDelete
+[Leader] scan -> [Council] assess -> [Pipeline] optimize -> [Council] verify
 ```
 
 **Content Launch:**
 ```
-TeamCreate -> [Leader] plan -> [Swarm] create -> [Council] review -> [Leader] publish -> TeamDelete
+[Leader] plan -> [Swarm] create -> [Council] review -> [Leader] publish
 ```
 
 **Competitive Analysis:**
 ```
-TeamCreate -> [Council] research -> [Swarm] analyze -> [Council] synthesize -> [Leader] report -> TeamDelete
+[Council] research -> [Swarm] analyze -> [Council] synthesize -> [Leader] report
 ```
 
 </details>
@@ -524,7 +523,7 @@ TeamCreate -> [Council] research -> [Swarm] analyze -> [Council] synthesize -> [
 
 | Agent | Model | Role | Team API Tools |
 |-------|-------|------|----------------|
-| **orchestrator** | opus | CTO-level team leader. Coordination only (delegation mode). | TeamCreate, SendMessage, TaskCreate, TaskUpdate, TaskList, TaskGet, TeamDelete, Task() |
+| **orchestrator** | opus | CTO-level team leader. Coordination only (delegation mode). | Agent(), SendMessage, TaskCreate, TaskUpdate, TaskList, TaskGet |
 
 The orchestrator **never writes code directly**. It assembles the team, distributes tasks, coordinates between teammates, and synthesizes results.
 
@@ -851,7 +850,7 @@ plugins/artibot/
 |   +-- sc.md                    #   Smart router
 |   +-- daily.md                 #   Daily work recap and retrospective
 |   +-- team.md                  #   Parallel team orchestration
-|   +-- orchestrate.md           #   Team orchestration (TeamCreate)
+|   +-- orchestrate.md           #   Team orchestration (named Agent spawns)
 |   +-- spawn.md                 #   Team spawn (parallel execution)
 |   +-- [25 dev commands].md
 |   +-- [10 marketing commands].md
@@ -959,7 +958,7 @@ node scripts/ci/validate-hooks.js     # Hook validation
 
 ### Agent Teams not working
 
-**Issue**: TeamCreate or SendMessage not available
+**Issue**: Agent or SendMessage not available
 
 **Solution**: Ensure the environment variable is set:
 ```json
@@ -977,7 +976,7 @@ node scripts/ci/validate-hooks.js     # Hook validation
 
 **Solution**:
 - Verify tasks have no unresolved `blockedBy` dependencies
-- Check that teammates are spawned with correct `team_name`
+- Check that teammates are spawned with a `name` (an unnamed teammate cannot be messaged)
 - Use `TaskUpdate` to explicitly assign if self-claim isn't working
 
 ### High token usage

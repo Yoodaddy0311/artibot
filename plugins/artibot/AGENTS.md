@@ -15,7 +15,7 @@
 | Agent count | 28 (전량 opus — `claude-opus-5`. fable 게이트는 `enabled=false`로 OFF) |
 | Skill count | 113 |
 | Command count | 72 |
-| Native orchestration | Claude Agent Teams API (`TeamCreate`, `SendMessage`, `TaskCreate/Update/List/Get`) |
+| Native orchestration | Claude Agent Teams API (`Agent(name=...)`, `SendMessage`, `TaskCreate/Update/List/Get`) |
 | Cross-tool export | `scripts/export-to-tool.mjs` |
 | Graceful-degradation modes | `agent-teams` → `sub-agent` → `direct` (see `artibot.config.json`) |
 
@@ -54,7 +54,7 @@ Full contributor rules: see `CLAUDE.md` (Quality Gates + Testing sections) — t
 
 | Tool | Reads | Writes-back | Supports Tasks API? | Notes |
 |---|---|---|---|---|
-| Claude Code | native `agents/*.md` + `commands/*.md` + `skills/*/SKILL.md` | via plugin hooks | **yes** (TeamCreate etc.) | Only tool with full Agent Teams |
+| Claude Code | native `agents/*.md` + `commands/*.md` + `skills/*/SKILL.md` | via plugin hooks | **yes** (named Agent spawns etc.) | Only tool with full Agent Teams |
 | Cursor | `.cursor/rules/*.mdc` | n/a | no | Agents map to rules + custom modes |
 | Codex CLI | `AGENTS.md` (root) + `.codex/agents/*.md` | optional `.codex/memory.json` | no | Sequential execution only |
 | OpenCode | `.opencode/agents.json` | n/a | no | JSON-manifest based |
@@ -163,7 +163,7 @@ Exporters that target non-Anthropic runtimes substitute a sane default; users ov
 
 | Feature | Portable? | Fallback |
 |---|---|---|
-| `TeamCreate` / `SendMessage` / `TaskCreate` | **Claude Code only** | Export as sequential steps; teammate becomes a section in the prompt |
+| `Agent(name=...)` / `SendMessage` / `TaskCreate` | **Claude Code only** | Export as sequential steps; teammate becomes a section in the prompt |
 | `SlashCommand` auto-invoke | **Claude Code only** | Exported as `.md` workflow the user runs manually |
 | Hooks (`PreToolUse`, `UserPromptSubmit`, …) | **Claude Code only** | Not exported; runtime-specific |
 | Skills (`SKILL.md` + `references/`) | Partially | Flatten to single prompt; reference files inlined by length budget |

@@ -1,7 +1,7 @@
 ---
 description: (Artibot) Feature implementation with planner/tdd-guide/code-reviewer pipeline
 argument-hint: '[feature] e.g. "로그인 기능 구현"'
-allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, Task, TaskCreate]
+allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, Agent, TaskCreate]
 toolset: team
 ---
 
@@ -41,22 +41,22 @@ Before writing a single line of code, verify three things (use Grep/Read — no 
 1. **Decompose**: Break user request into numbered atomic requirements. EVERY requirement MUST be tracked.
 2. **Parse**: Extract feature requirements, detect type and framework
 3. **Read Context**: Read ALL files that will be modified BEFORE making any changes. Understand existing patterns.
-4. **Plan**: Delegate to Task(planner) for implementation breakdown:
+4. **Plan**: Delegate to Agent(planner) for implementation breakdown:
    - File list (create/modify)
    - Dependency identification
    - Risk assessment
    - Phase ordering
-5. **Design** (for `api` and `service` types): Delegate to Task(architect) for:
+5. **Design** (for `api` and `service` types): Delegate to Agent(architect) for:
    - Interface/contract definition
    - Data model design
    - Error handling strategy
 6. **Implement**: Execute plan phase by phase:
-   - Write tests first if `--tdd` (delegate to Task(tdd-guide))
+   - Write tests first if `--tdd` (delegate to Agent(tdd-guide))
    - Create/modify files following plan
    - Use framework conventions and existing patterns
    - Re-read EVERY modified file to verify changes are correct
 7. **Test**: Run tests, verify coverage >= 80%
-8. **Review**: Delegate to Task(code-reviewer) for:
+8. **Review**: Delegate to Agent(code-reviewer) for:
    - CRITICAL/HIGH issue detection
    - Pattern consistency check
    - Security scan

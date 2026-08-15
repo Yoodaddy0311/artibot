@@ -1,7 +1,7 @@
 ---
 description: (Artibot) Systematic problem investigation with root cause analysis
 argument-hint: '[symptoms] e.g. "타임아웃 에러 원인 분석"'
-allowed-tools: [Read, Glob, Grep, Bash, Task, TaskCreate]
+allowed-tools: [Read, Glob, Grep, Bash, Agent, TaskCreate]
 toolset: code
 ---
 
@@ -46,9 +46,9 @@ Parse $ARGUMENTS:
      - Configuration drift
      - Dependency version conflicts
 4. **Delegate** (if complex): Route to specialized agent via Task tool:
-   - Build errors -> Task(build-error-resolver)
-   - Security issues -> Task(security-reviewer)
-   - Performance regressions -> Task(Explore) with performance focus
+   - Build errors -> Agent(build-error-resolver)
+   - Security issues -> Agent(security-reviewer)
+   - Performance regressions -> Agent(Explore) with performance focus
 5. **Root Cause**: Identify the underlying cause with evidence chain
 6. **Fix Recommendation**: Provide specific, actionable fix with code location
 7. **Report**: Output investigation summary

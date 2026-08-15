@@ -1,7 +1,7 @@
 ---
 description: (Artibot) Project build with framework auto-detection and optimization
 argument-hint: '[target] e.g. "React 프로젝트 빌드"'
-allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, Task, TaskCreate]
+allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, Agent, TaskCreate]
 toolset: code
 lifecycle: build
 ---

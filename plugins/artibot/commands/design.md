@@ -1,7 +1,7 @@
 ---
 description: (Artibot) System design with architect agent and ADR generation
 argument-hint: '[module] e.g. "인증 시스템 아키텍처 설계"'
-allowed-tools: [Read, Glob, Grep, Bash, Task, TaskCreate]
+allowed-tools: [Read, Glob, Grep, Bash, Agent, TaskCreate]
 toolset: design
 lifecycle: design
 ---
@@ -30,7 +30,7 @@ Parse $ARGUMENTS:
    ```bash
    node "${CLAUDE_PLUGIN_ROOT}/scripts/route-lifecycle.mjs" design "$ARGUMENTS"
    ```
-   This calls `routeLifecycle('design', { hint })` from `lib/core/lifecycle-router.js` and prints the `{agent, toolset, skills, candidates}` resolution as a single JSON line (default agent: `architect`). Route to Task(<resolved agent>) for:
+   This calls `routeLifecycle('design', { hint })` from `lib/core/lifecycle-router.js` and prints the `{agent, toolset, skills, candidates}` resolution as a single JSON line (default agent: `architect`). Route to Agent(<resolved agent>) for:
    - Requirements analysis from target description
    - Design alternative generation (N options)
    - Trade-off matrix evaluation per alternative

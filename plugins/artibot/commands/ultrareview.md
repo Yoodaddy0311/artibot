@@ -1,7 +1,7 @@
 ---
 description: (Artibot) Alias for /adversarial-review — multi-agent attacker-perspective review (Claude Code naming compat)
 argument-hint: '[target] e.g. "src/ 적대적 리뷰해줘"'
-allowed-tools: [Read, Glob, Grep, Bash, Task, TaskCreate]
+allowed-tools: [Read, Glob, Grep, Bash, Agent, TaskCreate]
 toolset: code
 ---
 

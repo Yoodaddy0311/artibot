@@ -1,7 +1,7 @@
 ---
 description: (Artibot) Refactoring and dead code cleanup using refactor-cleaner agent
 argument-hint: '[target] e.g. "중복 코드 제거 및 정리"'
-allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, Task, TaskCreate]
+allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, Agent, TaskCreate]
 toolset: code
 ---
 
@@ -25,7 +25,7 @@ Parse $ARGUMENTS:
 
 1. **Parse**: Resolve target, determine refactoring scope
 2. **Baseline**: Run existing tests to establish green state. Abort if tests fail
-3. **Analyze**: Delegate to Task(refactor-cleaner) for:
+3. **Analyze**: Delegate to Agent(refactor-cleaner) for:
    - Dead code detection (unused exports, unreachable branches, orphan files)
    - Duplication analysis (copy-paste detection, extractable patterns)
    - Complexity measurement (functions >20 cyclomatic, nesting >4 levels)

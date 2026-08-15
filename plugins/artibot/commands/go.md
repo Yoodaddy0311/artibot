@@ -7,7 +7,7 @@ description: >
   Produces 6 blueprint documents (CLAUDE.md, PRD, ARCHITECTURE, FILE-TREE, WORKFLOW, DATASETS) under
   a single output folder without touching external services or databases.
 argument-hint: '<아이디어 또는 repo 경로>'
-allowed-tools: [Read, Glob, Grep, Bash, Write, Task, TaskCreate, Skill, AskUserQuestion]
+allowed-tools: [Read, Glob, Grep, Bash, Write, Agent, TaskCreate, Skill, AskUserQuestion]
 lifecycle: genesis
 ---
 
@@ -262,7 +262,7 @@ const { ok, prdPath } = await writePRD({
 규모·복잡도가 크거나 아키텍처 결정이 필요한 경우 `/design`(architect agent) 위임:
 
 ```
-Task(architect, prompt="<domain> 프로젝트의 고수준 아키텍처 설계. 도메인: <domain>, 스택: <stack>")
+Agent(architect, prompt="<domain> 프로젝트의 고수준 아키텍처 설계. 도메인: <domain>, 스택: <stack>")
 ```
 
 MVP에서는 모델이 간결한 레이어 다이어그램(텍스트)을 `Write`로 직접 생성해도 된다. 위임 여부는 복잡도 판단에 따른다.

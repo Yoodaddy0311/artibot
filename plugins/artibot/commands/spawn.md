@@ -1,7 +1,7 @@
 ---
 description: (Artibot) Multi-agent task orchestration with parallel and sequential coordination using Agent Teams
 argument-hint: '[task] e.g. "병렬로 분석+테스트 실행"'
-allowed-tools: [Read, Glob, Grep, Bash, TeamCreate, SendMessage, TaskCreate, TaskUpdate, TaskList, TaskGet, Task, TeamDelete]
+allowed-tools: [Read, Glob, Grep, Bash, Agent, SendMessage, TaskCreate, TaskUpdate, TaskList, TaskGet]
 disable-model-invocation: true
 toolset: team
 ---
@@ -74,17 +74,20 @@ SendMessage(type="message", recipient="tester", content="{lint results and conte
    - Determine optimal mode (parallel/sequential/pipeline)
    - Select strategy (by-directory/by-domain/by-task/auto)
    - Identify required specialist types
-3. **Create Team**: Initialize the spawn team:
-   ```
-   TeamCreate(
-     team_name="spawn-{task-slug}",
-     description="Spawn orchestration: {task description}"
-   )
-   ```
+3. **Name the run**: There is no team to create. The session has one implicit
+   team, so instead fix a run slug `spawn-{task-slug}` and use it as the prefix
+   of every teammate name below, which is what keeps one run's agents
+   distinguishable from another's.
 4. **Spawn Teammates**: Launch specialist agents:
    ```
-   Task(subagent_type, team_name="spawn-{task-slug}", name="{role-name}")
+   Agent(
+     subagent_type="{type}",
+     name="spawn-{task-slug}-{role-name}",
+     prompt="{role brief}"
+   )
    ```
+   The name is what makes a teammate addressable by `SendMessage`, so spawn with
+   one even when the role seems obvious.
    - Spawn up to `--agents` teammates (default 3, max 7)
    - Each teammate is a specialist matched to the strategy
 5. **Create Work Tasks**: Build the task graph:
@@ -108,20 +111,21 @@ SendMessage(type="message", recipient="tester", content="{lint results and conte
    ```
    - Send shutdown requests to all teammates
    - Wait for confirmations
-   - `TeamDelete` to clean up the team
+   - No teardown call follows. The team is implicit, so shutting down every
+     teammate *is* the cleanup; there is nothing left to delete.
 9. **Report**: Output orchestration summary with team lifecycle metrics
 
 ## Agent Assignment
 
 | Domain | Teammate Spawn | Focus |
 |--------|----------------|-------|
-| Security | `Task(security-reviewer, team_name="spawn-*", name="security")` | Vulnerabilities, compliance |
-| Performance | `Task(performance-engineer, team_name="spawn-*", name="perf-analyst")` | Bottlenecks, optimization |
-| Quality | `Task(code-reviewer, team_name="spawn-*", name="quality")` | Code quality, patterns |
-| Architecture | `Task(architect, team_name="spawn-*", name="architect")` | Structure, design |
-| Testing | `Task(tdd-guide, team_name="spawn-*", name="tester")` | Coverage, test quality |
-| Frontend | `Task(frontend-developer, team_name="spawn-*", name="frontend-dev")` | UI, accessibility |
-| Backend | `Task(backend-developer, team_name="spawn-*", name="backend-dev")` | API, data, reliability |
+| Security | `Agent(security-reviewer, name="spawn-*-security")` | Vulnerabilities, compliance |
+| Performance | `Agent(performance-engineer, name="spawn-*-perf-analyst")` | Bottlenecks, optimization |
+| Quality | `Agent(code-reviewer, name="spawn-*-quality")` | Code quality, patterns |
+| Architecture | `Agent(architect, name="spawn-*-architect")` | Structure, design |
+| Testing | `Agent(tdd-guide, name="spawn-*-tester")` | Coverage, test quality |
+| Frontend | `Agent(frontend-developer, name="spawn-*-frontend-dev")` | UI, accessibility |
+| Backend | `Agent(backend-developer, name="spawn-*-backend-dev")` | API, data, reliability |
 
 ## Output Format
 

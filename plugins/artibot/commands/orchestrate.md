@@ -1,7 +1,7 @@
 ---
 description: (Artibot) Multi-agent workflow orchestration for complex operations using Agent Teams
 argument-hint: '[workflow] e.g. "기능 개발 파이프라인"'
-allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, TeamCreate, SendMessage, TaskCreate, TaskUpdate, TaskList, TaskGet, Task, TeamDelete]
+allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, Agent, SendMessage, TaskCreate, TaskUpdate, TaskList, TaskGet]
 disable-model-invocation: true
 toolset: team
 ---
@@ -10,7 +10,7 @@ toolset: team
 
 > **vs /spawn**: `/orchestrate` runs **predefined workflow patterns** (feature, bugfix, refactor, security) with structured phases via `--pattern`. `/spawn` is **free-form meta-orchestration** for arbitrary task decomposition without a pattern template. **Pick rule:** known dev workflow with a named lifecycle → `/orchestrate`; ad-hoc multi-domain work that doesn't fit a template → `/spawn`. Both share the same Agent Teams primitives, so neither is an alias of the other.
 
-> **vs /workflows — launcher ≠ monitor**: `/orchestrate` *starts* a run; it does not show status. It executes on **Agent Teams** (`toolset: team` → `TeamCreate`/`Task`), **not** the harness `Workflow` tool. Consequently the native **`/workflows`** command — which only *watches* already-running harness `Workflow`-tool runs — does **not** track `/orchestrate` runs. Follow an `/orchestrate` run's progress via its team tasks (`TaskList`/`TaskGet`, step 5). To start a **new** run while one is active, just invoke `/orchestrate` again — Agent Teams runs are independent and can run concurrently.
+> **vs /workflows — launcher ≠ monitor**: `/orchestrate` *starts* a run; it does not show status. It executes on **Agent Teams** (`toolset: team` → `Agent` spawns plus `SendMessage`), **not** the harness `Workflow` tool. Consequently the native **`/workflows`** command — which only *watches* already-running harness `Workflow`-tool runs — does **not** track `/orchestrate` runs. Follow an `/orchestrate` run's progress via its team tasks (`TaskList`/`TaskGet`, step 5). To start a **new** run while one is active, just invoke `/orchestrate` again — Agent Teams runs are independent and can run concurrently.
 
 Coordinate multi-agent workflows for complex operations that span multiple domains. Creates an Agent Team, spawns specialized teammates, and sequences them through a defined pipeline using shared tasks and direct messaging for handoffs between phases.
 
@@ -35,17 +35,20 @@ Parse $ARGUMENTS:
 ## Execution Flow
 
 1. **Parse**: Extract workflow requirements, select or detect pattern
-2. **Create Team**: Initialize the orchestration team:
-   ```
-   TeamCreate(
-     team_name="orchestrate-{workflow-slug}",
-     description="Orchestration: {workflow description}"
-   )
-   ```
+2. **Name the run**: There is no team to create. The session has one implicit
+   team, so instead fix a run slug `orchestrate-{workflow-slug}` and use it as
+   the prefix of every teammate name below, which is what keeps one run's agents
+   distinguishable from another's.
 3. **Spawn Teammates**: Launch required agents for the pipeline:
    ```
-   Task(subagent_type, team_name="orchestrate-{workflow-slug}", name="{role-name}")
+   Agent(
+     subagent_type="{type}",
+     name="orchestrate-{workflow-slug}-{role-name}",
+     prompt="{role brief}"
+   )
    ```
+   The name is what makes a teammate addressable by `SendMessage`, so spawn with
+   one even when the role seems obvious.
    - Spawn all teammates needed for the pipeline pattern
    - Each teammate is a specialist agent activated via the Task tool
 4. **Create Phase Tasks**: Build the pipeline as shared tasks:
@@ -78,7 +81,8 @@ Parse $ARGUMENTS:
    ```
    - Send shutdown requests to all teammates
    - Wait for shutdown confirmations
-   - `TeamDelete` to clean up the team
+   - No teardown call follows. The team is implicit, so shutting down every
+     teammate *is* the cleanup; there is nothing left to delete.
 9. **Report**: Output orchestration summary with team metrics
 
 ## Communication Protocol
@@ -120,14 +124,14 @@ SendMessage(
 
 | Phase | Teammate Spawn | Purpose |
 |-------|----------------|---------|
-| Plan | `Task(planner, team_name="orchestrate-*", name="planner")` | Implementation breakdown |
-| Design | `Task(architect, team_name="orchestrate-*", name="architect")` | System design decisions |
-| Implement | `Task(backend-developer, team_name="orchestrate-*", name="developer")` | Code creation/modification |
-| Test | `Task(tdd-guide, team_name="orchestrate-*", name="tester")` | Test writing and execution |
-| Review | `Task(code-reviewer, team_name="orchestrate-*", name="reviewer")` | Code quality validation |
-| Security | `Task(security-reviewer, team_name="orchestrate-*", name="security")` | Security assessment |
-| Fix Build | `Task(build-error-resolver, team_name="orchestrate-*", name="build-fixer")` | Build error resolution |
-| E2E | `Task(e2e-runner, team_name="orchestrate-*", name="e2e-runner")` | End-to-end testing |
+| Plan | `Agent(planner, name="orchestrate-*-planner")` | Implementation breakdown |
+| Design | `Agent(architect, name="orchestrate-*-architect")` | System design decisions |
+| Implement | `Agent(backend-developer, name="orchestrate-*-developer")` | Code creation/modification |
+| Test | `Agent(tdd-guide, name="orchestrate-*-tester")` | Test writing and execution |
+| Review | `Agent(code-reviewer, name="orchestrate-*-reviewer")` | Code quality validation |
+| Security | `Agent(security-reviewer, name="orchestrate-*-security")` | Security assessment |
+| Fix Build | `Agent(build-error-resolver, name="orchestrate-*-build-fixer")` | Build error resolution |
+| E2E | `Agent(e2e-runner, name="orchestrate-*-e2e-runner")` | End-to-end testing |
 
 ## Output Format
 

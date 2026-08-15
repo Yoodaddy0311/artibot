@@ -21,7 +21,7 @@ tools:
   - Read
   - Glob
   - Grep
-  - Task(Explore)
+  - Agent(Explore)
   # --- Team Collaboration ---
   - SendMessage
   - TaskUpdate

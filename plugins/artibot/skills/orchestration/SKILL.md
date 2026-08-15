@@ -68,7 +68,7 @@ Team mode auto-boost keywords: "전체", "모든", "all", "comprehensive", "audi
 
 | Pattern | Use case | Flow |
 |---------|----------|------|
-| Leader | Sequential with handoffs | TeamCreate → TaskCreate → assign → aggregate |
+| Leader | Sequential with handoffs | Agent spawns -> TaskCreate -> assign -> aggregate |
 | Council | Discussion-based decisions | spawn → SendMessage discussion → leader decides |
 | Swarm | Independent parallel work | TaskCreate (all items) → teammates self-claim |
 | Pipeline | Strict dependencies | TaskCreate with blockedBy chains |
@@ -85,7 +85,7 @@ Bypass: System 1 requests, explicit user override ("just do it"), `--hotfix` fla
 
 ## Quick Reference
 
-**Team API Tools**: TeamCreate, Task(type, team_name, name), TaskCreate, TaskUpdate, TaskList, TaskGet, SendMessage, TeamDelete
+**Team API Tools**: Agent(type, name), TaskCreate, TaskUpdate, TaskList, TaskGet, SendMessage. No create/delete calls: the session has one implicit team, and shutdown_request is the teardown.
 
 **Token zones**: Green 0-60% | Yellow 60-75% (enable --uc) | Orange 75-85% (compress) | Red 85%+ (/clear)
 

@@ -1,7 +1,7 @@
 ---
 description: (Artibot) Ship & Deploy phase command — routes to candidate agents via lifecycle router
 argument-hint: '[task description]'
-allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, Task, TaskCreate]
+allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, Agent, TaskCreate]
 toolset: devops
 lifecycle: ship
 ---
@@ -73,7 +73,7 @@ When invoked, this command:
    node "${CLAUDE_PLUGIN_ROOT}/scripts/route-lifecycle.mjs" ship "$ARGUMENTS"
    ```
    This calls `routeLifecycle('ship', { hint })` from `lib/core/lifecycle-router.js` and prints the `{agent, toolset, skills, candidates}` resolution as a single JSON line.
-3. Spawns the resolved agent via Task() tool with the appropriate prompt
+3. Spawns the resolved agent via Agent() tool with the appropriate prompt
 4. Reports back with the agent's findings
 
 ## Release Surface Checklist

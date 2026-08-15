@@ -1,7 +1,7 @@
 ---
 description: (Artibot) Adversarial code review from attacker's perspective using code-reviewer + security-reviewer agents
 argument-hint: '[target] e.g. "src/ 적대적 리뷰해줘"'
-allowed-tools: [Read, Glob, Grep, Bash, Task, TaskCreate]
+allowed-tools: [Read, Glob, Grep, Bash, Agent, TaskCreate]
 toolset: code
 ---
 
@@ -23,8 +23,8 @@ Parse $ARGUMENTS:
 1. **Parse**: Resolve target. If git range provided, extract changed files via `git diff`
 2. **Recon**: Read target files. Identify entry points, trust boundaries, sensitive assets
 3. **Delegate (parallel)**:
-   - Task(code-reviewer): Logic flaws, edge cases, error handling gaps
-   - Task(security-reviewer): OWASP Top 10, injection vectors, auth bypass, secret exposure
+   - Agent(code-reviewer): Logic flaws, edge cases, error handling gaps
+   - Agent(security-reviewer): OWASP Top 10, injection vectors, auth bypass, secret exposure
 4. **Attack Surface Map**: Identify all external input entry points and trace data flow
 5. **Exploit Analysis**: For each attack surface, construct concrete attack scenarios
 6. **Classify**: Categorize each finding by severity:

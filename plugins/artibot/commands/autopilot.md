@@ -1,7 +1,7 @@
 ---
 description: (Artibot) Autonomous long-running mode with PRD-first workflow, parallel execution, cross-check, verification, and completion report
 argument-hint: <task description> [--max 4h] [--budget 2000000] [--no-tui]
-allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, Task, TaskCreate, TaskUpdate, TaskList, TeamCreate, SendMessage, TaskGet, TeamDelete]
+allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, Agent, TaskCreate, TaskUpdate, TaskList, SendMessage, TaskGet, Workflow]
 toolset: team
 ---
 
@@ -245,12 +245,12 @@ if (pfInstr?.suppress) { /* warnings: state.preflightWarnings에 누적 + 계속
 ```
 
 #### Phase 0 — INTAKE (PRD 생성)
-- `Task(subagent_type="artibot:planner", prompt="[Autopilot Phase 0] 사용자 요청: {task}\n\n\`docs/PRD/<feature>-<sessionId>.md\` 작성. PRD 템플릿: 배경/목표/비목표/시나리오/설계/산출물/실행계획/위험/수락기준\n\n{보고 계약}")`
+- `Agent(subagent_type="artibot:planner", prompt="[Autopilot Phase 0] 사용자 요청: {task}\n\n\`docs/PRD/<feature>-<sessionId>.md\` 작성. PRD 템플릿: 배경/목표/비목표/시나리오/설계/산출물/실행계획/위험/수락기준\n\n{보고 계약}")`
   <!-- model: model-policy 해석 — 역할 frontier 티어 -->
 - `mode === 'plan'`: PRD 경로 보고 후 종료. `:resume <sessionId>` 안내.
 
 #### Phase 1 — PLAN
-- `Task(subagent_type="artibot:planner", prompt="[Autopilot Phase 1] PRD: {prdPath}\n\n분해 + 위험 식별 + 병렬 팀 구성 제안\n\n{보고 계약}")`
+- `Agent(subagent_type="artibot:planner", prompt="[Autopilot Phase 1] PRD: {prdPath}\n\n분해 + 위험 식별 + 병렬 팀 구성 제안\n\n{보고 계약}")`
   <!-- model: model-policy 해석 — 역할 frontier 티어 -->
 
 #### Phase 2 — PARALLEL EXECUTE
@@ -260,18 +260,18 @@ if (pfInstr?.suppress) { /* warnings: state.preflightWarnings에 누적 + 계속
   3. **Stage 2 자동선택**: autoSelect=true **그리고** 세션 시작 시 `options.recommendedRunner === 'workflow'`가 주입된 경우 → `'dynamic-run'`
   4. 그 외 전부 → `'team-create'`
 - **recommendedRunner 주입 규칙 (Step 1 파싱 시)**: 세션 시작 프롬프트에 `[artibot:hint recommend=workflow]` 디렉티브(동형 반복 감지 — `buildWorkflowPlan.recommendation`의 advisory 표면)가 있으면 `options.recommendedRunner = 'workflow'`로 전달한다. 엔진(L2)은 분류기(L4)를 import하지 않고 이 주입값만 소비한다 — 재계산 금지.
-- **`type: 'team-create'`** (기본): `TeamCreate(team_name="autopilot-{sessionId}", description="{task}")` → 병렬 `Task()` 스폰. 30분(또는 `--checkpoint`)마다 WIP commit: `git commit -m "wip(autopilot): phase2 checkpoint {sessionId}"`. SHA를 `engine.recordCheckpoint(sessionId, sha)`로 기록.
-- **`type: 'dynamic-run'`** (`--runner dynamic`): TeamCreate 대신 **하네스 `Workflow` 도구**로 스크립트 런 — Phase 1 PLAN의 작업 단위를 워크리스트로 매핑(pipeline() 기본), 세션 잔여 예산을 Workflow budget으로 전달(이중 계상 금지), checkpoint는 **run 경계**(시작 전/완료 후) WIP commit. **폴백**: 실패/빈 결과 시 같은 Phase를 team-create로 1회 재시도 + `runner-fallback` 이벤트 기록, 재시도도 실패 시 기존 PAUSED 경로.
+- **`type: 'team-create'`** (기본): 러너 이름은 계약 값이고(`lib/autopilot/engine.js:301`) 생성되는 팀은 없다 — 세션의 암묵적 단일 팀에 `Agent(name="autopilot-{sessionId}-{role}", subagent_type=…)`로 팀원을 병렬 스폰한다. 30분(또는 `--checkpoint`)마다 WIP commit: `git commit -m "wip(autopilot): phase2 checkpoint {sessionId}"`. SHA를 `engine.recordCheckpoint(sessionId, sha)`로 기록.
+- **`type: 'dynamic-run'`** (`--runner dynamic`): 팀원 스폰 대신 **하네스 `Workflow` 도구**로 스크립트 런 — Phase 1 PLAN의 작업 단위를 워크리스트로 매핑(pipeline() 기본), 세션 잔여 예산을 Workflow budget으로 전달(이중 계상 금지), checkpoint는 **run 경계**(시작 전/완료 후) WIP commit. **폴백**: 실패/빈 결과 시 같은 Phase를 team-create로 1회 재시도 + `runner-fallback` 이벤트 기록, 재시도도 실패 시 기존 PAUSED 경로.
 
 #### Phase 3 — CROSS_CHECK
-- 팀원 간 원형 검증 (A→B→C→A). 추가로 `Task(subagent_type="artibot:spec-reviewer")` 소환.
+- 팀원 간 원형 검증 (A→B→C→A). 추가로 `Agent(subagent_type="artibot:spec-reviewer")` 소환.
   <!-- model: model-policy 해석 — 역할 frontier 티어 (fable 마이그레이션 이후 review/docs 역할도 frontier) -->
 
 #### Phase 4 — VERIFY
 - `Bash("npm run ci")` 실행. 실패 시 `engine.classifyFailure(error)` → `build-error-resolver` 자동 소환. **3회 재시도 후에도 실패하면 PAUSED**.
 
 #### Phase 5 — IMPROVE
-- 병렬 소환: `Task(subagent_type="artibot:refactor-cleaner")` + `Task(subagent_type="artibot:performance-engineer")`. 결과는 보고서 §7~8.
+- 병렬 소환: `Agent(subagent_type="artibot:refactor-cleaner")` + `Agent(subagent_type="artibot:performance-engineer")`. 결과는 보고서 §7~8.
 
 #### 중계 계약 (MANDATORY — 리더가 사용자에게 보고할 때)
 
@@ -292,7 +292,7 @@ if (pfInstr?.suppress) { /* warnings: state.preflightWarnings에 누적 + 계속
 ```
 
 #### Phase 6 — REPORT
-- `Task(subagent_type="artibot:doc-updater", prompt="[Autopilot Phase 6] reports/AUTOPILOT/{sessionId}.md 작성. 템플릿: PRD §13.5 (요약/PRD링크/Phase표/커밋SHA/Cross-check/검증/개선/미래/큐/Next)\n\n{보고 계약}")`
+- `Agent(subagent_type="artibot:doc-updater", prompt="[Autopilot Phase 6] reports/AUTOPILOT/{sessionId}.md 작성. 템플릿: PRD §13.5 (요약/PRD링크/Phase표/커밋SHA/Cross-check/검증/개선/미래/큐/Next)\n\n{보고 계약}")`
   <!-- model: model-policy 해석 — 역할 frontier 티어 (fable 마이그레이션 이후 review/docs 역할도 frontier) -->
 - `engine.notifyCompletion(sessionId)` 호출 (`--no-notify` 시 skip, `night` 모드는 PushNotification 차단).
 

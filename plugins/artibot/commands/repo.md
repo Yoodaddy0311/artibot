@@ -1,7 +1,7 @@
 ---
 description: (Artibot) Clone and benchmark one or many external git repos against Artibot with scored comparison, parallel team analysis, and complexity-aware adoption filtering
 argument-hint: '[git-url ...] [--focus area] [--deep|--quick] [--no-replace-if-better] [--parallel]'
-allowed-tools: [Read, Glob, Grep, Bash, Task, TaskCreate, TaskUpdate]
+allowed-tools: [Read, Glob, Grep, Bash, Agent, TaskCreate, TaskUpdate]
 toolset: analysis
 ---
 
@@ -100,11 +100,11 @@ Only after completing steps 1–5, proceed to the Execution Flow below.
 
 | Phase | Agent | When |
 |---|---|---|
-| Structure scan | Task(Explore) per repo | always |
-| Core benchmark | Task(repo-benchmarker) **×N parallel** | default for multi-repo |
-| Architecture review | Task(architect) | `--deep` |
-| Code quality | Task(code-reviewer) | `--deep` |
-| Domain/vertical | Task(marketing-strategist) | `--domain-check` |
+| Structure scan | Agent(Explore) per repo | always |
+| Core benchmark | Agent(repo-benchmarker) **×N parallel** | default for multi-repo |
+| Architecture review | Agent(architect) | `--deep` |
+| Code quality | Agent(code-reviewer) | `--deep` |
+| Domain/vertical | Agent(marketing-strategist) | `--domain-check` |
 | Aggregation & complexity filter | orchestrator (main) | always |
 
 **Orchestrator discipline**: the main thread only *aggregates*. Per-repo analysis is never run inline when parallelism is available — this preserves Artibot's "operator delegates, team executes + cross-checks" DNA.

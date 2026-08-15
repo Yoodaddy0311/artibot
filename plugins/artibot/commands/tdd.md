@@ -1,7 +1,7 @@
 ---
 description: (Artibot) Test-driven development workflow (RED -> GREEN -> REFACTOR)
 argument-hint: '[feature] e.g. "TDD로 유틸 함수 개발"'
-allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, Task, TaskCreate]
+allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, Agent, TaskCreate]
 toolset: code
 ---
 
@@ -20,7 +20,7 @@ Parse $ARGUMENTS:
 ## Execution Flow
 
 1. **Parse**: Extract feature requirements, detect test framework from project config
-2. **Plan**: Delegate to Task(tdd-guide) to decompose feature into testable units:
+2. **Plan**: Delegate to Agent(tdd-guide) to decompose feature into testable units:
    - List test cases (happy path, edge cases, error cases)
    - Order by dependency (foundational tests first)
    - Identify mocks/fixtures needed

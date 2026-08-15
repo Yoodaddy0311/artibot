@@ -1,7 +1,7 @@
 ---
 description: (Artibot) Zero-downtime 마이그레이션 체크리스트 — 백업/Rollout/검증/Rollback/Communication/Worst-Case 6섹션 생성
 argument-hint: 'e.g. "MySQL→PostgreSQL", "Node 18→22", "결제 시스템을 Stripe로 이전"'
-allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, Task, TaskCreate]
+allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, Agent, TaskCreate]
 toolset: devops
 lifecycle: ship
 ---
@@ -53,7 +53,7 @@ lifecycle: ship
    - 현재 코드베이스의 관련 의존성 (package.json, requirements.txt, schema.prisma 등)
    - 기존 백업 스크립트 / 헬스체크 엔드포인트
    - 환경 분리 상태 (staging 존재 여부)
-4. **Delegate**: `Task(devops-engineer)` 또는 `Task(architect)`로 라우팅
+4. **Delegate**: `Agent(devops-engineer)` 또는 `Agent(architect)`로 라우팅
    - 데이터 마이그레이션 (스키마 변경) → `architect` 우선
    - 서비스 / 인프라 / 런타임 교체 → `devops-engineer` 우선
 5. **Generate**: 아래 **체크리스트 템플릿** 형식으로 출력

@@ -67,7 +67,7 @@ Progress:
 팀 생성 단계에서 `isolation: "worktree"` 옵션을 지정하면 모든 팀원이 격리된 worktree에서 생성됩니다.
 
 ```
-Task(subagent_type, team_name, name, { isolation: "worktree" })
+Agent(subagent_type, name="{run-slug}-{role}", { isolation: "worktree" })
 ```
 
 **설정**: `artibot.config.json`의 `team.worktreeIsolation.enabled`를 `true`로 설정하면 기본 동작이 됩니다.

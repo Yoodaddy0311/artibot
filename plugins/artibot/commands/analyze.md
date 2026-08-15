@@ -1,7 +1,7 @@
 ---
 description: (Artibot) Multi-dimensional code and system analysis with agent delegation
 argument-hint: '[target] e.g. "보안 취약점 분석해줘"'
-allowed-tools: [Read, Glob, Grep, Bash, Task, TaskCreate]
+allowed-tools: [Read, Glob, Grep, Bash, Agent, TaskCreate]
 toolset: analysis
 ---
 
@@ -46,10 +46,10 @@ When `--delegate` is active or auto-triggered (>50 files or >7 directories):
 
 | Focus | Agent | Task |
 |-------|-------|------|
-| performance | Task(Explore) | Profile hotspots, measure complexity |
-| security | Task(security-reviewer) | Vulnerability scan, threat model |
-| quality | Task(code-reviewer) | Code quality metrics, style violations |
-| architecture | Task(architect) | Dependency mapping, design evaluation |
+| performance | Agent(Explore) | Profile hotspots, measure complexity |
+| security | Agent(security-reviewer) | Vulnerability scan, threat model |
+| quality | Agent(code-reviewer) | Code quality metrics, style violations |
+| architecture | Agent(architect) | Dependency mapping, design evaluation |
 
 ## Output Format
 

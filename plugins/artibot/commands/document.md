@@ -1,7 +1,7 @@
 ---
 description: (Artibot) Documentation generation and maintenance with doc-updater agent
 argument-hint: '[target] e.g. "API 문서 자동 생성"'
-allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, Task, TaskCreate]
+allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, Agent, TaskCreate]
 toolset: design
 ---
 
@@ -39,7 +39,7 @@ If `--type` not specified, detect from target:
    - Outdated references (functions renamed/removed)
    - Missing new features or parameters
    - Broken code examples
-4. **Delegate**: Route to Task(doc-updater) with extracted context:
+4. **Delegate**: Route to Agent(doc-updater) with extracted context:
    - Type-specific template selection
    - Audience-appropriate language level
    - Code example generation from test files

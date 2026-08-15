@@ -27,10 +27,10 @@ Target ratio: **Sub-Agent ~35% | Team ~40%** (remaining ~25% is direct execution
 
 | Condition | Pattern | Team Size | API Flow |
 |-----------|---------|-----------|----------|
-| Independent parallel tasks | Swarm | 3-7 | TeamCreate -> TaskCreate (all) -> self-claim via TaskList |
-| Sequential dependencies | Pipeline | 3-5 | TeamCreate -> TaskCreate with blockedBy -> ordered execution |
-| Consensus or review needed | Council | 3-5 | TeamCreate -> TaskCreate -> SendMessage discussions -> leader decides |
-| Coordinated complex output | Leader | 3-7 | TeamCreate -> TaskCreate -> TaskUpdate (assign) -> aggregate |
+| Independent parallel tasks | Swarm | 3-7 | Agent spawns -> TaskCreate (all) -> self-claim via TaskList |
+| Sequential dependencies | Pipeline | 3-5 | Agent spawns -> TaskCreate with blockedBy -> ordered execution |
+| Consensus or review needed | Council | 3-5 | Agent spawns -> TaskCreate -> SendMessage discussions -> leader decides |
+| Coordinated complex output | Leader | 3-7 | Agent spawns -> TaskCreate -> TaskUpdate (assign) -> aggregate |
 
 ## Orchestration Patterns
 
@@ -47,8 +47,7 @@ Target ratio: **Sub-Agent ~35% | Team ~40%** (remaining ~25% is direct execution
 
 | Tool | Purpose | Usage |
 |------|---------|-------|
-| `TeamCreate` | Create a named team | Once at start of team operation |
-| `Task(subagent_type, team_name, name)` | Spawn teammate into team | Per teammate needed |
+| `Agent(subagent_type, name)` | Spawn a named teammate into the session's implicit team | Per teammate needed |
 | `TaskCreate` | Add work item to shared list | Per work item |
 | `TaskUpdate` | Assign, claim, complete, set dependencies | Throughout lifecycle |
 | `TaskList` | View tasks and status | Coordination and self-claiming |
@@ -58,7 +57,7 @@ Target ratio: **Sub-Agent ~35% | Team ~40%** (remaining ~25% is direct execution
 | `SendMessage(type: "shutdown_request")` | Request teammate shutdown | Cleanup phase |
 | `SendMessage(type: "shutdown_response")` | Approve/reject shutdown | Response to request |
 | `SendMessage(type: "plan_approval_response")` | Approve/reject plan | Plan mode workflow |
-| `TeamDelete` | Remove team | After all work complete |
+| `SendMessage(shutdown_request)` | Shut a teammate down; this IS the teardown | Per teammate, when done |
 
 ## Sub-Agent Specialization
 
@@ -92,11 +91,11 @@ Applies to both Sub-Agent and Team modes:
 ## Team Lifecycle Checklist
 
 1. [ ] Score delegation factors -> confirm Team Mode needed
-2. [ ] `TeamCreate` with descriptive name
-3. [ ] `Task(type, team_name, name)` for each teammate
+2. [ ] Fix a run slug to prefix teammate names with
+3. [ ] `Agent(type, name="{run-slug}-{role}")` for each teammate
 4. [ ] `TaskCreate` for all work items with clear descriptions
 5. [ ] `TaskUpdate` to assign or let teammates self-claim
 6. [ ] Monitor via `TaskList` and coordinate via `SendMessage`
 7. [ ] Aggregate results as tasks complete
 8. [ ] `SendMessage(shutdown_request)` to each teammate
-9. [ ] `TeamDelete` to clean up
+9. [ ] shutdown_request to every teammate -- that is the whole cleanup

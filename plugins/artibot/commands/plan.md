@@ -1,7 +1,7 @@
 ---
 description: (Artibot) Implementation plan creation with risk identification and phase decomposition
 argument-hint: '[task] e.g. "결제 시스템 구현 계획"'
-allowed-tools: [Read, Glob, Grep, Bash, Task, TaskCreate]
+allowed-tools: [Read, Glob, Grep, Bash, Agent, TaskCreate]
 toolset: team
 lifecycle: plan
 ---
@@ -41,7 +41,7 @@ Parse $ARGUMENTS:
    - Related files and modules that will be affected
    - Current test coverage in target areas
    - Dependency graph of affected components
-3. **Delegate**: Route to Task(planner) with gathered context for:
+3. **Delegate**: Route to Agent(planner) with gathered context for:
    - Phase decomposition (3-7 phases typical)
    - Task breakdown within each phase
    - Dependency ordering between tasks

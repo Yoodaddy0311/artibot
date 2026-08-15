@@ -1,7 +1,7 @@
 ---
 description: (Artibot) Load project context with framework detection and dependency mapping
 argument-hint: '[path] e.g. "프로젝트 구조 분석"'
-allowed-tools: [Read, Glob, Grep, Bash, Task]
+allowed-tools: [Read, Glob, Grep, Bash, Agent]
 toolset: meta
 ---
 

@@ -1,7 +1,7 @@
 ---
 description: (Artibot) ADR(Architecture Decision Record) 작성 - 두 개 이상 기술 선택지의 trade-off, 숨겨진 비용, 2년 뒤 부채까지 7섹션으로 비교하고 추천안 제시
 argument-hint: '[선택지 A] vs [선택지 B] e.g. "PostgreSQL vs MongoDB", "React Query vs SWR"'
-allowed-tools: [Read, Glob, Grep, Bash, Task]
+allowed-tools: [Read, Glob, Grep, Bash, Agent]
 toolset: team
 lifecycle: plan
 ---
@@ -42,8 +42,8 @@ lifecycle: plan
 3. **Skill Activation**: `adr-format` skill 활성화. 7-섹션 프레임워크 로드.
 
 4. **Agent Delegation** (복잡도 medium+):
-   - `Task(architect)` — 시스템 영향, 모듈 경계, 의존성 분석
-   - `Task(planner)` — 마이그레이션/도입 phase 분해 (선택)
+   - `Agent(architect)` — 시스템 영향, 모듈 경계, 의존성 분석
+   - `Agent(planner)` — 마이그레이션/도입 phase 분해 (선택)
    - 단순 라이브러리 비교(routing lib 같은)는 inline 처리
 
 5. **7-Section Fill**: 각 섹션을 차례로 채움. 빈칸은 "조사 필요" 명시(거짓 숫자 금지).

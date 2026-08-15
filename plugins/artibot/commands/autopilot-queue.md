@@ -1,7 +1,7 @@
 ---
 description: (Artibot) Multi-goal queue & scheduling for autopilot — enqueue goals, run them FIFO, gate by time window, track per-goal budget
 argument-hint: <add|run|list|remove|pause|resume> [args]
-allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, Task, TaskCreate, TaskUpdate, TaskList, TeamCreate, SendMessage, TaskGet, TeamDelete]
+allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, Agent, TaskCreate, TaskUpdate, TaskList, SendMessage, TaskGet]
 toolset: team
 ---
 

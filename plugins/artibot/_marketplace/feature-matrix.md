@@ -10,7 +10,7 @@ pass); revisit before each submission.
 | Capability | Artibot | LangGraph | AutoGen | CrewAI |
 |---|---|---|---|---|
 | Native Claude Code integration | Yes (first-class) | No (BYO) | No (BYO) | No (BYO) |
-| Parallel agent teams | Yes (TeamCreate API) | Manual graph | Yes (group chat) | Yes (sequential / hierarchical) |
+| Parallel agent teams | Yes (Agent Teams API) | Manual graph | Yes (group chat) | Yes (sequential / hierarchical) |
 | Auto-decomposition + cross-verify | Yes (operator-waits DNA) | Manual | Partial | Partial |
 | Dual-process (System 1 / 2) routing | Yes (EFFORT_POLICY) | No | No | No |
 | Lifelong learning (RLVR + drift) | Yes | No | No | No |

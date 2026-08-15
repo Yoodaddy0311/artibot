@@ -236,7 +236,7 @@ Proposed | Accepted | Deprecated | Superseded by ADR-{n}
 
 1. **선택지 파싱**: `$ARGUMENTS`에서 "A vs B vs ..." 추출. 자연어("PostgreSQL이랑 MongoDB 중 뭐가 나아?")도 받아서 정규화.
 2. **컨텍스트 수집**: `Read`/`Grep`/`Glob`으로 현재 프로젝트의 스택, 규모, 제약을 파악. `package.json`, `requirements.txt`, 기존 ADR 폴더 등.
-3. **architect 에이전트 위임**: 복잡도 medium+ 면 `Task(architect)`로 trade-off 분석 위임.
+3. **architect 에이전트 위임**: 복잡도 medium+ 면 `Agent(architect)`로 trade-off 분석 위임.
 4. **7-섹션 채우기**: 위 양식대로 빈칸 없이. 모르는 항목은 "조사 필요"라고 명시(거짓 숫자 금지).
 5. **추천안 굵게 강조**: TL;DR과 Section 5에서 박스/굵게로 부각.
 6. **저장 경로 제안**: `docs/adr/ADR-{NNN}-{slug}.md` 형태로 저장 권장.

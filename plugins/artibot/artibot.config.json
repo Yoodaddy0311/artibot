@@ -185,10 +185,7 @@
       "cleanupOnClose": true
     },
     "api": {
-      "lifecycle": [
-        "TeamCreate",
-        "TeamDelete"
-      ],
+      "lifecycle": [],
       "communication": [
         "SendMessage"
       ],
@@ -198,13 +195,13 @@
         "TaskList",
         "TaskGet"
       ],
-      "spawning": "Task(subagent_type, team_name, name)"
+      "spawning": "Agent(subagent_type, name)"
     },
     "gracefulDegradation": {
       "detection": "runtime-tool-availability",
       "modes": {
         "agent-teams": {
-          "condition": "TeamCreate tool available",
+          "condition": "Agent and SendMessage tools available",
           "requires": "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1",
           "capabilities": [
             "team-lifecycle",
@@ -217,7 +214,7 @@
           ]
         },
         "sub-agent": {
-          "condition": "Task tool available BUT TeamCreate unavailable",
+          "condition": "Agent tool available BUT SendMessage unavailable",
           "requires": "Claude Code (any version)",
           "capabilities": [
             "fire-and-forget-delegation",
@@ -230,7 +227,7 @@
           "fallbackFrom": "agent-teams"
         },
         "direct": {
-          "condition": "Neither TeamCreate nor Task tool available",
+          "condition": "Neither Agent nor SendMessage available",
           "requires": "Any AI coding assistant",
           "capabilities": [
             "sequential-execution",
@@ -256,19 +253,19 @@
       "subAgent": {
         "condition": "complexity < 0.4 AND single domain AND steps < 3",
         "tools": [
-          "Task"
+          "Agent"
         ],
         "communication": "one-way (result return only)"
       },
       "agentTeam": {
         "condition": "complexity >= 0.4 OR multi-domain OR steps >= 3",
         "tools": [
-          "TeamCreate",
+          "Agent",
           "SendMessage",
           "TaskCreate",
           "TaskUpdate",
           "TaskList",
-          "TeamDelete"
+          "TaskGet"
         ],
         "communication": "P2P bidirectional + shared task list"
       }

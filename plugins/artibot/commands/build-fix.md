@@ -1,7 +1,7 @@
 ---
 description: (Artibot) Automatic build error diagnosis and repair using build-error-resolver agent
 argument-hint: '[error] e.g. "빌드 에러 자동 수정"'
-allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, Task, TaskCreate]
+allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, Agent, TaskCreate]
 toolset: code
 ---
 
@@ -27,7 +27,7 @@ Parse $ARGUMENTS:
    - **Syntax**: Parse errors, unexpected tokens, malformed imports
    - **Config**: Invalid configuration, missing environment variables
    - **Runtime**: Module resolution failures, circular dependencies
-4. **Delegate**: Route to Task(build-error-resolver) with parsed error context
+4. **Delegate**: Route to Agent(build-error-resolver) with parsed error context
 5. **Fix**: Apply fixes in priority order (blocking errors first)
 6. **Rebuild**: Re-run build command to verify fix
 7. **Iterate**: If errors remain and attempts < max, return to step 2

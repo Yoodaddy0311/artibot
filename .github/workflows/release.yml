@@ -31,7 +31,13 @@ jobs:
           cache-dependency-path: plugins/artibot/package-lock.json
 
       - name: Install dependencies
-        run: npm ci --ignore-scripts || npm install
+        # The fallback keeps --ignore-scripts. Without it, `npm ci` failing (a
+        # lockfile that has drifted from package.json is the usual cause) would
+        # silently downgrade to an install that DOES run lifecycle scripts —
+        # arbitrary preinstall/postinstall code from the dependency tree, on a
+        # runner holding a write-scoped token. The flag exists to prevent that,
+        # so the degraded path is exactly where it must not be dropped.
+        run: npm ci --ignore-scripts || npm install --ignore-scripts
 
       - name: Verify version matches tag
         run: |
@@ -146,6 +152,32 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+      # Required by the `gh issue create` escalation paths below. A job-level
+      # `permissions:` block REPLACES the workflow-level one (`:8-9`, which
+      # grants only `contents: write`) instead of merging with it, so until this
+      # line existed the escalation could not have opened an issue under any
+      # circumstance.
+      #
+      # "존재 ≠ 작동": that escalation has been present in code since the badge-PR
+      # flow was introduced and has never once succeeded. It is invisible in the
+      # logs because it only fires when `gh pr merge --auto` FAILS, and that call
+      # kept succeeding — the stall happened one step later, waiting on required
+      # checks that were never created. Measured 2026-08-15: this repo has
+      # exactly one issue in its entire history (#33, 2026-05-21), confirming no
+      # escalation issue has ever been opened.
+      issues: write
+      # Read scopes for the stall detector's two queries. Same rule as above: a
+      # job-level `permissions:` block enumerates the ENTIRE grant, so any scope
+      # not listed here is no-access — `actions/runs` needs `actions: read` and
+      # `commits/<sha>/check-runs` needs `checks: read`.
+      #
+      # Not proven to have been failing: this repo is public (measured
+      # 2026-08-15 `gh repo view` -> visibility PUBLIC), and public resources are
+      # often readable regardless of the grant, so the detector might have worked
+      # by accident. Granting the scopes explicitly removes the dependency on
+      # that accident — and on the repo staying public.
+      actions: read
+      checks: read
 
     steps:
       - name: Checkout master
@@ -206,7 +238,10 @@ jobs:
 
       - name: Install plugin dependencies (for test count)
         working-directory: plugins/artibot
-        run: npm ci --ignore-scripts || npm install
+        # Same reasoning as the validate job's install step: the fallback must
+        # keep --ignore-scripts, or an `npm ci` failure quietly re-enables
+        # lifecycle scripts on a runner that holds a write-scoped token.
+        run: npm ci --ignore-scripts || npm install --ignore-scripts
 
       - name: Count test cases
         # marketplace.json `qualityMetrics.tests` is a test-CASE count, not a
@@ -239,7 +274,207 @@ jobs:
             node plugins/artibot/scripts/ci/sync-marketplace-meta.mjs
           fi
 
-      - name: Open PR for README badge updates
+      # ── Landing strategy ───────────────────────────────────────────────────
+      # There are two ways to get the badge commit onto a protected master, and
+      # which one is usable depends on whether a PAT is configured:
+      #
+      #   mode=ff  — `secrets.ARTIBOT_LANDING_PAT` is present.
+      #     Push to `ci/sync-badges-<tag>`, wait for the required contexts to go
+      #     green on that SHA, then fast-forward master onto it. This is the
+      #     side-branch gate flow documented in CONTRIBUTING.md "Landing changes
+      #     on master", and `ci/**` is already in the push-branch list of both
+      #     required-check workflows. It needs a PAT for exactly the reason the
+      #     PR path's comment records below: a push authenticated with
+      #     GITHUB_TOKEN does not trigger workflow runs, so the required check
+      #     runs would never be created and the branch could never go green.
+      #
+      #   mode=pr  — no PAT. Current behaviour, unchanged: open a PR, enable
+      #     auto-merge, and additionally run the stall detector below.
+      #
+      # Creating the PAT is a USER ACTION and is deliberately out of scope here:
+      # add a fine-grained PAT with `contents: write` on this repo as the
+      # `ARTIBOT_LANDING_PAT` secret. Until someone does, mode=pr is selected and
+      # nothing about the existing release behaviour changes.
+      - name: Decide landing strategy
+        id: strategy
+        env:
+          # `secrets` is not available in step `if:` conditions, so the presence
+          # test is evaluated into an env var here and re-exported as an output.
+          HAS_PAT: ${{ secrets.ARTIBOT_LANDING_PAT != '' }}
+        run: |
+          # Change detection moved here from the landing step so both paths share
+          # a single answer. Same file set, same semantics as before: no diff
+          # means nothing to land and both landing steps skip.
+          #
+          # Include root .claude-plugin/marketplace.json — it is the Claude
+          # Code marketplace routing file and drifted to 4.13.1 vs plugin.json
+          # 4.19.6 (incident 2026-06-08) because nothing wrote to it. The
+          # sync-marketplace-meta.mjs step above now updates both files.
+          if git diff --quiet README.md plugins/artibot/README.md plugins/artibot/marketplace.json .claude-plugin/marketplace.json; then
+            echo "No README / marketplace changes to land."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+          if [ "${HAS_PAT}" = "true" ]; then
+            echo "mode=ff" >> "$GITHUB_OUTPUT"
+            echo "Landing mode: ff (ARTIBOT_LANDING_PAT present — ci/** side-branch gate)"
+          else
+            echo "mode=pr" >> "$GITHUB_OUTPUT"
+            echo "Landing mode: pr (no ARTIBOT_LANDING_PAT — PR + auto-merge + stall detector)"
+          fi
+
+      - name: Land badge sync via ci/** side branch (PAT)
+        if: steps.strategy.outputs.changed == 'true' && steps.strategy.outputs.mode == 'ff'
+        env:
+          # The PAT is needed for exactly one thing: authenticating the push, so
+          # that the resulting workflow runs are attributed to a real user and
+          # therefore actually get created. Every `gh` call below deliberately
+          # uses GITHUB_TOKEN instead — a fine-grained PAT scoped to
+          # `contents: write` has no issues or checks access, so routing the
+          # escalation through it would reintroduce the silent failure this
+          # whole step exists to remove.
+          #
+          # PAT expiry is the expected long-run failure of this path: fine-grained
+          # PATs expire, and when this one does every `git` call against REMOTE
+          # below fails with exit 128. Under `bash -e` that would kill the step
+          # with a red X and no issue, i.e. the badge sync would stop landing and
+          # the only trace would be a failed step nobody is watching. Every git
+          # call is therefore wrapped and routed to open_issue.
+          LANDING_PAT: ${{ secrets.ARTIBOT_LANDING_PAT }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          BRANCH="ci/sync-badges-${GITHUB_REF_NAME}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "${BRANCH}"
+          git add README.md plugins/artibot/README.md plugins/artibot/marketplace.json .claude-plugin/marketplace.json
+          git commit -m "docs(release): sync README badges + marketplace meta to ${GITHUB_REF_NAME}"
+
+          # Push with the PAT explicitly instead of the GITHUB_TOKEN credential
+          # that actions/checkout persisted. The credential is inlined in the
+          # remote URL rather than base64-encoded into an http.extraheader
+          # because Actions' log scrubbing masks the raw secret value wherever it
+          # appears — including inside a URL — but does NOT mask a base64
+          # encoding of it.
+          REMOTE="https://x-access-token:${LANDING_PAT}@github.com/${GITHUB_REPOSITORY}.git"
+
+          # Open a tracking issue, skipping when one with the same title is
+          # already open. No --label: this repo carries only the nine default
+          # GitHub labels (measured 2026-08-15 via `gh label list`), and
+          # `gh issue create` fails outright when handed a label that does not
+          # exist. The previous escalation passed `--label automation,release`,
+          # neither of which exists here — a second, independent reason it could
+          # never have worked, on top of the missing `issues: write`.
+          open_issue() {
+            issue_title="$1"
+            issue_body="$2"
+            existing="$(gh issue list --state open --limit 100 --json title \
+              | jq --arg t "${issue_title}" '[.[] | select(.title == $t)] | length' 2>/dev/null || echo 0)"
+            # An empty value must mean "none found", not "skip the escalation".
+            existing="${existing:-0}"
+            if [ "${existing}" != "0" ]; then
+              echo "::warning::Escalation issue already open, not duplicating: ${issue_title}"
+              return 0
+            fi
+            gh issue create --title "${issue_title}" --body "${issue_body}" \
+              || echo "::warning::Could not open escalation issue: ${issue_title}"
+          }
+
+          # Wait until every check run on a SHA has completed successfully.
+          #
+          # Deliberately does NOT mirror the four required context names. Three
+          # copies of that list already exist (branch protection itself, the
+          # firewall test's REQUIRED_CONTEXTS, the pre-push hook) and a fourth
+          # would be one more thing to drift. Instead this waits for all checks
+          # to be green and then simply attempts the push — branch protection is
+          # the authority on what is required, and it rejects the push if the
+          # set is not satisfied.
+          #
+          # 40 attempts x 15s = 10 min ceiling. Measured 2026-08-15 on PR #100:
+          # the Node matrix took 3m33s wall and the plugin.json contexts 4s, so
+          # the ceiling is roughly 3x the observed worst case.
+          wait_for_green() {
+            target_sha="$1"
+            for _ in $(seq 1 40); do
+              sleep 15
+              payload="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${target_sha}/check-runs" 2>/dev/null || echo '')"
+              # `if`, not `[ ... ] && continue`: the default shell is `bash -e`,
+              # where a bare short-circuit list that evaluates false is a failing
+              # final command and aborts the whole step.
+              if [ -z "${payload}" ]; then continue; fi
+              total="$(printf '%s' "${payload}" | jq -r '.total_count' 2>/dev/null || echo 0)"
+              if [ "${total}" = "0" ]; then continue; fi
+              pending="$(printf '%s' "${payload}" | jq -r '[.check_runs[] | select(.status != "completed")] | length' 2>/dev/null || echo 1)"
+              failed="$(printf '%s' "${payload}" | jq -r '[.check_runs[] | select(.conclusion != null) | select([.conclusion] | inside(["success","neutral","skipped"]) | not)] | length' 2>/dev/null || echo 0)"
+              echo "  ${target_sha}: total=${total} pending=${pending} failed=${failed}"
+              if [ "${failed}" != "0" ]; then return 1; fi
+              if [ "${pending}" = "0" ]; then return 0; fi
+            done
+            return 1
+          }
+
+          ISSUE_TITLE="chore(release): badge sync ${GITHUB_REF_NAME} could not land on master"
+
+          if ! git push "${REMOTE}" "HEAD:refs/heads/${BRANCH}"; then
+            echo "::warning::Could not push ${BRANCH} — the landing PAT is the usual cause (expired, revoked, or missing contents:write)."
+            open_issue "${ISSUE_TITLE}" \
+              "Pushing \`${BRANCH}\` (release ${GITHUB_REF_NAME}) failed, so the badge sync never left the runner. The most likely cause is \`ARTIBOT_LANDING_PAT\` being expired, revoked, or lacking \`contents: write\`. Renew the secret, or remove it to fall back to the PR + auto-merge path."
+            exit 0
+          fi
+          SHA="$(git rev-parse HEAD)"
+          echo "Pushed ${BRANCH} @ ${SHA}"
+
+          if ! wait_for_green "${SHA}"; then
+            echo "::warning::Checks on ${BRANCH} @ ${SHA} did not go green within the wait window."
+            open_issue "${ISSUE_TITLE}" \
+              "Branch \`${BRANCH}\` (release ${GITHUB_REF_NAME}) did not reach a green required-check state at \`${SHA}\`, so master was not fast-forwarded. The badge + marketplace changes are on the branch and need a human to land or discard them."
+            exit 0
+          fi
+
+          # A plain (non-force) push to master is fast-forward-only by
+          # definition, so no extra flag is needed — git rejects it if master has
+          # moved. That rejection is the R5 race: the tag points at the released
+          # commit, and master can advance after the tag. Handle it by rebasing
+          # onto the new master, re-greening, and retrying exactly once.
+          if git push "${REMOTE}" "HEAD:refs/heads/master"; then
+            echo "Fast-forwarded master onto ${BRANCH} @ ${SHA}"
+            exit 0
+          fi
+
+          echo "::warning::master moved since the tag — rebasing ${BRANCH} and retrying once."
+          if ! git fetch "${REMOTE}" master; then
+            echo "::warning::Could not fetch master to rebase onto (landing PAT expired or revoked?)."
+            open_issue "${ISSUE_TITLE}" \
+              "\`${BRANCH}\` (release ${GITHUB_REF_NAME}) could not be fast-forwarded onto master and the follow-up fetch also failed, so no retry was possible. Check whether \`ARTIBOT_LANDING_PAT\` is still valid. The badge changes are on the branch and need a human to land or discard them."
+            exit 0
+          fi
+          if ! git rebase FETCH_HEAD; then
+            git rebase --abort || true
+            echo "::warning::Rebase of ${BRANCH} onto master conflicted."
+            open_issue "${ISSUE_TITLE}" \
+              "Branch \`${BRANCH}\` (release ${GITHUB_REF_NAME}) could not be rebased onto master without conflicts, so the badge sync was not landed. Needs manual resolution."
+            exit 0
+          fi
+          if ! git push --force-with-lease "${REMOTE}" "HEAD:refs/heads/${BRANCH}"; then
+            echo "::warning::Could not push the rebased ${BRANCH} (stale lease, or landing PAT expired)."
+            open_issue "${ISSUE_TITLE}" \
+              "The rebased \`${BRANCH}\` (release ${GITHUB_REF_NAME}) could not be pushed, so the retry was abandoned. Either another writer moved the branch (\`--force-with-lease\` refused) or \`ARTIBOT_LANDING_PAT\` is no longer valid."
+            exit 0
+          fi
+          SHA_RETRY="$(git rev-parse HEAD)"
+          echo "Rebased ${BRANCH} @ ${SHA_RETRY}"
+          if wait_for_green "${SHA_RETRY}" && git push "${REMOTE}" "HEAD:refs/heads/master"; then
+            echo "Fast-forwarded master onto ${BRANCH} @ ${SHA_RETRY} after rebase"
+            exit 0
+          fi
+          echo "::warning::Retry after rebase still could not land ${BRANCH} on master."
+          open_issue "${ISSUE_TITLE}" \
+            "Branch \`${BRANCH}\` (release ${GITHUB_REF_NAME}) failed to land on master even after one rebase retry (head \`${SHA_RETRY}\`). Needs a human to land or discard it."
+
+      - name: Land badge sync via PR + auto-merge
+        id: badge_pr
+        if: steps.strategy.outputs.changed == 'true' && steps.strategy.outputs.mode == 'pr'
         # Previous flow pushed directly to master with the default GITHUB_TOKEN.
         # Branch protection requires PR + required status checks, which blocked
         # every recent release's badge sync. Switching to a PR via the gh CLI:
@@ -251,14 +486,23 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.counts.outputs.version }}
         run: |
-          # Include root .claude-plugin/marketplace.json — it is the Claude
-          # Code marketplace routing file and drifted to 4.13.1 vs plugin.json
-          # 4.19.6 (incident 2026-06-08) because nothing wrote to it. The
-          # sync-marketplace-meta.mjs step above now updates both files.
-          if git diff --quiet README.md plugins/artibot/README.md plugins/artibot/marketplace.json .claude-plugin/marketplace.json; then
-            echo "No README / marketplace changes to PR."
-            exit 0
-          fi
+          # Same dedup + no-label rationale as the ff path's copy above. Defined
+          # here too because steps cannot share shell functions.
+          open_issue() {
+            issue_title="$1"
+            issue_body="$2"
+            existing="$(gh issue list --state open --limit 100 --json title \
+              | jq --arg t "${issue_title}" '[.[] | select(.title == $t)] | length' 2>/dev/null || echo 0)"
+            # An empty value must mean "none found", not "skip the escalation".
+            existing="${existing:-0}"
+            if [ "${existing}" != "0" ]; then
+              echo "::warning::Escalation issue already open, not duplicating: ${issue_title}"
+              return 0
+            fi
+            gh issue create --title "${issue_title}" --body "${issue_body}" \
+              || echo "::warning::Could not open escalation issue: ${issue_title}"
+          }
+
           BRANCH="chore/sync-readme-badges-${GITHUB_REF_NAME}"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -268,7 +512,17 @@ jobs:
           # auto-merge can proceed. Adding [skip ci] would block both the push
           # AND pull_request triggers, leaving the PR permanently BLOCKED.
           git commit -m "docs(release): sync README badges + marketplace meta to ${GITHUB_REF_NAME}"
-          git push origin "${BRANCH}"
+          # Guarded for the same reason as the ff path's pushes: a bare command
+          # under `bash -e` kills the step with a red X and no issue. The
+          # realistic trigger here is re-tagging — pushing v1.2.3 twice leaves a
+          # branch of that name already on the remote, and the second push is
+          # rejected as non-fast-forward.
+          if ! git push origin "${BRANCH}"; then
+            echo "::warning::Could not push ${BRANCH} — a branch of that name likely already exists on the remote (re-tagged release?)."
+            open_issue "chore(release): badge-sync branch ${GITHUB_REF_NAME} could not be pushed" \
+              "Pushing \`${BRANCH}\` (release ${GITHUB_REF_NAME}) was rejected, so no badge-sync PR was opened. If this release was re-tagged, delete the stale remote branch and re-run, or land the badge + marketplace changes manually."
+            exit 0
+          fi
           gh pr create \
             --base master \
             --head "${BRANCH}" \
@@ -277,11 +531,213 @@ jobs:
           # P1 escalation: if --auto fails (auto-merge disabled at repo level,
           # required-check misconfig, etc.) the PR previously stayed open
           # indefinitely. Now we open a tracking issue so the human can act.
+          # The `--label automation,release` this call used to pass was removed:
+          # neither label exists in this repo and `gh issue create` fails on an
+          # unknown label, so the escalation could not have succeeded even with
+          # the `issues: write` permission now granted above.
+          AUTOMERGE_ENABLED=true
           if ! gh pr merge --auto --squash --delete-branch "${BRANCH}"; then
+            AUTOMERGE_ENABLED=false
             echo "::warning::Auto-merge could not be enabled for ${BRANCH} — opening tracking issue."
-            gh issue create \
-              --title "chore(release): badge-sync PR ${GITHUB_REF_NAME} needs manual merge" \
-              --body "Auto-merge was not enabled on \`${BRANCH}\` (release ${GITHUB_REF_NAME}). Please review and merge the PR manually so the README badges + marketplace.json reach master." \
-              --label "automation,release" \
-              || echo "::warning::Could not open tracking issue either — manual cleanup required."
+            open_issue "chore(release): badge-sync PR ${GITHUB_REF_NAME} needs manual merge" \
+              "Auto-merge was not enabled on \`${BRANCH}\` (release ${GITHUB_REF_NAME}). Please review and merge the PR manually so the README badges + marketplace.json reach master."
+          fi
+
+          # The detector below answers exactly one question: "auto-merge is
+          # enabled — will it ever fire?" That question is meaningless when
+          # auto-merge could not be enabled at all, and the escalation just above
+          # has already reported that case. Gating the detector on
+          # AUTOMERGE_ENABLED keeps one release from producing both a "needs
+          # manual merge" and an "is stalled" issue for the same branch.
+          #
+          # head_sha is the PR HEAD, not the tag sha: the tag points at the
+          # commit that was released and this commit is one ahead of it, so
+          # querying the tag sha would make the detector permanently wrong in
+          # both directions.
+          {
+            echo "branch=${BRANCH}"
+            echo "head_sha=$(git rev-parse HEAD)"
+            echo "automerge_enabled=${AUTOMERGE_ENABLED}"
+          } >> "$GITHUB_OUTPUT"
+
+      # ── Stall detector ─────────────────────────────────────────────────────
+      # Enabling auto-merge is not the same as auto-merge working. Between
+      # v4.38.0 and v4.45.0 six badge PRs (#94 #95 #96 #98 #99 #100) sat open for
+      # four months with auto-merge enabled and no signal reaching anyone. The
+      # escalation in the step above only fires when `gh pr merge --auto` FAILS,
+      # and it succeeded every time — the stall was one step later, waiting on
+      # required checks that were never created.
+      #
+      # Two distinct silent modes were measured on 2026-08-15:
+      #   1. no runs at all — #94/#95/#96 (v4.38.0/v4.39.0/v4.40.0):
+      #      `actions/runs?branch=...` returned total_count 0 for all three.
+      #   2. runs created but gated on manual approval — #98/#99/#100:
+      #      conclusion `action_required`, triggering_actor github-actions[bot].
+      #
+      # Mode 2 does not appear in `commits/<sha>/check-runs` at all. On PR #100's
+      # original head 625f5cc3 that endpoint returned total_count 0 while
+      # `gh run list` showed two `action_required` runs on the same branch. So
+      # both a check-runs query and a workflow-runs query are needed: looking
+      # only at check-runs would reach the right verdict for the wrong reason,
+      # and looking for `action_required` *inside* check-runs would never match
+      # anything at all.
+      #
+      # Honest limit on the mode-2 arm: it could not be replayed against live
+      # data. Updating PR #100 to land it caused GitHub to delete those
+      # approval-gated runs (the run ids now 404), destroying the only fixture.
+      # The check-runs arm below WAS replayed against both real SHAs on
+      # 2026-08-15 and returned the correct verdict for each (625f5cc3 -> 0 ->
+      # escalate; 1a7f9e19 -> 6 -> quiet). The mode-2 arm is unproven until a
+      # release actually stalls that way again.
+      #
+      # 6 attempts x 20s = 2 min ceiling, exiting early on the first definite
+      # answer. The question here is only "were checks created", not "did they
+      # pass" — creation was observed within ~8s on PR #100 — so the window does
+      # not need to cover the ~3m30s the Node matrix takes to finish.
+      - name: Detect silent badge-sync stall
+        if: steps.badge_pr.outputs.automerge_enabled == 'true'
+        # The release is already published by the time this runs, so a detector
+        # bug must never fail it. But a swallowed failure is precisely the
+        # silence this step exists to remove: every exit path emits a
+        # ::warning:: annotation, which surfaces on the run summary rather than
+        # only in the step log.
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH: ${{ steps.badge_pr.outputs.branch }}
+          HEAD_SHA: ${{ steps.badge_pr.outputs.head_sha }}
+        run: |
+          # Same dedup + no-label rationale as the ff path's copy above.
+          open_issue() {
+            issue_title="$1"
+            issue_body="$2"
+            existing="$(gh issue list --state open --limit 100 --json title \
+              | jq --arg t "${issue_title}" '[.[] | select(.title == $t)] | length' 2>/dev/null || echo 0)"
+            # An empty value must mean "none found", not "skip the escalation".
+            existing="${existing:-0}"
+            if [ "${existing}" != "0" ]; then
+              echo "::warning::Escalation issue already open, not duplicating: ${issue_title}"
+              return 0
+            fi
+            gh issue create --title "${issue_title}" --body "${issue_body}" \
+              || echo "::warning::Could not open escalation issue: ${issue_title}"
+          }
+
+          # A failed query and a genuine zero must never collapse to the same
+          # value. `... || echo 0` did exactly that: an API error would have been
+          # reported as "no checks exist", which is the same class of
+          # unobservable silent failure this whole step exists to remove. Each
+          # query now records whether it ever succeeded, every failure emits a
+          # ::warning::, and the "all clear" verdict is only reachable when the
+          # queries actually answered.
+          # stderr is captured to a file rather than merged with `2>&1`. Merging
+          # puts any gh warning (deprecation notices, auth hints) into the value
+          # itself, so a query that SUCCEEDED could yield a non-numeric string
+          # and then blow up the `-ge` comparison below under `bash -e`. Keeping
+          # the streams apart means the value is only ever gh's stdout, while the
+          # diagnostic text stays available for the warning message.
+          ERR_LOG="$(mktemp)"
+          err_text() { tr '\n' ' ' < "${ERR_LOG}" | cut -c1-300; }
+
+          # Each query below additionally accepts its result only when it is a
+          # number. A zero exit code is not evidence that the payload parsed, and
+          # treating unparseable output as data is how a detector starts
+          # reporting confident nonsense. A non-numeric result leaves
+          # *_QUERY_OK false, so the verdict lands in the "inconclusive" branch
+          # rather than in a wrong diagnosis.
+
+          CHECKS=0
+          APPROVAL=0
+          CHECKS_QUERY_OK=false
+          APPROVAL_QUERY_OK=false
+          for attempt in $(seq 1 6); do
+            sleep 20
+            if CHECKS_RAW="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${HEAD_SHA}/check-runs" \
+              --jq '.total_count' 2>"${ERR_LOG}")"; then
+              case "${CHECKS_RAW}" in
+                ''|*[!0-9]*)
+                  echo "::warning::check-runs query for ${HEAD_SHA} returned non-numeric output: '${CHECKS_RAW}'"
+                  CHECKS=0 ;;
+                *)
+                  CHECKS="${CHECKS_RAW}"
+                  CHECKS_QUERY_OK=true ;;
+              esac
+            else
+              echo "::warning::check-runs query failed for ${HEAD_SHA}: $(err_text)"
+              CHECKS=0
+            fi
+            # Queried by branch AND by head_sha, taking whichever is larger.
+            # The branch form is the one directly observed to surface
+            # approval-gated runs (2026-08-15, `?branch=chore/sync-readme-badges-*`);
+            # the head_sha form is kept because `pull_request` runs in this repo
+            # do key head_sha to the PR head commit rather than to a synthetic
+            # merge commit (verified on the surviving runs for 1a7f9e19). The
+            # branch is created fresh in the step above and is unique per tag,
+            # so it cannot pick up unrelated runs.
+            APPROVAL_FILTER='[.workflow_runs[] | select(.conclusion == "action_required" or .status == "action_required")] | length'
+            APPROVAL_BRANCH=0
+            APPROVAL_SHA=0
+            if APPROVAL_BRANCH_RAW="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs?branch=${BRANCH}" \
+              --jq "${APPROVAL_FILTER}" 2>"${ERR_LOG}")"; then
+              case "${APPROVAL_BRANCH_RAW}" in
+                ''|*[!0-9]*)
+                  echo "::warning::actions/runs query by branch returned non-numeric output: '${APPROVAL_BRANCH_RAW}'" ;;
+                *)
+                  APPROVAL_BRANCH="${APPROVAL_BRANCH_RAW}"
+                  APPROVAL_QUERY_OK=true ;;
+              esac
+            else
+              echo "::warning::actions/runs query by branch failed for ${BRANCH}: $(err_text)"
+            fi
+            if APPROVAL_SHA_RAW="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${HEAD_SHA}" \
+              --jq "${APPROVAL_FILTER}" 2>"${ERR_LOG}")"; then
+              case "${APPROVAL_SHA_RAW}" in
+                ''|*[!0-9]*)
+                  echo "::warning::actions/runs query by head_sha returned non-numeric output: '${APPROVAL_SHA_RAW}'" ;;
+                *)
+                  APPROVAL_SHA="${APPROVAL_SHA_RAW}"
+                  APPROVAL_QUERY_OK=true ;;
+              esac
+            else
+              echo "::warning::actions/runs query by head_sha failed for ${HEAD_SHA}: $(err_text)"
+            fi
+            # Normalise: a successful query returning nothing leaves the var
+            # empty, and `-ge` on an empty string is a fatal error under `-e`.
+            CHECKS="${CHECKS:-0}"
+            APPROVAL_BRANCH="${APPROVAL_BRANCH:-0}"
+            APPROVAL_SHA="${APPROVAL_SHA:-0}"
+            if [ "${APPROVAL_BRANCH}" -ge "${APPROVAL_SHA}" ]; then
+              APPROVAL="${APPROVAL_BRANCH}"
+            else
+              APPROVAL="${APPROVAL_SHA}"
+            fi
+            echo "attempt ${attempt}: check_runs=${CHECKS} approval_gated=${APPROVAL} (branch=${APPROVAL_BRANCH} sha=${APPROVAL_SHA})"
+            # `if`, not `[ ... ] && break`: the default shell is `bash -e`, where
+            # a bare short-circuit list that evaluates false is a failing final
+            # command and aborts the whole step.
+            if [ "${APPROVAL}" != "0" ]; then break; fi
+            if [ "${CHECKS}" != "0" ]; then break; fi
+          done
+
+          ISSUE_TITLE="chore(release): badge-sync PR ${GITHUB_REF_NAME} is stalled — required checks never started"
+
+          if [ "${APPROVAL}" != "0" ]; then
+            echo "::warning::${APPROVAL} workflow run(s) for ${HEAD_SHA} are waiting for manual approval — auto-merge on ${BRANCH} will never complete."
+            open_issue "${ISSUE_TITLE}" \
+              "Branch \`${BRANCH}\` (release ${GITHUB_REF_NAME}, head \`${HEAD_SHA}\`) has ${APPROVAL} workflow run(s) in \`action_required\` state, i.e. queued behind a manual approval. Auto-merge is enabled but can never complete, because approval-gated runs do not produce check runs on the commit. Approve the runs in the Actions tab, or land the badge sync another way. Setting the \`ARTIBOT_LANDING_PAT\` secret switches this workflow to the ci/** side-branch gate and avoids the approval gate entirely."
+          elif [ "${CHECKS_QUERY_OK}" != "true" ] || [ "${APPROVAL_QUERY_OK}" != "true" ]; then
+            # Ordered BEFORE the `CHECKS = 0` branch on purpose. A query that
+            # never answered leaves CHECKS at its 0 initialiser, so testing for
+            # zero first would diagnose a permission or outage problem as "no
+            # check runs exist" and file an issue saying so — a confidently
+            # wrong diagnosis, which is worse than the silence being fixed here.
+            # No issue is opened: a query outage is not evidence of a stall. But
+            # the run must not look clean either.
+            echo "::warning::Stall detection was inconclusive for ${BRANCH} @ ${HEAD_SHA} (check-runs query ok=${CHECKS_QUERY_OK}, actions/runs query ok=${APPROVAL_QUERY_OK}). Verify the badge PR merged before assuming it did."
+          elif [ "${CHECKS}" = "0" ]; then
+            echo "::warning::No check runs were created for ${HEAD_SHA} — auto-merge on ${BRANCH} will never complete."
+            open_issue "${ISSUE_TITLE}" \
+              "Branch \`${BRANCH}\` (release ${GITHUB_REF_NAME}, head \`${HEAD_SHA}\`) has no check runs at all, so the required status checks can never be satisfied and auto-merge will wait forever. This is the failure mode that left six badge PRs open from v4.38.0 to v4.45.0. Land the badge sync manually, or set the \`ARTIBOT_LANDING_PAT\` secret to switch this workflow to the ci/** side-branch gate."
+          else
+            echo "Badge-sync PR on ${BRANCH}: ${CHECKS} check run(s) created for ${HEAD_SHA} — auto-merge can proceed."
           fi

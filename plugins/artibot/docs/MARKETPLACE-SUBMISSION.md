@@ -187,8 +187,8 @@ memory, self-learning, and native Agent Teams for Claude Code.
 **Detailed description**
 ```text
 Artibot is a 5-layer orchestration framework for Claude Code built on the
-native Agent Teams API (TeamCreate/SendMessage/TaskCreate — not one-shot
-Task() delegation). It ships 28 specialized agents, 75 slash commands, and
+native Agent Teams API (named Agent spawns/SendMessage/TaskCreate - not one-shot
+fire-and-forget delegation). It ships 28 specialized agents, 75 slash commands, and
 114 domain skills, backed by 9,300+ automated tests.
 
 Core capabilities:

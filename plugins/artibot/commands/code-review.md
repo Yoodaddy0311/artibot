@@ -1,7 +1,7 @@
 ---
 description: (Artibot) Code review with severity classification using code-reviewer agent
 argument-hint: '[target] e.g. "src/ 코드 리뷰해줘"'
-allowed-tools: [Read, Glob, Grep, Bash, Task, TaskCreate]
+allowed-tools: [Read, Glob, Grep, Bash, Agent, TaskCreate]
 toolset: code
 ---
 
@@ -21,7 +21,7 @@ Parse $ARGUMENTS:
 
 1. **Parse**: Resolve target. If git range provided, extract changed files via `git diff`
 2. **Context**: Read target files. Identify language, framework, existing patterns
-3. **Delegate**: Route to Task(code-reviewer) with file content and focus area
+3. **Delegate**: Route to Agent(code-reviewer) with file content and focus area
 4. **Classify**: Categorize each finding by severity:
    - **CRITICAL**: Security vulnerabilities, data loss risks, crash-causing bugs
    - **HIGH**: Logic errors, missing error handling, race conditions, type unsafety

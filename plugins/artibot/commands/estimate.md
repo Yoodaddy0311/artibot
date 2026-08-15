@@ -1,7 +1,7 @@
 ---
 description: (Artibot) Evidence-based estimation with complexity scoring and risk factoring
 argument-hint: '[task] e.g. "결제 모듈 개발 공수 산정"'
-allowed-tools: [Read, Glob, Grep, Bash, Task]
+allowed-tools: [Read, Glob, Grep, Bash, Agent]
 toolset: team
 ---
 
