@@ -465,6 +465,33 @@ describe('export-to-tool/convertAntigravity', () => {
     expect(content).not.toContain('TaskCreate()');
   });
 
+  it('translates Agent(...) spawn calls into the Agent Manager verb', () => {
+    // REGRESSION GUARD. `Agent(` is the current spelling of "spawn a teammate";
+    // the replacers were keyed on the retired `TeamCreate(`/`Task(` only, so the
+    // export SUCCEEDED while shipping an untranslated Claude-only call — a
+    // fail-open no-op. Measured 2026-08-15 before the fix: 69 `Agent(` reached
+    // the antigravity output.
+    const agent = {
+      name: 'test-agent',
+      description: 'test',
+      model: 'opus',
+      modelTier: '',
+      category: '',
+      tools: [],
+      permissionMode: '',
+      maxTurns: '',
+      skills: [],
+      // createAgent( must survive: /Agent\(/ without the \b boundary would
+      // rewrite its tail. (TaskUpdate etc. ARE translated here on purpose —
+      // Antigravity has an Agent Manager equivalent — so they are not pinned.)
+      body: 'Spawn with Agent(planner, name="p").\ncreateAgent({ x }) stays.',
+    };
+    const { content } = convertAntigravity(agent);
+    expect(content).toContain('Spawn agents via Agent Manager');
+    expect(content).not.toContain('Agent(planner');
+    expect(content).toContain('createAgent({ x })');
+  });
+
   it('preserves Claude-specific fields as HTML comments', () => {
     const parsed = parseFrontmatter(FIX_RICH);
     const agent = {

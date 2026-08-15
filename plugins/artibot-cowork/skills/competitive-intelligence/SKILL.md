@@ -11,8 +11,8 @@ triggers:
   - "competitive intelligence"
   - "landscape"
 agents:
-  - "code-reviewer"
-  - "architect"
+  - "marketing-strategist"
+  - "data-analyst"
 tokens: "~4K"
 category: "marketing"
 ---

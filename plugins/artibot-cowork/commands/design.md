@@ -1,49 +1,49 @@
 ---
-description: (Artibot) System design with architect agent and ADR generation
-argument-hint: '[module] e.g. "인증 시스템 아키텍처 설계"'
+description: (Artibot) Visual and brand design direction with presentation-designer agent
+argument-hint: '[target] e.g. "신제품 랜딩 페이지 비주얼 방향 잡아줘"'
 allowed-tools: [Read, Glob, Grep, Bash, Agent, TaskCreate]
 ---
 
 # /design
 
-System design and architecture planning. Delegates to architect agent for structural analysis, trade-off evaluation, and Architecture Decision Record (ADR) generation.
+Visual and brand design direction. Delegates to the presentation-designer agent for concept generation, alternative evaluation, and a documented design rationale.
 
 ## Arguments
 
 Parse $ARGUMENTS:
-- `system-or-module`: Target system, module, or feature to design
-- `--type [domain]`: `api` | `data` | `infra` | `ui` | `full`
-- `--adr`: Generate formal Architecture Decision Record
-- `--alternatives [n]`: Number of design alternatives to evaluate (default: 2)
+- `target`: Asset, campaign, or surface to design (landing page, deck, social set, brand system)
+- `--type [domain]`: `brand` | `deck` | `social` | `landing` | `full`
+- `--rationale`: Generate a formal design rationale document
+- `--alternatives [n]`: Number of design directions to evaluate (default: 2)
 
 ## Execution Flow
 
-1. **Parse**: Identify design target and domain type
-2. **Context**: Gather existing architecture:
-   - Project structure and module boundaries
-   - Current dependency graph
-   - Existing design patterns in use
-   - Technology stack and framework constraints
-3. **Delegate**: Route to Agent(architect) for:
-   - Requirements analysis from target description
-   - Design alternative generation (N options)
-   - Trade-off matrix evaluation per alternative
-   - Recommended approach with rationale
-4. **ADR** (if `--adr`): Generate Architecture Decision Record:
+1. **Parse**: Identify the design target and domain type
+2. **Context**: Gather existing design context:
+   - Brand guidelines, palette, and typography in use
+   - Existing assets and templates for the surface
+   - Audience, tone of voice, and campaign objective
+   - Channel constraints (aspect ratios, safe areas, file limits)
+3. **Delegate**: Route to Agent(presentation-designer) for:
+   - Requirement extraction from the target description
+   - Design direction generation (N alternatives)
+   - Trade-off matrix evaluation per direction
+   - Recommended direction with rationale
+4. **Rationale** (if `--rationale`): Generate a design rationale record:
    - Title, Status, Context, Decision, Consequences
-   - Store in `docs/adr/` or project-specific ADR directory
-5. **Validate**: Check design against SOLID principles, existing patterns, scalability needs
-6. **Report**: Output design recommendation with trade-off analysis
+   - Store alongside the campaign or brand documentation
+5. **Validate**: Check the direction against brand guidelines, accessibility contrast, and channel specs
+6. **Report**: Output the design recommendation with trade-off analysis
 
 ## Design Evaluation Criteria
 
 | Criterion | Weight | Measures |
 |-----------|--------|----------|
-| Maintainability | 30% | Complexity, readability, modification cost |
-| Scalability | 25% | Load capacity, horizontal scaling, statelessness |
-| Modularity | 20% | Coupling, cohesion, interface clarity |
-| Simplicity | 15% | Abstraction count, learning curve |
-| Extensibility | 10% | Plugin points, open/closed adherence |
+| Brand fit | 30% | Guideline adherence, tone consistency, recognizability |
+| Clarity | 25% | Message hierarchy, focal point, reading order |
+| Accessibility | 20% | Contrast ratio, legible type sizes, colorblind safety |
+| Reusability | 15% | Template potential, component reuse, asset count |
+| Production cost | 10% | Effort to produce, dependency on external assets |
 
 ## Output Format
 
@@ -53,11 +53,11 @@ Use GFM markdown tables:
 
 | 항목 | 값 |
 |------|-----|
-| Target | [system/module] |
-| Domain | [api/data/infra/ui] |
+| Target | [asset/campaign] |
+| Domain | [brand/deck/social/landing] |
 | Status | PROPOSED/ACCEPTED |
 
-**Design Options**
+**Design Directions**
 
 | Option | Description | Advantages | Disadvantages | Score |
 |--------|-------------|------------|---------------|-------|
@@ -66,11 +66,11 @@ Use GFM markdown tables:
 
 **Recommendation**: [A/B] — [rationale]
 
-**Dependency Map**
+**Asset Plan**
 
-| From | To | Coupling |
-|------|----|----------|
-| [module] | [module] | tight/loose |
+| Asset | Channel | Spec |
+|-------|---------|------|
+| [asset] | [channel] | [dimensions/format] |
 
 ## Next Steps
 
@@ -78,6 +78,6 @@ Use GFM markdown tables:
 
 | # | 액션 | 커맨드 | 설명 |
 |---|------|--------|------|
-| 1 | 설계 구현 | `/implement` | 설계 결과 기반 구현 시작 |
-| 2 | 설계 검증 | `/analyze` | 설계 품질 및 의존성 분석 |
-| 3 | 설계 문서화 | `/document` | ADR 및 설계 문서 작성 |
+| 1 | 자료 제작 | `/ppt` | 확정된 방향으로 덱·자료 제작 |
+| 2 | 방향 검증 | `/analyze` | 콘텐츠·전환 관점에서 방향 점검 |
+| 3 | 가이드 문서화 | `/document` | 디자인 근거 및 가이드 문서 작성 |

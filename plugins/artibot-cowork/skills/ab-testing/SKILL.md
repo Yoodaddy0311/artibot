@@ -13,8 +13,8 @@ triggers:
   - "statistical significance"
   - "sample size"
 agents:
-  - "code-reviewer"
-  - "performance-engineer"
+  - "cro-specialist"
+  - "data-analyst"
 tokens: "~4K"
 category: "testing"
 ---

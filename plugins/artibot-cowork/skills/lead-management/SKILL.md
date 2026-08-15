@@ -12,8 +12,8 @@ triggers:
   - "prospect"
   - "lead nurture"
 agents:
-  - "backend-developer"
-  - "code-reviewer"
+  - "cro-specialist"
+  - "data-analyst"
 tokens: "~4K"
 category: "marketing"
 ---

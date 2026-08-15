@@ -167,5 +167,5 @@ COMPETITOR ANALYSIS (if --compete)
 | 1 | 성과 분석 | `/analytics` | 소셜 미디어 성과 분석 |
 | 2 | 콘텐츠 제작 | `/content` | 소셜 콘텐츠 추가 제작 |
 | 3 | 유료 프로모션 | `/ad` | 소셜 광고 캠페인 생성 |
-| 4 | A/B 테스트 설계 | `/ab-testing` | 소셜 콘텐츠 실험 설계 |
-| 5 | 경쟁사 분석 | `/competitive-intelligence` | 심층 경쟁사 조사 |
+| 4 | A/B 테스트 설계 | `ab-testing` 스킬 | 소셜 콘텐츠 실험 설계 |
+| 5 | 경쟁사 분석 | `competitive-intelligence` 스킬 | 심층 경쟁사 조사 |

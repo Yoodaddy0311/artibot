@@ -88,9 +88,9 @@ Effort Policy:
 
 Deep Plan에서 팀 오케스트레이션 사용 시:
 ```
-/team ultraplan deep [topic]
+/ultraplan deep [topic]
 ```
-→ 오케스트레이터가 `marketing-campaign` 플레이북으로 자동 실행
+→ orchestrator 에이전트가 `marketing-campaign` 플레이북으로 팀을 구성해 자동 실행
 
 ## Execution Flow
 

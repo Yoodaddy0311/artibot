@@ -18,8 +18,8 @@ triggers:
   - "국내 검색"
   - "Naver SEO"
 agents:
-  - "code-reviewer"
-  - "backend-developer"
+  - "seo-specialist"
+  - "content-marketer"
 tokens: "~5K"
 category: "marketing"
 ---

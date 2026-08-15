@@ -64,12 +64,12 @@ spawn until they finish or accept a shutdown request.
 
 ## Sub-Agent Specialization
 
-| Role | Persona | Focus | Tools |
-|------|---------|-------|-------|
-| Quality | qa | Complexity, maintainability | Read, Grep, Sequential |
-| Security | security | Vulnerabilities, compliance | Grep, Sequential, Context7 |
-| Performance | performance | Bottlenecks, optimization | Read, Sequential, Playwright |
-| Architecture | architect | Patterns, structure | Read, Sequential, Context7 |
+| Role | Agent | Focus | Tools |
+|------|-------|-------|-------|
+| Analysis | data-analyst | KPIs, trends, attribution | Read, Grep, Bash |
+| Conversion | cro-specialist | Funnel drop-off, friction, tests | Read, Grep, WebFetch |
+| Search | seo-specialist | Visibility, keyword gaps, technical SEO | Read, Grep, WebSearch |
+| Strategy | marketing-strategist | Positioning, channel mix, competitive set | Read, WebSearch |
 
 ## Concurrency Limits
 

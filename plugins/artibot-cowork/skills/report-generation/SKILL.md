@@ -11,7 +11,7 @@ triggers:
   - "summary"
   - "insights report"
 agents:
-  - "code-reviewer"
+  - "data-analyst"
   - "doc-updater"
 tokens: "~3K"
 category: "analysis"

@@ -98,6 +98,41 @@ describe('cleanDescription()', () => {
   });
 });
 
+describe('stripAgentTeamsRefs() — Agent() spawn calls', () => {
+  // REGRESSION GUARD. The harness renamed the spawn tool Task() -> Agent(), and
+  // these replacers were keyed on the retired names only. The result was
+  // fail-open in the worst way: the export SUCCEEDED and shipped an untranslated
+  // Claude-only call. Measured 2026-08-15 before the fix — 69 `Agent(` survived
+  // into every platform's export output. A dead pattern is silent; that is
+  // exactly why it needs a test rather than an eyeball.
+  it('replaces Agent(...) with (agent delegation)', () => {
+    const result = stripAgentTeamsRefs('Use Agent(planner, name="p") to delegate.');
+    expect(result).not.toContain('Agent(');
+    expect(result).toContain('(agent delegation)');
+  });
+
+  it('does NOT eat the tail of identifiers like createAgent(', () => {
+    // The \b in /\bAgent\(/ is load-bearing. Without it `createAgent(` becomes
+    // `create(agent delegation)`. commands/sdk.md ships that exact spelling.
+    const result = stripAgentTeamsRefs('createAgent({ name }) stays intact');
+    expect(result).toContain('createAgent({ name })');
+  });
+
+  it('leaves the real Task* tools untouched', () => {
+    // These are CURRENT tools, not retired spellings. A replacer that catches
+    // them would corrupt working instructions.
+    const input = 'TaskCreate(a) TaskUpdate(b) TaskGet(c) TaskList() TaskStop(d)';
+    expect(stripAgentTeamsRefs(input)).toBe(input);
+  });
+
+  it('leaves bare "Agent" prose alone (it is an ordinary English word)', () => {
+    // Documented limitation, asserted so a future "improvement" to a bare-name
+    // match has to break this test on purpose rather than by accident.
+    const input = 'Delegate with the Agent tool when work is independent.';
+    expect(stripAgentTeamsRefs(input)).toBe(input);
+  });
+});
+
 describe('stripAgentTeamsRefs()', () => {
   it('replaces TeamCreate and TeamDelete with (team coordination)', () => {
     const result = stripAgentTeamsRefs('Use TeamCreate and TeamDelete');

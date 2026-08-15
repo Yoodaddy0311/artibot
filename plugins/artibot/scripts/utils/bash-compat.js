@@ -186,18 +186,46 @@ export function probeBashCandidate(bin) {
 /**
  * What a caller spawning `sh` actually depends on, expressed as a script.
  *
- * Existence is not the property under test — see the module header, and note
- * that the failure this guards against is WORSE for `sh` than it was for bash.
- * Measured 2026-08-15 from a PowerShell with a registry-only PATH:
+ * Existence is not the property under test — see the module header. Measured
+ * 2026-08-15 from a PowerShell with a registry-only PATH (git 2.51.0.windows.1):
  *
- *   Git\usr\bin\sh.exe   starts, exits 0, delivers NO stdin, and resolves
- *                        none of grep/sed/awk/cut/tr.
- *   Git\bin\sh.exe       sets up /usr/bin, delivers stdin, resolves everything.
+ *   Git\usr\bin\sh.exe   starts, exits 0, but resolves none of
+ *                        grep/sed/awk/head/cat — it does NOT set up /usr/bin.
+ *   Git\bin\sh.exe       sets up /usr/bin, so every tool resolves.
  *
  * Both "exist". Accepting the first would have produced a suite that runs and
- * fails for invented reasons — a false red dressed as a real one. So the probe
- * asserts the two properties a hook harness cannot work without: stdin reaches
- * the script, and the POSIX text tools the scripts under test call are on PATH.
+ * fails for invented reasons — a false red dressed as a real one.
+ *
+ * CORRECTION (2026-08-15, later the same day). An earlier version of this
+ * comment also claimed `usr/bin/sh.exe` "delivers NO stdin". **That was wrong**,
+ * and the way it was wrong is worth keeping, because the mistake is reusable:
+ * the original probe tested stdin with `$(cat)`, so on a shell where `cat` is
+ * not on PATH the substitution yields '' and an absent TOOL reads exactly like
+ * a dropped STDIN. Re-measured with the shell builtin `read`, which needs
+ * nothing on PATH:
+ *
+ *   usr/bin/sh.exe + `read`   -> GOT=[HELLO]   (stdin arrives)
+ *   usr/bin/sh.exe + `$(cat)` -> GOT=[]        (cat missing, not stdin missing)
+ *   bin/sh.exe     + either   -> GOT=[HELLO]
+ *
+ * So there is exactly ONE discriminator between these two shells: PATH tool
+ * availability. Do not "simplify" the loop below away on the theory that the
+ * stdin check already covers it — it is the tool loop that does the real work,
+ * and dropping it re-selects the broken shell.
+ *
+ * Note also what the `$(cat)` line below therefore is and is not: it is in
+ * practice a sixth tool check (for `cat`), NOT an independent guarantee that a
+ * shell forwards stdin. A true stdin assertion would have to use `read`.
+ *
+ * Switching that line to `read` was proposed and REJECTED 2026-08-15: no shell
+ * has ever been observed that resolves every tool above yet drops stdin, so the
+ * change would buy nothing the tool loop does not already catch. Reconsider on
+ * evidence, not on theory — if such a shell is ever actually observed, that is
+ * the trigger to make the stdin check independent.
+ *
+ * Reservation: the counter-evidence was reproduced on two machines, but both
+ * were Git for Windows; whether some other Git build genuinely drops stdin here
+ * is untested. The probe does not care either way — it rejects on the tool loop.
  */
 const SH_PROBE_STDIN = 'artibot_sh_stdin_ok';
 const SH_PROBE_TOOLS = ['grep', 'sed', 'awk', 'head', 'cat'];

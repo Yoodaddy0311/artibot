@@ -169,6 +169,29 @@ describe('AntigravityAdapter', () => {
   });
 
   describe('convertAgent() - convertToAgentManager transformations', () => {
+    // REGRESSION GUARD. `Agent(` replaced `Task(` as the spawn spelling and
+    // `TeamCreate(` was retired, but the replacers still matched only the retired
+    // names. The failure was silent — conversion succeeded and emitted an
+    // untranslated Claude-only call.
+    it('converts Agent(...) to the Agent Manager spawn instruction', () => {
+      const agent = { name: 'test', content: 'Use Agent(planner, name="p") to delegate' };
+      const result = adapter.convertAgent(agent);
+      expect(result.content).not.toContain('Agent(planner');
+      expect(result.content).toContain('Spawn agents via Agent Manager');
+    });
+
+    it('does not rewrite createAgent( — the \\b boundary holds', () => {
+      // Unlike the generic adapters, this converter DOES translate the Task*
+      // tools on purpose (TaskUpdate -> "Update task status" etc.), because
+      // Antigravity has an Agent Manager equivalent for each. So the thing worth
+      // pinning here is only the identifier-tail hazard the new Agent( rule
+      // introduces: without \b, `createAgent(` becomes `create(...)`.
+      const agent = { name: 'test', content: 'createAgent({ x }) and TaskStop(2) stay intact' };
+      const result = adapter.convertAgent(agent);
+      expect(result.content).toContain('createAgent({ x })');
+      expect(result.content).toContain('TaskStop(2)');
+    });
+
     it('converts TeamCreate(...) to Agent Manager spawn instruction', () => {
       const agent = { name: 'test', content: 'Use TeamCreate(team_id: "squad") to form teams' };
       const result = adapter.convertAgent(agent);

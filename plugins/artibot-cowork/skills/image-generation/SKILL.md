@@ -18,7 +18,7 @@ triggers:
   - "이미지 수정"
   - "그려줘"
 agents:
-  - "frontend-developer"
+  - "presentation-designer"
 tokens: "~5K"
 category: "design"
 ---

@@ -12,8 +12,9 @@ triggers:
   - "brand consistency"
   - "tone"
 agents:
+  - "content-marketer"
+  - "presentation-designer"
   - "doc-updater"
-  - "frontend-developer"
 tokens: "~3K"
 category: "marketing"
 ---

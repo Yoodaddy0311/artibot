@@ -13,8 +13,7 @@ triggers:
   - "data patterns"
 agent: Explore
 agents:
-  - "code-reviewer"
-  - "performance-engineer"
+  - "data-analyst"
 tokens: "~4K"
 category: "analysis"
 ---

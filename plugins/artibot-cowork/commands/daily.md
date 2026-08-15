@@ -8,7 +8,7 @@ allowed-tools: [Read, Bash, Glob, Grep, TaskList, TaskGet, Write]
 
 Daily retrospective report. Collects git activity, quality metrics, task status, and worklog entries to produce a structured review dashboard. Inspired by Claude Code's `/insights` but focused on a single day's developer activity.
 
-Also routed from: `/recap`, natural language "회고", "일일 보고", "오늘 작업", "오늘 뭐 했지"
+Also routed from natural language: "회고", "일일 보고", "오늘 작업", "오늘 뭐 했지"
 
 ## Arguments
 
@@ -269,6 +269,6 @@ When `--save` is specified:
 
 | # | 액션 | 커맨드 | 설명 |
 |---|------|--------|------|
-| 1 | 체크포인트 저장 | `/checkpoint` | 현재 상태 스냅샷 저장 |
-| 2 | 미완료 작업 정리 | `/task` | 보류 및 진행중 작업 정리 |
-| 3 | 변경사항 커밋 | `/git` | 미커밋 변경사항 커밋 |
+| 1 | 회고 문서화 | `/document` | 오늘 회고를 문서로 저장 |
+| 2 | 다음 작업 계획 | `/ultraplan` | 미완료 작업 기반 계획 수립 |
+| 3 | 성과 점검 | `/analytics` | 지표 기준으로 성과 확인 |

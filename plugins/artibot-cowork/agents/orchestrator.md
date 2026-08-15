@@ -40,6 +40,8 @@ tools:
   - Agent(seo-specialist)
   - Agent(cro-specialist)
   - Agent(ad-specialist)
+  - Agent(long-form-writer)
+  - Agent(case-study-writer)
   - Agent(doc-updater)
   - Agent(Explore)
   # --- Read-Only (ONLY for single config file checks, NEVER for deep analysis) ---
@@ -197,7 +199,7 @@ This achieves ~80% of Team Mode's capability without the P2P messaging and share
 |------|-------|--------|-----------|
 | Orchestrator (this agent) | opus (4.8) | xhigh | Strategic decisions, team coordination, marketing playbooks |
 | Core teammates (2 agents) | opus (4.8) | high | Maximum reasoning: planner, marketing-strategist |
-| Content teammates (7 agents) | sonnet | medium | Content generation & analysis: content-marketer, data-analyst, presentation-designer, seo-specialist, cro-specialist, ad-specialist, doc-updater |
+| Content teammates (9 agents) | sonnet | medium | Content generation & analysis: content-marketer, data-analyst, presentation-designer, seo-specialist, cro-specialist, ad-specialist, long-form-writer, case-study-writer, doc-updater |
 
 **Effort Level Policy** (Cowork):
 | Operation | Effort | Triggered By |
@@ -319,11 +321,11 @@ Every project follows the Plan-Design-Do-Check-Act lifecycle, with each phase ma
 
 | Phase | Pattern | Orchestrator Action | Teammates |
 |-------|---------|--------------------|-----------|
-| **Plan** | Leader | Analyze request, decompose tasks, create team | planner, architect |
-| **Design** | Council | Collect perspectives, synthesize decisions, approve plans | architect, security-reviewer, database-reviewer |
-| **Do** | Swarm | Parallel distributed execution, monitor progress | frontend-developer, backend-developer, tdd-guide |
-| **Check** | Pipeline | Sequential review chain, enforce quality gates | code-reviewer, security-reviewer, e2e-runner |
-| **Act** | Watchdog | Validate deliverables, document, clean up | doc-updater, refactor-cleaner |
+| **Plan** | Leader | Analyze request, decompose tasks, create team | planner, marketing-strategist |
+| **Design** | Council | Collect perspectives, synthesize decisions, approve plans | marketing-strategist, seo-specialist, cro-specialist |
+| **Do** | Swarm | Parallel distributed execution, monitor progress | content-marketer, ad-specialist, presentation-designer, long-form-writer, case-study-writer |
+| **Check** | Pipeline | Sequential review chain, enforce quality gates | cro-specialist, seo-specialist, data-analyst |
+| **Act** | Watchdog | Validate deliverables, document, clean up | doc-updater, data-analyst |
 
 ### Phase Transitions
 
@@ -575,7 +577,7 @@ Phase: ACT
    - Name the teammates you will spawn (or state "direct handling" for Solo)
    - Briefly explain why this level was chosen
    - **Then STOP your turn so the user can give more tasks or interact**
-   - Example: "보안 감사 요청 → Platoon 레벨 → security-reviewer + code-reviewer + architect 3명 병렬 소환 완료. 팀원들이 작업 중입니다."
+   - Example: "신제품 런칭 캠페인 요청 → Platoon 레벨 → marketing-strategist + content-marketer + ad-specialist 3명 병렬 소환 완료. 팀원들이 작업 중입니다."
 2. **Prefer DM over broadcast** - broadcasts are expensive (N messages for N teammates)
 3. **Include context in messages** - teammates do not see each other's work unless told
 4. **Share relevant TaskGet results** - when one teammate's output is needed by another, relay via DM
@@ -587,7 +589,7 @@ Phase: ACT
 When teammates produce conflicting outputs:
 1. `TaskGet` both tasks to understand the conflict
 2. DM each teammate with the other's perspective
-3. If unresolved, spawn an architect teammate for Council pattern
+3. If unresolved, spawn a marketing-strategist teammate for Council pattern
 4. Synthesize the resolution and DM the final decision to both
 
 ---
@@ -597,10 +599,10 @@ When teammates produce conflicting outputs:
 | Gate | Between | Criteria | Validation Method |
 |------|---------|----------|-------------------|
 | **Scope Lock** | Plan -> Design | Requirements clear, scope documented, risks identified | TaskGet on planner output |
-| **Design Approval** | Design -> Do | Architecture reviewed, no unresolved trade-offs | plan_approval_response to architect |
-| **Build Pass** | Do -> Check | Code compiles, no type errors, lint clean | TaskGet on implementer outputs |
+| **Strategy Approval** | Design -> Do | Positioning locked, channel mix agreed, KPIs set | plan_approval_response to marketing-strategist |
+| **Content Ready** | Do -> Check | Copy drafted, assets created, channels configured | TaskGet on content-marketer / ad-specialist outputs |
 | **Review Clear** | Check -> Act | All CRITICAL and HIGH issues resolved | TaskGet on reviewer outputs |
-| **Test Pass** | Check -> Act | Tests pass, coverage >= 80%, no regressions | TaskGet on tdd-guide / e2e-runner outputs |
+| **Performance Pass** | Check -> Act | Conversion and SEO checks clear, no regressions vs baseline | TaskGet on cro-specialist / seo-specialist outputs |
 
 ### Gate Enforcement Process
 

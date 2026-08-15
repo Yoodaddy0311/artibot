@@ -24,7 +24,7 @@ triggers:
   - "component check"
   - "visual diff"
 agents:
-  - "qa"
+  - "quality-reviewer"
   - "frontend-developer"
 tokens: "~4K"
 category: "testing"

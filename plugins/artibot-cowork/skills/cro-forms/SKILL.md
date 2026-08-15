@@ -10,8 +10,7 @@ triggers:
   - "form UX"
   - "form design"
 agents:
-  - "frontend-developer"
-  - "tdd-guide"
+  - "cro-specialist"
 tokens: "~3K"
 category: "marketing"
 ---

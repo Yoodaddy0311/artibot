@@ -145,8 +145,10 @@ describe('probeShCandidate', () => {
   // back into an existence check. `process.execPath` definitely exists and
   // definitely spawns; it is simply not a POSIX shell. A probe that answers
   // "can I spawn it" says yes here, and that answer is what picked a `sh.exe`
-  // which starts fine but silently drops stdin (measured 2026-08-15:
-  // Git\usr\bin\sh.exe delivered an empty stdin and had no grep/sed/awk).
+  // which starts fine but resolves none of grep/sed/awk/head/cat (measured
+  // 2026-08-15: Git\usr\bin\sh.exe, registry-only PATH). An earlier note here
+  // also said that shell dropped stdin; that was a misreading of the missing
+  // `cat` and has been retracted — see bash-compat.js#SH_PROBE_SCRIPT.
   it('rejects a real executable that is not a POSIX shell', () => {
     const res = probeShCandidate(process.execPath);
     expect(res.ok, 'node was accepted as a POSIX shell').toBe(false);

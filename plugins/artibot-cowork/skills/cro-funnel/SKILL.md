@@ -10,8 +10,8 @@ triggers:
   - "CRO"
   - "conversion rate"
 agents:
-  - "performance-engineer"
-  - "code-reviewer"
+  - "cro-specialist"
+  - "data-analyst"
 tokens: "~4K"
 category: "marketing"
 ---

@@ -11,7 +11,7 @@ triggers:
   - "cohort"
   - "customer segment"
 agents:
-  - "code-reviewer"
+  - "data-analyst"
 tokens: "~3K"
 category: "marketing"
 ---

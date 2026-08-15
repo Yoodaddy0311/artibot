@@ -528,8 +528,46 @@ export function convertAntigravity(agent) {
   return { fileName, content };
 }
 
+/**
+ * Rewrite Claude Teams API calls into their Antigravity Agent Manager equivalents.
+ *
+ * `Agent(...)` is the CURRENT spelling of "bring a teammate into existence"; the
+ * harness renamed it from `Task(...)`, and `TeamCreate(...)` was retired when the
+ * session became a single implicit team. Both retired names are kept below because
+ * this transformer also runs over agent bodies vendored from older exports — they
+ * cost nothing and removing them would silently stop translating that content.
+ *
+ * ── What this cannot see (repo convention: state it next to the gate) ──────────
+ *
+ *  1. **Bare names without a call.** Every rule here requires `(`. Prose that says
+ *     "use the Agent tool" is left alone — deliberate, since `Agent` is also an
+ *     ordinary English word and a blanket rewrite would corrupt real sentences.
+ *     The cost is that narrative instructions survive untranslated.
+ *  2. **Nested parentheses.** `[^)]*` stops at the FIRST `)`, so
+ *     `Agent(prompt="… (note) …")` would be truncated mid-argument. Measured
+ *     2026-08-15: zero occurrences in `agents/` (the only input this transformer
+ *     receives) and one in `commands/`, which never reaches here. Pre-existing
+ *     limitation shared by every rule below, not new to the `Agent` line.
+ *  3. **Fenced code blocks are rewritten like any other text.** These are plain
+ *     string replacements over the whole body, so a ```` ``` ```` example turns
+ *     into prose mid-listing: `Agent(planner, name="x")` becomes
+ *     `Spawn agents via Agent Manager`. Measured 2026-08-15: 34 of the 73
+ *     `Agent(` in `agents/` sit inside fences, all in `orchestrator.md`. This is
+ *     intended — the example calls an API the target platform does not have — but
+ *     it means exported code blocks are illustrative, not runnable, and a reader
+ *     cannot tell which lines were rewritten. Every rule here has always behaved
+ *     this way; the `Agent` line did not introduce it.
+ *  4. **Whether the Antigravity phrasing is actually correct.** These strings are
+ *     a manual mapping to another product's vocabulary; nothing verifies they
+ *     still match Antigravity's UI. They rot silently.
+ */
 function replaceAgentTeamsRefs(body) {
   return body
+    // `\bAgent\(` — the boundary is load-bearing. Without it this also eats the
+    // tail of identifiers like `createAgent(` (commands/sdk.md) and rewrites them
+    // into nonsense. `Task*` tools are unaffected: they are real, still-current
+    // tools and no rule here matches them by accident.
+    .replace(/\bAgent\([^)]*\)/g, "Spawn agents via Agent Manager")
     .replace(/TeamCreate\([^)]*\)/g, "Spawn agents via Agent Manager")
     .replace(/TeamDelete\([^)]*\)/g, "Close agent workspaces when done")
     .replace(/SendMessage\([^)]*\)/g, "Leave feedback on agent Artifact")

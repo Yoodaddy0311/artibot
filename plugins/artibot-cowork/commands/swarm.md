@@ -147,5 +147,5 @@ Privacy:       SHA-256 + Laplacian DP (ε=1.0)
 
 | # | Action | Description |
 |---|--------|-------------|
-| 1 | Learn patterns | `/swarm-intelligence` skill — understand what gets shared |
+| 1 | Learn patterns | `swarm-intelligence` skill — understand what gets shared |
 | 2 | Full management | Use CLI plugin for complete swarm control with live sync |

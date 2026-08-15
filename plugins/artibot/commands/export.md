@@ -60,12 +60,22 @@ cp antigravity-export/*.md .antigravity/agents/
 - Agent frontmatter (name, description, model, tools)
 - Agent body instructions
 - Team Collaboration sections are stripped with platform-specific fallback notes
-- Claude Code-specific API references (TeamCreate, SendMessage, etc.) are replaced with platform equivalents
+- **Antigravity only** — Claude Teams API calls in the body (`Agent(...)`, `SendMessage(...)`,
+  `TaskCreate(...)`, …) are rewritten into Agent Manager equivalents
 
-<!-- The retired `TeamCreate` spelling above is deliberate, not drift: this line names the literal
-     strings that `scripts/export-to-tool.mjs#replaceAgentTeamsRefs` matches. Renaming it to `Agent`
-     would make the doc claim a translation the exporter does not perform — the replacers still only
-     cover the pre-rename names. Fix the exporter first, then this line. -->
+Two honesty notes on the last point, both measured 2026-08-15:
+
+- **Cursor / Codex / OpenCode get no call-level rewrite.** Those converters strip the
+  Team Collaboration section and attach a "not supported on this platform" note, then
+  pass the body through verbatim. Claude-only calls elsewhere in the body survive as-is.
+  (The `lib/adapters/*` adapters — a separate stack — do redact them to labels such as
+  `(agent delegation)`.)
+- **The source `tools:` declaration is carried through verbatim on every platform** — as a
+  YAML `tools:` list for Codex/OpenCode/Antigravity, and as an
+  `<!-- Artibot source tools: … -->` comment for Cursor. Either way the rewriters never see
+  it (they only receive the body), so an orchestrator exports with `Agent(architect)`,
+  `SendMessage`, and `TaskCreate` still named. 24 occurrences in the current agent set.
+  Nothing is lost, but the exported file names tools the target platform does not have.
 
 
 ## What Does NOT Export

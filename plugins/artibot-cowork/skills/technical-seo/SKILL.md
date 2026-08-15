@@ -12,8 +12,7 @@ triggers:
   - "schema markup"
   - "sitemap"
 agents:
-  - "backend-developer"
-  - "performance-engineer"
+  - "seo-specialist"
 tokens: "~4K"
 category: "marketing"
 ---

@@ -11,8 +11,8 @@ triggers:
   - "customer experience"
   - "journey map"
 agents:
-  - "architect"
-  - "frontend-developer"
+  - "marketing-strategist"
+  - "cro-specialist"
 tokens: "~4K"
 category: "marketing"
 ---

@@ -4,7 +4,7 @@ argument-hint: 'list|info <name> [--domain development|marketing|security|qualit
 allowed-tools: [Read]
 ---
 
-# /sc playbook
+# /playbook
 
 Browse and inspect Artibot orchestration playbooks. Playbooks define multi-phase team workflows such as feature implementation, security audits, and marketing campaigns.
 
@@ -77,6 +77,6 @@ Status: valid / [error list]
 
 | # | 액션 | 커맨드 | 설명 |
 |---|------|--------|------|
-| 1 | 플레이북 실행 | `/orchestrate` | 선택한 플레이북 실행 |
-| 2 | 플레이북 분석 | `/analyze` | 플레이북 구조 및 효율 분석 |
-| 3 | 플레이북 개선 | `/improve` | 플레이북 최적화 및 개선 |
+| 1 | 실행 계획 전개 | `/ultraplan` | 선택한 플레이북을 실행 계획으로 |
+| 2 | 플레이북 분석 | `/analyze` | 플레이북 성과 및 효율 분석 |
+| 3 | 진행 모니터링 | `/monitor` | 실행 상태와 지표 추적 |

@@ -21,6 +21,18 @@
  *     복사 설치는 "훅 자체가 공격자 통제" 와 "게이트 자기무력화" 를 닫을 뿐,
  *     적대적 브랜치를 체크아웃한 채 push 하는 것을 안전하게 만들지 않는다.
  *   - push 시 훅이 실제로 차단하는지는 여기서 재현하지 않는다(원격·의존성 필요).
+ *   - **이 스위트는 커밋된 훅이 아니라 워킹트리의 훅을 읽는다** (`beforeEach` 의
+ *     `cpSync(HOOKS_SRC/pre-push, …)`). 그래서 다른 주체가 그 파일을 편집하는 중이면
+ *     결과는 **그 시점의 편집본**을 반영한다 — 내 변경과 무관한 red 가 나올 수 있다.
+ *     실제 사고(2026-08-15 18:48): 뮤테이션 테스트로 `protected_refs=''` 를 잠깐
+ *     넣어둔 사이 다른 에이전트 2명이 각각 20건 실패를 관측했고, 훅이 복원된 뒤로는
+ *     재현되지 않아 "1/8 플레이크" 로 몇 시간 미귀속 상태였다. 그 서명은
+ *     **stdout 빈 문자열 + stderr `node_modules missing`** 인데, 이는 landing-flow
+ *     게이트가 아예 발동하지 않았다는 뜻이라 **정상 훅에서는 나올 수 없다**
+ *     (정상이면 stdout 에 `landing-flow  FAIL` 이 있고 `node_modules missing` 은 없다).
+ *     그 조합을 보면 플레이크를 의심하지 말고 `git hash-object
+ *     plugins/artibot/scripts/git-hooks/pre-push` 를 HEAD 판본과 대조하라.
+ *     교훈: 훅 뮤테이션은 공유 워킹트리가 아니라 **사본/워크트리**에서 하라.
  *
  * @module tests/firewall/git-hooks-install
  */

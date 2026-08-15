@@ -150,7 +150,7 @@ The runtime calls `installFromUrl(url, { force })` from
    double-check. If the re-check fails, the copy is rolled back
    (`fs.rm --recursive --force`) before the error surfaces.
 
-Use `/uninstall <name>` or call `uninstall(name)` directly to remove.
+Call `uninstall(name)` directly to remove.
 
 ## Examples
 

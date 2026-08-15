@@ -18,7 +18,6 @@ triggers:
   - "비주얼 디자인"
   - "디자인 토큰"
 agents:
-  - "frontend-developer"
   - "presentation-designer"
 tokens: "~4K"
 category: "design"

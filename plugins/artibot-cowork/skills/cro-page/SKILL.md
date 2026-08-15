@@ -10,8 +10,7 @@ triggers:
   - "conversion page"
   - "page design"
 agents:
-  - "frontend-developer"
-  - "performance-engineer"
+  - "cro-specialist"
 tokens: "~3K"
 category: "marketing"
 ---

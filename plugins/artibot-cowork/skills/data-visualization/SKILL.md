@@ -12,8 +12,8 @@ triggers:
   - "data viz"
   - "report visualization"
 agents:
-  - "frontend-developer"
-  - "code-reviewer"
+  - "data-analyst"
+  - "presentation-designer"
 tokens: "~3K"
 category: "analysis"
 ---

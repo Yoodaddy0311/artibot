@@ -139,9 +139,25 @@ export class AntigravityAdapter extends BaseAdapter {
 /**
  * Convert Agent Teams API references to Agent Manager instructions.
  * Maps Claude-specific team tools to Antigravity's Agent Manager paradigm.
+ *
+ * `Agent(...)` is the current spelling for spawning a teammate — the harness
+ * renamed it from `Task(...)`, and `TeamCreate(...)` was retired once the session
+ * became a single implicit team. It maps onto the same Agent Manager verb the
+ * retired name did, because it denotes the same act. The retired spellings stay
+ * as a fallback for older vendored content.
+ *
+ * ── What this cannot see (repo convention: state it next to the gate) ─────────
+ * Bare `Agent` without a call is intentionally untouched (it is a normal English
+ * word, unlike `TeamCreate`), nested parentheses truncate at the first `)`, fenced
+ * code blocks are rewritten like any other text so exported examples become prose
+ * (34 of 73 `Agent(` in `agents/` sit inside fences, measured 2026-08-15), and
+ * nothing here verifies that Antigravity still uses this vocabulary.
  */
 function convertToAgentManager(content) {
   return content
+    // `\b` prevents eating the tail of identifiers like `createAgent(`; no
+    // `Task*` tool can match, so the real ones survive.
+    .replace(/\bAgent\([^)]*\)/g, 'Spawn agents via Agent Manager')
     .replace(/TeamCreate\([^)]*\)/g, 'Spawn agents via Agent Manager')
     .replace(/TeamDelete\([^)]*\)/g, 'Close agent workspaces when done')
     .replace(/SendMessage\(type:\s*"message"[^)]*\)/g, 'Leave feedback on agent Artifact')
