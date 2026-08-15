@@ -41,6 +41,29 @@ import { delimiter, dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { announceBashSkip, probeSh } from '../../scripts/utils/bash-compat.js';
+
+/**
+ * Which `sh` runs the hook — and whether one exists at all.
+ *
+ * This suite spawns a POSIX shell, so it inherits the launcher-dependence that
+ * bash-compat.js exists to document. Measured 2026-08-15 on Windows: from Git
+ * Bash `sh` is on PATH, from PowerShell it is not (PATH there carries Git\cmd,
+ * which holds git.exe but no shell). Before this probe was wired in, the
+ * resulting ENOENT was folded into "the hook exited 1 and printed nothing" and
+ * reported as **23 failures of the landing-flow gate** — a false red aimed at
+ * the one gate that keeps unreviewed commits off master. The next person to see
+ * it would have "fixed" a hook that was never broken.
+ *
+ * On POSIX (= CI, all nine workflows are ubuntu-latest) plain `sh` always
+ * probes ok, so nothing here can skip in CI. That is pinned, not assumed:
+ * tests/scripts/bash-compat.test.js asserts `probeSh().ok` on every non-Windows
+ * platform, so a probe regression turns CI red instead of silently deleting the
+ * 23 gate tests below.
+ */
+const SH = probeSh();
+if (!SH.ok) announceBashSkip('git-hooks-install: pre-push execution', SH.reason);
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 /** 플러그인 루트 (`plugins/artibot/`) */
 const PLUGIN_ROOT = join(__dirname, '..', '..');
@@ -108,7 +131,7 @@ function pushLine(remoteRef, sha) {
 function runHook(stdin, env = {}) {
   const args = [join('.git', 'hooks', 'pre-push'), 'origin', 'https://example.invalid/x.git'];
   try {
-    const stdout = execFileSync('sh', args, {
+    const stdout = execFileSync(SH.sh ?? 'sh', args, {
       cwd: repo,
       input: stdin,
       encoding: 'utf-8',
@@ -117,6 +140,20 @@ function runHook(stdin, env = {}) {
     });
     return { code: 0, stdout, stderr: '', all: stdout };
   } catch (error) {
+    // A shell that never started has no exit status. Folding that into
+    // `status ?? 1` manufactures "the hook exited 1 with empty output", which
+    // every assertion below then fails against for a reason that has nothing to
+    // do with the hook. Fail loudly and name the cause instead — the skipIf
+    // above should already have prevented this, so reaching here means the
+    // probe and the spawn disagree, which is worth a stack trace.
+    if (typeof error.status !== 'number' && error.code) {
+      throw new Error(
+        `could not execute the hook via '${SH.sh ?? 'sh'}' (${error.code}). `
+        + `probeSh(): ${SH.ok ? 'ok' : SH.reason}. `
+        + 'Run this suite from Git Bash, or install Git for Windows so a POSIX sh is discoverable.',
+        { cause: error },
+      );
+    }
     const stdout = error.stdout?.toString() ?? '';
     const stderr = error.stderr?.toString() ?? '';
     return { code: error.status ?? 1, stdout, stderr, all: stdout + stderr };
@@ -297,7 +334,7 @@ describe('git hooks 설치기', () => {
  *   - **원격이 실제로 보호하는 브랜치 목록은 원격 상태다.** 훅의 protected_refs 는
  *     그 수동 사본이라, GitHub 에서 새 브랜치를 보호해도 여기선 아무 일도 안 난다.
  */
-describe('pre-push landing-flow 게이트', () => {
+describe.skipIf(!SH.ok)('pre-push landing-flow 게이트', () => {
   beforeEach(() => {
     runInstaller();
   });
@@ -447,7 +484,7 @@ describe('pre-push landing-flow 게이트', () => {
  *   - 훅의 `required_contexts` 가 비었을 때의 fail-closed 분기는 훅을 편집해야
  *     재현되므로 미검증이다(코드로만 확인).
  */
-describe('pre-push landing-flow — 경로 1 (서버 check run)', () => {
+describe.skipIf(!SH.ok)('pre-push landing-flow — 경로 1 (서버 check run)', () => {
   beforeEach(() => {
     runInstaller();
   });
@@ -604,6 +641,22 @@ describe('pre-push landing-flow — 경로 1 (서버 check run)', () => {
     expect(result.all).toContain('matched by name');
     for (const ctx of REQUIRED) expect(result.all).toContain(ctx);
     expect(result.all).toContain('ARTIBOT_ALLOW_DIRECT_PUSH=1 git push origin master');
+  });
+});
+
+/**
+ * 이 스위트의 fail-open 방지선.
+ *
+ * 위 두 describe 는 sh 가 없으면 통째로 사라진다. 그런데 **사라진 것과 통과한 것은
+ * 요약 출력에서 구분되지 않는다** — 스킵을 도입하면 그 자체가 새로운 착시가 된다.
+ * POSIX(= CI, 워크플로 9개가 전부 ubuntu-latest)에는 sh 가 반드시 있으므로, 거기서
+ * 스킵이 일어났다면 환경 탓이 아니라 프로브가 깨진 것이다. 그때 조용히 23건을
+ * 잃는 대신 여기서 RED 가 된다. Windows 만 면제인 이유는 그쪽 판정이 "어느 셸이
+ * 띄웠는가" 에 정당하게 의존하기 때문이다(Git Bash → ok, PowerShell → 파생 탐색).
+ */
+describe.skipIf(process.platform === 'win32')('sh 프로브 (CI 스킵 방지선)', () => {
+  it('POSIX 에서는 ok 여서 landing-flow 게이트 23건이 스킵되지 않는다', () => {
+    expect(SH.ok, `probeSh failed on POSIX: ${SH.reason}`).toBe(true);
   });
 });
 

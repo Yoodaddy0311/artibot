@@ -133,7 +133,7 @@ describe('middleware/subagents', () => {
     const state = makeState({ config: {} });
     const result = await mw(state);
 
-    expect(result.context.subagents.contract.tools).toEqual(['Task']);
+    expect(result.context.subagents.contract.tools).toEqual(['Agent']);
     expect(result.context.subagents.contract.communication).toBe('one-way (result return only)');
   });
 

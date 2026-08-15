@@ -3,7 +3,7 @@ context: fork
 name: delegation
 description: |
   Delegation strategies for parallel and complex multi-file operations using Sub-Agent or Team Mode.
-  Sub-Agent Mode: Task tool for focused, single-session tasks.
+  Sub-Agent Mode: Agent tool for focused, single-session tasks.
   Team Mode: Agent Teams API for complex multi-domain coordination with peer communication.
   Auto-activates when: >7 directories, >50 files, multi-domain operations, high complexity tasks, team coordination needed.
   Triggers: delegate, parallel, sub-agent, team, concurrent, large-scale, orchestrate, coordinate, 위임, 병렬, 대규모, 팀
@@ -71,7 +71,7 @@ Team mode is preferred when any of: 3+ domains, 2 domains with >5 steps, multi-t
 
 ## Sub-Agent Mode (Lightweight)
 
-Use the `Task` tool to spawn focused sub-agents for bounded work.
+Use the `Agent` tool to spawn focused sub-agents for bounded work.
 
 **When to use**:
 - Complexity < 0.6, single domain, < 20 files
@@ -79,8 +79,8 @@ Use the `Task` tool to spawn focused sub-agents for bounded work.
 - No inter-agent communication needed
 
 **Blocking modes**:
-- `Task(subagent_type)` — blocks caller until result (use inside command pipelines)
-- `Task(subagent_type, run_in_background=true)` — non-blocking (use when routing from /sc or keeping user session responsive)
+- `Agent(subagent_type, run_in_background=false)` — blocks caller until result (use inside command pipelines)
+- `Agent(subagent_type)` — non-blocking, the default (use when routing from /sc or keeping user session responsive)
 
 **Strategies** (see `${CLAUDE_SKILL_DIR}/references/delegation-matrix.md`):
 | Condition | Strategy | Gain |
@@ -101,7 +101,7 @@ Use the `Task` tool to spawn focused sub-agents for bounded work.
 병렬 Sub-Agent가 동일 파일을 수정할 가능성이 있을 때, `isolation: "worktree"` 옵션으로 각 에이전트를 독립 Git worktree에서 실행할 수 있습니다.
 
 ```
-Task(subagent_type, { isolation: "worktree" })
+Agent(subagent_type, { isolation: "worktree" })
 ```
 
 - `artibot.config.json`의 `team.worktreeIsolation.enabled: true`로 기본 활성화 가능
@@ -124,15 +124,18 @@ Use the Agent Teams API for complex, multi-domain tasks requiring coordination.
 
 ### Team Lifecycle
 
+The session has ONE implicit team — there is no team to create or delete. A
+teammate exists from the moment `Agent(name=...)` spawns it until it finishes or
+accepts a shutdown request.
+
 ```
-1. TeamCreate          - Create named team
-2. Task(type, team, name) - Spawn teammates into team
-3. TaskCreate          - Populate shared task list
-4. TaskUpdate          - Assign tasks or let agents self-claim
-5. SendMessage         - Coordinate, discuss, resolve blockers
-6. TaskUpdate          - Mark tasks completed as work finishes
+1. Fix a run slug       - Prefix teammate names with it so runs stay distinguishable
+2. Agent(type, name)    - Spawn named teammates (do NOT pass team_name; it is ignored)
+3. TaskCreate           - Populate shared task list
+4. TaskUpdate           - Assign tasks or let agents self-claim
+5. SendMessage          - Coordinate, discuss, resolve blockers
+6. TaskUpdate           - Mark tasks completed as work finishes
 7. SendMessage(shutdown_request) - Request teammates to shut down
-8. TeamDelete          - Clean up team resources
 ```
 
 ### Team Communication Patterns
@@ -185,7 +188,7 @@ Progress:
 - [ ] Step 4: Spawn agents or create team with appropriate pattern
 - [ ] Step 5: Monitor execution and handle blockers
 - [ ] Step 6: Collect and aggregate results (dedup, cross-ref, prioritize)
-- [ ] Step 7: Cleanup — TeamDelete or confirm sub-agent completion
+- [ ] Step 7: Cleanup — every teammate confirmed shutdown, or sub-agent completion confirmed
 ```
 
 ## Human Checkpoints
@@ -194,7 +197,7 @@ Progress:
 **Context**: 복잡도/병렬성/소통 필요/규모 점수를 산출하여 Sub-Agent 또는 Team 모드를 선택한 시점. 잘못된 모드 선택은 리소스 낭비 또는 조율 실패로 이어진다.
 **Ask**: "점수 **[X.X]** 기반으로 **[Sub-Agent / Team / Direct]** 모드를 선택했습니다. 이 결정이 맞나요?"
 **Options**:
-1. Sub-Agent — Task 툴로 독립적 단일 도메인 작업 위임
+1. Sub-Agent — Agent 툴로 독립적 단일 도메인 작업 위임
 2. Team — Agent Teams API로 멀티도메인 복잡 조율
 3. Direct execution — 위임 없이 직접 실행
 **Default**: 점수 기반 자동 선택
@@ -244,7 +247,7 @@ Progress:
 | Spawn agents/team | MEDIUM | Patterns defined, team sizing flexible |
 | Monitor execution | HIGH | Intervention timing and strategy are situational |
 | Aggregate results | MEDIUM | Process defined, synthesis requires judgment |
-| Cleanup | LOW | TeamDelete and resource cleanup mandatory |
+| Cleanup | LOW | Shutdown request to every teammate is mandatory |
 
 ## Complexity Budget Guide
 
@@ -319,7 +322,7 @@ const score = budget.getScore(taskDescription);
 - No result aggregation after parallel work
 - **Using sub-agents when inter-agent communication is needed** (use Team Mode instead)
 - **Creating a full team for single-domain focused tasks** (use Sub-Agent instead)
-- Forgetting `TeamDelete` cleanup after team work completes
+- Leaving teammates running after team work completes (no `shutdown_request` sent)
 - Broadcasting when a direct message suffices
 
 ## Quick Reference
@@ -328,9 +331,9 @@ const score = budget.getScore(taskDescription);
 **Delegation matrix**: `${CLAUDE_SKILL_DIR}/references/delegation-matrix.md`
 **Auto-trigger**: >7 dirs OR >50 files OR complexity >0.8 OR multi-domain + communication need
 
-**Sub-Agent Flow (pipeline)**: `Task(subagent_type)` -> receive result (blocking, for internal pipelines)
-**Sub-Agent Flow (routing)**: `Task(subagent_type, run_in_background=true)` -> return control to user (non-blocking, for /sc delegation)
-**Team Flow**: `TeamCreate` -> `Task(type, team, name)` -> `TaskCreate` -> coordinate -> `TeamDelete`
+**Sub-Agent Flow (pipeline)**: `Agent(subagent_type, run_in_background=false)` -> receive result (blocking, for internal pipelines)
+**Sub-Agent Flow (routing)**: `Agent(subagent_type)` -> return control to user (non-blocking default, for /sc delegation)
+**Team Flow**: `Agent(type, name)` -> `TaskCreate` -> coordinate -> `SendMessage(shutdown_request)`
 
 Always aggregate and cross-reference results from both modes.
 Prefer Swarm pattern for independent tasks, Pipeline for dependencies, Council for consensus.

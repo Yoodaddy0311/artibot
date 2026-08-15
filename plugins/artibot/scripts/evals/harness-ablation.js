@@ -55,9 +55,9 @@ const DEFAULT_CONFIG = Object.freeze({
   team: {
     enabled: true,
     delegationModeSelection: {
-      subAgent: { tools: ['Task'], communication: 'one-way (result return only)' },
+      subAgent: { tools: ['Agent'], communication: 'one-way (result return only)' },
       agentTeam: {
-        tools: ['TeamCreate', 'SendMessage', 'TaskCreate', 'TaskUpdate', 'TaskList', 'TeamDelete'],
+        tools: ['Agent', 'SendMessage', 'TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet'],
         communication: 'P2P bidirectional + shared task list',
       },
     },

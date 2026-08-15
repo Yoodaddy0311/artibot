@@ -732,6 +732,92 @@ seed_local_config() {
 # ──────────────────────────────────────────────
 # Seed Auto-Memory for new users
 # ──────────────────────────────────────────────
+# Staleness is TWO conditions, both required. Either one alone false-positives.
+#
+# 1. SEED_SIGNATURE — the file must actually be OUR seed. Without this the check
+#    fires on memory files the installer never wrote. Measured, not assumed: the
+#    live MEMORY.md in this repo's own project memory contains the literal
+#    "인스톨러 유령 Task() 문자열" in a user-written backlog note, and it carries
+#    no seed header. A bare `Task(` scan parks a file for that user and tells
+#    them their seed is stale when they never had one.
+# 2. STALE_SEED_PATTERN — the ghost name the seed itself emitted.
+#
+# The pattern is one literal, not a list. Every historical revision of the
+# SEED_MEMORY heredoc was checked (`git log -S`): `Task()` is the only harness
+# name this seed ever emitted (d778e739 for sh, 545b21fe for ps1), and it was
+# renamed to `Agent`. TeamCreate/TeamDelete/TodoWrite are equally dead names but
+# never appeared in THIS seed, so matching them would only fire on the user's own
+# prose — and the parked seed would not remedy that line anyway. Substring match
+# (`grep -F`) so the live `TaskCreate(`/`TaskUpdate(` tools do not match.
+SEED_SIGNATURE='# Project Memory (Seeded by Artibot)'
+STALE_SEED_PATTERN='Task('
+
+# Emit the MEMORY.md quickstart body on stdout.
+#
+# Counts are computed here rather than by the caller so the fresh-seed path and
+# the stale-park path render identical text from one source.
+render_memory_seed() {
+  local mem_agent_count mem_cmd_count mem_skill_count
+  mem_agent_count=$(find "${CLAUDE_DIR}/agents" -name "*.md" -type f 2>/dev/null | wc -l | tr -d ' ')
+  mem_cmd_count=$(find "${CLAUDE_DIR}/commands" -name "*.md" -type f 2>/dev/null | wc -l | tr -d ' ')
+  mem_skill_count=$(find "${ARTIBOT_DIR}/skills" -maxdepth 1 -type d 2>/dev/null | wc -l | tr -d ' ')
+  mem_skill_count=$((mem_skill_count - 1))
+
+  cat <<SEED_MEMORY
+# Project Memory (Seeded by Artibot)
+
+## Artibot Quick Reference
+- **Agents**: ${mem_agent_count} specialized agents — use \`Agent()\` to delegate
+- **Commands**: \`/sc\` routes to optimal command/agent/skill automatically
+- **DEV Protocol**: Decompose → Execute → Verify (mandatory for all code changes)
+- **Quality**: 80%+ test coverage, immutable patterns, functions < 50 lines
+
+## Workflow Tips
+- Complex features: start with \`/sc plan [feature]\` or use planner agent
+- After implementation: code-reviewer agent runs automatically via rules
+- Parallel work: launch multiple agents with \`Agent()\` for independent tasks
+- Vibe coding: rules auto-activate on file access (no /sc needed after install)
+
+## Key Paths
+- Agents: \`~/.claude/agents/\` (${mem_agent_count} .md files)
+- Commands: \`~/.claude/commands/\` (${mem_cmd_count} .md files)
+- Skills: \`~/.claude/artibot/skills/\` (${mem_skill_count} skill directories)
+- Rules: \`~/.claude/rules/artibot/\` (auto-activate on file access)
+- Config: \`~/.claude/artibot/artibot.config.json\`
+SEED_MEMORY
+}
+
+# Non-destructive repair for ALREADY-INSTALLED users.
+#
+# The seed is write-once, so a MEMORY.md written by an older installer keeps its
+# stale `Task()` guidance forever. This NEVER rewrites that file — it is a user
+# document by now — it only parks the current version alongside it, matching the
+# `.artibot-new` convention install_rules (:599) uses for hand-edited rules.
+# That suffix does not end in `.md`, so Claude Code's loaders ignore the parked
+# copy. Re-parking overwrites any previous parked copy, again per install_rules:
+# the parked file is a regenerated artifact, and a stale one from an older
+# install is strictly worse than a current one.
+#
+# Silent when nothing is stale — the normal path must stay noise-free.
+park_stale_memory_seed() {
+  local memory_md="$1"
+  local parked="${memory_md}.artibot-new"
+
+  # Both conditions, in cheap-and-most-selective order. A user file that merely
+  # talks about `Task()` is not our stale seed and must not be touched.
+  grep -qF "$SEED_SIGNATURE" "$memory_md" 2>/dev/null || return 0
+  grep -qF "$STALE_SEED_PATTERN" "$memory_md" 2>/dev/null || return 0
+
+  if ! render_memory_seed > "$parked" 2>/dev/null; then
+    # A half-written park is worse than none — it looks like current guidance.
+    rm -f "$parked" 2>/dev/null || true
+    warn "  Could not write MEMORY.md.artibot-new — leaving MEMORY.md untouched"
+    return 0
+  fi
+  warn "Your MEMORY.md still names the old \`Task()\` tool (renamed to \`Agent()\`)"
+  warn "  Your file is untouched — current version parked as MEMORY.md.artibot-new"
+}
+
 seed_auto_memory() {
   local memory_dir="${CLAUDE_DIR}/projects"
   # Find the current project's memory directory
@@ -757,42 +843,16 @@ seed_auto_memory() {
   fi
   local project_memory="${memory_dir}/${project_hash}/memory"
 
-  # Only seed if no MEMORY.md exists yet
+  # Only seed if no MEMORY.md exists yet. Existing files are never rewritten —
+  # but they may carry stale tool names from an older installer, so check.
   if [ -d "$project_memory" ] && [ -f "${project_memory}/MEMORY.md" ]; then
+    park_stale_memory_seed "${project_memory}/MEMORY.md"
     log "Auto-memory already exists — skipping seed"
     return
   fi
 
-  # Count actual installed assets for accurate memory seed
-  local mem_agent_count mem_cmd_count mem_skill_count
-  mem_agent_count=$(find "${CLAUDE_DIR}/agents" -name "*.md" -type f 2>/dev/null | wc -l | tr -d ' ')
-  mem_cmd_count=$(find "${CLAUDE_DIR}/commands" -name "*.md" -type f 2>/dev/null | wc -l | tr -d ' ')
-  mem_skill_count=$(find "${ARTIBOT_DIR}/skills" -maxdepth 1 -type d 2>/dev/null | wc -l | tr -d ' ')
-  mem_skill_count=$((mem_skill_count - 1))
-
   mkdir -p "$project_memory"
-  cat > "${project_memory}/MEMORY.md" <<SEED_MEMORY
-# Project Memory (Seeded by Artibot)
-
-## Artibot Quick Reference
-- **Agents**: ${mem_agent_count} specialized agents — use \`Agent()\` to delegate
-- **Commands**: \`/sc\` routes to optimal command/agent/skill automatically
-- **DEV Protocol**: Decompose → Execute → Verify (mandatory for all code changes)
-- **Quality**: 80%+ test coverage, immutable patterns, functions < 50 lines
-
-## Workflow Tips
-- Complex features: start with \`/sc plan [feature]\` or use planner agent
-- After implementation: code-reviewer agent runs automatically via rules
-- Parallel work: launch multiple agents with \`Agent()\` for independent tasks
-- Vibe coding: rules auto-activate on file access (no /sc needed after install)
-
-## Key Paths
-- Agents: \`~/.claude/agents/\` (${mem_agent_count} .md files)
-- Commands: \`~/.claude/commands/\` (${mem_cmd_count} .md files)
-- Skills: \`~/.claude/artibot/skills/\` (${mem_skill_count} skill directories)
-- Rules: \`~/.claude/rules/artibot/\` (auto-activate on file access)
-- Config: \`~/.claude/artibot/artibot.config.json\`
-SEED_MEMORY
+  render_memory_seed > "${project_memory}/MEMORY.md"
   log "Auto-memory seeded with Artibot quickstart → ${project_memory}/MEMORY.md"
 }
 

@@ -9,7 +9,7 @@
 | Communication need | 0.2 | One-way reporting | P2P coordination, consensus |
 | File/scope scale | 0.2 | <20 files | 20+ files |
 
-**Score < 0.5**: Use Sub-Agent Mode (Task tool)
+**Score < 0.5**: Use Sub-Agent Mode (Agent tool)
 **Score >= 0.5**: Use Team Mode (Agent Teams API)
 
 Target ratio: **Sub-Agent ~35% | Team ~40%** (remaining ~25% is direct execution).
@@ -27,17 +27,17 @@ Target ratio: **Sub-Agent ~35% | Team ~40%** (remaining ~25% is direct execution
 
 | Condition | Pattern | Team Size | API Flow |
 |-----------|---------|-----------|----------|
-| Independent parallel tasks | Swarm | 3-7 | TeamCreate -> TaskCreate (all) -> self-claim via TaskList |
-| Sequential dependencies | Pipeline | 3-5 | TeamCreate -> TaskCreate with blockedBy -> ordered execution |
-| Consensus or review needed | Council | 3-5 | TeamCreate -> TaskCreate -> SendMessage discussions -> leader decides |
-| Coordinated complex output | Leader | 3-7 | TeamCreate -> TaskCreate -> TaskUpdate (assign) -> aggregate |
+| Independent parallel tasks | Swarm | 3-7 | Agent(name=…) spawn -> TaskCreate (all) -> self-claim via TaskList |
+| Sequential dependencies | Pipeline | 3-5 | Agent(name=…) spawn -> TaskCreate with blockedBy -> ordered execution |
+| Consensus or review needed | Council | 3-5 | Agent(name=…) spawn -> TaskCreate -> SendMessage discussions -> leader decides |
+| Coordinated complex output | Leader | 3-7 | Agent(name=…) spawn -> TaskCreate -> TaskUpdate (assign) -> aggregate |
 
 ## Orchestration Patterns
 
 | Pattern | Use When | Coordination | Mode |
 |---------|----------|-------------|------|
 | Direct | Trivial, <3 steps | None | Neither |
-| Sub-Agent | Focused, single domain | Task tool, one-way | Sub-Agent |
+| Sub-Agent | Focused, single domain | Agent tool, one-way | Sub-Agent |
 | Leader | Clear authority, coordinated output | TaskUpdate assign, leader aggregates | Team |
 | Council | Consensus needed, multiple perspectives | SendMessage discuss, leader decides | Team |
 | Swarm | Independent tasks, embarrassingly parallel | TaskList self-claim, merge results | Team |
@@ -47,8 +47,7 @@ Target ratio: **Sub-Agent ~35% | Team ~40%** (remaining ~25% is direct execution
 
 | Tool | Purpose | Usage |
 |------|---------|-------|
-| `TeamCreate` | Create a named team | Once at start of team operation |
-| `Task(subagent_type, team_name, name)` | Spawn teammate into team | Per teammate needed |
+| `Agent(subagent_type, name)` | Spawn a named teammate into the session's implicit team | Per teammate needed |
 | `TaskCreate` | Add work item to shared list | Per work item |
 | `TaskUpdate` | Assign, claim, complete, set dependencies | Throughout lifecycle |
 | `TaskList` | View tasks and status | Coordination and self-claiming |
@@ -58,7 +57,10 @@ Target ratio: **Sub-Agent ~35% | Team ~40%** (remaining ~25% is direct execution
 | `SendMessage(type: "shutdown_request")` | Request teammate shutdown | Cleanup phase |
 | `SendMessage(type: "shutdown_response")` | Approve/reject shutdown | Response to request |
 | `SendMessage(type: "plan_approval_response")` | Approve/reject plan | Plan mode workflow |
-| `TeamDelete` | Remove team | After all work complete |
+
+There is no team create/delete tool: the session has ONE implicit team, and
+`Agent`'s `team_name` parameter is deprecated and ignored. Teammates exist from
+spawn until they finish or accept a shutdown request.
 
 ## Sub-Agent Specialization
 
@@ -83,7 +85,7 @@ Target ratio: **Sub-Agent ~35% | Team ~40%** (remaining ~25% is direct execution
 
 Applies to both Sub-Agent and Team modes:
 
-1. **Collect**: Gather all agent results (Task return or SendMessage)
+1. **Collect**: Gather all agent results (Agent return or SendMessage)
 2. **Deduplicate**: Remove overlapping findings
 3. **Cross-reference**: Identify patterns across domains
 4. **Prioritize**: Rank by severity and impact
@@ -92,11 +94,10 @@ Applies to both Sub-Agent and Team modes:
 ## Team Lifecycle Checklist
 
 1. [ ] Score delegation factors -> confirm Team Mode needed
-2. [ ] `TeamCreate` with descriptive name
-3. [ ] `Task(type, team_name, name)` for each teammate
+2. [ ] Fix a descriptive run slug to prefix teammate names with
+3. [ ] `Agent(type, name)` for each teammate (do NOT pass `team_name`)
 4. [ ] `TaskCreate` for all work items with clear descriptions
 5. [ ] `TaskUpdate` to assign or let teammates self-claim
 6. [ ] Monitor via `TaskList` and coordinate via `SendMessage`
 7. [ ] Aggregate results as tasks complete
-8. [ ] `SendMessage(shutdown_request)` to each teammate
-9. [ ] `TeamDelete` to clean up
+8. [ ] `SendMessage(shutdown_request)` to each teammate — that is the whole teardown

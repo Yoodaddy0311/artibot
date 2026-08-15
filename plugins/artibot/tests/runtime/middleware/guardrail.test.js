@@ -247,7 +247,7 @@ describe('middleware/guardrail', () => {
     expect(result.context.guardrail.ruleCount).toBe(1);
   });
 
-  it('agentTeam 모드 → TeamCreate/SendMessage/TaskCreate 후보 추가', async () => {
+  it('agentTeam 모드 → Agent/SendMessage/TaskCreate 후보 추가', async () => {
     const mw = createGuardrailMiddleware({ failClosed: true, includeDefaults: false });
     const state = makeState({
       context: {
@@ -259,7 +259,7 @@ describe('middleware/guardrail', () => {
     const result = await mw(state);
 
     const toolNames = result.context.guardrail.evaluations.map((e) => e.tool);
-    expect(toolNames).toContain('TeamCreate');
+    expect(toolNames).toContain('Agent');
     expect(toolNames).toContain('SendMessage');
     expect(toolNames).toContain('TaskCreate');
   });

@@ -128,7 +128,7 @@ plugins/artibot/
 ├── .mcp.json                    # MCP server config (Context7, Playwright)
 │
 ├── agents/                      # Agent definitions (Markdown)
-│   ├── orchestrator.md          # CTO / team leader (TeamCreate, SendMessage, TaskCreate)
+│   ├── orchestrator.md          # CTO / team leader (SendMessage, TaskCreate/Update/List/Get)
 │   └── [specialist agents]      # Teammates (SendMessage + TaskList/Update)
 │
 ├── commands/                    # Slash command definitions (Markdown)
@@ -336,7 +336,7 @@ cp plugins/artibot/templates/command-template.md \
 | `command` | The slash command name (e.g., `/my-command`) |
 | `purpose` | What the command does |
 | `arguments` | Accepted arguments and flags |
-| `delegation` | How the command delegates (Sub-Agent vs TeamCreate) |
+| `delegation` | How the command delegates (Sub-Agent vs Agent Teams) |
 | `output` | Expected output format |
 
 ### Step 3: Register the command / 커맨드 등록

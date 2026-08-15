@@ -62,6 +62,12 @@ cp antigravity-export/*.md .antigravity/agents/
 - Team Collaboration sections are stripped with platform-specific fallback notes
 - Claude Code-specific API references (TeamCreate, SendMessage, etc.) are replaced with platform equivalents
 
+<!-- The retired `TeamCreate` spelling above is deliberate, not drift: this line names the literal
+     strings that `scripts/export-to-tool.mjs#replaceAgentTeamsRefs` matches. Renaming it to `Agent`
+     would make the doc claim a translation the exporter does not perform — the replacers still only
+     cover the pre-rename names. Fix the exporter first, then this line. -->
+
+
 ## What Does NOT Export
 
 - Skills (111 SKILL.md files) — use `lib/core/skill-exporter.js` for full export

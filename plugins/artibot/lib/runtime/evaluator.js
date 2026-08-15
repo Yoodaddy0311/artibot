@@ -30,11 +30,11 @@ const TEST_CONFIG = Object.freeze({
     enabled: true,
     delegationModeSelection: {
       subAgent: {
-        tools: ['Task'],
+        tools: ['Agent'],
         communication: 'one-way (result return only)',
       },
       agentTeam: {
-        tools: ['TeamCreate', 'SendMessage', 'TaskCreate', 'TaskUpdate', 'TaskList', 'TeamDelete'],
+        tools: ['Agent', 'SendMessage', 'TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet'],
         communication: 'P2P bidirectional + shared task list',
       },
     },

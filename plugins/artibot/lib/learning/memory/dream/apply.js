@@ -198,7 +198,12 @@ export function createApplyEngine(options = {}) {
   async function regenerateIndex() {
     const records = await adapter.readAll();
     const priorRows = await adapter.readIndex();
-    const text = adapter.regenerateIndex(records, { preserveOrderFrom: priorRows });
+    // Raw prior text keeps the user's / installer's prose sections alive; the
+    // adapter splices rows into it instead of rendering a header-only index.
+    const priorText = typeof adapter.readIndexText === 'function'
+      ? await adapter.readIndexText()
+      : '';
+    const text = adapter.regenerateIndex(records, { preserveOrderFrom: priorRows, priorText });
     await writeLive(adapter.indexPath, text);
   }
 

@@ -3,7 +3,7 @@
  *
  * Important contract: the engine itself never invokes agents directly.
  * Each Phase function returns an instruction object that the main Claude
- * uses to issue the actual Task() / TeamCreate() / Bash() calls.
+ * uses to issue the actual Agent() / SendMessage() / Bash() calls.
  *
  * Reference: PRD docs/PRD/autopilot-mode.md sections 5.4 and 13.2.
  *
@@ -304,7 +304,7 @@ export function runPhase2Execute(state) {
     nextPhase: 'CROSS_CHECK',
     instructions: [
       `Autopilot 세션 ${state.sessionId} Phase 2.`,
-      'TeamCreate 로 병렬 teammate 를 생성하고 Phase 1 의 작업 단위를 분배.',
+      'Agent(name=…) 로 병렬 teammate 를 생성하고 Phase 1 의 작업 단위를 분배.',
       '각 teammate 는 본 작업 디렉토리만 수정. 외부 송신/destructive action 금지.',
       'WIP commit 30분 주기. checkpoint SHA 를 session.checkpoints 에 기록.',
     ],

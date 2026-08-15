@@ -125,7 +125,9 @@ Priority [HIGH|MEDIUM|LOW]: [actionable improvement]
 ## Comparison Techniques
 
 - **File-level**: Count agents, commands, skills, hooks, libs → quantitative comparison
-- **Pattern-level**: Identify orchestration patterns (Task vs TeamCreate, sub-agent vs native teams)
+- **Pattern-level**: Identify orchestration patterns (sub-agent vs native teams). Benchmarked repos
+  often predate the harness rename, so expect the retired `Task`/`TeamCreate` spellings in their
+  sources — record them as-is rather than normalizing.
 - **Config-level**: Compare config depth, delegation strategies, model selection
 - **Quality-level**: Zero-dep approach, ESM vs CJS, error handling patterns
 - **Innovation-level**: Unique features not present in the other repo

@@ -135,6 +135,56 @@ describe('createApplyEngine — apply (review-gate passed)', () => {
     expect(log).toContain('"kind":"apply"');
   });
 
+  it('preserves the installer-seeded MEMORY.md prose while indexing new memories', async () => {
+    // Verbatim `SEED_MEMORY` heredoc from `install.sh#render_memory_seed` with
+    // the shell count vars expanded — pure prose, zero index rows. Cited by
+    // symbol rather than line number, which rots as the installer is refactored.
+    const seed = `# Project Memory (Seeded by Artibot)
+
+## Artibot Quick Reference
+- **Agents**: 28 specialized agents — use \`Agent()\` to delegate
+- **Commands**: \`/sc\` routes to optimal command/agent/skill automatically
+- **DEV Protocol**: Decompose → Execute → Verify (mandatory for all code changes)
+- **Quality**: 80%+ test coverage, immutable patterns, functions < 50 lines
+
+## Workflow Tips
+- Complex features: start with \`/sc plan [feature]\` or use planner agent
+- After implementation: code-reviewer agent runs automatically via rules
+- Parallel work: launch multiple agents with \`Agent()\` for independent tasks
+- Vibe coding: rules auto-activate on file access (no /sc needed after install)
+
+## Key Paths
+- Agents: \`~/.claude/agents/\` (28 .md files)
+- Commands: \`~/.claude/commands/\` (78 .md files)
+- Skills: \`~/.claude/artibot/skills/\` (113 skill directories)
+- Rules: \`~/.claude/rules/artibot/\` (auto-activate on file access)
+- Config: \`~/.claude/artibot/artibot.config.json\`
+`;
+    await fs.writeFile(path.join(memDir, 'MEMORY.md'), seed, 'utf-8');
+    await fs.writeFile(path.join(memDir, 'project_existing.md'),
+      '---\nname: existing\ndescription: pre-existing memory\n---\n\n# Existing Note\n', 'utf-8');
+    await fs.mkdir(staging, { recursive: true });
+    const stagedPath = path.join(staging, 'new.proposed.md');
+    await fs.writeFile(stagedPath,
+      '---\nname: newly-learned\ndescription: learned this run\n---\n\n# Newly Learned\n', 'utf-8');
+
+    const adapter = createMemoryMdAdapter({ memoryDir: memDir });
+    const engine = createApplyEngine({ memoryDir: memDir, stagingDir: staging, adapter });
+    const res = await engine.apply([{
+      op: 'insert', name: 'newly-learned', targetFile: 'project_newly_learned.md', stagedPath,
+    }]);
+    expect(res.applied).toBe(1);
+
+    const index = await fs.readFile(path.join(memDir, 'MEMORY.md'), 'utf-8');
+    // Every non-blank seed line survives the regeneration.
+    for (const line of seed.split('\n').filter((l) => l.trim())) {
+      expect(index).toContain(line);
+    }
+    // …and both memories are indexed.
+    expect(index).toContain('(project_existing.md)');
+    expect(index).toContain('(project_newly_learned.md)');
+  });
+
   it('skips rules/CLAUDE.md proposals (proposal-only, acceptance #7)', async () => {
     const adapter = createMemoryMdAdapter({ memoryDir: memDir });
     const engine = createApplyEngine({ memoryDir: memDir, stagingDir: staging, adapter });

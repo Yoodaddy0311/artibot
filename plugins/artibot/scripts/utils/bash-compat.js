@@ -1,5 +1,11 @@
 /**
- * bash-compat.js — does the `bash` on PATH understand THIS platform's paths?
+ * bash-compat.js — can THIS launcher's POSIX shell run our scripts?
+ *
+ * Two shells, two verdicts. {@link probeBash} answers for `bash`;
+ * {@link probeSh} answers for `sh`, which is a genuinely different question on
+ * Windows (from PowerShell, `bash` resolves and `sh` does not) and so must
+ * never be inferred from the bash verdict. The history below is the bash case;
+ * the `sh` section carries its own measurements.
  *
  * WHY THIS EXISTS (measured 2026-08-10, same repo / same commit / same machine):
  *   Whether a bash-dependent check works on Windows depends on which shell
@@ -38,7 +44,7 @@
  */
 
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -175,6 +181,156 @@ export function probeBashCandidate(bin) {
   }
 }
 
+/* ── `sh` (POSIX shell) ─────────────────────────────────────────────────── */
+
+/**
+ * What a caller spawning `sh` actually depends on, expressed as a script.
+ *
+ * Existence is not the property under test — see the module header, and note
+ * that the failure this guards against is WORSE for `sh` than it was for bash.
+ * Measured 2026-08-15 from a PowerShell with a registry-only PATH:
+ *
+ *   Git\usr\bin\sh.exe   starts, exits 0, delivers NO stdin, and resolves
+ *                        none of grep/sed/awk/cut/tr.
+ *   Git\bin\sh.exe       sets up /usr/bin, delivers stdin, resolves everything.
+ *
+ * Both "exist". Accepting the first would have produced a suite that runs and
+ * fails for invented reasons — a false red dressed as a real one. So the probe
+ * asserts the two properties a hook harness cannot work without: stdin reaches
+ * the script, and the POSIX text tools the scripts under test call are on PATH.
+ */
+const SH_PROBE_STDIN = 'artibot_sh_stdin_ok';
+const SH_PROBE_TOOLS = ['grep', 'sed', 'awk', 'head', 'cat'];
+const SH_PROBE_SCRIPT = [
+  '#!/bin/sh',
+  `for t in ${SH_PROBE_TOOLS.join(' ')}; do`,
+  '  command -v "$t" >/dev/null 2>&1 || { echo "missing tool: $t" >&2; exit 3; }',
+  'done',
+  `[ "$(cat)" = "${SH_PROBE_STDIN}" ] || { echo "stdin not delivered" >&2; exit 4; }`,
+  `echo ${PROBE_MARKER}`,
+  '',
+].join('\n');
+
+/**
+ * Can this specific binary run a POSIX script the way our harnesses run one?
+ *
+ * Same capability-not-denylist reasoning as {@link probeBashCandidate}: a list
+ * of known-bad shells fails open on the next one that appears, while asking for
+ * the property we depend on cannot. Never throws.
+ *
+ * @param {string} bin - Path to (or name of) an `sh`.
+ * @returns {{ ok: boolean, reason: string }} `reason` is '' when ok.
+ */
+export function probeShCandidate(bin) {
+  if (!bin) return { ok: false, reason: 'no candidate given' };
+
+  let dir = null;
+  try {
+    dir = mkdtempSync(path.join(os.tmpdir(), 'artibot-shprobe-'));
+    const script = path.join(dir, 'probe.sh');
+    writeFileSync(script, SH_PROBE_SCRIPT);
+
+    const run = spawnSync(bin, [toBashPath(script)], {
+      input: `${SH_PROBE_STDIN}\n`,
+      encoding: 'utf8',
+      timeout: 10000,
+    });
+    if (run && run.status === 0 && (run.stdout || '').includes(PROBE_MARKER)) {
+      return { ok: true, reason: '' };
+    }
+    // `run.error` is the spawn failure itself (ENOENT/EACCES). Reporting it as
+    // `exit ${status}` — status is null here — is how "there is no sh on PATH"
+    // gets mistaken for "sh ran and rejected the script".
+    const detail = (run && run.error)
+      ? (run.error.code || run.error.message)
+      : String((run && run.stderr) || '').trim().split('\n')[0]
+        || `exit ${run ? run.status : 'unknown'}`;
+    return { ok: false, reason: `${bin}: ${detail}` };
+  } catch (err) {
+    return { ok: false, reason: `${bin}: probe failed: ${err.message}` };
+  } finally {
+    if (dir) {
+      try { rmSync(dir, { recursive: true, force: true }); } catch { /* temp dir */ }
+    }
+  }
+}
+
+/**
+ * Windows-only `sh.exe` candidates, DERIVED from the git already on PATH.
+ *
+ * No absolute path is hardcoded. `git --exec-path` answers with a directory
+ * inside the Git installation (…/Git/mingw64/libexec/git-core, measured
+ * 2026-08-15), so walking its ancestors and looking for `bin/sh.exe` and
+ * `usr/bin/sh.exe` locates the shell wherever Git was installed. The remaining
+ * structural assumption — "sh.exe lives under bin/ or usr/bin/ of an ancestor
+ * of the exec-path" — is checked, not trusted: every candidate still has to
+ * pass {@link probeShCandidate}, so a wrong guess is rejected rather than used.
+ *
+ * `bin/` precedes `usr/bin/` at each level because only the former sets up the
+ * MSYS environment; see {@link SH_PROBE_SCRIPT} for the measurement.
+ *
+ * @returns {string[]}
+ */
+function windowsShCandidates() {
+  let execPath;
+  try {
+    execPath = spawnSync('git', ['--exec-path'], { encoding: 'utf8', timeout: 10000 });
+  } catch {
+    return [];
+  }
+  if (!execPath || execPath.status !== 0) return [];
+
+  const out = [];
+  let dir = path.resolve(String(execPath.stdout || '').trim());
+  for (let i = 0; i < 6 && dir; i += 1) {
+    out.push(path.join(dir, 'bin', 'sh.exe'), path.join(dir, 'usr', 'bin', 'sh.exe'));
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return out.filter((p) => existsSync(p));
+}
+
+/** Memoized {@link probeSh} result — the probe spawns processes, so run once. */
+let shCached = null;
+
+/**
+ * Find an `sh` that can actually run this repo's POSIX scripts.
+ *
+ * `sh` is a different question from `bash` and must not reuse that verdict.
+ * Measured 2026-08-15 on this machine from a registry-only PATH: `bash`
+ * resolves (to C:\WINDOWS\system32\bash.exe, the WSL launcher) while `sh` does
+ * not resolve at all. A caller that consulted {@link probeBash} would get the
+ * wrong answer in both directions.
+ *
+ * Order: plain `sh` first, so POSIX and Git Bash take one cheap probe and the
+ * derived Windows candidates are never even considered there.
+ *
+ * @returns {{ ok: boolean, sh: string|null, reason: string }}
+ *   `sh` is the validated executable to spawn; '' reason when ok.
+ */
+export function probeSh() {
+  if (shCached) return shCached;
+
+  const tried = [];
+  const candidates = ['sh', ...(process.platform === 'win32' ? windowsShCandidates() : [])];
+  for (const candidate of candidates) {
+    const res = probeShCandidate(candidate);
+    if (res.ok) {
+      shCached = { ok: true, sh: candidate, reason: '' };
+      return shCached;
+    }
+    tried.push(res.reason);
+  }
+
+  shCached = {
+    ok: false,
+    sh: null,
+    reason: `no usable POSIX sh found (${tried.join(' | ')})`,
+  };
+  return shCached;
+}
+
 /** Labels already announced, so a multi-suite run prints each reason once. */
 const announced = new Set();
 
@@ -203,5 +359,6 @@ export function announceBashSkip(label, reason = probeBash().reason) {
  */
 export function resetBashProbeCache() {
   cached = null;
+  shCached = null;
   announced.clear();
 }

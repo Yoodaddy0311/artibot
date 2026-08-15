@@ -5,13 +5,17 @@
  * @module lib/runtime/middleware/subagents
  */
 
+// Fallback for when config omits team.delegationModeSelection. Must stay in
+// lockstep with artibot.config.json#/team/delegationModeSelection — a drifted
+// fallback names tools the harness no longer provides, and the contract flows
+// into the prompt and into guardrail's candidate list.
 const DEFAULT_POLICIES = Object.freeze({
   subAgent: {
-    tools: ['Task'],
+    tools: ['Agent'],
     communication: 'one-way (result return only)',
   },
   agentTeam: {
-    tools: ['TeamCreate', 'SendMessage', 'TaskCreate', 'TaskUpdate', 'TaskList', 'TeamDelete'],
+    tools: ['Agent', 'SendMessage', 'TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet'],
     communication: 'P2P bidirectional + shared task list',
   },
 });

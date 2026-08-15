@@ -32,6 +32,14 @@
  *  5. **allowlist 가 실제 하네스와 함께 틀릴 수 있다.** 목록과 리포가 사이좋게
  *     같이 낡으면 전부 green 이다. 자기검증 describe 는 파서가 헛돌지 않는지만
  *     보증하지, 목록이 옳은지는 보증하지 못한다.
+ *  6. **`commands/` 와 `agents/` 밖은 통째로 스코프 밖이다.** `lib/` · `scripts/`
+ *     의 코드 상수, 훅이 주입하는 지시 문자열, 문서 산문은 한 줄도 보지 않는다.
+ *     2026-08-15 전역 census 실측: 프론트매터가 전부 green 인 상태에서 실행 경로에
+ *     유령 이름이 남아 있었다 — `scripts/hooks/auto-team-trigger.js` 가 모델에게
+ *     `TeamCreate` 호출을 지시했고, `lib/runtime/middleware/subagents.js` 의
+ *     `DEFAULT_POLICIES` 가 `artibot.config.json#/team/delegationModeSelection`
+ *     와 어긋나 있었다. **이 게이트의 green 을 "리포에 유령 이름이 없다"의 근거로
+ *     쓰지 마라.** 그 주장을 하려면 `--include` 없는 전역 grep 이 필요하다.
  *
  * @module tests/firewall/frontmatter-tool-names
  */
@@ -42,10 +50,25 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-/** 플러그인 루트 (`plugins/artibot/`) */
-const PLUGIN_ROOT = join(__dirname, '..', '..');
-const COMMANDS_DIR = join(PLUGIN_ROOT, 'commands');
-const AGENTS_DIR = join(PLUGIN_ROOT, 'agents');
+/** `plugins/` — 이 리포가 출하하는 모든 플러그인의 부모. */
+const PLUGINS_DIR = join(__dirname, '..', '..', '..');
+
+/**
+ * 검사 대상 플러그인 루트.
+ *
+ * **cowork 를 포함하는 이유**: `artibot-cowork` 는 artibot 의 미러가 아니라
+ * 루트 `.claude-plugin/marketplace.json` 에 자기 엔트리를 가진 **독립 출하
+ * 플러그인**이다(별도 `plugin.json`·CHANGELOG·릴리스 워크플로). 출하되는 이상
+ * 프론트매터가 가리키는 도구도 실재해야 한다. 릴리스 주기가 다르다는 것은
+ * 게이트를 면제할 이유가 아니라 **드리프트가 더 조용히 쌓일 이유**다 —
+ * 실제로 2026-08-15 첫 확장 시점에 cowork orchestrator 는 `tools:` 에
+ * `Agent` 를 한 줄도 선언하지 않은 채 폐지된 `Task(...)` 10건과
+ * `TeamCreate`/`TeamDelete` 로만 팀원을 스폰하게 돼 있었다(= 스폰 불능).
+ */
+const PLUGIN_ROOTS = [
+  { id: 'artibot', dir: join(PLUGINS_DIR, 'artibot') },
+  { id: 'artibot-cowork', dir: join(PLUGINS_DIR, 'artibot-cowork') },
+];
 
 /**
  * 하네스가 제공하는 도구 이름 정본.
@@ -231,18 +254,40 @@ export function normalizeToolName(declared) {
 }
 
 /** `.md` 파일 목록. INDEX.md 는 자동생성 색인이라 에이전트가 아니다. */
-function agentFiles() {
-  return readdirSync(AGENTS_DIR)
+function agentFiles(root) {
+  return readdirSync(join(root.dir, 'agents'))
     .filter((f) => f.endsWith('.md'))
     .filter((f) => f !== 'INDEX.md');
 }
 
-function commandFiles() {
-  return readdirSync(COMMANDS_DIR).filter((f) => f.endsWith('.md'));
+function commandFiles(root) {
+  return readdirSync(join(root.dir, 'commands')).filter((f) => f.endsWith('.md'));
 }
 
 /**
- * 전 파일을 훑어 allowlist 밖 이름을 모은다.
+ * 스캔 대상 파일 하나를 기술한다. `rel` 은 플러그인 id 를 접두로 달아 두 루트의
+ * 동명 파일(`commands/analyze.md` 가 양쪽에 있다)을 구별할 수 있게 한다.
+ *
+ * @param {{id: string, dir: string}} root
+ * @returns {Array<{rel: string, abs: string, parse: Function}>}
+ */
+function sourcesFor(root) {
+  return [
+    ...commandFiles(root).map((f) => ({
+      rel: `${root.id}/commands/${f}`,
+      abs: join(root.dir, 'commands', f),
+      parse: parseCommandTools,
+    })),
+    ...agentFiles(root).map((f) => ({
+      rel: `${root.id}/agents/${f}`,
+      abs: join(root.dir, 'agents', f),
+      parse: parseAgentTools,
+    })),
+  ];
+}
+
+/**
+ * 전 플러그인의 전 파일을 훑어 allowlist 밖 이름을 모은다.
  *
  * @param {Set<string>} allowlist 뮤테이션 테스트가 주입할 수 있게 인자로 받는다.
  * @returns {{ violations: Array<{file: string, name: string}>, unparsed: Array<{file: string, reason: string}>, scanned: number }}
@@ -252,10 +297,7 @@ export function scanDeclaredToolNames(allowlist = KNOWN_TOOL_NAMES) {
   const unparsed = [];
   let scanned = 0;
 
-  const sources = [
-    ...commandFiles().map((f) => ({ rel: `commands/${f}`, abs: join(COMMANDS_DIR, f), parse: parseCommandTools })),
-    ...agentFiles().map((f) => ({ rel: `agents/${f}`, abs: join(AGENTS_DIR, f), parse: parseAgentTools })),
-  ];
+  const sources = PLUGIN_ROOTS.flatMap(sourcesFor);
 
   for (const source of sources) {
     scanned += 1;
@@ -295,28 +337,34 @@ function formatViolations(violations) {
 describe('프론트매터 도구명 — 파싱 가능성', () => {
   // 파싱 실패는 null 이 아니라 RED 다. lockstep 게이트가 "못 읽음"과 "목록 없음"을
   // 구별하지 못해 노출을 남긴 선례를 반복하지 않는다.
-  it('모든 커맨드가 allowed-tools 를 파싱 가능한 형태로 선언한다', () => {
-    const failures = commandFiles()
-      .map((f) => ({ f, r: parseCommandTools(readFileSync(join(COMMANDS_DIR, f), 'utf-8')) }))
+  it('모든 커맨드·에이전트가 도구 선언을 파싱 가능한 형태로 한다', () => {
+    const failures = PLUGIN_ROOTS.flatMap(sourcesFor)
+      .map((s) => ({ s, r: s.parse(readFileSync(s.abs, 'utf-8')) }))
       .filter((x) => !x.r.ok)
-      .map((x) => `commands/${x.f}: ${x.r.reason}`);
+      .map((x) => `${x.s.rel}: ${x.r.reason}`);
     expect(failures, failures.join('\n')).toEqual([]);
   });
 
-  it('모든 에이전트가 tools 를 파싱 가능한 형태로 선언한다', () => {
-    const failures = agentFiles()
-      .map((f) => ({ f, r: parseAgentTools(readFileSync(join(AGENTS_DIR, f), 'utf-8')) }))
-      .filter((x) => !x.r.ok)
-      .map((x) => `agents/${x.f}: ${x.r.reason}`);
-    expect(failures, failures.join('\n')).toEqual([]);
+  // 분모가 줄면(디렉터리 오타, 필터 실수, 루트 누락) 게이트가 조용히 아무것도 안
+  // 보게 된다. 루트별로 따로 못박아, 한쪽이 통째로 빠져도 합계가 우연히 맞아
+  // 넘어가는 일이 없게 한다.
+  const FLOOR = {
+    artibot: { commands: 70, agents: 20 },
+    'artibot-cowork': { commands: 15, agents: 10 },
+  };
+
+  it.each(PLUGIN_ROOTS)('$id 루트가 커맨드와 에이전트 양쪽을 덮는다', (root) => {
+    expect(commandFiles(root).length).toBeGreaterThan(FLOOR[root.id].commands);
+    expect(agentFiles(root).length).toBeGreaterThan(FLOOR[root.id].agents);
   });
 
-  it('스코프가 커맨드와 에이전트 양쪽을 덮는다', () => {
-    // 분모가 줄면(디렉터리 오타, 필터 실수) 게이트가 조용히 아무것도 안 보게 된다.
+  it('스캔 분모가 전 루트의 파일 수 합과 정확히 같다', () => {
     const { scanned } = scanDeclaredToolNames();
-    expect(commandFiles().length).toBeGreaterThan(70);
-    expect(agentFiles().length).toBeGreaterThan(20);
-    expect(scanned).toBe(commandFiles().length + agentFiles().length);
+    const expected = PLUGIN_ROOTS.reduce(
+      (sum, root) => sum + commandFiles(root).length + agentFiles(root).length,
+      0,
+    );
+    expect(scanned).toBe(expected);
   });
 });
 
@@ -384,6 +432,18 @@ describe('스캐너 자기검증 — 게이트가 헛돌지 않는다', () => {
     const added = violations.filter((v) => v.name === 'Read');
     expect(added.length).toBeGreaterThan(0);
     expect(violations.length).toBe(baseline + added.length);
+  });
+
+  // 음성 대조. 위 뮤테이션은 "어딘가에서" 위반이 잡히는 것만 보증하므로, 루트를
+  // 하나 더 붙였는데 경로가 틀려 0건을 훑고 있어도 artibot 쪽 위반만으로 통과한다.
+  // 루트별로 위반이 **귀속**되는지까지 봐야 스코프 확장이 실효라는 증거가 된다.
+  it.each(PLUGIN_ROOTS)('$id 의 파일이 실제로 스캔된다 (루트별 귀속 확인)', (root) => {
+    const shrunk = new Set(KNOWN_TOOL_NAMES);
+    shrunk.delete('Read');
+    const { violations } = scanDeclaredToolNames(shrunk);
+
+    const fromRoot = violations.filter((v) => v.file.startsWith(`${root.id}/`) && v.name === 'Read');
+    expect(fromRoot.length, `${root.id} 에서 Read 위반이 0건 — 이 루트는 스캔되지 않고 있다`).toBeGreaterThan(0);
   });
 
   it('빈 allowlist 면 거의 모든 파일이 위반이다', () => {

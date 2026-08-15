@@ -173,7 +173,7 @@ function evaluatePrompt(prompt, triggers) {
 function buildOutput(reason) {
   const guidance =
     `[auto-team-suggested] reason: ${reason}. ` +
-    'Per CLAUDE.md auto-team DNA: invoke TeamCreate or parallel Task() ' +
+    'Per CLAUDE.md auto-team DNA: spawn parallel teammates with Agent(name=…) ' +
     'instead of running inline on the main thread. Opt-out: --no-team flag.';
   return {
     hookSpecificOutput: {

@@ -228,6 +228,16 @@ export function parseIndex(raw) {
   return rows;
 }
 
+/** Render one canonical index line. */
+function renderIndexRow(r) {
+  return `- [${r.title}](${r.file}) — ${r.hook}`;
+}
+
+/** Join document lines with exactly one trailing newline. */
+function joinDoc(lines) {
+  return `${lines.join('\n').replace(/\n+$/, '')}\n`;
+}
+
 /**
  * Render index rows back to the canonical 1-line-per-memory format with the
  * `# Project Memory` header. Preserves caller-provided ordering.
@@ -237,10 +247,66 @@ export function parseIndex(raw) {
  */
 export function serializeIndex(rows) {
   const lines = [INDEX_HEADER, ''];
-  for (const r of rows) {
-    lines.push(`- [${r.title}](${r.file}) — ${r.hook}`);
-  }
+  for (const r of rows) lines.push(renderIndexRow(r));
   return `${lines.join('\n')}\n`;
+}
+
+/**
+ * Splice regenerated rows into an EXISTING MEMORY.md, preserving every line
+ * that is not a canonical index row — the document title, `##` section
+ * headings, and free prose (e.g. the block `install.sh#render_memory_seed`
+ * writes, which contains no index rows at all).
+ *
+ * Surviving rows are rewritten in place, so rows keep the section they were
+ * filed under; rows whose files vanished are dropped; new rows land right
+ * after the last surviving row, or appended as a fresh block when the prior
+ * document had no rows.
+ *
+ * WHAT THIS DOES NOT PRESERVE (deliberate, but know it before trusting
+ * "prose always survives"):
+ *   - ANY line matching {@link INDEX_LINE_RE} whose target is not an active
+ *     memory file is DELETED, because a stale row and a non-memory link are
+ *     indistinguishable in this format. That includes external-link prose
+ *     (`- [Dashboard](https://…) — 운영 대시보드`), cross-references
+ *     (`- [ADR-003](docs/adr/ADR-003.md) — 결정 기록`), and rows inside code
+ *     fences — fences are not tracked. `reference`-type memories are meant to
+ *     hold URLs and dashboards, so this is reachable in practice, not
+ *     theoretical. If MEMORY.md ever needs to carry durable non-memory links,
+ *     they must live in a form that does not match the row regex.
+ *   - Whitespace-only input never reaches here; the caller falls back to the
+ *     canonical header-only render so the result is not a headerless doc.
+ *
+ * @param {string} priorText - raw prior MEMORY.md (non-blank; see caller)
+ * @param {Map<string, {title:string,file:string,hook:string}>} rowByFile
+ * @returns {string}
+ */
+function spliceIndexRows(priorText, rowByFile) {
+  const out = [];
+  const seen = new Set();
+  let lastRowAt = -1;
+  for (const line of String(priorText).split('\n')) {
+    const m = line.match(INDEX_LINE_RE);
+    if (!m) {
+      out.push(line);
+      continue;
+    }
+    const file = m[2].trim();
+    if (!rowByFile.has(file) || seen.has(file)) continue; // vanished or duplicate
+    out.push(renderIndexRow(rowByFile.get(file)));
+    seen.add(file);
+    lastRowAt = out.length - 1;
+  }
+  const added = [];
+  for (const [file, row] of rowByFile.entries()) {
+    if (!seen.has(file)) added.push(renderIndexRow(row));
+  }
+  if (!added.length) return joinDoc(out);
+  if (lastRowAt >= 0) {
+    out.splice(lastRowAt + 1, 0, ...added);
+    return joinDoc(out);
+  }
+  while (out.length && !out[out.length - 1].trim()) out.pop();
+  return joinDoc([...out, '', ...added]);
 }
 
 /**
@@ -300,6 +366,16 @@ export function createMemoryMdAdapter(options = {}) {
   }
 
   /**
+   * Read the raw MEMORY.md text (read-only, `''` when absent). Callers feed it
+   * back as `regenerateIndex(records, { priorText })` so surrounding prose is
+   * preserved rather than replaced by the header-only render.
+   * @returns {Promise<string>}
+   */
+  async function readIndexText() {
+    return (await readTextFile(indexPath)) || '';
+  }
+
+  /**
    * Write a serialized memory doc to an arbitrary absolute path. Used by the
    * apply step to emit into staging/archive/active — NEVER defaulted at the
    * source file. Atomic via tmp+rename (mirrors core/file write semantics).
@@ -318,8 +394,12 @@ export function createMemoryMdAdapter(options = {}) {
    * whose files disappeared (merge) and adding new ones. Returns the rendered
    * text WITHOUT writing — the apply step decides where it lands.
    *
+   * With `opts.priorText` the rows are spliced into that document so its title,
+   * section headings and prose survive; without it the result is the canonical
+   * header-only render (used when MEMORY.md does not exist yet).
+   *
    * @param {object[]} activeRecords
-   * @param {{preserveOrderFrom?: Array<{file:string}>}} [opts]
+   * @param {{preserveOrderFrom?: Array<{file:string}>, priorText?: string}} [opts]
    * @returns {string}
    */
   function regenerateIndex(activeRecords, opts = {}) {
@@ -327,6 +407,12 @@ export function createMemoryMdAdapter(options = {}) {
     for (const rec of activeRecords) {
       const row = indexRowFor(rec);
       rowByFile.set(row.file, row);
+    }
+    // Blank/whitespace-only MEMORY.md has no prose worth preserving and no
+    // header to keep — fall through to the canonical render instead of
+    // emitting a headerless document.
+    if (opts.priorText && opts.priorText.trim()) {
+      return spliceIndexRows(opts.priorText, rowByFile);
     }
     const ordered = [];
     const seen = new Set();
@@ -353,6 +439,7 @@ export function createMemoryMdAdapter(options = {}) {
     get indexPath() { return indexPath; },
     readAll,
     readIndex,
+    readIndexText,
     writeDoc,
     regenerateIndex,
   });

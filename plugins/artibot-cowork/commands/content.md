@@ -1,7 +1,7 @@
 ---
 description: (Artibot) Content marketing and SEO specialist using content-marketer subagent
 argument-hint: '[type] e.g. "블로그 글 SEO 최적화"'
-allowed-tools: [Read, Write, Task, WebSearch, TaskCreate]
+allowed-tools: [Read, Write, Agent, WebSearch, TaskCreate]
 ---
 
 # /content
@@ -37,7 +37,7 @@ Parse $ARGUMENTS:
    - Keyword research and competition analysis
    - Trending topics in the domain
    - Competitor content analysis
-3. **Delegate**: Route to Task(content-marketer) subagent with context:
+3. **Delegate**: Route to Agent(content-marketer) subagent with context:
    - Content type and format requirements
    - SEO keywords and target metrics
    - Brand voice guidelines (if available in project)

@@ -20,15 +20,27 @@
  *  1. **인스톨러를 실행하지 않는다.** 문자열이 파일에 있다는 것만 보고, 그게
  *     실제로 사용자 디스크에 그렇게 쓰이는지는 확인하지 않는다. heredoc 안의
  *     변수 전개·이스케이프가 깨져도 이 테스트는 green 이다.
- *  2. **이미 설치된 사용자 머신은 손댈 수 없다.** 두 인스톨러의 auto-memory
- *     시드는 **write-once** 다(`install.sh` 의 "Auto-memory already exists —
- *     skipping seed" / `install.ps1` 의 동일 가드). 재설치·업데이트가 낡은
- *     MEMORY.md 를 고쳐주지 않으므로, 기존 설치본의 유령 문자열은 **영구
- *     잔존**한다. 이 테스트는 앞으로의 유입만 막는다.
+ *  2. **이미 설치된 사용자의 MEMORY.md 는 여전히 낡은 채로 남는다.** 시드는
+ *     write-once 이고, 그 파일은 이미 사용자 문서라 덮어쓰지 않는다. 2026-08-15
+ *     부터 인스톨러가 유령 문자열을 감지하면 최신 시드를 `MEMORY.md.artibot-new`
+ *     로 **옆에 park** 하고 경고하지만(`install.sh#park_stale_memory_seed` /
+ *     `install.ps1#Save-StaleMemorySeed`), 병합은 사람이 해야 한다. 원본은
+ *     사용자가 손대기 전까지 낡은 채다. 그 파킹 동작 자체의 검증은 이 파일이
+ *     아니라 `tests/scripts/install-memory-seed-stale.test.js` 에 있다(실제 셸을
+ *     띄워 돌리는 실행형). 이 파일은 여전히 **앞으로의 유입**만 본다.
  *  3. **금지 이름 목록은 수동 사본이다.** 하네스가 또 개명하면 같이 낡는다.
  *     정본은 `frontmatter-tool-names.test.js#KNOWN_TOOL_NAMES` 쪽 주석에 있는
  *     재확인 절차다.
- *  4. **배포 대상 전체를 스캔하지 않는다.** 인스톨러가 복사하는 `agents/`
+ *  4. **본문 바이트 차이는 보지 않는다.** 아래 "도구명 파리티" describe 는
+ *     이름 그대로 **도구명 멘션만** 비교한다(`toolMentions` 가 백틱을 걷어내고
+ *     `/\b[A-Z][A-Za-z]*\(\)/g` 만 뽑는다). 두 시드는 실제로 바이트 동일하지
+ *     않다 — `install.sh` 는 em dash 와 `→` 를, `install.ps1` 은 `-` 와 `->` 를
+ *     쓴다. 그 비대칭은 **의도된 것**이다(install.ps1 에 BOM 이 없어 PS 5.1 이
+ *     ANSI 로 읽으므로 비-ASCII 는 사용자 파일에 `??` 로 떨어진다). 사유와
+ *     강제는 `install.ps1#Get-MemorySeed` 주석과
+ *     `tests/scripts/install-memory-seed-stale.test.js` 의 ASCII describe 에 있다.
+ *     여기서 전문 바이트 비교를 도입하면 그 의도된 비대칭이 RED 가 된다.
+ *  5. **배포 대상 전체를 스캔하지 않는다.** 인스톨러가 복사하는 `agents/`
  *     `commands/` `skills/` 는 프론트매터 게이트와 별개로 본문 산문이 남을 수
  *     있고, 그중 일부는 의도적 보존이다(플랫폼 변환 예시, 비교 산문). 여기서는
  *     **생성기가 직접 만드는 텍스트**와 `rules/` 만 본다.

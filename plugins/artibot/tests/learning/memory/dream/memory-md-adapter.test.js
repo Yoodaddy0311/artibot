@@ -41,6 +41,54 @@ const INDEX = `# Project Memory
 - [Release v4.16.0](project_v4_16_release.md) — social-media depth 4
 `;
 
+// Verbatim from the `SEED_MEMORY` heredoc in `install.sh#render_memory_seed`,
+// with the three shell count vars expanded. (Cited by symbol, not line number:
+// the installer is refactored often and line coordinates rot.)
+//
+// `install.ps1#Get-MemorySeed` emits the same document ASCII-normalized —
+// `-` for `—` and `->` for `→`. Either way no line matches INDEX_LINE_RE, so
+// this fixture covers both variants for the purpose of these tests.
+//
+// NOTE: zero index rows — the seed is pure prose, which is exactly the shape
+// that used to be wiped on regeneration.
+const INSTALLER_SEED = `# Project Memory (Seeded by Artibot)
+
+## Artibot Quick Reference
+- **Agents**: 28 specialized agents — use \`Agent()\` to delegate
+- **Commands**: \`/sc\` routes to optimal command/agent/skill automatically
+- **DEV Protocol**: Decompose → Execute → Verify (mandatory for all code changes)
+- **Quality**: 80%+ test coverage, immutable patterns, functions < 50 lines
+
+## Workflow Tips
+- Complex features: start with \`/sc plan [feature]\` or use planner agent
+- After implementation: code-reviewer agent runs automatically via rules
+- Parallel work: launch multiple agents with \`Agent()\` for independent tasks
+- Vibe coding: rules auto-activate on file access (no /sc needed after install)
+
+## Key Paths
+- Agents: \`~/.claude/agents/\` (28 .md files)
+- Commands: \`~/.claude/commands/\` (78 .md files)
+- Skills: \`~/.claude/artibot/skills/\` (113 skill directories)
+- Rules: \`~/.claude/rules/artibot/\` (auto-activate on file access)
+- Config: \`~/.claude/artibot/artibot.config.json\`
+`;
+
+/** Mirrors the live MEMORY.md shape: prose sections AND grouped index rows. */
+const GROUPED_INDEX = `# Artibot Project Memory
+
+## Project Structure
+- Plugin root: \`plugins/artibot/\` (hooks, skills, agents, commands, lib)
+
+## Project History
+- [Project: Artibot](project_artibot.md) — Claude Code 플러그인
+
+## Feedback
+- [Release v4.16.0](project_v4_16_release.md) — social-media depth 4
+
+## Architecture Notes
+- ESM-only (\`"type": "module"\` in package.json)
+`;
+
 async function hashFile(p) {
   const raw = await fs.readFile(p, 'utf-8');
   return createHash('sha256').update(raw).digest('hex');
@@ -178,5 +226,107 @@ describe('createMemoryMdAdapter (directory-bound, injected memoryDir)', () => {
       'project_artibot.md', 'project_v4_16_release.md',
     ]);
     expect(rows[0].hook).toBe('hook one');
+  });
+});
+
+describe('regenerateIndex — surrounding prose survival (opts.priorText)', () => {
+  async function seedTwoRecords() {
+    await fs.writeFile(path.join(tmpDir, 'project_artibot.md'),
+      '---\nname: artibot\ndescription: hook one\n---\n\n# Project: Artibot\n', 'utf-8');
+    await fs.writeFile(path.join(tmpDir, 'project_v4_16_release.md'),
+      '---\nname: rel\ndescription: depth 4\n---\n\n# Release v4.16.0\n', 'utf-8');
+    const adapter = createMemoryMdAdapter({ memoryDir: tmpDir });
+    return { adapter, records: await adapter.readAll() };
+  }
+
+  it('keeps every installer-seeded prose section and appends the new rows', async () => {
+    const { adapter, records } = await seedTwoRecords();
+    const text = adapter.regenerateIndex(records, { priorText: INSTALLER_SEED });
+
+    // All three seeded sections and their bullets survive verbatim.
+    for (const line of INSTALLER_SEED.split('\n').filter((l) => l.trim())) {
+      expect(text).toContain(line);
+    }
+    // The seed's own title is not clobbered by the canonical header.
+    expect(text.startsWith('# Project Memory (Seeded by Artibot)')).toBe(true);
+    // New memories are still indexed.
+    expect(parseIndex(text).map((r) => r.file).sort()).toEqual([
+      'project_artibot.md', 'project_v4_16_release.md',
+    ]);
+  });
+
+  it('rewrites rows in place, leaving prose sections and their headings intact', async () => {
+    const { adapter, records } = await seedTwoRecords();
+    const text = adapter.regenerateIndex(records, { priorText: GROUPED_INDEX });
+
+    expect(text).toContain('## Project Structure');
+    expect(text).toContain('- Plugin root: `plugins/artibot/` (hooks, skills, agents, commands, lib)');
+    expect(text).toContain('## Architecture Notes');
+    expect(text).toContain('- ESM-only (`"type": "module"` in package.json)');
+    // Rows stay under the section they were filed in, not flattened to the top.
+    const lines = text.split('\n');
+    const historyAt = lines.findIndex((l) => l === '## Project History');
+    const feedbackAt = lines.findIndex((l) => l === '## Feedback');
+    const artibotRowAt = lines.findIndex((l) => l.includes('(project_artibot.md)'));
+    const releaseRowAt = lines.findIndex((l) => l.includes('(project_v4_16_release.md)'));
+    expect(artibotRowAt).toBeGreaterThan(historyAt);
+    expect(artibotRowAt).toBeLessThan(feedbackAt);
+    expect(releaseRowAt).toBeGreaterThan(feedbackAt);
+  });
+
+  it('drops rows whose files vanished without touching neighbouring prose', async () => {
+    // Only project_artibot.md exists; the release row must disappear.
+    await fs.writeFile(path.join(tmpDir, 'project_artibot.md'),
+      '---\nname: artibot\ndescription: hook one\n---\n\n# Project: Artibot\n', 'utf-8');
+    const adapter = createMemoryMdAdapter({ memoryDir: tmpDir });
+    const text = adapter.regenerateIndex(await adapter.readAll(), { priorText: GROUPED_INDEX });
+
+    expect(text).not.toContain('project_v4_16_release.md');
+    expect(text).toContain('## Feedback');
+    expect(text).toContain('## Architecture Notes');
+    expect(parseIndex(text).map((r) => r.file)).toEqual(['project_artibot.md']);
+  });
+
+  it('refreshes the hook text of surviving rows from the record description', async () => {
+    const { adapter, records } = await seedTwoRecords();
+    const text = adapter.regenerateIndex(records, { priorText: GROUPED_INDEX });
+    const row = parseIndex(text).find((r) => r.file === 'project_artibot.md');
+    expect(row.hook).toBe('hook one'); // was "Claude Code 플러그인" in the prior text
+  });
+
+  it('falls back to the canonical header-only render when no priorText is given', async () => {
+    const { adapter, records } = await seedTwoRecords();
+    const text = adapter.regenerateIndex(records, { preserveOrderFrom: parseIndex(INDEX) });
+    expect(text.startsWith('# Project Memory\n')).toBe(true);
+    expect(parseIndex(text)).toHaveLength(2);
+  });
+
+  it.each([['\n'], ['   \n\n  '], ['']])(
+    'falls back to the canonical header for blank priorText (%j)', async (blank) => {
+      const { adapter, records } = await seedTwoRecords();
+      const text = adapter.regenerateIndex(records, { priorText: blank });
+      // A blank document must not yield a headerless index.
+      expect(text.startsWith('# Project Memory\n')).toBe(true);
+      expect(parseIndex(text)).toHaveLength(2);
+    });
+
+  // Documented limitation, pinned so it cannot change silently: a line that
+  // matches the row format but points at no active memory is deleted, because
+  // a stale row and a non-memory link are indistinguishable in this format.
+  it('deletes row-shaped non-memory links (documented limitation)', async () => {
+    const { adapter, records } = await seedTwoRecords();
+    const prior = `# Artibot Project Memory
+
+## Reference
+- [Dashboard](https://example.invalid/dash) — 운영 대시보드
+- [ADR-003](docs/adr/ADR-003.md) — 결정 기록
+
+## Project History
+- [Project: Artibot](project_artibot.md) — Claude Code 플러그인
+`;
+    const text = adapter.regenerateIndex(records, { priorText: prior });
+    expect(text).toContain('## Reference'); // heading itself survives
+    expect(text).not.toContain('example.invalid'); // row-shaped link does not
+    expect(text).not.toContain('ADR-003');
   });
 });

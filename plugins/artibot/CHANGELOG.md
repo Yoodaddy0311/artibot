@@ -127,7 +127,7 @@ v4.44.0 의 보안 표면을 대상으로 한 적대적 리뷰(`/ultrareview`)�
   버전 차이·플랫폼 차이)을 훅 헤더에 명시했다. 훅 그린은 CI 그린을 **예측할 뿐 보장하지 않는다**.
   **[2026-08-15 주기]** 위 `core.hooksPath` 활성화 방법은 이후 **철회됐다** — 신뢰 경계 문제로
   현행 설치기는 그 설정이 있으면 실행을 거부한다. 현행 절차는 `npm run hooks:install` 이며,
-  Unreleased 의 "pre-push 훅 배치 방식" 항목과 `CONTRIBUTING.md` "Trust boundary" 절이 정본이다.
+  [4.45.0] 의 "pre-push 훅 배치 방식" 항목과 `CONTRIBUTING.md` "Trust boundary" 절이 정본이다.
   (이 줄은 주기이며 위 문장은 v4.44.0 시점의 기록 그대로 남겨 둔다.)
 
 ### Fixed

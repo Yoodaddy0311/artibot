@@ -1,7 +1,7 @@
 ---
 description: (Artibot) System design with architect agent and ADR generation
 argument-hint: '[module] e.g. "인증 시스템 아키텍처 설계"'
-allowed-tools: [Read, Glob, Grep, Bash, Task, TaskCreate]
+allowed-tools: [Read, Glob, Grep, Bash, Agent, TaskCreate]
 ---
 
 # /design
@@ -24,7 +24,7 @@ Parse $ARGUMENTS:
    - Current dependency graph
    - Existing design patterns in use
    - Technology stack and framework constraints
-3. **Delegate**: Route to Task(architect) for:
+3. **Delegate**: Route to Agent(architect) for:
    - Requirements analysis from target description
    - Design alternative generation (N options)
    - Trade-off matrix evaluation per alternative

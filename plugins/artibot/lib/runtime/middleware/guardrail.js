@@ -172,7 +172,7 @@ function collectToolCandidates(state) {
 
   const taskMode = state.context.tasks?.mode;
   if (taskMode === 'agentTeam') {
-    tools.add('TeamCreate');
+    tools.add('Agent');
     tools.add('SendMessage');
     tools.add('TaskCreate');
   }

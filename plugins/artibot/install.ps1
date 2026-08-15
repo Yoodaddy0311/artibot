@@ -942,35 +942,41 @@ function Initialize-LocalConfig {
 # ---------------------------------------------------------------------------
 # Claude Code hashes the project path into ~/.claude/projects/<hash>/memory/.
 # The hash replaces space / \ : with '-' and strips a leading '-'.
-function Initialize-AutoMemory {
-  $memoryDir = Join-Path $ClaudeDir 'projects'
-  $cwd = (Get-Location).Path
+# Staleness is TWO conditions, both required - parity with install.sh
+# SEED_SIGNATURE + STALE_SEED_PATTERN, and see that comment for the evidence.
+# The signature check is what stops the scan from firing on a memory file the
+# installer never wrote but which happens to mention Task() in the user's prose.
+# .Contains() is a literal substring test, so live 'TaskCreate(' / 'TaskUpdate('
+# do not match.
+$script:SeedSignature = '# Project Memory (Seeded by Artibot)'
+$script:StaleSeedPattern = 'Task('
 
-  # Build the path hash the same way Claude Code does (space, /, \, : -> -).
-  $projectHash = ($cwd -replace '[ /:\\]', '-') -replace '^-', ''
-
-  # Fallback: if the computed hash dir is absent, match by trailing basename.
-  $candidate = Join-Path $memoryDir $projectHash
-  if ((-not (Test-Path -LiteralPath $candidate)) -and (Test-Path -LiteralPath $memoryDir)) {
-    $leaf = Split-Path -Leaf $cwd
-    $match = Get-ChildItem -LiteralPath $memoryDir -Directory -ErrorAction SilentlyContinue |
-      Where-Object { $_.Name -like "*$leaf" } | Select-Object -First 1
-    if ($match) { $projectHash = $match.Name }
-  }
-  $projectMemory = Join-Path (Join-Path $memoryDir $projectHash) 'memory'
-
-  if ((Test-Path -LiteralPath (Join-Path $projectMemory 'MEMORY.md'))) {
-    Write-Log 'Auto-memory already exists - skipping seed'
-    return
-  }
-  if ($DryRun) { Write-Log "[dry-run] would seed MEMORY.md -> $projectMemory"; return }
-
+# Emit the MEMORY.md quickstart body. Counts live here (not in the caller) so
+# the fresh-seed and stale-park paths render identical text - parity with
+# install.sh render_memory_seed.
+#
+# ── THE HERE-STRING BELOW MUST STAY PURE ASCII. DO NOT "RESTORE PARITY". ──
+# install.sh renders the same text with an em dash ("agents — use") and real
+# arrows ("Decompose → Execute"). This file deliberately uses "-" and "->".
+# That divergence is load-bearing, not drift.
+#
+# Why: this script has NO BOM (verified: first bytes are 23 52 65, not EF BB BF)
+# and Windows PowerShell 5.1 reads a BOM-less .ps1 as the ANSI codepage. Measured
+# on PowerShell 5.1.26100.9168 with a BOM-less script: an em dash in a
+# here-string is written to disk as "??" - the user's MEMORY.md gets mojibake.
+#   Input:  "- Agents - use `Agent()` to delegate"  <- with em dash
+#   Output: "- Agents ??use Agent() to delegate"
+# Non-ASCII elsewhere in this file (43 comment lines have em dashes) is harmless
+# because comments are never written to a user's disk. Only this rendered text is.
+#
+# Enforced by tests/scripts/install-memory-seed-stale.test.js, so reintroducing a
+# non-ASCII character here fails CI rather than silently shipping mojibake.
+function Get-MemorySeed {
   $agentCount = (Get-ChildItem -LiteralPath (Join-Path $ClaudeDir 'agents')   -Filter '*.md' -File -ErrorAction SilentlyContinue | Measure-Object).Count
   $cmdCount   = (Get-ChildItem -LiteralPath (Join-Path $ClaudeDir 'commands') -Filter '*.md' -File -ErrorAction SilentlyContinue | Measure-Object).Count
   $skillsDir  = Join-Path $ArtibotDir 'skills'
   $skillCount = if (Test-Path -LiteralPath $skillsDir) { (Get-ChildItem -LiteralPath $skillsDir -Directory -ErrorAction SilentlyContinue | Measure-Object).Count } else { 0 }
 
-  New-Item -ItemType Directory -Path $projectMemory -Force | Out-Null
   $seed = @"
 # Project Memory (Seeded by Artibot)
 
@@ -993,7 +999,63 @@ function Initialize-AutoMemory {
 - Rules: ``~/.claude/rules/artibot/`` (auto-activate on file access)
 - Config: ``~/.claude/artibot/artibot.config.json``
 "@
-  Set-Content -LiteralPath (Join-Path $projectMemory 'MEMORY.md') -Value $seed -Encoding utf8
+  return $seed
+}
+
+# Non-destructive repair for already-installed users - parity with install.sh
+# park_stale_memory_seed. Never rewrites the user's MEMORY.md; parks the current
+# version as MEMORY.md.artibot-new (same convention as Copy-MdFiles -Preserve,
+# and that suffix is ignored by the .md loaders). Re-parking overwrites a
+# previously parked copy, matching Copy-MdFiles' -Force. Silent when clean.
+function Save-StaleMemorySeed {
+  param([string]$MemoryMd)
+
+  $existing = Get-Content -LiteralPath $MemoryMd -Raw -ErrorAction SilentlyContinue
+  if (-not $existing) { return }
+  # Both conditions. A user file that merely talks about Task() is not our
+  # stale seed and must not be touched.
+  if (-not $existing.Contains($script:SeedSignature)) { return }
+  if (-not $existing.Contains($script:StaleSeedPattern)) { return }
+
+  try {
+    Set-Content -LiteralPath "$MemoryMd.artibot-new" -Value (Get-MemorySeed) -Encoding utf8 -ErrorAction Stop
+  } catch {
+    Write-Warn2 '  Could not write MEMORY.md.artibot-new - leaving MEMORY.md untouched'
+    return
+  }
+  Write-Warn2 'Your MEMORY.md still names the old Task() tool (renamed to Agent())'
+  Write-Warn2 '  Your file is untouched - current version parked as MEMORY.md.artibot-new'
+}
+
+function Initialize-AutoMemory {
+  $memoryDir = Join-Path $ClaudeDir 'projects'
+  $cwd = (Get-Location).Path
+
+  # Build the path hash the same way Claude Code does (space, /, \, : -> -).
+  $projectHash = ($cwd -replace '[ /:\\]', '-') -replace '^-', ''
+
+  # Fallback: if the computed hash dir is absent, match by trailing basename.
+  $candidate = Join-Path $memoryDir $projectHash
+  if ((-not (Test-Path -LiteralPath $candidate)) -and (Test-Path -LiteralPath $memoryDir)) {
+    $leaf = Split-Path -Leaf $cwd
+    $match = Get-ChildItem -LiteralPath $memoryDir -Directory -ErrorAction SilentlyContinue |
+      Where-Object { $_.Name -like "*$leaf" } | Select-Object -First 1
+    if ($match) { $projectHash = $match.Name }
+  }
+  $projectMemory = Join-Path (Join-Path $memoryDir $projectHash) 'memory'
+
+  # Existing files are never rewritten - but they may carry stale tool names
+  # from an older installer, so check before returning.
+  $memoryMd = Join-Path $projectMemory 'MEMORY.md'
+  if ((Test-Path -LiteralPath $memoryMd)) {
+    if (-not $DryRun) { Save-StaleMemorySeed $memoryMd }
+    Write-Log 'Auto-memory already exists - skipping seed'
+    return
+  }
+  if ($DryRun) { Write-Log "[dry-run] would seed MEMORY.md -> $projectMemory"; return }
+
+  New-Item -ItemType Directory -Path $projectMemory -Force | Out-Null
+  Set-Content -LiteralPath $memoryMd -Value (Get-MemorySeed) -Encoding utf8
   Write-Log "Auto-memory seeded with Artibot quickstart -> $projectMemory\MEMORY.md"
 }
 
