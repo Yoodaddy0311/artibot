@@ -1,7 +1,7 @@
 # Artibot Agent Coordination Rules
 
 ## Available Agents
-28 specialized agents in `~/.claude/agents/`. Use Task() to delegate.
+28 specialized agents in `~/.claude/agents/`. Use Agent() to delegate.
 
 ## Model Policy (단일 티어 — Opus 5)
 - **Opus (28/28)**: 모든 에이전트가 `opus` 티어 = `claude-opus-5`. 설계·계획·검수·구현·마케팅 구분 없이 동일 티어.

@@ -775,7 +775,7 @@ seed_auto_memory() {
 # Project Memory (Seeded by Artibot)
 
 ## Artibot Quick Reference
-- **Agents**: ${mem_agent_count} specialized agents — use \`Task()\` to delegate
+- **Agents**: ${mem_agent_count} specialized agents — use \`Agent()\` to delegate
 - **Commands**: \`/sc\` routes to optimal command/agent/skill automatically
 - **DEV Protocol**: Decompose → Execute → Verify (mandatory for all code changes)
 - **Quality**: 80%+ test coverage, immutable patterns, functions < 50 lines
@@ -783,7 +783,7 @@ seed_auto_memory() {
 ## Workflow Tips
 - Complex features: start with \`/sc plan [feature]\` or use planner agent
 - After implementation: code-reviewer agent runs automatically via rules
-- Parallel work: launch multiple agents with \`Task()\` for independent tasks
+- Parallel work: launch multiple agents with \`Agent()\` for independent tasks
 - Vibe coding: rules auto-activate on file access (no /sc needed after install)
 
 ## Key Paths
