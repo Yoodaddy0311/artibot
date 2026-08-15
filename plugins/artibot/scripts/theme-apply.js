@@ -6,7 +6,11 @@
  *   1. statusLine  — points ~/.claude/settings.json at statusline-themed.sh and
  *      writes the theme palette to ~/.claude/artibot/runtime/current-theme.json
  *   2. Windows Terminal — injects an `ARTIBOT <THEME>` color scheme + selects it
- *   3. output-style — writes ~/.claude/output-styles/<name>.md (activate via /output-style)
+ *   3. output-style — writes ~/.claude/output-styles/<name>.md and selects it by
+ *      setting `settings.outputStyle` in the same write as (1). No manual pick is
+ *      needed; it takes effect on /clear or a new session. (Do NOT point users at
+ *      `/output-style` — that command is a hidden deprecated stub as of CLI 2.1.23x
+ *      and only prints "moved to /config".)
  *
  * Targets the INSTALLED locations (HOME-based) since that is what the live
  * session uses, regardless of where this script runs from.

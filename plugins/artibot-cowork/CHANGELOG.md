@@ -116,12 +116,25 @@ Targeted at a future release:
   Marketing Audit, Content Launch, Competitive Analysis, Design Asset Creation,
   Campaign Automation). Also gained a model policy and an Effort Level Policy table,
   and its teammate roster was narrowed to the marketing agents.
-- `skills/principles/SKILL.md` — restructured around marketing principles and given
-  an Auto Mode safety guide (allow/block criteria).
+- `skills/principles/SKILL.md` — the software-engineering sections were replaced,
+  not supplemented: `SOLID Principles` and `Design Principles` were removed and
+  `마케팅 워크 원칙` / `의사결정 프레임워크` put in their place. Also gained an
+  `Auto Mode 안전 가이드` with explicit allow (`허용`) and block (`차단`) lists, an
+  Auto Mode safety checklist, and an `xhigh Effort — 마케팅 맥락` subsection.
 - `agents/planner.md` — skill reference `persona-architect` → `marketing-strategy`.
 - `agents/marketing-strategist.md` — added `capabilities` / `lifecycle` / `rules`
   frontmatter.
-- `README.md` — updated for this release.
+- `README.md` — retitled to **v3.1** and restructured: a new "v3.1 Highlights
+  (2026-04 Claude Feature Integration)" section (Claude Design, Routines, Ultraplan,
+  Monitor, Opus 4.7 model policy, Auto Mode safety guide, new orchestrator playbooks)
+  sits above the retained v3.0 and v0.4.0 highlight sections; the old `Installation`
+  section was dropped. Asset figures moved **Skills 40 → 46, Agents 10 → 12,
+  Commands 17 → 21** — but only part of that is new files. Counted at the parent
+  commit (`10faf1ef~1`) the tree already held **42 skills and 12 agents**, so
+  Commands **+4** and Skills **+4** are real additions (they match the four commands
+  and four skills listed above), while the Agents figure is a **stale-count
+  correction** — this release adds no agent file. The old README's own numbers also
+  disagreed with each other (badge 41 vs heading 40 skills).
 - `.claude-plugin/plugin.json` — version and expanded `keywords`.
 
 ---

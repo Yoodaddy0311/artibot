@@ -71,5 +71,5 @@ Bash: ENGINE="$HOME/.claude/artibot/scripts/theme-apply.js"; [ -f "$ENGINE" ] ||
 
 | # | 액션 | 설명 |
 |---|------|------|
-| 1 | `/output-style` | 테마 output-style 활성화 (포맷 적용) |
+| 1 | `/clear` | output-style 적용 (엔진이 이미 설정했으므로 세션만 새로 시작하면 된다) |
 | 2 | `/theme reset` | 기본으로 원복 |

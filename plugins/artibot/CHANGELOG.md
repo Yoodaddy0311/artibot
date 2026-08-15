@@ -2009,15 +2009,46 @@ The v4.6.4 commit `7072ac1` ("exec-form hooks") migrated to `args[]` on the assu
 
 ---
 
-## [Unreleased]
+## [Unversioned — shipped across v4.7.5 and v4.8.1]
 
-### Added
+> **This section never got a version heading.** It was left as `## [Unreleased]` at
+> release time and then had a second batch of entries appended during a later cycle,
+> so it holds work from **two** releases and cannot take one version label. It was
+> relabelled in 2026-08 from git history; nothing here was rewritten, only the heading
+> and this note were added. The content is unique — none of it is duplicated in the
+> `[4.7.5]` or `[4.8.1]` sections below and above.
+>
+> Provenance, by subsection:
+>
+> - **Added** — authored in `b5aec3db` (2026-05-16). First tag containing that commit
+>   is **v4.8.1**.
+> - **Changed / Fixed / Deprecated / Notes** — authored in `553f5157` (2026-05-14),
+>   whose commit subject calls itself "v4.7.2". First tag containing it is **v4.7.5**.
+>
+> **On the "v4.7.2" the Changed entry refers to:** versions 4.7.2, 4.7.3 and 4.7.4 were
+> never released. Those numbers were batch labels in commit subjects, not shipped
+> versions — which is why this section is not titled `[4.7.2]`.
+>
+> **The evidence for that is tag absence, and only tag absence.** No `v4.7.2`,
+> `v4.7.3`, or `v4.7.4` tag exists, and `.github/workflows/release.yml` fires on
+> `push: tags: ["v*"]` — tagging *is* the release mechanism here, so an untagged
+> version number never shipped. That is structural, not inferential.
+>
+> **Do not use `plugin.json` to decide whether a version shipped.** It reads `4.7.1`
+> at `553f5157` and at `6946c631` ("v4.7.3") — but it also reads `4.7.1` at the commit
+> tagged `v4.7.5`, which *did* ship. `51dde739` ("bump version metadata to match
+> release tag") then raised it to `4.7.5` after the fact. In this period the manifest
+> trailed the releases, so `plugin.json == 4.7.1` cannot tell "never shipped" apart
+> from "shipped, metadata late". It corroborates that these numbers were batch labels;
+> it does not establish non-release.
+
+### Added <!-- from b5aec3db (2026-05-16) — released in v4.8.1 -->
 
 - **`/adr` 커맨드 + `skills/adr-format/`** (Senior Eng Collection #4 벤치마킹) — 아키텍처 결정 기록(ADR) 작성 워크플로우. "ADR 작성해줘" 같은 자연어 입력으로도 자동 트리거됩니다. 결정 배경·대안·트레이드오프를 구조화된 문서로 남겨 팀 컨텍스트를 보존합니다.
 - **`/migrate` 커맨드 + `skills/zero-downtime-migration/`** (Senior Eng Collection #11) — 무중단 DB/인프라 마이그레이션 전략 수립 및 단계별 실행 가이드. Expand-Contract 패턴, 롤백 플랜, 단계별 검증 체크포인트를 자동 생성합니다.
 - **NLU 자동 탐지** — 비개발자가 "ADR 문서 만들어줘", "DB 마이그레이션 어떻게 하지" 처럼 자연어로 입력하면 NLU 훅이 의도를 분류하여 `/adr` 또는 `/migrate` 커맨드를 자동으로 제안합니다. 슬래시 커맨드 이름을 몰라도 됩니다.
 
-### Changed (BREAKING for users relying on silent commit/push)
+### Changed (BREAKING for users relying on silent commit/push) <!-- from 553f5157 (2026-05-14) — released in v4.7.5 -->
 
 - **`scripts/hooks/git-autopilot-save.js`** + **`scripts/hooks/git-autopilot-close.js`** — auto-save / session-close commits and the auto-push step **no longer pass `--no-verify` by default**. The user's `pre-commit` and `pre-push` hooks now run, so secret-scan / lint / test gates can fail an autopilot commit instead of being silently bypassed (CLAUDE.md Git Safety Protocol).
 
@@ -2034,17 +2065,17 @@ The v4.6.4 commit `7072ac1` ("exec-form hooks") migrated to `args[]` on the assu
 
   Per-repo override via `.git/autopilot.json` (`bypassPreCommitHooks` / `bypassPrePushHooks` keys) takes precedence over the plugin-level config.
 
-### Fixed
+### Fixed <!-- from 553f5157 (2026-05-14) — released in v4.7.5 -->
 
 - **`scripts/hooks/agent-evaluator.js`** — replace `lowerOutput.includes(marker)` substring match with word-boundary regex matching plus an error-negation phrase filter. Plain `.includes()` was firing `error` against `errorless`, `cannot` against `cannotation`, and was counting `no errors` / `0 issues found` / `error free build` as failures, inflating the error-marker rate for clean runs. Plural forms (`errors`, `failures`) still match via an `(s|es)?` suffix on single-word markers. (issue-scanner W4 P1-2)
 
-### Deprecated
+### Deprecated <!-- from 553f5157 (2026-05-14) — released in v4.7.5 -->
 
 - **`scripts/hooks/_deprecated/`** — staging area for hooks with no registered usage in `hooks.json` and no internal import. Files moved here are scheduled for deletion after a 1-week monitoring window. If you depended on any of these, please file an issue before the scheduled removal date.
   - `on-handoff.js`, `on-llm-start.js`, `on-llm-end.js` — Anthropic Agent SDK extension stubs (AD-07). Header explicitly notes "Not wired in hooks.json — Claude Code's native loader rejects snake_case event keys." Reserved for future SDK runtime wiring that never materialised. Scheduled deletion: **2026-05-21**.
   - `auto-review-trigger.js` — Stop/SubagentStop reviewer-suggestion hook (PRD §5.3). Never registered in `hooks.json`; `stop-recap.js` only references it in a JSDoc comment. Scheduled deletion: **2026-05-21**.
 
-### Notes
+### Notes <!-- from 553f5157 (2026-05-14) — released in v4.7.5 -->
 
 - `hooks.json` was **not** modified — all 4 deprecated files were already absent from the manifest.
 - Files retained in `scripts/hooks/` despite being unregistered: `event-emitter.mjs` (documented public API for the `hook-event-emitter` SKILL), `git-autopilot-merge.js` (imported by `git-autopilot-session.js:16`), `statusline.sh` (registered via `install.sh` as Claude Code `statusLine` slot), `skill-discovery-inject.js` (dynamic-imported by `session-start.js:369-371`), `check-console-log.js` (live test suite), `session-start-sweep.mjs` and `nightly-*.mjs` (designed but unwired — defer for separate evaluation).

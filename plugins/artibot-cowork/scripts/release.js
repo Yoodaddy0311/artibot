@@ -71,12 +71,20 @@ function run(cmd, cmdArgs, opts = {}) {
   return result;
 }
 
+/**
+ * Throws rather than calling fail(). Every caller runs inside main()'s try
+ * block, and that block's catch is the only thing that releases the autopilot
+ * lock. process.exit() unwinds nothing, so a failed step used to leave
+ * .git/autopilot.lock.json on disk and autopilot pinned to enabled=false —
+ * which then blocked the next release with "Lock already exists" and said
+ * nothing about either. The catch exits 2, the same code fail() used here.
+ */
 function gitOrFail(cmdArgs, errMsg) {
   const r = run('git', cmdArgs);
   if (r.status !== 0) {
     console.error(r.stdout);
     console.error(r.stderr);
-    fail(2, `${errMsg} (git ${cmdArgs.join(' ')} exited ${r.status})`);
+    throw new Error(`${errMsg} (git ${cmdArgs.join(' ')} exited ${r.status})`);
   }
   return r;
 }
@@ -119,8 +127,11 @@ function acquireLock(reason) {
 function releaseLock() {
   const r = run('node', [RELEASE_LOCK, '--release'], { stdio: 'inherit' });
   if (r.status !== 0) {
-    console.error('[release] WARNING: release-lock --release failed. Manual cleanup required:');
-    console.error('  node plugins/artibot-cowork/scripts/release-lock.js --status');
+    console.error('[release] WARNING: release-lock --release failed.');
+    console.error('  Autopilot is still paused (enabled=false) and the lock file remains.');
+    console.error('  The next release will refuse to start until it is cleared. Recover with:');
+    console.error('    node plugins/artibot-cowork/scripts/release-lock.js --status   # inspect');
+    console.error('    node plugins/artibot-cowork/scripts/release-lock.js --release  # restore');
   }
 }
 

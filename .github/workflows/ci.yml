@@ -94,13 +94,22 @@ jobs:
       - name: Validate README claims
         run: node scripts/ci/validate-readme-claims.js --full
 
+      # Unconditional on purpose. The `if [ -d "tests" ]` guard this replaces was
+      # GitHub starter-template boilerplate — it arrived with the file itself
+      # (7a37101d, 2026-02-19), not as an answer to any problem — and its `else`
+      # branch echoed "No test directory found. Skipping tests." and exited 0.
+      # Renaming or moving `tests/` would therefore have turned the whole test
+      # gate GREEN while running zero tests, and every other gate's green would
+      # have become meaningless with it.
+      #
+      # A condition that can silently disable its own gate is worse than no
+      # condition, because there is then nothing left to drift. vitest already
+      # fails closed here: no matching test files is exit 1 (measured
+      # 2026-08-15). That depends on `passWithNoTests` staying unset — it is not
+      # set in vitest.config.js or package.json today, and setting it would
+      # reopen exactly this hole.
       - name: Run tests with coverage
-        run: |
-          if [ -d "tests" ] || [ -d "__tests__" ] || [ -d "test" ]; then
-            npx vitest run --reporter=verbose --coverage
-          else
-            echo "No test directory found. Skipping tests."
-          fi
+        run: npx vitest run --reporter=verbose --coverage
 
       - name: Validate coverage thresholds
         run: node scripts/ci/validate-coverage.js --check
@@ -133,10 +142,17 @@ jobs:
             plugins/artibot/coverage/lcov.info
           if-no-files-found: warn
 
+      # Unconditional for the same reason as the test step above. The replaced
+      # guard enumerated five config filenames and skipped linting (exit 0) when
+      # it matched none — so renaming the config to any name absent from that
+      # list, or to a form ESLint supports but the list omits (`eslint.config.ts`,
+      # `eslint.config.mts`), would have dropped linting without a word. The
+      # enumeration was redundant as well: ESLint 9 resolves `eslint.config.*`
+      # itself and fails closed when it finds nothing — exit 2 (measured
+      # 2026-08-15). The repo ships `eslint.config.js`.
+      #
+      # Scope note, unchanged by this edit: the job-level
+      # `working-directory: plugins/artibot` means this lints that directory
+      # only. Repo-root files and plugins/artibot-cowork/ are NOT linted by CI.
       - name: Run ESLint
-        run: |
-          if [ -f ".eslintrc.json" ] || [ -f ".eslintrc.js" ] || [ -f ".eslintrc.yml" ] || [ -f "eslint.config.js" ] || [ -f "eslint.config.mjs" ]; then
-            npx eslint . --max-warnings=0
-          else
-            echo "No ESLint config found. Skipping lint."
-          fi
+        run: npx eslint . --max-warnings=0

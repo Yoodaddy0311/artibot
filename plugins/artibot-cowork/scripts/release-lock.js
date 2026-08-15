@@ -22,11 +22,33 @@
  */
 
 import { existsSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 
-const REPO_ROOT = process.cwd();
-const AUTOPILOT_PATH = path.join(REPO_ROOT, '.git', 'autopilot.json');
-const LOCK_PATH = path.join(REPO_ROOT, '.git', 'autopilot.lock.json');
+/**
+ * Autopilot state lives in the repository's common git directory, which is not
+ * always `<cwd>/.git`. Deriving it from cwd failed two ways: release.js spawns
+ * this script with cwd set to the plugin directory, which contains no `.git` at
+ * all, and inside a linked worktree `.git` is a file rather than a directory.
+ *
+ * `--git-common-dir` answers both. It always names the main repository's git
+ * directory, which is the correct home for state that pauses autopilot
+ * repo-wide — a worktree must not keep a private copy. Git may return it
+ * relative to cwd (`../../.git` from a subdirectory), so resolve it.
+ */
+function resolveGitDir() {
+  const r = spawnSync('git', ['rev-parse', '--git-common-dir'], { encoding: 'utf-8' });
+  if (r.error || r.status !== 0 || !r.stdout.trim()) {
+    console.error('[release-lock] Not inside a git repository.');
+    console.error('  git rev-parse --git-common-dir failed; cannot locate autopilot state.');
+    process.exit(1);
+  }
+  return path.resolve(r.stdout.trim());
+}
+
+const GIT_DIR = resolveGitDir();
+const AUTOPILOT_PATH = path.join(GIT_DIR, 'autopilot.json');
+const LOCK_PATH = path.join(GIT_DIR, 'autopilot.lock.json');
 
 const args = process.argv.slice(2);
 
