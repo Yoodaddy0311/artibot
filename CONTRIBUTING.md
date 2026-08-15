@@ -312,9 +312,10 @@ which puts you back to bypassing.
 
 ### Pre-push hook
 
-The hook runs the CI checks that are cheap enough to sit in front of every push.
-`.git/` is not tracked, so no committed file can install it for you. Every clone
-runs the installer once:
+The hook does two jobs. It runs the CI checks that are cheap enough to sit in
+front of every push, and it refuses a push to `master` that did not come through
+the side-branch gate flow above. `.git/` is not tracked, so no committed file can
+install it for you. Every clone runs the installer once:
 
 ```bash
 cd plugins/artibot
@@ -330,12 +331,61 @@ that setting overrides `.git/hooks` and would leave an installed-looking hook
 that never executes. `hooks:check` reports drift and exits non-zero without
 writing anything, which is the only way to confirm your clone is current.
 
-It takes roughly 11-15 seconds and blocks the push on failure. ESLint dominates
-that, so the number moves with its cache state. Bypass with
-`git push --no-verify` or `ARTIBOT_SKIP_PREPUSH=1`. Prefer the former.
+The content checks take roughly 11-15 seconds and block the push on failure.
+ESLint dominates that, so the number moves with its cache state. Bypass the whole
+hook with `git push --no-verify` or `ARTIBOT_SKIP_PREPUSH=1`. Prefer the former.
 `--no-verify` is scoped to the command you typed; the environment variable is
 not, and once it reaches a shell rc or a CI job env every later push is
 silently ungated. The hook announces the skip on stderr for that reason.
+
+#### Landing-flow gate
+
+The content gates check what you are pushing. This one checks how, and it runs
+first, so a push on the wrong route fails in under a second rather than after
+the lint pass.
+
+It looks only at pushes to `master` or `main`. For those it asks the question
+branch protection is about to ask: is the SHA the branch is being moved to
+already green on the server? It answers that two ways, in order.
+
+With `gh` available it reads the SHA's check runs, and requires all four
+required contexts to be present and green **by name**, plus no other check run
+on the SHA to be red or unfinished. Counting runs is not enough. A commit
+carrying one unrelated green check and none of the four satisfies every count
+while satisfying no required check at all, which is exactly the landing this
+gate exists to stop. The four names are mirrored in the hook, and a test in
+`plugins/artibot/tests/firewall/workflow-branch-lockstep.test.js` parses that
+mirror and fails when it disagrees with the list kept there.
+
+`gh` answering HTTP 422 for the SHA is a verdict rather than an error: the
+remote does not have the commit, which is the direct-push case itself. Any other
+gh failure (offline, unauthenticated, rate limited, timed out) leaves the
+question open, and the hook falls back to local evidence, requiring the SHA to
+equal the tip of a remote-tracking `ci/**` ref. Equality and not ancestry,
+because a push runs the workflows against the branch tip, so an ancestor of a
+pushed tip carries no check runs of its own. Your own
+`git push -u origin ci/topic` writes that ref, so it is there when you push
+`master`; the flow's last step deletes the branch afterwards.
+
+Waive it for one push with `ARTIBOT_ALLOW_DIRECT_PUSH=1`. That is deliberately a
+different switch from `ARTIBOT_SKIP_PREPUSH=1`, because it is a different
+decision: this one waives the route and leaves all the content gates running,
+while `ARTIBOT_SKIP_PREPUSH` waives the content checks and the route together.
+Both announce themselves on stderr.
+
+What this gate does not see:
+
+- **CI colour, whenever the offline fallback is the one that answered.** A
+  `ci/**` ref proves the SHA reached a branch CI runs on, not that the run went
+  green. Offline, a red SHA passes. Every such run says so on stderr.
+- **Which branches the remote actually protects.** That list is a manual copy
+  inside the hook with no automated lockstep, unlike the required contexts.
+  Protect another branch on GitHub and the gate keeps ignoring it until someone
+  edits the list.
+- **Clones that never ran the installer.** They have no hook at all, and
+  `--no-verify` skips it. This gate removes a slip you can make while paying
+  attention. Turning `enforce_admins` on is what would make the bypass
+  impossible, and no local hook substitutes for that.
 
 #### Trust boundary
 

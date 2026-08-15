@@ -45,6 +45,43 @@ const MACHINE_HASH_PATH = path.join(ARTIBOT_DIR, 'swarm-machine-hash.json');
 const GIT_TIMEOUT_MS = 30_000;
 
 /**
+ * Weight-map keys that must never be used as an index when aggregating a
+ * payload pulled from the swarm repo. See `gitDownloadLatestWeights`.
+ *
+ * A deny-list is normally fail-open against future additions; these three are
+ * the exception, being fixed by the language spec. `lib/core/config.js`
+ * (`deepMerge`) and `lib/core/redaction.js` (`redactObject`) already carry the
+ * same set for the same reason.
+ */
+const UNSAFE_WEIGHT_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
+/**
+ * @param {string} key
+ * @returns {boolean} true when `key` must not index an aggregation target.
+ */
+function isUnsafeWeightKey(key) {
+  return UNSAFE_WEIGHT_KEYS.has(key);
+}
+
+/**
+ * Copy one category's entries into the aggregation target (last write wins;
+ * `mergeWeights` does the proper averaging downstream).
+ *
+ * Split out of `gitDownloadLatestWeights` rather than inlined: the key guard
+ * needs a conditional inside the innermost loop, which would put that function
+ * one block past the max-depth lint budget.
+ *
+ * @param {object} target
+ * @param {object} entries
+ */
+function mergeCategoryEntries(target, entries) {
+  for (const [key, value] of Object.entries(entries)) {
+    if (isUnsafeWeightKey(key)) continue;
+    target[key] = value;
+  }
+}
+
+/**
  * Maximum commit message length. v4.8.0 audit L-2: spawnSync is shell-safe,
  * but unbounded message length (e.g. a stack trace mistakenly piped through)
  * can balloon `git commit -m` argv beyond the OS limit (Windows CreateProcess
@@ -357,12 +394,18 @@ export async function gitDownloadLatestWeights(currentVersion, options = {}) {
 
       // Shallow merge weights per category/key — caller will re-merge with mergeWeights().
       for (const [category, entries] of Object.entries(payload.weights)) {
+        // Both indices come from another machine's weights-latest.json, so both
+        // are attacker-controlled if that file is. A category of `__proto__` is
+        // not merely a bad key here: `aggregated[category]` READS the inherited
+        // accessor and yields Object.prototype, which is truthy — so the
+        // `if (!aggregated[category])` guard below never fires, and the inner
+        // assignment writes straight onto Object.prototype, process-wide.
+        // Verified 2026-08-15: `{"weights":{"__proto__":{"pwned":1}}}` through
+        // this loop leaves `({}).pwned === 1` for every object in the process.
+        if (isUnsafeWeightKey(category)) continue;
         if (!aggregated[category]) aggregated[category] = {};
         if (typeof entries !== 'object' || entries === null) continue;
-        for (const [key, value] of Object.entries(entries)) {
-          // Naive last-write-wins; merge-weights will do proper averaging downstream.
-          aggregated[category][key] = value;
-        }
+        mergeCategoryEntries(aggregated[category], entries);
       }
     }
 

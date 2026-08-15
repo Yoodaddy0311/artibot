@@ -21,8 +21,11 @@
 # See "Trust boundary" in CONTRIBUTING.md and the drift check below.
 #
 # Bypass:
-#   git push --no-verify           one-off, git built-in
+#   git push --no-verify             one-off, git built-in, skips everything
 #   ARTIBOT_SKIP_PREPUSH=1 git push  same, but greppable in shell history
+#   ARTIBOT_ALLOW_DIRECT_PUSH=1 git push
+#                                    skips only the landing-flow gate, not the
+#                                    ten content gates. See that gate's notes.
 #
 # WHAT THIS HOOK DOES NOT COVER. Read this before trusting a green result:
 #   - The vitest suite (~9,900 tests). Far too slow for a push gate.
@@ -37,6 +40,11 @@
 # A green hook predicts, it does not guarantee, a green CI.
 
 set -u
+
+# git invokes pre-push as `pre-push <remote name> <remote url>`. The
+# landing-flow gate uses the name, and it also reuses the positional parameters
+# as a POSIX-portable iterator, so read this before it is overwritten.
+push_remote_name=${1:-}
 
 # The skip announces itself on stderr, not stdout. `--no-verify` is scoped to the
 # one command you typed; an environment variable is not. Once ARTIBOT_SKIP_PREPUSH
@@ -56,12 +64,23 @@ fi
 # Deletions ("git push origin --delete x") carry an all-zero local sha and have
 # no tree to validate. Read stdin to tell them apart from real pushes. If every
 # ref on stdin is a deletion there is nothing to check.
+#
+# The surviving "<remote ref> <sha>" pairs are kept in push_refs for the
+# landing-flow gate: stdin is readable exactly once, so a later gate cannot go
+# back for them. This loop is deliberately not in a pipeline -- a subshell would
+# lose both has_content and push_refs.
 zero='0000000000000000000000000000000000000000'
 has_content=0
-while read -r _local_ref local_sha _remote_ref _remote_sha; do
+push_refs=''
+while read -r _local_ref local_sha remote_ref _remote_sha; do
 	[ -z "${local_sha:-}" ] && continue
 	if [ "$local_sha" != "$zero" ]; then
 		has_content=1
+		# The placeholder keeps the list an exact sequence of pairs. An empty
+		# field here would desync the word-splitting iterator below, silently
+		# pairing one line's sha with the next line's ref.
+		push_refs="$push_refs${remote_ref:-(unknown-ref)} $local_sha
+"
 	fi
 done
 
@@ -125,6 +144,343 @@ else
 	# there is nothing to compare against. The gate itself still runs -- only the
 	# drift signal is unavailable, and saying so is better than implying it passed.
 	echo "pre-push: NOTE - drift check unavailable (source or self not readable)" >&2
+fi
+
+# Landing-flow gate.
+#
+# The ten gates further down check what you are pushing. This one checks how.
+#
+# master carries four required status checks and has enforce_admins off. A
+# required check can only pass on a commit the server already has, and a commit
+# being pushed does not exist there yet, so a direct push always reports
+#
+#   remote: Bypassed rule violations for refs/heads/master:
+#   remote: - 4 of 4 required status checks are expected.
+#
+# and lands regardless. Not an occasional slip: every direct push bypasses, by
+# construction. CI then reports after the code is already on master, which is
+# how commit 9f124441 failed CI on 2026-08-11 and stayed. Commit 5c2f656a took
+# the same route on 2026-08-15, which is why this gate exists.
+#
+# Check runs attach to a commit SHA, not to a branch. So the supported flow
+# makes the SHA green before master ever reaches it, and the fast-forward then
+# satisfies the required checks with no bypass at all. The predicate this gate
+# tests is therefore the same one GitHub is about to evaluate: is the SHA that
+# master is being moved to already green on the server?
+#
+# Two ways to answer, tried in order:
+#
+#   1. gh api repos/{owner}/{repo}/commits/<sha>/check-runs -- the real signal,
+#      needs network and an authenticated gh. HTTP 422 "No commit found for
+#      SHA" is a verdict, not an error: the remote does not have the commit,
+#      which is the direct-push case itself. Every other gh failure (offline,
+#      401, 403, 404, rate limit, timeout) leaves the question open and is
+#      treated as unknown, never as a pass and never as a failure.
+#
+#   2. Unknown falls back to local evidence: does the SHA equal the tip of a
+#      remote-tracking ci/** ref? Your own `git push origin ci/topic` writes
+#      that ref, so it is present at the moment you push master; the flow's
+#      last step deletes the branch, but that runs afterwards. Equality and not
+#      ancestry, because a push runs the workflows against the branch tip only,
+#      so an ancestor of a pushed tip has no check runs of its own.
+#
+# WHAT THIS GATE CANNOT SEE. Read before treating a pass as proof:
+#
+#   - FAIL-OPEN on CI colour whenever path 2 answers. It proves the SHA reached
+#     a branch CI runs on, not that the run went green. Offline, a red SHA
+#     passes. Every such run says so on stderr; do not silence that NOTE.
+#   - Which branches the remote actually protects, and which contexts it
+#     requires. protected_refs and required_contexts below are manual mirrors
+#     of remote state. Protect another branch on GitHub and this gate keeps
+#     ignoring it until someone edits protected_refs; that one has no automated
+#     lockstep. required_contexts does: workflow-branch-lockstep.test.js parses
+#     it. Re-check either with:
+#       gh api repos/{owner}/{repo}/branches/master/protection \
+#         --jq '.required_status_checks.contexts'
+#   - Path 1 demands BOTH that the four required contexts are present and green
+#     BY NAME and that no other check run on the SHA is red or unfinished. The
+#     second half is stricter than GitHub, which ignores non-required runs, and
+#     it is wrong in the direction that costs a wait rather than a bad landing.
+#     The first half is not extra strictness, it is the actual question: an
+#     earlier revision counted runs without reading names, so one unrelated
+#     green check satisfied the gate while zero required contexts existed.
+#   - Nothing about clones that never ran `npm run hooks:install`: they have no
+#     hook at all. `--no-verify` skips it too. This gate removes a slip you can
+#     make while paying attention. Turning enforce_admins on is what would make
+#     the bypass impossible, and no local hook can substitute for that.
+
+# Manual mirror of remote branch protection. See the note above before editing.
+protected_refs='refs/heads/master refs/heads/main'
+
+# The contexts master's branch protection actually requires, pipe-separated
+# because the names contain spaces. A MANUAL COPY of remote state, exactly like
+# protected_refs above. Confirmed against the live API 2026-08-15 12:53 KST:
+#   gh api repos/{owner}/{repo}/branches/master/protection \
+#     --jq '.required_status_checks.contexts'
+# Drift is not left to discipline: tests/firewall/workflow-branch-lockstep.test.js
+# parses this exact line and fails if it disagrees with its REQUIRED_CONTEXTS,
+# which is the same list one layer up. Keep the assignment on one line, single
+# quoted, or that parser stops seeing it.
+required_contexts='Validate (Node 22)|Validate (Node 24)|Validate artibot plugin.json structure|Validate artibot-cowork plugin.json structure'
+
+# Scope the path-2 fallback to the remote actually being pushed to: a ci/**
+# branch on some fork proves nothing about a push to origin. `git push <url>`
+# passes a URL rather than a configured name and has no remote-tracking
+# namespace to consult, so that case widens to any remote.
+if [ -n "$push_remote_name" ] &&
+	git config --get "remote.$push_remote_name.url" >/dev/null 2>&1; then
+	ci_ref_glob="refs/remotes/$push_remote_name/ci/*"
+else
+	ci_ref_glob='refs/remotes/*/ci/*'
+fi
+
+# Is this SHA already green on the server?
+#   0 = green    1 = definitely not green    2 = could not tell
+# Prints one line of reason in every case, and the offending run names on 1.
+sha_check_state() {
+	scs_sha=$1
+
+	command -v gh >/dev/null 2>&1 || {
+		echo "gh is not on PATH, so the server's check runs could not be read"
+		return 2
+	}
+
+	# A hung API call must not hang the push. timeout is coreutils and ships
+	# with Git for Windows; where it is missing the call is unbounded.
+	scs_timeout=''
+	command -v timeout >/dev/null 2>&1 && scs_timeout='timeout 20'
+
+	# One line per check run, "<status>\t<conclusion>\t<name>". A single call:
+	# the counts and the required-context names both come out of this one body,
+	# and asking twice would let the two answers disagree. Empty output means
+	# the SHA carries no check runs at all.
+	# shellcheck disable=SC2086
+	scs_out=$($scs_timeout gh api "repos/{owner}/{repo}/commits/$scs_sha/check-runs" \
+		--jq '.check_runs[] | "\(.status)\t\(.conclusion)\t\(.name)"' 2>&1) || {
+		# Exactly one gh failure is a verdict: the remote does not have the
+		# commit, which is the direct-push case itself. Everything else
+		# (offline, 401, 403, 404, rate limit, timeout) leaves the question
+		# open, and answering an open question either way would be a lie.
+		case "$scs_out" in
+		*'No commit found for SHA'* | *'HTTP 422'*)
+			echo "the remote does not have this commit, so nothing has checked it"
+			return 1
+			;;
+		esac
+		echo "gh could not answer: $(echo "$scs_out" | head -n 1)"
+		return 2
+	}
+
+	# skipped and neutral count as green: GitHub treats them as passing, and
+	# scoring them as failures would block on a legitimately skipped job.
+	scs_counts=$(printf '%s\n' "$scs_out" | awk -F'\t' '
+		$0 == "" { next }
+		{ total++ }
+		$1 != "completed" { running++ }
+		$1 == "completed" && $2 != "success" && $2 != "skipped" && $2 != "neutral" { bad++ }
+		END { printf "%d %d %d", total + 0, running + 0, bad + 0 }')
+	scs_total=${scs_counts%% *}
+	scs_rest=${scs_counts#* }
+	scs_running=${scs_rest%% *}
+	scs_bad=${scs_rest##* }
+
+	if [ "$scs_total" = "0" ]; then
+		# Deliberately does not name a cause. Three produce this and the API
+		# cannot tell them apart: the runs have not been created yet, the
+		# commit landed on a branch outside the trigger list, or the workflows
+		# never fired. Measured on master commit 146dde99 (squash merge of
+		# PR #100): zero runs at 12:28 KST 2026-08-15, then one run at 12:53,
+		# so "wrong branch" would have been a confident wrong answer and even
+		# "no runs" was only true for that minute. Either way it is not green,
+		# which is the only thing this gate has to decide.
+		echo "the server has this commit but no check run has attached to it, so it is not green (they may not have started; check the Actions tab)"
+		return 1
+	fi
+	if [ "$scs_running" != "0" ]; then
+		echo "$scs_running of $scs_total check runs have not finished, so the SHA is not green yet"
+		return 1
+	fi
+	if [ "$scs_bad" != "0" ]; then
+		echo "$scs_bad of $scs_total check runs did not succeed:"
+		printf '%s\n' "$scs_out" | awk -F'\t' '
+			$1 == "completed" && $2 != "success" && $2 != "skipped" && $2 != "neutral" {
+				printf "          %s: %s\n", $3, $2
+			}'
+		return 1
+	fi
+
+	# Everything finished green. That is still not the question branch
+	# protection asks, which is whether the four REQUIRED contexts are among
+	# them -- counting cannot answer it, only names can. This block exists
+	# because counting alone let a real commit through: 146dde99 carries one
+	# unrelated green run ("Run self-control task") and none of the four, which
+	# satisfied total>0, running=0 and bad=0 while satisfying no required check
+	# whatsoever. That is the exact landing this gate was built to stop.
+	scs_green=$(printf '%s\n' "$scs_out" | awk -F'\t' '
+		$1 == "completed" && ($2 == "success" || $2 == "skipped" || $2 == "neutral") { print $3 }')
+
+	# Split the mirror on `|` rather than whitespace: the context names contain
+	# spaces, so the plain `set -- $list` idiom used elsewhere in this hook
+	# would shred them into fragments. -f guards the expansion against globbing.
+	scs_old_ifs=$IFS
+	IFS='|'
+	set -f
+	# shellcheck disable=SC2086
+	set -- $required_contexts
+	set +f
+	IFS=$scs_old_ifs
+	scs_req_total=$#
+
+	if [ "$scs_req_total" = "0" ]; then
+		# Fail closed. An empty mirror would otherwise make every SHA satisfy
+		# "no missing contexts" and silently retire this whole check.
+		echo "the required-context mirror in this hook is empty, so branch protection cannot be evaluated"
+		return 1
+	fi
+
+	scs_missing=''
+	scs_have=0
+	for scs_ctx in "$@"; do
+		if printf '%s\n' "$scs_green" | grep -Fxq -e "$scs_ctx"; then
+			scs_have=$((scs_have + 1))
+		else
+			scs_missing="$scs_missing
+          - $scs_ctx"
+		fi
+	done
+
+	if [ -n "$scs_missing" ]; then
+		echo "$scs_have of $scs_req_total required contexts are green on this SHA (all $scs_total runs that exist are green, but these are missing):$scs_missing"
+		return 1
+	fi
+
+	echo "all $scs_req_total required contexts green, and all $scs_total check runs on the SHA are green"
+	return 0
+}
+
+# Path 2. Empty output means no match; awk stops at the first hit.
+sha_on_pushed_ci_branch() {
+	git for-each-ref --format='%(objectname) %(refname)' "$ci_ref_glob" 2>/dev/null |
+		awk -v sha="$1" '$1 == sha { print $2; exit }'
+}
+
+# $1 remote ref, $2 short sha, $3 reason. Why, the correct flow, and the escape
+# hatch all in one screen, because someone reads this while already mid-push.
+print_landing_failure() {
+	echo "pre-push: landing-flow  FAIL  $1 at $2"
+	echo "        $3"
+	cat <<EOF
+
+        A commit pushed straight to master cannot satisfy master's four
+        required status checks, because a check only runs on a commit the
+        server already has. The push reports
+
+            remote: Bypassed rule violations for refs/heads/master:
+            remote: - 4 of 4 required status checks are expected.
+
+        and lands anyway, with CI reporting after the fact.
+
+        This gate accepts a push to a protected branch only when the SHA
+        already carries ALL of these contexts, green, matched by name --
+        and no other check run on that SHA is red or still running:
+EOF
+	# Rendered from required_contexts rather than retyped, so this screen cannot
+	# describe a rule the code above does not enforce.
+	printf '%s\n' "$required_contexts" | tr '|' '\n' | sed 's/^/            /'
+	cat <<EOF
+
+        A green check that is not on that list does not count for anything.
+
+        Land it through a ci/** branch so the SHA is green before master
+        reaches it:
+
+            git switch -c ci/short-topic
+            git push -u origin ci/short-topic
+            # wait for all four required contexts to go green on that SHA
+            git switch master
+            git merge --ff-only ci/short-topic
+            git push origin master
+            git push origin --delete ci/short-topic
+
+        --ff-only is not optional: a merge commit is a new SHA carrying no
+        check runs, which puts you back to bypassing.
+
+        Deliberate bypass, one command, leaves nothing behind:
+
+            ARTIBOT_ALLOW_DIRECT_PUSH=1 git push origin master
+
+        Background: CONTRIBUTING.md, "Landing changes on master".
+EOF
+}
+
+# A single push can carry several refs (`git push --all`, or a push.default
+# that sends more than one). Check every protected one.
+landing_blocked=''
+# Refnames and SHAs contain neither whitespace nor glob characters, so word
+# splitting push_refs into an exact sequence of pairs is safe. -f is belt and
+# braces against a refname that somehow carries one.
+set -f
+# shellcheck disable=SC2086
+set -- $push_refs
+set +f
+
+while [ "$#" -ge 2 ]; do
+	push_ref=$1
+	push_sha=$2
+	shift 2
+
+	is_protected=0
+	for candidate in $protected_refs; do
+		[ "$push_ref" = "$candidate" ] && is_protected=1
+	done
+	[ "$is_protected" = "1" ] || continue
+
+	# Scoped to this gate on purpose. Waving off the landing flow is a
+	# different decision from waving off the ten content gates, and the two
+	# should not share one switch.
+	if [ "${ARTIBOT_ALLOW_DIRECT_PUSH:-0}" = "1" ]; then
+		echo "pre-push: landing-flow  SKIP  $push_ref (ARTIBOT_ALLOW_DIRECT_PUSH=1)"
+		echo "pre-push:        that bypasses the ci/** flow for $push_ref. If you did not" >&2
+		echo "pre-push:        type it on this command line it is set in your environment," >&2
+		echo "pre-push:        and every push to a protected branch is ungated." >&2
+		echo "pre-push:        check with: env | grep ARTIBOT_ALLOW_DIRECT_PUSH" >&2
+		continue
+	fi
+
+	push_short=$(git rev-parse --short "$push_sha" 2>/dev/null || echo "$push_sha")
+	landing_reason=$(sha_check_state "$push_sha")
+	landing_state=$?
+
+	if [ "$landing_state" = "2" ]; then
+		landing_ci_ref=$(sha_on_pushed_ci_branch "$push_sha")
+		if [ -n "$landing_ci_ref" ]; then
+			echo "pre-push: landing-flow  ok    $push_ref at $push_short (via $landing_ci_ref)"
+			echo "pre-push: NOTE - $landing_reason." >&2
+			echo "pre-push:        Accepted on local evidence alone: $push_short is the tip of" >&2
+			echo "pre-push:        $landing_ci_ref, so it did reach a branch CI runs on." >&2
+			echo "pre-push:        Whether those checks went GREEN was NOT verified." >&2
+			continue
+		fi
+		landing_reason="$landing_reason, and $push_short is not the tip of any $ci_ref_glob"
+		landing_state=1
+	fi
+
+	if [ "$landing_state" = "0" ]; then
+		echo "pre-push: landing-flow  ok    $push_ref at $push_short ($landing_reason)"
+		continue
+	fi
+
+	landing_blocked="$landing_blocked $push_ref"
+	print_landing_failure "$push_ref" "$push_short" "$landing_reason"
+done
+
+# Stop here rather than falling through to the ten content gates. Those take
+# 11-15s and a green result from them would be beside the point: the tree is
+# not what is wrong, the route is.
+if [ -n "$landing_blocked" ]; then
+	echo ""
+	echo "pre-push: BLOCKED by the landing-flow gate:$landing_blocked" >&2
+	exit 1
 fi
 
 command -v node >/dev/null 2>&1 || {

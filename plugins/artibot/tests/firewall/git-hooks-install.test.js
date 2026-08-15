@@ -1,8 +1,11 @@
 /**
- * 검사 목적: `pre-push` 배치 계약 — 복사본이 **올바른 .git/hooks 에** byte-단위로 들어가고,
- * `core.hooksPath` 가 설정돼 있으면 설치를 거부한다.
+ * 검사 목적 2가지.
+ *   1. `pre-push` 배치 계약 — 복사본이 **올바른 .git/hooks 에** byte-단위로 들어가고,
+ *      `core.hooksPath` 가 설정돼 있으면 설치를 거부한다.
+ *   2. landing-flow 게이트 동작 — master 직푸시를 막고 ci/** 를 거친 SHA 는 통과시킨다.
  *
- * 이 스위트는 실제 임시 git 리포를 만들어서 설치기를 돌린다. 정적 스캔이 아니다.
+ * 이 스위트는 실제 임시 git 리포를 만들어서 설치기를 돌리고 **훅을 실행한다**.
+ * 정적 스캔이 아니다. (게이트가 못 보는 것은 각 describe 헤더에 따로 적었다.)
  *
  * ── 회귀 가드 (실제로 났던 버그) ──────────────────────────────────────────────
  * `git rev-parse --git-path hooks` 는 **git 을 호출한 cwd 기준 상대경로**를 준다.
@@ -23,9 +26,18 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, relative, resolve } from 'node:path';
+import { delimiter, dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -63,6 +75,116 @@ function runInstaller(args = []) {
 /** @param {string[]} args */
 function git(args) {
   return execFileSync('git', args, { cwd: repo, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] });
+}
+
+/** 임시 리포에 커밋 하나를 만들고 그 full SHA 를 돌려준다. */
+function commit(message) {
+  git(['-c', 'user.email=t@example.invalid', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', message]);
+  return git(['rev-parse', 'HEAD']).trim();
+}
+
+/** pre-push stdin 한 줄. git 이 주는 형식 그대로. */
+const ZERO = '0'.repeat(40);
+/**
+ * @param {string} remoteRef 밀어넣는 원격 ref (`refs/heads/master` 등)
+ * @param {string} sha 로컬 SHA
+ */
+function pushLine(remoteRef, sha) {
+  return `${remoteRef} ${sha} ${remoteRef} ${ZERO}\n`;
+}
+
+/**
+ * 설치된 훅을 git 이 부르는 방식 그대로 실행한다: cwd = 리포 루트,
+ * argv = `<remote name> <remote url>`, stdin = push 될 ref 목록.
+ *
+ * URL 은 반드시 GitHub 이 아닌 호스트여야 한다. `gh` 는 알려진 GitHub 호스트를
+ * 가리키는 remote 가 없으면 **네트워크를 타기 전에** 로컬에서 즉시 실패하므로,
+ * 이 스위트는 gh 설치 여부와 무관하게 항상 "판정 불가(=2)" 경로로 들어간다.
+ * 그래서 오프라인 폴백(ci/** ref 대조)이 결정론적으로 테스트된다.
+ *
+ * @param {string} stdin
+ * @param {Record<string, string>} [env]
+ */
+function runHook(stdin, env = {}) {
+  const args = [join('.git', 'hooks', 'pre-push'), 'origin', 'https://example.invalid/x.git'];
+  try {
+    const stdout = execFileSync('sh', args, {
+      cwd: repo,
+      input: stdin,
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: { ...process.env, ...env },
+    });
+    return { code: 0, stdout, stderr: '', all: stdout };
+  } catch (error) {
+    const stdout = error.stdout?.toString() ?? '';
+    const stderr = error.stderr?.toString() ?? '';
+    return { code: error.status ?? 1, stdout, stderr, all: stdout + stderr };
+  }
+}
+
+/**
+ * 훅이 landing-flow 게이트를 **통과해서** 뒤쪽 10종 게이트 구간까지 갔다는 증거.
+ *
+ * 임시 리포에는 node_modules 가 없으므로 훅은 거기서 fail-closed 로 멈춘다.
+ * 이 문자열이 보이면 landing-flow 가 막지 않았다는 뜻이고, 안 보이면 그 전에
+ * 끊긴 것이다. 통과/차단을 exit code 로는 구분할 수 없어서(둘 다 1) 이 마커를
+ * 쓴다. 덤으로 npx eslint 까지 가지 않으므로 이 스위트는 네트워크를 타지 않는다.
+ */
+const REACHED_CONTENT_GATES = 'node_modules missing';
+
+/**
+ * The contexts master's branch protection requires, as the hook must see them.
+ *
+ * A third copy of this list would be a third thing to drift, so nothing here
+ * asserts these strings against the hook directly — `workflow-branch-lockstep`
+ * owns that comparison. These are only fixture material for the stub `gh`.
+ */
+const REQUIRED = [
+  'Validate (Node 22)',
+  'Validate (Node 24)',
+  'Validate artibot plugin.json structure',
+  'Validate artibot-cowork plugin.json structure',
+];
+
+/** One check-run line in the exact shape the hook's `gh api --jq` emits. */
+const ghLine = (name, conclusion = 'success', status = 'completed') =>
+  `${status}\t${conclusion}\t${name}`;
+
+/**
+ * Writes a stub `gh` and returns an env that puts it ahead of the real one.
+ *
+ * Path 1 cannot otherwise be tested: it needs a network, an authenticated gh,
+ * and a commit that actually exists on the remote with the check runs the case
+ * calls for. A stub answers deterministically instead, so these tests do not
+ * change colour with the account, the network, or the day's CI state.
+ *
+ * `FAKE_GH_OUT` is printed verbatim on stdout; `FAKE_GH_FAIL` is printed on
+ * stderr with exit 1, which is how the hook sees a gh error.
+ *
+ * @param {Record<string, string>} extra
+ */
+function withFakeGh(extra = {}) {
+  const dir = join(repo, '.fakebin');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, 'gh'),
+    [
+      '#!/bin/sh',
+      'if [ -n "${FAKE_GH_FAIL:-}" ]; then echo "$FAKE_GH_FAIL" >&2; exit 1; fi',
+      'printf \'%s\' "${FAKE_GH_OUT:-}"',
+      'exit 0',
+      '',
+    ].join('\n'),
+  );
+  try {
+    chmodSync(join(dir, 'gh'), 0o755);
+  } catch {
+    // Windows filesystems ignore the exec bit; MSYS sh runs the file anyway.
+  }
+  // path.delimiter, not ':' — a bash-style ':' join would split the drive
+  // letter off every Windows PATH entry and the stub would never be found.
+  return { PATH: dir + delimiter + process.env.PATH, ...extra };
 }
 
 beforeEach(() => {
@@ -151,6 +273,340 @@ describe('git hooks 설치기', () => {
   });
 });
 
+/**
+ * landing-flow 게이트 — master 직푸시 차단.
+ *
+ * 정적 grep 이 아니라 **실제 훅을 실행한다**. 임시 리포를 만들고 git 이 주는 것과
+ * 같은 stdin/argv 를 먹인 뒤 stdout/stderr 를 단언한다.
+ *
+ * ── 이 테스트가 못 보는 것 (rules §9) ────────────────────────────────────────
+ *   - **온라인 경로(`gh api ... /check-runs`)는 여기서 실행되지 않는다.** remote 가
+ *     GitHub 이 아니라 gh 가 즉시 실패하고, 훅은 오프라인 폴백으로 내려간다.
+ *     그게 의도다 — 테스트가 네트워크·gh 인증 상태에 따라 green/red 가 갈리면
+ *     게이트가 아니라 flake 다. 온라인 경로의 판정(422 = 원격에 커밋 없음,
+ *     그 외 오류 = 판정 불가)은 실측으로만 확인했다: 2026-08-15, 실제 리포에서
+ *     green SHA 는 "all 6 check runs on the server are green" 으로 통과,
+ *     존재하지 않는 SHA 는 422 로 차단.
+ *   - **CI 색상은 오프라인 폴백이 검증하지 않는다.** 폴백이 증명하는 건 "그 SHA 가
+ *     ci/** 브랜치에 올라갔다" 까지고 "그 검사가 초록이었다" 가 아니다. 훅이 그때
+ *     stderr 로 NOTE 를 내는지를 아래에서 단언하는 이유다.
+ *   - **다른 클론에는 훅 자체가 없다.** `.git/` 은 커밋되지 않으므로 이 테스트도 CI 도
+ *     남의 클론 설치 상태를 볼 수 없다. `git push --no-verify` 도 그냥 건너뛴다.
+ *     이 게이트는 실수를 줄이지, 브랜치 보호를 대체하지 않는다. 우회를 불가능하게
+ *     만드는 건 원격의 enforce_admins 뿐이다.
+ *   - **원격이 실제로 보호하는 브랜치 목록은 원격 상태다.** 훅의 protected_refs 는
+ *     그 수동 사본이라, GitHub 에서 새 브랜치를 보호해도 여기선 아무 일도 안 난다.
+ */
+describe('pre-push landing-flow 게이트', () => {
+  beforeEach(() => {
+    runInstaller();
+  });
+
+  it('master 직푸시를 막고, 이유·올바른 플로우·우회법을 한 화면에 낸다', () => {
+    const sha = commit('direct');
+    const result = runHook(pushLine('refs/heads/master', sha));
+
+    expect(result.code).toBe(1);
+    expect(result.stdout).toContain('landing-flow  FAIL');
+    expect(result.stderr).toContain('BLOCKED by the landing-flow gate');
+
+    // 왜 막혔는지 + 올바른 플로우 + escape hatch 가 전부 같은 출력에 있어야 한다.
+    // 셋 중 하나라도 빠지면 막힌 사람이 다음에 뭘 할지 알 수 없다.
+    expect(result.all).toContain('required status checks are expected');
+    expect(result.all).toContain('git switch -c ci/short-topic');
+    expect(result.all).toContain('git merge --ff-only ci/short-topic');
+    expect(result.all).toContain('ARTIBOT_ALLOW_DIRECT_PUSH=1 git push origin master');
+    expect(result.all).toContain('Landing changes on master');
+
+    // 단락(short-circuit) 증거. 플로우가 틀렸으면 11-15s 짜리 내용 게이트를 도는 건
+    // 무의미하다 -- 틀린 건 트리가 아니라 경로다.
+    expect(result.all).not.toContain(REACHED_CONTENT_GATES);
+  });
+
+  it('main 도 같은 게이트를 받는다', () => {
+    const sha = commit('direct-main');
+    const result = runHook(pushLine('refs/heads/main', sha));
+    expect(result.stdout).toContain('landing-flow  FAIL');
+  });
+
+  it('ci/** 를 거친 SHA 는 통과시킨다', () => {
+    const sha = commit('landed');
+    git(['update-ref', 'refs/remotes/origin/ci/topic', sha]);
+
+    const result = runHook(pushLine('refs/heads/master', sha));
+    expect(result.stdout).toContain('landing-flow  ok');
+    expect(result.stdout).toContain('refs/remotes/origin/ci/topic');
+    // 실제로 통과했는지는 뒤 구간에 도달했는지로만 증명된다.
+    expect(result.all).toContain(REACHED_CONTENT_GATES);
+  });
+
+  it('오프라인 폴백으로 통과시킬 때 CI 색상 미검증을 stderr 로 알린다', () => {
+    // 이 NOTE 가 이 게이트의 유일한 fail-open 을 말한다. 지우면 게이트가 실제보다
+    // 강해 보이고, 그 착시가 게이트 자체보다 위험하다.
+    const sha = commit('landed');
+    git(['update-ref', 'refs/remotes/origin/ci/topic', sha]);
+
+    const result = runHook(pushLine('refs/heads/master', sha));
+    expect(result.stderr).toContain('Accepted on local evidence alone');
+    expect(result.stderr).toContain('NOT verified');
+  });
+
+  it('ci/** ref 가 있어도 SHA 가 다르면 막는다', () => {
+    // NEGATIVE CONTROL: 위 테스트가 "ci ref 가 존재하기만 하면 통과" 를 보고
+    // green 이 된 것이 아님을 확인한다. 대조가 없으면 그 테스트는 공허하다.
+    const older = commit('older');
+    commit('newer');
+    git(['update-ref', 'refs/remotes/origin/ci/topic', older]);
+
+    const result = runHook(pushLine('refs/heads/master', git(['rev-parse', 'HEAD']).trim()));
+    expect(result.stdout).toContain('landing-flow  FAIL');
+    expect(result.all).not.toContain(REACHED_CONTENT_GATES);
+  });
+
+  it('ci/** tip 의 조상은 통과시키지 않는다 (동일성이지 조상관계가 아니다)', () => {
+    // push 는 브랜치 tip 에 대해서만 워크플로를 돌린다. tip 의 조상 커밋에는
+    // check run 이 아예 붙지 않으므로, 조상을 통과시키면 검사 안 된 SHA 가 master
+    // 로 간다. 조상관계로 느슨하게 판정하고 싶은 유혹이 있어서 못박아 둔다.
+    const parent = commit('parent');
+    const tip = commit('tip');
+    git(['update-ref', 'refs/remotes/origin/ci/topic', tip]);
+
+    const result = runHook(pushLine('refs/heads/master', parent));
+    expect(result.stdout).toContain('landing-flow  FAIL');
+  });
+
+  it('중첩된 ci 세그먼트는 ci/** 로 인정하지 않는다', () => {
+    // refs/remotes/*/ci/* 의 `*` 는 `/` 를 넘지 않는다(실측 2026-08-15). 그래서
+    // refs/remotes/origin/feature/ci/x 는 매치되지 않는다. 이 glob 의미가 바뀌면
+    // 아무 브랜치나 이름에 ci 를 끼워 넣어 게이트를 통과할 수 있다.
+    const sha = commit('nested');
+    git(['update-ref', 'refs/remotes/origin/feature/ci/sneaky', sha]);
+
+    const result = runHook(pushLine('refs/heads/master', sha));
+    expect(result.stdout).toContain('landing-flow  FAIL');
+  });
+
+  it('보호 대상이 아닌 ref 에는 게이트가 관여하지 않는다', () => {
+    // 플로우 1단계인 `git push -u origin ci/topic` 자체가 막히면 안 된다.
+    const sha = commit('side');
+    const result = runHook(pushLine('refs/heads/ci/topic', sha));
+    expect(result.all).not.toContain('landing-flow');
+    expect(result.all).toContain(REACHED_CONTENT_GATES);
+  });
+
+  it('ARTIBOT_ALLOW_DIRECT_PUSH=1 은 이 게이트만 끄고 그 사실을 알린다', () => {
+    const sha = commit('deliberate');
+    const result = runHook(pushLine('refs/heads/master', sha), { ARTIBOT_ALLOW_DIRECT_PUSH: '1' });
+
+    expect(result.stdout).toContain('landing-flow  SKIP');
+    // 환경변수는 `--no-verify` 와 달리 한 명령에 갇히지 않는다. rc 나 CI job env 에
+    // 눌러앉으면 이후 모든 push 가 조용히 ungated 가 되므로 매번 시끄러워야 한다.
+    expect(result.stderr).toContain('set in your environment');
+    // "이 게이트만" 이 핵심이다. 나머지 10종은 그대로 돌아야 한다.
+    expect(result.all).toContain(REACHED_CONTENT_GATES);
+  });
+
+  it('ARTIBOT_SKIP_PREPUSH=1 은 landing-flow 를 포함해 전부 끈다', () => {
+    const sha = commit('skip-all');
+    const result = runHook(pushLine('refs/heads/master', sha), { ARTIBOT_SKIP_PREPUSH: '1' });
+    expect(result.code).toBe(0);
+    expect(result.all).not.toContain('landing-flow');
+  });
+
+  it('삭제 전용 push 는 게이트 이전에 끝난다', () => {
+    // 플로우 마지막 단계가 `git push origin --delete ci/topic` 이다. 삭제에는
+    // 검사할 트리가 없고, 여기서 막히면 플로우가 자기 꼬리를 문다.
+    commit('del');
+    const result = runHook(`(delete) ${ZERO} refs/heads/ci/topic ${'1'.repeat(40)}\n`);
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain('deletion-only push');
+  });
+
+  it('한 push 에 여러 ref 가 실려도 보호 대상만 골라 검사한다', () => {
+    const sha = commit('multi');
+    const result = runHook(pushLine('refs/heads/ci/topic', sha) + pushLine('refs/heads/master', sha));
+    expect(result.stdout).toContain('landing-flow  FAIL');
+    expect(result.stderr).toContain('refs/heads/master');
+  });
+});
+
+/**
+ * landing-flow 경로 1 — 서버 check run 판정.
+ *
+ * 실제 `gh` 대신 PATH 앞에 스텁을 꽂아 결정론적으로 돌린다. 네트워크·계정·그날의
+ * CI 상태에 따라 green/red 가 갈리면 게이트가 아니라 flake 이기 때문이다.
+ *
+ * ── 이 스위트가 못 보는 것 (rules §9) ────────────────────────────────────────
+ *   - **진짜 `gh api` 의 응답 형태는 검증하지 않는다.** 스텁은 훅의 jq 가 낸다고
+ *     가정한 TSV 를 그대로 뱉을 뿐이다. GitHub 이 필드 이름을 바꾸면 이 스위트는
+ *     전부 green 인 채로 훅만 깨진다. 실제 응답 형태는 실측으로만 확인했다:
+ *     2026-08-15 12:53 KST, `5c2f656a` 는 필수 4종 포함 6런 전부 green 으로 통과,
+ *     `146dde99` 는 비필수 1런만 green 이라 차단.
+ *   - **필수 컨텍스트 목록이 원격과 맞는지는 여기서 안 본다.** 그 대조는
+ *     workflow-branch-lockstep.test.js 가 훅의 미러를 파싱해서 한다.
+ *   - 훅의 `required_contexts` 가 비었을 때의 fail-closed 분기는 훅을 편집해야
+ *     재현되므로 미검증이다(코드로만 확인).
+ */
+describe('pre-push landing-flow — 경로 1 (서버 check run)', () => {
+  beforeEach(() => {
+    runInstaller();
+  });
+
+  it('필수 컨텍스트가 0개면 비필수 run 이 green 이어도 차단한다', () => {
+    // 회귀 가드 — 실제로 났던 결함. 이전 판정은 run 을 **개수로만** 셌다:
+    // total=1 / running=0 / bad=0 이면 통과였다. 그래서 master 커밋 146dde99 가
+    // 비필수 "Run self-control task" 하나만 green 인 채로 게이트를 통과했다.
+    // 막으려던 바로 그 착지다. 개수는 이 질문에 답할 수 없고 이름만 답한다.
+    const sha = commit('non-required-only');
+    const result = runHook(
+      pushLine('refs/heads/master', sha),
+      withFakeGh({ FAKE_GH_OUT: ghLine('Run self-control task') }),
+    );
+
+    expect(result.stdout).toContain('landing-flow  FAIL');
+    expect(result.all).toContain('0 of 4 required contexts');
+    for (const ctx of REQUIRED) expect(result.all).toContain(ctx);
+    expect(result.all).not.toContain(REACHED_CONTENT_GATES);
+  });
+
+  it('필수 4종이 전부 green 이면 통과한다', () => {
+    const sha = commit('all-green');
+    const result = runHook(
+      pushLine('refs/heads/master', sha),
+      withFakeGh({ FAKE_GH_OUT: REQUIRED.map((c) => ghLine(c)).join('\n') }),
+    );
+
+    expect(result.stdout).toContain('landing-flow  ok');
+    expect(result.stdout).toContain('all 4 required contexts green');
+    expect(result.all).toContain(REACHED_CONTENT_GATES);
+  });
+
+  it('필수 4종 중 하나라도 빠지면 차단하고 빠진 이름을 낸다', () => {
+    const sha = commit('one-missing');
+    const result = runHook(
+      pushLine('refs/heads/master', sha),
+      withFakeGh({ FAKE_GH_OUT: REQUIRED.slice(0, 3).map((c) => ghLine(c)).join('\n') }),
+    );
+
+    expect(result.all).toContain('3 of 4 required contexts');
+    expect(result.all).toContain(REQUIRED[3]);
+    expect(result.stdout).toContain('landing-flow  FAIL');
+  });
+
+  it('이름은 정확 일치여야 한다 (부분 일치로 필수를 만족시킬 수 없다)', () => {
+    // NEGATIVE CONTROL: `grep -Fxq` 를 부분일치로 느슨하게 바꾸면 아무 이름에
+    // 필수 컨텍스트를 접두사로 붙여 게이트를 통과시킬 수 있다.
+    const sha = commit('prefix-attack');
+    const result = runHook(
+      pushLine('refs/heads/master', sha),
+      withFakeGh({
+        FAKE_GH_OUT: REQUIRED.map((c) => ghLine(`${c} (not really)`)).join('\n'),
+      }),
+    );
+
+    expect(result.all).toContain('0 of 4 required contexts');
+    expect(result.stdout).toContain('landing-flow  FAIL');
+  });
+
+  it('필수 4종이 green 이어도 다른 run 이 red 면 차단한다 (전건 green 엄격성 유지)', () => {
+    const sha = commit('extra-red');
+    const result = runHook(
+      pushLine('refs/heads/master', sha),
+      withFakeGh({
+        FAKE_GH_OUT: [...REQUIRED.map((c) => ghLine(c)), ghLine('Lint', 'failure')].join('\n'),
+      }),
+    );
+
+    expect(result.all).toContain('1 of 5 check runs did not succeed');
+    expect(result.all).toContain('Lint: failure');
+    expect(result.stdout).toContain('landing-flow  FAIL');
+  });
+
+  it('아직 끝나지 않은 run 이 있으면 차단한다', () => {
+    const sha = commit('still-running');
+    const result = runHook(
+      pushLine('refs/heads/master', sha),
+      withFakeGh({
+        FAKE_GH_OUT: [
+          ...REQUIRED.slice(0, 3).map((c) => ghLine(c)),
+          ghLine(REQUIRED[3], null, 'in_progress'),
+        ].join('\n'),
+      }),
+    );
+
+    expect(result.all).toContain('have not finished');
+    expect(result.stdout).toContain('landing-flow  FAIL');
+  });
+
+  it('skipped 와 neutral 은 green 으로 친다', () => {
+    // GitHub 이 통과로 취급하므로 여기서도 통과여야 한다. 실패로 세면 정당하게
+    // 건너뛴 job 하나에 착지가 막힌다.
+    const sha = commit('skipped-ok');
+    const result = runHook(
+      pushLine('refs/heads/master', sha),
+      withFakeGh({
+        FAKE_GH_OUT: [
+          ghLine(REQUIRED[0], 'skipped'),
+          ghLine(REQUIRED[1], 'neutral'),
+          ghLine(REQUIRED[2]),
+          ghLine(REQUIRED[3]),
+        ].join('\n'),
+      }),
+    );
+
+    expect(result.stdout).toContain('landing-flow  ok');
+    expect(result.all).toContain(REACHED_CONTENT_GATES);
+  });
+
+  it('check run 이 하나도 없으면 차단한다', () => {
+    const sha = commit('no-runs');
+    const result = runHook(pushLine('refs/heads/master', sha), withFakeGh({ FAKE_GH_OUT: '' }));
+
+    expect(result.all).toContain('no check run has attached to it');
+    expect(result.stdout).toContain('landing-flow  FAIL');
+  });
+
+  it('gh 422 는 판정이다 — 원격에 커밋이 없으면 차단', () => {
+    const sha = commit('not-on-remote');
+    const result = runHook(
+      pushLine('refs/heads/master', sha),
+      withFakeGh({ FAKE_GH_FAIL: 'gh: No commit found for SHA: x (HTTP 422)' }),
+    );
+
+    expect(result.all).toContain('the remote does not have this commit');
+    expect(result.stdout).toContain('landing-flow  FAIL');
+  });
+
+  it('그 외 gh 오류는 판정 불가라서 경로 2 로 내려간다', () => {
+    // 판정 불가를 통과로 접으면 오프라인에서 게이트가 통째로 무력해지고,
+    // 차단으로 접으면 정당한 착지가 네트워크 사정으로 막힌다. 둘 다 아니다.
+    const sha = commit('gh-offline');
+    git(['update-ref', 'refs/remotes/origin/ci/topic', sha]);
+    const result = runHook(
+      pushLine('refs/heads/master', sha),
+      withFakeGh({ FAKE_GH_FAIL: 'error connecting to api.github.com' }),
+    );
+
+    expect(result.stdout).toContain('landing-flow  ok');
+    expect(result.stderr).toContain('NOT verified');
+    expect(result.all).toContain(REACHED_CONTENT_GATES);
+  });
+
+  it('차단 안내문이 실제 술어를 그대로 말한다 (필수 4종 이름 포함)', () => {
+    // 안내문과 코드가 어긋나면, 시킨 대로 했는데도 계속 막히는 사람이 생긴다.
+    // 훅은 이 목록을 required_contexts 에서 렌더링하므로 세 번째 사본이 아니다.
+    const sha = commit('guidance');
+    const result = runHook(
+      pushLine('refs/heads/master', sha),
+      withFakeGh({ FAKE_GH_OUT: ghLine('Run self-control task') }),
+    );
+
+    expect(result.all).toContain('matched by name');
+    for (const ctx of REQUIRED) expect(result.all).toContain(ctx);
+    expect(result.all).toContain('ARTIBOT_ALLOW_DIRECT_PUSH=1 git push origin master');
+  });
+});
+
 describe('pre-push 훅 소스 계약', () => {
   const hook = readFileSync(join(HOOKS_SRC, 'pre-push'), 'utf-8');
 
@@ -182,5 +638,23 @@ describe('pre-push 훅 소스 계약', () => {
     ]) {
       expect(hook).toContain(marker);
     }
+  });
+
+  it('landing-flow 게이트 옆에 "못 보는 것" 이 적혀 있다', () => {
+    // rules §9: 게이트를 만들면 그 게이트가 못 보는 것을 게이트 옆에 적어라.
+    // 안 적으면 게이트 자체가 다음 착시의 근거가 된다. 특히 이 게이트에는 진짜
+    // fail-open 이 하나 있다(gh 판정 불가 시 CI 색상 미검증 통과). 그 문구를
+    // 지우면서 게이트만 남기는 편집을 막는다.
+    expect(hook).toContain('WHAT THIS GATE CANNOT SEE');
+    expect(hook).toContain('FAIL-OPEN');
+    expect(hook).toContain('enforce_admins');
+  });
+
+  it('gh 실패를 통과로 바꾸지 않는다 (판정 불가 != 초록)', () => {
+    // 온라인 경로가 대답하지 못했을 때 통과시키는 유일한 근거는 로컬 ci/** ref
+    // 대조다. gh 오류를 곧장 pass 로 접는 편집이 들어오면 게이트가 오프라인에서
+    // 통째로 무력해진다.
+    expect(hook).toContain('No commit found for SHA');
+    expect(hook).toContain('sha_on_pushed_ci_branch');
   });
 });

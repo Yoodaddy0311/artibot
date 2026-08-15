@@ -47,7 +47,7 @@ import { isMainEntry } from './_main-entry.js';
 // bug (UTF-8 corruption at the 64KB chunk boundary) exist in two places at
 // once. The shared reader also wraps the `for await` in try/catch, which this
 // copy did not; behavior on a stdin error stays fail-open ({} then exit 0).
-import { createFatalHandler, readPayload } from './_dispatcher-utils.js';
+import { createFatalHandler, isUnsafeMergeKey, readPayload } from './_dispatcher-utils.js';
 
 const HOOK_NAME = '_userprompt-dispatcher';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -162,6 +162,9 @@ export function mergeHookResults(rewriterResult, parallelResults) {
     const ctx = value?.hookSpecificOutput?.additionalContext;
     if (typeof ctx === 'string' && ctx.length > 0) additions.push(ctx);
     for (const [key, val] of Object.entries(value)) {
+      // `__proto__`/`constructor`/`prototype` would hijack the envelope's
+      // prototype or shadow a built-in rather than merge a field.
+      if (isUnsafeMergeKey(key)) continue;
       if (key === 'hookSpecificOutput') continue; // composed below
       out[key] = val;
     }

@@ -477,3 +477,69 @@ describe('스캐너 자기검증 — renderJobNames', () => {
     expect(renderJobNames(yaml)).not.toContain('Validate (Node 22)');
   });
 });
+
+// ─────────────────── pre-push 훅의 required_contexts 락스텝 ───────────────────
+
+/** 훅 소스. `.git/hooks/` 의 복사본이 아니라 워크트리 소스가 진실원이다. */
+const PRE_PUSH = join(PLUGIN_ROOT, 'scripts', 'git-hooks', 'pre-push');
+
+/**
+ * 훅의 `required_contexts='A|B|C'` 한 줄을 파싱한다.
+ *
+ * 훅은 sh 라 이 목록을 파이프로 이어붙인 문자열로 들고 있다(이름에 공백이 있어
+ * 공백 분리가 불가능하다). 여기서 그 한 줄을 읽어 REQUIRED_CONTEXTS 와 대조한다.
+ *
+ * @param {string} source
+ * @returns {string[] | null} 파싱 실패면 null
+ */
+function extractHookRequiredContexts(source) {
+  const match = source.match(/^required_contexts='([^']*)'$/m);
+  if (!match) return null;
+  return match[1].split('|');
+}
+
+/**
+ * pre-push 훅이 들고 있는 required context 미러가 이 파일의 목록과 일치하는지.
+ *
+ * 훅은 push 되는 SHA 에 **이 이름들이 green 으로 붙어 있는지**를 이름 기준으로
+ * 확인해서 master 직푸시를 막는다. 개수만 세던 이전 판정은 비필수 run 하나만
+ * green 이어도 통과시켰다(실측: master 커밋 146dde99). 그래서 이름 목록이
+ * 게이트의 판정 근거가 됐고, 두 사본이 어긋나면 게이트가 조용히 틀린 것을
+ * 요구하게 된다.
+ *
+ * ── 이 락스텝이 못 보는 것 ──────────────────────────────────────────────────
+ *   - **원격 브랜치 보호의 실제 값은 여전히 안 본다.** 두 사본이 사이좋게 같이
+ *     틀릴 수 있다. REQUIRED_CONTEXTS 주석의 재확인 명령이 유일한 대조 수단이다.
+ *   - 개발자 머신의 `.git/hooks/pre-push` 가 이 소스와 같은지는 여기서 안 본다.
+ *     그건 훅 자신의 drift 자기검사와 `npm run hooks:install -- --check` 몫이다.
+ */
+describe('pre-push required_contexts 락스텝', () => {
+  const hookSource = readFileSync(PRE_PUSH, 'utf-8');
+
+  it('훅이 미러를 파싱 가능한 한 줄로 들고 있다', () => {
+    // 파싱이 깨지면 아래 대조가 통째로 무의미해지므로 먼저 못박는다.
+    // 여러 줄로 쪼개거나 큰따옴표로 바꾸면 여기서 RED 가 된다.
+    expect(extractHookRequiredContexts(hookSource)).not.toBeNull();
+  });
+
+  it('훅의 미러가 REQUIRED_CONTEXTS 와 정확히 일치한다', () => {
+    expect(extractHookRequiredContexts(hookSource)).toEqual(REQUIRED_CONTEXTS);
+  });
+
+  it('훅이 이름 기준으로 대조한다 (개수 세기로 되돌아가지 않았다)', () => {
+    // 개수 판정만 남기고 이름 대조를 지우는 편집이 이 게이트의 원래 결함이었다.
+    // 정확 일치 매칭(-Fx)이 사라지면 접두사만 같은 이름이 필수를 만족시킨다.
+    expect(hookSource).toContain('grep -Fxq');
+    expect(hookSource).toContain('required contexts');
+  });
+
+  it('스캐너 자기검증 — 미러가 다르면 파서가 그 차이를 드러낸다', () => {
+    // 위 대조가 항상 통과하는 헛돌이가 아님을 확인한다.
+    const drifted = hookSource.replace(
+      /^required_contexts='[^']*'$/m,
+      "required_contexts='Validate (Node 22)'",
+    );
+    expect(extractHookRequiredContexts(drifted)).toEqual(['Validate (Node 22)']);
+    expect(extractHookRequiredContexts(drifted)).not.toEqual(REQUIRED_CONTEXTS);
+  });
+});

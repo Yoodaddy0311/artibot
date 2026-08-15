@@ -193,6 +193,43 @@ export function parseHookStdout(stdout) {
 }
 
 /**
+ * Keys that must never be copied out of a hook's parsed stdout.
+ *
+ * `out[key] = val` is a [[Set]], so a key of `__proto__` runs the inherited
+ * accessor on Object.prototype and swaps the ENVELOPE's prototype instead of
+ * adding a property to it. Nothing reaches Object.prototype globally, and
+ * JSON.stringify emits own properties only — so the serialized response stays
+ * clean today. It is the field READS that are exposed: any caller holding the
+ * merged object sees attacker-supplied values resolve through the chain.
+ * `constructor` and `prototype` are different — they land as ordinary own
+ * enumerable properties and do reach stdout as-is.
+ *
+ * Measured against mergeResults 2026-08-15, before this guard:
+ *   [{"__proto__":{"decision":"block"}}] -> merged.decision === 'block'
+ *                                           while JSON.stringify(merged) is '{}'
+ *   [{"constructor":{"evil":1}}]         -> '{"constructor":{"evil":1}}'
+ *
+ * A deny-list is normally fail-open against future additions. These three are
+ * the exception: the set is fixed by the language spec, so it cannot grow.
+ */
+const UNSAFE_MERGE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
+/**
+ * True when `key` must not be shallow-merged into a response envelope.
+ *
+ * Exported rather than inlined so the UserPromptSubmit dispatcher's separate
+ * merge (`_userprompt-dispatcher.js#mergeHookResults`) cannot drift from this
+ * one — a duplicated merge is precisely what let a single stdin decode bug
+ * exist in two places at once (see readPayload above).
+ *
+ * @param {string} key
+ * @returns {boolean}
+ */
+export function isUnsafeMergeKey(key) {
+  return UNSAFE_MERGE_KEYS.has(key);
+}
+
+/**
  * Merge an array of hook results into a single response envelope.
  *
  *   - `additionalContext` from every hookSpecificOutput is concatenated with
@@ -201,7 +238,8 @@ export function parseHookStdout(stdout) {
  *     with its reason); we still concat any additionalContext from later
  *     hooks for visibility.
  *   - `message` strings are joined with newline separators.
- *   - Other top-level fields are shallow-merged (last write wins).
+ *   - Other top-level fields are shallow-merged (last write wins), except the
+ *     keys `isUnsafeMergeKey` rejects — those are dropped, never copied.
  *
  * @param {Array<object|null>} results
  * @param {string} hookEventName for the merged hookSpecificOutput envelope
@@ -229,6 +267,7 @@ export function mergeResults(results, hookEventName) {
     }
 
     for (const [key, val] of Object.entries(r)) {
+      if (isUnsafeMergeKey(key)) continue;
       if (key === 'hookSpecificOutput') continue;
       if (key === 'message') continue;
       if (key === 'decision' || key === 'reason') continue;
