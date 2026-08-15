@@ -11,6 +11,95 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+v4.44.0 의 보안 표면을 대상으로 한 적대적 리뷰(`/ultrareview`)가 찾은 HIGH 1 · MEDIUM 3 과,
+그 인접 발견 2건을 닫는다. 이 리포의 반복 패턴 — **"작동한다고 믿던 것이 실제로는 작동하지
+않는다"** — 이 이번에도 그대로 재현됐다: `install.ps1` 에 락이 아예 없었고, 부분 설치가 성공을
+보고했다.
+
+### Fixed
+- **`install.ps1` 에 동시 설치 상호배제가 0건이었다 (HIGH).** `install.sh` 에는
+  `acquire_install_lock` 이 있었으나 ps1 에는 대응물이 없어, 두 인스톨러가 겹치면 뒤늦게 시작한
+  쪽이 앞선 쪽의 설치를 반쯤 덮어썼다. 복제본 실측: OLD 경로는 **10파일 트리를 5파일로 교체하고
+  RC=0** 을 냈다 — 파괴가 성공으로 보고된다. sh 와 동일한 경로를 이식했고, 뮤텍스 본체는
+  `New-Item -ItemType Directory` 를 **`-Force` 없이** 쓰는 것이다(`-Force` 는 디렉터리가 이미
+  있어도 성공하므로 그 순간 락이 아니게 된다). 함께: staging 디렉터리를 PID 로 유일화, prune
+  범위 축소, 공백 가드에 재귀 카운트 추가.
+- **부분 설치가 `Installation complete!` 과 exit 0 을 보고했다.** `atomic_replace_dir … || true`
+  가 실패를 삼켜, 일부 디렉터리가 교체되지 않은 채로도 인스톨러가 성공 종료했다 — 실패를
+  관측할 표면이 어디에도 없었다. 호출부 7곳에서 `INSTALL_FAILURES` 를 집계해 **`PARTIAL INSTALL`**
+  을 출력하고 비영 종료하도록 바꿨다.
+- **훅 디스패처 stdin 이 64KB 청크 경계에서 UTF-8 문자를 U+FFFD 로 손상시켰다.** `buf += chunk`
+  로 읽어 청크마다 독립 디코딩이 일어났고, 멀티바이트 문자가 경계에 걸치면 양쪽이 각각 대체
+  문자가 된다. 한글 페이로드가 64KB 를 넘는 순간부터 조용히 발생한다. Buffer 로 모아 **일괄
+  디코드**로 교체했고, `_userprompt-dispatcher` 의 로컬 사본을 삭제했다 — 그 사본이 같은 버그를
+  두 곳에 살려 둔 원인이었다.
+- **`isMainEntry` 가 심링크·정션 경유 실행을 놓쳤다.** Node 는 main 모듈의 `import.meta.url` 을
+  realpath 로 해석하지만 `argv[1]` 은 명령줄에 적힌 철자 그대로 남으므로, 링크를 거치면 두
+  문자열이 다르다. 결과는 잘못된 불리언이 아니라 **훅이 spawn 되어 아무것도 하지 않고 exit 0 으로
+  성공을 보고하는 것** — v4.43.0 의 실패 양상이 다른 문에서 재현된다. `~/.claude/artibot` 이
+  정션인 Windows 프로필이나 npm-link 설치가 실제 도달 경로다. realpath 폴백으로 수정했고,
+  반대 방향(임포터 안에서 `main()` 이 발화하는 false positive)도 함께 고정했다.
+- **MCP 진입점에 같은 UTF-8 손상이 2경로 남아 있었다.** `bin/artibot-mcp.mjs` 의
+  `fallbackStdioLoop`(폴백)과 `createStdioTransport#lines()`(**주 경로**) 둘 다 `buf += chunk`
+  였다. 여기서는 `setEncoding` 이 아니라 **`StringDecoder`** 를 썼다 — 이 코드베이스는
+  `setEncoding?.()` 옵셔널 체이닝으로 *setEncoding 을 구현하지 않은 스트림의 주입을 이미 인정*
+  하고 있고, 그런 스트림에서 `setEncoding` 은 조용한 no-op 이라 손상이 그대로 남는다. 또 MCP
+  서버는 stdin 이 끝나기 전에 `initialize` 에 답해야 하므로 디스패처의 "전부 모아 한 번 디코드"
+  는 구조적으로 불가능하다. `createStdioTransport` 에서는 `setEncoding?.()` 를 제거했다 —
+  남겨두면 그 스트림에서 decoder 가 한 번도 실행되지 않아, 나중에 "중복이네" 하고 지우면 버그가
+  부활한다. `decoder.end()` 는 꼬리 라인을 내보내는 `createStdioTransport` 에만 넣었다.
+  실측(315,037B 입력, 64KB 경계 4.8회 통과): 두 경로 모두 **U+FFFD 5 → 0**, `setEncoding` 이
+  있는 대조군은 before 에도 intact — 제거가 회귀가 아님을 같이 증명한다.
+- **인스톨러 주석의 `install.sh` 줄번호 인용 6건이 전부 썩어 있었다** (코드 diff 0줄).
+  가장 나쁜 것은 **락 대기 동작을 설명하며 성공 경로(`trap` + `return 0`)를 가리킨 것**으로,
+  패리티를 확인하러 온 사람을 정반대 동작으로 안내했다. 전부 심볼 인용
+  (`install.sh#acquire_install_lock` 등)으로 교체했고 잔존 숫자 인용은 0건이다. 이 방침이 옳다는 증거가
+  작업 중에 나왔다 — **순수 주석 추가만으로 `install_hooks` 가 +13줄 밀렸다**.
+
+### Changed
+- **pre-push 훅 배치 방식 — `core.hooksPath` 설정에서 `.git/hooks/` 복사로.** v4.44.0 이 안내한
+  `git config core.hooksPath plugins/artibot/scripts/git-hooks` 는 **형태 자체가 틀렸다.**
+  `.git/hooks/` 와 달리 작업 트리는 *체크아웃된 브랜치가* 공급한다. 그 설정을 켜 두면 두 가지가
+  따라온다 — 적대적 브랜치가 `pre-push` 에 임의 코드를 넣어 **리뷰 중 push 하는 순간 메인테이너
+  머신에서 실행**시킬 수 있고, 같은 브랜치가 맨 위에 `exit 0` 을 넣어 게이트를 통째로 없앨 수도
+  있다. 둘 다 2026-08-15 에 일회용 리포에서 실측됐다. 이제 `npm run hooks:install` 이
+  `scripts/git-hooks/pre-push` 를 `.git/hooks/pre-push` 로 복사하고 exec 비트를 세운다 — 멱등이며,
+  기존 비-Artibot `pre-push` 는 덮어쓰지 않고 `pre-push.backup` 으로 비켜 둔다. 설치기는
+  **`core.hooksPath` 가 설정돼 있으면 실행을 거부한다**: 그 설정이 `.git/hooks` 를 덮어써서,
+  설치된 것처럼 보이지만 한 번도 실행되지 않는 훅을 남기기 때문이다. `npm run hooks:check` 는
+  드리프트만 보고하고 아무것도 쓰지 않은 채 비영 종료한다. 정본은 `CONTRIBUTING.md` 의
+  "Pre-push hook" · "Trust boundary" 절이다.
+
+### Notes
+- **커밋 `4d8f1ad0` 본문의 "테스트 +20건" 은 과소집계다. 실제 신규는 23건**(신규 4파일 22 +
+  기존 계약 테스트 순증 1). 산술도 그쪽이 맞는다: `9,915 → 9,939 = +24 = 신규 23 + 기존 red
+  1건의 green 전환`. 푸시된 커밋 메시지는 고칠 수 없으므로 여기가 정정하는 자리다. 위험 방향은
+  아니지만(과소집계) 이 리포는 카운트 주장 정직성을 여러 번 교정한 이력이 있어 기록을 남긴다.
+- 두 커밋의 테스트 증분은 **정적 `it(` 카운트**이고, 인용된 pass 총계(`9,939` → `9,948` /
+  0 fail / 35 skip / 449 files)는 커밋 작성자의 `npm test` 실측이다.
+- **인스톨러는 한 번도 실제로 실행되지 않았다.** H1 재현·락 상호배제·부분 실패 종료코드는 전부
+  추출 하네스이며 ps1 ↔ sh 라이브 교차 실행은 미관측이다. 검증은 **win32 에서만** 이루어졌고
+  심링크는 `mklink /J` 정션으로만 밟았다 — Linux/macOS `symlinkSync` 경로는 미확인이다.
+  `eslint` 는 `.sh`/`.ps1` 을 린트하지 않으므로 **lint 0/0 은 인스톨러 변경의 안전성 근거가
+  아니다**; 근거는 `bash -n` / `Parser::ParseFile` 과 주석·빈줄 제외 diff 0줄이다.
+- **이 라운드에서 닫히지 않은 것.** 감사 항목 번호(H1/M1/L2…)는 감사자마다 다르게 매겨져 독자에게
+  무의미하므로 내용으로 적는다. 각 항목에 **왜 남겼는지**를 함께 남긴다 — 맥락 없는 나열은 다음
+  사람이 잘못 판단하게 만든다.
+- `scripts/hooks/_dispatcher-utils.js#mergeResults` 의 얕은 병합(`:204` "shallow-merged (last
+  write wins)", `:210`)에 **`__proto__` 방어가 0건**이다(해당 파일 `__proto__`/`prototype` grep
+  0건). 전역 프로토타입 오염은 아니고 `JSON.stringify` 가 own property 만 직렬화하므로 **현재
+  출력은 깨끗하다** — 오늘 발현되지 않는 잠복 결함이라 남긴다.
+- 훅·`bin/` 트리 **밖**의 인라인 `argv[1]` 가드. 수렴 게이트가 `scripts/hooks/**` 와 `bin/**`
+  두 트리만 훑으므로 `scripts/` 직속·`scripts/ci/`·`scripts/cron/`·`lib/planning/` 은 스캔 범위
+  밖이다. 게이트를 넓히는 것이 본체 수정보다 먼저다.
+- `bin/artibot-dashboard.mjs` 1곳은 `KNOWN_INLINE_GUARD_GAPS`
+  (`tests/hooks/main-entry.test.js:163-165`)에 면제로 기재돼 있다. **자기만료 장치가 붙어 있다** —
+  같은 파일 `:180-191` 의 staleness 테스트가 *이 파일이 가드를 인라인하지 않게 되는 순간* red 가
+  되므로, 면제 항목이 그것이 기록한 부채보다 오래 살아남을 수 없다.
+- `bin/artibot.js:229` 의 가드 없는 `main().catch(`. **오늘의 결함은 아니다** — 이 파일을 import
+  하는 소스가 없고(`main-entry.test.js:114`·`:244` 가 그 전제를 명시적으로 적어 뒀다), bin 진입점은
+  그 규율의 대상이 아니다. 전제가 바뀌면 결함이 되므로 게이트가 못 보는 것으로 기재해 둔다.
+
 ---
 
 ## [4.44.0] — 2026-08-11
@@ -36,6 +125,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   부재(node·node_modules·work tree)는 전부 **fail-closed** — 돌 수 없었는데 통과하는 경로를
   만들지 않는다. 미커버 항목(vitest 전량·커버리지·runtime eval·plugin.json 구조 검사 2종·Node
   버전 차이·플랫폼 차이)을 훅 헤더에 명시했다. 훅 그린은 CI 그린을 **예측할 뿐 보장하지 않는다**.
+  **[2026-08-15 주기]** 위 `core.hooksPath` 활성화 방법은 이후 **철회됐다** — 신뢰 경계 문제로
+  현행 설치기는 그 설정이 있으면 실행을 거부한다. 현행 절차는 `npm run hooks:install` 이며,
+  Unreleased 의 "pre-push 훅 배치 방식" 항목과 `CONTRIBUTING.md` "Trust boundary" 절이 정본이다.
+  (이 줄은 주기이며 위 문장은 v4.44.0 시점의 기록 그대로 남겨 둔다.)
 
 ### Fixed
 - **direct-run 가드 import-safety 게이트의 거짓음성 — 게이트가 막겠다고 선언한 회귀를 통과시켰다.**

@@ -29,6 +29,7 @@ import { isMainEntry } from '../../scripts/hooks/_main-entry.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const HOOKS_DIR = path.resolve(HERE, '..', '..', 'scripts', 'hooks');
+const BIN_DIR = path.resolve(HERE, '..', '..', 'bin');
 const MAIN_ENTRY = pathToFileURL(path.join(HOOKS_DIR, '_main-entry.js')).href;
 
 // ---------------------------------------------------------------------------
@@ -107,12 +108,33 @@ describe('isMainEntry (path encoding)', () => {
 //     trade at this cost.
 //   - Side effects of an import that finishes cleanly. A module that writes a
 //     file at module scope passes both gates.
+//   - Whether a bin/ entry has ANY direct-run guard. The scan below rejects a
+//     re-inlined one, but a bin/ file that simply calls main() at top level is
+//     not flagged — see the scope note on the runnable-main() assertion. That
+//     is today true of bin/artibot.js, which nothing imports.
+//   - The 35 files outside scripts/hooks/ and bin/ that still carry an inline
+//     guard (census 2026-08-15: 37 repo-wide, 1 in scripts/hooks/ which is the
+//     legitimate home, 2 in bin/). scripts/ci/ holds the worst shapes — a
+//     `file://${process.argv[1]}` concat and two `path.basename(argv[1]) ===`
+//     compares that match ANY file of that name. Widening to them was left out
+//     of this change on purpose: it is 35 files of edits, not a scan change.
 // ---------------------------------------------------------------------------
 describe('hooks route their direct-run guard through _main-entry.js', () => {
   // `.js` and `.mjs` — the `.mjs` hooks were guarded on 2026-08-11 and are
   // held to the same rule; excluding them is what let four of them run main()
   // unguarded for as long as they did.
   const files = readdirSync(HOOKS_DIR)
+    .filter((f) => f.endsWith('.js') || f.endsWith('.mjs'))
+    .sort();
+
+  // bin/ runs through the SAME assertions rather than a parallel copy: two
+  // copies of a rule drift, which is the defect this file exists to prevent.
+  // Until 2026-08-15 the scan read scripts/hooks/ alone. A census that day
+  // found 37 files repo-wide carrying an inline argv[1] guard and exactly ONE
+  // inside the scanned directory — _main-entry.js, the legitimate home. The
+  // gate was watching the only place the problem was already solved, while
+  // bin/artibot-mcp.mjs had re-inlined the comparison unseen.
+  const binFiles = readdirSync(BIN_DIR)
     .filter((f) => f.endsWith('.js') || f.endsWith('.mjs'))
     .sort();
 
@@ -126,9 +148,21 @@ describe('hooks route their direct-run guard through _main-entry.js', () => {
     .replace(/\/\*[\s\S]*?\*\//g, '')
     .replace(/^[ \t]*\/\/.*$/gm, '');
 
-  const sources = new Map(
-    files.map((f) => [f, stripComments(readFileSync(path.join(HOOKS_DIR, f), 'utf8'))]),
-  );
+  // Hook files keep their bare name; bin/ files are prefixed so a failure names
+  // the tree the offender is in.
+  const sources = new Map([
+    ...files.map((f) => [f, stripComments(readFileSync(path.join(HOOKS_DIR, f), 'utf8'))]),
+    ...binFiles.map((f) => [
+      'bin/' + f, stripComments(readFileSync(path.join(BIN_DIR, f), 'utf8')),
+    ]),
+  ]);
+
+  // Pre-existing offender this task was not scoped to touch. NOT a way to pass:
+  // the staleness test below fails the moment it is fixed, so the entry cannot
+  // outlive the debt it records.
+  const KNOWN_INLINE_GUARD_GAPS = [
+    'bin/artibot-dashboard.mjs',
+  ];
 
   it('discovers the hook directory (guards against a vacuous pass)', () => {
     // Without this, a moved directory would make every scan below iterate
@@ -136,6 +170,24 @@ describe('hooks route their direct-run guard through _main-entry.js', () => {
     expect(files.length).toBeGreaterThan(40);
     expect(files).toContain('_main-entry.js');
     expect(files).toContain('_posttooluse-dispatcher.js');
+  });
+
+  it('discovers the bin directory (guards against a vacuous pass)', () => {
+    expect(binFiles.length).toBeGreaterThan(2);
+    expect(binFiles).toContain('artibot-mcp.mjs');
+  });
+
+  it('known-gap list has not gone stale', () => {
+    // A temporary exemption that outlives its defect becomes permanent silently.
+    // Fixing a listed file turns this red, which is the only reliable way the
+    // entry gets deleted.
+    for (const f of KNOWN_INLINE_GUARD_GAPS) {
+      expect(sources.has(f), `${f} is listed as a known gap but is not scanned`)
+        .toBe(true);
+      expect(sources.get(f).includes('process.argv[1]'),
+        `${f} no longer inlines the guard — delete it from KNOWN_INLINE_GUARD_GAPS`)
+        .toBe(true);
+    }
   });
 
   it('has no hook resolving process.argv[1] for itself', () => {
@@ -148,6 +200,7 @@ describe('hooks route their direct-run guard through _main-entry.js', () => {
     const offenders = [];
     for (const [file, src] of sources) {
       if (file === '_main-entry.js') continue; // the one legitimate home
+      if (KNOWN_INLINE_GUARD_GAPS.includes(file)) continue;
       if (/path\.resolve\(\s*process\.argv\[1\]\s*\)/.test(src)
         || /fileURLToPath\(\s*import\.meta\.url\s*\)\s*===/.test(src)
         || /===\s*path\.resolve\(\s*process\.argv\[1\]\s*\)/.test(src)) {
@@ -173,7 +226,7 @@ describe('hooks route their direct-run guard through _main-entry.js', () => {
     const offenders = [];
     for (const [file, src] of sources) {
       if (!src.includes('isMainEntry(import.meta.url)')) continue;
-      const imported = /import \{[^}]*\bisMainEntry\b[^}]*\} from '\.\/_(main-entry|dispatcher-utils)\.js'/s.test(src);
+      const imported = /import \{[^}]*\bisMainEntry\b[^}]*\} from '(\.\/_(main-entry|dispatcher-utils)|\.\.\/scripts\/hooks\/_main-entry)\.js'/s.test(src);
       if (!imported) offenders.push(file);
     }
     expect(offenders).toEqual([]);
@@ -186,6 +239,14 @@ describe('hooks route their direct-run guard through _main-entry.js', () => {
     const offenders = [];
     for (const [file, src] of sources) {
       if (!/\bmain\(\)\.catch\(/.test(src)) continue;
+      // Hooks only, deliberately. This assertion protects IMPORT INERTNESS —
+      // hooks are imported by tests, so an ungated main() blocks the suite on
+      // stdin. bin/ entries are not held to it: nothing imports bin/artibot.js
+      // (checked repo-wide 2026-08-15 — only docs reference it), so requiring a
+      // guard there would be a NEW policy invented by a scan, not the existing
+      // one enforced in a new place. The no-re-inlining rule above does apply
+      // to bin/, because that one is about duplication, not import safety.
+      if (file.startsWith('bin/')) continue;
       if (!src.includes('isMainEntry(import.meta.url)')) offenders.push(file);
     }
     expect(offenders).toEqual([]);

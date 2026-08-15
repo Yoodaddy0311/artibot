@@ -18,6 +18,8 @@
     "validate": "node scripts/validate.js",
     "validate:bin": "node scripts/validate-bin.js",
     "validate:install": "node scripts/ci/validate-install.js",
+    "hooks:install": "node scripts/git-hooks/install.js",
+    "hooks:check": "node scripts/git-hooks/install.js --check",
     "lint": "eslint bin/ lib/ scripts/ tests/",
     "lint:fix": "eslint --fix bin/ lib/ scripts/ tests/",
     "ci": "node scripts/validate.js && node scripts/validate-bin.js && node scripts/ci/validate-install.js && npm run skill:check && npm run docs:check && npm run lint && npm test && npm run eval:runtime:check",

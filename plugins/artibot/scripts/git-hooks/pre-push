@@ -9,9 +9,16 @@
 # server, so every direct push reports "N of N required status checks are
 # expected" and lands via the admin bypass.
 #
-# Enable once per clone (not committed, core.hooksPath is local config):
+# Enable once per clone. .git/ is not tracked, so no committed file can install
+# this for you; every clone runs the installer once:
 #
-#   git config core.hooksPath plugins/artibot/scripts/git-hooks
+#   npm run hooks:install          (from plugins/artibot)
+#
+# That copies this file to .git/hooks/pre-push. Do NOT use
+# `git config core.hooksPath plugins/artibot/scripts/git-hooks` instead: it makes
+# the checked-out branch the source of the hook, so reviewing a hostile PR and
+# then pushing runs that branch's code, and the branch can disable this gate.
+# See "Trust boundary" in CONTRIBUTING.md and the drift check below.
 #
 # Bypass:
 #   git push --no-verify           one-off, git built-in
@@ -31,8 +38,18 @@
 
 set -u
 
+# The skip announces itself on stderr, not stdout. `--no-verify` is scoped to the
+# one command you typed; an environment variable is not. Once ARTIBOT_SKIP_PREPUSH
+# lands in a shell rc, a .env, or a CI job env, every later push is silently
+# ungated and nothing in the normal push output says so. stderr survives the
+# `>/dev/null` that wrapper scripts routinely apply to stdout, so the notice is
+# still visible when it matters most. Prefer the inline form:
+#   ARTIBOT_SKIP_PREPUSH=1 git push     (one command, leaves nothing behind)
 if [ "${ARTIBOT_SKIP_PREPUSH:-0}" = "1" ]; then
-	echo "pre-push: skipped via ARTIBOT_SKIP_PREPUSH=1"
+	echo "pre-push: SKIPPED - gate disabled by ARTIBOT_SKIP_PREPUSH=1" >&2
+	echo "pre-push:           if you did not type that on this command line it is" >&2
+	echo "pre-push:           set in your environment and every push is ungated." >&2
+	echo "pre-push:           check with: env | grep ARTIBOT_SKIP_PREPUSH" >&2
 	exit 0
 fi
 
@@ -66,6 +83,49 @@ plugin_dir="$repo_root/plugins/artibot"
 	echo "pre-push: FAIL - $plugin_dir not found" >&2
 	exit 1
 }
+
+# Drift / tamper check.
+#
+# The supported install copies this file to .git/hooks/pre-push (see
+# scripts/git-hooks/install.js). .git/ is not a tracked path, so the copy is
+# pinned at install time and checking out a branch cannot rewrite it. That is
+# the whole point: with core.hooksPath aimed inside the work tree, the *branch*
+# supplies the hook, so a hostile branch could both run its own code on your
+# machine at push time and delete this gate by putting `exit 0` at the top.
+#
+# Being a pinned copy is not enough on its own, because a stale copy silently
+# runs an old gate. So the copy compares itself to the source file in the work
+# tree -- the checked-out bytes, not the blob git has stored -- and stops
+# if they differ. One mechanism, two readings, and you have to look at the diff
+# to tell them apart:
+#   - you pulled a newer (or older) hook   -> re-run the installer
+#   - the checked-out branch edited it     -> read the diff before trusting it
+#
+# Under core.hooksPath this compares the file to itself and always passes, which
+# is correct: there is no second copy to drift from. It also means core.hooksPath
+# users get no tamper signal at all. That is why the copy is the supported path.
+#
+# --no-filters hashes raw bytes. The installer copies bytes verbatim, so line
+# endings cannot manufacture a mismatch on Windows.
+hook_src="$repo_root/plugins/artibot/scripts/git-hooks/pre-push"
+if [ -r "$0" ] && [ -r "$hook_src" ]; then
+	self_hash=$(git hash-object --no-filters "$0" 2>/dev/null || echo self-unreadable)
+	src_hash=$(git hash-object --no-filters "$hook_src" 2>/dev/null || echo src-unreadable)
+	if [ "$self_hash" != "$src_hash" ]; then
+		echo "pre-push: FAIL - installed hook differs from the source file in the work tree." >&2
+		echo "pre-push:        installed: $0" >&2
+		echo "pre-push:        source:    $hook_src" >&2
+		echo "pre-push:        Diff them. If the checked-out branch changed the hook," >&2
+		echo "pre-push:        do not reinstall until you have read that change." >&2
+		echo "pre-push:        Otherwise refresh with: npm run hooks:install" >&2
+		exit 1
+	fi
+else
+	# Source absent (detached checkout of an old commit, sparse checkout) means
+	# there is nothing to compare against. The gate itself still runs -- only the
+	# drift signal is unavailable, and saying so is better than implying it passed.
+	echo "pre-push: NOTE - drift check unavailable (source or self not readable)" >&2
+fi
 
 command -v node >/dev/null 2>&1 || {
 	echo "pre-push: FAIL - node not on PATH" >&2

@@ -874,6 +874,37 @@ SETTINGS
 }
 
 # ──────────────────────────────────────────────
+# Octal permission bits of a file ("600"), empty when they cannot be read.
+# ──────────────────────────────────────────────
+# Both merge helpers below rewrite settings.json as temp-file + rename. A temp
+# file is created under the caller's umask (0644 by default), so the rename
+# silently REPLACED the mode the user had set: a settings.json locked to 600
+# came back 644 after any re-install. The installer writes an `env` block into
+# that file and users keep API keys there, so on a shared host that is a real
+# disclosure.
+#
+# Restoring the ORIGINAL mode rather than forcing 600: the merge is an in-place
+# edit and an in-place edit has no business changing metadata. Forcing 600 would
+# fix the 600 case by breaking the symmetric one — a user who deliberately runs
+# 644 (dotfile repo, shared group) would find it silently tightened, which is
+# the same class of surprise in the other direction.
+#
+# `chmod --reference=FILE` would be one line but it is a GNU coreutils
+# extension; this installer supports macOS, whose BSD chmod has no such flag.
+# So read the bits and re-apply them, using the same GNU-then-BSD stat spelling
+# acquire_install_lock already uses.
+#
+# FAILURE DIRECTION, so nobody has to re-derive it: if BOTH spellings miss (an
+# unexpected stat, a permission error), this echoes empty, every caller's
+# `[ -z "${mode}" ] ||` guard skips the chmod, and the rename proceeds exactly
+# as it did before this helper existed. The bad case is therefore the OLD
+# behaviour, not a broken install — worth knowing because `%Lp` is the spelling
+# least likely to have been exercised on a given machine.
+_file_mode() {
+  stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1" 2>/dev/null || echo ''
+}
+
+# ──────────────────────────────────────────────
 # Merge read-only allowlist into an existing settings.json
 # Idempotent: existing permissions.allow entries are preserved; only the
 # missing safe entries are appended. Prefers jq, falls back to node, then a
@@ -888,11 +919,26 @@ _seed_permission_allow() {
 
   if command -v jq &>/dev/null; then
     local tmp_file="${settings_file}.tmp.$$"
+    local mode
+    mode=$(_file_mode "$settings_file")
+    # Two steps, and both are needed. `umask 077` in a subshell makes the temp
+    # file 0600 AT CREATION — without it the redirection creates it at the
+    # caller's umask (0644 typically) and the chmod below only shortens the
+    # window rather than removing it, since the temp sits in the same directory
+    # as the file it is about to become. The chmod then restores the ORIGINAL
+    # mode before the rename, so the real path is never briefly readable.
+    #
+    # If the mode could not be read, the guard skips the chmod and the file
+    # lands 0600 rather than umask-default. That is the one case where this
+    # changes a mode instead of preserving it, and 0600 is the right guess for
+    # a file the installer writes an `env` block into.
     # Ensure .permissions.allow exists, then union with the safe set, dedupe.
-    if jq --argjson seed "$allow_csv" '
+    if ( umask 077; jq --argjson seed "$allow_csv" '
       .permissions = (.permissions // {})
       | .permissions.allow = ((.permissions.allow // []) + $seed | unique)
-    ' "$settings_file" > "$tmp_file" 2>/dev/null && mv "$tmp_file" "$settings_file"; then
+    ' "$settings_file" > "$tmp_file" 2>/dev/null ) \
+      && { [ -z "${mode}" ] || chmod "${mode}" "$tmp_file"; } \
+      && mv "$tmp_file" "$settings_file"; then
       log "Read-only permissions merged into settings.json (via jq)"
     else
       rm -f "$tmp_file"
@@ -910,7 +956,15 @@ _seed_permission_allow() {
       for (const entry of seed) { if (!merged.includes(entry)) merged.push(entry); }
       const next = { ...cfg, permissions: { ...perms, allow: merged } };
       const tmp = path + '.tmp.' + process.pid;
-      fs.writeFileSync(tmp, JSON.stringify(next, null, 2) + '\n');
+      // Preserve the original mode — see _file_mode() above for why the temp
+      // file would otherwise hand back a umask-default 0644.
+      let mode = null;
+      try { mode = fs.statSync(path).mode & 0o777; } catch (e) { mode = null; }
+      // mode 0o600 on CREATION so the temp is never briefly umask-default;
+      // chmodSync afterwards because the mode option is masked by umask and so
+      // cannot restore a mode more permissive than umask allows. Both halves.
+      fs.writeFileSync(tmp, JSON.stringify(next, null, 2) + '\n', { mode: 0o600 });
+      if (mode !== null) fs.chmodSync(tmp, mode);
       fs.renameSync(tmp, path);
     " && log "Read-only permissions merged into settings.json (via node)" \
       || warn "Could not merge permissions via node — add manually: \"permissions\": { \"allow\": ${allow_csv} }"
@@ -936,26 +990,51 @@ _register_statusline() {
 
   local statusline_json='"statusLine": { "type": "command", "command": "bash ~/.claude/artibot/scripts/hooks/statusline.sh", "padding": 2 }'
 
+  # Both branches below used to log success UNCONDITIONALLY, outside the
+  # command chain — a failed jq or a node that never wrote still printed
+  # "statusLine registered". _seed_permission_allow above already had the
+  # correct shape, so this was an inconsistency inside one file rather than a
+  # deliberate difference. Report what actually happened, in both branches.
   if command -v jq &>/dev/null; then
     # jq available: merge cleanly
     local tmp_file="${settings_file}.tmp.$$"
-    jq '. + {"statusLine": {"type": "command", "command": "bash ~/.claude/artibot/scripts/hooks/statusline.sh", "padding": 2}}' \
-      "$settings_file" > "$tmp_file" && mv "$tmp_file" "$settings_file"
-    log "statusLine registered in settings.json (via jq)"
+    local mode
+    mode=$(_file_mode "$settings_file")
+    # umask 077 at creation + chmod before rename — see _seed_permission_allow
+    # for why both halves are load-bearing.
+    if ( umask 077; jq '. + {"statusLine": {"type": "command", "command": "bash ~/.claude/artibot/scripts/hooks/statusline.sh", "padding": 2}}' \
+      "$settings_file" > "$tmp_file" 2>/dev/null ) \
+      && { [ -z "${mode}" ] || chmod "${mode}" "$tmp_file"; } \
+      && mv "$tmp_file" "$settings_file"; then
+      log "statusLine registered in settings.json (via jq)"
+    else
+      rm -f "$tmp_file"
+      warn "Could not register statusLine via jq — add manually: ${statusline_json}"
+    fi
   elif command -v node &>/dev/null; then
     # Node.js fallback: read, merge, write atomically
-    ARTIBOT_SETTINGS="$settings_file" node --input-type=commonjs -e "
+    if ARTIBOT_SETTINGS="$settings_file" node --input-type=commonjs -e "
       const fs = require('fs');
       const path = process.env.ARTIBOT_SETTINGS;
       const cfg = JSON.parse(fs.readFileSync(path, 'utf8'));
       if (!cfg.statusLine) {
         cfg.statusLine = { type: 'command', command: 'bash ~/.claude/artibot/scripts/hooks/statusline.sh', padding: 2 };
         const tmp = path + '.tmp.' + process.pid;
-        fs.writeFileSync(tmp, JSON.stringify(cfg, null, 2) + '\n');
+        let mode = null;
+        try { mode = fs.statSync(path).mode & 0o777; } catch (e) { mode = null; }
+        // mode 0o600 on CREATION closes the window the chmod alone leaves
+        // open (the temp would otherwise appear at umask default first). The
+        // option is masked by umask, so it can only ever be more restrictive
+        // — which is why the chmod below is still what restores the real mode.
+        fs.writeFileSync(tmp, JSON.stringify(cfg, null, 2) + '\n', { mode: 0o600 });
+        if (mode !== null) fs.chmodSync(tmp, mode);
         fs.renameSync(tmp, path);
       }
-    "
-    log "statusLine registered in settings.json (via node)"
+    "; then
+      log "statusLine registered in settings.json (via node)"
+    else
+      warn "Could not register statusLine via node — add manually: ${statusline_json}"
+    fi
   else
     warn "Neither jq nor node available — add statusLine manually to ~/.claude/settings.json:"
     echo -e "${BLUE}  ${statusline_json}${NC}"
@@ -1084,7 +1163,26 @@ _try_crontab() {
   fi
 
   local cron_comment="# artibot-auto-learning"
-  local cron_line="${schedule} cd ${ARTIBOT_DIR} && node scripts/run-auto-learning.js >> /tmp/artibot-auto-learning.log 2>&1 ${cron_comment}"
+  # Log under the user's own directory, not /tmp.
+  #
+  # The old target was the fixed name /tmp/artibot-auto-learning.log. /tmp is
+  # world-writable and shared, so another local account can pre-create that name
+  # as a symlink and the job's `>>` follows it. On Linux the default
+  # fs.protected_symlinks=1 blocks following another user's symlink in a sticky
+  # directory — but this branch is the Linux AND macOS path (Windows takes
+  # _try_schtasks), and macOS has no such sysctl. Relying on a mitigation that
+  # only one of the two supported platforms provides is not a reason to keep a
+  # shared-directory path when a private one costs nothing.
+  #
+  # `mkdir -p logs` runs INSIDE the cron command rather than at install time so
+  # a deleted (or never-created) log directory cannot silently disable the job:
+  # the redirection for `node` is opened only when node runs, which is after the
+  # mkdir in this && chain. /tmp always existed, and that availability property
+  # has to be matched, not traded away.
+  #
+  # ARTIBOT_DIR is quoted here — a home directory containing a space would
+  # otherwise split `cd` mid-path. Unrelated to the /tmp issue, same one line.
+  local cron_line="${schedule} cd \"${ARTIBOT_DIR}\" && mkdir -p logs && node scripts/run-auto-learning.js >> logs/auto-learning.log 2>&1 ${cron_comment}"
 
   # Check if already in crontab (idempotent)
   if crontab -l 2>/dev/null | grep -q "artibot-auto-learning"; then

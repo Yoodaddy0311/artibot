@@ -299,30 +299,80 @@ The prefix matters. `.github/workflows/ci.yml` and
 check runs, so the fast-forward would bypass exactly as a direct push does. Keep
 the two branch lists in lockstep when either changes.
 
+That lockstep is enforced, not just requested:
+`plugins/artibot/tests/firewall/workflow-branch-lockstep.test.js` fails if any
+root workflow with an `on.push.branches` list disagrees with the others, if
+either required-check workflow loses its push trigger, or if a job `name:`
+template stops rendering one of the four required contexts. Its header lists
+what it cannot see, the first item being that the required-contexts list is a
+manual mirror of remote branch-protection state.
+
 `--ff-only` is required. A merge commit is a new SHA with no check runs on it,
 which puts you back to bypassing.
 
 ### Pre-push hook
 
 The hook runs the CI checks that are cheap enough to sit in front of every push.
-Enable it once per clone. `core.hooksPath` is local config and is not committed.
+`.git/` is not tracked, so no committed file can install it for you. Every clone
+runs the installer once:
 
 ```bash
-git config core.hooksPath plugins/artibot/scripts/git-hooks
+cd plugins/artibot
+npm run hooks:install
+npm run hooks:check
 ```
 
-If pushes go through without the hook printing anything, check that the file is
-executable. This repo is worked on with `core.filemode=false`, so a local
-`chmod +x` is not recorded, and the mode has to be committed deliberately with
-`git add --chmod=+x plugins/artibot/scripts/git-hooks/pre-push`.
-
-```bash
-chmod +x plugins/artibot/scripts/git-hooks/pre-push
-```
+`hooks:install` copies `plugins/artibot/scripts/git-hooks/pre-push` to
+`.git/hooks/pre-push` and sets the exec bit. It is idempotent, it moves a
+pre-existing non-Artibot `pre-push` aside to `pre-push.backup` instead of
+overwriting it, and it refuses to run while `core.hooksPath` is set, because
+that setting overrides `.git/hooks` and would leave an installed-looking hook
+that never executes. `hooks:check` reports drift and exits non-zero without
+writing anything, which is the only way to confirm your clone is current.
 
 It takes roughly 11-15 seconds and blocks the push on failure. ESLint dominates
 that, so the number moves with its cache state. Bypass with
-`git push --no-verify` or `ARTIBOT_SKIP_PREPUSH=1`.
+`git push --no-verify` or `ARTIBOT_SKIP_PREPUSH=1`. Prefer the former.
+`--no-verify` is scoped to the command you typed; the environment variable is
+not, and once it reaches a shell rc or a CI job env every later push is
+silently ungated. The hook announces the skip on stderr for that reason.
+
+#### Trust boundary
+
+Do **not** install the hook with
+`git config core.hooksPath plugins/artibot/scripts/git-hooks`. Earlier revisions
+of this document recommended exactly that, and it is the wrong shape. Unlike
+`.git/hooks/`, the work tree is supplied by whichever branch is checked out. Two
+things follow. A hostile branch can put arbitrary code in `pre-push`, and it
+runs on your machine the moment you push while reviewing that branch. The same
+branch can also put `exit 0` at the top and delete the gate entirely.
+
+Both were measured on 2026-08-15 in a throwaway repo. With `core.hooksPath`
+aimed at the work tree, a branch whose `pre-push` was replaced by `exit 0`
+pushed successfully. With the copy installed under `.git/hooks/`, the same
+branch was blocked.
+
+The copy is pinned at install time, so checking out a branch cannot rewrite it,
+and the hook compares itself against the source file in the work tree on every
+run. That comparison is against the checked-out bytes, not against the blob git
+has stored, which is deliberate: hashing with filters applied would mismatch on
+every Windows checkout under `core.autocrlf`. A mismatch stops the push with
+both readings spelled out: either you need to re-run the installer, or the
+checked-out branch modified the hook and you should read that diff before
+trusting it.
+
+What this does **not** fix: the hook still runs `scripts/ci/validate-*.js` and
+`npx eslint` from the work tree, so a hostile branch that edits one of those
+scripts still gets code execution at push time. Copying the hook removes the
+self-disabling property and stops the gate itself from being attacker-supplied.
+It does not make pushing from a hostile checkout safe, and nothing that still
+runs repo scripts could. Having such a branch checked out is already dangerous
+for the same reason `npm ci`, `npm test`, and most editor plugins are.
+
+The installer is deliberately not a `postinstall` or `prepare` script. This
+plugin gets installed onto other people's machines, and writing to their
+`.git/hooks/` from a dependency install is precisely the behaviour a security
+gate should not model.
 
 It does not run the vitest suite, coverage thresholds, the runtime eval gate, or
 the two plugin.json structure checks. The full list of what it does not cover is

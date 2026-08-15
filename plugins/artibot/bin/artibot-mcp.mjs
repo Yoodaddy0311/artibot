@@ -24,9 +24,11 @@
  */
 
 import { readFileSync } from 'node:fs';
-import path, { resolve } from 'node:path';
+import path from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import { fileURLToPath } from 'node:url';
+
+import { isMainEntry } from '../scripts/hooks/_main-entry.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PLUGIN_ROOT = path.resolve(HERE, '..');
@@ -368,8 +370,23 @@ function createStdioTransport(stdin, stdout) {
   };
 }
 
-const invokedFromCli =
-  process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1]);
+// The direct-run guard is the shared helper, not a local copy. bin/ already
+// reaches into scripts/ (bin/artibot.js imports scripts/utils/index.js), so
+// this is not a new dependency direction, and _main-entry.js is a leaf whose
+// only imports are three node: builtins — this CLI pays three builtin lookups
+// it would have made anyway.
+//
+// The inline comparison this replaces used fileURLToPath, so it escaped the
+// v4.43.0 percent-encoding defect, but it compared a RAW process.argv[1]
+// against a realpath-resolved import.meta.url. Measured 2026-08-15 through a
+// Windows junction pointing at the real plugin directory:
+//
+//   node <real>/bin/artibot-mcp.mjs --version       -> 4.44.0
+//   node <junction>/bin/artibot-mcp.mjs --version   -> no output, exit 0
+//
+// An MCP host launching a junctioned install saw a process exit 0 with no
+// protocol on stdio and no diagnostic — "server disconnected", nothing else.
+const invokedFromCli = isMainEntry(import.meta.url);
 if (invokedFromCli) {
   main(process.argv.slice(2)).catch((err) => {
     process.stderr.write(`[artibot-mcp] fatal: ${err?.message ?? err}\n`);

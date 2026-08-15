@@ -184,9 +184,9 @@ function Write-Tip   { param($msg) if ($script:UseColor) { Write-Host "[artibot]
 function Get-ArtibotVersion {
   foreach ($rel in @('.claude-plugin\plugin.json', 'artibot.config.json', 'package.json')) {
     $p = Join-Path $ScriptDir $rel
-    if (Test-Path $p) {
+    if (Test-Path -LiteralPath $p) {
       try {
-        $v = (Get-Content $p -Raw | ConvertFrom-Json).version
+        $v = (Get-Content -LiteralPath $p -Raw | ConvertFrom-Json).version
         if ($v) { return $v }
       } catch { }
     }
@@ -249,7 +249,7 @@ function Initialize-Directories {
     (Join-Path $ClaudeDir 'rules\artibot'),
     $ArtibotDir
   )) {
-    if (-not (Test-Path $d)) {
+    if (-not (Test-Path -LiteralPath $d)) {
       if ($DryRun) { Write-Log "[dry-run] would create $d" }
       else { New-Item -ItemType Directory -Path $d -Force | Out-Null }
     }
@@ -283,19 +283,24 @@ function Test-FileContentEqual {
 # does not end in `.md`, so the rules loader and the verify count ignore it.
 function Copy-MdFiles {
   param([string]$SrcDir, [string]$DstDir, [string]$Label, [switch]$Preserve)
-  if (-not (Test-Path $SrcDir)) { return }
+  if (-not (Test-Path -LiteralPath $SrcDir)) { return }
   $count = 0
   $preserved = 0
-  Get-ChildItem -Path $SrcDir -Filter '*.md' -File | ForEach-Object {
+  # -LiteralPath even though a wildcard appears on this line: the wildcard is
+  # the -Filter argument, which is where it belongs. -Path stays a literal
+  # directory, and leaving it wildcard-interpreted enumerates zero .md files
+  # under a bracketed profile path — commands and agents would then install
+  # silently as nothing.
+  Get-ChildItem -LiteralPath $SrcDir -Filter '*.md' -File | ForEach-Object {
     if ($DryRun) { $count++; return }
     $dst = Join-Path $DstDir $_.Name
-    if ($Preserve -and (Test-Path $dst) -and -not (Test-FileContentEqual $_.FullName $dst)) {
-      Copy-Item -Path $_.FullName -Destination "$dst.artibot-new" -Force
+    if ($Preserve -and (Test-Path -LiteralPath $dst) -and -not (Test-FileContentEqual $_.FullName $dst)) {
+      Copy-Item -LiteralPath $_.FullName -Destination "$dst.artibot-new" -Force
       Write-Warn2 "  Kept your edited $($_.Name) - new version saved as $($_.Name).artibot-new"
       $preserved++
       return
     }
-    Copy-Item -Path $_.FullName -Destination $DstDir -Force
+    Copy-Item -LiteralPath $_.FullName -Destination $DstDir -Force
     $count++
   }
   $prefix = if ($DryRun) { '[dry-run] would install' } else { 'installed' }
@@ -310,7 +315,7 @@ function Copy-MdFiles {
 # statusline reads out of ~/.claude/artibot, and both mirrors copy FROM it.
 function Copy-Tree {
   param([string]$SrcDir, [string]$DstDir)
-  if (-not (Test-Path $SrcDir)) { return $true }
+  if (-not (Test-Path -LiteralPath $SrcDir)) { return $true }
   $target = Join-Path $DstDir (Split-Path -Leaf $SrcDir)
   Copy-DirAtomic -SrcDir $SrcDir -DstDir $target
 }
@@ -330,12 +335,12 @@ function Install-Assets {
 
   # .claude-plugin metadata (swarm-profile.json, plugin.json, ...)
   $srcMeta = Join-Path $ScriptDir '.claude-plugin'
-  if (Test-Path $srcMeta) {
+  if (Test-Path -LiteralPath $srcMeta) {
     $dstMeta = Join-Path $ArtibotDir '.claude-plugin'
     if ($DryRun) {
       Write-Log "[dry-run] would copy $srcMeta -> $dstMeta"
     } else {
-      if (-not (Test-Path $dstMeta)) { New-Item -ItemType Directory -Path $dstMeta -Force | Out-Null }
+      if (-not (Test-Path -LiteralPath $dstMeta)) { New-Item -ItemType Directory -Path $dstMeta -Force | Out-Null }
       Copy-Item -Path (Join-Path $srcMeta '*') -Destination $dstMeta -Recurse -Force
     }
   }
@@ -344,9 +349,9 @@ function Install-Assets {
   if ($DryRun) {
     Write-Log "[dry-run] would copy artibot.config.json + package.json -> $ArtibotDir"
   } else {
-    Copy-Item -Path (Join-Path $ScriptDir 'artibot.config.json') -Destination $ArtibotDir -Force
+    Copy-Item -LiteralPath (Join-Path $ScriptDir 'artibot.config.json') -Destination $ArtibotDir -Force
     $pkg = Join-Path $ScriptDir 'package.json'
-    if (Test-Path $pkg) { Copy-Item -Path $pkg -Destination $ArtibotDir -Force }
+    if (Test-Path -LiteralPath $pkg) { Copy-Item -LiteralPath $pkg -Destination $ArtibotDir -Force }
   }
 
   # Copy install.sh itself into ~/.claude/artibot/ — parity with the same
@@ -360,8 +365,8 @@ function Install-Assets {
     Write-Log "[dry-run] would copy install.sh -> $ArtibotDir"
   } else {
     $srcInstallSh = Join-Path $ScriptDir 'install.sh'
-    if (Test-Path $srcInstallSh) {
-      Copy-Item -Path $srcInstallSh -Destination $ArtibotDir -Force
+    if (Test-Path -LiteralPath $srcInstallSh) {
+      Copy-Item -LiteralPath $srcInstallSh -Destination $ArtibotDir -Force
     } else {
       Write-Warn2 'install.sh not found beside install.ps1 - update.js fallback may fail to find it'
     }
@@ -385,7 +390,7 @@ function Set-Settings {
     return
   }
 
-  if (Test-Path $settingsFile) {
+  if (Test-Path -LiteralPath $settingsFile) {
     # Merge into existing settings via Node (preserves user keys, idempotent).
     $node = @'
 const fs = require('fs');
@@ -431,7 +436,7 @@ fs.renameSync(tmp, path);
   }
 }
 '@
-    Set-Content -Path $settingsFile -Value $json -Encoding utf8
+    Set-Content -LiteralPath $settingsFile -Value $json -Encoding utf8
     Write-Log 'settings.json created: Agent Teams enabled + read-only permissions seeded'
   }
 
@@ -476,28 +481,37 @@ fs.renameSync(tmp, path);
 # it could not copy so the caller can say so out loud. Never throws.
 function Copy-TreeContents {
   param([string]$Source, [string]$Destination)
-  if (-not (Test-Path $Source)) { return 0 }
+  if (-not (Test-Path -LiteralPath $Source)) { return 0 }
 
   $failed = 0
   $srcRoot = [System.IO.Path]::GetFullPath($Source)
   # `foreach` (statement), not ForEach-Object: the pipeline form runs its block
   # in a child scope, so `$failed++` there would increment a copy and always
   # report 0.
-  foreach ($item in @(Get-ChildItem -Path $srcRoot -Recurse -Force -ErrorAction SilentlyContinue)) {
+  # -LiteralPath, not -Path: -Path is wildcard-interpreted, so a profile or repo
+  # directory containing [ or ] enumerates ZERO entries and reports no error.
+  # Measured 2026-08-15: `Get-ChildItem -Path <dir with brackets> -Recurse` -> 0
+  # items, -LiteralPath -> 1. Silence is what makes it dangerous here — the
+  # caller would read "0 items copied" as a locked destination.
+  foreach ($item in @(Get-ChildItem -LiteralPath $srcRoot -Recurse -Force -ErrorAction SilentlyContinue)) {
     $rel = $item.FullName.Substring($srcRoot.Length).TrimStart('\')
     if (-not $rel) { continue }
     $target = Join-Path $Destination $rel
     try {
       if ($item.PSIsContainer) {
-        if (-not (Test-Path $target)) {
+        if (-not (Test-Path -LiteralPath $target)) {
           New-Item -ItemType Directory -Path $target -Force -ErrorAction Stop | Out-Null
         }
       } else {
         $parent = Split-Path $target -Parent
-        if ($parent -and -not (Test-Path $parent)) {
+        if ($parent -and -not (Test-Path -LiteralPath $parent)) {
           New-Item -ItemType Directory -Path $parent -Force -ErrorAction Stop | Out-Null
         }
-        Copy-Item -Path $item.FullName -Destination $target -Force -ErrorAction Stop
+        # -LiteralPath for the same reason as the enumeration above. A single
+        # file copy happens to survive -Path, but only because the bracket
+        # pattern resolves to one match: with both `a1.js` and `a[1].js` in the
+        # directory, `-Path 'a[1].js'` matches a1.js and copies the WRONG file.
+        Copy-Item -LiteralPath $item.FullName -Destination $target -Force -ErrorAction Stop
       }
     } catch {
       $failed++
@@ -512,7 +526,7 @@ function Copy-TreeContents {
 # cannot report a clean install (see Show-Summary).
 function Copy-DirAtomic {
   param([string]$SrcDir, [string]$DstDir)
-  if (-not (Test-Path $SrcDir)) { return $true }
+  if (-not (Test-Path -LiteralPath $SrcDir)) { return $true }
   if ($DryRun) { Write-Log "[dry-run] would mirror $SrcDir -> $DstDir"; return $true }
 
   $dst = [System.IO.Path]::GetFullPath($DstDir)
@@ -563,10 +577,18 @@ function Copy-DirAtomic {
   try {
     # Children only, skipping node_modules/.git at the top for parity with
     # install.sh safe_copy_dir.
-    Get-ChildItem -Path $SrcDir -Force | Where-Object {
+    Get-ChildItem -LiteralPath $SrcDir -Force | Where-Object {
       $_.Name -ne 'node_modules' -and $_.Name -ne '.git'
     } | ForEach-Object {
-      Copy-Item -Path $_.FullName -Destination $staging -Recurse -Force -ErrorAction Stop
+      # -LiteralPath, never -Path: -Path is wildcard-interpreted, and a recursive
+      # copy of a directory whose name holds [ or ] then lands ZERO files while
+      # throwing nothing (measured 2026-08-15: 0 vs 2 with -LiteralPath).
+      # Staging would come out empty, the guard below would correctly refuse to
+      # swap it in, and a user whose profile path contains a bracket could never
+      # install — with a message blaming an empty copy.
+      # (Worded without naming the cmdlet: the contract test counts call sites
+      # in this function by matching that name, and prose would inflate it.)
+      Copy-Item -LiteralPath $_.FullName -Destination $staging -Recurse -Force -ErrorAction Stop
     }
   } catch {
     try { Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction Stop } catch { }
@@ -607,7 +629,7 @@ function Copy-DirAtomic {
   }
 
   # Nothing to displace: one move, no window at all.
-  if (-not (Test-Path $dst)) {
+  if (-not (Test-Path -LiteralPath $dst)) {
     try { [System.IO.Directory]::Move($staging, $dst); return $true } catch { }
     try { New-Item -ItemType Directory -Path $dst -Force -ErrorAction Stop | Out-Null } catch { }
     $failed = Copy-TreeContents -Source $staging -Destination $dst
@@ -698,11 +720,11 @@ function Copy-DirClean {
 function Update-MarketplaceMirror {
   $mktClone = Join-Path $ClaudeDir 'plugins\marketplaces\artibot'
   $mktRoot = Join-Path $mktClone 'plugins\artibot'
-  if (-not (Test-Path $mktRoot)) {
+  if (-not (Test-Path -LiteralPath $mktRoot)) {
     Write-Log 'Marketplace install not present (skip mirror)'
     return
   }
-  if (Test-Path (Join-Path $mktClone '.git')) {
+  if (Test-Path -LiteralPath (Join-Path $mktClone '.git')) {
     Write-Log "Marketplace is git-managed by Claude Code (skip mirror - use 'claude plugin marketplace update artibot')"
     return
   }
@@ -710,7 +732,7 @@ function Update-MarketplaceMirror {
   # Hot runtime paths come from the direct install we just wrote.
   foreach ($dir in @('scripts', 'hooks', 'lib', 'skills', 'output-styles', '.claude-plugin')) {
     $src = Join-Path $ArtibotDir $dir
-    if (Test-Path $src) { $null = Copy-DirClean -SrcDir $src -DstDir (Join-Path $mktRoot $dir) }
+    if (Test-Path -LiteralPath $src) { $null = Copy-DirClean -SrcDir $src -DstDir (Join-Path $mktRoot $dir) }
   }
 
   # Commands + agents live only in the source repo (the direct install omits
@@ -718,13 +740,13 @@ function Update-MarketplaceMirror {
   # the source repo, not ArtibotDir.
   foreach ($dir in @('commands', 'agents')) {
     $src = Join-Path $ScriptDir $dir
-    if (Test-Path $src) { $null = Copy-DirClean -SrcDir $src -DstDir (Join-Path $mktRoot $dir) }
+    if (Test-Path -LiteralPath $src) { $null = Copy-DirClean -SrcDir $src -DstDir (Join-Path $mktRoot $dir) }
   }
 
   if (-not $DryRun) {
-    Copy-Item -Path (Join-Path $ScriptDir 'artibot.config.json') -Destination $mktRoot -Force
+    Copy-Item -LiteralPath (Join-Path $ScriptDir 'artibot.config.json') -Destination $mktRoot -Force
     $pkg = Join-Path $ScriptDir 'package.json'
-    if (Test-Path $pkg) { Copy-Item -Path $pkg -Destination $mktRoot -Force }
+    if (Test-Path -LiteralPath $pkg) { Copy-Item -LiteralPath $pkg -Destination $mktRoot -Force }
   }
   Write-Log "Marketplace mirror updated -> $mktRoot"
 }
@@ -739,23 +761,23 @@ function Update-MarketplaceMirror {
 # the cache dir (clearCache() in update.js owns invalidation).
 function Update-PluginCache {
   $cacheRoot = Join-Path $ClaudeDir 'plugins\cache\artibot\artibot'
-  if (-not (Test-Path $cacheRoot)) {
+  if (-not (Test-Path -LiteralPath $cacheRoot)) {
     Write-Log 'Plugin cache not present (skip cache sync)'
     return
   }
 
   $synced = 0
-  Get-ChildItem -Path $cacheRoot -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+  Get-ChildItem -LiteralPath $cacheRoot -Directory -ErrorAction SilentlyContinue | ForEach-Object {
     $vRoot = $_.FullName
     foreach ($dir in @('scripts', 'hooks', 'lib', 'output-styles')) {
       $src = Join-Path $ArtibotDir $dir
-      if (Test-Path $src) { $null = Copy-DirClean -SrcDir $src -DstDir (Join-Path $vRoot $dir) }
+      if (Test-Path -LiteralPath $src) { $null = Copy-DirClean -SrcDir $src -DstDir (Join-Path $vRoot $dir) }
     }
     if (-not $DryRun) {
       $cfg = Join-Path $ScriptDir 'artibot.config.json'
-      if (Test-Path $cfg) { Copy-Item -Path $cfg -Destination $vRoot -Force }
+      if (Test-Path -LiteralPath $cfg) { Copy-Item -LiteralPath $cfg -Destination $vRoot -Force }
       $pkg = Join-Path $ScriptDir 'package.json'
-      if (Test-Path $pkg) { Copy-Item -Path $pkg -Destination $vRoot -Force }
+      if (Test-Path -LiteralPath $pkg) { Copy-Item -LiteralPath $pkg -Destination $vRoot -Force }
     }
     $synced++
   }
@@ -774,14 +796,14 @@ function Install-Mcp {
   $mcpFile = Join-Path $ClaudeDir '.mcp.json'
   $srcMcp  = Join-Path $ScriptDir '.mcp.json'
 
-  if (Test-Path $mcpFile) {
+  if (Test-Path -LiteralPath $mcpFile) {
     Write-Warn2 'MCP config exists at ~/.claude/.mcp.json - merge manually recommended'
     Write-Warn2 "Artibot MCP config: $srcMcp"
     return
   }
-  if (Test-Path $srcMcp) {
+  if (Test-Path -LiteralPath $srcMcp) {
     if ($DryRun) { Write-Log "[dry-run] would copy .mcp.json -> $mcpFile"; return }
-    Copy-Item -Path $srcMcp -Destination $mcpFile -Force
+    Copy-Item -LiteralPath $srcMcp -Destination $mcpFile -Force
     Write-Log 'MCP servers configured (Context7, Playwright)'
   }
 }
@@ -819,7 +841,7 @@ function Save-SourcePath {
     pluginDir = $ScriptDir
     savedAt   = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
   }
-  ($payload | ConvertTo-Json) + "`n" | Set-Content -Path $sourceJson -Encoding utf8 -NoNewline
+  ($payload | ConvertTo-Json) + "`n" | Set-Content -LiteralPath $sourceJson -Encoding utf8 -NoNewline
   Write-Log "Source repo path saved for auto-updates: $gitRoot"
 }
 
@@ -857,17 +879,27 @@ $script:ArtibotSection = @'
 function Initialize-ProjectClaudeMd {
   $claudeMd = Join-Path (Get-Location).Path 'CLAUDE.md'
 
-  if (Test-Path $claudeMd) {
-    if (Select-String -Path $claudeMd -Pattern '## Artibot Integration' -Quiet -ErrorAction SilentlyContinue) {
+  if (Test-Path -LiteralPath $claudeMd) {
+    # -LiteralPath on BOTH, and the pair is the point. `Select-String -Path`
+    # is wildcard-interpreted, so with a project directory whose name holds
+    # [ or ] it returns $false for a section that IS present — silently, since
+    # -Quiet reports a boolean and not an error. The append below then runs on
+    # a file it should have skipped, and `Add-Content -Path` throws on that
+    # same bracketed path (measured 2026-08-15: -Path throws and appends
+    # nothing, -LiteralPath appends). With $ErrorActionPreference = 'Stop' set
+    # at the top of this script and no handler here, that is not a duplicated
+    # section — it aborts the installer partway, after the copy phase and
+    # before MCP, settings, swarm consent and the summary.
+    if (Select-String -LiteralPath $claudeMd -Pattern '## Artibot Integration' -Quiet -ErrorAction SilentlyContinue) {
       Write-Log 'Project CLAUDE.md already has Artibot section - skipping'
       return
     }
     if ($DryRun) { Write-Log '[dry-run] would append Artibot section to CLAUDE.md'; return }
-    Add-Content -Path $claudeMd -Value $script:ArtibotSection -Encoding utf8
+    Add-Content -LiteralPath $claudeMd -Value $script:ArtibotSection -Encoding utf8
     Write-Log 'Artibot section appended to existing CLAUDE.md'
   } else {
     if ($DryRun) { Write-Log '[dry-run] would create CLAUDE.md with Artibot methodology'; return }
-    Set-Content -Path $claudeMd -Value ("# Project Instructions`n" + $script:ArtibotSection) -Encoding utf8
+    Set-Content -LiteralPath $claudeMd -Value ("# Project Instructions`n" + $script:ArtibotSection) -Encoding utf8
     Write-Log 'Project CLAUDE.md created with Artibot methodology'
   }
 }
@@ -881,22 +913,23 @@ function Initialize-LocalConfig {
   $gitignore = Join-Path $cwd '.gitignore'
   $template  = Join-Path $ScriptDir 'templates\CLAUDE.local.md.template'
 
-  if (Test-Path $localMd) {
+  if (Test-Path -LiteralPath $localMd) {
     Write-Log 'CLAUDE.local.md already exists - skipping'
     return
   }
-  if (-not (Test-Path $template)) {
+  if (-not (Test-Path -LiteralPath $template)) {
     Write-Warn2 "CLAUDE.local.md.template not found at $ScriptDir\templates\ - skipping seed"
     return
   }
   if ($DryRun) { Write-Log '[dry-run] would seed CLAUDE.local.md from template + gitignore it'; return }
 
-  Copy-Item -Path $template -Destination $localMd -Force
+  Copy-Item -LiteralPath $template -Destination $localMd -Force
   Write-Log 'CLAUDE.local.md created from template (personalize it!)'
 
-  if (Test-Path $gitignore) {
-    if (-not (Select-String -Path $gitignore -Pattern 'CLAUDE.local.md' -Quiet -ErrorAction SilentlyContinue)) {
-      Add-Content -Path $gitignore -Value 'CLAUDE.local.md' -Encoding utf8
+  if (Test-Path -LiteralPath $gitignore) {
+    # Same guard/action pair as Initialize-ProjectClaudeMd, same reasoning.
+    if (-not (Select-String -LiteralPath $gitignore -Pattern 'CLAUDE.local.md' -Quiet -ErrorAction SilentlyContinue)) {
+      Add-Content -LiteralPath $gitignore -Value 'CLAUDE.local.md' -Encoding utf8
       Write-Log 'Added CLAUDE.local.md to .gitignore'
     }
   } else {
@@ -918,24 +951,24 @@ function Initialize-AutoMemory {
 
   # Fallback: if the computed hash dir is absent, match by trailing basename.
   $candidate = Join-Path $memoryDir $projectHash
-  if ((-not (Test-Path $candidate)) -and (Test-Path $memoryDir)) {
+  if ((-not (Test-Path -LiteralPath $candidate)) -and (Test-Path -LiteralPath $memoryDir)) {
     $leaf = Split-Path -Leaf $cwd
-    $match = Get-ChildItem -Path $memoryDir -Directory -ErrorAction SilentlyContinue |
+    $match = Get-ChildItem -LiteralPath $memoryDir -Directory -ErrorAction SilentlyContinue |
       Where-Object { $_.Name -like "*$leaf" } | Select-Object -First 1
     if ($match) { $projectHash = $match.Name }
   }
   $projectMemory = Join-Path (Join-Path $memoryDir $projectHash) 'memory'
 
-  if ((Test-Path (Join-Path $projectMemory 'MEMORY.md'))) {
+  if ((Test-Path -LiteralPath (Join-Path $projectMemory 'MEMORY.md'))) {
     Write-Log 'Auto-memory already exists - skipping seed'
     return
   }
   if ($DryRun) { Write-Log "[dry-run] would seed MEMORY.md -> $projectMemory"; return }
 
-  $agentCount = (Get-ChildItem (Join-Path $ClaudeDir 'agents')   -Filter '*.md' -File -ErrorAction SilentlyContinue | Measure-Object).Count
-  $cmdCount   = (Get-ChildItem (Join-Path $ClaudeDir 'commands') -Filter '*.md' -File -ErrorAction SilentlyContinue | Measure-Object).Count
+  $agentCount = (Get-ChildItem -LiteralPath (Join-Path $ClaudeDir 'agents')   -Filter '*.md' -File -ErrorAction SilentlyContinue | Measure-Object).Count
+  $cmdCount   = (Get-ChildItem -LiteralPath (Join-Path $ClaudeDir 'commands') -Filter '*.md' -File -ErrorAction SilentlyContinue | Measure-Object).Count
   $skillsDir  = Join-Path $ArtibotDir 'skills'
-  $skillCount = if (Test-Path $skillsDir) { (Get-ChildItem $skillsDir -Directory -ErrorAction SilentlyContinue | Measure-Object).Count } else { 0 }
+  $skillCount = if (Test-Path -LiteralPath $skillsDir) { (Get-ChildItem -LiteralPath $skillsDir -Directory -ErrorAction SilentlyContinue | Measure-Object).Count } else { 0 }
 
   New-Item -ItemType Directory -Path $projectMemory -Force | Out-Null
   $seed = @"
@@ -960,7 +993,7 @@ function Initialize-AutoMemory {
 - Rules: ``~/.claude/rules/artibot/`` (auto-activate on file access)
 - Config: ``~/.claude/artibot/artibot.config.json``
 "@
-  Set-Content -Path (Join-Path $projectMemory 'MEMORY.md') -Value $seed -Encoding utf8
+  Set-Content -LiteralPath (Join-Path $projectMemory 'MEMORY.md') -Value $seed -Encoding utf8
   Write-Log "Auto-memory seeded with Artibot quickstart -> $projectMemory\MEMORY.md"
 }
 
@@ -973,7 +1006,7 @@ function Initialize-AutoMemory {
 # unless a consent file already exists. Users opt in later via '/sc swarm opt-in'.
 function Set-SwarmConsent {
   $consentFile = Join-Path $ArtibotDir 'swarm-consent.json'
-  if (Test-Path $consentFile) {
+  if (Test-Path -LiteralPath $consentFile) {
     Write-Log 'Swarm consent already configured - skipping'
     return
   }
@@ -989,7 +1022,7 @@ function Set-SwarmConsent {
 # via schtasks (idempotent) and write the marker regardless to avoid re-prompts.
 function Set-AutoLearning {
   $marker = Join-Path $ArtibotDir 'auto-learning-registered.json'
-  if (Test-Path $marker) {
+  if (Test-Path -LiteralPath $marker) {
     Write-Log 'Auto-learning schedule already registered - skipping'
     return
   }
@@ -999,7 +1032,7 @@ function Set-AutoLearning {
   $cfgFile = Join-Path $ArtibotDir 'artibot.config.json'
   $enabled = $false
   $schedule = '0 3 * * *'
-  if ((Test-Path $cfgFile) -and (Get-Command node -ErrorAction SilentlyContinue)) {
+  if ((Test-Path -LiteralPath $cfgFile) -and (Get-Command node -ErrorAction SilentlyContinue)) {
     try {
       $env:ARTIBOT_CFG = $cfgFile
       $enabled = (node --input-type=commonjs -e "const c=JSON.parse(require('fs').readFileSync(process.env.ARTIBOT_CFG,'utf8'));process.stdout.write(c.autoLearning&&c.autoLearning.enabled===true?'1':'0')") -eq '1'
@@ -1020,7 +1053,7 @@ function Set-AutoLearning {
   $nodeCmd = Get-Command node -ErrorAction SilentlyContinue
   $schtasks = Get-Command schtasks.exe -ErrorAction SilentlyContinue
 
-  if ($schtasks -and $nodeCmd -and (Test-Path $runner)) {
+  if ($schtasks -and $nodeCmd -and (Test-Path -LiteralPath $runner)) {
     $taskName = 'ArtibotAutoLearning'
     $already = $false
     & schtasks.exe /Query /TN $taskName *> $null
@@ -1051,21 +1084,21 @@ function Set-AutoLearning {
     schedule     = $schedule
     method       = $method
   }
-  ($markerPayload | ConvertTo-Json) + "`n" | Set-Content -Path $marker -Encoding utf8 -NoNewline
+  ($markerPayload | ConvertTo-Json) + "`n" | Set-Content -LiteralPath $marker -Encoding utf8 -NoNewline
 }
 
 # ---------------------------------------------------------------------------
 # Verify
 # ---------------------------------------------------------------------------
 function Show-Summary {
-  $agentCount = (Get-ChildItem (Join-Path $ClaudeDir 'agents')   -Filter '*.md' -File -ErrorAction SilentlyContinue | Measure-Object).Count
-  $cmdCount   = (Get-ChildItem (Join-Path $ClaudeDir 'commands') -Filter '*.md' -File -ErrorAction SilentlyContinue | Measure-Object).Count
+  $agentCount = (Get-ChildItem -LiteralPath (Join-Path $ClaudeDir 'agents')   -Filter '*.md' -File -ErrorAction SilentlyContinue | Measure-Object).Count
+  $cmdCount   = (Get-ChildItem -LiteralPath (Join-Path $ClaudeDir 'commands') -Filter '*.md' -File -ErrorAction SilentlyContinue | Measure-Object).Count
   $skillsDir  = Join-Path $ArtibotDir 'skills'
-  $skillCount = if (Test-Path $skillsDir) { (Get-ChildItem $skillsDir -Directory -ErrorAction SilentlyContinue | Measure-Object).Count } else { 0 }
+  $skillCount = if (Test-Path -LiteralPath $skillsDir) { (Get-ChildItem -LiteralPath $skillsDir -Directory -ErrorAction SilentlyContinue | Measure-Object).Count } else { 0 }
   $rulesDir   = Join-Path $ClaudeDir 'rules\artibot'
-  $ruleCount  = if (Test-Path $rulesDir) { (Get-ChildItem $rulesDir -Filter '*.md' -File -ErrorAction SilentlyContinue | Measure-Object).Count } else { 0 }
+  $ruleCount  = if (Test-Path -LiteralPath $rulesDir) { (Get-ChildItem -LiteralPath $rulesDir -Filter '*.md' -File -ErrorAction SilentlyContinue | Measure-Object).Count } else { 0 }
   $hooksDir   = Join-Path $ArtibotDir 'scripts\hooks'
-  $hookCount  = if (Test-Path $hooksDir) { (Get-ChildItem $hooksDir -Filter '*.js' -File -ErrorAction SilentlyContinue | Measure-Object).Count } else { 0 }
+  $hookCount  = if (Test-Path -LiteralPath $hooksDir) { (Get-ChildItem -LiteralPath $hooksDir -Filter '*.js' -File -ErrorAction SilentlyContinue | Measure-Object).Count } else { 0 }
 
   Write-Host ''
   Write-Log '--- Installation Summary ---'
@@ -1077,8 +1110,8 @@ function Show-Summary {
   Write-Host ''
 
   $cwd = (Get-Location).Path
-  if (Test-Path (Join-Path $cwd 'CLAUDE.md'))       { Write-Host '  Project:  CLAUDE.md seeded with Artibot methodology' }
-  if (Test-Path (Join-Path $cwd 'CLAUDE.local.md')) { Write-Host '  Local:    CLAUDE.local.md ready for personalization' }
+  if (Test-Path -LiteralPath (Join-Path $cwd 'CLAUDE.md'))       { Write-Host '  Project:  CLAUDE.md seeded with Artibot methodology' }
+  if (Test-Path -LiteralPath (Join-Path $cwd 'CLAUDE.local.md')) { Write-Host '  Local:    CLAUDE.local.md ready for personalization' }
   Write-Host ''
 
   # The counts above are read off whatever is on disk, so a directory that could
@@ -1101,29 +1134,29 @@ function Show-Summary {
 function Uninstall-Artibot {
   Write-Warn2 'Removing Artibot...'
   $srcAgents = Join-Path $ScriptDir 'agents'
-  if (Test-Path $srcAgents) {
-    Get-ChildItem $srcAgents -Filter '*.md' -File | ForEach-Object {
+  if (Test-Path -LiteralPath $srcAgents) {
+    Get-ChildItem -LiteralPath $srcAgents -Filter '*.md' -File | ForEach-Object {
       $t = Join-Path (Join-Path $ClaudeDir 'agents') $_.Name
-      if (Test-Path $t) {
-        if ($DryRun) { Write-Log "[dry-run] would remove $t" } else { Remove-Item $t -Force }
+      if (Test-Path -LiteralPath $t) {
+        if ($DryRun) { Write-Log "[dry-run] would remove $t" } else { Remove-Item -LiteralPath $t -Force }
       }
     }
   }
   $srcCmds = Join-Path $ScriptDir 'commands'
-  if (Test-Path $srcCmds) {
-    Get-ChildItem $srcCmds -Filter '*.md' -File | ForEach-Object {
+  if (Test-Path -LiteralPath $srcCmds) {
+    Get-ChildItem -LiteralPath $srcCmds -Filter '*.md' -File | ForEach-Object {
       $t = Join-Path (Join-Path $ClaudeDir 'commands') $_.Name
-      if (Test-Path $t) {
-        if ($DryRun) { Write-Log "[dry-run] would remove $t" } else { Remove-Item $t -Force }
+      if (Test-Path -LiteralPath $t) {
+        if ($DryRun) { Write-Log "[dry-run] would remove $t" } else { Remove-Item -LiteralPath $t -Force }
       }
     }
   }
   $rulesDir = Join-Path $ClaudeDir 'rules\artibot'
-  if (Test-Path $rulesDir) {
-    if ($DryRun) { Write-Log "[dry-run] would remove $rulesDir" } else { Remove-Item $rulesDir -Recurse -Force }
+  if (Test-Path -LiteralPath $rulesDir) {
+    if ($DryRun) { Write-Log "[dry-run] would remove $rulesDir" } else { Remove-Item -LiteralPath $rulesDir -Recurse -Force }
   }
-  if (Test-Path $ArtibotDir) {
-    if ($DryRun) { Write-Log "[dry-run] would remove $ArtibotDir" } else { Remove-Item $ArtibotDir -Recurse -Force }
+  if (Test-Path -LiteralPath $ArtibotDir) {
+    if ($DryRun) { Write-Log "[dry-run] would remove $ArtibotDir" } else { Remove-Item -LiteralPath $ArtibotDir -Recurse -Force }
   }
   Write-Log 'Artibot uninstalled. settings.json, CLAUDE.md, and auto-memory left unchanged.'
 }
@@ -1179,8 +1212,8 @@ switch ($Action) {
         $noopMarker = Join-Path $ArtibotDir '.last-install-noop'
         if ($DryRun) {
           Write-Log "[dry-run] would remove stale no-op marker -> $noopMarker"
-        } elseif (Test-Path $noopMarker) {
-          try { Remove-Item -Path $noopMarker -Force } catch { }
+        } elseif (Test-Path -LiteralPath $noopMarker) {
+          try { Remove-Item -LiteralPath $noopMarker -Force } catch { }
         }
       }
       Install-Mcp
