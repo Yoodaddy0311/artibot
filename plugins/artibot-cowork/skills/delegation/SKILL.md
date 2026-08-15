@@ -104,7 +104,7 @@ Use the `Agent` tool to spawn focused sub-agents for bounded work.
 Agent(subagent_type, { isolation: "worktree" })
 ```
 
-- `artibot.config.json`의 `team.worktreeIsolation.enabled: true`로 기본 활성화 가능
+- 이 플러그인은 `artibot.config.json`을 출하하지 않으므로, 전역 기본값을 켜 두는 설정 항목이 없습니다. 격리가 필요한 호출마다 위 옵션을 직접 지정하세요
 - 기본값: `false` (opt-in)
 - 완료 후 결과가 메인 worktree로 자동 병합 (`mergeStrategy: "auto"`)
 

@@ -1,6 +1,6 @@
 ---
-description: (Artibot) Educational explanations of code, concepts, and systems with progressive depth
-argument-hint: '[topic] e.g. "이벤트 루프 동작 원리"'
+description: (Artibot) Educational explanations of marketing concepts, frameworks, and channels with progressive depth
+argument-hint: '[topic] e.g. "어트리뷰션 모델 동작 원리"'
 allowed-tools: [Read, Glob, Grep, Bash, Agent]
 ---
 
@@ -11,21 +11,21 @@ Educational explanations that prioritize understanding over brevity. Uses mentor
 ## Arguments
 
 Parse $ARGUMENTS:
-- `topic-or-path`: Code file, concept name, pattern, or `@<path>` reference
+- `topic-or-path`: Campaign asset, concept name, framework, or `@<path>` reference
 - `--depth [level]`: `shallow` (overview) | `medium` (detailed) | `deep` (comprehensive with internals)
-- `--audience [level]`: `beginner` | `intermediate` | `senior` (adjusts terminology and assumed knowledge)
-- `--examples`: Include executable code examples
+- `--audience [level]`: `beginner` | `intermediate` | `expert` (adjusts terminology and assumed knowledge)
+- `--examples`: Include concrete campaign examples
 - `--compare`: Compare with alternative approaches
 
 ## Execution Flow
 
-1. **Parse**: Identify whether target is code path, concept, or pattern
-2. **Context**: If code path:
-   - Read the file and surrounding context
-   - Map dependencies and call sites
-   - Identify framework and language idioms used
+1. **Parse**: Identify whether target is an asset path, concept, or framework
+2. **Context**: If asset path:
+   - Read the asset and surrounding campaign context
+   - Map related channels and touchpoints
+   - Identify the framework and brand voice used
    If concept:
-   - Gather relevant code examples from the codebase
+   - Gather relevant examples from past campaigns
    - Use Context7 for authoritative documentation
 3. **Structure**: Build explanation with progressive complexity:
    - **What**: Core concept or purpose (1-2 sentences)
@@ -33,7 +33,7 @@ Parse $ARGUMENTS:
    - **How**: Mechanism and implementation details
    - **When**: Usage patterns and applicability
    - **Pitfalls**: Common mistakes and misconceptions
-4. **Examples**: If `--examples`, include runnable code demonstrating the concept
+4. **Examples**: If `--examples`, include concrete campaign examples demonstrating the concept
 5. **Compare**: If `--compare`, show alternative approaches with trade-offs
 6. **Report**: Output structured explanation
 
@@ -50,9 +50,9 @@ Parse $ARGUMENTS:
 ```
 EXPLANATION
 ===========
-Topic:    [topic or file path]
+Topic:    [topic or asset path]
 Depth:    [shallow|medium|deep]
-Audience: [beginner|intermediate|senior]
+Audience: [beginner|intermediate|expert]
 
 WHAT
 ----
@@ -68,7 +68,7 @@ HOW
 
 EXAMPLES
 --------
-[Runnable code examples with annotations]
+[Concrete campaign examples with annotations]
 
 PITFALLS
 --------

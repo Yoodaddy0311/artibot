@@ -1,24 +1,24 @@
 ---
 description: (Artibot) Browse, inspect, and manage orchestration playbooks
-argument-hint: 'list|info <name> [--domain development|marketing|security|quality]'
+argument-hint: 'list|info <name> [--domain marketing]'
 allowed-tools: [Read]
 ---
 
 # /playbook
 
-Browse and inspect Artibot orchestration playbooks. Playbooks define multi-phase team workflows such as feature implementation, security audits, and marketing campaigns.
+Browse and inspect Artibot orchestration playbooks. Playbooks define multi-phase team workflows such as campaign execution, marketing audits, and competitive analysis.
 
 ## Arguments
 
 Parse $ARGUMENTS:
 - `list` - List all available playbooks (default action)
 - `info <name>` - Show detailed information and phase diagram for a named playbook
-- `--domain [domain]` - Filter by domain: `development` | `marketing` | `security` | `quality` | `general`
+- `--domain [domain]` - Filter by domain. Every playbook bundled with this plugin is `marketing`, so this filter only narrows results once you have added your own playbooks under `~/.claude/artibot/playbooks/`.
 
 ## Execution Flow
 
 ### `list` (default)
-1. **Load**: Read system playbooks from `artibot.config.json` → `team.playbooks`
+1. **Load**: Read the bundled playbooks from `agents/orchestrator.md` → the `## Playbooks` section. This plugin ships no `artibot.config.json`, so there is no `team.playbooks` config block to read — the orchestrator agent file is the only bundled source.
 2. **Load**: Read user playbooks from `~/.claude/artibot/playbooks/`
 3. **Filter**: Apply `--domain` filter if provided
 4. **Format**: Output table with name, domain, phase count, and patterns
@@ -40,11 +40,10 @@ Source: system + user
 
 NAME                  DOMAIN        PHASES  PATTERNS
 ----                  ------        ------  --------
-feature               development   5       leader, council, swarm
-bugfix                development   3       leader, pipeline, council
-refactor              development   4       council, pipeline, swarm
-security              security      4       leader, council, pipeline
-marketing-campaign    marketing     5       leader, council, swarm
+marketing-campaign    marketing     5       leader, council, swarm, pipeline, watchdog
+marketing-audit       marketing     4       leader, swarm, council
+content-launch        marketing     4       leader, swarm, pipeline
+competitive-analysis  marketing     4       leader, swarm, council
 ...
 
 Total: [n] playbooks ([s] system, [u] user)
@@ -63,8 +62,8 @@ Tags:        [tag1, tag2, ...]
 
 PHASE DIAGRAM
 -------------
-[leader] plan → [council] design → [swarm] implement → [council] review → [leader] merge
-  Phase 0          Phase 1            Phase 2              Phase 3          Phase 4
+[leader] plan → [council] design → [swarm] do → [pipeline] check → [watchdog] act
+  Phase 0          Phase 1            Phase 2       Phase 3            Phase 4
 
 VALIDATION
 ----------
