@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [4.45.0] — 2026-08-15
 
 v4.44.0 의 보안 표면을 대상으로 한 적대적 리뷰(`/ultrareview`)가 찾은 HIGH 1 · MEDIUM 3 과,
 그 인접 발견 2건을 닫는다. 이 리포의 반복 패턴 — **"작동한다고 믿던 것이 실제로는 작동하지
