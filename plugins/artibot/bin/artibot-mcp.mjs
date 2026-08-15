@@ -25,6 +25,7 @@
 
 import { readFileSync } from 'node:fs';
 import path, { resolve } from 'node:path';
+import { StringDecoder } from 'node:string_decoder';
 import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -130,8 +131,23 @@ export function fallbackStdioLoop(stdin, stdout, stderr) {
   stderr.write('[artibot-mcp] server module not found — running minimal fallback.\n');
   return new Promise((resolvePromise) => {
     let buf = '';
+    // A Buffer chunk decoded on its own loses the tail of any multibyte
+    // character that straddles the chunk boundary, so 64KB of Korean text
+    // arrives with a U+FFFD sitting inside a JSON-RPC frame. StringDecoder
+    // holds the incomplete sequence until the next chunk completes it.
+    //
+    // Deliberately NOT `stdin.setEncoding(...)`, which is what
+    // createStdioTransport uses: that call is optional-chained there because
+    // a caller may inject a stream that does not implement it, and on such a
+    // stream setEncoding is a silent no-op while the corruption survives.
+    // Decoding the chunks themselves depends on nothing the stream provides,
+    // and does not reconfigure a stream this function was handed rather than
+    // opened. Collecting every chunk and decoding once — the readPayload
+    // shape in scripts/hooks/_dispatcher-utils.js — is not available here:
+    // this loop has to answer `initialize` long before stdin ends.
+    const decoder = new StringDecoder('utf-8');
     const onData = (chunk) => {
-      buf += chunk.toString('utf-8');
+      buf += typeof chunk === 'string' ? chunk : decoder.write(chunk);
       let idx;
       while ((idx = buf.indexOf('\n')) >= 0) {
         const line = buf.slice(0, idx).trim();
@@ -306,9 +322,28 @@ export async function main(argv, deps = {}) {
 function createStdioTransport(stdin, stdout) {
   async function* lines() {
     let buf = '';
-    stdin.setEncoding?.('utf-8');
+    // Same decode contract as fallbackStdioLoop, and deliberately the same
+    // shape: one answer in this file to "how is stdin turned into text".
+    //
+    // This replaces a `stdin.setEncoding?.('utf-8')` that used to sit here.
+    // That call was correct whenever the stream implemented it — measured
+    // 2026-08-15, a normal Readable round-tripped 315,037 bytes of Korean
+    // intact — but its own optional chaining conceded that a caller may
+    // inject a stream without it, and on such a stream it was a silent no-op
+    // while `buf += chunk` decoded every 64KB chunk in isolation: the same
+    // measurement over a Readable with setEncoding removed came back with 5
+    // U+FFFD. Keeping both would have left the decoder unreached on every
+    // stream that does implement setEncoding, so a later reader could not
+    // tell which mechanism was load-bearing. Decoding the chunks depends on
+    // nothing the stream provides, and does not reconfigure a stream this
+    // function was handed rather than opened.
+    //
+    // Declared here, not inside the loop: the decoder must outlive a chunk to
+    // hold the leading bytes of a character whose tail is in the next one.
+    // One instance per lines() call, and createStdioTransport calls it once.
+    const decoder = new StringDecoder('utf-8');
     for await (const chunk of stdin) {
-      buf += chunk;
+      buf += typeof chunk === 'string' ? chunk : decoder.write(chunk);
       let idx;
       while ((idx = buf.indexOf('\n')) >= 0) {
         const line = buf.slice(0, idx);
@@ -316,6 +351,12 @@ function createStdioTransport(stdin, stdout) {
         if (line.length > 0) yield line;
       }
     }
+    // Unlike fallbackStdioLoop, this generator yields a trailing unterminated
+    // line rather than dropping it (next statement). Bytes still held by the
+    // decoder belong to that line, so flushing one without the other loses
+    // exactly the data that statement exists to keep. Returns '' — and costs
+    // nothing — unless the stream ended mid-character.
+    buf += decoder.end();
     if (buf.trim().length > 0) yield buf;
   }
   return {

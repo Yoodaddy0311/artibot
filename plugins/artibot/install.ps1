@@ -78,7 +78,14 @@ $MIN_NODE_MAJOR = 20
 $SafeAllow = @('Read', 'Glob', 'Grep')
 
 # ---------------------------------------------------------------------------
-# Concurrency lock — parity with install.sh acquire_install_lock (L44-72)
+# Concurrency lock — parity with install.sh#acquire_install_lock
+#
+# Cross-file references here name SYMBOLS, not line numbers. The line numbers
+# this block originally carried were all stale within one release, because the
+# same change that added this lock shifted install.sh by ~90 lines. A citation
+# that rots points a reader at unrelated code, which is worse than no citation:
+# one of them landed on install.sh's success path while claiming to show its
+# error path.
 # ---------------------------------------------------------------------------
 # install.sh has had this mutex since v4.31.1; install.ps1 shipped without one,
 # so the two installers had NO mutual exclusion at all. That gap is reachable:
@@ -91,7 +98,7 @@ $SafeAllow = @('Read', 'Glob', 'Grep')
 #
 # THE LOCK PATH MUST MATCH install.sh CHARACTER FOR CHARACTER. A different path
 # is not a weaker lock, it is no lock: each script would take its own and both
-# would proceed. install.sh:47 builds it as "${CLAUDE_DIR}/.artibot-install.lock"
+# would proceed. install.sh sets INSTALL_LOCK_DIR="${CLAUDE_DIR}/.artibot-install.lock"
 # with CLAUDE_DIR="${HOME:-${USERPROFILE:-...}}/.claude" — the same directory
 # $ClaudeDir resolves to here whenever Git Bash's HOME points at the Windows
 # profile, which is its default.
@@ -106,10 +113,12 @@ $script:InstallLockHeld = $false
 $script:InstallFailures = 0
 
 # Matches install.sh exactly: try once, reclaim only a lock older than the stale
-# threshold, otherwise ERROR OUT. install.sh does not wait or retry
-# (install.sh:62-63 errs and exits 1; tests/scripts/install-lock.test.js:145-152
-# pins that behaviour), so neither does this — a second installer that silently
-# waited would still be a second installer, just later.
+# threshold, otherwise ERROR OUT. install.sh does not wait or retry — the last
+# two statements of acquire_install_lock, past the stale-reclaim branch, are
+# `err "Another install is already running…"` then `exit 1`
+# (tests/scripts/install-lock.test.js:145-152 pins that behaviour). So neither
+# does this — a second installer that silently waited would still be a second
+# installer, just later.
 function Request-InstallLock {
   if ($DryRun) {
     Write-Log "[dry-run] would acquire install lock ($InstallLockDir)"
@@ -125,8 +134,9 @@ function Request-InstallLock {
     return
   } catch { }
 
-  # Unreadable mtime is treated as infinitely old, matching install.sh:52's
-  # `|| echo 0` — for a LOCK, fail-open beats deadlocking every future install.
+  # Unreadable mtime is treated as infinitely old, matching the `|| echo 0` tail
+  # of the `stat -c %Y … || stat -f %m …` probe in install.sh#acquire_install_lock
+  # — for a LOCK, fail-open beats deadlocking every future install.
   $ageSecs = $InstallLockStaleSecs + 1
   try {
     $lockItem = Get-Item -LiteralPath $InstallLockDir -Force -ErrorAction Stop
@@ -339,7 +349,9 @@ function Install-Assets {
     if (Test-Path $pkg) { Copy-Item -Path $pkg -Destination $ArtibotDir -Force }
   }
 
-  # Copy install.sh itself into ~/.claude/artibot/ — parity with install.sh L181.
+  # Copy install.sh itself into ~/.claude/artibot/ — parity with the same
+  # `cp "${SCRIPT_DIR}/install.sh" "${ARTIBOT_DIR}/"` at the end of
+  # install.sh#install_hooks.
   # update.js (findInstallScript / findSourceRepo fallback #2) looks for
   # ~/.claude/artibot/install.sh after the plugin cache is cleared. On Windows,
   # update.js drives the actual update via Git Bash + install.sh, so this copy is
@@ -513,6 +525,14 @@ function Copy-DirAtomic {
   # Our own leftovers are ours to drop. Foreign ones are pruned only past the
   # same staleness threshold the install lock uses, because the alternative is
   # deleting a concurrent run's staging dir mid-copy.
+  #
+  # DELIBERATELY NOT PRUNED: the suffix-less "$dst.artibot-new" / ".artibot-old"
+  # left by versions before the PID suffix. The StartsWith below requires the
+  # trailing dot, so a bare name now survives forever. Matching it would mean
+  # deleting a non-unique path, and an older installer's LIVE staging dir is
+  # named exactly that — see the longer note in install.sh#atomic_replace_dir.
+  # Bounded disk in a directory nothing reads, and self-limiting: only
+  # pre-suffix versions create one.
   foreach ($leftover in @($staging, $retired)) {
     if (Test-Path -LiteralPath $leftover) {
       try { Remove-Item -LiteralPath $leftover -Recurse -Force -ErrorAction Stop } catch { }
@@ -1147,7 +1167,8 @@ switch ($Action) {
       } else {
         # Acquired here, not at the top: the self-install branch writes nothing
         # into the live trees, and install.sh takes the lock in exactly the same
-        # place (install.sh:1229, inside the non-self-install branch).
+        # place — install.sh#main calls acquire_install_lock as the first
+        # statement of the `else` arm of its `if is_self_install` branch.
         Request-InstallLock
         Install-Assets
         Update-MarketplaceMirror

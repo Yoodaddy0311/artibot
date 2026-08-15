@@ -238,6 +238,19 @@ atomic_replace_dir() {
   # staging dir is precisely the failure the PID suffix exists to prevent.
   # A leftover that survives is inert — nothing loads an `.artibot-new.*` or
   # `.artibot-old.*` path — so keeping one costs disk, not correctness.
+  #
+  # DELIBERATELY NOT PRUNED: the suffix-less `${dst}.artibot-new` and
+  # `${dst}.artibot-old` that versions BEFORE the PID suffix left behind. Both
+  # the glob below and install.ps1's StartsWith require the trailing dot, so a
+  # bare name now survives forever (verified 2026-08-15 on a copy: bare kept,
+  # foreign stale pruned, foreign fresh kept). That is the intended trade:
+  # matching the bare name means deleting a path that is NOT unique, and an
+  # older installer's LIVE staging dir is called exactly that. Those still run
+  # — update.js drives the self-copied `~/.claude/artibot/install.sh`, which can
+  # predate this change — so a prune-on-sight would delete a concurrent run's
+  # half-written staging and re-create the truncated-swap outage the suffix was
+  # added to prevent. The cost of leaving them is bounded disk in a directory
+  # nothing reads, and it is self-limiting: only pre-suffix versions create one.
   rm -rf "${staging}" "${retired}" 2>/dev/null || true
   local _leftover _lmtime _lage _now
   _now=$(date +%s)
