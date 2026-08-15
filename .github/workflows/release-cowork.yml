@@ -28,6 +28,33 @@ jobs:
         with:
           node-version: 22
 
+      # Rule coverage for these scripts lives in ci.yml, via
+      # plugins/artibot/tests/firewall/cowork-scripts-lint.test.js. That job runs
+      # on push/PR to master and the release branch prefixes — it does NOT run on
+      # a `cowork-v*` tag push, which is the event that gates this workflow. So a
+      # tag pushed from a branch that never saw CI would publish unparsed code.
+      # This step is that floor. It is syntax only; it does not replace the gate.
+      #
+      # `node --check` is FAIL-OPEN on a `.js` file whose nearest package.json
+      # declares no `type`: Node falls back to syntax detection and exits 0 with
+      # no output on a broken ESM file (measured 2026-08-15, Node 22.19.0). It
+      # works here only because the repo-root package.json declares
+      # `"type": "module"`. The count assertion is what stops the step from
+      # reporting success after examining nothing, which is the failure mode that
+      # left these scripts unchecked in the first place.
+      - name: Syntax-check release scripts
+        run: |
+          count=0
+          for f in scripts/*.js; do
+            node --check "$f"
+            count=$((count + 1))
+          done
+          if [ "$count" -eq 0 ]; then
+            echo "::error::No scripts/*.js matched — nothing was syntax-checked."
+            exit 1
+          fi
+          echo "Syntax-checked $count script(s)."
+
       - name: Verify version matches tag
         run: |
           TAG_VERSION="${GITHUB_REF_NAME#cowork-v}"

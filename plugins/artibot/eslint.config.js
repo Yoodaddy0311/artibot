@@ -1,3 +1,4 @@
+import { BASE_RULES, SCRIPT_RULE_OVERRIDES } from './eslint.shared-rules.js';
 import js from '@eslint/js';
 import globals from 'globals';
 
@@ -51,37 +52,13 @@ export default [
         ...globals.node,
       },
     },
-    rules: {
-      'no-console': 'warn',
-      'no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
-      'consistent-return': 'error',
-      'eqeqeq': 'error',
-      'max-depth': ['warn', 4],
-      // max-params 6 + complexity 30 are the current measured upper bounds
-      // for legacy GRPO + middleware functions (neural-policy.runIteration=6,
-      // joint-policy.selectJointWith=28, session-capture middleware=25).
-      // Refactoring is tracked separately; these caps prevent regression.
-      'max-params': ['warn', 6],
-      'complexity': ['warn', 30],
-      'no-eval': 'error',
-      'no-implied-eval': 'error',
-      'no-new-func': 'error',
-      'no-shadow': 'warn',
-      'prefer-const': 'error',
-      'no-var': 'error',
-      'sort-imports': ['warn', {
-        ignoreCase: true,
-        ignoreDeclarationSort: true,
-        ignoreMemberSort: false,
-      }],
-    },
+    // Shared with the cowork firewall gate — see eslint.shared-rules.js for why
+    // these live in a separate module rather than inline here.
+    rules: BASE_RULES,
   },
   {
     files: ['scripts/**/*.{js,mjs}'],
-    rules: {
-      'no-console': 'off',
-      'complexity': 'off',
-    },
+    rules: SCRIPT_RULE_OVERRIDES,
   },
   // ---------------------------------------------------------------------------
   // 5-Layer architecture enforcement (see CLAUDE.md "5-Layer Architecture").

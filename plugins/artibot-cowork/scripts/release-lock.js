@@ -21,7 +21,7 @@
  * Zero dependencies. Node 18+ built-ins only.
  */
 
-import { existsSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 
@@ -73,6 +73,23 @@ function readJson(file) {
   } catch (err) {
     console.error(`[release-lock] Failed to parse ${file}: ${err.message}`);
     process.exit(1);
+    // 도달하지 않는다. `process.exit()` 가 스택을 풀지 않는다는 사실을 정적
+    // 분석은 알 수 없어, 이 줄이 없으면 catch 가지가 값 없이 함수 끝으로 흘러
+    // consistent-return 위반이 된다. 종료 경로임을 코드로 명시해 둔다.
+    //
+    // 여기서 exit 하는 것 자체는 안전하다. 불변식: **readJson 호출은 모두 그
+    // 함수가 상태를 쓰기 전에 끝난다.** 호출 지점은 5곳이고 전부 이를 만족한다
+    // (줄번호는 썩으므로 심볼로 적는다):
+    //
+    //   requireAutopilot  — 유일한 읽기. 쓰기 없음
+    //   cmdAcquire        — 락 파일 읽기 → requireAutopilot. 두 writeJson 보다 앞
+    //   cmdRelease        — 락 파일 읽기 → requireAutopilot. writeJson·rmSync 보다 앞
+    //   cmdStatus         — 2곳. 이 함수는 읽기 전용이라 쓸 상태가 아예 없다
+    //
+    // 그래서 이 종료는 락을 누수시키지 않는다. **상태를 쓴 뒤에 읽는 호출이 새로
+    // 생기면 그때는 exit 이 아니라 throw 로 바꿔야 한다** — 그게 2026-08-15 D2 와
+    // 같은 형태이고, 그 경우 이 주석의 불변식이 깨진 것이므로 함께 갱신하라.
+    throw err;
   }
 }
 
