@@ -22,6 +22,9 @@ import { PlanTracker } from '../core/plan-tracker.js';
 /** @typedef {() => Date} NowFn */
 
 const KIND_DIRS = { prd: 'PRD', adr: 'adr' };
+/** Display labels for index headings. `docs/adr` is lowercase on disk; the
+ *  heading is not, so the two must not share one map. */
+const KIND_LABELS = { prd: 'PRD', adr: 'ADR' };
 const ARCHIVE_DIRNAME = '_archive';
 const STALE_DAYS = 90;
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
@@ -177,14 +180,40 @@ function parseFrontmatter(text) {
 }
 
 /**
+ * Canonicalise an artifact kind, or `null` when it is not one we know.
+ * Case is normalised so a `'ADR'`/`'PRD'` call site still resolves; anything
+ * else is rejected by the callers rather than silently redirected.
+ * @param {string} kind
+ * @returns {'prd'|'adr'|null}
+ */
+function normalizeKind(kind) {
+  const k = typeof kind === 'string' ? kind.trim().toLowerCase() : '';
+  return Object.hasOwn(KIND_DIRS, k) ? /** @type {'prd'|'adr'} */ (k) : null;
+}
+
+/**
  * Resolve the on-disk directory for an artifact kind.
+ *
+ * Throws on an unknown kind. This used to fall back to the PRD directory while
+ * `renderIndex()` fell back to the raw kind string — the two fallbacks pointed
+ * in opposite directions, so `indexArtifacts({kind:'ADR'})` overwrote
+ * `docs/PRD/INDEX.md` with an `# ADR Index` heading listing PRD records.
+ * Writing the wrong directory quietly is worse than failing, so this is now
+ * fail-closed; every caller wraps it and surfaces `{ ok: false, error }`.
+ *
  * @param {string} projectRoot
- * @param {string} kind - 'prd' | 'adr'
+ * @param {string} kind - 'prd' | 'adr' (case-insensitive)
  * @returns {string}
+ * @throws {TypeError} when `kind` is not a known artifact kind.
  */
 function kindDir(projectRoot, kind) {
-  const sub = KIND_DIRS[kind] || KIND_DIRS.prd;
-  return path.join(projectRoot, 'docs', sub);
+  const k = normalizeKind(kind);
+  if (!k) {
+    throw new TypeError(
+      `unknown artifact kind: ${JSON.stringify(kind)} (expected 'prd' or 'adr')`,
+    );
+  }
+  return path.join(projectRoot, 'docs', KIND_DIRS[k]);
 }
 
 /**
@@ -420,7 +449,16 @@ function renderAdr({ number, title, options, decision, rationale, when }) {
     .map((opt) => `### 선택지: ${opt}\n- **장점**: 조사 필요\n- **단점**: 조사 필요`)
     .join('\n\n');
   return (
-    `# ADR-${pad}: ${title}\n\n`
+    // Lifecycle frontmatter. Without it `readArtifact()` sees no `status` and
+    // labels a brand-new "Accepted" ADR as `legacy`, so the index status column
+    // contradicts the document body (and the doc joins the same archive bucket
+    // as untracked legacy files once it ages past STALE_DAYS).
+    '---\n'
+    + 'status: active\n'
+    + `created: ${date}\n`
+    + `number: ${number}\n`
+    + '---\n\n'
+    + `# ADR-${pad}: ${title}\n\n`
     + `## 추천 결론 (TL;DR)\n> **${decision}을(를) 채택한다.** ${rationale}\n\n`
     + `## Status\nAccepted\n\n작성일: ${date}\n\n---\n\n`
     + `## 1. Context (컨텍스트와 제약사항)\n조사 필요\n\n---\n\n`
@@ -436,6 +474,13 @@ function renderAdr({ number, title, options, decision, rationale, when }) {
 /**
  * Create the next ADR under `docs/adr/` with auto-incremented number.
  * Caller decides *whether* a real decision exists; this only generates.
+ *
+ * NOT idempotent, by design. An ADR number is the decision's identity, so two
+ * calls mean two decisions — even with identical arguments, since two distinct
+ * decisions can share a title. There is deliberately no `findActiveBySlug()`
+ * reuse guard like `writePRD()` has: replacing an earlier decision is
+ * {@link supersede}'s job, not a silent overwrite. Callers that must not
+ * double-record are responsible for checking first.
  *
  * @param {object} args
  * @param {string} args.projectRoot - Absolute repo root.
@@ -571,7 +616,7 @@ export async function listArtifacts({ projectRoot, kind = 'prd', filter = 'all',
  * @returns {string}
  */
 function renderIndex(kind, items, nowDate) {
-  const head = `# ${KIND_DIRS[kind] || kind} Index\n\n`
+  const head = `# ${KIND_LABELS[normalizeKind(kind)] || kind} Index\n\n`
     + `생성: ${humanStamp(nowDate)} · ${items.length}건\n\n`
     + '| slug | status | date | ageDays | link |\n'
     + '|------|--------|------|---------|------|\n';

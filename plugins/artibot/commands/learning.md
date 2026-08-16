@@ -1,5 +1,5 @@
 ---
-description: (Artibot) Diagnose the learning system — GRPO weights, swarm sync, top/bottom tools by performance
+description: (Artibot) Diagnose the learning system — swarm sync, top/bottom tools by performance, risk signals, pattern file health, ambient ledger capture
 argument-hint: 'e.g. "--top 5", "--swarm", "--raw", "review", "review approve <id>"'
 allowed-tools: [Bash, Read]
 toolset: meta
@@ -7,7 +7,7 @@ toolset: meta
 
 # /learning
 
-> **vs /learn**: `/learning` **diagnoses the learning system** (GRPO weights, swarm sync) — pure read-only inspection. `/learn` **extracts and saves patterns** from code or session to memory.
+> **vs /learn**: `/learning` **diagnoses the learning system** (swarm sync, tool/agent performance, ledger capture) — pure read-only inspection. `/learn` **extracts and saves patterns** from code or session to memory.
 
 Inspect the on-disk state of the Artibot auto-learning + swarm federation system. Pure observation — never mutates state.
 
@@ -22,7 +22,7 @@ The command runs `scripts/learning-diag.js` which reads (in order):
 
 Then renders a markdown dashboard with **6 sections**:
 
-1. **GRPO Self-Learning** — round count, top learned strategy weights, recent strategy distribution
+1. **GRPO Self-Learning (은퇴)** — 라이브 writer가 없다. `grpo-history.json`이 디스크에 남아 있으면 과거 수치를 그대로 보여줄 뿐이며, 대시보드가 스스로 `Retired / dormant` 배너를 렌더한다 (`scripts/learning-diag.js#renderGrpo`). 새 데이터는 쌓이지 않는다
 2. **Swarm (Federated Learning)** — sync state, merged-bucket sizes (tools / agents / errors / commands / teams)
 3. **Top Performers** — ranked by `success × certainty` (or `success × confidence` when certainty absent)
 4. **Risk Signals** — high confidence + low success entries (consistent failure patterns worth investigating)
@@ -35,7 +35,7 @@ A final **Recommendations** section calls out actionable findings (empty buckets
 
 Parse `$ARGUMENTS`:
 
-- _(none)_ — full dashboard, top-10 / bottom-10, last-50 GRPO rounds
+- _(none)_ — full dashboard, top-10 / bottom-10
 - `--top N` — change top performer count (default 10, range 1–100)
 - `--bottom N` — change risk-signal count (default 10, range 1–100)
 - `--rounds N` — change recent-rounds window for strategy distribution (default 50)
@@ -98,7 +98,6 @@ node "${PLUGIN_ROOT}/scripts/learning-diag.js" $ARGUMENTS
 
 | Signal | Meaning |
 |---|---|
-| GRPO rounds rising | Self-learning is actively recording per-session outcomes |
 | Top weights dominated by `fix` / `Bash` | Recent work is heavy on bug-fixes via shell — typical maintenance phase |
 | Swarm `agents` bucket empty | No post-v4.6.2 peer upload yet, OR local agent patterns below filter (sample ≥ 3, conf ≥ 0.4) |
 | Top performer has `cert` column populated | Post-v4.6.2 sample-size-aware certainty is flowing through pack/unpack |
@@ -134,7 +133,6 @@ A fresh install (no learning yet) will show:
 - Total rounds: 0
 - _no `grpo-history.json` found_
 - _no swarm state on disk — sync may not have run yet_
-- Recommendations: "GRPO has no rounds — auto-learning may not be running"
 ```
 
 ## Next Steps

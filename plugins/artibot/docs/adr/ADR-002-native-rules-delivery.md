@@ -1,3 +1,9 @@
+---
+status: active
+created: 2026-07-07
+number: 2
+---
+
 # ADR-002: 네이티브 마켓플레이스 설치에서 8개 auto-activating rules 전달
 
 ## 추천 결론 (TL;DR)

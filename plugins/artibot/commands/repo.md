@@ -59,7 +59,7 @@ Every spawned `repo-benchmarker` teammate MUST:
 
 1. **First action = `git clone --depth 1`** to `~/.claude/artibot/repos/<sanitized-name>/`. NOT `WebFetch` of github.com URLs.
 2. **Enumerate** with `Glob`/`Bash ls -R` after clone — get the actual file tree.
-3. **Read ≥10 substantive source files** per repo (not just README/LICENSE). Cover: entrypoints, configs, key modules, examples, tests.
+3. **Read ≥10 substantive source files per repo, or every substantive file the repo has if it has fewer than 10** (not just README/LICENSE). Cover: entrypoints, configs, key modules, examples, tests. Substantive excludes `LICENSE`, lockfiles, `.gitignore`, and binary assets. **Report the fraction you read** — `read 6/6 substantive` is complete coverage and stronger evidence than `read 10/500`; the floor exists to stop shallow reading of big repos, not to disqualify small ones. If you read fewer than exist, mark the untouched areas `UNINSPECTED` and say why.
 4. **Cite `file_path:line_number`** for every claim. A claim without a line citation is rejected.
 5. **Quote ≤5-line code snippets** for any "ADOPT / TRANSFORM / REJECT" judgment — show the actual code you saw.
 6. **No README-only judgments**. If you only read the README, return `INSUFFICIENT-INSPECTION` for that dimension instead of guessing.
@@ -98,7 +98,7 @@ Only after completing steps 1–5, proceed to the Execution Flow below.
    - If `--deep` → add `architect` + `code-reviewer` teammates for design & quality passes
    - If `--domain-check` → add `marketing-strategist` teammate for vertical coverage comparison
 5. **Decompose candidates** *(skip if `--quick`)* — Before assigning ADOPT/REJECT verdicts, decompose each proposal into independent sub-functions (e.g. "video awareness" → frame extraction · subtitle STT · ingest pipeline). Issue verdicts at the sub-function level — a single verdict on a compound proposal is forbidden; at least one decomposition attempt is required. If sub-functions fall under different policies or complexity tiers, split their verdicts accordingly (partial adoption allowed). For each candidate marked REJECT, ask once whether decomposition surfaces an adoptable piece; REJECT is final only after this check.
-6. **Score** — 10 dimensions per repo (see below). If `--focus [area]` is passed, still score all 10 (the weighted total requires them) but spend the deep-read budget on the mapped dimension(s) and expand only those in the report: `agents`→1, `architecture`→2 + 7, `skills`→3, `commands`→4, `hooks`→5, `quality`→7 + 9, `innovation`→10, `domain-coverage`→3 + 10 and run the `--domain-check` path. An unrecognized area is an error — list the eight valid ones and stop. Dimensions outside the focus may be scored from the structure scan alone — mark them `SHALLOW` so the reader knows which scores are thin.
+6. **Score** — score every dimension that **applies** to the repo; mark the rest `N/A` with a one-line reason and drop them from the denominator (see *10 Scoring Dimensions*). If `--focus [area]` is passed, still score every applicable dimension — the weighted total needs them — but spend the deep-read budget on the mapped dimension(s) and expand only those in the report: `agents`→1, `architecture`→2 + 7, `skills`→3, `commands`→4, `hooks`→5, `quality`→7 + 9, `innovation`→10, `domain-coverage`→3 + 10 and run the `--domain-check` path. An unrecognized area is an error — list the eight valid ones and stop. Dimensions outside the focus may be scored from the structure scan alone — mark them `SHALLOW` so the reader knows which scores are thin.
 7. **Judge candidates** — run the 3 VETO axes (safety / robustness / efficiency) at the strictness set by `--complexity-budget`, then score the 4 GAIN axes. Vetoed candidates go to `SUPPRESSED` with the failing axis named. See *Adoption Judgment* below
 8. **Don't-Replace-If-Better Rule** — if Artibot's score on dimension D exceeds target's, label as "ADVANTAGE — keep as-is"; never recommend swap
 9. **Validate claims** *(inspired by awesome-opensource-ai/validate_awesome.py)* — for each adoption suggestion, verify the referenced file/pattern actually exists in the target repo (grep/read check) before listing
@@ -108,6 +108,13 @@ Only after completing steps 1–5, proceed to the Execution Flow below.
 ## 10 Scoring Dimensions
 
 > **Single source of truth**: the per-dimension **weights** that produce `WEIGHTED TOTAL (/100)` live in [repo-benchmarking SKILL.md](../skills/repo-benchmarking/SKILL.md) § *Evaluation Dimensions (10-point scale)* — that skill also owns the clone/cache protocol, the workflow checklist, and the three human checkpoints. This table is the scoring rubric only (what each dimension measures); do not duplicate the weights here. Change weights in the skill file first. The [repo-benchmarker agent](../agents/repo-benchmarker.md) mirrors the same weight table for standalone spawns — keep all three in step.
+
+**Not every dimension applies to every repo.** A curated list has no hook system; a CLI has no skill system. Scoring an absent dimension is not rigor, it is invention — score it `N/A` instead.
+
+- `N/A` is **not zero.** A zero says "they did this badly"; `N/A` says "this axis does not exist here". Never fold `N/A` into the total as 0 — that silently penalizes repos for not being plugins.
+- **Drop `N/A` dimensions out of the denominator and state the denominator you used.** A total with no denominator cannot be compared to anything.
+- `N/A` is a claim like any other: say *why* the dimension is absent, from the structure scan.
+- `N/A` (dimension does not exist) is different from `UNINSPECTED` / `SHALLOW` / `INSUFFICIENT-INSPECTION` (dimension exists, you did not look hard enough). Do not use one for the other — the first is a property of the repo, the rest are properties of your effort.
 
 | # | Dimension | Measures |
 |---|---|---|
@@ -162,7 +169,18 @@ Any single veto failure sends the candidate to `SUPPRESSED`. No gain score can o
 | **독창성 (Originality)** | A pattern Artibot has no equivalent of |
 | **창의성 (Creativity)** | Reframes the problem so less machinery is needed |
 
-**ADOPT requires at least one gain axis at ≥2, backed by something actually read** (`file:line` in the cloned tree). Sum the four only to rank priority among candidates that already passed. **Never adopt on a weighted sum** — four weak claims must not add up to an adoption.
+**ADOPT requires at least one gain axis at ≥2, backed by evidence from the allowlist above** — *both* sources count, not just the cloned tree. Which source is valid differs by axis, because the axes ask different questions:
+
+| Axis | Valid evidence | Why |
+|---|---|---|
+| **독창성** | **Artibot grep returning nothing** (source ii), plus a cloned-tree `file:line` showing the pattern exists there | It is a claim about *absence in Artibot*; the cloned tree cannot prove that |
+| **확장성** | Cloned-tree `file:line` showing the mechanism, plus an Artibot `file:line` for the code it would touch | It is a claim about the post-adoption state — name the place that would change |
+| **효율성 관련 창의성** | Same pair: the pattern as read, and the Artibot machinery it would remove | "Less machinery" must name the machinery |
+| **미래지향성** | Cloned-tree `file:line` **only** — evidenced, not predicted | Roadmap speculation is not evidence; if you cannot point at code, score it 0 |
+
+The cloned tree proves *"this pattern exists there"*. Only an Artibot grep proves *"and we do not already have it"*. A gain score citing neither is 0.
+
+Sum the four only to rank priority among candidates that already passed. **Never adopt on a weighted sum** — four weak claims must not add up to an adoption.
 
 ### `--complexity-budget` = veto strictness
 
@@ -177,6 +195,8 @@ The flag does not gate volume. It sets **how strictly 견고성 and 효율성 ar
 Raising the setting is an explicit opt-in by the user, never an inference by the analyst. It gates *adoption suggestions only* — it never changes a dimension score. Anything whose end-state behavior **the existing test suite cannot verify** is DEFER at every setting.
 
 Record every vetoed suggestion in `SUPPRESSED` with **which of the three veto axes it failed** and the setting in force — a suggestion stopped by strictness is not the same as one rejected on evidence, and the user may re-run at a higher setting.
+
+> **Nothing on this page is automatically enforced.** The 7-axis judgment, the D1–D4 document guards, the evidence allowlist, and the `N/A`-excluded denominator rule hold only because whoever runs this command follows them — there is no gate behind them. The reason is structural, not neglect: `/repo` declares no `Write`/`Edit` and never writes a file, so its verdicts, `SUPPRESSED` rows, grep columns, and evidence markers exist only in the session. CI runs against a git checkout, where none of that is present; there is no artifact to check. The **only** things enforced automatically are the shared judgment vocabulary (this file ↔ [repo-benchmarker](../agents/repo-benchmarker.md)) and the axis counts (3 VETO / 4 GAIN), by `tests/firewall/repo-judgment-vocab.test.js`. **A green run of that gate means the words still match — it is not evidence that any judgment was actually made this way.** Do not cite it as such.
 
 ## Don't-Replace-If-Better Rule
 
@@ -213,7 +233,9 @@ else:
 
 ## Output Format (multi-repo)
 
-> `WEIGHTED TOTAL (/100)` below = Σ(dimension score × weight). Read the weights from [repo-benchmarking SKILL.md](../skills/repo-benchmarking/SKILL.md) § *Evaluation Dimensions* before computing it — never estimate the total.
+> `WEIGHTED TOTAL` below = Σ(dimension score × weight) over the **applicable** dimensions only. Read the weights from [repo-benchmarking SKILL.md](../skills/repo-benchmarking/SKILL.md) § *Evaluation Dimensions* before computing it — never estimate the total.
+>
+> **Always print the denominator**, because it changes per repo: `WEIGHTED TOTAL | 62 / 100 possible` when all ten apply, `41 / 60 possible (4 dims N/A)` when they do not. A bare `41` would read as a failing score when it is in fact 68% of what was scorable. Two repos with different denominators are **not** directly comparable — say so in the report rather than ranking them as if they were.
 >
 > **`--output` renders this same content in one of three containers** — the section set and field names never change, only the container:
 > - `table` *(default)* — the fixed-width block below, as written.
@@ -245,7 +267,10 @@ Agent Architecture     | 9       | 4    | 5    | A
 Orchestration          | 9       | 3    | 5    | A
 Skill System           | 8       | 5    | 9    | r2
 ...
-WEIGHTED TOTAL (/100)  | 82      | 60   | 62   | A
+Hook System            | 9       | N/A  | 4    | —      (r1: curated list, no hooks)
+...
+WEIGHTED TOTAL         | 82/100  | 41/60| 62/100 | see note
+  (r1 scored 41 of 60 possible — 4 dimensions N/A; not directly comparable to /100 columns)
 
 ADOPTABLE (filtered by --complexity-budget=low)
 ────────────────────────────────────────────────

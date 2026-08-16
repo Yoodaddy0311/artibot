@@ -1,5 +1,5 @@
 ---
-description: (Artibot) Maximal evidence-grounded planning — deep-research grounding + multi-lens council + adversarial review + execution handoff
+description: (Artibot) Maximal evidence-grounded planning — codebase and web research grounding + multi-lens council + adversarial review + execution handoff
 argument-hint: '[task] e.g. "결제 시스템 v2 마이그레이션" [--no-research] [--lenses N]'
 allowed-tools: [Read, Glob, Grep, Bash, Agent, SendMessage, TaskCreate, Skill, WebSearch]
 toolset: team
@@ -135,12 +135,17 @@ const { footprint, sizing, autopilot } = sizePlan(tasks, { size: sizeFlag /* qui
 문서 산출물(PRD / ADR / TODO 추적)은 **공유 산출물 레이어** `lib/planning/artifacts.js`를 호출해 생성한다 (직접 재구현 금지 — `/plan`과 동일 레이어 공유). **네 함수 전부 `async`다 — 반환값을 구조분해하기 전에 `await`를 붙여라. 빠뜨리면 모든 필드가 `undefined`가 된다.** 정확한 시그니처:
 
 ```
-await writePRD({ projectRoot, slug, title, sections, linkedAdrs, now }) → { ok, prdPath }
-  // docs/PRD/<slug>-<date>.md 생성. linkedAdrs 정본은 string[] (예: ['ADR-007']).
+await writePRD({ projectRoot, slug, title, sections, linkedAdrs, now }) → { ok, prdPath, deduped?, droppedAdrLinks? }
+  // docs/PRD/<slug>-<date>.md 생성. 같은 slug 의 active PRD 가 이미 있으면 새로 만들지 않고
+  // 기존 경로를 deduped:true 로 돌려준다 — prdPath 가 신규인지 재사용인지 이 필드로 구분한다.
+  // linkedAdrs 정본은 string[] (예: ['ADR-007']).
   // ensureADR() 반환 객체를 그대로 넘겨도 ADR-NNN 으로 정규화된다. 해석 불가 항목은
   // 렌더하지 않고 반환값 droppedAdrLinks 로 개수를 신고한다 (0 이면 필드 없음).
 await ensureADR({ projectRoot, title, options, decision, rationale, now }) → { ok, adrPath, number }
-  // docs/adr/ADR-NNN-slug.md 생성 (멱등). options=비교한 실선택지(2개 이상).
+  // docs/adr/ADR-NNN-slug.md 생성. **멱등이 아니다** — 같은 인자로 다시 부르면
+  // 새 번호의 ADR 이 하나 더 생긴다(ADR 번호가 곧 정체성이라 설계상 그렇다).
+  // 같은 결정을 두 번 기록하지 마라. 기존 결정을 바꿀 때는 supersede() 를 쓴다.
+  // options=비교한 실선택지(2개 이상).
 await syncTodo({ projectRoot, planMarkdown, planFile, sessionId, now }) → { ok, stateFile, progress }
   // .plan-state.json 기록. progress = { total, completed, percentage }
 await indexArtifacts({ projectRoot, kind, now }) → { ok, indexPath, count }
@@ -171,7 +176,7 @@ await indexArtifacts({ projectRoot: process.cwd(), kind: 'adr', now: new Date() 
 ### Phase 6 — PRD 생성 (기본) + TODO 추적 (기본)
 
 ```js
-const { ok: prdOk, prdPath, droppedAdrLinks } = await writePRD({   // async — await 필수
+const { ok: prdOk, prdPath, deduped, droppedAdrLinks } = await writePRD({   // async — await 필수
   projectRoot: process.cwd(),
   slug: '<feature-slug>',
   title: '<task title>',
@@ -194,7 +199,17 @@ const { stateFile, progress } = await syncTodo({   // async — await 필수
   now: new Date(),
 });
 // PRD 본문에 stateFile(.plan-state.json) 경로를 cross-link로 명시한다.
+// deduped 가 true 면 "기존 PRD를 재사용했습니다: <prdPath>" 를 사용자에게 1줄 보고한다.
 ```
+
+> **state 파일 위치 (알고 있어야 할 차이)**: `planFile: prdPath` 로 넘기므로 state 는 PRD 옆
+> (`docs/PRD/.plan-state.json`)에 남는다. 반면 `/plan` 은 `planFile` 기본값이 `PLAN.md` 라
+> **리포 루트**(`.plan-state.json`)를 본다 — 즉 **`/plan --status` 는 ultraplan 의 진행률을
+> 보지 못한다.** 이는 결함이 아니라 의도된 분리다: `syncTodo` 는 기존 state 를 **병합**하므로
+> (`artifacts.js#syncTodo` 가 `readState` → `fromState` → `parsePlan` 순서로 누적한다)
+> 두 커맨드가 같은 파일을 쓰면 **서로 다른 플랜의 태스크가 한 state 에 섞인다.**
+> 공유 레이어도 state 를 "플랜 파일 옆"에 두는 것을 설계로 명시한다. 진행률을 조회할 때는
+> PRD 옆 경로를 직접 지목하라. EXECUTION HANDOFF 에 그 경로를 그대로 출력한다.
 
 ## 중계 계약 (MANDATORY — 리더가 사용자에게 보고할 때)
 
@@ -256,7 +271,7 @@ EXECUTION HANDOFF
 > 추천 경로: /autopilot | /team | inline  +  근거
 > 자율실행: /autopilot "<task>" --goal "<검증가능 종료조건>" --max {autopilot.maxHint} --budget {autopilot.budgetHint}
 > (split 시) 세션 1: <goal> · 세션 2: <goal> · …
-> PRD: docs/PRD/<slug>-<date>.md · ADR: docs/adr/ADR-NNN-slug.md|none · TODO: .plan-state.json (N tasks)
+> PRD: docs/PRD/<slug>-<date>.md · ADR: docs/adr/ADR-NNN-slug.md|none · TODO: docs/PRD/.plan-state.json (N tasks)
 ```
 
 > **정직성**: 토큰→시간은 휴리스틱 추정(밴드+confidence)이며 보장 아님. autopilot의 `--max`/`--budget`이 실제 하드스톱이다.

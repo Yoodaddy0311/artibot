@@ -1,3 +1,9 @@
+---
+status: active
+created: 2026-07-15
+number: 3
+---
+
 # ADR-003: autopilot EXECUTE pluggable runner (Option-B)
 
 ## 추천 결론 (TL;DR)

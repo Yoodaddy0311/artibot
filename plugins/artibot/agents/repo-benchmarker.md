@@ -108,7 +108,14 @@ Documentation          | [0-10]  | [0-10] | [+/-] | [A|T|=]
 CI/CD & Validation     | [0-10]  | [0-10] | [+/-] | [A|T|=]
 Innovation             | [0-10]  | [0-10] | [+/-] | [A|T|=]
 ───────────────────────|─────────|────────|───────|────────
-WEIGHTED TOTAL         | [0-100] | [0-100]| [+/-] | [A|T|=]
+WEIGHTED TOTAL         | [n]/[possible] | [n]/[possible] | [+/-] | [A|T|=]
+
+Use `N/A` for any dimension the repo type does not have (a curated list has no
+hook system). `N/A` is not 0 — drop it from the denominator and print the
+denominator you used, e.g. `41/60 possible (4 dims N/A)`. Columns with
+different denominators are not directly comparable; say so instead of ranking
+them side by side. `N/A` (does not exist) is not `UNINSPECTED`/`SHALLOW`
+(exists, under-inspected).
 
 BENCHMARKABLE ELEMENTS (from Target)
 ─────────────────────────────────────
@@ -170,7 +177,7 @@ When running as a teammate in an agent team:
 | # | Zone | Check | Method | FAIL Criteria |
 |---|------|-------|--------|---------------|
 | 1 | Pre | Repo structure mapped | Clone/navigate target repo and map directory structure, file counts, config files | Scoring based on README claims without reading actual code |
-| 2 | Pre | Evaluation dimensions calibrated | Confirm all 10 scoring dimensions apply to the target repo type | Applying irrelevant dimensions (e.g., Hook System to a non-plugin repo) |
+| 2 | Pre | Evaluation dimensions calibrated | Decide per dimension whether it applies to this repo type; mark the rest `N/A` with a reason and exclude them from the denominator | Scoring a dimension the repo has no equivalent of (e.g. Hook System on a curated list), **or** folding an `N/A` in as 0, **or** printing a total without its denominator |
 | 3 | Active | Evidence-backed scoring | Every dimension score cites specific files, patterns, or metrics as evidence | Score assigned without supporting evidence from code reading |
 | 4 | Active | Objective comparison | Score both repos independently using identical criteria before comparing | Biasing scores toward Artibot or the target repo |
 | 5 | Post | Adoptable elements identified | Extract concrete patterns with adoption effort estimates (LOW/MEDIUM/HIGH), each confirmed absent from Artibot by grep | Benchmark report with no actionable adoption recommendations, or an adoption item that already exists in Artibot |

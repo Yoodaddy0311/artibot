@@ -479,3 +479,119 @@ describe('artifacts / supersede', () => {
     expect(res.error).toMatch(/not found/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// kind resolution (U6/D1)
+//
+// `kindDir()` used to fall back to the PRD directory for any unrecognised
+// kind while `renderIndex()` fell back to the raw kind string. The two
+// fallbacks pointed in different directions, so `indexArtifacts({kind:'ADR'})`
+// silently OVERWROTE docs/PRD/INDEX.md with a `# ADR Index` heading listing
+// PRD records. Writing the wrong directory quietly is worse than failing, so
+// the kind is now case-normalised and then validated against an allowlist.
+// ---------------------------------------------------------------------------
+
+describe('artifacts / kind resolution', () => {
+  let root;
+  beforeEach(() => { root = tmpRoot(); });
+  afterEach(() => { rmSync(root, { recursive: true, force: true }); });
+
+  it('indexArtifacts({kind:"ADR"}) does not clobber the PRD index', async () => {
+    seedPrd(root, 'p-one', { status: 'active', created: '2026-06-09' });
+    await indexArtifacts({ projectRoot: root, kind: 'prd', now: fixedNow });
+    const prdIndex = path.join(root, 'docs', 'PRD', 'INDEX.md');
+    const before = readFileSync(prdIndex, 'utf-8');
+
+    await ensureADR({
+      projectRoot: root, title: 'Kind Case', options: ['A', 'B'], decision: 'A', now: fixedNow,
+    });
+    const res = await indexArtifacts({ projectRoot: root, kind: 'ADR', now: fixedNow });
+
+    expect(res.ok).toBe(true);
+    // Uppercase is normalised to the adr directory — never the PRD one.
+    expect(res.indexPath).toBe(path.join(root, 'docs', 'adr', 'INDEX.md'));
+    expect(readFileSync(prdIndex, 'utf-8')).toBe(before);
+  });
+
+  it('rejects an unknown kind instead of silently writing docs/PRD', async () => {
+    seedPrd(root, 'p-one', { status: 'active', created: '2026-06-09' });
+    await indexArtifacts({ projectRoot: root, kind: 'prd', now: fixedNow });
+    const prdIndex = path.join(root, 'docs', 'PRD', 'INDEX.md');
+    const before = readFileSync(prdIndex, 'utf-8');
+
+    const res = await indexArtifacts({ projectRoot: root, kind: 'bogus', now: fixedNow });
+    expect(res.ok).toBe(false);
+    expect(res.error).toMatch(/kind/i);
+    expect(readFileSync(prdIndex, 'utf-8')).toBe(before);
+  });
+
+  it('listArtifacts and archiveStale reject an unknown kind too', async () => {
+    const list = await listArtifacts({ projectRoot: root, kind: 'bogus', now: fixedNow });
+    expect(list.ok).toBe(false);
+    expect(list.error).toMatch(/kind/i);
+
+    const arch = await archiveStale({ projectRoot: root, kind: 'bogus', dryRun: true, now: fixedNow });
+    expect(arch.ok).toBe(false);
+    expect(arch.error).toMatch(/kind/i);
+  });
+
+  it('index heading uses the canonical uppercase label for both kinds', async () => {
+    seedPrd(root, 'p-one', { status: 'active', created: '2026-06-09' });
+    const prd = await indexArtifacts({ projectRoot: root, kind: 'prd', now: fixedNow });
+    expect(readFileSync(prd.indexPath, 'utf-8').startsWith('# PRD Index')).toBe(true);
+
+    await ensureADR({
+      projectRoot: root, title: 'Heading Case', options: ['A', 'B'], decision: 'A', now: fixedNow,
+    });
+    const adr = await indexArtifacts({ projectRoot: root, kind: 'adr', now: fixedNow });
+    expect(readFileSync(adr.indexPath, 'utf-8').startsWith('# ADR Index')).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ADR lifecycle metadata (U6/D2, U6/D3)
+// ---------------------------------------------------------------------------
+
+describe('artifacts / ADR lifecycle metadata', () => {
+  let root;
+  beforeEach(() => { root = tmpRoot(); });
+  afterEach(() => { rmSync(root, { recursive: true, force: true }); });
+
+  // D3: renderAdr emitted no frontmatter, so readArtifact classified a
+  // brand-new "Accepted" ADR as `legacy` — the index status column contradicted
+  // the document body.
+  it('a freshly created ADR carries active frontmatter, not legacy', async () => {
+    const made = await ensureADR({
+      projectRoot: root, title: 'Fresh Decision', options: ['A', 'B'], decision: 'A', now: fixedNow,
+    });
+    const body = readFileSync(made.adrPath, 'utf-8');
+    expect(body.startsWith('---\n')).toBe(true);
+    expect(body).toContain('status: active');
+    // The rendered skeleton must survive the frontmatter addition.
+    expect(body).toContain('# ADR-001: Fresh Decision');
+
+    const listed = await listArtifacts({ projectRoot: root, kind: 'adr', filter: 'all', now: fixedNow });
+    expect(listed.ok).toBe(true);
+    expect(listed.items.map((i) => i.status)).toEqual(['active']);
+
+    const idx = await indexArtifacts({ projectRoot: root, kind: 'adr', now: fixedNow });
+    expect(readFileSync(idx.indexPath, 'utf-8')).not.toContain('| legacy |');
+  });
+
+  // D2: ensureADR is deliberately NOT idempotent — an ADR number is the
+  // decision's identity, and two calls mean two decisions. This test locks the
+  // contract so the "(멱등)" claim cannot silently return to the docs.
+  it('is NOT idempotent by design: identical args create a second numbered ADR', async () => {
+    const args = {
+      projectRoot: root, title: 'Same Title', options: ['A', 'B'], decision: 'A', now: fixedNow,
+    };
+    const first = await ensureADR(args);
+    const second = await ensureADR(args);
+
+    expect(first.number).toBe(1);
+    expect(second.number).toBe(2);
+    expect(second.adrPath).not.toBe(first.adrPath);
+    expect(existsSync(first.adrPath)).toBe(true);
+    expect(existsSync(second.adrPath)).toBe(true);
+  });
+});

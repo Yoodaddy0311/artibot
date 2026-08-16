@@ -1,3 +1,9 @@
+---
+status: active
+created: 2026-05-29
+number: 1
+---
+
 # ADR-001: Effort 결정 방식 — 정적 매핑 vs Score-Aware vs GRPO-학습
 
 ## 추천 결론 (TL;DR)
