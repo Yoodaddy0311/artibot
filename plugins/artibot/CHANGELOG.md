@@ -9,6 +9,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.46.0] — 2026-08-16
+
+v4.45.0 이후 이틀간의 세션 12커밋 묶음. 축은 두 가지다: **복잡도 개념 재정의**("복잡도는
+파이프라인 꼬임·로직 비효율이지 작업량이 아니다" — 사용자 교정을 `/repo`·`/ultraplan` 판정
+구조에 반영)와 **"존재 ≠ 작동" 실측** — 정적 검증 8회가 결함 0건이던 자리에서 런타임 실행
+2회가 결함 8건을 냈고(그중 1건은 PRD 인덱스 오염), 그 전부를 이 릴리스가 닫는다.
+
+### Added
+- **landing-flow pre-push 게이트** — master 직푸시가 `Bypassed rule violations` 로 필수 체크를
+  우회하던 구멍을 클라이언트에서 차단. 정본 플로우는 `ci/**` 브랜치 → CI 그린 → fast-forward.
+- **allowed-tools 실재 검증 게이트** — 커맨드 frontmatter 가 선언한 도구가 실재하는지 검증
+  (위반 86→0), 릴리스 침묵 감지기(배지동기 PR 이 4개월 조용히 고이던 두 가지 무성 모드 검출 +
+  이슈 에스컬레이션).
+- **cowork ZIP 드리프트 게이트 + 결정론적 패커** — `pack-cowork-plugin.mjs` (zero-dep, LF 정규화,
+  `--check` 드리프트 검사). 첫 CI 실행에서 게이트가 자기 대상 ZIP 의 CRLF/LF 크로스플랫폼
+  드리프트를 실제로 잡았다.
+- **도구정합 게이트 3종 + 인스톨러 콘텐츠 파리티 게이트** — 배포 콘텐츠의 유령 도구명
+  (163→0)·유령 에이전트/커맨드 참조를 상시 검증.
+- 설계사상 가이드 `.artibot/guides/repo-ultraplan-guide.md` (615줄) — `/repo`·`/ultraplan` 판정
+  구조의 근거 색인.
+
+### Changed
+- **`/repo` 복잡도 개념 재정의** — `--complexity-budget` 을 독립 축에서 7축의 효율성·견고성
+  그 자체로 통합(판정 블록 3→0, 개념 2→1, 진실원 −3). 10축 rubric 에 N/A 분모 규약(F1/F2) 도입.
+- **cowork 게이트 편입** — 게이트 분모 349→497 · 113→159, cowork 린트 사각지대 폐쇄,
+  미이식 커맨드 3건(daily 포함) 이식, TypeScript 잔재 문서 삭제.
+- `repo.md` 에 정직 고지 명문화 — 7축·D1~D4·evidence allowlist 는 산문 사양이라 자동 강제되지
+  않음을 커맨드 본문에 기록.
+
+### Fixed
+- **런타임 실행이 잡은 결함 8건** — 대표: `indexArtifacts({kind:'ADR'})` 가 PRD 인덱스를
+  오염시키던 결함(`artifacts.js#kindDir` fail-closed 화), ADR frontmatter 라이프사이클 어휘
+  (`#renderAdr`), 낡은 실패 메시지 정정.
+- **NUL 바이트 제거** — 복합키 구분자 2개가 NUL 로 커밋돼 있었다(전건 그린으로 은폐,
+  리포 전역 1,546파일 중 1건).
+- **CI fail-open 2곳 폐쇄 + 릴리스 락 결함 2건** — 릴리스 게이트 복구, export fail-open 폐쇄.
+- **cowork ZIP 재생성** — 트리와 드리프트 상태였던 ZIP 6종을 0/6→6/6 동기화. 인스톨러 시드
+  산문 소실·하네스 false-red 제거.
+- 프로토타입 오염 방어(hooks) 및 README/swarm 거짓 주장 정정.
+
 ## [4.45.0] — 2026-08-15
 
 v4.44.0 의 보안 표면을 대상으로 한 적대적 리뷰(`/ultrareview`)가 찾은 HIGH 1 · MEDIUM 3 과,
