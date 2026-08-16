@@ -34,9 +34,23 @@
  *     레벨이나 엔트리 순서가 달라져도 내용이 같으면 통과한다 — 의도적이다.
  *  4. **동시 편집 중에는 red 가 정상이다.** 누군가 cowork 트리를 고치고 ZIP 을
  *     재생성하지 않으면 이 게이트는 red 가 된다. 그것이 이 게이트의 목적이다.
+ *  5. **크로스플랫폼 검사는 `HEAD` 에 있는 파일만 본다.** 아직 커밋되지 않은 새
+ *     파일은 대조 대상이 없어 건너뛴다(분모로 노출된다). 즉 "새 파일이 CRLF 로
+ *     실릴 수 있는가"는 **커밋된 뒤에야** 잡힌다.
+ *  6. **`git` 실행에 의존한다.** git 이 없는 환경에서는 5번 테스트의 분모가
+ *     0 이 되어 red 가 된다 — fail-closed 쪽이라 의도대로다.
+ *
+ * ── 2026-08-16 CI 회귀 (이 게이트가 첫 실행에서 잡은 것) ────────────────────
+ * Windows 워킹트리(CRLF)에서 패킹한 ZIP 이 Linux 체크아웃(LF)과 CRC 불일치.
+ * `missing: []` + CRC 불일치 = **파일 목록은 맞고 바이트가 다름**. 실측: 한
+ * 에이전트 파일이 워킹트리 4,816B(CRLF 112개) vs git 오브젝트 4,704B(CRLF 0개)
+ * — 차이 112B 가 정확히 CR 개수였다. 같은 커밋에서 패킹한 OS 에 따라 사용자에게
+ * 가는 바이트가 달라지고 있었다. 패커가 개행을 정규화하도록 고쳤고, 아래 5번
+ * 테스트가 그 성질을 상시 강제한다.
  */
 
 import { describe, expect, it } from 'vitest';
+import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -45,6 +59,7 @@ import {
   collectEntries,
   deriveDirs,
   PACK_ALLOWLIST,
+  readPackedBytes,
 } from '../../scripts/pack-cowork-plugin.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -113,8 +128,10 @@ describe('artibot-cowork.plugin ZIP mirrors the cowork tree', () => {
         missing.push(rel);
         continue;
       }
-      const raw = readFileSync(path.join(COWORK_DIR, rel));
-      if (entry.crc !== crc32(raw) || entry.size !== raw.length) corrupt.push(rel);
+      // readPackedBytes, not readFileSync — the comparison must use exactly the
+      // bytes the packer ships, or the gate validates something that never shipped.
+      const packed = readPackedBytes(rel);
+      if (entry.crc !== crc32(packed) || entry.size !== packed.length) corrupt.push(rel);
     }
 
     expect(
@@ -150,6 +167,52 @@ describe('artibot-cowork.plugin ZIP mirrors the cowork tree', () => {
         return !allowedTops.has(top) && !allowedTops.has(n);
       });
     expect(leaked, 'entries outside PACK_ALLOWLIST leaked into the release archive').toEqual([]);
+  });
+
+  it('packed bytes equal the committed (LF) bytes — the archive is a function of the commit, not of the OS', () => {
+    // The 2026-08-16 CI failure in one line: the archive was packed from a
+    // Windows working tree (CRLF) and compared against a Linux checkout (LF),
+    // so the same commit yielded two different archives. `git show HEAD:<path>`
+    // hands back the stored object — LF — which is exactly what a Linux
+    // checkout materializes. If packed bytes equal those, the packer's output
+    // no longer depends on which machine ran it.
+    const files = collectEntries();
+    let compared = 0;
+    const skipped = [];
+    const mismatched = [];
+
+    for (const rel of files) {
+      const tracked = `plugins/artibot-cowork/${rel}`;
+      let committed;
+      try {
+        committed = execFileSync('git', ['show', `HEAD:${tracked}`], {
+          cwd: REPO_ROOT,
+          maxBuffer: 1 << 28,
+          stdio: ['ignore', 'pipe', 'ignore'],
+        });
+      } catch {
+        // Not in HEAD yet (new file in the working tree) — nothing to compare against.
+        skipped.push(rel);
+        continue;
+      }
+      compared++;
+      const packed = readPackedBytes(rel);
+      if (!committed.equals(packed)) {
+        mismatched.push({ path: rel, committed: committed.length, packed: packed.length });
+      }
+    }
+
+    // Denominator: separates "0 mismatches" from "compared nothing".
+    expect(
+      compared,
+      `only ${compared} of ${files.length} files were compared against HEAD (skipped: ${skipped.length})`,
+    ).toBeGreaterThan(100);
+
+    expect(
+      mismatched,
+      'packed bytes differ from the committed bytes — the archive depends on the packing machine. ' +
+        'Usually a line-ending issue: check NORMALIZE_EXTENSIONS covers this file type.',
+    ).toEqual([]);
   });
 
   it('every allowlist entry still exists in the tree with the declared kind', () => {

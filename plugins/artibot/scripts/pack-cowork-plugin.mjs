@@ -14,10 +14,12 @@
  *    crc32). No `archiver`/`adm-zip`/`Compress-Archive`/`zip` — the first two
  *    break the zero-runtime-dep constraint and the last two are OS-specific
  *    (dev is Windows, CI is Linux).
- *  - **Deterministic.** Entries are sorted, the DOS timestamp is a fixed
- *    constant, and no extra fields are written. Byte-identical input therefore
- *    yields a byte-identical archive, which is what lets the drift gate compare
- *    and what keeps `git diff` on the binary meaningful.
+ *  - **Deterministic across machines.** Entries are sorted, the DOS timestamp is
+ *    a fixed constant, no extra fields are written, and text files are
+ *    line-ending normalized ({@link NORMALIZE_EXTENSIONS}) so a Windows working
+ *    tree (CRLF) and a Linux CI checkout (LF) of the same commit produce the
+ *    same bytes. Without that last part "deterministic" held only within one OS
+ *    — the first CI run of the drift gate proved it.
  *  - **Allowlist, not deny-list.** {@link PACK_ALLOWLIST} names what ships. A
  *    deny-list ("everything except .git") would silently ship whatever new
  *    development directory someone adds later.
@@ -62,12 +64,55 @@ export const PACK_ALLOWLIST = Object.freeze([
 ]);
 
 /**
+ * Extensions whose bytes are line-ending normalized (CRLF → LF) before packing.
+ *
+ * Why this exists: on Windows the working tree is checked out with CRLF while
+ * git stores LF, so packing on Windows and packing on Linux CI produced
+ * *different archives from the same commit* — 4,816 bytes vs 4,704 for a single
+ * 112-line agent file. The drift gate caught it on its first CI run
+ * (`missing: []` with CRC32 mismatches: same file list, different bytes).
+ * Normalizing here makes the archive a function of the commit rather than of
+ * the packer's OS, which is what "deterministic" has to mean for a shipped
+ * artifact.
+ *
+ * **Allowlist, deliberately.** Only listed extensions are touched; everything
+ * else is packed byte-for-byte. A deny-list would corrupt the first image or
+ * font someone adds — normalization rewrites bytes, and in a binary those bytes
+ * are not line endings. Adding a text format here is a conscious act.
+ *
+ * Only `\r\n` → `\n` is rewritten, never a lone `\r`, matching what git itself
+ * normalizes on commit.
+ *
+ * @type {ReadonlySet<string>}
+ */
+export const NORMALIZE_EXTENSIONS = Object.freeze(
+  new Set(['.md', '.json', '.txt', '.yml', '.yaml', '.toml', '.js', '.mjs', '.cjs', '.ts', '.css', '.html', '.sh']),
+);
+
+/**
  * Fixed DOS date/time stamp (1980-01-01 00:00:00), the earliest the ZIP format
  * can express. Using a constant instead of mtime is what makes the output
  * reproducible across machines and checkouts.
  */
 const DOS_TIME = 0;
 const DOS_DATE = 0x0021;
+
+/**
+ * Read one packed file exactly as it will appear inside the archive.
+ *
+ * The single source of truth for "what bytes ship" — the packer writes these
+ * and the drift gate compares against these. If the two ever read the file
+ * differently the gate would validate something that is not what shipped.
+ *
+ * @param {string} rel - POSIX-style path relative to the cowork plugin root.
+ * @returns {Buffer} File bytes, line-ending normalized when the extension opts in.
+ */
+export function readPackedBytes(rel) {
+  const raw = readFileSync(path.join(COWORK_DIR, rel));
+  if (!NORMALIZE_EXTENSIONS.has(path.extname(rel).toLowerCase())) return raw;
+  // CRLF -> LF only; a lone CR is left alone, as git does.
+  return Buffer.from(raw.toString('binary').replace(/\r\n/g, '\n'), 'binary');
+}
 
 /**
  * Recursively collect file paths under `dir`, relative to {@link COWORK_DIR}.
@@ -143,7 +188,7 @@ export function buildZip(files) {
     records.push({ name, data: Buffer.alloc(0), raw: Buffer.alloc(0), crc: 0, method: 0 });
   }
   for (const name of files) {
-    const raw = readFileSync(path.join(COWORK_DIR, name));
+    const raw = readPackedBytes(name);
     const deflated = deflateRawSync(raw, { level: 9 });
     // Store uncompressed when deflate does not actually help.
     const useDeflate = deflated.length < raw.length;
