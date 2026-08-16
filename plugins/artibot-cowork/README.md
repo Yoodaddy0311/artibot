@@ -27,7 +27,7 @@ A slim, Cowork-optimized variant of the [Artibot](https://github.com/Yoodaddy031
 | 6 | **Compliance built-in** | `ad-compliance` covers 표시광고법, PIPA, FTC, GDPR; reduces legal review iterations |
 | 7 | **Claude Design** | Marketing asset creation workflows — landing pages, email templates, social cards, slide decks |
 | 8 | **Routines** | Marketing automation specs — nightly reports, weekly calendars, competitor monitoring via schedule/API/GitHub triggers |
-| 9 | **Sandbox-safe** | No hooks, no external scripts, no `lib/`, no `server/`, no background processes — runs cleanly in any Cowork sandbox |
+| 9 | **Sandbox-safe** | No hooks, no runtime scripts, no `lib/`, no `server/`, no background processes — runs cleanly in any Cowork sandbox |
 
 ---
 
@@ -77,7 +77,7 @@ The full `artibot` plugin is a 122-skill, 28-agent orchestration framework built
 
 `artibot-cowork` is a curated subset focused on tasks Cowork users actually do:
 
-- **No hooks, no external scripts.** No `hooks.json`, no `scripts/`, no `lib/`, no `server/`, no `runtime/`. Nothing runs in the background.
+- **No hooks, no runtime scripts.** No `hooks.json`, no `lib/`, no `server/`, no `runtime/`. Nothing runs in the background.
 - **No developer-only components.** Removed: all `lang-*`, `persona-*`, `git-*`, `ddd-*`, `tdd-*`, `fp-refactor`, `coding-standards`, `testing-standards`, `ci-cd-pipelines`, `production-code-audit`, etc.
 - **Marketing, content, data, design, and CRO/SEO only.**
 - **Claude Design** — 마케팅 에셋 제작 워크플로우 (랜딩페이지, 이메일, 소셜 카드, 슬라이드).

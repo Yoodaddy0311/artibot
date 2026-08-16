@@ -12,8 +12,8 @@ Create structured implementation plans using the planner agent. Decomposes compl
 
 > **/plan vs /ultraplan vs deep-research — 헷갈리지 않기**
 > - **/plan** (여기) — 빠른 구현 설계. 단일 planner가 단계·의존성·리스크를 분해. 범위가 명확할 때.
-> - **/ultraplan** — 상위 등급. 근거수집(deep-research) + 다관점 의회 + 적대적 검증 + 실행 핸드오프. 위험·비용·장기부채 큰 결정, 마이그레이션, 아키텍처 변경에.
-> - **deep-research 스킬** — "무엇이 진실인가"(사실 조사) 자체가 목적일 때. 구현 계획이 아니라 조사. (`/ultraplan`이 1단계로 내부 호출)
+> - **/ultraplan** — 상위 등급. 근거수집(WebSearch+Grep) + 다관점 의회 + 적대적 검증 + 실행 핸드오프. 위험·비용·장기부채 큰 결정, 마이그레이션, 아키텍처 변경에.
+> - **deep-research 스킬** — "무엇이 진실인가"(사실 조사) 자체가 목적일 때. 구현 계획이 아니라 조사. **Artibot 자체 제공 아님** — 설치돼 있으면 `/ultraplan` Phase 1이 보강으로 호출하고, 없으면 주경로(WebSearch+Grep)만으로 진행한다.
 > 정리: **계획=/plan, 철저한 계획=/ultraplan, 조사=deep-research.**
 > ⚠️ **감사형 입력 주의**: "바꿀 게 있나 / 개선점 찾아 / 트렌드 맞나" 같은 **열린 요청**엔 `/plan`(·`/ultraplan`)을 쓰기 **전에 문제-검증 먼저** — 이들은 "할 일이 정해졌다"를 전제하는 **해법(solution) 도구**다. 실제 코드로 검증된 문제가 0이면 "무변경"이 정답. (`/ultraplan` Phase 0 게이트 / 메모리 `audit-problem-first`)
 

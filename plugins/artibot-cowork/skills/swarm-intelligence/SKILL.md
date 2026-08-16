@@ -100,7 +100,7 @@ In Cowork, swarm management is done via the `/swarm` command which provides a gu
 ## Quick Reference
 
 **Privacy guarantees**: PII-stripped, SHA-256 anonymized, Laplacian noise (ε=1.0), opt-in only
-**Swarm server**: `https://artibot-swarm-154860486472.asia-northeast3.run.app`
+**Swarm server**: no external endpoint ships as a default — the CLI plugin defaults to `http://localhost:3000` (self-hosted). A non-localhost server applies only when it is set there via `ARTIBOT_SWARM_SERVER` and allowlisted; Cowork cannot set either.
 **Backend**: git (`https://github.com/Yoodaddy0311/artibot-swarm.git`)
 **Profile file**: `.claude-plugin/swarm-profile.json` (portable, safe to commit)
 

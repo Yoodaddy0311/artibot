@@ -33,11 +33,16 @@ SWARM STATUS
 ============
 Participation: [active/inactive]
 Profile:       [swarm-profile.json found/not found]
-Server:        https://artibot-swarm-154860486472.asia-northeast3.run.app
+Server:        [read from the profile — the CLI plugin defaults to
+               http://localhost:3000 (self-hosted)]
 Backend:       git (https://github.com/Yoodaddy0311/artibot-swarm.git)
 Sync Interval: session
 Note:          In Cowork, sync triggers at session boundaries when opted in.
 ```
+
+No external endpoint ships as a default. A non-localhost server is used only
+when the CLI plugin is given one explicitly via `ARTIBOT_SWARM_SERVER` and that
+host is allowlisted there; Cowork cannot set either.
 
 ### health
 Check swarm server health (informational).
@@ -46,8 +51,9 @@ Check swarm server health (informational).
 ```
 SWARM HEALTH
 ============
-Server:  https://artibot-swarm-154860486472.asia-northeast3.run.app
-Status:  [Guide the user to check the server URL for availability]
+Server:  [read from the profile — the CLI plugin defaults to
+         http://localhost:3000 (self-hosted)]
+Status:  [Guide the user to check that server's availability]
 Note:    Full health check requires CLI plugin with network access.
 ```
 

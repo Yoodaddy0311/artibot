@@ -30,7 +30,7 @@ incident that motivated this SOP).
 
 ---
 
-## 2. Release Procedure (7 steps)
+## 2. Release Procedure (8 steps)
 
 ### Step 1 — Version bump
 Edit `plugins/artibot-cowork/.claude-plugin/plugin.json` and set `"version"` to
@@ -71,7 +71,38 @@ git add <other release-window files>
 ```
 Do not push yet.
 
-### Step 5 — Release commit
+### Step 5 — Regenerate the plugin archive
+
+`README.md` advertises drag-and-drop of `artibot-cowork.plugin` as **Option 1**, the
+recommended install path. That archive is a build artifact — it does not update
+itself when you add a skill, and nothing else in the release chain touches it.
+
+```bash
+node plugins/artibot/scripts/pack-cowork-plugin.mjs
+git add artibot-cowork.plugin
+```
+
+The packer is zero-dep (Node `zlib` only, no `zip`/`Compress-Archive`, so it behaves
+the same on Windows and on Linux CI) and deterministic — an unchanged tree produces a
+byte-identical archive and therefore an empty `git diff`. What ships is the allowlist
+in `pack-cowork-plugin.mjs#PACK_ALLOWLIST`; `_reports/`, `scripts/`, `tests/`,
+`RELEASE.md`, and `CHANGELOG.md` are deliberately excluded.
+
+Verify before committing:
+
+```bash
+node plugins/artibot/scripts/pack-cowork-plugin.mjs --check   # exit 0 = in sync
+npx vitest run tests/firewall/cowork-plugin-zip-drift.test.js
+```
+
+> **Skipping this step is silent.** Between 2026-04-20 and 2026-08-16 the archive was
+> never regenerated: six advertised features — `ai-slop-reviewer`, `kr-marketing`,
+> `ad-compliance`, `schema-generator`, `evolution-loop`, `agents/long-form-writer.md`
+> — were absent from it while present in the tree, and two deleted files were still
+> shipping. No test, gate, or user-visible error reported any of it. The drift gate
+> above now fails closed on exactly this.
+
+### Step 6 — Release commit
 Either run the orchestrator (recommended):
 ```bash
 node plugins/artibot-cowork/scripts/release.js --version 0.4.0 --topic "schema-generator + smoke tests"
@@ -84,13 +115,13 @@ git commit -m "release(artibot-cowork v0.4.0): schema-generator + smoke tests"
 The orchestrator handles staging + commit + (optional) push + lock release in
 one atomic run. Use `--dry-run` first if uncertain.
 
-### Step 6 — Push
+### Step 7 — Push
 ```bash
 git push origin HEAD
 # or if you used release.js, pass --push to combine with step 5
 ```
 
-### Step 7 — Release the lock
+### Step 8 — Release the lock
 ```bash
 node plugins/artibot-cowork/scripts/release-lock.js --release
 ```
