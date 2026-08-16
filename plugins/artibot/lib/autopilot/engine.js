@@ -126,6 +126,10 @@ export function runPhase0Intake(state) {
     sessionId: state.sessionId,
     options: { ...state.options, mode: state.mode },
     priorLessons: state.priorLessons,
+    // Artifact root override (undefined = real project root, unchanged default).
+    // Tests pass options.projectRoot so PRDs land in a tmpdir instead of the
+    // developer's docs/PRD/.
+    projectRoot: state.options?.projectRoot,
   });
   state.prdPath = filePath;
 
@@ -458,7 +462,7 @@ export function runPhase6Report(state) {
   const paused = maybePause(state);
   if (paused) return paused;
   state.completedAt = new Date().toISOString();
-  const { filePath } = generateReport(state.sessionId);
+  const { filePath } = generateReport(state.sessionId, { projectRoot: state.options?.projectRoot });
   state.reportPath = filePath;
   state.phase = 'COMPLETED';
   recordPhase(state, { name: 'REPORT', status: 'done', artifact: filePath });
@@ -698,7 +702,7 @@ export async function abortAutopilot(sessionId, { graceful = true } = {}) {
   let reportPath = null;
   if (graceful) {
     try {
-      const r = generateReport(sessionId);
+      const r = generateReport(sessionId, { projectRoot: state.options?.projectRoot });
       reportPath = r.filePath;
       state.reportPath = reportPath;
       persist(state);

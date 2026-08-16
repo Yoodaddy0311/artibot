@@ -122,16 +122,6 @@ Define Goal -> Choose Platform(s) -> Create Content -> Optimize for Platform -> 
 | 포스트 | 카드뉴스 형태 | 비주얼 중심, 3-5장 카드 |
 | 타겟 | 전 연령대 | 국내 메신저 점유율 1위 플랫폼 |
 
-### 3. Content Pillar Strategy
-
-| Pillar | Content Mix | Purpose |
-|--------|------------|---------|
-| Educational | 40% | Build authority, provide value |
-| Engaging | 25% | Questions, polls, conversations |
-| Promotional | 20% | Product, offers, launches |
-| Entertaining | 10% | Memes, trends, behind-scenes |
-| User-Generated | 5% | Testimonials, community content |
-
 ### 4. Hashtag Strategy
 
 | Type | Volume | Count | Example |
@@ -195,21 +185,6 @@ End-to-end content production pipeline with gate criteria at each phase:
 ```
 Brief → Research → Draft → Internal Review → Asset Creation → Platform Optimization → Schedule → Publish → Monitor → Engage → Report → Archive
 ```
-
-| Phase | Inputs | Activities | Outputs | Gate Criteria |
-|-------|--------|------------|---------|---------------|
-| **Brief** | Campaign goal, target audience | Define objectives, KPIs, platform targets | Content brief document | Stakeholder sign-off on goals and audience |
-| **Research** | Content brief | Trending topics, competitor scan, hashtag research | Research summary, hashtag shortlist | At least 3 competitor posts analyzed, hashtag volumes verified |
-| **Draft** | Research summary | Write copy per platform, create visual concepts | Draft posts with media briefs | All posts within character limits, CTA present in each |
-| **Internal Review** | Draft posts | Brand voice check, compliance review, fact-check | Approved or revision-requested drafts | 2 reviewers approve; zero compliance flags |
-| **Asset Creation** | Approved drafts, media briefs | Design images, edit videos, create carousels | Final media assets | Correct dimensions per platform, accessibility checks pass |
-| **Platform Optimization** | Final copy + assets | Hashtag placement, emoji strategy, link shortening | Platform-ready posts | Character counts verified, UTM parameters attached |
-| **Schedule** | Platform-ready posts | Set publishing times per platform best-time data | Scheduled queue | Each post in optimal time window for its platform |
-| **Publish** | Scheduled queue | Automated or manual publish | Live posts | Post live and rendering correctly on each platform |
-| **Monitor** | Live posts | Track engagement first 60 min, respond to comments | Engagement log | First-hour engagement above platform baseline |
-| **Engage** | Engagement log | Reply to comments, share UGC, join conversations | Community interaction record | All comments addressed within 2 hours |
-| **Report** | Engagement data (7-day) | Compile KPIs, compare to benchmarks | Performance report | Report delivered within 48 hours of campaign end |
-| **Archive** | Performance report, assets | Tag and store in content library | Archived campaign folder | Assets tagged by pillar, platform, and performance tier |
 
 **한국 플랫폼 추가 워크플로우**:
 - 네이버 블로그: Research 단계에서 네이버 데이터랩 키워드 분석 필수. C-Rank/DIA 노출 전략 반영

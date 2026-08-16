@@ -34,6 +34,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { getPluginRoot } from './ci-utils.js';
+import { assertEntityFloors, countByRoot, listAllSkillFiles } from './skill-scan-roots.js';
 
 /** Minimum number of distinct activation signals required by R1. */
 export const MIN_TRIGGERS = 3;
@@ -225,7 +226,64 @@ export function gatherSkills(root) {
 }
 
 /**
- * Lint every skill on disk (never-throw: unreadable/unparseable → warn+skip).
+ * Lint every skill across EVERY project plugin root (never-throw).
+ *
+ * Results are keyed by the root-qualified name (`artibot-cowork/daily`) because
+ * 31 skill names are shared between the main plugin and cowork; a bare-name key
+ * would let one baseline entry excuse violations in both.
+ *
+ * @returns {{results: Array, perRoot: Record<string, number>}} Per-skill lint
+ *   results plus the per-root denominator.
+ */
+export function lintEveryRoot() {
+  const files = listAllSkillFiles();
+  const results = [];
+  for (const { key, rootName, file } of files) {
+    results.push({ rootName, ...lintSkillFile(key, file) });
+  }
+  return { results, perRoot: countByRoot(files) };
+}
+
+/**
+ * Lint a single SKILL.md file (never-throw: unreadable → warn+skip).
+ *
+ * @param {string} name - Reporting/baseline key for this skill.
+ * @param {string} file - Absolute path to SKILL.md.
+ * @returns {{name:string, violations:Array, triggerCount:number,
+ *           length:number, skipped?:boolean}} Lint result.
+ */
+export function lintSkillFile(name, file) {
+  let content;
+  try {
+    content = readFileSync(file, 'utf8');
+  } catch (err) {
+    return {
+      name,
+      violations: [{ rule: 'parse', severity: 'warn', detail: `unreadable: ${err.message}` }],
+      triggerCount: 0,
+      length: 0,
+      skipped: true,
+    };
+  }
+  const desc = extractDescription(content);
+  const { violations, triggerCount, length } = lintDescription(desc);
+  // R4 (body-rule, warn): flag a missing `## Red Flags` body section.
+  if (!hasRedFlagsSection(content)) {
+    violations.push({
+      rule: 'R4',
+      severity: 'warn',
+      detail: 'SKILL.md body has no `## Red Flags` section',
+    });
+  }
+  return { name, violations, triggerCount, length };
+}
+
+/**
+ * Lint every skill under ONE plugin root (never-throw: unreadable → warn+skip).
+ *
+ * Retained as the single-root entry point used by
+ * `tests/ci/lint-skill-descriptions.test.js`; the CLI uses
+ * {@link lintEveryRoot}.
  *
  * @param {string} root - Plugin root absolute path.
  * @returns {Array<{name:string, violations:Array, triggerCount:number,
@@ -372,7 +430,8 @@ function main() {
   const { baseline: baselineFile, redFlagsBaseline: redFlagsFile, report: reportFile } = paths(root);
   const update = process.argv.includes('--update-baseline');
 
-  const results = lintAllSkills(root);
+  const { results, perRoot } = lintEveryRoot();
+  const floorFailures = assertEntityFloors('skills', perRoot);
   const current = violatingSkillNames(results);
   const baseline = readBaseline(baselineFile);
   const redFlagCurrent = redFlagViolatingSkillNames(results);
@@ -385,11 +444,30 @@ function main() {
 
   printTable(results);
   console.log(
-    `\nSkills: ${results.length} · violating(error): ${current.length} · ` +
+    `\nSkills: ${results.length} across ${Object.keys(perRoot).length} root(s) [` +
+      Object.entries(perRoot)
+        .map(([rn, n]) => `${rn}=${n}`)
+        .join(' ') +
+      `] · violating(error): ${current.length} · ` +
       `R1=${r1} R2=${r2} R3(warn)=${r3} R4(warn)=${r4}`
   );
 
+  // Denominator first: if a root went unscanned, every count above is a
+  // statement about the wrong population and must not be read as a pass.
+  if (floorFailures.length > 0) {
+    console.error(`\nFAIL: skill scan denominator (${floorFailures.length}):`);
+    for (const f of floorFailures) console.error(`  - ${f}`);
+  }
+
   if (update) {
+    // Refuse to freeze a scan that did not see everything it should have.
+    // Otherwise a mis-pointed scanner writes a near-empty baseline and every
+    // later run "passes" against it — the ratchet destroying its own reference,
+    // which is exactly how check-unused-ratchet once zeroed itself.
+    if (floorFailures.length > 0) {
+      console.error('\nRefusing to update baselines: the scan failed its denominator check above.');
+      process.exit(1);
+    }
     writeFileSync(
       baselineFile,
       JSON.stringify({ skills: current, generatedAt: new Date().toISOString() }, null, 2) + '\n',
@@ -422,7 +500,7 @@ function main() {
     );
   }
 
-  const failed = !ratchet.pass || !redFlagRatchet.pass;
+  const failed = !ratchet.pass || !redFlagRatchet.pass || floorFailures.length > 0;
   if (!ratchet.pass) {
     console.error(`\nFAIL: ${ratchet.newViolations.length} NEW description-violating skill(s):`);
     for (const n of ratchet.newViolations) console.error(`  - ${n}`);

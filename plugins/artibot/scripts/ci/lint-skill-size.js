@@ -10,9 +10,15 @@
  * overflow into reference files. This ratchet enforces a hard 500-line ceiling
  * so the 114-skill (and growing) surface cannot silently bloat.
  *
+ * Scope: EVERY project plugin root, not just `plugins/artibot/`. Until
+ * 2026-08-16 this scanned one hardcoded root, so cowork's 46 skills were never
+ * measured and the gate still printed a PASS — see
+ * `scripts/ci/skill-scan-roots.js` for the denominator machinery that makes
+ * "0 violations" distinguishable from "0 files examined".
+ *
  * Exit codes:
  *   0 — every SKILL.md is within the ceiling
- *   1 — at least one SKILL.md exceeds it
+ *   1 — at least one SKILL.md exceeds it, or a denominator floor was missed
  *
  * Zero dependencies. Node 20+ built-ins only.
  *
@@ -22,6 +28,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { assertEntityFloors, countByRoot, listAllSkillFiles } from './skill-scan-roots.js';
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 export const PLUGIN_ROOT = path.resolve(scriptDir, '..', '..');
@@ -65,27 +72,58 @@ export function findOversizedSkills(pluginRoot = PLUGIN_ROOT, max = MAX_SKILL_LI
   return collectSkillSizes(pluginRoot).filter((s) => s.lines > max);
 }
 
+/**
+ * Collect SKILL.md line counts across every project plugin root.
+ *
+ * @returns {{ key: string, rootName: string, file: string, lines: number }[]}
+ *   `key` is the root-qualified name (`artibot-cowork/social-media`).
+ */
+export function collectAllSkillSizes() {
+  return listAllSkillFiles().map(({ key, rootName, file }) => ({
+    key,
+    rootName,
+    file,
+    lines: readFileSync(file, 'utf-8').split('\n').length,
+  }));
+}
+
 function main() {
-  const sizes = collectSkillSizes();
+  const sizes = collectAllSkillSizes();
   const offenders = sizes.filter((s) => s.lines > MAX_SKILL_LINES);
   const largest = sizes.slice().sort((a, b) => b.lines - a.lines)[0];
+  const perRoot = countByRoot(sizes);
+  const floorFailures = assertEntityFloors('skills', perRoot);
 
   console.log(`Artibot SKILL.md size gate (ceiling: ${MAX_SKILL_LINES} lines)`);
-  console.log(`  scanned ${sizes.length} skills, largest: ${largest ? `${largest.name} (${largest.lines})` : 'n/a'}`);
+  console.log(
+    `  scanned ${sizes.length} skills across ${Object.keys(perRoot).length} root(s): ` +
+      Object.entries(perRoot)
+        .map(([r, n]) => `${r}=${n}`)
+        .join(' '),
+  );
+  console.log(`  largest: ${largest ? `${largest.key} (${largest.lines})` : 'n/a'}`);
 
-  if (offenders.length === 0) {
-    console.log('All SKILL.md files are within the line ceiling.');
-    process.exit(0);
+  // Denominator first: a floor miss means the numbers above are not evidence of
+  // anything, so report it before (and independently of) the violation list.
+  if (floorFailures.length > 0) {
+    console.error(`\nFAIL: skill scan denominator (${floorFailures.length}):`);
+    for (const f of floorFailures) console.error(`  - ${f}`);
   }
 
-  console.log(`SKILL.md size violations (${offenders.length}):`);
-  for (const o of offenders.sort((a, b) => b.lines - a.lines)) {
-    console.log(`  ✗ ${o.name}: ${o.lines} lines (> ${MAX_SKILL_LINES})`);
+  if (offenders.length > 0) {
+    console.error(`\nSKILL.md size violations (${offenders.length}):`);
+    for (const o of offenders.sort((a, b) => b.lines - a.lines)) {
+      console.error(`  ✗ ${o.key}: ${o.lines} lines (> ${MAX_SKILL_LINES})`);
+    }
+    console.error('');
+    console.error('Fix: split the body into reference files loaded on-demand, keeping');
+    console.error('the SKILL.md body within the progressive-disclosure ceiling.');
   }
-  console.log('');
-  console.log('Fix: split the body into reference files loaded on-demand, keeping');
-  console.log('the SKILL.md body within the progressive-disclosure ceiling.');
-  process.exit(1);
+
+  if (floorFailures.length > 0 || offenders.length > 0) process.exit(1);
+
+  console.log('All SKILL.md files are within the line ceiling.');
+  process.exit(0);
 }
 
 const invokedDirectly =

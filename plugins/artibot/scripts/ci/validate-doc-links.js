@@ -2,7 +2,8 @@
 /**
  * CI: Validate documentation internal links and anchors.
  *
- * Scans authored Markdown under the artibot plugin and reports:
+ * Scans authored Markdown under **every co-located Artibot plugin** (artibot,
+ * artibot-cowork, _shared — see `ci-utils.js#listPluginRoots`) and reports:
  *   1. Broken relative `[..](path.md)` links (target file does not exist).
  *   2. Broken in-page `[..](#anchor)` references (no matching heading).
  *   3. Unbalanced (odd) code fences (likely an unclosed ``` block).
@@ -19,7 +20,7 @@
 
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
-import { getPluginRoot } from './ci-utils.js';
+import { assertScanFloors, getPluginsDir, listPluginRoots } from './ci-utils.js';
 
 /** Directories never scanned (vendored, generated, or VCS internals). */
 const IGNORE_DIRS = new Set([
@@ -33,13 +34,24 @@ const IGNORE_DIRS = new Set([
 ]);
 
 /**
- * Top-level scan roots under the plugin root, relative to it. Only authored
+ * Top-level scan roots under each plugin root, relative to it. Only authored
  * documentation lives here; everything else is excluded by IGNORE_DIRS or by
  * not being listed.
+ *
+ * `rubrics` exists only in `_shared`; listing it here is inert for plugins that
+ * lack the directory and avoids leaving `_shared`'s three authored rubric docs
+ * as a known hole.
  */
-const SCAN_DIRS = ['commands', 'skills', 'docs'];
+const SCAN_DIRS = ['commands', 'skills', 'docs', 'rubrics'];
 
-/** Individual top-level Markdown files to scan (not inside SCAN_DIRS). */
+/**
+ * Individual top-level Markdown files to scan (not inside SCAN_DIRS), relative
+ * to each plugin root.
+ *
+ * Deliberately excludes CHANGELOG.md / RELEASE.md: they are append-only release
+ * history, and `plugins/artibot/CHANGELOG.md` currently carries 14 rendering
+ * violations (measured 2026-08-16) that are out of scope for this gate's job.
+ */
 const SCAN_FILES = ['CLAUDE.md', 'README.md', 'AGENTS.md'];
 
 /**
@@ -234,12 +246,12 @@ function collectMarkdown(dir) {
 }
 
 /**
- * Gather every authored Markdown file under the plugin root in scope.
+ * Gather every authored Markdown file under one plugin root in scope.
  *
  * @param {string} root - Plugin root absolute path.
  * @returns {string[]} Absolute .md file paths.
  */
-function gatherDocFiles(root) {
+export function gatherDocFiles(root) {
   const files = [];
   for (const dir of SCAN_DIRS) {
     files.push(...collectMarkdown(path.join(root, dir)));
@@ -252,15 +264,43 @@ function gatherDocFiles(root) {
 }
 
 /**
- * CLI entry point: scan the plugin tree and exit non-zero on broken references.
+ * Gather documentation files across every project plugin root.
+ *
+ * @returns {{ files: string[], counts: Record<string, number> }} Absolute paths
+ *   plus a per-root file tally (the denominator asserted by `assertScanFloors`).
+ */
+export function gatherAllDocFiles() {
+  const files = [];
+  /** @type {Record<string, number>} */
+  const counts = {};
+  for (const root of listPluginRoots()) {
+    const found = gatherDocFiles(root);
+    counts[path.basename(root)] = found.length;
+    files.push(...found);
+  }
+  return { files, counts };
+}
+
+/**
+ * CLI entry point: scan every plugin tree and exit non-zero on broken
+ * references or on a scan denominator that fell below its floor.
  */
 function main() {
-  const root = getPluginRoot();
-  const files = gatherDocFiles(root);
+  // Containment root is the shared plugins directory, not one plugin: that way a
+  // cross-plugin link (`../artibot-cowork/README.md`) is validated instead of
+  // being silently treated as "outside scope".
+  const containment = getPluginsDir();
+  const { files, counts } = gatherAllDocFiles();
 
-  if (files.length === 0) {
-    console.log('No documentation files found. Skipping.');
-    process.exit(0);
+  const floorFailures = assertScanFloors(counts);
+  const tally = Object.entries(counts)
+    .map(([name, n]) => `${name}=${n}`)
+    .join(' ');
+
+  if (floorFailures.length > 0) {
+    for (const f of floorFailures) console.error(`FAIL: scan-denominator: ${f}`);
+    console.error(`\nScanned ${files.length} file(s) [${tally}] — denominator assertion failed.`);
+    process.exit(1);
   }
 
   let errorCount = 0;
@@ -271,15 +311,15 @@ function main() {
     try {
       content = readFileSync(file, 'utf8');
     } catch (err) {
-      console.error(`FAIL: ${path.relative(root, file)}: cannot read → ${err.message}`);
+      console.error(`FAIL: ${path.relative(containment, file)}: cannot read → ${err.message}`);
       errorCount++;
       fileWithErrors++;
       continue;
     }
-    const broken = findBrokenLinks(content, file, root);
+    const broken = findBrokenLinks(content, file, containment);
     if (broken.length > 0) {
       fileWithErrors++;
-      const rel = path.relative(root, file).split(path.sep).join('/');
+      const rel = path.relative(containment, file).split(path.sep).join('/');
       for (const b of broken) {
         console.error(`FAIL: ${rel}: ${b.message}`);
         errorCount++;
@@ -289,12 +329,14 @@ function main() {
 
   if (errorCount > 0) {
     console.error(
-      `\n${errorCount} broken reference(s) across ${fileWithErrors} file(s) (of ${files.length} scanned).`
+      `\n${errorCount} broken reference(s) across ${fileWithErrors} file(s) (of ${files.length} scanned) [${tally}].`
     );
     process.exit(1);
   }
 
-  console.log(`PASS: ${files.length} documentation file(s) checked, 0 broken references.`);
+  console.log(
+    `PASS: ${files.length} documentation file(s) checked [${tally}], 0 broken references.`
+  );
   process.exit(0);
 }
 

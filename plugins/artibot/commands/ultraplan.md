@@ -1,7 +1,7 @@
 ---
 description: (Artibot) Maximal evidence-grounded planning — deep-research grounding + multi-lens council + adversarial review + execution handoff
 argument-hint: '[task] e.g. "결제 시스템 v2 마이그레이션" [--no-research] [--lenses N]'
-allowed-tools: [Read, Glob, Grep, Bash, Agent, TaskCreate, Skill]
+allowed-tools: [Read, Glob, Grep, Bash, Agent, SendMessage, TaskCreate, Skill, WebSearch]
 toolset: team
 lifecycle: plan
 ---
@@ -15,7 +15,7 @@ lifecycle: plan
 > **언제 /plan, 언제 /ultraplan?**
 > - **/plan** — 범위가 명확하고 빠른 단계 분해가 필요할 때 (단일 planner, 저비용).
 > - **/ultraplan** — 위험·비용·장기부채가 큰 결정, 사전조사가 필요한 작업, 되돌리기 어려운 마이그레이션/아키텍처 변경.
-> - **deep-research 스킬** — "무엇이 진실인가"(사실 조사) 자체가 목적일 때. /ultraplan은 이 스킬을 1단계 근거수집으로 **내부 호출**한다.
+> - **deep-research 스킬** — "무엇이 진실인가"(사실 조사) 자체가 목적일 때. /ultraplan은 이 스킬이 **설치돼 있으면** 1단계 근거수집의 보강으로 호출한다(Artibot 자체 제공 아님 — 없으면 WebSearch+Grep 주경로만으로 진행).
 
 ## Arguments
 
@@ -30,19 +30,21 @@ Parse $ARGUMENTS:
 ## 6-Phase Pipeline
 
 ### Phase 0 — VALIDATE (문제 검증 게이트)  ·  발산 전 필수, null-result 가능
-> **공유 규율**: 이 게이트는 `problem-validation` 스킬로 재사용됨 — `/team`, `/improve`, `/analyze`도 동일 체크리스트를 적용한다(DRY). 규율 변경 시 스킬 파일을 먼저 수정한다.
+> **공유 규율**: 이 게이트의 진실원은 `problem-validation` 스킬이고, **여러 커맨드가 같은 체크리스트를 공유한다**(DRY). 현재 공유 목록은 `grep -rl problem-validation commands/` 로 확인한다 — 여기에 열거하면 커맨드가 늘 때마다 썩는다. 규율 변경 시 스킬 파일을 먼저 수정한다.
 
 DIVERGE(발산) 엔진을 돌리기 **전에** "이 작업이 진짜 필요한가"부터 확정한다. 이 게이트가 없으면 발산 엔진이 **없는 문제도 만들어낸다** (2026-06 실증 — 트렌드 기반 v4.27.0 계획 전량이 코드 검증에서 불필요로 판명. 메모리 `audit-problem-first`).
 - **입력 분류**:
   - **구체적 작업이 주어짐**("X 마이그레이션", "Y 구현", "이 버그 고쳐") → 문제는 사용자가 이미 준 것 → 통과(pass-through), Phase 1로.
   - **감사/열린 요청**("최신 트렌드 맞나", "보강할 기능·커맨드·훅", "전수조사", "개선점 찾아") → **반드시 문제-검증 먼저.**
-- **검증 방법**: 후보 문제를 *트렌드가 아니라* **실제 코드·incident·실패 테스트·문서화된 통증**으로 깊게 대조한다. "이미 있는가? 이미 테스트되는가? 실제로 깨졌는가?"를 `file:line`으로 확인 (얕은 트렌드 추론 금지).
+- **Pre-step (분해 먼저)**: 후보를 각각 **하나의 구체적 변경을 지목하는 named 항목**으로 열거한다. "X 개선" 같은 덩어리는 독립 하위기능으로 더 쪼갠 뒤 조각별로 게이트를 돌린다 — 덩어리 REJECT는 조각별 검증을 안 돌린 신호다.
+- **검증 방법**: `problem-validation` 스킬의 **4-check 체크리스트를 그대로** 적용한다 — ①이미 구현? ②하드 증거(`file:line`)? ③YAGNI 아님? ④유지비 < 가치. **네 개가 전부 통과해야 NECESSARY**다. 체크리스트 본문·판정 정의(NECESSARY/PARTIAL/DEFER/REJECT)는 **스킬 파일이 유일한 진실원**이며 여기에 복제하지 않는다(드리프트 방지). 후보는 *트렌드가 아니라* **실제 코드·incident·실패 테스트·문서화된 통증**으로 대조한다 (얕은 트렌드 추론 금지).
+- **기본값 = REJECT**: 후보는 증거로 통과를 **벌어야** 한다. 조각별 판정이 갈리면 단일 판정으로 뭉치지 말고 **PARTIAL**(통과 조각만 채택, 나머지 REJECT/DEFER 병기)로 보고한다.
 - **null-result 출구 (1급 결과)**: 검증을 통과한 문제가 **0개면 계획을 만들지 말고** "건강함 / 무변경 권장"으로 종료한다. 성숙한 코드의 정답은 흔히 "바꿀 것 없음"이며, 억지 계획은 부채다.
 - 통과한 **검증된 문제만** Phase 1~6로 넘긴다. 트렌드는 "가능한 선택지"만 알려줄 뿐 — **절대 트리거가 아니다.**
 
 ### Phase 1 — GROUND (근거 수집)  ·  `--no-research` 시 스킵
-- 작업 도메인을 **deep-research 스킬**로 조사한다: `Skill(deep-research, args="<task> 관련 최신 모범사례·함정·선행사례·벤치마크")`.
-  - deep-research가 없거나 실패하면 WebSearch + 코드베이스 Grep으로 폴백.
+- **주경로 (항상 실행)**: 코드베이스 Grep/Glob/Read + `WebSearch("<task> 관련 최신 모범사례·함정·선행사례·벤치마크")`. 두 도구 모두 이 커맨드의 `allowed-tools`에 있으므로 추가 설치 없이 리더가 직접 수행한다.
+- **보강 (조건부 — 있을 때만)**: `deep-research` 스킬이 **설치돼 있는 경우에만** `Skill(deep-research, args="<task> 관련 최신 모범사례·함정·선행사례·벤치마크")`로 심화한다. **Artibot은 이 스킬을 자체 제공하지 않는다** (Anti-Patterns 참조) — 없거나 실패해도 주경로 결과로 Phase 2를 계속 진행한다. 이것은 필수 의존이 아니다.
 - 코드베이스 컨텍스트도 수집(`/plan` Phase 2와 동일): 기존 패턴·영향 파일·테스트 커버리지·의존 그래프.
 - 산출: **근거 노트**(출처/사실/제약) — 이후 모든 단계의 입력.
 
@@ -94,9 +96,10 @@ DIVERGE(발산) 엔진을 돌리기 **전에** "이 작업이 진짜 필요한�
   - `recommendation==='expand'`(밴드 미달): 품질축(엣지케이스·테스트·하드닝·관측·문서)으로 **확장 지시**. **기능 스코프 억지 확대 금지**.
   - `recommendation==='split'`(밴드 초과): `splitInto` 개 autopilot 세션으로 **분할** + 각 세션 goal 제시.
   - `recommendation==='ok'`: 그대로 진행. 기본 밴드는 `session`(2~4h), `--size`로 조정.
-- **PRD 기본 생성 (ultraplan 기본 산출)**: `writePRD()`로 종합된 플랜을 PRD 문서(`docs/PRD/<slug>-<date>.md`)로 저장한다. ultraplan은 철저 모드이므로 PRD가 **기본 산출물**이다 (`/plan`과 달리 옵트인 아님). Phase 3에서 ADR을 만들었다면 그 번호/경로를 `linkedAdrs`로 PRD 헤더에 cross-link한다.
+- **PRD 기본 생성 (ultraplan 기본 산출)**: `writePRD()`로 종합된 플랜을 PRD 문서(`docs/PRD/<slug>-<date>.md`)로 저장한다. ultraplan은 철저 모드이므로 PRD가 **기본 산출물**이다 (`/plan`과 달리 옵트인 아님). Phase 3에서 ADR을 만들었다면 그 식별자를 **문자열 배열**(`['ADR-007']`)로 `linkedAdrs`에 넘겨 PRD 헤더에 cross-link한다.
 - **TODO 추적 기본**: `syncTodo()`로 `.plan-state.json` 저장 → 세션 간 추적. PRD 본문에 이 state 경로를 cross-link로 명시한다.
-- 세 호출(`sizePlan`/`writePRD`/`syncTodo`) 모두 공유 레이어(`lib/planning/session-sizer.js` · `lib/planning/artifacts.js`)를 통해 수행한다 (아래 "Artifacts Integration" 참조 — 직접 재구현 금지).
+- **INDEX 갱신 (필수)**: `writePRD()` 직후 `indexArtifacts({ kind: 'prd' })`, Phase 3에서 `ensureADR()`를 호출했다면 그 직후 `indexArtifacts({ kind: 'adr' })`를 호출해 `docs/PRD/INDEX.md` · `docs/adr/INDEX.md`를 갱신한다. 빠뜨리면 ultraplan 산출물만 인덱스에 없는 상태가 된다.
+- 네 호출(`sizePlan`/`writePRD`/`syncTodo`/`indexArtifacts`) 모두 공유 레이어(`lib/planning/session-sizer.js` · `lib/planning/artifacts.js`)를 통해 수행한다 (아래 "Artifacts Integration" 참조 — 직접 재구현 금지).
 - 실행 경로 추천(직교 2축):
   - **자리 비움/대형 무인작업** → `/autopilot "<task>" --goal "<검증가능 종료조건>" --max {autopilot.maxHint} --budget {autopilot.budgetHint}` (사이징 결과를 max/budget에 매칭)
   - **병렬 협업/교차검증** → `/team` (Operator-Waits DNA로 자동 발화되기도 함)
@@ -129,15 +132,19 @@ const { footprint, sizing, autopilot } = sizePlan(tasks, { size: sizeFlag /* qui
 
 ### 산출물 함수
 
-문서 산출물(PRD / ADR / TODO 추적)은 **공유 산출물 레이어** `lib/planning/artifacts.js`를 호출해 생성한다 (직접 재구현 금지 — `/plan`과 동일 레이어 공유). 세 함수의 정확한 시그니처:
+문서 산출물(PRD / ADR / TODO 추적)은 **공유 산출물 레이어** `lib/planning/artifacts.js`를 호출해 생성한다 (직접 재구현 금지 — `/plan`과 동일 레이어 공유). **네 함수 전부 `async`다 — 반환값을 구조분해하기 전에 `await`를 붙여라. 빠뜨리면 모든 필드가 `undefined`가 된다.** 정확한 시그니처:
 
 ```
-writePRD({ projectRoot, slug, title, sections, linkedAdrs, now }) → { ok, prdPath }
-  // docs/PRD/<slug>-<date>.md 생성. linkedAdrs로 ADR 헤더 cross-link.
-ensureADR({ projectRoot, title, options, decision, rationale, now }) → { ok, adrPath, number }
+await writePRD({ projectRoot, slug, title, sections, linkedAdrs, now }) → { ok, prdPath }
+  // docs/PRD/<slug>-<date>.md 생성. linkedAdrs 정본은 string[] (예: ['ADR-007']).
+  // ensureADR() 반환 객체를 그대로 넘겨도 ADR-NNN 으로 정규화된다. 해석 불가 항목은
+  // 렌더하지 않고 반환값 droppedAdrLinks 로 개수를 신고한다 (0 이면 필드 없음).
+await ensureADR({ projectRoot, title, options, decision, rationale, now }) → { ok, adrPath, number }
   // docs/adr/ADR-NNN-slug.md 생성 (멱등). options=비교한 실선택지(2개 이상).
-syncTodo({ projectRoot, planMarkdown, planFile, sessionId, now }) → { ok, stateFile, progress }
+await syncTodo({ projectRoot, planMarkdown, planFile, sessionId, now }) → { ok, stateFile, progress }
   // .plan-state.json 기록. progress = { total, completed, percentage }
+await indexArtifacts({ projectRoot, kind, now }) → { ok, indexPath, count }
+  // docs/<KIND>/INDEX.md 재생성. kind = 'prd' | 'adr' (소문자).
 ```
 
 동적 import는 `CLAUDE_PLUGIN_ROOT` 기준 절대경로로 해석한다 (cwd 상대경로 금지 — `commands/autopilot.md` Step 1의 `toFileUrl`/`pluginRoot` 패턴 참고). `lib/planning/artifacts.js`를 후보 경로에서 찾아 `import()`한다.
@@ -146,7 +153,7 @@ syncTodo({ projectRoot, planMarkdown, planFile, sessionId, now }) → { ok, stat
 
 ```js
 // 2개 이상 실선택지를 비교해 채택한 경우에만
-const { ok, adrPath, number } = ensureADR({
+const { ok, adrPath, number } = await ensureADR({   // async — await 필수
   projectRoot: process.cwd(),
   title: '<decision title>',
   options: ['렌즈-mvp 안', '렌즈-arch 안'],  // 비교한 실선택지 (2개 이상)
@@ -154,22 +161,32 @@ const { ok, adrPath, number } = ensureADR({
   rationale: '<근거 — EVIDENCE/LENS SYNTHESIS 인용>',
   now: new Date(),
 });
-const linkedAdrs = ok ? [{ number, adrPath }] : [];
+// linkedAdrs 정본은 string[] — 출력이 예측 가능하도록 canonical ADR-NNN 을 만들어 넘긴다.
+// (객체를 넘겨도 artifacts.js#adrLinkLabel 이 정규화하지만, 정본 형태를 쓰는 것이 기본이다.)
+const linkedAdrs = ok ? [`ADR-${String(number).padStart(3, '0')}`] : [];
+
+await indexArtifacts({ projectRoot: process.cwd(), kind: 'adr', now: new Date() }); // ADR INDEX 갱신
 ```
 
 ### Phase 6 — PRD 생성 (기본) + TODO 추적 (기본)
 
 ```js
-const { ok: prdOk, prdPath } = writePRD({
+const { ok: prdOk, prdPath, droppedAdrLinks } = await writePRD({   // async — await 필수
   projectRoot: process.cwd(),
   slug: '<feature-slug>',
   title: '<task title>',
   sections: { 배경, 목표, 비목표, 설계, 산출물, 실행계획, 위험, 수락기준, 근거 },
-  linkedAdrs,              // Phase 3에서 ADR 생성 시 cross-link (없으면 [])
+  linkedAdrs,              // string[] — Phase 3에서 ADR 생성 시 cross-link (없으면 [])
   now: new Date(),
 });
 
-const { stateFile, progress } = syncTodo({
+// writePRD 직후 항상 INDEX.md 를 갱신한다 (신규 PRD가 즉시 인덱스에 반영되도록).
+await indexArtifacts({ projectRoot: process.cwd(), kind: 'prd', now: new Date() });
+
+// droppedAdrLinks 가 있으면 EXECUTION HANDOFF 에 "ADR 링크 N건을 해석하지 못해 제외했습니다"
+// 를 한 줄로 **사용자에게 보고**한다. 반환값만 받고 말하지 않으면 통보 경로가 없는 것과 같다.
+
+const { stateFile, progress } = await syncTodo({   // async — await 필수
   projectRoot: process.cwd(),
   planMarkdown,            // 종합된 최종 플랜 마크다운
   planFile: prdPath,       // PRD 경로를 plan 원본으로 연결

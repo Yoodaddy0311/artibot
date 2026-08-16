@@ -22,7 +22,12 @@
  *     낡는다. 재확인 방법은 그 상수 주석에 있다.
  *  2. **본문 산문의 죽은 호출은 못 본다.** 프론트매터만 스캔한다. 선언을
  *     지워도 본문이 여전히 그 도구를 호출하라고 지시할 수 있고, 그때 게이트는
- *     green 인데 실동작은 더 나빠진다. 본문 정합은 사람이 봐야 한다.
+ *     green 인데 실동작은 더 나빠진다.
+ *     → **이 구멍은 `command-body-tool-parity.test.js` 가 닫았다**(2026-08-16).
+ *     그쪽은 반대 방향 — 본문이 `Name(` 로 호출하는데 `allowed-tools` 에 없는
+ *     경우 — 을 본다. 다만 **`agents/*.md` 본문은 여전히 아무도 안 본다**:
+ *     그 게이트도 `commands/` 만 덮는다. 여기서 green 인 것을 "본문도 정합"의
+ *     근거로 쓰지 마라.
  *  3. **파서가 읽지 못하는 표기법.** 읽지 못하면 `null` 이 아니라 **RED** 다
  *     (아래 "파싱 실패는 RED" 참조). 표기법을 넓히면 이 문단도 같이 고쳐라.
  *  4. **`mcp__*` · 와일드카드 · 괄호 taxonomy 는 검사 대상이 아니다.**
@@ -46,8 +51,27 @@
 
 import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import {
+  KNOWN_TOOL_NAMES,
+  normalizeToolName,
+  parseAgentTools,
+  parseCommandTools,
+  STALE_TOOL_NAMES,
+} from './frontmatter-tools.js';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+
+// 파서와 도구명 정본은 `frontmatter-tools.js` 로 옮겼다. `command-body-tool-parity`
+// 게이트가 같은 술어를 필요로 하는데, 테스트 파일끼리 import 하면 vitest 가 이
+// 파일의 describe 를 그쪽 스위트에도 등록해 같은 테스트가 두 번 돈다.
+// 하위 호환을 위해 재수출한다 — 기존 인용(`#KNOWN_TOOL_NAMES` 등)이 계속 유효하다.
+export {
+  KNOWN_TOOL_NAMES,
+  STALE_TOOL_NAMES,
+  normalizeToolName,
+  parseAgentTools,
+  parseCommandTools,
+};
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 /** `plugins/` — 이 리포가 출하하는 모든 플러그인의 부모. */
@@ -69,189 +93,6 @@ const PLUGIN_ROOTS = [
   { id: 'artibot', dir: join(PLUGINS_DIR, 'artibot') },
   { id: 'artibot-cowork', dir: join(PLUGINS_DIR, 'artibot-cowork') },
 ];
-
-/**
- * 하네스가 제공하는 도구 이름 정본.
- *
- * **원격/하네스 상태의 수동 사본이다** — `protected_refs`·`REQUIRED_CONTEXTS` 와
- * 같은 성격이고, 같은 방식으로 낡는다.
- *
- * 재확인 방법:
- *   Claude Code 세션에서 `ToolSearch("select:<name>")` 로 개별 조회하거나,
- *   세션 시작 시 로드된 도구 목록 + deferred 목록을 대조한다.
- *   최종 확인 2026-08-15 (리더 세션 + 본 세션 ToolSearch 2중).
- *
- * **allowlist 인 이유**(rules §8): 금지 목록은 미래 항목에 fail-open 이다.
- * 새 도구가 하네스에 추가되면 이 게이트는 RED 가 되고, 정본에 한 줄 추가하는
- * 것이 정상 워크플로다. 그 RED 는 결함이 아니라 설계다.
- */
-const KNOWN_TOOL_NAMES = new Set([
-  // 본 세션에서 로드 상태로 직접 관측.
-  'Agent',
-  'Artifact',
-  'Bash',
-  'Edit',
-  'Glob',
-  'Grep',
-  'PowerShell',
-  'Read',
-  'Skill',
-  'ToolSearch',
-  'Write',
-  // 본 세션에서 deferred 목록으로 직접 관측.
-  'CronCreate',
-  'CronDelete',
-  'CronList',
-  'EndConversation',
-  'EnterWorktree',
-  'ExitWorktree',
-  'Monitor',
-  'NotebookEdit',
-  'SendMessage',
-  'TaskCreate',
-  'TaskGet',
-  'TaskList',
-  'TaskStop',
-  'TaskUpdate',
-  'WebFetch',
-  'WebSearch',
-  // 리드 세션 실측 2026-08-15. 서브에이전트 세션에는 노출되지 않아 이 파일을 쓴
-  // 세션에서는 관측되지 않았다 — 부재가 곧 폐지가 아닌 사례이며, 그래서 등급을
-  // 나눠 적는다. 목록에서 빼려면 **먼저 리드 세션에서 재확인**하라.
-  'AskUserQuestion', // 리드 세션에서 2회 실호출 성공. commands/go.md 가 선언.
-  'ExitPlanMode', // 리드 세션 deferred 도구 목록에 실재.
-  'Workflow', // 리드 세션 최상위 도구로 스키마까지 로드됨. commands/dynamic.md 가 선언.
-]);
-
-/**
- * 하네스에서 사라졌거나 개명된 이름 → 현행 대체.
- *
- * **예외 목록이 아니다.** 이 이름들은 `KNOWN_TOOL_NAMES` 에 없으므로 그대로
- * 실패한다. 이 표가 하는 일은 실패 메시지에 "무엇으로 바꿔야 하는가"를 붙이는
- * 것뿐이다. 여기에 이름을 추가해도 게이트는 통과되지 않는다.
- */
-const STALE_TOOL_NAMES = new Map([
-  ['TeamCreate', '삭제 — 세션은 암묵적 단일 팀이다. Agent(name=…) 로 팀원을 스폰하라'],
-  ['TeamDelete', '삭제 — SendMessage 로 shutdown_request 를 보내라'],
-  ['TodoWrite', 'TaskCreate / TaskUpdate / TaskList'],
-  ['Task', 'Agent (개명). subagent_type 인자는 그대로다'],
-]);
-
-/**
- * 프론트매터 블록만 떼어낸다. 없으면 null (호출부가 RED 로 처리).
- * @param {string} text
- * @returns {string | null}
- */
-function frontmatter(text) {
-  const match = text.match(/^---\r?\n([\s\S]*?)\r?\n---/);
-  return match ? match[1] : null;
-}
-
-/**
- * YAML 스칼라에서 주석과 따옴표를 벗긴다.
- *
- * `agents/orchestrator.md:28` 처럼 항목 뒤에 `# DM (type:"message")` 가 붙는
- * 형태가 실재한다. 벗기지 않으면 도구명이 주석까지 포함한 문자열이 되어
- * 엉뚱한 이름으로 RED 가 난다.
- *
- * @param {string} raw
- * @returns {string}
- */
-function stripComment(raw) {
-  return raw.replace(/\s+#.*$/, '').trim().replace(/^['"]|['"]$/g, '');
-}
-
-/**
- * 인라인 flow 시퀀스 `[A, B, C]` 를 항목 배열로. flow 가 아니면 null.
- * @param {string} value
- * @returns {string[] | null}
- */
-function parseFlowSequence(value) {
-  const trimmed = value.trim();
-  if (!/^\[.*\]$/s.test(trimmed)) return null;
-  const inner = trimmed.slice(1, -1).trim();
-  if (inner === '') return [];
-  return inner.split(',').map(stripComment).filter((s) => s !== '');
-}
-
-/**
- * `commands/*.md` 의 `allowed-tools:` 를 읽는다.
- *
- * @param {string} text
- * @returns {{ ok: true, tools: string[] } | { ok: false, reason: string }}
- */
-export function parseCommandTools(text) {
-  const block = frontmatter(text);
-  if (block === null) return { ok: false, reason: '프론트매터 블록이 없다' };
-
-  const line = block.split(/\r?\n/).find((l) => /^allowed-tools:/.test(l));
-  if (line === undefined) return { ok: false, reason: 'allowed-tools 키가 없다' };
-
-  const parsed = parseFlowSequence(line.replace(/^allowed-tools:/, ''));
-  if (parsed === null) {
-    return { ok: false, reason: `allowed-tools 가 인라인 flow 형태가 아니다: ${line}` };
-  }
-  return { ok: true, tools: parsed };
-}
-
-/**
- * `agents/*.md` 의 `tools:` 를 읽는다. 인라인 flow 와 블록 시퀀스 양쪽.
- *
- * 블록 시퀀스는 `- name` 행만 항목으로 친다. 들여쓴 주석 행(`#` 로 시작)과
- * 앞 항목의 주석이 이어지는 행은 건너뛰고, 들여쓰기가 끝나면 블록도 끝난다.
- *
- * @param {string} text
- * @returns {{ ok: true, tools: string[] } | { ok: false, reason: string }}
- */
-export function parseAgentTools(text) {
-  const block = frontmatter(text);
-  if (block === null) return { ok: false, reason: '프론트매터 블록이 없다' };
-
-  const lines = block.split(/\r?\n/);
-  const start = lines.findIndex((l) => /^tools:/.test(l));
-  if (start === -1) return { ok: false, reason: 'tools 키가 없다' };
-
-  const inline = lines[start].replace(/^tools:/, '').trim();
-  if (inline !== '') {
-    const flow = parseFlowSequence(inline);
-    if (flow !== null) return { ok: true, tools: flow };
-    // 인라인인데 flow 가 아니면 쉼표 구분 스칼라로 본다.
-    return { ok: true, tools: inline.split(',').map(stripComment).filter((s) => s !== '') };
-  }
-
-  const tools = [];
-  for (let i = start + 1; i < lines.length; i += 1) {
-    const line = lines[i];
-    if (line.trim() === '') continue;
-    if (/^\S/.test(line)) break; // 들여쓰기 종료 = 다음 키
-    if (/^\s*#/.test(line)) continue; // 주석 전용 행
-    const item = line.match(/^\s+-\s+(.*)$/);
-    if (item) {
-      const name = stripComment(item[1]);
-      if (name !== '') tools.push(name);
-      continue;
-    }
-    // `- name` 도 아니고 주석도 아닌 들여쓴 행은 앞 항목 주석의 연속으로 본다.
-    if (/^\s+#/.test(line)) continue;
-    return { ok: false, reason: `tools 블록에서 읽지 못한 행: ${JSON.stringify(line)}` };
-  }
-  return { ok: true, tools };
-}
-
-/**
- * 선언 항목 하나를 검사 대상 기본명으로 정규화한다.
- *
- * @param {string} declared
- * @returns {{ skip: true } | { skip: false, base: string }}
- */
-export function normalizeToolName(declared) {
-  const name = declared.trim();
-  if (name === '' || name === '*') return { skip: true }; // "All tools" 표기
-  if (name.startsWith('mcp__')) return { skip: true }; // 세션별 MCP 구성 종속
-  const base = name.replace(/\(.*$/, '').trim(); // Task(Explore) → Task
-  if (base === '') return { skip: true };
-  return { skip: false, base };
-}
 
 /** `.md` 파일 목록. INDEX.md 는 자동생성 색인이라 에이전트가 아니다. */
 function agentFiles(root) {

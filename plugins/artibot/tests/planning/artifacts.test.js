@@ -63,6 +63,126 @@ describe('artifacts / writePRD', () => {
     expect(body).toContain('## 수락기준'); // empty section still rendered
   });
 
+  // linkedAdrs 정규화 — 호출자가 `.md` 프롬프트(모델 생성 JS)라 타입 검사가 닿지 않는다.
+  // `ensureADR()` 반환값을 그대로 넘기는 것이 자연스러운 사용 흐름이므로 객체도 받는다.
+  // 실제 사고: commands/ultraplan.md 가 `[{ number, adrPath }]` 를 넘겨 헤더에
+  // `[object Object]` 가 박힐 뻔했다. 문자열만 테스트하던 자리가 정확히 이 사각지대였다.
+  it('linkedAdrs: ensureADR 반환 객체를 canonical ADR-NNN 으로 정규화한다', async () => {
+    const res = await writePRD({
+      projectRoot: root,
+      slug: 'obj-link',
+      title: 'Obj',
+      sections: {},
+      linkedAdrs: [{ number: 7, adrPath: '/repo/docs/adr/ADR-007-caching.md' }],
+      now: fixedNow,
+    });
+    expect(res.ok).toBe(true);
+    const body = readFileSync(res.prdPath, 'utf-8');
+    expect(body).not.toContain('[object Object]');
+    expect(body).toContain('linked_adrs: ADR-007');
+    expect(body).toContain('`ADR-007`');
+  });
+
+  it('linkedAdrs: number 가 없으면 adrPath 파일명으로 폴백한다', async () => {
+    const res = await writePRD({
+      projectRoot: root,
+      slug: 'path-link',
+      title: 'Path',
+      sections: {},
+      linkedAdrs: [{ adrPath: '/repo/docs/adr/ADR-012-retry-policy.md' }],
+      now: fixedNow,
+    });
+    const body = readFileSync(res.prdPath, 'utf-8');
+    expect(body).not.toContain('[object Object]');
+    expect(body).toContain('`ADR-012-retry-policy`');
+  });
+
+  it('linkedAdrs: 문자열은 그대로 보존하고 섞인 배열도 처리한다', async () => {
+    const res = await writePRD({
+      projectRoot: root,
+      slug: 'mixed-link',
+      title: 'Mixed',
+      sections: {},
+      linkedAdrs: ['ADR-001', { number: 2, adrPath: '/x/ADR-002-b.md' }, '  ', null],
+      now: fixedNow,
+    });
+    const body = readFileSync(res.prdPath, 'utf-8');
+    expect(body).toContain('linked_adrs: ADR-001, ADR-002');
+    expect(body).not.toContain('[object Object]');
+  });
+
+  it('linkedAdrs: 알 수 없는 형태는 조용히 렌더하지 않고 droppedAdrLinks 로 신고한다', async () => {
+    const res = await writePRD({
+      projectRoot: root,
+      slug: 'bad-link',
+      title: 'Bad',
+      sections: {},
+      linkedAdrs: [{ foo: 'bar' }, 42, 'ADR-009'],
+      now: fixedNow,
+    });
+    expect(res.ok).toBe(true);
+    expect(res.droppedAdrLinks).toBe(2);
+    const body = readFileSync(res.prdPath, 'utf-8');
+    expect(body).not.toContain('[object Object]');
+    expect(body).toContain('linked_adrs: ADR-009');
+  });
+
+  // 경계 — `Number.isFinite` 만으로는 음수·소수가 통과해 `ADR-0-1` / `ADR-1.5` 같은
+  // 깨진 라벨이 렌더된다. JSDoc 이 "해석 불가는 렌더하지 않고 신고한다"고 약속하므로
+  // 이 자리는 계약 위반이다. ADR 번호는 정의상 0 이상의 정수다(`ensureADR` 이 그렇게 만든다).
+  it.each([
+    ['음수', -1],
+    ['소수', 1.5],
+    ['NaN 아닌 무한대', Number.MAX_VALUE + Number.MAX_VALUE],
+  ])('linkedAdrs: number 가 %s 면 깨진 라벨을 렌더하지 않고 신고한다', async (_label, bad) => {
+    const res = await writePRD({
+      projectRoot: root, slug: `bad-num-${String(bad)}`, title: 'BadNum', sections: {},
+      linkedAdrs: [{ number: bad }], now: fixedNow,
+    });
+    expect(res.ok).toBe(true);
+    expect(res.droppedAdrLinks).toBe(1);
+    const body = readFileSync(res.prdPath, 'utf-8');
+    expect(body).not.toContain('linked_adrs:');
+    expect(body).not.toContain('ADR-0-1');
+    expect(body).not.toContain('ADR-1.5');
+  });
+
+  it('linkedAdrs: number 0 은 유효한 ADR-000 이다 (falsy 경계)', async () => {
+    const res = await writePRD({
+      projectRoot: root, slug: 'zero-num', title: 'Zero', sections: {},
+      linkedAdrs: [{ number: 0 }], now: fixedNow,
+    });
+    expect(res.droppedAdrLinks).toBeUndefined();
+    expect(readFileSync(res.prdPath, 'utf-8')).toContain('linked_adrs: ADR-000');
+  });
+
+  it('linkedAdrs: 배열이 아닌 단일 값도 받아 링크 1건으로 처리한다', async () => {
+    const res = await writePRD({
+      projectRoot: root, slug: 'not-array', title: 'NotArray', sections: {},
+      linkedAdrs: 'ADR-001', now: fixedNow,
+    });
+    expect(res.ok).toBe(true);
+    expect(res.droppedAdrLinks).toBeUndefined();
+    expect(readFileSync(res.prdPath, 'utf-8')).toContain('linked_adrs: ADR-001');
+  });
+
+  it('linkedAdrs: 배열 아닌 해석 불가 값은 조용히 삼키지 않고 신고한다', async () => {
+    const res = await writePRD({
+      projectRoot: root, slug: 'not-array-bad', title: 'NotArrayBad', sections: {},
+      linkedAdrs: 42, now: fixedNow,
+    });
+    expect(res.droppedAdrLinks).toBe(1);
+    expect(readFileSync(res.prdPath, 'utf-8')).not.toContain('linked_adrs:');
+  });
+
+  it('linkedAdrs: 전부 정상이면 droppedAdrLinks 를 붙이지 않는다', async () => {
+    const res = await writePRD({
+      projectRoot: root, slug: 'clean-link', title: 'Clean', sections: {},
+      linkedAdrs: ['ADR-001'], now: fixedNow,
+    });
+    expect(res.droppedAdrLinks).toBeUndefined();
+  });
+
   it('writes status:active + created frontmatter', async () => {
     const res = await writePRD({
       projectRoot: root, slug: 'fm', title: 'FM', sections: {}, now: fixedNow,

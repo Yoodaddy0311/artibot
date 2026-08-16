@@ -3,7 +3,7 @@
  * Covers startAutopilot, resumeAutopilot, getStatus, abortAutopilot, PHASES,
  * and the public Phase runner functions.
  */
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import {
   abortAutopilot,
   getStatus,
@@ -16,8 +16,39 @@ import {
 } from '../../lib/autopilot/index.js';
 import { deleteSession } from '../../lib/autopilot/session-store.js';
 import { getLockPath, releaseLock } from '../../lib/autopilot/lock.js';
-import { existsSync, unlinkSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, unlinkSync } from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
 import { extractKey } from '../../lib/autopilot/memory.js';
+
+// ARTIFACT ISOLATION CONTRACT (mirrors the branch-leak guard in
+// engine.execute-worktree.test.js): every engine entry writes a PRD
+// (lib/autopilot/prd-generator.js#generatePRD) and a completion report
+// (lib/autopilot/report-generator.js#generateReport) under <projectRoot>/.
+// Without an explicit override those default to the real repo root, so each
+// test run left stray files in the operator's docs/PRD/ and reports/AUTOPILOT/.
+// options.projectRoot redirects both writers into a tmpdir.
+let ARTIFACT_ROOT = '';
+
+beforeAll(() => {
+  ARTIFACT_ROOT = mkdtempSync(path.join(os.tmpdir(), 'artibot-engine-artifacts-'));
+});
+
+afterAll(() => {
+  try { rmSync(ARTIFACT_ROOT, { recursive: true, force: true }); } catch { /* best-effort */ }
+});
+
+/**
+ * startAutopilot with the artifact-isolation override applied.
+ * @param {object} args - Same shape as startAutopilot.
+ * @returns {Promise<object>}
+ */
+function start(args) {
+  return startAutopilot({
+    ...args,
+    options: { ...(args.options || {}), projectRoot: ARTIFACT_ROOT },
+  });
+}
 
 const cleanupIds = new Set();
 function track(id) {
@@ -51,7 +82,7 @@ describe('startAutopilot', () => {
   });
 
   it('returns object with sessionId, prdPath, phase, instruction (P0-1 fix)', async () => {
-    const r = await startAutopilot({ task: 'engine test 표준 진입', mode: 'plan' });
+    const r = await start({ task: 'engine test 표준 진입', mode: 'plan' });
     track(r.sessionId);
     expect(r.sessionId).toMatch(/^ap-\d{8}-\d{6}/);
     expect(typeof r.prdPath).toBe('string');
@@ -62,20 +93,20 @@ describe('startAutopilot', () => {
   });
 
   it('plan mode stops at INTAKE phase', async () => {
-    const r = await startAutopilot({ task: 'plan-mode 정지 검증', mode: 'plan' });
+    const r = await start({ task: 'plan-mode 정지 검증', mode: 'plan' });
     track(r.sessionId);
     expect(r.phase).toBe('INTAKE');
   });
 
   it('default mode also initializes at INTAKE (Phase 0 first)', async () => {
-    const r = await startAutopilot({ task: 'default 모드 초기화', mode: 'default' });
+    const r = await start({ task: 'default 모드 초기화', mode: 'default' });
     track(r.sessionId);
     expect(r.phase).toBe('INTAKE');
     expect(r.instruction.type).toBeTruthy();
   });
 
   it('persists session retrievable via getStatus', async () => {
-    const r = await startAutopilot({ task: '세션 영속화 검증', mode: 'plan' });
+    const r = await start({ task: '세션 영속화 검증', mode: 'plan' });
     track(r.sessionId);
     const status = await getStatus(r.sessionId);
     expect(status).toBeTruthy();
@@ -92,7 +123,7 @@ describe('getStatus', () => {
   });
 
   it('returns the most recent session when sessionId is omitted', async () => {
-    const r = await startAutopilot({ task: 'most-recent 픽업', mode: 'plan' });
+    const r = await start({ task: 'most-recent 픽업', mode: 'plan' });
     track(r.sessionId);
     const recent = await getStatus();
     expect(recent).toBeTruthy();
@@ -102,7 +133,7 @@ describe('getStatus', () => {
 
 describe('abortAutopilot', () => {
   it('marks session ABORTED and emits reportPath when graceful', async () => {
-    const r = await startAutopilot({ task: 'abort graceful', mode: 'plan' });
+    const r = await start({ task: 'abort graceful', mode: 'plan' });
     track(r.sessionId);
     const a = await abortAutopilot(r.sessionId, { graceful: true });
     expect(a.sessionId).toBe(r.sessionId);
@@ -128,7 +159,7 @@ describe('resumeAutopilot', () => {
   });
 
   it('returns noop for COMPLETED sessions', async () => {
-    const r = await startAutopilot({ task: 'completed noop', mode: 'plan' });
+    const r = await start({ task: 'completed noop', mode: 'plan' });
     track(r.sessionId);
     await abortAutopilot(r.sessionId, { graceful: true });
     // After abort, session is ABORTED — resume should return noop status.
@@ -138,7 +169,7 @@ describe('resumeAutopilot', () => {
 
   it('returns paused when featureKey lock is held by a different session (F4)', async () => {
     const task = 'F4 lock contention scenario A';
-    const r = await startAutopilot({ task, mode: 'plan' });
+    const r = await start({ task, mode: 'plan' });
     track(r.sessionId);
     // Simulate a competing live session holding the same featureKey lock by
     // releasing the original holder and writing a fresh lock under a new
@@ -160,7 +191,7 @@ describe('resumeAutopilot', () => {
 
   it('proceeds when featureKey lock is already held by the same session (F4)', async () => {
     const task = 'F4 lock self-recovery scenario B';
-    const r = await startAutopilot({ task, mode: 'plan' });
+    const r = await start({ task, mode: 'plan' });
     track(r.sessionId);
     // The lock is still held by r.sessionId from startAutopilot. Resume should
     // recognize it's our own and proceed without pausing.
@@ -171,7 +202,7 @@ describe('resumeAutopilot', () => {
 
 describe('Phase runner functions return instruction objects', () => {
   it('runPhase0Intake returns object with type field', async () => {
-    const r = await startAutopilot({ task: 'phase0 inst 검증', mode: 'plan' });
+    const r = await start({ task: 'phase0 inst 검증', mode: 'plan' });
     track(r.sessionId);
     const state = await getStatus(r.sessionId);
     const inst = runPhase0Intake(state);
@@ -180,7 +211,7 @@ describe('Phase runner functions return instruction objects', () => {
   });
 
   it('runPhase1Plan returns object with type field', async () => {
-    const r = await startAutopilot({ task: 'phase1 inst 검증', mode: 'default' });
+    const r = await start({ task: 'phase1 inst 검증', mode: 'default' });
     track(r.sessionId);
     const state = await getStatus(r.sessionId);
     const inst = runPhase1Plan(state);
@@ -189,7 +220,7 @@ describe('Phase runner functions return instruction objects', () => {
   });
 
   it('runPhase6Report returns object with type=phase-result and reportPath', async () => {
-    const r = await startAutopilot({ task: 'phase6 report 산출', mode: 'default' });
+    const r = await start({ task: 'phase6 report 산출', mode: 'default' });
     track(r.sessionId);
     const state = await getStatus(r.sessionId);
     const inst = runPhase6Report(state);
@@ -219,12 +250,12 @@ describe('startAutopilot — feature lock collision (D-2)', () => {
   });
 
   it('first startAutopilot acquires the lock; second on the same task pauses with lock-held-by reason', async () => {
-    const a = await startAutopilot({ task: collisionTask, mode: 'plan' });
+    const a = await start({ task: collisionTask, mode: 'plan' });
     track(a.sessionId);
     expect(a.paused).not.toBe(true);
     expect(a.phase).toBe('INTAKE');
 
-    const b = await startAutopilot({ task: collisionTask, mode: 'plan' });
+    const b = await start({ task: collisionTask, mode: 'plan' });
     track(b.sessionId);
     expect(b.paused).toBe(true);
     expect(b.phase).toBe('PAUSED');
@@ -238,14 +269,14 @@ describe('startAutopilot — feature lock collision (D-2)', () => {
   });
 
   it('after release, a third startAutopilot for the same featureKey acquires successfully', async () => {
-    const a = await startAutopilot({ task: collisionTask, mode: 'plan' });
+    const a = await start({ task: collisionTask, mode: 'plan' });
     track(a.sessionId);
     expect(a.paused).not.toBe(true);
 
     // Release manually to mirror what completion / abort would do.
     expect(releaseLock(collisionKey, a.sessionId)).toBe(true);
 
-    const c = await startAutopilot({ task: collisionTask, mode: 'plan' });
+    const c = await start({ task: collisionTask, mode: 'plan' });
     track(c.sessionId);
     expect(c.paused).not.toBe(true);
     expect(c.phase).toBe('INTAKE');

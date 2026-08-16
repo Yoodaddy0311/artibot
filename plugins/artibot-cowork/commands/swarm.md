@@ -65,52 +65,50 @@ Note:          Detailed stats require CLI plugin with server access.
 ```
 
 ### opt-in
-Explain how to enable swarm participation.
+Explain that opt-in is not performed from Cowork, and where it is performed.
 
 **Output:**
 ```
 SWARM OPT-IN GUIDE
 ==================
-To enable swarm participation in Cowork:
+Swarm participation cannot be enabled from Cowork.
 
-1. Ensure .claude-plugin/swarm-profile.json exists (auto-created by artibot CLI)
-2. In artibot.config.json, set:
-   {
-     "swarm": {
-       "enabled": true,
-       "optIn": true,
-       "syncInterval": "session"
-     }
-   }
-3. Privacy guarantees:
+Why: opting in requires writing a swarm profile and a swarm configuration
+block, both of which are created and consumed by the full Artibot CLI
+plugin. This Cowork package ships no configuration file, no runtime
+scripts, and no background processes, so it has nothing to write or read
+them with. This command is read-only by design.
+
+To participate:
+
+1. Install the full Artibot CLI plugin in Claude Code.
+2. Run its `/swarm opt-in` command there and grant consent.
+3. Return to Cowork — `/swarm status` here reports what it can read from a
+   swarm profile, if one is present.
+
+Privacy guarantees (these apply to the CLI plugin's uploads; Cowork itself
+uploads nothing):
    - All patterns are anonymized (SHA-256, PII-stripped)
    - Differential privacy noise applied (Laplacian, ε=1.0)
    - Maximum 5MB per upload
    - Opt-out is instant and permanent until re-opted in
-
-Note: Full opt-in management available via CLI plugin `/swarm opt-in` command.
 ```
 
 ### opt-out
-Explain how to disable swarm participation.
+Explain the opt-out position of a Cowork-only user, and where opt-out is performed.
 
 **Output:**
 ```
 SWARM OPT-OUT GUIDE
 ===================
-To disable swarm participation:
+Swarm participation cannot be toggled from Cowork.
 
-1. In artibot.config.json, set:
-   {
-     "swarm": {
-       "enabled": false,
-       "optIn": false
-     }
-   }
-2. Or delete .claude-plugin/swarm-profile.json to remove the portable profile.
+If you never opted in through the full Artibot CLI plugin, you are already
+opted out. This Cowork package ships no runtime scripts and no background
+processes, so it never uploads anything on its own.
 
-Note: Full opt-out management available via CLI plugin `/swarm opt-out` command.
-Opt-out is instant — no further patterns will be shared.
+If you did opt in from Claude Code, run `/swarm opt-out` there. Opt-out is
+instant — no further patterns will be shared.
 ```
 
 ## Privacy Notice

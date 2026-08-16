@@ -44,14 +44,33 @@ function makeTempRepo() {
 }
 
 let tempRepo = null;
+// ARTIFACT ISOLATION CONTRACT (extends the branch-leak guard above to written
+// artifacts): startAutopilot writes docs/PRD/ and abortAutopilot writes
+// reports/AUTOPILOT/ under <projectRoot>/. Unset, that is the operator's real
+// checkout. Always created — unlike tempRepo it must exist even without git.
+let artifactRoot = '';
 beforeAll(() => {
   if (gitAvailable()) tempRepo = makeTempRepo();
+  artifactRoot = mkdtempSync(path.join(os.tmpdir(), 'artibot-runner-artifacts-'));
 });
 afterAll(() => {
   if (tempRepo) {
     try { rmSync(tempRepo, { recursive: true, force: true }); } catch { /* ignore */ }
   }
+  try { rmSync(artifactRoot, { recursive: true, force: true }); } catch { /* ignore */ }
 });
+
+/**
+ * startAutopilot with the artifact-isolation override applied.
+ * @param {object} args - Same shape as startAutopilot.
+ * @returns {Promise<object>}
+ */
+function start(args) {
+  return startAutopilot({
+    ...args,
+    options: { ...(args.options || {}), projectRoot: artifactRoot },
+  });
+}
 
 const sessionsToClean = new Set();
 function track(id) {
@@ -75,7 +94,7 @@ afterEach(async () => {
 });
 
 async function phase2Instruction(options, label) {
-  const r = await startAutopilot({
+  const r = await start({
     task: `runner test ${label}`,
     mode: 'default',
     options,
@@ -178,7 +197,7 @@ describe('runPhase2Execute — runner branching (ADR-003 Stage 1)', () => {
 
   it('should inherit the session worktree into the dynamic-run instruction (ADR-003 §4 cwdHint)', async () => {
     if (!gitAvailable()) return;
-    const r = await startAutopilot({
+    const r = await start({
       task: 'runner test dynamic worktree',
       mode: 'default',
       options: { runner: 'dynamic', useWorktree: true, worktreeCwd: tempRepo },
@@ -200,7 +219,7 @@ describe('runPhase2Execute — runner branching (ADR-003 Stage 1)', () => {
   });
 
   it('should stay on team-create when a legacy state lacks the runner field', async () => {
-    const r = await startAutopilot({
+    const r = await start({
       task: 'runner test legacy',
       mode: 'default',
       options: {},

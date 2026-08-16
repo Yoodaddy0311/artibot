@@ -19,16 +19,58 @@
 
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
-import { getPluginRoot } from './ci-utils.js';
+import { assertScanFloors, getPluginsDir, listPluginRoots } from './ci-utils.js';
 
 /** Directories never scanned (vendored / generated / VCS). */
-const IGNORE_DIRS = new Set(['node_modules', 'runtime', 'repos', '.git']);
+const IGNORE_DIRS = new Set(['node_modules', 'runtime', 'repos', '.git', '_reports', 'coverage']);
 
-/** Top-level entry points under the plugin root that are scanned for .md. */
-const SCAN_DIRS = ['commands', 'skills', 'docs'];
+/**
+ * Top-level entry points under each plugin root that are scanned for .md.
+ * Kept in lockstep with `validate-doc-links.js#SCAN_DIRS` — see the note there
+ * on why `rubrics` is listed.
+ */
+const SCAN_DIRS = ['commands', 'skills', 'docs', 'rubrics'];
 
-/** Single .md files at the plugin root that are scanned directly. */
+/**
+ * Single .md files at each plugin root that are scanned directly. CHANGELOG.md
+ * and RELEASE.md are excluded; see `validate-doc-links.js#SCAN_FILES`.
+ */
 const ROOT_FILES = ['CLAUDE.md', 'README.md', 'AGENTS.md'];
+
+/**
+ * Pre-existing violations that predate this gate's expansion to every plugin
+ * root, keyed `<plugin>/<path-within-plugin>::<rule>` → exact occurrence count.
+ *
+ * ── Why a keyed exact count and not a total ─────────────────────────────────
+ * A single "baseline: 2" number absorbs a brand-new violation the moment an old
+ * one is fixed. Keying by file *and* rule *and* count makes each entry a precise
+ * claim, so a third broken row in an already-listed file still fails.
+ *
+ * ── Why this ratchet cannot loosen itself ───────────────────────────────────
+ * The comparison is `!==`, not `>`. Fixing a listed violation turns the gate RED
+ * with "stale entry — delete this line", so the baseline can only ever be
+ * removed by hand, never widened by drift. There is no code path that rewrites
+ * this map, and no environment condition that skips the comparison: a missing
+ * or unreadable tree fails the denominator floor first
+ * (`ci-utils.js#assertScanFloors`) rather than reporting a tightened baseline.
+ * That is the failure mode `check-unused-ratchet` had when it printed
+ * "Baseline tightened 59 → 0. PASS." with `node_modules` absent.
+ *
+ * ── Entries (measured 2026-08-16) ───────────────────────────────────────────
+ * Both are genuine GFM table bugs in artibot-cowork: a data row carries fewer
+ * columns than its header, so the table renders ragged. They are left unfixed
+ * here only because cowork documentation content is owned elsewhere; the fix in
+ * each case is to add the missing cell (or escape a literal `|` as `\|`).
+ *
+ * Line numbers are intentionally omitted — they rot within a single editing
+ * session, and this map must survive concurrent edits to the same files.
+ *
+ * @type {Record<string, number>}
+ */
+export const KNOWN_RENDER_VIOLATIONS = {
+  'artibot-cowork/skills/long-form-writing/SKILL.md::table-pipe-column-mismatch': 1,
+  'artibot-cowork/skills/marketing-strategy/references/positioning-template.md::table-pipe-column-mismatch': 1,
+};
 
 const FENCE_RE = /^ {0,3}(?:>\s*)*```/;
 
@@ -242,12 +284,12 @@ function collectMarkdown(dir, root) {
 }
 
 /**
- * Resolve the full list of .md files to validate under the plugin root.
+ * Resolve the full list of .md files to validate under one plugin root.
  *
  * @param {string} root - Plugin root.
  * @returns {string[]} Absolute .md paths.
  */
-function listTargets(root) {
+export function listTargets(root) {
   const targets = [];
   for (const sub of SCAN_DIRS) {
     targets.push(...collectMarkdown(path.join(root, sub), root));
@@ -259,29 +301,119 @@ function listTargets(root) {
   return targets;
 }
 
-function main() {
-  const root = getPluginRoot();
-  const files = listTargets(root);
-  const errors = [];
+/**
+ * Run every rule across every project plugin root.
+ *
+ * @returns {{
+ *   counts: Record<string, number>,
+ *   total: number,
+ *   findings: Array<{ key: string, message: string }>,
+ * }} Per-root file tallies plus one finding per violation, each carrying the
+ *   `<plugin>/<path>::<rule>` key used by the ratchet.
+ */
+export function scanAllPlugins() {
+  const pluginsDir = getPluginsDir();
+  /** @type {Record<string, number>} */
+  const counts = {};
+  /** @type {Array<{ key: string, message: string }>} */
+  const findings = [];
+  let total = 0;
 
-  for (const abs of files) {
-    const relPath = path.relative(root, abs).split(path.sep).join('/');
-    const content = readFileSync(abs, 'utf-8');
-    for (const rule of RULES) {
-      errors.push(...rule.fn(content, relPath));
+  for (const root of listPluginRoots()) {
+    const files = listTargets(root);
+    counts[path.basename(root)] = files.length;
+    total += files.length;
+    for (const abs of files) {
+      // Display path is plugin-qualified so messages from two plugins that share
+      // a relative path (e.g. both `README.md`) stay distinguishable.
+      const relPath = path.relative(pluginsDir, abs).split(path.sep).join('/');
+      const content = readFileSync(abs, 'utf-8');
+      for (const rule of RULES) {
+        for (const message of rule.fn(content, relPath)) {
+          findings.push({ key: `${relPath}::${rule.name}`, message });
+        }
+      }
+    }
+  }
+  return { counts, total, findings };
+}
+
+/**
+ * Compare findings against {@link KNOWN_RENDER_VIOLATIONS}.
+ *
+ * @param {Array<{ key: string, message: string }>} findings - Raw violations.
+ * @param {Record<string, number>} [baseline] - Allowlist (injectable for tests).
+ * @returns {{ unexpected: string[], stale: string[] }} `unexpected` holds
+ *   messages for violations above baseline; `stale` holds baseline entries whose
+ *   observed count no longer matches (including entries now fully fixed).
+ */
+export function applyRatchet(findings, baseline = KNOWN_RENDER_VIOLATIONS) {
+  /** @type {Record<string, {count: number, messages: string[]}>} */
+  const observed = {};
+  for (const f of findings) {
+    observed[f.key] ??= { count: 0, messages: [] };
+    observed[f.key].count += 1;
+    observed[f.key].messages.push(f.message);
+  }
+
+  const unexpected = [];
+  const stale = [];
+
+  for (const [key, seen] of Object.entries(observed)) {
+    const allowed = baseline[key] ?? 0;
+    if (seen.count > allowed) {
+      // Report only the surplus so a listed file's known bug stays quiet while
+      // a newly added one in the same file still surfaces.
+      unexpected.push(...seen.messages.slice(allowed));
     }
   }
 
-  if (errors.length > 0) {
-    for (const e of errors) console.error(`FAIL: ${e}`);
+  for (const [key, allowed] of Object.entries(baseline)) {
+    const seen = observed[key]?.count ?? 0;
+    if (seen !== allowed) {
+      stale.push(
+        `${key}: baseline claims ${allowed} violation(s) but ${seen} observed — ` +
+          (seen < allowed
+            ? 'fixed or moved; tighten KNOWN_RENDER_VIOLATIONS by editing/removing this entry'
+            : 'unreachable (surplus already reported above)'),
+      );
+    }
+  }
+
+  return { unexpected, stale };
+}
+
+function main() {
+  const { counts, total, findings } = scanAllPlugins();
+  const tally = Object.entries(counts)
+    .map(([name, n]) => `${name}=${n}`)
+    .join(' ');
+
+  // Denominator first: a shrunken or missing tree must not be able to present
+  // itself as a clean run, nor as a "tightened" baseline.
+  const floorFailures = assertScanFloors(counts);
+  if (floorFailures.length > 0) {
+    for (const f of floorFailures) console.error(`FAIL: scan-denominator: ${f}`);
+    console.error(`\nScanned ${total} file(s) [${tally}] — denominator assertion failed.`);
+    process.exit(1);
+  }
+
+  const { unexpected, stale } = applyRatchet(findings);
+
+  if (unexpected.length > 0 || stale.length > 0) {
+    for (const e of unexpected) console.error(`FAIL: ${e}`);
+    for (const s of stale) console.error(`FAIL: stale-baseline: ${s}`);
     console.error(
-      `\n${errors.length} markdown rendering error(s) found in ${files.length} file(s).`,
+      `\n${unexpected.length} new + ${stale.length} stale-baseline markdown rendering ` +
+        `error(s) in ${total} file(s) [${tally}].`,
     );
     process.exit(1);
   }
 
+  const known = Object.values(KNOWN_RENDER_VIOLATIONS).reduce((a, b) => a + b, 0);
   console.log(
-    `Markdown rendering clean (${files.length} files, ${RULES.length} rules).`,
+    `Markdown rendering clean (${total} files [${tally}], ${RULES.length} rules, ` +
+      `${known} baselined violation(s) unchanged).`,
   );
 }
 

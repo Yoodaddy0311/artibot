@@ -1,7 +1,7 @@
 ---
 description: (Artibot) Parallel team execution with cross-check — persistent team mode, leader delegates only, implementation on frontier 티어(model-policy 해석, xhigh effort 권장), review phases도 frontier 티어(fable 마이그레이션 이후 model-policy 해석)
 argument-hint: '[task] e.g. "이 기능 구현하고 테스트도 작성해줘"'
-allowed-tools: [Read, Glob, Grep, Bash, Agent, SendMessage, TaskCreate, TaskUpdate, TaskList, TaskGet]
+allowed-tools: [Read, Glob, Grep, Bash, Agent, AskUserQuestion, SendMessage, TaskCreate, TaskUpdate, TaskList, TaskGet]
 toolset: team
 ---
 

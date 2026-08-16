@@ -58,14 +58,34 @@ function countAutopilotBranches(repo) {
 }
 
 let tempRepo = null;
+// ARTIFACT ISOLATION CONTRACT (extends the branch-leak guard documented in the
+// module header to *written artifacts*): startAutopilot writes docs/PRD/ and
+// abortAutopilot writes reports/AUTOPILOT/ under <projectRoot>/. Unset, that is
+// the operator's real checkout. Always created — unlike tempRepo it must exist
+// even when git is unavailable.
+let artifactRoot = '';
 beforeAll(() => {
   if (gitAvailable()) tempRepo = makeTempRepo();
+  artifactRoot = mkdtempSync(path.join(os.tmpdir(), 'artibot-eng-artifacts-'));
 });
 afterAll(() => {
   if (tempRepo) {
     try { rmSync(tempRepo, { recursive: true, force: true }); } catch { /* ignore */ }
   }
+  try { rmSync(artifactRoot, { recursive: true, force: true }); } catch { /* ignore */ }
 });
+
+/**
+ * startAutopilot with the artifact-isolation override applied.
+ * @param {object} args - Same shape as startAutopilot.
+ * @returns {Promise<object>}
+ */
+function start(args) {
+  return startAutopilot({
+    ...args,
+    options: { ...(args.options || {}), projectRoot: artifactRoot },
+  });
+}
 
 const sessionsToClean = new Set();
 function track(id) {
@@ -90,7 +110,7 @@ afterEach(async () => {
 
 describe('engine + worktree integration — Phase 2 EXECUTE', () => {
   it('case 1: useWorktree unset → state.worktreePath is null and instruction has no worktreePath', async () => {
-    const r = await startAutopilot({
+    const r = await start({
       task: 'wave-c case1 backward compat',
       mode: 'plan',
       options: {},
@@ -109,7 +129,7 @@ describe('engine + worktree integration — Phase 2 EXECUTE', () => {
   it('case 2: useWorktree=true (isolated repo) → worktree+branch created in temp repo, none in operator repo', async () => {
     if (!gitAvailable()) return;
     const before = countAutopilotBranches(tempRepo);
-    const r = await startAutopilot({
+    const r = await start({
       task: 'wave-c case2 worktree attempt',
       mode: 'default',
       options: { useWorktree: true, worktreeCwd: tempRepo },
@@ -135,7 +155,7 @@ describe('engine + worktree integration — Phase 2 EXECUTE', () => {
   it('case 3: abortAutopilot graceful removes worktree+branch from the temp repo', async () => {
     if (!gitAvailable()) return;
     const before = countAutopilotBranches(tempRepo);
-    const r = await startAutopilot({
+    const r = await start({
       task: 'wave-c case3 abort cleanup',
       mode: 'default',
       options: { useWorktree: true, worktreeCwd: tempRepo },

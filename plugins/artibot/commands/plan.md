@@ -147,27 +147,27 @@ const { footprint, sizing, autopilot } = sizePlan(tasks, { size: sizeFlag /* qui
 
 ### 산출물 함수
 
-문서 산출물(TODO 추적 / PRD / ADR)은 **공유 산출물 레이어** `lib/planning/artifacts.js`를 호출해 생성한다. `/plan`은 이 레이어를 직접 재구현하지 않고 **호출만** 한다. 세 함수의 정확한 시그니처:
+문서 산출물(TODO 추적 / PRD / ADR)은 **공유 산출물 레이어** `lib/planning/artifacts.js`를 호출해 생성한다. `/plan`은 이 레이어를 직접 재구현하지 않고 **호출만** 한다. 세 함수의 정확한 시그니처 (**전부 async — `await` 필수**):
 
 ```
-writePRD({ projectRoot, slug, title, sections, linkedAdrs, now }) → { ok, prdPath }
+await writePRD({ projectRoot, slug, title, sections, linkedAdrs, now }) → { ok, prdPath }
   // docs/PRD/<slug>-<date>.md 생성
-ensureADR({ projectRoot, title, options, decision, rationale, now }) → { ok, adrPath, number }
+await ensureADR({ projectRoot, title, options, decision, rationale, now }) → { ok, adrPath, number }
   // docs/adr/ADR-NNN-slug.md 생성 (멱등 — 동일 결정 재호출 시 기존 ADR 재사용)
-syncTodo({ projectRoot, planMarkdown, planFile, sessionId, now }) → { ok, stateFile, progress }
+await syncTodo({ projectRoot, planMarkdown, planFile, sessionId, now }) → { ok, stateFile, progress }
   // .plan-state.json 기록 (내부적으로 PlanTracker 사용). progress = { total, completed, percentage }
 ```
 
 문서 라이프사이클 관리(조회·인덱스·아카이브·승계)도 **같은 레이어**의 다음 함수로 수행한다 (직접 재구현 금지 — 호출만):
 
 ```
-listArtifacts({ projectRoot, kind, filter, now }) → { ok, items }
+await listArtifacts({ projectRoot, kind, filter, now }) → { ok, items }
   // filter: active|done|stale|all. items = 각 문서의 slug/status/date/ageDays/progress/link
-indexArtifacts({ projectRoot, kind, now }) → { ok, indexPath, count }
+await indexArtifacts({ projectRoot, kind, now }) → { ok, indexPath, count }
   // docs/<KIND>/INDEX.md 생성·갱신. writePRD/ensureADR/archiveStale 이후 자동 호출
-archiveStale({ projectRoot, kind, olderThanDays, statuses, dryRun, now }) → { ok, moved, dryRun }
+await archiveStale({ projectRoot, kind, olderThanDays, statuses, dryRun, now }) → { ok, moved, dryRun }
   // stale/done 문서를 docs/<KIND>/_archive/ 로 이동 (삭제 아님). dryRun:true 면 이동 예정만 반환
-supersede({ projectRoot, kind, oldSlug, newPath, now }) → { ok, oldPath }
+await supersede({ projectRoot, kind, oldSlug, newPath, now }) → { ok, oldPath }
   // 옛 문서(oldSlug)에 newPath 로의 superseded 표식
 ```
 
@@ -190,7 +190,10 @@ if (fs.existsSync(mpDir)) {
 }
 const pluginRoot = candidates.find((c) => fs.existsSync(path.join(c, 'lib/planning/artifacts.js')));
 if (!pluginRoot) throw new Error('Artibot planning layer not found. Set CLAUDE_PLUGIN_ROOT or install via marketplace.');
-const { writePRD, ensureADR, syncTodo } = await import(toFileUrl(path.join(pluginRoot, 'lib/planning/artifacts.js')));
+// 아래 8개는 **전부 async 함수**다. 구조분해에 await 를 빠뜨리면 Promise 를 분해해
+// 전 필드가 조용히 undefined 가 된다 (throw 하지 않으므로 티가 안 난다).
+const { writePRD, ensureADR, syncTodo, indexArtifacts, listArtifacts, archiveStale, supersede } =
+  await import(toFileUrl(path.join(pluginRoot, 'lib/planning/artifacts.js')));
 ```
 
 ### 1. 기본 — TODO 추적 (`syncTodo`)
@@ -198,7 +201,7 @@ const { writePRD, ensureADR, syncTodo } = await import(toFileUrl(path.join(plugi
 플랜 생성 직후 항상 호출. `.plan-state.json`에 태스크 목록·진행률·세션을 기록해 세션 간 추적을 가능케 한다.
 
 ```js
-const { ok, stateFile, progress } = syncTodo({
+const { ok, stateFile, progress } = await syncTodo({   // async — await 필수
   projectRoot: process.cwd(),
   planMarkdown,            // 방금 생성한 IMPLEMENTATION PLAN 마크다운
   planFile: 'docs/plan.md',// 플랜 원본 경로 (있으면)
@@ -225,7 +228,7 @@ Tasks: 5/12 (42%)   state: .plan-state.json
 ### 4. `--prd` — PRD 생성 (옵트인)
 
 ```js
-const { ok, prdPath } = writePRD({
+const { ok, prdPath } = await writePRD({   // async — await 필수
   projectRoot: process.cwd(),
   slug: '<feature-slug>',
   title: '<feature title>',
@@ -235,14 +238,14 @@ const { ok, prdPath } = writePRD({
 });
 ```
 
-`writePRD()` 호출 직후 항상 `indexArtifacts({ projectRoot, kind: 'PRD', now })`를 호출해 `docs/PRD/INDEX.md`를 자동 갱신한다 (신규 PRD가 인덱스에 즉시 반영되도록). 마찬가지로 `ensureADR()` 직후 `indexArtifacts({ kind: 'adr' })`로 ADR 인덱스를 갱신한다.
+`writePRD()` 호출 직후 항상 `indexArtifacts({ projectRoot, kind: 'prd', now })`를 호출해 `docs/PRD/INDEX.md`를 자동 갱신한다 (신규 PRD가 인덱스에 즉시 반영되도록). 마찬가지로 `ensureADR()` 직후 `indexArtifacts({ kind: 'adr' })`로 ADR 인덱스를 갱신한다.
 
 ### 5. `--adr` — 결정 기록 (옵트인 + 결정 존재 시에만)
 
 `--adr` 플래그가 있고 플랜에 either/or 결정(2개 이상 실선택지 비교)이 실제로 있을 때만 호출한다. 결정이 없으면 ADR을 만들지 않는다.
 
 ```js
-const { ok, adrPath, number } = ensureADR({
+const { ok, adrPath, number } = await ensureADR({   // async — await 필수
   projectRoot: process.cwd(),
   title: '<decision title>',
   options: ['선택지 A', '선택지 B'],   // 비교한 실선택지 (2개 이상)
@@ -268,9 +271,9 @@ const { ok, adrPath, number } = ensureADR({
 `listArtifacts({ filter })`로 PRD/플랜 문서를 나열한다. 플랜을 새로 만들지 않으며, 어떤 문서도 이동·삭제하지 않는다. `filter`는 `active`(진행중) | `done`(완료) | `stale`(오래됨) | `all`(기본).
 
 ```js
-const { ok, items } = listArtifacts({
+const { ok, items } = await listArtifacts({   // async — await 필수
   projectRoot: process.cwd(),
-  kind: 'PRD',
+  kind: 'prd',
   filter: 'all',           // --list 인자 (기본 all)
   now: new Date(),
 });
@@ -296,9 +299,9 @@ legacy-import        stale       2026-02-14  115d  0/6   0%   docs/PRD/legacy-im
 
 ```js
 // 1단계 — 기본: 미리보기 (이동 없음)
-const preview = archiveStale({
+const preview = await archiveStale({   // async — await 필수
   projectRoot: process.cwd(),
-  kind: 'PRD',
+  kind: 'prd',
   olderThanDays: 90,       // --older-than <Nd> (기본 90)
   statuses: ['done', 'stale'],
   dryRun: true,            // 기본값 — --apply 없으면 항상 true
@@ -308,9 +311,9 @@ const preview = archiveStale({
 
 // 2단계 — --apply 가 있을 때만: 실제 이동 + 인덱스 갱신
 if (userPassedApply) {
-  const result = archiveStale({ projectRoot: process.cwd(), kind: 'PRD',
+  const result = await archiveStale({ projectRoot: process.cwd(), kind: 'prd',
     olderThanDays: 90, statuses: ['done', 'stale'], dryRun: false, now: new Date() });
-  indexArtifacts({ projectRoot: process.cwd(), kind: 'PRD', now: new Date() }); // INDEX.md 갱신
+  await indexArtifacts({ projectRoot: process.cwd(), kind: 'prd', now: new Date() }); // INDEX.md 갱신
 }
 ```
 
@@ -334,9 +337,9 @@ WILL MOVE:
 옛 문서(`oldSlug`)를 새 문서(`newPath`)로 승계됨(superseded)을 표시한다. 파일을 삭제하지 않고 승계 표식만 추가한다.
 
 ```js
-const { ok, oldPath } = supersede({
+const { ok, oldPath } = await supersede({   // async — await 필수
   projectRoot: process.cwd(),
-  kind: 'PRD',
+  kind: 'prd',
   oldSlug: 'payment-system-v1',     // --supersede 첫 인자
   newPath: 'docs/PRD/payment-system-2026-06-01.md', // --supersede 둘째 인자
   now: new Date(),

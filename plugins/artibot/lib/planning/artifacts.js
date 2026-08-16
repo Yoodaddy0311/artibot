@@ -268,6 +268,35 @@ function renderPrdSections(sections) {
 }
 
 /**
+ * Coerce one `linkedAdrs` entry to a display string, or `null` if it is not a
+ * shape we recognise.
+ *
+ * Callers of {@link writePRD} are command prompts (`commands/plan.md`,
+ * `commands/ultraplan.md`, `commands/go.md`) whose JS is generated at runtime,
+ * so no static type check reaches this boundary. Passing the `ensureADR()`
+ * result object straight through is the natural thing to write — and it used to
+ * render as `[object Object]` in the PRD header. Normalise instead of trusting.
+ *
+ * `number` must be a non-negative integer — that is what `ensureADR` produces.
+ * `Number.isFinite` alone would let `-1` and `1.5` through and render the broken
+ * labels `ADR-0-1` / `ADR-1.5`, which contradicts the "drop, don't render"
+ * promise above.
+ *
+ * @param {unknown} entry
+ * @returns {string|null} Canonical `ADR-NNN`, a caller-supplied string, or null.
+ */
+function adrLinkLabel(entry) {
+  if (typeof entry === 'string') return entry.trim() || null;
+  if (!entry || typeof entry !== 'object') return null;
+  const { number, adrPath } = /** @type {{number?: unknown, adrPath?: unknown}} */ (entry);
+  if (Number.isInteger(number) && /** @type {number} */ (number) >= 0) {
+    return `ADR-${String(number).padStart(3, '0')}`;
+  }
+  if (typeof adrPath === 'string' && adrPath.trim()) return path.basename(adrPath.trim(), '.md');
+  return null;
+}
+
+/**
  * Write a PRD (Product Requirements Document) under `docs/PRD/`.
  * Non-destructive: collisions get a `-NN` suffix.
  *
@@ -277,10 +306,15 @@ function renderPrdSections(sections) {
  * @param {string} args.title - Human title for the H1 header.
  * @param {Record<string, string>} args.sections - { 배경, 목표, 비목표,
  *   시나리오, 설계, 산출물, 실행계획, 위험, 수락기준 }. Empty values allowed.
- * @param {string[]} [args.linkedAdrs=[]] - ADR ids/paths to link in header.
+ * @param {Array<string|{number?: number, adrPath?: string}>|string|object} [args.linkedAdrs=[]]
+ *   ADR links for the header. Canonical form is `string[]` (`['ADR-007']`); an
+ *   `ensureADR()` result object is also accepted and normalised to `ADR-NNN`,
+ *   and a bare non-array value is treated as a single entry. Unrecognised
+ *   entries are dropped and counted in `droppedAdrLinks` rather than rendered
+ *   as `[object Object]` or a malformed `ADR-…` label.
  * @param {NowFn|Date} [args.now] - Injectable clock.
  * @returns {Promise<{ ok: boolean, prdPath?: string, deduped?: boolean,
- *   error?: string }>}
+ *   droppedAdrLinks?: number, error?: string }>}
  */
 export async function writePRD({ projectRoot, slug, title, sections, linkedAdrs = [], now }) {
   try {
@@ -297,7 +331,26 @@ export async function writePRD({ projectRoot, slug, title, sections, linkedAdrs 
     const base = `${wantSlug}-${ymd(when)}`;
     const prdPath = await nonCollidingPath(dir, base, '.md');
 
-    const links = Array.isArray(linkedAdrs) ? linkedAdrs.filter(Boolean) : [];
+    // Normalise ADR links. Blank entries are skipped quietly; entries we cannot
+    // label are counted so the caller learns instead of shipping a corrupt
+    // header (see `adrLinkLabel`).
+    // A bare value (not an array) is a common generated-caller slip. Treat it as
+    // a single entry rather than discarding it silently — each entry is still
+    // validated below, so an unusable one is reported, never rendered.
+    const rawLinks = Array.isArray(linkedAdrs)
+      ? linkedAdrs
+      : (linkedAdrs === null || linkedAdrs === undefined ? [] : [linkedAdrs]);
+    const isBlank = (e) => e === null || e === undefined
+      || (typeof e === 'string' && e.trim() === '');
+    const links = [];
+    let dropped = 0;
+    for (const entry of rawLinks) {
+      if (isBlank(entry)) continue;
+      const label = adrLinkLabel(entry);
+      if (label) links.push(label);
+      else dropped += 1;
+    }
+
     const linkLine = links.length
       ? `linked_adrs: ${links.join(', ')}\n`
       : '';
@@ -315,7 +368,7 @@ export async function writePRD({ projectRoot, slug, title, sections, linkedAdrs 
       + renderPrdSections(sections);
 
     await atomicWriteText(prdPath, content);
-    return { ok: true, prdPath };
+    return dropped ? { ok: true, prdPath, droppedAdrLinks: dropped } : { ok: true, prdPath };
   } catch (err) {
     return { ok: false, error: err?.message || String(err) };
   }

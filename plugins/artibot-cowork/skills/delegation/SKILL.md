@@ -106,7 +106,7 @@ Agent(subagent_type, { isolation: "worktree" })
 
 - 이 플러그인은 `artibot.config.json`을 출하하지 않으므로, 전역 기본값을 켜 두는 설정 항목이 없습니다. 격리가 필요한 호출마다 위 옵션을 직접 지정하세요
 - 기본값: `false` (opt-in)
-- 완료 후 결과가 메인 worktree로 자동 병합 (`mergeStrategy: "auto"`)
+- 이 플러그인은 자동 병합 메커니즘을 출하하지 않습니다. 격리된 worktree의 결과는 에이전트가 보고한 내용을 확인한 뒤 직접 적용하세요
 
 **Result Aggregation**: Collect -> Deduplicate -> Cross-reference -> Prioritize -> Synthesize
 
@@ -248,70 +248,6 @@ Progress:
 | Monitor execution | HIGH | Intervention timing and strategy are situational |
 | Aggregate results | MEDIUM | Process defined, synthesis requires judgment |
 | Cleanup | LOW | Shutdown request to every teammate is mandatory |
-
-## Complexity Budget Guide
-
-Use `ComplexityBudget` from `lib/orchestration/complexity-budget.js` to objectively assess whether a task should be split before delegation.
-
-### Import
-
-```js
-import { ComplexityBudget } from '../../lib/orchestration/complexity-budget.js';
-```
-
-### Using `shouldSplit()`
-
-Call `shouldSplit()` with the task description text to get a split recommendation. The budget analyzes line count, subtask count, and file references against configurable thresholds:
-
-```
-const budget = new ComplexityBudget();
-// Default thresholds: lines > 150, subtasks > 5, files > 7
-
-const result = budget.shouldSplit(taskDescription);
-// result = { shouldSplit: true, reasons: ['Subtask count (8) exceeds threshold (5)'] }
-
-if (result.shouldSplit) {
-  // Use suggestSplits() to find natural break points
-  const splits = budget.suggestSplits(taskDescription);
-  // splits.headings -> markdown heading boundaries
-  // splits.numberedGroups -> numbered list items
-  // splits.fileGroups -> files grouped by directory
-}
-```
-
-### Integration with Delegation Mode Decision
-
-Add complexity budget as a pre-check before delegation mode selection:
-
-| Step | Action |
-|------|--------|
-| 1. Receive task description | Parse the raw request text |
-| 2. `budget.shouldSplit(text)` | Check if the task exceeds complexity thresholds |
-| 3. If `shouldSplit: true` | Decompose into sub-tasks using `suggestSplits()` |
-| 4. Score each sub-task | Apply delegation mode scoring (complexity/parallelism/communication/scale) |
-| 5. Delegate sub-tasks | Sub-Agent or Team mode per sub-task score |
-
-### Custom Thresholds
-
-Adjust thresholds for different contexts:
-
-```
-// Stricter thresholds for sub-agent mode (smaller tasks)
-const subAgentBudget = new ComplexityBudget({ lines: 80, subtasks: 3, files: 5 });
-
-// Relaxed thresholds for team mode (larger tasks acceptable)
-const teamBudget = new ComplexityBudget({ lines: 300, subtasks: 10, files: 15 });
-```
-
-### Quick Complexity Check
-
-Use `getScore()` for a quick complexity level assessment without split recommendations:
-
-```
-const score = budget.getScore(taskDescription);
-// score = { lines: 45, subtasks: 3, files: 2, level: 'LOW' }
-// level: 'LOW' | 'MEDIUM' | 'HIGH'
-```
 
 ## Anti-Patterns
 

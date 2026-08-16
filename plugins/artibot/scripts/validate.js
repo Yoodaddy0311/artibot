@@ -3,12 +3,42 @@
  * Validates plugin structure, manifest, agents, skills, commands, and hooks.
  *
  * Usage: node scripts/validate.js
+ *
+ * ── Which validators span which plugin roots (2026-08-16) ───────────────────
+ * `agents` / `skills` / `commands` scan EVERY project plugin root, because the
+ * frontmatter contract they enforce is identical in each. Until this change
+ * they scanned only `plugins/artibot/`, so cowork's 46 skills / 21 commands /
+ * 12 agents were validated by nothing at all while the script printed PASS.
+ *
+ * The remaining validators stay deliberately main-plugin-only. Each exclusion
+ * is a measured judgement, not an oversight:
+ *
+ *   manifest     — per-root data, but cowork's plugin.json is already covered
+ *                  by `scripts/ci/sync-marketplace-meta.mjs`; duplicating the
+ *                  check here would give two owners for one invariant.
+ *   hooks        — cowork ships NO hooks by design (`plugins/artibot-cowork/
+ *                  README.md`: "No hooks, no external scripts"). Verified: it
+ *                  has no `hooks/` directory. Including it would emit a
+ *                  permanent "hooks.json not found" warning for a file that is
+ *                  correct to be absent.
+ *   config       — `artibot.config.json` is the main plugin's runtime config;
+ *                  cowork has none and is not supposed to.
+ *   model-policy — the policy roster in `artibot.config.json#/agents/
+ *                  modelPolicy` lists exactly the main plugin's 28 agents.
+ *                  Measured: cowork's `case-study-writer` and
+ *                  `long-form-writer` appear in no bucket, and
+ *                  `findModelPolicyDrift` additionally errors on every policy
+ *                  agent with no file — pointing it at cowork's 12-agent
+ *                  directory would manufacture 16 false "missing agent"
+ *                  errors. Cross-plugin model policy needs its own roster
+ *                  before it can be gated; that is a separate change.
  */
 
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getPolicyModel, resolveModel } from '../lib/core/model-policy.js';
+import { assertEntityFloors, listEntityRoots, qualify } from './ci/skill-scan-roots.js';
 import {
   collectPolicyAgents,
   findModelPolicyDrift,
@@ -92,116 +122,170 @@ async function validateManifest() {
   }
 }
 
+/**
+ * Label an entity for reporting: bare name inside the primary plugin, prefixed
+ * with the root elsewhere, so `daily` and `artibot-cowork/daily` never read as
+ * the same finding (31 skill names are shared between the two plugins).
+ */
+function label(rootName, entity) {
+  return qualify(rootName, entity);
+}
+
+/**
+ * Report per-root denominators and turn any floor miss into a hard error.
+ * Without this, "0 problems" and "0 files examined" print identically — the
+ * defect that let all of cowork sit outside these gates while they said PASS.
+ *
+ * @param {'skills'|'commands'|'agents'} kind - Entity kind.
+ * @param {Record<string, number>} perRoot - Root name → entities validated.
+ * @param {Record<string, number>} [candidatesByRoot] - Root name → entities
+ *   *considered*. When given, the count prints as `validated/considered`; the
+ *   gap is the interesting number (e.g. a skills/ subdirectory with no
+ *   SKILL.md is counted as a candidate but never validates).
+ */
+function reportScan(kind, perRoot, candidatesByRoot = null) {
+  const breakdown = Object.entries(perRoot).map(([r, n]) => `${r}=${n}`).join(' ') || '(none)';
+  const sum = (o) => Object.values(o).reduce((a, b) => a + b, 0);
+  const count = candidatesByRoot ? `${sum(perRoot)}/${sum(candidatesByRoot)}` : `${sum(perRoot)}`;
+  console.log(`  [${kind}] ${count} ${kind.slice(0, -1)}(s) validated across ${Object.keys(perRoot).length} root(s): ${breakdown}`);
+  for (const f of assertEntityFloors(kind, perRoot)) error(`[${kind}] ${f}`);
+}
+
 async function validateAgents() {
-  const agentsDir = join(PLUGIN_ROOT, 'agents');
-  if (!await exists(agentsDir)) {
-    warn('[agents] agents/ directory not found');
+  const roots = listEntityRoots('agents');
+  const perRoot = {};
+
+  for (const { name: rootName, dir } of roots) {
+    const files = await readdir(dir);
+    // Skip INDEX.md (and similar catalog/index files) — they are catalog files, not agent definitions.
+    const mdFiles = files.filter(f => f.endsWith('.md') && f.toLowerCase() !== 'index.md');
+    perRoot[rootName] = mdFiles.length;
+
+    for (const file of mdFiles) {
+      const content = await readFile(join(dir, file), 'utf-8');
+      const id = label(rootName, file);
+      if (!content.includes('---')) {
+        error(`[agents] ${id} missing YAML frontmatter`);
+      }
+      if (!content.match(/^---\s*\n[\s\S]*?name:/m)) {
+        warn(`[agents] ${id} missing "name" in frontmatter`);
+      }
+      // Validate modelTier field presence
+      if (!content.match(/modelTier\s*:/)) {
+        warn(`[agents] ${id} missing "modelTier" field in frontmatter`);
+      }
+    }
+  }
+
+  reportScan('agents', perRoot);
+}
+
+/**
+ * Validate one SKILL.md's frontmatter contract.
+ * @param {string} id - Reporting label (root-qualified outside the main plugin).
+ * @param {string} content - Raw file content.
+ */
+function validateSkillContent(id, content) {
+  if (!content.includes('---')) {
+    error(`[skills] ${id}/SKILL.md missing YAML frontmatter`);
     return;
   }
-
-  const files = await readdir(agentsDir);
-  // Skip INDEX.md (and similar catalog/index files) — they are catalog files, not agent definitions.
-  const mdFiles = files.filter(f => f.endsWith('.md') && f.toLowerCase() !== 'index.md');
-
-  if (mdFiles.length === 0) {
-    warn('[agents] No agent .md files found');
+  // Validate Progressive Disclosure frontmatter block (opening --- block)
+  const frontmatterMatch = content.match(/^---\s*\n([\s\S]*?)\n---/);
+  if (!frontmatterMatch) {
+    warn(`[skills] ${id}/SKILL.md frontmatter block not properly closed`);
     return;
   }
-
-  for (const file of mdFiles) {
-    const content = await readFile(join(agentsDir, file), 'utf-8');
-    if (!content.includes('---')) {
-      error(`[agents] ${file} missing YAML frontmatter`);
-    }
-    if (!content.match(/^---\s*\n[\s\S]*?name:/m)) {
-      warn(`[agents] ${file} missing "name" in frontmatter`);
-    }
-    // Validate modelTier field presence
-    if (!content.match(/modelTier\s*:/)) {
-      warn(`[agents] ${file} missing "modelTier" field in frontmatter`);
-    }
+  const frontmatter = frontmatterMatch[1];
+  if (!frontmatter.includes('name:')) {
+    warn(`[skills] ${id}/SKILL.md missing "name" in frontmatter`);
   }
-
-  console.log(`  [agents] ${mdFiles.length} agent(s) validated`);
+  if (!frontmatter.includes('description:') && !frontmatter.includes('purpose:')) {
+    warn(`[skills] ${id}/SKILL.md missing "description" or "purpose" in frontmatter`);
+  }
 }
 
 async function validateSkills() {
-  const skillsDir = join(PLUGIN_ROOT, 'skills');
-  if (!await exists(skillsDir)) {
-    warn('[skills] skills/ directory not found');
+  const perRoot = {};
+  const candidates = {};
+
+  for (const { name: rootName, dir } of listEntityRoots('skills')) {
+    const entries = await readdir(dir, { withFileTypes: true });
+    const skillDirs = entries.filter(e => e.isDirectory());
+    candidates[rootName] = skillDirs.length;
+    let valid = 0;
+
+    for (const d of skillDirs) {
+      const id = label(rootName, d.name);
+      const skillMd = join(dir, d.name, 'SKILL.md');
+      if (!await exists(skillMd)) {
+        error(`[skills] ${id}/ missing SKILL.md`);
+        continue;
+      }
+      validateSkillContent(id, await readFile(skillMd, 'utf-8'));
+      valid++;
+    }
+    perRoot[rootName] = valid;
+  }
+
+  reportScan('skills', perRoot, candidates);
+}
+
+/**
+ * Validate one command file's frontmatter contract.
+ * @param {string} id - Reporting label (root-qualified outside the main plugin).
+ * @param {string} content - Raw file content.
+ */
+function validateCommandContent(id, content) {
+  // A command must OPEN with a properly closed YAML fence — a stray '---'
+  // anywhere in the body must not satisfy the gate (2026-07 test-gap scan).
+  const fence = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  if (!fence) {
+    error(`[commands] ${id} missing or unclosed leading YAML frontmatter block`);
     return;
   }
-
-  const entries = await readdir(skillsDir, { withFileTypes: true });
-  const skillDirs = entries.filter(e => e.isDirectory());
-  let valid = 0;
-
-  for (const dir of skillDirs) {
-    const skillMd = join(skillsDir, dir.name, 'SKILL.md');
-    if (!await exists(skillMd)) {
-      error(`[skills] ${dir.name}/ missing SKILL.md`);
-      continue;
-    }
-
-    const content = await readFile(skillMd, 'utf-8');
-    if (!content.includes('---')) {
-      error(`[skills] ${dir.name}/SKILL.md missing YAML frontmatter`);
-    } else {
-      // Validate Progressive Disclosure frontmatter block (opening --- block)
-      const frontmatterMatch = content.match(/^---\s*\n([\s\S]*?)\n---/);
-      if (!frontmatterMatch) {
-        warn(`[skills] ${dir.name}/SKILL.md frontmatter block not properly closed`);
-      } else {
-        const frontmatter = frontmatterMatch[1];
-        if (!frontmatter.includes('name:')) {
-          warn(`[skills] ${dir.name}/SKILL.md missing "name" in frontmatter`);
-        }
-        if (!frontmatter.includes('description:') && !frontmatter.includes('purpose:')) {
-          warn(`[skills] ${dir.name}/SKILL.md missing "description" or "purpose" in frontmatter`);
-        }
-      }
-    }
-    valid++;
+  const frontmatter = fence[1];
+  if (!/^description\s*:/m.test(frontmatter)) {
+    error(`[commands] ${id} missing "description" in frontmatter`);
   }
-
-  console.log(`  [skills] ${valid}/${skillDirs.length} skill(s) validated`);
+  if (!/^allowed-tools\s*:/m.test(frontmatter)) {
+    warn(`[commands] ${id} missing "allowed-tools" in frontmatter`);
+  }
+  if (!/^argument-hint\s*:/m.test(frontmatter)) {
+    warn(`[commands] ${id} missing "argument-hint" in frontmatter`);
+  }
 }
 
 async function validateCommands() {
   // Test seam: lets the frontmatter-gate regression tests point this validator
   // at a throwaway fixture dir instead of mutating the live commands/ tree
   // (a live-tree temp file races parallel test workers that count commands).
-  const commandsDir = process.env.ARTIBOT_COMMANDS_DIR || join(PLUGIN_ROOT, 'commands');
-  if (!await exists(commandsDir)) {
-    warn('[commands] commands/ directory not found');
+  // In seam mode ONLY the fixture is scanned and floors are not asserted — a
+  // 2-file fixture legitimately cannot meet a 70-command floor.
+  const seam = process.env.ARTIBOT_COMMANDS_DIR;
+  if (seam) {
+    if (!await exists(seam)) {
+      warn('[commands] commands/ directory not found');
+      return;
+    }
+    const files = (await readdir(seam)).filter(f => f.endsWith('.md'));
+    for (const file of files) {
+      validateCommandContent(file, await readFile(join(seam, file), 'utf-8'));
+    }
+    console.log(`  [commands] ${files.length} command(s) validated (fixture seam)`);
     return;
   }
 
-  const files = await readdir(commandsDir);
-  const mdFiles = files.filter(f => f.endsWith('.md'));
-
-  for (const file of mdFiles) {
-    const content = await readFile(join(commandsDir, file), 'utf-8');
-    // A command must OPEN with a properly closed YAML fence — a stray '---'
-    // anywhere in the body must not satisfy the gate (2026-07 test-gap scan).
-    const fence = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
-    if (!fence) {
-      error(`[commands] ${file} missing or unclosed leading YAML frontmatter block`);
-      continue;
-    }
-    const frontmatter = fence[1];
-    if (!/^description\s*:/m.test(frontmatter)) {
-      error(`[commands] ${file} missing "description" in frontmatter`);
-    }
-    if (!/^allowed-tools\s*:/m.test(frontmatter)) {
-      warn(`[commands] ${file} missing "allowed-tools" in frontmatter`);
-    }
-    if (!/^argument-hint\s*:/m.test(frontmatter)) {
-      warn(`[commands] ${file} missing "argument-hint" in frontmatter`);
+  const perRoot = {};
+  for (const { name: rootName, dir } of listEntityRoots('commands')) {
+    const mdFiles = (await readdir(dir)).filter(f => f.endsWith('.md'));
+    perRoot[rootName] = mdFiles.length;
+    for (const file of mdFiles) {
+      validateCommandContent(label(rootName, file), await readFile(join(dir, file), 'utf-8'));
     }
   }
 
-  console.log(`  [commands] ${mdFiles.length} command(s) validated`);
+  reportScan('commands', perRoot);
 }
 
 async function validateHooks() {

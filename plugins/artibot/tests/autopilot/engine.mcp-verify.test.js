@@ -7,13 +7,41 @@
  * @see lib/autopilot/mcp-verifier.js — loadAllowList
  */
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
 import {
   getStatus,
   runPhase4Verify,
   startAutopilot,
 } from '../../lib/autopilot/index.js';
 import { deleteSession } from '../../lib/autopilot/session-store.js';
+
+// ARTIFACT ISOLATION CONTRACT: startAutopilot writes a PRD under
+// <projectRoot>/docs/PRD/. Without options.projectRoot that is the operator's
+// real checkout. See engine.test.js for the same guard.
+let ARTIFACT_ROOT = '';
+
+beforeAll(() => {
+  ARTIFACT_ROOT = mkdtempSync(path.join(os.tmpdir(), 'artibot-mcpverify-artifacts-'));
+});
+
+afterAll(() => {
+  try { rmSync(ARTIFACT_ROOT, { recursive: true, force: true }); } catch { /* best-effort */ }
+});
+
+/**
+ * startAutopilot with the artifact-isolation override applied.
+ * @param {object} args - Same shape as startAutopilot.
+ * @returns {Promise<object>}
+ */
+function start(args) {
+  return startAutopilot({
+    ...args,
+    options: { ...(args.options || {}), projectRoot: ARTIFACT_ROOT },
+  });
+}
 
 const cleanup = [];
 afterEach(() => {
@@ -25,7 +53,7 @@ afterEach(() => {
 
 describe('runPhase4Verify with mcpVerify', () => {
   it('default (no mcpVerify): instruction omits mcp field (backward compat)', async () => {
-    const r = await startAutopilot({ task: 'no mcp', mode: 'plan' });
+    const r = await start({ task: 'no mcp', mode: 'plan' });
     cleanup.push(r.sessionId);
     const state = await getStatus(r.sessionId);
     const inst = runPhase4Verify(state);
@@ -35,7 +63,7 @@ describe('runPhase4Verify with mcpVerify', () => {
   });
 
   it('mcpVerify=true: instruction includes mcp field with allowList', async () => {
-    const r = await startAutopilot({
+    const r = await start({
       task: 'with mcp',
       mode: 'plan',
       options: { mcpVerify: true },
@@ -50,7 +78,7 @@ describe('runPhase4Verify with mcpVerify', () => {
   });
 
   it('mcpVerify=true: state.verifyResult.mcp slot initialized', async () => {
-    const r = await startAutopilot({
+    const r = await start({
       task: 'verify slot',
       mode: 'plan',
       options: { mcpVerify: true },
@@ -75,9 +103,9 @@ describe('runPhase4Verify with mcpVerify', () => {
   });
 
   it('npm run ci command unchanged regardless of mcpVerify (backward compat)', async () => {
-    const r1 = await startAutopilot({ task: 'no mcp', mode: 'plan' });
+    const r1 = await start({ task: 'no mcp', mode: 'plan' });
     cleanup.push(r1.sessionId);
-    const r2 = await startAutopilot({
+    const r2 = await start({
       task: 'with mcp',
       mode: 'plan',
       options: { mcpVerify: true },

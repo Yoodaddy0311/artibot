@@ -21,17 +21,37 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { handleUserPromptSubmit } from '../../scripts/hooks/runtime-prompt.js';
 
 const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const EFFORT_FILE = path.join(PLUGIN_ROOT, 'runtime', 'current-effort.json');
+const RUNTIME_DIR = path.join(PLUGIN_ROOT, 'runtime');
+const EFFORT_FILE = path.join(RUNTIME_DIR, 'current-effort.json');
+
+// STATE-RESTORE CONTRACT. This suite must run against the REAL plugin root
+// (see the module header), so handleUserPromptSubmit mutates the developer's
+// own runtime/ state. Measured side effects of one run (sha256 diff of
+// runtime/*, 15-file denominator): current-task-budget.json, decision-trail.json,
+// token-usage-session.json, user-profile.json — on top of the seeded
+// current-effort.json. Every one is saved and restored below; without that the
+// suite silently overwrites whatever the developer's live session had.
+// Caveat: restore is last-writer-wins, so it can only be trusted while these
+// globals are not being written concurrently by another suite.
+const MUTATED_RUNTIME_FILES = [
+  EFFORT_FILE,
+  path.join(RUNTIME_DIR, 'current-task-budget.json'),
+  path.join(RUNTIME_DIR, 'decision-trail.json'),
+  path.join(RUNTIME_DIR, 'token-usage-session.json'),
+  path.join(RUNTIME_DIR, 'user-profile.json'),
+];
 
 describe('runtime-prompt — effort resolved before pipeline (FIX-2 ordering)', () => {
   let savedEnv;
-  let hadEffortFile;
-  let savedEffort;
+  /** @type {Map<string, string|null>} absolute path → original content (null = absent) */
+  let savedRuntime;
 
   beforeEach(() => {
-    mkdirSync(path.join(PLUGIN_ROOT, 'runtime'), { recursive: true });
-    hadEffortFile = existsSync(EFFORT_FILE);
-    savedEffort = hadEffortFile ? readFileSync(EFFORT_FILE, 'utf-8') : null;
+    mkdirSync(RUNTIME_DIR, { recursive: true });
+    savedRuntime = new Map();
+    for (const file of MUTATED_RUNTIME_FILES) {
+      savedRuntime.set(file, existsSync(file) ? readFileSync(file, 'utf-8') : null);
+    }
     // Seed a STALE effort file as if left over from a prior prompt.
     writeFileSync(
       EFFORT_FILE,
@@ -53,9 +73,11 @@ describe('runtime-prompt — effort resolved before pipeline (FIX-2 ordering)', 
       if (v === undefined) delete process.env[k];
       else process.env[k] = v;
     }
-    // Restore the original effort file (or remove the one we seeded).
-    if (hadEffortFile) writeFileSync(EFFORT_FILE, savedEffort);
-    else rmSync(EFFORT_FILE, { force: true });
+    // Restore every runtime file the hook mutates (or remove the ones we created).
+    for (const [file, original] of savedRuntime) {
+      if (original === null) rmSync(file, { force: true });
+      else writeFileSync(file, original);
+    }
   });
 
   it('overwrites the stale effort file with the current command before output', async () => {

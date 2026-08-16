@@ -1,4 +1,12 @@
 {
-  "skills": [],
-  "generatedAt": "2026-06-11T06:42:46.123Z"
+  "skills": [
+    "artibot-cowork/clarify",
+    "artibot-cowork/content-pipeline",
+    "artibot-cowork/daily",
+    "artibot-cowork/design-system-reference",
+    "artibot-cowork/library-mermaid",
+    "artibot-cowork/report-generation",
+    "artibot-cowork/seo-strategy"
+  ],
+  "generatedAt": "2026-08-16T06:46:31.733Z"
 }

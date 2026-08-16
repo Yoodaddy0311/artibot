@@ -824,7 +824,7 @@
     "enabled": false,
     "optIn": false,
     "serverUrl": "http://localhost:3000",
-    "_serverUrlPolicy": "DATA POLICY: 기본값은 localhost(self-hosted)로 고정합니다. 외부 swarm 서버로 데이터를 보내려면 (a) 직접 self-host 하거나 (b) ARTIBOT_SWARM_SERVER 환경변수로 명시 지정 + lib/privacy/allowlist.json 또는 ARTIBOT_ALLOW_EGRESS로 해당 호스트를 명시 허용해야 합니다. 어떤 외부 엔드포인트도 기본값으로 출하하지 않습니다(과거 run.app 기본값은 v4.x에서 제거됨, CHANGELOG 참조).",
+    "_serverUrlPolicy": "DATA POLICY: 기본값은 localhost(self-hosted)로 고정합니다. 외부 swarm 서버로 데이터를 보내려면 (a) 직접 self-host 하거나 (b) ARTIBOT_SWARM_SERVER 환경변수로 명시 지정 + lib/core/allowlist.json 또는 ARTIBOT_ALLOW_EGRESS로 해당 호스트를 명시 허용해야 합니다. 어떤 외부 엔드포인트도 기본값으로 출하하지 않습니다(과거 run.app 기본값은 v4.x에서 제거됨, CHANGELOG 참조).",
     "syncInterval": "session",
     "localGlobalRatio": [
       0.3,

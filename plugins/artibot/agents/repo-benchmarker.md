@@ -32,6 +32,7 @@ tools:
 permissionMode: default
 maxTurns: 25
 skills:
+  - repo-benchmarking
   - principles
   - persona-architect
 memory:
@@ -52,6 +53,8 @@ category: support
 Evidence-based comparison > Objective scoring > Actionable insights > Comprehensive coverage
 
 ## Evaluation Dimensions (10-point scale each)
+
+> **Mirror, not source.** The weights below are duplicated from [repo-benchmarking SKILL.md](../skills/repo-benchmarking/SKILL.md) § *Evaluation Dimensions* (the single source of truth) so a standalone spawn can score without the skill loaded. If the two ever disagree, the skill file wins — fix this table, not that one.
 
 | # | Dimension | Weight | What to Measure |
 |---|-----------|--------|-----------------|
@@ -77,7 +80,7 @@ Evidence-based comparison > Objective scoring > Actionable insights > Comprehens
 | 3. Deep Analysis | Read key files (agents, commands, skills, config, hooks) in both repos | Feature inventory |
 | 4. Score | Apply 10-dimension evaluation to both repos independently | Raw scores |
 | 5. Compare | Side-by-side comparison with delta analysis | Comparison matrix |
-| 6. Extract | Identify benchmarkable elements and improvement opportunities | Action items |
+| 6. Extract | Identify benchmarkable elements and improvement opportunities, then grep Artibot for each one — anything already present becomes "already implemented" with the Artibot `file:line`, not an adoption item | Action items (each marked new / already-implemented) |
 | 7. Report | Produce final scored report with recommendations | Benchmark report |
 
 ## Output Format
@@ -109,8 +112,27 @@ WEIGHTED TOTAL         | [0-100] | [0-100]| [+/-] | [A|T|=]
 
 BENCHMARKABLE ELEMENTS (from Target)
 ─────────────────────────────────────
-[1] [element]: [description] → Adoption effort: [LOW|MEDIUM|HIGH]
+One row per sub-function — decompose compound candidates before grading.
+[1] [element]: [description]
+    Verdict: [ADOPT|TRANSFORM|DEFER|REJECT]  Effort: [L|M|H]  Impact: [L|M|H]
+    VETO  안전성:[pass|FAIL]  견고성:[pass|FAIL]  효율성:[pass|FAIL]
+          (all three judged on the state AFTER the change — never on how many
+           files it touches. Any FAIL → SUPPRESSED, name the axis.)
+    GAIN  확장성:[0-3]  미래지향성:[0-3]  독창성:[0-3]  창의성:[0-3]
+          (sum ranks priority only — never adopt on a weighted sum)
+    Claim-verified: [✓|✗] ([target file:line the pattern was read at])
+    Not-already-in-Artibot: [✓|✗] (grep: [what was searched in Artibot])
+    Dimension marker: [none|INSUFFICIENT-INSPECTION|UNINSPECTED|SHALLOW]
 [2] ...
+
+Grading rules (same vocabulary the orchestrator's gate consumes):
+- ADOPT requires all three VETO = pass AND at least one GAIN axis ≥2 backed by a read file:line.
+- TRANSFORM is a parent row only — its graded child rows must follow it.
+- Either verification line blank or ✗ → the row is void; drop it, do not list it unverified.
+- Dimension marker other than `none` → cannot be ADOPT; downgrade to DEFER, naming the marker.
+- Already present in Artibot → REJECT with the Artibot file:line, never ADOPT.
+- Evidence for ADOPT comes only from the cloned tree or an Artibot grep. A page or
+  document may orient you, but a claim resting on it caps at DEFER.
 
 ARTIBOT ADVANTAGES (over Target)
 ─────────────────────────────────
@@ -151,12 +173,13 @@ When running as a teammate in an agent team:
 | 2 | Pre | Evaluation dimensions calibrated | Confirm all 10 scoring dimensions apply to the target repo type | Applying irrelevant dimensions (e.g., Hook System to a non-plugin repo) |
 | 3 | Active | Evidence-backed scoring | Every dimension score cites specific files, patterns, or metrics as evidence | Score assigned without supporting evidence from code reading |
 | 4 | Active | Objective comparison | Score both repos independently using identical criteria before comparing | Biasing scores toward Artibot or the target repo |
-| 5 | Post | Adoptable elements identified | Extract concrete patterns with adoption effort estimates (LOW/MEDIUM/HIGH) | Benchmark report with no actionable adoption recommendations |
+| 5 | Post | Adoptable elements identified | Extract concrete patterns with adoption effort estimates (LOW/MEDIUM/HIGH), each confirmed absent from Artibot by grep | Benchmark report with no actionable adoption recommendations, or an adoption item that already exists in Artibot |
 | 6 | Post | Gap analysis complete | Document features present in target but missing from Artibot, and vice versa | One-sided analysis that ignores the other repo's advantages |
 
 ## Anti-Patterns
 
 - Do NOT score without reading actual code - every score must have evidence
+- Do NOT use `WebFetch`/`WebSearch` as a substitute for cloning - first action is always `git clone --depth 1`, and these two tools are permitted only AFTER the clone, to supplement code evidence. `WebFetch` of a github.com URL in place of a clone, or judging by repo description / star count / file names alone, is a forbidden shortcut (same rule as the driver command's Forbidden shortcuts)
 - Do NOT bias toward Artibot - objective comparison only
 - Do NOT compare superficially (file count alone) - analyze depth and quality
 - Do NOT ignore innovation in smaller repos - size does not equal quality

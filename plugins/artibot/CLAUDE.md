@@ -32,7 +32,7 @@ Upper layers import lower only (5 → 4 → 3 → 2 → 1). Detailed module map:
 
 제안·개선·감사 작업은 제시 **전에** `problem-validation` 스킬 검증 게이트를 통과해야 한다. null-result("변경 불필요")는 정당한 결과다. 사용자가 재검증을 지시하게 만들지 마라.
 
-적용 범위: `/team` Phase 0, `/improve` Proposal Gate, `/analyze` Proposal Gate, `/ultraplan` Phase 0 — 모두 동일 규율(공유 진실원: `problem-validation` 스킬).
+적용 범위: `/team` · `/improve` · `/analyze` · `/ultraplan` · `/implement` · `/go` · `/repo` — 모두 동일 규율(공유 진실원: `problem-validation` 스킬). 2026-08-16 기준 7개이며, 현재 목록은 `grep -rl problem-validation plugins/artibot/commands/` 가 정본이다.
 
 ## Operator-Waits DNA (auto-team)
 

@@ -11,13 +11,11 @@
  *   --json  Output report as JSON instead of table
  */
 
-import { readdir, readFile, stat } from 'node:fs/promises';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { readFile } from 'node:fs/promises';
+import { assertEntityFloors, countByRoot, listAllSkillFiles } from './ci/skill-scan-roots.js';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const PLUGIN_ROOT = resolve(__dirname, '..');
-const SKILLS_DIR = join(PLUGIN_ROOT, 'skills');
+// Skill discovery lives in ci/skill-scan-roots.js — it spans every project
+// plugin root, so this script no longer resolves a single skills/ directory.
 
 // --- Configuration ---
 
@@ -300,19 +298,19 @@ async function main() {
   const args = process.argv.slice(2);
   const jsonMode = args.includes('--json');
 
-  const entries = await readdir(SKILLS_DIR);
+  // Scans every project plugin root, not just this one. `name` stays the bare
+  // directory name so the name↔directory check keeps working; `key` is the
+  // root-qualified reporting name, needed because 31 skill names collide
+  // between the main plugin and cowork.
+  const files = listAllSkillFiles();
+  const perRoot = countByRoot(files);
   const results = {};
   const skillsMap = {};
 
-  for (const entry of entries.sort()) {
-    const skillDir = join(SKILLS_DIR, entry);
-    const skillStat = await stat(skillDir).catch(() => null);
-    if (!skillStat?.isDirectory()) continue;
-
-    const skillFile = join(skillDir, 'SKILL.md');
-    const content = await readFile(skillFile, 'utf-8').catch(() => null);
+  for (const { key, name, file } of files) {
+    const content = await readFile(file, 'utf-8').catch(() => null);
     if (!content) {
-      results[entry] = {
+      results[key] = {
         fields: null,
         issues: [{ severity: 'error', field: '-', message: 'SKILL.md not found or unreadable' }],
       };
@@ -321,32 +319,52 @@ async function main() {
 
     const fields = parseFrontmatter(content);
     if (!fields) {
-      results[entry] = {
+      results[key] = {
         fields: null,
         issues: [{ severity: 'error', field: '-', message: 'no valid frontmatter found' }],
       };
       continue;
     }
 
-    const issues = validateSkill(entry, fields);
-    results[entry] = { fields, issues };
-    skillsMap[entry] = fields;
+    const issues = validateSkill(name, fields);
+    results[key] = { fields, issues };
+    skillsMap[key] = fields;
   }
 
   const duplicates = detectTriggerDuplicates(skillsMap);
+  const floorFailures = assertEntityFloors('skills', perRoot);
 
   if (jsonMode) {
     const { errors, warnings, compliant, total } = summarize(results);
-    console.log(JSON.stringify({ summary: { total, errors, warnings, compliant }, results, duplicates }, null, 2));
+    console.log(
+      JSON.stringify(
+        { summary: { total, errors, warnings, compliant, perRoot, floorFailures }, results, duplicates },
+        null,
+        2,
+      ),
+    );
   } else {
     console.log(formatTableReport(results, duplicates));
+    console.log(
+      `\nScanned ${files.length} skill(s) across ${Object.keys(perRoot).length} root(s): ` +
+        Object.entries(perRoot)
+          .map(([r, n]) => `${r}=${n}`)
+          .join(' '),
+    );
+  }
+
+  // Denominator first — "0 errors" and "0 skills examined" print identically
+  // without this, and the second is what the gate existed to catch.
+  if (floorFailures.length > 0) {
+    console.error(`\nFAIL: skill scan denominator (${floorFailures.length}):`);
+    for (const f of floorFailures) console.error(`  - ${f}`);
   }
 
   // Exit with error code if any errors found.
   // Trigger duplicates are reported informationally — shared keywords are an
   // intentional routing pattern (multiple skills can claim the same keyword).
   const { errors } = summarize(results);
-  if (errors > 0) {
+  if (errors > 0 || floorFailures.length > 0) {
     process.exit(1);
   }
 }

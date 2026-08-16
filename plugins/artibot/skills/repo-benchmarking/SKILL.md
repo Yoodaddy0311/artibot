@@ -61,6 +61,8 @@ Validate URL (HTTPS only) -> Sanitize repo name -> Clone to ~/.claude/artibot/re
 
 ### 3. Evaluation Dimensions (10-point scale)
 
+> **This table is the single source of truth for the weights.** [`/repo`](../../commands/repo.md) § *10 Scoring Dimensions* carries the rubric (what each dimension measures) and defers here for the weights that produce its `WEIGHTED TOTAL (/100)` output; the [repo-benchmarker agent](../../agents/repo-benchmarker.md) mirrors this table for standalone spawns. Change the weights here first, then update the agent mirror — never edit only one.
+
 | # | Dimension | Weight | What to Measure |
 |---|-----------|--------|-----------------|
 | 1 | Agent Architecture | 15% | Agent count, role separation, model optimization |
@@ -78,7 +80,7 @@ Validate URL (HTTPS only) -> Sanitize repo name -> Clone to ~/.claude/artibot/re
 
 ### 4. Cache Strategy
 - Cache location: `~/.claude/artibot/repos/[repo-name]/`
-- Re-clone: `git pull` if cache exists (unless `--compare-only`)
+- Re-clone: `git pull` if cache exists (unless `--compare-only` / `--skip-clone` — synonyms, see [`/repo`](../../commands/repo.md) § *Arguments*)
 - Stale threshold: 7 days (suggest refresh)
 - Cleanup: Manual via `rm -rf ~/.claude/artibot/repos/[repo-name]`
 
@@ -102,10 +104,12 @@ Progress:
 - [ ] Step 5: Build feature inventory — agents, commands, skills, hooks, libs, tests
 - [ ] Step 6: Score each of 10 evaluation dimensions (evidence required per score)
 - [ ] Step 7: Produce side-by-side comparison matrix with deltas
-- [ ] Step 8: Identify adoptable elements with effort estimates
+- [ ] Step 8: Identify adoptable elements with effort estimates — then grep Artibot itself for each one and drop the ones already implemented (cite the Artibot file:line)
 - [ ] Step 9: Generate prioritized recommendations
 - [ ] Step 10: Output final benchmark report
 ```
+
+> **Step 8, second half — the already-in-Artibot filter.** A candidate that already exists in Artibot is not an adoptable element; it is a `REJECT — already implemented` with the Artibot `file:line` as evidence. Run this grep *before* Checkpoint 3, so the human is never asked to prioritize something Artibot already has. Same rule, stated command-side as Execution Flow step 10 of [`/repo`](../../commands/repo.md).
 
 ## Human Checkpoints
 
@@ -155,11 +159,12 @@ Progress:
 | Report format | LOW | Template is defined |
 
 ## Quick Reference
+- Driver command: [`/repo`](../../commands/repo.md) — owns argument parsing, parallel-team delegation, the 3-VETO/4-GAIN adoption judgment, and the report template. This skill owns the clone protocol, the 10 discovery dimensions and their weights, checkpoints, and cache policy. **The 10 dimensions find candidates; the 7 axes judge them — neither replaces the other.**
 - Clone to `~/.claude/artibot/repos/` (never into project dir)
 - HTTPS only, no script execution from cloned repos
 - 10-dimension scoring (100 points max, weighted)
 - Use `--quick` for structure-only, `--deep` for full analysis
-- `--compare-only` reuses cached clone
+- `--compare-only` / `--skip-clone` reuses cached clone
 - repo-benchmarker agent handles the heavy analysis
 - All scores require evidence (file paths, code examples)
 
