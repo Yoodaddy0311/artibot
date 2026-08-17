@@ -25,12 +25,16 @@ const REPO_ROOT = path.resolve(PLUGIN_ROOT, '..', '..');
 const BASELINE = JSON.parse(fs.readFileSync(path.join(HERE, 'citation-baseline.json'), 'utf8'));
 
 /**
- * 분모 하한 — 2026-08-17 실측(498 파일 · 1,701 스팬 · 63 checkable · no-target 1,177)에
- * 여유를 둔 값. 스팬 총수에 no-target(위치 접미사 없는 언급)이 포함된다 — 그 층을
- * 분모에서 빼면 추출 규칙 회귀가 조용히 지나간다 (적대 검증 N1).
+ * 분모 하한 — **추적 파일 한정** 실측(2026-08-17: 472 파일 · 1,276 스팬 · 63 checkable ·
+ * no-target 856)에 여유를 둔 값. floor 는 반드시 추적-한정 모집단으로 잡아야 한다:
+ * 로컬 디스크에는 gitignore 로 커밋되지 않은 문서가 스캔에 섞여 스팬이 더 많이
+ * 잡히고(같은 날 로컬 1,701), 로컬 기준 floor 는 클린 체크아웃(CI)에서 미달한다 —
+ * 실제로 1,400 으로 잡았다가 CI 3잡이 1,276 으로 전멸한 실사고가 이 주석의 근거다.
+ * 스팬 총수에 no-target(위치 접미사 없는 언급)이 포함된다 — 그 층을 분모에서 빼면
+ * 추출 규칙 회귀가 조용히 지나간다 (적대 검증 N1).
  */
 const FLOOR_FILES = 450;
-const FLOOR_SPANS = 1400;
+const FLOOR_SPANS = 1100;
 const FLOOR_CHECKABLE = 50;
 
 /** 케이스 민감 존재 판정 facade — `existsSync` 단독은 Windows 에서 케이스를 무시한다(FO-6). */
