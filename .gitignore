@@ -72,9 +72,13 @@ reports/
 *-design-spec.md
 *-analysis-report.md
 
-# Session handoffs — committed for cross-session/cross-machine visibility
-!.artibot/HANDOFF.md
-!.artibot/handoffs/
+# Session handoffs — LOCAL-ONLY since 2026-08-17 (user decision via /save).
+# Previously committed for cross-machine visibility, but the landing-flow gate
+# makes per-session commits impractical (five sessions of permanent dirty tree).
+# Trade-off accepted: handoffs are per-machine local records; cross-machine
+# context restore relies on git-tracked guides + auto-memory instead.
+.artibot/HANDOFF.md
+.artibot/handoffs/
 
 # Auto-generated per-session timeline log — hooks rewrite it every session,
 # so it only adds dirty-tree noise to git status / /save. Read from the working
