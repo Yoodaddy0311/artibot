@@ -21,7 +21,7 @@ agents:
   - "architect"
 tokens: "~3K"
 category: "analysis"
-source_hash: 0b32c63b
+source_hash: b0616227
 ---
 
 # Repo Benchmarking
@@ -78,6 +78,25 @@ Validate URL (HTTPS only) -> Sanitize repo name -> Clone to ~/.claude/artibot/re
 
 **Total: 100 points maximum (weighted sum)**
 
+### 3b. Artibot Baseline (pinned — never re-scored mid-benchmark)
+
+> Benchmarks score the **target repo only**; the Artibot column is read from this table. Reason: two judges in one session (2026-08-17) scored the same Artibot tree 4.0 points apart on the same 40-point slice, because each anchored to the repo sitting in the comparison column — a relative scale inflates Artibot next to weak targets. A pinned baseline removes that drift and makes results from different benchmark runs comparable for the first time. Re-pin deliberately (release audit or explicit user request) — if a run surfaces evidence a value is wrong, **report the discrepancy with `file:line`, do not silently overwrite**.
+
+| # | Dimension | Score | Evidence (2026-08-17 실측, v4.46.0) |
+|---|-----------|:-----:|---|
+| 1 | Agent Architecture | 8 | 29 agent defs; model-policy single source `lib/core/model-policy.js` |
+| 2 | Orchestration Patterns | 8 | Teams API 46 call sites; auto-team trigger `lib/cognitive/workflow-plan.js` |
+| 3 | Skill System | 8 | 113 SKILL.md; description-lint ratchet gate |
+| 4 | Command System | 9 | 78 commands; schema gate `scripts/ci/validate-commands.js` |
+| 5 | Hook System | 9 | 27 registered entries / 15 events; 62 hook scripts |
+| 6 | API Integration | 9 | MCP dual surface (`.mcp.json` + `.well-known/mcp-server.json`); egress allowlist `lib/core/data-egress-guard.js` |
+| 7 | Code Quality | 9 | zero runtime deps (no `dependencies` field in package.json); 800-line rule 2 violations / 419 JS files |
+| 8 | Documentation | 9 | `docs/` 20+, ADRs, self-correcting honesty notes in CLAUDE.md |
+| 9 | CI/CD & Validation | 9 | `scripts/ci/` 22 files (11 `validate-*.js`), 5 workflows, stale-baseline-fails ratchet |
+| 10 | Innovation | 7 | learning loops partially retired; conceded from 8 when challenged as unmeasured |
+
+**Pinned weighted total: 84.0/100** (v4.46.0, 2026-08-17). Provenance, honestly: dims 1–5 single-judge, dims 6–7 dual-judge resolved on orchestrator-verified evidence, dim 10 a conceded value — this is a working baseline, not a full-tree audit.
+
 ### 4. Cache Strategy
 - Cache location: `~/.claude/artibot/repos/[repo-name]/`
 - Re-clone: `git pull` if cache exists (unless `--compare-only` / `--skip-clone` — synonyms, see [`/repo`](../../commands/repo.md) § *Arguments*)
@@ -106,7 +125,7 @@ Progress:
 - [ ] Step 7: Produce side-by-side comparison matrix with deltas
 - [ ] Step 8: Identify adoptable elements with effort estimates — then grep Artibot itself for each one and drop the ones already implemented (cite the Artibot file:line)
 - [ ] Step 9: Generate prioritized recommendations
-- [ ] Step 10: Output final benchmark report
+- [ ] Step 10: Output final benchmark report — with the plain-language layer required by [`/repo`](../../commands/repo.md) § *Report Readability*: 결론 선행 요약(표 앞 3-5문장) + 판정별 뭔가/왜/채택하면 3필드 + 내부 코드네임 금지
 ```
 
 > **Step 8, second half — the already-in-Artibot filter.** A candidate that already exists in Artibot is not an adoptable element; it is a `REJECT — already implemented` with the Artibot `file:line` as evidence. Run this grep *before* Checkpoint 3, so the human is never asked to prioritize something Artibot already has. Same rule, stated command-side as Execution Flow step 10 of [`/repo`](../../commands/repo.md).

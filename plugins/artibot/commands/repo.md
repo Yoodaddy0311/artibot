@@ -115,6 +115,7 @@ Only after completing steps 1–5, proceed to the Execution Flow below.
 - **Drop `N/A` dimensions out of the denominator and state the denominator you used.** A total with no denominator cannot be compared to anything.
 - `N/A` is a claim like any other: say *why* the dimension is absent, from the structure scan.
 - `N/A` (dimension does not exist) is different from `UNINSPECTED` / `SHALLOW` / `INSUFFICIENT-INSPECTION` (dimension exists, you did not look hard enough). Do not use one for the other — the first is a property of the repo, the rest are properties of your effort.
+- **The Artibot column is pinned, not re-scored.** Read it from [repo-benchmarking SKILL.md](../skills/repo-benchmarking/SKILL.md) § *Artibot Baseline* and score the **target repo only**. Re-scoring Artibot per run drifted 4.0/40 between two judges in one session (2026-08-17) — scores anchor to whatever sits in the comparison column, so weak targets inflate Artibot. If run evidence contradicts a baseline value, report the discrepancy with `file:line`; re-pin only on release audit or explicit user request, never mid-benchmark.
 
 | # | Dimension | Measures |
 |---|---|---|
@@ -230,6 +231,21 @@ else:
 | REJECT | Drop — already implemented in Artibot (cite the `file:line`), or fails evidence, YAGNI, or a VETO axis on all sub-functions |
 
 **Evidence markers bind to verdicts.** The three markers this command already emits — `INSUFFICIENT-INSPECTION` (README-only, rule 6; also **any dimension supported only by a kind ② locator or a kind ③ document**, since neither is clone-tree evidence), `UNINSPECTED` (directory not read, Pre-Analysis step 5), `SHALLOW` (scored from the structure scan alone, Execution Flow step 6; also a kind ③ document truncated by guard D3) — mark a dimension as *not sufficiently inspected*. If the dimension supporting a candidate carries any of the three, that candidate cannot be ADOPT: downgrade it to DEFER and name the marker as the reason. Inspect further to clear the marker, then re-grade — never grade around it.
+
+## Report Readability — 사람이 읽는 층 (mandatory)
+
+The evidence discipline above protects *correctness*; this section protects *comprehension*. A report the user cannot understand is an unfinished report, no matter how well-cited (2026-08-17 user feedback: 판정과 주장이 무슨 뜻인지 알 수 없었음). Evidence never substitutes for explanation — they serve different readers.
+
+1. **결론 먼저, 평문으로.** Open the report with 3–5 plain sentences *before any table*: 대상 레포가 뭐 하는 물건인지 한 줄 → 총평(어디가 강하고 약한지) → 가져올 것이 몇 건이고 각각 무엇을 해주는지. Write it for a reader who will not read the tables.
+2. **판정마다 3필드 필수.** Every ADOPTABLE / REJECT / SUPPRESSED row carries three plain-language fields (template lives in [repo-benchmarker](../agents/repo-benchmarker.md) § *Output Format*):
+   - `뭔가` — 그 패턴이 무엇을 하는 물건인지, 일상어 한 문장
+   - `왜` — 이 판정이 나온 이유 한 문장; `file:line` 증거는 문장 **뒤** 괄호로 — 문장을 대체하지 못한다
+   - `채택하면` — 채택 시 Artibot에서 달라지는 것 한 문장; REJECT/SUPPRESSED 는 "안 가져와서 피하는 것"으로 대체
+3. **내부 코드네임 금지.** 세션 안에서 만든 임시 라벨(C1, C4b, F1/F2, §4#3 …)은 리포트에 쓰지 않는다. 축약이 불가피하면 첫 사용 줄에서 정의를 병기한다.
+4. **전문용어는 첫 등장 시 1회 풀어쓴다.** 예: `N/A`("이 레포엔 그 축 자체가 없음 — 0점과 다름"), `SUPPRESSED`("복잡도 기준으로 막아둔 후보 — 증거 부족 기각과 다름"), VETO("하나라도 걸리면 탈락하는 배제 축"), GAIN("채택 근거가 되는 이득 축"). 두 번째 등장부터는 그대로 쓴다.
+5. **리포트 언어 = 사용자 프롬프트 언어.** 한국어 세션이면 설명 필드도 한국어. 고정 어휘 토큰(ADOPT/REJECT/DEFER/TRANSFORM/N/A/SUPPRESSED, 축 이름)은 게이트가 검사하는 식별자이므로 원형 유지.
+
+A row missing any of the three fields is incomplete — same severity as a blank verification column: fix it before shipping, never ship around it.
 
 ## Output Format (multi-repo)
 

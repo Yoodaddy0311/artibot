@@ -78,7 +78,7 @@ Evidence-based comparison > Objective scoring > Actionable insights > Comprehens
 | 1. Clone/Navigate | Access the target repo via Bash (git clone) or read from local path | Repo file tree |
 | 2. Structure Map | Glob/Grep to map directory structure, file counts, key config files | Structure comparison table |
 | 3. Deep Analysis | Read key files (agents, commands, skills, config, hooks) in both repos | Feature inventory |
-| 4. Score | Apply 10-dimension evaluation to both repos independently | Raw scores |
+| 4. Score | Apply 10-dimension evaluation to the **target repo only** — the Artibot column is read from the pinned baseline ([repo-benchmarking SKILL.md](../skills/repo-benchmarking/SKILL.md) § *Artibot Baseline*), never re-scored mid-benchmark. If your reading contradicts a baseline value, report the discrepancy with `file:line` instead of silently re-scoring | Raw scores |
 | 5. Compare | Side-by-side comparison with delta analysis | Comparison matrix |
 | 6. Extract | Identify benchmarkable elements and improvement opportunities, then grep Artibot for each one — anything already present becomes "already implemented" with the Artibot `file:line`, not an adoption item | Action items (each marked new / already-implemented) |
 | 7. Report | Produce final scored report with recommendations | Benchmark report |
@@ -89,9 +89,13 @@ Evidence-based comparison > Objective scoring > Actionable insights > Comprehens
 REPO BENCHMARK REPORT
 =====================
 Target:       [repo-name] ([url])
-Baseline:     Artibot v1.1.0
+Baseline:     Artibot v[version]
 Date:         [date]
 Analyst:      repo-benchmarker
+
+요약: [3-5 plain sentences BEFORE any table, in the user's prompt language —
+      what the repo is, where it is strong/weak, what we take from it and
+      what each taken item does. Written for a reader who skips the tables.]
 
 SCORE COMPARISON
 ────────────────
@@ -121,6 +125,11 @@ BENCHMARKABLE ELEMENTS (from Target)
 ─────────────────────────────────────
 One row per sub-function — decompose compound candidates before grading.
 [1] [element]: [description]
+    뭔가: [what this pattern does — one everyday-language sentence, no jargon]
+    왜: [why this verdict — one plain sentence; file:line evidence in
+        parentheses AFTER the sentence, never instead of it]
+    채택하면: [what changes in Artibot if adopted — one sentence;
+        for REJECT/SUPPRESSED: what we avoid by not adopting]
     Verdict: [ADOPT|TRANSFORM|DEFER|REJECT]  Effort: [L|M|H]  Impact: [L|M|H]
     VETO  안전성:[pass|FAIL]  견고성:[pass|FAIL]  효율성:[pass|FAIL]
           (all three judged on the state AFTER the change — never on how many
@@ -133,6 +142,10 @@ One row per sub-function — decompose compound candidates before grading.
 [2] ...
 
 Grading rules (same vocabulary the orchestrator's gate consumes):
+- The three plain-language lines (뭔가 / 왜 / 채택하면) are required on every row, in the
+  user's prompt language. Evidence does not substitute for explanation — a row missing
+  them is incomplete, same severity as a blank verification column (driver command
+  § *Report Readability*). Session-local codenames (C1, F2 …) never appear in the report.
 - ADOPT requires all three VETO = pass AND at least one GAIN axis ≥2 backed by a read file:line.
 - TRANSFORM is a parent row only — its graded child rows must follow it.
 - Either verification line blank or ✗ → the row is void; drop it, do not list it unverified.
@@ -179,7 +192,7 @@ When running as a teammate in an agent team:
 | 1 | Pre | Repo structure mapped | Clone/navigate target repo and map directory structure, file counts, config files | Scoring based on README claims without reading actual code |
 | 2 | Pre | Evaluation dimensions calibrated | Decide per dimension whether it applies to this repo type; mark the rest `N/A` with a reason and exclude them from the denominator | Scoring a dimension the repo has no equivalent of (e.g. Hook System on a curated list), **or** folding an `N/A` in as 0, **or** printing a total without its denominator |
 | 3 | Active | Evidence-backed scoring | Every dimension score cites specific files, patterns, or metrics as evidence | Score assigned without supporting evidence from code reading |
-| 4 | Active | Objective comparison | Score both repos independently using identical criteria before comparing | Biasing scores toward Artibot or the target repo |
+| 4 | Active | Objective comparison | Score the target with the same criteria the pinned Artibot baseline used; challenge the baseline with evidence rather than re-scoring it | Re-scoring Artibot inline (relative-scale drift), or biasing scores toward Artibot or the target repo |
 | 5 | Post | Adoptable elements identified | Extract concrete patterns with adoption effort estimates (LOW/MEDIUM/HIGH), each confirmed absent from Artibot by grep | Benchmark report with no actionable adoption recommendations, or an adoption item that already exists in Artibot |
 | 6 | Post | Gap analysis complete | Document features present in target but missing from Artibot, and vice versa | One-sided analysis that ignores the other repo's advantages |
 
