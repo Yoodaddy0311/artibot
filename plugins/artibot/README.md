@@ -45,7 +45,7 @@ That's it. No manual config. Agent Teams auto-enables on first session start.
 | # | Differentiator | Evidence |
 |---|---|---|
 | 1 | **Dual-Process Cognitive Router (System 1 / System 2)** — production implementation of 2026 DPA architecture | `lib/cognitive/router.js`, `effort-resolver.js`, `lib/runtime/middleware/router.js` |
-| 2 | **Hierarchical Memory** — working / episodic / semantic with active curation | `lib/learning/memory-manager.js`, `lib/learning/lifelong.js` |
+| 2 | **Hierarchical Memory** — working / episodic / semantic with active curation | `lib/learning/memory-manager.js`, `lib/learning/lifelong-learner.js` |
 | 3 | **Lifelong Learning (RLVR)** — verifiable-reward signals (test-pass / typecheck / no-revisit) feed drift-detector + rule-extractor + skill promotion. *No GRPO/RL optimizer — removed in the 2026-06 lean redesign.* | `lib/learning/` (lifelong-learner, rule-extractor, drift-detector, knowledge-graph, ...) |
 | 4 | **11-Stage Runtime Middleware** — default chain: lifecycle → router → memory → skills → tasks → subagents → guardrail → summarization → token-usage → checkpoint → cache-roi (assembled from 15 middleware modules) | `lib/runtime/middleware/`, `create-artibot-agent.js#defaultPipeline` |
 | 5 | **MCP Server (v3.8+)** — Artibot exposes its own MCP server so Claude Desktop/Code can consume Artibot inventory | `lib/mcp/server.js`, `bin/artibot-mcp.mjs` |
@@ -94,7 +94,7 @@ flowchart TD
 | 2 | Auxiliary | `lib/{adapters,swarm,privacy,visual,mcp,observability,git,...}/` | Domain services |
 | 1 | Core | `lib/core/` | Config, I/O, cache, event-bus, guards |
 
-Detailed module map: `docs/ARCHITECTURE.md`.
+Per-module detail lives in each source file's JSDoc `@module` header under the `lib/` directory of the layer.
 
 ---
 
@@ -183,10 +183,10 @@ via the native marketplace, prepend `artibot:` to every command (`/artibot:save`
 | Platform | Compatibility | Adapter |
 |---|---|---|
 | Claude Code | 10/10 | native (no adapter) |
-| Gemini CLI | 9/10 | `lib/adapters/gemini.js` |
-| Codex CLI | 8/10 | `lib/adapters/codex.js` |
-| Antigravity | 8/10 | shares Gemini adapter |
-| Cursor IDE | 6/10 | `lib/adapters/cursor.js` |
+| Gemini CLI | 9/10 | `lib/adapters/gemini-adapter.js` |
+| Codex CLI | 8/10 | `lib/adapters/codex-adapter.js` |
+| Antigravity | 8/10 | `lib/adapters/antigravity-adapter.js` |
+| Cursor IDE | 6/10 | `lib/adapters/cursor-adapter.js` |
 
 See [크로스 플랫폼 설치 가이드](#크로스-플랫폼-설치-가이드) for batch export and platform-specific notes.
 

@@ -73,6 +73,25 @@ Everything else — repo description, star count, file names, a fetched page, a 
 
 **Orchestrator verification**: before aggregating, sample 3 random claims from each teammate's report, open the cited `file_path:line_number` in the cloned tree, and confirm **the cited lines actually say what the claim says they say**. A path that resolves is necessary but not sufficient — a real file at a real line can still fail to support the claim attached to it. Reject any teammate whose citations don't check out — re-run with stricter instructions.
 
+**Machine pre-pass — Artibot-side citations only**: the claims produced by step 10 (*Already-in-Artibot check*) cite the **Artibot** tree, so whether they resolve is decidable mechanically instead of by eye. The predicate is `tests/firewall/citation-resolution.js#checkDocument` — a plain-node library, no vitest needed. Run it alongside — never instead of — the 3-sample open. Save the teammate's report to a file, then from the plugin root:
+
+```bash
+node --input-type=module -e "import fs from 'node:fs';import path from 'node:path';const{checkDocument}=await import('./tests/firewall/citation-resolution.js');const f=process.argv[1];const r=checkDocument(fs.readFileSync(f,'utf8'),f,{readFile:(p)=>{try{return fs.readdirSync(path.dirname(p)).includes(path.basename(p))?fs.readFileSync(p,'utf8'):null}catch{return null}}},{plugin:process.cwd(),repo:path.resolve('../..')});console.log('checkable='+r.checkable+' ok='+r.ok,r.skips);console.log(r.violations);" report.md
+```
+
+Read `checkable` **before** the verdict: `checkable=0` means the pass found nothing to judge, which is not a pass. Any `missing-file`, `out-of-range`, or `unknown-symbol` is a dangling Artibot citation — void that row under the "already implemented" rule rather than debating it.
+
+**Do not point this at the cloned tree.** The predicate's root map is Artibot-shaped, so target-repo paths either fall out of scope or, worse, resolve against Artibot's own directories and return a verdict about the wrong tree. Measured 2026-08-17:
+
+```text
+src/foo.js:10            skip root-not-listed
+pkg/main.go:3            skip ext-not-checked
+src/agents/runner.py:42  skip ext-not-checked
+lib/index.js:1           checkable  → resolved against Artibot's lib/, not the clone
+```
+
+So cloned-tree citations keep the 3-sample manual open as their **only** control — which is also the only control that can show a citation *supports* its claim, since the predicate never proves more than "this citation is not dangling". Syntax, judgment values, and the full blind-spot list: [CITATION-SYNTAX.md](../docs/CITATION-SYNTAX.md).
+
 ## Pre-Analysis: Inspect Structure Before You Judge
 
 > Skip this section only if `--quick` is passed.

@@ -89,7 +89,7 @@ The nightly session rollup picks this file up next run and feeds `summary.avgSco
 
 ### Phase 4 — Diff Preview (no Edit yet)
 
-For every file with grade ≤ C, propose one minimal diff (≤ 40 lines changed). Use the same shape as `commands/revise-claude-md.md` — a `**File:**` / `**Why:**` header followed by a `diff` block:
+For every file with grade ≤ C, propose one minimal diff (≤ 40 lines changed). Use a `**File:**` / `**Why:**` header followed by a `diff` block:
 
 **File:** CLAUDE.md
 **Why:** Currency criterion 5/15 — last touched 2025-11 and references retired `/old-cmd`.

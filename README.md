@@ -1012,7 +1012,6 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide on adding skills, agen
 | **CHANGELOG** (full detail) | [`plugins/artibot/CHANGELOG.md`](./plugins/artibot/CHANGELOG.md) |
 | **artibot plugin README** (Claude Code) | [`plugins/artibot/README.md`](./plugins/artibot/README.md) |
 | **artibot-cowork plugin README** (Claude Cowork) | [`plugins/artibot-cowork/README.md`](./plugins/artibot-cowork/README.md) |
-| **Architecture deep dive** | `plugins/artibot/docs/ARCHITECTURE.md` (see CHANGELOG for module map) |
 | **MCP server usage** | `plugins/artibot/docs/MCP-SETUP.md` |
 | **Marketplace submission package** | [`plugins/artibot/_marketplace/`](./plugins/artibot/_marketplace/) |
 

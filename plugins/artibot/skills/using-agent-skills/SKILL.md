@@ -102,4 +102,4 @@ that skill        │
 
 - `plugins/artibot/AGENTS.md` — agent roster + when each is best
 - `plugins/artibot/CLAUDE.md` — DEV protocol + auto-team rules
-- `docs/ARCHITECTURE.md` — 5-layer module map
+- `plugins/artibot/README.md` — 5-layer module map

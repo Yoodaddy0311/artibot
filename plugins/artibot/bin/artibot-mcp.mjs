@@ -91,7 +91,7 @@ export function parseArgs(argv) {
 
 /**
  * Attempt to dynamically load the MCP server factory from lib/mcp/server.js
- * (MS1) and bridges from lib/mcp/bridges/index.js (MS2). Both are optional
+ * (MS1) and bridges from lib/mcp/bridge/index.js (MS2). Both are optional
  * at bin boot so the CLI can still print --version / --help even before
  * those modules land.
  * @returns {Promise<{ createArtibotMcpServer?: Function, wireBridges?: Function }>}

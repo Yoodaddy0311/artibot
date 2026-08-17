@@ -18,7 +18,7 @@ Claude Native Agent Teams API (named `Agent` spawns into the session's single im
 | 2 Auxiliary | `lib/{adapters,swarm,privacy,visual,git,...}/` | Domain services |
 | 1 Core | `lib/core/` | Config, I/O, cache, event-bus, guards |
 
-Upper layers import lower only (5 → 4 → 3 → 2 → 1). Detailed module map: `docs/ARCHITECTURE.md`.
+Upper layers import lower only (5 → 4 → 3 → 2 → 1). Per-module detail lives in each source file's JSDoc `@module` header.
 
 ## DEV Protocol (Mandatory)
 

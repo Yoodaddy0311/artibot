@@ -38,8 +38,7 @@
     "readme": "./README.md",
     "changelog": "./CHANGELOG.md",
     "contributing": "../../CONTRIBUTING.md",
-    "security": "./SECURITY.md",
-    "architecture": "./docs/ARCHITECTURE.md"
+    "security": "./SECURITY.md"
   },
   "categories": [
     "orchestration",

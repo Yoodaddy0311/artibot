@@ -195,6 +195,7 @@ When running as a teammate in an agent team:
 | 4 | Active | Objective comparison | Score the target with the same criteria the pinned Artibot baseline used; challenge the baseline with evidence rather than re-scoring it | Re-scoring Artibot inline (relative-scale drift), or biasing scores toward Artibot or the target repo |
 | 5 | Post | Adoptable elements identified | Extract concrete patterns with adoption effort estimates (LOW/MEDIUM/HIGH), each confirmed absent from Artibot by grep | Benchmark report with no actionable adoption recommendations, or an adoption item that already exists in Artibot |
 | 6 | Post | Gap analysis complete | Document features present in target but missing from Artibot, and vice versa | One-sided analysis that ignores the other repo's advantages |
+| 7 | Post | Artibot-side citations resolve | Write every "already implemented" citation in the canonical syntax — backticked, root segment first, `#symbol` preferred over a line number — so the orchestrator's machine pre-pass can resolve it (syntax: [CITATION-SYNTAX.md](../docs/CITATION-SYNTAX.md)) | An Artibot citation the pre-pass reports as `missing-file`, `out-of-range`, or `unknown-symbol` |
 
 ## Anti-Patterns
 

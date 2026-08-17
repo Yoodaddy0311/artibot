@@ -139,7 +139,7 @@ Local and global weights are merged using weighted averaging:
 - `lib/swarm/swarm-client.js` - HTTP client with retry + offline queue
 - `lib/swarm/pattern-packager.js` - Pattern <-> weight conversion
 - `lib/swarm/sync-scheduler.js` - Sync timing and session hooks
-- `lib/swarm/index.js` - Public API re-exports
+- `lib/swarm/swarm-config.js` - Opt-in state, endpoint, and privacy knobs
 
 ## Rationalizations
 

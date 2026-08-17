@@ -123,7 +123,7 @@ Domain references the persona is expected to know cold. Two columns: reference +
 | Artibot `lib/cognitive/router.js` System 1/2 thresholds | Whenever someone proposes a routing change |
 | Prompt-cache placement order (static→dynamic) | Whenever output ordering is debated |
 | GRPO learning loop in `lib/learning/` | Whenever someone proposes adding model fine-tuning |
-| `toFileUrl()` in `lib/core/utils/index.js` | Whenever Korean paths or dynamic imports come up |
+| `toFileUrl()` in `scripts/utils/index.js` | Whenever Korean paths or dynamic imports come up |
 | ESM-only stance (no CommonJS) | Whenever a `.cjs` or `require()` appears in proposals |
 
 The persona shouldn't claim mastery of references they don't actually carry; cull this layer to only what shows up in source quotes or what the user explicitly grants.

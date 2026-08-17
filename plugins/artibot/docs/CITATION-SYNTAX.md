@@ -58,5 +58,10 @@ census 는 매달린 참조 ~55건(대부분 GRPO/voyager 철거로 삭제된 �
 
 스캔 대상은 `validate-doc-links.js#gatherAllDocFiles` 를 승계한다 (플러그인 루트들의
 commands/skills/docs/rubrics + CLAUDE/README/AGENTS; CHANGELOG 는 append-only 이력이라 제외).
-v2 후보: `agents/` `rules/` `.artibot/guides/`(추적 1파일, `#symbol` 최다 보유) 편입,
-`/repo` 오케스트레이터 인용 검증·`problem-validation` check 2 에 술어 재사용.
+v2 후보: `agents/` `rules/` `.artibot/guides/`(추적 1파일, `#symbol` 최다 보유) 편입.
+
+술어의 **스캔 밖 재사용**은 배선되어 있다: `/repo` 오케스트레이터가 팀원 보고의 Artibot 측 인용을
+plain node 로 전수 검사하고(`commands/repo.md` § *MANDATORY: Code-Level Inspection*),
+`problem-validation` check 2 가 같은 술어를 증거 검증 수단으로 지목한다. 이 재사용은 CI 게이트가
+아니라 오케스트레이터의 수동 호출이다 — 보고서는 커밋되지 않으므로 스캔 대상에 들어올 수 없다.
+클론된 외부 트리에는 쓰지 마라: 루트 맵이 Artibot 형상이라 엉뚱한 트리에 대한 판정이 나온다.

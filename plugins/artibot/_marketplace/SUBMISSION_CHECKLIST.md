@@ -31,7 +31,6 @@ checked or have a tracked exception.
 - [ ] `CHANGELOG.md` has entry for the listed `version` with `Added / Changed / Fixed`
 - [ ] `SECURITY.md` exists and lists vulnerability disclosure process
 - [ ] `CONTRIBUTING.md` exists at repo root
-- [ ] `docs/ARCHITECTURE.md` reachable from README
 
 ## 3. Media
 
@@ -118,7 +117,6 @@ checked or have a tracked exception.
 ## 12. Roadmap & design doc cross-references (C-RM verification)
 
 - [ ] `_reports/horizon-2-3-roadmap.md` exists (referenced from `plugins/artibot/README.md` Roadmap section)
-- [ ] `docs/ARCHITECTURE.md` exists (referenced from `plugins/artibot/README.md` 5-layer table + root README Quick Links)
 - [ ] `docs/mcp-server-usage.md` exists (referenced from CHANGELOG v3.8.0 + root README Quick Links)
 - [ ] `_reports/market-competitive-eval-2026-04-24.md` referenced from plugin README "Why Artibot?" section — VERIFIED file exists
 - [ ] `_reports/ai-ecosystem-research-2026-04-24.md` referenced from plugin README Roadmap section — VERIFIED file exists

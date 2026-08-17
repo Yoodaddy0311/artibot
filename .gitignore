@@ -33,6 +33,7 @@ plugins/artibot/docs/*
 !plugins/artibot/docs/IMPROVEMENT-DESIGN-2026-07-02.md
 !plugins/artibot/docs/MARKETPLACE-SUBMISSION.md
 !plugins/artibot/docs/CITATION-SYNTAX.md
+!plugins/artibot/docs/mcp-server-usage.md
 !plugins/artibot/docs/adr/
 !plugins/artibot/docs/adr/**
 plugins/artibot/coverage/

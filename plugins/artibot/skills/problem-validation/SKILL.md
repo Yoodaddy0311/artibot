@@ -75,6 +75,8 @@ Run each check with actual tooling (Grep, Read, Glob) — never from memory.
 | 3 | Not YAGNI? | Confirm real current demand exists, not speculative future need | "Might be useful someday", "best practice says" |
 | 4 | Maintenance cost < value? | Estimate upkeep burden vs concrete benefit | Ongoing cost likely exceeds realistic gain |
 
+check 2 의 `file:line` 표기 정본은 [CITATION-SYNTAX.md](../../docs/CITATION-SYNTAX.md) 이고, 그 인용이 실제로 해소되는지는 술어 `tests/firewall/citation-resolution.js#checkDocument` 로 기계 판정할 수 있다 (규칙은 그 두 곳에만 산다 — 여기 복제하지 않는다). 다만 술어는 **"매달린 인용이 아님"만** 증명한다. 인용한 줄이 주장을 실제로 뒷받침하는지는 열어서 확인해야 check 2 가 충족된다.
+
 ## Verdicts
 
 | Verdict | Meaning | Condition |
