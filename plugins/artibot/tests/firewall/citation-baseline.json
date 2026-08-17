@@ -1,0 +1,9 @@
+{
+  "comment": "인용 해소 게이트 베이스라인 — 정당한 역사 기록만 담는다 (역사 개서 금지). 항목이 해소되면 테스트가 제거를 강제한다 (축소강제 래칫). 신규 위반은 여기 추가하지 말고 인용을 고쳐라.",
+  "unresolved": [
+    "plugins/artibot/docs/PRD-DREAMING.md::lib/learning/memory/promoter.js#createPromoter",
+    "plugins/artibot/README.md::scripts/validate.test.js:31",
+    "plugins/artibot/README.md::hooks/session-start.test.js:268,276"
+  ],
+  "generatedAt": "2026-08-17T13:30:00.000Z"
+}
