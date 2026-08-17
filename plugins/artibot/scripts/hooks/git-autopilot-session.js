@@ -211,15 +211,33 @@ function syncFromBaseBranch(cwd, currentBranch, config) {
 }
 
 /**
+ * Branch-name shape the hook is allowed to relocate HEAD away from.
+ *
+ * This is an allowlist by construction: only a name whose autopilot sibling
+ * is derivable byte-for-byte (`main` → `artibot/main`) qualifies. A namespaced
+ * branch (`ci/release-v4.46.0`, `release/1.2`, `chore/deps`) would have to be
+ * rewritten into `artibot/ci-release-v4-46-0` — a lossy, collision-prone
+ * mapping, and in practice those namespaces carry human landing flows that the
+ * hook must not take over. Stating it as "which names may move" rather than
+ * "which prefixes to skip" makes an unfamiliar prefix fail closed (stay put)
+ * instead of fail open (relocate).
+ *
+ * Also rejects the empty string, i.e. detached HEAD, where the derived name
+ * would be a bare `artibot/` that git refuses.
+ */
+const RELOCATABLE_BRANCH_NAME = /^[A-Za-z0-9_-]+$/;
+
+/**
  * Ensure the autopilot branch exists and is checked out.
  * Creates from current HEAD if new.
  *
- * Direct-on-base guard: when the working branch IS the repo's base/default
- * branch (e.g. `master`), we do NOT relocate HEAD onto an `artibot/<base>`
- * sibling. Workflows that commit directly to the default branch would
- * otherwise have HEAD silently yanked away on every SessionStart, risking
- * commits landing on a stale sibling base. Autopilot-branch creation still
- * happens when the session starts on a non-base branch.
+ * Two guards keep HEAD where the operator put it:
+ *   - Direct-on-base: when the working branch IS the repo's base/default
+ *     branch (e.g. `master`), we do NOT relocate onto an `artibot/<base>`
+ *     sibling. Workflows that commit directly to the default branch would
+ *     otherwise have HEAD silently yanked away on every SessionStart, risking
+ *     commits landing on a stale sibling base.
+ *   - Name allowlist: see {@link RELOCATABLE_BRANCH_NAME}.
  *
  * @param {string} cwd
  * @param {string} branchPrefix
@@ -230,13 +248,15 @@ function syncFromBaseBranch(cwd, currentBranch, config) {
 function ensureAutopilotBranch(cwd, branchPrefix, currentBranch, config) {
   if (currentBranch.startsWith(branchPrefix)) return currentBranch;
 
+  // Only branch names the hook may take over — everything else stays put.
+  if (!RELOCATABLE_BRANCH_NAME.test(currentBranch)) return currentBranch;
+
   // Stay put when already on the canonical base/default branch.
   const base = resolveBaseBranch(cwd, config);
   const baseLocal = base && base.startsWith('origin/') ? base.slice('origin/'.length) : base;
   if (baseLocal && currentBranch === baseLocal) return currentBranch;
 
-  const baseName = currentBranch.replace(/[^a-zA-Z0-9_-]/g, '-');
-  const autopilotBranch = `${branchPrefix}${baseName}`;
+  const autopilotBranch = `${branchPrefix}${currentBranch}`;
 
   try {
     // Check if branch already exists

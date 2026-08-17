@@ -411,6 +411,85 @@ describe('git-autopilot-session', () => {
   });
 
   // -------------------------------------------------------------------------
+  // Name allowlist — RELOCATABLE_BRANCH_NAME
+  //
+  // Regression for the v4.46.0 release (2026-08-16): a SessionStart on the
+  // manual landing branch `ci/release-v4.46.0` relocated HEAD onto
+  // `artibot/ci-release-v4-46-0`, hijacking the required-checks flow.
+  //
+  // These cases are the fail-closed half. The negative control lives above in
+  // "should switch to autopilot branch when not already on one" (`main` →
+  // `artibot/main`): without it, a gate that blocked every relocation would
+  // also pass here and prove nothing.
+  // -------------------------------------------------------------------------
+
+  /**
+   * Drive the hook with a given starting branch and collect every git argv
+   * string it issued.
+   *
+   * @param {string} branch
+   * @returns {Promise<string[]>}
+   */
+  async function runOnBranch(branch) {
+    const commands = [];
+    mockState.execSyncImpl = (cmd) => {
+      commands.push(cmd);
+      if (cmd === 'git rev-parse --show-toplevel') return '/repo';
+      if (cmd === 'git config --get remote.origin.url') {
+        return 'https://github.com/Yoodaddy0311/artibot.git';
+      }
+      if (cmd === 'git branch --show-current') return branch;
+      if (cmd === 'git rev-parse --git-dir') return '.git';
+      if (cmd.startsWith('git pull')) return '';
+      if (cmd.startsWith('git show-ref')) throw new Error('not found');
+      return '';
+    };
+    mockState.existsSyncResults = { 'autopilot.json': true };
+    mockState.readFileSyncImpl = () => JSON.stringify({
+      enabled: true,
+      autoPullOnSession: true,
+      branchPrefix: 'artibot/',
+    });
+
+    await runHook();
+    return commands;
+  }
+
+  it('does not relocate HEAD off a ci/** landing branch', async () => {
+    const commands = await runOnBranch('ci/release-v4.46.0');
+    const logs = stderrSpy.mock.calls.map(([msg]) => msg).join('');
+
+    expect(logs).not.toContain('Switched to autopilot branch');
+    expect(commands.some((c) => c.includes('checkout'))).toBe(false);
+    // The mangled sibling from the incident must never be referenced.
+    expect(commands.some((c) => c.includes('artibot/ci-release-v4-46-0'))).toBe(false);
+  });
+
+  // The gate is an allowlist, so a namespace nobody enumerated is covered too.
+  // A `ci/**` deny-list would fail open on exactly this case.
+  it.each([
+    ['chore/deps-bump'],
+    ['release/1.2'],
+    ['feature/foo'],
+    ['hotfix/v4.46.1'],
+  ])('does not relocate HEAD off the namespaced branch %s', async (branch) => {
+    const commands = await runOnBranch(branch);
+    const logs = stderrSpy.mock.calls.map(([msg]) => msg).join('');
+
+    expect(logs).not.toContain('Switched to autopilot branch');
+    expect(commands.some((c) => c.includes('checkout'))).toBe(false);
+  });
+
+  it('does not relocate HEAD when detached (empty branch name)', async () => {
+    const commands = await runOnBranch('');
+    const logs = stderrSpy.mock.calls.map(([msg]) => msg).join('');
+
+    expect(logs).not.toContain('Switched to autopilot branch');
+    // A derived `artibot/` is not a valid ref — the hook must not attempt it.
+    expect(commands.some((c) => c.includes('checkout'))).toBe(false);
+  });
+
+  // -------------------------------------------------------------------------
   // syncFromBaseBranch — cross-machine version drift fix
   //
   // Background: autopilot's `git pull` only fetches origin/<current-branch>.
