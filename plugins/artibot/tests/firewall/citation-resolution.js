@@ -32,6 +32,10 @@
  *    — 그 함수는 인라인 코드스팬까지 지우므로 백틱 인용이 전부 사라져
  *    추출 0 = 무음 fail-open 이 된다 (2026-08-17 적대 검증에서 확인).
  *    그래서 아래 `maskFencedBlocks` 는 펜스 블록만 지운다.
+ * 8. **위치 접미사 없는 백틱 경로(`` `lib/foo.js` `` 류)는 판정하지 않는다** —
+ *    추출은 하되 `no-target` 으로 계수만 한다. 2026-08-17 적대 검증의 광의
+ *    census 는 이 층에서 매달린 참조 ~55건(대부분 GRPO/voyager 철거로 삭제된
+ *    파일)을 관측했다 — v2 승격 후보이며, 계수를 남기는 이유가 그 규모 추적이다.
  *
  * @module tests/firewall/citation-resolution
  */
@@ -66,14 +70,17 @@ export const PLACEHOLDER_LITERALS = ['file:line', 'file_path:line_number', 'path
  * 존재할 수 없게 작성한다 — skip 이 쓰레기통이 되면 분모가 조용히 무너진다.
  */
 export const SKIP_REASONS = [
-  'placeholder', 'out-of-repo-prefix', 'bare-basename', 'ext-not-checked', 'root-not-listed',
+  'placeholder', 'out-of-repo-prefix', 'ext-not-checked', 'no-target', 'bare-basename', 'root-not-listed',
 ];
 
-/** resolve 판정 6값. 불리언으로 뭉치면 소비자마다 재분류가 갈라진다. */
+/** resolve 판정 5값. 불리언으로 뭉치면 소비자마다 재분류가 갈라진다. */
 export const STATUSES = ['ok', 'missing-file', 'out-of-range', 'unknown-symbol', 'read-error'];
 
 const SPAN_RE = /`([^`\n]+)`/g;
-const CITE_RE = /^([A-Za-z0-9_.@/-]+\.[A-Za-z0-9]+)(?::([0-9]+(?:-[0-9]+)?(?:,[0-9]+(?:-[0-9]+)?)*)|#([A-Za-z_$][A-Za-z0-9_.$()-]*))$/;
+// 타깃(:NN / #symbol)은 **선택**으로 추출한다 — 없으면 판정하지 않고 `no-target`
+// 으로 계수한다. 필수로 두면 위치 없는 인용이 total/skips 어디에도 안 잡히는
+// 무계수 소실이 된다 (2026-08-17 적대 검증 N1: 추출 커버리지 8.5% 무언 배제).
+const CITE_RE = /^([A-Za-z0-9_.@/-]+\.[A-Za-z0-9]+)(?::([0-9]+(?:-[0-9]+)?(?:,[0-9]+(?:-[0-9]+)?)*)|#([A-Za-z_$][A-Za-z0-9_.$()-]*))?$/;
 
 /**
  * 펜스 블록(``` / ~~~)만 공백으로 지운다. 인라인 코드스팬은 **보존**한다 —
@@ -116,10 +123,11 @@ export function extractCitations(markdown) {
 export function classifyCitation(cite) {
   if (PLACEHOLDER_LITERALS.includes(cite.raw)) return { checkable: false, skip: 'placeholder' };
   if (/^(~|\/|[A-Za-z]:|\.\.\/)/.test(cite.path)) return { checkable: false, skip: 'out-of-repo-prefix' };
-  if (!cite.path.includes('/')) return { checkable: false, skip: 'bare-basename' };
   const ext = cite.path.slice(cite.path.lastIndexOf('.'));
   if (!CHECKED_EXTENSIONS.includes(ext)) return { checkable: false, skip: 'ext-not-checked' };
-  if (!ROOT_SEGMENTS.includes(cite.path.split('/')[0])) return { checkable: false, skip: 'root-not-listed' };
+  if (!cite.lines && !cite.symbol) return { checkable: false, skip: 'no-target' };
+  if (!cite.path.includes('/')) return { checkable: false, skip: 'bare-basename' };
+  if (!(cite.path.split('/')[0] in SEGMENT_ROOT_KIND)) return { checkable: false, skip: 'root-not-listed' };
   return { checkable: true };
 }
 
@@ -155,13 +163,21 @@ export function mdHeadingAnchor(heading) {
     .replace(/-+$/g, '');
 }
 
-/** @param {string} body @param {string} name @returns {boolean} */
+/**
+ * JS 심볼 = **정의 문맥만** 매치한다. 단순 호출문(`name(...)`; 뒤에 `{` 없음)에
+ * 매치하면 "그 파일이 심볼을 import 해 쓰기만 해도 ok" 가 되는 fail-open 이다
+ * (2026-08-17 적대 검증 N2). 그래서 메서드 축약은 `){ ` 까지, 객체 키는 `:` 까지
+ * 요구한다.
+ *
+ * @param {string} body @param {string} name @returns {boolean}
+ */
 function hasJsSymbol(body, name) {
   const n = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const re = new RegExp(
     `(^|\\s)(export\\s+)?(default\\s+)?(async\\s+)?(function\\*?|class|const|let|var)\\s+${n}\\b` +
     `|export\\s*\\{[^}]*\\b${n}\\b` +
-    `|^\\s*${n}\\s*[:(]`, 'm'
+    `|^\\s*${n}\\s*\\([^)]*\\)\\s*\\{` +
+    `|^\\s*${n}\\s*:`, 'm'
   );
   return re.test(body);
 }

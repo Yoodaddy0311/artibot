@@ -24,10 +24,14 @@ const PLUGIN_ROOT = path.resolve(HERE, '..', '..');
 const REPO_ROOT = path.resolve(PLUGIN_ROOT, '..', '..');
 const BASELINE = JSON.parse(fs.readFileSync(path.join(HERE, 'citation-baseline.json'), 'utf8'));
 
-/** 분모 하한 — 2026-08-17 census 실측(497 파일 · 104 스팬 · 59 checkable)에 여유를 둔 값. */
+/**
+ * 분모 하한 — 2026-08-17 실측(498 파일 · 1,701 스팬 · 63 checkable · no-target 1,177)에
+ * 여유를 둔 값. 스팬 총수에 no-target(위치 접미사 없는 언급)이 포함된다 — 그 층을
+ * 분모에서 빼면 추출 규칙 회귀가 조용히 지나간다 (적대 검증 N1).
+ */
 const FLOOR_FILES = 450;
-const FLOOR_SPANS = 80;
-const FLOOR_CHECKABLE = 45;
+const FLOOR_SPANS = 1400;
+const FLOOR_CHECKABLE = 50;
 
 /** 케이스 민감 존재 판정 facade — `existsSync` 단독은 Windows 에서 케이스를 무시한다(FO-6). */
 function makeRealFacade() {
@@ -66,6 +70,7 @@ const FIXTURE_DOC = [
   '`lib/core/a.js:99` 는 범위 밖, `lib/gone/x.js:1` 은 없는 파일.',
   '플레이스홀더 `file.js:123`, 베어 `index.js:59`, 외부 `../x/y.js:1`,',
   '확장자 밖 `lib/core/a.py:3`, 루트 밖 `vendor/z.js:1`.',
+  '타깃 없는 언급 `lib/core/a.js` 는 계수만 한다.',
   '백틱 없는 lib/core/a.js:2 는 인용이 아니다.',
   '```',
   '`lib/fenced/only.js:1` — 펜스 안이라 추출되지 않는다',
@@ -77,13 +82,14 @@ const FIXTURE_FS = {
 };
 
 describe('자기검증 — 추출·분류 (라이브보다 먼저)', () => {
-  it('픽스처에서 정확히 9건 추출한다 (펜스 안 1건은 제외)', () => {
+  it('픽스처에서 정확히 10건 추출한다 (펜스 안 1건은 제외, no-target 포함)', () => {
     const cites = extractCitations(FIXTURE_DOC);
     expect(cites.map((c) => c.raw)).toEqual([
       'lib/core/a.js:2', 'lib/core/a.js#alpha', 'lib/core/a.js:99', 'lib/gone/x.js:1',
       'file.js:123', 'index.js:59', '../x/y.js:1', 'lib/core/a.py:3', 'vendor/z.js:1',
+      'lib/core/a.js',
     ]);
-    expect(cites).toHaveLength(9);
+    expect(cites).toHaveLength(10);
   });
 
   it('음성 단언: 백틱 없는 인용은 탐지되지 않아야 한다 — 탐지기를 산문으로 넓히려면 이 테스트를 지워야 한다', () => {
@@ -97,7 +103,7 @@ describe('자기검증 — 추출·분류 (라이브보다 먼저)', () => {
     expect(masked).not.toContain('lib/fenced/only.js');
   });
 
-  it('skip 5사유가 각각 발화하고, 전부 SKIP_REASONS 열거형 안이다', () => {
+  it('skip 6사유가 각각 발화하고, 전부 SKIP_REASONS 열거형 안이다', () => {
     const byRaw = Object.fromEntries(
       extractCitations(FIXTURE_DOC).map((c) => [c.raw, classifyCitation(c)])
     );
@@ -106,13 +112,14 @@ describe('자기검증 — 추출·분류 (라이브보다 먼저)', () => {
     expect(byRaw['../x/y.js:1']).toEqual({ checkable: false, skip: 'out-of-repo-prefix' });
     expect(byRaw['lib/core/a.py:3']).toEqual({ checkable: false, skip: 'ext-not-checked' });
     expect(byRaw['vendor/z.js:1']).toEqual({ checkable: false, skip: 'root-not-listed' });
+    expect(byRaw['lib/core/a.js']).toEqual({ checkable: false, skip: 'no-target' });
     for (const cls of Object.values(byRaw)) {
       if (cls.checkable === false) expect(SKIP_REASONS).toContain(cls.skip);
     }
   });
 });
 
-describe('자기검증 — 해소 6상태가 각각 실패영역에 실제 도달한다', () => {
+describe('자기검증 — 해소 5상태가 각각 실패영역에 실제 도달한다', () => {
   const facade = makeMemFacade(FIXTURE_FS);
   const ctx = { plugin: 'R', repo: 'REPO' };
   const resolve = (raw) => {
@@ -133,6 +140,7 @@ describe('자기검증 — 해소 6상태가 각각 실패영역에 실제 도�
     expect(resolve('lib/core/a.js:1,2').status).toBe('ok');
     expect(resolve('lib/core/a.js:1-99').status).toBe('out-of-range');
     expect(resolve('lib/core/a.js:1,99').status).toBe('out-of-range');
+    expect(resolve('lib/core/a.js:1,2-99').status).toBe('out-of-range'); // 혼합형 — 라이브 실물 존재
   });
 
   it('read-error: facade 가 throw 하면 통과가 아니라 위반이다 (FO-7)', () => {
@@ -155,6 +163,12 @@ describe('자기검증 — 해소 6상태가 각각 실패영역에 실제 도�
     expect(hasSymbol('.sh', 'echo acquire_lock', 'acquire_lock')).toBe(false);
     expect(hasSymbol('.md', '## Grading rules\n', 'Grading-rules')).toBe(true);
     expect(hasSymbol('.md', '## Other\n', 'Grading-rules')).toBe(false);
+  });
+
+  it('음성 단언: js 심볼은 정의 문맥만 — import 후 호출만 하는 파일은 false (호출부 fail-open 차단)', () => {
+    expect(hasSymbol('.js', 'import { foo } from "./y.js";\nfoo();\n', 'foo')).toBe(false);
+    expect(hasSymbol('.js', 'const o = {\n  foo: 1,\n};\n', 'foo')).toBe(true);
+    expect(hasSymbol('.js', 'class C {\n  foo(a) {\n    return a;\n  }\n}\n', 'foo')).toBe(true);
   });
 
   it('mdHeadingAnchor 는 validate-doc-links#headingToAnchor 와 lockstep 이다', () => {
