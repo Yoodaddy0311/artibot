@@ -436,7 +436,10 @@ async function writeWithOverwrite(filePath, content, overwrite) {
     );
   }
   // Atomic: a crash mid-scaffold leaves the previous file intact rather than a
-  // truncated one. Creates the parent directory itself.
+  // truncated one. Creates the parent directory itself. The cost is a new
+  // failure mode — the closing rename can throw EPERM/EBUSY on Windows when
+  // another process momentarily holds the target (scripts/utils/index.js:102-110)
+  // — and atomicWriteText does not retry, so it surfaces to the caller.
   await atomicWriteText(filePath, content);
   return existed;
 }

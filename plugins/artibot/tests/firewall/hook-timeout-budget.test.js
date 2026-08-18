@@ -66,10 +66,20 @@ const SINGLE_HOOK_STRATEGY = 'single-hook';
 /**
  * 파싱 결과가 비면 이 파일의 모든 루프가 0회 돌고 전부 초록이 된다. 경로가 썩거나
  * 스키마가 바뀌었을 때 게이트가 조용히 사라지는 대신 빨개지도록 바닥을 못박는다.
- * 작성 시점 실측: 슬롯 7 / 강제 대상 5.
+ *
+ * **세 상수는 모집단이 서로 다르다. 섞어 쓰면 바닥이 헐거워진다.**
+ *   - MIN_SLOTS / MIN_ENFORCED_SLOTS → dispatch-table.json 의 slots (실측 7 / 5)
+ *   - MIN_HOOKS_JSON_SLOTS           → hooks.json 의 최상위 이벤트 키 (실측 15)
+ * 이전 판본은 hooks.json 의 15개를 dispatch-table 용 바닥 6과 비교했다. 통과는
+ * 했지만 9개나 여유가 있어서 hooks.json 슬롯이 절반 사라져도 초록이었다.
+ *
+ * 값은 전부 **실측치와 같게** 둔다(> 가 아니라 =). 슬롯을 정당하게 줄이는 편집은
+ * 이 상수도 함께 고치도록 강제하는 쪽이 fail-closed 다 — 여유를 두면 축소가
+ * 조용히 통과한다. 실측 2026-08-19.
  */
-const MIN_SLOTS = 6;
+const MIN_SLOTS = 7;
 const MIN_ENFORCED_SLOTS = 5;
+const MIN_HOOKS_JSON_SLOTS = 15;
 
 /** 경로 썩음 방지 — 로더가 아는 정본 경로를 그대로 쓴다. */
 const TABLE_PATH = getTablePath();
@@ -289,7 +299,9 @@ describe('게이트 자기검증', () => {
     const names = Object.keys(TABLE.slots ?? {});
     expect(names.length).toBeGreaterThanOrEqual(MIN_SLOTS);
     expect(PARTITION.enforced.length).toBeGreaterThanOrEqual(MIN_ENFORCED_SLOTS);
-    expect(Object.keys(HOOKS.hooks ?? {}).length).toBeGreaterThanOrEqual(MIN_SLOTS);
+    // hooks.json 은 dispatch-table 보다 넓다 (PreToolUse·Notification 처럼 디스패처가
+    // 없는 이벤트까지 등록한다). 그래서 자기 모집단의 바닥으로 잰다.
+    expect(Object.keys(HOOKS.hooks ?? {}).length).toBeGreaterThanOrEqual(MIN_HOOKS_JSON_SLOTS);
 
     // 내가 읽은 파일이 프로덕션 로더가 읽는 그 파일인지. 경로가 갈리면 이 게이트는
     // 아무도 안 쓰는 사본을 검사하며 초록이 된다.

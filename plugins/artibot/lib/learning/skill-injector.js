@@ -169,6 +169,12 @@ async function readSkillMd(skillName) {
  * Atomic: a crash mid-write leaves the previous SKILL.md intact rather than a
  * half-injected file. `atomicWriteText` creates the skill directory itself.
  *
+ * The cost of that atomicity is a new failure mode: the write now ends in a
+ * rename, which on Windows can throw EPERM/EBUSY when antivirus, the file
+ * indexer, or another process momentarily holds the target (see the hardening
+ * note at scripts/utils/index.js:102-110). `atomicWriteText` does not retry, so
+ * such a failure propagates to the caller rather than being absorbed.
+ *
  * @param {string} skillName
  * @param {string} content
  * @returns {Promise<void>}

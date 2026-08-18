@@ -16,13 +16,25 @@
  * even mid-spin-wait, stranding the `.lock` file. With a listener the signal is
  * queued until the event loop turns, so the synchronous body — including the
  * `finally` that unlinks the lock — always runs to completion first. The
- * handler then unlinks whatever is still registered and re-raises the signal so
- * the exit status stays a signal death rather than a normal exit.
+ * handler then unlinks whatever is still registered and re-raises the signal,
+ * so the exit status stays a signal death rather than a normal exit — provided
+ * no other SIGTERM/SIGINT listener remains on this process. Another listener
+ * catches the re-raise too, which suppresses the default action; if its handler
+ * neither exits nor re-raises, the process survives the signal instead. See the
+ * same caveat on releaseLocksAndReRaise() below.
  *
  * Not covered:
+ * - **Windows** — no POSIX signal delivery. `child.kill('SIGTERM')` maps to
+ *   TerminateProcess, which kills unconditionally without running the handler
+ *   (measured; see tests/core/file-lock-signal.test.js). This protection is
+ *   POSIX-only, and Windows is a primary development platform here, so treat
+ *   the stale-lock sweep — not this — as the Windows story.
  * - **SIGKILL / power loss** — undeliverable to userspace; nothing runs.
  * - **A signal during an unbounded CPU-bound block** — delivery is deferred to
  *   the next event-loop turn, so a body that never returns is never rescued.
+ * - **The registration window** — a signal landing between the writeFileSync
+ *   that creates the lock and installSignalHandlers() strands the file, since
+ *   no listener is installed and the path is not yet in the active set.
  * - **Cross-process staleness** — a lock stranded by any of the above is
  *   reclaimed by the stale-lock sweep below (LOCK_TIMEOUT_MS), not by signals.
  *
@@ -71,6 +83,16 @@ function removeSignalHandlers() {
  * process still dies of what killed it. Re-raising (rather than
  * `process.exit`) preserves the signal exit status that dispatchers and
  * shells use for accounting.
+ *
+ * The death is only guaranteed while no other SIGTERM/SIGINT listener is
+ * registered on this process: removing ours restores the default disposition
+ * only if ours were the last. A surviving listener catches the re-raise and
+ * suppresses the default action, so a handler that neither exits nor re-raises
+ * leaves the process alive. `lib/system/keep-awake.js:154-156` registers such a
+ * cleanup; nothing imports it and withFileLock into the same process today
+ * (keep-awake reaches only lib/autopilot/, withFileLock only the hook scripts
+ * and lib/core/rotation.js), so this is a constraint on future wiring rather
+ * than a live defect.
  *
  * @param {string} signal - The signal being handled.
  * @returns {void}

@@ -32,6 +32,16 @@
  *     `scripts/hooks/.artibot/ledger/` (gitignore:96 로 무시되는 세션 원장 2파일)
  *     가 샌드박스까지 따라왔다. 아래 node_modules/.git 단언은 **그 부류를 잡지
  *     않는다** — 잡게 만들면 개발자 트리 상태에 따라 색이 갈리는 게이트가 된다.
+ *   - **node_modules/.git 단언의 오늘 초록은 "검사해서 깨끗하다"가 아니라 "검사할
+ *     대상이 없다"이다.** install.sh 는 플러그인 루트를 통째로 복사하지 않고
+ *     하위 디렉터리별로 옮긴다(install_hooks:446-448 의 skills/hooks/scripts/lib +
+ *     .claude-plugin + 개별 cp). 실측 2026-08-19: 복사 대상 6개 트리
+ *     (skills·hooks·scripts·lib·output-styles·.claude-plugin) 안의 node_modules/.git
+ *     은 **전부 0건**이고, node_modules 는 플러그인 루트에만 .git 은 리포 루트에만
+ *     있다 — 둘 다 복사 경로 밖이다. 즉 safe_copy_dir 의 --exclude 는 지금 한 번도
+ *     발화하지 않으며, 이 단언은 그 제외가 옳게 동작함을 증명하지 않는다.
+ *     **미래 회귀 가드로만 유지한다**: 누가 복사 단위를 루트로 넓히거나 하위 트리에
+ *     node_modules 가 생기는 순간 빨개진다.
  *
  * @module tests/firewall/install-files-smoke
  */
@@ -59,8 +69,40 @@ if (!BASH.ok) announceBashSkip('install-files-smoke: install.sh files', BASH.rea
  */
 const CAN_RUN = BASH.ok;
 
-/** 실측 2026-08-18 (Git Bash / Win 11 / rsync 없음): 4분 35초. 3배 여유. */
-const INSTALL_TIMEOUT_MS = 900_000;
+/**
+ * 실측 이력 (전부 Windows 11 / Git Bash / rsync 없음 = per-file cp 루프 경로):
+ *   - WS-C **190~330s** (190·217·229·242·246·330 — 2파일 동시, 전체 스위트, 단독 등
+ *     부하 조건이 매번 달랐다). 같은 명령 같은 기계에서 190s 와 330s 가 다 나왔다
+ *     — **이 스위트의 소요는 재현되지 않는다.** 새 관측이 이 범위 안이면 갱신 불필요.
+ *   - WS-B: **518s** (2026-08-19)
+ *   - spec-reviewer: **520.4s** (2026-08-19)
+ *   - Windows CI 레그(windows-latest): **미측정**
+ *
+ * 같은 코드가 부하에 따라 190s → 520s 로 2.7배 흔들린다. 그래서 이 값은 "평균의
+ * 몇 배"가 아니라 **관측된 최댓값 기준**으로 잡는다 — 520s 대비 3.4배.
+ * 이전 값 900,000ms 는 520s 관측 앞에서 1.7배까지 얇아져 있었다.
+ *
+ * 신설 Windows CI 레그는 러너 성능이 이 로컬 머신보다 낮을 수 있고 rsync 도 없다.
+ * 거기서 실측이 나오면 그 수치를 위 목록에 추가하고 이 값을 다시 판단하라 —
+ * **타임아웃 초과가 나면 이 상수를 올리기 전에 왜 느려졌는지부터 보라.** 이 값이
+ * 커질수록 진짜 행(hang)을 CI 가 붙잡고 있는 시간도 같이 커진다.
+ */
+const INSTALL_TIMEOUT_MS = 1_800_000;
+
+/**
+ * 자식 프로세스 타임아웃 — 훅 타임아웃보다 **반드시 먼저** 발화해야 한다 (1,740,000ms).
+ *
+ * 둘이 같은 값이면 행(hang) 발생 시 경합이 되고, vitest 훅 타임아웃이 먼저 이기면
+ * beforeAll 이 통째로 중단되면서 아래 `result.error.message`(ETIMEDOUT)를 stderr 에
+ * 접어 넣는 경로가 **아예 실행되지 않는다.** 그러면 CI 에는 "hook timed out" 만
+ * 남고 install.sh 가 어디서 멈췄는지는 사라진다. spawn 쪽이 먼저 죽으면 beforeAll
+ * 은 정상 복귀하고 `exit 0` 단언이 stdout 꼬리까지 붙은 메시지로 실패한다.
+ *
+ * 상수를 따로 박지 않고 빼서 쓰는 이유: 위 값을 올릴 때 이 값을 같이 올리는 걸
+ * 잊으면 간격이 뒤집혀 경합이 조용히 되살아난다. 60초는 vitest 가 훅을 정리하고
+ * 결과를 보고하기까지의 여유이고 — **실측치가 아니라 여유치다.**
+ */
+const SPAWN_TIMEOUT_MS = INSTALL_TIMEOUT_MS - 60_000;
 
 const PLUGIN_ROOT = resolve(import.meta.dirname, '..', '..');
 const INSTALL_SH = join(PLUGIN_ROOT, 'install.sh');
@@ -138,6 +180,20 @@ function findDirsNamed(dir, names) {
  * 그 규칙이면 Windows 에서 항상 fail 이다(실측 2026-08-18). 홈 하위인지가 아니라
  * **진짜 ~/.claude 에 손이 닿는지**가 지켜야 할 성질이므로 그걸 직접 단언한다.
  *
+ * ── A10("실 ~/.claude 무변경")을 이 스위트가 충족하는 방식 ────────────────────
+ * **사후 관측이 아니라 경로 가드 + 구성상 보장이다.** install.sh:7-8 은 목적지를
+ * 오직 `${HOME:-${USERPROFILE:-…}}` 에서 유도하고, beforeAll 이 그 둘을 모두 임시
+ * 경로로 덮는다. 여기서 "실 ~/.claude 가 샌드박스 밖"임을 확인하면, 설치기가 실
+ * 디렉터리에 닿을 경로 자체가 존재하지 않는다 — 사후에 세어 보고 "안 변했더라"를
+ * 확인하는 것보다 강한 보장이다.
+ *
+ * 사후 mtime·파일 수 대조를 **의도적으로 넣지 않았다**: 실 `~/.claude/artibot` 은
+ * statusline 참조와 학습 상태 데이터로 **상시 쓰이는 라이브 디렉터리**라, 이 스위트가
+ * 도는 3~9분 사이에 다른 세션의 훅이 정상적으로 쓰기만 해도 빨개진다. 그건 이
+ * 스위트가 검사하려는 것과 무관한 플레이크이고, 플레이크가 된 게이트는 결국 꺼진다.
+ * 대신 A10 은 **작업 시점 수기 실측**으로 확인했다(2026-08-18 23:52 → 08-19 00:23,
+ * 스모크 3회 실행 전후로 artibot 39,805 / agents 33 / commands 78 / rules 11 불변).
+ *
  * @param {string} dir
  */
 function assertSandboxIsolated(dir) {
@@ -168,7 +224,8 @@ beforeAll(() => {
     // cwd 와 무관해야 하고, 그게 사실인지도 여기서 같이 검증된다.
     cwd: sandbox,
     encoding: 'utf-8',
-    timeout: INSTALL_TIMEOUT_MS,
+    // 훅 타임아웃보다 60초 먼저 발화한다 — 사유는 SPAWN_TIMEOUT_MS 참조.
+    timeout: SPAWN_TIMEOUT_MS,
   });
 
   run = {
