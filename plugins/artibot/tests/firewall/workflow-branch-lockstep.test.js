@@ -16,7 +16,8 @@
  *      한다. 트리거를 통째로 지우는 우회를 막는다.
  *   3. 두 워크플로의 job `name:` 템플릿 + matrix 를 전개한 결과가 REQUIRED_CONTEXTS
  *      4개를 **전부 포함**해야 한다. job 이름을 바꾸면 브랜치 보호가 영원히
- *      "expected" 상태로 굳는데, 그 리네임을 여기서 잡는다.
+ *      "expected" 상태로 굳는데, 그 리네임을 여기서 잡는다. matrix 전개는
+ *      `include:` 병합까지 모델링한다(buildMatrixCombinations).
  *
  * ── 이 게이트가 못 보는 것 (rules §9 — 게이트 옆에 적어라) ─────────────────────
  *   - **브랜치 보호의 실제 required contexts 는 원격 상태다.** REQUIRED_CONTEXTS 는
@@ -44,6 +45,17 @@
  *     그런 워크플로는 required context 를 내지 않으므로 ff-only 우회를 만들지 않는다.
  *     파서를 넓히는 것 자체는 환영이지만 **넓히면 이 문단과 아래 단언도 같이 고쳐야
  *     한다** — 그러라고 단언으로 박아뒀다.
+ *     (위 4형태는 `extractPushBranches` 얘기다. matrix 전개기는 별개이고 아래 두
+ *     항목이 그쪽 한계다.)
+ *   - **matrix `exclude:` 는 모델링하지 않는다.** 쓰인 job 은 이름을 하나도 내지
+ *     않으므로 required context 를 내던 job 이 `exclude:` 를 도입하면 게이트가 RED
+ *     가 된다(fail-closed — 조합을 빼는 키를 모른 채 전개하면 실제로는 생기지 않는
+ *     check run 을 "있다"고 판정하게 된다). 확장하려면 이 문단과
+ *     "`exclude:` 가 있으면 이름을 하나도 내지 않는다" 단언을 같이 고쳐라.
+ *   - **이름 중복은 검사하지 않는다.** 서로 다른 조합이 같은 이름을 내면 GitHub 에는
+ *     동명 check run 이 2개 생기고 required 판정이 모호해지는데, 여기서는 Set 으로
+ *     합쳐져 1개로 보인다. ci.yml 이 Windows 레그에 `os-label` 접미사를 붙이는 이유가
+ *     그 중복 회피인데, **그 접미사를 지우는 편집은 이 게이트로 잡히지 않는다.**
  *
  * @module tests/firewall/workflow-branch-lockstep
  */
@@ -167,8 +179,13 @@ function readBlockList(lines, start) {
  * `${{ matrix.k }}` 참조만 치환한다. 다른 표현식(`github.*` 등)이 남아 있으면 그
  * 이름은 정적으로 확정할 수 없으므로 결과에서 제외한다 — 못 푸는 것을 푼 척하지 않는다.
  *
+ * matrix 는 **`include:` 병합까지 모델링한다**(buildMatrixCombinations 참조).
+ * 벡터 키의 데카르트 곱만 보던 이전 판정은 include 전용 키를 "못 읽은 matrix" 로
+ * 취급해 그 job 의 이름을 통째로 버렸다 — ci.yml 의 Windows 레그가 정확히 그
+ * 형태였고, required context 4개를 내는 job 이 0개로 보여 게이트가 RED 였다.
+ *
  * @param {string} yaml 워크플로 파일 전체 텍스트
- * @returns {string[]} 전개된 job 이름들
+ * @returns {string[]} 전개된 job 이름들 (중복 제거)
  */
 export function renderJobNames(yaml) {
   const lines = yaml.split(/\r?\n/);
@@ -206,17 +223,36 @@ export function renderJobNames(yaml) {
     const template = nameLine[1].replace(/^["']|["']$/g, '');
 
     const matrix = extractMatrix(block.lines);
-    names.push(...expandTemplate(template, matrix));
+    // matrix 블록이 아예 없는 job 은 조합 1개(빈 조합)로 본다. 그런 job 의 이름에
+    // `${{ matrix.x }}` 가 있으면 knownKeys 가 비어 있어 아래에서 fail-closed 된다.
+    const combinations = matrix === null ? [{}] : buildMatrixCombinations(matrix);
+    const knownKeys = matrix === null ? new Set() : matrixKeys(matrix);
+    names.push(...expandTemplate(template, combinations, knownKeys));
   }
-  return names;
+  return [...new Set(names)];
 }
 
+/** matrix 의 예약 키. 나머지는 전부 값 벡터(차원)로 본다. */
+const MATRIX_RESERVED_KEYS = new Set(['include', 'exclude']);
+
 /**
- * job 블록에서 `strategy.matrix.<key>: [ ... ]` flow 목록들을 뽑는다.
- * block 시퀀스 형식의 matrix 값도 읽는다.
+ * job 블록에서 `strategy.matrix` 를 구조로 읽는다.
+ *
+ * flow(`k: [a, b]`) / block(`k:` + `- a`) 벡터와 `include:` 매핑 목록을 구분해서
+ * 담는다. `exclude:` 는 **일부러 지원하지 않고 unsupported 로 표시**한다 — 조합을
+ * 빼는 키를 모른 채 전개하면 실제로는 생기지 않는 check run 이름을 게이트가
+ * "있다"고 판정한다(fail-open). 표시된 job 은 이름을 하나도 내지 않으므로
+ * `exclude:` 를 처음 쓰는 사람이 RED 로 이 모델을 확장하게 된다.
+ *
+ * @param {string[]} jobLines job 블록의 줄들
+ * @returns {{vectors: Record<string, string[]>, includes: Record<string, string>[],
+ *   unsupported: string[]} | null} matrix 블록이 없으면 null
  */
 function extractMatrix(jobLines) {
-  const matrix = {};
+  const vectors = {};
+  const includes = [];
+  const unsupported = [];
+  let found = false;
   let inMatrix = false;
   let matrixIndent = -1;
 
@@ -230,6 +266,7 @@ function extractMatrix(jobLines) {
     if (!inMatrix) {
       if (/^\s*matrix:\s*(#.*)?$/.test(line)) {
         inMatrix = true;
+        found = true;
         matrixIndent = indent;
       }
       continue;
@@ -237,43 +274,171 @@ function extractMatrix(jobLines) {
 
     const flow = line.match(/^\s*([A-Za-z0-9_-]+):\s*\[(.*)\]\s*(#.*)?$/);
     if (flow) {
-      matrix[flow[1]] = splitFlowList(flow[2]);
+      if (!MATRIX_RESERVED_KEYS.has(flow[1])) vectors[flow[1]] = splitFlowList(flow[2]);
       continue;
     }
+
     const blockKey = line.match(/^\s*([A-Za-z0-9_-]+):\s*(#.*)?$/);
-    if (blockKey) {
-      const items = readBlockList(jobLines, i + 1);
-      if (items.length > 0) matrix[blockKey[1]] = items;
+    if (!blockKey) continue;
+
+    if (blockKey[1] === 'exclude') {
+      unsupported.push('exclude');
+      continue;
     }
+    if (blockKey[1] === 'include') {
+      includes.push(...readMappingList(jobLines, i + 1, indent));
+      continue;
+    }
+    const items = readBlockList(jobLines, i + 1);
+    if (items.length > 0) vectors[blockKey[1]] = items;
   }
-  return matrix;
+
+  return found ? { vectors, includes, unsupported } : null;
 }
 
-/** `${{ matrix.k }}` 를 matrix 값들의 데카르트 곱으로 전개한다. */
-function expandTemplate(template, matrix) {
-  const refs = [...template.matchAll(/\$\{\{\s*matrix\.([A-Za-z0-9_-]+)\s*\}\}/g)].map(
-    (m) => m[1],
-  );
+/**
+ * `include:` 아래의 매핑 시퀀스를 읽는다.
+ *
+ * ```yaml
+ * include:
+ *   - os: windows-latest      ← 새 엔트리 시작
+ *     node-version: 22        ← 같은 엔트리의 이어지는 쌍
+ * ```
+ *
+ * @param {string[]} lines
+ * @param {number} start `include:` 다음 줄
+ * @param {number} parentIndent `include:` 자체의 들여쓰기
+ * @returns {Record<string, string>[]}
+ */
+function readMappingList(lines, start, parentIndent) {
+  const entries = [];
+  let current = null;
 
-  let rendered = [template];
-  for (const key of refs) {
-    const values = matrix[key];
-    if (!values) return []; // matrix 를 못 읽었으면 이름을 확정하지 않는다
-    const next = [];
-    for (const base of rendered) {
-      for (const value of values) {
-        next.push(
-          base.replace(
-            new RegExp(`\\$\\{\\{\\s*matrix\\.${key}\\s*\\}\\}`, 'g'),
-            value,
-          ),
-        );
-      }
+  for (let i = start; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (/^\s*(#.*)?$/.test(line)) continue;
+    const indent = line.length - line.trimStart().length;
+    if (indent <= parentIndent) break; // include 블록 밖으로 나왔다
+
+    const dash = line.match(/^\s*-\s*(.*)$/);
+    if (dash) {
+      current = {};
+      entries.push(current);
+      assignPair(current, dash[1]);
+      continue;
     }
-    rendered = next;
+    if (!current) break;
+    assignPair(current, line.trim());
   }
+  return entries;
+}
+
+/** `k: v` 한 쌍을 파싱해 대상 객체에 넣는다. 형태가 아니면 무시. */
+function assignPair(target, text) {
+  const pair = text.match(/^([A-Za-z0-9_-]+):\s*(.*)$/);
+  if (!pair) return;
+  target[pair[1]] = parseScalar(pair[2]);
+}
+
+/**
+ * 스칼라 값 하나를 읽는다. 따옴표가 있으면 그 안쪽을 **공백까지 그대로** 살린다
+ * (`" on Windows"` 의 선행 공백이 이름 접미사로 유효하다). 따옴표가 없으면 뒤쪽
+ * 주석을 떼고 trim.
+ */
+function parseScalar(raw) {
+  const quoted = raw.match(/^"([^"]*)"/) || raw.match(/^'([^']*)'/);
+  if (quoted) return quoted[1];
+  return raw.replace(/\s+#.*$/, '').trim();
+}
+
+/** 벡터 키 ∪ include 엔트리에 등장하는 모든 키. */
+function matrixKeys(matrix) {
+  const keys = new Set(Object.keys(matrix.vectors));
+  for (const entry of matrix.includes) for (const key of Object.keys(entry)) keys.add(key);
+  return keys;
+}
+
+/**
+ * matrix 를 GitHub 의 `include:` 병합 의미론대로 조합 목록으로 전개한다.
+ *
+ * 규칙(GitHub Actions 문서 "Adding configurations"): include 엔트리의 키:값 쌍은,
+ * **원본 matrix 값을 덮어쓰지 않는 한** 기존 모든 조합에 더해진다. 어느 조합에도
+ * 더할 수 없으면 **새 조합**이 된다. 그래서 "원본 키인지" 가 판정의 전부다 —
+ * include 전용 키(예: `os-label`)는 절대 충돌을 만들지 않고, 원본 키(예: `os`)에서
+ * 값이 다르면 병합이 막혀 새 조합이 생긴다.
+ *
+ * ci.yml 이 `os: [ubuntu-latest]` 라는 **단일 값 차원**을 두는 이유가 이것이다.
+ * `os` 가 원본 키라서 `{windows-latest, 22}` 가 어느 ubuntu 조합과도 병합되지
+ * 못하고 4번째 조합이 된다. 그 줄이 없으면 같은 include 가 기존 Node 22 조합에
+ * **병합되어** 그 레그를 Windows 로 옮겨버린다(추가가 아니라 이동).
+ *
+ * @param {{vectors: Record<string, string[]>, includes: Record<string, string>[],
+ *   unsupported: string[]}} matrix
+ * @returns {Record<string, string>[]} 조합 목록
+ */
+function buildMatrixCombinations(matrix) {
+  if (matrix.unsupported.length > 0) return [];
+
+  // 벡터가 하나도 없으면 base 는 빈 목록이고 include 엔트리 하나하나가 조합이 된다
+  // (include-only matrix). 여기서 `[{}]` 로 시작하면 모든 엔트리가 그 빈 조합에
+  // 병합돼 조합이 1개로 뭉개진다 — GitHub 은 엔트리당 job 1개를 만든다.
+  const hasVectors = Object.keys(matrix.vectors).length > 0;
+  let base = hasVectors ? [{}] : [];
+
+  for (const [key, values] of Object.entries(matrix.vectors)) {
+    const next = [];
+    for (const combination of base) {
+      for (const value of values) next.push({ ...combination, [key]: value });
+    }
+    base = next;
+  }
+
+  // 병합 대상은 **벡터에서 나온 base 조합뿐**이다. include 가 만든 조합은 뒤이은
+  // include 엔트리의 병합 대상이 아니다 — 그것까지 대상에 넣으면 원본 키가 없는
+  // matrix 에서 엔트리들이 서로에게 병합돼 조합이 1개로 붕괴한다(이 코드의 첫
+  // 판이 정확히 그랬고, "include-only matrix 는 엔트리당 조합 1개" 테스트가
+  // 마지막 엔트리 하나만 내면서 그 결함을 잡았다).
+  const originalKeys = new Set(Object.keys(matrix.vectors));
+  const added = [];
+  for (const entry of matrix.includes) {
+    const targets = base.filter((combination) =>
+      Object.entries(entry).every(
+        ([key, value]) => !originalKeys.has(key) || combination[key] === value,
+      ),
+    );
+    if (targets.length === 0) {
+      added.push({ ...entry });
+      continue;
+    }
+    for (const target of targets) Object.assign(target, entry);
+  }
+  return [...base, ...added];
+}
+
+/**
+ * `${{ matrix.k }}` 를 조합별로 치환한다.
+ *
+ * 조합에 없는 키는 **빈 문자열**이다 — include 전용 키가 base 조합에서 갖는 값이
+ * 정확히 그것이다. 다만 matrix 어디에도 없는 키를 참조하면 파서가 그 matrix 를
+ * 못 읽었을 가능성과 구별되지 않으므로 이름을 하나도 내지 않는다(fail-closed).
+ *
+ * @param {string} template
+ * @param {Record<string, string>[]} combinations
+ * @param {Set<string>} knownKeys
+ * @returns {string[]}
+ */
+function expandTemplate(template, combinations, knownKeys) {
+  const pattern = /\$\{\{\s*matrix\.([A-Za-z0-9_-]+)\s*\}\}/g;
+  const refs = [...template.matchAll(pattern)].map((m) => m[1]);
+  for (const key of refs) {
+    if (!knownKeys.has(key)) return [];
+  }
+
+  const rendered = combinations.map((combination) =>
+    template.replace(pattern, (_, key) => combination[key] ?? ''),
+  );
   // 정적으로 못 푸는 표현식이 남은 이름은 버린다.
-  return rendered.filter((name) => !name.includes('${{'));
+  return [...new Set(rendered)].filter((name) => !name.includes('${{'));
 }
 
 // ───────────────────────── 실제 리포에 대한 게이트 ─────────────────────────
@@ -438,8 +603,18 @@ describe('스캐너 자기검증 — extractPushBranches', () => {
   });
 });
 
+/** 테스트용 job 한 개짜리 워크플로를 만든다. */
+function jobYaml(name, matrixLines) {
+  return [
+    'jobs:',
+    '  validate:',
+    `    name: ${name}`,
+    ...(matrixLines.length > 0 ? ['    strategy:', '      matrix:', ...matrixLines] : []),
+  ].join('\n');
+}
+
 describe('스캐너 자기검증 — renderJobNames', () => {
-  it('matrix 를 전개해 check run 이름을 만든다 (ci.yml 실제 형태)', () => {
+  it('단일 차원 matrix 를 전개해 check run 이름을 만든다', () => {
     const yaml = [
       'jobs:',
       '  validate:',
@@ -475,6 +650,139 @@ describe('스캐너 자기검증 — renderJobNames', () => {
       '        node-version: [22, 24]',
     ].join('\n');
     expect(renderJobNames(yaml)).not.toContain('Validate (Node 22)');
+  });
+});
+
+// ───────────── 스캐너 자기검증 — include: 병합 의미론 ─────────────
+// 이 describe 는 "전개기가 include 를 GitHub 과 같은 규칙으로 푸는가" 만 본다.
+// 아래 두 건(충돌 → 새 조합 / 비충돌 → 병합)이 서로를 판별하는 변이 쌍이다:
+// "include 는 항상 조합을 추가한다" 는 순진한 모델은 두 번째에서 4개를 내며 죽고,
+// "include 는 항상 병합된다" 는 모델은 첫 번째에서 Windows 이름을 못 내며 죽는다.
+//
+// ── 이 모델이 못 보는 것 (rules §9) ────────────────────────────────
+//   - `exclude:` 는 모델링하지 않는다. 쓰인 job 은 이름을 하나도 내지 않아
+//     fail-closed 된다(아래 단언으로 고정).
+//   - **이름 중복은 검사하지 않는다.** 두 조합이 같은 이름을 내면 GitHub 에서는
+//     같은 이름의 check run 이 2개 생기고 required check 판정이 모호해지는데,
+//     여기서는 Set 으로 합쳐져 1개로 보인다. ci.yml 이 Windows 레그에
+//     `os-label` 접미사를 붙이는 이유가 그 중복 회피이고, 그 접미사를 지우는
+//     편집은 이 게이트로는 잡히지 않는다.
+//   - 조합 수·순서는 단언하지 않는다. 게이트의 관심사는 **이름 집합**뿐이다.
+describe('스캐너 자기검증 — matrix include 병합', () => {
+  const NAME = 'Validate (Node ${{ matrix.node-version }})${{ matrix.os-label }}';
+
+  it('원본 키가 충돌하는 include 는 새 조합이 된다 (ci.yml 실제 형태)', () => {
+    const names = renderJobNames(
+      jobYaml(NAME, [
+        '        os: [ubuntu-latest]',
+        '        node-version: [20, 22, 24]',
+        '        include:',
+        '          - os: windows-latest',
+        '            node-version: 22',
+        '            os-label: " on Windows"',
+      ]),
+    );
+    // base 3개는 이름이 그대로 보존되고(required context 2개 포함), Windows 는 별도 이름.
+    expect(names).toEqual([
+      'Validate (Node 20)',
+      'Validate (Node 22)',
+      'Validate (Node 24)',
+      'Validate (Node 22) on Windows',
+    ]);
+  });
+
+  it('include 전용 키는 base 조합에서 빈 문자열이다', () => {
+    // 이 한 건이 게이트를 RED 로 만들었던 결함 그 자체다. include 에만 있는 키를
+    // "못 읽은 matrix" 로 취급하면 job 전체가 이름을 0개 내고, required context 를
+    // 내는 job 이 없다는 거짓 판정이 나온다.
+    const names = renderJobNames(
+      jobYaml('Validate (Node ${{ matrix.node-version }})${{ matrix.os-label }}', [
+        '        os: [ubuntu-latest]',
+        '        node-version: [22]',
+        '        include:',
+        '          - os: windows-latest',
+        '            node-version: 22',
+        '            os-label: " on Windows"',
+      ]),
+    );
+    expect(names).toContain('Validate (Node 22)');
+  });
+
+  it('원본 키가 충돌하지 않는 include 는 기존 조합에 병합된다 (추가가 아니다)', () => {
+    // `os` 차원이 없으므로 node-version 22 는 기존 조합과 일치 → 병합.
+    // 조합이 늘지 않고 그 레그의 이름만 바뀐다.
+    const names = renderJobNames(
+      jobYaml(NAME, [
+        '        node-version: [20, 22, 24]',
+        '        include:',
+        '          - node-version: 22',
+        '            os-label: " LTS"',
+      ]),
+    );
+    expect(names).toEqual([
+      'Validate (Node 20)',
+      'Validate (Node 22) LTS',
+      'Validate (Node 24)',
+    ]);
+    // 병합이므로 접미사 없는 "Validate (Node 22)" 는 더 이상 존재하지 않는다.
+    expect(names).not.toContain('Validate (Node 22)');
+  });
+
+  it('벡터 없는 include-only matrix 는 엔트리당 조합 1개다', () => {
+    const names = renderJobNames(
+      jobYaml('Validate (Node ${{ matrix.node-version }})', [
+        '        include:',
+        '          - node-version: 22',
+        '          - node-version: 24',
+      ]),
+    );
+    expect(names).toEqual(['Validate (Node 22)', 'Validate (Node 24)']);
+  });
+
+  it('따옴표 안의 선행 공백을 살린다', () => {
+    const names = renderJobNames(
+      jobYaml('Validate${{ matrix.os-label }}', [
+        '        node-version: [22]',
+        '        include:',
+        '          - node-version: 22',
+        '            os-label: " on Windows"',
+      ]),
+    );
+    expect(names).toEqual(['Validate on Windows']);
+  });
+
+  it('`exclude:` 가 있으면 이름을 하나도 내지 않는다 (fail-closed)', () => {
+    // exclude 를 모른 채 전개하면 실제로는 생기지 않는 조합의 이름을 게이트가
+    // "있다"고 판정한다. 모르는 건 모른다고 해야 fail-open 이 아니다.
+    const names = renderJobNames(
+      jobYaml('Validate (Node ${{ matrix.node-version }})', [
+        '        node-version: [20, 22, 24]',
+        '        exclude:',
+        '          - node-version: 20',
+      ]),
+    );
+    expect(names).toEqual([]);
+  });
+
+  it('matrix 에 없는 키를 참조하면 이름을 내지 않는다 (파서 실패와 구별 불가)', () => {
+    const names = renderJobNames(
+      jobYaml('Validate (Node ${{ matrix.node-version }})${{ matrix.nope }}', [
+        '        node-version: [22]',
+      ]),
+    );
+    expect(names).toEqual([]);
+  });
+
+  it('읽지 못한 matrix 표기법은 이름을 내지 않는다 (여러 줄 flow)', () => {
+    const names = renderJobNames(
+      jobYaml('Validate (Node ${{ matrix.node-version }})', [
+        '        node-version: [',
+        '          20,',
+        '          22',
+        '        ]',
+      ]),
+    );
+    expect(names).toEqual([]);
   });
 });
 
