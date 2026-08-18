@@ -207,6 +207,24 @@ describe('createHook().commit', () => {
     const committed = await result.commit(pluginRoot);
     expect(committed.warnings.length).toBeGreaterThan(0);
   });
+
+  it('guards against overwrite by default', async () => {
+    const result = createHook(spec);
+    await result.commit(pluginRoot);
+    await expect(result.commit(pluginRoot)).rejects.toThrow(/file exists/);
+  });
+
+  it('leaves the existing script intact when the overwrite guard rejects', async () => {
+    const first = createHook(spec);
+    await first.commit(pluginRoot);
+    const scriptFile = path.join(pluginRoot, 'scripts', 'hooks', 'demo-hook.js');
+    const before = readFileSync(scriptFile, 'utf-8');
+
+    const second = createHook({ ...spec, script: 'process.stdout.write("REPLACED");' });
+    await expect(second.commit(pluginRoot)).rejects.toThrow(/file exists/);
+
+    expect(readFileSync(scriptFile, 'utf-8')).toBe(before);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -256,5 +274,20 @@ describe('createMiddleware().commit', () => {
     const result = createMiddleware(spec);
     await result.commit(pluginRoot);
     await expect(result.commit(pluginRoot)).rejects.toThrow(/file exists/);
+  });
+
+  it('replaces the module content when overwrite: true', async () => {
+    await createMiddleware(spec).commit(pluginRoot);
+    const second = createMiddleware({
+      ...spec,
+      factoryCode: 'export default function mw(ctx) { return { ...ctx, v: 2 }; }',
+    });
+    const committed = await second.commit(pluginRoot, { overwrite: true });
+
+    expect(committed.overwritten).toBe(true);
+    const moduleFile = path.join(
+      pluginRoot, 'lib', 'runtime', 'middleware', 'demo-mw.js',
+    );
+    expect(readFileSync(moduleFile, 'utf-8')).toContain('v: 2');
   });
 });

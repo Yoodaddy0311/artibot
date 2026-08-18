@@ -88,10 +88,61 @@ function cleanupTmpSync(tmpPath) {
 }
 
 /**
- * Atomic JSON write with temp file + rename. Guaranteed crash-safe: readers
- * never observe a partial file. Creates parent directory first, then writes
- * a unique tmp sibling, then renames into place. If rename fails, the tmp
- * file is removed so we never leak `.tmp.*` droppings.
+ * Atomic text write with temp file + rename. Guaranteed crash-safe: readers
+ * never observe a partial file, and a crash mid-write leaves the previous
+ * content intact. Creates parent directory first, then writes a unique tmp
+ * sibling, then renames into place. If rename fails, the tmp file is removed
+ * so we never leak `.tmp.*` droppings.
+ *
+ * The content is written byte-for-byte as given — no trailing newline is
+ * added. Callers that want one must include it, otherwise a read → write
+ * round-trip would grow the file on every pass.
+ *
+ * @param {string} filePath - Absolute path to the text file.
+ * @param {string} content - Exact content to write.
+ * @returns {Promise<void>}
+ * @example
+ * await atomicWriteText('/path/skills/foo/SKILL.md', markdown);
+ */
+export async function atomicWriteText(filePath, content) {
+  await ensureDir(path.dirname(filePath));
+  const tmp = buildAtomicTmpPath(filePath);
+  try {
+    await fs.writeFile(tmp, content, 'utf-8');
+    await fs.rename(tmp, filePath);
+  } catch (err) {
+    cleanupTmpSync(tmp);
+    throw err;
+  }
+}
+
+/**
+ * Synchronous variant of `atomicWriteText`. Intended for startup-critical
+ * paths (hooks, sync loggers) where an async API would complicate the call
+ * site. Identical crash-safety and no-added-newline semantics.
+ *
+ * @param {string} filePath - Absolute path to the text file.
+ * @param {string} content - Exact content to write.
+ * @returns {void}
+ * @example
+ * atomicWriteTextSync('/path/runtime/last-run.log', line);
+ */
+export function atomicWriteTextSync(filePath, content) {
+  ensureDirSync(path.dirname(filePath));
+  const tmp = buildAtomicTmpPath(filePath);
+  try {
+    fsSync.writeFileSync(tmp, content, 'utf-8');
+    fsSync.renameSync(tmp, filePath);
+  } catch (err) {
+    cleanupTmpSync(tmp);
+    throw err;
+  }
+}
+
+/**
+ * Atomic JSON write with temp file + rename. Serializes, appends the
+ * conventional trailing newline, and delegates the crash-safe write to
+ * `atomicWriteText`.
  *
  * Use this for any JSON state file that must survive crashes / concurrent
  * writes (self-control state, decision trail, kill-switch state, first-run
@@ -105,16 +156,7 @@ function cleanupTmpSync(tmpPath) {
  * await atomicWriteJson('/path/runtime/state.json', { globalRuns: 3 });
  */
 export async function atomicWriteJson(filePath, data, indent = 2) {
-  await ensureDir(path.dirname(filePath));
-  const tmp = buildAtomicTmpPath(filePath);
-  const content = JSON.stringify(data, null, indent) + '\n';
-  try {
-    await fs.writeFile(tmp, content, 'utf-8');
-    await fs.rename(tmp, filePath);
-  } catch (err) {
-    cleanupTmpSync(tmp);
-    throw err;
-  }
+  await atomicWriteText(filePath, JSON.stringify(data, null, indent) + '\n');
 }
 
 /**
@@ -130,16 +172,7 @@ export async function atomicWriteJson(filePath, data, indent = 2) {
  * atomicWriteJsonSync('/path/runtime/decision-trail.json', trail);
  */
 export function atomicWriteJsonSync(filePath, data, indent = 2) {
-  ensureDirSync(path.dirname(filePath));
-  const tmp = buildAtomicTmpPath(filePath);
-  const content = JSON.stringify(data, null, indent) + '\n';
-  try {
-    fsSync.writeFileSync(tmp, content, 'utf-8');
-    fsSync.renameSync(tmp, filePath);
-  } catch (err) {
-    cleanupTmpSync(tmp);
-    throw err;
-  }
+  atomicWriteTextSync(filePath, JSON.stringify(data, null, indent) + '\n');
 }
 
 /**

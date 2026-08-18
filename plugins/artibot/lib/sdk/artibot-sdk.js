@@ -12,6 +12,7 @@
 
 import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { atomicWriteText } from '../core/file.js';
 
 // ---------------------------------------------------------------------------
 // Schema Definitions
@@ -434,8 +435,9 @@ async function writeWithOverwrite(filePath, content, overwrite) {
       `file exists, pass overwrite:true to replace: ${filePath}`,
     );
   }
-  await mkdir(path.dirname(filePath), { recursive: true });
-  await writeFile(filePath, content, 'utf-8');
+  // Atomic: a crash mid-scaffold leaves the previous file intact rather than a
+  // truncated one. Creates the parent directory itself.
+  await atomicWriteText(filePath, content);
   return existed;
 }
 

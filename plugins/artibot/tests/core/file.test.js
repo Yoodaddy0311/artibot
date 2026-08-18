@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   atomicWriteJson,
   atomicWriteJsonSync,
+  atomicWriteText,
+  atomicWriteTextSync,
   ensureDir,
   exists,
   listDirs,
@@ -170,6 +172,100 @@ describe('file', () => {
       await fs.writeFile(path.join(tmpDir, 'file.txt'), '');
       const dirs = await listDirs(tmpDir);
       expect(dirs).toEqual([]);
+    });
+  });
+
+  describe('atomicWriteText()', () => {
+    it('writes the exact string with no added trailing newline', async () => {
+      const file = path.join(tmpDir, 'exact.md');
+      await atomicWriteText(file, '# Title\n\nbody');
+      expect(await fs.readFile(file, 'utf-8')).toBe('# Title\n\nbody');
+    });
+
+    it('preserves a trailing newline the caller supplied, without doubling it', async () => {
+      const file = path.join(tmpDir, 'trailing.md');
+      await atomicWriteText(file, 'line\n');
+      expect(await fs.readFile(file, 'utf-8')).toBe('line\n');
+    });
+
+    it('writes an empty string as a zero-byte file', async () => {
+      const file = path.join(tmpDir, 'empty.md');
+      await atomicWriteText(file, '');
+      expect((await fs.stat(file)).size).toBe(0);
+    });
+
+    it('creates parent directories', async () => {
+      const file = path.join(tmpDir, 'nested', 'a', 'b', 'doc.md');
+      await atomicWriteText(file, 'deep');
+      expect(await fs.readFile(file, 'utf-8')).toBe('deep');
+    });
+
+    it('does not leave a .tmp sibling on success', async () => {
+      const file = path.join(tmpDir, 'clean.md');
+      await atomicWriteText(file, 'x');
+      const entries = await fs.readdir(tmpDir);
+      expect(entries.filter((e) => e.startsWith('clean.md.tmp'))).toEqual([]);
+    });
+
+    it('round-trips without growing the file', async () => {
+      const file = path.join(tmpDir, 'roundtrip.md');
+      const content = '# Skill\n\n## Rules\n- [preference] use tabs\n';
+      await atomicWriteText(file, content);
+      const first = (await fs.stat(file)).size;
+      await atomicWriteText(file, await fs.readFile(file, 'utf-8'));
+      expect((await fs.stat(file)).size).toBe(first);
+    });
+
+    it('cleans up tmp sibling and preserves existing content when rename fails', async () => {
+      // A non-empty directory at the target makes rename fail on every platform.
+      const target = path.join(tmpDir, 'collide.md');
+      await fs.mkdir(target);
+      await fs.writeFile(path.join(target, 'x'), 'occupied');
+
+      await expect(atomicWriteText(target, 'new')).rejects.toThrow();
+
+      const entries = await fs.readdir(tmpDir);
+      expect(entries.filter((e) => e.startsWith('collide.md.tmp'))).toEqual([]);
+      // Pre-existing content survived the failed write.
+      expect(await fs.readFile(path.join(target, 'x'), 'utf-8')).toBe('occupied');
+    });
+
+    it('overwrites an existing file', async () => {
+      const file = path.join(tmpDir, 'over.md');
+      await atomicWriteText(file, 'v1');
+      await atomicWriteText(file, 'v2');
+      expect(await fs.readFile(file, 'utf-8')).toBe('v2');
+    });
+  });
+
+  describe('atomicWriteTextSync()', () => {
+    it('writes the exact string with no added trailing newline', () => {
+      const file = path.join(tmpDir, 'sync-exact.md');
+      atomicWriteTextSync(file, 'no-newline');
+      expect(fsSync.readFileSync(file, 'utf-8')).toBe('no-newline');
+    });
+
+    it('creates parent directories', () => {
+      const file = path.join(tmpDir, 'sync', 'deep', 'doc.md');
+      atomicWriteTextSync(file, 'ok');
+      expect(fsSync.readFileSync(file, 'utf-8')).toBe('ok');
+    });
+
+    it('does not leave a .tmp sibling on success', () => {
+      const file = path.join(tmpDir, 'sync-clean.md');
+      atomicWriteTextSync(file, 'x');
+      const entries = fsSync.readdirSync(tmpDir);
+      expect(entries.filter((e) => e.startsWith('sync-clean.md.tmp'))).toEqual([]);
+    });
+
+    it('cleans up tmp sibling and preserves existing content when rename fails', () => {
+      const target = path.join(tmpDir, 'sync-collide.md');
+      fsSync.mkdirSync(target);
+      fsSync.writeFileSync(path.join(target, 'x'), 'occupied');
+      expect(() => atomicWriteTextSync(target, 'new')).toThrow();
+      const entries = fsSync.readdirSync(tmpDir);
+      expect(entries.filter((e) => e.startsWith('sync-collide.md.tmp'))).toEqual([]);
+      expect(fsSync.readFileSync(path.join(target, 'x'), 'utf-8')).toBe('occupied');
     });
   });
 

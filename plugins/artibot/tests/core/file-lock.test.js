@@ -15,8 +15,43 @@ vi.mock('node:fs', async () => {
 
 let withFileLock;
 
+/** Signals the module installs handlers for. */
+const SIGNALS = ['SIGTERM', 'SIGINT'];
+
+/** Listeners present before a test ran, so we can strip only what it added. */
+let baselineListeners;
+
+function captureBaselineListeners() {
+  baselineListeners = new Map(
+    SIGNALS.map((sig) => [sig, new Set(process.listeners(sig))]),
+  );
+}
+
+/**
+ * Remove listeners this test added. `vi.resetModules()` gives each test a
+ * fresh module (and thus a fresh "handlers installed" flag) but does NOT
+ * detach listeners already attached to the real `process`, so without this
+ * they accumulate across the file and trip MaxListenersExceededWarning.
+ */
+function restoreBaselineListeners() {
+  for (const sig of SIGNALS) {
+    for (const listener of process.listeners(sig)) {
+      if (!baselineListeners.get(sig).has(listener)) {
+        process.removeListener(sig, listener);
+      }
+    }
+  }
+}
+
+/** Listeners the module added on top of the baseline, for one signal. */
+function addedListenerCount(sig) {
+  return process.listeners(sig)
+    .filter((l) => !baselineListeners.get(sig).has(l)).length;
+}
+
 describe('file-lock', () => {
   beforeEach(async () => {
+    captureBaselineListeners();
     vi.resetModules();
     vi.mocked(existsSync).mockReturnValue(false);
     vi.mocked(readFileSync).mockReturnValue('{}');
@@ -27,6 +62,7 @@ describe('file-lock', () => {
   });
 
   afterEach(() => {
+    restoreBaselineListeners();
     vi.restoreAllMocks();
   });
 
@@ -214,6 +250,72 @@ describe('file-lock', () => {
 
     const result = withFileLock('/tmp/state.json', () => 'ok');
     expect(result).toBe('ok');
+  });
+
+  // ─── Signal Listener Lifecycle (A4) ───────────────────────────
+  //
+  // The listener pair is installed once per process and deliberately left
+  // installed after release — see the rationale on installSignalHandlers().
+  // The property under test is therefore "exactly one pair, never growing",
+  // not "count returns to zero".
+
+  it('installs exactly one listener per signal on first lock', () => {
+    withFileLock('/tmp/state.json', () => {});
+
+    expect(addedListenerCount('SIGTERM')).toBe(1);
+    expect(addedListenerCount('SIGINT')).toBe(1);
+  });
+
+  it('does not add listeners for repeated sequential locks', () => {
+    withFileLock('/tmp/a.json', () => {});
+    const after1 = addedListenerCount('SIGTERM');
+
+    withFileLock('/tmp/b.json', () => {});
+    withFileLock('/tmp/c.json', () => {});
+
+    expect(after1).toBe(1);
+    expect(addedListenerCount('SIGTERM')).toBe(1);
+    expect(addedListenerCount('SIGINT')).toBe(1);
+  });
+
+  it('does not add listeners for nested locks on different paths', () => {
+    withFileLock('/tmp/outer.json', () => {
+      withFileLock('/tmp/inner.json', () => {
+        expect(addedListenerCount('SIGTERM')).toBe(1);
+      });
+    });
+
+    expect(addedListenerCount('SIGTERM')).toBe(1);
+    expect(addedListenerCount('SIGINT')).toBe(1);
+  });
+
+  it('does not add listeners when re-entering the same path', () => {
+    withFileLock('/tmp/same.json', () => {
+      withFileLock('/tmp/same.json', () => {});
+    });
+
+    expect(addedListenerCount('SIGTERM')).toBe(1);
+    expect(addedListenerCount('SIGINT')).toBe(1);
+  });
+
+  it('does not add listeners when fn throws', () => {
+    try {
+      withFileLock('/tmp/boom.json', () => { throw new Error('boom'); });
+    } catch { /* expected */ }
+
+    expect(addedListenerCount('SIGTERM')).toBe(1);
+  });
+
+  it('installs no listeners when the lock could not be created (fail-open)', () => {
+    vi.mocked(writeFileSync).mockImplementation(() => {
+      throw new Error('EPERM');
+    });
+
+    const result = withFileLock('/tmp/state.json', () => 'no-lock-ok');
+
+    expect(result).toBe('no-lock-ok');
+    expect(addedListenerCount('SIGTERM')).toBe(0);
+    expect(addedListenerCount('SIGINT')).toBe(0);
   });
 
   // ─── No-Lock Path (lock doesn't exist) ────────────────────────

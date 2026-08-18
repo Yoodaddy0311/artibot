@@ -15,7 +15,7 @@
 
 import path from 'node:path';
 import fs from 'node:fs/promises';
-import { ensureDir, readJsonFile, writeJsonFile } from '../core/file.js';
+import { atomicWriteText, ensureDir, readJsonFile, writeJsonFile } from '../core/file.js';
 import { ARTIBOT_DIR } from '../core/config.js';
 import { getPluginRoot } from '../core/platform.js';
 
@@ -165,14 +165,16 @@ async function readSkillMd(skillName) {
 
 /**
  * Write updated content back to SKILL.md.
+ *
+ * Atomic: a crash mid-write leaves the previous SKILL.md intact rather than a
+ * half-injected file. `atomicWriteText` creates the skill directory itself.
+ *
  * @param {string} skillName
  * @param {string} content
  * @returns {Promise<void>}
  */
 async function writeSkillMd(skillName, content) {
-  const skillDir = path.join(getPluginRoot(), 'skills', skillName);
-  await ensureDir(skillDir);
-  await fs.writeFile(getSkillMdPath(skillName), content, 'utf-8');
+  await atomicWriteText(getSkillMdPath(skillName), content);
 }
 
 /**

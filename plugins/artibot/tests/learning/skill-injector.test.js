@@ -7,11 +7,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mockReadJsonFile = vi.fn();
 const mockWriteJsonFile = vi.fn();
 const mockEnsureDir = vi.fn();
+const mockAtomicWriteText = vi.fn();
 
 vi.mock('../../lib/core/file.js', () => ({
   readJsonFile: (...args) => mockReadJsonFile(...args),
   writeJsonFile: (...args) => mockWriteJsonFile(...args),
   ensureDir: (...args) => mockEnsureDir(...args),
+  atomicWriteText: (...args) => mockAtomicWriteText(...args),
 }));
 
 vi.mock('../../lib/core/config.js', () => ({
@@ -95,6 +97,7 @@ describe('injectRules()', () => {
     mockFsAccess.mockResolvedValue(undefined); // skill exists
     mockFsReadFile.mockResolvedValue('# Coding Standards\n\nSome content.');
     mockFsWriteFile.mockResolvedValue(undefined);
+    mockAtomicWriteText.mockResolvedValue(undefined);
   });
 
   it('returns zero injected when rules array is empty', async () => {
@@ -145,8 +148,10 @@ describe('injectRules()', () => {
     const rules = [makeRule('preference', 'Always use TypeScript')];
     await injectRules(rules, 'coding-standards');
 
-    // fs.writeFile should NOT be called (SKILL.md is not touched)
+    // Neither write path may touch SKILL.md: raw fs.writeFile nor the atomic
+    // text writer that writeSkillMd now uses.
     expect(mockFsWriteFile).not.toHaveBeenCalled();
+    expect(mockAtomicWriteText).not.toHaveBeenCalled();
   });
 
   it('skips rules already in injection log (deduplication)', async () => {
@@ -343,6 +348,7 @@ describe('clearInjections()', () => {
     mockFsAccess.mockResolvedValue(undefined);
     mockFsReadFile.mockResolvedValue('# Skill\n\n## Project-Specific Rules\n\n- [preference] Old rule\n');
     mockFsWriteFile.mockResolvedValue(undefined);
+    mockAtomicWriteText.mockResolvedValue(undefined);
     mockFsUnlink.mockResolvedValue(undefined);
   });
 
@@ -398,9 +404,33 @@ describe('clearInjections()', () => {
 
     await clearInjections('coding-standards');
 
-    const writtenSkill = mockFsWriteFile.mock.calls[0][1];
+    const writtenSkill = mockAtomicWriteText.mock.calls[0][1];
     expect(writtenSkill).not.toContain('## Project-Specific Rules');
     expect(writtenSkill).not.toContain('Old rule');
+  });
+
+  it('does not grow SKILL.md across a write → read → write round-trip', async () => {
+    // A writer that appends its own trailing newline would grow the file by one
+    // byte per pass. Feed pass 1's output back in as pass 2's input.
+    const log = [{ skillName: 'coding-standards', ruleHash: 'aaa', type: 'preference', content: 'A', injectedAt: '' }];
+    mockReadJsonFile.mockResolvedValue(log);
+
+    await clearInjections('coding-standards');
+    const firstPass = mockAtomicWriteText.mock.calls[0][1];
+    // Exactly one trailing newline — the one clearInjections appends itself.
+    expect(firstPass.endsWith('\n')).toBe(true);
+    expect(firstPass.endsWith('\n\n')).toBe(false);
+
+    mockAtomicWriteText.mockClear();
+    mockReadJsonFile.mockResolvedValue(log);
+    mockFsReadFile.mockResolvedValue(firstPass);
+
+    await clearInjections('coding-standards');
+
+    // Pass 2 finds no sentinel (skill-injector.js:404) and rewrites nothing,
+    // so the file cannot grow. The byte-exactness of the writer itself is
+    // asserted directly in tests/core/file.test.js (atomicWriteText).
+    expect(mockAtomicWriteText).not.toHaveBeenCalled();
   });
 
   it('returns cleared=0 when no entries for that skill', async () => {

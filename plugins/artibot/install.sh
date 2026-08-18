@@ -1515,11 +1515,31 @@ main() {
       # the shell (and any `npm run sync:local` wrapping it) as a non-zero exit.
       verify_install || exit 1
       ;;
+    # File-placement phase only. For tests/CI, so a smoke test can assert what
+    # the installer actually puts on disk without touching machine-scoped state.
+    #
+    # This is an ALLOWLIST, not a denylist. check_prerequisites (wants the
+    # claude CLI), the marketplace/cache mirrors, install_mcp,
+    # configure_settings, the three seed_* steps, setup_swarm_consent,
+    # setup_auto_learning (registers crontab/schtasks — machine scope) and
+    # save_source_path are excluded BY NOT BEING LISTED. A step added to
+    # `install)` later does not leak in here on its own; someone has to decide
+    # it belongs. A denylist would have failed open on exactly that.
+    files)
+      setup_directories
+      install_agents
+      install_commands
+      install_skills
+      install_hooks
+      install_rules
+      verify_install || exit 1
+      ;;
     uninstall)
       uninstall
       ;;
     *)
-      echo "Usage: ./install.sh [install|uninstall]"
+      echo "Usage: ./install.sh [install|uninstall|files]"
+      echo "  files: copy phase only (agents/commands/skills/hooks/rules) — test & CI use"
       exit 1
       ;;
   esac
