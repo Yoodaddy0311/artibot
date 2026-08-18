@@ -97,9 +97,14 @@ Parse the latest user message for complaint/request signals (see description). I
 - 실제: ...
 
 ### 환경
-- Artibot: v2.4.0
+- Artibot: vX.Y.Z (detected from .claude-plugin/plugin.json version)
 - OS: Windows 11 (from cwd detection)
 - Node: detected from package.json engines
+
+### 출처 (선택)
+- 파일: `skills/<name>/SKILL.md` 또는 `commands/<name>.md`
+- 섹션: "<헤딩 제목>"
+- (오안내·문서 오류 신고일 때만. 모르면 생략)
 
 ### 라벨
 `bug`, `triage` (or `enhancement`, `improvement`)

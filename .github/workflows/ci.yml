@@ -24,28 +24,63 @@ env:
 
 jobs:
   validate:
-    name: Validate (Node ${{ matrix.node-version }})
-    runs-on: ubuntu-latest
+    # `matrix.os-label` is deliberately absent from the matrix vectors below and
+    # set only on the Windows include entry, so it expands to the empty string
+    # on the three Linux legs and leaves their names byte-identical:
+    # "Validate (Node 20|22|24)". Two of those are required contexts in master's
+    # branch protection (measured 2026-08-18: "Validate (Node 22)",
+    # "Validate (Node 24)", plus the two plugin-structure contexts) — renaming
+    # them would silently unsatisfy branch protection. Because this job sets
+    # `name:` explicitly, GitHub does NOT append matrix values to it, which is
+    # what makes adding an `os` dimension safe here; it is also why the Windows
+    # leg needs an explicit suffix, or it would collide on the same check name.
+    name: Validate (Node ${{ matrix.node-version }})${{ matrix.os-label }}
+    runs-on: ${{ matrix.os }}
 
     strategy:
       fail-fast: false
       matrix:
+        # Single-value dimension on purpose: it does not multiply the matrix,
+        # but it makes `os` an *original* matrix key. That is load-bearing —
+        # an `include:` entry only creates a new combination when it cannot be
+        # merged into an existing one, and merging is blocked only by a
+        # conflicting original key. With `os` here, `{windows-latest, 22}`
+        # conflicts with every ubuntu combination and becomes a 4th job. Drop
+        # this line and the same include would instead be absorbed into the
+        # existing Node 22 leg, moving it off Linux rather than adding to it.
+        os: [ubuntu-latest]
         # Node 20 is the floor (package.json#/engines/node >=20). 22 is the
         # primary LTS gate (uploads coverage + runtime evals). 24 is the
         # forward smoke. Drift detection: keep this list lockstep with
         # plugins/artibot/scripts/install.sh#MIN_NODE_MAJOR (=20).
         node-version: [20, 22, 24]
+        include:
+          # Windows coverage, one combination. The suite is path- and
+          # shell-sensitive in ways Linux legs cannot surface. Node 22 chosen
+          # to match the primary LTS gate. This produces the check name
+          # "Validate (Node 22) on Windows", which is NOT in branch
+          # protection's required list — it is informational until someone
+          # adds it deliberately.
+          - os: windows-latest
+            node-version: 22
+            os-label: " on Windows"
 
     defaults:
       run:
         working-directory: plugins/artibot
+        # Windows runners default to pwsh, which is a parse error — not a
+        # runtime failure — on the sh syntax these steps use (`||` fallback at
+        # :62 below). bash is present on all three runner images, so setting it
+        # workflow-wide keeps one step body valid on every leg instead of
+        # forking the script per OS.
+        shell: bash
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
       - name: Setup Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: ${{ matrix.node-version }}
           cache: npm
@@ -121,9 +156,17 @@ jobs:
         if: always()
         run: node scripts/ci/publish-runtime-eval-summary.js
 
+      # The `matrix.os` half of this condition is not cosmetic. Artifact names
+      # are unique per workflow run in upload-artifact v4+ — a second upload of
+      # an existing name is a 409, and a failed step fails the job. Adding the
+      # Windows leg created a second Node 22 combination, so without this the
+      # Windows job would go red on the artifact step alone while every gate
+      # above it passed. Restricting to Linux (rather than putting the OS in
+      # the artifact name) keeps `runtime-evals-node-22` stable for anything
+      # already downloading it.
       - name: Upload runtime eval artifacts
-        if: always() && matrix.node-version == 22
-        uses: actions/upload-artifact@v5
+        if: always() && matrix.node-version == 22 && matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
           name: runtime-evals-node-${{ matrix.node-version }}
           path: |
@@ -132,9 +175,10 @@ jobs:
             _benchmarks/runtime-eval-comparison.md
           if-no-files-found: warn
 
+      # Same 409-on-duplicate-name reason as the step above.
       - name: Upload coverage report
-        if: always() && matrix.node-version == 22
-        uses: actions/upload-artifact@v5
+        if: always() && matrix.node-version == 22 && matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
           name: coverage-report-node-${{ matrix.node-version }}
           path: |

@@ -1,0 +1,40 @@
+# Dependabot exists here for exactly one reason: the five workflows under
+# .github/workflows/ pin every `uses:` to a 40-char commit SHA (supply-chain
+# hardening — a mutable tag like `@v5` can be repointed at arbitrary code by
+# anyone who can push a tag). A SHA pin with no updater is not security, it is
+# frozen debt: the pin never picks up a patched action. This file is the
+# updater half of that trade.
+#
+# Dependabot rewrites both the SHA and the trailing `# vX.Y.Z` comment, so the
+# comment stays truthful without hand maintenance. Do not replace those
+# comments with a bare major (`# v5`) — the SHA tracks one exact release, and a
+# major-only comment goes silently wrong the moment a new patch ships.
+#
+# Scope this does NOT cover: `directory: "/"` scans .github/workflows at the
+# repository root only. plugins/artibot/.github/workflows/ci.yml (the
+# standalone-development duplicate noted at .github/workflows/ci.yml:1-2) is
+# not scanned and is not SHA-pinned.
+version: 2
+
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "ci(deps)"
+    labels:
+      - dependencies
+      - github-actions
+    groups:
+      # One PR per week for all four actions rather than four. Every bump lands
+      # in the same required-check run, so batching costs no coverage and keeps
+      # the side-branch gate flow (CONTRIBUTING.md "Landing changes on master")
+      # to a single pass.
+      actions:
+        patterns:
+          - "*"
