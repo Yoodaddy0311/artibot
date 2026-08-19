@@ -24,12 +24,14 @@
  *     `plugins/artibot-cowork/_reports/` 는 지금도 어느 게이트에도 걸리지 않는다.
  *     측정 시점에 `plugins/artibot/CHANGELOG.md` 만으로 rendering 위반 14건이
  *     있어서(전부 backtick-in-inline-code) 이번 패스의 범위를 넘는다고 판단했다.
- *  2-a. **리포 루트 문서는 이제 doc-links 만 본다 (2026-08-19).** `validate-doc-links`
- *     는 리포 루트의 `README/CONTRIBUTING/INSTALL/CLAUDE/AGENTS.md` 를 스캔하지만
- *     `validate-md-rendering` 은 여전히 플러그인 루트만 본다. 즉 루트 문서의 표·
- *     인라인코드 **렌더링** 위반은 아직 아무 게이트에도 안 걸린다. 두 스캐너의
- *     분모 lockstep 단언(아래)이 **플러그인 루트 기준**인 이유이기도 하다 —
- *     `gatherAllDocFiles().counts` 는 의도적으로 루트를 포함하지 않는다.
+ *  2-a. **리포 루트 문서는 이제 두 게이트가 다 본다 (2026-08-19 해소).** 처음엔
+ *     doc-links 만 루트를 편입해서 루트 문서의 **렌더링** 위반이 어느 게이트에도
+ *     안 걸리는 반쪽 상태였다. 지금은 `validate-md-rendering` 도
+ *     `ci-utils.js#ROOT_SCAN_FILES` 를 스캔한다(양쪽 다 `<root>=4`).
+ *     주의: 두 스캐너의 분모 lockstep 단언(아래)은 여전히 **플러그인 루트 기준**
+ *     이다. `gatherAllDocFiles().counts` 와 `scanAllPlugins().counts` 는 의도적으로
+ *     루트를 포함하지 않는다 — `<root>` 키를 넣으면 `assertScanFloors` 가 미지의
+ *     루트로 보고 FAIL 한다. 루트 분모는 `assertRootScanFloor` 가 따로 맡는다.
  *  3. **`isProjectPluginDir` 는 이름 규칙이다.** `plugins/` 아래에 `artibot`
  *     접두사도 `_shared` 도 아닌 이름의 새 디렉터리가 생기면 그것은 스캔되지
  *     않는다. 설치 트리에서 남의 플러그인을 우리 CI 로 끌어들이지 않기 위한
@@ -45,10 +47,12 @@ import { basename, dirname, join, relative, sep } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { fileURLToPath } from 'node:url';
 import {
+  assertRootScanFloor,
   assertScanFloors,
   isProjectPluginDir,
   listPluginRoots,
   MIN_DOC_FILES,
+  MIN_ROOT_DOC_FILES,
 } from '../../scripts/ci/ci-utils.js';
 import {
   findBrokenLinks,
@@ -59,7 +63,9 @@ import {
 import {
   applyRatchet,
   KNOWN_RENDER_VIOLATIONS,
+  RULES,
   scanAllPlugins,
+  scanRepoRoot,
 } from '../../scripts/ci/validate-md-rendering.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -179,7 +185,7 @@ describe('게이트 자기검증 — 리포 루트 문서 사각지대 (2026-08-
     const { root, files } = gatherRepoRootDocFiles();
     expect(root).toBe(REPO_ROOT);
     expect(files.map((f) => basename(f))).toContain('README.md');
-    expect(files.length).toBeGreaterThanOrEqual(3);
+    expect(files.length).toBeGreaterThanOrEqual(MIN_ROOT_DOC_FILES);
   });
 
   it('루트 문서의 깨진 링크를 실제로 잡는다 (①+② 둘 다 닫혔을 때만 통과)', () => {
@@ -225,7 +231,62 @@ describe('게이트 자기검증 — 리포 루트 문서 사각지대 (2026-08-
   });
 });
 
+/**
+ * md-rendering 은 doc-links 보다 늦게(같은 날) 루트를 편입했다. 그 사이에는
+ * "doc-links 는 루트를 보는데 md-rendering 은 안 본다"는 반쪽 상태였고, 루트
+ * README/CONTRIBUTING 의 표가 깨져도 두 게이트가 모두 그린이었다. 아래는 그
+ * 반쪽 상태로 되돌아가지 못하게 하는 핀이다.
+ */
+describe('게이트 자기검증 — md-rendering 루트 편입 (2026-08-19)', () => {
+  it('루트 문서를 실제로 읽는다 (분모 — 0건이면 아래 음성 대조가 무의미해진다)', () => {
+    const { root, count } = scanRepoRoot();
+    expect(root).toBe(REPO_ROOT);
+    expect(count).toBeGreaterThanOrEqual(MIN_ROOT_DOC_FILES);
+  });
+
+  it('두 스캐너의 루트 분모가 일치한다 (한쪽만 조여지면 다른 쪽이 조용히 느슨해진다)', () => {
+    expect(scanRepoRoot().count).toBe(gatherRepoRootDocFiles().files.length);
+  });
+
+  it('루트 문서의 렌더링 위반을 실제로 잡는다', () => {
+    // 디스크를 건드리지 않고 규칙을 직접 태운다. 헤더는 2열인데 데이터 행이 1열.
+    const ragged = '# x\n\n| A | B |\n|---|---|\n| only-one-cell |\n';
+    const hits = RULES.flatMap((r) => r.fn(ragged, '<root>/CONTRIBUTING.md'));
+    expect(hits.join(' ')).toMatch(/table-pipe-column-mismatch/);
+  });
+
+  it('정상 표는 잡지 않는다 (양성 대조의 짝)', () => {
+    const ok = '# x\n\n| A | B |\n|---|---|\n| 1 | 2 |\n';
+    expect(RULES.flatMap((r) => r.fn(ok, '<root>/CONTRIBUTING.md'))).toEqual([]);
+  });
+
+  it('루트 findings 키는 `<root>/` 접두사를 달아 플러그인 파일과 충돌하지 않는다', () => {
+    // `artibot/README.md` 와 루트 `README.md` 가 같은 래칫 키를 갖게 되면
+    // KNOWN_RENDER_VIOLATIONS 항목 하나가 두 파일을 동시에 면제해 버린다.
+    const { findings } = scanRepoRoot();
+    for (const f of findings) expect(f.key.startsWith('<root>/')).toBe(true);
+    // 현재 루트 위반은 0건이므로 위 루프는 비어 있을 수 있다. 접두사 규약 자체는
+    // 분모가 살아 있다는 사실(첫 테스트)과 함께 읽어야 의미가 있다.
+    expect(scanAllPlugins().findings.every((f) => !f.key.startsWith('<root>/'))).toBe(true);
+  });
+
+  it('플러그인 counts 에는 <root> 키가 없다 (lockstep·assertScanFloors 보호)', () => {
+    expect(Object.keys(scanAllPlugins().counts)).not.toContain('<root>');
+    expect(Object.keys(gatherAllDocFiles().counts)).not.toContain('<root>');
+  });
+});
+
 describe('분모 단언은 fail-closed 다', () => {
+  it('루트 분모가 하한 미만이면 FAIL', () => {
+    expect(assertRootScanFloor('/fake/repo', MIN_ROOT_DOC_FILES - 1).join(' ')).toMatch(
+      /repo root scanned \d+ file\(s\), below floor/,
+    );
+  });
+
+  it('dev repo 가 아니면(root=null) 루트 분모를 강제하지 않는다', () => {
+    expect(assertRootScanFloor(null, 0)).toEqual([]);
+  });
+
   it('루트가 통째로 빠지면 FAIL', () => {
     const { 'artibot-cowork': _drop, ...withoutCowork } = {
       artibot: 349,

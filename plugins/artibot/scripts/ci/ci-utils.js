@@ -108,6 +108,97 @@ export function assertScanFloors(counts) {
 }
 
 /**
+ * Authored Markdown at the **repo root** — the parent of the plugins directory.
+ * These sit outside every plugin root, so neither documentation scanner saw
+ * them until 2026-08-19 (doc-links) / 2026-08-19 (md-rendering).
+ *
+ * Shared rather than copied per scanner: `SCAN_DIRS`/`ROOT_FILES` are duplicated
+ * in each scanner with a lockstep test holding them together, but the dev-repo
+ * GUARD below must never diverge — two copies of a safety check is how one gets
+ * fixed and the other does not.
+ *
+ * Excluded on purpose, mirroring each scanner's CHANGELOG rule:
+ *   - `CHANGELOG.md` — append-only release history.
+ *   - `RELEASE_NOTES_*.md`, `WORK-REPORT-*.md` — frozen dated artifacts; their
+ *     content describes the repo as it was, not as it is.
+ *   - `CLAUDE.local.md` — gitignored personal config, absent in CI.
+ */
+export const ROOT_SCAN_FILES = [
+  'README.md',
+  'CONTRIBUTING.md',
+  'INSTALL.md',
+  'CLAUDE.md',
+  'AGENTS.md',
+];
+
+/**
+ * Minimum repo-root docs that must be scanned once the root is in scope.
+ *
+ * Kept separate from {@link MIN_DOC_FILES} because that map is keyed by plugin
+ * root and {@link assertScanFloors} fails on any key it does not know — adding
+ * a `<root>` entry there would make every plugin-only scanner fail.
+ *
+ * Pinned exactly at the measured count (4 of the 5 listed files exist;
+ * `AGENTS.md` has never existed at the repo root) for the same reason
+ * `MIN_DOC_FILES._shared` is pinned: all four are long-lived, and repo history
+ * shows **zero** deletions of any of them (`git log --diff-filter=D`, checked
+ * 2026-08-19), so losing one should fail loudly rather than pass with slack.
+ */
+export const MIN_ROOT_DOC_FILES = 4;
+
+/**
+ * File that marks a directory as the Artibot **dev repo** rather than an
+ * installed plugin tree.
+ *
+ * This matters because `getPluginsDir()`'s parent is `<repo>` in the dev repo
+ * but `~/.claude` in an installed tree. Without this check the scanners would
+ * walk a user's personal `~/.claude/README.md` and `CLAUDE.md` and report their
+ * problems as Artibot CI failures.
+ */
+const DEV_REPO_MARKER = path.join('.claude-plugin', 'marketplace.json');
+
+/**
+ * Resolve the repo root whose top-level docs are in scope, or `null` when not
+ * running against the dev repo (installed tree → plugin roots only).
+ *
+ * @returns {string|null} Absolute repo root, or null if unavailable.
+ */
+export function getRepoDocRoot() {
+  const candidate = path.resolve(getPluginsDir(), '..');
+  return existsSync(path.join(candidate, DEV_REPO_MARKER)) ? candidate : null;
+}
+
+/**
+ * Gather the repo root's authored top-level Markdown files.
+ *
+ * @returns {{ root: string|null, files: string[] }} The repo root in scope (or
+ *   null outside the dev repo) and the absolute paths of its scanned docs.
+ */
+export function gatherRepoRootDocFiles() {
+  const root = getRepoDocRoot();
+  if (root === null) return { root: null, files: [] };
+  const files = ROOT_SCAN_FILES.map((f) => path.join(root, f)).filter((abs) => existsSync(abs));
+  return { root, files };
+}
+
+/**
+ * Check the repo-root denominator, mirroring {@link assertScanFloors}'s job for
+ * plugin roots. Returns no failure outside the dev repo, where the root is
+ * deliberately out of scope.
+ *
+ * @param {string|null} root - Repo root in scope, or null.
+ * @param {number} count - Files actually scanned at that root.
+ * @returns {string[]} Human-readable failures (empty when the floor is met).
+ */
+export function assertRootScanFloor(root, count) {
+  if (root === null) return [];
+  if (count < MIN_ROOT_DOC_FILES) {
+    return [`repo root scanned ${count} file(s), below floor ${MIN_ROOT_DOC_FILES}`];
+  }
+  return [];
+}
+
+/**
  * Extract YAML frontmatter fields from a Markdown file's content.
  * Supports simple key:value pairs (no nested objects).
  * @param {string} content - Raw file content

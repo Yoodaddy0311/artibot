@@ -32,12 +32,13 @@
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   CLAIM_PATTERNS,
   collectActuals,
+  partitionFrozenHistory,
   PLUGIN_ROOT,
   REPO_ROOT,
-  splitFrozenHistory,
 } from './readme-claims-registry.js';
 
 const args = process.argv.slice(2);
@@ -48,29 +49,46 @@ const GREEN = '\x1b[32m';
 const YELLOW = '\x1b[33m';
 const NC = '\x1b[0m';
 
-// Rewrite drifting prose in a single file. Returns { changed, edits }.
-function syncFile(file, actuals) {
+/**
+ * Rewrite drifting count prose in a single file.
+ *
+ * Exported so the write path itself is testable against fixture files. The
+ * module-level `CHECK_ONLY` stays the CLI default, but `write` is an explicit
+ * parameter: a test must not have to reach into `process.argv` to decide
+ * whether the function touches the disk.
+ *
+ * @param {string} file - Absolute path; a missing file is a no-op.
+ * @param {Record<string, number>} actuals - Counts from collectActuals().
+ * @param {{ write?: boolean }} [opts] - Defaults to the CLI's mode.
+ * @returns {{ changed: boolean, edits: Array<{from: string, to: string}> }}
+ */
+export function syncFile(file, actuals, { write = !CHECK_ONLY } = {}) {
   if (!existsSync(file)) return { changed: false, edits: [] };
   const original = readFileSync(file, 'utf-8');
-  // Rewrite the live region only. Release notes state what was true at that
+  // Rewrite live sections only. Release notes state what was true at that
   // version, so auto-healing them to today's counts would falsify history —
-  // `frozen` is carried through byte-for-byte and re-appended below.
-  const { scanned, frozen } = splitFrozenHistory(original);
+  // frozen segments are carried through byte-for-byte.
   const edits = [];
 
-  let updated = scanned;
-  for (const { key, regex } of CLAIM_PATTERNS) {
-    const actual = actuals[key];
-    if (actual === null || actual === undefined) continue;
-    updated = updated.replace(regex, (match, num, tail) => {
-      if (Number(num) === actual) return match;
-      edits.push({ from: match, to: `${actual}${tail}` });
-      return `${actual}${tail}`;
-    });
-  }
+  const updated = partitionFrozenHistory(original)
+    .map((segment) => {
+      if (segment.frozen) return segment.text;
+      let text = segment.text;
+      for (const { key, regex } of CLAIM_PATTERNS) {
+        const actual = actuals[key];
+        if (actual === null || actual === undefined) continue;
+        text = text.replace(regex, (match, num, tail) => {
+          if (Number(num) === actual) return match;
+          edits.push({ from: match, to: `${actual}${tail}` });
+          return `${actual}${tail}`;
+        });
+      }
+      return text;
+    })
+    .join('');
 
-  if (updated === scanned) return { changed: false, edits: [] };
-  if (!CHECK_ONLY) writeFileSync(file, updated + frozen);
+  if (updated === original) return { changed: false, edits: [] };
+  if (write) writeFileSync(file, updated);
   return { changed: true, edits };
 }
 
@@ -117,4 +135,10 @@ function main() {
   process.exit(0);
 }
 
-main();
+// Run only when invoked directly (node sync-readme-claims.js), not on import —
+// tests import syncFile to exercise the write path against fixture files, and
+// an unguarded main() would rewrite the real READMEs and process.exit the test
+// worker. Mirrors the guard in validate-readme-claims.js.
+const invokedDirectly =
+  process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (invokedDirectly) main();

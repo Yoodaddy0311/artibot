@@ -14,13 +14,15 @@
  * @module tests/ci/readme-claims-registry
  */
 
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   CLAIM_PATTERNS,
   collectActuals,
+  partitionFrozenHistory,
   PLUGIN_ROOT,
   REPO_ROOT,
-  splitFrozenHistory,
 } from '../../scripts/ci/readme-claims-registry.js';
 
 describe('collectActuals', () => {
@@ -130,32 +132,84 @@ describe('CLAIM_PATTERNS contract', () => {
   });
 });
 
-describe('splitFrozenHistory', () => {
-  it('is lossless: scanned + frozen reconstructs the input', () => {
-    const doc = '# Title\n\n113개 스킬\n\n## v2.1.0 주요 변경사항\n\n117개 스킬\n';
-    const { scanned, frozen } = splitFrozenHistory(doc);
-    expect(scanned + frozen).toBe(doc);
+describe('partitionFrozenHistory', () => {
+  const live = (doc) =>
+    partitionFrozenHistory(doc)
+      .filter((s) => !s.frozen)
+      .map((s) => s.text)
+      .join('');
+  const frozenOf = (doc) =>
+    partitionFrozenHistory(doc)
+      .filter((s) => s.frozen)
+      .map((s) => s.text)
+      .join('');
+
+  it('is lossless: the segments rejoin into the input', () => {
+    const doc = '# Title\n\n113개 스킬\n\n## v2.1.0 주요 변경사항\n\n117개 스킬\n\n## 기여하기\n\n113개 스킬\n';
+    expect(partitionFrozenHistory(doc).map((s) => s.text).join('')).toBe(doc);
   });
 
-  it('cuts at the first version heading so release notes are not claim-checked', () => {
+  it('freezes a release-note section without freezing the rest of the file', () => {
     const doc = '# Title\n\n113개 스킬\n\n## v2.1.0 주요 변경사항\n\n117개 스킬\n';
-    const { scanned, frozen } = splitFrozenHistory(doc);
-    expect(scanned).toContain('113개 스킬');
-    expect(scanned).not.toContain('117개 스킬');
-    expect(frozen).toContain('117개 스킬');
+    expect(live(doc)).toContain('113개 스킬');
+    expect(live(doc)).not.toContain('117개 스킬');
+    expect(frozenOf(doc)).toContain('117개 스킬');
+  });
+
+  it('keeps sections that FOLLOW the release notes live (the tail hole)', () => {
+    // The earlier single-cut design froze everything to EOF, so the sections
+    // after the release notes — `## 기여하기` and `## 라이선스` in the live
+    // plugins/artibot/README.md — silently left the gate.
+    const doc =
+      '# T\n\n## v2.1.0 주요 변경사항\n\n117개 스킬\n\n## 기여하기\n\n999개 도메인 스킬\n';
+    expect(frozenOf(doc)).toContain('117개 스킬');
+    expect(live(doc), 'tail section must be claim-checked').toContain('999개 도메인 스킬');
+  });
+
+  it('freezes each version section independently of ordering', () => {
+    // A non-version section BETWEEN two version blocks must not un-freeze the
+    // release notes that follow it — the ordering assumption a "resume at the
+    // first non-version heading" boundary would have carried.
+    const doc =
+      '## v2.0.0 노트\n\n111개 스킬\n\n## 참고\n\n222개 도메인 스킬\n\n## v1.0.0 노트\n\n333개 스킬\n';
+    expect(frozenOf(doc)).toContain('111개 스킬');
+    expect(frozenOf(doc), 'later version block stays frozen').toContain('333개 스킬');
+    expect(live(doc)).toContain('222개 도메인 스킬');
   });
 
   it('does not treat a version-citing sub-heading as history', () => {
     // "### 런타임 미들웨어 파이프라인 (v1.14.0+)" is current documentation.
     const doc = '### 런타임 파이프라인 (v1.14.0+)\n\n113개 스킬\n';
-    const { scanned, frozen } = splitFrozenHistory(doc);
-    expect(frozen).toBe('');
-    expect(scanned).toBe(doc);
+    expect(frozenOf(doc)).toBe('');
+    expect(live(doc)).toBe(doc);
+  });
+
+  it('ignores a "## v1.0" line inside a fenced code block', () => {
+    const doc = '# T\n\n```\n## v1.0.0 주요 변경사항\n```\n\n113개 도메인 스킬\n';
+    expect(frozenOf(doc), 'a fenced heading is text, not a section').toBe('');
+    expect(live(doc)).toBe(doc);
   });
 
   it('is a no-op for a document with no release-note section', () => {
     const doc = '# Root README\n\n113 skills\n';
-    expect(splitFrozenHistory(doc)).toEqual({ scanned: doc, frozen: '' });
+    expect(partitionFrozenHistory(doc)).toEqual([{ text: doc, frozen: false }]);
+  });
+
+  it('handles empty input without inventing a segment', () => {
+    expect(partitionFrozenHistory('')).toEqual([]);
+  });
+
+  it('the live plugin README keeps its tail sections in scope', () => {
+    // Non-vacuous against the real file: 기여하기/라이선스 sit after five
+    // release-note blocks and must still be live.
+    const doc = readFileSync(join(PLUGIN_ROOT, 'README.md'), 'utf-8');
+    const segments = partitionFrozenHistory(doc);
+    expect(segments.map((s) => s.text).join(''), 'lossless on the real file').toBe(doc);
+    expect(segments.some((s) => s.frozen), 'release notes must be detected').toBe(true);
+    const liveText = segments.filter((s) => !s.frozen).map((s) => s.text).join('');
+    expect(liveText).toContain('## 기여하기');
+    expect(liveText).toContain('## 라이선스');
+    expect(liveText, 'release-note counts stay out').not.toContain('117개 스킬');
   });
 
   it('does not match single-digit or "N+" forms (validator parity)', () => {

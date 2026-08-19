@@ -43,7 +43,13 @@
 
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
-import { assertScanFloors, getPluginsDir, listPluginRoots } from './ci-utils.js';
+import {
+  assertRootScanFloor,
+  assertScanFloors,
+  gatherRepoRootDocFiles,
+  getPluginsDir,
+  listPluginRoots,
+} from './ci-utils.js';
 
 /** Directories never scanned (vendored, generated, or VCS internals). */
 const IGNORE_DIRS = new Set([
@@ -77,65 +83,14 @@ const SCAN_DIRS = ['commands', 'skills', 'docs', 'rubrics'];
  */
 const SCAN_FILES = ['CLAUDE.md', 'README.md', 'AGENTS.md'];
 
-/**
- * Authored Markdown at the **repo root** (the parent of the plugins directory),
- * which is outside every plugin root and was therefore unscanned until
- * 2026-08-19. That hole let `README.md`'s link to the deleted
- * `RELEASE_NOTES_4.8_KO.md` (removed in `ccd7f7fa`) sit broken while this gate
- * reported `PASS: 474 documentation file(s) checked, 0 broken references` —
- * true for what it scanned, and the root README was not in it.
- *
- * Excluded on purpose, mirroring {@link SCAN_FILES}'s CHANGELOG rule:
- *   - `CHANGELOG.md` — append-only release history.
- *   - `RELEASE_NOTES_*.md`, `WORK-REPORT-*.md` — frozen dated artifacts; their
- *     links describe the repo as it was, not as it is.
- *   - `CLAUDE.local.md` — gitignored personal config, absent in CI.
- */
-const ROOT_SCAN_FILES = ['README.md', 'CONTRIBUTING.md', 'INSTALL.md', 'CLAUDE.md', 'AGENTS.md'];
-
-/**
- * Minimum repo-root docs that must be scanned once the root is in scope. This
- * is the root's denominator assertion — the sibling of `ci-utils.js`'s
- * {@link MIN_DOC_FILES}, kept separate because that map is shared with
- * `validate-md-rendering.js`, which scans plugin roots only. Without a floor,
- * "0 problems" and "0 files examined" print the same word.
- */
-const MIN_ROOT_DOC_FILES = 3;
-
-/**
- * File that marks a directory as the Artibot **dev repo** rather than an
- * installed plugin tree.
- *
- * This matters because `getPluginsDir()`'s parent is `<repo>` in the dev repo
- * but `~/.claude` in an installed tree. Without this check the gate would walk
- * a user's personal `~/.claude/README.md` and `CLAUDE.md` and report their
- * broken links as Artibot CI failures.
- */
-const DEV_REPO_MARKER = path.join('.claude-plugin', 'marketplace.json');
-
-/**
- * Resolve the repo root whose top-level docs are in scope, or `null` when not
- * running against the dev repo (installed tree → plugin roots only).
- *
- * @returns {string|null} Absolute repo root, or null if unavailable.
- */
-export function getRepoDocRoot() {
-  const candidate = path.resolve(getPluginsDir(), '..');
-  return existsSync(path.join(candidate, DEV_REPO_MARKER)) ? candidate : null;
-}
-
-/**
- * Gather the repo root's authored top-level Markdown files.
- *
- * @returns {{ root: string|null, files: string[] }} The repo root in scope (or
- *   null outside the dev repo) and the absolute paths of its scanned docs.
- */
-export function gatherRepoRootDocFiles() {
-  const root = getRepoDocRoot();
-  if (root === null) return { root: null, files: [] };
-  const files = ROOT_SCAN_FILES.map((f) => path.join(root, f)).filter((abs) => existsSync(abs));
-  return { root, files };
-}
+// Repo-root scanning (the 2026-08-19 blind spot: the root README's link to the
+// deleted RELEASE_NOTES_4.8_KO.md sat broken while this gate reported
+// `PASS: 474 documentation file(s) checked, 0 broken references` — true for what
+// it scanned, and the root README was not in it). The file list, floor, and
+// dev-repo guard live in ci-utils.js so this gate and validate-md-rendering.js
+// cannot drift apart on them; re-exported here because that is where callers
+// and the firewall tests already look for them.
+export { gatherRepoRootDocFiles, getRepoDocRoot } from './ci-utils.js';
 
 /**
  * Mask fenced code blocks and inline code spans by replacing their inner
@@ -383,12 +338,10 @@ function main() {
   const containment = repoRoot ?? getPluginsDir();
   const files = [...pluginFiles, ...rootFiles];
 
-  const floorFailures = assertScanFloors(counts);
-  if (repoRoot !== null && rootFiles.length < MIN_ROOT_DOC_FILES) {
-    floorFailures.push(
-      `repo root scanned ${rootFiles.length} file(s), below floor ${MIN_ROOT_DOC_FILES}`
-    );
-  }
+  const floorFailures = [
+    ...assertScanFloors(counts),
+    ...assertRootScanFloor(repoRoot, rootFiles.length),
+  ];
   const tally = Object.entries(counts)
     .map(([name, n]) => `${name}=${n}`)
     .concat(repoRoot === null ? ['<root>=skipped(not-dev-repo)'] : [`<root>=${rootFiles.length}`])

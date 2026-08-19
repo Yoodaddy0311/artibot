@@ -12,7 +12,8 @@
  *   REPO_ROOT, PLUGIN_ROOT — resolved repo paths (callers pass nothing).
  *   collectActuals(opts)   — file-system counts; opts.full adds coverage.
  *   CLAIM_PATTERNS         — [{ key, regex, label, lang }] matching prose/badges.
- *   splitFrozenHistory(s)  — { scanned, frozen }; only `scanned` is claim-checked.
+ *   partitionFrozenHistory(s) — ordered [{text, frozen}]; only live ones are
+ *                            claim-checked. Lossless: the texts rejoin into `s`.
  *
  * Regex contract: each pattern has capture group 1 = numeric claim, group 2 =
  * the trailing phrase (e.g. " slash commands", or "개 도메인 스킬"). The validator
@@ -110,28 +111,63 @@ export function collectActuals(opts = {}) {
   return actuals;
 }
 
-// Heading that opens the frozen release-note region of a README. Everything
-// from the first such heading onward is a historical record of what was true at
-// that version ("117개 스킬" in the v1.14.0 notes, "39개 훅 등록" in v1.13.0) and
-// must NOT be rewritten to today's counts — doing so would falsify history.
-// Matches `## v2.1.0 주요 변경사항` but not `### 런타임 파이프라인 (v1.14.0+)`,
-// which is current documentation that merely cites a version.
-const FROZEN_HISTORY_HEADING = /^##\s+v\d+\.\d+/m;
+// Heading that opens a frozen release-note section. Such a section is a
+// historical record of what was true at that version ("117개 스킬" in the
+// v1.14.0 notes, "39개 훅 등록" in v1.13.0) and must NOT be rewritten to today's
+// counts — doing so would falsify history. Matches `## v2.1.0 주요 변경사항` but
+// not `### 런타임 파이프라인 (v1.14.0+)`, which is current documentation that
+// merely cites a version.
+const FROZEN_HISTORY_HEADING = /^##\s+v\d+\.\d+/;
+
+/** Any `##` (h2) heading — the granularity at which freeze is decided. */
+const H2_HEADING = /^##\s+/;
+
+/** Fence opener/closer. Tracked so a `## …` line inside a code block is text. */
+const FENCE = /^\s*(?:```|~~~)/;
 
 /**
- * Split README content into the live region (claim-checked) and the frozen
- * release-note region (left alone).
+ * Partition README content into ordered segments, each marked frozen or live.
  *
- * `scanned + frozen === content` always holds, so the sync rewriter can operate
- * on `scanned` and reassemble the file without touching history.
+ * Freeze is decided **per `##` section**, not by a single cut point. An earlier
+ * design froze everything from the first version heading to EOF, which also
+ * swallowed the sections that follow the release notes — in
+ * plugins/artibot/README.md that is `## 기여하기` and `## 라이선스`, current
+ * documentation that would silently leave the gate. Per-section classification
+ * also removes an ordering assumption: a non-version section appearing between
+ * two version blocks no longer un-freezes every release note after it.
+ *
+ * `segments.map((s) => s.text).join('') === content` always holds, so the sync
+ * rewriter can rebuild the file from the segments without touching history.
+ *
+ * Known limit: fences are tracked so `##` inside a code block is not read as a
+ * heading, but only ``` / ~~~ fences — an indented (4-space) code block whose
+ * content starts with `##` would still be read as a heading. No scan target
+ * contains one (measured 2026-08-19: 0 fenced `##` lines across all three).
  *
  * @param {string} content - Full file text.
- * @returns {{ scanned: string, frozen: string }}
+ * @returns {Array<{ text: string, frozen: boolean }>} Ordered, lossless.
  */
-export function splitFrozenHistory(content) {
-  const m = FROZEN_HISTORY_HEADING.exec(content);
-  if (!m) return { scanned: content, frozen: '' };
-  return { scanned: content.slice(0, m.index), frozen: content.slice(m.index) };
+export function partitionFrozenHistory(content) {
+  const segments = [];
+  let buf = '';
+  let frozen = false;
+  let inFence = false;
+
+  for (const line of content.split(/(?<=\n)/)) {
+    if (FENCE.test(line)) {
+      inFence = !inFence;
+    } else if (!inFence && H2_HEADING.test(line)) {
+      const nextFrozen = FROZEN_HISTORY_HEADING.test(line);
+      if (nextFrozen !== frozen) {
+        if (buf !== '') segments.push({ text: buf, frozen });
+        buf = '';
+        frozen = nextFrozen;
+      }
+    }
+    buf += line;
+  }
+  if (buf !== '') segments.push({ text: buf, frozen });
+  return segments;
 }
 
 // Claim patterns. Group 1 = numeric claim, group 2 = trailing phrase (preserved
@@ -174,6 +210,32 @@ export function splitFrozenHistory(content) {
 //      scripts/hooks/, not the 24 that hooks.json actually references. Prose
 //      saying "N개 훅" binds to whichever noun the pattern matches, so state the
 //      unit ("훅 등록" vs "훅 스크립트") or the claim is unfalsifiable.
+//      A sixth number exists and matters most when reading the first five:
+//      hooks.json is not the only registration table. hooks/dispatch-table.json
+//      names 47 scripts that the `*-dispatcher.js` hooks fan out to, 35 of them
+//      not in hooks.json (the other 12 overlap with its 24), so 24 + 35 = 59 of
+//      the 68 files are reachable through the two tables combined (measured
+//      2026-08-19). The remaining 9 are not automatically dead — but only 5
+//      carry positive evidence: `_main-entry.js` (63 importers, 61 under
+//      scripts/hooks/), `_dispatcher-utils.js` (8 — the six `*-dispatcher.js`
+//      plus two tests), `git-autopilot-merge.js` (imported by the registered
+//      git-autopilot-session.js), and the `nightly-*.mjs` pair, named in the
+//      TRAINERS registry at scripts/setup-nightly-trainers.js:28-41. Note that
+//      script PRINTS a crontab/schtasks guide rather than installing one, so
+//      for the pair a schedule is intended, not proven to run anywhere.
+//      The other 4 are UNVERIFIED, not asserted live: `event-emitter.mjs`,
+//      `session-start-sweep.mjs` and `skill-discovery-inject.js` have zero
+//      importers and sit in no registration table, and `check-console-log.js`
+//      is worse than unverified — docs/wiring-audit-result.json marks it
+//      INTENTIONAL_DORMANT and its own header calls it a legacy no-op stub
+//      "safe to remove". So do not subtract a registration count from the file
+//      count and read the difference as dead files — and do not read this list
+//      as proof the difference is all alive either.
+//      Counting these by regex is itself error-prone: a naive
+//      `\.m?js` scan of dispatch-table.json returns 50, because it also
+//      matches prose in the file's own `description` (`*-dispatcher.js`,
+//      `dispatch-table-loader.js`) and the `.js` inside the string `hooks.json`.
+//      Intersect against the real directory listing before believing any of it.
 // ---------------------------------------------------------------------------
 export const CLAIM_PATTERNS = [
   { key: 'skills', regex: /(\d{2,3})(\s+(?:domain\s+)?skills?\b)/gi, label: 'skills', lang: 'en' },

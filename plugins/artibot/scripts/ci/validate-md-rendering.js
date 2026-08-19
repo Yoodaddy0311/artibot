@@ -14,12 +14,44 @@
  * dependencies. Each rule is a pure `(content, relPath) -> string[]` function;
  * add a new rule by writing the function and appending `{ name, fn }` to RULES.
  *
+ * Scope: every co-located plugin root (`ci-utils.js#listPluginRoots`) plus the
+ * repo root's own authored docs (`ci-utils.js#ROOT_SCAN_FILES`). The root was
+ * added 2026-08-19, closing the gap where `validate-doc-links.js` already
+ * scanned root docs and this gate did not — root README/CONTRIBUTING tables
+ * could render ragged with both gates green.
+ *
+ * ## Known holes — what this gate still does NOT see
+ *
+ * Two rules is not "rendering is correct"; it is two mechanical bugs ruled out.
+ * Write the rest down, or the gate's own green becomes the next alibi:
+ *   - **Every rendering bug outside the two RULES** — unclosed emphasis, broken
+ *     nested lists, bad reference links, raw HTML, heading-level jumps, mixed
+ *     tabs/spaces in fences. None are checked.
+ *   - **Whether the table is CORRECT**, only whether its pipe counts line up. A
+ *     table with the right shape and wrong numbers passes.
+ *   - **Baselined violations** in {@link KNOWN_RENDER_VIOLATIONS} — real bugs
+ *     held at an exact count, not fixed.
+ *   - **Files outside SCAN_DIRS/ROOT_FILES/ROOT_SCAN_FILES** — notably
+ *     `agents/*.md`, `CHANGELOG.md`, `RELEASE.md`, and the root's
+ *     `RELEASE_NOTES_*.md` / `WORK-REPORT-*.md`.
+ *   - **Installed trees.** Root scanning requires the dev-repo marker
+ *     (`ci-utils.js#getRepoDocRoot`), so root regressions are caught in CI, not
+ *     on a user's box.
+ *   - **The actual renderer.** These are regexes, not GitHub's GFM parser; they
+ *     approximate it and can disagree at the edges.
+ *
  * @module scripts/ci/validate-md-rendering
  */
 
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
-import { assertScanFloors, getPluginsDir, listPluginRoots } from './ci-utils.js';
+import {
+  assertRootScanFloor,
+  assertScanFloors,
+  gatherRepoRootDocFiles,
+  getPluginsDir,
+  listPluginRoots,
+} from './ci-utils.js';
 
 /** Directories never scanned (vendored / generated / VCS). */
 const IGNORE_DIRS = new Set(['node_modules', 'runtime', 'repos', '.git', '_reports', 'coverage']);
@@ -339,6 +371,40 @@ export function scanAllPlugins() {
 }
 
 /**
+ * Run every rule across the repo root's own authored docs.
+ *
+ * Deliberately NOT folded into {@link scanAllPlugins}: that function's `counts`
+ * is asserted key-for-key against `validate-doc-links.js#gatherAllDocFiles`'s
+ * counts by the lockstep firewall test, and both are keyed by PLUGIN root. A
+ * `<root>` key there would break the lockstep and, via
+ * `ci-utils.js#assertScanFloors`, fail every plugin-only scanner.
+ *
+ * Ratchet keys are prefixed `<root>/` so a root `README.md` can never collide
+ * with a plugin's `artibot/README.md`.
+ *
+ * @returns {{ root: string|null, count: number, findings: Array<{ key: string, message: string }> }}
+ *   The repo root in scope (null outside the dev repo), how many files were
+ *   read there, and one finding per violation.
+ */
+export function scanRepoRoot() {
+  const { root, files } = gatherRepoRootDocFiles();
+  /** @type {Array<{ key: string, message: string }>} */
+  const findings = [];
+  if (root === null) return { root, count: 0, findings };
+
+  for (const abs of files) {
+    const relPath = `<root>/${path.relative(root, abs).split(path.sep).join('/')}`;
+    const content = readFileSync(abs, 'utf-8');
+    for (const rule of RULES) {
+      for (const message of rule.fn(content, relPath)) {
+        findings.push({ key: `${relPath}::${rule.name}`, message });
+      }
+    }
+  }
+  return { root, count: files.length, findings };
+}
+
+/**
  * Compare findings against {@link KNOWN_RENDER_VIOLATIONS}.
  *
  * @param {Array<{ key: string, message: string }>} findings - Raw violations.
@@ -384,14 +450,22 @@ export function applyRatchet(findings, baseline = KNOWN_RENDER_VIOLATIONS) {
 }
 
 function main() {
-  const { counts, total, findings } = scanAllPlugins();
+  const { counts, total: pluginTotal, findings: pluginFindings } = scanAllPlugins();
+  const { root: repoRoot, count: rootCount, findings: rootFindings } = scanRepoRoot();
+
+  const total = pluginTotal + rootCount;
+  const findings = [...pluginFindings, ...rootFindings];
   const tally = Object.entries(counts)
     .map(([name, n]) => `${name}=${n}`)
+    .concat(repoRoot === null ? ['<root>=skipped(not-dev-repo)'] : [`<root>=${rootCount}`])
     .join(' ');
 
   // Denominator first: a shrunken or missing tree must not be able to present
   // itself as a clean run, nor as a "tightened" baseline.
-  const floorFailures = assertScanFloors(counts);
+  const floorFailures = [
+    ...assertScanFloors(counts),
+    ...assertRootScanFloor(repoRoot, rootCount),
+  ];
   if (floorFailures.length > 0) {
     for (const f of floorFailures) console.error(`FAIL: scan-denominator: ${f}`);
     console.error(`\nScanned ${total} file(s) [${tally}] — denominator assertion failed.`);

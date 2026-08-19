@@ -26,9 +26,9 @@ import { fileURLToPath } from 'node:url';
 import {
   CLAIM_PATTERNS,
   collectActuals,
+  partitionFrozenHistory,
   PLUGIN_ROOT,
   REPO_ROOT,
-  splitFrozenHistory,
 } from './readme-claims-registry.js';
 
 // Files scanned for count claims. README badges/prose + the plugin CLAUDE.md
@@ -62,22 +62,25 @@ const NC = '\x1b[0m';
  */
 export function scanFile(file, actuals) {
   if (!existsSync(file)) return [];
-  // Only the live region is claim-checked; release notes record what was true
-  // at that version and must stay frozen (see splitFrozenHistory).
-  const { scanned: content } = splitFrozenHistory(readFileSync(file, 'utf-8'));
+  // Only live sections are claim-checked; release-note sections record what was
+  // true at that version and must stay frozen (see partitionFrozenHistory).
+  // Segments are scanned individually rather than concatenated so a match can
+  // never straddle the boundary between two non-adjacent live sections.
+  const live = partitionFrozenHistory(readFileSync(file, 'utf-8')).filter((s) => !s.frozen);
   const findings = [];
 
   for (const { key, regex, label } of CLAIM_PATTERNS) {
     if (actuals[key] === null || actuals[key] === undefined) continue;
-    const matches = [...content.matchAll(regex)];
-    for (const m of matches) {
-      const claimed = Number(m[1]);
-      const actual = actuals[key];
-      // Allow exact match only — README counts must be precise.
-      if (claimed !== actual) {
-        findings.push({ file, label, claimed, actual, snippet: m[0] });
-      } else if (VERBOSE) {
-        findings.push({ file, label, claimed, actual, snippet: m[0], ok: true });
+    for (const segment of live) {
+      for (const m of segment.text.matchAll(regex)) {
+        const claimed = Number(m[1]);
+        const actual = actuals[key];
+        // Allow exact match only — README counts must be precise.
+        if (claimed !== actual) {
+          findings.push({ file, label, claimed, actual, snippet: m[0] });
+        } else if (VERBOSE) {
+          findings.push({ file, label, claimed, actual, snippet: m[0], ok: true });
+        }
       }
     }
   }

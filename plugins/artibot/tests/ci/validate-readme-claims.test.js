@@ -21,9 +21,9 @@ import { SCAN_TARGETS, scanFile } from '../../scripts/ci/validate-readme-claims.
 import {
   CLAIM_PATTERNS,
   collectActuals,
+  partitionFrozenHistory,
   PLUGIN_ROOT,
   REPO_ROOT,
-  splitFrozenHistory,
 } from '../../scripts/ci/readme-claims-registry.js';
 
 const CLAUDE_MD = path.join(PLUGIN_ROOT, 'CLAUDE.md');
@@ -146,7 +146,10 @@ describe('Korean count claims are gate-covered and consistent', () => {
   // Live region only — the same slice the validator checks. Reading the raw file
   // here would trip over the frozen release notes (README.md:1697 "117개 스킬",
   // the v1.13.0 notes' "39개 훅 등록"), which are correct history, not drift.
-  const content = splitFrozenHistory(readFileSync(PLUGIN_README, 'utf-8')).scanned;
+  const content = partitionFrozenHistory(readFileSync(PLUGIN_README, 'utf-8'))
+    .filter((s) => !s.frozen)
+    .map((s) => s.text)
+    .join('');
   const actuals = collectActuals();
   const koPatterns = CLAIM_PATTERNS.filter((p) => p.lang === 'ko');
 
@@ -239,6 +242,20 @@ describe('scanner reports drift it is supposed to catch (mutation check)', () =>
     );
     const findings = scanFile(file, actuals).filter((f) => !f.ok);
     expect(findings, 'frozen history must be exempt').toHaveLength(0);
+  });
+
+  it('flags drift in a section that FOLLOWS the release notes', () => {
+    // The tail hole: the earlier single-cut split froze everything from the
+    // first version heading to EOF, so `## 기여하기` / `## 라이선스` — current
+    // documentation — were outside the gate. Per-section freezing keeps them in.
+    const wrong = actuals.skills + 6;
+    const file = write(
+      'tail.md',
+      `# t\n\n## v1.14.0 주요 변경사항\n\n- 117개 도메인 스킬\n\n## 기여하기\n\n${wrong}개 도메인 스킬\n`
+    );
+    const findings = scanFile(file, actuals).filter((f) => !f.ok);
+    expect(findings, 'exactly the tail claim, not the release note').toHaveLength(1);
+    expect(findings[0].claimed).toBe(wrong);
   });
 
   it('still flags drift that appears BEFORE the release-note section', () => {
