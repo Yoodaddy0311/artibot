@@ -156,8 +156,48 @@ check_prerequisites() {
 # ──────────────────────────────────────────────
 # Fresh-machine install used to copy node_modules/ (hundreds of MB, sometimes
 # with Windows-incompatible symlinks) which hung or failed with EPERM. Always
-# exclude node_modules and .git from recursive copies. Prefer rsync when
-# available; fall back to a find+cp loop that respects the exclude list.
+# exclude node_modules and .git from recursive copies.
+#
+# THREE TIERS, in order: rsync -> tar pipe -> per-file cp loop. Each produces the
+# same tree; they differ only in how long it takes. Measured on the real 294-file
+# lib/ tree, Windows 11 / Git Bash / no rsync (2026-08-19):
+#
+#     tar pipe        0.541s
+#     per-file cp   166.310s      (~307x slower, same 294 files copied)
+#
+# The cp loop pays one process spawn per file, and on Windows a process spawn is
+# expensive; tar pays two for the whole tree. That is the entire difference — so
+# the cp loop stays as the last resort rather than being deleted. A machine
+# without tar gets the old speed, not a broken install.
+#
+# WHY THE PIPELINE CANNOT FAIL SILENTLY: `set -euo pipefail` at the top of this
+# file (:4) includes **pipefail**, so a failure in the LEFT tar becomes the
+# pipeline's exit status instead of being masked by a successful right-hand
+# extract. Without pipefail a source-side read error would look like success and
+# swap a truncated tree onto a live destination. Do not remove that setting.
+#
+# `-h` (dereference) on the creating tar is deliberate: the cp loop below copies
+# through `cp` without -d/-P, which follows symlinks, so the installed tree has
+# always held real files rather than links. Keeping -h preserves that contract.
+# Measured 2026-08-19: all six copied trees (skills, hooks, scripts, lib,
+# output-styles, .claude-plugin) currently contain **zero** symlinks, so this
+# flag changes nothing today — it is here so the answer stays the same if one
+# ever appears.
+#
+# But -h is NOT a claim of exact parity, and saying so would be false. The two
+# tiers agree on a symlink to a FILE (both dereference to a real file) and differ
+# on a symlink to a DIRECTORY: tar -h archives the linked directory's contents,
+# while the cp loop's `find` does not descend into it and so produced an EMPTY
+# directory. tar's answer is the more complete of the two. This is reasoned from
+# the two implementations, NOT measured: MSYS on this machine refuses to create
+# real symlinks (`ln -s` yields a copy), so the case could not be reproduced here.
+#
+# Exclude equivalence was re-verified independently against a synthetic tree
+# (2026-08-19): tar and the cp loop produced byte-identical file lists (14/14
+# entries), both dropping top-level AND nested node_modules/.git, and both
+# KEEPING the near-miss names `my-node_modules/`, `.github/`, `node_modules.txt`
+# and `.gitignore`. tar's --exclude is unanchored, which is what makes the
+# nested case work; anchoring it would silently start shipping node_modules.
 safe_copy_dir() {
   local src="$1"
   local dst="$2"
@@ -166,6 +206,25 @@ safe_copy_dir() {
     return $?
   fi
   mkdir -p "${dst}"
+
+  # Tier 2 — tar pipe. Guarded on tar being present AND on the pipeline
+  # succeeding: a tar that exists but rejects these flags (a non-GNU build, say)
+  # falls through to the cp loop rather than failing the install. That makes the
+  # worst case a PERFORMANCE regression, never a correctness one.
+  #
+  # A partial extract left by a failed tar is not a problem for the fallback:
+  # the cp loop below writes every file unconditionally, so it completes the
+  # tree rather than merging into a half-copy. The callers that stage into a
+  # fresh directory (atomic_replace_dir) start from an empty one anyway.
+  if command -v tar &>/dev/null; then
+    if tar -chf - --exclude=node_modules --exclude=.git -C "${src}" . \
+      | tar -xf - -C "${dst}"; then
+      return 0
+    fi
+    warn "  tar copy of ${src} failed — falling back to the per-file copy (slower, same result)"
+  fi
+
+  # Tier 3 — per-file cp loop. Correct everywhere, slow on Windows.
   local base
   base="$(cd "${src}" && pwd)"
   find "${base}" -mindepth 1 \( -name node_modules -o -name .git \) -prune -o -print 2>/dev/null | while IFS= read -r entry; do
@@ -187,8 +246,16 @@ safe_copy_dir() {
 # Between those two steps the directory is absent or half-populated, and every
 # hook a live session spawns out of it dies with ERR_MODULE_NOT_FOUND. That
 # window is not a flicker: with rsync absent — the default for Git Bash on
-# Windows — safe_copy_dir falls back to a per-file `cp` loop measured at 54.6s
-# for the 293-file lib/ tree, and it pays that once per destination.
+# Windows — safe_copy_dir used to fall straight through to a per-file `cp` loop,
+# and it pays the copy cost once per destination. Measured on the lib/ tree,
+# Windows 11 / Git Bash / no rsync:
+#     2026-08-15   54.6s   (293 files, per-file cp — the number this note carried)
+#     2026-08-19  166.3s   (294 files, per-file cp — same code, 3x the first read)
+#     2026-08-19    0.5s   (294 files, tar pipe — the tier added in front of it)
+# The two cp readings are the same loop on the same machine, so treat either as
+# an order of magnitude and not a constant. What matters here is unchanged: the
+# copy is slow enough that doing it in-place would expose a long broken window,
+# which is why the staging swap below exists regardless of which tier copies.
 #
 # Instead, copy into a sibling staging dir (the destination stays intact and
 # complete for the whole copy) and swap by rename. The destination is then only

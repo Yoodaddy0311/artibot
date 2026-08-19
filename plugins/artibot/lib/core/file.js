@@ -50,6 +50,17 @@ export async function readJsonFile(filePath) {
 /**
  * Write an object as JSON to a file, creating parent directories if needed.
  *
+ * Delegates to `atomicWriteJson`, so the write is crash-safe: readers never
+ * observe a partial file and a failure leaves the previous content intact.
+ * The emitted bytes are unchanged (`JSON.stringify(data, null, indent)` plus a
+ * trailing newline), so this is transparent to existing callers.
+ *
+ * The cost of that atomicity is a new failure mode: the write now ends in a
+ * rename, which on Windows can throw EPERM/EBUSY when antivirus, the file
+ * indexer, or another process momentarily holds the target (see the hardening
+ * note at scripts/utils/index.js:102-110). There is no retry here, so such a
+ * failure propagates to the caller.
+ *
  * @param {string} filePath - Absolute path to write to.
  * @param {object} data - Data to serialize as JSON.
  * @param {number} [indent=2] - Number of spaces for JSON indentation.
@@ -59,9 +70,7 @@ export async function readJsonFile(filePath) {
  * await writeJsonFile('/path/to/compact.json', data, 0); // no indentation
  */
 export async function writeJsonFile(filePath, data, indent = 2) {
-  await ensureDir(path.dirname(filePath));
-  const content = JSON.stringify(data, null, indent) + '\n';
-  await fs.writeFile(filePath, content, 'utf-8');
+  await atomicWriteJson(filePath, data, indent);
 }
 
 /**

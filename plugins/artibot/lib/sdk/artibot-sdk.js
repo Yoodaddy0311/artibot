@@ -10,9 +10,9 @@
  * @module lib/sdk/artibot-sdk
  */
 
-import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { atomicWriteText } from '../core/file.js';
+import { atomicWriteJson, atomicWriteText } from '../core/file.js';
 
 // ---------------------------------------------------------------------------
 // Schema Definitions
@@ -459,8 +459,13 @@ async function updateJsonFile(filePath, mutate) {
     data = raw.trim() === '' ? {} : JSON.parse(raw);
   }
   const next = mutate(data);
-  await mkdir(path.dirname(filePath), { recursive: true });
-  await writeFile(filePath, `${JSON.stringify(next, null, 2)}\n`, 'utf-8');
+  // Atomic: this is the read-modify-write path for .claude-plugin/plugin.json,
+  // hooks.json and artibot.config.json. A torn write here does not degrade a
+  // feature, it makes the manifest unparseable and the whole plugin fails to
+  // load. Byte output is unchanged — atomicWriteJson emits the same
+  // `JSON.stringify(next, null, 2)` plus trailing newline — and it creates the
+  // parent directory itself, so the mkdir this replaces is redundant.
+  await atomicWriteJson(filePath, next);
 }
 
 /**
