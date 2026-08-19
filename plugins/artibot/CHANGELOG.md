@@ -9,6 +9,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.47.0] — 2026-08-19
+
+autopilot ap-20260818 골(설치·게이트 견고화, WS-A~D) + 인용 해소 하드 게이트 + 설치 성능
+배치 묶음. 축은 두 가지다: **주장에는 실존하는 근거를** — 문서·보고가 인용하는
+`file:line`/`#symbol` 이 실제로 존재하는지 게이트가 상시 검증한다 — 그리고 **설치·상태
+파일의 crash-safety** — 세션이 중간에 죽어도 반쯤 쓰인 파일이 남지 않는다.
+
+### Added
+- **인용 해소 하드 게이트** (firewall) — `file:line`/`#symbol` 인용의 실존 검증. 적대 검증
+  2차 반영(no-target 회계·심볼 검사 조임·베이스라인 정화), floor 는 추적-한정 모집단 기준.
+- **CI Windows 레그 + actions SHA 핀 + dependabot actions 그룹** (WS-B) — 크로스플랫폼
+  회귀를 CI 에서 잡고, 서드파티 액션은 SHA 로 고정.
+- **타임아웃 예산 게이트 + 실설치 스모크** (WS-C) — install.sh 가 배포해야 할 파일이 실제
+  설치본에 실리는지 실설치로 검증. 스모크 타임아웃 상수는 관측 최댓값(520s) 기준.
+- **비신뢰-읽기 규칙 + 피드백 출처 필드** (WS-D).
+- **벤치마크 리포트 가독성 레이어 + Artibot 고정 기준선** (`/repo`).
+- 계약문 D1~D4 (phase3 cross-check).
+
+### Changed
+- **safe_copy_dir 3단 폴백** — rsync → tar 파이프 → per-file cp. 실측 294파일 lib/ 트리
+  기준 cp 루프 166.3s → tar 0.5s (Windows/Git Bash). tar 부재 머신은 cp 루프로 강등 —
+  최악이 성능 회귀이지 정합성 회귀가 아니다.
+- **파일락 대기를 Atomics.wait 슬립으로** — busy-wait 스핀 제거, 대기 중 코어 점유
+  96.7% → 0.0% (Node 24/Windows 실측).
+- **JSON 쓰기 원자화** (WS-A) — `writeJsonFile`·SDK 매니페스트 read-modify-write 경로를
+  atomicWrite 로. torn write 가 매니페스트를 깨서 플러그인 전체 로드 실패로 번지는 경로 차단.
+  atomicWriteText + 락 시그널 해제 포함.
+- lockstep 전개기 include 병합 의미론 교정 + 변이킬 4종, lockstep lib 분리.
+- `.artibot` 핸드오프 로컬 전용 전환 — 추적 해제 + gitignore.
+
+### Fixed
+- autopilot SessionStart 의 네임스페이스 브랜치 하이재킹 차단.
+- F1 fail-open 폐쇄 + 게이트 상수 교정(MIN_SLOTS·모집단 분리·타임아웃 1800s·spawn 경합).
+
 ## [4.46.0] — 2026-08-16
 
 v4.45.0 이후 이틀간의 세션 12커밋 묶음. 축은 두 가지다: **복잡도 개념 재정의**("복잡도는

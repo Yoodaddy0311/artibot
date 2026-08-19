@@ -1,7 +1,7 @@
 /**
  * File-level advisory lock for state file race condition prevention.
  *
- * Provides a simple spin-lock mechanism using .lock sentinel files
+ * Provides a simple retry-loop lock using .lock sentinel files
  * to serialize read-modify-write operations on shared state files.
  * Designed for short-lived hook processes where OS-level locking
  * (flock/LockFileEx) is unreliable across platforms.
@@ -13,9 +13,10 @@
  *
  * Holding a lock installs one SIGTERM/SIGINT listener pair. The protection is
  * mostly indirect: with no listener the kernel kills the process *immediately*,
- * even mid-spin-wait, stranding the `.lock` file. With a listener the signal is
- * queued until the event loop turns, so the synchronous body — including the
- * `finally` that unlinks the lock — always runs to completion first. The
+ * even while it is waiting for the lock, stranding the `.lock` file. With a
+ * listener the signal is queued until the event loop turns, so the synchronous
+ * body — including the `finally` that unlinks the lock — runs to completion
+ * first. The
  * handler then unlinks whatever is still registered and re-raises the signal,
  * so the exit status stays a signal death rather than a normal exit — provided
  * no other SIGTERM/SIGINT listener remains on this process. Another listener
@@ -49,6 +50,15 @@ const LOCK_TIMEOUT_MS = 5000;
 
 /** Interval (ms) between lock acquisition retries. */
 const LOCK_RETRY_MS = 50;
+
+/**
+ * Backing cell for the retry sleep. Nothing ever writes to it or notifies on
+ * it, so `Atomics.wait` on index 0 for value 0 always runs the full timeout
+ * and returns `'timed-out'` — i.e. it is a synchronous sleep that yields the
+ * CPU. Allocated once; every waiter times out independently, so sharing one
+ * cell across nested or re-entrant calls is safe.
+ */
+const RETRY_SLEEP_CELL = new Int32Array(new SharedArrayBuffer(4));
 
 /** Signals intercepted so held locks are released before the process dies. */
 const RELEASE_SIGNALS = ['SIGTERM', 'SIGINT'];
@@ -164,9 +174,14 @@ export function withFileLock(filePath, fn) {
       break;
     }
 
-    // Busy-wait (hooks are short-lived processes, sleep is not available)
-    const waitUntil = Date.now() + LOCK_RETRY_MS;
-    while (Date.now() < waitUntil) { /* spin */ }
+    // Synchronous sleep that yields the CPU. Measured on Node 24 / Windows:
+    // returns 'timed-out' after ~56ms for a 50ms request, consuming 0.0% of a
+    // core, where the busy-wait it replaces burned 96.7% of one core for the
+    // same wall time. Contended hooks no longer pin a core while waiting.
+    // The OS timer granularity means each retry overshoots slightly, so a
+    // 5s window fits ~89 retries rather than ~100; the timeout itself is
+    // wall-clock checked above and is unaffected.
+    Atomics.wait(RETRY_SLEEP_CELL, 0, 0, LOCK_RETRY_MS);
   }
 
   // Acquire lock
