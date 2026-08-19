@@ -1035,7 +1035,7 @@ You can install **both** in the same Anthropic account — `artibot` runs in you
 
 **4.12.0** (2026-05-19) — Comprehensive audit fixes: security hardening (timing-safe auth, K_SERVICE bypass removed, shell-injection surfaces eliminated), manifest drift sync, layer-cycle fix.
 
-[📖 Full release notes (비개발자용)](./RELEASE_NOTES_4.8_KO.md) · [CHANGELOG](./plugins/artibot/CHANGELOG.md)
+[📖 Full release history — CHANGELOG](./plugins/artibot/CHANGELOG.md)
 
 ## License
 

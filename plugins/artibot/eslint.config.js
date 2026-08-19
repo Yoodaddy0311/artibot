@@ -6,14 +6,17 @@ export default [
   // ---------------------------------------------------------------------------
   // Generated output. An `ignores`-only entry is a global ignore in flat config.
   //
-  // Why this has to exist: the pre-push hook runs `npx eslint .` (see
-  // scripts/git-hooks/pre-push, which explains why `.` and not a directory list),
-  // while `npm run lint` passes `bin/ lib/ scripts/ tests/`. CI only ever runs the
-  // latter, and these paths are gitignored so they do not exist on a runner at
-  // all. The result was a gate that was green on CI and red on every developer
-  // machine that had run the autopilot or a coverage report: measured 2026-08-15,
-  // `npx eslint .` reported 13 no-undef errors in .ap-boot.mjs and would have
-  // blocked every push once the hook was installed.
+  // Why this has to exist: every lint gate now runs `eslint .` over the whole
+  // package — the pre-push hook (scripts/git-hooks/pre-push, which explains why
+  // `.` and not a directory list), .github/workflows/ci.yml, and
+  // package.json#scripts.lint alike. Back when package.json still passed
+  // `bin/ lib/ scripts/ tests/`, CI ran only that list and these gitignored
+  // paths did not exist on a runner at all. The result was a gate that was green
+  // on CI and red on every developer machine that had run the autopilot or a
+  // coverage report: measured 2026-08-15, `npx eslint .` reported 13 no-undef
+  // errors in .ap-boot.mjs and would have blocked every push once the hook was
+  // installed. Now that all three share one command, ignoring here is the only
+  // place a path can leave the gate — which is why each entry is listed by hand.
   //
   // Scope is deliberately narrow. Both entries are gitignored AND were measured
   // to actually contain lintable files (.ap-boot.mjs: 1, coverage/: 3). The other

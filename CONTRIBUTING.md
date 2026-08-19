@@ -97,7 +97,7 @@ plugins/artibot/agents/my-agent.md
 ```yaml
 ---
 name: my-agent
-model: opus          # or sonnet
+model: opus          # must equal the agent's EFFECTIVE tier — see below
 description: >
   One-line description of the agent's specialty.
 ---
@@ -105,12 +105,56 @@ description: >
 
 ### Model tier policy
 
-| Tier | Model | Use for |
-|------|-------|---------|
-| opus (73%) | Claude Opus | Orchestration, architecture, security, development, code review |
-| sonnet (27%) | Claude Sonnet | Documentation, content, data analysis, SEO, CRO, ads |
+The fleet currently runs a **single tier**: all 28 agents resolve to `opus`.
+There is no per-agent tier choice to make — write `model: opus` and move on.
 
-Choose the model tier based on the agent's complexity requirements. Code-writing and security agents should use opus. Content and documentation agents can use sonnet.
+Tiers are named by tier, never by model ID. The tier → model ID mapping lives in
+`plugins/artibot/lib/core/model-catalog.js#MODELS`; do not hardcode a model ID in
+docs, prompts, or agent files.
+
+| Bucket | Declared tier | Effective tier | Agents |
+|--------|---------------|----------------|--------|
+| `high` | `fable` | `opus` | 21 |
+| `medium` | `opus` | `opus` | 7 |
+
+**Declared vs effective.** The `high` bucket still *declares* `fable`, but the
+opt-in gate `artibot.config.json#/agents/modelPolicy/fable/enabled` is `false`,
+so every `fable` request is demoted to `opus`. Effective tier is therefore
+`opus` for all 28 agents. Read the effective value with
+`lib/core/model-policy.js#resolveModel` — the single source of truth — not from
+the bucket's declared `model` field (`getPolicyModel(name, config)` returns the
+*declared* tier and will say `fable` — and it needs that hydrated config as its
+second argument, since a single-argument `getPolicyModel(name)` falls back to
+`EMPTY_POLICY` and returns `null` for every agent).
+
+**Pass a hydrated config, or you will read a fallback instead of the policy.**
+Both functions take the config as a later argument and fall back to a frozen
+`EMPTY_POLICY` (empty buckets, `defaultModel`) when it is missing. Measured
+2026-08-19 across all 28 agents:
+
+| Call | Result | Why |
+|------|--------|-----|
+| `getPolicyModel(name)` | `null` × 28 | EMPTY_POLICY has no bucket members |
+| `getPolicyModel(name, config)` | `fable` × 21, `opus` × 7 | the declared tiers |
+| `resolveModel(name, {}, config)` | `opus` × 28 | declared, then gated |
+
+Note the trap in the last row's single-argument form: `resolveModel(name)` also
+returns `opus` × 28, but it gets there from `EMPTY_POLICY.defaultModel`, not
+from the policy — the right answer today for the wrong reason. Re-enable
+`fable.enabled` and that call keeps saying `opus` for allowlisted agents while
+the real effective tier has changed. Always pass the config.
+
+**Frontmatter must match the effective tier**, not the declared one.
+`scripts/ci/validate-model-policy.js` is the drift gate: it hydrates the config
+first (`await loadConfig()`), then compares each `agents/<name>.md` `model:`
+field against the effective tier — `resolveModel(name, {}, config)`, guarded by
+`getPolicyModel(name, config) === null` so an agent in no policy bucket is
+reported as unlisted rather than silently compared against a default. It exits
+non-zero on a mismatch. Re-enabling `fable.enabled` therefore requires updating
+the 20 allowlisted agents' frontmatter in the same change, or the gate fails.
+(`security-reviewer` is excluded from the allowlist and hard-pinned to `opus` by
+`FABLE_DENYLIST`, because fable's refusal classifier false-positives on
+legitimate security work.)
 
 ### 3. Agent body structure
 
@@ -249,7 +293,7 @@ Before submitting, verify:
 - [ ] No emojis in files
 - [ ] Skill files are under 500 lines
 - [ ] Reference material is in `references/` subdirectory
-- [ ] Agent model tier follows the policy (opus for complex, sonnet for content)
+- [ ] Agent frontmatter `model:` matches the effective tier from `resolveModel` (currently `opus` for all agents) — `scripts/ci/validate-model-policy.js` enforces this
 - [ ] Command `description` starts with `(Artibot)`
 
 ### PR body

@@ -19,11 +19,17 @@
  *  1. **문서의 내용 품질은 보지 않는다.** 링크가 해석되는지·표 열 수가 맞는지만
  *     본다. 문장이 사실인지, 링크가 *올바른* 문서를 가리키는지는 별개다.
  *  2. **SCAN_DIRS 밖은 여전히 사각지대다.** 두 스캐너 모두 각 플러그인 루트의
- *     `commands`·`skills`·`docs`·`rubrics` 와 루트 `CLAUDE/README/AGENTS.md` 만
- *     본다. `agents/*.md`(artibot 28개)·`CHANGELOG.md`·`RELEASE.md`·
+ *     `commands`·`skills`·`docs`·`rubrics` 와 그 루트의 `CLAUDE/README/AGENTS.md`
+ *     만 본다. `agents/*.md`(artibot 28개)·`CHANGELOG.md`·`RELEASE.md`·
  *     `plugins/artibot-cowork/_reports/` 는 지금도 어느 게이트에도 걸리지 않는다.
  *     측정 시점에 `plugins/artibot/CHANGELOG.md` 만으로 rendering 위반 14건이
  *     있어서(전부 backtick-in-inline-code) 이번 패스의 범위를 넘는다고 판단했다.
+ *  2-a. **리포 루트 문서는 이제 doc-links 만 본다 (2026-08-19).** `validate-doc-links`
+ *     는 리포 루트의 `README/CONTRIBUTING/INSTALL/CLAUDE/AGENTS.md` 를 스캔하지만
+ *     `validate-md-rendering` 은 여전히 플러그인 루트만 본다. 즉 루트 문서의 표·
+ *     인라인코드 **렌더링** 위반은 아직 아무 게이트에도 안 걸린다. 두 스캐너의
+ *     분모 lockstep 단언(아래)이 **플러그인 루트 기준**인 이유이기도 하다 —
+ *     `gatherAllDocFiles().counts` 는 의도적으로 루트를 포함하지 않는다.
  *  3. **`isProjectPluginDir` 는 이름 규칙이다.** `plugins/` 아래에 `artibot`
  *     접두사도 `_shared` 도 아닌 이름의 새 디렉터리가 생기면 그것은 스캔되지
  *     않는다. 설치 트리에서 남의 플러그인을 우리 CI 로 끌어들이지 않기 위한
@@ -44,7 +50,12 @@ import {
   listPluginRoots,
   MIN_DOC_FILES,
 } from '../../scripts/ci/ci-utils.js';
-import { findBrokenLinks, gatherAllDocFiles } from '../../scripts/ci/validate-doc-links.js';
+import {
+  findBrokenLinks,
+  gatherAllDocFiles,
+  gatherRepoRootDocFiles,
+  getRepoDocRoot,
+} from '../../scripts/ci/validate-doc-links.js';
 import {
   applyRatchet,
   KNOWN_RENDER_VIOLATIONS,
@@ -145,6 +156,72 @@ describe('게이트 자기검증 — 사각지대가 실제로 닫혔는가', ()
       PLUGINS_DIR,
     );
     expect(broken).toHaveLength(1);
+  });
+});
+
+/**
+ * ── 2026-08-19 사각지대 (리포 루트 문서) ────────────────────────────────────
+ * 루트 `README.md` 는 삭제된 `RELEASE_NOTES_4.8_KO.md`(`ccd7f7fa` 에서 제거)를
+ * 계속 가리키고 있었는데 게이트는 `PASS: 474 documentation file(s) checked,
+ * 0 broken references` 를 냈다. 스캔한 것 안에서는 참이었고, 루트 README 는 그
+ * 안에 없었다.
+ *
+ * 결함은 **두 겹**이었고 둘 다 닫아야 했다:
+ *   ① 스캔 집합 — 모든 스캔 루트가 `plugins/` 아래라 리포 루트 문서는 아예
+ *      열리지 않았다.
+ *   ② containment — 판정은 containment **안쪽**으로 해석되는 링크에만 적용된다
+ *      (`findBrokenLinks` 1단계가 나머지를 범위 밖으로 건너뛴다). containment 가
+ *      `plugins/` 인 채로 루트 README 만 스캔 집합에 넣었다면, 타깃이 리포 루트로
+ *      해석되므로 **여전히 건너뛰어졌다**. 아래 세 번째 테스트가 그 절반을 못박는다.
+ */
+describe('게이트 자기검증 — 리포 루트 문서 사각지대 (2026-08-19)', () => {
+  it('리포 루트 문서가 실제 스캔 목록에 들어 있다 (분모)', () => {
+    const { root, files } = gatherRepoRootDocFiles();
+    expect(root).toBe(REPO_ROOT);
+    expect(files.map((f) => basename(f))).toContain('README.md');
+    expect(files.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('루트 문서의 깨진 링크를 실제로 잡는다 (①+② 둘 다 닫혔을 때만 통과)', () => {
+    const victim = join(REPO_ROOT, 'README.md');
+    expect(existsSync(victim)).toBe(true);
+    const broken = findBrokenLinks(
+      '# x\n\n[dead](./RELEASE_NOTES_4.8_KO.md)\n',
+      victim,
+      REPO_ROOT,
+    );
+    expect(broken.map((b) => b.type)).toContain('link');
+  });
+
+  it('containment 가 plugins/ 로 좁아지면 같은 링크를 놓친다 (②가 왜 필요한지)', () => {
+    // 회귀 핀: 이 단언이 깨졌다면 containment 를 다시 좁혀도 테스트가 통과하게
+    // 된 것이다. 좁은 containment 는 경계를 넘는 링크를 조용히 면제한다 = fail-open.
+    const victim = join(REPO_ROOT, 'README.md');
+    expect(
+      findBrokenLinks('[dead](./RELEASE_NOTES_4.8_KO.md)\n', victim, PLUGINS_DIR),
+    ).toEqual([]);
+  });
+
+  it('루트 문서가 정상일 때는 잡지 않는다 (양성 대조의 짝)', () => {
+    const victim = join(REPO_ROOT, 'README.md');
+    expect(
+      findBrokenLinks('[live](./plugins/artibot/CHANGELOG.md)\n', victim, REPO_ROOT),
+    ).toEqual([]);
+  });
+
+  it('dev-repo 마커가 없으면 루트를 스캔하지 않는다 (설치 트리 안전장치)', () => {
+    // 설치 트리에서 `getPluginsDir()` 의 부모는 `~/.claude` 다. 마커 검사가 없으면
+    // 사용자의 개인 `~/.claude/CLAUDE.md` 를 열어 그 깨진 링크를 우리 CI 실패로
+    // 만든다. 마커가 없는 경로를 강제해 null 로 떨어지는지 확인한다.
+    const saved = process.env.CLAUDE_PLUGIN_ROOT;
+    try {
+      process.env.CLAUDE_PLUGIN_ROOT = join(REPO_ROOT, '__no_such_tree__', 'plugins', 'artibot');
+      expect(getRepoDocRoot()).toBeNull();
+      expect(gatherRepoRootDocFiles().files).toEqual([]);
+    } finally {
+      if (saved === undefined) delete process.env.CLAUDE_PLUGIN_ROOT;
+      else process.env.CLAUDE_PLUGIN_ROOT = saved;
+    }
   });
 });
 

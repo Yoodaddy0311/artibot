@@ -535,13 +535,16 @@ run_gate md-render    node scripts/ci/validate-md-rendering.js
 run_gate model-policy node scripts/ci/validate-model-policy.js
 # The gate that caught 9f124441 (README claimed 61 hook scripts, actual 62).
 run_gate readme       node scripts/ci/validate-readme-claims.js --full
-# Deliberately `.` and not a directory list, matching .github/workflows/ci.yml
-# exactly. `npm run lint` in package.json passes `bin/ lib/ scripts/ tests/`,
-# which silently misses server/ (4 lintable files), and any directory added
-# later would be missed the same way. Passing `.` cannot drift. It is also not
-# slower: measured 2026-08-11, `.` took 7893ms against 8852ms for the explicit
-# list. Do not "optimise" this into a directory list, and note that naming a
-# directory with no lintable files (hooks/) makes ESLint exit 2 outright.
+# Deliberately `.` and not a directory list. All three lint gates now agree on
+# this exact command — here, .github/workflows/ci.yml, and package.json#lint —
+# so a file cannot be linted by one and skipped by another. That parity is the
+# fix for the earlier split, where package.json passed `bin/ lib/ scripts/
+# tests/` and silently missed server/; any directory added later would have been
+# missed the same way. Passing `.` cannot drift. Verified 2026-08-19: `npx
+# eslint . --format json` reports 907 files, including all 4 server/*.js.
+# It is also not slower: measured 2026-08-11, `.` took 7893ms against 8852ms for
+# the explicit list. Do not "optimise" this into a directory list, and note that
+# naming a directory with no lintable files (hooks/) makes ESLint exit 2.
 run_gate lint         npx eslint . --max-warnings=0
 
 elapsed=$(( $(date +%s) - started ))

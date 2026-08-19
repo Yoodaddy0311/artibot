@@ -32,7 +32,13 @@
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { CLAIM_PATTERNS, collectActuals, PLUGIN_ROOT, REPO_ROOT } from './readme-claims-registry.js';
+import {
+  CLAIM_PATTERNS,
+  collectActuals,
+  PLUGIN_ROOT,
+  REPO_ROOT,
+  splitFrozenHistory,
+} from './readme-claims-registry.js';
 
 const args = process.argv.slice(2);
 const CHECK_ONLY = args.includes('--check');
@@ -46,9 +52,13 @@ const NC = '\x1b[0m';
 function syncFile(file, actuals) {
   if (!existsSync(file)) return { changed: false, edits: [] };
   const original = readFileSync(file, 'utf-8');
+  // Rewrite the live region only. Release notes state what was true at that
+  // version, so auto-healing them to today's counts would falsify history —
+  // `frozen` is carried through byte-for-byte and re-appended below.
+  const { scanned, frozen } = splitFrozenHistory(original);
   const edits = [];
 
-  let updated = original;
+  let updated = scanned;
   for (const { key, regex } of CLAIM_PATTERNS) {
     const actual = actuals[key];
     if (actual === null || actual === undefined) continue;
@@ -59,8 +69,8 @@ function syncFile(file, actuals) {
     });
   }
 
-  if (updated === original) return { changed: false, edits: [] };
-  if (!CHECK_ONLY) writeFileSync(file, updated);
+  if (updated === scanned) return { changed: false, edits: [] };
+  if (!CHECK_ONLY) writeFileSync(file, updated + frozen);
   return { changed: true, edits };
 }
 

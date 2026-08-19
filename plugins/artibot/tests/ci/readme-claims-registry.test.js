@@ -20,6 +20,7 @@ import {
   collectActuals,
   PLUGIN_ROOT,
   REPO_ROOT,
+  splitFrozenHistory,
 } from '../../scripts/ci/readme-claims-registry.js';
 
 describe('collectActuals', () => {
@@ -60,7 +61,7 @@ describe('CLAIM_PATTERNS contract', () => {
   });
 
   it('each regex captures group1=number and group2=trailing phrase', () => {
-    for (const { regex, label } of CLAIM_PATTERNS) {
+    for (const { regex, label, lang } of CLAIM_PATTERNS) {
       // Build a synthetic claim that the pattern must match: a 2-digit count
       // followed by the phrase the regex was written for. We derive a probe by
       // matching against a representative string per known label.
@@ -73,6 +74,12 @@ describe('CLAIM_PATTERNS contract', () => {
         'hook regs': '42 hook registrations',
         'hook scripts': '42 hook scripts',
         'CI scripts': '42 CI scripts',
+        'skills (ko)': '42개 도메인 스킬',
+        'commands (ko)': '42개 슬래시 커맨드',
+        'agent defs (ko)': '42개 에이전트 정의',
+        'hook regs (ko)': '42개 훅 등록',
+        'hook scripts (ko)': '42개 훅 스크립트 파일',
+        'CI scripts (ko)': '42개 CI 검증 스크립트',
       }[label];
       expect(probe, `no probe defined for label "${label}"`).toBeTruthy();
 
@@ -80,10 +87,75 @@ describe('CLAIM_PATTERNS contract', () => {
       const m = fresh.exec(probe);
       expect(m, `pattern for "${label}" should match "${probe}"`).not.toBeNull();
       expect(m[1]).toBe('42'); // group 1 = numeric claim
-      expect(m[2]).toMatch(/^\s+/); // group 2 = trailing phrase (leading space)
+      // Group 2 is the trailing phrase. English tails begin with the separating
+      // space; Korean tails begin with the counter 개 and have no space, so the
+      // shape assertion is per-language rather than a single leading-space rule.
+      expect(m[2]).toMatch(lang === 'ko' ? /^개/ : /^\s+/);
       // Rebuild contract used by the sync rewriter: number + tail === full match.
       expect(`${m[1]}${m[2]}`).toBe(m[0]);
     }
+  });
+
+  it('every pattern declares a supported lang', () => {
+    for (const { label, lang } of CLAIM_PATTERNS) {
+      expect(['en', 'ko'], `pattern "${label}" must declare lang`).toContain(lang);
+    }
+  });
+
+  it('covers the Korean prose keys, not English only', () => {
+    // The gap this closes: plugins/artibot/README.md is Korean-dominant and
+    // every pattern used to be English, so its counts could drift unseen.
+    const ko = CLAIM_PATTERNS.filter((p) => p.lang === 'ko');
+    expect(ko.length, 'Korean patterns must exist').toBeGreaterThan(0);
+    const koKeys = new Set(ko.map((p) => p.key));
+    for (const key of ['skills', 'commands', 'agents', 'hookScripts', 'hookRegistrations', 'ciScripts']) {
+      expect(koKeys.has(key), `Korean prose for "${key}" must be gated`).toBe(true);
+    }
+  });
+
+  it('Korean patterns ignore sub-category counts that have no truth source', () => {
+    // "12개 페르소나 스킬" / "23개 마케팅 스킬" are breakdowns collectActuals()
+    // cannot verify. Matching them would assert a number against the WRONG
+    // total (113) and force the prose to a false value.
+    const skillsKo = CLAIM_PATTERNS.find((p) => p.label === 'skills (ko)');
+    for (const prose of ['12개 페르소나 스킬', '23개 마케팅 스킬', '63개 기타 스킬']) {
+      const re = new RegExp(skillsKo.regex.source, skillsKo.regex.flags);
+      expect(re.test(prose), `"${prose}" must NOT bind to the skills total`).toBe(false);
+    }
+    // But the real total phrasings must bind.
+    for (const prose of ['113개 스킬', '113개 도메인 스킬', '113개 스킬 디렉토리']) {
+      const re = new RegExp(skillsKo.regex.source, skillsKo.regex.flags);
+      expect(re.test(prose), `"${prose}" must bind to the skills total`).toBe(true);
+    }
+  });
+});
+
+describe('splitFrozenHistory', () => {
+  it('is lossless: scanned + frozen reconstructs the input', () => {
+    const doc = '# Title\n\n113개 스킬\n\n## v2.1.0 주요 변경사항\n\n117개 스킬\n';
+    const { scanned, frozen } = splitFrozenHistory(doc);
+    expect(scanned + frozen).toBe(doc);
+  });
+
+  it('cuts at the first version heading so release notes are not claim-checked', () => {
+    const doc = '# Title\n\n113개 스킬\n\n## v2.1.0 주요 변경사항\n\n117개 스킬\n';
+    const { scanned, frozen } = splitFrozenHistory(doc);
+    expect(scanned).toContain('113개 스킬');
+    expect(scanned).not.toContain('117개 스킬');
+    expect(frozen).toContain('117개 스킬');
+  });
+
+  it('does not treat a version-citing sub-heading as history', () => {
+    // "### 런타임 미들웨어 파이프라인 (v1.14.0+)" is current documentation.
+    const doc = '### 런타임 파이프라인 (v1.14.0+)\n\n113개 스킬\n';
+    const { scanned, frozen } = splitFrozenHistory(doc);
+    expect(frozen).toBe('');
+    expect(scanned).toBe(doc);
+  });
+
+  it('is a no-op for a document with no release-note section', () => {
+    const doc = '# Root README\n\n113 skills\n';
+    expect(splitFrozenHistory(doc)).toEqual({ scanned: doc, frozen: '' });
   });
 
   it('does not match single-digit or "N+" forms (validator parity)', () => {

@@ -3,7 +3,8 @@
  * CI: Validate documentation internal links and anchors.
  *
  * Scans authored Markdown under **every co-located Artibot plugin** (artibot,
- * artibot-cowork, _shared — see `ci-utils.js#listPluginRoots`) and reports:
+ * artibot-cowork, _shared — see `ci-utils.js#listPluginRoots`) **and the repo
+ * root's own authored docs** (see {@link ROOT_SCAN_FILES}), and reports:
  *   1. Broken relative `[..](path.md)` links (target file does not exist).
  *   2. Broken in-page `[..](#anchor)` references (no matching heading).
  *   3. Unbalanced (odd) code fences (likely an unclosed ``` block).
@@ -14,6 +15,28 @@
  *
  * Ported from claude-howto's check_cross_references.py (Python → Node ESM).
  * Zero external dependencies (node:fs / node:path / node:url only).
+ *
+ * ## Known holes — what this gate still does NOT see
+ *
+ * A gate's own green becomes the alibi for the next blind spot unless its holes
+ * are written down beside it. This list is part of the gate. As of 2026-08-19
+ * the following are NOT checked:
+ *   - **Non-`.md` link targets.** `[x](./scripts/foo.js)`, image links, and
+ *     directory links are never resolved — only `*.md` targets are (see
+ *     {@link extractMdLinks}). A dead link to a deleted script passes green.
+ *   - **Cross-file anchors.** In `other.md#section` only the *file* half is
+ *     verified; the `#section` half is stripped. Only same-file anchors are
+ *     matched against headings.
+ *   - **External http(s) links.** Never fetched, so link rot is invisible.
+ *   - **Reference-style and raw-HTML links.** `[x][ref]` and `<a href="…">`
+ *     are not parsed; only inline `[x](target)` is.
+ *   - **Repo-root docs excluded by policy** — CHANGELOG.md, RELEASE_NOTES_*.md,
+ *     WORK-REPORT-*.md, CLAUDE.local.md (see {@link ROOT_SCAN_FILES}).
+ *   - **Targets outside the repo root**, which are skipped as out-of-scope
+ *     rather than reported (see {@link findBrokenLinks} step 1).
+ *   - **Installed trees.** Repo-root scanning requires the dev-repo marker (see
+ *     {@link getRepoDocRoot}); under `~/.claude/plugins` only plugin roots are
+ *     scanned, so root-doc regressions are caught in CI, not on a user's box.
  *
  * @module scripts/ci/validate-doc-links
  */
@@ -53,6 +76,66 @@ const SCAN_DIRS = ['commands', 'skills', 'docs', 'rubrics'];
  * violations (measured 2026-08-16) that are out of scope for this gate's job.
  */
 const SCAN_FILES = ['CLAUDE.md', 'README.md', 'AGENTS.md'];
+
+/**
+ * Authored Markdown at the **repo root** (the parent of the plugins directory),
+ * which is outside every plugin root and was therefore unscanned until
+ * 2026-08-19. That hole let `README.md`'s link to the deleted
+ * `RELEASE_NOTES_4.8_KO.md` (removed in `ccd7f7fa`) sit broken while this gate
+ * reported `PASS: 474 documentation file(s) checked, 0 broken references` —
+ * true for what it scanned, and the root README was not in it.
+ *
+ * Excluded on purpose, mirroring {@link SCAN_FILES}'s CHANGELOG rule:
+ *   - `CHANGELOG.md` — append-only release history.
+ *   - `RELEASE_NOTES_*.md`, `WORK-REPORT-*.md` — frozen dated artifacts; their
+ *     links describe the repo as it was, not as it is.
+ *   - `CLAUDE.local.md` — gitignored personal config, absent in CI.
+ */
+const ROOT_SCAN_FILES = ['README.md', 'CONTRIBUTING.md', 'INSTALL.md', 'CLAUDE.md', 'AGENTS.md'];
+
+/**
+ * Minimum repo-root docs that must be scanned once the root is in scope. This
+ * is the root's denominator assertion — the sibling of `ci-utils.js`'s
+ * {@link MIN_DOC_FILES}, kept separate because that map is shared with
+ * `validate-md-rendering.js`, which scans plugin roots only. Without a floor,
+ * "0 problems" and "0 files examined" print the same word.
+ */
+const MIN_ROOT_DOC_FILES = 3;
+
+/**
+ * File that marks a directory as the Artibot **dev repo** rather than an
+ * installed plugin tree.
+ *
+ * This matters because `getPluginsDir()`'s parent is `<repo>` in the dev repo
+ * but `~/.claude` in an installed tree. Without this check the gate would walk
+ * a user's personal `~/.claude/README.md` and `CLAUDE.md` and report their
+ * broken links as Artibot CI failures.
+ */
+const DEV_REPO_MARKER = path.join('.claude-plugin', 'marketplace.json');
+
+/**
+ * Resolve the repo root whose top-level docs are in scope, or `null` when not
+ * running against the dev repo (installed tree → plugin roots only).
+ *
+ * @returns {string|null} Absolute repo root, or null if unavailable.
+ */
+export function getRepoDocRoot() {
+  const candidate = path.resolve(getPluginsDir(), '..');
+  return existsSync(path.join(candidate, DEV_REPO_MARKER)) ? candidate : null;
+}
+
+/**
+ * Gather the repo root's authored top-level Markdown files.
+ *
+ * @returns {{ root: string|null, files: string[] }} The repo root in scope (or
+ *   null outside the dev repo) and the absolute paths of its scanned docs.
+ */
+export function gatherRepoRootDocFiles() {
+  const root = getRepoDocRoot();
+  if (root === null) return { root: null, files: [] };
+  const files = ROOT_SCAN_FILES.map((f) => path.join(root, f)).filter((abs) => existsSync(abs));
+  return { root, files };
+}
 
 /**
  * Mask fenced code blocks and inline code spans by replacing their inner
@@ -286,15 +369,29 @@ export function gatherAllDocFiles() {
  * references or on a scan denominator that fell below its floor.
  */
 function main() {
-  // Containment root is the shared plugins directory, not one plugin: that way a
-  // cross-plugin link (`../artibot-cowork/README.md`) is validated instead of
-  // being silently treated as "outside scope".
-  const containment = getPluginsDir();
-  const { files, counts } = gatherAllDocFiles();
+  const { files: pluginFiles, counts } = gatherAllDocFiles();
+  const { root: repoRoot, files: rootFiles } = gatherRepoRootDocFiles();
+
+  // Containment root is the widest tree whose docs we scan, never one plugin.
+  // A link is only judged when it resolves INSIDE containment (findBrokenLinks
+  // step 1 skips the rest as out-of-scope), so a containment narrower than the
+  // scan set is fail-open: it silently excuses exactly the links that reach
+  // across the boundary. That is the second half of the 2026-08-19 blind spot —
+  // adding the root README to the scan set alone would NOT have caught its
+  // `./RELEASE_NOTES_4.8_KO.md` link, because the target resolves to the repo
+  // root, outside the old `plugins/` containment.
+  const containment = repoRoot ?? getPluginsDir();
+  const files = [...pluginFiles, ...rootFiles];
 
   const floorFailures = assertScanFloors(counts);
+  if (repoRoot !== null && rootFiles.length < MIN_ROOT_DOC_FILES) {
+    floorFailures.push(
+      `repo root scanned ${rootFiles.length} file(s), below floor ${MIN_ROOT_DOC_FILES}`
+    );
+  }
   const tally = Object.entries(counts)
     .map(([name, n]) => `${name}=${n}`)
+    .concat(repoRoot === null ? ['<root>=skipped(not-dev-repo)'] : [`<root>=${rootFiles.length}`])
     .join(' ');
 
   if (floorFailures.length > 0) {

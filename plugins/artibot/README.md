@@ -396,7 +396,7 @@ Artibot의 핵심 엔진은 Claude Code의 **Agent Teams API**입니다. 단순�
 
 ### CTO-Led 팀 오케스트레이션
 
-- **orchestrator** 에이전트가 팀 리더(CTO)로서 27개 전문 에이전트를 팀으로 구성
+- **orchestrator** 에이전트가 팀 리더(CTO)로서 나머지 27개 전문 에이전트를 팀원으로 구성 (오케스트레이터 1 + 팀원 27 = 총 28개)
 - Delegation 모드: 리더는 조율만 담당, 직접 코드 작성 안함
 - 5가지 오케스트레이션 패턴: Leader, Council, Swarm, Pipeline, Watchdog
 - 3단계 팀 규모: Solo(0명), Squad(3명), Platoon(5명)
@@ -479,7 +479,7 @@ Artibot의 핵심 엔진은 Claude Code의 **Agent Teams API**입니다. 단순�
 
 ### 지능형 훅 시스템
 
-- 15개 이벤트에 24개 훅 등록 (HTTP webhook 알림 포함)
+- 15개 이벤트에 25개 훅 등록 (HTTP webhook 알림 포함)
 - **Guard Registry**: 중앙 집중식 가드 파이프라인 (`registerGuard()`/`executeChain()` API), 6개 내장 가드, 훅 코드 75% 감소
 - **Advisory File Lock**: 동시 훅 실행 시 상태 파일 경합 방지 (spin-lock, fail-open)
 - 위험 명령 차단, 민감 파일 보호, 자동 포맷, PR 감지, 팀원 생명주기 추적
@@ -553,9 +553,9 @@ Artibot은 Claude Code 외에도 **Gemini CLI**, **OpenAI Codex CLI**, **Cursor 
 | **호환성 점수** | 10/10 | 9/10 | 8/10 | 6/10 | 8/10 |
 | Agent Teams (P2P 메시징) | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Sub-Agent (단방향 위임) | ✅ | ✅ | ✅ | ⚠️ 제한적 | ✅ |
-| 27개 전문 에이전트 | ✅ | ✅ 자동변환 | ✅ 자동변환 | ✅ 자동변환 | ✅ 자동변환 |
+| 28개 에이전트 (오케스트레이터 1 + 전문 27) | ✅ | ✅ 자동변환 | ✅ 자동변환 | ✅ 자동변환 | ✅ 자동변환 |
 | 113개 스킬 (SKILL.md) | ✅ | ✅ | ✅ | ✅ | ✅ |
-| 슬래시 커맨드 | ✅ 75개 | ✅ TOML | → Workflows | → Prompts | → Workflows |
+| 슬래시 커맨드 | ✅ 78개 | ✅ TOML | → Workflows | → Prompts | → Workflows |
 | Hooks 자동작동 | ✅ 15이벤트 | ✅ 동일패턴 | ⚠️ 제한적 | ❌ | ✅ Agent Manager |
 | 인지 라우터 (System 1/2) | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 자가학습 (RLVR 신호) | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -1479,7 +1479,7 @@ orchestrator는 **코드를 직접 작성하지 않습니다**. 팀을 구성하
 
 ## 훅 시스템
 
-15개 이벤트에 24개 훅이 등록되어 있습니다.
+15개 이벤트에 25개 훅이 등록되어 있습니다.
 
 ### 이벤트별 훅
 
@@ -1575,8 +1575,8 @@ plugins/artibot/
 ├── hooks/
 │   └── hooks.json               # 훅 이벤트 매핑
 ├── scripts/
-│   ├── hooks/                   # 65개 훅 스크립트 파일 (.js 59 + .mjs 6, ESM, file-lock 포함)
-│   ├── ci/                      # 6개 CI 검증 스크립트
+│   ├── hooks/                   # 68개 훅 스크립트 파일 (.js 62 + .mjs 6, ESM, file-lock 포함)
+│   ├── ci/                      # 20개 CI 검증 스크립트 (.js 18 + .mjs 2)
 │   ├── evals/                   # 런타임 eval 스위트
 │   └── utils/
 ├── lib/                         # 79개 모듈

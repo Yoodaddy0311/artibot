@@ -23,7 +23,13 @@
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { CLAIM_PATTERNS, collectActuals, PLUGIN_ROOT, REPO_ROOT } from './readme-claims-registry.js';
+import {
+  CLAIM_PATTERNS,
+  collectActuals,
+  PLUGIN_ROOT,
+  REPO_ROOT,
+  splitFrozenHistory,
+} from './readme-claims-registry.js';
 
 // Files scanned for count claims. README badges/prose + the plugin CLAUDE.md
 // (whose Stack line carries skills/commands/agents counts that were previously
@@ -43,9 +49,22 @@ const GREEN = '\x1b[32m';
 const YELLOW = '\x1b[33m';
 const NC = '\x1b[0m';
 
-function scanFile(file, actuals) {
+/**
+ * Scan one file for count claims that disagree with `actuals`.
+ *
+ * Exported so the gate's own decision logic is testable against fixture files
+ * (a pattern-level test would only prove the regex matches, not that a wrong
+ * count actually produces a finding, nor that frozen history is skipped).
+ *
+ * @param {string} file - Absolute path; a missing file yields [].
+ * @param {Record<string, number>} actuals - Counts from collectActuals().
+ * @returns {Array<{file:string,label:string,claimed:number,actual:number,snippet:string,ok?:boolean}>}
+ */
+export function scanFile(file, actuals) {
   if (!existsSync(file)) return [];
-  const content = readFileSync(file, 'utf-8');
+  // Only the live region is claim-checked; release notes record what was true
+  // at that version and must stay frozen (see splitFrozenHistory).
+  const { scanned: content } = splitFrozenHistory(readFileSync(file, 'utf-8'));
   const findings = [];
 
   for (const { key, regex, label } of CLAIM_PATTERNS) {
