@@ -35,6 +35,7 @@ import {
   buildRecoveryNote,
   detectInterruptedPhase,
 } from '../../lib/autopilot/_engine-helpers.js';
+import { reconcileAttemptOnResume } from '../../lib/autopilot/phase-attempt.js';
 import { deleteSession, loadSession } from '../../lib/autopilot/session-store.js';
 import { getEventsPath } from '../../lib/autopilot/telemetry.js';
 import { readEvents } from '../../lib/autopilot/telemetry.js';
@@ -144,6 +145,56 @@ describe('crash recovery — real session, real NDJSON, real process death', () 
     expect(note).toContain('이전 세션');
     expect(note).toContain('EXECUTE');
     expect(note).toContain('재진입');
+  });
+
+  it('detects a crash between EXECUTE delegation and its acknowledgement', () => {
+    // ADR-005 stage 2's existence proof. This case was UNDETECTABLE by stage 1
+    // on principle, not by oversight: `runPhase2Execute` used to emit
+    // `phase-end` at delegation time, so by the moment the real EXECUTE work
+    // began the NDJSON log already showed a cleanly paired phase. Pairing
+    // cannot see a crash that happens after the pair is complete.
+    //
+    // The durable attempt is what closes it: the child hands work out (which
+    // now records an open attempt instead of a phase-end) and dies before any
+    // result comes back — exactly the sequence a real mid-EXECUTE crash
+    // produces.
+    const sessionId = `attempt-smoke-${process.pid}-${Date.now()}`;
+    created.add(sessionId);
+
+    const child = runChild(`
+        const { startAutopilot, runPhase1Plan, runPhase2Execute } = await import('./lib/autopilot/engine.js');
+        const { loadSession } = await import('./lib/autopilot/session-store.js');
+        await startAutopilot({
+          task: 'attempt crash smoke',
+          mode: 'default',
+          options: { keepAwake: false, tui: false },
+          sessionId: ${JSON.stringify(sessionId)},
+        });
+        const state = loadSession(${JSON.stringify(sessionId)});
+        runPhase1Plan(state);
+        runPhase2Execute(state);
+        // No recordPhaseResult: the team never reported back.
+        process.kill(process.pid, 'SIGKILL');
+      `);
+    expect(child.status === null || child.status !== 0).toBe(true);
+
+    // Precondition that makes this test meaningful: the log really does NOT
+    // look interrupted to stage-1 pairing. If a phase-end for EXECUTE were
+    // still written here, this test would pass for the wrong reason.
+    const phaseEvents = readEvents(sessionId)
+      .filter((e) => e.type === 'phase-start' || e.type === 'phase-end')
+      .map((e) => `${e.type}:${e.phase}`);
+    expect(phaseEvents).toContain('phase-start:EXECUTE');
+    expect(phaseEvents).not.toContain('phase-end:EXECUTE');
+
+    // The durable record survived the kill, unacknowledged.
+    const state = loadSession(sessionId);
+    expect(state.activePhaseAttempt).toMatchObject({
+      phase: 'EXECUTE',
+      status: 'started',
+    });
+    expect(reconcileAttemptOnResume(state)).toMatchObject({ action: 'pause' });
+    expect(detectInterruptedPhase(state).interrupted).toBe(true);
   });
 
   it('reports no interruption for a session whose phases all closed', () => {

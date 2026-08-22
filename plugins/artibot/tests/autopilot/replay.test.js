@@ -111,6 +111,42 @@ describe('summarizeSession — bottleneck detection', () => {
   });
 });
 
+describe('summarizeSession — unterminated windows', () => {
+  it('marks an unclosed phase and keeps it out of the bottleneck ranking', () => {
+    // The shape a crashed-or-stalled EXECUTE leaves behind under ADR-005
+    // stage 2: `phase-start` recorded, no `phase-end` until the result is
+    // acknowledged. Its first and last events are the same instant, so its
+    // computed duration is 0 — and a measured 9s phase must not be reported
+    // as the bottleneck relative to a phase that never finished at all.
+    const id = uniqueSessionId('unterminated');
+    const t0 = Date.parse('2026-05-17T00:00:00.000Z');
+    appendEvent(id, { ts: new Date(t0).toISOString(), phase: 'PLAN', type: 'phase-start', level: 'info', message: 'p' });
+    appendEvent(id, { ts: new Date(t0 + 9000).toISOString(), phase: 'PLAN', type: 'phase-end', level: 'info', message: 'p-end' });
+    appendEvent(id, { ts: new Date(t0 + 9000).toISOString(), phase: 'EXECUTE', type: 'phase-start', level: 'info', message: 'e' });
+
+    const summary = summarizeSession(id);
+    const execute = summary.phases.find((p) => p.phase === 'EXECUTE');
+    const plan = summary.phases.find((p) => p.phase === 'PLAN');
+
+    expect(execute.unterminated).toBe(true);
+    expect(execute.endedAt).toBeNull();
+    expect(execute.bottleneck).toBe(false);
+    expect(plan.unterminated).toBe(false);
+    expect(summary.topBottleneck).toBe('PLAN');
+  });
+
+  it('renders an unterminated window as 진행중 rather than 0ms', () => {
+    const id = uniqueSessionId('unterminated-render');
+    const t0 = Date.parse('2026-05-17T00:00:00.000Z');
+    appendEvent(id, { ts: new Date(t0).toISOString(), phase: 'EXECUTE', type: 'phase-start', level: 'info', message: 'e' });
+
+    const table = renderTimelineTable(summarizeSession(id));
+    // `0ms` reads as "instant", the opposite of "never reported completion".
+    expect(table).toContain('진행중');
+    expect(table).not.toMatch(/\|\s*0ms\s*\|/);
+  });
+});
+
 describe('summarizeSession — retry counting', () => {
   it('counts both type=retry and warn+message containing "retry"', () => {
     const id = uniqueSessionId('retry');

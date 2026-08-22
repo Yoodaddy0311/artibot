@@ -148,12 +148,13 @@ function groupByPhase(events) {
     const phase = ev.phase || 'UNKNOWN';
     const isStart = ev.type === 'phase-start';
     if (!current || current.phase !== phase || isStart) {
-      current = { phase, events: [] };
+      current = { phase, events: [], opened: isStart, closed: false };
       groups.push(current);
     }
     current.events.push(ev);
     if (ev.type === 'phase-end') {
       // close the window so subsequent same-phase events start a new group
+      current.closed = true;
       current = null;
     }
   }
@@ -182,11 +183,19 @@ function buildPhaseEntry(group) {
     if (ev.level === 'error') errors += 1;
     if (isRetry(ev)) retries += 1;
   }
+  // A window opened by `phase-start` and never closed is still running (or the
+  // process died in it). Its "duration" is the gap between its own first and
+  // last event, which for a hand-off phase like EXECUTE is ~0 — the real work
+  // happens after the last event this session recorded. Reporting that 0 as a
+  // measured duration is what let a stalled EXECUTE lose the bottleneck
+  // ranking to a phase that merely took longer to *log*.
+  const unterminated = group.opened === true && group.closed !== true;
   return {
     phase: group.phase,
     startedAt: typeof first?.ts === 'string' ? first.ts : null,
-    endedAt: typeof last?.ts === 'string' ? last.ts : null,
+    endedAt: unterminated ? null : (typeof last?.ts === 'string' ? last.ts : null),
     durationMs,
+    unterminated,
     events: evs.length,
     warnings,
     errors,
@@ -244,6 +253,10 @@ export function summarizeSession(sessionId) {
   let topPhase = null;
   let topDuration = 0;
   for (const p of phases) {
+    // Unterminated windows carry no measured duration, so they take no part in
+    // the bottleneck ranking. Including them let a 0ms stalled phase win or
+    // lose the comparison on a number that was never a measurement.
+    if (p.unterminated) continue;
     if (totalDurationMs > 0
       && p.durationMs / totalDurationMs >= BOTTLENECK_THRESHOLD) {
       p.bottleneck = true;
@@ -279,7 +292,10 @@ export function renderTimelineTable(summary) {
   const sep = '|---|---|---|---|---|---|---|---|';
   const rows = phases.map((p) => {
     const flag = p.bottleneck ? '⚠' : '-';
-    return `| ${p.phase} | ${fmtTime(p.startedAt)} | ${fmtDuration(p.durationMs)} | `
+    // `진행중`, not `0ms`: the phase never reported completion, so no duration
+    // was measured. Printing 0ms reads as "instant", the opposite of the truth.
+    const duration = p.unterminated ? '진행중' : fmtDuration(p.durationMs);
+    return `| ${p.phase} | ${fmtTime(p.startedAt)} | ${duration} | `
       + `${p.events} | ${p.warnings} | ${p.errors} | ${p.retries} | ${flag} |`;
   });
   const total = s.totalDurationMs || 0;

@@ -20,6 +20,7 @@ import {
   startAutopilot,
 } from '../../lib/autopilot/index.js';
 import { planFastExecution, resolveFastCpuCount } from '../../lib/autopilot/fast-execution.js';
+import { recordPhaseResult } from '../../lib/autopilot/engine-state.js';
 import { deleteSession, loadSession, saveSession } from '../../lib/autopilot/session-store.js';
 
 function gitAvailable() {
@@ -516,6 +517,11 @@ describe('runPhase2Execute — runner branching (ADR-003 Stage 1)', () => {
     const state = loadSession(r.sessionId);
     runPhase1Plan(state);
     runPhase2Execute(state);
+    // Acknowledge the EXECUTE hand-off before pausing. Without this the
+    // session is "work handed out, never reported back" and resume correctly
+    // PAUSEs on the outstanding attempt (phase-attempt.js) — which would make
+    // this test measure attempt recovery instead of fast-snapshot reuse.
+    recordPhaseResult(loadSession(r.sessionId), { phase: 'EXECUTE', status: 'done' });
 
     const paused = loadSession(r.sessionId);
     paused.phase = 'PAUSED';
@@ -536,6 +542,144 @@ describe('runPhase2Execute — runner branching (ADR-003 Stage 1)', () => {
     expect(resumed.phase).toBe('EXECUTE');
     expect(resumed.instruction.fast).toMatchObject({ enabled: true, plannedParallelism: 2 });
     expect(persisted.fastProfile).toMatchObject({ enabled: true, plannedParallelism: 2 });
+  });
+
+  it('should PAUSE a resume whose EXECUTE hand-off was never acknowledged', async () => {
+    const r = await start({
+      task: 'runner test unacked execute',
+      mode: 'default',
+      options: { cpuCount: 2 },
+      sessionId: uniqueId('unacked'),
+    });
+    track(r.sessionId);
+    const state = loadSession(r.sessionId);
+    runPhase1Plan(state);
+    runPhase2Execute(state);
+    // Deliberately NO recordPhaseResult — this is the crash shape: work was
+    // handed to a team and the process died before any result came back.
+
+    const handed = loadSession(r.sessionId);
+    expect(handed.activePhaseAttempt).toMatchObject({ phase: 'EXECUTE', status: 'started' });
+
+    const resumed = await resumeAutopilot(r.sessionId);
+    expect(resumed.status).toBe('paused');
+    expect(resumed.phase).toBe('EXECUTE');
+    expect(resumed.instruction).toMatchObject({
+      type: 'pause',
+      reason: 'unacknowledged-attempt',
+      attemptId: handed.activePhaseAttempt.attemptId,
+    });
+    // Korean recovery note, and it must say we are NOT redoing the work.
+    expect(resumed.recoveryNote).toContain('EXECUTE');
+    expect(resumed.recoveryNote).toContain('자동 재실행하지 않습니다');
+    // It must not have silently started EXECUTE again.
+    expect(resumed.instruction.type).not.toBe('team-create');
+  });
+
+  it('should produce no recovery note when the session completed its phase normally', async () => {
+    // Negative control for the test above, and the guard against a permanent
+    // recovery loop: acknowledging the hand-off must fully clear the slot, so
+    // a healthy session resumes with zero notes no matter how often it pauses.
+    const r = await start({
+      task: 'runner test acked execute',
+      mode: 'default',
+      options: { cpuCount: 2 },
+      sessionId: uniqueId('acked'),
+    });
+    track(r.sessionId);
+    const state = loadSession(r.sessionId);
+    runPhase1Plan(state);
+    runPhase2Execute(state);
+    recordPhaseResult(loadSession(r.sessionId), { phase: 'EXECUTE', status: 'done' });
+
+    expect(loadSession(r.sessionId).activePhaseAttempt).toBeNull();
+
+    const resumed = await resumeAutopilot(r.sessionId);
+    expect(resumed.status).not.toBe('paused');
+    expect(resumed.recoveryNote).toBeUndefined();
+
+    // Twice: an ACK that only half-cleared would resurface on the second pass.
+    const again = await resumeAutopilot(r.sessionId);
+    expect(again.recoveryNote).toBeUndefined();
+  });
+
+  it('should resume normally when the operator acknowledges the attempt by argument', async () => {
+    const r = await start({
+      task: 'runner test operator ack',
+      mode: 'default',
+      options: { cpuCount: 2 },
+      sessionId: uniqueId('op-ack'),
+    });
+    track(r.sessionId);
+    const state = loadSession(r.sessionId);
+    runPhase1Plan(state);
+    runPhase2Execute(state);
+    expect(loadSession(r.sessionId).activePhaseAttempt).toMatchObject({ phase: 'EXECUTE' });
+
+    const resumed = await resumeAutopilot(r.sessionId, { ackOutstandingAttempt: true });
+
+    // Not paused — the operator asserted the handed-out work landed.
+    expect(resumed.status).not.toBe('paused');
+    expect(resumed.instruction?.reason).not.toBe('unacknowledged-attempt');
+    // And the slot is genuinely cleared, so the escape hatch is one-shot
+    // rather than a mode: the next resume needs no argument and pauses no more.
+    expect(loadSession(r.sessionId).activePhaseAttempt).toBeNull();
+    const again = await resumeAutopilot(r.sessionId);
+    expect(again.status).not.toBe('paused');
+    expect(again.recoveryNote).toBeUndefined();
+  });
+
+  it('should still PAUSE when the acknowledgement is absent from the call', async () => {
+    // Control for the test above: same session shape, argument omitted.
+    const r = await start({
+      task: 'runner test no ack arg',
+      mode: 'default',
+      options: { cpuCount: 2 },
+      sessionId: uniqueId('no-ack-arg'),
+    });
+    track(r.sessionId);
+    const state = loadSession(r.sessionId);
+    runPhase1Plan(state);
+    runPhase2Execute(state);
+
+    const resumed = await resumeAutopilot(r.sessionId);
+    expect(resumed.status).toBe('paused');
+    expect(resumed.instruction.reason).toBe('unacknowledged-attempt');
+  });
+
+  it('should ignore an acknowledgement planted in config or env (call-arg only)', async () => {
+    // Negative control on the escape hatch itself. Same reasoning as the
+    // consent override: this argument asserts that a human just looked at the
+    // tree. A config key or env var would make that assertion once, by nobody,
+    // and keep making it forever — permanently disabling the guard.
+    const r = await start({
+      task: 'runner test planted ack',
+      mode: 'default',
+      options: { cpuCount: 2, ackOutstandingAttempt: true },
+      sessionId: uniqueId('planted-ack'),
+    });
+    track(r.sessionId);
+    const state = loadSession(r.sessionId);
+    runPhase1Plan(state);
+    runPhase2Execute(state);
+
+    // Planted in session options...
+    const planted = loadSession(r.sessionId);
+    planted.ackOutstandingAttempt = true;
+    planted.config = { autopilot: { ackOutstandingAttempt: true } };
+    saveSession(planted);
+    // ...and in the environment.
+    const priorEnv = process.env.ARTIBOT_ACK_OUTSTANDING_ATTEMPT;
+    process.env.ARTIBOT_ACK_OUTSTANDING_ATTEMPT = '1';
+    try {
+      const resumed = await resumeAutopilot(r.sessionId);
+      expect(resumed.status).toBe('paused');
+      expect(resumed.instruction.reason).toBe('unacknowledged-attempt');
+      expect(loadSession(r.sessionId).activePhaseAttempt).toMatchObject({ status: 'started' });
+    } finally {
+      if (priorEnv === undefined) delete process.env.ARTIBOT_ACK_OUTSTANDING_ATTEMPT;
+      else process.env.ARTIBOT_ACK_OUTSTANDING_ATTEMPT = priorEnv;
+    }
   });
 
   it('should discard a malformed fast snapshot and safely replan from metadata', () => {

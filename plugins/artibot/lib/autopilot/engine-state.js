@@ -8,8 +8,9 @@
  * @module lib/autopilot/engine-state
  */
 
-import { persist, recordPhase } from './_engine-helpers.js';
+import { persist, recordPhase, tick } from './_engine-helpers.js';
 import { appendLesson } from './memory.js';
+import { ackPhaseAttempt } from './phase-attempt.js';
 
 /**
  * Best-effort lesson append. Skips when state.featureKey is unset (Phase 0
@@ -28,6 +29,27 @@ export function safeAppendLesson(state, payload) {
 
 /**
  * Append a labeled phase result to state.phases. Surfaced for commands/autopilot.md.
+ *
+ * **This is also the ACK point for durable phase attempts** (see
+ * `phase-attempt.js`). It was extended rather than joined by a separate
+ * `ackPhaseAttempt()` export, deliberately:
+ *
+ *   - The driver already calls exactly this function at phase completion
+ *     (commands/autopilot.md § "Step 3 — Phase Execution Loop"; cited by
+ *     heading because step numbers and line numbers both drift). A second
+ *     required call would mean a
+ *     driver that forgets it leaves the attempt open forever, and every later
+ *     resume would pause a perfectly healthy session — a fail-stuck worse than
+ *     the bug being fixed.
+ *   - "This phase finished" is one decision. Splitting it across two entry
+ *     points splits a source of truth, which is the robustness veto.
+ *
+ * The signature and return value are unchanged, and the ACK is a no-op when no
+ * matching attempt is open, so existing callers are unaffected. The paired
+ * `phase-end` telemetry is emitted here — for armed phases the engine no
+ * longer writes it at delegation time, because that is precisely what made a
+ * mid-EXECUTE crash look like a cleanly closed phase.
+ *
  * @param {object} state
  * @param {{ phase: string, status: string, [k: string]: any }} payload
  * @returns {object} mutated state
@@ -36,6 +58,16 @@ export function recordPhaseResult(state, payload = {}) {
   if (!state) throw new TypeError('state required');
   const { phase, status, ...rest } = payload;
   recordPhase(state, { name: phase, status, ...rest });
+  const acked = ackPhaseAttempt(state, { phase, status });
+  if (acked) {
+    tick(state.sessionId, {
+      phase,
+      type: 'phase-end',
+      level: 'info',
+      message: `Phase ${phase} 완료 확인 (attempt ${acked.attemptId})`,
+      data: { attemptId: acked.attemptId, resultStatus: acked.resultStatus },
+    });
+  }
   if (phase === 'IMPROVE') {
     const improvements = Array.isArray(rest.improvements) ? rest.improvements : [];
     for (const item of improvements) {

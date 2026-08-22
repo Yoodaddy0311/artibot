@@ -267,6 +267,10 @@ if (pfInstr?.suppress) { /* warnings: state.preflightWarnings에 누적 + 계속
 
 각 Phase 완료 시 `engine.recordPhaseResult(state, { phase, status, ...result })`로 session-store 업데이트 (1번 인자는 `loadSession(sessionId)`로 얻은 **state 객체**, 2번 인자에 `phase`/`status` 포함 payload).
 
+> **EXECUTE 는 이 호출이 필수다 (ADR-005 2단).** EXECUTE 위임 시 엔진은 `state.activePhaseAttempt` 를 durable 하게 남기고 `phase-end` 를 기록하지 않는다 — 팀이 실제 작업을 끝냈는지는 엔진이 관측할 수 없기 때문이다. `recordPhaseResult(state, { phase: 'EXECUTE', ... })` 가 그 attempt 를 ACK 하고 `phase-end` 를 기록한다. **이 호출을 빠뜨리면 다음 resume 이 "위임 후 미보고" 로 판단해 PAUSE 한다** (재실행은 허용목록 phase 에만 자동 적용되고 EXECUTE 는 목록 밖 — 이미 반영된 작업의 중복 커밋을 막기 위함). 반대로 정상 완주 세션은 ACK 으로 슬롯이 비워지므로 resume 을 반복해도 recovery note 가 생기지 않는다.
+>
+> **PAUSE 된 뒤 빠져나오는 길은 셋이다** (recovery note 가 그대로 안내한다): ① 결과를 기록할 수 있으면 `recordPhaseResult(state, { phase: 'EXECUTE', status: 'done' })` ② 작업이 반영된 것은 확인했으나 결과를 기록할 수 없으면 `engine.resumeAutopilot(sessionId, { ackOutstandingAttempt: true })` — **호출 인자로만 받는다.** config·env 에 심어도 무시된다(`consentOverride` 와 같은 이유: "사람이 방금 트리를 확인했다"는 선언은 1회성이어야 하며, 설정에 박히면 아무도 확인하지 않은 채 영구히 참이 된다) ③ 판단이 안 서면 `/autopilot:abort` 로 종료 후 새로 시작.
+
 **자동 통합 (default 모드 기본 ON)**:
 - **★ 진행률 렌더 (MANDATORY — 채팅에 눈에 띄게)**: 각 Phase 완료 직후, 리더는 **대화에 진행률 박스를 직접(인라인) 출력**한다. PRD 작업이 "지금 몇 %"인지 한눈에 보이게 하는 핵심 UX다. `commands/team.md`의 "Phase 3.5 진행률 렌더링" 박스 템플릿을 그대로 쓰되 done=방금 끝난 phase index+1, **total은 모드에 따라 7(legacy: EVALUATE 생략) 또는 EVALUATE 포함(goal-driven)**, phaseLabel=Phase명. legacy면 phase 순서 INTAKE/PLAN/EXECUTE/CROSS_CHECK/VERIFY/IMPROVE/REPORT(=7), goal-driven이면 IMPROVE 뒤 EVALUATE가 추가된다. 인라인 출력이라 스크립트·환경변수 의존이 없어 **모든 컴퓨터에서 작동**한다. (선택: `node "$HOME/.claude/artibot/scripts/render-progress.js" <done> 7 "<Phase>"` 헬퍼로 자동화 가능 — 실패 시 인라인 폴백. `${CLAUDE_PLUGIN_ROOT}`는 쓰지 마라.) hook/TUI가 아니라 리더 채팅 출력이라 항상 보인다. 생략 금지.
 - 각 Phase 완료 직후 `engine.notePhaseCost(state, phase, { tokensIn, tokensOut, costUsd, model })` 호출 — Phase별 토큰/비용을 telemetry + state.usage에 기록

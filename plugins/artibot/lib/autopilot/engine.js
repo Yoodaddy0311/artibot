@@ -30,11 +30,12 @@ import {
   attemptCreateWorktree,
   reapSessionArtifacts,
 } from './engine-cleanup.js';
-import { safeAppendLesson } from './engine-state.js';
+import { recordPhaseResult, safeAppendLesson } from './engine-state.js';
 import { buildBlockedResult, resolveAutopilotConsent } from './consent-gate.js';
 import { acquireLock, isLocked, releaseLock } from './lock.js';
 import { loadAllowList } from './mcp-verifier.js';
 import { buildFastTeamInstruction, demoteFastToStandard, loadFastProfileConfig, planFastExecution, retainFastIntegrationWorktree } from './fast-execution.js';
+import { openPhaseAttempt, reconcileAttemptOnResume } from './phase-attempt.js';
 /**
  * Phase names in canonical order.
  *
@@ -357,14 +358,22 @@ export function runPhase2Execute(state) {
   }
 
   recordPhase(state, { name: 'EXECUTE', status: 'queued' });
+  // Durable attempt BEFORE the instruction leaves this function: from here on
+  // the work is owned by a team the engine cannot observe, so the only honest
+  // record is "handed out, not yet acknowledged". `phase-end` is deliberately
+  // NOT emitted here any more — writing it at delegation time is what made a
+  // crash during real EXECUTE work look like a cleanly closed phase to
+  // `replay.js#findUnterminatedPhases`. `recordPhaseResult` emits it on ACK.
+  const attempt = openPhaseAttempt(state, { phase: 'EXECUTE', runner });
   persist(state);
   tick(state.sessionId, {
     phase: 'EXECUTE',
-    type: 'phase-end',
+    type: 'attempt-started',
     level: 'info',
     message: runner === 'dynamic-run'
-      ? 'Phase 2 EXECUTE 위임 완료 (runner=dynamic-run)'
-      : 'Phase 2 EXECUTE 위임 완료',
+      ? 'Phase 2 EXECUTE 위임 (runner=dynamic-run) — 완료 보고 대기'
+      : 'Phase 2 EXECUTE 위임 — 완료 보고 대기',
+    data: { attemptId: attempt.attemptId, checkpointSha: attempt.checkpointSha },
   });
   notePhaseProgress(state, 'PLAN', 'EXECUTE');
   const instruction = runner === 'dynamic-run' ? buildDynamicRunInstruction(state) : fast?.enabled
@@ -684,7 +693,10 @@ function nextPhaseAfter(current) {
  *   ADR-004 execution gate; **call argument only**.
  * @returns {Promise<{ phase: string, status: string, instruction?: object, blocked?: boolean }>}
  */
-export async function resumeAutopilot(sessionId, { consentOverride = false } = {}) {
+export async function resumeAutopilot(
+  sessionId,
+  { consentOverride = false, ackOutstandingAttempt = false } = {},
+) {
   if (!sessionId) throw new TypeError('sessionId required');
   const state = loadSession(sessionId);
   if (!state) throw new Error(`session not found: ${sessionId}`);
@@ -735,6 +747,12 @@ export async function resumeAutopilot(sessionId, { consentOverride = false } = {
     }
   }
 
+  // Outstanding attempt reconciliation. Runs before any phase runner is
+  // chosen, because the question "was the previous hand-off ever acknowledged"
+  // has to be answered before deciding what to do next.
+  const pauseResult = settleOutstandingAttempt(state, sessionId, ackOutstandingAttempt);
+  if (pauseResult) return pauseResult;
+
   const target = state.phase === 'PAUSED'
     ? state.lastPhase || 'PLAN'
     : nextPhaseAfter(state.phase) || state.phase;
@@ -747,6 +765,89 @@ export async function resumeAutopilot(sessionId, { consentOverride = false } = {
     phase: state.phase,
     status: instruction?.type === 'pause' ? 'paused' : 'ok',
     instruction,
+  };
+}
+
+/**
+ * Reconcile an outstanding phase attempt at resume time.
+ *
+ * Extracted from `resumeAutopilot` to keep that function under the complexity
+ * gate; it owns one decision and returns a paused result only when resume must
+ * stop.
+ *
+ * @param {object} state - Live session state (mutated).
+ * @param {string} sessionId
+ * @param {boolean} ackOutstandingAttempt - Operator acknowledgement. **Call
+ *   argument only** — never sourced from config or env. It asserts that a
+ *   human just looked at the tree and decided the handed-out work landed;
+ *   a persisted setting would make that assertion once, by nobody, and keep
+ *   making it forever. `consentOverride` is call-arg-only for the same reason
+ *   (see consent-gate.js).
+ * @returns {object|null} A paused resume result, or null to continue.
+ */
+function settleOutstandingAttempt(state, sessionId, ackOutstandingAttempt) {
+  const reconciled = reconcileAttemptOnResume(state);
+  if (reconciled.action === 'none') return null;
+
+  if (reconciled.action === 'rerun') {
+    tick(sessionId, {
+      phase: reconciled.attempt.phase,
+      type: 'attempt-rerun',
+      level: 'warn',
+      message: reconciled.note,
+      data: { attemptId: reconciled.attempt.attemptId },
+    });
+    // Clear the slot so the re-run opens its own attempt rather than
+    // inheriting a stale one — otherwise a repeated crash would loop forever.
+    state.activePhaseAttempt = null;
+    persist(state);
+    return null;
+  }
+
+  if (ackOutstandingAttempt === true) {
+    // Operator escape hatch. A session whose EXECUTE result never came back
+    // would otherwise pause on every resume forever: the pause is correct, but
+    // a policy with no exit is a trap. Routed through recordPhaseResult so the
+    // ACK keeps one owner — the slot clears, `phase-end` is emitted, and
+    // state.phases records who did it.
+    recordPhaseResult(state, {
+      phase: reconciled.attempt.phase,
+      status: 'acknowledged-on-resume',
+      attemptId: reconciled.attempt.attemptId,
+      ackedBy: 'resume-operator',
+    });
+    tick(sessionId, {
+      phase: reconciled.attempt.phase,
+      type: 'attempt-acknowledged',
+      level: 'warn',
+      message: `${reconciled.attempt.phase} 미결 attempt 를 운영자 승인으로 ACK 처리하고 resume 을 계속합니다.`,
+      data: { attemptId: reconciled.attempt.attemptId, ackedBy: 'resume-operator' },
+    });
+    return null;
+  }
+
+  state.phase = 'PAUSED';
+  state.lastPhase = reconciled.attempt.phase;
+  persist(state);
+  tick(sessionId, {
+    phase: reconciled.attempt.phase,
+    type: 'pause',
+    level: 'warn',
+    message: reconciled.note,
+    data: { attemptId: reconciled.attempt.attemptId, reason: 'unacknowledged-attempt' },
+  });
+  return {
+    phase: reconciled.attempt.phase,
+    status: 'paused',
+    recoveryNote: reconciled.note,
+    instruction: {
+      type: 'pause',
+      reason: 'unacknowledged-attempt',
+      phase: reconciled.attempt.phase,
+      attemptId: reconciled.attempt.attemptId,
+      checkpointSha: reconciled.attempt.checkpointSha,
+      note: reconciled.note,
+    },
   };
 }
 
