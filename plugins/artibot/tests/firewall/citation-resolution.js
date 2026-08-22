@@ -298,10 +298,16 @@ export function checkDocument(markdown, docRel, fsFacade, rootsCtx) {
 }
 
 /**
- * 래칫 판정 — 선례(`lint-skill-descriptions.js#runRatchet`)와 달리 **축소를
- * 강제한다**: 베이스라인 항목이 지금 해소되면 그것도 FAIL 이다 ("빼라").
- * 축소 미강제 래칫은 화석화된다 (2026-08-17 lens-arch 실측 — fixed 는
- * 문구만 출력되고 pass 식에 없었다).
+ * 래칫 판정 — **축소를 강제한다**: 베이스라인 항목이 지금 해소되면 그것도
+ * FAIL 이다 ("빼라"). 축소 미강제 래칫은 화석화된다 (2026-08-17 lens-arch 실측
+ * — 당시 `lint-skill-descriptions.js` 는 fixed 를 문구로만 출력하고 pass 식에
+ * 넣지 않았다).
+ *
+ * 2026-08-22: 그 선례도 축소강제로 전환됐다 —
+ * `lint-skill-descriptions.js#evaluateGates`. 단 위치가 다르다: 저쪽은
+ * `runRatchet().pass` 를 "신규 위반 없음"으로 남겨두고 축소 판정을
+ * `evaluateGates` 가 맡고, 이쪽은 `pass` 하나에 두 방향을 합친다. 두 파일을
+ * 비교할 때 `pass` 의 의미가 같다고 가정하지 말 것.
  *
  * @param {string[]} currentViolationIdentities
  * @param {string[]} baseline

@@ -56,8 +56,10 @@
  *   skill-lint-baseline.json:     HEAD=0  now=7   removed=0 added=7  addedAllCowork=true
  *   skill-redflags-baseline.json: HEAD=85 now=130 removed=0 added=45 addedAllCowork=true
  *
- * 아래 `베이스라인은 자라기만 한다` 테스트가 이 불변식을 HEAD 대조로 강제한다 —
- * 주석은 썩지만 테스트는 안 썩는다.
+ * 아래 `사라진 항목은 실제로 해소된 것뿐이다` 테스트가 이 불변식을 HEAD 대조로
+ * 강제한다 — 주석은 썩지만 테스트는 안 썩는다. (2026-08-22: 불변식을 "제거 0건"
+ * 에서 "조용한 제거 0건"으로 정밀화 — 축소강제 게이트와의 충돌 해소. 해당
+ * 테스트 위 주석 참조.)
  *
  * ── 이 게이트가 못 보는 것 ──────────────────────────────────────────────────
  *  1. **내용 품질을 보지 않는다.** frontmatter 계약과 줄 수만 본다. 설명이 실제로
@@ -90,12 +92,35 @@ import {
   qualify,
 } from '../../scripts/ci/skill-scan-roots.js';
 import { collectAllSkillSizes, MAX_SKILL_LINES } from '../../scripts/ci/lint-skill-size.js';
-import { lintEveryRoot, readBaseline } from '../../scripts/ci/lint-skill-descriptions.js';
+import {
+  lintDescription,
+  lintEveryRoot,
+  readBaseline,
+  redFlagViolatingSkillNames,
+  violatingSkillNames,
+} from '../../scripts/ci/lint-skill-descriptions.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PLUGIN_ROOT = join(__dirname, '..', '..');
 
 const COWORK = 'artibot-cowork';
+
+/**
+ * 베이스라인에서 사라진 이름 중 **정당하지 않은** 것만 남긴다.
+ *
+ * 정당한 제거 = 그 스킬이 지금 위반하지 않는다(축소강제가 요구하는 화석 청소).
+ * 정당하지 않은 제거 = 아직 위반 중인데 면제가 사라졌다 → 다음 회귀를 못 잡는다.
+ * 판정을 함수로 빼둔 이유는 아래 `게이트 자기검증` 에서 같은 함수로 음성 대조를
+ * 돌리기 위함이다 — 단언 안에 인라인으로 쓰면 자기검증이 동어반복이 된다.
+ *
+ * @param {string[]} headEntries - HEAD 커밋의 베이스라인 항목.
+ * @param {Set<string>} nowEntries - 워킹트리 베이스라인 항목.
+ * @param {Set<string>} currentViolators - 지금 실제로 위반 중인 이름.
+ * @returns {string[]} 조용히 사라진(=부당한) 항목.
+ */
+function illegitimateRemovals(headEntries, nowEntries, currentViolators) {
+  return headEntries.filter((n) => !nowEntries.has(n) && currentViolators.has(n));
+}
 
 describe('cowork is inside the skill/command/agent gates', () => {
   // ── 분모 (양성 대조) ──────────────────────────────────────────────────────
@@ -162,31 +187,50 @@ describe('cowork is inside the skill/command/agent gates', () => {
       },
     );
 
-    // 편입은 베이스라인을 **늘리기만** 해야 한다. cowork 를 더하며 돌린
-    // `--update-baseline` 이 기존 본체 항목을 지웠다면, 그 스킬들의 위반이
-    // 조용히 "고쳐진 것"으로 둔갑하고 다음 회귀를 잡지 못한다.
-    it.each(['skill-lint-baseline.json', 'skill-redflags-baseline.json'])(
-      '%s 은 HEAD 대비 자라기만 한다 (제거 0건)',
-      (file) => {
-        const rel = `plugins/artibot/scripts/ci/${file}`;
-        // 실패를 삼키지 않는다. `git show` 가 죽었을 때 조용히 return 하면 이
-        // 테스트는 통과하면서 아무것도 비교하지 않는다 — 정확히 이 파일이
-        // 막으려는 종류의 공허한 그린이다.
-        const head = JSON.parse(
-          execFileSync('git', ['show', `HEAD:${rel}`], {
-            cwd: join(PLUGIN_ROOT, '..', '..'),
-            encoding: 'utf8',
-            maxBuffer: 1024 * 1024 * 32,
-          }),
-        );
-        expect(Array.isArray(head.skills)).toBe(true);
-        const now = new Set(readBaseline(join(PLUGIN_ROOT, 'scripts', 'ci', file)));
-        const removed = head.skills.filter((n) => !now.has(n));
-        expect(removed).toEqual([]);
-        // 분모: 현재 베이스라인이 HEAD 보다 작아질 수 없다.
-        expect(now.size).toBeGreaterThanOrEqual(head.skills.length);
-      },
-    );
+    // 지켜야 할 것은 "제거 0건"이 아니라 **조용한 제거 0건**이다. cowork 를
+    // 더하며 돌린 `--update-baseline` 이 아직 위반 중인 항목을 지웠다면, 그
+    // 스킬의 위반이 조용히 "고쳐진 것"으로 둔갑하고 다음 회귀를 잡지 못한다.
+    //
+    // 2026-08-22 개정: 원래 이 단언은 **모든** 제거를 금지했다. 같은 날
+    // `lint-skill-descriptions.js#evaluateGates` 에 축소강제가 들어가면서
+    // (베이스라인에 남은 화석 = FAIL, 해소책은 `--update-baseline`), 두 게이트가
+    // 서로 충족 불가가 됐다 — 린터는 "지워라", 이 테스트는 "지우지 마라".
+    // 게이트를 깎는 대신 불변식을 정확히 다시 썼다: 제거는 그 이름이 **지금
+    // 위반하지 않을 때만** 정당하다. 막으려던 공격(위반이 살아있는데 베이스라인이
+    // 날아감 = `check-unused-ratchet` 자기파괴 선례)은 그대로 FAIL 하고,
+    // 정당한 축소만 통과한다.
+    it.each([
+      ['skill-lint-baseline.json', 'desc'],
+      ['skill-redflags-baseline.json', 'redflag'],
+    ])('%s 에서 사라진 항목은 실제로 해소된 것뿐이다 (조용한 제거 0건)', (file, kind) => {
+      const rel = `plugins/artibot/scripts/ci/${file}`;
+      // 실패를 삼키지 않는다. `git show` 가 죽었을 때 조용히 return 하면 이
+      // 테스트는 통과하면서 아무것도 비교하지 않는다 — 정확히 이 파일이
+      // 막으려는 종류의 공허한 그린이다.
+      const head = JSON.parse(
+        execFileSync('git', ['show', `HEAD:${rel}`], {
+          cwd: join(PLUGIN_ROOT, '..', '..'),
+          encoding: 'utf8',
+          maxBuffer: 1024 * 1024 * 32,
+        }),
+      );
+      expect(Array.isArray(head.skills)).toBe(true);
+      const now = new Set(readBaseline(join(PLUGIN_ROOT, 'scripts', 'ci', file)));
+
+      // 분모 먼저. 스캐너가 엉뚱한 곳을 보면 "현재 위반 0건"이 되어 **모든**
+      // 제거가 정당해 보인다 — 이 단언 없이는 아래 검사가 fail-open 한다.
+      const { results, perRoot } = lintEveryRoot();
+      expect(assertEntityFloors('skills', perRoot)).toEqual([]);
+
+      const current = new Set(
+        kind === 'desc' ? violatingSkillNames(results) : redFlagViolatingSkillNames(results),
+      );
+      // 규칙 자기검증: 평가기가 죽으면 위반 0건이 되어 모든 제거가 정당해 보인다.
+      // assertEntityFloors 는 population 만 보므로 이 구멍을 못 막는다.
+      expect(lintDescription('Parses -> renders.').violations.some((v) => v.severity === 'error')).toBe(true);
+      // 지금도 위반 중인데 베이스라인에서 사라진 이름 = 조용한 면제 취소.
+      expect(illegitimateRemovals(head.skills, now, current)).toEqual([]);
+    });
   });
 
   // ── 자기검증 / 음성 대조 ─────────────────────────────────────────────────
@@ -195,6 +239,20 @@ describe('cowork is inside the skill/command/agent gates', () => {
   // 전부 순수 함수 입력으로 한다 (§10.5(a): 동시 편집 트리에서 파일을 변조하면
   // 다른 관측자가 그 창에서 잰 값을 플레이크로 오판한다).
   describe('게이트 자기검증', () => {
+    it('아직 위반 중인 항목이 베이스라인에서 사라지면 FAIL 한다 (음성 대조)', () => {
+      const head = ['still-violating', 'fossil'];
+      const current = new Set(['still-violating']);
+      // 베이스라인 통째 wipe = `check-unused-ratchet` 자기파괴 선례.
+      expect(illegitimateRemovals(head, new Set(), current)).toEqual(['still-violating']);
+    });
+
+    it('해소된 항목의 제거는 통과시킨다 (축소강제와 충돌하지 않는다)', () => {
+      const head = ['still-violating', 'fossil'];
+      const current = new Set(['still-violating']);
+      // 화석만 지운 상태 — 축소강제가 요구하는 바로 그 편집.
+      expect(illegitimateRemovals(head, new Set(['still-violating']), current)).toEqual([]);
+    });
+
     it('루트가 통째로 빠지면 분모 단언이 FAIL 한다', () => {
       const failures = assertEntityFloors('skills', { [PRIMARY_ROOT]: 113 });
       expect(failures.join('\n')).toMatch(/artibot-cowork/);

@@ -25,6 +25,15 @@
  *   - description gate (R1/R2 errors) → `skill-lint-baseline.json`
  *   - Red Flags gate (R4 warns)       → `skill-redflags-baseline.json`
  *
+ * Both gates are enforced in BOTH directions (see evaluateGates):
+ *   - grow  → a skill violating outside the baseline fails CI (new violation),
+ *   - shrink → a baseline entry whose skill no longer violates ALSO fails CI.
+ * A baseline entry that outlived its violation ("fossil") is not cosmetic
+ * debt: it is a live re-entry permit. The name stays excused, so if that same
+ * skill regresses later the ratchet stays silent — the exact regression the
+ * gate exists to catch. Shrink enforcement keeps the baseline monotonically
+ * decreasing, which is the only property that makes a ratchet a ratchet.
+ *
  * Zero external dependencies (node:fs / node:path / node:url only).
  * Never-throw: a skill that fails to parse is reported as a warning and skipped.
  *
@@ -351,6 +360,11 @@ export function violatingSkillNames(results) {
 /**
  * Apply the ratchet gate against a frozen baseline of violating skill names.
  *
+ * `pass` covers the GROW direction only (no violation outside the baseline).
+ * The SHRINK direction — `fixed` must be empty — is decided by
+ * {@link evaluateGates}, which owns the whole CLI verdict; keeping it out of
+ * `pass` preserves the meaning "no NEW violations" for existing callers.
+ *
  * @param {string[]} current - Skill names violating now (error severity).
  * @param {string[]} baseline - Frozen baseline skill names.
  * @returns {{newViolations:string[], stillViolating:string[], fixed:string[],
@@ -363,6 +377,87 @@ export function runRatchet(current, baseline) {
   const stillViolating = current.filter((n) => base.has(n));
   const fixed = baseline.filter((n) => !cur.has(n));
   return { newViolations, stillViolating, fixed, pass: newViolations.length === 0 };
+}
+
+/**
+ * Command that regenerates BOTH baselines. Run from `plugins/artibot/`.
+ * Kept as one exported constant so the failure message and the docs can never
+ * drift from the actual npm script (`package.json#scripts.skill:lint:desc:baseline`).
+ *
+ * @type {string}
+ */
+export const BASELINE_REGEN_CMD = 'npm run skill:lint:desc:baseline';
+
+/**
+ * Build the shrink-direction failure block for one ratchet.
+ *
+ * @param {string[]} fossils - Baseline names whose skill no longer violates.
+ * @param {string} baselineName - Baseline file name, for the operator.
+ * @param {string} what - Human label for what stopped violating.
+ * @returns {string[]} stderr lines (empty when there is nothing to report).
+ */
+function fossilMessages(fossils, baselineName, what) {
+  if (fossils.length === 0) return [];
+  const lines = [
+    `\nFAIL: ${fossils.length} stale entr(y|ies) in ${baselineName} — ${what}:`,
+    ...fossils.map((n) => `  - ${n}`),
+    'A baseline entry that outlived its violation still excuses that skill by name,',
+    'so the same violation could come back unnoticed. The baseline must shrink.',
+    `Regenerate it (from plugins/artibot/):  ${BASELINE_REGEN_CMD}`,
+    `  equivalently:  node scripts/ci/lint-skill-descriptions.js --update-baseline`,
+    `Then commit the updated ${baselineName} alongside your change.`,
+  ];
+  return lines;
+}
+
+/**
+ * Decide the CLI verdict from both ratchets plus the denominator check.
+ *
+ * Pure (no I/O) so the exit-path can be unit-tested without spawning. Floor
+ * failures are counted into `failed` but NOT re-rendered here: main() prints
+ * them earlier, before the `--update-baseline` branch, and duplicating them
+ * would make the operator think there were twice as many.
+ *
+ * @param {{ratchet:{pass:boolean,newViolations:string[],fixed:string[]},
+ *          redFlagRatchet:{pass:boolean,newViolations:string[],fixed:string[]},
+ *          floorFailures?:string[]}} input - Gate inputs.
+ * @returns {{failed:boolean, messages:string[]}} Verdict + stderr lines.
+ */
+export function evaluateGates({ ratchet, redFlagRatchet, floorFailures = [] }) {
+  const descFossils = ratchet.fixed || [];
+  const redFlagFossils = redFlagRatchet.fixed || [];
+  const messages = [];
+
+  if (!ratchet.pass) {
+    messages.push(`\nFAIL: ${ratchet.newViolations.length} NEW description-violating skill(s):`);
+    for (const n of ratchet.newViolations) messages.push(`  - ${n}`);
+    messages.push('Fix the description or justify, then re-run.');
+  }
+  if (!redFlagRatchet.pass) {
+    messages.push(
+      `\nFAIL: ${redFlagRatchet.newViolations.length} NEW/edited skill(s) missing a \`## Red Flags\` section:`
+    );
+    for (const n of redFlagRatchet.newViolations) messages.push(`  - ${n}`);
+    messages.push('Add a `## Red Flags` section to the SKILL.md body, then re-run.');
+  }
+  messages.push(
+    ...fossilMessages(descFossils, 'skill-lint-baseline.json', 'these skills no longer violate R1/R2')
+  );
+  messages.push(
+    ...fossilMessages(
+      redFlagFossils,
+      'skill-redflags-baseline.json',
+      'these skills now have a `## Red Flags` section'
+    )
+  );
+
+  const failed =
+    !ratchet.pass ||
+    !redFlagRatchet.pass ||
+    descFossils.length > 0 ||
+    redFlagFossils.length > 0 ||
+    floorFailures.length > 0;
+  return { failed, messages };
 }
 
 /** Resolve baseline paths (committed) and report path (runtime, gitignored). */
@@ -489,34 +584,16 @@ function main() {
   const redFlagRatchet = runRatchet(redFlagCurrent, redFlagBaseline);
   writeReport(reportFile, { results, current, baseline, ratchet, redFlagCurrent, redFlagBaseline, redFlagRatchet });
 
-  if (ratchet.fixed.length > 0) {
-    console.log(
-      `\nFixed descriptions (remove from baseline): ${ratchet.fixed.join(', ')} — run with --update-baseline.`
-    );
-  }
-  if (redFlagRatchet.fixed.length > 0) {
-    console.log(
-      `\nAdded Red Flags (remove from baseline): ${redFlagRatchet.fixed.join(', ')} — run with --update-baseline.`
-    );
-  }
-
-  const failed = !ratchet.pass || !redFlagRatchet.pass || floorFailures.length > 0;
-  if (!ratchet.pass) {
-    console.error(`\nFAIL: ${ratchet.newViolations.length} NEW description-violating skill(s):`);
-    for (const n of ratchet.newViolations) console.error(`  - ${n}`);
-    console.error('Fix the description or justify, then re-run.');
-  }
-  if (!redFlagRatchet.pass) {
-    console.error(`\nFAIL: ${redFlagRatchet.newViolations.length} NEW/edited skill(s) missing a \`## Red Flags\` section:`);
-    for (const n of redFlagRatchet.newViolations) console.error(`  - ${n}`);
-    console.error('Add a `## Red Flags` section to the SKILL.md body, then re-run.');
-  }
+  const { failed, messages } = evaluateGates({ ratchet, redFlagRatchet, floorFailures });
+  for (const line of messages) console.error(line);
   if (failed) process.exit(1);
 
+  // Both fixed[] counts are structurally 0 here (shrink enforcement exits above),
+  // so they are not printed — a "0 fixed" column would only look like a metric.
   console.log(
-    `\nPASS: no new violations ` +
-      `(desc: ${ratchet.stillViolating.length} baselined/${ratchet.fixed.length} fixed · ` +
-      `Red Flags: ${redFlagRatchet.stillViolating.length} baselined/${redFlagRatchet.fixed.length} added).`
+    `\nPASS: no new violations, no stale baseline entries ` +
+      `(desc: ${ratchet.stillViolating.length} baselined · ` +
+      `Red Flags: ${redFlagRatchet.stillViolating.length} baselined).`
   );
   process.exit(0);
 }

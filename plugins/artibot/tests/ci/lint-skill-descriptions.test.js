@@ -7,6 +7,13 @@
  *   - detectWorkflowSummary (R2): pipeline tokens, arrows, numbered steps, verb chains
  *   - lintDescription: rule composition + severities (R3 = warn)
  *   - runRatchet: new-violation fail / baseline pass / shrink (fixed) branches
+ *   - evaluateGates: shrink enforcement — a baseline entry whose skill no longer
+ *     violates ("fossil") fails the gate, and the message carries the exact
+ *     baseline-regeneration command
+ *   - CLI end-to-end (spawned against a SYNTHETIC plugin tree in os.tmpdir()):
+ *     fossil → exit 1, fossil-free → exit 0, plus both pre-existing verdicts
+ *     (new violation → exit 1, baselined violation → exit 0) so the shrink gate
+ *     is proven to be additive rather than a rewrite of the grow gate
  *   - Calibration: every detectWorkflowSummary branch is exercised by SYNTHETIC
  *     fixture strings, never by real skill descriptions. Real-skill coupling broke
  *     this twice (each time the ratchet legitimately fixed the example skill), so it
@@ -15,14 +22,18 @@
  * @module tests/ci/lint-skill-descriptions
  */
 
-import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import {
+  BASELINE_REGEN_CMD,
   countTriggers,
   detectWorkflowSummary,
+  evaluateGates,
   extractDescription,
   hasRedFlagsSection,
   lintAllSkills,
@@ -298,4 +309,227 @@ describe('lintAllSkills + ratchet against committed baseline', () => {
       expect(r4.severity).toBe('warn');
     }
   });
+});
+
+// ── Shrink enforcement (unit) ────────────────────────────────────────────────
+// A "fossil" is a baseline entry whose skill no longer violates. It is not idle
+// debt: the name stays excused, so a later regression of that same skill would
+// pass the ratchet silently. evaluateGates must fail on it in BOTH gates.
+describe('evaluateGates (shrink enforcement)', () => {
+  const clean = { pass: true, newViolations: [], fixed: [] };
+
+  it('passes when neither ratchet has new violations or fossils', () => {
+    const v = evaluateGates({ ratchet: { ...clean }, redFlagRatchet: { ...clean } });
+    expect(v.failed).toBe(false);
+    expect(v.messages).toEqual([]);
+  });
+
+  it('FAILS on a fossil in the description baseline', () => {
+    const v = evaluateGates({
+      ratchet: { pass: true, newViolations: [], fixed: ['ghost-skill'] },
+      redFlagRatchet: { ...clean },
+    });
+    expect(v.failed).toBe(true);
+    const text = v.messages.join('\n');
+    expect(text).toContain('skill-lint-baseline.json');
+    expect(text).toContain('ghost-skill');
+  });
+
+  it('FAILS on a fossil in the Red Flags baseline', () => {
+    const v = evaluateGates({
+      ratchet: { ...clean },
+      redFlagRatchet: { pass: true, newViolations: [], fixed: ['ghost-skill'] },
+    });
+    expect(v.failed).toBe(true);
+    expect(v.messages.join('\n')).toContain('skill-redflags-baseline.json');
+  });
+
+  it('names the exact baseline-regeneration command in the failure message', () => {
+    const v = evaluateGates({
+      ratchet: { pass: true, newViolations: [], fixed: ['ghost-skill'] },
+      redFlagRatchet: { ...clean },
+    });
+    const text = v.messages.join('\n');
+    expect(text).toContain(BASELINE_REGEN_CMD);
+    expect(text).toContain('--update-baseline');
+    // The command must match the npm script actually shipped in package.json,
+    // or the operator is told to run something that does not exist.
+    const pkg = JSON.parse(readFileSync(join(PLUGIN_ROOT, 'package.json'), 'utf8'));
+    expect(pkg.scripts['skill:lint:desc:baseline']).toContain('--update-baseline');
+    expect(BASELINE_REGEN_CMD).toBe('npm run skill:lint:desc:baseline');
+  });
+
+  it('keeps the pre-existing verdicts intact (grow direction + denominator)', () => {
+    expect(
+      evaluateGates({
+        ratchet: { pass: false, newViolations: ['newbie'], fixed: [] },
+        redFlagRatchet: { ...clean },
+      }).failed
+    ).toBe(true);
+    expect(
+      evaluateGates({
+        ratchet: { ...clean },
+        redFlagRatchet: { pass: false, newViolations: ['newbie'], fixed: [] },
+      }).failed
+    ).toBe(true);
+    expect(
+      evaluateGates({
+        ratchet: { ...clean },
+        redFlagRatchet: { ...clean },
+        floorFailures: ['artibot scanned 0 skills'],
+      }).failed
+    ).toBe(true);
+  });
+
+  it('does not re-render floor failures (main prints them earlier — no double count)', () => {
+    const v = evaluateGates({
+      ratchet: { ...clean },
+      redFlagRatchet: { ...clean },
+      floorFailures: ['artibot scanned 0 skills'],
+    });
+    expect(v.messages).toEqual([]);
+  });
+});
+
+// ── Shrink enforcement (CLI end-to-end) ──────────────────────────────────────
+// Spawns the real CLI against a SYNTHETIC plugin tree so the exit code — not a
+// return value — is what gets asserted. The tree is built once and only the
+// baseline files change between cases, so a differing exit code is attributable
+// to the baseline content and nothing else (negative control: the same tree with
+// fossil-free baselines must exit 0).
+describe('CLI shrink enforcement (spawned, synthetic plugin tree)', () => {
+  const SCRIPT = join(PLUGIN_ROOT, 'scripts', 'ci', 'lint-skill-descriptions.js');
+  // Floors from skill-scan-roots.js#MIN_ENTITY_COUNTS: artibot 100, cowork 40.
+  // Below them the denominator check fails first and the run proves nothing.
+  const ARTIBOT_SKILLS = 100;
+  const COWORK_SKILLS = 40;
+  const COMPLIANT = [
+    '---',
+    "name: NAME",
+    "description: Use when user says 'alpha', 'beta', 'gamma'.",
+    '---',
+    '',
+    '# NAME',
+    '',
+    '## Red Flags',
+    '',
+    '- none',
+    '',
+  ].join('\n');
+  // R1 (1 signal < 3) + R2 (arrow-chain) → an error-severity violator.
+  const VIOLATING = ['---', 'name: NAME', 'description: Parses -> renders.', '---', '', '# NAME', '', '## Red Flags', '', '- none', ''].join('\n');
+
+  let tmpRoot; // <tmp>/plugins/artibot
+  let baseDir; // <tmp>/plugins
+
+  const skillDir = (root, name) => join(baseDir, root, 'skills', name);
+
+  function writeSkill(root, name, template) {
+    const dir = skillDir(root, name);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'SKILL.md'), template.replaceAll('NAME', name), 'utf8');
+  }
+
+  function writeBaselines(skills, redFlagSkills) {
+    const dir = join(tmpRoot, 'scripts', 'ci');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'skill-lint-baseline.json'), JSON.stringify({ skills }), 'utf8');
+    writeFileSync(
+      join(dir, 'skill-redflags-baseline.json'),
+      JSON.stringify({ skills: redFlagSkills }),
+      'utf8'
+    );
+  }
+
+  function run() {
+    return spawnSync(process.execPath, [SCRIPT], {
+      encoding: 'utf8',
+      env: { ...process.env, CLAUDE_PLUGIN_ROOT: tmpRoot },
+    });
+  }
+
+  beforeAll(() => {
+    const tmp = mkdtempSync(join(tmpdir(), 'artibot-shrink-'));
+    baseDir = join(tmp, 'plugins');
+    tmpRoot = join(baseDir, 'artibot');
+    for (let i = 0; i < ARTIBOT_SKILLS; i++) {
+      writeSkill('artibot', `skill-${String(i).padStart(3, '0')}`, COMPLIANT);
+    }
+    for (let i = 0; i < COWORK_SKILLS; i++) {
+      writeSkill('artibot-cowork', `co-skill-${String(i).padStart(3, '0')}`, COMPLIANT);
+    }
+  }, 60000);
+
+  afterAll(() => {
+    if (baseDir) rmSync(dirname(baseDir), { recursive: true, force: true });
+  });
+
+  it('FIXTURE REACHES THE GATE: fossil-free baselines exit 0 (negative control)', () => {
+    writeBaselines([], []);
+    const r = run();
+    // If this ever fails, every red case below is red for the wrong reason.
+    expect(r.stderr).not.toContain('FAIL');
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain('PASS: no new violations, no stale baseline entries');
+    // Prove the scan really saw the synthetic tree (not the real repo's 159).
+    expect(r.stdout).toContain(`artibot=${ARTIBOT_SKILLS}`);
+    expect(r.stdout).toContain(`artibot-cowork=${COWORK_SKILLS}`);
+  }, 30000);
+
+  it('exits non-zero when the description baseline holds a fossil', () => {
+    // skill-000 exists and is compliant → its baseline entry is a fossil.
+    writeBaselines(['skill-000'], []);
+    const r = run();
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain('skill-lint-baseline.json');
+    expect(r.stderr).toContain('skill-000');
+    expect(r.stderr).toContain(BASELINE_REGEN_CMD);
+  }, 30000);
+
+  it('exits non-zero when the Red Flags baseline holds a fossil', () => {
+    writeBaselines([], ['skill-000']);
+    const r = run();
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain('skill-redflags-baseline.json');
+    expect(r.stderr).toContain(BASELINE_REGEN_CMD);
+  }, 30000);
+
+  it('still exits non-zero on a NEW violation (grow direction unchanged)', () => {
+    writeSkill('artibot', 'skill-bad', VIOLATING);
+    try {
+      writeBaselines([], []);
+      const r = run();
+      expect(r.status).not.toBe(0);
+      expect(r.stderr).toContain('NEW description-violating');
+      expect(r.stderr).toContain('skill-bad');
+    } finally {
+      rmSync(skillDir('artibot', 'skill-bad'), { recursive: true, force: true });
+    }
+  }, 30000);
+
+  it('still exits 0 for a baselined violation (shrink gate did not over-tighten)', () => {
+    writeSkill('artibot', 'skill-bad', VIOLATING);
+    try {
+      writeBaselines(['skill-bad'], []);
+      const r = run();
+      expect(r.stderr).not.toContain('FAIL');
+      expect(r.status).toBe(0);
+      expect(r.stdout).toContain('desc: 1 baselined');
+    } finally {
+      rmSync(skillDir('artibot', 'skill-bad'), { recursive: true, force: true });
+    }
+  }, 30000);
+
+  it('--update-baseline clears the fossil and the next run is green', () => {
+    writeBaselines(['skill-000'], ['skill-000']);
+    expect(run().status).not.toBe(0);
+    const upd = spawnSync(process.execPath, [SCRIPT, '--update-baseline'], {
+      encoding: 'utf8',
+      env: { ...process.env, CLAUDE_PLUGIN_ROOT: tmpRoot },
+    });
+    expect(upd.status).toBe(0);
+    const after = run();
+    expect(after.stderr).not.toContain('FAIL');
+    expect(after.status).toBe(0);
+  }, 60000);
 });
