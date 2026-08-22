@@ -6,7 +6,7 @@
  * Covers:
  *   - interrupted detection (phase-start without matching phase-end)
  *   - normal termination (each start matched by an end)
- *   - empty timeline
+ *   - empty event log
  *   - malformed entries (skipped without throwing)
  *   - nested phases (LIFO pairing)
  *   - non-object input safety
@@ -18,29 +18,40 @@ import {
   detectInterruptedPhase,
 } from '../../lib/autopilot/_engine-helpers.js';
 
+/**
+ * Input surface note: these fixtures are NDJSON **events** passed through the
+ * documented `{events}` unit-test seam. They used to be `state.timeline`
+ * arrays -- a field with no production writer -- so every "interrupted:true"
+ * case here described a shape the engine never produced, while the real
+ * detector sat permanently at `interrupted:false`. The seam still does not
+ * prove the file read works; that is the job of
+ * `engine-crash-recovery-smoke.test.js`, which SIGKILLs a real autopilot
+ * process. These tests own the pairing logic and the defensive behaviour.
+ *
+ * Session stub carries only what the detector reads. Because `{events}` is
+ * supplied, this id never touches the filesystem.
+ */
+const SESSION = { sessionId: 'ap-recovery-unit' };
+
 describe('detectInterruptedPhase — interruption detection', () => {
-  it('flags interrupted when timeline ends on a phase-start with no matching end', () => {
-    const state = {
-      timeline: [
-        { type: 'phase-start', phase: 'INTAKE', ts: '2026-05-17T00:00:00Z' },
-        { type: 'phase-end', phase: 'INTAKE', ts: '2026-05-17T00:01:00Z' },
-        { type: 'phase-start', phase: 'PLAN', ts: '2026-05-17T00:02:00Z' },
-      ],
-    };
-    const result = detectInterruptedPhase(state);
+  it('flags interrupted when the log ends on a phase-start with no matching end', () => {
+    const events = [
+      { type: 'phase-start', phase: 'INTAKE', ts: '2026-05-17T00:00:00Z' },
+      { type: 'phase-end', phase: 'INTAKE', ts: '2026-05-17T00:01:00Z' },
+      { type: 'phase-start', phase: 'PLAN', ts: '2026-05-17T00:02:00Z' },
+    ];
+    const result = detectInterruptedPhase(SESSION, { events });
     expect(result.interrupted).toBe(true);
     expect(result.phase).toBe('PLAN');
     expect(result.startedAt).toBe('2026-05-17T00:02:00Z');
   });
 
   it('reports the most recent open phase when multiple are pending', () => {
-    const state = {
-      timeline: [
-        { type: 'phase-start', phase: 'PLAN', ts: '2026-05-17T00:00:00Z' },
-        { type: 'phase-start', phase: 'EXECUTE', ts: '2026-05-17T00:01:00Z' },
-      ],
-    };
-    const result = detectInterruptedPhase(state);
+    const events = [
+      { type: 'phase-start', phase: 'PLAN', ts: '2026-05-17T00:00:00Z' },
+      { type: 'phase-start', phase: 'EXECUTE', ts: '2026-05-17T00:01:00Z' },
+    ];
+    const result = detectInterruptedPhase(SESSION, { events });
     expect(result.interrupted).toBe(true);
     expect(result.phase).toBe('EXECUTE');
   });
@@ -48,56 +59,51 @@ describe('detectInterruptedPhase — interruption detection', () => {
 
 describe('detectInterruptedPhase — normal termination', () => {
   it('reports interrupted:false when every phase-start has a matching phase-end', () => {
-    const state = {
-      timeline: [
-        { type: 'phase-start', phase: 'INTAKE', ts: '2026-05-17T00:00:00Z' },
-        { type: 'phase-end', phase: 'INTAKE', ts: '2026-05-17T00:01:00Z' },
-        { type: 'phase-start', phase: 'PLAN', ts: '2026-05-17T00:02:00Z' },
-        { type: 'phase-end', phase: 'PLAN', ts: '2026-05-17T00:03:00Z' },
-      ],
-    };
-    expect(detectInterruptedPhase(state)).toEqual({ interrupted: false });
+    const events = [
+      { type: 'phase-start', phase: 'INTAKE', ts: '2026-05-17T00:00:00Z' },
+      { type: 'phase-end', phase: 'INTAKE', ts: '2026-05-17T00:01:00Z' },
+      { type: 'phase-start', phase: 'PLAN', ts: '2026-05-17T00:02:00Z' },
+      { type: 'phase-end', phase: 'PLAN', ts: '2026-05-17T00:03:00Z' },
+    ];
+    expect(detectInterruptedPhase(SESSION, { events })).toEqual({ interrupted: false });
   });
 
   it('handles nested LIFO pairing (inner phase closes before outer)', () => {
-    const state = {
-      timeline: [
-        { type: 'phase-start', phase: 'EXECUTE', ts: '2026-05-17T00:00:00Z' },
-        { type: 'phase-start', phase: 'TEST', ts: '2026-05-17T00:00:10Z' },
-        { type: 'phase-end', phase: 'TEST', ts: '2026-05-17T00:00:20Z' },
-        { type: 'phase-end', phase: 'EXECUTE', ts: '2026-05-17T00:00:30Z' },
-      ],
-    };
-    expect(detectInterruptedPhase(state).interrupted).toBe(false);
+    const events = [
+      { type: 'phase-start', phase: 'EXECUTE', ts: '2026-05-17T00:00:00Z' },
+      { type: 'phase-start', phase: 'TEST', ts: '2026-05-17T00:00:10Z' },
+      { type: 'phase-end', phase: 'TEST', ts: '2026-05-17T00:00:20Z' },
+      { type: 'phase-end', phase: 'EXECUTE', ts: '2026-05-17T00:00:30Z' },
+    ];
+    expect(detectInterruptedPhase(SESSION, { events }).interrupted).toBe(false);
   });
 });
 
 describe('detectInterruptedPhase — defensive parsing', () => {
-  it('returns interrupted:false on empty timeline', () => {
-    expect(detectInterruptedPhase({ timeline: [] })).toEqual({ interrupted: false });
+  it('returns interrupted:false on an empty event log', () => {
+    expect(detectInterruptedPhase(SESSION, { events: [] })).toEqual({ interrupted: false });
   });
 
-  it('returns interrupted:false when timeline field is missing entirely', () => {
-    expect(detectInterruptedPhase({ sessionId: 'x' })).toEqual({ interrupted: false });
+  it('returns interrupted:false for a session with no id to read a log for', () => {
+    expect(detectInterruptedPhase({ task: 'no id' })).toEqual({ interrupted: false });
   });
 
-  it('returns interrupted:false when timeline is not an array', () => {
-    expect(detectInterruptedPhase({ timeline: 'not-an-array' })).toEqual({ interrupted: false });
-    expect(detectInterruptedPhase({ timeline: null })).toEqual({ interrupted: false });
-    expect(detectInterruptedPhase({ timeline: 42 })).toEqual({ interrupted: false });
+  it('returns interrupted:false when the supplied event list is not an array', () => {
+    // Non-array seam input falls through to the real reader, which yields []
+    // for an id with no log on disk.
+    expect(detectInterruptedPhase(SESSION, { events: 'not-an-array' })).toEqual({ interrupted: false });
+    expect(detectInterruptedPhase(SESSION, { events: 42 })).toEqual({ interrupted: false });
   });
 
   it('skips malformed entries (missing type/phase, null, non-objects) without throwing', () => {
-    const state = {
-      timeline: [
-        null,
-        'string-entry',
-        { /* no type */ phase: 'PLAN' },
-        { type: 'phase-start' /* no phase */ },
-        { type: 'phase-start', phase: 'EXECUTE', ts: '2026-05-17T00:00:00Z' },
-      ],
-    };
-    const result = detectInterruptedPhase(state);
+    const events = [
+      null,
+      'string-entry',
+      { /* no type */ phase: 'PLAN' },
+      { type: 'phase-start' /* no phase */ },
+      { type: 'phase-start', phase: 'EXECUTE', ts: '2026-05-17T00:00:00Z' },
+    ];
+    const result = detectInterruptedPhase(SESSION, { events });
     expect(result.interrupted).toBe(true);
     expect(result.phase).toBe('EXECUTE');
   });
@@ -109,34 +115,22 @@ describe('detectInterruptedPhase — defensive parsing', () => {
   });
 
   it('handles missing ts gracefully (startedAt=null)', () => {
-    const state = {
-      timeline: [
-        { type: 'phase-start', phase: 'INTAKE' /* no ts */ },
-      ],
-    };
-    const result = detectInterruptedPhase(state);
+    const events = [{ type: 'phase-start', phase: 'INTAKE' /* no ts */ }];
+    const result = detectInterruptedPhase(SESSION, { events });
     expect(result.interrupted).toBe(true);
     expect(result.startedAt).toBeNull();
   });
 
   it('ignores orphaned phase-end entries (no preceding start)', () => {
-    const state = {
-      timeline: [
-        { type: 'phase-end', phase: 'PLAN', ts: '2026-05-17T00:00:00Z' },
-      ],
-    };
-    expect(detectInterruptedPhase(state)).toEqual({ interrupted: false });
+    const events = [{ type: 'phase-end', phase: 'PLAN', ts: '2026-05-17T00:00:00Z' }];
+    expect(detectInterruptedPhase(SESSION, { events })).toEqual({ interrupted: false });
   });
 });
 
 describe('buildRecoveryNote', () => {
   it('returns Korean banner including phase name and timestamp', () => {
-    const state = {
-      timeline: [
-        { type: 'phase-start', phase: 'PLAN', ts: '2026-05-17T00:00:00Z' },
-      ],
-    };
-    const note = buildRecoveryNote(state);
+    const events = [{ type: 'phase-start', phase: 'PLAN', ts: '2026-05-17T00:00:00Z' }];
+    const note = buildRecoveryNote(SESSION, { events });
     expect(note).toBeTypeOf('string');
     expect(note).toContain('이전 세션');
     expect(note).toContain('PLAN');
@@ -145,28 +139,22 @@ describe('buildRecoveryNote', () => {
   });
 
   it('returns null when the prior session terminated cleanly', () => {
-    const state = {
-      timeline: [
-        { type: 'phase-start', phase: 'INTAKE', ts: '2026-05-17T00:00:00Z' },
-        { type: 'phase-end', phase: 'INTAKE', ts: '2026-05-17T00:01:00Z' },
-      ],
-    };
-    expect(buildRecoveryNote(state)).toBeNull();
+    const events = [
+      { type: 'phase-start', phase: 'INTAKE', ts: '2026-05-17T00:00:00Z' },
+      { type: 'phase-end', phase: 'INTAKE', ts: '2026-05-17T00:01:00Z' },
+    ];
+    expect(buildRecoveryNote(SESSION, { events })).toBeNull();
   });
 
-  it('returns null on empty/missing timeline', () => {
-    expect(buildRecoveryNote({ timeline: [] })).toBeNull();
+  it('returns null on an empty or unreadable event log', () => {
+    expect(buildRecoveryNote(SESSION, { events: [] })).toBeNull();
     expect(buildRecoveryNote({})).toBeNull();
     expect(buildRecoveryNote(null)).toBeNull();
   });
 
   it('omits the timestamp parenthetical when startedAt is null', () => {
-    const state = {
-      timeline: [
-        { type: 'phase-start', phase: 'EXECUTE' /* no ts */ },
-      ],
-    };
-    const note = buildRecoveryNote(state);
+    const events = [{ type: 'phase-start', phase: 'EXECUTE' /* no ts */ }];
+    const note = buildRecoveryNote(SESSION, { events });
     expect(note).toContain('EXECUTE');
     // No "(...)" since startedAt is null
     expect(note).not.toMatch(/\(/);

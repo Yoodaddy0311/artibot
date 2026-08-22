@@ -175,7 +175,12 @@ describe('extractSuccessPatterns', () => {
     expect(r.contractFields).not.toHaveProperty('unknown');
   });
 
-  it('falls back to timeline when phases is missing', () => {
+  it('reports no phase ordering when phases is missing', () => {
+    // Replaces "falls back to timeline when phases is missing". That test was
+    // the clearest symptom of the ghost: it proved a `session.timeline`
+    // fallback worked, using a fixture no production code could ever create.
+    // Real sessions carry `state.phases`; one without it genuinely has no
+    // ordering to report, and saying so is the honest contract.
     const sessions = [
       successSession('a', {
         phases: undefined,
@@ -185,7 +190,10 @@ describe('extractSuccessPatterns', () => {
       }),
     ];
     const r = extractSuccessPatterns(sessions);
-    expect(r.commonPhaseOrdering).toEqual(['PLAN', 'EXECUTE', 'REPORT']);
+    // `null`, not `[]` — measured, not assumed: with no ordering to pool,
+    // `mode()` over an empty list returns null and that is the existing
+    // "no data" signal the callers already handle.
+    expect(r.commonPhaseOrdering).toBeNull();
   });
 });
 

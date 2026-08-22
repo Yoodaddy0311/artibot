@@ -102,11 +102,10 @@ function phaseOrderingOf(session) {
       .map((p) => (p && typeof p === 'object' ? p.name : p))
       .filter((n) => typeof n === 'string' && n.length > 0);
   }
-  if (Array.isArray(session.timeline)) {
-    return session.timeline
-      .map((e) => (e && typeof e === 'object' ? e.phase : null))
-      .filter((n) => typeof n === 'string' && n.length > 0);
-  }
+  // A `session.timeline` fallback used to sit here. It was unreachable in
+  // practice: nothing ever wrote phase records into that field, so it was
+  // either absent or an empty array and this branch returned []. `state.phases`
+  // above is the live record; sessions without it have no ordering to report.
   return [];
 }
 

@@ -233,7 +233,13 @@ export function migrateState(state) {
   const next = { ...state };
   if (!Array.isArray(next.queuedQuestions)) next.queuedQuestions = [];
   if (!Array.isArray(next.checkpoints)) next.checkpoints = [];
-  if (!Array.isArray(next.timeline)) next.timeline = [];
+  // `timeline` is deliberately NOT initialized here any more. It was a ghost:
+  // this line was its only writer and it only ever wrote `[]` — nothing in the
+  // codebase appended a phase record to it, so the crash detector that read it
+  // was permanently fail-open. Phase history lives in the NDJSON event log
+  // (`telemetry.appendEvent`), which `replay.js#findUnterminatedPhases` reads.
+  // Legacy sessions on disk may still carry a stale `timeline` array; it is
+  // simply ignored rather than migrated, since it never held real data.
   next.schemaVersion = CURRENT_SCHEMA_VERSION;
   return next;
 }

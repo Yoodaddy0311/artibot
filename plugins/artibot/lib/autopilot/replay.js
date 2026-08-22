@@ -11,6 +11,7 @@
  * Public surface:
  *   - summarizeSession(sessionId)
  *   - renderTimelineTable(summary)
+ *   - findUnterminatedPhases(events)
  *
  * @module lib/autopilot/replay
  */
@@ -71,6 +72,67 @@ function isRetry(ev) {
   if (ev.level === 'warn' && typeof ev.message === 'string'
     && /retry/i.test(ev.message)) return true;
   return false;
+}
+
+/**
+ * Pop the most recent open entry with the given phase name. No-op when none
+ * is found, so an orphaned `phase-end` is treated as data drift, not an error.
+ *
+ * @param {Array<{phase: string}>} open
+ * @param {string} phase
+ * @returns {void}
+ */
+function popMatchingPhase(open, phase) {
+  for (let i = open.length - 1; i >= 0; i -= 1) {
+    if (open[i].phase === phase) {
+      open.splice(i, 1);
+      return;
+    }
+  }
+}
+
+/**
+ * Return the phase windows that were opened by a `phase-start` and never
+ * closed by a matching `phase-end` — i.e. the phases a crashed process died
+ * inside. Order is chronological, so the last element is the innermost /
+ * most recent open phase.
+ *
+ * **Single owner of phase-start/phase-end pairing.** This used to live in
+ * `_engine-helpers.js#walkTimelinePending`, reading `state.timeline` — a
+ * field with zero production writers, which made the crash detector a
+ * permanent `{interrupted:false}` fail-open. The real phase record has always
+ * been the NDJSON event log this module already reads, so the pairing walk now
+ * lives next to it and `_engine-helpers` consumes it instead of keeping a
+ * second copy.
+ *
+ * Pairing is LIFO by phase name (a `phase-end` closes the most recent open
+ * window of the same phase), which preserves the previous detector's nesting
+ * behaviour. Production never nests phases — each `runPhaseN` emits its start
+ * and end in one call — so LIFO vs. flat only matters for hand-built input.
+ *
+ * Note this is deliberately NOT {@link groupByPhase}: that one slices events
+ * into windows for the report table and emits a row for every window whether
+ * or not it closed. Only this function decides "still open".
+ *
+ * Never throws: non-array input yields `[]`, malformed entries are skipped.
+ *
+ * @param {object[]} events - Raw events from `telemetry.readEvents`.
+ * @returns {Array<{phase: string, startedAt: string|null}>}
+ */
+export function findUnterminatedPhases(events) {
+  if (!Array.isArray(events)) return [];
+  const open = [];
+  for (const ev of events) {
+    if (!ev || typeof ev !== 'object') continue;
+    const phase = typeof ev.phase === 'string' && ev.phase ? ev.phase : null;
+    if (!phase) continue;
+    if (ev.type === 'phase-start') {
+      open.push({ phase, startedAt: typeof ev.ts === 'string' ? ev.ts : null });
+    } else if (ev.type === 'phase-end') {
+      popMatchingPhase(open, phase);
+    }
+  }
+  return open;
 }
 
 /**

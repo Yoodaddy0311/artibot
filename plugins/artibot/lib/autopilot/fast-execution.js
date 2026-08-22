@@ -238,6 +238,11 @@ export function retainFastIntegrationWorktree(state, worktreePath) {
  * serial entries) so `:status` can still explain what was requested and why
  * it did not run — only the parts that would drive fan-out are cleared.
  *
+ * **Consumers: read `enabled` and `fallbackReason` first.** The parallelism
+ * fields on a demoted profile are what was *requested*, not what will run —
+ * reading `plannedParallelism` without checking `enabled` reports a fan-out
+ * that was refused.
+ *
  * @param {object} fast Accepted profile from {@link planFastExecution}.
  * @param {string} reason Fallback reason recorded on the demoted profile.
  * @returns {object} A new profile; the input is never mutated.

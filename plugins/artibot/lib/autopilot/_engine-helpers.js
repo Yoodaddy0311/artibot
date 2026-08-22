@@ -12,7 +12,8 @@
  */
 
 import { newSessionId, saveSession } from './session-store.js';
-import { appendEvent } from './telemetry.js';
+import { findUnterminatedPhases } from './replay.js';
+import { appendEvent, readEvents } from './telemetry.js';
 import { notifyDanger, notifyPause, notifyPhaseProgress } from './notification.js';
 import { acquireKeepAwake } from '../system/keep-awake.js';
 
@@ -320,25 +321,41 @@ export function renderPreflightSummary(result) {
 }
 
 /**
- * Crash-recovery detector. Walks the timeline in order and pairs each
- * `phase-start` with the next matching `phase-end` (same `phase`). A
- * `phase-start` left without a successor implies the prior process died
- * mid-phase.
+ * Crash-recovery detector: did the previous process die inside a phase?
  *
- * Timeline contract (post-v2 migration):
- *   [{ type: 'phase-start', phase: string, ts: string }, ...]
+ * Reads the session's **NDJSON event log** — the only durable record that
+ * production actually writes. `tick()` emits `phase-start` / `phase-end` there
+ * on every phase transition, so a `phase-start` with no matching `phase-end`
+ * means the process never reached the end of that phase.
  *
- * All errors are absorbed — recovery detection MUST NOT throw into the
- * engine startup path.
+ * Previously this read `state.timeline`, a field with **zero production
+ * writers** (`session-store.js#migrateState` guaranteed an empty array and
+ * nothing ever appended to it). The detector therefore returned
+ * `{interrupted:false}` unconditionally in every real session — a fail-open
+ * that the unit tests could not see, because they hand-built `timeline`
+ * fixtures that no code path produces.
  *
- * @param {object} state
+ * Pairing is delegated to `replay.js#findUnterminatedPhases` so the
+ * start/end walk has exactly one home.
+ *
+ * All errors are absorbed — recovery detection MUST NOT throw into the engine
+ * startup path. A detector that crashes resume is worse than one that misses.
+ *
+ * @param {object} state - Live session state; only `sessionId` is read.
+ * @param {{events?: object[]}} [opts] - `events` is a unit-test seam that
+ *   bypasses the file read. Production always passes nothing; the real NDJSON
+ *   path is covered by the crash smoke test, not by this seam.
  * @returns {{ interrupted: true, phase: string, startedAt: string|null } | { interrupted: false }}
  */
-export function detectInterruptedPhase(state) {
+export function detectInterruptedPhase(state, opts = {}) {
   try {
     if (!state || typeof state !== 'object') return { interrupted: false };
-    const timeline = Array.isArray(state.timeline) ? state.timeline : [];
-    const pending = walkTimelinePending(timeline);
+    const sessionId = typeof state.sessionId === 'string' && state.sessionId
+      ? state.sessionId : null;
+    const events = Array.isArray(opts?.events)
+      ? opts.events
+      : (sessionId ? readEvents(sessionId) : []);
+    const pending = findUnterminatedPhases(events);
     if (pending.length === 0) return { interrupted: false };
     const last = pending[pending.length - 1];
     return { interrupted: true, phase: last.phase, startedAt: last.startedAt };
@@ -348,55 +365,17 @@ export function detectInterruptedPhase(state) {
 }
 
 /**
- * Internal: stack-walk a timeline and return the still-open phase-start
- * entries. phase-start pushes, matching phase-end pops the most recent
- * open entry (LIFO; engine.js never overlaps unrelated phases). Orphaned
- * phase-end entries are ignored as data drift.
- *
- * @param {Array<object>} timeline
- * @returns {Array<{ phase: string, startedAt: string|null }>}
- */
-function walkTimelinePending(timeline) {
-  const pending = [];
-  for (const entry of timeline) {
-    if (!entry || typeof entry !== 'object') continue;
-    const phase = typeof entry.phase === 'string' ? entry.phase : null;
-    if (!phase) continue;
-    if (entry.type === 'phase-start') {
-      pending.push({ phase, startedAt: typeof entry.ts === 'string' ? entry.ts : null });
-    } else if (entry.type === 'phase-end') {
-      popMatchingPhase(pending, phase);
-    }
-  }
-  return pending;
-}
-
-/**
- * Internal: pop the most recent pending entry with the given phase name.
- * No-op when none is found.
- *
- * @param {Array<{ phase: string }>} pending
- * @param {string} phase
- */
-function popMatchingPhase(pending, phase) {
-  for (let i = pending.length - 1; i >= 0; i -= 1) {
-    if (pending[i].phase === phase) {
-      pending.splice(i, 1);
-      return;
-    }
-  }
-}
-
-/**
  * Build a user-facing (한국어) recovery banner string when the prior session
  * crashed mid-phase. Returns null when no recovery action is needed.
  *
- * @param {object} state
+ * @param {object} state - Live session state; only `sessionId` is read.
+ * @param {{events?: object[]}} [opts] - Forwarded to
+ *   {@link detectInterruptedPhase}; unit-test seam only.
  * @returns {string|null}
  */
-export function buildRecoveryNote(state) {
+export function buildRecoveryNote(state, opts = {}) {
   try {
-    const result = detectInterruptedPhase(state);
+    const result = detectInterruptedPhase(state, opts);
     if (!result.interrupted) return null;
     const tsPart = result.startedAt ? ` (${result.startedAt})` : '';
     return `이전 세션이 ${result.phase} 단계 진행 중 중단됨${tsPart}. 자동으로 ${result.phase} 재진입합니다.`;

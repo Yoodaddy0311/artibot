@@ -4,7 +4,7 @@
  *   - schemaVersion auto-stamping on save
  *   - isLegacyState true/false branches (missing/wrong type/older)
  *   - migrateState idempotence
- *   - missing-array slots backfilled (queuedQuestions/checkpoints/timeline)
+ *   - missing-array slots backfilled (queuedQuestions/checkpoints)
  *   - loadSession migration on the read path
  *   - migrateState non-object rejection
  *   - immutability (input not mutated)
@@ -88,12 +88,14 @@ describe('migrateState', () => {
     expect(v2.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
   });
 
-  it('backfills queuedQuestions / checkpoints / timeline as empty arrays when missing', () => {
+  it('backfills queuedQuestions / checkpoints as empty arrays when missing', () => {
     const v1 = { sessionId: 'ap-mig-2' };
     const v2 = migrateState(v1);
     expect(v2.queuedQuestions).toEqual([]);
     expect(v2.checkpoints).toEqual([]);
-    expect(v2.timeline).toEqual([]);
+    // `timeline` is intentionally absent: it had no production writer, so
+    // migration no longer manufactures it. See session-store.js#migrateState.
+    expect(v2.timeline).toBeUndefined();
   });
 
   it('preserves existing array contents when already populated', () => {
@@ -101,12 +103,10 @@ describe('migrateState', () => {
       sessionId: 'ap-mig-3',
       queuedQuestions: [{ id: 'q1' }],
       checkpoints: [{ id: 'c1' }],
-      timeline: [{ type: 'phase-start', phase: 'INTAKE', ts: '2026-05-17T00:00:00Z' }],
     };
     const v2 = migrateState(v1);
     expect(v2.queuedQuestions).toEqual([{ id: 'q1' }]);
     expect(v2.checkpoints).toEqual([{ id: 'c1' }]);
-    expect(v2.timeline).toHaveLength(1);
   });
 
   it('is idempotent — migrating an already-v2 state returns equivalent v2 state', () => {
@@ -115,7 +115,6 @@ describe('migrateState', () => {
     expect(v2Again.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
     expect(v2Again.queuedQuestions).toEqual([]);
     expect(v2Again.checkpoints).toEqual([]);
-    expect(v2Again.timeline).toEqual([]);
   });
 
   it('does not mutate the input object', () => {
@@ -132,7 +131,9 @@ describe('migrateState', () => {
     const v2 = migrateState(v1);
     expect(v2.queuedQuestions).toEqual([]);
     expect(v2.checkpoints).toEqual([]);
-    expect(v2.timeline).toEqual([]);
+    // A stale `timeline` on a legacy session is carried through untouched
+    // rather than coerced — it is ignored data now, not a slot to maintain.
+    expect(v2.timeline).toBe(42);
   });
 
   it('throws TypeError when input is not an object', () => {
@@ -177,7 +178,6 @@ describe('loadSession migration path', () => {
     expect(loaded.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
     expect(Array.isArray(loaded.queuedQuestions)).toBe(true);
     expect(Array.isArray(loaded.checkpoints)).toBe(true);
-    expect(Array.isArray(loaded.timeline)).toBe(true);
 
     // Second load should hit the fast path (already v2)
     const loadedAgain = loadSession(sessionId);
@@ -192,7 +192,6 @@ describe('loadSession migration path', () => {
       schemaVersion: CURRENT_SCHEMA_VERSION,
       queuedQuestions: [{ id: 'q' }],
       checkpoints: [],
-      timeline: [],
     };
     saveSession(original);
     const loaded = loadSession(sessionId);
