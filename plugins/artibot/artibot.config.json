@@ -731,6 +731,12 @@
   },
   "autopilot": {
     "enabled": false,
+    "suggest": {
+      "enabled": false
+    },
+    "execution": {
+      "enabled": true
+    },
     "defaultMode": "default",
     "modes": [
       "default",

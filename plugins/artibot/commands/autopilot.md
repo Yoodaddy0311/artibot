@@ -473,7 +473,18 @@ DATA POLICY: ndjson 파일은 로컬에만 존재. 외부 송신 없음.
 
 `autopilot.fast`는 fast fan-out의 운영 설정이다. 기본은 `{ hardMaxAgents: 16, agentsPerCpu: 2, maxWorktrees: 12, maxRisk: "medium" }`이며, config 값은 immutable absolute cap(agents 16, worktrees 12, agentsPerCpu 4)을 넘을 수 없고 maxRisk는 `medium`을 넘을 수 없다. 예를 들어 `agentsPerCpu`는 기본 2에서 최대 4까지 조정할 수 있다. malformed 값은 안전한 기본값으로 정규화되고, high/critical risk는 fast wave에 넣지 않는다.
 
-비활성화: `--no-autopilot` 플래그 또는 config `autopilot.enabled: false`.
+비활성화는 **두 갈래로 분리**되어 있다 (ADR-004 — 러너 ADR-003 과 별건):
+
+| 대상 | 끄는 법 | 효과 |
+|---|---|---|
+| 자동 제안(NLU) | `autopilot.suggest.enabled: false` 또는 `--no-autopilot` | "자고 올 동안…" 류 문장에 `[autopilot-suggested]` 를 붙이지 않는다. 명시적 `/autopilot <task>` 는 계속 동작 |
+| 실행 | `autopilot.execution.enabled: false` | `start`·`queue`·`resume` 이 차단된다. 세션 파일·락 **생성 전** 에 거부하므로 잔재가 남지 않는다 |
+
+레거시 `autopilot.enabled: false` 는 **두 갈래 모두 false 로 보수 매핑**되고 stderr WARN 이 뜬다 — 문서상 전면 kill-switch 로 알고 false 를 넣은 사용자의 의도를 보존하기 위함이다. 단 `suggest`/`execution` 을 **명시**하면 그 값이 레거시 키를 이긴다(이 리포의 출하 config 가 그 예: 제안은 끄고 실행은 켠다).
+
+`status`·`list`·`abort`·`tail`·`replay`·`diff` 는 게이트와 무관하게 **항상 허용**된다 — 꺼진 오토파일럿도 멈출 수 있어야 한다.
+
+판정 소유자는 `lib/autopilot/consent-gate.js#resolveAutopilotConsent` 하나다. 플래그를 직접 읽어 판정을 복제하지 마라.
 
 ## Output Format
 

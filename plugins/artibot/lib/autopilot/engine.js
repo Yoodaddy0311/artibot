@@ -31,6 +31,7 @@ import {
   reapSessionArtifacts,
 } from './engine-cleanup.js';
 import { safeAppendLesson } from './engine-state.js';
+import { buildBlockedResult, resolveAutopilotConsent } from './consent-gate.js';
 import { acquireLock, isLocked, releaseLock } from './lock.js';
 import { loadAllowList } from './mcp-verifier.js';
 import { buildFastTeamInstruction, demoteFastToStandard, loadFastProfileConfig, planFastExecution, retainFastIntegrationWorktree } from './fast-execution.js';
@@ -569,14 +570,24 @@ export function runPhase6Report(state) {
  * Returns sessionId + prdPath; subsequent phases are driven by the main Claude
  * via resumeAutopilot or direct phase calls.
  *
- * @param {{ task: string, mode?: string, options?: object, sessionId?: string }} args
- * @returns {Promise<{ sessionId: string, prdPath: string, phase: string, instruction: object, paused?: boolean, reason?: string }>}
+ * @param {{ task: string, mode?: string, options?: object, sessionId?: string,
+ *   consentOverride?: boolean }} args - `consentOverride` is a one-shot bypass
+ *   of the ADR-004 execution gate and is a **call argument only**; it is never
+ *   sourced from config or env (see lib/autopilot/consent-gate.js).
+ * @returns {Promise<{ sessionId: string, prdPath: string, phase: string, instruction: object, paused?: boolean, reason?: string, blocked?: boolean }>}
  */
-export async function startAutopilot({ task, mode, options, sessionId } = {}) {
+export async function startAutopilot({ task, mode, options, sessionId, consentOverride } = {}) {
   if (!task || typeof task !== 'string') {
     throw new TypeError('task is required');
   }
+  // ADR-004 execution gate. Placed before makeInitialState — the last point at
+  // which this function has produced zero side effects (no lock, no session
+  // file, no keep-awake), so a refusal leaves nothing behind to clean up.
+  const consent = resolveAutopilotConsent({ operation: 'start', override: consentOverride === true });
+  if (!consent.allowed) return buildBlockedResult(consent);
+
   const state = makeInitialState({ task, mode, options, sessionId });
+  if (consent.receipt) state.consentReceipt = consent.receipt;
   retainExecuteRunnerSelection(state);
 
   // Derive featureKey early so we can guard against concurrent sessions
@@ -669,12 +680,25 @@ function nextPhaseAfter(current) {
  * Resume a session by running its next phase exactly once.
  * Returns the phase label it just attempted plus a status string.
  * @param {string} sessionId
- * @returns {Promise<{ phase: string, status: string, instruction?: object }>}
+ * @param {{ consentOverride?: boolean }} [opts] - one-shot bypass of the
+ *   ADR-004 execution gate; **call argument only**.
+ * @returns {Promise<{ phase: string, status: string, instruction?: object, blocked?: boolean }>}
  */
-export async function resumeAutopilot(sessionId) {
+export async function resumeAutopilot(sessionId, { consentOverride = false } = {}) {
   if (!sessionId) throw new TypeError('sessionId required');
   const state = loadSession(sessionId);
   if (!state) throw new Error(`session not found: ${sessionId}`);
+
+  // ADR-004 execution gate. loadSession is a pure read, so this is still the
+  // side-effect-0 point. A session started under a one-shot override carries a
+  // consent receipt and resumes without needing the override re-supplied —
+  // otherwise a long run would die at its first checkpoint.
+  const consent = resolveAutopilotConsent({
+    operation: 'resume',
+    override: consentOverride === true || state.consentReceipt?.overridden === true,
+  });
+  if (!consent.allowed) return { ...buildBlockedResult(consent, sessionId), status: 'blocked' };
+
   if (state.phase === 'COMPLETED') return { phase: 'COMPLETED', status: 'noop' };
   if (state.phase === 'ABORTED') return { phase: 'ABORTED', status: 'noop' };
 

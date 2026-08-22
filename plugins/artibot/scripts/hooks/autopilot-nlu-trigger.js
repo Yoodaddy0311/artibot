@@ -22,6 +22,7 @@ import path from 'node:path';
 import { existsSync, readFileSync } from 'node:fs';
 import { getPluginRoot, parseJSON, readStdin, toFileUrl, writeStdout } from '../utils/index.js';
 import { createErrorHandler } from '../../lib/core/hook-utils.js';
+import { resolveAutopilotConsent } from '../../lib/autopilot/consent-gate.js';
 import { isMainEntry } from './_main-entry.js';
 
 const HOOK_NAME = 'autopilot-nlu-trigger';
@@ -30,20 +31,29 @@ const NO_TEAM_FLAG = /--no-team\b/i;
 
 /**
  * Read team + autopilot config (single source of truth: artibot.config.json).
- * Suggestion is gated by both: team-level kill switches AND a dedicated
- * `autopilot.enabled` so users can disable autopilot suggestion without
- * also disabling team auto-apply. Documented in `commands/autopilot.md`.
+ * Suggestion is gated by both: team-level kill switches AND the autopilot
+ * `suggest` gate. Documented in `commands/autopilot.md`.
+ *
+ * The autopilot half of the answer is **not computed here** — it is delegated
+ * to `lib/autopilot/consent-gate.js#resolveAutopilotConsent`. This hook used to
+ * own a private copy (`autopilot.enabled === false`), and that copy is exactly
+ * how the v4.4.1 doc/code gap arose: `commands/autopilot.md` promised a total
+ * kill-switch while the only implementation of it lived here and silenced
+ * suggestions alone. One owner, many readers.
+ *
  * @param {string} pluginRoot
+ * @param {(args: object) => { allowed: boolean }} [resolve] - injectable
+ *   resolver (tests); defaults to the shared consent gate.
  * @returns {boolean} true when autopilot suggestion is enabled
  */
-function isEnabled(pluginRoot) {
+function isEnabled(pluginRoot, resolve = resolveAutopilotConsent) {
   const cfgPath = path.join(pluginRoot, 'artibot.config.json');
   try {
     if (!existsSync(cfgPath)) return true;
     const cfg = JSON.parse(readFileSync(cfgPath, 'utf-8'));
     const team = cfg?.team ?? {};
     const autopilot = cfg?.autopilot ?? {};
-    if (autopilot.enabled === false) return false;
+    if (!resolve({ config: autopilot, operation: 'suggest' }).allowed) return false;
     return team.autoApply !== false && team.enabled !== false;
   } catch {
     // Fail-closed on malformed config: if a user wrote a config file at all,

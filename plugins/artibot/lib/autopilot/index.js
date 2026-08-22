@@ -29,6 +29,17 @@ export {
   PHASES,
 } from './engine.js';
 
+// ADR-004 consent gate — the single owner of the autopilot activation
+// vocabulary. Re-exported so no consumer re-reads the raw config flags.
+export {
+  buildBlockedResult,
+  buildConsentReceipt,
+  GATES,
+  loadAutopilotConfig,
+  OPERATION_GATES,
+  resolveAutopilotConsent,
+} from './consent-gate.js';
+
 // Preflight / recovery helpers referenced by commands/autopilot.md.
 // These live in _engine-helpers.js; re-exported here so the documented
 // autopilot orchestration API is actually present on the public barrel.
