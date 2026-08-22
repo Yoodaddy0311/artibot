@@ -21,7 +21,7 @@ agents:
   - "architect"
 tokens: "~3K"
 category: "analysis"
-source_hash: 190793d6
+source_hash: 4e113488
 ---
 
 # Repo Benchmarking
