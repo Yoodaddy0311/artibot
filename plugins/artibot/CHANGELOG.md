@@ -9,6 +9,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.48.0] — 2026-08-23
+
+v4.47.0 이후 13커밋 묶음. 축은 두 가지다: **래칫을 양방향으로** — 지금까지 게이트 베이스라인은
+"자라기만" 했고 해소된 항목은 문구로만 안내됐다. 해소된 항목이 남아 있으면 그 이름은 여전히
+면제되므로 같은 위반이 되돌아와도 조용히 통과한다(살아있는 재진입 허가증). 이제 축소도 FAIL 이다
+— 그리고 **allowlist 게이트의 fail-open 봉합** — 경로 allowlist 로 적용되는 게이트는 "규칙 위반
+없음"과 "규칙이 아예 없음"이 똑같이 조용하다. 등록 커버리지 자체를 게이트로 만들어 그 침묵을 깬다.
+사용자 데이터 파괴 1건(`syncTodo`)과 판정기 이중화 1건(auto-team)도 이 릴리스에서 닫는다.
+
+### Added
+- **스킬 설명 래칫 축소강제** — `lint-skill-descriptions.js#evaluateGates`. 베이스라인에 남은
+  화석(=이미 해소된 항목)이 있으면 FAIL 하고 재생성 명령(`npm run skill:lint:desc:baseline`)을
+  실패 메시지에 싣는다. description(R1/R2)·Red Flags(R4) 두 게이트 모두 적용.
+- **lib 레이어 등록 커버리지 게이트** — `tests/firewall/layer-registration-coverage.test.js`.
+  `lib/*` 1-depth 디렉터리는 eslint 5-Layer 블록 중 정확히 1곳에 등록되거나 명시 면제여야 한다
+  (초기 면제 = `runtime` 뿐, L5 는 제한할 상위가 없음). 실측 25개 중 미등록이던 **`lib/genesis`
+  를 L2 로 등록** — 그동안 레이어 규칙이 0개 적용되고 있었다.
+- **`/repo` 취득 헬퍼 코드화** — clone 소유자 단일화 + `sourceSha` 스탬프 + 캐시 충돌 시
+  `CACHE_CONFLICT` fail-closed.
+- **루트 문서 렌더링 게이트 + 동결 이력 절 단위 판정** — `validate-md-rendering` 루트 문서 편입
+  (474→478), 안전장치는 `ci-utils` 단일 소스로 공유. `partitionFrozenHistory` 로 릴리스 노트
+  동결 판정을 절 단위로 재설계(구설계는 버전 블록 사이에 비-버전 절이 끼면 동결이 전부 풀렸다).
+- **doc-links 루트 사각지대 2겹 폐쇄 + 한국어 카운트 게이트** — 스캔 집합과 containment 를 함께
+  루트로 확대(한쪽만 고치면 거짓 그린 — 변이로 입증), 한국어 카운트 패턴 6종 추가.
+- **marketplace 카운트 게이트 편입** — `validate-readme-claims.js#SCAN_TARGETS` 에
+  `marketplace.json` 추가 + `entryPoints.*.count` 단언(`tests/ci/marketplace-version-sync.test.js`).
+
+### Changed
+- **⚠ 행동 변화 — auto-team `bypassIntents` 가 실제로 억제하기 시작한다.** 판정 소유자를
+  `lib/cognitive/workflow-plan.js#evaluateTrigger` 하나로 단일화하면서, 그동안 훅이 소비하지 않아
+  사문이던 `minComplexity`·`bypassIntents`·판정 로직이 실효화됐다. explain/diagnose 계열 요청에서
+  자동팀 제안이 이전보다 줄어들 수 있다(설정대로 동작하는 것이 정상 상태).
+- **⚠ 행동 변화 — `syncTodo` 비문자열 입력이 `ok:false` 로 표면화된다.** 이전에는 조용히
+  `''` 로 강제변환돼 성공(`ok:true`)으로 보고됐다. 호출부가 반환값을 무시하고 있었다면 이제
+  실패가 보인다.
+- 베이스라인 JSON 의 `generatedAt` 제거 — 아무도 읽지 않는 벽시계 필드가 병렬 브랜치 재생성 시
+  100% 충돌원이었다. 생성 이력은 커밋이 갖는다.
+- 고아 config 키 2종 제거 — `persistentTeam`·`excludeTrivial`(소비자 0).
+- 스킬 `source_hash` 60건 정리 — 43건 재생성 + 17건 최초 부여.
+- CI actions 그룹 4종 업데이트(dependabot).
+
+### Fixed
+- **`syncTodo` 파괴적 쓰기** — `lib/planning/artifacts.js#syncTodo` 의 `: ''` 강제변환이
+  `plan-tracker.js#parsePlan` 의 타입가드를 무력화해, 비문자열 입력에서 기존 완료 상태를 빈
+  배열로 무증상 덮어쓰고 있었다. 유효 문자열 경로에서도 tasks 통째 교체로 완료 플래그가
+  소실되던 일반 경로까지 정규화 텍스트 병합으로 수리.
+- **`/plan`·`/ultraplan` `--size` 무실효** — `lib/planning/session-sizer.js#sizePlan` 이
+  `opts.band` 만 읽어 `--size` 4실행이 바이트 동일이었다. quick|session|epic 프리셋 바인딩
+  (우선순위 `band` > `size` > 기본), 부재·undefined 는 기존대로 통과.
+- **PRD 미등록 섹션 소실** — `renderPrdSections` 가 등록 9종만 순회해 그 외 섹션을 조용히
+  버렸다. 미등록 키를 정렬 순서로 후미 첨부(기존 "빈 섹션도 렌더" 계약은 유지).
+- **auto-team 판정 divergence 4건** — 훅이 자체 판정을 들고 있어 구성 케이스 4/4 에서
+  `workflow-plan` 과 결론이 갈렸다. 훅은 렌더러로 축소, stderr WARN 은 보존(조용한 종료로
+  유일한 운영자 신호를 지우지 않는다), 절대 발화 수 하한 게이트 동반.
+- **marketplace 카운트 드리프트** — `description` 75 / `entryPoints.commands.count` 72 →
+  실측 **78**(README 는 이미 78이라 같은 파일 안에서 세 값이 달랐다), `rules` 8 → 10.
+- **orchestrator ↔ team shutdown 정책 모순** — 실측 10곳 지점별 분류 후 정합(프로토콜 메커니즘
+  설명 구간은 불가침으로 보존). `Task` 도구 fallback 서술을 실존 도구명(`TaskCreate`/`TaskUpdate`)
+  으로 교정 — 유령 `Task()` 재삽입 금지.
+- `skills/repo-benchmarking/SKILL.md` N/A 4원칙 명문화.
+- README 실측 드리프트 교정 — 훅 등록 24→25, 훅 스크립트 65→68, CI 스크립트 6→20,
+  슬래시 커맨드 75→78, 에이전트 총계 28 명시. 루트 README 죽은 링크 1건 제거.
+
 ## [4.47.0] — 2026-08-19
 
 autopilot ap-20260818 골(설치·게이트 견고화, WS-A~D) + 인용 해소 하드 게이트 + 설치 성능
