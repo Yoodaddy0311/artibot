@@ -66,6 +66,13 @@ export {
 } from './safety.js';
 
 export {
+  FAST_PROFILE_DEFAULTS,
+  normalizeFastProfile,
+  areAffectedPathsConflicting,
+  buildFastFanoutPlan,
+} from './fast-profile.js';
+
+export {
   generatePRD,
   renderPRD,
   slugify,

@@ -1,6 +1,6 @@
 ---
-description: (Artibot) Autonomous long-running mode with PRD-first workflow, parallel execution, cross-check, verification, and completion report
-argument-hint: <task description> [--max 4h] [--budget 2000000] [--no-tui]
+description: (Artibot) Autonomous long-running mode with PRD-first workflow, parallel execution, cross-check, verification, completion report, and an opt-in fast fan-out profile
+argument-hint: <task description> [--max 4h] [--budget 2000000] [--fast|-fast] [--no-tui]
 allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, Agent, TaskCreate, TaskUpdate, TaskList, SendMessage, TaskGet, Workflow]
 toolset: team
 ---
@@ -43,6 +43,7 @@ When the prompt contains `[artibot:hint recommend=autopilot]`, surface to the us
 | `--no-notify` | off | 완료/pause/iteration/danger 알림 비활성화 (`notifyDanger`만 안전 직결 시 예외 발사) |
 | `--no-tui` | off | default 모드의 라이브 TUI 자동 렌더 비활성 (night 모드는 자동 off) |
 | `--no-team` | off | 병렬 팀 비활성화 (단일 메인 실행) |
+| `--fast` / `-fast` | off | **Fast fan-out profile** — 동의어이며 모두 내부 `options.fast = true`로 정규화된다. PLAN의 의존성 그래프에서 검증된 독립 작업만 최대한 동시 실행한다. 안전한 병렬 구간이 없으면 표준 경로로 폴백하며, 속도 배수는 보장하지 않는다. |
 | `--checkpoint <interval>` | `30m` | 체크포인트(WIP commit) 주기 |
 | `--worktree` | off | git worktree 격리 사용 (P0-3, 기본 브랜치: `autopilot/<sessionId>`) |
 | `--runner [team\|dynamic]` | `team` | **ADR-003** — Phase 2 EXECUTE 러너 수동 선택. `dynamic` = 하네스 `Workflow` 도구 스크립트 런(결정론, 동형 반복 작업용). 명시 지정은 항상 최우선(Stage 2 자동선택도 무시). 세션 시작 시 1회 고정 — resume에서 재평가 없음 |
@@ -53,6 +54,51 @@ When the prompt contains `[artibot:hint recommend=autopilot]`, surface to the us
 | `--max-iterations <n>` | `3` | Phase 2 → 5 → evaluator 재진입 횟수 cap. 1~10 범위. |
 | `--keep-awake` / `--no-keep-awake` | `--keep-awake` (on) | OS sleep 방지 (Win SetThreadExecutionState / macOS caffeinate / Linux systemd-inhibit). 세션 시작 시 acquire, 완료/abort 시 release. |
 | `--keep-display` | off | 모니터까지 켜둠 (배터리 소모↑). 기본은 시스템만 깨움(디스플레이는 OS 설정대로 어두워질 수 있음). |
+
+## Fast Fan-out Profile (`--fast` / `-fast`)
+
+`--fast`와 호환 별칭 `-fast`는 모두 `options.fast = true`로 정규화된다. Fast는 "더 많은 에이전트" 자체가 아니라 **의존성 그래프의 독립 wave를 가능한 범위까지 동시에 처리**하는 opt-in 실행 프로필이다. 목표는 총 경과 시간을 줄이는 것이며, 모든 작업을 무리하게 병렬화하거나 10배 속도를 약속하지 않는다.
+
+**설계 선택:** 독립 Fast 명령은 만들지 않는다. PRD, 동의, budget, pause/resume, checkpoint, rollback, report를 중복 구현하면 세션 복구 경계가 갈라지므로, `/autopilot -fast`와 `/autopilot --fast`가 같은 lifecycle 안에서 실행 프로필만 바꾸는 편이 더 안전하고 운영 효율적이다.
+
+### 체감 차이 — 표준 vs `--fast`
+
+| 관점 | 표준 Autopilot | `--fast` / `-fast` Autopilot |
+|------|----------------|--------------------|
+| Phase 2 실행 | 팀이 작업을 판단해 병렬화 | PLAN의 독립 wave를 먼저 만들고 가능한 작업을 한꺼번에 fan-out |
+| 동시성 | 작업 중 동적으로 결정 | `min(적격 작업 수, availableParallelism × agentsPerCpu, agent 상한 16, worktree 상한 12)`에서 **계획** — 수치는 planned telemetry에 기록 |
+| 파일 격리 | 요청 시 세션 단위 `--worktree` | wave별 worker worktree를 계획(최대 12개). `--worktree` 조합 시 세션 integration worktree의 고정 cwd/base SHA를 각 worker 기준점으로 전달하고, 실제 worker 생성·정리·통합은 실행 driver가 수행 |
+| 짧아지는 구간 | 일반 병렬 팀의 이득 | 서로 독립적인 구현·테스트·문서 작업이 많은 Phase 2. 예: 8개가 각각 10분 걸리고 병합 비용이 작으면 순차 80분 대신 약 10~20분 + 통합 시간으로 단축될 수 있음 |
+| 그대로 직렬인 구간 | 계획, 최종 병합, 전체 CI, 위험 작업 | 동일 — 충돌 해결과 전체 검증은 안전을 위해 직렬 유지 |
+| 비용·자원 | 기본 팀 사용량 | 동시 에이전트·worktree·토큰 사용량 증가 가능. token budget과 agent/worktree cap을 유지하고, 디스크 부족 시 driver가 표준 경로로 폴백 |
+| 속도 약속 | 작업 형태에 따라 다름 | **최소 10배를 보장하지 않음.** 동등 길이 작업의 계획상 추정치만 기록하며, 실제 측정·보고는 실행 driver의 책임 |
+
+따라서 `--fast`의 이득은 **같은 DAG wave에서 파일 소유권이 겹치지 않는 작업 묶음**에서 가장 크다. 한 파일을 함께 고치거나, 의존성 사슬이 길거나, 전역 CI가 병목이면 wave 수가 늘거나 직렬 실행되어 체감 속도는 제한된다.
+
+### 실행 계약
+
+1. **PLAN이 DAG를 만든다.** 각 후보 작업은 안정적인 ID, `dependsOn`/`dependencies`, `independent`, `affectedPaths`, risk, worktree 적격 여부를 기록하고 `state.fastTasks`에 보존한다. 엔진은 준비된 작업만 위상 wave로 묶고, 같은 wave에서 파일 소유권이 겹치면 conflict group으로 직렬화한다.
+2. **증명된 작업만 fan-out한다.** low/medium risk, repo-relative `affectedPaths`, `independent: true`, `worktreeEligible: true`인 작업만 fast wave에 들어간다. 선행 작업이 끝난 의존 작업은 다음 wave에서 실행할 수 있다. ID 누락·중복, 미해결 의존성, cycle, fast 비적격 선행 작업, 위험/불명 경로는 사유와 함께 직렬 큐로 보낸다.
+3. **세션 integration과 worker를 분리한다.** `--fast --worktree` 조합이면 세션 integration worktree를 최초 한 번 만들고 고정 cwd/`baseSha`를 resume에서도 재사용한다. 엔진은 wave마다 이 기준점을 가진 고유 worker ID·branch/worktree 계획을 반환한다. 동시 worker 수는 `min(계획된 병렬도, maxWorktrees=12)`다. `--worktree`가 없으면 integration 기준점은 `null`일 수 있으므로, **실행 driver가** 안전한 기준점을 만들 수 없거나 디스크/CPU 부족·생성 실패가 발생하면 격리를 추측하지 말고 표준 경로로 폴백해야 한다.
+4. **통합은 driver가 검증·직렬화한다.** driver는 worker 결과의 owner·변경 경로·검증 증거를 수집하고 통합 기준 tree(`--worktree`이면 세션 integration worktree)에 하나씩 통합한다. 충돌 없는 결과만 다음 단계로 넘기며, ownership 이탈·불확실한 병합·high-risk 변경은 자동 통합하지 않고 PAUSED로 전환해야 한다. 전체 CI와 최종 수락 기준은 모든 wave 뒤 같은 통합 기준 tree에서 수행한다.
+5. **관측 가능해야 한다.** 엔진 telemetry와 `:status`/`:tail`에는 fast 요청 여부, requested/eligible/planned parallelism, planned worktree, fallback/serial reason 및 `reused`를 남긴다. 작업 수와 동등 길이 작업 기준 `estimatedSpeedup`은 `state.fastProfile`/`instruction.fast`의 **계획값**이며 측정값이나 SLA가 아니다. 실행 driver가 실제 wall-clock 결과를 수집하지 않았다면 성능 향상을 주장하지 않는다.
+6. **기존 lifecycle을 재사용한다.** fast는 별도 세션/명령/안전 모델을 만들지 않는다. 기존 pre-flight, feature lock, checkpoint/WIP commit, budget·goal·danger pause, cross-check, 전체 CI, completion report 및 session-store를 그대로 사용해 빠른 실행이 resume·rollback·감사의 경계를 깨지 않게 한다.
+
+### 제약, 폴백, 재개
+
+| 상황 | `--fast` / `-fast` 동작 |
+|------|---------------|
+| PLAN에 작업 metadata가 없거나 적격 작업이 2개 미만 | 표준 team 경로로 실행하고 `no-tasks` 또는 `fewer-than-two-eligible-tasks` 사유 기록 |
+| `affectedPaths`가 겹침 | 충돌 group만 `conflict-serialized`로 직렬화한다. 안전한 concurrent pair가 하나도 없으면 표준 경로 + `no-safe-parallelism` 기록 |
+| 절대/drive/UNC/home/traversal 경로 | worker 격리에 쓰지 않고 `unsafe-affected-path`로 직렬화. glob은 literal prefix 이전 디렉터리부터 보수적으로 충돌 판정 |
+| 작업 ID 누락·중복, unresolved dependency, DAG cycle | 각각 `missing-id`, `duplicate-id`, `unresolved-dependency`, `dependency-cycle`로 직렬화. fast 비적격 선행 작업의 후속은 `dependency-not-fast`로 직렬화 |
+| `--no-team` 동시 사용 | fast 엔진은 `team-disabled` telemetry와 표준 `team-create` instruction을 반환한다. command driver가 별도로 `--no-team`의 단일 실행 정책을 강제한다. |
+| `--runner dynamic` 동시 사용 | 명시 runner를 우선한다. fast fan-out은 비적격이며 `explicit-runner-dynamic` 사유를 기록하고 dynamic 실행 |
+| autoSelect가 `dynamic-run`을 선택 | fast fan-out은 비적격이며 `auto-runner-dynamic` 사유를 기록하고 자동 선택된 dynamic 실행 |
+| `:plan` 모드 | INTAKE 뒤 종료하므로 fast 요청과 PRD만 저장한다. PLAN/그래프/fast profile은 이후 Phase 1·2가 실제로 실행될 때 생성한다. |
+| `:night` 모드 | 동일한 fast 계약으로 실행하며 알림 정책만 night 규칙을 따름 |
+| `:resume` | **EXECUTE에 재진입할 때만**, shape-valid한 저장 `executeRunner`와 `fastProfile` snapshot을 재사용하고 현재 CPU·config로 runner/그래프/병렬도를 다시 선택하거나 확대하지 않는다. 이 경우 `fast-profile-reused` telemetry와 `reused: true`를 기록한다. snapshot이 없거나 malformed일 때만 task metadata로 보수적 재계획하며 unsafe면 표준 경로로 폴백한다. 살아 있는 에이전트는 가정하지 않는다. |
+| 예산·위험·테스트/빌드 실패 guard 발동 | fast 여부와 무관하게 기존 pause/abort 정책이 우선 |
 
 ## Sleep Prevention (v4.12.0)
 
@@ -86,7 +132,7 @@ When the prompt contains `[artibot:hint recommend=autopilot]`, surface to the us
 Parse `$ARGUMENTS`:
 - `task-description`: 자율 처리할 작업 설명 (필수, `:resume`/`:status`/`:abort` 제외)
 - subcommand 접미어: `night` / `plan` / `resume` / `status` / `abort` / `list` 중 하나 (없으면 `default`)
-- `--max`, `--budget`, `--no-notify`, `--no-tui`, `--no-team`, `--checkpoint`, `--worktree`, `--detached`, `--runner`: 위 표 참조
+- `--max`, `--budget`, `--no-notify`, `--no-tui`, `--no-team`, `--fast` / `-fast`, `--checkpoint`, `--worktree`, `--detached`, `--runner`: 위 표 참조
 - `session-id`: `:resume` / `:abort` / `:status` 에서 사용 (`ap-YYYYMMDD-HHMMSS` 형식)
 - `--goal`, `--validation-command`, `--max-iterations`: v4.6.0 Goal-driven mode (아래 "Goal-driven Mode" 섹션 참조)
 
@@ -184,7 +230,8 @@ Goal Contract 슬롯이 없는 PRD는 기존 7-phase 단방향 흐름 (Phase 0~6
    ```
 2. `$ARGUMENTS` 파싱하여 `{ task, mode, options }` 분해:
    - `mode`: `default` | `night` | `plan` | `resume` | `status` | `abort`
-   - `options`: `{ maxDuration, budget, notify, team, checkpoint }`
+   - `options`: `{ maxDuration, budget, notify, team, checkpoint, fast }`
+   - `--fast`와 `-fast`는 모두 `options.fast = true`로 정규화한다. `fast-profile` public API는 boolean `fast`만 소비하며 별칭을 다시 해석하지 않는다.
    - `sessionId`: `:resume`/`:status`/`:abort` 인 경우만
 
 ### Step 1.5 — Pre-flight Gate (default 모드 자동)
@@ -252,6 +299,7 @@ if (pfInstr?.suppress) { /* warnings: state.preflightWarnings에 누적 + 계속
 #### Phase 1 — PLAN
 - `Agent(subagent_type="artibot:planner", prompt="[Autopilot Phase 1] PRD: {prdPath}\n\n분해 + 위험 식별 + 병렬 팀 구성 제안\n\n{보고 계약}")`
   <!-- model: model-policy 해석 — 역할 frontier 티어 -->
+- `options.fast === true`면, planner 결과를 `state.fastTasks` (또는 `options.fastTasks`)로 저장한다. 각 작업은 stable ID, `dependsOn`/`dependencies`, `independent: true`, non-empty repo-relative `affectedPaths`, `risk`, `worktreeEligible`를 가져야 한다. 엔진은 dependency를 위상 wave로 해석한다. metadata가 불완전하거나 경로가 unsafe하면 fast 실행을 추측하지 말고 사유와 함께 직렬화한다.
 
 #### Phase 2 — PARALLEL EXECUTE
 - EXECUTE 러너는 `engine.resolveExecuteRunner(state)`가 결정한다 (**ADR-003**). 우선순위 사다리:
@@ -260,7 +308,10 @@ if (pfInstr?.suppress) { /* warnings: state.preflightWarnings에 누적 + 계속
   3. **Stage 2 자동선택**: autoSelect=true **그리고** 세션 시작 시 `options.recommendedRunner === 'workflow'`가 주입된 경우 → `'dynamic-run'`
   4. 그 외 전부 → `'team-create'`
 - **recommendedRunner 주입 규칙 (Step 1 파싱 시)**: 세션 시작 프롬프트에 `[artibot:hint recommend=workflow]` 디렉티브(동형 반복 감지 — `buildWorkflowPlan.recommendation`의 advisory 표면)가 있으면 `options.recommendedRunner = 'workflow'`로 전달한다. 엔진(L2)은 분류기(L4)를 import하지 않고 이 주입값만 소비한다 — 재계산 금지.
-- **`type: 'team-create'`** (기본): 러너 이름은 계약 값이고(`lib/autopilot/engine.js:301`) 생성되는 팀은 없다 — 세션의 암묵적 단일 팀에 `Agent(name="autopilot-{sessionId}-{role}", subagent_type=…)`로 팀원을 병렬 스폰한다. 30분(또는 `--checkpoint`)마다 WIP commit: `git commit -m "wip(autopilot): phase2 checkpoint {sessionId}"`. SHA를 `engine.recordCheckpoint(sessionId, sha)`로 기록.
+- **`type: 'team-create'`** (기본): 러너 이름은 `lib/autopilot/engine.js#runPhase2Execute`의 계약 값이고 생성되는 팀은 없다 — 세션의 암묵적 단일 팀에 `Agent(name="autopilot-{sessionId}-{role}", subagent_type=…)`로 팀원을 병렬 스폰한다. 30분(또는 `--checkpoint`)마다 WIP commit: `git commit -m "wip(autopilot): phase2 checkpoint {sessionId}"`. SHA를 `engine.recordCheckpoint(state, { sha, label: 'phase2-wip' })`로 기록.
+- **`options.fast === true`**: `buildFastFanoutPlan({ fast: true, tasks, cpuCount, limits: config.autopilot.fast })` 결과가 적격이면 DAG의 topological wave를 가능한 한 동시에 **계획**한다. `cpuCount`는 `os.availableParallelism()`(미지원 시 `os.cpus().length`, 실패 시 1)에서 구한다. 계획 동시성은 `min(eligibleTaskCount, cpuCount × agentsPerCpu, hardMaxAgents=16, maxWorktrees=12)`이며, 동시 write worker 수는 `maxWorktrees=12`를 넘지 않는다. 엔진은 `state.fastProfile`/`instruction.fast`에 requestedTaskCount, eligibleTaskCount, plannedParallelism, estimatedSpeedup, worktrees.count, serialReasons를 기록한다. planned telemetry에는 `requested`, requested/eligible/planned parallelism, worktrees, serialReasons, fallbackReason, `reused`를 기록한다. 새 profile은 `fast-profile-planned`, 저장 snapshot을 재사용한 profile은 `fast-profile-reused`와 `reused: true` telemetry로 구분한다. `estimatedSpeedup`은 동등 길이 작업의 스케줄 추정치일 뿐 측정값이나 SLA가 아니다. `--worktree` 조합 시 **실행 driver는** 저장된 integration cwd/`baseSha`에서 각 worker의 고유 branch/worktree 생성, agent 배정, owner·변경 경로·검증 증거 검사, 직렬 통합 및 worker 정리를 수행한다.
+- **fast 재개**: EXECUTE 재진입 시 shape-valid `state.executeRunner`와 `state.fastProfile` snapshot이 있으면 현재 CPU·config·task metadata로 runner/eligibility를 다시 계산하거나 병렬도를 늘리지 않고 저장값을 그대로 사용한다. snapshot이 없거나 malformed일 때만 task metadata로 보수적으로 재계획하며, metadata가 없거나 unsafe하면 표준 instruction으로 폴백한다.
+- **fast 폴백**: task metadata 부재(`no-tasks`), 적격 작업 2개 미만(`fewer-than-two-eligible-tasks`), 안전한 concurrent pair 부재(`no-safe-parallelism`), `--no-team`, 명시 `--runner dynamic`(`explicit-runner-dynamic`), 또는 autoSelect의 `dynamic-run`(`auto-runner-dynamic`)이면 기존 runner 우선순위를 유지한다. 일부 ownership 충돌은 해당 conflict group만 직렬화한다. ID 누락/중복, 미해결 dependency, cycle, 비적격 선행 작업, unsafe path는 `missing-id`/`duplicate-id`/`unresolved-dependency`/`dependency-cycle`/`dependency-not-fast`/`unsafe-affected-path`로 직렬화한다. 이때 엔진은 extra agent/worktree가 없는 표준 instruction 및 `fallbackReason`/`serialReasons`를 반환한다. worktree 생성·병합 단계의 실패 처리는 driver가 수행하며, fast는 위험·비용·merge guard를 우회하지 않는다.
 - **`type: 'dynamic-run'`** (`--runner dynamic`): 팀원 스폰 대신 **하네스 `Workflow` 도구**로 스크립트 런 — Phase 1 PLAN의 작업 단위를 워크리스트로 매핑(pipeline() 기본), 세션 잔여 예산을 Workflow budget으로 전달(이중 계상 금지), checkpoint는 **run 경계**(시작 전/완료 후) WIP commit. **폴백**: 실패/빈 결과 시 같은 Phase를 team-create로 1회 재시도 + `runner-fallback` 이벤트 기록, 재시도도 실패 시 기존 PAUSED 경로.
 
 #### Phase 3 — CROSS_CHECK
@@ -362,6 +413,8 @@ DATA POLICY: ndjson 파일은 로컬에만 존재. 외부 송신 없음.
 
 ## Multi-session Orchestration (P0-3)
 
+`--fast`는 이 기능을 대체하지 않는다. `--fast --worktree`에서 세션 worktree는 고정 integration cwd/`baseSha`가 되고, fast instruction이 적격 concurrent write wave에 요청하는 **worker worktree**는 그 기준점에서 분기되는 제한된 수의 임시 작업 공간이다. resume은 동일 integration 경로/SHA를 재사용한다. 실제 worker worktree lifecycle은 engine이 아닌 실행 driver가 이 instruction에 따라 수행한다.
+
 `--worktree` 옵션 시 git worktree로 세션 격리 + 파일 lock으로 동시 N 자율 세션 안전 운영.
 
 ### 동작
@@ -412,10 +465,13 @@ DATA POLICY: ndjson 파일은 로컬에만 존재. 외부 송신 없음.
 | context window > 85% | 자동 strategic-compact + checkpoint |
 | 제한시간 초과 (`--max`) | 진행 상태 freeze + Phase 6 보고서 작성 후 종료 |
 | 토큰 예산 초과 (`--budget`) | 동일 (freeze + 보고서) |
+| fast worktree 병합에서 ownership 밖 변경 또는 해소 불가 충돌 | engine은 계획만 반환한다. 실행 driver는 자동 병합을 중단하고 PAUSED + owner/경로/증거를 큐와 telemetry에 기록해야 함 |
 
 ## Config
 
 `artibot.config.json` → `autopilot` 섹션 참조 (`enabled`, `defaultMode`, `limits`, `safety`, `phases`, `paths`, `notification`).
+
+`autopilot.fast`는 fast fan-out의 운영 설정이다. 기본은 `{ hardMaxAgents: 16, agentsPerCpu: 2, maxWorktrees: 12, maxRisk: "medium" }`이며, config 값은 immutable absolute cap(agents 16, worktrees 12, agentsPerCpu 4)을 넘을 수 없고 maxRisk는 `medium`을 넘을 수 없다. 예를 들어 `agentsPerCpu`는 기본 2에서 최대 4까지 조정할 수 있다. malformed 값은 안전한 기본값으로 정규화되고, high/critical risk는 fast wave에 넣지 않는다.
 
 비활성화: `--no-autopilot` 플래그 또는 config `autopilot.enabled: false`.
 
@@ -430,15 +486,16 @@ DATA POLICY: ndjson 파일은 로컬에만 존재. 외부 송신 없음.
 | Task | {요약} |
 | PRD | {prdPath} |
 | Max | {duration} / {budget} tokens |
+| Execution profile | standard / fast (planned parallelism, worktrees, estimated speedup 또는 fallback reason) |
 
 **Phase 진행 표 (`:status` 또는 보고서)**
 
-| Phase | 상태 | 소요 | 변경 파일 | 검증 |
-|-------|------|-----|----------|------|
-| 0 INTAKE | DONE | 2m | docs/PRD/... | - |
-| 1 PLAN | DONE | 3m | - | - |
-| 2 EXECUTE | IN_PROGRESS | 14m | 7 | - |
-| ... | ... | ... | ... | ... |
+| Phase | 상태 | 소요 | 변경 파일 | 검증 | Fast 관측값 |
+|-------|------|-----|----------|------|-------------|
+| 0 INTAKE | DONE | 2m | docs/PRD/... | - | - |
+| 1 PLAN | DONE | 3m | - | - | 8 requested / 6 eligible |
+| 2 EXECUTE | IN_PROGRESS | 14m | 7 | - | planned 6 parallel / 6 worktrees / estimated 4.2x |
+| ... | ... | ... | ... | ... | ... |
 
 **완료 시**: `reports/AUTOPILOT/<sessionId>.md` 경로 + Phase 표 + 큐된 질문 + Next Action.
 

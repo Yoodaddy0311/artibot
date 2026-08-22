@@ -5,7 +5,7 @@
  * without the field) stays on the legacy `team-create` instruction so
  * Stage 1 ships with zero default-behavior change.
  */
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -14,11 +14,13 @@ import {
   abortAutopilot,
   removeWorktree,
   resolveExecuteRunner,
+  resumeAutopilot,
   runPhase1Plan,
   runPhase2Execute,
   startAutopilot,
 } from '../../lib/autopilot/index.js';
-import { deleteSession, loadSession } from '../../lib/autopilot/session-store.js';
+import { planFastExecution, resolveFastCpuCount } from '../../lib/autopilot/fast-execution.js';
+import { deleteSession, loadSession, saveSession } from '../../lib/autopilot/session-store.js';
 
 function gitAvailable() {
   try {
@@ -85,6 +87,7 @@ function uniqueId(label) {
 }
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   for (const id of sessionsToClean) {
     try { await abortAutopilot(id, { graceful: true }); } catch { /* ignore */ }
     try { removeWorktree(id, { force: true, cwd: tempRepo }); } catch { /* ignore */ }
@@ -167,6 +170,49 @@ describe('resolveExecuteRunner — Stage 2 auto-select ladder (config-injected)'
     const state = { options: { recommendedRunner: 'workflow' } };
     expect(resolveExecuteRunner(state)).toBe('team-create');
   });
+
+  it('should reuse a saved runner selection when the auto-select config changes', () => {
+    const state = {
+      options: { recommendedRunner: 'workflow' },
+      executeRunner: { runner: 'dynamic-run', reason: 'auto-runner-dynamic' },
+    };
+
+    expect(resolveExecuteRunner(state, { autoSelect: false })).toBe('dynamic-run');
+  });
+});
+
+describe('resolveFastCpuCount', () => {
+  it('uses options.cpuCount only as an explicit test override', () => {
+    expect(resolveFastCpuCount({ cpuCount: 3 })).toBe(3);
+    expect(resolveFastCpuCount({})).toBeGreaterThan(0);
+  });
+
+  it('prefers availableParallelism and falls back to cpus when it is unusable', () => {
+    const available = vi.spyOn(os, 'availableParallelism').mockReturnValue(0);
+    const cpus = vi.spyOn(os, 'cpus').mockReturnValue([{}, {}, {}, {}]);
+
+    expect(resolveFastCpuCount()).toBe(4);
+    expect(available).toHaveBeenCalledOnce();
+    expect(cpus).toHaveBeenCalledOnce();
+  });
+
+  it('does not trust a persisted session cpuCount as production capacity', () => {
+    vi.spyOn(os, 'availableParallelism').mockReturnValue(2);
+    const fastTasks = Array.from({ length: 8 }, (_, index) => ({
+      id: `cpu-${index + 1}`,
+      independent: true,
+      affectedPaths: [`src/cpu-${index + 1}.js`],
+      risk: 'low',
+      worktreeEligible: true,
+    }));
+
+    const fast = planFastExecution({
+      options: { fast: true, cpuCount: 999, fastTasks },
+    }, 'team-create');
+
+    expect(fast.cpuCount).toBe(2);
+    expect(fast.eligibleParallelism).toBe(4);
+  });
 });
 
 describe('runPhase2Execute — runner branching (ADR-003 Stage 1)', () => {
@@ -193,6 +239,356 @@ describe('runPhase2Execute — runner branching (ADR-003 Stage 1)', () => {
   it('should keep team-create for explicit runner="team"', async () => {
     const inst = await phase2Instruction({ runner: 'team' }, 'team');
     expect(inst.type).toBe('team-create');
+  });
+
+  it('should turn an eligible --fast task wave into isolated parallel team instructions', async () => {
+    const inst = await phase2Instruction({
+      fast: true,
+      cpuCount: 2,
+      fastTasks: [
+        { id: 'api', independent: true, affectedPaths: ['src/api/**'], risk: 'low', worktreeEligible: true },
+        { id: 'ui', independent: true, affectedPaths: ['src/ui/**'], risk: 'low', worktreeEligible: true },
+        { id: 'tests', independent: true, affectedPaths: ['tests/**'], risk: 'medium', worktreeEligible: true },
+      ],
+    }, 'fast-eligible');
+
+    expect(inst.type).toBe('team-create');
+    expect(inst.fast).toMatchObject({ enabled: true, profile: 'fast' });
+    expect(inst.fast.plannedParallelism).toBeGreaterThan(1);
+    expect(inst.fast.worktrees.count).toBeGreaterThan(0);
+    expect(inst.fast.serialReasons).toEqual([]);
+    expect(inst.teamHint).toMatchObject({ parallel: true, profile: 'fast' });
+    expect(inst.teamHint.plannedParallelism).toBe(inst.fast.plannedParallelism);
+    expect(inst.instructions.join('\n')).toContain('독립 작업 wave');
+    expect(inst.instructions.join('\n')).toContain('파일 소유권');
+  });
+
+  it('should retain the session integration worktree for --fast worker instructions', async () => {
+    if (!gitAvailable()) return;
+    const inst = await phase2Instruction({
+      fast: true,
+      useWorktree: true,
+      worktreeCwd: tempRepo,
+      fastTasks: [
+        { id: 'api', independent: true, affectedPaths: ['src/api/**'], risk: 'low', worktreeEligible: true },
+        { id: 'ui', independent: true, affectedPaths: ['src/ui/**'], risk: 'low', worktreeEligible: true },
+      ],
+    }, 'fast-integration-worktree');
+
+    expect(inst.worktreePath).toEqual(expect.any(String));
+    expect(inst.fast.worktreePlan.integration).toMatchObject({
+      cwd: inst.worktreePath,
+      baseSha: expect.stringMatching(/^[0-9a-f]{40}$/),
+    });
+    expect(inst.fast.worktreePlan.waves[0].workers[0]).toMatchObject({
+      baseCwd: inst.worktreePath,
+      baseSha: expect.stringMatching(/^[0-9a-f]{40}$/),
+    });
+    expect(inst.cwdHint).toBe(inst.worktreePath);
+  });
+
+  it('should reuse the same integration worktree and base SHA on an EXECUTE resume', async () => {
+    if (!gitAvailable()) return;
+    const r = await start({
+      task: 'runner test fast integration resume',
+      mode: 'default',
+      options: {
+        fast: true,
+        useWorktree: true,
+        worktreeCwd: tempRepo,
+        fastTasks: [
+          { id: 'api', independent: true, affectedPaths: ['src/api/**'], risk: 'low', worktreeEligible: true },
+          { id: 'ui', independent: true, affectedPaths: ['src/ui/**'], risk: 'low', worktreeEligible: true },
+        ],
+      },
+      sessionId: uniqueId('fast-integration-resume'),
+    });
+    track(r.sessionId);
+    const state = loadSession(r.sessionId);
+    runPhase1Plan(state);
+    const first = runPhase2Execute(state);
+    const resumed = runPhase2Execute(loadSession(r.sessionId));
+
+    expect(resumed.worktreePath).toBe(first.worktreePath);
+    expect(resumed.cwdHint).toBe(first.cwdHint);
+    expect(resumed.fast.worktreePlan.integration).toEqual(first.fast.worktreePlan.integration);
+  });
+
+  it('should persist requested, eligible, planned, and worktree fast telemetry in session state', async () => {
+    const r = await start({
+      task: 'runner test fast telemetry',
+      mode: 'default',
+      options: {
+        fast: true,
+        cpuCount: 2,
+        fastTasks: [
+          { id: 'one', independent: true, affectedPaths: ['src/one/**'], risk: 'low', worktreeEligible: true },
+          { id: 'two', independent: true, affectedPaths: ['src/two/**'], risk: 'low', worktreeEligible: true },
+        ],
+      },
+      sessionId: uniqueId('fast-telemetry'),
+    });
+    track(r.sessionId);
+    const state = loadSession(r.sessionId);
+    runPhase1Plan(state);
+    runPhase2Execute(state);
+    const persisted = loadSession(r.sessionId);
+
+    expect(persisted.fastProfile).toMatchObject({
+      requested: true,
+      requestedParallelism: 2,
+      eligibleParallelism: 2,
+      plannedParallelism: 2,
+      worktrees: { required: true, count: 2 },
+      serialReasons: [],
+    });
+  });
+
+  it('should retain the standard runner when --fast has unsafe or conflicting work', async () => {
+    const inst = await phase2Instruction({
+      fast: true,
+      fastTasks: [
+        { id: 'same-a', independent: true, affectedPaths: ['src/shared.js'], risk: 'low', worktreeEligible: true },
+        { id: 'same-b', independent: true, affectedPaths: ['src/shared.js'], risk: 'low', worktreeEligible: true },
+      ],
+    }, 'fast-conflict');
+
+    expect(inst.type).toBe('team-create');
+    expect(inst.fast).toMatchObject({ enabled: false, profile: 'standard' });
+    expect(inst.fast.serialReasons.length).toBeGreaterThan(0);
+    expect(inst.teamHint).not.toHaveProperty('profile', 'fast');
+    expect(inst.instructions.join('\n')).not.toContain('독립 작업 wave별');
+  });
+
+  it('should make explicit dynamic runner win over --fast and record the safe fallback', async () => {
+    const inst = await phase2Instruction({
+      fast: true,
+      runner: 'dynamic',
+      fastTasks: [
+        { id: 'one', independent: true, affectedPaths: ['src/one/**'], risk: 'low', worktreeEligible: true },
+        { id: 'two', independent: true, affectedPaths: ['src/two/**'], risk: 'low', worktreeEligible: true },
+      ],
+    }, 'fast-dynamic');
+
+    expect(inst.type).toBe('dynamic-run');
+    expect(inst.fast).toMatchObject({ enabled: false, profile: 'standard' });
+    expect(inst.fast.serialReasons).toContain('explicit-runner-dynamic');
+  });
+
+  it('should label an auto-selected dynamic runner without claiming it was explicit', () => {
+    const state = {
+      options: {
+        fast: true,
+        recommendedRunner: 'workflow',
+        fastTasks: [
+          { id: 'one', independent: true, affectedPaths: ['src/one/**'], risk: 'low', worktreeEligible: true },
+          { id: 'two', independent: true, affectedPaths: ['src/two/**'], risk: 'low', worktreeEligible: true },
+        ],
+      },
+    };
+
+    const runner = resolveExecuteRunner(state, { autoSelect: true });
+    const fast = planFastExecution(state, runner);
+
+    expect(runner).toBe('dynamic-run');
+    expect(fast).toMatchObject({ enabled: false, profile: 'standard' });
+    expect(fast.serialReasons).toContain('auto-runner-dynamic');
+    expect(fast.serialReasons).not.toContain('explicit-runner-dynamic');
+  });
+
+  it('should reuse the saved runner reason when later options would relabel it', () => {
+    const state = {
+      executeRunner: { runner: 'dynamic-run', reason: 'auto-runner-dynamic' },
+      options: {
+        fast: true,
+        runner: 'dynamic',
+        fastTasks: [
+          { id: 'one', independent: true, affectedPaths: ['src/one/**'], risk: 'low', worktreeEligible: true },
+          { id: 'two', independent: true, affectedPaths: ['src/two/**'], risk: 'low', worktreeEligible: true },
+        ],
+      },
+    };
+
+    const fast = planFastExecution(state, resolveExecuteRunner(state));
+
+    expect(fast.serialReasons).toContain('auto-runner-dynamic');
+    expect(fast.serialReasons).not.toContain('explicit-runner-dynamic');
+  });
+
+  it('should reuse the paused EXECUTE fast snapshot when later inputs offer more parallelism', async () => {
+    const r = await start({
+      task: 'runner test fast resume snapshot',
+      mode: 'default',
+      options: {
+        fast: true,
+        cpuCount: 1,
+        fastTasks: [
+          { id: 'one', independent: true, affectedPaths: ['src/one/**'], risk: 'low', worktreeEligible: true },
+          { id: 'two', independent: true, affectedPaths: ['src/two/**'], risk: 'low', worktreeEligible: true },
+        ],
+      },
+      sessionId: uniqueId('fast-resume'),
+    });
+    track(r.sessionId);
+    const state = loadSession(r.sessionId);
+    runPhase1Plan(state);
+    runPhase2Execute(state);
+
+    const paused = loadSession(r.sessionId);
+    paused.phase = 'PAUSED';
+    paused.lastPhase = 'EXECUTE';
+    paused.options.cpuCount = 64;
+    paused.options.fastTasks = Array.from({ length: 16 }, (_, index) => ({
+      id: `expanded-${index + 1}`,
+      independent: true,
+      affectedPaths: [`src/expanded-${index + 1}/**`],
+      risk: 'low',
+      worktreeEligible: true,
+    }));
+    saveSession(paused);
+
+    const resumed = await resumeAutopilot(r.sessionId);
+    const persisted = loadSession(r.sessionId);
+
+    expect(resumed.phase).toBe('EXECUTE');
+    expect(resumed.instruction.fast).toMatchObject({ enabled: true, plannedParallelism: 2 });
+    expect(persisted.fastProfile).toMatchObject({ enabled: true, plannedParallelism: 2 });
+  });
+
+  it('should discard a malformed fast snapshot and safely replan from metadata', () => {
+    const fast = planFastExecution({
+      options: { fast: true, fastTasks: [] },
+      fastProfile: {
+        requested: true,
+        profile: 'fast',
+        enabled: true,
+        requestedTaskCount: 2,
+        eligibleTaskCount: 2,
+        requestedParallelism: 2,
+        eligibleParallelism: 2,
+        plannedParallelism: 2,
+        limits: { hardMaxAgents: 16, agentsPerCpu: 2, maxWorktrees: 12 },
+        worktrees: { required: true, count: 2 },
+        waves: [{ taskIds: ['duplicate', 'duplicate'], worktreeCount: 2 }],
+        serial: [],
+        serialReasons: [],
+      },
+    }, 'team-create');
+
+    expect(fast).toMatchObject({
+      enabled: false,
+      fallbackReason: 'no-tasks',
+      reused: false,
+    });
+  });
+
+  it.each([
+    ['non-canonical limits', (profile) => ({
+      ...profile,
+      limits: { ...profile.limits, maxWorktrees: 99 },
+    })],
+    ['capacity above CPU cap', (profile) => ({
+      ...profile,
+      cpuCount: 1,
+      limits: { ...profile.limits, agentsPerCpu: 1 },
+    })],
+    ['serial count mismatch', (profile) => ({
+      ...profile,
+      serial: [{ taskId: 'ghost', reason: 'not-independent' }],
+    })],
+    ['duplicate wave and serial task id', (profile) => ({
+      ...profile,
+      requestedTaskCount: 3,
+      requestedParallelism: 3,
+      serial: [{ taskId: profile.waves[0].taskIds[0], reason: 'not-independent' }],
+      serialReasons: ['not-independent'],
+    })],
+    ['invalid speed estimate', (profile) => ({ ...profile, estimatedSpeedup: null })],
+  ])('should reject a persisted fast snapshot with %s without throwing', (_label, mutate) => {
+    const valid = planFastExecution({
+      options: {
+        fast: true,
+        fastTasks: [
+          { id: 'one', independent: true, affectedPaths: ['src/one.js'], risk: 'low', worktreeEligible: true },
+          { id: 'two', independent: true, affectedPaths: ['src/two.js'], risk: 'low', worktreeEligible: true },
+        ],
+      },
+    }, 'team-create', {}, { cpuCount: 1 });
+    const state = {
+      options: { fast: true, fastTasks: [] },
+      fastProfile: mutate(valid),
+    };
+
+    expect(() => planFastExecution(state, 'team-create')).not.toThrow();
+    expect(planFastExecution(state, 'team-create')).toMatchObject({
+      enabled: false,
+      fallbackReason: 'no-tasks',
+      reused: false,
+    });
+  });
+
+  it('should reject a malformed persisted standard fallback instead of reusing it', () => {
+    const standard = planFastExecution({
+      options: {
+        fast: true,
+        fastTasks: [
+          { id: 'one', independent: true, affectedPaths: ['src/shared.js'], risk: 'low', worktreeEligible: true },
+          { id: 'two', independent: true, affectedPaths: ['src/shared.js'], risk: 'low', worktreeEligible: true },
+        ],
+      },
+    }, 'team-create', {}, { cpuCount: 1 });
+    const state = {
+      options: { fast: true, fastTasks: [] },
+      fastProfile: { ...standard, serial: [] },
+    };
+
+    expect(planFastExecution(state, 'team-create')).toMatchObject({
+      fallbackReason: 'no-tasks',
+      reused: false,
+    });
+  });
+
+  it('should persist the first runner selection and reason for future resumes', async () => {
+    const r = await start({
+      task: 'runner selection persistence',
+      mode: 'default',
+      options: {},
+      sessionId: uniqueId('runner-selection'),
+    });
+    track(r.sessionId);
+    const state = loadSession(r.sessionId);
+    expect(state.executeRunner).toEqual({
+      runner: 'team-create',
+      reason: 'default-runner-team',
+    });
+    runPhase1Plan(state);
+    runPhase2Execute(state);
+
+    expect(loadSession(r.sessionId).executeRunner).toEqual({
+      runner: 'team-create',
+      reason: 'default-runner-team',
+    });
+  });
+
+  it('should not let changed options drift the runner after session start', async () => {
+    const r = await start({
+      task: 'runner selection immutable after start',
+      mode: 'default',
+      options: {},
+      sessionId: uniqueId('runner-selection-immutable'),
+    });
+    track(r.sessionId);
+    const state = loadSession(r.sessionId);
+    state.options.runner = 'dynamic';
+    runPhase1Plan(state);
+
+    const inst = runPhase2Execute(state);
+
+    expect(inst.type).toBe('team-create');
+    expect(loadSession(r.sessionId).executeRunner).toEqual({
+      runner: 'team-create',
+      reason: 'default-runner-team',
+    });
   });
 
   it('should inherit the session worktree into the dynamic-run instruction (ADR-003 §4 cwdHint)', async () => {

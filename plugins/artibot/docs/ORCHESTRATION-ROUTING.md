@@ -10,10 +10,17 @@ All other files that discuss routing summarize and link here; do not duplicate t
 |  | **Adaptive (model-driven)** | **Deterministic (code-driven)** |
 |---|---|---|
 | **Single attended session** | **team** — Agent Teams API; auto-fires when ≥2 independent subtasks are detected (Operator-Waits DNA) | **orchestrate** (classifier label: `workflow`) — fixed control flow; explicit opt-in only, never auto-fires. User-facing slash entry point: **`/orchestrate`** (predefined pipelines: feature / bugfix / refactor / security) |
-| **Long unattended session** | **autopilot** (CONSUMES team internally — default EXECUTE runner) | **autopilot** (CONSUMES the deterministic runner — ADR-003: `--runner dynamic` manual, or Stage 2 auto-select gated by `autopilot.runner.autoSelect` config, default OFF) |
+| **Long unattended session** | **autopilot** (CONSUMES team internally — default EXECUTE runner; `--fast`/`-fast` are an explicit dependency-graph fan-out profile for independently owned work only) | **autopilot** (CONSUMES the deterministic runner — ADR-003: `--runner dynamic` manual, or Stage 2 auto-select gated by `autopilot.runner.autoSelect` config, default OFF) |
 
 > autopilot is not a third axis — it is a session-lifetime wrapper whose EXECUTE phase delegates
 > to team and/or orchestrate depending on the sub-task shape. It never auto-fires.
+> `--fast` (or compatibility alias `-fast`) does not add an axis or a runner: both normalize to the
+> same opt-in profile. After PLAN supplies dependency and repo-relative ownership metadata, it uses
+> CPU/agent/worktree-capped topological waves; with `--worktree`, worker plans inherit a persisted session
+> integration cwd/base SHA. Unresolved or cyclic dependencies, unsafe paths, and conflicting ownership remain serial. EXECUTE resume reuses strict
+> runner/profile snapshots. Planned telemetry is an estimate, not measured speed, so 10x is never
+> guaranteed. Merge, verification, cost, and safety gates remain unchanged. The detailed contract and
+> standard-vs-fast comparison are in [commands/autopilot.md](../commands/autopilot.md).
 >
 > **Naming**: bare "workflow" is banned in orchestration prose — see the
 > [Canonical Naming Convention](ORCHESTRATION-GLOSSARY.md#canonical-naming-convention).

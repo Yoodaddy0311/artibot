@@ -792,6 +792,13 @@
     "runner": {
       "autoSelect": false,
       "comment": "ADR-003 Stage 2 gate: true = EXECUTE runner auto-selects dynamic-run when the classifier recommendation (options.recommendedRunner) is 'workflow'. Explicit --runner always wins. Kill-switch: set false."
+    },
+    "fast": {
+      "hardMaxAgents": 16,
+      "agentsPerCpu": 2,
+      "maxWorktrees": 12,
+      "maxRisk": "medium",
+      "comment": "Opt-in --fast fan-out limits. fast-profile.js clamps every value to immutable safety caps; only explicitly independent, disjoint low/medium-risk tasks receive isolated worker worktrees."
     }
   },
   "git": {

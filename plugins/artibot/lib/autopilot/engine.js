@@ -9,7 +9,6 @@
  *
  * @module lib/autopilot/engine
  */
-
 import { readFileSync } from 'node:fs';
 import nodePath from 'node:path';
 import { getPluginRoot } from '../core/platform.js';
@@ -34,7 +33,7 @@ import {
 import { safeAppendLesson } from './engine-state.js';
 import { acquireLock, isLocked, releaseLock } from './lock.js';
 import { loadAllowList } from './mcp-verifier.js';
-
+import { buildFastTeamInstruction, loadFastProfileConfig, planFastExecution, retainFastIntegrationWorktree } from './fast-execution.js';
 /**
  * Phase names in canonical order.
  *
@@ -222,7 +221,7 @@ export function loadRunnerConfig() {
  * Resolve the Phase 2 EXECUTE runner (ADR-003).
  *
  * Priority ladder:
- *   1. Explicit `options.runner` — 'dynamic' | 'team' (Stage 1, always wins).
+ *   1. Valid persisted selection; otherwise explicit `options.runner` (Stage 1).
  *   2. Config gate `autopilot.runner.autoSelect` OFF (default) → team-create.
  *   3. Auto-select (Stage 2): the classifier recommendation injected at
  *      session start as `options.recommendedRunner === 'workflow'` (homogeneous
@@ -237,6 +236,8 @@ export function loadRunnerConfig() {
  * @returns {'team-create'|'dynamic-run'}
  */
 export function resolveExecuteRunner(state, config) {
+  const saved = readExecuteRunnerSelection(state);
+  if (saved) return saved.runner;
   const explicit = state?.options?.runner;
   if (explicit === 'dynamic') return 'dynamic-run';
   // Any other non-empty explicit value ('team', typos, unknown strings) pins
@@ -249,6 +250,36 @@ export function resolveExecuteRunner(state, config) {
     return 'dynamic-run';
   }
   return 'team-create';
+}
+
+function runnerSelectionReason(state, runner) {
+  if (runner === 'dynamic-run') {
+    return state?.options?.runner === 'dynamic'
+      ? 'explicit-runner-dynamic' : 'auto-runner-dynamic';
+  }
+  return typeof state?.options?.runner === 'string' && state.options.runner
+    ? 'explicit-runner-team' : 'default-runner-team';
+}
+
+function readExecuteRunnerSelection(state) {
+  const selection = state?.executeRunner;
+  if (!selection || typeof selection !== 'object') return null;
+  const validReasons = selection.runner === 'dynamic-run'
+    ? ['explicit-runner-dynamic', 'auto-runner-dynamic']
+    : selection.runner === 'team-create'
+      ? ['explicit-runner-team', 'default-runner-team'] : [];
+  return validReasons.includes(selection.reason)
+    ? { runner: selection.runner, reason: selection.reason } : null;
+}
+
+/** Capture runner+reason exactly once, then reuse the persisted pair. */
+export function retainExecuteRunnerSelection(state, config) {
+  const saved = readExecuteRunnerSelection(state);
+  if (saved) return saved;
+  const runner = resolveExecuteRunner(state, config);
+  const selection = { runner, reason: runnerSelectionReason(state, runner) };
+  if (state && typeof state === 'object') state.executeRunner = selection;
+  return selection;
 }
 
 /**
@@ -287,8 +318,37 @@ export function runPhase2Execute(state) {
   const paused = maybePause(state);
   if (paused) return paused;
 
-  const worktreePath = attemptCreateWorktree(state);
-  const runner = resolveExecuteRunner(state);
+  const { runner } = retainExecuteRunnerSelection(state);
+  const fast = planFastExecution(state, runner, loadFastProfileConfig());
+  // The session worktree is the integration base for fast worker worktrees.
+  // Standard execution retains the same best-effort worktree behavior.
+  const savedWorktree = typeof state.worktreePath === 'string' && state.worktreePath
+    ? state.worktreePath : null;
+  const worktreePath = savedWorktree || attemptCreateWorktree(state);
+  if (fast?.enabled) retainFastIntegrationWorktree(state, worktreePath);
+
+  if (fast) {
+    state.fastProfile = fast;
+    tick(state.sessionId, {
+      phase: 'EXECUTE',
+      type: fast.reused ? 'fast-profile-reused' : 'fast-profile-planned',
+      level: fast.enabled ? 'info' : 'warn',
+      message: fast.reused
+        ? 'Fast execution profile reused from the paused session'
+        : fast.enabled ? 'Fast parallel execution plan accepted' : 'Fast request fell back to standard execution',
+      data: {
+        requested: fast.requested,
+        reused: fast.reused === true,
+        cpuCount: fast.cpuCount,
+        requestedParallelism: fast.requestedParallelism,
+        eligibleParallelism: fast.eligibleParallelism,
+        plannedParallelism: fast.plannedParallelism,
+        worktrees: fast.worktrees,
+        serialReasons: fast.serialReasons,
+        fallbackReason: fast.fallbackReason,
+      },
+    });
+  }
 
   recordPhase(state, { name: 'EXECUTE', status: 'queued' });
   persist(state);
@@ -301,7 +361,8 @@ export function runPhase2Execute(state) {
       : 'Phase 2 EXECUTE 위임 완료',
   });
   notePhaseProgress(state, 'PLAN', 'EXECUTE');
-  const instruction = runner === 'dynamic-run' ? buildDynamicRunInstruction(state) : {
+  const instruction = runner === 'dynamic-run' ? buildDynamicRunInstruction(state) : fast?.enabled
+    ? buildFastTeamInstruction(state, fast) : {
     type: 'team-create',
     phase: 'EXECUTE',
     sessionId: state.sessionId,
@@ -314,6 +375,7 @@ export function runPhase2Execute(state) {
     ],
     teamHint: { parallel: true, leadAgent: 'orchestrator' },
   };
+  if (fast && !fast.enabled) instruction.fast = fast;
   if (worktreePath) {
     instruction.worktreePath = worktreePath;
     instruction.cwdHint = worktreePath;
@@ -510,6 +572,7 @@ export async function startAutopilot({ task, mode, options, sessionId } = {}) {
     throw new TypeError('task is required');
   }
   const state = makeInitialState({ task, mode, options, sessionId });
+  retainExecuteRunnerSelection(state);
 
   // Derive featureKey early so we can guard against concurrent sessions
   // working on the same feature (worktree/branch collision).

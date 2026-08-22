@@ -12,6 +12,8 @@ Four parallel-execution mechanisms in Artibot. Their engines are distinct and mu
 
 **autopilot** — Long-running unattended session wrapper; its EXECUTE phase consumes `team` and/or `orchestrate` as sub-mechanisms; never auto-fires without explicit opt-in.
 
+**autopilot fast profile** — Explicit `--fast` execution profile (compatibility alias: `-fast`) for autopilot's `team` runner. Both command spellings normalize to `options.fast = true`. PLAN supplies repo-relative ownership and dependency metadata; the engine forms bounded CPU/agent/worktree-capped topological waves and keeps invalid/cyclic/unsafe work serial. With `--worktree`, worker plans inherit a persisted session integration cwd/base SHA. The persisted runner/profile snapshots are reused on EXECUTE resume. It is not a runner, not Dynamic Workflows (platform), and not a promise of any speed multiplier (including 10x).
+
 **dynamic** — Slash entry point (**`/dynamic`**) that authors and runs a harness **`Workflow` tool** script (fan-out / pipeline / adversarial verify over a known worklist). Invoking it constitutes the explicit opt-in the `Workflow` tool requires; it never auto-fires. Runs are visible in the native `/workflows` monitor (unlike `/orchestrate` runs).
 
 ---

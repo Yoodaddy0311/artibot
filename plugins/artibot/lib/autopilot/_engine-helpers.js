@@ -76,13 +76,21 @@ import { recordPhaseUsage } from './cost-tracker.js';
  */
 export function makeInitialState({ task, mode, options, sessionId }) {
   const id = sessionId || newSessionId();
+  const requestedOptions = options && typeof options === 'object' ? options : {};
   return {
     sessionId: id,
     task: task || '',
     mode: mode || 'default',
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
-    options: { maxDuration: '4h', budget: 2_000_000, ...(options || {}) },
+    options: {
+      maxDuration: '4h',
+      budget: 2_000_000,
+      ...requestedOptions,
+      // Command parsing owns aliases; engine state accepts exactly one
+      // canonical representation so persisted/resumed sessions are unambiguous.
+      fast: requestedOptions.fast === true,
+    },
     phase: 'INTAKE',
     prdPath: null,
     reportPath: null,

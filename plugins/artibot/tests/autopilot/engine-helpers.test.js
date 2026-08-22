@@ -8,8 +8,17 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildPreflightInstruction,
+  makeInitialState,
   renderPreflightSummary,
 } from '../../lib/autopilot/_engine-helpers.js';
+
+describe('makeInitialState', () => {
+  it('normalizes the fast request to a canonical boolean in persisted options', () => {
+    expect(makeInitialState({ task: 'fast true', options: { fast: true } }).options.fast).toBe(true);
+    expect(makeInitialState({ task: 'fast string', options: { fast: 'true' } }).options.fast).toBe(false);
+    expect(makeInitialState({ task: 'fast absent' }).options.fast).toBe(false);
+  });
+});
 
 describe('buildPreflightInstruction', () => {
   it('returns null when result is ok with no warnings', () => {
