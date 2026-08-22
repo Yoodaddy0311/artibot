@@ -563,14 +563,14 @@ function main() {
       console.error('\nRefusing to update baselines: the scan failed its denominator check above.');
       process.exit(1);
     }
-    writeFileSync(
-      baselineFile,
-      JSON.stringify({ skills: current, generatedAt: new Date().toISOString() }, null, 2) + '\n',
-      'utf8'
-    );
+    // No `generatedAt`: a wall-clock field nothing reads (readBaseline only
+    // looks at `.skills`) turns every regeneration into a guaranteed merge
+    // conflict — two branches fixing two DIFFERENT skills still collide on the
+    // timestamp line. Provenance belongs in the commit, not in the artifact.
+    writeFileSync(baselineFile, JSON.stringify({ skills: current }, null, 2) + '\n', 'utf8');
     writeFileSync(
       redFlagsFile,
-      JSON.stringify({ skills: redFlagCurrent, generatedAt: new Date().toISOString() }, null, 2) + '\n',
+      JSON.stringify({ skills: redFlagCurrent }, null, 2) + '\n',
       'utf8'
     );
     console.log(

@@ -34,10 +34,25 @@ import {
 // Files scanned for count claims. README badges/prose + the plugin CLAUDE.md
 // (whose Stack line carries skills/commands/agents counts that were previously
 // outside any gate — the self-validation gap this list closes).
+//
+// marketplace.json (2026-08-22): its `description` / `shortDescription` /
+// screenshot captions carry the same "N agents, N skills, N commands" claims,
+// and nothing watched them — `sync-marketplace-meta.mjs` only touches
+// `version`, `qualityMetrics.tests` and `release.current`. Measured drift when
+// this line was added: `75 commands` vs 78 actual, while both READMEs already
+// said 78. Scanning it is claim-shaped, not JSON-shaped: the patterns need a
+// digit immediately followed by " commands"/" skills"/" agents", so structural
+// fields like `"count": 78` are invisible here — those are asserted in
+// `tests/ci/marketplace-version-sync.test.js` instead. Probe on the unfixed
+// file returned exactly 1 finding and 0 false positives.
+//
+// Like CLAUDE.md, this file is validate-only: `sync-readme-claims.js` rewrites
+// the two READMEs and nothing else, so a finding here is fixed by hand.
 export const SCAN_TARGETS = [
   path.join(REPO_ROOT, 'README.md'),
   path.join(PLUGIN_ROOT, 'README.md'),
   path.join(PLUGIN_ROOT, 'CLAUDE.md'),
+  path.join(PLUGIN_ROOT, 'marketplace.json'),
 ];
 
 const args = process.argv.slice(2);

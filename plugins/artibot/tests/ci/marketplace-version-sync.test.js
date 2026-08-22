@@ -17,6 +17,9 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
+import { collectActuals } from '../../scripts/ci/readme-claims-registry.js';
+import { SCAN_TARGETS, scanFile } from '../../scripts/ci/validate-readme-claims.js';
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 // __dirname = .../plugins/artibot/tests/ci
@@ -64,6 +67,42 @@ describe('marketplace.json version sync', () => {
     expect(packageJson.engines?.node).toMatch(/>=\s*20/);
     expect(pluginJson.compatibility?.node).toMatch(/>=\s*20/);
     expect(rootPackageJson.engines?.node).toMatch(/>=\s*20/);
+  });
+});
+
+// ── entryPoints 재고 카운트 ──────────────────────────────────────────────────
+// `description` 쪽 산문 카운트("78 commands")는 `validate-readme-claims.js`
+// 가 SCAN_TARGETS 로 잡는다. 여기서 막는 것은 그 정규식이 **구조적으로 볼 수
+// 없는** 필드다: `entryPoints.<kind>.count` 는 숫자 뒤에 " commands" 같은 꼬리가
+// 없어 claim 패턴에 걸리지 않는다. 2026-08-22 실측 드리프트 = commands 72 vs
+// 실제 78 (같은 파일 description 은 75, README 는 이미 78 — 세 곳이 전부 달랐다).
+//
+// 분모는 `readme-claims-registry.js#collectActuals` 하나만 쓴다. 여기서 디렉터리를
+// 다시 세면 정의가 갈라지고(agents 는 INDEX.md 제외, skills 는 SKILL.md 보유
+// 디렉터리) 두 게이트가 서로 다른 "진실"을 갖게 된다.
+describe('marketplace.json entryPoints counts match the filesystem', () => {
+  // 여기서 단언하지 않는 것: entryPoints.rules(선언 8 vs .md 10 + csv/) 와
+  // entryPoints.hooks(선언 2 = 디렉터리 파일 수이지 hook 수가 아니다 —
+  // 실체는 hookScripts 68 / hookRegistrations 25). 둘 다 collectActuals 에
+  // 대응 분모가 없어 정의부터 정해야 한다 → 백로그.
+  const publicMarketplace = readJson(join(PLUGIN_ROOT, 'marketplace.json'));
+  const actuals = collectActuals();
+
+  it.each([
+    ['agents', 'agents'],
+    ['skills', 'skills'],
+    ['commands', 'commands'],
+  ])('entryPoints.%s.count == 실측', (kind, actualKey) => {
+    // 양성 대조: 분모가 0 이면 아래 단언은 "둘 다 0" 으로 공허하게 통과한다.
+    expect(actuals[actualKey]).toBeGreaterThan(0);
+    expect(publicMarketplace.entryPoints?.[kind]?.count).toBe(actuals[actualKey]);
+  });
+
+  it('description 의 산문 카운트도 같은 실측과 일치한다 (게이트 중복이 아니라 배선 증명)', () => {
+    // validate-readme-claims.js#SCAN_TARGETS 에 marketplace.json 이 실제로
+    // 들어 있는지 확인한다 — 그 배선이 빠지면 산문 카운트는 다시 무주공산이 된다.
+    expect(SCAN_TARGETS).toContain(join(PLUGIN_ROOT, 'marketplace.json'));
+    expect(scanFile(join(PLUGIN_ROOT, 'marketplace.json'), actuals)).toEqual([]);
   });
 });
 
