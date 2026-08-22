@@ -40,6 +40,8 @@ source_hash: 190793d6
 Validate URL (HTTPS only) -> Sanitize repo name -> Clone to ~/.claude/artibot/repos/ -> Shallow clone (--depth 1) -> No script execution
 ```
 
+> **Who runs this pipeline: the leader, once, via code.** `lib/git/repo-acquire.js#acquireRepo` implements the whole line above (validation in `lib/core/repo-input.js#parseRepoInput`) and returns `{ localPath, sourceUrl, sourceSha, cacheStatus, sizeBytes, depth }`. Under [`/repo`](../../commands/repo.md) it is called at § *Execution Flow* step 2 and analysts receive a `localPath` — **a teammate or sub-agent never clones**, because a second clone re-derives the destination and the size guard from prose instead of from the one function that enforces them. Steps 1–3 of the checklist below are therefore the leader's steps. Invoked standalone with no leader, you are the leader: call the helper, do not hand-roll `git clone`.
+
 **Security Rules**:
 - HTTPS URLs only (reject SSH, file://, relative paths)
 - Clone directory: `~/.claude/artibot/repos/[sanitized-name]/`
@@ -52,7 +54,7 @@ Validate URL (HTTPS only) -> Sanitize repo name -> Clone to ~/.claude/artibot/re
 
 | Phase | Action | Output |
 |-------|--------|--------|
-| 1. Clone | `git clone --depth 1 [url]` to isolated directory | Local repo copy |
+| 1. Acquire *(leader)* | `acquireRepo(url)` — validate, clone `--depth 1` or reuse cache, size-guard | `localPath` + `sourceSha` |
 | 2. Structure | Glob/Grep for directory tree, file counts, config files | Structure map |
 | 3. Feature Inventory | Identify agents, commands, skills, hooks, libs, tests | Feature comparison table |
 | 4. Deep Analysis | Read key files, identify patterns, score quality | Raw dimension scores |
@@ -117,9 +119,10 @@ Copy this checklist and track progress:
 
 ```
 Progress:
-- [ ] Step 1: Validate and sanitize git URL (HTTPS only, no metacharacters)
-- [ ] Step 2: Check cache at ~/.claude/artibot/repos/[repo-name]/
-- [ ] Step 3: Clone or update repo (git clone --depth 1 or git pull)
+- [ ] Steps 1-3 (leader only, one call): acquireRepo() validates the URL, resolves
+      the cache at ~/.claude/artibot/repos/[repo-name]/, clones or pulls, enforces
+      the 500MB ceiling, and returns localPath + sourceSha. Record the sourceSha —
+      the report header carries it. Analysts skip to Step 4 with the localPath.
 - [ ] Step 4: Map structure — file counts, directory tree, config files
 - [ ] Step 5: Build feature inventory — agents, commands, skills, hooks, libs, tests
 - [ ] Step 6: Score each of 10 evaluation dimensions (evidence required per score)

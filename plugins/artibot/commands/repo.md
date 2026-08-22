@@ -32,6 +32,10 @@ Parse $ARGUMENTS (space-separated inputs supported). Three input kinds are accep
 
 ## Security (unchanged, hardened)
 
+> Rules 1–6 are **enforced in code**, not by whoever reads this page: `lib/core/repo-input.js#parseRepoInput` (scheme, host, path allowlist, NUL, shell metacharacters, cache-name sanitization, the 500MB constant) and `lib/git/repo-acquire.js#acquireRepo` (isolation directory, `--depth 1`, size guard). Rules 5, 7, and 8 remain prose — nothing stops an agent from reading a `.env` out of a cloned tree, so they hold only by discipline. Do not read the enforced half as evidence that the unenforced half is covered.
+>
+> Rule 6's `..` clause is worded loosely: `parseRepoInput` does not *reject* traversal, because URL normalization collapses `.`, `..`, and their `%2e` spellings while the URL is being constructed — **no `..` component survives to reach the cache path**, so there is nothing left to reject by the time validation runs. `sanitizeRepoName` strips them from the resulting directory name as a second pass. The outcome rule 6 promises holds; the mechanism is collapse-then-sanitize, not rejection.
+
 1. HTTPS only. Reject `git@`, `file://`, relative paths
 2. Clone isolation to `~/.claude/artibot/repos/[sanitized-name]/`
 3. `--depth 1` default; full clone only with `--deep`
@@ -58,8 +62,8 @@ Parse $ARGUMENTS (space-separated inputs supported). Three input kinds are accep
 
 Every spawned `repo-benchmarker` teammate MUST:
 
-1. **First action = `git clone --depth 1`** to `~/.claude/artibot/repos/<sanitized-name>/`. NOT `WebFetch` of github.com URLs.
-2. **Enumerate** with `Glob`/`Bash ls -R` after clone — get the actual file tree.
+1. **First action = enter the `localPath` the leader gave you.** The tree is already on disk — Execution Flow step 2 acquired it, and the leader is the only actor that clones. Do **not** clone it again: a second clone bypasses the size guard and detaches your report from the leader's `sourceSha`, which is the only thing that makes your `file:line` citations checkable later. If you were given no `localPath`, stop and ask for one — under `/repo` a missing `localPath` means the leader skipped step 2, and a `WebFetch` of a github.com URL is not a substitute. (A `repo-benchmarker` spawned **outside** `/repo` has no leader and acquires the tree itself — see [repo-benchmarker](../agents/repo-benchmarker.md) § *Process* step 1. That case does not apply here.)
+2. **Enumerate** with `Glob`/`Bash ls -R` at that path — get the actual file tree.
 3. **Read ≥10 substantive source files per repo, or every substantive file the repo has if it has fewer than 10** (not just README/LICENSE). Cover: entrypoints, configs, key modules, examples, tests. Substantive excludes `LICENSE`, lockfiles, `.gitignore`, and binary assets. **Report the fraction you read** — `read 6/6 substantive` is complete coverage and stronger evidence than `read 10/500`; the floor exists to stop shallow reading of big repos, not to disqualify small ones. If you read fewer than exist, mark the untouched areas `UNINSPECTED` and say why.
 4. **Cite `file_path:line_number`** for every claim. A claim without a line citation is rejected.
 5. **Quote ≤5-line code snippets** for any "ADOPT / TRANSFORM / REJECT" judgment — show the actual code you saw.
@@ -109,8 +113,14 @@ Only after completing steps 1–5, proceed to the Execution Flow below.
 
 ## Execution Flow
 
-1. **Parse & Validate** — tokenize URLs, validate each, dedupe
-2. **Clone in parallel** — `git clone --depth 1` per URL (background jobs, `wait`)
+1. **Parse & Validate** — tokenize URLs, dedupe
+2. **Acquire — leader only.** Call the acquisition helper once per URL. **This is the single place in `/repo` that clones**; neither the teammates (★ MANDATORY rule 1) nor the standalone agent ([repo-benchmarker](../agents/repo-benchmarker.md) § *Process*) run `git clone`. `lib/git/repo-acquire.js#acquireRepo` validates the input via `lib/core/repo-input.js#parseRepoInput` (HTTPS only; shell metacharacters and NUL rejected, and traversal already collapsed by URL normalization before validation runs — the Security rules below, executable), clones `--depth 1` into the cache, enforces the 500MB ceiling, and returns `{ localPath, sourceUrl, sourceSha, cacheStatus, sizeBytes, depth }`. Run the calls concurrently for multiple URLs. From the plugin root:
+
+   ```bash
+   node --input-type=module -e "const{acquireRepo,formatSourceStamp}=await import('./lib/git/repo-acquire.js');const r=acquireRepo(process.argv[1],{deep:process.argv[2]==='deep'});console.log(JSON.stringify(r,null,2));console.log(formatSourceStamp(r));" "https://github.com/owner/repo"
+   ```
+
+   Pass `--deep` through as the second argument for full history, and `{skipClone:true}` for `--compare-only` / `--skip-clone`. **Hand every teammate its `localPath` *and* `sourceSha`.** `sourceSha` is the commit each `file:line` in the report was read against — without it the citations are unverifiable a week later, so it goes in the report header (`formatSourceStamp`). A `RepoInputError` or `RepoAcquireError` for one URL drops that URL from the batch; report the code and continue with the rest.
 3. **Structure Scan** — count agents/commands/skills/hooks/lib/tests per repo
 4. **Delegate**:
    - If 1 URL → single `repo-benchmarker` agent
@@ -276,12 +286,16 @@ A row missing any of the three fields is incomplete — same severity as a blank
 > **`--output` renders this same content in one of three containers** — the section set and field names never change, only the container:
 > - `table` *(default)* — the fixed-width block below, as written.
 > - `markdown` — the same sections as GFM pipe tables (`STRUCTURE MATRIX`, `SCORE MATRIX`, `RECOMMENDATIONS` become tables; the list sections stay numbered lists).
-> - `json` — one object with keys `meta` (repos/artibot/date/mode/budget), `structure`, `scores` (per dimension: `{score, weight, evidence}`), `weightedTotal`, `adoptable` (per candidate: `{verdict, veto:{안전성,견고성,효율성}, gain:{확장성,미래지향성,독창성,창의성}, claimVerified, notAlreadyInArtibot, marker}`), `advantages`, `suppressed` (each with the failed veto axis), `recommendations`. Emit nothing but the JSON object so it can be piped.
+> - `json` — one object with keys `meta` (repos/sources/artibot/date/mode/budget, where `sources` is the per-repo `{sourceUrl, sourceSha, depth, cacheStatus}` from Execution Flow step 2), `structure`, `scores` (per dimension: `{score, weight, evidence}`), `weightedTotal`, `adoptable` (per candidate: `{verdict, veto:{안전성,견고성,효율성}, gain:{확장성,미래지향성,독창성,창의성}, claimVerified, notAlreadyInArtibot, marker}`), `advantages`, `suppressed` (each with the failed veto axis), `recommendations`. Emit nothing but the JSON object so it can be piped.
 
 ```
 REPO BENCHMARK — BATCH
 ========================
 Repos:    [n]
+Sources:  [one formatSourceStamp line per repo, from Execution Flow step 2 —
+           e.g. https://github.com/owner/repo@a1b2c3d (depth 1, created).
+           Mandatory: the file:line citations below are only checkable
+           against the commit they were read at.]
 Artibot:  v[version]
 Date:     [date]
 Mode:     [quick|standard|deep]
