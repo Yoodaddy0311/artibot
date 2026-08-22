@@ -262,6 +262,79 @@ describe('artifacts / ensureADR', () => {
 });
 
 // ---------------------------------------------------------------------------
+// W1-3 (U2a) — unregistered PRD sections.
+//
+// renderPrdSections walked PRD_SECTION_ORDER only, so any key outside the
+// canonical nine was silently discarded — including `기능요구사항`, which
+// `commands/go.md` passes on every /go run.
+// ---------------------------------------------------------------------------
+
+describe('artifacts / writePRD — unregistered sections', () => {
+  let root;
+  beforeEach(() => { root = tmpRoot(); });
+  afterEach(() => { rmSync(root, { recursive: true, force: true }); });
+
+  const REGISTERED = [
+    '배경', '목표', '비목표', '시나리오', '설계',
+    '산출물', '실행계획', '위험', '수락기준',
+  ];
+
+  async function write(sections, slug = 'extra') {
+    const res = await writePRD({
+      projectRoot: root, slug, title: 'T', sections, now: fixedNow,
+    });
+    expect(res.ok).toBe(true);
+    return readFileSync(res.prdPath, 'utf-8');
+  }
+
+  it('round-trips unregistered keys instead of dropping them', async () => {
+    const body = await write({ 배경: 'b', 근거: '왜 이 결정인가', 기능요구사항: 'F-1 로그인' });
+    expect(body).toContain('## 근거\n\n왜 이 결정인가\n');
+    expect(body).toContain('## 기능요구사항\n\nF-1 로그인\n');
+  });
+
+  it('preserves the 기능요구사항 key that /go passes', async () => {
+    const goSections = {
+      배경: 'ctx', 목표: 'g', 비목표: 'ng',
+      기능요구사항: 'P0 기능마다 F-ID sub-section',
+      시나리오: 's', 설계: 'd', 산출물: 'o', 실행계획: 'p', 위험: 'r', 수락기준: 'a',
+    };
+    const body = await write(goSections, 'go-prd');
+    expect(body).toContain('P0 기능마다 F-ID sub-section');
+  });
+
+  it('appends extras after all nine registered sections, in sorted order', async () => {
+    const body = await write({ 배경: 'b', 힣: 'z', 근거: 'r', abc: 'a' });
+    const order = [...body.matchAll(/^## (.+)$/gm)].map((m) => m[1]);
+    expect(order.slice(0, 9)).toEqual(REGISTERED);
+    // Exact, not "is sorted" — comparing a list to its own sort is a tautology.
+    expect(order.slice(9)).toEqual(['abc', '근거', '힣']);
+  });
+
+  it('still renders empty sections — registered and appended alike', async () => {
+    const body = await write({ 근거: '' });
+    expect(body).toContain('## 수락기준'); // existing contract, unchanged
+    expect(body).toContain('## 근거');
+  });
+
+  it('is byte-identical to the previous output when no extra key is present', async () => {
+    // Negative control for the "registered render is unchanged" requirement.
+    const sections = Object.fromEntries(REGISTERED.map((k) => [k, `v-${k}`]));
+    const body = await write(sections, 'no-extra');
+    const expected = REGISTERED
+      .map((name) => `## ${name}\n\nv-${name}\n`)
+      .join('\n');
+    expect(body.endsWith(expected)).toBe(true);
+  });
+
+  it('skips blank keys rather than emitting a bare "## " heading', async () => {
+    const body = await write({ 배경: 'b', '': 'x', '   ': 'y' });
+    expect(body).not.toMatch(/^##\s*$/m);
+    expect(body).not.toContain('## \n');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // syncTodo
 // ---------------------------------------------------------------------------
 
@@ -310,6 +383,134 @@ describe('artifacts / syncTodo', () => {
     const res = await syncTodo({ planMarkdown: PLAN });
     expect(res.ok).toBe(false);
     expect(res.error).toMatch(/projectRoot/);
+  });
+
+  // -------------------------------------------------------------------------
+  // W1-1 — destructive-write repair.
+  //
+  // The prior fixture must carry REAL completions (3 of them). With an empty
+  // or absent prior state the bug is unobservable: overwriting nothing with
+  // nothing looks identical to correct behavior.
+  // -------------------------------------------------------------------------
+
+  /** Plan whose three tasks are all unchecked in markdown. */
+  const PLAN_OPEN = [
+    '# Plan',
+    '- [ ] alpha task',
+    '- [ ] beta task',
+    '- [ ] gamma task',
+  ].join('\n');
+
+  /** Same three tasks, all checked — used to seed a prior state with 3 done. */
+  const PLAN_ALL_DONE = [
+    '# Plan',
+    '- [x] alpha task',
+    '- [x] beta task',
+    '- [x] gamma task',
+  ].join('\n');
+
+  /** Seed `.plan-state.json` with 3 completed tasks and return its path. */
+  async function seedThreeDone() {
+    const res = await syncTodo({
+      projectRoot: root, planMarkdown: PLAN_ALL_DONE, sessionId: 'seed', now: fixedNow,
+    });
+    expect(res.progress).toEqual({ total: 3, completed: 3, percentage: 100 });
+    return res.stateFile;
+  }
+
+  it('rejects a non-string planMarkdown and leaves the state file untouched', async () => {
+    const stateFile = await seedThreeDone();
+    const before = readFileSync(stateFile, 'utf-8');
+
+    for (const bad of [undefined, null, 42, {}, ['- [x] a'], true]) {
+      const res = await syncTodo({ projectRoot: root, planMarkdown: bad, now: fixedNow });
+      expect(res.ok).toBe(false);
+      expect(res.error).toMatch(/planMarkdown/);
+      expect(res.progress).toBeUndefined();
+      // Byte-identical: the destroyed-state bug reported ok:true here.
+      expect(readFileSync(stateFile, 'utf-8')).toBe(before);
+    }
+
+    const state = JSON.parse(readFileSync(stateFile, 'utf-8'));
+    expect(state.tasks.filter((t) => t.completed)).toHaveLength(3);
+  });
+
+  it('does not create a state file at all when planMarkdown is not a string', async () => {
+    const res = await syncTodo({ projectRoot: root, planMarkdown: null, now: fixedNow });
+    expect(res.ok).toBe(false);
+    expect(existsSync(path.join(root, '.plan-state.json'))).toBe(false);
+  });
+
+  it('keeps completion across re-syncs of a valid plan (flags are not reset)', async () => {
+    const stateFile = await seedThreeDone();
+
+    // Re-sync twice with markdown whose checkboxes are all OPEN. parsePlan
+    // replaces the task list wholesale, so without the merge the completion
+    // count would drop to 0 on the first call.
+    const first = await syncTodo({
+      projectRoot: root, planMarkdown: PLAN_OPEN, sessionId: 's2', now: fixedNow,
+    });
+    const second = await syncTodo({
+      projectRoot: root, planMarkdown: PLAN_OPEN, sessionId: 's3', now: fixedNow,
+    });
+
+    expect(first.progress).toEqual({ total: 3, completed: 3, percentage: 100 });
+    expect(second.progress).toEqual({ total: 3, completed: 3, percentage: 100 });
+
+    const state = JSON.parse(readFileSync(stateFile, 'utf-8'));
+    expect(state.tasks.filter((t) => t.completed)).toHaveLength(3);
+    expect(state.sessions.map((s) => s.id)).toEqual(['seed', 's2', 's3']);
+  });
+
+  it('merges completion by normalized text, tolerating whitespace drift', async () => {
+    await seedThreeDone();
+    const rewrapped = [
+      '# Plan',
+      '- [ ]   alpha    task  ', // re-wrapped spacing, same task
+      '- [ ] beta task',
+      '- [ ] delta task', // genuinely new — must stay open
+    ].join('\n');
+
+    const res = await syncTodo({ projectRoot: root, planMarkdown: rewrapped, now: fixedNow });
+    expect(res.ok).toBe(true);
+    const state = JSON.parse(readFileSync(res.stateFile, 'utf-8'));
+    // Markdown is the source of truth for WHICH tasks exist: gamma is gone,
+    // delta is new and open; alpha/beta keep their completion.
+    expect(state.tasks.map((t) => [t.text, t.completed])).toEqual([
+      ['alpha    task', true],
+      ['beta task', true],
+      ['delta task', false],
+    ]);
+    expect(res.progress).toEqual({ total: 3, completed: 2, percentage: 67 });
+  });
+
+  it('drops completion when a task is renamed (text is the only join key)', async () => {
+    // stable ID 가 없으므로 rename = 제거 + 추가다. 이 손실은 의도된 동작이며,
+    // 퍼지 매칭을 도입하려면 이 단언을 의식적으로 깨야 한다. 공백 차이만은
+    // taskKey 가 흡수한다 (바로 위 whitespace-drift 테스트가 그 경계다).
+    await seedThreeDone();
+    const renamed = [
+      '# Plan',
+      '- [ ] alpha task RENAMED',
+      '- [ ] beta task',
+      '- [ ] gamma task',
+    ].join('\n');
+
+    const res = await syncTodo({ projectRoot: root, planMarkdown: renamed, now: fixedNow });
+    expect(res.ok).toBe(true);
+    const { tasks } = JSON.parse(readFileSync(res.stateFile, 'utf-8'));
+    expect(tasks.find((t) => t.text === 'alpha task RENAMED').completed).toBe(false);
+    expect(tasks.find((t) => t.text === 'beta task').completed).toBe(true);
+    expect(tasks.find((t) => t.text === 'gamma task').completed).toBe(true);
+    // 이름이 바뀐 태스크는 사라진 것으로 취급된다 — 옛 텍스트는 state 에 남지 않는다.
+    expect(tasks.some((t) => t.text === 'alpha task')).toBe(false);
+    expect(res.progress).toEqual({ total: 3, completed: 2, percentage: 67 });
+  });
+
+  it('never un-completes: markdown [x] wins even when prior state says open', async () => {
+    await syncTodo({ projectRoot: root, planMarkdown: PLAN_OPEN, now: fixedNow });
+    const res = await syncTodo({ projectRoot: root, planMarkdown: PLAN_ALL_DONE, now: fixedNow });
+    expect(res.progress).toEqual({ total: 3, completed: 3, percentage: 100 });
   });
 });
 

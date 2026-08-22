@@ -205,9 +205,12 @@ const { stateFile, progress } = await syncTodo({   // async — await 필수
 > **state 파일 위치 (알고 있어야 할 차이)**: `planFile: prdPath` 로 넘기므로 state 는 PRD 옆
 > (`docs/PRD/.plan-state.json`)에 남는다. 반면 `/plan` 은 `planFile` 기본값이 `PLAN.md` 라
 > **리포 루트**(`.plan-state.json`)를 본다 — 즉 **`/plan --status` 는 ultraplan 의 진행률을
-> 보지 못한다.** 이는 결함이 아니라 의도된 분리다: `syncTodo` 는 기존 state 를 **병합**하므로
-> (`artifacts.js#syncTodo` 가 `readState` → `fromState` → `parsePlan` 순서로 누적한다)
-> 두 커맨드가 같은 파일을 쓰면 **서로 다른 플랜의 태스크가 한 state 에 섞인다.**
+> 보지 못한다.** 이는 결함이 아니라 의도된 분리다. `syncTodo` 가 실제로 병합하는 것은
+> **`sessions` 뿐**이고, **태스크 목록의 진실원은 넘긴 마크다운**이다
+> (`artifacts.js#syncTodo` → `parsePlan` 이 목록을 통째로 교체하고, 이전 state 에서는
+> `completed` 플래그만 정규화 텍스트 키로 재적용된다 — `artifacts.js#mergeCompletion`).
+> 따라서 두 커맨드가 같은 파일을 쓰면 **태스크 목록은 나중에 쓴 쪽으로 덮이고 `sessions` 만
+> 뒤섞인다.** 마크다운에서 사라진 태스크는 state 에서도 사라진다.
 > 공유 레이어도 state 를 "플랜 파일 옆"에 두는 것을 설계로 명시한다. 진행률을 조회할 때는
 > PRD 옆 경로를 직접 지목하라. EXECUTION HANDOFF 에 그 경로를 그대로 출력한다.
 

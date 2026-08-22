@@ -58,6 +58,22 @@ export const COMPLEXITY_MULT = Object.freeze({
  */
 export const SESSION_BAND = Object.freeze({ minHours: 2, maxHours: 4 });
 
+/**
+ * Named target windows for `--size`. `session` IS {@link SESSION_BAND}, so the
+ * default path and an explicit `--size session` are the same object.
+ *
+ * These are *target windows*, not classifications: picking `epic` widens the
+ * window a plan is measured against (and therefore `maxHint`/`budgetHint`); the
+ * returned `band` label still reports where the estimate actually landed.
+ *
+ * @type {Readonly<Record<'quick'|'session'|'epic', { minHours: number, maxHours: number }>>}
+ */
+export const SIZE_BANDS = Object.freeze({
+  quick: Object.freeze({ minHours: 0.5, maxHours: 1 }),
+  session: SESSION_BAND,
+  epic: Object.freeze({ minHours: 4, maxHours: 8 }),
+});
+
 /** Hard cap on any budget hint (mirrors autopilot.limits.maxBudget = 2M). */
 export const MAX_BUDGET_TOKENS = 2000000;
 
@@ -134,6 +150,36 @@ function lookupCatalogCoeff(tier) {
   } catch {
     return DEFAULT_TOKENIZER_COEFF;
   }
+}
+
+/**
+ * Resolve the target band from `opts`. Precedence: an explicit `opts.band`
+ * object wins, then the named `opts.size`, then {@link SESSION_BAND}.
+ *
+ * Fail-closed on exactly one case — a non-empty string that names no preset.
+ * `--size epci` silently sizing to the default window is how U1 stayed invisible
+ * for four releases, so it now throws. Everything else (absent, `undefined`,
+ * empty/whitespace string) takes the default path unchanged: the call sites are
+ * model-generated JS in `.md` prompts, and throwing at them would trade a
+ * silent mis-size for a broken command.
+ *
+ * @param {object} [opts]
+ * @returns {{ minHours: number, maxHours: number }}
+ * @throws {TypeError} when `opts.size` is a non-empty string with no preset.
+ */
+function resolveBand(opts) {
+  if (opts?.band) return opts.band;
+  const raw = opts?.size;
+  if (typeof raw !== 'string') return SESSION_BAND;
+  const key = raw.trim().toLowerCase();
+  if (key === '') return SESSION_BAND;
+  if (!Object.hasOwn(SIZE_BANDS, key)) {
+    throw new TypeError(
+      `unknown size: ${JSON.stringify(raw)} `
+      + `(expected ${Object.keys(SIZE_BANDS).join(' | ')})`,
+    );
+  }
+  return SIZE_BANDS[key];
 }
 
 /**
@@ -238,12 +284,16 @@ export function estimateFootprint(tasks, opts = {}) {
  *
  * @param {number} hours
  * @param {object} [opts]
- * @param {{ minHours: number, maxHours: number }} [opts.band=SESSION_BAND]
+ * @param {{ minHours: number, maxHours: number }} [opts.band=SESSION_BAND] - explicit
+ *   window; wins over `opts.size`.
+ * @param {'quick'|'session'|'epic'} [opts.size] - named preset (`--size`).
+ *   Absent/empty → default window. Unknown non-empty name throws.
  * @returns {{ band: 'quick'|'session'|'epic', target: { minHours: number,
  *   maxHours: number }, recommendation: 'expand'|'ok'|'split', splitInto: number }}
+ * @throws {TypeError} on an unknown `opts.size`.
  */
 export function classifySize(hours, opts = {}) {
-  const band = opts.band || SESSION_BAND;
+  const band = resolveBand(opts);
   const { minHours, maxHours } = band;
   const h = typeof hours === 'number' && hours > 0 ? hours : 0;
   const target = Object.freeze({ minHours, maxHours });
@@ -266,10 +316,17 @@ export function classifySize(hours, opts = {}) {
  * (2M, matching autopilot.limits.maxBudget). maxHint is the band's max as a
  * "Nh" string.
  *
+ * `opts.size` ('quick'|'session'|'epic') selects the target window, so it is
+ * what makes `--size` change `maxHint`/`budgetHint`; `opts.band` still overrides
+ * it. See {@link resolveBand} for precedence and the fail-closed case.
+ *
  * @param {Array<{ type?: string, complexity?: string }>} tasks
  * @param {object} [opts] - forwarded to estimateFootprint & classifySize.
+ * @param {{ minHours: number, maxHours: number }} [opts.band]
+ * @param {'quick'|'session'|'epic'} [opts.size]
  * @returns {{ footprint: object, sizing: object,
  *   autopilot: { maxHint: string, budgetHint: number } }}
+ * @throws {TypeError} on an unknown `opts.size`.
  */
 export function sizePlan(tasks, opts = {}) {
   const footprint = estimateFootprint(tasks, opts);

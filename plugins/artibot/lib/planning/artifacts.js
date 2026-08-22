@@ -285,13 +285,33 @@ function matchesFilter(rec, filter) {
 // ---------------------------------------------------------------------------
 
 /**
- * Render PRD markdown body from sections in canonical order.
+ * Render PRD markdown body: the nine canonical sections in fixed order, then
+ * any unregistered key the caller supplied, appended in sorted order.
+ *
+ * The tail append exists because callers are `.md` command prompts (`/go`
+ * passes `기능요구사항`, others pass `근거`) that no static check reaches — those
+ * keys used to be dropped silently, so content the user watched being written
+ * never reached disk.
+ *
+ * Two deliberate non-changes:
+ *   - Empty sections are still rendered, for registered *and* appended keys —
+ *     `tests/planning/artifacts.test.js` ("empty section still rendered") is an
+ *     explicit contract, and the skeleton is what tells an author what to fill.
+ *   - With no unregistered keys the output is byte-identical to before.
+ *
+ * Blank/whitespace-only keys are skipped: they are not section names and would
+ * emit a bare `## ` heading.
+ *
  * @param {Record<string, string>} sections
  * @returns {string}
  */
 function renderPrdSections(sections) {
   const src = sections && typeof sections === 'object' ? sections : {};
-  return PRD_SECTION_ORDER
+  const registered = new Set(PRD_SECTION_ORDER);
+  const extras = Object.keys(src)
+    .filter((k) => !registered.has(k) && k.trim() !== '')
+    .sort();
+  return [...PRD_SECTION_ORDER, ...extras]
     .map((name) => `## ${name}\n\n${(src[name] ?? '').toString().trim()}\n`)
     .join('\n');
 }
@@ -521,12 +541,70 @@ export async function ensureADR({ projectRoot, title, options, decision, rationa
 // ---------------------------------------------------------------------------
 
 /**
+ * Normalise a task's text into a merge key. Whitespace-only differences (an
+ * editor re-wrapping a line, a stray trailing space) must not orphan a
+ * completed task, so runs of whitespace collapse and the ends are trimmed.
+ * Case is preserved — two tasks differing only in case are two tasks.
+ *
+ * @param {unknown} text
+ * @returns {string}
+ */
+function taskKey(text) {
+  return String(text ?? '').trim().replace(/\s+/g, ' ');
+}
+
+/**
+ * Re-apply `completed: true` flags from a prior `.plan-state.json` onto the
+ * freshly parsed task list.
+ *
+ * `PlanTracker#parsePlan` replaces its task list wholesale, so the flags
+ * restored by `fromState(prior)` are dropped on every sync. A task checked off
+ * via `/plan --done` survives only because that path writes `- [x]` back into
+ * the markdown; a task completed in state alone silently reverted to unchecked.
+ *
+ * Division of truth: the markdown decides *which* tasks exist (a task removed
+ * from the plan disappears from state); prior state only contributes
+ * stickiness of completion, keyed by normalized text.
+ *
+ * 태스크 텍스트를 편집하면 그 태스크의 완료 플래그는 사라진다(rename = 제거 + 추가).
+ * 공백 차이만은 {@link taskKey} 가 흡수한다. 텍스트가 유일한 조인 키이기 때문이며,
+ * stable ID 가 도입되기 전까지는 의도된 동작이다 — `tests/planning/artifacts.test.js`
+ * 의 "drops completion when a task is renamed" 가 이 계약을 고정한다.
+ *
+ * @param {Array<{ text: string, completed: boolean }>} parsed - parsePlan result.
+ * @param {object|null} prior - previously persisted state, if any.
+ * @returns {Array<{ text: string, completed: boolean }>}
+ */
+function mergeCompletion(parsed, prior) {
+  const priorTasks = Array.isArray(prior?.tasks) ? prior.tasks : [];
+  const done = new Set();
+  for (const t of priorTasks) {
+    if (t && t.completed) done.add(taskKey(t.text));
+  }
+  if (done.size === 0) return parsed;
+  return parsed.map((t) => (
+    t.completed || !done.has(taskKey(t.text)) ? t : { ...t, completed: true }
+  ));
+}
+
+/**
  * Parse a plan markdown into checkbox tasks and persist `.plan-state.json`
- * alongside the resolved plan file. Merges with any existing state.
+ * alongside the resolved plan file.
+ *
+ * What merges and what does not: `sessions` accumulate across calls, and
+ * `completed` flags are carried over by normalized task text; the task *list*
+ * itself is whatever the supplied markdown contains.
+ *
+ * `planMarkdown` must be a string. It used to be coerced with `: ''`, which
+ * defeated `parsePlan`'s own type guard (non-string → return `[]`, task list
+ * untouched) and turned a caller slip into an atomic overwrite of the user's
+ * completed state with an empty list — reported as `ok: true`. Now the call is
+ * rejected before anything is written.
  *
  * @param {object} args
  * @param {string} args.projectRoot - Absolute repo root.
  * @param {string} args.planMarkdown - Markdown containing `- [ ]` / `- [x]`.
+ *   Non-string input is rejected with `{ ok: false }` and leaves disk untouched.
  * @param {string} [args.planFile='PLAN.md'] - Plan file path (relative to
  *   projectRoot or absolute) recorded in state; state lands beside it.
  * @param {string} [args.sessionId] - Optional session to register.
@@ -538,6 +616,12 @@ export async function ensureADR({ projectRoot, title, options, decision, rationa
 export async function syncTodo({ projectRoot, planMarkdown, planFile = 'PLAN.md', sessionId, now }) {
   try {
     if (!projectRoot) return { ok: false, error: 'projectRoot required' };
+    // Fail-closed BEFORE any read/write: a non-string plan carries no task list,
+    // and writing state derived from it would destroy the prior one.
+    if (typeof planMarkdown !== 'string') {
+      const got = planMarkdown === null ? 'null' : typeof planMarkdown;
+      return { ok: false, error: `planMarkdown must be a string (got ${got})` };
+    }
     resolveNow(now); // validate clock arg for call-site consistency
     const resolvedPlan = path.isAbsolute(planFile)
       ? planFile
@@ -547,7 +631,11 @@ export async function syncTodo({ projectRoot, planMarkdown, planFile = 'PLAN.md'
     const tracker = new PlanTracker();
     const prior = await readState(stateFile);
     if (prior) tracker.fromState(prior);
-    tracker.parsePlan(typeof planMarkdown === 'string' ? planMarkdown : '');
+    const parsed = tracker.parsePlan(planMarkdown);
+    // parsePlan replaced the task list; put the merged one back so both
+    // toState() and getProgress() see the same tasks. Passing only `tasks`
+    // leaves the sessions restored above untouched.
+    tracker.fromState({ tasks: mergeCompletion(parsed, prior) });
     if (sessionId) tracker.addSession(sessionId);
 
     const state = tracker.toState(resolvedPlan);

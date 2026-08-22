@@ -12,6 +12,7 @@ import {
   MAX_BUDGET_TOKENS,
   PER_TASK_TOKENS,
   SESSION_BAND,
+  SIZE_BANDS,
   sizePlan,
   THROUGHPUT_TOKENS_PER_HOUR,
 } from '../../lib/planning/session-sizer.js';
@@ -193,6 +194,98 @@ describe('classifySize', () => {
     const r = classifySize(5, { band: { minHours: 6, maxHours: 8 } });
     expect(r.band).toBe('quick');
     expect(r.target).toEqual({ minHours: 6, maxHours: 8 });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// U1 — `--size` binding. sizePlan/classifySize used to read `opts.band` only,
+// so all four `--size` values produced byte-identical output.
+// ---------------------------------------------------------------------------
+
+describe('--size binding (opts.size)', () => {
+  const TASKS = [{ type: 'impl' }, { type: 'test' }];
+
+  it('maps quick/session/epic to distinct target windows', () => {
+    expect(classifySize(1, { size: 'quick' }).target).toEqual(SIZE_BANDS.quick);
+    expect(classifySize(1, { size: 'session' }).target).toEqual(SIZE_BANDS.session);
+    expect(classifySize(1, { size: 'epic' }).target).toEqual(SIZE_BANDS.epic);
+    // The three windows must actually differ, else the binding is cosmetic.
+    const maxes = ['quick', 'session', 'epic'].map((s) => SIZE_BANDS[s].maxHours);
+    expect(new Set(maxes).size).toBe(3);
+  });
+
+  it('sizePlan: each size yields a different maxHint and budgetHint', () => {
+    // Throughput is lowered so no band's raw product hits MAX_BUDGET_TOKENS —
+    // at the default 500k tok/h both session (4h→2M) and epic (8h→4M) clamp to
+    // 2M and the budgetHint assertion would pass vacuously. The cap itself is
+    // asserted separately below, with a combination that really exceeds it.
+    const opts = { throughput: 100000 };
+    const quick = sizePlan(TASKS, { ...opts, size: 'quick' });
+    const session = sizePlan(TASKS, { ...opts, size: 'session' });
+    const epic = sizePlan(TASKS, { ...opts, size: 'epic' });
+
+    expect([quick.autopilot.maxHint, session.autopilot.maxHint, epic.autopilot.maxHint])
+      .toEqual(['1h', '4h', '8h']);
+    const budgets = [
+      quick.autopilot.budgetHint,
+      session.autopilot.budgetHint,
+      epic.autopilot.budgetHint,
+    ];
+    expect(budgets).toEqual([100000, 400000, 800000]);
+    expect(new Set(budgets).size).toBe(3);
+    // Guard the guard: none of these were clamped, so the distinctness above
+    // is a property of the presets, not of the cap.
+    for (const b of budgets) expect(b).toBeLessThan(MAX_BUDGET_TOKENS);
+  });
+
+  it('caps budgetHint when the raw band×throughput product exceeds the cap', () => {
+    // epic 8h × 500k = 4,000,000 raw — genuinely over the 2M cap.
+    const raw = SIZE_BANDS.epic.maxHours * THROUGHPUT_TOKENS_PER_HOUR;
+    expect(raw).toBeGreaterThan(MAX_BUDGET_TOKENS);
+    expect(sizePlan(TASKS, { size: 'epic' }).autopilot.budgetHint).toBe(MAX_BUDGET_TOKENS);
+  });
+
+  it('lets an explicit opts.band win over opts.size', () => {
+    const r = sizePlan(TASKS, { size: 'quick', band: { minHours: 1, maxHours: 6 } });
+    expect(r.autopilot.maxHint).toBe('6h');
+    expect(r.sizing.target).toEqual({ minHours: 1, maxHours: 6 });
+  });
+
+  it('normalises case and surrounding whitespace', () => {
+    expect(classifySize(1, { size: '  EPIC  ' }).target).toEqual(SIZE_BANDS.epic);
+  });
+
+  // Negative control — the default path must stay byte-identical, because the
+  // call sites are model-generated JS inside `.md` prompts (plan-critic I3).
+  it('is byte-identical to the default for absent / undefined / empty size', () => {
+    const base = JSON.stringify(sizePlan(TASKS));
+    expect(JSON.stringify(sizePlan(TASKS, { size: undefined }))).toBe(base);
+    expect(JSON.stringify(sizePlan(TASKS, { size: '' }))).toBe(base);
+    expect(JSON.stringify(sizePlan(TASKS, { size: '   ' }))).toBe(base);
+    expect(JSON.stringify(sizePlan(TASKS, { size: 'session' }))).toBe(base);
+    expect(sizePlan(TASKS).sizing.target).toEqual(SESSION_BAND);
+  });
+
+  it('throws only for a non-empty string naming no preset', () => {
+    expect(() => sizePlan(TASKS, { size: 'epci' })).toThrow(/unknown size/);
+    expect(() => classifySize(1, { size: 'huge' })).toThrow(TypeError);
+    // Prototype keys are not presets.
+    expect(() => classifySize(1, { size: 'constructor' })).toThrow(/unknown size/);
+  });
+
+  // Documented residual: a truthy non-string `size` is ignored rather than
+  // rejected. The throw is scoped to the string case on purpose (see
+  // resolveBand); this pins the behavior so a future widening is a conscious
+  // change, not a surprise.
+  it('ignores non-string size values instead of throwing', () => {
+    expect(() => classifySize(1, { size: 3 })).not.toThrow();
+    expect(classifySize(1, { size: 3 }).target).toEqual(SESSION_BAND);
+    expect(classifySize(1, { size: null }).target).toEqual(SESSION_BAND);
+  });
+
+  it('exposes session as the very same object as SESSION_BAND', () => {
+    expect(SIZE_BANDS.session).toBe(SESSION_BAND);
+    expect(Object.isFrozen(SIZE_BANDS)).toBe(true);
   });
 });
 
