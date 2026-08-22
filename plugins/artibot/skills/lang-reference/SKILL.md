@@ -207,6 +207,7 @@ whenNotToUse: "Architecture decisions, infrastructure configuration, or non-lang
 level1_tokens: 200
 level2_tokens: 1200
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
+source_hash: b25de159
 ---
 
 # Language Patterns Reference Hub

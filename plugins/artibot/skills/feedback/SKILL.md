@@ -36,6 +36,7 @@ tokens: 2500
 agents: [orchestrator, code-reviewer]
 auto-invoke: true
 user-invocable: false
+source_hash: 76bd1631
 ---
 
 # feedback — Auto Bug/Feature Capture → GitHub Issues

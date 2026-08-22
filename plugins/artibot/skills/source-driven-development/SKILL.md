@@ -33,6 +33,7 @@ allowed-tools:
 tokens: "~5K"
 category: "workflow"
 whenNotToUse: "Pure business logic with no framework dependency (data structures, loops, conditionals). Internal helpers that don't touch any third-party API. The user explicitly opts for speed over verification ('just do it quickly'). Offline sessions where WebFetch is unavailable AND no Context7 cache hit exists — fall back to explicit unverified flags."
+source_hash: e801f583
 ---
 
 # Source-Driven Development

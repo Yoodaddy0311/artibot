@@ -17,7 +17,7 @@ agents:
   - "frontend-developer"
 tokens: "~3K"
 category: "marketing"
-source_hash: c8b012f3
+source_hash: a9ef611d
 whenNotToUse: "One-off copy tasks or campaign-specific content where brand system governance is not the goal; do not apply when the user only needs a single piece of text, not a reusable standard."
 ---
 

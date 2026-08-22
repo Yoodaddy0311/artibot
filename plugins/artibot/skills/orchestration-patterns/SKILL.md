@@ -13,6 +13,7 @@ whenNotToUse:
   - "Single-agent task with no delegation"
   - "Trivial scripts that do not need an LLM"
   - "Cases already covered by Agent Teams API native handoff"
+source_hash: 2d3ebb11
 ---
 
 # Orchestration Patterns

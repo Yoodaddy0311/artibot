@@ -54,6 +54,7 @@ risk: high
 version: "1.0.0"
 lastVerified: "2026-05-16"
 whenNotToUse: "단순 코드 리팩토링, 빌드 도구 교체 (Webpack→Vite처럼 사용자 데이터 무관), 로컬 dev 환경 변경 — production 트래픽과 사용자 데이터가 걸리지 않은 작업에는 과한 절차."
+source_hash: 4be83740
 ---
 
 # Zero-Downtime Migration

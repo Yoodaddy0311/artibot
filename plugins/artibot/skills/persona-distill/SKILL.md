@@ -28,6 +28,7 @@ allowed-tools:
 tokens: "~5K"
 category: "persona"
 whenNotToUse: "Do not apply when an existing persona is already active in the session — switch personas via persona-architect instead. Do not apply when the user wants to invoke (use) a persona on a task — that's persona-architect's job. Do not apply for one-off tone shifts inside a single message; only use when producing a persisted, reusable persona-* skill from local source material."
+source_hash: 05fc5a5c
 ---
 
 # Persona Distill: Compile a Person into a Skill

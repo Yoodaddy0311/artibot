@@ -89,6 +89,7 @@ whenNotToUse: "Non-Git version control systems (SVN, Mercurial) or tasks with no
 level1_tokens: 200
 level2_tokens: 1200
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
+source_hash: 8c8013b0
 ---
 
 # Git Unified Workflow Hub

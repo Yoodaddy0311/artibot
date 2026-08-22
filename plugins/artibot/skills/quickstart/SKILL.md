@@ -18,7 +18,7 @@ agents:
 argument-hint: "[project-type] e.g., node, python, rust, go"
 tokens: "~1K"
 category: "onboarding"
-source_hash: eb9d81f5
+source_hash: 66cdaeca
 whenNotToUse: "Returning users with an established project context; do not re-run the quickstart guide when the user has already completed onboarding and is working on an existing task."
 ---
 

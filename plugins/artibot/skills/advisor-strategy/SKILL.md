@@ -24,6 +24,7 @@ tokens: "~3K"
 category: "orchestration"
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 whenNotToUse: "Do not apply when the task is already routed to an Opus-tier agent via modelPolicy.high, as the advisor pattern adds latency without cost benefit. Also skip for System 1 routed requests where complexity is below threshold."
+source_hash: ea5a89ed
 ---
 
 # Advisor Strategy

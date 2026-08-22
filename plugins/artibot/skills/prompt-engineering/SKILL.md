@@ -32,7 +32,7 @@ category: "development"
 version: "1.0.0"
 risk: safe
 lastVerified: "2026-06-08"
-source_hash: 947e33e8
+source_hash: 02d60c00
 whenNotToUse: "Do not apply prompt engineering patterns to prompts that run once and are immediately discarded, or to simple factual queries where the model's default behavior is adequate. Reserve this skill for prompts that will be reused, parameterized, or embedded in production systems."
 ---
 

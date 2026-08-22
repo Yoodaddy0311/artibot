@@ -22,7 +22,7 @@ agents:
   - "performance-engineer"
 tokens: "~2K"
 category: "tooling"
-source_hash: 2eccc99a
+source_hash: 479513f3
 whenNotToUse: "Short sessions with low context usage where compression would degrade output clarity; do not apply when context is under 60% and no explicit --uc flag is set."
 ---
 

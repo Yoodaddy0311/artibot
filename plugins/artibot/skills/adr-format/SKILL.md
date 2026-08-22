@@ -44,7 +44,7 @@ agents:
 argument-hint: "[선택지 A] vs [선택지 B] e.g. PostgreSQL vs MongoDB, React Query vs SWR"
 tokens: "~3K"
 category: "decision"
-source_hash: adrfmt01
+source_hash: 8492680a
 whenNotToUse: "단일 선택지에 대한 단순 설명(→ /explain), 이미 결정된 사항의 구현 계획(→ /plan), 코드 리뷰(→ /code-review), 버그 수정(→ /troubleshoot). 또한 비교 대상이 1개뿐이거나 trivial한 선택(예: 변수명, 들여쓰기)에는 사용하지 않는다."
 ---
 

@@ -30,7 +30,7 @@ agents:
 argument-hint: "[ambiguous-request] e.g., improve the app, add authentication"
 tokens: "~2K"
 category: "intent"
-source_hash: e1f36028
+source_hash: f615e8ca
 whenNotToUse: "Do not trigger clarification for requests that are unambiguous, for tasks where clarifying would require more context than just starting, or when the user has already answered the same question in the current session. After 2 clarification rounds, proceed with stated assumptions."
 ---
 

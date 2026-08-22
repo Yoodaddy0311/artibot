@@ -19,6 +19,7 @@ tokens: "~3K"
 category: "quality"
 whenNotToUse: "Single CLAUDE.md edit requests where the user already specified the change. Skip when no CLAUDE.md file exists in the repository — run `/learn` to bootstrap one instead."
 tools: Read, Glob, Grep, Edit
+source_hash: d9a6baa2
 ---
 
 # CLAUDE.md Auditor

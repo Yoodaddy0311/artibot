@@ -13,6 +13,7 @@ whenNotToUse:
   - "Trivial single-call utilities with no untrusted input"
   - "Pure-function tools whose output is already type-checked at the call site"
   - "Operations where blocking is unsafe (logging, telemetry stubs)"
+source_hash: 3406edd4
 ---
 
 # Guardrails: Input, Output, and Tool-Level Policy Enforcement

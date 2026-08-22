@@ -19,7 +19,7 @@ agents:
   - "architect"
 tokens: "~4K"
 category: "persona"
-source_hash: cde72b5a
+source_hash: 71802227
 whenNotToUse: "Tactical implementation tasks (writing functions, fixing bugs, writing tests) where architectural trade-off analysis and system boundary decisions are not the primary concern."
 ---
 # Persona: Architect

@@ -79,6 +79,13 @@ export function collectActuals(opts = {}) {
     skills: countDirsWith(path.join(PLUGIN_ROOT, 'skills'), 'SKILL.md'),
     commands: countFiles(path.join(PLUGIN_ROOT, 'commands'), '.md'),
     agents: countFiles(path.join(PLUGIN_ROOT, 'agents'), '.md', ['INDEX.md', 'README.md']),
+    // `rules` = the .md rule files directly under rules/ (2026-08-22 리더 결정).
+    // rules/csv/ and everything inside it are NOT rules — the directory holds
+    // lookup tables consumed BY rules, and countFiles' extension filter already
+    // drops it (a directory named `csv` does not end in `.md`). Nested .md files
+    // are likewise out of scope: the count is deliberately 1-depth, matching how
+    // marketplace.json#/entryPoints/rules advertises the directory to users.
+    rules: countFiles(path.join(PLUGIN_ROOT, 'rules'), '.md'),
     // Script-file counts are "executable ESM modules in this directory", i.e.
     // .js + .mjs. `.mjs` is NOT a separate category: hooks/dispatch-table.json
     // registers session-readback.mjs (SessionStart) and session-ledger.mjs

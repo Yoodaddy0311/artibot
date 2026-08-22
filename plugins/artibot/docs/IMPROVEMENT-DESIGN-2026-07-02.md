@@ -96,6 +96,7 @@
 |----|------|-----|------|-----------|------|
 | IMP-10 | shouldPause danger 死분기 정리 (IMP-01에 흡수 가능) | 워크플로우 | 부채 | Med×Low | safety.js:141 vs engine-state.js:103-124 |
 | IMP-11 | config excludeTrivial 실소비 or 제거 | 워크플로우 | 부채 | Low×Low | artibot.config.json:146-149 죽은 설정, 훅은 자체 30자 하드코딩 |
+| ↳ IMP-11 해소 | **제거로 종결 (2026-08-22)** | 워크플로우 | 해소 | — | `team.autoApplyTriggers.excludeTrivial` 블록을 `artibot.config.json` 에서 삭제. 판정 근거: 리포 전역 JS 소비자 0(독립 2인 수렴 실측), `maxLines`/`singleFile` 은 diff 를 전제한 어휘라 프롬프트 문자열에 대응 의미가 없음. 훅의 30자·≤1도메인·≤1서브태스크 하드코딩(`scripts/hooks/auto-team-trigger.js#evaluatePrompt`)이 정본이며 그 사실을 같은 함수 JSDoc 에 명시 |
 | IMP-12 | runParallel 중복 키 dev-모드 경고 | 파이프라인 | 부채 | Low×Med | create-artibot-agent.js:82-105 컨벤션 의존 불변식 |
 | IMP-13 | defaultPipeline 주석 정정 (phase2 병렬 서술) | 파이프라인 | 부채 | Low×Low | create-artibot-agent.js:245 vs :342-347 |
 | IMP-14 | 벤치마크 표 타임스탬프 명시 or 단일 정본화 | 문서 | 부채 | Med×Med | README.md:59 v4.13.0 스냅샷 vs MEMORY 9.63/10 이원화 |

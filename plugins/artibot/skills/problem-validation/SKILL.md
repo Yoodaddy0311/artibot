@@ -35,7 +35,7 @@ agents:
   - "architect"
 tokens: "~2K"
 category: "quality"
-source_hash: ""
+source_hash: 8c870fb5
 whenNotToUse: "Do not apply when the user has already specified a concrete, bounded problem (e.g. 'fix this bug', 'implement X feature'). This skill is for open-ended improvement/audit requests where the set of problems is not yet determined."
 ---
 

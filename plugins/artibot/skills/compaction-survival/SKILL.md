@@ -27,7 +27,7 @@ category: "optimization"
 risk: safe
 version: "1.0.0"
 lastVerified: "2026-06-08"
-source_hash: fd4bafdf
+source_hash: dcb49e69
 whenNotToUse: "Short sessions well within context limits where compaction is not imminent; do not invoke as a routine step — only apply when context size poses a real loss risk."
 ---
 

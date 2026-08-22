@@ -35,7 +35,7 @@ agents:
 tokens: "~3K"
 category: "security"
 whenNotToUse: "Do not apply LLM-specific controls to pure deterministic code paths with no model in the loop (e.g., a config parser, a math utility). When no untrusted text ever reaches a model context and no agent acts on tool output, the classical security-standards skill covers it. Scale up to this skill the moment external text enters a prompt, a RAG store, or a tool result an agent will act on."
-source_hash: c81f47ef
+source_hash: 94e13a10
 ---
 
 # AI Security Standards

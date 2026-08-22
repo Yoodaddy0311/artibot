@@ -31,7 +31,7 @@ category: "architecture"
 version: "1.0.0"
 risk: safe
 lastVerified: "2026-06-08"
-source_hash: 4eb81a99
+source_hash: 4546f1e0
 whenNotToUse: "Do not apply DDD tactical patterns to simple CRUD APIs, admin dashboards, or data pipeline scripts where the domain has no invariants worth protecting. The aggregate/repository/domain-event overhead is unjustified when there is no complex domain logic."
 ---
 

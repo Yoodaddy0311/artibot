@@ -27,7 +27,7 @@ agents:
   - "orchestrator"
 tokens: "~3K"
 category: "orchestration"
-source_hash: dd3cd6dd
+source_hash: 7ede2340
 whenNotToUse: "Do not delegate single-file changes under 30 lines to sub-agents or teams — the delegation overhead exceeds the task cost. Do not use Team Mode for tasks with strict sequential dependencies where all work would block on the first agent anyway."
 ---
 

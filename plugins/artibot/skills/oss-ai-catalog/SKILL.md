@@ -32,6 +32,7 @@ tokens: 2500
 agents: [llm-architect, backend-developer, data-analyst]
 auto-invoke: true
 user-invocable: false
+source_hash: 27c775bf
 ---
 
 # oss-ai-catalog — Curated OSS AI Tool Index

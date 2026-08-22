@@ -22,7 +22,7 @@ agents:
   - "orchestrator"
 tokens: "~2K"
 category: "learning"
-source_hash: 03ee7158
+source_hash: 0dba3114
 whenNotToUse: "Do not persist memory for single-session tasks that have no reuse value across sessions. Do not store sensitive data (API keys, passwords, personal user data) in any memory store. Skip memory operations when running in ephemeral CI environments where the memory directory is discarded after the run."
 ---
 # Memory Management

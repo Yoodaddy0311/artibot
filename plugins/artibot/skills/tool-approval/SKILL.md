@@ -14,6 +14,7 @@ whenNotToUse:
   - "Read-only utilities that do not touch the filesystem or network"
   - "Cases already covered by the existing `pre-write-guard` hook"
   - "Hot-path tools where every call must be pre-approved offline"
+source_hash: 5b6a2b85
 ---
 
 # Tool Approval

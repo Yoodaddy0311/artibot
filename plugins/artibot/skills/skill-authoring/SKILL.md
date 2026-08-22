@@ -20,6 +20,7 @@ agents:
 tokens: "~3K"
 category: "meta"
 whenNotToUse: "Editing a skill's body content when the frontmatter is already correct and the change is a minor prose fix. Do not apply the full pressure-test loop for trivial description typos."
+source_hash: cf338637
 ---
 
 # Skill Authoring (Meta-Skill)

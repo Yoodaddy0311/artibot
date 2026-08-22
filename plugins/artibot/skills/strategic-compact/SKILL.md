@@ -20,7 +20,7 @@ agents:
   - "architect"
 tokens: "~2K"
 category: "analysis"
-source_hash: 20062e8f
+source_hash: 1ec6766b
 whenNotToUse: "Do not trigger strategic compaction below the yellow zone (60% context usage) or during active multi-file edits where task state is partially committed. Compacting mid-transaction loses the uncommitted state that the agent needs to complete the current operation."
 ---
 # Strategic Compaction

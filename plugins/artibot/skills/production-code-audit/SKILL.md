@@ -30,7 +30,7 @@ category: "quality"
 version: "1.0.0"
 risk: safe
 lastVerified: "2026-06-08"
-source_hash: 17d9f59e
+source_hash: 184fbe75
 whenNotToUse: "Do not run a full 4-phase audit on proof-of-concept branches, internal tooling with no external exposure, or code that is about to be deleted. Reserve audit depth for production-bound code or pre-release milestones."
 ---
 

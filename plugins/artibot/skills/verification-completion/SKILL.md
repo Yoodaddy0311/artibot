@@ -22,7 +22,7 @@ agents:
   - "tdd-guide"
 tokens: "~3K"
 category: "quality"
-source_hash: 76cdbedd
+source_hash: f84bab90
 whenNotToUse: "Do not apply full verification protocol to internal planning steps, WIP checkpoints mid-task, or agent-to-agent status messages. Reserve the protocol for final completion claims that a human or downstream agent will act on."
 ---
 

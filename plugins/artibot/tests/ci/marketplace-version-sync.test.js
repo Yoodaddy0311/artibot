@@ -81,10 +81,12 @@ describe('marketplace.json version sync', () => {
 // 다시 세면 정의가 갈라지고(agents 는 INDEX.md 제외, skills 는 SKILL.md 보유
 // 디렉터리) 두 게이트가 서로 다른 "진실"을 갖게 된다.
 describe('marketplace.json entryPoints counts match the filesystem', () => {
-  // 여기서 단언하지 않는 것: entryPoints.rules(선언 8 vs .md 10 + csv/) 와
-  // entryPoints.hooks(선언 2 = 디렉터리 파일 수이지 hook 수가 아니다 —
-  // 실체는 hookScripts 68 / hookRegistrations 25). 둘 다 collectActuals 에
-  // 대응 분모가 없어 정의부터 정해야 한다 → 백로그.
+  // 여기서 단언하지 않는 것: entryPoints.hooks 하나뿐이다(선언 2 = 디렉터리
+  // 파일 수이지 hook 수가 아니다 — 실체는 hookScripts / hookRegistrations).
+  // collectActuals 에 대응 분모가 없어 정의부터 정해야 한다 → 백로그.
+  //
+  // rules 는 2026-08-22 에 정의 확정 + 편입됐다: rules = `rules/*.md` 1-depth
+  // 파일 수(csv/ 및 그 내부 제외). 선언 8 vs 실측 10 드리프트를 이때 정정.
   const publicMarketplace = readJson(join(PLUGIN_ROOT, 'marketplace.json'));
   const actuals = collectActuals();
 
@@ -92,6 +94,7 @@ describe('marketplace.json entryPoints counts match the filesystem', () => {
     ['agents', 'agents'],
     ['skills', 'skills'],
     ['commands', 'commands'],
+    ['rules', 'rules'],
   ])('entryPoints.%s.count == 실측', (kind, actualKey) => {
     // 양성 대조: 분모가 0 이면 아래 단언은 "둘 다 0" 으로 공허하게 통과한다.
     expect(actuals[actualKey]).toBeGreaterThan(0);

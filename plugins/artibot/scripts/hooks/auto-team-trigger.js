@@ -258,12 +258,13 @@ function adaptPrompt(prompt) {
  * check the planner cannot make (it never sees a prompt). It can only SUPPRESS;
  * it can never fire the team on its own.
  *
- * HONESTY NOTE: the thresholds below are HARD-CODED, not config-driven. The
- * shipped `team.autoApplyTriggers.excludeTrivial` ({maxLines, singleFile}) has
- * zero consumers repo-wide — same defect class as the four T2 divergences, but
- * out of T2's scope because `maxLines`/`singleFile` have no defined meaning
- * against a prompt string. Do not silently "wire it up" without deciding that
- * mapping first.
+ * HONESTY NOTE: the thresholds below are HARD-CODED, not config-driven, and
+ * that is now the only definition. `team.autoApplyTriggers.excludeTrivial`
+ * ({maxLines, singleFile}) was an orphan key with zero consumers repo-wide and
+ * was REMOVED from artibot.config.json on 2026-08-22. If you want this filter
+ * to become configurable, define what `maxLines`/`singleFile` mean against a
+ * PROMPT STRING first — they were written for a diff, not a prompt, which is
+ * why the key was never wired. Do not re-add it without that mapping.
  *
  * @param {string} prompt
  * @param {object} triggers - raw config team.autoApplyTriggers (may be partial)
@@ -274,7 +275,8 @@ export function evaluatePrompt(prompt, triggers) {
 
   const { classification, intent, signals } = adaptPrompt(prompt);
 
-  // excludeTrivial: short + single-domain + single-verb -> skip
+  // trivial-prompt filter: short + single-domain + single-verb -> skip
+  // (formerly named after the removed `excludeTrivial` config key — see above)
   const trivial = prompt.length < TRIVIAL_MAX_CHARS
     && signals.domainCount <= 1
     && signals.subtasks <= 1;

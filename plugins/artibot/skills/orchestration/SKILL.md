@@ -31,7 +31,7 @@ agents:
   - "orchestrator"
 tokens: "~3K"
 category: "orchestration"
-source_hash: 27f267d4
+source_hash: d6b0c41d
 whenNotToUse: "Simple single-agent, single-file tasks under 30 lines where orchestration overhead exceeds the value; also not applicable outside the Artibot plugin environment."
 ---
 

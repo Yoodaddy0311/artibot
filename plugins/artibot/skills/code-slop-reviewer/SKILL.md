@@ -26,6 +26,7 @@ agents:
 tokens: "~4K"
 category: "quality"
 whenNotToUse: "Do not apply to test fixtures, generated code (protobuf stubs, GraphQL codegen), or vendor files. Do not run on patches authored by humans with explicit style justifications — use code-reviewer directly instead."
+source_hash: 4bf1f5a3
 ---
 
 # Code Slop Reviewer

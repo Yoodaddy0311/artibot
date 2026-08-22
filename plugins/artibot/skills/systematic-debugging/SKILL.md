@@ -26,7 +26,7 @@ agents:
 argument-hint: "[error-description] e.g., TypeError in auth.js, login 500 error"
 tokens: "~3K"
 category: "debugging"
-source_hash: 16fbf30a
+source_hash: d2c2c185
 whenNotToUse: "Do not apply the full 4-phase investigation to trivial typos, obvious off-by-one errors visible in a single line, or issues where root cause is already established in a prior post-mortem. Skip Phase 1-2 overhead when the error is deterministic and the fix is one character."
 ---
 

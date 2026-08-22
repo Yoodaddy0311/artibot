@@ -34,6 +34,7 @@ agents: [content-marketer, doc-updater]
 auto-invoke: true
 user-invocable: false
 whenNotToUse: "Do not apply polish to code blocks, JSON/YAML/SQL, internal agent-to-agent messages, or outputs shorter than 200 characters. Do not re-run on text that has already been polished in the same session (idempotency guard)."
+source_hash: 618ed027
 ---
 
 # polish — AI-slop Auto-Remediation (Post-Generation Hook Skill)

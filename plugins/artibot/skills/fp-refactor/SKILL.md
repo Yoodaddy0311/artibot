@@ -32,7 +32,7 @@ category: "development"
 version: "1.0.0"
 risk: safe
 lastVerified: "2026-06-08"
-source_hash: 59d3e5ea
+source_hash: 2cfe34fa
 whenNotToUse: "Do not apply fp-ts patterns to simple CRUD handlers, scripts with no error branching, or codebases where the team has no FP experience and no budget for the learning curve. The abstraction cost exceeds the benefit in these contexts."
 ---
 

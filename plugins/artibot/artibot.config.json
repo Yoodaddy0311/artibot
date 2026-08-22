@@ -164,11 +164,7 @@
         "explain",
         "lookup"
       ],
-      "excludeTrivial": {
-        "maxLines": 50,
-        "singleFile": true
-      },
-      "comment": "Tightened 2026-05-03: minComplexity high, minSubtasks/Files 3, maxLines 50, bypass intents added. Reduces team-routing for simple Q/diagnostic requests so non-trivial multi-domain work still triggers parallel teammates."
+      "comment": "Tightened 2026-05-03: minComplexity high, minSubtasks/Files 3, bypass intents added. Reduces team-routing for simple Q/diagnostic requests so non-trivial multi-domain work still triggers parallel teammates. 2026-08-22: orphan key excludeTrivial ({maxLines:50,singleFile:true}) removed — it had zero consumers repo-wide; the trivial-prompt filter is hard-coded in scripts/hooks/auto-team-trigger.js#evaluatePrompt. The five functional keys that remain (logic, minSubtasks, minFiles, minComplexity, bypassIntents) are all consumed by lib/cognitive/workflow-plan.js#evaluateTrigger; this comment key is documentation only and is read by nothing."
     },
     "engine": "claude-agent-teams",
     "envVar": "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS",

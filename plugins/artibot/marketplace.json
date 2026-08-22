@@ -120,7 +120,7 @@
     },
     "rules": {
       "directory": "./rules/",
-      "count": 8
+      "count": 10
     }
   },
   "features": [

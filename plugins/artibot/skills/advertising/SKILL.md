@@ -17,7 +17,7 @@ agents:
   - "ad-specialist"
 tokens: "~3K"
 category: "marketing"
-source_hash: 5f514760
+source_hash: 4a34a6c2
 whenNotToUse: "Organic/unpaid content creation, SEO copywriting, or brand storytelling that does not involve paid media placement, bidding strategy, or platform ad accounts."
 ---
 

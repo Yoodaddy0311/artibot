@@ -17,7 +17,7 @@ agents:
   - "doc-updater"
 tokens: "~3K"
 category: "marketing"
-source_hash: b03c3667
+source_hash: 0617ec03
 whenNotToUse: "Technical documentation, neutral informational writing, or internal prose where persuasion frameworks (AIDA, PAS) are inappropriate or would distort the content's intent."
 ---
 

@@ -9,7 +9,7 @@ agents: ["architect"]
 tokens: "~3K"
 category: "workflow"
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
-source_hash: 022945ba
+source_hash: e63ca081
 whenNotToUse: "Do not apply when the request is a quick exploratory spike, a one-liner fix, or when the stakeholder explicitly wants to prototype first and specify later. EARS overhead exceeds value for tasks under 30 minutes of implementation."
 ---
 

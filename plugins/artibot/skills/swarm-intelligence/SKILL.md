@@ -21,7 +21,7 @@ agents:
   - "orchestrator"
 tokens: "~3K"
 category: "learning"
-source_hash: e2241486
+source_hash: 631ad65d
 whenNotToUse: "Isolated single-instance deployments where federated sharing is disabled or no network is available; also not applicable for tasks unrelated to cross-instance pattern sharing."
 ---
 
