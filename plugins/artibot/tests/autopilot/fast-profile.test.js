@@ -11,6 +11,17 @@ import {
 } from '../../lib/autopilot/fast-profile.js';
 import { buildFastFanoutPlan as buildFromPublicApi } from '../../lib/autopilot/index.js';
 
+/**
+ * True when two task ids land in the same wave — i.e. would run concurrently.
+ * @param {{waves: Array<{taskIds: string[]}>}} plan
+ * @param {string} a
+ * @param {string} b
+ * @returns {boolean}
+ */
+function coLocated(plan, a, b) {
+  return plan.waves.some((wave) => wave.taskIds.includes(a) && wave.taskIds.includes(b));
+}
+
 function task(id, affectedPaths, overrides = {}) {
   return {
     id,
@@ -165,6 +176,94 @@ describe('buildFastFanoutPlan', () => {
       { taskId: 'home', reason: 'unsafe-affected-path' },
       { taskId: 'traversal', reason: 'unsafe-affected-path' },
     ]);
+  });
+
+  it('serializes tasks whose affectedPaths contain unparseable non-string entries', () => {
+    // Negative control first, measured rather than assumed: with the SAME
+    // shared file spelled as a string the planner does NOT serialize — it
+    // splits the pair across waves (`[alpha,gamma,delta]`, `[beta]`, serial
+    // empty). So the invariant to hold is "never in one wave together", which
+    // is what actually prevents two workers editing src/shared.js at once.
+    const stringly = buildFastFanoutPlan({
+      fast: true,
+      cpuCount: 8,
+      tasks: [
+        task('alpha', ['src/shared.js']),
+        task('beta', ['src/shared.js']),
+        task('gamma', ['src/gamma.js']),
+        task('delta', ['src/delta.js']),
+      ],
+    });
+    expect(coLocated(stringly, 'alpha', 'beta')).toBe(false);
+
+    // Now the same collision hidden behind shapes the parser cannot read.
+    //
+    // The arrays are MIXED on purpose: each task keeps one readable, private
+    // path and hides the shared file in an unreadable entry. An all-unreadable
+    // array would leave `paths` empty and serialize safely via
+    // `missing-affected-paths` — it never reaches the failure region. The
+    // mixed shape is the one the bug lived in: the unreadable entry vanished,
+    // each task kept an understated (and non-overlapping) path set, no
+    // conflict was detected, and both landed in the SAME wave — two workers
+    // editing src/shared.js concurrently. Verified against the pre-fix code:
+    // with `unsafe:false` restored, `coLocated(shaped,'alpha','beta')` is true.
+    const shaped = buildFastFanoutPlan({
+      fast: true,
+      cpuCount: 8,
+      tasks: [
+        task('alpha', ['src/alpha.js', { glob: 'src/shared.js' }]),
+        task('beta', ['src/beta.js', { glob: 'src/shared.js' }]),
+        task('gamma', ['src/gamma.js']),
+        task('delta', ['src/delta.js']),
+      ],
+    });
+
+    const reasons = new Map(shaped.serial.map((entry) => [entry.taskId, entry.reason]));
+    expect(reasons.get('alpha')).toBe('unsafe-affected-path');
+    expect(reasons.get('beta')).toBe('unsafe-affected-path');
+    // The invariant, same as the string spelling above.
+    expect(coLocated(shaped, 'alpha', 'beta')).toBe(false);
+    // Stronger than the string case: unparseable ownership leaves the waves
+    // entirely, so neither can share a wave with ANY task.
+    for (const wave of shaped.waves) {
+      expect(wave.taskIds).not.toContain('alpha');
+      expect(wave.taskIds).not.toContain('beta');
+    }
+    // Well-formed siblings are untouched — this narrows ownership, it does not
+    // poison the whole plan.
+    expect(shaped.waves.flatMap((wave) => wave.taskIds).sort()).toEqual(['delta', 'gamma']);
+  });
+
+  it('treats a blank-string affectedPath as unparseable, not as absent', () => {
+    const plan = buildFastFanoutPlan({
+      fast: true,
+      cpuCount: 8,
+      tasks: [
+        task('blank', ['   ']),
+        task('ok-one', ['src/one.js']),
+        task('ok-two', ['src/two.js']),
+      ],
+    });
+    expect(plan.serial).toEqual(expect.arrayContaining([
+      { taskId: 'blank', reason: 'unsafe-affected-path' },
+    ]));
+  });
+
+  it('still reports an all-absent affectedPaths list as missing, not unsafe', () => {
+    // null/undefined are absence, not corruption: they shrink no ownership
+    // claim, so the pre-existing `missing-affected-paths` reason must survive.
+    const plan = buildFastFanoutPlan({
+      fast: true,
+      cpuCount: 8,
+      tasks: [
+        task('empty', [null, undefined]),
+        task('ok-one', ['src/one.js']),
+        task('ok-two', ['src/two.js']),
+      ],
+    });
+    expect(plan.serial).toEqual(expect.arrayContaining([
+      { taskId: 'empty', reason: 'missing-affected-paths' },
+    ]));
   });
 
   it('builds topological waves while maximizing independent work in each wave', () => {

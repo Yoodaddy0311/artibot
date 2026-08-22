@@ -64,7 +64,16 @@ function isUnsafeRepoPath(value) {
 }
 
 function inspectPath(value) {
-  if (typeof value !== 'string' || !value.trim()) return { path: null, unsafe: false };
+  // Absent entries are absent: they shrink no ownership claim, and a task whose
+  // affectedPaths are all absent still serializes via `missing-affected-paths`.
+  if (value === null || value === undefined) return { path: null, unsafe: false };
+  // Anything else unparseable is UNSAFE, not ignorable. Dropping it silently
+  // was fail-open in the mixed case: with `['src/a.js', {glob:'src/shared.js'}]`
+  // the object vanished, the task kept its (now understated) path set, and two
+  // tasks that really do touch `src/shared.js` landed in the same wave. Marking
+  // it unsafe routes the task to `assessTask`'s existing `unsafe-affected-path`
+  // serialization, which is the conservative answer when ownership is unknown.
+  if (typeof value !== 'string' || !value.trim()) return { path: null, unsafe: true };
   const slashed = value.trim().replaceAll('\\', '/');
   if (isUnsafeRepoPath(slashed)) return { path: null, unsafe: true };
   const path = slashed.split('/').filter((segment) => segment && segment !== '.')

@@ -223,6 +223,38 @@ export function retainFastIntegrationWorktree(state, worktreePath) {
 }
 
 /**
+ * Demote an accepted fast plan back to standard execution.
+ *
+ * Fan-out is only safe on a **fixed** integration base: every worker worktree
+ * is branched from `integration.baseSha`, and the instruction also tells the
+ * driver to WIP-commit every 30 minutes. With no session worktree,
+ * {@link retainFastIntegrationWorktree} yields `{cwd:null, baseSha:null}`, so
+ * a driver that reads `null` as "the repo root" would branch up to
+ * `maxWorktrees` workers off a **moving HEAD** instead of a pinned commit.
+ *
+ * Demotion is the deliberate response, rather than forcing `useWorktree` on:
+ * `--fast` is not consent to create a worktree the user never asked for.
+ * The returned profile keeps every measured field (cpuCount, parallelism,
+ * serial entries) so `:status` can still explain what was requested and why
+ * it did not run — only the parts that would drive fan-out are cleared.
+ *
+ * @param {object} fast Accepted profile from {@link planFastExecution}.
+ * @param {string} reason Fallback reason recorded on the demoted profile.
+ * @returns {object} A new profile; the input is never mutated.
+ */
+export function demoteFastToStandard(fast, reason) {
+  if (!fast || fast.enabled !== true) return fast;
+  return {
+    ...fast,
+    enabled: false,
+    fallbackReason: reason,
+    worktrees: { required: false, count: 0 },
+    waves: [],
+    serialReasons: [...new Set([...(fast.serialReasons ?? []), reason])],
+  };
+}
+
+/**
  * Plan a requested fast execution profile from explicit task metadata.
  * Explicit runners and no-team remain authoritative and force a safe fallback.
  * @param {object} state
@@ -235,7 +267,15 @@ export function planFastExecution(state, runner, limits = {}, testOptions = {}) 
   if (state?.options?.fast !== true) return null;
   const blockedReason = runner === 'dynamic-run'
     ? dynamicRunnerBlockReason(state)
-    : state?.options?.noTeam === true || state?.options?.team === false
+    // One spelling only. `options.noTeam` was accepted here too, but a repo-wide
+    // census found zero producers for it and it appears nowhere in
+    // `commands/autopilot.md` — an undocumented alias that nothing writes is a
+    // second door onto the same decision, so it is gone. The surviving contract
+    // is `options.team === false`: the command driver normalizes the documented
+    // `--no-team` flag (autopilot.md § Fast Fan-out Profile) into it, and the
+    // engine's obligation is the `team-disabled` telemetry + standard
+    // `team-create` instruction that the same table promises.
+    : state?.options?.team === false
       ? 'team-disabled'
       : null;
   const persisted = blockedReason ? null : getPersistedFastProfile(state);

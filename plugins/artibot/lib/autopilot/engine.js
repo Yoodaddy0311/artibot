@@ -33,7 +33,7 @@ import {
 import { safeAppendLesson } from './engine-state.js';
 import { acquireLock, isLocked, releaseLock } from './lock.js';
 import { loadAllowList } from './mcp-verifier.js';
-import { buildFastTeamInstruction, loadFastProfileConfig, planFastExecution, retainFastIntegrationWorktree } from './fast-execution.js';
+import { buildFastTeamInstruction, demoteFastToStandard, loadFastProfileConfig, planFastExecution, retainFastIntegrationWorktree } from './fast-execution.js';
 /**
  * Phase names in canonical order.
  *
@@ -319,13 +319,18 @@ export function runPhase2Execute(state) {
   if (paused) return paused;
 
   const { runner } = retainExecuteRunnerSelection(state);
-  const fast = planFastExecution(state, runner, loadFastProfileConfig());
+  let fast = planFastExecution(state, runner, loadFastProfileConfig());
   // The session worktree is the integration base for fast worker worktrees.
   // Standard execution retains the same best-effort worktree behavior.
   const savedWorktree = typeof state.worktreePath === 'string' && state.worktreePath
     ? state.worktreePath : null;
   const worktreePath = savedWorktree || attemptCreateWorktree(state);
-  if (fast?.enabled) retainFastIntegrationWorktree(state, worktreePath);
+  // No session worktree (the `--worktree` default is off) means no fixed
+  // integration base, so fan-out would pin every worker to a moving HEAD.
+  // Demote to standard rather than creating a worktree the user never asked for.
+  if (fast?.enabled && !retainFastIntegrationWorktree(state, worktreePath).cwd) {
+    fast = demoteFastToStandard(fast, 'no-integration-worktree');
+  }
 
   if (fast) {
     state.fastProfile = fast;

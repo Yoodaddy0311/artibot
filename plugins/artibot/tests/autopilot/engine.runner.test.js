@@ -233,6 +233,10 @@ describe('runPhase2Execute — runner branching (ADR-003 Stage 1)', () => {
     expect(inst.teamHint).toBeUndefined();
     const text = inst.instructions.join('\n');
     expect(text).toContain('Workflow');
+    // Blind spot, stated next to the gate: this checks only that the word
+    // appears in the instruction text. The actual dynamic-run -> team-create
+    // fallback transition is NOT implemented (A3, DEFER), so a green here is
+    // evidence the driver was told to fall back — never that it can.
     expect(text).toContain('runner-fallback');
   });
 
@@ -242,8 +246,15 @@ describe('runPhase2Execute — runner branching (ADR-003 Stage 1)', () => {
   });
 
   it('should turn an eligible --fast task wave into isolated parallel team instructions', async () => {
+    if (!gitAvailable()) return;
+    // `useWorktree` is load-bearing, not decoration: fan-out requires a fixed
+    // integration base, and without a session worktree the engine demotes to
+    // standard (see the no-integration-worktree test below). This test used to
+    // omit it and still assert enabled:true — it was asserting the bug.
     const inst = await phase2Instruction({
       fast: true,
+      useWorktree: true,
+      worktreeCwd: tempRepo,
       cpuCount: 2,
       fastTasks: [
         { id: 'api', independent: true, affectedPaths: ['src/api/**'], risk: 'low', worktreeEligible: true },
@@ -261,6 +272,41 @@ describe('runPhase2Execute — runner branching (ADR-003 Stage 1)', () => {
     expect(inst.teamHint.plannedParallelism).toBe(inst.fast.plannedParallelism);
     expect(inst.instructions.join('\n')).toContain('독립 작업 wave');
     expect(inst.instructions.join('\n')).toContain('파일 소유권');
+  });
+
+  it('should demote an eligible --fast wave to standard when there is no integration worktree', async () => {
+    // The gap the review found: `--worktree` defaults off, so `--fast` alone
+    // left `integration = {cwd:null, baseSha:null}` while fan-out stayed on.
+    // A driver reading that null as "the repo root" would branch up to
+    // maxWorktrees workers off a MOVING HEAD, since the same instruction also
+    // orders a WIP commit every 30 minutes. Identical input to the test above
+    // minus `useWorktree` — the only difference is the integration base.
+    const inst = await phase2Instruction({
+      fast: true,
+      cpuCount: 2,
+      fastTasks: [
+        { id: 'api', independent: true, affectedPaths: ['src/api/**'], risk: 'low', worktreeEligible: true },
+        { id: 'ui', independent: true, affectedPaths: ['src/ui/**'], risk: 'low', worktreeEligible: true },
+        { id: 'tests', independent: true, affectedPaths: ['tests/**'], risk: 'medium', worktreeEligible: true },
+      ],
+    }, 'fast-no-integration');
+
+    // Standard instruction, not the fan-out one.
+    expect(inst.type).toBe('team-create');
+    expect(inst.teamHint).toEqual({ parallel: true, leadAgent: 'orchestrator' });
+    expect(inst.fast).toMatchObject({
+      enabled: false,
+      fallbackReason: 'no-integration-worktree',
+      worktrees: { required: false, count: 0 },
+      waves: [],
+    });
+    expect(inst.fast.serialReasons).toContain('no-integration-worktree');
+    // Nothing may carry a worker plan: no worktreePlan at all, so there is no
+    // null baseCwd/baseSha for a driver to reinterpret.
+    expect(inst.fast.worktreePlan).toBeUndefined();
+    // The tasks were genuinely eligible — demotion is about the missing base,
+    // not about the work. Keeping these fields is what lets :status explain it.
+    expect(inst.fast).toMatchObject({ requested: true, eligibleParallelism: 3 });
   });
 
   it('should retain the session integration worktree for --fast worker instructions', async () => {
@@ -314,12 +360,44 @@ describe('runPhase2Execute — runner branching (ADR-003 Stage 1)', () => {
     expect(resumed.fast.worktreePlan.integration).toEqual(first.fast.worktreePlan.integration);
   });
 
+  it('should fall back to standard when --fast is combined with team:false', async () => {
+    // The `--no-team` interlock had zero tests and zero producers (repo-wide
+    // census: the only match for either spelling was the consuming line
+    // itself). `options.noTeam` is gone; `options.team === false` is the single
+    // documented spelling the command driver is contracted to set, and this
+    // pins the engine half of that contract (autopilot.md § Fast Fan-out
+    // Profile: `team-disabled` telemetry + standard team-create instruction).
+    const inst = await phase2Instruction({
+      fast: true,
+      team: false,
+      useWorktree: true,
+      worktreeCwd: tempRepo,
+      cpuCount: 2,
+      fastTasks: [
+        { id: 'api', independent: true, affectedPaths: ['src/api/**'], risk: 'low', worktreeEligible: true },
+        { id: 'ui', independent: true, affectedPaths: ['src/ui/**'], risk: 'low', worktreeEligible: true },
+      ],
+    }, 'fast-team-disabled');
+
+    expect(inst.type).toBe('team-create');
+    expect(inst.fast).toMatchObject({ enabled: false, fallbackReason: 'team-disabled' });
+    expect(inst.fast.serialReasons).toContain('team-disabled');
+    expect(inst.fast.worktreePlan).toBeUndefined();
+    // Both eligible tasks are serialized under the interlock, not silently kept.
+    expect(inst.fast.serial.map((entry) => entry.taskId).sort()).toEqual(['api', 'ui']);
+  });
+
   it('should persist requested, eligible, planned, and worktree fast telemetry in session state', async () => {
+    if (!gitAvailable()) return;
     const r = await start({
       task: 'runner test fast telemetry',
       mode: 'default',
       options: {
         fast: true,
+        // Required for the plan to stay enabled — this asserts the telemetry of
+        // an ACCEPTED plan, which only exists with an integration base.
+        useWorktree: true,
+        worktreeCwd: tempRepo,
         cpuCount: 2,
         fastTasks: [
           { id: 'one', independent: true, affectedPaths: ['src/one/**'], risk: 'low', worktreeEligible: true },
@@ -416,11 +494,16 @@ describe('runPhase2Execute — runner branching (ADR-003 Stage 1)', () => {
   });
 
   it('should reuse the paused EXECUTE fast snapshot when later inputs offer more parallelism', async () => {
+    if (!gitAvailable()) return;
     const r = await start({
       task: 'runner test fast resume snapshot',
       mode: 'default',
       options: {
         fast: true,
+        // Snapshot reuse is only observable on an accepted plan, which needs
+        // the integration base; without it the profile demotes before resume.
+        useWorktree: true,
+        worktreeCwd: tempRepo,
         cpuCount: 1,
         fastTasks: [
           { id: 'one', independent: true, affectedPaths: ['src/one/**'], risk: 'low', worktreeEligible: true },
