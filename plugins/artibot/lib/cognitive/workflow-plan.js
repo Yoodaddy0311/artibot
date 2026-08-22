@@ -99,12 +99,23 @@ function parentCommand(intent) {
  * Numeric thresholds live in config (`team.autoApplyTriggers`); this is a pure
  * evaluator. `subtasks`/`files` both proxy off `recommendations.length`.
  *
+ * SOLE OWNER of the auto-team decision (PRD command-improvement-verified
+ * 20260822 §T2). `scripts/hooks/auto-team-trigger.js` no longer re-implements
+ * the thresholds: it adapts a raw prompt into `{ classification, intent }` and
+ * RENDERS whatever this function returns. Any threshold/precedence change must
+ * happen here and only here — a second evaluator is how the pre-T2 hook drifted
+ * into ignoring `minComplexity`/`bypassIntents`/`logic`.
+ *
+ * Defaults applied when a key is absent from `triggers` (this is the single
+ * source for them — callers MUST NOT pre-fill their own copies):
+ *   minSubtasks=3, minFiles=3, minComplexity='high', logic='OR', bypassIntents=[]
+ *
  * @param {{ score?: number }} classification
  * @param {object} intent
  * @param {object} triggers - config team.autoApplyTriggers (may be partial).
  * @returns {{ fired: boolean, runner: 'inline'|'team', reasons: string[], bypassed: boolean }}
  */
-function evaluateTrigger(classification, intent, triggers) {
+export function evaluateTrigger(classification, intent, triggers) {
   const t = triggers || {};
   const bypass = Array.isArray(t.bypassIntents) ? t.bypassIntents : [];
   const intents = Array.isArray(intent?.intents) ? intent.intents : [];
