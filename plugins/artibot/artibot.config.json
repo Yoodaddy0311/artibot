@@ -168,7 +168,6 @@
         "maxLines": 50,
         "singleFile": true
       },
-      "persistentTeam": true,
       "comment": "Tightened 2026-05-03: minComplexity high, minSubtasks/Files 3, maxLines 50, bypass intents added. Reduces team-routing for simple Q/diagnostic requests so non-trivial multi-domain work still triggers parallel teammates."
     },
     "engine": "claude-agent-teams",

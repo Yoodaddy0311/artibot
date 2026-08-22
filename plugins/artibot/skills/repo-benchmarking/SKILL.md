@@ -81,6 +81,29 @@ Validate URL (HTTPS only) -> Sanitize repo name -> Clone to ~/.claude/artibot/re
 
 **Total: 100 points maximum (weighted sum)**
 
+#### 3a. `N/A` — 4 rules (apply before you sum)
+
+**Not every dimension applies to every repo.** A curated list has no hook system; a CLI has
+no skill system. Scoring an absent dimension is not rigor, it is invention — score it `N/A`.
+These four rules are summarized here because this skill is loadable **standalone** (a spawn
+that never opens the driver command would otherwise score without the convention). The full
+statement lives in [`/repo`](../../commands/repo.md) § *10 Scoring Dimensions*; change it
+there first, then mirror here.
+
+1. **`N/A` is not zero.** A zero says "they did this badly"; `N/A` says "this axis does not
+   exist here". Never fold `N/A` into the total as 0 — that silently penalizes a repo for
+   not being a plugin.
+2. **Drop `N/A` dimensions out of the denominator, and print the denominator you used.**
+   `41 / 60 possible (4 dims N/A)`, never a bare `41`. A total with no denominator cannot be
+   compared to anything, and two repos with different denominators are **not** directly
+   comparable — say so instead of ranking them side by side.
+3. **State why.** `N/A` is a claim like any other: cite the structure scan that shows the
+   dimension is absent.
+4. **`N/A` ≠ `UNINSPECTED`.** `N/A` (the axis does not exist) is different from
+   `UNINSPECTED` / `SHALLOW` / `INSUFFICIENT-INSPECTION` (the axis exists, you did not look
+   hard enough). The first is a property of the repo; the rest are properties of your effort.
+   Do not use one to cover the other.
+
 ### 3b. Artibot Baseline (pinned — never re-scored mid-benchmark)
 
 > Benchmarks score the **target repo only**; the Artibot column is read from this table. Reason: two judges in one session (2026-08-17) scored the same Artibot tree 4.0 points apart on the same 40-point slice, because each anchored to the repo sitting in the comparison column — a relative scale inflates Artibot next to weak targets. A pinned baseline removes that drift and makes results from different benchmark runs comparable for the first time. Re-pin deliberately (release audit or explicit user request) — if a run surfaces evidence a value is wrong, **report the discrepancy with `file:line`, do not silently overwrite**.

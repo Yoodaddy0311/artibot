@@ -1,6 +1,6 @@
 ---
 description: (Artibot) Implementation plan creation with risk identification and phase decomposition
-argument-hint: '[task] e.g. "결제 시스템 구현 계획"'
+argument-hint: '[task] e.g. "결제 시스템 구현 계획" [--depth shallow|deep] [--scope file|module|project|system] [--size quick|session|epic] [--risks] [--prd] [--adr] · 조회/정리: [--status] [--done N] [--list active|done|stale|all] [--archive [--apply]] [--supersede old new]'
 allowed-tools: [Read, Glob, Grep, Bash, Agent, TaskCreate]
 toolset: team
 lifecycle: plan

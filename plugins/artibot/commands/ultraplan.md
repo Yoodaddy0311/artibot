@@ -1,6 +1,6 @@
 ---
 description: (Artibot) Maximal evidence-grounded planning — codebase and web research grounding + multi-lens council + adversarial review + execution handoff
-argument-hint: '[task] e.g. "결제 시스템 v2 마이그레이션" [--no-research] [--lenses N]'
+argument-hint: '[task] e.g. "결제 시스템 v2 마이그레이션" [--no-research] [--lenses N] [--scope file|module|project|system] [--size quick|session|epic] [--no-adversarial]'
 allowed-tools: [Read, Glob, Grep, Bash, Agent, SendMessage, TaskCreate, Skill, WebSearch]
 toolset: team
 lifecycle: plan

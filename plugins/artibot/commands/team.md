@@ -181,6 +181,31 @@ TaskUpdate(taskId="{id}", owner="{teammate-name}", status="in_progress")
 - Teammates work independently
 - Leader monitors via TaskList but does NOT intervene unless blocked
 
+#### Task 도구가 없는 세션 (fallback)
+
+`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` 가 설정되지 않았거나 하네스가 태스크 도구를
+내려주지 않은 세션에서는 `TaskCreate` · `TaskUpdate` · `TaskList` · `TaskGet` 이 **아예
+존재하지 않는다**. 그때는 위 태스크 단계를 **생략하고 SendMessage 기반으로 진행**한다 —
+없는 도구를 호출하려다 턴을 태우지 마라.
+
+1. 태스크 레코드 대신 **Phase 2 스폰 프롬프트의 작업 명세**가 배정이다. 범위·파일·성공기준을
+   프롬프트에 이미 실어 보냈으므로 배정 정보는 소실되지 않는다.
+2. 진행 상황은 `TaskList` 조회가 아니라 **팀원이 `SendMessage` 로 보내오는 보고**로 파악한다.
+   보고 계약 1조가 이미 그 채널을 강제한다.
+3. Phase 3.5 진행률 바의 `done`/`total` 은 리더가 배정한 작업 단위 수와 수신한 완료 보고
+   수로 직접 센다 (태스크 조회 없이도 계산이 성립한다).
+4. Phase 6 SHUTDOWN 은 그대로다 — `SendMessage(type="shutdown_request", ...)` 는 태스크
+   도구와 별개다.
+
+`SendMessage` 마저 없으면 팀원은 애초에 주소가 잡히지 않는다. 그때는 이름 없이
+`Agent(subagent_type=…)` 로 fire-and-forget 위임하고 반환값을 리더가 취합한다. 이 모드의
+정본 절차는 `agents/orchestrator.md` § *Sub-Agent Fallback* 이다.
+
+> **도구명 주의**: 폴백 경로를 적을 때 개명 전 이름(`Task`)을 되살리지 마라. 현행 스폰
+> 도구는 `Agent` 이고 태스크 도구는 위 4종이다 — 정본 목록은
+> `tests/firewall/frontmatter-tools.js#KNOWN_TOOL_NAMES`, 폐지명은 같은 파일의
+> `STALE_TOOL_NAMES` 다.
+
 ### ★ Phase 3.5: 진행률 렌더링 (MANDATORY — 채팅에 눈에 띄게)
 
 리더는 작업이 진행되는 동안 **대화(채팅)에 진행률 바를 직접 출력**한다. 이건

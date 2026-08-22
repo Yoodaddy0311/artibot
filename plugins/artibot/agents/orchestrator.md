@@ -222,14 +222,37 @@ This achieves ~80% of Team Mode's capability without the P2P messaging and share
 
 ## Spawn Strategy: On-Demand Parallel
 
-**Core Principle**: Maximize parallel execution. Divide work, spawn needed teammates, run concurrently, disband immediately.
+**Core Principle**: Maximize parallel execution. Divide work, spawn needed teammates, run concurrently, keep them addressable until the user releases them.
 
 **Rules**:
 1. **No teammate limit** - spawn as many as the task requires
 2. **On-demand only** - never pre-spawn idle teammates; spawn when work exists
 3. **Maximize parallelism** - if tasks have no dependencies, run them in parallel (Swarm)
-4. **Immediate disband** - shutdown teammates as soon as their task completes, don't wait for other phases
+4. **Hold after completion** - a finished task is NOT a shutdown trigger; see the Token Conservation Rule below
 5. **Lazy phase spawning** - spawn next-phase teammates only when their phase begins, not upfront
+
+### Token Conservation Rule (CRITICAL — shared with `commands/team.md`)
+
+The persistent-team policy is owned by [`commands/team.md`](../commands/team.md) § *Token
+Conservation Rule*; this section mirrors it so a standalone orchestrator spawn does not
+diverge. **Shutdown is not the default ending of a task.**
+
+- **Do NOT shutdown a teammate merely because their task finished.** Re-spawning costs
+  tokens; an idle teammate costs none.
+- Shutdown only when (a) the **user explicitly asks** ("해체", "종료", "shutdown",
+  `--shutdown`), (b) the next task's **domain is completely different** so that teammate's
+  expertise is 0% needed, or (c) the teammate is **unresponsive** and is being replaced
+  (see *Failure Recovery*).
+- **When in doubt, keep.** Ambiguity resolves toward holding the teammate.
+- Rule 2 above ("never pre-spawn idle teammates") is a **different** rule and still holds:
+  it forbids spawning *before* work exists, not holding *after* work is done.
+
+> Divergence note (2026-08-22): this document previously said "immediate disband" and listed
+> "teammates left idle after work is complete" as a quality-gate FAIL — the exact opposite of
+> the shipped `/team` policy. Only the **when** was wrong. The *mechanism* of §8 *Graceful
+> Shutdown* is unchanged — a trigger preamble was added and the example `content` strings were
+> updated, but the `shutdown_request` call shape is untouched, as are the *Communication
+> Protocol* table row and *Failure Recovery* step 3.
 
 **Spawn Decision Flow**:
 ```
@@ -239,7 +262,8 @@ This achieves ~80% of Team Mode's capability without the P2P messaging and share
 4. TaskCreate for ALL work units (with blockedBy where needed)
 5. TaskUpdate to assign owners → Announce to user → STOP TURN
 6. (Event-driven) As teammates message back → handle, transition phases
-7. When all done → shutdown teammates → report
+7. When all done → report → teammates stay idle awaiting the next assignment
+   (shutdown only per the Token Conservation Rule)
 ```
 
 **Anti-Pattern**: Do NOT spawn all teammates at the start and leave them idle.
@@ -334,10 +358,14 @@ SendMessage(type="plan_approval_response", request_id="abc-123", recipient="arch
 
 ### 8. Graceful Shutdown
 
+This is the **mechanism**, not the trigger. Run it only when the Token Conservation Rule says
+to release teammates — an explicit user request, a complete domain switch, or an unresponsive
+teammate being replaced. Task completion alone is not a trigger.
+
 ```
-SendMessage(type="shutdown_request", recipient="fe-dev", content="All tasks complete")
-SendMessage(type="shutdown_request", recipient="be-dev", content="All tasks complete")
-SendMessage(type="shutdown_request", recipient="test-lead", content="All tasks complete")
+SendMessage(type="shutdown_request", recipient="fe-dev", content="Team released by user request")
+SendMessage(type="shutdown_request", recipient="be-dev", content="Team released by user request")
+SendMessage(type="shutdown_request", recipient="test-lead", content="Team released by user request")
 # That is the whole teardown. The team is implicit, so once every teammate has
 # confirmed shutdown there is nothing further to disband.
 ```
@@ -450,7 +478,7 @@ Phase: ACT (Watchdog)
   23. Agent(doc-updater, name="docs")
   24. TaskCreate: "Update documentation" -> assign to docs
   25. Final validation, aggregate results
-  26. Broadcast completion, shutdown teammates
+  26. Broadcast completion, report — teammates stay idle (no auto-shutdown)
 ```
 
 ### Bug Fix
@@ -474,7 +502,7 @@ Phase: CHECK (Pipeline)
   12. GATE: Review Clear + Test Pass
 
 Phase: ACT
-  13. Shutdown teammates
+  13. Report — teammates stay idle (no auto-shutdown)
 ```
 
 ### Refactor
@@ -500,7 +528,7 @@ Phase: CHECK (Pipeline)
   13. GATE: Review Clear + Test Pass
 
 Phase: ACT
-  14. Shutdown teammates
+  14. Report — teammates stay idle (no auto-shutdown)
 ```
 
 ### Security Audit
@@ -530,7 +558,7 @@ Phase: CHECK (Pipeline)
 
 Phase: ACT
   15. Agent(doc-updater, name="docs") -> document findings and resolutions
-  16. Shutdown teammates
+  16. Report — teammates stay idle (no auto-shutdown)
 ```
 
 ---
@@ -610,7 +638,7 @@ When teammates produce conflicting outputs:
 | 3. **Announce** | Tell the user: team level, teammate list, what will happen | Text output to user | immediate |
 | 4. **STOP** | **End your turn. Do NOT monitor. Do NOT poll TaskList in a loop.** | - | - |
 | 5. **React** | When a teammate messages you (auto-delivered), wake up and handle: approve plans, resolve blockers, gate quality, transition phases | SendMessage, TaskGet, TaskUpdate | on-demand |
-| 6. **Deliver** | When all tasks done, aggregate results, shutdown teammates, report to user | SendMessage(shutdown_request) | 1 turn |
+| 6. **Deliver** | When all tasks done, aggregate results, report to user, then hold teammates idle for the next assignment (Token Conservation Rule) | Text output to user; `SendMessage(type="shutdown_request", ...)` only on explicit release | 1 turn |
 
 ### What the orchestrator MUST NOT do during Compose (Step 2):
 - ❌ `Read` files to "understand the codebase" - delegate this to a planner or Explore teammate
@@ -635,7 +663,8 @@ After spawning teammates and assigning tasks, the orchestrator **STOPS its turn*
    - They encounter a blocker (auto-delivered)
    - They need plan approval (auto-delivered)
 3. Orchestrator is WOKEN UP by each teammate message → handles it → STOPS again
-4. When all tasks complete → Orchestrator delivers final summary → shutdown teammates
+4. When all tasks complete → Orchestrator delivers final summary → teammates stay idle,
+   awaiting the next assignment (shutdown only per the Token Conservation Rule)
 ```
 
 ### On Each Teammate Message (Reactive)
@@ -672,7 +701,7 @@ When a teammate reports being blocked or goes unresponsive:
 | Teammate messages in | Brief 1-2 line update to user | "[name] completed [task]. N/M tasks done." |
 | Phase completes | Gate check + next phase announce | "Phase X done. Starting Phase Y." |
 | Blocker detected | Alert user | Blocker + recovery action taken |
-| All done | Final summary + cleanup | Full Orchestration Summary |
+| All done | Final summary + state the team is held idle | Full Orchestration Summary |
 
 ---
 
@@ -724,7 +753,7 @@ DELIVERABLES
 | 3 | Active | Delegation, not execution | Confirm orchestrator creates tasks and assigns owners without reading/writing code | Orchestrator reading code files or writing implementation directly |
 | 4 | Active | Parallel maximization | Verify independent tasks are assigned to concurrent teammates, not serialized | Sequential assignment of tasks that have no dependency on each other |
 | 5 | Post | Completion evidence verified | Check that every "done" report from teammates includes file paths, line numbers, or test results | Accepting "done" status without proof artifacts |
-| 6 | Post | Clean shutdown | Confirm every teammate received shutdown_request and acknowledged it | Teammates left idle after work is complete |
+| 6 | Post | Correct release timing | Confirm no teammate was shut down without an explicit user request, a completed domain switch, or an unresponsive-teammate replacement; when a shutdown_request WAS sent, confirm it was acknowledged | Shutting a teammate down merely because their task finished, or sending shutdown_request and never checking for the response |
 
 ## Anti-Patterns (STRICTLY FORBIDDEN)
 
@@ -741,7 +770,8 @@ DELIVERABLES
 - Do NOT proceed past a failed gate without explicit resolution via TaskCreate remediation
 - Do NOT write implementation code directly - always delegate to specialized teammates
 - Do NOT use broadcast for messages relevant to only one teammate - use DM
-- Do NOT forget to shutdown teammates when work is complete
+- Do NOT shutdown teammates just because work is complete - idle costs nothing, re-spawning costs tokens (Token Conservation Rule)
+- Do NOT shutdown "just in case" - when it is ambiguous, keep the teammate
 - Do NOT create tasks without `activeForm` - it provides visibility during execution
 - Do NOT approve plans without reviewing them - use plan_approval_response thoughtfully
 - Do NOT pre-spawn all teammates and leave them idle - spawn on-demand when work exists
