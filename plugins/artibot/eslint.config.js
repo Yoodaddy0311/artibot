@@ -83,7 +83,8 @@ export default [
           {
             group: [
               '**/adapters/**', '**/autopilot/**', '**/context/**',
-              '**/dispatcher/**', '**/git/**', '**/handoff/**', '**/intent/**',
+              '**/dispatcher/**', '**/genesis/**', '**/git/**',
+              '**/handoff/**', '**/intent/**',
               '**/mcp/**', '**/observability/**', '**/orchestration/**',
               '**/planning/**', '**/privacy/**', '**/release/**', '**/sdk/**',
               '**/security/**', '**/swarm/**', '**/system/**', '**/tui/**',
@@ -99,10 +100,22 @@ export default [
   },
   {
     // L2 Auxiliary: must not import from L3 Learning, L4 Cognitive, L5 Runtime.
+    //
+    // genesis/ (added 2026-08-22): `/go` blueprint renderers. It was in NO
+    // layer block, so the allowlist-shaped gate applied zero layer rules to it
+    // — fail-open by omission, not by decision. Placed at L2 on two measured
+    // grounds: its own imports are node built-ins + `./_shared.js` only (zero
+    // lib/* edges), and its only consumers are `commands/go.md` (runtime
+    // dynamic import) and tests — no lib module imports it. That is the same
+    // "domain service a command drives" profile as release/ visual/ tui/, not
+    // the shared-leaf profile of core/ utils/ (L1). Registering is therefore
+    // non-breaking today and forward-protective tomorrow.
+    // tests/firewall/layer-registration-coverage.test.js keeps this list from
+    // silently missing the next new directory.
     files: [
       'lib/adapters/**/*.{js,mjs}', 'lib/autopilot/**/*.{js,mjs}',
       'lib/context/**/*.{js,mjs}', 'lib/dispatcher/**/*.{js,mjs}',
-      'lib/git/**/*.{js,mjs}',
+      'lib/genesis/**/*.{js,mjs}', 'lib/git/**/*.{js,mjs}',
       'lib/intent/**/*.{js,mjs}', 'lib/mcp/**/*.{js,mjs}',
       'lib/observability/**/*.{js,mjs}', 'lib/orchestration/**/*.{js,mjs}',
       'lib/planning/**/*.{js,mjs}', 'lib/privacy/**/*.{js,mjs}',
