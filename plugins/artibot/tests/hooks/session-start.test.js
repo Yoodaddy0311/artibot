@@ -218,14 +218,14 @@ describe('session-start hook', () => {
   });
 
   describe('environment variables', () => {
-    it('reports agent-teams (full) mode when CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1', async () => {
+    it('reports the env var as set when CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1', async () => {
       process.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS = '1';
       mockState.readStdinResult = Promise.resolve(JSON.stringify({}));
 
       await importAndWait();
 
       const output = mockState.writeStdoutCalls[0][0];
-      expect(output.message).toContain('agent-teams (full)');
+      expect(output.message).toContain('agent-teams (env set)');
     });
 
     it('shows advisory message when agent teams is not configured', async () => {
@@ -234,10 +234,33 @@ describe('session-start hook', () => {
       await importAndWait();
 
       const output = mockState.writeStdoutCalls[0][0];
-      expect(output.message).toContain('sub-agent (fallback)');
+      expect(output.message).toContain('team env unset (tools unchecked)');
       // Should write advisory to stderr instead of modifying settings.json
       const stderrOutput = stderrSpy.mock.calls.map((c) => c[0]).join('');
-      expect(stderrOutput).toContain('Agent Teams not enabled');
+      expect(stderrOutput).toContain('Agent Teams env var not set');
+    });
+
+    // Regression guard for the label's honesty, not its wording. A
+    // SessionStart hook cannot see the session's tools (main() discards the
+    // stdin payload), and toggling this env var was measured to add/remove no
+    // tool at all on CLI 2.1.220 headless. So the banner must never state the
+    // session's capability from the env var alone — asserting `agent-teams
+    // (full)` or `sub-agent (fallback)` off a config read is the exact claim
+    // that was wrong. Rewording the labels keeps this green; re-asserting
+    // capability turns it red.
+    it('never claims a capability it cannot observe, in either direction', async () => {
+      for (const envValue of ['1', undefined]) {
+        if (envValue === undefined) delete process.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS;
+        else process.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS = envValue;
+        mockState.writeStdoutCalls.length = 0;
+        mockState.readStdinResult = Promise.resolve(JSON.stringify({}));
+
+        await importAndWait();
+
+        const { message } = mockState.writeStdoutCalls[0][0];
+        expect(message).not.toContain('agent-teams (full)');
+        expect(message).not.toContain('sub-agent (fallback)');
+      }
     });
 
     it('does not modify settings.json (advisory only)', async () => {

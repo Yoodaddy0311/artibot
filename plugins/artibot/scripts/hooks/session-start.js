@@ -149,9 +149,27 @@ async function loadCollectiveTop(pluginRoot) {
 }
 
 /**
- * Detect Agent Teams orchestration mode. Reads env + settings.json and
- * emits a stderr advisory when the env is not configured. Never modifies
- * settings.json.
+ * Report what the **configuration** says about Agent Teams. Reads env +
+ * settings.json and emits a stderr advisory when the env is not set. Never
+ * modifies settings.json.
+ *
+ * **This does not detect the session's actual capability, and the labels no
+ * longer claim it does.** A SessionStart hook has no way to ask: `main()`
+ * discards the stdin payload precisely because it carries no tool inventory,
+ * and no hook in this repo receives one. So every branch here is an inference
+ * from config, not an observation of the session.
+ *
+ * That distinction became load-bearing once it was measured. On CLI 2.1.220
+ * headless (2026-08-23), toggling `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` did
+ * not add or remove a single tool — `SendMessage` and the whole `Task*` family
+ * were present either way, and only an explicit `--tools` allowlist removed
+ * them (see `agents/orchestrator.md` § Sub-Agent Fallback). The old labels
+ * asserted `agent-teams (full)` / `sub-agent (fallback)` from the env var
+ * alone, so a session with every team tool available could be told it was in
+ * fallback. The labels now name the observed config state and leave capability
+ * unclaimed; whether the variable gates anything interactively is still
+ * unverified in both directions, so nothing here asserts that it does.
+ *
  * @param {string} home
  * @returns {{ teamMode: string, setupHint: string }}
  */
@@ -172,21 +190,22 @@ function detectTeamMode(home) {
   }
 
   if (hasAgentTeams) {
-    return { teamMode: 'agent-teams (full)', setupHint: '' };
+    return { teamMode: 'agent-teams (env set)', setupHint: '' };
   }
   if (settingsHasTeamEnv) {
     return {
-      teamMode: 'agent-teams (restart required)',
-      setupHint: '\n  Restart Claude Code to activate Agent Teams.',
+      teamMode: 'agent-teams (settings only, applies next launch)',
+      setupHint: '\n  Set in settings.json but not in this process env — an env change applies on the next launch.',
     };
   }
   process.stderr.write(
-    '[artibot] Agent Teams not enabled. Add to ~/.claude/settings.json:\n' +
+    '[artibot] Agent Teams env var not set (tool availability not checked — this hook cannot see the session\'s tools).\n' +
+    '  If team tools are missing, add to ~/.claude/settings.json:\n' +
     '  "env": { "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1" }\n'
   );
   return {
-    teamMode: 'sub-agent (fallback)',
-    setupHint: '\n  Enable full team mode: Add {"env":{"CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS":"1"}} to ~/.claude/settings.json',
+    teamMode: 'team env unset (tools unchecked)',
+    setupHint: '\n  Config-based only. Check whether SendMessage/Task* actually exist before assuming fallback; if they are missing, add {"env":{"CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS":"1"}} to ~/.claude/settings.json.',
   };
 }
 
