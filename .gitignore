@@ -82,6 +82,14 @@ reports/
 .artibot/HANDOFF.md
 .artibot/handoffs/
 
+# Session work products written at the repo root (reports, proposals, exported
+# docs). Same local-only rationale as the handoffs above: they are per-session
+# records, not repo state. Root-anchored so it cannot swallow a future
+# `plugins/*/artifacts/` that a build step legitimately tracks.
+# Concrete reason it is here: during the v4.49.0 release this directory sat
+# untracked and un-ignored, one `git add -A` away from shipping a .docx.
+/artifacts/
+
 # Auto-generated per-session timeline log — hooks rewrite it every session,
 # so it only adds dirty-tree noise to git status / /save. Read from the working
 # tree by hooks (session-notes.js, dev-verify-gate.js, pr-description-builder.js);
