@@ -315,6 +315,31 @@ jobs:
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
+
+            # Name only the halves that actually changed. The subject used to be
+            # a fixed string asserting both. Three consecutive releases
+            # (572e9d19, #106, #108) touched marketplace.json alone and still
+            # announced "README badges", which sends a reader hunting for a
+            # README diff that is not in the commit. Built here rather than in
+            # the landing steps for the same reason the change detection lives
+            # here: both paths must give one answer.
+            readme_changed=false
+            marketplace_changed=false
+            git diff --quiet README.md plugins/artibot/README.md || readme_changed=true
+            git diff --quiet plugins/artibot/marketplace.json .claude-plugin/marketplace.json || marketplace_changed=true
+
+            if [ "${readme_changed}" = "true" ] && [ "${marketplace_changed}" = "true" ]; then
+              parts="README badges + marketplace meta"
+            elif [ "${readme_changed}" = "true" ]; then
+              parts="README badges"
+            else
+              # Reached only when the READMEs are clean, and this whole branch
+              # runs only when at least one of the four files differs — so the
+              # marketplace half is what changed. Not a default.
+              parts="marketplace meta"
+            fi
+            echo "subject=docs(release): sync ${parts} to ${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+            echo "Commit subject: docs(release): sync ${parts} to ${GITHUB_REF_NAME}"
           fi
           if [ "${HAS_PAT}" = "true" ]; then
             echo "mode=ff" >> "$GITHUB_OUTPUT"
@@ -343,13 +368,18 @@ jobs:
           # call is therefore wrapped and routed to open_issue.
           LANDING_PAT: ${{ secrets.ARTIBOT_LANDING_PAT }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BADGE_SUBJECT: ${{ steps.strategy.outputs.subject }}
         run: |
           BRANCH="ci/sync-badges-${GITHUB_REF_NAME}"
+          # Fall back to the both-halves wording only if the strategy step
+          # somehow produced no subject. An empty -m aborts the commit, which
+          # would turn a naming nit into a failed landing.
+          SUBJECT="${BADGE_SUBJECT:-docs(release): sync README badges + marketplace meta to ${GITHUB_REF_NAME}}"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -b "${BRANCH}"
           git add README.md plugins/artibot/README.md plugins/artibot/marketplace.json .claude-plugin/marketplace.json
-          git commit -m "docs(release): sync README badges + marketplace meta to ${GITHUB_REF_NAME}"
+          git commit -m "${SUBJECT}"
 
           # Push with the PAT explicitly instead of the GITHUB_TOKEN credential
           # that actions/checkout persisted. The credential is inlined in the
@@ -485,6 +515,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.counts.outputs.version }}
+          BADGE_SUBJECT: ${{ steps.strategy.outputs.subject }}
         run: |
           # Same dedup + no-label rationale as the ff path's copy above. Defined
           # here too because steps cannot share shell functions.
@@ -504,6 +535,8 @@ jobs:
           }
 
           BRANCH="chore/sync-readme-badges-${GITHUB_REF_NAME}"
+          # Same fallback rationale as the ff path: an empty -m aborts the commit.
+          SUBJECT="${BADGE_SUBJECT:-docs(release): sync README badges + marketplace meta to ${GITHUB_REF_NAME}}"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -b "${BRANCH}"
@@ -511,7 +544,7 @@ jobs:
           # No [skip ci] — the badge PR needs required CI checks to run so
           # auto-merge can proceed. Adding [skip ci] would block both the push
           # AND pull_request triggers, leaving the PR permanently BLOCKED.
-          git commit -m "docs(release): sync README badges + marketplace meta to ${GITHUB_REF_NAME}"
+          git commit -m "${SUBJECT}"
           # Guarded for the same reason as the ff path's pushes: a bare command
           # under `bash -e` kills the step with a red X and no issue. The
           # realistic trigger here is re-tagging — pushing v1.2.3 twice leaves a
@@ -526,7 +559,7 @@ jobs:
           gh pr create \
             --base master \
             --head "${BRANCH}" \
-            --title "docs(release): sync README badges + marketplace meta to ${GITHUB_REF_NAME}" \
+            --title "${SUBJECT}" \
             --body "Automated badge + marketplace metadata sync triggered by release ${GITHUB_REF_NAME}. Auto-merges once required CI checks pass."
           # P1 escalation: if --auto fails (auto-merge disabled at repo level,
           # required-check misconfig, etc.) the PR previously stayed open
