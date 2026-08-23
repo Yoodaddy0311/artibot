@@ -7,5 +7,12 @@
   "engines": {
     "node": ">=20"
   },
-  "type": "module"
+  "type": "module",
+  "scripts": {
+    "//": "Delegate to the workspace that declares the runner — see vitest.config.js for why bare `npx vitest` here is unpinned.",
+    "test": "npm --prefix plugins/artibot test",
+    "test:coverage": "npm --prefix plugins/artibot run test:coverage",
+    "lint": "npm --prefix plugins/artibot run lint",
+    "ci": "npm --prefix plugins/artibot run ci"
+  }
 }

@@ -1,6 +1,12 @@
 /**
  * Root-level vitest config that delegates to plugins/artibot/.
- * Allows running `npx vitest run` from the project root.
+ *
+ * Prefer `npm test` from the repo root — it runs the workspace's own pinned
+ * runner. This file only takes effect for a bare `npx vitest` here, and this
+ * package declares no dependencies, so that invocation resolves no local
+ * binary: npm runs whatever version its _npx cache happens to hold (measured
+ * 2026-08-23: 4.1.11, against a declared 4.0.18). CI is unaffected — it runs
+ * with `working-directory: plugins/artibot` (.github/workflows/ci.yml).
  *
  * The strip-shebang plugin is needed because hook scripts start with
  * #!/usr/bin/env node which vitest's VM evaluator cannot parse.
