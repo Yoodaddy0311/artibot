@@ -251,12 +251,42 @@ All contributions must respect Artibot's **local-only data policy** — exports 
 | File | Field | Must equal |
 |---|---|---|
 | `plugins/artibot/package.json` | `version` | plugin version |
-| `plugins/artibot/.claude-plugin/plugin.json` | `version` | plugin version |
 | `plugins/artibot/artibot.config.json` | `version` | plugin version |
+| `plugins/artibot/.claude-plugin/plugin.json` | `version` | plugin version |
 | `plugins/artibot/.well-known/mcp-server.json` | `version` | plugin version |
-| `plugins/artibot/AGENTS.md` | this section | plugin version |
+| `plugins/artibot/marketplace.json` | `version` | plugin version |
+| `plugins/artibot/marketplace.json` | `release.current` | plugin version |
+| `plugins/artibot/AGENTS.md` | this section's version line (below) | plugin version |
+| `plugins/artibot/README.md` | `badge/version-X-` badge URL | plugin version |
+| `package.json` (repo root) | `version` | plugin version |
+| `README.md` (repo root) | `badge/version-X-` badge URL | plugin version |
+| `.claude-plugin/marketplace.json` (repo root) | `plugins[name=artibot].version` | plugin version |
 
-Current plugin version: **4.48.0**. Keep the five in lockstep — `scripts/release-check.js` enforces all five.
+<!-- release-check.js regex-matches the FIRST occurrence of the version sentence below
+     (the "Current plugin version" label followed by a bold value). Do not repeat that
+     sentence pattern with a placeholder value anywhere earlier in this file — the gate
+     would capture the placeholder and fail the release. -->
+
+Current plugin version: **4.48.0**. That is **11 entries across 10 files** — `marketplace.json`
+contributes two (`version` and `release.current`). Keep all eleven in lockstep;
+`scripts/release-check.js` enforces every one of them and exits 1 on any mismatch.
+
+The entries added to the gate later are the ones that historically drifted, because until
+then nothing enforced them: the two README badges (the GitHub-visible root one in
+particular), and the marketplace JSON files, whose drift silently routes Claude Code's
+per-version plugin cache to stale code (2026-06-08 incident: 4.13.1 vs 4.19.6).
+
+Two further checks live in the same script and are easy to miss:
+
+- **CHANGELOG entry** — `CHANGELOG.md` must contain a level-2 heading for the current
+  version; the square brackets are optional, so both `## [X.Y.Z]` and `## X.Y.Z` match.
+  A missing entry is a blocking failure (exit 1), not a warning.
+- **Installed-copy drift** — warns (exit 2, non-blocking) when `~/.claude/artibot/` is behind
+  the source. Note the scope: it inspects **only** that one path. The marketplace mirror at
+  `~/.claude/plugins/marketplaces/artibot/` and any copy under `~/.claude/plugins/artibot/`
+  are **not** checked, so a green release check does not mean every local copy is current.
+  `npm run sync:local` updates the direct install; the git-managed marketplace mirror needs
+  `claude plugin marketplace update artibot` instead.
 
 ### Release gate: install & update verification
 
