@@ -17,6 +17,7 @@ import {
   buildRecoveryNote,
   detectInterruptedPhase,
 } from '../../lib/autopilot/_engine-helpers.js';
+import { ATTEMPT_RERUN_ALLOWLIST, ATTEMPT_STATUS } from '../../lib/autopilot/phase-attempt.js';
 
 /**
  * Input surface note: these fixtures are NDJSON **events** passed through the
@@ -158,5 +159,97 @@ describe('buildRecoveryNote', () => {
     expect(note).toContain('EXECUTE');
     // No "(...)" since startedAt is null
     expect(note).not.toMatch(/\(/);
+  });
+});
+
+/**
+ * ADR-005 2단 regression guard.
+ *
+ * 1단 gave this banner one sentence — "자동으로 {phase} 재진입합니다" — because
+ * back then resume really did re-enter every interrupted phase. 2단 changed
+ * that for un-acknowledged attempts: `engine.js#settleOutstandingAttempt`
+ * PAUSEs instead, and says so in the opposite words. The banner was not
+ * updated, so a driver following `commands/autopilot.md` § Step 2 (which tells
+ * it to push this note *before* calling resumeAutopilot) showed the operator
+ * "재진입합니다" one line before the engine said "자동 재실행하지 않습니다".
+ *
+ * These tests pin the banner to the decision `phase-attempt.js#reconcileAttemptOnResume`
+ * will actually make. They deliberately assert on the *contradiction* rather
+ * than on exact wording, so rephrasing either note keeps them green while
+ * re-introducing the conflict turns them red.
+ */
+describe('buildRecoveryNote — attempt-aware (ADR-005 2단)', () => {
+  /** A crashed EXECUTE hand-off: phase-start logged, no phase-end, attempt still open. */
+  const executeEvents = [{ type: 'phase-start', phase: 'EXECUTE', ts: '2026-08-23T00:30:16.290Z' }];
+  const openAttempt = (phase) => ({
+    attemptId: '08a99713-c61f-4fdc-86e6-14733205c68c',
+    phase,
+    runner: 'team-create',
+    status: ATTEMPT_STATUS.STARTED,
+    checkpointSha: null,
+    startedAt: '2026-08-23T00:30:17.408Z',
+  });
+
+  it('warns that the work will NOT be redone when an EXECUTE attempt is outstanding', () => {
+    const state = { ...SESSION, activePhaseAttempt: openAttempt('EXECUTE') };
+    const note = buildRecoveryNote(state, { events: executeEvents });
+
+    expect(note).toContain('자동 재실행하지 않습니다');
+    expect(note).toContain('EXECUTE');
+  });
+
+  it('never promises re-entry while also refusing to re-run (the original contradiction)', () => {
+    const state = { ...SESSION, activePhaseAttempt: openAttempt('EXECUTE') };
+    const note = buildRecoveryNote(state, { events: executeEvents });
+
+    // The exact defect: both claims reaching the operator from one resume.
+    expect(note).not.toContain('재진입합니다');
+  });
+
+  it('surfaces all three documented exits so the pause is never a dead end', () => {
+    const state = { ...SESSION, activePhaseAttempt: openAttempt('EXECUTE') };
+    const note = buildRecoveryNote(state, { events: executeEvents });
+
+    expect(note).toContain('recordPhaseResult');
+    expect(note).toContain('ackOutstandingAttempt');
+    expect(note).toContain('/autopilot:abort');
+  });
+
+  it('says an allowlisted phase WILL be redone automatically', () => {
+    // CROSS_CHECK/VERIFY are read-and-report passes; redoing them is free, so
+    // reconcileAttemptOnResume returns `rerun` and the banner must agree.
+    const phase = [...ATTEMPT_RERUN_ALLOWLIST][0];
+    const state = { ...SESSION, activePhaseAttempt: openAttempt(phase) };
+    const note = buildRecoveryNote(state, { events: [{ type: 'phase-start', phase, ts: '2026-08-23T00:30:16.290Z' }] });
+
+    expect(note).toContain('자동으로 다시 진행합니다');
+    expect(note).not.toContain('자동 재실행하지 않습니다');
+  });
+
+  it('keeps the plain re-entry banner when no attempt is outstanding', () => {
+    // Negative control. Without an open attempt resume really does re-enter,
+    // so 1단's wording is correct and must survive.
+    const note = buildRecoveryNote(SESSION, { events: executeEvents });
+
+    expect(note).toContain('재진입합니다');
+    expect(note).not.toContain('자동 재실행하지 않습니다');
+  });
+
+  it('ignores an already-committed attempt (only `started` blocks resume)', () => {
+    const state = {
+      ...SESSION,
+      activePhaseAttempt: { ...openAttempt('EXECUTE'), status: ATTEMPT_STATUS.COMMITTED },
+    };
+    const note = buildRecoveryNote(state, { events: executeEvents });
+
+    expect(note).toContain('재진입합니다');
+  });
+
+  it('still returns null for a cleanly terminated session carrying no attempt', () => {
+    const events = [
+      { type: 'phase-start', phase: 'EXECUTE', ts: '2026-08-23T00:30:16.290Z' },
+      { type: 'phase-end', phase: 'EXECUTE', ts: '2026-08-23T00:31:43.205Z' },
+    ];
+    expect(buildRecoveryNote({ ...SESSION, activePhaseAttempt: null }, { events })).toBeNull();
   });
 });

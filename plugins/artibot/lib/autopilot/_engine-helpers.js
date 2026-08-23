@@ -13,6 +13,7 @@
 
 import { newSessionId, saveSession } from './session-store.js';
 import { findUnterminatedPhases } from './replay.js';
+import { reconcileAttemptOnResume } from './phase-attempt.js';
 import { appendEvent, readEvents } from './telemetry.js';
 import { notifyDanger, notifyPause, notifyPhaseProgress } from './notification.js';
 import { acquireKeepAwake } from '../system/keep-awake.js';
@@ -368,13 +369,39 @@ export function detectInterruptedPhase(state, opts = {}) {
  * Build a user-facing (한국어) recovery banner string when the prior session
  * crashed mid-phase. Returns null when no recovery action is needed.
  *
- * @param {object} state - Live session state; only `sessionId` is read.
+ * **This banner must predict what resume will actually do.** The driver shows
+ * it *before* calling `resumeAutopilot` (`commands/autopilot.md` § Step 2 —
+ * Mode Dispatch, `resume` row), so a banner that disagrees with the engine
+ * hands the operator two opposite instructions inside one resume.
+ *
+ * That is exactly what ADR-005 2단 introduced and this function now closes.
+ * 1단 had one answer — re-enter the interrupted phase — because that was the
+ * only thing resume did. 2단 added a second: an un-acknowledged
+ * `activePhaseAttempt` makes `engine.js#settleOutstandingAttempt` PAUSE (or,
+ * for an allowlisted phase, re-run) instead of re-entering. So the attempt is
+ * consulted **first**, and only a session with no outstanding attempt falls
+ * through to the 1단 wording, which is still correct for that case.
+ *
+ * The attempt wording is not restated here — `reconcileAttemptOnResume`
+ * returns the note it will act on, and reusing it verbatim is what keeps one
+ * owner for the text. Duplicating the sentences is how the two drifted apart
+ * in the first place.
+ *
+ * @param {object} state - Live session state; `sessionId` and
+ *   `activePhaseAttempt` are read.
  * @param {{events?: object[]}} [opts] - Forwarded to
  *   {@link detectInterruptedPhase}; unit-test seam only.
  * @returns {string|null}
  */
 export function buildRecoveryNote(state, opts = {}) {
   try {
+    // Attempt first: it outranks phase pairing. A delegating phase writes no
+    // `phase-end` until ACK, so an outstanding attempt and an unterminated
+    // phase describe the SAME crash — and only the attempt knows whether
+    // resume will pause or redo it.
+    const reconciled = reconcileAttemptOnResume(state);
+    if (reconciled.action !== 'none') return reconciled.note;
+
     const result = detectInterruptedPhase(state, opts);
     if (!result.interrupted) return null;
     const tsPart = result.startedAt ? ` (${result.startedAt})` : '';

@@ -43,7 +43,7 @@ When the prompt contains `[artibot:hint recommend=autopilot]`, surface to the us
 | `--no-notify` | off | 완료/pause/iteration/danger 알림 비활성화 (`notifyDanger`만 안전 직결 시 예외 발사) |
 | `--no-tui` | off | default 모드의 라이브 TUI 자동 렌더 비활성 (night 모드는 자동 off) |
 | `--no-team` | off | 병렬 팀 비활성화 (단일 메인 실행) |
-| `--fast` / `-fast` | off | **Fast fan-out profile** — 동의어이며 모두 내부 `options.fast = true`로 정규화된다. PLAN의 의존성 그래프에서 검증된 독립 작업만 최대한 동시 실행한다. 안전한 병렬 구간이 없으면 표준 경로로 폴백하며, 속도 배수는 보장하지 않는다. |
+| `--fast` / `-fast` | off | **Fast fan-out profile** — 동의어이며 모두 내부 `options.fast = true`로 정규화된다. PLAN의 의존성 그래프에서 검증된 독립 작업만 최대한 동시 실행한다. 안전한 병렬 구간이 없으면 표준 경로로 폴백하며, 속도 배수는 보장하지 않는다. **`--worktree`와 함께 지정해야 한다** — fan-out은 고정 integration 기준점을 요구하므로, `--worktree` 없이 `--fast`만 주면 엔진이 `no-integration-worktree`로 **표준 경로에 강등**한다(경고 텔레메트리 1줄만 남고 병렬 실행은 일어나지 않는다). 상세는 아래 "Fast Fan-out Profile" 섹션 참조 |
 | `--checkpoint <interval>` | `30m` | 체크포인트(WIP commit) 주기 |
 | `--worktree` | off | git worktree 격리 사용 (P0-3, 기본 브랜치: `autopilot/<sessionId>`) |
 | `--runner [team\|dynamic]` | `team` | **ADR-003** — Phase 2 EXECUTE 러너 수동 선택. `dynamic` = 하네스 `Workflow` 도구 스크립트 런(결정론, 동형 반복 작업용). 명시 지정은 항상 최우선(Stage 2 자동선택도 무시). 세션 시작 시 1회 고정 — resume에서 재평가 없음 |
@@ -253,7 +253,7 @@ if (pfInstr?.suppress) { /* warnings: state.preflightWarnings에 누적 + 계속
 | mode | 호출 | 다음 단계 |
 |------|------|-----------|
 | `default` / `night` / `plan` | `engine.startAutopilot({ task, mode, options })` → `{ sessionId, prdPath, instruction }` | Step 3 (Phase 진행) |
-| `resume` | `engine.resumeAutopilot(sessionId)` 직전 `detectInterruptedPhase(state)` 호출 — interrupted 검출 시 `engine.buildRecoveryNote(state)` 한국어 안내를 큐에 푸시 후 정상 resume. 판정 근거는 세션의 `events.ndjson`(`phase-start` 뒤에 짝 `phase-end` 가 없으면 중단)이므로 **`state.sessionId` 가 있는 상태를 넘겨야 한다** — `loadSession` 결과를 그대로 전달하면 된다 | Step 3 (재진입 Phase 부터) |
+| `resume` | `engine.resumeAutopilot(sessionId)` 직전 `detectInterruptedPhase(state)` 호출 — interrupted 검출 시 `engine.buildRecoveryNote(state)` 한국어 안내를 큐에 푸시 후 정상 resume. 판정 근거는 세션의 `events.ndjson`(`phase-start` 뒤에 짝 `phase-end` 가 없으면 중단)이므로 **`state.sessionId` 가 있는 상태를 넘겨야 한다** — `loadSession` 결과를 그대로 전달하면 된다. **미ACK attempt 가 있으면 배너가 "재진입"이 아니라 PAUSE 안내를 낸다** (아래 Step 3 의 ADR-005 2단 주석 참조) | Step 3 (재진입 Phase 부터 — 단 미ACK attempt 는 PAUSE) |
 | `status` | `engine.getStatus(sessionId?)` → `SessionState` | 상태 표 출력 후 종료 |
 | `abort` | `engine.abortAutopilot(sessionId, { graceful: true })` → `AbortResult` | 결과 표 출력 후 종료 |
 | `tail` | `engine.readEvents(sessionId, { tail: lines })` → `Event[]` | 이벤트 표 출력 후 종료 (PRD v4.1 P0-2 Live Telemetry) |
@@ -268,6 +268,8 @@ if (pfInstr?.suppress) { /* warnings: state.preflightWarnings에 누적 + 계속
 각 Phase 완료 시 `engine.recordPhaseResult(state, { phase, status, ...result })`로 session-store 업데이트 (1번 인자는 `loadSession(sessionId)`로 얻은 **state 객체**, 2번 인자에 `phase`/`status` 포함 payload).
 
 > **EXECUTE 는 이 호출이 필수다 (ADR-005 2단).** EXECUTE 위임 시 엔진은 `state.activePhaseAttempt` 를 durable 하게 남기고 `phase-end` 를 기록하지 않는다 — 팀이 실제 작업을 끝냈는지는 엔진이 관측할 수 없기 때문이다. `recordPhaseResult(state, { phase: 'EXECUTE', ... })` 가 그 attempt 를 ACK 하고 `phase-end` 를 기록한다. **이 호출을 빠뜨리면 다음 resume 이 "위임 후 미보고" 로 판단해 PAUSE 한다** (재실행은 허용목록 phase 에만 자동 적용되고 EXECUTE 는 목록 밖 — 이미 반영된 작업의 중복 커밋을 막기 위함). 반대로 정상 완주 세션은 ACK 으로 슬롯이 비워지므로 resume 을 반복해도 recovery note 가 생기지 않는다.
+>
+> **Step 2 의 resume 배너도 이 판정을 그대로 따른다.** `buildRecoveryNote(state)` 는 `activePhaseAttempt` 를 먼저 조회해서, 미ACK attempt 가 있으면 아래 PAUSE 안내를 그대로 반환하고 attempt 가 없을 때만 "재진입합니다" 라고 말한다. 두 문구를 각자 쓰지 마라 — 문구 진실원은 `phase-attempt.js#buildPauseNote` / `#buildRerunNote` 하나뿐이고, 예전에 배너가 이 판정을 모른 채 항상 "재진입"이라고 말해 같은 resume 에서 정반대 안내가 동시에 나간 적이 있다.
 >
 > **PAUSE 된 뒤 빠져나오는 길은 셋이다** (recovery note 가 그대로 안내한다): ① 결과를 기록할 수 있으면 `recordPhaseResult(state, { phase: 'EXECUTE', status: 'done' })` ② 작업이 반영된 것은 확인했으나 결과를 기록할 수 없으면 `engine.resumeAutopilot(sessionId, { ackOutstandingAttempt: true })` — **호출 인자로만 받는다.** config·env 에 심어도 무시된다(`consentOverride` 와 같은 이유: "사람이 방금 트리를 확인했다"는 선언은 1회성이어야 하며, 설정에 박히면 아무도 확인하지 않은 채 영구히 참이 된다) ③ 판단이 안 서면 `/autopilot:abort` 로 종료 후 새로 시작.
 
