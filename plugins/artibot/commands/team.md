@@ -183,10 +183,14 @@ TaskUpdate(taskId="{id}", owner="{teammate-name}", status="in_progress")
 
 #### Task 도구가 없는 세션 (fallback)
 
-`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` 가 설정되지 않았거나 하네스가 태스크 도구를
-내려주지 않은 세션에서는 `TaskCreate` · `TaskUpdate` · `TaskList` · `TaskGet` 이 **아예
-존재하지 않는다**. 그때는 위 태스크 단계를 **생략하고 SendMessage 기반으로 진행**한다 —
-없는 도구를 호출하려다 턴을 태우지 마라.
+하네스가 태스크 도구를 내려주지 않은 세션에서는 `TaskCreate` · `TaskUpdate` · `TaskList` ·
+`TaskGet` 이 **아예 존재하지 않는다**. 그때는 위 태스크 단계를 **생략하고 SendMessage 기반으로
+진행**한다 — 없는 도구를 호출하려다 턴을 태우지 마라.
+
+판단 기준은 **도구의 실제 존재 여부**이지 환경변수가 아니다. `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS`
+미설정은 도구 부재를 뜻하지 않는다 — CLI 2.1.220 headless 실측에서 변수 유무와 무관하게 `Task*`
+7종이 모두 존재했고, 실제로 도구를 지운 것은 `--tools` 허용목록뿐이었다 (대화형 표면과 타 CLI
+버전은 미확인).
 
 1. 태스크 레코드 대신 **Phase 2 스폰 프롬프트의 작업 명세**가 배정이다. 범위·파일·성공기준을
    프롬프트에 이미 실어 보냈으므로 배정 정보는 소실되지 않는다.

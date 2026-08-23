@@ -126,21 +126,40 @@ after they are spawned:
 | Mode | Available Tools | Delegation | Communication | Task Tracking |
 |------|----------------|------------|---------------|---------------|
 | **agent-teams** | Agent(name=…), SendMessage, TaskCreate | Named teammates, addressable while running | Bidirectional (DM, broadcast, plan approval) | Shared TaskList |
-| **sub-agent** | Agent() only | Fire-and-forget sub-agents | One-way (result return only) | Manual tracking via orchestrator |
+| **sub-agent** | Spawn tool of the session — `Agent()` interactive, `Task()` headless | Fire-and-forget sub-agents | One-way (result return only) | Manual tracking via orchestrator |
 | **direct** | Read, Glob, Grep, Bash, WebSearch | None - orchestrator does all work | N/A | Orchestrator self-manages |
 
-### Sub-Agent Fallback (Claude Code without Agent Teams env var)
+### Sub-Agent Fallback (session without team messaging / task tools)
 
-When `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` is NOT set but Agent() is available:
+Trigger this fallback on **actual tool availability, not on an env var**. Enter it when
+the session does not expose `SendMessage` and/or the `Task*` family — for example a
+harness shipping a reduced toolset, or a run started with an explicit tool allowlist.
+Check what the session actually has before concluding anything is missing.
+
+> **Measured (CLI 2.1.220, headless `claude -p`, 2026-08-23):** unsetting
+> `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` did **not** remove any tool. `SendMessage` and
+> all seven `Task*` tools were present with the variable both set and unset — the two
+> tool lists were identical. Only an explicit `--tools` allowlist actually removed them.
+> The env var is therefore not a reliable predictor of tool absence.
+> **Scope of that measurement:** headless only, and **"seven" is surface-dependent, not a
+> universal**. Interactive sessions on the same CLI were observed to carry `Agent`, no bare
+> `Task`, and five `Task*` tools — the mirror image of the headless set, which adds bare
+> `Task` and `TaskOutput` but has no `Agent`. Always read the surface you are on rather
+> than trusting a count from the other one. What stays unverified is whether the env var
+> gates anything *interactively* — nobody has toggled it on that surface — and no other CLI
+> version was tested, so older builds may genuinely have gated these tools.
+
+Once you have confirmed the tools are genuinely absent:
 
 ```
-1. Skip SendMessage (tool doesn't exist) — teammates cannot be addressed mid-run
-2. Skip TaskCreate/TaskUpdate/TaskList/TaskGet (tools don't exist)
+1. Skip SendMessage — teammates cannot be addressed mid-run
+2. Skip TaskCreate/TaskUpdate/TaskList/TaskGet — no shared task record
 3. Spawn without a name: an unnamed teammate is unreachable anyway
-4. Use Agent(subagent_type) for delegation:
+4. Delegate with whichever spawn tool the session exposes
+   (`Agent(subagent_type=…)` interactively, `Task(subagent_type=…)` headless):
    - Each sub-agent works independently
-   - Results return to orchestrator when sub-agent completes
-   - Launch multiple Agent() calls in parallel for concurrent execution
+   - Results return to orchestrator when the sub-agent completes
+   - Launch multiple spawns in parallel for concurrent execution
 5. Orchestrator aggregates results when all sub-agents return
 6. Quality gates: orchestrator reviews sub-agent outputs directly
 ```
@@ -161,7 +180,7 @@ When `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` is NOT set but Agent() is available:
 
 ### Direct Fallback (Gemini CLI, Codex CLI, Cursor, etc.)
 
-When NEITHER SendMessage NOR Agent() is available:
+When NEITHER SendMessage NOR any spawn tool (`Agent()` / `Task()`) is available:
 
 ```
 1. Orchestrator acts as a single-agent executing all work sequentially
@@ -173,23 +192,34 @@ When NEITHER SendMessage NOR Agent() is available:
 
 ### Auto-Setup Protocol (Claude Code only)
 
-When the orchestrator detects Team Mode is needed but `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` is not set:
+Entry condition is the same one the fallback above uses — **the session does not expose
+the tools Team Mode needs**, established by checking tool availability, not by reading an
+env var:
 
 ```
 1. DETECT: SendMessage not available (teammates cannot be addressed)
-2. ASK USER: "Agent Teams가 비활성화되어 있습니다. 풀 팀 모드를 활성화할까요?"
-   - Options: "Yes, enable full team mode" / "No, use sub-agent fallback"
+2. ASK USER: "팀원을 주소지정할 도구가 이 세션에 없습니다. 풀 팀 모드 설정을 시도할까요?"
+   - Options: "Yes, try enabling full team mode" / "No, use sub-agent fallback"
 3. If YES:
    a. Read ~/.claude/settings.json
    b. Add/merge {"env":{"CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS":"1"}} into settings
    c. Write updated settings.json
-   d. Inform user: "설정 완료. Claude Code를 재시작하면 풀 팀 모드가 활성화됩니다."
-   e. Continue current session in sub-agent mode (env takes effect on next launch)
+   d. Inform user: "설정을 추가했습니다. 환경변수는 다음 실행부터 반영됩니다."
+   e. Continue the current session in sub-agent mode
 4. If NO:
-   a. Continue in sub-agent mode with full parallel Agent() delegation
+   a. Continue in sub-agent mode, delegating with the session's spawn tool
 ```
 
-**Important**: The env var only takes effect on Claude Code restart. The current session continues in sub-agent mode after setting, but the NEXT session will have full Agent Teams.
+**What this setting is and is not known to do.** Step 3b is kept because it is the
+documented way to opt into Agent Teams — not because it is confirmed to be what makes the
+tools appear. Measured on CLI 2.1.220 headless (2026-08-23),
+`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` gated **nothing**: `SendMessage` and all seven
+`Task*` tools were present with it both set and unset. Whether it changes anything in an
+interactive session, or on other CLI versions, is **unverified in both directions** — do
+not promise the operator that the next session will have full Agent Teams, and do not
+tell them the setting is useless either. Practical reading: if the tools are already
+present, this setting is not what you need; if they are absent, adding it may or may not
+help. Either way an env change applies on the next launch, never mid-session.
 
 ### Cross-Platform Sub-Agent Orchestration
 
