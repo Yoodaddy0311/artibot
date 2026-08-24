@@ -8,6 +8,20 @@ on:
 permissions:
   contents: write
 
+# Single source of truth for the stall-escalation issue title. Two steps in the
+# `sync-readmes` job below now depend on this exact string: the detector opens
+# an issue with it, and the self-heal step finds those issues again to close
+# them once the badge PR has landed. Written literally in both places they would
+# drift on the first reword and the closer would silently stop matching — which
+# is the same class of unobservable failure the detector itself exists to fix.
+#
+# Split into prefix/suffix rather than a single format string because the closer
+# has to run the substitution BACKWARDS: it recovers the tag from an existing
+# issue title, which `printf '…%s…'` cannot do.
+env:
+  STALL_TITLE_PREFIX: "chore(release): badge-sync PR "
+  STALL_TITLE_SUFFIX: " is stalled — required checks never started"
+
 jobs:
   validate:
     name: Validate before release
@@ -186,6 +200,105 @@ jobs:
           ref: master
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
+
+      # ── Stall-issue self-heal ──────────────────────────────────────────────
+      # The detector at the end of this job opens an issue when a badge PR
+      # cannot merge. Nothing ever closed those issues: #107 (v4.48.0) and #109
+      # (v4.49.0) were still open on 2026-08-24 even though their PRs (#106,
+      # #108) had merged on 08-22 and 08-23. This step is the missing half.
+      #
+      # Why it lives in the release run and NOT on a `pull_request: closed`
+      # trigger, which is the obvious answer: measured 2026-08-24, both badge
+      # PRs were merged by `app/github-actions` via auto-merge, and GitHub does
+      # not create workflow runs for events attributed to GITHUB_TOKEN.
+      # `actions/runs?head_sha=` returned total_count 0 for #106's merge commit
+      # 572e9d19 and 1 for #108's 33deadbc — and that single run was a
+      # `schedule` run of Self-Control, not a push or pull_request run. A
+      # `pull_request: closed` closer would therefore never fire for the exact
+      # case it exists to handle: it would look correct in review, produce no
+      # error, and do nothing. Tag pushes are human-authored, so this run is the
+      # nearest trigger that is actually guaranteed to happen.
+      #
+      # What this gate does NOT cover (rules §9 — write down what the gate
+      # cannot see, next to the gate):
+      #   - Latency. The issue stays open until the NEXT stable release runs,
+      #     bounding the backlog at one open issue rather than closing at merge
+      #     time. Closing on merge needs a trigger that fires without a human;
+      #     a `schedule:` cron in its own workflow is the upgrade path if that
+      #     latency ever starts to matter.
+      #   - Pre-releases. The `sync-readmes` job's own `if:` skips -rc/-beta/
+      #     -alpha tags, so a backlog of stalled issues would not be reconciled
+      #     until the next stable tag.
+      #   - Issues whose title was hand-edited after the fact no longer match
+      #     the prefix/suffix and are left alone. Deliberate: closing on a fuzzy
+      #     match would be worse than leaving a human-owned issue open.
+      #   - Anything past the first 100 open issues. `gh issue list --limit 100`
+      #     is not paginated below, so a repo carrying more than 100 open issues
+      #     could hide a stall issue from this pass entirely. Harmless today
+      #     (measured 2026-08-24: this repo has had 3 issues in its whole
+      #     history) and it fails closed — an unseen issue simply stays open.
+      #
+      # Placed immediately after the checkout, before the badge computation
+      # steps, so a failure in those cannot leave last release's issue open too.
+      - name: Close resolved badge-sync stall issues
+        # The GitHub Release is already published by the time this job runs, so
+        # a reconciliation bug must never fail the workflow.
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # A failed query and a genuine zero must not collapse to the same
+          # value — the same rule the detector step below records at length.
+          # `2>/dev/null || true` would have reported an auth failure or an API
+          # outage as "nothing to reconcile" and exited green, which is the
+          # unobservable silence both steps exist to remove.
+          ERR_LOG="$(mktemp)"
+          trap 'rm -f "${ERR_LOG}"' EXIT
+          if ! open_issues="$(gh issue list --state open --limit 100 --json number,title \
+            --jq '.[] | [.number, .title] | @tsv' 2>"${ERR_LOG}")"; then
+            echo "::warning::Could not list open issues, so no stall issue was reconciled this run: $(tr '\n' ' ' < "${ERR_LOG}" | cut -c1-300)"
+            exit 0
+          fi
+          if [ -z "${open_issues}" ]; then
+            echo "No open issues to reconcile."
+            exit 0
+          fi
+
+          printf '%s\n' "${open_issues}" | while IFS="$(printf '\t')" read -r number title; do
+            # Quoted patterns are literal in a `case` arm; only the bare `*` is
+            # a glob. Matching on both ends keeps an unrelated issue that merely
+            # starts with the prefix out of the closer.
+            case "${title}" in
+              "${STALL_TITLE_PREFIX}"*"${STALL_TITLE_SUFFIX}") ;;
+              *) continue ;;
+            esac
+            tag="${title#"${STALL_TITLE_PREFIX}"}"
+            tag="${tag%"${STALL_TITLE_SUFFIX}"}"
+            branch="chore/sync-readme-badges-${tag}"
+
+            # `--state merged` is the whole verdict: an issue is only resolved
+            # when the badge changes actually reached master. A closed-unmerged
+            # PR means someone discarded the sync, which is still a thing a
+            # human needs to know about, so that issue stays open.
+            #
+            # This query is allowed to swallow its failure, unlike the issue
+            # list above, because the two fail in opposite directions: an
+            # unanswered `pr list` yields an empty `merged_at`, which leaves the
+            # issue OPEN. Failing closed on a per-issue query costs one stale
+            # issue until the next release; failing open would close an issue
+            # reporting a stall that is still happening.
+            merged_at="$(gh pr list --head "${branch}" --state merged --limit 1 \
+              --json mergedAt --jq '.[0].mergedAt // empty' 2>/dev/null || true)"
+            if [ -z "${merged_at}" ]; then
+              echo "Issue #${number} (${tag}): no merged PR on ${branch} — leaving open."
+              continue
+            fi
+            echo "Issue #${number} (${tag}): badge PR merged at ${merged_at} — closing."
+            gh issue close "${number}" \
+              --comment "Badge sync for ${tag} landed on master (\`${branch}\` merged at ${merged_at}), so the stall reported here is resolved. Closed automatically by the ${GITHUB_REF_NAME} release run." \
+              || echo "::warning::Could not close resolved stall issue #${number}"
+          done
+          echo "Stall-issue reconciliation complete."
 
       - name: Setup Node.js 22
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -752,7 +865,9 @@ jobs:
             if [ "${CHECKS}" != "0" ]; then break; fi
           done
 
-          ISSUE_TITLE="chore(release): badge-sync PR ${GITHUB_REF_NAME} is stalled — required checks never started"
+          # Assembled from the workflow-level env pair, not written out here, so
+          # the self-heal step in this job can find these issues again later.
+          ISSUE_TITLE="${STALL_TITLE_PREFIX}${GITHUB_REF_NAME}${STALL_TITLE_SUFFIX}"
 
           if [ "${APPROVAL}" != "0" ]; then
             echo "::warning::${APPROVAL} workflow run(s) for ${HEAD_SHA} are waiting for manual approval — auto-merge on ${BRANCH} will never complete."

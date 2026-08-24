@@ -103,6 +103,14 @@ reports/
 # nested cwd (e.g. plugins/artibot/.artibot/ledger/ during in-repo dev).
 **/.artibot/ledger/
 
+# /scorecard snapshot store — per-machine progress history appended by
+# lib/planning/scorecard.js. Same local-only rationale as SESSION-NOTES.md:
+# it is a record of what one operator measured in one session, not repo state,
+# and it grows on every /scorecard run. Named as a single file rather than
+# `.artibot/` so it cannot swallow the seven tracked files in that directory
+# (guides/, failure-patterns.json, the backlog notes).
+.artibot/scorecard.json
+
 # Claude Code plan-mode ephemeral state — machine-local absolute paths, stale
 # across sessions. Never commit.
 .plan-state.json
