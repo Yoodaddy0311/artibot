@@ -14,8 +14,7 @@
  * Pure + zero-dep; all formatting helpers are exported for testing.
  */
 
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { isMainEntry } from './hooks/_main-entry.js';
 
 const BAR_WIDTH = 20;
 const RULE = '━'.repeat(40);
@@ -77,12 +76,6 @@ function main() {
   process.stdout.write(renderProgressBox({ done, total, phaseLabel, inflight, pending }) + '\n');
 }
 
-const isMain = (() => {
-  try {
-    return path.resolve(process.argv[1] || '') === path.resolve(fileURLToPath(import.meta.url));
-  } catch {
-    return false;
-  }
-})();
+const isMain = isMainEntry(import.meta.url);
 
 if (isMain) main();

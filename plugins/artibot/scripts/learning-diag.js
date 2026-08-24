@@ -27,8 +27,8 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { homedir } from 'node:os';
-import { fileURLToPath } from 'node:url';
 import { computeLedgerStats } from '../lib/learning/ledger/stats.js';
+import { isMainEntry } from './hooks/_main-entry.js';
 
 // ---------------------------------------------------------------------------
 // Arg parsing
@@ -510,9 +510,7 @@ async function main() {
 // Run as CLI only when invoked directly (`node scripts/learning-diag.js`),
 // not when imported by tests. Keeps CLI behavior identical while allowing
 // the pure ranking/render helpers above to be unit-tested in-memory.
-const thisFile = fileURLToPath(import.meta.url);
-const invokedFile = process.argv[1] ? path.resolve(process.argv[1]) : '';
-if (invokedFile && path.resolve(thisFile) === invokedFile) {
+if (isMainEntry(import.meta.url)) {
   main().catch((err) => {
     process.stderr.write(`learning-diag failed: ${err?.message || err}\n`);
     process.exitCode = 1;

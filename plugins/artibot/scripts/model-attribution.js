@@ -26,9 +26,9 @@
 
 import { createReadStream, readdirSync, statSync } from 'node:fs';
 import { createInterface } from 'node:readline';
-import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import os from 'node:os';
+import { isMainEntry } from './hooks/_main-entry.js';
 
 /**
  * Assistant phrases that mark a self-correction or reversal. Deliberately
@@ -375,8 +375,7 @@ async function main() {
 
 // Direct-run guard: importing this module (tests) must not start a full scan
 // of every transcript on the machine.
-const isDirectRun = process.argv[1]
-  && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
+const isDirectRun = isMainEntry(import.meta.url);
 
 if (isDirectRun) {
   main().catch((err) => {

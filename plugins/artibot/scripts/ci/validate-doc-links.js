@@ -50,6 +50,7 @@ import {
   getPluginsDir,
   listPluginRoots,
 } from './ci-utils.js';
+import { isMainEntry } from '../hooks/_main-entry.js';
 
 /** Directories never scanned (vendored, generated, or VCS internals). */
 const IGNORE_DIRS = new Set([
@@ -391,6 +392,6 @@ function main() {
 }
 
 // Run only when invoked directly (not when imported by tests).
-if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith('validate-doc-links.js')) {
+if (isMainEntry(import.meta.url)) {
   main();
 }

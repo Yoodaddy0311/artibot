@@ -29,11 +29,10 @@
  *   node scripts/ledger-review.js reject <id>     # drop one item (no promotion)
  */
 
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import {
   approve, enqueueFromCorpus, listPending, reject, renderReviewReport,
 } from '../lib/learning/ledger/review-queue.js';
+import { isMainEntry } from './hooks/_main-entry.js';
 
 // Default engine wiring — overridable in tests so approval never touches the
 // real learning store (~/.claude/artibot) or a temp ledger's collectExperience.
@@ -129,9 +128,7 @@ async function main() {
 }
 
 // Run as CLI only when invoked directly, not when imported by tests.
-const thisFile = fileURLToPath(import.meta.url);
-const invokedFile = process.argv[1] ? path.resolve(process.argv[1]) : '';
-if (invokedFile && path.resolve(thisFile) === invokedFile) {
+if (isMainEntry(import.meta.url)) {
   main().catch((err) => {
     process.stderr.write(`ledger-review failed: ${err?.message || err}\n`);
     process.exitCode = 1;

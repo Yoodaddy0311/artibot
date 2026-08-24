@@ -24,13 +24,11 @@
  */
 
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import { readJsonFile } from '../../lib/core/file.js';
 import { getPluginRoot } from '../../lib/core/platform.js';
 import { recordDecision } from '../../lib/core/decision-trail.js';
-
-const __filename = fileURLToPath(import.meta.url);
+import { isMainEntry } from '../hooks/_main-entry.js';
 
 // ---------------------------------------------------------------------------
 // Gate check (shared shape with auto-commit / auto-pr)
@@ -208,8 +206,7 @@ async function main() {
   process.exit(0);
 }
 
-const isDirectRun = process.argv[1]
-  && path.resolve(process.argv[1]) === path.resolve(__filename);
+const isDirectRun = isMainEntry(import.meta.url);
 
 if (isDirectRun) {
   main().catch((err) => {

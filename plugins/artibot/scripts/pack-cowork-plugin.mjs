@@ -37,6 +37,7 @@ import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { crc32, deflateRawSync } from 'node:zlib';
+import { isMainEntry } from './hooks/_main-entry.js';
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(SCRIPT_DIR, '..', '..', '..');
@@ -296,6 +297,6 @@ function main() {
   console.log(`  bytes=${buffer.length}${prevSize !== null ? ` (was ${prevSize})` : ''}`);
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
+if (isMainEntry(import.meta.url)) {
   main();
 }

@@ -20,10 +20,10 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 import { getPluginRoot } from '../lib/core/platform.js';
 import { buildOutputStyle, buildStatuslinePalette, buildVscodeTerminalColors, buildWtScheme, isTheme, THEME_NAMES, THEMES, VSCODE_TERMINAL_KEYS } from './theme/registry.js';
+import { isMainEntry } from './hooks/_main-entry.js';
 
 const HOME = homedir();
 const ARTIBOT = join(HOME, '.claude', 'artibot');
@@ -312,8 +312,5 @@ function main() {
   process.stdout.write(`테마 적용: ${THEMES[arg].label}\n` + notes.map((n) => `  ✓ ${n}`).join('\n') + '\n');
 }
 
-const isMain = (() => {
-  try { return resolve(process.argv[1] || '') === resolve(fileURLToPath(import.meta.url)); }
-  catch { return false; }
-})();
+const isMain = isMainEntry(import.meta.url);
 if (isMain) main();

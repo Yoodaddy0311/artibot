@@ -18,7 +18,6 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { isNewerVersion } from '../lib/core/version-checker.js';
 import { getPluginRoot } from '../lib/core/platform.js';
 import { detectInstallMode, NATIVE_UPDATE_HINT } from '../lib/core/install-mode.js';
@@ -51,6 +50,7 @@ import {
   inspectMarketplaceClone,
   renderMarketplaceDiagnosis,
 } from './update-marketplace.js';
+import { isMainEntry } from './hooks/_main-entry.js';
 
 // ---------------------------------------------------------------------------
 // Argument parsing
@@ -763,7 +763,7 @@ async function main() {
 }
 
 // Only run main() when invoked as a CLI script, not when imported by tests.
-const isCliEntrypoint = process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
+const isCliEntrypoint = isMainEntry(import.meta.url);
 if (isCliEntrypoint) {
   main().catch((err) => {
     console.error(`[update] Unexpected error: ${err.message}`);

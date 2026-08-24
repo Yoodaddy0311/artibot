@@ -29,6 +29,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assertEntityFloors, countByRoot, listAllSkillFiles } from './skill-scan-roots.js';
+import { isMainEntry } from '../hooks/_main-entry.js';
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 export const PLUGIN_ROOT = path.resolve(scriptDir, '..', '..');
@@ -126,6 +127,5 @@ function main() {
   process.exit(0);
 }
 
-const invokedDirectly =
-  process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+const invokedDirectly = isMainEntry(import.meta.url);
 if (invokedDirectly) main();

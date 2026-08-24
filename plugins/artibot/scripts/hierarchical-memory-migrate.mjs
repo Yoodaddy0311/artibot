@@ -33,6 +33,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { pathToFileURL } from 'node:url';
+import { isMainEntry } from './hooks/_main-entry.js';
 
 const LEGACY_FILES = Object.freeze([
   'user-preferences.json',
@@ -388,14 +389,7 @@ export async function main(argv = process.argv.slice(2), io = {}) {
 }
 
 // Execute when invoked directly (not when imported by tests).
-const isDirectRun = (() => {
-  try {
-    const invoked = process.argv[1] ? pathToFileURL(process.argv[1]).href : '';
-    return invoked === import.meta.url;
-  } catch {
-    return false;
-  }
-})();
+const isDirectRun = isMainEntry(import.meta.url);
 
 if (isDirectRun) {
   main().then(

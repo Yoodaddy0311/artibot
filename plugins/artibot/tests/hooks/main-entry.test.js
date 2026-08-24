@@ -157,12 +157,12 @@ describe('hooks route their direct-run guard through _main-entry.js', () => {
     ]),
   ]);
 
-  // Pre-existing offender this task was not scoped to touch. NOT a way to pass:
-  // the staleness test below fails the moment it is fixed, so the entry cannot
-  // outlive the debt it records.
-  const KNOWN_INLINE_GUARD_GAPS = [
-    'bin/artibot-dashboard.mjs',
-  ];
+  // Pre-existing offenders not yet routed through the helper. NOT a way to
+  // pass: the staleness test below fails the moment one is fixed, so an entry
+  // cannot outlive the debt it records. Emptied 2026-08-24 when the repo-wide
+  // sweep moved every remaining inline guard onto isMainEntry() — its last
+  // entry, bin/artibot-dashboard.mjs, is now scanned like everything else.
+  const KNOWN_INLINE_GUARD_GAPS = [];
 
   it('discovers the hook directory (guards against a vacuous pass)', () => {
     // Without this, a moved directory would make every scan below iterate

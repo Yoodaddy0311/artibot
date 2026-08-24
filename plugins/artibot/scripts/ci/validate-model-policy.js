@@ -34,6 +34,7 @@ import {
   normalizeAgentType,
   resolveModel,
 } from '../../lib/core/model-policy.js';
+import { isMainEntry } from '../hooks/_main-entry.js';
 
 /** Files that live under agents/ for discoverability but are NOT agent definitions. */
 const NON_AGENT_FILES = new Set(['INDEX.md', 'README.md']);
@@ -212,10 +213,8 @@ async function main() {
 }
 
 // Only run when invoked directly (allow importing the pure functions in tests).
-// Korean-path safe: compare resolved basenames, not file:// URLs.
-const invokedDirectly =
-  process.argv[1] &&
-  path.basename(process.argv[1]) === 'validate-model-policy.js';
+// Korean-path AND junction/symlink safe: see scripts/hooks/_main-entry.js.
+const invokedDirectly = isMainEntry(import.meta.url);
 if (invokedDirectly) {
   main().catch((err) => {
     console.error(`[model-policy] unexpected failure: ${err.message}`);

@@ -25,9 +25,10 @@
 import fsDefault from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
 import { categorizeAll } from '../lib/learning/failure-categorizer.js';
+import { isMainEntry } from './hooks/_main-entry.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -437,14 +438,7 @@ async function main(argv = process.argv.slice(2)) {
   }
 }
 
-const invokedDirectly = (() => {
-  if (!process.argv[1]) return false;
-  try {
-    return import.meta.url === pathToFileURL(process.argv[1]).href;
-  } catch {
-    return false;
-  }
-})();
+const invokedDirectly = isMainEntry(import.meta.url);
 if (invokedDirectly) {
   main();
 }

@@ -17,6 +17,7 @@
 import { writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isMainEntry } from './hooks/_main-entry.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PLUGIN_ROOT = resolve(__dirname, '..');
@@ -208,7 +209,7 @@ async function main() {
   console.log(`[gen-model-catalog-docs] wrote ${OUT_PATH}`);
 }
 
-const isDirectRun = process.argv[1]?.endsWith('gen-model-catalog-docs.js');
+const isDirectRun = isMainEntry(import.meta.url);
 if (isDirectRun) {
   main().catch((err) => {
     console.error('Fatal:', err.message);

@@ -23,6 +23,7 @@ import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { probeBash, toBashPath } from '../utils/bash-compat.js';
+import { isMainEntry } from '../hooks/_main-entry.js';
 
 const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
@@ -198,6 +199,6 @@ function main() {
   console.log(`${GREEN}✓ install/update validation passed${NC}`);
 }
 
-if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith('validate-install.js')) {
+if (isMainEntry(import.meta.url)) {
   main();
 }

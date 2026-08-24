@@ -24,6 +24,7 @@
 import { readFile, stat } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isMainEntry } from './hooks/_main-entry.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PLUGIN_ROOT = resolve(__dirname, '..');
@@ -378,11 +379,9 @@ async function main() {
 }
 
 // Only run main() when invoked directly (not when imported by tests).
-// Absolute-path comparison avoids the Korean-path / percent-encoding mismatch
-// (project memory: Windows + non-ASCII chars break file:// URL equality).
-const invokedPath = process.argv[1] ? resolve(process.argv[1]) : '';
-const thisPath = fileURLToPath(import.meta.url);
-if (invokedPath === thisPath) {
+// isMainEntry() handles both the Korean-path / percent-encoding mismatch and the
+// junction/symlink mismatch — see scripts/hooks/_main-entry.js.
+if (isMainEntry(import.meta.url)) {
   main().catch((err) => {
     process.stderr.write(`marketplace-validate error: ${err.stack || err.message}\n`);
     process.exit(2);

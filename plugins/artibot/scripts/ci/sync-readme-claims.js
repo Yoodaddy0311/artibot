@@ -32,7 +32,6 @@
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import {
   CLAIM_PATTERNS,
   collectActuals,
@@ -40,6 +39,7 @@ import {
   PLUGIN_ROOT,
   REPO_ROOT,
 } from './readme-claims-registry.js';
+import { isMainEntry } from '../hooks/_main-entry.js';
 
 const args = process.argv.slice(2);
 const CHECK_ONLY = args.includes('--check');
@@ -139,6 +139,5 @@ function main() {
 // tests import syncFile to exercise the write path against fixture files, and
 // an unguarded main() would rewrite the real READMEs and process.exit the test
 // worker. Mirrors the guard in validate-readme-claims.js.
-const invokedDirectly =
-  process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+const invokedDirectly = isMainEntry(import.meta.url);
 if (invokedDirectly) main();

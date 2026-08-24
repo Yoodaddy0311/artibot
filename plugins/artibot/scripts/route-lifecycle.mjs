@@ -11,8 +11,7 @@
  * Prints the routing result as a single JSON line (or null).
  */
 import { routeByContext, routeLifecycle } from '../lib/core/lifecycle-router.js';
-import { fileURLToPath } from 'node:url';
-import path from 'node:path';
+import { isMainEntry } from './hooks/_main-entry.js';
 
 const KNOWN = new Set(['build', 'verify', 'review', 'ship', 'marketing', 'design', 'plan', 'spec']);
 
@@ -30,8 +29,6 @@ async function main() {
 }
 
 // CLI-only guard (same convention as scripts/ci/*.mjs and scripts/learning-diag.js)
-const thisFile = fileURLToPath(import.meta.url);
-const invoked = process.argv[1] ? path.resolve(process.argv[1]) : '';
-if (invoked && path.resolve(thisFile) === invoked) {
+if (isMainEntry(import.meta.url)) {
   main().catch((e) => { console.error(e?.message ?? e); process.exit(1); });
 }

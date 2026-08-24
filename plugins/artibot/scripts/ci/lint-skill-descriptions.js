@@ -44,6 +44,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import path from 'node:path';
 import { getPluginRoot } from './ci-utils.js';
 import { assertEntityFloors, countByRoot, listAllSkillFiles } from './skill-scan-roots.js';
+import { isMainEntry } from '../hooks/_main-entry.js';
 
 /** Minimum number of distinct activation signals required by R1. */
 export const MIN_TRIGGERS = 3;
@@ -599,9 +600,6 @@ function main() {
 }
 
 // Run only when invoked directly (not when imported by tests).
-if (
-  import.meta.url === `file://${process.argv[1]}` ||
-  process.argv[1]?.endsWith('lint-skill-descriptions.js')
-) {
+if (isMainEntry(import.meta.url)) {
   main();
 }

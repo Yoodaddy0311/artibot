@@ -29,12 +29,12 @@
 
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
 
 import { ensureDir, readJsonFile, writeJsonFile } from '../../lib/core/file.js';
 import { getPluginRoot } from '../../lib/core/platform.js';
 import { recordDecision } from '../../lib/core/decision-trail.js';
 import { resolveSelfControlGates } from '../../lib/learning/self-control-gates.js';
+import { isMainEntry } from '../hooks/_main-entry.js';
 
 // ---------------------------------------------------------------------------
 // Constants (security-critical — do not weaken)
@@ -378,8 +378,7 @@ export async function createAutoPR(options) {
 // CLI entry
 // ---------------------------------------------------------------------------
 
-const __filename = fileURLToPath(import.meta.url);
-const isDirectRun = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(__filename);
+const isDirectRun = isMainEntry(import.meta.url);
 
 function parseArgs(argv) {
   const out = { dryRun: false, category: 'drift' };

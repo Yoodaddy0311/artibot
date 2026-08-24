@@ -13,6 +13,7 @@
 
 import { readFile } from 'node:fs/promises';
 import { assertEntityFloors, countByRoot, listAllSkillFiles } from './ci/skill-scan-roots.js';
+import { isMainEntry } from './hooks/_main-entry.js';
 
 // Skill discovery lives in ci/skill-scan-roots.js — it spans every project
 // plugin root, so this script no longer resolves a single skills/ directory.
@@ -370,7 +371,7 @@ async function main() {
 }
 
 // Only run main() when executed directly (not imported for testing)
-const isDirectRun = process.argv[1]?.endsWith('gen-skill-docs.js');
+const isDirectRun = isMainEntry(import.meta.url);
 if (isDirectRun) {
   main().catch(err => {
     console.error('Fatal:', err.message);

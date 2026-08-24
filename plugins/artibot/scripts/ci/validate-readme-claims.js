@@ -22,7 +22,6 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import {
   CLAIM_PATTERNS,
   collectActuals,
@@ -30,6 +29,7 @@ import {
   PLUGIN_ROOT,
   REPO_ROOT,
 } from './readme-claims-registry.js';
+import { isMainEntry } from '../hooks/_main-entry.js';
 
 // Files scanned for count claims. README badges/prose + the plugin CLAUDE.md
 // (whose Stack line carries skills/commands/agents counts that were previously
@@ -146,6 +146,5 @@ function main() {
 
 // Run only when invoked directly (node validate-readme-claims.js), not on import
 // — tests import SCAN_TARGETS without triggering the process.exit path.
-const invokedDirectly =
-  process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+const invokedDirectly = isMainEntry(import.meta.url);
 if (invokedDirectly) main();

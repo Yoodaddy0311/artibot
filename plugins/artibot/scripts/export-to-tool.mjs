@@ -26,6 +26,7 @@
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isMainEntry } from './hooks/_main-entry.js';
 
 const SUPPORTED_TOOLS = new Set(["cursor", "codex", "opencode", "antigravity"]);
 const VALID_INCLUDES = new Set(["agents", "skills", "commands"]);
@@ -734,9 +735,7 @@ async function main() {
 }
 
 // Only run main() when invoked directly (not when imported by tests)
-const invokedPath = process.argv[1] ? resolve(process.argv[1]) : "";
-const thisPath = fileURLToPath(import.meta.url);
-if (invokedPath === thisPath) {
+if (isMainEntry(import.meta.url)) {
   main().catch((err) => {
     process.stderr.write(`[export] fatal: ${err.stack || err.message}\n`);
     process.exit(99);

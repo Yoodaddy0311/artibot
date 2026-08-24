@@ -52,6 +52,7 @@ import {
   reportCriticalFailure,
   resolveSelfControlGates,
 } from '../../lib/learning/self-control-gates.js';
+import { isMainEntry } from '../hooks/_main-entry.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -379,14 +380,9 @@ async function main() {
 }
 
 // Only run when invoked directly (not when imported by tests).
-if (import.meta.url === `file://${process.argv[1]}` ||
-    import.meta.url === pathToFileURLSafe(process.argv[1])) {
+if (isMainEntry(import.meta.url)) {
   main().catch((err) => {
     process.stderr.write(`auto-commit cron failed: ${err.message}\n`);
     process.exit(1);
   });
-}
-
-function pathToFileURLSafe(p) {
-  try { return new URL(`file://${path.resolve(p)}`).href; } catch { return ''; }
 }

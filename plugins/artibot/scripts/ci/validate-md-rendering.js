@@ -52,6 +52,7 @@ import {
   getPluginsDir,
   listPluginRoots,
 } from './ci-utils.js';
+import { isMainEntry } from '../hooks/_main-entry.js';
 
 /** Directories never scanned (vendored / generated / VCS). */
 const IGNORE_DIRS = new Set(['node_modules', 'runtime', 'repos', '.git', '_reports', 'coverage']);
@@ -492,7 +493,6 @@ function main() {
 }
 
 // Run only when invoked directly (CLI), not when imported by tests.
-const invokedPath = process.argv[1] ? path.resolve(process.argv[1]) : '';
-if (invokedPath.endsWith('validate-md-rendering.js')) {
+if (isMainEntry(import.meta.url)) {
   main();
 }

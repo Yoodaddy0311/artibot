@@ -48,6 +48,7 @@ import {
   collectDiff,
   releaseLock,
 } from './auto-commit-runner.js';
+import { isMainEntry } from '../hooks/_main-entry.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -257,14 +258,9 @@ async function main() {
   process.exit(0);
 }
 
-if (import.meta.url === `file://${process.argv[1]}` ||
-    import.meta.url === pathToFileURLSafe(process.argv[1])) {
+if (isMainEntry(import.meta.url)) {
   main().catch((err) => {
     process.stderr.write(`auto-cleanup cron failed: ${err.message}\n`);
     process.exit(1);
   });
-}
-
-function pathToFileURLSafe(p) {
-  try { return new URL(`file://${path.resolve(p)}`).href; } catch { return ''; }
 }

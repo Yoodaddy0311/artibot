@@ -32,9 +32,9 @@
 
 import { readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { redactSecrets } from '../lib/learning/ledger/redact.js';
 import { _internals as storeInternals } from '../lib/learning/ledger/store.js';
+import { isMainEntry } from './hooks/_main-entry.js';
 
 const { LEDGER_REL } = storeInternals;
 
@@ -161,9 +161,7 @@ async function main() {
 }
 
 // Run as CLI only when invoked directly, not when imported by tests.
-const thisFile = fileURLToPath(import.meta.url);
-const invokedFile = process.argv[1] ? path.resolve(process.argv[1]) : '';
-if (invokedFile && path.resolve(thisFile) === invokedFile) {
+if (isMainEntry(import.meta.url)) {
   main().catch((err) => {
     process.stderr.write(`ledger-rescrub failed: ${err?.message || err}\n`);
     process.exitCode = 1;

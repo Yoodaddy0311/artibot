@@ -18,8 +18,8 @@
  */
 
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { getPluginRoot } from '../lib/core/platform.js';
+import { isMainEntry } from './hooks/_main-entry.js';
 
 // ---------------------------------------------------------------------------
 // Trainer registry — schedules pinned to docs/SCHEDULED-JOBS.md
@@ -168,8 +168,7 @@ function main() {
 
 // Only run as a CLI; stay importable and side-effect-free so the registry can be
 // unit-tested (it prints guides on run, which a test import must not trigger).
-const isCliEntrypoint = process.argv[1] &&
-  fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
+const isCliEntrypoint = isMainEntry(import.meta.url);
 if (isCliEntrypoint) {
   main();
 }

@@ -24,12 +24,13 @@
  */
 
 import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
 // Korean-path-safe import resolution: build the absolute `file://` URL via
 // fileURLToPath round-trip on import.meta.url. The builder module is
 // imported statically (ESM); no dynamic file:// construction needed.
 import { buildPrDescription } from '../lib/release/pr-description-builder.js';
+import { isMainEntry } from './hooks/_main-entry.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -157,17 +158,10 @@ export async function main(argv, io = {}) {
 
 // ---------------------------------------------------------------------------
 // Entry guard — only invoke main() when run directly, not when imported.
-// Korean path safe: compare via pathToFileURL().href.
+// Korean path AND junction/symlink safe: see scripts/hooks/_main-entry.js.
 // ---------------------------------------------------------------------------
 
-const invokedDirectly = (() => {
-  if (!process.argv[1]) return false;
-  try {
-    return import.meta.url === pathToFileURL(process.argv[1]).href;
-  } catch {
-    return false;
-  }
-})();
+const invokedDirectly = isMainEntry(import.meta.url);
 
 if (invokedDirectly) {
   main(process.argv.slice(2)).then(

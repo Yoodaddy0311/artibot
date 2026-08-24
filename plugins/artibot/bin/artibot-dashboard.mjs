@@ -20,6 +20,7 @@ import { readFileSync } from 'node:fs';
 import path, { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createDashboardServer } from '../lib/runtime/dashboard/server.mjs';
+import { isMainEntry } from '../scripts/hooks/_main-entry.js';
 
 /**
  * Resolve version at runtime from the plugin's package.json so CLI output
@@ -156,8 +157,7 @@ export async function main(argv) {
   process.on('SIGTERM', () => shutdown('SIGTERM'));
 }
 
-const invokedFromCli =
-  process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1]);
+const invokedFromCli = isMainEntry(import.meta.url);
 if (invokedFromCli) {
   main(process.argv.slice(2)).catch((err) => {
     process.stderr.write(`[artibot-dashboard] fatal: ${err?.message ?? err}\n`);

@@ -18,8 +18,8 @@
  */
 
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { atomicWriteJson, readJsonFile } from '../core/file.js';
+import { isMainEntry } from '../../scripts/hooks/_main-entry.js';
 
 /** @typedef {() => Date} NowFn */
 /** @typedef {{ file: string, note?: string }} Evidence */
@@ -372,7 +372,7 @@ async function runCli(argv) {
 }
 
 // Run only as a CLI entry point; importing (tests) gets the exports untouched.
-const isDirectRun = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
+const isDirectRun = isMainEntry(import.meta.url);
 if (isDirectRun) {
   runCli(process.argv).catch((err) => {
     process.stdout.write(`_scorecard 오류: ${String((err && err.message) || err)}_\n`);

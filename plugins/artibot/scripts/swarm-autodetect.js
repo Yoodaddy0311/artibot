@@ -20,12 +20,12 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
 import { getPluginRoot } from '../lib/core/platform.js';
 import { getSwarmConfig, loadConsent } from '../lib/swarm/swarm-config.js';
 import { ARTIBOT_DIR } from '../lib/core/config.js';
 import { readJsonFile, writeJsonFile } from '../lib/core/file.js';
 import { assertSafeGitUrl } from '../lib/swarm/git-backend.js';
+import { isMainEntry } from './hooks/_main-entry.js';
 
 const PROFILE_REL = path.join('.claude-plugin', 'swarm-profile.json');
 const AUTO_APPLIED_MARKER = path.join(ARTIBOT_DIR, 'swarm-autoapplied.json');
@@ -260,18 +260,9 @@ async function main() {
 }
 
 // Only auto-run when invoked directly via the Node CLI (not when imported by
-// a test or another module). Compares this module's URL to argv[1] resolved
-// as a file:// URL — matches Node's standard "main module" idiom.
-function isDirectInvocation() {
-  if (!process.argv[1]) return false;
-  try {
-    return import.meta.url === pathToFileURL(process.argv[1]).href;
-  } catch {
-    return false;
-  }
-}
-
-if (isDirectInvocation()) {
+// a test or another module). isMainEntry() is the canonical spelling — it closes
+// both the percent-encoding and the junction/symlink fail-open.
+if (isMainEntry(import.meta.url)) {
   main().catch((err) => {
     process.stderr.write(`[swarm-autodetect] ${err.message || err}\n`);
     process.exit(0); // advisory — never block

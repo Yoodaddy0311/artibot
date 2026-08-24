@@ -61,6 +61,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { getHomeDir } from '../lib/core/platform.js';
+import { isMainEntry } from './hooks/_main-entry.js';
 
 /** Repo root that owns this plugin (`<repo>/plugins/artibot/scripts` -> `<repo>`). */
 const REPO_ROOT = path.resolve(fileURLToPath(new URL('../../..', import.meta.url)));
@@ -406,8 +407,7 @@ function main() {
 
 // Direct-run guard: importing this module (tests) must not start a full scan of
 // every transcript on the machine.
-const isDirectRun = process.argv[1]
-  && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
+const isDirectRun = isMainEntry(import.meta.url);
 
 if (isDirectRun) {
   try {

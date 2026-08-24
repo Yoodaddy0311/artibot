@@ -28,7 +28,7 @@ import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { argv, cwd } from 'node:process';
-import { fileURLToPath } from 'node:url';
+import { isMainEntry } from '../hooks/_main-entry.js';
 
 const DEFAULT_MAX_FRAMES = 24;
 const HARD_CAP_FRAMES = 50;
@@ -234,7 +234,7 @@ async function main() {
 
 // Run only as a CLI entry point; importing (tests) gets the exported helpers
 // without triggering ingestion.
-const isDirectRun = argv[1] && fileURLToPath(import.meta.url) === argv[1];
+const isDirectRun = isMainEntry(import.meta.url);
 if (isDirectRun) {
   main().catch((err) => {
     // Absolute last resort — never let /watch die on a stack trace.

@@ -18,8 +18,11 @@
  *   - `--dry-run` prints the plan and exits 0 without mutating the repo.
  *   - The squash refuses to run with uncommitted working-tree changes so
  *      partial work cannot be folded into the squash commit unintentionally.
- *   - All git invocations use windowsHide + explicit cwd; Korean paths are
- *      respected via `fileURLToPath(import.meta.url)`.
+ *   - All git invocations use windowsHide + explicit cwd.
+ *   - The CLI entry check goes through `isMainEntry` (scripts/hooks/_main-entry.js),
+ *      which is the part that survives a Korean install path or a junction.
+ *      It used to be an inline `fileURLToPath(import.meta.url)` compare here;
+ *      that symbol is gone from this file, so do not look for it.
  *
  * Exit codes:
  *   0  — success or dry-run
@@ -30,8 +33,8 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
 import { isWipSubject } from '../lib/autopilot/wip-stats.js';
+import { isMainEntry } from './hooks/_main-entry.js';
 
 /**
  * Default git runner used by the CLI. Injectable for tests.
@@ -282,15 +285,8 @@ export function main(argv, opts = {}) {
 }
 
 // CLI entry — only when this file is the launched script (not under import).
-// Korean-path safe: fileURLToPath collapses percent-encoded UTF-8.
-const isCliEntry = (() => {
-  if (!process.argv[1]) return false;
-  try {
-    return fileURLToPath(import.meta.url) === process.argv[1];
-  } catch {
-    return false;
-  }
-})();
+// Korean-path AND junction/symlink safe: see scripts/hooks/_main-entry.js.
+const isCliEntry = isMainEntry(import.meta.url);
 
 if (isCliEntry) {
   const { code, message } = main(process.argv.slice(2));

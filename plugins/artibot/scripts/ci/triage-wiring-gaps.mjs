@@ -33,6 +33,7 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isMainEntry } from '../hooks/_main-entry.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PLUGIN_ROOT = path.resolve(__dirname, '..', '..');
@@ -444,8 +445,7 @@ export function runTriage() {
 }
 
 // Run only when invoked directly; export the pure functions for tests.
-const invokedDirectly =
-  process.argv[1] && path.basename(process.argv[1]) === 'triage-wiring-gaps.mjs';
+const invokedDirectly = isMainEntry(import.meta.url);
 if (invokedDirectly) {
   try {
     const result = runTriage();
