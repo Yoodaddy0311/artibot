@@ -767,13 +767,13 @@ daily (work recap/retrospective), team (parallel orchestration), session-worklog
 | PostToolUse (Bash) | `post-bash.js` | Auto-detect PR URLs after git push |
 | PostToolUseFailure | `post-tool-failure-advisor.js` | Inject corrective context for recognised failure patterns (allowlist; silent otherwise) |
 | PreCompact | `pre-compact.js` | State snapshot before context compression |
-| Stop | `check-console-log.js` | Detect leftover console.log statements |
+| Stop (legacy stub) | `check-console-log.js` | No-op stub kept so sessions that cached the pre-v4.7.2 hooks.json still resolve the path; real console.log detection lives in `dev-verify-gate.js` |
 | UserPromptSubmit | `user-prompt-handler.js` | Intent detection and agent suggestion |
-| UserPromptSubmit | `cognitive-router.js` | System 1/2 cognitive routing classification |
+| UserPromptSubmit | `runtime-prompt.js` | Second-stage prompt enrichment — builds the runtime envelope (replaced the former cognitive-router hook) |
 | SubagentStart/Stop | `subagent-handler.js` | Teammate registration/deregistration tracking |
 | TeammateIdle | `team-idle-handler.js` | Alert idle teammates about pending tasks |
 | SessionEnd | `session-end.js` | Persist session state |
-| SessionEnd | `nightly-learner.js` | Batch learning (GRPO) + knowledge transfer |
+| SessionEnd | `memory-tracker.js` | Summarize the session and persist learnings |
 | SessionEnd | `http-notify.js` | HTTP webhook notifications (Slack/Discord/generic) |
 
 </details>

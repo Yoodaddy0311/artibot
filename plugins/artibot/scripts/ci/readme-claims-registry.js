@@ -221,23 +221,91 @@ export function partitionFrozenHistory(content) {
 //      hooks.json is not the only registration table. hooks/dispatch-table.json
 //      names 47 scripts that the `*-dispatcher.js` hooks fan out to, 35 of them
 //      not in hooks.json (the other 12 overlap with its 24), so 24 + 35 = 59 of
-//      the 68 files are reachable through the two tables combined (measured
-//      2026-08-19). The remaining 9 are not automatically dead — but only 5
-//      carry positive evidence: `_main-entry.js` (63 importers, 61 under
-//      scripts/hooks/), `_dispatcher-utils.js` (8 — the six `*-dispatcher.js`
-//      plus two tests), `git-autopilot-merge.js` (imported by the registered
-//      git-autopilot-session.js), and the `nightly-*.mjs` pair, named in the
-//      TRAINERS registry at scripts/setup-nightly-trainers.js:28-41. Note that
-//      script PRINTS a crontab/schtasks guide rather than installing one, so
-//      for the pair a schedule is intended, not proven to run anywhere.
-//      The other 4 are UNVERIFIED, not asserted live: `event-emitter.mjs`,
-//      `session-start-sweep.mjs` and `skill-discovery-inject.js` have zero
-//      importers and sit in no registration table, and `check-console-log.js`
-//      is worse than unverified — docs/wiring-audit-result.json marks it
-//      INTENTIONAL_DORMANT and its own header calls it a legacy no-op stub
-//      "safe to remove". So do not subtract a registration count from the file
-//      count and read the difference as dead files — and do not read this list
-//      as proof the difference is all alive either.
+//      the 68 files are reachable through the two tables combined (re-measured
+//      2026-08-24 against the real directory listing: unchanged from the
+//      2026-08-19 figures — 68 = 62 .js + 6 .mjs, union 59, remainder 9, and
+//      the same 9 filenames). The remaining 9 are NOT the dead list. Table
+//      registration is only one of the ways a hook file is reached: a dynamic
+//      import from a registered hook also reaches one, and a file can be the
+//      named deliverable of an opt-in surface that nothing in this repo wires
+//      up. Measured 2026-08-24, the 9 fall into four evidence tiers — none of
+//      them "dead", but they are NOT equally well evidenced, so do not quote
+//      them as one bucket:
+//      (a) Live code path, reachable today — 4:
+//        - `_main-entry.js` — 64 importers, 61 under scripts/hooks/. (63 until
+//          scripts/evals/harness-ablation.js:9 added one; the number moves with
+//          the tree, so re-measure before quoting it.)
+//        - `_dispatcher-utils.js` — 8: the six `*-dispatcher.js` plus two
+//          tests under tests/dispatcher/.
+//        - `git-autopilot-merge.js` — imported by the registered
+//          git-autopilot-session.js:16.
+//        - `skill-discovery-inject.js` — NOT importer-less. session-start.js
+//          (`maybeInjectSkillDiscovery`, :620 on 2026-08-24) builds the path
+//          with path.join() and `await import()`s it (AD-23, first-session-of-
+//          day meta-skill inject), and session-start.js is dispatch-table
+//          SessionStart handlers[0]. A static import scan cannot see a
+//          path.join()'d specifier; tests/hooks/skill-discovery-inject.test.js
+//          covers it. The wiring audit reached this independently and files it
+//          under bySubsystem[19].findings[2] as gapType FALSE_POSITIVE,
+//          missingLink "None — wired via dynamic in-process import from the
+//          registered session-start.js handler." (That entry cites :594-598 and
+//          :683; those line numbers are from the 2026-05-30 audit and have
+//          since drifted — the symbol names still resolve.)
+//      (b) Deliberately kept, never executed — 1:
+//        - `check-console-log.js` — a deliberate KEEP, not a removal candidate.
+//          tests/hooks/legacy-stubs.test.js asserts the file exists and parses
+//          (V3_LEGACY_HOOKS array at :18-27, assertions at :29-54), because
+//          sessions that cached the v3.0.0 hooks.json still exec this path on
+//          Stop and would MODULE_NOT_FOUND without it. The wiring audit agrees
+//          twice over — dormant[] and bySubsystem[19].findings[0], both
+//          INTENTIONAL_DORMANT, missingLink "None — intentional backward-compat
+//          stub kept alive on purpose by legacy-stubs.test.js ... Do not fix."
+//          Its header's "Safe to remove" is conditional ("after all open
+//          sessions are restarted"); quoting it without that clause inverts the
+//          verdict.
+//      (c) Schedule intended, not proven to run anywhere — 2:
+//        - the `nightly-*.mjs` pair — named in the TRAINERS registry at
+//          scripts/setup-nightly-trainers.js:28-41. That script PRINTS a
+//          crontab/schtasks guide rather than installing one.
+//      (d) Named deliverable of an opt-in surface, no wiring in this repo — 2.
+//          Weakest tier: for these two, "not dead" rests on documented intent,
+//          not on any executed path.
+//        - `event-emitter.mjs` — deliverable #1 of the `hook-event-emitter`
+//          skill and step 3 of its (unchecked) build checklist; the skill's
+//          pipeline diagram at skills/hook-event-emitter/SKILL.md:59-67 shows
+//          `Claude Code hook -> scripts/hooks/event-emitter.mjs (stdin JSON)`,
+//          and downstream consumers of its envelope exist in
+//          lib/runtime/dashboard/{server.mjs,aggregator.js} and
+//          bin/artibot-dashboard.mjs. Three registered hooks cite
+//          `event-emitter.mjs:84` as the payload-shape reference (post-bash.js,
+//          post-edit-recovery.js, tool-tracker.js) but none import it. NOTE: no
+//          settings.json wiring for it exists anywhere in this repo — SKILL.md
+//          contains the string "settings.json" zero times, and its one "opt-in"
+//          (:47) is about http-notify.js, not this file. An earlier revision of
+//          this comment asserted a user-side settings.json entry; that was
+//          unsourced. What is sourced is the skill contract, not an invocation.
+//        - `session-start-sweep.mjs` — zero importers, no table entry, no test.
+//          Unlike event-emitter.mjs it does carry a settings.json snippet in its
+//          own header (:23-25), under the heading "Hook registration (pending —
+//          v0.5.1 roadmap)". Dormant by declaration.
+//      Two cautions on the audit itself. It is plugins/artibot/docs/
+//      wiring-audit-result.json, NOT docs/ at the repo root, and it is
+//      UNTRACKED — .gitignore:24 ignores `plugins/artibot/docs/*`, so it exists
+//      only on machines that ran the audit and `git log` on it returns nothing.
+//      No generator ships in this repo (scripts/ci/triage-wiring-gaps.mjs
+//      READS it), so it cannot be regenerated to check staleness; the local copy
+//      is dated 2026-05-30 by FILE MTIME ONLY — the JSON carries no generated-at
+//      field, and the sibling docs/WIRING-AUDIT-2026-05-30.md is the same date.
+//      Search all FOUR top-level keys when checking it — confirmedRealGaps,
+//      dormant, refuted AND bySubsystem. An earlier revision of this comment
+//      claimed the audit had no entry for skill-discovery-inject.js; that was a
+//      scoping error (three keys searched, bySubsystem missed). It has no entry
+//      for `event-emitter.mjs` or `session-start-sweep.mjs` — zero occurrences
+//      across the whole file, verified 2026-08-24 — and there, silence is
+//      absence of evidence, not a dormant verdict.
+//      So do not subtract a registration count from the file count and read the
+//      difference as dead files. On this measurement the difference contains
+//      zero removable files.
 //      Counting these by regex is itself error-prone: a naive
 //      `\.m?js` scan of dispatch-table.json returns 50, because it also
 //      matches prose in the file's own `description` (`*-dispatcher.js`,
