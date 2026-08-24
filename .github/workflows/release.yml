@@ -8,19 +8,47 @@ on:
 permissions:
   contents: write
 
-# Single source of truth for the stall-escalation issue title. Two steps in the
-# `sync-readmes` job below now depend on this exact string: the detector opens
-# an issue with it, and the self-heal step finds those issues again to close
-# them once the badge PR has landed. Written literally in both places they would
-# drift on the first reword and the closer would silently stop matching — which
-# is the same class of unobservable failure the detector itself exists to fix.
+# Single source of truth for the escalation issue titles. The `sync-readmes`
+# job below can open four different issues, and every one of them now has a
+# closing half in `Close resolved badge-sync escalation issues`: the opener
+# writes the title, the closer finds those issues again once the badge sync has
+# landed. Written literally in both places they would drift on the first reword
+# and the closer would silently stop matching — which is the same class of
+# unobservable failure the detector itself exists to fix.
 #
 # Split into prefix/suffix rather than a single format string because the closer
 # has to run the substitution BACKWARDS: it recovers the tag from an existing
 # issue title, which `printf '…%s…'` cannot do.
+#
+# MERGE_TITLE_PREFIX is byte-identical to STALL_TITLE_PREFIX today. They are
+# kept as two names on purpose: they belong to two independent issues opened by
+# two different steps, and collapsing them would mean rewording one could not be
+# done without rewording the other. The `case` in the closer disambiguates on
+# the suffix, which is unique per kind.
 env:
+  # Opened by `Detect silent badge-sync stall` (PR mode): auto-merge is on but
+  # the required checks were never created, so it can never fire.
   STALL_TITLE_PREFIX: "chore(release): badge-sync PR "
   STALL_TITLE_SUFFIX: " is stalled — required checks never started"
+  # Opened by `Land badge sync via ci/** side branch (PAT)` (ff mode) on any of
+  # its six failure paths — push rejected, checks not green, fetch failed,
+  # rebase conflicted, force-with-lease refused, retry exhausted.
+  LAND_TITLE_PREFIX: "chore(release): badge sync "
+  LAND_TITLE_SUFFIX: " could not land on master"
+  # Opened by `Land badge sync via PR + auto-merge` (PR mode) when the branch
+  # push itself was rejected, so no PR was ever created.
+  PUSH_TITLE_PREFIX: "chore(release): badge-sync branch "
+  PUSH_TITLE_SUFFIX: " could not be pushed"
+  # Opened by `Land badge sync via PR + auto-merge` (PR mode) when the PR exists
+  # but `gh pr merge --auto` was refused.
+  MERGE_TITLE_PREFIX: "chore(release): badge-sync PR "
+  MERGE_TITLE_SUFFIX: " needs manual merge"
+  # Branch names are a second single source of truth for the same reason: the
+  # closer has to reconstruct the branch a given issue is about, and a producer
+  # that reworded its branch name would leave the closer querying a name that
+  # never existed — again with no error, just an issue that stops being closed.
+  FF_BRANCH_PREFIX: "ci/sync-badges-"
+  PR_BRANCH_PREFIX: "chore/sync-readme-badges-"
 
 jobs:
   validate:
@@ -201,11 +229,48 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      # ── Stall-issue self-heal ──────────────────────────────────────────────
+      # ── Escalation-issue self-heal ─────────────────────────────────────────
       # The detector at the end of this job opens an issue when a badge PR
       # cannot merge. Nothing ever closed those issues: #107 (v4.48.0) and #109
       # (v4.49.0) were still open on 2026-08-24 even though their PRs (#106,
       # #108) had merged on 08-22 and 08-23. This step is the missing half.
+      #
+      # Four kinds of escalation issue are reconciled here, each with its own
+      # observable resolution. The kinds differ in which branch carries the
+      # badge sync and therefore in what "it landed" can even be measured from:
+      #
+      #   kind   opened when                        branch                landed when
+      #   ─────  ─────────────────────────────────  ────────────────────  ──────────────────────────
+      #   stall  auto-merge on, no required checks  PR_BRANCH_PREFIX+tag  a PR on it merged
+      #   merge  `gh pr merge --auto` refused       PR_BRANCH_PREFIX+tag  a PR on it merged
+      #   push   branch push rejected (re-tag)      PR_BRANCH_PREFIX+tag  a PR on it merged
+      #   land   ff path failed (any of six ways)   FF_BRANCH_PREFIX+tag  a PR on it merged, OR the
+      #                                                                   branch is contained in master
+      #
+      # `land` needs the second signal because the ff path never opens a PR — it
+      # fast-forwards master onto the branch directly and does not delete the
+      # branch afterwards, so containment in master is the only trace a
+      # successful landing leaves behind. The REST compare endpoint reports that
+      # as status `identical` (master is exactly the branch) or `behind` (master
+      # has since moved on past it); `ahead` and `diverged` both mean the branch
+      # carries commits master does not. The merged-PR signal is kept too, because a
+      # human resolving it by hand may well open a PR from that branch, and a
+      # squash merge would break containment while still meaning it landed.
+      #
+      # `push` is the one case where the escalation can be resolved by work that
+      # happened BEFORE the issue was opened: the push is rejected because a
+      # branch of that name already exists from an earlier tagging attempt, and
+      # that attempt's PR may already have merged. Closing it on the next
+      # release is right, but NOT because the two syncs carry identical
+      # content — only the version half is tag-derived. `Compute counts` reads
+      # VERSION from GITHUB_REF_NAME, i.e. from the tag; the four badge counts
+      # come from `find` over the tree that `Checkout master` just checked out,
+      # i.e. from master AT RUN TIME. So if master moved between the two
+      # tagging attempts, the already-merged PR carried different counts than
+      # this run computed, and closing the issue hides "this run's numbers
+      # never landed". Accepted, for the same reason the latency entry below
+      # is: the next stable release recomputes and re-syncs the counts, so the
+      # divergence lives at most one release.
       #
       # Why it lives in the release run and NOT on a `pull_request: closed`
       # trigger, which is the obvious answer: measured 2026-08-24, both badge
@@ -237,10 +302,19 @@ jobs:
       #     could hide a stall issue from this pass entirely. Harmless today
       #     (measured 2026-08-24: this repo has had 3 issues in its whole
       #     history) and it fails closed — an unseen issue simply stays open.
+      #   - A badge sync landed by a route that touches neither the branch nor a
+      #     PR from it — someone committing the four files to master by hand, or
+      #     cherry-picking them onto a differently named branch. Nothing here
+      #     observes that, so the issue stays open for a human to close. This is
+      #     the deliberate fail-closed direction, not an oversight.
+      #   - A `land` issue whose branch was never pushed at all (the first of
+      #     the ff path's six failure paths). `compare` 404s on a branch that
+      #     does not exist, which reads as "not landed" — correct by accident
+      #     here, since the sync genuinely never left the runner.
       #
       # Placed immediately after the checkout, before the badge computation
       # steps, so a failure in those cannot leave last release's issue open too.
-      - name: Close resolved badge-sync stall issues
+      - name: Close resolved badge-sync escalation issues
         # The GitHub Release is already published by the time this job runs, so
         # a reconciliation bug must never fail the workflow.
         continue-on-error: true
@@ -256,7 +330,7 @@ jobs:
           trap 'rm -f "${ERR_LOG}"' EXIT
           if ! open_issues="$(gh issue list --state open --limit 100 --json number,title \
             --jq '.[] | [.number, .title] | @tsv' 2>"${ERR_LOG}")"; then
-            echo "::warning::Could not list open issues, so no stall issue was reconciled this run: $(tr '\n' ' ' < "${ERR_LOG}" | cut -c1-300)"
+            echo "::warning::Could not list open issues, so no escalation issue was reconciled this run: $(tr '\n' ' ' < "${ERR_LOG}" | cut -c1-300)"
             exit 0
           fi
           if [ -z "${open_issues}" ]; then
@@ -264,22 +338,49 @@ jobs:
             exit 0
           fi
 
+          # Which `compare` verdicts mean the branch reached master. An
+          # allowlist, not a denylist: a denylist is fail-OPEN on any status
+          # GitHub adds later (rules §8), and failing open here means closing an
+          # issue whose badge sync never landed. The four statuses the API can
+          # return today are identical / behind / ahead / diverged; only the
+          # first two mean every commit on the branch is already in master.
+          LANDED_COMPARE_STATUSES="identical behind"
+
           printf '%s\n' "${open_issues}" | while IFS="$(printf '\t')" read -r number title; do
             # Quoted patterns are literal in a `case` arm; only the bare `*` is
             # a glob. Matching on both ends keeps an unrelated issue that merely
-            # starts with the prefix out of the closer.
+            # starts with the prefix out of the closer — which matters more now
+            # that two kinds share a prefix byte-for-byte: `stall` and `merge`
+            # are told apart by the suffix alone.
             case "${title}" in
-              "${STALL_TITLE_PREFIX}"*"${STALL_TITLE_SUFFIX}") ;;
+              "${STALL_TITLE_PREFIX}"*"${STALL_TITLE_SUFFIX}")
+                kind="stall"
+                tag="${title#"${STALL_TITLE_PREFIX}"}"
+                tag="${tag%"${STALL_TITLE_SUFFIX}"}"
+                branch="${PR_BRANCH_PREFIX}${tag}" ;;
+              "${MERGE_TITLE_PREFIX}"*"${MERGE_TITLE_SUFFIX}")
+                kind="merge"
+                tag="${title#"${MERGE_TITLE_PREFIX}"}"
+                tag="${tag%"${MERGE_TITLE_SUFFIX}"}"
+                branch="${PR_BRANCH_PREFIX}${tag}" ;;
+              "${PUSH_TITLE_PREFIX}"*"${PUSH_TITLE_SUFFIX}")
+                kind="push"
+                tag="${title#"${PUSH_TITLE_PREFIX}"}"
+                tag="${tag%"${PUSH_TITLE_SUFFIX}"}"
+                branch="${PR_BRANCH_PREFIX}${tag}" ;;
+              "${LAND_TITLE_PREFIX}"*"${LAND_TITLE_SUFFIX}")
+                kind="land"
+                tag="${title#"${LAND_TITLE_PREFIX}"}"
+                tag="${tag%"${LAND_TITLE_SUFFIX}"}"
+                branch="${FF_BRANCH_PREFIX}${tag}" ;;
               *) continue ;;
             esac
-            tag="${title#"${STALL_TITLE_PREFIX}"}"
-            tag="${tag%"${STALL_TITLE_SUFFIX}"}"
-            branch="chore/sync-readme-badges-${tag}"
 
-            # `--state merged` is the whole verdict: an issue is only resolved
-            # when the badge changes actually reached master. A closed-unmerged
-            # PR means someone discarded the sync, which is still a thing a
-            # human needs to know about, so that issue stays open.
+            # `--state merged` is the whole verdict for the three PR-mode kinds:
+            # an issue is only resolved when the badge changes actually reached
+            # master. A closed-unmerged PR means someone discarded the sync,
+            # which is still a thing a human needs to know about, so that issue
+            # stays open.
             #
             # This query is allowed to swallow its failure, unlike the issue
             # list above, because the two fail in opposite directions: an
@@ -289,14 +390,35 @@ jobs:
             # reporting a stall that is still happening.
             merged_at="$(gh pr list --head "${branch}" --state merged --limit 1 \
               --json mergedAt --jq '.[0].mergedAt // empty' 2>/dev/null || true)"
-            if [ -z "${merged_at}" ]; then
-              echo "Issue #${number} (${tag}): no merged PR on ${branch} — leaving open."
+            resolution=""
+            if [ -n "${merged_at}" ]; then
+              resolution="a PR on \`${branch}\` merged at ${merged_at}"
+            elif [ "${kind}" = "land" ]; then
+              # ff mode never opens a PR, so containment in master is the only
+              # trace a successful landing leaves. Same swallow-and-fail-closed
+              # rule as the query above: an unanswered `compare` (or a 404 for a
+              # branch that was never pushed) yields an empty status, which
+              # matches nothing in the allowlist and leaves the issue open.
+              compare_status="$(gh api \
+                "repos/${GITHUB_REPOSITORY}/compare/master...${branch}" \
+                --jq '.status' 2>/dev/null || true)"
+              # An empty status expands to two adjacent spaces, which the
+              # single-spaced allowlist cannot contain — so "query failed" and
+              # "not landed" both fall through to the leave-open branch.
+              case " ${LANDED_COMPARE_STATUSES} " in
+                *" ${compare_status} "*)
+                  resolution="\`${branch}\` is contained in master (compare status \`${compare_status}\`)" ;;
+              esac
+            fi
+
+            if [ -z "${resolution}" ]; then
+              echo "Issue #${number} (${kind} ${tag}): no landing evidence on ${branch} — leaving open."
               continue
             fi
-            echo "Issue #${number} (${tag}): badge PR merged at ${merged_at} — closing."
+            echo "Issue #${number} (${kind} ${tag}): ${resolution} — closing."
             gh issue close "${number}" \
-              --comment "Badge sync for ${tag} landed on master (\`${branch}\` merged at ${merged_at}), so the stall reported here is resolved. Closed automatically by the ${GITHUB_REF_NAME} release run." \
-              || echo "::warning::Could not close resolved stall issue #${number}"
+              --comment "Badge sync for ${tag} landed on master (${resolution}), so the problem reported here is resolved. Closed automatically by the ${GITHUB_REF_NAME} release run." \
+              || echo "::warning::Could not close resolved escalation issue #${number}"
           done
           echo "Stall-issue reconciliation complete."
 
@@ -483,7 +605,18 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BADGE_SUBJECT: ${{ steps.strategy.outputs.subject }}
         run: |
-          BRANCH="ci/sync-badges-${GITHUB_REF_NAME}"
+          # Defence in depth for the one env this step cannot work without.
+          # An unset/empty prefix does not fail — it makes BRANCH equal to
+          # GITHUB_REF_NAME, i.e. `git checkout -b v4.50.0` and a push creating
+          # a branch with the SAME NAME AS THE TAG, with the step still green.
+          # `${x:?}` exits the shell on the spot, so this cannot reach
+          # open_issue (defined below). Deliberate: a top-level env literal can
+          # only become unset by editing this file, and
+          # tests/firewall/badge-stall-issue-lifecycle.test.js pins the exact
+          # env name set, so that edit is already RED at PR time. The
+          # notification for the residual case is the red step itself.
+          : "${FF_BRANCH_PREFIX:?}"
+          BRANCH="${FF_BRANCH_PREFIX}${GITHUB_REF_NAME}"
           # Fall back to the both-halves wording only if the strategy step
           # somehow produced no subject. An empty -m aborts the commit, which
           # would turn a naming nit into a failed landing.
@@ -557,7 +690,10 @@ jobs:
             return 1
           }
 
-          ISSUE_TITLE="chore(release): badge sync ${GITHUB_REF_NAME} could not land on master"
+          # Assembled from the workflow-level env pair, not written out here, so
+          # the self-heal step at the top of this job can find these issues
+          # again later and close the ones whose sync did eventually land.
+          ISSUE_TITLE="${LAND_TITLE_PREFIX}${GITHUB_REF_NAME}${LAND_TITLE_SUFFIX}"
 
           if ! git push "${REMOTE}" "HEAD:refs/heads/${BRANCH}"; then
             echo "::warning::Could not push ${BRANCH} — the landing PAT is the usual cause (expired, revoked, or missing contents:write)."
@@ -647,7 +783,9 @@ jobs:
               || echo "::warning::Could not open escalation issue: ${issue_title}"
           }
 
-          BRANCH="chore/sync-readme-badges-${GITHUB_REF_NAME}"
+          # Same unset-env guard, same rationale as the ff path's copy above.
+          : "${PR_BRANCH_PREFIX:?}"
+          BRANCH="${PR_BRANCH_PREFIX}${GITHUB_REF_NAME}"
           # Same fallback rationale as the ff path: an empty -m aborts the commit.
           SUBJECT="${BADGE_SUBJECT:-docs(release): sync README badges + marketplace meta to ${GITHUB_REF_NAME}}"
           git config user.name "github-actions[bot]"
@@ -665,7 +803,7 @@ jobs:
           # rejected as non-fast-forward.
           if ! git push origin "${BRANCH}"; then
             echo "::warning::Could not push ${BRANCH} — a branch of that name likely already exists on the remote (re-tagged release?)."
-            open_issue "chore(release): badge-sync branch ${GITHUB_REF_NAME} could not be pushed" \
+            open_issue "${PUSH_TITLE_PREFIX}${GITHUB_REF_NAME}${PUSH_TITLE_SUFFIX}" \
               "Pushing \`${BRANCH}\` (release ${GITHUB_REF_NAME}) was rejected, so no badge-sync PR was opened. If this release was re-tagged, delete the stale remote branch and re-run, or land the badge + marketplace changes manually."
             exit 0
           fi
@@ -685,7 +823,7 @@ jobs:
           if ! gh pr merge --auto --squash --delete-branch "${BRANCH}"; then
             AUTOMERGE_ENABLED=false
             echo "::warning::Auto-merge could not be enabled for ${BRANCH} — opening tracking issue."
-            open_issue "chore(release): badge-sync PR ${GITHUB_REF_NAME} needs manual merge" \
+            open_issue "${MERGE_TITLE_PREFIX}${GITHUB_REF_NAME}${MERGE_TITLE_SUFFIX}" \
               "Auto-merge was not enabled on \`${BRANCH}\` (release ${GITHUB_REF_NAME}). Please review and merge the PR manually so the README badges + marketplace.json reach master."
           fi
 
