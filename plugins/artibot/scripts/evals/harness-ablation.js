@@ -6,6 +6,7 @@
  * @module scripts/evals/harness-ablation
  */
 
+import { isMainEntry } from '../hooks/_main-entry.js';
 import { createArtibotAgent } from '../../lib/runtime/create-artibot-agent.js';
 import { createRouterMiddleware } from '../../lib/runtime/middleware/router.js';
 import { createMemoryMiddleware } from '../../lib/runtime/middleware/memory.js';
@@ -270,9 +271,13 @@ async function main() {
   }
 }
 
-// Only run when executed directly
-const isMain = process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/\\/g, '/'));
-if (isMain) {
+// Only run when executed directly (tests import the exports above, and an
+// unguarded main() would run a full ablation sweep in the test worker).
+// Suffix-matching import.meta.url against argv[1] cannot do this: the URL is
+// percent-ENCODED and argv[1] is a raw path, so any install path holding a
+// space or non-ASCII character made this false and the script exited 0 in
+// silence. isMainEntry decodes both sides. See scripts/hooks/_main-entry.js.
+if (isMainEntry(import.meta.url)) {
   main().catch((err) => {
     process.stderr.write(`[ablation] ${err.message || err}\n`);
     process.exit(1);
