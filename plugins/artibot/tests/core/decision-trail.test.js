@@ -3,6 +3,33 @@
  * Covers recordDecision, queryDecisions, pruneDecisionTrail, getDecisionStats,
  * redaction, prototype-pollution rejection, and integration with runtime-prompt,
  * cognitive router, and user-profile subsystems.
+ *
+ * ── DO NOT RUN THIS FILE UNDER `--no-isolate` ───────────────────────────────
+ * Under `--no-isolate` these tests write their fixtures into the REAL
+ * `runtime/decision-trail.json` instead of their per-test sandbox, silently
+ * polluting live learning data. Measured 2026-08-25 on a 28-file set
+ * (`grep -rln CLAUDE_PLUGIN_ROOT tests/`): 341 fixture entries had accumulated
+ * in the real trail, and each additional failing run appended ~26 more. The
+ * fixtures are the giveaway — subsystems `s`, `a`, `b`, `x`, `router`,
+ * `profile`, which no production code can emit (production writes only
+ * auto-cleanup, auto-commit, auto-macro-register, auto-pr-creator,
+ * cognitive-router, runtime-prompt, user-profile).
+ *
+ * Two symptoms, one cause: writes land in the real root, so the sandbox's
+ * `runtime/` is never created (`ENOENT .../artibot-trail-XXXX/runtime/
+ * decision-trail.json`) and reads that reach the real file see its entry count
+ * instead of the fixture's (`expected 811 to be 3`).
+ *
+ * THE CODE PATH THAT CAUSES IT IS UNIDENTIFIED. Do not read the note above as
+ * a diagnosis — it describes the symptom, not the mechanism. Every two-file
+ * reproduction attempt failed; it only manifests at ~28-file scale, and the
+ * file execution order is not reproducible even with `--sequence.seed` fixed
+ * (measured: same seed, same list, different order and different outcome run
+ * to run). Whoever narrows it further should record the mechanism here.
+ *
+ * The default config (`isolate: true`) does NOT trigger this — verified
+ * 2026-08-25, this file alone and in pairs, every seed tried. CI runs the
+ * default, so this is a manual-flag hazard only.
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
