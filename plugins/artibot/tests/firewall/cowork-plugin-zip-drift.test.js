@@ -102,6 +102,87 @@ function readCentralDirectory(buf) {
   return out;
 }
 
+/**
+ * Read many `HEAD:<path>` blobs out of git in ONE process.
+ *
+ * WHY THIS IS BATCHED. The obvious spelling is `git show HEAD:<path>` per file,
+ * and that is what this gate shipped with. It made the byte-equality test below
+ * a process-spawn benchmark: measured 2026-08-25 on this tree, 158 files at
+ * 37.1 ms/spawn = 5,869 ms, of which the actual file reading
+ * (`readPackedBytes`) was 43 ms. 99.3% of the test was spawn overhead.
+ *
+ * THE NUMBER THAT MATTERS IS NOT THE 33x SPEEDUP — IT IS THE MARGIN. Do not
+ * read the old state as 'a test that was sometimes slow'. Spawn cost is the
+ * thing that degrades under parallelism: measured the same day, one worker per
+ * concurrent spawner, k=1 36.2 ms, k=8 41.9 ms, k=16 71.0 ms, k=32 149.8 ms —
+ * a 4.13x regression at the ~31 workers vitest opens on a 32-core box. So in a
+ * real full-suite run this test spent 25,377 ms of a 30,000 ms budget. EVERY
+ * run. A 1.18x margin is not flakiness, it is a test that fails the moment
+ * anything else touches the machine — coverage instrumentation, a second suite,
+ * one more teammate. It had already timed out four times, and the runs that
+ * 'passed' were just as broken. Raising the timeout would have moved the cliff,
+ * not removed it; the only real fix was to stop spawning 158 processes.
+ *
+ * One `git cat-file --batch` does the same work in 178 ms — a 33x reduction in
+ * the resource that was actually scarce. Verified byte-for-byte against the
+ * per-file `git show` output for all 158 files before the swap: 158 identical,
+ * 0 content mismatches, 0 presence mismatches.
+ *
+ * This changes NOTHING about what the gate detects. Same paths, same bytes,
+ * same denominator, same missing-file handling — a file absent from HEAD still
+ * comes back as a skip rather than a pass. The only thing that shrank is the
+ * process count.
+ *
+ * Fails closed: an unparseable header or a short read throws rather than
+ * silently yielding fewer blobs, which would quietly shrink the denominator
+ * the assertion below relies on.
+ *
+ * @param {string[]} relPaths - Cowork-relative POSIX paths.
+ * @returns {Map<string, Buffer|null>} Blob bytes, or null when absent from HEAD.
+ */
+function readCommittedBlobs(relPaths) {
+  for (const rel of relPaths) {
+    // `--batch` is newline-delimited, so a newline in a path would desync the
+    // whole stream and misattribute every blob after it. Windows cannot create
+    // such a name; assert rather than assume.
+    if (/[\n\r]/.test(rel)) {
+      throw new Error(`path contains a newline, unsafe for --batch: ${JSON.stringify(rel)}`);
+    }
+  }
+  const paths = relPaths.map((r) => `HEAD:plugins/artibot-cowork/${r}`);
+  const out = execFileSync('git', ['cat-file', '--batch'], {
+    cwd: REPO_ROOT,
+    input: `${paths.join('\n')}\n`,
+    maxBuffer: 1 << 28,
+    stdio: ['pipe', 'pipe', 'ignore'],
+  });
+
+  const blobs = new Map();
+  let off = 0;
+  for (const rel of relPaths) {
+    const nl = out.indexOf(0x0a, off);
+    if (nl < 0) throw new Error(`git cat-file --batch output ended early at ${rel}`);
+    const header = out.toString('utf8', off, nl);
+    off = nl + 1;
+    if (/ (missing|ambiguous)$/.test(header)) {
+      blobs.set(rel, null);
+      continue;
+    }
+    const m = /^[0-9a-f]+ blob (\d+)$/.exec(header);
+    if (!m) throw new Error(`unparseable --batch header for ${rel}: ${JSON.stringify(header)}`);
+    const size = Number(m[1]);
+    blobs.set(rel, out.subarray(off, off + size));
+    off += size + 1; // content, then the LF git appends after it
+  }
+  if (off !== out.length) {
+    throw new Error(`git cat-file --batch output not fully consumed: ${off} of ${out.length} bytes`);
+  }
+  if (blobs.size !== relPaths.length) {
+    throw new Error(`--batch accounted for ${blobs.size} of ${relPaths.length} paths`);
+  }
+  return blobs;
+}
+
 describe('artibot-cowork.plugin ZIP mirrors the cowork tree', () => {
   it('the release artifact exists (fail-closed)', () => {
     expect(
@@ -177,20 +258,16 @@ describe('artibot-cowork.plugin ZIP mirrors the cowork tree', () => {
     // checkout materializes. If packed bytes equal those, the packer's output
     // no longer depends on which machine ran it.
     const files = collectEntries();
+    // One git process for every path — see readCommittedBlobs above for why the
+    // per-file spelling made this test time out under parallel load.
+    const committedBlobs = readCommittedBlobs(files);
     let compared = 0;
     const skipped = [];
     const mismatched = [];
 
     for (const rel of files) {
-      const tracked = `plugins/artibot-cowork/${rel}`;
-      let committed;
-      try {
-        committed = execFileSync('git', ['show', `HEAD:${tracked}`], {
-          cwd: REPO_ROOT,
-          maxBuffer: 1 << 28,
-          stdio: ['ignore', 'pipe', 'ignore'],
-        });
-      } catch {
+      const committed = committedBlobs.get(rel);
+      if (committed === null) {
         // Not in HEAD yet (new file in the working tree) — nothing to compare against.
         skipped.push(rel);
         continue;
@@ -202,11 +279,38 @@ describe('artibot-cowork.plugin ZIP mirrors the cowork tree', () => {
       }
     }
 
-    // Denominator: separates "0 mismatches" from "compared nothing".
-    expect(
-      compared,
-      `only ${compared} of ${files.length} files were compared against HEAD (skipped: ${skipped.length})`,
-    ).toBeGreaterThan(100);
+    // Denominator, and the reason it is an EXACT count rather than a floor.
+    //
+    // `> 100` was the old spelling, and against 158 files it tolerated 57
+    // silently-skipped ones. That is the fail-open this gate has to be immune
+    // to, because a skip is not an error here: a file legitimately absent from
+    // HEAD (new, uncommitted) is skipped BY DESIGN — see note 5 in the header.
+    // So "count the skips" cannot separate the legitimate case from a parser
+    // that lost entries; both land in the same bucket and both stay green.
+    //
+    // What separates them is asking git which files are actually in HEAD. Every
+    // file that IS committed must have been compared; only genuinely-absent
+    // ones may be skipped. One extra process for the whole list (~37 ms), which
+    // is the entire point of batching in the first place.
+    const HEAD_PREFIX = 'plugins/artibot-cowork/';
+    const inHead = new Set(
+      execFileSync('git', ['ls-tree', '-r', '--name-only', 'HEAD', '--', 'plugins/artibot-cowork'], {
+        cwd: REPO_ROOT,
+        maxBuffer: 1 << 28,
+        stdio: ['ignore', 'pipe', 'ignore'],
+      })
+        .toString('utf8')
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => (line.startsWith(HEAD_PREFIX) ? line.slice(HEAD_PREFIX.length) : line)),
+    );
+
+    expect(inHead.size, 'git ls-tree returned nothing — the cross-check would be vacuous').toBeGreaterThan(100);
+    expect(compared, `compared ${compared} files but HEAD holds ${files.filter((f) => inHead.has(f)).length} of them`)
+      .toBe(files.filter((f) => inHead.has(f)).length);
+    expect(skipped, 'a file present in HEAD was skipped — the batch parser lost it')
+      .toEqual(files.filter((f) => !inHead.has(f)));
+    expect(compared + skipped.length, 'files were neither compared nor skipped').toBe(files.length);
 
     expect(
       mismatched,
