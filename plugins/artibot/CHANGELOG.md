@@ -9,6 +9,79 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.50.0] — 2026-08-25
+
+v4.49.0 이후 14커밋. **새 기능은 한 건도 없다.** 축은 하나다 — **조용히 통과하던 게이트를
+닫고, 게이트가 실제로 검증한 것만 말하게 만든다.** 이 배치의 결함은 전부 같은 모양이었다:
+빨개져야 할 자리에서 초록이었고, 초록이라 아무도 보지 않았다.
+
+가장 무거운 것은 `argv[1]` 계열 direct-run 가드였다. junction/symlink 를 경유해 실행되면
+argv[1](링크 철자)과 `import.meta.url`(realpath)이 갈려 가드가 false 가 된다. `main()` 이
+안 돌고, stdout 은 비고, exit 는 **0** 이다 — 실패가 성공과 바이트 단위로 구분되지 않으니
+로그에도 남지 않는다. 프로덕션 **39파일**이 이 상태였다.
+
+그 가드를 지키던 게이트도 같이 눈이 멀어 있었다. 스캐너가 `process.argv[1]` 이라는 **철자**
+를 찾는 규칙이라 `import { argv } from 'node:process'` 로 별칭한 파일이 미이전 상태로
+통과했다. 스스로를 "a migrated file scans clean by construction" 이라 적어둔 채로, 자기
+검사 대상을 못 보면서 그린이었다. 철자 규칙을 버리고 바인딩 추적으로 바꿨다.
+
+zip-drift 테스트는 **플레이크가 아니었다.** 커밋-바이트 대조가 파일마다 `git show` 를 띄워
+158파일 = 스폰 158회였고, 테스트 시간의 **99.3%** 가 프로세스 생성이었다. 32코어에서 vitest
+가 워커를 ~31개 열면 스폰 비용이 무너지므로 이 테스트는 **매번** 25,377ms 를 썼다 —
+30,000ms 예산의 **1.18배 마진**이다. 통과한 런도 이미 병들어 있었고, 커버리지나 동시 작업이
+얹히는 순간 넘어갔다. 타임아웃은 건드리지 않았다. 원인이 스폰이므로 스폰을 없앴다:
+마진 **1.18x → 22.1x**.
+
+### Fixed
+- **junction/symlink 경유 direct-run fail-open 폐쇄 (39파일).** `path.resolve(argv[1]) ===
+  fileURLToPath(import.meta.url)` 계열 가드를 `scripts/hooks/_main-entry.js#isMainEntry` 로
+  일괄 통일했다. 정션 프로브 실측(argv[1] != realpath 를 **선조건 단언**해 공허한 PASS 를
+  배제): 전환 전 direct=FIRED / junction=SILENT, 전환 후 둘 다 FIRED. 전환으로 실버그 2건이
+  드러났다 — `scripts/media/watch-ingest.js` 는 `path.resolve` 조차 없는 raw 비교였고
+  (`/watch` 가 링크 경로에서 무출력 exit 0 으로 죽는다), cron 러너 2건은 틸드/8.3 단축명
+  경로에서만 깨져 있었다.
+- **direct-run 가드 스캐너가 자기 대상을 못 보던 구멍.** 철자 매칭 → argv 바인딩 추적으로
+  교체. 별칭 이름이 `argv` 가 아니어도 잡고(`const a = process.argv; a[1]`), `slice` 파생은
+  잡지 않는다 — 파생 배열을 인자로 받는 파일 3건에 오탐을 내지 않기 위해서다. detector 가
+  원리적으로 못 보는 3형태(파라미터·반환으로 세탁된 별칭, 모듈 경계를 넘긴 argv, 계산된
+  인덱스)는 게이트 옆 주석에 적었다.
+- **zip-drift 커밋-바이트 대조: 스폰 158회 → `git cat-file --batch` 1회.** 배치화는 공짜가
+  아니다 — `git cat-file --batch` 는 해석 못 하는 이름에 죽지 않고 `<입력> missing` 을 뱉고
+  exit 0 으로 계속 간다. 그래서 fail-closed 를 명시했다(개행 포함 경로·헤더 파싱 실패·조기
+  종료·회계 불일치·미소비 바이트 전부 throw). 나아가 `git ls-tree` 로 HEAD 실목록과 대조해
+  **원래 있던 fail-open 도 함께** 닫았다: 옛 기준 `compared > 100` 은 158 중 57개가 조용히
+  사라져도 초록이었다.
+- **zip-drift 단언의 앵커를 `files` → HEAD 로 교정.** 직전 커밋이 넣은 회계 단언이 전부
+  `files` 자신에 앵커돼 있어, 수집기가 158 중 157만 돌려주면 기대값도 같이 줄어 **전부
+  통과**했다. 변이 4축 실측에서 이 한 축(1b)만 GREEN 으로 살아남았고, 재변이 후 4축 전부
+  **서로 다른 가드**에 걸려 RED 가 되는 것까지 확인했다.
+- **harness-ablation 직접실행 가드의 한글 경로 fail-open 폐쇄.**
+- **`detectTeamMode` 라벨이 확인하지 않은 것을 주장하던 문제.**
+
+### Changed
+- **배지 escalation 이슈 4종 전부를 자동 정리 대상으로 확장.** 여는 쪽만 있고 닫는 쪽이 없어
+  #107(v4.48.0)·#109(v4.49.0)가 각자의 PR(#106·#108)이 머지된 뒤에도 열려 있었다.
+  stall/merge/push/land 4종을 모두 넣고, 제목 prefix·suffix 와 브랜치 prefix 를 워크플로
+  최상위 `env:` 단일 진실원으로 올렸다(opener 와 closer 가 문자열을 따로 들고 있으면 첫
+  리워딩에서 조용히 매칭이 끊긴다). `land` 만 판정 신호가 다르다 — ff 경로는 PR 을 열지 않고
+  master 를 직접 fast-forward 하므로 REST compare 의 `identical`/`behind` containment 가 유일한
+  흔적이다. 실패 방향은 전부 "안 닫힘" 으로 떨어지는 것을 확인했다(gh 실패, compare 404,
+  `gh issue list --limit 100` 페이지네이션 한계).
+
+  > **유보 — 이것은 "배선됨"이지 "작동함"이 아니다.** 닫기 경로의 **라이브 발화는 0회**다.
+  > 이 리포에서 ff 경로가 실패한 적이 없어 `land` 이슈는 아직 한 번도 열린 적이 없고,
+  > `identical`/`behind` 가 정말 containment 를 뜻하는지도 라이브로 확인되지 않았다. 게이트는
+  > 정적 문자열 스캔이라 스텝이 실제로 실행·성공하는지는 보지 않는다. 실측은 다음 stable
+  > 릴리스 런 로그에서 `Stall-issue reconciliation complete.` 를 확인하는 것뿐이다.
+- **배지 동기화 커밋 제목을 실제 변경분으로 조립.**
+- **`RELEASE.md` 를 실제 강제 규칙에 맞춤.** 자체 3개 목록을 걷어내고 `AGENTS.md` §8(11엔트리
+  /10파일)을 단일 진실원으로 가리킨다 — 부분 사본이 두 문서를 갈라놓았고, 그 페이지를 믿은
+  릴리서가 3파일만 올렸다가 게이트에서 막혔다.
+- **훅 도달성 주석 재측정 + 루트 README 훅 표 유령 행 3건 교정.**
+- **루트 테스트 실행을 워크스페이스 러너로 위임**하고, `artifacts/` 를 로컬 ignore 에 추가.
+
+---
+
 ## [4.49.0] — 2026-08-23
 
 v4.48.0 이후 9커밋. 축은 하나다 — **위임한 작업의 관측 사각을 닫고, 그 판정을 말하는 문구를
