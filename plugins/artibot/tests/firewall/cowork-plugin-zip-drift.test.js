@@ -312,6 +312,23 @@ describe('artibot-cowork.plugin ZIP mirrors the cowork tree', () => {
       .toEqual(files.filter((f) => !inHead.has(f)));
     expect(compared + skipped.length, 'files were neither compared nor skipped').toBe(files.length);
 
+    // ...and every assertion above is anchored to `files`, so none of them can see
+    // `files` ITSELF shrinking: a collectEntries() that quietly returns 157 of 158
+    // shrinks the expectation with it and stays green. Not hypothetical — measured
+    // 2026-08-25 by mutation: `collectEntries().slice(0, -1)` passed every check
+    // above, and passed the older `> 100` floor too. So the last assertion anchors
+    // to HEAD instead: anything committed, allowlisted, and still on disk MUST have
+    // been collected. Requiring it to still be on disk is what keeps a genuine
+    // deletion from false-alarming here — that case is test 3's job, not this one's.
+    const allowedTops = new Set(PACK_ALLOWLIST.map((a) => a.path));
+    const collected = new Set(files);
+    const lost = [...inHead]
+      .filter((n) => allowedTops.has(n.split('/')[0]) || allowedTops.has(n))
+      .filter((n) => !collected.has(n) && existsSync(path.join(COWORK_DIR, n)))
+      .sort();
+    expect(lost, 'committed, allowlisted, still on disk — but collectEntries() no longer returns it')
+      .toEqual([]);
+
     expect(
       mismatched,
       'packed bytes differ from the committed bytes — the archive depends on the packing machine. ' +
