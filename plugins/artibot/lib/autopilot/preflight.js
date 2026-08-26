@@ -17,13 +17,32 @@
  *   - runPreflight(ctx, deps?)
  *   - runIndividualCheck(name, ctx, deps?)
  *
+ * Repository-scoped checks (PRD split-cross-session, Phase 3):
+ *   - `repoConcurrency` — the feature lock is keyed per task, so a second
+ *     autopilot in the SAME repository with a DIFFERENT task was invisible
+ *     to `lockFree` (F3). This check lists live locks whose holder recorded
+ *     the same repo identity. Peers in the same working tree fail (two runs
+ *     mutating one checkout); peers in another worktree of the repo warn
+ *     (isolated trees, shared refs); peers whose feature key is on the
+ *     allowlist `ctx.options.repoConcurrency.allow` pass. Allowlist entries
+ *     are exact keys or `prefix*`. The engine records the identity in every
+ *     lock it acquires, so a live lock WITHOUT one comes from another plugin
+ *     version (or a session outside any repo) — reported as a warn, not
+ *     silently dropped.
+ *   - `peerNotice` — ALWAYS pass. Advisory count of other Claude sessions
+ *     whose cwd overlaps this repo. `ListAgents` is a model-side tool and is
+ *     not reachable from node; the only source is an injected `deps.listAgents`
+ *     seam. With no seam the check passes with `peer-listing-unavailable`,
+ *     which is the normal state in subagent contexts.
+ *
  * @module lib/autopilot/preflight
  */
 
 import { execFileSync, execSync } from 'node:child_process';
 import { statfsSync } from 'node:fs';
 import path from 'node:path';
-import { isLocked as defaultIsLocked } from './lock.js';
+import { getRepoIdentity as defaultGetRepoIdentity } from '../git/repo-identity.js';
+import { isLocked as defaultIsLocked, listLocks as defaultListLocks } from './lock.js';
 import { appendEvent as defaultAppendEvent } from './telemetry.js';
 
 const MIN_DISK_FAIL_BYTES = 500 * 1024 * 1024; // 500 MB
@@ -41,6 +60,8 @@ const ALL_CHECKS = [
   'diskSpace',
   'nodeVersion',
   'goalContractLint',
+  'repoConcurrency',
+  'peerNotice',
 ];
 
 /**
@@ -110,15 +131,54 @@ function checkGitClean(ctx, deps) {
 }
 
 /**
+ * Repo identity for a check. `deps.resolveRepoIdentity` is the hermetic seam;
+ * `runPreflight` wraps it so one battery resolves the identity once (each
+ * resolution is a git subprocess) — see {@link withSharedIdentity}. The memo
+ * lives in that wrapper, not on `ctx`: callers reuse ctx objects, and a memo
+ * keyed on them would pin the first answer across runs.
+ * @param {object} ctx
+ * @param {object} deps
+ * @returns {string|null}
+ */
+function resolveIdentity(ctx, deps) {
+  const resolve = deps.resolveRepoIdentity || defaultGetRepoIdentity;
+  return resolve(ctx.cwd) || null;
+}
+
+/**
+ * Return deps whose `resolveRepoIdentity` answers from a single resolution
+ * for the lifetime of one preflight battery.
+ * @param {object} deps
+ * @returns {object}
+ */
+function withSharedIdentity(deps) {
+  const resolve = deps.resolveRepoIdentity || defaultGetRepoIdentity;
+  let done = false;
+  let cached = null;
+  return {
+    ...deps,
+    resolveRepoIdentity: (cwd) => {
+      if (!done) { cached = resolve(cwd) || null; done = true; }
+      return cached;
+    },
+  };
+}
+
+/**
  * lockFree — wraps lock.isLocked. Held + non-stale = fail. Stale = warn.
+ * Probes the repo-scoped key when the identity resolves (the key the engine
+ * now acquires under); `isLocked` itself also reads the legacy unscoped file
+ * in that mode, so a holder from an older plugin version is still seen.
  */
 function checkLockFree(ctx, deps) {
   try {
     const checker = deps.lockChecker || defaultIsLocked;
-    const state = checker(ctx.featureKey);
+    const identity = resolveIdentity(ctx, deps);
+    const state = identity ? checker(ctx.featureKey, { repoIdentity: identity }) : checker(ctx.featureKey);
     if (!state || state.locked === false) return result('lockFree', 'pass');
-    if (state.stale === true) return result('lockFree', 'warn', 'stale lock detected');
-    return result('lockFree', 'fail', `held by pid=${state.holder?.pid ?? '?'}`);
+    const via = identity && state.scheme === 'legacy' ? ' (legacy-scheme holder)' : '';
+    if (state.stale === true) return result('lockFree', 'warn', `stale lock detected${via}`);
+    return result('lockFree', 'fail', `held by pid=${state.holder?.pid ?? '?'}${via}`);
   } catch (err) {
     return result('lockFree', 'warn', err?.message || 'lock probe failed');
   }
@@ -187,6 +247,131 @@ function checkGoalContractLint(ctx) {
 }
 
 /**
+ * Normalise a path for same-tree comparison. Windows paths are compared
+ * case-insensitively; `null` when the input is not a usable string.
+ * @param {unknown} p
+ * @returns {string|null}
+ */
+function treeKey(p) {
+  if (typeof p !== 'string' || !p) return null;
+  const resolved = path.resolve(p);
+  return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+}
+
+/**
+ * Build the allowlist matcher from `ctx.options.repoConcurrency.allow`.
+ * Entries are exact feature keys or `prefix*`. Non-array → nothing allowed.
+ * @param {object} ctx
+ * @returns {(featureKey: string) => boolean}
+ */
+function buildAllowMatcher(ctx) {
+  const raw = ctx?.options?.repoConcurrency?.allow;
+  const entries = Array.isArray(raw) ? raw.filter((e) => typeof e === 'string' && e) : [];
+  return (featureKey) => entries.some((e) => (
+    e.endsWith('*') ? featureKey.startsWith(e.slice(0, -1)) : featureKey === e
+  ));
+}
+
+/**
+ * Partition same-repo peer locks into the buckets the verdict is built from.
+ * @param {Array<{ holder: object, stale: boolean }>} locks
+ * @param {object} ctx
+ * @param {string} identity
+ * @returns {{ blocked: string[], isolated: string[], allowed: string[], stale: string[], unattributed: number }}
+ */
+function partitionPeers(locks, ctx, identity) {
+  const allowed = buildAllowMatcher(ctx);
+  const ownTree = treeKey(ctx.cwd);
+  const out = { blocked: [], isolated: [], allowed: [], stale: [], unattributed: 0 };
+  for (const entry of locks) {
+    const h = entry?.holder;
+    if (!h || typeof h !== 'object') continue;
+    if (h.sessionId && h.sessionId === ctx.sessionId) continue;
+    if (typeof h.repoIdentity !== 'string' || !h.repoIdentity) {
+      if (!entry.stale) out.unattributed += 1;
+      continue;
+    }
+    if (h.repoIdentity !== identity) continue;
+    const key = typeof h.featureKey === 'string' ? h.featureKey : String(entry.lockKey ?? '?');
+    if (key === ctx.featureKey) continue; // lockFree owns the same-key case
+    if (entry.stale) { out.stale.push(key); continue; }
+    if (allowed(key)) { out.allowed.push(key); continue; }
+    const peerTree = treeKey(h.cwd);
+    // Unknown peer cwd is treated as the same tree: fail-closed.
+    if (peerTree === null || ownTree === null || peerTree === ownTree) out.blocked.push(key);
+    else out.isolated.push(key);
+  }
+  return out;
+}
+
+/**
+ * repoConcurrency — same repository, different task. See module header.
+ * Identity unresolvable (not a repo, git missing) = warn, never fail.
+ */
+function checkRepoConcurrency(ctx, deps) {
+  try {
+    const identity = resolveIdentity(ctx, deps);
+    if (!identity) return result('repoConcurrency', 'warn', 'repo-identity-unavailable');
+    const list = deps.listLocks || defaultListLocks;
+    const peers = partitionPeers(list() || [], ctx, identity);
+    const notes = [];
+    // The engine writes repoIdentity into every lock it can attribute, so a
+    // live lock without one was written by another plugin version (or by a
+    // session outside any repo) and cannot be placed. Reported, not hidden.
+    if (peers.unattributed) notes.push(`${peers.unattributed} legacy-scheme live lock(s) from another plugin version (unattributable to a repo)`);
+    if (peers.stale.length) notes.push(`stale: ${peers.stale.join(', ')}`);
+    if (peers.allowed.length) notes.push(`allowlisted: ${peers.allowed.join(', ')}`);
+    if (peers.blocked.length) {
+      return result('repoConcurrency', 'fail', `same repo+tree: ${peers.blocked.join(', ')}`);
+    }
+    if (peers.isolated.length) {
+      notes.unshift(`same repo, other worktree: ${peers.isolated.join(', ')}`);
+      return result('repoConcurrency', 'warn', notes.join('; '));
+    }
+    if (peers.unattributed || peers.stale.length) return result('repoConcurrency', 'warn', notes.join('; '));
+    return result('repoConcurrency', 'pass', notes.length ? notes.join('; ') : `repo=${identity}; no same-repo peer`);
+  } catch (err) {
+    return result('repoConcurrency', 'warn', err?.message || 'repo concurrency probe failed');
+  }
+}
+
+/**
+ * Does `peerCwd` overlap `ownCwd` — same dir, or one inside the other?
+ * @param {unknown} peerCwd
+ * @param {unknown} ownCwd
+ * @returns {boolean}
+ */
+function cwdOverlaps(peerCwd, ownCwd) {
+  const a = treeKey(peerCwd);
+  const b = treeKey(ownCwd);
+  if (a === null || b === null) return false;
+  if (a === b) return true;
+  return a.startsWith(b + path.sep) || b.startsWith(a + path.sep);
+}
+
+/**
+ * peerNotice — advisory only; every path returns `pass`. Zero side effects:
+ * reads `deps.listAgents()` if injected and nothing else.
+ */
+function checkPeerNotice(ctx, deps) {
+  try {
+    const lister = deps.listAgents;
+    if (typeof lister !== 'function') {
+      const env = deps.env && typeof deps.env === 'object' ? deps.env : process.env;
+      const socket = env.CLAUDE_CODE_MESSAGING_SOCKET ? ' (messaging socket present; ListAgents is main-session only)' : '';
+      return result('peerNotice', 'pass', `peer-listing-unavailable${socket}`);
+    }
+    const agents = lister();
+    const rows = Array.isArray(agents) ? agents : [];
+    const peers = rows.filter((a) => a && typeof a === 'object' && cwdOverlaps(a.cwd, ctx.cwd));
+    const names = peers.map((a) => (typeof a.name === 'string' && a.name) || '?');
+    return result('peerNotice', 'pass', `${peers.length} peer session(s) in this repo${names.length ? `: ${names.join(', ')}` : ''}`);
+  } catch (err) {
+    return result('peerNotice', 'pass', `peer-listing-failed: ${err?.message || 'unknown'}`);
+  }
+}
+
+/**
  * Map check name → runner. Each runner is ≤30 lines and pure-ish (DI'd).
  */
 const CHECK_RUNNERS = {
@@ -195,6 +380,8 @@ const CHECK_RUNNERS = {
   diskSpace: checkDiskSpace,
   nodeVersion: checkNodeVersion,
   goalContractLint: checkGoalContractLint,
+  repoConcurrency: checkRepoConcurrency,
+  peerNotice: checkPeerNotice,
 };
 
 /**
@@ -247,7 +434,8 @@ function emitTelemetry(deps, sessionId, payload) {
  * block, but are surfaced for the user and emitted to telemetry.
  *
  * @param {{ cwd: string, sessionId?: string, featureKey: string, options?: object, goalContract?: object }} ctx
- * @param {{ gitRunner?: Function, statfs?: Function, lockChecker?: Function, telemetry?: Function, nodeVersion?: string }} [deps]
+ * @param {{ gitRunner?: Function, statfs?: Function, lockChecker?: Function, telemetry?: Function, nodeVersion?: string,
+ *   resolveRepoIdentity?: Function, listLocks?: Function, listAgents?: Function, env?: object }} [deps]
  * @returns {{
  *   ok: boolean,
  *   warnings: Array<{ check: string, severity: string, message: string }>,
@@ -257,7 +445,7 @@ function emitTelemetry(deps, sessionId, payload) {
  */
 export function runPreflight(ctx, deps = {}) {
   const safeCtx = ctx && typeof ctx === 'object' ? ctx : {};
-  const safeDeps = deps && typeof deps === 'object' ? deps : {};
+  const safeDeps = withSharedIdentity(deps && typeof deps === 'object' ? deps : {});
   const checks = [];
   const warnings = [];
   const errors = [];

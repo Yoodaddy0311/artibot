@@ -34,6 +34,7 @@ import {
 import { recordPhaseResult, safeAppendLesson } from './engine-state.js';
 import { buildBlockedResult, resolveAutopilotConsent } from './consent-gate.js';
 import { acquireLock, isLocked, releaseLock } from './lock.js';
+import { getRepoIdentity } from '../git/repo-identity.js';
 import { loadAllowList } from './mcp-verifier.js';
 import { buildFastTeamInstruction, demoteFastToStandard, loadFastProfileConfig, planFastExecution, retainFastIntegrationWorktree } from './fast-execution.js';
 import { openPhaseAttempt, reconcileAttemptOnResume } from './phase-attempt.js';
@@ -574,7 +575,7 @@ export function runPhase6Report(state) {
   // Release the feature lock + keep-awake acquired in startAutopilot.
   // Best-effort — mirrors the cleanup pattern already used in abortAutopilot.
   try {
-    if (state.featureKey) releaseLock(state.featureKey, state.sessionId);
+    if (state.featureKey) releaseLock(state.featureKey, state.sessionId, lockOpts(state));
   } catch { /* cleanup non-blocking */ }
   // Finalize cleanup: remove this session's worktree+branch and sweep any
   // orphaned autopilot/* artifacts so a completed run never leaks branches.
@@ -603,6 +604,34 @@ export function runPhase6Report(state) {
  *   sourced from config or env (see lib/autopilot/consent-gate.js).
  * @returns {Promise<{ sessionId: string, prdPath: string, phase: string, instruction: object, paused?: boolean, reason?: string, blocked?: boolean }>}
  */
+/**
+ * Resolve the repo scope the feature lock is keyed under, ONCE at start, and
+ * pin it on `state.lockScope` so every later acquire/isLocked/release uses the
+ * exact same key regardless of the process cwd at that moment (a resume from
+ * another directory of the same repo, or from outside it, must still find the
+ * file this session wrote). `null` — not a git repo, no commits, git missing —
+ * means the legacy unscoped key; that is logged, never silent.
+ * @param {object} state
+ * @returns {{ repoIdentity: string, cwd: string }|null}
+ */
+function resolveLockScope(state) {
+  const cwd = state.options?.projectRoot || process.cwd();
+  const repoIdentity = getRepoIdentity(cwd);
+  return repoIdentity ? { repoIdentity, cwd } : null;
+}
+
+/**
+ * Lock options for a session: the pinned scope, or `{}` for sessions that
+ * have none — including every session persisted before scoping existed,
+ * whose lock file lives at the legacy path and must keep being found there.
+ * @param {object} state
+ * @returns {{ repoIdentity?: string, cwd?: string }}
+ */
+function lockOpts(state) {
+  const scope = state?.lockScope;
+  return scope && typeof scope === 'object' && typeof scope.repoIdentity === 'string' ? scope : {};
+}
+
 export async function startAutopilot({ task, mode, options, sessionId, consentOverride } = {}) {
   if (!task || typeof task !== 'string') {
     throw new TypeError('task is required');
@@ -621,10 +650,20 @@ export async function startAutopilot({ task, mode, options, sessionId, consentOv
   // working on the same feature (worktree/branch collision).
   const featureKey = extractKey(task);
   state.featureKey = featureKey;
+  state.lockScope = resolveLockScope(state);
+  if (!state.lockScope) {
+    tick(state.sessionId, {
+      phase: 'INTAKE',
+      type: 'lock-scope-unresolved',
+      level: 'info',
+      message: `Feature lock is unscoped: no repo identity for ${state.options?.projectRoot || process.cwd()} (not a git repo, no commits, or git unavailable) — legacy key in use`,
+      data: { featureKey },
+    });
+  }
 
   // Attempt to acquire a cross-process feature lock. On collision we pause
   // the new session immediately rather than racing the existing holder.
-  const lockResult = acquireLock(featureKey, state.sessionId);
+  const lockResult = acquireLock(featureKey, state.sessionId, lockOpts(state));
   if (!lockResult.ok) {
     const holderId = lockResult.holder?.sessionId || 'unknown';
     state.phase = 'PAUSED';
@@ -672,7 +711,7 @@ export async function startAutopilot({ task, mode, options, sessionId, consentOv
     // Lock leak guard: if Phase 0 throws (e.g. PRD generation, persist failure)
     // we must release the feature lock before propagating, otherwise the holder
     // appears stuck and blocks future sessions on the same feature.
-    try { releaseLock(featureKey, state.sessionId); } catch { /* best-effort */ }
+    try { releaseLock(featureKey, state.sessionId, lockOpts(state)); } catch { /* best-effort */ }
     releaseSessionKeepAwake(state.sessionId).catch(() => {});
     throw err;
   }
@@ -737,7 +776,7 @@ export async function resumeAutopilot(
   // it (same sessionId) — typical in single-process Claude Code — proceed.
   // Stale lock (dead pid) is auto-reclaimed by acquireLock.
   if (state.featureKey) {
-    const status = isLocked(state.featureKey);
+    const status = isLocked(state.featureKey, lockOpts(state));
     const heldByOther =
       status.locked && status.holder?.sessionId && status.holder.sessionId !== sessionId;
     if (heldByOther) {
@@ -761,7 +800,7 @@ export async function resumeAutopilot(
     }
     // Either unlocked or already ours — refresh acquisition (best-effort).
     if (!status.locked) {
-      try { acquireLock(state.featureKey, sessionId); } catch { /* best-effort */ }
+      try { acquireLock(state.featureKey, sessionId, lockOpts(state)); } catch { /* best-effort */ }
     }
   }
 
@@ -925,7 +964,7 @@ export async function abortAutopilot(sessionId, { graceful = true } = {}) {
   // when non-graceful) and sweep orphaned autopilot/* artifacts.
   reapSessionArtifacts(state, { force: !graceful });
   try {
-    if (state.featureKey) releaseLock(state.featureKey, sessionId);
+    if (state.featureKey) releaseLock(state.featureKey, sessionId, lockOpts(state));
   } catch { /* cleanup non-blocking */ }
   releaseSessionKeepAwake(sessionId).catch(() => {});
   return { sessionId, status: 'ABORTED', reportPath };

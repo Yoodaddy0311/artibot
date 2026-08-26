@@ -14,9 +14,11 @@ import {
   runPhase6Report,
   startAutopilot,
 } from '../../lib/autopilot/index.js';
-import { deleteSession } from '../../lib/autopilot/session-store.js';
-import { getLockPath, releaseLock } from '../../lib/autopilot/lock.js';
-import { existsSync, mkdtempSync, rmSync, unlinkSync } from 'node:fs';
+import { deleteSession, loadSession } from '../../lib/autopilot/session-store.js';
+import { getLockPath, readLock, releaseLock } from '../../lib/autopilot/lock.js';
+import { getRepoIdentity } from '../../lib/git/repo-identity.js';
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { extractKey } from '../../lib/autopilot/memory.js';
@@ -283,5 +285,79 @@ describe('startAutopilot — feature lock collision (D-2)', () => {
 
     // Cleanup the lock for the third session.
     releaseLock(collisionKey, c.sessionId);
+  });
+});
+
+// Every test above runs with projectRoot = a plain tmpdir (no git), so the
+// engine resolves NO repo identity and keys the lock the legacy way — which is
+// exactly why those tests keep passing unchanged. This block is the one place
+// the scoped path is exercised end to end: a temp git repo with a remote.
+describe('startAutopilot — repo-scoped feature lock wiring', () => {
+  let repoRoot = '';
+
+  function git(args) {
+    execFileSync('git', args, { cwd: repoRoot, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true });
+  }
+
+  beforeAll(() => {
+    repoRoot = mkdtempSync(path.join(os.tmpdir(), 'artibot-engine-lockscope-'));
+    git(['init', '-q', '-b', 'main', '.']);
+    git(['config', 'user.email', 'test@example.invalid']);
+    git(['config', 'user.name', 'test']);
+    git(['remote', 'add', 'origin', 'https://github.com/Example/Lock-Scope.git']);
+    writeFileSync(path.join(repoRoot, 'seed.txt'), 'seed\n', 'utf-8');
+    git(['add', 'seed.txt']);
+    git(['commit', '-qm', 'init']);
+  });
+
+  afterAll(() => {
+    try { rmSync(repoRoot, { recursive: true, force: true }); } catch { /* best-effort */ }
+  });
+
+  it('acquires under ${repoIdentity}__${featureKey}, pins the scope on state, and abort releases that same file', async () => {
+    const task = 'lock scope wiring assertion';
+    const featureKey = extractKey(task);
+    const repoIdentity = getRepoIdentity(repoRoot);
+    expect(repoIdentity).toBe('example/lock-scope');
+
+    const r = await startAutopilot({ task, mode: 'plan', options: { projectRoot: repoRoot } });
+    track(r.sessionId);
+    expect(r.paused).not.toBe(true);
+
+    const scopedPath = getLockPath(featureKey, { repoIdentity });
+    expect(r.sessionId && existsSync(scopedPath)).toBe(true);
+    expect(existsSync(getLockPath(featureKey))).toBe(false); // no legacy file written
+    expect(readLock(featureKey, { repoIdentity })).toMatchObject({
+      sessionId: r.sessionId, featureKey, repoIdentity, cwd: repoRoot,
+    });
+    expect(loadSession(r.sessionId).lockScope).toEqual({ repoIdentity, cwd: repoRoot });
+
+    // An unscoped release cannot find it; the engine's own abort path does.
+    expect(releaseLock(featureKey, r.sessionId)).toBe(false);
+    await abortAutopilot(r.sessionId, { graceful: false });
+    expect(existsSync(scopedPath)).toBe(false);
+  });
+
+  it('a second start in the same repo on the same task pauses; a tmpdir start on the same task does not', async () => {
+    const task = 'lock scope collision assertion';
+    const featureKey = extractKey(task);
+    const repoIdentity = getRepoIdentity(repoRoot);
+
+    const a = await startAutopilot({ task, mode: 'plan', options: { projectRoot: repoRoot } });
+    track(a.sessionId);
+    const b = await startAutopilot({ task, mode: 'plan', options: { projectRoot: repoRoot } });
+    track(b.sessionId);
+    // No git under ARTIFACT_ROOT → legacy key → a different file → no collision.
+    const c = await start({ task, mode: 'plan' });
+    track(c.sessionId);
+    try {
+      expect(a.paused).not.toBe(true);
+      expect(b.paused).toBe(true);
+      expect(b.reason).toBe(`lock-held-by-${a.sessionId}`);
+      expect(c.paused).not.toBe(true);
+    } finally {
+      releaseLock(featureKey, a.sessionId, { repoIdentity });
+      releaseLock(featureKey, c.sessionId);
+    }
   });
 });
