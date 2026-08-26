@@ -3,6 +3,7 @@
  * @module scripts/ci/ci-utils
  */
 
+import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { getPluginRoot } from '../../lib/core/platform.js';
@@ -44,18 +45,101 @@ export function isProjectPluginDir(name) {
   return name === 'artibot' || name.startsWith('artibot-') || name === '_shared';
 }
 
+/** @type {Map<string, Set<string>|null>} */
+const trackedNameCache = new Map();
+
+/**
+ * Top-level directory names under `base` that git actually tracks.
+ *
+ * `readdirSync` answers "what is on disk", which is a different question from
+ * "what is part of this project". The two diverge whenever a directory appears
+ * that git never accepted: a nested worktree copy, a junction, a stale checkout
+ * left by a killed run. Measured 2026-08-26 in this repo, seven such copies sat
+ * under `plugins/artibot/runtime/autopilot/worktrees/` while `git worktree
+ * list` reported only the main tree.
+ *
+ * One `git ls-files` per directory, memoized — every gate calls
+ * {@link listPluginRoots}, and re-spawning per call is how a cheap check turns
+ * into the 158-spawn problem.
+ *
+ * @param {string} base - Directory to enumerate tracked children of.
+ * @returns {Set<string>|null} Tracked top-level names, or `null` when `base` is
+ *   not inside a git work tree (an installed plugin tree, a tarball).
+ */
+function gitTrackedNames(base) {
+  if (trackedNameCache.has(base)) return trackedNameCache.get(base);
+  /** @type {Set<string>|null} */
+  let result;
+  try {
+    const out = execFileSync('git', ['ls-files', '-z'], {
+      cwd: base,
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    const names = new Set();
+    for (const entry of out.split('\0')) {
+      if (!entry) continue;
+      const [head] = entry.split('/');
+      if (head) names.add(head);
+    }
+    result = names;
+  } catch {
+    result = null;
+  }
+  trackedNameCache.set(base, result);
+  return result;
+}
+
+/**
+ * Reset the tracked-name memo. Test helper, not public contract.
+ *
+ * @returns {void}
+ */
+export function _resetTrackedNameCache() {
+  trackedNameCache.clear();
+}
+
 /**
  * Enumerate the project's plugin roots, sorted for deterministic output.
  *
+ * Anchored to git rather than to the filesystem. {@link isProjectPluginDir} is
+ * a *name* rule, so anything named `artibot-<x>` on disk was previously adopted
+ * as a plugin root — including a junction or a nested repo copy, which then
+ * contributed a second set of every skill and doc to whichever gate asked.
+ * The two observed failures, both reproduced in
+ * `tests/firewall/gate-scan-anchoring.test.js`:
+ *
+ *   1. a live link named `artibot-*` was enumerated as a real root, and
+ *   2. a dangling one threw ENOENT out of the unguarded `statSync` below,
+ *      taking down the whole gate rather than failing it.
+ *
+ * Outside a work tree there is nothing to anchor to, so the name rule stands
+ * alone (see {@link gitTrackedNames}). That is a widening, not a fail-open: the
+ * per-root floors in {@link assertScanFloors} still have to be met, and an
+ * extra root trips the "no entry in MIN_DOC_FILES" branch rather than passing
+ * quietly.
+ *
+ * @param {object} [options]
+ * @param {Set<string>|null} [options.trackedNames] - Override the tracked-name
+ *   set instead of consulting git. Injected by tests so a fixture needs no
+ *   `git init`; the same shape the resolver returns.
  * @returns {string[]} Absolute paths of project plugin roots.
  */
-export function listPluginRoots() {
+export function listPluginRoots(options = {}) {
   const base = getPluginsDir();
   if (!existsSync(base)) return [];
+  const tracked = options.trackedNames !== undefined
+    ? options.trackedNames
+    : gitTrackedNames(base);
   return readdirSync(base)
     .filter((name) => isProjectPluginDir(name))
+    .filter((name) => tracked === null || tracked.has(name))
     .map((name) => path.join(base, name))
-    .filter((abs) => statSync(abs).isDirectory())
+    .filter((abs) => {
+      // A dangling link survives readdirSync and throws here. Dropping it is
+      // right either way: it resolves to nothing, so it holds no files to scan.
+      try { return statSync(abs).isDirectory(); } catch { return false; }
+    })
     .sort();
 }
 

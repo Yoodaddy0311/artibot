@@ -106,11 +106,13 @@ export function qualify(rootName, entityName) {
  * {@link assertEntityFloors} to prove the expected roots were present.
  *
  * @param {'skills'|'commands'|'agents'} kind - Entity directory name.
+ * @param {object} [options] - Forwarded to {@link listPluginRoots}; `trackedNames`
+ *   lets a fixture stand in for git. See `tests/firewall/gate-scan-anchoring.test.js`.
  * @returns {Array<{name: string, root: string, dir: string}>} Sorted roots.
  */
-export function listEntityRoots(kind) {
+export function listEntityRoots(kind, options) {
   const out = [];
-  for (const root of listPluginRoots()) {
+  for (const root of listPluginRoots(options)) {
     const dir = path.join(root, kind);
     if (!existsSync(dir) || !statSync(dir).isDirectory()) continue;
     out.push({ name: path.basename(root), root, dir });
@@ -121,13 +123,14 @@ export function listEntityRoots(kind) {
 /**
  * Enumerate `skills/<name>/SKILL.md` across every scanned root.
  *
+ * @param {object} [options] - Forwarded to {@link listEntityRoots}.
  * @returns {Array<{root: string, rootName: string, name: string, key: string, file: string}>}
  *   `name` is the bare directory name; `key` is the {@link qualify}-ed name used
  *   by ratchet baselines and report output.
  */
-export function listAllSkillFiles() {
+export function listAllSkillFiles(options) {
   const out = [];
-  for (const { name: rootName, dir } of listEntityRoots('skills')) {
+  for (const { name: rootName, dir } of listEntityRoots('skills', options)) {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue;
       const file = path.join(dir, entry.name, 'SKILL.md');
