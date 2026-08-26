@@ -138,7 +138,20 @@ export function listPluginRoots(options = {}) {
     .filter((abs) => {
       // A dangling link survives readdirSync and throws here. Dropping it is
       // right either way: it resolves to nothing, so it holds no files to scan.
-      try { return statSync(abs).isDirectory(); } catch { return false; }
+      //
+      // Only those two codes. Swallowing every error would turn a root that is
+      // merely unreadable (EACCES, ELOOP) into one that was never there, and a
+      // root absent from the enumeration is absent from `counts` — so a *new*
+      // root, one MIN_DOC_FILES has no entry for yet, would clear both loops of
+      // assertScanFloors and pass in silence. Before this guard existed such a
+      // root crashed the gate, which is worse output but louder. Rethrowing
+      // keeps the loud half for everything that is not a dead link.
+      try {
+        return statSync(abs).isDirectory();
+      } catch (err) {
+        if (err.code === 'ENOENT' || err.code === 'ENOTDIR') return false;
+        throw err;
+      }
     })
     .sort();
 }

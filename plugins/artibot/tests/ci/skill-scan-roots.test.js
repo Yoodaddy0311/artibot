@@ -20,6 +20,16 @@
  * root — which makes the injected set the *only* thing that can exclude it,
  * and therefore makes its exclusion proof of delivery.
  *
+ * ── Process spawns ─────────────────────────────────────────────────────────
+ * The (a) cases resolve through git, so they are not spawn-free, and the count
+ * is stated rather than left to be discovered: `GIT_TRACE` to a file, measured
+ * 2026-08-26, records **4 `git ls-files` invocations across the 4 no-arg
+ * cases — exactly one each**. `gitTrackedNames` memoizes per directory, so
+ * repeated calls inside one test are free; `afterEach` clears that memo, which
+ * is what puts the boundary at one per test rather than one per file. The (b)
+ * cases inject instead of resolving and add none. Nothing here runs a gate —
+ * see `tests/firewall/gate-scan-anchoring.test.js` for why that line matters.
+ *
  * What this file does NOT cover: the gates themselves (they are never run
  * here — see `tests/firewall/gate-scan-anchoring.test.js` for why), the
  * contents of a root once enumerated, and `assertEntityFloors`' own logic

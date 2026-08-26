@@ -7,22 +7,31 @@
  * `statSync`. So "is this a plugin root" was answered by what the filesystem
  * happened to be showing, and anything wearing the right name was believed.
  *
- * Two artifacts that actually occur here wear it:
+ * Two failure modes follow, and they need different guards:
  *
- *   1. A nested repo copy. Measured 2026-08-26: seven directories under
- *      `plugins/artibot/runtime/autopilot/worktrees/` while `git worktree list`
- *      reported only the main tree — orphaned trees no command was tracking.
- *      One placed a level higher, or a junction pointing at one, is adopted as
- *      a plugin root and contributes a second copy of every skill and doc.
- *   2. A dangling link. `plugins/artibot/UsersHeechangLee…escratchpad/jx`
- *      exists in this working tree right now and points inside its own parent
- *      at a target that does not exist. `readdirSync` lists it; `statSync`
- *      throws ENOENT. An unguarded enumerator does not fail the gate — it
- *      crashes it, which is a different and worse outcome.
+ *   1. A nested repo copy is *adopted*. Measured 2026-08-26: seven directories
+ *      under `plugins/artibot/runtime/autopilot/worktrees/` while `git worktree
+ *      list` reported only the main tree — orphaned trees no command was
+ *      tracking. One placed directly under `plugins/`, or a junction pointing
+ *      at one, matches the name rule and contributes a second copy of every
+ *      skill and doc. The git anchor is what excludes it.
+ *   2. A dangling link *crashes* the enumerator. `readdirSync` lists it and
+ *      `statSync` throws ENOENT, so an unguarded scan does not fail the gate —
+ *      it takes the gate down, which is a different and worse outcome.
  *
- * Both are invisible to git: `.gitignore:59 *AppDataLocalTemp*` and
- * `runtime/autopilot/` keep them untracked, so `git ls-files` is exactly the
- * anchor that separates "on disk" from "part of this project".
+ * On (2), be precise about what the working tree does and does not demonstrate.
+ * `plugins/artibot/UsersHeechangLee…escratchpad/jx` is a real dangling link
+ * here — it points inside its own parent at a target that does not exist — but
+ * it is NOT an instance of this function's crash path: it is named `jx`, which
+ * the name rule rejects, and it sits inside `plugins/artibot/` rather than
+ * beside it, so `listPluginRoots` never enumerates it at all. It is evidence
+ * that links of this kind occur in this tree, nothing more. The crash path is
+ * reproduced below with a planted link that does match the name rule.
+ *
+ * Both artifacts are invisible to git — the REPO ROOT `.gitignore` (not
+ * `plugins/artibot/.gitignore`, which carries no such rule) ignores them at
+ * `:59 *AppDataLocalTemp*` and `runtime/autopilot/`. That is what makes
+ * `git ls-files` the anchor separating "on disk" from "part of this project".
  *
  * ── Why this file runs no gate ──────────────────────────────────────────────
  * It imports enumeration functions and nothing else. Running the gates instead
