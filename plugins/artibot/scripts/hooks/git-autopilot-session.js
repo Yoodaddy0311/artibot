@@ -16,6 +16,7 @@ import { createErrorHandler } from '../../lib/core/hook-utils.js';
 import { autoResolveAll } from './git-autopilot-merge.js';
 import { isAutopilotAllowed } from '../../lib/autopilot/repo-identity.js';
 import { resolveBaseBranch } from '../../lib/git/resolve-base.js';
+import { gitPath } from '../../lib/git/git-dir.js';
 import { isMainEntry } from './_main-entry.js';
 
 // Throttle: skip `git pull` if a successful pull happened within this window.
@@ -71,7 +72,7 @@ function getRepoRoot() {
  * @returns {object|null} Parsed config or null if not found / disabled
  */
 function loadConfig(repoRoot) {
-  const configPath = path.join(repoRoot, '.git', 'autopilot.json');
+  const configPath = gitPath(repoRoot, 'autopilot.json');
   if (!existsSync(configPath)) return null;
   try {
     const config = JSON.parse(readFileSync(configPath, 'utf-8'));
@@ -117,7 +118,7 @@ function gitPull(cwd) {
  */
 function isPullThrottled(repoRoot) {
   try {
-    const configPath = path.join(repoRoot, '.git', 'autopilot.json');
+    const configPath = gitPath(repoRoot, 'autopilot.json');
     const config = JSON.parse(readFileSync(configPath, 'utf-8'));
     if (!config.lastPullAt) return false;
     const age = Date.now() - new Date(config.lastPullAt).getTime();
@@ -135,7 +136,7 @@ function isPullThrottled(repoRoot) {
  */
 function recordPullTimestamp(repoRoot) {
   try {
-    const configPath = path.join(repoRoot, '.git', 'autopilot.json');
+    const configPath = gitPath(repoRoot, 'autopilot.json');
     const config = JSON.parse(readFileSync(configPath, 'utf-8'));
     config.lastPullAt = new Date().toISOString();
     writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');

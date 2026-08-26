@@ -14,6 +14,7 @@ import path from 'node:path';
 import { parseJSON, readStdin, writeStdout } from '../utils/index.js';
 import { createErrorHandler, extractFilePath, extractToolName } from '../../lib/core/hook-utils.js';
 import { isAutopilotAllowed } from '../../lib/autopilot/repo-identity.js';
+import { gitPath } from '../../lib/git/git-dir.js';
 import { isMainEntry } from './_main-entry.js';
 
 // -------------------------------------------------------------------------
@@ -48,7 +49,7 @@ function getRepoRoot() {
  * @returns {object|null}
  */
 function loadConfig(repoRoot) {
-  const configPath = path.join(repoRoot, '.git', 'autopilot.json');
+  const configPath = gitPath(repoRoot, 'autopilot.json');
   if (!existsSync(configPath)) return null;
   try {
     const config = JSON.parse(readFileSync(configPath, 'utf-8'));

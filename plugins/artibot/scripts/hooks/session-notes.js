@@ -22,6 +22,7 @@ import path from 'node:path';
 import { parseJSON, readStdin } from '../utils/index.js';
 import { createErrorHandler } from '../../lib/core/hook-utils.js';
 import { isAutopilotAllowed } from '../../lib/autopilot/repo-identity.js';
+import { gitPath } from '../../lib/git/git-dir.js';
 import {
   buildAppendBlock,
   fileHeader,
@@ -246,7 +247,7 @@ export async function main() {
 
   const notesDir = path.join(repoRoot, '.artibot');
   const notesFile = path.join(notesDir, 'SESSION-NOTES.md');
-  const stateFile = path.join(repoRoot, '.git', 'session-notes-state.json');
+  const stateFile = gitPath(repoRoot, 'session-notes-state.json');
 
   const state = loadState(stateFile);
   const commits = collectCommits(repoRoot, state.lastSeenSha);

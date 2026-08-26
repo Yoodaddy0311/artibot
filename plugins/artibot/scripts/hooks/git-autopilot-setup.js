@@ -29,6 +29,7 @@ import path from 'node:path';
 import { atomicWriteSync } from '../utils/index.js';
 import { logHookError } from '../../lib/core/hook-utils.js';
 import { isAutopilotAllowed } from '../../lib/autopilot/repo-identity.js';
+import { getGitDir } from '../../lib/git/git-dir.js';
 import { isMainEntry } from './_main-entry.js';
 
 // -------------------------------------------------------------------------
@@ -111,22 +112,6 @@ function getRepoRoot() {
 }
 
 /**
- * Resolve the per-worktree git directory. In a worktree this is
- * `<main>/.git/worktrees/<name>/`, in a normal repo this is `<root>/.git/`.
- * Always a real directory we can safely write to (unlike the worktree's
- * top-level `.git` which is a pointer file).
- * @returns {string} Absolute path to git dir
- */
-function getGitDir() {
-  const out = execSync('git rev-parse --absolute-git-dir', {
-    encoding: 'utf-8',
-    stdio: ['ignore', 'pipe', 'ignore'],
-    windowsHide: true,
-  }).trim();
-  return path.resolve(out);
-}
-
-/**
  * Read existing autopilot config, merging with defaults.
  * @param {string} configPath
  * @returns {object}
@@ -176,7 +161,13 @@ export async function main(argv) {
   let gitDir;
   try {
     repoRoot = getRepoRoot();
-    gitDir = getGitDir();
+    gitDir = getGitDir(repoRoot);
+    // The shared resolver reports failure with null instead of throwing, so the
+    // `catch` below no longer covers a failed git-dir lookup. `getRepoRoot()`
+    // still throws first outside a repository, which is how the ordinary
+    // not-a-repo case gets here; this guard covers the narrow window where the
+    // root resolves but the git dir does not. Same outcome either way.
+    if (!gitDir) return 'no-repo';
   } catch {
     // Not in a git repo — silent no-op (hook fires on every SessionStart,
     // so shell-started-outside-a-repo cases should not log errors).

@@ -10,11 +10,12 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import path, { dirname } from 'node:path';
+import { dirname } from 'node:path';
 import { parseJSON, readStdin, resolveConfigPath } from '../utils/index.js';
 import { createErrorHandler } from '../../lib/core/hook-utils.js';
 import { isMergeBaseFresh, resolveBaseBranch } from '../../lib/git/resolve-base.js';
 import { isAutopilotAllowed } from '../../lib/autopilot/repo-identity.js';
+import { gitPath } from '../../lib/git/git-dir.js';
 import { isMainEntry } from './_main-entry.js';
 
 /**
@@ -132,7 +133,7 @@ function detectPhaseTransition(hookData, repoRoot) {
     return { transitioned: false, completedPhase: null };
   }
 
-  const statePath = path.join(repoRoot, '.git', 'autopilot-state.json');
+  const statePath = gitPath(repoRoot, 'autopilot-state.json');
   let lastPhase = null;
 
   try {
@@ -160,7 +161,7 @@ function detectPhaseTransition(hookData, repoRoot) {
  * @param {string|null} phase
  */
 function savePhaseState(repoRoot, phase) {
-  const statePath = path.join(repoRoot, '.git', 'autopilot-state.json');
+  const statePath = gitPath(repoRoot, 'autopilot-state.json');
   const state = { lastPhase: phase, updatedAt: new Date().toISOString() };
   try {
     mkdirSync(dirname(statePath), { recursive: true });
@@ -319,7 +320,7 @@ function getRepoRoot() {
  * @returns {object|null}
  */
 function loadConfig(repoRoot) {
-  const configPath = path.join(repoRoot, '.git', 'autopilot.json');
+  const configPath = gitPath(repoRoot, 'autopilot.json');
   if (!existsSync(configPath)) return null;
   try {
     const config = JSON.parse(readFileSync(configPath, 'utf-8'));

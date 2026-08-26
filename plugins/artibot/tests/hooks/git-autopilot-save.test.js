@@ -505,6 +505,11 @@ describe('git-autopilot-save', () => {
       if (cmd === 'git status --porcelain') return ' M file.js\n';
       if (cmd === 'git stash create') return 'deadbeefcafe\n';
       if (cmd.startsWith('git stash store')) return '';
+      // Cleanup pins each checkpoint to the commit its index resolves to and
+      // re-checks that SHA before dropping — `refs/stash` is shared across
+      // worktrees, so an index alone is a position, not an identity. A stable
+      // answer here means "nothing moved", which is this scenario.
+      if (cmd.startsWith('git rev-parse stash@{')) return 'deadbeefcafe\n';
       if (cmd === 'git stash list') {
         // Simulate 12 artibot checkpoints (max default is 10, so 2 should be dropped).
         const lines = [];

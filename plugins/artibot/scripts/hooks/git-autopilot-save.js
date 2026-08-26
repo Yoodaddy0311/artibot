@@ -9,10 +9,10 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import { execSync } from 'node:child_process';
-import path from 'node:path';
 import { atomicWriteSync, parseJSON, readStdin, resolveConfigPath } from '../utils/index.js';
 import { createErrorHandler } from '../../lib/core/hook-utils.js';
 import { isAutopilotAllowed } from '../../lib/autopilot/repo-identity.js';
+import { gitPath } from '../../lib/git/git-dir.js';
 import { isMainEntry } from './_main-entry.js';
 
 /**
@@ -75,7 +75,7 @@ function getRepoRoot() {
  * @returns {object|null}
  */
 function loadConfig(repoRoot) {
-  const configPath = path.join(repoRoot, '.git', 'autopilot.json');
+  const configPath = gitPath(repoRoot, 'autopilot.json');
   if (!existsSync(configPath)) return null;
   try {
     const config = JSON.parse(readFileSync(configPath, 'utf-8'));
@@ -91,7 +91,7 @@ function loadConfig(repoRoot) {
  * @returns {{ lastWipAt: string|null }}
  */
 function loadState(repoRoot) {
-  const statePath = path.join(repoRoot, '.git', 'autopilot-state.json');
+  const statePath = gitPath(repoRoot, 'autopilot-state.json');
   if (!existsSync(statePath)) return { lastWipAt: null };
   try {
     return JSON.parse(readFileSync(statePath, 'utf-8'));
@@ -106,7 +106,7 @@ function loadState(repoRoot) {
  * @param {object} state
  */
 function saveState(repoRoot, state) {
-  const statePath = path.join(repoRoot, '.git', 'autopilot-state.json');
+  const statePath = gitPath(repoRoot, 'autopilot-state.json');
   atomicWriteSync(statePath, state);
 }
 
@@ -265,13 +265,61 @@ function createStashCheckpoint(cwd, opts = {}) {
 }
 
 /**
+ * Resolve the commit a stash index currently points at.
+ *
+ * Uses `execSync` like every other git call in this module: `idx` is a number
+ * parsed out of `git stash list` output, so there is nothing to inject, and the
+ * module's tests drive it through a single `execSync` seam.
+ *
+ * @param {string} cwd
+ * @param {number} idx
+ * @returns {string|null} SHA, or null when the index no longer resolves.
+ */
+function stashShaAt(cwd, idx) {
+  try {
+    const out = execSync(`git rev-parse stash@{${idx}}`, {
+      cwd,
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: 2000,
+      windowsHide: true,
+    });
+    return String(out).trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Remove old artibot checkpoint stashes beyond the retention limit.
  * Keeps the most recent entries and drops the oldest.
  *
+ * `refs/stash` is shared across every worktree of a repository — measured
+ * 2026-08-26: a stash pushed from a linked worktree renumbers `stash@{n}` for
+ * the main checkout too, so the entry that was `stash@{0}` at list time becomes
+ * `stash@{1}` mid-loop. An index captured from `git stash list` is therefore a
+ * position, not an identity, and dropping by that stale position destroys
+ * somebody else's stash. Every drop re-resolves the index and aborts the whole
+ * cleanup on the first mismatch: falling behind on retention is recoverable,
+ * dropping the wrong stash is not.
+ *
+ * Exported for `tests/firewall/stash-ref-isolation.test.js`: the shared-ref
+ * hazard cannot be exercised through `main()` without driving a whole hook
+ * event, and a test that re-implemented this loop would be testing its own copy.
+ *
+ * `opts.stashShaAt` is a seam, not a feature: the guard only fires when the
+ * stash ref moves BETWEEN the collection pass and the drop pass of one call,
+ * and no test can wedge a real `git stash push` into that window. Injecting the
+ * resolver lets a test answer one SHA while pinning and a different one at
+ * re-check, which is exactly what a concurrent push looks like from in here.
+ * Production passes nothing and runs the real resolver.
+ *
  * @param {string} cwd
  * @param {number} maxStashes maximum checkpoint stashes to retain (default 10)
+ * @param {{ stashShaAt?: (cwd: string, idx: number) => string|null }} [opts]
  */
-function cleanupOldStashes(cwd, maxStashes = 10) {
+export function cleanupOldStashes(cwd, maxStashes = 10, opts = {}) {
+  const resolveSha = opts.stashShaAt ?? stashShaAt;
   try {
     const raw = execSync('git stash list', {
       cwd,
@@ -281,19 +329,24 @@ function cleanupOldStashes(cwd, maxStashes = 10) {
       windowsHide: true,
     });
     const lines = raw.trim().split('\n').filter(Boolean);
-    // Collect indices of artibot checkpoint entries (in reflog order, 0 = newest).
+    // Collect indices of artibot checkpoint entries (in reflog order, 0 = newest),
+    // pinning each to the commit it resolved to at list time.
     const checkpoints = [];
     for (const line of lines) {
       if (!line.includes('artibot-checkpoint-')) continue;
       const match = line.match(/^stash@\{(\d+)\}/);
-      if (match) checkpoints.push(Number(match[1]));
+      if (!match) continue;
+      const idx = Number(match[1]);
+      const sha = resolveSha(cwd, idx);
+      if (sha) checkpoints.push({ idx, sha });
     }
     if (checkpoints.length <= maxStashes) return;
 
     // Drop oldest first. Dropping shifts indices, so we process from highest
     // index to lowest to avoid invalidation.
-    const toDrop = checkpoints.slice(maxStashes).sort((a, b) => b - a);
-    for (const idx of toDrop) {
+    const toDrop = checkpoints.slice(maxStashes).sort((a, b) => b.idx - a.idx);
+    for (const { idx, sha } of toDrop) {
+      if (resolveSha(cwd, idx) !== sha) return;
       execSync(`git stash drop stash@{${idx}}`, {
         cwd,
         stdio: 'ignore',
