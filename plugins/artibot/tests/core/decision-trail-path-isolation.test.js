@@ -20,7 +20,7 @@
  * plugin directory: `assertNotRealRoot` fails the test if it ever does.
  */
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs/promises';
 import fsSync from 'node:fs';
 import os from 'node:os';
@@ -28,6 +28,37 @@ import path from 'node:path';
 import * as trail from '../../lib/core/decision-trail.js';
 import * as router from '../../lib/cognitive/router.js';
 import { getPluginRoot } from '../../lib/core/platform.js';
+
+/**
+ * Scenario B needs the root to move *while `recordDecision` is suspended*, and
+ * a `setTimeout(..., 0)` cannot promise that. It only wins the race because
+ * `ensureDir` happens to await a threadpool round-trip — a property of another
+ * module, not part of any contract. Measured 2026-08-26: give `ensureDir` a
+ * synchronous fast path (`if (existsSync(dir)) return;`) and a re-resolving
+ * `recordDecision` — the exact defect this file guards — passes scenario B 8
+ * times out of 8. No assertion changed; the flip just stopped landing in the
+ * window.
+ *
+ * So the flip hangs off `ensureDir` itself, the one call whose invocation sits
+ * inside the suspension by construction, and scenario B asserts it fired.
+ *
+ * `vi.mock` is hoisted file-wide, so the hook is nullable and stays null for
+ * scenarios A and C, where `ensureDir` passes straight through to the real one.
+ * `vi.hoisted` is what lets the factory reach the holder: the factory is lifted
+ * above ordinary top-level declarations and cannot see them.
+ */
+const fileHook = vi.hoisted(() => ({ onEnsureDir: null }));
+
+vi.mock('../../lib/core/file.js', async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    ensureDir: async (dirPath) => {
+      fileHook.onEnsureDir?.();
+      return actual.ensureDir(dirPath);
+    },
+  };
+});
 
 const ORIGINAL_PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT;
 const REAL_PLUGIN_ROOT = (() => {
@@ -129,9 +160,20 @@ describe('decision-trail path isolation', () => {
       trail._resetDecisionTrailCache();
 
       // Flip the root while recordDecision is suspended on `await ensureDir`.
-      const flip = setTimeout(() => { process.env.CLAUDE_PLUGIN_ROOT = decoy; }, 0);
+      // Hanging this off the call itself puts the flip after the read and
+      // before the write, with no dependence on how long the mkdir takes.
+      let ensureDirCalls = 0;
+      fileHook.onEnsureDir = () => {
+        ensureDirCalls += 1;
+        process.env.CLAUDE_PLUGIN_ROOT = decoy;
+      };
+
       const result = await trail.recordDecision({ subsystem: 'probe-b', action: 'y' });
-      clearTimeout(flip);
+
+      // Without these two, the scenario name is an unbacked claim: the three
+      // assertions below also hold when the root never moved at all.
+      expect(ensureDirCalls).toBe(1);
+      expect(process.env.CLAUDE_PLUGIN_ROOT).toBe(decoy);
 
       expect(result).not.toBeNull();
 
@@ -141,6 +183,9 @@ describe('decision-trail path isolation', () => {
       // The decoy must be untouched — neither appended to nor replaced.
       expect(readEntries(decoy).map((e) => e.subsystem)).toEqual(['decoySeed']);
     } finally {
+      // The mock is file-wide; leaving the hook set would flip the root under
+      // whichever scenario runs next.
+      fileHook.onEnsureDir = null;
       await fs.rm(sandbox, { recursive: true, force: true });
       await fs.rm(decoy, { recursive: true, force: true });
     }
