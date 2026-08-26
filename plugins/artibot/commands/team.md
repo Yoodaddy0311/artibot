@@ -136,15 +136,40 @@ The orchestrator MUST:
 ### Phase 2: TEAM SETUP (Leader only)
 
 생성할 팀이 없다. 세션에는 **암묵적 단일 팀**이 하나 있을 뿐이라, 여기서 정하는 건
-팀이 아니라 **런 슬러그**다. `team-{task-slug}`를 팀원 이름 접두사로 고정해 이번
-런의 팀원을 다른 런과 구분한다.
+팀이 아니라 **런 슬러그**다. `team-{task-slug}-{sid}`를 팀원 이름 접두사로 고정해
+이번 런의 팀원을 다른 런과, 그리고 **같은 리포를 도는 다른 세션**과 구분한다.
+
+#### `{sid}` — 세션 판별자 (생략 불가)
+
+`{task-slug}` 는 작업 설명에서 결정적으로 나온다. 그래서 두 세션이 같은 리포에서 같은
+커맨드를 돌리면 **같은 팀원 이름이 만들어진다.** `SendMessage` 는 이 충돌을 조용히
+해소한다 — *"if the same name also names an in-process agent, the bare name always
+wins"*. 즉 교차 세션 지시가 **오류 없이** 자기 세션 팀원에게 배달되고, 오배달은 사후에
+탐지되지 않는다. `{sid}` 는 그 이름 충돌 자체를 없앤다.
+
+`{sid}` 값을 고르는 법:
+
+- **정본 소스는 훅 페이로드의 `session_id`** 를 앞 **6자**로 줄인 값이다. 선례:
+  `scripts/hooks/pre-write-checkpoint.js#resolveSessionId` — `hookData?.session_id` 가
+  1순위이고 env `CLAUDE_SESSION_ID` 는 폴백이다. 그 훅은 payload 값 없이 돌던 동안
+  모든 체크포인트가 `'default'` 로 뭉쳐 세션 간에 충돌했다.
+- 리더(모델)는 훅 stdin 을 직접 읽지 않는다. `ListAgents` 결과에서 자기 세션 행에 붙은
+  `[ref]` 6자 — 예컨대 `artibot-a1 [afd778]` 의 `afd778` — 를 쓰거나, 세션 ID 를 알고
+  있으면 그 앞 6자를 쓴다. 둘 중 무엇이든 **한 런 안에서는 고정**한다.
+- **`machineId` 를 판별자로 쓰지 마라.** `lib/autopilot/cross-machine.js#machineId` 는
+  `{hostname}_{username}` 이라 **같은 PC 의 두 세션이 같은 값**을 낸다. 그것이 가르는
+  것은 기계이지 세션이 아니므로 이 충돌에는 아무 효력이 없다.
 
 Spawn ALL teammates in a single message (parallel):
 ```
-Agent(subagent_type="artibot:{agent-type}", name="team-{task-slug}-{role}",
+Agent(subagent_type="artibot:{agent-type}", name="team-{task-slug}-{sid}-{role}",
       /* model: model-policy 해석 — 구현/검토 역할 모두 frontier 티어 (fable 마이그레이션 이후) */
       prompt="[DEV Protocol 준수]\n\n작업:\n{specific work unit}\n\n{보고 계약}")
 ```
+
+아래 단계들의 스폰 예시에 나오는 `team-*-…` 에서 `*` 는 **여기서 고정한 런 접두사**
+(`{task-slug}-{sid}`) 를 가리킨다 — 별표 자리에도 `{sid}` 가 들어간다. 판별자가
+빠진 이름을 그 예시에서 그대로 베끼지 마라.
 
 `name`이 있어야 `SendMessage(to="{name}")`로 주소가 잡힌다. 역할이 자명해 보여도
 이름 없이 스폰하지 마라 — 이름 없는 팀원에게는 중간 지시를 보낼 수 없다.
