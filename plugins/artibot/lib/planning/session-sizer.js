@@ -279,8 +279,16 @@ export function estimateFootprint(tasks, opts = {}) {
  *
  * - hours < minHours → band 'quick',   recommendation 'expand'.
  * - minHours..maxHours → band 'session', recommendation 'ok'.
- * - hours > maxHours → band 'epic',     recommendation 'split'
- *   (splitInto = ceil(hours / maxHours)).
+ * - hours > maxHours → band 'epic',     recommendation 'sequence'
+ *   (sequenceInto = ceil(hours / maxHours)).
+ *
+ * The label is `'sequence'`, not `'split'`, on purpose: this means "run N
+ * autopilot sessions one after another", which is a different operation from
+ * the `/split` command's "fan out into N concurrent worktree windows". Both
+ * decompose a goal, so a shared word would put two referents in one domain —
+ * the failure mode `docs/ORCHESTRATION-GLOSSARY.md` already paid for with
+ * "workflow". User-facing copy still says 분할/split; only the internal label
+ * is disambiguated.
  *
  * @param {number} hours
  * @param {object} [opts]
@@ -289,7 +297,7 @@ export function estimateFootprint(tasks, opts = {}) {
  * @param {'quick'|'session'|'epic'} [opts.size] - named preset (`--size`).
  *   Absent/empty → default window. Unknown non-empty name throws.
  * @returns {{ band: 'quick'|'session'|'epic', target: { minHours: number,
- *   maxHours: number }, recommendation: 'expand'|'ok'|'split', splitInto: number }}
+ *   maxHours: number }, recommendation: 'expand'|'ok'|'sequence', sequenceInto: number }}
  * @throws {TypeError} on an unknown `opts.size`.
  */
 export function classifySize(hours, opts = {}) {
@@ -299,13 +307,13 @@ export function classifySize(hours, opts = {}) {
   const target = Object.freeze({ minHours, maxHours });
 
   if (h < minHours) {
-    return { band: 'quick', target, recommendation: 'expand', splitInto: 1 };
+    return { band: 'quick', target, recommendation: 'expand', sequenceInto: 1 };
   }
   if (h > maxHours) {
-    const splitInto = Math.ceil(h / maxHours);
-    return { band: 'epic', target, recommendation: 'split', splitInto };
+    const sequenceInto = Math.ceil(h / maxHours);
+    return { band: 'epic', target, recommendation: 'sequence', sequenceInto };
   }
-  return { band: 'session', target, recommendation: 'ok', splitInto: 1 };
+  return { band: 'session', target, recommendation: 'ok', sequenceInto: 1 };
 }
 
 /**

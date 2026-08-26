@@ -53,7 +53,7 @@ Parse $ARGUMENTS:
 5. **Size (autopilot 풋프린트 사이징)**: 분해된 태스크를 `{type,complexity}` 배열로 매핑해 공유 사이저 `sizePlan()`을 호출하고 (아래 "Artifacts Integration §0" 참조), 결과에 따라 계획을 밴드에 맞춘다:
    - 한 줄 요약: **"예상 autopilot 풋프린트: ~X.XM tokens / ~Y.Yh (tier, confidence)"**.
    - `recommendation==='expand'`(밴드 미달): **품질축으로 확장** — 엣지케이스·테스트·하드닝·관측·문서 단계를 추가한다. **기능 스코프를 억지로 확대하지 않는다** (없던 기능 끼워넣기 금지).
-   - `recommendation==='split'`(밴드 초과): `splitInto` 개 autopilot 세션으로 **분할**하고 각 세션의 goal을 제시한다.
+   - `recommendation==='sequence'`(밴드 초과): `sequenceInto` 개 autopilot 세션으로 **순차 분할**하고 각 세션의 goal을 제시한다.
    - `recommendation==='ok'`: 그대로 진행.
    - `--size quick`이면 quick 밴드로(<2h) 경량 사이징, `--size epic`이면 epic(>4h, 분할 전제)으로 호출한다 (기본 `session`).
 6. **Persist (기본 — TODO 추적)**: 플랜 생성 직후 공유 산출물 레이어를 호출해 `.plan-state.json`에 진행상태를 기록한다 (아래 "Artifacts Integration" 참조). 이것이 `/plan`의 유일한 기본 산출물이다 (PRD/ADR은 옵트인).
@@ -123,9 +123,9 @@ HANDOFF
 계획 분해(Execution Flow Step 5) 직후, 공유 사이저 `lib/planning/session-sizer.js`를 호출해 autopilot 자율실행 풋프린트를 추정한다. 이 레이어를 재구현하지 않고 **호출만** 한다. 정확한 시그니처:
 
 ```
-sizePlan(tasks, opts) → { footprint:{tokens,hours,tier,confidence}, sizing:{band,recommendation,splitInto,target}, autopilot:{maxHint,budgetHint} }
+sizePlan(tasks, opts) → { footprint:{tokens,hours,tier,confidence}, sizing:{band,recommendation,sequenceInto,target}, autopilot:{maxHint,budgetHint} }
 estimateFootprint(tasks, opts) → { tokens, hours, tier, confidence, perTask }
-classifySize(hours, opts) → { band, target, recommendation, splitInto }
+classifySize(hours, opts) → { band, target, recommendation, sequenceInto }
 // tasks = [{ type:'impl'|'test'|'review'|'docs'|'other', complexity?:'low'|'medium'|'high' }]
 ```
 
@@ -136,12 +136,12 @@ const { sizePlan } = await import(toFileUrl(path.join(pluginRoot, 'lib/planning/
 const tasks = phases.flatMap((p) => p.tasks.map((t) => ({ type: t.kind, complexity: t.complexity })));
 const { footprint, sizing, autopilot } = sizePlan(tasks, { size: sizeFlag /* quick|session|epic, 기본 session */ });
 // footprint = { tokens, hours, tier, confidence }
-// sizing = { band, recommendation: 'ok'|'expand'|'split', splitInto, target }
+// sizing = { band, recommendation: 'ok'|'expand'|'sequence', sequenceInto, target }
 // autopilot = { maxHint, budgetHint }   ← /autopilot --max / --budget 에 그대로 매칭
 ```
 
 - `recommendation==='expand'`(밴드 미달): 품질축(엣지케이스·테스트·하드닝·관측·문서)으로 확장. **기능 스코프 억지 확대 금지**.
-- `recommendation==='split'`(밴드 초과): `splitInto` 개 autopilot 세션으로 분할 + 각 세션 goal 제시.
+- `recommendation==='sequence'`(밴드 초과): `sequenceInto` 개 autopilot 세션으로 순차 분할 + 각 세션 goal 제시.
 - `recommendation==='ok'`: 그대로 진행.
 - 출력은 Output Format의 `SIZING` 블록과 `HANDOFF` 라인에 반영한다. **토큰→시간은 휴리스틱 추정**이며 autopilot의 `--max`/`--budget`이 실제 하드스톱이다.
 

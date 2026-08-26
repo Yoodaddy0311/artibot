@@ -167,7 +167,7 @@ describe('classifySize', () => {
     const r = classifySize(1.5);
     expect(r.band).toBe('quick');
     expect(r.recommendation).toBe('expand');
-    expect(r.splitInto).toBe(1);
+    expect(r.sequenceInto).toBe(1);
     expect(r.target).toEqual({ minHours: 2, maxHours: 4 });
   });
 
@@ -177,11 +177,11 @@ describe('classifySize', () => {
     expect(classifySize(4).band).toBe('session'); // inclusive upper bound
   });
 
-  it('classifies over-band durations as epic/split with correct splitInto', () => {
+  it('classifies over-band durations as epic/sequence with correct sequenceInto', () => {
     const r = classifySize(9);
     expect(r.band).toBe('epic');
-    expect(r.recommendation).toBe('split');
-    expect(r.splitInto).toBe(Math.ceil(9 / 4)); // 3
+    expect(r.recommendation).toBe('sequence');
+    expect(r.sequenceInto).toBe(Math.ceil(9 / 4)); // 3
   });
 
   it('treats zero/invalid hours as quick', () => {
@@ -305,13 +305,13 @@ describe('sizePlan', () => {
     expect(r.autopilot.budgetHint).toBe(MAX_BUDGET_TOKENS);
   });
 
-  it('produces an epic split recommendation for a heavy plan', () => {
+  it('produces an epic sequence recommendation for a heavy plan', () => {
     const tasks = Array(20).fill({ type: 'impl', complexity: 'high' });
     const r = sizePlan(tasks);
     // 20 × 192000 = 3.84M tokens ⇒ 7.68h ⇒ epic.
     expect(r.sizing.band).toBe('epic');
-    expect(r.sizing.recommendation).toBe('split');
-    expect(r.sizing.splitInto).toBeGreaterThanOrEqual(2);
+    expect(r.sizing.recommendation).toBe('sequence');
+    expect(r.sizing.sequenceInto).toBeGreaterThanOrEqual(2);
   });
 
   it('respects custom band in the autopilot hint', () => {
