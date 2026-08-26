@@ -173,6 +173,7 @@
     "delegationMode": true,
     "displayMode": "auto",
     "spawnStrategy": "on-demand-parallel",
+    "comment": "2026-08-26: orphan key worktreeIsolation ({enabled,defaultMode,mergeStrategy,cleanupOnClose}) removed — it had zero JS consumers repo-wide. No handler for a /team --worktree flag ever existed, and nothing ever auto-merged a teammate worktree, so mergeStrategy/cleanupOnClose described machinery that was never built. Per-teammate isolation is a tool-level option instead: Agent(subagent_type, { isolation: 'worktree' }), documented in skills/team/SKILL.md and skills/delegation/SKILL.md. lib/core/config-schema.js validates non-strict (extra properties allowed), so a leftover worktreeIsolation key in a user's local config is ignored, not rejected. This comment key is documentation only and is read by nothing.",
     "api": {
       "lifecycle": [],
       "communication": [

@@ -1724,9 +1724,9 @@ Claude Code 하네스 아키텍처에서 영감받은 13개 신규 모듈 도입
 - **v4.11.3부터**: `close(Stop)` 의 turn-end 자동 commit/squash/push는 **opt-in**. 매 agent turn마다 `chore: artibot session close` commit이 누적되던 노이즈 폭주 차단. 이전 동작 복원: `.git/autopilot.json` 또는 `artibot.config.json` 의 `git.autopilot.closeOnStop: true` 토글. **WIP interval save(작업 분실 방지)는 영향 없음.**
 
 ### Worktree 격리 모드
-- `team.worktreeIsolation` 설정 추가 (`enabled: false` 기본, opt-in)
-- `/team --worktree` 플래그로 병렬 팀원 격리 실행 지원
-- `delegation` 스킬에 Sub-Agent worktree 옵션 안내 추가
+- ~~`team.worktreeIsolation` 설정 추가 (`enabled: false` 기본, opt-in)~~ — **2026-08-26 제거됨.** 발표 당시부터 이 키를 읽는 코드가 없었고, 따라서 한 번도 동작한 적이 없다(삭제 시점 리포 전역 JS 소비자 0건).
+- ~~`/team --worktree` 플래그로 병렬 팀원 격리 실행 지원~~ — **구현된 적 없음.** 이 플래그를 파싱하는 핸들러는 존재한 적이 없다. 팀원 격리의 실제 수단은 아래 항목의 `isolation` 옵션뿐이다.
+- `delegation` 스킬에 Sub-Agent worktree 옵션 안내 추가 — 이 항목은 유효하다(`skills/delegation/SKILL.md`의 `Agent(subagent_type, { isolation: "worktree" })`).
 
 ### hooks.json 동기화
 - 버전 `v1.9.2` → `v1.12.0` → `v1.13.0` 동기화
