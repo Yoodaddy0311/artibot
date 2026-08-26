@@ -616,6 +616,7 @@ jobs:
           # env name set, so that edit is already RED at PR time. The
           # notification for the residual case is the red step itself.
           : "${FF_BRANCH_PREFIX:?}"
+          git --version
           BRANCH="${FF_BRANCH_PREFIX}${GITHUB_REF_NAME}"
           # Fall back to the both-halves wording only if the strategy step
           # somehow produced no subject. An empty -m aborts the commit, which

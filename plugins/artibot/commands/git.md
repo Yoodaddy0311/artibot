@@ -167,9 +167,11 @@ Git worktree lifecycle management (Git-Zero workspace abstraction).
   - Directory naming: `../{project}-{branch-name}`
   - Copy shared configs (.env, etc.) via post-create hook
 - `list`: Dashboard of all active worktrees with status, dirty files, last commit
-- `check`: Conflict prediction across all worktree pairs using `git merge-tree`
-  - Display conflict matrix with file-level detail
+- `check`: Conflict prediction across all worktree pairs via `lib/git/merge-preflight.js` (`git merge-tree --write-tree`; single owner shared with `/split integrate`, ADR-005)
+  - Display conflict matrix with file-level detail; exit 1 when any pair is `conflict` OR `error` (a bad ref also exits 1 in git — never read it as clean)
   - Recommend merge order to minimize conflicts
+  - git < 2.38 → `UNSUPPORTED`, `degrade=serial` (fail-closed: no pair examined, merge one branch at a time)
+  - merge-tree green ≠ safe — semantic conflicts are CI's job
 - `merge [target]`: Squash-merge current worktree branch into target (default: main)
   - 6-phase workflow: Validate → Research → Prep → Merge → Commit → Verify
   - AI-generated commit message from full diff analysis

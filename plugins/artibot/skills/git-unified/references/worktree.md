@@ -101,12 +101,17 @@ WORKTREE STATUS DASHBOARD
 
 ### `check`
 
-모든 워크트리 쌍 간 충돌 예측. `git merge-tree` 기반.
+모든 워크트리 쌍 간 충돌 예측. `git merge-tree --write-tree` 기반이며, **구현은 `lib/git/merge-preflight.js` 가 단일 소유**한다(ADR-005 — `/split integrate` 도 같은 모듈을 소비). 손으로 `git merge-tree` 를 치지 말고 모듈을 호출한다:
 
 ```bash
-# 모든 쌍 조합 검사
-git merge-tree $(git merge-base feat/login-page feat/signup) feat/login-page feat/signup
+# 워크트리 브랜치 목록을 모아 모듈에 넘긴다 (플러그인 루트 plugins/artibot 에서)
+node --input-type=module -e "const m=await import('./lib/git/merge-preflight.js');const branches=process.argv.slice(1);const r=m.preflightBranches(branches,{cwd:process.cwd()});console.log(m.formatConflictMatrix(r));process.exitCode=r.blocked?1:0;" $(git worktree list --porcelain | sed -n 's#^branch refs/heads/##p')
 ```
+
+- 종료코드 1 = `blocked`(충돌 쌍이 있거나 예측 불가). 0 = 모든 쌍 SAFE.
+- 출력 첫 줄이 `UNSUPPORTED` 면 로컬 git 이 2.38 미만(`--write-tree` 없음) — **fail-closed**: 쌍을 하나도 검사하지 않았고 `degrade=serial`, 즉 줄기를 한 번에 하나씩 머지하라. "충돌 없음"으로 읽지 말 것.
+- 같은 파일이 아니어도 깨질 수 있다 — **merge-tree 초록 ≠ 안전**. 텍스트 병합 성공만 뜻하고 의미적 충돌(한쪽이 함수 개명, 다른 쪽이 호출 추가)은 못 본다. 최종 판정은 CI.
+- `merge-tree --write-tree` 는 객체 DB 에만 쓰고 인덱스·워킹트리·ref 를 건드리지 않으므로 다른 세션이 편집 중인 공유 체크아웃에서 실행해도 안전하다.
 
 **충돌 매트릭스 출력**:
 ```
@@ -226,8 +231,9 @@ git branch -d feat/login-page
 - `main`/`master` 워크트리는 `clean` 대상 제외
 - `merge --squash` 후 원본 브랜치 삭제는 사용자 명시 확인 후에만
 - 워크트리 디렉터리가 저장소 내부(`./`)가 되지 않도록 경로 검증
-- `git merge-tree` 결과가 비어있으면 "충돌 없음" 으로 판정 (오탐 없음)
-- `check` 단계에서 충돌 예측 실패 시 "예측 불가" 표시 후 수동 확인 권장
+- `check` 는 `lib/git/merge-preflight.js` 의 판정(`clean`/`conflict`/`error`)만 쓴다. `error`(잘못된 ref, git 실패)는 충돌과 같은 `blocked` — 종료코드 1 을 "충돌 없음"으로 뒤집지 말 것(`merge-tree` 는 잘못된 ref 에도 exit 1 을 낸다)
+- git < 2.38 이면 `UNSUPPORTED` + `degrade=serial` — 예측 없이 직렬 머지로 강등, "예측 불가"를 안전으로 읽지 않는다
+- merge-tree 초록 ≠ 안전(의미적 충돌은 CI 가 본다)
 
 ## Quick Reference
 
