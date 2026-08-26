@@ -40,7 +40,11 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const read = (rel) => readFileSync(path.join(PLUGIN_ROOT, rel), 'utf-8');
+// CRLF 정규화는 read 에서 한 번만 한다. Windows CI 러너는 autocrlf 로 CRLF 체크아웃을
+// 만들므로(2026-08-26 CI 실측 — `측정 고지` 케이스의 `\n` 하드코딩 정규식만 red, 리눅스 3러너
+// 그린), 원문에 `\n` 정규식을 대는 케이스가 하나라도 있으면 러너 OS 에 따라 결과가 갈린다.
+// extractBlock 처럼 케이스별로 정규화하는 방식은 새 케이스가 정규화를 빼먹는 함정을 남긴다.
+const read = (rel) => readFileSync(path.join(PLUGIN_ROOT, rel), 'utf-8').replace(/\r\n/g, '\n');
 
 // 파일 부재·읽기 실패는 fail-closed 다 — 조용한 스킵 가드를 두지 않는다.
 const splitMd = read('commands/split.md');
