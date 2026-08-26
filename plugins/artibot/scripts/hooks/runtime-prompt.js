@@ -171,24 +171,37 @@ export function buildTeamDirective(workflowPlan) {
 }
 
 /**
+ * Recommendation values this hook will render. Allowlist, not denylist: a
+ * value the classifier starts emitting tomorrow does not reach the prompt
+ * until someone adds it here AND writes its surfacing sentence
+ * (`CLAUDE.md` "Recommend-hint surfacing rule"). Mirrors
+ * `lib/cognitive/workflow-plan.js#deriveRecommendation` return values.
+ */
+export const RECOMMENDATION_HINTS = Object.freeze(['workflow', 'split', 'autopilot']);
+
+/**
  * Build the ADVISORY recommendation directive injected when the unified
  * workflow plan elects to SUGGEST (but not auto-fire) a heavier runner.
  *
  * Mirrors buildTeamDirective's style. Output format:
- *   [artibot:hint recommend=workflow] | [artibot:hint recommend=autopilot]
+ *   [artibot:hint recommend=workflow] | [artibot:hint recommend=split]
+ *   | [artibot:hint recommend=autopilot]
  *
  * This is advisory ONLY — it surfaces workflowPlan.recommendation as text so the
  * model/user can choose to opt in. It must NEVER spawn or auto-fire anything:
- * the harness rule is that only inline|team auto-fire, while workflow|autopilot
- * require explicit user opt-in. Returns '' when there is no plan or no
- * recommendation so non-recommending prompts stay byte-identical.
+ * the harness rule is that only inline|team auto-fire, while
+ * workflow|split|autopilot require explicit user opt-in (`/split` opens N
+ * human-attended windows — the model may only suggest it, never run it).
+ * Returns '' when there is no plan, no recommendation, or a value outside
+ * `RECOMMENDATION_HINTS`, so non-recommending prompts stay byte-identical.
  *
  * @param {object|null|undefined} workflowPlan - tasks.meta.workflowPlan
  * @returns {string}
  */
 export function buildRecommendationDirective(workflowPlan) {
-  if (!workflowPlan || !workflowPlan.recommendation) return '';
-  return `[artibot:hint recommend=${workflowPlan.recommendation}]`;
+  const rec = workflowPlan?.recommendation;
+  if (!rec || !RECOMMENDATION_HINTS.includes(rec)) return '';
+  return `[artibot:hint recommend=${rec}]`;
 }
 
 /**
@@ -628,8 +641,8 @@ export function composePromptOutput({ prepared, prompt, effortMeta, taskBudgetDi
   // signal actually reaches the model — without this the plan was built then
   // discarded ("parallel-not-spawned" symptom).
   const teamDirective = buildTeamDirective(prepared.context?.tasks?.meta?.workflowPlan);
-  // P3: surface an ADVISORY runner recommendation (workflow|autopilot) at the
-  // front door. Same source as buildTeamDirective. This only adds text so the
+  // P3: surface an ADVISORY runner recommendation (workflow|split|autopilot) at
+  // the front door. Same source as buildTeamDirective. This only adds text so the
   // user/model can opt in — it never auto-fires (honors the harness opt-in rule).
   const recommendationDirective = buildRecommendationDirective(prepared.context?.tasks?.meta?.workflowPlan);
   // P4: deterministic front-door hint — a YouTube link in the prompt suggests the

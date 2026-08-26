@@ -16,6 +16,7 @@ import {
   buildRecommendationDirective,
   buildTeamDirective,
   composePromptOutput,
+  RECOMMENDATION_HINTS,
 } from '../../scripts/hooks/runtime-prompt.js';
 
 function teamPlan() {
@@ -74,6 +75,24 @@ describe('buildRecommendationDirective()', () => {
   it('emits an advisory hint when the plan recommends autopilot', () => {
     const d = buildRecommendationDirective({ recommendation: 'autopilot' });
     expect(d).toBe('[artibot:hint recommend=autopilot]');
+  });
+
+  it('emits an advisory hint when the plan recommends split (N attended windows)', () => {
+    const d = buildRecommendationDirective({ recommendation: 'split' });
+    expect(d).toBe('[artibot:hint recommend=split]');
+  });
+
+  it('renders ONLY allowlisted values — an unknown recommendation stays out of the prompt', () => {
+    // Allowlist, not denylist: a new classifier label must be added to
+    // RECOMMENDATION_HINTS (and get a surfacing sentence) before it renders.
+    expect(buildRecommendationDirective({ recommendation: 'sequence' })).toBe('');
+    expect(buildRecommendationDirective({ recommendation: 'team' })).toBe('');
+    expect(buildRecommendationDirective({ recommendation: 'inline' })).toBe('');
+  });
+
+  it('RECOMMENDATION_HINTS is the frozen trio the classifier can emit', () => {
+    expect(Object.isFrozen(RECOMMENDATION_HINTS)).toBe(true);
+    expect([...RECOMMENDATION_HINTS]).toEqual(['workflow', 'split', 'autopilot']);
   });
 
   it('returns empty string when recommendation is null', () => {

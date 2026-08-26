@@ -249,6 +249,7 @@ describe('buildWorkflowPlan() — advisory recommendation & autoFire', () => {
       best: { intent: 'action:implement', commands: ['/implement'], agents: ['planner'] },
       ambiguity: { ambiguous: false, score: 0, clarification: null },
     };
+    // CONFIG has no split block → the pre-split behaviour, byte for byte.
     const plan = buildWorkflowPlan({ score: 0.8 }, intent, CONFIG);
     expect(plan.runner).toBe('team');
     expect(plan.recommendation).toBe('autopilot');
@@ -262,6 +263,120 @@ describe('buildWorkflowPlan() — advisory recommendation & autoFire', () => {
     expect(plan.runner).toBe('team');
     expect(plan.recommendation).toBeNull();
     expect(plan.autoFire).toBe(true);
+  });
+});
+
+// --- Advisory recommendation: split (config-gated) ------------------------
+
+/**
+ * N recs cycling 3 commands (maxRepeat < 3 for n <= 8 → never homogeneous)
+ * + N distinct agents. n=6 is the autopilot fixture.
+ */
+function heterogeneousN(n, { agents } = {}) {
+  const cmds = ['/implement', '/code-review', '/verify'];
+  const recommendations = Array.from({ length: n }, (_, i) => ({
+    intent: `action:r${i}`, type: 'action', description: `rec ${i}`,
+    agents: [agents ? agents[i % agents.length] : `agent-${i}`], commands: [cmds[i % 3]],
+  }));
+  return {
+    intents: recommendations.map((r) => r.intent), matches: [], recommendations,
+    best: { intent: 'action:implement', commands: ['/implement'], agents: ['planner'] },
+    ambiguity: { ambiguous: false, score: 0, clarification: null },
+  };
+}
+const heterogeneousSix = () => heterogeneousN(6);
+
+/**
+ * Shipped shape (artibot.config.json#split, 2026-08-26 22:32 실측:
+ * minStems 2 / recommendMinSubtasks 6). Two keys, two roles: `minStems` is the
+ * PLAN validity floor, `recommendMinSubtasks` is the HINT gate (leader decision
+ * — checker-3 REQUEST_CHANGES). The value 6 is a conservative guess with zero
+ * live-operator evidence, not a measurement.
+ */
+const CONFIG_SPLIT = Object.freeze({ ...CONFIG, split: { maxWindows: 4, minStems: 2, recommendMinSubtasks: 6 } });
+/** cmd's config BEFORE the hint gate existed — must behave exactly like no split block. */
+const CONFIG_SPLIT_PLAN_ONLY = Object.freeze({ ...CONFIG, split: { maxWindows: 4, minStems: 2 } });
+
+describe('buildWorkflowPlan() — advisory recommendation: split (advisory only, opt-in via recommendMinSubtasks)', () => {
+  it('6 sub-objectives (>= recommendMinSubtasks 6) across >= minStems agents at high tier → split', () => {
+    const plan = buildWorkflowPlan({ score: 0.8 }, heterogeneousSix(), CONFIG_SPLIT);
+    expect(plan.recommendation).toBe('split');
+    // Advisory only: the runner decision is untouched by the recommendation.
+    expect(plan.runner).toBe('team');
+    expect(plan.autoFire).toBe(true);
+  });
+
+  it('5 sub-objectives (< recommendMinSubtasks 6) → no split, and no autopilot either (below its floor)', () => {
+    expect(buildWorkflowPlan({ score: 0.8 }, heterogeneousN(5), CONFIG_SPLIT).recommendation).toBeNull();
+  });
+
+  it('recommendMinSubtasks absent → OFF: the autopilot hint is byte-identical to a config with no split block', () => {
+    const six = heterogeneousSix();
+    const withoutKey = buildWorkflowPlan({ score: 0.8 }, six, CONFIG_SPLIT_PLAN_ONLY);
+    const noBlock = buildWorkflowPlan({ score: 0.8 }, six, CONFIG);
+    expect(withoutKey.recommendation).toBe('autopilot');
+    expect(withoutKey.recommendation).toBe(noBlock.recommendation);
+    expect(buildWorkflowPlan({ score: 0.8 }, six, { ...CONFIG, split: {} }).recommendation).toBe('autopilot');
+    // minStems alone (the plan floor) must never turn the hint on.
+    expect(buildWorkflowPlan({ score: 0.8 }, heterogeneousN(3), CONFIG_SPLIT_PLAN_ONLY).recommendation).toBeNull();
+  });
+
+  it('actually reads recommendMinSubtasks (not a hard-coded 6): 5 sub-objectives fire at 5, not at 6', () => {
+    const five = heterogeneousN(5);
+    expect(buildWorkflowPlan({ score: 0.8 }, five, { ...CONFIG, split: { minStems: 2, recommendMinSubtasks: 5 } }).recommendation).toBe('split');
+    expect(buildWorkflowPlan({ score: 0.8 }, five, { ...CONFIG, split: { minStems: 2, recommendMinSubtasks: 6 } }).recommendation).toBeNull();
+  });
+
+  it('actually reads minStems as the distinct-agent floor: 6 subs over 2 agents fire at minStems 2, not 3', () => {
+    const twoAgents = heterogeneousN(6, { agents: ['backend-developer', 'frontend-developer'] });
+    expect(buildWorkflowPlan({ score: 0.8 }, twoAgents, CONFIG_SPLIT).recommendation).toBe('split');
+    const at3 = buildWorkflowPlan({ score: 0.8 }, twoAgents, { ...CONFIG, split: { minStems: 3, recommendMinSubtasks: 6 } });
+    // Falls through to the old autopilot signal — split never swallows a hint it does not earn.
+    expect(at3.recommendation).toBe('autopilot');
+  });
+
+  it('rejects a malformed recommendMinSubtasks or minStems as disabled — never as 0', () => {
+    for (const bad of [1, 0, -1, 2.5, '6', null, true]) {
+      expect(buildWorkflowPlan({ score: 0.8 }, heterogeneousSix(), { ...CONFIG, split: { minStems: 2, recommendMinSubtasks: bad } }).recommendation,
+        `recommendMinSubtasks=${JSON.stringify(bad)}`).toBe('autopilot');
+      expect(buildWorkflowPlan({ score: 0.8 }, heterogeneousSix(), { ...CONFIG, split: { minStems: bad, recommendMinSubtasks: 6 } }).recommendation,
+        `minStems=${JSON.stringify(bad)}`).toBe('autopilot');
+    }
+  });
+
+  it('one agent across all sub-objectives = one stem → no split; the autopilot signal is what remains', () => {
+    const plan = buildWorkflowPlan({ score: 0.8 }, heterogeneousN(6, { agents: ['backend-developer'] }), CONFIG_SPLIT);
+    expect(plan.recommendation).toBe('autopilot');
+  });
+
+  it('medium/low tier never recommends split even with enough sub-objectives and stems', () => {
+    expect(buildWorkflowPlan({ score: 0.4 }, heterogeneousSix(), CONFIG_SPLIT).recommendation).toBeNull();
+    expect(buildWorkflowPlan({ score: 0.1 }, heterogeneousSix(), CONFIG_SPLIT).recommendation).toBeNull();
+  });
+
+  it('precedence: homogeneous batch still wins as workflow over split', () => {
+    const plan = buildWorkflowPlan({ score: 0.8 }, homogeneousIntentWith(6), CONFIG_SPLIT);
+    expect(plan.recommendation).toBe('workflow');
+  });
+
+  it('precedence (documented consequence): with recommendMinSubtasks 6, split SHADOWS the autopilot hint for multi-agent jobs', () => {
+    // The autopilot floor is also 6, so the shipped value flips every multi-agent
+    // autopilot hint to split. Byte-identical autopilot behaviour exists only
+    // while the key is absent (previous test). Recorded here on purpose.
+    expect(buildWorkflowPlan({ score: 0.8 }, heterogeneousSix(), CONFIG_SPLIT).recommendation).toBe('split');
+    expect(buildWorkflowPlan({ score: 0.8 }, heterogeneousSix(), CONFIG).recommendation).toBe('autopilot');
+  });
+
+  it('inline plans can still carry the split hint (advisory is independent of the runner)', () => {
+    // Bypassed intent → inline regardless of size/complexity; 6 sub-objectives
+    // across 6 agents still satisfy the thresholds at tier high.
+    const plan = buildWorkflowPlan({ score: 0.8 }, heterogeneousSix(), {
+      team: { autoApplyTriggers: { ...TRIGGERS, bypassIntents: ['action'] } },
+      split: { minStems: 2, recommendMinSubtasks: 6 },
+    });
+    expect(plan.runner).toBe('inline');
+    expect(plan.autoFire).toBe(false);
+    expect(plan.recommendation).toBe('split');
   });
 });
 

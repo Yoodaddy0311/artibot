@@ -150,31 +150,87 @@ export function evaluateTrigger(classification, intent, triggers) {
 }
 
 /**
+ * Read the `/split` recommendation thresholds from config.
+ *
+ * Two keys, two meanings — do not conflate them:
+ * - `config.split.recommendMinSubtasks` — the HINT gate: how many
+ *   sub-objectives a job needs before the classifier even suggests N windows.
+ *   Absent or malformed → the split signal is OFF. There is no built-in
+ *   default on purpose (leader decision 2026-08-26, checker-3): with zero
+ *   live `/split` operator data, the shipped config must not change what the
+ *   existing autopilot hint does, and an opt-in key is the only way to keep a
+ *   repository without it byte-identical (`docs/ORCHESTRATION-ROUTING.md` —
+ *   advisory surfaces are additive only).
+ * - `config.split.minStems` — the PLAN validity floor (`/split plan` refuses
+ *   fewer stems). Reused here only as the distinct-agent floor, so the hint
+ *   never suggests a split the planner would reject.
+ *
+ * Both must be integers >= 2 for the signal to be on.
+ *
+ * @param {object|undefined} splitConfig - `config.split`
+ * @returns {{ minSubtasks: number, minStems: number }|null} thresholds, or null when disabled.
+ */
+function splitRecommendThresholds(splitConfig) {
+  const minSubtasks = splitConfig?.recommendMinSubtasks;
+  const minStems = splitConfig?.minStems;
+  if (!Number.isInteger(minSubtasks) || minSubtasks < 2) return null;
+  if (!Number.isInteger(minStems) || minStems < 2) return null;
+  return { minSubtasks, minStems };
+}
+
+/**
  * Derive an ADVISORY runner recommendation (NOT an auto-fire decision).
  *
  * Purely additive signal for the classifier to SURFACE to the user; it never
- * changes runner selection. Only `inline`/`team` auto-fire — `workflow` and
- * `autopilot` require explicit user opt-in, so this layer can only suggest.
+ * changes runner selection. Only `inline`/`team` auto-fire — `workflow`,
+ * `split` and `autopilot` require explicit user opt-in, so this layer can
+ * only suggest (`docs/ORCHESTRATION-ROUTING.md` "Harness Constraint").
  *
+ * Precedence (first hit wins — one hint slot):
  * - Homogeneous fan-out (>=3 sub-objectives, largest same-command group >=3)
  *   → 'workflow' (a deterministic pipeline fits a repeated-command batch).
+ * - Else a high-tier job with >= `config.split.recommendMinSubtasks`
+ *   sub-objectives spanning >= `config.split.minStems` distinct agents
+ *   → 'split' (N windows, each owning a disjoint stem — PRD
+ *   split-cross-session-multi-worktree G1). Distinct `agent` is the STEM
+ *   PROXY: the live intent carries no file ownership, and one agent domain ≈
+ *   one ownership boundary. It is a proxy, not a measurement — `/split plan`
+ *   re-derives stems from real file sets. OFF unless BOTH keys are present
+ *   and valid (see `splitRecommendThresholds`).
  * - Else a big multi-domain high-tier job (tier 'high', >=6 sub-objectives)
- *   → 'autopilot' (worth an unattended session).
+ *   → 'autopilot' (worth an unattended single-window session).
  * - Else → null (no signal).
  *
- * @param {{ command: string }[]} subObjectives
+ * `split` sits before `autopilot` deliberately: both describe a large
+ * multi-domain job, and the difference is whether a human wants N attended
+ * windows or one unattended one. Consequence to keep in view: the autopilot
+ * floor is 6, so any `recommendMinSubtasks` <= 6 makes split SHADOW the
+ * autopilot hint for every multi-agent job that used to get it. The old
+ * autopilot signal is byte-identical only while `recommendMinSubtasks` is
+ * absent — that is why the key is opt-in rather than defaulted here.
+ *
+ * @param {{ command: string, agent?: string }[]} subObjectives
  * @param {'low'|'medium'|'high'} tier
- * @returns {'workflow'|'autopilot'|null}
+ * @param {object} [splitConfig] - `config.split` (read-only here; owned by artibot.config.json).
+ * @returns {'workflow'|'split'|'autopilot'|null}
  */
-function deriveRecommendation(subObjectives, tier) {
+function deriveRecommendation(subObjectives, tier, splitConfig) {
   const subs = Array.isArray(subObjectives) ? subObjectives : [];
   const counts = new Map();
+  const agents = new Set();
   for (const sub of subs) {
     const cmd = sub?.command || '';
     counts.set(cmd, (counts.get(cmd) || 0) + 1);
+    if (sub?.agent) agents.add(sub.agent);
   }
   const maxRepeat = counts.size > 0 ? Math.max(...counts.values()) : 0;
   if (subs.length >= 3 && maxRepeat >= 3) return 'workflow';
+
+  const split = splitRecommendThresholds(splitConfig);
+  if (split !== null && tier === 'high' && subs.length >= split.minSubtasks && agents.size >= split.minStems) {
+    return 'split';
+  }
+
   if (tier === 'high' && subs.length >= 6) return 'autopilot';
   return null;
 }
@@ -233,7 +289,7 @@ export function buildWorkflowPlan(classification, intent, config, deps = {}) {
   const trigger = evaluateTrigger(cls, safeIntent, triggers);
 
   const subObjectives = extractSubObjectives(safeIntent);
-  const recommendation = deriveRecommendation(subObjectives, complexityTier(cls.score));
+  const recommendation = deriveRecommendation(subObjectives, complexityTier(cls.score), config?.split);
 
   if (trigger.runner !== 'team') {
     return Object.freeze({
