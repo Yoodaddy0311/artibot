@@ -91,7 +91,9 @@ Applies to both Sub-Agent and Team modes:
 ## Team Lifecycle Checklist
 
 1. [ ] Score delegation factors -> confirm Team Mode needed
-2. [ ] Fix a run slug to prefix teammate names with
+2. [ ] Fix a run slug to prefix teammate names with — the run slug is
+       `team-{task-slug}-{sid}`, where `{sid}` is a session discriminator
+       (see `commands/team.md` Phase 2)
 3. [ ] `Agent(type, name="{run-slug}-{role}")` for each teammate
 4. [ ] `TaskCreate` for all work items with clear descriptions
 5. [ ] `TaskUpdate` to assign or let teammates self-claim

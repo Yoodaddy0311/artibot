@@ -66,6 +66,8 @@ Progress:
 Agent(subagent_type, name="{run-slug}-{role}", { isolation: "worktree" })
 ```
 
+런 슬러그 = `team-{task-slug}-{sid}`, `{sid}` 는 세션 판별자 — `commands/team.md` Phase 2 참조.
+
 **주의사항**:
 - 격리를 전역 기본값으로 켜는 설정은 없습니다 — 켜려면 호출마다 옵션을 주십시오.
 - 변경이 없는 worktree는 자동 정리됩니다. 변경이 있으면 남습니다.

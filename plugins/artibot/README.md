@@ -391,7 +391,7 @@ Artibot의 핵심 엔진은 Claude Code의 **Agent Teams API**입니다. 단순�
 **사용하는 Agent Teams API 도구:**
 - `SendMessage` - DM, 브로드캐스트, 셧다운 요청/응답, 계획 승인
 - `TaskCreate` / `TaskUpdate` / `TaskList` / `TaskGet` - 공유 태스크 관리
-- `Agent(type, name="{run-slug}-{role}")` - 팀원 스폰. 팀은 세션당 하나(암묵적)라 생성 호출이 없다
+- `Agent(type, name="{run-slug}-{role}")` - 팀원 스폰. 팀은 세션당 하나(암묵적)라 생성 호출이 없다 (런 슬러그 = `team-{task-slug}-{sid}`, `{sid}` 는 세션 판별자 — `commands/team.md` Phase 2 참조)
 - 해체 호출은 없다 — 팀원 전원에게 `SendMessage(shutdown_request)` 를 보내면 그것이 정리의 전부다
 
 ### CTO-Led 팀 오케스트레이션
@@ -991,6 +991,8 @@ cd artibot/plugins/artibot && bash install.sh
 7. SendMessage(type: "shutdown_request") × N  -- 종료 요청
 8. shutdown_request 전원 발송  -- 이것이 정리의 전부
 ```
+
+> 런 슬러그 = `team-{task-slug}-{sid}`, `{sid}` 는 세션 판별자 — `commands/team.md` Phase 2 참조.
 
 ### 오케스트레이션 패턴
 
