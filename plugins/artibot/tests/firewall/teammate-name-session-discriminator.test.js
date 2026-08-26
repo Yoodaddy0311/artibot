@@ -46,6 +46,35 @@ const TEAM_MD = join(PLUGIN_ROOT, 'commands', 'team.md');
 const teamMd = readFileSync(TEAM_MD, 'utf-8');
 
 /**
+ * 팀원을 스폰하는 커맨드 4종. `report-contract-parity.test.js#CARRIERS` 와 같은
+ * 목록이며 이유도 같다 — 계약이 한 파일에만 있으면 나머지 경로가 더 약한 규약으로
+ * 돈다. 이름 규약도 정확히 같은 성질이다.
+ *
+ * `minNames` 는 **분모 단언**이다. 스캔이 0건을 내면 "위반 0" 이 "검사 0" 을
+ * 뜻하게 되므로, 각 캐리어가 최소 몇 개의 name 예시를 갖는지 못박는다.
+ * 2026-08-26 실측: team 4 / autopilot 1 / ultraplan 4 / sc 0.
+ */
+const CARRIERS = [
+  { file: 'team.md', minNames: 4 },
+  { file: 'autopilot.md', minNames: 1 },
+  { file: 'ultraplan.md', minNames: 4 },
+  // sc.md 는 **의도적으로 0** 이다 — 아래 전용 테스트가 그 0 을 지킨다.
+  { file: 'sc.md', minNames: 0 },
+];
+
+/**
+ * 판별자로 인정하는 표기.
+ *   `{sid}`       — team.md·ultraplan.md 규약
+ *   `{sessionId}` — autopilot.md 가 먼저 쓰던 같은 뜻의 이름
+ *   `*`           — team.md 가 정의한 런 접두사 축약(`{task-slug}-{sid}`)
+ */
+const DISCRIMINATOR = /\{sid\}|\{sessionId\}|\*/;
+
+const carrierSrc = Object.fromEntries(
+  CARRIERS.map((c) => [c.file, readFileSync(join(PLUGIN_ROOT, 'commands', c.file), 'utf-8')]),
+);
+
+/**
  * 출하 에이전트 이름. `agents/*.md` 의 프론트매터 `name:` 이 정본이다.
  *
  * `agent-name-references.test.js#shippedAgents` 가 같은 일을 하지만 **import 하지
@@ -110,13 +139,31 @@ describe('명명 규약 — 세션 판별자가 문서에 성문화돼 있다', 
     expect(teamMd).toMatch(/\{task-slug\}-\{sid\}\).*가리킨다|별표 자리에도 `\{sid\}` 가 들어간다/s);
   });
 
-  it('모든 스폰 예시 name 이 판별자를 싣거나 런 접두사 축약을 쓴다', () => {
-    const names = spawnNameLiterals(teamMd).filter((n) => n.startsWith('team-'));
-    // 분모 단언: 예시를 하나도 못 찾으면 "위반 0" 이 "검사 0" 을 뜻하게 된다.
-    expect(names.length, '팀원 스폰 예시 name 을 하나도 찾지 못했다').toBeGreaterThanOrEqual(4);
+});
 
-    const bare = names.filter((n) => !n.includes('{sid}') && !n.includes('*'));
-    expect(bare, `판별자 없는 스폰 이름: ${JSON.stringify(bare)}`).toEqual([]);
+describe('명명 규약 — 스폰 캐리어 4종 전수', () => {
+  // 분모 먼저. 스캐너가 아무것도 못 읽고 "위반 0" 으로 통과하는 것을 막는다.
+  it.each(CARRIERS)('$file 의 name 예시 수가 하한 이상이다', ({ file, minNames }) => {
+    expect(spawnNameLiterals(carrierSrc[file]).length).toBeGreaterThanOrEqual(minNames);
+  });
+
+  it.each(CARRIERS)('$file 의 모든 스폰 name 이 세션 판별자를 싣는다', ({ file }) => {
+    const bare = spawnNameLiterals(carrierSrc[file]).filter((n) => !DISCRIMINATOR.test(n));
+
+    expect(bare, `${file}: 판별자 없는 고정 이름 — 두 세션이 같은 이름을 만든다: ${JSON.stringify(bare)}`)
+      .toEqual([]);
+  });
+
+  // sc.md 의 0 은 결함이 아니라 **다른 안전 방식**이다. 이름이 없으면 SendMessage
+  // 주소가 아예 잡히지 않으므로 이름 충돌이 성립할 수 없다. 그 0 을 명시적으로
+  // 고정해 둔다 — 누군가 sc.md 에 고정 이름을 붙이면 위 전수 검사가 red 가 되고,
+  // 여기서는 "이름 없는 위임" 이라는 전제가 깨진 것을 알린다.
+  it('sc.md 는 이름 없는 위임이다 (이름이 없으면 충돌도 없다)', () => {
+    const sc = carrierSrc['sc.md'];
+
+    expect(spawnNameLiterals(sc), 'sc.md 에 고정 스폰 이름이 생겼다').toEqual([]);
+    // 그렇다고 스폰 자체가 사라진 것은 아님을 함께 단언한다.
+    expect(sc.match(/prompt="/g)?.length ?? 0).toBeGreaterThanOrEqual(1);
   });
 });
 
