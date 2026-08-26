@@ -325,10 +325,14 @@ describe('runPhase2Execute — runner branching (ADR-003 Stage 1)', () => {
   it('should report a REQUESTED integration worktree that failed as integration-worktree-failed', async () => {
     // Both demotions used to collapse into `no-integration-worktree`, so an
     // operator reading `:status` could not tell "I never asked for a worktree"
-    // from "I asked and creation broke". Observed live: a session passed the
-    // wrong option key, took the opt-out path, and the single reason code left
-    // no way to see it. Same eligible task set as the two tests above — the ONLY
-    // difference is that `useWorktree` is on while creation is forced to fail.
+    // from "I asked and creation broke". A live session that passed the wrong
+    // option key is what EXPOSED that shared label — but it is not what this
+    // test covers: that session took the opt-out path, so its own label is
+    // `no-integration-worktree` both before and after the split (unchanged, and
+    // correct). What this test closes is the other branch the shared label was
+    // hiding — worktree requested, creation failed. Same eligible task set as
+    // the two tests above; the ONLY difference is that `useWorktree` is on
+    // while creation is forced to fail.
     const inst = await phase2Instruction({
       fast: true,
       useWorktree: true,
