@@ -27,9 +27,17 @@ import { fileURLToPath } from 'node:url';
 
 const COMMANDS_DIR = path.resolve(fileURLToPath(import.meta.url), '..', '..', '..', 'commands');
 
-/** team.md 가 정본, 나머지는 문자 단위로 같아야 한다 */
+/**
+ * team.md 가 정본, 나머지는 문자 단위로 같아야 한다.
+ *
+ * split.md 는 5번째 캐리어다(2026-08-26). 그 `prompt=` 는 `Agent(...)` 스폰이 아니라
+ * **사람이 새 창에 붙여넣는 창 시작 프롬프트**(`SplitWindow(...)` 표기)지만, 계약을
+ * 실어 나르는 경로라는 점은 같다 — 줄기 창의 리더가 부모 창에 보고하는 채널이 이
+ * 블록으로 정해지기 때문이다. 창 프롬프트 고유 규약(트레일러·슬러그 고정·인사 1회)은
+ * `tests/firewall/split-window-contract.test.js` 가 따로 본다.
+ */
 const CANONICAL = 'team.md';
-const CARRIERS = ['team.md', 'autopilot.md', 'ultraplan.md', 'sc.md'];
+const CARRIERS = ['team.md', 'autopilot.md', 'ultraplan.md', 'sc.md', 'split.md'];
 
 const read = (f) => readFileSync(path.join(COMMANDS_DIR, f), 'utf-8');
 
@@ -105,11 +113,12 @@ describe('보고 계약/스폰 프롬프트 커버리지', () => {
     expect(uncovered, `계약 없는 스폰 프롬프트: ${JSON.stringify(uncovered)}`).toEqual([]);
   });
 
-  it('4개 파일 합계 스폰 프롬프트 수가 기대치와 같다 (신규 경로 누락 감지)', () => {
+  it('5개 파일 합계 스폰 프롬프트 수가 기대치와 같다 (신규 경로 누락 감지)', () => {
     const total = CARRIERS.reduce((n, f) => n + extractPrompts(read(f)).length, 0);
-    // team 4 + autopilot 3 + ultraplan 4 + sc 2 = 13.
+    // team 4 + autopilot 3 + ultraplan 4 + sc 2 + split 1 = 14 (2026-08-26 재계산 —
+    // `grep -c 'prompt="' commands/<f>.md` 로 재현. split 의 1 은 창 시작 프롬프트다).
     // 늘었는데 이 수가 안 맞으면 새 스폰 경로가 생겼다는 뜻 — 계약을 붙였는지 확인하라.
-    expect(total).toBe(13);
+    expect(total).toBe(14);
   });
 });
 

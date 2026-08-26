@@ -802,6 +802,14 @@
       "comment": "Opt-in --fast fan-out limits. fast-profile.js clamps every value to immutable safety caps; only explicitly independent, disjoint low/medium-risk tasks receive isolated worker worktrees. Effective concurrency ceiling is 12, NOT 16: fast-profile.js#parallelCapacity takes min(hardMaxAgents, agentsPerCpu*cpuCount, maxWorktrees, taskCount), and maxWorktrees=12 is always the smaller of the two caps at these defaults, so hardMaxAgents=16 never binds. Raising hardMaxAgents alone changes nothing — raise maxWorktrees too."
     }
   },
+  "split": {
+    "maxWindows": 4,
+    "minStems": 2,
+    "serverEntryPaths": [],
+    "humanWaitReevalPct": 50,
+    "recommendMinSubtasks": null,
+    "comment": "/split (cross-session multi-worktree). maxWindows maps onto the EXISTING fast-profile keys (limits.maxWorktrees AND limits.hardMaxAgents) because normalizeFastProfile reads only four keys and silently drops unknown ones; serverEntryPaths seeds the conflict grouping so two windows never share a dev-server port; humanWaitReevalPct is the Phase 5 human-wait threshold that re-opens the headless-window (C-stage) question; recommendMinSubtasks: null = recommend=split hint OFF (opt-in). Set an integer >= 2 to enable; NOTE any value <= 6 shadows the autopilot hint (same floor). Shipped OFF because real-operator /split data is 0. These keys never touch the user settings.json cross-session inbound or peer-machine isolation settings (tests/firewall/split-config-firewall.test.js)."
+  },
   "git": {
     "autopilot": {
       "bypassPreCommitHooks": false,

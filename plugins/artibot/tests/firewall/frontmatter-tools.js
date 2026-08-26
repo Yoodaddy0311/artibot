@@ -67,6 +67,7 @@ export const KNOWN_TOOL_NAMES = new Set([
   'AskUserQuestion', // 리드 세션에서 2회 실호출 성공. commands/go.md 가 선언.
   'ExitPlanMode', // 리드 세션 deferred 도구 목록에 실재.
   'Workflow', // 리드 세션 최상위 도구로 스키마까지 로드됨. commands/dynamic.md 가 선언.
+  'ListAgents', // 리드 세션 도구 목록에 실재(2026-08-26 리더 실측 — 21:29 실호출, 피어 세션 4행 출력), 서브에이전트 컨텍스트에는 부재. commands/split.md 가 선언.
 ]);
 
 /**

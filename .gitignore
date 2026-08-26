@@ -81,6 +81,9 @@ reports/
 # context restore relies on git-tracked guides + auto-memory instead.
 .artibot/HANDOFF.md
 .artibot/handoffs/
+# /split run state (plan.json, run.json, list-agents.txt, locks/, per-limb brief.md in
+# worktrees) — per-machine local records, never committed (commands/split.md "plan" step 7).
+.artibot/split/
 
 # Session work products written at the repo root (reports, proposals, exported
 # docs). Same local-only rationale as the handoffs above: they are per-session

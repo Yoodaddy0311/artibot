@@ -248,7 +248,10 @@ if (pfInstr?.abort) { /* abort: surface preflight errors table via engine.render
 if (pfInstr?.suppress) { /* warnings: state.preflightWarnings에 누적 + 계속 */ }
 ```
 
-5 체크: `gitClean` / `lockFree` / `diskSpace (>500MB hard / >2GB warn)` / `nodeVersion (>=18 hard / >=20 warn)` / `goalContractLint`. Hard fail = abort, warn = continue + 누적. `:resume`는 pre-flight skip (이미 진행 중).
+7 체크(`lib/autopilot/preflight.js#ALL_CHECKS` 순서): `gitClean` / `lockFree` / `diskSpace (>500MB hard / >2GB warn)` / `nodeVersion (>=18 hard / >=20 warn)` / `goalContractLint` / `repoConcurrency`(같은 리포·다른 태스크의 동시 실행 — allowlist 밖이면 fail, identity 미해결이면 warn) / `peerNotice`(항상 pass — 같은 리포 피어 세션 수 advisory). Hard fail = abort, warn = continue + 누적. `:resume`는 pre-flight skip (이미 진행 중).
+- `options.repoConcurrency.allow`: 같은 리포에서 함께 돌아도 되는 feature key 의 allowlist — 정확 키 또는 `prefix*`. 배열이 아니면 아무것도 허용되지 않는다(fail-closed).
+
+- **피어 세션 고지(advisory, 차단 없음)**: 메인 세션에 `ListAgents` 도구가 있으면 1회 호출해 같은 리포를 도는 다른 로컬 세션(예: `/split` 줄기 창 `split-<repoShort>-<limb>-xx`)을 경고 1줄로 표시한다. 도구 출력에는 cwd 가 없으므로(2026-08-26 실측) 세션 이름 접두 휴리스틱뿐이고, 도구가 없는 컨텍스트(서브에이전트)에서는 생략한다 — `commands/split.md` "status" 참조.
 
 ### Step 2 — Mode Dispatch
 
