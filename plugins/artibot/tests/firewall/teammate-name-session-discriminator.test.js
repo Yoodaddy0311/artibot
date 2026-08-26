@@ -129,8 +129,13 @@ describe('명명 규약 — 세션 판별자가 문서에 성문화돼 있다', 
   });
 
   it('machineId 를 판별자로 쓰지 말라고 명시한다', () => {
-    // `cross-machine.js#machineId` 는 {hostname}_{username} 이라 같은 PC 의 두
-    // 세션이 같은 값을 낸다 — 기계는 가르지만 세션은 가르지 못한다.
+    // `cross-machine.js#computeMachineId` 는 {hostname}_{username} 을 돌려주므로
+    // 같은 PC 의 두 세션이 같은 값을 받는다 — 기계는 가르지만 세션은 못 가른다.
+    //
+    // 여기서 **심볼 이름은 단언하지 않는다.** 인용이 실제 export 로 해소되는지는
+    // `citation-resolution.test.js` 가 리포 전역으로 소유한다. 이 테스트가 소유한
+    // 것은 "금지가 문서에 적혀 있는가" 뿐이다 — 심볼명까지 여기서 못박으면 export
+    // 개명 한 번에 두 게이트가 같이 red 가 되고, 어느 쪽이 진짜인지 흐려진다.
     expect(teamMd).toMatch(/machineId/);
     expect(teamMd).toMatch(/hostname\}_\{username|같은 PC 의 두\s*\n?\s*세션이 같은 값/);
   });

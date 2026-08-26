@@ -156,7 +156,7 @@ wins"*. 즉 교차 세션 지시가 **오류 없이** 자기 세션 팀원에게
 - 리더(모델)는 훅 stdin 을 직접 읽지 않는다. `ListAgents` 결과에서 자기 세션 행에 붙은
   `[ref]` 6자 — 예컨대 `artibot-a1 [afd778]` 의 `afd778` — 를 쓰거나, 세션 ID 를 알고
   있으면 그 앞 6자를 쓴다. 둘 중 무엇이든 **한 런 안에서는 고정**한다.
-- **`machineId` 를 판별자로 쓰지 마라.** `lib/autopilot/cross-machine.js#machineId` 는
+- **`machineId` 를 판별자로 쓰지 마라.** `lib/autopilot/cross-machine.js#computeMachineId` 는
   `{hostname}_{username}` 이라 **같은 PC 의 두 세션이 같은 값**을 낸다. 그것이 가르는
   것은 기계이지 세션이 아니므로 이 충돌에는 아무 효력이 없다.
 
