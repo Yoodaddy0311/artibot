@@ -327,11 +327,21 @@ export function runPhase2Execute(state) {
   const savedWorktree = typeof state.worktreePath === 'string' && state.worktreePath
     ? state.worktreePath : null;
   const worktreePath = savedWorktree || attemptCreateWorktree(state);
-  // No session worktree (the `--worktree` default is off) means no fixed
-  // integration base, so fan-out would pin every worker to a moving HEAD.
-  // Demote to standard rather than creating a worktree the user never asked for.
+  // No session worktree means no fixed integration base, so fan-out would pin
+  // every worker to a moving HEAD. Demote — but the two ways to arrive here are
+  // not the same incident and must not share one reason code: `useWorktree` off
+  // is the documented `--worktree` default (the operator opted out, nothing
+  // broke), while `useWorktree` on with no cwd means `attemptCreateWorktree`
+  // was asked and FAILED (git missing, bad `worktreeCwd`, disk) and swallowed
+  // it into a warn tick. Reporting a failure as an opt-out is what made a real
+  // session unexplainable: `:status` said "no integration worktree" for a run
+  // that had asked for one. `.cwd` falsy ⟺ `worktreePath` falsy, so
+  // `options.useWorktree` is the only thing that separates them here.
   if (fast?.enabled && !retainFastIntegrationWorktree(state, worktreePath).cwd) {
-    fast = demoteFastToStandard(fast, 'no-integration-worktree');
+    fast = demoteFastToStandard(
+      fast,
+      state.options?.useWorktree === true ? 'integration-worktree-failed' : 'no-integration-worktree',
+    );
   }
 
   if (fast) {

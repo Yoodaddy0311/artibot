@@ -47,6 +47,13 @@ function makeTempRepo() {
 }
 
 let tempRepo = null;
+// A directory that is deliberately NOT a git repo (and has no git ancestor —
+// verified: `git worktree add` under the Node tmpdir exits 128 "not a git
+// repository"). Used to force `attemptCreateWorktree` to FAIL while
+// `useWorktree` is on, which is the only way to reach the
+// `integration-worktree-failed` branch. Needs no gitAvailable() guard: with git
+// absent the spawn errors instead, and both paths return null identically.
+let nonGitDir = '';
 // ARTIFACT ISOLATION CONTRACT (extends the branch-leak guard above to written
 // artifacts): startAutopilot writes docs/PRD/ and abortAutopilot writes
 // reports/AUTOPILOT/ under <projectRoot>/. Unset, that is the operator's real
@@ -55,12 +62,14 @@ let artifactRoot = '';
 beforeAll(() => {
   if (gitAvailable()) tempRepo = makeTempRepo();
   artifactRoot = mkdtempSync(path.join(os.tmpdir(), 'artibot-runner-artifacts-'));
+  nonGitDir = mkdtempSync(path.join(os.tmpdir(), 'artibot-runner-nongit-'));
 });
 afterAll(() => {
   if (tempRepo) {
     try { rmSync(tempRepo, { recursive: true, force: true }); } catch { /* ignore */ }
   }
   try { rmSync(artifactRoot, { recursive: true, force: true }); } catch { /* ignore */ }
+  try { rmSync(nonGitDir, { recursive: true, force: true }); } catch { /* ignore */ }
 });
 
 /**
@@ -295,6 +304,9 @@ describe('runPhase2Execute — runner branching (ADR-003 Stage 1)', () => {
     // Standard instruction, not the fan-out one.
     expect(inst.type).toBe('team-create');
     expect(inst.teamHint).toEqual({ parallel: true, leadAgent: 'orchestrator' });
+    // Reason code unchanged: `no-integration-worktree` now means opt-out ONLY —
+    // a worktree that was requested and failed reports `integration-worktree-failed`
+    // instead (see the next test).
     expect(inst.fast).toMatchObject({
       enabled: false,
       fallbackReason: 'no-integration-worktree',
@@ -307,6 +319,47 @@ describe('runPhase2Execute — runner branching (ADR-003 Stage 1)', () => {
     expect(inst.fast.worktreePlan).toBeUndefined();
     // The tasks were genuinely eligible — demotion is about the missing base,
     // not about the work. Keeping these fields is what lets :status explain it.
+    expect(inst.fast).toMatchObject({ requested: true, eligibleParallelism: 3 });
+  });
+
+  it('should report a REQUESTED integration worktree that failed as integration-worktree-failed', async () => {
+    // Both demotions used to collapse into `no-integration-worktree`, so an
+    // operator reading `:status` could not tell "I never asked for a worktree"
+    // from "I asked and creation broke". Observed live: a session passed the
+    // wrong option key, took the opt-out path, and the single reason code left
+    // no way to see it. Same eligible task set as the two tests above — the ONLY
+    // difference is that `useWorktree` is on while creation is forced to fail.
+    const inst = await phase2Instruction({
+      fast: true,
+      useWorktree: true,
+      // Non-git cwd => `git worktree add` exits 128 => createWorktree ok:false
+      // => attemptCreateWorktree returns null with `useWorktree` still true.
+      worktreeCwd: nonGitDir,
+      cpuCount: 2,
+      fastTasks: [
+        { id: 'api', independent: true, affectedPaths: ['src/api/**'], risk: 'low', worktreeEligible: true },
+        { id: 'ui', independent: true, affectedPaths: ['src/ui/**'], risk: 'low', worktreeEligible: true },
+        { id: 'tests', independent: true, affectedPaths: ['tests/**'], risk: 'medium', worktreeEligible: true },
+      ],
+    }, 'fast-integration-worktree-failed');
+
+    // Creation really did fail: engine.js only sets these when a path exists.
+    expect(inst.worktreePath).toBeUndefined();
+    expect(inst.cwdHint).toBeUndefined();
+
+    // Same safe demotion as the opt-out case — only the reason differs.
+    expect(inst.type).toBe('team-create');
+    expect(inst.teamHint).toEqual({ parallel: true, leadAgent: 'orchestrator' });
+    expect(inst.fast).toMatchObject({
+      enabled: false,
+      fallbackReason: 'integration-worktree-failed',
+      worktrees: { required: false, count: 0 },
+      waves: [],
+    });
+    expect(inst.fast.serialReasons).toContain('integration-worktree-failed');
+    // The whole point of the split: the opt-out code must NOT appear here.
+    expect(inst.fast.serialReasons).not.toContain('no-integration-worktree');
+    expect(inst.fast.worktreePlan).toBeUndefined();
     expect(inst.fast).toMatchObject({ requested: true, eligibleParallelism: 3 });
   });
 
