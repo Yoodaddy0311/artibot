@@ -299,9 +299,12 @@ function stashShaAt(cwd, idx) {
  * the main checkout too, so the entry that was `stash@{0}` at list time becomes
  * `stash@{1}` mid-loop. An index captured from `git stash list` is therefore a
  * position, not an identity, and dropping by that stale position destroys
- * somebody else's stash. Every drop re-resolves the index and aborts the whole
- * cleanup on the first mismatch: falling behind on retention is recoverable,
- * dropping the wrong stash is not.
+ * somebody else's stash. Every drop re-resolves the index first; on a mismatch
+ * it refuses that drop and abandons the rest of the loop. Drops already made
+ * under a still-valid pin stay — they were correct — so a cleanup can end having
+ * removed some of its targets and not the others. The guarantee is not "all or
+ * nothing"; it is that the wrong stash is never dropped. Falling behind on
+ * retention is recoverable, dropping somebody else's stash is not.
  *
  * Exported for `tests/firewall/stash-ref-isolation.test.js`: the shared-ref
  * hazard cannot be exercised through `main()` without driving a whole hook

@@ -11,17 +11,21 @@
  * user — every recorded index is off by one and the loop deletes stashes that
  * were never checkpoints. Losing a user's stash is unrecoverable; falling behind
  * on retention is not. The fix re-resolves each index to the SHA it had at list
- * time and aborts the cleanup on the first mismatch.
+ * time and abandons the rest of the loop at the first mismatch.
  *
- * These tests drive the real `cleanupOldStashes` from the save hook.
+ * What that guarantees, stated precisely: it does not drop the WRONG stash. It
+ * is not "no partial drop" — drops that already completed under a still-valid
+ * pin stay done, and they were correct. The guard only refuses to keep going
+ * once the indices stop meaning what they meant when they were pinned, so a
+ * cleanup can end having removed some of its targets and not the others.
  *
- * These tests drive the real `cleanupOldStashes`. One of them reaches the guard
- * itself: `cleanupOldStashes` takes an injectable `stashShaAt`, so a test can
- * answer one commit while pinning and a different one at re-check — what a
- * shifted `refs/stash` looks like from inside the loop — and assert that
- * nothing is dropped. Deleting the guard line turns that case red (mutation
- * run, 2026-08-26); before the seam existed the whole file stayed green with
- * the guard removed, which is why the seam was added rather than trusted.
+ * These tests drive the real `cleanupOldStashes` from the save hook. One of them
+ * reaches the guard itself: `cleanupOldStashes` takes an injectable `stashShaAt`,
+ * so a test can answer one commit while pinning and a different one at re-check
+ * — what a shifted `refs/stash` looks like from inside the loop — and assert
+ * that nothing is dropped. Deleting the guard line turns that case red (mutation
+ * run, 2026-08-26); before the seam existed the whole file stayed green with the
+ * guard removed, which is why the seam was added rather than trusted.
  *
  * WHAT THIS STILL DOES NOT COVER:
  *   - Real cross-process interleaving. The injected resolver simulates the
