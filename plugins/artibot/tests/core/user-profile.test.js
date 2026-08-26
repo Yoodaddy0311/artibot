@@ -12,6 +12,12 @@ import {
   setSkillLevel,
 } from '../../lib/core/user-profile.js';
 import { getPluginRoot } from '../../lib/core/platform.js';
+import { useTrailSandbox } from '../helpers/trail-sandbox.js';
+
+// A novice->pro promotion records a decision. `configureProfilePath()` sandboxes
+// only the profile file; the trail resolves separately from CLAUDE_PLUGIN_ROOT
+// and would otherwise land in the repo's live learning data.
+useTrailSandbox('user-profile');
 
 const TMP_ROOT = join(tmpdir(), 'artibot-user-profile-tests');
 

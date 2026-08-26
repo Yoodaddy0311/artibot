@@ -11,6 +11,7 @@
  */
 
 import { round as _coreRound } from '../core/index.js';
+import { getPluginRoot } from '../core/platform.js';
 import { readNativeEffortLevel } from './native-effort.js';
 // Router uses 2 decimal precision for display values
 const round = (n) => _coreRound(n, 2);
@@ -374,7 +375,14 @@ export function route(input, context = {}) {
 
   // AGO G3 — record classification for Explainability (observe-only).
   // Dynamic import to avoid a hard dependency; all failures are swallowed.
+  //
+  // `route()` is synchronous, so this write cannot be awaited — it flushes on a
+  // later turn of the event loop, potentially long after the caller moved on.
+  // Capture the plugin root NOW and hand it to recordDecision: resolved at flush
+  // time instead, the destination is whatever CLAUDE_PLUGIN_ROOT happens to say
+  // then, which is how router fixtures ended up in the real trail.
   try {
+    const pluginRoot = getPluginRoot();
     import('../core/decision-trail.js').then(({ recordDecision }) => {
       recordDecision({
         subsystem: 'cognitive-router',
@@ -387,7 +395,7 @@ export function route(input, context = {}) {
           nativeEffort: classification.nativeEffort,
         },
         confidence: classification.confidence,
-      }).catch(() => {});
+      }, { pluginRoot }).catch(() => {});
     }).catch(() => {});
   } catch {
     // Non-critical: decision trail is advisory

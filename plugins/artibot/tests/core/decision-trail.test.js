@@ -4,32 +4,39 @@
  * redaction, prototype-pollution rejection, and integration with runtime-prompt,
  * cognitive router, and user-profile subsystems.
  *
- * ── DO NOT RUN THIS FILE UNDER `--no-isolate` ───────────────────────────────
- * Under `--no-isolate` these tests write their fixtures into the REAL
- * `runtime/decision-trail.json` instead of their per-test sandbox, silently
- * polluting live learning data. Measured 2026-08-25 on a 28-file set
- * (`grep -rln CLAUDE_PLUGIN_ROOT tests/`): 341 fixture entries had accumulated
- * in the real trail, and each additional failing run appended ~26 more. The
- * fixtures are the giveaway — subsystems `s`, `a`, `b`, `x`, `router`,
- * `profile`, which no production code can emit (production writes only
- * auto-cleanup, auto-commit, auto-macro-register, auto-pr-creator,
- * cognitive-router, runtime-prompt, user-profile).
+ * ── HISTORY: fixtures leaked into the live trail; mechanism found 2026-08-26 ──
+ * Test fixtures used to accumulate in the repo's real
+ * `runtime/decision-trail.json`. An earlier note here (commit c27632ce) called
+ * this a `--no-isolate`-only hazard and recorded the mechanism as unidentified.
+ * Both of those statements were wrong; the corrected findings are:
  *
- * Two symptoms, one cause: writes land in the real root, so the sandbox's
- * `runtime/` is never created (`ENOENT .../artibot-trail-XXXX/runtime/
- * decision-trail.json`) and reads that reach the real file see its entry count
- * instead of the fixture's (`expected 811 to be 3`).
+ *   - It was NOT specific to `--no-isolate`, and the default `isolate: true`
+ *     config did NOT make it safe. Measured 2026-08-26, default config, single
+ *     files: `tests/core/user-profile.test.js` (22 passed) grew the real trail
+ *     971 -> 972; `tests/cognitive/router.test.js` (78 passed) grew it 972 ->
+ *     973. The 2026-08-25 "default is safe" check only counted non-production
+ *     subsystem names, and these two leaks emit `user-profile` and
+ *     `cognitive-router` — production names — so that check could not see them.
  *
- * THE CODE PATH THAT CAUSES IT IS UNIDENTIFIED. Do not read the note above as
- * a diagnosis — it describes the symptom, not the mechanism. Every two-file
- * reproduction attempt failed; it only manifests at ~28-file scale, and the
- * file execution order is not reproducible even with `--sequence.seed` fixed
- * (measured: same seed, same list, different order and different outcome run
- * to run). Whoever narrows it further should record the mechanism here.
+ *   - The "only at ~28-file scale" and "~26 entries per run" observations were
+ *     real but misattributed. `router.route()` cannot await its trail write, so
+ *     the write flushes on a later turn of the event loop. How many flushes
+ *     survive depends only on how long the process lives after the calls;
+ *     `--no-isolate` keeps one worker alive for the whole run, so far more land.
+ *     The file count itself was never the variable.
  *
- * The default config (`isolate: true`) does NOT trigger this — verified
- * 2026-08-25, this file alone and in pairs, every seed tried. CI runs the
- * default, so this is a manual-flag hazard only.
+ *   - The mechanism was the trail path being re-derived from
+ *     `CLAUDE_PLUGIN_ROOT` at each use rather than once per operation, with
+ *     `getPluginRoot()` falling back to the real plugin directory when the
+ *     variable is unset. That also made it destructive, not merely noisy: a read
+ *     from the sandbox followed by a write to the real root REPLACED the real
+ *     trail with fixture data. That is the other face of `expected 811 to be 3`.
+ *
+ * Fixed on three fronts: `recordDecision` now resolves the path once per call
+ * (`lib/core/decision-trail.js`), `router.route()` pins the root it observed at
+ * call time (`lib/cognitive/router.js`), and test files that touch a recording
+ * subsystem sandbox the root via `tests/helpers/trail-sandbox.js`.
+ * `tests/core/decision-trail-path-isolation.test.js` guards all three.
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest';

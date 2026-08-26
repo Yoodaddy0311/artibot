@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readFileSync } from 'node:fs';
+import { useTrailSandbox } from '../helpers/trail-sandbox.js';
 
 /**
  * E2E Integration Test: Command Execution Flow
@@ -25,6 +26,14 @@ const PLUGIN_ROOT = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   '..', '..',
 );
+
+// Step 3 drives the real cognitive router, and `route()` records every
+// classification to the decision trail. The trail resolves its own root from
+// CLAUDE_PLUGIN_ROOT, independently of the PLUGIN_ROOT above, so without this
+// sandbox those writes land in the repo's live learning data. Assertions here
+// read plugin files through PLUGIN_ROOT (derived from import.meta.url), which
+// the sandbox does not affect.
+useTrailSandbox('e2e-command');
 
 describe('E2E: Command Execution Flow', () => {
   let detectIntent;

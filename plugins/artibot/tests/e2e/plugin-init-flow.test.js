@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readdirSync, readFileSync } from 'node:fs';
+import { useTrailSandbox } from '../helpers/trail-sandbox.js';
 
 /**
  * E2E Integration Test: Plugin Initialization Flow
@@ -25,6 +26,14 @@ const PLUGIN_ROOT = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   '..', '..',
 );
+
+// Step 6 drives the real cognitive router, and `route()` records every
+// classification to the decision trail. The trail resolves its own root from
+// CLAUDE_PLUGIN_ROOT, independently of the PLUGIN_ROOT above, so without this
+// sandbox those writes land in the repo's live learning data. Assertions here
+// read plugin files through PLUGIN_ROOT (derived from import.meta.url), which
+// the sandbox does not affect.
+useTrailSandbox('e2e-plugin-init');
 
 describe('E2E: Plugin Initialization Flow', () => {
   describe('Step 1 - Plugin manifest validation', () => {
@@ -100,6 +109,12 @@ describe('E2E: Plugin Initialization Flow', () => {
 
     afterEach(() => {
       vi.restoreAllMocks();
+      // `restoreAllMocks` restores spies but leaves `doMock` factories
+      // registered, so without this the platform mock above outlives this
+      // describe: Step 6 re-imports the router after `resetModules()` and gets
+      // the mocked `getPluginRoot`, sending its trail writes to the real
+      // plugin root regardless of CLAUDE_PLUGIN_ROOT.
+      vi.doUnmock('../../lib/core/platform.js');
     });
 
     it('loads config successfully from artibot.config.json', () => {

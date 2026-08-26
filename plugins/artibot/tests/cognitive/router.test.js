@@ -8,6 +8,11 @@ import {
   resetRouter,
   route,
 } from '../../lib/cognitive/router.js';
+import { useTrailSandbox } from '../helpers/trail-sandbox.js';
+
+// `route()` records every classification to the decision trail. Without a
+// sandbox root those writes land in the repo's live learning data.
+useTrailSandbox('router');
 
 describe('router', () => {
   beforeEach(() => {

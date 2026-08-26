@@ -77,11 +77,22 @@ function resolveConfig() {
   return cachedConfig;
 }
 
-function resolveTrailPath() {
+/**
+ * Resolve the trail file path.
+ *
+ * `pluginRoot` lets a caller pin the root it observed at call time. Without it
+ * the root comes from `process.env.CLAUDE_PLUGIN_ROOT` (via `getPluginRoot()`)
+ * as read *right now*, which is wrong for any write whose caller resolved its
+ * intent earlier — see `recordDecision`'s options and `lib/cognitive/router.js`.
+ *
+ * @param {string} [pluginRoot] - Root to resolve a relative trail path against.
+ * @returns {string} Absolute path to the trail file.
+ */
+function resolveTrailPath(pluginRoot) {
   const cfg = resolveConfig();
   const p = cfg.path;
   if (path.isAbsolute(p)) return p;
-  return path.join(getPluginRoot(), p);
+  return path.join(pluginRoot || getPluginRoot(), p);
 }
 
 // ---------------------------------------------------------------------------
@@ -122,10 +133,13 @@ function sanitize(value, redact) {
 // Storage (synchronous read + atomic write)
 // ---------------------------------------------------------------------------
 
-function readTrailSync() {
-  const p = resolveTrailPath();
+// Both take the path as an argument rather than re-resolving it. A read and the
+// write that follows it must target the same file: they form a read-modify-write,
+// and resolving twice lets the destination move between them, replacing the
+// second file's contents with the first file's data.
+function readTrailSync(trailPath) {
   try {
-    const raw = fsSync.readFileSync(p, 'utf-8');
+    const raw = fsSync.readFileSync(trailPath, 'utf-8');
     const parsed = JSON.parse(raw);
     if (!parsed || !Array.isArray(parsed.entries)) {
       return { entries: [], metadata: { createdAt: new Date().toISOString() } };
@@ -136,9 +150,8 @@ function readTrailSync() {
   }
 }
 
-function writeTrailSync(data) {
-  const p = resolveTrailPath();
-  atomicWriteJsonSync(p, data);
+function writeTrailSync(trailPath, data) {
+  atomicWriteJsonSync(trailPath, data);
 }
 
 // ---------------------------------------------------------------------------
@@ -166,9 +179,15 @@ function generateId() {
  * @param {object} [decision.inputs]    - input signals (redacted if sensitive)
  * @param {object} [decision.outputs]   - decision output (redacted if sensitive)
  * @param {number} [decision.confidence]- 0.0-1.0 if applicable
+ * @param {object} [options]
+ * @param {string} [options.pluginRoot] - Plugin root captured by the caller at the
+ *   moment the decision was made. Pass it whenever the write is deferred (a
+ *   fire-and-forget `.then()` chain, a queued task): without it the destination
+ *   is re-read from the environment at flush time, which may no longer be the
+ *   root the caller meant. See `lib/cognitive/router.js`.
  * @returns {Promise<{id: string, timestamp: string}|null>} null when disabled or on failure
  */
-export async function recordDecision(decision) {
+export async function recordDecision(decision, options = {}) {
   const cfg = resolveConfig();
   if (!cfg.enabled) return null;
   if (!decision || typeof decision !== 'object') return null;
@@ -177,6 +196,13 @@ export async function recordDecision(decision) {
   }
 
   try {
+    // Resolve once, up front. Everything below — read, mkdir, write — uses this
+    // one value. `await ensureDir(...)` suspends mid-function, and while the
+    // argument to it is evaluated before the suspension, a second resolution
+    // *after* the suspension would observe whatever the environment says on
+    // resumption. That is how a sandboxed read followed by a real-root write
+    // overwrites the real trail with fixture data.
+    const trailPath = resolveTrailPath(options.pluginRoot);
     const timestamp = new Date().toISOString();
     const id = generateId();
 
@@ -195,7 +221,7 @@ export async function recordDecision(decision) {
         : null,
     };
 
-    const trail = readTrailSync();
+    const trail = readTrailSync(trailPath);
     trail.entries.push(entry);
 
     // Hard-cap on entries (drop oldest)
@@ -209,8 +235,8 @@ export async function recordDecision(decision) {
       totalAppended: (trail.metadata?.totalAppended || 0) + 1,
     };
 
-    await ensureDir(path.dirname(resolveTrailPath()));
-    writeTrailSync(trail);
+    await ensureDir(path.dirname(trailPath));
+    writeTrailSync(trailPath, trail);
 
     return { id, timestamp };
   } catch {
@@ -227,11 +253,14 @@ export async function recordDecision(decision) {
  * @param {string} [filter.action]    - exact action match
  * @param {Date|string|number} [filter.since] - return entries at/after this timestamp
  * @param {number} [filter.limit]     - max entries returned (newest first)
+ * @param {string} [filter.pluginRoot] - read the trail under this root instead of
+ *   the one the environment names right now; mirrors `recordDecision`'s option
+ *   so a caller can read back exactly what it wrote.
  * @returns {Promise<object[]>}
  */
 export async function queryDecisions(filter = {}) {
   try {
-    const trail = readTrailSync();
+    const trail = readTrailSync(resolveTrailPath(filter.pluginRoot));
     let entries = trail.entries;
 
     if (filter.subsystem) {
@@ -266,7 +295,9 @@ export async function queryDecisions(filter = {}) {
 export async function pruneDecisionTrail() {
   const cfg = resolveConfig();
   try {
-    const trail = readTrailSync();
+    // Read-modify-write: one resolution shared by both halves.
+    const trailPath = resolveTrailPath();
+    const trail = readTrailSync(trailPath);
     const before = trail.entries.length;
     if (cfg.retentionDays <= 0) {
       return { removed: 0, remaining: before };
@@ -279,7 +310,7 @@ export async function pruneDecisionTrail() {
       ...(trail.metadata || {}),
       lastPruned: new Date().toISOString(),
     };
-    writeTrailSync(trail);
+    writeTrailSync(trailPath, trail);
     return { removed: before - trail.entries.length, remaining: trail.entries.length };
   } catch {
     return { removed: 0, remaining: 0 };
@@ -292,7 +323,7 @@ export async function pruneDecisionTrail() {
  */
 export async function getDecisionStats() {
   try {
-    const trail = readTrailSync();
+    const trail = readTrailSync(resolveTrailPath());
     const bySubsystem = Object.create(null);
     const byAction = Object.create(null);
     const cutoff24h = Date.now() - 24 * 60 * 60 * 1000;
