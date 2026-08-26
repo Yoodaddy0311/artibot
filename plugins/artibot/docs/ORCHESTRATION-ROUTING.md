@@ -80,6 +80,50 @@ The classifier MAY only recommend them (advisory text). Only `inline` and `team`
 
 ---
 
+## Process Cardinality (orthogonal)
+
+The 2-axis table above answers **how work is decomposed and controlled inside one Claude Code
+session**. Process cardinality is a separate, orthogonal question: **how many Claude Code windows
+(OS processes, each with its own context window, leader, and worktree) take part**. It adds no
+row, no column, and no fifth mechanism to the 2-axis model — the table above is unchanged.
+
+| Surface | Windows (processes) | Fan-out inside the window | Who starts the processes |
+|---|---|---|---|
+| `inline` | 1 | none | — |
+| `team` | 1 | N in-process teammates (`Agent` spawns into the one implicit team) | harness, inside the session |
+| `orchestrate` / `/dynamic` | 1 | fixed control flow (pattern pipeline / `Workflow` tool script) | harness, inside the session |
+| `autopilot` (standard) | 1 | delegates to `team` / `orchestrate` per phase | harness, inside the session |
+| `autopilot --fast` / `-fast` | 1 | dependency-graph waves of in-process workers; with `--worktree`, each worker in its own worktree | harness, inside the session |
+| `/split` | **N** (practical cap 4) | each window is a full session and may itself run any row above | **the human** opens the windows — the plugin only plans, briefs, observes, and integrates |
+
+Rules that follow from the table:
+
+- **Recommend-only.** `/split` never auto-fires. The `recommend=split` hint is wired via
+  `lib/cognitive/workflow-plan.js#deriveRecommendation`, gated by
+  `config.split.recommendMinSubtasks` (**shipped `null` = OFF, opt-in**; an integer ≥ 2 enables it,
+  together with `config.split.minStems` as the distinct-agent floor; values ≤ 6 shadow the
+  `autopilot` hint, whose floor is 6), and rendered through the
+  `scripts/hooks/runtime-prompt.js#RECOMMENDATION_HINTS` allowlist (`workflow | split | autopilot`)
+  as `[artibot:hint recommend=split]`. Advisory only — the model surfaces it as a sentence and waits
+  for confirmation (`CLAUDE.md` "Recommend-hint surfacing rule"); it falls under the same
+  [Harness Constraint](#harness-constraint-do-not-violate) as `recommend=workflow` and
+  `recommend=autopilot`. Only `inline` and `team` auto-fire.
+- **`-fast` is not `/split`.** `-fast` multiplies workers inside one context window, one leader,
+  and one landing pipeline; `/split` multiplies context windows, leaders, and landing pipelines.
+  They compose (a split window may run `-fast`) but are never substitutes.
+- **`sequence` is not `split`.** `lib/planning/session-sizer.js` recommends `sequence`
+  (`recommendation: 'sequence'`, `sequenceInto: k`) when a task should be cut into *k successive*
+  sessions; `/split` cuts it into *k concurrent* windows. Naming rows:
+  [ORCHESTRATION-GLOSSARY.md](ORCHESTRATION-GLOSSARY.md#canonical-naming-convention).
+- **Truth source for "which windows exist / are done" is git, not the messaging layer.**
+  `git worktree list --porcelain` and commit trailers on the limb branch are authoritative;
+  `ListAgents` / `SendMessage` are an optimization. Measured 2026-08-26: the `ListAgents` tool
+  output has no cwd column, so a window cannot be matched to its worktree by cwd from inside a
+  session (record: root `docs/PRD/split-cross-session-multi-worktree-20260826.md`, section
+  "Phase 2 프로브 실측" — untracked design doc).
+
+---
+
 ## Model-Era Assumptions (Single Source)
 
 All model knowledge — names, pricing, tokenizer limits, context windows, and tier

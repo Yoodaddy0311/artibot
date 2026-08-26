@@ -12,7 +12,7 @@
 >
 > **Claude Code를 위한 인지 오케스트레이션 OS** — 계층 메모리, 검증가능-보상(RLVR) 학습, MCP 서버, 멀티 플랫폼 에이전트 팀.
 
-Artibot은 Claude Code의 네이티브 **Agent Teams API**를 핵심 엔진으로 사용하여 28개 전문 에이전트, 113개 도메인 스킬, 11단계 런타임 미들웨어, 계층 메모리·규칙 추출 학습 모듈, 스웜 동기화 모듈을 통합한 **5-layer 오케스트레이션 OS**입니다. System 1/2 인지 라우팅과 검증가능 보상(테스트 통과·타입체크) 기반 학습으로 라우팅·스킬 선택을 점진 보정합니다.
+Artibot은 Claude Code의 네이티브 **Agent Teams API**를 핵심 엔진으로 사용하여 28개 전문 에이전트, 114개 도메인 스킬, 11단계 런타임 미들웨어, 계층 메모리·규칙 추출 학습 모듈, 스웜 동기화 모듈을 통합한 **5-layer 오케스트레이션 OS**입니다. System 1/2 인지 라우팅과 검증가능 보상(테스트 통과·타입체크) 기반 학습으로 라우팅·스킬 선택을 점진 보정합니다.
 
 > **참고(2026-06 lean redesign):** 기존 GRPO 정책 옵티마이저는 측정 가능한 개선이 없어 철거되었습니다. 현재 학습은 **검증가능 보상(RLVR)** 신호(테스트 통과·타입체크·no-revisit)로 라우팅/스킬 승격과 계층 메모리를 보정하는 방식이며, 별도 외부 보상 모델·강화학습 옵티마이저는 사용하지 않습니다.
 
@@ -421,13 +421,13 @@ Artibot의 핵심 엔진은 Claude Code의 **Agent Teams API**입니다. 단순�
 | **토큰 비용** | 1x | ~5x |
 | **적합 작업** | 단일 파일 분석, 검색, 빠른 위임 | 복잡한 기능 구현, 멀티 에이전트 협업 |
 
-### 78개 슬래시 커맨드
+### 79개 슬래시 커맨드
 
 - `/sc`로 자연어 의도를 분석하여 최적 커맨드로 자동 라우팅
 - 개발, 분석, 품질, 테스트, 문서화, 배포, 마케팅 전 영역 커버
 - **비개발자도 자연어로 트리거 가능** — "ADR 작성해줘", "마이그레이션 전략 짜줘" 입력 시 자동으로 적합한 커맨드 제안
 
-### 113개 도메인 스킬
+### 114개 도메인 스킬
 
 - 12개 페르소나 스킬 (architect, frontend, backend, security, distill 등)
 - 6개 코어 스킬 (orchestration, principles, coding/security/testing standards)
@@ -436,7 +436,7 @@ Artibot의 핵심 엔진은 Claude Code의 **Agent Teams API**입니다. 단순�
 - 23개 마케팅 스킬 (SEO, CRO, A/B 테스트, 이메일 마케팅 등)
 - 63개 기타 스킬 (오케스트레이션 패턴, DDD, 자가학습/메모리, 관측성, 플랫폼 auth/deployment/DB, 프롬프트·도구 설계, 품질 게이트, 온보딩/운영 등 — 전체 목록은 [스킬 시스템](#스킬-시스템) 참고)
 
-실측 기준: `skills/*/SKILL.md` 보유 디렉토리 카운트 (113개, 2026-07-09 기준). 카테고리는 이름 패턴(`persona-*` 등) 및 frontmatter 기준 분류.
+실측 기준: `skills/*/SKILL.md` 보유 디렉토리 카운트 (114개, 2026-08-26 기준). 카테고리는 이름 패턴(`persona-*` 등) 및 frontmatter 기준 분류.
 
 ### 런타임 미들웨어 파이프라인 (v1.14.0+)
 
@@ -554,8 +554,8 @@ Artibot은 Claude Code 외에도 **Gemini CLI**, **OpenAI Codex CLI**, **Cursor 
 | Agent Teams (P2P 메시징) | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Sub-Agent (단방향 위임) | ✅ | ✅ | ✅ | ⚠️ 제한적 | ✅ |
 | 28개 에이전트 (오케스트레이터 1 + 전문 27) | ✅ | ✅ 자동변환 | ✅ 자동변환 | ✅ 자동변환 | ✅ 자동변환 |
-| 113개 스킬 (SKILL.md) | ✅ | ✅ | ✅ | ✅ | ✅ |
-| 슬래시 커맨드 | ✅ 78개 | ✅ TOML | → Workflows | → Prompts | → Workflows |
+| 114개 스킬 (SKILL.md) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| 슬래시 커맨드 | ✅ 79개 | ✅ TOML | → Workflows | → Prompts | → Workflows |
 | Hooks 자동작동 | ✅ 15이벤트 | ✅ 동일패턴 | ⚠️ 제한적 | ❌ | ✅ Agent Manager |
 | 인지 라우터 (System 1/2) | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 자가학습 (RLVR 신호) | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -823,7 +823,7 @@ Agent Teams (Full P2P)  →  Sub-Agent (단방향)  →  Direct (직접 실행)
 | 1 | **Agent Teams** | Claude의 네이티브 Agent Teams API로 전문 에이전트를 팀으로 구성. P2P 통신, 공유 태스크, 자기 할당 지원 |
 | 2 | **Cognitive Routing** | System 1(직관적 빠른 판단) / System 2(심층 분석) 이중 프로세스로 요청 복잡도에 따라 자동 라우팅 |
 | 3 | **Guard Registry** | 중앙 집중식 안전 파이프라인. 위험 명령 차단, 민감 파일 보호, Stop-Review-Gate로 코드 리뷰 강제 |
-| 4 | **Skills** | 113개 도메인 스킬이 컨텍스트에 따라 자동 활성화. 페르소나, 코딩 표준, 언어별 패턴, 마케팅 전략 등 |
+| 4 | **Skills** | 114개 도메인 스킬이 컨텍스트에 따라 자동 활성화. 페르소나, 코딩 표준, 언어별 패턴, 마케팅 전략 등 |
 | 5 | **Hooks** | 15개 이벤트에 연결된 자동화 파이프라인. 포맷팅, 검증, 추적, 외부 알림을 코드 변경 없이 처리 |
 
 ### 최소 실행 흐름
@@ -1565,15 +1565,15 @@ plugins/artibot/
 ├── agents/                      # 28개 에이전트 정의 (orchestrator 1 + 팀원 27)
 │   ├── orchestrator.md          #   CTO / 팀 리더 (Agent Teams API)
 │   └── [27개 전문 에이전트].md    #   팀원 (SendMessage + TaskUpdate)
-├── commands/                    # 78개 슬래시 커맨드
+├── commands/                    # 79개 슬래시 커맨드
 │   ├── sc.md                    #   메인 라우터
 │   ├── orchestrate.md           #   팀 오케스트레이션 (네임드 Agent 스폰)
 │   ├── spawn.md                 #   팀 스폰 (병렬 실행)
 │   └── [47개 커맨드].md
-├── skills/                      # 113개 스킬 디렉토리 (forked context 격리)
+├── skills/                      # 114개 스킬 디렉토리 (forked context 격리)
 │   ├── orchestration/           #   위임 모드 선택 + 팀 라우팅
 │   ├── delegation/              #   Sub-Agent/Team 위임 전략
-│   └── [113개 스킬]/
+│   └── [114개 스킬]/
 ├── hooks/
 │   └── hooks.json               # 훅 이벤트 매핑
 ├── scripts/

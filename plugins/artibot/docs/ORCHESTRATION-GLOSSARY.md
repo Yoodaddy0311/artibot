@@ -1,6 +1,6 @@
 # Orchestration Glossary
 
-Four parallel-execution mechanisms in Artibot. Their engines are distinct and must not be conflated.
+Four parallel-execution mechanisms in Artibot. Their engines are distinct and must not be conflated. (`split` below is an orthogonal process-cardinality surface, not a fifth mechanism.)
 
 ## Entries
 
@@ -16,6 +16,10 @@ Four parallel-execution mechanisms in Artibot. Their engines are distinct and mu
 
 **dynamic** — Slash entry point (**`/dynamic`**) that authors and runs a harness **`Workflow` tool** script (fan-out / pipeline / adversarial verify over a known worklist). Invoking it constitutes the explicit opt-in the `Workflow` tool requires; it never auto-fires. Runs are visible in the native `/workflows` monitor (unlike `/orchestrate` runs).
 
+**split** — Process-cardinality surface (**`/split`**): the human opens **N concurrent Claude Code windows** (each its own worktree "limb" with disjoint file ownership); the plugin plans, briefs, observes completion via git trailers, and integrates. Orthogonal to the four mechanisms above — every window may run any of them — and it never auto-fires. Not a fifth mechanism. See [Process Cardinality (orthogonal)](ORCHESTRATION-ROUTING.md#process-cardinality-orthogonal).
+
+**sequence** — `lib/planning/session-sizer.js` recommendation (`recommendation: 'sequence'`, `sequenceInto: k`) that an oversized task be cut into **k successive sessions**. Renamed from `split` on 2026-08-26 (root `docs/adr/ADR-001`, untracked design record) so that the word `split` means concurrent windows only.
+
 ---
 
 ## Canonical Naming Convention
@@ -30,6 +34,8 @@ Bare "workflow" is **banned in orchestration contexts** — six referents share 
 | Legacy "dynamic-workflow" (Auto-Team trigger) | **Auto-Team** | "dynamic-workflow" (except when citing the filename `workflow-plan.js`) |
 | Native monitor command | **`/workflows` monitor** | bare "workflows" |
 | Generic noun in non-orchestration contexts (CRM, git, marketing docs) | allowed as-is; inside orchestration docs prefer "pipeline" / "process" | — |
+| Concurrent-window division (`/split` command, limbs, `Split-Limb:` trailer) | **split** — always with its referent: `/split`, "split window", "split limb" | "sequence"; bare "split" for the sizer label |
+| Successive-session division (`session-sizer.js` recommendation) | **sequence** (`recommendation: 'sequence'`, `sequenceInto`) | "split" (the pre-2026-08-26 sizer label), "split into sessions" |
 
 The classifier output label `workflow` (`lib/cognitive/workflow-plan.js#buildWorkflowPlan`) and the hint string `recommend=workflow` are **code identifiers** — they keep the legacy name until a code-level rename ships. Docs must annotate them as "(classifier label: `workflow`)" when referring to the orchestrate mechanism.
 
