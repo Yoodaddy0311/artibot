@@ -10,8 +10,15 @@
  *
  * Public surface:
  *   - summarizeSession(sessionId)
+ *   - summarizeEvents(sessionId, events)
  *   - renderTimelineTable(summary)
  *   - findUnterminatedPhases(events)
+ *
+ * MEASUREMENT CONTRACT (PRD split Phase 5, 2026-08-26): a duration that was
+ * not measured is `null`, never `0`. `0` is a measurement ("start and end were
+ * the same instant"); `null` is the absence of one (window never closed,
+ * timestamp unparseable, no events at all). Collapsing the two is what let a
+ * stalled EXECUTE read as "instant" in the bottleneck table.
  *
  * @module lib/autopilot/replay
  */
@@ -172,9 +179,6 @@ function buildPhaseEntry(group) {
   const last = evs[evs.length - 1];
   const startMs = tsToMs(first?.ts);
   const endMs = tsToMs(last?.ts);
-  const durationMs = Number.isFinite(startMs) && Number.isFinite(endMs)
-    ? Math.max(0, endMs - startMs)
-    : 0;
   let warnings = 0;
   let errors = 0;
   let retries = 0;
@@ -190,6 +194,12 @@ function buildPhaseEntry(group) {
   // measured duration is what let a stalled EXECUTE lose the bottleneck
   // ranking to a phase that merely took longer to *log*.
   const unterminated = group.opened === true && group.closed !== true;
+  // `null`, not `0`: an unclosed window has no end to subtract, and an
+  // unparseable timestamp has nothing to subtract from. Only a window with two
+  // real instants yields a number — which may legitimately be 0.
+  const durationMs = !unterminated && Number.isFinite(startMs) && Number.isFinite(endMs)
+    ? Math.max(0, endMs - startMs)
+    : null;
   return {
     phase: group.phase,
     startedAt: typeof first?.ts === 'string' ? first.ts : null,
@@ -206,36 +216,41 @@ function buildPhaseEntry(group) {
 
 /**
  * Compute totalDurationMs across all phases (first ts → last ts).
+ * `null` when there is nothing to measure (no events, unparseable bounds).
  * @param {object[]} events
- * @returns {number}
+ * @returns {number|null}
  */
 function computeTotalDuration(events) {
-  if (!events.length) return 0;
+  if (!events.length) return null;
   const firstMs = tsToMs(events[0].ts);
   const lastMs = tsToMs(events[events.length - 1].ts);
-  if (!Number.isFinite(firstMs) || !Number.isFinite(lastMs)) return 0;
+  if (!Number.isFinite(firstMs) || !Number.isFinite(lastMs)) return null;
   return Math.max(0, lastMs - firstMs);
 }
+
+/**
+ * @typedef {object} SessionSummary
+ * @property {string} sessionId
+ * @property {number|null} totalDurationMs - null when nothing was measurable
+ * @property {Array<{
+ *   phase: string, startedAt: string|null, endedAt: string|null,
+ *   durationMs: number|null, unterminated: boolean,
+ *   events: number, warnings: number, errors: number,
+ *   retries: number, bottleneck: boolean
+ * }>} phases
+ * @property {string|null} topBottleneck
+ */
 
 /**
  * Summarize a session by aggregating events.ndjson into phase-level timeline.
  * Returns empty result if events file is missing or empty.
  *
  * @param {string} sessionId
- * @returns {{
- *   sessionId: string,
- *   totalDurationMs: number,
- *   phases: Array<{
- *     phase: string, startedAt: string|null, endedAt: string|null, durationMs: number,
- *     events: number, warnings: number, errors: number,
- *     retries: number, bottleneck: boolean
- *   }>,
- *   topBottleneck: string|null
- * }}
+ * @returns {SessionSummary}
  */
 export function summarizeSession(sessionId) {
   if (!sessionId || typeof sessionId !== 'string') {
-    return { sessionId: '', totalDurationMs: 0, phases: [], topBottleneck: null };
+    return { sessionId: '', totalDurationMs: null, phases: [], topBottleneck: null };
   }
   let events;
   try {
@@ -243,8 +258,27 @@ export function summarizeSession(sessionId) {
   } catch {
     events = null;
   }
+  return summarizeEvents(sessionId, events);
+}
+
+/**
+ * Pure form of {@link summarizeSession}: same aggregation over an in-memory
+ * event array instead of the autopilot store. This is the seam `/split`
+ * telemetry uses — its ndjson lives in `runtime/split/`, not
+ * `runtime/autopilot/`, but the line shape is identical
+ * (`lib/observability/run-events.js`), so one summarizer serves both.
+ *
+ * Never throws: non-array or empty input yields the empty summary with
+ * `totalDurationMs: null`.
+ *
+ * @param {string} sessionId - echoed into the summary; may be any run id
+ * @param {object[]} events - raw events in file order
+ * @returns {SessionSummary}
+ */
+export function summarizeEvents(sessionId, events) {
+  const id = typeof sessionId === 'string' ? sessionId : '';
   if (!Array.isArray(events) || events.length === 0) {
-    return { sessionId, totalDurationMs: 0, phases: [], topBottleneck: null };
+    return { sessionId: id, totalDurationMs: null, phases: [], topBottleneck: null };
   }
   const totalDurationMs = computeTotalDuration(events);
   const groups = groupByPhase(events);
@@ -256,8 +290,8 @@ export function summarizeSession(sessionId) {
     // Unterminated windows carry no measured duration, so they take no part in
     // the bottleneck ranking. Including them let a 0ms stalled phase win or
     // lose the comparison on a number that was never a measurement.
-    if (p.unterminated) continue;
-    if (totalDurationMs > 0
+    if (p.unterminated || p.durationMs === null) continue;
+    if (totalDurationMs !== null && totalDurationMs > 0
       && p.durationMs / totalDurationMs >= BOTTLENECK_THRESHOLD) {
       p.bottleneck = true;
     }
@@ -267,7 +301,7 @@ export function summarizeSession(sessionId) {
     }
   }
   return {
-    sessionId,
+    sessionId: id,
     totalDurationMs,
     phases,
     topBottleneck: topPhase,
@@ -298,7 +332,7 @@ export function renderTimelineTable(summary) {
     return `| ${p.phase} | ${fmtTime(p.startedAt)} | ${duration} | `
       + `${p.events} | ${p.warnings} | ${p.errors} | ${p.retries} | ${flag} |`;
   });
-  const total = s.totalDurationMs || 0;
+  const total = Number.isFinite(s.totalDurationMs) ? s.totalDurationMs : 0;
   let footer = '';
   if (s.topBottleneck && total > 0) {
     const top = phases.find((p) => p.phase === s.topBottleneck);

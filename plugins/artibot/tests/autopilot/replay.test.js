@@ -49,7 +49,7 @@ describe('summarizeSession — missing or empty input', () => {
     const id = `ap-test-replay-missing-${Date.now()}`;
     const summary = summarizeSession(id);
     expect(summary.sessionId).toBe(id);
-    expect(summary.totalDurationMs).toBe(0);
+    expect(summary.totalDurationMs).toBeNull();
     expect(summary.phases).toEqual([]);
     expect(summary.topBottleneck).toBeNull();
   });

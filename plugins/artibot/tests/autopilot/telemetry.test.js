@@ -44,6 +44,16 @@ describe('getEventsPath', () => {
     expect(() => getEventsPath('')).toThrow(TypeError);
     expect(() => getEventsPath(null)).toThrow(TypeError);
   });
+
+  it('keeps the sessionId error message across the run-events promotion', () => {
+    // The core moved to lib/observability/run-events.js, which names its id
+    // `runId`. The autopilot surface still speaks `sessionId` — a caller that
+    // matched on this message before 2026-08-26 must still match.
+    const message = 'sessionId must be a non-empty string';
+    expect(() => getEventsPath('')).toThrow(message);
+    expect(() => appendEvent('', {})).toThrow(message);
+    expect(() => readEvents('')).toThrow(message);
+  });
 });
 
 describe('appendEvent + readEvents roundtrip', () => {

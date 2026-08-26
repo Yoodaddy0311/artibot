@@ -16,15 +16,18 @@
  * @module lib/autopilot/telemetry
  */
 
-import path from 'node:path';
-import {
-  appendFileSync,
-  existsSync,
-  readFileSync,
-} from 'node:fs';
-import { dirname } from 'node:path';
-import { ensureDirSync } from '../core/file.js';
 import { getStoreDir } from './session-store.js';
+import {
+  appendRunEvent,
+  readRunEvents,
+  resolveRunEventsPath,
+} from '../observability/run-events.js';
+
+// The store-dir-agnostic core (normalize / append / read) was promoted to
+// `lib/observability/run-events.js` on 2026-08-26 so `/split` can write the
+// same line shape into `runtime/split/`. This module is the autopilot binding:
+// it supplies the store dir and keeps the historical names. Nothing about the
+// on-disk line changed — `replay.js` reads both streams unmodified.
 
 /**
  * Resolve absolute ndjson path for a session.
@@ -35,28 +38,7 @@ export function getEventsPath(sessionId) {
   if (!sessionId || typeof sessionId !== 'string') {
     throw new TypeError('sessionId must be a non-empty string');
   }
-  return path.join(getStoreDir(), `${sessionId}.events.ndjson`);
-}
-
-/**
- * Build a normalized event line; missing fields are filled with safe defaults.
- * @param {string} sessionId
- * @param {object} event
- * @returns {object}
- */
-function normalizeEvent(sessionId, event) {
-  const e = event && typeof event === 'object' ? event : {};
-  const level = e.level === 'warn' || e.level === 'error' ? e.level : 'info';
-  const out = {
-    ts: typeof e.ts === 'string' ? e.ts : new Date().toISOString(),
-    sessionId,
-    phase: typeof e.phase === 'string' ? e.phase : null,
-    type: typeof e.type === 'string' ? e.type : 'log',
-    level,
-    message: typeof e.message === 'string' ? e.message : '',
-  };
-  if (e.data !== undefined) out.data = e.data;
-  return out;
+  return resolveRunEventsPath(getStoreDir(), sessionId);
 }
 
 /**
@@ -70,27 +52,7 @@ export function appendEvent(sessionId, event) {
   if (!sessionId || typeof sessionId !== 'string') {
     throw new TypeError('sessionId must be a non-empty string');
   }
-  const filePath = getEventsPath(sessionId);
-  ensureDirSync(dirname(filePath));
-  const normalized = normalizeEvent(sessionId, event);
-  const line = `${JSON.stringify(normalized)}\n`;
-  appendFileSync(filePath, line, 'utf-8');
-  return normalized;
-}
-
-/**
- * Parse a single ndjson line; returns null on malformed input.
- * @param {string} line
- * @returns {object|null}
- */
-function parseLine(line) {
-  const trimmed = line.trim();
-  if (!trimmed) return null;
-  try {
-    return JSON.parse(trimmed);
-  } catch {
-    return null;
-  }
+  return appendRunEvent(getStoreDir(), sessionId, event);
 }
 
 /**
@@ -101,28 +63,10 @@ function parseLine(line) {
  * @returns {object[]}
  */
 export function readEvents(sessionId, opts = {}) {
-  const filePath = getEventsPath(sessionId);
-  if (!existsSync(filePath)) return [];
-  let raw;
-  try {
-    raw = readFileSync(filePath, 'utf-8');
-  } catch {
-    return [];
+  if (!sessionId || typeof sessionId !== 'string') {
+    throw new TypeError('sessionId must be a non-empty string');
   }
-  const lines = raw.split('\n');
-  const events = [];
-  for (const line of lines) {
-    const parsed = parseLine(line);
-    if (parsed) events.push(parsed);
-  }
-  let filtered = events;
-  if (opts && typeof opts.level === 'string') {
-    filtered = filtered.filter((e) => e.level === opts.level);
-  }
-  if (opts && Number.isInteger(opts.tail) && opts.tail > 0) {
-    return filtered.slice(-opts.tail);
-  }
-  return filtered;
+  return readRunEvents(getStoreDir(), sessionId, opts);
 }
 
 /**
