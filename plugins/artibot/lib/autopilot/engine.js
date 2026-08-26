@@ -29,6 +29,7 @@ import { extractKey, recallLessons } from './memory.js';
 import {
   attemptCreateWorktree,
   reapSessionArtifacts,
+  worktreeRequested,
 } from './engine-cleanup.js';
 import { recordPhaseResult, safeAppendLesson } from './engine-state.js';
 import { buildBlockedResult, resolveAutopilotConsent } from './consent-gate.js';
@@ -335,12 +336,17 @@ export function runPhase2Execute(state) {
   // was asked and FAILED (git missing, bad `worktreeCwd`, disk) and swallowed
   // it into a warn tick. Reporting a failure as an opt-out is what made a real
   // session unexplainable: `:status` said "no integration worktree" for a run
-  // that had asked for one. `.cwd` falsy ⟺ `worktreePath` falsy, so
-  // `options.useWorktree` is the only thing that separates them here.
+  // that had asked for one. `.cwd` falsy ⟹ `worktreePath` falsy, so
+  // `worktreeRequested` is the only thing that separates them here. (Only that
+  // direction holds: a truthy `worktreePath` can still yield a falsy `.cwd`-less
+  // path through the stable-integration branch at `fast-execution.js:218`.)
+  // The predicate is imported, never re-spelled inline: it has to be the same
+  // one `attemptCreateWorktree` used, or a non-boolean truthy `useWorktree`
+  // gets creation attempted here and reported as an opt-out.
   if (fast?.enabled && !retainFastIntegrationWorktree(state, worktreePath).cwd) {
     fast = demoteFastToStandard(
       fast,
-      state.options?.useWorktree === true ? 'integration-worktree-failed' : 'no-integration-worktree',
+      worktreeRequested(state) ? 'integration-worktree-failed' : 'no-integration-worktree',
     );
   }
 

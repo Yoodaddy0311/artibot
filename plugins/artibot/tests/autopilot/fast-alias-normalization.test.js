@@ -64,7 +64,7 @@ describe('anchor A — commands/autopilot.md carries the alias contract', () => 
   });
 
   // Deliberately >= 1 rather than an exact count: the contract currently
-  // appears on three lines (:46, :60, :234), and a gate that pins the count
+  // appears on three lines (:46, :60, :236), and a gate that pins the count
   // would go red on harmless doc additions. Core tokens are required, spacing
   // and markdown emphasis around them are not.
   it('states on at least one line that both spellings normalize to options.fast = true', () => {

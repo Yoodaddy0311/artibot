@@ -367,6 +367,37 @@ describe('runPhase2Execute — runner branching (ADR-003 Stage 1)', () => {
     expect(inst.fast).toMatchObject({ requested: true, eligibleParallelism: 3 });
   });
 
+  it('should treat a non-boolean truthy useWorktree as a request, not an opt-out', async () => {
+    // The creation gate has always been a bare truthy check, so `'true'` (a
+    // string — what a resumed session or a hand-edited options blob yields)
+    // DOES spawn `git worktree add`. The demotion site used to ask `=== true`,
+    // so the same value failed creation and was then labelled
+    // `no-integration-worktree` — blaming the operator for not asking when the
+    // engine had in fact asked and broken. Both gates now read
+    // `worktreeRequested`, so a truthy-but-not-`true` value cannot land in the
+    // gap between them. Resume matters here: `resumeAutopilot` reads options
+    // straight off disk without the canonical-boolean pass that `startAutopilot`
+    // applies to `fast`, so non-boolean values genuinely reach this code.
+    const inst = await phase2Instruction({
+      fast: true,
+      useWorktree: 'true',
+      worktreeCwd: nonGitDir,
+      cpuCount: 2,
+      fastTasks: [
+        { id: 'api', independent: true, affectedPaths: ['src/api/**'], risk: 'low', worktreeEligible: true },
+        { id: 'ui', independent: true, affectedPaths: ['src/ui/**'], risk: 'low', worktreeEligible: true },
+        { id: 'tests', independent: true, affectedPaths: ['tests/**'], risk: 'medium', worktreeEligible: true },
+      ],
+    }, 'fast-truthy-usewor');
+
+    expect(inst.worktreePath).toBeUndefined();
+    expect(inst.fast).toMatchObject({
+      enabled: false,
+      fallbackReason: 'integration-worktree-failed',
+    });
+    expect(inst.fast.serialReasons).not.toContain('no-integration-worktree');
+  });
+
   it('should retain the session integration worktree for --fast worker instructions', async () => {
     if (!gitAvailable()) return;
     const inst = await phase2Instruction({
