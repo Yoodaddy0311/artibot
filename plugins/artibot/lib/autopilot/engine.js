@@ -338,8 +338,10 @@ export function runPhase2Execute(state) {
   // session unexplainable: `:status` said "no integration worktree" for a run
   // that had asked for one. `.cwd` falsy ⟹ `worktreePath` falsy, so
   // `worktreeRequested` is the only thing that separates them here. (Only that
-  // direction holds: a truthy `worktreePath` can still yield a falsy `.cwd`-less
-  // path through the stable-integration branch at `fast-execution.js:218`.)
+  // direction holds, not the converse: a falsy `worktreePath` can still yield a
+  // truthy `.cwd`, because the stable-integration branch at
+  // `fast-execution.js:218` returns a previously pinned integration without
+  // consulting `worktreePath` at all.)
   // The predicate is imported, never re-spelled inline: it has to be the same
   // one `attemptCreateWorktree` used, or a non-boolean truthy `useWorktree`
   // gets creation attempted here and reported as an opt-out.
