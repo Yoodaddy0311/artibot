@@ -173,12 +173,6 @@
     "delegationMode": true,
     "displayMode": "auto",
     "spawnStrategy": "on-demand-parallel",
-    "worktreeIsolation": {
-      "enabled": false,
-      "defaultMode": "worktree-isolated",
-      "mergeStrategy": "auto",
-      "cleanupOnClose": true
-    },
     "api": {
       "lifecycle": [],
       "communication": [

@@ -9,10 +9,13 @@ on:
   #
   # `push` previously carried a paths filter, justified by the comment "direct
   # pushes to master are blocked by branch protection anyway". That premise was
-  # false: master sets enforce_admins=false, so the owner's direct pushes land
-  # by bypassing the required checks rather than satisfying them. Measured on
-  # 2026-08-11, this workflow ran on 1 of the 5 pushes to master that day, so
-  # 4 of 5 produced neither required plugin context in any form.
+  # false at the time: master then set enforce_admins=false, so the owner's
+  # direct pushes landed by bypassing the required checks rather than satisfying
+  # them. Measured on 2026-08-11, this workflow ran on 1 of the 5 pushes to
+  # master that day, so 4 of 5 produced neither required plugin context in any
+  # form. enforce_admins has been on since 2026-08-19, so such a push is now
+  # rejected rather than bypassing — but the filter still stays off, because a
+  # rejected push is not a delivered context either.
   #
   # The filter now has to stay off for a second reason: the side-branch gate
   # flow needs all four required contexts to appear on the `ci/**` SHA before

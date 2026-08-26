@@ -305,21 +305,25 @@ Describe what changed and why. Include sample input/output if relevant. Link any
 Outside contributors use the PR flow above. Maintainers pushing to `master`
 directly should use the side-branch gate flow, for a reason worth understanding.
 
-### Why direct pushes are not gated
+### Why direct pushes are rejected
 
-`master` has branch protection with four required status checks. It also has
-`enforce_admins` turned off. A required status check can only pass on a commit
-that already exists on the server, and a commit being pushed does not exist yet,
-so every direct push reports this and lands anyway:
+`master` has branch protection with four required status checks, and
+`enforce_admins` is on (enabled 2026-08-19). A required status check can only
+pass on a commit that already exists on the server, and a commit being pushed
+does not exist yet, so a direct push can never satisfy the four checks. With
+`enforce_admins` on, the remote rejects such a push instead of letting it land.
+
+This is not an occasional slip; it is every direct push, by construction. Before
+`enforce_admins` was enabled the same pushes reported
 
 ```
 remote: Bypassed rule violations for refs/heads/master:
 remote: - 4 of 4 required status checks are expected.
 ```
 
-This is not an occasional slip. Every direct push bypasses, by construction. CI
-still runs afterwards, so a red result arrives after the code is already on the
-remote. On 2026-08-11 commit `9f124441` failed CI and stayed on `master`.
+and landed anyway, so a red CI result arrived after the code was already on the
+remote. That is how commit `9f124441` failed CI on 2026-08-11 and stayed on
+`master`. The side-branch gate below is now the only way to land on `master`.
 
 ### The side-branch gate flow
 
@@ -428,8 +432,8 @@ What this gate does not see:
   edits the list.
 - **Clones that never ran the installer.** They have no hook at all, and
   `--no-verify` skips it. This gate removes a slip you can make while paying
-  attention. Turning `enforce_admins` on is what would make the bypass
-  impossible, and no local hook substitutes for that.
+  attention. What makes the bypass impossible is `enforce_admins` on the remote
+  (on since 2026-08-19), and no local hook substitutes for that.
 
 #### Trust boundary
 
