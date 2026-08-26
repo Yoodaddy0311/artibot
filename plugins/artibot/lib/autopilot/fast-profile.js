@@ -221,6 +221,40 @@ function assessTasks(tasks, profile) {
   return settleBlockedDependencies(markDependencyCycles(resolved), knownIds);
 }
 
+/**
+ * Server entry paths are an opt-in conflict seed for `/split`: every task that
+ * touches one of them would start the same dev server, and two windows cannot
+ * share a port. They are read from a top-level option, NOT from `limits`, on
+ * purpose — `normalizeFastProfile` reads exactly four keys and drops the rest,
+ * so a seed smuggled through `limits` would fall back silently to "no seed".
+ *
+ * Absent (`undefined`/`null`) or empty means no seed and leaves every plan
+ * unchanged. Anything the planner cannot read — a non-array, or an entry
+ * `inspectPath` flags unsafe — is fail-closed: the seed marks EVERY eligible
+ * task, which collapses the plan to one stem. Unknown ownership must reduce
+ * concurrency, never widen it (module header).
+ */
+function inspectServerEntryPaths(values) {
+  if (values === null || values === undefined) return { paths: [], unsafe: false };
+  if (!Array.isArray(values)) return { paths: [], unsafe: true };
+  return inspectAffectedPaths(values);
+}
+
+function touchesServerEntry(paths, seed) {
+  return seed.unsafe
+    || paths.some((path) => seed.paths.some((entry) => pathsOverlap(path, entry)));
+}
+
+/**
+ * One predicate for both the audit (`conflictGroups`) and the schedule
+ * (`buildWaves`). Keeping them on the same rule is what prevents a plan that
+ * reports two tasks as one group and then co-locates them in a wave anyway.
+ */
+function tasksConflict(left, right) {
+  return areAffectedPathsConflicting(left.paths, right.paths)
+    || (left.serverEntry === true && right.serverEntry === true);
+}
+
 function buildConflictGroups(tasks) {
   const parents = tasks.map((_, index) => index);
   const root = (index) => {
@@ -231,7 +265,7 @@ function buildConflictGroups(tasks) {
   const join = (left, right) => { parents[root(left)] = root(right); };
   for (let left = 0; left < tasks.length; left += 1) {
     for (let right = left + 1; right < tasks.length; right += 1) {
-      if (areAffectedPathsConflicting(tasks[left].paths, tasks[right].paths)) join(left, right);
+      if (tasksConflict(tasks[left], tasks[right])) join(left, right);
     }
   }
   const groups = new Map();
@@ -250,7 +284,7 @@ function buildWaves(tasks, capacity) {
   while (pending.length > 0) {
     const ready = pending.filter((task) => task.dependencies.every((id) => completed.has(id)));
     const wave = ready.reduce((selected, task) => selected.length < capacity
-      && selected.every((placed) => !areAffectedPathsConflicting(task.paths, placed.paths))
+      && selected.every((placed) => !tasksConflict(task, placed))
       ? [...selected, task] : selected, []);
     if (wave.length === 0) break;
     const waveIds = new Set(wave.map((task) => task.id));
@@ -291,7 +325,11 @@ function standardPlan(assessments, profile, fallbackReason, conflictIds = new Se
 /**
  * Create a bounded parallel-work plan from explicit planner task metadata.
  * `estimatedSpeedup` is an equal-duration scheduling estimate, not a promise.
- * @param {{ fast?: boolean, tasks?: object[], cpuCount?: number, limits?: object }} [options]
+ * `serverEntryPaths` (optional, top-level) seeds the conflict grouping: tasks
+ * that touch any of those paths are kept in one stem. See
+ * `inspectServerEntryPaths` for why it is not a `limits` key.
+ * @param {{ fast?: boolean, tasks?: object[], cpuCount?: number, limits?: object,
+ *   serverEntryPaths?: string[] }} [options]
  * @returns {object}
  */
 export function buildFastFanoutPlan(options = {}) {
@@ -301,7 +339,9 @@ export function buildFastFanoutPlan(options = {}) {
   if (source.fast !== true) return standardPlan(assessments, profile, 'fast-not-requested');
   if (assessments.length === 0) return standardPlan(assessments, profile, 'no-tasks');
 
-  const eligible = assessments.filter((task) => task.eligible);
+  const seed = inspectServerEntryPaths(source.serverEntryPaths);
+  const eligible = assessments.filter((task) => task.eligible)
+    .map((task) => ({ ...task, serverEntry: touchesServerEntry(task.paths, seed) }));
   if (eligible.length < 2) return standardPlan(assessments, profile, 'fewer-than-two-eligible-tasks');
 
   const groups = buildConflictGroups(eligible);
