@@ -281,6 +281,62 @@ describe('파서 — 관측 텍스트 → 구조', () => {
     expect(matchingSessions(`${ROOT}/${n.worktreeName}`, rows)).toEqual(['split-my-repo-auth-3f']);
   });
 
+  it('세션 이름 대조는 대소문자를 가리지 않는다 (2026-08-27 라이브 실측 결함)', () => {
+    // 실측: worktree 디렉터리명은 `split-Artibot-plan-state` 였다 — `repoShortName` 이
+    // `repo-identity.js#sanitizeSegment` 를 쓰는데 그 함수는 소문자화를 하지 않아 원문
+    // 케이스(`Artibot`)가 그대로 남는다. 반면 하네스가 지은 세션 이름은 전부 소문자
+    // (`split-artibot-plan-state-dd`)였다. 대소문자 민감 대조는 매칭 0건 → 창 2개가
+    // 실제로 열려 idle 인데도 `unopenedWindows` 2건으로 refused(fail-closed)했다.
+    // 재현 입력: `.artibot/split/list-agents.txt` + `.artibot/split/dispatch-run.mjs`.
+    const live = [
+      { name: 'split-artibot-plan-state-dd' },
+      { name: 'split-artibot-sid-anchor-4a' },
+      { name: 'ontology-31' },
+    ];
+    expect(matchingSessions(`${ROOT}/split-Artibot-plan-state`, live)).toEqual(['split-artibot-plan-state-dd']);
+    expect(matchingSessions(`${ROOT}/split-Artibot-sid-anchor`, live)).toEqual(['split-artibot-sid-anchor-4a']);
+    // 반대 방향도 같다 — 어느 쪽이 대문자인지에 판정이 걸리면 안 된다.
+    expect(matchingSessions(`${ROOT}/split-artibot-x`, [{ name: 'split-Artibot-X-DD' }])).toEqual(['split-Artibot-X-DD']);
+  });
+
+  it('대소문자 무시가 "세그먼트 1개" 규칙을 느슨하게 만들지 않는다', () => {
+    const rows = [
+      { name: 'split-artibot-x-dd' },        // 창 ← 유일한 매칭
+      { name: 'split-artibot-x-dd-coder' },  // 그 창이 스폰한 팀원 (세그먼트 2개)
+      { name: 'SPLIT-ARTIBOT-X-DD-CODER' },  // 대문자 팀원도 마찬가지로 제외
+      { name: 'split-artibot-x-v2-08' },     // 다른 limb(x-v2)
+      { name: 'split-artibot-x' },           // hex 없는 맨 worktree 이름
+      { name: 'split-artibot-xy-08' },       // 다른 limb(xy) — 접두가 아니라 이름 전체가 같아야 한다
+    ];
+    expect(matchingSessions(`${ROOT}/split-Artibot-x`, rows)).toEqual(['split-artibot-x-dd']);
+  });
+
+  it('라이브 관측(창 2개 idle)이 ready 로 판정된다 — 이 사건의 회귀 케이스', () => {
+    const plan = {
+      runId: 'split-74', base: 'master',
+      limbs: [
+        { limb: 'plan-state', worktreePath: `${ROOT}/split-Artibot-plan-state`, branch: 'worktree-split-Artibot-plan-state' },
+        { limb: 'sid-anchor', worktreePath: `${ROOT}/split-Artibot-sid-anchor`, branch: 'worktree-split-Artibot-sid-anchor' },
+      ],
+    };
+    const r = resolveDispatch({
+      plan,
+      worktrees: plan.limbs.map((l) => ({ path: l.worktreePath, branch: l.branch })),
+      sessions: parseListAgents([
+        'This session is artibot-74 [8f83d7] — the name other sessions use to message it.',
+        '',
+        'Peer sessions (3):',
+        '  split-artibot-plan-state-dd [83416c]  ·  interactive  ·  idle  ·  started 3m ago',
+        '  split-artibot-sid-anchor-4a [c4e092]  ·  interactive  ·  idle  ·  started 2m ago',
+        '  ontology-31 [bdc518]  ·  interactive  ·  busy  ·  started 28m ago',
+      ].join('\n')),
+      messaging: OK,
+    });
+    expect(r.unopenedWindows).toEqual([]);
+    expect(r.status).toBe('ready');
+    expect(r.messages.map((m) => m.to)).toEqual(['split-artibot-plan-state-dd', 'split-artibot-sid-anchor-4a']);
+  });
+
   it('limbsFromPlan 은 split.md 의 plan.json 형태를 정본 규약(split-<repo>-<limb> / worktree-split-<repo>-<limb>)으로 펼친다', () => {
     const rows = limbsFromPlan(
       { limbs: [{ limb: 'auth', taskIds: [1] }, { limb: 'api', taskIds: [2] }] },

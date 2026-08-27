@@ -177,6 +177,20 @@ export function messagingFromEnv({ listAgentsAvailable, env = process.env } = {}
  * matching limb `auth-v2`'s session (`split-auth-v2-08` has two segments after
  * `split-auth-`).
  *
+ * Case-INSENSITIVE, measured 2026-08-27 (live `/split` run, session artibot-74):
+ * the worktree directory was `split-Artibot-plan-state` — `repoShortName` runs
+ * the identity through `repo-identity.js#sanitizeSegment`, which does not
+ * lower-case, so the repository's own capitalisation survives into the name —
+ * while the session Claude Code named for that window was
+ * `split-artibot-plan-state-dd`, all lower-case. A case-sensitive compare
+ * matched nothing and `resolveDispatch` refused two limbs whose windows were
+ * open and idle. The rule is unconditional, not platform-gated: it is the
+ * harness's lower-casing that has to be absorbed, and that happens on every
+ * platform. Widening cannot collide — two limbs differing only in case would
+ * need two worktree names differing only in case, which `splitWorktreeName`
+ * derives from one repoShort and slugs that `limb-completion.js#SLUG`
+ * constrains to lower-case.
+ *
  * Limits: a user-renamed session is invisible; a session started elsewhere
  * (another repository's limb with the same name — `ListAgents` is machine-wide)
  * is a false positive; nothing here proves the session's cwd is the worktree
@@ -190,7 +204,7 @@ export function messagingFromEnv({ listAgentsAvailable, env = process.env } = {}
 export function matchingSessions(worktreePath, sessions) {
   const dirname = path.basename(String(worktreePath || '').replace(/[\\/]+$/, ''));
   if (!dirname) return [];
-  const re = new RegExp(`^${dirname.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}-[^-]+$`);
+  const re = new RegExp(`^${dirname.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}-[^-]+$`, 'i');
   return (Array.isArray(sessions) ? sessions : [])
     .map((s) => s?.name)
     .filter((n) => typeof n === 'string' && re.test(n));
