@@ -66,9 +66,13 @@ const CARRIERS = [
  * 판별자로 인정하는 표기.
  *   `{sid}`       — team.md·ultraplan.md 규약
  *   `{sessionId}` — autopilot.md 가 먼저 쓰던 같은 뜻의 이름
- *   `*`           — team.md 가 정의한 런 접두사 축약(`{task-slug}-{sid}`)
+ *   `team-*-`     — team.md 가 정의한 런 접두사 축약(`{task-slug}-{sid}`).
+ *                   **앵커된 형태만** 인정한다. 무앵커 `\*` 였을 때는 별표가 이름
+ *                   어디에 있든 통과해 `"reviewer-*"`·맨 `"*"` 까지 판별자로 인정
+ *                   하는 fail-open 이었다 (이슈 #112, 2026-08-27 auditor 재현).
+ *                   축약 정의는 `team-` 접두 뒤의 별표에만 있으므로 그 위치만 믿는다.
  */
-const DISCRIMINATOR = /\{sid\}|\{sessionId\}|\*/;
+const DISCRIMINATOR = /\{sid\}|\{sessionId\}|^team-\*-/;
 
 const carrierSrc = Object.fromEntries(
   CARRIERS.map((c) => [c.file, readFileSync(join(PLUGIN_ROOT, 'commands', c.file), 'utf-8')]),
@@ -158,6 +162,25 @@ describe('명명 규약 — 스폰 캐리어 4종 전수', () => {
     expect(bare, `${file}: 판별자 없는 고정 이름 — 두 세션이 같은 이름을 만든다: ${JSON.stringify(bare)}`)
       .toEqual([]);
   });
+
+  // 이슈 #112 회귀: 무앵커 `\*` 시절에는 아래 세 이름이 전부 판별자로 인정돼
+  // 게이트가 fail-open 이었다. `*` 인정은 team.md 가 정의한 축약(`team-*-…`)의
+  // 앵커된 위치뿐이다 — 그 밖의 별표는 글롭/장식이지 세션 판별자가 아니다.
+  it.each(['reviewer-*', 'team-fixed-*', '*'])(
+    '앵커 밖의 별표는 판별자가 아니다: %s',
+    (name) => {
+      expect(DISCRIMINATOR.test(name), `"${name}" 이 판별자로 오인정됐다 (무앵커 fail-open 회귀)`)
+        .toBe(false);
+    },
+  );
+
+  // 양성 대조: 앵커 수정이 정상 표기까지 끊지 않았는지 고정한다.
+  it.each(['team-*-checker-{n}', 'team-{task-slug}-{sid}-{role}', 'autopilot-{sessionId}-{role}'])(
+    '정상 표기는 앵커 후에도 판별자로 인정된다: %s',
+    (name) => {
+      expect(DISCRIMINATOR.test(name)).toBe(true);
+    },
+  );
 
   // sc.md 의 0 은 결함이 아니라 **다른 안전 방식**이다. 이름이 없으면 SendMessage
   // 주소가 아예 잡히지 않으므로 이름 충돌이 성립할 수 없다. 그 0 을 명시적으로
