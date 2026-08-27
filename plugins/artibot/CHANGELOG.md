@@ -9,6 +9,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+`.plan-state.json` 을 파괴하던 fail-open 경로 3종과, 실행하면 죽는 `/split dispatch`
+스니펫을 닫는다. 세 fail-open 은 모두 같은 모양이었다 — **입력을 읽지 못했는데 "비어
+있다"로 해석하고, 그 해석을 `ok:true` 로 디스크에 썼다.**
+
+### Changed
+- **⚠ 행동 변화 — 체크박스가 하나도 없는 플랜이 `ok:false` 로 표면화된다.** 이전에는 태스크
+  0건으로 파싱해 기존 완료 상태를 빈 목록으로 덮어쓰고 성공으로 보고했다. 이제 본문이 비어
+  있지 않은데 0건이면 파싱 실패로 보고 쓰지 않는다. 산문만 있는 문서를 의도적으로
+  `syncTodo` 에 넘기던 호출부가 있었다면 이제 실패가 보인다(빈 문자열 + 선행 태스크 0건인
+  초기화 경로는 그대로 허용된다).
+- **⚠ 행동 변화 — 읽을 수 없는 `.plan-state.json` 이 `ok:false` 로 표면화된다.**
+  `readState` 가 모든 예외를 "부재"로 삼키던 것을 `ENOENT` 만 부재로 좁혔다. 파손 JSON·BOM
+  선행·`EACCES`/`EBUSY`(윈도우 동시접근·AV 잠금)·`EISDIR` 은 이제 쓰기를 막고 원본을
+  보존한다. 이전에는 그 상태에서 조용히 덮어써 완료 플래그가 소실됐다.
+
+### Fixed
+- **CRLF 플랜의 태스크 0건 파싱** — `lib/core/plan-tracker.js#parsePlan` 이 `split('\n')` 으로
+  줄을 나눠 CRLF 문서에서 모든 줄에 `\r` 이 남았다. JS 정규식의 `.` 는 줄 종결자를 매치하지
+  않고 **`\r` 이 줄 종결자**라, 체크박스 패턴의 `(.+)$` 가 앵커에 실패해 태스크가 0건이 됐다.
+  줄 종결자를 보존한 채 분해하도록 고쳐 `markCompleted` 왕복이 원본 줄 종결자를 바이트 단위로
+  유지한다 — 체크박스 하나를 넘기는 변경이 파일 전체 diff 가 되지 않는다.
+- **`/split dispatch` 스니펫 실행 불가** — `commands/split.md` 가 `CLAUDE_PLUGIN_ROOT` 를
+  폴백 없이 보간해, 그 변수가 비어 있는 환경(서브에이전트·메인 세션 Bash 실측)에서
+  `Cannot find package 'undefined'` 로 죽었다. `commands/autopilot.md` Step 1 관례를 이식하되
+  세 가지를 보정했다.
+  ① 프로브 파일을 **실제로 import 할 파일**로 고정 — 마켓플레이스 mirror 는
+  `lib/autopilot/index.js` 는 있어도 `lib/git/split-dispatch.js` 가 없어 오선택된다.
+  ② 후보에 실로드 캐시 경로(`~/.claude/plugins/cache/artibot/artibot/<version>/`) 추가 +
+  버전 **숫자** 정렬 — 렉시코그래픽이면 `4.9.0` 이 `4.50.0` 을 이긴다.
+  ③ 존재(`existsSync`)가 아니라 **로드 가능성**(`await import`)으로 후보를 고른다 — 배포본이
+  대상 파일을 갖고도 전이 의존이 빠져 있으면(4.50.0 이 `lib/git/git-dir.js` 누락: dev 14파일
+  vs cache 13파일) 존재 프로브는 통과시키고 import 에서 죽어, fail-fast 메시지가 발화조차
+  못 한 채 내부 파일명만 노출된다. 체인 `split-dispatch → limb-completion → repo-identity →
+  git-dir` 은 최상위 부작용이 0(순수 export)이라 프로브 import 가 무해하고 성공 시 ESM 캐시가
+  재사용된다. 실패 시에는 후보별 실패 사유 목록과 함께 조치 가능한 메시지를 낸다.
+  **이 커버리지의 전제와 한계 2건**: ⓐ 전이 의존이 걸리는 것은 체인이 **정적 import** 이기
+  때문이다 — 중간 모듈이 지연 로딩을 위해 함수 안의 동적 `import()` 로 바뀌면 프로브는 그
+  의존을 건드리지 않고 통과하며, 커버리지가 **조용히** 사라진다(게이트가 알려주지 않는다).
+  ⓑ 프로브는 **모듈이 로드되는지**만 보고 **필요한 named export 가 있는지**는 보지 않는다 —
+  동적 `import()` 의 네임스페이스 구조분해는 없는 키에 대해 throw 하지 않고 `undefined` 를
+  주므로(실측 확인), export 가 개명·삭제되면 프로브를 통과한 뒤 최초 호출 시점에야 터진다.
+
+  > **미해결(별건)** — 배포된 4.50.0 패키지 자체가 `lib/git/git-dir.js` 를 담고 있지 않다
+  > (커밋 `41e690d0` 이후 파일). 위 보정은 이 상태를 **명확히 보고**하게 만들 뿐 고치지
+  > 못한다. 실제 해소는 재배포(`claude plugin update`) 몫이다.
+
+### Added
+- `tests/firewall/plan-crlf-fail-closed.test.js` — CRLF/CR 파싱, 줄 종결자 왕복, `syncTodo`
+  0건 fail-closed, `readState` 부재/실패 구분 게이트.
+- `tests/firewall/split-telemetry-callsites.test.js` — `commands/split.md` 산문이 recorder 5종을
+  실제로 싣고 있는지 잠근다. 기존 `split-telemetry-wallclock` 은 recorder **엔진**만 보고
+  `commands/split.md` 를 읽지 않아, 호출을 전부 지워도 전 게이트가 그린이었다.
+
+---
+
 ## [4.50.0] — 2026-08-25
 
 v4.49.0 이후 14커밋. **새 기능은 한 건도 없다.** 축은 하나다 — **조용히 통과하던 게이트를

@@ -588,6 +588,30 @@ function mergeCompletion(parsed, prior) {
 }
 
 /**
+ * Decide whether a zero-task parse is a legitimate empty plan or a parse
+ * failure whose result must not reach disk.
+ *
+ * A plan with prose in it always has tasks — a checkbox the parser fails to
+ * recognize (CRLF line endings were the reported case) yields zero and, written
+ * through, replaces real completions with an empty list under `ok: true`. Only
+ * one zero-task write is safe: a blank plan with nothing tracked yet.
+ *
+ * @param {string} planMarkdown
+ * @param {object|null} prior - Previously persisted state, if any.
+ * @returns {string|null} Error message, or `null` when the write may proceed.
+ */
+function zeroTaskRejection(planMarkdown, prior) {
+  if (planMarkdown.trim() !== '') {
+    return 'plan is not empty but parsed 0 tasks — refusing to overwrite .plan-state.json';
+  }
+  const priorTasks = Array.isArray(prior?.tasks) ? prior.tasks.length : 0;
+  if (priorTasks > 0) {
+    return `blank plan would drop ${priorTasks} tracked tasks — refusing to overwrite .plan-state.json`;
+  }
+  return null;
+}
+
+/**
  * Parse a plan markdown into checkbox tasks and persist `.plan-state.json`
  * alongside the resolved plan file.
  *
@@ -599,12 +623,17 @@ function mergeCompletion(parsed, prior) {
  * defeated `parsePlan`'s own type guard (non-string → return `[]`, task list
  * untouched) and turned a caller slip into an atomic overwrite of the user's
  * completed state with an empty list — reported as `ok: true`. Now the call is
- * rejected before anything is written.
+ * rejected before anything is written. {@link zeroTaskRejection} closes the
+ * same hole from the other side: a plan that *is* a string but parses to zero
+ * tasks is treated as a parse failure, not as an emptied plan. {@link readState}
+ * closes the third: a state file that exists but cannot be read stops the write
+ * instead of being mistaken for "no prior tasks".
  *
  * @param {object} args
  * @param {string} args.projectRoot - Absolute repo root.
  * @param {string} args.planMarkdown - Markdown containing `- [ ]` / `- [x]`.
- *   Non-string input is rejected with `{ ok: false }` and leaves disk untouched.
+ *   Non-string input is rejected with `{ ok: false }` and leaves disk untouched;
+ *   so is a non-blank plan that yields no tasks.
  * @param {string} [args.planFile='PLAN.md'] - Plan file path (relative to
  *   projectRoot or absolute) recorded in state; state lands beside it.
  * @param {string} [args.sessionId] - Optional session to register.
@@ -629,9 +658,18 @@ export async function syncTodo({ projectRoot, planMarkdown, planFile = 'PLAN.md'
     const stateFile = path.join(path.dirname(resolvedPlan), '.plan-state.json');
 
     const tracker = new PlanTracker();
-    const prior = await readState(stateFile);
+    // Fail-closed BEFORE the write: an unreadable state file is not an absent
+    // one. Proceeding would drop completion flags mergeCompletion could not
+    // read, whatever the new plan parses to.
+    const priorRead = await readState(stateFile);
+    if (!priorRead.ok) return { ok: false, error: `refusing to overwrite state — ${priorRead.error}` };
+    const prior = priorRead.data;
     if (prior) tracker.fromState(prior);
     const parsed = tracker.parsePlan(planMarkdown);
+    if (parsed.length === 0) {
+      const rejection = zeroTaskRejection(planMarkdown, prior);
+      if (rejection) return { ok: false, error: rejection };
+    }
     // parsePlan replaced the task list; put the merged one back so both
     // toState() and getProgress() see the same tasks. Passing only `tasks`
     // leaves the sessions restored above untouched.
@@ -648,16 +686,31 @@ export async function syncTodo({ projectRoot, planMarkdown, planFile = 'PLAN.md'
 }
 
 /**
- * Read a previously saved plan-state JSON, tolerating absence.
+ * Read a previously saved plan-state JSON, distinguishing absence from failure.
+ *
+ * Only `ENOENT` means "no prior state" — that is the first sync, and writing is
+ * correct. Every other outcome (corrupt JSON, `EACCES`, `EBUSY` from a Windows
+ * antivirus or concurrent handle, `EISDIR`) means state may well exist and is
+ * merely unreadable. Collapsing those into `null` made the caller believe there
+ * were no prior tasks, so a blank or unparsable plan overwrote good data and
+ * reported `ok: true` — the same fail-open shape as the non-string bug above.
+ * A BOM-prefixed state file lands here too: `JSON.parse` rejects `U+FEFF`.
+ *
  * @param {string} stateFile
- * @returns {Promise<object|null>}
+ * @returns {Promise<{ ok: true, data: object|null } | { ok: false, error: string }>}
  */
 async function readState(stateFile) {
+  let raw;
   try {
-    const raw = await fs.readFile(stateFile, 'utf-8');
-    return JSON.parse(raw);
-  } catch {
-    return null;
+    raw = await fs.readFile(stateFile, 'utf-8');
+  } catch (err) {
+    if (err?.code === 'ENOENT') return { ok: true, data: null };
+    return { ok: false, error: `cannot read ${stateFile}: ${err?.code || err?.message}` };
+  }
+  try {
+    return { ok: true, data: JSON.parse(raw) };
+  } catch (err) {
+    return { ok: false, error: `${stateFile} is not valid JSON: ${err?.message}` };
   }
 }
 

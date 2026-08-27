@@ -13,6 +13,39 @@ const CHECKBOX_UNCHECKED = /^(\s*)-\s\[\s\]\s+(.+)$/;
 const CHECKBOX_CHECKED = /^(\s*)-\s\[x\]\s+(.+)$/i;
 
 // ---------------------------------------------------------------------------
+// Line handling
+// ---------------------------------------------------------------------------
+
+/**
+ * Split content into lines, keeping each line's own terminator.
+ *
+ * `split('\n')` leaves a trailing `\r` on every CRLF line, and JS counts `\r`
+ * as a line terminator that `.` refuses to match — so `(.+)$` in the checkbox
+ * patterns never anchors and a CRLF plan parses as zero tasks. Normalizing the
+ * whole document would fix parsing but make {@link PlanTracker#markCompleted}
+ * rewrite every line ending, turning one checkbox flip into a whole-file diff.
+ * So the terminator travels with its line and is re-attached on rejoin.
+ *
+ * @param {string} content
+ * @returns {Array<{ text: string, ending: string }>} Terminator is `''` on a
+ *   final line that the content does not end.
+ */
+function splitLines(content) {
+  const lines = [];
+  let start = 0;
+  for (let i = 0; i < content.length; i++) {
+    const ch = content[i];
+    if (ch !== '\n' && ch !== '\r') continue;
+    const ending = ch === '\r' && content[i + 1] === '\n' ? '\r\n' : ch;
+    lines.push({ text: content.slice(start, i), ending });
+    i += ending.length - 1;
+    start = i + 1;
+  }
+  if (start < content.length) lines.push({ text: content.slice(start), ending: '' });
+  return lines;
+}
+
+// ---------------------------------------------------------------------------
 // PlanTracker
 // ---------------------------------------------------------------------------
 
@@ -40,10 +73,9 @@ export class PlanTracker {
     if (typeof markdownContent !== 'string') return [];
 
     this.#rawContent = markdownContent;
-    const lines = markdownContent.split('\n');
     const tasks = [];
 
-    for (const line of lines) {
+    for (const { text: line } of splitLines(markdownContent)) {
       const checked = CHECKBOX_CHECKED.exec(line);
       if (checked) {
         tasks.push({ text: checked[2].trim(), completed: true, indent: checked[1] });
@@ -85,21 +117,18 @@ export class PlanTracker {
     const task = this.#tasks[taskIndex];
     if (task.completed) return this.#rawContent;
 
-    const lines = this.#rawContent.split('\n');
     let taskCounter = -1;
-    const newLines = lines.map((line) => {
-      const isChecked = CHECKBOX_CHECKED.test(line);
-      const isUnchecked = CHECKBOX_UNCHECKED.test(line);
+    const newContent = splitLines(this.#rawContent).map(({ text, ending }) => {
+      const isChecked = CHECKBOX_CHECKED.test(text);
+      const isUnchecked = CHECKBOX_UNCHECKED.test(text);
       if (isChecked || isUnchecked) {
         taskCounter++;
         if (taskCounter === taskIndex && isUnchecked) {
-          return line.replace('- [ ]', '- [x]');
+          return text.replace('- [ ]', '- [x]') + ending;
         }
       }
-      return line;
-    });
-
-    const newContent = newLines.join('\n');
+      return text + ending;
+    }).join('');
 
     // Record in active session
     const activeSession = this.#sessions[this.#sessions.length - 1];

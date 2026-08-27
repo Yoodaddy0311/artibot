@@ -128,14 +128,48 @@ SplitWindow(limb="{limb}", worktree="split-{repoShort}-{limb}", parent="{parent-
 
 1. **가용성(fail-closed)**: `ListAgents` 가 toolset 에 없으면 `unavailable`. Bash `node -e "process.stdout.write(process.env.CLAUDE_CODE_MESSAGING_SOCKET||'')"` 가 빈 값이면 `unavailable`. 둘 다 사유 한 줄만 내고 **창 상태는 단정하지 않는다**.
 2. **관측**: `git worktree list --porcelain` + `ListAgents` 결과 텍스트를 `<parentRoot>/.artibot/split/list-agents.txt` 에 그대로 저장(파싱은 코드 — 리더가 표를 눈으로 읽어 판단하지 마라).
-3. **판정** (`CLAUDE_PLUGIN_ROOT` 기준 절대경로, `commands/autopilot.md` Step 1 관례):
+3. **판정** (플러그인 루트 절대경로 해석 — `commands/autopilot.md` Step 1 관례 + split 고유 보정 2건):
 
 ```js
 // node --input-type=module -e "<아래>"
 import fs from 'node:fs';
-const root = process.env.CLAUDE_PLUGIN_ROOT;
-const { listWorktrees, parseListAgents, messagingFromEnv, resolveDispatch } = await import(`${root}/lib/git/split-dispatch.js`);
-const { readPlanCompletion } = await import(`${root}/lib/git/limb-completion.js`);
+import path from 'node:path';
+// toFileUrl: 한글 경로 안전 (pathToFileURL 의 percent-encoding 회피 — utils/index.js 참고)
+const toFileUrl = (p) => {
+  const f = p.replace(/\\/g, '/');
+  return /^[A-Z]:/i.test(f) ? `file:///${f}` : `file://${f}`;
+};
+// 플러그인을 **찾는** 코드라 엔진 승격 불가. 세 보정(프로브 파일 = import 할 파일 /
+// cache 가 실로드 경로 / 숫자 정렬)의 근거는 CHANGELOG [Unreleased] 에 실측과 함께 있다.
+const NEEDED = 'lib/git/split-dispatch.js';
+const home = process.env.USERPROFILE ?? process.env.HOME ?? '';
+const pluginsDir = path.join(home, '.claude', 'plugins');
+// CLAUDE_PLUGIN_ROOT 는 양쪽 Bash 에서 빈 값 실측(2026-08-27) — 폴백 없이 보간하면 죽는다.
+const candidates = [process.env.CLAUDE_PLUGIN_ROOT].filter(Boolean);
+const cacheDir = path.join(pluginsDir, 'cache', 'artibot', 'artibot');
+if (fs.existsSync(cacheDir)) {
+  const versions = fs.readdirSync(cacheDir).sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
+  for (const v of versions) candidates.push(path.join(cacheDir, v));
+}
+const mpDir = path.join(pluginsDir, 'marketplaces');
+if (fs.existsSync(mpDir)) {
+  for (const mp of fs.readdirSync(mpDir)) candidates.push(path.join(mpDir, mp, 'plugins', 'artibot'));
+}
+// 존재가 아니라 **로드 가능성**으로 고른다: 배포본이 NEEDED 를 갖고도 전이 의존이
+// 빠져 있으면(4.50.0 실측) existsSync 는 통과시키고 import 에서 죽는다. 체인
+// split-dispatch → limb-completion → repo-identity → git-dir 은 최상위 부작용이 0 이라
+// 프로브 import 가 무해하고, 성공 시 ESM 캐시가 재사용된다.
+const toUrl = (c) => toFileUrl(path.join(c, NEEDED));
+let root = null;
+const probeErrors = [];
+for (const c of candidates) {
+  if (!fs.existsSync(path.join(c, NEEDED))) continue;
+  try { await import(toUrl(c)); root = c; break; }
+  catch (e) { probeErrors.push(c + ' -> ' + (e.code || e.message)); }
+}
+if (!root) throw new Error(`Artibot split engine not loadable (${NEEDED}). Set CLAUDE_PLUGIN_ROOT or reinstall.\n` + probeErrors.join('\n'));
+const { listWorktrees, parseListAgents, messagingFromEnv, resolveDispatch } = await import(toUrl(root));
+const { readPlanCompletion } = await import(toFileUrl(path.join(root, 'lib/git/limb-completion.js')));
 const plan = JSON.parse(fs.readFileSync('<parentRoot>/.artibot/split/plan.json', 'utf-8'));
 const sessions = parseListAgents(fs.readFileSync('<parentRoot>/.artibot/split/list-agents.txt', 'utf-8')); // 못 불렀으면 null — [] 가 아니다
 const decision = resolveDispatch({ plan, worktrees: listWorktrees(process.cwd()), sessions, messaging: messagingFromEnv({ listAgentsAvailable: true }) });
