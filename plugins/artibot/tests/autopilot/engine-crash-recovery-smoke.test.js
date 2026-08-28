@@ -28,7 +28,9 @@
  * process reports skip rather than a false red.
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 import {
@@ -50,6 +52,26 @@ const PLUGIN_ROOT = fileURLToPath(new URL('../..', import.meta.url));
 /** Sessions created by this file, cleaned up at the end. */
 const created = new Set();
 
+// Artifact root for the children. `startAutopilot` runs the real
+// `generatePRD`, whose `projectRoot` falls back to the resolved project root
+// (`lib/autopilot/prd-generator.js:220`) — so without this every run wrote three
+// real files into the developer's `docs/PRD/`. `engine.js:135` forwards
+// `state.options.projectRoot` to the generator (and `:561`/`:955` forward the
+// same value to `generateReport`), so pointing it at a tmpdir keeps the whole
+// artifact side of the engine out of the repo.
+//
+// It is not artifact-only, though: `resolveLockScope` takes the same value as
+// its cwd (`engine.js:618`), and a tmpdir is not a git repo — so the feature
+// lock resolves to no repo identity, falls back to its legacy unscoped key, and
+// emits one extra `lock-scope-unresolved` event (measured: 4 events with the
+// tmpdir root vs 3 with the real one). Harmless here, but do not read
+// `projectRoot` as a pure artifact switch.
+//
+// The assertions are unaffected either way: they read the session and NDJSON
+// through `getStoreDir()`, which is independent of this path, and none of them
+// count events or assert on the lock.
+const ARTIFACT_ROOT = mkdtempSync(path.join(tmpdir(), 'artibot-crash-smoke-'));
+
 /**
  * Child program: real engine, real telemetry, then a hard kill with the
  * EXECUTE phase still open. `process.kill(process.pid, 'SIGKILL')` is used
@@ -67,7 +89,10 @@ function crashChildProgram(sessionId) {
     await startAutopilot({
       task: 'crash recovery smoke',
       mode: 'default',
-      options: { keepAwake: false, tui: false },
+      options: {
+        keepAwake: false, tui: false,
+        projectRoot: ${JSON.stringify(ARTIFACT_ROOT)},
+      },
       sessionId: ${JSON.stringify(sessionId)},
     });
     const state = loadSession(${JSON.stringify(sessionId)});
@@ -107,6 +132,7 @@ afterAll(() => {
   for (const id of created) {
     try { deleteSession(id); } catch { /* best-effort */ }
   }
+  rmSync(ARTIFACT_ROOT, { recursive: true, force: true });
 });
 
 describe('crash recovery — real session, real NDJSON, real process death', () => {
@@ -167,7 +193,10 @@ describe('crash recovery — real session, real NDJSON, real process death', () 
         await startAutopilot({
           task: 'attempt crash smoke',
           mode: 'default',
-          options: { keepAwake: false, tui: false },
+          options: {
+            keepAwake: false, tui: false,
+            projectRoot: ${JSON.stringify(ARTIFACT_ROOT)},
+          },
           sessionId: ${JSON.stringify(sessionId)},
         });
         const state = loadSession(${JSON.stringify(sessionId)});
@@ -211,7 +240,10 @@ describe('crash recovery — real session, real NDJSON, real process death', () 
         await startAutopilot({
           task: 'clean shutdown smoke',
           mode: 'default',
-          options: { keepAwake: false, tui: false },
+          options: {
+            keepAwake: false, tui: false,
+            projectRoot: ${JSON.stringify(ARTIFACT_ROOT)},
+          },
           sessionId: ${JSON.stringify(sessionId)},
         });
         runPhase1Plan(loadSession(${JSON.stringify(sessionId)}));
