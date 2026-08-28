@@ -14,7 +14,7 @@ import {
   retryGoal,
 } from '../../lib/autopilot/goal-control.js';
 import {
-  deleteSession,
+  deleteSessionArtifacts,
   newSessionId,
   saveSession,
 } from '../../lib/autopilot/session-store.js';
@@ -67,7 +67,7 @@ beforeEach(() => {
 
 afterEach(() => {
   for (const id of tracked) {
-    try { deleteSession(id); } catch { /* ignore */ }
+    try { deleteSessionArtifacts(id); } catch { /* ignore */ }
   }
   tracked.clear();
   vi.restoreAllMocks();

@@ -16,7 +16,7 @@ import {
   runPhase4Verify,
   startAutopilot,
 } from '../../lib/autopilot/index.js';
-import { deleteSession } from '../../lib/autopilot/session-store.js';
+import { deleteSessionArtifacts } from '../../lib/autopilot/session-store.js';
 
 // ARTIFACT ISOLATION CONTRACT: startAutopilot writes a PRD under
 // <projectRoot>/docs/PRD/. Without options.projectRoot that is the operator's
@@ -46,7 +46,7 @@ function start(args) {
 const cleanup = [];
 afterEach(() => {
   for (const sid of cleanup) {
-    try { deleteSession(sid); } catch { /* ignore */ }
+    try { deleteSessionArtifacts(sid); } catch { /* ignore */ }
   }
   cleanup.length = 0;
 });

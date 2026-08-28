@@ -4,7 +4,7 @@
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import {
-  deleteSession,
+  deleteSession, deleteSessionArtifacts,
   getSessionPath,
   listSessions,
   loadSession,
@@ -36,7 +36,7 @@ describe('saveSession / loadSession roundtrip', () => {
   afterEach(() => {
     while (sessions.length) {
       const id = sessions.pop();
-      try { deleteSession(id); } catch { /* ignore */ }
+      try { deleteSessionArtifacts(id); } catch { /* ignore */ }
     }
   });
 

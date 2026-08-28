@@ -136,6 +136,7 @@ export {
   loadSession,
   listSessions,
   deleteSession,
+  deleteSessionArtifacts,
   newSessionId,
   getSessionPath,
   getStoreDir,

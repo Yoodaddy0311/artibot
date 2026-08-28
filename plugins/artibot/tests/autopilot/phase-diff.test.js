@@ -16,7 +16,7 @@
 import {
   afterEach, describe, expect, it, vi,
 } from 'vitest';
-import { deleteSession, saveSession } from '../../lib/autopilot/session-store.js';
+import { deleteSessionArtifacts, saveSession } from '../../lib/autopilot/session-store.js';
 import {
   diffSession,
   renderDiffTable,
@@ -43,7 +43,7 @@ function saveState(sessionId, partial) {
 afterEach(() => {
   while (createdSessions.length) {
     const id = createdSessions.pop();
-    try { deleteSession(id); } catch { /* ignore */ }
+    try { deleteSessionArtifacts(id); } catch { /* ignore */ }
   }
 });
 

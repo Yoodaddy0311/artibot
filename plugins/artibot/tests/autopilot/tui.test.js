@@ -20,7 +20,7 @@ import { existsSync, unlinkSync } from 'node:fs';
 import {
   renderFrame, runTuiLoop, shouldActivateTui,
 } from '../../lib/autopilot/tui.js';
-import { deleteSession, saveSession } from '../../lib/autopilot/session-store.js';
+import { deleteSessionArtifacts, saveSession } from '../../lib/autopilot/session-store.js';
 import { appendEvent, getEventsPath } from '../../lib/autopilot/telemetry.js';
 
 const createdSessions = [];
@@ -58,7 +58,7 @@ function persistAndTrack(state) {
 afterEach(() => {
   while (createdSessions.length) {
     const id = createdSessions.pop();
-    try { deleteSession(id); } catch { /* ignore */ }
+    try { deleteSessionArtifacts(id); } catch { /* ignore */ }
     try {
       const ev = getEventsPath(id);
       if (existsSync(ev)) unlinkSync(ev);

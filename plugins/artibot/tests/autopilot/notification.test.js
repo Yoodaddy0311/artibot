@@ -19,7 +19,7 @@ import {
   THROTTLE_WINDOW_MS,
 } from '../../lib/autopilot/notification.js';
 import {
-  deleteSession,
+  deleteSessionArtifacts,
   loadSession,
   newSessionId,
   saveSession,
@@ -53,7 +53,7 @@ beforeEach(() => {
 
 afterEach(() => {
   for (const id of sessions) {
-    try { deleteSession(id); } catch { /* ignore */ }
+    try { deleteSessionArtifacts(id); } catch { /* ignore */ }
   }
   sessions.clear();
   _resetThrottleForTests();

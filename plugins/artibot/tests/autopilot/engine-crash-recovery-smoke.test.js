@@ -38,7 +38,7 @@ import {
   detectInterruptedPhase,
 } from '../../lib/autopilot/_engine-helpers.js';
 import { reconcileAttemptOnResume } from '../../lib/autopilot/phase-attempt.js';
-import { deleteSession, loadSession } from '../../lib/autopilot/session-store.js';
+import { deleteSessionArtifacts, loadSession } from '../../lib/autopilot/session-store.js';
 import { getEventsPath } from '../../lib/autopilot/telemetry.js';
 import { readEvents } from '../../lib/autopilot/telemetry.js';
 
@@ -130,7 +130,10 @@ function runChild(program) {
 
 afterAll(() => {
   for (const id of created) {
-    try { deleteSession(id); } catch { /* best-effort */ }
+    // Artifacts, not just the session JSON: each case writes a real
+    // `.events.ndjson` that `deleteSession` alone would leave in
+    // `runtime/autopilot/` forever.
+    try { deleteSessionArtifacts(id); } catch { /* best-effort */ }
   }
   rmSync(ARTIFACT_ROOT, { recursive: true, force: true });
 });

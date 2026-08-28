@@ -19,7 +19,7 @@ import {
   releaseLock,
 } from '../../lib/autopilot/lock.js';
 import {
-  deleteSession,
+  deleteSessionArtifacts,
   saveSession,
 } from '../../lib/autopilot/session-store.js';
 
@@ -60,7 +60,7 @@ afterEach(() => {
   }
   while (createdSessions.length) {
     const sid = createdSessions.pop();
-    try { deleteSession(sid); } catch { /* ignore */ }
+    try { deleteSessionArtifacts(sid); } catch { /* ignore */ }
   }
 });
 

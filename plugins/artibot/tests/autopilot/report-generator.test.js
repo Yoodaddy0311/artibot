@@ -7,7 +7,7 @@ import { existsSync, mkdtempSync, rmSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { generateReport } from '../../lib/autopilot/report-generator.js';
-import { deleteSession, saveSession } from '../../lib/autopilot/session-store.js';
+import { deleteSessionArtifacts, saveSession } from '../../lib/autopilot/session-store.js';
 
 let projectRoot = null;
 
@@ -52,7 +52,7 @@ function cleanup() {
   }
   trackedFiles.clear();
   if (trackedSession) {
-    try { deleteSession(trackedSession); } catch { /* ignore */ }
+    try { deleteSessionArtifacts(trackedSession); } catch { /* ignore */ }
     trackedSession = null;
   }
   if (projectRoot) {

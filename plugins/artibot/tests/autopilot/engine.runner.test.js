@@ -21,7 +21,7 @@ import {
 } from '../../lib/autopilot/index.js';
 import { planFastExecution, resolveFastCpuCount } from '../../lib/autopilot/fast-execution.js';
 import { recordPhaseResult } from '../../lib/autopilot/engine-state.js';
-import { deleteSession, loadSession, saveSession } from '../../lib/autopilot/session-store.js';
+import { deleteSessionArtifacts, loadSession, saveSession } from '../../lib/autopilot/session-store.js';
 
 function gitAvailable() {
   try {
@@ -101,7 +101,7 @@ afterEach(async () => {
   for (const id of sessionsToClean) {
     try { await abortAutopilot(id, { graceful: true }); } catch { /* ignore */ }
     try { removeWorktree(id, { force: true, cwd: tempRepo }); } catch { /* ignore */ }
-    try { deleteSession(id); } catch { /* ignore */ }
+    try { deleteSessionArtifacts(id); } catch { /* ignore */ }
   }
   sessionsToClean.clear();
 });

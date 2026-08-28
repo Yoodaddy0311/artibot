@@ -2,7 +2,7 @@
  * Unit tests for lib/autopilot/sub-checkpoint.js
  */
 import { afterEach, describe, expect, it } from 'vitest';
-import { deleteSession, loadSession, saveSession } from '../../lib/autopilot/session-store.js';
+import { deleteSessionArtifacts, loadSession, saveSession } from '../../lib/autopilot/session-store.js';
 import { listSubCheckpoints, recordSubCheckpoint } from '../../lib/autopilot/sub-checkpoint.js';
 
 const tracked = [];
@@ -11,7 +11,7 @@ function track(id) { tracked.push(id); return id; }
 afterEach(() => {
   while (tracked.length) {
     const id = tracked.pop();
-    try { deleteSession(id); } catch { /* ignore */ }
+    try { deleteSessionArtifacts(id); } catch { /* ignore */ }
   }
 });
 

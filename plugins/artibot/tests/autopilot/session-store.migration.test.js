@@ -14,7 +14,7 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import {
   CURRENT_SCHEMA_VERSION,
-  deleteSession,
+  deleteSessionArtifacts,
   getSessionPath,
   isLegacyState,
   loadSession,
@@ -32,7 +32,7 @@ function track(id) {
 afterEach(() => {
   while (tracked.length) {
     const id = tracked.pop();
-    try { deleteSession(id); } catch { /* ignore */ }
+    try { deleteSessionArtifacts(id); } catch { /* ignore */ }
   }
 });
 

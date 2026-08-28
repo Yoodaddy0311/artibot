@@ -14,7 +14,7 @@ import {
   runPhase6Report,
   startAutopilot,
 } from '../../lib/autopilot/index.js';
-import { deleteSession, loadSession } from '../../lib/autopilot/session-store.js';
+import { deleteSessionArtifacts, loadSession } from '../../lib/autopilot/session-store.js';
 import { getLockPath, readLock, releaseLock } from '../../lib/autopilot/lock.js';
 import { getRepoIdentity } from '../../lib/git/repo-identity.js';
 import { execFileSync } from 'node:child_process';
@@ -60,7 +60,7 @@ function track(id) {
 
 afterEach(() => {
   for (const id of cleanupIds) {
-    try { deleteSession(id); } catch { /* ignore */ }
+    try { deleteSessionArtifacts(id); } catch { /* ignore */ }
   }
   cleanupIds.clear();
 });

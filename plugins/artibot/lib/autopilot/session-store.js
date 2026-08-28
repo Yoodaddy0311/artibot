@@ -12,6 +12,7 @@ import path from 'node:path';
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { getPluginRoot } from '../core/platform.js';
+import { resolveRunEventsPath } from '../observability/run-events.js';
 
 /**
  * Current persisted-state schema version. Bump when the on-disk shape
@@ -297,6 +298,46 @@ export function deleteSession(sessionId) {
   } catch {
     return false;
   }
+}
+
+/**
+ * Delete a session file AND its telemetry stream.
+ *
+ * Separate from {@link deleteSession} on purpose. `deleteSession` removes only
+ * the session JSON, so a caller that creates sessions in a loop — every test
+ * `afterAll` in `tests/autopilot/` — leaves the `.events.ndjson` behind forever.
+ * Measured 2026-08-28: `runtime/autopilot/` held 10,484 ndjson against 2,446
+ * json, a ratio that is exactly that leak. Widening `deleteSession` itself was
+ * rejected: it is an exported, barrel-re-exported API (`index.js:138`) and the
+ * event log is the post-mortem record for a crashed run, so throwing it away by
+ * default would remove evidence someone may still want. Opting in says "this
+ * session was disposable" — which only the caller knows.
+ *
+ * The events path is resolved through `lib/observability/run-events.js` rather
+ * than `telemetry.js`: telemetry imports `getStoreDir` from this module
+ * (`telemetry.js:19`), so importing it back would close a cycle. `run-events`
+ * is a leaf (node builtins + `core/file.js` only).
+ *
+ * Locks are NOT removed. They are keyed by featureKey, not sessionId
+ * (`lock.js:80`), so a session id alone cannot name one; `releaseLock` owns
+ * that path.
+ *
+ * @param {string} sessionId
+ * @returns {{ session: boolean, events: boolean }} What was actually removed.
+ */
+export function deleteSessionArtifacts(sessionId) {
+  const session = deleteSession(sessionId);
+  let events = false;
+  try {
+    const eventsPath = resolveRunEventsPath(getStoreDir(), sessionId);
+    if (existsSync(eventsPath)) {
+      unlinkSync(eventsPath);
+      events = true;
+    }
+  } catch {
+    // Best-effort, mirroring deleteSession: cleanup must never fail a caller.
+  }
+  return { session, events };
 }
 
 /**
