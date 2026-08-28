@@ -160,8 +160,11 @@ describe('decision-trail path isolation', () => {
       trail._resetDecisionTrailCache();
 
       // Flip the root while recordDecision is suspended on `await ensureDir`.
-      // Hanging this off the call itself puts the flip after the read and
-      // before the write, with no dependence on how long the mkdir takes.
+      // That suspension now sits above the read — the read-modify-write below it
+      // has to stay unbroken, or concurrent writes lose each other's entries
+      // (see decision-trail.js) — so the flip lands after the path is resolved
+      // and before either half uses it. A write that re-resolved the path would
+      // still land in the decoy and fail the assertion below.
       let ensureDirCalls = 0;
       fileHook.onEnsureDir = () => {
         ensureDirCalls += 1;

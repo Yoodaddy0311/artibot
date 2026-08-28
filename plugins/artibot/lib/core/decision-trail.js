@@ -196,13 +196,20 @@ export async function recordDecision(decision, options = {}) {
   }
 
   try {
-    // Resolve once, up front. Everything below — read, mkdir, write — uses this
-    // one value. `await ensureDir(...)` suspends mid-function, and while the
-    // argument to it is evaluated before the suspension, a second resolution
-    // *after* the suspension would observe whatever the environment says on
-    // resumption. That is how a sandboxed read followed by a real-root write
-    // overwrites the real trail with fixture data.
+    // Resolve once, up front. Everything below — mkdir, read, write — uses this
+    // one value. Re-resolving after the `await` below would observe whatever the
+    // environment says on resumption, and that is how a sandboxed read followed
+    // by a real-root write overwrote the real trail with fixture data.
     const trailPath = resolveTrailPath(options.pluginRoot);
+
+    // The only suspension in this function, and it must stay above the read.
+    // Everything from `readTrailSync` to `writeTrailSync` is one
+    // read-modify-write; an `await` anywhere inside it lets a second call read
+    // the same base and write it back, erasing the first call's entry.
+    // `route()` (lib/cognitive/router.js:386) fires these unawaited, so
+    // overlapping calls are the normal case, not a corner one.
+    await ensureDir(path.dirname(trailPath));
+
     const timestamp = new Date().toISOString();
     const id = generateId();
 
@@ -235,7 +242,6 @@ export async function recordDecision(decision, options = {}) {
       totalAppended: (trail.metadata?.totalAppended || 0) + 1,
     };
 
-    await ensureDir(path.dirname(trailPath));
     writeTrailSync(trailPath, trail);
 
     return { id, timestamp };
