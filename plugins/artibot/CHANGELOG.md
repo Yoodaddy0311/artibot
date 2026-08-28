@@ -9,6 +9,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+동시 쓰기와 체크아웃 변환이 각각 삼키던 데이터 2종을 고정한다. 둘은 원인이 무관하지만 증상이
+같았다 — **쓴 것이 그대로 남지 않는데 아무도 실패를 보지 못했다.** 하나는 항목이 사라지는 동안
+호출자가 성공을 돌려받았고, 다른 하나는 발행한 md5 가 신선한 클론에서만 어긋났다.
+
+### Fixed
+- **decision-trail 동시 쓰기 소실(lost update)** — `recordDecision` 이 read-modify-write
+  한가운데서 중단됐다. `readTrailSync` 로 스냅샷을 뜨고 `await ensureDir(...)` 에서 이벤트
+  루프를 놓은 뒤 그 스냅샷에 항목 하나를 얹어 썼기 때문에, 중단 구간에서 겹친 두 호출이 같은
+  base 를 읽고 되써 나중 쓰기가 앞 항목을 지웠다. 실측(HEAD daf7fec0, 2026-08-28): **동시 쓰기
+  5건 중 1건만 생존**, `metadata.totalAppended` 는 5 대신 2. 겹침은 예외가 아니라 기본값이었다 —
+  `lib/cognitive/router.js:386` 의 `route()` 는 동기 함수라 trail 쓰기를 await 하지 못하고
+  unawaited `.then()` 으로 던진다. **중단점을 read 위로 옮겨** read~write 구간을 완전 동기로
+  만들었다(`lib/core/decision-trail.js:205-213`). 큐도 뮤텍스도 추가하지 않았다 — 구간이
+  동기이면 Node 단일 스레드가 두 호출을 섞을 수 없다.
+  **범위와 한계**: 프로세스 내 한정이다. 별도 프로세스 writer(프롬프트마다 뜨는
+  `scripts/hooks/runtime-prompt.js:549`, `scripts/cron/` 러너 4종)는 실행을 공유하지 않아 동기
+  구간으로 직렬화되지 않는다 — 3프로세스 × 20회 실측에서 **60건 중 21건(35%) 소실**이 그대로
+  남는다. 닫으려면 파일 락이나 append-only 포맷이 필요하고 이번 범위 밖이다.
+- **`reports/SPLIT/*.ndjson` 증거 파일의 체크아웃 바이트 드리프트** — 런 텔레메트리 원본은
+  발행된 md5 를 신선한 체크아웃에서 재검증할 수 있어야 하는데, `core.autocrlf=true` 인 윈도우
+  호스트에서 체크아웃 시 LF 가 CRLF 로 재작성됐다. 실측: `split-8f83d7.events.ndjson` 이
+  인덱스에서는 2752B/`daed838f` 인데 신선한 클론에서는 2767B/`236e3761`(LF 15개 → +15B)라 발행
+  해시가 맞지 않았다. 루트 `.gitattributes` 에 `reports/SPLIT/**/*.ndjson -text` 를 추가해
+  고정한다. `eol=lf` 가 아니라 `-text` 인 이유는 증거가 **양방향**으로 무변환이어야 하기
+  때문이다 — `eol=lf` 는 체크인 때 정규화해 워크트리==blob 을 보장하므로 런이 실제로 뱉은 CR 을
+  조용히 제거한다(CR 포함 픽스처로 재현 확인). 텍스트 diff 는 그대로 렌더링된다: 이 파일들에
+  NUL 이 없고 git 의 바이너리 판정은 `text` 속성과 무관하다. 추적 파일 1,644개 중 속성이 붙는
+  것은 이 1개뿐이다.
+
+### Tests
+- **trail 격리 firewall 게이트 신규** — `tests/firewall/trail-sandbox-required.test.js`.
+  decision-trail writer 에 도달하는 테스트 파일은 등록된 격리 수단을 반드시 갖는다.
+  `useTrailSandbox` · 자체 임시 root 고정 · `vi.mock` 모듈 무력화 · STATE-RESTORE 저장·복원
+  4종의 **허용목록**이며 목록에 없는 수단은 red 다(부정목록은 미래 변형에 fail-open 이라 쓰지
+  않았다). writer 축에도 래칫을 걸어 `recordDecision` 을 참조하는 모듈 집합(현재 9개)이 변하면
+  게이트가 red 가 되고, 새 writer 가 스캔 밖으로 새지 못한다. 스캐너 자기검증 5케이스를 동봉해
+  게이트가 거짓 그린이 되는 경로를 막는다 — 빈 스캔, 검출 regex 부패, 허용목록 4종 개별 인식,
+  무관한 로컬 `route()` 오검출. **게이트가 못 보는 것**은 파일 상단에 명기했다: 간접 도달,
+  서브프로세스 스폰, 수단의 실제 작동 여부. 프로덕션 표면을 0줄 쓴다 — 대안이던 스위트 전역
+  default-deny 는 프로덕션에 테스트 전용 킬 스위치를 남겼을 것이다.
+- **decision-trail 동시 쓰기 회귀 3케이스** — `tests/core/decision-trail-concurrency.test.js`.
+  동시 5건 전량 생존, `totalAppended` 정합, unawaited fire-and-forget 왕복을 검증한다.
+  프로덕션 수정을 HEAD 로 정확히 되돌리면 3/3 실패해 허수가 아님을 확인했다.
+
+---
+
 ## [4.51.0] — 2026-08-28
 
 축이 둘인 릴리스다. 하나 — **`/split` 크로스세션 멀티-worktree 분할이 처음 출하된다**:
