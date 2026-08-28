@@ -10,7 +10,7 @@ import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, sta
 import path from 'node:path';
 import os from 'node:os';
 import { checkForUpdate } from '../../lib/core/version-checker.js';
-import { createErrorHandler } from '../../lib/core/hook-utils.js';
+import { createErrorHandler, getStatePath } from '../../lib/core/hook-utils.js';
 import { getLastTestStatus } from '../../lib/core/test-status.js';
 import { resolveProjectRoot } from '../../lib/git/project-root.js';
 import {
@@ -85,22 +85,15 @@ function activateLongContext(config, pluginRoot) {
 }
 
 /**
- * Restore previous session state. Tries lib/context/session module first;
- * falls back to manual state file read.
- * @param {string} pluginRoot
- * @param {string} home
- * @returns {Promise<object|null>}
+ * Restore previous session state from the canonical state path that
+ * session-end.js writes — resolved by the same hook-utils#getStatePath, so
+ * reader and writer can never diverge again (issue #113). The removed
+ * lib/context/session pre-try read ~/.claude/artibot/… instead, a path no
+ * writer ever produced.
+ * @returns {object|null}
  */
-async function loadPreviousState(pluginRoot, home) {
-  try {
-    const sessionModPath = path.join(pluginRoot, 'lib', 'context', 'session.js');
-    const { loadSessionState } = await import(toFileUrl(sessionModPath));
-    const state = await loadSessionState();
-    if (state && state.sessionId) return state;
-  } catch {
-    // Fall through to manual loading
-  }
-  const statePath = path.join(home, '.claude', 'artibot-state.json');
+function loadPreviousState() {
+  const statePath = getStatePath();
   if (existsSync(statePath)) {
     try {
       return JSON.parse(readFileSync(statePath, 'utf-8'));
@@ -670,7 +663,7 @@ export async function main() {
   activateLongContext(config, env.pluginRoot);
 
   const home = process.env.USERPROFILE || process.env.HOME || '';
-  const previousState = await loadPreviousState(env.pluginRoot, home);
+  const previousState = loadPreviousState();
   const sessionRecall = await recallSessionMemory(env.pluginRoot);
   const collectiveTop = await loadCollectiveTop(env.pluginRoot);
 

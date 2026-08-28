@@ -82,21 +82,3 @@ describe('lib/system/index.js barrel exports', () => {
     expect(typeof mod.resetDiagnostics).toBe('function');
   });
 });
-
-// ---------------------------------------------------------------------------
-// lib/context/index.js
-// ---------------------------------------------------------------------------
-describe('lib/context/index.js barrel exports', () => {
-  it('re-exports session functions', async () => {
-    const mod = await import('../lib/context/index.js');
-    expect(typeof mod.addHistory).toBe('function');
-    expect(typeof mod.addTask).toBe('function');
-    expect(typeof mod.getActiveAgents).toBe('function');
-    expect(typeof mod.getInProgressTasks).toBe('function');
-    expect(typeof mod.loadSessionState).toBe('function');
-    expect(typeof mod.registerAgent).toBe('function');
-    expect(typeof mod.saveSessionState).toBe('function');
-    expect(typeof mod.unregisterAgent).toBe('function');
-    expect(typeof mod.updateTaskStatus).toBe('function');
-  });
-});

@@ -114,7 +114,7 @@ export default [
     // silently missing the next new directory.
     files: [
       'lib/adapters/**/*.{js,mjs}', 'lib/autopilot/**/*.{js,mjs}',
-      'lib/context/**/*.{js,mjs}', 'lib/dispatcher/**/*.{js,mjs}',
+      'lib/dispatcher/**/*.{js,mjs}',
       'lib/genesis/**/*.{js,mjs}', 'lib/git/**/*.{js,mjs}',
       'lib/intent/**/*.{js,mjs}', 'lib/mcp/**/*.{js,mjs}',
       'lib/observability/**/*.{js,mjs}', 'lib/orchestration/**/*.{js,mjs}',
