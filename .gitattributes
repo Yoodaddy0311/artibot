@@ -1,0 +1,15 @@
+# /split run evidence — byte-immutable.
+#
+# These ndjson files are verbatim copies of a run's telemetry stream, kept so a
+# reported md5 stays re-verifiable from a fresh checkout. `core.autocrlf=true`
+# (the default on this Windows host) otherwise rewrites LF to CRLF on checkout:
+# split-8f83d7.events.ndjson measured 2752B/daed838f in the index but
+# 2767B/236e3761 in a fresh clone, so the published hash no longer matched.
+#
+# `-text` (not `eol=lf`) because evidence must round-trip unmodified in BOTH
+# directions. `eol=lf` guarantees worktree==blob only by normalizing on check-in,
+# which silently strips CRs from whatever the run actually produced; measured on
+# a CR-bearing fixture, `-text` kept 4f614ce2 end to end while `eol=lf` committed
+# 56af49a2. Textual diffs still render — these files contain no NUL bytes, and
+# git's diff binary-detection is independent of the `text` attribute.
+reports/SPLIT/**/*.ndjson -text
