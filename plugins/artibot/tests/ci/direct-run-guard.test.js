@@ -676,11 +676,12 @@ describe('every direct-run guard routes through the canonical helper', () => {
 
     // The precision half. Widening to a bare /argv\[1\]/ would have closed the
     // hole too, at the cost of flagging a slice(2)-derived list — where index 1
-    // is the second USER argument and means nothing about entry points. Three
+    // is the second USER argument and means nothing about entry points. Two
     // files in the live tree take an `argv` parameter of exactly that shape
-    // (scripts/backfill-grpo-categories.js, scripts/hierarchical-memory-migrate.mjs,
-    // scripts/route-lifecycle.mjs, measured 2026-08-24), so this is a live
-    // false positive, not a hypothetical one.
+    // (scripts/hierarchical-memory-migrate.mjs, scripts/route-lifecycle.mjs,
+    // re-measured 2026-08-28 — a third, scripts/backfill-grpo-categories.js, was
+    // retired with the GRPO subsystem), so this is a live false positive, not a
+    // hypothetical one.
     expect(derivesEntryFromRawArgv('export function parseArgs(argv) { return argv[1]; }')).toBe(false);
     expect(
       derivesEntryFromRawArgv('async function main(argv = process.argv.slice(2)) { return argv[1]; }'),
