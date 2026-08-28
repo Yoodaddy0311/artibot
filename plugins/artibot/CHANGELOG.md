@@ -25,6 +25,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `readState` 가 모든 예외를 "부재"로 삼키던 것을 `ENOENT` 만 부재로 좁혔다. 파손 JSON·BOM
   선행·`EACCES`/`EBUSY`(윈도우 동시접근·AV 잠금)·`EISDIR` 은 이제 쓰기를 막고 원본을
   보존한다. 이전에는 그 상태에서 조용히 덮어써 완료 플래그가 소실됐다.
+- **plan-state 동기화 계열이 `lib/planning/artifacts.js` 에서 `lib/planning/plan-state.js` 로
+  분리됐다.** 947줄(800 한도 초과)이던 artifacts.js 의 `taskKey`·`mergeCompletion`·
+  `zeroTaskRejection`·`syncTodo`·`readState` 를 이동한 순수 리팩토링 — 위 fail-closed 로직은
+  무수정 이동, 행동 변화 0. `artifacts.js#syncTodo` 는 위임 wrapper 로 남는다
+  (doc-async-await-parity 게이트가 이 파일 내 선언을 요구하고 `commands/*.md` 동적 import
+  소비자가 이 모듈을 로드한다). 분리 후 artifacts.js 793줄 / plan-state.js 213줄.
 
 ### Fixed
 - **CRLF 플랜의 태스크 0건 파싱** — `lib/core/plan-tracker.js#parsePlan` 이 `split('\n')` 으로
@@ -57,12 +63,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   > (커밋 `41e690d0` 이후 파일). 위 보정은 이 상태를 **명확히 보고**하게 만들 뿐 고치지
   > 못한다. 실제 해소는 재배포(`claude plugin update`) 몫이다.
 
+- **`/split` 세션 매칭이 대소문자 민감이라 dispatch 가 거부되던 라이브 결함** — worktree
+  이름은 리포 원문 케이스를 보존하는데(`lib/git/repo-identity.js#sanitizeSegment` 는
+  소문자화하지 않는다) 하네스는 세션 이름을 소문자화해(`split-Artibot-plan-state` ↔
+  `split-artibot-plan-state-dd`) `lib/git/split-dispatch.js#matchingSessions` 의 민감 대조가
+  열린 창을 전부 "미개설"로 판정, `dispatch` 가 fail-closed refused(전송 0)였다.
+  실오퍼레이터 런 split-8f83d7 이 발굴(2026-08-27 실측). 매칭 정규식에 `i` 플래그 + 회귀
+  3건(대소문자 교차 매칭·세그먼트 2개 제외 유지·라이브 `ListAgents` 원문 end-to-end).
+
+### Removed
+- **`lib/context/`(session.js·index.js) 죽은 모듈 삭제 — `getStatePath` split-brain 해소
+  (#113).** 삭제된 `session.js` 의 상태 경로는 어떤 writer 도 만들지 않는
+  `~/.claude/artibot/…` 계열로, `session-end.js` 가 실제로 쓰는
+  `lib/core/hook-utils.js#getStatePath` 판과 갈라져 있었다.
+  `scripts/hooks/session-start.js#loadPreviousState` 의 선시도 분기(session.js 동적 import
+  후 폴백)를 제거하고 인자 없는 동기 함수로 정본화 — reader 와 writer 가 같은
+  `getStatePath()` 를 호출해 다시 갈라질 수 없다. 행동 변화: 세션 시작이 존재한 적 없는
+  경로를 먼저 읽던 동작 소멸(선시도는 항상 실패해 폴백으로 떨어졌으므로 관측 가능한 회귀
+  없음). 동반: `tests/context/session.test.js` 삭제, `tests/barrel-exports.test.js` 의
+  lib/context 블록 제거, `eslint.config.js` 죽은 글롭 제거. 프로덕션 호출자 0건은 리포
+  전역 grep 실측 — 잔존 참조는 과거 릴리스 노트뿐이다.
+
 ### Added
 - `tests/firewall/plan-crlf-fail-closed.test.js` — CRLF/CR 파싱, 줄 종결자 왕복, `syncTodo`
   0건 fail-closed, `readState` 부재/실패 구분 게이트.
 - `tests/firewall/split-telemetry-callsites.test.js` — `commands/split.md` 산문이 recorder 5종을
   실제로 싣고 있는지 잠근다. 기존 `split-telemetry-wallclock` 은 recorder **엔진**만 보고
   `commands/split.md` 를 읽지 않아, 호출을 전부 지워도 전 게이트가 그린이었다.
+- `tests/planning/plan-state.test.js` — plan-state.js **직접 import** 테스트 9건(파싱·진행률,
+  fail-closed 3종, 완료 플래그 이월, artifacts.js wrapper 의 순수 위임 고정). 기존 스위트는
+  wrapper 경유로만 이 모듈을 실행해 리뷰 게이트(무테스트 모듈)에 걸려 있었다.
+- `reports/SPLIT/split-8f83d7.md`(+원본 이벤트 ndjson) — **실오퍼레이터 `/split` 런 1호**
+  리포트. 줄기 2건(plan-state·sid-anchor)을 배치 커밋 `41f7f7e9` 로 랜딩(#112 닫힘),
+  run 11,242,709ms 중 humanWait 8,958,416ms = 79.7%(confirm 대기 2h05m 이 사용자 부재 지배 —
+  해석 주의), n=1 이라 속도 비교 주장 불가. 런이 발굴한 세션 매칭 결함은 위 Fixed 항목으로
+  후속 랜딩. `.gitignore` 의 `reports/` ignore 를 `reports/*` + `!reports/SPLIT/` 로 바꿔
+  split 런 리포트만 커밋 대상으로 재포함했다.
 
 ---
 

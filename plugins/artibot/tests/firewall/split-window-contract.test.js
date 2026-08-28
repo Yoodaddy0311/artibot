@@ -308,7 +308,7 @@ describe('후속 Phase 절 — 병합된 것과 자리표시자', () => {
   });
 
   it('측정 고지 3문구가 문자 그대로 있고 null 을 0 으로 바꾸지 않는다', () => {
-    expect(splitMd).toMatch(/^측정 고지:\n1\. 실오퍼레이터 데이터 0건/m);
+    expect(splitMd).toMatch(/^측정 고지:\n1\. 실오퍼레이터 데이터 1건\(n=1\)/m);
     expect(splitMd).toMatch(/^2\. wall-clock 은 인간 대기 포함/m);
     expect(splitMd).toMatch(/^3\. 사람 대기 비율 \{humanWaitPct\}%/m);
     expect(splitMd).toMatch(/`null` 은 `null` 로 찍는다/);

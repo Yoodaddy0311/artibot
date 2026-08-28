@@ -66,7 +66,11 @@ runtime/autopilot/
 !runtime/state/.gitkeep
 
 # Generated reports / analyses / plugin design proposals (committed history kept; new files ignored)
-reports/
+# reports/* (not reports/) so the SPLIT exception below can re-include — git cannot
+# re-include children of an excluded directory. /split run reports are committed
+# evidence (commands/split.md 측정 고지 1번이 인용한다), unlike the other generated reports.
+reports/*
+!reports/SPLIT/
 **/_design/
 **/_analysis/
 **/_research/

@@ -1,0 +1,15 @@
+{"ts":"2026-08-27T10:16:16.663Z","sessionId":"split-8f83d7","phase":null,"type":"wall-clock-start","level":"info","message":"wall-clock start: run","data":{"segment":"run","humanWait":false}}
+{"ts":"2026-08-27T10:16:16.666Z","sessionId":"split-8f83d7","phase":"PLAN","type":"phase-start","level":"info","message":"PLAN start"}
+{"ts":"2026-08-27T10:16:16.670Z","sessionId":"split-8f83d7","phase":"PLAN","type":"fast-profile-planned","level":"info","message":"Fast parallel execution plan accepted","data":{"requested":true,"reused":false,"cpuCount":32,"requestedParallelism":2,"eligibleParallelism":2,"plannedParallelism":2,"worktrees":{"required":true,"count":2},"serialReasons":[],"fallbackReason":null}}
+{"ts":"2026-08-27T10:16:16.797Z","sessionId":"split-8f83d7","phase":"PLAN","type":"phase-end","level":"info","message":"PLAN end"}
+{"ts":"2026-08-27T10:16:46.726Z","sessionId":"split-8f83d7","phase":null,"type":"wall-clock-start","level":"info","message":"wall-clock start: open-windows","data":{"segment":"open-windows","humanWait":true}}
+{"ts":"2026-08-27T10:16:46.728Z","sessionId":"split-8f83d7","phase":"OPEN","type":"phase-start","level":"info","message":"OPEN start"}
+{"ts":"2026-08-27T10:40:35.950Z","sessionId":"split-8f83d7","phase":null,"type":"wall-clock-end","level":"info","message":"wall-clock end: open-windows","data":{"segment":"open-windows"}}
+{"ts":"2026-08-27T10:40:35.952Z","sessionId":"split-8f83d7","phase":"OPEN","type":"phase-end","level":"info","message":"OPEN end"}
+{"ts":"2026-08-27T10:41:34.193Z","sessionId":"split-8f83d7","phase":"DISPATCH","type":"phase-start","level":"info","message":"DISPATCH start"}
+{"ts":"2026-08-27T10:42:06.572Z","sessionId":"split-8f83d7","phase":"DISPATCH","type":"phase-end","level":"info","message":"refused: session-name case mismatch (split-Artibot-* vs split-artibot-*) — fail-closed, 0 sent"}
+{"ts":"2026-08-27T11:11:46.951Z","sessionId":"split-8f83d7","phase":null,"type":"wall-clock-start","level":"info","message":"wall-clock start: confirm-integrate","data":{"segment":"confirm-integrate","humanWait":true}}
+{"ts":"2026-08-27T13:17:16.143Z","sessionId":"split-8f83d7","phase":null,"type":"wall-clock-end","level":"info","message":"wall-clock end: confirm-integrate","data":{"segment":"confirm-integrate"}}
+{"ts":"2026-08-27T13:17:16.146Z","sessionId":"split-8f83d7","phase":"INTEGRATE","type":"phase-start","level":"info","message":"INTEGRATE start"}
+{"ts":"2026-08-27T13:23:39.370Z","sessionId":"split-8f83d7","phase":"INTEGRATE","type":"phase-end","level":"info","message":"landed 41f7f7e9 rebuilds=0"}
+{"ts":"2026-08-27T13:23:39.372Z","sessionId":"split-8f83d7","phase":null,"type":"wall-clock-end","level":"info","message":"wall-clock end: run","data":{"segment":"run"}}

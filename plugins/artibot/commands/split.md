@@ -45,7 +45,7 @@ Parse $ARGUMENTS — 첫 토큰이 서브커맨드다.
 |---|---|---|
 | `maxWindows` | 4 | 동시 창 상한. `buildFastFanoutPlan` 의 **기존 4키**로 매핑된다(`maxWorktrees`·`hardMaxAgents` 양쪽) — `lib/autopilot/fast-profile.js#normalizeFastProfile` 은 4키만 읽고 새 키는 **무음 폴백**하므로 `limits:{maxWindows}` 로 넘기면 상한이 안 걸린다 |
 | `minStems` | 2 | 이보다 적은 줄기면 `/split` 을 쓰지 않는다(창 1개는 `/team` 이 낫다). plan 유효성 하한 — 힌트 임계가 아니다 |
-| `recommendMinSubtasks` | `null` | `recommend=split` 힌트 발화 임계(sub-objective 수). `null` = OFF(opt-in). 정수 ≥2 로 켜되 **6 이하는 autopilot 힌트(`tier high AND subs ≥ 6`)를 가린다** — 실오퍼레이터 데이터 0건이라 OFF 출하 |
+| `recommendMinSubtasks` | `null` | `recommend=split` 힌트 발화 임계(sub-objective 수). `null` = OFF(opt-in). 정수 ≥2 로 켜되 **6 이하는 autopilot 힌트(`tier high AND subs ≥ 6`)를 가린다** — 실오퍼레이터 데이터 n=1(split-8f83d7)뿐이라 OFF 출하 유지 |
 | `serverEntryPaths` | `[]` | 개발 서버 진입 경로. 같은 포트를 두 창이 못 띄우므로 이 경로를 만지는 작업은 한 줄기로 묶는다 |
 | `humanWaitReevalPct` | 50 | 측정 계약의 사람 대기 구간이 총 소요의 이 % 를 넘으면 C단계(headless 창) 재평가 조건 성립 — 기록·병기만, 코드 비교 없음 |
 
@@ -213,7 +213,7 @@ node --input-type=module -e "const {landBatch,makeGhCheckRunsFetcher}=await impo
 
 사전 탐지만 따로 보려면 `/git worktree check` 와 같은 모듈이다(ADR-005 단일 소유): `preflightBranches([...], { cwd })` + `formatConflictMatrix` — 종료코드 1 = `blocked`(충돌 쌍 또는 `error` 쌍 — 잘못된 ref 도 exit 1 이므로 `error` 는 충돌과 같은 차단), 첫 줄 `UNSUPPORTED` = git < 2.38.
 
-**이 절이 못 보는 것**: merge-tree 초록 ≠ 안전(텍스트 3-way 성공만 — 개명+호출 추가 같은 의미적 충돌은 ⑤ 의 CI 만 본다, 그래서 초록이어도 CI 를 생략하지 않는다) · 원격 TOCTOU(락은 이 호스트의 파일 — 다른 머신·CI 잡·수동 push 는 ⑥ base 재확인과 non-ff 거부가 막고, 그 사이 마이크로초 창은 "moved" 로 재빌드 1회에 포함) · GitHub 자체(`strict`·`enforce_admins`·required contexts 는 라이브 원격 동작 — 테스트는 로컬 bare 원격 + 주입 check-run 페이로드뿐, `gh api` 라이브 호출 0회, 실오퍼레이터 랜딩 0건) · 10분 상한의 실제 wall-clock(테스트는 `pollMs:0` 으로 시도 횟수만).
+**이 절이 못 보는 것**: merge-tree 초록 ≠ 안전(텍스트 3-way 성공만 — 개명+호출 추가 같은 의미적 충돌은 ⑤ 의 CI 만 본다, 그래서 초록이어도 CI 를 생략하지 않는다) · 원격 TOCTOU(락은 이 호스트의 파일 — 다른 머신·CI 잡·수동 push 는 ⑥ base 재확인과 non-ff 거부가 막고, 그 사이 마이크로초 창은 "moved" 로 재빌드 1회에 포함) · GitHub 자체(`strict`·`enforce_admins`·required contexts 는 라이브 원격 동작 — 테스트는 로컬 bare 원격 + 주입 check-run 페이로드뿐, `gh api` 라이브 호출 0회 — 실오퍼레이터 랜딩은 1건 있다: split-8f83d7→41f7f7e9) · 10분 상한의 실제 wall-clock(테스트는 `pollMs:0` 으로 시도 횟수만).
 
 ### handoff / resume (부모 슬러그 기준)
 
@@ -234,7 +234,7 @@ node --input-type=module -e "const {landBatch,makeGhCheckRunsFetcher}=await impo
 
 ```
 측정 고지:
-1. 실오퍼레이터 데이터 0건 — `/split` vs `-fast` 속도 비교는 아직 주장할 수 없다(2026-08-26 기준; 이 문장은 라이브 실측 리포트가 최소 1건 랜딩된 뒤에만 갱신한다).
+1. 실오퍼레이터 데이터 1건(n=1) — `/split` vs `-fast` 속도 비교는 여전히 주장할 수 없다(n=1 은 존재 증명이지 비교 표본이 아니다; 근거 `reports/SPLIT/split-8f83d7.md`, 2026-08-28 기준).
 2. wall-clock 은 인간 대기 포함 — 창 열기(`open-windows`)·통합 확인(`confirm-integrate`) 등 사람이 일한 구간이 총 소요(`run`)에 들어 있다. `humanWait:true` 세그먼트로 분리 기록하며, 빼고 말하지 않는다.
 3. 사람 대기 비율 {humanWaitPct}% (분자 humanWaitMs={humanWaitMs}, 분모 run={totalMs}ms, 측정시각 {마지막 이벤트 ts}; 미쌍 {unpaired 수}건이면 `null`) — C단계(headless 자동 창) 재평가 조건 `config.split.humanWaitReevalPct`={config 값} 대비 {초과/미만/미측정}. 판정과 C단계 재개는 사람이 결정한다 — 플러그인은 기록만 하고 임계값을 코드에서 비교하지 않는다(`tests/firewall/split-telemetry-wallclock.test.js` "record-only" 게이트).
 ```
@@ -285,7 +285,7 @@ node --input-type=module -e "const {landBatch,makeGhCheckRunsFetcher}=await impo
 
 - 세션↔worktree 대응은 휴리스틱이다(P3). 사람이 손으로 지은 worktree 이름·세션은 대상 밖이다. 하네스 세션 이름 규칙(`{디렉터리명}-{hex2}`)은 관측이지 계약이 아니다.
 - merge-tree 초록 ≠ 의미적 안전. DB·포트·락 공유는 `serverEntryPaths` 시드 외에는 탐지하지 않는다.
-- 실오퍼레이터 텔레메트리 **0건**(2026-08-26). 이 문서의 절차가 §측정 호출을 실제로 하는지는 실행해야만 안다(존재 ≠ 작동).
+- 실오퍼레이터 텔레메트리 **1건**(split-8f83d7, 2026-08-28 기준) — §측정 호출 실발화는 그 런에서 확인됐다(15이벤트·미쌍 0). n=1 이라 매 실행 발화의 보장은 아니다(존재 ≠ 작동).
 - 훅 등록 ≠ 발화, 스킬 실발화 미확인. `.worktreeinclude` 로 P6 이 풀리는지 미확인. `collectHandoffData` 슬러그 구멍은 코드로 닫히기 전까지 프롬프트 규칙에 의존한다.
 
 ## Next Steps
