@@ -1,5 +1,5 @@
 ---
-description: (Artibot) Cross-session multi-worktree split — 파일 소유권이 겹치지 않는 줄기를 창 N개(실용 상한 4)로 병렬 진행하고, 완료를 git 트레일러로 판독한다. 첫 출하는 plan·open·status
+description: (Artibot) Cross-session multi-worktree split — 파일 소유권이 겹치지 않는 줄기를 창 N개(실용 상한 4)로 병렬 진행하고, 완료를 git 트레일러로 판독한다. 서브커맨드는 plan·open·status·dispatch·run·integrate·handoff·resume
 argument-hint: 'plan <task-description> | open <limb> | status | dispatch | run [--resume <runId>] | integrate | handoff | resume'
 allowed-tools: [Read, Write, Bash, Glob, Grep, ListAgents, SendMessage]
 toolset: team
