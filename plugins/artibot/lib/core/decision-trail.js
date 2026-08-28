@@ -204,10 +204,16 @@ export async function recordDecision(decision, options = {}) {
 
     // The only suspension in this function, and it must stay above the read.
     // Everything from `readTrailSync` to `writeTrailSync` is one
-    // read-modify-write; an `await` anywhere inside it lets a second call read
-    // the same base and write it back, erasing the first call's entry.
-    // `route()` (lib/cognitive/router.js:386) fires these unawaited, so
-    // overlapping calls are the normal case, not a corner one.
+    // read-modify-write; an `await` anywhere inside it lets a second caller read
+    // the same base and write it back, erasing the first one's entry. Measured
+    // on the pre-fix code: five overlapping writes, one survivor.
+    //
+    // Keeping the section synchronous closes that IN-PROCESS window, because
+    // Node's single thread cannot interleave two synchronous sections. It does
+    // NOT close the cross-process one: the per-prompt hook and the `scripts/cron/`
+    // runners are separate Node processes sharing no execution, and 21 of 60
+    // writes were lost across three of them (measured 2026-08-28). Closing that
+    // needs a file lock or an append-only format, and is out of scope here.
     await ensureDir(path.dirname(trailPath));
 
     const timestamp = new Date().toISOString();

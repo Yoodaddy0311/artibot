@@ -8,6 +8,7 @@
 import { emit } from '../../core/event-bus.js';
 import { classifyComplexity } from '../../cognitive/router.js';
 import { detectIntent } from '../../intent/index.js';
+import { recordRoutingDecision, resolveDecisionRunId } from '../../observability/decision-events.js';
 
 /**
  * @param {object} [options]
@@ -36,6 +37,12 @@ export function createRouterMiddleware(options = {}) {
       ...classification,
       system,
     };
+
+    // Explainability (D5) — observe-only, swallows its own failures, records no
+    // prompt text. This is the classification that actually runs on every
+    // prompt; `router.js#route()` wraps the same call with a trail write but
+    // nothing in production calls it (measured 2026-08-28).
+    recordRoutingDecision(resolveDecisionRunId(state.context), classification);
 
     state.context.intent = {
       intents: intent.intents,

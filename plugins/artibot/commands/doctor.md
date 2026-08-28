@@ -13,13 +13,14 @@ Run automated health checks on the Artibot plugin installation. Validates config
 ## Arguments
 
 Parse $ARGUMENTS:
-- (no argument): Run all 6 checks
+- (no argument): Run all 7 checks
 - `config`: Check 1 only — config validation
 - `agents`: Check 2 only — agent file presence
 - `skills`: Check 3 only — skill hash integrity
 - `hooks`: Check 4 only — hook health
 - `mcp`: Check 5 only — MCP connectivity
 - `memory`: Check 6 only — memory store health
+- `explainability`: Check 7 only — decision recording health
 - `--verbose`: Show per-item details (not just summary lines)
 - `--json`: Output results as a JSON object instead of the formatted report
 - `--fix`: After diagnosing, apply SAFE automatic repairs for fixable failures (see Self-Heal below)
@@ -107,6 +108,37 @@ All paths are relative to the plugin root (`plugins/artibot/`):
 3. Flag oversized files (> 500KB) or empty stores (0 entries)
 4. Report: store count, total entries, total size, warnings
 
+### Check 7: Explainability Health
+
+Read-only. This check exists because the decision record had no reader at all:
+`getDecisionStats` and `queryDecisions` were exported from `lib/core/index.js`
+and consumed by nothing, so the trail sat empty in production and nobody
+noticed. A store nobody reads cannot report its own outage.
+
+1. **Decision trail** — import `getDecisionStats` from `lib/core/decision-trail.js`
+   and read `totalDecisions`, `last24h`, and `bySubsystem`.
+2. **Decision events** — list `runtime/decisions/*.events.ndjson`
+   (`lib/observability/decision-events.js`). Count lines written in the last 24h
+   and note the newest `ts` across files.
+3. **Absence check (S3)** — read `runtime/current-effort.json`. Its `updatedAt`
+   is written by `persistEffortMeta` on every slash-command prompt
+   (`scripts/hooks/runtime-prompt.js:62-74`), so it dates the last prompt that
+   should have produced a trail entry. Warn when that timestamp is within 24h
+   but step 1 reports `last24h === 0` — that pairing means recording is broken,
+   not merely idle. Absence of records is only meaningful against evidence that
+   something should have been recorded.
+4. Report: trail entries (total / last 24h), decision-event lines (last 24h),
+   newest record timestamp, and any S3 warning.
+
+Status for this check:
+- **pass** — records exist in the last 24h, or no slash command fired in that window
+- **warn** — zero records but a slash command fired within 24h (S3), or the stores are missing entirely
+- **fail** — reserved for an unreadable/corrupt store; a merely empty one is a warning, not a failure
+
+Do not treat a green result as proof that every decision is recorded. Only two
+decision points are wired (routing classification and workflow plan); this check
+reports whether the recording path is alive, not whether its coverage is complete.
+
 ## Output Format
 
 ```
@@ -119,14 +151,15 @@ ARTIBOT HEALTH CHECK
 [check-4-icon] Hooks: {n} dispatchers, {n} scripts
 [check-5-icon] MCP: {server1} ({status}), {server2} ({status})
 [check-6-icon] Memory: {n} stores, {n} entries, {size} total
+[check-7-icon] Explainability: {n} trail entries (24h), {n} event lines (24h), last {timestamp}
 
 Status: {HEALTHY|DEGRADED|UNHEALTHY} ({passed}/{total} checks passed)
 ```
 
 Status logic:
-- **HEALTHY**: All 6 checks passed (zero errors)
-- **DEGRADED**: 4-5 checks passed (warnings present)
-- **UNHEALTHY**: 3 or fewer checks passed
+- **HEALTHY**: All 7 checks passed (zero errors)
+- **DEGRADED**: 5-6 checks passed (warnings present)
+- **UNHEALTHY**: 4 or fewer checks passed
 
 Use checkmark for passed checks, cross for failed checks, warning sign for checks with non-critical issues.
 
@@ -143,21 +176,22 @@ If `--json` is set, output a structured JSON object:
     "skills": { "status": "pass", "details": {} },
     "hooks":  { "status": "pass", "details": {} },
     "mcp":    { "status": "warn", "details": {} },
-    "memory": { "status": "pass", "details": {} }
+    "memory": { "status": "pass", "details": {} },
+    "explainability": { "status": "pass", "details": {} }
   },
-  "summary": { "passed": 6, "total": 6, "status": "HEALTHY" }
+  "summary": { "passed": 7, "total": 7, "status": "HEALTHY" }
 }
 ```
 
 ## Error Handling
 
-- If `artibot.config.json` cannot be read or parsed, abort all checks and report a critical error — config is the foundation for checks 2-6
+- If `artibot.config.json` cannot be read or parsed, abort all checks and report a critical error — config is the foundation for checks 2-7
 - If a specific check fails mid-execution (e.g., file I/O error), mark that check as FAIL and continue to the next check
 - Never let a single check failure prevent the remaining checks from running
 
 ## Self-Heal (`--fix` / `--dry-run`)
 
-When `--fix` (or `--dry-run`) is passed, after the 6 diagnostic checks above complete, route the collected failures through the self-heal layer in `lib/core/doctor-fix.js`. This is built for the non-developer ("vibe coder") who hits a sudden "it stopped working" wall and wants a one-shot recovery.
+When `--fix` (or `--dry-run`) is passed, after the 7 diagnostic checks above complete, route the collected failures through the self-heal layer in `lib/core/doctor-fix.js`. This is built for the non-developer ("vibe coder") who hits a sudden "it stopped working" wall and wants a one-shot recovery.
 
 ### Invocation
 

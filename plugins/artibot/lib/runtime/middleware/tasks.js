@@ -9,6 +9,7 @@ import path from 'node:path';
 import { readJsonFileSync } from '../../core/file.js';
 import { buildWorkflowPlan } from '../../cognitive/workflow-plan.js';
 import { getTaskBudgetForEffort } from '../task-budget.js';
+import { recordWorkflowPlanDecision, resolveDecisionRunId } from '../../observability/decision-events.js';
 
 function makeTaskId(nowFn) {
   const now = nowFn();
@@ -107,6 +108,11 @@ export function createTasksMiddleware(options = {}) {
         budgetResolver: (e) => getTaskBudgetForEffort(e, cfg) || 0,
       });
       task.meta = { ...(task.meta || {}), workflowPlan: plan };
+
+      // Explainability (D7) — observe-only. Records whether a parallel team
+      // fired and the trigger reasons, including the inline case; agent names
+      // only, no sub-objective text.
+      recordWorkflowPlanDecision(resolveDecisionRunId(state.context), plan);
     }
 
     state.context.tasks = task;

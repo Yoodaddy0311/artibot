@@ -14,15 +14,21 @@
  * section is simply synchronous, so Node's single thread cannot interleave two
  * of them.
  *
- * The live overlap source is `lib/cognitive/router.js:386`: `route()` is
- * synchronous and fires the trail write into an unawaited `.then()` chain, so
- * back-to-back routes start overlapping writes by construction.
+ * WHERE THE OVERLAP ACTUALLY COMES FROM. An earlier version of this header
+ * named `router.js#route()` — it fires its trail write into an unawaited
+ * `.then()` chain, which looks like the obvious source. It is not: `route()`
+ * has ZERO production callers (measured 2026-08-28; the live path calls
+ * `classifyComplexity` directly through `lib/runtime/middleware/router.js`).
+ * The real overlap today is CROSS-PROCESS — the per-prompt hook
+ * (`scripts/hooks/runtime-prompt.js`) and the `scripts/cron/` runners are
+ * separate Node processes — and a synchronous section cannot serialize those:
+ * 21 of 60 writes were lost across three processes in the same measurement.
  *
- * Scope: in-process only. Cross-process writers (the hook at
- * `scripts/hooks/runtime-prompt.js:549`, the cron runners under `scripts/cron/`)
- * are separate Node processes sharing no execution, so a synchronous section
- * does not serialize them; guarding those needs a filesystem lock, which is
- * deliberately out of scope here.
+ * So these cases drive the overlap directly with `Promise.all` rather than
+ * through a caller. They pin the in-process guarantee, which is real and worth
+ * keeping — a future in-process concurrent caller must not silently reopen the
+ * defect. Closing the cross-process half needs a file lock or an append-only
+ * format and is deliberately out of scope.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -93,8 +99,9 @@ describe('decision-trail concurrent writes', () => {
   });
 
   it('interleaves cleanly with a fire-and-forget writer that is never awaited', async () => {
-    // Mirrors router.js: the write is left unawaited and the caller moves on
-    // immediately, so it completes on a later turn of the event loop.
+    // The unawaited shape `route()` uses — the caller moves on immediately and
+    // the write completes on a later turn. Kept as a shape, not as a claim about
+    // a live caller: see the header on where overlap actually comes from.
     recordDecision({ subsystem: 'forget-probe', action: 'classified', outputs: { index: 0 } });
     recordDecision({ subsystem: 'forget-probe', action: 'classified', outputs: { index: 1 } });
     const last = await recordDecision({
