@@ -9,11 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [4.51.0] — 2026-08-28
 
-`.plan-state.json` 을 파괴하던 fail-open 경로 3종과, 실행하면 죽는 `/split dispatch`
-스니펫을 닫는다. 세 fail-open 은 모두 같은 모양이었다 — **입력을 읽지 못했는데 "비어
-있다"로 해석하고, 그 해석을 `ok:true` 로 디스크에 썼다.**
+축이 둘인 릴리스다. 하나 — **`/split` 크로스세션 멀티-worktree 분할이 처음 출하된다**:
+커맨드·스킬(plan·open·status·dispatch·run·integrate·handoff·resume)과 git 판정 계열(repo-identity·
+limb 완료 판독·dispatch 판정기·merge-preflight·배치 랜딩·랜딩 락), 측정 계약까지 전부
+신규다(아래 Added). 둘 — `.plan-state.json` 을 파괴하던 fail-open 경로 3종과 신규
+`/split` 의 결함 2건을 닫는다. 둘 중 dispatch 스니펫은 런과 무관한 별건으로,
+부트스트랩 프로브 실측(서브에이전트·메인 세션 Bash)이 먼저 드러냈고, 실오퍼레이터
+런 1호가 드러낸 것은 세션 매칭 1건이다. 세 fail-open 은 모두 같은 모양이었다 —
+**입력을 읽지 못했는데 "비어 있다"로 해석하고, 그 해석을 `ok:true` 로 디스크에 썼다.**
 
 ### Changed
 - **⚠ 행동 변화 — 체크박스가 하나도 없는 플랜이 `ok:false` 로 표면화된다.** 이전에는 태스크
@@ -70,6 +75,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   열린 창을 전부 "미개설"로 판정, `dispatch` 가 fail-closed refused(전송 0)였다.
   실오퍼레이터 런 split-8f83d7 이 발굴(2026-08-27 실측). 매칭 정규식에 `i` 플래그 + 회귀
   3건(대소문자 교차 매칭·세그먼트 2개 제외 유지·라이브 `ListAgents` 원문 end-to-end).
+- **worktree 안에서 훅이 무음 비활성되던 `'.git'` 리터럴 조인 11곳(훅 5파일)을
+  `lib/git/git-dir.js#getGitDir` 로 통일.** worktree 최상위 `.git` 은 디렉터리가 아니라
+  gitdir 포인터 파일이라, 리터럴 조인 훅은 worktree 에서 조용히 죽거나 상태가 분열됐다
+  (setup 은 진짜 gitdir 에 쓰고 session 은 `<wt>/.git/…` 에서 읽는 식). 동반:
+  `cleanupOldStashes` 의 stash drop TOCTOU 가드 — `refs/stash` 는 worktree 간 공유(실측)라
+  list→drop 사이 삽입 시 인덱스가 밀려 남의 stash 를 drop 할 수 있어, 수집 시 SHA pin +
+  drop 직전 rev-parse 재확인·불일치 시 중단. 게이트 3종(worktree-gitdir-resolution·
+  stash-ref-isolation·hooks-no-dotgit-literal '.git' 잔여 0 래칫).
+- **decision-trail 테스트 픽스처가 실제 학습 데이터(`runtime/decision-trail.json`)를
+  오염·대체하던 경로 결함.** 기본 `isolate:true` 에서도 발생(2026-08-26 실측: 테스트
+  파일당 +1 누적) — trail 경로를 연산당 1회가 아니라 사용할 때마다 `CLAUDE_PLUGIN_ROOT`
+  에서 다시 풀어, 읽기/ensureDir/쓰기가 다른 루트로 갈리면 샌드박스에서 읽고 실루트에
+  써 실제 trail 이 픽스처로 대체됐다(오염이 아니라 데이터 소실). `resolveTrailPath` 로
+  경로를 연산당 1회 고정, 동기 함수 `route()` 는 호출 시점에 pluginRoot 를 캡처해 넘긴다.
+- **autopilot worktree 오귀속 2건.** ① 생성 게이트(truthy)와 강등 사유 결정(`=== true`)의
+  술어 분열로 `useWorktree: 'true'|1` 이 실제로 worktree 생성을 시도·실패하고도 "요청한
+  적 없음"(no-integration-worktree)으로 기록되던 것을 `worktreeRequested(state)` 단일
+  술어로 통일 — resume 은 디스크 state 를 원시 통과시켜 비-boolean 이 실재 도달한다.
+  ② `--worktree` 지정 후 생성 실패가 opt-out 과 같은 사유 코드로 합쳐지던 것을
+  `integration-worktree-failed` 로 분리 — `:status` 가 실패를 opt-out 으로 보고하지 않는다.
 
 ### Removed
 - **`lib/context/`(session.js·index.js) 죽은 모듈 삭제 — `getStatePath` split-brain 해소
@@ -83,8 +108,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   없음). 동반: `tests/context/session.test.js` 삭제, `tests/barrel-exports.test.js` 의
   lib/context 블록 제거, `eslint.config.js` 죽은 글롭 제거. 프로덕션 호출자 0건은 리포
   전역 grep 실측 — 잔존 참조는 과거 릴리스 노트뿐이다.
+- **orphan `team.worktreeIsolation` config 블록 삭제 (ADR-004)** — JS 소비자 0건(리포 전역
+  실측), config-schema 미선언·non-strict 라 로컬 config 에 남은 키는 무해. 동반:
+  `skills/team/SKILL.md` 의 거짓 서술 제거(`/team --worktree` 플래그·worktreeIsolation
+  작동·"자동 병합" — 전부 구현된 적 없음; `Agent({isolation:"worktree"})` 는 실재라 유지,
+  병합은 리더 책임으로 명시), 라이브 `enforce_admins=true` 실측(gh api)에 맞춰 거짓 서술
+  5곳(CONTRIBUTING.md 2·plugin-validate.yml·pre-push 2) 교정.
 
 ### Added
+- **`/split` 커맨드·스킬 신설 — 크로스세션 멀티-worktree 분할** (plan·open·status·
+  dispatch·run·integrate·handoff·resume). 파일 소유권이 겹치지 않는 줄기를 창 N개(실용 상한 4)로 병렬
+  진행하고 완료를 `Split-Limb: done` git 트레일러로 판독한다. `commands/split.md`: plan 은
+  fast-profile 호출(fallbackReason 시 중단), open 은 내장 `claude --worktree` 만 사용
+  (명명 정본 `worktree-split-{repoShort}-{limb}`), status 는 porcelain 진실원, dispatch/run
+  은 fail-closed·멱등, integrate 는 배치 랜딩. 창 프롬프트의 보고/중계 계약은 team.md 와
+  문자 동일. 동반: `skills/split/SKILL.md`, `config#split`(maxWindows 4·minStems 2·
+  recommendMinSubtasks null=opt-in), 게이트 3종(split-window-contract·split-config-firewall·
+  split-name-collision).
+- **`lib/git/repo-identity.js` 신설 + autopilot 락의 repo 스코프화.** `getRepoIdentity`
+  (remote→owner/name, 폴백 root-<16hex>)·`composeScopedKey`·`splitWorktreeName`/
+  `splitLimbBranch` 가 split 명명의 단일 정본. `lock.js` 는 repo 스코프 키(+구스킴 병행
+  리더·`listLocks`), `preflight.js` 에 repoConcurrency·peerNotice 체크 추가, `engine.js`
+  락 호출 6곳 배선 — 스코프는 start 시 `state.lockScope` 로 영속돼 resume 시 cwd 무관.
+- **limb 완료 판독 + dispatch 판정기 + `recommend=split` 힌트(opt-in).**
+  `lib/git/limb-completion.js` 는 `Split-Limb: done` 트레일러만 완료로 인정(reason
+  allowlist 6종, 못 봤을 때 완료 오판 경로 0). `lib/git/split-dispatch.js#resolveDispatch`
+  는 ready|refused|unavailable 순수 판정기(fail-closed·멱등). `workflow-plan.js` 의
+  recommend=split 은 `config.split.recommendMinSubtasks` 출하 기본 null=OFF(opt-in).
+  runtime-prompt 의 RECOMMENDATION_HINTS 는 fail-open 에서 허용목록으로 전환.
+- **merge-preflight 승격 + 배치 랜딩 + 랜딩 락 (ADR-005).** `lib/git/merge-preflight.js`
+  (merge-tree --write-tree 쌍별 충돌 탐지, git <2.38 은 fail-closed serial),
+  `lib/git/batch-landing.js#landBatch`(N줄기→`ci/split-<run>` 단일 SHA, wait_for_green
+  포팅, 재빌드 정확히 1회 후 needs-human, base 재확인 + --force-with-lease),
+  `lib/git/landing-lock.js`(O_EXCL, 키는 composeScopedKey 단일 진실원).
+- **run-events 관측 코어 승격 + split 측정 계약.** telemetry ndjson 코어를
+  `lib/observability/run-events.js` 로 승격(줄 형식 바이트 동일, 소비자 2 확보).
+  `split-telemetry.js` 는 wall-clock/phase 쌍·humanWaitPct 기록 전용(미쌍→null, 0 금지,
+  config import 0). `replay.js` 는 미측정 durationMs 를 0 이 아니라 null 로 — 측정된
+  0 과 미측정을 더는 섞지 않는다.
+- **autopilot fast-profile `serverEntryPaths` 시드(top-level 옵션).** 시드 엔트리를
+  건드리는 태스크는 한 줄기로 병합(buildConflictGroups·buildWaves 가 같은 술어 사용),
+  읽을 수 없는 시드는 fail-closed(전원 직렬), 부재 시 plan deep-equal 불변.
 - `tests/firewall/plan-crlf-fail-closed.test.js` — CRLF/CR 파싱, 줄 종결자 왕복, `syncTodo`
   0건 fail-closed, `readState` 부재/실패 구분 게이트.
 - `tests/firewall/split-telemetry-callsites.test.js` — `commands/split.md` 산문이 recorder 5종을
