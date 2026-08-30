@@ -6,7 +6,7 @@
 import path from 'node:path';
 import { statSync } from 'node:fs';
 import { readJsonFile } from './file.js';
-import { getHomeDir, getPluginRoot } from './platform.js';
+import { getHomeDir, getPluginRoot, sameDirPath } from './platform.js';
 import { validateConfig } from './config-schema.js';
 
 /**
@@ -31,15 +31,38 @@ export function resolveArtibotDir() {
   const override = process.env.ARTIBOT_STATE_DIR;
   if (!override) return homeDerived;
 
-  // The override carries the home it was minted for, and loses whenever the
-  // current home is a different one. Environment variables are inherited by
+  // The override carries the home it was minted for, and is trusted only while
+  // that is still the home in force. Environment variables are inherited by
   // spawned processes, and the hook tests isolate themselves by handing a child
-  // `{ ...process.env, HOME: sandbox }` — so without this the override rode
-  // along and silently overruled the more specific knob the child was given.
+  // `{ ...process.env, HOME: sandbox }` — so without this the override rides
+  // along and silently overrules the more specific knob the child was given.
   // Measured 2026-08-30: 4 tests across 2 files broke exactly this way, and 9
   // spawn sites carried the same latent conflict.
+  //
+  // The pairing is REQUIRED, not optional. An override with no recorded home is
+  // an override we cannot place, and "cannot place" must not mean "trust" — the
+  // same fail-open shape as a denylist. Census 2026-08-30 found two setters in
+  // the repo, both of which record the pair, so nothing relied on the older
+  // permissive reading.
+  //
+  // Compared through `sameDirPath` rather than `===`: `getHomeDir()` returns
+  // whatever `USERPROFILE`/`HOME` hold verbatim, so a trailing separator or a
+  // drive-letter case difference used to read as a different home and throw the
+  // override away — which puts writes back into the real state directory, the
+  // exact outcome this seam exists to prevent.
+  // Checked against EVERY home variable that is set, not just the winner of
+  // `getHomeDir()`'s precedence. That function returns `USERPROFILE` before
+  // `HOME`, so a child handed `HOME` alone — the POSIX idiom — moved its home
+  // without moving the value being compared, and the override survived a change
+  // it was never minted for. Requiring agreement from all of them means any
+  // disagreement is a home change, whichever variable carries it.
   const mintedFor = process.env.ARTIBOT_STATE_DIR_HOME;
-  if (mintedFor && mintedFor !== getHomeDir()) return homeDerived;
+  if (!mintedFor) return homeDerived;
+
+  const declaredHomes = [process.env.USERPROFILE, process.env.HOME].filter(Boolean);
+  const homes = declaredHomes.length > 0 ? declaredHomes : [getHomeDir()];
+  if (!homes.every((home) => sameDirPath(mintedFor, home))) return homeDerived;
+
   return override;
 }
 

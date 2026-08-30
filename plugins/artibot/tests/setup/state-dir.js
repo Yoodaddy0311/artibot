@@ -78,10 +78,17 @@ if (!process.env.ARTIBOT_STATE_DIR) {
   process.once('exit', () => {
     try { fsSync.rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
   });
-  // Records the home this override belongs to. Both variables are inherited by
-  // spawned children, and a hook test isolates itself by handing the child a
-  // different HOME; `resolveArtibotDir()` compares the two and lets the child's
-  // home win. Read through `getHomeDir()` rather than a local reimplementation
-  // so the value being compared is produced by the same function on both sides.
-  process.env.ARTIBOT_STATE_DIR_HOME = getHomeDir();
 }
+
+// Records the home the override in force belongs to. Both variables are
+// inherited by spawned children, and a hook test isolates itself by handing the
+// child a different HOME; `resolveArtibotDir()` compares the two and lets the
+// child's home win. Read through `getHomeDir()` rather than a local
+// reimplementation so both sides of that comparison come from one function.
+//
+// Stamped OUTSIDE the block above on purpose. `resolveArtibotDir()` now discards
+// an override that carries no recorded home, so an operator running
+// `ARTIBOT_STATE_DIR=/tmp/x npx vitest` — the documented ad-hoc form — would
+// otherwise find their redirect silently ignored. Whatever value is in force
+// when the suite starts is the one this pairs.
+process.env.ARTIBOT_STATE_DIR_HOME = getHomeDir();
