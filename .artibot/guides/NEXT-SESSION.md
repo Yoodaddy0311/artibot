@@ -1,4 +1,11 @@
-# NEXT-SESSION — 크로스머신 핸드오프 (2026-08-30, master f3505fd9)
+# NEXT-SESSION — 크로스머신 핸드오프 (2026-08-30, master 34e61a06)
+
+> **2차 갱신 (같은 날 G 라운드)**: Check 7 스펙 재배선(S4/S5/S6, `0de8ca6d`) ·
+> badge-stall 발화 이력 실측 정정(`8371af46`) · stash-ref per-test 60s(`34e61a06`).
+> P1 의 Check 7 처방·모순 규명은 **완료** — 남은 것: ① effort-order 스위트의
+> mtime 화석 되찍기 처방(trail-sandbox 이전 or utimesSync — G4-a 규명 완료, 수정 미착수)
+> ② `landing-serialization.test.js#LOCK_MODULE` 의 cwd 의존(리포 루트 실행 함정) +
+> tests/ 전역 동종 스캔 ③ 실세션 decision-events 첫 기록 관측 (S5 warn 자동 해소).
 
 > 로컬 `.artibot/HANDOFF.md` 는 머신별이라 git 을 타지 않는다. 이 파일이 다른
 > 머신으로 넘어가는 요지본이다. 갱신 주체: 세션 종료 시 리더가 `/save` 와 함께.
