@@ -17,6 +17,8 @@ const mockState = {
   mkdirSyncCalls: [],
   readFileSyncImpl: () => { throw new Error('ENOENT'); },
   existsSyncResult: false,
+  /** Args of every stubbed `child_process.spawn` call — see the mock below. */
+  spawnCalls: [],
   // Per-path existsSync override map (string → boolean). When set, takes
   // precedence over `existsSyncResult` so a test can mark only `.artibot/HANDOFF.md`
   // as present while keeping all other paths absent.
@@ -94,6 +96,44 @@ vi.mock('node:os', async () => {
   };
 });
 
+/**
+ * The hook must not launch real child processes from a test.
+ *
+ * `main()` ends with `maybeSwarmAutodetect(env.pluginRoot)`, which spawns
+ * `scripts/swarm-autodetect.js --auto` against the REAL plugin root and
+ * `unref()`s it. That child spawns `scripts/swarm-init.js`, which WRITES the
+ * tracked `artibot.config.json` (`swarm.enabled` true, `backend` git,
+ * `gitRepoUrl` set) and rewrites `.claude-plugin/swarm-profile.json`.
+ *
+ * Measured 2026-08-30 with a probe on both scripts: one full-suite run produced
+ * 26 spawns from this file — every parent stack was
+ * `maybeSwarmAutodetect (session-start.js) <- main (session-start.js)` and no
+ * other test file appeared — of which 3 reached `swarm-init` and flipped the
+ * shipped defaults. It reproduces only in a long run because the child is
+ * detached: run this file alone and the suite exits before the child gets there.
+ *
+ * The run-once guard cannot stop it here. That guard is a marker file under
+ * `ARTIBOT_STATE_DIR`, which the global setup redirects to a fresh temp dir per
+ * worker, while the profile it acts on is read from the real
+ * `CLAUDE_PLUGIN_ROOT` — the guard state and its target live in different
+ * places, so every worker looks like a first run.
+ *
+ * Stubbing `spawn` is the whole fix and costs no production surface: this hook
+ * uses exactly one symbol from the module (`session-start.js`, the lone
+ * `await import('node:child_process')`). Calls are recorded so a test can still
+ * assert that a spawn was attempted.
+ */
+vi.mock('node:child_process', async () => {
+  const actual = await vi.importActual('node:child_process');
+  return {
+    ...actual,
+    spawn: vi.fn((...args) => {
+      mockState.spawnCalls.push(args);
+      return { unref: () => {}, on: () => {}, kill: () => {} };
+    }),
+  };
+});
+
 vi.mock('../../lib/core/version-checker.js', () => ({
   checkForUpdate: vi.fn(() => mockState.checkForUpdateFactory()),
 }));
@@ -134,6 +174,7 @@ describe('session-start hook', () => {
     vi.resetModules();
     mockState.readStdinResult = Promise.resolve('{}');
     mockState.writeStdoutCalls = [];
+    mockState.spawnCalls = [];
     mockState.writeFileSyncCalls = [];
     mockState.mkdirSyncCalls = [];
     mockState.readFileSyncImpl = () => { throw new Error('ENOENT'); };
@@ -582,6 +623,26 @@ describe('session-start hook', () => {
       const output = mockState.writeStdoutCalls[0][0];
       expect(output.message).toContain('[artibot:handoff]');
       expect(output.message).not.toContain('[artibot:pending-suggestions');
+    });
+  });
+
+  describe('자식 프로세스 격리 (추적 config 오염 차단)', () => {
+    it('swarm autodetect 스폰이 스텁을 통과한다 — 실제 프로세스가 아니다', async () => {
+      // `maybeSwarmAutodetect` returns early unless the autodetect script
+      // "exists", so let it through to the spawn it guards.
+      mockState.existsSyncResult = true;
+
+      await runHook();
+
+      // FAIL-CLOSED GATE. Delete the `node:child_process` mock and this goes
+      // red: a real `spawn` never touches `mockState.spawnCalls`. The mock is
+      // what stops the detached child from rewriting the tracked
+      // `artibot.config.json` — see the mock's own comment for the measurement.
+      const swarmSpawns = mockState.spawnCalls
+        .filter(([, args]) => Array.isArray(args)
+          && args.some((a) => String(a).includes('swarm-autodetect')));
+      expect(swarmSpawns.length).toBeGreaterThanOrEqual(1);
+      expect(swarmSpawns[0][1]).toContain('--auto');
     });
   });
 });

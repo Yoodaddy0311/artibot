@@ -14,6 +14,7 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { ensureDir, readJsonFile, writeJsonFile } from '../core/file.js';
 import { ARTIBOT_DIR } from '../core/config.js';
+import { assertEgressAllowed, safeFetch } from '../core/data-egress-guard.js';
 import { scrubPattern as defaultScrubPii } from '../privacy/pii-scrubber.js';
 
 // ---------------------------------------------------------------------------
@@ -42,8 +43,20 @@ const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 // ---------------------------------------------------------------------------
 
 /**
- * Set of hosts allowed for outbound HTTP requests.
- * Localhost + official Artibot Swarm Server on GCP Cloud Run.
+ * Set of hosts this client will talk to. Localhost only — a swarm server is
+ * self-hosted by DATA POLICY.
+ *
+ * There used to be an `ALLOWED_HOST_PATTERNS` beside this admitting
+ * `/^artibot-swarm-\d+\.[\w-]+\.run\.app$/`. The middle group is a Cloud Run
+ * PROJECT name, so `artibot-swarm-1.attacker.run.app` matched (measured
+ * 2026-08-30) — this list was strictly LOOSER than the policy allowlist in
+ * `lib/core/data-egress-guard.js`, which admits no run.app host at all. The
+ * hook paths consult the policy guard first, but
+ * `swarm-sync-now.js` -> `sync-scheduler.js#forceSync` -> here does not, so the
+ * looser list was reachable on its own. The run.app default was already removed
+ * from shipped config in v4.x and the pattern had no live consumer, so it is
+ * deleted rather than narrowed. `validateUrl` now also defers to the policy
+ * guard, making that the single source of truth.
  */
 const ALLOWED_HOSTS = new Set([
   'localhost',
@@ -51,11 +64,6 @@ const ALLOWED_HOSTS = new Set([
   '::1',
   '[::1]', // URL-parsed form of IPv6 localhost
 ]);
-
-/** Host patterns allowed for swarm server (Cloud Run domains) */
-const ALLOWED_HOST_PATTERNS = [
-  /^artibot-swarm-\d+\.[\w-]+\.run\.app$/, // GCP Cloud Run
-];
 
 /** RFC 1918 / RFC 6598 private IPv4 ranges (excluding explicit localhost) */
 const PRIVATE_IP_PATTERNS = [
@@ -116,12 +124,16 @@ function validateUrl(urlString) {
     throw new Error(`SSRF blocked: URL must not contain embedded credentials`);
   }
 
-  // Check allowlist (exact match or pattern match)
-  const hostAllowed = ALLOWED_HOSTS.has(url.hostname)
-    || ALLOWED_HOST_PATTERNS.some((p) => p.test(url.hostname));
-  if (!hostAllowed) {
+  // Check allowlist (exact match only — no patterns, see ALLOWED_HOSTS)
+  if (!ALLOWED_HOSTS.has(url.hostname)) {
     throw new Error(`SSRF blocked: host '${url.hostname}' not in allowlist`);
   }
+
+  // DATA POLICY. The list above is this client's own narrow rule; the shipped
+  // policy allowlist is the authority, and it has to agree. Routing through it
+  // here closes the force-sync path, which reaches this function without any
+  // hook-level `assertEgressAllowed` in front of it.
+  assertEgressAllowed(url.toString(), { reason: 'swarm-client' });
 
   // Block private IP ranges (except explicit localhost)
   if (isPrivateIp(url.hostname)) {
@@ -182,14 +194,23 @@ function buildHeaders(extraHeaders = {}) {
 // ---------------------------------------------------------------------------
 
 /**
- * Make an HTTP request with timeout using native fetch.
- * Validates the URL against the SSRF allowlist before making the request.
+ * Make an HTTP request with timeout.
+ *
+ * Goes through `safeFetch`, not raw `fetch`. Validating the URL once before the
+ * request only covers the FIRST hop: a redirect is followed by the runtime
+ * without any further check, and these requests carry an `Authorization:
+ * Bearer` header (see `buildHeaders`), so an allowlisted host answering 302
+ * would hand the token to wherever it pointed. `safeFetch` forces
+ * `redirect: 'manual'` and re-runs the allowlist on every hop.
+ *
+ * `options` is forwarded intact, so the caller's `signal` — the timeout
+ * controller below — still aborts the request, on the redirect hops too.
  *
  * @param {string} url - Full URL to fetch
  * @param {object} [options] - Fetch options (method, headers, body, etc.)
  * @param {number} [timeoutMs] - Timeout in milliseconds
  * @returns {Promise<Response>}
- * @throws {Error} If the URL is blocked by SSRF protection
+ * @throws {Error} If the URL is blocked by SSRF protection or DATA POLICY
  */
 async function fetchWithTimeout(url, options = {}, timeoutMs = REQUEST_TIMEOUT_MS) {
   // SSRF protection: validate URL before making any outbound request
@@ -199,10 +220,11 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = REQUEST_TIMEOUT_M
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const response = await fetch(validatedUrl.toString(), {
-      ...options,
-      signal: controller.signal,
-    });
+    const response = await safeFetch(
+      validatedUrl.toString(),
+      { ...options, signal: controller.signal },
+      { reason: 'swarm-client' },
+    );
     return response;
   } finally {
     clearTimeout(timer);
