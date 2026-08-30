@@ -29,6 +29,13 @@ export default defineConfig({
     // without masking real regressions.
     testTimeout: 30_000,
     hookTimeout: 30_000,
+    // Redirects `resolveArtibotDir()` away from the developer's real
+    // `~/.claude/artibot`. Declared here rather than per project because both
+    // entries below use `extends: true`; verified 2026-08-30 that the env
+    // actually reaches workers in BOTH projects rather than assuming it.
+    // Default-on by design: an opt-in guard fails open for the next test
+    // someone writes. See the file for what it does not cover.
+    setupFiles: ['./tests/setup/state-dir.js'],
     coverage: {
       provider: 'v8',
       reportOnFailure: true,

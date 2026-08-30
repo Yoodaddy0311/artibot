@@ -6,7 +6,7 @@
  */
 
 import path from 'node:path';
-import { ARTIBOT_DIR } from '../../core/config.js';
+import { resolveArtibotDir } from '../../core/config.js';
 import { readJsonFile, writeJsonFile } from '../../core/file.js';
 
 function buildCheckpointId(nowFn) {
@@ -14,8 +14,12 @@ function buildCheckpointId(nowFn) {
   return `ckpt-${ts.toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 }
 
+// Resolved per call, not from the `ARTIBOT_DIR` constant. Same path in
+// production; the difference is that a test can redirect it, which it could not
+// before — this middleware is in the DEFAULT pipeline, so every `preparePrompt`
+// test was persisting a checkpoint into the developer's own state file.
 function getDefaultCheckpointPath() {
-  return path.join(ARTIBOT_DIR, 'runtime', 'checkpoints.json');
+  return path.join(resolveArtibotDir(), 'runtime', 'checkpoints.json');
 }
 
 function trimEntries(entries, maxEntries) {

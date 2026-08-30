@@ -10,10 +10,48 @@ import { getHomeDir, getPluginRoot } from './platform.js';
 import { validateConfig } from './config-schema.js';
 
 /**
+ * Resolve the base directory for artibot's cross-session user state.
+ *
+ * `~/.claude/artibot`, deliberately NOT `getPluginRoot()`: this data has to
+ * outlive the plugin build that wrote it. In production the plugin root is a
+ * version-scoped cache directory (`~/.claude/plugins/cache/artibot/artibot/<v>/`)
+ * that Claude Code replaces on upgrade, so anchoring user state there would
+ * discard it on every release.
+ *
+ * `ARTIBOT_STATE_DIR` is the test seam for that choice. It lets a suite redirect
+ * user state without moving it in production, and it is read on EVERY call —
+ * the `ARTIBOT_DIR` constant below is captured once at import, which is already
+ * too late for a test to influence. Any writer that needs to be isolatable must
+ * therefore call this function rather than read the constant.
+ *
+ * @returns {string} Absolute path to the state directory.
+ */
+export function resolveArtibotDir() {
+  const homeDerived = path.join(getHomeDir(), '.claude', 'artibot');
+  const override = process.env.ARTIBOT_STATE_DIR;
+  if (!override) return homeDerived;
+
+  // The override carries the home it was minted for, and loses whenever the
+  // current home is a different one. Environment variables are inherited by
+  // spawned processes, and the hook tests isolate themselves by handing a child
+  // `{ ...process.env, HOME: sandbox }` — so without this the override rode
+  // along and silently overruled the more specific knob the child was given.
+  // Measured 2026-08-30: 4 tests across 2 files broke exactly this way, and 9
+  // spawn sites carried the same latent conflict.
+  const mintedFor = process.env.ARTIBOT_STATE_DIR_HOME;
+  if (mintedFor && mintedFor !== getHomeDir()) return homeDerived;
+  return override;
+}
+
+/**
  * Base directory for all artibot runtime data.
  * Shared across swarm, learning, and privacy modules.
+ *
+ * Captured at import, so its value is fixed for the life of the module graph.
+ * Existing readers keep that behavior unchanged; new code that writes user state
+ * should call `resolveArtibotDir()` so tests can isolate it.
  */
-export const ARTIBOT_DIR = path.join(getHomeDir(), '.claude', 'artibot');
+export const ARTIBOT_DIR = resolveArtibotDir();
 
 const DEFAULTS = {
   version: '1.0.0',
