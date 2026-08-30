@@ -52,7 +52,7 @@
  *   - getDecisionStoreDir({ storeDir })
  *   - getDecisionEventsPath(runId, { storeDir })
  *   - readDecisionEvents(runId, { storeDir, tail, level })
- *   - resolveDecisionRunId(context)
+ *   - resolveDecisionRunId(source)
  *   - recordRoutingDecision(runId, classification, { storeDir, ts, phase })
  *   - recordWorkflowPlanDecision(runId, plan, { storeDir, ts, phase })
  *   - getDecisionRecorderStats() / resetDecisionRecorderStats()
@@ -160,7 +160,13 @@ function sanitizeRunId(raw) {
  *   1. the hook payload's `session_id` — the real Claude Code session, which
  *      `scripts/hooks/pre-write-checkpoint.js:17-23` and five sibling hooks
  *      already rely on
- *   2. `context.sessionId`, for callers that already resolved one
+ *   2. `sessionId`, for callers that already resolved one
+ *
+ * The runtime callers pass `state.input` — the object holding the hook payload.
+ * The parameter is deliberately NOT named `context`: it was, and both call sites
+ * were written against `state.context`, which carries neither field. That reads
+ * as working code and fails silently (every call counted `skipped`), so the name
+ * is load-bearing.
  *
  * NO FALLBACK BUCKET, deliberately. An earlier draft fell back to a UTC date so
  * an event was "never dropped" — measured consequence: running the middleware
@@ -170,12 +176,12 @@ function sanitizeRunId(raw) {
  * missing record. Callers without a session are counted as `skipped` instead,
  * so the absence is visible rather than silently bucketed.
  *
- * @param {{ hookData?: object, sessionId?: string }} [context]
+ * @param {{ hookData?: object, sessionId?: string }} [source]
  * @returns {string|null}
  */
-export function resolveDecisionRunId(context) {
-  const ctx = context && typeof context === 'object' ? context : {};
-  const candidates = [ctx.hookData?.session_id, ctx.sessionId];
+export function resolveDecisionRunId(source) {
+  const src = source && typeof source === 'object' ? source : {};
+  const candidates = [src.hookData?.session_id, src.sessionId];
   for (const c of candidates) {
     if (typeof c === 'string' && c.trim()) {
       const clean = sanitizeRunId(c.trim());
