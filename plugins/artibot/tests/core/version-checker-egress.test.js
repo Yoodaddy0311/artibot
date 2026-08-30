@@ -13,10 +13,20 @@ vi.mock('node:fs', () => ({
   mkdirSync: vi.fn(),
 }));
 
-// Spy on assertEgressAllowed from data-egress-guard
+// The seam moved: version-checker now routes through `safeFetch` instead of
+// calling `assertEgressAllowed` itself and then reaching for a raw `fetch`.
+// That is the point of the change — a guard the caller can forget to pair with
+// its fetch is a guard that only covers the first URL (redirects escaped it).
+// The stub below models the real safeFetch (assert, then fetch) so every
+// assertion in this file keeps its original meaning.
 const mockAssertEgress = vi.fn();
+const mockSafeFetch = vi.fn(async (url, init, guardOptions) => {
+  mockAssertEgress(url, guardOptions);
+  return globalThis.fetch(url, init);
+});
 vi.mock('../../lib/core/data-egress-guard.js', () => ({
   assertEgressAllowed: (...args) => mockAssertEgress(...args),
+  safeFetch: (...args) => mockSafeFetch(...args),
   EgressBlockedError: class EgressBlockedError extends Error {
     constructor(msg) { super(msg); this.name = 'EgressBlockedError'; }
   },
@@ -29,6 +39,10 @@ describe('version-checker: assertEgressAllowed gate', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // clearAllMocks wipes recorded calls but KEEPS implementations, so the
+    // throwing impl one test installs would leak into the next. Reset just the
+    // policy seam; mockSafeFetch must keep its delegating implementation.
+    mockAssertEgress.mockReset();
     originalFetch = globalThis.fetch;
     globalThis.fetch = vi.fn(() =>
       Promise.resolve({
@@ -73,5 +87,13 @@ describe('version-checker: assertEgressAllowed gate', () => {
     const result = await checkForUpdate('1.0.0', '/fake/cache');
     expect(globalThis.fetch).not.toHaveBeenCalled();
     expect(result).toEqual({ hasUpdate: false });
+  });
+
+  it('never reaches for a raw fetch — every request goes through safeFetch', async () => {
+    // The original defect class: a module that asserts and then fetches on its
+    // own only ever checks the first URL. Pin the routing, not just the check.
+    await checkForUpdate('1.0.0', '/fake/cache');
+    expect(mockSafeFetch).toHaveBeenCalled();
+    expect(globalThis.fetch).toHaveBeenCalledTimes(mockSafeFetch.mock.calls.length);
   });
 });

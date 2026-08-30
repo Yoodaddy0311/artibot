@@ -1,5 +1,5 @@
 {
-  "$comment": "DATA POLICY egress allowlist. Add domains that Artibot may contact for legitimate purposes (release checks, opt-in swarm sync). Localhost / 127.0.0.1 / ::1 / *.local are ALWAYS allowed and do not need to be listed here. Override or extend at runtime by setting ARTIBOT_ALLOW_EGRESS=domain1,domain2 in the environment. Matching is EXACT hostname only (subdomains must be listed separately). Empty list = fail-closed: every non-localhost host is blocked.",
+  "$comment": "DATA POLICY egress allowlist. Add domains that Artibot may contact for legitimate purposes (release checks, opt-in swarm sync). Only loopback is ALWAYS allowed and needs no entry: localhost / 127.0.0.0-8 / ::1 / 0.0.0.0. LAN destinations are NOT exempt — *.local (mDNS) and fe80:: (IPv6 link-local) name other machines and must be listed here like any other host. Override or extend at runtime by setting ARTIBOT_ALLOW_EGRESS=domain1,domain2 in the environment. Matching is EXACT hostname only (subdomains must be listed separately). Empty list = fail-closed: every non-loopback host is blocked.",
   "domains": [
     "api.github.com",
     "github.com",

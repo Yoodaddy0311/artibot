@@ -17,6 +17,7 @@ import {
   assertEgressAllowed,
   EgressBlockedError,
   loadAllowlist,
+  safeFetch,
 } from '../../lib/core/data-egress-guard.js';
 import { readFileSync } from 'node:fs';
 import { isMainEntry } from './_main-entry.js';
@@ -114,11 +115,15 @@ export async function sendWebhook(config, payload) {
     // DATA POLICY gate: refuse to send to any host outside the allowlist.
     // Webhooks (Slack/Discord) are by definition third-party; users must
     // opt the destination host in via ARTIBOT_ALLOW_EGRESS or allowlist.json.
+    //
+    // This pre-check is deliberately kept even though `safeFetch` below asserts
+    // the same thing: it fails before the AbortController/timer exist, and it
+    // is the only path that produces the specific "blocked by DATA POLICY"
+    // line. The generic handler at the bottom would just say "Webhook failed".
+    // The allowlist is loaded once and handed to both.
+    const allowlist = loadAllowlist();
     try {
-      assertEgressAllowed(config.url, {
-        allowlist: loadAllowlist(),
-        reason: 'http-notify',
-      });
+      assertEgressAllowed(config.url, { allowlist, reason: 'http-notify' });
     } catch (egressErr) {
       if (egressErr instanceof EgressBlockedError) {
         process.stderr.write(
@@ -132,14 +137,31 @@ export async function sendWebhook(config, payload) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), config.timeoutMs ?? 5000);
 
-    const response = await fetch(config.url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-      signal: controller.signal,
-    });
-
-    clearTimeout(timer);
+    // safeFetch, not fetch: the pre-check above only clears the FIRST url. A
+    // webhook host answering 302 would otherwise carry this session payload —
+    // and the operator's headers — to wherever it pointed, because fetch
+    // follows redirects by default. safeFetch re-checks every hop.
+    //
+    // `finally`, not a trailing call: safeFetch now throws on a hop that leaves
+    // the allowlist, and a bare `clearTimeout` after the await is skipped when
+    // it does. This hook is a short-lived per-event process with no
+    // `process.exit`, so one armed timer keeps the event loop alive for the
+    // whole `timeoutMs` after the function has already returned — measured
+    // 2026-08-30: returned in 43ms, process exited at 5,027ms. Routing through
+    // safeFetch is what made that path routine (a URL shortener or a
+    // Slack/Discord redirect reaches it), so the cleanup has to be
+    // unconditional. Same shape as lib/swarm/swarm-client.js#fetchWithTimeout.
+    let response;
+    try {
+      response = await safeFetch(config.url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      }, { allowlist, reason: 'http-notify' });
+    } finally {
+      clearTimeout(timer);
+    }
 
     if (!response.ok) {
       process.stderr.write(
@@ -150,6 +172,15 @@ export async function sendWebhook(config, payload) {
 
     return true;
   } catch (err) {
+    // A redirect hop that left the allowlist arrives here, not at the
+    // pre-check above — report it as the policy decision it is rather than as
+    // a generic network failure.
+    if (err instanceof EgressBlockedError) {
+      process.stderr.write(
+        `[artibot:http-notify] Webhook blocked by DATA POLICY: ${err.message}\n`,
+      );
+      return false;
+    }
     const reason = err.name === 'AbortError' ? 'timeout' : err.message;
     process.stderr.write(`[artibot:http-notify] Webhook failed: ${reason}\n`);
     return false;

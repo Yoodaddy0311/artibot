@@ -2,9 +2,15 @@
  * DATA POLICY runtime egress guard.
  *
  * Enforces Artibot's DATA POLICY at runtime: outbound HTTP requests are
- * blocked unless the destination host is explicitly allowlisted. Localhost
- * variants (`localhost`, `127.0.0.1`, `::1`, `*.local`) are always allowed
- * because they cannot exfiltrate data outside the user's machine.
+ * blocked unless the destination host is explicitly allowlisted. Loopback
+ * hosts (`localhost`, `127.0.0.0/8`, `::1`, `0.0.0.0`) are always allowed
+ * because a request to them cannot leave the user's machine.
+ *
+ * `*.local` (mDNS) and `fe80::/10` (IPv6 link-local) are NOT in that set. They
+ * name OTHER machines on the LAN, so allowing them by default made the policy
+ * depend on how a host was spelled: `http://exfil.local/collect` passed while
+ * `http://192.168.1.50/collect` was blocked. Both are blocked now; reach a LAN
+ * host by putting it in the allowlist like any other destination.
  *
  * Fail-closed contract:
  *   - Empty allowlist = every non-localhost host is blocked.
@@ -67,20 +73,38 @@ const LOCALHOST_NAMES = new Set([
 
 /** Exact IPv4 loopback (127.0.0.0/8) — all four octets in 0-255 range. */
 const IPV4_LOOPBACK_RE = /^127\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
-/** Exact IPv6 link-local prefix fe80::/10 (canonical zero-compressed forms). */
-const IPV6_LINK_LOCAL_RE = /^fe80:(?::[0-9a-f]{0,4}){1,7}$/i;
 
 /**
- * Check whether a hostname refers to the local machine.
+ * Check whether a hostname refers to the LOCAL MACHINE — i.e. a request to it
+ * cannot leave this host. This is the only question the egress policy cares
+ * about; "is it nearby" is not the same question.
  *
  * Returns true ONLY for exact matches against:
  *   - `localhost`
  *   - `127.0.0.0/8` (IPv4 loopback, all four octets validated 0-255)
  *   - `::1` (IPv6 loopback, with or without brackets)
- *   - `fe80::/10` (IPv6 link-local)
- *   - `*.local` mDNS labels — host must END with `.local` (and only `.local`,
- *     not `.local.attacker.com`), and the `.local` token must be the final
- *     label of the hostname.
+ *   - `0.0.0.0` — the unspecified address; as a CONNECT target the supported
+ *     platforms route it to loopback, so it cannot reach another machine.
+ *
+ * Deliberately NOT included:
+ *   - `*.local` (mDNS) — resolves to another machine on the LAN. Treating it as
+ *     local let `http://exfil.local/collect` through while the same box's
+ *     `http://192.168.1.50/collect` was blocked, so the policy could be
+ *     defeated by spelling the destination differently. The webhook in
+ *     `scripts/hooks/http-notify.js` posts session payloads to an operator-set
+ *     URL, which made that reachable in practice.
+ *   - `fe80::/10` (IPv6 link-local) — another machine on the link, same
+ *     reasoning. It used to be accepted here and then blocked anyway by the
+ *     bracketed-URL form; that accident is now the deliberate answer.
+ *
+ * Reach either kind by allowlisting it explicitly, like any other host.
+ *
+ * `lib/runtime/dashboard/server.mjs#LOOPBACK_HOSTS` draws the line in the same
+ * place but is STRICTLY NARROWER — measured 2026-08-30 it is exactly
+ * `new Set(['127.0.0.1', '::1', 'localhost'])`, with no `[::1]`, no `0.0.0.0`,
+ * and no 127.0.0.0/8 beyond the one literal. It is an inbound bind check, not
+ * an outbound egress policy, so it has no reason to accept the extra forms.
+ * Do not read the two as one definition.
  *
  * Hardened against DNS-rebinding-style impostors such as `127.evil.com`,
  * `localhost.evil.com`, and `foo.local.evil.com` — all return false.
@@ -99,18 +123,6 @@ export function isLocalhost(hostname) {
       const n = Number(o);
       return Number.isInteger(n) && n >= 0 && n <= 255;
     });
-  }
-  // IPv6 link-local fe80::/10
-  if (IPV6_LINK_LOCAL_RE.test(lower)) return true;
-  // mDNS .local — exact-suffix only. Reject empty label, multi-dot tricks,
-  // and forms like `host.local.attacker.com`. The `.local` must be the final
-  // 6 characters and there must be content before it.
-  if (lower.endsWith('.local') && lower.length > '.local'.length) {
-    // Disallow consecutive dots (e.g. "foo..local") and stray whitespace.
-    if (lower.includes('..') || /\s/.test(lower)) return false;
-    // The substring `.local` may not appear anywhere except at the tail.
-    if (lower.lastIndexOf('.local') !== lower.length - '.local'.length) return false;
-    return true;
   }
   return false;
 }
@@ -257,23 +269,87 @@ export function assertEgressAllowed(url, options = {}) {
   );
 }
 
+/** Maximum redirect hops followed before giving up (fail-closed). */
+const MAX_REDIRECT_HOPS = 5;
+
+/** HTTP statuses that carry a `Location` the client is expected to follow. */
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+
 /**
- * Convenience wrapper: assert egress, then `fetch`.
+ * Convenience wrapper: assert egress, then `fetch` — **re-asserting every
+ * redirect hop**.
  *
  * Use this anywhere production code would normally call `fetch` directly.
  * Throws `EgressBlockedError` before any network I/O when the URL is denied.
  *
+ * Redirects are followed MANUALLY (`redirect: 'manual'`), which is the whole
+ * point of this wrapper. `fetch` defaults to `redirect: 'follow'`, so checking
+ * only the first URL meant an allowlisted host answering `302` could send the
+ * request — headers and bearer tokens included — anywhere it liked, which is
+ * exactly the SSRF-style bypass this module claims to prevent. A caller-supplied
+ * `init.redirect` is overridden on purpose: egress policy is not the caller's
+ * to opt out of.
+ *
+ * Per-hop behaviour:
+ *   - `Location` is resolved against the CURRENT url, so relative targets and
+ *     protocol-relative `//host/path` (which changes host) are both normalized
+ *     before being checked.
+ *   - Each resolved hop goes through {@link assertEgressAllowed} BEFORE any
+ *     request is made to it.
+ *   - `303`, and `301`/`302` on a POST, become GET with no body — the same
+ *     rewrite the fetch spec performs. `307`/`308` keep method and body.
+ *   - A 30x with no `Location` is returned as-is; there is nothing to follow.
+ *   - Exceeding {@link MAX_REDIRECT_HOPS} throws rather than returning the last
+ *     response, so a redirect loop cannot be mistaken for a real answer.
+ *
+ * Known limit: within the allowlist, a hop from host A to host B still carries
+ * the caller's headers to B. Every hop being allowlisted is a weaker statement
+ * than every hop being entitled to the caller's credentials; stripping them
+ * cross-origin is a separate decision and is not made here.
+ *
  * @param {string} url - Target URL
- * @param {RequestInit} [init] - Standard fetch init
+ * @param {RequestInit} [init] - Standard fetch init (`redirect` is ignored)
  * @param {object} [guardOptions]
  * @param {Iterable<string>} [guardOptions.allowlist] - Optional pre-loaded allowlist
  * @param {string} [guardOptions.reason] - Context tag for log messages
  * @returns {Promise<Response>}
  */
 export async function safeFetch(url, init, guardOptions = {}) {
-  assertEgressAllowed(url, {
-    allowlist: guardOptions.allowlist ?? loadAllowlist(),
-    reason: guardOptions.reason,
-  });
-  return fetch(url, init);
+  const allowlist = guardOptions.allowlist ?? loadAllowlist();
+  const reason = guardOptions.reason;
+
+  let currentUrl = url;
+  let currentInit = { ...(init || {}), redirect: 'manual' };
+
+  for (let hop = 0; hop <= MAX_REDIRECT_HOPS; hop += 1) {
+    assertEgressAllowed(currentUrl, { allowlist, reason });
+    const response = await fetch(currentUrl, currentInit);
+
+    if (!REDIRECT_STATUSES.has(response.status)) return response;
+    const location = response.headers?.get?.('location');
+    if (!location) return response;
+
+    let nextUrl;
+    try {
+      nextUrl = new URL(location, currentUrl).toString();
+    } catch {
+      throw new EgressBlockedError(
+        `egress blocked${reason ? ` [${reason}]` : ''}: redirect to unparseable Location '${location}'`,
+      );
+    }
+
+    const method = (currentInit.method || 'GET').toUpperCase();
+    const downgradeToGet = response.status === 303
+      || ((response.status === 301 || response.status === 302) && method === 'POST');
+    if (downgradeToGet) {
+      const { body, ...rest } = currentInit;
+      void body;
+      currentInit = { ...rest, method: 'GET' };
+    }
+    currentUrl = nextUrl;
+  }
+
+  throw new EgressBlockedError(
+    `egress blocked${reason ? ` [${reason}]` : ''}: more than ${MAX_REDIRECT_HOPS} redirects from '${url}'`,
+  );
 }
