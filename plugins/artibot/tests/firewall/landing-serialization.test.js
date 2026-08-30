@@ -48,7 +48,7 @@ import { execFile, execFileSync } from 'node:child_process';
 import fsSync from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import {
   acquireLandingLock,
@@ -67,7 +67,15 @@ import {
 import { runGit } from '../../lib/git/merge-preflight.js';
 
 const execFileAsync = promisify(execFile);
-const LOCK_MODULE = path.resolve('lib/git/landing-lock.js');
+// Anchored to THIS file, not to process.cwd(). The child processes below import
+// this path, so a cwd-relative `path.resolve` made the race test depend on where
+// the runner was launched from: `npx vitest` at the repo root resolves the
+// workspace to plugins/artibot but leaves cwd at the repo root, so the path came
+// out as <repo>/lib/git/landing-lock.js and the children died with
+// ERR_MODULE_NOT_FOUND (measured 2026-08-30: 1 failed | 15 passed). The specifier
+// is deliberately the same '../../lib/git/landing-lock.js' the static import at
+// the top of this file uses, so the two can never drift to different modules.
+const LOCK_MODULE = fileURLToPath(new URL('../../lib/git/landing-lock.js', import.meta.url));
 
 let root = '';
 let lockDir = '';
