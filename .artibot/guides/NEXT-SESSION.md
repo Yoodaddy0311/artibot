@@ -1,4 +1,19 @@
-# NEXT-SESSION — 크로스머신 핸드오프 (2026-08-30, master a78dd239)
+# NEXT-SESSION — 크로스머신 핸드오프 (2026-08-31, master 2841af82)
+
+> **5차 갱신 (/ultrareview 잔여 백로그 6레인 착지)**: egress 3결함(`41554374`) ·
+> core fail-open 2건(`53cbf5bc`) · swarm config 오염 + A-1(`c08c7ff5`) ·
+> genesis ACE(`06320386`) · PII 4결함(`2841af82`). CI 7/7 그린, 전체 스위트
+> 11,331 pass / 0 fail. **크로스체크가 그린 상태에서 실결함 5건을 잡았다** —
+> 상세와 백로그는 memory `project_ultrareview_backlog_20260831`.
+> **다음 P0**: 실세션 관측 2건이 아직 미실증이다 — ① decision-events 가 실제
+> 훅 발화로 `runtime/decisions/` 에 non-diag ndjson 을 쓰는지(플러그인 재등록
+> 후 첫 세션) ② 다음 릴리즈의 `wait_for_green` 첫 회차 `total>0`(persist-credentials
+> 수정 실증). **사용자 액션 1건**: `ARTIBOT_LANDING_PAT` 이 fine-grained user
+> PAT 인지 확인. **검증 규율 정정**: `npm run prebuild`·`build` 는 이 리포에
+> 없다(정본은 플러그인 `npm run ci`) — rules §11 체크리스트가 어긋나 있다.
+> — 이하 이전 라운드 기록:
+
+# (구) NEXT-SESSION — 2026-08-30, master a78dd239
 
 > **4차 갱신 (/ultrareview 전수 적대검수 + 능동발생 3건 수정)**: 플러그인 전수
 > 검수 5레인 → CRITICAL 1+HIGH 11. 능동발생 3건 착지: checkpoint 무락
