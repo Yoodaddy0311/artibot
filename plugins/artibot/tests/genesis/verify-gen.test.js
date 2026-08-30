@@ -265,6 +265,66 @@ describe('verify-gen / check 6 — hooks loadable (error)', () => {
     const res = await verifyGenerated({ projectRoot: root });
     expect(findCheck(res, 'hooks-loadable').pass).toBe(true);
   });
+
+  // Security regression — `checkHooksLoadable` enumerates the hooks directory as
+  // it exists on disk, not the file list genesis just wrote. A project that
+  // already ships `.claude/hooks/*.mjs` (a cloned repo committing its Claude
+  // config) therefore hands this check attacker-authored modules. Verifying them
+  // with `import()` would EXECUTE their top-level code with the user's full
+  // privileges, bypassing the settings.json registration + approval prompt that
+  // normally gates hook execution — and the check still reported pass:true, so
+  // the execution was silent. Syntax validation must never run the subject.
+  it('does not execute top-level code in a .mjs hook while verifying it', async () => {
+    await writeValidProject(root);
+    const sentinel = path.join(root, 'EXECUTED.txt');
+    await fs.writeFile(
+      path.join(root, '.claude', 'hooks', 'side-effect.mjs'),
+      'import { writeFileSync } from \'node:fs\';\n'
+      + `writeFileSync(${JSON.stringify(sentinel)}, 'top-level code ran');\n`
+      + 'export default function () { return { ok: true }; }\n',
+      'utf-8',
+    );
+
+    const res = await verifyGenerated({ projectRoot: root });
+
+    await expect(fs.access(sentinel)).rejects.toThrow();
+    // The file is syntactically valid, so it must still pass the check.
+    expect(findCheck(res, 'hooks-loadable').pass).toBe(true);
+  });
+
+  // Over-correction guard — a fix that parses as CommonJS instead of ESM would
+  // reject these three module-only forms and turn valid stubs into failures.
+  it('passes hooks-loadable for ESM-only syntax (import.meta, top-level await, export)', async () => {
+    await writeValidProject(root);
+    await fs.writeFile(
+      path.join(root, '.claude', 'hooks', 'esm-only.mjs'),
+      'import { readFileSync } from \'node:fs\';\n'
+      + 'const here = import.meta.url;\n'
+      + 'await Promise.resolve();\n'
+      + 'export default { here, readFileSync };\n',
+      'utf-8',
+    );
+    const res = await verifyGenerated({ projectRoot: root });
+    const c = findCheck(res, 'hooks-loadable');
+    expect(c.pass).toBe(true);
+    expect(res.ok).toBe(true);
+  });
+
+  // Over-correction guard — the detail string is the only place a user learns
+  // WHICH hook broke and WHY, so a syntax failure must keep naming both.
+  it('names the offending file and the syntax error in the failure detail', async () => {
+    await writeValidProject(root);
+    await fs.writeFile(
+      path.join(root, '.claude', 'hooks', 'broken.mjs'),
+      'export default {\n',
+      'utf-8',
+    );
+    const res = await verifyGenerated({ projectRoot: root });
+    const c = findCheck(res, 'hooks-loadable');
+    expect(c.pass).toBe(false);
+    expect(c.detail).toContain('broken.mjs');
+    expect(c.detail).toMatch(/SyntaxError|Unexpected/);
+  });
 });
 
 describe('verify-gen / check 7 — docs-map complete (warn)', () => {
