@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import os from 'node:os';
 import path from 'node:path';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
-import { createCheckpointMiddleware } from '../../../lib/runtime/middleware/checkpoint.js';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { createCheckpointMiddleware, readCheckpoints } from '../../../lib/runtime/middleware/checkpoint.js';
 
 function makeState(overrides = {}) {
   return {
@@ -107,11 +107,10 @@ describe('middleware/checkpoint', () => {
         expect(result.context.checkpoint.persisted).toBe(true);
         expect(result.context.checkpoint.filePath).toBe(filePath);
 
-        const saved = JSON.parse(await readFile(filePath, 'utf-8'));
-        expect(Array.isArray(saved.entries)).toBe(true);
-        expect(saved.entries).toHaveLength(1);
-        expect(saved.entries[0].id).toBe(result.context.checkpoint.id);
-        expect(saved.metadata.updatedAt).toBeDefined();
+        const saved = readCheckpoints(filePath);
+        expect(saved).toHaveLength(1);
+        expect(saved[0].id).toBe(result.context.checkpoint.id);
+        expect(saved[0].createdAt).toBeDefined();
       } finally {
         await rm(dir, { recursive: true, force: true });
       }
@@ -145,7 +144,7 @@ describe('middleware/checkpoint', () => {
       expect(result.context.checkpoint.id).toMatch(/^ckpt-/);
     });
 
-    it('maxEntries 디스크 trimming', async () => {
+    it('maxEntries 는 읽기 시점 캡 — 쓰기는 버리지 않는다', async () => {
       const dir = await mkdtemp(path.join(os.tmpdir(), 'ckpt-trim-'));
       const filePath = path.join(dir, 'checkpoints.json');
 
@@ -161,8 +160,11 @@ describe('middleware/checkpoint', () => {
         await mw(makeState());
         await mw(makeState());
 
-        const saved = JSON.parse(await readFile(filePath, 'utf-8'));
-        expect(saved.entries).toHaveLength(2);
+        // The writer appends all three — dropping on write is what made
+        // concurrent writers lose each other's entries.
+        expect(readCheckpoints(filePath)).toHaveLength(3);
+        // The cap is applied when reading, newest-last.
+        expect(readCheckpoints(filePath, { tail: 2 })).toHaveLength(2);
       } finally {
         await rm(dir, { recursive: true, force: true });
       }

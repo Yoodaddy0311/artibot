@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import os from 'node:os';
 import path from 'node:path';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { createArtibotAgent } from '../../lib/runtime/create-artibot-agent.js';
 import { createRouterMiddleware } from '../../lib/runtime/middleware/router.js';
 import { createSkillsMiddleware } from '../../lib/runtime/middleware/skills.js';
 import { createTasksMiddleware } from '../../lib/runtime/middleware/tasks.js';
 import { createSubagentsMiddleware } from '../../lib/runtime/middleware/subagents.js';
 import { createSummarizationMiddleware } from '../../lib/runtime/middleware/summarization.js';
-import { createCheckpointMiddleware } from '../../lib/runtime/middleware/checkpoint.js';
+import { createCheckpointMiddleware, readCheckpoints } from '../../lib/runtime/middleware/checkpoint.js';
 import {
   evaluateRuntimeScenario,
   evaluateRuntimeSuite,
@@ -137,9 +137,9 @@ describe('Runtime Task Eval Suite', () => {
     const { pass, score } = grade(result);
     expect(pass).toBe(true);
     expect(score).toBeGreaterThan(0.6);
-      const saved = JSON.parse(await readFile(checkpointPath, 'utf-8'));
-      expect(Array.isArray(saved.entries)).toBe(true);
-      expect(saved.entries.some((entry) => entry.id === result.context.checkpoint.id)).toBe(true);
+      const saved = readCheckpoints(checkpointPath);
+      expect(Array.isArray(saved)).toBe(true);
+      expect(saved.some((entry) => entry.id === result.context.checkpoint.id)).toBe(true);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

@@ -8,7 +8,7 @@
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync as execFileSyncCompat } from 'node:child_process';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { createArtibotAgent } from './create-artibot-agent.js';
 import { createRouterMiddleware } from './middleware/router.js';
 import { createMemoryMiddleware } from './middleware/memory.js';
@@ -16,7 +16,7 @@ import { createSkillsMiddleware } from './middleware/skills.js';
 import { createTasksMiddleware } from './middleware/tasks.js';
 import { createSubagentsMiddleware } from './middleware/subagents.js';
 import { createSummarizationMiddleware } from './middleware/summarization.js';
-import { createCheckpointMiddleware } from './middleware/checkpoint.js';
+import { createCheckpointMiddleware, readCheckpoints } from './middleware/checkpoint.js';
 import { ensureDir, readJsonFile, writeJsonFile } from '../core/file.js';
 import { ARTIBOT_DIR } from '../core/config.js';
 import { getPluginRoot } from '../core/platform.js';
@@ -177,7 +177,8 @@ async function runCheckpointScenario() {
         },
       },
     );
-    const persisted = JSON.parse(await readFile(filePath, 'utf-8'));
+    // ndjson store — read through the module that owns the format.
+    const persisted = { entries: readCheckpoints(filePath) };
     return { result, persisted, filePath };
   } finally {
     await rm(dir, { recursive: true, force: true });
