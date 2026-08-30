@@ -231,7 +231,9 @@ export const BUILTIN_PATTERNS = [
   {
     name: 'generic_api_key_assignment',
     category: 'auth',
-    regex: /(?:api[_-]?key|apikey|api[_-]?secret)\s*[=:]\s*['"]?[a-zA-Z0-9_\-/+=]{16,}['"]?/gi,
+    // Same quoted-value handling as password_assignment above: measured 2026-08-30,
+    // these two were the only patterns whose partial match left secret text behind.
+    regex: /(?:api[_-]?key|apikey|api[_-]?secret)s?\s*[=:]\s*(?:'[^'\r\n]{16,}'|"[^"\r\n]{16,}"|['"]?[a-zA-Z0-9_\-/+=]{16,}['"]?)/gi,
     replacement: `api_key=${TOKENS.REDACTED_KEY}`,
     priority: 28,
     hint: 'api',
@@ -241,7 +243,13 @@ export const BUILTIN_PATTERNS = [
   {
     name: 'password_assignment',
     category: 'secrets',
-    regex: /(?:password|passwd|pwd)\s*[=:]\s*['"]?[^\s'"]{4,}['"]?/gi,
+    // Quoted alternatives come first so a value containing spaces is consumed to
+    // its closing quote. Without them the unquoted branch stopped at the first
+    // space, leaving the rest of the password in the clear AND destroying the
+    // `key: 'value'` shape that config_sensitive_value (priority 86) would
+    // otherwise have caught. \r\n exclusion keeps an unbalanced quote from
+    // running to end of input; that case falls through to the unquoted branch.
+    regex: /(?:password|passwd|pwd)s?\s*[=:]\s*(?:'[^'\r\n]{4,}'|"[^"\r\n]{4,}"|['"]?[^\s'"]{4,}['"]?)/gi,
     replacement: `password=${TOKENS.REDACTED_SECRET}`,
     priority: 30,
     hint: ['password', 'passwd', 'pwd'],
@@ -249,7 +257,14 @@ export const BUILTIN_PATTERNS = [
   {
     name: 'secret_assignment',
     category: 'secrets',
-    regex: /(?:secret|client_secret|app_secret)\s*[=:]\s*['"]?[^\s'"]{8,}['"]?/gi,
+    // Quoted-first, exactly as in password_assignment. Measured 2026-08-30: an
+    // earlier review called these four "already safe" because config_sensitive_value
+    // (priority 86) covered them — but it only covers when THIS pattern does not
+    // match at all. Once the first token of a quoted value reaches the length
+    // floor, this pattern half-matches, eats the opening quote, and destroys the
+    // `key: 'value'` shape the catch-all needs. Safety was value-dependent, not
+    // structural. `s?` covers the plural key (`secrets:`), which matched nothing.
+    regex: /(?:secret|client_secret|app_secret)s?\s*[=:]\s*(?:'[^'\r\n]{8,}'|"[^"\r\n]{8,}"|['"]?[^\s'"]{8,}['"]?)/gi,
     replacement: `secret=${TOKENS.REDACTED_SECRET}`,
     priority: 31,
     hint: 'secret',
@@ -257,7 +272,7 @@ export const BUILTIN_PATTERNS = [
   {
     name: 'credential_assignment',
     category: 'secrets',
-    regex: /(?:credential|credentials)\s*[=:]\s*['"]?[^\s'"]{8,}['"]?/gi,
+    regex: /(?:credential|credentials)\s*[=:]\s*(?:'[^'\r\n]{8,}'|"[^"\r\n]{8,}"|['"]?[^\s'"]{8,}['"]?)/gi,
     replacement: `credential=${TOKENS.REDACTED_SECRET}`,
     priority: 32,
     hint: 'credential',
@@ -265,7 +280,7 @@ export const BUILTIN_PATTERNS = [
   {
     name: 'private_key_assignment',
     category: 'secrets',
-    regex: /(?:private[_-]?key)\s*[=:]\s*['"]?[^\s'"]{16,}['"]?/gi,
+    regex: /(?:private[_-]?key)s?\s*[=:]\s*(?:'[^'\r\n]{16,}'|"[^"\r\n]{16,}"|['"]?[^\s'"]{16,}['"]?)/gi,
     replacement: `private_key=${TOKENS.REDACTED_SECRET}`,
     priority: 33,
     hint: 'private',
@@ -273,7 +288,7 @@ export const BUILTIN_PATTERNS = [
   {
     name: 'access_token_assignment',
     category: 'secrets',
-    regex: /(?:access[_-]?token|auth[_-]?token|refresh[_-]?token)\s*[=:]\s*['"]?[^\s'"]{10,}['"]?/gi,
+    regex: /(?:access[_-]?token|auth[_-]?token|refresh[_-]?token)s?\s*[=:]\s*(?:'[^'\r\n]{10,}'|"[^"\r\n]{10,}"|['"]?[^\s'"]{10,}['"]?)/gi,
     replacement: `token=${TOKENS.REDACTED_TOKEN}`,
     priority: 34,
     hint: 'token',
@@ -400,7 +415,11 @@ export const BUILTIN_PATTERNS = [
   {
     name: 'email_address',
     category: 'personal',
-    regex: /\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\b/g,
+    // Unicode classes, not ASCII: a Korean local part or an IDN domain
+    // (김철수@naver.com, bob@회사.한국) went undetected under [a-zA-Z0-9].
+    // \b is replaced by a lookbehind because \b is ASCII-defined and would
+    // place a boundary in the middle of a non-Latin local part.
+    regex: /(?<![\p{L}\p{N}._%+-])[\p{L}\p{N}._%+-]+@[\p{L}\p{N}.-]+\.\p{L}{2,}/gu,
     replacement: TOKENS.EMAIL,
     priority: 55,
     hint: '@',
@@ -460,7 +479,36 @@ export const BUILTIN_PATTERNS = [
   {
     name: 'windows_user_path',
     category: 'paths',
-    regex: /[A-Z]:\\Users\\[^\\:*?"<>|\s]+\\[^\s'"]+/gi,
+    // Segments may contain a single space each ('alice bob', '바탕 화면'): the old
+    // class excluded \\s outright, so a space in the ACCOUNT name made the whole
+    // path unmatchable and the name shipped in the clear. Intermediate segments
+    // are proven to be path by the \\ that follows them, so a space there is safe;
+    // the final segment stays space-free so a path never swallows the sentence
+    // after it.
+    //
+    // BOUND — a segment must be `token` or `token token`: one interior space, no
+    // leading and no trailing space. Anything else ends that segment, including
+    // 2+ consecutive spaces. WHERE that happens decides the outcome and the two
+    // cases are NOT equally safe. Measured 2026-08-30:
+    //
+    //   - a LATER segment fails -> the group stops before it, so the account name
+    //     IS scrubbed and only the tail survives:
+    //       C:\Users\alice\Program  Files\x.txt
+    //         -> {USER_HOME}\[PATH]  Files\x.txt
+    //
+    //   - the ACCOUNT NAME fails -> it is the FIRST segment, so the whole pattern
+    //     fails and NOTHING is scrubbed. The account name ships in the clear —
+    //     precisely the state the paragraph above describes having fixed:
+    //       C:\Users\alice  bob\notes.txt  -> unchanged
+    //     A leading or trailing space in the account name does the same thing.
+    //
+    // The second case is a KNOWN, ACCEPTED limit, not a safety claim. An earlier
+    // draft of this comment said only "the account name is still scrubbed", which
+    // is true of the first case and false of the second; a reader who stopped
+    // there would conclude the account name is always covered. Both cases are
+    // pinned in tests/privacy/pii-scrubber-boundaries.test.js so widening this
+    // pattern later has to confront them.
+    regex: /[A-Z]:\\Users\\(?:[^\\:*?"<>|\r\n'" ]+(?: [^\\:*?"<>|\r\n'" ]+)?\\)+[^\\:*?"<>|\r\n\s'"]*/gi,
     replacement: `${TOKENS.USER_HOME}\\${TOKENS.PATH}`,
     priority: 70,
     hint: ':\\users\\',
@@ -530,7 +578,28 @@ export const BUILTIN_PATTERNS = [
   {
     name: 'config_sensitive_value',
     category: 'code',
-    regex: /(?:password|secret|token|key|credential|auth)['"]?\s*[=:]\s*['"][^'"]{8,}['"]/gi,
+    // `s?` closes the plural key. Measured 2026-08-30: `credentials:`, `secrets:`,
+    // `tokens:`, `keys:`, `passwords:`, `auths:` matched NOTHING here (the trailing
+    // s broke the [=:] that follows the keyword) and nothing in the narrow patterns
+    // either, so a quoted secret under a plural key shipped in the clear.
+    //
+    // WHAT `s?` NEWLY MATCHES. It does match strings that did not match before, and
+    // the reason that is still safe is NOT "the singular already matched there".
+    // Measured 2026-08-30, the new set is exactly two kinds:
+    //   (a) the plural of each keyword — the point of the change;
+    //   (b) the plural of any word ENDING in a keyword: `monkeys:` via `key`.
+    // (b) is not a new class. The alternation has no left boundary, so `monkey:`
+    // ALREADY matched before this change while `monkeys:` did not; `s?` widens a
+    // pre-existing substring behaviour by one letter rather than creating one.
+    // `keyword:` `keyboard:` `authority:` `author:` `tokenizer:` stay unmatched —
+    // not because a singular matched, but because `s?` consumes a single `s` and
+    // cannot consume `word` / `board` / `ity` / `izer`.
+    //
+    // NOT closed by this, deliberately: a keyword followed by any OTHER suffix
+    // (`tokenValue:`). Widening to \w* would also swallow `keyword:`, `keyboard:`,
+    // `authority:` — trading a measured narrow miss for unmeasured broad
+    // over-detection. Plural is the form config keys actually take.
+    regex: /(?:password|secret|token|key|credential|auth)s?['"]?\s*[=:]\s*['"][^'"]{8,}['"]/gi,
     replacement: `key: '${TOKENS.REDACTED_SECRET}'`,
     priority: 86,
     hint: null,
@@ -550,7 +619,14 @@ export const VALIDATION_CHECKS = [
   { name: 'api_key_pattern', regex: /sk-[a-zA-Z0-9_-]{20,}/g },
   { name: 'github_token', regex: /gh[pours]_[a-zA-Z0-9]{36,}/g },
   { name: 'aws_key', regex: /AKIA[A-Z0-9]{16}/g },
-  { name: 'email', regex: /\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\b/g },
+  // Deliberately BROADER than email_address in BUILTIN_PATTERNS, and built
+  // differently: a validator that shares the detector regex shares its blind
+  // spots, so it can only ever confirm what the detector already saw. Measured
+  // 2026-08-30: the shared ASCII regex reported 'clean' on text still holding
+  // 김철수@naver.com. No charset restriction on either side of the @; the TLD must
+  // be letters so npm specs (foo@1.2.3) do not trip it, and a '[' after the @ is
+  // excluded so an already-masked git@[HOST] token reads as clean.
+  { name: 'email', regex: /[^\s@]+@(?!\[)[^\s@]+\.\p{L}{2,}/gu },
   { name: 'bearer_token_raw', regex: /Bearer\s+(?![[{])[a-zA-Z0-9._/+=-]{20,}/g },
   { name: 'jwt', regex: /eyJ[a-zA-Z0-9_-]{10,}\.eyJ[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}/g },
   { name: 'connection_string', regex: /(?:mongodb|postgres|mysql|redis):\/\/[^[\s]+/gi },

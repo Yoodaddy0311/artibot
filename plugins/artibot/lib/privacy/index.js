@@ -35,6 +35,7 @@ export {
   detectHomoglyphs,
   getHomoglyphMap,
   normalizeHomoglyphs,
+  normalizeMixedScriptTokens,
 } from './homoglyph-detector.js';
 
 // Token Rotation

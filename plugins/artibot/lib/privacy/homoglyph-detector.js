@@ -171,6 +171,52 @@ export function normalizeHomoglyphs(input) {
 }
 
 /**
+ * Normalize ONLY the tokens that are internally mixed-script, leaving every
+ * other token byte-identical.
+ *
+ * This is the form `scrub()` needs. `checkMixedScript()` answers a question
+ * about a WHOLE STRING, and a string-level answer is the wrong gate for a
+ * destructive transform: any Latin word anywhere makes a legitimate Cyrillic or
+ * Greek sentence "mixed", and normalizing it corrupts real text. Measured
+ * 2026-08-30 against the shipped scrubber:
+ *   "Ошибка: cannot open file"  ->  "Oшибкa: cannot open file"
+ *   "const переменная = 1;"    ->  "const пepeмeннaя = 1;"
+ * A homograph attack, by contrast, hides the substitution INSIDE one token
+ * ("pаypal.com", "usеr@evil.com") — exactly what a token-level test still
+ * catches. Whitespace runs are preserved so the result rejoins exactly.
+ *
+ * @param {string} input - Text to normalize
+ * @returns {{ text: string, normalizedTokens: number }} Normalized text and the
+ *   number of tokens rewritten (0 means `text` is the input, unchanged).
+ * @example
+ * normalizeMixedScriptTokens("Ошибка: cannot open file");
+ * // { text: 'Ошибка: cannot open file', normalizedTokens: 0 }
+ *
+ * @example
+ * normalizeMixedScriptTokens("visit pаypal.com");
+ * // { text: 'visit paypal.com', normalizedTokens: 1 }
+ */
+export function normalizeMixedScriptTokens(input) {
+  if (!input || typeof input !== 'string') {
+    return { text: input ?? '', normalizedTokens: 0 };
+  }
+
+  // Capturing split keeps the separators, so join() restores the original
+  // spacing rather than collapsing it.
+  const parts = input.split(/(\s+)/);
+  let normalizedTokens = 0;
+
+  for (let i = 0; i < parts.length; i++) {
+    const token = parts[i];
+    if (!token || !checkMixedScript(token).mixed) continue;
+    parts[i] = normalizeHomoglyphs(token);
+    normalizedTokens += 1;
+  }
+
+  return { text: normalizedTokens > 0 ? parts.join('') : input, normalizedTokens };
+}
+
+/**
  * Get the full homoglyph mapping table.
  * Useful for debugging or extending the detector.
  *
