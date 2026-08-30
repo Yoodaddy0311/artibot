@@ -1,4 +1,16 @@
-# NEXT-SESSION — 크로스머신 핸드오프 (2026-08-30, master afedb3c9)
+# NEXT-SESSION — 크로스머신 핸드오프 (2026-08-30, master a78dd239)
+
+> **4차 갱신 (/ultrareview 전수 적대검수 + 능동발생 3건 수정)**: 플러그인 전수
+> 검수 5레인 → CRITICAL 1+HIGH 11. 능동발생 3건 착지: checkpoint 무락
+> lost-update(`b6265225`) · 자동커밋 git add -A 인덱스 오염(`69a9ec3a`) ·
+> SAFE_OVERRIDES 게이트 무력화(`a78dd239`). **원 P1 라이브 재현**: 전체 npm test
+> 동시실행이 추적 artibot.config.json swarm 을 enabled:true 로 뒤집음(로컬
+> swarm-consent optedIn:true + 전체동시성 트리거, 단일디렉터리·CI 무재현) — 커밋 전
+> config 복원 필수. **다음 P0(잔여 조건부 HIGH, swarm OFF 시 잠복)**: A-1 swarm-client
+> run.app 정규식 egress 우회 · E3 safeFetch 리다이렉트 미검증 · A-2 .local=localhost ·
+> D-1 verify-gen import() ACE(fix: node --check) · E2/E5/E6 PII 스크럽 훼손 · B/H-2
+> denylist §8 · B/H-3 Git Bash cwd 가드해제. 상세 memory project_ultrareview_20260830.
+> 유발 테스트 특정 미완(전체 동시성 필요). — 이하 H 라운드 기록:
 
 > **3차 갱신 (같은 날 H 라운드)**: 2차의 잔여 3건 전부 해소 + 중대 발견 2건.
 > ① effort-order mtime 화석 → 링크드 샌드박스 이전(`08e6f9f7`) ② landing-serialization
