@@ -1,0 +1,51 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+title: ArtibotProjectState
+type: object
+required:
+  - project
+  - state_version
+  - active_missions
+properties:
+  project:
+    type: string
+  state_version:
+    type: integer
+    minimum: 1
+  updated_at:
+    type: string
+  active_missions:
+    type: object
+    additionalProperties:
+      type: object
+      required:
+        - status
+        - intent
+        - plan
+      properties:
+        title:
+          type: string
+        status:
+          enum:
+            - queued
+            - planning
+            - executing
+            - blocked
+            - reviewing
+            - completed
+            - failed
+        intent:
+          type: object
+          required: [path, revision]
+        plan:
+          type: object
+          required: [path, revision]
+        owners:
+          type: object
+        topology:
+          type: object
+        workers:
+          type: object
+        blocked_by:
+          type: array
+        review:
+          type: object

@@ -1,0 +1,59 @@
+version: "5.0"
+
+canonical_state:
+  entry: "ARTIBOT.md"
+  project: ".artibot/project.md"
+  live_state: ".artibot/state.yaml"
+  runtime_ledger: ".artibot/runtime/ledger.jsonl"
+
+artifacts:
+  no_derivative_files: true
+
+  mission:
+    required:
+      - intent.md
+      - plan.md
+      - review.md
+      - outcome.md
+
+  forbidden_patterns:
+    - "intent-v*.md"
+    - "intent-final*.md"
+    - "plan-v*.md"
+    - "plan-final*.md"
+    - "todo.md"
+    - "progress.md"
+    - "status.md"
+
+intent:
+  create_for_substantive_mission: true
+  preserve_original_request: true
+  revision_in_place: true
+  allow_refinement_when:
+    - new_verified_evidence
+    - explicit_user_change
+    - product_decision_change
+    - problem_reframing_required
+
+routing:
+  intent_aware: true
+  action_based: true
+  switching:
+    explicit: true
+    cache_aware: true
+    hysteresis: true
+
+review:
+  independent: true
+  model: "fable-5.1"
+  use_canonical_intent: true
+
+multi_agent:
+  shared_live_state: true
+  worker_file_ownership: true
+  worker_may_redefine_intent: false
+
+memory:
+  promote_only_after_outcome: true
+  require_validation: true
+  deduplicate: true

@@ -1,0 +1,113 @@
+{
+  "package": "Artibot 5.0 Canonical Design Package",
+  "version": "5.0-draft-constitution-v1.0",
+  "generated_at": "2026-09-02T04:32:48.858101+00:00",
+  "file_count": 21,
+  "files": [
+    {
+      "path": "01_PHILOSOPHY_CONSTITUTION.md",
+      "sha256": "639c95d675ad70490bfa4f44d9d255f220b9ec46821d3761e05a5fc64ef0d420",
+      "bytes": 3971
+    },
+    {
+      "path": "02_PRODUCT_UX_NATURAL_LANGUAGE_RUNTIME.md",
+      "sha256": "157675b35d598f0ab0ad3eb63e7ebeab10297470480b35ce8840876ba724cea7",
+      "bytes": 2456
+    },
+    {
+      "path": "03_INTENT_MISSION_COMPILER.md",
+      "sha256": "01ba0e5031a60fa6ba86c9e37640f96db105508cb08f76271608237023d5cd82",
+      "bytes": 1741
+    },
+    {
+      "path": "04_PLAN_ULTRAPLAN_ADR.md",
+      "sha256": "eab3506e43681ac027e5ab3c8dee3dbc4dfae6fa8a4ecba6e9f59005ec0b2927",
+      "bytes": 1769
+    },
+    {
+      "path": "05_CONTEXT_MEMORY.md",
+      "sha256": "64aaddc7a7b7f2b274fa3c6f176fdcc081334a6105136608abb3eb9ca680b52c",
+      "bytes": 1185
+    },
+    {
+      "path": "06_MODEL_ROUTING_ECONOMICS.md",
+      "sha256": "42215d751b3faee2f66c79679695af7cae4c9981201172c91b531c9e39560ac8",
+      "bytes": 2163
+    },
+    {
+      "path": "07_TOPOLOGY_AUTOPILOT_SPLIT.md",
+      "sha256": "a0bf807fb4367c91d35a24b032888b9a668eefe7b37c7a1e00dc7abf73245a13",
+      "bytes": 1974
+    },
+    {
+      "path": "08_REVIEW_VERIFICATION_RECOVERY.md",
+      "sha256": "f3568d6e46b4c036dfe3c73c6447a4c477ccb0a4b6eec9262d064d3fef71dfe1",
+      "bytes": 1547
+    },
+    {
+      "path": "09_BLINDSPOT_SYSTEMIC_REASONING.md",
+      "sha256": "e44ba3f5c0f6b2358ec3fc81ecb6600f5879ff86d9a7d5e9ebfdeb6972d61858",
+      "bytes": 1142
+    },
+    {
+      "path": "10_LEARNING_OBSERVABILITY_LEDGER.md",
+      "sha256": "ccd660e7a3d2fa72ff19e3b3c8a4648fb48e7fc5b3e7cd12e2a60abb19f36039",
+      "bytes": 1573
+    },
+    {
+      "path": "11_SAFE_AUTONOMY_HUMAN_GATES.md",
+      "sha256": "5beb8251a48a08b1f7994a9a15b9e5440eb78df9af9c055d12bb8c707e13c279",
+      "bytes": 1431
+    },
+    {
+      "path": "12_RUNTIME_ARCHITECTURE.md",
+      "sha256": "7e402cf08f0af1d75def06999e427327808de11dd03543167c14ba0ff0f638c1",
+      "bytes": 7165
+    },
+    {
+      "path": "13_IMPLEMENTATION_BLUEPRINT.md",
+      "sha256": "20ab144b0c42696b60843e25f2aa5dafd234cb08052b8a34500365ee3258fbf9",
+      "bytes": 2355
+    },
+    {
+      "path": "14_RELEASE_ROADMAP.md",
+      "sha256": "1909fe368980323cec81835414b94d85fc41660fe81cf339e6cfcd4b95d9e939",
+      "bytes": 1290
+    },
+    {
+      "path": "15_DECISION_REGISTER.md",
+      "sha256": "2b3afab380d7d87f28064aef5c8cd258ba4866433b321d2c0a60997f4df6360f",
+      "bytes": 2947
+    },
+    {
+      "path": "README.md",
+      "sha256": "9b8323fef472229c94b4c1fd9df1f203fd5176f93c4c779143a9dc2e518d6390",
+      "bytes": 3228
+    },
+    {
+      "path": "VIBE_CODING_MASTER_PROMPT.md",
+      "sha256": "9da1db5733976e6f700baa74eb5d7c2eaaf024f901064cb42b741e33ceca2455",
+      "bytes": 4821
+    },
+    {
+      "path": "config/artibot-v5-policy.example.yaml",
+      "sha256": "bb225550dc14c303ed890335467c031fe2074ee2b2556a6e7630c97d4e853a90",
+      "bytes": 2173
+    },
+    {
+      "path": "schemas/adr.schema.yaml",
+      "sha256": "3568a7031ef262c4d9a2db3d0685f164858fb79d4933bc6fbf74f8038a54c31f",
+      "bytes": 797
+    },
+    {
+      "path": "schemas/mission-contract.schema.yaml",
+      "sha256": "704da51dbd1e3d959a4d8a1729b287fdf792d165c21e6c546897759afcf99a84",
+      "bytes": 1077
+    },
+    {
+      "path": "schemas/run-ledger.schema.yaml",
+      "sha256": "6d2f9e80b5e627e4efdad8e7e20c164ba9f74e1bf83fe42eb7d481953e9b5134",
+      "bytes": 1159
+    }
+  ]
+}

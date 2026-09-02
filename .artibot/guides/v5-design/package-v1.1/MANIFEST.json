@@ -1,0 +1,112 @@
+{
+  "name": "Artibot 5.0 Canonical State Design",
+  "version": "1.1",
+  "generated_at": "2026-09-02T04:55:48.324184+00:00",
+  "files": [
+    {
+      "path": "01_CORE_ARCHITECTURE.md",
+      "bytes": 1160,
+      "sha256": "d5ba63355f665f835d53e845bc9bb0903a19f5598d85c47180afe9a0d81d7692"
+    },
+    {
+      "path": "02_CANONICAL_PROJECT_STATE.md",
+      "bytes": 1658,
+      "sha256": "41e01efb759ca08f15da996ee8431d6eae1a891a41b9b45071f7ce642abf11f1"
+    },
+    {
+      "path": "03_ARTIBOT_MD_ENTRY_CONTRACT.md",
+      "bytes": 973,
+      "sha256": "924ba5f359ce7df3253d71d7974ef94788185e885a4e081319dc0d2ae18d6ac2"
+    },
+    {
+      "path": "04_INTENT_MD_SPEC.md",
+      "bytes": 2122,
+      "sha256": "1f3dfa9f85edb2e96a1d8d2e0fad354ba0ad306b3f204ec5a7f98d8263969903"
+    },
+    {
+      "path": "05_PLAN_AND_TASK_STATE.md",
+      "bytes": 1133,
+      "sha256": "9f8562d7d178d493ba6a0c9e92457c71fb4002f3d70b342fd90d48dc6f022d9b"
+    },
+    {
+      "path": "06_STATE_YAML_SPEC.md",
+      "bytes": 1312,
+      "sha256": "c1f342fd0e07d9b92f3a9f1eb9ba0ea7b11fb8028685aa491362beea62537701"
+    },
+    {
+      "path": "07_MODEL_ROUTING_SWITCHING.md",
+      "bytes": 1698,
+      "sha256": "1b82dfe678cdba55ed3f2117972007b24f66d8784814a0c0f0627a2b1180a8db"
+    },
+    {
+      "path": "08_ARTIFACT_GOVERNANCE.md",
+      "bytes": 1865,
+      "sha256": "94f2cd53a182fcbcfe86aedc280cb38c9dcb426ec34626aaa4051f5b6f3b4fa9"
+    },
+    {
+      "path": "09_MULTI_HUMAN_MULTI_AGENT_RULES.md",
+      "bytes": 1337,
+      "sha256": "b73ddc1d27c1688cb2a2a5653170a14203405c08db1f37c91ccdf9a6b02c22e1"
+    },
+    {
+      "path": "10_ADR_GOVERNANCE.md",
+      "bytes": 836,
+      "sha256": "1d335b15ab27458f18d2a0a1516ae94d41bd2e72e968bd777158acafbab8a68f"
+    },
+    {
+      "path": "11_REVIEW_OUTCOME_LEDGER.md",
+      "bytes": 1158,
+      "sha256": "6a576d3114c60799d32feb5aa41321f581e709fd39a8e0a21913c7df5757959c"
+    },
+    {
+      "path": "12_SOURCE_OF_TRUTH_MATRIX.md",
+      "bytes": 671,
+      "sha256": "7892d2dd8d947f9e884cdb1cf975bd7b8664d03820f316129bbbb951dc2e0088"
+    },
+    {
+      "path": "13_LIFECYCLE.md",
+      "bytes": 740,
+      "sha256": "3b58c2cc552976cb7a5c51ac1552c2f845d82332a7fc32d2363611e41ebeeccf"
+    },
+    {
+      "path": "14_IMPLEMENTATION_BLUEPRINT.md",
+      "bytes": 1552,
+      "sha256": "354a9412b77cd51b445d7553454e5e664b478e6c0d188bcef06984e7cabc5b81"
+    },
+    {
+      "path": "15_POLICY_EXAMPLE.yaml",
+      "bytes": 1130,
+      "sha256": "3d7cdeeb3b0ebaaa0cabece76f7c582e0e75b1e8e17b299dd5ae39ebc62370c7"
+    },
+    {
+      "path": "16_STATE_SCHEMA.yaml",
+      "bytes": 1021,
+      "sha256": "18cb94f8017c90ddabb64108f09353e710c996221839ead9e88cb9fae878c927"
+    },
+    {
+      "path": "17_INTENT_TEMPLATE.md",
+      "bytes": 388,
+      "sha256": "fd3cf442142c8914b624e5f4b5c48db62dc448c9909b2de2d88d726289a42f75"
+    },
+    {
+      "path": "18_PROJECT_TEMPLATE.md",
+      "bytes": 221,
+      "sha256": "b4797fb14fce07d8c926357616f0562b70102a8c8e4f474e94a2efb3626f3556"
+    },
+    {
+      "path": "19_ARTIBOT_TEMPLATE.md",
+      "bytes": 714,
+      "sha256": "bda740586f937b461a3b05205c7c35561d3054dd985fa7ee5ba1cc6cbc774900"
+    },
+    {
+      "path": "20_VIBE_CODING_PROMPT.md",
+      "bytes": 2016,
+      "sha256": "068c7a3c66f870d4312eed6ec1a9f9f0ff7e3abfb5065759f0989c380445081f"
+    },
+    {
+      "path": "README.md",
+      "bytes": 1788,
+      "sha256": "7821b5e6ed55562d27832abece248275dd88c2e95f119de4322751d563f89907"
+    }
+  ]
+}

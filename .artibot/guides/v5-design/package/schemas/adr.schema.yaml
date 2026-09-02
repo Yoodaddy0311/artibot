@@ -1,0 +1,32 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+title: ArtibotADR
+type: object
+required: [title, context, problem, options, decision]
+properties:
+  title: {type: string}
+  context: {type: string}
+  problem: {type: string}
+  constraints: {type: array}
+  options:
+    type: array
+    items:
+      type: object
+      required: [id, summary]
+      properties:
+        id: {type: string}
+        summary: {type: string}
+        strengths: {type: array}
+        weaknesses: {type: array}
+  user_decisions: {type: array}
+  decision:
+    type: object
+    properties:
+      selected: {type: string}
+      rationale: {type: string}
+  consequences:
+    type: object
+    properties:
+      positive: {type: array}
+      negative: {type: array}
+  validation: {type: array}
+  revisit_when: {type: array}

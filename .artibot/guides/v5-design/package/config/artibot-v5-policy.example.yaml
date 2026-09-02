@@ -1,0 +1,95 @@
+version: "5.0"
+
+product:
+  interface:
+    default: natural_language
+    target_users: [non_developer, developer]
+    advanced_command_override: true
+
+intent_runtime:
+  auto_activate:
+    commands: true
+    command_flags: true
+    skills: true
+    settings: true
+    models: true
+    topology: true
+    verification: true
+
+planning:
+  default: auto
+  philosophy: think_deep_before_acting
+  modes:
+    direct:
+      max_complexity: 0.20
+    plan:
+      max_complexity: 0.70
+    ultraplan:
+      use_when: [high_uncertainty, architecture, long_running, repeated_plan_failure, large_blast_radius]
+
+adr:
+  enabled: true
+  initial_question_gate:
+    tool: questionUserAnswer
+    only_when_human_value_decision_required: true
+
+routing:
+  objective:
+    normal: cost_per_accepted_outcome
+    quality_constraint: no_quality_regression
+  models:
+    classify: haiku
+    explore: sonnet
+    implement: opus
+    complex_debug: opus
+    architecture: fable-5.1
+    independent_review: fable-5.1
+    status: haiku
+  hysteresis:
+    enabled: true
+    cache_aware: true
+
+review:
+  independent: true
+  default_model: fable-5.1
+  required_for_substantive_work: true
+
+context:
+  strategy: minimal_sufficient
+  evidence_pointer_memory: true
+  deduplicate: true
+  recoverable_tool_compression: true
+
+topology:
+  default: auto
+  normal:
+    parallelism_objective: net_gain
+  autopilot_fast:
+    token_policy: generous
+    optimization:
+      primary: [time_to_verified_outcome, accuracy]
+      secondary: [cost_ceiling]
+    parallel_exploration: aggressive
+    independent_review: true
+  split:
+    token_policy: generous
+    parallelism: aggressive
+    work_isolation: worktree
+    durable_workers: true
+    auto_monitoring: true
+    independent_review: true
+
+recovery:
+  order: [review, repair_current_plan, revise_plan, ultraplan_if_framing_invalid, human_if_value_decision_required]
+
+blindspots:
+  auto_fix:
+    require: [causal, small_scope, reversible, clear_intent, no_new_product_decision, verifiable]
+
+learning:
+  initial_mode: shadow
+  optimize: [routing, context, planning_depth, topology, recovery]
+
+observability:
+  unified_run_ledger: true
+  primary_kpi: cost_per_accepted_outcome

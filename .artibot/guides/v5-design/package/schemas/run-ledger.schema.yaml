@@ -1,0 +1,46 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+title: ArtibotRunLedger
+type: object
+required: [mission_id, route, execution, review, verification, outcome]
+properties:
+  mission_id: {type: string}
+  action_id: {type: string}
+  route:
+    type: object
+    properties:
+      model: {type: string}
+      effort: {type: string}
+      reason: {type: array}
+  topology:
+    type: object
+    properties:
+      mode: {enum: [solo, subagent, team, autopilot, autopilot_fast, split]}
+  economics:
+    type: object
+    properties:
+      fresh_input: {type: number}
+      cached_input: {type: number}
+      output: {type: number}
+      thinking: {type: number}
+      total_cost: {type: number}
+  execution:
+    type: object
+    properties:
+      tools: {type: array}
+      files: {type: array}
+      retries: {type: integer}
+  review:
+    type: object
+    properties:
+      model: {type: string}
+      verdict: {enum: [pass, repair, replan]}
+      findings: {type: array}
+  verification:
+    type: object
+    properties:
+      result: {enum: [pass, fail]}
+      evidence: {type: array}
+  outcome:
+    type: object
+    properties:
+      accepted: {type: boolean}

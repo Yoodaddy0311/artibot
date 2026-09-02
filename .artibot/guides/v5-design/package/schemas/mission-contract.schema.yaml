@@ -1,0 +1,41 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+title: ArtibotMissionContract
+type: object
+required: [goal, explicit_requests, success, scope]
+properties:
+  goal: {type: string}
+  explicit_requests:
+    type: array
+    items: {type: string}
+  inferred_outcomes:
+    type: array
+    items: {type: string}
+  success:
+    type: object
+    properties:
+      functional: {type: array}
+      behavioral: {type: array}
+      regression: {type: array}
+      evidence: {type: array}
+  scope:
+    type: object
+    properties:
+      requested_target: {type: array}
+      direct: {type: array}
+      upstream: {type: array}
+      downstream: {type: array}
+      bounded_blindspots: {type: array}
+      excluded: {type: array}
+  autonomy:
+    type: object
+    properties:
+      mode: {enum: [guided, agent_led, autonomous]}
+      human_gates: {type: array}
+  performance:
+    type: object
+    properties:
+      priority: {enum: [economy, balanced, quality, fast, maximum_performance]}
+  planning:
+    type: object
+    properties:
+      mode: {enum: [auto, direct, plan, ultraplan]}
