@@ -122,6 +122,7 @@ c898461c **trail explainability Step1+2** (/doctor Check 7 + append-only 판단 
 
 ## 백로그 (급하지 않음)
 
+- **부하성 플레이크 4파일(2026-09-02 전체 스위트 6회 실측)**: stash-ref-isolation·landing-serialization 30s 타임아웃, handoff-store 임시 디렉터리 rename EPERM(Windows, 전체 6회 중 4회 — atomicWrite 에 EPERM 재시도 검토), 병합 후 신규 git-dir.test.js "nests several segments" 8.3 단축경로 vs 장경로 불일치(53cbf5bc 이후, 단독 통과·전체에서만 red → repo-root-cache 정규화 경합 의심). 전부 단독 재실행 통과, 로직 회귀 아님.
 collectExperience 크로스 프로세스 RMW(trail 과 동형) · concurrency 테스트
 저빈도 플레이크(0/20 까지만 배제) · docs/PRD 역사적 잔재 4,165건 · aux
 `.artibot-new` 는 이 머신에서 병합 완료(다른 머신은 각자 sync 시 정리) ·
