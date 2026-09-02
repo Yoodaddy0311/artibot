@@ -808,6 +808,24 @@
     "serverEntryPaths": [],
     "humanWaitReevalPct": 50,
     "recommendMinSubtasks": null,
+    "supervisor": {
+      "suspectHeartbeatSeconds": 480,
+      "staleHeartbeatSeconds": 900,
+      "probe": { "mainActiveMinutes": 10, "subagentActiveMinutes": 5 },
+      "comment": "S0 observe-only thresholds (vNext design §03 stuck table) read by lib/supervisor/lane-monitor.js and scripts/split/{watch,fanout-probe}.mjs. suspect < stale; a misordered pair collapses to stale. probe.* are the fanout-probe SOLO windows (main transcript active within N min AND zero subagent activity within M min). No key here triggers any action — the supervisor spine only observes."
+    },
+    "dispatch": {
+      "budget": 600000,
+      "template": null,
+      "comment": "scripts/split/dispatch.mjs: budget fills the window prompt's {BUDGET} (--budget wins); template=null uses templates/split/PROMPT-TEMPLATE.md (--template wins). The script renders prompt.md into the worktree and prints a one-line pointer; it never sends a message."
+    },
+    "worktreeSetup": {
+      "linkDirs": ["plugins/artibot/node_modules"],
+      "copyFiles": [".env.local"],
+      "installCmd": null,
+      "envPerLane": {},
+      "comment": "scripts/split/worktree-setup.mjs: linkDirs are junction-linked from the parent checkout when absent in the worktree (win32 mklink /J, posix symlink); copyFiles are copied only when absent; installCmd (argv array, shell-free) runs only when linkDirs did not cover node_modules; envPerLane writes <worktree>/.artibot/split/<limb>/lane.env with {limb} / {limb_} substituted (e.g. E2E_DB_NAME=app_e2e_{limb_}) so parallel lanes never share an e2e database. --teardown removes reparse points only, never a real directory."
+    },
     "comment": "/split (cross-session multi-worktree). maxWindows maps onto the EXISTING fast-profile keys (limits.maxWorktrees AND limits.hardMaxAgents) because normalizeFastProfile reads only four keys and silently drops unknown ones; serverEntryPaths seeds the conflict grouping so two windows never share a dev-server port; humanWaitReevalPct is the Phase 5 human-wait threshold that re-opens the headless-window (C-stage) question; recommendMinSubtasks: null = recommend=split hint OFF (opt-in). Set an integer >= 2 to enable; NOTE any value <= 6 shadows the autopilot hint (same floor). Shipped OFF because real-operator /split data is 0. These keys never touch the user settings.json cross-session inbound or peer-machine isolation settings (tests/firewall/split-config-firewall.test.js)."
   },
   "git": {

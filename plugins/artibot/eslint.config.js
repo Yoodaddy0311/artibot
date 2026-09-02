@@ -121,6 +121,10 @@ export default [
       'lib/planning/**/*.{js,mjs}', 'lib/privacy/**/*.{js,mjs}',
       'lib/release/**/*.{js,mjs}', 'lib/sdk/**/*.{js,mjs}',
       'lib/security/**/*.{js,mjs}', 'lib/swarm/**/*.{js,mjs}',
+      // supervisor/ (added 2026-09-02): `/split` observe-only control plane
+      // (event reducer · run store · lane monitor). Imports lib/git and
+      // lib/observability only — same L2 profile as git/ and observability/.
+      'lib/supervisor/**/*.{js,mjs}',
       'lib/system/**/*.{js,mjs}', 'lib/tui/**/*.{js,mjs}',
       'lib/visual/**/*.{js,mjs}',
     ],

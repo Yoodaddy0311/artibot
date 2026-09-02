@@ -11,6 +11,8 @@ import { cleanupStaleStateTmpFiles, createErrorHandler, extractAgentId, extractA
 import { withFileLock } from '../../lib/core/file-lock.js';
 import { getPolicyModel, resolveModel } from '../../lib/core/model-policy.js';
 import { loadConfig } from '../../lib/core/config.js';
+import { resolveProjectRoot } from '../../lib/git/project-root.js';
+import { appendSpawn } from '../../lib/learning/ledger/spawn-ledger.js';
 import { isMainEntry } from './_main-entry.js';
 
 /**
@@ -57,6 +59,47 @@ async function checkModelPolicy(agentType, requestedModel) {
   } catch {
     return { canonicalModel: null, modelMismatch: false };
   }
+}
+
+/**
+ * Append one line to the project-local spawn ledger
+ * (`<projectRoot>/.artibot/ledger/spawns.ndjson`). Best-effort audit surface
+ * for fan-out counts and model-policy drift — must NEVER throw and never
+ * touches stdout. The project root is resolved from the payload `cwd` the
+ * same way session-ledger.mjs does (a mid-session `cd` must not fork the
+ * ledger tree); without a `cwd` there is no trustworthy root, so the record
+ * is skipped rather than guessed from process.cwd().
+ *
+ * @param {object} hookData - Parsed hook payload
+ * @param {object} record - Spawn record fields (see spawn-ledger.js)
+ * @returns {{ ok: boolean, reason?: string }}
+ */
+function recordSpawn(hookData, record) {
+  try {
+    const cwd = hookData?.cwd;
+    if (typeof cwd !== 'string' || cwd.length === 0) return { ok: false, reason: 'no-cwd' };
+    return appendSpawn(resolveProjectRoot(cwd), {
+      sessionId: hookData?.session_id || hookData?.sessionId || null,
+      agentName: hookData?.agent_name || hookData?.name || null,
+      ...record,
+    });
+  } catch (err) {
+    return { ok: false, reason: err?.message || 'record-failed' };
+  }
+}
+
+/**
+ * Elapsed ms since a tracked agent's `startedAt` (ISO string written on
+ * `start`). Undefined when the agent was never tracked or the stamp is unusable.
+ * @param {object|undefined} tracked - `state.agents[agentId]` entry
+ * @param {number} [nowMs=Date.now()]
+ * @returns {number|undefined}
+ */
+function spawnDurationMs(tracked, nowMs = Date.now()) {
+  const startedMs = Date.parse(tracked?.startedAt ?? '');
+  if (!Number.isFinite(startedMs)) return undefined;
+  const d = nowMs - startedMs;
+  return d >= 0 ? d : undefined;
 }
 
 function loadState() {
@@ -146,15 +189,20 @@ export async function main() {
       };
       saveState(updatedState);
     });
+    recordSpawn(hookData, {
+      event: 'start', agentId, agentType, requestedModel, canonicalModel, modelMismatch,
+    });
     let message = `[team] Agent registered: ${agentId} (${agentRole})`;
     if (modelMismatch) {
       message += `\n[model-policy] '${agentType}' spawned with ${requestedModel} but policy says ${canonicalModel}`;
     }
     writeStdout({ message });
   } else if (action === 'stop') {
+    let tracked;
     withFileLock(statePath, () => {
       const loaded = loadState();
       const existing = (loaded.agents || {})[agentId];
+      tracked = existing;
       const updatedState = existing
         ? {
             ...loaded,
@@ -169,6 +217,14 @@ export async function main() {
           }
         : loaded;
       saveState(updatedState);
+    });
+    recordSpawn(hookData, {
+      event: 'stop',
+      agentId,
+      agentType: tracked?.agentType ?? agentType,
+      canonicalModel: tracked?.canonicalModel ?? null,
+      modelMismatch: tracked?.modelMismatch === true,
+      durationMs: spawnDurationMs(tracked),
     });
     writeStdout({
       message: `[team] Agent deregistered: ${agentId}`,

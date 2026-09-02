@@ -18,7 +18,7 @@ category: orchestration
 tokens: 2500
 agents: [orchestrator, planner]
 whenNotToUse: "Work that fits in one window — fewer than two stems with disjoint file ownership (use /team), a single dependency chain (sequential is faster), tasks that all touch one shared file or one dev-server port, or when the user cannot open a second terminal. Not the session sizer's `sequence` recommendation (that splits one task across consecutive sessions, not concurrent windows)."
-source_hash: 49da5609
+source_hash: 793e5f00
 ---
 
 # /split
@@ -63,6 +63,34 @@ Progress:
 - [ ] 재결합 전 merge-tree 충돌 확인
 ```
 
+## 운용 스크립트 (2026-09-02, 절차 정본은 커맨드)
+
+리더가 손으로 반복하던 것을 `scripts/split/*.mjs` 가 잰다 — 판단은 코드, 행동(`SendMessage`·push·merge)은 리더. 어느 스크립트도 메시지를 보내지 않는다. 플래그·출력 형태·실사고 근거는 [references/operations.md](references/operations.md).
+
+| 통증(실측) | 스크립트 | 무엇을 |
+|---|---|---|
+| 프롬프트 2.5KB 창마다 복제 전송(9회) | `dispatch <limb>` | 템플릿 렌더 + 브리프 worktree 복사 + **포인터 1줄** |
+| 랜딩마다 수동 재측정 6종 × ~4 왕복 | `land <limb>` | 트레일러·소유권·바이너리·인용·merge-tree·뒤처짐 PASS/FAIL 표(승인 아님) |
+| 창 순찰·상태 자유형 기록 | `watch` | ops·supervisor·트레일러·health 한 표(부작용 0, S0) |
+| SOLO 경보 수십 건 중 실개입 0 | `probe` | `active` 줄기만 경보, 미지는 `(state unknown)` 로 경보 |
+| node_modules 부재·env 미복사·공유 e2e DB | `worktree-setup <wt>` | junction·`.env.local`·`lane.env`; teardown 은 reparse point 만 |
+| `git checkout --` 가 sha 지문 파괴 | `restore-blob <f>` | `cat-file -p` 바이트 복원 + `update-index --refresh` |
+| 재부팅 마감 수기 5항 | `suspend` / `resume-notices` | 정지·재개 통지 생성 + `run.json.suspend` |
+
+## 복원·역주입 SOP (A7 — 9/2 실사고 3건 기준)
+
+역주입(고의로 결함을 심어 게이트가 빨개지는지 보는 검증) 뒤 원복은 다음 순서만 허용한다.
+1. **적용 증명**: 주입 문자열이 대상 파일에 실재함을 `grep -n` 으로 찍는다(주입 안 됐는데 red 를 보고하는 착시 차단).
+2. **red 확인**: 게이트가 실제로 red 인지 실행 출력으로.
+3. **토큰 단위 원복**: 주입한 토큰만 되돌린다. 병렬 편집 중인 트리에서 파일 전체를 `cp` 로 덮으면 형제 창의 변경(111 insertions 실측)이 지워진다.
+4. **바이트 복원이 필요하면 `restore-blob`**: sha256 지문 절차에서 `git checkout --` 는 autocrlf 때문에 바이트 복원이 아니다(내용 동일·지문 상이). `git cat-file -p HEAD:<f>` + `git update-index --refresh` 가 정본.
+5. **전역 0 확인**: 주입 문자열이 리포 전역에 0건임을 `grep -rn` 으로(범위를 좁혔으면 좁혔다고 적는다).
+6. **방화벽 테스트는 CRLF 정규화를 기본으로**: 파서형 게이트는 `content.replace(/\r\n/g, '\n')` 를 넣는다 — CRLF 체크아웃이 전건-missing 거짓 red 를 만들어 PR 이 Windows 기준 red 인 채 착지하고 prebuild 까지 막은 실사고(9/2)가 근거다.
+
+## 브리프 §0 — 정찰 검증 선행 (A10)
+
+브리프 첫 절은 "착수 시 재확인 대상"이다. 리더·브리프의 인용(경로·행번호·계수·기전)은 **창이 착수 정찰에서 재확인**하고, 틀렸으면 따르지 않고 교정 보고한다 — 한 주에 10건+ 이 조항으로 잡혔다(workView 경로·C 범위·행번호·repositories 계수·bootOs 기전). 행번호 인용에는 **측정일**을 병기한다(동시 편집 중인 트리에서 줄번호는 썩는다). 이것은 문서 규약이지 코드가 강제하지 않는다.
+
 ## Guardrails
 
 - 창 열기·정리는 **사람**이 합니다. 플러그인은 `git worktree add` 도, headless 창(`claude -p --worktree`)도 만들지 않습니다 — 사용자가 본 적 없는 세션의 권한 자세를 플러그인이 고르는 것은 permission laundering 입니다.
@@ -78,6 +106,8 @@ Progress:
 - 두 줄기가 같은 파일을 만져야 한다는 말이 나온다 (소유권 겹침 = 줄기가 아님)
 - `plan` 이 `fallbackReason` 을 냈는데 "일단 창을 열어보자" 고 한다
 - 유휴 신호나 "다 했다" 는 메시지만 보고 완료로 친다 (트레일러 없음 = 미완료)
+- `land` 의 PASS 를 승인으로 읽는다 (기계 검사 통과 ≠ 검수 APPROVE — REQUEST_CHANGES 가 실결함을 잡은 실측 2건)
+- 창이 스스로 push·merge 하거나, 스크립트에 SendMessage 를 시키려 한다 ("창은 push 하지 않는다 · 병합은 리더+검수" 가 사고 0 의 구조다)
 - 부모 창이 `EnterWorktree` 로 줄기에 들어가 있다 (status 를 볼 자리가 없다)
 - 창 하나가 남의 worktree 안 파일을 고치고 있다
 

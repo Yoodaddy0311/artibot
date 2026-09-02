@@ -58,8 +58,18 @@ const EXPECTED_SPLIT = Object.freeze({
   recommendMinSubtasks: null,
 });
 
+/**
+ * 2026-09-02 에 additive 로 들어온 하위 객체 3종. 값은 각 소비자가 기본값으로 읽으므로
+ * 여기서 형태만 allowlist 한다(의미 검증은 헤더 #5 대로 안 본다):
+ *   - `supervisor`    — S0 관측 임계(`lib/supervisor/lane-monitor.js`, `scripts/split/{watch,fanout-probe}.mjs`)
+ *   - `dispatch`      — `scripts/split/dispatch.mjs` 의 `{BUDGET}`·템플릿 경로
+ *   - `worktreeSetup` — `scripts/split/worktree-setup.mjs` 의 junction·복사·레인 env
+ * 어느 키도 행동을 켜지 않고, 사용자 settings.json 의 cross-session 키와 무관하다(아래 스캔이 지킨다).
+ */
+const ADDITIVE_OBJECT_KEYS = Object.freeze(['supervisor', 'dispatch', 'worktreeSetup']);
+
 /** `split` 아래에 있어도 되는 키 — allowlist. `comment` 는 이 config 의 관례다. */
-const ALLOWED_KEYS = new Set([...Object.keys(EXPECTED_SPLIT), 'comment']);
+const ALLOWED_KEYS = new Set([...Object.keys(EXPECTED_SPLIT), ...ADDITIVE_OBJECT_KEYS, 'comment']);
 
 /**
  * 사용자 소유 설정 키. 이 두 문자열이 플러그인 트리에 등장하면 RED.

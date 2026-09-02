@@ -14,15 +14,32 @@
  * `git log --format=%(trailers:...)` on the limb range and nothing else —
  * no hooks, no runtime state, no session identity.
  *
- * Contract:
+ * Contract (first-parent, newest-first — decided by the FIRST commit that
+ * carries any `Split-Limb` trailer):
  *   - no branch          → not complete (`reason: 'no-branch'`)
  *   - branch, no commits → not complete (`reason: 'no-commits'`) — "커밋 없으면 완료 아님"
- *   - commits, no `Split-Limb: done` in range → not complete (`reason: 'no-trailer'`)
+ *   - no `Split-Limb` trailer on any first-parent commit in range
+ *                        → not complete (`reason: 'no-trailer'`)
+ *   - newest trailer is not `done` (e.g. `wip` after an earlier `done`)
+ *                        → not complete (`reason: 'superseded'`, `lastTrailer` = that value)
+ *   - newest trailer is `done` → complete (`doneCommit` = that commit)
  *   - git failed / too old for `%(trailers:key=…)` → not complete (`reason: 'git-error'`)
- *   - `Split-Limb: done` on a commit inside `<base>..<branch>` → complete
  *
- * Every failure mode collapses to `complete: false`. A limb is never reported
- * done because the reader could not look.
+ * Why `--first-parent` (measured 3× in the 2026-09 live run, reproduced in
+ * `tests/firewall/split-completion-evidence.test.js` "머지 커밋 함정"):
+ * a limb window runs `git merge origin/main`; the tip becomes a merge commit
+ * with no trailer, and the base recorded in `plan.json` (`git rev-parse HEAD`
+ * at plan time — a SHA) now lies BEHIND the merged-in main. Scanning every
+ * commit in `<base>..<branch>` then sees other limbs' already-landed
+ * `Split-Limb: done` commits and reports a false `done` for a limb that never
+ * wrote one. On the first-parent line those commits are second-parent and
+ * invisible; the limb's own commits — including a merge commit the limb made
+ * itself, so a trailer placed on it still counts — are the whole story.
+ *
+ * Why "newest trailer decides" and not "any done": a `done` followed by a
+ * `wip` means the window reopened the work. Reporting it done would land
+ * half a change. A `done` followed by trailer-less commits (a merge, a typo
+ * fix) stays done — only an explicit later trailer supersedes.
  *
  * Follows `lib/git/git-dir.js` conventions: never throws on a bad cwd, shell-
  * free argv (`execFileSync`), `windowsHide`, short timeout.
@@ -154,12 +171,23 @@ export function parseLimbLog(raw) {
 }
 
 /**
- * Does this trailer value list mark the limb done?
- * @param {ReadonlyArray<string>} trailers
- * @returns {boolean}
+ * Decide completion from a newest-first list of first-parent commits: the
+ * first commit carrying ANY `Split-Limb` trailer is decisive, and within that
+ * commit the LAST `Split-Limb` value decides (git prints trailers in message
+ * order, so the last one is the most recent statement — a commit carrying
+ * both `wip` and `done` is `done` only if `done` comes last; review finding
+ * 2026-09-02). Exported so the rule is testable without git.
+ *
+ * @param {ReadonlyArray<{ sha: string, subject: string, trailers: ReadonlyArray<string> }>} commits - newest first
+ * @returns {{ reason: 'done'|'no-trailer'|'superseded', decisive: null | { sha: string, subject: string, trailers: ReadonlyArray<string> }, lastTrailer: string|null }}
  */
-function isDone(trailers) {
-  return trailers.some((v) => v.toLowerCase() === SPLIT_LIMB_DONE);
+export function decideFromTrailers(commits) {
+  const list = Array.isArray(commits) ? commits : [];
+  const decisive = list.find((c) => Array.isArray(c?.trailers) && c.trailers.length > 0) ?? null;
+  if (!decisive) return { reason: 'no-trailer', decisive: null, lastTrailer: null };
+  const lastTrailer = decisive.trailers[decisive.trailers.length - 1];
+  const done = String(lastTrailer).trim().toLowerCase() === SPLIT_LIMB_DONE;
+  return { reason: done ? 'done' : 'superseded', decisive, lastTrailer };
 }
 
 /**
@@ -170,6 +198,10 @@ function isDone(trailers) {
  * `Split-Limb: done` that already landed on master (another limb, an earlier
  * run) must not count for this one, and only the range excludes it.
  *
+ * The walk is `--first-parent`, newest first, and the first commit carrying
+ * any `Split-Limb` trailer decides (see the module header). Commits merged
+ * INTO the limb (second parents) are never read.
+ *
  * @param {object} opts
  * @param {string} opts.cwd - Any directory inside the repository (main checkout or a worktree).
  * @param {string} opts.branch - Limb branch name (e.g. from {@link limbNames}).
@@ -177,10 +209,12 @@ function isDone(trailers) {
  * @param {number} [opts.maxCount=500] - Cap when no base range is available.
  * @returns {Readonly<{
  *   branch: string, base: string|null, complete: boolean,
- *   reason: 'done'|'no-branch'|'no-commits'|'no-trailer'|'git-error'|'bad-input',
+ *   reason: 'done'|'no-branch'|'no-commits'|'no-trailer'|'superseded'|'git-error'|'bad-input',
  *   commitCount: number,
  *   doneCommit: null | { sha: string, subject: string },
- * }>}
+ *   lastTrailer: string|null,
+ * }>} `commitCount` counts first-parent commits only. `lastTrailer` is the
+ *   decisive commit's newest `Split-Limb` value (`done`, `wip`, …) or null.
  */
 export function readLimbCompletion({ cwd, branch, base, maxCount = 500 } = {}) {
   const result = (reason, extra = {}) => Object.freeze({
@@ -190,6 +224,7 @@ export function readLimbCompletion({ cwd, branch, base, maxCount = 500 } = {}) {
     reason,
     commitCount: 0,
     doneCommit: null,
+    lastTrailer: null,
     ...extra,
   });
 
@@ -210,17 +245,18 @@ export function readLimbCompletion({ cwd, branch, base, maxCount = 500 } = {}) {
     range = [`--max-count=${Math.max(1, Number(maxCount) || 500)}`, `refs/heads/${branch}`];
   }
 
-  const log = git(['log', `--format=${LOG_FORMAT}`, ...range, '--'], cwdAbs);
+  const log = git(['log', '--first-parent', `--format=${LOG_FORMAT}`, ...range, '--'], cwdAbs);
   if (!log.ok) return result('git-error');
 
   const commits = parseLimbLog(log.out);
   if (commits.length === 0) return result('no-commits');
 
-  const done = commits.find((c) => isDone(c.trailers));
-  if (!done) return result('no-trailer', { commitCount: commits.length });
+  const { reason, decisive, lastTrailer } = decideFromTrailers(commits);
+  if (reason !== 'done') return result(reason, { commitCount: commits.length, lastTrailer });
   return result('done', {
     commitCount: commits.length,
-    doneCommit: Object.freeze({ sha: done.sha, subject: done.subject }),
+    doneCommit: Object.freeze({ sha: decisive.sha, subject: decisive.subject }),
+    lastTrailer,
   });
 }
 
