@@ -92,10 +92,11 @@ frontier 티어 모델은 effort를 네이티브 레벨로 노출한다: **max /
 **적용 조건**: 작업 요청이 제안·개선·감사형인 경우 — "보완해줘", "발전방안", "개선점", "전수조사", "최신 트렌드 맞나" 등 열린 요청 → **DECOMPOSE 전에 이 게이트를 반드시 통과**한다.  
 **구체적 작업 지시**("X 구현", "Y 버그 수정", "이 파일 바꿔줘") → 문제는 사용자가 이미 준 것 → pass-through, Phase 1로 직행.
 
-**검증 절차**: 각 후보를 다음 체크리스트로 대조한다 (`problem-validation` 스킬 참조):
+**검증 절차**: 각 후보를 다음 4-check 로 대조한다 (정본 `skills/problem-validation/SKILL.md` — 네 항목 전부 통과해야 NECESSARY):
 1. **이미 존재하는가?** — 코드·설정·문서에서 `file:line`으로 확인
 2. **하드 증거가 있는가?** — incident 기록, 실패 테스트, 문서화된 통증 (트렌드 추론 금지)
 3. **YAGNI 아닌가?** — 현재 실제로 필요하지 않으면 REJECT
+4. **유지비 < 가치인가?** — 지속 유지 부담이 구체적 이득을 넘으면 REJECT
 
 **기본값 = REJECT.** 통과한 후보만 NECESSARY로 분류해 Phase 1로 넘긴다.
 
@@ -524,7 +525,7 @@ This runs the original flow: Phase 1 through 6, with automatic shutdown after re
 
 ## Fable opt-in
 
-최고난도 장기 추론 작업은 config `fable.allowlist` opt-in 시 `deep-async` 역할로 라우팅 가능(실효 비용 ~2.6× — model-catalog 참조).
+fable 게이트는 `artibot.config.json#agents.modelPolicy.fable.enabled`(현재 false) 와 `agents.modelPolicy.fable.allowlist`(에이전트 **이름** 목록) 로 제어한다. `deep-async` 역할 별칭은 fable 로 라우팅되지 **않는다** — `lib/core/model-policy.js#resolveModel` 이 별칭 문자열 자체를 에이전트 이름 allowlist 와 대조하므로 게이트를 켜도 opus 로 강등된다(실측 2026-09-02: 게이트 ON + allowlist 포함 config 로도 `resolveModel('deep-async')` → opus). fable 이 실효되려면 게이트 ON, 에이전트 이름이 allowlist 에 있음, 그 에이전트의 버킷/frontmatter 해석 티어가 fable 임 — 세 조건이 모두 필요하다(실효 비용 ~2.6× — model-catalog 참조).
 
 ## Next Steps
 

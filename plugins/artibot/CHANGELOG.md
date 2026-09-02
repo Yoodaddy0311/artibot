@@ -15,6 +15,93 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 같았다 — **쓴 것이 그대로 남지 않는데 아무도 실패를 보지 못했다.** 하나는 항목이 사라지는 동안
 호출자가 성공을 돌려받았고, 다른 하나는 발행한 md5 가 신선한 클론에서만 어긋났다.
 
+**2026-09-02 — `/split` 자율 런타임 1단계.** 다른 리포(Ontology)의 다중창 캠페인 실측(랜딩 29건 ·
+5창 · 레인 14개 · 리더 개입 ~150건)에서 반복된 사고 10건과 vNext 설계 패키지
+(`docs/artibot-vnext-autonomous-runtime-design-v1.0/`) 의 P1(Supervisor Observe) 을 한 번에 싣는다.
+원칙은 설계 그대로다 — 기존 완료 규약(git 트레일러)·fail-closed dispatch·telemetry RECORD-ONLY 는
+바꾸지 않고, 판단은 `lib/` 에, 행동(SendMessage·push·merge)은 여전히 리더에 둔다. 어느 스크립트도
+메시지를 보내거나 푸시하지 않는다.
+
+### Added
+- **supervisor observe spine (vNext PR-SV01+SV02, 자율도 S0)** — `lib/supervisor/` 신설. 설계 §05
+  이벤트 20종 allowlist(`event-types.js`), run/lane 상태 어휘와 검증기 + 리더가 `run.json.lanes[limb].state`
+  에 적는 운용 상태 allowlist `pending|active|awaiting-dispatch|review|serial-gate|closing|done|suspended`
+  (`contracts.js`), 결정적 리듀서(`state-reducer.js`: 같은 스트림 → deep-equal, 미지 이벤트는 경고 + 무전이,
+  터미널 역행 금지, 기존 split 텔레메트리 `phase-*`/`wall-clock-*` 를 전진 전용으로 매핑), 런 스토어
+  (`run-store.js`: `{runId}.supervisor.ndjson` append + `actionId` 멱등 + `{runId}.state.json` 원자 재구성 —
+  캐시를 지워도 리플레이로 동일 상태), 레인 모니터(`lane-monitor.js`: §03 stuck 표
+  `healthy|suspect|inspect|recoverable|restart|done|unknown`, 입력 결손은 `unknown` 이지 `healthy` 가 아니다).
+  `lib/observability/split-telemetry.js` 는 무변경. 자동 행동 0.
+- **`/split` 운용 스크립트 8종** (`scripts/split/`, 모두 `../../lib` 상대 import — 마크다운의 부트스트랩
+  로더 없이 플러그인 루트에서 바로 실행):
+  `land.mjs <limb>`(랜딩 체크리스트 6행 — 트레일러 · allowlist 대비 소유권 diff · 바이너리 0 · 금지 인용 ·
+  merge-tree 드라이런 · base 대비 뒤처짐 — PASS 일 때만 exit 0, PR 본문 골격 생성, **PASS ≠ 승인**) ·
+  `watch.mjs`(관측 대시보드: ops · supervisor · 트레일러 · 마지막 커밋 · heartbeat · health + 측정 고지 raw,
+  부작용은 state.json 캐시뿐) · `fanout-probe.mjs`(창별 SOLO 경보 — `active` 줄기만, 미지 창·상태는
+  `(state unknown)` 로 **경보**한다, 침묵 쪽으로 실패하지 않는다) · `dispatch.mjs <limb>`(템플릿 렌더 ·
+  브리프 worktree 원자 복사 · **포인터 1줄만 출력**, 전송은 리더 — 프롬프트 2.5KB 수기 붙여넣기 제거) ·
+  `worktree-setup.mjs <wt>`(node_modules junction · `.env.local` 복사 · 레인별 `lane.env`; `--teardown` 은
+  reparse point 만 제거, 재귀 삭제 0) · `restore-blob.mjs <f>`(`git cat-file -p` 바이트 복원 +
+  `update-index --refresh` — autocrlf 가 sha 지문을 깨는 `git checkout --` 대체) · `suspend.mjs` /
+  `resume-notices.mjs`(재부팅 5단계 정지·재개 통지 생성, `run.json.suspend` 기록).
+- `lib/git/limb-landing-check.js#checkLimbLanding`, `lib/git/split-brief.js`(`renderPrompt` — 미해결
+  `{PLACEHOLDER}` 는 throw · `extractReportContract` — `commands/split.md` 의 `[보고 계약]` 펜스를 그대로 실어
+  parity 게이트를 상속 · `renderModelPolicy` — `resolveModel` 해석값만, 모델 ID 리터럴 0 · `materializeLimb`),
+  `lib/git/split-run-file.js`(run.json 원자 읽기/쓰기), `templates/split/PROMPT-TEMPLATE.md`(플레이스홀더 14종).
+- **서브에이전트 spawn 원장** — `SubagentStart`/`SubagentStop` 훅이 `<projectRoot>/.artibot/ledger/spawns.ndjson`
+  에 `{ts, sessionId, agentId, agentName, agentType, requestedModel, canonicalModel(정책 티어), modelMismatch,
+  event, durationMs?}` 를 append 한다(`lib/learning/ledger/spawn-ledger.js`). 팬아웃 횟수·모델 정책 준수를
+  `~/.claude/projects/<sid>/*.jsonl` 을 손으로 세던 우회를 닫는다. best-effort, stdout 계약 불변, 페이로드에
+  `cwd` 가 없으면 기록하지 않는다(루트 추측 금지).
+- `artibot.config.json#split` 가산 키: `supervisor.{suspectHeartbeatSeconds:480, staleHeartbeatSeconds:900,
+  probe.{mainActiveMinutes:10, subagentActiveMinutes:5}}`, `dispatch.{budget:600000, template:null}`,
+  `worktreeSetup.{linkDirs, copyFiles, installCmd:null, envPerLane:{}}`. 어느 키도 행동을 켜지 않는다.
+  `eslint.config.js` L2 블록에 `lib/supervisor/**` 등록(`layer-registration-coverage` 게이트).
+
+### Changed
+- **`/split` 완료 판정 규칙 — first-parent** (`lib/git/limb-completion.js`). 줄기가 `git merge origin/main` 을
+  하면 tip 이 트레일러 없는 머지 커밋이 되고, `plan.json` 의 base(계획 시점 SHA)는 머지된 main 보다 뒤에
+  남는다. 종전 판독기는 `<base>..<branch>` 의 **모든** 커밋을 훑어 다른 줄기가 이미 랜딩한 `Split-Limb: done`
+  이 범위에 들어왔고 — **트레일러를 한 번도 안 쓴 줄기가 done 으로 샜다**(임시 리포 재현: `complete:true,
+  doneCommit` 이 남의 커밋; 라이브 `main` base 에서는 재현 안 됨, plan.json 의 SHA base 에서만). 라이브
+  런의 "tip 트레일러" 규칙은 반대로 이미 done 인 줄기를 amend 왕복으로 몰았다(3회 실측). 이제
+  `git log --first-parent <base>..<branch>` 를 최신부터 훑어 **`Split-Limb` 트레일러를 가진 첫 커밋이
+  결정**한다: `done` → 완료, 그 외(`wip`) → 새 reason `superseded`(`lastTrailer` 노출), 없음 → `no-trailer`.
+  머지된 main 쪽 커밋은 second-parent 라 보이지 않고, 줄기 자신의 머지 커밋에 단 트레일러는 그대로
+  센다(예전 amend 우회와 호환). 나머지 계약은 그대로.
+- `lib/handoff/handoff-builder.js#toProjectSlug` 가 하네스의 실제 프로젝트 디렉터리 인코딩을 따른다 —
+  `C:/Users/x/Repo` → `C--Users-x-Repo`(종전 `C-Users-x-Repo` 는 이 머신의 어느 디렉터리와도 일치하지
+  않았고 `collectWorklog` 는 항상 빈 결과였다; `scripts/baseline-measure.js` 가 그 불일치를 주석으로 적고
+  우회하고 있었다). POSIX 형태(`-home-x-Repo`)는 불변.
+
+### Docs
+- **커맨드 문서 7종의 코드 불일치 진술 정정** (상위 커맨드 감사 2026-09-02, 8항목 전부 코드로 재확인):
+  `/plan` ensureADR 비멱등 명시 · `/ultraplan`·`/team`·`/autopilot` 의 fable 게이트 상태(OFF)·config 경로
+  (`agents.modelPolicy.fable.*`)·`deep-async` 별칭이 fable 로 해석되지 않음(실측: `isFableAllowed` 가 별칭
+  문자열을 에이전트 이름 allowlist 에 대조) 정정 · `/team` Phase 0 을 정본 4-check 로 정렬 · `/review` 라우터가
+  힌트를 무시하고 항상 code-reviewer 를 고른다는 실태와 security/spec/quality-reviewer 도달 경로 명시 ·
+  `/blindspot` 기본 `--since HEAD` 가 커밋 후 빈 결과임을 안내 · `/autopilot` dispatch 표에
+  replay/diff/tui/goal 추가, 줄번호 인용을 `engine.js#runPhase5Improve` 심볼로 교체 · `/resume` 가
+  `.artibot/HANDOFF.md` 만 읽음을 명시하고 아카이브 예시 파일명을 lib 규약으로 정정.
+  `commands/split.md` 는 300줄 래칫에 맞춰 절차를 `skills/split/references/operations.md` 로 분리했다.
+
+### Fixed
+- **`/save` 가 git 추적 아카이브를 덮어쓰고 지웠다** — `lib/handoff/handoff-store.js` 는 "최신 아카이브" 를
+  mtime 으로 골랐다. 새 `git worktree`·`merge`·`pull` 직후에는 체크아웃된 추적 파일이 전부 신선한 mtime
+  을 받으므로 몇 달 전 커밋된 핸드오프가 방금 쓴 것보다 "젊어" 보였고, 10분 스로틀이 그 파일을 제자리
+  덮어썼다(` M`). `pruneHandoffs` 는 같은 순서로 `keep` 밖을 `unlink` 해 추적 파일을 지웠다(` D`). 다른
+  리포의 다중창 실측 3회+, 이 세션의 임시 리포 재현 2회(독립 감사 포함). 이제 `git ls-files -z --
+  .artibot/handoffs` 로 추적 집합을 읽어 **추적 파일은 절대 재사용·prune 대상이 아니다**. git 워크트리인데
+  추적 집합을 못 읽으면 둘 다 하지 않는다(fail-closed, `pruneSkipped: 'git-unknown'`). "리포 아님" 판정은
+  git 이 그렇게 답했을 때, 또는 git 부재 시 **조상 디렉터리 어디에도 `.git` 이 없을 때**만 — 리포 하위
+  디렉터리를 projectRoot 로 쓰는 경우를 형제 `.git` 검사만으로 "리포 아님"으로 오판해 추적 파일을 지우던
+  경로를 교차 검수가 잡아 닫았다(회귀 테스트 동봉). 정렬·나이 판정은
+  파일명 스탬프 `YYYY-MM-DD-HHMM[-n].md` 가 1차 키(체크아웃은 mtime 은 바꾸지만 파일명은 못 바꾼다).
+  부수 효과: 스로틀 창이 아카이브 생성 분에 고정된다. 반환에 `{ protectedTracked, pruneSkipped }` 가산,
+  `checkHandoffTrackedIntegrity(projectRoot)` 신설 — `/save` 가 저장 후 `.artibot/handoffs` 의 M/D 를 한
+  줄로 찍는다(0/0 이어야 하며 git 실패 시 "미확인"). `commands/save.md` 의 파일명 오기
+  (`HANDOFF-<timestamp>.md` → 실제 `YYYY-MM-DD-HHMM.md`)도 정정.
+
 ### Fixed
 - **decision-trail 동시 쓰기 소실(lost update)** — `recordDecision` 이 read-modify-write
   한가운데서 중단됐다. `readTrailSync` 로 스냅샷을 뜨고 `await ensureDir(...)` 에서 이벤트
@@ -41,6 +128,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   것은 이 1개뿐이다.
 
 ### Tests
+- **`/split` 1단계 회귀 273건 신규** — `tests/handoff/handoff-store.test.js` 9 → 26(실제 `git init` 임시
+  리포로 추적 보호·fail-closed·스탬프 정렬; 수정 전 코드로 돌리면 ` M`/` D` 가 그대로 재현),
+  `tests/firewall/split-completion-evidence.test.js` 14 → 20(머지 함정 4시나리오 + 픽스처 자기검증 — 평범한
+  범위에 남의 done 이 **실제로** 들어 있음을 먼저 단언), `tests/git/limb-landing-check.test.js` 25,
+  `tests/supervisor/*` 76(리듀서 결정성·미지·터미널·텔레메트리 매핑, 스토어 재구성 바이트 동일, 실런 픽스처
+  `reports/SPLIT/split-8f83d7.events.ndjson` 리플레이, 프로브 분류), `tests/git/split-brief.test.js` 26,
+  `tests/git/split-run-file.test.js` 18, `tests/scripts/split-tools.test.js` 41(restore-blob 은
+  `core.autocrlf=true` 임시 리포에서 바이트 == blob), `tests/hooks/subagent-spawn-ledger.test.js` 13(자식
+  프로세스 통합, HOME 샌드박스).
 - **trail 격리 firewall 게이트 신규** — `tests/firewall/trail-sandbox-required.test.js`.
   decision-trail writer 에 도달하는 테스트 파일은 등록된 격리 수단을 반드시 갖는다.
   `useTrailSandbox` · 자체 임시 root 고정 · `vi.mock` 모듈 무력화 · STATE-RESTORE 저장·복원

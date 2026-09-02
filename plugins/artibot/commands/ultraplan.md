@@ -78,11 +78,11 @@ DIVERGE(발산) 엔진을 돌리기 **전에** "이 작업이 진짜 필요한�
 > 앞 6자, 또는 `ListAgents` 결과의 자기 세션 `[ref]`. 한 런 안에서는 고정한다.
 
 - `Agent(subagent_type="artibot:planner", name="lens-{sid}-mvp", prompt="[ULTRAPLAN 렌즈: MVP·최단경로] 근거:{ground}\n작업:{task}\n가장 빠르게 가치 내는 단계 계획\n\n{보고 계약}")`
-  <!-- model: model-policy 해석 — 역할 `frontier`; fable opt-in 게이트 활성(현재 기본) 시 `deep-async` 별칭 선택 가능 -->
+  <!-- model: model-policy 해석 — 역할 `frontier`; fable 게이트는 현재 OFF(`artibot.config.json#agents.modelPolicy.fable.enabled` = false) 이고, `deep-async` 별칭은 게이트를 켜도 `lib/core/model-policy.js#resolveModel` 이 opus 로 강등한다(실측 2026-09-02) — 별칭으로 fable 을 고를 수 없다 -->
 - `Agent(subagent_type="artibot:architect", name="lens-{sid}-risk", prompt="[ULTRAPLAN 렌즈: 위험·견고성 우선] ... 실패모드·롤백·테스트를 최우선으로 한 계획\n\n{보고 계약}")`
-  <!-- model: model-policy 해석 — 역할 `frontier`; fable opt-in 게이트 활성(현재 기본) 시 `deep-async` 별칭 선택 가능 -->
+  <!-- model: model-policy 해석 — 역할 `frontier`; fable 게이트는 현재 OFF(`artibot.config.json#agents.modelPolicy.fable.enabled` = false) 이고, `deep-async` 별칭은 게이트를 켜도 `lib/core/model-policy.js#resolveModel` 이 opus 로 강등한다(실측 2026-09-02) — 별칭으로 fable 을 고를 수 없다 -->
 - `Agent(subagent_type="artibot:architect", name="lens-{sid}-arch", prompt="[ULTRAPLAN 렌즈: 장기 아키텍처] ... 2년 뒤 유지보수·확장성·기술부채 최소화 계획\n\n{보고 계약}")`
-  <!-- model: model-policy 해석 — 역할 `frontier`; fable opt-in 게이트 활성(현재 기본) 시 `deep-async` 별칭 선택 가능 -->
+  <!-- model: model-policy 해석 — 역할 `frontier`; fable 게이트는 현재 OFF(`artibot.config.json#agents.modelPolicy.fable.enabled` = false) 이고, `deep-async` 별칭은 게이트를 켜도 `lib/core/model-policy.js#resolveModel` 이 opus 로 강등한다(실측 2026-09-02) — 별칭으로 fable 을 고를 수 없다 -->
 
 ### Phase 3 — JUDGE & SYNTHESIZE (종합)
 리더가 후보 N개를 비교·채점(가치/위험/비용/장기성)하고 **최선안으로 종합**하되 각 후보의 강점을 접목한다.
@@ -93,7 +93,7 @@ DIVERGE(발산) 엔진을 돌리기 **전에** "이 작업이 진짜 필요한�
 ### Phase 4 — ADVERSARIAL REVIEW (적대적 검증)  ·  `--no-adversarial` 시 스킵
 공격자 관점 검증(`{sid}` 는 Phase 2 와 같은 세션 판별자 — 고정 이름이라 판별자 없이는 두 세션이
 같은 `plan-critic` 을 만든다): `Agent(subagent_type="artibot:code-reviewer", name="plan-{sid}-critic", prompt="[Plan 적대 검증] 이 계획의 순환 의존, 누락된 테스트 단계, 숨은 비용, 2년 뒤 기술부채, 실존하지 않는 파일 참조, 비현실적 의존 순서를 전부 찾아내라\n\n{보고 계약}")`
-<!-- model: model-policy 해석 — 역할 `balanced`(검증·읽기 전용 작업) -->.
+<!-- model: model-policy 해석 — 역할 `balanced`(검증·읽기 전용 작업). 실측(2026-09-02) `resolveModel('balanced')` → sonnet 티어 — 단일 티어(opus) 정책 및 `commands/team.md` "review 도 frontier" 와 어긋나는 유일한 하위 티어 지점이다. frontier 로 통일할지는 미결정 -->.
 발견 항목은 종합안에 반영(재조정) 후 통과시킨다.
 
 ### Phase 5 — HARDEN (강화)

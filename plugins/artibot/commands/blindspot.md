@@ -14,7 +14,7 @@ toolset: team
 ## Arguments
 
 Parse $ARGUMENTS:
-- `--since <git-ref>`: 비교 기준 ref (기본값: `HEAD`). 이 ref 이후의 변경을 점검 대상으로 삼는다.
+- `--since <git-ref>`: 비교 기준 ref (기본값: `HEAD`). 이 ref 이후의 변경을 점검 대상으로 삼는다. 기본값 `HEAD` 는 **미커밋 변경만** 잡으므로, 커밋을 마친 뒤 부르면 점검 대상이 0 이 되어 그대로 종료된다 — 커밋 후 점검은 `--since <base>`(예: `--since HEAD~1`, `--since main`, `--since @{u}`) 로 세션 시작 지점을 지정하라.
 
 ## Execution Flow
 

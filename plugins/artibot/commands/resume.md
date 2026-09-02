@@ -9,6 +9,8 @@ toolset: team
 
 이전 세션이 `/save` 로 작성한 `.artibot/HANDOFF.md` 를 그대로 stdout 에 출력해 다음 작업을 5초 안에 이어가도록 합니다. 자동 실행은 절대 하지 않으며, `--run` 플래그가 있을 때만 1순위 첫 프롬프트를 확인 프롬프트로 제안합니다 (push/deploy/release/force/delete 키워드는 강제 confirm).
 
+읽는 파일은 `.artibot/HANDOFF.md` **하나뿐이다** — `lib/handoff/handoff-store.js#readLatestHandoff` 는 그 포인터 파일만 연다. 크로스머신 요지본 `.artibot/guides/NEXT-SESSION.md` 와 `/split` 줄기 worktree 의 `.artibot/HANDOFF.md` 는 읽지 않는다 — 필요하면 직접 `Read` 하라.
+
 Also routed from: 자연어 "이어가기", "어제 어디까지 했지", "지난 세션 복원", "핸드오프 보여줘"
 
 ## Arguments
@@ -76,8 +78,8 @@ Parse $ARGUMENTS:
 ```
 | # | 파일명 | mtime | size |
 |---|--------|-------|------|
-| 1 | HANDOFF-20260519-114433.md | 2026-05-19 11:44 | 8.2 KB |
-| 2 | HANDOFF-20260518-220112.md | 2026-05-18 22:01 | 9.1 KB |
+| 1 | 2026-05-19-1144.md | 2026-05-19 11:44 | 8.2 KB |
+| 2 | 2026-05-18-2201.md | 2026-05-18 22:01 | 9.1 KB |
 | ... |
 ```
 

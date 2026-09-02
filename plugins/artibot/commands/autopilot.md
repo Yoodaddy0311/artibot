@@ -133,7 +133,7 @@ When the prompt contains `[artibot:hint recommend=autopilot]`, surface to the us
 
 Parse `$ARGUMENTS`:
 - `task-description`: 자율 처리할 작업 설명 (필수, `:resume`/`:status`/`:abort` 제외)
-- subcommand 접미어: `night` / `plan` / `resume` / `status` / `abort` / `list` 중 하나 (없으면 `default`)
+- subcommand 접미어: `night` / `plan` / `resume` / `status` / `abort` / `tail` / `replay` / `diff` / `tui` / `list` / `goal` 중 하나 (없으면 `default`) — Subcommands 표와 Step 2 dispatch 표가 정본
 - `--max`, `--budget`, `--no-notify`, `--no-tui`, `--no-team`, `--fast` / `-fast`, `--checkpoint`, `--worktree`, `--detached`, `--runner`: 위 표 참조
 - `session-id`: `:resume` / `:abort` / `:status` 에서 사용 (`ap-YYYYMMDD-HHMMSS` 형식)
 - `--goal`, `--validation-command`, `--max-iterations`: v4.6.0 Goal-driven mode (아래 "Goal-driven Mode" 섹션 참조)
@@ -263,11 +263,15 @@ if (pfInstr?.suppress) { /* warnings: state.preflightWarnings에 누적 + 계속
 | `abort` | `engine.abortAutopilot(sessionId, { graceful: true })` → `AbortResult` | 결과 표 출력 후 종료 |
 | `tail` | `engine.readEvents(sessionId, { tail: lines })` → `Event[]` | 이벤트 표 출력 후 종료 (PRD v4.1 P0-2 Live Telemetry) |
 | `list` | `engine.listActiveWorktrees()` + `engine.listSessions()` 조합 | GFM 표 출력 후 종료 |
+| `replay` | `engine.summarizeSession(sessionId)` → `engine.renderTimelineTable(summary)` | phase timeline 표 출력 후 종료 |
+| `diff` | `engine.diffSession(sessionId, opts)` → `engine.renderDiffTable(summary)` | phase별 git diff 요약 표 출력 후 종료 |
+| `tui` | `engine.runTuiLoop(sessionId, opts)` (`shouldActivateTui` 는 default 모드 자동 시작 판정용) | 라이브 대시보드 attach, 종료 시 복귀 |
+| `goal status/pause/resume/retry/clear` | `engine.getGoalStatus` / `pauseGoal` / `resumeGoal` / `retryGoal` / `clearGoal`(sessionId, opts) | 결과 출력 후 종료 (Goal-driven Mode 참조) |
 
 ### Step 3 — Phase Execution Loop
 
 엔진이 반환한 `instruction` 객체를 따라 **Phase를 순차 실행**한다. 엔진 `lib/autopilot/engine.js`의 `PHASES`는 8개(INTAKE/PLAN/EXECUTE/CROSS_CHECK/VERIFY/IMPROVE/**EVALUATE**/REPORT)이며, 실행 갯수는 모드에 따라 다르다:
-- **legacy(비-goal) PRD** = Goal Contract 부재 → IMPROVE 다음 EVALUATE를 건너뛰고 바로 REPORT (`engine.js` 라인 354 `state.goalContract ? 'EVALUATE' : 'REPORT'`). 실효 **7 phase (0~6)**.
+- **legacy(비-goal) PRD** = Goal Contract 부재 → IMPROVE 다음 EVALUATE를 건너뛰고 바로 REPORT (`lib/autopilot/engine.js#runPhase5Improve` 의 `nextPhaseFromImprove` 분기 — 줄번호는 썩으므로 심볼로 인용). 실효 **7 phase (0~6)**.
 - **goal-driven PRD** = Goal Contract 존재 → IMPROVE 다음 **EVALUATE 실행**(수락기준 미달 시 re-EXECUTE로 재반복, 충족 시 REPORT). 실효 **EVALUATE 추가**.
 
 각 Phase 완료 시 `engine.recordPhaseResult(state, { phase, status, ...result })`로 session-store 업데이트 (1번 인자는 `loadSession(sessionId)`로 얻은 **state 객체**, 2번 인자에 `phase`/`status` 포함 payload).
@@ -378,7 +382,7 @@ Phase 6 완료 후:
 
 ## Fable-mode (조건부 — config fable.enabled 시)
 
-이 섹션은 `artibot.config.json#/fable.enabled` + `fable.allowlist` opt-in 에이전트가 존재할 때만 적용되는 부록이다. model-policy fable 게이트를 통과한 에이전트에게만 아래 원칙·스니펫·휴리스틱이 적용된다. 게이트 미통과 에이전트(보안 계열 등 denylist)에는 적용하지 않는다.
+이 섹션은 `artibot.config.json#agents.modelPolicy.fable.enabled`(현재 false) 가 true 이고 `agents.modelPolicy.fable.allowlist` 에 든 에이전트가 존재할 때만 적용되는 부록이다. model-policy fable 게이트를 통과한 에이전트에게만 아래 원칙·스니펫·휴리스틱이 적용된다. 게이트 미통과 에이전트(보안 계열 등 denylist)에는 적용하지 않는다.
 
 ### de-prescribe 원칙
 
