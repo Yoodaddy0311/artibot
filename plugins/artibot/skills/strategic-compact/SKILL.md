@@ -20,7 +20,7 @@ agents:
   - "architect"
 tokens: "~2K"
 category: "analysis"
-source_hash: 1ec6766b
+source_hash: 8c47e655
 whenNotToUse: "Do not trigger strategic compaction below the yellow zone (60% context usage) or during active multi-file edits where task state is partially committed. Compacting mid-transaction loses the uncommitted state that the agent needs to complete the current operation."
 ---
 # Strategic Compaction
@@ -47,8 +47,8 @@ whenNotToUse: "Do not trigger strategic compaction below the yellow zone (60% co
 | Red | 85-95% | Force efficiency, essential ops only |
 | Critical | 95%+ | Emergency protocols |
 
-### Claude Opus 4.8 (1M 컨텍스트) 전략
-4.8은 1M 토큰을 표준 가격으로 제공하므로 **지연 컴팩션** 가능.
+### 현재 정책 티어 (1M 컨텍스트) 전략
+현재 정책 티어는 1M 토큰을 표준 가격으로 제공하므로 **지연 컴팩션** 가능.
 - 400k 토큰 미만: 컴팩션 보류 (성능 페널티 없음)
 - 400k-700k: 주의 — 다음 휴지기에 `/checkpoint` 권장
 - 700k-900k: 즉시 컴팩션 실행, 또는 `/load`를 `--full-context` 없이 재호출

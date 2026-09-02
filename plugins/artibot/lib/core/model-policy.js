@@ -64,6 +64,22 @@ function getFableDenylistNormalized() {
 }
 
 /**
+ * Resolve the policy source object from an explicit config or the cached one.
+ * Never throws; returns null when nothing usable is available.
+ *
+ * @param {object} [config] - Explicit config; falls back to getConfig().
+ * @returns {object|null}
+ */
+function resolveConfigSource(config) {
+  if (config && typeof config === 'object') return config;
+  try {
+    return getConfig();
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Load and normalize the opt-in fable gate config from `agents.modelPolicy.fable`.
  * Never throws; returns a disabled, empty gate if anything is missing or malformed
  * so the absence of a fable block is byte-identical to legacy behavior.
@@ -72,14 +88,7 @@ function getFableDenylistNormalized() {
  * @returns {{ enabled: boolean, allowlist: string[] }}
  */
 function loadFableGate(config) {
-  let src = config;
-  if (!src || typeof src !== 'object') {
-    try {
-      src = getConfig();
-    } catch {
-      src = null;
-    }
-  }
+  const src = resolveConfigSource(config);
   const fable = src && src.agents && src.agents.modelPolicy && src.agents.modelPolicy.fable;
   if (!fable || typeof fable !== 'object') {
     return { enabled: false, allowlist: [] };
@@ -94,6 +103,23 @@ function loadFableGate(config) {
 }
 
 /**
+ * True when the fable kill-switch (`agents.modelPolicy.fable.enabled`) is on.
+ * This is the gate WITHOUT the per-agent allowlist/denylist — use it only for
+ * requests that carry no agent identity (role aliases, bare phase roles).
+ * Never throws.
+ *
+ * @param {object} [config] - Explicit config; falls back to getConfig().
+ * @returns {boolean}
+ *
+ * @example
+ * isFableGateEnabled({ agents: { modelPolicy: { fable: { enabled: true } } } }); // true
+ * isFableGateEnabled({}); // false
+ */
+export function isFableGateEnabled(config) {
+  return loadFableGate(config).enabled;
+}
+
+/**
  * Decide whether an agent is permitted to run on the fable tier. Returns true
  * ONLY when the gate is enabled, the (normalized) agent is in the allowlist, and
  * the agent is not on the security denylist. Every other case is false →
@@ -103,8 +129,8 @@ function loadFableGate(config) {
  * @param {object} [config] - Explicit config; falls back to getConfig().
  * @returns {boolean}
  *
- * NOTE: as shipped, `fable.enabled` is false (single-tier opus fleet), so this
- * returns false for EVERY agent until an operator flips the kill-switch back on.
+ * NOTE: `fable.enabled` is the kill-switch. When it is false this returns false
+ * for EVERY agent regardless of the allowlist (single-tier opus fleet).
  *
  * @example
  * isFableAllowed('architect', cfg); // true  (only if enabled + allowlisted)
@@ -184,14 +210,7 @@ function normalizeBucket(bucket, fallbackModel) {
  * policy.high.model; // 'fable'
  */
 export function loadModelPolicy(config) {
-  let src = config;
-  if (!src || typeof src !== 'object') {
-    try {
-      src = getConfig();
-    } catch {
-      src = null;
-    }
-  }
+  const src = resolveConfigSource(config);
   const policy = src && src.agents && src.agents.modelPolicy;
   if (!policy || typeof policy !== 'object') {
     return { ...EMPTY_POLICY };
@@ -236,36 +255,40 @@ export function getPolicyModel(agentType, config) {
  * Resolve the effective model for an agent, honoring role/advisor overrides.
  *
  * Precedence:
- *   1. `opts.advisor === true` → advisorStrategy.advisorModel (if enabled),
- *      else fall through to bucket/default.
- *   2. `opts.role` 'review'|'inspect' → 'opus';
- *      'implementation'|'build' → 'opus' (overrides bucket).
- *   3. Otherwise → getPolicyModel(agentType) ?? DEFAULT_MODEL.
- *
- * Never throws.
- *
- * Precedence:
  * 0. Role-alias / raw-tier input (frontier|deep-async|balanced|fast or a tier
  *    name) — resolved immediately via the catalog; `opts.advisor` and
  *    `opts.role` are IGNORED on this path (the caller asked for a tier family,
- *    not an agent). Fable still passes the opt-in gate.
- * 1. opts.advisor — advisorStrategy.advisorModel.
- * 2. opts.role — phase-role mapping (implementation/review/...).
- * 3. Policy bucket lookup, then defaultModel.
+ *    not an agent). A fable result still passes the opt-in gate: when
+ *    `opts.agentType` names the calling agent, its allowlist/denylist status
+ *    decides; without it only the kill-switch (`fable.enabled`) is consulted
+ *    because there is no agent to check (see {@link gateFableTier}).
+ * 1. opts.advisor — advisorStrategy.advisorModel, gated for `agentType`.
+ * 2. opts.role — phase-role mapping from `agents.modelPolicy.phaseRoles`
+ *    (build-side / review-side; see {@link resolveModelForPhase}), gated for
+ *    `agentType` so a non-allowlisted agent in a fable phase still lands on opus.
+ * 3. Policy bucket lookup, then defaultModel — gated for `agentType`.
  *
- * @param {string} agentType - Agent name (prefixed or bare).
- * @param {object} [opts] - { advisor?:boolean, role?:string }.
+ * Never throws.
+ *
+ * @param {string} agentType - Agent name (prefixed or bare) OR a role alias / tier.
+ * @param {object} [opts] - { advisor?:boolean, role?:string, agentType?:string }.
+ *   `opts.agentType` is only meaningful on the alias path (step 0), where the
+ *   first argument is not an agent name.
  * @param {object} [config] - Explicit config; falls back to getConfig().
  * @returns {'fable'|'opus'|'sonnet'|'haiku'}
  *
  * @example
- * resolveModel('planner'); // 'opus' (high bucket declares fable; gate is off)
+ * resolveModel('architect'); // 'fable' (gate on + allowlisted)
+ * resolveModel('backend-developer'); // 'opus' (high bucket, but not allowlisted)
  * resolveModel('security-reviewer'); // 'opus' (denylisted, never fable)
- * resolveModel('planner', { role: 'review' }); // 'opus'
+ * resolveModel('code-reviewer', { role: 'review' }); // 'fable' (phaseRoles.review)
+ * resolveModel('backend-developer', { role: 'build' }); // 'opus' (phaseRoles.build)
  * resolveModel('doc-updater', { advisor: true }); // 'opus' (advisorModel)
- * resolveModel('frontier'); // 'opus'  (role alias)
- * resolveModel('deep-async'); // 'opus' unless fable gate opts the agent in
- * resolveModel('deep-async', { role: 'review' }); // 'opus' — alias wins, role ignored
+ * resolveModel('frontier'); // 'opus' (role alias)
+ * resolveModel('deep-async', { agentType: 'planner' }); // 'fable' (allowlisted caller)
+ * resolveModel('deep-async', { agentType: 'backend-developer' }); // 'opus'
+ * resolveModel('deep-async'); // 'fable' iff the kill-switch is on (no agent to check)
+ * resolveModel('deep-async', { role: 'review' }); // alias wins, role ignored
  */
 export function resolveModel(agentType, opts = {}, config) {
   const options = opts && typeof opts === 'object' ? opts : {};
@@ -275,10 +298,13 @@ export function resolveModel(agentType, opts = {}, config) {
   // deep-async / balanced / fast) or a raw tier, resolve it via the catalog
   // BEFORE any bucket logic — this is an independent tier lookup, not an agent
   // name. The catalog import is one-way (model-catalog imports nothing), so no
-  // cycle. Fable still passes the opt-in gate below.
+  // cycle. The gate is applied against the CALLING agent when the caller
+  // supplies one (`opts.agentType`); the alias string itself is never an
+  // allowlist key.
   const aliasTier = resolveRole(agentType);
   if (aliasTier !== null) {
-    return gateFableTier(aliasTier, agentType, config);
+    const caller = normalizeAgentType(options.agentType);
+    return gateFableTier(aliasTier, caller === '' ? null : caller, config);
   }
 
   if (options.advisor === true) {
@@ -288,9 +314,8 @@ export function resolveModel(agentType, opts = {}, config) {
     }
   }
 
-  if (typeof options.role === 'string') {
-    const roleModel = resolveModelForPhase(options.role);
-    if (options.role !== '' && isKnownPhaseRole(options.role)) return roleModel;
+  if (typeof options.role === 'string' && options.role !== '' && isKnownPhaseRole(options.role)) {
+    return gateFableTier(resolvePhaseTierRaw(options.role, config), agentType, config);
   }
 
   const bucketModel = getPolicyModel(agentType, config) ?? policy.defaultModel;
@@ -298,24 +323,41 @@ export function resolveModel(agentType, opts = {}, config) {
 }
 
 /**
- * Enforce the fable opt-in gate on a resolved tier. If `tier` is 'fable' and the
- * agent is not explicitly opted in (and not denylisted), demote to opus.
- * Any non-fable tier passes through unchanged. Never throws.
+ * Enforce the fable opt-in gate on a resolved tier. Any non-fable tier passes
+ * through unchanged. For 'fable':
+ *   - with an agent name → {@link isFableAllowed} (kill-switch + allowlist +
+ *     denylist);
+ *   - without one (null/'' — role aliases, bare phase roles) → only the
+ *     kill-switch ({@link isFableGateEnabled}). The allowlist and the security
+ *     denylist CANNOT be applied here because there is no agent identity to
+ *     check; callers that know the agent must pass it.
+ * Never throws.
  *
- * @param {string} tier - The tier resolved by alias/bucket/advisor logic.
- * @param {string} agentType - Agent name used for the allowlist/denylist check.
+ * @param {string} tier - The tier resolved by alias/bucket/advisor/phase logic.
+ * @param {string|null} agentType - Agent name for the allowlist/denylist check, or null.
  * @param {object} [config] - Explicit config; falls back to getConfig().
  * @returns {string} The tier, or FABLE_FALLBACK_MODEL ('opus') if fable is gated out.
  */
 function gateFableTier(tier, agentType, config) {
   if (tier !== 'fable') return tier;
-  return isFableAllowed(agentType, config) ? 'fable' : FABLE_FALLBACK_MODEL;
+  const name = normalizeAgentType(agentType);
+  if (name === '') {
+    return isFableGateEnabled(config) ? 'fable' : FABLE_FALLBACK_MODEL;
+  }
+  return isFableAllowed(name, config) ? 'fable' : FABLE_FALLBACK_MODEL;
 }
 
-/** Phase roles mapped to opus (build-side). */
+/** Phase roles mapped to the build-side tier (`phaseRoles.build`). */
 const BUILD_ROLES = new Set(['implementation', 'build', 'impl']);
-/** Phase roles mapped to opus (review-side; formerly sonnet pre-fable-migration). */
+/** Phase roles mapped to the review-side tier (`phaseRoles.review`). */
 const REVIEW_ROLES = new Set(['review', 'inspect', 'crosscheck']);
+
+/**
+ * Defaults for `agents.modelPolicy.phaseRoles`. Both sides opus = the
+ * pre-phaseRoles behavior, so a config without the key is byte-identical to
+ * the previous hardcoded mapping.
+ */
+const DEFAULT_PHASE_ROLES = Object.freeze({ build: 'opus', review: 'opus' });
 
 /**
  * True if `role` is a recognized phase role (build- or review-side).
@@ -328,22 +370,68 @@ function isKnownPhaseRole(role) {
 }
 
 /**
- * Map a team phase-role to a model, decoupled from any specific agent.
+ * Load `agents.modelPolicy.phaseRoles` merged over {@link DEFAULT_PHASE_ROLES}.
+ * A side is taken from config only when it is a known tier or role alias
+ * (resolved through the catalog); anything else keeps the default. Never throws.
  *
- * @param {string} role - 'implementation'|'build'|'impl' → opus;
- *   'review'|'inspect'|'crosscheck' → opus; unknown → DEFAULT_MODEL.
+ * @param {object} [config] - Explicit config; falls back to getConfig().
+ * @returns {{ build: string, review: string }} Tier keys (not aliases).
+ */
+function loadPhaseRoles(config) {
+  const src = resolveConfigSource(config);
+  const raw = src && src.agents && src.agents.modelPolicy && src.agents.modelPolicy.phaseRoles;
+  const out = { ...DEFAULT_PHASE_ROLES };
+  if (!raw || typeof raw !== 'object') return out;
+  for (const side of ['build', 'review']) {
+    const tier = typeof raw[side] === 'string' ? resolveRole(raw[side].trim()) : null;
+    if (tier !== null) out[side] = tier;
+  }
+  return out;
+}
+
+/**
+ * Ungated phase tier for a role: `phaseRoles.build` for build-side roles,
+ * `phaseRoles.review` for review-side roles, DEFAULT_MODEL otherwise.
+ *
+ * @param {string} role
+ * @param {object} [config]
+ * @returns {string}
+ */
+function resolvePhaseTierRaw(role, config) {
+  if (typeof role !== 'string') return DEFAULT_MODEL;
+  const phases = loadPhaseRoles(config);
+  if (BUILD_ROLES.has(role)) return phases.build;
+  if (REVIEW_ROLES.has(role)) return phases.review;
+  return DEFAULT_MODEL;
+}
+
+/**
+ * Map a team phase-role to a model, decoupled from any specific agent. The
+ * mapping is read from `artibot.config.json#/agents/modelPolicy/phaseRoles`
+ * (`{ build, review }`); a missing key defaults both sides to opus.
+ *
+ * **Called without an agent name, this function CANNOT see `fable.allowlist`
+ * or `FABLE_DENYLIST` — a fable side passes on the kill-switch alone (see
+ * {@link gateFableTier}). Do NOT use it to pick a teammate's tier:
+ * `resolveModelForPhase('review')` returns 'fable' even for `security-reviewer`
+ * or a non-allowlisted implementation agent. For teammate assignment always
+ * call `resolveModel(agentName, { role })`, which applies the same phaseRoles
+ * map AND the per-agent allowlist/denylist.** This agent-less form exists for
+ * "what does the review phase default to" questions (docs, dashboards); as of
+ * 2026-09-02 no lib/ or scripts/ code calls it.
+ *
+ * @param {string} role - 'implementation'|'build'|'impl' → phaseRoles.build;
+ *   'review'|'inspect'|'crosscheck' → phaseRoles.review; unknown → DEFAULT_MODEL.
+ * @param {object} [config] - Explicit config; falls back to getConfig().
  * @returns {string}
  *
  * @example
- * resolveModelForPhase('build'); // 'opus'
- * resolveModelForPhase('review'); // 'opus'
- * resolveModelForPhase('mystery'); // 'opus' (DEFAULT_MODEL)
+ * resolveModelForPhase('build', cfg); // 'opus'  (phaseRoles.build)
+ * resolveModelForPhase('review', cfg); // 'fable' (phaseRoles.review, gate on)
+ * resolveModelForPhase('mystery', cfg); // 'opus' (DEFAULT_MODEL)
  */
-export function resolveModelForPhase(role) {
-  if (typeof role !== 'string') return DEFAULT_MODEL;
-  if (BUILD_ROLES.has(role)) return 'opus';
-  if (REVIEW_ROLES.has(role)) return 'opus';
-  return DEFAULT_MODEL;
+export function resolveModelForPhase(role, config) {
+  return gateFableTier(resolvePhaseTierRaw(role, config), null, config);
 }
 
 /**

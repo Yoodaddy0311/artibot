@@ -7,6 +7,7 @@ import {
   FABLE_DENYLIST,
   getPolicyModel,
   isFableAllowed,
+  isFableGateEnabled,
   isKnownAgent,
   listAgentsByModel,
   loadModelPolicy,
@@ -20,12 +21,19 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const configPath = path.join(__dirname, '..', '..', 'artibot.config.json');
 const realConfig = JSON.parse(await readFile(configPath, 'utf8'));
 const policy = realConfig.agents.modelPolicy;
-// Shipped state (v4.41): single-tier opus fleet. The high bucket still DECLARES
-// model=fable, but `fable.enabled=false` is the kill-switch, so every agent's
-// EFFECTIVE tier is opus. Raw-bucket lookups (getPolicyModel/listAgentsByModel)
-// still report the declaration; resolveModel reports the gated reality.
+// Shipped state (2026-09-02, owner decision "design + review on fable"):
+// 2-tier fleet. The high bucket DECLARES model=fable for 21 agents, but only
+// the `fable.allowlist` (8 design/review agents) actually resolves to fable;
+// every other agent — including the 12 high-bucket implementation agents and
+// the denylisted security-reviewer — is demoted to opus by the gate.
+// Raw-bucket lookups (getPolicyModel/listAgentsByModel) still report the
+// declaration; resolveModel reports the gated reality.
 const highAgents = policy.high.agents;
 const mediumAgents = policy.medium.agents;
+const fableAllowlist = policy.fable.allowlist;
+/** Effective tier the shipped config must yield for `agent`. */
+const expectedShipped = (agent) =>
+  fableAllowlist.includes(agent) && !FABLE_DENYLIST.includes(agent) ? 'fable' : 'opus';
 
 describe('model-policy', () => {
   describe('normalizeAgentType()', () => {
@@ -123,8 +131,11 @@ describe('model-policy', () => {
 
   describe('resolveModel()', () => {
     it('resolves a bucket agent to its effective (gated) policy model', () => {
-      // high bucket declares fable, but the kill-switch demotes it to opus.
-      expect(resolveModel('planner', {}, realConfig)).toBe('opus');
+      // planner: high bucket + allowlisted → fable.
+      expect(resolveModel('planner', {}, realConfig)).toBe('fable');
+      // backend-developer: high bucket declares fable, NOT allowlisted → opus.
+      expect(resolveModel('backend-developer', {}, realConfig)).toBe('opus');
+      // doc-updater: medium bucket → opus.
       expect(resolveModel('doc-updater', {}, realConfig)).toBe('opus');
     });
 
@@ -139,28 +150,30 @@ describe('model-policy', () => {
       expect(resolveModel('nobody-here', {}, realConfig)).toBe(DEFAULT_MODEL);
     });
 
-    it('role review/inspect overrides bucket to opus', () => {
-      expect(resolveModel('planner', { role: 'review' }, realConfig)).toBe(
-        'opus',
-      );
-      expect(resolveModel('orchestrator', { role: 'inspect' }, realConfig)).toBe(
-        'opus',
-      );
+    it('role review/inspect/crosscheck maps to phaseRoles.review (fable) for an allowlisted agent', () => {
+      expect(resolveModel('planner', { role: 'review' }, realConfig)).toBe('fable');
+      expect(resolveModel('code-reviewer', { role: 'inspect' }, realConfig)).toBe('fable');
+      expect(resolveModel('spec-reviewer', { role: 'crosscheck' }, realConfig)).toBe('fable');
     });
 
-    it('role implementation/build overrides bucket to opus', () => {
-      expect(
-        resolveModel('doc-updater', { role: 'implementation' }, realConfig),
-      ).toBe('opus');
-      expect(resolveModel('seo-specialist', { role: 'build' }, realConfig)).toBe(
-        'opus',
-      );
+    it('role review still demotes a NON-allowlisted agent to opus (allowlist wins over phase)', () => {
+      // backend-developer is in the high bucket but not in fable.allowlist.
+      expect(resolveModel('backend-developer', { role: 'review' }, realConfig)).toBe('opus');
+      // doc-updater is medium bucket; a fable phase never promotes it.
+      expect(resolveModel('doc-updater', { role: 'review' }, realConfig)).toBe('opus');
+      // denylist beats both the phase map and the allowlist.
+      expect(resolveModel('security-reviewer', { role: 'review' }, realConfig)).toBe('opus');
+    });
+
+    it('role implementation/build maps to phaseRoles.build (opus) even for an allowlisted agent', () => {
+      expect(resolveModel('planner', { role: 'build' }, realConfig)).toBe('opus');
+      expect(resolveModel('doc-updater', { role: 'implementation' }, realConfig)).toBe('opus');
+      expect(resolveModel('seo-specialist', { role: 'impl' }, realConfig)).toBe('opus');
     });
 
     it('unknown role falls through to bucket resolution', () => {
-      expect(resolveModel('planner', { role: 'mystery' }, realConfig)).toBe(
-        'opus',
-      );
+      expect(resolveModel('planner', { role: 'mystery' }, realConfig)).toBe('fable');
+      expect(resolveModel('backend-developer', { role: 'mystery' }, realConfig)).toBe('opus');
     });
 
     it('advisor:true with advisorStrategy.enabled returns advisorModel', () => {
@@ -185,30 +198,80 @@ describe('model-policy', () => {
     });
 
     it('handles non-object opts safely', () => {
-      expect(resolveModel('planner', null, realConfig)).toBe('opus');
+      expect(resolveModel('planner', null, realConfig)).toBe('fable');
+      expect(resolveModel('backend-developer', null, realConfig)).toBe('opus');
     });
   });
 
   describe('resolveModelForPhase()', () => {
-    it('maps build-side roles to opus', () => {
+    /** Config with a custom phaseRoles block over the real fable gate. */
+    const withPhaseRoles = (phaseRoles, fable = policy.fable) => ({
+      agents: { modelPolicy: { ...policy, fable, phaseRoles } },
+    });
+
+    it('shipped config: build-side roles map to opus (phaseRoles.build)', () => {
+      expect(policy.phaseRoles.build).toBe('opus');
       for (const role of ['implementation', 'build', 'impl']) {
-        expect(resolveModelForPhase(role)).toBe('opus');
+        expect(resolveModelForPhase(role, realConfig)).toBe('opus');
       }
     });
 
-    it('maps review-side roles to opus', () => {
+    it('shipped config: review-side roles map to fable (phaseRoles.review, gate on)', () => {
+      expect(policy.phaseRoles.review).toBe('fable');
+      expect(policy.fable.enabled).toBe(true);
       for (const role of ['review', 'inspect', 'crosscheck']) {
-        expect(resolveModelForPhase(role)).toBe('opus');
+        expect(resolveModelForPhase(role, realConfig)).toBe('fable');
       }
+    });
+
+    it('a config WITHOUT phaseRoles keeps the legacy mapping (both sides opus)', () => {
+      const mp = { ...policy };
+      delete mp.phaseRoles;
+      const cfg = { agents: { modelPolicy: mp } };
+      for (const role of ['build', 'review', 'inspect']) {
+        expect(resolveModelForPhase(role, cfg)).toBe('opus');
+      }
+    });
+
+    it('phaseRoles.review=fable is demoted to opus when the kill-switch is off', () => {
+      const cfg = withPhaseRoles({ build: 'opus', review: 'fable' }, { enabled: false, allowlist: [] });
+      expect(resolveModelForPhase('review', cfg)).toBe('opus');
+    });
+
+    it('phaseRoles accepts catalog role aliases and ignores unknown values', () => {
+      const cfg = withPhaseRoles({ build: 'balanced', review: 'not-a-tier' });
+      expect(resolveModelForPhase('build', cfg)).toBe('sonnet');
+      // unknown → default for that side (opus)
+      expect(resolveModelForPhase('review', cfg)).toBe('opus');
+    });
+
+    it('tolerates a malformed phaseRoles block', () => {
+      expect(resolveModelForPhase('review', withPhaseRoles('nonsense'))).toBe('opus');
+      expect(resolveModelForPhase('review', withPhaseRoles({ review: 42 }))).toBe('opus');
     });
 
     it('maps unknown role to DEFAULT_MODEL', () => {
-      expect(resolveModelForPhase('something-else')).toBe(DEFAULT_MODEL);
+      expect(resolveModelForPhase('something-else', realConfig)).toBe(DEFAULT_MODEL);
     });
 
     it('maps non-string input to DEFAULT_MODEL', () => {
-      expect(resolveModelForPhase(null)).toBe(DEFAULT_MODEL);
-      expect(resolveModelForPhase(99)).toBe(DEFAULT_MODEL);
+      expect(resolveModelForPhase(null, realConfig)).toBe(DEFAULT_MODEL);
+      expect(resolveModelForPhase(99, realConfig)).toBe(DEFAULT_MODEL);
+    });
+
+    it('never throws without a config (falls back to the default mapping)', () => {
+      expect(() => resolveModelForPhase('review')).not.toThrow();
+      expect(resolveModelForPhase('build')).toBe('opus');
+    });
+  });
+
+  describe('isFableGateEnabled()', () => {
+    it('reflects the kill-switch only', () => {
+      expect(isFableGateEnabled(realConfig)).toBe(true);
+      expect(isFableGateEnabled({ agents: { modelPolicy: { fable: { enabled: false } } } })).toBe(false);
+      expect(isFableGateEnabled({ agents: { modelPolicy: {} } })).toBe(false);
+      expect(isFableGateEnabled({})).toBe(false);
+      expect(isFableGateEnabled(null)).toBe(false);
     });
   });
 
@@ -347,22 +410,39 @@ describe('model-policy', () => {
       }
     });
 
-    it('the shipped config keeps the kill-switch off — every agent is opus', () => {
-      // Guards the single-tier fleet decision: flipping fable.enabled back to
-      // true without re-syncing agent frontmatter must fail here first.
-      expect(policy.fable.enabled).toBe(false);
+    it('the shipped config routes exactly the 8 allowlisted design/review agents to fable', () => {
+      // Guards the owner's 2-tier decision (2026-09-02): design + review on
+      // fable, everything else on opus. Changing the allowlist or the gate
+      // without re-syncing agent frontmatter must fail here first.
+      expect(policy.fable.enabled).toBe(true);
+      expect([...fableAllowlist].sort()).toEqual(
+        [
+          'orchestrator', 'architect', 'planner', 'code-reviewer',
+          'spec-reviewer', 'quality-reviewer', 'llm-architect', 'repo-benchmarker',
+        ].sort(),
+      );
+      const fableHits = [...highAgents, ...mediumAgents].filter(
+        (a) => resolveModel(a, {}, realConfig) === 'fable',
+      );
+      expect(fableHits.sort()).toEqual([...fableAllowlist].sort());
       for (const agent of [...highAgents, ...mediumAgents]) {
-        expect(resolveModel(agent, {}, realConfig)).toBe('opus');
+        expect(resolveModel(agent, {}, realConfig)).toBe(expectedShipped(agent));
       }
     });
 
-    it('the allowlist is preserved so re-enabling restores the fable split', () => {
-      // The stored opt-in set stays intact while disabled; re-enabling routes
-      // every allowlisted (non-denylisted) agent back to fable.
-      const reenabled = withFable({ ...policy.fable, enabled: true });
-      for (const agent of highAgents) {
-        const expected = agent === 'security-reviewer' ? 'opus' : 'fable';
-        expect(resolveModel(agent, {}, reenabled)).toBe(expected);
+    it('a high-bucket agent outside the allowlist is demoted to opus (allowlist wins over bucket)', () => {
+      const demoted = highAgents.filter((a) => !fableAllowlist.includes(a));
+      expect(demoted.length).toBeGreaterThan(0);
+      for (const agent of demoted) {
+        expect(getPolicyModel(agent, realConfig)).toBe('fable'); // declaration
+        expect(resolveModel(agent, {}, realConfig)).toBe('opus'); // reality
+      }
+    });
+
+    it('flipping enabled=false demotes every agent to opus (single-tier revert path)', () => {
+      const reverted = withFable({ ...policy.fable, enabled: false });
+      for (const agent of [...highAgents, ...mediumAgents]) {
+        expect(resolveModel(agent, {}, reverted)).toBe('opus');
       }
     });
 
@@ -417,27 +497,49 @@ describe('model-policy', () => {
     it("'deep-async' demotes to opus when fable gate is closed", () => {
       const cfg = withFable({ enabled: false, allowlist: [] });
       expect(resolveModel('deep-async', {}, cfg)).toBe('opus');
+      expect(resolveModel('deep-async', { agentType: 'planner' }, cfg)).toBe('opus');
     });
 
-    it("'deep-async' resolves to fable only when that alias is opted in", () => {
-      const cfg = withFable({ enabled: true, allowlist: ['deep-async'] });
-      expect(resolveModel('deep-async', {}, cfg)).toBe('fable');
+    it("'deep-async' + opts.agentType is gated by the CALLING agent's allowlist/denylist", () => {
+      // The alias string is never an allowlist key; the caller is.
+      expect(resolveModel('deep-async', { agentType: 'planner' }, realConfig)).toBe('fable');
+      expect(resolveModel('deep-async', { agentType: 'artibot:architect' }, realConfig)).toBe('fable');
+      expect(resolveModel('deep-async', { agentType: 'backend-developer' }, realConfig)).toBe('opus');
+      expect(resolveModel('deep-async', { agentType: 'security-reviewer' }, realConfig)).toBe('opus');
+      expect(resolveModel('deep-async', { agentType: 'nobody-here' }, realConfig)).toBe('opus');
+    });
+
+    it("'deep-async' WITHOUT opts.agentType consults only the kill-switch (no agent to check)", () => {
+      // Documented limitation: allowlist/denylist cannot be applied without an
+      // agent identity, so gate ON → fable regardless of allowlist contents.
+      expect(resolveModel('deep-async', {}, withFable({ enabled: true, allowlist: [] }))).toBe('fable');
+      expect(resolveModel('deep-async', {}, realConfig)).toBe('fable');
+      expect(resolveModel('deep-async', {}, withFable({ enabled: false, allowlist: ['planner'] }))).toBe('opus');
     });
 
     it('alias input wins over opts.role/advisor (documented precedence step 0)', () => {
       const closed = withFable({ enabled: false, allowlist: [] });
-      // alias fast path ignores opts entirely — role 'review' would map to
-      // sonnet for an agent name, but 'deep-async' is a tier-family request.
+      // alias fast path ignores opts.role/advisor entirely — 'deep-async' is a
+      // tier-family request, not an agent name.
       expect(resolveModel('deep-async', { role: 'review' }, closed)).toBe('opus');
       expect(resolveModel('frontier', { role: 'review' }, closed)).toBe('opus');
       expect(resolveModel('balanced', { advisor: true }, closed)).toBe('sonnet');
+      // role is ignored even when the gate is open: build-side role does not
+      // pull a deep-async request down to opus for an allowlisted caller.
+      expect(resolveModel('deep-async', { role: 'build', agentType: 'planner' }, realConfig)).toBe('fable');
     });
 
-    it('raw fable tier still passes through the opt-in gate', () => {
-      const open = withFable({ enabled: true, allowlist: ['fable'] });
-      expect(resolveModel('fable', {}, open)).toBe('fable');
+    it('raw fable tier passes through the same gate as the alias', () => {
+      expect(resolveModel('fable', {}, withFable({ enabled: true, allowlist: [] }))).toBe('fable');
+      expect(resolveModel('fable', { agentType: 'backend-developer' }, realConfig)).toBe('opus');
+      expect(resolveModel('fable', { agentType: 'code-reviewer' }, realConfig)).toBe('fable');
       const closed = withFable({ enabled: false, allowlist: [] });
       expect(resolveModel('fable', {}, closed)).toBe('opus');
+    });
+
+    it('opts.agentType is ignored on the agent-name path (first argument wins)', () => {
+      expect(resolveModel('backend-developer', { agentType: 'planner' }, realConfig)).toBe('opus');
+      expect(resolveModel('planner', { agentType: 'backend-developer' }, realConfig)).toBe('fable');
     });
   });
 

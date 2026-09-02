@@ -66,7 +66,7 @@ const EXPECTED_SPLIT = Object.freeze({
  *   - `worktreeSetup` — `scripts/split/worktree-setup.mjs` 의 junction·복사·레인 env
  * 어느 키도 행동을 켜지 않고, 사용자 settings.json 의 cross-session 키와 무관하다(아래 스캔이 지킨다).
  */
-const ADDITIVE_OBJECT_KEYS = Object.freeze(['supervisor', 'dispatch', 'worktreeSetup']);
+const ADDITIVE_OBJECT_KEYS = Object.freeze(['supervisor', 'dispatch', 'worktreeSetup', 'contextLifecycle']);
 
 /** `split` 아래에 있어도 되는 키 — allowlist. `comment` 는 이 config 의 관례다. */
 const ALLOWED_KEYS = new Set([...Object.keys(EXPECTED_SPLIT), ...ADDITIVE_OBJECT_KEYS, 'comment']);

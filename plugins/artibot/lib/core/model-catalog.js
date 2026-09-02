@@ -90,7 +90,7 @@ export const MODELS = deepFreeze({
     constraints: [],
   },
   fable: {
-    id: 'claude-fable-5',
+    id: 'claude-fable-5-1',
     priceInPerMTok: 10,
     priceOutPerMTok: 50,
     tokenizerCoeff: 1.3,
@@ -128,7 +128,7 @@ export const ROLE_ALIASES = deepFreeze({
  * @returns {Readonly<object>|null} Frozen model spec, or null if unknown.
  *
  * @example
- * getModel('fable').id; // 'claude-fable-5'
+ * getModel('fable').id; // 'claude-fable-5-1'
  * getModel('mystery'); // null
  */
 export function getModel(tier) {

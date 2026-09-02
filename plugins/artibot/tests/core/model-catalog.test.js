@@ -31,7 +31,7 @@ describe('model-catalog', () => {
   describe('getModel()', () => {
     it('returns the full spec for a known tier', () => {
       expect(getModel('fable')).toMatchObject({
-        id: 'claude-fable-5',
+        id: 'claude-fable-5-1',
         priceInPerMTok: 10,
         priceOutPerMTok: 50,
         tokenizerCoeff: 1.3,

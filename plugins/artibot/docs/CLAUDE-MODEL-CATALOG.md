@@ -14,20 +14,18 @@
 
 | Tier | Claude API ID | Context | Max output | Price in/out (per MTok) | tokenizerCoeff | Thinking |
 |---|---|---|---|---|---|---|
-| `fable` ⭐ | `claude-fable-5` | 1M | 128K | $10 / $50 | 1.3 | always-on |
-| `opus` ✅ | `claude-opus-5` | 1M | 128K | $5 / $25 | 1 | adaptive |
+| `fable` ⭐ | `claude-fable-5-1` | 1M | 128K | $10 / $50 | 1.3 | always-on |
+| `opus` | `claude-opus-5` | 1M | 128K | $5 / $25 | 1 | adaptive |
 | `sonnet` | `claude-sonnet-4-6` | 1M | 64K | $3 / $15 | 1 | adaptive |
 | `haiku` | `claude-haiku-4-5` | 200K | 64K | $1 / $5 | 1 | adaptive |
 
-⭐ = most capable widely released model. ✅ = Artibot's shipped tier — all 28 agents route here.
+⭐ = most capable widely released model.
 
-`tokenizerCoeff` is tokens-per-content relative to the Opus baseline (1.0). A coefficient > 1.0 means the same text costs more tokens — re-baseline `max_tokens`/budgets accordingly.
-
-**Claude Opus 5 notes** (vs Opus 4.8, same $5/$25 pricing): thinking is **on by default** — omitting `thinking` runs adaptive, and `thinking: {type:"disabled"}` is rejected (400) at `effort` `xhigh`/`max`. Prompt-cache minimum drops to 512 tokens (from 1024). Rate limits are a **separate bucket** from the combined Opus 4.x pool.
+`tokenizerCoeff` is tokens-per-content relative to the Opus 4.8 baseline (1.0). A coefficient > 1.0 means the same text costs more tokens — re-baseline `max_tokens`/budgets accordingly.
 
 ---
 
-## Claude Fable 5 (`claude-fable-5`)
+## Claude Fable (`claude-fable-5-1`)
 
 Most capable widely released model. Behavioral constraints Artibot must honor when calling it directly:
 
@@ -48,13 +46,12 @@ Effective cost vs Opus 4.8: **~2.6×** (price 2× × tokenizer 1.3×).
 
 The Claude Code Agent/Task `model` enum now includes `fable` (`sonnet | opus | haiku | fable`) — Fable 5 **can** be a subagent tier.
 
-**Artibot policy, however, routes every agent to `opus` and keeps Fable 5 switched off:**
+**Artibot policy, however, keeps Fable as explicit opt-in (allowlist) only:**
 
-- Routing is **Claude Opus 5** (`opus` tier) for all 28 agents — a single-tier fleet.
-- `fable` is gated off at the source: `artibot.config.json#/agents/modelPolicy/fable/enabled=false`. With the switch off, every fable request — bucket, alias, or advisor — is demoted to `opus`.
-- Re-enabling requires flipping that flag AND re-syncing `agents/<name>.md` frontmatter (`scripts/ci/validate-model-policy.js` is the drift gate). The 20-agent allowlist is preserved for that path.
-- Security-class agents (denylist) must NOT route to `fable` even when it is re-enabled.
-- **Cost warning:** effective spend is ~2.6× Opus (price 2× × tokenizer 1.3×) — budget before opting in.
+- Default routing stays **Opus** (`opus` tier, the Opus 4.8 baseline in the cost math) for every agent that is not allowlisted — the implementation, test, and marketing agents.
+- `fable` is selectable only when an agent is explicitly allowlisted for it (`artibot.config.json#/agents/modelPolicy/fable.allowlist`, the design + review roles); it is never the default. The allowlist wins over the `high` bucket declaration — a high-bucket agent outside it still resolves to `opus`.
+- Security-class agents (denylist) must NOT route to `fable`.
+- **Cost warning:** effective spend is ~2.6× Opus 4.8 (price 2× × tokenizer 1.3×) — budget before opting in.
 
 Tier → role aliases live in `model-catalog.js#ROLE_ALIASES` (`frontier→opus`, `deep-async→fable`, `balanced→sonnet`, `fast→haiku`).
 

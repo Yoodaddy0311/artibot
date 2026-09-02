@@ -27,7 +27,7 @@ category: "optimization"
 risk: safe
 version: "1.0.0"
 lastVerified: "2026-06-08"
-source_hash: dcb49e69
+source_hash: e20e6b9d
 whenNotToUse: "Short sessions well within context limits where compaction is not imminent; do not invoke as a routine step — only apply when context size poses a real loss risk."
 ---
 
@@ -39,7 +39,7 @@ whenNotToUse: "Short sessions well within context limits where compaction is not
 - 다단계 작업 중 컴팩션으로 인한 정보 손실 방지
 - 컴팩션 후 작업 연속성 복구
 
-> Claude 4.7+/4.8 tokenizer는 동일 텍스트에 더 많은 토큰을 사용할 수 있어 5%p 조기 트리거 필요 (75% → 70%).
+> 현재 정책 티어의 토크나이저(4.7 세대에서 변경)는 동일 텍스트에 더 많은 토큰을 사용할 수 있어 5%p 조기 트리거 필요 (75% → 70%).
 
 ## Do NOT Use When
 - 프롬프트 캐시 구조 설계 (prompt-caching-strategy 참조)

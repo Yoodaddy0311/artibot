@@ -1,5 +1,5 @@
 ---
-description: (Artibot) Parallel team execution with cross-check — persistent team mode, leader delegates only, implementation on frontier 티어(model-policy 해석, xhigh effort 권장), review phases도 frontier 티어(fable 마이그레이션 이후 model-policy 해석)
+description: (Artibot) Parallel team execution with cross-check — persistent team mode, leader delegates only, implementation on the build tier(`phaseRoles.build`, model-policy 해석, xhigh effort 권장), review phases on the review tier(`phaseRoles.review` — 2026-09-02 2티어 정책: 구현 opus · 검수 fable)
 argument-hint: '[task] e.g. "이 기능 구현하고 테스트도 작성해줘"'
 allowed-tools: [Read, Glob, Grep, Bash, Agent, AskUserQuestion, SendMessage, TaskCreate, TaskUpdate, TaskList, TaskGet]
 toolset: team
@@ -7,7 +7,7 @@ toolset: team
 
 # /team
 
-Parallel team execution with mandatory cross-check and **persistent team mode**. The leader (YOU) delegates work and receives results ONLY — never does the work yourself. Implementation teammates (Phase 3) run on the **frontier 티어(model-policy 해석, xhigh effort 권장)** for maximum code quality. Review teammates (Phase 4 cross-check, Phase 4.5 inspection) also resolve to the **frontier 티어** via model-policy (fable 마이그레이션 이후 review 역할도 frontier로 상향). By default, the team **persists** after task completion and awaits the next assignment. Use `--one-shot` to revert to single-task-then-shutdown behavior.
+Parallel team execution with mandatory cross-check and **persistent team mode**. The leader (YOU) delegates work and receives results ONLY — never does the work yourself. Implementation teammates (Phase 3) run on the **build tier** (`phaseRoles.build` = opus, model-policy 해석, xhigh effort 권장). Review teammates (Phase 4 cross-check, Phase 4.5 inspection) resolve per agent via `resolveModel(agentName, { role: 'review' })` — the **review tier** (`phaseRoles.review` = fable) for the 8 allowlisted design/review agents, opus for everyone else and for `security-reviewer` (2026-09-02 2티어 정책, `### Teammate Rules & Model Policy` 참조). By default, the team **persists** after task completion and awaits the next assignment. Use `--one-shot` to revert to single-task-then-shutdown behavior.
 
 ## Arguments
 
@@ -44,12 +44,12 @@ When the prompt contains `[artibot:hint recommend=workflow]`, surface to the use
 
 ### Teammate Rules & Model Policy
 - **Implementation teammates (Phase 3)**: `frontier` 티어(model-policy 해석) — 코드 작성/구현은 최고 품질 필수
-- **Review teammates (Phase 4, 4.5)**: `frontier` 티어(model-policy 해석) — fable 마이그레이션 이후 review 역할도 frontier로 상향 (`resolveModelForPhase('review')`)
+- **Review teammates (Phase 4, 4.5)**: 팀원별 `resolveModel(agentName, { role: 'review' })` 해석 — config `agents.modelPolicy.phaseRoles` = `{ build: opus, review: fable }`(2026-09-02 오너 결정: 검수·설계 = fable, 구현 = opus)를 읽되, **그 에이전트 이름으로 `fable.allowlist`·`FABLE_DENYLIST` 를 대조**한다. 그래서 allowlist 8종(code-reviewer, spec-reviewer, quality-reviewer …)만 fable 이고, allowlist 밖 팀원(구현 에이전트)이나 `security-reviewer` 를 Phase 4 에 배정하면 review phase 여도 opus 다. 에이전트 이름 없는 `resolveModelForPhase('review')` 는 kill-switch 만 보므로 팀원 배정 근거로 쓰지 마라. 코드 상수가 아니라 config 가 정본
 - **ALL work in parallel** (no blockedBy unless truly sequential dependency)
 - **Each teammate works independently** on their assigned scope
-- After main work: cross-check another teammate's output (frontier 티어)
+- After main work: cross-check another teammate's output (review phase-role — allowlist 안의 검수 에이전트면 fable, 그 밖은 opus)
 
-> **Single source of truth:** the phase→model mapping above is a prose summary. The authoritative resolver is `lib/core/model-policy.js` (`resolveModelForPhase` / `resolveModel`), backed by `artibot.config.json#/agents/modelPolicy`. The SubagentStart hook (`scripts/hooks/subagent-handler.js`) calls `resolveModel` to flag spawns that drift from policy.
+> **Single source of truth:** the phase→model mapping above is a prose summary. The authoritative resolver is `lib/core/model-policy.js#resolveModel(agentName, { role })`, backed by `artibot.config.json#/agents/modelPolicy` (`resolveModelForPhase(role)` is the agent-less variant — it cannot see the allowlist/denylist, so never use it to pick a teammate's tier). The SubagentStart hook (`scripts/hooks/subagent-handler.js`) calls `resolveModel` to flag spawns that drift from policy.
 
 ### Token Conservation Rule (CRITICAL)
 - **작업 완료 후 팀원을 임의로 셧다운하지 마라** — 재소환 시 토큰이 발생한다
@@ -116,7 +116,7 @@ Break the user's request into independent work units:
 - Each unit should be independently completable
 - Choose the best specialist agent for each unit
 
-### Auto-Effort Pre-injection (4.8 Agentic)
+### Auto-Effort Pre-injection (현재 정책 티어 Agentic)
 
 Before spawning teammates, `scripts/hooks/runtime-prompt.js` has already written:
 - `runtime/current-effort.json` — 현재 커맨드의 effort level (max/xhigh/high/medium/low)
@@ -515,7 +515,7 @@ This runs the original flow: Phase 1 through 6, with automatic shutdown after re
 - Sequential execution when parallel is possible
 - Skipping cross-check phase
 - Using balanced/fast 티어 for **implementation** teammates (Phase 3 must be frontier 티어)
-- Using balanced/fast 티어 for review phases (Phase 4/4.5 — fable 마이그레이션 이후 review도 frontier 티어가 정책)
+- Using balanced/fast 티어 for review phases (Phase 4/4.5 — `phaseRoles.review` = fable 이 정책, 2026-09-02 오너 결정)
 - Single teammate for multi-domain work
 - Cross-checker reviewing their own work
 - **작업 완료 후 팀원을 임의로 셧다운** — 재소환 토큰 낭비 (idle 유지가 더 저렴)
@@ -525,7 +525,9 @@ This runs the original flow: Phase 1 through 6, with automatic shutdown after re
 
 ## Fable opt-in
 
-fable 게이트는 `artibot.config.json#agents.modelPolicy.fable.enabled`(현재 false) 와 `agents.modelPolicy.fable.allowlist`(에이전트 **이름** 목록) 로 제어한다. `deep-async` 역할 별칭은 fable 로 라우팅되지 **않는다** — `lib/core/model-policy.js#resolveModel` 이 별칭 문자열 자체를 에이전트 이름 allowlist 와 대조하므로 게이트를 켜도 opus 로 강등된다(실측 2026-09-02: 게이트 ON + allowlist 포함 config 로도 `resolveModel('deep-async')` → opus). fable 이 실효되려면 게이트 ON, 에이전트 이름이 allowlist 에 있음, 그 에이전트의 버킷/frontmatter 해석 티어가 fable 임 — 세 조건이 모두 필요하다(실효 비용 ~2.6× — model-catalog 참조).
+**정책 (2026-09-02 오너 결정)**: 2티어 — 설계·검수는 fable, 구현·마케팅은 opus. 게이트는 `artibot.config.json#agents.modelPolicy.fable.enabled` = true 와 `agents.modelPolicy.fable.allowlist`(에이전트 **이름** 8종: orchestrator, architect, planner, code-reviewer, spec-reviewer, quality-reviewer, llm-architect, repo-benchmarker) 로 제어한다. 구현 에이전트 12종은 opus 이며, `high` 버킷이 `model: fable` 을 선언해도 allowlist 밖이면 게이트가 opus 로 강등한다(의도된 동작). `security-reviewer` 는 `FABLE_DENYLIST` 로 영구 opus. phase-role 은 config `agents.modelPolicy.phaseRoles` = `{ build: opus, review: fable }` 가 정본이다.
+
+`deep-async`/`frontier` 별칭은 `resolveModel(alias, { agentType })` 로 **호출 에이전트를 넘겨야** allowlist·denylist 대조가 된다 — agentType 없이 부르면 게이트 ON 여부만 본다. 단일 진실원은 `lib/core/model-policy.js#resolveModel`, 되돌리기(단일 티어 opus)는 `fable.enabled=false` + 8개 frontmatter `model: opus` 이며 `scripts/ci/validate-model-policy.js` 가 드리프트 게이트다. 실효 비용 계수는 `lib/core/model-catalog.js#getCostFactor` 를 따른다(문서의 ~2.6× 는 미검증 수치).
 
 ## Next Steps
 

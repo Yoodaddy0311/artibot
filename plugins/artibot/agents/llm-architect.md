@@ -14,7 +14,7 @@ description: |
   프롬프트, 임베딩, AI 아키텍처, 벡터 DB
 
   Do NOT use for: traditional backend logic, CSS styling, database schema without AI context
-model: opus
+model: fable
 modelTier: premium
 tools:
   - Read
@@ -58,8 +58,8 @@ category: expert
 
 | Use Case | Recommended Model | Rationale |
 |-----------|-------------------|-----------|
-| Highest-capability reasoning (currently OFF) | claude-fable-5 | Most capable widely released model; 1M context + always-on thinking + effort. **~2.6× Opus effective cost (price 2× × tokenizer 1.3×); refusal→fallback contract applies.** In the subagent enum, but Artibot's fable gate ships `enabled=false` — no agent routes here today. |
-| Complex reasoning (default) | claude-opus-5 | Artibot의 유일한 라우팅 티어. 1M context + adaptive thinking(기본 ON) + xhigh/max effort. `thinking:{type:"disabled"}`는 effort `xhigh`/`max`에서 400 |
+| Highest-capability reasoning (design · review) | fable tier (`lib/core/model-catalog.js#MODELS.fable`) | Most capable widely released model; always-on thinking + effort. **~2.6× Opus effective cost is an unverified 5.0-era estimate; refusal→fallback contract applies.** Since 2026-09-02 Artibot's fable gate is `enabled=true` for the 8 design/review agents in `fable.allowlist` (this agent included); implementation agents stay on opus and `security-reviewer` is denylisted. |
+| Complex reasoning (implementation default) | opus tier (`MODELS.opus`) | 구현·마케팅 에이전트 20종의 라우팅 티어(`phaseRoles.build`). 1M context + adaptive thinking(기본 ON) + xhigh/max effort. `thinking:{type:"disabled"}`는 effort `xhigh`/`max`에서 400 |
 | General coding | claude-sonnet-4-6 | Best balance of speed and capability |
 | High-throughput | claude-sonnet-4-6 | Quality-first approach |
 | Embeddings | text-embedding-3-small | Cost-effective for most use cases |

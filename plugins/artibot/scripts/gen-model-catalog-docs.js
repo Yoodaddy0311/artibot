@@ -9,12 +9,16 @@
  * pathToFileURL() percent-encodes those chars and Node's import() on Windows
  * cannot resolve them, so we build the file:/// URL manually (see toFileUrl()).
  *
- * Usage: node scripts/gen-model-catalog-docs.js
+ * Usage:
+ *   node scripts/gen-model-catalog-docs.js          # render + overwrite the doc
+ *   node scripts/gen-model-catalog-docs.js --check  # render + compare only:
+ *       exit 0 when the tracked doc already equals the render, exit 1 when it
+ *       is stale or missing. Writes nothing — safe for CI / pre-commit.
  *
  * @module scripts/gen-model-catalog-docs
  */
 
-import { writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isMainEntry } from './hooks/_main-entry.js';
@@ -139,7 +143,9 @@ function renderDoc(catalog) {
 }
 
 /**
- * Render the Fable 5 constraints section.
+ * Render the Fable constraints section. The heading names the tier and the
+ * catalog ID only — no generation number is typed here — so a model bump in
+ * model-catalog.js flows into the doc without a hand edit in this file.
  *
  * @param {object} fable - The fable model spec.
  * @param {number} factor - Effective cost factor vs Opus 4.8.
@@ -147,7 +153,7 @@ function renderDoc(catalog) {
  */
 function fableSection(fable, factor) {
   return [
-    '## Claude Fable 5 (`claude-fable-5`)',
+    `## Claude Fable (\`${fable.id}\`)`,
     '',
     'Most capable widely released model. Behavioral constraints Artibot must ' +
       'honor when calling it directly:',
@@ -187,12 +193,17 @@ function routingSection(factor) {
     'The Claude Code Agent/Task `model` enum now includes `fable` ' +
       '(`sonnet | opus | haiku | fable`) — Fable 5 **can** be a subagent tier.',
     '',
-    '**Artibot policy, however, keeps Fable 5 as explicit opt-in (allowlist) ' +
+    '**Artibot policy, however, keeps Fable as explicit opt-in (allowlist) ' +
       'only:**',
     '',
-    '- Default routing stays **Opus 4.8** (`opus` tier) for all agents.',
+    '- Default routing stays **Opus** (`opus` tier, the Opus 4.8 baseline in ' +
+      'the cost math) for every agent that is not allowlisted — the ' +
+      'implementation, test, and marketing agents.',
     '- `fable` is selectable only when an agent is explicitly allowlisted for ' +
-      'it; it is never the default.',
+      'it (`artibot.config.json#/agents/modelPolicy/fable.allowlist`, the ' +
+      'design + review roles); it is never the default. The allowlist wins ' +
+      'over the `high` bucket declaration — a high-bucket agent outside it ' +
+      'still resolves to `opus`.',
     '- Security-class agents (denylist) must NOT route to `fable`.',
     `- **Cost warning:** effective spend is ~${factor}× Opus 4.8 ` +
       '(price 2× × tokenizer 1.3×) — budget before opting in.',
@@ -202,19 +213,65 @@ function routingSection(factor) {
   ];
 }
 
-async function main() {
+/**
+ * Compare a rendered doc against what is on disk WITHOUT writing. Line endings
+ * are normalized (git may check the tracked doc out with CRLF on Windows) so a
+ * pure EOL difference is not reported as drift.
+ *
+ * @param {string} rendered - Output of {@link renderDoc}.
+ * @param {string|null} onDisk - Current file content, or null when the file is missing.
+ * @returns {{ upToDate: boolean, reason: 'match'|'missing'|'stale' }}
+ */
+function checkDoc(rendered, onDisk) {
+  if (onDisk === null) return { upToDate: false, reason: 'missing' };
+  const norm = (s) => s.replace(/\r\n/g, '\n');
+  return norm(rendered) === norm(onDisk)
+    ? { upToDate: true, reason: 'match' }
+    : { upToDate: false, reason: 'stale' };
+}
+
+/**
+ * @param {string[]} argv - process.argv slice (flags only).
+ * @returns {Promise<number>} Process exit code.
+ */
+async function main(argv = process.argv.slice(2)) {
   const catalog = await import(toFileUrl(CATALOG_SRC));
   const md = renderDoc(catalog);
+
+  if (argv.includes('--check')) {
+    let onDisk = null;
+    try {
+      onDisk = await readFile(OUT_PATH, 'utf-8');
+    } catch {
+      // missing doc → checkDoc reports 'missing'
+    }
+    const { upToDate, reason } = checkDoc(md, onDisk);
+    if (upToDate) {
+      console.log(`[gen-model-catalog-docs] --check: up to date (${OUT_PATH})`);
+      return 0;
+    }
+    console.error(
+      `[gen-model-catalog-docs] --check: ${reason} — ${OUT_PATH} does not match ` +
+        'lib/core/model-catalog.js. Run `node scripts/gen-model-catalog-docs.js` and commit the result.',
+    );
+    return 1;
+  }
+
   await writeFile(OUT_PATH, md, 'utf-8');
   console.log(`[gen-model-catalog-docs] wrote ${OUT_PATH}`);
+  return 0;
 }
 
 const isDirectRun = isMainEntry(import.meta.url);
 if (isDirectRun) {
-  main().catch((err) => {
-    console.error('Fatal:', err.message);
-    process.exit(2);
-  });
+  main()
+    .then((code) => {
+      process.exitCode = code;
+    })
+    .catch((err) => {
+      console.error('Fatal:', err.message);
+      process.exit(2);
+    });
 }
 
-export { renderDoc, specTable, toFileUrl };
+export { checkDoc, renderDoc, specTable, toFileUrl };

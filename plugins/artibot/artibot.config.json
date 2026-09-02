@@ -58,30 +58,23 @@
         ]
       },
       "fable": {
-        "enabled": false,
+        "enabled": true,
         "allowlist": [
           "orchestrator",
           "architect",
-          "frontend-developer",
-          "backend-developer",
-          "code-reviewer",
-          "tdd-guide",
-          "database-reviewer",
-          "mcp-developer",
-          "typescript-pro",
           "planner",
-          "refactor-cleaner",
-          "build-error-resolver",
-          "llm-architect",
-          "devops-engineer",
-          "performance-engineer",
-          "e2e-runner",
-          "marketing-strategist",
-          "repo-benchmarker",
+          "code-reviewer",
+          "spec-reviewer",
           "quality-reviewer",
-          "spec-reviewer"
+          "llm-architect",
+          "repo-benchmarker"
         ],
-        "comment": "OFF by design — the operator chose a single-tier fleet: every agent runs on opus (claude-opus-5). enabled=false is the kill-switch, so ALL fable requests are demoted to opus regardless of this allowlist; the high bucket still DECLARES model=fable, but its effective tier is opus. The allowlist is kept as the pre-approved opt-in set: flipping enabled back to true restores the v4.38 fable split (20 agents; security-reviewer is EXCLUDED here AND hard-pinned to opus by the FABLE_DENYLIST in lib/core/model-policy.js because fable's refusal classifier false-positives on legit security work). Re-enabling requires re-syncing agents/<name>.md frontmatter model: fields — scripts/ci/validate-model-policy.js is the drift gate. Effective cost vs Opus baseline is computed by lib/core/model-catalog.js#getCostFactor('fable') — do not duplicate the number here."
+        "comment": "ON — 2-tier fleet by owner decision (2026-09-02): design + review roles run on fable, implementation/test/marketing roles stay on opus. enabled=true is the kill-switch; this allowlist (8 agents) is the ONLY set that resolves to fable. The high bucket still DECLARES model=fable for 21 agents, and that is intentional: the 12 high-bucket agents NOT in this allowlist (frontend-developer, backend-developer, tdd-guide, database-reviewer, mcp-developer, typescript-pro, refactor-cleaner, build-error-resolver, devops-engineer, performance-engineer, e2e-runner, marketing-strategist) are demoted to opus by the gate in lib/core/model-policy.js#gateFableTier — allowlist wins over bucket, by design. security-reviewer is in the high bucket, NOT in this allowlist, AND hard-pinned to opus by FABLE_DENYLIST (fable's refusal classifier false-positives on legit security work; 5.1 false-positive rate unmeasured — do not lift before measuring). Frontmatter contract: the 8 allowlisted agents/<name>.md carry model: fable, the other 20 carry model: opus — scripts/ci/validate-model-policy.js is the drift gate (gate-aware: it compares frontmatter against resolveModel, so a non-allowlisted high-bucket agent with model: opus is correct, not drift). Role aliases (deep-async) and phaseRoles below pass this gate only through resolveModel(alias|role, { agentType }) — without an agentType only enabled is consulted. Revert to single-tier opus: enabled=false + the 8 frontmatter lines back to opus. Effective cost vs Opus baseline is computed by lib/core/model-catalog.js#getCostFactor('fable') — do not duplicate the number here."
+      },
+      "phaseRoles": {
+        "build": "opus",
+        "review": "fable",
+        "comment": "Team phase-role → tier map read by lib/core/model-policy.js#resolveModelForPhase (build-side roles: implementation|build|impl; review-side roles: review|inspect|crosscheck). Values are tier keys or ROLE_ALIASES from lib/core/model-catalog.js; unknown values fall back to the default (opus/opus, the pre-phaseRoles behavior). A fable side still passes the fable gate: resolveModel(agent, { role }) checks that agent against fable.allowlist/FABLE_DENYLIST, so a non-allowlisted cross-checker lands on opus; bare resolveModelForPhase(role) only checks fable.enabled."
       }
     },
     "categories": {
@@ -819,6 +812,12 @@
       "template": null,
       "comment": "scripts/split/dispatch.mjs: budget fills the window prompt's {BUDGET} (--budget wins); template=null uses templates/split/PROMPT-TEMPLATE.md (--template wins). The script renders prompt.md into the worktree and prints a one-line pointer; it never sends a message."
     },
+    "contextLifecycle": {
+      "enabled": false,
+      "postCompactRehydrate": true,
+      "maxRehydrateBytes": 10240,
+      "comment": "vNext PR-CX01 (S0). enabled=false ships the PostCompact hook (scripts/hooks/post-compact-rehydrate.js) silent; set true to have it read the PreCompact snapshot (~/.claude/artibot-pre-compact.json), refuse it when cwd/branch differ, and report a <= maxRehydrateBytes bundle (lib/context/rehydration.js) via systemMessage + ~/.claude/artibot/post-compact/<stamp>.md. Observe-only: no automatic action, never blocks compaction. Live-verified 0 times as of 2026-09-02."
+    },
     "worktreeSetup": {
       "linkDirs": ["plugins/artibot/node_modules"],
       "copyFiles": [".env.local"],
@@ -1028,7 +1027,7 @@
         "medium": 32000,
         "low": 16000
       },
-      "comment": "v4.17.0: nativeApi true — Claude Opus 4.8 exposes effort as a first-class output_config.effort level (max/xhigh/high/medium/low, default high; no beta header). The Messages API caller now sets output_config:{effort} directly instead of relying on prompt injection alone; injectPrompt stays true as the cross-platform fallback for non-4.8 backends. budgetMap maps each native level to a recommended max_tokens; 'max' (200k) is the new ceiling tier for the deepest agentic runs (ultracode), xhigh/high/medium/low remain 1:1 with the native levels."
+      "comment": "What these keys actually do (measured 2026-09-02; the plugin has NO Messages API caller and never sets output_config.effort — `grep output_config lib scripts` finds only comments). injectPrompt=true: scripts/hooks/runtime-prompt.js prepends the prose directive `[artibot:effort level=X command=Y]` (from lib/cognitive/effort-policy.js via effort-resolver.js) to the user prompt on UserPromptSubmit and persists it to runtime/current-effort.json; lib/runtime/middleware/tasks.js then copies it into task.meta.effort/taskBudget so /team can prefix each teammate. nativeApi=true: runtime-prompt.js READS the host's native effort band (lib/cognitive/native-effort.js — env var / hook stdin) and lets it override the heuristic band before persisting; it never writes the host's effort. The directive is advisory text — the model's real effort is whatever the host applies (/effort, --effort, settings). budgetMap maps each level to a recommended max_tokens for the `[artibot:task-budget]` directive (lib/runtime/task-budget.js); 'max' (200k) is the ceiling tier for the deepest agentic runs (ultracode), xhigh/high/medium/low are 1:1 with the native level names."
     },
     "longContext": {
       "enabled": false,

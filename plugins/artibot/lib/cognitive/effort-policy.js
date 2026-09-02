@@ -11,15 +11,30 @@
  */
 
 // ---------------------------------------------------------------------------
-// Effort Level Policy (Claude Opus 4.8 native effort levels)
+// Effort Level Policy (native effort level vocabulary)
 // ---------------------------------------------------------------------------
 // Official guide: https://platform.claude.com/docs/ko/build-with-claude/effort
-// Native levels (4.8): max | xhigh | high | medium | low. Default is 'high' on
-// every surface; no beta header is required. The Messages API caller sets
-// output_config:{ effort } directly from EFFORT_POLICY (native API) and also
-// keeps the prompt-injected directive as a cross-platform fallback. 'xhigh' is
-// the recommended floor for agentic coding; 'max' is reserved for the deepest
-// multi-agent orchestration (ultracode: xhigh + always-on team workflows).
+// Native levels: max | xhigh | high | medium | low. Default is 'high' on every
+// surface; no beta header is required.
+//
+// HOW THIS MAPPING ACTUALLY REACHES THE MODEL (measured 2026-09-02 — the
+// plugin has NO Messages API caller and sets NO output_config.effort; grep
+// `output_config` in lib/ and scripts/ finds only comments):
+//   1. scripts/hooks/runtime-prompt.js resolves EFFORT_POLICY (via
+//      effort-resolver.js) on UserPromptSubmit and injects the prose directive
+//      `[artibot:effort level=X command=Y]` at the top of the user prompt, and
+//      persists it to runtime/current-effort.json.
+//   2. The host's own effort setting is READ, never written: when
+//      runtime.effort.nativeApi is true, runtime-prompt.js consults
+//      lib/cognitive/native-effort.js (host env var / hook stdin band) and lets
+//      that band override the heuristic one before persisting.
+//   3. lib/runtime/middleware/tasks.js copies the persisted band into
+//      task.meta.effort / task.meta.taskBudget so /team can prefix each
+//      teammate prompt with the same directive.
+// The directive is advisory text; the model's real effort is whatever the host
+// (Claude Code /effort, --effort, settings) applies. 'xhigh' is the recommended
+// floor for agentic coding; 'max' is reserved for the deepest multi-agent
+// orchestration (ultracode: xhigh + always-on team workflows).
 
 /** @type {Readonly<Record<string, 'max'|'xhigh'|'high'|'medium'|'low'>>} */
 export const EFFORT_POLICY = Object.freeze({

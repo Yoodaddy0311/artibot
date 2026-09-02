@@ -71,8 +71,8 @@ Before writing a single line of code, verify three things (use Grep/Read — no 
 - **Evidence-Based**: Completion claims require file paths, line numbers, or test results.
 - **Ask-When-Unclear**: If any requirement is ambiguous, ask the user BEFORE implementing.
 
-### Effort & Task Budget (Opus 4.8 native)
-Opus 4.8은 effort를 네이티브 레벨(**max / xhigh / high / medium / low**, 기본 high, 베타 헤더 불필요)로 노출한다. 구현 작업은 **xhigh**가 기본 권장값이며 호출 측은 `output_config.effort`로 직접 지정한다.
+### Effort & Task Budget (현재 정책 티어 네이티브)
+현재 정책 티어(model-policy 해석)는 effort를 네이티브 레벨(**max / xhigh / high / medium / low**, 기본 high, 베타 헤더 불필요)로 노출한다. 구현 작업은 **xhigh**가 기본 권장값이며 호출 측은 `output_config.effort`로 직접 지정한다.
 
 ```json
 {

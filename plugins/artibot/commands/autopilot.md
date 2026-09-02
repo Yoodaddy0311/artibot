@@ -332,7 +332,7 @@ if (pfInstr?.suppress) { /* warnings: state.preflightWarnings에 누적 + 계속
 
 #### Phase 3 — CROSS_CHECK
 - 팀원 간 원형 검증 (A→B→C→A). 추가로 `Agent(subagent_type="artibot:spec-reviewer")` 소환.
-  <!-- model: model-policy 해석 — 역할 frontier 티어 (fable 마이그레이션 이후 review/docs 역할도 frontier) -->
+  <!-- model: model-policy 해석 — review phase-role (2026-09-02 오너 결정: `phaseRoles.review` = fable; spec-reviewer 는 allowlist 8종에 포함) -->
 
 #### Phase 4 — VERIFY
 - `Bash("npm run ci")` 실행. 실패 시 `engine.classifyFailure(error)` → `build-error-resolver` 자동 소환. **3회 재시도 후에도 실패하면 PAUSED**.
@@ -360,7 +360,7 @@ if (pfInstr?.suppress) { /* warnings: state.preflightWarnings에 누적 + 계속
 
 #### Phase 6 — REPORT
 - `Agent(subagent_type="artibot:doc-updater", prompt="[Autopilot Phase 6] reports/AUTOPILOT/{sessionId}.md 작성. 템플릿: PRD §13.5 (요약/PRD링크/Phase표/커밋SHA/Cross-check/검증/개선/미래/큐/Next)\n\n{보고 계약}")`
-  <!-- model: model-policy 해석 — 역할 frontier 티어 (fable 마이그레이션 이후 review/docs 역할도 frontier) -->
+  <!-- model: model-policy 해석 — doc-updater 는 allowlist 밖 → opus (2026-09-02 오너 결정: 구현·문서 = opus, 설계·검수 = fable) -->
 - `engine.notifyCompletion(sessionId)` 호출 (`--no-notify` 시 skip, `night` 모드는 PushNotification 차단).
 
 ### Step 4 — PAUSED Handling
@@ -380,9 +380,9 @@ Phase 6 완료 후:
 - pre-flight 경고가 있었다면 `engine.renderPreflightSummary(state.preflightResult)` 출력 (참고용).
 - abort/완료 시 `engine.releaseAllForSession(sessionId)`로 잔존 lock 일괄 해제.
 
-## Fable-mode (조건부 — config fable.enabled 시)
+## Fable-mode (조건부 — config fable.enabled 시, 2026-09-02 오너 결정으로 ON)
 
-이 섹션은 `artibot.config.json#agents.modelPolicy.fable.enabled`(현재 false) 가 true 이고 `agents.modelPolicy.fable.allowlist` 에 든 에이전트가 존재할 때만 적용되는 부록이다. model-policy fable 게이트를 통과한 에이전트에게만 아래 원칙·스니펫·휴리스틱이 적용된다. 게이트 미통과 에이전트(보안 계열 등 denylist)에는 적용하지 않는다.
+이 섹션은 `artibot.config.json#agents.modelPolicy.fable.enabled` 가 true 이고 `agents.modelPolicy.fable.allowlist` 에 든 에이전트가 존재할 때만 적용되는 부록이다 (2026-09-02 오너 결정: 게이트 ON, allowlist 는 설계·검수 8종 — orchestrator/architect/planner/code-reviewer/spec-reviewer/quality-reviewer/llm-architect/repo-benchmarker; 구현 12종은 opus). model-policy fable 게이트를 통과한 에이전트에게만 아래 원칙·스니펫·휴리스틱이 적용된다. 게이트 미통과 에이전트(보안 계열 등 denylist)에는 적용하지 않는다.
 
 ### de-prescribe 원칙
 

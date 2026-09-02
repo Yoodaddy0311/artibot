@@ -22,7 +22,7 @@ agents:
   - "performance-engineer"
 tokens: "~2K"
 category: "tooling"
-source_hash: 479513f3
+source_hash: 9b99ded5
 whenNotToUse: "Short sessions with low context usage where compression would degrade output clarity; do not apply when context is under 60% and no explicit --uc flag is set."
 ---
 
@@ -35,7 +35,7 @@ whenNotToUse: "Short sessions with low context usage where compression would deg
 - Output exceeds token budget for complexity level
 - Emergency compression needed (context >95%)
 
-> Claude 4.7+/4.8 신 토크나이저는 최대 1.35배 토큰을 소비하므로 기존 임계값에 1.35 안전 버퍼 필요 (75% → 60%).
+> 현재 정책 티어의 신 토크나이저(4.7 세대에서 변경)는 최대 1.35배 토큰을 소비하므로 기존 임계값에 1.35 안전 버퍼 필요 (75% → 60%).
 
 ## Core Guidance
 

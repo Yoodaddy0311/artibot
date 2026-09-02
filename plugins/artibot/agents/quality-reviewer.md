@@ -15,7 +15,7 @@ description: |
 
   Do NOT use for: spec compliance (use spec-reviewer), security audits (use security-reviewer),
   writing code, implementation
-model: opus
+model: fable
 modelTier: premium
 tools:
   - Read

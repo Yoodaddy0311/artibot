@@ -8,8 +8,26 @@
  * @module tests/ci/validate-model-policy
  */
 
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { findModelPolicyDrift } from '../../scripts/ci/validate-model-policy.js';
+import {
+  collectPolicyAgents,
+  findModelPolicyDrift,
+  readAgentModels,
+} from '../../scripts/ci/validate-model-policy.js';
+import { getPolicyModel, resolveModel } from '../../lib/core/model-policy.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const PLUGIN_ROOT = path.resolve(__dirname, '..', '..');
+const realConfig = JSON.parse(
+  await readFile(path.join(PLUGIN_ROOT, 'artibot.config.json'), 'utf8'),
+);
+
+/** The gate-aware lookup the CLI uses (mirrors validate-model-policy.js#main). */
+const gateAwareLookup = (config) => (name) =>
+  getPolicyModel(name, config) === null ? null : resolveModel(name, {}, config);
 
 /**
  * Build a `resolvePolicyModel` lookup from a plain { name: model } map.
@@ -104,5 +122,60 @@ describe('findModelPolicyDrift', () => {
     expect(warnings).toHaveLength(1); // rogue
     expect(errors.some((e) => /planner/.test(e) && /mismatch/.test(e))).toBe(true);
     expect(errors.some((e) => /ghost/.test(e) && /missing file/.test(e))).toBe(true);
+  });
+});
+
+describe('gate-aware drift check against the shipped repo (2-tier fleet)', () => {
+  const agentsDir = path.join(PLUGIN_ROOT, 'agents');
+  const agentModels = readAgentModels(agentsDir);
+  const policyAgents = collectPolicyAgents(realConfig);
+  const allowlist = realConfig.agents.modelPolicy.fable.allowlist;
+
+  it('the live agents/ tree has zero drift against the live config', () => {
+    const { errors, warnings } = findModelPolicyDrift({
+      agentModels,
+      resolvePolicyModel: gateAwareLookup(realConfig),
+      policyAgents,
+    });
+    expect(errors).toEqual([]);
+    expect(warnings).toEqual([]);
+  });
+
+  it('frontmatter model: fable is exactly the fable.allowlist (8) and nothing else', () => {
+    const fableFiles = agentModels.filter((a) => a.model === 'fable').map((a) => a.name).sort();
+    expect(fableFiles).toEqual([...allowlist].sort());
+    expect(fableFiles).toHaveLength(8);
+  });
+
+  it('a non-allowlisted high-bucket agent with model: opus is NOT drift (allowlist wins over bucket)', () => {
+    // backend-developer: high bucket declares fable, gate demotes to opus, file says opus.
+    const { errors } = findModelPolicyDrift({
+      agentModels: [{ name: 'backend-developer', model: 'opus' }],
+      resolvePolicyModel: gateAwareLookup(realConfig),
+      policyAgents: ['backend-developer'],
+    });
+    expect(errors).toEqual([]);
+  });
+
+  it('a non-allowlisted high-bucket agent with model: fable IS drift', () => {
+    const { errors } = findModelPolicyDrift({
+      agentModels: [{ name: 'backend-developer', model: 'fable' }],
+      resolvePolicyModel: gateAwareLookup(realConfig),
+      policyAgents: ['backend-developer'],
+    });
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatch(/model "fable" ≠ policy "opus"/);
+  });
+
+  it('flipping the kill-switch off without re-syncing the 8 frontmatter lines is caught as drift', () => {
+    const reverted = structuredClone(realConfig);
+    reverted.agents.modelPolicy.fable.enabled = false;
+    const { errors } = findModelPolicyDrift({
+      agentModels,
+      resolvePolicyModel: gateAwareLookup(reverted),
+      policyAgents,
+    });
+    expect(errors).toHaveLength(allowlist.length);
+    for (const e of errors) expect(e).toMatch(/model "fable" ≠ policy "opus"/);
   });
 });
