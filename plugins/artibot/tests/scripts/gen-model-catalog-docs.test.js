@@ -6,9 +6,38 @@
 import { describe, expect, it } from 'vitest';
 
 import * as catalog from '../../lib/core/model-catalog.js';
-import { renderDoc, specTable, toFileUrl } from '../../scripts/gen-model-catalog-docs.js';
+import { checkDoc, renderDoc, specTable, toFileUrl } from '../../scripts/gen-model-catalog-docs.js';
 
 describe('gen-model-catalog-docs', () => {
+  describe('checkDoc (--check mode, write-free)', () => {
+    const rendered = renderDoc(catalog);
+
+    it('reports match when disk equals the render', () => {
+      expect(checkDoc(rendered, rendered)).toEqual({ upToDate: true, reason: 'match' });
+    });
+
+    it('treats a CRLF checkout of the same content as up to date', () => {
+      expect(checkDoc(rendered, rendered.replace(/\n/g, '\r\n')).upToDate).toBe(true);
+    });
+
+    it('reports stale when content differs', () => {
+      expect(checkDoc(rendered, rendered + '\nextra')).toEqual({ upToDate: false, reason: 'stale' });
+    });
+
+    it('reports missing when the doc is absent', () => {
+      expect(checkDoc(rendered, null)).toEqual({ upToDate: false, reason: 'missing' });
+    });
+  });
+
+  describe('fable heading', () => {
+    it('derives the fable heading from the catalog id, with no hand-typed generation number', () => {
+      const doc = renderDoc(catalog);
+      const id = catalog.getModel('fable').id;
+      expect(doc).toContain(`## Claude Fable (\`${id}\`)`);
+      expect(doc).not.toMatch(/^## Claude Fable \d/m);
+    });
+  });
+
   describe('toFileUrl', () => {
     it('builds file:/// URLs for Windows drive paths without percent-encoding', () => {
       const url = toFileUrl('C:\\Users\\nowhe\\바탕 화면\\AI\\artibot\\lib\\x.js');
