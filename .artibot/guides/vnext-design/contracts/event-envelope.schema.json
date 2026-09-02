@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "artibot://contracts/supervisor-event-v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version","eventId","ts","runId","type","source"],
+  "properties": {
+    "version": {"const": 1},
+    "eventId": {"type": "string", "minLength": 1},
+    "ts": {"type": "string", "format": "date-time"},
+    "runId": {"type": "string", "minLength": 1},
+    "laneId": {"type": ["string","null"]},
+    "type": {"type": "string", "pattern": "^[a-z][a-z0-9-]+$"},
+    "source": {"enum": ["human","supervisor","worker","reviewer","hook","git","gate","scheduler"]},
+    "actionId": {"type": ["string","null"]},
+    "evidenceRef": {"type": ["string","null"]},
+    "data": {}
+  }
+}

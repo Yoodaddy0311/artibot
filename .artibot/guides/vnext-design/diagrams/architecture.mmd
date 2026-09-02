@@ -1,0 +1,21 @@
+flowchart TD
+    U[User Goal] --> PL[Planner]
+    PL --> DG[Dependency/Conflict Graph]
+    DG --> SV[Supervisor]
+    SV --> SC[Adaptive Scheduler]
+    SV --> CM[Context Manager]
+    SV --> BG[Budget Governor]
+    SV --> RE[Recovery Engine]
+    SV --> AP[Approval Guard]
+    SV --> RL[Run Ledger]
+    SC --> A[Worker A / Worktree]
+    SC --> B[Worker B / Worktree]
+    SC --> C[Worker C / Worktree]
+    A --> RV[Reviewer Pool]
+    B --> RV
+    C --> RV
+    RV --> GT[Combined Gate]
+    GT --> ST[Staging/E2E]
+    ST --> PR[Promotion]
+    AP --> H[Human Exception Queue]
+    H --> SV

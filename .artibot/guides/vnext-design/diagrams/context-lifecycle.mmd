@@ -1,0 +1,13 @@
+flowchart LR
+    W[Worker Running] --> P{Context Pressure}
+    P -->|low| W
+    P -->|medium| CK[Checkpoint]
+    CK --> W
+    P -->|native compact| PRE[PreCompact Snapshot]
+    PRE --> COMP[Compact]
+    COMP --> POST[PostCompact Rehydrate]
+    POST --> W
+    P -->|high at safe boundary| ROT[Fresh Session Rotation]
+    ROT --> CK2[Restore Latest Checkpoint]
+    CK2 --> VERIFY[Verify Worktree/Branch/Head]
+    VERIFY --> W

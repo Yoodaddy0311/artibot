@@ -1,0 +1,43 @@
+{
+  "split": {
+    "maxWindows": 4,
+    "minStems": 2,
+    "supervisor": {
+      "enabled": false,
+      "mode": "observe",
+      "pollSeconds": 30,
+      "staleHeartbeatSeconds": 900,
+      "autonomy": "S0"
+    },
+    "contextLifecycle": {
+      "enabled": false,
+      "postCompactRehydrate": true,
+      "pressureAdvisoryThreshold": 0.75,
+      "rotationThreshold": 0.9,
+      "maxRehydrateBytes": 10240,
+      "autoRotate": false
+    },
+    "scheduler": {
+      "mode": "existing-plan",
+      "minConcurrency": 1,
+      "hardMaxWindows": 4,
+      "targetCpuPct": 70,
+      "maxConcurrentHeavy": 2,
+      "workStealing": false
+    },
+    "budget": {
+      "enforce": false,
+      "maxWallMinutes": 240,
+      "maxTotalTokens": 2500000,
+      "maxRetriesPerLane": 2,
+      "maxConcurrentHighEffort": 2,
+      "onSoftLimit": "warn",
+      "onHardLimit": "pause"
+    },
+    "backgroundWorkers": {
+      "enabled": false,
+      "provider": "manual",
+      "permissionEscalation": "foreground"
+    }
+  }
+}

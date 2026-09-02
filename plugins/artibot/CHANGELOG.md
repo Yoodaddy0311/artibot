@@ -85,6 +85,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `.artibot/HANDOFF.md` 만 읽음을 명시하고 아카이브 예시 파일명을 lib 규약으로 정정.
   `commands/split.md` 는 300줄 래칫에 맞춰 절차를 `skills/split/references/operations.md` 로 분리했다.
 
+- **"Opus 4.8" 잔존 문구 13건 → 티어 어휘**(실측 15건 중 산술값·평점 예시 2건 유지): commands/{implement,sc,team,ultraplan,autopilot}.md,
+  skills/{compaction-survival,strategic-compact,token-efficiency,visual-validation}/SKILL.md(해시 갱신), agents/{code-reviewer,orchestrator}.md
+  산문, CLAUDE.md. `commands/team.md` "Fable opt-in" 절·frontmatter description·ultraplan 렌즈 주석·autopilot Fable-mode 조건을
+  2티어 정책으로 재작성. `agents/llm-architect.md` 모델 표의 "(currently OFF)"·하드코딩 ID 제거.
+
+### Changed (모델 정책 — 오너 결정 2026-09-02 "설계·검수만 Fable ON")
+- **2티어 전환** — `artibot.config.json#/agents/modelPolicy/fable.enabled=true`, `fable.allowlist` 20종 → **8종**(orchestrator, architect,
+  planner, code-reviewer, spec-reviewer, quality-reviewer, llm-architect, repo-benchmarker). `high` 버킷의 `model: fable` 선언은
+  유지하되 allowlist 밖 12종(구현·테스트·마케팅)은 게이트가 opus 로 강등하는 것이 **의도**임을 `fable.comment` 에 명시.
+  `security-reviewer` 는 `FABLE_DENYLIST` 영구 opus(변경 없음). 해당 8개 `agents/<name>.md` frontmatter `model: opus → fable`
+  (실측 분포 fable 8 / opus 20, `node scripts/ci/validate-model-policy.js` 드리프트 0). 되돌리기: `enabled=false` + 8줄 opus.
+  근거: Ontology queue.md 의 오너 9/1 정책 "구현·테스트 서브에이전트 = opus, 검수·설계 = fable". 비용 계수 2.6× 는 5.0 기준 미검증 추정치.
+- **`agents.modelPolicy.phaseRoles { build: opus, review: fable }` 신설** — `lib/core/model-policy.js#resolveModelForPhase(role, config)` 가
+  상수 대신 config 를 읽는다. 키가 없으면 build/review 모두 opus(기존 동작과 동일). `resolveModel(agent, { role })` 은 같은 매핑을 타되
+  **에이전트 이름으로 allowlist/denylist 를 대조**하므로 allowlist 밖 크로스체커는 review phase 에서도 opus.
+- **alias 게이트 수정** — `resolveModel('deep-async'|'frontier'…, { agentType })`: 호출 에이전트를 넘기면 그 이름으로 게이트·denylist
+  대조, 넘기지 않으면 `fable.enabled` 만 본다(JSDoc 명시). 이전에는 alias 문자열 자체를 allowlist 키로 대조해 `deep-async` 가 게이트 ON
+  에서도 opus 였다 — 옛 테스트가 그 계약을 핀하고 있었고 프로덕션 호출처는 0건(전부 에이전트 이름으로 호출). `isFableGateEnabled(config)`
+  export 추가.
+- **문서 경로의 denylist 우회 차단** — `commands/team.md`(:10·:47·:50·:52)·`commands/ultraplan.md`(:96) 가 review 팀원 해석을 에이전트 이름
+  없는 `resolveModelForPhase('review')` 로 안내하고 있었다(그 경로는 kill-switch 만 보고 allowlist·denylist 를 못 봐 `security-reviewer` 가
+  fable 이 될 수 있었다 — 교차 검수 발견). 팀원별 `resolveModel(agentName, { role: 'review' })` 로 정정하고 JSDoc 에 경고.
+  `scripts/gen-model-catalog-docs.js` 는 헤딩을 카탈로그 ID 에서만 파생하고 `--check`(쓰기 0, exit 0/1)를 갖는다.
+- `scripts/split/lane-state.mjs` 는 `lanes[limb]` 의 손으로 넣은 추가 키(`pr`·`inspector` 등)를 보존한다(교차 검수 발견, 테스트 49건).
+- **모델 카탈로그** — fable ID `claude-fable-5` → `claude-fable-5-1`(가격·계수 불변). `scripts/gen-model-catalog-docs.js` 의 fable 절 제목이
+  카탈로그 ID 에서 파생, "for all agents" 를 "allowlist 밖 에이전트" 로 정정, `docs/CLAUDE-MODEL-CATALOG.md` 재생성.
+- **effort 경로 사실화** — `artibot.config.json#/runtime/effort.comment` 와 `lib/cognitive/effort-policy.js` 헤더의 "Messages API caller 가
+  `output_config.effort` 를 직접 설정" 주장을 실측 경로(`runtime-prompt.js` 프로즈 디렉티브 → `runtime/current-effort.json` →
+  `tasks.js` task.meta; `nativeApi=true` 는 호스트 effort 밴드를 **읽기만**)로 교체. 그 API 를 호출하는 코드는 리포에 0건이었다.
+  프론트매터 `effort:` 는 추가하지 않음(호스트 적용 여부 미확인).
+
+### Added (컨텍스트 수명주기 — vNext PR-CX01, S0)
+- **PostCompact 재주입** — `hooks/hooks.json` 에 `PostCompact` 훅 신설 → `scripts/hooks/post-compact-rehydrate.js`. 지금까지 write-only
+  였던 PreCompact 스냅샷(`~/.claude/artibot-pre-compact.json`)을 읽어 현재 cwd·브랜치와 대조하고(불일치·미상이면 스냅샷 유래 섹션을
+  주입하지 않고 사유를 적음 — 수락기준 "wrong branch/worktree restore refused"), 최신 HANDOFF 포인터·`/split` run.json·레인 brief 와
+  함께 ≤10KB 번들(`lib/context/rehydration.js`, 순수·결정적·우선순위 절단 표시)을 `systemMessage` 로 보고하고
+  `~/.claude/artibot/post-compact/<stamp>.md` + `~/.claude/artibot-post-compact.json` 에 `compact_summary` 원문과 함께 저장한다.
+  게이트 `split.contextLifecycle.enabled`(**기본 false** — 켜기 전 라이브 compact 0회). per claude-code-guide: PostCompact 는
+  `additionalContext` 미지원·stdout 비주입이라 컨텍스트 주입의 문서화된 경로는 `SessionStart(matcher "compact")` 이며 그 등록은
+  하지 않았다(옵션 문서화). `pre-compact.js` 스냅샷에 `gitState.head`·`sessionId` additive, 요약 로직 무변경.
+  `hooks/dispatch-table.json` 에 PreCompact 와 같은 `single-hook` 슬롯, `tests/hooks-schema-fingerprint.txt` 갱신(의도된 스키마 변경),
+  `tests/dispatcher/dispatch-table.test.js` 슬롯 7 → 8. `eslint.config.js` L2 에 `lib/context/**` 등록.
+  교차 검수 반영: 번들 캡은 footer 실측 후 재예산 → 경고 제거 → 본문 하드컷 → 최후 캡컷 순으로 **최종 바이트 ≤ maxRehydrateBytes 를
+  코드로 보장**(refused+깊은 경로 @10240 → 9062B, @200 → 정확히 200B); 거부된 스냅샷은 경로조차 나열하지 않고 "읽지 마라" 1줄만;
+  게이트 OFF 면 stderr 0바이트.
+- **`scripts/split/lane-state.mjs`** — `run.json.lanes[limb]` 의 **첫 writer**(blindspot 2026-09-02: reader 만 있어 모든 레인이 영원히
+  `unknown`, A4 오탐 억제·watch ops 열이 채워질 수 없었다). `<limb> <state> [--window] [--note]` 로 `{ state, since, window?, note? }`
+  원자 갱신, `--list` 로 표. state 는 `LANE_OPS_STATES` 밖이면 refuse, limb 는 plan.json 밖이면 refuse. 다른 run.json 키·다른 레인 항목
+  보존, 같은 state 재선언은 `since` 유지.
+- `templates/split/PROMPT-TEMPLATE.md` §0 정찰 검증 선행(A10): 인용 재확인·교정 보고·행번호에 측정일 병기.
+- vNext 설계 패키지를 추적 경로 `.artibot/guides/vnext-design/` 로 복사(원본 `docs/` 는 gitignore) + `ADDENDUM-2026-09-02.md`:
+  수락기준 #1·#2("트레일러 계약 변경 0")는 **의도된 개정**(first-parent 최신 트레일러 결정 — 종전 규칙이 거짓 완료를 냈다)이며 회귀가
+  아니라는 기록, PR_PLAN 14개 구축 현황(SV01·SV02·UX01 구현 / DR01·DR02 부분 / CX01 구현(기본 OFF) / 나머지 미착수), 설계와 다른 결정
+  5건(되돌릴 것 0), "존재 ≠ 작동" 2건(supervisor 이벤트 emitter 0 · 실런 픽스처 1/3), A6·A7 의 설계 공백.
+
 ### Fixed
 - **`/save` 가 git 추적 아카이브를 덮어쓰고 지웠다** — `lib/handoff/handoff-store.js` 는 "최신 아카이브" 를
   mtime 으로 골랐다. 새 `git worktree`·`merge`·`pull` 직후에는 체크아웃된 추적 파일이 전부 신선한 mtime
@@ -128,15 +183,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   것은 이 1개뿐이다.
 
 ### Tests
-- **`/split` 1단계 회귀 273건 신규** — `tests/handoff/handoff-store.test.js` 9 → 26(실제 `git init` 임시
-  리포로 추적 보호·fail-closed·스탬프 정렬; 수정 전 코드로 돌리면 ` M`/` D` 가 그대로 재현),
-  `tests/firewall/split-completion-evidence.test.js` 14 → 20(머지 함정 4시나리오 + 픽스처 자기검증 — 평범한
-  범위에 남의 done 이 **실제로** 들어 있음을 먼저 단언), `tests/git/limb-landing-check.test.js` 25,
-  `tests/supervisor/*` 76(리듀서 결정성·미지·터미널·텔레메트리 매핑, 스토어 재구성 바이트 동일, 실런 픽스처
-  `reports/SPLIT/split-8f83d7.events.ndjson` 리플레이, 프로브 분류), `tests/git/split-brief.test.js` 26,
-  `tests/git/split-run-file.test.js` 18, `tests/scripts/split-tools.test.js` 41(restore-blob 은
-  `core.autocrlf=true` 임시 리포에서 바이트 == blob), `tests/hooks/subagent-spawn-ledger.test.js` 13(자식
-  프로세스 통합, HOME 샌드박스).
+- **`/split` 1단계 + Fable 2티어 + PostCompact 회귀 테스트** (파일별 실측, `npx vitest run --reporter=json <파일>` 2026-09-02 12:0x KST):
+  `tests/handoff/handoff-store.test.js` 9 → 27(실제 `git init` 임시 리포로 추적 보호·fail-closed·조상 `.git`·스탬프 정렬; 수정 전
+  코드로 돌리면 ` M`/` D` 가 그대로 재현), `tests/firewall/split-completion-evidence.test.js` 13 → 20(머지 함정 4시나리오 +
+  픽스처 자기검증 — 평범한 범위에 남의 done 이 **실제로** 들어 있음을 먼저 단언 + 커밋 내 마지막 트레일러 규칙),
+  `tests/git/limb-landing-check.test.js` 26, `tests/supervisor/*` 76(8파일: 리듀서 결정성·미지·터미널·텔레메트리 매핑,
+  스토어 재구성 바이트 동일, 실런 픽스처 `reports/SPLIT/split-8f83d7.events.ndjson` 리플레이, 프로브 분류, watch e2e),
+  `tests/git/split-brief.test.js` 26, `tests/git/split-run-file.test.js` 18, `tests/scripts/split-tools.test.js` 48
+  (restore-blob 은 `core.autocrlf=true` 임시 리포에서 바이트 == blob; lane-state 7건 포함), `tests/hooks/subagent-spawn-ledger.test.js`
+  13(자식 프로세스 통합, HOME 샌드박스), `tests/context/rehydration.test.js` 13, `tests/hooks/post-compact-rehydrate.test.js` 9
+  (임시 git 리포 + 임시 HOME 자식 프로세스), `tests/core/model-policy.test.js` 70(2티어 shipped·phaseRoles·alias+agentType·kill-switch),
+  `tests/ci/validate-model-policy.test.js` 11(실 `agents/` 트리 드리프트 0, fable 파일 집합 == allowlist 8, `enabled=false` 되돌리기
+  시 8건 검출), `tests/handoff/handoff-builder.test.js` 27.
 - **trail 격리 firewall 게이트 신규** — `tests/firewall/trail-sandbox-required.test.js`.
   decision-trail writer 에 도달하는 테스트 파일은 등록된 격리 수단을 반드시 갖는다.
   `useTrailSandbox` · 자체 임시 root 고정 · `vi.mock` 모듈 무력화 · STATE-RESTORE 저장·복원

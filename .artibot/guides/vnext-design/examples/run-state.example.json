@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "runId": "split-demo01",
+  "state": "EXECUTING",
+  "createdAt": "2026-09-01T08:00:00Z",
+  "updatedAt": "2026-09-01T08:22:00Z",
+  "base": "abc1234",
+  "lanes": {
+    "work-ui": {
+      "laneId": "work-ui",
+      "state": "RUNNING",
+      "attempt": 1,
+      "ownedPaths": ["src/apps/work/**"],
+      "dependsOn": [],
+      "worktree": ".claude/worktrees/split-demo-work-ui",
+      "branch": "worktree-split-demo-work-ui",
+      "head": "def4567",
+      "workerId": "session-77",
+      "lastHeartbeatAt": "2026-09-01T08:21:00Z",
+      "checkpointSeq": 2,
+      "reviewVerdict": null
+    }
+  },
+  "exceptionCount": 0,
+  "budget": {
+    "maxWallMinutes": 240,
+    "maxTotalTokens": 2500000,
+    "maxCostUsd": null,
+    "maxRetriesPerLane": 2,
+    "maxConcurrentHighEffort": 2,
+    "onSoftLimit": "warn",
+    "onHardLimit": "pause"
+  }
+}

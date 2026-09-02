@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "artibot://contracts/lane-state-v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["laneId", "state", "attempt", "ownedPaths"],
+  "properties": {
+    "laneId": {"type": "string", "minLength": 1},
+    "state": {"enum": ["PENDING","READY","CLAIMED","RUNNING","CHECKPOINTING","WAITING_INPUT","REVIEW_REQUIRED","FIXING","DONE","FAILED_RECOVERABLE","FAILED_TERMINAL","ABORTED"]},
+    "attempt": {"type": "integer", "minimum": 0},
+    "ownedPaths": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "dependsOn": {"type": "array", "items": {"type": "string"}, "default": []},
+    "worktree": {"type": ["string","null"]},
+    "branch": {"type": ["string","null"]},
+    "head": {"type": ["string","null"]},
+    "workerId": {"type": ["string","null"]},
+    "lastHeartbeatAt": {"type": ["string","null"], "format": "date-time"},
+    "checkpointSeq": {"type": "integer", "minimum": 0, "default": 0},
+    "reviewVerdict": {"enum": [null,"PENDING","APPROVED","CHANGES_REQUESTED"]}
+  }
+}

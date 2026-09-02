@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "artibot://contracts/checkpoint-v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version","runId","laneId","seq","createdAt","phase","branch","dirty","resumeInstruction"],
+  "properties": {
+    "version": {"const": 1},
+    "runId": {"type": "string"},
+    "laneId": {"type": "string"},
+    "seq": {"type": "integer", "minimum": 1},
+    "createdAt": {"type": "string", "format": "date-time"},
+    "phase": {"type": "string"},
+    "worktree": {"type": ["string","null"]},
+    "branch": {"type": "string"},
+    "head": {"type": ["string","null"]},
+    "dirty": {"type": "boolean"},
+    "completedTaskIds": {"type": "array", "items": {"type": "string"}, "default": []},
+    "pendingTaskIds": {"type": "array", "items": {"type": "string"}, "default": []},
+    "decisions": {"type": "array", "items": {"type": "string"}, "default": []},
+    "resumeInstruction": {"type": "string", "maxLength": 4096}
+  }
+}

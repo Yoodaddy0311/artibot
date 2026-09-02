@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "artibot://contracts/run-state-v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "runId", "state", "createdAt", "updatedAt", "lanes"],
+  "properties": {
+    "version": {"const": 1},
+    "runId": {"type": "string", "minLength": 1},
+    "state": {"enum": ["CREATED","PLANNED","PROVISIONING","READY","EXECUTING","REVIEWING","INTEGRATING","GATING","STAGING","E2E","PROMOTING","COMPLETED","BLOCKED","PAUSED","FAILED_RECOVERABLE","FAILED_TERMINAL","CANCELLED"]},
+    "createdAt": {"type": "string", "format": "date-time"},
+    "updatedAt": {"type": "string", "format": "date-time"},
+    "base": {"type": ["string","null"]},
+    "lanes": {"type": "object", "additionalProperties": {"$ref": "lane-state.schema.json"}},
+    "exceptionCount": {"type": "integer", "minimum": 0, "default": 0},
+    "budget": {"$ref": "budget-policy.schema.json"}
+  }
+}

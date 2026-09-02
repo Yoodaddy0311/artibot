@@ -1,0 +1,22 @@
+stateDiagram-v2
+    [*] --> CREATED
+    CREATED --> PLANNED
+    PLANNED --> PROVISIONING
+    PROVISIONING --> READY
+    READY --> EXECUTING
+    EXECUTING --> REVIEWING
+    REVIEWING --> EXECUTING: changes requested
+    REVIEWING --> INTEGRATING: approved
+    INTEGRATING --> GATING
+    GATING --> EXECUTING: owning lane fix
+    GATING --> STAGING: pass
+    STAGING --> E2E
+    E2E --> PROMOTING
+    PROMOTING --> COMPLETED
+    EXECUTING --> FAILED_RECOVERABLE
+    FAILED_RECOVERABLE --> EXECUTING: recovered
+    EXECUTING --> BLOCKED
+    BLOCKED --> EXECUTING: human resolved
+    BLOCKED --> CANCELLED
+    COMPLETED --> [*]
+    CANCELLED --> [*]

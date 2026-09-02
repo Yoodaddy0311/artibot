@@ -752,7 +752,7 @@ daily (work recap/retrospective), team (parallel orchestration), session-worklog
 
 ## Hooks
 
-25 hook registrations across 15 event types.
+26 hook registrations across 15 event types.
 
 <details>
 <summary>Hook Event Table</summary>
@@ -870,7 +870,7 @@ plugins/artibot/
 +-- hooks/
 |   +-- hooks.json               # Hook event mappings
 +-- scripts/
-|   +-- hooks/                   # 68 hook scripts (ESM)
+|   +-- hooks/                   # 69 hook scripts (ESM)
 |   +-- ci/                      # 20 CI scripts
 |   +-- evals/                   # Runtime eval suite
 |   +-- utils/

@@ -1,0 +1,28 @@
+sequenceDiagram
+    participant U as User
+    participant S as Supervisor
+    participant W as Worker
+    participant R as Reviewer
+    participant G as Gate
+    U->>S: Goal + autonomy policy
+    S->>S: Plan/DAG/Budget
+    S->>W: Dispatch lane + brief
+    loop execution
+      W-->>S: heartbeat/progress
+      alt context pressure
+        S->>W: checkpoint/rotate
+      end
+    end
+    W-->>S: result-ready + git evidence
+    S->>R: independent review
+    R-->>S: approve / changes
+    alt changes
+      S->>W: structured feedback
+    else approve
+      S->>G: combined gates
+      G-->>S: pass/fail
+    end
+    alt human exception
+      S->>U: one structured decision
+      U->>S: resolve
+    end

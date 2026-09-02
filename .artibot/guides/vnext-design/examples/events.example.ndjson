@@ -1,0 +1,4 @@
+{"version":1,"eventId":"e1","ts":"2026-09-01T08:00:00Z","runId":"split-demo01","laneId":null,"type":"run-created","source":"supervisor","actionId":null,"evidenceRef":null,"data":{}}
+{"version":1,"eventId":"e2","ts":"2026-09-01T08:02:00Z","runId":"split-demo01","laneId":"work-ui","type":"lane-state-changed","source":"scheduler","actionId":"dispatch:work-ui:1","evidenceRef":"plan.json#work-ui","data":{"from":"READY","to":"RUNNING"}}
+{"version":1,"eventId":"e3","ts":"2026-09-01T08:20:00Z","runId":"split-demo01","laneId":"work-ui","type":"context-pressure","source":"hook","actionId":null,"evidenceRef":null,"data":{"score":0.82}}
+{"version":1,"eventId":"e4","ts":"2026-09-01T08:21:00Z","runId":"split-demo01","laneId":"work-ui","type":"checkpoint-written","source":"worker","actionId":"checkpoint:work-ui:2","evidenceRef":"checkpoints/work-ui/2.json","data":{"seq":2}}

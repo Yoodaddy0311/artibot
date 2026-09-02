@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "artibot://contracts/budget-policy-v1",
+  "type": ["object","null"],
+  "additionalProperties": false,
+  "properties": {
+    "maxWallMinutes": {"type": ["number","null"], "minimum": 1},
+    "maxTotalTokens": {"type": ["integer","null"], "minimum": 1},
+    "maxCostUsd": {"type": ["number","null"], "minimum": 0},
+    "maxRetriesPerLane": {"type": "integer", "minimum": 0, "maximum": 10, "default": 2},
+    "maxConcurrentHighEffort": {"type": "integer", "minimum": 1, "default": 2},
+    "onSoftLimit": {"enum": ["warn","degrade","pause"]},
+    "onHardLimit": {"enum": ["pause","fail"]}
+  }
+}
