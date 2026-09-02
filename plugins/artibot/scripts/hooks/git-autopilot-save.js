@@ -12,6 +12,7 @@ import { execSync } from 'node:child_process';
 import { atomicWriteSync, parseJSON, readStdin, resolveConfigPath } from '../utils/index.js';
 import { createErrorHandler } from '../../lib/core/hook-utils.js';
 import { isAutopilotAllowed } from '../../lib/autopilot/repo-identity.js';
+import { captureIndexTree, restoreIndexTree } from '../../lib/git/index-snapshot.js';
 import { gitPath } from '../../lib/git/git-dir.js';
 import { isMainEntry } from './_main-entry.js';
 
@@ -178,6 +179,20 @@ function hasMeaningfulChanges(cwd) {
  * @returns {boolean} true if commit succeeded
  */
 function createWipCommit(cwd, opts = {}) {
+  // Snapshot the index BEFORE staging. A pre-commit hook rejecting this commit
+  // is the designed-normal path (bypassPreCommitHooks defaults to false), and
+  // without this the `add -A` sweep stayed in the index for whatever the
+  // operator committed next. `write-tree`/`read-tree` and not `git reset`:
+  // reset would also unstage what the operator had staged by hand.
+  // Args are literals and a git-produced sha, so the string form is safe.
+  const runGit = (args) => execSync(`git ${args.join(' ')}`, {
+    cwd,
+    encoding: 'utf-8',
+    stdio: ['ignore', 'pipe', 'ignore'],
+    timeout: 2000,
+    windowsHide: true,
+  });
+  const indexTree = captureIndexTree(runGit);
   try {
     execSync('git add -A', { cwd, stdio: 'ignore', timeout: 2000, windowsHide: true });
     const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
@@ -191,6 +206,7 @@ function createWipCommit(cwd, opts = {}) {
     });
     return true;
   } catch {
+    restoreIndexTree(runGit, indexTree);
     return false;
   }
 }

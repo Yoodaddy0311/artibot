@@ -104,10 +104,18 @@ const MECHANISMS = [
   {
     id: 'state-restore-contract',
     why: 'the file must run against the real root, so it saves and restores the '
-      + 'trail instead — see tests/hooks/runtime-prompt-effort-order.test.js:27-42, '
-      + 'whose module header explains why a temp root cannot work there '
-      + '(lib/cognitive/router.js stops resolving). Verified 2026-08-28: running '
-      + 'that suite leaves the live trail md5 unchanged.',
+      + 'trail instead. REGISTERED BUT UNUSED as of 2026-08-30: its only holder '
+      + 'was tests/hooks/runtime-prompt-effort-order.test.js, which moved to a '
+      + 'self-pinned root once the claim behind it ("a temp root cannot resolve '
+      + 'lib/cognitive/router.js") was retested and found to hold only for a BARE '
+      + 'temp root — linking lib/ in, as runtime-prompt-effort-inject.test.js '
+      + 'already did, resolves it. Restoring is also strictly weaker than '
+      + 'sandboxing: rewriting the original bytes still stamps a fresh mtime, '
+      + 'which produced a months-long mtime/updatedAt contradiction that cost an '
+      + 'investigation on 2026-08-29. Prefer a sandbox. Retiring this entry '
+      + 'entirely is the tighter option and is left as a deliberate decision for '
+      + 'the gate owner — note that it matches on a COMMENT string, so while it '
+      + 'stays registered any file can claim it without actually restoring.',
     test: (src) => /STATE-RESTORE/.test(src) && /decision-trail\.json/.test(src),
   },
 ];

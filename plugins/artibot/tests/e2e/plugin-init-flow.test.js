@@ -93,10 +93,19 @@ describe('E2E: Plugin Initialization Flow', () => {
     beforeEach(async () => {
       vi.resetModules();
 
-      // Mock platform to use the real plugin root
+      // Mock platform to use the real plugin root.
+      //
+      // A factory replaces the module wholesale, so every export the module
+      // under test reaches for has to appear here — `config.js#resolveArtibotDir`
+      // compares the recorded state-dir home against the live one through
+      // `sameDirPath`, and omitting it throws at import rather than at the
+      // assertion. Add to this list whenever `config.js` gains a platform
+      // dependency.
       vi.doMock('../../lib/core/platform.js', () => ({
         getPluginRoot: vi.fn(() => PLUGIN_ROOT),
         getHomeDir: vi.fn(() => '/fake/home'),
+        normalizeDirPath: vi.fn((p) => (typeof p === 'string' && p.trim() ? p.trim() : null)),
+        sameDirPath: vi.fn((a, b) => Boolean(a) && Boolean(b) && a === b),
       }));
 
       const configModule = await import('../../lib/core/config.js');

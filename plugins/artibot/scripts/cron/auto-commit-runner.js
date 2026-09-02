@@ -38,6 +38,7 @@ import { fileURLToPath } from 'node:url';
 import { readJsonFile } from '../../lib/core/file.js';
 import { getPluginRoot } from '../../lib/core/platform.js';
 import { recordDecision } from '../../lib/core/decision-trail.js';
+import { captureIndexTreeAsync, restoreIndexTreeAsync } from '../../lib/git/index-snapshot.js';
 import {
   classifyDiff,
   isWithinRiskCeiling,
@@ -224,11 +225,25 @@ async function snapshotState({ cwd, guard, ac }) {
  * @returns {Promise<{ok: boolean, reason?: string}>}
  */
 async function executeCommit({ cwd, gitOps, classification }) {
+  // Snapshot the index before staging so a rejected commit does not leave
+  // `add -A`'s sweep behind for the operator's next commit. Unlike the hook
+  // variants this path also returns early on a failed `add`, which is why the
+  // restore is wired to every non-ok exit rather than to a single catch.
+  // Bound to `gitOps` rather than the module-level runGit so an injected
+  // gitOps (tests) is honoured on this path too.
+  const gitForIndex = (args) => gitOps.runGit(args, cwd);
+  const indexTree = await captureIndexTreeAsync(gitForIndex);
   const add = await gitOps.runGit(['add', '-A'], cwd);
-  if (add.code !== 0) return { ok: false, reason: 'git add failed' };
+  if (add.code !== 0) {
+    await restoreIndexTreeAsync(gitForIndex, indexTree);
+    return { ok: false, reason: 'git add failed' };
+  }
   const msg = `chore(artibot-auto): ${classification.level}-risk auto-commit [skip ci]`;
   const commit = await gitOps.runGit(['commit', '-m', msg], cwd);
-  if (commit.code !== 0) return { ok: false, reason: 'git commit failed' };
+  if (commit.code !== 0) {
+    await restoreIndexTreeAsync(gitForIndex, indexTree);
+    return { ok: false, reason: 'git commit failed' };
+  }
   return { ok: true };
 }
 

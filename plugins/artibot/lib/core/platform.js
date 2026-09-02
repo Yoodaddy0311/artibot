@@ -133,6 +133,65 @@ export function getHomeDir() {
 }
 
 /**
+ * Bring a directory path to a single comparable, stat-able form.
+ *
+ * The reason this exists is that the same directory reaches us spelled several
+ * ways. Git Bash — the shell this repo is developed in — hands a child
+ * `/c/Users/x` where Windows means `C:\Users\x`, and Node cannot stat the first
+ * form: `existsSync` reports "no" for a directory that is plainly there.
+ * Measured 2026-08-30, that alone silenced the `sensitive-file` guard for the
+ * Artibot repo itself, because the repo-detection check could not see its own
+ * markers. Trailing separators and drive-letter case are the same class of
+ * difference and are folded out by `path.resolve`.
+ *
+ * @param {unknown} input - Candidate path.
+ * @returns {string|null} Absolute normalized path, or null when the input is
+ *   not a usable path string.
+ */
+export function normalizeDirPath(input) {
+  if (typeof input !== 'string') return null;
+  const trimmed = input.trim();
+  if (!trimmed) return null;
+
+  let candidate = trimmed;
+  if (process.platform === 'win32') {
+    // `/c/Users/x` (and `/C/Users/x`) → `C:\Users\x`. Anchored so a genuine
+    // POSIX root path on a POSIX host is never rewritten.
+    const msys = /^\/([A-Za-z])(?:\/(.*))?$/.exec(candidate);
+    if (msys) {
+      const rest = (msys[2] || '').split('/').join(path.sep);
+      candidate = `${msys[1].toUpperCase()}:${path.sep}${rest}`;
+    }
+  }
+
+  try {
+    return path.resolve(candidate);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Compare two directory paths for identity, tolerating spelling differences.
+ *
+ * Case-insensitive on Windows, where `C:\Users` and `c:\users` are one
+ * directory; exact elsewhere, where they are two. Returns false when either
+ * side cannot be normalized — an unusable path is not evidence of a match.
+ *
+ * @param {unknown} a
+ * @param {unknown} b
+ * @returns {boolean}
+ */
+export function sameDirPath(a, b) {
+  const na = normalizeDirPath(a);
+  const nb = normalizeDirPath(b);
+  if (!na || !nb) return false;
+  return process.platform === 'win32'
+    ? na.toLowerCase() === nb.toLowerCase()
+    : na === nb;
+}
+
+/**
  * Resolve a path relative to the plugin root directory.
  * Uses `path.join` for cross-platform (Windows/Unix) compatibility.
  *

@@ -116,28 +116,158 @@ and consumed by nothing, so the trail sat empty in production and nobody
 noticed. A store nobody reads cannot report its own outage.
 
 1. **Decision trail** — import `getDecisionStats` from `lib/core/decision-trail.js`
-   and read `totalDecisions`, `last24h`, and `bySubsystem`.
-2. **Decision events** — list `runtime/decisions/*.events.ndjson`
-   (`lib/observability/decision-events.js`). Count lines written in the last 24h
-   and note the newest `ts` across files.
-3. **Absence check (S3)** — read `runtime/current-effort.json`. Its `updatedAt`
-   is written by `persistEffortMeta` on every slash-command prompt
-   (`scripts/hooks/runtime-prompt.js:62-74`), so it dates the last prompt that
-   should have produced a trail entry. Warn when that timestamp is within 24h
-   but step 1 reports `last24h === 0` — that pairing means recording is broken,
-   not merely idle. Absence of records is only meaningful against evidence that
-   something should have been recorded.
-4. Report: trail entries (total / last 24h), decision-event lines (last 24h),
-   newest record timestamp, and any S3 warning.
+   and read `totalDecisions`, `last24h`, and `bySubsystem`. It is `async`
+   (`decision-trail.js#getDecisionStats`) — **await it**. Reading the returned
+   promise's properties directly yields `undefined` for every field, and
+   `undefined === 0` is false, so S3's conjunct would silently never fire again
+   while the step still printed a plausible-looking line.
+   It never throws: a missing or unparseable trail is caught and returned as
+   `{ totalDecisions: 0, bySubsystem: {}, byAction: {}, last24h: 0 }` (verified
+   2026-08-30 against an empty plugin root), so a zero here does not distinguish
+   "no trail file" from "trail present but empty" — step 5 reports the file's
+   existence separately for that reason.
+2. **Decision events** — resolve `runtime/decisions/`
+   (`lib/observability/decision-events.js#getDecisionStoreDir`) and record which
+   of three states it is in: `absent` (no directory) / `empty` (directory but no
+   `*.events.ndjson`) / `populated`. `getDecisionStoreDir` only joins a path, so
+   the directory comes into existence on the first write — `absent` and `empty`
+   therefore mean the same thing here, "nothing was ever recorded under this
+   root", and neither is the more reassuring of the two.
 
-Status for this check:
-- **pass** — records exist in the last 24h, or no slash command fired in that window
-- **warn** — zero records but a slash command fired within 24h (S3), or the stores are missing entirely
-- **fail** — reserved for an unreadable/corrupt store; a merely empty one is a warning, not a failure
+   Then count, SEPARATELY, the files and lines whose `sessionId` does NOT begin
+   with `diag-`. Only those are evidence of live firing. A diagnostic run writes
+   byte-identical lines through the same code path, so counting them would let a
+   single verification run flip this store out of every "nothing was recorded"
+   condition below. Measured 2026-08-30, that is exactly what happened: the
+   store's first and only file was `diag-installed-verify-01.events.ndjson`,
+   written to confirm the wiring fix.
 
-Do not treat a green result as proof that every decision is recorded. Only two
-decision points are wired (routing classification and workflow plan); this check
-reports whether the recording path is alive, not whether its coverage is complete.
+   For lines that qualify, note how many fall in the last 24h and the newest
+   `ts` across files.
+3. **Wiring probe (S4)** — read the two call sites in the INSTALLED tree:
+   `lib/runtime/middleware/router.js` and `lib/runtime/middleware/tasks.js`.
+   Each must hand `resolveDecisionRunId` an object that actually carries the hook
+   payload — `state.input`, which holds `hookData`. Warn when either passes
+   `state.context` instead: that object carries neither `hookData` nor
+   `sessionId`, so every call resolves to `null`, is counted as `skipped`, and
+   nothing is ever written. This warns regardless of every timestamp below,
+   because it is a structural fact rather than an inference from absence.
+   The probe exists because /doctor reads the INSTALLED plugin while the test
+   suite runs against the repo. Measured 2026-08-30: the repo was fixed and fully
+   green while the install still carried the broken call sites, and no
+   timestamp-based step could tell the two apart.
+4. **Absence check (S3)** — absence of records means nothing unless something
+   should have been recorded, so judge it against an activity timestamp. Take the
+   NEWEST of the following, skipping any that cannot be read:
+   - `runtime/current-effort.json` — the `updatedAt` field, written by
+     `persistEffortMeta` (`scripts/hooks/runtime-prompt.js#persistEffortMeta`) on
+     every slash-command prompt.
+   - `runtime/current-effort.json` — the file's own mtime.
+   - `runtime/decision-trail.json` — `metadata.lastUpdated`.
+
+   Use the newest rather than any single source. Measured 2026-08-29, that file's
+   mtime (2026-08-23) and its `updatedAt` (2026-07-10) disagreed by 44 days even
+   though the sole writer stamps both in one call, so the mtime is moving without
+   the writer. The mechanism was traced to test fixtures rewriting the file's
+   original bytes in `afterEach` — see the S3 entry under "What this check cannot
+   see" for how far that tracing goes. Either way at least one source is
+   unreliable, so take the maximum: that fails toward "there was activity", which
+   can only make this check warn more readily, never less.
+
+   Warn when that newest timestamp is within 24h AND step 1 reports
+   `last24h === 0` AND step 2 counts zero non-`diag-` event lines in the same
+   window.
+5. Report: the resolved plugin root (absolute), whether
+   `runtime/decision-trail.json` exists, trail entries (total / last 24h), the
+   `runtime/decisions/` state, its total and non-`diag-` line counts for the last
+   24h, the newest record timestamp, which activity source was newest, which
+   activity sources were missing, and any S3 / S4 / S5 / S6 warning.
+
+Status for this check — **first matching row wins**:
+
+| Condition | Status |
+|---|---|
+| A store exists but cannot be read or parsed | **fail** |
+| S4 — either call site passes `state.context` | **warn** |
+| S5 — no `*.events.ndjson` with a non-`diag-` `sessionId` has ever been written under this root | **warn** |
+| S6 — live records exist but `runtime/decision-trail.json` does not | **warn** |
+| S3 — activity within 24h, but zero trail entries and zero non-`diag-` event lines in it | **warn** |
+| Otherwise | **pass** |
+
+S5 covers `absent`, `empty`, and diag-only in one condition, and it is NOT
+conditioned on S4 passing: a store with no live record is worth saying out loud
+whether or not the wiring reads correctly, because wiring that looks right and
+has still never fired is the more interesting of the two. When S5 fires, say in
+the report whether `runtime/decision-trail.json` also exists — S5 plus a missing
+trail means this root holds no recording evidence of any kind, which is as much a
+sign of reading the wrong tree as of a broken recorder.
+
+Trail absence is deliberately not an UNCONDITIONAL warn. It has never existed
+under `~/.claude/artibot/` (measured 2026-08-30), so a bare row for it would fire
+forever on the installed tree — the desensitization this check is trying to
+avoid. S6 conditions it on live records already existing, and that condition is
+what turns it from noise into a signal: both stores are written under the same
+resolved root, so records landing in one while the other was never even created
+means that writer is dead rather than that the root is new. On a root with no
+live records S6 cannot fire and S5 covers the case instead.
+
+Also deliberately NOT a warn: a store holding real (non-`diag-`) records whose
+newest entry predates the 24h window, with no activity signal inside it either.
+That is an idle machine.
+
+**What this check cannot see** (§9 — state it next to the gate):
+
+- **That any particular decision was recorded.** It reads counts and timestamps.
+  Two decision points are wired (routing classification and workflow plan), so a
+  green result says the path is alive, not that coverage is complete.
+- **Whether a real session or a diagnostic produced the records — beyond the
+  naming convention.** S5 separates them by the `diag-` prefix, which holds only
+  as long as diagnostics keep using it. A synthetic `preparePrompt` run writes
+  byte-identical lines through the same code path, so a diagnostic that forgets
+  the prefix is indistinguishable from a live session and will silence S5. When
+  writing a verification run, prefix the session id.
+- **Whether the S3 activity signal reflects prompts or file churn.** Measured
+  2026-08-30 on the repo tree, `current-effort.json` had an mtime from that same
+  morning while its `updatedAt` still read 2026-07-10. The best available account
+  is that test fixtures refresh the mtime by rewriting the file's original bytes
+  in `afterEach`: the mechanism was reproduced in an equivalent standalone
+  experiment, and all 5 files a suite restores that way match the observed
+  cluster, down to identical nanosecond mtimes. What was NOT done is the direct
+  reproduction — running the suite and watching this file's mtime move. So treat
+  the cause as well-evidenced, not measured end to end.
+  Whatever the cause, the consequence is what matters here: because S3 takes the
+  maximum, a tree whose tests run often reads as "active" almost always, so on an
+  otherwise idle tree S3 can degrade into a standing warn. That is the fail-safe
+  direction, but it is the same desensitization risk this check warns about
+  elsewhere; prefer S4 and S5 as the load-bearing signals and treat a lone S3
+  warn as a prompt to check which activity source was newest.
+- **Whether the activity sources are themselves telling the truth.** S3 assumes
+  at least one of its three timestamps reflects real prompt activity. The bullet
+  above shows one of them moving for a reason unrelated to prompts; the mirror
+  failure is equally possible — if all three went stale while prompts kept
+  arriving, S3 would stay silent while recording was broken. S4 and S5 are the
+  steps that depend on no timestamp at all.
+- **Anything when none of the activity sources exists.** Measured 2026-08-30,
+  the installed tree (`~/.claude/artibot/runtime/`) has neither
+  `current-effort.json` nor `decision-trail.json`, while the repo tree has both.
+  Under a plugin root like that, S3 can never fire and only S4 and S5 are
+  load-bearing. Report which activity sources were missing rather than reporting
+  "no activity".
+- **A recorder that stops after it once worked.** S5 is a latch: it asks whether
+  a live record has EVER appeared under this root, so the first real one silences
+  it permanently, even if recording breaks the next day. Ongoing detection is
+  S3's job — and on a root with no activity sources (the case directly above) S3
+  cannot fire at all, which leaves that root with no continuous watcher once S5
+  has latched. Closing this would take a time-windowed row, and a time window
+  needs activity evidence, which is the thing that root does not have. Until
+  something supplies it, re-run the wiring probe rather than trusting a pass.
+- **Which runtime directory it read.** Every path here resolves through
+  `getPluginRoot()`, and the /doctor process does not necessarily resolve it to
+  the same tree the prompt hooks write to. State the resolved absolute path in
+  the report so a reader can tell whether an empty store means "nothing was
+  recorded" or "you looked in the other tree".
+- **Anything about the repo working tree.** A fixed repo and a stale install are
+  indistinguishable to every step except S4.
 
 ## Output Format
 

@@ -6,78 +6,111 @@
  * that file). So on prompt N the pipeline saw prompt N-1's effort. The fix
  * reorders the write ahead of the read.
  *
- * This suite runs against the REAL plugin root (the temp-dir variant cannot
- * resolve lib/cognitive/router.js, so effort never resolves there). It seeds a
- * STALE current-effort.json, fires a fresh slash command, and asserts the file
- * + output reflect the CURRENT command — never the stale one. The keystone
- * read-after-write itself is proven in
+ * This suite seeds a STALE current-effort.json, fires a fresh slash command,
+ * and asserts the file + output reflect the CURRENT command — never the stale
+ * one. The keystone read-after-write itself is proven in
  * tests/runtime/create-artibot-agent-pluginroot.test.js.
+ *
+ * ── Why a LINKED sandbox root, not the real one ───────────────────────────────
+ * Until 2026-08-30 this suite ran against the REAL plugin root and restored the
+ * developer's runtime/*.json in afterEach. Restoring by rewriting the original
+ * bytes is not a no-op: `writeFileSync` stamps a fresh mtime even when the
+ * content is identical, so every run left files whose mtime said "just now"
+ * while their `updatedAt` still said months ago. That contradiction is not
+ * cosmetic — it cost a full investigation on 2026-08-29, because
+ * `persistEffortMeta` (scripts/hooks/runtime-prompt.js#persistEffortMeta) stamps
+ * `new Date()` on every write and therefore CANNOT produce that pairing. The
+ * restore also raced: two suites touching the same globals resolved
+ * last-writer-wins, so a concurrent run could hand the developer another
+ * suite's state.
+ *
+ * The old header claimed a temp root was impossible here ("lib/cognitive/router
+ * .js stops resolving"). That is true only of a BARE temp root. The hook
+ * dynamically `import()`s modules under `getPluginRoot()`, so the fix is to LINK
+ * them in rather than to give up isolation — exactly what the sibling suite
+ * tests/hooks/runtime-prompt-effort-inject.test.js#LINKED_DIRS already does.
+ * Links, not copies, so the REAL modules run: a sandbox missing them would send
+ * every dynamic import into its catch block and the assertions below would pass
+ * for the wrong reason.
+ *
+ * Consequence: this file no longer writes ANY path under the repo. There is
+ * nothing to restore, so there is no restore race and no mtime side effect.
  */
 
 import path from 'node:path';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import {
+  copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync,
+} from 'node:fs';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { handleUserPromptSubmit } from '../../scripts/hooks/runtime-prompt.js';
 
 const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const RUNTIME_DIR = path.join(PLUGIN_ROOT, 'runtime');
-const EFFORT_FILE = path.join(RUNTIME_DIR, 'current-effort.json');
+const REAL_CONFIG_PATH = path.join(PLUGIN_ROOT, 'artibot.config.json');
 
-// STATE-RESTORE CONTRACT. This suite must run against the REAL plugin root
-// (see the module header), so handleUserPromptSubmit mutates the developer's
-// own runtime/ state. Measured side effects of one run (sha256 diff of
-// runtime/*, 15-file denominator): current-task-budget.json, decision-trail.json,
-// token-usage-session.json, user-profile.json — on top of the seeded
-// current-effort.json. Every one is saved and restored below; without that the
-// suite silently overwrites whatever the developer's live session had.
-// Caveat: restore is last-writer-wins, so it can only be trusted while these
-// globals are not being written concurrently by another suite.
-const MUTATED_RUNTIME_FILES = [
-  EFFORT_FILE,
-  path.join(RUNTIME_DIR, 'current-task-budget.json'),
-  path.join(RUNTIME_DIR, 'decision-trail.json'),
-  path.join(RUNTIME_DIR, 'token-usage-session.json'),
-  path.join(RUNTIME_DIR, 'user-profile.json'),
-];
+/**
+ * Read-only directories the hook resolves through `getPluginRoot()` at runtime.
+ * Junctioned on Windows, plain dir symlinks elsewhere; `fs.rmSync` unlinks the
+ * link itself rather than recursing through it (verified 2026-08-30 against a
+ * throwaway target), so tearing the sandbox down cannot reach the repo.
+ */
+const LINKED_DIRS = ['lib', 'commands', 'skills', 'agents'];
+
+let sandboxRoot = '';
+let effortFile = '';
+let savedEnv;
+
+beforeAll(() => {
+  sandboxRoot = mkdtempSync(path.join(tmpdir(), 'artibot-effort-order-'));
+  const linkType = process.platform === 'win32' ? 'junction' : 'dir';
+  for (const dir of LINKED_DIRS) {
+    symlinkSync(path.join(PLUGIN_ROOT, dir), path.join(sandboxRoot, dir), linkType);
+  }
+  copyFileSync(REAL_CONFIG_PATH, path.join(sandboxRoot, 'artibot.config.json'));
+  mkdirSync(path.join(sandboxRoot, 'runtime'), { recursive: true });
+  effortFile = path.join(sandboxRoot, 'runtime', 'current-effort.json');
+});
+
+afterAll(() => {
+  if (sandboxRoot) rmSync(sandboxRoot, { recursive: true, force: true });
+});
+
+beforeEach(() => {
+  // Seed a STALE effort file as if left over from a prior prompt.
+  writeFileSync(
+    effortFile,
+    JSON.stringify({ command: 'daily', effort: 'low', baseline: 'low', shift: 0, reason: 'stale' }) + '\n',
+  );
+
+  savedEnv = {
+    CLAUDE_PLUGIN_ROOT: process.env.CLAUDE_PLUGIN_ROOT,
+    ARTIBOT_RUNTIME_CHECKPOINT_DISABLE: process.env.ARTIBOT_RUNTIME_CHECKPOINT_DISABLE,
+    ARTIBOT_RUNTIME_MEMORY_DISABLE: process.env.ARTIBOT_RUNTIME_MEMORY_DISABLE,
+  };
+  process.env.CLAUDE_PLUGIN_ROOT = sandboxRoot;
+  process.env.ARTIBOT_RUNTIME_CHECKPOINT_DISABLE = '1';
+  process.env.ARTIBOT_RUNTIME_MEMORY_DISABLE = '1';
+});
+
+afterEach(() => {
+  for (const [k, v] of Object.entries(savedEnv)) {
+    if (v === undefined) delete process.env[k];
+    else process.env[k] = v;
+  }
+});
 
 describe('runtime-prompt — effort resolved before pipeline (FIX-2 ordering)', () => {
-  let savedEnv;
-  /** @type {Map<string, string|null>} absolute path → original content (null = absent) */
-  let savedRuntime;
-
-  beforeEach(() => {
-    mkdirSync(RUNTIME_DIR, { recursive: true });
-    savedRuntime = new Map();
-    for (const file of MUTATED_RUNTIME_FILES) {
-      savedRuntime.set(file, existsSync(file) ? readFileSync(file, 'utf-8') : null);
+  it('runs against a sandbox that actually carries the linked modules', () => {
+    // NEGATIVE CONTROL. If the links were missing, every dynamic import in the
+    // hook would fall into its catch block and the assertions below would pass
+    // for the wrong reason — no effort resolved looks identical to no stale
+    // effort leaking. Assert the seam instead of trusting it.
+    for (const dir of LINKED_DIRS) {
+      expect(existsSync(path.join(sandboxRoot, dir))).toBe(true);
     }
-    // Seed a STALE effort file as if left over from a prior prompt.
-    writeFileSync(
-      EFFORT_FILE,
-      JSON.stringify({ command: 'daily', effort: 'low', baseline: 'low', shift: 0, reason: 'stale' }) + '\n',
-    );
-
-    savedEnv = {
-      CLAUDE_PLUGIN_ROOT: process.env.CLAUDE_PLUGIN_ROOT,
-      ARTIBOT_RUNTIME_CHECKPOINT_DISABLE: process.env.ARTIBOT_RUNTIME_CHECKPOINT_DISABLE,
-      ARTIBOT_RUNTIME_MEMORY_DISABLE: process.env.ARTIBOT_RUNTIME_MEMORY_DISABLE,
-    };
-    process.env.CLAUDE_PLUGIN_ROOT = PLUGIN_ROOT;
-    process.env.ARTIBOT_RUNTIME_CHECKPOINT_DISABLE = '1';
-    process.env.ARTIBOT_RUNTIME_MEMORY_DISABLE = '1';
-  });
-
-  afterEach(() => {
-    for (const [k, v] of Object.entries(savedEnv)) {
-      if (v === undefined) delete process.env[k];
-      else process.env[k] = v;
-    }
-    // Restore every runtime file the hook mutates (or remove the ones we created).
-    for (const [file, original] of savedRuntime) {
-      if (original === null) rmSync(file, { force: true });
-      else writeFileSync(file, original);
-    }
+    expect(existsSync(path.join(sandboxRoot, 'lib', 'cognitive', 'router.js'))).toBe(true);
+    expect(existsSync(path.join(sandboxRoot, 'artibot.config.json'))).toBe(true);
   });
 
   it('overwrites the stale effort file with the current command before output', async () => {
@@ -93,7 +126,7 @@ describe('runtime-prompt — effort resolved before pipeline (FIX-2 ordering)', 
 
     // The persisted effort file now holds the current command (write happened,
     // overwriting the seeded stale value).
-    const persisted = JSON.parse(readFileSync(EFFORT_FILE, 'utf-8'));
+    const persisted = JSON.parse(readFileSync(effortFile, 'utf-8'));
     expect(persisted.command).toBe('implement');
     expect(persisted.reason).not.toBe('stale');
   });

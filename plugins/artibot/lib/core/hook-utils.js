@@ -7,7 +7,7 @@
 
 import path from 'node:path';
 import { existsSync, readdirSync, statSync, unlinkSync } from 'node:fs';
-import { getHomeDir } from './platform.js';
+import { getHomeDir, normalizeDirPath } from './platform.js';
 
 // -------------------------------------------------------------------------
 // Path Validation
@@ -186,7 +186,14 @@ export function isEnvEnabled(varName) {
  * @returns {boolean}
  */
 export function isArtibotRepo(cwd) {
-  const dir = arguments.length === 0 ? process.cwd() : cwd;
+  const raw = arguments.length === 0 ? process.cwd() : cwd;
+  if (!raw) return false;
+  // Normalized first: a caller that got its cwd from a Git Bash-launched
+  // process spells it `/c/Users/x`, which Node cannot stat, so both markers
+  // read as absent for the repo itself. Measured 2026-08-30 — that dropped the
+  // `artibot-policy` guards (`sensitive-file`, `content-secret`) for an
+  // otherwise ordinary write inside this repo.
+  const dir = normalizeDirPath(raw);
   if (!dir) return false;
   return (
     existsSync(path.join(dir, 'plugins', 'artibot', 'CLAUDE.md')) ||

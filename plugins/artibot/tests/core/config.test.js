@@ -10,6 +10,12 @@ vi.mock('../../lib/core/file.js', () => ({
 vi.mock('../../lib/core/platform.js', () => ({
   getPluginRoot: vi.fn(() => '/fake/plugin/root'),
   getHomeDir: vi.fn(() => '/fake/home'),
+  // `resolveArtibotDir` compares the recorded home against the live one through
+  // this. A mock factory replaces the whole module, so every export the module
+  // under test reaches for has to be listed here or the import throws at
+  // collection time.
+  normalizeDirPath: vi.fn((p) => (typeof p === 'string' && p.trim() ? p.trim() : null)),
+  sameDirPath: vi.fn((a, b) => Boolean(a) && Boolean(b) && a === b),
 }));
 
 // Mock node:fs so statSync is controllable in tests.

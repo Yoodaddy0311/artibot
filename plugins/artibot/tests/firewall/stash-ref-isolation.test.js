@@ -43,6 +43,25 @@ import os from 'node:os';
 import path from 'node:path';
 import { cleanupOldStashes } from '../../scripts/hooks/git-autopilot-save.js';
 
+/**
+ * Per-test budget for the three cases that build 12 checkpoints. `storeStash`
+ * spawns three `git` processes per entry, so those cases pay at least 36 spawns
+ * in setup alone, before the assertions and `cleanupOldStashes`' own list and
+ * re-resolve passes. The count is not reducible without giving up fidelity —
+ * the whole point of this file is that every real git call runs (see the
+ * header, and `storeStash`'s "as the hook does").
+ *
+ * Measured unloaded 2026-08-30 on Windows: worst case 4.7s per test, file total
+ * 17.5s. The global budget is `vitest.config.js#testTimeout` = 30s PER TEST, so
+ * a case has to slow ~6.4x before it trips — reachable when several agents run
+ * suites at once, because the cost here is process-spawn latency, not compute.
+ * 60s restores ~12.8x headroom.
+ *
+ * This raises only this file's three heaviest cases. The global 30s stays put,
+ * and no assertion changes: a timeout is a budget, not a gate.
+ */
+const LONG_GIT_TIMEOUT_MS = 60_000;
+
 let repo = '';
 let worktree = '';
 
@@ -129,7 +148,7 @@ describe('checkpoint stash cleanup under a shared refs/stash', () => {
     // And nothing that is not a checkpoint may have been dropped.
     const nonCheckpoints = survivors.filter((l) => !l.includes('artibot-checkpoint-'));
     expect(nonCheckpoints).toHaveLength(1);
-  });
+  }, LONG_GIT_TIMEOUT_MS);
 
   // NOTE: this asserts the ordinary path only. It does NOT reach the SHA
   // re-check — nothing shifts the indices during the call. See the file header.
@@ -142,7 +161,7 @@ describe('checkpoint stash cleanup under a shared refs/stash', () => {
     // Every entry is a checkpoint and none moved, so cleanup may proceed.
     cleanupOldStashes(repo, 10);
     expect(stashLabels(repo).length).toBeLessThan(total);
-  });
+  }, LONG_GIT_TIMEOUT_MS);
 
   it('does nothing when the checkpoint count is within the retention limit', () => {
     git(['stash', 'clear'], repo);
@@ -180,7 +199,7 @@ describe('checkpoint stash cleanup under a shared refs/stash', () => {
     // Guard tripped on the first drop, so nothing was removed.
     expect(stashLabels(repo)).toEqual(before);
     expect(stashLabels(repo)).toHaveLength(12);
-  });
+  }, LONG_GIT_TIMEOUT_MS);
 
   it('never throws on a directory that is not a repository', () => {
     const notARepo = fsSync.mkdtempSync(path.join(os.tmpdir(), 'artibot-nostash-'));

@@ -42,7 +42,13 @@ export function createRouterMiddleware(options = {}) {
     // prompt text. This is the classification that actually runs on every
     // prompt; `router.js#route()` wraps the same call with a trail write but
     // nothing in production calls it (measured 2026-08-28).
-    recordRoutingDecision(resolveDecisionRunId(state.context), classification);
+    //
+    // The session id is read from `state.input`, not `state.context`: the hook
+    // payload is stored there (`create-artibot-agent.js#preparePrompt`), and
+    // `state.context` never carries it. Passing the wrong one is silent — the
+    // recorder counts a `skipped` and returns null — which is how this recorded
+    // 0 of 2 decisions until 2026-08-29.
+    recordRoutingDecision(resolveDecisionRunId(state.input), classification);
 
     state.context.intent = {
       intents: intent.intents,

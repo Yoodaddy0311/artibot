@@ -111,8 +111,9 @@ export function createTasksMiddleware(options = {}) {
 
       // Explainability (D7) — observe-only. Records whether a parallel team
       // fired and the trigger reasons, including the inline case; agent names
-      // only, no sub-objective text.
-      recordWorkflowPlanDecision(resolveDecisionRunId(state.context), plan);
+      // only, no sub-objective text. Session id comes from `state.input` (where
+      // the hook payload lives), the same place `pluginRoot` is read from above.
+      recordWorkflowPlanDecision(resolveDecisionRunId(state.input), plan);
     }
 
     state.context.tasks = task;

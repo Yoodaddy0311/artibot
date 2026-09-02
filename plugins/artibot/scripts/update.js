@@ -18,6 +18,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
+import { safeFetch } from '../lib/core/data-egress-guard.js';
 import { isNewerVersion } from '../lib/core/version-checker.js';
 import { getPluginRoot } from '../lib/core/platform.js';
 import { detectInstallMode, NATIVE_UPDATE_HINT } from '../lib/core/install-mode.js';
@@ -95,13 +96,20 @@ async function fetchLatestRelease() {
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
   try {
-    const response = await fetch(GITHUB_API_URL, {
+    // DATA POLICY: this path had no egress guard at all. The URL above is a
+    // hardcoded constant on an allowlisted host, so nothing is newly blocked
+    // (`api.github.com` is in lib/core/allowlist.json) — but going through
+    // safeFetch means the check does not depend on that constant staying
+    // hardcoded, and every redirect hop is re-checked instead of followed
+    // blind. An EgressBlockedError propagates to the caller as an update
+    // failure, which is the fail-closed answer for an explicit user action.
+    const response = await safeFetch(GITHUB_API_URL, {
       signal: controller.signal,
       headers: {
         'Accept': 'application/vnd.github+json',
         'User-Agent': 'artibot-update-script',
       },
-    });
+    }, { reason: 'update-check' });
 
     if (!response.ok) {
       throw new Error(`GitHub API returned HTTP ${response.status}`);

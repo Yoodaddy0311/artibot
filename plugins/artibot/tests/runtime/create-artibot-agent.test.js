@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import os from 'node:os';
 import path from 'node:path';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { createArtibotAgent } from '../../lib/runtime/create-artibot-agent.js';
+import { readCheckpoints } from '../../lib/runtime/middleware/checkpoint.js';
 
 const TEST_CONFIG = {
   automation: {
@@ -135,10 +136,9 @@ describe('runtime/createArtibotAgent', () => {
       expect(result.context.checkpoint.persisted).toBe(true);
       expect(result.context.checkpoint.filePath).toBe(checkpointPath);
 
-      const saved = JSON.parse(await readFile(checkpointPath, 'utf-8'));
-      expect(Array.isArray(saved.entries)).toBe(true);
-      expect(saved.entries).toHaveLength(1);
-      expect(saved.entries[0].id).toBe(result.context.checkpoint.id);
+      const saved = readCheckpoints(checkpointPath);
+      expect(saved).toHaveLength(1);
+      expect(saved[0].id).toBe(result.context.checkpoint.id);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

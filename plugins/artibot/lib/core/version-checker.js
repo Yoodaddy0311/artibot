@@ -8,7 +8,7 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { assertEgressAllowed } from './data-egress-guard.js';
+import { safeFetch } from './data-egress-guard.js';
 
 const CACHE_FILE = 'update-check.json';
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
@@ -107,19 +107,25 @@ function writeCache(cacheFilePath, result) {
  */
 async function fetchVersionFrom(url, currentVersion, pick) {
   try {
-    // DATA POLICY: assertEgressAllowed enforces that only allowlisted GitHub
-    // hosts can be reached; any other host throws EgressBlockedError.
-    assertEgressAllowed(url, { reason: 'version-check' });
-
+    // DATA POLICY: safeFetch asserts the destination is allowlisted BEFORE any
+    // network I/O and re-asserts every redirect hop; a non-allowlisted host
+    // throws EgressBlockedError, which the catch below turns into `null`.
+    //
+    // The standalone `assertEgressAllowed(url, …)` that used to sit here was
+    // removed rather than kept: it checked the same thing with the same reason
+    // tag, and both outcomes were swallowed identically by that catch, so it
+    // produced no observable behaviour of its own. (Contrast http-notify, which
+    // keeps its pre-check because that one emits a distinct operator message.)
+    // This is audit F-02 from .artibot/REPORTS/audit-core-config-security-2026-06-08.md.
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
     let response;
     try {
-      response = await fetch(url, {
+      response = await safeFetch(url, {
         signal: controller.signal,
         headers: { 'User-Agent': `artibot/${currentVersion}` },
-      });
+      }, { reason: 'version-check' });
     } finally {
       clearTimeout(timeoutId);
     }

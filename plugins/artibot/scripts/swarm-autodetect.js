@@ -205,6 +205,29 @@ async function main() {
   // fork as implicit consent (user explicitly committed it). Runs once per
   // (repoUrl, machine) — tracked via swarm-autoapplied.json marker.
   if (doAuto) {
+    // Auto-apply is safe only because it runs once per (repoUrl, machine), and
+    // "once" is remembered in a marker under the user's state directory. When
+    // `ARTIBOT_STATE_DIR` redirects that directory, the marker — and the opt-out
+    // record checked below — are read from somewhere that is not the user's
+    // state, so both guards answer "first run, never opted out" no matter how
+    // many times this has already run. The profile and the config it rewrites
+    // are still the real ones, taken from the plugin root.
+    //
+    // Measured 2026-08-30: the test suite sets this variable per worker, and
+    // three subprocess runs of `session-start.js` (via the SessionStart
+    // dispatcher test) each reached `swarm-init` and flipped the tracked
+    // `artibot.config.json` to `enabled: true` / `backend: "git"` plus a
+    // rewritten `.claude-plugin/swarm-profile.json`.
+    //
+    // Refusing here is the fail-safe answer: never auto-enable on the strength
+    // of a guard that is looking in the wrong place. `--apply` is unaffected,
+    // so an operator can still act deliberately. In production this variable is
+    // unset and nothing changes.
+    if (process.env.ARTIBOT_STATE_DIR) {
+      log('[swarm] Auto-apply skipped — ARTIBOT_STATE_DIR redirects the state '
+        + 'directory, so the run-once marker is not the real one. Use --apply to act deliberately.');
+      return;
+    }
     if (classification.state !== 'profile-only') {
       // Nothing to auto-apply (no profile, already active, or mismatch).
       return;

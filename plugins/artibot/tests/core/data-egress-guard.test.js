@@ -58,9 +58,12 @@ describe('isLocalhost()', () => {
     expect(isLocalhost('[::1]')).toBe(true);
   });
 
-  it('recognizes .local mDNS hostnames', () => {
-    expect(isLocalhost('mybox.local')).toBe(true);
-    expect(isLocalhost('printer.local')).toBe(true);
+  // `.local` used to be treated as local. mDNS names resolve to OTHER machines
+  // on the LAN, so that let `http://exfil.local/collect` past a policy that
+  // blocked the same box's IP. See tests/core/data-egress-redirect-and-mdns.
+  it('does NOT treat .local mDNS hostnames as local', () => {
+    expect(isLocalhost('mybox.local')).toBe(false);
+    expect(isLocalhost('printer.local')).toBe(false);
   });
 
   it('rejects empty / non-string inputs', () => {
@@ -103,15 +106,17 @@ describe('isLocalhost()', () => {
       expect(isLocalhost('.local')).toBe(false); // empty label
     });
 
-    it('still accepts canonical .local mDNS hostnames', () => {
-      expect(isLocalhost('printer.local')).toBe(true);
-      expect(isLocalhost('my-mac.local')).toBe(true);
+    it('rejects canonical .local mDNS hostnames too', () => {
+      // The impostor cases above stay rejected; so do the well-formed ones,
+      // because a well-formed mDNS name is still another machine.
+      expect(isLocalhost('printer.local')).toBe(false);
+      expect(isLocalhost('my-mac.local')).toBe(false);
     });
 
-    it('accepts IPv6 link-local (fe80::/10) addresses', () => {
-      expect(isLocalhost('fe80::1')).toBe(true);
-      expect(isLocalhost('fe80::abcd:1234')).toBe(true);
-      expect(isLocalhost('FE80::1')).toBe(true); // case-insensitive
+    it('rejects IPv6 link-local (fe80::/10) — another machine on the link', () => {
+      expect(isLocalhost('fe80::1')).toBe(false);
+      expect(isLocalhost('fe80::abcd:1234')).toBe(false);
+      expect(isLocalhost('FE80::1')).toBe(false); // case-insensitive
     });
 
     it('rejects fe80 impostors', () => {
@@ -206,9 +211,10 @@ describe('assertEgressAllowed()', () => {
     expect(
       assertEgressAllowed('http://[::1]/y', { allowlist: new Set() }),
     ).toBe(true);
+    // `.local` is deliberately NOT in that set — it names another machine.
     expect(
-      assertEgressAllowed('http://mybox.local/z', { allowlist: new Set() }),
-    ).toBe(true);
+      () => assertEgressAllowed('http://mybox.local/z', { allowlist: new Set() }),
+    ).toThrow(EgressBlockedError);
   });
 
   it('allows explicitly listed hosts', () => {
@@ -368,7 +374,9 @@ describe('safeFetch()', () => {
       reason: 'unit-test',
     });
     expect(fetchSpy).toHaveBeenCalledTimes(1);
-    expect(fetchSpy).toHaveBeenCalledWith('https://api.github.com/repos', undefined);
+    // `redirect: 'manual'` is forced so every hop can be re-checked — see
+    // safeFetch's JSDoc. It is part of the contract, not an incidental option.
+    expect(fetchSpy).toHaveBeenCalledWith('https://api.github.com/repos', { redirect: 'manual' });
     expect(res.ok).toBe(true);
   });
 
@@ -382,12 +390,16 @@ describe('safeFetch()', () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it('forwards init options to fetch unchanged', async () => {
+  it('forwards init options to fetch, overriding only `redirect`', async () => {
     const init = { method: 'POST', body: 'payload' };
     await safeFetch('http://localhost:3000/hook', init, {
       allowlist: new Set(),
       reason: 'unit-test',
     });
-    expect(fetchSpy).toHaveBeenCalledWith('http://localhost:3000/hook', init);
+    expect(fetchSpy).toHaveBeenCalledWith('http://localhost:3000/hook', {
+      method: 'POST', body: 'payload', redirect: 'manual',
+    });
+    // The caller's object is not mutated — the override is applied to a copy.
+    expect(init).toEqual({ method: 'POST', body: 'payload' });
   });
 });

@@ -15,7 +15,7 @@ import {
   hintMatches,
   VALIDATION_CHECKS,
 } from './pii-detector.js';
-import { checkMixedScript, normalizeHomoglyphs } from './homoglyph-detector.js';
+import { normalizeMixedScriptTokens } from './homoglyph-detector.js';
 
 // ---------------------------------------------------------------------------
 // Platform-Aware Path Detection
@@ -107,16 +107,26 @@ export function scrub(text) {
   if (!text || typeof text !== 'string') return text ?? '';
 
   // WIRE-16: defeat homoglyph / mixed-script spoofing before regex matching.
-  // checkMixedScript().mixed is true only when Latin AND a known Cyrillic/Greek
-  // lookalike co-occur, so disguised PII (e.g. 'usеr@evil.com' with Cyrillic е)
-  // is normalized to Latin and then caught by the pattern pass below. Pure-Latin
-  // or pure-non-Latin text (legit Korean/Russian/CJK) is left untouched, so
-  // non-spoofing multilingual data is never corrupted. Counted on a dedicated
-  // stat (not byCategory) so PII-category consumers stay clean.
-  // scrub() is the egress chokepoint: scrubPattern (line 144) and scrubPatterns
-  // (line 176) both recurse here for every string value.
-  if (checkMixedScript(text).mixed) {
-    text = normalizeHomoglyphs(text);
+  // Disguised PII (e.g. 'usеr@evil.com' with a Cyrillic е) is normalized to Latin
+  // and then caught by the pattern pass below.
+  //
+  // Scoped to individual TOKENS, not the whole string. The earlier string-level
+  // gate claimed "legit Korean/Russian/CJK is left untouched"; measured 2026-08-30
+  // that held for Korean only (no Hangul is in the homoglyph map) and was false
+  // for Cyrillic and Greek the moment one Latin word appeared — "Ошибка: cannot
+  // open file" came back as "Oшибкa: cannot open file". Latin mixed into a
+  // non-Latin log line is the normal case, not the attack; the attack hides the
+  // substitution inside a single token, which the token-level test still catches.
+  // See homoglyph-detector.js#normalizeMixedScriptTokens.
+  //
+  // The stat counts scrub() CALLS that normalized something, not tokens, so its
+  // meaning is unchanged for existing consumers. Counted on a dedicated stat
+  // (not byCategory) so PII-category consumers stay clean.
+  // scrub() is the egress chokepoint: scrubPattern and scrubPatterns both
+  // recurse here for every string value.
+  const homoglyphPass = normalizeMixedScriptTokens(text);
+  if (homoglyphPass.normalizedTokens > 0) {
+    text = homoglyphPass.text;
     stats.homoglyphNormalized += 1;
   }
 

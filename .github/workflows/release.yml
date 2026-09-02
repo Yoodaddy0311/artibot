@@ -228,6 +228,23 @@ jobs:
           ref: master
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
+          # Do NOT persist this token into `.git/config`. With the default
+          # (`true`), checkout writes an `http.https://github.com/.extraheader`
+          # AUTHORIZATION header that applies to every github.com URL — including
+          # one that carries its own credentials in the userinfo part. That
+          # header WINS over the URL credential (actions/checkout#181, #162), so
+          # the ff landing step below silently pushed as GITHUB_TOKEN instead of
+          # as ARTIBOT_LANDING_PAT. A GITHUB_TOKEN-attributed push creates no
+          # workflow runs at all, so the required checks the ff path waits for
+          # could never appear: the v4.51.0 badge branch @ c5c230f0 had 0
+          # workflow runs and 0 check runs, the 10-minute window expired, and
+          # the badge sync stranded (issue #114). The branch name is deliberately
+          # not spelled out here — FF_BRANCH_PREFIX is the single source of truth
+          # and badge-stall-issue-lifecycle.test.js keeps literals out of it.
+          #
+          # Both push paths below therefore name their credential explicitly.
+          # Nothing else in this job runs an authenticated git command.
+          persist-credentials: false
 
       # ── Escalation-issue self-heal ─────────────────────────────────────────
       # The detector at the end of this job opens an issue when a badge PR
@@ -628,12 +645,17 @@ jobs:
           git add README.md plugins/artibot/README.md plugins/artibot/marketplace.json .claude-plugin/marketplace.json
           git commit -m "${SUBJECT}"
 
-          # Push with the PAT explicitly instead of the GITHUB_TOKEN credential
-          # that actions/checkout persisted. The credential is inlined in the
+          # Push with the PAT explicitly. The credential is inlined in the
           # remote URL rather than base64-encoded into an http.extraheader
           # because Actions' log scrubbing masks the raw secret value wherever it
           # appears — including inside a URL — but does NOT mask a base64
           # encoding of it.
+          #
+          # This ONLY works because the checkout step sets
+          # `persist-credentials: false`. An inline URL credential does not
+          # override a persisted `http.<url>.extraheader` — the header wins
+          # (actions/checkout#181) — and this step pushed as GITHUB_TOKEN for
+          # exactly that reason until 2026-08-30. Do not drop that input.
           REMOTE="https://x-access-token:${LANDING_PAT}@github.com/${GITHUB_REPOSITORY}.git"
 
           # Open a tracking issue, skipping when one with the same title is
@@ -671,17 +693,45 @@ jobs:
           # 40 attempts x 15s = 10 min ceiling. Measured 2026-08-15 on PR #100:
           # the Node matrix took 3m33s wall and the plugin.json contexts 4s, so
           # the ceiling is roughly 3x the observed worst case.
+          #
+          # Return codes: 0 green, 1 red-or-timeout, 2 no check runs ever
+          # appeared. 2 is split out because it is a different failure with a
+          # different fix, and conflating it cost a wrong diagnosis once already:
+          # v4.51.0 burned the full 10 minutes and then reported "did not go
+          # green", which reads as "a check was red" and sent the reader hunting
+          # for a failing job. There was no job. Zero check runs means no
+          # workflow run was ever created for the SHA, i.e. the push was not
+          # attributed to a workflow-triggering identity — an auth problem, not a
+          # test problem. Approval-gated runs do NOT look like this: a run held
+          # for approval still exists as an object and is counted by total_count,
+          # so total_count == 0 is specific to "no event was generated".
+          ZERO_POLL_LIMIT=8
           wait_for_green() {
             target_sha="$1"
+            zero_polls=0
             for _ in $(seq 1 40); do
               sleep 15
               payload="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${target_sha}/check-runs" 2>/dev/null || echo '')"
               # `if`, not `[ ... ] && continue`: the default shell is `bash -e`,
               # where a bare short-circuit list that evaluates false is a failing
               # final command and aborts the whole step.
+              #
+              # An empty payload is an API failure, NOT evidence about the SHA,
+              # so it deliberately does not advance zero_polls — otherwise a
+              # 2-minute API outage would be reported as an auth failure.
               if [ -z "${payload}" ]; then continue; fi
               total="$(printf '%s' "${payload}" | jq -r '.total_count' 2>/dev/null || echo 0)"
-              if [ "${total}" = "0" ]; then continue; fi
+              if [ "${total}" = "0" ]; then
+                zero_polls=$((zero_polls + 1))
+                # `zero_polls=$((...))` is an assignment, so it yields status 0
+                # even when the arithmetic result is 0 — unlike a bare `((...))`,
+                # which would abort the step under `bash -e` on the first pass.
+                if [ "${zero_polls}" -ge "${ZERO_POLL_LIMIT}" ]; then
+                  echo "  ${target_sha}: total=0 on ${zero_polls} consecutive polls — no workflow run was ever created"
+                  return 2
+                fi
+                continue
+              fi
               pending="$(printf '%s' "${payload}" | jq -r '[.check_runs[] | select(.status != "completed")] | length' 2>/dev/null || echo 1)"
               failed="$(printf '%s' "${payload}" | jq -r '[.check_runs[] | select(.conclusion != null) | select([.conclusion] | inside(["success","neutral","skipped"]) | not)] | length' 2>/dev/null || echo 0)"
               echo "  ${target_sha}: total=${total} pending=${pending} failed=${failed}"
@@ -705,7 +755,20 @@ jobs:
           SHA="$(git rev-parse HEAD)"
           echo "Pushed ${BRANCH} @ ${SHA}"
 
-          if ! wait_for_green "${SHA}"; then
+          # `|| wait_rc=$?` keeps errexit off the call (left of `||`) and the
+          # assignment itself always succeeds, so the exit code survives without
+          # aborting the step. Same ISSUE_TITLE for both outcomes on purpose: the
+          # close-step reconciler matches issues by title, so splitting the
+          # wording here would create a `land` issue it can never resolve.
+          wait_rc=0
+          wait_for_green "${SHA}" || wait_rc=$?
+          if [ "${wait_rc}" = "2" ]; then
+            echo "::warning::No workflow runs were created on ${BRANCH} @ ${SHA} — the push was not attributed to a workflow-triggering identity."
+            open_issue "${ISSUE_TITLE}" \
+              "Branch \`${BRANCH}\` (release ${GITHUB_REF_NAME}) produced NO workflow runs at \`${SHA}\`, so the required checks could never appear and master was not fast-forwarded. This is an authentication-attribution failure, not a failing check — a push authenticated with \`GITHUB_TOKEN\` does not create workflow runs. Verify that the checkout step in this job still sets \`persist-credentials: false\` (a persisted \`http.<url>.extraheader\` overrides the credential inlined in the push URL) and that \`ARTIBOT_LANDING_PAT\` is a user or GitHub App token. The badge changes are on the branch and need a human to land or discard them."
+            exit 0
+          fi
+          if [ "${wait_rc}" != "0" ]; then
             echo "::warning::Checks on ${BRANCH} @ ${SHA} did not go green within the wait window."
             open_issue "${ISSUE_TITLE}" \
               "Branch \`${BRANCH}\` (release ${GITHUB_REF_NAME}) did not reach a green required-check state at \`${SHA}\`, so master was not fast-forwarded. The badge + marketplace changes are on the branch and need a human to land or discard them."
@@ -797,12 +860,22 @@ jobs:
           # auto-merge can proceed. Adding [skip ci] would block both the push
           # AND pull_request triggers, leaving the PR permanently BLOCKED.
           git commit -m "${SUBJECT}"
+          # Name the credential explicitly. `git push origin` used to work off
+          # the credential actions/checkout persisted, and that persistence is
+          # now off (see the checkout step) because it was silently overriding
+          # the ff path's PAT. Keeping GITHUB_TOKEN here is deliberate and not a
+          # downgrade: this path lands through `pull_request` checks on the PR
+          # opened below, never through `push` events on the branch, so the
+          # GITHUB_TOKEN rule that suppresses push-triggered runs costs it
+          # nothing. Same inline-URL form as the ff path, for the same
+          # log-masking reason.
+          PR_REMOTE="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           # Guarded for the same reason as the ff path's pushes: a bare command
           # under `bash -e` kills the step with a red X and no issue. The
           # realistic trigger here is re-tagging — pushing v1.2.3 twice leaves a
           # branch of that name already on the remote, and the second push is
           # rejected as non-fast-forward.
-          if ! git push origin "${BRANCH}"; then
+          if ! git push "${PR_REMOTE}" "${BRANCH}"; then
             echo "::warning::Could not push ${BRANCH} — a branch of that name likely already exists on the remote (re-tagged release?)."
             open_issue "${PUSH_TITLE_PREFIX}${GITHUB_REF_NAME}${PUSH_TITLE_SUFFIX}" \
               "Pushing \`${BRANCH}\` (release ${GITHUB_REF_NAME}) was rejected, so no badge-sync PR was opened. If this release was re-tagged, delete the stale remote branch and re-run, or land the badge + marketplace changes manually."

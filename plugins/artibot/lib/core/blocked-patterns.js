@@ -9,6 +9,14 @@
  * @property {RegExp} pattern - Regex to match against command strings
  * @property {string} label - Human-readable description of the threat
  * @property {string} category - Pattern category for organization
+ * @property {RegExp[]} [safeOverrides] - Flags that make THIS rule's match safe
+ *   and so exempt it. Declared per rule on purpose: the exemption list used to
+ *   be global and was tested against the whole command, which let
+ *   `rm -rf / --force-with-lease` through the entire denylist (measured
+ *   2026-08-30). Category scoping would not have been enough either —
+ *   `--force-with-lease` is just as meaningless to `git reset --hard`, which
+ *   shares the `git` category. Add one only where the flag genuinely changes
+ *   what the matched command does.
  */
 
 /**
@@ -40,8 +48,20 @@ const BLOCKED_PATTERNS = Object.freeze([
   { pattern: /chown\s+-R\s+root/i, label: 'chown to root recursive', category: 'permission' },
 
   // ── Git destructive ─────────────────────────────────────────────────
-  { pattern: /git\s+push\s+.*--force(?!-with-lease)/i, label: 'git push --force', category: 'git' },
-  { pattern: /git\s+push\s+-f\b/i, label: 'git push -f', category: 'git' },
+  // `--force-with-lease` / `--force-if-includes` turn a blind force push into a
+  // checked one, so they exempt THESE two rules and nothing else.
+  {
+    pattern: /git\s+push\s+.*--force(?!-with-lease)/i,
+    label: 'git push --force',
+    category: 'git',
+    safeOverrides: [/--force-with-lease/i, /--force-if-includes/i],
+  },
+  {
+    pattern: /git\s+push\s+-f\b/i,
+    label: 'git push -f',
+    category: 'git',
+    safeOverrides: [/--force-with-lease/i, /--force-if-includes/i],
+  },
   { pattern: /git\s+reset\s+--hard/i, label: 'git reset --hard', category: 'git' },
   { pattern: /git\s+clean\s+-\w*f/i, label: 'git clean -f', category: 'git' },
   { pattern: /git\s+checkout\s+\.\s*$/i, label: 'git checkout . (discard all changes)', category: 'git' },

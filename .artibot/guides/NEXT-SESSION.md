@@ -1,5 +1,7 @@
 # NEXT-SESSION — 크로스머신 핸드오프 (2026-09-02, master 1d895903 + 2차 커밋)
 
+> **병합 메모(2026-09-02)**: 이 파일은 같은 날 두 세션이 갱신했다 — 위 헤더·아래 "다음 할 일"은 Artibot 세션(Fable 2티어·/split·v4.52.0 릴리스), 아래 "이전 갱신(2026-08-31, /ultrareview 라운드)" 절은 origin/master 에서 온 기록이다. 우선순위 표는 두 세션의 P0 를 합쳐 읽는다.
+
 > 로컬 `.artibot/HANDOFF.md` 는 머신별이라 git 을 타지 않는다. 이 파일이 다른
 > 머신으로 넘어가는 요지본이다. 갱신 주체: 세션 종료 시 리더가 `/save` 와 함께.
 
@@ -22,13 +24,68 @@
 - 보고서(아티팩트) 에 운영자 관점 "어제까지 → 이제" 표와 설계안 대비 구축률(PR 14개 중 구현 4·부분 2·미착수 8)이 있다.
 - 확정 결정: 완료 판정은 first-parent 최신 트레일러(ADDENDUM §1, 되돌리지 말 것) · Fable 은 allowlist 8종 + phaseRoles(build opus/review fable) · PostCompact 는 기본 OFF.
 
+## 이전 갱신 (2026-08-31, /ultrareview 라운드 — origin/master 에서 병합)
+
+> **5차 갱신 (/ultrareview 잔여 백로그 6레인 착지)**: egress 3결함(`41554374`) ·
+> core fail-open 2건(`53cbf5bc`) · swarm config 오염 + A-1(`c08c7ff5`) ·
+> genesis ACE(`06320386`) · PII 4결함(`2841af82`). CI 7/7 그린, 전체 스위트
+> 11,331 pass / 0 fail. **크로스체크가 그린 상태에서 실결함 5건을 잡았다** —
+> 상세와 백로그는 memory `project_ultrareview_backlog_20260831`.
+> **다음 P0**: 실세션 관측 2건이 아직 미실증이다 — ① decision-events 가 실제
+> 훅 발화로 `runtime/decisions/` 에 non-diag ndjson 을 쓰는지(플러그인 재등록
+> 후 첫 세션) ② 다음 릴리즈의 `wait_for_green` 첫 회차 `total>0`(persist-credentials
+> 수정 실증). **사용자 액션 1건**: `ARTIBOT_LANDING_PAT` 이 fine-grained user
+> PAT 인지 확인. **검증 규율 정정**: `npm run prebuild`·`build` 는 이 리포에
+> 없다(정본은 플러그인 `npm run ci`) — rules §11 체크리스트가 어긋나 있다.
+> — 이하 이전 라운드 기록:
+
+# (구) NEXT-SESSION — 2026-08-30, master a78dd239
+
+> **4차 갱신 (/ultrareview 전수 적대검수 + 능동발생 3건 수정)**: 플러그인 전수
+> 검수 5레인 → CRITICAL 1+HIGH 11. 능동발생 3건 착지: checkpoint 무락
+> lost-update(`b6265225`) · 자동커밋 git add -A 인덱스 오염(`69a9ec3a`) ·
+> SAFE_OVERRIDES 게이트 무력화(`a78dd239`). **원 P1 라이브 재현**: 전체 npm test
+> 동시실행이 추적 artibot.config.json swarm 을 enabled:true 로 뒤집음(로컬
+> swarm-consent optedIn:true + 전체동시성 트리거, 단일디렉터리·CI 무재현) — 커밋 전
+> config 복원 필수. **다음 P0(잔여 조건부 HIGH, swarm OFF 시 잠복)**: A-1 swarm-client
+> run.app 정규식 egress 우회 · E3 safeFetch 리다이렉트 미검증 · A-2 .local=localhost ·
+> D-1 verify-gen import() ACE(fix: node --check) · E2/E5/E6 PII 스크럽 훼손 · B/H-2
+> denylist §8 · B/H-3 Git Bash cwd 가드해제. 상세 memory project_ultrareview_20260830.
+> 유발 테스트 특정 미완(전체 동시성 필요). — 이하 H 라운드 기록:
+
+> **3차 갱신 (같은 날 H 라운드)**: 2차의 잔여 3건 전부 해소 + 중대 발견 2건.
+> ① effort-order mtime 화석 → 링크드 샌드박스 이전(`08e6f9f7`) ② landing-serialization
+> cwd 의존 수정 + 전역 census(`e4d7d366`) ③ **artibot 플러그인이 미등록 상태였음을
+> 발견**(캐시 orphaned 2026-08-23, 훅 전용 산출물 3종이 07-10 부터 정지) → 리더가
+> 재등록 + 미러/캐시를 ac988452 신배선으로 재구축. **다음 세션 시작 시 훅이 처음
+> 로드된다** — 프롬프트 1회 후 `<pluginRoot>/runtime/decisions/` 에 non-diag ndjson
+> 생성 여부가 P0 관측. ④ checkpoint 샌드박스 탈출 수정(`afedb3c9`): ARTIBOT_STATE_DIR
+> seam + vitest setupFiles 기본 배선 + 발행-home 유효범위 가드 — 실 사용자 상태
+> 오염(checkpoints.json 100/100 픽스처) 종식, 오염분은 삭제됨.
+> 잔여 백로그: session-start.test.js 리포루트 단언 전제 · cache-roi/watch-ingest
+> 리터 부작용 · trail-sandbox state-restore-contract mechanism 은퇴(+samples 동반
+> 삭제 필요) · getHomeDir 문자열 비교 정규화 · badge-stall 타 릴리스 런 로그 미조사.
+
 ## 이전 우선순위 (2026-08-28) — 참고
 
 | # | 작업 | 근거 |
 |---|---|---|
-| P0 | **decision-events 라이브 발화 검증** — 새 세션에서 `/doctor` Check 7(Explainability Health) 실동작 확인 + 슬래시 커맨드 몇 번 후 `runtime/decisions/` 에 ndjson 이 실제로 쌓이는지 | `c898461c` 의 D5·D7 배선은 테스트로만 검증됨. 폴백 없음 설계라 session_id 가 안 오면 전량 skip — Check 7 의 skipped 카운터가 그걸 드러낸다 |
-| P1 | **/split limb 권한 모드 정렬** — limb 세션의 권한 모드 클래스가 리더와 달라 크로스세션 완료 보고가 "Held message" 로 걸림(사용자 수동 승인 요구, 무인 진행 깨짐). `/split open` 이 창을 띄울 때 리더와 같은 모드로 정렬 | 2026-08-28 라이브 런 실측. dispatch 자체는 실작동 확인(2e6c123f 첫 라이브 증거). Deny 해도 무해 — 완료 판정은 git 트레일러가 정본 |
-| P2 | stash-ref-isolation 타임아웃 처방(스폰 ~60회가 원인, 무부하 8.4s/30s 상한 — 스폰 축소 vs timeout 상향) + runtime/autopilot 잔여 test-engine-state 계열(런당 +11) 정리 배선 | 부하성 간헐 red, 재발 예측 가능 |
+| P0 | **다음 릴리즈에서 라이브 실증 2건 관측** — ① `wait_for_green` 첫 회차 로그가 `total=N (N>0)` 인지 (f3505fd9 의 persist-credentials 수정 실증. 0건이면 rc=2 가 2분 만에 escalate — 그땐 PAT 토큰 종류가 원인) ② 릴리즈 전 사용자에게 `ARTIBOT_LANDING_PAT` 이 fine-grained **user** PAT 인지 확인 요청 | v4.51.0 ff 착지 실패(#114) 원인 = checkout persist-credentials 기본값이 GITHUB_TOKEN 을 영속 → 인라인 PAT 을 덮음(actions/checkout#181) → push 이벤트 미발생. 수정은 착지했으나 라이브 발화 0회 |
+| P1 | **decision-events 실세션 관측** — 슬래시 커맨드 몇 번 후 실제 플러그인 루트 `runtime/decisions/` 에 ndjson 이 쌓이는지. 이어서 `/doctor` Check 7 거짓 그린 처방(S3 게이트가 `current-effort.json#updatedAt` 24h 창 밖이면 기록 0건이어도 pass) + `current-effort.json` mtime(08-23)/updatedAt(07-10) 모순 규명(OneDrive 가설) | 구 P0 의 배선 결함은 d6fdd2fa 로 수정 완료(라이브 재현 recorded:2 실측). 남은 것은 실세션 관측과 Check 7 게이트 자체 |
+| P2 | **/split limb 권한 모드 정렬** — limb 세션의 권한 모드 클래스가 리더와 달라 크로스세션 완료 보고가 "Held message" 로 걸림(사용자 수동 승인 요구, 무인 진행 깨짐). `/split open` 이 창을 띄울 때 리더와 같은 모드로 정렬 | 2026-08-28 라이브 런 실측. dispatch 자체는 실작동 확인(2e6c123f 첫 라이브 증거). Deny 해도 무해 — 완료 판정은 git 트레일러가 정본 |
+| P3 | stash-ref-isolation 타임아웃 처방(스폰 ~60회가 원인, 무부하 8.4s/30s 상한 — 스폰 축소 vs timeout 상향) + runtime/autopilot 잔여 test-engine-state 계열(런당 +11) 정리 배선 | 부하성 간헐 red, 재발 예측 가능 |
+
+## 2026-08-30 세션 총괄 (519e2529 → f3505fd9, 2커밋 — hee 머신)
+
+d6fdd2fa **decision-events 배선 수정** (D5·D7 이 `state.context` 를 넘겨 기록 100%
+skipped 이던 것을 `state.input` 으로 — 실파이프라인 회귀 4건 신설) ·
+f3505fd9 **릴리즈 ff 착지 수정** (persist-credentials:false + PR_REMOTE 동반 +
+wait_for_green total=0 조기판정 + firewall 게이트 release-landing-credentials 9건).
+전체 스위트 11,207 pass / 40 skip (513파일, 커밋 직전 실측). 크로스체크·뮤테이션
+대조 전건 통과. 사용자 액션 잔여: PAT 토큰 종류 확인 · `ci/sync-badges-v4.51.0`
+브랜치 삭제(파생값이라 체리픽 불필요) · #114 수동 종료(자동 해소 조건 영구 거짓).
+
+## 확정 결정 (재논의 불필요)
 
 ## 2026-08-28 세션 총괄 (daf7fec0 → 1665eb48, 8커밋)
 

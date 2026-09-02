@@ -7,8 +7,8 @@
  *
  * Local filesystem only — IO is allowed (we read generated files), but there is
  * ZERO network egress (DATA POLICY): no fetch, no http(s), no external import.
- * The only dynamic import is of a freshly-generated local `.mjs` hook stub, by
- * absolute `file://` URL, to confirm it parses/loads. Korean-path safe.
+ * Nothing under `projectRoot` is ever executed: hook stubs are syntax-checked in
+ * a throwaway `node --check` subprocess, never imported. Korean-path safe.
  *
  * Graceful by construction: a missing directory or unreadable file degrades to
  * a failing check, never an exception. `verifyGenerated` never throws.
@@ -22,6 +22,10 @@
 
 import path from 'node:path';
 import fs from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+
+const execFileAsync = promisify(execFile);
 
 /**
  * @typedef {object} VerifyCheck
@@ -36,12 +40,6 @@ import fs from 'node:fs/promises';
  * @property {boolean} ok - True iff every `error`-severity check passes.
  * @property {VerifyCheck[]} checks - All checks run, in execution order.
  */
-
-/** Korean-path-safe `file://` URL builder (avoids pathToFileURL percent-encoding). */
-function toFileUrl(p) {
-  const f = String(p).replace(/\\/g, '/');
-  return /^[A-Z]:/i.test(f) ? `file:///${f}` : `file://${f}`;
-}
 
 /**
  * Check whether a path exists, tolerating any access error as "absent".
@@ -285,11 +283,42 @@ async function checkAgentCommandFrontmatter(root, checks) {
 }
 
 /**
- * Check 6 — every `.claude/hooks/{star}.mjs` hook stub is dynamically loadable
- * (parses + imports without throwing). A syntax error in a generated hook would
- * break the project at runtime, so this is severity: error. Local import only
- * (absolute `file://` URL); the generated stubs make no external calls, so
- * importing them is side-effect-free and safe. No `.mjs` hooks ⇒ vacuous pass.
+ * Summarize why `node --check` rejected a file. The syntax error lands on the
+ * child's stderr (the `Error` subclass line), which is the only place naming
+ * what is actually wrong — `err.message` alone is just the failed command line.
+ *
+ * @param {any} err - Rejection from `execFileAsync`.
+ * @returns {string} Single-line reason, suitable for the check `detail`.
+ */
+function syntaxFailureReason(err) {
+  if (err?.killed) return 'syntax check timed out';
+  const stderr = String(err?.stderr || '');
+  const errorLine = stderr
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .find((l) => /^[A-Za-z]*Error\b/.test(l));
+  return errorLine || String(err?.message || err).split('\n')[0];
+}
+
+/**
+ * Check 6 — every `.claude/hooks/{star}.mjs` hook stub parses as a valid ES
+ * module. A syntax error in a generated hook would break the project at
+ * runtime, so this is severity: error. No `.mjs` hooks ⇒ vacuous pass.
+ *
+ * Validation runs `node --check` in a throwaway subprocess and deliberately
+ * does NOT `import()` the file. `import()` would EXECUTE the module's top-level
+ * code, and this function enumerates the hooks directory as it exists on disk —
+ * not the list genesis just wrote. A project that already ships committed
+ * `.claude/hooks/*.mjs` (the normal way a repo shares its Claude config) would
+ * therefore have run attacker-authored code here with the user's privileges,
+ * skipping the settings.json registration + approval prompt that otherwise
+ * gates hook execution. `node --check` parses without evaluating, and handles
+ * `.mjs` as a real ES module (import.meta / top-level await / export all pass).
+ *
+ * Deliberate narrowing: this now proves the file PARSES, not that it RESOLVES.
+ * A stub importing a missing specifier used to fail here and now passes —
+ * accepted, because detecting that is not worth executing untrusted code.
+ *
  * @param {string} root
  * @param {VerifyCheck[]} checks - mutated.
  * @returns {Promise<void>}
@@ -302,9 +331,13 @@ async function checkHooksLoadable(root, checks) {
   for (const name of mjs) {
     const abs = path.join(hooksDir, name);
     try {
-      await import(toFileUrl(abs));
+      await execFileAsync(process.execPath, ['--check', abs], {
+        timeout: 5000,
+        windowsHide: true,
+        encoding: 'utf-8',
+      });
     } catch (err) {
-      failures.push(`${name} (${err?.message || String(err)})`);
+      failures.push(`${name} (${syntaxFailureReason(err)})`);
     }
   }
 
@@ -313,8 +346,8 @@ async function checkHooksLoadable(root, checks) {
     failures.length === 0,
     'error',
     failures.length === 0
-      ? '훅 .mjs 동적 로드 성공 (또는 .mjs 훅 없음)'
-      : `훅 .mjs 로드 실패: ${failures.join('; ')}`,
+      ? '훅 .mjs 구문 검사 통과 (또는 .mjs 훅 없음)'
+      : `훅 .mjs 구문 오류: ${failures.join('; ')}`,
   ));
 }
 
@@ -420,7 +453,8 @@ async function checkDocsMapComplete(root, checks) {
  *  3. `skill-frontmatter` (warn) — every SKILL.md has name/description.
  *  4. `hook-mjs-extension` (warn) — no Windows-incompatible `.sh`/`.bat` hooks.
  *  5. `agent-command-frontmatter` (warn) — agents/commands docs have frontmatter.
- *  6. `hooks-loadable` (error) — every `.mjs` hook stub imports cleanly.
+ *  6. `hooks-loadable` (error) — every `.mjs` hook stub parses as an ES module
+ *     (`node --check`, never executed).
  *  7. `docs-map-complete` (warn) — docs-map enumerates every generated doc.
  *
  * @param {object} args

@@ -287,11 +287,12 @@ const ENV_VAR_BLOCKLIST = new Set([
 // Built-in Guard Implementations
 // -------------------------------------------------------------------------
 
-/** Safe command patterns that override block patterns (e.g. --force-with-lease). */
-const SAFE_OVERRIDES = [
-  /--force-with-lease/i,
-  /--force-if-includes/i,
-];
+// Exemptions live on the rule they apply to (`BlockedPattern.safeOverrides` in
+// blocked-patterns.js), not in a list here. The list used to be global and was
+// consulted for every pattern against the whole command string, so appending
+// `--force-with-lease` — a flag `rm` does not even accept — skipped the entire
+// denylist. Measured 2026-08-30: `rm -rf /` blocked, `rm -rf / --force-with-lease`
+// allowed.
 
 /** Check dangerous Bash commands. */
 function checkDangerousCommand(ctx) {
@@ -301,11 +302,11 @@ function checkDangerousCommand(ctx) {
   const normalized = normalizeCommand(command);
   const variants = [command, normalized];
 
-  for (const { pattern, label } of BLOCKED_PATTERNS) {
+  for (const { pattern, label, safeOverrides } of BLOCKED_PATTERNS) {
     for (const variant of variants) {
       if (pattern.test(variant)) {
-        // Allow safe variants (e.g. --force-with-lease is a safe force push)
-        if (SAFE_OVERRIDES.some((safe) => safe.test(command))) {
+        // Only this rule's own exemptions apply — see BlockedPattern#safeOverrides.
+        if (safeOverrides?.some((safe) => safe.test(command))) {
           continue;
         }
         return {

@@ -22,6 +22,10 @@ vi.mock('node:fs', () => ({
 // The actual DATA POLICY gate is tested in version-checker-egress.test.js.
 vi.mock('../../lib/core/data-egress-guard.js', () => ({
   assertEgressAllowed: vi.fn(), // no-op: allow all in unit tests
+  // version-checker fetches through safeFetch; the stub delegates straight to
+  // the `globalThis.fetch` spy these tests already assert on, so the policy
+  // layer stays out of the way here (it is covered in version-checker-egress).
+  safeFetch: (url, init) => globalThis.fetch(url, init),
   EgressBlockedError: class EgressBlockedError extends Error {
     constructor(msg) { super(msg); this.name = 'EgressBlockedError'; }
   },

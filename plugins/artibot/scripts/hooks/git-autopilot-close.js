@@ -15,6 +15,7 @@ import { parseJSON, readStdin, resolveConfigPath } from '../utils/index.js';
 import { createErrorHandler } from '../../lib/core/hook-utils.js';
 import { isMergeBaseFresh, resolveBaseBranch } from '../../lib/git/resolve-base.js';
 import { isAutopilotAllowed } from '../../lib/autopilot/repo-identity.js';
+import { captureIndexTree, restoreIndexTree } from '../../lib/git/index-snapshot.js';
 import { gitPath } from '../../lib/git/git-dir.js';
 import { isMainEntry } from './_main-entry.js';
 
@@ -249,6 +250,10 @@ function generateSemanticMessage(completedPhase, cwd) {
  * @returns {boolean} true if commit succeeded
  */
 function commitSemantic(cwd, completedPhase, opts = {}) {
+  // See createWipCommit in git-autopilot-save.js for why this snapshots the
+  // index before staging: a rejected commit must not leave `add -A`'s sweep
+  // behind for the operator's next commit to publish.
+  const indexTree = captureIndexTree((a) => gitRun(a, { cwd }));
   try {
     gitSilent(['add', '-A'], { cwd });
     const message = generateSemanticMessage(completedPhase, cwd);
@@ -257,6 +262,7 @@ function commitSemantic(cwd, completedPhase, opts = {}) {
     gitSilent(args, { cwd });
     return true;
   } catch {
+    restoreIndexTree((a) => gitSilent(a, { cwd }), indexTree);
     return false;
   }
 }
@@ -375,6 +381,8 @@ function hasDirtyWorkspace(cwd) {
  * @returns {boolean}
  */
 function commitClose(cwd, opts = {}) {
+  // Same index-restore contract as commitSemantic above.
+  const indexTree = captureIndexTree((a) => gitRun(a, { cwd }));
   try {
     gitSilent(['add', '-A'], { cwd });
     const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
@@ -383,6 +391,7 @@ function commitClose(cwd, opts = {}) {
     gitSilent(args, { cwd });
     return true;
   } catch {
+    restoreIndexTree((a) => gitSilent(a, { cwd }), indexTree);
     return false;
   }
 }
