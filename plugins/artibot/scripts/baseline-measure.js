@@ -77,11 +77,13 @@ function defaultProjectsDir() {
  * `C:\Users\me\Desktop\Artibot` becomes `C--Users-me-Desktop-Artibot` (the
  * colon AND the following separator each contribute a dash).
  *
- * NOTE: `lib/handoff/handoff-builder.js#toProjectSlug` is NOT reused here. It
- * collapses the leading `C:/` into a single `C-`, yielding
- * `C-Users-me-Desktop-Artibot`, which matches no directory on this machine
- * (verified 2026-08-10: 20 project dirs, all double-dash, zero single-dash).
- * Reusing it would silently scan an empty path and report a pristine baseline.
+ * NOTE: `lib/handoff/handoff-builder.js#toProjectSlug` used to collapse the
+ * leading `C:/` into a single `C-` (`C-Users-me-Desktop-Artibot`), which
+ * matched no directory on this machine (verified 2026-08-10: 20 project dirs,
+ * all double-dash, zero single-dash), so this script re-implemented the
+ * encoding. `toProjectSlug` was fixed to the double-dash form on 2026-09-02;
+ * the local copy is kept so a baseline measurement never depends on the
+ * handoff builder's behaviour.
  *
  * @param {string} projectRoot
  * @returns {string}

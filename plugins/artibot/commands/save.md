@@ -16,7 +16,7 @@ Also routed from: 자연어 "저장해줘", "재부팅 전에 정리", "다음 �
 ## Arguments
 
 Parse $ARGUMENTS:
-- `--keep N`: 회전 보관 개수 (기본 30). `.artibot/handoffs/` 아래 `HANDOFF-<timestamp>.md` 형태로 아카이브
+- `--keep N`: 회전 보관 개수 (기본 30). `.artibot/handoffs/` 아래 `YYYY-MM-DD-HHMM.md` 형태로 아카이브 (같은 분 충돌 시 `-2`, `-3` 접미사). git 추적 아카이브는 개수에서 자리를 차지하되 절대 삭제되지 않음
 - `--prune`: 이번 저장 후 강제로 회전 prune 한 번 더 수행 (사용자 명시적 청소)
 - `--quick`: advisor 흡수 단계 스킵 — 30초 미만 모드. 핸드오프만 작성, 마킹 안 함
 - `--no-advisor`: advisor `markConsumed` 호출 스킵 (`--quick` 의 부분집합 별칭. 회전·다른 단계는 정상 실행)
@@ -61,12 +61,16 @@ Parse $ARGUMENTS:
 ### Phase C: 저장 (~0.2s)
 
 1. `lib/handoff/handoff-store.js` 의 `writeHandoff(markdown, { projectRoot, keep, now })` 호출
-2. 반환: `{ latestPath, archivePath, pruned }`
+2. 반환: `{ latestPath, archivePath, pruned, throttled, protectedTracked, pruneSkipped }`
    - `latestPath`: `<projectRoot>/.artibot/HANDOFF.md` (덮어쓰기)
-   - `archivePath`: `<projectRoot>/.artibot/handoffs/HANDOFF-YYYYMMDD-HHmmss.md` (회전)
+   - `archivePath`: `<projectRoot>/.artibot/handoffs/YYYY-MM-DD-HHMM.md` (회전)
    - `pruned`: 회전 정책으로 제거된 파일 개수
-3. `--dry-run` 시 이 단계를 스킵하고 mock 결과로 진행
-4. write 실패 시: 명시적 에러 출력 + advisor 흡수 단계 절대 실행 금지 (원자성 보장)
+   - `throttled`: 직전 아카이브가 10분 이내라 새 파일 대신 제자리 갱신했으면 `true`
+   - `protectedTracked`: `.artibot/handoffs/` 아래 git 추적 아카이브 개수 (전부 덮어쓰기·prune 면제)
+   - `pruneSkipped`: git 워크트리인데 추적 집합을 읽지 못하면 `'git-unknown'` — 이 경우 덮어쓰기도 prune 도 하지 않았으므로 출력에 "추적 확인 불가 → 회전 스킵" 으로 명시. 정상이면 `null`
+3. **저장 후 무결성 점검**: 같은 모듈의 `checkHandoffTrackedIntegrity(projectRoot)` 호출 → `{ inRepo, modified, deleted, error }`. `.artibot/handoffs` 의 M/D 를 출력에 한 줄로 표기하며 **반드시 0/0 이어야 함**. `inRepo=false` 면 "(git 아님)", `error` 가 있으면 "미확인" 으로 표기 — 0/0 으로 꾸미지 말 것
+4. `--dry-run` 시 이 단계를 스킵하고 mock 결과로 진행
+5. write 실패 시: 명시적 에러 출력 + advisor 흡수 단계 절대 실행 금지 (원자성 보장)
 
 ### Phase D: Advisor 흡수 마킹 (~0.1s)
 
@@ -105,8 +109,9 @@ Parse $ARGUMENTS:
 | 항목 | 값 |
 |------|-----|
 | 핸드오프 파일 | `.artibot/HANDOFF.md` |
-| 아카이브 | `.artibot/handoffs/HANDOFF-20260519-114433.md` |
-| 회전 후 보관 | N / keep=30 |
+| 아카이브 | `.artibot/handoffs/2026-05-19-1144.md` (또는 "10분 이내 → 제자리 갱신") |
+| 회전 후 보관 | N / keep=30 (prune N · 추적 보호 N) |
+| 아카이브 무결성 | `.artibot/handoffs` M 0 / D 0 (git 아님 · 미확인 시 그대로 표기) |
 | Advisor 흡수 | N marked / N skipped |
 | WIP 커밋 | N (oldest ~Nh) |
 | 미해결 결정 | N |
@@ -148,9 +153,11 @@ Parse $ARGUMENTS:
 ## 회전 정책 (writeHandoff 내부)
 
 - `latestPath` 는 항상 마지막 저장본으로 덮어씀 — `/resume` 의 단일 진입점
-- `archivePath` 에 즉시 복사본 보존 (mtime 정렬 가능하도록 타임스탬프 파일명)
-- 회전: `keep` 보다 오래된 아카이브 우선 제거 (mtime 기준 오름차순)
-- prune 카운트는 출력에 명시
+- `archivePath` 에 즉시 복사본 보존. 파일명 `YYYY-MM-DD-HHMM[-n].md` 의 스탬프가 정렬·나이 판정의 1차 키이고 mtime 은 스탬프가 없는 파일에만 쓰는 폴백 — 체크아웃·머지·워크트리 생성은 mtime 을 전부 새로 찍지만 파일명은 못 바꾸기 때문
+- 스로틀: 최신 아카이브의 스탬프가 10분 이내면 새 파일 대신 제자리 갱신 (`ARTIBOT_HANDOFF_THROTTLE_MS`, 0 이면 끔). 창은 아카이브 생성 분에 고정되므로 10분 넘게 이어지는 연타는 새 파일로 넘어감
+- 회전: 최신순 `keep` 개 밖의 아카이브 제거. prune 카운트는 출력에 명시
+- **추적 파일 보호**: `git ls-files -- .artibot/handoffs` 로 추적 아카이브를 읽어 그 파일은 **절대 제자리 덮어쓰기·prune 대상이 되지 않음**. 제자리 갱신 대상은 이 저장소가 만든(스탬프 파일명) 미추적 파일뿐. git 워크트리인데 추적 집합을 못 읽으면(`pruneSkipped: 'git-unknown'`) 덮어쓰기·prune 둘 다 하지 않는 fail-closed. git 이 아닌 디렉토리는 종전 동작 그대로. 배경: 새 워크트리에서는 커밋된 옛 핸드오프가 mtime 상 "최신" 으로 보여 실측 3회 이상 ` M` / ` D` 로 잡혔음
+- 포인터 `.artibot/HANDOFF.md` 는 추적 여부와 무관하게 항상 덮어씀 (설계)
 
 ## Anti-Patterns
 
@@ -163,6 +170,7 @@ Parse $ARGUMENTS:
 - Do NOT push/commit/pull을 사용자 확인 없이 자동 실행하지 말 것 — `gitSync.actions` 는 *제안*이며 `confirm:true` 액션은 반드시 단계별 확인 후 실행 (유저 선호: 高위험 git 작업 단계별 확인)
 - Do NOT `git fetch`/네트워크 호출을 `/save` 안에서 자동 수행하지 말 것 — upstream 시각은 마지막 fetch된 remote-tracking ref 기준으로만 비교(오프라인·빠른 저장 보장). fetch는 otherMachineRisk 안내문으로만 권고
 - Do NOT 동기화 정상인데도 경고/액션을 출력하지 말 것 — clean 상태면 "✅ 커밋·푸시 동기화 정상" 한 줄로 끝낼 것
+- Do NOT git 추적 아카이브를 제자리 덮어쓰거나 prune 하지 말 것 — `checkHandoffTrackedIntegrity` 의 M/D 가 0/0 이 아니면 그 자체가 결함이며 출력에서 숨기지 말 것
 
 ## Edge Cases
 
@@ -178,6 +186,8 @@ Parse $ARGUMENTS:
 | 오프라인 / fetch 안 됨 | upstream 시각이 stale → githubLagDays 과대평가 가능. 안내문에 "마지막 fetch 기준" 명시로 완화 |
 | Advisor 파일 missing | `markConsumed` 가 `{marked:0, skipped:N}` 반환, 본문에 명시 |
 | `writeHandoff` 디스크 풀 | 명시적 ERROR 출력, advisor 마킹 스킵 |
+| `.artibot/handoffs/*.md` 가 git 추적됨 (새 워크트리·머지 직후) | 추적 파일은 덮어쓰기·prune 면제, 새 미추적 파일 생성. `protectedTracked` 개수 출력 |
+| git 워크트리인데 `git ls-files` 실패 (인덱스 락·git 없음) | `pruneSkipped: 'git-unknown'` — 덮어쓰기·prune 모두 스킵하고 "추적 확인 불가" 명시 |
 | `--dry-run` | 마크다운 stdout 출력, 디스크 쓰기/마킹 모두 스킵 |
 
 ## Next Steps

@@ -75,7 +75,12 @@ describe('handoff-builder / estimateStepDuration', () => {
 
 describe('handoff-builder / toProjectSlug', () => {
   it('converts a Windows path with drive letter and separators', () => {
-    expect(toProjectSlug('C:\\Users\\foo\\Artibot')).toBe('C-Users-foo-Artibot');
+    // Harness encoding measured 2026-09-02: drive colon AND the following
+    // separator each become '-', so the drive letter is followed by '--'.
+    expect(toProjectSlug('C:\\Users\\foo\\Artibot')).toBe('C--Users-foo-Artibot');
+  });
+  it('drops a trailing separator so "C:/x/" and "C:/x" share one slug', () => {
+    expect(toProjectSlug('C:/Users/foo/Artibot/')).toBe('C--Users-foo-Artibot');
   });
   it('converts a POSIX path', () => {
     expect(toProjectSlug('/home/foo/Artibot')).toBe('-home-foo-Artibot');

@@ -89,8 +89,17 @@ function isGitLockOrTimeout(err) {
 
 /**
  * Convert an absolute project path to the slug used in
- * `~/.claude/projects/<slug>/memory/worklog.md`. Replaces drive separators
- * and path separators with `-`, matching Claude Code's directory layout.
+ * `~/.claude/projects/<slug>/memory/worklog.md`. Every `:` and every path
+ * separator becomes `-`; nothing is collapsed.
+ *
+ * Measured 2026-09-02 on this host: the harness names `C:/Users/x/Repo` as
+ * `C--Users-x-Repo` (double dash — the drive colon and the following slash
+ * each contribute one `-`) and `/home/x/Repo` as `-home-x-Repo`. The previous
+ * form folded `C:/` into a single `C-`, which matched no directory on Windows,
+ * so `collectWorklog` always came back empty there; `scripts/baseline-measure.js`
+ * had documented the mismatch and re-implemented the encoding instead of
+ * reusing this function. A trailing separator is dropped so `C:/x/` and `C:/x`
+ * map to the same slug.
  *
  * @param {string} projectRoot
  * @returns {string}
@@ -99,7 +108,7 @@ export function toProjectSlug(projectRoot) {
   if (!projectRoot) return '';
   return String(projectRoot)
     .replace(/\\/g, '/')
-    .replace(/^([A-Za-z]):\//, '$1-')
+    .replace(/\/+$/, '')
     .replace(/:/g, '-')
     .replace(/\//g, '-');
 }
