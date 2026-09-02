@@ -4,6 +4,8 @@
 
 브리프: {WORKTREE_PATH}/.artibot/split/{LIMB}/brief.md 를 먼저 Read 하라(없으면 {PARENT_ROOT}/.artibot/split/{LIMB}/brief.md — 부모가 정본, worktree 는 사본) — 소유 파일 allowlist·비소유 파일·완료 기준이 거기 있다. 소유 밖 파일은 고치지 말고 보고하라. prompt.md 가 브리프 옆에 같은 내용으로 있다.
 
+§0 정찰 검증 선행: 브리프와 이 프롬프트의 인용(경로·행번호·계수·기전)은 착수 정찰에서 재확인하라. 틀렸으면 따르지 말고 교정 보고. 행번호 인용에는 측정일을 병기하라(동시 편집 트리에서 줄번호는 썩는다).
+
 규약:
 - 시작 인사 1회: 첫 턴에 SendMessage(to='{PARENT}') 로 'limb {LIMB} started @ {WORKTREE_PATH} base=<sha>' 를 보낸다. 그 뒤로는 보고 계약대로만 — 유휴 ≠ 완료다. 인사는 최적화다: 도달하지 않아도 런은 진행되고, 순서에 기대지 마라.
 - 완료 = 줄기 브랜치의 first-parent 선상 마지막 `Split-Limb` 트레일러가 `done` — `git merge origin/main` 뒤 tip 이 병합 커밋이어도 된다(판독기는 first-parent 로 본다), 그 뒤에 `wip` 을 얹으면 완료가 풀린다. 트레일러는 마지막 문단에 둔다(git commit -m '<subject>' -m 'Split-Limb: done' 또는 --trailer). 커밋 없으면 완료가 아니다. 중간 커밋은 `Split-Limb: wip`. 메시지는 최적화이지 진실원이 아니다.

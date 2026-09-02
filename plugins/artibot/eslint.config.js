@@ -114,6 +114,10 @@ export default [
     // silently missing the next new directory.
     files: [
       'lib/adapters/**/*.{js,mjs}', 'lib/autopilot/**/*.{js,mjs}',
+      // context/ (added 2026-09-02): PostCompact rehydration bundle builder
+      // (vNext PR-CX01). Reads hook snapshots + handoff pointer; imports
+      // lib/core only — same L2 profile as handoff-adjacent services.
+      'lib/context/**/*.{js,mjs}',
       'lib/dispatcher/**/*.{js,mjs}',
       'lib/genesis/**/*.{js,mjs}', 'lib/git/**/*.{js,mjs}',
       'lib/intent/**/*.{js,mjs}', 'lib/mcp/**/*.{js,mjs}',

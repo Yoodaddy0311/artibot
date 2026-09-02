@@ -95,6 +95,15 @@
       "singleHookCommand": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-compact.js",
       "singleHookTimeoutMs": 8000,
       "handlers": []
+    },
+    "PostCompact": {
+      "label": "After Context Compaction",
+      "dispatcher": null,
+      "strategy": "single-hook",
+      "note": "Not dispatcher-consolidated (vNext PR-CX01, 2026-09-02). PostCompact is a single direct hook registration in hooks.json, same convention as PreCompact. `singleHookCommand` / `singleHookTimeoutMs` MUST match the PostCompact entry in hooks.json — tests/firewall/hook-timeout-budget.test.js compares them with equality. Automation 0: the hook only rebuilds a rehydration bundle from the PreCompact snapshot and reports it.",
+      "singleHookCommand": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/post-compact-rehydrate.js",
+      "singleHookTimeoutMs": 8000,
+      "handlers": []
     }
   }
 }

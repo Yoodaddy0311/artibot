@@ -48,6 +48,12 @@
 - 줄기·상태를 못 찾으면 **경보하고** `(state unknown)` 을 붙인다(침묵 쪽으로 실패하지 않는다).
 - 스폰 원장 `.artibot/ledger/spawns.ndjson`(`lib/learning/ledger/spawn-ledger.js`, SubagentStart/Stop 훅이 쓴다)이 쌓이면 트랜스크립트 계수 대신 그 원장을 읽는 것이 다음 단계다(미배선).
 
+## lane-state <limb> <state> (운용 상태 기록 — probe·watch 의 입력)
+
+- 레인 상태 갱신: `node <pluginRoot>/scripts/split/lane-state.mjs <limb> <state> [--window <세션>] [--note <한줄>]` — state ∈ `pending|active|awaiting-dispatch|review|serial-gate|closing|done|suspended`(`lib/supervisor/contracts.js#LANE_OPS_STATES`). dispatch 직후 `active`, 검수 넘길 때 `review`, 랜딩 후 `done`, suspend 뒤 `suspended`. **이걸 적어야** probe 의 오탐 억제와 watch 의 ops 열이 켜진다(2026-09-02 blindspot: 쓰는 도구가 없어 전 줄기 unknown 이었다).
+- 현황: `node <pluginRoot>/scripts/split/lane-state.mjs --list` — plan.json 의 모든 줄기와 state/since/window 표(미설정·allowlist 밖 = unknown, fanout-probe 와 같은 판정).
+- 규칙: allowlist 밖 state·plan.json 밖 limb 는 refuse(exit 1), 다른 run.json 키는 절대 지우지 않는다(실런 run.json 의 `metrics`·`landings`·`rebootShutdown_*` 보존). 오타 lane 을 만들 길이 없으므로 이름은 plan.json 그대로.
+
 ## worktree-setup <worktreePath> (창 열린 직후 · 멱등 — A6)
 
 `node <pluginRoot>/scripts/split/worktree-setup.mjs <worktreePath> --limb <limb> [--json]` — `config.split.worktreeSetup` 대로 부모의 `node_modules` 를 junction(win32 `mklink /J`, posix symlink)으로 걸고, `.env.local` 을 없을 때만 복사하고, `envPerLane` 을 `<worktreePath>/.artibot/split/<limb>/lane.env` 로 쓴다(`{limb}`/`{limb_}` 치환 — 레인별 e2e DB 이름). 재실행은 전건 skip.

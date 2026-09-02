@@ -21,11 +21,13 @@ import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { afterEach, describe, expect, it } from 'vitest';
 import * as dispatch from '../../scripts/split/dispatch.mjs';
+import * as laneState from '../../scripts/split/lane-state.mjs';
 import * as restore from '../../scripts/split/restore-blob.mjs';
 import * as resume from '../../scripts/split/resume-notices.mjs';
 import * as suspend from '../../scripts/split/suspend.mjs';
 import * as wts from '../../scripts/split/worktree-setup.mjs';
 import { readRunJson, writeRunJson } from '../../lib/git/split-run-file.js';
+import { LANE_OPS_STATES } from '../../lib/supervisor/contracts.js';
 
 const tmpDirs = [];
 const mkTmp = (label = 'split-tools-') => {
@@ -529,5 +531,105 @@ describe('resume-notices.mjs', () => {
     expect(resume.readBranchSha('worktree-split-demo-auth', repo)).toBe(expected);
     expect(resume.readBranchSha('worktree-split-demo-none', repo)).toBeNull();
     expect(resume.readBranchSha('', repo)).toBeNull();
+  });
+});
+
+// ── lane-state ──────────────────────────────────────────────────────────────
+
+describe('lane-state.mjs (writer for run.json.lanes[limb] — the reader is lib/supervisor/lane-monitor.js#readLaneOpsState)', () => {
+  it('parseArgs', () => {
+    expect(laneState.parseArgs(['auth', 'active', '--window', 'w-1', '--note', 'n', '--json'])).toEqual({ limb: 'auth', state: 'active', window: 'w-1', note: 'n', list: false, json: true, help: false });
+    expect(laneState.parseArgs(['--list'])).toMatchObject({ list: true, limb: null, state: null });
+    expect(() => laneState.parseArgs(['a', 'b', 'c'])).toThrow(/unexpected argument/);
+    expect(() => laneState.parseArgs(['--nope'])).toThrow(/unknown option/);
+  });
+
+  it('refuses a state outside LANE_OPS_STATES and prints the allowlist; run.json untouched', () => {
+    const { parent } = seedParent();
+    const before = fs.readFileSync(path.join(parent, '.artibot', 'split', 'run.json'), 'utf-8');
+    expect(() => laneState.setLaneState({ limb: 'auth', state: 'running' }, { cwd: parent })).toThrow(/allowlist: pending, active/);
+    const c = collect();
+    expect(laneState.main(['auth', 'running', '--json'], { cwd: parent, ...c.io })).toBe(1);
+    expect(JSON.parse(c.stdout()).allowlist).toEqual([...LANE_OPS_STATES]);
+    expect(fs.readFileSync(path.join(parent, '.artibot', 'split', 'run.json'), 'utf-8')).toBe(before);
+  });
+
+  it('refuses a limb not in plan.json (no --force) without touching run.json', () => {
+    const { parent } = seedParent();
+    expect(() => laneState.setLaneState({ limb: 'auht', state: 'active' }, { cwd: parent })).toThrow(/not in plan.json \(known: auth\)/);
+    expect(readRunJson(parent).lanes).toBeUndefined();
+    const c = collect();
+    expect(laneState.main(['auht', 'active'], { cwd: parent, ...c.io })).toBe(1);
+    expect(c.stderr()).toMatch(/lane-state refused/);
+  });
+
+  it('writes { state, since, window, note } atomically, preserves every other key and other lanes, and the reader sees it', async () => {
+    const { parent } = seedParent({ limbs: ['auth', 'billing'] });
+    writeRunJson(parent, {
+      runId: 'split-abc123',
+      windowReuse: { auth: 'split-demo-auth-3f @ x', billing: 'split-demo-billing-3f @ y' },
+      metrics: { lanes: { auth: { files: 3 } } },
+      rebootShutdown_20260902: { at: 't', ok: true },
+      lanes: { billing: 'review' },
+    });
+    const now = () => new Date('2026-09-02T10:00:00.000Z');
+    const r = laneState.setLaneState({ limb: 'auth', state: 'active', note: 'wave 1' }, { cwd: parent, now });
+    expect(r).toEqual({ limb: 'auth', state: 'active', previous: null, since: '2026-09-02T10:00:00.000Z', window: 'split-demo-auth-3f', note: 'wave 1', changed: true });
+    const run = readRunJson(parent);
+    expect(run.lanes.auth).toEqual({ state: 'active', since: '2026-09-02T10:00:00.000Z', window: 'split-demo-auth-3f', note: 'wave 1' });
+    expect(run.lanes.billing).toBe('review');
+    expect(run.metrics).toEqual({ lanes: { auth: { files: 3 } } });
+    expect(run.rebootShutdown_20260902).toEqual({ at: 't', ok: true });
+    expect(run.windowReuse.billing).toBe('split-demo-billing-3f @ y');
+    expect(fs.readdirSync(path.join(parent, '.artibot', 'split')).filter((f) => f.includes('.tmp'))).toEqual([]);
+    const { readLaneOpsState } = await import('../../lib/supervisor/lane-monitor.js');
+    expect(readLaneOpsState(run, 'auth')).toBe('active');
+    expect(readLaneOpsState(run, 'billing')).toBe('review');
+  });
+
+  it('re-asserting the same state keeps since; a state change resets it; --window overrides', () => {
+    const { parent } = seedParent();
+    const t1 = () => new Date('2026-09-02T10:00:00.000Z');
+    const t2 = () => new Date('2026-09-02T11:00:00.000Z');
+    laneState.setLaneState({ limb: 'auth', state: 'active' }, { cwd: parent, now: t1 });
+    const same = laneState.setLaneState({ limb: 'auth', state: 'active' }, { cwd: parent, now: t2 });
+    expect(same).toMatchObject({ changed: false, since: '2026-09-02T10:00:00.000Z', previous: 'active' });
+    const moved = laneState.setLaneState({ limb: 'auth', state: 'review', window: 'w-new' }, { cwd: parent, now: t2 });
+    expect(moved).toMatchObject({ changed: true, since: '2026-09-02T11:00:00.000Z', previous: 'active', window: 'w-new' });
+    expect(readRunJson(parent).lanes.auth).toEqual({ state: 'review', since: '2026-09-02T11:00:00.000Z', window: 'w-new' });
+  });
+
+  it('preserves hand-added keys of lanes[limb] (pr, inspector) and promotes a string entry to the object form', () => {
+    const { parent } = seedParent({ limbs: ['auth', 'billing'] });
+    writeRunJson(parent, { runId: 'split-abc123', lanes: { auth: { state: 'review', since: '2026-09-02T08:00:00.000Z', pr: 220, inspector: 'team-r2-inspector' }, billing: 'active' } });
+    const now = () => new Date('2026-09-02T12:00:00.000Z');
+    laneState.setLaneState({ limb: 'auth', state: 'done', note: 'landed' }, { cwd: parent, now });
+    laneState.setLaneState({ limb: 'billing', state: 'active', window: 'w-b' }, { cwd: parent, now });
+    const run = readRunJson(parent);
+    expect(run.lanes.auth).toEqual({ state: 'done', since: '2026-09-02T12:00:00.000Z', pr: 220, inspector: 'team-r2-inspector', note: 'landed' });
+    expect(run.lanes.billing).toEqual({ state: 'active', since: '2026-09-02T12:00:00.000Z', window: 'w-b' });
+  });
+
+  it('--list shows every plan limb, unknown for unset or out-of-allowlist entries', () => {
+    const { parent } = seedParent({ limbs: ['auth', 'billing', 'search'] });
+    laneState.setLaneState({ limb: 'auth', state: 'done' }, { cwd: parent });
+    writeRunJson(parent, { ...readRunJson(parent), lanes: { ...readRunJson(parent).lanes, billing: { state: 'bogus' } } });
+    const rows = laneState.listLaneStates({ cwd: parent });
+    expect(rows.map((r) => [r.limb, r.state])).toEqual([['auth', 'done'], ['billing', 'unknown'], ['search', 'unknown']]);
+    const c = collect();
+    expect(laneState.main(['--list', '--json'], { cwd: parent, ...c.io })).toBe(0);
+    expect(JSON.parse(c.stdout())).toHaveLength(3);
+    const t = collect();
+    expect(laneState.main(['--list'], { cwd: parent, ...t.io })).toBe(0);
+    expect(t.stdout()).toMatch(/limb\s+state\s+since/);
+  });
+
+  it('main: missing plan → exit 1; help lists the allowlist', () => {
+    const c = collect();
+    expect(laneState.main(['auth', 'active'], { cwd: mkTmp(), ...c.io })).toBe(1);
+    expect(c.stderr()).toMatch(/plan.json missing/);
+    const h = collect();
+    expect(laneState.main(['--help'], { ...h.io })).toBe(0);
+    for (const s of LANE_OPS_STATES) expect(h.stdout()).toContain(s);
   });
 });

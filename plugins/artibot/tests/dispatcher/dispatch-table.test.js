@@ -47,6 +47,10 @@ const EXPECTED_HANDLER_COUNTS = {
   SessionEnd: 6,
   SubagentStop: 3,
   PreCompact: 0,
+  // Added 2026-09-02 (vNext PR-CX01): PostCompact is a single-hook slot like
+  // PreCompact — one direct hooks.json registration
+  // (scripts/hooks/post-compact-rehydrate.js), no dispatcher, 0 handlers here.
+  PostCompact: 0,
 };
 
 const SPAWN_SLOTS = ['SessionStart', 'PostToolUse', 'Stop', 'SessionEnd', 'SubagentStop'];
@@ -63,7 +67,7 @@ describe('dispatch-table.json', () => {
     expect(() => JSON.parse(raw)).not.toThrow();
   });
 
-  it('declares all 7 expected slots', () => {
+  it('declares all 8 expected slots', () => {
     const slots = listSlots();
     expect(slots.sort()).toEqual(Object.keys(EXPECTED_HANDLER_COUNTS).sort());
   });

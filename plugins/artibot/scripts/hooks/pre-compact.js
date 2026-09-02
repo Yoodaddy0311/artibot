@@ -239,12 +239,13 @@ function formatSummaryMessage(summary, tokenEstimate) {
  * AD-40: capture cwd, current git branch, and `git status --short` so the
  * model can resume after compaction without re-issuing exploratory git
  * commands. All sub-calls wrapped in try/catch — failures must NEVER throw.
- * @returns {{ cwd: string, branch: string, gitStatus: string, capturedAt: string }}
+ * @returns {{ cwd: string, branch: string, head: string|null, gitStatus: string, capturedAt: string }}
  */
 function captureGitState() {
   const cwd = process.cwd();
   const capturedAt = new Date().toISOString();
   let branch = 'unknown';
+  let head = null;
   let gitStatus = '';
   try {
     branch = execSync('git rev-parse --abbrev-ref HEAD', {
@@ -258,6 +259,19 @@ function captureGitState() {
     // Not a git repo or git unavailable — leave default
   }
   try {
+    // Additive (vNext PR-CX01): lets post-compact-rehydrate.js report whether
+    // the head moved between PreCompact and PostCompact. Never blocks rehydration.
+    head = execSync('git rev-parse --short=12 HEAD', {
+      cwd,
+      stdio: ['ignore', 'pipe', 'ignore'],
+      encoding: 'utf-8',
+      timeout: 2000,
+      windowsHide: true,
+    }).trim() || null;
+  } catch {
+    // Best effort
+  }
+  try {
     gitStatus = execSync('git status --short', {
       cwd,
       stdio: ['ignore', 'pipe', 'ignore'],
@@ -268,7 +282,7 @@ function captureGitState() {
   } catch {
     // Best effort
   }
-  return { cwd, branch, gitStatus, capturedAt };
+  return { cwd, branch, head, gitStatus, capturedAt };
 }
 
 /**
@@ -365,9 +379,13 @@ export async function main() {
     gitState: {
       cwd: gitState.cwd,
       branch: gitState.branch,
+      // Additive (vNext PR-CX01): read by scripts/hooks/post-compact-rehydrate.js
+      // together with `sessionId` below; summary logic above is unchanged.
+      head: gitState.head,
       hasStatus: Boolean(gitState.gitStatus && gitState.gitStatus.trim().length > 0),
     },
     stateFilePath,
+    sessionId: typeof hookData.session_id === 'string' ? hookData.session_id : null,
   };
 
   try {

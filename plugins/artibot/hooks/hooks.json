@@ -131,6 +131,20 @@
         "category": "context"
       }
     ],
+    "PostCompact": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/post-compact-rehydrate.js",
+            "timeout": 8000
+          }
+        ],
+        "priority": "optional",
+        "category": "context"
+      }
+    ],
     "Stop": [
       {
         "matcher": "*",
