@@ -7,11 +7,25 @@
  *  (c) a medium/low/info finding without `suggestion` stays schema-VALID
  *      (non-breaking for existing consumers).
  *
- * Pure file-read structural assertions (no runtime deps, matching the plugin's
- * zero-dependency policy). The if/then behaviour is additionally verified with
- * ajv ONLY when it is resolvable as a transitive dependency — that block is
- * skipped (never failed) when ajv is absent, so the suite never depends on a
- * package that is not declared in package.json.
+ * Two layers. Structural assertions are pure file reads (no runtime deps,
+ * matching the plugin's zero-dependency policy). The if/then behaviour — the
+ * whole point of (b) and (c) — can only be shown by a real validator, so the
+ * ajv layer runs UNCONDITIONALLY. THE ORACLE IS REQUIRED, NOT OPTIONAL: an
+ * earlier revision guarded it with `Ajv ? it : it.skip`, and a run that
+ * measured no conditional-required behaviour at all reported the same green as
+ * a run that measured all of it. It now goes RED, and a missing oracle
+ * surfaces as {@link AJV_MISSING}. Pattern adopted from
+ * tests/schemas/receipts.test.js (T-16).
+ *
+ * WHAT THIS FILE CANNOT SEE (write it next to the gate, per repo rule):
+ *  - WHICH ajv enforces layer 2. ajv reaches this file only as a TRANSITIVE
+ *    dependency (eslint -> ajv; package.json declares no `ajv`, package-lock
+ *    pins 6.15.0 while the installed tree resolves 6.12.6, both measured
+ *    2026-09-03), so an eslint bump can remove the oracle with nothing else
+ *    changing. The fix then is to DECLARE ajv as a devDependency, never to
+ *    restore the skip.
+ *  - Whether any reviewer actually emits documents against this schema. A green
+ *    run says the contract is satisfiable, not that it is satisfied at runtime.
  */
 
 import { readFile } from 'node:fs/promises';
@@ -19,9 +33,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
-// ajv is a transitive dependency (not declared in package.json), so import it
-// defensively at module scope: the ajv behaviour block is skipped — never
-// failed — when ajv cannot be resolved, keeping the suite zero-dep-safe.
+// Imported defensively at module scope only so that a missing ajv produces the
+// explicit AJV_MISSING failure below instead of an unresolved-import crash
+// whose message says nothing about what to do. Absence is still a FAILURE.
 let Ajv = null;
 try {
   Ajv = (await import('ajv')).default;
@@ -94,13 +108,29 @@ describe('review-output.schema.json — structure', () => {
   });
 });
 
-describe('review-output.schema.json — ajv conditional behaviour (skipped if ajv absent)', () => {
-  const maybeIt = Ajv ? it : it.skip;
+/**
+ * What a reader sees when the schema oracle is gone. Written as guidance, not
+ * as a bare failure: the correct response is to DECLARE the dependency, and
+ * the wrong one — restoring the skip — is the one that looks easiest at 2am.
+ * @type {string}
+ */
+const AJV_MISSING = [
+  'ajv could not be resolved, so schemas/review-output.schema.json cannot be enforced and this gate',
+  'proves nothing. ajv is only a TRANSITIVE dependency here (eslint -> ajv);',
+  "package.json declares no 'ajv'.",
+  'FIX: add ajv to devDependencies. Do NOT skip or delete these assertions —',
+  'a skipped conformance test reports the same green as a passing one.',
+].join(' ');
 
+describe('review-output.schema.json — ajv conditional behaviour (red, never skipped, without ajv)', () => {
   const base = { verdict: 'fail', next_steps: ['fix it'] };
   const mk = (finding) => ({ ...base, findings: [finding] });
 
+  // Throws rather than returning null: a null validator would turn every
+  // assertion below into "validate is not a function", which buries the real
+  // cause. Throwing makes each test fail with the fix instruction instead.
   async function compile() {
+    if (Ajv === null) throw new Error(AJV_MISSING);
     const { schema } = await loadSchema();
     // ajv v6's bundled default meta-schema does not register the draft-07 $id
     // URI; drop $schema to avoid a meta-ref lookup miss. The if/then semantics
@@ -111,7 +141,7 @@ describe('review-output.schema.json — ajv conditional behaviour (skipped if aj
     return ajv.compile(clone);
   }
 
-  maybeIt('rejects a critical finding with no suggestion', async () => {
+  it('rejects a critical finding with no suggestion', async () => {
     const validate = await compile();
     const ok = validate(
       mk({ severity: 'critical', file: 'a.ts', description: 'sqli' }),
@@ -119,7 +149,7 @@ describe('review-output.schema.json — ajv conditional behaviour (skipped if aj
     expect(ok).toBe(false);
   });
 
-  maybeIt('accepts a critical finding that carries a suggestion', async () => {
+  it('accepts a critical finding that carries a suggestion', async () => {
     const validate = await compile();
     const ok = validate(
       mk({
@@ -132,7 +162,7 @@ describe('review-output.schema.json — ajv conditional behaviour (skipped if aj
     expect(ok).toBe(true);
   });
 
-  maybeIt('rejects a high finding with no suggestion', async () => {
+  it('rejects a high finding with no suggestion', async () => {
     const validate = await compile();
     const ok = validate(
       mk({ severity: 'high', file: 'a.ts', description: 'xss' }),
@@ -140,7 +170,7 @@ describe('review-output.schema.json — ajv conditional behaviour (skipped if aj
     expect(ok).toBe(false);
   });
 
-  maybeIt('accepts medium/low/info findings with no suggestion', async () => {
+  it('accepts medium/low/info findings with no suggestion', async () => {
     const validate = await compile();
     for (const severity of ['medium', 'low', 'info']) {
       const ok = validate(
@@ -148,5 +178,27 @@ describe('review-output.schema.json — ajv conditional behaviour (skipped if aj
       );
       expect(ok, `${severity} without suggestion should be valid`).toBe(true);
     }
+  });
+
+  it('has a real oracle — present, and able to say NO as well as YES', async () => {
+    // The assertion IS the fail-closed statement: when ajv is gone this block
+    // goes red and prints the fix, instead of the suite quietly running four
+    // fewer assertions. The compared value carries the guidance so the failure
+    // diff is the instruction.
+    expect(Ajv === null ? AJV_MISSING : 'oracle present').toBe('oracle present');
+
+    // A validator that accepts everything would satisfy every `toBe(true)`
+    // above, and one that rejects everything would satisfy every `toBe(false)`.
+    // Demanding both directions is what makes either worth reading.
+    const validate = await compile();
+    expect(
+      validate(mk({
+        severity: 'critical',
+        file: 'a.ts',
+        description: 'sqli',
+        suggestion: 'parameterize',
+      })),
+    ).toBe(true);
+    expect(validate({ ...base, verdict: 'not-a-verdict', findings: [] })).toBe(false);
   });
 });

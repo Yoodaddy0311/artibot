@@ -57,23 +57,9 @@ When the prompt contains `[artibot:hint recommend=workflow]`, surface to the use
 - 애매하면 유지 — idle 상태 팀원은 토큰을 소비하지 않는다
 - 셧다운 판단 기준: 다음 작업의 도메인이 완전히 달라져서 해당 전문성이 0% 필요할 때만
 
-### Effort & Task Budget (frontier 티어 native)
-frontier 티어 모델은 effort를 네이티브 레벨로 노출한다: **max / xhigh / high / medium / low** (기본 high, 베타 헤더 불필요). `/team` 구현 phase는 **xhigh**가 기본 권장값이고, 대규모 멀티에이전트 오케스트레이션은 **max**까지 올린다. 호출 측은 `output_config.effort`로 직접 지정한다.
+### Effort & Task Budget
 
-```json
-{
-  "output_config": { "effort": "xhigh" }
-}
-```
-
-작업 예산(task budget)은 에이전트 루프 토큰 폭주 방지용 옵트인으로, 팀 전체 작업 예산을 모델에 권고한다.
-
-```json
-{
-  "headers": { "anthropic-beta": "task-budgets-2026-03-13" },
-  "output_config": { "task_budget": { "type": "tokens", "total": 128000 } }
-}
-```
+effort 레벨은 **max / xhigh / high / medium / low** 다 (기본 `high`). `/team` 구현 phase 는 **xhigh** 가 기본 권장값이고, 대규모 멀티에이전트 오케스트레이션은 **max** 까지 올린다. 작업 예산(task budget)은 에이전트 루프 토큰 폭주 방지용 **옵트인 권고값**으로, 팀 전체 작업 예산을 모델에 권고한다.
 
 | 상황 | 권장 effort | 권장 task_budget |
 |---|---|---|
@@ -83,7 +69,9 @@ frontier 티어 모델은 effort를 네이티브 레벨로 노출한다: **max /
 | 짧은 배치 | medium | 20,000 (최소) |
 | 개방형 탐색 | high (기본) | 설정하지 말 것 |
 
-주의: 하드 캡 아님. `max_tokens`(요청별 상한)와 역할이 다름.
+주의: 하드 캡이 아니라 권고다. 요청별 상한(`max_tokens`)과는 역할이 다르다.
+
+> **두 값이 팀원에게 닿는 경로는 프롬프트 디렉티브 하나뿐이다.** `Agent` 도구에는 effort·budget 파라미터가 **없다** — 아래 "Auto-Effort Pre-injection" 이 `[artibot:effort level=…][artibot:task-budget max_tokens=…]` 를 팀원 프롬프트 맨 앞에 붙이는 것이 유일한 실경로다(값의 출처는 `runtime/current-effort.json`·`runtime/current-task-budget.json`). 실측 근거는 `lib/cognitive/effort-policy.js:20-22`("HOW THIS MAPPING ACTUALLY REACHES THE MODEL" 주석, 2026-09-02 측정) — "플러그인에는 Messages API 호출자가 없고 `output_config.effort` 를 설정하는 곳도 없다". 이 자리에 있던 SDK `output_config` JSON 예시는 `Agent` 스폰에도 통하는 것처럼 읽혀 삭제했다(설계 §3.7 R7). SDK·API 를 직접 호출하는 경우의 파라미터 형태는 이 문서의 범위가 아니다 — 필요하면 공식 API 문서를 보라.
 
 ## Execution Flow
 

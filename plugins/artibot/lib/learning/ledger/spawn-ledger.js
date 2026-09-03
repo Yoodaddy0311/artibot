@@ -17,6 +17,7 @@
  * Record shape (one line):
  *   { ts, sessionId, agentId, agentName, agentType, requestedModel,
  *     canonicalModel, modelMismatch, event: 'start'|'stop', durationMs? }
+ *   plus the OPTIONAL v5 routing columns below.
  *
  * `requestedModel` is whatever the spawn payload carried (a model id or a
  * tier alias — caller-owned). `canonicalModel` is the value returned by
@@ -24,6 +25,23 @@
  * (`opus`, `fable`, …), not a model id; map through
  * `lib/core/model-catalog.js#MODELS` when an id is needed. Same value the
  * hook stores in `artibot-state.json#agents[id].canonicalModel`.
+ *
+ * V5 ROUTING COLUMNS (T-31) — `recommendedModel`, `actionClass`,
+ * `routing_epoch_id`, `depth`, `mission_id`, `task_id`, `route_ledger`. These
+ * are OPTIONAL in the {@link OPTIONAL_FIELDS} sense: a key the caller does not
+ * supply is OMITTED from the line, exactly like `durationMs`, rather than
+ * written as null. Two reasons, and both matter:
+ *   1. every pre-T-31 writer keeps producing byte-identical lines, so the
+ *      column set is a statement about what the writer knew, not a schema bump;
+ *   2. an omitted key and an explicit `null` then mean different things —
+ *      "this writer does not produce the column" vs "the writer produced it and
+ *      measured nothing" (the `depth` case, where the host payload names no
+ *      depth). Defaulting them to null would erase that distinction.
+ * `recommendedModel` is a MODEL ID (`models.recommended.model_id` of the
+ * RouteReceipt), NOT a tier — deliberately different from `canonicalModel`,
+ * which is a tier; comparing the two directly is a bug.
+ * `routing_epoch_id` is the spawn's `agentId` (decision G1: the Routing Epoch's
+ * effective unit is the spawn, because in-flight model switching is unverified).
  *
  * DATA POLICY: local file only, no network. Every string field is passed
  * through the ledger's secret scrubber BEFORE serialization, so a redaction
@@ -83,8 +101,48 @@ function scrubbed(v) {
 }
 
 /**
+ * The v5 routing columns, in line order, with the coercion each one gets.
+ *
+ * `string` fields are scrubbed and degrade to null; `depth` keeps a
+ * non-negative integer and degrades to null. A key ABSENT from the caller's
+ * record is absent from the line — see the module header for why omission and
+ * null are kept distinct.
+ *
+ * @type {readonly [string, 'string'|'depth'][]}
+ */
+const OPTIONAL_FIELDS = Object.freeze([
+  ['recommendedModel', 'string'],
+  ['actionClass', 'string'],
+  ['routing_epoch_id', 'string'],
+  ['depth', 'depth'],
+  ['mission_id', 'string'],
+  ['task_id', 'string'],
+  ['route_ledger', 'string'],
+]);
+
+/**
+ * Copy the supplied {@link OPTIONAL_FIELDS} onto the canonical record.
+ * Mutates `out` in place; the caller owns that object and has not published it.
+ *
+ * @param {object} out - Canonical record under construction
+ * @param {object} r - Caller-supplied record
+ * @returns {void}
+ */
+function applyOptionalFields(out, r) {
+  for (const [key, kind] of OPTIONAL_FIELDS) {
+    if (!Object.prototype.hasOwnProperty.call(r, key)) continue;
+    const value = r[key];
+    if (kind === 'depth') {
+      out[key] = Number.isInteger(value) && value >= 0 ? value : null;
+    } else {
+      out[key] = scrubbed(value);
+    }
+  }
+}
+
+/**
  * Normalize a caller-supplied record into the canonical line shape. Unknown
- * keys are dropped; missing keys become null so every line has the same
+ * keys are dropped; missing base keys become null so every line has the same
  * columns and downstream readers never branch on `undefined`.
  *
  * @param {object} record
@@ -109,6 +167,7 @@ function normalizeRecord(record, now) {
   if (Number.isFinite(r.durationMs) && r.durationMs >= 0) {
     out.durationMs = Math.round(r.durationMs);
   }
+  applyOptionalFields(out, r);
   return out;
 }
 

@@ -530,3 +530,118 @@ R1·R2·R3·R4·R5·R6 본문 정정(§3.1·§3.3·§3.5·§3.6) · §7.1 합계
 1. 오너가 §5·§7.4 결정(특히 A1·B1·B2·C1·D1·E1·F1~F3)과 추가 업데이트 요청을 준다.
 2. 레인 4 v1.1 보강 반영 + Phase 4 크로스체크(architect ↔ reviewer 가 이 문서를 레인 원문·패키지·Addendum 과 대조) → 설계 v2.
 3. 승인 후 Phase 0(정본 착지, 코드 0)부터 착수. 그 전까지 코드 변경·커밋 0. `.artibot/guides/v5-design/` 45+1 파일은 승인 직후 커밋(B8).
+
+---
+
+## 부록 0-2. 구축 세션(`ap-20260902-062936-tyc5j4`) 중 팀원 실측으로 드러난 설계 문서 정정 (리더 기록, 본문은 이 표가 이긴다)
+
+| 위치 | 설계 v1 문장 | 실측 | 정정 |
+|---|---|---|---|
+| §0-1 L7 행 | 루트 `.artibot/*.md` 6개 | T-04 가 추적 4개를 `.artibot/archive/2026-06/` 로 이동 → 루트 `.artibot/*.md` 는 HANDOFF·SESSION-NOTES 2개 + `project.md`(T-02 신설) = 3개(2026-09-03 T-49 재확인; "6" 은 `ls` 기준 추적 4 + 미추적 2 라 모순 아님) | 그 행은 이동 **전** 관측. 추적 status 파일은 3이 아니라 **4**(stage-b-side-diagnosis 포함, planner P2) |
+| §3.1 평가셋 | `evaluator.js:219` 인라인 케이스 | `lib/runtime/evaluator.js#DEFAULT_RUNTIME_EVAL_SCENARIOS` **:229**, 8시나리오(planner P8·T-47) | 229 |
+| §3.1 평가셋 첫 케이스 | `substantive_signals:["S3","S5"]` | 그 프롬프트는 요청 1개·슬래시 없음이라 S3·S5 둘 다 안 켜짐(T-47) | **S1**(저장소 쓰기 기대, 도구 시점 확정) + 프롬프트 시점 `deferred` — §3.3 2단계 발급의 실례 |
+| §3.1·§7.2 | `command_activation` "7불리언" | 불리언 6(plan·ultraplan·review·autopilot·autopilot_fast·split) + `skills[]` = 키 7(T-47, `package/03:75`) | "키 7(불리언 6 + skills)" |
+| §3.2 | 가격표 "3배 불일치" | opus·fable 3×, sonnet 1×, haiku 0.8× — 균일 배수 아님(planner P9) | "두 표가 독립 관리, 교차검증 없음" |
+| §3.2·§8.2 | split objective `wallclock_throughput` | 코퍼스 0건 — 레인 2 산문 조어(T-26). `cost_per_accepted_outcome`·`time_to_verified_outcome` 은 policy YAML 실재 | UNATTESTED 표기 유지, 결정 G6: split 도 `time_to_verified_outcome` + 가중치 차이로 갈지 |
+| §3.2 | `execution_profile.performance` 허용값 근거는 06·15·04·정책 YAML | 진짜 enum 은 `package/schemas/mission-contract.schema.yaml`(:32·:37·:41)·`run-ledger.schema.yaml:17`·`package/02:53-63`(T-18 I2) | I2 대상 문서 목록 정정 |
+| §3.1 confidence "4축" | 수치 4축 | `package/03:65-69` 는 수치 3(goal·scope·completion_expectation) + boolean 1 = 키 4(T-13) | "키 4" |
+| §7.2 §7-8 / §3.5 | 상태 8종 = "v1.1 7종 + cancelled" | :198 투영표는 `claimed·done` 을 쓰고 v1.1 미션 7종(planning·completed)과 다르다(T-14) | 태스크 8종 = `queued|claimed|executing|blocked|reviewing|done|failed|cancelled`, 미션 7종은 별도 유지 |
+| §1-8 | E-01 "L1 금지 열거에 `context`·`supervisor` 누락" | `context` 는 HEAD 에 이미 있었고 빠진 것은 `supervisor` 1건; 대신 L2 group 이 `handoff` 를 안 막는 같은 종류의 구멍 1건 추가 발견·봉합(T-10) | E-01 = supervisor 1 + handoff 1 |
+| §7.1 | `lease` 0건 / `idempotency` 1파일 | landing-lock 은 이름 없는 TTL 리스(§7.1 정정 완료); idempotency 2파일 | 반영 완료 |
+| PRD 전제 | "행동 변화 0 = 프롬프트 바이트 불변" | 헌법 단계 A 가 rules·commands 본문 편집이라 자기모순(planner P1) | **런타임 행동 불변**(스폰 모델·훅 차단 결과·기존 커맨드 출력 경로)으로 재정의 |
+| §3.7 A-3 원문 | "훅·커맨드·스킬·lib 모듈은 릴리스마다 …" | 설계 축자문이 아니라 D18 재료로 리더가 구성한 문장(T-05) | 규칙은 유지, 출처 표기를 "D18 유도" 로 |
+| §3.5 게이트 10행 | "DB 는 DDL 만" | `safety.js` 는 `DELETE FROM` no-WHERE(DML)도 잡음 | 반영 완료 |
+| §8.2 §32-35 | "5캐리어" | 설계 명시 3(team·autopilot·split) + parity 게이트 CARRIERS 5; `sc·ultraplan` 은 진행률 바 마커 0건 → 미확인 등급(T-48). **`split.md` 도 마커 0건**(트레일러 표) | "캐리어 3 + 미확인 2", split 은 설계 명시만 |
+| 세션 규칙 | — | 공유 워킹트리 **라이브 뮤테이션 금지**(T-48 뮤테이션 창이 리더 관측에 거짓 레드로 잡힘) | 전 레인 규칙으로 승격 |
+| Hardening §6 | `plan.accepted→plan.md` | 어휘 36종에 `plan.accepted` 없음, `plan.revised{revision,mode}` 만(T-40 실측) | allowlist 가 정본 — plan.md ← `plan.revised`. `adr.*` 이벤트도 0건이라 ADR 핸들러는 B2 대기 |
+| §3.5 규칙 1 | 계약에 `activation_suppressed_by:"explicit-command"` | 착지 스키마 `additionalProperties:false`, 해당 필드 없음(T-22) | Observe 동안 `compileMission().meta.activation_suppressed_by` 로 확정 |
+| §3.1 템플릿 | intent.md `status: active`, text 정규화·span null 허용 | contract enum 7종에 `active` 없음; 설계 §3.1 은 verbatim 보존(T-23·T-12 실측) | 템플릿 `status: queued`, text = 원문 verbatim slice, span 필수·null 은 오류. 정본 검사기 `lib/mission/contract.js#verifyExplicitRequestSpans` |
+| v5 §11 표 / OD-1 | HG-07 외부 시스템 쓰기 default `policy` | OD-1 "파괴·배포·외부쓰기·제품결정 = 항상 사람"(T-38) | OD-1 이 이긴다 — HG-07 `human`(policyRef 유지, note 로 승격 근거 기록) |
+| §3.3 / §3.5 | topology-router 의 `humanGateHits` | 텍스트 매치라 `tools` 필터 미경유(config 경로 문자열에 HG-02·HG-13 동시 히트, T-38 실측) | 게이트 판정 정본 = 훅 계층 `human-gates.js#classify`; 라우터 hit 는 advisory, 결정에 사용 금지 |
+| §3.6 / config `ledger.comment` | 4KB 초과 "evidence_refs 로 절단" vs "거부" | 두 문서 상충(T-20) | 2단: 비필수 data 접기 → 그래도 초과면 `ledger.rejected`; receipt 3종은 `additionalProperties:false` 라 접지 않고 거부 |
+| §7.2 §25 | redaction 은 `guard-registry.js#SECRET_CONTENT_PATTERNS` 재사용 | 그 상수는 export 되지 않음(T-20·T-40 실측) | 원장은 `lib/learning/ledger/redact.js#redactSecrets`(기존 spawn-ledger 스크러버) 사용, 4형상 마스킹은 테스트로 고정 |
+| PRD R-09 | 세션 fallback mission_id 발급자 = T-24 | 실제 소유·착지 = T-22 `lib/mission/mission-id.js`(T-22·T-24 양쪽 보고) | PRD 오기 — 코드 구멍 없음 |
+| §3.2 / 02:58 | performance 어휘 `high-quality`·`maximum-performance` | T-18 스키마 enum 은 `quality`·`maximum_performance`, README :86-89 가 "매핑하라" 명시(T-24) | interpreter 가 스키마 철자 발행, `PERFORMANCE_PROSE_ALIASES` 로 매핑 |
+| 레인 5 §1-D | `safety.js#RISK_PATTERNS` | export 명은 `DANGEROUS_PATTERNS`(`safety.js:18`, T-38) | 인용 정정 |
+| 어휘 | `human.resolved` 는 `decision` 만 필수 | `question_id` 미선언 → ask↔resolve 짝짓기 불가(T-40) | T-15 에 선택적 `question_id` 추가 지시(17:08) |
+| 레인 5 §2-D | worker `heartbeat_at := max(heartbeat, commit)` (괄호는 "assessLane 그대로") | `lane-monitor.js#assessLane:129-138` 은 우선순위(heartbeat 유한값이면 그것, 아니면 commit) — 본문과 괄호가 자기모순(T-46) | 우선순위가 정본(활성 판정기 둘 금지). T-46 반영 지시 17:11 |
+| §3.5 / OD-4 F3 | StateStore 위치 = git-common-dir | 메인 트리에서 `git rev-parse --git-common-dir` 은 **상대경로 `.git`**, 링크드 worktree 만 절대경로(T-21, git 2.54 실측) | `path.resolve(projectRoot, commonDir, "artibot")` 로 해석. 절대 가정 시 CWD 에 스토어 생성 |
+| 어휘 / §3.5 | `human.asked.question_id` 발급 형식 | 어느 정본에도 없음(T-15) | 리더 결정: `q-<sid8>-<sha256(gate|command)[:12]>`, 결정적(재차단 = 같은 id). T-39 구현 |
+| §3.1 / §3.5 배선 | `task.meta.missionContract` 에 계약 기록 | `tests/runtime/middleware/tasks.test.js:165·:199` 가 `meta` 전체 객체를 고정(T-25) | 형제 필드 `task.mission{contract,mode,signals,substantive,deferred,ledger,ok}` — `meta` 바이트 불변. 컴파일러의 `mission-candidate-deferred`(설계 표기) → 원장 `mission.candidate_deferred` 는 fail-closed 맵 |
+| §3.1 substantive | `mission.created` 가 주 경로 | 프롬프트 단계 미들웨어는 S3(요청≥2)·S5(슬래시 5종)만 공급 가능 — S4 confidence·S6 activeMission 미배선(T-25) | Phase 0 에서 나머지는 전부 `mission.candidate_deferred`. 발화율 분모 미측정 |
+| §8.1 G1 | 라우터가 epoch 없이도 receipt 발행(`routing_epoch_id:null`) | route-receipt 스키마는 `routing_epoch_id` required·minLength 1(T-29 실측 `:69-73`) | 스키마 엄격 유지 — epoch 없는 receipt 는 append 불가. Observe writer 는 T-31 훅뿐이고 항상 `epoch = agentId` |
+| §8.3 Replay | `loadReplay` 가 `lib/runtime/ledger.js#readAllEvents` 를 직접 호출 | L2→L5 import 는 eslint 하드 에러(`eslint.config.js:196-200`, T-41 프로브 실측); §1 포트 규칙 | `readEvents` 포트 주입, 누락 시 throw(fail-closed). 리더 지시가 틀렸음 |
+| §3.6 writer | receipt 검증에 ajv 사용 가능(리포 내 해석됨) | ajv 6.x 는 eslint 전이 의존·미선언, `lib/` 외부 import 0건(T-20 실측) | `lib/runtime/ledger-schema.js` 의존성 0 서브셋 검증기 + 게이트에서 ajv 를 오라클로 13픽스처 대조(불일치 0). `allOf/oneOf/if` 는 런타임 미검증 명시. ajv devDependency 명시는 후속 |
+| §3.5 question_id | `sha256(gate|command)` | gate 없음(hit 0)·짧은 session_id 표기 미정(T-39) | gate 없음 = `""`, sid 는 `slice(0,8)` 그대로(패딩 없음 — `sessionFallbackMissionId` 의 8자 미만 해시 대체와 표기 불일치, 기록만) |
+| §1-8 | 신규 디렉터리는 "L2 순수 모듈" | 20여 모듈 중 17개는 `node:fs` 0; `project-state/{state-manager,journal}`·`economics/usage-receipt`·L4 `split-state` 는 저장소 소유라 fs 직접 호출(T-51) | 문언 교체: "포트는 상향 호출(L3/L4/L5)·config·시계·git 에만; `node:fs` 는 저장소 소유 모듈에 한해 직접 허용" — eslint 규칙이 이미 그렇게 동작 |
+| §3.6 doctor | `reduce(ledger) ≟ state.yaml` 바이트 비교 | `state.updated.data` 는 `{state_version,status,reason}` 뿐이라 원장만으로 상태 재구성 불가; `reconcile.js` 는 store 저널로 재구성하고 원장은 `state_version` 집합 비교(T-51) | 불변식 교체: 원장 = `state_version` 수열 정본, store 저널 = 내용 정본, 검사 = ⊇ 방향 두 집합 비교 + 투영 바이트 비교(T-43 Check 8 이 그렇게 구현) |
+| §3.6 어휘 | `worker.claimed/released` 와 `task.claimed/released` 4이벤트 | 사실 2개에 이벤트 4개, 계열 구분 근거가 spec 문자열뿐; split-state 가 두 계열을 섞어 씀(T-51) | 후속 결정 항목(소비자 0 인 지금이 가장 싸다) — Observe 에선 T-46 이 writer 입력 형태로만 고정 |
+| §0-2 가격표 행 | "두 표가 독립 관리" 정정 완료 | `middleware/cache-roi.js:30,81-86` 은 model-catalog 를 참조한다고 적고 import 하지 않음, 교차 테스트 0(T-51) | "정정 완료" 아님 — Shadow 가격 단일화 항목에 cache-roi 명시 |
+| §3.4 / C4 | Observe 는 unmeasured 를 카운트만 | `artifact-lifecycle.js:465` 첫 게이트가 unmeasured 1건이면 outcome 차단(단일 불리언, 층 구분 없음)(T-51) | C4 선점 해제: `opts.policy.unmeasuredBlocksOutcome`(기본 true) + `verify.completed.data.layer` 선택 필드 — T-40·T-15 지시 17:52 |
+| §3.6 dedupe | 원장 중복 키 `(source,pid,seq)` | seq 는 프로세스마다 0 부터, 회전은 미션 단위 → pid 재사용 시 조용한 유실(T-51) | 키에 `session_id` 추가 — T-20·T-41 지시 17:52 |
+| 검색 규율 §1 | — | `ledger.js:113`·`plan-repair.js:66`·`usage-receipt.js:446` 에 리터럴 NUL 구분자 → ripgrep 이 이후를 binary 로 잘라 35~65% 실명(T-51) | `"\0"` 이스케이프로 교체 지시. 규칙 추가: 소스에 제어 바이트 리터럴 금지 |
+| §3.7 D18 Existence Audit | 훅·커맨드·스킬·모듈 발화 수를 원장에서 fold | 어휘 36종 중 그 **이름**을 담는 필드 0 — `source` 는 8종 카테고리, `tool.used.data.tool` 은 툴명(`Skill` 까지만), `intent.detected.data.type` 은 의도(T-44 전수) | Phase 0 결론 = 분모 부재. 카운터는 `unmeasured:no-event-carries-<kind>` 로 정직하게. Shadow 에서 carrier 필드 결정 필요(예: `tool.used.data.skill`) |
+| CLAUDE.md:88 면제 목록 | 정본 1곳 | 사본 3벌: CLAUDE.md 원문 · `tests/firewall/existence-audit-section.test.js:55` · `lib/replay/existence-audit.js` 상수(T-44) | 후속: 공용 상수 승격(마지막 항목 표기 차이 `verification-discipline 전문` vs 부분문자열) |
+| §1-8 `now` 포트 | 시계 포트 3계약(T-51 #6) | 실측(T-34): state-manager·split-state 는 이미 `() => Date`, unified-verifier 만 permissive; 다른 것은 **엄격도**(split-state 무언 폴백) | 계약 `() => Date` + 잘못된 형태 = TypeError 로 통일(T-34 반영, T-46 지시). T-51 #6 관측은 부분 오류 |
+| §0-2 NUL 행 정정 | "이후 35~65% 실명" | ripgrep·grep 은 NUL 1바이트에 파일 **전체**를 binary 로 판정해 매칭 줄을 하나도 출력하지 않음(T-35 실측: `rg -n const` 1줄 vs `grep -an` 15줄) | 피해 = 파일 전체. 재발 방지 게이트 `tests/firewall/no-control-bytes.test.js`(T-32 구축 중). 유입 경로 미확인(셸 인용 접힘 추정) |
+| §3.6:228 | `route.selected{source:"shadow", shadow_of}` | 봉투 `source`(발신자 8종, 훅=`hook`) 와 영수증 `data.source`(production/shadow) 는 **다른 필드**이고 공존이 설계 의도(T-31·T-15 실측). allowlist `route.selected.sources` 는 `["scheduler","hook"]` 로 확장(T-15) | 발신자 라벨 위조 금지 — 어휘가 사실을 따른다. 리더가 두 필드를 합쳐 낸 주석 정정 지시는 T-31 이 거부, 명시적 분리 블록으로 대체 |
+| PRD T-19 title | common-meta "4조각 예약만" | 착지 11 `$defs`, 예약만 원칙(루트 검증 0·`$ref` 0) 준수(T-49) | title 대체됨 — NOTE |
+| PRD 소유권 | T-07 `ultraplan.md`·T-11 `config-schema.js`/`model-catalog.js`/`model-catalog-version.test.js`·T-20 `ledger-schema.js`·T-37 `decision-events.js`·T-40 `artifact-lifecycle-gates.js`·T-46 `split-state-sources.js`·T-32 `lib/planning/scorecard.js` | affectedPaths 밖 착지(T-49 #4·#5 + 800줄 게이트 분할 승인분) | 커밋 전 정본 JSON 소유권 갱신 대상 — 전부 리더 승인 |
+| 세션 기록 | `lib/replay/__layer_probe.js` | 17:51 존재(T-49 `git status`) → 18:05 전후 T-41 삭제 → 18:06·18:08 부재(리더·T-49) | 시점 관측 3건 정합, 제3의 사건 없음 |
+| 의존성 | ajv | eslint 전이 의존(6.x, 미선언)을 `tests/firewall/ledger-vocab-allowlist.test.js` 가 오라클로 사용(T-20) | 후속: `devDependencies` 명시 선언(package.json 리더 소유, 락파일 갱신 필요해 커밋 시점) |
+| §3.6 dedupe / T-41 | `(session_id,pid)` 그룹핑 | seq 카운터의 진짜 범위는 프로세스 인스턴스 — 한 프로세스가 두 session_id 로 쓰면 없는 구멍을 지어냄(T-41 거울상 위험, 현재 writer 3곳은 세션 1개) | 후속: 봉투에 process-instance id 도입 검토 |
+| 세션 기록 | — | 2026-09-02 18:28 팀원 14명 세션 한도(21:30 리셋) 중단 → 09-03 09:05 전원 idle 생존, 재개. 중단 구간 디스크 변경 0(`find -newermt`) | 한도 리셋 후 같은 에이전트 재개(재스폰 0). T-50 수리 10건은 09:05 이후 착지 |
+| §1-8 계층 / T-10 | "topology 는 autopilot 을 import 하므로 L2 불가"(리더 근거) | `lib/autopilot` 은 **L2**, L2→L2 는 형제 import(T-10 실측). topology 의 lib 간선 5개 전부 L2 이하 | L4 유지 근거를 "합성 계층 + 오늘 비용 0 + L2 모듈이 split-state 를 필요로 하는 순간 배치 재검토" 로 교체. 리더 근거는 오류 |
+| §3.4 verifier | "throw 는 잘못된 `now` 뿐" | 순환 evidence 로 id 스탬프 `JSON.stringify` 가 throw(T-50 #3) | 필드 단위 `[unserializable]` 대체 + `warnings[]` 신설 + 반환 `evidence[]` 도 직렬화 가능형(T-34) |
+| §3.6 writer | "NEVER THROWS" | 순환 `data` 로 `redactDeep` RangeError(T-50 #2) | `WeakSet`/depth 가드 + 조립부 try/catch → `{ok:false, reason:"writer-exception:*"}`(T-20, 착지 대기) |
+| §3.5 StateStore | "보증은 CAS — 조용한 덮어쓰기 없음" | `expectedVersion` 생략 시 검사 없음(옵트인, T-50 #4) | Phase 0 옵트인 유지 + 헤더 사실화 + 생략 시 `warnings:["cas:skipped"]`(T-21). 호출자가 버전을 들면 기본값 반전 |
+| 어휘 / 02:57 | completion 7종 정본 1곳 | `mission-id.js` 사본 `"pr"` 소문자 드리프트 + `artifact.js:91` 세 번째 사본(T-50 #5·T-22) | interpreter 를 정본으로 재수출 + `toBe` 참조 동일성(T-22 완료, T-23 지시) |
+| 게이트 진실성 | — | `artifact-governance` 예외 키 무앵커(#6)·`command-output-invariance` 필터 무앵커(#7)·`usage-receipt-schema-guard` 항진명제+무음 skip(#8)(T-50 직접 재현) | 카디널리티 앵커·명시 실패 전환. skip 된 적합성 테스트는 통과와 같은 green — 파이어월에서 skip 금지 원칙 |
+| CLAUDE.md:80 Quality Gates | "files < 800, functions < 50" | 기계적 강제 0 — `max-lines` 미설정, CI 스크립트 0(T-50 §2). 신규 `lib/` 800 초과 1건(`intent/artifact.js` 1,347 유예), 테스트 800 이상 다수 | 후속: 현 위반자 명시 래칫 베이스라인 게이트(`tests/firewall/`). 이번 세션은 분할 4건(T-20·T-37·T-40·T-46)으로 대응 |
+| §3.7 nl-activation | 픽스처 형식 검증만("lib/mission 미착지") | `compileMission` 착지(T-50 §8) | 10 케이스 실제 실행 대조 지시(T-47, 해상도 10%p 명시) |
+| 부록 자체 | — | 부록 0-2 :582 에 리더 삽입 스크립트가 남긴 리터럴 NUL 1바이트(T-52 실측; control-byte 게이트는 `.artibot/` 밖) | 09:12 이스케이프. 후속: 게이트 root 에 `.artibot/guides` 추가 검토 |
+| §4 Observe 종료조건 / 설치 | 훅 착지 = 기록 시작 | 훅은 `${CLAUDE_PLUGIN_ROOT}` = 마켓플레이스 미러(`~/.claude/plugins/marketplaces/artibot/…`, 09-02 13:37, 241줄)에서 실행; `~/.claude/artibot/` 은 statusline 용 flat 설치본(12:42). 둘 다 정지 → Phase 0 훅 3종 실행 0회, 스폰 원장 라우팅 필드 0/119(T-51 2차 + T-42 정정, 리더 10:04 실측) | Observe 측정은 릴리스 + `claude plugin marketplace update`/`plugin update` 반영 뒤부터(`sync:local` 은 flat 만). "파일 있다·테스트 통과" ≠ "실행된다"(규율 §2) |
+| §1-2 `ledger ⊇ store` | state-manager 는 원장 거부 시 store 쓰기 포기 | 거부 판정이 `appended === false` 뿐인데 writer 는 `{ok}` 만 반환 → 실제 경로에서 원장 실패 = 성공으로 오판, 페어링 게이트 스텁이 `{appended}` 형태라 못 봄(T-51 2차 A·A′) | 술어 `throw || ok===false || appended===false`(split-state `ledgerRefusal` 과 동일) + 스텁 형태 교정 + 실제 writer 1케이스(T-21) |
+| §1-8 시계 포트 | `readClock` 정본 = unified-verifier | 무가드 `now()` 2곳 잔존(`state-manager:306`·`event-writer:348`); L5 가 verification 에서 시계를 빌리는 모양은 어긋남(T-51 2차 B·②) | `lib/core/clock.js` 로 이전(재수출 유지) + 두 곳 채택을 한 변경으로(T-34·T-20·T-21). 이전 조건 = 소비자 수가 아니라 간선 모양 |
+| §3.6 Observe 기록 거처 | 중앙 원장 하나 | `route.selected.sources` 는 `hook` 추가로 원장에, `topology.selected.sources` 는 `[scheduler,supervisor]` 그대로라 T-37 은 `runtime/decisions/` 사이드 채널로 — 레인별 우연(T-51 2차 C) | Shadow 후속: hook 이 정당 발행자인 이벤트는 sources 확장, 아니면 전부 사이드 채널 — 한 규칙 |
+| §3.3 / §3.6 | 모든 writer 는 projectRoot 주입 | `decision-events.js:135` 기본 기록 위치 `<pluginRoot>/runtime/decisions/` → 설치 플러그인에서 모든 프로젝트 세션이 한 디렉터리에 섞임(T-51 2차 D) | Shadow 후속: 기본값 projectRoot 또는 줄에 프로젝트 식별자 필수 |
+| §1-8 topology 계층 | L4 등록 근거 = 라우터가 cognitive plan 을 소비 | 실 간선 전부 L2 이하; 디렉터리에 L4형(router)과 L2형(split-state) 혼재(T-10·T-51 2차 ①) | L4 유지 — 근거는 "설계상 의존 상한(입력 정본 = `buildWorkflowPlan` 결과)", 현재 간선이 아님. 혼재는 기록만 |
+| §1-2 (2차 수리) | — | 옛 술어 `appended===false` 는 실제 writer 실패 3종(`line-too-large`·`no-project-root`·`invalid-envelope`)을 전부 성공으로 읽음(T-21 실측 4경로 대조) | 술어 `throw || ok===false || appended===false`; 페어링 게이트가 실제 `writeEvent` 2케이스 포함; 스텁 기본 형태 `{ok}` |
+| §1-8 시계 (2차 수리) | — | `readClock` 정의 `lib/core/clock.js`(L1, import 0, 기본 label `clock`), `unified-verifier` 는 재수출 + 명시 label; 채택 4곳(verifier·split-state 직접·event-writer·state-manager) | 판정기 1개. event-writer 는 비함수 `now` 를 무음 벽시계 대체 → `ok:false` 로(행동 변화, 호출자 도달 0 — tasks.js 는 Date 반환 래퍼) |
+| 검수 방법 | 동결 = 소유자 "추가 작업 없음" 보고 | 2차 검수 창(09:28~)에 리더가 T-51 수리(clock 이전 등 13파일 09:45~09:52)를 다시 배분 — 1차와 같은 실수(T-49·T-50 2차 §0) | 규칙: 검수 착수 후 그 대상에 수리를 배분하지 않는다. 이동분은 3차 부분패스로 재검 |
+| 코드 내 설계 인용 | `ARTIBOT-5.0-DESIGN.md:NNN`·`design:NNN` 라인 앵커 | 97건/distinct 36 중 9종이 현 본문과 불일치(`:253` 표 구분선, `:259` 빈 줄 등), 오프셋 불규칙 — 쓰인 시점부터 틀림(T-49 2차 #1; 1차 "46건 전부 정확" 철회) | 라인 앵커 → §헤딩 앵커 일괄 교체(T-53, 주석만). 규칙: 코드에서 문서를 인용할 때 줄번호 금지 |
+| §3.2 가격표(코드 주석) | `usage-receipt.js:39-42` "~3x disagree" | 부록 정정(불균일 0.8~3.0×) 이 코드 주석에 안 내려옴(T-49 2차 #5) | T-32 주석 정정 |
+| §3.6 writer 성능 | `redactDeep` "TERMINATES ON ANY INPUT" | path-scoped 순환 가드는 공유 서브트리 DAG 에서 2^depth(depth 22 → 2.9s, T-49 실측); 4KB cap 이전에 실행되어 못 막음 | 객체별 memo(WeakMap) 로 O(n), 순환은 in-progress 집합(T-20) |
+| 소유권 추가(2차) | — | T-37 `lib/observability/decision-events.js`(+221 → **+289/-0, 11:34 재측정**; `runtime-prompt.js` +92/-14)·T-52 `plugins/artibot/README.md`(+3/-3) 는 affectedPaths 밖 — 리더 승인 확장(T-49 2차 #2·#4) | 커밋 전 소유권 기록에 포함. PRD 부록 A 는 :337 에서 "정본 아님" 강등 상태(#12) |
+| 문서 주장 | `commands/scorecard.md:80` "writer 미배선이라 unmeasured 가 정상" | 훅 3곳 배선 착지 — 비어 있는 이유는 설치본 미반영(T-49 2차 #3) | T-42 문장 정정 |
+| §3.6 writer 성능(수리) | — | memo(`WeakMap`) + in-progress 순환 집합: 공유 DAG depth 22 2,733ms → 0.94ms(T-20), 리더 프로브 0.2ms; 출력 8종 바이트 동일; 깊이-잘린 서브트리는 memo 제외 | 작업량 O(객체). 200ms 상한 테스트는 이 머신 기준(CI 미측정) |
+| T-49 2차 #10 | topology-router 테스트 "8 comparisons" 문구·추가 방향 미검출 | 문자열 리포 전역 0건, `:854-855` 단언 실재(T-36 실측, 리더 grep 확인) | **철회** — 검수측 오류(출처 미확인) |
+| 코드 인용 규칙 | 줄번호 인용 | T-25 자기 파일 12건 중 7건 stale(리더 지시의 `:132·:210` 도 썩어 있었음) → 심볼·JSON 포인터·테스트명으로 전량 교체 | 규칙은 리더 지시문에도 적용 |
+| §4 Observe / `/scorecard` 문서 | "writer 미배선이라 unmeasured 가 정상" | writer 3곳 배선 착지; 비어 있는 이유는 설치본(마켓플레이스 미러) 미반영(T-42 정정, 헤더 3곳 동반) | "배선 ≠ 실행 ≠ append" 3단 구분을 문서에 명시 |
+| 코드 내 설계 인용(수리) | — | T-53: 93 occurrences/35 distinct + bare 3 = 96건, 32파일, MISMATCH 10종/14건(T-49 9종 + `:500`), 잔여 라인 앵커 0(리더 10:13 grep) | 형식 = 기존 관례 `design §x.y`(판정표는 행 라벨 병기). 코드 인용에 줄번호 금지 규칙 확정 |
+| 검수 방법(2) | mtime 정지 = 동결 | 2차 검수 창에 T-53 sweep(32파일) 도 겹침 — 3회 연속 붕괴(T-50 2차 §0) | 규칙 확정: **검수 착수 후 리더 배분 0**(수리는 대기열, 보고 도착 후 일괄). 불변 스냅샷은 미추적 95건이라 worktree 불가 — 커밋 후부터 가능 |
+| §3.3 T-37 관측성 | 실패는 세어진다(`getDecisionRecorderStats`) | `stats` 는 프롬프트마다 죽는 훅 프로세스의 모듈 객체, 비테스트 호출자 0 — 세어도 아무도 못 본다(T-50 2차 §3). 프로덕션 0행의 실제 원인은 설치본 정지(리더 10:19: 워킹트리 token-usage 는 10:16 검수 프로브 1회) | 대기열: stats 를 decisions 줄 또는 stderr 로 영속 |
+| §3.2 T-31 | 라우팅 필드는 추측 대신 skip | `subagent-handler.js:325-326` `phase` 가 `derivePhase` null 을 `"build"` 로 날조, 단언 0(T-50 2차 §4) — 6필드 중 유일한 fail-open | 대기열: null 유지 + skip 사유 + 단언 |
+| CHANGELOG | receipt `applied:false` | route-receipt 는 `additionalProperties:false`, `applied` 필드 없음 — 실제 기제는 `source:"shadow"`; `applied:false` 는 model-switcher 객체(T-50 2차 §4) | 대기열: T-52 문구 정정 |
+| 의존성(2) | ajv 명시 실패 3파일 | 같은 skip 패턴 8곳 잔존(review-verdict-adapter·mission-contract·review-output·state-task-lease·execution-profile×2·contract-ajv-crosscheck·adaptive-router 테스트)(T-50 2차 #8) | 대기열: T-54 sweep + `devDependencies.ajv` 선언(커밋 준비) |
+| §1-8 eslint 근거표(2) | split-state → verification 엣지 | clock.js 추출로 그 엣지는 `../core/clock.js` 로 이동 — T-10 이 방금 고친 표가 다시 낡음(T-50 2차) | 대기열: T-10 재정정. 교훈: 근거표에 간선 목록을 적으면 간선이 바뀔 때마다 썩는다 → 규칙 문장만 |
+| 코드 내 인용(2) | 설계문서 앵커만 대상 | 코드→코드 라인 인용(`x.js:N`) 잔존, `doctor-checks.js:30` 의 `eslint.config.js:154-207` 은 T-10 주석 확장으로 이미 낡음(T-51 3차 P3-1, 패턴 204 히트 중 픽스처 오탐 포함) | 대기열: 2차 sweep(코드 인용은 심볼명, 픽스처 데이터 제외). 규칙 일반화: 어떤 파일이든 줄번호 인용 금지 |
+| §1-8 eslint 근거표(3) | 간선 5줄 열거 | 09:08 표는 `split-state-sources.js`(supervisor 간선) 를 열지 않아 **썩기 전에 이미 불완전**했고, 09:52 clock 이동으로 다시 낡음(T-10 자기 실측) | 간선 목록 삭제, 불변식 문장만("전부 L2 이하, cognitive/learning 0; 최신 목록은 코드가 정본") |
+| T-50 2차 BLOCK §1 | "T-37 프로덕션 0행 = 기록기 결함" | 미러 훅은 v4.52.0 체크아웃(08-28 판 `runtime-prompt.js`, recorder 호출 0); 워킹트리 `token-usage-session.json` 10:16 requestCount 1 = 검수 프로브(T-50 자기 철회, 리더 10:19·10:25 실측) | 원인 = P2-0 설치본 정지. mtime 은 "누가 실행했나" 를 구분 못 함 — 카운터 영속(T-37 대기열) 이 오진과 결함의 같은 뿌리 |
+| 검수 방법(3) | "검수 집합 밖 파일은 배분 가능" | 3차 검수 중 집합 밖 3파일 배분 → 그중 1개가 검수 REPAIR 대상, 브리프는 전 트리 이동을 BLOCK 으로 정의(T-49 3차) — 3회 연속 리더 책임 | 규칙: 검수 열린 동안 배분 0(집합 안팎 불문) + 착수 전 전 레인 편집 동결 통보(착수·종료 시각 명시) |
+| 코드 내 인용(3) | 리더 grep 범위 `lib schemas tests scripts` | `commands/doctor.md:280·292·358` 에 약식 `design:253/259/95` 3건 잔존 — 전부 2차 MISMATCH 앵커(T-49 3차 #1) | T-53 2차 sweep 범위에 `commands/ rules/ skills/` + 코드→코드 인용 추가 |
+| 소유권 추가(3) | — | T-37 `tests/observability/decision-events-t37.test.js` 도 affectedPaths 밖(T-49 3차 #2) | 리더 승인 확장 기록 |
+| §3.7 nl-activation 면제 | `UNSCORED_CASES` id 배열 | 사유 없이 id 1줄 추가로 채점 분모가 자동 축소(T-49 3차 #3) — `KNOWN_DIVERGENCES` 는 cause 길이 강제 | 대기열: id→reason 객체 + 사유 길이 단언 + 분모 명시 상수 |
+| §3.6 redaction memo | 마커는 경로 사실 | memo 가 `[circular]` 마커를 포함한 서브트리를 형제 위치에 재사용 → 그 위치에선 역방향 간선이 아님(T-49 3차 #7) | 대기열: 마커 포함 서브트리 memo 제외(depth 절단과 동일 규칙, T-20) |
+| §3.4 route-receipt 문서화 | CHANGELOG "receipt(shadow, `applied:false`)" | `applied` 는 receipt 필드가 아님(`additionalProperties:false`, writer 거부). shadow 기제 = `source:'shadow'`+`shadow_of`; `applied:false` 는 `model-switcher#proposeSwitch` 반환 리터럴 — 두 층 분리(T-52, 2026-09-03 10:3x) |
+| §3.5 replay 집계 | `totals.input` / existence-audit `ledgerLines` | 둘 다 `readAllEvents` 생존자 수(손상·거부·필터·중복 제거 후) — `received`/`eventsReceived` 로 개명, 원본 줄 수는 리더 소관(T-41 착지, T-44 배분) |
+| §1 시계 | `unified-verifier.js` `readClock` 재수출 | 프로덕션 importer 0 + 재수출 고정 테스트 1. 유지(마켓플레이스 배포본 존재, 제거는 Phase 0 밖) — 리더 판정 2026-09-03 10:4x |
+| §2.4 StateStore 포트 계약 | JSDoc "throw 또는 `{appended:false}`" | `{ok:false}` 도 거부, `undefined` 는 성공 — 판정 정본 `state-manager#ledgerRefusal`, split-state 와 동일 술어(사본 2개, 공용화는 후속)(T-21·T-46) |
+| §3.3 recorder stats | 카운터 프로세스 메모리에만 | `flushRecorderStats` 가 `runtime/decisions/<runId>` 또는 `_unattributed` 에 `recorder-stats` 1줄(둘 다 0 이면 무음, `failed>0`=warn, `skipped`만=info). 부작용: 실 root 에 쓰는 기존 훅 스위트 5개 가시화 → 셋업 격리 배분(T-37) |
+| §3.6 redaction 예산 | depth 상한(`MAX_REDACT_DEPTH=64`)만 | 순환을 품은 공유 서브트리는 memo 불가 → 경로별 재순회(depth 16 에서 19ms, 레벨당 ×3, 4KB cap 이전 단계라 cap 이 못 막음). 모양 무관 **결과 노드** 상한 `MAX_REDACT_NODES=4096`(memo 재사용 시 서브트리 size 차감) + `[budget]` 마커. 리더 최초 지시 "방문 기준" 은 T-20 반증(memo 가 DAG 을 돌려주면 `JSON.stringify` 가 트리로 되펼침 — 49객체 386MB, 3.6s; 예산도 4KB cap 도 못 봄) 으로 폐기. 근거 "4096 노드 최소 직렬화 `{}` > 4KB" 는 결과 노드 기준에서만 참. depth 200 까지 상수 시간, writer e2e 26ms(T-20 착지 2026-09-03 10:55, 701/701) |
+| 문서 규율(인용) | `file:line` 인용 허용 | 세션 중 동시 편집으로 리더·팀원 인용 다수가 썩음(T-47 95줄 밀림, T-46 5건 중 2건, T-53 census 결함 11) → 코드·테스트·스키마·커맨드의 코드→코드 인용은 **심볼명·테스트명·JSON 포인터**로, 줄번호는 픽스처 데이터·산문 출현 위치(`README.md:1565` 류)·게이트가 파싱하는 상수(`EXEMPT_LINE_NO`)에만 — 리더 판정 2026-09-03 |
+| 테스트 격리 | 훅 스위트가 실 plugin root(`CLAUDE_PLUGIN_ROOT`) 로 실행 | 실 `runtime/` 오염(`token-usage-session.json`, `decisions/_unattributed`) → /doctor 헬스 신호 오염. 오염원 실측 3개(`runtime-prompt`·`silent-fail-stderr`·`userprompt-dispatcher`) + `tests/e2e/runtime-flow` 1개 — 링크 샌드박스(lib·commands·skills·agents symlink + config 복사) 셋업만 적용, 단언 0 변경(T-37, 2026-09-03 10:5x). 리더 최초 목록 5개는 오염원 아님(심볼명 grep 오탐) |
+| §2.4 refusal 술어 | (판정) | `ledgerRefusal` 사본 2개는 진실원 분열이 아니라 "불변식 1 · 집행자 2" — 둘이 갈리면 한 경로에서만 `ledger ⊇ store` 성립(2차 A 형태). 공용화 전 드리프트 테스트 1건이 다리(T-51 4차 APPROVE, 2026-09-03 11:16) |
+| §3.3 decisions 사이드 채널 | 어휘 자유 | 어휘 5종(`routing-classified`·`workflow-planned`·`topology-recommended`·`memory-injection-measured`·`recorder-stats`), writer 단일(`decision-events.js`) 이라 allowlist 없음 허용 — **두 번째 writer 가 생기면 fail-closed allowlist 필수**(T-51 P4-2) |
+| §3.6 예산 근거 | 상수 4096 리터럴 핀 | 정당화는 config `line_max_bytes` 와의 관계(2바이트×4096 ≥ 캡). 캡 상향 시 리터럴 테스트는 통과하며 근거만 거짓 → 관계 단언으로 전환 후속(T-51 P4-1) |
+| 부록 0-2 행수 표기 | 리더 브리프 "307행" | 파일 전체 표 행(310) 을 부록 행으로 오기 — 부록 실제 108 데이터행(:536~:646). 수치를 박을 때 재현 명령·시각 병기(T-49 4차 NOTE 1, 2026-09-03 11:36) |

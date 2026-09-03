@@ -13,6 +13,11 @@ import { getPolicyModel, resolveModel } from '../../lib/core/model-policy.js';
 import { loadConfig } from '../../lib/core/config.js';
 import { resolveProjectRoot } from '../../lib/git/project-root.js';
 import { appendSpawn } from '../../lib/learning/ledger/spawn-ledger.js';
+import { classifyAction, derivePhase, getActionClassForAgent } from '../../lib/routing/action-classifier.js';
+import { routeModel } from '../../lib/routing/adaptive-model-router.js';
+import { classifyComplexity } from '../../lib/cognitive/router.js';
+import { appendLedgerEvent } from '../../lib/runtime/ledger.js';
+import { isMissionId, sessionFallbackMissionId } from '../../lib/mission/mission-id.js';
 import { isMainEntry } from './_main-entry.js';
 
 /**
@@ -37,9 +42,14 @@ function extractRequestedModel(hookData) {
  * (getPolicyModel → null), the canonical model is untrustworthy and the
  * advisory is suppressed rather than emitting a false-positive warning.
  *
+ * The hydrated config is returned alongside so the routing observer below can
+ * reuse it: passing the SAME config into `routeModel` is what makes the
+ * receipt's `models.selected` provably the value this function computed,
+ * rather than a second, independently-loaded answer to one question.
+ *
  * @param {string} agentType - The spawning agent's type
  * @param {string|null} requestedModel - Model explicitly requested in the payload
- * @returns {Promise<{ canonicalModel: string|null, modelMismatch: boolean }>}
+ * @returns {Promise<{ canonicalModel: string|null, modelMismatch: boolean, config: object|undefined }>}
  */
 async function checkModelPolicy(agentType, requestedModel) {
   try {
@@ -51,13 +61,33 @@ async function checkModelPolicy(agentType, requestedModel) {
     // opt-in gate/denylist (e.g. security-reviewer in a fable bucket → opus),
     // so the advisory compares against resolveModel, not the raw bucket.
     if (getPolicyModel(agentType, config) === null) {
-      return { canonicalModel: null, modelMismatch: false };
+      return { canonicalModel: null, modelMismatch: false, config };
     }
     const canonicalModel = resolveModel(agentType, {}, config);
     const modelMismatch = Boolean(requestedModel) && requestedModel !== canonicalModel;
-    return { canonicalModel, modelMismatch };
+    return { canonicalModel, modelMismatch, config };
   } catch {
-    return { canonicalModel: null, modelMismatch: false };
+    return { canonicalModel: null, modelMismatch: false, config: undefined };
+  }
+}
+
+/**
+ * Project root for both ledgers, resolved from the payload `cwd` the same way
+ * session-ledger.mjs does (a mid-session `cd` must not fork the ledger tree).
+ * Without a `cwd` there is no trustworthy root, so callers skip rather than
+ * guess from process.cwd(). Never throws.
+ *
+ * @param {object} hookData - Parsed hook payload
+ * @returns {string|null} Absolute project root, or null when unresolvable
+ */
+function payloadProjectRoot(hookData) {
+  try {
+    const cwd = hookData?.cwd;
+    if (typeof cwd !== 'string' || cwd.length === 0) return null;
+    const root = resolveProjectRoot(cwd);
+    return typeof root === 'string' && root.length > 0 ? root : null;
+  } catch {
+    return null;
   }
 }
 
@@ -65,26 +95,322 @@ async function checkModelPolicy(agentType, requestedModel) {
  * Append one line to the project-local spawn ledger
  * (`<projectRoot>/.artibot/ledger/spawns.ndjson`). Best-effort audit surface
  * for fan-out counts and model-policy drift — must NEVER throw and never
- * touches stdout. The project root is resolved from the payload `cwd` the
- * same way session-ledger.mjs does (a mid-session `cd` must not fork the
- * ledger tree); without a `cwd` there is no trustworthy root, so the record
- * is skipped rather than guessed from process.cwd().
+ * touches stdout.
  *
  * @param {object} hookData - Parsed hook payload
+ * @param {string|null} projectRoot - Root from {@link payloadProjectRoot}
  * @param {object} record - Spawn record fields (see spawn-ledger.js)
  * @returns {{ ok: boolean, reason?: string }}
  */
-function recordSpawn(hookData, record) {
+function recordSpawn(hookData, projectRoot, record) {
   try {
-    const cwd = hookData?.cwd;
-    if (typeof cwd !== 'string' || cwd.length === 0) return { ok: false, reason: 'no-cwd' };
-    return appendSpawn(resolveProjectRoot(cwd), {
+    if (typeof projectRoot !== 'string' || projectRoot.length === 0) {
+      return { ok: false, reason: 'no-cwd' };
+    }
+    return appendSpawn(projectRoot, {
       sessionId: hookData?.session_id || hookData?.sessionId || null,
       agentName: hookData?.agent_name || hookData?.name || null,
       ...record,
     });
   } catch (err) {
     return { ok: false, reason: err?.message || 'record-failed' };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// v5 routing observation (T-31) — OBSERVE ONLY
+//
+// Nothing in this block changes which model actually spawns. `checkModelPolicy`
+// above remains the sole source of the advisory message and of
+// `canonicalModel`; what follows records a SHADOW RouteReceipt beside it so a
+// later phase can compare the recommendation against what really ran.
+//
+// TWO FIELDS ARE BOTH NAMED `source` AND THEY ARE NOT THE SAME FIELD. One line
+// of this ledger carries both, and reading one for the other is the mistake
+// this note exists to prevent:
+//   envelope `source`  — WHO EMITTED the line. Enum of eight
+//     (`ledger-envelope.schema.json`): human | supervisor | worker | reviewer |
+//     hook | git | gate | scheduler. Ours is `hook` — see LEDGER_SOURCE below.
+//   receipt `data.source` — PROVENANCE OF THE DECISION. Enum of two
+//     (`route-receipt.schema.json`): production | shadow. Ours is `shadow`,
+//     set by `adaptive-model-router.js:524` from its `RECEIPT_SOURCE`; the hook
+//     never writes it.
+// So one route.selected line reads `source: 'hook'` on the envelope and
+// `data.source: 'shadow'` inside it, which is exactly what the design
+// specifies: `route.selected{source:'shadow', shadow_of}` (§3.6). `shadow_of`
+// is a THIRD, separate field — the pairing pointer, not a provenance label —
+// and it does not stand in for either of the two above.
+// ---------------------------------------------------------------------------
+
+/**
+ * Envelope `source` for `route.selected`: the TRUTH about who emitted the
+ * line, which for this event is a hook. Not to be confused with the receipt's
+ * own `data.source` (`shadow`) — see the two-fields note above.
+ *
+ * It was briefly 'scheduler' because the vocabulary allowlist
+ * (`schemas/ledger-events.allowlist.json#/events/route.selected/sources`)
+ * permitted only that, and the writer rejects any source outside the list
+ * (`lib/runtime/event-writer.js:561`). Naming a source you are not is sender
+ * forgery, so the fix was to widen the allowlist, not to relabel the emitter —
+ * T-15 added `hook` (measured 2026-09-02 18:08, sources now
+ * `["scheduler","hook"]`). If this ever has to change again, change the
+ * allowlist; do not make the hook claim to be something else.
+ * @type {string}
+ */
+const LEDGER_SOURCE = 'hook';
+
+/**
+ * `execution_profile_version` for Phase 0. `lib/routing/execution-profile.js`
+ * exports no version constant (measured 2026-09-02) and the receipt schema
+ * types the field as a counter with minimum 1, so Phase 0 emits 1.
+ * @type {number}
+ */
+const PROFILE_VERSION = 1;
+
+/** Reason strings land on the spawn record; keep them short. @type {number} */
+const REASON_MAX = 60;
+
+/**
+ * Action classes whose spawn is a review-phase action. Derived from the
+ * classifier's own vocabulary — `review` and `architecture` are the two
+ * classes `ACTION_CLASS_TIERS` places on the review tier — and consulted only
+ * when the payload names no `resolveModel` role that `derivePhase` recognises.
+ *
+ * T-27 `lib/routing/action-classifier.js` MIGRATION CANDIDATE (leader ruling,
+ * 2026-09-02): this is a class→phase mapping, which is classifier vocabulary,
+ * not hook logic. It lives here only for the Observe phase, because
+ * `action-classifier.js` exports `derivePhase` (role→phase) and no class→phase
+ * counterpart. When one is added there, delete this set and call it instead —
+ * a second place that decides what "review" means is how the two drift apart.
+ * @type {Set<string>}
+ */
+const REVIEW_ACTION_CLASSES = new Set(['review', 'architecture']);
+
+/**
+ * Free text describing the action the spawn is about to perform.
+ *
+ * The complexity port scores TEXT; with no text `action.complexity` is absent
+ * and the receipt cannot satisfy `schemas/route-receipt.schema.json`, which
+ * requires it. The append is then SKIPPED rather than fabricating a score — an
+ * invented complexity is indistinguishable from a measured one once written.
+ *
+ * @param {object} hookData - Parsed hook payload
+ * @returns {string|null} Non-blank text, or null
+ */
+function extractActionText(hookData) {
+  const toolInput = hookData?.tool_input;
+  const candidates = [
+    hookData?.prompt, toolInput?.prompt, hookData?.description, toolInput?.description,
+  ];
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && candidate.trim() !== '') return candidate;
+  }
+  return null;
+}
+
+/**
+ * Spawn nesting depth, when the payload names one.
+ *
+ * MEASURED 2026-09-02 (`grep -rn depth scripts/hooks/*.js` → 2 hits, both
+ * prose): no SubagentStart payload key in this repo carries a depth, and the
+ * fields this handler reads are agent_id / agent_type / name / cwd /
+ * session_id. The probe is therefore forward-looking — it returns null until
+ * the host supplies one of these keys, and the record stores that null
+ * EXPLICITLY so a reader can tell "not supplied" from "top level".
+ *
+ * @param {object} hookData - Parsed hook payload
+ * @returns {number|null} Non-negative integer depth, or null
+ */
+function extractDepth(hookData) {
+  const candidates = [
+    hookData?.depth, hookData?.agent_depth, hookData?.nesting_depth, hookData?.tool_input?.depth,
+  ];
+  for (const candidate of candidates) {
+    if (Number.isInteger(candidate) && candidate >= 0) return candidate;
+  }
+  return null;
+}
+
+/**
+ * Task Graph node id when the payload names one.
+ * @param {object} hookData - Parsed hook payload
+ * @returns {string|null}
+ */
+function extractTaskId(hookData) {
+  const value = hookData?.task_id ?? hookData?.taskId ?? hookData?.tool_input?.task_id;
+  return typeof value === 'string' && value.trim() !== '' ? value.trim() : null;
+}
+
+/**
+ * Mission id for the ledger envelope: the payload's when it names a valid one,
+ * otherwise the session fallback `M-YYYYMMDD-S<sid8>`.
+ *
+ * The state store is NOT consulted: `~/.claude/artibot-state.json` carries no
+ * mission field (measured 2026-09-02 — `grep -rn 'missionId|mission_id'
+ * lib/core/hook-utils.js scripts/hooks/` → 0 hits), so a state branch here
+ * would be dead code posing as a source.
+ *
+ * `sessionFallbackMissionId` THROWS on a session id with fewer than eight
+ * alphanumerics, so the call is guarded and degrades to null.
+ *
+ * @param {object} hookData - Parsed hook payload
+ * @param {string|null} sessionId - Session id from the payload
+ * @returns {string|null} A valid mission id, or null
+ */
+function resolveMissionId(hookData, sessionId) {
+  const declared = hookData?.mission_id ?? hookData?.missionId;
+  if (isMissionId(declared)) return declared;
+  if (typeof sessionId !== 'string' || sessionId === '') return null;
+  try {
+    const id = sessionFallbackMissionId({ sessionId, nowMs: Date.now() });
+    return isMissionId(id) ? id : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Reason the receipt cannot be appended, or null when it can.
+ *
+ * Checked BEFORE the append so a structurally incomplete receipt is skipped
+ * instead of writing a `ledger.rejected` line on every spawn: the writer
+ * records refusals, and one refusal per spawn is noise, not observability.
+ *
+ * @param {object|null} receipt - RouteReceipt from `routeModel`
+ * @returns {string|null} Short reason code, or null when appendable
+ */
+function receiptGap(receipt) {
+  if (!receipt || typeof receipt !== 'object') return 'no-receipt';
+  const epoch = receipt.routing_epoch_id;
+  if (typeof epoch !== 'string' || epoch === '') return 'no-epoch';
+  if (typeof receipt.action?.phase !== 'string') return 'no-phase';
+  if (typeof receipt.action?.complexity !== 'number') return 'no-complexity';
+  return null;
+}
+
+/**
+ * Lifecycle phase for one spawn, or NULL when nothing supports either answer.
+ *
+ * Three sources, in order, and the third one is the reason this function
+ * exists as a named thing instead of a ternary:
+ *   1. `derivePhase(role)` — the payload named a real `resolveModel` role.
+ *   2. the action class — `review` and `architecture` ARE review-phase actions,
+ *      so a class is evidence about the phase.
+ *   3. nothing. `factors.source === 'default'` is the classifier stating that
+ *      NO signal identified the action: not the command table, not the agent
+ *      table, not the text, not the tool/file footprint. Its `implement` is a
+ *      safe FALLBACK CLASS, not an observation, so it cannot be read as
+ *      evidence of a build phase.
+ *
+ * Case 3 returns null and the caller then skips the ledger append with
+ * `skipped:no-phase`, because `route-receipt.schema.json` requires
+ * `action.phase`. That is the same rule the other fields already follow: when
+ * the value is not known, record the gap and skip — never invent one. The
+ * previous form of this code answered `'build'` here, which put a fabricated
+ * phase into an append-only ledger where it was indistinguishable from a
+ * measured one (T-50 §4).
+ *
+ * @param {string} agentRole - Role from the payload
+ * @param {object} classified - `classifyAction` result
+ * @returns {'build'|'review'|null} The phase, or null when unevidenced
+ */
+function spawnPhase(agentRole, classified) {
+  const fromRole = derivePhase(agentRole);
+  if (fromRole !== null) return fromRole;
+  if (REVIEW_ACTION_CLASSES.has(classified?.actionClass)) return 'review';
+  if (classified?.factors?.source === 'default') return null;
+  return 'build';
+}
+
+/**
+ * Build the shadow RouteReceipt for one spawn.
+ *
+ * `role` is deliberately NOT handed to `routeModel`: it would flow into
+ * `resolveModel(agentType, {role})` and make `models.selected` describe a role
+ * the hook invented. Only `phase` (a classification field) is supplied, so
+ * `models.selected` stays equal to the `canonicalModel` the hook records.
+ *
+ * @param {object} ctx - See {@link observeRoute}
+ * @returns {{ receipt: object|null, reason: string|null }}
+ */
+function buildRouteReceipt(ctx) {
+  const text = extractActionText(ctx.hookData);
+  if (text === null) return { receipt: null, reason: 'no-action-text' };
+  const input = { text, agentType: ctx.agentType, role: ctx.agentRole };
+  const classifierOptions = { classifyComplexity };
+  const classified = classifyAction(input, classifierOptions);
+  const timestamp = new Date().toISOString();
+  const evidence = {
+    route_receipt_id: `rr-${ctx.agentId}-${timestamp}`,
+    mission_id: ctx.missionId,
+    session_id: ctx.sessionId,
+    execution_profile_version: PROFILE_VERSION,
+    timestamp,
+    // The production line this shadow mirrors: the spawn-ledger record for
+    // this agent. A spawn has no ledger seq, so the spawn identity is what
+    // pairs the two sides.
+    shadow_of: `spawn:${ctx.agentId}`,
+  };
+  if (ctx.taskId !== null) evidence.task_id = ctx.taskId;
+  const receipt = routeModel({
+    agentType: ctx.agentType,
+    epoch: ctx.agentId,
+    config: ctx.config,
+    phase: spawnPhase(ctx.agentRole, classified),
+    input,
+    classifierOptions,
+    evidence,
+  });
+  return { receipt, reason: null };
+}
+
+/**
+ * Record one `route.selected` line and report what the spawn record should
+ * carry. NEVER throws: every failure becomes a `skipped:<reason>` string and
+ * the hook's stdout is untouched either way.
+ *
+ * @param {object} ctx - `{ hookData, agentId, agentType, agentRole, sessionId,
+ *   missionId, taskId, projectRoot, config }`
+ * @returns {{ recommendedModel: string|null, actionClass: string|null,
+ *   routeLedger: string }}
+ */
+function observeRoute(ctx) {
+  const base = {
+    recommendedModel: null,
+    actionClass: getActionClassForAgent(ctx.agentType),
+    routeLedger: 'skipped:unknown',
+  };
+  const skip = (reason) => ({
+    ...base, routeLedger: `skipped:${String(reason).slice(0, REASON_MAX)}`,
+  });
+  try {
+    if (typeof ctx.agentId !== 'string' || ctx.agentId === '') return skip('no-epoch');
+    if (typeof ctx.sessionId !== 'string' || ctx.sessionId === '') return skip('no-session');
+    if (ctx.missionId === null) return skip('no-mission');
+    const { receipt, reason } = buildRouteReceipt(ctx);
+    if (receipt === null) return skip(reason);
+    const observed = {
+      recommendedModel: receipt.models?.recommended?.model_id ?? null,
+      actionClass: receipt.action?.type ?? base.actionClass,
+    };
+    const gap = receiptGap(receipt);
+    if (gap !== null) return { ...observed, routeLedger: `skipped:${gap}` };
+    if (ctx.projectRoot === null) return { ...observed, routeLedger: 'skipped:no-cwd' };
+    const envelope = {
+      event: 'route.selected',
+      session_id: ctx.sessionId,
+      mission_id: ctx.missionId,
+      routing_epoch_id: ctx.agentId,
+      source: LEDGER_SOURCE,
+      data: receipt,
+    };
+    if (ctx.taskId !== null) envelope.task_id = ctx.taskId;
+    const result = appendLedgerEvent(ctx.projectRoot, envelope);
+    if (result?.ok === true) return { ...observed, routeLedger: 'ok' };
+    const why = String(result?.reason ?? 'append-failed').slice(0, REASON_MAX);
+    return { ...observed, routeLedger: `skipped:${why}` };
+  } catch (err) {
+    return skip(err?.message || 'route-failed');
   }
 }
 
@@ -152,6 +478,108 @@ function initTeamContext(loaded, hookData, agentRole) {
   return { teamId, domain, startedAt };
 }
 
+/**
+ * SubagentStart: register the teammate, observe the routing decision, and
+ * append the spawn record. Neither ledger write can affect registration or the
+ * advisory message — both are best-effort and swallow every failure.
+ *
+ * @param {object} hookData - Parsed hook payload
+ * @param {{agentId: string, agentRole: string, agentType: string, statePath: string}} ids
+ * @returns {Promise<void>}
+ */
+async function handleStart(hookData, ids) {
+  const { agentId, agentRole, agentType, statePath } = ids;
+  const requestedModel = extractRequestedModel(hookData);
+  const { canonicalModel, modelMismatch, config } = await checkModelPolicy(agentType, requestedModel);
+  const sessionId = hookData?.session_id || hookData?.sessionId || null;
+  const taskId = extractTaskId(hookData);
+  const missionId = resolveMissionId(hookData, sessionId);
+  const projectRoot = payloadProjectRoot(hookData);
+  const route = observeRoute({
+    hookData, agentId, agentType, agentRole, sessionId, missionId, taskId, config, projectRoot,
+  });
+  withFileLock(statePath, () => {
+    const loaded = loadState();
+    saveState({
+      ...loaded,
+      ...initTeamContext(loaded, hookData, agentRole),
+      agents: {
+        ...(loaded.agents || {}),
+        [agentId]: {
+          role: agentRole,
+          agentType,
+          active: true,
+          startedAt: new Date().toISOString(),
+          canonicalModel,
+          modelMismatch,
+          recommendedModel: route.recommendedModel,
+          actionClass: route.actionClass,
+        },
+      },
+    });
+  });
+  recordSpawn(hookData, projectRoot, {
+    event: 'start', agentId, agentType, requestedModel, canonicalModel, modelMismatch,
+    recommendedModel: route.recommendedModel,
+    actionClass: route.actionClass,
+    routing_epoch_id: agentId,
+    depth: extractDepth(hookData),
+    mission_id: missionId,
+    ...(taskId === null ? {} : { task_id: taskId }),
+    route_ledger: route.routeLedger,
+  });
+  let message = `[team] Agent registered: ${agentId} (${agentRole})`;
+  if (modelMismatch) {
+    message += `\n[model-policy] '${agentType}' spawned with ${requestedModel} but policy says ${canonicalModel}`;
+  }
+  writeStdout({ message });
+}
+
+/**
+ * SubagentStop: deregister the teammate and append the stop record. No
+ * `route.selected` line is written here — a routing decision belongs to the
+ * START of an epoch, and one epoch must not produce two.
+ *
+ * @param {object} hookData - Parsed hook payload
+ * @param {{agentId: string, agentType: string, statePath: string}} ids
+ * @returns {void}
+ */
+function handleStop(hookData, ids) {
+  const { agentId, agentType, statePath } = ids;
+  let tracked;
+  withFileLock(statePath, () => {
+    const loaded = loadState();
+    const existing = (loaded.agents || {})[agentId];
+    tracked = existing;
+    saveState(existing
+      ? {
+          ...loaded,
+          agents: {
+            ...(loaded.agents || {}),
+            [agentId]: { ...existing, active: false, stoppedAt: new Date().toISOString() },
+          },
+        }
+      : loaded);
+  });
+  const taskId = extractTaskId(hookData);
+  const sessionId = hookData?.session_id || hookData?.sessionId || null;
+  recordSpawn(hookData, payloadProjectRoot(hookData), {
+    event: 'stop',
+    agentId,
+    agentType: tracked?.agentType ?? agentType,
+    canonicalModel: tracked?.canonicalModel ?? null,
+    modelMismatch: tracked?.modelMismatch === true,
+    durationMs: spawnDurationMs(tracked),
+    recommendedModel: tracked?.recommendedModel ?? null,
+    actionClass: tracked?.actionClass ?? null,
+    routing_epoch_id: agentId,
+    depth: extractDepth(hookData),
+    mission_id: resolveMissionId(hookData, sessionId),
+    ...(taskId === null ? {} : { task_id: taskId }),
+  });
+  writeStdout({ message: `[team] Agent deregistered: ${agentId}` });
+}
+
 export async function main() {
   const action = process.argv[2]; // 'start' or 'stop'
   const raw = await readStdin();
@@ -166,69 +594,11 @@ export async function main() {
   // crashes or EPERM failures may have left in ~/.claude/.
   cleanupStaleStateTmpFiles(statePath);
 
+  const ids = { agentId, agentRole, agentType, statePath };
   if (action === 'start') {
-    const requestedModel = extractRequestedModel(hookData);
-    const { canonicalModel, modelMismatch } = await checkModelPolicy(agentType, requestedModel);
-    withFileLock(statePath, () => {
-      const loaded = loadState();
-      const teamCtx = initTeamContext(loaded, hookData, agentRole);
-      const updatedState = {
-        ...loaded,
-        ...teamCtx,
-        agents: {
-          ...(loaded.agents || {}),
-          [agentId]: {
-            role: agentRole,
-            agentType,
-            active: true,
-            startedAt: new Date().toISOString(),
-            canonicalModel,
-            modelMismatch,
-          },
-        },
-      };
-      saveState(updatedState);
-    });
-    recordSpawn(hookData, {
-      event: 'start', agentId, agentType, requestedModel, canonicalModel, modelMismatch,
-    });
-    let message = `[team] Agent registered: ${agentId} (${agentRole})`;
-    if (modelMismatch) {
-      message += `\n[model-policy] '${agentType}' spawned with ${requestedModel} but policy says ${canonicalModel}`;
-    }
-    writeStdout({ message });
+    await handleStart(hookData, ids);
   } else if (action === 'stop') {
-    let tracked;
-    withFileLock(statePath, () => {
-      const loaded = loadState();
-      const existing = (loaded.agents || {})[agentId];
-      tracked = existing;
-      const updatedState = existing
-        ? {
-            ...loaded,
-            agents: {
-              ...(loaded.agents || {}),
-              [agentId]: {
-                ...existing,
-                active: false,
-                stoppedAt: new Date().toISOString(),
-              },
-            },
-          }
-        : loaded;
-      saveState(updatedState);
-    });
-    recordSpawn(hookData, {
-      event: 'stop',
-      agentId,
-      agentType: tracked?.agentType ?? agentType,
-      canonicalModel: tracked?.canonicalModel ?? null,
-      modelMismatch: tracked?.modelMismatch === true,
-      durationMs: spawnDurationMs(tracked),
-    });
-    writeStdout({
-      message: `[team] Agent deregistered: ${agentId}`,
-    });
+    handleStop(hookData, ids);
   }
 }
 

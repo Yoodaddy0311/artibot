@@ -38,6 +38,15 @@ export const configSchema = {
                 agents: { type: 'array', items: { type: 'string' } },
               },
             },
+            // 4-tier step 2. Shape-only: model-policy.js#loadModelPolicy reads
+            // just high+medium, so this bucket is declared and unread by design.
+            low: {
+              type: 'object',
+              properties: {
+                model: { type: 'string' },
+                agents: { type: 'array', items: { type: 'string' } },
+              },
+            },
             advisorStrategy: { type: 'object' },
           },
         },
@@ -185,6 +194,90 @@ export const configSchema = {
             comment: { type: 'string' },
           },
         },
+      },
+    },
+    // ── v5 Phase 0 declaration keys ──────────────────────────────────────
+    // All five are DECLARATIONS: no lib/ module reads any of them as of
+    // 2026-09-02, and their shipped values encode current behavior, so
+    // validating them here constrains shape without granting them effect.
+    // Shape/value pinning lives in tests/firewall/v5-config-firewall.test.js;
+    // this schema is non-strict (extra properties allowed), so it can only
+    // reject a WRONG type, never a missing or an added key.
+    topology: {
+      type: 'object',
+      properties: {
+        // One of the run-ledger topology.mode enum 6. Enumerated here so a
+        // typo is a validation error rather than a silently unroutable value.
+        default: {
+          type: 'string',
+          enum: ['solo', 'subagent', 'team', 'autopilot', 'autopilot_fast', 'split'],
+        },
+        // *Ref values are dot paths into this same config, never copied
+        // values (design §3.5 forbids duplicate definition). Dangling-path
+        // detection needs the whole document, so it lives in the firewall.
+        autopilot_fast: {
+          type: 'object',
+          properties: {
+            hardMaxAgentsRef: { type: 'string' },
+            agentsPerCpuRef: { type: 'string' },
+            maxWorktreesRef: { type: 'string' },
+            maxRiskRef: { type: 'string' },
+          },
+        },
+        split: {
+          type: 'object',
+          properties: {
+            maxWindowsRef: { type: 'string' },
+            minStemsRef: { type: 'string' },
+            dispatchBudgetRef: { type: 'string' },
+          },
+        },
+        reviewTierRef: { type: 'string' },
+        comment: { type: 'string' },
+      },
+    },
+    routing: {
+      type: 'object',
+      properties: {
+        observe: { type: 'boolean' },
+        canary: {
+          type: 'object',
+          properties: {
+            // Allowlist of action classes whose recommendation is applied.
+            // Empty = observe-only; fail-closed for future classes.
+            actionClasses: { type: 'array', items: { type: 'string' } },
+          },
+        },
+        comment: { type: 'string' },
+      },
+    },
+    ledger: {
+      type: 'object',
+      properties: {
+        // Relative to <projectRoot>, not pluginRoot (both have a runtime/).
+        path: { type: 'string' },
+        maxLineBytes: { type: 'number', minimum: 1 },
+        comment: { type: 'string' },
+      },
+    },
+    stateStore: {
+      type: 'object',
+      properties: {
+        // 'sqlite' is interface-compatible only and deliberately NOT offered:
+        // it would force engines >=22.13 against the current >=20 (OD-4/F1).
+        backend: { type: 'string', enum: ['jsonl'] },
+        location: { type: 'string', enum: ['git-common-dir'] },
+        comment: { type: 'string' },
+      },
+    },
+    missions: {
+      type: 'object',
+      properties: {
+        // Allowlist, not a negative list — a negative list is fail-open in
+        // the generating direction (design §3.1).
+        substantiveSignals: { type: 'array', items: { type: 'string' } },
+        idFormat: { type: 'string' },
+        comment: { type: 'string' },
       },
     },
   },

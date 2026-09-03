@@ -1,0 +1,180 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "attempt-receipt.schema.json",
+  "title": "AttemptReceipt",
+  "description": "Attempt Receipt (MODEL-SWITCHING-SCORECARD.md §42). NOT a standalone file or artifact: this schema describes the `data` object of the append-only ledger envelope event `usage.receipt` (ARTIBOT-5.0-DESIGN.md §8.2 §4·§42 — 'usage.receipt 이벤트 = Attempt Receipt', 동일 개체). One receipt per Run, and a Run is one spawn (§7.2), so run_id also joins to RouteReceipt.routing_epoch_id. The single writer is economics/usage-receipt.js (design §3.6): cache-roi.js and token-usage.js must not double-count. Beyond §42 this schema carries exactly the three additions lane 2 §4.5 prescribes — usage.source, usage.requests and cost.pricing_version — because a receipt without a source grade contradicts the §46 EXACT/PARTIAL/SIMULATED labelling rule. additionalProperties is false at every level.",
+  "type": "object",
+  "required": ["schema_version", "run_id", "mission_id", "model_identity", "usage", "timing", "outcome", "cost"],
+  "properties": {
+    "schema_version": {
+      "const": 1,
+      "description": "Receipt schema revision. Bumped only on a breaking field change."
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The Run this attempt belongs to. One spawn = one Run (§7.2), so this equals the spawn id and joins to RouteReceipt.routing_epoch_id (lane 2 §4.5 G1)."
+    },
+    "mission_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Mission this attempt belongs to."
+    },
+    "action_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Optional. Transcript entries carry no mission or action id (lane 2 §2.4): attribution is reliable to the spawn, and a main-thread turn can only be attributed to an action by joining requestId + timestamp against the decision trail (accuracy unverified). Omit rather than guess."
+    },
+    "model_identity": {
+      "$ref": "#/definitions/model_identity",
+      "description": "Exact identity of the model that ran the attempt (§20, §42). Resolved from the transcript message.model, never from the tier alias."
+    },
+    "usage": {
+      "type": "object",
+      "required": ["source", "fresh_input_tokens", "cached_input_tokens", "cache_creation_tokens", "output_tokens"],
+      "additionalProperties": false,
+      "description": "Token usage for the attempt, mapped from lane 2 §2.4: fresh_input_tokens = input_tokens, cached_input_tokens = cache_read_input_tokens, cache_creation_tokens = cache_creation_input_tokens, thinking_tokens = output_tokens_details.thinking_tokens. A writer normalises a missing counter to 0; a missing REQUIRED transcript key instead downgrades the entry to source: estimate and increments receipt.parseFailures.",
+      "properties": {
+        "source": {
+          "type": "string",
+          "enum": ["transcript", "otlp", "estimate"],
+          "description": "Where the numbers came from, in priority order: transcript (folded jsonl, the only source that covers subagents), otlp (telemetry collector), estimate (chars/4 heuristic). Mandatory — an unlabelled receipt cannot be graded EXACT/PARTIAL/SIMULATED (§46), and estimate values must never be mixed into a measured aggregate."
+        },
+        "fresh_input_tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Uncached input tokens (transcript input_tokens)."
+        },
+        "cached_input_tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Cache-read input tokens (transcript cache_read_input_tokens)."
+        },
+        "cache_creation_tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Cache-write tokens (transcript cache_creation_input_tokens)."
+        },
+        "output_tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Output tokens."
+        },
+        "thinking_tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Optional. Thinking tokens (output_tokens_details.thinking_tokens); absent for a model or entry that reports none — absent is not the same statement as 0."
+        },
+        "requests": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Optional. Distinct requestId count for the attempt (lane 2 §2.4). Not available when source is estimate."
+        }
+      }
+    },
+    "timing": {
+      "type": "object",
+      "required": ["started_at", "completed_at", "latency_ms"],
+      "additionalProperties": false,
+      "description": "Attempt timing. Lane 2 §4.5: derivable per entry from the transcript timestamp field (measured).",
+      "properties": {
+        "started_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO-8601 instant the attempt started."
+        },
+        "completed_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO-8601 instant the attempt finished."
+        },
+        "latency_ms": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Wall-clock duration in milliseconds."
+        }
+      }
+    },
+    "outcome": {
+      "type": "object",
+      "required": ["status", "accepted"],
+      "additionalProperties": false,
+      "description": "Attempt outcome. Success@1, Retry Waste and Escalation Rescue fold from this block (ARTIBOT-5.0-DESIGN.md §8.2 §4·§42). status and verifier_result are deliberately left as free strings: §42 fixes no vocabulary for them, and inventing one here would collide with the review verdict vocabulary owned elsewhere (T-17). Whoever fixes those vocabularies should add the allowlist here in the same change.",
+      "properties": {
+        "status": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Terminal status of the attempt. Vocabulary NOT fixed by §42 — see the block description."
+        },
+        "verifier_result": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Optional. Result reported by the verifier for this attempt. Vocabulary NOT fixed by §42."
+        },
+        "accepted": {
+          "type": ["boolean", "null"],
+          "description": "Whether the outcome was accepted. Explicitly nullable and required: lane 2 §2.5 records that no user-acceptance signal exists yet, so null means 'not labelled' and must never be silently read as false. Cost per Accepted Outcome is only computable over the labelled subset."
+        }
+      }
+    },
+    "cost": {
+      "type": "object",
+      "required": ["total", "pricing_version"],
+      "additionalProperties": false,
+      "description": "Attempt cost. total is nullable by design: lane 2 §3 decision 1 records that the catalog price table and cache-roi.js disagree by roughly 3x, and until one source of truth is chosen a writer must emit null rather than an unverified number. pricing_version is required either way, so a later backfill knows which table produced (or failed to produce) the value.",
+      "properties": {
+        "total": {
+          "type": ["number", "null"],
+          "minimum": 0,
+          "description": "Total cost from the catalog unit price times the usage counters, or null when the price table is unverified."
+        },
+        "pricing_version": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Identifier of the price table used. Mandatory (lane 2 §4.5), including when total is null."
+        }
+      }
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "model_identity": {
+      "type": "object",
+      "required": ["provider", "family", "tier", "model_id", "version", "catalog_version"],
+      "additionalProperties": false,
+      "description": "Exact model identity (§20, §42). Duplicated verbatim in route-receipt.schema.json; the T-19 common meta fragment is the intended future home. version (not the §20 spelling snapshot_or_version) is the canonical key — lane 2 §4.5 flags that document inconsistency and resolves it in favour of §42.",
+      "properties": {
+        "provider": {
+          "type": "string",
+          "minLength": 1,
+          "description": "e.g. anthropic. Left a free string: the field exists precisely because a non-Anthropic provider is possible (§59 vLLM reference)."
+        },
+        "family": {
+          "type": "string",
+          "minLength": 1,
+          "description": "e.g. claude."
+        },
+        "tier": {
+          "type": "string",
+          "enum": ["haiku", "sonnet", "opus", "fable"],
+          "description": "Artibot tier alias. Allowlist grounded in the lib/core/model-catalog.js MODELS keys (measured 2026-09-02: haiku, sonnet, opus, fable)."
+        },
+        "model_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Exact provider model id from model-catalog.js (e.g. claude-fable-5-1), never the tier alias."
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Provider snapshot/version string for the model id."
+        },
+        "catalog_version": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Version of the Artibot model catalog the identity was resolved against. PREREQUISITE: lib/core/model-catalog.js exports no CATALOG_VERSION today (repo-wide grep 0 excluding node_modules, measured 2026-09-02), so that constant must be added before a writer can populate this field."
+        }
+      }
+    }
+  }
+}

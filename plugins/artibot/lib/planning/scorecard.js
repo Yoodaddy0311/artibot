@@ -163,11 +163,12 @@ const NEON_CITY_PALETTE = {
 };
 const C_GREEN = [80, 250, 123];
 const C_RED = [255, 85, 85];
-const RESET = '[0m';
+// SGR escapes are written as \x1b, never as a raw ESC byte: a literal control byte makes grep/ripgrep read this file as binary (tests/firewall/no-control-bytes.test.js).
+const RESET = '\x1b[0m';
 
 /** Truecolor SGR prefix for an [r,g,b] triple. */
 function neon([r, g, b]) {
-  return `[38;2;${r};${g};${b}m`;
+  return `\x1b[38;2;${r};${g};${b}m`;
 }
 
 /** Display width: CJK / fullwidth code points count as 2 cells, others as 1. */

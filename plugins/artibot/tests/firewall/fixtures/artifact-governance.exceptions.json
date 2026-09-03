@@ -1,0 +1,76 @@
+{
+  "$comment": [
+    "artifact-governance firewall(검사 #1 #2 #4 #6)의 동결 예외 목록. allowlist 형태다 —",
+    "여기에 없는 위반은 전부 red(fail-closed). 부정 목록으로 쓰지 마라: 미래 항목에",
+    "fail-open 이 된다(verification-discipline §8).",
+    "",
+    "각 항목은 포인터 필드를 반드시 갖는다(pending_decision 또는 pending_implementation).",
+    "포인터 없는 예외는 자기검증 테스트가 red 로 잡는다 — 설계 R-10 '동결 예외가 시간이",
+    "지나며 영구 면제로 굳는다' 에 대한 대응이다.",
+    "",
+    "측정 기준: baseCommit 시점의 `git ls-files`(워킹트리 아님). 인덱스에 T-03·T-04·T-08 의",
+    "스테이징이 반영된 상태에서 측정했다."
+  ],
+  "schemaVersion": 1,
+  "baseCommit": "dc9a4c12",
+  "measuredAt": "2026-09-02T16:37:49+09:00",
+  "trackedFileCountAtMeasurement": 1782,
+  "trackedMarkdownCountAtMeasurement": 654,
+
+  "check2_canonicalPairs": [
+    {
+      "pair": ["plugins/artibot/docs/adr", "docs/adr"],
+      "pending_decision": "B2",
+      "reason": "ADR 001~005 번호가 두 디렉터리에서 겹친다. 통합(플러그인 5 → .artibot/adr/ADR-001~005, 루트 5 → ADR-006~010 재번호)은 결정 B2 대기라 이번 범위 밖이다. 설계 §3.3 이행 매핑표 'ADR 2계열' 행.",
+      "measuredState": "dormant — 측정 시점 `docs/adr/` 는 추적 0건(.gitignore:19 `/docs/` 가 통째로 ignore). 추적 계열은 plugins/artibot/docs/adr 하나뿐이라 이 예외는 아직 발동하지 않는다. B2 가 `docs/adr/` 를 추적으로 올리는 순간 발동한다."
+    }
+  ],
+
+  "check4_rawLogs": [
+    {
+      "path": ".artibot/guides/vnext-design/examples/events.example.ndjson",
+      "grade": "doc-example",
+      "pending_decision": "none — 설계 문서 세트의 예시 파일이지 런타임 원장이 아니다. 설계 세트가 정리될 때 함께 사라진다.",
+      "reason": "vnext 설계 패키지 사본에 딸려 온 이벤트 예시. append 되지 않고 코드가 읽지 않는다."
+    }
+  ],
+
+  "check6_derivedRenders": [
+    {
+      "path": ".artibot/guides/NEXT-SESSION.md",
+      "pending_implementation": "설계 §3.3 이행 매핑표 NEXT-SESSION 행 — `derived-from: state@<state_version>` 헤더 렌더 뷰로 전환. StateStore 착지(Observe) 후 폐기.",
+      "reason": "커밋 519e2529 로 추적됐고 frontmatter 가 아예 없다. 헤더를 붙이는 것은 이 파일을 소유한 별도 작업의 몫이고, T-09 는 게이트만 놓는다(다른 파일 수정 금지). 예외로 두되 검사는 살아 있다 — 이 목록 밖의 파생 렌더 파일이 헤더 없이 추적되면 red 다.",
+      "expectedToDisappear": "헤더가 붙는 즉시 이 항목은 stale 이 되고 자기검증 테스트가 red 로 삭제를 요구한다."
+    }
+  ],
+
+  "$derivedRenderBasenamesComment": [
+    "#6 이 감시하는 파생 렌더 파일명. 이 키도 위 $comment 의 규칙을 그대로 받는다 —",
+    "항목마다 실체가 있거나, 없으면 포인터를 달아야 한다.",
+    "",
+    "T-50 #6 이 잡은 결함: 이 키가 문자열 배열이던 때 소비처는 2곳인데 단언이 0 이라",
+    "`HANDOFF.md` 를 지워도 게이트가 그린이었다(추적 HANDOFF.md 가 0건이라 지워도 아무",
+    "차이가 없었다). 앵커 없는 목록은 조용히 비어 갈 수 있다.",
+    "",
+    "그래서 각 항목은 `anchor` 로 '이 이름이 리포에 실재하는 근거' 를 선언하고 테스트가",
+    "그 선언을 실제로 대조한다:",
+    "  tracked-file   — 그 basename 을 가진 추적 파일이 있다",
+    "  generator-code — 그 파일을 만드는 소스(lib/·scripts/·hooks/, 테스트 제외)에",
+    "                   따옴표 문자열로 등장한다",
+    "  none           — 둘 다 아니다. 이때만 pending_decision + reason 이 필수다."
+  ],
+  "derivedRenderBasenames": [
+    {
+      "basename": "HANDOFF.md",
+      "anchor": "generator-code",
+      "evidence": "plugins/artibot/lib/handoff/handoff-store.js:39 — const HANDOFF_FILE = 'HANDOFF.md'",
+      "reason": "추적 파일은 0건이다(gitignore 로 로컬 산출물). 하지만 생성기가 실재하므로 언제든 `git add -f` 로 인덱스에 들어올 수 있고, 그때 헤더 없이 들어오면 #6 이 잡아야 한다. 이름을 목록에서 빼면 그 경로가 통째로 열린다."
+    },
+    {
+      "basename": "NEXT-SESSION.md",
+      "anchor": "tracked-file",
+      "evidence": ".artibot/guides/NEXT-SESSION.md (커밋 519e2529)",
+      "reason": "추적 중이고 frontmatter 가 없어 check6_derivedRenders 예외 1건으로 등록돼 있다. 생성기 코드에는 이 문자열이 없다 — 사람이 손으로 쓰는 파일이다."
+    }
+  ]
+}

@@ -1,0 +1,175 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://artibot.dev/schemas/execution-profile.schema.json",
+  "title": "ExecutionProfile",
+  "description": "Artibot v5 execution_profile — the versioned contract between intent.md and the router (ADDENDUM-HARDENING.md sections 2 and 20). Eight keys: reasoning, autonomy, performance, parallelism, planning, context, review, completion. The v1.1 three-key form {planning, performance, topology} is accepted as a subset; topology is an alias projection of parallelism.strategy. Every enum value is attested in a design document — see execution-profile.README.md for the per-value source table. Draft-07 is deliberate: the repo resolves ajv 6.12.6 transitively, which cannot compile 2020-12.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Schema generation for migration (ADDENDUM-HARDENING.md:930)."
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Execution-profile revision (ADDENDUM-HARDENING.md:710). Required at the versionedProfile conformance level, optional at the minimal v1.1 level."
+    },
+    "derived_from": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["intent_revision"],
+      "properties": {
+        "intent_revision": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "intent.md revision this profile was compiled from (ADDENDUM-HARDENING.md:711-712). Staleness is judged against the intent.md frontmatter intent_revision. Monotonic counter starting at 1, matching route-receipt.schema.json:59-61 and context-receipt.schema.json:50-52 (T-16) and common-meta.schema.json#/$defs/revision (T-19)."
+        }
+      }
+    },
+    "reasoning": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "depth": {
+          "type": "string",
+          "enum": ["direct", "plan", "deep-plan", "deep", "ultraplan"],
+          "$comment": "direct|plan|deep-plan|ultraplan from package/02_PRODUCT_UX_NATURAL_LANGUAGE_RUNTIME.md:56. deep from ADDENDUM-HARDENING.md:119. Overlaps planning.mode by construction; no document disambiguates the two axes (README open gap G-3)."
+        }
+      }
+    },
+    "autonomy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "level": {
+          "$ref": "#/definitions/autonomyValue",
+          "description": "Key name per ADDENDUM-HARDENING.md:121-122."
+        },
+        "mode": {
+          "$ref": "#/definitions/autonomyValue",
+          "description": "Accepted alias of level — the v1.0 mission contract spells this key mode (package/schemas/mission-contract.schema.yaml:29-32, package/03_INTENT_MISSION_COMPILER.md:29-30)."
+        },
+        "human_gates": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "package/schemas/mission-contract.schema.yaml:33; named in ARTIBOT-5.0-DESIGN.md §3.1 as autonomy{mode,human_gates}."
+        }
+      }
+    },
+    "performance": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "priority": {
+          "type": "string",
+          "enum": [
+            "balanced",
+            "maximum",
+            "split",
+            "economy",
+            "quality",
+            "fast",
+            "maximum_performance",
+            "speed_accuracy"
+          ],
+          "$comment": "Union of four independent vocabularies, none of which supersedes the others in writing. balanced|maximum|split from ARTIBOT-5.0-DESIGN.md §3.2 (the three design weights). economy|balanced|quality|fast|maximum_performance from package/schemas/mission-contract.schema.yaml:37. speed_accuracy from ADDENDUM-HARDENING.md:125. maximum also appears as intent frontmatter (package-v1.1/04_INTENT_MD_SPEC.md:35) and as state.yaml performance_profile (package-v1.1/06_STATE_YAML_SPEC.md:43). The hyphenated prose forms high-quality and maximum-performance (package/02:58) are NOT accepted — see README."
+        },
+        "budget": {
+          "type": "string",
+          "enum": ["generous"],
+          "$comment": "Only value attested anywhere: ADDENDUM-HARDENING.md:126, plus token_policy: generous at package/config/artibot-v5-policy.example.yaml:68 (autopilot_fast) and :75 (split). No document names a non-generous budget token, so the enum is closed at one value on purpose (fail-closed): a second value must arrive with a citation, not an assumption."
+        }
+      }
+    },
+    "parallelism": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "strategy": {
+          "type": "string",
+          "enum": ["auto", "aggressive", "net_gain"],
+          "$comment": "aggressive from ADDENDUM-HARDENING.md:129 and package/config/artibot-v5-policy.example.yaml:76 (split.parallelism) and :72 (autopilot_fast.parallel_exploration). auto from policy.example.yaml:64 (topology.default). net_gain from policy.example.yaml:66, where the key is spelled parallelism_objective, not strategy — promoting it here is a judgment call, flagged in the README."
+        }
+      }
+    },
+    "topology": {
+      "type": "string",
+      "enum": [
+        "auto",
+        "solo",
+        "subagent",
+        "team",
+        "autopilot",
+        "autopilot_fast",
+        "split"
+      ],
+      "$comment": "v1.1 three-key alias, accepted as a projection of parallelism.strategy per ARTIBOT-5.0-DESIGN.md §7.2 Addendum §2 스키마. The six execution modes are the run-ledger vocabulary (package/schemas/run-ledger.schema.yaml:17), which ARTIBOT-5.0-DESIGN.md §3.5 fixes as the canonical router-output vocabulary; auto from policy.example.yaml:64. Used as topology: split at package-v1.1/04_INTENT_MD_SPEC.md:36."
+    },
+    "planning": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["auto", "direct", "plan", "ultraplan"],
+          "$comment": "package/schemas/mission-contract.schema.yaml:41; package/config/artibot-v5-policy.example.yaml:20-28 (default auto; modes direct/plan/ultraplan). ultraplan is the ADDENDUM example value (:132) and the v1.1 intent frontmatter value (package-v1.1/04_INTENT_MD_SPEC.md:34)."
+        }
+      }
+    },
+    "context": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "strategy": {
+          "type": "string",
+          "enum": ["minimal_sufficient", "sufficient"],
+          "$comment": "sufficient from ADDENDUM-HARDENING.md:135. minimal_sufficient from package/config/artibot-v5-policy.example.yaml:58. The two are near-synonyms in prose; no document declares them distinct, so both are kept rather than one being silently dropped."
+        }
+      }
+    },
+    "review": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "independent": {
+          "type": "boolean",
+          "$comment": "ADDENDUM-HARDENING.md:138; package-v1.1/15_POLICY_EXAMPLE.yaml:47; package/config/artibot-v5-policy.example.yaml:53; package-v1.1/04_INTENT_MD_SPEC.md:39. package-v1.1/06_STATE_YAML_SPEC.md:60 spells the same field review.required — a third spelling, NOT accepted here (README gap G-6)."
+        },
+        "strictness": {
+          "type": "string",
+          "enum": ["high"],
+          "$comment": "high is the single attested value (ADDENDUM-HARDENING.md:139). package/02:61 names a review strictness axis but lists no values, and :75 says only strict Fable review. Closed at one value on purpose — a second tier needs an owner decision, not a guess."
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "$comment": "Free string, deliberately not an enum. Every design document writes fable-5.1 (ADDENDUM:140; package-v1.1/15_POLICY_EXAMPLE.yaml:48; package/config/artibot-v5-policy.example.yaml:54 where the key is spelled default_model; 04_INTENT_MD_SPEC.md:40; 06_STATE_YAML_SPEC.md:61), but that token is not the catalog id, and the coordination rules forbid hardcoding model ids outside lib/core/model-catalog.js. Resolution belongs to the consumer, not this schema."
+        }
+      }
+    },
+    "completion": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "verified_outcome_required": {
+          "type": "boolean",
+          "$comment": "ADDENDUM-HARDENING.md:142-143."
+        }
+      }
+    }
+  },
+  "definitions": {
+    "autonomyValue": {
+      "type": "string",
+      "enum": ["guided", "agent_led", "autonomous", "full", "auto"],
+      "$comment": "guided|agent_led|autonomous from package/schemas/mission-contract.schema.yaml:32, which ARTIBOT-5.0-DESIGN.md §5 A6 (merged into F2) recommends as the canonical three. full from ADDENDUM-HARDENING.md:122. auto from package/03_INTENT_MISSION_COMPILER.md:30. A union, not a choice: no document reconciles them."
+    },
+    "versionedProfile": {
+      "$comment": "Conformance level 2 — ADDENDUM-HARDENING.md:704-715 requires an execution profile to carry an explicit version and the intent revision it derives from. The root schema leaves both optional so the v1.1 three-key subset still validates; consumers that must detect staleness validate against this definition instead.",
+      "allOf": [{ "$ref": "#" }],
+      "required": ["version", "derived_from"]
+    }
+  }
+}

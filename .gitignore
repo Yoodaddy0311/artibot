@@ -34,6 +34,7 @@ plugins/artibot/docs/*
 !plugins/artibot/docs/MARKETPLACE-SUBMISSION.md
 !plugins/artibot/docs/CITATION-SYNTAX.md
 !plugins/artibot/docs/mcp-server-usage.md
+!plugins/artibot/docs/completion-block-spec.md
 !plugins/artibot/docs/adr/
 !plugins/artibot/docs/adr/**
 plugins/artibot/coverage/
@@ -109,6 +110,36 @@ reports/*
 # `**/` so it matches whether the hook's projectRoot is the repo root or a
 # nested cwd (e.g. plugins/artibot/.artibot/ledger/ during in-repo dev).
 **/.artibot/ledger/
+
+# ── v5 정본/로컬 경계 (설계 §"gitignore 경계", ARTIBOT-5.0-DESIGN.md:161) ─────
+# 추적(정본, 규칙 없음 — 여기 나열하지 않는다):
+#   ARTIBOT.md · .artibot/project.md · .artibot/missions/ · .artibot/adr/
+#   .artibot/memory/ · .artibot/guides/**(설계 세트)
+# 로컬(재생성 가능하거나 사적 데이터 — 아래 4규칙):
+#
+# `**/` 는 위 ledger 규칙(:111)과 같은 이유다. 훅의 projectRoot 가 리포 루트가
+# 아니라 중첩 cwd 로 잡히는 경우가 실제로 있다 — 그 증거가
+# `plugins/artibot/scripts/hooks/.artibot/ledger/` 다. runtime/state 도 같은
+# projectRoot 로 쓰이므로 같은 폭이 필요하다.
+#
+# 디렉터리형(`dir/`)이지 `dir/**` 가 아닌 것은 의도다. git 은 제외된 디렉터리의
+# 자식을 negation 으로 되살릴 수 없으므로, 이 형태는 나중에 누군가 `!.../x.md`
+# 를 넣어 사적 데이터를 되살리는 일을 구조적으로 막는다(fail-closed).
+# 대가: 이 디렉터리들에는 `.gitkeep` 을 추적시킬 수 없다. 런타임 코드가 쓰기
+# 시점에 mkdir 하므로 필요 없다.
+#
+# 원장·이벤트·evidence 등 런타임 산출물. ledger 는 `.artibot/ledger/` 에서
+# `.artibot/runtime/` 으로 옮겨갈 예정이나 개명은 이번 범위 밖이라 위 :111
+# 규칙을 그대로 둔다 — 두 규칙이 당분간 공존한다.
+**/.artibot/runtime/
+# 세션 전사 원문. DATA POLICY: 사용자/어시스턴트 대화 원문을 담는다. 절대 커밋 금지.
+**/.artibot/transcripts/
+# Generated Project Knowledge — `generated:true canonical:false` 프론트매터를
+# 단 재생성 산출물(architecture·conventions·known-failures·active-initiatives).
+# 정본이 아니라 HANDOFF 렌더와 같은 등급이다(설계 :474).
+**/.artibot/generated/
+# 정본 상태의 투영(projection). 재생성 가능하므로 로컬 — 결정 B1.
+**/.artibot/state.yaml
 
 # /scorecard snapshot store — per-machine progress history appended by
 # lib/planning/scorecard.js. Same local-only rationale as SESSION-NOTES.md:

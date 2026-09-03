@@ -295,6 +295,7 @@ EXECUTION HANDOFF
 - Phase 4(적대 검증) 스킵을 기본으로 — 되돌리기 어려운 작업에서 특히 금지
 - deep-research를 재구현 — 빌트인/설치된 스킬을 **호출**만 (Artibot 자체 딥리서치 스킬 없음)
 - `/plan`과 동일하게 동작 — ultraplan은 ground+council+adversarial가 본질. 빠른 계획은 `/plan` 사용
+- **일반 실패를 재프레이밍으로 끌고 오기** — 구현 오류는 현 플랜 수리로, 플랜 오류는 플랜 개정으로 끝난다. `/ultraplan` 은 **프레이밍·아키텍처 자체가 틀렸을 때만** 부르는 사다리 맨 윗칸이고 그런 경우는 희귀하다 (복구 사다리 D05 — 정본 `commands/plan.md` 의 `## 복구 사다리 (D05)`)
 
 ## Next Steps
 

@@ -81,6 +81,14 @@ See also: `commands/team.md` (hint cross-reference), `commands/autopilot.md` (hi
 - Immutable patterns (spread/create new, never mutate)
 - 80%+ coverage target; CI gate (`scripts/ci/validate-coverage.js`): Statements 85 / Branches 76 / Functions 85 / Lines 85 (vitest.config.js local gate is 80/76/80/80)
 
+## Existence Audit
+
+훅·커맨드·스킬·`lib/` 모듈은 **릴리스마다 소비처 수와 발화 수를 실측해 원장에 남긴다**. 소비처 0 + 발화 0 이 **2릴리스 연속**이면 제거 후보로 올린다 — 후보일 뿐 자동 삭제가 아니고, 제거는 사람이 승인한다.
+
+**면제(안전 계약 — 실측과 무관하게 유지)**: 보고·중계 계약 · `{sid}` · Phase 0 VALIDATE · Phase 4.5 · fast 하드캡 · Operator-Waits · `FABLE_DENYLIST` · task-budget 하한 · PreToolUse 보안 훅 · dispatch-table · vitest-only · 격리 · ambiguity-guard · verification-discipline 전문. 정본 목록은 설계 §3.7 "유지(REJECT)".
+
+이 절은 규칙만 정한다. 측정 원장은 별도 작업이 만들며, 발화 카운트의 분모는 현재 미측정이다.
+
 ## Context Efficiency
 
 - Instruction files ≤ 4K chars each, ≤ 12K chars total

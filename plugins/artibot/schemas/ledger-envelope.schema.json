@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "$id": "https://artibot.dev/schemas/ledger-envelope.schema.json",
+  "title": "ArtibotLedgerEnvelope",
+  "description": "Envelope for one line of the central append-only run ledger at <projectRoot>/.artibot/runtime/ledger.jsonl (design ARTIBOT-5.0-DESIGN.md §3.6; lane 6 §2.2 + §5-①). One JSON object per line, no trailing newline inside the object. This schema governs the ENVELOPE ONLY: the per-event contract for `data` (which fields are required for which event, and their value enums) lives in the single vocabulary source of truth `ledger-events.allowlist.json`, and both layers are enforced together by the writer (T-20 lib/runtime/event-writer.js). Splitting them keeps one canonical vocabulary file rather than duplicating the event enum here (Hardening §46 'canonical 1개'). NOT enforced here and deliberately so: (a) the 4096-byte per-line cap is a writer concern, not a schema concern -- JSON Schema cannot measure the serialized byte length of the document validating against it, so T-20 measures Buffer.byteLength(line,'utf8') before append and routes the overflow to data.evidence_refs (design §3.6 '줄 4KB 상한, 초과분은 evidence_refs'); (b) membership of `event` in the allowlist -- `event` is pattern-constrained here and enum-constrained by the allowlist file, so an unregistered but well-formed name passes THIS schema and is rejected by the allowlist layer, which writes a `ledger.rejected` line instead (fail-closed, design §3.6 '미등록 event 는 ledger.rejected 로 기록 후 무시').",
+  "type": "object",
+  "required": [
+    "v",
+    "ts",
+    "event",
+    "mission_id",
+    "session_id",
+    "source",
+    "pid",
+    "seq"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "v": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Envelope schema version (Hardening §28-29 'schema_version ... 봉투 v'). Phase 0 emits 1. Not a const: a later envelope revision must be representable without editing every reader."
+    },
+    "ts": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$",
+      "description": "ISO 8601 timestamp with an explicit offset or Z. The `pattern` is what actually enforces the shape; `format` is documentation, because ajv core does not implement format assertions without ajv-formats."
+    },
+    "event": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*\\.[a-z][a-z0-9_]*$",
+      "description": "Dotted event vocabulary, exactly one dot: <family>.<name>, lowercase, underscores allowed only in the name half (e.g. mission.candidate_deferred). Membership is decided by ledger-events.allowlist.json, NOT by this pattern -- see the schema description."
+    },
+    "mission_id": {
+      "type": "string",
+      "pattern": "^M-\\d{8}-(?:\\d{3,}|S[0-9A-Za-z]{8})$",
+      "description": "REQUIRED on every line (design §3.6 'mission_id(필수)'), which is where the central ledger is stricter than the v1.1 §11 examples -- two of those six lines carry no mission_id (lane 6 §2.2 records this same gap). Two forms: the issued form M-YYYYMMDD-NNN, with NNN allowed to run past three digits so a busy day cannot overflow the id space (04_INTENT_MD_SPEC.md:27; pattern kept byte-identical to schemas/review-output.schema.json so a mission_id valid in a review is valid in the ledger) and the session fallback M-YYYYMMDD-S<sid8> used when the substantive-mission gate says no (lane 6 §2.5)."
+    },
+    "session_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Claude Code session id that produced the line. With `cwd` this is how a hook (a separate process) looks up the active mission in the state store."
+    },
+    "source": {
+      "type": "string",
+      "enum": [
+        "human",
+        "supervisor",
+        "worker",
+        "reviewer",
+        "hook",
+        "git",
+        "gate",
+        "scheduler"
+      ],
+      "description": "Who emitted the line. Reused verbatim from the vNext supervisor envelope enum, measured at lib/supervisor/event-types.js:57-66 (SOURCES). Same 8 values, same order -- do not fork this list."
+    },
+    "pid": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Emitting OS process id. Part of the reader-side dedupe key (session_id,source,pid,seq): the writer never does read-then-append, so duplicate and missing lines are judged when reading (lane 6 §2.8). session_id leads the key because a PID is only unique while the process lives -- the OS reuses it, so without session_id two unrelated lines from a recycled PID could collide (T-51 #3; implemented at lib/runtime/ledger.js#dedupeKey)."
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Monotonic per-process counter. Part of the (session_id,source,pid,seq) dedupe key."
+    },
+    "action_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Optional. Routing is scored per Action (Hardening §3 ontology Project/Mission/Task/Action/Run)."
+    },
+    "task_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Optional. Task Graph node id (Hardening §3 + §7-8; the graph itself is owned by T-14 task-graph.schema.json)."
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Optional. One spawn = one Run (Hardening §3, 'spawns.ndjson agentId = run_id'). Cost and retries are Run-scoped."
+    },
+    "routing_epoch_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Optional. A Routing Epoch is a contiguous model/context stretch: score per Action, switch per Epoch (§8.2 §29-§30). Its effective unit is the spawn, because in-flight model switching in the host is unverified (decision G1)."
+    },
+    "idempotency_key": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Optional. Makes a runtime op safe to re-run, e.g. 'mission:M-20260902-001:review:rev-2' (Hardening §11). artifact-lifecycle must not produce a second artifact for a repeated key."
+    },
+    "worker": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Optional. Worker/limb name. Present in the v1.1 §11 worker.claimed example."
+    },
+    "model": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Optional. Exact provider model id, never a tier (§8.2 §20 'Exact Model Identity'). Present in the v1.1 §11 review.completed example."
+    },
+    "actor": {
+      "type": "object",
+      "description": "Optional. Attribution (Hardening §41-42). Schema-only in v5.0; role enforcement is P2.",
+      "required": ["type", "id"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["human", "agent", "runtime"]
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "data": {
+      "type": "object",
+      "description": "Event payload. Free-form HERE by design: which keys are required, and which enum a value must belong to, is declared per event in ledger-events.allowlist.json so the vocabulary has exactly one source of truth. Consequence to be aware of: a line whose event requires data fields but which omits `data` entirely still satisfies THIS schema -- the allowlist layer is what rejects it, so a writer must run both."
+    }
+  }
+}

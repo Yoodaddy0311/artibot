@@ -24,6 +24,14 @@
  * top-level `lanes[limb].state` yet — `readLaneOpsState` therefore returns
  * `null` ("unknown") for that file, which is the fail-closed answer.
  *
+ * ── v1.1 task/worker status (`task-graph.schema.json`) ────────────────────
+ * A third vocabulary exists: the eight v1.1 statuses
+ * (`schemas/task-graph.schema.json:59-68`). {@link V11_STATUS_TO_LANE_STATE}
+ * is the ONE authored table between it and the design lane machine; the ops
+ * direction ({@link LANE_OPS_TO_V11_STATUS}) is *derived* by composing the two
+ * tables that already exist, never hand-written, so there is a single place to
+ * edit. Design §3.1: no fourth file — the mapping lives here.
+ *
  * @module lib/supervisor/contracts
  */
 
@@ -99,6 +107,17 @@ export const REVIEW_VERDICTS = Object.freeze(['PENDING', 'APPROVED', 'CHANGES_RE
 /**
  * Operational lane states the `/split` leader writes into
  * `run.json.lanes[limb].state`. Allowlist — anything else reads as unknown.
+ *
+ * `failed` is the 9th and was added last: the ops vocabulary had no word for a
+ * lane that stopped on a failure, so a v1.1 `failed` task had nowhere to
+ * project. Widening an allowlist widens what {@link isLaneOpsState} accepts,
+ * so it was only safe because nothing emits the string today — measured
+ * 2026-09-02 with a repo-wide `grep -rnE` for a `state` key or assignment set
+ * to `failed` (no `--include`, `node_modules` and `.git` excluded): 0 hits.
+ * The one writer, `scripts/split/lane-state.mjs`, takes the state from argv
+ * and refuses anything off this list, so `failed` can only enter by a human
+ * typing it. `tests/supervisor/v11-status-mapping.test.js` re-measures that 0
+ * on every run rather than trusting this note.
  */
 export const LANE_OPS_STATES = Object.freeze([
   'pending',
@@ -109,6 +128,7 @@ export const LANE_OPS_STATES = Object.freeze([
   'closing',
   'done',
   'suspended',
+  'failed',
 ]);
 
 /**
@@ -125,6 +145,7 @@ export const LANE_OPS_STATES = Object.freeze([
  * | `serial-gate`       | WAITING_INPUT   | blocked on another lane's landing or a leader-run gate |
  * | `suspended`         | WAITING_INPUT   | operator hold (compact wait, owner pause) — not a failure |
  * | `done`              | DONE            | trailer read by git |
+ * | `failed`            | FAILED_RECOVERABLE | lane stopped on a failure. RECOVERABLE, not TERMINAL: the ops word carries no "give up" signal, and choosing the terminal state would let a mere projection close a lane a retry could still finish. Terminal-ness must come from an explicit event, never from this table |
  */
 export const LANE_OPS_TO_LANE_STATE = Object.freeze({
   'pending': 'PENDING',
@@ -135,7 +156,87 @@ export const LANE_OPS_TO_LANE_STATE = Object.freeze({
   'serial-gate': 'WAITING_INPUT',
   'suspended': 'WAITING_INPUT',
   'done': 'DONE',
+  'failed': 'FAILED_RECOVERABLE',
 });
+
+/**
+ * The eight v1.1 task/worker statuses, in the enum order of
+ * `schemas/task-graph.schema.json`. Kept identical to that enum —
+ * `v11-status-mapping.test.js` reads the schema file and compares, so the two
+ * cannot drift apart silently.
+ */
+export const V11_STATUSES = Object.freeze([
+  'queued',
+  'claimed',
+  'executing',
+  'blocked',
+  'reviewing',
+  'done',
+  'failed',
+  'cancelled',
+]);
+
+/**
+ * v1.1 status → design lane state. The single authored mapping table; every
+ * other direction in this module is derived from it. Total over
+ * {@link V11_STATUSES} and injective, which is what makes the inverse below
+ * well defined.
+ *
+ * | v1.1        | lane               | why |
+ * |-------------|--------------------|-----|
+ * | `queued`    | PENDING            | planned, nobody holds it |
+ * | `claimed`   | READY              | taken but not yet running |
+ * | `executing` | RUNNING            | worker executing |
+ * | `blocked`   | WAITING_INPUT      | *why* it is blocked lives in `blocked_by[]` (`lane:` / `gate:` / `human:` / `reconcile:`), not in the state word |
+ * | `reviewing` | REVIEW_REQUIRED    | inspector dispatched / verdict pending |
+ * | `done`      | DONE               | — |
+ * | `failed`    | FAILED_RECOVERABLE | see the loss note below |
+ * | `cancelled` | ABORTED            | — |
+ *
+ * Losses in both directions, stated rather than hidden:
+ * - **lane → v1.1**: four of the twelve lane states have no v1.1 word —
+ *   `CLAIMED`, `CHECKPOINTING`, `FIXING`, `FAILED_TERMINAL`. `CHECKPOINTING`
+ *   and `FIXING` are moments inside `executing` that v1.1 does not name;
+ *   `FAILED_TERMINAL` collapses because v1.1 has a single `failed`; and
+ *   `CLAIMED` is unreachable because v1.1 `claimed` means "taken, not yet
+ *   running", which is READY here. The inverse leaves all four unmapped, so a
+ *   lookup returns `undefined` — unknown, the fail-closed answer, not a guess.
+ * - **ops → v1.1**: `closing` and `suspended` are lost, because
+ *   {@link LANE_OPS_TO_LANE_STATE} already merges `closing` into RUNNING and
+ *   `suspended` into WAITING_INPUT. `closing` survives only as a ledger event;
+ *   `suspended` survives only as `blocked_by: ['human:suspend']`. A round trip
+ *   through {@link LANE_OPS_TO_V11_STATUS} therefore does not return the ops
+ *   word it started from, and that is by design, not a bug.
+ */
+export const V11_STATUS_TO_LANE_STATE = Object.freeze({
+  'queued': 'PENDING',
+  'claimed': 'READY',
+  'executing': 'RUNNING',
+  'blocked': 'WAITING_INPUT',
+  'reviewing': 'REVIEW_REQUIRED',
+  'done': 'DONE',
+  'failed': 'FAILED_RECOVERABLE',
+  'cancelled': 'ABORTED',
+});
+
+/** lane state → v1.1 status. Derived: the inverse of the table above. */
+const LANE_STATE_TO_V11 = Object.freeze(
+  Object.fromEntries(Object.entries(V11_STATUS_TO_LANE_STATE).map(([v11, lane]) => [lane, v11])),
+);
+
+/**
+ * ops state → v1.1 status. **Derived, not authored** — the composition
+ * `ops → LANE_OPS_TO_LANE_STATE → inverse(V11_STATUS_TO_LANE_STATE)`. It
+ * reproduces the design's ops→v1.1 table exactly (the test asserts all nine
+ * rows against the written-out table), so hand-writing it here would only
+ * create a second copy to drift. This is the direction the split-state
+ * adapter reads `run.json` in.
+ */
+export const LANE_OPS_TO_V11_STATUS = Object.freeze(
+  Object.fromEntries(
+    LANE_OPS_STATES.map((ops) => [ops, LANE_STATE_TO_V11[LANE_OPS_TO_LANE_STATE[ops]]]),
+  ),
+);
 
 const RUN_SET = new Set(RUN_STATES);
 const LANE_SET = new Set(LANE_STATES);
@@ -143,6 +244,7 @@ const RUN_TERMINAL_SET = new Set(RUN_TERMINAL_STATES);
 const LANE_TERMINAL_SET = new Set(LANE_TERMINAL_STATES);
 const SOURCE_SET = new Set(SOURCES);
 const OPS_SET = new Set(LANE_OPS_STATES);
+const V11_SET = new Set(V11_STATUSES);
 
 /** `type` pattern from the envelope schema. */
 const TYPE_PATTERN = /^[a-z][a-z0-9-]+$/;
@@ -190,6 +292,14 @@ export function isLaneTerminal(s) {
  */
 export function isLaneOpsState(s) {
   return typeof s === 'string' && OPS_SET.has(s);
+}
+
+/**
+ * @param {unknown} s
+ * @returns {boolean}
+ */
+export function isV11Status(s) {
+  return typeof s === 'string' && V11_SET.has(s);
 }
 
 /**

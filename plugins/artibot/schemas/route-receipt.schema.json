@@ -1,0 +1,331 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "route-receipt.schema.json",
+  "title": "RouteReceipt",
+  "description": "Route Receipt (MODEL-SWITCHING-SCORECARD.md §40). NOT a standalone file or artifact: this schema describes the `data` object of the append-only ledger envelope event `route.selected` (ARTIBOT-5.0-DESIGN.md §8.2 §3·§40 — 'Route Receipt = 원장 route.selected 이벤트의 data. 별도 파일 아님'). One receipt per routing decision: score per action, switch per epoch (§29). In Phase 0 (Observe) only decision.type 'pin' and 'route' occur — 'switch' is Canary-gated (PRD §3), so a Phase 0 receipt records the recommendation plus the ESTIMATED switch economics with no behaviour change. Field alignment is fixed by lane 2 §4.5 (v5-lane2-routing.md): predicted{} is the route-scorer output, terms{} carries the seven §28 SwitchCost terms each with an explicit measured flag, transition.handoff_tokens is in TOKENS (handoff-builder.js measures bytes — a writer must convert, never store bytes here), routing_epoch_id equals the spawn run_id (G1), and actionsSinceSwitch is the residency/cooldown counter. additionalProperties is false at every level so a typo such as handoff_bytes is rejected rather than silently stored.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "route_receipt_id",
+    "mission_id",
+    "session_id",
+    "execution_profile_version",
+    "routing_epoch_id",
+    "action",
+    "models",
+    "decision",
+    "predicted",
+    "transition",
+    "terms",
+    "actionsSinceSwitch",
+    "reason",
+    "timestamp"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1,
+      "description": "Receipt schema revision. Bumped only on a breaking field change."
+    },
+    "route_receipt_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Unique id of this routing decision record."
+    },
+    "project_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Optional. Absent in Phase 0, where no project registry has landed yet."
+    },
+    "mission_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Mission this decision belongs to (the id from the ledger's mission.created event)."
+    },
+    "session_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Claude Code session that produced the decision."
+    },
+    "task_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Optional. Task the action belongs to; absent when routing happens outside a task."
+    },
+    "action_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Optional. Action being scored. Transcript entries carry no action id (lane 2 §2.4), so attribution below spawn granularity is not always available."
+    },
+    "intent_revision": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Optional. Monotonic intent revision the decision was made under."
+    },
+    "execution_profile_version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Monotonic execution-profile revision (lane 2 §4.5: profile_version increments together with intent_revision). Typed as a counter, not a date string."
+    },
+    "routing_epoch_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Routing Epoch (§29) this decision belongs to. Lane 2 §4.5 (G1): the epoch is the spawn, so this equals the spawn run_id and joins to AttemptReceipt.run_id."
+    },
+    "action": {
+      "type": "object",
+      "required": ["type", "phase", "complexity"],
+      "additionalProperties": false,
+      "description": "Action classification (§40). Lane 2 §4.5: phase is derived from the resolveModel role (build/review/…), complexity is the classifier score, uncertainty and risk are classifyComplexity.factors passed through. uncertainty and risk are optional because a classifier path may not produce those factors; type, phase and complexity always exist.",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "classify",
+            "status",
+            "explore",
+            "edit-routine",
+            "implement",
+            "complex-debug",
+            "architecture",
+            "review"
+          ],
+          "description": "Action class (actionClass) from action-classifier.js, as a CLOSED allowlist of the eight behaviour aliases (lane 2 §2.2, v5-lane2-routing.md:57). A ninth class is a schema change, not a free-form string. Which TIER each class resolves to is a policy decision owned by the T-27 action-classifier and the model-policy config — never by this schema. A receipt records the class that was observed; the same class may resolve to a different tier under a different policy, and models.selected is what actually ran."
+        },
+        "phase": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Lifecycle phase derived from the resolveModel role (e.g. build, review)."
+        },
+        "complexity": {
+          "type": "number",
+          "description": "classifyComplexity score."
+        },
+        "uncertainty": {
+          "type": "number",
+          "description": "Optional. classifyComplexity.factors.uncertainty, passed through unchanged."
+        },
+        "risk": {
+          "type": "number",
+          "description": "Optional. classifyComplexity.factors.risk, passed through unchanged."
+        }
+      }
+    },
+    "models": {
+      "type": "object",
+      "required": ["current", "recommended", "selected"],
+      "additionalProperties": false,
+      "description": "Exact model identities (§20). current is explicitly nullable — the first decision of a session has no incumbent — but the key stays required so 'no incumbent' is recorded rather than omitted. In Observe, recommended and selected differ whenever the router disagrees with policy; that divergence rate is the Phase 0 metric (PRD S3).",
+      "properties": {
+        "current": {
+          "description": "Model in force before this decision, or null when there is none.",
+          "oneOf": [{ "$ref": "#/definitions/model_identity" }, { "type": "null" }]
+        },
+        "recommended": {
+          "description": "What the router recommends (lane 2 §4.5: adaptive-model-router output gains model: ModelIdentity).",
+          "$ref": "#/definitions/model_identity"
+        },
+        "selected": {
+          "description": "What was actually used. In Observe this is always the resolveModel policy result, never the recommendation.",
+          "$ref": "#/definitions/model_identity"
+        }
+      }
+    },
+    "decision": {
+      "type": "object",
+      "required": ["type"],
+      "additionalProperties": false,
+      "description": "Lane 2 §4.5: the five-value decision vocabulary is the model-switcher.js output. The legacy reason vocabulary (profile_change | health) is demoted to an entry in reason[], never a decision type.",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["route", "pin", "switch", "escalate", "downgrade"],
+          "description": "§40 decision vocabulary as an allowlist: a value outside these five is rejected rather than passed through."
+        }
+      }
+    },
+    "predicted": {
+      "type": "object",
+      "required": ["success", "cost", "latency", "retry_probability"],
+      "additionalProperties": false,
+      "description": "Route-scorer prediction terms (§40). Lane 2 §4.5: before Shadow these are constants; the fact that they are unmeasured is carried by terms{}.measured rather than duplicated here.",
+      "properties": {
+        "success": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Predicted success probability, 0..1."
+        },
+        "cost": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Predicted cost in the same unit as AttemptReceipt.cost.total (the null-cost pricing caveat applies)."
+        },
+        "latency": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Predicted latency in milliseconds."
+        },
+        "retry_probability": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Predicted retry probability, 0..1."
+        }
+      }
+    },
+    "transition": {
+      "type": "object",
+      "required": [
+        "context_rebuild_tokens",
+        "cache_loss_estimate",
+        "handoff_tokens",
+        "predicted_time_ms",
+        "predicted_cost"
+      ],
+      "additionalProperties": false,
+      "description": "Projection of the switch economics onto the §40 transition block (lane 2 §4.5: mapped from the hysteresis terms).",
+      "properties": {
+        "context_rebuild_tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Tokens needed to rebuild context after the transition."
+        },
+        "cache_loss_estimate": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Estimated prompt-cache value lost by the transition."
+        },
+        "handoff_tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Handoff size in TOKENS, not bytes. handoff-builder.js measures bytes only (lane 2 §2.5 lists Handoff token attribution as 불가), so a writer must convert; storing a byte count here is a defect."
+        },
+        "predicted_time_ms": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Predicted transition wall time. Unmeasured until a latency input exists — see terms.handoffLatency.measured."
+        },
+        "predicted_cost": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Predicted transition cost."
+        }
+      }
+    },
+    "terms": {
+      "type": "object",
+      "required": [
+        "contextSerialization",
+        "contextRebuild",
+        "cacheLoss",
+        "handoffTokens",
+        "handoffLatency",
+        "reorientationRisk",
+        "expectedRetry"
+      ],
+      "additionalProperties": false,
+      "description": "The seven §28 SwitchCost terms, key names fixed by lane 2 §4.5. camelCase here because these are the route-hysteresis module's own term names, unlike the snake_case §40 receipt fields. Every term carries measured:boolean so an estimate can never be read as a measurement — before the usage receipt lands, handoffLatency, reorientationRisk and expectedRetry are measured:false (§8.2 R2).",
+      "properties": {
+        "contextSerialization": { "$ref": "#/definitions/cost_term" },
+        "contextRebuild": { "$ref": "#/definitions/cost_term" },
+        "cacheLoss": { "$ref": "#/definitions/cost_term" },
+        "handoffTokens": { "$ref": "#/definitions/cost_term" },
+        "handoffLatency": { "$ref": "#/definitions/cost_term" },
+        "reorientationRisk": { "$ref": "#/definitions/cost_term" },
+        "expectedRetry": { "$ref": "#/definitions/cost_term" }
+      }
+    },
+    "actionsSinceSwitch": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Residency/cooldown counter feeding §30 minimum_residency and cooldown. Lane 2 §4.5: an epoch is a spawn, so in Phase 0 this counts spawns since the last switch. camelCase follows the hysteresis module contract, matching terms{}."
+    },
+    "reason": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "description": "Ordered reason codes for the decision (§40 reason[]). The legacy profile_change and health values live here, not in decision.type. May be empty."
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO-8601 instant the decision was taken."
+    },
+    "source": {
+      "type": "string",
+      "enum": ["production", "shadow"],
+      "default": "production",
+      "description": "Provenance of the line. Optional: an absent source means production, so every existing production writer stays valid. A shadow line is what the Observe→Shadow learner appends BESIDE the production line (design §3.6, ARTIBOT-5.0-DESIGN.md §3.6 — route.selected{source:'shadow', shadow_of}); the production line is never modified, and a shadow line never changes behaviour."
+    },
+    "shadow_of": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Which production line this shadow line mirrors: the ledger seq or event id of that line. Required when source is shadow (see allOf below) — a shadow line that names no original cannot be paired for counterfactual comparison, which is the only thing shadow lines exist for. Must be absent-or-meaningless for production lines, which name no original."
+    }
+  },
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": { "source": { "const": "shadow" } },
+        "required": ["source"]
+      },
+      "then": { "required": ["shadow_of"] }
+    }
+  ],
+  "definitions": {
+    "model_identity": {
+      "type": "object",
+      "required": ["provider", "family", "tier", "model_id", "version", "catalog_version"],
+      "additionalProperties": false,
+      "description": "Exact model identity (§20, §42). Duplicated verbatim in attempt-receipt.schema.json; the T-19 common meta fragment is the intended future home. version (not the §20 spelling snapshot_or_version) is the canonical key — lane 2 §4.5 flags that document inconsistency and resolves it in favour of §42.",
+      "properties": {
+        "provider": {
+          "type": "string",
+          "minLength": 1,
+          "description": "e.g. anthropic. Left a free string: the field exists precisely because a non-Anthropic provider is possible (§59 vLLM reference)."
+        },
+        "family": {
+          "type": "string",
+          "minLength": 1,
+          "description": "e.g. claude."
+        },
+        "tier": {
+          "type": "string",
+          "enum": ["haiku", "sonnet", "opus", "fable"],
+          "description": "Artibot tier alias. Allowlist grounded in the lib/core/model-catalog.js MODELS keys (measured 2026-09-02: haiku, sonnet, opus, fable)."
+        },
+        "model_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Exact provider model id from model-catalog.js (e.g. claude-fable-5-1), never the tier alias."
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Provider snapshot/version string for the model id."
+        },
+        "catalog_version": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Version of the Artibot model catalog the identity was resolved against. PREREQUISITE: lib/core/model-catalog.js exports no CATALOG_VERSION today (repo-wide grep 0 excluding node_modules, measured 2026-09-02), so that constant must be added before a writer can populate this field."
+        }
+      }
+    },
+    "cost_term": {
+      "type": "object",
+      "required": ["value", "measured"],
+      "additionalProperties": false,
+      "description": "One §28 SwitchCost term. measured is mandatory so estimated and measured terms are never conflated (§46 EXACT/PARTIAL/SIMULATED labelling).",
+      "properties": {
+        "value": {
+          "type": "number",
+          "description": "Term magnitude in the term's own unit (tokens, currency, or a 0..1 risk weight)."
+        },
+        "measured": {
+          "type": "boolean",
+          "description": "true only when the value came from an actual measurement. Constants and heuristics are false."
+        }
+      }
+    }
+  }
+}

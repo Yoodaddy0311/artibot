@@ -1,0 +1,135 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "context-receipt.schema.json",
+  "title": "ContextReceipt",
+  "description": "Context Receipt (MODEL-SWITCHING-SCORECARD.md §41). NOT a standalone file or artifact: this schema describes the `data` object of the append-only ledger envelope event `context.compiled` (ARTIBOT-5.0-DESIGN.md §8.2 §8·§41 — Context Receipt는 context.compiled 이벤트의 data). Its purpose is to separate a model problem from a context problem: input tokens in, transform deltas, output tokens out. Ownership note from lane 2 §4.5 — cache.hit_tokens and cache.created_tokens read the SAME transcript fields as the attempt receipt, and the single writer of those numbers is economics/usage-receipt.js (design §3.6); the context module references the values, it does not re-measure them. additionalProperties is false at every level.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "context_receipt_id",
+    "mission_id",
+    "based_on",
+    "input_tokens",
+    "transforms",
+    "protected_sections",
+    "output_tokens",
+    "cache",
+    "strategy_version"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1,
+      "description": "Receipt schema revision. Bumped only on a breaking field change."
+    },
+    "context_receipt_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Unique id of this context compilation record."
+    },
+    "mission_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Mission the compiled context belongs to."
+    },
+    "task_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Optional. Task the compilation was performed for."
+    },
+    "action_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Optional. Action the compiled context was handed to."
+    },
+    "based_on": {
+      "type": "object",
+      "required": ["intent_revision", "plan_revision"],
+      "additionalProperties": false,
+      "description": "Which revisions the context was compiled from (§41, Hardening §22 based_on). Monotonic counters, so a receipt compiled against a stale plan is detectable after the fact.",
+      "properties": {
+        "intent_revision": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Intent revision the compilation was based on."
+        },
+        "plan_revision": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Plan revision the compilation was based on."
+        }
+      }
+    },
+    "input_tokens": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Token count of the context before any transform."
+    },
+    "transforms": {
+      "type": "object",
+      "required": ["dedup", "tool_compression", "history_trim", "memory_add", "project_knowledge_add"],
+      "additionalProperties": false,
+      "description": "The five §41 transforms. INTERPRETATION (§41 leaves the value types blank; this is the schema's choice, stated so a consumer never has to guess): each value is a SIGNED token delta contributed by that transform — negative removes tokens, positive adds them, 0 means the transform ran and changed nothing. All five keys are required so input_tokens + sum(transforms) reconciles against output_tokens; a transform that did not run is 0, never omitted.",
+      "properties": {
+        "dedup": {
+          "type": "integer",
+          "description": "Signed token delta from de-duplication (normally negative or 0)."
+        },
+        "tool_compression": {
+          "type": "integer",
+          "description": "Signed token delta from tool-result compression (normally negative or 0)."
+        },
+        "history_trim": {
+          "type": "integer",
+          "description": "Signed token delta from history trimming (normally negative or 0)."
+        },
+        "memory_add": {
+          "type": "integer",
+          "description": "Signed token delta from injected memory (normally positive or 0). In Phase 0 memory injection is instrumented only, with defaults unchanged (design §501)."
+        },
+        "project_knowledge_add": {
+          "type": "integer",
+          "description": "Signed token delta from injected generated project knowledge (normally positive or 0)."
+        }
+      }
+    },
+    "protected_sections": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "description": "Identifiers of sections that no transform may touch (§41). May be empty; the empty array is a statement that nothing was protected."
+    },
+    "output_tokens": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Token count of the compiled context handed to the model."
+    },
+    "cache": {
+      "type": "object",
+      "required": ["provider", "hit_tokens", "created_tokens"],
+      "additionalProperties": false,
+      "description": "Prompt-cache accounting for this compilation. Same transcript origin as AttemptReceipt.usage.cached_input_tokens and cache_creation_tokens — referenced from the single usage-receipt writer, not measured again here (lane 2 §4.5).",
+      "properties": {
+        "provider": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Cache provider the numbers came from (e.g. anthropic)."
+        },
+        "hit_tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Tokens served from cache (transcript cache_read_input_tokens)."
+        },
+        "created_tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Tokens written to cache (transcript cache_creation_input_tokens)."
+        }
+      }
+    },
+    "strategy_version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Monotonic version of the context-compilation strategy that produced this receipt. Typed as a counter for consistency with the other revision fields (intent_revision, plan_revision, execution_profile_version); §41 leaves the type blank."
+    }
+  },
+  "additionalProperties": false
+}

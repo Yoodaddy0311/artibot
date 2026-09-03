@@ -23,6 +23,7 @@ Before ANY action, break the request into numbered atomic items:
 - Every sentence with an action verb = separate item
 - "A하고 B도 해줘" = TWO items
 - Implicit requirements count (e.g., "새 API" implies route + handler + types)
+- 상류 원인·하류 회귀 후보가 있으면 항목으로 적는다(없으면 "없음")
 
 ## Step 2: EXECUTE
 For EACH item:

@@ -45,6 +45,11 @@
           "ad-specialist"
         ]
       },
+      "low": {
+        "model": "sonnet",
+        "agents": [],
+        "comment": "4-tier introduction step 2 (design §3.2 OD-2). Declared EMPTY on purpose: effective routing change is 0. lib/core/model-policy.js#loadModelPolicy normalizes ONLY the `high` and `medium` buckets (see its return object) and #getPolicyModel / #listAgentsByModel consult only those two — an unknown `low` bucket is never read, so this key is inert twice over (unread by the resolver AND empty). scripts/ci/validate-model-policy.js#collectPolicyAgents likewise goes through listAgentsByModel, so the 28-agent roster count that scripts/validate.js checks is unchanged. Populating `agents` here would still do nothing until loadModelPolicy learns the bucket — that wiring is a later step, NOT this one. tests/firewall/v5-config-firewall.test.js pins both facts."
+      },
       "advisorStrategy": {
         "enabled": true,
         "executorModel": "opus",
@@ -826,6 +831,44 @@
       "comment": "scripts/split/worktree-setup.mjs: linkDirs are junction-linked from the parent checkout when absent in the worktree (win32 mklink /J, posix symlink); copyFiles are copied only when absent; installCmd (argv array, shell-free) runs only when linkDirs did not cover node_modules; envPerLane writes <worktree>/.artibot/split/<limb>/lane.env with {limb} / {limb_} substituted (e.g. E2E_DB_NAME=app_e2e_{limb_}) so parallel lanes never share an e2e database. --teardown removes reparse points only, never a real directory."
     },
     "comment": "/split (cross-session multi-worktree). maxWindows maps onto the EXISTING fast-profile keys (limits.maxWorktrees AND limits.hardMaxAgents) because normalizeFastProfile reads only four keys and silently drops unknown ones; serverEntryPaths seeds the conflict grouping so two windows never share a dev-server port; humanWaitReevalPct is the Phase 5 human-wait threshold that re-opens the headless-window (C-stage) question; recommendMinSubtasks: null = recommend=split hint OFF (opt-in). Set an integer >= 2 to enable; NOTE any value <= 6 shadows the autopilot hint (same floor). Shipped OFF because real-operator /split data is 0. These keys never touch the user settings.json cross-session inbound or peer-machine isolation settings (tests/firewall/split-config-firewall.test.js)."
+  },
+  "topology": {
+    "default": "solo",
+    "autopilot_fast": {
+      "hardMaxAgentsRef": "autopilot.fast.hardMaxAgents",
+      "agentsPerCpuRef": "autopilot.fast.agentsPerCpu",
+      "maxWorktreesRef": "autopilot.fast.maxWorktrees",
+      "maxRiskRef": "autopilot.fast.maxRisk"
+    },
+    "split": {
+      "maxWindowsRef": "split.maxWindows",
+      "minStemsRef": "split.minStems",
+      "dispatchBudgetRef": "split.dispatch.budget"
+    },
+    "reviewTierRef": "agents.modelPolicy.phaseRoles.review",
+    "comment": "Design §3.5 '예외 정책은 config 로, 값은 기존 키 참조'. Every *Ref value is a DOT PATH POINTING AT an existing key, never a copy of its value — duplicating the number here is exactly what §3.5 forbids, because the copy silently rots when the pointee changes. tests/firewall/v5-config-firewall.test.js resolves every *Ref against this same file and fails when a path is dangling, so a rename of autopilot.fast.* / split.* / phaseRoles.review breaks the gate instead of the runtime. `default` is the topology.mode taken when nothing escalates; 'solo' is the CURRENT behavior (lib/cognitive/workflow-plan.js runner defaults to inline when team.autoApplyTriggers do not fire), so this key records today's default rather than changing it. Allowed values are the run-ledger topology.mode enum 6 (.artibot/guides/v5-design/package/schemas/run-ledger.schema.yaml:17): solo|subagent|team|autopilot|autopilot_fast|split. READER as of 2026-09-03: lib/topology/topology-router.js reads config.topology.* and resolves these *Ref dot-paths, but READ-ONLY — it appends them to reason[] for audit and DELIBERATELY DOES NOT APPLY `default` (a divergence is recorded as `config-default-ignored:<v>`, see its :560). lib/routing/execution-profile.js also references `default`. So this key is now read and still selects nothing; 'has a reader' is not 'changes behavior'. Note topology-router.js falls back to built-in UNCALIBRATED ParallelGain weights because `topology.parallelGain` intentionally does not exist here. reviewTierRef sits at this level (not under split) because both profiles share one review tier; that placement is an implementation judgment, the design names the three pointees without nesting them."
+  },
+  "routing": {
+    "observe": true,
+    "canary": {
+      "actionClasses": []
+    },
+    "comment": "Design §3.2 OD-2 4-tier order, stage 3 (Observe) — record only, route nothing. observe=true means the router MAY be called to WRITE spawn-ledger fields (recommendedModel, actionClass); it never selects the model. The selection stays lib/core/model-policy.js#resolveModel, which §3.2 requires to be byte-identical. canary.actionClasses is the allowlist of action classes whose recommendation is ACTUALLY APPLIED; it ships EMPTY, which is what makes this observe-only — an empty allowlist applies to nothing, and being an allowlist it stays fail-closed as new action classes appear (rules §8). The design's Canary-stage value is ['classify','status'] (§3.2); shipping that list is a later, separate decision, not this task. NO CONSUMER READS THIS KEY as of 2026-09-02 (lib/routing/ does not exist yet) — the value is a declaration, and 'observe=true' therefore does NOT mean anything is currently being observed."
+  },
+  "ledger": {
+    "path": ".artibot/runtime/ledger.jsonl",
+    "maxLineBytes": 4096,
+    "comment": "Design §3.6 — the ONE physical ledger of record. path is relative to <projectRoot>, NOT to pluginRoot: pluginRoot also has a runtime/ directory, so the leading '.artibot/' is load-bearing and every writer takes projectRoot by injection (§3.6 operating clause 10). The existing 12 ledgers are not deleted; they are demoted to raw-log grade. maxLineBytes 4096 is the per-line cap — content over it goes in evidence_refs rather than inline, and the writer rejects the oversized line (fail-closed). NO WRITER EXISTS as of 2026-09-02 (lib/runtime/event-writer.js absent) and the file itself is not created by this task, so this key describes a contract, not an observed artifact."
+  },
+  "stateStore": {
+    "backend": "jsonl",
+    "location": "git-common-dir",
+    "comment": "Design §1-2 + decision OD-4 (F1 backend, F3 location). backend 'jsonl' = append-only JSONL + derived snapshot + withFileLock + CAS behind a StateStore interface; node:sqlite is interface-compatible only and is NOT chosen, because it would force engines >=22.13 against the current >=20 (package.json). location 'git-common-dir' = under `git rev-parse --git-common-dir`, which every worktree shares, so /split windows see one store instead of a per-worktree copy. MEASUREMENT GAP (design I5, still open): the --git-common-dir value inside a junction-based worktree made by scripts/split/worktree-setup.mjs is UNVERIFIED on Windows — this key records the decision, and nothing resolves the path yet. NO CONSUMER READS THIS KEY as of 2026-09-02 (lib/project-state/ does not exist)."
+  },
+  "missions": {
+    "substantiveSignals": ["S1", "S2", "S3", "S4", "S5", "S6"],
+    "idFormat": "M-YYYYMMDD-NNN",
+    "comment": "Design §3.1. substantiveSignals is an ALLOWLIST, and that direction is the whole point: the v1.1 04 negative list ('not a simple question, not a short fix, …') is fail-OPEN in the generating direction, so a new interaction kind silently becomes substantive. S1 repository-write expected · S2 commit/PR/deploy expected · S3 explicit_requests >= 2 · S4 product_decision_required · S5 explicit /plan|/ultraplan|/split|/autopilot|/implement call · S6 follow-up on an existing mission's intent_revision. Undecidable => no mission is created and the ledger gets mission-candidate-deferred. The signal IDs are listed here, but their PREDICATES live in code: lib/mission/mission-id.js#judgeSubstantive owns the signal table and the evaluation, and lib/mission/compiler.js only imports and calls it (compiler.js:52, :444). So this key does not define what S1 means — and editing it does NOT change any judgment, because mission-id.js carries its own hardcoded S1..S6 table and never reads this config. The two are INDEPENDENT DECLARATIONS of the same allowlist, and what keeps them from drifting apart is tests/evals/nl-activation-fixture.test.js:237, which reads #/missions/substantiveSignals and cross-checks it. Readers as of 2026-09-03 are that drift gate plus tests/firewall/v5-config-firewall.test.js (shape); NO lib/ RUNTIME CODE consults this key. idFormat is the issued-mission format; non-substantive interactions instead get the session fallback M-<date>-S<sid8> (§3.1), which is deliberately NOT a second key here because its issuer (T-24) and the envelope schema that must accept it (T-17) are separate work."
   },
   "git": {
     "autopilot": {

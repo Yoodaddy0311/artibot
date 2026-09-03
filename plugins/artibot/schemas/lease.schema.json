@@ -1,0 +1,51 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "lease.schema.json",
+  "title": "ArtibotLease",
+  "description": "Claim/Lease/Heartbeat record for a task owner or a mission controller (design ARTIBOT-5.0-DESIGN.md §7.2 Addendum §9). Four fields are canonical and required: owner, acquired_at, expires_at, heartbeat_at. Expiry is a derived judgement (now > expires_at => reclaimable) made by the Mission Controller, never a stored boolean. Prior art is lib/git/landing-lock.js (30-min TTL, PID-death + record-age staleness, O_EXCL reclaim); this schema adds the renew/heartbeat field that module lacks. NOTE two deliberate deviations from that prior art, both resolved in favour of the design text and state.yaml: field names are snake_case here vs camelCase there (acquiredAt/sessionId), and timestamps are ISO-8601 strings here vs epoch-millisecond numbers there (landing-lock.js sets acquiredAt: now()). A StateStore adapter must convert in both directions.",
+  "type": "object",
+  "required": ["owner", "acquired_at", "expires_at", "heartbeat_at"],
+  "properties": {
+    "owner": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Stable identifier of the holder: a worker/agent id for a task lease, or a session id for a mission controller lease."
+    },
+    "acquired_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO-8601 instant the lease was taken. Corresponds to landing-lock.js record.acquiredAt (epoch ms there)."
+    },
+    "expires_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO-8601 instant after which the lease is reclaimable. Prior art default TTL is 30 minutes (landing-lock.js DEFAULT_STALE_MS)."
+    },
+    "heartbeat_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO-8601 instant of the last renew. This is the field landing-lock.js has no equivalent of; renew is the only addition the design makes to that prior art."
+    },
+    "token": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Optional release guard carried over from landing-lock.js: release only when the stored token matches, so an evicted holder's late release cannot remove a reclaimed lease."
+    },
+    "pid": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Optional. Holder process id, used with host for the PID-death staleness axis (landing-lock.js defaultIsPidAlive)."
+    },
+    "host": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Optional. Holder hostname. PID-death staleness is only valid when host matches the observer."
+    },
+    "session_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Optional. Claude Code session that holds the lease. Required in practice for missions.<M>.controller, where the leader session is the controller."
+    }
+  },
+  "additionalProperties": false
+}

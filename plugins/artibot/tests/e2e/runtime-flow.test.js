@@ -1,6 +1,8 @@
 import path from 'node:path';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { copyFileSync, mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { handleUserPromptSubmit as handleSpecialTrigger } from '../../scripts/hooks/user-prompt-handler.js';
 import { handleUserPromptSubmit as handleRuntimePrompt } from '../../scripts/hooks/runtime-prompt.js';
 
@@ -38,6 +40,46 @@ async function runHookChain(promptValue) {
   return { firstOutput, runtimeOutput };
 }
 
+/**
+ * SETUP-ONLY ISOLATION (assertions and fixtures below are untouched).
+ *
+ * This suite used to point `CLAUDE_PLUGIN_ROOT` at the REAL plugin root, so
+ * running it mutated the developer's live `runtime/` — `token-usage-session
+ * .json` every run, and (once the recorder-stats flush landed) a line in the
+ * real `runtime/decisions/` store that `/doctor` reads to decide whether
+ * recording is alive. Writing fixture data into the store a health check reads
+ * is worse than recording nothing, and being gitignored does not make it safe.
+ *
+ * The sandbox LINKS the real `lib/`, `commands/`, `skills/` and `agents/` and
+ * copies the real `artibot.config.json`, so both hooks in the chain still
+ * resolve the REAL modules and the REAL config — the flow under test is
+ * unchanged. Only the writable `runtime/` directory is redirected.
+ *
+ * Links, not copies: a sandbox missing the modules would send every dynamic
+ * import into its catch block, and the assertions below would then be measuring
+ * the in-script fallback rather than the runtime path they name.
+ */
+const LINKED_DIRS = ['lib', 'commands', 'skills', 'agents'];
+
+let sandboxRoot = '';
+
+beforeAll(() => {
+  sandboxRoot = mkdtempSync(path.join(tmpdir(), 'artibot-runtime-flow-'));
+  const linkType = process.platform === 'win32' ? 'junction' : 'dir';
+  for (const dir of LINKED_DIRS) {
+    symlinkSync(path.join(PLUGIN_ROOT, dir), path.join(sandboxRoot, dir), linkType);
+  }
+  copyFileSync(
+    path.join(PLUGIN_ROOT, 'artibot.config.json'),
+    path.join(sandboxRoot, 'artibot.config.json'),
+  );
+  mkdirSync(path.join(sandboxRoot, 'runtime'), { recursive: true });
+});
+
+afterAll(() => {
+  if (sandboxRoot) rmSync(sandboxRoot, { recursive: true, force: true });
+});
+
 describe('hook-chain runtime flow', () => {
   let savedEnv;
 
@@ -47,7 +89,7 @@ describe('hook-chain runtime flow', () => {
       ARTIBOT_RUNTIME_CHECKPOINT_DISABLE: process.env.ARTIBOT_RUNTIME_CHECKPOINT_DISABLE,
       ARTIBOT_RUNTIME_MEMORY_DISABLE: process.env.ARTIBOT_RUNTIME_MEMORY_DISABLE,
     };
-    process.env.CLAUDE_PLUGIN_ROOT = PLUGIN_ROOT;
+    process.env.CLAUDE_PLUGIN_ROOT = sandboxRoot;
     process.env.ARTIBOT_RUNTIME_CHECKPOINT_DISABLE = '1';
     process.env.ARTIBOT_RUNTIME_MEMORY_DISABLE = '1';
   });

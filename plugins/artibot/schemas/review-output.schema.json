@@ -89,5 +89,285 @@
       "additionalProperties": false
     }
   },
-  "additionalProperties": false
+  "additionalProperties": false,
+  "definitions": {
+    "finding": {
+      "type": "object",
+      "required": [
+        "severity",
+        "file",
+        "description"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "severity": {
+                "enum": [
+                  "critical",
+                  "high"
+                ]
+              }
+            },
+            "required": [
+              "severity"
+            ]
+          },
+          "then": {
+            "required": [
+              "suggestion"
+            ]
+          }
+        }
+      ],
+      "properties": {
+        "severity": {
+          "type": "string",
+          "enum": [
+            "critical",
+            "high",
+            "medium",
+            "low",
+            "info"
+          ],
+          "description": "Issue severity level"
+        },
+        "file": {
+          "type": "string",
+          "description": "File path where the issue was found"
+        },
+        "line": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Line number of the issue"
+        },
+        "confidence": {
+          "type": "string",
+          "enum": [
+            "high",
+            "medium",
+            "low"
+          ],
+          "description": "Confidence level that this is a real issue"
+        },
+        "description": {
+          "type": "string",
+          "description": "Detailed description of the finding"
+        },
+        "suggestion": {
+          "type": "string",
+          "description": "Recommended fix or remediation"
+        }
+      },
+      "additionalProperties": false
+    },
+    "evidence": {
+      "type": "object",
+      "description": "One observed piece of evidence. kind=file pins file:line; kind=command pins the command and its verbatim output. An assertion with neither is not evidence.",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "file",
+            "command"
+          ],
+          "description": "Evidence form"
+        },
+        "file": {
+          "type": "string",
+          "description": "File path (kind=file)"
+        },
+        "line": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Line number (kind=file)"
+        },
+        "command": {
+          "type": "string",
+          "description": "Exact command that was run (kind=command)"
+        },
+        "output": {
+          "type": "string",
+          "description": "Verbatim command output (kind=command)"
+        },
+        "measured_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the evidence was observed"
+        },
+        "note": {
+          "type": "string",
+          "description": "Optional reviewer note"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "file"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "required": [
+              "file",
+              "line"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "command"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "required": [
+              "command",
+              "output"
+            ]
+          }
+        }
+      ],
+      "additionalProperties": false
+    },
+    "reviewOutputV2": {
+      "type": "object",
+      "title": "ReviewOutputV2",
+      "description": "review.md verdict envelope, schema_version 2. The canonical verdict vocabulary is the five values of ADDENDUM-HARDENING section 15; the four legacy vocabularies reach it only through schemas/verdict-adapter-map.json. The six mandatory references (mission_id, intent_revision, plan_revision, diff_ref, test_evidence, regression_evidence) come from v1.1 doc 11 \"Review must reference\" and are fail-closed: a review missing any of them must not parse.",
+      "required": [
+        "schema_version",
+        "verdict",
+        "findings",
+        "evidence",
+        "recommended_action",
+        "mission_id",
+        "intent_revision",
+        "plan_revision",
+        "diff_ref",
+        "test_evidence",
+        "regression_evidence",
+        "verification_id",
+        "next_steps"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": 2,
+          "description": "Discriminates v2 from the v1 root schema. v1 documents carry no schema_version."
+        },
+        "verdict": {
+          "type": "string",
+          "enum": [
+            "PASS",
+            "REPAIR_REQUIRED",
+            "REPLAN_REQUIRED",
+            "INTENT_REVIEW_REQUIRED",
+            "BLOCK"
+          ],
+          "description": "Canonical verdict. The reviewer may not edit intent or plan; it submits findings and severity only, and the Mission Controller owns the follow-on state transition."
+        },
+        "findings": {
+          "type": "array",
+          "description": "Same finding shape as v1 (definitions/finding). May be empty on PASS.",
+          "items": {
+            "$ref": "#/definitions/finding"
+          }
+        },
+        "evidence": {
+          "type": "array",
+          "minItems": 1,
+          "description": "What the reviewer actually looked at. Required even for PASS.",
+          "items": {
+            "$ref": "#/definitions/evidence"
+          }
+        },
+        "recommended_action": {
+          "type": "string",
+          "minLength": 1,
+          "description": "What the reviewer recommends next. Advisory only - the Mission Controller decides the transition."
+        },
+        "mission_id": {
+          "type": "string",
+          "pattern": "^M-\\d{8}-(?:\\d{3,}|S[0-9A-Za-z]{8})$",
+          "description": "Canonical mission id M-YYYYMMDD-NNN, or the session fallback M-YYYYMMDD-S<sid8> issued for non-substantive interactions (design 3.1, risk R-09)."
+        },
+        "intent_revision": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "intent.md revision the verdict was formed against. assertIntentBinding re-checks it at review completion."
+        },
+        "plan_revision": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "plan.md revision the verdict was formed against."
+        },
+        "diff_ref": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Git ref, commit range, or patch path identifying the changes that were reviewed."
+        },
+        "test_evidence": {
+          "type": "array",
+          "minItems": 1,
+          "description": "Test evidence as evidence entries, not as a claim that tests were run.",
+          "items": {
+            "$ref": "#/definitions/evidence"
+          }
+        },
+        "regression_evidence": {
+          "type": "array",
+          "minItems": 1,
+          "description": "Regression evidence as evidence entries.",
+          "items": {
+            "$ref": "#/definitions/evidence"
+          }
+        },
+        "verification_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Join key emitted by a single unified-verifier run, linking review.md, outcome.md and ledger.jsonl. The concrete format (hash range, collision probability) is undecided in the design, so no pattern is asserted here."
+        },
+        "next_steps": {
+          "type": "array",
+          "description": "Prioritized remediation actions",
+          "items": {
+            "type": "string"
+          }
+        },
+        "metadata": {
+          "type": "object",
+          "description": "Review metadata",
+          "properties": {
+            "reviewer": {
+              "type": "string",
+              "description": "Reviewer agent or persona identifier"
+            },
+            "timestamp": {
+              "type": "string",
+              "format": "date-time",
+              "description": "ISO 8601 timestamp of the review"
+            },
+            "scope": {
+              "type": "string",
+              "description": "Files or directories reviewed"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  }
 }

@@ -1,0 +1,377 @@
+/**
+ * lib/mission/compiler.js — verbatim extraction, target derivation, the
+ * reduced/full split, and the first eval case of design §3.1.
+ *
+ * WHAT THESE TESTS CANNOT SEE
+ * ---------------------------
+ *  - They are hand-written prompts, not usage logs. NL activation accuracy is a
+ *    Shadow-stage measurement against what users actually typed; nothing here
+ *    is evidence for it. This file is a regression fence.
+ *  - The fixture set is tiny (single-digit prompts) against a live prompt
+ *    stream of unmeasured size. A pass here says the named behaviours hold, not
+ *    that extraction generalizes.
+ *  - Goal interpretation is not tested because the compiler does not interpret;
+ *    it copies. `lib/intent/interpreter.js` (T-24) owns that and has not landed.
+ */
+
+import { describe, expect, it } from 'vitest';
+
+import {
+  compileMission,
+  deriveRequestedTargets,
+  extractExplicitRequests,
+  projectCommandActivation,
+} from '../../lib/mission/compiler.js';
+import {
+  checkIntentFidelity,
+  validateMissionContract,
+} from '../../lib/mission/contract.js';
+
+const SPLIT_PROMPT = 'split 을 업그레이드해줘';
+
+describe('extractExplicitRequests() — verbatim, with spans', () => {
+  it('strips the Korean request ending and keeps the rest byte-for-byte', () => {
+    const { requests, extraction } = extractExplicitRequests(SPLIT_PROMPT);
+    expect(extraction).toBe('matched');
+    expect(requests).toHaveLength(1);
+    expect(requests[0].text).toBe('split 을 업그레이드');
+    expect(SPLIT_PROMPT.slice(requests[0].span.start, requests[0].span.end))
+      .toBe(requests[0].text);
+  });
+
+  it('prefers the longest matching ending so no dangling 해 is left', () => {
+    const { requests } = extractExplicitRequests('split 을 업그레이드해주세요');
+    expect(requests[0].text).toBe('split 을 업그레이드');
+  });
+
+  it('extracts two requests from two clauses', () => {
+    const prompt = 'split 을 업그레이드해줘. 그리고 테스트도 추가해줘';
+    const { requests } = extractExplicitRequests(prompt);
+    expect(requests.map((r) => r.text)).toEqual([
+      'split 을 업그레이드', '테스트도 추가',
+    ]);
+    for (const r of requests) {
+      expect(prompt.slice(r.span.start, r.span.end)).toBe(r.text);
+    }
+  });
+
+  it('splits a VERB-CONNECTIVE sentence into the same two requests a period would', () => {
+    // T-47 finding: only `그리고` was a boundary, so this phrasing yielded ONE
+    // request and substantive signal S3 (>= 2) could never fire for it, while the
+    // identical sentence written with a period yielded two.
+    const joined = '라우팅 테스트를 추가하고 README 의 라우팅 절도 갱신해줘';
+    const { requests } = extractExplicitRequests(joined);
+    expect(requests.map((r) => r.text)).toEqual([
+      '라우팅 테스트를 추가', 'README 의 라우팅 절도 갱신',
+    ]);
+    // Every fragment is still a verbatim slice of the ORIGINAL prompt.
+    for (const r of requests) {
+      expect(joined.slice(r.span.start, r.span.end)).toBe(r.text);
+    }
+    const periods = extractExplicitRequests(
+      '라우팅 테스트를 추가해줘. README 의 라우팅 절도 갱신해줘',
+    );
+    expect(requests.map((r) => r.text)).toEqual(periods.requests.map((r) => r.text));
+  });
+
+  it('does NOT split an auxiliary "-하고" that is one verb phrase', () => {
+    // "테스트하고 싶어" is a single desiderative phrase, not two requests. The
+    // guard is that the text after the connective is not itself request-shaped.
+    const prompt = '테스트하고 싶어';
+    const { requests, extraction } = extractExplicitRequests(prompt);
+    expect(requests).toHaveLength(1);
+    expect(requests[0].text).toBe(prompt);
+    expect(extraction).toBe('fallback-whole-prompt');
+  });
+
+  it('keeps splitting on the standalone 그리고 (regression)', () => {
+    const prompt = 'split 을 업그레이드해줘. 그리고 테스트도 추가해줘';
+    const { requests } = extractExplicitRequests(prompt);
+    expect(requests.map((r) => r.text)).toEqual([
+      'split 을 업그레이드', '테스트도 추가',
+    ]);
+    for (const r of requests) {
+      expect(prompt.slice(r.span.start, r.span.end)).toBe(r.text);
+    }
+  });
+
+
+  it('handles an English imperative, dropping a leading "please"', () => {
+    const prompt = 'Please upgrade the split command';
+    const { requests } = extractExplicitRequests(prompt);
+    expect(requests[0].text).toBe('upgrade the split command');
+    expect(prompt.slice(requests[0].span.start, requests[0].span.end))
+      .toBe(requests[0].text);
+  });
+
+  it('falls back to the WHOLE prompt rather than losing the user\'s words', () => {
+    const prompt = '이게 좀 느린 것 같은데';
+    const { requests, extraction } = extractExplicitRequests(prompt);
+    expect(extraction).toBe('fallback-whole-prompt');
+    expect(requests[0].text).toBe(prompt);
+  });
+
+  it('reports empty for an empty prompt instead of inventing an entry', () => {
+    const { requests, extraction } = extractExplicitRequests('   ');
+    expect(requests).toEqual([]);
+    expect(extraction).toBe('empty');
+  });
+
+  it('does not cut an ordinary noun that merely ends in 해', () => {
+    const { requests } = extractExplicitRequests('이해');
+    expect(requests[0].text).toBe('이해');
+  });
+
+  it('deduplicates identical clauses', () => {
+    const { requests } = extractExplicitRequests('고쳐줘. 고쳐줘');
+    expect(requests).toHaveLength(1);
+  });
+});
+
+describe('deriveRequestedTargets()', () => {
+  it('takes the noun in front of the Korean object particle', () => {
+    const { requests } = extractExplicitRequests(SPLIT_PROMPT);
+    expect(deriveRequestedTargets(requests)).toContain('split');
+  });
+
+  it('drops a LEADING imperative verb but keeps the same word as an object', () => {
+    // "split" is both an imperative and a real target; an unconditional verb
+    // filter would erase the target in the Korean case.
+    expect(deriveRequestedTargets([{ text: 'upgrade split' }])).toEqual(['split']);
+    expect(deriveRequestedTargets([{ text: 'split 을 업그레이드' }])).toContain('split');
+  });
+
+  it('picks up path-like and file-like tokens', () => {
+    const targets = deriveRequestedTargets([{ text: 'fix lib/core/config.js' }]);
+    expect(targets).toContain('lib/core/config.js');
+  });
+
+  it('routes subjects through an injected resolveTarget port', () => {
+    const targets = deriveRequestedTargets([{ text: 'upgrade split' }], {
+      resolveTarget: (s) => (s === 'split' ? ['plugins/artibot/commands/split.md'] : []),
+    });
+    expect(targets).toEqual(['plugins/artibot/commands/split.md']);
+  });
+
+  it('returns an empty list when there is no subject to point at', () => {
+    expect(deriveRequestedTargets([{ text: '고쳐' }])).toEqual([]);
+    expect(deriveRequestedTargets(null)).toEqual([]);
+  });
+});
+
+describe('projectCommandActivation() — derived projection only', () => {
+  it('returns undefined when there is nothing to project', () => {
+    expect(projectCommandActivation({})).toBeUndefined();
+  });
+
+  it('projects planning mode onto plan / ultraplan', () => {
+    expect(projectCommandActivation({ planning: { mode: 'ultraplan' } }))
+      .toEqual({ plan: false, ultraplan: true });
+  });
+
+  it('projects topology mode onto autopilot / autopilot_fast / split', () => {
+    expect(projectCommandActivation({ topology: { mode: 'autopilot_fast' } }))
+      .toEqual({ autopilot: true, autopilot_fast: true, split: false });
+  });
+
+  it('projects review.required', () => {
+    expect(projectCommandActivation({ review: { required: true } }))
+      .toEqual({ review: true });
+  });
+});
+
+describe('compileMission() — the §3.1 first eval case', () => {
+  const result = compileMission({ prompt: SPLIT_PROMPT });
+
+  it('produces explicit_requests = ["split 을 업그레이드"]', () => {
+    expect(result.contract.explicit_requests.map((r) => r.text))
+      .toEqual(['split 을 업그레이드']);
+  });
+
+  it('puts split in scope.requested_target and validates', () => {
+    expect(result.contract.scope.requested_target).toContain('split');
+    expect(result.validation.valid).toBe(true);
+  });
+
+  it('every span slices back to the original prompt', () => {
+    expect(result.spans.ok).toBe(true);
+    expect(result.meta.originalRequest).toBe(SPLIT_PROMPT);
+  });
+
+  it('passes the Intent Fidelity check', () => {
+    expect(result.fidelity.ok).toBe(true);
+  });
+
+  it('is INVALID when requested_target is emptied', () => {
+    const stripped = { ...result.contract, scope: { requested_target: [] } };
+    expect(validateMissionContract(stripped).valid).toBe(false);
+  });
+
+  it('RED: swapping the target for a "root cause" breaks fidelity', () => {
+    const substituted = {
+      ...result.contract,
+      scope: { requested_target: ['lib/context/'], upstream: ['lib/context/rehydration.js'] },
+    };
+    // Structurally fine — which is the point: only the fidelity check catches it.
+    expect(validateMissionContract(substituted).valid).toBe(true);
+    const fidelity = checkIntentFidelity(substituted);
+    expect(fidelity.ok).toBe(false);
+    expect(fidelity.unmatched[0].text).toBe('split 을 업그레이드');
+  });
+});
+
+describe('compileMission() — substantive judgment and ledger event', () => {
+  it('a greeting compiles but is DEFERRED, with no mission event', () => {
+    const result = compileMission({ prompt: '안녕하세요' });
+    expect(result.substantive).toBe(false);
+    expect(result.deferred).toBe(true);
+    expect(result.signals).toEqual([]);
+    expect(result.meta.ledgerEvent).toBe('mission-candidate-deferred');
+  });
+
+  it('two requests fire S3 and the event becomes mission.created', () => {
+    const result = compileMission({
+      prompt: 'split 을 업그레이드해줘. 그리고 테스트도 추가해줘',
+    });
+    expect(result.signals).toEqual(['S3']);
+    expect(result.meta.ledgerEvent).toBe('mission.created');
+  });
+
+  it('an explicit /split invocation fires S5 and marks activation suppressed', () => {
+    const result = compileMission({ prompt: '/split plan 을 만들어줘' });
+    expect(result.signals).toContain('S5');
+    expect(result.meta.slashCommand).toBe('split');
+    expect(result.meta.activation_suppressed_by).toBe('explicit-command');
+  });
+
+  it('leaves activation_suppressed_by null when no command was typed', () => {
+    expect(compileMission({ prompt: SPLIT_PROMPT }).meta.activation_suppressed_by)
+      .toBeNull();
+  });
+});
+
+describe('compileMission() — system1 reduced contract', () => {
+  const result = compileMission({
+    prompt: SPLIT_PROMPT,
+    system: 'system1',
+    intentConfidence: { goal: 0.9, product_decision_required: false },
+  });
+
+  it('carries only goal, explicit_requests and intent_confidence', () => {
+    expect(Object.keys(result.contract).sort())
+      .toEqual(['explicit_requests', 'goal', 'intent_confidence']);
+    expect(result.mode).toBe('reduced');
+  });
+
+  it('validates in reduced mode and FAILS in full mode', () => {
+    expect(result.validation.valid).toBe(true);
+    expect(validateMissionContract(result.contract, { mode: 'full' }).valid).toBe(false);
+  });
+
+  it('does not run the boundary or blindspot passes', () => {
+    expect(result.meta.boundary).toBeNull();
+    expect(result.meta.blindspots).toBeNull();
+    expect(result.fidelity).toBeNull();
+  });
+
+  it('still compiles for system1 — the agentTeam condition is NOT inherited', () => {
+    // design §3.5: gating compilation on mode==='agentTeam' would erase the
+    // Observe denominator for every system1 prompt.
+    expect(result.contract.explicit_requests).toHaveLength(1);
+    expect(result.spans.ok).toBe(true);
+  });
+});
+
+describe('compileMission() — full contract assembly', () => {
+  it('passes optional sub-objects through and stays schema-valid', () => {
+    const result = compileMission({
+      prompt: SPLIT_PROMPT,
+      schemaVersion: 1,
+      missionId: 'M-20260902-001',
+      intentRevision: 1,
+      status: 'queued',
+      constraints: ['no commits'],
+      inferredOutcomes: ['faster landing'],
+      autonomy: { mode: 'agent_led', human_gates: ['HG-01'] },
+      performance: { priority: 'quality', fast_mode: false },
+      planning: { mode: 'plan' },
+      topology: { mode: 'split' },
+      review: { required: true, model: 'fable', status: 'pending' },
+      completion: { expected_actions: ['implement', 'test'] },
+      intentConfidence: { goal: 0.97, scope: 0.81, product_decision_required: false },
+      userDecisions: [{ q: 'a', a: 'b' }],
+    });
+    expect(result.validation.valid).toBe(true);
+    expect(result.validation.errors).toEqual([]);
+    expect(result.contract.command_activation)
+      .toEqual({
+        plan: true, ultraplan: false, autopilot: false, autopilot_fast: false,
+        split: true, review: true,
+      });
+  });
+
+  it('classifies boundary candidates into scope', () => {
+    const result = compileMission({
+      prompt: SPLIT_PROMPT,
+      candidates: [
+        { subject: 'lib/core/config.js', relation: 'causes', evidence: ['config.js:3'] },
+        { subject: 'lib/tui/theme.js' },
+      ],
+    });
+    expect(result.contract.scope.upstream).toEqual(['lib/core/config.js']);
+    expect(result.contract.scope.excluded).toEqual(['lib/tui/theme.js']);
+  });
+
+  it('carries blindspot findings and never authorizes a fix', () => {
+    const result = compileMission({
+      prompt: SPLIT_PROMPT,
+      blindspotCandidates: [{
+        subject: 'stale JSDoc',
+        causal: true,
+        small: true,
+        reversible: true,
+        intentClear: true,
+        noNewProductDecision: true,
+        verifiable: true,
+      }],
+    });
+    expect(result.contract.findings.bounded_blindspots).toEqual(['stale JSDoc']);
+    expect(result.contract.scope.bounded_blindspots).toEqual(['stale JSDoc']);
+    expect(result.meta.blindspots.autoFix.allowed).toBe(false);
+  });
+
+  it('reports execution_profile as unchecked rather than validating it', () => {
+    const result = compileMission({
+      prompt: SPLIT_PROMPT,
+      executionProfile: { reasoning: 'whatever' },
+    });
+    expect(result.validation.unchecked.map((u) => u.path)).toContain('execution_profile');
+  });
+
+  it('records goalSource when it had to fall back to the request verbatim', () => {
+    const fallback = compileMission({ prompt: SPLIT_PROMPT });
+    expect(fallback.meta.goalSource).toBe('derived-from-explicit-request');
+    expect(fallback.contract.goal).toBe('split 을 업그레이드');
+
+    const supplied = compileMission({ prompt: SPLIT_PROMPT, goal: 'Upgrade the split command' });
+    expect(supplied.meta.goalSource).toBe('input');
+    expect(supplied.contract.goal).toBe('Upgrade the split command');
+  });
+});
+
+describe('compileMission() — determinism', () => {
+  it('the same input compiles to the same contract', () => {
+    const a = compileMission({ prompt: SPLIT_PROMPT, nowMs: 1 });
+    const b = compileMission({ prompt: SPLIT_PROMPT, nowMs: 2 });
+    expect(JSON.stringify(a.contract)).toBe(JSON.stringify(b.contract));
+  });
+
+  it('an unparseable prompt still yields a contract, invalid where it must be', () => {
+    const result = compileMission({ prompt: '고쳐줘' });
+    expect(result.contract.explicit_requests).toHaveLength(1);
+    expect(result.contract.scope.requested_target).toEqual([]);
+    expect(result.validation.valid).toBe(false);
+    expect(result.validation.errors.some((e) => e.path === 'scope.requested_target'))
+      .toBe(true);
+  });
+});

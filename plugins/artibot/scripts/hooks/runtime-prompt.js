@@ -20,20 +20,20 @@ import {
   writeStdout,
 } from '../utils/index.js';
 import { createErrorHandler } from '../../lib/core/hook-utils.js';
+// T-50 #10 — `detectSlashCommand` used to be duplicated here, byte-identical to
+// the L2 copy. That copy's own JSDoc explains the duplication as "an L2 module
+// may not import" the hook layer — true, but the dependency runs the other way:
+// this is a hook (L5), so importing L2 is downward and allowed. One definition
+// now, so the two cannot drift apart.
+//
+// STATIC, not the dynamic `import(toFileUrl(...))` this file uses elsewhere. The
+// dynamic form exists so a module resolves under the plugin root observed at
+// call time; that matters for modules that read the root or its config. This one
+// is a pure string function, and its whole dependency chain is two leaf modules
+// with no imports of their own (`mission-id.js` → `contract.js`) and no
+// top-level side effects, so there is nothing for a sandboxed root to change.
+import { detectSlashCommand } from '../../lib/mission/mission-id.js';
 import { isMainEntry } from './_main-entry.js';
-
-/**
- * Detect a leading slash command in the prompt and return its name.
- * Matches the first whitespace-delimited token after an optional '/'.
- * @param {string} prompt
- * @returns {string|null}
- */
-function detectSlashCommand(prompt) {
-  const trimmed = String(prompt || '').trimStart();
-  if (!trimmed.startsWith('/')) return null;
-  const match = trimmed.slice(1).match(/^([a-z][a-z0-9_-]{0,31})(?=\s|$)/i);
-  return match ? match[1].toLowerCase() : null;
-}
 
 /**
  * Resolve effort level for a detected slash command using EFFORT_POLICY.
@@ -559,6 +559,75 @@ async function recordEffortDecision(effortMeta, pluginRoot) {
 }
 
 /**
+ * T-37 — OBSERVE-ONLY records go to `runtime/decisions/`, NOT the central
+ * ledger: that writer refuses both named events from a `hook` source and writes
+ * a `ledger.rejected` line instead of passing silently. The measurement, the
+ * allowlist reasoning, the receipt-schema conflict, and the parser
+ * `measureMemoryInjection` all live at the destination
+ * (`lib/observability/decision-events.js`); only the call sites remain here,
+ * because keeping the parser put this file over the 800-line standard. Tripwire:
+ * `tests/hooks/runtime-prompt-memory-instrumentation.test.js`.
+ */
+
+/**
+ * Load a lib module under the plugin root observed NOW. Dynamic like every
+ * other lib import here, so a sandboxed root resolves to that sandbox.
+ * @param {string} pluginRoot
+ * @param {...string} segments
+ * @returns {Promise<object>}
+ */
+function loadLibModule(pluginRoot, ...segments) {
+  return import(toFileUrl(path.join(pluginRoot, 'lib', ...segments)));
+}
+
+/**
+ * T-37 — record the topology sighting, then the memory measurement. OBSERVE
+ * ONLY: `routeTopology` selects nothing and both results are discarded here.
+ *
+ * `evidence.promptText` is supplied because T-36 measured that the router's
+ * natural-language activation is dead without it: `detectIntent` carries no
+ * source text, and the router reads the prompt only through this port. The text
+ * stays IN MEMORY — `topology-router.js#firstMatch` returns the `pattern.id` of
+ * a fixed table (`#FAST_PATTERNS` / `#SPLIT_PATTERNS`), never the matched text,
+ * so no prompt text reaches disk.
+ *
+ * One try/catch covers all three — each is advisory and must leave the hook's
+ * already-computed output untouched.
+ *
+ * @param {{prompt: string, prepared: object, runtimeConfig: object,
+ *   hookData: object, pluginRoot: string}} params
+ * @returns {Promise<void>}
+ */
+async function recordObserveOnlyDecisions({
+  prompt, prepared, runtimeConfig, hookData, pluginRoot,
+}) {
+  try {
+    const { routeTopology } = await loadLibModule(pluginRoot, 'topology', 'topology-router.js');
+    const {
+      flushRecorderStats, measureMemoryInjection, recordMemoryInjection,
+      recordTopologyRecommended, resolveDecisionRunId,
+    } = await loadLibModule(pluginRoot, 'observability', 'decision-events.js');
+
+    const runId = resolveDecisionRunId({ hookData });
+    recordTopologyRecommended(runId, routeTopology({
+      intent: prepared?.context?.intent,
+      workflowPlan: prepared?.context?.tasks?.meta?.workflowPlan,
+      config: runtimeConfig,
+      evidence: { promptText: typeof prompt === 'string' ? prompt : undefined },
+    }));
+    recordMemoryInjection(runId, measureMemoryInjection(prepared));
+
+    // LAST: the counters live in a module object in this per-prompt process, so
+    // anything unwritten at exit is lost. Every recorder call has happened by
+    // now (the middleware's two inside preparePrompt, these two just above).
+    // Writes nothing when the counters are clean.
+    flushRecorderStats(runId);
+  } catch {
+    // Observe-only: these records must never affect the hook's output.
+  }
+}
+
+/**
  * P3-8: record user signal for skill-level auto-detection + G10 macro
  * observation. Both are non-critical and observe-only.
  *
@@ -704,9 +773,18 @@ export async function handleUserPromptSubmit(hookData) {
     await applyNativeEffortHint(nativeBand ?? effortMeta.effort, pluginRoot);
   }
 
-  return composePromptOutput({
+  const output = composePromptOutput({
     prepared, prompt, effortMeta, taskBudgetDirective, injectPrompt,
   });
+
+  // T-37 — observe-only records, placed AFTER `output` is already final. The
+  // position is the guarantee: the call does not receive `output` and cannot
+  // reach it, so byte-identical stdout is structural rather than a promise.
+  await recordObserveOnlyDecisions({
+    prompt, prepared, runtimeConfig, hookData, pluginRoot,
+  });
+
+  return output;
 }
 
 async function main() {

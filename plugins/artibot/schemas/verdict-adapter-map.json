@@ -1,0 +1,179 @@
+{
+  "$comment": "Vocabulary adapter map: the four legacy review verdict vocabularies (plus the v1.0 design draft) folded into the five canonical verdicts of ADDENDUM-HARDENING section 15. This file is DATA, not a JSON Schema. Canonical prose: v5 lane 4 section 5.3. Enforced by tests/firewall/review-verdict-adapter.test.js.",
+  "schema_version": 1,
+  "target_verdicts": [
+    "PASS",
+    "REPAIR_REQUIRED",
+    "REPLAN_REQUIRED",
+    "INTENT_REVIEW_REQUIRED",
+    "BLOCK"
+  ],
+  "rules": {
+    "unmapped_token": "reject",
+    "ambiguous_token": "escalate_to_human",
+    "note": "An unknown token is not silently downgraded to PASS. An ambiguous token is not guessed: the adapter returns ambiguous:true with the candidate set and a human resolves it."
+  },
+  "sources": [
+    {
+      "id": "design-v1.0-08",
+      "description": "v1.0 design package doc 08, superseded draft vocabulary",
+      "file": ".artibot/guides/v5-design/package/08_REVIEW_VERIFICATION_RECOVERY.md",
+      "cited_line": 19,
+      "vocabulary": ["pass", "repair", "replan"]
+    },
+    {
+      "id": "schema-v1",
+      "description": "review-output.schema.json v1 root verdict enum",
+      "file": "plugins/artibot/schemas/review-output.schema.json",
+      "cited_line": null,
+      "vocabulary": ["pass", "warning", "fail"]
+    },
+    {
+      "id": "code-reviewer",
+      "description": "code-reviewer agent final verdict line",
+      "file": "plugins/artibot/agents/code-reviewer.md",
+      "cited_line": 57,
+      "vocabulary": ["APPROVE", "REQUEST_CHANGES", "REJECT"]
+    },
+    {
+      "id": "spec-reviewer",
+      "description": "spec-reviewer stage 1 JUDGMENT line",
+      "file": "plugins/artibot/agents/spec-reviewer.md",
+      "cited_line": 119,
+      "vocabulary": ["SPEC_PASS", "SPEC_WARN", "SPEC_FAIL"]
+    },
+    {
+      "id": "quality-reviewer",
+      "description": "quality-reviewer stage 2 JUDGMENT line",
+      "file": "plugins/artibot/agents/quality-reviewer.md",
+      "cited_line": 136,
+      "vocabulary": ["QUALITY_PASS", "QUALITY_WARN", "QUALITY_FAIL"]
+    }
+  ],
+  "rows": [
+    {
+      "source": "design-v1.0-08",
+      "token": "pass",
+      "verdict": "PASS",
+      "ambiguous": false,
+      "candidates": [],
+      "note": ""
+    },
+    {
+      "source": "design-v1.0-08",
+      "token": "repair",
+      "verdict": "REPAIR_REQUIRED",
+      "ambiguous": false,
+      "candidates": [],
+      "note": ""
+    },
+    {
+      "source": "design-v1.0-08",
+      "token": "replan",
+      "verdict": "REPLAN_REQUIRED",
+      "ambiguous": false,
+      "candidates": [],
+      "note": "The only source token in any vocabulary that reaches REPLAN_REQUIRED, and it comes from a design draft rather than a running pipeline."
+    },
+    {
+      "source": "schema-v1",
+      "token": "pass",
+      "verdict": "PASS",
+      "ambiguous": false,
+      "candidates": [],
+      "note": ""
+    },
+    {
+      "source": "schema-v1",
+      "token": "warning",
+      "verdict": "PASS",
+      "ambiguous": false,
+      "candidates": [],
+      "note": "Demoted to PASS; the warning survives as findings[] entries with their own severity, so no information is lost."
+    },
+    {
+      "source": "schema-v1",
+      "token": "fail",
+      "verdict": "REPAIR_REQUIRED",
+      "ambiguous": false,
+      "candidates": [],
+      "note": ""
+    },
+    {
+      "source": "code-reviewer",
+      "token": "APPROVE",
+      "verdict": "PASS",
+      "ambiguous": false,
+      "candidates": [],
+      "note": ""
+    },
+    {
+      "source": "code-reviewer",
+      "token": "REQUEST_CHANGES",
+      "verdict": "REPAIR_REQUIRED",
+      "ambiguous": false,
+      "candidates": [],
+      "note": ""
+    },
+    {
+      "source": "code-reviewer",
+      "token": "REJECT",
+      "verdict": "BLOCK",
+      "ambiguous": false,
+      "candidates": [],
+      "note": "The only source token that reaches BLOCK."
+    },
+    {
+      "source": "spec-reviewer",
+      "token": "SPEC_PASS",
+      "verdict": "PASS",
+      "ambiguous": false,
+      "candidates": [],
+      "note": "Stage verdicts are conjunctive: a mission-level PASS needs SPEC_PASS and QUALITY_PASS together. This row maps the token only; combining the two stages is the caller's job."
+    },
+    {
+      "source": "spec-reviewer",
+      "token": "SPEC_WARN",
+      "verdict": "PASS",
+      "ambiguous": false,
+      "candidates": [],
+      "note": "Warning survives as findings[]."
+    },
+    {
+      "source": "spec-reviewer",
+      "token": "SPEC_FAIL",
+      "verdict": null,
+      "ambiguous": true,
+      "candidates": ["REPAIR_REQUIRED", "INTENT_REVIEW_REQUIRED"],
+      "note": "The only row that splits. SPEC_FAIL means either the implementation falls short of the spec (REPAIR_REQUIRED) or the requirement itself is contradictory or unclear (INTENT_REVIEW_REQUIRED). The two are not distinguishable from the token, so the adapter must NOT classify it: return ambiguous:true and escalate to a human."
+    },
+    {
+      "source": "quality-reviewer",
+      "token": "QUALITY_PASS",
+      "verdict": "PASS",
+      "ambiguous": false,
+      "candidates": [],
+      "note": "Conjunctive with SPEC_PASS, see the SPEC_PASS row."
+    },
+    {
+      "source": "quality-reviewer",
+      "token": "QUALITY_WARN",
+      "verdict": "PASS",
+      "ambiguous": false,
+      "candidates": [],
+      "note": "Warning survives as findings[]."
+    },
+    {
+      "source": "quality-reviewer",
+      "token": "QUALITY_FAIL",
+      "verdict": "REPAIR_REQUIRED",
+      "ambiguous": false,
+      "candidates": [],
+      "note": ""
+    }
+  ],
+  "unreachable_verdicts": {
+    "INTENT_REVIEW_REQUIRED": "No legacy token maps here unambiguously. The existing pipeline has no vocabulary for 'the requirement itself is wrong' and has been folding those cases into SPEC_FAIL. This is a vocabulary gap before it is a code gap.",
+    "REPLAN_REQUIRED": "Reached only from the superseded v1.0 draft token 'replan'. No running reviewer emits it today."
+  }
+}

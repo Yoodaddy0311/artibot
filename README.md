@@ -44,6 +44,7 @@ Most Claude Code plugins use simple sub-agent (unnamed, fire-and-forget) delegat
 
 - **Cognitive Architecture** -- Dual-process System 1/2 routing inspired by Kahneman's theory: fast intuitive responses for simple tasks, deep deliberative reasoning for complex ones
 - **Lifelong Learning** -- GRPO-based batch learning from session outcomes with automatic knowledge transfer between System 1 and System 2 caches
+- **Decision Ledger (v5 Observe)** -- Append-only records of routing, mission, human-gate and verification decisions, written as the decision happens. Recording only: runtime behavior is unchanged and routing receipts carry `applied:false`. Read them back with `/scorecard --session|--routing` and `/doctor` Check 8/9
 - **CTO-Led Orchestration** -- `orchestrator` agent leads 28 specialist agents as a team coordinator (delegation mode: no direct coding)
 - **Intelligent Delegation** -- Auto-selects Sub-Agent (simple) vs Agent Team (complex) based on cognitive complexity scoring
 - **5 Orchestration Patterns** -- Leader, Council, Swarm, Pipeline, Watchdog
@@ -51,11 +52,11 @@ Most Claude Code plugins use simple sub-agent (unnamed, fire-and-forget) delegat
 - **79 Slash Commands** -- `/sc` smart router, `/save`, `/resume`, `/daily`, `/team`, `/orchestrate`, `/spawn`, `/implement`, `/visual-check`, `/sc playbook`, `/learning`, `/ultrareview`, `/ultraplan`, `/audit-claude-md`, `/export`, and more
 - **28 Specialized Agents** -- Architecture, security, frontend, backend, testing, DevOps, marketing, SEO, analytics, and more (all on `claude-opus-5`)
 - **114 Domain Skills** -- 11 persona skills, 8 core skills, 16 language skills, 8 utility skills, 35 marketing skills, visual-validation, daily, team, session-worklog, vibe-coding, repo-benchmarking, git-worktree, dynamic-context-injection, claude-md-auditor, skill-authoring (all enhanced with Anthropic best-practice descriptions, workflow checklists, HITL v2 conversational checkpoints, output templates, and freedom levels)
-- **8 Auto-Activating Rules** -- DEV protocol, quality gates, agent coordination, config safety, frontend/backend/test patterns, clean state enforcement
+- **10 Auto-Activating Rules** -- DEV protocol, quality gates, agent coordination, config safety, frontend/backend/test patterns, clean state enforcement, verification discipline, question recommendations
 - **Guard Registry** -- Centralized guard pipeline with `registerGuard()`/`executeChain()` API, 6 built-in guards extracted from hook scripts (75% code reduction)
 - **Loop Detection** -- Circular buffer-based agent loop detection with fingerprint matching, automatic warn/block on repeated tool calls
 - **Clean State Enforcement** -- TaskCompleted hook ensures lint+test verification at feature completion boundaries
-- **57 Event Hook Registrations** -- Cognitive routing, lifelong learning, session lifecycle, dangerous command blocking, auto-formatting, team tracking, loop detection, clean state checks, HTTP webhook notifications, git autopilot
+- **26 Hook Registrations** -- Across 16 event types: cognitive routing, lifelong learning, session lifecycle, dangerous command blocking, auto-formatting, team tracking, loop detection, clean state checks, HTTP webhook notifications, git autopilot
 - **Advisory File Locking** -- Spin-lock based file locking for concurrent hook state access, fail-open pattern prevents workflow blocking
 - **DEV Protocol** -- Mandatory Decompose-Execute-Verify workflow with zero-skip policy for all code changes
 - **Vibe Coding Support** -- Natural language request handling with read-first, verify-after, evidence-based completion
@@ -90,9 +91,9 @@ Native install **namespaces every command** under the `artibot:` prefix (call
 `/artibot:save`, `/artibot:sc`). Agent Teams auto-enables on first session start.
 To uninstall: `/plugin uninstall artibot@artibot`.
 
-> **Native install does not deliver the 8 auto-activating rules** (DEV Protocol,
+> **Native install does not deliver the 10 auto-activating rules** (DEV Protocol,
 > Quality Gates, agent-coordination, config-safety, clean-state, frontend/backend/test
-> patterns). Claude Code's plugin schema has no `rules` field, so they load only
+> patterns, verification-discipline, question-recommendations). Claude Code's plugin schema has no `rules` field, so they load only
 > when `install.sh` copies them to `~/.claude/rules/artibot/`. If you want that
 > automatic DEV-protocol / quality-gate enforcement, use the full install below.
 > `/theme` and the themed statusline now auto-resolve both layouts (native install
@@ -354,6 +355,11 @@ Spawns 5 teammates that self-claim tasks from the shared task list and report fi
                           |  TaskUpdate -> report  |
                           +-----------------------+
 ```
+
+**Decision ledger (v5 Observe).** Alongside this path, an append-only ledger records the
+decisions it makes -- which model a spawn resolved to, where a hook stopped and asked a human,
+what was and was not verified. It observes only: nothing in the flow above is routed, blocked,
+or ordered differently because the ledger exists.
 
 ## Cognitive Architecture
 
@@ -752,7 +758,7 @@ daily (work recap/retrospective), team (parallel orchestration), session-worklog
 
 ## Hooks
 
-26 hook registrations across 15 event types.
+26 hook registrations across 16 event types.
 
 <details>
 <summary>Hook Event Table</summary>
@@ -862,11 +868,11 @@ plugins/artibot/
 |   +-- [23 dev skills]/
 |   +-- [23 marketing skills]/
 |   +-- [7 workflow skills]/
-+-- rules/                       # 8 auto-activating rules
++-- rules/                       # 10 auto-activating rules
 |   +-- dev-protocol.md          #   DEV (Decompose-Execute-Verify) protocol
 |   +-- quality-gates.md         #   Quality enforcement gates
 |   +-- agent-coordination.md    #   Agent collaboration patterns
-|   +-- [4 domain rules].md
+|   +-- [7 domain rules].md
 +-- hooks/
 |   +-- hooks.json               # Hook event mappings
 +-- scripts/
@@ -881,9 +887,9 @@ plugins/artibot/
 |   +-- intent/                  # Intent detection (language, trigger)
 |   +-- context/                 # Context management (session)
 |   +-- privacy/                 # PII protection (pii-detector, pii-scrubber, homoglyph, token-rotation, differential-privacy)
-|   +-- learning/                # Lifelong learning (15 modules: memory, GRPO, pattern-analyzer, tool-history, rule-extractor, skill-injector, knowledge-demotion, etc.)
+|   +-- learning/                # Lifelong learning (39 modules: memory, GRPO, pattern-analyzer, tool-history, rule-extractor, skill-injector, knowledge-demotion, etc.)
 |   +-- adapters/                # Cross-platform adapters
-+-- output-styles/               # 7 output styles (default, compressed, mentor, team-dashboard, tokens, narrative, statusline)
++-- output-styles/               # 7 output styles (default, compressed, intelligence, mentor, narrative, report, team-dashboard) + tokens.md
 +-- templates/                   # 5 writing templates
 +-- artibot.config.json          # Plugin config (Agent Teams settings)
 +-- package.json                 # Node.js ESM runtime

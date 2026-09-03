@@ -67,8 +67,12 @@ describe('state vocabularies', () => {
   });
 
   it('every ops state maps onto a real lane state; nothing outside the allowlist is an ops state', () => {
+    // Pins the allowlist, so widening it has to come through here. `failed` was
+    // added 9th (v5 T-45); why it is safe, and the emitter count that makes it
+    // safe, live in tests/supervisor/v11-status-mapping.test.js.
     expect(LANE_OPS_STATES).toEqual([
       'pending', 'active', 'awaiting-dispatch', 'review', 'serial-gate', 'closing', 'done', 'suspended',
+      'failed',
     ]);
     for (const ops of LANE_OPS_STATES) {
       expect(isLaneOpsState(ops)).toBe(true);

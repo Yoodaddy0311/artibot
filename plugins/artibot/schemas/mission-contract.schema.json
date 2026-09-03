@@ -1,0 +1,236 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ArtibotMissionContract",
+  "description": "In-memory validator contract for the output of the intent.md parser. This schema is NOT a disk artifact and no file is ever written in this shape: `.artibot/missions/<mission_id>/intent.md` is the canonical on-disk form, and this schema validates the object a parser produces from it (design v1 3.1, 'mission-contract.schema.yaml 은 파서 출력의 메모리 내 검증기'). Derived-file generation is forbidden, so a consumer that persists an instance of this schema is violating the design. Extends the v1.0 13-field contract (package/03_INTENT_MISSION_COMPILER.md) with the reverse additions mission_id, intent_revision, status, topology, review and user_decisions, plus execution_profile and schema_version.",
+  "type": "object",
+  "required": ["goal", "explicit_requests", "success", "scope"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Common-meta field. Shape kept byte-identical to `common-meta.schema.json#/$defs/schema_version` (T-19), which is the authority: a monotonic INTEGER version of the artifact schema, not a semver string and not the instance's `revision`. Inlined rather than $ref'd because draft-07 drops keywords sitting beside a $ref and because this schema must stay loadable on its own. Reserved only in Phase 0 — deliberately NOT in `required`; enforcement across artifacts is a P2 decision."
+    },
+    "mission_id": {
+      "type": "string",
+      "pattern": "^M-\\d{8}-(?:\\d{3,}|S[0-9A-Za-z]{8})$",
+      "description": "Reverse addition from intent.md frontmatter. Two accepted forms: the issued mission id `M-<YYYYMMDD>-<NNN>`, where NNN may run PAST three digits so a busy day cannot overflow the id space (04_INTENT_MD_SPEC.md:27), and the session fallback `M-<YYYYMMDD>-S<sid8>` used for non-substantive interactions so ledger envelopes keep their required field (design 3.1, PRD R-09). The pattern is kept BYTE-IDENTICAL to schemas/ledger-envelope.schema.json and schemas/review-output.schema.json: a mission_id valid in a contract must be valid in the ledger and in a review, or the join across those three breaks. Do not tighten it here alone. Issuance is two-stage and parent-session-only (T-24); /split workers inherit rather than issue.",
+      "examples": ["M-20260902-001", "M-20260902-1001", "M-20260902-Styc5j4aa"]
+    },
+    "intent_revision": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Reverse addition from intent.md frontmatter. Monotonic revision of the interpreted intent. Substantive signal S6 keys off a follow-up to an existing mission's intent_revision, and review binding (assertIntentBinding) re-checks this value at completion time."
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "queued",
+        "planning",
+        "executing",
+        "blocked",
+        "reviewing",
+        "completed",
+        "failed"
+      ],
+      "description": "Reverse addition. The canonical 7-state mission vocabulary from package-v1.1/16_STATE_SCHEMA.yaml. The StateStore task graph is the source of truth; state.yaml and the ops/vNext state sets are projections of it (design 3.5)."
+    },
+    "goal": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The interpreted mission goal — what must be achieved and why. Not a transcript of the raw request; the raw text lives in intent.md `## Original Request`."
+    },
+    "explicit_requests": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Protected list of what the user literally asked for (Intent Fidelity Rule). Upgraded from v1.0 `array of string` to objects carrying a `span` back into the original request, so a systemic finding cannot silently substitute a different target for the user's words. Widening scope needs only a plan revision; narrowing or replacing an entry here requires an evidence-backed intent revision (design 3.1).",
+      "items": {
+        "type": "object",
+        "required": ["text", "span"],
+        "additionalProperties": false,
+        "properties": {
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The explicit request, as extracted."
+          },
+          "span": {
+            "type": "object",
+            "required": ["start", "end"],
+            "additionalProperties": false,
+            "description": "Character offsets of this request inside the preserved original request text. The span is what binds the frontmatter array item back to the user's words; without it the anti-substitution check has nothing to compare against.",
+            "properties": {
+              "start": { "type": "integer", "minimum": 0 },
+              "end": { "type": "integer", "minimum": 0 }
+            }
+          }
+        }
+      }
+    },
+    "inferred_outcomes": {
+      "type": "array",
+      "description": "Outcomes the interpreter inferred but the user did not state. Never promoted into explicit_requests.",
+      "items": { "type": "string" }
+    },
+    "success": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Success criteria in four sub-sections, mirroring intent.md `## Success Criteria`.",
+      "properties": {
+        "functional": { "type": "array", "items": { "type": "string" } },
+        "behavioral": { "type": "array", "items": { "type": "string" } },
+        "regression": { "type": "array", "items": { "type": "string" } },
+        "evidence": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "scope": {
+      "type": "object",
+      "required": ["requested_target"],
+      "additionalProperties": false,
+      "description": "Problem boundary. `requested_target` is what the user pointed at; the other lists are the 5-way classification the boundary pass produces. Scope may widen only with a causal justification.",
+      "properties": {
+        "requested_target": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Fail-closed: at least one target. A contract whose requested_target is empty has lost the thing the user pointed at, which is exactly the context-substitution failure the constitution forbids (design 3.1 first eval case)."
+        },
+        "direct": { "type": "array", "items": { "type": "string" } },
+        "upstream": { "type": "array", "items": { "type": "string" } },
+        "downstream": { "type": "array", "items": { "type": "string" } },
+        "bounded_blindspots": { "type": "array", "items": { "type": "string" } },
+        "excluded": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "constraints": {
+      "type": "array",
+      "description": "Explicit limits on how the mission may be carried out.",
+      "items": { "type": "string" }
+    },
+    "findings": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Blindspot classes. `bounded_blindspots` may be fixed autonomously; `future_opportunities` are recorded and must not silently become a large refactor.",
+      "properties": {
+        "mission_blockers": { "type": "array", "items": { "type": "string" } },
+        "bounded_blindspots": { "type": "array", "items": { "type": "string" } },
+        "future_opportunities": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "autonomy": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Human-gate posture. Mirrors intent.md frontmatter `autonomy{mode,human_gates}`.",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["guided", "agent_led", "autonomous"]
+        },
+        "human_gates": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "HUMAN_GATE_MATRIX identifiers (HG-01 through HG-13) this mission expects to hit. Enforcement lives in the PreToolUse hook, not here."
+        }
+      }
+    },
+    "performance": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "priority": {
+          "type": "string",
+          "enum": [
+            "economy",
+            "balanced",
+            "quality",
+            "fast",
+            "maximum_performance"
+          ]
+        },
+        "fast_mode": { "type": "boolean" }
+      }
+    },
+    "planning": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["auto", "direct", "plan", "ultraplan"]
+        }
+      }
+    },
+    "completion": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "expected_actions": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "intent_confidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Uncertainty represented rather than hidden. Low confidence triggers investigation first, not a user question. Axis set copied verbatim from package/03_INTENT_MISSION_COMPILER.md; `product_decision_required` is substantive signal S4.",
+      "properties": {
+        "goal": { "type": "number", "minimum": 0, "maximum": 1 },
+        "scope": { "type": "number", "minimum": 0, "maximum": 1 },
+        "completion_expectation": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "product_decision_required": { "type": "boolean" }
+      }
+    },
+    "command_activation": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "NOT a first-class field. Hardening 2 overrode the lane-1 contract: natural language compiles to an execution profile, and command_activation is only a DERIVED PROJECTION of that profile, kept so the Shadow metric 'activation vs actual slash command' stays measurable. Never treat it as an input, and never round-trip a profile through it — `execution_profile` is the authority.",
+      "properties": {
+        "plan": { "type": "boolean" },
+        "ultraplan": { "type": "boolean" },
+        "review": { "type": "boolean" },
+        "autopilot": { "type": "boolean" },
+        "autopilot_fast": { "type": "boolean" },
+        "split": { "type": "boolean" },
+        "skills": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "execution_profile": {
+      "$ref": "https://artibot.dev/schemas/execution-profile.schema.json",
+      "description": "The 8-key execution profile (reasoning, autonomy, performance, parallelism, planning, context, review, completion), owned by T-18. Referenced by the `$id` that `execution-profile.schema.json` declares for itself, not by relative path, so resolution does not depend on where either file sits on disk. A validator that has not been given the target schema cannot check this subtree at all — treat the absence of errors there as 'not checked', never as 'well-formed'."
+    },
+    "topology": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Reverse addition. `mode` uses the run-ledger 6-value enum, which design 3.5 makes the canonical router-output vocabulary. v1.1 06_STATE_YAML_SPEC.md also put `performance_profile` here; decision F2 moved that dimension to execution_profile.performance, so it is deliberately absent.",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "solo",
+            "subagent",
+            "team",
+            "autopilot",
+            "autopilot_fast",
+            "split"
+          ]
+        }
+      }
+    },
+    "review": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Reverse addition, mirroring state.yaml `review{required,model,status}`. The verdict vocabulary itself belongs to review-output v2 and its adapter map (T-20); `status` is intentionally an unconstrained string here so this schema does not fork that vocabulary.",
+      "properties": {
+        "required": { "type": "boolean" },
+        "model": { "type": "string" },
+        "status": { "type": "string" }
+      }
+    },
+    "user_decisions": {
+      "type": "array",
+      "description": "Reverse addition. Decisions the user actually made (AskUserQuestion answers), carried so a later agent cannot re-litigate them. Shape left open, matching package/schemas/adr.schema.yaml which declares `user_decisions: {type: array}` with no item constraint."
+    }
+  }
+}

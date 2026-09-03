@@ -11,6 +11,102 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Artibot 5.0 — Phase 0(정본 착지) + Observe(기록만)
+
+**오늘 당장 달라지는 동작은 없다.** 스폰되는 모델도, 훅이 차단하는 결과도, 기존 커맨드가 찍는
+출력도 전부 그대로다. 이 묶음이 바꾼 것은 하나다 — **Artibot 이 자기가 내린 판단을 남기기
+시작했다.**
+
+- **어제까지**: 왜 이 모델로 스폰했는지, 왜 저기서 멈추고 사람에게 물었는지, 무엇을 검증하고
+  무엇을 검증하지 않았는지가 세션이 끝나면 함께 사라졌다. 다음 세션은 같은 것을 다시 추측했다.
+- **이제**: 그 판단들이 append-only 원장에 남는다. 사후에 되짚을 수 있고, 세어볼 수 있다.
+- **체감**: 새 커맨드 플래그로 "이번 세션에 무슨 일이 있었나" 를 직접 볼 수 있다. 그 외에는
+  **아무것도 느껴지지 않는 것이 정상이다.** 느껴진다면 그것이 버그다.
+
+무엇이 기록되는가 — 미션 원장(`mission.created` / `mission.candidate_deferred`), 라우팅
+shadow receipt(`source:'shadow'` + `shadow_of` — 프로덕션 줄을 고치지 않고 **그 옆에** 덧붙는다.
+실제 스폰 모델은 불변), 스위치 제안 객체의 `applied` 는 리터럴 상수 `false`
+(`lib/routing/model-switcher.js#proposeSwitch`, 사유 `observe:not-applied`). 이 둘은 서로 다른
+층이다 — `applied` 는 receipt 필드가 **아니고**, route-receipt 스키마는 `additionalProperties:false`
+라 그 이름을 쓰면 writer 가 거부한다. 서브에이전트
+스폰의 라우팅 필드 7종(`recommendedModel` `actionClass` `routing_epoch_id` `depth`
+`mission_id` `task_id` `route_ledger` — `spawn-ledger.js#OPTIONAL_FIELDS`, 2026-09-03 10:00 측정,
+**11:56 커밋 직전 재측정 7 동일**)과 `route.selected`, 토폴로지·메모리 주입 계측(`runtime/decisions/`),
+그리고 훅이 실제로 차단하는 그 지점에서 쓰는 `human.asked`. 마지막 항목이 중요한 이유는
+비대칭이 탐지 가능해지기 때문이다 — 훅은 물었다고 기록했는데 모델의 `human.resolved` 가 없으면,
+그 누락 자체가 신호로 남는다.
+
+**새로 쓸 수 있는 것** (전부 읽기 전용, 기존 출력 경로 불변)
+
+- `/scorecard --session [id]` — 원장을 접어 만든 세션 카드. `--routing` 은 라우팅 카드(스냅샷
+  저장 안 함). `--session` 은 `session_id` 가 필수다. 없으면 조용히 전 세션을 한 장으로 접는
+  대신 이유를 적고 멈춘다.
+- `/doctor` Check 8(원장/상태 정합 + `state_version` 연속성), Check 9(Artifact Health).
+  둘 다 읽기 전용이고 `--fix` 대상이 아니다.
+- 새 정본 파일 — 리포 진입점 `ARTIBOT.md`, 프로젝트 상태 `.artibot/project.md`, 그리고
+  `plugins/artibot/schemas/` 15개 파일(계약 스키마 10 + 어휘·매핑 표 3 + 템플릿·설명 2 — 2026-09-02 18:22 측정 · 2026-09-03 09:06 · **11:55 커밋 직전 재측정 동일**: `git status --porcelain -- schemas` 신규 15).
+
+### Added
+
+- **신규 `lib/` 디렉터리 10**(2026-09-02 18:22 측정 · 2026-09-03 09:06 · **11:55 커밋 직전 재측정 동일**: HEAD `git ls-tree` 대조) — `economics` `mission` `project-state` `recovery` `replay`
+  `review` `routing` `scorecard` `topology` `verification`. 기존 디렉터리에 얹은 모듈은
+  `intent/{interpreter,confidence,artifact}.js`, `planning/question-gate.js`,
+  `security/human-gates.js`, `runtime/{ledger,ledger-schema,event-writer,artifact-lifecycle,artifact-lifecycle-gates}.js`.
+- **원장·receipt 계층** — `runtime/ledger.js` append-only writer + 의존성 0 서브셋 검증기
+  `ledger-schema.js`(ajv 는 게이트에서 오라클로만 대조, 런타임 의존 없음). receipt 3종
+  (attempt · context · route)은 `additionalProperties:false` 라 접히지 않고 거부된다.
+- **replay 읽기 모델** `lib/replay/` — 원장 fold. `readEvents` 를 포트로 주입받는다(L2→L5
+  직접 import 는 eslint 하드 에러).
+- **existence audit** `lib/replay/existence-audit.js` — Phase 0 결론은 **분모 부재**다.
+  어휘 36종 중 훅·커맨드·스킬 이름을 담는 필드가 0이라, 카운터는 숫자를 지어내는 대신
+  `unmeasured:no-event-carries-<kind>` 로 정직하게 비운다.
+- **파이어월 게이트 신규 17종**(2026-09-02 18:22 측정 · 2026-09-03 09:06 · **11:55 커밋 직전 재측정 동일**: `tests/firewall/` 신규 `.test.js` 17) (`tests/firewall/`) — `no-control-bytes`(소스에 리터럴 제어
+  바이트 금지: NUL 1바이트가 ripgrep 에게 파일 **전체**를 binary 로 만들어 검색이 조용히
+  0건을 돌려주던 실사고를 막는다) · `ledger-vocab-allowlist` · `ledger-append-survival` ·
+  `state-updated-pairing` · `command-output-invariance` · `hook-decision-invariance` ·
+  `artifact-governance` · `human-gate-matrix-selfcheck` · `review-verdict-adapter` ·
+  `usage-receipt-schema-guard` · `project-md-contract` · `existence-audit-section` ·
+  `artibot-entry-parity` · `gitignore-boundary` · `v5-config-firewall` ·
+  `constitution-stage-a-{commands,rules}`.
+
+### 설계 대비 변경 (구축 중 실측이 설계를 이긴 것 — 전체 ~50행은 `.artibot/guides/v5-design/ARTIBOT-5.0-DESIGN.md` 부록 0-2)
+
+- **"행동 변화 0" 의 정의를 좁혔다.** 원안의 "프롬프트 바이트 불변" 은 헌법 단계 A 가 rules·
+  commands 본문을 편집하므로 자기모순이었다. **런타임 행동 불변**(스폰 모델 · 훅 차단 결과 ·
+  기존 커맨드 출력 경로)으로 재정의.
+- **`task.meta` 는 바이트 불변으로 두고 형제 필드 `task.mission` 을 신설.** 기존 테스트가
+  `meta` 객체 전체를 고정하고 있었다.
+- **원장이 상태의 정본이 아니다.** `state.updated.data` 만으로는 상태를 재구성할 수 없어,
+  원장 = `state_version` 수열 정본 / 저장소 저널 = 내용 정본으로 역할을 갈랐다.
+- **게이트 판정의 정본은 훅 계층**(`human-gates.js#classify`)이다. 라우터의 `humanGateHits` 는
+  텍스트 매치라 오탐이 나므로 advisory 로 강등, 결정에 쓰지 않는다.
+- **UNMEASURED 의 완료 차단을 선점 해제.** 단일 불리언이라 층 구분 없이 막던 것을
+  `opts.policy.unmeasuredBlocksOutcome`(기본 유지) + 층 필드로 분리했다.
+
+### 오너 결정 대기 (Observe 기록이 쌓인 뒤 판단할 항목 — 지금은 전부 보류 상태로 착지)
+
+| 항목 | 현재 착지 상태 | 판단 시점 |
+|---|---|---|
+| A1 blindspot 자동수정 | **미채택 유지**(recommend-only) | Observe 원장의 보고 건수·수용률 확보 후, Canary 저위험 bounded 만 재론 |
+| B2 ADR 정본 위치 `.artibot/adr/` 통합 | 미이동 | 인용 파손 수 측정 후 |
+| C4 UNMEASURED 를 완료 차단 사유로 | Observe 는 카운트만 | 층별 필수/선택 config 확정 후 |
+| G1 Routing Epoch 실효 단위(스폰 vs 액션) | **스폰**으로 시작 | 재검토 트리거는 I7(실행 중 모델 전환 지원 확인)이지 I4(alias 수용)가 아니다 |
+| G2 매 프롬프트 메모리 주입 기본값 | 현행 유지 | Observe A/B(`ARTIBOT_RUNTIME_MEMORY_DISABLE`) 결과 후 |
+| G3 `.artibot/generated/` 4파일 도입 | 미도입 | Shadow 진입 전 검토 1회, 통과분만 |
+| G4 RouteBench 기준선 = 현행 2티어 `resolveModel` | **채택**(Shadow 대조군) | — |
+| G5 residency 3 / cooldown 2 초기값 | 문서 값으로 시작 | RouteBench 보정 전까지 "미보정" 표기 유지 |
+| split objective `wallclock_throughput` | **UNATTESTED** — 코퍼스 0건 | `time_to_verified_outcome` + 가중치 차이로 갈지 결정 필요 |
+| G6 split objective 통일 여부 | 설계 문서 §5 결정표에 **행이 없다** — 부록 0-2 본문에서만 "결정 G6" 으로 언급된다 | 결정표에 행으로 승격해야 판단 가능 |
+| G-1 | 설계 문서 어느 절에도 **미등장**(세션 메모에만 존재) | 항목 정의부터 필요 |
+| `review.independent` → required | 설계 :176 은 **계약만** 정의한다(`assertIndependence`). 동명 config 키는 `artibot.config.json` 에 **0건** | required 로 올리려면 config 키 신설이 선행 |
+| planner 병렬화 | Phase 0 범위 밖 — 오너 후속 요청으로 별도 단위 | 추후 |
+
+**검증 상태** — 전체 스위트 615파일 / 14,356 통과 / 10 skipped / red 0
+(`npx vitest run`, 2026-09-02 18:22 측정, 161s). 같은 스위트의 18:16 실행은 파일 2·테스트 3이
+red 였고 전부 Windows 임시 디렉터리 `rename EPERM` — `.artibot/guides/NEXT-SESSION.md` 에
+기록된 부하성 플레이크와 같은 형태다(해당 파일 단독 재실행 17/17 통과, 로직 회귀 아님).
+수치는 커밋 직전 재측정한다.
+
 ## [4.52.0] — 2026-09-02
 
 동시 쓰기와 체크아웃 변환이 각각 삼키던 데이터 2종을 고정한다. 둘은 원인이 무관하지만 증상이

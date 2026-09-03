@@ -1,0 +1,154 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "project-state.schema.json",
+  "title": "ArtibotProjectState",
+  "description": "Shape of .artibot/state.yaml. This is a PROJECTION, not the live truth: the StateStore holds live state and ledger.jsonl holds history, and state.yaml is re-rendered from them after the store write commits (design ARTIBOT-5.0-DESIGN.md §3.6, §7.2 Addendum §1.1, overriding v1.1 06's 'state.yaml = authoritative cache'). It answers 'what is happening right now', never 'what happened'. A corrupted state.yaml is regenerable and must never be repaired by hand in preference to the store. Extends .artibot/guides/v5-design/package-v1.1/16_STATE_SCHEMA.yaml; every required field and every enum value of that original is preserved.",
+  "type": "object",
+  "required": ["project", "state_version", "active_missions"],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Migration handle (design §7.2 Addendum §28-29). Deliberately OPTIONAL here, unlike task-graph.schema.json where it is required: the canonical state.yaml example in package-v1.1/06_STATE_YAML_SPEC.md carries no schema_version, and requiring it would invalidate the design's own example. Promote to required only together with a migration of that example."
+    },
+    "project": {
+      "type": "string",
+      "minLength": 1
+    },
+    "state_version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Monotonically increasing counter bumped by every StateStore write under CAS; the matching state.updated{state_version} lands in the ledger inside the same transaction, so a gap in the ledger sequence is a lost update (design §3.6). Monotonicity spans versions and therefore CANNOT be checked by this schema — it is /doctor Check 8's job. Only the floor of 1 is enforced here."
+    },
+    "updated_at": {
+      "type": "string",
+      "description": "ISO-8601 instant of the last projection render. Left as a plain string, matching the v1.1 16 original, because the design's own example uses an offset form and no format was specified there."
+    },
+    "active_missions": {
+      "type": "object",
+      "description": "Live missions keyed by mission id. Completed missions leave this map; their history is the ledger and their result is outcome.md. Keys accept BOTH id forms, and both are load-bearing: the issued form M-YYYYMMDD-NNN, with NNN free to run past three digits so a busy day cannot overflow the id space, and the session fallback M-YYYYMMDD-S<sid8> written when the substantive-mission gate declines to issue a mission. Rejecting either here would break the state-store-to-ledger join, since ledger-envelope.schema.json, review-output.schema.json and mission-contract.schema.json all accept both.",
+      "propertyNames": { "pattern": "^M-\\d{8}-(?:\\d{3,}|S[0-9A-Za-z]{8})$" },
+      "additionalProperties": { "$ref": "#/definitions/mission" }
+    }
+  },
+  "definitions": {
+    "blockerReason": {
+      "type": "string",
+      "pattern": "^(lane|gate|human|reconcile):.+$",
+      "description": "Blocked reason convention from design §3.5 — lane:<x> | gate:<n> | human:<r> | reconcile:<w>. An allowlist pattern, not a deny-list, so a prefix invented later fails closed instead of slipping through. This tightens the v1.1 16 original, which left blocked_by as an unconstrained array."
+    },
+    "revisionRef": {
+      "type": "object",
+      "required": ["path", "revision"],
+      "description": "Pointer to a mission document plus the revision that is current. Revisions are numbers in one file, never plan-v2.md / plan-final.md (package-v1.1/05).",
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "revision": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "mission": {
+      "type": "object",
+      "required": ["status", "intent", "plan"],
+      "properties": {
+        "title": { "type": "string" },
+        "status": {
+          "type": "string",
+          "enum": [
+            "queued",
+            "planning",
+            "executing",
+            "blocked",
+            "reviewing",
+            "completed",
+            "failed"
+          ],
+          "description": "MISSION status — the 7 values of the v1.1 16 original, unchanged. This is NOT the task vocabulary: tasks use the 8 values in task-graph.schema.json (claimed/done/cancelled instead of planning/completed). Merging the two would silently widen both."
+        },
+        "intent": { "$ref": "#/definitions/revisionRef" },
+        "plan": { "$ref": "#/definitions/revisionRef" },
+        "owners": {
+          "type": "object",
+          "description": "Who is on this mission. Kept permissive: humans[] is a field a person edits by hand, and how hand-written fields survive a projection rebuild is still an open decision (design §3.6 D14).",
+          "properties": {
+            "humans": { "type": "array", "items": { "type": "string" } },
+            "agents": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "topology": {
+          "type": "object",
+          "description": "Execution shape. mode uses the router's canonical output vocabulary — the run-ledger 6-value enum (design §3.5; .artibot/guides/v5-design/package/schemas/run-ledger.schema.yaml:17), the same list already enforced at lib/core/config-schema.js:213 and tests/firewall/v5-config-firewall.test.js#TOPOLOGY_MODES, and the same one mission-contract.schema.json uses. performance_profile deliberately KEEPS its v1.1 spelling here even though mission-contract.schema.json drops it: this schema describes state.yaml, whose canonical v1.1 example carries performance_profile: maximum, and the rename to execution_profile.performance is decision F2 and still open (design §3.5). Renaming it here would invalidate the design's own example before that decision lands.",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": ["solo", "subagent", "team", "autopilot", "autopilot_fast", "split"]
+            },
+            "performance_profile": { "type": "string" }
+          }
+        },
+        "workers": {
+          "type": "object",
+          "description": "Per-worker projection of the Task Graph. INTENTIONALLY OPEN: the v1.1 16 original declares workers as a bare object, and the richer vNext/ops fields (window, head, attempt, checkpointSeq) must be absorbable without loss, so neither this map nor a worker entry closes additionalProperties. The named properties below are documentation, not a fence.",
+          "additionalProperties": { "$ref": "#/definitions/worker" }
+        },
+        "blocked_by": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/blockerReason" },
+          "description": "Why the mission cannot proceed. A state/git mismatch found on resume is recorded here as reconcile:<w> and fails closed (design §3.5)."
+        },
+        "review": {
+          "type": "object",
+          "description": "Review request state. status stays a free string rather than the 5-value verdict enum (PASS/REPAIR_REQUIRED/REPLAN_REQUIRED/INTENT_REVIEW_REQUIRED/BLOCK, design §3.4): that enum is the reviewer's VERDICT contract and is owned elsewhere, while the design's own example puts a request status ('pending') in this field. Pinning the verdict enum here would fork that contract.",
+          "properties": {
+            "required": { "type": "boolean" },
+            "model": { "type": "string" },
+            "status": { "type": "string" }
+          }
+        },
+        "controller": {
+          "type": "object",
+          "required": ["session_id", "lease"],
+          "description": "The single logical writer for this mission (design §7.2 Addendum §16-17). In Claude Code the leader session is the controller, and for /split it is the parent session. Its whole purpose is to make two simultaneous controllers impossible, so both fields are required: a controller entry without a lease would be a claim nobody can time out.",
+          "properties": {
+            "session_id": { "type": "string", "minLength": 1 },
+            "lease": { "$ref": "lease.schema.json" }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    "worker": {
+      "type": "object",
+      "description": "One worker's projected state. additionalProperties is left open (see workers above).",
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "queued",
+            "claimed",
+            "executing",
+            "blocked",
+            "reviewing",
+            "done",
+            "failed",
+            "cancelled"
+          ],
+          "description": "The 8 task states, because a worker row is a projection of its Task Graph node (design §7.2 Addendum §7-8 makes the Task Graph canonical and demotes state.yaml.workers to a projection). Both values used in the v1.1 06 example, executing and reviewing, are members."
+        },
+        "owns": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Path globs, projected from the task's file_ownership."
+        },
+        "heartbeat_at": {
+          "type": ["string", "null"],
+          "description": "Null is the measured reality today: there is no heartbeat emitter, so the vNext field is always null (design §3.5). Until an emitter exists this is derived as max(lane-heartbeat, last-commit) and heartbeat_source must be written next to it (design §3.5)."
+        },
+        "heartbeat_source": { "type": ["string", "null"] },
+        "blocked_by": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/blockerReason" }
+        }
+      }
+    }
+  }
+}

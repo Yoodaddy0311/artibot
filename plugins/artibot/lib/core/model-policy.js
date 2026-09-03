@@ -17,7 +17,7 @@
  */
 
 import { getConfig } from './config.js';
-import { resolveRole } from './model-catalog.js';
+import { listTiers, resolveRole } from './model-catalog.js';
 
 /**
  * Fallback model for agents not listed in any policy bucket. Opus (not fable)
@@ -347,10 +347,28 @@ function gateFableTier(tier, agentType, config) {
   return isFableAllowed(name, config) ? 'fable' : FABLE_FALLBACK_MODEL;
 }
 
-/** Phase roles mapped to the build-side tier (`phaseRoles.build`). */
-const BUILD_ROLES = new Set(['implementation', 'build', 'impl']);
-/** Phase roles mapped to the review-side tier (`phaseRoles.review`). */
-const REVIEW_ROLES = new Set(['review', 'inspect', 'crosscheck']);
+/**
+ * Phase roles mapped to the build-side tier (`phaseRoles.build`).
+ *
+ * Exported as the SINGLE SOURCE of the phase-role vocabulary: any module that
+ * needs to know which roles are build-side (e.g. a classifier deriving a phase)
+ * must import this rather than re-listing the strings, or the two copies drift
+ * apart silently. Treat it as read-only — `Object.freeze` does NOT stop
+ * `Set.prototype.add`, so mutating it would corrupt every caller's routing.
+ *
+ * @type {Set<string>}
+ */
+export const BUILD_ROLES = new Set(['implementation', 'build', 'impl']);
+
+/**
+ * Phase roles mapped to the review-side tier (`phaseRoles.review`).
+ *
+ * Same contract as {@link BUILD_ROLES}: import it, never mirror it, never
+ * mutate it.
+ *
+ * @type {Set<string>}
+ */
+export const REVIEW_ROLES = new Set(['review', 'inspect', 'crosscheck']);
 
 /**
  * Defaults for `agents.modelPolicy.phaseRoles`. Both sides opus = the
@@ -432,6 +450,130 @@ function resolvePhaseTierRaw(role, config) {
  */
 export function resolveModelForPhase(role, config) {
   return gateFableTier(resolvePhaseTierRaw(role, config), null, config);
+}
+
+/** Policy buckets consulted by {@link allowedTiers}, widest-first. */
+const POLICY_BUCKETS = Object.freeze(['high', 'medium', 'low']);
+
+/**
+ * Catalog tier keys, memoized. Used only to give {@link allowedTiers} a stable
+ * iteration order; computed lazily so module init stays side-effect free.
+ *
+ * @type {string[]|null}
+ */
+let tierOrderCache = null;
+
+/**
+ * @returns {string[]} Catalog tier keys in declaration order (memoized).
+ */
+function getTierOrder() {
+  if (tierOrderCache === null) tierOrderCache = listTiers();
+  return tierOrderCache;
+}
+
+/**
+ * Sort comparator for the {@link allowedTiers} result: catalog order first
+ * (cheapest → most capable), tiers the catalog does not know last, ties broken
+ * lexicographically so the order is total and reproducible.
+ *
+ * @param {string} a
+ * @param {string} b
+ * @returns {number}
+ */
+function compareTiers(a, b) {
+  const order = getTierOrder();
+  const rankA = order.indexOf(a) === -1 ? Number.MAX_SAFE_INTEGER : order.indexOf(a);
+  const rankB = order.indexOf(b) === -1 ? Number.MAX_SAFE_INTEGER : order.indexOf(b);
+  if (rankA !== rankB) return rankA - rankB;
+  if (a === b) return 0;
+  return a < b ? -1 : 1;
+}
+
+/**
+ * Tier a named policy bucket DECLARES for an agent, or null when the bucket is
+ * missing/malformed, does not list the agent, or declares something the catalog
+ * cannot resolve. Reads the raw config on purpose: {@link loadModelPolicy}
+ * normalizes only `high` and `medium`, and the `low` bucket must stay inert for
+ * every other entry point (see the `low.comment` in artibot.config.json).
+ * Never throws.
+ *
+ * @param {string} bucketName - One of {@link POLICY_BUCKETS}.
+ * @param {string} name - Already-normalized agent name (never '').
+ * @param {object} [config] - Explicit config; falls back to getConfig().
+ * @returns {string|null} Tier key (role aliases resolved), or null.
+ */
+function declaredBucketTier(bucketName, name, config) {
+  const src = resolveConfigSource(config);
+  const policy = src && src.agents && src.agents.modelPolicy;
+  const bucket = policy && typeof policy === 'object' ? policy[bucketName] : null;
+  if (!bucket || typeof bucket !== 'object') return null;
+  const { model, agents } = normalizeBucket(bucket, '');
+  if (!agents.includes(name)) return null;
+  return resolveRole(model);
+}
+
+/**
+ * Every tier an agent is PERMITTED to run on — the policy ceiling, not the pick.
+ * `resolveModel` answers "which model today"; this answers "which models are
+ * even legal", so `lib/routing/` can choose inside the set and is structurally
+ * unable to choose outside it. Never throws; the returned Set is never empty.
+ *
+ * Membership:
+ *   - `opus` — always present (the universal fallback tier).
+ *   - the current {@link resolveModel} result for the same `{role}`, so the set
+ *     is ALWAYS a superset of today's pick — true even under a config whose
+ *     buckets declare a tier the catalog does not know.
+ *   - `fable` — only when {@link isFableAllowed} says so for this agent
+ *     (kill-switch AND allowlist AND not in {@link FABLE_DENYLIST}). A
+ *     denylisted agent is capped at opus here too, so an escalation controller
+ *     that only ever picks inside this set cannot route around the denylist.
+ *   - every tier the `high` / `medium` / `low` buckets DECLARE for this agent,
+ *     resolved through the catalog (unresolvable declarations are dropped) and
+ *     put through the same fable gate. This is the 4-tier hook: listing an
+ *     agent under `low` widens its ceiling by sonnet/haiku without touching any
+ *     other resolver — `loadModelPolicy` still never reads `low`.
+ *
+ * A `role` can change which tier {@link resolveModel} picks by default, but it
+ * never widens the ceiling past the allowlist: a non-allowlisted agent in a
+ * fable phase still gets `{ opus }`.
+ *
+ * Iteration order is catalog order (haiku → sonnet → opus → fable), unknown
+ * tiers last, so a logged/serialized set is stable across calls.
+ *
+ * WHAT THIS DOES NOT SEE: with no agent identity (empty/non-string input) the
+ * allowlist and denylist cannot be consulted, so `fable` is only present if
+ * {@link resolveModel} itself already returned it (alias path, kill-switch
+ * only). Callers that know the agent must pass it.
+ *
+ * @param {string} agentType - Agent name (prefixed or bare).
+ * @param {object} [opts] - `{ role?: string }`, same phase-role vocabulary as
+ *   {@link resolveModel}.
+ * @param {object} [config] - Explicit config; falls back to getConfig().
+ * @returns {Set<string>} Permitted tiers, ordered; always contains 'opus'.
+ *
+ * @example
+ * allowedTiers('architect'); // Set { 'opus', 'fable' }
+ * allowedTiers('backend-developer'); // Set { 'opus' }  (high bucket, not allowlisted)
+ * allowedTiers('security-reviewer'); // Set { 'opus' }  (denylisted, ceiling opus)
+ * allowedTiers('code-reviewer', { role: 'build' }); // Set { 'opus', 'fable' }
+ */
+export function allowedTiers(agentType, opts = {}, config) {
+  const options = opts && typeof opts === 'object' ? opts : {};
+  const roleOpts =
+    typeof options.role === 'string' ? { role: options.role } : {};
+  const name = normalizeAgentType(agentType);
+  const tiers = new Set([
+    FABLE_FALLBACK_MODEL,
+    resolveModel(agentType, roleOpts, config),
+  ]);
+  if (name !== '') {
+    if (isFableAllowed(name, config)) tiers.add('fable');
+    for (const bucketName of POLICY_BUCKETS) {
+      const declared = declaredBucketTier(bucketName, name, config);
+      if (declared !== null) tiers.add(gateFableTier(declared, name, config));
+    }
+  }
+  return new Set([...tiers].sort(compareTiers));
 }
 
 /**

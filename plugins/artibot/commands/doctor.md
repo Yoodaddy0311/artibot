@@ -13,7 +13,7 @@ Run automated health checks on the Artibot plugin installation. Validates config
 ## Arguments
 
 Parse $ARGUMENTS:
-- (no argument): Run all 7 checks
+- (no argument): Run all 9 checks
 - `config`: Check 1 only — config validation
 - `agents`: Check 2 only — agent file presence
 - `skills`: Check 3 only — skill hash integrity
@@ -21,6 +21,8 @@ Parse $ARGUMENTS:
 - `mcp`: Check 5 only — MCP connectivity
 - `memory`: Check 6 only — memory store health
 - `explainability`: Check 7 only — decision recording health
+- `state`: Check 8 only — ledger/state parity and `state_version` continuity
+- `artifacts`: Check 9 only — Artifact Health, the ten items of Hardening §32
 - `--verbose`: Show per-item details (not just summary lines)
 - `--json`: Output results as a JSON object instead of the formatted report
 - `--fix`: After diagnosing, apply SAFE automatic repairs for fixable failures (see Self-Heal below)
@@ -269,6 +271,147 @@ That is an idle machine.
 - **Anything about the repo working tree.** A fixed repo and a stale install are
   indistinguishable to every step except S4.
 
+### Check 8: Ledger / State Parity
+
+Read-only, and NOT a `--fix` target (see the note at the end of Check 9).
+
+`state.yaml` is a projection, not the truth: the StateStore holds the live
+state, `ledger.jsonl` holds the history, and the projection must be
+reproducible from them at any time (design §3.6; Hardening §31).
+This check tests that reproducibility, and reads the `state_version` counter
+for the holes that mean a committed write was lost.
+
+The judgement lives in `lib/project-state/doctor-checks.js` and performs NO
+I/O. This command reads the three inputs and hands them over:
+
+1. **Ledger events** — `readAllEvents(projectRoot)` from `lib/runtime/ledger.js`.
+2. **Store journal** — `readJournal(paths.journal)` from
+   `lib/project-state/journal.js`, which tolerates a torn tail rather than
+   refusing to open the store.
+3. **Projection** — `.artibot/state.yaml`. Pass the RAW TEXT when you have it:
+   a string is compared byte for byte, which is design §3.6's rule, while a
+   parsed object can only be compared structurally because a YAML parse does
+   not preserve key order.
+
+Then call, and report the worse of the two verdicts:
+
+- `checkLedgerStateParity({events, journal, projection})` — folds the journal
+  through T-21's `reduceProjectState`, never a second fold of its own, then
+  compares the rebuild against the supplied projection and the two version
+  sets against each other.
+- `checkStateVersionGaps({journal})` — enumerates holes, regressions and
+  duplicates in the `state_version` sequence.
+
+Status for this check — **first matching row wins**:
+
+| Condition | Status |
+|---|---|
+| Any of events / journal / projection was not read | **unmeasured** |
+| A store version has no paired `state.updated` event | **fail** |
+| The journal fold does not reproduce the projection | **fail** |
+| A `state_version` is missing, repeated, or goes backwards | **fail** |
+| A ledger version has not reached the store yet | **warn** |
+| The journal fold produced a warning | **warn** |
+| Otherwise | **pass** |
+
+The two version-set directions mean opposite things and are never merged. A
+version in the ledger but not the store is a crash between the two appends: the
+store is behind and the superset invariant still holds. A version in the store
+but not the ledger is a committed write with no event, which is that invariant
+broken and the exact signature lost-update detection exists to see.
+
+**unmeasured is not a pass.** All three inputs are required, because a parity
+claim made without one of them is a partial comparison reported as a whole one.
+A store that has never been written has nothing to compare, and that reads as
+unmeasured rather than healthy.
+
+**What this check cannot see** (§9 — state it next to the gate):
+
+- **Whether the projection on disk is the one the runtime wrote.** It compares a
+  projection against a rebuild of it. Both being wrong the same way is
+  indistinguishable from both being right.
+- **A lost write that never reached either store or ledger.** The counter only
+  exposes writes that got a number; a write that died before CAS leaves no hole.
+- **Anything about a second worktree.** Each worktree carries its own
+  `.artibot/`, so this compares one tree and says nothing about the others.
+- **Whether the ledger it read is the one being written.** This is the same
+  resolved-root problem Check 7 documents. State the absolute project root in
+  the report so an empty comparison can be told from the wrong tree.
+
+### Check 9: Artifact Health
+
+Read-only, and NOT a `--fix` target.
+
+Ten checks, transcribed from Hardening §32. The canonical list is
+`.artibot/guides/v5-design/ADDENDUM-HARDENING.md` lines 994-1003 — the TRACKED
+copy, since `.gitignore:19` ignores the byte-identical one under `docs/`. The
+order below is the document's. Mission artifacts live at
+`.artibot/missions/<mission_id>/` as `intent.md`, `plan.md`, `review.md` and
+`outcome.md`.
+
+1. Read each mission folder and parse the frontmatter of the four canonical
+   files, passing `null` for any that is absent. List the OTHER files in the
+   folder as `extraFiles` — without that listing, item 5 cannot be measured.
+2. Import `classifyStaleness` from `lib/runtime/artifact-lifecycle.js` and pass
+   it in. It is injected rather than imported by the check module because
+   `lib/project-state/` is L2 and may not import the runtime layer, so upward
+   calls arrive as ports (design §1-8). Without it, items 2-4 are unmeasured.
+3. Call `checkArtifactHealth` with every input below, passing the Check 8
+   result as `parity`:
+
+```js
+checkArtifactHealth({
+  missionDirs, classifyStaleness, activeMissionIds,
+  leases, now, parity, evidenceIds, supportedSchemaVersions,
+});
+```
+
+| # | §32 item | Input it needs | Without that input |
+|---|---|---|---|
+| 1 | Missing intent.md | `missionDirs` | unmeasured |
+| 2 | Broken based_on revision | `classifyStaleness` | unmeasured |
+| 3 | Stale plan | `classifyStaleness` | unmeasured |
+| 4 | Invalid review | `classifyStaleness` | unmeasured |
+| 5 | Duplicate canonical artifact | `extraFiles` per mission | unmeasured |
+| 6 | Orphan mission | `activeMissionIds` | unmeasured |
+| 7 | Expired task lease | `leases` and `now` | unmeasured |
+| 8 | Ledger/state mismatch | the Check 8 result as `parity` | unmeasured |
+| 9 | Missing evidence reference | `evidenceIds` | unmeasured |
+| 10 | Unsupported schema version | `supportedSchemaVersions` | unmeasured |
+
+Each item reports pass, fail or unmeasured on its own, and the summary takes the
+most severe of the ten. unmeasured outranks pass, so a run that measured four
+items and skipped six reports unmeasured: a check that did not run must never
+read the same as a check that ran and found nothing. Report the measured count
+alongside the verdict.
+
+An `outcome.md` can also come back NOT_ACCEPTABLE from the §5 propagation table.
+§32's ten items have no slot for that state, so it is reported in `findings`
+carrying `outsideCanonicalTen: true` rather than folded into one of the ten.
+
+**Check 8 and Check 9 are not `--fix` targets.** The self-heal layer below maps
+diagnostic codes to directory and JSON repairs. Every failure these two checks
+report is instead a disagreement between recorded facts — a lost write, a broken
+dependency edge, an expired lease. Repairing one means choosing which record was
+wrong, and rewriting state to silence a lost-update alarm destroys the evidence
+that a write was lost. Phase 0 is Observe: report, never repair.
+
+**What this check cannot see** (§9 — state it next to the gate):
+
+- **Any item whose input was not supplied.** The table above is the full list of
+  what each item needs. Six of the ten need something beyond the mission
+  folders, so a bare invocation measures four and must say so.
+- **Whether the frontmatter matches the bytes on disk.** Parsing happens in this
+  command, so a parser bug reads as artifact health.
+- **A duplicate whose name resembles nothing canonical.** Item 5 fires on names
+  starting with a canonical stem, plus governance 08's named derivatives. A
+  competing file called `notes-v2.md` is invisible to it.
+- **Whether an orphan is abandoned or archived.** Item 6 treats "absent from the
+  live state with no outcome.md" as orphaned, so a mission archived by any path
+  that does not write an outcome is reported as an orphan.
+- **Whether cited evidence is true.** Item 9 resolves ids against the registry
+  and never opens the evidence behind them.
+
 ## Output Format
 
 ```
@@ -282,14 +425,20 @@ ARTIBOT HEALTH CHECK
 [check-5-icon] MCP: {server1} ({status}), {server2} ({status})
 [check-6-icon] Memory: {n} stores, {n} entries, {size} total
 [check-7-icon] Explainability: {n} trail entries (24h), {n} event lines (24h), last {timestamp}
+[check-8-icon] State parity: {status} at state_version {n} ({n} gaps, {n} unpaired)
+[check-9-icon] Artifacts: {n}/10 items measured, {n} failing, {n} missions read
 
 Status: {HEALTHY|DEGRADED|UNHEALTHY} ({passed}/{total} checks passed)
 ```
 
 Status logic:
-- **HEALTHY**: All 7 checks passed (zero errors)
-- **DEGRADED**: 5-6 checks passed (warnings present)
-- **UNHEALTHY**: 4 or fewer checks passed
+- **HEALTHY**: All 9 checks passed (zero errors)
+- **DEGRADED**: 7-8 checks passed (warnings present)
+- **UNHEALTHY**: 6 or fewer checks passed
+
+An `unmeasured` check counts as neither passed nor failed. Report it as its own
+number rather than folding it into either — "7 passed, 2 unmeasured" and "9
+passed" are different results and the summary must not blur them.
 
 Use checkmark for passed checks, cross for failed checks, warning sign for checks with non-critical issues.
 
@@ -307,9 +456,11 @@ If `--json` is set, output a structured JSON object:
     "hooks":  { "status": "pass", "details": {} },
     "mcp":    { "status": "warn", "details": {} },
     "memory": { "status": "pass", "details": {} },
-    "explainability": { "status": "pass", "details": {} }
+    "explainability": { "status": "pass", "details": {} },
+    "state":  { "status": "pass", "details": {} },
+    "artifacts": { "status": "unmeasured", "details": { "measured": 4, "total": 10 } }
   },
-  "summary": { "passed": 7, "total": 7, "status": "HEALTHY" }
+  "summary": { "passed": 8, "unmeasured": 1, "total": 9, "status": "DEGRADED" }
 }
 ```
 

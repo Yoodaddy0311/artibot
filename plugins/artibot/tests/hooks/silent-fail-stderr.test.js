@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync,
+} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -31,6 +33,32 @@ function makeBrokenPluginRoot() {
   // path so the runtime can still import its libs.
   const tmp = mkdtempSync(path.join(os.tmpdir(), 'artibot-silent-fail-'));
   mkdirSync(tmp, { recursive: true });
+  return tmp;
+}
+
+/**
+ * SETUP-ONLY ISOLATION (assertions and fixtures are untouched).
+ *
+ * The well-formed-config case below used to point `CLAUDE_PLUGIN_ROOT` at the
+ * REAL plugin root, so running it mutated the developer's live `runtime/` —
+ * `token-usage-session.json` every run, and a line in the real
+ * `runtime/decisions/` store that `/doctor` reads once the recorder-stats flush
+ * landed. This builds a stand-in root that is well-formed in exactly the way the
+ * test needs: the real modules LINKED in and the real `artibot.config.json`
+ * copied, so the hook parses a genuinely valid config and imports the genuine
+ * libs. Only the writable `runtime/` directory is redirected.
+ */
+function makeGoodPluginRoot() {
+  const tmp = mkdtempSync(path.join(os.tmpdir(), 'artibot-silent-fail-ok-'));
+  const linkType = process.platform === 'win32' ? 'junction' : 'dir';
+  for (const dir of ['lib', 'commands', 'skills', 'agents']) {
+    symlinkSync(path.join(PLUGIN_ROOT, dir), path.join(tmp, dir), linkType);
+  }
+  copyFileSync(
+    path.join(PLUGIN_ROOT, 'artibot.config.json'),
+    path.join(tmp, 'artibot.config.json'),
+  );
+  mkdirSync(path.join(tmp, 'runtime'), { recursive: true });
   return tmp;
 }
 
@@ -99,7 +127,10 @@ describe('silent fail → stderr (issue-scanner A2 #10)', () => {
   });
 
   it('runtime-prompt stays silent on a well-formed config', async () => {
-    process.env.CLAUDE_PLUGIN_ROOT = PLUGIN_ROOT;
+    const goodRoot = makeGoodPluginRoot();
+    tmpRoots.push(goodRoot);
+
+    process.env.CLAUDE_PLUGIN_ROOT = goodRoot;
     process.env.ARTIBOT_RUNTIME_CHECKPOINT_DISABLE = '1';
     process.env.ARTIBOT_RUNTIME_MEMORY_DISABLE = '1';
 

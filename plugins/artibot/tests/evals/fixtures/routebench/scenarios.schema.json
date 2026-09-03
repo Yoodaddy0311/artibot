@@ -1,0 +1,117 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://artibot.dev/schemas/routebench-scenario.schema.json",
+  "title": "RouteBenchScenario",
+  "description": "One RouteBench scenario. DEFINITION ONLY — nothing in this directory executes a benchmark. Design ARTIBOT-5.0-DESIGN.md §8.2 §11·§12·§44·§45 splits RouteBench in two: scenario/fixture/baseline DEFINITIONS are tracked here next to the lane-1 eval JSONL, while run RESULTS and reports stay local under `_benchmarks/routing/` because `_benchmarks/` is gitignored (.gitignore:15). Vocabulary is transcribed from MODEL-SWITCHING-SCORECARD.md section 11 (baselines B0..B6), section 12 (13 task classes, 17 metrics) and section 45 (scoring keeps raw metrics, no composite). Draft-07 is deliberate: the repo resolves ajv 6.12.6 transitively, which cannot compile 2020-12 — same reason as execution-profile.schema.json.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "task_class", "baselines", "metrics", "source"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$",
+      "description": "Stable slug. Used as the completed-pair key so a re-run can skip finished work (MODEL-SWITCHING-SCORECARD.md:715 'benchmark가 재실행 가능하고 completed pair를 skip하는 패턴')."
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Human-readable one line. Not an identifier."
+    },
+    "task_class": {
+      "type": "string",
+      "enum": [
+        "simple_edit",
+        "repo_exploration",
+        "routine_implementation",
+        "complex_implementation",
+        "debugging",
+        "repeated_failure",
+        "architecture",
+        "long_context",
+        "memory_dependent",
+        "intent_revision",
+        "high_risk_review",
+        "autopilot_fast",
+        "split"
+      ],
+      "description": "MODEL-SWITCHING-SCORECARD.md section 12 verbatim, all 13 values. The doc calls this list a MINIMUM ('최소'), so widening is expected — but widening must edit this enum, which is the point: an unlisted class is schema-invalid rather than silently benchmarked."
+    },
+    "baselines": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "description": "Which baselines this scenario must be compared against. MODEL-SWITCHING-SCORECARD.md section 11 makes B0..B4 mandatory ('반드시 비교') and B5..B6 optional ('선택'); this schema does not encode that split because a single scenario may legitimately run a subset. B2 is the Shadow control group per design ARTIBOT-5.0-DESIGN.md §8.2 §11·§12·§44·§45.",
+      "items": {
+        "type": "string",
+        "enum": ["B0", "B1", "B2", "B3", "B4", "B5", "B6"],
+        "$comment": "B0 Fixed Sonnet · B1 Fixed Opus · B2 Current v4 Policy · B3 v5 Static Heuristic · B4 v5 Adaptive Router · B5 Fixed Fable · B6 Hindsight Oracle (offline hindsight policy)."
+      }
+    },
+    "metrics": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "description": "Metrics this scenario reports. MODEL-SWITCHING-SCORECARD.md section 12 lists 17; section 45 forbids compressing them into a single composite score up front and requires raw metrics to always be preserved, so there is deliberately no `score` property on this schema.",
+      "items": {
+        "type": "string",
+        "enum": [
+          "accepted_outcome",
+          "success_at_1",
+          "attempts",
+          "retry_waste",
+          "total_tokens",
+          "total_cost",
+          "cost_per_accepted_outcome",
+          "wall_clock",
+          "routing_latency",
+          "switch_count",
+          "transition_cost",
+          "transition_time",
+          "avoided_switches",
+          "human_corrections",
+          "human_decisions",
+          "review_findings",
+          "context_churn"
+        ]
+      }
+    },
+    "replay_mode": {
+      "type": "string",
+      "enum": ["exact", "partial", "simulation"],
+      "description": "MODEL-SWITCHING-SCORECARD.md section 13 / section 46. Exact = a recorded outcome exists for the candidate; partial = only some candidates have real outcomes; simulation = learned or predicted outcome. The doc requires this distinction to stay visible rather than being averaged away, because a replay is not a full counterfactual."
+    },
+    "fixture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status"],
+      "description": "Where this scenario's input material lives. A scenario may be defined before its fixture exists — `status: \"pending\"` is how that is declared instead of shipping an empty fixture file that a runner would silently treat as zero cases.",
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["present", "pending"],
+          "description": "`pending` means the fixture is owned by other work and does not exist yet. A runner MUST refuse to score a pending scenario rather than scoring it as empty."
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Repo-relative path to the fixture, when it exists. Omitted while status is pending and the owning task has not landed a path yet."
+        },
+        "owner": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Which task or lane owns producing this fixture. Present so a pending entry names someone rather than rotting anonymously."
+        }
+      }
+    },
+    "why": {
+      "type": "string",
+      "minLength": 1,
+      "description": "What routing behaviour this scenario is meant to discriminate. Same discipline as the nl-activation cases: an expectation with no stated reason cannot be re-judged later."
+    },
+    "source": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9.-]*$",
+      "description": "Which design clause this scenario comes from. Required for the same reason `source` is required in nl-activation.cases.jsonl — without it nobody can tell later whether a changed expectation is a fix or a regression."
+    }
+  }
+}

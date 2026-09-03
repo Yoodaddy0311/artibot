@@ -39,6 +39,25 @@ function deepFreeze(obj) {
 export const BASELINE_TIER = 'opus';
 
 /**
+ * Version stamp of the catalog DATA below (IDs, prices, limits, coefficients).
+ * Emitted alongside routing/cost records so a stored decision can be replayed
+ * against the exact price table that produced it — without it, a later price
+ * edit silently rewrites the meaning of every past record.
+ *
+ * Date-shaped (`YYYY-MM-DD`), not semver: it marks *when the numbers were last
+ * verified*, which is the question a replay actually asks. Bump it in the same
+ * commit that changes any value inside {@link MODELS}; leaving it stale is
+ * worse than having no stamp, because consumers trust it.
+ *
+ * Producer only — no consumer reads it as of 2026-09-02 (the routing/economics
+ * modules that will emit it are not written yet). Do not infer from its
+ * presence that any record currently carries a catalog version.
+ *
+ * @type {string}
+ */
+export const CATALOG_VERSION = '2026-09-02';
+
+/**
  * Model specs keyed by Artibot tier alias. These are the tier enums the Claude
  * Code Agent/Task `model` parameter accepts (`sonnet|opus|haiku|fable`), each
  * mapped to its current underlying model ID and verified specs.

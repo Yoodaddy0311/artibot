@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync, spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -48,15 +48,43 @@ const SCRIPT_PATH = path.join(PLUGIN_ROOT, 'scripts', 'hooks', '_userprompt-disp
 /** Throwaway home and working directory for the spawned dispatcher. */
 let sandboxHome;
 let sandboxCwd;
+let sandboxRoot;
 
+/**
+ * SETUP-ONLY ISOLATION (assertions and fixtures are untouched).
+ *
+ * This suite already redirected HOME and cwd, but still passed the REAL
+ * `CLAUDE_PLUGIN_ROOT` — the blind spot the note above `runDispatcher` records.
+ * So every run mutated the developer's live `runtime/`: `token-usage-session
+ * .json` each time, and a line in the real `runtime/decisions/` store that
+ * `/doctor` reads once the recorder-stats flush landed. Writing fixture data
+ * into the store a health check reads is worse than recording nothing.
+ *
+ * The sandbox LINKS the real `lib/`, `commands/`, `skills/` and `agents/` and
+ * copies the real `artibot.config.json`, so the dispatcher still resolves the
+ * REAL modules and config and the exercised path is unchanged. Only the
+ * writable `runtime/` directory is redirected. `SCRIPT_PATH` still points at the
+ * real dispatcher — the script under test is not a copy.
+ */
 beforeAll(() => {
   sandboxHome = mkdtempSync(path.join(tmpdir(), 'artibot-userprompt-home-'));
   sandboxCwd = mkdtempSync(path.join(tmpdir(), 'artibot-userprompt-cwd-'));
+  sandboxRoot = mkdtempSync(path.join(tmpdir(), 'artibot-userprompt-root-'));
+  const linkType = process.platform === 'win32' ? 'junction' : 'dir';
+  for (const dir of ['lib', 'commands', 'skills', 'agents']) {
+    symlinkSync(path.join(PLUGIN_ROOT, dir), path.join(sandboxRoot, dir), linkType);
+  }
+  copyFileSync(
+    path.join(PLUGIN_ROOT, 'artibot.config.json'),
+    path.join(sandboxRoot, 'artibot.config.json'),
+  );
+  mkdirSync(path.join(sandboxRoot, 'runtime'), { recursive: true });
 });
 
 afterAll(() => {
   if (sandboxHome) rmSync(sandboxHome, { recursive: true, force: true });
   if (sandboxCwd) rmSync(sandboxCwd, { recursive: true, force: true });
+  if (sandboxRoot) rmSync(sandboxRoot, { recursive: true, force: true });
 });
 
 function runDispatcher(payload, env = {}) {
@@ -67,7 +95,7 @@ function runDispatcher(payload, env = {}) {
       cwd: sandboxCwd,
       env: {
         ...process.env,
-        CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT,
+        CLAUDE_PLUGIN_ROOT: sandboxRoot,
         // Disable downstream side-effects that would otherwise touch
         // network / disk / runtime caches during the test run.
         // getHomeDir() reads USERPROFILE then HOME — both must point at the
@@ -150,10 +178,13 @@ describe('_userprompt-dispatcher (integration)', () => {
   /**
    * Isolation self-check.
    *
-   * Blind spots it does NOT cover: `CLAUDE_PLUGIN_ROOT` still points at the real
-   * plugin, so `runtime-prompt` keeps writing `plugins/artibot/runtime/*.json`
-   * in the repo. Those are gitignored (`plugins/artibot/.gitignore:10`) and so
-   * cannot dirty git, which is why they are deliberately left alone.
+   * The blind spot this note used to record — `CLAUDE_PLUGIN_ROOT` pointing at
+   * the real plugin, so `runtime-prompt` kept writing
+   * `plugins/artibot/runtime/*.json` in the repo — is CLOSED: the env now names
+   * the linked sandbox root (see the beforeAll above). Being gitignored was
+   * never the whole test: `runtime/decisions/` is what `/doctor` reads to decide
+   * whether recording is alive, so fixture lines there corrupt a health signal
+   * without ever dirtying git.
    */
   it('keeps every side effect inside the sandbox', () => {
     // Structural proof the git path is shut, independent of the mutable
@@ -239,7 +270,7 @@ describe('dispatcher writes a single newline-free JSON document to stdout', () =
         cwd: PLUGIN_ROOT,
         env: {
           ...process.env,
-          CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT,
+          CLAUDE_PLUGIN_ROOT: sandboxRoot,
           ARTIBOT_RUNTIME_CHECKPOINT_DISABLE: '1',
           ARTIBOT_RUNTIME_MEMORY_DISABLE: '1',
         },

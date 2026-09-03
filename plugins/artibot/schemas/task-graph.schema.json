@@ -1,0 +1,150 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "task-graph.schema.json",
+  "title": "ArtibotTaskGraph",
+  "description": "Structured Task Graph — canonical task state (design ARTIBOT-5.0-DESIGN.md §7.2 Addendum §7-8, which overrides v1 §3.5's 'state.yaml.workers is the worker source of truth'). The graph lives inside the StateStore; state.yaml.workers is a projection of it, never the reverse. No todo.md is created: the todo principle is kept, the file is not. Feeders are /split plan.json limbs (affectedPaths -> file_ownership) and /team TaskCreate.",
+  "type": "object",
+  "required": ["schema_version", "mission_id", "tasks"],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Migration handle required on every v5 artifact (design §7.2 Addendum §28-29)."
+    },
+    "mission_id": {
+      "type": "string",
+      "pattern": "^M-\\d{8}-(?:\\d{3,}|S[0-9A-Za-z]{8})$",
+      "description": "Owning mission; ids carry no repository prefix (design §7.2 Addendum §28-29). Two accepted forms, and BOTH must be accepted or the StateStore cannot join to the ledger: the issued form M-YYYYMMDD-NNN, with NNN free to run past three digits so a busy day cannot overflow the id space, and the session fallback M-YYYYMMDD-S<sid8> written when the substantive-mission gate declines to issue a mission. The same two forms are accepted by ledger-envelope.schema.json, review-output.schema.json and mission-contract.schema.json."
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO-8601 instant of the last graph mutation."
+    },
+    "tasks": {
+      "type": "array",
+      "description": "Task nodes. Node ids must be unique across the array and every dependency must name an existing node; neither is expressible in draft-07, so both stay a validator obligation of the StateStore (T-21), not of this schema. A consumer that trusts schema validity alone still has to check for duplicate ids and dangling dependencies.",
+      "items": { "$ref": "#/definitions/task" }
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "blockerReason": {
+      "type": "string",
+      "pattern": "^(lane|gate|human|reconcile):.+$",
+      "description": "Blocked reason convention from design §3.5 — lane:<x> | gate:<n> | human:<r> | reconcile:<w>. Written as an allowlist pattern on purpose: a deny-list would fail open for every prefix invented later."
+    },
+    "evidenceRefs": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "description": "References into the Evidence Registry (design §7.2 Addendum §23, .artibot/runtime/evidence.jsonl, ids shaped E-nnn). No id pattern is enforced here: the registry's id format is owned by the evidence-registry work, and pinning it from this schema would fork that contract."
+    },
+    "task": {
+      "type": "object",
+      "required": ["id", "mission_id", "status"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Task identifier, unique within the graph (e.g. T-14, or a /split limb id)."
+        },
+        "mission_id": {
+          "type": "string",
+          "pattern": "^M-\\d{8}-(?:\\d{3,}|S[0-9A-Za-z]{8})$",
+          "description": "Owning mission; must equal the graph mission_id. Same two accepted forms as the graph-level field. Cross-field equality is a validator obligation, not a schema one."
+        },
+        "title": { "type": "string" },
+        "status": {
+          "type": "string",
+          "enum": [
+            "queued",
+            "claimed",
+            "executing",
+            "blocked",
+            "reviewing",
+            "done",
+            "failed",
+            "cancelled"
+          ],
+          "description": "The 8 canonical task states. The projection targets in design §3.5 (pending->queued, awaiting-dispatch->claimed, active/closing->executing, review->reviewing, serial-gate/suspended->blocked, done->done, plus the 9th 'failed' the ops vocabulary lacks) supply seven of them; 'cancelled' is the eighth added by design §7.2 Addendum §7-8. Mission status is a DIFFERENT vocabulary (see project-state.schema.json) and the two must not be merged."
+        },
+        "owner": {
+          "type": ["string", "null"],
+          "description": "Worker/agent holding the task. Null or absent while queued."
+        },
+        "dependencies": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Ids of tasks that must reach a terminal state first. .plan-state.json had no dependency field; this is where dependency truth now lives."
+        },
+        "blockers": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/blockerReason" },
+          "description": "Why this task cannot proceed, using the design §3.5 reason convention. The design names this vocabulary for the mission-level blocked_by; the same allowlist is applied here because it is the same vocabulary."
+        },
+        "file_ownership": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Path globs this task owns, fed by /split plan.json affectedPaths (design §7.2 Addendum §7-8). Coordination policy, not a Git lock (design §10). NOTE: §10's exclusive/read-only/unknown tri-state has no field of its own here — the design states the affectedPaths -> file_ownership mapping as a flat list and never gives the tri-state a shape, so none was invented."
+        },
+        "retry_count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Attempts so far. Cost and retry accounting is per Run (design §8.2 §4·§42), so this is a coordination counter, not the economics record."
+        },
+        "created_at": { "type": "string", "format": "date-time" },
+        "updated_at": { "type": "string", "format": "date-time" },
+        "heartbeat_at": {
+          "type": ["string", "null"],
+          "format": "date-time",
+          "description": "Last liveness signal. Null is the honest value today: the measured lane state has no heartbeat emitter (design §3.5). Until one exists the value is derived as max(lane-heartbeat, last-commit) and must carry heartbeat_source alongside (design §3.5)."
+        },
+        "heartbeat_source": {
+          "type": ["string", "null"],
+          "description": "Where heartbeat_at came from while it is a derived value — 'lane-heartbeat' or 'last-commit' per design §3.5. Required in spirit whenever heartbeat_at is derived rather than emitted; the schema cannot tell the two apart, so this stays optional."
+        },
+        "verification": {
+          "description": "How this task is proven done. Accepts the plain command string that plan.json task entries already use, or an object when a result is recorded.",
+          "anyOf": [
+            { "type": "string", "minLength": 1 },
+            {
+              "type": "object",
+              "required": ["command"],
+              "properties": {
+                "command": { "type": "string", "minLength": 1 },
+                "status": {
+                  "type": "string",
+                  "enum": ["unmeasured", "passed", "failed"],
+                  "description": "'unmeasured' is a real state, not a default to hide: a leftover UNMEASURED blocks outcome.md generation (design §3.4)."
+                },
+                "evidence_refs": { "$ref": "#/definitions/evidenceRefs" }
+              },
+              "additionalProperties": false
+            }
+          ]
+        },
+        "evidence_refs": { "$ref": "#/definitions/evidenceRefs" }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "status": { "enum": ["claimed", "executing", "reviewing"] } },
+            "required": ["status"]
+          },
+          "then": { "required": ["owner"] }
+        },
+        {
+          "if": {
+            "properties": { "status": { "const": "blocked" } },
+            "required": ["status"]
+          },
+          "then": {
+            "required": ["blockers"],
+            "properties": { "blockers": { "minItems": 1 } }
+          }
+        }
+      ],
+      "additionalProperties": false
+    }
+  }
+}

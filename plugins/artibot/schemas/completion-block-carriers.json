@@ -1,0 +1,168 @@
+{
+  "$comment": "REGISTRY (data), not a JSON Schema — it shares this directory with *.schema.json because docs/PRD T-48 assigned the path. It fixes WHICH commands must render the 4-line completion block of design §33, and pins the block's literal text so the renderer wave cannot invent its own wording. NOTHING RENDERS THIS BLOCK YET: `renderedYet` is false and tests/firewall/command-output-invariance.test.js proves the block appears in zero command bodies. That proof is the point of this wave — T-48 is required to leave command output byte-unchanged.",
+  "version": 3,
+  "recordedAt": "2026-09-02T07:35:36Z",
+  "source": {
+    "design": ".artibot/guides/v5-design/ARTIBOT-5.0-DESIGN.md",
+    "designAnchor": "§32~§35·§54 row — \"진행률 바 100% 뒤에 \\\"Running independent review…\\\" 단계와 4줄 완료 블록을 team.md·autopilot.md·split.md 5캐리어 공통 렌더로(보고 계약과 같은 parity 게이트 대상)\"",
+    "blockText": ".artibot/guides/v5-design/MODEL-SWITCHING-SCORECARD.md",
+    "blockTextAnchor": "# 33. Progress Bar 100% 최종 Semantics",
+    "prd": "docs/PRD/artibot-v5-구축-phase-0-정본-착지-observe-기록만-행동-변화-0-설계-정본-artibo-ap-20260902-062936-tyc5j4.md",
+    "prdAnchor": "T-48 / 미확인 §: \"5캐리어의 구체 목록이 확정되지 않았다\""
+  },
+  "carrierSetDerivation": {
+    "rule": "설계가 이름으로 명시한 파일 + 진행률 바 템플릿을 실제로 렌더한다고 grep 으로 도출된 파일. 둘 중 어느 쪽으로도 도출되지 않으면 넣지 않는다 — 추측으로 채우지 않는다.",
+    "designNamed": [
+      "team.md",
+      "autopilot.md",
+      "split.md"
+    ],
+    "grepDerivedBeyondDesignNamed": [],
+    "measuredAt": "2026-09-02T07:25:22Z",
+    "denominator": 79,
+    "denominatorScope": "plugins/artibot/commands/*.md",
+    "markerScan": {
+      "M1_📊_작업_진행률": [
+        "team.md"
+      ],
+      "M2_🎉_작업_완료": [
+        "autopilot.md",
+        "team.md"
+      ],
+      "M3_완료_done_전체_total": [
+        "team.md"
+      ],
+      "M4_현재_단계": [
+        "team.md"
+      ],
+      "M5_괘선_40": [
+        "team.md"
+      ],
+      "M6_바_20": [
+        "team.md"
+      ],
+      "M7_render_progress_js": [
+        "autopilot.md",
+        "team.md"
+      ],
+      "M8_Phase_3_5_진행률_렌더링": [
+        "autopilot.md"
+      ]
+    },
+    "note": "리더 지정 마커 M1 은 team.md 1건만 잡는다. autopilot.md 는 M1 리터럴을 갖지 않지만 M2·M7·M8 로 렌더러임이 도출된다(템플릿을 복제하지 않고 team.md 를 참조). split.md 는 설계가 이름으로 명시했으나 M1~M8 전 마커 0건이다 — 설계 명시로만 들어와 있고 측정 근거는 없다."
+  },
+  "canonical": "team.md",
+  "carriers": [
+    {
+      "file": "team.md",
+      "role": "canonical",
+      "progressBar": "literal",
+      "designNamed": true,
+      "grepDerived": true,
+      "grepMarkers": [
+        "M1",
+        "M2",
+        "M3",
+        "M4",
+        "M5",
+        "M6",
+        "M7"
+      ],
+      "progressBarAnchor": "### ★ Phase 3.5: 진행률 렌더링 (MANDATORY — 채팅에 눈에 띄게)",
+      "terminalMoment": "Phase 5 최종 100% 바 직후",
+      "note": "리포 안에서 진행률 박스 템플릿의 유일한 마크다운 원본이다."
+    },
+    {
+      "file": "autopilot.md",
+      "role": "carrier",
+      "progressBar": "by-reference",
+      "designNamed": true,
+      "grepDerived": true,
+      "grepMarkers": [
+        "M2",
+        "M7",
+        "M8"
+      ],
+      "progressBarAnchor": "commands/team.md`의 \"Phase 3.5 진행률 렌더링\" 박스 템플릿을 그대로 쓰되",
+      "terminalMoment": "★ 최종 진행률 100% 렌더 (MANDATORY) 직후 — REPORT phase",
+      "note": "박스 텍스트를 복제하지 않고 team.md 를 가리킨다. 그래서 M1 리터럴은 없지만 렌더 경로다 — 캐리어 간 \"바이트 동일\" 비교는 사본이 하나뿐이라 성립하지 않는다."
+    },
+    {
+      "file": "split.md",
+      "role": "carrier",
+      "progressBar": "none",
+      "designNamed": true,
+      "grepDerived": false,
+      "grepMarkers": [],
+      "progressBarAnchor": null,
+      "terminalMoment": "integrate 배치 랜딩 성공 직후 (완료 판정은 Split-Limb 트레일러)",
+      "note": "설계 명시로만 들어와 있다. M1~M8 전 마커 0건 — 진행률 바를 렌더하지 않는다. 완료 신호가 % 가 아니라 git 트레일러 표라, 렌더 웨이브는 \"Execution ✓ 100%\" 를 무엇으로 채울지 먼저 정해야 한다."
+    }
+  ],
+  "unresolved": {
+    "files": [
+      "sc.md",
+      "ultraplan.md"
+    ],
+    "grade": "미확인",
+    "sameGrade": true,
+    "reason": "보고 계약 parity CARRIERS 에는 있으나 ① 설계가 이름으로 명시하지 않았고 ② 진행률 바 마커 M1~M8 전건 0건이다. 캐리어인지 아닌지 판단할 근거가 없어 캐리어로 넣지 않는다 — 추측으로 채우지 않는다.",
+    "sameGradeNote": "둘은 같은 등급이다. 하나를 캐리어로 올리려면 다른 하나도 같은 근거가 필요하다 — 한쪽만 올리는 것은 근거가 아니라 선호다.",
+    "resolvesTo": "설계의 \"5캐리어\" 가 이 둘을 가리키는지, 다른 두 파일인지, 오기인지 확인되면 그때 캐리어로 옮기거나 이 목록을 지운다.",
+    "reportContractGate": "tests/commands/report-contract-parity.test.js",
+    "reportContractCarriers": [
+      "team.md",
+      "autopilot.md",
+      "ultraplan.md",
+      "sc.md",
+      "split.md"
+    ],
+    "measuredAt": "2026-09-02T07:25:22Z"
+  },
+  "renderer": {
+    "path": "scripts/render-progress.js",
+    "isCarrier": false,
+    "why": "커맨드가 아니라 team.md 박스의 선택적 헬퍼다. 캐리어 목록에는 넣지 않지만 박스 템플릿의 두 번째 리터럴 사본이라 parity 대상이다.",
+    "ruleWidth": 40,
+    "ruleGlyph": "━",
+    "barWidth": 20,
+    "barGlyphs": {
+      "filled": "█",
+      "empty": "░"
+    }
+  },
+  "knownDrift": [
+    {
+      "id": "D1",
+      "what": "완료 박스 2행 꼬리말이 두 사본에서 다르다",
+      "teamMd": "(전 작업 검수 통과)",
+      "renderer": "(전 작업 완료)",
+      "measuredAt": "2026-09-02T07:12:21Z",
+      "status": "기록만 — 고치지 않았다",
+      "why": "T-48 은 commands/*.md 와 scripts/ 를 수정하지 않는다(소유 밖). 두 문구는 뜻도 다르다 — \"검수 통과\"는 리뷰 결과 주장이고 \"완료\"는 실행 사실 주장이라, 어느 쪽으로 통일할지는 오너 판단이다. 게이트는 이 차이를 그대로 고정해 조용히 벌어지는 것만 막는다."
+    }
+  ],
+  "block": {
+    "renderedYet": false,
+    "labelPad": 14,
+    "preamble": [
+      "Execution complete.",
+      "Running independent review..."
+    ],
+    "lines": [
+      "Execution     ✓ 100%",
+      "Review        ✓ Fable 5.1 PASS",
+      "Verification  ✓ PASS",
+      "Outcome       ✓ Saved"
+    ],
+    "terminator": "✓ MISSION COMPLETE",
+    "followedBy": "Final Scorecard (설계 §34) — outcome.md 가 없으면 스코어카드도 없다 (설계 §3.4)"
+  },
+  "designMockMismatch": {
+    "designBarCells": 32,
+    "designBarBracketed": true,
+    "liveBarCells": 20,
+    "liveBarBracketed": false,
+    "resolution": "라이브(20칸·무괄호)를 유지한다. 설계 §33 의 바는 4줄 블록의 선행 조건을 그림으로 보인 삽화이지 바 규격 변경 지시가 아니고, T-48 은 출력을 바꾸지 않는다."
+  }
+}

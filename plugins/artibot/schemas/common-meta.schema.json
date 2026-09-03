@@ -1,0 +1,123 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "common-meta.schema.json",
+  "title": "ArtibotCommonMeta",
+  "description": "Fragment-only schema. It defines the metadata pieces every other v5 artifact schema shares, so that intent / plan / review / outcome / task-graph / lease / receipt / execution-profile / context-package schemas $ref one definition instead of re-declaring the same field five times. THE ROOT VALIDATES NOTHING ON PURPOSE: there are no root-level `type`, `properties` or `required` keywords, so any instance passes the root. Consumers must point at a member of $defs, e.g. { \"$ref\": \"common-meta.schema.json#/$defs/actor\" }. Sources: ADDENDUM-HARDENING.md §5 (based_on + staleness, line 235), §11 (idempotency_key, line 471), §20 (execution profile version/derived_from, line 704), §22 (context package based_on, line 753), §23 (evidence registry / evidence_refs, line 768), §24 (artifact provenance, line 799), §29 (schema_version, line 923), §41 (actor identity, line 1171); ARTIBOT-5.0-DESIGN.md §8.2 §20 (catalog_version). PRD T-19 scope is RESERVE ONLY: these shapes are declared here in Phase 0, enforcement across artifacts is P2. DRAFT-07 CAVEAT: `$defs` is not a draft-07 keyword, it is an unknown keyword that ajv 6 ignores while still resolving `#/$defs/...` JSON pointers (measured 2026-09-02 with ajv 6.12.6). Also draft-07 IGNORES keywords that sit next to a `$ref`, so a consumer writing { \"$ref\": ..., \"description\": ... } silently loses the description; wrap in `allOf` when a sibling keyword must survive.",
+
+  "$defs": {
+    "schema_version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Addendum §29 (line 923). Monotonic integer version of the ARTIFACT SCHEMA, not of the artifact instance (that is `revision`). Present so a v1 state file can be read and migrated by v2 code instead of breaking the project. §29's only literal is `schema_version: 1`, so this is an integer, not a semver string."
+    },
+
+    "revision": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Addendum §5 (line 235) and §24 (line 799). Monotonic revision counter of one artifact instance. Starts at 1 on creation. This is what the *_revision members of based_on point at."
+    },
+
+    "actor": {
+      "type": "object",
+      "required": ["type", "id"],
+      "additionalProperties": false,
+      "description": "Addendum §41 (line 1171). Attribution for an event or an artifact change. Both members are required: an actor with no id cannot be audited, and an id with no type cannot be authorised later. Becomes the basis of the future permission model (§42).",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["human", "agent", "runtime"],
+          "description": "Allowlist, closed on purpose (a denylist would fail open for a fourth actor kind added later). `human` = a person, `agent` = a spawned subagent or teammate, `runtime` = the Artibot runtime acting with no agent in the loop (documentation side effects, §6)."
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Stable identifier within its type: a user identity for `human`, an agent/teammate name for `agent`, a runtime component name for `runtime`."
+        }
+      }
+    },
+
+    "based_on": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "description": "Addendum §5 (line 235), reused verbatim by §22 for context packages (line 753). Records which upstream revisions an artifact was built from, so the runtime — not the agent — can decide staleness. §5's propagation rule: when intent 2 -> 3, every artifact whose based_on.intent_revision is still 2 becomes Plan=STALE / Review=INVALID / Outcome=NOT ACCEPTABLE. All three members are optional because the set depends on the artifact (a plan has only intent_revision; a review has intent+plan; an outcome has all three; an intent has no based_on at all and simply omits the field). `minProperties: 1` because a present-but-empty based_on asserts nothing while reading as if a dependency had been recorded.",
+      "properties": {
+        "intent_revision": { "$ref": "#/$defs/revision" },
+        "plan_revision": { "$ref": "#/$defs/revision" },
+        "review_revision": { "$ref": "#/$defs/revision" }
+      }
+    },
+
+    "derived_from": {
+      "description": "Addendum §20 (line 704). Same shape as based_on but with intent_revision REQUIRED, and under the distinct key name the design uses for the execution profile. Kept separate from based_on rather than aliased because §20 gives it a different key name in the artifact, and an execution profile with no intent revision has no contract to be stale against. Draft-07 ignores keywords sibling to `$ref`, so the extra `required` is applied through allOf.",
+      "allOf": [
+        { "$ref": "#/$defs/based_on" },
+        { "required": ["intent_revision"] }
+      ]
+    },
+
+    "execution_profile_meta": {
+      "type": "object",
+      "required": ["version", "derived_from"],
+      "additionalProperties": false,
+      "description": "Addendum §20 (line 704). The two version-control members of an execution profile, offered as one piece so execution-profile.schema.json (T-18) can $ref it next to its own 8 behaviour keys. Deliberately does NOT contain those 8 keys — this schema owns metadata only.",
+      "properties": {
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Version of the execution profile instance itself (§20 literal: `version: 1`)."
+        },
+        "derived_from": { "$ref": "#/$defs/derived_from" }
+      }
+    },
+
+    "catalog_version": {
+      "type": "string",
+      "minLength": 1,
+      "description": "ARTIBOT-5.0-DESIGN.md §8.2 §20 and MODEL-SWITCHING-SCORECARD.md:1146. Version stamp of the model catalog that a routing/attempt decision was made against, so a scorecard stays reproducible after the catalog changes. UNCONSTRAINED BEYOND non-empty ON PURPOSE: the only literal in the design is the date `2026-09-02`, but the constant is owned by T-11 and does not exist yet (measured 2026-09-02: no `catalog_version` / `catalogVersion` key in plugins/artibot/artibot.config.json). Pinning a `^\\d{4}-\\d{2}-\\d{2}$` pattern here would fail closed if T-11 lands a semver instead. Tighten this once the constant exists."
+    },
+
+    "idempotency_key": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*(:[A-Za-z0-9._-]+)+$",
+      "description": "Addendum §11 (line 471). Lets a retried runtime operation be recognised as the same operation, so autonomous recovery cannot duplicate an artifact. §11's only literal is `mission:M-001:review:rev-2`; the T-19 brief writes the same shape as `mission:M:review:rev-2`. Both match. The pattern is deliberately kept GENERAL (a lowercase scope segment followed by one or more colon-separated segments) rather than hard-coded to `mission:<id>:review:rev-<n>`, because §11 names five operations that all need keys — mission.created, task.claimed, review.saved, artifact.updated, ledger.append — and only one of them has a documented literal. Over-fitting to that one literal would reject `mission:M-001:task:T-03:claim` for no stated reason. What it does reject: empty strings, whitespace, a bare single segment with no colon, leading or trailing colons, empty inner segments, and an uppercase or digit-leading scope."
+    },
+
+    "evidence_ref": {
+      "type": "string",
+      "pattern": "^E-[0-9]{3,}$",
+      "description": "Addendum §23 (line 768). A single evidence registry id. §23's literals are `E-001` and `E-008`, i.e. zero-padded to three digits; `{3,}` keeps the padding as the floor while allowing the registry to grow past E-999 without a schema change."
+    },
+
+    "evidence_refs": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/evidence_ref" },
+      "description": "Addendum §23 (line 768). Evidence is referenced by id instead of being copy-pasted into every markdown artifact, which is what makes a review reproducible and keeps context cost down. An empty array is allowed and means 'no evidence cited'; `uniqueItems` because citing E-001 twice adds nothing and usually signals a merge bug."
+    },
+
+    "provenance": {
+      "type": "object",
+      "required": ["created_by", "updated_by", "created_at", "updated_at", "revision"],
+      "additionalProperties": false,
+      "description": "Addendum §24 (line 799): the minimum metadata every artifact carries, answering 'who changed this and why' in a multi-user, multi-agent repo. §24 lists seven members. Five are required here because they are always well defined — on creation updated_by equals created_by and updated_at equals created_at. The other two are OPTIONAL because they are structurally absent for root artifacts: an intent is based on nothing (§5 shows based_on only from plan downward), and an artifact that cites no evidence has no evidence_refs (§23). Requiring either would force callers to invent an empty value, which is worse than an absent one.",
+      "properties": {
+        "created_by": { "$ref": "#/$defs/actor" },
+        "updated_by": { "$ref": "#/$defs/actor" },
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO-8601 instant the artifact was first written. Same string convention as lease.schema.json."
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO-8601 instant of the most recent change. Equals created_at until the first update."
+        },
+        "revision": { "$ref": "#/$defs/revision" },
+        "based_on": { "$ref": "#/$defs/based_on" },
+        "evidence_refs": { "$ref": "#/$defs/evidence_refs" }
+      }
+    }
+  }
+}

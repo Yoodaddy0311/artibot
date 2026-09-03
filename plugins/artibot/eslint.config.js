@@ -81,15 +81,41 @@ export default [
       'no-restricted-imports': ['error', {
         patterns: [
           {
+            // Every directory registered by an L2/L3/L4 block below must also
+            // appear here, plus runtime (L5, which has no block of its own
+            // because nothing sits above it). Registration and prohibition are
+            // two separate hand-maintained lists, so one can drift from the
+            // other with nothing visibly wrong: a directory registered below
+            // but absent here is a directory lib/core may import freely.
+            //
+            // Measured 2026-09-02, before this edit: the enumeration held 23
+            // entries while 24 L2+ directories existed on disk. The missing one
+            // was `supervisor` — `lib/core` importing `../supervisor/*` matched
+            // no pattern and so produced no error. (The audit that reported it
+            // named `context` as missing too; `context` was in fact already listed,
+            // so supervisor was the only real hole.) The drift is now checked
+            // mechanically instead of by eye: see
+            // tests/firewall/layer-registration-coverage.test.js, describe
+            // '상위 레이어 금지 열거 완전성', which derives the required set from
+            // the files[] of the blocks below rather than trusting this list.
             group: [
-              '**/adapters/**', '**/autopilot/**', '**/context/**',
-              '**/dispatcher/**', '**/genesis/**', '**/git/**',
-              '**/handoff/**', '**/intent/**',
-              '**/mcp/**', '**/observability/**', '**/orchestration/**',
-              '**/planning/**', '**/privacy/**', '**/release/**', '**/sdk/**',
-              '**/security/**', '**/swarm/**', '**/system/**', '**/tui/**',
-              '**/visual/**',
-              '**/learning/**', '**/cognitive/**', '**/runtime/**',
+              // L2 Auxiliary
+              '**/adapters/**', '**/autopilot/**', '**/checkpoint/**',
+              '**/context/**', '**/dispatcher/**', '**/economics/**',
+              '**/genesis/**', '**/git/**', '**/intent/**', '**/mcp/**',
+              '**/mission/**', '**/observability/**', '**/orchestration/**',
+              '**/planning/**', '**/privacy/**', '**/project-state/**',
+              '**/recovery/**', '**/release/**', '**/replay/**',
+              '**/review/**', '**/routing/**', '**/scorecard/**',
+              '**/sdk/**', '**/security/**', '**/supervisor/**',
+              '**/swarm/**', '**/system/**', '**/tui/**',
+              '**/verification/**', '**/visual/**',
+              // L3 Learning
+              '**/handoff/**', '**/learning/**',
+              // L4 Cognitive
+              '**/cognitive/**', '**/topology/**',
+              // L5 Runtime
+              '**/runtime/**',
             ],
             message:
               'Layer violation: lib/core (L1) must not import from a higher layer. Upper layers import lower only (5->4->3->2->1).',
@@ -112,31 +138,79 @@ export default [
     // non-breaking today and forward-protective tomorrow.
     // tests/firewall/layer-registration-coverage.test.js keeps this list from
     // silently missing the next new directory.
+    //
+    // The ten v5 Phase 0 directories (checkpoint, economics, mission,
+    // project-state, recovery, replay, review, routing, scorecard,
+    // verification — added 2026-09-02 per PRD T-10) are registered here
+    // BEFORE they exist on disk. That ordering is deliberate: eslint matches
+    // these globs against file paths, so a pattern with no files behind it is
+    // inert, whereas the reverse order leaves a window in which a new
+    // directory is created and linted with zero layer rules applied.
+    // Design §1-8 places all ten at L2 on one stated ground: each is a pure
+    // module that receives its effects through injected ports, so its
+    // dependency ceiling is lib/core. If one later grows an edge into
+    // learning/ or cognitive/, the correct move is to move the module, not to
+    // re-register the directory at a higher layer.
+    //
+    // "Pure" there is narrower than it sounds, and design appendix 0-2 §1-8
+    // states the boundary rather than leaving it to be inferred: a module that
+    // OWNS a store may call `node:fs` directly — the project-state store and
+    // its journal, and economics/usage-receipt, are the named cases. Injected
+    // ports are for upward calls, config, the clock, and git, not for every
+    // effect. Reading "pure" as "zero fs" would make those modules look like
+    // violations of a rule this file does not actually enforce: eslint checks
+    // only the layer of an import specifier, so `node:fs` is invisible to it
+    // either way. The distinction lives here so nobody rewrites a storage
+    // owner to take an fs port in the belief that this block demanded it.
     files: [
       'lib/adapters/**/*.{js,mjs}', 'lib/autopilot/**/*.{js,mjs}',
+      'lib/checkpoint/**/*.{js,mjs}',
       // context/ (added 2026-09-02): PostCompact rehydration bundle builder
       // (vNext PR-CX01). Reads hook snapshots + handoff pointer; imports
       // lib/core only — same L2 profile as handoff-adjacent services.
       'lib/context/**/*.{js,mjs}',
       'lib/dispatcher/**/*.{js,mjs}',
+      'lib/economics/**/*.{js,mjs}',
       'lib/genesis/**/*.{js,mjs}', 'lib/git/**/*.{js,mjs}',
       'lib/intent/**/*.{js,mjs}', 'lib/mcp/**/*.{js,mjs}',
+      'lib/mission/**/*.{js,mjs}',
       'lib/observability/**/*.{js,mjs}', 'lib/orchestration/**/*.{js,mjs}',
       'lib/planning/**/*.{js,mjs}', 'lib/privacy/**/*.{js,mjs}',
-      'lib/release/**/*.{js,mjs}', 'lib/sdk/**/*.{js,mjs}',
+      'lib/project-state/**/*.{js,mjs}',
+      'lib/recovery/**/*.{js,mjs}',
+      'lib/release/**/*.{js,mjs}',
+      'lib/replay/**/*.{js,mjs}', 'lib/review/**/*.{js,mjs}',
+      'lib/routing/**/*.{js,mjs}', 'lib/scorecard/**/*.{js,mjs}',
+      'lib/sdk/**/*.{js,mjs}',
       'lib/security/**/*.{js,mjs}', 'lib/swarm/**/*.{js,mjs}',
       // supervisor/ (added 2026-09-02): `/split` observe-only control plane
       // (event reducer · run store · lane monitor). Imports lib/git and
       // lib/observability only — same L2 profile as git/ and observability/.
       'lib/supervisor/**/*.{js,mjs}',
       'lib/system/**/*.{js,mjs}', 'lib/tui/**/*.{js,mjs}',
+      'lib/verification/**/*.{js,mjs}',
       'lib/visual/**/*.{js,mjs}',
     ],
     rules: {
       'no-restricted-imports': ['error', {
         patterns: [
           {
-            group: ['**/learning/**', '**/cognitive/**', '**/runtime/**'],
+            // topology/ joins cognitive/ at L4 (see the L4 block below), so it
+            // belongs in every group that already names cognitive. Omitting it
+            // would let an L2 module import L4 through the newer of the two
+            // directory names while the older one stayed blocked.
+            // handoff/ is the other half of L3 (see the L3 block below, where
+            // it sits beside learning/). It was absent from this group while
+            // learning/ was present, so an L2 module could import ../handoff/*
+            // with no rule matching — the same shape of hole as the missing
+            // supervisor/ entry at L1, found by the same completeness test.
+            // Measured 2026-09-02: zero L2 modules import handoff/, so adding
+            // it reports no existing code and only closes the future path.
+            group: [
+              '**/handoff/**', '**/learning/**',
+              '**/cognitive/**', '**/topology/**',
+              '**/runtime/**',
+            ],
             message:
               'Layer violation: lib auxiliary (L2) must not import from the learning (L3), cognitive (L4), or runtime (L5) layers. Upper layers import lower only (5->4->3->2->1).',
           },
@@ -154,7 +228,7 @@ export default [
       'no-restricted-imports': ['error', {
         patterns: [
           {
-            group: ['**/cognitive/**', '**/runtime/**'],
+            group: ['**/cognitive/**', '**/topology/**', '**/runtime/**'],
             message:
               'Layer violation: lib/learning (L3) must not import from the cognitive (L4) or runtime (L5) layers. Upper layers import lower only (5->4->3->2->1).',
           },
@@ -164,7 +238,39 @@ export default [
   },
   {
     // L4 Cognitive: must not import from L5 Runtime.
-    files: ['lib/cognitive/**/*.{js,mjs}'],
+    //
+    // topology/ (registered 2026-09-02 per PRD T-10, ahead of the directory
+    // existing — see the L2 block for why registration leads creation). This
+    // block therefore now holds two directories, and 'L4 Cognitive' names the
+    // layer, not the directory.
+    //
+    // Its placement is a decision, not a forced consequence. Measured
+    // 2026-09-03: every lib edge out of topology/ lands on L2 or L1, and
+    // nothing here imports cognitive/ or learning/. The code is the canonical
+    // list — this comment deliberately does not enumerate the edges.
+    //
+    // It used to. The enumeration was rewritten once to correct it and was
+    // stale again within the hour, because a module moved and a new file
+    // added an edge the list never had. An edge list in a comment decays on
+    // someone else's schedule, and a decayed list is worse than none: it
+    // reads as measured fact while being wrong. The invariant above survives
+    // those moves; the addresses do not.
+    //
+    // So the directory's actual dependency ceiling is L2, and L2 would
+    // satisfy every existing rule — an L2->L2 edge is a sibling import, the
+    // same shape the L3 block below already permits for handoff->learning.
+    // Do not read this registration as "topology cannot be L2"; an earlier
+    // version of this comment claimed the router consumed buildWorkflowPlan
+    // from lib/cognitive, and that edge does not exist in the code.
+    //
+    // L4 is kept because topology/ is the tier that *composes* the services it
+    // calls into a routing judgement, and because it costs nothing today: no
+    // lib module imports topology/ at all (measured 2026-09-03, repo-wide
+    // grep), so placing it above L2 forbids no edge that anyone has. The bill
+    // comes due only if an L2 module ever needs split-state — that import
+    // would be upward and would fail. Revisit the placement at that moment
+    // rather than widening the rule then.
+    files: ['lib/cognitive/**/*.{js,mjs}', 'lib/topology/**/*.{js,mjs}'],
     rules: {
       'no-restricted-imports': ['error', {
         patterns: [

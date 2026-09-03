@@ -1,0 +1,575 @@
+{
+  "$id": "https://artibot.dev/schemas/ledger-events.allowlist.json",
+  "title": "ArtibotLedgerEventAllowlist",
+  "version": 1,
+  "description": "The single source of truth for the central run ledger's event vocabulary (design ARTIBOT-5.0-DESIGN.md §3.6 '어휘 통일표'; lane 6 v5-lane6-ledger.md §5-② + §2.3). This is DATA, not a JSON Schema: `ledger-envelope.schema.json` governs the envelope, this file governs which `event` names exist and what each one's `data` must carry. Deliberately an ALLOWLIST and not a denylist -- a denylist is fail-open for every event name invented later (verification-discipline §8). An event name absent from `events` is unregistered: the writer (T-20 lib/runtime/event-writer.js) does not append it, and appends a `ledger.rejected` line carrying the original instead, then continues (design §3.6 'ledger.rejected 로 기록 후 무시'). `ledger.rejected` is itself registered here, so rejection is recorded rather than silent, and /doctor Check 8-⑤ counts those lines.",
+  "notes": {
+    "sources": "An event's `sources` lists which of the 8 envelope `source` values may emit it. It is always a subset of the enum in ledger-envelope.schema.json#/properties/source, which itself mirrors lib/supervisor/event-types.js:57-66 verbatim. `sources` omitted means any of the 8 -- used where the design names no emitter.",
+    "required": "`required` lists keys that must be present inside the envelope's `data` object. Fields already carried by the ENVELOPE (mission_id, action_id, task_id, run_id, session_id, worker, model, routing_epoch_id, idempotency_key, actor) are never repeated in `data`. Does not apply to events carrying `data_schema` -- see that note.",
+    "unspecified_required": "`\"unspecified_required\": true` marks an event the design registers by name but for which no source document states its required `data` fields. Its empty `required` is a KNOWN GAP, not a deliberate zero -- so a reader can tell the two apart instead of mistaking absence of a rule for a rule of absence. Fill these in when the owning lane specifies them.",
+    "enum_ref": "A `fields` entry with `enum_ref` constrains that key's value to `enums[<ref>]` when the key is present. Presence itself is governed by `required`.",
+    "line_cap": "`limits.line_max_bytes` is stated here so the writer reads the number from one place. It is NOT enforced by either schema: JSON Schema cannot measure the serialized byte length of the document validating against it. T-20 measures Buffer.byteLength(line, 'utf8') before append and moves the overflow into data.evidence_refs (design §3.6).",
+    "required_envelope": "`required_envelope` lists ENVELOPE keys (not data keys) that are optional in general but mandatory for this event -- e.g. review.completed and usage.receipt must carry the envelope `model`, worker.claimed/released must carry the envelope `worker`. Lane 6 §5-② lists these inside the event's required fields; they live at the envelope level here so one field has exactly one home, per the `required` note above.",
+    "data_schema": "`data_schema` names a sibling schema file in schemas/ that is the canonical contract for this event's entire `data` object, replacing `required`/`fields`. Introduced by the T-15 ↔ T-16 leader ruling for the three receipt events: design §8.2 makes the receipt AND the event data the same object, so the receipt schema is the one place that defines it. The writer validates data against that file; this allowlist does not restate its keys. Two consequences: a receipt is a self-contained document and MAY repeat envelope fields such as mission_id and session_id (the `required` note's no-duplication rule does not apply to these three), and any enum the receipt owns -- route-receipt's five-value decision.type, for instance -- is NOT copied into `enums` here."
+  },
+  "limits": {
+    "line_max_bytes": 4096,
+    "overflow_field": "evidence_refs"
+  },
+  "enums": {
+    "topology_mode": [
+      "solo",
+      "subagent",
+      "team",
+      "autopilot",
+      "autopilot_fast",
+      "split"
+    ],
+    "plan_mode": [
+      "plan",
+      "ultraplan"
+    ],
+    "review_verdict": [
+      "PASS",
+      "REPAIR_REQUIRED",
+      "REPLAN_REQUIRED",
+      "INTENT_REVIEW_REQUIRED",
+      "BLOCK"
+    ],
+    "verify_result": [
+      "pass",
+      "fail",
+      "unmeasured"
+    ],
+    "mission_status": [
+      "queued",
+      "planning",
+      "executing",
+      "blocked",
+      "reviewing",
+      "completed",
+      "failed"
+    ],
+    "human_resolved_kind": [
+      "correction",
+      "decision",
+      "approval"
+    ],
+    "memory_kind": [
+      "architecture_decision",
+      "failure_pattern",
+      "convention",
+      "user_preference",
+      "project_preference",
+      "tool_constraint"
+    ]
+  },
+  "enum_sources": {
+    "topology_mode": "run-ledger.schema.yaml:17 (6종, verbatim).",
+    "plan_mode": "lane 6 §5-② row 3.",
+    "review_verdict": "design §3.4 'verdict 스키마 v2 = PASS|REPAIR_REQUIRED|REPLAN_REQUIRED|INTENT_REVIEW_REQUIRED|BLOCK (Hardening §15 로 확정)'. The vocabulary and the adapter from the 4 legacy vocabularies are owned by T-17; this file only records which values a ledger line may carry.",
+    "verify_result": "run-ledger.schema.yaml:41 gives pass|fail. `unmeasured` is added from design §3.4 'unified-verifier status: PASS|FAIL|UNMEASURED, UNMEASURED 가 1급 상태 -- 재지 못한 층을 PASS 라 부르지 않는다'. Without it an unmeasured layer has no representable value and would have to be written as a false pass or dropped.",
+    "mission_status": "package-v1.1/16_STATE_SCHEMA.yaml:27-35 (7종). Distinct from the Task Graph's 8 states (v1.1 7 + cancelled, Hardening §7-8), which T-14 owns.",
+    "human_resolved_kind": "design §8.2 §19 'human.resolved{kind: correction|decision|approval}'. Scheduled for Shadow (§8.4), so declared but not required here.",
+    "memory_kind": "lane 6 §5-④, from artifact-governance 08 '승격 대상'. The non-promotable list (transient logs, one-off retries, stale plans, provisional guesses) has no kind, so it is structurally unrepresentable rather than merely discouraged."
+  },
+  "events": {
+    "mission.created": {
+      "required": [
+        "title",
+        "intent_revision"
+      ],
+      "sources": [
+        "hook"
+      ],
+      "v1_1_example": true,
+      "spec": "lane 6 §5-② #1. Emitted at the Intent Detection gate in scripts/hooks/runtime-prompt.js. fold start point; a mission with no mission.created is an orphan (/doctor Check 8-③)."
+    },
+    "mission.candidate_deferred": {
+      "required": [],
+      "unspecified_required": true,
+      "fields": {
+        "reason": {
+          "type": "string"
+        },
+        "signals": {
+          "type": "array"
+        }
+      },
+      "sources": [
+        "hook"
+      ],
+      "spec": "design §3.1 '판정 불가면 mission 을 만들지 않고 원장에 mission-candidate-deferred'. Written with the hyphen there and normalized to the dotted vocabulary here. Carries the session fallback mission_id (M-YYYYMMDD-S<sid8>), because by definition no mission was issued. Required data fields are not stated in any source document -- lane 1 owns the substantive gate S1~S6."
+    },
+    "intent.detected": {
+      "required": [
+        "type",
+        "confidence"
+      ],
+      "sources": [
+        "hook"
+      ],
+      "spec": "lane 6 §5-② #2. Replaces decision-events `routing-classified`, whose directory has never been created."
+    },
+    "plan.revised": {
+      "required": [
+        "revision",
+        "mode"
+      ],
+      "fields": {
+        "mode": {
+          "enum_ref": "plan_mode"
+        }
+      },
+      "sources": [
+        "worker",
+        "hook"
+      ],
+      "v1_1_example": true,
+      "spec": "lane 6 §5-② #3. fold takes the maximum revision."
+    },
+    "route.selected": {
+      "data_schema": "route-receipt.schema.json",
+      "sources": [
+        "scheduler",
+        "hook"
+      ],
+      "spec": "design §8.2 §3·§40 'Route Receipt = 원장 route.selected 이벤트의 data. 별도 파일 아님'. Leader ruling (T-15 ↔ T-16): the receipt schema is the canonical data contract, and lane 6 §5-②'s flat keys (model, effort, reason, decision) are a pre-§8 draft and are retired. Note the shape moved too -- the receipt nests decision as decision.type, and owns the five-value vocabulary itself. Phase 0: the SubagentStart hook records a shadow receipt at spawn time (scripts/hooks/subagent-handler.js, measured 2026-09-02 18:20 -- builds the shadow RouteReceipt at :272, sets shadow_of at :298, appends at :340), so `hook` is listed alongside `scheduler`. The hook had been setting source:'scheduler' because this list allowed nothing else, and labelling the emitter as something it is not to satisfy a schema is the defect, not the fix -- the vocabulary follows the fact (T-37 precedent). `scheduler` stays for the cognitive-router path that writes the same event from Canary onward."
+    },
+    "model.switched": {
+      "required": [
+        "from",
+        "to",
+        "reason"
+      ],
+      "sources": [
+        "scheduler"
+      ],
+      "v1_1_example": true,
+      "spec": "lane 6 §5-② #5. Feeds Model Switch Cost. Recorded alongside route.selected{decision:'switch'} rather than instead of it (decision D7)."
+    },
+    "topology.selected": {
+      "required": [
+        "mode"
+      ],
+      "fields": {
+        "mode": {
+          "enum_ref": "topology_mode"
+        }
+      },
+      "sources": [
+        "scheduler",
+        "supervisor"
+      ],
+      "spec": "lane 6 §5-② #6. Emitted by cognitive-router, autopilot, or split dispatch."
+    },
+    "worker.claimed": {
+      "required": [
+        "agent_type",
+        "model_tier",
+        "owns"
+      ],
+      "required_envelope": [
+        "worker"
+      ],
+      "fields": {
+        "owns": {
+          "type": "array"
+        }
+      },
+      "sources": [
+        "hook",
+        "supervisor"
+      ],
+      "v1_1_example": true,
+      "spec": "lane 6 §5-② #7. Written beside recordSpawn in subagent-handler. `owns[]` is the file-ownership declaration (Hardening §10: a coordination policy, not a git lock)."
+    },
+    "worker.released": {
+      "required": [],
+      "required_envelope": [
+        "worker"
+      ],
+      "sources": [
+        "hook",
+        "supervisor"
+      ],
+      "spec": "lane 6 §5-② #7 pairs claimed with released. Absent from the task brief's event list; registered here because the pair is what makes an unreleased worker detectable."
+    },
+    "task.claimed": {
+      "required": [
+        "owner",
+        "expires_at"
+      ],
+      "sources": [
+        "supervisor",
+        "worker"
+      ],
+      "spec": "design §7.2 §9 Claim/Lease/Heartbeat, lease{owner, acquired_at, expires_at, heartbeat_at}. Only claimed/released reach the central ledger; heartbeats update the store only, so a high-frequency event cannot break mission-unit rotation (decision D11)."
+    },
+    "task.released": {
+      "required": [
+        "owner"
+      ],
+      "sources": [
+        "supervisor",
+        "worker"
+      ],
+      "spec": "design §7.2 §9. Before GA, reclaiming an expired lease needs human confirmation."
+    },
+    "context.compiled": {
+      "data_schema": "context-receipt.schema.json",
+      "sources": [
+        "worker"
+      ],
+      "spec": "design §8.2 §8·§41 Context Receipt. Leader ruling (T-15 ↔ T-16): context-receipt.schema.json is the canonical data contract; lane 6 §5-②'s flat keys (supplied_tokens, cache_hit_tokens, evidence_refs) are retired. First writer is the existing lib/context/rehydration.js, which takes the ledger writer as an injected port rather than importing it (layer rule)."
+    },
+    "usage.receipt": {
+      "data_schema": "attempt-receipt.schema.json",
+      "sources": [
+        "worker"
+      ],
+      "spec": "design §8.2 §4·§42 'usage.receipt 이벤트 = Attempt Receipt', Run-scoped. Leader ruling (T-15 ↔ T-16): attempt-receipt.schema.json is the canonical data contract; lane 6 §5-②'s flat keys (model, fresh_input, cached_input, output, thinking, cost_usd) are retired, and exact model identity now lives in the receipt's model_identity object rather than a bare model string. lib/economics/usage-receipt.js remains the ONLY writer, so the same spend is never counted twice."
+    },
+    "tool.used": {
+      "required": [
+        "tool",
+        "ok",
+        "duration_ms"
+      ],
+      "sources": [
+        "hook"
+      ],
+      "spec": "lane 6 §5-② #10."
+    },
+    "retry.scheduled": {
+      "required": [
+        "attempt",
+        "reason"
+      ],
+      "sources": [
+        "supervisor",
+        "scheduler"
+      ],
+      "spec": "lane 6 §5-② #11. execution.retries is one of the three v1.0 run-ledger fields with no recording site anywhere today, so Retry Waste Ratio and Success@1 both start here."
+    },
+    "review.requested": {
+      "required": [],
+      "unspecified_required": true,
+      "fields": {
+        "reviewer": {
+          "type": "string"
+        },
+        "intent_revision": {
+          "type": "integer"
+        }
+      },
+      "sources": [
+        "reviewer",
+        "supervisor"
+      ],
+      "spec": "lane 6 §5-② #12 states required fields for the completed half of the pair only."
+    },
+    "review.completed": {
+      "required": [
+        "verdict",
+        "findings_ref"
+      ],
+      "required_envelope": [
+        "model"
+      ],
+      "fields": {
+        "verdict": {
+          "enum_ref": "review_verdict"
+        },
+        "verification_id": {
+          "type": "string"
+        }
+      },
+      "sources": [
+        "reviewer"
+      ],
+      "v1_1_example": true,
+      "spec": "lane 6 §5-② #12 with the verdict vocabulary taken from design §3.4 v2 (5 values) rather than lane 6's 3. The v1.1 §11 example writes lowercase 'pass', which is one of the 4 legacy vocabularies T-17's adapter folds into this one. verification_id joins review.md, outcome.md and the ledger (design §3.4 §5.5)."
+    },
+    "verify.completed": {
+      "required": [
+        "result",
+        "evidence"
+      ],
+      "fields": {
+        "result": {
+          "enum_ref": "verify_result"
+        },
+        "layer": {
+          "type": "string",
+          "description": "Which verification layer produced this line. Optional, and deliberately carries no enum_ref: the layer vocabulary is owned by lib/verification/unified-verifier.js and duplicating it here would create a second source of truth that drifts."
+        },
+        "evidence": {
+          "type": "array"
+        },
+        "verification_id": {
+          "type": "string"
+        }
+      },
+      "sources": [
+        "gate"
+      ],
+      "spec": "lane 6 §5-② #13. Written by dev-verify-gate / unified-verifier. The optional `layer` field (T-51 review #5) names the layer a line came from; its vocabulary lives in `lib/verification/unified-verifier.js` (exported `LAYERS`, measured at :98 on 2026-09-02 17:45 = deterministic·behavioral·operational) and is NOT restated here -- that module is free to add a layer without an allowlist edit. `required` is unchanged: a verifier that reports no layer is still a valid line, so adding the field cannot reject anything that was accepted before."
+    },
+    "human.asked": {
+      "required": [
+        "question_id"
+      ],
+      "fields": {
+        "question_id": {
+          "type": "string",
+          "description": "Opaque id of the question, identical on the human.asked line it answers. This is the join key for question-to-resolution pairing."
+        },
+        "gate": {
+          "type": "string"
+        }
+      },
+      "sources": [
+        "hook"
+      ],
+      "spec": "lane 6 §5-② #14 + design §8.2 §19. Written by the HOOK at the point it blocks (pre-bash / pre-write), not by the model -- so the model cannot omit it. That asymmetry is the point: a human.asked with no matching human.resolved is a detectable signature of 'reconstructed a guess instead of asking', and it blocks outcome.md generation (design §3.4 OD-5)."
+    },
+    "human.resolved": {
+      "required": [
+        "decision"
+      ],
+      "fields": {
+        "question_id": {
+          "type": "string",
+          "description": "Opaque id of the question, identical on the human.asked line it answers. This is the join key for question-to-resolution pairing."
+        },
+        "kind": {
+          "enum_ref": "human_resolved_kind"
+        }
+      },
+      "sources": [
+        "human",
+        "hook"
+      ],
+      "spec": "lane 6 §5-② #14 requires `decision`. The task brief writes human.resolved{kind}; `kind` is declared with its enum but left OPTIONAL because design §8.4 schedules the 3-way split for Shadow, not Observe. Written by the model right after it receives an AskUserQuestion answer. T-40 measured that human.asked requires question_id while human.resolved did not even declare it, leaving asked/resolved pairs unjoinable; question_id is declared here as OPTIONAL so the join becomes expressible without widening what an existing writer may omit."
+    },
+    "budget.warning": {
+      "required": [
+        "used",
+        "limit"
+      ],
+      "sources": [
+        "scheduler",
+        "supervisor"
+      ],
+      "spec": "lane 6 §5-② #15."
+    },
+    "budget.exhausted": {
+      "required": [
+        "used",
+        "limit"
+      ],
+      "sources": [
+        "scheduler",
+        "supervisor"
+      ],
+      "spec": "lane 6 §5-② #15."
+    },
+    "phase.started": {
+      "required": [
+        "segment"
+      ],
+      "fields": {
+        "human_wait_ms": {
+          "type": "integer"
+        }
+      },
+      "sources": [
+        "supervisor",
+        "scheduler"
+      ],
+      "spec": "lane 6 §5-② #16. split-telemetry dual-writes here."
+    },
+    "phase.ended": {
+      "required": [
+        "segment"
+      ],
+      "fields": {
+        "human_wait_ms": {
+          "type": "integer"
+        }
+      },
+      "sources": [
+        "supervisor",
+        "scheduler"
+      ],
+      "spec": "lane 6 §5-② #16. human_wait_ms is what separates wall-clock from working time."
+    },
+    "wallclock.started": {
+      "required": [],
+      "unspecified_required": true,
+      "fields": {
+        "segment": {
+          "type": "string"
+        }
+      },
+      "sources": [
+        "supervisor",
+        "scheduler"
+      ],
+      "spec": "design §3.6 'phase.*·wallclock.* <- split-telemetry dual-write' and lane 6 §2.3 keep wallclock as its own pair; lane 6 §5-② instead folds split's wall-clock-* into phase.*. Following the design, which is the PRD's canonical source. Registering it costs one allowlist entry; omitting it would make the writer reject a line the design says to write."
+    },
+    "wallclock.ended": {
+      "required": [],
+      "unspecified_required": true,
+      "fields": {
+        "segment": {
+          "type": "string"
+        }
+      },
+      "sources": [
+        "supervisor",
+        "scheduler"
+      ],
+      "spec": "design §3.6 + lane 6 §2.3. See wallclock.started."
+    },
+    "state.updated": {
+      "required": [
+        "state_version",
+        "status",
+        "reason"
+      ],
+      "fields": {
+        "status": {
+          "enum_ref": "mission_status"
+        },
+        "state_version": {
+          "type": "integer"
+        }
+      },
+      "spec": "lane 6 §5-② #17. Every writer that touches the state store appends this inside the same transaction, append FIRST and projection second. state_version increases monotonically, so a GAP in the numbering is direct evidence of a lost update -- which is how the decision-trail class of loss stops being something you only find by measuring for it (/doctor Check 8-②)."
+    },
+    "mission.checkpointed": {
+      "required": [],
+      "unspecified_required": true,
+      "fields": {
+        "checkpoint_id": {
+          "type": "string"
+        },
+        "trigger": {
+          "type": "string"
+        }
+      },
+      "sources": [
+        "supervisor",
+        "scheduler"
+      ],
+      "spec": "design §8.2 §21~§26 Checkpoint, written only at meaningful transitions (task completed, epoch completed, plan revised, human decision, before high risk, /save). The design specifies the Store interface (save/load/latest/list) but no event field list."
+    },
+    "mission.completed": {
+      "required": [
+        "accepted",
+        "evidence_refs"
+      ],
+      "fields": {
+        "accepted": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "evidence_refs": {
+          "type": "array"
+        },
+        "supersedes": {
+          "type": "string"
+        },
+        "verification_id": {
+          "type": "string"
+        }
+      },
+      "sources": [
+        "hook",
+        "scheduler"
+      ],
+      "v1_1_example": true,
+      "spec": "lane 6 §5-② #18. accepted is deliberately three-valued: the writer appends {accepted:null} first and, when the observation window closes, APPENDS a second line with the verdict plus `supersedes` rather than rewriting the first (append-only; the reader takes the last value). KPI denominators count non-null only. This line is a fact derived AFTER outcome.md exists -- a ledger entry with no outcome.md is ledger contamination, not a completion (design §3.4)."
+    },
+    "mission.archived": {
+      "required": [
+        "archive_ref"
+      ],
+      "sources": [
+        "scheduler"
+      ],
+      "spec": "lane 6 §5-② #19. The trigger for rotation and for pruning raw logs. Rotation moves whole missions, never a line range, because a partial mission breaks fold."
+    },
+    "memory.candidate": {
+      "required": [
+        "kind",
+        "source_refs"
+      ],
+      "fields": {
+        "kind": {
+          "enum_ref": "memory_kind"
+        },
+        "source_refs": {
+          "type": "array"
+        }
+      },
+      "spec": "lane 6 §5-④. The ONLY trigger is mission.completed{accepted:true} (policy promote_only_after_outcome), so a false or null outcome produces zero candidates."
+    },
+    "memory.dedup": {
+      "required": [
+        "candidate_id"
+      ],
+      "fields": {
+        "duplicate_of": {
+          "type": "string"
+        }
+      },
+      "spec": "lane 6 §5-④. Checked against existing memory files by name and description."
+    },
+    "memory.validated": {
+      "required": [
+        "candidate_id",
+        "evidence_refs"
+      ],
+      "fields": {
+        "evidence_refs": {
+          "type": "array"
+        }
+      },
+      "spec": "lane 6 §5-④. At least one reproducible piece of evidence, or the candidate ends here."
+    },
+    "memory.promoted": {
+      "required": [
+        "candidate_id",
+        "path"
+      ],
+      "spec": "lane 6 §5-④. The ledger records the promotion history only; the memory body lives in the memory file, never in the ledger."
+    },
+    "memory.rejected": {
+      "required": [
+        "candidate_id",
+        "reason"
+      ],
+      "spec": "lane 6 §5-④ pairs promoted with rejected."
+    },
+    "ledger.rejected": {
+      "required": [
+        "raw_event",
+        "reason"
+      ],
+      "fields": {
+        "raw_event": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "spec": "lane 6 §5-② #20. Written by the writer itself when a line fails the allowlist or the envelope. Excluded from fold and counted by /doctor Check 8-⑤. Registered in the allowlist like everything else, so the rejection path cannot itself be rejected -- and so a rejected line is recorded rather than silently dropped."
+    }
+  }
+}
