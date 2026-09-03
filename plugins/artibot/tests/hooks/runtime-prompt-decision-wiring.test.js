@@ -14,9 +14,12 @@
  *     prompts. The structural argument (both recorders run after `output` is
  *     final and neither receives it) is what covers the rest; these cases are
  *     the sample that makes the argument checkable.
- *  3. It compares against the newest PRE-WIRING commit, not the installed
- *     plugin. If that commit already carried a defect, this suite reproduces
- *     it identically and calls that a pass.
+ *  3. It compares against a FROZEN FIXTURE of the pre-wiring hook, not the
+ *     installed plugin and not live history. If that revision already carried a
+ *     defect, this suite reproduces it identically and calls that a pass. The
+ *     fixture is deliberately never refreshed, so any later change to the hook
+ *     that is NOT the T-37 wiring is absent from the control too: this proves
+ *     "the wiring changed no bytes", never "the hook still behaves as it did".
  *  4. It says nothing about whether the recorded topology `mode` is CORRECT.
  *     topology-router.js is an Observe-stage sighting function whose weights are
  *     uncalibrated by its own header; this only checks that what the router
@@ -53,8 +56,6 @@ import {
 const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const REAL_CONFIG_PATH = path.join(PLUGIN_ROOT, 'artibot.config.json');
 const REAL_HOOK = path.join(PLUGIN_ROOT, 'scripts', 'hooks', 'runtime-prompt.js');
-const REPO_ROOT = path.resolve(PLUGIN_ROOT, '..', '..');
-const REPO_HOOK_PATH = 'plugins/artibot/scripts/hooks/runtime-prompt.js';
 
 /** Directories the hook resolves through `getPluginRoot()` at runtime. */
 const LINKED_DIRS = ['lib', 'commands', 'skills', 'agents'];
@@ -66,46 +67,28 @@ let baselineHook = '';
 let savedEnv;
 
 /**
- * The symbol whose presence means a revision ALREADY carries the T-37 wiring.
- * Used to find the baseline, not to assert behavior.
+ * The symbol whose presence means a source ALREADY carries the T-37 wiring.
+ * Used to prove the control is pre-wiring, not to assert behavior.
  */
 const WIRING_MARKER = 'recordObserveOnlyDecisions';
 
-/** How far back to look for a pre-wiring revision before giving up. */
-const MAX_REVISIONS_SCANNED = 50;
-
 /**
- * Resolve the newest committed revision of this hook that does NOT yet carry
- * the T-37 wiring, and return its source.
+ * The frozen pre-wiring hook. A CHECKED-IN FILE, not a `git log` lookup.
  *
- * NOT simply `HEAD`. Once this work is committed, `HEAD` contains the wiring
- * and a HEAD-vs-worktree comparison compares the change to itself — the suite
- * would go vacuously green (or trip its own seam guard) the moment it mattered
- * most. Walking back to the last revision without the marker keeps the
- * before/after comparison meaningful for the life of the file.
+ * This used to walk `git log -n 50 -- <hook>` at run time to find the newest
+ * revision without the marker. That needs full history, and GitHub Actions
+ * checks out SHALLOW — so on CI the revision did not exist and every test in
+ * this file failed with "no pre-wiring revision … found in the last 50"
+ * (run 33714134586: Linux ×3, Windows ×1). It passed locally only because a
+ * developer clone carries the history, and it would have started failing
+ * locally too once the hook gathered 50 more commits. The control could expire;
+ * a file cannot.
  *
- * @returns {{rev: string, content: string}}
+ * Provenance and the freeze rule live in the fixture's own header.
  */
-function resolvePreWiringSource() {
-  const log = spawnSync(
-    'git',
-    ['log', `-n${MAX_REVISIONS_SCANNED}`, '--format=%H', '--', REPO_HOOK_PATH],
-    { cwd: REPO_ROOT, encoding: 'utf-8', maxBuffer: 8 * 1024 * 1024 },
-  );
-  if (log.status !== 0) throw new Error(`git log failed: ${log.stderr}`);
-  const revisions = log.stdout.split('\n').map((s) => s.trim()).filter(Boolean);
-
-  for (const rev of revisions) {
-    const show = spawnSync('git', ['show', `${rev}:${REPO_HOOK_PATH}`], {
-      cwd: REPO_ROOT, encoding: 'utf-8', maxBuffer: 8 * 1024 * 1024,
-    });
-    if (show.status !== 0 || typeof show.stdout !== 'string') continue;
-    if (!show.stdout.includes(WIRING_MARKER)) return { rev, content: show.stdout };
-  }
-  throw new Error(
-    `no pre-wiring revision of ${REPO_HOOK_PATH} found in the last ${MAX_REVISIONS_SCANNED}`,
-  );
-}
+const PRE_WIRING_FIXTURE = path.join(
+  PLUGIN_ROOT, 'tests', 'hooks', 'fixtures', 'runtime-prompt.pre-wiring.js.txt',
+);
 
 /**
  * Build a sandbox plugin root: real modules LINKED in (not copied, so the real
@@ -127,7 +110,7 @@ function makeSandbox(prefix) {
 beforeAll(() => {
   sandboxRoot = makeSandbox('artibot-t37-wiring-');
 
-  // The PRE-WIRING hook (see resolvePreWiringSource). Placed inside its own scripts/
+  // The PRE-WIRING hook, from the frozen fixture. Placed inside its own scripts/
   // tree so its three relative imports resolve: '../utils/index.js' via a link
   // to the real utils, '../../lib/core/hook-utils.js' via the linked lib, and
   // './_main-entry.js' via a copy (copied rather than linked so `isMainEntry`
@@ -143,9 +126,8 @@ beforeAll(() => {
     path.join(PLUGIN_ROOT, 'scripts', 'hooks', '_main-entry.js'),
     path.join(hooksDir, '_main-entry.js'),
   );
-  const { content } = resolvePreWiringSource();
   baselineHook = path.join(hooksDir, 'runtime-prompt.js');
-  writeFileSync(baselineHook, content, 'utf-8');
+  writeFileSync(baselineHook, readFileSync(PRE_WIRING_FIXTURE, 'utf-8'), 'utf-8');
 });
 
 afterAll(() => {
@@ -230,8 +212,24 @@ describe('T-37 sandbox seam', () => {
     expect(existsSync(path.join(sandboxRoot, 'lib', 'topology', 'topology-router.js'))).toBe(true);
     expect(existsSync(path.join(sandboxRoot, 'lib', 'observability', 'decision-events.js'))).toBe(true);
     expect(existsSync(baselineHook)).toBe(true);
-    // The baseline must be the PRE-wiring file. If HEAD already contained the
-    // wiring, the byte-identity test below would compare the change to itself.
+  });
+
+  it('has a pre-wiring fixture that exists and is not empty', () => {
+    // FAIL-CLOSED. A missing or truncated fixture must go red here rather than
+    // produce an empty baseline whose stdout trivially matches nothing.
+    expect(existsSync(PRE_WIRING_FIXTURE)).toBe(true);
+    const raw = readFileSync(PRE_WIRING_FIXTURE, 'utf-8');
+    expect(raw.trim().length).toBeGreaterThan(0);
+    // Not merely non-empty: it must actually be the hook. A stray file that
+    // happened to sit at this path would otherwise satisfy the length check.
+    expect(raw).toContain('handleUserPromptSubmit');
+  });
+
+  it('has a fixture that is genuinely PRE-wiring', () => {
+    // FAIL-CLOSED, and the reason the fixture is frozen. If anyone regenerates
+    // it from a wired revision, the byte comparison below would be comparing the
+    // change to itself and pass vacuously. This turns that into a red test.
+    expect(readFileSync(PRE_WIRING_FIXTURE, 'utf-8')).not.toContain(WIRING_MARKER);
     expect(readFileSync(baselineHook, 'utf-8')).not.toContain(WIRING_MARKER);
   });
 });
