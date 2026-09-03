@@ -8,14 +8,14 @@ revised: 2026-09-02
 revision_reason: 같은 slug 추적 2파일(PRD-SPLIT-…{,-2}.md) 제자리 병합 — 파생 파일 금지(08_ARTIFACT_GOVERNANCE) 및 파일명 패턴 위반(*-2.md) 해소. 작업 T-03.
 generations: r1 2026-08-26 20:09 (ADR-001~005, 진행상태 보유) · r2 2026-08-26 21:17 (ADR-006~010 초안번호, 진행상태 0) · r3 2026-09-02 병합
 merged_from: PRD-SPLIT-CROSS-SESSION-MULTI-WORKTREE-2.md
-linked_adrs: ADR-001, ADR-002, ADR-003, ADR-004, ADR-005
-superseded_linked_adrs: ADR-006, ADR-007, ADR-008, ADR-009, ADR-010
+linked_adrs: ADR-006, ADR-007, ADR-008, ADR-009, ADR-010
+superseded_linked_adrs_note: r2 초안 번호 ADR-006~010 은 폐기됨. 위 linked_adrs 의 ADR-006~010 은 B2(2026-09-03) 재번호 결과로 이름만 같고 별개다 — 같은 번호가 같은 주제를 다시 가리키게 된 것은 재번호의 결과이지 r2 초안 번호의 부활이 아니다
 ---
 
 # PRD: cross-session × multi-worktree 협업 — /split 커맨드+스킬 (ULTRAPLAN)
 
 생성: 2026-08-26 20:09 (r1) · 2026-08-26 21:17 (r2, 흡수됨) · 2026-09-02 병합 (r3) — "세대 이력 · 병합 기록" 절 참조
-**연관 ADR**: `ADR-001`, `ADR-002`, `ADR-003`, `ADR-004`, `ADR-005`
+**연관 ADR**: `ADR-006`, `ADR-007`, `ADR-008`, `ADR-009`, `ADR-010` (B2 재번호 후, 2026-09-03. 전부 `.artibot/adr/`)
 
 ---
 
@@ -284,8 +284,23 @@ crash-detection-ndjson]; 루트 `docs/adr/` 5건은 split ADR-001~005 이며 `.g
 **B2** 로 "플러그인 5 → `.artibot/adr/ADR-001~005`(git mv), 루트 5 → **ADR-006~010** 재번호 +
 `moved-from`" 을 계획한다. 루트 5건이 곧 split ADR 이므로, B2 가 이행되면 이 표의 왼쪽 열
 번호와 **같은 번호가 같은 주제를 다시 가리키게 된다**. 다만 그것은 재번호의 결과이지 r2 초안
-번호의 부활이 아니다. B2 는 미결이므로 이 문서는 r1 확정 번호(ADR-001~005)를 계속 쓴다.
-B2 이행 시 이 절과 frontmatter `linked_adrs` 를 함께 갱신할 것.
+번호의 부활이 아니다. ~~B2 는 미결이므로~~ **B2 는 2026-09-03 확정됐다**(오너, 2차 재확인): ADR 을 **`.artibot/adr/` 로 단일화**. 즉 이 절이 계획으로 적어 둔 방향이 **그대로 최종 결정**이다. 정본 기록은 `.artibot/guides/v5-design/ARTIBOT-5.0-DESIGN.md` 「부록 0-2 후속. 오너 결정 (2026-09-03 확정)」 B2 행. **다만 이 문서는 아직 r1 번호(ADR-001~005)를 계속 쓴다.**
+**갱신 완료(기록자, 2026-09-03 16:5x)** — B2 가 **결정 + 이행 모두 끝나** 이 절의 요구를 실제로 수행했다.
+
+이행 실측(`ls` · `git status --porcelain`, 16:5x): `.artibot/adr/` 에 **ADR-001~010 + INDEX.md**,
+구 경로 `docs/adr/` 와 `plugins/artibot/docs/adr/` 는 **둘 다 소멸**. 플러그인 5건은 `git mv`(인덱스에 `R`),
+루트 출신 split 5건은 **ADR-006~010 으로 재번호**(아직 untracked — `git add` 는 apply 담당).
+즉 **이 문서가 다루는 split ADR = `.artibot/adr/ADR-006~010`** 이다.
+
+수행한 갱신 3건:
+1. frontmatter `linked_adrs` → `ADR-006 … ADR-010`.
+2. frontmatter `superseded_linked_adrs` → `superseded_linked_adrs_note` 로 바꿔, r2 초안 번호(폐기)와
+   B2 재번호(유효)가 **이름만 같고 별개**임을 한 줄로 구분했다. 값이 같은 두 필드가 나란히 서서
+   서로를 무효화하는 것을 막기 위함이다.
+3. 본문 상단 `**연관 ADR**` 줄도 같은 번호로.
+
+위 이동표 왼쪽 열과 최종 번호가 같아졌지만, **그것은 재번호의 결과이지 r2 초안 번호의 부활이 아니다** —
+이 문서가 미리 예고한 그대로다.
 
 ### 바이트 단위 원본
 

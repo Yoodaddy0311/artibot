@@ -119,7 +119,7 @@ v5 헌법 14원칙(`.artibot/guides/v5-design/package/01_PHILOSOPHY_CONSTITUTION
 
 - 명명 정본: `docs/ORCHESTRATION-GLOSSARY.md#canonical-naming-convention`.
 - 산출물 파일명: 회차 접미(`-2` `-final` `-new` `plan-v2` `todo` `progress` `status`) 금지. 시점 접미(`-YYYY-MM-DD`)는 허용된다. 게이트는 `p/tests/firewall/artifact-governance.test.js`.
-- ADR 은 `ADR-NNN-...` 단일 계열. 현재 `docs/adr/` 와 `plugins/artibot/docs/adr/` 두 계열이 병존하며 번호가 겹친다 — 통합은 **결정 B2 대기**.
+- ADR 은 `ADR-NNN-...` 단일 계열이고, 위치는 **`.artibot/adr/`** 다(**결정 B2 확정 2026-09-03**). `ADR-001~005` = 구 플러그인 계열(`git mv`, 내용 무변경), `ADR-006~010` = 구 루트 계열 재번호(`renumbered-from`·`moved-from` frontmatter). 루트 `docs/adr/` 와 `plugins/artibot/docs/adr/` 는 **부재**.
 - 원장은 중앙 `.artibot/runtime/ledger.jsonl` 하나. 분산 원장은 게이트가 잡는다.
 - mission id 는 `M-YYYYMMDD-NNN`.
 - 추적 경계: 추적 = `ARTIBOT.md`·`project.md`·`missions/`·`adr/`·`memory/`·설계 세트 / 로컬 = `runtime/ledger.jsonl`·raw 로그·렌더 핸드오프 / `state.yaml` = 로컬(재생성 가능 투영, 결정 B1).
@@ -167,7 +167,7 @@ human 인데 강제 none)는 **알려진 구멍**이지 승인 면제가 아니�
   - `package-v1.1/` — 정본 상태·산출물·물리 형식(`02_CANONICAL_PROJECT_STATE.md`, `18_PROJECT_TEMPLATE.md` = 이 파일의 골격)
   - 충돌 시 v1.1 이 산출물·상태·형식의 정본, v1.0 이 런타임 단계·경제·헌법의 정본
 - **vNext 설계** — `.artibot/guides/vnext-design/`(`09_SECURITY_GOVERNANCE.md` Action Risk Matrix = HG-11~13 의 출처)
-- **ADR** — `docs/adr/` · `plugins/artibot/docs/adr/` **두 계열 병존, 번호 충돌 있음.** 단일 계열 통합은 **결정 B2 대기** — 그때까지 어느 쪽도 단독 정본이 아니다.
+- **ADR** — 단일 계열 **`.artibot/adr/`** 가 정본이다(**결정 B2 확정 2026-09-03**, 번호 충돌 해소). 001~005 = 구 플러그인 계열, 006~010 = 구 루트 계열 재번호. `/adr`·`ensureADR` 기본 경로 = **기존 ADR 디렉터리 탐색 → `.artibot/adr/`**(`lib/planning/artifacts.js#resolveAdrDir`). 검증 게이트 = `tests/firewall/artifact-governance.test.js` 의 양성 단언 `expect(adrDirs).toEqual(['.artibot/adr'])`.
 - **라우팅 정본** — `docs/ORCHESTRATION-ROUTING.md` · 명명 정본 `docs/ORCHESTRATION-GLOSSARY.md`
 - **개발자층** — `plugins/artibot/CLAUDE.md`(DEV 프로토콜 · Problem-First Gate · Quality Gates · Context Efficiency · Testing). 이 파일은 그것을 대체하지 않는다.
 - **전역 규율** — `~/.claude/rules/artibot/{verification-discipline,agent-coordination,question-recommendations}.md`

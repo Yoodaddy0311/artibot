@@ -645,3 +645,184 @@ R1·R2·R3·R4·R5·R6 본문 정정(§3.1·§3.3·§3.5·§3.6) · §7.1 합계
 | §3.3 decisions 사이드 채널 | 어휘 자유 | 어휘 5종(`routing-classified`·`workflow-planned`·`topology-recommended`·`memory-injection-measured`·`recorder-stats`), writer 단일(`decision-events.js`) 이라 allowlist 없음 허용 — **두 번째 writer 가 생기면 fail-closed allowlist 필수**(T-51 P4-2) |
 | §3.6 예산 근거 | 상수 4096 리터럴 핀 | 정당화는 config `line_max_bytes` 와의 관계(2바이트×4096 ≥ 캡). 캡 상향 시 리터럴 테스트는 통과하며 근거만 거짓 → 관계 단언으로 전환 후속(T-51 P4-1) |
 | 부록 0-2 행수 표기 | 리더 브리프 "307행" | 파일 전체 표 행(310) 을 부록 행으로 오기 — 부록 실제 108 데이터행(:536~:646). 수치를 박을 때 재현 명령·시각 병기(T-49 4차 NOTE 1, 2026-09-03 11:36) |
+
+### 부록 0-2 후속. 오너 결정 (2026-09-03 확정)
+
+**결정자: 오너 · 결정일: 2026-09-03 · 기록: 리더 경유 팀원 반영(이 세션).**
+아래 14건 + 부가 2건은 그 전까지 §5 「결정 필요 항목」·§7.4·§8.5(G 계열) 및
+`reports/AUTOPILOT/ap-20260902-062936-tyc5j4.md` §5 에 **미결**로만 남아 있던 항목이다.
+이 절이 해당 항목의 정본이며, 본문·§5 의 "대기/잠정" 표기보다 이 표가 이긴다.
+**결정 문구는 오너 원장을 그대로 옮긴 것이고, 기록자의 해석·보완을 더하지 않았다.**
+「재결정 조건」열은 오너가 근거 열에 적은 유보를 조건문으로 옮긴 것이며,
+**오너가 특정하지 않은 임계·표본 수는 그 자리에 `미확인` 으로 적었다**(추측으로 메우지 않음).
+
+> **오너 메타 결정(2026-09-03 16:3x)** — 이후 결정 처리 규칙:
+> "이후 결정은 **설계 정본(§5·§3.3) 우선 → 권장안** 순으로 리더가 처리하고 **기록만** 한다.
+> 질문은 정본에도 없고 권장안이 갈리는 **신규 방향**에만."
+> (오너 원문: "권장사항으로 처리해줘. 이미 내가 추구하는 바에 대해서는 맨처음 설계안에 다 적어줬던 것 같아")
+> 이 규칙은 위 B2 3라운드에서 얻은 교훈과 같은 방향이다 — 정본이 이미 답을 갖고 있으면 그것이 이긴다.
+
+| ID | 오너 결정 (2026-09-03 확정) | 근거/단서(오너 제시) | 재결정 조건 |
+|---|---|---|---|
+| A1 | blindspot 자동수정 **금지** — 제안(dry-run diff)까지만 생성, 적용은 사람 승인 후 | 오너 상시 원칙: 설계안 먼저, 적용은 승인 후 | 없음(원칙 결정) |
+| B2 | **최종 확정(2026-09-03 2차 재확인).** ADR 을 **`.artibot/adr/` 로 단일화** — 설계 정본을 따른다. 경위: 원안 "루트 `docs/adr/` 단일화" → (루트가 추적되지 않음이 실측돼 철회) 1차 재질의 "`plugins/artibot/docs/adr/`" → **그 1차 근거였던 "플러그인 경로만 추적된다" 가 오판임이 드러나 2차 재확인에서 `.artibot/adr/` 로 최종** | 리더 실측 2026-09-03 16:0x(기록자 재현 확인): ① `git check-ignore -v .artibot/adr/ADR-001.md` → **exit 1(무시되지 않음 = 추적 가능)** ② `.gitignore:116` 이 추적 정본 목록에 **`.artibot/adr/` 를 명시** ③ 대조: 루트 `docs/adr/` 만 실제로 무시된다(`git check-ignore` → **exit 0**, `.gitignore:19` `/docs/`) — `plugins/artibot/docs/adr/` 와 `.artibot/adr/` 는 **둘 다 exit 1 로 추적 가능** ④ 설계 정본 2곳 + 파이어월 게이트 2곳이 원래부터 `.artibot/adr/` 를 가리켰다 | **없음 — 확정** |
+| C4 | **`deterministic` 만 필수**, 나머지 층 선택. `unmeasuredBlocksOutcome=true`(fail-closed) 유지 | 현행 `DEFAULT_REQUIRED_LAYERS` 선례를 정본 승격 | 없음 |
+| G1 | `routing_epoch_id` = **스폰 단위(agentId)** 확정, 스키마 required 유지 | 라이브 원장 0건 — Shadow 실측 후 재결정 가능한 값 | **Shadow 단계에서 라이브 원장 실측(현 0건)이 확보되면** 재결정 가능. 어떤 관측이 뒤집기 조건인지는 오너가 특정하지 않음 — `미확인` |
+| G2 | 매 프롬프트 메모리 주입 = **계측만 유지, 기본값 무변경** | 라이브 표본 n=1 은 판단 근거가 아님 | 라이브 표본이 **n=1 을 넘어 판단 가능한 규모로 축적되면** 재결정. 필요 표본 수·판단 임계는 오너 미특정 — `미확인` |
+| G3 | `.artibot/generated` **도입 보류** | 소비처 0 — YAGNI | 소비처가 **1 이상** 생기면 재검토(근거의 대우) |
+| G4·G5 | hysteresis 3/2·2 및 refusal 임계 **값 그대로 유지 + `UNCALIBRATED` 명시** | 근거 없는 값을 근거 있는 값으로 오인시키지 않기 위함 | **보정에 쓸 실측이 확보되면** 값 재결정 + `UNCALIBRATED` 표기 해제. 어떤 측정이 보정 자격인지는 오너 미특정 — `미확인` |
+| G6 | `wallclock_throughput` **`UNATTESTED` 유지 · 소비처 0 유지**(대시보드/보고서가 읽지 못하게) | 미검증 수치가 다음 착시의 근거가 되는 것을 차단 | attestation 확보 전까지 **소비처 추가 금지**. 확보 시 재검토 |
+| G-1 | `performance.priority` **정규화 함수 도입 → 8값 허용목록(enum) 대조**, 미지값 거부 | 부정 목록 아닌 허용목록 | — |
+| review.independent | **config 키 신설 + 기본 `true`**(독립 검수 필수, fail-closed) | 키 부재로 인한 조용한 비활성(fail-open) 차단 | — |
+| fixture `substantive` 스테이지 한정자 | **확정(권장안, 2026-09-03).** 스테이지 한정자 추가 — `substantive_stage: 'execution'`(어휘 출처 `compiler.js` JSDoc `@param input.stage` 의 `'prompt' 또는 'execution'` 합집합, 리더 인용 `:508` 확인), `KNOWN_DIVERGENCES` 에서 `split-upgrade-fidelity` **1건 제거**, 나머지 2건은 call-shape 아티팩트라 무관 | evidence 실측: divergence 3건 중 이 값에 걸리는 것은 1건뿐. 이전 "보류" 사유였던 "3건의 정체 미확인" 이 해소됨 | **없음 — 확정.** apply 이행 완료(`tests/evals` 93/93, 16:21). 기록자 재확인: `nl-activation-fixture.test.js:625-630` 이 제거 사유를 주석으로 남기고 있고 `split-upgrade-fidelity` 는 `KNOWN_DIVERGENCES` 에 없다 |
+| interpreter cue `시간이 중요` | **추가하지 않음.** T-36 드리프트 게이트의 기대값을 **현행 어휘에 맞춰 고정**해 불일치 해소 | Phase 0 대원칙 "런타임 행동 불변" | — |
+| planner 병렬화 | **설계안 먼저**, 구현은 승인 후 | 별도 팀원이 설계안 작성 중(결정 시점) | 설계안이 오너 승인을 받으면 구현 착수 |
+| `runtime/decisions/` 기본 위치 | **projectRoot `.artibot/runtime/decisions/` 로 변경**(T-51 D 승격). 폴더 트리 정리도 함께 승인 | `claude plugin update` 가 pluginRoot 를 교체하면 KPI 분모 소실 위험 | **이행 완료 2026-09-03** — checker-config APPROVE. Check 7 소비처 5곳(`router.js:57` · `tasks.js:342` · `runtime-prompt.js:616,622,626`)에 cwd 주입, `doctor.md:131` 갱신, **이관 로직 없음**(라이브 0건이라 옮길 데이터가 없다). 기록자 재확인: `decision-events.js:90` `DECISIONS_REL=['.artibot','runtime','decisions']`, `getDecisionStoreDir` 가 projectRoot → `resolveProjectRoot(cwd)` 순 해석(리더 인용 `:89` 는 JSDoc 줄, 실제 상수는 `:90`) |
+| receipt 위치 (2026-09-03 16:3x) | 라우팅 shadow receipt 를 **PreToolUse(Agent) 로 이관 + `prompt_id` 브릿지**. **설계안 먼저**(구현은 승인 후) | SubagentStart 페이로드에 action text 가 **없다** — 호스트 2.1.259 바이너리 스키마는 `agent_id`·`agent_type` 뿐(INCIDENT `§F10`). 따라서 `skipped:no-action-text` 14/14 는 **결함이 아니라 정확한 동작** | 설계안이 오너 승인을 받으면 구현 착수. 설계안 **`ROUTE-RECEIPT-PRETOOLUSE-DESIGN.md`(144줄)** — 요지: **2단계 기록**(PreToolUse `route.selected{stage:'pre'}` + SubagentStart 신규 `route.bound`), allowlist **36→37**, 되돌리기 스위치 `routing.observe.receiptStage`. 근거 문서: `INCIDENT-2026-09-03-hook-payload-contract.md` §6.2 |
+| ensureADR 하드코딩 (2026-09-03 16:3x) | `docs/adr` 하드코딩을 **지금 수리** — 기존 ADR 디렉터리 탐색 → 폴백. **"코드는 설계안" 원칙의 명시적 예외**(안 고치면 다음 `/plan --adr` 이 B2 를 되돌린다) | apply 미결 #1 | **없음 — 확정.** 기록자 실측: **이미 착지했다**(`artifacts.js` 워킹트리 수정분, `kindDir(projectRoot,'adr')` + `resolveAdrDir` 탐색·폴백 구현). 남은 `docs/adr` 2곳(`:161` 탐색 목록, `:208` 비-Artibot 리포 폴백)은 **의도된 것**이라 하드코딩 잔존 아님 |
+| effort 디렉티브 경로 (2026-09-03 16:3x) | **판정 완료(2026-09-03 16:5x) — (나) 호스트 2.1.259 는 훅 stdout 최상위 `user_prompt` 를 읽지 않는다.** 따라서 `user_prompt` 봉투 전체(effort 디렉티브 · System 1 mode · memory context · guardrail · `message`)가 **모델에 닿은 적이 없다.** 후속 **결정(권장안 채택 — 오너 미질의, 메타 결정 규칙 적용)**: `hookSpecificOutput.additionalContext` 로 이전 | effortpath 실측 `PROBE-effort-directive-delivery.md`(**126줄**, 기록자 실재·행수 확인): 출력 스키마 `Xbr` = `continue`/`suppressOutput`/`stopReason`/`decision`/`reason`/`systemMessage`/`terminalSequence`/`hookSpecificOutput` 뿐이고 파서가 스키마 밖 키를 "unrecognized keys (ignored)" 로 버림(리더 바이너리 grep 재확인) · 공식 hooks.md "UserPromptSubmit can't replace the prompt; only injects additionalContext" · 라이브 트랜스크립트 사용자 턴 4건 중 `[artibot:effort` **0건** | 설계안 `DESIGN-UPS-additionalContext-migration.md` **승인 후 구현**. 기록자 실측: 그 설계안은 **실재한다 — `DESIGN-UPS-additionalContext-migration.md` 207줄**(17:1x `wc -l`. 앞선 "부재" 표기는 17:0x 시점 관측이었고 그 사이 착지 — **해소**). **팀원 디렉티브 경로는 생존** — 리더가 Agent 프롬프트에 직접 쓰는 `team.md:107-120` 경로는 훅 stdout 을 거치지 않는다 |
+| (부가) 반영 범위 | **문서 + config 를 먼저 반영**, 코드 변경 4건은 설계안으로 받아 **승인 후 구현** | — | — |
+| (부가) census JSON | 스크래치패드의 `citation-census-20260903.json` 을 **리포 안으로 보존** | 재스캔 비용 > 보관 비용 | — |
+
+**보존 위치 기록(부가 2번 이행)**: `.artibot/guides/v5-design/evidence/citation-census-20260903.json`.
+오너 지시의 문자 그대로라면 `reports/` 아래였으나, `.gitignore:73` 이 `reports/*` 를 제외하고
+`!reports/SPLIT/` 만 재포함한다(`reports/AUTOPILOT/` 는 현재 **untracked**) — 즉 `reports/` 에 두면
+git 에 보존되지 않아 결정 취지("재스캔 비용 > 보관 비용")를 달성하지 못한다. 그래서 이 설계 정본
+바로 옆의 **추적되는** 경로에 두었다. 원본은 스크래치패드에 그대로 남겨 두었다(복사).
+실측 표기: **rows 349 / 4,927 lines**(133,693 B). 349 는 파일 행수가 아니라 잔여 occurrence 수(`postEditTotal`)다.
+
+**B2 보충 근거(기록자 확인, 2026-09-03)**: 파이어월 픽스처
+`plugins/artibot/tests/firewall/fixtures/artifact-governance.exceptions.json`(`check2_canonicalPairs`, `.artibot/adr` 는 :24)
+의 `measuredState` 필드가 **이미 같은 사실을 기록하고 있다** — "측정 시점 `docs/adr/` 는 추적 0건(.gitignore:19
+`/docs/` 가 통째로 ignore). 추적 계열은 plugins/artibot/docs/adr 하나뿐". 나아가 같은 픽스처의 `reason` 은
+통합 방향을 **`.artibot/adr/` 쪽으로**("플러그인 5 → `.artibot/adr/ADR-001~005`, 루트 5 → ADR-006~010 재번호")
+적어 두었다 — 즉 `docs/adr/` 단일화와 **반대 방향**이다. 또 `plugins/artibot/tests/firewall/gitignore-boundary.test.js:109`
+의 `TRACKED_PATHS` 에 `.artibot/adr/ADR-0001.md` 가 들어 있어, 이 게이트는 `.artibot/adr/` 가 추적 경로임을 전제한다.
+**→ 최종 확정(2차 재확인): `.artibot/adr/`. 위 픽스처 `reason` 과 게이트 `TRACKED_PATHS` 는 처음부터 옳았다 —
+갱신 대상이 아니다.** (1차 재질의에서 잠시 `plugins/artibot/docs/adr/` 로 확정됐다가 근거 오류가 드러나 뒤집혔다.
+경위는 아래 「B2 결정 경위」 참조.)
+
+**이 문서 자체의 기존 기록도 같은 방향이다(기록자 확인)**: §3.3 이행 매핑표는 ADR 2계열을
+"플러그인 `docs/adr` 5 추적 + 루트 `docs/adr` 5 **미추적**" 로 이미 적고 목표를 **`.artibot/adr/` 한 계열**로
+두었고(`#이행-매핑표` ADR 2계열 행), §5 결정 항목 B2 의 원문도 "ADR 정본 계열·위치 — **`.artibot/adr/` 통합**,
+플러그인 5 이동 + 루트 5 재번호" 다. 즉 **설계 정본 2곳 + 파이어월 게이트 2곳 = 4곳이 모두 `.artibot/adr/` 를
+가리키며, "`docs/adr/` 로 단일화" 는 그 4곳과 반대 방향이다.** 오너 원장의 B2 문구가 이 사실을 전제로
+작성된 것인지 확인되지 않아 재질의 대상이 되었다. 1차 재질의는 `plugins/artibot/docs/adr/` 로 갔으나
+**2차 재확인에서 `.artibot/adr/` 로 최종 확정**됐다 — 즉 **이 4곳은 처음부터 최종 결정과 일치했고 갱신이 불필요하다.**
+
+**시점 관측(2026-09-03 15:46, 기록자 — 상태 단정 아님)**: B2 재질의가 진행 중인 동안 **다른 세션/팀원이
+ADR 을 실제로 옮기고 있다.** 15:45:23 mtime 으로 `plugins/artibot/docs/adr/ADR-006~010` 5파일이 생겼고,
+이는 루트 `docs/adr/ADR-001~005` 와 **같은 문서의 재번호본**이다. 다만 루트 `docs/adr/` 6파일은 **그대로 남아
+있고**(즉 이동이 아니라 복사 상태), `.artibot/adr/` 는 **존재하지 않는다**. 이 시점 트리는 같은 ADR 5건이 두
+곳에 중복된 상태다 — 작업이 진행 중일 수 있으므로 "중복을 남겼다" 로 단정하지 않는다. 확정된 것은
+`git ls-files plugins/artibot/docs/adr/` = **5**(신규 5건은 미추적)뿐이다. **후속(2차 재확인 후)**: 이 진행 중 작업의 목적지 `plugins/artibot/docs/adr/` 는 **1차 재질의 결정을 이행하던 것**이고,
+그 결정이 뒤집혔으므로 **최종 목적지(`.artibot/adr/`)와 다르다.** 즉 ADR-006~010 은 최종 결정 기준으로는
+중간 산물이다. 최종 이동·정리는 **별도 팀원(apply)** 소관이며, 이 기록자는 ADR 파일·게이트를 건드리지 않았다.
+관측 자체(루트 6파일 잔존 = 이동 아닌 복사 상태)는 그대로 기록해 둔다.
+
+**B2 결정 경위 (3라운드 — 왜 두 번 뒤집혔는지)**
+
+| 라운드 | 결정 | 뒤집힌 이유 |
+|---|---|---|
+| 원안(오너 원장 최초) | 루트 `docs/adr/` 로 단일화 | 전제 "루트가 추적된다" 가 실측으로 깨짐 — `.gitignore:19` `/docs/` 가 통째 제외. 그대로 갔으면 ADR 이 버전관리 밖으로 나갈 뻔했다 |
+| 1차 재질의 | `plugins/artibot/docs/adr/` | **근거 오류**: "플러그인 경로만 추적된다" 는 `git ls-files` **개수**(플러그인 5 / `.artibot/adr/` 0)에서 추론한 것인데, `.artibot/adr/` 의 0 은 **디렉터리가 아직 없어서**지 무시돼서가 아니다. **추적 파일 0건 ≠ 추적 불가.** 또 이 라운드의 선택지 설명에 "4곳이 `.artibot/adr/` 를 가리킨다" 는 관측이 포함되지 않았다 |
+| **2차 재확인 (최종)** | **`.artibot/adr/`** | `git check-ignore` 로 **무시 여부를 직접 측정**: `.artibot/adr/` exit 1(추적 가능), `plugins/artibot/docs/adr/` exit 1, 루트 `docs/adr/` exit 0(무시). 둘 다 추적 가능하므로 "유일하게 추적된다" 는 성립하지 않고, 설계 정본·게이트 4곳이 가리키는 `.artibot/adr/` 가 최종 |
+
+**남은 교훈(기록자)**: `git ls-files` 는 *이미 추적 중인 파일*을 세고, `git check-ignore` 는 *추적 가능 여부*를 판정한다.
+아직 존재하지 않는 경로에 대해 전자로 후자를 주장하면 이번처럼 뒤집힌다. 이 부록의 초기 B2 근거 문장
+"`git ls-files plugins/artibot/docs/adr/` = 5 — 실제 버전관리되는 ADR 계열은 여기뿐" 도 **문자 그대로는 참이지만
+추적 *가능성* 의 근거로는 쓸 수 없었다** — 그 문장이 1차 재질의의 오판으로 이어졌다.
+
+**B2 최종 확정에 따른 기존 기록 상태 (기록자 실측 — 대부분 해소됨)**
+
+| # | 위치 | 내용 | 최종 결정과의 관계 |
+|---|---|---|---|
+| 1 | `plugins/artibot/tests/firewall/gitignore-boundary.test.js:109` | `TRACKED_PATHS` 에 `.artibot/adr/ADR-0001.md` | ✅ **해소 — 원래대로 맞다.** 조치 불필요 |
+| 2 | `plugins/artibot/tests/firewall/fixtures/artifact-governance.exceptions.json` | `pending_decision: "B2"`(:23), `reason` 의 "플러그인 5 → `.artibot/adr/ADR-001~005`"(:24) | ⚠️ `reason` 의 이동 방향은 ✅ 맞다. **남는 조치는 `pending_decision:"B2"` 해제 1건뿐 — apply 팀원 담당** |
+| 3 | 이 문서 §3.3 이행 매핑표(ADR 2계열 행) | 목표 = "`.artibot/adr/` 한 계열" | ✅ **해소 — 최종 결정과 일치** |
+| 4 | 이 문서 §5 결정 항목 B2 | "ADR 정본 계열·위치 — `.artibot/adr/` 통합" | ✅ **해소 — 최종 결정과 일치** |
+
+**B2 후속 3건 (apply 미결 · 코드 아님 — 기록만)**
+
+| # | 항목 | 내용 | 성격 |
+|---|---|---|---|
+| 1 | `docs:check` 스코프 490 → 479(**-11**) | `validate-doc-links.js` 가 **리포 루트 `.artibot/` 을 훑지 않는다** → ADR 링크 썩음을 게이트가 영영 못 본다. B2 로 ADR 이 `.artibot/adr/` 로 가면 **ADR 링크 전체가 게이트 사각지대**로 들어간다 | 후속(설계) |
+| 2 | `.gitignore:38-39` `!plugins/artibot/docs/adr/` 재포함 2줄 | B2 이행 후 빈 경로를 가리키게 된다 — 무해 | 후속 정리 |
+| 3 | `.artibot/guides/PRD-SPLIT-CROSS-SESSION-MULTI-WORKTREE.md` 자기 갱신 | 그 문서 `:283-289` 가 "B2 이행 시 이 절과 frontmatter `linked_adrs` 를 함께 갱신할 것" 을 **스스로 요구**한다 | 문서(기록자 처리 — 아래) |
+| 4 | `plugins/artibot/scripts/hooks/tool-tracker.js:352` **와 `:444`** | `case Task:` **2곳** 이 스폰 도구명을 옛 이름으로 읽는다. 도구명이 **`Task` → `Agent`** 로 바뀌어 두 분기 모두 `default` 로 빠진다 — `:352` 는 `input.subagent_type` 로 `delegate:<type>:subagent` 를 만들고, `:444` 는 결과 점수를 매긴다. 기록자 실측: 같은 파일에 `case Agent` **없음**(= 낡은 키 확정). **라이브 도달 여부는 미확인** | 후속(코드) — **별도 결정 불필요.** 권장: PreToolUse 이관 설계안(`ROUTE-RECEIPT-PRETOOLUSE-DESIGN.md`) 구현 시 함께 정리 |
+| 5 | `plugins/artibot/tests/observability/decision-events-t37.test.js:31` | 주석의 "real `<pluginRoot>/runtime/decisions/`" 가 stale — 결정 D 로 경로가 projectRoot 로 바뀌었다. **테스트 동작은 무관**(storeDir override 로 돈다) | 후속(코드) — 다음에 그 파일을 편집할 때 함께 |
+| 6 | `.artibot/guides/NEXT-SESSION.md:61`·`:74` | 두 줄이 `<pluginRoot>/runtime/decisions/` 를 적고 있었다 — 크로스머신 요지본이라 다음 세션이 먼저 읽는다 | 문서 — **기록자 갱신 완료**(경로 정정 + 결정 D 각주) |
+| 7 | `.artibot/project.md:122`·`:170` | 두 줄이 "두 계열 병존 · 통합은 결정 B2 대기" 로 적고 있었다 — `ARTIBOT.md` 읽기 순서 1번 정본 | 문서 — **기록자 갱신 완료**(단일 계열 `.artibot/adr/` 로) |
+| 8 | `plugins/artibot/commands/team.md:74` · `plugins/artibot/lib/cognitive/effort-policy.js:20-26` | 두 곳이 프롬프트 디렉티브를 **"유일한 실경로"** 라고 단언한다 — effort 판정으로 **틀린 문장이 됐다**(훅 stdout 최상위 `user_prompt` 를 호스트가 읽지 않는다). 기록자 실측: `team.md:74` 원문 "…붙이는 것이 **유일한 실경로**다", `effort-policy.js:20-26` 주석 "HOW THIS MAPPING ACTUALLY REACHES THE MODEL". 참고로 `team.md` 는 근거로 `effort-policy.js:20-22` 를 인용하는데 주석 블록은 `:26` 까지다 | 후속(P2) — **`DESIGN-UPS-additionalContext-migration.md` 설계안에 포함**. 코드 아님 |
+| 9 | `plugins/artibot/skills/persona-distill/SKILL.md:93` | 원문 `- ADR files under docs/adr/` — B2 로 거짓이 된 고정 문구(기록자 원문 확인) | 문서 — **처리 완료**(기록자 실측 17:1x). 현재 `:93` 은 고정 문구가 아니라 탐색 목록이다: "ADR files under the project's ADR directory (`.artibot/adr/`, `docs/adr/`, or `adr/` — …" |
+| 10 | `plugins/artibot/docs/PRD-EFFORT-DYNAMIC-WORKFLOW.md:122` · `plugins/artibot/docs/PRD-LEARNING-ACTIVATION.md:81` | B2 로 깨진 ADR 포인터. 원문은 각각 "ADR: docs/adr/ADR-001-effort-workflow-fusion.md" 와 "…docs/adr/ADR-001…". **⚠️ 리더 인용은 `docs/…` 였으나 실제 경로는 `plugins/artibot/docs/…` 다** — 루트 `docs/` 에 그 두 파일은 없다(find 전역 0건). 또 새 정본 `.artibot/adr/ADR-001` 은 **구 플러그인 계열**이라 이 포인터가 가리키려던 대상과 번호가 우연히 일치한다 — 재번호 대상이 아님을 확인하고 고칠 것 | 문서 — **처리 완료**(기록자 실측 17:1x). 두 곳 다 `.artibot/adr/ADR-001-effort-workflow-fusion.md` 로 갱신됐고, **번호는 001 그대로**다(구 플러그인 계열이라 재번호 대상이 아니라는 위 경고가 지켜졌다). 리더의 "아직 미처리(17:0x)" 는 그 사이 착지로 해소 |
+| 11 | `.gitignore:38-39` | `!plugins/artibot/docs/adr/` 와 `!plugins/artibot/docs/adr/**` 재포함 2줄. B2 이행으로 **그 디렉터리가 소멸**해 빈 경로를 가리킨다 — 무해. 기록자 실측: **2026-09-03 17:0x 기준 아직 존재** | 후속 정리 — **아직 미처리**(기록자 실측 17:1x: `:38` `!plugins/artibot/docs/adr/`, `:39` `!plugins/artibot/docs/adr/**` 그대로 존재). apply 재지시 대상 |
+| 12 | `.artibot/runtime/decisions/_unattributed.events.ndjson`(리포 루트) — **cwd 폴백 오염 경로** | **관측**: 16:43:22 출현 → 16:44:20 소멸(50ms 폴링, `.artibot/` mtime 일치). 테스트 스위트 42개 단독 실행 + 폴링으로 **재현 0건** — 모든 훅 스위트가 샌드박스 `cwd`/`storeDir` 를 넘긴다. **메커니즘은 확정**: `getDecisionStoreDir({})` 가 `cwd` 미전달 시 `process.cwd()` → 최근접 `.git` = 리포 루트로 떨어진다. 이것은 `decision-events.js:170-174` 가 명시한 설계("관측 전용 recorder 는 실패 모드를 갖지 말 것" — 원문 "an observe-only recorder must not acquire a failure mode")의 **대가**다. **⚠️ 위험**: `/doctor` Check 7 은 `diag-` 접두만 제외하므로(`doctor.md:200` S5 행 원문 "no `*.events.ndjson` with a non-`diag-` `sessionId` has ever been written under this root" → warn) `_unattributed` 줄이 S5 판정에서 **"실 기록"으로 읽힌다** — **팀원 프로브 1회가 Check 7 을 거짓 그린으로 만들 수 있다.** 기록자 추가 실측: **2026-09-03 17:0x 기준 `.artibot/runtime/decisions/` 디렉터리 자체가 부재**(소멸 후 재출현 없음) | 후속(설계안 후보, **코드 아님**) — 세션 없는 수동 실행을 실 스토어에서 분리: `_unattributed` 를 Check 7 분모에서 제외하거나 `diag-` 계열로 강등. `HOOK-VISIBILITY-DESIGN.md` 또는 `INCIDENT-2026-09-03-hook-payload-contract.md` 에 교차 참조. **미확인 3건: ① 그 파일의 내용 ② 쓰기 주체(정황: 팀원이 `session_id` 없는 호스트 형태 페이로드를 디스패처에 파이프한 프로브 — 추론) ③ 삭제 주체(코드에 스토어 삭제 0건 → 수동 정리 추론)** |
+| 13 | `plugins/artibot/scripts/hooks/auto-team-trigger.js:372`·`:376` — **`--no-team` 옵트아웃 회귀** | 리라이터가 플래그를 제거한 본문을 `payload.user_prompt` 에 넣고, `:372` 의 `extractUserPromptText(hookData)` 가 그것을 1순위로 읽는다 → `:376` 의 `NO_TEAM_FLAG.test(prompt)` 가 **원문을 못 본다**(`NO_TEAM_FLAG = /--no-team\b/i`, `:59`). **오늘 수리로 비로소 도달 가능해진 잠복 결함** — HEAD 에선 두 훅 다 프롬프트를 못 읽어 잠복했다 | 후속(코드) — **payload 팀원이 커밋 전 수리 중**(원문 `hookData.prompt` 에서 감지, 디스패처 체인 테스트 + RED 증명) |
+| 14 | `plugins/artibot/hooks/hooks.json:169` `"timeout": 15000` | effortpath 지적: 호스트 문서상 단위가 **초**라면 4.2시간이 된다. **⚠️ 기록자 실측 — 이 지적은 `:169` 에 한정되지 않는다**: 같은 파일의 모든 timeout 이 동일 척도다(`:13` 30000 · `:27~:99` 5000 ×7 · `:113` 30000 · `:127` 8000 · `:169` 15000). 단위가 초라면 30000 = **8.3시간**이 되므로 **전부 이상해진다** — 즉 쟁점은 "이 줄의 값"이 아니라 **파일 전체의 단위 규약**이다. 15000 은 8000 과 30000 사이라 이상치도 아니다 | 확인 요망 — **의도·단위 규약 미확인, 범위 밖.** 호스트 문서를 확인하지 않았다 |
+| 15 | `plugins/artibot/scripts/hooks/_userprompt-dispatcher.js:146` 주석 "fulfillment order" | 원문 "…followed by the parallel contributors in **fulfillment order**" 는 **틀렸다**. `:212` 의 `Promise.allSettled` 는 결과 배열을 **입력 순서**로 돌려준다(완료 순서가 아니다) → 디렉티브 선두 배치는 배열 순서로 **결정적**이다(effortpath 실측, 기록자 원문·`allSettled` 호출 위치 확인) | 후속(코드 주석) — **UPS 설계안 구현 시 정정.** 동작은 이미 결정적이라 버그 아님 |
+| 16 | **결정 스토어 2개가 서로 다른 루트로 갈라짐** — 이벤트는 projectRoot, 트레일은 pluginRoot | 이벤트 스토어는 결정 D 로 **projectRoot** `.artibot/runtime/decisions/` 가 됐는데, **트레일은 여전히 pluginRoot** 다: `plugins/artibot/lib/core/decision-trail.js`(**경로 확정 — `lib/observability/` 아님**) 3곳이 pluginRoot 를 고정한다: `:12` 헤더 "Storage: `runtime/decision-trail.json` at the plugin root" · `:22` `import { getPluginRoot } from './platform.js';` · `:32` `const DEFAULT_PATH = 'runtime/decision-trail.json';`. 루트 해석은 `:84` 주석대로 `process.env.CLAUDE_PLUGIN_ROOT`(via `getPluginRoot()`). 그 결과 `/doctor` Check 7 **S6** 의 근거 문장("both stores are written under the same resolved root")이 거짓이 됐다. 기록자 확인: config 가 이미 `commands/doctor.md` 를 갱신했다 — 옛 문장은 **소멸**했고(`grep "same resolved root"` 0건), `:188-192` 가 두 루트를 각각 라벨링해 보고하도록, `:191` 이 "2026-09-03 these are two different trees — see the S6 note below" 로, `:222-228` 이 "CAVEAT ON S6, since 2026-09-03 … Treat an S6 warn as 'check WHICH root each store resolved to'" 로 대체됐다 | 후속(설계안) — **트레일 이관은 이번 범위 밖.** 다음 결정으로 올릴 것. 현재는 S6 오독 방지 문구로만 막혀 있다 |
+
+**후속 12 귀속 해소 (2026-09-03 17:09, config 팀원 자기보고 — 등급: 추론 → 자기보고)**
+
+config 보고 원문 요지: "`getDecisionStoreDir` 기본값을 projectRoot 로 바꾸자 `CLAUDE_PLUGIN_ROOT` 로만
+격리하던 스위트들이 **실 리포 스토어에 픽스처를 쓰기 시작**했다. 첫 테스트 실행에서
+`.artibot/runtime/decisions/` 에 **11개 파일**이 생겨 삭제했고, 전 스위트 이진탐색으로 **9파일**을
+샌드박스 `.git` 마커 + 페이로드 `cwd` 로 재고정했다."
+
+- **쓰기 주체(미확인 ②) → config 의 이진탐색 테스트 실행**
+- **삭제 주체(미확인 ③) → config 의 수동 정리**
+- **파일 내용(미확인 ①) → 여전히 미확인**(파일 소멸, 복원 불가 가능성)
+
+**등급 표기**: 이것은 **config 자기보고**이며 **시각 대조는 실시하지 않았다** — checker-config 가 본
+16:43:22 출현·16:44:20 소멸과 config 의 실행 시각을 맞춰본 사람이 없다. "추론"에서 "자기보고"로
+한 등급 올라간 것이지 **실측 확인이 아니다.**
+
+**이 사건의 의미**: 후속 12 의 위험은 가설이 아니라 **실제로 발생했다.** 메커니즘 확정 →
+**실발생 1회**로 승격한다. 즉 리포 루트 스토어 오염은 "일어날 수 있다"가 아니라 "이미 일어났고
+사람이 손으로 지웠다".
+
+재고정된 9파일(기록자 실재 확인 — 9/9 전부 존재):
+`tests/hooks/` 의 `runtime-prompt-decision-wiring` · `runtime-prompt-memory-instrumentation` ·
+`runtime-prompt` · `runtime-prompt-effort-inject` · `runtime-prompt-effort-order` ·
+`silent-fail-stderr` · `userprompt-dispatcher`, 그리고 `tests/e2e/runtime-flow.test.js` ·
+`tests/runtime/middleware/decision-events-wiring.test.js`.
+
+**⚠️ 리더 인용 정정**: 마지막 항목을 "`userprompt-dispatcher.test.js:285` 의 `cwd: PLUGIN_ROOT` 스폰"
+이라 했으나, `:285` 는 `hookSpecificOutput` 픽스처 안이다. 해당 수정은 **`:317-325`** 의 `spawn` 이며
+그 주석이 사건을 그대로 적고 있다 — "since 2026-09-03 the decision store resolves from the PROJECT ROOT
+of the cwd … Spawning from PLUGIN_ROOT put this suite's recorder-stats line in the repository's own store
+— the exact 'fixture data in the store /doctor reads' failure this file's header says it exists to avoid."
+현재 값은 `cwd: sandboxCwd`(`:325`).
+
+**checker-apply F5 — no-op (반영 불필요)**: "`fixture substantive` 행이 아직 보류" 라는 지적은 **기록자의 확정 갱신 이전 스냅샷**을 본 것이다. 해당 행은 16:4x 에 이미 확정으로 갱신됐고 리더가 재확인했다. **F5 는 이미 반영됨(16:4x).**
+
+**설계안 정본 각주(가시성)**: 훅 실패 가시성은 **`HOOK-VISIBILITY-DESIGN.md`(23,162 B)가 통합 정본**이며
+저장 위치는 홈 스코프 `~/.claude/artibot/runtime/hook-errors.ndjson` 이다.
+`DESIGN-HOOK-FAILURE-VISIBILITY.md`(11,837 B)는 **리다이렉트 문서일 뿐** — 내용 정본으로 인용하지 말 것.
+(기록자 실측: 두 파일 모두 `.artibot/guides/v5-design/` 에 실재)
+
+**`ARTIBOT.md` 확인 결과: 손댈 것 없음.** `docs/adr`·`.artibot/adr`·`B2` 어느 문자열도 **0건**이라
+`artibot-entry-parity` 게이트가 지키는 그 파일은 이번 B2 변경으로 거짓이 되지 않았다.
+
+**1번은 단순 후속이 아니라 게이트 사각지대다.** 게이트를 만들면 그 게이트가 못 보는 것을 옆에 적으라는
+규율에 따라 여기 남긴다: **B2 이행 직후 `.artibot/adr/` 안의 링크는 어떤 게이트도 검사하지 않는다.**
+
+**PRD-SPLIT 자기 갱신 처리(기록자, 2026-09-03 16:5x) — 완료**
+
+그 문서 `:283-289` 는 **"B2 *이행* 시"** 갱신하라고 요구했다. 16:4x 관측에서는 이행 미완이라 결정 상태만
+갱신하고 번호 재작성을 미뤘으나, **16:5x 재측정에서 이행이 완료돼 재작성까지 수행했다.**
+
+이행 실측(`ls` · `git status --porcelain`): `.artibot/adr/` 에 **ADR-001~010 + INDEX.md**,
+구 경로 `docs/adr/`·`plugins/artibot/docs/adr/` **둘 다 소멸**. 플러그인 5건 `git mv`(인덱스 `R` 5건),
+split 5건은 **ADR-006~010 재번호**(untracked — `git add` 는 apply 담당).
+
+PRD-SPLIT 에 수행한 갱신: frontmatter `linked_adrs` → ADR-006~010 · `superseded_linked_adrs` →
+`superseded_linked_adrs_note`(r2 초안 번호와 B2 재번호가 **값이 같아지므로** 구분 문장으로 대체) ·
+본문 `**연관 ADR**` 줄 · 상태 문단. **이것이 이 세션에서 유일하게 append-only 가 아닌 편집이다**
+(numstat 20/5 — 삭제 5줄은 전부 제자리 교체분).
+
+**이 결정 기록의 버전관리 정본은 여기다.** 같은 §5 결정 내용이
+`reports/AUTOPILOT/ap-20260902-062936-tyc5j4.md` §5 에도 들어가 있으나, **그 보고서는 git 추적 대상이 아니다**
+(`.gitignore:73` 의 `reports/*`, 재포함은 `!reports/SPLIT/` 뿐 — `git check-ignore` exit 0). 따라서 나중에 이
+결정을 찾는 사람은 **`ARTIBOT-5.0-DESIGN.md` 부록 0-2 후속(이 절)** 을 정본으로 삼아야 한다.

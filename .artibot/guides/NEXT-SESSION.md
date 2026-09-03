@@ -58,7 +58,7 @@
 > cwd 의존 수정 + 전역 census(`e4d7d366`) ③ **artibot 플러그인이 미등록 상태였음을
 > 발견**(캐시 orphaned 2026-08-23, 훅 전용 산출물 3종이 07-10 부터 정지) → 리더가
 > 재등록 + 미러/캐시를 ac988452 신배선으로 재구축. **다음 세션 시작 시 훅이 처음
-> 로드된다** — 프롬프트 1회 후 `<pluginRoot>/runtime/decisions/` 에 non-diag ndjson
+> 로드된다** — 프롬프트 1회 후 **`<projectRoot>/.artibot/runtime/decisions/`** 에 non-diag ndjson
 > 생성 여부가 P0 관측. ④ checkpoint 샌드박스 탈출 수정(`afedb3c9`): ARTIBOT_STATE_DIR
 > seam + vitest setupFiles 기본 배선 + 발행-home 유효범위 가드 — 실 사용자 상태
 > 오염(checkpoints.json 100/100 픽스처) 종식, 오염분은 삭제됨.
@@ -71,9 +71,16 @@
 | # | 작업 | 근거 |
 |---|---|---|
 | P0 | **다음 릴리즈에서 라이브 실증 2건 관측** — ① `wait_for_green` 첫 회차 로그가 `total=N (N>0)` 인지 (f3505fd9 의 persist-credentials 수정 실증. 0건이면 rc=2 가 2분 만에 escalate — 그땐 PAT 토큰 종류가 원인) ② 릴리즈 전 사용자에게 `ARTIBOT_LANDING_PAT` 이 fine-grained **user** PAT 인지 확인 요청 | v4.51.0 ff 착지 실패(#114) 원인 = checkout persist-credentials 기본값이 GITHUB_TOKEN 을 영속 → 인라인 PAT 을 덮음(actions/checkout#181) → push 이벤트 미발생. 수정은 착지했으나 라이브 발화 0회 |
-| P1 | **decision-events 실세션 관측** — 슬래시 커맨드 몇 번 후 실제 플러그인 루트 `runtime/decisions/` 에 ndjson 이 쌓이는지. 이어서 `/doctor` Check 7 거짓 그린 처방(S3 게이트가 `current-effort.json#updatedAt` 24h 창 밖이면 기록 0건이어도 pass) + `current-effort.json` mtime(08-23)/updatedAt(07-10) 모순 규명(OneDrive 가설) | 구 P0 의 배선 결함은 d6fdd2fa 로 수정 완료(라이브 재현 recorded:2 실측). 남은 것은 실세션 관측과 Check 7 게이트 자체 |
+| P1 | **decision-events 실세션 관측** — 슬래시 커맨드 몇 번 후 **`<projectRoot>/.artibot/runtime/decisions/`** 에 ndjson 이 쌓이는지(*이 줄은 2026-08-28 당시 “실제 플러그인 루트 `runtime/decisions/`” 였다 — 경로가 바뀌었다*). 이어서 `/doctor` Check 7 거짓 그린 처방(S3 게이트가 `current-effort.json#updatedAt` 24h 창 밖이면 기록 0건이어도 pass) + `current-effort.json` mtime(08-23)/updatedAt(07-10) 모순 규명(OneDrive 가설) | 구 P0 의 배선 결함은 d6fdd2fa 로 수정 완료(라이브 재현 recorded:2 실측). 남은 것은 실세션 관측과 Check 7 게이트 자체 |
 | P2 | **/split limb 권한 모드 정렬** — limb 세션의 권한 모드 클래스가 리더와 달라 크로스세션 완료 보고가 "Held message" 로 걸림(사용자 수동 승인 요구, 무인 진행 깨짐). `/split open` 이 창을 띄울 때 리더와 같은 모드로 정렬 | 2026-08-28 라이브 런 실측. dispatch 자체는 실작동 확인(2e6c123f 첫 라이브 증거). Deny 해도 무해 — 완료 판정은 git 트레일러가 정본 |
 | P3 | stash-ref-isolation 타임아웃 처방(스폰 ~60회가 원인, 무부하 8.4s/30s 상한 — 스폰 축소 vs timeout 상향) + runtime/autopilot 잔여 test-engine-state 계열(런당 +11) 정리 배선 | 부하성 간헐 red, 재발 예측 가능 |
+
+> **경로 정정 각주(2026-09-03 결정 D)**: 위 두 곳(`:61`·`:74`)이 적고 있던 `<pluginRoot>/runtime/decisions/` 는
+> 더 이상 사실이 아니다. 오너 결정으로 decisions 기본 저장소가 **projectRoot `.artibot/runtime/decisions/`** 로
+> 바뀌었다(정본: `lib/observability/decision-events.js` 의 `DECISIONS_REL = ['.artibot','runtime','decisions']`
+> + `getDecisionStoreDir` 가 `projectRoot` → `resolveProjectRoot(cwd)` 순으로 해석). 이유는 `claude plugin update` 가
+> pluginRoot 를 교체하면 Observe KPI 분모가 통째로 사라지기 때문이다. 결정 원장:
+> `.artibot/guides/v5-design/ARTIBOT-5.0-DESIGN.md` 「부록 0-2 후속. 오너 결정 (2026-09-03 확정)」.
 
 ## 2026-08-30 세션 총괄 (519e2529 → f3505fd9, 2커밋 — hee 머신)
 
