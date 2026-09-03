@@ -21,9 +21,16 @@ import { syncTodo as syncPlanState } from './plan-state.js';
 
 /** @typedef {() => Date} NowFn */
 
+/**
+ * Directory basename per kind.
+ *
+ * PRD is still rooted at `docs/PRD`. ADR is NOT rooted at a fixed parent any
+ * more — see {@link ADR_SEARCH_DIRS} and {@link resolveAdrDir}. This map keeps
+ * the basename only, and `kindDir()` decides the parent.
+ */
 const KIND_DIRS = { prd: 'PRD', adr: 'adr' };
-/** Display labels for index headings. `docs/adr` is lowercase on disk; the
- *  heading is not, so the two must not share one map. */
+/** Display labels for index headings. The ADR directory is lowercase on disk;
+ *  the heading is not, so the two must not share one map. */
 const KIND_LABELS = { prd: 'PRD', adr: 'ADR' };
 const ARCHIVE_DIRNAME = '_archive';
 const STALE_DAYS = 90;
@@ -135,7 +142,74 @@ async function atomicWriteText(filePath, content) {
 }
 
 /**
- * Scan a `docs/adr/` directory for the highest `ADR-NNN-` number.
+ * Where an ADR series may live, in precedence order.
+ *
+ * Owner decision **B2** (2026-09-03) made `.artibot/adr/` the canonical ADR
+ * series for this repo. This module ships to OTHER projects too, so the path is
+ * resolved by SEARCH rather than hardcoded — hardcoding Artibot's own layout
+ * would make `/plan --adr` write `.artibot/adr/` into a repo that has no
+ * `.artibot/` at all.
+ *
+ * Kept in lockstep with `commands/adr.md` (`--save` default + Execution Flow
+ * step 2). If you change one, change the other: they are two declarations of
+ * the same rule and nothing but this comment holds them together.
+ *
+ * @type {readonly string[][]}
+ */
+const ADR_SEARCH_DIRS = Object.freeze([
+  ['.artibot', 'adr'],
+  ['docs', 'adr'],
+  ['adr'],
+]);
+
+/**
+ * Resolve which directory holds (or should hold) this project's ADR series.
+ *
+ * Order:
+ *   1. The single search dir that already CONTAINS `ADR-*.md`. Two or more is
+ *      an error, not a pick — silently choosing one is how the repo ended up
+ *      with two series numbered 001~005 that B2 had to untangle. Numbering off
+ *      one series while another exists mints a duplicate number.
+ *   2. Otherwise the first search dir that merely exists (empty but intended).
+ *   3. Otherwise a new directory: `.artibot/adr` when the project already has
+ *      an `.artibot/` (Artibot-managed — B2's canon), else `docs/adr`, the
+ *      conventional location for everyone else. This is why a plain project is
+ *      byte-for-byte unaffected by B2.
+ *
+ * @param {string} projectRoot
+ * @returns {Promise<string>} Absolute directory path.
+ * @throws {Error} when two or more directories already hold an ADR series.
+ */
+async function resolveAdrDir(projectRoot) {
+  const candidates = ADR_SEARCH_DIRS.map((seg) => path.join(projectRoot, ...seg));
+
+  const populated = [];
+  const present = [];
+  for (const dir of candidates) {
+    if (!(await exists(dir))) continue;
+    present.push(dir);
+    const files = await listFiles(dir, '.md');
+    if (files.some((f) => /^ADR-\d+/i.test(path.basename(f)))) populated.push(dir);
+  }
+
+  if (populated.length > 1) {
+    throw new Error(
+      `ADR series found in ${populated.length} directories `
+      + `(${populated.map((d) => path.relative(projectRoot, d)).join(', ')}). `
+      + 'Refusing to write: numbering off one while the other exists creates a '
+      + 'duplicate ADR number. Consolidate to one directory first (decision B2).',
+    );
+  }
+  if (populated.length === 1) return populated[0];
+  if (present.length > 0) return present[0];
+
+  return (await exists(path.join(projectRoot, '.artibot')))
+    ? path.join(projectRoot, '.artibot', 'adr')
+    : path.join(projectRoot, 'docs', 'adr');
+}
+
+/**
+ * Scan an ADR directory for the highest `ADR-NNN-` number.
  * @param {string} adrDir
  * @returns {Promise<number>} Highest number found, or 0 if none.
  */
@@ -201,19 +275,29 @@ function normalizeKind(kind) {
  * Writing the wrong directory quietly is worse than failing, so this is now
  * fail-closed; every caller wraps it and surfaces `{ ok: false, error }`.
  *
+ * Async since B2: the ADR directory is SEARCHED, not computed (see
+ * {@link resolveAdrDir}), and that touches the filesystem. Every one of the
+ * four call sites was already inside an async function wrapped in try/catch
+ * returning `{ ok: false, error }`, so the `resolveAdrDir` two-series throw
+ * surfaces the same way the unknown-kind TypeError already did.
+ *
  * @param {string} projectRoot
  * @param {string} kind - 'prd' | 'adr' (case-insensitive)
- * @returns {string}
+ * @returns {Promise<string>}
  * @throws {TypeError} when `kind` is not a known artifact kind.
+ * @throws {Error} when `kind` is 'adr' and two directories hold a series.
  */
-function kindDir(projectRoot, kind) {
+async function kindDir(projectRoot, kind) {
   const k = normalizeKind(kind);
   if (!k) {
     throw new TypeError(
       `unknown artifact kind: ${JSON.stringify(kind)} (expected 'prd' or 'adr')`,
     );
   }
-  return path.join(projectRoot, 'docs', KIND_DIRS[k]);
+  // PRD keeps its fixed root. B2 decided the ADR series only; moving PRD is a
+  // separate decision and is deliberately NOT bundled in here.
+  if (k === 'prd') return path.join(projectRoot, 'docs', KIND_DIRS.prd);
+  return resolveAdrDir(projectRoot);
 }
 
 /**
@@ -492,7 +576,9 @@ function renderAdr({ number, title, options, decision, rationale, when }) {
 }
 
 /**
- * Create the next ADR under `docs/adr/` with auto-incremented number.
+ * Create the next ADR under this project's ADR directory (resolved by
+ * {@link resolveAdrDir} — `.artibot/adr/` for an Artibot-managed repo,
+ * `docs/adr/` otherwise) with an auto-incremented number.
  * Caller decides *whether* a real decision exists; this only generates.
  *
  * NOT idempotent, by design. An ADR number is the decision's identity, so two
@@ -520,7 +606,10 @@ export async function ensureADR({ projectRoot, title, options, decision, rationa
     if (!decision) return { ok: false, error: 'decision required' };
 
     const when = resolveNow(now);
-    const dir = path.join(projectRoot, 'docs', 'adr');
+    // Was `path.join(projectRoot, 'docs', 'adr')`. That hardcode is what
+    // created the root `docs/adr/` series B2 had to renumber — one
+    // `/plan --adr` run would have recreated it right after the migration.
+    const dir = await kindDir(projectRoot, 'adr');
     const number = (await highestAdrNumber(dir)) + 1;
     const pad = String(number).padStart(3, '0');
     const base = `ADR-${pad}-${slugify(title)}`;
@@ -580,7 +669,7 @@ export async function listArtifacts({ projectRoot, kind = 'prd', filter = 'all',
   try {
     if (!projectRoot) return { ok: false, error: 'projectRoot required' };
     const nowDate = resolveNow(now);
-    const dir = kindDir(projectRoot, kind);
+    const dir = await kindDir(projectRoot, kind);
     const files = await listFiles(dir, '.md');
     const items = [];
     for (const file of files) {
@@ -627,7 +716,7 @@ export async function indexArtifacts({ projectRoot, kind = 'prd', now }) {
   try {
     if (!projectRoot) return { ok: false, error: 'projectRoot required' };
     const nowDate = resolveNow(now);
-    const dir = kindDir(projectRoot, kind);
+    const dir = await kindDir(projectRoot, kind);
 
     // Main index: active records only (excludes done/superseded/archive).
     const active = await listArtifacts({ projectRoot, kind, filter: 'active', now });
@@ -679,7 +768,7 @@ export async function archiveStale({
   try {
     if (!projectRoot) return { ok: false, error: 'projectRoot required', dryRun };
     const nowDate = resolveNow(now);
-    const dir = kindDir(projectRoot, kind);
+    const dir = await kindDir(projectRoot, kind);
     const archiveDir = path.join(dir, ARCHIVE_DIRNAME);
     const wanted = new Set(statuses);
     const files = await listFiles(dir, '.md');
@@ -753,7 +842,7 @@ export async function supersede({ projectRoot, kind = 'prd', oldSlug, newPath, n
     if (!oldSlug) return { ok: false, error: 'oldSlug required' };
     if (!newPath) return { ok: false, error: 'newPath required' };
     resolveNow(now); // validate clock arg for call-site consistency
-    const dir = kindDir(projectRoot, kind);
+    const dir = await kindDir(projectRoot, kind);
     const oldPath = path.join(dir, `${oldSlug}.md`);
     let raw;
     try { raw = await fs.readFile(oldPath, 'utf-8'); } catch {

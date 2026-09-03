@@ -25,7 +25,17 @@ lifecycle: plan
 - `option-a vs option-b [vs option-c ...]`: 비교 대상 (자연어 OK — "PostgreSQL이랑 MongoDB 중에" 같은 표현도 정규화)
 - `--depth [level]`: `quick` (핵심 결정만, ~2K) | `standard` (7섹션 전체, ~5K) | `deep` (모든 섹션 + 외부 리서치, ~10K)
 - `--audience [level]`: `dev` (기술자 중심) | `mixed` (개발자+PM) | `non-tech` (창업자/디자이너 친화, 한국어 위주, 어려운 용어 풀어쓰기)
-- `--save [path]`: ADR 파일 저장 경로 (기본: `docs/adr/ADR-{NNN}-{slug}.md`)
+- `--save [path]`: ADR 파일 저장 경로. 기본값은 **한 값이 아니라 순서**다 — 이 커맨드는
+  남의 프로젝트로도 출하되므로 Artibot 자신의 경로를 만인의 기본값으로 박으면 안 된다:
+  1. 2단계가 찾은 **그 프로젝트의 기존 ADR 디렉터리**. 판정은 두 단계다 — 먼저 `ADR-*.md` 를
+     **실제로 담고 있는** 디렉터리를 찾고, 그런 곳이 없으면 **비어 있더라도 존재하는** 첫
+     디렉터리를 쓴다(빈 디렉터리는 "여기에 두기로 한 자리"라는 뜻이므로 무시하지 않는다)
+  2. 없고 `.artibot/` 이 있으면 `.artibot/adr/ADR-{NNN}-{slug}.md` — Artibot 관리 프로젝트의 정본
+  3. 둘 다 없으면 `docs/adr/ADR-{NNN}-{slug}.md`
+
+  Artibot 리포 자신의 정본은 `.artibot/adr/` 다. 결정 **B2**(오너, 2026-09-03)로 ADR 계열을
+  그 한 곳으로 단일화했다 — 그 전에는 `plugins/artibot/docs/adr/` 와 루트 `docs/adr/` 두 계열이
+  같은 001~005 를 각각 써서 같은 번호가 서로 다른 결정을 가리켰다.
 - `--scale [factor]`: 확장성 시나리오 배수 (기본 `10x`. `3x`, `100x`도 가능)
 
 ## Execution Flow
@@ -34,7 +44,14 @@ lifecycle: plan
 
 2. **Context Gathering**: 현재 프로젝트 컨텍스트를 자동 수집:
    - `package.json` / `requirements.txt` / `go.mod` / `pyproject.toml` — 기존 스택
-   - `docs/adr/` 폴더 존재 시 기존 ADR 번호 확인 (auto-increment)
+   - **기존 ADR 디렉터리 탐색** — `.artibot/adr/` · `docs/adr/` · `adr/` 순.
+     `ADR-*.md` 를 **실제로 담은** 디렉터리가 1순위, 없으면 **비어 있어도 존재하는** 디렉터리가
+     2순위다. 찾은 디렉터리가 그 프로젝트의 정본이고, 거기 있는 최대 번호 +1 로
+     auto-increment 한다. **ADR 이 실제로 담긴 곳이 두 곳 이상이면 새 파일을 쓰지 말고
+     계열이 둘이라고 보고**하라 — 한쪽 번호만 보고 발번하면 다른 계열의 같은 번호와 충돌하고,
+     그것이 B2 가 없앤 결함이다.
+     (이 규칙의 코드 쪽 정본은 `lib/planning/artifacts.js#resolveAdrDir` 다. 두 선언을 묶는
+     게이트는 없으니 한쪽을 고치면 반드시 다른 쪽도 고쳐라.)
    - `README.md` / `CLAUDE.md` — 프로젝트 규모, 제약
    - 최근 commit log — 팀 활동성 / 기술 추가 트렌드
    - 비교 대상 관련 파일 grep — 이미 일부 채택돼 있나
@@ -57,7 +74,11 @@ lifecycle: plan
 
 6. **TL;DR 작성**: 최상단에 1~2줄 결론. 비개발자가 첫 줄만 읽고 결정할 수 있게.
 
-7. **Save**: `--save` 경로 또는 기본 `docs/adr/ADR-{NNN}-{slug}.md`에 저장. 폴더 없으면 `Bash mkdir -p` 후 생성.
+7. **Save**: `--save` 경로, 없으면 위 `--save` 항목의 3단 순서(기존 ADR 디렉터리 →
+   `.artibot/adr/` → `docs/adr/`)로 결정한 경로에 `ADR-{NNN}-{slug}.md` 저장.
+   폴더 없으면 `Bash mkdir -p` 후 생성.
+   **주의**: 그 경로가 `.gitignore` 에 걸리면 ADR 이 추적되지 않는다(정본이 로컬에만 남는다).
+   저장 후 `git check-ignore --no-index -q <경로>` 로 확인하고, ignored 면 그 사실을 보고하라.
 
 8. **Report**: 콘솔에 요약 + 저장 경로 출력.
 
@@ -67,7 +88,7 @@ lifecycle: plan
 ═══════════════════════════════════════════════════
   ADR-{NNN}: {결정 제목}
 ═══════════════════════════════════════════════════
-저장: docs/adr/ADR-{NNN}-{slug}.md
+저장: {ADR 디렉터리}/ADR-{NNN}-{slug}.md
 대상: {선택지 A} vs {선택지 B} [vs {선택지 C}]
 청중: dev | mixed | non-tech
 
@@ -148,7 +169,7 @@ ADR을 출력하기 전 자체 체크:
 ```
 사용자: "PostgreSQL이랑 MongoDB 중에 뭐가 나아?"
 → /adr 자동 트리거 (audience=mixed)
-→ 7-섹션 ADR 출력 + docs/adr/ADR-001-primary-database.md 저장
+→ 7-섹션 ADR 출력 + {ADR 디렉터리}/ADR-001-primary-database.md 저장
 
 사용자: "React Query, SWR, RTK Query 셋 중에 고민이야"
 → /adr 자동 트리거 (3개 선택지, audience=dev 추정)

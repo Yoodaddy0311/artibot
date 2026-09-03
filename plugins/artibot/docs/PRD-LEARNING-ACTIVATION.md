@@ -78,5 +78,5 @@
 
 ## 7. 참조
 - 진단 근거: 이 세션 (policies 디렉터리 부재, 스케줄러 미등록)
-- 관련: P3 `docs/PRD-EFFORT-DYNAMIC-WORKFLOW.md`, `docs/adr/ADR-001`, `lib/learning/grpo/effort-policy-updater.js` (폐기됨 — GRPO retirement, `artibot.config.json:936`)
+- 관련: P3 `docs/PRD-EFFORT-DYNAMIC-WORKFLOW.md`, `.artibot/adr/ADR-001-effort-workflow-fusion.md`, `lib/learning/grpo/effort-policy-updater.js` (폐기됨 — GRPO retirement, `artibot.config.json:936`)
 - 트레이너 패턴: `scripts/setup-nightly-trainers.js`, `scripts/hooks/nightly-skill-policy-trainer.mjs`

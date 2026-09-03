@@ -18,7 +18,7 @@ Four parallel-execution mechanisms in Artibot. Their engines are distinct and mu
 
 **split** — Process-cardinality surface (**`/split`**): the human opens **N concurrent Claude Code windows** (each its own worktree "limb" with disjoint file ownership); the plugin plans, briefs, observes completion via git trailers, and integrates. Orthogonal to the four mechanisms above — every window may run any of them — and it never auto-fires. Not a fifth mechanism. See [Process Cardinality (orthogonal)](ORCHESTRATION-ROUTING.md#process-cardinality-orthogonal).
 
-**sequence** — `lib/planning/session-sizer.js` recommendation (`recommendation: 'sequence'`, `sequenceInto: k`) that an oversized task be cut into **k successive sessions**. Renamed from `split` on 2026-08-26 (root `docs/adr/ADR-001`, untracked design record) so that the word `split` means concurrent windows only.
+**sequence** — `lib/planning/session-sizer.js` recommendation (`recommendation: 'sequence'`, `sequenceInto: k`) that an oversized task be cut into **k successive sessions**. Renamed from `split` on 2026-08-26 (`.artibot/adr/ADR-006-split-어휘-소유권-sizer-라벨을-sequence-로-개명.md`) so that the word `split` means concurrent windows only. That record was root `docs/adr/ADR-001` when this line was written; decision B2 (2026-09-03) moved it into `.artibot/adr/` and **renumbered it to 006**, because the destination series already had an unrelated ADR-001. Prefix-only rewrites of `docs/adr/ADR-001` are wrong here — that number now belongs to `ADR-001-effort-workflow-fusion.md`.
 
 ---
 

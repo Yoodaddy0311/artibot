@@ -108,7 +108,7 @@ DIVERGE(발산) 엔진을 돌리기 **전에** "이 작업이 진짜 필요한�
   - `recommendation==='ok'`: 그대로 진행. 기본 밴드는 `session`(2~4h), `--size`로 조정.
 - **PRD 기본 생성 (ultraplan 기본 산출)**: `writePRD()`로 종합된 플랜을 PRD 문서(`docs/PRD/<slug>-<date>.md`)로 저장한다. ultraplan은 철저 모드이므로 PRD가 **기본 산출물**이다 (`/plan`과 달리 옵트인 아님). Phase 3에서 ADR을 만들었다면 그 식별자를 **문자열 배열**(`['ADR-007']`)로 `linkedAdrs`에 넘겨 PRD 헤더에 cross-link한다.
 - **TODO 추적 기본**: `syncTodo()`로 `.plan-state.json` 저장 → 세션 간 추적. PRD 본문에 이 state 경로를 cross-link로 명시한다.
-- **INDEX 갱신 (필수)**: `writePRD()` 직후 `indexArtifacts({ kind: 'prd' })`, Phase 3에서 `ensureADR()`를 호출했다면 그 직후 `indexArtifacts({ kind: 'adr' })`를 호출해 `docs/PRD/INDEX.md` · `docs/adr/INDEX.md`를 갱신한다. 빠뜨리면 ultraplan 산출물만 인덱스에 없는 상태가 된다.
+- **INDEX 갱신 (필수)**: `writePRD()` 직후 `indexArtifacts({ kind: 'prd' })`, Phase 3에서 `ensureADR()`를 호출했다면 그 직후 `indexArtifacts({ kind: 'adr' })`를 호출해 `docs/PRD/INDEX.md` 와 ADR 디렉터리의 `INDEX.md`(경로는 resolveAdrDir 이 결정 — 이 리포는 `.artibot/adr/INDEX.md`)를 갱신한다. 빠뜨리면 ultraplan 산출물만 인덱스에 없는 상태가 된다.
 - 네 호출(`sizePlan`/`writePRD`/`syncTodo`/`indexArtifacts`) 모두 공유 레이어(`lib/planning/session-sizer.js` · `lib/planning/artifacts.js`)를 통해 수행한다 (아래 "Artifacts Integration" 참조 — 직접 재구현 금지).
 - 실행 경로 추천(직교 2축):
   - **자리 비움/대형 무인작업** → `/autopilot "<task>" --goal "<검증가능 종료조건>" --max {autopilot.maxHint} --budget {autopilot.budgetHint}` (사이징 결과를 max/budget에 매칭)
@@ -152,7 +152,8 @@ await writePRD({ projectRoot, slug, title, sections, linkedAdrs, now }) → { ok
   // ensureADR() 반환 객체를 그대로 넘겨도 ADR-NNN 으로 정규화된다. 해석 불가 항목은
   // 렌더하지 않고 반환값 droppedAdrLinks 로 개수를 신고한다 (0 이면 필드 없음).
 await ensureADR({ projectRoot, title, options, decision, rationale, now }) → { ok, adrPath, number }
-  // docs/adr/ADR-NNN-slug.md 생성. **멱등이 아니다** — 같은 인자로 다시 부르면
+  // 프로젝트의 ADR 디렉터리에 ADR-NNN-slug.md 생성 (경로는 resolveAdrDir 이 결정:
+  // `.artibot/adr/` → `docs/adr/` → `adr/`). **멱등이 아니다** — 같은 인자로 다시 부르면
   // 새 번호의 ADR 이 하나 더 생긴다(ADR 번호가 곧 정체성이라 설계상 그렇다).
   // 같은 결정을 두 번 기록하지 마라. 기존 결정을 바꿀 때는 supersede() 를 쓴다.
   // options=비교한 실선택지(2개 이상).
@@ -284,7 +285,7 @@ EXECUTION HANDOFF
 > 추천 경로: /autopilot | /team | inline  +  근거
 > 자율실행: /autopilot "<task>" --goal "<검증가능 종료조건>" --max {autopilot.maxHint} --budget {autopilot.budgetHint}
 > (split 시) 세션 1: <goal> · 세션 2: <goal> · …
-> PRD: docs/PRD/<slug>-<date>.md · ADR: docs/adr/ADR-NNN-slug.md|none · TODO: docs/PRD/.plan-state.json (N tasks)
+> PRD: docs/PRD/<slug>-<date>.md · ADR: <ADR 디렉터리>/ADR-NNN-slug.md|none · TODO: docs/PRD/.plan-state.json (N tasks)
 ```
 
 > **정직성**: 토큰→시간은 휴리스틱 추정(밴드+confidence)이며 보장 아님. autopilot의 `--max`/`--budget`이 실제 하드스톱이다.

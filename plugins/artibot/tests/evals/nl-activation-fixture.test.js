@@ -30,22 +30,25 @@
  *  - **NL activation accuracy.** The last block DOES run every case through
  *    `compileMission` (`lib/mission/compiler.js#compileMission`), but it records
  *    agreement as a divergence ledger, not a score. Measured 2026-09-03 at
- *    `stage: 'prompt'`, `system: 'system1'`: 6 of the 10 cases agree on the
+ *    `stage: 'prompt'`, `system: 'system1'`: 7 of the 10 cases agree on the
  *    `substantive` axis. One case is exempt by name in `UNSCORED_CASES`, so the
- *    scorable denominator is 9 → 6/9; the exempt set is asserted, not inferred
+ *    scorable denominator is 9 → 7/9; the exempt set is asserted, not inferred
  *    from a missing field. It was 5/10 until T-22 fixed the Korean clause
- *    connective on 2026-09-03; the ledger below caught that landing by going
- *    red, which is what it is for. **n=10 gives 10 percentage points of resolution
+ *    connective on 2026-09-03, then 6/9; the `substantive_stage` qualifier added
+ *    the same day resolved the last non-call-shape entry. The ledger below caught
+ *    both landings by going red, which is what it is for. **n=10 gives 10 percentage points of resolution
  *    per case, so this number is NOT a basis for the §3.7 ≥90% exit criterion.**
  *    That bar is Shadow work against real user choices; this file is regression
  *    protection only.
- *  - **The three divergences are recorded, not resolved.** Their causes are
- *    written beside the ledger below. Two are an artifact of the three-argument
- *    call shape (S4 needs `intentConfidence`, S6 needs `activeMission` +
- *    `followUp` — neither is derivable from prompt text); the third is a stage
- *    mismatch in the fixture's own `substantive` field. A fourth entry, a Korean
- *    clause-connective gap in the extractor, was removed on 2026-09-03 after
- *    T-22 fixed it. None is fixed here; T-47 does not own the compiler.
+ *  - **The two remaining divergences are recorded, not resolved.** Their causes
+ *    are written beside the ledger below. BOTH are an artifact of the
+ *    three-argument call shape (S4 needs `intentConfidence`, S6 needs
+ *    `activeMission` + `followUp` — neither is derivable from prompt text), so
+ *    neither is a compiler defect. Two earlier entries are gone: a Korean
+ *    clause-connective gap the extractor fix (T-22) closed, and a stage mismatch
+ *    in the fixture's own `substantive` field, closed by the `substantive_stage`
+ *    qualifier. Neither was fixed by editing an expectation to match output —
+ *    T-47 does not own the compiler and did not touch it.
  *  - **Whether the expected values are correct.** `expect` blocks are
  *    transcriptions of design clauses. This gate cannot tell a faithful
  *    transcription from a wrong one; `source` exists so a human can re-judge.
@@ -93,6 +96,7 @@ const EXPECT_VOCAB = Object.freeze([
   'command_activation',
   'requested_target_not_empty',
   'substantive',
+  'substantive_stage',
   'substantive_signals',
   'activation_suppressed_by',
   'prompt_time_verdict',
@@ -109,6 +113,38 @@ const PROMPT_TIME_VERDICTS = Object.freeze(['substantive', 'deferred']);
 
 /** Signals design 3.2 marks as decidable only at tool-call time. */
 const EXECUTION_TIME_SIGNALS = Object.freeze(['S1', 'S2']);
+
+/**
+ * Which stage a case's `substantive` field is stating a verdict FOR.
+ *
+ * Not a new vocabulary: these are the two values `compileMission` itself takes
+ * (`lib/mission/compiler.js:508` — `@param {'prompt'|'execution'} [input.stage]`).
+ * Absent means `'prompt'`, which is what nine of the ten cases mean today, so
+ * adding the key changed no existing case.
+ *
+ * Why the key had to exist. Design 3.3 issues in two stages, so ONE prompt has
+ * TWO substantive verdicts, and a field named `substantive` alone cannot say
+ * which one it holds. `split-upgrade-fidelity` states the execution-time
+ * verdict (true, via S1) while its own `prompt_time_verdict` says `deferred` —
+ * both correct, about different stages. The agreement ledger compares against
+ * the prompt stage, so without the qualifier it read the execution-time verdict
+ * as a prompt-time claim and booked a divergence that was nobody's defect. The
+ * fixture and the predicate now name the same stage; the compiler is unchanged.
+ */
+const SUBSTANTIVE_STAGES = Object.freeze(['prompt', 'execution']);
+
+/**
+ * What a case expects `compileMission(..., stage: 'prompt')` to return.
+ *
+ * For an execution-staged case that is `prompt_time_verdict`, not `substantive`
+ * — which is exactly what design 3.3 stage 1 decides.
+ */
+function expectedSubstantiveAtPromptStage(entry) {
+  if (entry.expect.substantive_stage === 'execution') {
+    return entry.expect.prompt_time_verdict === 'substantive';
+  }
+  return entry.expect.substantive;
+}
 
 /** Design §3.7 fixes this case verbatim; it is the first line by contract. */
 const CONSTITUTIONAL_CASE_ID = 'split-upgrade-fidelity';
@@ -299,6 +335,7 @@ describe('nl-activation.cases.jsonl — the constitutional first case', () => {
       command_activation: { plan: true, ultraplan: false, split: false },
       requested_target_not_empty: true,
       substantive: true,
+      substantive_stage: 'execution',
       substantive_signals: ['S1'],
       prompt_time_verdict: 'deferred',
     });
@@ -354,6 +391,31 @@ describe('nl-activation.cases.jsonl — substantive signals', () => {
       if (Array.isArray(signals) && signals.length > 0) {
         expect(substantive, `line ${record.lineNumber}`).toBe(true);
       }
+    }
+  });
+
+  it('keeps substantive_stage inside the two-value vocabulary the compiler itself takes', () => {
+    for (const record of caseRecords) {
+      const stage = record.value.expect.substantive_stage;
+      if (stage === undefined) continue;
+      expect(SUBSTANTIVE_STAGES, `line ${record.lineNumber}`).toContain(stage);
+    }
+  });
+
+  it('makes an execution-staged case state its prompt-stage verdict too', () => {
+    // The qualifier only pays for itself if the OTHER stage is also on record.
+    // Without `prompt_time_verdict` the case would say "this is not the prompt
+    // verdict" and then never say what the prompt verdict is — which leaves the
+    // agreement ledger with nothing to compare and would silently drop the case
+    // out of scoring. And an execution-staged verdict has to rest on a signal
+    // that is only decidable at execution time, or the qualifier is misapplied.
+    const executionOnly = new Set(EXECUTION_TIME_SIGNALS);
+    for (const record of caseRecords) {
+      if (record.value.expect.substantive_stage !== 'execution') continue;
+      const where = `line ${record.lineNumber}`;
+      expect(record.value.expect.prompt_time_verdict, where).toBeTypeOf('string');
+      const signals = record.value.expect.substantive_signals || [];
+      expect(signals.some((s) => executionOnly.has(s)), where).toBe(true);
     }
   });
 
@@ -525,7 +587,7 @@ describe('the structural validator itself rejects broken scenarios', () => {
 // Live compile — every case through the real classifier.
 //
 // This block answers "does the compiler agree with the fixture", and today the
-// answer is: on 6 of 10. That number is deliberately NOT asserted as a
+// answer is: on 7 of 10. That number is deliberately NOT asserted as a
 // threshold. A frozen score ratchets the wrong way, because improving the
 // compiler would turn it red. Instead the divergences are listed by id with
 // their cause, so BOTH directions are fail-closed: fixing one, or adding a new
@@ -535,30 +597,37 @@ describe('the structural validator itself rejects broken scenarios', () => {
 // T-22 taught the extractor the Korean clause connective. The ledger went red on
 // the next run, the entry was removed, and the case it covered is now asserted
 // as AGREEING below — a resolved divergence becomes a regression guard rather
-// than quietly disappearing.
+// than quietly disappearing. It happened a second time the same day: adding the
+// `substantive_stage` qualifier made `split-upgrade-fidelity` agree, so that
+// entry came out too. Note what did NOT happen either time — no expectation was
+// relaxed to match output. T-22 changed the extractor; the qualifier made the
+// fixture state which of design 3.3's two stages its verdict belongs to.
 //
 // Call shape is the one T-50 section 8 specified: {prompt, stage: 'prompt',
 // system: 'system1'}. That shape cannot supply `intentConfidence` (S4) or
-// `activeMission` + `followUp` (S6), which is why two divergences exist that
-// are nobody's defect — proven below by re-running those two prompts WITH those
-// inputs, where both signals fire correctly.
+// `activeMission` + `followUp` (S6), which is why the two remaining divergences
+// exist and are nobody's defect — proven below by re-running those two prompts
+// WITH those inputs, where both signals fire correctly.
+//
+// Because every case is compiled at `stage: 'prompt'`, the comparison target is
+// each case's PROMPT-stage expectation, not a bare `substantive` field —
+// see `expectedSubstantiveAtPromptStage`.
 // ---------------------------------------------------------------------------
 
 /** Signals design 3.2 marks as decidable at prompt time. */
 const PROMPT_STAGE_SIGNALS = Object.freeze(['S3', 'S4', 'S5', 'S6']);
 
 /**
- * Cases where the compiler prompt-stage verdict differs from the fixture
- * `substantive` field, with why. Measured 2026-09-03.
+ * Cases where the compiler prompt-stage verdict differs from the fixture's
+ * prompt-stage expectation, with why. Measured 2026-09-03.
  */
 const KNOWN_DIVERGENCES = Object.freeze({
-  'split-upgrade-fidelity':
-    'Fixture states the EVENTUAL verdict (S1, confirmed at tool time). At prompt '
-    + 'stage S1 is skipped by design 3.3, so the compiler says deferred — which is '
-    + 'exactly what the same case prompt_time_verdict field says. The fixture '
-    + 'substantive field carries no stage qualifier. Compiler verified correct: the '
-    + 'same prompt at stage execution with completion.expected_actions ["implement"] '
-    + 'returns substantive true, signals ["S1"].',
+  // Removed 2026-09-03: 'split-upgrade-fidelity'. It was never a compiler
+  // defect — the fixture stated the execution-time verdict while the ledger
+  // compared against the prompt stage. The `substantive_stage` qualifier makes
+  // the fixture say which stage it means, so the two now agree and the case is
+  // scored as AGREEING (a resolved divergence becomes a regression guard, the
+  // same treatment T-22's connective fix got). The compiler was not touched.
   'product-decision-required-s4':
     'Call-shape artifact, not a defect. S4 reads intentConfidence.'
     + 'product_decision_required, which question-gate supplies and prompt text '
@@ -668,10 +737,13 @@ describe('compileMission — fixture agreement ledger', () => {
     }
   });
 
-  it('diverges on exactly the three recorded cases, and no others', () => {
+  it('diverges on exactly the two recorded cases, and no others', () => {
     const diverged = compiled
       .filter(({ entry }) => !isUnscored(entry.id))
-      .filter(({ entry, result }) => result.substantive !== entry.expect.substantive)
+      // Compared against the PROMPT-stage expectation, because that is the stage
+      // `compiled` was produced at. Reading a bare `substantive` here was the
+      // stage mismatch that put split-upgrade-fidelity in the ledger.
+      .filter(({ entry, result }) => result.substantive !== expectedSubstantiveAtPromptStage(entry))
       .map(({ entry }) => entry.id)
       .sort();
     // Red in BOTH directions on purpose: a fixed divergence and a new one both
@@ -683,7 +755,7 @@ describe('compileMission — fixture agreement ledger', () => {
     for (const { entry, result } of compiled) {
       if (isUnscored(entry.id)) continue;
       if (Object.prototype.hasOwnProperty.call(KNOWN_DIVERGENCES, entry.id)) continue;
-      expect(result.substantive, entry.id).toBe(entry.expect.substantive);
+      expect(result.substantive, entry.id).toBe(expectedSubstantiveAtPromptStage(entry));
       const expectedPromptSignals = (entry.expect.substantive_signals || [])
         .filter((signal) => PROMPT_STAGE_SIGNALS.includes(signal));
       expect(result.signals, entry.id).toEqual(expectedPromptSignals);

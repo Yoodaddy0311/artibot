@@ -90,7 +90,8 @@ If the user names a real public figure without consent context, halt and offer a
 
 Ingest only LOCAL paths and pasted content. Approved sources:
 - Local git commits (`git log --author`)
-- ADR files under `docs/adr/`
+- ADR files under the project's ADR directory (`.artibot/adr/`, `docs/adr/`, or `adr/` —
+  see `lib/planning/artifacts.js#resolveAdrDir`)
 - PR review comments stored in local exports
 - User-pasted writing samples (code reviews, design docs, postmortems)
 

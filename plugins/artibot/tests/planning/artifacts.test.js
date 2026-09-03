@@ -262,6 +262,101 @@ describe('artifacts / ensureADR', () => {
 });
 
 // ---------------------------------------------------------------------------
+// ADR directory resolution (decision B2, 2026-09-03).
+//
+// `ensureADR` used to hardcode `path.join(projectRoot, 'docs', 'adr')`. That is
+// the line that minted the root `docs/adr/` series B2 had to renumber into
+// 006~010 — after the migration, one `/plan --adr` run would have recreated it.
+// The fix routes every ADR path through one resolver that SEARCHES.
+//
+// Why these tests exist even though the pre-existing 50 stayed green: they
+// stayed green precisely because a fresh `mkdtemp` root has no `.artibot/`, so
+// the fallback still yields `docs/adr`. That green proves the OLD path still
+// works and says nothing at all about the new branches. Every branch below is
+// unreachable from the old suite.
+// ---------------------------------------------------------------------------
+
+describe('artifacts / ensureADR — ADR 디렉터리 탐색 (B2)', () => {
+  let root;
+  beforeEach(() => { root = tmpRoot(); });
+  afterEach(() => { rmSync(root, { recursive: true, force: true }); });
+
+  const mk = (...seg) => mkdirSync(path.join(root, ...seg), { recursive: true });
+  const adr = (dirSeg, name) => writeFileSync(
+    path.join(root, ...dirSeg, name), '---\nstatus: active\nnumber: 1\n---\n# ADR-001: x\n',
+  );
+  const write = (title = 'Chosen Thing') => ensureADR({
+    projectRoot: root, title, options: ['A', 'B'], decision: 'A', now: fixedNow,
+  });
+
+  it('.artibot/ 가 없는 프로젝트는 docs/adr/ 을 쓴다 (회귀 없음)', async () => {
+    // B2 이후에도 외부 프로젝트는 그대로여야 한다. 이 단언이 무너지는 순간
+    // `/adr` 가 남의 리포에 `.artibot/` 를 새로 만들게 된다.
+    const res = await write('Primary Database');
+    expect(res.ok).toBe(true);
+    expect(res.adrPath).toBe(path.join(root, 'docs', 'adr', 'ADR-001-primary-database.md'));
+    expect(existsSync(path.join(root, '.artibot'))).toBe(false);
+  });
+
+  it('.artibot/ 가 있는 프로젝트는 .artibot/adr/ 에 쓴다 (B2 정본)', async () => {
+    mk('.artibot');
+    const res = await write('Primary Database');
+    expect(res.ok).toBe(true);
+    expect(res.adrPath).toBe(path.join(root, '.artibot', 'adr', 'ADR-001-primary-database.md'));
+  });
+
+  it('이미 docs/adr/ 계열이 있는 곳은 .artibot/ 가 있어도 그쪽을 이어 쓴다', async () => {
+    // 탐색이 "실재하는 계열" 우선이라는 것을 이 줄이 고정한다. 우선순위를
+    // 뒤집으면 기존 계열을 놔둔 채 .artibot/adr/ 에 001 부터 새로 시작해,
+    // 같은 번호가 서로 다른 결정을 가리키는 이중 계열이 다시 생긴다 —
+    // B2 가 정리한 바로 그 사고다.
+    mk('.artibot');
+    mk('docs', 'adr');
+    adr(['docs', 'adr'], 'ADR-001-existing.md');
+
+    const res = await write('Second Decision');
+    expect(res.ok).toBe(true);
+    expect(res.number).toBe(2);
+    expect(res.adrPath).toBe(path.join(root, 'docs', 'adr', 'ADR-002-second-decision.md'));
+    expect(existsSync(path.join(root, '.artibot', 'adr'))).toBe(false);
+  });
+
+  it('계열이 둘이면 쓰지 않고 오류를 낸다 (중복 번호 방지)', async () => {
+    // 둘 중 하나를 조용히 고르면 그쪽 최대번호 +1 로 써버리고, 다른 계열에 이미 그
+    // 번호가 있으면 같은 번호가 서로 다른 결정을 가리키게 된다. 이 리포가 001~005
+    // 중복을 실제로 겪은 경로다. 써버리는 것보다 멈추는 것이 옳다(fail-closed).
+    mk('.artibot', 'adr');
+    mk('docs', 'adr');
+    adr(['.artibot', 'adr'], 'ADR-001-canonical.md');
+    adr(['docs', 'adr'], 'ADR-001-stray.md');
+
+    const res = await write('Third Decision');
+    expect(res.ok).toBe(false);
+    expect(res.error).toMatch(/2 directories/);
+    expect(res.error).toMatch(/duplicate ADR number/);
+
+    // 자기검증: 거부는 말뿐이 아니라 실제로 파일을 안 만들었어야 한다.
+    expect(readdirSync(path.join(root, '.artibot', 'adr'))).toEqual(['ADR-001-canonical.md']);
+    expect(readdirSync(path.join(root, 'docs', 'adr'))).toEqual(['ADR-001-stray.md']);
+  });
+
+  it('indexArtifacts({kind:\'adr\'}) 가 ensureADR 과 같은 디렉터리를 본다', async () => {
+    // 한 곳만 고치고 다른 곳이 옛 경로를 보는 상태에 대한 회귀 가드다.
+    // 고치기 전에는 ensureADR 만 자체 하드코딩을 가졌고 indexArtifacts 는
+    // kindDir() 를 썼다 — 둘은 우연히 같았을 뿐이라, 한쪽만 움직이면 INDEX 가
+    // 빈 디렉터리에 쓰이고 새 ADR 은 색인에서 사라졌다.
+    mk('.artibot');
+    const made = await write('Indexed Decision');
+    expect(made.ok).toBe(true);
+
+    const idx = await indexArtifacts({ projectRoot: root, kind: 'adr', now: fixedNow });
+    expect(idx.ok).toBe(true);
+    expect(idx.indexPath).toBe(path.join(root, '.artibot', 'adr', 'INDEX.md'));
+    expect(readFileSync(idx.indexPath, 'utf-8')).toContain('ADR-001-indexed-decision');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // W1-3 (U2a) — unregistered PRD sections.
 //
 // renderPrdSections walked PRD_SECTION_ORDER only, so any key outside the

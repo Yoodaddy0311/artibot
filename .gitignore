@@ -35,8 +35,10 @@ plugins/artibot/docs/*
 !plugins/artibot/docs/CITATION-SYNTAX.md
 !plugins/artibot/docs/mcp-server-usage.md
 !plugins/artibot/docs/completion-block-spec.md
-!plugins/artibot/docs/adr/
-!plugins/artibot/docs/adr/**
+# (2026-09-03, 결정 B2) `!plugins/artibot/docs/adr/` + `…/adr/**` 재포함 2줄을 삭제했다.
+# ADR 정본이 `.artibot/adr/` 로 옮겨가면서 그 디렉터리가 비었고, 되살릴 대상이 없는
+# 재포함은 다음 사람에게 "ADR 이 아직 저기 있다"고 잘못 알린다. `.artibot/adr/` 는
+# :116 정본 목록에 있고 규칙이 없어 그대로 추적된다.
 plugins/artibot/coverage/
 plugins/artibot/image.png
 # Runtime state files (token usage, sessions, hashes) — never commit; caused rebase corruption v3.9.0→v3.9.1

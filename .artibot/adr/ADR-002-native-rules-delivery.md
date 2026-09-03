@@ -235,4 +235,4 @@ rules는 install.sh용으로 유지, 네이티브 갭은 README/제출문서에 
 - 중복 대상 스킬: `quality-framework`, `testing-standards`, `persona-backend`, `persona-frontend`,
   `orchestration`/`delegation`, `principles`
 - 드리프트 실증: agent-coordination.md "26 agents/73%·27%" vs 실측 28/75%·25%
-- 템플릿: `docs/adr/ADR-001-effort-workflow-fusion.md`
+- 템플릿: `.artibot/adr/ADR-001-effort-workflow-fusion.md`

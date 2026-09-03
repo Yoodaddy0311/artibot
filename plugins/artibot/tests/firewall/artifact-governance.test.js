@@ -17,7 +17,9 @@
  *     GOVERNANCE.md:27-35` 의 `plan2.md`·`new-plan.md`, 그리고 확장 3패턴
  *     (`*-2.md`·`*-final.md`·`*-new.md`). 전부 `.md` 한정이다(아래 "지시 정정" #1).
  *  #2 정본 둘 — 같은 `slug:` 를 선언한 추적 md 2개 이상, 그리고 ADR 번호가 겹치는
- *     디렉터리 2개 이상. ADR 쌍은 결정 B2 대기라 예외 목록에서 동결한다.
+ *     디렉터리 2개 이상. **B2 이행 후(2026-09-03) ADR 예외는 0쌍**이다 — 두 계열이
+ *     `.artibot/adr/` 하나로 합쳐지고(루트 5건은 006~010 재번호) 원본 디렉터리가
+ *     둘 다 삭제되어 겹칠 계열이 없다. allowlist 가 비었다 = 검사가 fail-closed.
  *  #4 원장 분산 — `.artibot/` 또는 `runtime/` 을 경로 세그먼트로 갖는 추적 파일 중
  *     `*.ndjson`·`*.jsonl`·`*-trail.json` 이 중앙 `.artibot/runtime/ledger.jsonl`
  *     밖에 있는 것.
@@ -40,6 +42,15 @@
  *      ADR 계열은 추적 1개(`plugins/artibot/docs/adr/` ADR-001~005). 루트
  *      `docs/adr/` 5+INDEX 는 `.gitignore:19` 의 `/docs/` 로 **추적 0건**이라
  *      인덱스 기준으로는 아직 정본-둘이 아니다. 예외 1쌍이 등록돼 있고 B2 대기다.
+ *
+ *   **갱신 (2026-09-03, B2 이행)**: ADR 정본이 `.artibot/adr/` 한 계열로 합쳐졌다
+ *      (설계 §3.3 매핑표 :151 · §5 결정표 :282 · `/adr` 운명 :159 가 지정한 위치,
+ *      루트 `.gitignore:116` 도 추적 정본으로 열거). `plugins/artibot/docs/adr/`
+ *      5건은 `git mv` 로 번호 그대로, 루트 `docs/adr/` 5+INDEX 는 **006~010**
+ *      재번호로 옮겼고 두 원본 디렉터리는 삭제됐다. 그 결과 #2 의 ADR 예외는
+ *      **1쌍 → 0쌍**이고 추적 ADR 계열은 한 곳뿐이다(최종 001~010 + INDEX =
+ *      11파일, 그중 5건이 인덱스에 반영됨 — 나머지는 신규라 커밋 시 합류).
+ *      위 dc9a4c12 실측치는 그대로 둔다 — 시점을 지우지 않는다.
  *   #4 위반 0건 / 예외 1건 — `.artibot/guides/vnext-design/examples/
  *      events.example.ndjson`(설계 예시, raw-log 등급으로 동결).
  *   #6 위반 0건 / 예외 1건 — `.artibot/guides/NEXT-SESSION.md` 는 **추적 중이고
@@ -367,29 +378,34 @@ describe('artifact-governance 자기검증 — 판정기가 위반을 잡는가'
   });
 
   it('#2-b 판정기가 번호 겹치는 ADR 두 계열을 잡는다', () => {
+    // 경로는 합성 픽스처다. B2 이행(2026-09-03) 전에는 여기 실제 두 계열
+    // (`docs/adr` + `plugins/artibot/docs/adr`)의 이름을 그대로 썼는데, 이제 그
+    // 둘 다 존재하지 않으므로 독자가 픽스처를 라이브 상태로 오독하지 않도록
+    // 정본(`.artibot/adr`) + 가상의 두 번째 계열로 바꿨다. 단언 구조·정렬 근거는
+    // 그대로다 — 이 테스트가 재는 것은 경로 이름이 아니라 겹침 판정이다.
     const fixture = [
-      'docs/adr/ADR-001-a.md',
-      'docs/adr/ADR-002-b.md',
-      'plugins/artibot/docs/adr/ADR-001-c.md',
-      'plugins/artibot/docs/adr/ADR-005-d.md',
+      '.artibot/adr/ADR-001-a.md',
+      '.artibot/adr/ADR-002-b.md',
+      'docs/adr/ADR-001-c.md',
+      'docs/adr/ADR-005-d.md',
     ];
     expect(findAdrSeriesCollisions(fixture)).toEqual([
-      { dirs: ['docs/adr', 'plugins/artibot/docs/adr'], sharedNumbers: [1] },
+      { dirs: ['.artibot/adr', 'docs/adr'], sharedNumbers: [1] },
     ]);
   });
 
   it('#2-b allowlist 는 등록된 쌍만 면제하고 다른 쌍은 그대로 red 다', () => {
     const fixture = [
-      'docs/adr/ADR-001-a.md',
-      'plugins/artibot/docs/adr/ADR-001-c.md',
+      '.artibot/adr/ADR-001-a.md',
+      'docs/adr/ADR-001-c.md',
       'other/adr/ADR-001-e.md',
     ];
-    const allowed = [['plugins/artibot/docs/adr', 'docs/adr']];
+    const allowed = [['.artibot/adr', 'docs/adr']];
     const found = findAdrSeriesCollisions(fixture, allowed);
     // 등록된 한 쌍만 빠지고, `other/adr` 이 만드는 두 쌍은 남는다.
     expect(found.map((c) => c.dirs.join(' ↔ ')).sort()).toEqual([
+      '.artibot/adr ↔ other/adr',
       'docs/adr ↔ other/adr',
-      'other/adr ↔ plugins/artibot/docs/adr',
     ]);
   });
 
@@ -459,16 +475,36 @@ describe('artifact-governance 예외 목록 — 형식과 신선도', () => {
     expect(EXCEPTIONS.baseCommit).toMatch(/^[0-9a-f]{7,40}$/);
   });
 
-  it('#2 예외는 ADR 한 쌍이고 B2 를 가리킨다', () => {
-    // 수락기준 문구: "#2 예외 1쌍, B2 대기". 0건이 아니다.
-    const pairs = EXCEPTIONS.check2_canonicalPairs;
-    expect(Array.isArray(pairs)).toBe(true);
-    expect(pairs).toHaveLength(1);
-    const [entry] = pairs;
-    expect(entry.pair).toEqual(['plugins/artibot/docs/adr', 'docs/adr']);
-    expect(entry.pending_decision).toBe('B2');
-    expect(typeof entry.reason).toBe('string');
-    expect(entry.reason.length).toBeGreaterThan(20);
+  it('#2 예외가 비어 있다 — B2 이행 완료(면제할 것이 없다)', () => {
+    // 기대값을 1 → 0 으로 바꾼 이유. 게이트를 통과시키려 깎은 것이 아니라 **조인
+    // 것**이다. 예외 1쌍은 "ADR 계열이 둘이라 번호가 겹친다" 는 위반을 면제하고
+    // 있었다. 결정 B2(오너, 2026-09-03 최종)가 두 계열을 `.artibot/adr/` 한 곳으로
+    // 합치면서 그 위반 자체가 사라졌다 — `plugins/artibot/docs/adr/` 5건은 `git mv`
+    // 로 번호 그대로, 루트 `docs/adr/` 5건은 006~010 재번호로 옮겼고 원본 디렉터리
+    // 둘 다 없앴다. 면제 대상이 없어졌는데 면제를 남겨 두면, 나중에 누가 두 번째
+    // 계열을 만들었을 때 조용히 통과한다 — 정확히 R-10 이 막으려는 형태다.
+    expect(EXCEPTIONS.check2_canonicalPairs).toEqual([]);
+
+    // 빈 목록만 단언하면 항진명제다("아무것도 없다"는 언제나 참이 되기 쉽다).
+    // B2 의 **결과**를 양성으로 못박는다: 추적 중인 ADR 계열은 정확히 한 곳이고,
+    // 그곳이 `.artibot/adr/` 다. 두 번째 계열이 생기면 여기서 먼저 red 가 난다.
+    // `lastIndexOf('/') === -1`(리포 루트 직속 파일)을 slice 로 흘려보내면 경로가
+    // 잘려 조용히 다른 디렉터리로 집계된다. 루트는 '' 로 명시한다.
+    const dirOf = (f) => (f.includes('/') ? f.slice(0, f.lastIndexOf('/')) : '');
+    const baseOf = (f) => (f.includes('/') ? f.slice(f.lastIndexOf('/') + 1) : f);
+    const adrDirs = [...new Set(
+      TRACKED.filter((f) => /^ADR-\d{3,}[-.]/.test(baseOf(f))).map(dirOf),
+    )].sort();
+    expect(adrDirs).toEqual(['.artibot/adr']);
+
+    // 자기검증: 위 필터가 실제로 무언가를 세고 있다(0건이면 항진명제가 된다).
+    // 고정값 10 을 쓰지 않는 이유 — 이 게이트는 **인덱스**(`git ls-files`)를 잰다.
+    // 001~005 는 `git mv` 라 인덱스에 이미 새 경로로 들어와 있지만, 재번호된
+    // 006~010 과 INDEX.md 는 신규 파일이라 커밋되기 전까지 워킹트리에만 있어
+    // 여기 안 잡힌다. 커밋 후 10, 그 전 5. 하한을 5 에 걸어 둔다 — 5 아래로
+    // 내려가면 원래 추적본이 사라진 것이므로 red 다.
+    expect(TRACKED.filter((f) => /^ADR-\d{3,}[-.]/.test(baseOf(f))).length)
+      .toBeGreaterThanOrEqual(5);
   });
 
   it('모든 예외 항목이 포인터 필드를 갖는다 (R-10)', () => {

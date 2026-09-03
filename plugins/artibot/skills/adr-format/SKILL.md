@@ -239,7 +239,9 @@ Proposed | Accepted | Deprecated | Superseded by ADR-{n}
 3. **architect 에이전트 위임**: 복잡도 medium+ 면 `Agent(architect)`로 trade-off 분석 위임.
 4. **7-섹션 채우기**: 위 양식대로 빈칸 없이. 모르는 항목은 "조사 필요"라고 명시(거짓 숫자 금지).
 5. **추천안 굵게 강조**: TL;DR과 Section 5에서 박스/굵게로 부각.
-6. **저장 경로 제안**: `docs/adr/ADR-{NNN}-{slug}.md` 형태로 저장 권장.
+6. **저장 경로 제안**: `<ADR 디렉터리>/ADR-{NNN}-{slug}.md` 형태로 저장 권장. ADR 디렉터리는
+   `lib/planning/artifacts.js#resolveAdrDir` 이 정한다 — `.artibot/adr/` · `docs/adr/` · `adr/`
+   중 이미 계열을 담은 곳, 없으면 `.artibot/` 이 있는 프로젝트는 `.artibot/adr/`, 그 외는 `docs/adr/`.
 
 ## 비개발자 친화 가이드
 

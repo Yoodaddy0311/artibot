@@ -27,13 +27,24 @@ the new version.
    npm run release:check  # expect exit 0
    npm run ci             # must be fully green
    ```
-   `npm run release` chains the same three as `release:check && ci && sync:local`, with
-   `sync:local` last. Immediately after a bump that ordering stops at the first step: the
-   installed copy is still on the previous version, `release-check.js` reports that as a
-   drift warning and exits 2, and `&&` stops on any non-zero — even though nothing is
-   actually wrong. Running `sync:local` up front removes the warning, which is why the
-   three are listed separately above. `release:check -- --no-sync-check` is the other way
-   out and is what CI uses, since CI has no installed copy at all.
+   `npm run release` chains exactly these three in exactly this order. It used to run
+   them as `release:check && ci && sync:local`, with `sync:local` last, and that ordering
+   made the chain stop at the first step after **every** bump: the installed copy is still
+   on the previous version, `release-check.js` reports that as a drift warning and exits 2,
+   and `&&` stops on any non-zero — even though nothing was actually wrong. The order was
+   corrected in the script (2026-09-03, decision F-01) rather than by silencing the
+   warning: `release-check.js` still exits 2 on warnings, because a real drift warning
+   should still stop a release. Running `sync:local` first simply means the warning has
+   nothing to report by the time the check runs.
+
+   The trade-off of going first is deliberate: `sync:local` re-installs the source into
+   `~/.claude/artibot/` **before** the version lockstep is verified, so a failed
+   `release:check` leaves a local install of a version that never shipped. That is a local
+   developer copy, not a published artifact, and re-running `sync:local` after the fix
+   restores it — cheaper than a chain that can never reach step two.
+
+   `release:check -- --no-sync-check` skips the installed-copy comparison entirely and is
+   what CI uses, since CI has no installed copy at all.
 4. **Commit** with explicit paths — never `git add -A`, and never `-am`. Untracked
    scratch directories sit in the tree and a blanket add sweeps them into the release.
    ```bash

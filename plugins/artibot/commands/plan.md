@@ -167,7 +167,8 @@ const { footprint, sizing, autopilot } = sizePlan(tasks, { size: sizeFlag /* qui
 await writePRD({ projectRoot, slug, title, sections, linkedAdrs, now }) → { ok, prdPath }
   // docs/PRD/<slug>-<date>.md 생성
 await ensureADR({ projectRoot, title, options, decision, rationale, now }) → { ok, adrPath, number }
-  // docs/adr/ADR-NNN-slug.md 생성. **멱등이 아니다** — 같은 인자로 다시 부르면
+  // 프로젝트의 ADR 디렉터리에 ADR-NNN-slug.md 생성 (경로는 resolveAdrDir 이 결정:
+  // `.artibot/adr/` → `docs/adr/` → `adr/`). **멱등이 아니다** — 같은 인자로 다시 부르면
   // 새 번호의 ADR 이 하나 더 생긴다(ADR 번호가 곧 정체성이라 설계상 그렇다).
   // 같은 결정을 두 번 기록하지 마라. 기존 결정을 바꿀 때는 supersede() 를 쓴다.
 await syncTodo({ projectRoot, planMarkdown, planFile, sessionId, now }) → { ok, stateFile, progress }

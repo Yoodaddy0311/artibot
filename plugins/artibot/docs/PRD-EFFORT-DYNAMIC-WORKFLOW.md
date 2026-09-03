@@ -119,7 +119,7 @@ P1 (foundation, 공유 파일 router.js/tasks.js)
 
 ## 7. 참조
 
-- ADR: `docs/adr/ADR-001-effort-workflow-fusion.md`
+- ADR: `.artibot/adr/ADR-001-effort-workflow-fusion.md`
 - 관련 코드: `lib/cognitive/router.js`, `lib/runtime/task-budget.js`, `lib/runtime/middleware/tasks.js`,
   `lib/cognitive/grpo-routing-config.js`(패턴), `lib/learning/grpo/reward-metrics.js`
 - 태스크: #1 P1 / #2 P2 (blockedBy #1) / #3 P3 (blockedBy #1)

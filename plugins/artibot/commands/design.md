@@ -37,7 +37,10 @@ Parse $ARGUMENTS:
    - Recommended approach with rationale
 4. **ADR** (if `--adr`): Generate Architecture Decision Record:
    - Title, Status, Context, Decision, Consequences
-   - Store in `docs/adr/` or project-specific ADR directory
+   - Store in the project's ADR directory, resolved by
+     `lib/planning/artifacts.js#resolveAdrDir` (`.artibot/adr/` -> `docs/adr/` -> `adr/`,
+     first one that already holds the series; new projects get `.artibot/adr/` when an
+     `.artibot/` exists, else `docs/adr/`)
 5. **Validate**: Check design against SOLID principles, existing patterns, scalability needs
 6. **Report**: Output design recommendation with trade-off analysis
 

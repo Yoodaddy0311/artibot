@@ -47,6 +47,10 @@
  *  3. **추적되어야 할 파일의 실재.** `ARTIBOT.md`·`.artibot/project.md` 등
  *     6경로는 측정 시점에 **아직 하나도 존재하지 않는다**. 여기서 "미ignored"
  *     라는 것은 *만들면 추적된다* 는 뜻일 뿐, 만들어졌다는 뜻이 아니다.
+ *     **2026-09-03 갱신**: 결정 B2 로 `.artibot/adr/` 만은 실물이 생겼다(ADR
+ *     001~010 + INDEX). 그래도 이 게이트는 여전히 규칙만 본다 — 그 디렉터리에
+ *     ADR 이 실제로 몇 개 있고 계열이 하나인지는 `artifact-governance.test.js`
+ *     의 #2 가 `git ls-files` 로 잰다. 나머지 5경로는 여전히 가설이다.
  *  4. **전역 gitignore·`.git/info/exclude`·중첩 `.gitignore`.** check-ignore 는
  *     그것들도 함께 본다. 어떤 경로가 ignored 로 나와도 그 근거가 루트
  *     `.gitignore` 라는 보장은 없다 — 그래서 규칙 문자열 존재를 따로 검사한다.
@@ -106,6 +110,17 @@ const TRACKED_PATHS = [
   'ARTIBOT.md',
   '.artibot/project.md',
   '.artibot/missions/m-0001.md',
+  // 2026-09-03, 결정 B2: 이 경로가 이제 **ADR 정본**이다(그 전에는 아직 비어 있는
+  // 계획상의 자리였다). `plugins/artibot/docs/adr/` 5건이 `git mv` 로, 루트
+  // `docs/adr/` 5건이 006~010 재번호로 여기 모였고 두 원본 디렉터리는 사라졌다.
+  // 이 줄이 red 가 되면 ADR 정본 11파일이 통째로 로컬에만 남는다.
+  //
+  // 파일명이 4자리(`ADR-0001.md`)인데 실물은 3자리+슬러그(`ADR-001-…md`)인 것은
+  // 의도된 불일치가 아니라 **무관**하다: 이 게이트는 `check-ignore --no-index` 로
+  // 규칙만 대조하고 경로를 만들지도 존재를 보지도 않으며(위 "판정 방법"), 여기
+  // 걸리는 규칙은 전부 `.artibot/adr/` **디렉터리 접두**라 basename 이 판정을
+  // 바꾸지 않는다. 실물과 맞추면 "이 파일이 있다" 는 착각을 부르고, 존재 여부는
+  // 이 게이트가 아니라 artifact-governance 의 #2 가 인덱스 기준으로 잰다.
   '.artibot/adr/ADR-0001.md',
   '.artibot/memory/promoted-note.md',
   '.artibot/guides/v5-design/ARTIBOT-5.0-DESIGN.md',
