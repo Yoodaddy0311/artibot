@@ -2,12 +2,19 @@
 status: active
 created: 2026-08-26
 slug: split-cross-session-multi-worktree
+revision: 3
+plan_revision: 3
+revised: 2026-09-02
+revision_reason: 같은 slug 추적 2파일(PRD-SPLIT-…{,-2}.md) 제자리 병합 — 파생 파일 금지(08_ARTIFACT_GOVERNANCE) 및 파일명 패턴 위반(*-2.md) 해소. 작업 T-03.
+generations: r1 2026-08-26 20:09 (ADR-001~005, 진행상태 보유) · r2 2026-08-26 21:17 (ADR-006~010 초안번호, 진행상태 0) · r3 2026-09-02 병합
+merged_from: PRD-SPLIT-CROSS-SESSION-MULTI-WORKTREE-2.md
 linked_adrs: ADR-001, ADR-002, ADR-003, ADR-004, ADR-005
+superseded_linked_adrs: ADR-006, ADR-007, ADR-008, ADR-009, ADR-010
 ---
 
 # PRD: cross-session × multi-worktree 협업 — /split 커맨드+스킬 (ULTRAPLAN)
 
-생성: 2026-08-26 20:09
+생성: 2026-08-26 20:09 (r1) · 2026-08-26 21:17 (r2, 흡수됨) · 2026-09-02 병합 (r3) — "세대 이력 · 병합 기록" 절 참조
 **연관 ADR**: `ADR-001`, `ADR-002`, `ADR-003`, `ADR-004`, `ADR-005`
 
 ---
@@ -184,3 +191,118 @@ G6. cross-session 신뢰 경계: 보고 계약 8번째 조항(피어 내용은 �
 ## 근거
 
 공식: code.claude.com/docs/en/cross-session-messaging(Win 2.1.234+, notify_when_idle 2.1.236+, 한도·hold 파생·laundering 금지, 순서 진술 없음), code.claude.com/docs/en/worktrees(`--worktree`, `.claude/worktrees/`, EnterWorktree, `-p --worktree`, cleanupPeriodDays, .worktreeinclude), headless, agent-teams. 리더 실측: `CLAUDE_CODE_MESSAGING_SOCKET/_TOKEN` 이 세션 Bash 에 export 됨(2026-08-26). `ListAgents` cwd 노출 — 메인 세션 `/list-agents` 관측(서브에이전트 일반화 불가). 브랜치 보호 `strict:true`·`enforce_admins:true` 라이브(`gh api`). `git merge-tree --write-tree` 로컬 2.54 성공. 웹 선행사례: 재결합이 최난, merge-tree 사전 탐지, 파일 소유권 매핑 최중요, 포트/DB/lock 경합, 실용 상한 4~5. 리포 file:line 은 ultra-ground-note.md·렌즈 4·critic 보고(HEAD 74fca735, 인용 전 직접 열 것). 게이트가 못 보는 것: 픽스처 규모(1~2 vs 4~5 worktree), 하네스 내부(held/burst/hold/-p trust), 의미적 충돌, 사용자 수동 git·커스텀 이름, 훅 등록≠발화, 스킬 실발화, 원격 TOCTOU, 실오퍼레이터 텔레메트리 0건.
+
+---
+
+## 세대 이력 · 병합 기록 (r3, 2026-09-02)
+
+이 문서는 같은 `slug: split-cross-session-multi-worktree` 를 쓰던 **추적 2파일**을 제자리 병합한
+결과다. 파생 파일(`*-2.md`)은 `08_ARTIFACT_GOVERNANCE.md` "파생 금지 7패턴 · 제자리 revision"
+규범 위반이었고, `ARTIBOT-5.0-DESIGN.md:163` §3.3 validator 검사 **#1 파일명 패턴**이 지목한
+추적 위반 1건이 바로 이것이다. 병합 근거 작업: **T-03**.
+
+| 세대 | 원본 파일 | 생성 표기 | ADR 계열 | 진행 상태 | 처분 |
+|---|---|---|---|---|---|
+| r1 | `PRD-SPLIT-CROSS-SESSION-MULTI-WORKTREE.md` | 2026-08-26 20:09 | ADR-001~005 | 체크박스 45개 중 `[x]` 42 · `[ ]` 3 | **본문으로 존속**(정본) |
+| r2 | `PRD-SPLIT-CROSS-SESSION-MULTI-WORKTREE-2.md` | 2026-08-26 21:17 | ADR-006~010(초안 번호) | 체크박스 44개 전부 `[ ]` | 이 절로 흡수 후 `git rm` |
+
+**r1 이 정본인 이유**(추론 아님 — 파일 내용 실측): r2 는 생성 표기가 1시간 늦지만 진행 상태가
+0이고, r1 본문은 r2 에 없는 **Phase 2 프로브 실측 절(2026-08-26 21:30~21:35 KST)** 과 그 귀결
+5건, 그리고 21:55 실측에 근거한 브랜치 규약 결정을 이미 담고 있다. r1 은 21:17 이후에도 계속
+갱신된 계보이고, r2 는 같은 ULTRAPLAN 을 다시 뽑은 **초안 재생성물**이다. r1 본문이 이를 명시한다:
+Phase 6 항목의 "ADR-001~005 확정(2026-08-26 생성 번호 — **계획 초안의 006~010 은 무효**)".
+
+### r2 고유 내용 — 전량 보존
+
+r2 에만 있던 줄은 총 **52줄**이며 그 중 44줄은 r1 과 같은 항목의 미체크(`[ ]`) 사본이라
+정보 증분이 없다(r1 이 같은 항목을 더 많은 주석과 함께 상태까지 보유). 정보 증분이 있는
+**8줄**을 아래에 원문 그대로 보존한다.
+
+**(1) frontmatter · 제목 블록 — 초안 ADR 번호 계열**
+
+```text
+linked_adrs: ADR-006, ADR-007, ADR-008, ADR-009, ADR-010
+생성: 2026-08-26 21:17
+**연관 ADR**: `ADR-006`, `ADR-007`, `ADR-008`, `ADR-009`, `ADR-010`
+```
+
+**(2) 설계 절 — 교정 주석이 붙기 전 원문 3문단**
+
+```text
+**줄기 정체성** = `{repoIdentity, worktreePath}`(resume 를 넘어 안정, `ListAgents` cwd 로 관측). 줄기 브랜치 접두 `split/` → `worktree-manager.js:51` allowlist 가 구조적으로 보호. 줄기/팀원 이름은 in-process 에이전트 이름과 교집합 0 + 세션 판별자(`hookData.session_id` 단축) 포함.
+**worktree**: `/split` 은 내장(`claude --worktree split/<limb>` 안내 또는 `EnterWorktree`)만 사용. `worktree-manager.js` 무수정 공존(브랜치 접두 allowlist 로 분리). provider 어댑터(ADR-007)는 2번째 소비자/C단계 때. 줄기 생성 직후 `<worktree>/.artibot/split/<limb>/brief.md` 에 줄기 브리프 + PRD 발췌 write(9a).
+**integrate**: merge-tree 소유권은 **`lib/git/merge-preflight.js` 로 승격, `/git worktree check` 와 `/split integrate` 양쪽이 소비**(ADR-010, 실소비자 2인). `--write-tree` 버전 프로브 fail-closed(<2.38 → 직렬). 배치 랜딩: N줄기 → `ci/split-<run>` 단일 SHA → CI(happy path 1회, master 이동 시 rebase 1회, 그 다음 사람; `wait_for_green` 상한 10분, `release.yml:670-750` 재사용). 랜딩 락 키는 **단일 문자열 합성**(`${repoIdentity}__${branch}`, `/`·`:` 새니타이즈 — `lock.js:178` 은 복합 페이로드지 복합 키 선례가 아님) + push 직전 base 재확인 + `--force-with-lease`. merge-tree 초록 ≠ 안전(의미적 충돌) 파일 헤더 명시.
+```
+
+r1 은 앞 두 문단에 `(2026-08-26 교정: 실측 규약은 프로브 절 귀결② — split-<repo-short>-<limb> → worktree-split-…)`
+를 덧붙였고 세 번째 문단의 `ADR-010` 을 `ADR-005` 로 바꿨다. 그 외 문자는 동일하다.
+
+**(3) 산출물 Phase 6 행**
+
+```text
+- Phase 6(문서·ADR): ROUTING 절, GLOSSARY 행, ADR-006/007/008/009/010
+```
+
+**(4) 수락기준 Phase 0 — 실측 교정 전 원문**
+
+```text
+- Phase 0: 임시 리포 일반/worktree 양쪽에서 훅 설정 write→read 왕복 성공, `scripts/hooks/` `'.git'` 리터럴 0, 파리티 테스트 그린(8조항), `grep -rn worktreeIsolation` CHANGELOG 외 0
+```
+
+r1 이 이를 `worktreeIsolation` JS 소비자 0 + 활성 문서 0 으로 교정한 근거는 r1 본문에 있다
+(2026-08-26 실측: 문자 그대로 0 은 ADR-004·PRD 자신 때문에 불가능).
+
+**(5) r2 체크박스 항목 중 r1 과 문자열이 갈린 3건 — 원문 보존**
+
+나머지 41건은 r1 이 같은 문자열을 상태(`[x]`)와 함께 보유하므로 증분이 없다. 아래 3건만
+r1 쪽 문자열이 달라졌다: ①은 r1 이 eslint 스캔 루트 대조 절을 중간에 끼워 넣었고(r1 이 상위집합),
+②③은 초안 ADR 번호를 확정 번호로 바꿨다.
+
+```text
+- [ ] **착수 전 프로브(코드 0, 타임박스)**: `claude --worktree probe1` 창 열기 → `.claude/worktrees/probe1/` 실재 → 그 창에서 `ListAgents` cwd 열 확인 → 부모로 `SendMessage` 왕복 1회 → `git worktree list --porcelain` 보고 → 정리 관측. ② 실패 시 status/dispatch 설계 재검토 {other,medium}
+- [ ] `lib/git/merge-preflight.js` 승격 — `git-unified` 와 `/split` 양쪽 소비(ADR-010), `--write-tree` 버전 프로브 fail-closed {impl,high}
+- [ ] ADR-006 split 어휘 / ADR-007 worktree provider / ADR-008 `lib/orchestration/` 처분 / ADR-009 worktreeIsolation 삭제 / ADR-010 merge-tree 소유권 {docs,medium}
+```
+
+### ADR-006~010 — 미존재 포인터로 보존
+
+r2 가 가리키던 `ADR-006`~`ADR-010` 은 **현재 리포에 존재하지 않는다**(2026-09-02 실측:
+`plugins/artibot/docs/adr/` 추적 5건 = ADR-001~005 이나 내용은 split 과 무관한 별개 계열
+[effort-workflow-fusion · native-rules-delivery · pluggable-runner · kill-switch-split ·
+crash-detection-ndjson]; 루트 `docs/adr/` 5건은 split ADR-001~005 이며 `.gitignore:19 /docs/` 로
+**미추적**). r2 의 번호는 초안 단계의 임시 배번이고 r1 이 무효로 선언했다.
+
+| r2 초안 번호 | r1 확정 번호 | 주제 |
+|---|---|---|
+| ADR-006 | **ADR-001** | split 어휘 소유권 — sizer 라벨 `sequence` 로 개명 |
+| ADR-007 | **ADR-002** | worktree 제공자 — `/split` 은 내장 worktree, `worktree-manager` 는 autopilot 전용 공존 |
+| ADR-008 | **ADR-003** | `lib/orchestration/` 휴면 828줄 처분 |
+| ADR-009 | **ADR-004** | `team.worktreeIsolation` orphan 설정 삭제 |
+| ADR-010 | **ADR-005** | merge-tree 사전 충돌 탐지 소유권 → `lib/git/merge-preflight.js` 승격 |
+
+**충돌 주의(미결 · 이번 범위 밖)**: `ARTIBOT-5.0-DESIGN.md` §3.3 이행 매핑표의 ADR 행은 결정
+**B2** 로 "플러그인 5 → `.artibot/adr/ADR-001~005`(git mv), 루트 5 → **ADR-006~010** 재번호 +
+`moved-from`" 을 계획한다. 루트 5건이 곧 split ADR 이므로, B2 가 이행되면 이 표의 왼쪽 열
+번호와 **같은 번호가 같은 주제를 다시 가리키게 된다**. 다만 그것은 재번호의 결과이지 r2 초안
+번호의 부활이 아니다. B2 는 미결이므로 이 문서는 r1 확정 번호(ADR-001~005)를 계속 쓴다.
+B2 이행 시 이 절과 frontmatter `linked_adrs` 를 함께 갱신할 것.
+
+### 바이트 단위 원본
+
+병합 직전 두 파일의 원본은 세션 스크래치패드에 보존했다(md5 대조 완료).
+
+```text
+scratchpad/t03-backup/PRD-SPLIT-CROSS-SESSION-MULTI-WORKTREE.md.bak     md5 bf906004ff7be63bbf5941595b1c5e4f  186줄
+scratchpad/t03-backup/PRD-SPLIT-CROSS-SESSION-MULTI-WORKTREE-2.md.bak   md5 11857ca69a9b406d84bf2cabf8d3c424  163줄
+```
+
+스크래치패드는 세션 한정이므로 영구 원본은 git 이력이다 —
+`git show HEAD:.artibot/guides/PRD-SPLIT-CROSS-SESSION-MULTI-WORKTREE-2.md`.
+
+### 이 절이 못 보는 것
+
+- **내용 참 여부 미검사**: 여기 보존한 r2 원문의 사실성은 확인하지 않았다. 원문 그대로의 보존일 뿐이다.
+- **의미 중복 미검사**: r1·r2 가 다른 문장으로 같은 말을 하는 경우는 줄 단위 diff 로 잡히지 않는다.
+- **인용처 미수정**: `-2.md` 를 이름으로 가리키는 파일이 남아 있다(T-03 소유 밖 — 아래).
+  `.artibot/HANDOFF.md:76` · `.artibot/handoffs/2026-08-28-1736.md:73` ·
+  `.artibot/handoffs/2026-08-28-1847.md:76` · T-03 발주 PRD 자신(`affectedPaths`).
