@@ -46,7 +46,8 @@ import path from 'node:path';
  * changing pre-existing wiring that T-25 does not own.
  *
  * Left unmocked, running this suite writes `workflow-planned` lines into the
- * REAL store at `<pluginRoot>/runtime/decisions/`, which `/doctor` reads —
+ * REAL store at `<projectRoot>/.artibot/runtime/decisions/` (`<pluginRoot>/
+ * runtime/decisions/` before 2026-09-03), which `/doctor` reads —
  * fixture pollution of a diagnostic store is worse than a missing record.
  * Measured: 159 lines / 61,215 B accumulated there before this mock landed.
  *

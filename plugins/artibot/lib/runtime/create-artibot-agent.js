@@ -10,6 +10,7 @@
  */
 
 import { loadConfig } from '../core/config.js';
+import { extractUserPromptText } from '../core/hook-utils.js';
 import { createExtensionRegistry } from '../core/extension.js';
 import { createCompositeBackend } from './backend/composite-backend.js';
 import { createRouterMiddleware } from './middleware/router.js';
@@ -36,8 +37,13 @@ function summarizeMessage(parts) {
   return core ? `[runtime] ${core}` : '[runtime] prepared';
 }
 
+// The explicit `prompt` argument wins; `hookData` is only the fallback for
+// callers that pass a payload and no text. That fallback read the same two
+// wrong keys (`user_prompt` / `content`) as the five broken hook call sites,
+// so it goes through the same measured extractor — see
+// `lib/core/hook-utils.js#extractUserPromptText`.
 function normalizePrompt(prompt, hookData) {
-  const fromHook = hookData?.user_prompt || hookData?.content || '';
+  const fromHook = extractUserPromptText(hookData);
   const value = typeof prompt === 'string' && prompt.length > 0 ? prompt : fromHook;
   return String(value || '').trim();
 }

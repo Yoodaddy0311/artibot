@@ -2,7 +2,7 @@
  * Decision events — the explainability record for live routing decisions.
  *
  * Every case pins a store dir under `os.tmpdir()`. Nothing here may touch the
- * real `runtime/decisions/`.
+ * real decision store.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';

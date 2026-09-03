@@ -247,6 +247,88 @@ export function extractToolName(hookData) {
 }
 
 /**
+ * The user's prompt text from a **UserPromptSubmit** payload.
+ *
+ * SINGLE SOURCE OF TRUTH for that one key question. Six call sites used to
+ * answer it independently and five of them answered it wrong, which is how the
+ * whole UserPromptSubmit chain ran dead for a release while the sixth
+ * (`ambiguity-guard`) kept working and hid the outage.
+ *
+ * MEASURED 2026-09-03 against the Claude Code **2.1.259** binary
+ * (`~/.local/share/claude/versions/2.1.259`, Zod hook-input schema table at
+ * byte offset ~183,955,500). UserPromptSubmit is
+ *   base.and({ hook_event_name: 'UserPromptSubmit', prompt, source?, session_title? })
+ * where base = { session_id, transcript_path, cwd, prompt_id?,
+ * permission_mode?, agent_id?, agent_type?, effort? }.
+ * The host's key is therefore **`prompt`** — that payload carries no
+ * `user_prompt`, `userPrompt`, `content`, `message` or `text`.
+ *
+ * The three keys checked here, and why each one is checked:
+ *   1. `user_prompt` — NOT a host key. `_userprompt-dispatcher.js` writes it
+ *      onto the payload after `user-prompt-handler` rewrites the prompt, so
+ *      the parallel contributors classify the text that will actually run. It
+ *      is checked FIRST for that reason, and with a typeof-string test rather
+ *      than a truthy one: `''` is a legitimate rewriter output ("blank this
+ *      out") and a `||` chain would silently fall back to the original.
+ *   2. `prompt` — the host key, measured above.
+ *   3. `content` — pre-existing legacy fallback, kept so this change cannot
+ *      regress a caller that already relied on it. No 2.1.259 payload carries
+ *      it; it should be removable once that is confirmed.
+ *
+ * NOT a general "prompt text" getter. SubagentStart carries no free text at
+ * all (see `scripts/hooks/subagent-handler.js#extractActionText`), so there is
+ * nothing there for this to unify with.
+ *
+ * @param {*} hookData - Parsed UserPromptSubmit payload
+ * @returns {string} The prompt text, or `''` when the payload names none
+ */
+export function extractUserPromptText(hookData) {
+  if (!hookData || typeof hookData !== 'object') return '';
+  for (const key of ['user_prompt', 'prompt', 'content']) {
+    const value = hookData[key];
+    if (typeof value === 'string') return value;
+  }
+  return '';
+}
+
+/**
+ * Every prompt spelling in the payload, joined — the surface an OPT-OUT FLAG
+ * must be searched on. Use `extractUserPromptText` to CLASSIFY, and this to
+ * decide whether the user asked to be left alone.
+ *
+ * WHY THESE ARE TWO FUNCTIONS. `user-prompt-handler` STRIPS `--no-team` from
+ * the prompt and the dispatcher then puts that stripped text on
+ * `payload.user_prompt`, which `extractUserPromptText` returns first. A hook
+ * that tests its opt-out regex against that value therefore never sees the
+ * flag the user typed, and fires anyway — the opt-out silently stops working.
+ * The flag is on `payload.prompt` (the untouched host key) the whole time.
+ *
+ * The union is deliberate, and it is NOT the same as "read the original":
+ *   - original only  → misses a flag that reaches a hook on `user_prompt`
+ *     alone, e.g. a direct handler call with no rewriter in front of it.
+ *   - union          → any spelling that carries the flag disables the
+ *     feature. An opt-out is a stated user intent; once expressed it must not
+ *     be erasable by a downstream rewrite. Fail CLOSED, never fail open.
+ *
+ * Joined with a newline so `\b` anchors cannot fuse the tail of one value to
+ * the head of the next and invent a match that is in neither.
+ *
+ * @param {*} hookData - Parsed UserPromptSubmit payload
+ * @returns {string} All prompt spellings, newline-joined; `''` when none
+ */
+export function extractUserPromptFlagSurface(hookData) {
+  if (!hookData || typeof hookData !== 'object') return '';
+  const seen = [];
+  for (const key of ['user_prompt', 'prompt', 'content']) {
+    const value = hookData[key];
+    if (typeof value === 'string' && value !== '' && !seen.includes(value)) {
+      seen.push(value);
+    }
+  }
+  return seen.join('\n');
+}
+
+/**
  * Extract the agent identifier from hook data.
  * Checks agent_id, subagent_id, and name fields.
  * @param {object} hookData - Parsed hook data

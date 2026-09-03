@@ -9,7 +9,7 @@
  *     `context.compiled` are refused from a hook `source` is measured in
  *     tests/hooks/runtime-prompt-memory-instrumentation.test.js against the
  *     real writer; here it is only the REASON the events go to
- *     `runtime/decisions/` instead, not an assertion.
+ *     the decision store instead, not an assertion.
  *  2. Byte-identity is proven for the PROMPTS THIS FILE FIRES, not for all
  *     prompts. The structural argument (both recorders run after `output` is
  *     final and neither receives it) is what covers the rest; these cases are
@@ -104,6 +104,13 @@ function makeSandbox(prefix) {
   }
   copyFileSync(REAL_CONFIG_PATH, path.join(root, 'artibot.config.json'));
   mkdirSync(path.join(root, 'runtime'), { recursive: true });
+  // The decision store hangs off the PROJECT root now, resolved by
+  // `lib/git/project-root.js#resolveProjectRoot`, whose first rule is "nearest
+  // ancestor holding .git". Planting one pins the sandbox as its own root:
+  // without it the walk climbs out of tmpdir and could land on whatever
+  // ancestor carries a weak marker, which is how this suite would silently
+  // write fixture lines into the real repository store.
+  mkdirSync(path.join(root, '.git'), { recursive: true });
   return root;
 }
 
@@ -150,13 +157,17 @@ afterEach(() => {
     if (v === undefined) delete process.env[k];
     else process.env[k] = v;
   }
-  const store = path.join(sandboxRoot, 'runtime', 'decisions');
-  rmSync(store, { recursive: true, force: true });
+  rmSync(decisionStore(), { recursive: true, force: true });
 });
+
+/** @returns {string} the sandbox's decision store, per getDecisionStoreDir. */
+function decisionStore() {
+  return path.join(sandboxRoot, '.artibot', 'runtime', 'decisions');
+}
 
 /** @returns {object[]} every decision event written under the sandbox store. */
 function readSandboxDecisions() {
-  const store = path.join(sandboxRoot, 'runtime', 'decisions');
+  const store = decisionStore();
   if (!existsSync(store)) return [];
   return readdirSync(store)
     .filter((f) => f.endsWith('.ndjson'))
@@ -234,12 +245,13 @@ describe('T-37 sandbox seam', () => {
   });
 });
 
-describe('topology sighting reaches runtime/decisions/', () => {
+describe('topology sighting reaches <projectRoot>/.artibot/runtime/decisions/', () => {
   it('writes exactly one topology-recommended event per prompt', async () => {
     const out = await handleUserPromptSubmit({
       user_prompt: 'add oauth login to the settings page',
       session_id: 'sess-t37-topology-a',
       event: 'UserPromptSubmit',
+      cwd: sandboxRoot,
     });
     expect(out).not.toBeNull();
 
@@ -255,6 +267,7 @@ describe('topology sighting reaches runtime/decisions/', () => {
       user_prompt: 'run rm -rf build and then deploy to production',
       session_id: 'sess-t37-topology-b',
       event: 'UserPromptSubmit',
+      cwd: sandboxRoot,
     });
     const [topo] = readSandboxDecisions().filter((e) => e.type === TOPOLOGY_RECOMMENDED);
     expect(topo.data.humanGateHits.advisory).toBe(true);
@@ -269,6 +282,7 @@ describe('topology sighting reaches runtime/decisions/', () => {
       user_prompt: `대규모 변경을 파일별로 병렬 처리해줘 ${canary}`,
       session_id: 'sess-t37-topology-c',
       event: 'UserPromptSubmit',
+      cwd: sandboxRoot,
     });
     const [topo] = readSandboxDecisions().filter((e) => e.type === TOPOLOGY_RECOMMENDED);
     expect(JSON.stringify(topo)).not.toContain(canary);
@@ -281,6 +295,7 @@ describe('topology sighting reaches runtime/decisions/', () => {
     const out = await handleUserPromptSubmit({
       user_prompt: 'a prompt with no session',
       event: 'UserPromptSubmit',
+      cwd: sandboxRoot,
     });
     expect(out).not.toBeNull();
     // No date-bucket fallback: an absent session is counted as skipped, never
@@ -299,11 +314,10 @@ describe('topology sighting reaches runtime/decisions/', () => {
     await handleUserPromptSubmit({
       user_prompt: 'another prompt with no session',
       event: 'UserPromptSubmit',
+      cwd: sandboxRoot,
     });
 
-    const statsFile = path.join(
-      sandboxRoot, 'runtime', 'decisions', `${UNATTRIBUTED_RUN_ID}.events.ndjson`,
-    );
+    const statsFile = path.join(decisionStore(), `${UNATTRIBUTED_RUN_ID}.events.ndjson`);
     expect(existsSync(statsFile)).toBe(true);
 
     const lines = readFileSync(statsFile, 'utf-8').split('\n').filter((l) => l.trim())
@@ -328,6 +342,7 @@ describe('topology sighting reaches runtime/decisions/', () => {
         user_prompt: '/implement add a feature',
         session_id: 'sess-t37-import-fail',
         event: 'UserPromptSubmit',
+      cwd: sandboxRoot,
       });
       expect(out).not.toBeNull();
       expect(out.user_prompt).toContain('add a feature');
@@ -383,7 +398,7 @@ describe('stdout is byte-identical to the pre-wiring hook', () => {
     // some prompts, and 'explain how the router works' is one of them, which is
     // why an earlier draft of this test asserted determinism it had not
     // established. Measured 2026-09-02.
-    const payload = { user_prompt: 'a prompt with no session at all' };
+    const payload = { user_prompt: 'a prompt with no session at all', cwd: sandboxRoot };
     const a = runHook(REAL_HOOK, payload);
     const b = runHook(REAL_HOOK, payload);
     expect(a.status).toBe(0);
@@ -403,8 +418,8 @@ describe('stdout is byte-identical to the pre-wiring hook', () => {
 
   it.each(PAYLOADS)('$label — HEAD and current emit the same bytes', (payload) => {
     const { label: _label, ...hookData } = payload;
-    const before = runHook(baselineHook, { ...hookData, event: 'UserPromptSubmit' });
-    const after = runHook(REAL_HOOK, { ...hookData, event: 'UserPromptSubmit' });
+    const before = runHook(baselineHook, { ...hookData, event: 'UserPromptSubmit', cwd: sandboxRoot });
+    const after = runHook(REAL_HOOK, { ...hookData, event: 'UserPromptSubmit', cwd: sandboxRoot });
 
     expect(before.status).toBe(0);
     expect(after.status).toBe(0);
@@ -438,6 +453,7 @@ describe('stdout is byte-identical to the pre-wiring hook', () => {
       user_prompt: 'explain how the router works',
       session_id: 'sess-not-vacuous',
       event: 'UserPromptSubmit',
+      cwd: sandboxRoot,
     });
     const topo = readSandboxDecisions().filter((e) => e.type === TOPOLOGY_RECOMMENDED);
     expect(topo.length).toBeGreaterThanOrEqual(1);

@@ -30,7 +30,7 @@ const PLUGIN_ROOT = path.resolve(
 );
 
 async function runHookChain(promptValue) {
-  const basePayload = { user_prompt: promptValue, event: 'UserPromptSubmit' };
+  const basePayload = { user_prompt: promptValue, event: 'UserPromptSubmit', cwd: sandboxRoot };
   const firstOutput = handleSpecialTrigger(basePayload);
   const runtimePayload = {
     ...basePayload,
@@ -46,7 +46,7 @@ async function runHookChain(promptValue) {
  * This suite used to point `CLAUDE_PLUGIN_ROOT` at the REAL plugin root, so
  * running it mutated the developer's live `runtime/` — `token-usage-session
  * .json` every run, and (once the recorder-stats flush landed) a line in the
- * real `runtime/decisions/` store that `/doctor` reads to decide whether
+ * real decision store that `/doctor` reads to decide whether
  * recording is alive. Writing fixture data into the store a health check reads
  * is worse than recording nothing, and being gitignored does not make it safe.
  *
@@ -74,6 +74,12 @@ beforeAll(() => {
     path.join(sandboxRoot, 'artibot.config.json'),
   );
   mkdirSync(path.join(sandboxRoot, 'runtime'), { recursive: true });
+  // The decision store is anchored on the PROJECT root, not CLAUDE_PLUGIN_ROOT
+  // (`decision-events.js#getDecisionStoreDir`), so redirecting the plugin root
+  // alone no longer keeps this suite out of the real store. A `.git` marker
+  // makes `lib/git/project-root.js#resolveProjectRoot` stop at the sandbox, and
+  // the payloads below carry `cwd: sandboxRoot` so the hook resolves from here.
+  mkdirSync(path.join(sandboxRoot, '.git'), { recursive: true });
 });
 
 afterAll(() => {

@@ -1,6 +1,7 @@
 /**
- * Firewall — v5 Phase 0 이 `artibot.config.json` 최상위에 신설한 키 5종
- * (`topology`·`routing`·`ledger`·`stateStore`·`missions`) + `agents.modelPolicy.low`.
+ * Firewall — v5 Phase 0 이 `artibot.config.json` 최상위에 신설한 키 6종
+ * (`topology`·`routing`·`ledger`·`stateStore`·`missions`·`review`)
+ * + `agents.modelPolicy.low`. `review` 는 오너 결정 2026-09-03 으로 추가됐다.
  *
  * ── 왜 새 파일인가 ──────────────────────────────────────────────────────────
  *  `tests/firewall/split-config-firewall.test.js` 는 이름과 달리 **`config.split`
@@ -10,8 +11,8 @@
  *  소유한다. `split-config-firewall.test.js` 는 무수정이다(소유 경로 충돌 제거).
  *
  * ── 무엇을 지키는가 ────────────────────────────────────────────────────────
- *  A. **키 5종의 형태와 값.** 값 표는 설계 정본(§3.1·§3.2·§3.5·§3.6·§1-2/OD-4)이
- *     정한 것이다. 하위 키는 **allowlist** 다 — 알 수 없는 키가 생기면 RED.
+ *  A. **키 6종의 형태와 값.** 값 표는 설계 정본(§3.1·§3.2·§3.5·§3.6·§1-2/OD-4)과
+ *     오너 결정(2026-09-03: review.independent·C4)이 정한 것이다. 하위 키는 **allowlist** 다 — 알 수 없는 키가 생기면 RED.
  *  B. **`*Ref` 는 실제로 가리킨다.** §3.5 "값은 기존 키 참조, 중복 정의 금지" 는
  *     문자열을 적어두는 것만으로는 지켜지지 않는다. 여기서 모든 `*Ref` 를 같은
  *     문서에 대고 해석해 **dangling 이면 RED** 로 만든다. 그래야
@@ -34,6 +35,10 @@
  *         `lib/routing/execution-profile.js` 도 `default` 를 참조한다.
  *         **"소비자가 생겼다" ≠ "행동이 바뀐다"** — 이 게이트는 둘 다 안 본다.
  *       - `routing`·`ledger`·`stateStore` — `lib/`·`scripts/` 소비자 **0**.
+ *       - `review` — 소비자 **0**. `lib/mission/compiler.js:403` 은 호출자가
+ *         boolean 을 넘길 때만 반영하고 이 config 를 읽지 않으며,
+ *         `lib/runtime/artifact-lifecycle-gates.js` 는 자기 frozen 기본값을
+ *         쓴다. 즉 선언 2개이고 이 게이트는 선언만 본다.
  *       - `missions` — `lib/` 런타임 소비자 **0**. 술어는
  *         `lib/mission/mission-id.js#judgeSubstantive` 가 **자체 하드코딩 표**로
  *         갖고 있고 이 config 를 읽지 않는다. 즉 config 와 코드는 **독립 선언 2개**이고,
@@ -52,8 +57,8 @@
  *     게이트가 아니라 `tests/core/model-policy.test.js` 가 잡아야 한다.
  *  4. **`*Ref` 의 타입.** B 는 경로가 **존재**하는지만 본다. 가리키는 값이 수인지
  *     문자열인지, 소비자가 기대하는 타입인지는 소비자가 없으므로 검사하지 않는다.
- *  5. **다른 최상위 키.** 이 파일은 5키 + `low` 만 소유한다. 나머지 최상위 키
- *     (2026-09-02 기준 30 중 24)는 여전히 **무게이트**다 — "최상위가 지켜진다" 고
+ *  5. **다른 최상위 키.** 이 파일은 6키 + `low` 만 소유한다. 나머지 최상위 키
+ *     (2026-09-03 기준 31 중 25)는 여전히 **무게이트**다 — "최상위가 지켜진다" 고
  *     읽지 마라.
  *
  * @module tests/firewall/v5-config-firewall
@@ -123,6 +128,10 @@ const EXPECTED = Object.freeze({
   stateStore: Object.freeze({ backend: 'jsonl', location: 'git-common-dir' }),
   // §3.1 — allowlist S1~S6, 부정 목록 금지.
   missions: Object.freeze({ idFormat: 'M-YYYYMMDD-NNN' }),
+  // 오너 결정 2026-09-03 — review.independent 기본 필수(fail-closed) + C4.
+  // C4 는 `deterministic` 만 필수이고, unmeasuredBlocksOutcome 은 코드가 이미
+  // 출하 중인 값(artifact-lifecycle-gates.js#DEFAULT_POLICY)을 기록한 것이다.
+  review: Object.freeze({ independent: true }),
 });
 
 /** 각 신설 키 아래 있어도 되는 키 — allowlist. `comment` 는 이 config 의 관례다. */
@@ -132,13 +141,18 @@ const ALLOWED_SUBKEYS = Object.freeze({
   ledger: ['path', 'maxLineBytes', 'comment'],
   stateStore: ['backend', 'location', 'comment'],
   missions: ['substantiveSignals', 'idFormat', 'comment'],
+  review: ['independent', 'verify', 'comment'],
 });
 
 /** run-ledger 스키마의 topology.mode enum 6값(라우터 출력 어휘 정본). */
 const TOPOLOGY_MODES = Object.freeze(['solo', 'subagent', 'team', 'autopilot', 'autopilot_fast', 'split']);
 
-/** 2026-09-02 실측. 신설 5키를 더한 뒤의 최상위 키 수 — 무단 추가/삭제 탐지용. */
-const EXPECTED_TOP_LEVEL_COUNT = 30;
+/**
+ * 2026-09-03 실측. 신설 6키(topology·routing·ledger·stateStore·missions·review)를
+ * 더한 뒤의 최상위 키 수 — 무단 추가/삭제 탐지용. 2026-09-02 의 30 에서 오너 결정
+ * `review` 1건이 더해져 31 이다.
+ */
+const EXPECTED_TOP_LEVEL_COUNT = 31;
 
 /** 정책 버킷이 결정하는 28 에이전트 전건 + 티어 기대값(현행 = 변화 0 기준선). */
 const FABLE_AGENTS = Object.freeze([
@@ -153,7 +167,7 @@ const OPUS_AGENTS = Object.freeze([
   'presentation-designer', 'seo-specialist', 'cro-specialist', 'ad-specialist',
 ]);
 
-describe('v5 신설 최상위 키 5종 — 형태와 값', () => {
+describe('v5 신설 최상위 키 6종 — 형태와 값', () => {
   it.each(Object.keys(ALLOWED_SUBKEYS))('%s 키가 객체로 존재한다', (key) => {
     expect(config[key], `config.${key} 가 없다`).toBeDefined();
     expect(typeof config[key]).toBe('object');
@@ -184,6 +198,15 @@ describe('v5 신설 최상위 키 5종 — 형태와 값', () => {
 
   it('missions.substantiveSignals 는 S1~S6 allowlist 다', () => {
     expect(config.missions.substantiveSignals).toEqual(['S1', 'S2', 'S3', 'S4', 'S5', 'S6']);
+  });
+
+  it('review.verify 는 C4 결정 그대로다 (deterministic 만 필수, 차단은 유지)', () => {
+    // requiredLayers 는 allowlist 다 — 아무도 올리지 않은 레이어는 선택이고,
+    // 새 레이어가 생겨도 조용히 필수가 되지 않는다(rules §8).
+    expect(config.review.verify.requiredLayers).toEqual(['deterministic']);
+    // 코드가 이미 출하 중인 값. 이 키는 그 값을 기록할 뿐 바꾸지 않는다 —
+    // artifact-lifecycle-gates.js 는 이 config 를 읽지 않는다.
+    expect(config.review.verify.unmeasuredBlocksOutcome).toBe(true);
   });
 
   it('ledger.path 는 <projectRoot> 상대이고 .artibot/ 로 시작한다', () => {

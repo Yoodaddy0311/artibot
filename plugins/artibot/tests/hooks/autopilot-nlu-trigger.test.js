@@ -34,7 +34,11 @@ vi.mock('../../lib/autopilot/nlu.js', () => ({
   classifyAutopilotIntent: vi.fn(() => mockState.classifyResult),
 }));
 
-vi.mock('../../lib/core/hook-utils.js', () => ({
+// PARTIAL mock: only the two logging helpers are stubbed. `extractUserPromptText`
+// must stay REAL here — a stub of it would re-hide the payload-key mismatch this
+// hook was blind to, which is precisely what a full module mock did before.
+vi.mock('../../lib/core/hook-utils.js', async (importOriginal) => ({
+  ...(await importOriginal()),
   createErrorHandler: vi.fn(() => () => {}),
   logHookError: vi.fn(),
 }));
@@ -97,6 +101,28 @@ describe('autopilot-nlu-trigger — fail-closed on malformed config (C-2)', () =
 
     const result = await handleUserPromptSubmit({
       user_prompt: '자고 올 동안 전체 시스템 리팩토링',
+    });
+
+    expect(result).not.toBeNull();
+    expect(result.hookSpecificOutput.hookEventName).toBe('UserPromptSubmit');
+  });
+
+  // 호스트 2.1.259 스키마 형태 — 회귀 방지.
+  // 위 케이스들은 전부 `user_prompt` 픽스처라, 이 훅이 그 키를 직독으로 되돌려도
+  // 전부 green 으로 남는다. 호스트 계약은 이 케이스에서만 red 가 된다.
+  it('classifies the host `prompt` key alone (no user_prompt in the payload)', async () => {
+    mockState.existsSyncResults = { 'artibot.config.json': false };
+    mockState.classifyResult = {
+      score: 0.92,
+      matched: ['자고 올 동안'],
+      suggestion: 'default',
+    };
+
+    const result = await handleUserPromptSubmit({
+      hook_event_name: 'UserPromptSubmit',
+      prompt: '자고 올 동안 전체 시스템 리팩토링',
+      session_id: '9120048e-3385-4855-a35b-09c89e5dd684',
+      cwd: 'C:/Users/HeechangLee/Desktop/AI/Artibot',
     });
 
     expect(result).not.toBeNull();

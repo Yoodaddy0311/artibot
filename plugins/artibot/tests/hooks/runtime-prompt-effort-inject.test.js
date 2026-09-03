@@ -18,7 +18,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import {
-  copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync,
+  copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync,
+  writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -68,6 +69,12 @@ describe('runtime-prompt effort + task-budget prefix injection', () => {
     // a throwaway sandbox that owns its own copy of the config, so both the
     // config edits and the runtime/ writes land in the temp dir.
     sandboxRoot = mkdtempSync(path.join(tmpdir(), 'artibot-effort-root-'));
+    // The decision store is anchored on the PROJECT root, not CLAUDE_PLUGIN_ROOT
+    // (`decision-events.js#getDecisionStoreDir`, changed 2026-09-03), so
+    // redirecting the plugin root no longer keeps this suite out of the real
+    // store. A `.git` marker makes `lib/git/project-root.js#resolveProjectRoot`
+    // stop here, and every payload below carries `cwd` pointing at this root.
+    mkdirSync(path.join(sandboxRoot, '.git'), { recursive: true });
     const linkType = process.platform === 'win32' ? 'junction' : 'dir';
     for (const dir of LINKED_DIRS) {
       symlinkSync(path.join(PLUGIN_ROOT, dir), path.join(sandboxRoot, dir), linkType);
@@ -127,6 +134,7 @@ describe('runtime-prompt effort + task-budget prefix injection', () => {
     const output = await handleUserPromptSubmit({
       user_prompt: '/implement add oauth login',
       event: 'UserPromptSubmit',
+      cwd: sandboxRoot,
     });
 
     expect(output).not.toBeNull();
@@ -149,6 +157,7 @@ describe('runtime-prompt effort + task-budget prefix injection', () => {
     const output = await handleUserPromptSubmit({
       user_prompt: '/code-review auth module',
       event: 'UserPromptSubmit',
+      cwd: sandboxRoot,
     });
 
     expect(output).not.toBeNull();
@@ -163,6 +172,7 @@ describe('runtime-prompt effort + task-budget prefix injection', () => {
     const output = await handleUserPromptSubmit({
       user_prompt: 'fix typo in readme',
       event: 'UserPromptSubmit',
+      cwd: sandboxRoot,
     });
 
     expect(output).not.toBeNull();
@@ -180,6 +190,7 @@ describe('runtime-prompt effort + task-budget prefix injection', () => {
       const output = await handleUserPromptSubmit({
         user_prompt: '/implement add oauth login',
         event: 'UserPromptSubmit',
+      cwd: sandboxRoot,
       });
 
       expect(output).not.toBeNull();

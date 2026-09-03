@@ -33,6 +33,12 @@ function makeBrokenPluginRoot() {
   // path so the runtime can still import its libs.
   const tmp = mkdtempSync(path.join(os.tmpdir(), 'artibot-silent-fail-'));
   mkdirSync(tmp, { recursive: true });
+  // The decision store is anchored on the PROJECT root, not CLAUDE_PLUGIN_ROOT
+  // (`decision-events.js#getDecisionStoreDir`, changed 2026-09-03), so
+  // redirecting the plugin root no longer keeps this suite out of the real
+  // store. A `.git` marker makes `lib/git/project-root.js#resolveProjectRoot`
+  // stop here, and every payload below carries `cwd` pointing at this root.
+  mkdirSync(path.join(tmp, '.git'), { recursive: true });
   return tmp;
 }
 
@@ -42,7 +48,7 @@ function makeBrokenPluginRoot() {
  * The well-formed-config case below used to point `CLAUDE_PLUGIN_ROOT` at the
  * REAL plugin root, so running it mutated the developer's live `runtime/` —
  * `token-usage-session.json` every run, and a line in the real
- * `runtime/decisions/` store that `/doctor` reads once the recorder-stats flush
+ * decision store that `/doctor` reads once the recorder-stats flush
  * landed. This builds a stand-in root that is well-formed in exactly the way the
  * test needs: the real modules LINKED in and the real `artibot.config.json`
  * copied, so the hook parses a genuinely valid config and imports the genuine
@@ -59,6 +65,12 @@ function makeGoodPluginRoot() {
     path.join(tmp, 'artibot.config.json'),
   );
   mkdirSync(path.join(tmp, 'runtime'), { recursive: true });
+  // The decision store is anchored on the PROJECT root, not CLAUDE_PLUGIN_ROOT
+  // (`decision-events.js#getDecisionStoreDir`, changed 2026-09-03), so
+  // redirecting the plugin root no longer keeps this suite out of the real
+  // store. A `.git` marker makes `lib/git/project-root.js#resolveProjectRoot`
+  // stop here, and every payload below carries `cwd` pointing at this root.
+  mkdirSync(path.join(tmp, '.git'), { recursive: true });
   return tmp;
 }
 
@@ -119,7 +131,9 @@ describe('silent fail → stderr (issue-scanner A2 #10)', () => {
     const { handleUserPromptSubmit } = await import('../../scripts/hooks/runtime-prompt.js');
 
     const stderr = await captureStderr(async () => {
-      await handleUserPromptSubmit({ user_prompt: 'hi', event: 'UserPromptSubmit' });
+      await handleUserPromptSubmit({
+        user_prompt: 'hi', event: 'UserPromptSubmit', cwd: brokenRoot,
+      });
     });
 
     expect(stderr).toContain('[runtime-prompt]');
@@ -137,7 +151,9 @@ describe('silent fail → stderr (issue-scanner A2 #10)', () => {
     const { handleUserPromptSubmit } = await import('../../scripts/hooks/runtime-prompt.js');
 
     const stderr = await captureStderr(async () => {
-      await handleUserPromptSubmit({ user_prompt: 'hi', event: 'UserPromptSubmit' });
+      await handleUserPromptSubmit({
+        user_prompt: 'hi', event: 'UserPromptSubmit', cwd: goodRoot,
+      });
     });
 
     expect(stderr).not.toContain('config parse failed');

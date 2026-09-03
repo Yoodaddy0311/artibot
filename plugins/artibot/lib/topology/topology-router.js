@@ -523,7 +523,8 @@ function appendPolicyRefs(mode, config, reason) {
  * Route a request onto a topology mode and score its ParallelGain.
  *
  * OBSERVE STAGE: the return value is a RECORD. It changes nothing. The caller
- * (T-37) writes it to `runtime/decisions/<sessionId>.events.ndjson` as a
+ * (T-37) writes it to
+ * `<projectRoot>/.artibot/runtime/decisions/<sessionId>.events.ndjson` as a
  * `topology-recommended` event; no execution path consumes `mode`.
  *
  * @param {object} [params]

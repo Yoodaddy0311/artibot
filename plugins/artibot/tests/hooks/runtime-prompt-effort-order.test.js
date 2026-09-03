@@ -69,6 +69,12 @@ beforeAll(() => {
   }
   copyFileSync(REAL_CONFIG_PATH, path.join(sandboxRoot, 'artibot.config.json'));
   mkdirSync(path.join(sandboxRoot, 'runtime'), { recursive: true });
+  // The decision store is anchored on the PROJECT root, not CLAUDE_PLUGIN_ROOT
+  // (`decision-events.js#getDecisionStoreDir`, changed 2026-09-03), so
+  // redirecting the plugin root no longer keeps this suite out of the real
+  // store. A `.git` marker makes `lib/git/project-root.js#resolveProjectRoot`
+  // stop here, and every payload below carries `cwd` pointing at this root.
+  mkdirSync(path.join(sandboxRoot, '.git'), { recursive: true });
   effortFile = path.join(sandboxRoot, 'runtime', 'current-effort.json');
 });
 
@@ -117,6 +123,7 @@ describe('runtime-prompt — effort resolved before pipeline (FIX-2 ordering)', 
     const output = await handleUserPromptSubmit({
       user_prompt: '/implement add oauth login',
       event: 'UserPromptSubmit',
+      cwd: sandboxRoot,
     });
 
     expect(output).not.toBeNull();
@@ -135,6 +142,7 @@ describe('runtime-prompt — effort resolved before pipeline (FIX-2 ordering)', 
     const output = await handleUserPromptSubmit({
       user_prompt: 'just answer this question directly',
       event: 'UserPromptSubmit',
+      cwd: sandboxRoot,
     });
 
     expect(output).not.toBeNull();

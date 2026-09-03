@@ -86,13 +86,18 @@ const VERIFY_RESULTS = Object.freeze(['pass', 'fail', VERIFY_RESULT_UNMEASURED])
 /**
  * Policy knobs, and the only one that exists today.
  *
- * `unmeasuredBlocksOutcome` is a **C4 placeholder**. Owner decision C4 ("층별
- * 필수/선택 config, Observe 는 카운트만") is open, and hard-coding the block
- * would settle it in the blocking direction before the owner ruled. So the
- * judgment is a parameter with a fail-closed default: `true` keeps today's
- * behaviour, `false` counts without blocking. **When C4 is decided this moves to
- * `artibot.config.json` and a per-layer required/optional map replaces the
- * boolean** — this constant is the seam, not the answer.
+ * `unmeasuredBlocksOutcome` was a C4 placeholder; owner decision C4 ("층별
+ * 필수/선택 config, Observe 는 카운트만") RULED on 2026-09-03 and kept this value
+ * at `true`, so the constant is no longer provisional in the blocking
+ * direction — it is the decided answer. `false` still counts without blocking,
+ * for the caller that opts out.
+ *
+ * The decision's OTHER half — only the `deterministic` layer is required — is
+ * recorded at `artibot.config.json#/review/verify` and is NOT implemented here:
+ * this module still holds one boolean, not a per-layer required/optional map,
+ * and it does NOT read that config. Replacing the boolean with the map is the
+ * change C4 authorises and it has not been made, so a green test here says
+ * nothing about per-layer enforcement.
  */
 export const DEFAULT_POLICY = Object.freeze({ unmeasuredBlocksOutcome: true });
 

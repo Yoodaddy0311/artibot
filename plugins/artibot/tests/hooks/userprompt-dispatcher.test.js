@@ -56,7 +56,7 @@ let sandboxRoot;
  * This suite already redirected HOME and cwd, but still passed the REAL
  * `CLAUDE_PLUGIN_ROOT` — the blind spot the note above `runDispatcher` records.
  * So every run mutated the developer's live `runtime/`: `token-usage-session
- * .json` each time, and a line in the real `runtime/decisions/` store that
+ * .json` each time, and a line in the real decision store that
  * `/doctor` reads once the recorder-stats flush landed. Writing fixture data
  * into the store a health check reads is worse than recording nothing.
  *
@@ -134,6 +134,21 @@ describe('_userprompt-dispatcher (integration)', () => {
     expect(out.user_prompt.length).toBeGreaterThan(0);
   });
 
+  // 호스트 2.1.259 스키마 형태 — 회귀 방지.
+  // 이 파일의 다른 케이스는 전부 `user_prompt` 를 심어 디스패처의 내부 계약(리라이터가
+  // 이미 쓴 상태)을 재현한다. 그 계약도 여전히 유효하므로 지우지 않았고, 대신 호스트가
+  // 실제로 보내는 형태를 한 건 추가한다 — 라이브에서 전 체인이 죽어 있던 그 형태다.
+  it('drives the whole chain from the host `prompt` key alone (no user_prompt)', () => {
+    const out = runDispatcher({
+      hook_event_name: 'UserPromptSubmit',
+      prompt: '!rv check the auth module',
+      session_id: '9120048e-3385-4855-a35b-09c89e5dd684',
+    });
+    expect(out).not.toBeNull();
+    // 리라이터가 호스트 `prompt` 를 읽어야만 이 봉투가 만들어진다.
+    expect(out.user_prompt).toMatch(/CRITICAL RE-VERIFICATION MODE/);
+  });
+
   it('rewrites !rv prompts via user-prompt-handler before parallel hooks see them', () => {
     const out = runDispatcher({ user_prompt: '!rv check the auth module' });
     expect(out).not.toBeNull();
@@ -150,6 +165,39 @@ describe('_userprompt-dispatcher (integration)', () => {
     // user_prompt envelope, but the underlying prompt no longer contains
     // --no-team.
     expect(out.user_prompt).not.toMatch(/--no-team/);
+  });
+
+  // 호스트 2.1.259 스키마 형태 — 회귀 방지.
+  // --no-team 옵트아웃이 리라이터에 의해 무력화되지 않는지. 이 결함은 오직 체인
+  // 전체를 돌릴 때만 보인다: 리라이터가 플래그를 제거한 뒤 `payload.user_prompt`
+  // 에 제거본을 넣고, auto-team-trigger 가 그 제거본을 1순위로 읽기 때문이다.
+  // 핸들러 단독 테스트는 리라이터를 거치지 않으므로 이 결함을 절대 못 잡는다.
+  it('--no-team survives the rewriter: auto-team must not fire from the host prompt', () => {
+    const out = runDispatcher({
+      hook_event_name: 'UserPromptSubmit',
+      // 옵트아웃이 없었다면 auto-team 이 반드시 발화하는 프롬프트(3도메인·다중동사).
+      prompt: '프론트와 백엔드 시스템을 마이그레이션하고 테스트도 추가해줘 --no-team',
+      session_id: '9120048e-3385-4855-a35b-09c89e5dd684',
+    });
+    expect(out).not.toBeNull();
+    // 리라이터는 플래그를 제거한다(디스패처 계약 — 유지).
+    expect(out.user_prompt).not.toMatch(/--no-team/);
+    // 그러나 옵트아웃은 살아 있어야 한다.
+    const ctx = out.hookSpecificOutput?.additionalContext || '';
+    expect(ctx).not.toContain('[auto-team-suggested]');
+  });
+
+  // 대조군: 같은 프롬프트에서 플래그만 빼면 반드시 발화해야 한다.
+  // 이게 없으면 위 케이스는 "그냥 아무것도 발화 안 함"으로도 통과해 버린다.
+  it('control: the same prompt WITHOUT --no-team does fire auto-team', () => {
+    const out = runDispatcher({
+      hook_event_name: 'UserPromptSubmit',
+      prompt: '프론트와 백엔드 시스템을 마이그레이션하고 테스트도 추가해줘',
+      session_id: '9120048e-3385-4855-a35b-09c89e5dd684',
+    });
+    expect(out).not.toBeNull();
+    const ctx = out.hookSpecificOutput?.additionalContext || '';
+    expect(ctx).toContain('[auto-team-suggested]');
   });
 
   it('flags short destructive prompts via ambiguity-guard additionalContext', () => {
@@ -267,7 +315,14 @@ describe('dispatcher writes a single newline-free JSON document to stdout', () =
     // JSON object — multiple writes would break Claude Code's hook protocol.
     const raw = await new Promise((resolve, reject) => {
       const child = spawn(process.execPath, [SCRIPT_PATH], {
-        cwd: PLUGIN_ROOT,
+        // `sandboxCwd`, like `runDispatcher` — NOT PLUGIN_ROOT. This case only
+        // inspects stdout shape, so the cwd is not load-bearing for it, but
+        // since 2026-09-03 the decision store resolves from the PROJECT ROOT of
+        // the cwd (`decision-events.js#getDecisionStoreDir`). Spawning from
+        // PLUGIN_ROOT put this suite's recorder-stats line in the repository's
+        // own store — the exact "fixture data in the store /doctor reads"
+        // failure this file's header says it exists to avoid.
+        cwd: sandboxCwd,
         env: {
           ...process.env,
           CLAUDE_PLUGIN_ROOT: sandboxRoot,

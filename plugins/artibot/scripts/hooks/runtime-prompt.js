@@ -5,7 +5,9 @@
  *
  * Flow:
  *   1. user-prompt-handler.js may rewrite special triggers like !rv
- *   2. this hook reads the rewritten prompt from hookData.user_prompt
+ *   2. this hook reads that rewritten prompt via `extractUserPromptText` —
+ *      `hookData.user_prompt` when the rewriter set it, else the host's own
+ *      `hookData.prompt` (measured; see hook-utils.js)
  *   3. createArtibotAgent().preparePrompt() builds a runtime envelope
  *   4. the enriched prompt is returned to Claude Code via stdout
  */
@@ -19,7 +21,7 @@ import {
   toFileUrl,
   writeStdout,
 } from '../utils/index.js';
-import { createErrorHandler } from '../../lib/core/hook-utils.js';
+import { createErrorHandler, extractUserPromptText } from '../../lib/core/hook-utils.js';
 // T-50 #10 — `detectSlashCommand` used to be duplicated here, byte-identical to
 // the L2 copy. That copy's own JSDoc explains the duplication as "an L2 module
 // may not import" the hook layer — true, but the dependency runs the other way:
@@ -559,11 +561,11 @@ async function recordEffortDecision(effortMeta, pluginRoot) {
 }
 
 /**
- * T-37 — OBSERVE-ONLY records go to `runtime/decisions/`, NOT the central
- * ledger: that writer refuses both named events from a `hook` source and writes
- * a `ledger.rejected` line instead of passing silently. The measurement, the
- * allowlist reasoning, the receipt-schema conflict, and the parser
- * `measureMemoryInjection` all live at the destination
+ * T-37 — OBSERVE-ONLY records go to `<projectRoot>/.artibot/runtime/decisions/`,
+ * NOT the central ledger: that writer refuses both named events from a `hook`
+ * source and writes a `ledger.rejected` line instead of passing silently. The
+ * measurement, the allowlist reasoning, the receipt-schema conflict, the store
+ * location and the parser `measureMemoryInjection` all live at the destination
  * (`lib/observability/decision-events.js`); only the call sites remain here,
  * because keeping the parser put this file over the 800-line standard. Tripwire:
  * `tests/hooks/runtime-prompt-memory-instrumentation.test.js`.
@@ -609,19 +611,19 @@ async function recordObserveOnlyDecisions({
     } = await loadLibModule(pluginRoot, 'observability', 'decision-events.js');
 
     const runId = resolveDecisionRunId({ hookData });
+    // One raw `cwd` for all four writers; the recorder resolves the store from it.
+    const store = { cwd: hookData?.cwd };
     recordTopologyRecommended(runId, routeTopology({
       intent: prepared?.context?.intent,
       workflowPlan: prepared?.context?.tasks?.meta?.workflowPlan,
       config: runtimeConfig,
       evidence: { promptText: typeof prompt === 'string' ? prompt : undefined },
-    }));
-    recordMemoryInjection(runId, measureMemoryInjection(prepared));
+    }), store);
+    recordMemoryInjection(runId, measureMemoryInjection(prepared), store);
 
-    // LAST: the counters live in a module object in this per-prompt process, so
-    // anything unwritten at exit is lost. Every recorder call has happened by
-    // now (the middleware's two inside preparePrompt, these two just above).
-    // Writes nothing when the counters are clean.
-    flushRecorderStats(runId);
+    // LAST: this per-prompt process dies with its counters, and every recorder
+    // call has happened by now (two in preparePrompt, two above). No-op if clean.
+    flushRecorderStats(runId, store);
   } catch {
     // Observe-only: these records must never affect the hook's output.
   }
@@ -740,7 +742,7 @@ export function composePromptOutput({ prepared, prompt, effortMeta, taskBudgetDi
  *   - null when no prompt was present
  */
 export async function handleUserPromptSubmit(hookData) {
-  const prompt = hookData?.user_prompt || hookData?.content || '';
+  const prompt = extractUserPromptText(hookData);
   if (!prompt) return null;
 
   const pluginRoot = getPluginRoot();

@@ -132,18 +132,27 @@ export const DOWNGRADE_ACTION_CLASSES = Object.freeze([
 ]);
 
 /**
- * Uncalibrated policy defaults.
+ * UNCALIBRATED policy defaults.
  *
  * `ceilingRetries: 1` is the only value with a written source
  * (`commands/autopilot.md`: "frontier 티어로 1회 재시도"). The other two are
  * placeholders: §4.1 says downgrade needs "연속 성공 N" without naming N, and
  * no document sets a refusal-exclusion count at all.
+ *
+ * Owner decision G5 (2026-09-03) KEPT these numbers as they stand and required
+ * only that their status be stated where they are written: they are document /
+ * placeholder values awaiting RouteBench, NOT measured thresholds. The same
+ * ruling covers `route-hysteresis.js#DEFAULT_SWITCH_POLICY` (residency 3 /
+ * cooldown 2), which carries its own UNCALIBRATED note. Changing any of these
+ * numbers needs calibration evidence, not a judgement call.
  * @type {Readonly<{ceilingRetries: number, ceilingRetryTier: string, downgradeAfterSuccesses: number, refusalExclusionThreshold: number}>}
  */
 export const DEFAULT_ESCALATION_POLICY = Object.freeze({
   ceilingRetries: 1,
   ceilingRetryTier: CEILING_RETRY_TIER,
+  // UNCALIBRATED (G5) — §4.1 names no N.
   downgradeAfterSuccesses: 2,
+  // UNCALIBRATED (G5) — no document sets this count.
   refusalExclusionThreshold: 2,
 });
 

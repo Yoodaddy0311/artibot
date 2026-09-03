@@ -9,6 +9,8 @@ import {
   extractExtension,
   extractFilePath,
   extractToolName,
+  extractUserPromptFlagSurface,
+  extractUserPromptText,
   getArtibotDataDir,
   getClaudeDir,
   getHomeDir,
@@ -394,6 +396,98 @@ describe('hook-utils / Hook Input Extraction', () => {
     it('returns null for non-object payloads', () => {
       expect(extractToolName('Bash')).toBeNull();
       expect(extractToolName(42)).toBeNull();
+    });
+  });
+
+  // Regression cover for the UserPromptSubmit key mismatch: five of the six
+  // contributors read `user_prompt`/`content` only, so with the host's real
+  // key (`prompt`, measured against Claude Code 2.1.259) they all saw '' and
+  // silently no-opped for a whole release.
+  describe('extractUserPromptText()', () => {
+    it('reads the host key `prompt`', () => {
+      expect(extractUserPromptText({ prompt: 'hello' })).toBe('hello');
+    });
+
+    it('prefers the dispatcher-written user_prompt over the host prompt', () => {
+      expect(extractUserPromptText({ prompt: 'raw', user_prompt: 'rewritten' }))
+        .toBe('rewritten');
+    });
+
+    // A `||` chain would fall through to `prompt` here and undo a deliberate
+    // blank-out by the rewriter — the exact bug the typeof check prevents.
+    it('preserves an empty-string rewrite rather than falling back', () => {
+      expect(extractUserPromptText({ prompt: 'raw', user_prompt: '' })).toBe('');
+    });
+
+    it('falls back to the legacy content key', () => {
+      expect(extractUserPromptText({ content: 'legacy' })).toBe('legacy');
+    });
+
+    it('ignores keys that no UserPromptSubmit payload carries', () => {
+      expect(extractUserPromptText({ userPrompt: 'y', message: 'm', text: 't' }))
+        .toBe('');
+    });
+
+    it('returns empty string for non-object input', () => {
+      expect(extractUserPromptText(null)).toBe('');
+      expect(extractUserPromptText(undefined)).toBe('');
+      expect(extractUserPromptText(42)).toBe('');
+      expect(extractUserPromptText({})).toBe('');
+    });
+
+    it('ignores non-string values under a recognised key', () => {
+      expect(extractUserPromptText({ user_prompt: 42, prompt: 'ok' })).toBe('ok');
+    });
+  });
+
+  // Opt-out flags must survive the rewriter. `user-prompt-handler` strips
+  // `--no-team` and the dispatcher publishes the stripped text on
+  // `user_prompt`, so a hook testing its regex against the classify-value
+  // never sees the flag the user typed.
+  describe('extractUserPromptFlagSurface()', () => {
+    it('carries the flag from the untouched host key when the rewrite dropped it', () => {
+      const surface = extractUserPromptFlagSurface({
+        prompt: 'ship the feature --no-team',
+        user_prompt: 'ship the feature',
+      });
+      expect(surface).toMatch(/--no-team\b/);
+    });
+
+    it('also carries a flag that only the rewritten value holds', () => {
+      // A direct handler call with no rewriter in front of it. Reading only the
+      // "original" would miss this, which is why the surface is a union.
+      expect(extractUserPromptFlagSurface({ user_prompt: 'x --no-team' }))
+        .toMatch(/--no-team\b/);
+    });
+
+    it('joins with a newline so \\b cannot fuse two values into a false match', () => {
+      // The split point is chosen so the two joins actually DISAGREE:
+      //   concat  -> 'a --no-team b'  => /--no-team\b/ MATCHES (the false positive)
+      //   newline -> 'a --no-\nteam b' => no match (what this function must do)
+      // A split like 'a --no' + 'team b' would be non-discriminating: bare
+      // concat gives '--noteam', which has no hyphen and fails the regex
+      // anyway, so the assertion would pass no matter how the values were
+      // joined and would prove nothing.
+      const parts = { user_prompt: 'a --no-', prompt: 'team b' };
+      const surface = extractUserPromptFlagSurface(parts);
+
+      expect(surface).toBe('a --no-\nteam b');
+      expect(/--no-team\b/.test(surface)).toBe(false);
+      // Control: the rejected implementation really would have matched here.
+      expect(/--no-team\b/.test(parts.user_prompt + parts.prompt)).toBe(true);
+    });
+
+    it('deduplicates identical values and drops empties', () => {
+      expect(extractUserPromptFlagSurface({ user_prompt: 'same', prompt: 'same' }))
+        .toBe('same');
+      expect(extractUserPromptFlagSurface({ user_prompt: '', prompt: 'only' }))
+        .toBe('only');
+    });
+
+    it('returns empty string for non-object input', () => {
+      expect(extractUserPromptFlagSurface(null)).toBe('');
+      expect(extractUserPromptFlagSurface(42)).toBe('');
+      expect(extractUserPromptFlagSurface({})).toBe('');
     });
   });
 

@@ -56,6 +56,13 @@ beforeAll(() => {
   }
   copyFileSync(REAL_CONFIG_PATH, path.join(sandboxRoot, 'artibot.config.json'));
   mkdirSync(path.join(sandboxRoot, 'runtime'), { recursive: true });
+  // The decision store hangs off the PROJECT root now, and the project root is
+  // resolved by `lib/git/project-root.js#resolveProjectRoot`, whose first rule
+  // is "nearest ancestor holding .git". Planting one here pins the sandbox as
+  // its own root: without it the walk climbs out of tmpdir and could land on
+  // whatever ancestor happens to carry a weak marker, which is how this suite
+  // would silently write fixture lines into the real repository store.
+  mkdirSync(path.join(sandboxRoot, '.git'), { recursive: true });
 });
 
 afterAll(() => {
@@ -79,12 +86,17 @@ afterEach(() => {
     if (v === undefined) delete process.env[k];
     else process.env[k] = v;
   }
-  rmSync(path.join(sandboxRoot, 'runtime', 'decisions'), { recursive: true, force: true });
+  rmSync(decisionStore(), { recursive: true, force: true });
 });
+
+/** @returns {string} the sandbox's decision store, per getDecisionStoreDir. */
+function decisionStore() {
+  return path.join(sandboxRoot, '.artibot', 'runtime', 'decisions');
+}
 
 /** @returns {object[]} every decision event written under the sandbox store. */
 function readSandboxDecisions() {
-  const store = path.join(sandboxRoot, 'runtime', 'decisions');
+  const store = decisionStore();
   if (!existsSync(store)) return [];
   return readdirSync(store)
     .filter((f) => f.endsWith('.ndjson'))
@@ -100,6 +112,7 @@ describe('the measurement is recorded on a live prompt', () => {
       user_prompt: 'summarize the current architecture',
       session_id: 'sess-t37-memory-a',
       event: 'UserPromptSubmit',
+      cwd: sandboxRoot,
     });
     expect(out).not.toBeNull();
 
@@ -120,6 +133,7 @@ describe('the measurement is recorded on a live prompt', () => {
       user_prompt: 'summarize the current architecture',
       session_id: 'sess-t37-memory-b',
       event: 'UserPromptSubmit',
+      cwd: sandboxRoot,
     });
     const [evt] = readSandboxDecisions().filter((e) => e.type === MEMORY_INJECTION_MEASURED);
     expect(out.user_prompt.includes(MEMORY_BLOCK_HEAD)).toBe(evt.data.injected);

@@ -32,7 +32,7 @@ const PLUGIN_ROOT = path.resolve(
  * This suite used to point `CLAUDE_PLUGIN_ROOT` at the REAL plugin root, so
  * running it mutated the developer's live `runtime/` — `token-usage-session.json`
  * on every run, and (once the recorder-stats flush landed) a line in the real
- * `runtime/decisions/` store that `/doctor` reads. Writing fixture data into the
+ * decision store that `/doctor` reads. Writing fixture data into the
  * store a health check reads is worse than recording nothing.
  *
  * The sandbox LINKS the real `lib/`, `commands/`, `skills/` and `agents/` and
@@ -60,6 +60,12 @@ beforeAll(() => {
     path.join(sandboxRoot, 'artibot.config.json'),
   );
   mkdirSync(path.join(sandboxRoot, 'runtime'), { recursive: true });
+  // The decision store is anchored on the PROJECT root, not CLAUDE_PLUGIN_ROOT
+  // (`decision-events.js#getDecisionStoreDir`), so redirecting the plugin root
+  // alone no longer keeps this suite out of the real store. A `.git` marker
+  // makes `lib/git/project-root.js#resolveProjectRoot` stop at the sandbox, and
+  // the payloads below carry `cwd: sandboxRoot` so the hook resolves from here.
+  mkdirSync(path.join(sandboxRoot, '.git'), { recursive: true });
 });
 
 afterAll(() => {
@@ -93,7 +99,7 @@ describe('runtime-prompt hook', () => {
   it('consumes a prompt already rewritten by user-prompt-handler', async () => {
     const output = await handleUserPromptSubmit({
       user_prompt: 'CRITICAL RE-VERIFICATION MODE ACTIVATED.\nCLAIM AUDIT\nEVIDENCE CHECK',
-      event: 'UserPromptSubmit',
+      event: 'UserPromptSubmit', cwd: sandboxRoot,
     });
 
     expect(output).not.toBeNull();
@@ -104,7 +110,7 @@ describe('runtime-prompt hook', () => {
   it('rewrites a simple prompt through the Phase 1 runtime path', async () => {
     const output = await handleUserPromptSubmit({
       user_prompt: 'fix typo in readme',
-      event: 'UserPromptSubmit',
+      event: 'UserPromptSubmit', cwd: sandboxRoot,
     });
 
     // Accept both the real runtime path (returns `route=SYSTEM1`) and the
@@ -118,10 +124,27 @@ describe('runtime-prompt hook', () => {
     expect(output.user_prompt).toContain('fix typo in readme');
   });
 
+  // 호스트 2.1.259 스키마 형태 — 회귀 방지.
+  // 이 훅이 라이브에서 죽어 있던 형태가 정확히 이것이다: 페이로드에 `user_prompt` 가
+  // 없고 `prompt` 만 있는데, 훅은 `user_prompt`/`content` 만 읽어 매번 null 을 반환했다.
+  // 위 케이스들은 전부 `user_prompt` 픽스처라 그 상태에서도 green 이었다.
+  it('prepares the envelope from the host `prompt` key alone (no user_prompt)', async () => {
+    const output = await handleUserPromptSubmit({
+      hook_event_name: 'UserPromptSubmit',
+      prompt: 'fix typo in readme',
+      session_id: '9120048e-3385-4855-a35b-09c89e5dd684',
+      cwd: sandboxRoot,
+    });
+
+    expect(output).not.toBeNull();
+    expect(output.message).toContain('[runtime]');
+    expect(output.user_prompt).toContain('fix typo in readme');
+  });
+
   it('rewrites a complex prompt through the Phase 1 runtime path', async () => {
     const output = await handleUserPromptSubmit({
       user_prompt: 'analyze security vulnerabilities, then refactor auth flow, then deploy to production',
-      event: 'UserPromptSubmit',
+      event: 'UserPromptSubmit', cwd: sandboxRoot,
     });
 
     // Same dual-path acceptance as the SYSTEM1 test above.

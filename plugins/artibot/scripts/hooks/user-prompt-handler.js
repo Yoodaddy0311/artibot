@@ -6,7 +6,7 @@
  */
 
 import { parseJSON, readStdin, writeStdout } from '../utils/index.js';
-import { createErrorHandler } from '../../lib/core/hook-utils.js';
+import { createErrorHandler, extractUserPromptText } from '../../lib/core/hook-utils.js';
 import { isMainEntry } from './_main-entry.js';
 
 const REVERIFY_TRIGGER_PREFIX = /^!rv\b|^!(?:재검증)(?=\s|$)/iu;
@@ -71,7 +71,7 @@ function buildReverifyPrompt(prompt, _hookData) {
  *   - null when the prompt should pass through unchanged
  */
 export function handleUserPromptSubmit(hookData) {
-  const prompt = hookData?.user_prompt || hookData?.content || '';
+  const prompt = extractUserPromptText(hookData);
   if (!prompt) return null;
 
   const trimmedPrompt = prompt.trim();

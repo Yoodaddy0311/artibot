@@ -48,7 +48,15 @@ export function createRouterMiddleware(options = {}) {
     // `state.context` never carries it. Passing the wrong one is silent — the
     // recorder counts a `skipped` and returns null — which is how this recorded
     // 0 of 2 decisions until 2026-08-29.
-    recordRoutingDecision(resolveDecisionRunId(state.input), classification);
+    //
+    // `cwd` comes from the same payload and is what anchors the store on the
+    // PROJECT root rather than on whatever directory this hook process happens
+    // to start in (`decision-events.js#getDecisionStoreDir`). Absent, the
+    // recorder falls back to `process.cwd()`, which is usually the same answer
+    // but is not guaranteed to be.
+    recordRoutingDecision(resolveDecisionRunId(state.input), classification, {
+      cwd: state.input?.hookData?.cwd,
+    });
 
     state.context.intent = {
       intents: intent.intents,

@@ -65,6 +65,11 @@ export const HYSTERESIS_BAND = 0.05;
  * cooldown "are not fixed rules but calibrated by RouteBench", and may differ
  * per model family. `threshold: 0` is the literal §28 rule ("switch only if
  * SwitchUtility > threshold") with no bias added.
+ *
+ * Owner decision G5 (2026-09-03) KEPT residency 3 / cooldown 2 at the document
+ * values and required only the UNCALIBRATED label the paragraph above already
+ * carries — so this block is the decision, unchanged. Its sibling is
+ * `escalation-controller.js#DEFAULT_ESCALATION_POLICY` (refusal threshold 2).
  * @type {Readonly<{minimum_residency: number, cooldown: number, threshold: number, band: number}>}
  */
 export const DEFAULT_SWITCH_POLICY = Object.freeze({

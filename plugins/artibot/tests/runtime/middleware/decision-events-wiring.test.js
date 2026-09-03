@@ -13,13 +13,21 @@
  * the real `createArtibotAgent().preparePrompt()` with a real hook payload and
  * require that events land on disk.
  *
- * Writes are pinned to a throwaway plugin root by `useTrailSandbox`, because the
- * middleware calls the recorder with no `storeDir` — it resolves
- * `getPluginRoot()/runtime/decisions/` at write time, which is the repo's live
- * store unless `CLAUDE_PLUGIN_ROOT` is redirected.
+ * Writes are pinned to a throwaway root, but NOT by `CLAUDE_PLUGIN_ROOT`: since
+ * 2026-09-03 the store is `<projectRoot>/.artibot/runtime/decisions/`
+ * (`decision-events.js#getDecisionStoreDir`), so redirecting the plugin root no
+ * longer moves it. `useTrailSandbox` still pins the decision TRAIL, and this
+ * file additionally (a) plants a `.git` marker in that sandbox so
+ * `lib/git/project-root.js#resolveProjectRoot` stops there instead of walking
+ * out of tmpdir, and (b) passes the sandbox as `cwd` on every payload and read.
+ * Without both, this suite writes into the repo's live store and reads back
+ * lines earlier runs left there — measured 2026-09-03 as 8 events where the
+ * assertion expects 2.
  */
 
-import { beforeEach, describe, expect, it } from 'vitest';
+import { mkdirSync } from 'node:fs';
+import path from 'node:path';
+import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { useTrailSandbox } from '../../helpers/trail-sandbox.js';
 import { createArtibotAgent } from '../../../lib/runtime/create-artibot-agent.js';
 import { resetRouter } from '../../../lib/cognitive/router.js';
@@ -32,6 +40,14 @@ import {
 } from '../../../lib/observability/decision-events.js';
 
 const sandbox = useTrailSandbox('decision-events-wiring');
+
+// Registered AFTER the helper's own beforeAll, so `sandbox.root()` is set.
+beforeAll(() => {
+  mkdirSync(path.join(sandbox.root(), '.git'), { recursive: true });
+});
+
+/** Store options every write and read in this file must share. */
+const store = () => ({ cwd: sandbox.root() });
 
 /**
  * One session id per test. The sandbox root is per-file, and the store is keyed
@@ -61,7 +77,10 @@ const CONFIG = { automation: {}, cognitive: { router: { threshold: 0.4 } } };
  */
 async function runPipeline(hookData) {
   const agent = createArtibotAgent({ pluginRoot: sandbox.root(), config: CONFIG });
-  return agent.preparePrompt({ prompt: SYSTEM2_PROMPT, hookData });
+  return agent.preparePrompt({
+    prompt: SYSTEM2_PROMPT,
+    hookData: { ...hookData, cwd: sandbox.root() },
+  });
 }
 
 beforeEach(() => {
@@ -92,7 +111,7 @@ describe('decision-events wiring — live middleware chain', () => {
       skipped: 0,
     });
 
-    const onDisk = readDecisionEvents(sessionId);
+    const onDisk = readDecisionEvents(sessionId, store());
     expect(onDisk.map((e) => e.type)).toEqual([ROUTING_CLASSIFIED, WORKFLOW_PLANNED]);
     expect(onDisk.every((e) => e.sessionId === sessionId)).toBe(true);
   });
@@ -100,7 +119,7 @@ describe('decision-events wiring — live middleware chain', () => {
   it('writes the classifier outputs, and no prompt text, into the D5 line', async () => {
     await runPipeline({ session_id: sessionId, event: 'UserPromptSubmit' });
 
-    const [routing] = readDecisionEvents(sessionId);
+    const [routing] = readDecisionEvents(sessionId, store());
     expect(routing.phase).toBe('ROUTE');
     expect(routing.data.system).toBe(2);
     expect(typeof routing.data.score).toBe('number');

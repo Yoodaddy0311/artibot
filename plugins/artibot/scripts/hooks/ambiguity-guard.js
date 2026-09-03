@@ -13,7 +13,7 @@
  */
 
 import { parseJSON, readStdin, writeStdout } from '../utils/index.js';
-import { createErrorHandler } from '../../lib/core/hook-utils.js';
+import { createErrorHandler, extractUserPromptText } from '../../lib/core/hook-utils.js';
 import { isMainEntry } from './_main-entry.js';
 
 const HOOK_NAME = 'ambiguity-guard';
@@ -32,19 +32,29 @@ const SHORT_PROMPT_THRESHOLD = 5;
 
 /**
  * Extract the prompt text from the hook stdin payload.
+ *
+ * Delegates to the shared `extractUserPromptText`. This guard's own five-key
+ * list was the only one in the UserPromptSubmit chain that happened to include
+ * the host's real key (`prompt`), which is why it kept firing while the other
+ * five contributors ran dead — see the measurement in `hook-utils.js`. The
+ * list is not promoted as-is: `userPrompt`, `message` and `text` appear in no
+ * UserPromptSubmit payload in Claude Code 2.1.259 (`message` belongs to the
+ * Notification event), so keeping them would spread three dead keys to six
+ * more call sites.
+ *
+ * TWO BEHAVIOR CHANGES, both deliberate:
+ *   - `user_prompt` now takes precedence over `prompt`, so this guard reads
+ *     the prompt as REWRITTEN by `user-prompt-handler` rather than the raw
+ *     one. That is the contract `_userprompt-dispatcher.js` already documents
+ *     for its parallel contributors ("they see the rewritten prompt"); this
+ *     guard was the one contributor that quietly did not honour it.
+ *   - `userPrompt` / `message` / `text` are no longer read.
+ *
  * @param {*} hookData
  * @returns {string}
  */
 export function extractPrompt(hookData) {
-  if (!hookData || typeof hookData !== 'object') return '';
-  return (
-    hookData.prompt ||
-    hookData.user_prompt ||
-    hookData.userPrompt ||
-    hookData.message ||
-    hookData.text ||
-    ''
-  );
+  return extractUserPromptText(hookData);
 }
 
 /**

@@ -280,6 +280,29 @@ export const configSchema = {
         comment: { type: 'string' },
       },
     },
+    // Owner decisions 2026-09-03 (review.independent, C4). Same grade as the
+    // five above: a DECLARATION with no lib/ reader, whose shipped values
+    // encode current behavior.
+    review: {
+      type: 'object',
+      properties: {
+        // Default for a mission contract's `review.required`. The compiler
+        // still reflects only a boolean a CALLER passes it, so this is a
+        // recorded decision, not an enforced one.
+        independent: { type: 'boolean' },
+        verify: {
+          type: 'object',
+          properties: {
+            // Allowlist of REQUIRED layers (decision C4), the same direction
+            // missions.substantiveSignals takes: a layer nobody listed is
+            // optional, never silently required.
+            requiredLayers: { type: 'array', items: { type: 'string' } },
+            unmeasuredBlocksOutcome: { type: 'boolean' },
+          },
+        },
+        comment: { type: 'string' },
+      },
+    },
   },
 };
 

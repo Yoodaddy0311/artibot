@@ -95,15 +95,37 @@ describe('ambiguity-guard hook', () => {
   });
 
   describe('extractPrompt()', () => {
-    it('reads .prompt first', () => {
-      expect(extractPrompt({ prompt: 'a', message: 'b' })).toBe('a');
+    it('reads the host key .prompt', () => {
+      expect(extractPrompt({ prompt: 'a' })).toBe('a');
     });
 
-    it('falls back to user_prompt, userPrompt, message, text', () => {
-      expect(extractPrompt({ user_prompt: 'x' })).toBe('x');
-      expect(extractPrompt({ userPrompt: 'y' })).toBe('y');
-      expect(extractPrompt({ message: 'm' })).toBe('m');
-      expect(extractPrompt({ text: 't' })).toBe('t');
+    // The dispatcher writes `user_prompt` onto the payload after
+    // `user-prompt-handler` rewrites the prompt, so a contributor must
+    // classify the rewritten text, not the original. This guard used to read
+    // `.prompt` first and was the one contributor that did not honour that.
+    it('prefers the dispatcher-rewritten user_prompt over the host prompt', () => {
+      expect(extractPrompt({ prompt: 'raw', user_prompt: 'rewritten' })).toBe('rewritten');
+    });
+
+    // An empty rewrite is a deliberate blank-out, not a missing value.
+    it('preserves an empty-string rewrite instead of falling back', () => {
+      expect(extractPrompt({ prompt: 'raw', user_prompt: '' })).toBe('');
+    });
+
+    it('falls back to the legacy content key', () => {
+      expect(extractPrompt({ content: 'c' })).toBe('c');
+    });
+
+    // MEASURED 2026-09-03 (Claude Code 2.1.259 hook-input schema): the
+    // UserPromptSubmit payload is base + { prompt, source?, session_title? }.
+    // These three keys appear in no such payload (`message` belongs to the
+    // Notification event), so reading them was dead weight — asserted absent
+    // here so a future "widen the key list" change has to argue with a
+    // measurement instead of re-adding them on a hunch.
+    it('does not read keys absent from the UserPromptSubmit payload', () => {
+      expect(extractPrompt({ userPrompt: 'y' })).toBe('');
+      expect(extractPrompt({ message: 'm' })).toBe('');
+      expect(extractPrompt({ text: 't' })).toBe('');
     });
 
     it('returns empty string for null/undefined hookData', () => {

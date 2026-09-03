@@ -4,8 +4,8 @@
  * The third consumer of `lib/observability/run-events.js`, alongside
  * `lib/autopilot/telemetry.js` (`runtime/autopilot/`) and
  * `lib/observability/split-telemetry.js` (`runtime/split/`). It writes the same
- * line shape into `runtime/decisions/`, so `replay.js` and every other reader of
- * that shape work here unchanged.
+ * line shape into `<projectRoot>/.artibot/runtime/decisions/`, so `replay.js` and
+ * every other reader of that shape work here unchanged.
  *
  * WHY A SECOND STORE INSTEAD OF `lib/core/decision-trail.js`: measured
  * 2026-08-28, the trail records one entry per *slash-command* prompt — 95 of 782
@@ -66,15 +66,15 @@
  * Public surface:
  *   - ROUTING_CLASSIFIED / WORKFLOW_PLANNED   (the two `type` values written)
  *   - TOPOLOGY_RECOMMENDED / MEMORY_INJECTION_MEASURED  (the T-37 pair)
- *   - getDecisionStoreDir({ storeDir })
- *   - getDecisionEventsPath(runId, { storeDir })
- *   - readDecisionEvents(runId, { storeDir, tail, level })
+ *   - getDecisionStoreDir({ storeDir, projectRoot, cwd })
+ *   - getDecisionEventsPath(runId, { storeDir, projectRoot, cwd })
+ *   - readDecisionEvents(runId, { storeDir, projectRoot, cwd, tail, level })
  *   - resolveDecisionRunId(source)
- *   - recordRoutingDecision(runId, classification, { storeDir, ts, phase })
- *   - recordWorkflowPlanDecision(runId, plan, { storeDir, ts, phase })
- *   - recordTopologyRecommended(runId, observation, { storeDir, ts, phase })
+ *   - recordRoutingDecision(runId, classification, { storeDir, projectRoot, cwd, ts, phase })
+ *   - recordWorkflowPlanDecision(runId, plan, { storeDir, projectRoot, cwd, ts, phase })
+ *   - recordTopologyRecommended(runId, observation, { storeDir, projectRoot, cwd, ts, phase })
  *   - measureMemoryInjection(prepared)  (pure parser for the above)
- *   - recordMemoryInjection(runId, measurement, { storeDir, ts, phase })
+ *   - recordMemoryInjection(runId, measurement, { storeDir, projectRoot, cwd, ts, phase })
  *   - getDecisionRecorderStats() / resetDecisionRecorderStats()
  *
  * DATA POLICY: 100% local file; no external transmission.
@@ -83,10 +83,11 @@
  */
 
 import path from 'node:path';
-import { getPluginRoot } from '../core/platform.js';
+import { resolveProjectRoot } from '../git/project-root.js';
 import { appendRunEvent, readRunEvents, resolveRunEventsPath } from './run-events.js';
 
-const DECISIONS_DIR = 'decisions';
+/** Store path relative to <projectRoot>. See {@link getDecisionStoreDir}. */
+const DECISIONS_REL = Object.freeze(['.artibot', 'runtime', 'decisions']);
 
 export const ROUTING_CLASSIFIED = 'routing-classified';
 export const WORKFLOW_PLANNED = 'workflow-planned';
@@ -147,21 +148,45 @@ export function resetDecisionRecorderStats() {
 }
 
 /**
- * Resolve the directory decision events live in. Defaults to
- * `<pluginRoot>/runtime/decisions/`; tests pass an explicit `storeDir` under
- * `os.tmpdir()` and never touch the real one.
+ * Resolve the directory decision events live in.
  *
- * @param {{ storeDir?: string }} [opts]
+ * `<projectRoot>/.artibot/runtime/decisions/`, matching the ledger's rule
+ * (design §3.3/§3.6: per-project local artifacts hang off the PROJECT root, and
+ * `.artibot/` is load-bearing because pluginRoot also has a `runtime/`).
+ *
+ * WHY NOT `<pluginRoot>/runtime/decisions/`, which this was until 2026-09-03:
+ * the plugin root is the marketplace mirror, and `claude plugin update`
+ * REPLACES that directory. Every KPI this store feeds — /doctor Check 7's
+ * "has anything ever been recorded", the Observe coverage denominator — is a
+ * count over its history, so an update would silently reset the denominator to
+ * zero and the reset would read as "recording is fine, this root is just new".
+ * A store whose disappearance is indistinguishable from health is the failure
+ * this module's header already argues against for swallowed errors.
+ *
+ * Resolution order: an explicit `storeDir` (tests, which point at `os.tmpdir()`
+ * and never touch a real store) -> an injected `projectRoot` -> the root
+ * resolved from `cwd`. The last step goes through
+ * `lib/git/project-root.js#resolveProjectRoot` rather than using `cwd`
+ * directly: a hook payload's `cwd` follows the shell, so anchoring on it splits
+ * one project's store across every directory the session `cd`s into. That
+ * helper always returns a path and never throws, which keeps this function
+ * total — an observe-only recorder must not acquire a failure mode.
+ *
+ * @param {{ storeDir?: string, projectRoot?: string, cwd?: string }} [opts]
  * @returns {string}
  */
 export function getDecisionStoreDir(opts = {}) {
-  const override = opts && typeof opts.storeDir === 'string' && opts.storeDir ? opts.storeDir : null;
-  return override || path.join(getPluginRoot(), 'runtime', DECISIONS_DIR);
+  const o = opts && typeof opts === 'object' ? opts : {};
+  if (typeof o.storeDir === 'string' && o.storeDir) return o.storeDir;
+  const root = typeof o.projectRoot === 'string' && o.projectRoot
+    ? o.projectRoot
+    : resolveProjectRoot(typeof o.cwd === 'string' && o.cwd ? o.cwd : undefined);
+  return path.join(root, ...DECISIONS_REL);
 }
 
 /**
  * @param {string} runId
- * @param {{ storeDir?: string }} [opts]
+ * @param {{ storeDir?: string, projectRoot?: string, cwd?: string }} [opts]
  * @returns {string}
  */
 export function getDecisionEventsPath(runId, opts = {}) {
@@ -170,7 +195,7 @@ export function getDecisionEventsPath(runId, opts = {}) {
 
 /**
  * @param {string} runId
- * @param {{ storeDir?: string, tail?: number, level?: 'info'|'warn'|'error' }} [opts]
+ * @param {{ storeDir?: string, projectRoot?: string, cwd?: string, tail?: number, level?: 'info'|'warn'|'error' }} [opts]
  * @returns {object[]}
  */
 export function readDecisionEvents(runId, opts = {}) {
@@ -180,7 +205,7 @@ export function readDecisionEvents(runId, opts = {}) {
 /**
  * Reduce an id to characters that cannot leave the store directory. A session
  * id reaches us from the hook payload — outside input — and it becomes a file
- * name, so `../` in it would write outside `runtime/decisions/`.
+ * name, so `../` in it would write outside the decisions store.
  *
  * @param {string} raw
  * @returns {string}
@@ -214,7 +239,7 @@ function sanitizeRunId(raw) {
  *
  * NO FALLBACK BUCKET, deliberately. An earlier draft fell back to a UTC date so
  * an event was "never dropped" — measured consequence: running the middleware
- * suites wrote 10 fixture lines into the real `runtime/decisions/`, mixing test
+ * suites wrote 10 fixture lines into the real decisions store, mixing test
  * noise into the very store `/doctor` reads to decide whether recording is
  * alive. A fixture that makes the health check look healthy is worse than a
  * missing record. Callers without a session are counted as `skipped` instead,
@@ -240,7 +265,7 @@ export function resolveDecisionRunId(source) {
  *
  * @param {string} runId
  * @param {object} event
- * @param {{ storeDir?: string }} opts
+ * @param {{ storeDir?: string, projectRoot?: string, cwd?: string }} opts
  * @returns {object|null} the persisted event, or null when nothing was written
  */
 function record(runId, event, opts) {
@@ -317,7 +342,7 @@ function reasonLiteralsOnly(arr) {
  *
  * @param {string} runId
  * @param {object} classification - a `classifyComplexity` result
- * @param {{ storeDir?: string, ts?: string, phase?: string }} [opts]
+ * @param {{ storeDir?: string, projectRoot?: string, cwd?: string, ts?: string, phase?: string }} [opts]
  * @returns {object|null}
  */
 export function recordRoutingDecision(runId, classification, opts = {}) {
@@ -355,7 +380,7 @@ export function recordRoutingDecision(runId, classification, opts = {}) {
  *
  * @param {string} runId
  * @param {object} plan - a `buildWorkflowPlan` result
- * @param {{ storeDir?: string, ts?: string, phase?: string }} [opts]
+ * @param {{ storeDir?: string, projectRoot?: string, cwd?: string, ts?: string, phase?: string }} [opts]
  * @returns {object|null}
  */
 export function recordWorkflowPlanDecision(runId, plan, opts = {}) {
@@ -445,7 +470,7 @@ function scalarValuesOnly(src) {
  *
  * @param {string} runId
  * @param {object} observation - a `routeTopology` result
- * @param {{ storeDir?: string, ts?: string, phase?: string }} [opts]
+ * @param {{ storeDir?: string, projectRoot?: string, cwd?: string, ts?: string, phase?: string }} [opts]
  * @returns {object|null}
  */
 export function recordTopologyRecommended(runId, observation, opts = {}) {
@@ -554,7 +579,7 @@ export function measureMemoryInjection(prepared) {
  *
  * @param {string} runId
  * @param {object} measurement - a `measureMemoryInjection` result
- * @param {{ storeDir?: string, ts?: string, phase?: string }} [opts]
+ * @param {{ storeDir?: string, projectRoot?: string, cwd?: string, ts?: string, phase?: string }} [opts]
  * @returns {object|null}
  */
 export function recordMemoryInjection(runId, measurement, opts = {}) {
@@ -612,7 +637,7 @@ export function recordMemoryInjection(runId, measurement, opts = {}) {
  *
  * @param {string|null|undefined} runId session to attribute the stats to;
  *   falls back to {@link UNATTRIBUTED_RUN_ID} when there is none.
- * @param {{ storeDir?: string, ts?: string, phase?: string }} [opts]
+ * @param {{ storeDir?: string, projectRoot?: string, cwd?: string, ts?: string, phase?: string }} [opts]
  * @returns {object|null} the persisted event, or null when there was nothing to
  *   report (or the write failed — which is itself counted, see the caveat).
  */

@@ -331,7 +331,17 @@ export function createTasksMiddleware(options = {}) {
       // fired and the trigger reasons, including the inline case; agent names
       // only, no sub-objective text. Session id comes from `state.input` (where
       // the hook payload lives), the same place `pluginRoot` is read from above.
-      recordWorkflowPlanDecision(resolveDecisionRunId(state.input), plan);
+      //
+      // `cwd` is passed RAW, not through this file's `resolveProjectRoot(state)`
+      // helper: the recorder runs the payload through
+      // `lib/git/project-root.js#resolveProjectRoot` itself, and every call site
+      // handing it the same raw `cwd` is what guarantees all four recorders
+      // agree on one store directory. Pre-resolving here would introduce a
+      // second answer, which is the split store this store is being moved to
+      // avoid.
+      recordWorkflowPlanDecision(resolveDecisionRunId(state.input), plan, {
+        cwd: state.input?.hookData?.cwd,
+      });
     }
 
     // T-25: compile a Mission Contract for EVERY prompt and record it. Placed

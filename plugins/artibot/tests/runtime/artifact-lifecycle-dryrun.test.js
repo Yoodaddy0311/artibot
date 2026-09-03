@@ -368,7 +368,7 @@ describe('outcome.md refusal conditions (design §3.4)', () => {
 // 3b. C4 policy seam + per-layer counting (T-51 repair #5)
 // ---------------------------------------------------------------------------
 
-describe('unmeasuredBlocksOutcome policy (owner decision C4 still open)', () => {
+describe('unmeasuredBlocksOutcome policy (owner decision C4 ruled 2026-09-03: value stays true)', () => {
   const withUnmeasured = () => [
     ev.missionCreated(2),
     ev.planRevised(5),

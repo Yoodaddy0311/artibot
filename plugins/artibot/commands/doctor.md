@@ -128,7 +128,7 @@ noticed. A store nobody reads cannot report its own outage.
    2026-08-30 against an empty plugin root), so a zero here does not distinguish
    "no trail file" from "trail present but empty" — step 5 reports the file's
    existence separately for that reason.
-2. **Decision events** — resolve `runtime/decisions/`
+2. **Decision events** — resolve `<projectRoot>/.artibot/runtime/decisions/`
    (`lib/observability/decision-events.js#getDecisionStoreDir`) and record which
    of three states it is in: `absent` (no directory) / `empty` (directory but no
    `*.events.ndjson`) / `populated`. `getDecisionStoreDir` only joins a path, so
@@ -181,9 +181,15 @@ noticed. A store nobody reads cannot report its own outage.
    window.
 5. Report: the resolved plugin root (absolute), whether
    `runtime/decision-trail.json` exists, trail entries (total / last 24h), the
-   `runtime/decisions/` state, its total and non-`diag-` line counts for the last
+   decision-store state, its total and non-`diag-` line counts for the last
    24h, the newest record timestamp, which activity source was newest, which
    activity sources were missing, and any S3 / S4 / S5 / S6 warning.
+
+   Report BOTH resolved roots, and label them: the trail lives under the PLUGIN
+   root (`<pluginRoot>/runtime/decision-trail.json`) while the event store lives
+   under the PROJECT root (`<projectRoot>/.artibot/runtime/decisions/`). Since
+   2026-09-03 these are two different trees — see the S6 note below — and a
+   report naming one path cannot be read against the other.
 
 Status for this check — **first matching row wins**:
 
@@ -208,10 +214,19 @@ Trail absence is deliberately not an UNCONDITIONAL warn. It has never existed
 under `~/.claude/artibot/` (measured 2026-08-30), so a bare row for it would fire
 forever on the installed tree — the desensitization this check is trying to
 avoid. S6 conditions it on live records already existing, and that condition is
-what turns it from noise into a signal: both stores are written under the same
-resolved root, so records landing in one while the other was never even created
-means that writer is dead rather than that the root is new. On a root with no
-live records S6 cannot fire and S5 covers the case instead.
+what turns it from noise into a signal: records landing in one store while the
+other was never even created means that writer is dead rather than that the root
+is new. On a root with no live records S6 cannot fire and S5 covers the case
+instead.
+
+CAVEAT ON S6, since 2026-09-03. The two stores no longer share a root: the trail
+is under the PLUGIN root and the events under the PROJECT root
+(`decision-events.js#getDecisionStoreDir`), so "one store has records and the
+other does not" now has a second, innocent explanation — the two trees are
+simply different, e.g. events recorded from a project whose prompts never ran
+against this plugin install. Treat an S6 warn as "check WHICH root each store
+resolved to" before reading it as a dead writer, and state both paths in the
+report.
 
 Also deliberately NOT a warn: a store holding real (non-`diag-`) records whose
 newest entry predates the 24h window, with no activity signal inside it either.
@@ -263,11 +278,13 @@ That is an idle machine.
   has latched. Closing this would take a time-windowed row, and a time window
   needs activity evidence, which is the thing that root does not have. Until
   something supplies it, re-run the wiring probe rather than trusting a pass.
-- **Which runtime directory it read.** Every path here resolves through
-  `getPluginRoot()`, and the /doctor process does not necessarily resolve it to
-  the same tree the prompt hooks write to. State the resolved absolute path in
-  the report so a reader can tell whether an empty store means "nothing was
-  recorded" or "you looked in the other tree".
+- **Which runtime directories it read.** The trail resolves through
+  `getPluginRoot()` and the event store through the PROJECT root, and the
+  /doctor process does not necessarily resolve either to the tree the prompt
+  hooks write to — an event store is per project, so running /doctor from a
+  different project reads a different store even on one machine. State BOTH
+  resolved absolute paths in the report so a reader can tell whether an empty
+  store means "nothing was recorded" or "you looked in the other tree".
 - **Anything about the repo working tree.** A fixed repo and a stale install are
   indistinguishable to every step except S4.
 

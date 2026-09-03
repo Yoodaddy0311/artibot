@@ -25,6 +25,33 @@ describe('user-prompt-handler hook', () => {
     });
   });
 
+  // 호스트 2.1.259 스키마 형태 — 회귀 방지.
+  // 이 핸들러는 디스패처 체인의 FIRST 이므로 `user_prompt` 가 아직 존재할 수 없다.
+  // 호스트가 주는 `prompt` 만으로 동작해야 한다. 아래 픽스처에 `user_prompt` 는 없다.
+  describe('host payload shape (UserPromptSubmit, Claude Code 2.1.259)', () => {
+    const hostPayload = (prompt) => ({
+      hook_event_name: 'UserPromptSubmit',
+      prompt,
+      session_id: '9120048e-3385-4855-a35b-09c89e5dd684',
+      cwd: 'C:/Users/HeechangLee/Desktop/AI/Artibot',
+    });
+
+    it('fires the !rv trigger from the host `prompt` key alone', () => {
+      const out = handleUserPromptSubmit(hostPayload('!rv check the auth module'));
+      expect(out).not.toBeNull();
+      expect(out.message).toContain('[trigger] !rv re-verification mode activated');
+      expect(out.user_prompt).toContain('CRITICAL RE-VERIFICATION MODE');
+      expect(out.user_prompt).toContain('Additional context from user: check the auth module');
+    });
+
+    it('strips --no-team from the host `prompt` key alone', () => {
+      const out = handleUserPromptSubmit(hostPayload('build a dashboard --no-team'));
+      expect(out).not.toBeNull();
+      expect(out.user_prompt).toBe('build a dashboard');
+      expect(out.message).toContain('--no-team flag detected');
+    });
+  });
+
   describe('!rv re-verification trigger', () => {
     it('activates re-verification mode for "!rv"', () => {
       const out = handleUserPromptSubmit({ user_prompt: '!rv' });

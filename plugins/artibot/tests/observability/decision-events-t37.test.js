@@ -28,7 +28,9 @@
  *     substantive property lives in `topology-router.js`, which returns pattern
  *     ids from a fixed table.
  *  6. Every write goes to a `storeDir` under `os.tmpdir()`. Nothing here
- *     exercises the real `<pluginRoot>/runtime/decisions/` path resolution.
+ *     exercises the real `<projectRoot>/.artibot/runtime/decisions/` path
+ *     resolution (the default since 2026-09-03; it was `<pluginRoot>/runtime/
+ *     decisions/` before).
  */
 
 import path from 'node:path';

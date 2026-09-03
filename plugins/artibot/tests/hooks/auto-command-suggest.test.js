@@ -28,7 +28,11 @@ vi.mock('../../scripts/utils/index.js', () => ({
   getPluginRoot: vi.fn(() => '/plugin/root'),
 }));
 
-vi.mock('../../lib/core/hook-utils.js', () => ({
+// PARTIAL mock: only the two logging helpers are stubbed. `extractUserPromptText`
+// must stay REAL here — a stub of it would re-hide the payload-key mismatch this
+// hook was blind to, which is precisely what a full module mock did before.
+vi.mock('../../lib/core/hook-utils.js', async (importOriginal) => ({
+  ...(await importOriginal()),
   createErrorHandler: vi.fn(() => () => {}),
   logHookError: vi.fn(),
 }));
@@ -441,6 +445,20 @@ describe('handleUserPromptSubmit — input edge cases', () => {
   it('accepts `content` as an alias for user_prompt', () => {
     // Blocks: prompt arriving on the alternate `content` field being dropped.
     const r = handleUserPromptSubmit({ content: 'PostgreSQL vs MongoDB 비교' });
+    expect(r).not.toBeNull();
+    expect(r.hookSpecificOutput.additionalContext).toContain('/adr');
+  });
+
+  // 호스트 2.1.259 스키마 형태 — 회귀 방지.
+  // 바로 위 케이스가 legacy alias(`content`)를 핸들러 수준에서 핀하는데, 정작
+  // 호스트가 실제로 보내는 키(`prompt`)는 어디에서도 핀되지 않던 상태였다.
+  it('suggests from the host `prompt` key alone (no user_prompt in the payload)', () => {
+    const r = handleUserPromptSubmit({
+      hook_event_name: 'UserPromptSubmit',
+      prompt: 'PostgreSQL vs MongoDB 비교',
+      session_id: '9120048e-3385-4855-a35b-09c89e5dd684',
+      cwd: 'C:/Users/HeechangLee/Desktop/AI/Artibot',
+    });
     expect(r).not.toBeNull();
     expect(r.hookSpecificOutput.additionalContext).toContain('/adr');
   });

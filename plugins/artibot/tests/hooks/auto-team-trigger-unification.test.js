@@ -40,7 +40,11 @@ vi.mock('../../scripts/utils/index.js', () => ({
   getPluginRoot: vi.fn(() => '/plugin/root'),
 }));
 
-vi.mock('../../lib/core/hook-utils.js', () => ({
+// PARTIAL mock: only the two logging helpers are stubbed. `extractUserPromptText`
+// must stay REAL here — a stub of it would re-hide the payload-key mismatch this
+// hook was blind to, which is precisely what a full module mock did before.
+vi.mock('../../lib/core/hook-utils.js', async (importOriginal) => ({
+  ...(await importOriginal()),
   createErrorHandler: vi.fn(() => () => {}),
   logHookError: vi.fn(),
 }));
@@ -109,6 +113,24 @@ function fires(prompt) {
   return true;
 }
 
+/**
+ * 호스트 2.1.259 스키마 형태 — 회귀 방지.
+ * `fires()` 는 디스패처가 이미 리라이트한 상태(`user_prompt`)를 재현하므로,
+ * 호스트가 실제로 주는 형태(`prompt`, `user_prompt` 없음)는 이쪽으로만 검증된다.
+ * @returns {boolean} did the hook emit an auto-team suggestion?
+ */
+function firesOnHostPayload(prompt) {
+  const result = hook.handleUserPromptSubmit({
+    hook_event_name: 'UserPromptSubmit',
+    prompt,
+    session_id: '9120048e-3385-4855-a35b-09c89e5dd684',
+    cwd: 'C:/Users/HeechangLee/Desktop/AI/Artibot',
+  });
+  if (result === null) return false;
+  expect(result.hookSpecificOutput.additionalContext).toContain('[auto-team-suggested]');
+  return true;
+}
+
 describe('T2 divergence #1 — minComplexity was loaded but never compared', () => {
   // Thresholds put the size signal permanently out of reach, so the ONLY thing
   // that can fire the trigger is the configured complexity tier.
@@ -120,6 +142,12 @@ describe('T2 divergence #1 — minComplexity was loaded but never compared', () 
   it('canonical: a medium-tier prompt fires when minComplexity=medium', () => {
     stubTriggers(TRIGGERS);
     expect(fires(PROMPT)).toBe(true);
+  });
+
+  // 호스트 2.1.259 스키마 형태 — 회귀 방지. 같은 판정이 `user_prompt` 없이도 나야 한다.
+  it('the same verdict holds on the host payload shape (`prompt`, no user_prompt)', () => {
+    stubTriggers(TRIGGERS);
+    expect(firesOnHostPayload(PROMPT)).toBe(true);
   });
 
   it('negative control: the pre-T2 evaluator does NOT fire (it ignored minComplexity)', () => {

@@ -194,6 +194,28 @@ const REVIEW_ACTION_CLASSES = new Set(['review', 'architecture']);
  * requires it. The append is then SKIPPED rather than fabricating a score — an
  * invented complexity is indistinguishable from a measured one once written.
  *
+ * ALWAYS RETURNS NULL IN PRODUCTION TODAY, AND THAT IS NOT A KEY-NAME BUG.
+ * MEASURED 2026-09-03 against the Claude Code **2.1.259** binary
+ * (`~/.local/share/claude/versions/2.1.259`, Zod hook-input schema table at
+ * byte offset ~183,955,500), the whole SubagentStart payload is
+ *   { session_id, transcript_path, cwd, prompt_id?, permission_mode?,
+ *     agent_id, agent_type, effort?, hook_event_name: 'SubagentStart' }
+ * — no `prompt`, no `description`, no `tool_input` under any spelling. Live
+ * confirmation: `.artibot/ledger/spawns.ndjson`, 10/10 starts after the 4.53.0
+ * install carry `route_ledger: 'skipped:no-action-text'`, and the same file's
+ * `agentName: null` independently confirms the absence of `name`/`agent_name`.
+ *
+ * So DO NOT "fix" this by adding more key spellings: there is no key to find.
+ * The only source of an action description at SubagentStart time is the parent
+ * transcript at `transcript_path` (the Agent tool_use carries `description` and
+ * `prompt`), which needs an agent_id→tool_use_id correlation this payload does
+ * not supply. That is a design decision, not a rename — do not take it here.
+ *
+ * The unified `extractUserPromptText` in `lib/core/hook-utils.js` deliberately
+ * does NOT cover this function: a SubagentStart action description and a
+ * UserPromptSubmit prompt are different payloads answering different questions,
+ * and merging their key lists would only hide this measurement again.
+ *
  * @param {object} hookData - Parsed hook payload
  * @returns {string|null} Non-blank text, or null
  */

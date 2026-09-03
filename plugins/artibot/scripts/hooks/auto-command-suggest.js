@@ -31,7 +31,7 @@
 import path from 'node:path';
 import { existsSync, readFileSync } from 'node:fs';
 import { getPluginRoot, parseJSON, readStdin, writeStdout } from '../utils/index.js';
-import { createErrorHandler } from '../../lib/core/hook-utils.js';
+import { createErrorHandler, extractUserPromptFlagSurface, extractUserPromptText } from '../../lib/core/hook-utils.js';
 import { isMainEntry } from './_main-entry.js';
 
 const HOOK_NAME = 'auto-command-suggest';
@@ -225,10 +225,15 @@ function buildOutput(cls) {
  * @returns {object|null} hookSpecificOutput envelope, or null to pass through.
  */
 export function handleUserPromptSubmit(hookData) {
-  const prompt = String(hookData?.user_prompt || hookData?.content || '').trim();
+  const prompt = extractUserPromptText(hookData).trim();
   if (!prompt) return null;
 
-  if (NO_COMMAND_SUGGEST_FLAG.test(prompt) || NO_TEAM_FLAG.test(prompt)) return null;
+  // Opt-outs are tested on the FLAG SURFACE, not on `prompt`: the rewriter
+  // strips `--no-team` before this hook runs, so the rewritten text no longer
+  // carries it. (`--no-command-suggest` is not stripped, but both are read from
+  // the same surface so a future rewrite of either cannot reopen this hole.)
+  const flagSurface = extractUserPromptFlagSurface(hookData);
+  if (NO_COMMAND_SUGGEST_FLAG.test(flagSurface) || NO_TEAM_FLAG.test(flagSurface)) return null;
   const { enabled } = loadConfig(getPluginRoot());
   if (!enabled) return null;
 

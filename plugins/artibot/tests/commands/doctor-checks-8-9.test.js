@@ -590,6 +590,17 @@ describe('commands/doctor.md gained Check 8 and Check 9', () => {
  * Changing a value here is only correct when Check 1-7 prose is DELIBERATELY
  * edited. Refreshing one to make a red test green is how a ratchet destroys its
  * own reference.
+ *
+ * Check 7 was re-frozen ONCE, on 2026-09-03, for a deliberate edit that had
+ * nothing to do with T-43: the decision-event store moved from
+ * `<pluginRoot>/runtime/decisions/` to `<projectRoot>/.artibot/runtime/decisions/`
+ * (`lib/observability/decision-events.js#getDecisionStoreDir`), and Check 7 is
+ * that store's only reader. Its text had to follow, because the two stores no
+ * longer share a root and S6's stated rationale ("both under the same resolved
+ * root") had become false. Checks 1-6 are untouched and still carry their
+ * dc9a4c12 digests, which is what keeps this refresh auditable: a refresh that
+ * moved all seven would prove nothing.
+ *   66d45dd3e6cc4812 -> 68a73087845aa9cd
  */
 const CHECK_1_7_SHA256 = Object.freeze({
   'Check 1': '68a7994da5db8345',
@@ -598,7 +609,8 @@ const CHECK_1_7_SHA256 = Object.freeze({
   'Check 4': 'b48ec269f024a6d3',
   'Check 5': '76b677614892ac3c',
   'Check 6': '889cb2c477eae694',
-  'Check 7': '66d45dd3e6cc4812',
+  // Re-frozen 2026-09-03 (store path move). See the note above.
+  'Check 7': '68a73087845aa9cd',
 });
 
 // Truncated to 16 hex characters, the same shape `lib/core/skill-hash.js` uses
