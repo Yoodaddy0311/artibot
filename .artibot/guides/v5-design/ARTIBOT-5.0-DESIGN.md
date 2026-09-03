@@ -776,6 +776,8 @@ ADR 을 실제로 옮기고 있다.** 15:45:23 mtime 으로 `plugins/artibot/doc
 | 15 | `plugins/artibot/scripts/hooks/_userprompt-dispatcher.js:146` 주석 "fulfillment order" | 원문 "…followed by the parallel contributors in **fulfillment order**" 는 **틀렸다**. `:212` 의 `Promise.allSettled` 는 결과 배열을 **입력 순서**로 돌려준다(완료 순서가 아니다) → 디렉티브 선두 배치는 배열 순서로 **결정적**이다(effortpath 실측, 기록자 원문·`allSettled` 호출 위치 확인) | 후속(코드 주석) — **UPS 설계안 구현 시 정정.** 동작은 이미 결정적이라 버그 아님 |
 | 16 | **결정 스토어 2개가 서로 다른 루트로 갈라짐** — 이벤트는 projectRoot, 트레일은 pluginRoot | 이벤트 스토어는 결정 D 로 **projectRoot** `.artibot/runtime/decisions/` 가 됐는데, **트레일은 여전히 pluginRoot** 다: `plugins/artibot/lib/core/decision-trail.js`(**경로 확정 — `lib/observability/` 아님**) 3곳이 pluginRoot 를 고정한다: `:12` 헤더 "Storage: `runtime/decision-trail.json` at the plugin root" · `:22` `import { getPluginRoot } from './platform.js';` · `:32` `const DEFAULT_PATH = 'runtime/decision-trail.json';`. 루트 해석은 `:84` 주석대로 `process.env.CLAUDE_PLUGIN_ROOT`(via `getPluginRoot()`). 그 결과 `/doctor` Check 7 **S6** 의 근거 문장("both stores are written under the same resolved root")이 거짓이 됐다. 기록자 확인: config 가 이미 `commands/doctor.md` 를 갱신했다 — 옛 문장은 **소멸**했고(`grep "same resolved root"` 0건), `:188-192` 가 두 루트를 각각 라벨링해 보고하도록, `:191` 이 "2026-09-03 these are two different trees — see the S6 note below" 로, `:222-228` 이 "CAVEAT ON S6, since 2026-09-03 … Treat an S6 warn as 'check WHICH root each store resolved to'" 로 대체됐다 | 후속(설계안) — **트레일 이관은 이번 범위 밖.** 다음 결정으로 올릴 것. 현재는 S6 오독 방지 문구로만 막혀 있다 |
 | 17 | **`npm run ci` red 2건 — 팀 미수정·환경성** (inspector 실측 17:26~17:48) | ① `tests/git/git-dir.test.js:142`(`expect(gitPath(repo)).toBe(getGitDir(repo))`) — tmpdir **8.3 단축경로(`HEECHA~1`) vs 장경로 비교 불일치**. **격리 13/13 통과**, 전체 실행 시 **1회만 관측** → **재현 조건 미확인**. ② `tests/handoff/handoff-store.test.js:316`(`await writeHandoff(...)` throttle 케이스) — **Windows EPERM rename(부하)**. **격리 27/27 통과**, 어제 autopilot 보고서 §1 에도 플레이크 1 로 기록됨. 기록자 실측: 두 테스트 파일 모두 `git status` **미수정 확인**(팀이 건드리지 않았다) | 후속(다음 릴리스) — **테스트 픽스처 수리이지 제품 코드 아님.** 권장: git-dir 는 `fs.realpathSync` 로 양쪽 정규화, handoff-store 는 rename 재시도. **주의**: `eval:runtime:check` 는 `package.json:25` ci `&&` 체인의 **맨 끝**이라 `npm test` 가 red 면 **아예 실행되지 않는다**(기록자 체인 확인) — 별도 실행 시 8/8 EXIT 0 |
+| 18 | **`npm run sync:local` 이 라이브 plugin cache 를 덮어쓴다** — **메커니즘 확정: `install.sh` 의 의도된 동작** | **경로**: `sync:local` → `install.sh:615 install_plugin_cache()`(`:616` `cache_root`, 복사 `:626-651` `atomic_replace_dir`, 호출부 `:1566`, 로그 `:651`). **의도임이 문서화**: `:41` 헤더 "write into LIVE plugin", `:542`, `:596-612`. 그 `:596-612` 주석이 이유를 전부 적고 있다 — 호스트는 **세션 시작 시 hooks.json 을 캐시 디렉터리에서 로드**하고, 캐시는 마켓플레이스 미러에서 **lazy 채움**이며 install.sh 가 미러만 쓰면 갱신되지 않는다(v4.6.4→v4.8.2 훅 회귀가 오래 묻힌 원인). "Mirroring the hot paths into **every cache version dir** keeps future sessions consistent" — **5개 전부 덮어쓰는 것이 설계다.** `.claude-plugin/plugin.json` 을 **일부러 안 건드리는** 이유도 명시돼 있다: "its version field is **the cache routing key** — overwriting it would orphan the cache entry". **기록자 전수 실측(18:2x)**: 5개 디렉터리 모두 `lib/core/hook-utils.js` 가 워킹트리와 바이트 동일, `package.json` 전부 4.54.0, `plugin.json` 만 원래 라벨 유지 — **관측이 설계와 정확히 일치**. **캐시 코드의 정체**: HEAD **`bc2e9e55` 와 내용 동일**(EOL 만 CRLF, `core.autocrlf=true`) = **커밋됐으나 릴리스·태그 전인 코드** | 후속(설계) — 권장: 캐시 덮어쓰기를 **옵트인**으로 하거나 릴리스 절차에 명시. **함의**: (a) 이 세션 라이브 훅이 **릴리스 전 코드로 돌고 있다**(커밋은 된 코드) (b) 앞선 "설치본 무접촉" 전제 **무효** (c) `installed_plugins.json` 의 SHA 와 캐시 내용이 어긋난다 (d) **캐시는 파생물이라 더 이상 과거 버전을 보존하지 않는다 — 캐시 디렉터리 이름으로 구 버전을 되돌려도 같은 코드가 돈다. 롤백은 캐시가 아니라 마켓플레이스 미러 태그 체크아웃 + 캐시 무효화(`scripts/update.js:239 clearCache`, `install.sh:611-612` 주석)로 해야 한다.** 라벨 불일치 자체는 결함이 아니라 라우팅 키 보존이다 |
+| 19 | **git 경로 출력을 `-z` 없이 파싱하는 곳 13곳** — artifact-governance 수리(`0273c7d7`)와 같은 클래스 | 한글/공백 경로에서 git 이 C-quote 로 감싸 파서가 깨질 수 있다. **각각이 실제 결함인지는 미확인** — `core.quotepath=false` 를 넘기거나 ASCII 경로만 다루면 무해하다. 기록자 전수 확인(13/13 해당 줄에 `--name-only`/`--name-status`/`ls-files`/`ls-tree` 실재): `lib/git/conflict-detector.js:82`·`:142` · **`lib/git/limb-landing-check.js:427`**(`git(['diff','--name-only',range,'--'])` — `/split` 소유권 게이트, **다음 배치 `/split` 4줄기가 바로 이 경로를 탄다 → 우선 확인 대상**) · `lib/git/merge-preflight.js:207` · `lib/handoff/handoff-builder.js:425` · `scripts/hooks/dev-verify-gate.js:124-125` · `git-autopilot-guard.js:86` · `git-autopilot-merge.js:47` · `image-cleanup.js:85` · `session-notes.js:139` · **`scripts/hooks/stop-review-gate.js:79-80`**(`diff --name-status --diff-filter=ACMR` ×2 — **방금 주석 전용 변경에 오탐을 낸 리뷰 게이트**, 한글 경로에서도 깨질 수 있다) · `tests/firewall/cowork-plugin-zip-drift.test.js:297` · `tests/firewall/gitignore-boundary.test.js:176` | 후속(설계) — **이번 릴리스 밖.** 권장: 공용 헬퍼 `gitPathsZ()` 하나로 모으고 **한글 경로 픽스처 게이트**. 선행 사례는 `0273c7d7` `fix(test): artifact-governance 게이트의 git ls-files 파싱을 -z 로 — 한글 경로 C-quote 로 디렉터리 2개 집계·frontmatter 검사 누락 수리`. **분모 주의**: 리더는 `-z` 사용처를 7건으로 셌고 기록자 grep 은 6건 — 패턴이 달라 생긴 차이이며 어느 쪽도 재현 명령을 고정하지 않았다(미확인) |
 
 **후속 12 귀속 해소 (2026-09-03 17:09, config 팀원 자기보고 — 등급: 추론 → 자기보고)**
 
@@ -808,6 +810,43 @@ config 보고 원문 요지: "`getDecisionStoreDir` 기본값을 projectRoot 로
 of the cwd … Spawning from PLUGIN_ROOT put this suite's recorder-stats line in the repository's own store
 — the exact 'fixture data in the store /doctor reads' failure this file's header says it exists to avoid."
 현재 값은 `cwd: sandboxCwd`(`:325`).
+
+**후속 12 갱신 — 실발생 2회째, 이번엔 리더 본인 (쓰기 주체 실측 확정, 2026-09-03 17:46)**
+
+리더가 `plugins/artibot` 를 cwd 로 `npx vitest run tests/git/git-dir.test.js tests/handoff/handoff-store.test.js`
+를 **격리 실행**하자 리포 루트에 `.artibot/runtime/decisions/_unattributed.events.ndjson`(215 B,
+mtime **17:46:56** = 실행 시각 일치)가 생성됐다. 1회째(config)와 달리 이번은 **쓰기 주체가 실측으로 확정**
+됐다 — 리더 본인이다. 내용은 리더가 읽고 18:1x 에 삭제(gitignore 산출물). 기록자 재확인: 현재
+`.artibot/runtime/decisions/` **디렉터리 부재**.
+
+메커니즘은 후속 12 그대로(`cwd` 미전달 → `process.cwd()` → 최근접 `.git`). **이로써 확정되는 것**:
+후속 12 를 낳은 9파일 재고정은 **문제를 없애지 못했다.** 그 수리는 *그 9개 스위트*를 샌드박스에
+묶었을 뿐이고, **경로 자체는 여전히 열려 있어 아무 테스트나 리포 루트 cwd 에서 돌리면 실 스토어를
+오염시킨다.** "테스트 격리 실행조차 실 스토어를 오염시킨다" 가 관측 2회로 성립했다 —
+**설계안 우선순위 상향 권고**(현재 후속 12 의 권장 처리는 개별 스위트 수리가 아니라 경로 차단이어야 한다).
+
+
+**교훈 각주 — 설치본·캐시 대조에 `cmp` 를 쓰지 마라 (이 세션 CRLF 착시 3번째)**
+
+`core.autocrlf=true` 라 **워킹트리·설치본·캐시는 CRLF**, **커밋 blob 은 LF** 다. 그래서
+`cmp <(git show HEAD:<path>) <cache>` 는 **내용이 같아도 항상 다르다고 나온다**(실제 관측:
+`differ: byte 4, line 1` — 첫 줄 끝에서 갈린다). 이 착시로 기록자가 후속 18 에 "캐시 코드는
+릴리스본도 커밋본도 아닌 워킹트리 스냅샷" 이라고 **틀린 결론**을 적었고, 그것을 "어느 커밋에도
+대응하지 않는 코드" 로 격상해 보고했다. 실제로는 **`bc2e9e55` 커밋본과 내용 동일**이다.
+
+**대조에 쓸 명령**:
+```
+diff -q --strip-trailing-cr <(git show HEAD:<path>) <cache>   # 내용 동치 판정
+git diff --ignore-cr-at-eol HEAD -- <path>                    # 워킹트리 대조
+file <cache>                                                  # EOL 종류 확인
+```
+`cmp` 는 **양쪽이 같은 EOL 계열일 때만** 유효하다 — 캐시 ↔ 워킹트리(둘 다 CRLF) 대조는 유효했고,
+그래서 "5개 캐시 전부 워킹트리와 동일" 결론은 **그대로 유효하다**. 무효가 된 것은 blob 을 한쪽에
+놓은 대조뿐이다.
+
+**이 세션에서 CRLF 가 만든 착시는 이번이 3번째다** — (1) inspector 부작용 (a), (2) 기록자 census
+원본 LF, (3) 이번. 세 번 반복됐으므로 대조 절차의 기본값을 `--strip-trailing-cr` 로 둔다.
+
 
 **checker-apply F5 — no-op (반영 불필요)**: "`fixture substantive` 행이 아직 보류" 라는 지적은 **기록자의 확정 갱신 이전 스냅샷**을 본 것이다. 해당 행은 16:4x 에 이미 확정으로 갱신됐고 리더가 재확인했다. **F5 는 이미 반영됨(16:4x).**
 
