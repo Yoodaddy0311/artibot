@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.53.0] — 2026-09-03
+
 ### Artibot 5.0 — Phase 0(정본 착지) + Observe(기록만)
 
 **오늘 당장 달라지는 동작은 없다.** 스폰되는 모델도, 훅이 차단하는 결과도, 기존 커맨드가 찍는

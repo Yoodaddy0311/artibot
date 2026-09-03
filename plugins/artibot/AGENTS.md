@@ -267,7 +267,7 @@ All contributions must respect Artibot's **local-only data policy** — exports 
      sentence pattern with a placeholder value anywhere earlier in this file — the gate
      would capture the placeholder and fail the release. -->
 
-Current plugin version: **4.52.0**. That is **11 entries across 10 files** — `marketplace.json`
+Current plugin version: **4.53.0**. That is **11 entries across 10 files** — `marketplace.json`
 contributes two (`version` and `release.current`). Keep all eleven in lockstep;
 `scripts/release-check.js` enforces every one of them and exits 1 on any mismatch.
 
