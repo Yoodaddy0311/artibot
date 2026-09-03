@@ -254,13 +254,32 @@ function findMissingDerivedFrom(trackedPaths, readHead, opts = {}) {
 // 라이브 입력
 // ───────────────────────────────────────────────────────────────────────────
 
-const TRACKED = execFileSync('git', ['ls-files'], {
+/**
+ * 추적 경로 목록. **`-z` 는 선택이 아니다.**
+ *
+ * `git ls-files` 는 `core.quotepath`(기본 **true**)에서 ASCII 밖 바이트를 담은
+ * 경로를 C 스타일로 인용해 돌려준다 — 경로 전체가 `"` 로 감싸이고 각 바이트가
+ * `\354\226\264` 같은 8진 이스케이프가 된다. 줄 단위로 파싱하면 그 인용부호가
+ * 경로의 일부가 되어, 예컨대 `.artibot/adr/ADR-006-…(한글).md` 가
+ * `".artibot/adr/…` 로 읽히고 디렉터리 집계가 `".artibot/adr` 과 `.artibot/adr`
+ * 둘로 갈라진다. `-z` 는 인용을 끄고 NUL 로 구분하므로 바이트 그대로 나온다.
+ *
+ * 이 결함이 늦게 드러난 이유를 적어 둔다: 한글 경로가 **미추적**인 동안에는
+ * `ls-files` 에 아예 안 나와 전건 그린이었고, 커밋되는 순간 red 가 됐다. 즉
+ * '지금 초록' 은 이 파서가 옳다는 증거가 아니었다 — 이 게이트가 못 보는 것
+ * 목록에 '아직 커밋되지 않은 경로' 가 빠져 있었던 셈이다. 같은 리포의 선례는
+ * `scripts/ci/ci-utils.js:74` 이며 처음부터 `['ls-files', '-z']` 를 쓴다.
+ *
+ * `-z` 는 마지막 항목 뒤에도 NUL 을 붙여 꼬리 빈 문자열이 생긴다 —
+ * `filter(Boolean)` 이 그것을 걷어낸다(줄 파싱 때의 역할과 같다).
+ */
+const TRACKED = execFileSync('git', ['ls-files', '-z'], {
   cwd: REPO_ROOT,
   encoding: 'utf-8',
   maxBuffer: 64 * 1024 * 1024,
   stdio: ['ignore', 'pipe', 'pipe'],
 })
-  .split('\n')
+  .split('\0')
   .filter(Boolean);
 
 /** 파일 앞부분만 읽는다. frontmatter 판정에 본문 전체가 필요하지 않다. */
