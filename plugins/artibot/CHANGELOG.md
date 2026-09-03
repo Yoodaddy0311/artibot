@@ -11,6 +11,90 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.54.0] — 2026-09-03
+
+### 훅이 다시 말을 걸기 시작한다 — 호스트 페이로드 계약 수리
+
+**행동 변화 고지.** 이 릴리스에서 `UserPromptSubmit` 5개 훅이 **2026-02 이후 처음으로 라이브에서
+실제 프롬프트를 읽는다.** 그동안 그 훅들은 매 발화마다 실행되기는 했으나 프롬프트 텍스트를
+한 글자도 받지 못한 채 조용히 빈손으로 끝났다. 설치 직후 그 훅들이 처음으로 동작하는 것을
+보게 된다 — 새 기능이 아니라, 오래 죽어 있던 기존 기능이 살아나는 것이다.
+
+#### Fixed
+
+- **호스트 페이로드 키 `prompt`** — Claude Code 2.1.259 의 Zod 스키마를 바이너리에서 실측한 결과
+  `UserPromptSubmit` 이 넘기는 키는 `prompt` 인데, 코드는 `user_prompt || content` 만 읽고 있었다.
+  그래서 5개 훅이 2026-02 이후 라이브에서 프롬프트를 한 번도 읽지 못했다.
+  `lib/core/hook-utils.js#extractUserPromptText` 로 통일(`user_prompt` → `prompt` → `content`,
+  `typeof` 검사)하고 소비처 7곳 + `create-artibot-agent` 를 옮겼다. 호스트 형태 픽스처 8건이
+  RED 를 입증한다(`'prompt'` 를 빼면 정확히 8건이 깨진다).
+  `SubagentStart` 는 action text 가 없는 것이 **정확한 동작**이므로 `extractActionText` 는
+  손대지 않고 근거를 JSDoc 으로 고정했다.
+- **`--no-team` 옵트아웃 회귀** — 리라이터가 제거한 `--no-team` 을 3개 훅이 보지 못해 옵트아웃이
+  무력화돼 있었다. 감지 경로를 `extractUserPromptFlagSurface`(원문 + 리라이트본 합집합, 개행 조인)
+  로 분리했다. 디스패처 체인 회귀 테스트와 대조군을 함께 넣었다.
+- **`npm run release` 체인 순서** — `release:check && ci && sync:local` 이었다. 설치본이 항상
+  이전 버전이므로 모든 범프에서 `release-check.js` 가 drift 경고로 exit 2 를 내고 `&&` 가 첫 단계에서
+  멈췄다. `sync:local → release:check → ci` 로 바로잡았다(RELEASE.md 순서와 일치, `release-check.js`
+  는 무수정 — 실제 drift 경고는 여전히 릴리스를 멈춰야 한다).
+- **`ensureADR` 의 `docs/adr` 하드코딩** — `lib/planning/artifacts.js` 에 `resolveAdrDir`
+  (`.artibot/adr` → `docs/adr` → `adr`, 실재하는 계열 우선, 둘 이상이면 오류·미기록, 외부 프로젝트는
+  `docs/adr` 폴백)를 넣고 `kindDir` 소비처 5곳을 async 로 바꿨다. 신규 테스트 5건(HEAD 대비 3건 red
+  입증), 외부 프로젝트 산출물은 바이트 동일.
+- **artifact-governance 게이트의 `git ls-files` 파싱** — `-z` 없이 파싱해 한글 파일명(ADR-006~010)이
+  C-quote 로 돌아오면 디렉터리가 2개로 집계됐고, 그 5파일은 frontmatter 읽기 실패로 슬러그 검사에서
+  조용히 제외되고 있었다. `-z` + NUL 분리로 수리(`scripts/ci/ci-utils.js` 와 동일 패턴). 미추적일 때는
+  `ls-files` 에 나오지 않아 그린이었고 커밋되는 순간 red 가 된 사례 — "지금 초록"이 파서가 옳다는 증거가
+  아니었다.
+
+#### Changed
+
+- **ADR 단일 계열 `.artibot/adr/`** — `plugins/artibot/docs/adr` 001~005 를 `git mv` 하고 루트
+  `docs/adr` 5건을 006~010 으로 재번호(`renumbered-from` / `moved-from` 보존), INDEX 재생성.
+  게이트를 재조준했다 — artifact-governance 양성 단언 `['.artibot/adr']`, 예외 `[]`(fail-closed 복귀).
+  `.gitignore` 의 죽은 재포함 2줄 삭제.
+- **decisions 스토어 기본 경로** — `getDecisionStoreDir` 기본값이 `<pluginRoot>/runtime` 에서
+  `<projectRoot>/.artibot/runtime/decisions` 로 이동했다(오너 결정 D). plugin update 가 버전별
+  디렉터리를 만들기 때문에 이전 위치에는 이월이 없다. Check 7 소비처 5곳에 cwd 를 주입하고
+  `doctor.md` S6 에 두 루트를 분리해 명시했다. 테스트 9파일을 샌드박스로 재고정(실 스토어 오염 방지).
+- **config `review` 블록** — `review.independent=true`, `verify.requiredLayers=[deterministic]`,
+  `unmeasuredBlocksOutcome=true` (오너 결정 C4·review). **소비처 0** — 값만 선언돼 있고 아직 읽는
+  코드가 없다는 사실을 주석으로 명시했다.
+- **G4·G5 `UNCALIBRATED` 명시** — 값 자체는 변경하지 않고 미보정 상태만 표기했다.
+- **v5-config-firewall 최상위 키 30 → 31** — `review` 편입, 사유를 주석으로 남겼다.
+
+#### Docs
+
+- **오너 결정 원장 23건 + 후속 19** — `ARTIBOT-5.0-DESIGN.md` 부록 0-2 후속 절(append-only).
+  A1·B2(3라운드 경위)·C4·G1~G6·G-1·`review.independent`·substantive·cue·planner·decisions D·
+  receipt 위치·ensureADR·effort 경로 + 메타 규칙(정본 우선 → 권장안), 그리고 payload 키 수리 승인과
+  §7 NECESSARY 3건(F-01 은 이번에 착지, F-30/F-10 은 설계안 대기). 후속 18·19 는 릴리스 과정에서 추가됐다 — `install.sh` `install_plugin_cache` 가
+  `sync:local` 때 캐시 5개 버전 디렉터리 전부에 워킹트리 코드를 미러해 **릴리스 전(커밋된) 코드가
+  라이브 훅에 실린다**(의도된 설계, 라우팅 키 `plugin.json` 은 보존), 그리고 `git ls-files`/`--name-only` 를
+  `-z` 없이 파싱하는 곳이 **13곳 더** 있다(`limb-landing-check.js:427`·`stop-review-gate.js:79-80` 우선
+  확인 대상).
+- **설계안 6종(오너 승인 전 구현 금지)** — PLANNER-PARALLELIZATION · DESIGN-G-1 매핑표 ·
+  DESIGN-F-30 원장 카운터 · DESIGN-F-10 게이트 root · HOOK-VISIBILITY(통합 정본, FAILURE-VISIBILITY
+  는 리다이렉트) · ROUTE-RECEIPT-PRETOOLUSE · DESIGN-UPS-additionalContext-migration.
+- **INCIDENT / PROBE 실측 보고** — `INCIDENT-2026-09-03-hook-payload-contract`(호스트 2.1.259 스키마
+  실측: `UserPromptSubmit` 키는 `prompt`, `SubagentStart` 에 action text 부재, 출력 스키마에
+  `user_prompt` 없음), `PROBE-effort-directive-delivery`(훅 stdout 의 `user_prompt` 는 호스트가 버린다).
+- **census 보존** — `evidence/citation-census-20260903.json`(rows 349 / 4,927 lines). `reports/` 가
+  gitignore 라 여기로 옮겼다.
+- 기타 — `.artibot/project.md` B2 확정 반영, `NEXT-SESSION.md` decisions 경로 각주,
+  PRD-SPLIT `linked_adrs` 006~010, `commands/adr.md` 3단 탐색, `docs/adr` 고정 문구 7곳 + PRD 포인터 4곳.
+- **CI 수리** — wiring 테스트의 pre-wiring 기준을 git 이력 조회에서 동결 픽스처로 교체(shallow 체크아웃).
+
+#### Known
+
+- **`user_prompt` 출력 봉투는 호스트가 버린다.** 훅이 stdout 으로 돌려주는 봉투에 담긴 effort
+  디렉티브와 메모리 봉투는 모델에 도달하지 않는다. 입력 키 수리와는 별개 문제이며,
+  `DESIGN-UPS-additionalContext-migration`(`additionalContext` 로 이전) 설계안이 승인 대기 중이다.
+- **`SubagentStart` receipt** — 그 이벤트의 payload 에는 라우팅 receipt 를 쓸 만한 텍스트가 애초에
+  없다. PreToolUse 로 이관하는 `ROUTE-RECEIPT-PRETOOLUSE` 설계안이 승인 대기 중이다.
+- **라이브 원장·decisions 분모는 이 릴리스를 설치한 뒤에야 처음 생긴다.** 이전 버전에서는 훅이
+  프롬프트를 읽지 못했고 decisions 스토어 경로도 달랐으므로, 기존 캐시에는 비교할 기준선이 없다.
+
 ## [4.53.0] — 2026-09-03
 
 ### Artibot 5.0 — Phase 0(정본 착지) + Observe(기록만)
