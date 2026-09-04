@@ -59,8 +59,8 @@ Parse $ARGUMENTS — 첫 토큰이 서브커맨드다.
 
 ### plan
 
-1. `recordWallClockStart(runId, { segment: RUN_SEGMENT })` · `recordPhaseStart(runId, 'PLAN')` (`lib/observability/split-telemetry.js` — 호출 실패는 경고 1줄 후 진행, 리포트에 적는다).
-2. 작업 메타데이터를 autopilot Phase 1 planner 와 같은 형태로 만든다: `id`, `dependsOn`, `independent`, `affectedPaths`(리포 상대), `risk`, `worktreeEligible`. 메타가 불완전하면 추측하지 말고 그 작업은 직렬로 남긴다.
+1. `recordWallClockStart(runId, { segment: RUN_SEGMENT })` · `recordPhaseStart(runId, 'PLAN')` (`lib/observability/split-telemetry.js` — 호출 실패는 경고 1줄 후 진행, 리포트에 적는다). **런 시작 시 `<pluginRoot>` 를 하나로 고정하고 이후 전부 그 값으로 부른다**: 텔레메트리 스토어는 실행한 플러그인 루트별로 갈려(소스 리포 `plugins/artibot/runtime/split/` vs 설치 캐시 `~/.claude/plugins/cache/artibot/artibot/<ver>/runtime/split/`) 2026-09-04 런은 한 런의 18이벤트가 두 파일로 쪼개졌고 한 파일만 읽으면 `wait-limbs` 가 미쌍으로 보였다(gotchas #9). 리포트는 두 경로를 **병합해** 센다.
+2. 작업 메타데이터를 autopilot Phase 1 planner 와 같은 형태로 만든다: `id`, `dependsOn`, `independent`, `affectedPaths`(리포 상대), `risk`, `worktreeEligible`. 메타가 불완전하면 추측하지 말고 그 작업은 직렬로 남긴다. `affectedPaths` 에 소스 경로를 넣을 때는 **대응 테스트 디렉터리를 함께** 넣는다(`scripts/x/y.js` → `tests/x/`) — 변경 대상 심볼의 테스트 참조 grep 을 allowlist 산출에 포함하라. allowlist 가 "고칠 파일"만 담고 "깨질 테스트"를 빠뜨리면 줄기가 변칙 위치에 테스트를 만들거나 소유 밖 red 를 떠안는다(2026-09-04 실발생 2건, gotchas #14·#23).
 3. `lib/autopilot/fast-profile.js#buildFastFanoutPlan` 을 `save.md` Phase B 관례(실제 시그니처대로 전체 인자)로 호출한다:
 
 ```js
@@ -73,17 +73,17 @@ const plan = buildFastFanoutPlan({
 recordFastProfilePlanned(runId, fastProfileFromPlan(plan, { cpuCount })); // -fast 와 같은 9필드 문자 복사
 ```
 
-4. **항상 표시**: `profile`, `fallbackReason`, `plannedParallelism`, `waves[]`, `serial[]`(사유 포함), `conflictGroups[]`, `limits`(사용자가 `maxWorktrees === cfg.maxWindows` 를 눈으로 확인 — 실제 waves 상한 반영은 `tests/firewall/split-limits-applied.test.js`).
+4. **항상 표시**: `profile`, `fallbackReason`, `plannedParallelism`, `waves[]`, `serial[]`(사유 포함), `conflictGroups[]`, `limits`(사용자가 `maxWorktrees === cfg.maxWindows` 를 눈으로 확인 — 실제 waves 상한 반영은 `tests/firewall/split-limits-applied.test.js`). `waves` 는 `{ taskIds: string[] }` **객체의 배열**이다 — `waves[0]` 은 배열이 아니고 줄기 목록은 `waves[0].taskIds` 다. 이 오해가 heredoc 의 `\` 이스케이프 소실과 함께 2026-09-04 plan 을 2회 크래시시켰다(gotchas #3).
 5. `fallbackReason !== null` 이면 **명시 중단** — 표준 경로 폴백을 조용히 창 1개로 바꾸지 않는다. `plannedParallelism < cfg.minStems` 도 중단(줄기 수 미달). 중단은 알려진 끝이므로 `recordPhaseEnd(runId, 'PLAN', { message })` 후 `recordWallClockEnd(runId, { segment: RUN_SEGMENT })` 로 쌍을 닫는다.
 6. 줄기 = 첫 wave 의 작업 각각(같은 wave 안은 소유권이 겹치지 않음이 `areAffectedPathsConflicting` 으로 보장된다). 경고 1줄(판정 아님): "DB 공유 여부 **미확인** — 여러 창이 같은 DB 에 마이그레이션·시드를 걸면 충돌할 수 있다. 플러그인은 탐지하지 않는다."
-7. `<parentRoot>/.artibot/split/plan.json` 에 `{ runId, sid, parentRoot, repoShort, base: git rev-parse HEAD, createdAt, limbs:[{ limb, worktreeName, worktreePath, branch, taskIds, affectedPaths }], plan }` 를 쓴다 — `dispatch`·`resume` 의 입력 형태(`lib/git/split-dispatch.js#resolveDispatch` 가 `{ runId, base, limbs[].worktreePath/branch }` 를 읽는다). `.artibot/split/` 은 루트 `.gitignore:86` 으로 ignore 된다(2026-08-26 추가) — 로컬 런 상태이므로 커밋 경로에 넣지 마라. `recordPhaseEnd(runId, 'PLAN')`.
+7. `<parentRoot>/.artibot/split/plan.json` 에 `{ runId, sid, parentRoot, parentSession, repoShort, base: git rev-parse HEAD, createdAt, limbs:[{ limb, worktreeName, worktreePath, branch, taskIds, affectedPaths }], plan }` 를 쓴다 — `dispatch`·`resume` 의 입력 형태(`lib/git/split-dispatch.js#resolveDispatch` 가 `{ runId, base, limbs[].worktreePath/branch }` 를 읽는다). `.artibot/split/` 은 루트 `.gitignore:86` 으로 ignore 된다(2026-08-26 추가) — 로컬 런 상태이므로 커밋 경로에 넣지 마라. `recordPhaseEnd(runId, 'PLAN')`. **`parentSession` 은 선택이 아니다** — `scripts/split/dispatch.mjs` 는 `--parent` 또는 `plan.json.parentSession` 을 요구하고 없으면 dry-run 부터 실패한다(2026-09-04 실발생 1회). 값은 이 창의 세션 이름이다.
 
 ### open
 
 1. `plan.json` 에서 `{limb}` 를 찾는다(없으면 중단). worktree 이름 `split-{repoShort}-{limb}`, 기대 경로 `<repoRoot>/.claude/worktrees/split-{repoShort}-{limb}`, 기대 브랜치 `worktree-split-{repoShort}-{limb}`(P2).
 2. **창 열기는 사람이 한다** — 안내만 출력한다: 새 터미널에서 **리포 루트**로 이동해 `claude --worktree split-{repoShort}-{limb}`. 같은 세션을 옮기는 `EnterWorktree` 는 메인 세션에는 쓰지 않는다(리더가 부모 트리를 떠나면 `status` 를 볼 자리가 없다). `git worktree add` 로 직접 만들지도 않는다 — `/split` 은 내장 worktree 만 쓴다(ADR-002). 안내 직후 `recordWallClockStart(runId, { segment: 'open-windows', humanWait: true })` · `recordPhaseStart(runId, 'OPEN')`.
 3. 사용자가 열었다고 하면 `git worktree list --porcelain` 을 실행해(종료코드 ≠0 이면 중단) `worktree <기대 경로>` 행을 확인한다. 없으면 "창이 아직 없다" 로 멈춘다 — 대신 만들지 않는다. 확인되면 `recordWallClockEnd(runId, { segment: 'open-windows' })` · `recordPhaseEnd(runId, 'OPEN')` (확인 전 이탈하면 미쌍 → `null` — 그게 사실이다).
-4. **줄기 브리프 write(9a)**: `<worktreePath>/.artibot/split/{limb}/brief.md` — 헤더에 `parentRoot`·`slug`·`branch`·`base`, 줄기 목표, **소유 파일 allowlist**(계획의 `affectedPaths`), 비소유 파일(다른 줄기의 경로 — 고치지 말고 보고), 완료 기준, PRD **발췌 복사**(worktree 에는 미추적 `docs/` 가 없다 — P6), 환경 경고(`plugins/artibot/node_modules` 부재 → 테스트 전 `npm ci`).
+4. **줄기 브리프 write(9a)**: `<worktreePath>/.artibot/split/{limb}/brief.md` — 헤더에 `parentRoot`·`slug`·`branch`·`base`, 줄기 목표, **소유 파일 allowlist**(계획의 `affectedPaths`), 비소유 파일(다른 줄기의 경로 — 고치지 말고 보고), 완료 기준, PRD **발췌 복사**(worktree 에 없는 것은 **미추적 경로만**이다 — `docs/`·`node_modules` 는 없지만 git 추적 파일인 `.artibot/guides/**` 는 그대로 있다. P6 를 "worktree 에 `.artibot` 이 없다" 로 읽지 마라 — 2026-09-04 정정), 환경 경고(`plugins/artibot/node_modules` 부재 → 테스트 전 `npm ci`), **표적 스위트만 돌리라는 경고**(리포 전체 `vitest` 는 `tests/dispatcher/*-dispatcher.test.js` 가 실제 훅 프로세스를 창의 cwd 로 스폰하게 만들어 2026-09-04 에 4/4 줄기 브랜치를 `artibot/` 접두로 옮겼다 — `status` 에서 줄기가 사라지고 `land` 가 완료된 작업을 `no-commits` 로 읽었다. 근본 수리는 착지했으나 전체 실행은 부하 의존 플레이크까지 끌고 오므로 창은 여전히 표적 스위트만. gotchas #18·#22·#35).
 5. **창 시작 프롬프트 생성** — 핸드오프 스냅샷을 전체 인자로 모은다(인자를 빼면 placeholder 로 열화한다 — `save.md` Phase B 2단계와 같은 함정):
 
 ```js
@@ -99,7 +99,7 @@ const slug = toProjectSlug(parentRoot); // 메모리·워크로그 슬러그는 
 
 ```
 SplitWindow(limb="{limb}", worktree="split-{repoShort}-{limb}", parent="{parent-session}",
-     prompt="[artibot:effort level=xhigh command=split][artibot:task-budget max_tokens={budget}]\n\n[split limb] run={runId} limb={limb} · parent={parent-session} · worktree={worktreePath} · branch=worktree-split-{repoShort}-{limb} · base={base} · slug={slug}\n\n브리프: {worktreePath}/.artibot/split/{limb}/brief.md 를 먼저 Read 하라 — 소유 파일 allowlist·비소유 파일·완료 기준이 거기 있다. 소유 밖 파일은 고치지 말고 보고하라.\n\n핸드오프 스냅샷:\n{handoffMd}\n\n규약:\n- 시작 인사 1회: 첫 턴에 SendMessage(to='{parent-session}') 로 'limb {limb} started @ {worktreePath}' 를 보낸다. 그 뒤로는 보고 계약대로만 — 유휴 ≠ 완료다. 인사는 최적화다: 도달하지 않아도 런은 진행되고, 순서에 기대지 마라.\n- 완료 = 줄기 브랜치 커밋 + first-parent 선상 마지막 `Split-Limb` 트레일러가 `Split-Limb: done` (git commit -m '<subject>' -m 'Split-Limb: done' 또는 --trailer). 커밋 없으면 완료가 아니다. 중간 커밋은 `Split-Limb: wip` — done 뒤에 wip 을 얹으면 다시 미완료다. origin/main 을 merge 해 tip 이 병합 커밋이어도 트레일러를 다시 달 필요 없다(판독기는 first-parent 로 본다). 메시지는 최적화이지 진실원이 아니다.\n- 메모리·핸드오프·워크로그 슬러그는 부모 projectRoot({parentRoot}) 기준 {slug} 로 고정한다. worktree 경로로 새 슬러그를 만들지 마라. /save 는 이 worktree 의 .artibot/ 에 쓰고 부모 포인터에는 쓰지 않는다(줄기 N개가 서로를 지운다).\n- git stash·reset·checkout·worktree 생성 금지 — refs/stash 는 worktree 간 공유라 남의 stash 를 지운다.\n- 이 창에서 팀원을 스폰하면 이름은 split-{repoShort}-{limb}-{sid}-{role} 이다({sid} 는 이 창의 세션 판별자).\n- plugins/artibot/node_modules 가 없으면 테스트 전 npm ci.\n\n{보고 계약}")
+     prompt="[artibot:effort level=xhigh command=split][artibot:task-budget max_tokens={budget}]\n\n[split limb] run={runId} limb={limb} · parent={parent-session} · worktree={worktreePath} · branch=worktree-split-{repoShort}-{limb} · base={base} · slug={slug}\n\n브리프: {worktreePath}/.artibot/split/{limb}/brief.md 를 먼저 Read 하라 — 소유 파일 allowlist·비소유 파일·완료 기준이 거기 있다. 소유 밖 파일은 고치지 말고 보고하라.\n\n핸드오프 스냅샷:\n{handoffMd}\n\n규약:\n- 시작 인사 1회: 첫 턴에 SendMessage(to='{parent-session}') 로 'limb {limb} started @ {worktreePath}' 를 보낸다. 그 뒤로는 보고 계약대로만 — 유휴 ≠ 완료다. 인사는 최적화다: 도달하지 않아도 런은 진행되고, 순서에 기대지 마라.\n- 완료 = 줄기 브랜치 커밋 + first-parent 선상 마지막 `Split-Limb` 트레일러가 `Split-Limb: done` (git commit -m '<subject>' -m 'Split-Limb: done' 또는 --trailer). 커밋 없으면 완료가 아니다. 중간 커밋은 `Split-Limb: wip` — done 뒤에 wip 을 얹으면 다시 미완료다. origin/main 을 merge 해 tip 이 병합 커밋이어도 트레일러를 다시 달 필요 없다(판독기는 first-parent 로 본다). 메시지는 최적화이지 진실원이 아니다.\n- 메모리·핸드오프·워크로그 슬러그는 부모 projectRoot({parentRoot}) 기준 {slug} 로 고정한다. worktree 경로로 새 슬러그를 만들지 마라. /save 는 이 worktree 의 .artibot/ 에 쓰고 부모 포인터에는 쓰지 않는다(줄기 N개가 서로를 지운다).\n- git stash·reset·checkout·worktree 생성 금지, ref 조작(branch -f/-m/-D) 금지 — refs/stash 는 worktree 간 공유라 남의 stash 를 지운다. 판독 불일치는 스스로 맞추지 말고 리더에게 보고하라(2026-09-04: 한 창이 land 의 no-commits 를 보고 스스로 ref 를 옮겨 정본이 둘이 됐다).\n- 이 창에서 팀원을 스폰하면 이름은 split-{repoShort}-{limb}-{sid}-{role} 이다({sid} 는 이 창의 세션 판별자).\n- plugins/artibot/node_modules 가 없으면 테스트 전 npm ci.\n\n{보고 계약}")
 ```
 
 ### status (메인 세션 전용)
@@ -110,14 +110,14 @@ SplitWindow(limb="{limb}", worktree="split-{repoShort}-{limb}", parent="{parent-
 4. 출력(줄기당 1행) + 아래 "측정 고지" 3문구:
 
 ```
-| limb | worktree | branch | commits | complete | reason | lastTrailer | doneCommit | locked(pid) | session(휴리스틱) | prunable |
+| limb | worktree | branch | 훅 이동 | commits | complete | reason | lastTrailer | doneCommit | locked(pid) | session(휴리스틱) | prunable |
 ```
 
-메시지 0건이어도 이 표는 정확해야 한다(진실원이 git 이기 때문). `prunable` 행은 그대로 보여주고 지우지 않는다(P5 미관측).
+**훅 이동** 열 = `resolveDispatch` 의 `limbs[].branchRelocatedByHook` — 관측 브랜치가 계획 브랜치의 `artibot/` 접두형이면 `yes`, 관측했고 아니면 `no`, worktree 미관측이면 `미확인`(`null` 을 `no` 로 바꾸지 마라). 2026-09-04 에 SessionStart 훅이 4/4 줄기를 그렇게 옮겨 이 표에서 줄기가 통째로 사라졌다(gotchas #18·#22). 훅은 수리됐으므로 `yes` 는 이제 수리 전 worktree 를 뜻한다 — 사람이 `plan.json` 의 `branch` 를 porcelain 실제값으로 동기화하고 `plannedBranch` 를 보존한다. 표시일 뿐 게이트가 아니다. 메시지 0건이어도 이 표는 정확해야 한다(진실원이 git 이기 때문). `prunable` 행은 그대로 보여주고 지우지 않는다(P5 미관측).
 
 ### dispatch (메인 세션 전용 · 안내형 · fail-closed · 멱등)
 
-판단은 코드(`lib/git/split-dispatch.js#resolveDispatch`, 순수 함수 — 같은 입력 → 같은 출력), 행동은 리더(`messages[]` 를 그대로 `SendMessage`). 진실원은 git 과 파일시스템, 메시지는 최적화다. `recordPhaseStart(runId, 'DISPATCH')`.
+판단은 코드(`lib/git/split-dispatch.js#resolveDispatch`, 순수 함수 — 같은 입력 → 같은 출력), 행동은 리더(`messages[]` 를 그대로 `SendMessage`). 진실원은 git 과 파일시스템, 메시지는 최적화다. `recordPhaseStart(runId, 'DISPATCH')`. **줄기 안의 팬아웃은 리더가 설계한다** — 브리프 §1 에 줄기별 분해 권장안(하위 묶음 2~5개 · 각 묶음의 소유 파일 · 검수 배치)을 넣는다. 창은 리더이지 구현자가 아니다(창 쪽 규약은 `templates/split/PROMPT-TEMPLATE.md` §줄기 내부 팬아웃, 관측점은 `<worktreePath>/.artibot/ledger/spawns.ndjson` — `fanout-probe`). 2026-09-04 실측: 템플릿에 팬아웃 지시가 없어 4창 중 3창이 스폰 0건으로 시작했다(gotchas #16).
 
 0. **줄기 하나 배정(스크립트, 2026-09-02 — 프롬프트 전문 붙여넣기 금지)**: `node <pluginRoot>/scripts/split/dispatch.mjs <limb> [--window <세션>] [--dry-run] [--json]` 이 부모 브리프를 worktree 로 원자 복사하고 `prompt.md` 를 템플릿에서 렌더한다(`lib/git/split-brief.js#materializeLimb` · `renderPrompt` — 필수 절 없음·미해결 `{PLACEHOLDER}` 는 refuse; `{REPORT_CONTRACT}` 는 이 문서의 `[보고 계약]` 펜스 그대로). 출력의 **`pointer` 1줄만** 리더가 `SendMessage(to, pointer)` 한다 — 스크립트는 보내지 않는다. 절차·플래그·근거(Ontology 9회 2.5KB 복제 전송)는 `skills/split/references/operations.md` §dispatch. 전체 줄기를 한 번에 판정·발송하는 절차는 아래 1~5.
 1. **가용성(fail-closed)**: `ListAgents` 가 toolset 에 없으면 `unavailable`. Bash `node -e "process.stdout.write(process.env.CLAUDE_CODE_MESSAGING_SOCKET||'')"` 가 빈 값이면 `unavailable`. 둘 다 사유 한 줄만 내고 **창 상태는 단정하지 않는다**.
@@ -195,7 +195,7 @@ process.stdout.write(JSON.stringify({ ...decision, messages: decision.messages.f
 
 **왜 배치인가 — strict 비용 고지.** 브랜치 보호가 `strict:true`·`enforce_admins:true`(라이브 실측 2026-08-26)라 master 가 한 번 움직이면 다른 모든 초록 브랜치는 stale 이 된다. 줄기 N개를 하나씩 올리면 CI N회가 직렬로 돌고 각 랜딩이 다음 랜딩을 무효화한다(통증 ⑥). 배치는 N줄기를 먼저 한 커밋으로 접어 happy path 를 CI 1회로 만든다 — strict 비용은 사라지지 않고 **경합 케이스로 이동**한다: master 이동 1회 → 새 base 위 재빌드 + 재검사(`rebuilds:1`), 또 이동 → `needs-human`.
 
-**절차** — 판단은 코드에, 행동은 리더에. 확인 프롬프트를 띄우며 `recordWallClockStart(runId, { segment: 'confirm-integrate', humanWait: true })`, 응답 수신 시 `recordWallClockEnd` + `recordPhaseStart(runId, 'INTEGRATE')`. 그 뒤 플러그인 루트에서 아래 한 번을 실행하고 `status` 로 분기한다(limbs = `plan.json` 줄기 브랜치 중 트레일러 `done` 인 것만):
+**절차** — 판단은 코드에, 행동은 리더에. 확인 프롬프트를 띄우며 `recordWallClockStart(runId, { segment: 'confirm-integrate', humanWait: true })`, 응답 수신 시 `recordWallClockEnd` + `recordPhaseStart(runId, 'INTEGRATE')`. **확인 생략 규약**: 오너의 사전 위임이 원장에 남아 있으면 프롬프트를 띄우지 않아도 된다. 그때도 `confirm-integrate` 세그먼트는 **0길이로 기록하고 지우지 않는다**(start/end 를 붙여 찍고 `data.note` 에 위임 근거) — 세그먼트를 빼면 사람 대기 분자가 조용히 0 이 되어 아래 3번 고지가 거짓이 된다. 위임 근거가 원장에 없으면 생략하지 않는다(gotchas #29). 그 뒤 플러그인 루트에서 아래 한 번을 실행하고 `status` 로 분기한다(limbs = `plan.json` 줄기 브랜치 중 트레일러 `done` 인 것만):
 
 ```bash
 node --input-type=module -e "const {landBatch,makeGhCheckRunsFetcher}=await import('./lib/git/batch-landing.js');const {getRepoIdentity}=await import('./lib/git/repo-identity.js');const [runId,...limbs]=process.argv.slice(1);const cwd=process.cwd();const repoIdentity=getRepoIdentity(cwd);const r=await landBatch({cwd,limbs,runId,repoIdentity,lockDir:'<parentRoot>/.artibot/split/locks',base:'master',remote:'origin',sessionId:process.env.CLAUDE_SESSION_ID,fetchCheckRuns:makeGhCheckRunsFetcher({repo:repoIdentity,cwd})});console.log(JSON.stringify({status:r.status,sha:r.sha,base:r.base,rebuilds:r.rebuilds,reason:r.reason},null,2));console.log(r.log.join('\n'));process.exitCode=r.status==='landed'?0:1;" <runId> worktree-split-<repoShort>-<limb1> worktree-split-<repoShort>-<limb2> …
@@ -211,7 +211,7 @@ node --input-type=module -e "const {landBatch,makeGhCheckRunsFetcher}=await impo
 
 ### 운용 스크립트 (land · watch · probe · worktree-setup · restore-blob · suspend — 절차 정본은 `skills/split/references/operations.md`)
 
-`node <pluginRoot>/scripts/split/<x>.mjs`(`<pluginRoot>` = `CLAUDE_PLUGIN_ROOT` 또는 `~/.claude/plugins/cache/artibot/artibot/<최신>`), 전부 부모 루트를 cwd 로. 어느 것도 메시지를 보내거나 push·merge 하지 않는다. `land <limb> [--base <ref>]` = 트레일러(first-parent) · allowlist 소유권 diff · 바이너리 0 · 금지 인용 0 · merge-tree 드라이런 · base 뒤처짐(`lib/git/limb-landing-check.js#checkLimbLanding`) → `PASS`(exit 0, **승인 아님**) / `FAIL`(빨간 행 `detail` 을 줄기 창에 `SendMessage`) / `UNSUPPORTED`(git < 2.38 → 직렬 강등); 줄기가 main 을 merge 했으면 살아 있는 ref 를 `--base` 로. `watch --parent <root>` = 줄기당 ops state(`run.json.lanes[limb].state`) · supervisor · 트레일러 · 마지막 커밋 · heartbeat · health(`lib/supervisor/lane-monitor.js#assessLane`, 결손은 `unknown`) + 측정 고지 raw — 부작용은 `runtime/split/{runId}.state.json` 캐시 1건, 폴링 루프 금지는 그대로. `fanout-probe --parent <root>` = `active` 줄기만 SOLO 경보, 미지 창·상태는 `(state unknown)` 로 **경보**(침묵 쪽으로 실패하지 않음). `worktree-setup <wt> --limb <limb>` = junction·`.env.local`·레인별 `lane.env`(e2e DB 분리), 멱등, `--teardown` 은 reparse point 만. `restore-blob <f...>` = `git cat-file -p` 바이트 복원(autocrlf 가 지문을 깨는 `git checkout --` 대체). `suspend` / `resume-notices` = 재부팅 5단계 정지·재개 통지 생성 + `run.json.suspend`(회신 sha 는 리더가 git 으로 직접 확인).
+`node <pluginRoot>/scripts/split/<x>.mjs`(`<pluginRoot>` = `CLAUDE_PLUGIN_ROOT` 또는 `~/.claude/plugins/cache/artibot/artibot/<최신>`), 전부 부모 루트를 cwd 로. 어느 것도 메시지를 보내거나 push·merge 하지 않는다. `land <limb> [--base <ref>]` = 트레일러(first-parent) · allowlist 소유권 diff · 바이너리 0 · 금지 인용 0 · **lint**(변경된 `.js`/`.mjs` 한정 `eslint --max-warnings=0`; 변경 0건이면 `SKIP`, eslint 부재면 `UNSUPPORTED` — PASS 로 넘기지 않는다. 2026-09-04: land 6/6 PASS 인데 eslint 는 오류 3·경고 2 였고 CI 는 `eslint . --max-warnings=0` 이라 배치가 빨개질 상태였다, gotchas #25) · merge-tree 드라이런 · base 뒤처짐(`lib/git/limb-landing-check.js#checkLimbLanding`) → `PASS`(exit 0, **승인 아님**) / `FAIL`(빨간 행 `detail` 을 줄기 창에 `SendMessage`) / `UNSUPPORTED`(git < 2.38 → 직렬 강등); 줄기가 main 을 merge 했으면 살아 있는 ref 를 `--base` 로. `watch --parent <root>` = 줄기당 ops state(`run.json.lanes[limb].state`) · supervisor · 트레일러 · 마지막 커밋 · heartbeat · health(`lib/supervisor/lane-monitor.js#assessLane`, 결손은 `unknown`) + 측정 고지 raw — 부작용은 `runtime/split/{runId}.state.json` 캐시 1건, 폴링 루프 금지는 그대로. `fanout-probe --parent <root>` = `active` 줄기만 SOLO 경보, 미지 창·상태는 `(state unknown)` 로 **경보**(침묵 쪽으로 실패하지 않음). `worktree-setup <wt> --limb <limb>` = junction·`.env.local`·레인별 `lane.env`(e2e DB 분리), 멱등, `--teardown` 은 reparse point 만. `restore-blob <f...>` = `git cat-file -p` 바이트 복원(autocrlf 가 지문을 깨는 `git checkout --` 대체). `suspend` / `resume-notices` = 재부팅 5단계 정지·재개 통지 생성 + `run.json.suspend`(회신 sha 는 리더가 git 으로 직접 확인).
 
 ### handoff / resume (부모 슬러그 기준)
 
@@ -232,7 +232,7 @@ node --input-type=module -e "const {landBatch,makeGhCheckRunsFetcher}=await impo
 
 ```
 측정 고지:
-1. 실오퍼레이터 데이터 1건(n=1) — `/split` vs `-fast` 속도 비교는 여전히 주장할 수 없다(n=1 은 존재 증명이지 비교 표본이 아니다; 근거 `reports/SPLIT/split-8f83d7.md`, 2026-08-28 기준).
+1. 실오퍼레이터 데이터 2건(n=2) — `/split` vs `-fast` 속도 비교는 여전히 주장할 수 없다(n=2 도 존재 증명이지 비교 표본이 아니다; 근거 `reports/SPLIT/split-8f83d7.md` 2026-08-28 · `reports/SPLIT/split-9d6dc2.md` 2026-09-04).
 2. wall-clock 은 인간 대기 포함 — 창 열기(`open-windows`)·통합 확인(`confirm-integrate`) 등 사람이 일한 구간이 총 소요(`run`)에 들어 있다. `humanWait:true` 세그먼트로 분리 기록하며, 빼고 말하지 않는다.
 3. 사람 대기 비율 {humanWaitPct}% (분자 humanWaitMs={humanWaitMs}, 분모 run={totalMs}ms, 측정시각 {마지막 이벤트 ts}; 미쌍 {unpaired 수}건이면 `null`) — C단계(headless 자동 창) 재평가 조건 `config.split.humanWaitReevalPct`={config 값} 대비 {초과/미만/미측정}. 판정과 C단계 재개는 사람이 결정한다 — 플러그인은 기록만 하고 임계값을 코드에서 비교하지 않는다(`tests/firewall/split-telemetry-wallclock.test.js` "record-only" 게이트).
 ```

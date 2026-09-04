@@ -481,26 +481,35 @@ describe('git-autopilot-session', () => {
   });
 
   // -------------------------------------------------------------------------
-  // /split limb branches — measured incident, 2026-09-04 (gotchas #18, #22)
+  // Built-in worktree branches — two measured incidents, 2026-09-04
   //
-  // A limb branch is `worktree-split-<repo-short>-<limb>`, which is pure
-  // `[A-Za-z0-9_-]` and therefore PASSES the RELOCATABLE_BRANCH_NAME allowlist:
-  // the name gate cannot see it. Four of four `/split` worktrees had HEAD
-  // relocated to `artibot/worktree-split-…` by a SessionStart fired from a
-  // full-repo `vitest` run. `isSplitLimbBranch` then rejected the relocated
-  // name, so `/split status` reported every limb as missing and `land` read
-  // finished work as `no-commits`.
+  // `claude --worktree <name>` creates `worktree-<name>` and we do not choose
+  // that name. Such a branch is pure `[A-Za-z0-9_-]`, so it PASSES the
+  // RELOCATABLE_BRANCH_NAME allowlist: the name gate cannot see it at all.
   //
-  // The check is semantic, not lexical — it asks `lib/git/repo-identity.js`
-  // whether this is a limb, rather than adding another shape to the regex.
-  // The regex answers "is this name mechanically derivable"; ownership is a
-  // different question and belongs to the module that defines the naming.
+  //  1. `/split` limbs (gotchas #18, #22). Four of four `/split` worktrees had
+  //     HEAD relocated to `artibot/worktree-split-…` by a SessionStart that a
+  //     full-repo `vitest` run fired. `isSplitLimbBranch` then rejected the
+  //     relocated name, so `/split status` reported every limb as missing and
+  //     `land` read finished work as `no-commits`.
+  //  2. Agent worktrees. Measured 14:42:38 in a LIVE `claude -p` run, no test
+  //     involved: reflog "moving from worktree-agent-a3725b933da90230d to
+  //     artibot/worktree-agent-a3725b933da90230d". So limb-only was too
+  //     narrow — the harness creates worktree branches for its own agents and
+  //     the hook took those over too.
+  //
+  // The rule is therefore the built-in PREFIX: a branch the worktree provider
+  // created belongs to whoever asked for the worktree, and the hook does not
+  // relocate it. Stated as "which names may move" (the same allowlist shape as
+  // RELOCATABLE_BRANCH_NAME), so an unfamiliar worktree kind fails closed.
   // -------------------------------------------------------------------------
 
   it.each([
     ['worktree-split-artibot-l4-f10'],
     ['worktree-split-artibot-test-git-sandbox'],
-  ])('does not relocate HEAD off the /split limb branch %s', async (branch) => {
+    ['worktree-agent-abc123'],
+    ['worktree-probe1'],
+  ])('does not relocate HEAD off the built-in worktree branch %s', async (branch) => {
     const commands = await runOnBranch(branch);
     const logs = stderrSpy.mock.calls.map(([msg]) => msg).join('');
 
@@ -510,15 +519,16 @@ describe('git-autopilot-session', () => {
     expect(commands.some((c) => c.includes(`artibot/${branch}`))).toBe(false);
   });
 
-  it('still relocates a plain built-in worktree branch (negative control)', async () => {
-    // `worktree-probe1` is what `claude --worktree probe1` creates outside
-    // /split. It is NOT a limb (`isSplitLimbBranch` is false for it), so the
-    // new exception must not swallow it — otherwise the guard would be a
-    // blanket "never relocate anything starting with worktree-", which is a
-    // different and much broader change than the one being made.
-    const commands = await runOnBranch('worktree-probe1');
-    expect(commands.some((c) => c.includes('checkout -b artibot/worktree-probe1'))).toBe(true);
-  });
+  it.each([['main'], ['develop'], ['my-feature']])(
+    'still relocates the plain branch %s (negative control — the guard is not a blanket refusal)',
+    async (branch) => {
+      // Without this, a hook that relocated NOTHING would pass every case
+      // above and prove nothing. `master` is excluded here because the
+      // base-branch guard already keeps it put for a different reason.
+      const commands = await runOnBranch(branch);
+      expect(commands.some((c) => c.includes(`checkout -b artibot/${branch}`))).toBe(true);
+    },
+  );
 
   it('does not relocate HEAD when detached (empty branch name)', async () => {
     const commands = await runOnBranch('');
