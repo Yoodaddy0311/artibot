@@ -23,6 +23,16 @@
  * make the second model's receipt look like a repeat of the first and drop
  * real spend.
  *
+ * THE KEY HAS NO CONTENT COMPONENT, AND THAT IS A CHOSEN UNDER-COUNT. A session
+ * that ends, resumes, and ends again has a LARGER transcript the second time,
+ * but its (session, run, model) triples are the same, so the second SessionEnd
+ * skips them and the increment is never recorded. Putting a counter into the
+ * key would record both lines, and the ledger's fold would then sum them —
+ * the double count this key exists to prevent. Measured 2026-09-05: a manual
+ * SessionEnd at 08:44 froze the main run at requests=33/output=44,602 while
+ * a re-parse at 08:50 read 45/54,885. Fixing this belongs to the reader
+ * (`ledger.js#applyUsageReceipt`, latest-per-key instead of sum), not here.
+ *
  * SOURCE
  * ------
  * The envelope's `source` names WHO WROTE THE LINE, not whose tokens it

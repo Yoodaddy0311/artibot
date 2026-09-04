@@ -711,7 +711,9 @@ export async function recordUsageReceipts(hookData, deps = {}) {
   try {
     outcome = await collectUsageReceipts(hookData, deps);
   } catch (err) {
-    logHookError('session-end', 'usage receipt recording failed', err);
+    // No logHookError here on purpose: the brief fixes this stage at ONE
+    // stderr line, and the summary below already carries `reason=`. A second
+    // line would say the same thing twice (review 2026-09-05, probe: 2 lines).
     outcome = receiptOutcome({ status: 'failed', reason: truncateReason(err?.message ?? err) });
   }
   process.stderr.write(formatUsageReceiptLine(outcome.result, outcome.unresolved));
