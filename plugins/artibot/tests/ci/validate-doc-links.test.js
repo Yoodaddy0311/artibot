@@ -19,11 +19,13 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { MIN_ROOT_TREE_DOC_FILES } from '../../scripts/ci/ci-utils.js';
 import {
   extractAnchorRefs,
   extractHeadings,
   extractMdLinks,
   findBrokenLinks,
+  gatherRepoRootTreeDocFiles,
   hasUnbalancedFences,
   headingToAnchor,
   maskCodeFences,
@@ -242,5 +244,60 @@ describe('findBrokenLinks (integration on disk)', () => {
 describe('module sanity', () => {
   it('plugin root resolves to the artibot plugin dir', () => {
     expect(PLUGIN_ROOT).toMatch(/artibot$/);
+  });
+});
+
+// ----- repo-root canon trees (added to the scan set 2026-09-05) -------------
+//
+// `main()` is not exported, so what is pinned here is the two halves it
+// composes: the tree enumeration is in scope (denominator, via ci-utils), and a
+// tree file's links are judged under repo-root containment — which is what lets
+// `.artibot/guides/x.md → ../../plugins/artibot/...` be checked at all.
+
+describe('repo-root tree docs are judged under root containment', () => {
+  /** `<repo>/plugins/artibot` → two levels up is the repo root. */
+  const REPO_ROOT = join(PLUGIN_ROOT, '..', '..');
+
+  it('enumerates the canon trees through the shared, git-anchored helper', () => {
+    // One git spawn. Proves the re-export is wired, and that the count this
+    // gate would add to its tally clears the floor it would assert.
+    const { root, files } = gatherRepoRootTreeDocFiles();
+    expect(root).toBe(REPO_ROOT);
+    expect(files.length).toBeGreaterThanOrEqual(MIN_ROOT_TREE_DOC_FILES);
+    expect(files.some((f) => f.includes(join('.artibot', 'adr')))).toBe(true);
+  });
+
+  it('reports a dead link from a guides file (the ADR-rot case 후속 1 named)', () => {
+    const victim = join(REPO_ROOT, '.artibot', 'guides', 'v5-design', 'x.md');
+    const broken = findBrokenLinks('[adr](../../adr/ADR-999-does-not-exist.md)\n', victim, REPO_ROOT);
+    expect(broken.map((b) => b.type)).toEqual(['link']);
+  });
+
+  it('judges a cross-link from a guides file into a plugin (not skipped as out-of-scope)', () => {
+    const victim = join(REPO_ROOT, '.artibot', 'guides', 'v5-design', 'x.md');
+    const ok = findBrokenLinks('[readme](../../../plugins/artibot/README.md)\n', victim, REPO_ROOT);
+    expect(ok).toEqual([]);
+    const dead = findBrokenLinks('[readme](../../../plugins/artibot/NOPE.md)\n', victim, REPO_ROOT);
+    expect(dead.map((b) => b.type)).toEqual(['link']);
+  });
+
+  it('would have excused the same dead cross-link under plugins/ containment (why root containment matters)', () => {
+    const victim = join(REPO_ROOT, '.artibot', 'guides', 'v5-design', 'x.md');
+    const dead = findBrokenLinks(
+      '[readme](../../../plugins/artibot/NOPE.md)\n',
+      victim,
+      join(REPO_ROOT, 'plugins', 'artibot'),
+    );
+    // Resolves inside plugins/artibot, so it IS judged even there — but the
+    // guides file itself would never have been scanned. The point of this case
+    // is the file-to-root pairing: a target that resolves under `.artibot/`
+    // is out of scope for a plugins/ containment and silently skipped.
+    expect(dead.map((b) => b.type)).toEqual(['link']);
+    const skipped = findBrokenLinks(
+      '[adr](../../adr/ADR-999-does-not-exist.md)\n',
+      victim,
+      join(REPO_ROOT, 'plugins'),
+    );
+    expect(skipped).toEqual([]);
   });
 });

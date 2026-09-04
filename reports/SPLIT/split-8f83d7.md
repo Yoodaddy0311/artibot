@@ -39,8 +39,8 @@
 
 ## 런이 발굴한 라이브 결함 — 세션 매칭 대소문자
 
-DISPATCH phase 가 `refused: session-name case mismatch (split-Artibot-* vs split-artibot-*)
-— fail-closed, 0 sent` 로 종료(10:42:06). worktree 이름은 리포 원문 케이스를 보존하는데
+DISPATCH phase 가 `refused: session-name case mismatch (split-Artibot-* vs split-artibot-*)`
+`— fail-closed, 0 sent` 로 종료(10:42:06). worktree 이름은 리포 원문 케이스를 보존하는데
 하네스가 세션 이름을 소문자화해 `matchingSessions` 민감 대조가 열린 창을 전부 "미개설"로
 판정했다. fail-closed 설계 덕에 오배달 없이 거부로 표면화 → `2e6c123f` 로 수정(`i` 플래그
 + 회귀 3건). 이 런에서 dispatch 는 끝까지 성공하지 않았고(성공 DISPATCH 이벤트 없음),
