@@ -16,7 +16,7 @@
     "PreToolUse_matcher": "Agent",
     "SubagentStart_matcher": "*",
     "matcher_syntax": "plain string \"Agent\" fired on the first attempt; the hooks.json expression form (tool == \"Agent\") was therefore not tried",
-    "settings_merge_behaviour": "MERGED, not replaced — the plugin's own hooks.json SubagentStart handler wrote .artibot/ledger/spawns.ndjson during the probe sessions (mtime 12:32 KST), so --settings hooks run alongside plugin hooks",
+    "settings_merge_behaviour": "MERGED, not replaced — the plugin's own hooks.json SubagentStart/SubagentStop handler wrote rows into .artibot/ledger/spawns.ndjson stamped with the three probe sessions' own session ids: 2 rows (a), 6 rows (b), 4 rows (c) = one start + one stop per spawn, 12/12 (counted 13:1x KST; ids not recorded here). So --settings hooks ran alongside plugin hooks in the same sessions",
     "probe_execution": "headless (claude -p) from the limb session's Bash tool, cwd = worktree root; all 3 sessions returned subtype success, is_error false"
   },
   "scenarios": [
