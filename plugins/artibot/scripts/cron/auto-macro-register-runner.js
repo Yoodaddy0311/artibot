@@ -27,7 +27,7 @@ import path from 'node:path';
 
 import { readJsonFile } from '../../lib/core/file.js';
 import { getPluginRoot } from '../../lib/core/platform.js';
-import { recordDecision } from '../../lib/core/decision-trail.js';
+import { cronRunId, recordSelfControlDecision } from '../../lib/observability/decision-events.js';
 import { isMainEntry } from '../hooks/_main-entry.js';
 
 // ---------------------------------------------------------------------------
@@ -103,7 +103,11 @@ async function loadMacroLearner() {
  * @param {object} [deps.killSwitch]
  * @param {object} [deps.firstRunGuard]
  * @param {object} [deps.macroLearner]
- * @param {Function} [deps.trail]
+ * @param {string|null} [deps.runId] - decisions-store run id (`cronRunId`); the
+ *   CLI entry mints one, tests inject `trail` instead. Null → the default
+ *   `trail` counts `skipped` and writes nothing (D9, no session no file).
+ * @param {Function} [deps.trail] - `(decision) => void`; defaults to
+ *   `recordSelfControlDecision` bound to `runId` and `pluginRoot`.
  * @returns {Promise<{ran: boolean, reason?: string, registered?: number, skipped?: number, observeMode?: boolean}>}
  */
 export async function runAutoMacroRegister(deps) {
@@ -115,7 +119,8 @@ export async function runAutoMacroRegister(deps) {
     killSwitch,
     firstRunGuard,
     macroLearner,
-    trail = recordDecision,
+    runId = null,
+    trail = (decision) => recordSelfControlDecision(runId, decision, { cwd: pluginRoot }),
   } = deps;
 
   // Gate 1: explicit user opt-out.
@@ -201,7 +206,9 @@ async function main() {
   const configPath = path.join(pluginRoot, 'artibot.config.json');
   const config = (await readJsonFile(configPath)) || {};
 
-  const result = await runAutoMacroRegister({ pluginRoot, config, dryRun });
+  const result = await runAutoMacroRegister({
+    pluginRoot, config, dryRun, runId: cronRunId('auto-macro-register'),
+  });
   process.stdout.write(`auto-macro-register: ${JSON.stringify(result)}\n`);
   process.exit(0);
 }

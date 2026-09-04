@@ -8,7 +8,9 @@
  * ledger stays the one source of truth (design §8.3-2).
  *
  * `existence-audit.js` is T-44's and is intentionally absent here; `countBy`
- * and `foldByAction` are exported for it to build on.
+ * and `foldByAction` are exported for it to build on. `route-bind.js` is the
+ * receipt ↔ bind join `buildReplay` embeds as `route_binds`; its two counters
+ * are exported for `/doctor` Check 10.
  *
  * @module lib/replay
  */
@@ -33,3 +35,12 @@ export {
 } from './replay.js';
 
 export { loadReplay } from './load.js';
+
+export {
+  ROUTE_EVENTS,
+  TOOL_USE_SHADOW_PREFIX,
+  UNBOUND_ROUTE_LEDGER,
+  countUnboundSpawns,
+  isPreToolUseReceipt,
+  joinRouteBinds,
+} from './route-bind.js';

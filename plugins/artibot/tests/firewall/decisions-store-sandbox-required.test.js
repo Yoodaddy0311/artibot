@@ -61,6 +61,19 @@
  * deliberately. There is no denylist — a list of bad patterns fails open for
  * every future variant.
  *
+ * D9 (2026-09-05) ADDED TWO WRITERS. The decision trail froze and its unique
+ * writers moved here: `recordSelfControlDecision` (the four `scripts/cron/`
+ * runners) and `recordSkillLevelChanged` (bound by the hook and handed to
+ * `lib/core/user-profile.js#recordSignal` as a `recordChange` PORT). Both are
+ * tier 1 below. `recordSignal` itself is deliberately NOT a tier: it cannot
+ * reach the store without a port, and the only writer a port can carry is a
+ * recorder from this module — so a test that binds one must import it and is
+ * caught on that name. Scanning for `recordSignal` would flag every profile
+ * test that passes no port, which is the false positive the `importOf`
+ * tightening was built to avoid. The module ratchet also widened: it now keys
+ * on the recorder names as well as the two primitives, so the cron runners and
+ * the hook's port-binding site are listed rather than invisible.
+ *
  * WHAT THIS GATE CANNOT SEE — do not read a green run as more than it is:
  *   - **Indirect reach.** Only the test file's own source is read. A test that
  *     drives `lib/runtime/middleware/router.js#route` or the middleware chain
@@ -82,6 +95,11 @@
  *     escapes both the call regex and the aliased-import rule, which is static
  *     only. Measured 2026-09-04: zero occurrences repo-wide, so this is a known
  *     hole rather than a live miss. The static alias form IS covered.
+ *   - **A port-less `recordSignal`.** `lib/core/user-profile.js#recordSignal`
+ *     is not a tier: without a `recordChange` port it never reaches this
+ *     store, and a port can only carry a recorder from `decision-events.js`,
+ *     which IS scanned for by name. A profile test that passes no port
+ *     therefore reads as clean here, correctly.
  *   - **Non-test writers.** Scripts, benchmarks and `tests/**\/*.bench.js` are
  *     out of scope; only `*.test.js` under `tests/` is scanned.
  *   - **Sibling stores.** `lib/autopilot/telemetry.js` and
@@ -110,15 +128,33 @@ const TESTS_DIR = path.join(PLUGIN_ROOT, 'tests');
  */
 const KNOWN_DECISION_STORE_MODULES = [
   'lib/autopilot/telemetry.js',
+  // D9: the frozen trail's header cites both successors by `file#symbol`. A
+  // doc reference, not a reach — listed so the citation can stay.
+  'lib/core/decision-trail.js',
+  // D9 port site: names `recordSkillLevelChanged` in its JSDoc and reaches it
+  // only through the injected `recordChange` port (L1 may not import L2).
+  'lib/core/user-profile.js',
   'lib/observability/decision-events.js',
   'lib/observability/run-events.js',
   'lib/observability/split-telemetry.js',
   'lib/runtime/middleware/checkpoint.js',
   'lib/runtime/middleware/router.js',
+  // D9: the four self-control runners write `self-control-decided`.
+  'scripts/cron/auto-cleanup-runner.js',
+  'scripts/cron/auto-commit-runner.js',
+  'scripts/cron/auto-macro-register-runner.js',
+  'scripts/cron/auto-pr-creator.js',
+  // D9: binds `recordSkillLevelChanged` to the session and hands it to the port.
+  'scripts/hooks/runtime-prompt.js',
 ];
 
-/** Source pattern the ratchet walk looks for. */
-const STORE_WRITER_REF = /\b(appendRunEvent|getDecisionStoreDir)\b/;
+/**
+ * Source pattern the ratchet walk looks for: the two store primitives plus the
+ * two D9 recorders, which reach the store through `record` without naming
+ * either primitive. Without the recorder names the four cron runners would be
+ * store writers this ratchet never listed.
+ */
+const STORE_WRITER_REF = /\b(appendRunEvent|getDecisionStoreDir|recordSelfControlDecision|recordSkillLevelChanged)\b/;
 
 /** A module file name as a regex fragment — only `.` needs escaping here. */
 function escapeMod(mod) {
@@ -200,6 +236,9 @@ const TIER1_WRITERS = [
   tier1Writer('recordTopologyRecommended', /\brecordTopologyRecommended\s*\(/, 'decision-events.js'),
   tier1Writer('recordMemoryInjection', /\brecordMemoryInjection\s*\(/, 'decision-events.js'),
   tier1Writer('flushRecorderStats', /\bflushRecorderStats\s*\(/, 'decision-events.js'),
+  // D9 (2026-09-05): the trail's unique writers, now store writers.
+  tier1Writer('recordSelfControlDecision', /\brecordSelfControlDecision\s*\(/, 'decision-events.js'),
+  tier1Writer('recordSkillLevelChanged', /\brecordSkillLevelChanged\s*\(/, 'decision-events.js'),
 ];
 
 /**
@@ -359,6 +398,29 @@ describe('scanner self-verification (positive controls)', () => {
     ].join('\n');
     expect(reachesWriter(bad)).toBe('tier1:recordTopologyRecommended');
     expect(mechanismsIn(bad)).toEqual([]);
+  });
+
+  it('flags the two D9 recorders like any other tier-1 writer', () => {
+    const selfControl = [
+      "import { recordSelfControlDecision } from '../../lib/observability/decision-events.js';",
+      "it('x', () => { recordSelfControlDecision('cron-x', { subsystem: 'auto-commit', action: 'refused' }); });",
+    ].join('\n');
+    expect(reachesWriter(selfControl)).toBe('tier1:recordSelfControlDecision');
+    expect(mechanismsIn(selfControl)).toEqual([]);
+
+    const skill = [
+      "import { recordSkillLevelChanged } from '../../lib/observability/decision-events.js';",
+      "it('x', () => { recordSkillLevelChanged('sess-1', { from: 'novice', to: 'pro' }); });",
+    ].join('\n');
+    expect(reachesWriter(skill)).toBe('tier1:recordSkillLevelChanged');
+    expect(mechanismsIn(skill)).toEqual([]);
+
+    // A port-less recordSignal call reaches no store and must stay clean.
+    const portless = [
+      "import { recordSignal } from '../../lib/core/user-profile.js';",
+      "it('x', async () => { await recordSignal({ type: 'slash-command', value: 'x' }); });",
+    ].join('\n');
+    expect(reachesWriter(portless)).toBeNull();
   });
 
   it('flags an unisolated hook call on a plain prompt (tier 2)', () => {

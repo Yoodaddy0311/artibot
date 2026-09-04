@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
+import {
+  existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync,
+} from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -12,12 +14,18 @@ import {
   setSkillLevel,
 } from '../../lib/core/user-profile.js';
 import { getPluginRoot } from '../../lib/core/platform.js';
-import { useTrailSandbox } from '../helpers/trail-sandbox.js';
+import {
+  readDecisionEvents,
+  recordSkillLevelChanged,
+  resetDecisionRecorderStats,
+  SKILL_LEVEL_CHANGED,
+} from '../../lib/observability/decision-events.js';
 
-// A novice->pro promotion records a decision. `configureProfilePath()` sandboxes
-// only the profile file; the trail resolves separately from CLAUDE_PLUGIN_ROOT
-// and would otherwise land in the repo's live learning data.
-useTrailSandbox('user-profile');
+// D9 (2026-09-05): a novice->pro promotion no longer touches the decision
+// trail. `recordSignal` reports the transition through its `recordChange` port
+// and writes nothing itself, so no trail sandbox is needed here any more. The
+// one case that binds the port to the real recorder pins the store to a
+// throwaway `storeDir` (decision-events.js#getDecisionStoreDir).
 
 const TMP_ROOT = join(tmpdir(), 'artibot-user-profile-tests');
 
@@ -81,6 +89,67 @@ describe('user-profile', () => {
       const p = await getProfile();
       expect(p.skillLevel).toBe('pro');
       expect(p.evidence.some((e) => e.startsWith('slash-ratio='))).toBe(true);
+    });
+
+    it('reports a skill-level transition through the recordChange port', async () => {
+      const changes = [];
+      const recordChange = (change) => { changes.push(change); };
+      for (let i = 0; i < 12; i++) {
+        await recordSignal({
+          type: 'slash-command',
+          value: `refactor async api hook commit ${i}`,
+          timestamp: Date.now() + i,
+        }, { recordChange });
+      }
+      // One transition, reported once — later signals keep the level and stay silent.
+      expect(changes).toHaveLength(1);
+      expect(changes[0]).toMatchObject({ from: 'novice', to: 'pro' });
+      expect(changes[0].signals).toBeGreaterThanOrEqual(10);
+      expect(changes[0].evidence.some((e) => e.startsWith('slash-ratio='))).toBe(true);
+    });
+
+    it('does not call the port when the level does not change', async () => {
+      const recordChange = () => { throw new Error('must not be called'); };
+      await recordSignal({ type: 'natural-language', value: 'hello', timestamp: Date.now() }, { recordChange });
+      const p = await getProfile();
+      expect(p.skillLevel).toBe('novice');
+    });
+
+    it('swallows a throwing port — the record is advisory, the profile write is not', async () => {
+      const recordChange = () => { throw new Error('recorder down'); };
+      for (let i = 0; i < 12; i++) {
+        await recordSignal({
+          type: 'slash-command',
+          value: `refactor async api hook commit ${i}`,
+          timestamp: Date.now() + i,
+        }, { recordChange });
+      }
+      const p = await getProfile();
+      expect(p.skillLevel).toBe('pro');
+    });
+
+    it('lands in the decisions store when the port is the real D9 recorder', async () => {
+      // The wiring `scripts/hooks/runtime-prompt.js#recordPromptSignals` does:
+      // bind recordSkillLevelChanged to a session and a store, hand it in.
+      const storeDir = mkdtempSync(join(tmpdir(), 'artibot-profile-store-'));
+      resetDecisionRecorderStats();
+      try {
+        const recordChange = (change) => recordSkillLevelChanged('sess-profile-01', change, { storeDir });
+        for (let i = 0; i < 12; i++) {
+          await recordSignal({
+            type: 'slash-command',
+            value: `refactor async api hook commit ${i}`,
+            timestamp: Date.now() + i,
+          }, { recordChange });
+        }
+        const events = readDecisionEvents('sess-profile-01', { storeDir });
+        expect(events).toHaveLength(1);
+        expect(events[0].type).toBe(SKILL_LEVEL_CHANGED);
+        expect(events[0].data).toMatchObject({ from: 'novice', to: 'pro' });
+      } finally {
+        rmSync(storeDir, { recursive: true, force: true });
+        resetDecisionRecorderStats();
+      }
     });
 
     it('stays novice when user asks natural-language questions', async () => {

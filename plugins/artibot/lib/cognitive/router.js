@@ -11,7 +11,6 @@
  */
 
 import { round as _coreRound } from '../core/index.js';
-import { getPluginRoot } from '../core/platform.js';
 import { readNativeEffortLevel } from './native-effort.js';
 // Router uses 2 decimal precision for display values
 const round = (n) => _coreRound(n, 2);
@@ -373,33 +372,15 @@ export function route(input, context = {}) {
 
   history.push(entry);
 
-  // AGO G3 — record classification for Explainability (observe-only).
-  // Dynamic import to avoid a hard dependency; all failures are swallowed.
-  //
-  // `route()` is synchronous, so this write cannot be awaited — it flushes on a
-  // later turn of the event loop, potentially long after the caller moved on.
-  // Capture the plugin root NOW and hand it to recordDecision: resolved at flush
-  // time instead, the destination is whatever CLAUDE_PLUGIN_ROOT happens to say
-  // then, which is how router fixtures ended up in the real trail.
-  try {
-    const pluginRoot = getPluginRoot();
-    import('../core/decision-trail.js').then(({ recordDecision }) => {
-      recordDecision({
-        subsystem: 'cognitive-router',
-        action: 'classified',
-        reason: `heuristic score ${classification.score} vs threshold ${classification.threshold}`,
-        outputs: {
-          system: classification.system,
-          score: classification.score,
-          threshold: classification.threshold,
-          nativeEffort: classification.nativeEffort,
-        },
-        confidence: classification.confidence,
-      }, { pluginRoot }).catch(() => {});
-    }).catch(() => {});
-  } catch {
-    // Non-critical: decision trail is advisory
-  }
+  // D9 (2026-09-05): this function no longer writes the decision trail. The
+  // `cognitive-router / classified` entry it used to fire-and-forget here is
+  // the same fact `lib/runtime/middleware/router.js` records on every prompt as
+  // `routing-classified` in the projectRoot decisions store
+  // (`lib/observability/decision-events.js#recordRoutingDecision`), and that
+  // path is the one with production callers — `route()` itself has none
+  // (measured 2026-08-28, tests/core/decision-trail-concurrency.test.js).
+  // Removing the write also removes the deferred-flush hazard that put router
+  // fixtures into the real trail (tests/core/decision-trail-path-isolation).
 
   return {
     system: classification.system,

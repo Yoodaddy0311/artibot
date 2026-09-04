@@ -12,6 +12,19 @@
  * that way — the alternative was a suite-wide default-deny, which needed a
  * test-only kill switch in production code. This costs zero production surface.
  *
+ * D9 (2026-09-05) SHRANK THE WRITER AXIS. The trail is frozen
+ * (`lib/core/decision-trail.js` header): `recordDecision` is a no-op unless the
+ * config says `enabled: true`, and every production caller moved to the
+ * decisions store or was deleted. So `router.route()` and
+ * `user-profile.recordSignal()` are no longer trail writers and are no longer
+ * tiers here, the hook entry point no longer writes the trail on a slash
+ * command and tier 2 is gone, and `KNOWN_TRAIL_WRITER_MODULES` is down to the
+ * module itself plus its barrel. The ratchet is what makes that a fact rather
+ * than a claim: a module that starts calling `recordDecision` again turns this
+ * gate red. The decisions store has its own gate
+ * (`tests/firewall/decisions-store-sandbox-required.test.js`); the two do not
+ * overlap and neither covers the other's store.
+ *
  * The rule is an ALLOWLIST: a matched file must carry one of the isolation
  * mechanisms enumerated in `MECHANISMS` below. A new mechanism is red until
  * someone registers it here, deliberately — a denylist of "bad patterns" would
@@ -28,10 +41,11 @@
  *     call in the file (a write before `beforeAll` runs would still escape).
  *     Only the entry-delta measurement and
  *     `tests/core/decision-trail-path-isolation.test.js` prove real isolation.
- *   - **Tier-2 precision.** The hook entry point writes only when a slash
- *     command matches EFFORT_POLICY (`scripts/hooks/runtime-prompt.js:544-546`),
- *     so Tier 2 keys on a literal slash-command prompt. A prompt built from a
- *     variable or a template literal slips through.
+ *   - **The opt-in path only.** Since D9 a test can only reach a trail WRITE by
+ *     calling `recordDecision` directly under a root whose config says
+ *     `enabled: true`. That is exactly the set this scan keys on; a test that
+ *     flips the config on the REAL root and then calls a frozen production path
+ *     would write nothing anyway, because no production path calls it.
  *   - **Non-test writers.** Scripts, benchmarks, and `tests/**\/*.bench.js` are
  *     out of scope; only `*.test.js` under `tests/` is scanned.
  */
@@ -50,34 +64,30 @@ const TESTS_DIR = path.join(PLUGIN_ROOT, 'tests');
  * gate goes red, forcing whoever added it to decide how tests reach it. Without
  * this the writer axis would fail open — a brand-new writer would simply not be
  * scanned for.
+ *
+ * D9 (2026-09-05) took this list from nine entries to two. The seven that left
+ * — `lib/cognitive/router.js`, `lib/core/user-profile.js`, the four
+ * `scripts/cron/` runners and `scripts/hooks/runtime-prompt.js` — either
+ * deleted their call or moved to `lib/observability/decision-events.js`. A
+ * module re-appearing here is a regression of the freeze, not a new feature.
  */
 const KNOWN_TRAIL_WRITER_MODULES = [
-  'lib/cognitive/router.js',
   'lib/core/decision-trail.js',
   'lib/core/index.js',
-  'lib/core/user-profile.js',
-  'scripts/cron/auto-cleanup-runner.js',
-  'scripts/cron/auto-commit-runner.js',
-  'scripts/cron/auto-macro-register-runner.js',
-  'scripts/cron/auto-pr-creator.js',
-  'scripts/hooks/runtime-prompt.js',
 ];
 
 /**
- * Tier 1 — library-level writers a test invokes directly and unconditionally.
- * Each entry pairs a call symbol with an import the file must also carry, so an
- * unrelated local helper named `route()` cannot trip the scan (measured:
- * `tests/utils/spawn-mock.test.js` defines exactly such a helper).
+ * Tier 1 — the one library-level writer a test can invoke directly. It pairs
+ * the call symbol with an import the file must also carry, so an unrelated
+ * local helper of the same name cannot trip the scan.
+ *
+ * `recordSignal` and `route()` were tiers until D9; they no longer write the
+ * trail (the former reports through a port, the latter writes nothing), so
+ * scanning for them here would be a denylist of yesterday's writers.
  */
 const TIER1_WRITERS = [
   { id: 'recordDecision', call: /\brecordDecision\s*\(/, from: /decision-trail\.js|core\/index\.js/ },
-  { id: 'recordSignal', call: /\brecordSignal\s*\(/, from: /user-profile\.js|core\/index\.js/ },
-  { id: 'route', call: /\broute\s*\(/, from: /cognitive\/router\.js/ },
 ];
-
-/** Tier 2 — the hook entry point, which writes only on a slash-command prompt. */
-const TIER2_HOOK_CALL = /\bhandleUserPromptSubmit\s*\(/;
-const TIER2_SLASH_PROMPT = /user_prompt\s*:\s*(['"`])\//;
 
 /**
  * ALLOWLIST of recognized trail-isolation mechanisms. A matched file must show
@@ -142,7 +152,6 @@ function reachesWriter(src) {
   for (const { id, call, from } of TIER1_WRITERS) {
     if (call.test(src) && from.test(src)) return `tier1:${id}`;
   }
-  if (TIER2_HOOK_CALL.test(src) && TIER2_SLASH_PROMPT.test(src)) return 'tier2:hook-slash-command';
   return null;
 }
 
@@ -166,8 +175,11 @@ describe('tests reaching a decision-trail writer must isolate the trail', () => 
   it('still finds files that reach a writer (self-check)', () => {
     // If the detection regexes rot, every file looks clean and the gate becomes
     // decorative. This asserts the scan is still finding real matches.
+    // Measured 2026-09-05 after D9: 4 files (the three decision-trail suites
+    // and this file's own control strings). The floor is 3 so a single suite
+    // being retired does not read as "the scanner broke".
     const matched = files.filter((f) => reachesWriter(readTest(f)) !== null);
-    expect(matched.length).toBeGreaterThanOrEqual(5);
+    expect(matched.length).toBeGreaterThanOrEqual(3);
   });
 
   it('every file reaching a writer carries an allowlisted mechanism', () => {
@@ -216,27 +228,34 @@ describe('scanner self-verification (positive controls)', () => {
     expect(mechanismsIn(bad)).toEqual([]);
   });
 
-  it('flags an unisolated slash-command hook call (tier 2)', () => {
-    const bad = [
-      "import { handleUserPromptSubmit } from '../../scripts/hooks/runtime-prompt.js';",
-      "it('x', async () => { await handleUserPromptSubmit({ user_prompt: '/implement go' }); });",
-    ].join('\n');
-    expect(reachesWriter(bad)).toBe('tier2:hook-slash-command');
-    expect(mechanismsIn(bad)).toEqual([]);
+  it('does not flag the hook entry point any more (D9: it no longer writes the trail)', () => {
+    // Tier 2 used to key on a slash-command prompt. The hook's trail write is
+    // gone, so BOTH prompt shapes must read as "no reach" here — the decisions
+    // store gate is where the hook is scanned now.
+    for (const prompt of ['/implement go', 'hello there']) {
+      const src = [
+        "import { handleUserPromptSubmit } from '../../scripts/hooks/runtime-prompt.js';",
+        `it('x', async () => { await handleUserPromptSubmit({ user_prompt: '${prompt}' }); });`,
+      ].join('\n');
+      expect(reachesWriter(src)).toBeNull();
+    }
   });
 
-  it('does not flag a plain-prompt hook call (tier 2 stays off the safe branch)', () => {
-    const ok = [
-      "import { handleUserPromptSubmit } from '../../scripts/hooks/runtime-prompt.js';",
-      "it('x', async () => { await handleUserPromptSubmit({ user_prompt: 'hello there' }); });",
+  it('does not flag route() or recordSignal() any more (D9: neither writes the trail)', () => {
+    const routeCall = [
+      "import { route } from '../../lib/cognitive/router.js';",
+      "it('x', () => { route('analyze auth'); });",
     ].join('\n');
-    expect(reachesWriter(ok)).toBeNull();
+    expect(reachesWriter(routeCall)).toBeNull();
+    const signalCall = [
+      "import { recordSignal } from '../../lib/core/user-profile.js';",
+      "it('x', async () => { await recordSignal({ type: 'slash-command', value: 'x' }); });",
+    ].join('\n');
+    expect(reachesWriter(signalCall)).toBeNull();
   });
 
-  it('does not flag an unrelated local route() helper', () => {
-    // Guards the two-stage rule. Measured against tests/utils/spawn-mock.test.js,
-    // which defines its own `route()` and must never be swept in.
-    const ok = "const route = (cmd) => cmd;\nit('x', () => { expect(route('git')).toBe('git'); });";
+  it('does not flag a call without the import (two-stage rule)', () => {
+    const ok = "const recordDecision = (d) => d;\nit('x', () => { expect(recordDecision(1)).toBe(1); });";
     expect(reachesWriter(ok)).toBeNull();
   });
 

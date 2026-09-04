@@ -13,7 +13,7 @@ Run automated health checks on the Artibot plugin installation. Validates config
 ## Arguments
 
 Parse $ARGUMENTS:
-- (no argument): Run all 9 checks
+- (no argument): Run all 10 checks
 - `config`: Check 1 only — config validation
 - `agents`: Check 2 only — agent file presence
 - `skills`: Check 3 only — skill hash integrity
@@ -23,6 +23,7 @@ Parse $ARGUMENTS:
 - `explainability`: Check 7 only — decision recording health
 - `state`: Check 8 only — ledger/state parity and `state_version` continuity
 - `artifacts`: Check 9 only — Artifact Health, the ten items of Hardening §32
+- `routing`: Check 10 only — route receipt ↔ bind residue (design §2.3 invariant 3)
 - `--verbose`: Show per-item details (not just summary lines)
 - `--json`: Output results as a JSON object instead of the formatted report
 - `--fix`: After diagnosing, apply SAFE automatic repairs for fixable failures (see Self-Heal below)
@@ -117,36 +118,39 @@ Read-only. This check exists because the decision record had no reader at all:
 and consumed by nothing, so the trail sat empty in production and nobody
 noticed. A store nobody reads cannot report its own outage.
 
-1. **Decision trail** — import `getDecisionStats` from `lib/core/decision-trail.js`
-   and read `totalDecisions`, `last24h`, and `bySubsystem`. It is `async`
-   (`decision-trail.js#getDecisionStats`) — **await it**. Reading the returned
-   promise's properties directly yields `undefined` for every field, and
-   `undefined === 0` is false, so S3's conjunct would silently never fire again
-   while the step still printed a plausible-looking line.
-   It never throws: a missing or unparseable trail is caught and returned as
-   `{ totalDecisions: 0, bySubsystem: {}, byAction: {}, last24h: 0 }` (verified
-   2026-08-30 against an empty plugin root), so a zero here does not distinguish
-   "no trail file" from "trail present but empty" — step 5 reports the file's
-   existence separately for that reason.
-2. **Decision events** — resolve `<projectRoot>/.artibot/runtime/decisions/`
-   (`lib/observability/decision-events.js#getDecisionStoreDir`) and record which
-   of three states it is in: `absent` (no directory) / `empty` (directory but no
-   `*.events.ndjson`) / `populated`. `getDecisionStoreDir` only joins a path, so
-   the directory comes into existence on the first write — `absent` and `empty`
-   therefore mean the same thing here, "nothing was ever recorded under this
-   root", and neither is the more reassuring of the two.
+ONE ROOT, since 2026-09-05 (D9 — `.artibot/guides/v5-design/DESIGN-TRAIL-migration-projectRoot.md`
+§2 C, owner rulings TR-1..3). Every live decision writer appends to the
+decisions store under the PROJECT root, `<projectRoot>/.artibot/runtime/decisions/`
+(`lib/observability/decision-events.js#getDecisionStoreDir`). The plugin-root
+trail `runtime/decision-trail.json` is FROZEN: `lib/core/decision-trail.js#recordDecision`
+is a no-op unless `ago.decisionTrail.enabled` is explicitly `true`, and no
+module under `lib/` or `scripts/` calls it any more —
+`tests/firewall/trail-sandbox-required.test.js` ratchets that writer list.
+This check therefore resolves ONE root, judges ONE store, and reports the trail
+as a single informational row that never enters the status table.
 
-   Then count, SEPARATELY, the files and lines whose `sessionId` does NOT begin
-   with `diag-`. Only those are evidence of live firing. A diagnostic run writes
-   byte-identical lines through the same code path, so counting them would let a
-   single verification run flip this store out of every "nothing was recorded"
-   condition below. Measured 2026-08-30, that is exactly what happened: the
-   store's first and only file was `diag-installed-verify-01.events.ndjson`,
-   written to confirm the wiring fix.
+1. **Decision events** — resolve `<projectRoot>/.artibot/runtime/decisions/`
+   and record which of three states it is in: `absent` (no directory) /
+   `empty` (directory but no `*.events.ndjson`) / `populated`.
+   `getDecisionStoreDir` only joins a path, so the directory comes into
+   existence on the first write — `absent` and `empty` therefore mean the same
+   thing here, "nothing was ever recorded under this root", and neither is the
+   more reassuring of the two.
+
+   Then count, SEPARATELY, the files and lines whose `sessionId` begins with
+   neither `diag-` nor `cron-`. Only those are evidence that the PROMPT path
+   fires. A diagnostic run writes byte-identical lines through the same code
+   path, so counting them would let a single verification run flip this store
+   out of every "nothing was recorded" condition below (measured 2026-08-30: the
+   store's first and only file was `diag-installed-verify-01.events.ndjson`). A
+   `cron-` file (`decision-events.js#cronRunId`, the D9 destination of the four
+   `scripts/cron/` runners) proves the SCHEDULER ran, which is a different
+   writer in a different process; report cron files as their own count so a
+   nightly job cannot stand in for a live session.
 
    For lines that qualify, note how many fall in the last 24h and the newest
    `ts` across files.
-3. **Wiring probe (S4)** — read the two call sites in the INSTALLED tree:
+2. **Wiring probe (S4)** — read the two call sites in the INSTALLED tree:
    `lib/runtime/middleware/router.js` and `lib/runtime/middleware/tasks.js`.
    Each must hand `resolveDecisionRunId` an object that actually carries the hook
    payload — `state.input`, which holds `hookData`. Warn when either passes
@@ -158,133 +162,108 @@ noticed. A store nobody reads cannot report its own outage.
    suite runs against the repo. Measured 2026-08-30: the repo was fixed and fully
    green while the install still carried the broken call sites, and no
    timestamp-based step could tell the two apart.
-4. **Absence check (S3)** — absence of records means nothing unless something
-   should have been recorded, so judge it against an activity timestamp. Take the
-   NEWEST of the following, skipping any that cannot be read:
-   - `runtime/current-effort.json` — the `updatedAt` field, written by
-     `persistEffortMeta` (`scripts/hooks/runtime-prompt.js#persistEffortMeta`) on
-     every slash-command prompt.
-   - `runtime/current-effort.json` — the file's own mtime.
-   - `runtime/decision-trail.json` — `metadata.lastUpdated`.
+3. **Absence check (S3)** — absence of records means nothing unless something
+   should have been recorded, so judge it against an activity timestamp. Both
+   sources live under the SAME project root as the store, so this step no longer
+   compares one tree's activity against another tree's records. Take the NEWEST
+   of the following, skipping any that cannot be read:
+   - `<projectRoot>/.artibot/runtime/ledger.jsonl` — the file's mtime. Every
+     central-ledger writer moves it: the PreToolUse route receipt
+     (`scripts/hooks/route-observe-pre.js`), the SubagentStart bind, the
+     state-store pairing. A moving ledger means hooks are firing.
+   - `<projectRoot>/.artibot/runtime/decisions/*.events.ndjson` — the newest
+     mtime across files, INCLUDING `diag-` and `cron-` files. A file this store
+     itself just wrote is activity even when it is not session evidence.
 
-   Use the newest rather than any single source. Measured 2026-08-29, that file's
-   mtime (2026-08-23) and its `updatedAt` (2026-07-10) disagreed by 44 days even
-   though the sole writer stamps both in one call, so the mtime is moving without
-   the writer. The mechanism was traced to test fixtures rewriting the file's
-   original bytes in `afterEach` — see the S3 entry under "What this check cannot
-   see" for how far that tracing goes. Either way at least one source is
-   unreliable, so take the maximum: that fails toward "there was activity", which
-   can only make this check warn more readily, never less.
-
-   Warn when that newest timestamp is within 24h AND step 1 reports
-   `last24h === 0` AND step 2 counts zero non-`diag-` event lines in the same
-   window.
-5. Report: the resolved plugin root (absolute), whether
-   `runtime/decision-trail.json` exists, trail entries (total / last 24h), the
-   decision-store state, its total and non-`diag-` line counts for the last
-   24h, the newest record timestamp, which activity source was newest, which
-   activity sources were missing, and any S3 / S4 / S5 / S6 warning.
-
-   Report BOTH resolved roots, and label them: the trail lives under the PLUGIN
-   root (`<pluginRoot>/runtime/decision-trail.json`) while the event store lives
-   under the PROJECT root (`<projectRoot>/.artibot/runtime/decisions/`). Since
-   2026-09-03 these are two different trees — see the S6 note below — and a
-   report naming one path cannot be read against the other.
+   Use the newest rather than any single source: taking the maximum fails
+   toward "there was activity", which can only make this check warn more
+   readily, never less. Warn when that newest timestamp is within 24h AND step 1
+   counts zero non-`diag-`, non-`cron-` event lines in the same window.
+4. **Legacy trail row (informational)** — read `<pluginRoot>/runtime/decision-trail.json`
+   through `getDecisionStats` from `lib/core/decision-trail.js` (it is `async` —
+   **await it**; reading the promise's properties yields `undefined`) and report
+   whether the file exists, `totalDecisions`, and `metadata.lastUpdated`. This
+   row is NEVER a status input: the file is frozen, its count is expected to
+   stop moving, and the entries it holds (972 in the dev repo, 9 in the
+   marketplace cache, measured 2026-09-04) stay where they are by TR-3. Also
+   read `ago.decisionTrail.enabled` from the INSTALLED `artibot.config.json` and
+   say which value it holds — `true` means the kill switch is not engaged on
+   this install and the trail is still being appended to, which is a config
+   fact worth stating next to the row.
+5. Report: the resolved PROJECT root (absolute), the store state, session-file
+   and line counts (total / last 24h), the cron-file count, the newest record
+   timestamp, which activity source was newest, which activity sources were
+   missing, the legacy trail row (exists / entries / lastUpdated / config
+   switch), and any S3 / S4 / S5 warning.
 
 Status for this check — **first matching row wins**:
 
 | Condition | Status |
 |---|---|
-| A store exists but cannot be read or parsed | **fail** |
+| The store exists but cannot be read or parsed | **fail** |
 | S4 — either call site passes `state.context` | **warn** |
-| S5 — no `*.events.ndjson` with a non-`diag-` `sessionId` has ever been written under this root | **warn** |
-| S6 — live records exist but `runtime/decision-trail.json` does not | **warn** |
-| S3 — activity within 24h, but zero trail entries and zero non-`diag-` event lines in it | **warn** |
+| S5 — no `*.events.ndjson` with a session id (neither `diag-` nor `cron-`) has ever been written under this root | **warn** |
+| S3 — activity within 24h, but zero session event lines in that window | **warn** |
 | Otherwise | **pass** |
 
-S5 covers `absent`, `empty`, and diag-only in one condition, and it is NOT
-conditioned on S4 passing: a store with no live record is worth saying out loud
-whether or not the wiring reads correctly, because wiring that looks right and
-has still never fired is the more interesting of the two. When S5 fires, say in
-the report whether `runtime/decision-trail.json` also exists — S5 plus a missing
-trail means this root holds no recording evidence of any kind, which is as much a
-sign of reading the wrong tree as of a broken recorder.
+S5 covers `absent`, `empty`, diag-only and cron-only in one condition, and it
+is NOT conditioned on S4 passing: a store with no live record is worth saying
+out loud whether or not the wiring reads correctly, because wiring that looks
+right and has still never fired is the more interesting of the two.
 
-Trail absence is deliberately not an UNCONDITIONAL warn. It has never existed
-under `~/.claude/artibot/` (measured 2026-08-30), so a bare row for it would fire
-forever on the installed tree — the desensitization this check is trying to
-avoid. S6 conditions it on live records already existing, and that condition is
-what turns it from noise into a signal: records landing in one store while the
-other was never even created means that writer is dead rather than that the root
-is new. On a root with no live records S6 cannot fire and S5 covers the case
-instead.
+S6 ("live records exist but the trail does not") was RETIRED on 2026-09-05 with
+the trail freeze. It compared two roots, and after D9 the trail is not expected
+to move at all — its absence is the normal state on every install, so the row
+could only ever fire as noise.
 
-CAVEAT ON S6, since 2026-09-03. The two stores no longer share a root: the trail
-is under the PLUGIN root and the events under the PROJECT root
-(`decision-events.js#getDecisionStoreDir`), so "one store has records and the
-other does not" now has a second, innocent explanation — the two trees are
-simply different, e.g. events recorded from a project whose prompts never ran
-against this plugin install. Treat an S6 warn as "check WHICH root each store
-resolved to" before reading it as a dead writer, and state both paths in the
-report.
-
-Also deliberately NOT a warn: a store holding real (non-`diag-`) records whose
-newest entry predates the 24h window, with no activity signal inside it either.
-That is an idle machine.
+Also deliberately NOT a warn: a store holding real session records whose newest
+entry predates the 24h window, with no activity signal inside it either. That
+is an idle machine.
 
 **What this check cannot see** (§9 — state it next to the gate):
 
 - **That any particular decision was recorded.** It reads counts and timestamps.
-  Two decision points are wired (routing classification and workflow plan), so a
-  green result says the path is alive, not that coverage is complete.
-- **Whether a real session or a diagnostic produced the records — beyond the
-  naming convention.** S5 separates them by the `diag-` prefix, which holds only
-  as long as diagnostics keep using it. A synthetic `preparePrompt` run writes
-  byte-identical lines through the same code path, so a diagnostic that forgets
-  the prefix is indistinguishable from a live session and will silence S5. When
-  writing a verification run, prefix the session id.
-- **Whether the S3 activity signal reflects prompts or file churn.** Measured
-  2026-08-30 on the repo tree, `current-effort.json` had an mtime from that same
-  morning while its `updatedAt` still read 2026-07-10. The best available account
-  is that test fixtures refresh the mtime by rewriting the file's original bytes
-  in `afterEach`: the mechanism was reproduced in an equivalent standalone
-  experiment, and all 5 files a suite restores that way match the observed
-  cluster, down to identical nanosecond mtimes. What was NOT done is the direct
-  reproduction — running the suite and watching this file's mtime move. So treat
-  the cause as well-evidenced, not measured end to end.
-  Whatever the cause, the consequence is what matters here: because S3 takes the
-  maximum, a tree whose tests run often reads as "active" almost always, so on an
-  otherwise idle tree S3 can degrade into a standing warn. That is the fail-safe
-  direction, but it is the same desensitization risk this check warns about
-  elsewhere; prefer S4 and S5 as the load-bearing signals and treat a lone S3
-  warn as a prompt to check which activity source was newest.
-- **Whether the activity sources are themselves telling the truth.** S3 assumes
-  at least one of its three timestamps reflects real prompt activity. The bullet
-  above shows one of them moving for a reason unrelated to prompts; the mirror
-  failure is equally possible — if all three went stale while prompts kept
-  arriving, S3 would stay silent while recording was broken. S4 and S5 are the
-  steps that depend on no timestamp at all.
-- **Anything when none of the activity sources exists.** Measured 2026-08-30,
-  the installed tree (`~/.claude/artibot/runtime/`) has neither
-  `current-effort.json` nor `decision-trail.json`, while the repo tree has both.
-  Under a plugin root like that, S3 can never fire and only S4 and S5 are
-  load-bearing. Report which activity sources were missing rather than reporting
-  "no activity".
+  Six decision points are wired (routing classification, workflow plan,
+  topology sighting, memory measurement, skill-level change, self-control
+  decision), so a green result says the path is alive, not that coverage is
+  complete.
+- **Whether a real session, a diagnostic, or a scheduler produced the records —
+  beyond the naming convention.** S5 separates them by the `diag-` and `cron-`
+  prefixes, which hold only as long as diagnostics and `cronRunId` keep using
+  them. A synthetic `preparePrompt` run writes byte-identical lines through the
+  same code path, so a diagnostic that forgets the prefix is indistinguishable
+  from a live session and will silence S5. When writing a verification run,
+  prefix the session id.
+- **Whether the S3 activity signal reflects prompts.** `ledger.jsonl` moves on
+  every central-ledger writer, not only on a user prompt — a PreToolUse receipt
+  or a state pairing is enough — and the decisions directory moves on its own
+  cron and diag files. Both push S3 toward warning, never toward silence, so a
+  lone S3 warn is a prompt to check which source was newest, not proof that the
+  recorder is dead; S4 and S5 remain the load-bearing signals.
+- **Anything when neither activity source exists.** A project that has never
+  run a hook has neither file. Under such a root S3 can never fire and only S4
+  and S5 are load-bearing. Report which activity sources were missing rather
+  than reporting "no activity".
 - **A recorder that stops after it once worked.** S5 is a latch: it asks whether
-  a live record has EVER appeared under this root, so the first real one silences
-  it permanently, even if recording breaks the next day. Ongoing detection is
-  S3's job — and on a root with no activity sources (the case directly above) S3
-  cannot fire at all, which leaves that root with no continuous watcher once S5
-  has latched. Closing this would take a time-windowed row, and a time window
-  needs activity evidence, which is the thing that root does not have. Until
-  something supplies it, re-run the wiring probe rather than trusting a pass.
-- **Which runtime directories it read.** The trail resolves through
-  `getPluginRoot()` and the event store through the PROJECT root, and the
-  /doctor process does not necessarily resolve either to the tree the prompt
-  hooks write to — an event store is per project, so running /doctor from a
-  different project reads a different store even on one machine. State BOTH
-  resolved absolute paths in the report so a reader can tell whether an empty
-  store means "nothing was recorded" or "you looked in the other tree".
+  a session record has EVER appeared under this root, so the first real one
+  silences it permanently, even if recording breaks the next day. Ongoing
+  detection is S3's job, and S3 needs the ledger or the store to keep moving.
+  Until something supplies a time-windowed activity row, re-run the wiring
+  probe rather than trusting a pass.
+- **Which project it read.** The store is per PROJECT root — and, in a linked
+  worktree, per worktree (`lib/git/project-root.js#resolveProjectRoot` returns
+  the worktree root). Running /doctor from a different project or worktree reads
+  a different store even on one machine. State the resolved absolute root in the
+  report so an empty store can be told from the wrong tree.
+- **The frozen trail's health.** The legacy row is reported, not judged. A
+  trail that is still growing on an install whose config says `enabled: true`
+  is a config fact this check states and does not act on.
+- **Where a scheduler run's file landed.** A `cron-` file is written under
+  `resolveProjectRoot(pluginRoot)`. When the plugin root has no `.git`
+  ancestor (the marketplace cache), that resolves INSIDE the plugin tree —
+  the directory `plugin update` replaces — not under the project. Measured
+  2026-09-05 on the cache path; reach is nil today because the runners'
+  only caller is a git checkout (`.github/workflows/self-control.yml`).
 - **Anything about the repo working tree.** A fixed repo and a stale install are
   indistinguishable to every step except S4.
 
@@ -453,6 +432,101 @@ that a write was lost. Phase 0 is Observe: report, never repair.
 - **Whether cited evidence is true.** Item 9 resolves ids against the registry
   and never opens the evidence behind them.
 
+### Check 10: Route Bind Residue
+
+Read-only, and NOT a `--fix` target (the note at the end of Check 9 applies).
+
+Design `.artibot/guides/v5-design/ROUTE-RECEIPT-PRETOOLUSE-DESIGN.md` §2.3
+invariant 3, §3. Two hooks write two lines for one spawn:
+`scripts/hooks/route-observe-pre.js` records a `route.selected` receipt at
+PreToolUse(Agent), keyed by the host's `tool_use_id`; `scripts/hooks/subagent-handler.js#bindRoute`
+records a `route.bound` line at SubagentStart naming that `tool_use_id` and the
+`agent_id` that spawned — or, when no receipt matched, stamps
+`route_ledger: 'skipped:unbound'` on the spawn record in
+`.artibot/ledger/spawns.ndjson` and writes nothing to the central ledger.
+Neither hook keeps a pending list. The join is recomputed from the ledger
+(§3: "별도 상태 파일을 두지 않는다 — 두 번째 진실원 금지"), and this check
+reports what that join left over on BOTH sides, side by side.
+
+The judgement lives in `lib/project-state/doctor-checks.js#checkRouteBindResidue`
+and performs NO I/O. This command reads two files and hands over two counts:
+
+1. **Ledger side** — `loadReplay(projectRoot, { readLedger: readLedgerCensus })`
+   from `lib/replay/index.js` (pass `readLedgerCensus` from
+   `lib/runtime/ledger.js` as the port — `lib/replay` is L2 and may not import
+   the runtime layer). The index carries `route_binds`
+   (`lib/replay/route-bind.js#joinRouteBinds`): `unbound_receipts[]`,
+   `orphan_binds[]`, `conflicts[]`, and `by_session`. `unboundReceipts` is
+   `route_binds.unbound_receipts.length`. Scope to a session with
+   `filter: { session_id }`, or read `by_session` for all of them.
+2. **Spawn side** — `readSpawns(projectRoot, { sessionId })` from
+   `lib/learning/ledger/spawn-ledger.js`, then
+   `countUnboundSpawns(records)` (`lib/replay/route-bind.js`).
+   `unboundSpawns` is its `unbound`: the number of DISTINCT `agentId`s whose
+   `start` record carries `route_ledger: 'skipped:unbound'`. The axis is agent
+   ids, not lines — measured 2026-09-04 on this repo's spawn ledger, counting
+   `start` events under-counted by at least 12 and counting every event
+   double-counted. When `spawns.ndjson` is absent, pass `undefined`, not `0`:
+   zero unbound spawns in a file that does not exist is not a measurement.
+3. Call `checkRouteBindResidue({ unboundReceipts, unboundSpawns, conflicts })`
+   with `conflicts` = `route_binds.conflicts`.
+
+Status for this check — **first matching row wins**:
+
+| Condition | Status |
+|---|---|
+| Either count was not supplied (a file was not read) | **unmeasured** |
+| `conflicts` non-empty — a `tool_use_id` or an `agent_id` bound more than once, or a receipt written twice (invariant 1) | **fail** |
+| Both counts non-zero AND different | **warn** |
+| Otherwise | **pass** |
+
+Report BOTH counts together with the session scope and BOTH absolute file
+paths (`.artibot/runtime/ledger.jsonl` and `.artibot/ledger/spawns.ndjson`),
+the conflict count (or "not counted" when the join was not read), and the bind
+side's own bounds — a 10-minute candidate window and a 128 KB ledger tail
+(`subagent-handler.js#RECEIPT_WINDOW_MS`, `#RECEIPT_TAIL_BYTES`) — because a
+receipt older than that window is unbound BY DESIGN and belongs in the reader's
+explanation of the number, not in a warning.
+
+**unmeasured is not a pass.** Both files are required. A residue verdict
+reached from one side is a comparison with nothing on the other, and reporting
+it as `pass` would be exactly the false green the two-file design exists to
+prevent. Measured 2026-09-05 02:34 KST on the worktree that landed this
+section, AFTER its own review agents had spawned: `ledger.jsonl` held 3
+`route.selected` and 3 `route.bound` lines (`grep -c`), `spawns.ndjson` held 7
+lines over 3 distinct agent ids (`route_ledger`: 3 `ok:bound`, 1
+`skipped:already-bound`), the join gave bound 3 / unbound 0 / orphan 0 /
+conflicts 0 (all `confidence: exact`, `prompt_id+name`), and
+`checkRouteBindResidue` returned **pass** — one live end-to-end run. Before
+those spawns (02:1x) the same tree held 0/0 and no spawn ledger, which is what
+the `unmeasured` row is for. The warn and fail rows have been exercised on
+fixtures only.
+
+**What this check cannot see** (§9 — state it next to the gate):
+
+- **Whether a bound pair is the RIGHT pair.** A tier-3 FIFO bind
+  (`confidence: 'fifo'`) that picked the wrong receipt reads as bound. Equal
+  residue counts mean nothing was left over, not that the pairs are correct.
+  Correctness needs the bind line's `selected_model` against the receipt's
+  prediction (invariant 2), which this check does not evaluate.
+- **Asymmetries that are legitimate by design.** A spawn that never went through
+  the `Agent` tool (SDK, scheduler, loop entry) has no receipt and is a normal
+  `skipped:unbound`; a tool call the host cancelled leaves an unbound receipt
+  with no spawn; a receipt past the 10-minute window or beyond the 128 KB tail
+  is unbound on purpose. The warn row fires on any inequality and cannot tell
+  these from a real miss — read the two lists, not just the two numbers.
+- **Receipts the join excludes.** Pre-4.55 `route.selected` lines carry
+  `shadow_of: spawn:<agentId>` and can never bind; they are counted under
+  `route_binds.ignored.pre_tool_use_only` and never as residue.
+- **Whether the two files cover the same span.** `ledger.jsonl` and
+  `spawns.ndjson` rotate independently. A count of 0 on one side because the
+  file was rotated is indistinguishable from 0 because nothing was unbound —
+  state both paths and both mtimes in the report.
+- **Spawn records with no session.** `countUnboundSpawns` buckets a record whose
+  `sessionId` is null under `null`; a session-scoped read misses it.
+- **Anything about a second worktree.** Both files are per worktree, so this
+  compares one tree and says nothing about the others.
+
 ## Output Format
 
 ```
@@ -465,20 +539,21 @@ ARTIBOT HEALTH CHECK
 [check-4-icon] Hooks: {n} dispatchers, {n} scripts
 [check-5-icon] MCP: {server1} ({status}), {server2} ({status})
 [check-6-icon] Memory: {n} stores, {n} entries, {size} total
-[check-7-icon] Explainability: {n} trail entries (24h), {n} event lines (24h), last {timestamp}
+[check-7-icon] Explainability: {n} session event lines (24h), {n} cron files, trail legacy(frozen) {exists|absent}/{n}, last {timestamp}
 [check-8-icon] State parity: {status} at state_version {n} ({n} gaps, {n} unpaired)
 [check-9-icon] Artifacts: {n}/10 items measured, {n} failing, {n} missions read
+[check-10-icon] Route bind: {n} unbound receipts / {n} unbound spawns, {n} conflicts
 
 Status: {HEALTHY|DEGRADED|UNHEALTHY} ({passed}/{total} checks passed)
 ```
 
 Status logic:
-- **HEALTHY**: All 9 checks passed (zero errors)
-- **DEGRADED**: 7-8 checks passed (warnings present)
-- **UNHEALTHY**: 6 or fewer checks passed
+- **HEALTHY**: All 10 checks passed (zero errors)
+- **DEGRADED**: 8-9 checks passed (warnings present)
+- **UNHEALTHY**: 7 or fewer checks passed
 
 An `unmeasured` check counts as neither passed nor failed. Report it as its own
-number rather than folding it into either — "7 passed, 2 unmeasured" and "9
+number rather than folding it into either — "8 passed, 2 unmeasured" and "10
 passed" are different results and the summary must not blur them.
 
 Use checkmark for passed checks, cross for failed checks, warning sign for checks with non-critical issues.
@@ -499,9 +574,10 @@ If `--json` is set, output a structured JSON object:
     "memory": { "status": "pass", "details": {} },
     "explainability": { "status": "pass", "details": {} },
     "state":  { "status": "pass", "details": {} },
-    "artifacts": { "status": "unmeasured", "details": { "measured": 4, "total": 10 } }
+    "artifacts": { "status": "unmeasured", "details": { "measured": 4, "total": 10 } },
+    "routing": { "status": "unmeasured", "details": { "unboundReceipts": 0, "unboundSpawns": null, "conflicts": 0 } }
   },
-  "summary": { "passed": 8, "unmeasured": 1, "total": 9, "status": "DEGRADED" }
+  "summary": { "passed": 8, "unmeasured": 2, "total": 10, "status": "DEGRADED" }
 }
 ```
 

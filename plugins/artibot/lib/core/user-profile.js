@@ -331,10 +331,21 @@ export async function getProfile() {
  * Record a signal (slash usage, free-form text, etc.). The oldest signals
  * are evicted once the ring-buffer hits MAX_STORED_SIGNALS.
  *
+ * A skill-level TRANSITION is reported through the `recordChange` PORT, never
+ * written here. This module is L1 and the decisions store recorder
+ * (`lib/observability/decision-events.js#recordSkillLevelChanged`) is L2, so
+ * the caller binds the recorder to its session and hands it in
+ * (`scripts/hooks/runtime-prompt.js#recordPromptSignals`). No port → nothing is
+ * recorded, which is the honest default for a module that cannot know the
+ * store. D9 (2026-09-05): this replaced the `decision-trail.js` write that
+ * lived here; the trail is frozen (see its header).
+ *
  * @param {{ type: 'slash-command'|'natural-language', value: string, timestamp?: number }} signal
+ * @param {{ recordChange?: (change: {from: string, to: string, signals: number,
+ *   evidence: string[]}) => unknown }} [opts]
  * @returns {Promise<void>}
  */
-export async function recordSignal(signal) {
+export async function recordSignal(signal, opts = {}) {
   if (!signal || typeof signal !== 'object') return;
   const { type, value, timestamp } = signal;
   if (type !== 'slash-command' && type !== 'natural-language') return;
@@ -371,19 +382,19 @@ export async function recordSignal(signal) {
   profile.updatedAt = new Date().toISOString();
   await writeProfile(profile);
 
-  // AGO G3 — record skill-level changes for Explainability (observe-only).
-  // Only fire on actual transitions; swallow all errors.
-  if (previousLevel !== level) {
+  // Report skill-level transitions through the caller's port (observe-only).
+  // Only fire on actual transitions; swallow all errors — the port is advisory.
+  const recordChange = opts && typeof opts.recordChange === 'function' ? opts.recordChange : null;
+  if (previousLevel !== level && recordChange !== null) {
     try {
-      const { recordDecision } = await import('./decision-trail.js');
-      await recordDecision({
-        subsystem: 'user-profile',
-        action: 'skill-level-changed',
-        reason: `auto-detected from ${profile.signals.length} signals`,
-        outputs: { from: previousLevel, to: level, evidence },
+      await recordChange({
+        from: previousLevel,
+        to: level,
+        signals: profile.signals.length,
+        evidence,
       });
     } catch {
-      // Non-critical: decision trail is advisory
+      // Non-critical: the decision record is advisory
     }
   }
 }
