@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.56.0] — 2026-09-05
 
 ### 3차 배치(split-ff6c63) — 보안 훅 부활 · 트레일 동결 · 조사·감사 에이전트
 
