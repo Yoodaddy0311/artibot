@@ -37,7 +37,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 function main() {
-  let raw = '';
+  let raw;
   try {
     raw = fs.readFileSync(0, 'utf8');
   } catch (err) {
@@ -45,7 +45,7 @@ function main() {
     return;
   }
 
-  let data = null;
+  let data;
   try {
     data = JSON.parse(raw);
   } catch {
@@ -91,6 +91,10 @@ function main() {
 try {
   main();
 } catch (err) {
-  try { process.stderr.write(`probe-hook-keys: unexpected: ${err && err.name ? err.name : 'Error'}\n`); } catch {}
+  try {
+    process.stderr.write(`probe-hook-keys: unexpected: ${err && err.name ? err.name : 'Error'}\n`);
+  } catch {
+    // stderr itself is unavailable (closed pipe) — nothing left to report to; exit 0 regardless.
+  }
 }
 process.exitCode = 0;
