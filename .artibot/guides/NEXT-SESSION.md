@@ -18,26 +18,26 @@
 
 | # | 작업 | 근거·주의 |
 |---|---|---|
-| P0 | **오너 결정 10건 회신** — 설계안 3건 §5: 모델 정책 5(`DESIGN-MODEL-POLICY-role-override.md`) · docs:check 2(`DESIGN-DOCS-CHECK-scope-artibot.md`) · trail 3(`DESIGN-TRAIL-migration-projectRoot.md`). 권장안은 각 §5 에 적혀 있다(아래 표) → 회신을 정본 `.artibot/guides/v5-design/ARTIBOT-5.0-DESIGN.md` 부록 0-2 후속(3) 에 기록 | 3차 배치 착수 전제. 오너 결정 없이는 코드 0 |
+| ~~P0~~ 완료 | ~~**오너 결정 10건 회신**~~ — **2026-09-04 23:1x 확정(nowhe 머신)**. 10건 전부 설계안 권장안 채택. 정본 `.artibot/guides/v5-design/ARTIBOT-5.0-DESIGN.md` **부록 0-2 후속(3)** 에 기록 | 3차 배치 착수 전제 **충족**. 아래 "오너 결정 대기 10건" 표는 확정값으로 갱신 |
 | P0 | **3차 배치 `/split plan`** — L2 Check 10 + replay tool_use_id 조인(오너 승인됨, #42) · docs:check 스코프 · trail D9 동결 · hooks.json 매처 문법 A/B(#49) · timeout 단위 재설정(#50) · `ci-utils.js:74 gitTrackedNames` 링크드 worktree 결함(#56) · handoff-builder :433·stop-review-gate :225(#44) | 2차는 `/split` 창 대신 `/team`+`isolation: worktree` 로 돌렸다(#37). 3차 형태는 오너 참관 여부로 결정 |
 | P1 | **릴리스 v4.55.0** — 1차+2차 배치 CHANGELOG 일괄(리더 소유) → `npm run release` → `claude plugin update` → L1 D4·L2 D3/D4 라이브 판정(Check 7 · `spawns.ndjson` route.selected/route.bound) | 라이브 판정은 릴리스 후에만 가능 |
 | P2 | `templates/split/PROMPT-TEMPLATE.md`·`commands/split.md` 가 2차에서 착지했는지 **라이브 dispatch 1회**로 검증 | 회고 §7 2차 절은 e569e2da 로 이미 착지 — 남은 것은 dispatch 검증뿐 |
 | P2 | 3차 승인 **보류분**(건드리지 말 것): HOOK-VISIBILITY H-1~6 · PLANNER-PARALLELIZATION · landing-lock 근본안(tmp+linkSync — 최소 수리 e0aa2580 으로 운용) | #42 오너 결정 |
 
-## 오너 결정 대기 10건 — 권장안 요약
+## 오너 결정 10건 — 확정값 (2026-09-04 23:1x, 정본 = ARTIBOT-5.0-DESIGN.md 부록 0-2 후속(3))
 
-| 설계안 | 질문 | 권장 |
+| 설계안 | 질문 | 오너 확정 |
 |---|---|---|
-| MODEL-POLICY §5 ① | 조사 역할을 process/judge 로 분리? | (권장 없음 — 오너 판단) |
-| MODEL-POLICY §5 ② | A안(역할이 이름을 이김) 허용? | **아니오** |
+| MODEL-POLICY §5 ① | 조사 역할을 process/judge 로 분리? | **분리** (설계안 §5 원문 권장. 이 표의 종전 "권장 없음"은 요약 누락이었다) |
+| MODEL-POLICY §5 ② | A안(역할이 이름을 이김) 허용? | **아니오, 지금은 불허** |
 | MODEL-POLICY §5 ③ | D 에이전트 2종 신설 + allowlist 8→10? | **예** |
 | MODEL-POLICY §5 ④ | `review.claim_audit` 어휘 +1? | **예** |
-| MODEL-POLICY §5 ⑤ | fable 예산 상한 | (수치 결정 필요) |
-| DOCS-CHECK §5 ① | 렌더링 위반 15건 고치고 넣기 vs baseline | **고치고 넣기** |
-| DOCS-CHECK §5 ② | 서브트리 허용목록 vs `.artibot/**` | **허용목록** |
-| TRAIL §5 ① | D9 동결 지금? | **예** |
-| TRAIL §5 ② | 목적지 decisions 스토어? | **예** |
-| TRAIL §5 ③ | 기존 trail 972·9건 그대로? | **예** |
+| MODEL-POLICY §5 ⑤ | fable 예산 상한 | **상한 없이 집계만(Observe)** |
+| DOCS-CHECK §4 ① | 렌더링 위반 15건 고치고 넣기 vs baseline | **고치고 넣기** |
+| DOCS-CHECK §4 ② | 서브트리 허용목록 vs `.artibot/**` | **허용목록 + 추적 파일만** |
+| TRAIL §5 ① | D9 동결 지금? | **지금 동결** |
+| TRAIL §5 ② | 목적지 decisions 스토어? | **decisions 스토어** |
+| TRAIL §5 ③ | 기존 trail 972·9건 그대로? | **그대로 두기** |
 
 ## 2026-09-04 세션 총괄
 
