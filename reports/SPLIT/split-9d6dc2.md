@@ -18,7 +18,7 @@ n=2 — 이 문서도 존재 증명이지 성능 주장이 아니다. `/split` v
 | 랜딩 검증 | `master` tip == `520886bd` **일치** · 4줄기 tip 전부 master 조상 **4/4** · `ca013e2c` 는 landing 의 조상 (기록자 재확인) |
 | 증거 원본 | **두 파일**(§1.3 — 루트가 갈렸다): `plugins/artibot/runtime/split/split-9d6dc2.events.ndjson`(13건) + `~/.claude/plugins/cache/artibot/artibot/4.54.0/runtime/split/split-9d6dc2.events.ndjson`(5건) = **18** |
 | 교훈 원장 | `.artibot/split/gotchas.md` — **37건**(§3 에 전문 수록) |
-| 랜딩 이후 | `60dab1dd`(2026-09-04 13:57) — sessionstart 테스트 git 샌드박스 격리가 **이미 master 에 착지**했다(기록자 확인: master tip == `60dab1dd`, `520886bd` 는 그 조상). 즉 gotcha #18/#22 의 **근본 수리 (1) 은 완료**다 — 교훈 #37 의 "선행 랜딩 **중**" 은 그 시점 표기이고, 지금은 **랜딩 완료**다 |
+| 랜딩 이후 | `60dab1dd`(2026-09-04 13:57) — sessionstart 테스트 git 샌드박스 격리가 **master 에 착지**했다(기록자 확인 **14:5x 기준** master tip == `60dab1dd`, `520886bd` 는 그 조상. 이후 2차 배치가 그 위에 쌓여 master 는 더 나아갔다 — §7). 즉 gotcha #18/#22 의 **근본 수리 (1) 은 완료**다 — 교훈 #37 의 "선행 랜딩 **중**" 은 그 시점 표기이고, 지금은 **랜딩 완료**다 |
 | 2차 배치 초안 | `.artibot/split/next-batch-plan.md` 365줄(architect 작성) |
 
 ---
@@ -342,10 +342,11 @@ start ∪ stop = **28 distinct agent** 이므로, `start` 만 세면 팬아웃�
 
 **#34 는 본 리포트 §4-C 가 원문이다** — 기록자 전수 판독이 교훈 원장으로 등재된 것이라 §4-C 와 같은 사실이다.
 
-**#37 에 대한 기록자 재측정**: "선행 랜딩 **중**" 은 그 시점 표기이고, **지금은 랜딩 완료**다 —
-`60dab1dd`(13:57, `sessionstart-dispatcher.test.js` 1파일 +156/-10)가 **master tip** 이고
-`520886bd` 는 그 조상이다. 따라서 gotcha #18/#22 의 **근본 수리 (1) 은 이미 닫혔고**,
-2차 `test-git-sandbox` 줄기에 남는 것은 **(2) 방어선 · (3) status 표시 · (4) 템플릿**이다(§4-A).
+**#37 에 대한 기록자 재측정**: "선행 랜딩 **중**" 은 그 시점 표기이고, **랜딩은 완료됐다** —
+`60dab1dd`(13:57, `sessionstart-dispatcher.test.js` 1파일 +156/-10)가 **14:5x 기준 master tip** 이었고
+`520886bd` 는 그 조상이다(이후 2차 배치가 그 위에 쌓였다 — §7). 따라서 gotcha #18/#22 의
+**근본 수리 (1) 은 이미 닫혔고**, 2차 `test-git-sandbox` 줄기에 남았던 것은
+**(2) 방어선 · (3) status 표시 · (4) 템플릿**이다 — 셋 다 2차에서 착지했다(§7.6).
 
 ---
 
@@ -357,7 +358,7 @@ start ∪ stop = **28 distinct agent** 이므로, `start` 만 세면 팬아웃�
 
 | 교훈 | 2차 줄기 | 어느 파일을 어떻게 |
 |---|---|---|
-| **#18 · #22** (브랜치 이동) | `test-git-sandbox` (R-12a) | ✅ **(1) 근본은 이미 착지** — `60dab1dd`(13:57)가 `tests/dispatcher/sessionstart-dispatcher.test.js` 의 `cwd` 를 **비-git 임시 디렉터리**로 격리(+무오염 단언, 1파일 +156/-10)했고 **master tip** 이다. 따라서 이 파일은 `test-git-sandbox` 소유에서 **제외**한다(#37). 남는 것은 아래 셋. **(2) 방어선**: `scripts/hooks/git-autopilot-session.js` 에 `isSplitLimbBranch(currentBranch) → stay put` 분기 + `tests/hooks/git-autopilot-session.test.js` 회귀 + `tests/firewall/split-branch-prefix-guard.test.js` 확장 (**오너 D-1 로 "버그 수리 예외 4번째" 승인됨**). **(3) 표시**: `lib/git/split-dispatch.js#branchMatches` 옆에 `actual === 'artibot/' + planned` 판정 + `commands/split.md` §status 열. **(1′) 잔여**: 같은 클래스 나머지(§1.5 C-2~C-4)와 신규 파이어월 `tests/firewall/dispatcher-cwd-sandbox-required.test.js` 는 **아직 미착지** |
+| **#18 · #22** (브랜치 이동) | `test-git-sandbox` (R-12a) | ✅ **전부 착지(2차 배치에서 완료 — §7 참조).** **(1) 근본**: `60dab1dd`(13:57)가 `tests/dispatcher/sessionstart-dispatcher.test.js` 의 `cwd` 를 **비-git 임시 디렉터리**로 격리(+무오염 단언, 1파일 +156/-10)해 **선행 착지**했고, 이 파일은 `test-git-sandbox` 소유에서 제외됐다(#37). **(1′) 같은 클래스 나머지도 닫혔다** — 기록자 재확인: `subagentstop`·`sessionend`·`posttooluse` 디스패처 테스트 3개(§1.5 C-2~C-4)가 전부 `cwd: sandboxCwd` 이고, 신규 파이어월 `tests/firewall/dispatcher-cwd-sandbox-required.test.js` 도 **실재**한다. **(2) 방어선**: `git-autopilot-session.js` 가 `isSplitLimbBranch` 를 import 하고 `worktree-` 접두까지 stay-put(오너 **D-1** 로 "버그 수리 예외 4번째" 승인). **(3) 표시**: `lib/git/split-dispatch.js` 에 `branchRelocatedByHook`(참조 3건) |
 | **#16** (창이 혼자 일함) | `test-git-sandbox` (4) | `templates/split/PROMPT-TEMPLATE.md` 에 "줄기 내부 팬아웃 절"(분해 권장 단위 · 구현 opus / 검수 fable · 창은 배정·검증·커밋만) + `commands/split.md` §open/§dispatch 문구. **제약**: 새 플레이스홀더를 만들면 `lib/git/split-brief.js` 의 허용목록이 코드가 되므로 **정적 텍스트 절로 한정** |
 | **#14** (allowlist 가 깨질 테스트를 빠뜨림) | 2차 plan 전체 | 2차 4줄기 allowlist 에 `hook-timeout-budget`·`dispatch-table`·`split-brief.test`·`split-limb-naming` 을 선편입해 반영 완료 |
 | **#23** (Stop 게이트 ↔ allowlist 충돌) | `test-git-sandbox` (4) 동반 (R-29) | `commands/split.md` §plan 절차에 "소스 경로마다 대응 테스트 디렉터리 자동 동반(`scripts/x/y.js` → `tests/x/`)" 1항 |
@@ -514,3 +515,207 @@ console.log(mod.summarizeWallClock(ev));
 - **OPEN phase 4ms** 가 사후 기록임은 `data.note` 로 확정되나, **실제 창 열기 소요**(~11:53 → 11:55 로 추정되는 구간)는 텔레메트리에 없다.
 - **런 1호 대비 개선/악화 비교** — 두 런의 절차·줄기 수·humanWait 기록 방식이 달라 대조하지 않았다. n=2 는 여전히 비교 표본이 아니다.
 - **`estimatedSpeedup: 4`**(plan.json) 의 실현 여부 — 대조군이 없어 측정 불가. 이 값은 계획 산출물이지 실측이 아니다.
+
+---
+
+## 7. 2차 배치 (v5b2-9d6dc2)
+
+1차 배치(`split-9d6dc2`)의 후속이다. **`/split` 을 쓰지 않았다** — 오너 부재 구간이라
+창을 열 사람이 없어, 교훈 #37 의 권장 채택대로 **`/team` + `Agent(isolation: worktree)`**
+로 실행했다. 따라서 이 절에는 `/split` 텔레메트리(phase·세그먼트·humanWait)가 **없다**.
+줄기 정의·소유권 표·랜딩 절차는 1차 것을 그대로 재사용했다.
+
+| 항목 | 값 |
+|---|---|
+| 배치 id | `v5b2-9d6dc2` |
+| 실행 형태 | `/team` + `Agent(isolation: worktree)` 팀원 **4명**(opus, build 티어) |
+| 독립 검수 | fable **4명 전원 APPROVE** — `review-l1` · `review-l2` · `review-p19` · `review-tgs`. `review-tgs` 는 **보고 직후 세션 한도로 종료**(보고 자체는 완결, 한도 리셋 16:50) |
+| 줄기 분기점 | **`520886bd`**(1차 배치 랜딩) — 4줄기 전부 여기서 갈라졌다(기록자 `git merge-base` 4/4 확인) |
+| 통합 base | **`e0aa2580`**(landing-lock 수리) — 분기점과 **다르다**. 줄기는 `520886bd` 에서 갈라져 `e0aa2580` 위로 접혔다 |
+| 랜딩 | **landed** — 배치 랜딩 SHA **`838d86bd`**(2026-09-04 **17:11:53**), 4줄기 tip 전부 조상 **4/4**. `origin/master` == `838d86bd` 로 **푸시 완료**. **CI 결과는 `TBD-리더`**(랜딩 후 실행분 미조회) |
+| 교훈 | `.artibot/split/gotchas.md` **#37~#57**(21건, §7.5 에 전문) — 원장 총계는 57건 |
+
+### 7.1 줄기별 결과 (분기점 `520886bd` 대비 기록자 재측정)
+
+재현: `MB=$(git merge-base <tip> e0aa2580)` → `git rev-list --count $MB..<tip>` ·
+`git diff --shortstat $MB..<tip>` · `git log --format='%(trailers:key=Split-Limb,valueonly)' $MB..<tip>`
+
+| 줄기 | tip | 커밋 | 파일 | 삽입/삭제 | `done` 트레일러 |
+|---|---|---|---|---|---|
+| `l1-ups` | `4b2fe4fe` | 3 | 21 | **+1,179 / -106** | 3/3 |
+| `l2-d1` | `52b81c43` | 2 | 10 | **+1,738 / -336** | 2/2 |
+| `p19-rest` | `79fa8788` | 2 | 18 | **+1,002 / -84** | 2/2 |
+| `test-git-sandbox` | `56bc7912` | 2 | 15 | **+1,320 / -83** | **1/2** |
+| **합계** | — | **9** | **64** | **+5,239 / -609** | 8/9 |
+
+**⚠️ 리더 브리프와 세 곳이 다르다.** 커밋 수·파일 수는 4/4 일치하나 삽입/삭제가 갈린다 —
+`l1-ups` +1120/-105 → **+1179/-106**, `l2-d1` +1736/-336 → **+1738/-336**,
+`p19-rest` +999/-83 → **+1002/-84**. `test-git-sandbox` 만 정확히 일치했다.
+브리프 값은 각 줄기의 **마지막 커밋 직전** 시점 측정으로 보인다(추론 — 측정 시각 미기재).
+위 표는 tip 기준 재측정값이다.
+
+**`test-git-sandbox` 는 2커밋 중 1건만 `done` 트레일러를 달았다.** 완료 판독은 트레일러가
+정본이므로(1차 창 공통 주의 4번째) 기록해 둔다 — 랜딩 자체는 리더가 배치로 접었으므로
+결과에는 영향이 없었다.
+
+**줄기 정의**(`next-batch-plan.md` §2.1 원문 요지):
+`l1-ups` = UserPromptSubmit stdout 을 호스트 허용목록으로 + 봉투를 `hookSpecificOutput.additionalContext`
+로 이전(D1·D2·D3, D4 는 통합 후) · `l2-d1` = 라우팅 shadow receipt 를 PreToolUse(Agent) 신규 훅으로,
+SubagentStart 에서 `route.bound` 로 결합 · `test-git-sandbox` = gotcha #18/#22 의 (1)(2)(3) + #16
+템플릿 팬아웃 절 · `p19-rest` = 후속 19 나머지 자리 `-z` 전환(자리별 개별 사양, 공용 헬퍼 금지).
+
+### 7.2 배치 조립과 랜딩 실패 2회
+
+```
+e0aa2580 (통합 base)
+  └ 916f2ce3 fold artibot/worktree-agent-a3725b933da90230d  [1/4]
+    └ c9eb5309 fold artibot/worktree-agent-ad1a5857fe48056bf [2/4]
+      └ a4989c9c fold worktree-agent-a987e856d8773a878       [3/4]
+        └ 93d95c47 fold worktree-agent-af353c3796d5a412d     [4/4]   ← 배치
+          └ 18b8b126 README 수치 동기화                        ← 실패 ① 처치
+            └ 838d86bd 통합 수정 3건                            ← 실패 ② 처치
+```
+
+기록자 재측정: `git diff --shortstat e0aa2580..838d86bd` = **67 files, +5,259, -614**
+(**리더 값과 정확히 일치**). 중간 커밋 자체는 `18b8b126` 2파일 +6/-6, `838d86bd` 3파일 +17/-2.
+
+**실패 ① — "Validate README claims"(#54).** `l2-d1` 이 훅 스크립트 1개(`route-observe-pre.js`)와
+등록 1개를 추가했는데 README 두 파일의 카운트 주장 6곳(26 등록 · 69 스크립트)이 그대로였다.
+CI 가 **테스트 이전 단계**에서 Node 20/22/24 전부 RED. **README 는 어느 줄기도 소유하지 않는 파일**이라
+gotcha #14("깨질 파일이 allowlist 밖")의 **재발**이다. 처치는 `scripts/ci/sync-readme-claims.js` 로
+6곳 정정 후 배치 위에 커밋.
+
+**실패 ② — vitest 3건, 전부 줄기 간 계약 충돌(#57).** 단독 스위트는 4줄기 모두 그린이었다.
+- (a) `test-git-sandbox` 가 `land.mjs` 에 lint 행을 더해 **1차 배치** `limb-landing-check.test.js:407`
+  의 `toHaveLength(6)` 이 RED. 6→7행.
+- (b) `l1-ups` 의 신규 `ups-stdout-allowlist.test.js` 가 디스패처를 spawn 해서
+  `test-git-sandbox` 가 방금 만든 **스포너 래칫(6개 고정)** 이 RED.
+- (c) `l2-d1` 이 `subagent-handler.js#observeRoute` 심볼을 제거해 `commands/scorecard.md:80` 의
+  인용이 **유령 인용**이 되어 citation 게이트가 RED.
+
+(c)에서 **게이트 2개가 같은 바이트에서 충돌**했다 — citation 게이트는 심볼 실존을 요구하고,
+`command-doc` 게이트는 `scorecard.md` 줄 삭제를 금지한다. 규율 §10("게이트를 통과시키려
+게이트를 깎지 않는다")대로 **게이트는 무수정**, 설계 쪽(**심볼 보존 별칭**)으로 해소했다.
+
+**이것이 1차 배치 §4-D 의 전제를 깬다.** 2차 계획은 "파일 소유권 겹침 **0**"을 파일 단위로
+직접 대조해 확인했고 그것은 사실이었다. 그런데 **계약 겹침**(A 줄기가 B 줄기 또는 과거
+배치의 테스트가 핀한 값을 바꾸는 것)은 파일 소유권 표가 **구조적으로 볼 수 없다.**
+1차의 gotcha #14 는 "깨질 테스트를 allowlist 에" 로 끝났으나, #57 은 그것으로도 부족함을 보인다 —
+깨질 테스트가 **다른 줄기가 이번에 새로 만든 것**이면 plan 시점에 존재하지도 않는다.
+
+### 7.3 브랜치 이동 재발 — 현재 ref 로는 4/4 가 아니라 2/4
+
+리더 보고는 "4줄기 모두 훅에 의해 `artibot/` 접두 이동 재발" 이다. **현재 ref 로는 2/4 만
+재현된다.** 기록자 `git for-each-ref` 실측:
+
+| 줄기 | 계획 이름 ref | `artibot/` 접두 ref | 판정 |
+|---|---|---|---|
+| `l2-d1` | `worktree-agent-a3725b933da90230d` = `520886bd`(**0커밋**) | `artibot/worktree-agent-a3725b933da90230d` = `52b81c43` | **이동됨** |
+| `test-git-sandbox` | `worktree-agent-ad1a5857fe48056bf` = `520886bd`(**0커밋**) | `artibot/worktree-agent-ad1a5857fe48056bf` = `56bc7912` | **이동됨** |
+| `p19-rest` | `worktree-agent-a987e856d8773a878` = `79fa8788` | **없음** | 이동 안 됨 |
+| `l1-ups` | `worktree-agent-af353c3796d5a412d` = `4b2fe4fe` | **없음** | 이동 안 됨 |
+
+**배치 fold 커밋 메시지가 같은 말을 한다** — `[1/4]`·`[2/4]` 는 `artibot/` 접두 이름으로,
+`[3/4]`·`[4/4]` 는 접두 없는 이름으로 접혔다. 즉 **fold 시점(16:36)에도 2/4** 였다.
+1차와 같은 지문("계획 이름 ref 가 base 에 0커밋으로 남고 `artibot/` 쪽이 작업을 든다")이
+2줄기에서 그대로 재현됐다.
+
+**미확인**: "4/4" 가 런 중 어느 시점의 관측이고 그 뒤 2줄기가 되돌려진 것인지, 아니면
+관측 자체가 넓게 잡힌 것인지 구분하지 못했다. 기록자는 **런 중 상태를 보지 못했고**
+사후 ref 만 읽었다. 어느 쪽이든 **재발 자체는 성립**한다(최소 2/4).
+
+**1차와 달라진 것 하나**: 팀원 스폰 프롬프트에 **"리포 전체 vitest 금지 · 표적 스위트만"** 을
+넣었다(교훈 #37). 1차에서 이 결함의 트리거가 리포 전체 vitest 였으므로(#22) 그 지시가
+재발을 줄였을 수 있으나, **대조군이 없어 효과는 측정되지 않았다.** 그리고 #48(d)가 보인
+대로 **`claude -p` 라이브 런 자체도 SessionStart 로 브랜치를 옮긴다** — vitest 금지만으로는
+경로가 닫히지 않아 `test-git-sandbox` 가 stay-put 을 `worktree-` **접두 전체**로 넓혔다.
+
+### 7.4 교훈 #37~#57 — 분류표
+
+`#37` 은 §3.1·§3.2 에 이미 실려 있다(1차 회고 시점에 등재). 여기서는 분류만 다시 싣고
+원문은 §3.2 를 보라. `#38`~`#57` 은 §7.5 에 전문을 옮긴다.
+
+| 분류 | 건수 | 번호 |
+|---|---|---|
+| **리더 오류** | 5 (+1 부분) | #39 · #43 · #45 · #47 · #57 · (#44 부분) |
+| **도구·템플릿 결함** | 5 | #38 · #41 · #49 · #55 · #56 |
+| **훅·테스트 결함** | 1 | #40 |
+| **호스트 관측** | 2 | #48 · #50 |
+| **절차 공백** | 2 | #52 · #54 |
+| 런 기록·결정(문제 아님) | 6 | #37 · #42 · #44 · #46 · #51 · #53 |
+| **합계** | **21** | |
+
+| # | 한 줄 | 분류 | 코드 수리 |
+|---|---|---|---|
+| 37 | 2차 배치 실행 형태 결정 — `/split` 대신 `/team` + worktree 격리 | 런 기록(결정) | 아니오 |
+| 38 | `landBatch` 가 로컬 `ci/split-<runId>` ref 를 남김 — 런 1호분까지 누적 | 도구·템플릿 결함 | 예 |
+| 39 | **측정 고지 분모를 리더가 잘못 보고** — `totalMs` 는 null, 7,405,445 는 2회째 엔트리 값. 미쌍도 3이 아니라 1 | **리더 오류** | 아니오 |
+| 40 | `landing-serialization` 게이트 오늘 2회 실패 — 자식 2개가 둘 다 락 획득 | 훅·테스트 결함 | 조사 → #41 |
+| 41 | **[결함 확정]** landing-lock 빈 파일 회수 — `openSync('wx')`↔`writeSync` 창에서 상대가 스테일 판정. #40 의 "플레이크" 표기는 **틀렸다** | 도구·템플릿 결함 | **예**(`e0aa2580`) |
+| 42 | 오너 결정(15:0x) — 3차 승인 2건, 미승인 유지 2건, landing-lock 근본안 보류 | 런 기록(결정) | 아니오 |
+| 43 | **l1-ups 브리프 전제 3건이 틀림** — 소유 밖 편집 추인 · 설계 §4.3-1 이 CI 에서 항상 RED · 800줄 권고 초과 확대 | **리더 오류** | 설계안 수정 |
+| 44 | p19-rest 실측 — 정본 재결정 조건 "한글 실유입" **이미 충족**, 게이트 fail-open 라이브 RED. 소유 밖 편집 1은 브리프 "없음" 오류 | 런 기록(+리더 오류 부분) | 아니오 |
+| 45 | **p19-rest 검수 — 리더 브리프 기준 오류 1** + 구현자 "결과 불변 4" 중 1건은 실제 행동 변화 | **리더 오류** | 아니오 |
+| 46 | l1-ups 검수 APPROVE — 교차검수 3점 독립 실측, 디스패처 재현 4건 바이트 일치 | 런 기록 | minor 1줄 |
+| 47 | **설계안 2건 착지 + 리더 전제 정정 3건**(479 아닌 478 오기 · guides 96 · trail 질문 프레임) | **리더 오류** | 코드 0 |
+| 48 | l2-d1 실측 5건 — 매처 표현식 0건 · `agent_type` 경로별 상이 · `claude -p` 도 브랜치 이동 | 호스트 관측 | 설계 갱신 |
+| 49 | **[3차 1순위]** `hooks.json` 매처 표현식 4종이 호스트 문법에 없음 — 정규식 해석이면 일부는 절대 불일치, 일부는 **전 도구 매치** | 도구·템플릿 결함 | 예(측정 후) |
+| 50 | 후속 14 확정 — `timeout` 단위는 **초**. `5000` = 5,000초. CONTRIBUTING "milliseconds" 는 문서 오류 | 호스트 관측 | 3차 |
+| 51 | l2-d1 검수 APPROVE — 8형태 재현, 265/266 pass. R2: FIFO 매칭에 게이트 없어 D4 분모 흐림 | 런 기록 | 후속 |
+| 52 | test-git-sandbox 완료 — 자기검증 초안이 거짓 그린이던 것을 **스스로 잡음**. **규약 위반 1**: 팀원이 `git stash` 실행 | 절차 공백 | 아니오 |
+| 53 | 2차 배치 랜딩 착수 — 검수 4/4 APPROVE, 로컬 docs 커밋을 브랜치로 보관 후 master reset | 런 기록(결정) | 아니오 |
+| 54 | **첫 랜딩 실패 — README 수치 게이트.** 어느 줄기도 소유하지 않는 파일 → gotcha #14 재발 | 절차 공백 | 예(처치됨) |
+| 55 | 임시 worktree pre-push — `node_modules` 부재 fail-closed, junction 으로 해결. 3게이트 FAIL 재현 불가 | 도구·템플릿 결함 | 조사 |
+| 56 | **[결함 확정]** `ci-utils.js:74` 가 링크드 worktree + `GIT_DIR` 환경에서 리포 전체 1,973개를 돌려받아 플러그인 루트 0개로 오판 | 도구·템플릿 결함 | **예**(3차) |
+| 57 | **두 번째 랜딩 실패 — 줄기 간 계약 충돌 3건.** 파일 소유권 겹침 0 이어도 **계약 겹침은 plan 이 못 본다** | **리더 오류**(미예측) | 예(처치됨) |
+
+### 7.5 교훈 #38~#57 원문 (`.artibot/split/gotchas.md` — 삭제·요약 없음)
+
+38. **landBatch 가 로컬 `ci/split-<runId>` ref 를 남김(record 실측 14:5x)** — 원격만 삭제했고 로컬 ref 는 남아 런 1호분(`ci/split-split-8f83d7`)까지 누적. 리더가 둘 다 삭제(master 조상 확인 후). 다음: `split.md` §integrate `landed` 후처리에 "로컬 ci ref 삭제" 1줄, 또는 landBatch 가 `update-ref -d`.
+39. **측정 고지 분모 정정(record)** — `summarizeWallClock` 은 첫 `run` 엔트리를 집으므로 크래시분(열린 채) 때문에 `totalMs=null` — 리더가 보고한 7,405,445 는 2회째 엔트리 durationMs 였다. 병합 기준 미쌍은 1(리더의 3 은 파일별 합산). 결론(미측정)은 동일. 다음: 중복 start 처리 규칙(닫힌 엔트리 우선 / 마지막 start 정본 / 거부) 결정 필요 — 재시도 런의 총 소요 정의가 선행.
+40. **`tests/firewall/landing-serialization.test.js` "real child processes racing on one key: exactly one wins" 오늘 2회 실패(12:2x Windows Node22 · 15:12 Linux Node24 필수 컨텍스트)** — 단언 `['ok','ok']` = 자식 2개가 **둘 다 락 획득**. 재실행으로 그린이 되지만 "타이밍 플레이크"로 넘기면 안 된다: `lib/git/landing-lock.js` O_EXCL 상호배제가 실제로 깨지는 경로(같은 pid 재사용? 스테일 락 회수 창? 키 파일 경로 경쟁?)일 수 있고, 이 락은 integrate 의 유일한 직렬화 수단이다. 다음: 3차 조사 항목 1순위 — 테스트 하네스(자식 스폰 방식)와 락 구현을 분리 실측, 실패 시 두 자식의 stdout·락 파일 내용 캡처를 테스트에 추가. 그 전까지 이 게이트의 그린을 직렬화 증거로 쓰지 않는다(규율 §9).
+41. **[결함 확정·수리 착수] landing-lock 빈 파일 회수 결함(lockprobe 조사 15:2x, 리더 직접 열람)** — `lib/git/landing-lock.js:116` `openSync('wx')` → `:122` `writeSync` 사이 창에서 상대가 `readHolder :99-106` null(빈/부분 JSON) → `:182-184` `stale=!existing` → unlink → 재생성 `reclaimed:true`. 둘 다 ok. 결정적 재현 1/1(빈 파일 미리 생성), 타이밍 재현 0/100(로컬 무부하), CI 공유 러너에서 2회 발화. 프로덕션 `/split integrate`(`batch-landing.js:338`) 동일 창. #40 의 "플레이크" 표기는 틀렸다 — 게이트가 잡은 진짜 결함. 수리: 파싱 불가 파일은 mtime 기준으로만 스테일 판정 + 자식 출력에 reclaimed 구분 + 결정적 회귀 테스트(tdd-guide, 버그 수리 클래스 — D-1 선례, 오너 부재 권장 채택). 근본안(tmp+linkSync)은 exFAT 미확인으로 보류.
+42. **오너 결정(15:0x, 복귀 중 1회 질의)** — 3차 배치 승인: L2 Check 10 + replay tool_use_id 조인(l2-d1 랜딩 후 /split 창) · docs:check 스코프·trail 이관 **설계안** 작성(코드 0, 부모 세션 architect 즉시). 미승인 유지: HOOK-VISIBILITY H-1~6 · PLANNER-PARALLELIZATION. landing-lock 근본안(tmp+linkSync) 보류 — 최소 수리(e0aa2580)로 운용. 1차 창 4개는 닫아도 됨(랜딩 완료).
+43. **l1-ups 리더 결정(15:0x)** — (a) `runtime-prompt-decision-wiring.test.js` 소유 밖 편집 추인(바이트 동일성 게이트가 의도된 필드 추가로 설계상 통과 불가 → 그 필드만 마스킹 + positive control 4종). (b) `ups-host-schema-drift.test.js` 는 설계 §4.3-1 "바이너리 부재 = FAIL" 이 GitHub 러너에서 항상 RED → CI 환경에서만 사유 명시 skip, 로컬은 fail-closed 유지. 설계 §4.3-1 수정 필요 — 권장 채택, 오너 미질의. (c) `runtime-prompt.js` 801→932줄(800 권고 초과 확대) — R-24 계열 후속.
+44. **p19-rest 실측(15:0x)** — 정본 :913 재결정 조건 "한글 경로 실유입" 은 이미 충족(추적 1961 중 비-ASCII 5건 `.artibot/adr/`), `gitignore-boundary` 게이트 fail-open 라이브 RED, `plugin-validate.yml` 은 한글 자산만 바뀐 PR 을 fast-skip. `merge-tree --name-only -z` 는 지원하되 출력 구조가 달라 파서 재작성. 4자리는 결과 불변(예방 전환). 소유 밖 편집 1(`tests/hooks/git-autopilot-merge.test.js` 실재 — 브리프 "없음" 오류, 추인). 3차 후보: `handoff-builder.js:433` porcelain 동일 결함 · `stop-review-gate.js:225` 한 줄 블록 주석 오탐(경로 파서 무관). NUL 출력을 `$(...)` 로 받으면 bash 가 NUL 을 버린다 — 파일 경유 필수.
+45. **p19-rest 검수 APPROVE(15:0x)** — 검수자가 12자리 전부 diff 대조 + git 2.54 원시 출력 od 실측(merge-tree 4중주·name-status R100 2경로·log 커밋 경계 빈 필드). 반증 1: 구현자의 "결과 불변 4" 중 dev-verify-gate 는 행동 변화(앞공백 면제 오인 해소, 지문 변경) — 코드 주석은 맞고 보고 분류가 틀림. 리더 브리프 오류 1: "주석 전용 변경 오탐 재현 케이스" 는 파서와 무관한 별건(`stop-review-gate.js:225` 한 줄 블록 주석) — 3차 후보. 비차단 JSDoc 1줄 후속. cowork `release.js` 는 eslint config 부재로 lint 미측정(cowork-scripts-lint 5/5 로 대체).
+46. **l1-ups 검수 APPROVE(15:0x)** — 교차검수 3점 독립 실측 확인(허용목록 양성·`payload.user_prompt` 생존·`--no-team` flag-surface 판정), 디스패처 실자식 재현 4건이 구현자 프로브와 바이트 일치(893/811/1315/301). minor: 8KB 캡 서로게이트 분리(1줄 보정 지시). 관측: `stripRouterWrapper` 는 래퍼 부재 시 `''` 반환 → 라우터 off 구성이 라이브에 있으면 메모리 컨텍스트가 사라짐(미확인, 3차 확인 항목) · `isLegacyStdoutEnabled` 가 프롬프트마다 config 재판독(지연 미측정).
+47. **설계안 2건 착지(architect 15:0x, 오너 결정 5건 §5 승인 대기)** — docs:check: 추적 `.artibot`·`reports/SPLIT` md 93 중 링크 0 broken / 렌더링 15 위반(정본 표 12) → "고치고 넣기" 권장, 서브트리 허용목록 + 추적 파일만 + git 실패 fail-closed. trail: 이관이 아니라 정본 D9(:314) "동결" 실행 권장 — 라이브 트레일은 캐시 4.54.0 에만 9건(다른 캐시 5개 파일 없음 → plugin update 마다 0 리셋), unique writer 는 user-profile·cron 2뿐, 3차 L2 Check 10 줄기와 묶음. 리더 전제 정정: docs:check 479(478 아님), guides 96(95 아님), trail 질문 프레임(이관 vs 동결).
+48. **l2-d1 실측(15:1x)** — (a) hooks.json 매처 표현식 `tool == "Agent"` 는 0건, 평문 `"Agent"` 만 발화(A/B 2런) — 설계 전제 정정. (b) Agent 도구 경로의 SubagentStart 는 `agent_type = subagent_type`, `agentName=null`(2/2) — 설계 §2.1 "명명 스폰 = agent_type===name" 불성립; team/autopilot 경로(부모 원장 1025행)는 이름 모양 → 호스트가 경로별로 다른 값. 2차 티어를 name∨subagent_type 로 넓히고 `matched_on` 기록. (c) 봉투 스키마 `additionalProperties:false` 라 `data.stage`·`predicted_selected` 불가 → `idempotency_key = route.pre:<tool_use_id>:<prompt_id>:<subagent_type>` 로 상관 운반(설계 밖 선택, 리더 수용·설계안 갱신 항목). (d) **`claude -p` 라이브 런도 SessionStart→git-autopilot 으로 브랜치 이동**(reflog 14:42:38 `worktree-agent-…` → `artibot/…`) — 디스패처 cwd 샌드박스로는 못 막고 훅 stay-put 예외가 `worktree-agent-*`(하네스 격리 worktree)까지 덮어야 함 → test-git-sandbox 에 전달. (e) 후속 14 실증: hooks.json PreToolUse timeout 5000 vs `--settings` 예시 `timeout: 10`(초) 모순.
+49. **[3차 1순위 · 오너 결정 필요] hooks.json 매처 문법 의심(review-l2, 호스트 문서 15:2x WebFetch)** — 호스트 규칙: 매처는 도구명 정확 일치(문자·숫자·`_-`·공백·`,`·`|` 만) 아니면 **JS 정규식(unanchored)**, 표현식 문법 없음. 리포 정본 CONTRIBUTING:456 도 `"Write|Edit"` 평문형. 그런데 hooks.json :22 `tool == "Write" || tool == "Edit"`, :34 `tool == "Bash"`, WebFetch 등 표현식 4종이 실존 → 정규식 해석이면 `tool == "Bash"` 는 절대 불일치(l2 A/B `tool == "Agent"` 0건과 같은 클래스), `||` 가 든 것은 빈 대안 때문에 **모든 도구에 매치**(pre-write-guard·pre-write-checkpoint·git-autopilot-guard 가 Bash/Agent 에도 발화 가능). 추론·미측정. 다음: `--settings` A/B 1회로 4종 실측 → 결과에 따라 hooks.json 매처 전면 평문화(설계안 불필요, 버그 수리 클래스) — 단 hooks.json 로더가 --settings 와 같은 파서인지 미확인.
+50. **후속 14 확정(review-l2, 호스트 문서)** — `timeout` 은 **초**(command 기본 600). hooks.json PreToolUse 7항 `5000` = 5,000초, 설계 ROUTE-RECEIPT §4 "3초 SIGTERM 안전망"은 실재하지 않음. CONTRIBUTING:466 "milliseconds" 는 문서 오류. 타임아웃 훅은 도구 호출을 막지 않음(non-blocking). 다음: 값 전면 재설정은 오너 결정(파일 전체 관행) — 3차.
+51. **l2-d1 검수 APPROVE(15:2x)** — 8형태 직접 스폰 재현 exit 0·stdout 0·stderr 0, 64KB 행 1,814B≤4,096, 265/266 pass. R2: FIFO 매칭이 `agent_type==='teammate'` 게이트 없이 적용 → 영수증 없는 스폰이 남의 receipt 를 가져갈 수 있음(격리는 됨, D4 분모 흐림). 원장 fifo 쌍 1건 추가 존재. 짧은 session_id 는 `no-mission` 미기록(경계 픽스처 없음).
+52. **test-git-sandbox 완료(15:3x)** — (1) 3슬롯 실측 구멍 0(패턴 통일·심층 방어), 자기검증 초안이 거짓 그린(sandboxCwd 직접 읽음)이었던 것을 스스로 잡음, 스캐너가 주석 아포스트로피에 오판하던 것 수정. (2) stay-put = isSplitLimbBranch ∨ `worktree-` 접두. (3) `branchRelocatedByHook` 3값(null=미관측). (4) split.md 300줄 래칫에 정확히 걸려 기존 줄 문장 추가로 처리(300→300). land.mjs lint 행 — Windows `.bin/eslint.cmd` 무shell spawn EINVAL → execPath+JS 엔트리. 소유 밖 편집 1(`split-window-contract.test.js:311` n=2 핀, 추인). **규약 위반 1**: 팀원이 `git stash push/pop` 실행(즉시 복원, 손실 0) — 브리프 금지 조항이 격리 worktree 팀원에게도 필요함을 실증. 미확인: `session-start.test.js` 1 fail 이 줄기 변경 탓인지(master 메인 트리는 23/23 — 리더 실측) → 검수 항목.
+53. **2차 배치 랜딩 착수(15:4x)** — 4줄기 검수 전부 APPROVE(fable 4명: p19·l1·l2·tgs). review-tgs 는 보고 직후 세션 한도(resets 16:50)로 종료 — 보고는 완결. 로컬 docs 커밋 70fc838b 는 배치 랜딩 뒤 새 master 위로 재적용(브랜치 v5-docs-b3 에 보관, master 는 origin 으로 reset — 워킹트리 변경은 runtime/cache-roi-session.json 뿐이라 손실 0). test-git-sandbox 검수 주의 3건 추인: SplitWindow 펜스 1불릿(#21) · 비-git mkdtemp(계획 문구 갱신 대상) · lint 행 .cjs 미대상(CI 가 잡음).
+54. **2차 배치 첫 랜딩 실패(15:5x) — README 수치 게이트** — l2-d1 이 훅 스크립트 +1(`route-observe-pre.js`)·등록 +1 을 넣었는데 README 두 파일의 카운트 주장 6곳(26 등록·69 스크립트)이 미갱신 → CI "Validate README claims" 가 Node 20/22/24 에서 RED(테스트 전 단계). README 는 어느 줄기도 소유하지 않는 파일 — gotcha #14("깨질 파일"이 allowlist 밖) 클래스 재발. 처치: `scripts/ci/sync-readme-claims.js` 로 6곳 정정 후 배치 위에 커밋, ci 브랜치 갱신. 다음(plan 단계): 훅 스크립트/등록·agents·commands·skills 개수를 바꾸는 줄기는 README 2파일 + sync 스크립트 실행을 완료 기준에 자동 동반. 부수: Windows 260자 한도 — 스크래치 temp 경로 + 한글 ADR 파일명이면 worktree add 가 "Filename too long" 으로 실패(리포 안 `.claude/worktrees/` 짧은 경로 사용).
+55. **임시 worktree 에서의 pre-push(16:0x)** — (a) `node_modules` 부재 → 훅이 fail-closed 로 거부(정상). `npm ci` 는 5분 타임아웃 → 메인 트리 node_modules 를 junction 으로 연결해 해결(리포 `worktree-setup` 과 같은 방식). (b) junction 직후 첫 푸시에서 structure·doc-links·md-render 3게이트 FAIL 로 BLOCKED(28s) — 그러나 단독 실행·동시 실행·훅 직접 호출(24s, 10/10 ok) 모두 통과, 재현 불가. 첫 실행의 일시 상태로 추정(캐시/파일 잠금 — 미확인). `--no-verify` 는 쓰지 않았다. (c) 스크래치 temp 경로에 worktree 를 만들면 한글 ADR 파일명이 Windows 260자 한도를 넘어 `Filename too long` — 리포 안 `.claude/worktrees/<짧은이름>` 사용.
+56. **[결함 확정 · 3차 후보] `scripts/ci/ci-utils.js:74 gitTrackedNames` 가 훅 환경에서 플러그인 루트 0개로 오판(16:1x)** — git 이 pre-push 에 절대 `GIT_DIR` 을 넘기고 `GIT_WORK_TREE` 가 없으면, `cwd: <하위디렉터리>` 로 실행한 `git ls-files -z` 가 하위 상대경로가 아니라 **리포 루트 기준 전체 1973개**를 돌려준다(실측: agents/·skills/·commands/ 어디서든 1973). 첫 세그먼트만 취하는 파서가 `plugins` 만 보게 되어 structure·doc-links·md-render 3게이트가 "expected plugin root contributed no agents at all" 로 FAIL. 메인 트리 푸시·CI·훅 직접 호출(env 없음)에선 재현 안 됨 — 링크드 worktree 에서 `git push` 할 때만. 수리안: `ls-files -z -- .` 에 `--full-name` 대신 `git -C base ls-files -z .` + `GIT_DIR` 무시(`env: {...process.env, GIT_DIR: undefined, GIT_WORK_TREE: undefined}`) 또는 결과를 `base` 기준으로 재상대화. 이번 푸시는 훅 직접 호출 10/10 ok 확인 후 리포가 명시 허용한 `ARTIBOT_SKIP_PREPUSH=1` 한 명령으로 우회(--no-verify 아님, 셸 이력에 남음).
+57. **2차 배치 두 번째 랜딩 실패(16:2x) — 줄기 간 상호작용 3건, 단독 스위트는 전부 그린이었음** — (a) test-git-sandbox 가 land.mjs 에 lint 행을 추가 → 1차 p2 의 `limb-landing-check.test.js:407` `toHaveLength(6)` RED. (b) l1-ups 의 신규 `ups-stdout-allowlist.test.js` 가 디스패처를 spawn → test-git-sandbox 의 스포너 래칫(6개 고정) RED. (c) l2-d1 이 `subagent-handler.js#observeRoute` 심볼 제거 → `commands/scorecard.md:80` 인용이 유령 → citation 게이트 RED. 세 건 모두 "A 줄기가 B 줄기(또는 과거 배치)의 테스트가 핀한 값을 바꾼" 형태 — 파일 소유권 겹침 0 이어도 **계약 겹침**은 plan 이 못 본다. (c)는 게이트 2개(citation: 심볼 실존 요구 / command-doc: scorecard.md 줄 삭제 금지)가 같은 바이트에서 충돌 → 규율 §10 대로 게이트 무수정, 설계 쪽(심볼 보존 별칭)을 택함. 다음(plan 단계): 줄기 완료 기준에 "배치 통합 후 리포 전체 vitest 1회"를 리더 단계로 명시하고, 줄기가 export/심볼을 제거할 때 리포 전역 `#symbol` 인용 grep 을 완료 기준에 동반. CI 로그는 `gh run view --log-failed` 가 빈 결과를 줄 수 있어 `gh api .../jobs/<id>/logs` 로 받아야 했다(교훈).
+
+### 7.6 1차 §4 개선안의 반영 여부
+
+| 1차 §4 항목 | 2차에서 |
+|---|---|
+| #18/#22 (1) 근본 — 디스패처 cwd 격리 | ✅ `60dab1dd` 로 **선행 착지**, 나머지 3개(C-2~C-4)와 신규 파이어월도 `test-git-sandbox` 로 착지(기록자 재확인: 4/4 `cwd: sandboxCwd`, `dispatcher-cwd-sandbox-required.test.js` 실재). 다만 #48(d)가 **`claude -p` 라이브 런도 같은 경로**임을 보여 격리만으로는 부족했다 |
+| #18/#22 (2) 방어선 — stay-put | ✅ `test-git-sandbox` 착지. 범위를 `isSplitLimbBranch` → **`worktree-` 접두 전체**로 넓혔다(#52) |
+| #18/#22 (3) status 표시 | ✅ `branchRelocatedByHook` 3값(null = 미관측)(#52) |
+| #16 팬아웃 절 | ✅ 템플릿 팬아웃 절 착지(#52). 팀원 스폰 프롬프트에 "리포 전체 vitest 금지" 도 추가(#37) |
+| #25 land lint 행 | ✅ 착지 — 다만 **이것이 실패 ②(a)의 원인**이 됐다(1차 테스트가 6행을 핀) |
+| #14 깨질 테스트를 allowlist 에 | ⚠️ **부족했다** — #54(README)·#57(계약 겹침)로 **2회 재발** |
+| 후속 19 나머지 | ✅ `p19-rest` 12자리 착지, 검수 12/12 diff 대조(#45) |
+| #21 ref 조작 금지 · #24 보고 계약 | ⚠️ **미편입** — #52 가 팀원 `git stash` 실행으로 **필요성을 실증**했다 |
+| #3·#9·#10·#11·#12·#29 (`split.md` 문구) | ⚠️ **미편입**. `split.md` 는 300줄 래칫에 걸려 있어(#52) 추가 여력이 없다 — 래칫 상향 또는 참조 문서 분리가 선행 |
+
+### 7.7 미확인 (2차 배치)
+
+- **랜딩 CI 결과** — 랜딩 자체는 확인했으나(`838d86bd`, 4/4 조상, `origin/master` 일치) **랜딩 후 CI 실행분은 조회하지 않았다.**
+- ⚠️ **이 절을 쓰는 동안 상태가 바뀌었다(규율 §6 시점 관측 ≠ 상태).** 집필 시작 시점에는 `838d86bd` 가 master 조상이 **아니었고** 이 표에 "미착지 · TBD-리더" 로 적었다. 집필 중 리더가 랜딩·푸시를 완료해 재측정 후 고쳤다. **두 관측 모두 각 시점에는 참이었다** — 이 절의 다른 사후 실측(§7.1 줄기 수치 · §7.3 ref)도 같은 위험을 갖는다.
+- **브랜치 이동이 4/4 인지 2/4 인지**(§7.3) — 현재 ref 와 fold 메시지는 **2/4**. 런 중 상태는 보지 못했다.
+- **"리포 전체 vitest 금지" 지시의 효과** — 대조군 0. 재발이 줄었는지 측정되지 않았다.
+- **#49 매처 문법** — 추론·미측정. `hooks.json` 로더가 `--settings` 와 같은 파서인지도 미확인.
+- **#55(b) 3게이트 FAIL** — 재현 불가. 첫 실행의 일시 상태로 추정될 뿐 원인 미확정.
+- **#52 `session-start.test.js` 1 fail** 이 줄기 변경 탓인지 — 검수 항목으로 남았다.
+- **#46 `stripRouterWrapper` 가 래퍼 부재 시 빈 문자열** — 라우터 off 구성이 라이브에 있는지 미확인.
+- **리더 브리프의 줄기별 삽입/삭제 3건이 어느 시점 측정인지**(§7.1) — 측정 시각이 적히지 않아 추론했다.
+- **`test-git-sandbox` 2커밋 중 1건만 `done` 트레일러인 이유** — 조사하지 않았다.
+- 기록자는 **2차 배치를 실행하지 않았다.** 이 절은 전부 리더 보고 + 교훈 원장 + 사후 git·ref 실측이며, 런 중 관측은 하나도 없다.
