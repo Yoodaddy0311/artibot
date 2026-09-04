@@ -101,6 +101,7 @@ const KNOWN_DISPATCHER_SPAWNERS = [
   'tests/dispatcher/sessionstart-dispatcher.test.js',
   'tests/dispatcher/stop-dispatcher.test.js',
   'tests/dispatcher/subagentstop-dispatcher.test.js',
+  'tests/firewall/ups-stdout-allowlist.test.js',
   'tests/hooks/userprompt-dispatcher.test.js',
 ];
 

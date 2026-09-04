@@ -404,7 +404,7 @@ describe('scripts/split/land.mjs — CLI', () => {
     const parsed = JSON.parse(out.join('\n'));
     expect(parsed.status).toBe('PASS');
     expect(parsed.changedFiles).toContain('src/x.js');
-    expect(parsed.checks).toHaveLength(6);
+    expect(parsed.checks).toHaveLength(7);
   });
 
   it('--pr-body 는 그 파일만 쓴다', () => {

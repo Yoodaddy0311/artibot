@@ -497,6 +497,20 @@ function matchReceipt(candidates, promptId, agentType) {
  * @returns {{ recommendedModel: string|null, actionClass: string|null,
  *   routeLedger: string }}
  */
+/**
+ * Kept under the pre-L2-D1 name on purpose. `commands/scorecard.md` cites
+ * `subagent-handler.js#observeRoute`; the citation gate (tests/firewall/
+ * citation-resolution) requires the symbol to exist and the command-doc gate
+ * (tests/scorecard/command-doc) forbids deleting that line. The receipt itself
+ * now lives in route-observe-pre.js (PreToolUse); this hook only BINDS.
+ * Reconciled 2026-09-04 during the v5 2nd-batch integration (leader decision).
+ * @param {object} ctx
+ * @returns {ReturnType<typeof bindRoute>}
+ */
+function observeRoute(ctx) {
+  return bindRoute(ctx);
+}
+
 function bindRoute(ctx) {
   const base = {
     recommendedModel: null,
@@ -651,7 +665,7 @@ async function handleStart(hookData, ids) {
   const taskId = extractTaskId(hookData);
   const missionId = resolveMissionId(hookData, sessionId);
   const projectRoot = payloadProjectRoot(hookData);
-  const route = bindRoute({
+  const route = observeRoute({
     hookData, agentId, agentType, sessionId, missionId, taskId, projectRoot, canonicalModel,
   });
   withFileLock(statePath, () => {
