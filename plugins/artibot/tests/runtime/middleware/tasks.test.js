@@ -1,8 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createTasksMiddleware } from '../../../lib/runtime/middleware/tasks.js';
+import { sessionFallbackMissionId } from '../../../lib/runtime/event-writer.js';
+import { readLedgerCensus } from '../../../lib/runtime/ledger.js';
+import { readJournal } from '../../../lib/project-state/state-manager.js';
 
 function makeState(overrides = {}) {
   return {
@@ -197,5 +200,196 @@ describe('middleware/tasks — Score-Aware effort meta propagation', () => {
     const result = await mw(state);
 
     expect(result.context.tasks.meta).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// StateStore wiring — `mission.created` also commits one store write.
+//
+// THE TWO PROMPTS BELOW WERE CHOSEN BY RUNNING `compileMission`, NOT BY
+// READING IT. Measured 2026-09-05 with `{nowMs: 1700000000000, system:
+// 'system1'}`, which is exactly what `recordMissionCompile` passes:
+//
+//   '/implement add a retry guard to the ledger writer'
+//        -> meta.ledgerEvent 'mission.created',            signals ['S5']
+//   'build a dashboard'
+//        -> meta.ledgerEvent 'mission-candidate-deferred', signals []
+//
+// Only S3 (>= 2 explicit requests) and S5 (a slash command in
+// `mission-id.js#S5_COMMANDS`) can ever fire from HERE:
+// `recordMissionCompile` hands `compileMission` no `completion` (S1/S2), no
+// `intentConfidence` (S4) and no `activeMission`/`followUp` (S6). So a prompt
+// that merely SOUNDS like work is deferred — 'build a dashboard', the string
+// the suites above already use, is the deferred fixture for that reason and
+// not by coincidence.
+//
+// The mission id is COMPUTED here via `sessionFallbackMissionId`, never
+// spelled out. A literal would re-derive the writer's rule in the test and
+// then agree with itself when the rule changed.
+// ---------------------------------------------------------------------------
+
+describe('middleware/tasks — StateStore wiring on mission.created', () => {
+  const SESSION_ID = 'sess-e247a22f-test';
+  const NOW_MS = 1700000000000;
+  /** Substantive by S5. Produces `mission.created`. */
+  const SUBSTANTIVE = '/implement add a retry guard to the ledger writer';
+  /** Deferred: no signal fires. Produces `mission.candidate_deferred`. */
+  const DEFERRED = 'build a dashboard';
+
+  let projectRoot;
+
+  beforeEach(() => {
+    projectRoot = mkdtempSync(path.join(tmpdir(), 'artibot-tasks-store-'));
+    // A real `.git` DIRECTORY, so `resolveGitCommonDir` resolves for real
+    // rather than through a stub that would prove nothing about the resolver.
+    mkdirSync(path.join(projectRoot, '.git'), { recursive: true });
+  });
+
+  afterEach(() => {
+    rmSync(projectRoot, { recursive: true, force: true });
+  });
+
+  /** A hook payload carrying both keys the wiring needs: cwd and session id. */
+  function storeState(prompt, hookOverrides = {}) {
+    return {
+      input: {
+        prompt,
+        hookData: { cwd: projectRoot, session_id: SESSION_ID, ...hookOverrides },
+      },
+      context: {
+        routing: { system: 'system1', score: 0.3 },
+        intent: { best: 'action:implement', commands: [], agents: [], ambiguous: false },
+      },
+      messageParts: [],
+      userPrompt: prompt,
+    };
+  }
+
+  const run = (prompt, options = {}) => createTasksMiddleware({
+    now: () => NOW_MS, ...options,
+  })(storeState(prompt));
+
+  const missionId = () => sessionFallbackMissionId(SESSION_ID, new Date(NOW_MS));
+  const storeDir = () => path.join(projectRoot, '.git', 'artibot');
+  const yamlPath = () => path.join(projectRoot, '.artibot', 'state.yaml');
+  const eventsNamed = (name) => readLedgerCensus(projectRoot)
+    .events.filter((e) => e.event === name);
+
+  it('pairs mission.created with one state.updated and writes the store under the git common dir', async () => {
+    const result = await run(SUBSTANTIVE);
+    const id = missionId();
+
+    const created = eventsNamed('mission.created');
+    const updated = eventsNamed('state.updated');
+    expect(created).toHaveLength(1);
+    expect(updated).toHaveLength(1);
+    expect(created[0].mission_id).toBe(id);
+    expect(updated[0].mission_id).toBe(id);
+    expect(updated[0].data.state_version).toBe(1);
+
+    const store = result.context.tasks.mission.store;
+    expect(store.status).toBe('written');
+    expect(store.location).toBe('git-common-dir');
+    expect(store.state_version).toBe(1);
+    expect(store.mission_id).toBe(id);
+
+    expect(existsSync(path.join(storeDir(), 'project-state.jsonl'))).toBe(true);
+    expect(existsSync(path.join(storeDir(), 'project-state.json'))).toBe(true);
+    expect(existsSync(yamlPath())).toBe(true);
+    expect(readFileSync(yamlPath(), 'utf8')).toContain(id);
+  });
+
+  it('bumps state_version to 2 on a second prompt while keeping exactly one mission', async () => {
+    const mw = createTasksMiddleware({ now: () => NOW_MS });
+    const first = await mw(storeState(SUBSTANTIVE));
+    const second = await mw(storeState(SUBSTANTIVE));
+
+    expect(eventsNamed('state.updated').map((e) => e.data.state_version)).toEqual([1, 2]);
+    expect(first.context.tasks.mission.store.state_version).toBe(1);
+    expect(second.context.tasks.mission.store.state_version).toBe(2);
+
+    // Two writes, ONE mission: the fallback id is a function of session + UTC
+    // day, so a second prompt must update the same record, not mint another.
+    const { records } = readJournal(path.join(storeDir(), 'project-state.jsonl'));
+    const ids = [...new Set(records
+      .filter((r) => r.kind === 'mission.upsert')
+      .map((r) => r.mission_id))];
+    expect(ids).toEqual([missionId()]);
+  });
+
+  it('skips the store entirely when the prompt is only a deferred candidate', async () => {
+    const result = await run(DEFERRED);
+
+    const store = result.context.tasks.mission.store;
+    expect(store.status).toBe('skipped');
+    expect(store.detail).toBe('no-mission-created');
+    expect(eventsNamed('mission.created')).toHaveLength(0);
+    expect(eventsNamed('state.updated')).toHaveLength(0);
+    // The deferral itself IS recorded, so absence of the store must not be
+    // read as "the middleware did nothing".
+    expect(eventsNamed('mission.candidate_deferred')).toHaveLength(1);
+    expect(existsSync(storeDir())).toBe(false);
+    expect(existsSync(yamlPath())).toBe(false);
+  });
+
+  it('skips the store when a substantive prompt carries no session id', async () => {
+    const state = storeState(SUBSTANTIVE);
+    delete state.input.hookData.session_id;
+    const result = await createTasksMiddleware({ now: () => NOW_MS })(state);
+
+    const mission = result.context.tasks.mission;
+    expect(mission.ledger).toBe('skipped:no-session-id');
+    expect(mission.store.status).toBe('skipped');
+    expect(mission.store.detail).toBe('no-mission-created');
+    expect(existsSync(storeDir())).toBe(false);
+    expect(existsSync(yamlPath())).toBe(false);
+  });
+
+  it('leaves the pre-existing return shape untouched for a state with no hook payload', async () => {
+    // `makeState()` verbatim — the same builder the suites above use. This is
+    // the additive-only claim stated as a test: nothing the wiring added may
+    // change what a caller without `hookData` already received.
+    const result = await createTasksMiddleware({ now: () => NOW_MS })(makeState());
+    const task = result.context.tasks;
+
+    expect(task.mission.store.status).toBe('skipped');
+    expect(task.meta).toBeUndefined();
+    expect(task.mode).toBe('subAgent');
+    expect(task.phases).toEqual(['execute', 'verify']);
+    expect(task.objective).toBe('build a dashboard');
+    expect(task.recommendedAgent).toBe('frontend-developer');
+  });
+
+  it('reports project-root-fallback and writes under .artibot/runtime when the git port yields null', async () => {
+    const result = await run(SUBSTANTIVE, { resolveGitCommonDir: () => null });
+
+    const store = result.context.tasks.mission.store;
+    expect(store.status).toBe('written');
+    expect(store.location).toBe('project-root-fallback');
+    expect(existsSync(path.join(projectRoot, '.artibot', 'runtime', 'project-state.jsonl')))
+      .toBe(true);
+    // The real `.git` is still there — the fallback came from the injected
+    // port, so this also proves the port is the only thing consulted.
+    expect(existsSync(storeDir())).toBe(false);
+  });
+
+  it('fails open: a store directory blocked by a file changes no other field', async () => {
+    // A FILE where the store directory must be. `ensureDirSync` throws EEXIST
+    // on this, and it is a failure that can be injected identically on Windows
+    // and POSIX — unlike a chmod, which Windows does not honour.
+    writeFileSync(storeDir(), 'not a directory\n');
+
+    const result = await run(SUBSTANTIVE);
+    const task = result.context.tasks;
+
+    expect(task.mission.ledger).toBe('appended');
+    expect(task.mission.ok).toBe(true);
+    expect(task.mission.mode).toBe('reduced');
+    expect(task.mode).toBe('subAgent');
+    expect(task.phases).toEqual(['execute', 'verify']);
+    expect(eventsNamed('mission.created')).toHaveLength(1);
+
+    expect(task.mission.store.status).not.toBe('written');
+    expect(['error', 'rejected']).toContain(task.mission.store.status);
   });
 });

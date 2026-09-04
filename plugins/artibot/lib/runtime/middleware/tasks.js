@@ -25,6 +25,9 @@ import { buildWorkflowPlan } from '../../cognitive/workflow-plan.js';
 import { compileMission } from '../../mission/compiler.js';
 import { getTaskBudgetForEffort } from '../task-budget.js';
 import { appendLedgerEvent } from '../ledger.js';
+import { sessionFallbackMissionId } from '../event-writer.js';
+import { createStateStore } from '../../project-state/state-manager.js';
+import { resolveGitCommonDir } from '../../project-state/git-common-dir.js';
 import { recordWorkflowPlanDecision, resolveDecisionRunId } from '../../observability/decision-events.js';
 
 function makeTaskId(nowFn) {
@@ -63,7 +66,7 @@ function readEffortMeta(pluginRoot) {
 }
 
 // ---------------------------------------------------------------------------
-// Mission compile (T-25) — OBSERVE ONLY
+// Mission compile (T-25) + the paired StateStore write
 //
 // `compileMission()` runs for EVERY prompt. It deliberately does NOT inherit
 // the `mode === 'agentTeam'` condition that gates `buildWorkflowPlan` below:
@@ -71,10 +74,32 @@ function readEffortMeta(pluginRoot) {
 // system1 has no Observe denominator (design §3.5; compiler.js module header).
 // system1 receives the REDUCED contract instead.
 //
-// Nothing here changes behavior. The compiled contract is recorded on the task
-// envelope, one line is appended to the central ledger, and every failure is
-// swallowed into a status field. No file under `.artibot/**` is created by
-// this block other than the ledger's own append (intent.md is T-40's).
+// WHAT THIS BLOCK WRITES — the old claim is RETIRED, not softened. This header
+// used to read "No file under `.artibot/**` is created by this block other than
+// the ledger's own append". That sentence is now false, so it is replaced
+// rather than qualified: a stale exemption is worse than no exemption, because
+// the next reader takes it as permission. A substantive prompt now touches
+// three paths, not one:
+//
+//   <projectRoot>/.artibot/runtime/ledger.jsonl          the append (history)
+//   <git-common-dir>/artibot/project-state.{json,jsonl}  the store  (now)
+//   <projectRoot>/.artibot/state.yaml                    the projection (view)
+//
+// The store sits under the GIT COMMON DIR, never under a worktree's own
+// `.artibot/` — decision F3, restated at length in
+// `lib/project-state/state-manager.js`'s module header: every linked worktree
+// shares one common dir, and a per-worktree store is the measured failure the
+// design rejects, where each `/split` window keeps its own divergent copy.
+//
+// `state.yaml` is a PROJECTION, and the leader's ruling is that it sits OUTSIDE
+// the zero-artifact rule (ADDENDUM-HARDENING §1.1). It is regenerated from the
+// store after every commit and is never read back as truth, so deleting it
+// loses nothing — which is precisely what makes it not an artifact. The store
+// and the ledger are the two records; this file is a view of one of them.
+//
+// Behavior is still unchanged for the caller. A compile failure, a refused
+// append and a refused store write are all swallowed into status fields: the
+// prompt has to survive its own bookkeeping (intent.md is still T-40's).
 // ---------------------------------------------------------------------------
 
 /**
@@ -151,6 +176,46 @@ function resolveSessionId(state) {
 }
 
 /**
+ * The mission title, capped.
+ *
+ * EXTRACTED so the ledger line and the store row cannot drift apart. They have
+ * to agree by construction, not because two call sites happen to spell the same
+ * expression today: `/doctor` Check 8 pairs a `mission.created` event with the
+ * store entry it created, and a title that matched when it was written and
+ * diverged three edits later is a mismatch nobody would think to look for.
+ *
+ * @param {object} result `compileMission()` output
+ * @param {string} prompt raw prompt, the fallback when the contract has no goal
+ * @returns {string} the goal (or prompt) truncated to MISSION_TITLE_MAX
+ */
+function missionTitle(result, prompt) {
+  const goal = typeof result.contract?.goal === 'string' && result.contract.goal.length > 0
+    ? result.contract.goal
+    : prompt;
+  return String(goal).slice(0, MISSION_TITLE_MAX);
+}
+
+/**
+ * The intent revision for this compile.
+ *
+ * No revision source exists in Phase 0 — `intent_revision` is the caller's,
+ * copied through by `compiler.js#assignOptionalFields`, and this caller has
+ * none, so a first compile is revision 1. Revisions are T-24's.
+ *
+ * EXTRACTED for the same reason as {@link missionTitle}: the ledger's
+ * `intent_revision` and the store's `mission.intent.revision` are ONE fact, and
+ * the pairing stays checkable only while they stay one expression.
+ *
+ * @param {object} result `compileMission()` output
+ * @returns {number} an integer >= 1
+ */
+function missionIntentRevision(result) {
+  return Number.isInteger(result.contract?.intent_revision)
+    ? result.contract.intent_revision
+    : 1;
+}
+
+/**
  * The `data` object for one mission ledger line — the minimum each event's
  * allowlist entry requires, and nothing else.
  *
@@ -165,18 +230,9 @@ function resolveSessionId(state) {
  */
 function buildMissionLedgerData(eventName, result, prompt) {
   if (eventName === 'mission.created') {
-    const goal = typeof result.contract?.goal === 'string' && result.contract.goal.length > 0
-      ? result.contract.goal
-      : prompt;
     return {
-      title: String(goal).slice(0, MISSION_TITLE_MAX),
-      // No revision source exists in Phase 0 — `intent_revision` is the
-      // caller's, copied through by `compiler.js#assignOptionalFields`, and
-      // this caller has none, so a first compile is revision 1. Revisions
-      // are T-24's.
-      intent_revision: Number.isInteger(result.contract?.intent_revision)
-        ? result.contract.intent_revision
-        : 1,
+      title: missionTitle(result, prompt),
+      intent_revision: missionIntentRevision(result),
     };
   }
   return {
@@ -230,13 +286,194 @@ function appendMissionEvent(state, result, now) {
 }
 
 /**
+ * `reason` recorded on the `state.updated` event this write emits.
+ *
+ * Deliberately the NAME OF THE PAIRED EVENT rather than a prose description:
+ * `/doctor` Check 8 matches store writes to `mission.created` appends, and a
+ * reader who has only the `state.updated` line needs to know which event it was
+ * paired with, not how the author felt about it.
+ */
+const MISSION_STORE_REASON = 'mission.created';
+
+/**
+ * The `task.mission.store` value for a prompt that wrote nothing.
+ *
+ * A FACTORY, not a frozen constant: the shape carries a mutable `warnings`
+ * array, and a shared literal would let one caller's push be observed by every
+ * later prompt in the process.
+ *
+ * The field is ALWAYS present, on every branch, including compile failure. An
+ * absent key and a key reading `skipped` are different claims — the first says
+ * "this middleware does not do stores", which stopped being true — and a census
+ * over the envelope cannot count what is not there.
+ *
+ * @param {string} detail why nothing was written
+ * @returns {object} the skipped store record
+ */
+function skippedMissionStore(detail) {
+  return {
+    status: 'skipped',
+    detail,
+    state_version: null,
+    mission_id: null,
+    location: null,
+    warnings: [],
+  };
+}
+
+/**
+ * Reduce a `updateMission` commit result to the reported store record.
+ *
+ * `conflict` is kept DISTINCT from `rejected` even though both are `ok:false`.
+ * A conflict means someone else won a race and this write can simply be retried;
+ * a rejection means the draft was invalid and retrying it forever would not
+ * help. Folding them together would make a permanent defect look like noise.
+ *
+ * @param {object} commit `updateMission()` result
+ * @param {string} missionId the mission the write was for
+ * @param {string} location `store.location.source`
+ * @returns {object} the `task.mission.store` value
+ */
+function summarizeMissionCommit(commit, missionId, location) {
+  const warnings = Array.isArray(commit?.warnings) ? commit.warnings : [];
+  if (commit?.ok) {
+    return {
+      status: 'written',
+      detail: null,
+      state_version: Number.isInteger(commit.state_version) ? commit.state_version : null,
+      mission_id: missionId,
+      location,
+      warnings,
+    };
+  }
+  return {
+    status: commit?.conflict === true ? 'conflict' : 'rejected',
+    detail: Array.isArray(commit?.errors) && commit.errors.length > 0
+      ? commit.errors.join('; ')
+      : null,
+    state_version: null,
+    mission_id: missionId,
+    location,
+    warnings,
+  };
+}
+
+/**
+ * The mutation applied to the mission row.
+ *
+ * PRESERVING, not replacing. The same session's second substantive prompt
+ * arrives under the SAME fallback mission id — `sessionFallbackMissionId` is a
+ * pure function of the session id and the UTC date — so this runs against a
+ * mission that may already be `executing` with a controller and a plan. Only
+ * `title` and `intent` are authored here; resetting `status` to `queued` would
+ * walk a running mission backwards, and the store would faithfully record the
+ * lie.
+ *
+ * @param {string} missionId mission the row belongs to
+ * @param {string} title from {@link missionTitle}
+ * @param {number} revision from {@link missionIntentRevision}
+ * @returns {(current: object|null) => object} mutator for `updateMission`
+ */
+function missionMutator(missionId, title, revision) {
+  return (current) => ({
+    ...(current ?? {}),
+    title,
+    status: current?.status ?? 'queued',
+    // Reference form only. `validateMission` checks `{path, revision}` and
+    // deliberately does NOT check that the file exists — writing intent.md is
+    // T-40's, and a store that refused a reference to a not-yet-authored file
+    // could never hold a mission at all.
+    intent: { path: `missions/${missionId}/intent.md`, revision },
+    plan: current?.plan ?? { path: `missions/${missionId}/plan.md`, revision: 1 },
+  });
+}
+
+/**
+ * Record the mission in the StateStore, 1:1 with the `mission.created` append.
+ *
+ * Called ONLY after that append succeeded. A store row whose mission has no
+ * `mission.created` event is an orphan by the design's own definition
+ * (`/doctor` Check 8-③), so a failed or skipped append must not be followed by
+ * a store write that invents one.
+ *
+ * FAIL-OPEN, in full. Every failure — a bad project root, a store constructor
+ * TypeError, a refused ledger port inside the commit — becomes a status string.
+ * Nothing here may throw, and nothing here may alter any other field of the
+ * middleware's return value: this is bookkeeping attached to a user prompt.
+ *
+ * @param {object} state middleware state
+ * @param {object} result `compileMission()` output
+ * @param {() => number} now epoch-ms clock (converted to the store's `() => Date`)
+ * @param {{resolveGitCommonDir: (root: string) => string|null}} deps injected ports
+ * @returns {object} the `task.mission.store` value
+ */
+function recordMissionState(state, result, now, deps) {
+  try {
+    const projectRoot = resolveProjectRoot(state);
+    const sessionId = resolveSessionId(state);
+    // Both are guaranteed by the append that gated this call; re-read rather
+    // than passed so this function has no hidden precondition on its caller.
+    if (!projectRoot || !sessionId) return skippedMissionStore('no-project-root-or-session-id');
+
+    // THE SAME FUNCTION AND THE SAME INSTANT the writer used for the append.
+    // `event-writer.js#buildEnvelope` derives the fallback id this way when a
+    // caller supplies no `mission_id`; deriving it any other way here (there is
+    // a same-named function in `lib/mission/mission-id.js` with a different
+    // signature) would pair the two events under two different missions.
+    const missionId = sessionFallbackMissionId(sessionId, new Date(now()));
+    if (!missionId) return skippedMissionStore('no-mission-id');
+
+    const store = createStateStore({
+      projectRoot,
+      sessionId,
+      // `state.updated` registers no `sources` restriction, and this middleware
+      // runs inside the UserPromptSubmit hook pipeline, so 'hook' is the honest
+      // value — not the store's 'supervisor' default, which names a process
+      // that is not running.
+      source: 'hook',
+      now: () => new Date(now()),
+      appendEvent: (envelope) => appendLedgerEvent(projectRoot, envelope),
+      resolveGitCommonDir: () => deps.resolveGitCommonDir(projectRoot),
+    });
+
+    const mutator = missionMutator(
+      missionId, missionTitle(result, String(state.input?.prompt ?? '')), missionIntentRevision(result),
+    );
+    const opts = { reason: MISSION_STORE_REASON };
+    let commit = store.updateMission(missionId, mutator, {
+      ...opts, expectedVersion: store.getState().state_version,
+    });
+    // ONE retry, not a loop. A second conflict means sustained contention, and
+    // a hook that spins on a lock delays the user's prompt to fix bookkeeping.
+    if (commit.conflict === true) {
+      commit = store.updateMission(missionId, mutator, {
+        ...opts, expectedVersion: store.getState().state_version,
+      });
+    }
+    return summarizeMissionCommit(commit, missionId, store.location.source);
+  } catch (err) {
+    return {
+      status: 'error',
+      detail: err?.message ?? 'store-threw',
+      // Null because nothing committed. Reporting the id here would suggest a
+      // row exists under it, which is the one thing this branch knows is false.
+      state_version: null,
+      mission_id: null,
+      location: null,
+      warnings: [],
+    };
+  }
+}
+
+/**
  * Compile the prompt into a Mission Contract and record it.
  *
  * @param {object} state
  * @param {() => number} now
+ * @param {{resolveGitCommonDir: (root: string) => string|null}} deps injected ports
  * @returns {object} the value for `task.mission`
  */
-function recordMissionCompile(state, now) {
+function recordMissionCompile(state, now, deps) {
   try {
     const result = compileMission({
       prompt: String(state.input?.prompt ?? ''),
@@ -255,22 +492,43 @@ function recordMissionCompile(state, now) {
       substantive: result.substantive,
       deferred: result.deferred,
       ledger: ledger.status,
+      // Gated on the APPEND, not on the compile. `mission.candidate_deferred`
+      // is a successful append of a non-mission, and a store row for it would
+      // be a mission the ledger never opened.
+      store: ledger.ok && ledger.event === 'mission.created'
+        ? recordMissionState(state, result, now, deps)
+        : skippedMissionStore('no-mission-created'),
       ok: true,
     };
   } catch (err) {
-    // A compile failure is recorded, not raised. Observe-only means the
-    // prompt must survive its own bookkeeping.
-    return { ok: false, error: err?.message ?? 'compile-failed', ledger: 'skipped:compile-failed' };
+    // A compile failure is recorded, not raised. The prompt must survive its
+    // own bookkeeping.
+    return {
+      ok: false,
+      error: err?.message ?? 'compile-failed',
+      ledger: 'skipped:compile-failed',
+      store: skippedMissionStore('no-mission-created'),
+    };
   }
 }
 
 /**
  * @param {object} [options]
  * @param {() => number} [options.now] - Clock injection for deterministic tests.
+ * @param {(projectRoot: string) => string|null} [options.resolveGitCommonDir] - Git
+ *   port for the StateStore's location rule (decision F3). Injected the same way
+ *   as `now`, and for the same reason: the default reads the filesystem, so a
+ *   test that could not replace it would be asserting against whatever
+ *   repository the suite happens to run inside. Contract: returns the absolute
+ *   common dir or `null`, and NEVER throws — a `null` selects the reported
+ *   `project-root-fallback` location rather than failing the write.
  * @returns {(state: object) => Promise<object>}
  */
 export function createTasksMiddleware(options = {}) {
   const now = options.now || Date.now;
+  const missionDeps = {
+    resolveGitCommonDir: options.resolveGitCommonDir || resolveGitCommonDir,
+  };
 
   return async function tasksMiddleware(state) {
     const routingSystem = state.context.routing?.system || 'system1';
@@ -348,7 +606,7 @@ export function createTasksMiddleware(options = {}) {
     // outside the `agentTeam` branch above on purpose (§3.5). Recorded on
     // `task.mission`, a sibling of `task.meta` — see the deviation note in the
     // module header for why not `task.meta.missionContract`.
-    task.mission = recordMissionCompile(state, now);
+    task.mission = recordMissionCompile(state, now, missionDeps);
 
     state.context.tasks = task;
     state.messageParts.push(`task=${mode}`);
