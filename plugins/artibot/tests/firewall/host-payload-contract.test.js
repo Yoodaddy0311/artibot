@@ -25,10 +25,12 @@
  * ── WHAT THIS GATE CANNOT SEE (rules §9) ────────────────────────────────────
  *   - WHETHER THE HOST ACTUALLY HONOURS THE 5000 TIMEOUT, or whether a timeout
  *     is non-blocking as the host docs say. Nothing here spawns a real host.
- *   - REGISTRATION. `hooks.json` matcher syntax is checked structurally below,
- *     never by observing the host fire it. The D0 probe measured `"Agent"` as
- *     a plain-string matcher through `--settings`; the expression form
- *     `tool == "Agent"` used in `hooks.json` is what the D2 live burn measures.
+ *   - REGISTRATION. `hooks.json` registers the PLAIN STRING `"Agent"` (see the
+ *     matcher assertion below for the A/B that decided it), and this file only
+ *     checks that registration structurally — never by observing the host fire
+ *     it through `hooks.json`. The D2 burn fired the hook through a temporary
+ *     `--settings`, so "the installed plugin's own registration works" stays
+ *     unmeasured until D3.
  *   - LATENCY. A node process now starts before every Agent spawn. Unmeasured.
  *   - THE OTHER PreToolUse HOOKS. This file judges one script; a sibling hook
  *     that starts writing stdout is invisible here.
