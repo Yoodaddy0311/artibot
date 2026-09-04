@@ -28,6 +28,10 @@
  * (`limbs[].branchMatches === false`) still counts as present. The gate is
  * worktree existence; the branch mismatch is surfaced per limb for `status`
  * to show, and the completion reader will report `no-branch` for it later.
+ * `limbs[].branchRelocatedByHook` narrows that display: it says the observed
+ * branch is exactly the planned one under the autopilot prefix, i.e. the
+ * SessionStart hook took it over. Also not a gate — `status` shows it so an
+ * operator stops re-reading porcelain by hand.
  *
  * Idempotence: same inputs → deep-equal output, inputs untouched. Re-running
  * dispatch re-issues the same messages; that is intended ("재발행"). The
@@ -50,6 +54,25 @@ import { limbNames } from './limb-completion.js';
 
 /** Env var Claude Code exports into a session's shell when messaging is on. */
 export const MESSAGING_SOCKET_ENV = 'CLAUDE_CODE_MESSAGING_SOCKET';
+
+/**
+ * Prefix the autopilot SessionStart hook puts in front of a branch it takes
+ * over (`scripts/hooks/git-autopilot-session.js` `branchPrefix`, default
+ * `artibot/`). Used only to LABEL an observed mismatch, never to decide one.
+ *
+ * The hook now stays put on a limb branch, so a limb should never wear this
+ * prefix again. The label exists for the worktrees that already do, and for
+ * an operator running a build from before that fix: on 2026-09-04 all four
+ * limbs were relocated and `branchMatches:false` alone could not say WHY, so
+ * the leader had to read the porcelain by hand and resync `plan.json`
+ * (`.artibot/split/gotchas.md` #18, #22).
+ *
+ * Literal rather than imported: `branchPrefix` is per-repo config the hook
+ * reads at runtime from `.git/autopilot.json`, and this module is pure — it
+ * has no repo to read it from. A repo that configured a different prefix will
+ * simply not get the label, which is the safe direction for a display field.
+ */
+const AUTOPILOT_RELOCATION_PREFIX = 'artibot/';
 
 /**
  * Normalise a filesystem path for equality: resolved, forward slashes, no
@@ -268,7 +291,7 @@ export function buildLimbMessage(plan, limb) {
  * @returns {Readonly<{
  *   status: 'ready'|'refused'|'unavailable',
  *   reasons: ReadonlyArray<string>,
- *   limbs: ReadonlyArray<{ limb: string, worktreePath: string, branch: string, worktreeExists: boolean, branchMatches: boolean|null, sessions: ReadonlyArray<string>, windowOpen: boolean }>,
+ *   limbs: ReadonlyArray<{ limb: string, worktreePath: string, branch: string, worktreeExists: boolean, branchMatches: boolean|null, branchRelocatedByHook: boolean|null, sessions: ReadonlyArray<string>, windowOpen: boolean }>,
  *   missingWorktrees: ReadonlyArray<string>,
  *   unopenedWindows: ReadonlyArray<string>,
  *   ambiguousWindows: ReadonlyArray<string>,
@@ -293,6 +316,12 @@ export function resolveDispatch({
       branch: String(l?.branch ?? ''),
       worktreeExists: wt !== undefined,
       branchMatches: wt ? (wt.branch ?? null) === (l?.branch ?? null) : null,
+      // Null, not false, when there is no worktree: "not observed" and
+      // "observed and not relocated" are different answers, and `status`
+      // renders them differently. Same three-valued shape as branchMatches.
+      branchRelocatedByHook: wt
+        ? (wt.branch ?? null) === `${AUTOPILOT_RELOCATION_PREFIX}${l?.branch ?? ''}`
+        : null,
       sessions: Object.freeze(matches),
       windowOpen: matches.length === 1,
     });

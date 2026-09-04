@@ -108,6 +108,56 @@ describe('dispatch — 준비 완료 경로', () => {
   });
 });
 
+describe('dispatch — 훅이 옮긴 브랜치 표시 (gotchas #18/#22)', () => {
+  // 2026-09-04 실측: SessionStart 훅이 4/4 줄기 브랜치를 `artibot/` 접두로 옮겼고
+  // `branchMatches:false` 만으로는 "브랜치가 다르다" 까지밖에 말하지 못했다.
+  // 리더는 그 차이를 손으로 읽어 plan.json 을 동기화했다. 이 필드는 그 판독을
+  // 자동화한다 — 게이트가 아니라 표시다(문서 §설계 dispatch, 무게 불변).
+  const RELOCATED = deepFreeze([
+    { path: process.platform === 'win32' ? 'C:/proj' : '/proj', head: 'aaa', branch: 'master', bare: false, detached: false },
+    { path: `${ROOT}/split-rr-auth`, head: 'bbb', branch: 'artibot/worktree-split-rr-auth', bare: false, detached: false },
+    { path: `${ROOT}/split-rr-api/`, head: 'ccc', branch: 'worktree-split-rr-api', bare: false, detached: false },
+  ]);
+
+  it('actual === "artibot/" + planned 인 줄기만 true 로 표시한다', () => {
+    const r = resolveDispatch({ plan: PLAN, worktrees: RELOCATED, sessions: SESSIONS, messaging: OK });
+    expect(r.limbs.map((l) => [l.limb, l.branchMatches, l.branchRelocatedByHook])).toEqual([
+      ['auth', false, true],
+      ['api', true, false],
+    ]);
+  });
+
+  it('표시일 뿐 게이트가 아니다 — 옮겨진 줄기도 ready 이고 메시지를 받는다', () => {
+    // worktree 실재가 게이트라는 기존 결정(모듈 헤더 "NOT a gate")을 유지한다.
+    const r = resolveDispatch({ plan: PLAN, worktrees: RELOCATED, sessions: SESSIONS, messaging: OK });
+    expect(r.status).toBe('ready');
+    expect(r.messages).toHaveLength(2);
+  });
+
+  it('worktree 가 없으면 branchMatches 와 같이 null 이다 (모른다 ≠ 아니다)', () => {
+    const r = resolveDispatch({ plan: PLAN, worktrees: [], sessions: SESSIONS, messaging: OK });
+    expect(r.limbs.map((l) => [l.branchMatches, l.branchRelocatedByHook])).toEqual([
+      [null, null],
+      [null, null],
+    ]);
+  });
+
+  it('다른 이유로 브랜치가 다르면 false 다 — 접두 일치만 인정한다', () => {
+    // `artibot/` 이 아닌 어떤 불일치도 "훅이 옮겼다" 로 읽히면 안 된다.
+    const other = [{ path: `${ROOT}/split-rr-auth`, head: 'bbb', branch: 'feature/x', bare: false, detached: false }];
+    const r = resolveDispatch({ plan: PLAN, worktrees: other, sessions: SESSIONS, messaging: OK });
+    expect(r.limbs[0].branchRelocatedByHook).toBe(false);
+  });
+
+  it('키 순서를 포함해 기존 필드가 그대로다 (판독기·직렬화 호환)', () => {
+    const r = resolveDispatch({ plan: PLAN, worktrees: WORKTREES, sessions: SESSIONS, messaging: OK });
+    expect(Object.keys(r.limbs[0])).toEqual([
+      'limb', 'worktreePath', 'branch', 'worktreeExists', 'branchMatches',
+      'branchRelocatedByHook', 'sessions', 'windowOpen',
+    ]);
+  });
+});
+
 describe('dispatch — 멱등·부작용 0', () => {
   it('같은 관측으로 두 번 판정하면 결과가 deep-equal 이고 입력이 변하지 않는다', () => {
     const before = [snapshot(PLAN), snapshot(WORKTREES), snapshot(SESSIONS), snapshot(OK)];

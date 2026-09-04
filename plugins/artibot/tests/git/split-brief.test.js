@@ -46,6 +46,43 @@ afterEach(() => {
 
 const ALL_VARS = Object.freeze(Object.fromEntries(PROMPT_PLACEHOLDERS.map((k) => [k, `<${k.toLowerCase()}>`])));
 
+describe('shipped PROMPT-TEMPLATE.md — 줄기 내부 팬아웃 절 (gotchas #16 · #21 · #24)', () => {
+  // 2026-09-04 실측: 4창 중 3창이 팀원을 한 명도 띄우지 않고 혼자 일했다.
+  // 템플릿이 팀원 스폰을 이름 규칙으로만 언급했기 때문이다.
+  //
+  // 이 절은 정적 텍스트여야 한다 — 새 {PLACEHOLDER} 를 만들면
+  // lib/git/split-brief.js#PROMPT_PLACEHOLDERS 허용목록에 등록해야 하고,
+  // 그순간 산문이 코드가 된다(미등록 플레이스홀더는 refuse 로 떨어진다).
+  //
+  // 이 테스트가 못 보는 것: 창이 실제로 팬아웃을 하는지. 그건 스폰 원장이
+  // 답하며(scripts/split/fanout-probe.mjs), 문서는 필요조건일 뿐이다.
+  const tpl = readMd('templates/split/PROMPT-TEMPLATE.md');
+
+  it('팬아웃 절이 실재하고 렌더 결과에도 살아남는다', () => {
+    expect(tpl).toContain('줄기 내부 팬아웃');
+    const out = renderPrompt(tpl, ALL_VARS);
+    expect(out).toContain('줄기 내부 팬아웃');
+    expect(out).not.toMatch(/\{[A-Z][A-Z0-9_]*\}/);
+  });
+
+  it.each([
+    ['분해 권장 단위', /분해 권장 단위/],
+    ['창은 배정·검증·커밋만 (#16)', /배정·검증·커밋뿐이다/],
+    ['모델은 resolveModel 이 정본', /resolveModel/],
+    ['모델 ID 하드코딩 금지', /모델 ID 를 프롬프트에 하드코딩하지 않는다/],
+    ['팀원 스폰에 보고 계약 삽입 (#24)', /\[보고 계약\] 8줄을 그대로 삽입/],
+    ['스폰 원장이 관측점', /spawns\.ndjson/],
+    ['계수 축은 start ∪ stop distinct', /start ∪ stop/],
+    ['ref 조작 금지 (#21)', /branch -f \/ `-m` \/ `-D`|ref 조작 금지/],
+  ])('팬아웃 절에 "%s" 규약이 있다', (_label, re) => {
+    expect(tpl).toMatch(re);
+  });
+
+  it('새 플레이스홀더를 만들지 않았다 — 허용목록이 정본이다', () => {
+    const used = new Set([...tpl.matchAll(/\{([A-Z][A-Z0-9_]*)\}/g)].map((m) => m[1]));
+    for (const k of used) expect(PROMPT_PLACEHOLDERS, `\${k} \uac00 \ud5c8\uc6a9\ubaa9\ub85d \ubc16\uc774\ub2e4`).toContain(k);
+  });
+});
 describe('renderPrompt', () => {
   it('substitutes every documented placeholder', () => {
     const template = PROMPT_PLACEHOLDERS.map((k) => `${k}={${k}}`).join('\n');

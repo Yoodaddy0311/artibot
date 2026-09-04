@@ -21,6 +21,43 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
  * land in the developer's own learning store: `category:'NonexistentToolXYZ'`
  * rows (a tool that does not exist) were measured there. Disabling
  * checkpoint/memory below is not enough — the tracker writes elsewhere.
+ *
+ * TWO redirections, for two different blast radii — the second one matches
+ * `sessionstart-dispatcher.test.js`, which had to add it after a measured
+ * incident. `spawnHook` passes no `cwd`
+ * (`scripts/hooks/_dispatcher-utils.js:126`), so every grand-child inherits
+ * whatever cwd this file hands the dispatcher: the cwd below is load-bearing,
+ * not incidental.
+ *
+ *  - HOME/USERPROFILE -> throwaway dir (above).
+ *
+ *  - cwd -> throwaway NON-git dir. None of the 11 PostToolUse hooks is a
+ *    git-autopilot hook (measured 2026-09-04T05:03Z against `HOOKS`), so
+ *    unlike SessionStart there is no `checkout -b` to prevent here. Three
+ *    hooks do reach the repository through `process.cwd()`, and all three
+ *    reads are read-only:
+ *      * `pre-write-guard.js:73-79` resolves the repo root from cwd and tests
+ *        it for the Artibot marker, purely to decide whether to advise.
+ *      * `post-write-tdd.js:102` gates on `isArtibotRepo(getRepoRoot())`.
+ *      * `tool-tracker.js:239` takes `basename(resolveProjectRoot(...))` as a
+ *        label; with no payload `cwd`, `resolveProjectRoot` falls back to
+ *        `process.cwd()` (`lib/git/project-root.js:122-124`) and the label
+ *        becomes the sandbox directory name. The row itself is written under
+ *        the sandbox HOME either way.
+ *    MEASURED, baseline run 2026-09-04T05:03:18Z (31/31 pass across the three
+ *    dispatcher suites): no repo artifact moved — worktree `autopilot.json`
+ *    absent before and after, HEAD/branch/reflog/`artibot/*` identical,
+ *    `git status --porcelain` 0 lines both sides.
+ *
+ *    The redirection is therefore defense in depth plus uniformity, not a
+ *    repair of an observed leak: it makes the cwd of every dispatcher suite
+ *    structurally incapable of reaching a repository, which is what
+ *    `tests/firewall/dispatcher-cwd-sandbox-required.test.js` enforces.
+ *
+ *    NOT output-neutral in one direction, and the assertions below survive it:
+ *    `pre-write-guard` now takes its "not an Artibot repo" early return and
+ *    stops advising. Nothing here asserts on its advice — the one positive
+ *    stdout assertion is `zero-result-guard`, which is cwd-independent.
  */
 
 const PLUGIN_ROOT = path.resolve(
@@ -29,16 +66,50 @@ const PLUGIN_ROOT = path.resolve(
 );
 const SCRIPT_PATH = path.join(PLUGIN_ROOT, 'scripts', 'hooks', '_posttooluse-dispatcher.js');
 
-/** Throwaway home for the spawned dispatcher. */
+/** Throwaway home and working directory for the spawned dispatcher. */
 let sandboxHome;
+let sandboxCwd;
 
 beforeAll(() => {
   sandboxHome = mkdtempSync(path.join(tmpdir(), 'artibot-posttooluse-'));
+  sandboxCwd = mkdtempSync(path.join(tmpdir(), 'artibot-posttooluse-cwd-'));
 });
 
 afterAll(() => {
   if (sandboxHome) rmSync(sandboxHome, { recursive: true, force: true });
+  if (sandboxCwd) rmSync(sandboxCwd, { recursive: true, force: true });
 });
+
+/**
+ * Spawn options for the dispatcher, in ONE place so the isolation self-check
+ * at the bottom reads the same `cwd` the real spawns use. Inlining `cwd:` at
+ * the call site instead lets the two drift, and the self-check then passes
+ * vacuously: measured 2026-09-04T05:13Z, the first draft of this file kept
+ * asserting on the sandbox while the spawn had been pointed back at the
+ * checkout, and reported green. The indirection is the detector.
+ *
+ * @param {Record<string,string>} [env] extra environment for this spawn
+ * @returns {import('node:child_process').ExecFileSyncOptions}
+ */
+function spawnOptions(env = {}) {
+  return {
+    cwd: sandboxCwd,
+    env: {
+      ...process.env,
+      CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT,
+      // getHomeDir() reads USERPROFILE then HOME — both must point at the
+      // sandbox or the real learning store gets the fixtures.
+      USERPROFILE: sandboxHome,
+      HOME: sandboxHome,
+      ARTIBOT_RUNTIME_CHECKPOINT_DISABLE: '1',
+      ARTIBOT_RUNTIME_MEMORY_DISABLE: '1',
+      ...env,
+    },
+    encoding: 'utf-8',
+    timeout: 35000,
+    stdio: ['pipe', 'pipe', 'pipe'],
+  };
+}
 
 function runDispatcher(payload, env = {}) {
   let stdout;
@@ -47,24 +118,7 @@ function runDispatcher(payload, env = {}) {
     stdout = execFileSync(
       process.execPath,
       [SCRIPT_PATH],
-      {
-        cwd: PLUGIN_ROOT,
-        env: {
-          ...process.env,
-          CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT,
-          // getHomeDir() reads USERPROFILE then HOME — both must point at the
-          // sandbox or the real learning store gets the fixtures.
-          USERPROFILE: sandboxHome,
-          HOME: sandboxHome,
-          ARTIBOT_RUNTIME_CHECKPOINT_DISABLE: '1',
-          ARTIBOT_RUNTIME_MEMORY_DISABLE: '1',
-          ...env,
-        },
-        input: JSON.stringify(payload),
-        encoding: 'utf-8',
-        timeout: 35000,
-        stdio: ['pipe', 'pipe', 'pipe'],
-      },
+      { ...spawnOptions(env), input: JSON.stringify(payload) },
     );
   } catch (err) {
     status = typeof err.status === 'number' ? err.status : 1;
@@ -215,5 +269,55 @@ describe('_posttooluse-dispatcher (integration)', () => {
     const selected = mod.selectHooks('MultiEdit').map((h) => h.name);
     expect(selected).toContain('mark-main-agent-edit');
     expect(selected).toContain('tool-tracker');
+  });
+
+  /**
+   * Isolation self-check — asserted, not assumed.
+   *
+   * STRUCTURAL, not data-driven: the cwd handed to the dispatcher is not
+   * inside any git repository, so every `git rev-parse --show-toplevel` a
+   * grand-child runs from it fails and the hook returns before reading or
+   * writing. That is what makes the isolation independent of a mutable flag —
+   * see `sessionstart-dispatcher.test.js`, where gating on data was the bug.
+   *
+   * The second half re-reads the working tree afterwards: a hook that writes
+   * a formatted file or a recovery artifact into the checkout would show up
+   * as a `git status --porcelain` line. `-z` because this repository has
+   * Korean paths and `core.quotepath` is on by default — the byte count is
+   * compared, not a parsed list, so the assertion needs no path decoding.
+   *
+   * WHAT THIS DOES NOT COVER: writes a hook reaches by absolute path rather
+   * than through HOME or cwd. `CLAUDE_PLUGIN_ROOT` still points at the real
+   * plugin, so writes under `plugins/artibot/runtime/` still land in the repo;
+   * they are gitignored (`plugins/artibot/.gitignore:10`) and therefore
+   * invisible to porcelain, which is why they are left alone. It also cannot
+   * see a concurrent operator edit — a failure here means read the diff
+   * before assuming the dispatcher did it.
+   */
+  it('leaves the real repository untouched (non-git cwd, working tree unchanged)', () => {
+    // Read through spawnOptions(), never from `sandboxCwd` directly — that is
+    // what makes this assertion go red if the spawn cwd is pointed back at
+    // the checkout.
+    expect(() => execFileSync('git', ['rev-parse', '--show-toplevel'], {
+      cwd: spawnOptions().cwd, stdio: ['pipe', 'pipe', 'pipe'],
+    })).toThrow();
+
+    const porcelain = () => {
+      try {
+        return execFileSync('git', ['status', '--porcelain', '-z'], {
+          cwd: PLUGIN_ROOT, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
+        });
+      } catch {
+        return '';
+      }
+    };
+
+    const before = porcelain();
+    const { status } = runDispatcher({
+      tool: 'Edit',
+      tool_input: { file_path: '/tmp/nonexistent.txt', old_string: 'a', new_string: 'b' },
+    });
+    expect(status).toBe(0);
+    expect(porcelain()).toBe(before);
   });
 });

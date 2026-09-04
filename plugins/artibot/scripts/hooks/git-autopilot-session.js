@@ -15,6 +15,7 @@ import { parseJSON, readStdin } from '../utils/index.js';
 import { createErrorHandler } from '../../lib/core/hook-utils.js';
 import { autoResolveAll } from './git-autopilot-merge.js';
 import { isAutopilotAllowed } from '../../lib/autopilot/repo-identity.js';
+import { BUILTIN_WORKTREE_BRANCH_PREFIX, isSplitLimbBranch } from '../../lib/git/repo-identity.js';
 import { resolveBaseBranch } from '../../lib/git/resolve-base.js';
 import { gitPath } from '../../lib/git/git-dir.js';
 import { isMainEntry } from './_main-entry.js';
@@ -239,6 +240,9 @@ const RELOCATABLE_BRANCH_NAME = /^[A-Za-z0-9_-]+$/;
  *     otherwise have HEAD silently yanked away on every SessionStart, risking
  *     commits landing on a stale sibling base.
  *   - Name allowlist: see {@link RELOCATABLE_BRANCH_NAME}.
+ *   - Built-in worktree: a `worktree-*` branch belongs to whoever asked for
+ *     the worktree (`/split` limbs, agent worktrees) and is the ref their own
+ *     status/landing machinery reads by name. See below.
  *
  * @param {string} cwd
  * @param {string} branchPrefix
@@ -251,6 +255,32 @@ function ensureAutopilotBranch(cwd, branchPrefix, currentBranch, config) {
 
   // Only branch names the hook may take over — everything else stays put.
   if (!RELOCATABLE_BRANCH_NAME.test(currentBranch)) return currentBranch;
+
+  // A branch the built-in worktree provider created stays put. The name gate
+  // above cannot catch these: `worktree-<name>` is pure `[A-Za-z0-9_-]`, so
+  // it is mechanically derivable and passes. But derivability is not
+  // ownership — whoever asked for the worktree owns that branch, and several
+  // readers resolve it BY NAME, so an `artibot/` prefix silently orphans it.
+  //
+  // Two measured relocations on 2026-09-04, which is why the rule is the
+  // PREFIX and not just the limb predicate:
+  //   - `/split` limbs: a full-repo `vitest` run fired this hook inside four
+  //     `/split` worktrees and moved all four. `isSplitLimbBranch` then
+  //     rejected the moved name, so `/split status` showed no limbs and
+  //     `land` reported `no-commits` on finished work (gotchas #18, #22).
+  //   - Agent worktrees, in a LIVE `claude -p` run with no test involved:
+  //     reflog 14:42:38 "moving from worktree-agent-a3725b933da90230d to
+  //     artibot/worktree-agent-a3725b933da90230d". Limb-only was too narrow.
+  //
+  // `isSplitLimbBranch` is subsumed by the prefix today (every limb branch
+  // starts with it) and is kept deliberately: it names WHY limbs must not
+  // move, and `tests/firewall/split-branch-prefix-guard.test.js` pins the tie
+  // to the module that owns the naming, so a future narrowing of the prefix
+  // cannot silently drop limbs. Both are asked here rather than folded into
+  // RELOCATABLE_BRANCH_NAME: that regex answers "is this name derivable", and
+  // a second copy of the worktree shape would drift from repo-identity.js.
+  if (isSplitLimbBranch(currentBranch)) return currentBranch;
+  if (currentBranch.startsWith(BUILTIN_WORKTREE_BRANCH_PREFIX)) return currentBranch;
 
   // Stay put when already on the canonical base/default branch.
   const base = resolveBaseBranch(cwd, config);

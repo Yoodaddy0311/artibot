@@ -17,11 +17,14 @@
  * unverified. Bare `split/…` is rejected — nothing the built-in provider
  * creates can look like that.
  *
- * This file pins three things:
+ * This file pins four things:
  *   1. the accepted limb prefixes are disjoint from the autopilot prefix
  *      (read from the manager's SOURCE, so a renamed constant turns this red);
  *   2. the manager's delete path still carries the `startsWith` guard;
- *   3. the naming helpers produce the measured shape and refuse `/` and `:`.
+ *   3. the naming helpers produce the measured shape and refuse `/` and `:`;
+ *   4. the SessionStart hook leaves every `worktree-*` branch where it is
+ *      before relocating HEAD (gotchas #18/#22 — 4/4 limbs on 2026-09-04,
+ *      plus a live `claude -p` run that moved an agent worktree branch).
  *
  * WHAT THIS GATE DOES NOT SEE:
  *   - whether `claude --worktree` still prefixes `worktree-` in a future CLI;
@@ -61,6 +64,59 @@ describe('worktree-manager delete allowlist (read from source)', () => {
 
   it('guards branch deletion with startsWith(AUTOPILOT_BRANCH_PREFIX)', () => {
     expect(managerSrc).toMatch(/if \(!branch\.startsWith\(AUTOPILOT_BRANCH_PREFIX\)\) return false;/);
+  });
+});
+
+describe('the SessionStart hook leaves split limb branches where they are', () => {
+  // Fourth pin, added 2026-09-04 after the measured incident in
+  // `.artibot/split/gotchas.md` #18/#22: `git-autopilot-session.js` relocated
+  // all four `/split` limbs onto `artibot/worktree-split-…`, which
+  // `isSplitLimbBranch` then rejected — `status` lost every limb and `land`
+  // read finished work as `no-commits`.
+  //
+  // Read from SOURCE rather than by calling the hook: the behavioural
+  // regression lives in `tests/hooks/git-autopilot-session.test.js`, and this
+  // pins the WIRING so the exception cannot be quietly reimplemented as a
+  // local regex that drifts from `lib/git/repo-identity.js`.
+  //
+  // WHAT THIS PIN DOES NOT SEE: whether the call is reachable, whether it
+  // guards the checkout rather than something else, or a rename of the
+  // enclosing function. Only the behavioural test proves the branch stays.
+  const HOOK = path.join(PLUGIN_ROOT, 'scripts', 'hooks', 'git-autopilot-session.js');
+  const hookSrc = readFileSync(HOOK, 'utf-8');
+
+  it('imports both predicates from lib/git/repo-identity.js (no local copy)', () => {
+    expect(hookSrc).toMatch(
+      /import \{[^}]*\bisSplitLimbBranch\b[^}]*\} from '\.\.\/\.\.\/lib\/git\/repo-identity\.js';/,
+    );
+    expect(hookSrc).toMatch(
+      /import \{[^}]*\bBUILTIN_WORKTREE_BRANCH_PREFIX\b[^}]*\} from '\.\.\/\.\.\/lib\/git\/repo-identity\.js';/,
+    );
+    // The literal must not be re-typed in the hook: repo-identity.js is where
+    // the naming lives, and a second copy is exactly the drift this file exists
+    // to catch. Comments are allowed to spell it out; code is not.
+    const code = hookSrc.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, '');
+    expect(code).not.toContain("'worktree-'");
+  });
+
+  it('returns the current branch unchanged for a limb AND for any built-in worktree branch', () => {
+    expect(hookSrc).toMatch(/if \(isSplitLimbBranch\(currentBranch\)\) return currentBranch;/);
+    // Widened 2026-09-04 after a LIVE `claude -p` run (no test involved) moved
+    // `worktree-agent-a3725b933da90230d` under `artibot/` at 14:42:38. The limb
+    // predicate alone did not cover the harness\u2019s own agent worktrees.
+    expect(hookSrc).toMatch(
+      /if \(currentBranch\.startsWith\(BUILTIN_WORKTREE_BRANCH_PREFIX\)\) return currentBranch;/,
+    );
+  });
+
+  it('places the exception before the checkout it has to prevent', () => {
+    // Ordering is the whole point: the same call placed after `checkout -b`
+    // would satisfy the pin above and prevent nothing.
+    const guardAt = hookSrc.indexOf('startsWith(BUILTIN_WORKTREE_BRANCH_PREFIX)');
+    const checkoutAt = hookSrc.indexOf("gitSilent(['checkout'");
+    expect(guardAt).toBeGreaterThan(-1);
+    expect(checkoutAt).toBeGreaterThan(-1);
+    expect(guardAt).toBeLessThan(checkoutAt);
   });
 });
 

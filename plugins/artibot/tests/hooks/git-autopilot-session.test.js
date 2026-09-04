@@ -480,6 +480,56 @@ describe('git-autopilot-session', () => {
     expect(commands.some((c) => c.includes('checkout'))).toBe(false);
   });
 
+  // -------------------------------------------------------------------------
+  // Built-in worktree branches — two measured incidents, 2026-09-04
+  //
+  // `claude --worktree <name>` creates `worktree-<name>` and we do not choose
+  // that name. Such a branch is pure `[A-Za-z0-9_-]`, so it PASSES the
+  // RELOCATABLE_BRANCH_NAME allowlist: the name gate cannot see it at all.
+  //
+  //  1. `/split` limbs (gotchas #18, #22). Four of four `/split` worktrees had
+  //     HEAD relocated to `artibot/worktree-split-…` by a SessionStart that a
+  //     full-repo `vitest` run fired. `isSplitLimbBranch` then rejected the
+  //     relocated name, so `/split status` reported every limb as missing and
+  //     `land` read finished work as `no-commits`.
+  //  2. Agent worktrees. Measured 14:42:38 in a LIVE `claude -p` run, no test
+  //     involved: reflog "moving from worktree-agent-a3725b933da90230d to
+  //     artibot/worktree-agent-a3725b933da90230d". So limb-only was too
+  //     narrow — the harness creates worktree branches for its own agents and
+  //     the hook took those over too.
+  //
+  // The rule is therefore the built-in PREFIX: a branch the worktree provider
+  // created belongs to whoever asked for the worktree, and the hook does not
+  // relocate it. Stated as "which names may move" (the same allowlist shape as
+  // RELOCATABLE_BRANCH_NAME), so an unfamiliar worktree kind fails closed.
+  // -------------------------------------------------------------------------
+
+  it.each([
+    ['worktree-split-artibot-l4-f10'],
+    ['worktree-split-artibot-test-git-sandbox'],
+    ['worktree-agent-abc123'],
+    ['worktree-probe1'],
+  ])('does not relocate HEAD off the built-in worktree branch %s', async (branch) => {
+    const commands = await runOnBranch(branch);
+    const logs = stderrSpy.mock.calls.map(([msg]) => msg).join('');
+
+    expect(logs).not.toContain('Switched to autopilot branch');
+    expect(commands.some((c) => c.includes('checkout'))).toBe(false);
+    // The relocated name from the incident must never be referenced.
+    expect(commands.some((c) => c.includes(`artibot/${branch}`))).toBe(false);
+  });
+
+  it.each([['main'], ['develop'], ['my-feature']])(
+    'still relocates the plain branch %s (negative control — the guard is not a blanket refusal)',
+    async (branch) => {
+      // Without this, a hook that relocated NOTHING would pass every case
+      // above and prove nothing. `master` is excluded here because the
+      // base-branch guard already keeps it put for a different reason.
+      const commands = await runOnBranch(branch);
+      expect(commands.some((c) => c.includes(`checkout -b artibot/${branch}`))).toBe(true);
+    },
+  );
+
   it('does not relocate HEAD when detached (empty branch name)', async () => {
     const commands = await runOnBranch('');
     const logs = stderrSpy.mock.calls.map(([msg]) => msg).join('');

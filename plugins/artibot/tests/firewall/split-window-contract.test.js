@@ -308,7 +308,11 @@ describe('후속 Phase 절 — 병합된 것과 자리표시자', () => {
   });
 
   it('측정 고지 3문구가 문자 그대로 있고 null 을 0 으로 바꾸지 않는다', () => {
-    expect(splitMd).toMatch(/^측정 고지:\n1\. 실오퍼레이터 데이터 1건\(n=1\)/m);
+    // n 상수는 실오퍼레이터 런 1회마다 갱신된다 — 2026-09-04 `split-9d6dc2` 로 n=2.
+    // 첫 줄은 모양만, 둘째 줄은 현재 값을 고정한다: 모양만 보면 n 이 조용히 사라져도 초록이고,
+    // 값만 보면 문구 자체가 사라져도 초록이다.
+    expect(splitMd).toMatch(/^측정 고지:\n1\. 실오퍼레이터 데이터 \d+건\(n=\d+\)/m);
+    expect(splitMd).toMatch(/1\. 실오퍼레이터 데이터 2건\(n=2\)/);
     expect(splitMd).toMatch(/^2\. wall-clock 은 인간 대기 포함/m);
     expect(splitMd).toMatch(/^3\. 사람 대기 비율 \{humanWaitPct\}%/m);
     expect(splitMd).toMatch(/`null` 은 `null` 로 찍는다/);
