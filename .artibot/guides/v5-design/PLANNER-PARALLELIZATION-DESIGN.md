@@ -175,7 +175,7 @@ INTAKE 가 `domains[] = [{ id, scopePaths[], rationale }]` 를 선언했을 때,
 
 | 변경 | 파일 | 내용 |
 |---|---|---|
-| 신설 | `lib/planning/plan-manifest.js` | `parsePlanManifest(text) → {ok, manifest|null, error}` (```json 펜스 1개 추출) · `validatePlanManifest(manifest, {profile}) → {ok, tasks, rejected[{id,reason}], summary}` — `assessTask` 는 비공개(`fast-profile.js:142`)이므로 **`buildFastFanoutPlan({fast:true, tasks, limits})` 를 호출해 `serial[].reason` 을 읽는다**(export 추가 없이 재사용. `fast:true` 는 판정용이지 실행 아님 — `cpuCount` 는 미지정) |
+| 신설 | `lib/planning/plan-manifest.js` | `parsePlanManifest(text) → {ok, manifest|null, error}` (`` ```json `` 펜스 1개 추출) · `validatePlanManifest(manifest, {profile}) → {ok, tasks, rejected[{id,reason}], summary}` — `assessTask` 는 비공개(`fast-profile.js:142`)이므로 **`buildFastFanoutPlan({fast:true, tasks, limits})` 를 호출해 `serial[].reason` 을 읽는다**(export 추가 없이 재사용. `fast:true` 는 판정용이지 실행 아님 — `cpuCount` 는 미지정) |
 | 신설 | `lib/planning/plan-ownership-audit.js` | `auditOwnership({ changedFiles, tasks }) → { escaped[{file}], coveredBy[{file, taskIds}] }` — `matchesAllowlist` 재사용. 순수; `changedFiles` 는 호출자가 `git diff --name-only <checkpointSha>...HEAD` 로 넘긴다 |
 | 배선(산문) | `commands/autopilot.md:316-318` | Phase 1 프롬프트 말미에 "출력은 반드시 ```json PlanTaskManifest``` 1블록" · 리더는 `validatePlanManifest` 후 `state.fastTasks` 저장 · `rejected` 는 진행률 박스 아래 표로 출력 |
 | 배선(산문) | `commands/autopilot.md` Phase 3 CROSS_CHECK 직전 | `auditOwnership` 결과 `escaped` 를 **표로 출력만** (PAUSE 아님 — Observe) |

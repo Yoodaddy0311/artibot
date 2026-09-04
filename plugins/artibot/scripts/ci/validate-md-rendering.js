@@ -15,10 +15,16 @@
  * add a new rule by writing the function and appending `{ name, fn }` to RULES.
  *
  * Scope: every co-located plugin root (`ci-utils.js#listPluginRoots`) plus the
- * repo root's own authored docs (`ci-utils.js#ROOT_SCAN_FILES`). The root was
- * added 2026-08-19, closing the gap where `validate-doc-links.js` already
- * scanned root docs and this gate did not — root README/CONTRIBUTING tables
- * could render ragged with both gates green.
+ * repo root's own authored docs (`ci-utils.js#ROOT_SCAN_FILES`) plus the
+ * tracked docs under the repo-root canon trees (`ci-utils.js#ROOT_SCAN_TREES`:
+ * `.artibot/guides`, `.artibot/adr`, `.artibot/archive`, `reports/SPLIT`,
+ * `.artibot/project.md`). The root was added 2026-08-19, closing the gap where
+ * `validate-doc-links.js` already scanned root docs and this gate did not —
+ * root README/CONTRIBUTING tables could render ragged with both gates green.
+ * The trees were added 2026-09-05; the design canon entered with 15 real
+ * violations fixed first (12 ragged rows in `ARTIBOT-5.0-DESIGN.md` 부록 0-2,
+ * 3 unclosed code spans) rather than baselined, because a baseline on a file
+ * still being edited goes stale on the next edit and bites the next author.
  *
  * ## Known holes — what this gate still does NOT see
  *
@@ -31,9 +37,13 @@
  *     table with the right shape and wrong numbers passes.
  *   - **Baselined violations** in {@link KNOWN_RENDER_VIOLATIONS} — real bugs
  *     held at an exact count, not fixed.
- *   - **Files outside SCAN_DIRS/ROOT_FILES/ROOT_SCAN_FILES** — notably
- *     `agents/*.md`, `CHANGELOG.md`, `RELEASE.md`, and the root's
+ *   - **Files outside SCAN_DIRS/ROOT_FILES/ROOT_SCAN_FILES/ROOT_SCAN_TREES** —
+ *     notably `agents/*.md`, `CHANGELOG.md`, `RELEASE.md`, and the root's
  *     `RELEASE_NOTES_*.md` / `WORK-REPORT-*.md`.
+ *   - **Untracked files under the root trees** — `.artibot/HANDOFF.md`,
+ *     `SESSION-NOTES.md`, `split/`, `missions/`, gitignored `reports/*`. Only
+ *     git-tracked files are enumerated (`ci-utils.js#gatherRepoRootTreeDocFiles`)
+ *     so local and CI see the same set; local-only docs rot locally.
  *   - **Installed trees.** Root scanning requires the dev-repo marker
  *     (`ci-utils.js#getRepoDocRoot`), so root regressions are caught in CI, not
  *     on a user's box.
@@ -47,8 +57,10 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import {
   assertRootScanFloor,
+  assertRootTreeScanFloor,
   assertScanFloors,
   gatherRepoRootDocFiles,
+  gatherRepoRootTreeDocFiles,
   getPluginsDir,
   listPluginRoots,
 } from './ci-utils.js';
@@ -406,6 +418,41 @@ export function scanRepoRoot() {
 }
 
 /**
+ * Run every rule across the tracked docs under the repo-root canon trees
+ * (`ci-utils.js#ROOT_SCAN_TREES` + `ROOT_SCAN_TREE_FILES`).
+ *
+ * Kept beside {@link scanRepoRoot} rather than inside it for the same reason
+ * that one is not inside {@link scanAllPlugins}: the two denominators are
+ * asserted separately (`<root>` against `MIN_ROOT_DOC_FILES`, `<root-trees>`
+ * against `MIN_ROOT_TREE_DOC_FILES`), and a single merged count would let one
+ * side shrink while the other grew.
+ *
+ * Ratchet keys use the same `<root>/` prefix as {@link scanRepoRoot}, so a key
+ * reads `<root>/.artibot/adr/ADR-001.md::table-pipe-column-mismatch`.
+ *
+ * @returns {{ root: string|null, count: number, findings: Array<{ key: string, message: string }> }}
+ * @throws {Error} When the root is in scope and git cannot enumerate it — the
+ *   caller reports this as a denominator failure.
+ */
+export function scanRepoRootTrees() {
+  const { root, files } = gatherRepoRootTreeDocFiles();
+  /** @type {Array<{ key: string, message: string }>} */
+  const findings = [];
+  if (root === null) return { root, count: 0, findings };
+
+  for (const abs of files) {
+    const relPath = `<root>/${path.relative(root, abs).split(path.sep).join('/')}`;
+    const content = readFileSync(abs, 'utf-8');
+    for (const rule of RULES) {
+      for (const message of rule.fn(content, relPath)) {
+        findings.push({ key: `${relPath}::${rule.name}`, message });
+      }
+    }
+  }
+  return { root, count: files.length, findings };
+}
+
+/**
  * Compare findings against {@link KNOWN_RENDER_VIOLATIONS}.
  *
  * @param {Array<{ key: string, message: string }>} findings - Raw violations.
@@ -454,11 +501,26 @@ function main() {
   const { counts, total: pluginTotal, findings: pluginFindings } = scanAllPlugins();
   const { root: repoRoot, count: rootCount, findings: rootFindings } = scanRepoRoot();
 
-  const total = pluginTotal + rootCount;
-  const findings = [...pluginFindings, ...rootFindings];
+  // Tree enumeration goes through git and refuses to guess when git cannot
+  // answer; that refusal is a denominator failure, never a quiet zero.
+  let treeCount;
+  let treeFindings;
+  try {
+    ({ count: treeCount, findings: treeFindings } = scanRepoRootTrees());
+  } catch (err) {
+    console.error(`FAIL: scan-denominator: ${err.message}`);
+    process.exit(1);
+  }
+
+  const total = pluginTotal + rootCount + treeCount;
+  const findings = [...pluginFindings, ...rootFindings, ...treeFindings];
   const tally = Object.entries(counts)
     .map(([name, n]) => `${name}=${n}`)
-    .concat(repoRoot === null ? ['<root>=skipped(not-dev-repo)'] : [`<root>=${rootCount}`])
+    .concat(
+      repoRoot === null
+        ? ['<root>=skipped(not-dev-repo)', '<root-trees>=skipped(not-dev-repo)']
+        : [`<root>=${rootCount}`, `<root-trees>=${treeCount}`],
+    )
     .join(' ');
 
   // Denominator first: a shrunken or missing tree must not be able to present
@@ -466,6 +528,7 @@ function main() {
   const floorFailures = [
     ...assertScanFloors(counts),
     ...assertRootScanFloor(repoRoot, rootCount),
+    ...assertRootTreeScanFloor(repoRoot, treeCount),
   ];
   if (floorFailures.length > 0) {
     for (const f of floorFailures) console.error(`FAIL: scan-denominator: ${f}`);
