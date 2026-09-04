@@ -12,6 +12,8 @@
  *   REPO_ROOT, PLUGIN_ROOT — resolved repo paths (callers pass nothing).
  *   collectActuals(opts)   — file-system counts; opts.full adds coverage.
  *   CLAIM_PATTERNS         — [{ key, regex, label, lang }] matching prose/badges.
+ *   parseClaimNumber(s)    — claim text -> number (tolerates "9,900").
+ *   formatClaimNumber(n,s) — number -> claim text in `s`'s separator style.
  *   partitionFrozenHistory(s) — ordered [{text, frozen}]; only live ones are
  *                            claim-checked. Lossless: the texts rejoin into `s`.
  *
@@ -20,6 +22,11 @@
  * reads group 1 to compare; the sync reads group 2 to rebuild the replacement
  * verbatim, so `group1 + group2` must always reconstruct the whole match. The
  * `gi` flag is intentional (case-insensitive, all occurrences).
+ *
+ * Group 1 may carry thousands separators ("9,900"), so callers must go through
+ * parseClaimNumber/formatClaimNumber rather than `Number(m[1])` and `${actual}`.
+ * A bare `Number("9,900")` is NaN — it would report every such claim as drift
+ * and then rewrite the comma out of the document.
  *
  * `lang` is 'en' or 'ko'. It is not used for matching — Korean tails begin with
  * the counter "개" rather than whitespace, so it exists so tests can assert the
@@ -37,6 +44,71 @@ import { fileURLToPath } from 'node:url';
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 export const PLUGIN_ROOT = path.resolve(scriptDir, '..', '..');
 export const REPO_ROOT = path.resolve(PLUGIN_ROOT, '..', '..');
+
+// ---------------------------------------------------------------------------
+// Target lists. Kept HERE, not in the two scripts, for the same reason the
+// patterns are: the gate and the auto-fixer must never disagree about which
+// files carry claims. Before 2026-09-05 the fixer rewrote two files while the
+// validator scanned four, so `plugins/artibot/CLAUDE.md` and
+// `plugins/artibot/marketplace.json` could only be fixed by hand — and the
+// census below found that hand-fixing is exactly what does not happen.
+//
+// Measured 2026-09-05 across the tracked public docs, every one of these files
+// carried at least one count that no pattern bound or no fixer healed:
+//   INSTALL.md:67,69                       28 agents / 111 skills  (actual 30 / 114)
+//   plugins/artibot/AGENTS.md:4            28 agents + 113 skills + 72 commands
+//   plugins/artibot/.well-known/
+//     mcp-server.json:6                    28 agents, 100 skills
+//   plugins/artibot/docs/
+//     MARKETPLACE-SUBMISSION.md:191-192    28 agents, 75 commands, 9,300+ tests
+//   plugins/artibot/marketplace.json:10    9,900+ tests (its own
+//                                          qualityMetrics.tests said 14953)
+//   plugins/artibot/CLAUDE.md:101          9,300+ tests
+//
+// SYNC = the fixer rewrites it. VALIDATE_ONLY = checked but hand-fixed; use it
+// only for files whose claims cannot be healed by substituting a number.
+//
+// NOT in either list, on purpose:
+//   - CONTRIBUTING.md (root). It says "all 28 agents" three times (actual 30),
+//     but two of those are unsafe to auto-substitute. `:127-129` is a bucket
+//     table whose rows must sum to the total (`high` 21 + `medium` 7 = 28);
+//     rewriting the total to 30 would leave 21 + 7 = 30, a NEW false statement,
+//     and the rows are themselves stale (artibot.config.json measured
+//     2026-09-05: high 23, medium 7). `:133` reads "Measured 2026-08-19 across
+//     all 28 agents", a dated observation that a rewrite would falsify exactly
+//     the way partitionFrozenHistory exists to prevent. Fixing that file needs
+//     a reword and a re-measure by a human, so gating it would only create a
+//     RED nobody may safely clear.
+//   - The Korean phrase "N개 전문 에이전트" wherever it appears (e.g.
+//     plugins/artibot/docs/ROADMAP-CLAUDE-TAG-CONVERGENCE.md:48). It is left
+//     unbound for the reason recorded at the ko `agent defs` pattern below.
+//   - AGENTS.md at the repo root is listed but is UNTRACKED (git ls-files
+//     returns nothing for it, measured 2026-09-05). The fixer heals it on a
+//     machine that has it; CI will never see its drift. Do not cite it as
+//     evidence that a claim is gated.
+const SYNC_RELATIVE = [
+  ['REPO', 'README.md'],
+  ['REPO', 'INSTALL.md'],
+  ['REPO', 'AGENTS.md'],
+  ['REPO', '.claude-plugin/marketplace.json'],
+  ['PLUGIN', 'README.md'],
+  ['PLUGIN', 'CLAUDE.md'],
+  ['PLUGIN', 'AGENTS.md'],
+  ['PLUGIN', 'marketplace.json'],
+  ['PLUGIN', '.well-known/mcp-server.json'],
+  ['PLUGIN', 'docs/MARKETPLACE-SUBMISSION.md'],
+];
+
+/** Files the auto-fixer rewrites. Absolute paths. */
+export const SYNC_TARGETS = SYNC_RELATIVE.map(([root, rel]) =>
+  path.join(root === 'REPO' ? REPO_ROOT : PLUGIN_ROOT, ...rel.split('/'))
+);
+
+/** Checked by the validator but never rewritten. Absolute paths. */
+export const VALIDATE_ONLY_TARGETS = [];
+
+/** Everything the validator scans. Every synced file is necessarily scanned. */
+export const SCAN_TARGETS = [...SYNC_TARGETS, ...VALIDATE_ONLY_TARGETS];
 
 function countDirsWith(dir, marker) {
   if (!existsSync(dir)) return 0;
@@ -70,6 +142,31 @@ function readJsonSafe(file) {
 }
 
 /**
+ * Read a claim's numeric value, tolerating thousands separators.
+ *
+ * @param {string} raw - Capture group 1 of a CLAIM_PATTERNS match.
+ * @returns {number} the value, or NaN when `raw` is not a number.
+ */
+export function parseClaimNumber(raw) {
+  return Number(String(raw).replace(/,/g, ''));
+}
+
+/**
+ * Render `value` in the separator style of the claim it replaces.
+ *
+ * The document, not the registry, decides whether counts are grouped: rewriting
+ * "9,900+ tests" must yield "14,953+ tests", while a JSON field written as
+ * `9900` must stay ungrouped. `sample` is the original group-1 text.
+ *
+ * @param {number} value - Actual count.
+ * @param {string} sample - The claim text being replaced.
+ * @returns {string} formatted number
+ */
+export function formatClaimNumber(value, sample) {
+  return String(sample).includes(',') ? value.toLocaleString('en-US') : String(value);
+}
+
+/**
  * Collect actual counts from the file system.
  * @param {{ full?: boolean }} [opts] - When `full`, also reads coverage summary.
  * @returns {Record<string, number>} category -> count
@@ -96,6 +193,42 @@ export function collectActuals(opts = {}) {
     hookScripts: countFiles(path.join(PLUGIN_ROOT, 'scripts', 'hooks'), ['.js', '.mjs']),
     ciScripts: countFiles(path.join(PLUGIN_ROOT, 'scripts', 'ci'), ['.js', '.mjs']),
   };
+
+  // Suite size. Unlike every other key here this is NOT a file-system fact —
+  // no directory listing yields "how many test cases exist", and a real count
+  // needs a full vitest run (minutes). So the truth source is the number the
+  // release pipeline already measured and committed:
+  // marketplace.json#/qualityMetrics/tests, whose ONLY writer is
+  // scripts/ci/sync-marketplace-meta.mjs (from `--tests=N` or a cached
+  // runtime/vitest-report.json#numTotalTests). One writer, one reader.
+  //
+  // Reproduce the underlying measurement with:
+  //   npx vitest run --reporter=json --outputFile=runtime/vitest-report.json
+  //   node scripts/ci/sync-marketplace-meta.mjs
+  // then this key follows automatically.
+  //
+  // What this does NOT prove (write it down or the gate becomes the next false
+  // confidence source):
+  //   - It does not verify the suite actually has that many cases TODAY. It
+  //     asserts that public prose agrees with the last committed measurement,
+  //     nothing more. A hand-edited qualityMetrics.tests propagates silently
+  //     into every synced document — the field is the contract, so review it
+  //     like one.
+  //   - runtime/ is gitignored (plugins/artibot/.gitignore:10), so the cached
+  //     vitest report is machine-local and absent in CI. Reading it here would
+  //     make the gate's value depend on whether someone happened to run the
+  //     suite locally, and would let a dev machine's number and the committed
+  //     number disagree in opposite directions. That is why the report is NOT
+  //     consulted here even though sync-marketplace-meta.mjs consults it: that
+  //     script is the writer, this one is the reader.
+  //   - When the field is missing or non-numeric the key is left undefined,
+  //     which both the validator and the sync already treat as "skip". That is
+  //     deliberate fail-safe (no assertion), not fail-open coverage.
+  const marketplace = readJsonSafe(path.join(PLUGIN_ROOT, 'marketplace.json'));
+  const committedTests = marketplace?.qualityMetrics?.tests;
+  if (Number.isInteger(committedTests) && committedTests > 0) {
+    actuals.tests = committedTests;
+  }
 
   // hooks.json registration count (sum of array lengths across event types).
   const hooksJson = readJsonSafe(path.join(PLUGIN_ROOT, 'hooks', 'hooks.json'));
@@ -315,15 +448,40 @@ export function partitionFrozenHistory(content) {
 export const CLAIM_PATTERNS = [
   { key: 'skills', regex: /(\d{2,3})(\s+(?:domain\s+)?skills?\b)/gi, label: 'skills', lang: 'en' },
   { key: 'skills', regex: /(\d{2,3})(\s+skill\s+director(?:y|ies))/gi, label: 'skill dirs', lang: 'en' },
-  { key: 'commands', regex: /(\d{2,3})(\s+(?:slash\s+)?commands?\b)/gi, label: 'commands', lang: 'en' },
-  { key: 'agents', regex: /(\d{2,3})(\s+(?:specialist\s+)?agents?\b)/gi, label: 'agents', lang: 'en' },
-  { key: 'agents', regex: /(\d{2,3})(\s+agent\s+definitions?)/gi, label: 'agent defs', lang: 'en' },
+  // `slash[- ]command` covers the hyphenated compound. Measured 2026-09-05,
+  // AGENTS.md:8 read "54 slash-command definitions" against an actual 79 and no
+  // pattern bound it — the hyphen alone was the whole gap.
+  { key: 'commands', regex: /(\d{2,3})(\s+(?:slash[-\s])?commands?\b)/gi, label: 'commands', lang: 'en' },
+  // `specialist|specialized` for the same reason: AGENTS.md:7 said
+  // "29 specialized agent definitions" (actual 30) and only "specialist" was
+  // listed, so the adjective silently unbound the claim.
+  { key: 'agents', regex: /(\d{2,3})(\s+(?:specialist\s+|specialized\s+)?agents?\b)/gi, label: 'agents', lang: 'en' },
+  { key: 'agents', regex: /(\d{2,3})(\s+(?:specialist\s+|specialized\s+)?agent\s+definitions?)/gi, label: 'agent defs', lang: 'en' },
   { key: 'hookRegistrations', regex: /(\d{2,3})(\s+hook\s+registrations?)/gi, label: 'hook regs', lang: 'en' },
   { key: 'hookScripts', regex: /(\d{2,3})(\s+hook\s+scripts?)/gi, label: 'hook scripts', lang: 'en' },
   // `validation` is optional so that rewording the prose ("19 CI scripts" <->
   // "19 CI validation scripts") cannot silently unbind the gate — the failure
   // mode that left this claim uncovered while it drifted to 6-vs-19.
   { key: 'ciScripts', regex: /(\d{1,3})(\s+CI\s+(?:validation\s+)?scripts?\b)/gi, label: 'CI scripts', lang: 'en' },
+
+  // Suite size. DELIBERATELY NARROW: it binds only comma-grouped numbers or
+  // 4-or-more digits, so it sees "9,900+ tests" and "14953 tests" but not the
+  // ordinary prose "+14 tests" / "3 tests". That prose is not hypothetical —
+  // plugins/artibot/README.md's release-note lines (":261 +14 tests",
+  // ":269 +27 tests", measured 2026-09-05) sit in LIVE, non-frozen sections, so
+  // a loose `\d+\s*tests` would rewrite them to the suite size and wreck the
+  // sentences. The consequence of the narrowing is equally real and is the
+  // gate's blind spot: a genuine suite-size claim written as "990 tests" (three
+  // digits, no separator) stays unbound. Widening needs a different anchor
+  // noun, not a looser number.
+  //
+  // The optional `\+` lives in group 2 so a floor claim stays a floor claim:
+  // "9,900+ tests" heals to "14,953+ tests", never to a bare "14,953 tests".
+  // `automated` is optional for the same reason `validation` is optional in the
+  // CI-scripts pattern: rewording the noun phrase must not silently unbind the
+  // claim. Measured 2026-09-05, docs/MARKETPLACE-SUBMISSION.md:192 read
+  // "9,300+ automated tests" and the adjective alone hid it from the gate.
+  { key: 'tests', regex: /(\d{1,3}(?:,\d{3})+|\d{4,})(\+?\s*(?:automated\s+)?tests?\b)/gi, label: 'tests', lang: 'en' },
 
   // --- Korean prose -------------------------------------------------------
   // plugins/artibot/README.md is Korean-dominant: before these entries existed
@@ -348,4 +506,12 @@ export const CLAIM_PATTERNS = [
   // Single-digit floor for the same reason as the English CI pattern: the value
   // this exists to catch was a literal "6개 CI 검증 스크립트" beside an actual 20.
   { key: 'ciScripts', regex: /(\d{1,3})(개\s*CI\s*(?:검증\s*)?스크립트)/gi, label: 'CI scripts (ko)', lang: 'ko' },
+  // NO Korean `tests` pattern, deliberately. One was written and then removed
+  // on 2026-09-05: the scan set contains zero Korean suite-size claims, so the
+  // pattern matched nothing and `tests/ci/validate-readme-claims.test.js`
+  // ("every Korean pattern binds to at least one real sentence ... — dead
+  // gate") failed on it, correctly. A pattern that binds nothing is not free
+  // insurance — it is an untested regex that will be trusted the first time
+  // someone writes the phrase. Add it together with the first real Korean
+  // suite-size sentence, not before.
 ];

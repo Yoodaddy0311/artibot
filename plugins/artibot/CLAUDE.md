@@ -98,7 +98,7 @@ See also: `commands/team.md` (hint cross-reference), `commands/autopilot.md` (hi
 ## Testing
 
 ```
-npm test               # 9,300+ tests via vitest
+npm test               # 14,953+ tests via vitest
 npm run test:coverage
 npm run lint           # 0 errors/warnings target
 npm run ci             # validate + skill:check + lint + test + eval:runtime

@@ -64,9 +64,9 @@ Expected output: health check results showing agents, skills, commands, hooks, a
 ```
 
 This lists all installed commands, agents, and skills. Verify the counts match:
-- 28 agents
+- 30 agents
 - 70+ commands
-- 111 skills
+- 114 skills
 
 ### Step 3: Smoke test a command
 

@@ -3,7 +3,7 @@
   "_comment": "Template — populate capabilities when MCP server features are added. See docs/mcp-2.0-integration.md.",
   "name": "artibot",
   "version": "4.56.0",
-  "description": "Artibot — autonomous agent OS with 28 agents, 100 skills, and Claude Agent Teams orchestration.",
+  "description": "Artibot — autonomous agent OS with 30 agents, 114 skills, and Claude Agent Teams orchestration.",
   "license": "BUSL-1.1",
   "homepage": "https://github.com/Yoodaddy0311/artibot",
   "capabilities": {

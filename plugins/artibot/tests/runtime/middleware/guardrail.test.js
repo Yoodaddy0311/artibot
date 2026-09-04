@@ -383,3 +383,85 @@ describe('middleware/guardrail', () => {
     expect(r2.context.guardrail.evaluations[0].decision).toBe('deny');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Regression: orchestration tools must not be false-denied
+// (회고 reports/SPLIT/split-ff6c63.md §3.4 ② — 매 프롬프트에 붙던
+//  "tools denied by policy — Agent, SendMessage, Task*" 오탐)
+// ---------------------------------------------------------------------------
+
+describe('guardrail/오케스트레이션 도구 오탐 회귀', () => {
+  it('agentTeam 모드 + 기본 규칙만 → denied 0건, 프롬프트 무오염', async () => {
+    const mw = createGuardrailMiddleware();
+    const state = makeState({
+      context: {
+        routing: { system: 'system2' },
+        subagents: { contract: { tools: [] } },
+        tasks: { mode: 'agentTeam' },
+      },
+    });
+    const result = await mw(state);
+
+    expect(result.context.guardrail.denied).toEqual([]);
+    expect(result.userPrompt).not.toContain('denied by policy');
+    expect(result.userPrompt).toBe('test prompt');
+    expect(result.messageParts).toContain('guardrail=ok');
+  });
+
+  it('서브에이전트 contract 전체 팀 도구 → denied 0건', async () => {
+    const mw = createGuardrailMiddleware();
+    const state = makeState({
+      context: {
+        routing: { system: 'system2' },
+        subagents: {
+          contract: {
+            tools: ['Agent', 'SendMessage', 'TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet'],
+          },
+        },
+        tasks: { mode: 'agentTeam' },
+      },
+    });
+    const result = await mw(state);
+
+    expect(result.context.guardrail.evaluated).toBe(6);
+    expect(result.context.guardrail.denied).toEqual([]);
+    expect(result.context.guardrail.asked).toEqual([]);
+    expect(result.userPrompt).not.toContain('⚠️ Guardrail');
+  });
+
+  it('AskUserQuestion → allow', async () => {
+    const mw = createGuardrailMiddleware();
+    const state = makeStateWithTools(['AskUserQuestion']);
+    const result = await mw(state);
+
+    expect(result.context.guardrail.evaluations[0].decision).toBe('allow');
+  });
+
+  it('Task* 접두 규칙은 TaskStop 등 미래 팀 도구도 커버', async () => {
+    const mw = createGuardrailMiddleware();
+    const state = makeStateWithTools(['TaskStop']);
+    const result = await mw(state);
+
+    expect(result.context.guardrail.evaluations[0].decision).toBe('allow');
+    expect(result.context.guardrail.evaluations[0].rulePattern).toBe('Task*');
+  });
+
+  it('오케스트레이션 규칙의 reason 은 표기 계층임을 밝힌다', () => {
+    const orchestration = DEFAULT_RULES.filter((r) =>
+      ['Agent', 'SendMessage', 'Task*', 'AskUserQuestion'].includes(r.tool),
+    );
+    expect(orchestration).toHaveLength(4);
+    for (const rule of orchestration) {
+      expect(rule.decision).toBe('allow');
+      expect(rule.reason).toContain('표기 계층');
+    }
+  });
+
+  it('fail_closed 의미는 유지 — 미등록 도구는 여전히 deny', async () => {
+    const mw = createGuardrailMiddleware();
+    const state = makeStateWithTools(['TotallyUnknownTool']);
+    const result = await mw(state);
+
+    expect(result.context.guardrail.denied).toEqual(['TotallyUnknownTool']);
+  });
+});

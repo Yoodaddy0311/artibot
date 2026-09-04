@@ -13,8 +13,8 @@
  * the validator gate) so count drift never reaches a human.
  *
  * Modes:
- *   (default)  — Rewrite drifting prose in README.md (root) and
- *                plugins/artibot/README.md. Idempotent: a no-op when in sync.
+ *   (default)  — Rewrite drifting prose across SYNC_TARGETS (the two READMEs,
+ *                the entry docs, both marketplace manifests). Idempotent.
  *   --check    — Report would-be changes and exit 1 if any (CI dry-run); makes
  *                no writes. Exit 0 when already in sync.
  *
@@ -22,10 +22,17 @@
  *   0 — files already in sync (or were successfully rewritten in write mode)
  *   1 — (--check only) drift detected that a write run would fix
  *
- * Scope: only structural counts (skills, commands, agents, hook scripts, hook
- * registrations). Coverage/test counts live in --full validator territory and
- * are deliberately NOT auto-rewritten here (they are remote/threshold claims,
- * not file-system facts a release should silently mutate).
+ * Scope: structural counts (skills, commands, agents, hook scripts, hook
+ * registrations, CI scripts) plus the committed suite size (`tests`).
+ *
+ * `tests` (added 2026-09-05) is NOT an exception to "file-system facts only",
+ * because this script is not the thing that measures it. Its value is the
+ * already-committed `marketplace.json#/qualityMetrics/tests`, written solely by
+ * `sync-marketplace-meta.mjs` from a real vitest run — so a release still
+ * decides the number, and this script only stops the same number from being
+ * transcribed by hand into six documents that then drift apart. Coverage
+ * (`statementCoverage`) remains validator-only: it is a threshold claim with no
+ * committed integer to propagate.
  *
  * Zero dependencies. Node 20+ built-ins only.
  */
@@ -35,11 +42,18 @@ import path from 'node:path';
 import {
   CLAIM_PATTERNS,
   collectActuals,
+  formatClaimNumber,
+  parseClaimNumber,
   partitionFrozenHistory,
-  PLUGIN_ROOT,
   REPO_ROOT,
+  SYNC_TARGETS,
 } from './readme-claims-registry.js';
 import { isMainEntry } from '../hooks/_main-entry.js';
+
+// The files this script rewrites. Defined in the registry beside the patterns
+// so the gate and this fixer can never disagree about which documents carry
+// claims; the census that produced the list is recorded there.
+export { SYNC_TARGETS };
 
 const args = process.argv.slice(2);
 const CHECK_ONLY = args.includes('--check');
@@ -78,9 +92,13 @@ export function syncFile(file, actuals, { write = !CHECK_ONLY } = {}) {
         const actual = actuals[key];
         if (actual === null || actual === undefined) continue;
         text = text.replace(regex, (match, num, tail) => {
-          if (Number(num) === actual) return match;
-          edits.push({ from: match, to: `${actual}${tail}` });
-          return `${actual}${tail}`;
+          if (parseClaimNumber(num) === actual) return match;
+          // Keep the document's own separator style: "9,900+ tests" heals to
+          // "14,953+ tests", while a bare "9900" stays ungrouped. `tail` is
+          // reproduced verbatim, so a floor claim's "+" survives.
+          const replacement = `${formatClaimNumber(actual, num)}${tail}`;
+          edits.push({ from: match, to: replacement });
+          return replacement;
         });
       }
       return text;
@@ -94,10 +112,7 @@ export function syncFile(file, actuals, { write = !CHECK_ONLY } = {}) {
 
 function main() {
   const actuals = collectActuals();
-  const targets = [
-    path.join(REPO_ROOT, 'README.md'),
-    path.join(PLUGIN_ROOT, 'README.md'),
-  ];
+  const targets = SYNC_TARGETS;
 
   console.log(`Artibot README claim sync (mode: ${CHECK_ONLY ? 'check' : 'write'})`);
   console.log('Actual counts:');

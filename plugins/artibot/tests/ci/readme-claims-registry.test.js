@@ -64,35 +64,41 @@ describe('CLAIM_PATTERNS contract', () => {
 
   it('each regex captures group1=number and group2=trailing phrase', () => {
     for (const { regex, label, lang } of CLAIM_PATTERNS) {
-      // Build a synthetic claim that the pattern must match: a 2-digit count
-      // followed by the phrase the regex was written for. We derive a probe by
-      // matching against a representative string per known label.
-      const probe = {
-        skills: '42 skills',
-        'skill dirs': '42 skill directories',
-        commands: '42 slash commands',
-        agents: '42 specialist agents',
-        'agent defs': '42 agent definitions',
-        'hook regs': '42 hook registrations',
-        'hook scripts': '42 hook scripts',
-        'CI scripts': '42 CI scripts',
-        'skills (ko)': '42개 도메인 스킬',
-        'commands (ko)': '42개 슬래시 커맨드',
-        'agent defs (ko)': '42개 에이전트 정의',
-        'hook regs (ko)': '42개 훅 등록',
-        'hook scripts (ko)': '42개 훅 스크립트 파일',
-        'CI scripts (ko)': '42개 CI 검증 스크립트',
-      }[label];
+      // Build a synthetic claim that the pattern must match: a count followed
+      // by the phrase the regex was written for. Each entry carries its OWN
+      // expected number rather than one shared literal, because not every
+      // pattern accepts a 2-digit count — `tests` deliberately binds only
+      // comma-grouped or >= 4-digit numbers so it cannot swallow ordinary prose
+      // like the "+14 tests" that appears in the plugin README's live sections.
+      const [probe, expectedNum] = {
+        skills: ['42 skills', '42'],
+        'skill dirs': ['42 skill directories', '42'],
+        commands: ['42 slash commands', '42'],
+        agents: ['42 specialist agents', '42'],
+        'agent defs': ['42 agent definitions', '42'],
+        'hook regs': ['42 hook registrations', '42'],
+        'hook scripts': ['42 hook scripts', '42'],
+        'CI scripts': ['42 CI scripts', '42'],
+        tests: ['9,900+ tests', '9,900'],
+        'skills (ko)': ['42개 도메인 스킬', '42'],
+        'commands (ko)': ['42개 슬래시 커맨드', '42'],
+        'agent defs (ko)': ['42개 에이전트 정의', '42'],
+        'hook regs (ko)': ['42개 훅 등록', '42'],
+        'hook scripts (ko)': ['42개 훅 스크립트 파일', '42'],
+        'CI scripts (ko)': ['42개 CI 검증 스크립트', '42'],
+      }[label] ?? [];
       expect(probe, `no probe defined for label "${label}"`).toBeTruthy();
 
       const fresh = new RegExp(regex.source, regex.flags);
       const m = fresh.exec(probe);
       expect(m, `pattern for "${label}" should match "${probe}"`).not.toBeNull();
-      expect(m[1]).toBe('42'); // group 1 = numeric claim
-      // Group 2 is the trailing phrase. English tails begin with the separating
-      // space; Korean tails begin with the counter 개 and have no space, so the
-      // shape assertion is per-language rather than a single leading-space rule.
-      expect(m[2]).toMatch(lang === 'ko' ? /^개/ : /^\s+/);
+      expect(m[1]).toBe(expectedNum); // group 1 = numeric claim
+      // Group 2 is the trailing phrase. English tails begin with the separator
+      // that follows the number — whitespace, or the `+` of a floor claim
+      // ("9,900+ tests"), which must stay in group 2 so the rewriter preserves
+      // it. Korean tails begin with the counter 개 and have no space, so the
+      // shape assertion is per-language rather than one leading-space rule.
+      expect(m[2]).toMatch(lang === 'ko' ? /^개/ : /^[\s+]/);
       // Rebuild contract used by the sync rewriter: number + tail === full match.
       expect(`${m[1]}${m[2]}`).toBe(m[0]);
     }

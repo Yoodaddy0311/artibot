@@ -3,6 +3,17 @@
  * Policy-based tool call authorization with allow/deny/ask rules.
  * Integrates with the existing Guard Registry for centralized safety.
  *
+ * This layer only ANNOTATES the prompt — it is not the host permission system,
+ * and a `deny` here never blocks an actual tool call.
+ *
+ * History: until 2026-09-05 `DEFAULT_RULES` listed only the six file/shell
+ * tools, so every orchestration tool that `collectToolCandidates` contributes
+ * (Agent, SendMessage, the Task* family) fell through to the `failClosed`
+ * branch and got stamped "tools denied by policy" on every prompt. The notice
+ * was false: spawning worked throughout. Per the retro
+ * `reports/SPLIT/split-ff6c63.md` §3.4 ②, four windows spent their first
+ * 30 minutes implementing solo because they read that notice as a real denial.
+ *
  * @module lib/runtime/middleware/guardrail
  */
 
@@ -32,6 +43,15 @@ const DEFAULT_RULES = Object.freeze([
   { tool: 'Read', decision: 'allow', reason: 'File reads are always safe' },
   { tool: 'Grep', decision: 'allow', reason: 'Search operations are always safe' },
   { tool: 'Glob', decision: 'allow', reason: 'File pattern matching is always safe' },
+
+  // Orchestration tools. These are contributed by `collectToolCandidates` in
+  // agentTeam mode and by subagent contracts, so they MUST be listed or
+  // `failClosed` stamps a false denial on every prompt (see @module history).
+  // Allowlist form on purpose: a denylist would fail-open on future tools.
+  { tool: 'Agent', decision: 'allow', reason: '팀원 스폰 — 표기 계층 — 호스트 권한 아님' },
+  { tool: 'SendMessage', decision: 'allow', reason: '팀 메시징 — 표기 계층 — 호스트 권한 아님' },
+  { tool: 'Task*', decision: 'allow', reason: '작업 원장 (Create/Update/List/Get/Stop) — 표기 계층 — 호스트 권한 아님' },
+  { tool: 'AskUserQuestion', decision: 'allow', reason: '사용자 확인 질의 — 표기 계층 — 호스트 권한 아님' },
 ]);
 
 // ---------------------------------------------------------------------------
