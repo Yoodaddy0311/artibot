@@ -54,6 +54,17 @@ import { getTablePath, listSlots } from '../../lib/dispatcher/dispatch-table-loa
 const HEADROOM_MS = 3000;
 
 /**
+ * hooks.json 의 `timeout` 은 **초** 다. dispatch-table 의 `timeoutMs` 는 밀리초다.
+ * 두 파일을 대조하려면 한쪽을 환산해야 하고, 여기서는 hooks.json 쪽을 ms 로 올린다.
+ *
+ * 호스트 단위가 초라는 것은 호스트 문서(command 훅 기본 600)와 회고 #50 으로
+ * 확정됐고, 4.55.0 까지의 `5000`·`30000` 은 5,000초·30,000초였다(limb hooks-fix,
+ * 2026-09-04, host 2.1.260). 단위 자체의 게이트는 tests/hooks-schema-shape.test.js
+ * 가 맡는다(600 초과 = 밀리초 잔재로 간주해 RED). 여기서는 환산만 한다.
+ */
+const HOOKS_JSON_TIMEOUT_UNIT_MS = 1000;
+
+/**
  * 강제하지 않는 전략. 테이블이 스스로 "informational only" 라고 선언한 슬롯이다.
  * 문자열이 아니라 전략으로 거르는 이유: 슬롯 **이름** 목록으로 예외를 두면 새
  * 슬롯이 이름만 바꿔 달고 예외로 새어나갈 수 있다.
@@ -120,7 +131,7 @@ function partitionSlots(table) {
  * @param {object} hooks
  * @param {string} slotName
  * @param {string|undefined} dispatcher
- * @returns {{ timeout: number } | { error: string }}
+ * @returns {{ timeout: number } | { error: string }} — `timeout` 은 ms 로 환산된 값
  */
 function findSlotTimeout(hooks, slotName, dispatcher) {
   const groups = hooks?.hooks?.[slotName];
@@ -147,7 +158,7 @@ function findSlotTimeout(hooks, slotName, dispatcher) {
   if (typeof matched[0].timeout !== 'number') {
     return { error: `hooks.json 의 "${slotName}" 디스패처 항목에 숫자 timeout 이 없다` };
   }
-  return { timeout: matched[0].timeout };
+  return { timeout: matched[0].timeout * HOOKS_JSON_TIMEOUT_UNIT_MS };
 }
 
 /**
@@ -170,9 +181,9 @@ function singleHookDrift(table, hooks, slotName) {
   }
 
   const out = [];
-  if (entries[0].timeout !== slot.singleHookTimeoutMs) {
+  if (entries[0].timeout * HOOKS_JSON_TIMEOUT_UNIT_MS !== slot.singleHookTimeoutMs) {
     out.push(
-      `${slotName}: singleHookTimeoutMs=${slot.singleHookTimeoutMs} != hooks.json timeout=${entries[0].timeout}`,
+      `${slotName}: singleHookTimeoutMs=${slot.singleHookTimeoutMs} != hooks.json timeout=${entries[0].timeout}s`,
     );
   }
   if (entries[0].command !== slot.singleHookCommand) {
@@ -267,7 +278,8 @@ describe('훅 타임아웃 예산 정합 (dispatch-table ↔ hooks.json)', () =>
 
     const slot = TABLE.slots.PreCompact;
     const entry = HOOKS.hooks.PreCompact[0].hooks[0];
-    expect(entry.timeout).toBe(slot.singleHookTimeoutMs);
+    // hooks.json 은 초, 테이블은 ms — 등호는 환산 뒤에 성립한다.
+    expect(entry.timeout * HOOKS_JSON_TIMEOUT_UNIT_MS).toBe(slot.singleHookTimeoutMs);
     expect(entry.command).toBe(slot.singleHookCommand);
     expect(singleHookDrift(TABLE, HOOKS, 'PreCompact')).toEqual([]);
   });
@@ -327,6 +339,14 @@ describe('게이트 자기검증', () => {
     const mutated = structuredClone(TABLE);
     mutated.slots.PreCompact.singleHookTimeoutMs += 1;
     expect(() => assertNoViolations(mutated, HOOKS)).toThrow(/singleHookTimeoutMs/);
+  });
+
+  it('hooks.json 쪽이 밀리초로 되돌아가면(4.55.0 의 8000) 환산 뒤 등호가 깨져 throw 한다', () => {
+    // 단위 회귀의 음성 대조. 환산 상수가 1 로 바뀌거나 빠지면 옛 값 8000 이 다시
+    // 통과하므로, 이 변이가 RED 인 것이 환산이 실제로 적용됐다는 증거다.
+    const mutatedHooks = structuredClone(HOOKS);
+    mutatedHooks.hooks.PreCompact[0].hooks[0].timeout = TABLE.slots.PreCompact.singleHookTimeoutMs;
+    expect(() => assertNoViolations(TABLE, mutatedHooks)).toThrow(/singleHookTimeoutMs/);
   });
 
   it('디스패처 경로가 hooks.json 과 어긋나면 스킵이 아니라 throw 다 (fail-closed)', () => {

@@ -45,7 +45,10 @@ const FROZEN_NOW = () => new Date(Date.UTC(2026, 4, 19, 12, 30, 0));
 const HAPPY_GIT = mockGit({
   'rev-parse --abbrev-ref HEAD': 'feat/handoff\n',
   'rev-parse --short HEAD': 'abc1234\n',
-  'status --porcelain': ' M file-a.js\n?? file-b.js\nA  file-c.js\n',
+  // 회고 #44: collectGitState/collectContextFiles 는 `status --porcelain -z` 를
+  // 쓴다. 목 조회는 prefix 매치라 '-z' 가 붙어도 이 키가 잡힌다. 값은 실제 -z
+  // 출력대로 NUL 종단.
+  'status --porcelain': ' M file-a.js\0?? file-b.js\0A  file-c.js\0',
   'log -5 --format=%h|%s|%ar': [
     'abc1234|feat: add handoff (PR #42)|2 hours ago',
     'def5678|fix: typo|5 hours ago',
@@ -252,7 +255,7 @@ describe('handoff-builder / full render', () => {
     const partialGit = mockGit({
       'rev-parse --abbrev-ref HEAD': 'feat/handoff\n',
       'rev-parse --short HEAD': 'abc1234\n',
-      'status --porcelain': ' M file-a.js\n',
+      'status --porcelain': ' M file-a.js\0',
       'log -5 --format=%h|%s|%ar': () => {
         // Plain error (not a lock/timeout) — should NOT flip lockedOut.
         throw new Error('fatal: bad revision');
@@ -422,6 +425,115 @@ describe('handoff-builder / collectContextFiles 경로 디코딩', () => {
     expect(data.contextFiles).not.toContain('');
     // KO 는 두 커밋에 등장 → 빈도 1위
     expect(data.contextFiles[0]).toBe(KO);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 회고 #44 — `status --porcelain` 도 C-quote 대상이다. `-z` + NUL 분리로 읽는다.
+// ---------------------------------------------------------------------------
+describe('handoff-builder / porcelain -z 경로 디코딩 (회고 #44)', () => {
+  let pluginRoot;
+  let projectRoot;
+
+  beforeEach(() => {
+    pluginRoot = makeTempRoot();
+    projectRoot = makeTempRoot();
+  });
+
+  afterEach(() => {
+    rmSync(pluginRoot, { recursive: true, force: true });
+    rmSync(projectRoot, { recursive: true, force: true });
+  });
+
+  const KO = 'src/한글폴더/설계문서.md';
+  const SPACE = ' src/leading space.md';
+  const RENAMED_TO = 'src/새이름.md';
+  const RENAMED_FROM = 'src/old-name.md';
+  const C_QUOTED =
+    '"src/\\355\\225\\234\\352\\270\\200\\355\\217\\264\\353\\215\\224/'
+    + '\\354\\204\\244\\352\\263\\204\\353\\254\\270\\354\\204\\234.md"';
+
+  /**
+   * 양방향 목: `-z` 가 있으면 실제 NUL 출력(경로 원문, rename 은 2필드), 없으면
+   * 예전 개행 출력(C-quote·`old -> new`). 어느 형태를 요청했는지도 기록한다 —
+   * 파서가 고쳐졌어도 호출부가 `-z` 를 안 넘기면 라이브에서는 그대로 깨진다.
+   */
+  const statusCalls = [];
+  const dualGit = (args) => {
+    const key = args.join(' ');
+    if (key.startsWith('status --porcelain')) {
+      statusCalls.push(args);
+      return args.includes('-z')
+        ? ` M ${KO}\0?? ${SPACE}\0R  ${RENAMED_TO}\0${RENAMED_FROM}\0`
+        : ` M ${C_QUOTED}\n?? "${SPACE}"\nR  ${RENAMED_FROM} -> ${RENAMED_TO}\n`;
+    }
+    if (key.startsWith('log -5 --name-only')) return '';
+    if (key.startsWith('rev-parse --abbrev-ref')) return 'feat/handoff\n';
+    if (key.startsWith('rev-parse --short')) return 'abc1234\n';
+    if (key.startsWith('log -5 --format=')) return '';
+    if (key.startsWith('rev-list --count')) return '0\n';
+    throw new Error(`dualGit: unmatched ${key}`);
+  };
+
+  beforeEach(() => { statusCalls.length = 0; });
+
+  async function collect() {
+    return collectHandoffData({
+      pluginRoot,
+      projectRoot,
+      gitRunner: dualGit,
+      taskList: [],
+      firstPrompts: [],
+      now: FROZEN_NOW,
+    });
+  }
+
+  it('두 호출부 모두 status 에 -z 를 넘긴다', async () => {
+    await collect();
+    // collectGitState(계수) + collectContextFiles(경로) = 2회. 0회면 아래 단언이
+    // 공허해지므로 분모를 먼저 못박는다.
+    expect(statusCalls).toHaveLength(2);
+    expect(statusCalls.every((a) => a.includes('-z'))).toBe(true);
+  });
+
+  it('한글·앞공백 경로를 C-quote 가 아니라 실제 경로로 싣는다 (trim 하지 않는다)', async () => {
+    const data = await collect();
+    expect(data.contextFiles).toContain(KO);
+    expect(data.contextFiles).toContain(SPACE);
+    for (const f of data.contextFiles) {
+      expect(f.startsWith('"')).toBe(false);
+      expect(f).not.toMatch(/\\[0-7]{3}/);
+    }
+  });
+
+  it('rename 은 2필드 — 새 경로만 싣고 원래 경로를 유령 항목으로 세지 않는다', async () => {
+    const data = await collect();
+    expect(data.contextFiles).toContain(RENAMED_TO);
+    expect(data.contextFiles).not.toContain(RENAMED_FROM);
+    // 원본 경로 필드가 "상태 코드 + 경로" 로 오독되면 슬라이스된 잔재가 남는다.
+    expect(data.contextFiles).not.toContain(RENAMED_FROM.slice(3));
+  });
+
+  it('계수도 -z 파서를 탄다: modified 1 · staged 1(R) · untracked 1, 유령 항목 0', async () => {
+    const data = await collect();
+    expect(data.gitState.modified).toBe(1);
+    expect(data.gitState.staged).toBe(1);
+    expect(data.gitState.untracked).toBe(1);
+  });
+
+  it('음성 대조: 개행 출력(비 -z)을 먹이면 C-quote 가 그대로 새어 나온다', async () => {
+    // 픽스처가 결함 영역에 실제로 닿는지 증명한다 — 비 -z 출력에서 파서가 통과하면
+    // 위 단언들은 아무것도 증명하지 않는다.
+    const legacy = (args) => (args[0] === 'status' ? dualGit(args.filter((a) => a !== '-z')) : dualGit(args));
+    const data = await collectHandoffData({
+      pluginRoot,
+      projectRoot,
+      gitRunner: legacy,
+      taskList: [],
+      firstPrompts: [],
+      now: FROZEN_NOW,
+    });
+    expect(data.contextFiles).not.toContain(KO);
   });
 });
 
@@ -640,7 +752,7 @@ describe('handoff-builder / git sync collection + render', () => {
     const noUpstreamGit = mockGit({
       'rev-parse --abbrev-ref HEAD': 'feat/local\n',
       'rev-parse --short HEAD': 'abc1234\n',
-      'status --porcelain': ' M foo.js\n',
+      'status --porcelain': ' M foo.js\0',
       'log -5 --format=%h|%s|%ar': 'abc1234|wip|1 hour ago\n',
       'rev-parse --abbrev-ref --symbolic-full-name @{u}': () => {
         throw new Error('fatal: no upstream configured for branch');

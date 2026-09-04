@@ -10,7 +10,7 @@
           {
             "type": "command",
             "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/_sessionstart-dispatcher.js",
-            "timeout": 30000
+            "timeout": 30
           }
         ],
         "priority": "operational",
@@ -19,72 +19,72 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "tool == \"Write\" || tool == \"Edit\"",
+        "matcher": "Write|Edit",
         "hooks": [
           {
             "type": "command",
             "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-write.js",
-            "timeout": 5000
+            "timeout": 5
           }
         ],
         "priority": "critical",
         "category": "security"
       },
       {
-        "matcher": "tool == \"Bash\"",
+        "matcher": "Bash",
         "hooks": [
           {
             "type": "command",
             "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-bash.js",
-            "timeout": 5000
+            "timeout": 5
           }
         ],
         "priority": "critical",
         "category": "security"
       },
       {
-        "matcher": "tool == \"Bash\"",
+        "matcher": "Bash",
         "hooks": [
           {
             "type": "command",
             "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/bash-risk-guard.js",
-            "timeout": 5000
+            "timeout": 5
           }
         ],
         "priority": "critical",
         "category": "security"
       },
       {
-        "matcher": "tool == \"Write\" || tool == \"Edit\"",
+        "matcher": "Write|Edit",
         "hooks": [
           {
             "type": "command",
             "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-write-guard.js",
-            "timeout": 5000
+            "timeout": 5
           }
         ],
         "priority": "critical",
         "category": "security"
       },
       {
-        "matcher": "tool == \"Write\" || tool == \"Edit\"",
+        "matcher": "Write|Edit",
         "hooks": [
           {
             "type": "command",
             "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/git-autopilot-guard.js",
-            "timeout": 5000
+            "timeout": 5
           }
         ],
         "priority": "operational",
         "category": "git"
       },
       {
-        "matcher": "tool == \"Write\" || tool == \"Edit\"",
+        "matcher": "Write|Edit",
         "hooks": [
           {
             "type": "command",
             "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-write-checkpoint.js",
-            "timeout": 5000
+            "timeout": 5
           }
         ],
         "priority": "critical",
@@ -96,19 +96,19 @@
           {
             "type": "command",
             "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/route-observe-pre.js",
-            "timeout": 5000
+            "timeout": 5
           }
         ],
         "priority": "optional",
         "category": "observability"
       },
       {
-        "matcher": "tool == \"WebFetch\"",
+        "matcher": "WebFetch",
         "hooks": [
           {
             "type": "command",
             "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/webfetch-cache-pre.js",
-            "timeout": 5000
+            "timeout": 5
           }
         ],
         "priority": "optional",
@@ -122,7 +122,7 @@
           {
             "type": "command",
             "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/_posttooluse-dispatcher.js",
-            "timeout": 30000
+            "timeout": 30
           }
         ],
         "priority": "operational",
@@ -136,7 +136,7 @@
           {
             "type": "command",
             "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-compact.js",
-            "timeout": 8000
+            "timeout": 8
           }
         ],
         "priority": "optional",
@@ -150,7 +150,7 @@
           {
             "type": "command",
             "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/post-compact-rehydrate.js",
-            "timeout": 8000
+            "timeout": 8
           }
         ],
         "priority": "optional",
@@ -164,7 +164,7 @@
           {
             "type": "command",
             "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/_stop-dispatcher.js",
-            "timeout": 30000
+            "timeout": 30
           }
         ],
         "priority": "operational",
@@ -178,7 +178,7 @@
           {
             "type": "command",
             "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/_userprompt-dispatcher.js",
-            "timeout": 15000
+            "timeout": 15
           }
         ],
         "priority": "operational",
@@ -192,12 +192,12 @@
           {
             "type": "command",
             "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/subagent-handler.js start",
-            "timeout": 5000
+            "timeout": 5
           },
           {
             "type": "command",
             "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/workflow-status.js teammate-update",
-            "timeout": 5000
+            "timeout": 5
           }
         ],
         "priority": "optional",
@@ -211,7 +211,7 @@
           {
             "type": "command",
             "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/_subagentstop-dispatcher.js",
-            "timeout": 15000
+            "timeout": 15
           }
         ],
         "priority": "optional",
@@ -225,12 +225,12 @@
           {
             "type": "command",
             "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/team-idle-handler.js",
-            "timeout": 5000
+            "timeout": 5
           },
           {
             "type": "command",
             "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/workflow-status.js teammate-update",
-            "timeout": 5000
+            "timeout": 5
           }
         ],
         "priority": "optional",
@@ -244,7 +244,7 @@
           {
             "type": "command",
             "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/team-idle-handler.js",
-            "timeout": 5000
+            "timeout": 5
           }
         ],
         "priority": "optional",
@@ -256,7 +256,7 @@
           {
             "type": "command",
             "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/clean-state-check.js",
-            "timeout": 5000
+            "timeout": 5
           }
         ],
         "priority": "observability",
@@ -270,7 +270,7 @@
           {
             "type": "command",
             "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/permission-auto-approve.js",
-            "timeout": 5000
+            "timeout": 5
           }
         ],
         "priority": "operational",
@@ -284,7 +284,7 @@
           {
             "type": "command",
             "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/_sessionend-dispatcher.js",
-            "timeout": 30000
+            "timeout": 30
           }
         ],
         "priority": "operational",
@@ -298,7 +298,7 @@
           {
             "type": "command",
             "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/tool-tracker.js failure",
-            "timeout": 5000
+            "timeout": 5
           }
         ],
         "priority": "observability",
@@ -310,7 +310,7 @@
           {
             "type": "command",
             "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/memory-tracker.js PostToolUseFailure",
-            "timeout": 5000
+            "timeout": 5
           }
         ],
         "priority": "operational",
@@ -322,7 +322,7 @@
           {
             "type": "command",
             "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/post-tool-failure-advisor.js",
-            "timeout": 5000
+            "timeout": 5
           }
         ],
         "priority": "operational",
@@ -336,7 +336,7 @@
           {
             "type": "command",
             "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/workflow-status.js notification",
-            "timeout": 5000
+            "timeout": 5
           }
         ],
         "priority": "observability",
@@ -348,7 +348,7 @@
           {
             "type": "command",
             "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/context-tracker.js",
-            "timeout": 5000
+            "timeout": 5
           }
         ],
         "priority": "observability",
@@ -363,7 +363,7 @@
           {
             "type": "command",
             "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/instructions-loaded.js",
-            "timeout": 5000
+            "timeout": 5
           }
         ],
         "priority": "operational",

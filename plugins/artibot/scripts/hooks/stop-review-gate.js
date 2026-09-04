@@ -212,6 +212,42 @@ function checkBracketMismatch(absPath, ext) {
 
 
 /**
+ * Strip block-comment text from one line, carrying the open/closed state
+ * across lines. Returns the code that remains on the line (possibly empty)
+ * and the state to carry into the next line.
+ *
+ * Why not a per-line "starts with slash-star" test: a block comment that opens
+ * AND closes on the same line (slash-star TODO star-slash, alone or after
+ * code) matched neither the "opens a block" branch nor the "inside a block"
+ * branch of the previous heuristic, so its words were scanned as code and a
+ * TODO/FIXME inside it was reported as a violation (retro #44/#45,
+ * 2026-09-04). This version removes every closed span on the line, keeps the
+ * code before an unterminated opener, and drops everything up to the closer
+ * when a block is already open.
+ *
+ * Still a heuristic: a slash-star inside a string literal or a regex opens a
+ * block here too, exactly as it did before.
+ *
+ * @param {string} line
+ * @param {boolean} inBlock — true when a block comment is open from a prior line
+ * @returns {{ code: string, inBlock: boolean }}
+ */
+function stripBlockComments(line, inBlock) {
+  let text = line;
+  if (inBlock) {
+    const close = text.indexOf('*/');
+    if (close < 0) return { code: '', inBlock: true };
+    text = text.slice(close + 2);
+  }
+  // Closed spans on this line (there may be several).
+  text = text.replace(/\/\*[\s\S]*?\*\//g, '');
+  // An opener with no closer on this line starts a block; keep the code before it.
+  const open = text.indexOf('/*');
+  if (open >= 0) return { code: text.slice(0, open), inBlock: true };
+  return { code: text, inBlock: false };
+}
+
+/**
  * Check for pattern violations (console.log, TODO/FIXME).
  * @param {string} content
  * @param {string} filename
@@ -231,16 +267,10 @@ function checkPatternViolations(content, filename) {
   let inBlockComment = false;
 
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    // Track block comment state (simple line-level heuristic)
-    if (inBlockComment) {
-      if (/\*\//.test(line)) inBlockComment = false;
-      continue;
-    }
-    if (/^\s*\/\*/.test(line) && !/\*\//.test(line)) {
-      inBlockComment = true;
-      continue;
-    }
+    const stripped = stripBlockComments(lines[i], inBlockComment);
+    inBlockComment = stripped.inBlock;
+    const line = stripped.code;
+    if (line.trim() === '') continue;
     // Skip JSDoc continuation lines and single-line comments
     if (jsdocLine.test(line) || singleLineComment.test(line)) continue;
     if (consolePattern.test(line)) consoleHits.push(i + 1);

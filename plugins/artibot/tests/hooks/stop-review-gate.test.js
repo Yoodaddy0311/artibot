@@ -499,3 +499,76 @@ describe('stop-review-gate — --name-status -z 파서 (후속 19 #11)', () => {
     expect(seen).toHaveLength(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// 회고 #44/#45 — 한 줄 블록 주석 오탐 (경로 파서와 별건)
+// ---------------------------------------------------------------------------
+describe('stop-review-gate — checkPatternViolations 한 줄 블록 주석 (회고 #44)', () => {
+  /** 게이트를 lib/ 코드 파일 1개에 대해 돌리고 stdout 페이로드 본문을 돌려준다. */
+  async function gateOn(content) {
+    mockState.readStdinResult = Promise.resolve(JSON.stringify({}));
+    mockState.execSyncResponses = [
+      ['rev-parse --show-toplevel', '/repo'],
+      ['diff --name-status', 'M\0plugins/artibot/lib/sample.js\0'],
+    ];
+    mockState.existsSyncResults = {
+      'sample.js': true,
+      'tests': false,
+      'CLAUDE.md': true,
+      'artibot.config.json': false,
+    };
+    mockState.readFileSyncImpl = () => content;
+    await runHook();
+    expect(mockState.writeStdoutCalls).toHaveLength(1);
+    const payload = mockState.writeStdoutCalls[0];
+    return payload.reason || payload.message || JSON.stringify(payload);
+  }
+
+  it('같은 줄에서 열고 닫히는 블록 주석 안의 TODO/FIXME 는 위반이 아니다', async () => {
+    const text = await gateOn([
+      '/* TODO: revisit after v5 */',
+      'export const a = 1;',
+      'export const b = 2; /* FIXME(#44) trailing */',
+      'export const c = 3; /* one */ /* HACK two */',
+      '',
+    ].join('\n'));
+    expect(text).not.toContain('TODO/FIXME');
+  });
+
+  it('같은 줄에서 열리고 다음 줄에서 닫히는 블록도 안쪽은 건너뛰고 닫힌 뒤 코드는 본다', async () => {
+    const text = await gateOn([
+      'export const a = 1; /* opens here',
+      '   TODO inside the block',
+      'still inside */ export const b = 2; // TODO after close',
+      '',
+    ].join('\n'));
+    // 3행: 닫힌 뒤 코드에 TODO 가 있다 → 이 한 곳만 잡혀야 한다.
+    expect(text).toContain('TODO/FIXME at line(s) 3');
+  });
+
+  it('음성 대조: 주석 밖 코드 줄의 TODO 와 console.log 는 여전히 잡는다', async () => {
+    const text = await gateOn([
+      '/* header */',
+      'export const a = 1; // TODO real',
+      'console.log("x");',
+      '',
+    ].join('\n'));
+    expect(text).toContain('TODO/FIXME at line(s) 2');
+    expect(text).toContain('console.log at line(s) 3');
+  });
+
+  it('여러 줄 블록 주석·JSDoc·한 줄 주석은 이전과 같이 건너뛴다 (회귀 없음)', async () => {
+    const text = await gateOn([
+      '/**',
+      ' * TODO in jsdoc',
+      ' */',
+      '/*',
+      '  FIXME in block',
+      '*/',
+      '// XXX line comment',
+      'export const a = 1;',
+      '',
+    ].join('\n'));
+    expect(text).not.toContain('TODO/FIXME');
+  });
+});

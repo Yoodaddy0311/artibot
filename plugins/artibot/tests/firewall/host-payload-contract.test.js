@@ -255,12 +255,12 @@ describe('gate self-verification', () => {
     expect(matched[0].matcher).toBe('Agent');
     expect(matched[0].hooks).toHaveLength(1);
     expect(typeof matched[0].hooks[0].timeout).toBe('number');
-    // Follow-up 14 (hooks.json timeout unit convention) is CONFIRM-ONLY for
-    // this limb: no existing value is changed, and the new entry adopts the
-    // file's own scale rather than inventing a second one. Every PreToolUse
-    // entry in this file states 5000; this asserts the new one did not fork it.
+    // Follow-up 14 resolved (retro #50, limb hooks-fix 2026-09-04): the host
+    // `timeout` is in SECONDS, so the whole file moved 5000 → 5. This still
+    // asserts one shared scale across PreToolUse — the new entry must not fork
+    // it — with the unit itself gated in tests/hooks-schema-shape.test.js.
     const preTimeouts = new Set(groups.flatMap((g) => (g.hooks ?? []).map((h) => h.timeout)));
-    expect([...preTimeouts]).toEqual([5000]);
+    expect([...preTimeouts]).toEqual([5]);
   });
 
   it('a payload that SHOULD record does record — the gate is not vacuously green', () => {
