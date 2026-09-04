@@ -62,6 +62,21 @@
       "user_preference",
       "project_preference",
       "tool_constraint"
+    ],
+    "route_bind_confidence": [
+      "exact",
+      "name",
+      "fifo"
+    ],
+    "route_bind_matched_on": [
+      "name",
+      "subagent_type"
+    ],
+    "route_bind_method": [
+      "prompt_id+name",
+      "prompt_id+fifo",
+      "name-only",
+      "fifo-only"
     ]
   },
   "enum_sources": {
@@ -71,7 +86,10 @@
     "verify_result": "run-ledger.schema.yaml:41 gives pass|fail. `unmeasured` is added from design §3.4 'unified-verifier status: PASS|FAIL|UNMEASURED, UNMEASURED 가 1급 상태 -- 재지 못한 층을 PASS 라 부르지 않는다'. Without it an unmeasured layer has no representable value and would have to be written as a false pass or dropped.",
     "mission_status": "package-v1.1/16_STATE_SCHEMA.yaml:27-35 (7종). Distinct from the Task Graph's 8 states (v1.1 7 + cancelled, Hardening §7-8), which T-14 owns.",
     "human_resolved_kind": "design §8.2 §19 'human.resolved{kind: correction|decision|approval}'. Scheduled for Shadow (§8.4), so declared but not required here.",
-    "memory_kind": "lane 6 §5-④, from artifact-governance 08 '승격 대상'. The non-promotable list (transient logs, one-off retries, stale plans, provisional guesses) has no kind, so it is structurally unrepresentable rather than merely discouraged."
+    "memory_kind": "lane 6 §5-④, from artifact-governance 08 '승격 대상'. The non-promotable list (transient logs, one-off retries, stale plans, provisional guesses) has no kind, so it is structurally unrepresentable rather than merely discouraged.",
+    "route_bind_confidence": "ROUTE-RECEIPT-PRETOOLUSE-DESIGN.md §2.3-4 declares confidence exact|inferred and defines exact as 'passed tier 2', i.e. a named spawn whose prompt_id also matched. `inferred` is SPLIT here into `name` (tier 2 hit, tier 1 did not -- still deterministic) and `fifo` (nothing left to match on, probabilistic). Splitting only refines the denominator: `exact` keeps the design's meaning, so the KPI numerator is unchanged, and the two kinds of not-exact stop being one indistinguishable bucket.",
+    "route_bind_matched_on": "MEASURED 2026-09-04, host 2.1.260 (limb l2-d1 D2 burn): an Agent-tool spawn reports agent_type === subagent_type on SubagentStart even when the caller passed a name (2/2 rows, 1/1 of them named), while team/autopilot spawns report agent_type === name (1025-row spawns.ndjson census, name-shaped values dominate). Design §2.1 recorded only the second. Tier 2 therefore matches EITHER spelling, and this field records which one actually matched -- otherwise a confidence of exact cannot be audited against the host behaviour it assumes.",
+    "route_bind_method": "ROUTE-RECEIPT-PRETOOLUSE-DESIGN.md §2.3-4, verbatim: correlation.method = 'prompt_id+name' | 'prompt_id+fifo' | 'name-only' | 'fifo-only'. Which TIERS fired, recorded beside the confidence they produced, so a later reader can tell a promptless-but-named bind from a scoped guess without re-deriving it."
   },
   "events": {
     "mission.created": {
@@ -135,6 +153,29 @@
         "hook"
       ],
       "spec": "design §8.2 §3·§40 'Route Receipt = 원장 route.selected 이벤트의 data. 별도 파일 아님'. Leader ruling (T-15 ↔ T-16): the receipt schema is the canonical data contract, and lane 6 §5-②'s flat keys (model, effort, reason, decision) are a pre-§8 draft and are retired. Note the shape moved too -- the receipt nests decision as decision.type, and owns the five-value vocabulary itself. Phase 0: the SubagentStart hook records a shadow receipt at spawn time (scripts/hooks/subagent-handler.js, measured 2026-09-02 18:20 -- builds the shadow RouteReceipt at :272, sets shadow_of at :298, appends at :340), so `hook` is listed alongside `scheduler`. The hook had been setting source:'scheduler' because this list allowed nothing else, and labelling the emitter as something it is not to satisfy a schema is the defect, not the fix -- the vocabulary follows the fact (T-37 precedent). `scheduler` stays for the cognitive-router path that writes the same event from Canary onward."
+    },
+    "route.bound": {
+      "required": [
+        "tool_use_id",
+        "agent_id",
+        "confidence",
+        "method"
+      ],
+      "fields": {
+        "tool_use_id": { "type": "string" },
+        "agent_id": { "type": "string" },
+        "agent_type": { "type": "string" },
+        "confidence": { "enum_ref": "route_bind_confidence" },
+        "method": { "enum_ref": "route_bind_method" },
+        "matched_on": { "enum_ref": "route_bind_matched_on" },
+        "selected_model": { "type": "string" },
+        "recommended_model": { "type": "string" },
+        "action_class": { "type": "string" }
+      },
+      "sources": [
+        "hook"
+      ],
+      "spec": "ROUTE-RECEIPT-PRETOOLUSE-DESIGN.md §3 'route.selected (PreToolUse) + route.bound (SubagentStart)'. STAGE 2 OF A TWO-STAGE RECORD, and it exists because the two facts arrive at different times through different events with NO shared key. The PreToolUse payload for the Agent tool is the only place the action text and subagent_type exist (host 2.1.259 binary + 2.1.260 live probe), and it does not know which agent_id will spawn; SubagentStart knows the agent_id and the policy model but carries no text. So route.selected records the receipt under the tool_use_id as a temporary epoch, and this event records the JOIN under the agent_id -- the epoch the G1 decision actually names. The first line is NEVER updated: the ledger is append-only, and an amended receipt would be indistinguishable from one that was right the first time. data.tool_use_id is the join key back to route.selected's routing_epoch_id. confidence/method say HOW the join was made, because two of the three tiers are not deterministic and a bind that does not report its own certainty is read as if it were certain (design §2.3 invariant 4). NOT REGISTERED HERE, deliberately: bind.conflict (design §2.3 invariant 1) -- the 1:1 rule is enforced by construction instead (an already-bound tool_use_id is not a candidate and an already-bound agent_id skips), so there is no conflict line to write and no event registered for one; if the reconciliation in /doctor Check 10 (design §2.3 invariant 3, 3rd batch) ever needs to report a violation rather than prevent it, that is when the event earns its entry."
     },
     "model.switched": {
       "required": [

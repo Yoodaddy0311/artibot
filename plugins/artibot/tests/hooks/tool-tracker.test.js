@@ -94,6 +94,7 @@ function buildContext(toolName, input) {
     }
     case 'WebSearch': return 'search:web:external';
     case 'WebFetch': return 'fetch:web:external';
+    case 'Agent':
     case 'Task': {
       const agentType = input.subagent_type || input.type || 'generic';
       return `delegate:${agentType}:subagent`;
@@ -163,6 +164,7 @@ function scoreResult(toolName, result, _input) {
     case 'WebFetch':
       if (!output || output.length < MIN_SUBSTANTIVE_LENGTH) return 0.2;
       return 0.9;
+    case 'Agent':
     case 'Task':
       if (!output || output.length < MIN_SUBSTANTIVE_LENGTH) return 0.3;
       return 0.85;
@@ -321,6 +323,25 @@ describe('tool-tracker hook (pure function tests)', () => {
       expect(buildContext('Task', { type: 'security' })).toBe('delegate:security:subagent');
     });
 
+    // Design follow-up 4: the host renamed the spawn tool Task -> Agent, so the
+    // branch that reads `subagent_type` had been falling through to `default`
+    // and recording every delegation as `use:agent:tool`. Both spellings are
+    // handled; the old one is kept so an older host does not regress.
+    it('builds context for Agent tool (the current host spelling of Task)', () => {
+      expect(buildContext('Agent', { subagent_type: 'code-reviewer' }))
+        .toBe('delegate:code-reviewer:subagent');
+      expect(buildContext('Agent', { subagent_type: 'artibot:tdd-guide' }))
+        .toBe('delegate:artibot:tdd-guide:subagent');
+    });
+
+    it('builds context for Agent tool with type fallback and with neither key', () => {
+      expect(buildContext('Agent', { type: 'security' })).toBe('delegate:security:subagent');
+      expect(buildContext('Agent', {})).toBe('delegate:generic:subagent');
+      // The regression this closes: before follow-up 4 an Agent payload hit the
+      // default branch and lost the agent type entirely.
+      expect(buildContext('Agent', { subagent_type: 'code-reviewer' })).not.toBe('use:agent:tool');
+    });
+
     it('builds context for Skill tool', () => {
       expect(buildContext('Skill', { skill: 'git-workflow' })).toBe('invoke:git-workflow:skill');
     });
@@ -390,6 +411,11 @@ describe('tool-tracker hook (pure function tests)', () => {
 
     it('returns 0.85 for Task with output', () => {
       expect(scoreResult('Task', { content: 'sub-agent completed work.' }, {})).toBe(0.85);
+    });
+
+    it('returns 0.85 for Agent with output and 0.3 without (same rule as Task)', () => {
+      expect(scoreResult('Agent', { content: 'sub-agent completed work.' }, {})).toBe(0.85);
+      expect(scoreResult('Agent', {}, {})).toBe(0.3);
     });
 
     it('returns 0.7 for unknown tool with output', () => {
