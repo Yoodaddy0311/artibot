@@ -62,7 +62,9 @@ const DEV_VERIFY_REASON =
   "flag anything unproven as 'Pending verification'.";
 
 /**
- * Run a git command in the given cwd, returning trimmed stdout.
+ * Run a git command in the given cwd, returning stdout verbatim.
+ * Not trimmed: the sole caller parses NUL-separated `-z` output, where a path
+ * may legitimately begin or end with a space.
  * Returns null on failure (silent — git unavailable / not a repo).
  *
  * @param {string} cmd
@@ -77,7 +79,7 @@ function git(cmd, cwd) {
       stdio: ['ignore', 'pipe', 'pipe'],
       timeout: 5000,
       windowsHide: true,
-    }).trim();
+    });
   } catch (err) {
     logHookError(HOOK_NAME, `git failed: ${cmd}`, err);
     return null;
@@ -120,15 +122,20 @@ const EXCLUDED_FILES = new Set([
  */
 function getChangedFiles(repoRoot) {
   const merged = new Set();
+  // `-z` : NUL-separated output. It also suppresses `core.quotepath`, though
+  // that axis is inert here — these paths are never dereferenced, only counted,
+  // matched against EXCLUDED_FILES, and folded into the fingerprint.
+  // The axis that DID bite: a leading/trailing space is not C-quoted by git, so
+  // the old per-line `.trim()` silently rewrote " .artibot/SESSION-NOTES.md"
+  // into the excluded name and the gate went quiet on a file it should flag.
   for (const cmd of [
-    'git diff --name-only HEAD',
-    'git diff --name-only --cached',
+    'git diff --name-only -z HEAD',
+    'git diff --name-only -z --cached',
   ]) {
     const out = git(cmd, repoRoot);
     if (!out) continue;
-    for (const line of out.split('\n')) {
-      const trimmed = line.trim();
-      if (trimmed && !EXCLUDED_FILES.has(trimmed)) merged.add(trimmed);
+    for (const file of out.split('\0')) {
+      if (file && !EXCLUDED_FILES.has(file)) merged.add(file);
     }
   }
   return [...merged];

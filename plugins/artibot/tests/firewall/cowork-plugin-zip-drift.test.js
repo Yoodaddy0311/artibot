@@ -292,18 +292,33 @@ describe('artibot-cowork.plugin ZIP mirrors the cowork tree', () => {
     // file that IS committed must have been compared; only genuinely-absent
     // ones may be skipped. One extra process for the whole list (~37 ms), which
     // is the entire point of batching in the first place.
+    // 후속 19 (#12): `-z` 는 NUL 구분이자 core.quotepath 억제 스위치다. 없으면
+    // 비-ASCII 경로가 "plugins/artibot-cowork/\355\225\234...".. 로 감싸여
+    // zip 엔트리 이름과 절대 일치하지 않는다. 그러면 그 파일은 inHead 에서
+    // 실제 이름으로 빠지고, 아래 "HEAD 에 있는 건 전부 비교됐어야 한다" 교차
+    // 검증이 **그 파일을 면제해 준다** — 배치 파서가 항목을 잃어도 초록이 된다.
+    //
+    // 정직한 기록: 2026-09-04 14:3x 실측으로 `plugins/artibot-cowork/` 아래
+    // 추적 경로 168건은 **전부 ASCII** 라 오늘은 결과가 바뀌지 않는다. 이건
+    // 예방적 수리이고, 아래 자기검증이 그 전제를 계속 감시한다.
     const HEAD_PREFIX = 'plugins/artibot-cowork/';
+    const headPaths = execFileSync(
+      'git',
+      ['ls-tree', '-r', '--name-only', '-z', 'HEAD', '--', 'plugins/artibot-cowork'],
+      { cwd: REPO_ROOT, maxBuffer: 1 << 28, stdio: ['ignore', 'pipe', 'ignore'] },
+    )
+      .toString('utf8')
+      .split('\0')
+      .filter(Boolean);
     const inHead = new Set(
-      execFileSync('git', ['ls-tree', '-r', '--name-only', 'HEAD', '--', 'plugins/artibot-cowork'], {
-        cwd: REPO_ROOT,
-        maxBuffer: 1 << 28,
-        stdio: ['ignore', 'pipe', 'ignore'],
-      })
-        .toString('utf8')
-        .split('\n')
-        .filter(Boolean)
-        .map((line) => (line.startsWith(HEAD_PREFIX) ? line.slice(HEAD_PREFIX.length) : line)),
+      headPaths.map((p) => (p.startsWith(HEAD_PREFIX) ? p.slice(HEAD_PREFIX.length) : p)),
     );
+
+    // C-quote 가 새면 접두 제거가 실패해 경로가 통째로 남는다. 그 상태를
+    // 직접 못박는다(오늘은 비-ASCII 가 0건이라 조용히 통과하는 것이 정상).
+    for (const p of headPaths) {
+      expect(p.startsWith('"'), `ls-tree C-quoted a path: ${p}`).toBe(false);
+    }
 
     expect(inHead.size, 'git ls-tree returned nothing — the cross-check would be vacuous').toBeGreaterThan(100);
     expect(compared, `compared ${compared} files but HEAD holds ${files.filter((f) => inHead.has(f)).length} of them`)

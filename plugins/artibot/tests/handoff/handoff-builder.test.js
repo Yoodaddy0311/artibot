@@ -51,7 +51,10 @@ const HAPPY_GIT = mockGit({
     'def5678|fix: typo|5 hours ago',
   ].join('\n') + '\n',
   'rev-list --count @{u}..HEAD': '3\n',
-  'log -5 --name-only --pretty=format:': 'lib/handoff/handoff-builder.js\nlib/handoff/handoff-store.js\nlib/handoff/handoff-builder.js\n',
+  // 후속 19 (#5): collectContextFiles 는 `log --name-only -z` 를 쓴다. 목 조회는
+  // args.join(' ') 의 prefix 매치라 '-z' 가 붙어도 이 키가 잡힌다. 값은 실제
+  // -z 출력대로 NUL 구분 (커밋 경계는 빈 필드).
+  'log -5 --name-only': 'lib/handoff/handoff-builder.js\0lib/handoff/handoff-store.js\0\0lib/handoff/handoff-builder.js\0',
 });
 
 // ---------------------------------------------------------------------------
@@ -327,6 +330,98 @@ describe('handoff-builder / full render', () => {
     };
     const md = renderHandoffMarkdown(synthetic, { now: FROZEN_NOW });
     expect(md).toMatch(/^machineId:\s+(unknown|'')/m);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// collectContextFiles — git 경로 출력 디코딩 (후속 19 #5, handoff-builder.js:425)
+// ---------------------------------------------------------------------------
+//
+// `git log --name-only` 의 기본 출력은 core.quotepath 의 지배를 받아 비-ASCII
+// 경로가 "src/\355\225\234..." C-quote 로 나온다. contextFiles 는 HANDOFF
+// 문서에 그대로 렌더되므로(:804 renderContextFiles) 다음 세션이 읽는 파일
+// 목록이 깨진 문자열이 된다. `-z` 는 NUL 구분이자 C-quote 억제 스위치다.
+//
+// 아래 목은 **-z 유무에 따라 다른 형태를 돌려준다** — 그래야 이 테스트가
+// "새 코드가 -z 를 실제로 넘기는지"를 재고, 옛 코드에서는 C-quote 로 RED 가
+// 된다. .trim() 을 쓰지 않는 근거로 공백 경로 1건을 함께 싣는다.
+describe('handoff-builder / collectContextFiles 경로 디코딩', () => {
+  let pluginRoot;
+  let projectRoot;
+
+  beforeEach(() => {
+    pluginRoot = makeTempRoot();
+    projectRoot = makeTempRoot();
+  });
+
+  afterEach(() => {
+    rmSync(pluginRoot, { recursive: true, force: true });
+    rmSync(projectRoot, { recursive: true, force: true });
+  });
+
+  const KO = 'src/한글폴더/설계문서.md';
+  const SPACE = 'src/with space/파일 이름.md';
+  const C_QUOTED =
+    '"src/\\355\\225\\234\\352\\270\\200\\355\\217\\264\\353\\215\\224/'
+    + '\\354\\204\\244\\352\\263\\204\\353\\254\\270\\354\\204\\234.md"';
+
+  const dualGit = (args) => {
+    const key = args.join(' ');
+    if (key.startsWith('log -5 --name-only')) {
+      return args.includes('-z')
+        ? `${KO}\0${SPACE}\0\0${KO}\0`
+        : `${C_QUOTED}\n"src/with space/..."\n${C_QUOTED}\n`;
+    }
+    if (key.startsWith('rev-parse --abbrev-ref')) return 'feat/handoff\n';
+    if (key.startsWith('rev-parse --short')) return 'abc1234\n';
+    if (key.startsWith('status --porcelain')) return '';
+    if (key.startsWith('log -5 --format=')) return '';
+    if (key.startsWith('rev-list --count')) return '0\n';
+    throw new Error(`dualGit: unmatched ${key}`);
+  };
+
+  it('한글·공백 경로를 C-quote 가 아니라 실제 경로로 싣는다', async () => {
+    const data = await collectHandoffData({
+      pluginRoot,
+      projectRoot,
+      gitRunner: dualGit,
+      taskList: [],
+      firstPrompts: [],
+      now: FROZEN_NOW,
+    });
+    expect(data.contextFiles).toContain(KO);
+    expect(data.contextFiles).toContain(SPACE);
+  });
+
+  it('contextFiles 에 C-quote 잔재가 없다', async () => {
+    const data = await collectHandoffData({
+      pluginRoot,
+      projectRoot,
+      gitRunner: dualGit,
+      taskList: [],
+      firstPrompts: [],
+      now: FROZEN_NOW,
+    });
+    // 자기검증: 목록이 비면 아래 루프는 공허하게 통과한다.
+    expect(data.contextFiles.length).toBeGreaterThanOrEqual(2);
+    for (const f of data.contextFiles) {
+      expect(f.startsWith('"')).toBe(false);
+      expect(f).not.toMatch(/\\[0-7]{3}/);
+    }
+  });
+
+  it('커밋 경계(빈 필드)를 파일명으로 세지 않는다', async () => {
+    const data = await collectHandoffData({
+      pluginRoot,
+      projectRoot,
+      gitRunner: dualGit,
+      taskList: [],
+      firstPrompts: [],
+      now: FROZEN_NOW,
+    });
+    expect(data.contextFiles).not.toContain('');
+    // KO 는 두 커밋에 등장 → 빈도 1위
+    expect(data.contextFiles[0]).toBe(KO);
   });
 });
 

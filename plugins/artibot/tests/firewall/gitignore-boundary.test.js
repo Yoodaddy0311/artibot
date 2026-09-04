@@ -172,17 +172,43 @@ describe('gitignore boundary — v5 정본/로컬 경계', () => {
     expect(isIgnored('plugins/artibot/scripts/hooks/.artibot/transcripts/s.jsonl')).toBe(true);
   });
 
-  it('새 규칙이 덮는 자리에 추적 중인 파일이 하나도 없다', () => {
-    const tracked = execFileSync('git', ['ls-files'], {
+  // 후속 19 (#10): `-z` 가 없으면 core.quotepath 가 비-ASCII 경로를
+  // "\.artibot/adr/ADR-006-split-\354\226\264\355\234\230..." 로 감싼다.
+  // 그러면 NEWLY_LOCAL 정규식이 **실제 경로가 아닌 이스케이프 문자열**에
+  // 걸리므로, 무시 규칙이 덮는 자리에 한글 경로 파일이 추적되고 있어도
+  // 이 게이트가 통과한다 — fail-open 이다.
+  // 이건 가상의 위험이 아니다: 이 리포에는 이미 비-ASCII 추적 경로가 실재한다
+  // (측정 2026-09-04 14:3x, `git ls-files -z` 기준 1961건 중 5건, 전부
+  // `.artibot/adr/ADR-0xx-...md`).
+  function trackedPaths() {
+    return execFileSync('git', ['ls-files', '-z'], {
       cwd: REPO_ROOT,
       encoding: 'utf-8',
       maxBuffer: 32 * 1024 * 1024,
       stdio: ['ignore', 'pipe', 'pipe'],
-    }).split('\n').filter(Boolean);
+    }).split('\0').filter(Boolean);
+  }
+
+  it('새 규칙이 덮는 자리에 추적 중인 파일이 하나도 없다', () => {
+    const tracked = trackedPaths();
 
     // 자기검증: 목록이 비면 아래 필터는 항상 통과한다.
     expect(tracked.length).toBeGreaterThan(500);
 
     expect(tracked.filter((f) => NEWLY_LOCAL.test(f))).toEqual([]);
+  });
+
+  it('추적 목록이 비-ASCII 경로를 C-quote 없이 그대로 싣는다', () => {
+    const tracked = trackedPaths();
+    const nonAscii = tracked.filter((f) => /[^\x20-\x7e]/.test(f));
+
+    // 자기검증: 이 리포에 비-ASCII 추적 경로가 하나도 없다면 이 테스트는
+    // 아무것도 재지 못한다. 그때는 이 단언이 먼저 깨져 알려준다.
+    expect(nonAscii.length).toBeGreaterThan(0);
+
+    for (const f of nonAscii) {
+      expect(f.startsWith('"')).toBe(false);
+      expect(f).not.toMatch(/\\[0-7]{3}/);
+    }
   });
 });

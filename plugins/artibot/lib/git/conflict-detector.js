@@ -79,11 +79,11 @@ export async function predictConflictFiles(targetBranch, cwd) {
  */
 async function getChangedFiles(_base, range, cwd) {
   try {
-    const { stdout } = await execFileAsync('git', ['diff', '--name-only', range], { cwd });
-    return stdout
-      .split('\n')
-      .map((l) => l.trim())
-      .filter(Boolean);
+    // `-z` : NUL-separated output, and it disables `core.quotepath` C-quoting,
+    // so non-ASCII paths arrive verbatim instead of as "src/\355\225\234...".
+    // No `.trim()` — a path may legitimately begin or end with a space.
+    const { stdout } = await execFileAsync('git', ['diff', '--name-only', '-z', range], { cwd });
+    return stdout.split('\0').filter(Boolean);
   } catch (err) {
     logError('conflict-detector', `git diff failed for range ${range}`, err);
     return [];
@@ -139,11 +139,11 @@ async function abortRebase(cwd) {
 async function findFilesWithConflictMarkers(cwd) {
   let trackedFiles;
   try {
-    const { stdout } = await execFileAsync('git', ['ls-files', '--modified'], { cwd });
-    trackedFiles = stdout
-      .split('\n')
-      .map((l) => l.trim())
-      .filter(Boolean);
+    // `-z` : see getChangedFiles above. Here a mis-decoded path is worse than
+    // cosmetic — it feeds `readFile(join(cwd, f))` below, which throws ENOENT
+    // and the file is then silently dropped from the conflict list.
+    const { stdout } = await execFileAsync('git', ['ls-files', '--modified', '-z'], { cwd });
+    trackedFiles = stdout.split('\0').filter(Boolean);
   } catch (err) {
     logError('conflict-detector', 'git ls-files failed', err);
     return [];

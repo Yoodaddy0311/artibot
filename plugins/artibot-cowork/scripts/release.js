@@ -155,8 +155,14 @@ function commitRelease(version, topic) {
     `Version source: plugins/artibot-cowork/.claude-plugin/plugin.json`,
   ].join('\n');
 
-  const staged = run('git', ['diff', '--cached', '--name-only']);
-  const hasStaged = staged.stdout.split('\n').filter(Boolean).length > 0;
+  // 후속 19 (#14): `-z` for NUL-separated paths. 정직한 기록 — 이 자리는
+  // **결과가 바뀌지 않는다**. 쓰이는 값이 경로가 아니라 "스테이지된 것이
+  // 있는가" 하나뿐이고, C-quote 는 항목 수를 바꾸지 않기 때문이다(오너가
+  // 제외한 #7 존재 판정 · #10 개수만 과 같은 부류). 나머지 자리와 형태를
+  // 맞춰 두어, 훗날 이 목록에서 경로를 실제로 꺼내 쓸 때 조용히 깨지지
+  // 않게 하려는 예방적 정렬이다.
+  const staged = run('git', ['diff', '--cached', '--name-only', '-z']);
+  const hasStaged = staged.stdout.split('\0').filter(Boolean).length > 0;
 
   const commitArgs = ['commit', '-m', body];
   if (!hasStaged) commitArgs.splice(1, 0, '--allow-empty');

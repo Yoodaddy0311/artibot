@@ -422,9 +422,13 @@ async function collectSessionRecall(projectRoot) {
 function collectContextFiles(git, cwd) {
   const counts = new Map();
   try {
-    const out = git(['log', '-5', '--name-only', '--pretty=format:'], { cwd });
-    for (const raw of out.split('\n')) {
-      const f = raw.trim();
+    // `-z` : NUL-separated, and it suppresses `core.quotepath` C-quoting so
+    // non-ASCII paths reach the rendered HANDOFF verbatim rather than as
+    // "src/\355\225\234...". With an empty --pretty the commit boundary is
+    // just an empty field, which filter(Boolean) drops — same as the old
+    // blank-line skip. No `.trim()`: a path may begin or end with a space.
+    const out = git(['log', '-5', '--name-only', '-z', '--pretty=format:'], { cwd });
+    for (const f of out.split('\0')) {
       if (!f) continue;
       counts.set(f, (counts.get(f) || 0) + 1);
     }

@@ -167,11 +167,13 @@ describe('stop-review-gate — getChangedFiles --diff-filter=ACMR', () => {
     mockState.readStdinResult = Promise.resolve(JSON.stringify({}));
     mockState.execSyncResponses = [
       ['rev-parse --show-toplevel', '/repo'],
-      // Source builds: `git diff --name-status --diff-filter=ACMR HEAD~1 HEAD ...`
-      // Deletion entries (D\t...) would be filtered out by git itself; we
-      // simulate that by NOT emitting any "D" rows.  Bracket-mismatch /
-      // pattern checks pass on the trivial body returned by readFileSync.
-      ['diff --name-status', 'M\tplugins/artibot/lib/foo.js\nA\tplugins/artibot/lib/bar.js\n'],
+      // Source builds:
+      //   `git diff --name-status -z --diff-filter=ACMR HEAD~1 HEAD ...`
+      // 후속 19 (#11): -z 라 status 와 path 가 별개 NUL 필드다 ("M" NUL path NUL).
+      // Deletion entries (D) would be filtered out by git itself; we simulate
+      // that by NOT emitting any "D" rows.  Bracket-mismatch / pattern checks
+      // pass on the trivial body returned by readFileSync.
+      ['diff --name-status', 'M\0plugins/artibot/lib/foo.js\0A\0plugins/artibot/lib/bar.js\0'],
     ];
     mockState.existsSyncResults = {
       'plugins/artibot/lib/foo.js': true,
@@ -195,10 +197,11 @@ describe('stop-review-gate — getChangedFiles --diff-filter=ACMR', () => {
     mockState.readStdinResult = Promise.resolve(JSON.stringify({}));
     mockState.execSyncResponses = [
       ['rev-parse --show-toplevel', '/repo'],
-      // Rename row format: "R100\told/path.js\tnew/path.js"
-      // Pattern row: "M\tregular/path.js"
+      // 후속 19 (#11) -z 형태:
+      //   rename → "R100" NUL "old" NUL "new" NUL  (경로 2개, 새 이름을 취한다)
+      //   modify → "M" NUL "path" NUL
       ['diff --name-status', () => {
-        return 'R100\told/foo.js\tnew/foo.js\nM\tplugins/artibot/lib/regular.js\n';
+        return 'R100\0old/foo.js\0new/foo.js\0M\0plugins/artibot/lib/regular.js\0';
       }],
     ];
     // Exists only for the new path (the old path no longer exists in HEAD).
@@ -289,7 +292,7 @@ describe('stop-review-gate — checkMissingTests suffix variant', () => {
     mockState.readStdinResult = Promise.resolve(JSON.stringify({}));
     mockState.execSyncResponses = [
       ['rev-parse --show-toplevel', '/repo'],
-      ['diff --name-status', 'M\tplugins/artibot/lib/swarm/git-backend.js\n'],
+      ['diff --name-status', 'M\0plugins/artibot/lib/swarm/git-backend.js\0'],
     ];
     mockState.existsSyncResults = {
       'plugins/artibot/lib/swarm/git-backend.js': true,
@@ -334,4 +337,165 @@ describe('stop-review-gate — checkMissingTests suffix variant', () => {
     expect(reason).not.toContain('Code without tests');
   });
 
+});
+
+// ---------------------------------------------------------------------------
+// getChangedFiles — --name-status -z 파서 (후속 19 #11, stop-review-gate.js:79-80)
+// ---------------------------------------------------------------------------
+//
+// 이 자리는 12자리 중 **유일한 파서 재작성**이다. `--name-status` 는 `-z` 를
+// 붙이면 단순히 구분자만 바뀌는 게 아니라 **필드 구조가 달라진다**:
+//
+//   개행형  "M\tpath"              · rename "R100\told\tnew"
+//   -z 형   "M" NUL "path" NUL      · rename "R100" NUL "old" NUL "new" NUL
+//
+// 즉 status 와 path 가 **별개 NUL 필드**이고, R/C 만 경로가 2개다. 탭 분해로는
+// 읽을 수 없으므로 상태별 필드 수를 세는 파서가 필요하다.
+//
+// 실제 피해: 여기서 나온 경로는 existsSync/readFileSync 로 곧장 넘어간다.
+// C-quote 된 경로는 존재하지 않으므로 **한글 경로 파일은 리뷰 대상에서 조용히
+// 빠진다** — 게이트가 통과시키는 것이 아니라 아예 보지 못한다.
+describe('stop-review-gate — --name-status -z 파서 (후속 19 #11)', () => {
+  const KO = 'plugins/artibot/lib/한글폴더/설계문서.js';
+  const SPACE = 'plugins/artibot/lib/with space/파일 이름.js';
+  const KO_CQ =
+    '"plugins/artibot/lib/\\355\\225\\234\\352\\270\\200\\355\\217\\264\\353\\215\\224/'
+    + '\\354\\204\\244\\352\\263\\204\\353\\254\\270\\354\\204\\234.js"';
+
+  // -z 유무로 형태를 가른다 — 옛 코드가 -z 를 넘기지 않는 사실 자체가 RED.
+  const dual = (zForm, plainForm) => (cmd) => (cmd.includes(' -z ') ? zForm : plainForm);
+
+  function readPaths() {
+    const seen = [];
+    mockState.readFileSyncImpl = (p) => {
+      seen.push(String(p));
+      return 'export const x = 1;\n';
+    };
+    return seen;
+  }
+
+  it('두 diff 변형 모두 -z 를 넘긴다', async () => {
+    mockState.readStdinResult = Promise.resolve(JSON.stringify({}));
+    mockState.execSyncResponses = [
+      ['rev-parse --show-toplevel', '/repo'],
+      ['diff --name-status', dual('M\0plugins/artibot/lib/a.js\0', 'M\tplugins/artibot/lib/a.js\n')],
+    ];
+    mockState.existsSyncResults = {
+      'a.js': true,
+      'tests': false,
+      'CLAUDE.md': true,
+      'artibot.config.json': false,
+    };
+    readPaths();
+
+    await runHook();
+
+    const diffCmds = mockState.execLog.filter((c) => c.includes('diff --name-status'));
+    // 자기검증: 호출이 없으면 아래 단언은 공허하다.
+    expect(diffCmds.length).toBeGreaterThan(0);
+    expect(diffCmds.every((c) => c.includes(' -z '))).toBe(true);
+    // -z 를 넣어도 B-1 불변식(ACMR)은 유지된다.
+    expect(diffCmds.every((c) => c.includes('--diff-filter=ACMR'))).toBe(true);
+  });
+
+  it('한글·공백 경로를 실제 경로로 읽는다', async () => {
+    mockState.readStdinResult = Promise.resolve(JSON.stringify({}));
+    mockState.execSyncResponses = [
+      ['rev-parse --show-toplevel', '/repo'],
+      ['diff --name-status', dual(
+        `M\0${KO}\0M\0${SPACE}\0`,
+        `M\t${KO_CQ}\nM\t"plugins/artibot/lib/with space/..."\n`,
+      )],
+    ];
+    mockState.existsSyncResults = {
+      '한글폴더': true,
+      'with space': true,
+      'plugins/artibot/tests': false,
+      'CLAUDE.md': true,
+      'artibot.config.json': false,
+    };
+    const seen = readPaths();
+
+    await runHook();
+
+    const joined = seen.join('|');
+    expect(joined).toContain('설계문서.js');
+    expect(joined).toContain('파일 이름.js');
+    // C-quote 잔재가 파일 경로로 새지 않는다.
+    expect(joined).not.toMatch(/\\[0-7]{3}/);
+  });
+
+  it('rename 은 3필드 — 새 경로만 취한다', async () => {
+    mockState.readStdinResult = Promise.resolve(JSON.stringify({}));
+    mockState.execSyncResponses = [
+      ['rev-parse --show-toplevel', '/repo'],
+      ['diff --name-status', dual(
+        'R100\0plugins/artibot/lib/old.js\0plugins/artibot/lib/new.js\0'
+        + 'M\0plugins/artibot/lib/regular.js\0',
+        'R100\tplugins/artibot/lib/old.js\tplugins/artibot/lib/new.js\n'
+        + 'M\tplugins/artibot/lib/regular.js\n',
+      )],
+    ];
+    mockState.existsSyncResults = {
+      'old.js': false,
+      'new.js': true,
+      'regular.js': true,
+      'tests': false,
+      'CLAUDE.md': true,
+      'artibot.config.json': false,
+    };
+    const seen = readPaths();
+
+    await runHook();
+
+    const joined = seen.join('|');
+    expect(joined).toContain('new.js');
+    expect(joined).toContain('regular.js');
+    // 옛 경로도, 상태 토큰도 파일명으로 새지 않는다.
+    expect(joined).not.toContain('old.js');
+    expect(seen.every((p) => !/(^|[\\/])R100$/.test(p))).toBe(true);
+  });
+
+  it('상태 토큰을 파일 경로로 세지 않는다', async () => {
+    mockState.readStdinResult = Promise.resolve(JSON.stringify({}));
+    mockState.execSyncResponses = [
+      ['rev-parse --show-toplevel', '/repo'],
+      ['diff --name-status', dual(
+        'M\0plugins/artibot/lib/a.js\0A\0plugins/artibot/lib/b.js\0',
+        'M\tplugins/artibot/lib/a.js\nA\tplugins/artibot/lib/b.js\n',
+      )],
+    ];
+    mockState.existsSyncResults = {
+      'a.js': true,
+      'b.js': true,
+      'tests': false,
+      'CLAUDE.md': true,
+      'artibot.config.json': false,
+    };
+    const seen = readPaths();
+
+    await runHook();
+
+    expect(seen).toHaveLength(2);
+    for (const p of seen) expect(p).not.toMatch(/[\\/][MA]$/);
+  });
+
+  it('꼬리 NUL 을 빈 파일명으로 세지 않는다', async () => {
+    mockState.readStdinResult = Promise.resolve(JSON.stringify({}));
+    mockState.execSyncResponses = [
+      ['rev-parse --show-toplevel', '/repo'],
+      ['diff --name-status', dual('M\0plugins/artibot/lib/a.js\0', 'M\tplugins/artibot/lib/a.js\n')],
+    ];
+    mockState.existsSyncResults = {
+      'a.js': true,
+      'tests': false,
+      'CLAUDE.md': true,
+      'artibot.config.json': false,
+    };
+    const seen = readPaths();
+
+    await runHook();
+
+    expect(seen).toHaveLength(1);
+  });
 });

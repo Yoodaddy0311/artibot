@@ -144,38 +144,56 @@ export function probeMergeTreeSupport(opts = {}) {
  * @property {'clean'|'conflict'|'error'} kind
  * @property {string|null} tree            - Merged tree OID (clean or conflict), null on error
  * @property {string[]} conflictFiles      - Paths git reported as conflicted
- * @property {string[]} messages           - Informational lines after the blank separator
+ * @property {string[]} messages           - Informational messages after the separator
  */
 
 /**
- * Classify `merge-tree --write-tree --name-only` output.
+ * Classify `merge-tree --write-tree --name-only -z` output.
  *
- * Layout (git ≥ 2.38, measured 2.54): line 1 = tree OID; then one conflicted
- * path per line; then a blank line; then informational messages. Exit 0 with
- * an OID = clean. Exit 1 with an OID = conflict. Anything else = error.
+ * Takes **-z (NUL-separated) output only**. -z is not merely a separator swap:
+ * it changes the shape of the informational-message section, and it is what
+ * suppresses `core.quotepath` C-quoting so non-ASCII paths survive intact.
  *
- * @param {string} stdout
+ * Layout (measured git 2.54.0.windows.1), all fields NUL-terminated:
+ *   clean     <tree-oid>
+ *   conflict  <tree-oid> <path>... <empty>            <- empty field ends section 1
+ *             then per message: <n> <path>xn <conflict-type> <message>
+ *
+ * Exit 0 with an OID = clean. Exit 1 with an OID = conflict. Else error.
+ *
+ * @param {string} stdout  - Raw stdout of the -z invocation
  * @param {number} status
  * @returns {MergeTreeOutcome}
  */
 export function parseMergeTreeOutput(stdout, status) {
-  const lines = String(stdout ?? '').split(/\r?\n/);
-  const first = (lines[0] ?? '').trim();
+  const fields = String(stdout ?? '').split('\0');
+  const first = fields[0] ?? '';
   const hasOid = OID_RE.test(first);
   if (status === 0 && hasOid) {
     return { kind: 'clean', tree: first, conflictFiles: [], messages: [] };
   }
   if (status === 1 && hasOid) {
+    // Section 1 — conflicted paths, verbatim (no .trim(): a path may begin or
+    // end with a space). Terminated by an empty field.
     const conflictFiles = [];
+    let i = 1;
+    for (; i < fields.length; i++) {
+      if (fields[i] === '') { i++; break; }
+      conflictFiles.push(fields[i]);
+    }
+    // Section 2 — informational messages, one quartet per message:
+    //   <n> NUL <path>xn NUL <conflict-type> NUL <message> NUL
+    // Walk by field count rather than by content so a path that happens to
+    // look like a message (or vice versa) cannot desynchronise the parse.
     const messages = [];
-    let inMessages = false;
-    for (const line of lines.slice(1)) {
-      if (!inMessages) {
-        if (line.trim() === '') { inMessages = true; continue; }
-        conflictFiles.push(line.trim());
-      } else if (line.trim() !== '') {
-        messages.push(line.trim());
-      }
+    while (i < fields.length) {
+      const n = Number.parseInt(fields[i], 10);
+      if (!Number.isInteger(n) || n < 0) break;
+      const msgIdx = i + n + 2;
+      if (msgIdx >= fields.length) break;
+      const msg = fields[msgIdx].trim();
+      if (msg) messages.push(msg);
+      i = msgIdx + 1;
     }
     return { kind: 'conflict', tree: first, conflictFiles, messages };
   }
@@ -204,7 +222,13 @@ export function parseMergeTreeOutput(stdout, status) {
  */
 export function mergeTreePair(ours, theirs, opts = {}) {
   const exec = opts.exec ?? runGit;
-  const r = exec(['merge-tree', '--write-tree', '--name-only', ours, theirs], { cwd: opts.cwd });
+  // `-z` : NUL-separated output that also disables `core.quotepath`, so
+  // non-ASCII conflict paths reach /git check and /split integrate verbatim
+  // instead of as "src/\355\225\234...". Supported since the same git release
+  // as --write-tree (measured: git 2.54.0.windows.1 `merge-tree -h`).
+  // NOTE: -z changes the OUTPUT SHAPE, not just the separator — see
+  // parseMergeTreeOutput above.
+  const r = exec(['merge-tree', '--write-tree', '--name-only', '-z', ours, theirs], { cwd: opts.cwd });
   const parsed = parseMergeTreeOutput(r.stdout, r.status);
   return { ours, theirs, ...parsed, stderr: r.stderr ?? '' };
 }
