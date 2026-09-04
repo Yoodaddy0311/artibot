@@ -49,6 +49,61 @@ export function isProjectPluginDir(name) {
 const trackedNameCache = new Map();
 
 /**
+ * Environment for the git spawns below, with the repository-override
+ * variables removed so discovery starts from `cwd` and nowhere else.
+ *
+ * git runs its hooks with an absolute `GIT_DIR` exported and — in a linked
+ * worktree — no `GIT_WORK_TREE`. Under exactly that pair, `git ls-files` run
+ * from a *subdirectory* takes the subdirectory itself as the top of the work
+ * tree and prints the whole index relative to it. Measured 2026-09-05 in the
+ * worktree `split-artibot-ci-scope` (retro split-9d6dc2 #56):
+ *
+ *   cwd=plugins, env clean            → 1822 paths, heads {_shared, artibot, artibot-cowork}
+ *   cwd=plugins, GIT_DIR only         → 1975 paths, heads {.artibot, .github, ARTIBOT.md, …}
+ *   cwd=plugins, GIT_DIR + WORK_TREE  → 1822 paths, correct again
+ *
+ * With the wrong listing the first-segment parser in {@link gitTrackedNames}
+ * sees `plugins` and no plugin root, and the structure / doc-links / md-render
+ * gates all fail with "expected plugin root … contributed no … at all". This
+ * never reproduced from a plain shell or in CI because neither exports
+ * `GIT_DIR`; it fired only from `git push` in a linked worktree.
+ *
+ * Dropping both variables is the fix rather than re-relativising the output:
+ * every question this module asks is "what does git track *here*", and the
+ * only way to make `cwd` mean `cwd` is to leave discovery to it. Other `GIT_*`
+ * variables (`GIT_INDEX_FILE`, `GIT_TRACE`, author identity) are kept — they
+ * do not move the work tree.
+ *
+ * @returns {NodeJS.ProcessEnv} A copy of `process.env` without the overrides.
+ */
+function gitDiscoveryEnv() {
+  const env = { ...process.env };
+  delete env.GIT_DIR;
+  delete env.GIT_WORK_TREE;
+  return env;
+}
+
+/**
+ * Run `git ls-files -z` in `cwd`, optionally narrowed to `pathspecs`, and
+ * return the tracked paths relative to `cwd`. Throws when git is absent or
+ * `cwd` is not inside a work tree — callers decide whether that is a null
+ * (name rule stands alone) or a hard failure (fail-closed enumeration).
+ *
+ * @param {string} cwd - Directory the paths are reported relative to.
+ * @param {string[]} [pathspecs] - Narrowing pathspecs, relative to `cwd`.
+ * @returns {string[]} Tracked paths, POSIX-separated, relative to `cwd`.
+ */
+function runGitLsFiles(cwd, pathspecs = []) {
+  const out = execFileSync('git', ['ls-files', '-z', '--', ...pathspecs], {
+    cwd,
+    encoding: 'utf-8',
+    env: gitDiscoveryEnv(),
+    stdio: ['ignore', 'pipe', 'ignore'],
+  });
+  return out.split('\0').filter((entry) => entry.length > 0);
+}
+
+/**
  * Top-level directory names under `base` that git actually tracks.
  *
  * `readdirSync` answers "what is on disk", which is a different question from
@@ -71,14 +126,8 @@ function gitTrackedNames(base) {
   /** @type {Set<string>|null} */
   let result;
   try {
-    const out = execFileSync('git', ['ls-files', '-z'], {
-      cwd: base,
-      encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    });
     const names = new Set();
-    for (const entry of out.split('\0')) {
-      if (!entry) continue;
+    for (const entry of runGitLsFiles(base)) {
       const [head] = entry.split('/');
       if (head) names.add(head);
     }
@@ -291,6 +340,131 @@ export function assertRootScanFloor(root, count) {
   if (root === null) return [];
   if (count < MIN_ROOT_DOC_FILES) {
     return [`repo root scanned ${count} file(s), below floor ${MIN_ROOT_DOC_FILES}`];
+  }
+  return [];
+}
+
+/**
+ * Repo-root **subtrees** scanned in addition to {@link ROOT_SCAN_FILES}. These
+ * hold the design canon (`.artibot/guides`), the ADRs (`.artibot/adr` — single
+ * home since B2), archived diagnostics, and `/split` run reports. Until
+ * 2026-09-05 neither documentation scanner saw any of them, so a rotted ADR
+ * link or a ragged table in the design canon could never go red
+ * (`ARTIBOT-5.0-DESIGN.md` 후속 1).
+ *
+ * An **allowlist of subtrees**, not `.artibot/**`: `.artibot/` also holds
+ * untracked local artifacts (`HANDOFF.md`, `SESSION-NOTES.md`, `split/`,
+ * `missions/`, `runtime/`), and `reports/*` is gitignored except `SPLIT/`
+ * (`.gitignore` re-includes it). A disk walk over either would make local and
+ * CI results diverge; a negative list would fail open on the next local dir.
+ *
+ * Only **git-tracked** files inside these trees are scanned — see
+ * {@link gatherRepoRootTreeDocFiles}.
+ *
+ * @type {readonly string[]}
+ */
+export const ROOT_SCAN_TREES = Object.freeze([
+  '.artibot/guides',
+  '.artibot/adr',
+  '.artibot/archive',
+  'reports/SPLIT',
+]);
+
+/**
+ * Individual tracked files under the repo root that join the tree scan.
+ * `.artibot/project.md` is `ARTIBOT.md`'s first read-order entry and lives
+ * beside the untracked locals, so it is named rather than swept.
+ *
+ * @type {readonly string[]}
+ */
+export const ROOT_SCAN_TREE_FILES = Object.freeze(['.artibot/project.md']);
+
+/**
+ * Minimum tracked Markdown files the root trees must contribute.
+ *
+ * Pinned at the measured count, like {@link MIN_ROOT_DOC_FILES}, because these
+ * are the project's canon: a design document or ADR disappearing should fail
+ * loudly rather than pass with slack. Raise it when the canon grows; if it
+ * shrinks, RED is the right answer until the deletion is deliberate.
+ *
+ * Measured 2026-09-05 in worktree `split-artibot-ci-scope` @ base dd071ce3:
+ *   `git ls-files -z -- .artibot/guides .artibot/adr .artibot/archive
+ *    reports/SPLIT .artibot/project.md | tr '\0' '\n' | grep -c '\.md$'`
+ *   → 95 (guides 77 · adr 11 · archive 4 · SPLIT 2 · project.md 1).
+ * Count with `-z`: five ADR filenames are Korean and a non-`-z` listing wraps
+ * them in C-quotes, which hides them from a `$`-anchored grep (86, not 95).
+ */
+export const MIN_ROOT_TREE_DOC_FILES = 95;
+
+/**
+ * Is a repo-relative POSIX path inside the root-tree scan scope?
+ *
+ * @param {string} rel - Path relative to the repo root, `/`-separated.
+ * @returns {boolean} True when a listed tree or listed file contains it.
+ */
+function isInRootScanTrees(rel) {
+  if (ROOT_SCAN_TREE_FILES.includes(rel)) return true;
+  return ROOT_SCAN_TREES.some((tree) => rel.startsWith(`${tree}/`));
+}
+
+/**
+ * Gather the tracked Markdown files under {@link ROOT_SCAN_TREES} and
+ * {@link ROOT_SCAN_TREE_FILES}.
+ *
+ * Enumeration goes through `git ls-files -z` rather than a disk walk so the
+ * scan set is identical on every machine that holds the same commit. When git
+ * cannot answer — not installed, not a work tree — this **throws** rather than
+ * falling back to the filesystem: a quiet fallback would scan whatever local
+ * files happen to exist and report a clean run for a different set than CI
+ * sees. The scanners turn the throw into a `scan-denominator` failure.
+ *
+ * @param {object} [options]
+ * @param {string[]} [options.tracked] - Repo-relative tracked paths to use
+ *   instead of consulting git. Injected by tests so a fixture needs no
+ *   `git init`; the same shape the resolver returns. Still filtered to the
+ *   scan scope and to `.md`, so an injected list cannot widen the scan.
+ * @returns {{ root: string|null, files: string[] }} The repo root in scope (or
+ *   null outside the dev repo) and the absolute, sorted paths of its tracked
+ *   tree docs.
+ * @throws {Error} When the root is in scope and git cannot enumerate it.
+ */
+export function gatherRepoRootTreeDocFiles(options = {}) {
+  const root = getRepoDocRoot();
+  if (root === null) return { root: null, files: [] };
+  let tracked;
+  if (options.tracked !== undefined) {
+    tracked = options.tracked;
+  } else {
+    try {
+      tracked = runGitLsFiles(root, [...ROOT_SCAN_TREES, ...ROOT_SCAN_TREE_FILES]);
+    } catch (err) {
+      throw new Error(
+        `cannot enumerate tracked docs under ${root}: git ls-files failed ` +
+          `(${err.message}) — refusing to fall back to a disk walk`,
+        { cause: err },
+      );
+    }
+  }
+  const files = tracked
+    .filter((rel) => rel.toLowerCase().endsWith('.md'))
+    .filter((rel) => isInRootScanTrees(rel))
+    .map((rel) => path.join(root, rel))
+    .sort();
+  return { root, files };
+}
+
+/**
+ * Check the root-tree denominator, mirroring {@link assertRootScanFloor}.
+ * Returns no failure outside the dev repo.
+ *
+ * @param {string|null} root - Repo root in scope, or null.
+ * @param {number} count - Tree files actually scanned.
+ * @returns {string[]} Human-readable failures (empty when the floor is met).
+ */
+export function assertRootTreeScanFloor(root, count) {
+  if (root === null) return [];
+  if (count < MIN_ROOT_TREE_DOC_FILES) {
+    return [`repo-root trees scanned ${count} file(s), below floor ${MIN_ROOT_TREE_DOC_FILES}`];
   }
   return [];
 }

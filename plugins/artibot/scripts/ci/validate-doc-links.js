@@ -3,8 +3,11 @@
  * CI: Validate documentation internal links and anchors.
  *
  * Scans authored Markdown under **every co-located Artibot plugin** (artibot,
- * artibot-cowork, _shared — see `ci-utils.js#listPluginRoots`) **and the repo
- * root's own authored docs** (see {@link ROOT_SCAN_FILES}), and reports:
+ * artibot-cowork, _shared — see `ci-utils.js#listPluginRoots`), **the repo
+ * root's own authored docs** (see {@link ROOT_SCAN_FILES}), and **the tracked
+ * docs under the repo-root canon trees** (`.artibot/guides`, `.artibot/adr`,
+ * `.artibot/archive`, `reports/SPLIT`, `.artibot/project.md` — see
+ * `ci-utils.js#ROOT_SCAN_TREES`, added 2026-09-05), and reports:
  *   1. Broken relative `[..](path.md)` links (target file does not exist).
  *   2. Broken in-page `[..](#anchor)` references (no matching heading).
  *   3. Unbalanced (odd) code fences (likely an unclosed ``` block).
@@ -32,6 +35,13 @@
  *     are not parsed; only inline `[x](target)` is.
  *   - **Repo-root docs excluded by policy** — CHANGELOG.md, RELEASE_NOTES_*.md,
  *     WORK-REPORT-*.md, CLAUDE.local.md (see {@link ROOT_SCAN_FILES}).
+ *   - **Untracked files under the root trees** — `.artibot/HANDOFF.md`,
+ *     `SESSION-NOTES.md`, `split/`, `missions/`, and the ~3,000 gitignored
+ *     `reports/*` files. Excluded on purpose (`ci-utils.js#ROOT_SCAN_TREES`):
+ *     they exist on one machine only, so they rot locally and silently.
+ *   - **Paths inside backticks** (`docs/PRD/…`, `file:line` citations) — masked
+ *     before scanning, so a rotted code→code citation is not this gate's
+ *     finding; that is the citation-resolution gate's job.
  *   - **Targets outside the repo root**, which are skipped as out-of-scope
  *     rather than reported (see {@link findBrokenLinks} step 1).
  *   - **Installed trees.** Repo-root scanning requires the dev-repo marker (see
@@ -45,8 +55,10 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import {
   assertRootScanFloor,
+  assertRootTreeScanFloor,
   assertScanFloors,
   gatherRepoRootDocFiles,
+  gatherRepoRootTreeDocFiles,
   getPluginsDir,
   listPluginRoots,
 } from './ci-utils.js';
@@ -91,7 +103,7 @@ const SCAN_FILES = ['CLAUDE.md', 'README.md', 'AGENTS.md'];
 // dev-repo guard live in ci-utils.js so this gate and validate-md-rendering.js
 // cannot drift apart on them; re-exported here because that is where callers
 // and the firewall tests already look for them.
-export { gatherRepoRootDocFiles, getRepoDocRoot } from './ci-utils.js';
+export { gatherRepoRootDocFiles, gatherRepoRootTreeDocFiles, getRepoDocRoot } from './ci-utils.js';
 
 /**
  * Mask fenced code blocks and inline code spans by replacing their inner
@@ -328,6 +340,17 @@ function main() {
   const { files: pluginFiles, counts } = gatherAllDocFiles();
   const { root: repoRoot, files: rootFiles } = gatherRepoRootDocFiles();
 
+  // Tree enumeration goes through git and refuses to guess when git cannot
+  // answer. That refusal is a denominator failure, reported in the same shape
+  // as a floor miss, never a quiet "0 tree files, 0 problems".
+  let treeFiles;
+  try {
+    ({ files: treeFiles } = gatherRepoRootTreeDocFiles());
+  } catch (err) {
+    console.error(`FAIL: scan-denominator: ${err.message}`);
+    process.exit(1);
+  }
+
   // Containment root is the widest tree whose docs we scan, never one plugin.
   // A link is only judged when it resolves INSIDE containment (findBrokenLinks
   // step 1 skips the rest as out-of-scope), so a containment narrower than the
@@ -337,15 +360,20 @@ function main() {
   // `./RELEASE_NOTES_4.8_KO.md` link, because the target resolves to the repo
   // root, outside the old `plugins/` containment.
   const containment = repoRoot ?? getPluginsDir();
-  const files = [...pluginFiles, ...rootFiles];
+  const files = [...pluginFiles, ...rootFiles, ...treeFiles];
 
   const floorFailures = [
     ...assertScanFloors(counts),
     ...assertRootScanFloor(repoRoot, rootFiles.length),
+    ...assertRootTreeScanFloor(repoRoot, treeFiles.length),
   ];
   const tally = Object.entries(counts)
     .map(([name, n]) => `${name}=${n}`)
-    .concat(repoRoot === null ? ['<root>=skipped(not-dev-repo)'] : [`<root>=${rootFiles.length}`])
+    .concat(
+      repoRoot === null
+        ? ['<root>=skipped(not-dev-repo)', '<root-trees>=skipped(not-dev-repo)']
+        : [`<root>=${rootFiles.length}`, `<root-trees>=${treeFiles.length}`],
+    )
     .join(' ');
 
   if (floorFailures.length > 0) {

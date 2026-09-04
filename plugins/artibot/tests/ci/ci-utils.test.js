@@ -27,27 +27,44 @@
  * @module tests/ci/ci-utils
  */
 
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import {
+  _resetTrackedNameCache,
   assertRootScanFloor,
+  assertRootTreeScanFloor,
   assertScanFloors,
   gatherRepoRootDocFiles,
+  gatherRepoRootTreeDocFiles,
   getPluginsDir,
   getRepoDocRoot,
   isProjectPluginDir,
   listPluginRoots,
   MIN_DOC_FILES,
   MIN_ROOT_DOC_FILES,
+  MIN_ROOT_TREE_DOC_FILES,
   ROOT_SCAN_FILES,
+  ROOT_SCAN_TREE_FILES,
+  ROOT_SCAN_TREES,
 } from '../../scripts/ci/ci-utils.js';
+
+/** `<repo>/plugins/artibot/tests/ci` → four levels up is the real repo root. */
+const REAL_REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..');
 
 /** Root of a synthetic tree; each test builds the shape it needs underneath. */
 let tmpRoot;
 /** Restored after every test so one case cannot leak into the next. */
 const savedEnv = process.env.CLAUDE_PLUGIN_ROOT;
+/** The git-override variables a hook inherits; restored after every test. */
+const savedGitEnv = {
+  GIT_DIR: process.env.GIT_DIR,
+  GIT_WORK_TREE: process.env.GIT_WORK_TREE,
+  GIT_CEILING_DIRECTORIES: process.env.GIT_CEILING_DIRECTORIES,
+};
 
 /**
  * Build a synthetic `<repo>/plugins/artibot` tree and point the resolver at it.
@@ -76,6 +93,38 @@ afterAll(() => {
 afterEach(() => {
   if (savedEnv === undefined) delete process.env.CLAUDE_PLUGIN_ROOT;
   else process.env.CLAUDE_PLUGIN_ROOT = savedEnv;
+  for (const [key, value] of Object.entries(savedGitEnv)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+  _resetTrackedNameCache();
+});
+
+describe('gitTrackedNames under a hook environment (retro split-9d6dc2 #56)', () => {
+  // git runs pre-push with an ABSOLUTE `GIT_DIR` in the environment and, in a
+  // linked worktree, no `GIT_WORK_TREE`. Under that pair `git ls-files` treats
+  // the *cwd* as the top of the work tree and lists the whole index relative
+  // to it — measured 2026-09-05 in the worktree `split-artibot-ci-scope`:
+  //   cwd=plugins, env clean            → 1822 entries, heads {_shared, artibot, artibot-cowork}
+  //   cwd=plugins, GIT_DIR only         → 1975 entries, heads {.artibot, .github, ARTIBOT.md, …}
+  //   cwd=plugins, GIT_DIR + WORK_TREE  → 1822 entries (correct again)
+  // The first-segment parser then sees `plugins` and no plugin root, so the
+  // structure / doc-links / md-render gates all fail with "contributed no …".
+  // This case pins the fix: the resolver must ignore both overrides.
+  //
+  // It spawns two git processes (rev-parse + ls-files) against the real repo;
+  // that is the only way to reproduce a hook environment.
+  it('still resolves the three plugin roots with GIT_DIR set and GIT_WORK_TREE absent', () => {
+    const gitDir = execFileSync('git', ['rev-parse', '--absolute-git-dir'], {
+      cwd: REAL_REPO_ROOT,
+      encoding: 'utf-8',
+    }).trim();
+    process.env.GIT_DIR = gitDir;
+    delete process.env.GIT_WORK_TREE;
+    _resetTrackedNameCache();
+    const roots = listPluginRoots().map((p) => path.basename(p));
+    expect(roots).toEqual(['_shared', 'artibot', 'artibot-cowork']);
+  });
 });
 
 describe('ROOT_SCAN_FILES / MIN_ROOT_DOC_FILES constants', () => {
@@ -167,6 +216,139 @@ describe('gatherRepoRootDocFiles — existence filter', () => {
     expect(root).toBe(repo);
     expect(files).toEqual([]);
     expect(assertRootScanFloor(root, files.length)).toHaveLength(1);
+  });
+});
+
+describe('ROOT_SCAN_TREES / ROOT_SCAN_TREE_FILES / MIN_ROOT_TREE_DOC_FILES constants', () => {
+  it('is a subtree allowlist naming the canon trees, not `.artibot/**`', () => {
+    // `.artibot/` also holds untracked locals (HANDOFF.md, SESSION-NOTES.md,
+    // split/, missions/, runtime/) and `reports/*` is gitignored except SPLIT.
+    // A wildcard here would make local and CI scan different sets.
+    expect([...ROOT_SCAN_TREES]).toEqual([
+      '.artibot/guides',
+      '.artibot/adr',
+      '.artibot/archive',
+      'reports/SPLIT',
+    ]);
+    expect([...ROOT_SCAN_TREE_FILES]).toEqual(['.artibot/project.md']);
+    expect(Object.isFrozen(ROOT_SCAN_TREES)).toBe(true);
+    expect(Object.isFrozen(ROOT_SCAN_TREE_FILES)).toBe(true);
+  });
+
+  it('floor is pinned at the measured count (95 on 2026-09-05), not padded', () => {
+    // Reproduce: git ls-files -z -- <trees> <files> | tr '\0' '\n' | grep -c '\.md$'
+    // Pinned exactly like MIN_ROOT_DOC_FILES: the canon shrinking should go
+    // RED until the deletion is deliberate, and growth means raising this.
+    expect(MIN_ROOT_TREE_DOC_FILES).toBe(95);
+  });
+});
+
+describe('gatherRepoRootTreeDocFiles — git-tracked enumeration, fail-closed', () => {
+  it('returns a null root and no files outside the dev repo, without touching git', () => {
+    makeTree({ marker: false });
+    expect(gatherRepoRootTreeDocFiles()).toEqual({ root: null, files: [] });
+  });
+
+  it('keeps only .md files inside the allowlisted trees from an injected listing', () => {
+    const repo = makeTree({ marker: true });
+    const { root, files } = gatherRepoRootTreeDocFiles({
+      tracked: [
+        '.artibot/guides/v5-design/B.md',
+        '.artibot/guides/v5-design/A.md',
+        '.artibot/guides/evidence/trace.ndjson', // not markdown
+        '.artibot/adr/ADR-006-split-어휘-소유권.md', // Korean path survives
+        '.artibot/HANDOFF.md', // tracked-looking but outside the allowlist
+        '.artibot/project.md',
+        'reports/SPLIT/split-8f83d7.md',
+        'reports/other/report.md', // reports/* outside SPLIT
+        'README.md',
+      ],
+    });
+    expect(root).toBe(repo);
+    expect(files).toEqual(
+      [
+        '.artibot/adr/ADR-006-split-어휘-소유권.md',
+        '.artibot/guides/v5-design/A.md',
+        '.artibot/guides/v5-design/B.md',
+        '.artibot/project.md',
+        'reports/SPLIT/split-8f83d7.md',
+      ]
+        .map((rel) => path.join(repo, rel))
+        .sort(),
+    );
+  });
+
+  it('does not treat a sibling that merely shares a prefix as inside a tree', () => {
+    makeTree({ marker: true });
+    const { files } = gatherRepoRootTreeDocFiles({
+      tracked: ['.artibot/guides-old/x.md', '.artibot/adrs/y.md', 'reports/SPLITTER/z.md'],
+    });
+    expect(files).toEqual([]);
+  });
+
+  it('throws "cannot enumerate tracked docs" when git cannot answer (no disk-walk fallback)', () => {
+    // A marker-bearing tmp dir that is not a work tree. GIT_CEILING_DIRECTORIES
+    // stops discovery from climbing into any repo that might contain tmpdir,
+    // so the failure is git's own "not a git repository", deterministically.
+    const repo = makeTree({ marker: true, rootDocs: ['README.md'] });
+    mkdirSync(path.join(repo, '.artibot', 'guides'), { recursive: true });
+    writeFileSync(path.join(repo, '.artibot', 'guides', 'on-disk-only.md'), '# x\n', 'utf-8');
+    process.env.GIT_CEILING_DIRECTORIES = tmpRoot;
+    expect(() => gatherRepoRootTreeDocFiles()).toThrow(/cannot enumerate tracked docs/);
+  });
+
+  it('enumerates the real repo through git: meets the floor and includes the Korean ADR paths', () => {
+    // The only tree case that spawns git. It is what proves `-z` is in use —
+    // without it the five Korean ADR filenames come back C-quoted and would
+    // neither match the tree prefix nor exist on disk under that name.
+    const { root, files } = gatherRepoRootTreeDocFiles();
+    expect(root).toBe(REAL_REPO_ROOT);
+    expect(files.length).toBeGreaterThanOrEqual(MIN_ROOT_TREE_DOC_FILES);
+    expect(assertRootTreeScanFloor(root, files.length)).toEqual([]);
+    const koreanAdrs = files.filter((f) => /[^\x20-\x7E]/.test(path.basename(f)));
+    expect(koreanAdrs.length).toBeGreaterThanOrEqual(5);
+    for (const f of files) expect(f.startsWith(root + path.sep)).toBe(true);
+  });
+
+  it('enumerates the real repo identically under a hook environment (GIT_DIR set, no GIT_WORK_TREE)', () => {
+    const clean = gatherRepoRootTreeDocFiles().files;
+    process.env.GIT_DIR = execFileSync('git', ['rev-parse', '--absolute-git-dir'], {
+      cwd: REAL_REPO_ROOT,
+      encoding: 'utf-8',
+    }).trim();
+    delete process.env.GIT_WORK_TREE;
+    expect(gatherRepoRootTreeDocFiles().files).toEqual(clean);
+  });
+});
+
+describe('assertRootTreeScanFloor — fail-closed denominator', () => {
+  it('passes at and above the floor', () => {
+    expect(assertRootTreeScanFloor('/fake/repo', MIN_ROOT_TREE_DOC_FILES)).toEqual([]);
+    expect(assertRootTreeScanFloor('/fake/repo', MIN_ROOT_TREE_DOC_FILES + 1)).toEqual([]);
+  });
+
+  it('fails one below the floor, naming both numbers', () => {
+    const failures = assertRootTreeScanFloor('/fake/repo', MIN_ROOT_TREE_DOC_FILES - 1);
+    expect(failures).toHaveLength(1);
+    expect(failures[0]).toContain(String(MIN_ROOT_TREE_DOC_FILES - 1));
+    expect(failures[0]).toContain(String(MIN_ROOT_TREE_DOC_FILES));
+  });
+
+  it('fails at zero and does not enforce outside the dev repo', () => {
+    expect(assertRootTreeScanFloor('/fake/repo', 0)).toHaveLength(1);
+    expect(assertRootTreeScanFloor(null, 0)).toEqual([]);
+  });
+
+  it('goes RED if one allowlisted tree drops out of the enumeration (self-check of the floor)', () => {
+    // Design §3 D2: removing `.artibot/adr` from scope must not pass. Simulated
+    // through the injection seam with the real listing minus that tree.
+    const { root, files } = gatherRepoRootTreeDocFiles();
+    const withoutAdr = files
+      .map((abs) => path.relative(root, abs).split(path.sep).join('/'))
+      .filter((rel) => !rel.startsWith('.artibot/adr/'));
+    expect(withoutAdr.length).toBeLessThan(files.length);
+    const narrowed = gatherRepoRootTreeDocFiles({ tracked: withoutAdr });
+    expect(assertRootTreeScanFloor(narrowed.root, narrowed.files.length)).toHaveLength(1);
   });
 });
 

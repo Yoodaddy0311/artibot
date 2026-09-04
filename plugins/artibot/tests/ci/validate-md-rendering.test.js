@@ -15,10 +15,19 @@
 
 import { describe, expect, it } from 'vitest';
 import {
+  gatherRepoRootTreeDocFiles,
+  MIN_ROOT_TREE_DOC_FILES,
+} from '../../scripts/ci/ci-utils.js';
+import {
+  applyRatchet,
+  KNOWN_RENDER_VIOLATIONS,
   maskFencedBlocks,
   ruleBacktickInInlineCode,
   RULES,
   ruleTablePipeMismatch,
+  scanAllPlugins,
+  scanRepoRoot,
+  scanRepoRootTrees,
 } from '../../scripts/ci/validate-md-rendering.js';
 
 const REL = 'README.md';
@@ -148,5 +157,54 @@ describe('RULES', () => {
       const out = rule.fn('# clean\n', REL);
       expect(Array.isArray(out)).toBe(true);
     }
+  });
+});
+
+// ----- scanRepoRootTrees (repo-root canon trees, added 2026-09-05) ----------
+//
+// These cases run against the live repo: the tree scan is anchored to
+// `git ls-files`, and a fixture that cannot `git init` cannot stand in for it.
+// Each `scanRepoRootTrees()` call spawns one git process.
+
+describe('scanRepoRootTrees', () => {
+  it('reads the same files the shared enumerator returns (lockstep denominator)', () => {
+    // If this scanner ever grew its own listing, one side could quietly
+    // shrink while the other stayed green. Both must consume ci-utils.
+    const { root, count } = scanRepoRootTrees();
+    const { files } = gatherRepoRootTreeDocFiles();
+    expect(root).not.toBeNull();
+    expect(count).toBe(files.length);
+    expect(count).toBeGreaterThanOrEqual(MIN_ROOT_TREE_DOC_FILES);
+  });
+
+  it('keys findings under `<root>/<tree path>` so they cannot collide with plugin or root-file keys', () => {
+    const ragged = '| a | b |\n|---|---|\n| 1 |\n';
+    const hits = RULES.flatMap((r) => r.fn(ragged, '<root>/.artibot/guides/x.md'));
+    expect(hits).toHaveLength(1);
+    expect(hits[0]).toMatch(/^<root>\/\.artibot\/guides\/x\.md:3: table-pipe-column-mismatch/);
+    // The three scans partition the key space: plugin keys never start with
+    // `<root>/`, root-file keys never descend into a tree.
+    expect(scanAllPlugins().findings.every((f) => !f.key.startsWith('<root>/'))).toBe(true);
+    for (const f of scanRepoRoot().findings) {
+      expect(f.key).not.toMatch(/^<root>\/(\.artibot|reports)\//);
+    }
+    for (const f of scanRepoRootTrees().findings) {
+      expect(f.key).toMatch(/^<root>\/(\.artibot|reports\/SPLIT)\//);
+    }
+  });
+
+  it('the canon enters the gate clean and is never baselined (design DC-1: fix, do not ratchet)', () => {
+    // 15 real violations were fixed before this scope opened (12 ragged rows
+    // in ARTIBOT-5.0-DESIGN.md 부록 0-2, 3 unclosed code spans). A `<root>/`
+    // key in KNOWN_RENDER_VIOLATIONS would mean the canon was baselined
+    // instead — and a baseline on a file still being edited goes stale on the
+    // next edit. Evaluated against an EMPTY baseline so the two cowork entries
+    // do not read as stale here; the live ratchet is the gate's own job.
+    for (const key of Object.keys(KNOWN_RENDER_VIOLATIONS)) {
+      expect(key.startsWith('<root>/')).toBe(false);
+    }
+    const { findings } = scanRepoRootTrees();
+    const { unexpected } = applyRatchet(findings, {});
+    expect(unexpected).toEqual([]);
   });
 });
