@@ -11,6 +11,117 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.55.0] — 2026-09-04
+
+### 훅 출력이 호스트 계약을 따른다 — `/split` 1차·2차 배치(split-9d6dc2) 일괄 출하
+
+4.54.0 이 입력 키(`prompt`)를 살렸다면, 이 릴리스는 **출력 쪽**을 호스트 계약에 맞춘다.
+`UserPromptSubmit` 디스패처가 stdout 으로 내던 봉투(디렉티브·라우팅 힌트·메모리·가드레일)는
+호스트가 버리고 있었다. 이제 그 내용은 `hookSpecificOutput.additionalContext` 로 간다 — 설치 직후
+effort 디렉티브와 메모리 봉투가 **처음으로 모델에 도달**한다. 같은 배치에서 라우팅 receipt 가
+`PreToolUse(Agent)` 로 옮겨 71/71 `skipped:no-action-text` 였던 스코어링 파이프라인에 처음 입력이 생기고,
+한글·공백 경로를 C-quote 로 깨뜨리던 git 경로 파서 16자리 중 14자리가 `-z` 로 수리됐다.
+두 배치(1차 4줄기 `520886bd` · 2차 4줄기 `838d86bd`)를 한 번에 출하한다.
+`v4.54.0..` 108파일 +9,501/−862(`git diff --shortstat`, 2026-09-04 23:2x 실측).
+
+#### Added
+
+- **UserPromptSubmit 출력 이관(DESIGN-UPS D1/D2/D3)** — `_userprompt-dispatcher.js` stdout 을
+  **호스트 스키마 허용목록**으로만 조립하고, `runtime-prompt.js` 의 프롬프트 봉투를
+  `additionalContext` 한 문자열(8KB 캡)로 옮겼다. `!rv` 는 additionalContext 지시문으로,
+  `--no-team` 은 "제거"가 아니라 "원문에서 감지"로. 디스패처 내부 `payload.user_prompt` 계약은 그대로.
+  firewall 2종 신설: `ups-stdout-allowlist`(허용목록 밖 키 = RED) · `ups-host-schema-drift`
+  (로컬 fail-closed, CI 는 호스트 바이너리 부재 시 소리 나는 skip).
+- **라우팅 receipt 2단계(ROUTE-RECEIPT L2 D1)** — 신규 훅 `route-observe-pre.js` 가 `PreToolUse`
+  `tool_name === 'Agent'` 에서 `route.selected` 를 기록한다(블록 포인트이므로 stdout 0바이트·exit 0
+  고정·throw 없음, 8개 payload 형태를 `host-payload-contract` 게이트가 고정). `subagent-handler.js`
+  는 receipt 를 만들지 않고 **묶는다** — `route.bound`(allowlist 36→37)가 `agent_id` 를 receipt 의
+  `tool_use_id` 에 조인하고 확신도(`matched_on`)를 남긴다. Agent 도구 스폰은 `agent_type ===
+  subagent_type`, 팀/autopilot 스폰은 `agent_type === name` 으로 보고된다는 실측(1,025행 census)을
+  Tier 2 가 둘 다 받는다. `hooks.json` 매처는 평문 `"Agent"` — 같은 프롬프트 A/B 에서 표현식형
+  `tool == "Agent"` 는 0건, 평문은 1 receipt + 1 bind. 등록 훅 26→27, 스크립트 69→70.
+- **F-30 원장 census** — `lib/runtime/ledger.js#readLedgerCensus` 가 버린 줄을 센다(손실 3종
+  corrupt/malformed_envelope/duplicate · 선택 2종 rejected_excluded/filtered_out, 빈 줄은 선분리).
+  `loadReplay` 가 `totals.census` 를 싣고 `/doctor` Check 8 이 `ledger-lines-dropped` WARN 을 낸다 —
+  손실 > 0 일 때만. census 없는 호출자는 강등되지 않고, 원장 파일 부재는 `unmeasured` 다.
+- **G-1 `performance.priority` 별칭표** — 오너 결정(2026-09-04)대로 5값을 3값으로 흡수
+  (`lib/routing/execution-profile.js#PRIORITY_ALIASES`): fast·speed_accuracy·maximum_performance →
+  maximum, quality·economy → balanced. **economy 는 손실 흡수**(G-1b 미결 등록, README 명시).
+  원값은 `profile.performance.priority` 에 보존, `objective_reason` 에 등급·인용이 남는다.
+- **F-10 no-control-bytes 게이트 root +1** — 리포 루트 `.artibot/guides` 를 8번째 root 로.
+  `marketplace.json` 존재로 리포 정체를 먼저 검사해 부분 체크아웃에서는 조용한 skip 이 아니라 RED.
+- **`/split` 운용** — `git-autopilot-session.js#ensureAutopilotBranch` 가 `worktree-*` 브랜치
+  전부에서 **제자리 유지**(줄기 브랜치 4/4 가 `artibot/` 접두로 옮겨지던 실사고 수리, `main`·`develop`
+  대조군 유지). `split-dispatch.js` 에 `branchRelocatedByHook` 3값 열, `land` 에 lint 행,
+  PROMPT-TEMPLATE 에 줄기 내부 팬아웃 절, `split.md` 에 gotcha 10건 반영.
+- **firewall 게이트 3종** — `decisions-store-sandbox-required`(decisions 스토어 라이터에 도달하는
+  테스트는 격리 기전을 보여야 한다, 619 스캔) · `dispatcher-cwd-sandbox-required`(디스패처를
+  스폰하는 테스트는 mkdtemp cwd 만, 주석 제거 후 스캔) · `host-payload-contract`.
+
+#### Fixed
+
+- **git 경로 파서 `-z` 14자리(후속 19)** — `core.quotepath` 기본값에서 비-ASCII 경로가 C-quote 로
+  돌아와 깨지던 자리. 이 리포에만 이미 비-ASCII 추적 경로 5건(`.artibot/adr/`)이 있다.
+  행동이 실제로 바뀐 곳: `conflict-detector.js`(한글 경로 충돌 조용히 누락) · `merge-preflight.js`
+  (`merge-tree -z` 는 출력 구조가 달라 파서 재작성) · `handoff-builder.js` · `git-autopilot-merge.js`
+  (한글 경로 충돌이 자동 해소에서 통째로 탈락) · `stop-review-gate.js`(`--name-status -z` 파서 재작성,
+  픽스처 3곳 개편) · `plugin-validate.yml`(한글 자산만 바뀐 PR 을 **검증 통째로 fast-skip** 하던 것,
+  NUL 은 `$(...)` 가 버리므로 파일 리다이렉트 + `read -d ''`) · `gitignore-boundary` 게이트(fail-open
+  라이브 RED 재현) · `limb-landing-check.js`(`/split` 소유권 게이트 거짓 FAIL) · `restore-blob.mjs`.
+  `.trim()` 은 앞뒤 공백 경로를 파괴하므로 전 자리에서 제거. 오너가 제외한 2자리(`git-autopilot-guard`
+  ·`session-notes`)는 결과 불변이라 손대지 않았다.
+- **landing-lock 이중 획득** — `openSync('wx')` 와 `writeSync` 사이 창에서 상대가 빈 파일을 stale 로
+  읽고 unlink·재생성해 둘 다 `ok` 를 받던 결함(CI 2회 실발생). 빈/부분 락 파일은 "기록 중"으로 보고
+  **mtime 기준으로만** 스테일 판정. 결정적 창 재현 OLD 10/10 탈취 → NEW 0/10.
+  (tmp+linkSync 근본안은 오너 결정으로 보류 — 이 최소 수리로 운용.)
+- **후속 12 안 B — 세션 없는 recorder-stats** — `flushRecorderStats` 가 세션 id 없이 호출되면
+  `_unattributed.events.ndjson` 을 쓰는 대신 stderr 1줄(카운트만)로 알리고 `null`. 세션 있는 경로는
+  바이트 동일(동결 픽스처 `toBe`).
+- **디스패처 테스트가 실 리포를 오염** — `sessionstart`·`subagentstop`·`sessionend`·`posttooluse`
+  스위트가 자식 훅을 `PLUGIN_ROOT` cwd 로 스폰해 실 리포 `.git/autopilot.json` 을 덮어쓰고
+  `/split` 줄기 브랜치를 `artibot/` 로 옮기던 것(worktree 4/4 실발생). 비-git 임시 cwd 로 격리 +
+  스폰 전후 sha·HEAD·reflog·브랜치 불변 단언.
+- **additionalContext 8KB 캡의 고아 서로게이트** — 캡이 서로게이트 쌍 사이를 자르면 남던 lone high
+  surrogate 수리.
+- **2차 배치 줄기 간 상호작용 3건** — `land --json` 7행(lint 행 추가분) · 디스패처 스포너 래칫 +1 ·
+  `subagent-handler.js#observeRoute` 별칭 보존(`scorecard.md` 인용 게이트, 두 게이트 무수정).
+- `dev-verify-gate.js` JSDoc "trimmed stdout" 1줄 정정 · `tool-tracker.js` 가 `case 'Agent'` 를
+  `case 'Task'` 옆에서 처리.
+
+#### Changed
+
+- **decisions 스토어 게이트(후속 12 안 D)** — 라이터 도달 테스트의 격리 기전 허용목록
+  (storeDir/projectRoot 주입 · cwd+mkdtemp+.git · vi.mock). `useTrailSandbox`/`CLAUDE_PLUGIN_ROOT`
+  는 이 스토어를 격리하지 않으므로 미등록.
+- **`/doctor` Check 8** — `checkLedgerStateParity` 가 별도 `census` 키(pass | warn | unmeasured)를
+  돌려준다. Check 1~7 은 SHA 동결 그대로.
+- **README 수치** — 훅 27 등록 · 70 스크립트.
+
+#### Docs
+
+- **오너 결정 원장** — 부록 0-2 후속(2) 4건 + 후속(2)-b 3건·위임 1건 + **후속(3) 10건**
+  (모델 정책 역할 오버라이드 §5 5건 · docs:check 스코프 2건 · trail D9 동결 3건, 전부 권장안 채택).
+- **설계안 3건 신규(코드 0)** — `DESIGN-MODEL-POLICY-role-override` · `DESIGN-DOCS-CHECK-scope-artibot`
+  · `DESIGN-TRAIL-migration-projectRoot`. L1 설계안 재대조(`bc2e9e55` 반영, §2.2/§4.4 모순 해소).
+- **`reports/SPLIT/split-9d6dc2.md`** — 1차 §0~6 + 2차 §7, 교훈 원장 61건(#1~61). 리더 오류 5+1.
+- **`NEXT-SESSION.md`** 크로스머신 핸드오프 2026-09-04 갱신.
+
+#### Known
+
+- **라이브 판정은 이 릴리스를 설치한 뒤에야 가능하다** — L1 D4(additionalContext 가 모델에 보이는지)
+  · L2 D3/D4(설치본의 `hooks.json` 등록으로 `route.selected`/`route.bound` 가 `spawns.ndjson` 에
+  쌓이는지). D2 burn 은 임시 `--settings` 로 발화시킨 것이라 설치본 등록의 발화는 **미측정**이다.
+- **`hooks.json` 매처 표현식 4종(#49)** — `tool == "Write" || tool == "Edit"` 류가 호스트 문법에 없다.
+  정규식 해석이면 `tool == "Bash"` 는 절대 불일치, `||` 가 든 것은 **모든 도구에 매치**할 수 있다.
+  추론·미측정 — 3차 배치 1순위(A/B 실측 후 평문화).
+- **`timeout` 단위는 초(#50)** — `hooks.json` PreToolUse 의 `5000` 은 5,000초다. CONTRIBUTING
+  "milliseconds" 는 문서 오류. 값 전면 재설정은 3차.
+- **`ci-utils.js#gitTrackedNames` 링크드 worktree(#56)** — pre-push 가 `GIT_DIR` 만 넘기는 환경에서
+  `ls-files` 가 리포 전체를 돌려줘 플러그인 루트 0개로 오판(메인 트리·CI 는 무관). 3차.
+- **`landing-serialization` 게이트의 그린은 직렬화 증거가 아니다(#40)** — 락 수리 후에도 테스트
+  하네스 축은 미분리. 3차 조사 1순위.
+- 부하성 플레이크: `install-*.test.js` 30s 타임아웃 킬(전체 실행에서만, 단독 통과).
+
 ## [4.54.0] — 2026-09-03
 
 ### 훅이 다시 말을 걸기 시작한다 — 호스트 페이로드 계약 수리
