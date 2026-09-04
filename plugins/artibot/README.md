@@ -12,7 +12,7 @@
 >
 > **Claude Code를 위한 인지 오케스트레이션 OS** — 계층 메모리, 검증가능-보상(RLVR) 학습, MCP 서버, 멀티 플랫폼 에이전트 팀.
 
-Artibot은 Claude Code의 네이티브 **Agent Teams API**를 핵심 엔진으로 사용하여 28개 전문 에이전트, 114개 도메인 스킬, 11단계 런타임 미들웨어, 계층 메모리·규칙 추출 학습 모듈, 스웜 동기화 모듈을 통합한 **5-layer 오케스트레이션 OS**입니다. System 1/2 인지 라우팅과 검증가능 보상(테스트 통과·타입체크) 기반 학습으로 라우팅·스킬 선택을 점진 보정합니다.
+Artibot은 Claude Code의 네이티브 **Agent Teams API**를 핵심 엔진으로 사용하여 30개 전문 에이전트, 114개 도메인 스킬, 11단계 런타임 미들웨어, 계층 메모리·규칙 추출 학습 모듈, 스웜 동기화 모듈을 통합한 **5-layer 오케스트레이션 OS**입니다. System 1/2 인지 라우팅과 검증가능 보상(테스트 통과·타입체크) 기반 학습으로 라우팅·스킬 선택을 점진 보정합니다.
 
 > **참고(2026-06 lean redesign):** 기존 GRPO 정책 옵티마이저는 측정 가능한 개선이 없어 철거되었습니다. 현재 학습은 **검증가능 보상(RLVR)** 신호(테스트 통과·타입체크·no-revisit)로 라우팅/스킬 승격과 계층 메모리를 보정하는 방식이며, 별도 외부 보상 모델·강화학습 옵티마이저는 사용하지 않습니다.
 
@@ -79,7 +79,7 @@ flowchart TD
     S2 --> TM[Agent Team Mode<br/>named spawns + P2P]
     SUB --> RT[Runtime Middleware Pipeline<br/>11 stages]
     TM --> RT
-    RT --> AG[28 Specialist Agents<br/>orchestrator + 27 teammates]
+    RT --> AG[30 Specialist Agents<br/>orchestrator + 29 teammates]
     AG --> LL[Lifelong Learning<br/>RLVR signals + memory transfer]
     LL --> CR
 ```
@@ -396,7 +396,7 @@ Artibot의 핵심 엔진은 Claude Code의 **Agent Teams API**입니다. 단순�
 
 ### CTO-Led 팀 오케스트레이션
 
-- **orchestrator** 에이전트가 팀 리더(CTO)로서 나머지 27개 전문 에이전트를 팀원으로 구성 (오케스트레이터 1 + 팀원 27 = 총 28개)
+- **orchestrator** 에이전트가 팀 리더(CTO)로서 나머지 29개 전문 에이전트를 팀원으로 구성 (오케스트레이터 1 + 팀원 29 = 총 30개)
 - Delegation 모드: 리더는 조율만 담당, 직접 코드 작성 안함
 - 5가지 오케스트레이션 패턴: Leader, Council, Swarm, Pipeline, Watchdog
 - 3단계 팀 규모: Solo(0명), Squad(3명), Platoon(5명)
@@ -553,7 +553,7 @@ Artibot은 Claude Code 외에도 **Gemini CLI**, **OpenAI Codex CLI**, **Cursor 
 | **호환성 점수** | 10/10 | 9/10 | 8/10 | 6/10 | 8/10 |
 | Agent Teams (P2P 메시징) | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Sub-Agent (단방향 위임) | ✅ | ✅ | ✅ | ⚠️ 제한적 | ✅ |
-| 28개 에이전트 (오케스트레이터 1 + 전문 27) | ✅ | ✅ 자동변환 | ✅ 자동변환 | ✅ 자동변환 | ✅ 자동변환 |
+| 30개 에이전트 (오케스트레이터 1 + 전문 29) | ✅ | ✅ 자동변환 | ✅ 자동변환 | ✅ 자동변환 | ✅ 자동변환 |
 | 114개 스킬 (SKILL.md) | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 슬래시 커맨드 | ✅ 79개 | ✅ TOML | → Workflows | → Prompts | → Workflows |
 | Hooks 자동작동 | ✅ 15이벤트 | ✅ 동일패턴 | ⚠️ 제한적 | ❌ | ✅ Agent Manager |
@@ -814,7 +814,7 @@ Agent Teams (Full P2P)  →  Sub-Agent (단방향)  →  Direct (직접 실행)
 
 ## 시작하기 (Onboarding Guide)
 
-> Claude Code를 위한 지능형 오케스트레이션 플러그인 — 28개 전문 에이전트가 팀으로 협업하여 개발 생산성을 극대화합니다.
+> Claude Code를 위한 지능형 오케스트레이션 플러그인 — 30개 전문 에이전트가 팀으로 협업하여 개발 생산성을 극대화합니다.
 
 ### 핵심 개념 5가지
 
@@ -959,7 +959,7 @@ cd artibot/plugins/artibot && bash install.sh
                             └──────────┬───────────────┘
                                        ▼
                             ┌──────────────────────────┐
-                            │   27개 전문 에이전트 (팀원)   │
+                            │   29개 전문 에이전트 (팀원)   │
                             │  TaskList → 자기할당        │
                             │  SendMessage → P2P 소통    │
                             │  TaskUpdate → 완료 보고     │
@@ -1247,27 +1247,31 @@ Artibot v1.5.0 initialized
 
 orchestrator는 **코드를 직접 작성하지 않습니다**. 팀을 구성하고, 태스크를 분배하고, 팀원간 조율하고, 결과를 종합하는 역할만 수행합니다.
 
-### 전문 에이전트 (27개 팀원)
+### 전문 에이전트 (29개 팀원)
 
 모든 팀원은 자신의 전문 도구 + 팀 협업 도구를 가집니다:
 - `SendMessage` - 리더/동료에게 DM, 셧다운 응답
 - `TaskList` / `TaskGet` - 할당된 태스크 확인
 - `TaskUpdate` - 태스크 자기 할당 + 완료 보고
 
-#### 설계/분석 (3개)
+#### 설계/분석 (5개)
 
 | 에이전트 | 모델 | 역할 |
 |----------|------|------|
-| **architect** | opus | 시스템 아키텍처, ADR, 트레이드오프 분석 |
-| **planner** | opus | 구현 계획, 위험 평가, 단계 분해 |
-| **llm-architect** | opus | LLM 아키텍처, 프롬프트 설계, RAG |
+| **architect** | fable | 시스템 아키텍처, ADR, 트레이드오프 분석 |
+| **planner** | fable | 구현 계획, 위험 평가, 단계 분해 |
+| **llm-architect** | fable | LLM 아키텍처, 프롬프트 설계, RAG |
+| **investigator** | fable | 조사·측정, 관측치 정합성 대조, 등급 붙은 판정 |
+| **auditor** | fable | 사후 감사 — 주장 계수(분모)와 반증(분자), `claim_audit` 산출 |
 
-#### 품질/보안 (4개)
+#### 품질/보안 (6개)
 
 | 에이전트 | 모델 | 역할 |
 |----------|------|------|
-| **code-reviewer** | opus | 코드 리뷰 (4단계 심각도, 5개 차원) |
-| **security-reviewer** | opus | OWASP Top 10, 위협 모델링 |
+| **code-reviewer** | fable | 코드 리뷰 오케스트레이터 (스펙 + 품질 2단계) |
+| **spec-reviewer** | fable | 스펙 일치, 범위 이탈·과잉 구현 탐지 |
+| **quality-reviewer** | fable | 코드 품질, 패턴 준수, 커버리지 |
+| **security-reviewer** | opus | OWASP Top 10, 위협 모델링 (denylist 로 opus 고정) |
 | **tdd-guide** | opus | TDD (RED→GREEN→REFACTOR), 80%+ 커버리지 |
 | **e2e-runner** | opus | Playwright E2E 테스트 |
 
@@ -1302,18 +1306,20 @@ orchestrator는 **코드를 직접 작성하지 않습니다**. 팀을 구성하
 | **cro-specialist** | opus | 전환율 최적화, A/B 테스트 |
 | **ad-specialist** | opus | 광고 캠페인, 예산 최적화 |
 | **presentation-designer** | opus | 프레젠테이션 디자인, 시각 자료 |
-| **repo-benchmarker** | opus | 레포지토리 벤치마크, 비교 분석 |
+| **repo-benchmarker** | fable | 레포지토리 벤치마크, 비교 분석 |
 
 ### 모델 선택 기준
 
 | 모델 | 용도 | 에이전트 수 |
 |------|------|------------|
-| **opus** (`claude-opus-5`) | 설계·구현·검수·마케팅 전 영역 — 단일 티어 편성 | 28개 (100%) |
-| **fable** | 미사용. `artibot.config.json#/agents/modelPolicy/fable/enabled=false`로 OFF (allowlist 20종은 보존 — `true`로 되돌리면 v4.38 분리 복원) | 0개 |
+| **opus** | 구현·테스트·마케팅 — `fable.allowlist` 밖의 전원. `security-reviewer` 는 `FABLE_DENYLIST` 로 여기에 고정 | 20개 (67%) |
+| **fable** | 설계·검수·판정(judge) — `artibot.config.json#/agents/modelPolicy/fable/allowlist` 10종이 유일한 fable 집합 (`enabled: true`). investigator·auditor 는 오너 결정 MP-3(2026-09-04)로 편입 | 10개 (33%) |
+
+> 티어→모델 ID 매핑의 단일 진실원은 `lib/core/model-catalog.js#MODELS` 이고, 실효 티어는 `lib/core/model-policy.js#resolveModel` 이 정합니다. 이 표에 모델 ID 를 하드코딩하지 마세요.
 
 ### 팀원 행동 프로토콜
 
-모든 27개 팀원은 팀으로 실행될 때 다음 프로토콜을 따릅니다:
+모든 29개 팀원은 팀으로 실행될 때 다음 프로토콜을 따릅니다:
 
 ```
 1. TaskList → 할당된 태스크 확인
@@ -1562,9 +1568,9 @@ orchestrator는 **코드를 직접 작성하지 않습니다**. 팀을 구성하
 plugins/artibot/
 ├── .claude-plugin/
 │   └── plugin.json              # 플러그인 매니페스트
-├── agents/                      # 28개 에이전트 정의 (orchestrator 1 + 팀원 27)
+├── agents/                      # 30개 에이전트 정의 (orchestrator 1 + 팀원 29)
 │   ├── orchestrator.md          #   CTO / 팀 리더 (Agent Teams API)
-│   └── [27개 전문 에이전트].md    #   팀원 (SendMessage + TaskUpdate)
+│   └── [29개 전문 에이전트].md    #   팀원 (SendMessage + TaskUpdate)
 ├── commands/                    # 79개 슬래시 커맨드
 │   ├── sc.md                    #   메인 라우터
 │   ├── orchestrate.md           #   팀 오케스트레이션 (네임드 Agent 스폰)

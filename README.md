@@ -45,12 +45,12 @@ Most Claude Code plugins use simple sub-agent (unnamed, fire-and-forget) delegat
 - **Cognitive Architecture** -- Dual-process System 1/2 routing inspired by Kahneman's theory: fast intuitive responses for simple tasks, deep deliberative reasoning for complex ones
 - **Lifelong Learning** -- GRPO-based batch learning from session outcomes with automatic knowledge transfer between System 1 and System 2 caches
 - **Decision Ledger (v5 Observe)** -- Append-only records of routing, mission, human-gate and verification decisions, written as the decision happens. Recording only: runtime behavior is unchanged and routing receipts carry `applied:false`. Read them back with `/scorecard --session|--routing` and `/doctor` Check 8/9
-- **CTO-Led Orchestration** -- `orchestrator` agent leads 28 specialist agents as a team coordinator (delegation mode: no direct coding)
+- **CTO-Led Orchestration** -- `orchestrator` agent leads 30 specialist agents as a team coordinator (delegation mode: no direct coding)
 - **Intelligent Delegation** -- Auto-selects Sub-Agent (simple) vs Agent Team (complex) based on cognitive complexity scoring
 - **5 Orchestration Patterns** -- Leader, Council, Swarm, Pipeline, Watchdog
 - **8 DAG Playbooks** -- Feature, Bugfix, Refactor, Security + Marketing Campaign, Marketing Audit, Content Launch, Competitive Analysis (DAG-based with parallel node execution, topological sort, and cycle detection)
 - **79 Slash Commands** -- `/sc` smart router, `/save`, `/resume`, `/daily`, `/team`, `/orchestrate`, `/spawn`, `/implement`, `/visual-check`, `/sc playbook`, `/learning`, `/ultrareview`, `/ultraplan`, `/audit-claude-md`, `/export`, and more
-- **28 Specialized Agents** -- Architecture, security, frontend, backend, testing, DevOps, marketing, SEO, analytics, and more (all on `claude-opus-5`)
+- **30 Specialized Agents** -- Architecture, security, frontend, backend, testing, DevOps, marketing, SEO, analytics, investigation, audit, and more (20 on the `opus` tier, 10 design/review/judge agents on the `fable` tier)
 - **114 Domain Skills** -- 11 persona skills, 8 core skills, 16 language skills, 8 utility skills, 35 marketing skills, visual-validation, daily, team, session-worklog, vibe-coding, repo-benchmarking, git-worktree, dynamic-context-injection, claude-md-auditor, skill-authoring (all enhanced with Anthropic best-practice descriptions, workflow checklists, HITL v2 conversational checkpoints, output templates, and freedom levels)
 - **10 Auto-Activating Rules** -- DEV protocol, quality gates, agent coordination, config safety, frontend/backend/test patterns, clean state enforcement, verification discipline, question recommendations
 - **Guard Registry** -- Centralized guard pipeline with `registerGuard()`/`executeChain()` API, 6 built-in guards extracted from hook scripts (75% code reduction)
@@ -225,13 +225,13 @@ Artibot: /team triggers automatically
 You want to use Artibot agents in Cursor IDE
 -> manually rewrite each agent .md file to .mdc format
 -> figure out Cursor Rules-for-AI conventions
--> repeat for 28 agents = hours of tedious work
+-> repeat for 30 agents = hours of tedious work
 ```
 
 **After (with Artibot):**
 ```
 /export cursor
-  -> auto-converts all 28 agents to .mdc format
+  -> auto-converts all 30 agents to .mdc format
   -> places them in .cursor/rules/ with correct frontmatter
   -> preserves agent expertise and tool permissions
   -> supports: cursor, codex, opencode, antigravity, all
@@ -349,7 +349,7 @@ Spawns 5 teammates that self-claim tasks from the shared task list and report fi
                                       |
                                       v
                           +-----------------------+
-                          |  28 Specialist Agents  |
+                          |  30 Specialist Agents  |
                           |  TaskList -> self-claim|
                           |  SendMessage -> P2P    |
                           |  TaskUpdate -> report  |
@@ -522,21 +522,21 @@ Load System 1 cache          (routing decisions +            Knowledge transfer
 
 ## Agents
 
-28 specialized agents: 1 orchestrator (CTO) + 27 specialist teammates. Fable 71%, Opus 29% (security-reviewer stays opus via denylist).
+30 specialized agents: 1 orchestrator (CTO) + 29 specialist teammates. Fable 33% (10/30), Opus 67% (20/30) — security-reviewer stays opus via denylist.
 
 <details>
 <summary>Orchestrator (Team Leader / CTO)</summary>
 
 | Agent | Model | Role | Team API Tools |
 |-------|-------|------|----------------|
-| **orchestrator** | opus | CTO-level team leader. Coordination only (delegation mode). | Agent(), SendMessage, TaskCreate, TaskUpdate, TaskList, TaskGet |
+| **orchestrator** | fable | CTO-level team leader. Coordination only (delegation mode). | Agent(), SendMessage, TaskCreate, TaskUpdate, TaskList, TaskGet |
 
 The orchestrator **never writes code directly**. It assembles the team, distributes tasks, coordinates between teammates, and synthesizes results.
 
 </details>
 
 <details>
-<summary>Specialist Agents (27 Teammates)</summary>
+<summary>Specialist Agents (29 Teammates)</summary>
 
 All teammates have their specialist tools + team collaboration tools (`SendMessage`, `TaskList`, `TaskGet`, `TaskUpdate`).
 
@@ -544,16 +544,20 @@ All teammates have their specialist tools + team collaboration tools (`SendMessa
 
 | Agent | Model | Specialty |
 |-------|-------|-----------|
-| architect | opus | System architecture, ADR, trade-off analysis |
-| planner | opus | Implementation planning, risk assessment |
-| llm-architect | opus | LLM architecture, prompt design, RAG |
+| architect | fable | System architecture, ADR, trade-off analysis |
+| planner | fable | Implementation planning, risk assessment |
+| llm-architect | fable | LLM architecture, prompt design, RAG |
+| investigator | fable | Evidence measurement, consistency cross-check, graded verdicts |
+| auditor | fable | Post-hoc claim census and refutation (`claim_audit` output) |
 
 **Quality & Security:**
 
 | Agent | Model | Specialty |
 |-------|-------|-----------|
-| code-reviewer | opus | Code review (4 severity levels, 5 dimensions) |
-| security-reviewer | opus | OWASP Top 10, threat modeling |
+| code-reviewer | fable | Code review orchestrator (spec + quality, 2 stages) |
+| spec-reviewer | fable | Spec compliance, scope creep and over-implementation |
+| quality-reviewer | fable | Code quality, pattern adherence, coverage |
+| security-reviewer | opus | OWASP Top 10, threat modeling (pinned opus via denylist) |
 | tdd-guide | opus | TDD (RED->GREEN->REFACTOR), 80%+ coverage |
 | e2e-runner | opus | Playwright E2E testing |
 
@@ -587,7 +591,7 @@ All teammates have their specialist tools + team collaboration tools (`SendMessa
 | seo-specialist | opus | Technical SEO, keyword strategy, SERP optimization |
 | cro-specialist | opus | Conversion optimization, A/B testing, funnel analysis |
 | ad-specialist | opus | PPC campaigns, ad creative, ROAS optimization |
-| repo-benchmarker | opus | Repository analysis, competitive benchmarking |
+| repo-benchmarker | fable | Repository analysis, competitive benchmarking |
 
 **Performance & Infrastructure:**
 
@@ -848,7 +852,7 @@ Each adapter translates Artibot's Agent Teams API calls into the target platform
 plugins/artibot/
 +-- .claude-plugin/
 |   +-- plugin.json              # Plugin manifest
-+-- agents/                      # 28 agent definitions
++-- agents/                      # 30 agent definitions
 |   +-- orchestrator.md          #   CTO / Team leader (Agent Teams API)
 |   +-- [17 dev specialists].md  #   Development teammates
 |   +-- [8 marketing agents].md  #   Marketing specialists

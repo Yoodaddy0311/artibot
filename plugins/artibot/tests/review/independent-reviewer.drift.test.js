@@ -37,6 +37,7 @@ import { describe, expect, it } from 'vitest';
 import {
   ADAPTER_ROWS,
   CANONICAL_VERDICTS,
+  CLAIM_NATURES,
   MISSION_ID_PATTERN,
   V2_REQUIRED_FIELDS,
 } from '../../lib/review/independent-reviewer.js';
@@ -53,6 +54,7 @@ function loadJson(rel) {
 
 const reviewSchema = loadJson('schemas/review-output.schema.json');
 const adapterMap = loadJson('schemas/verdict-adapter-map.json');
+const ledgerAllowlist = loadJson('schemas/ledger-events.allowlist.json');
 const v2 = reviewSchema.definitions.reviewOutputV2;
 
 /**
@@ -160,6 +162,42 @@ describe('verdict-adapter-map.json mirror', () => {
   });
 });
 
+describe('ledger-events.allowlist.json#enums.claim_nature mirror', () => {
+  it('CLAIM_NATURES equals the allowlist enum, in order', () => {
+    expect([...CLAIM_NATURES]).toEqual(ledgerAllowlist.enums.claim_nature);
+  });
+
+  it('the enum is the two values 부록 0-2 후속(3) MP-1 fixed', () => {
+    // Denominator guard: an enum that silently grew a third value would make
+    // the equality above pass while the stratification changed underneath it.
+    expect(ledgerAllowlist.enums.claim_nature).toHaveLength(2);
+    expect(CLAIM_NATURES).toHaveLength(2);
+  });
+
+  it('the enum carries a stated source, like every other enum in the file', () => {
+    expect(typeof ledgerAllowlist.enum_sources.claim_nature).toBe('string');
+    expect(ledgerAllowlist.enum_sources.claim_nature.length).toBeGreaterThan(20);
+  });
+
+  it('review.claim_audit is registered and points at that enum', () => {
+    const spec = ledgerAllowlist.events['review.claim_audit'];
+    expect(spec).toBeDefined();
+    expect(spec.required).toEqual([
+      'subject_agent_type', 'claims_total', 'claims_refuted',
+    ]);
+    expect(spec.fields.nature.enum_ref).toBe('claim_nature');
+  });
+
+  it('the event does not require the two fields that may legitimately be absent', () => {
+    // `nature` is dropped from the denominator when untagged (설계 §4.4 #4) and
+    // `subject_model` cannot be filled before the L2 D1 bind. Requiring either
+    // would make the writer refuse every line the Observe phase can produce.
+    const spec = ledgerAllowlist.events['review.claim_audit'];
+    expect(spec.required).not.toContain('nature');
+    expect(spec.required).not.toContain('subject_model');
+  });
+});
+
 describe('gate self-verification — the comparison actually compares', () => {
   it('a dropped row makes the adapter comparison red', () => {
     const missing = [...ADAPTER_ROWS].slice(0, -1);
@@ -180,5 +218,16 @@ describe('gate self-verification — the comparison actually compares', () => {
 
   it('a dropped required field makes the required comparison red', () => {
     expect([...V2_REQUIRED_FIELDS].filter((f) => f !== 'verification_id')).not.toEqual(v2.required);
+  });
+
+  it('a reordered claim_nature makes the enum comparison red', () => {
+    // The mirror above compares IN ORDER. Feeding the same comparison a
+    // permuted copy proves the order is really part of what is checked, so a
+    // future `toEqual` on sorted arrays cannot quietly weaken it.
+    expect([...CLAIM_NATURES].reverse()).not.toEqual(ledgerAllowlist.enums.claim_nature);
+  });
+
+  it('an added claim_nature makes the enum comparison red', () => {
+    expect([...CLAIM_NATURES, 'explore']).not.toEqual(ledgerAllowlist.enums.claim_nature);
   });
 });
