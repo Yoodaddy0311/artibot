@@ -3,7 +3,7 @@
 **런 2호.** 런 1호(`split-8f83d7`, 2026-08-27)에 이어 두 번째 실오퍼레이터 완주다.
 n=2 — 이 문서도 존재 증명이지 성능 주장이 아니다. `/split` vs `/autopilot --fast` 속도
 비교는 여전히 이 데이터로 주장할 수 없다. 런 1호와 달리 이번 런의 핵심 산출물은
-**교훈 원장 33건**(§3)이며, 그중 6건은 코드 결함, 5건은 리더 자기 오류다.
+**교훈 원장 37건**(§3)이며, 그중 7건은 코드 결함, 5건은 리더 자기 오류다.
 
 | 항목 | 값 |
 |---|---|
@@ -17,7 +17,8 @@ n=2 — 이 문서도 존재 증명이지 성능 주장이 아니다. `/split` v
 | 랜딩 | **landed** — 배치 SHA `520886bd7cb4de0a745d99b819b6ce9ab6e0131d`, base `ca013e2c`, **rebuilds 0**, `wait_for_green` 폴링 33회 (13:32:31 KST, `merge(split): fold … [4/4]`) |
 | 랜딩 검증 | `master` tip == `520886bd` **일치** · 4줄기 tip 전부 master 조상 **4/4** · `ca013e2c` 는 landing 의 조상 (기록자 재확인) |
 | 증거 원본 | **두 파일**(§1.3 — 루트가 갈렸다): `plugins/artibot/runtime/split/split-9d6dc2.events.ndjson`(13건) + `~/.claude/plugins/cache/artibot/artibot/4.54.0/runtime/split/split-9d6dc2.events.ndjson`(5건) = **18** |
-| 교훈 원장 | `.artibot/split/gotchas.md` — **33건**(§3 에 전문 수록) |
+| 교훈 원장 | `.artibot/split/gotchas.md` — **37건**(§3 에 전문 수록) |
+| 랜딩 이후 | `60dab1dd`(2026-09-04 13:57) — sessionstart 테스트 git 샌드박스 격리가 **이미 master 에 착지**했다(기록자 확인: master tip == `60dab1dd`, `520886bd` 는 그 조상). 즉 gotcha #18/#22 의 **근본 수리 (1) 은 완료**다 — 교훈 #37 의 "선행 랜딩 **중**" 은 그 시점 표기이고, 지금은 **랜딩 완료**다 |
 | 2차 배치 초안 | `.artibot/split/next-batch-plan.md` 365줄(architect 작성) |
 
 ---
@@ -27,7 +28,7 @@ n=2 — 이 문서도 존재 증명이지 성능 주장이 아니다. `/split` v
 2026-09-04 11:40 KST 에 `/split plan` 으로 4줄기를 세우고 11:53 에 창 4개를 열어 12:05 에
 4/4 dispatch 했으며, 13:32 에 4줄기 전부 `Split-Limb: done` 트레일러와 land 6/6 PASS 로
 INTEGRATE 에 진입해 **13:44 에 `520886bd` 로 랜딩(rebuilds 0)** 했다. 코드 산출은 4커밋 계열
-합계 **29파일 / +2,393 / -216**(base 대비 재측정, §2)이고, 부수 산출은 교훈 원장 **33건**이다.
+합계 **29파일 / +2,393 / -216**(base 대비 재측정, §2)이고, 부수 산출은 교훈 원장 **37건**이다.
 이번 런이 드러낸 가장 무거운 것은 **리포 전체 vitest 가 split 줄기 브랜치를 `artibot/` 접두로
 이동시켜 완료 판독을 4/4 거짓 미완료로 만든 결함**(#18·#22)과, **창이 팀원을 안 띄우고 혼자
 일한 것**(#16 — 템플릿에 팬아웃 지시가 없다)이다. 리더 자기 오류 5건이 원장에 남았고
@@ -207,7 +208,7 @@ start ∪ stop = **28 distinct agent** 이므로, `start` 만 세면 팬아웃�
 
 ---
 
-## 3. 문제점과 배울점 — 교훈 원장 33건
+## 3. 문제점과 배울점 — 교훈 원장 37건
 
 원문은 `.artibot/split/gotchas.md`(append-only, 리더 소유)다. 아래 §3.2 는 그 파일의
 본문을 **삭제·요약 없이 번호 그대로** 옮긴 것이다. §3.1 은 본 리포트가 붙인 분류 태그다.
@@ -217,15 +218,15 @@ start ∪ stop = **28 distinct agent** 이므로, `start` 만 세면 팬아웃�
 | 분류 | 건수 | 번호 |
 |---|---|---|
 | **리더 오류** | 4 (+1 부분) | #1 · #2 · #12 · #15 · (#26 (a)) |
-| **도구·템플릿 결함** | 10 | #3 · #6 · #8 · #9 · #10 · #11 · #16 · #25 · #27 · **#30** |
-| **훅·테스트 결함** | 5 | #7 · #17 · #18 · #22 · **#32** |
+| **도구·템플릿 결함** | 11 | #3 · #6 · #8 · #9 · #10 · #11 · #16 · #25 · #27 · **#30** · **#35** |
+| **훅·테스트 결함** | 6 | #7 · #17 · #18 · #22 · **#32** · **#34** |
 | **호스트 관측** | 3 | #5 · #19 · #20 |
 | **절차 공백** | 9 (+1 부분) | #4 · #13 · #14 · #21 · #23 · #24 · #28 · #29 · **#31** · (#26 (b)) |
-| 런 기록(문제 아님) | 1 | **#33** |
-| **합계** | **33** | |
+| 런 기록·결정(문제 아님) | 3 | **#33** · **#36** · **#37** |
+| **합계** | **37** | |
 
-**6번째 라벨을 1회 썼다**: #33 은 랜딩 결과·측정 기록이라 "문제" 5분류 어디에도 맞지 않는다.
-억지로 끼워 넣지 않고 별도 라벨로 두었다.
+**6번째 라벨을 3회 썼다**: #33(랜딩 결과) · #36(회고 정정 반영) · #37(2차 실행 형태 결정)은
+"문제" 5분류 어디에도 맞지 않는다. 억지로 끼워 넣지 않고 별도 라벨로 두었다.
 
 | # | 한 줄 | 분류 | 코드 수리 필요 |
 |---|---|---|---|
@@ -262,6 +263,10 @@ start ∪ stop = **28 distinct agent** 이므로, `start` 만 세면 팬아웃�
 | 31 | `commands/team.md:155` 주석이 2티어 모델 정책과 모순 | 절차 공백 | 문서(record 레인) |
 | 32 | **스폰 원장이 팀원 모델을 기록하지 못함** — 오늘 22/22 행 `canonicalModel:null` | 훅·테스트 결함 | 예(L2 D1 선행) |
 | 33 | 랜딩 결과·측정 기록 | 런 기록 | 아니오 |
+| 34 | **스폰 원장 계수 축이 양방향 손실** — start 22 / distinct 16 / start 없는 stop 12 | 훅·테스트 결함 | 예(`fanout-probe` 축) |
+| 35 | 교훈 #4 문구 재작성 필요 — "명령 2회 실행"은 #22 재귀속 전 오진 | 도구·템플릿 결함 | 문서(`split.md`) |
+| 36 | 회고에서 정정된 것(16→18 이벤트 · `totalMs` 여전히 null · "n=1" 상수) | 런 기록 | 문서 |
+| 37 | 2차 배치 실행 형태 결정 — `/split` 대신 `/team` + worktree 격리 | 런 기록(결정) | 아니오 |
 
 ### 3.2 원문 (`.artibot/split/gotchas.md` — 삭제·요약 없음)
 
@@ -328,6 +333,20 @@ start ∪ stop = **28 distinct agent** 이므로, `start` 만 세면 팬아웃�
 (b) 미쌍은 **병합 기준 1건**이다 — 3 은 두 파일을 따로 세어 더한 값이다(소스 2 + 캐시 1).
 (c) `ci/split-split-9d6dc2` 는 **로컬 ref 로 아직 존재**한다(§2).
 
+#### 랜딩 이후 추가분 (14:0x~14:2x)
+
+34. **스폰 원장 계수 축이 양방향 손실(record 전수 판독 14:0x)** — 4 worktree `spawns.ndjson`: start 이벤트 22 → distinct start id 16(중복), stop 만 있고 start 없는 id 12(l4 3·l3 2·p2 6·l2 1), start∪stop distinct 28. `start` 만 세면 최소 12건 과소, 이벤트 수를 세면 과대. `fanout-probe` 의 SOLO 분모도 같은 축이면 틀린다. 다음: 계수 축 = start∪stop distinct agentId; 원인(start 유실 12건) 조사는 별건. 런 종료 시 최종 팬아웃: l4 1 · l3 4 · p2 8 · l2 9.
+35. **교훈 #4 문구 재작성 필요** — "명령 2회 실행" 안내는 #22 재귀속 전 오진. `split.md` 에 넣을 문구는 "리포 전체 vitest 가 SessionStart 훅을 worktree cwd 로 스폰해 브랜치를 옮긴다 — 수리(test-git-sandbox) 전까지 창은 표적 스위트만" 이어야 한다.
+36. **회고에서 정정된 것** — 텔레메트리 16→18 이벤트(리더가 14:44 에 INTEGRATE end·run end 기록). 그래도 첫 크래시분 run start 미쌍이 남아 `totalMs=null` → humanWaitPct null 유지. 측정 고지 1번 "n=1" 은 이 런으로 n=2 — `split.md` 상수 갱신 대상(test-git-sandbox 줄기 소유 파일).
+37. **2차 배치 실행 형태 결정(14:2x, 오너 부재 — 권장 채택)** — `/split`(창 4개, 사람 필요) 대신 `/team` + `Agent(isolation: worktree)` 팀원 4명(opus, build 티어)으로 l1-ups · l2-d1 · test-git-sandbox · p19-rest 를 병렬 스폰. 팀원에게 "리포 전체 vitest 금지, 표적 스위트만" 을 명시(훅 브랜치 이동 재트리거 회피). sessionstart 테스트 격리(60dab1dd)는 ci/v5-sessionstart-sandbox 로 선행 랜딩 중 — test-git-sandbox 소유에서 그 파일 제외. 랜딩은 팀원 브랜치를 landBatch 로 배치 예정(worktree 브랜치명은 하네스가 짓는다 — `isSplitLimbBranch` 미충족 시 plan.json 없이 브랜치 직접 지정). 다음: `/split` 문서에 "오너 부재 시 대체 경로 = /team isolation:worktree" 절 추가 검토.
+
+**#34 는 본 리포트 §4-C 가 원문이다** — 기록자 전수 판독이 교훈 원장으로 등재된 것이라 §4-C 와 같은 사실이다.
+
+**#37 에 대한 기록자 재측정**: "선행 랜딩 **중**" 은 그 시점 표기이고, **지금은 랜딩 완료**다 —
+`60dab1dd`(13:57, `sessionstart-dispatcher.test.js` 1파일 +156/-10)가 **master tip** 이고
+`520886bd` 는 그 조상이다. 따라서 gotcha #18/#22 의 **근본 수리 (1) 은 이미 닫혔고**,
+2차 `test-git-sandbox` 줄기에 남는 것은 **(2) 방어선 · (3) status 표시 · (4) 템플릿**이다(§4-A).
+
 ---
 
 ## 4. 개선안
@@ -338,11 +357,11 @@ start ∪ stop = **28 distinct agent** 이므로, `start` 만 세면 팬아웃�
 
 | 교훈 | 2차 줄기 | 어느 파일을 어떻게 |
 |---|---|---|
-| **#18 · #22** (브랜치 이동) | `test-git-sandbox` (R-12a) | **(1) 근본**: `tests/dispatcher/sessionstart-dispatcher.test.js` 의 `cwd` 를 `mkdtemp` + `git init` 임시 리포로 교체(모범 원본은 `tests/dispatcher/stop-dispatcher.test.js:56,:72 sandboxCwd`) + 신규 파이어월 `tests/firewall/dispatcher-cwd-sandbox-required.test.js`. **(2) 방어선**: `scripts/hooks/git-autopilot-session.js` 에 `isSplitLimbBranch(currentBranch) → stay put` 분기 + `tests/hooks/git-autopilot-session.test.js` 회귀 + `tests/firewall/split-branch-prefix-guard.test.js` 확장. **(3) 표시**: `lib/git/split-dispatch.js#branchMatches` 옆에 `actual === 'artibot/' + planned` 판정 + `commands/split.md` §status 열 |
+| **#18 · #22** (브랜치 이동) | `test-git-sandbox` (R-12a) | ✅ **(1) 근본은 이미 착지** — `60dab1dd`(13:57)가 `tests/dispatcher/sessionstart-dispatcher.test.js` 의 `cwd` 를 **비-git 임시 디렉터리**로 격리(+무오염 단언, 1파일 +156/-10)했고 **master tip** 이다. 따라서 이 파일은 `test-git-sandbox` 소유에서 **제외**한다(#37). 남는 것은 아래 셋. **(2) 방어선**: `scripts/hooks/git-autopilot-session.js` 에 `isSplitLimbBranch(currentBranch) → stay put` 분기 + `tests/hooks/git-autopilot-session.test.js` 회귀 + `tests/firewall/split-branch-prefix-guard.test.js` 확장 (**오너 D-1 로 "버그 수리 예외 4번째" 승인됨**). **(3) 표시**: `lib/git/split-dispatch.js#branchMatches` 옆에 `actual === 'artibot/' + planned` 판정 + `commands/split.md` §status 열. **(1′) 잔여**: 같은 클래스 나머지(§1.5 C-2~C-4)와 신규 파이어월 `tests/firewall/dispatcher-cwd-sandbox-required.test.js` 는 **아직 미착지** |
 | **#16** (창이 혼자 일함) | `test-git-sandbox` (4) | `templates/split/PROMPT-TEMPLATE.md` 에 "줄기 내부 팬아웃 절"(분해 권장 단위 · 구현 opus / 검수 fable · 창은 배정·검증·커밋만) + `commands/split.md` §open/§dispatch 문구. **제약**: 새 플레이스홀더를 만들면 `lib/git/split-brief.js` 의 허용목록이 코드가 되므로 **정적 텍스트 절로 한정** |
 | **#14** (allowlist 가 깨질 테스트를 빠뜨림) | 2차 plan 전체 | 2차 4줄기 allowlist 에 `hook-timeout-budget`·`dispatch-table`·`split-brief.test`·`split-limb-naming` 을 선편입해 반영 완료 |
 | **#23** (Stop 게이트 ↔ allowlist 충돌) | `test-git-sandbox` (4) 동반 (R-29) | `commands/split.md` §plan 절차에 "소스 경로마다 대응 테스트 디렉터리 자동 동반(`scripts/x/y.js` → `tests/x/`)" 1항 |
-| **#25** (land 에 lint 행 없음) | `test-git-sandbox` 에 부착 권고 (R-27) | `scripts/split/land.mjs` 에 `lint` 행(변경 파일 한정 `eslint --max-warnings=0`) + `commands/split.md` §land + 브리프 완료 기준 문구. **`land.mjs` 는 2차 어느 후보도 소유하지 않으므로 배정이 필요하다** |
+| **#25** (land 에 lint 행 없음) | `test-git-sandbox` **소유 확정** (R-27, **리더 결정 14:2x**) | `scripts/split/land.mjs` 에 `lint` 행(변경 파일 한정 `eslint --max-warnings=0`) + `commands/split.md` §land + 브리프 완료 기준 공통 문구에 lint 0 명시. 앞선 "배정 필요" 는 **해소** — `land.mjs` 는 이제 `test-git-sandbox` 줄기 소유다. 같은 줄기가 이미 `commands/split.md` 를 소유하므로 §land 편집과 겹침 0 |
 | 후속 19 나머지 12자리 | `p19-rest` (R-13) | 자리별 개별 사양(공용 헬퍼 금지 — `-z` 는 명령마다 출력 형태가 다르다) + 각 테스트에 한글·공백 경로 케이스. **D-3 확정 전 dispatch 금지**(#7·#10 의 정체 미확인) |
 
 ### 4-B. 아직 미편입 — 어느 파일을 어떻게
@@ -356,7 +375,7 @@ start ∪ stop = **28 distinct agent** 이므로, `start` 만 세면 팬아웃�
 | **#21** (창이 `branch -f` 로 ref 조작) | `templates/split/PROMPT-TEMPLATE.md` | 브리프 규약에 "ref 조작(`branch -f`/`-m`/`-D`) 금지, 판독 불일치는 리더에게 보고" 1항. **#16 과 같은 파일** |
 | **#24** (검수 팀원 무보고) | `templates/split/PROMPT-TEMPLATE.md` | 팀원 스폰 규약을 "SendMessage 뿐" 한 줄에서 **보고 계약 8줄 삽입 명시**로 확장. **#16·#21 과 같은 파일** |
 | **#3** (plan 크래시) | `commands/split.md` §plan | 코드 예시에 wave 형태(`waves[].taskIds` 가 배열임)를 명시. heredoc `\` 소실 주의 1줄 |
-| **#4** (브랜치 충돌 우회) | `commands/split.md` §open | ⚠️ **현 문구는 오진 기반이다** — #22 가 원인을 vitest 로 재귀속했으므로 "명령 2회 실행" 안내를 그대로 쓰면 안 된다. `status` 의 "훅 이동 브랜치" 표시(4-A (3))와 함께 **재작성** |
+| **#4** (브랜치 충돌 우회) | `commands/split.md` §open | ⚠️ **현 문구는 오진 기반이다** — #22 가 원인을 vitest 로 재귀속했으므로 "명령 2회 실행" 안내를 그대로 쓰면 안 된다. **넣을 문구는 #35 가 확정했다**: "리포 전체 vitest 가 SessionStart 훅을 worktree cwd 로 스폰해 브랜치를 옮긴다 — 수리(test-git-sandbox) 전까지 창은 표적 스위트만". `status` 의 "훅 이동 브랜치" 표시(4-A (3))와 함께 넣는다. ⚠️ **단서**: `60dab1dd` 로 트리거 1개가 닫혔으므로 "수리 전까지" 의 시제를 착지 시점에 맞춰 다시 볼 것 — 같은 클래스 나머지(C-2~C-4)는 아직 열려 있어 **주의 문구 자체는 유지**해야 한다 |
 | **#9** (텔레메트리 루트 갈림) | `commands/split.md` + split 스크립트 호출 규약 | 런 시작 시 호출 루트를 하나로 고정하고 문서에 명시. **본 리포트 §1.3 이 그 피해를 실증했다**(`wait-limbs` 가 두 파일에 걸쳐 있어 한 파일만 읽으면 미쌍) |
 | **#10** (msys `~` 경로) | `skills/split/references/operations.md` 또는 `commands/split.md` | `process.env.USERPROFILE` 로 조립할 것 1줄 |
 | **#11** (`parentSession` 필수) | `commands/split.md` §plan 7단계 | plan.json 스키마에 `parentSession` 추가 |
@@ -414,9 +433,15 @@ L1 D4·L2 D3/D4 라이브 판정(릴리스 필요) · `/doctor` Check 10 과 `li
 3. 사람 대기 비율 null% (분자 humanWaitMs=1, 분모 run=null ms, 측정시각 2026-09-04T04:44:10.621Z; 미쌍 1건이면 `null`) — C단계(headless 자동 창) 재평가 조건 `config.split.humanWaitReevalPct`=50 대비 미측정. 판정과 C단계 재개는 사람이 결정한다 — 플러그인은 기록만 하고 임계값을 코드에서 비교하지 않는다(`tests/firewall/split-telemetry-wallclock.test.js` "record-only" 게이트).
 ```
 
+**이벤트 수가 16 → 18 로 늘었으나 결론은 바뀌지 않았다.** 리더가 2026-09-04 **14:44:10Z** 에
+INTEGRATE end 와 `run` end 를 기록해 두 파일 합계가 **18건**이 됐고, `run` **2회째** 세그먼트는
+7,405,445ms 로 닫혔다. 그럼에도 **첫 크래시분 `run` start 가 미쌍으로 남아** `summarizeWallClock`
+이 집는 첫 엔트리가 열린 채이므로 **`totalMs` 는 여전히 `null`**, 따라서 `humanWaitPct` 도
+**`null`(미측정)** 이다. 16건 시점의 판정과 18건 시점의 판정이 같다.
+
 **1번 문구에 대한 주석**: 이 런으로 실오퍼레이터 데이터는 **2건(n=2)** 이 됐다. 위 문구는
 `split.md` 원문을 문자 그대로 옮기라는 지시에 따라 "1건(n=1)" 을 보존한 것이다 —
-`split.md` 의 그 상수는 갱신 대상이다(리더 판단).
+`split.md` 의 그 상수는 **갱신 대상이며, 소유는 2차 `test-git-sandbox` 줄기**다(#36).
 
 **3번 값이 `null`(미측정)인 이유**: `run` 세그먼트가 **2회 start** 됐고 end 는 1개뿐이라
 `summarizeWallClock` 이 집는 **첫 엔트리**(크래시분)가 열린 채로 남아 `totalMs = null` 이다.
