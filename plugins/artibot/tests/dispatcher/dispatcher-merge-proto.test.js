@@ -147,30 +147,52 @@ describe('mergeHookResults — prototype-hostile hook output', () => {
   /** Shape the UserPromptSubmit dispatcher receives from Promise.allSettled. */
   const settled = (value) => ({ status: 'fulfilled', value });
 
+  // NOTE on the fixtures below: `user_prompt` is no longer an emitted key, so
+  // the envelopes use `systemMessage` — an ALLOWLISTED host key — as the
+  // legitimate field that must survive alongside a hostile one. Keeping
+  // `user_prompt` here would have made every `toEqual({})` pass for the wrong
+  // reason (dropped by the allowlist, not by the prototype guard).
   it('leaves the envelope prototype intact when the rewriter is hostile', () => {
-    const merged = mergeHookResults(HOSTILE_PROTO(), [settled({ user_prompt: 'hi' })]);
+    const merged = mergeHookResults(HOSTILE_PROTO(), [settled({ systemMessage: 'hi' })]);
 
     expect(Object.getPrototypeOf(merged)).toBe(Object.prototype);
     expect(merged.polluted).toBeUndefined();
-    expect(merged).toEqual({ user_prompt: 'hi' });
+    expect(merged).toEqual({ systemMessage: 'hi' });
     expect({}.polluted).toBeUndefined();
   });
 
   it('leaves the envelope prototype intact when a parallel contributor is hostile', () => {
-    const merged = mergeHookResults({ user_prompt: 'hi' }, [settled(HOSTILE_PROTO())]);
+    const merged = mergeHookResults({ systemMessage: 'hi' }, [settled(HOSTILE_PROTO())]);
 
     expect(Object.getPrototypeOf(merged)).toBe(Object.prototype);
     expect(merged.decision).toBeUndefined();
-    expect(merged).toEqual({ user_prompt: 'hi' });
+    expect(merged).toEqual({ systemMessage: 'hi' });
   });
 
   it('drops constructor/prototype instead of emitting them on stdout', () => {
     const merged = mergeHookResults(
-      JSON.parse('{"constructor":{"evil":1},"prototype":{"evil":2},"user_prompt":"hi"}'),
+      JSON.parse('{"constructor":{"evil":1},"prototype":{"evil":2},"systemMessage":"hi"}'),
       [],
     );
-    expect(JSON.stringify(merged)).toBe('{"user_prompt":"hi"}');
+    expect(JSON.stringify(merged)).toBe('{"systemMessage":"hi"}');
     expect(merged.constructor).toBe(Object);
+  });
+
+  it('the prototype guard runs BEFORE the host allowlist, not instead of it', () => {
+    // Both filters must be live. A hostile key that happens to be absent from
+    // the allowlist would be dropped either way, so the discriminating fixture
+    // is one where the prototype guard is the only thing standing: `decision`
+    // IS an allowlisted host key, and `__proto__` smuggles it in.
+    const merged = mergeHookResults(
+      JSON.parse('{"__proto__":{"decision":"block"},"systemMessage":"real"}'),
+      [],
+    );
+    expect(merged.decision).toBeUndefined();
+    expect(merged).toEqual({ systemMessage: 'real' });
+
+    // And the allowlist is the only thing standing against an ordinary
+    // internal key, which the prototype guard does not touch.
+    expect(mergeHookResults({ user_prompt: 'hi', message: 'm' }, [])).toBeNull();
   });
 
   it('returns null when a hostile payload was the only input', () => {

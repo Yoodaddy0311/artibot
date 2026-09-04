@@ -21,9 +21,16 @@
 // plugin has NO Messages API caller and sets NO output_config.effort; grep
 // `output_config` in lib/ and scripts/ finds only comments):
 //   1. scripts/hooks/runtime-prompt.js resolves EFFORT_POLICY (via
-//      effort-resolver.js) on UserPromptSubmit and injects the prose directive
-//      `[artibot:effort level=X command=Y]` at the top of the user prompt, and
-//      persists it to runtime/current-effort.json.
+//      effort-resolver.js) on UserPromptSubmit, persists it to
+//      runtime/current-effort.json, and emits the prose directive
+//      `[artibot:effort level=X command=Y]` as
+//      hookSpecificOutput.additionalContext. The host delivers that as a
+//      separate meta message ("UserPromptSubmit hook additional context: …")
+//      NEXT TO the user’s prompt — a hook cannot rewrite or prefix the prompt
+//      itself (measured 2026-09-03 on 2.1.259; see
+//      .artibot/guides/v5-design/PROBE-effort-directive-delivery.md).
+//      Teammates get the directive only because the orchestrator writes it
+//      into each Agent() prompt (commands/team.md "Auto-Effort Pre-injection").
 //   2. The host's own effort setting is READ, never written: when
 //      runtime.effort.nativeApi is true, runtime-prompt.js consults
 //      lib/cognitive/native-effort.js (host env var / hook stdin band) and lets

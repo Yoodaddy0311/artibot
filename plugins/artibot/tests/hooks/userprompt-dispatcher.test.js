@@ -115,23 +115,26 @@ function runDispatcher(payload, env = {}) {
 }
 
 describe('_userprompt-dispatcher (integration)', () => {
-  it('emits at most a pass-through envelope when stdin payload is empty', () => {
+  it('emits nothing for an empty stdin payload', () => {
     const out = runDispatcher({});
-    // ambiguity-guard always returns { continue: true } even on empty input,
-    // so the merged output is either null or a no-op pass-through. No
-    // user_prompt rewriting and no additionalContext should be present.
-    if (out !== null) {
-      expect(out.user_prompt).toBeUndefined();
-      expect(out.hookSpecificOutput).toBeUndefined();
-    }
+    // ambiguity-guard returns { continue: true } on every prompt, but `true` is
+    // the host default and carries no information, so the allowlist merge does
+    // not copy it. With no additionalContext either, there is nothing to send.
+    expect(out).toBeNull();
   });
 
   it('emits a single merged JSON object for an ordinary prompt', () => {
     const out = runDispatcher({ user_prompt: 'fix typo in readme' });
     expect(out).not.toBeNull();
-    // runtime-prompt always contributes user_prompt for non-empty input.
-    expect(typeof out.user_prompt).toBe('string');
-    expect(out.user_prompt.length).toBeGreaterThan(0);
+    // The runtime envelope now travels in the host field. `user_prompt` is a
+    // DISPATCHER-INTERNAL key and must not appear on stdout at all — the host
+    // strips it and logs `unrecognized keys (ignored)` to the debug file only,
+    // which is how it went unnoticed for six weeks
+    // (INCIDENT-2026-09-03-hook-payload-contract.md).
+    expect(out.user_prompt).toBeUndefined();
+    expect(out.message).toBeUndefined();
+    expect(typeof out.hookSpecificOutput.additionalContext).toBe('string');
+    expect(out.hookSpecificOutput.additionalContext.length).toBeGreaterThan(0);
   });
 
   // 호스트 2.1.259 스키마 형태 — 회귀 방지.
@@ -145,26 +148,32 @@ describe('_userprompt-dispatcher (integration)', () => {
       session_id: '9120048e-3385-4855-a35b-09c89e5dd684',
     });
     expect(out).not.toBeNull();
-    // 리라이터가 호스트 `prompt` 를 읽어야만 이 봉투가 만들어진다.
-    expect(out.user_prompt).toMatch(/CRITICAL RE-VERIFICATION MODE/);
+    // 리라이터가 호스트 `prompt` 를 읽어야만 이 봉투가 만들어진다. 재작성문은
+    // 이제 호스트가 읽는 필드로 나간다 — 최상위 `user_prompt` 는 버려지므로
+    // 그 자리에서 재검증 프로토콜을 확인하면 거짓 그린이 된다(설계 §2.1 A).
+    expect(out.user_prompt).toBeUndefined();
+    expect(out.hookSpecificOutput.additionalContext).toMatch(/CRITICAL RE-VERIFICATION MODE/);
   });
 
   it('rewrites !rv prompts via user-prompt-handler before parallel hooks see them', () => {
     const out = runDispatcher({ user_prompt: '!rv check the auth module' });
     expect(out).not.toBeNull();
-    // user-prompt-handler rewrote into the CRITICAL RE-VERIFICATION envelope.
-    expect(out.user_prompt).toMatch(/CRITICAL RE-VERIFICATION MODE/);
-    // runtime-prompt, in turn, prefixed/appended runtime envelope content.
-    // (It composed on top of the rewriter's output — confirms the ordering.)
+    // user-prompt-handler produced the CRITICAL RE-VERIFICATION protocol and it
+    // reached the host field. The internal `user_prompt` handoff that let the
+    // parallel hooks classify the rewritten text still happens — it just never
+    // reaches stdout (see the resilience suite for that half of the contract).
+    expect(out.hookSpecificOutput.additionalContext).toMatch(/CRITICAL RE-VERIFICATION MODE/);
+    expect(out.user_prompt).toBeUndefined();
   });
 
-  it('strips --no-team flag from the prompt', () => {
+  it('surfaces the --no-team opt-out as an instruction to the model', () => {
     const out = runDispatcher({ user_prompt: 'implement feature --no-team' });
     expect(out).not.toBeNull();
-    // user-prompt-handler stripped --no-team. runtime-prompt then rebuilt the
-    // user_prompt envelope, but the underlying prompt no longer contains
-    // --no-team.
-    expect(out.user_prompt).not.toMatch(/--no-team/);
+    // The rewriter still strips the flag from the INTERNAL payload (that branch
+    // is retained — design §8-2), but stripping never reached the model: the
+    // host always sends the user's own text. The opt-out is stated instead.
+    expect(out.hookSpecificOutput.additionalContext).toContain('[artibot:team opt-out]');
+    expect(out.user_prompt).toBeUndefined();
   });
 
   // 호스트 2.1.259 스키마 형태 — 회귀 방지.
@@ -180,15 +189,47 @@ describe('_userprompt-dispatcher (integration)', () => {
       session_id: '9120048e-3385-4855-a35b-09c89e5dd684',
     });
     expect(out).not.toBeNull();
-    // 리라이터는 플래그를 제거한다(디스패처 계약 — 유지).
-    expect(out.user_prompt).not.toMatch(/--no-team/);
-    // 그러나 옵트아웃은 살아 있어야 한다.
     const ctx = out.hookSpecificOutput?.additionalContext || '';
+    // 리라이터의 제거 분기는 유지된다(디스패처 계약 — 설계 §8-2). stdout 에서는
+    // `user_prompt` 가 사라졌으므로 제거 사실을 그 자리에서 볼 수 없다. 대신
+    // 그 분기가 실행됐다는 증거는 이 지시문이다 — 분기를 지우면 사라진다.
+    expect(out.user_prompt).toBeUndefined();
+    expect(ctx).toContain('[artibot:team opt-out]');
+    // 그리고 옵트아웃은 살아 있어야 한다.
     expect(ctx).not.toContain('[auto-team-suggested]');
   });
 
   // 대조군: 같은 프롬프트에서 플래그만 빼면 반드시 발화해야 한다.
   // 이게 없으면 위 케이스는 "그냥 아무것도 발화 안 함"으로도 통과해 버린다.
+  // KNOWN GAP, pinned as-is — NOT a passing behaviour.
+  //
+  // A payload carrying ONLY the dispatcher-internal `user_prompt` (no host
+  // `prompt`) loses the --no-team opt-out: the rewriter overwrites
+  // `payload.user_prompt` with the stripped copy, and `extractUserPromptFlagSurface`
+  // (hook-utils.js) then has no surviving copy of the original text to read.
+  // The control case above proves this prompt DOES fire auto-team, so the
+  // assertion below is measuring the loss, not an unrelated silence.
+  //
+  // LIVE-UNREACHABLE, which is why it is documented rather than fixed
+  // (design §2.2 정정 / §8-3, measured 2026-09-04): host 2.1.259 sends `prompt`,
+  // and a hook run standalone through its legacy main() never goes through the
+  // rewriter. Fixing it would require the dispatcher to keep a second internal
+  // copy of the original text — a new internal key, which is exactly the drift
+  // this migration removes. Recorded here so the gap cannot be mistaken for
+  // coverage; if a future change makes the opt-out survive, DELETE this test
+  // rather than inverting it, and say so.
+  it('KNOWN GAP: a user_prompt-only payload loses the --no-team opt-out (legacy, live-unreachable)', () => {
+    const out = runDispatcher({
+      user_prompt: '프론트와 백엔드 시스템을 마이그레이션하고 테스트도 추가해줘 --no-team',
+    });
+    expect(out).not.toBeNull();
+    const ctx = out.hookSpecificOutput?.additionalContext || '';
+    // The rewriter DID see the flag …
+    expect(ctx).toContain('[artibot:team opt-out]');
+    // … and auto-team fired anyway. This is the defect, stated.
+    expect(ctx).toContain('[auto-team-suggested]');
+  });
+
   it('control: the same prompt WITHOUT --no-team does fire auto-team', () => {
     const out = runDispatcher({
       hook_event_name: 'UserPromptSubmit',
@@ -255,14 +296,49 @@ describe('mergeHookResults (unit)', () => {
     expect(mergeHookResults(null, [{ status: 'fulfilled', value: null }])).toBeNull();
   });
 
-  it('preserves the rewriter user_prompt and message', async () => {
+  it('drops the rewriter user_prompt and message — they are not host keys', async () => {
     const { mergeHookResults } = await import('../../scripts/hooks/_userprompt-dispatcher.js');
     const merged = mergeHookResults(
       { user_prompt: 'rewritten', message: '[trigger] applied' },
       [],
     );
-    expect(merged.user_prompt).toBe('rewritten');
-    expect(merged.message).toBe('[trigger] applied');
+    // Both were always discarded by the host; now they are never emitted.
+    // Nothing else was produced, so there is nothing to send at all.
+    expect(merged).toBeNull();
+  });
+
+  it('copies allowlisted host keys through unchanged', async () => {
+    const { mergeHookResults, HOST_STDOUT_KEYS } = await import('../../scripts/hooks/_userprompt-dispatcher.js');
+    const merged = mergeHookResults(
+      { decision: 'block', reason: 'policy', systemMessage: 'heads up', user_prompt: 'internal' },
+      [],
+    );
+    // POSITIVE CONTROL for the allowlist: it must not be so aggressive that a
+    // legitimate host field is eaten. Every emitted key is on the list.
+    expect(merged).toEqual({ decision: 'block', reason: 'policy', systemMessage: 'heads up' });
+    for (const key of Object.keys(merged)) expect(HOST_STDOUT_KEYS).toContain(key);
+  });
+
+  it('elides continue:true but keeps continue:false', async () => {
+    const { mergeHookResults } = await import('../../scripts/hooks/_userprompt-dispatcher.js');
+    // `true` is the host default — ambiguity-guard returns it on every prompt,
+    // so emitting it would make an otherwise-empty envelope look meaningful.
+    expect(mergeHookResults({ continue: true }, [])).toBeNull();
+    expect(mergeHookResults({ continue: false, stopReason: 'halt' }, []))
+      .toEqual({ continue: false, stopReason: 'halt' });
+  });
+
+  it('legacyStdout:true restores the pre-allowlist copy-everything shape', async () => {
+    const { mergeHookResults } = await import('../../scripts/hooks/_userprompt-dispatcher.js');
+    const merged = mergeHookResults(
+      { user_prompt: 'rewritten', message: '[trigger] applied' },
+      [],
+      { legacyStdout: true },
+    );
+    // The config rollback (runtime.hooks.userPromptSubmit.legacyStdout). This
+    // shape is the BROKEN one — the host discards both keys — and the switch
+    // exists only to bisect a parallel-contributor regression.
+    expect(merged).toEqual({ user_prompt: 'rewritten', message: '[trigger] applied' });
   });
 
   it('concatenates additionalContext from every fulfilled contributor', async () => {

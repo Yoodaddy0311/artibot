@@ -52,6 +52,34 @@ describe('user-prompt-handler hook', () => {
     });
   });
 
+  // The two surfaces this hook writes to are NOT interchangeable:
+  // `user_prompt`/`message` are dispatcher-internal (the host discards them —
+  // 2.1.259 measured), `hookSpecificOutput.additionalContext` is what the model
+  // sees. Every branch that changes behaviour must reach the second one, or it
+  // changes nothing the user can observe.
+  describe('host channel (hookSpecificOutput.additionalContext)', () => {
+    it('states the --no-team opt-out as an instruction', () => {
+      const out = handleUserPromptSubmit({ user_prompt: 'implement feature --no-team' });
+      const ctx = out.hookSpecificOutput?.additionalContext ?? '';
+      expect(out.hookSpecificOutput?.hookEventName).toBe('UserPromptSubmit');
+      expect(ctx).toContain('[artibot:team opt-out]');
+      expect(ctx).toContain('do not spawn a team');
+    });
+
+    it('carries the full !rv protocol, not just a mention of it', () => {
+      const out = handleUserPromptSubmit({ user_prompt: '!rv check the auth module' });
+      const ctx = out.hookSpecificOutput?.additionalContext ?? '';
+      expect(ctx).toContain('CRITICAL RE-VERIFICATION MODE');
+      expect(ctx).toContain('CLAIM AUDIT');
+      expect(ctx).toContain('Additional context from user: check the auth module');
+    });
+
+    it('emits nothing on the host channel for an ordinary prompt', () => {
+      // Pass-through returns null outright — no empty envelope to merge.
+      expect(handleUserPromptSubmit({ user_prompt: 'build a dashboard component' })).toBeNull();
+    });
+  });
+
   describe('!rv re-verification trigger', () => {
     it('activates re-verification mode for "!rv"', () => {
       const out = handleUserPromptSubmit({ user_prompt: '!rv' });

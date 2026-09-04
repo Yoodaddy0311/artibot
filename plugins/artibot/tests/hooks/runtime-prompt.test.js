@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { copyFileSync, mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { handleUserPromptSubmit } from '../../scripts/hooks/runtime-prompt.js';
+import { buildAdditionalContext, handleUserPromptSubmit } from '../../scripts/hooks/runtime-prompt.js';
 
 /**
  * runtime-prompt hook — in-process contract test.
@@ -104,7 +104,28 @@ describe('runtime-prompt hook', () => {
 
     expect(output).not.toBeNull();
     expect(output.message).toContain('[runtime]');
+    // The rewritten text still flows through the pipeline (internal surface)…
     expect(output.user_prompt).toContain('CRITICAL RE-VERIFICATION MODE ACTIVATED.');
+    // …but this hook does NOT echo the prompt body into the host channel. The
+    // `!rv` protocol reaches the model from user-prompt-handler's own
+    // additionalContext (design §2.1 A), not from here.
+    const ctx = output.hookSpecificOutput?.additionalContext ?? '';
+    expect(ctx).not.toContain('CRITICAL RE-VERIFICATION MODE ACTIVATED.');
+  });
+
+  it('emits the runtime envelope on the host channel, without the prompt body', async () => {
+    const output = await handleUserPromptSubmit({
+      user_prompt: 'fix typo in readme',
+      event: 'UserPromptSubmit', cwd: sandboxRoot,
+    });
+
+    expect(output).not.toBeNull();
+    const ctx = output.hookSpecificOutput?.additionalContext ?? '';
+    // The routing verdict survives the move, as a directive rather than as the
+    // 'System N mode: … / Original request:' prompt wrapper the host ignores.
+    expect(ctx).toMatch(/^\[artibot:route system[12]\] /);
+    expect(ctx).not.toContain('Original request:');
+    expect(ctx).not.toContain('fix typo in readme');
   });
 
   it('rewrites a simple prompt through the Phase 1 runtime path', async () => {
@@ -152,5 +173,54 @@ describe('runtime-prompt hook', () => {
     expect(output.message).toContain('[runtime]');
     expect(output.message).toMatch(/route=SYSTEM2|SYSTEM2\s*\|\s*fallback/);
     expect(output.user_prompt).toContain('analyze security vulnerabilities');
+  });
+});
+/** 8,000 B — `ADDITIONAL_CONTEXT_MAX_BYTES`, module-private, so it is restated here. */
+const CAP_BYTES = 8000;
+
+describe('buildAdditionalContext — 8 KB cap', () => {
+  it('leaves an envelope under the cap byte-identical', () => {
+    const ctx = buildAdditionalContext(['[artibot:effort level=high]'], 'body');
+    expect(ctx).toBe('[artibot:effort level=high]\n\nbody');
+  });
+
+  it('truncates an oversized envelope to the cap', () => {
+    const ctx = buildAdditionalContext([], 'x'.repeat(CAP_BYTES * 2));
+    expect(Buffer.byteLength(ctx, 'utf-8')).toBeLessThanOrEqual(CAP_BYTES);
+    expect(ctx.length).toBeGreaterThan(0);
+  });
+
+  it('never cuts an astral character in half', () => {
+    // REGRESSION, measured 2026-09-04 (independent review). The cap walks the
+    // string 64 CODE UNITS at a time, but JS strings are UTF-16 and an emoji is
+    // two units — so the cut landed between a surrogate pair and left a lone
+    // high surrogate (0xd83d) as the final unit. `JSON.stringify` emits that
+    // happily, and the host then receives an ill-formed string.
+    //
+    // FIXTURE MUST REACH THE FAILURE REGION: the payload has to be astral AND
+    // long enough to actually trip the cap, and the pre-fix cut must land on an
+    // ODD unit offset. The trailing 'a' is what makes it odd — drop it, or swap
+    // the emoji for ASCII, and this test goes vacuous.
+    const body = '\u{1F680}'.repeat(2100) + 'a';
+    expect(body.length % 2, 'fixture must put the cut on an odd unit offset').toBe(1);
+
+    const ctx = buildAdditionalContext([], body);
+
+    // NECESSARY: the cap really fired, so the repair path was exercised.
+    expect(Buffer.byteLength(body, 'utf-8')).toBeGreaterThan(CAP_BYTES);
+    expect(Buffer.byteLength(ctx, 'utf-8')).toBeLessThanOrEqual(CAP_BYTES);
+
+    // The defect, stated three ways so a partial fix cannot pass.
+    expect(ctx.isWellFormed()).toBe(true);
+    expect(/[\uD800-\uDBFF]$/.test(ctx)).toBe(false);
+    // And it survives the JSON round-trip the dispatcher actually performs.
+    expect(JSON.parse(JSON.stringify(ctx))).toBe(ctx);
+  });
+
+  it('leaves a well-formed astral string alone when it fits', () => {
+    // NEGATIVE CONTROL: the repair must not shave a character off output that
+    // never needed cutting.
+    const body = '\u{1F680}'.repeat(10);
+    expect(buildAdditionalContext([], body)).toBe(body);
   });
 });

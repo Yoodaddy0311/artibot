@@ -396,6 +396,36 @@ function maskVolatile(s) {
     .replace(/teardown\(\d+ms\)/g, 'teardown(<masked>ms)');
 }
 
+/**
+ * Strip the ONE field this hook gained on purpose after the fixture was taken.
+ *
+ * 2026-09-04, DESIGN-UPS-additionalContext-migration.md: the runtime envelope
+ * moved to `hookSpecificOutput.additionalContext`, because the host discards a
+ * top-level `user_prompt` and always has (2.1.259 measured — six weeks of the
+ * effort/team directives reaching nothing, INCIDENT-2026-09-03-hook-payload-
+ * contract.md). The pre-wiring fixture predates that field by construction, so
+ * the byte comparison below would now fail on a change that is the point.
+ *
+ * THIS IS NOT A LOOSENING OF THE T-37 INVARIANT, and the test right after
+ * `maskVolatile`'s pair is what holds that line: it asserts the field is
+ * present in the CURRENT hook and ABSENT from the baseline, so this mask can
+ * only ever remove the L1 addition. Every other byte — which is what "the
+ * observability wiring is observe-only" actually means — is still compared
+ * exactly.
+ *
+ * The removed field is not unguarded: tests/firewall/ups-stdout-allowlist.test.js
+ * and the runtime-prompt-*-inject suites assert its contents.
+ *
+ * It is anchored to the end because JSON.stringify emits insertion order and
+ * `composePromptOutput` adds this key last.
+ *
+ * @param {string} s
+ * @returns {string}
+ */
+function maskIntentionalUpsField(s) {
+  return s.replace(/,"hookSpecificOutput":.*$/, '}');
+}
+
 describe('stdout is byte-identical to the pre-wiring hook', () => {
   const PAYLOADS = [
     { label: 'slash command', user_prompt: '/implement add oauth login', session_id: 'sess-bytes-1' },
@@ -432,6 +462,30 @@ describe('stdout is byte-identical to the pre-wiring hook', () => {
     expect(maskVolatile(a.stdout)).toBe(maskVolatile(b.stdout));
   });
 
+  it('the UPS-field mask removes exactly the intentional addition, nothing else', () => {
+    // POSITIVE CONTROL for `maskIntentionalUpsField`. Without this pair the
+    // mask could quietly absorb a real regression in the legacy stdout.
+    const payload = { user_prompt: '/implement add oauth login', session_id: 'sess-mask-1' };
+    const before = runHook(baselineHook, { ...payload, event: 'UserPromptSubmit', cwd: sandboxRoot });
+    const after = runHook(REAL_HOOK, { ...payload, event: 'UserPromptSubmit', cwd: sandboxRoot });
+
+    // NECESSARY: the current hook really does emit the field, the baseline
+    // really does not — so the mask has exactly one thing to do.
+    expect(after.stdout).toContain('"hookSpecificOutput"');
+    expect(before.stdout).not.toContain('"hookSpecificOutput"');
+
+    // SUFFICIENT and BOUNDED: masking removes that field and leaves valid JSON
+    // whose remaining keys are the legacy pair. If the mask ever swallowed more
+    // than the trailing field, this parse or these keys would change.
+    const masked = maskIntentionalUpsField(after.stdout.trim());
+    expect(() => JSON.parse(masked)).not.toThrow();
+    expect(Object.keys(JSON.parse(masked))).toEqual(Object.keys(JSON.parse(before.stdout.trim())));
+
+    // And it is a NO-OP on output that never had the field — so applying it to
+    // the baseline side cannot hide a baseline-only difference.
+    expect(maskIntentionalUpsField(before.stdout)).toBe(before.stdout);
+  });
+
   it.each(PAYLOADS)('$label — HEAD and current emit the same bytes', (payload) => {
     const { label: _label, ...hookData } = payload;
     const before = runHook(baselineHook, { ...hookData, event: 'UserPromptSubmit', cwd: sandboxRoot });
@@ -444,7 +498,10 @@ describe('stdout is byte-identical to the pre-wiring hook', () => {
     // Compare BYTES, not parsed JSON: key order and whitespace are part of what
     // the model receives, and a parsed comparison would hide a reordering.
     const beforeBytes = Buffer.from(maskVolatile(before.stdout), 'utf-8');
-    const afterBytes = Buffer.from(maskVolatile(after.stdout), 'utf-8');
+    const afterBytes = Buffer.from(
+      maskVolatile(maskIntentionalUpsField(after.stdout.trim())),
+      'utf-8',
+    );
     expect(afterBytes.equals(beforeBytes)).toBe(true);
 
     // Stop the mask from doing structural work: both sides must carry the SAME
@@ -460,6 +517,10 @@ describe('stdout is byte-identical to the pre-wiring hook', () => {
     for (const re of [/ckpt=[a-z0-9]+/g, /teardown\(\d+ms\)/g]) {
       expect(countOf(after.stdout, re)).toBe(countOf(before.stdout, re));
     }
+    // Same guard for the third mask: exactly one occurrence removed, and the
+    // baseline never had one.
+    expect((after.stdout.match(/"hookSpecificOutput"/g) || []).length).toBe(1);
+    expect((before.stdout.match(/"hookSpecificOutput"/g) || []).length).toBe(0);
   });
 
   it('the wiring did run during those comparisons (identity is not vacuous)', () => {

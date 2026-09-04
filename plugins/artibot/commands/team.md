@@ -71,7 +71,7 @@ effort 레벨은 **max / xhigh / high / medium / low** 다 (기본 `high`). `/te
 
 주의: 하드 캡이 아니라 권고다. 요청별 상한(`max_tokens`)과는 역할이 다르다.
 
-> **두 값이 팀원에게 닿는 경로는 프롬프트 디렉티브 하나뿐이다.** `Agent` 도구에는 effort·budget 파라미터가 **없다** — 아래 "Auto-Effort Pre-injection" 이 `[artibot:effort level=…][artibot:task-budget max_tokens=…]` 를 팀원 프롬프트 맨 앞에 붙이는 것이 유일한 실경로다(값의 출처는 `runtime/current-effort.json`·`runtime/current-task-budget.json`). 실측 근거는 `lib/cognitive/effort-policy.js:20-22`("HOW THIS MAPPING ACTUALLY REACHES THE MODEL" 주석, 2026-09-02 측정) — "플러그인에는 Messages API 호출자가 없고 `output_config.effort` 를 설정하는 곳도 없다". 이 자리에 있던 SDK `output_config` JSON 예시는 `Agent` 스폰에도 통하는 것처럼 읽혀 삭제했다(설계 §3.7 R7). SDK·API 를 직접 호출하는 경우의 파라미터 형태는 이 문서의 범위가 아니다 — 필요하면 공식 API 문서를 보라.
+> **두 값이 팀원에게 닿는 경로는 오케스트레이터(모델)가 쓰는 프롬프트 디렉티브뿐이다.** `Agent` 도구에는 effort·budget 파라미터가 **없다** — 아래 "Auto-Effort Pre-injection" 대로 오케스트레이터가 `[artibot:effort level=…][artibot:task-budget max_tokens=…]` 를 팀원 프롬프트 맨 앞에 **직접 써 넣는다**(값의 출처는 `runtime/current-effort.json`·`runtime/current-task-budget.json`; 파일이 없으면 기본값 xhigh/128000 이 쓰이므로 **설치본에 파일이 있어야 측정값이 반영된다**). 훅(`scripts/hooks/runtime-prompt.js`)은 이 값을 **리더 세션**에는 `UserPromptSubmit` 의 `hookSpecificOutput.additionalContext` 로 알릴 뿐이고, 팀원 프롬프트를 직접 만들지 않는다 — 호스트는 훅이 프롬프트를 치환하는 것을 허용하지 않는다(공식 hooks 문서 "UserPromptSubmit: can’t replace the prompt", 2.1.259 실측 `.artibot/guides/v5-design/PROBE-effort-directive-delivery.md`). 실측 근거는 `lib/cognitive/effort-policy.js:20-30`("HOW THIS MAPPING ACTUALLY REACHES THE MODEL" 주석, 2026-09-02 측정) — "플러그인에는 Messages API 호출자가 없고 `output_config.effort` 를 설정하는 곳도 없다". 이 자리에 있던 SDK `output_config` JSON 예시는 `Agent` 스폰에도 통하는 것처럼 읽혀 삭제했다(설계 §3.7 R7). SDK·API 를 직접 호출하는 경우의 파라미터 형태는 이 문서의 범위가 아니다 — 필요하면 공식 API 문서를 보라.
 
 ## Execution Flow
 

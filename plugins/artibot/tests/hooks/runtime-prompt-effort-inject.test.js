@@ -142,15 +142,20 @@ describe('runtime-prompt effort + task-budget prefix injection', () => {
     // (implement→xhigh) shifted ±1 by prompt complexity, so assert the
     // injection CONTRACT — a valid band + the budget matching that band —
     // rather than a fixed level that breaks whenever scoring changes.
-    const m = output.user_prompt.match(
+    // The directive must sit on the channel the HOST reads. `user_prompt` is
+    // dispatcher-internal and never reaches the model (2.1.259 measured), so
+    // asserting it there is the false green this migration exists to remove.
+    const ctx = output.hookSpecificOutput?.additionalContext;
+    const m = ctx.match(
       /^\[artibot:effort level=(low|medium|high|xhigh|max) command=implement\]\[artibot:task-budget max_tokens=(\d+)\]/,
     );
     expect(m).not.toBeNull();
     expect(Number(m[2])).toBe(BUDGET_BY_LEVEL[m[1]]);
-    // Prefix is followed by blank line, then the (possibly-prepared) prompt
-    // which must still carry the original request text somewhere.
-    expect(output.user_prompt).toMatch(/\[artibot:task-budget max_tokens=\d+\]\n\n/);
-    expect(output.user_prompt).toContain('/implement add oauth login');
+    // Directives first, then a blank line, then the envelope context.
+    expect(ctx).toMatch(/\[artibot:task-budget max_tokens=\d+\]\n\n/);
+    // The prompt itself must NOT come back — the host already sends it, and a
+    // second copy in the hook context is duplication the model has to reconcile.
+    expect(ctx).not.toContain('/implement add oauth login');
   });
 
   it('injects effort + task-budget prefix for /code-review (band/budget consistent)', async () => {
@@ -161,7 +166,7 @@ describe('runtime-prompt effort + task-budget prefix injection', () => {
     });
 
     expect(output).not.toBeNull();
-    const m = output.user_prompt.match(
+    const m = (output.hookSpecificOutput?.additionalContext ?? '').match(
       /^\[artibot:effort level=(low|medium|high|xhigh|max) command=code-review\]\[artibot:task-budget max_tokens=(\d+)\]/,
     );
     expect(m).not.toBeNull();
@@ -176,8 +181,7 @@ describe('runtime-prompt effort + task-budget prefix injection', () => {
     });
 
     expect(output).not.toBeNull();
-    expect(output.user_prompt).not.toMatch(/^\[artibot:effort/);
-    expect(output.user_prompt).toContain('fix typo in readme');
+    expect(output.hookSpecificOutput?.additionalContext).not.toMatch(/\[artibot:effort/);
   });
 
   it('respects runtime.effort.injectPrompt=false (opt-out)', async () => {
@@ -194,7 +198,9 @@ describe('runtime-prompt effort + task-budget prefix injection', () => {
       });
 
       expect(output).not.toBeNull();
-      expect(output.user_prompt).not.toMatch(/^\[artibot:effort/);
+      expect(output.hookSpecificOutput?.additionalContext).not.toMatch(/\[artibot:effort/);
+      // injectPrompt=false suppresses the DIRECTIVES, not the whole channel —
+      // the routing/memory/guardrail envelope still goes out.
       expect(output.user_prompt).toContain('/implement add oauth login');
     } finally {
       // Restore forced (injectPrompt:true) config so subsequent tests

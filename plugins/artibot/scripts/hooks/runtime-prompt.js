@@ -9,7 +9,15 @@
  *      `hookData.user_prompt` when the rewriter set it, else the host's own
  *      `hookData.prompt` (measured; see hook-utils.js)
  *   3. createArtibotAgent().preparePrompt() builds a runtime envelope
- *   4. the enriched prompt is returned to Claude Code via stdout
+ *   4. the runtime envelope (effort/team/hint directives, route hint, memory
+ *      context, guardrail notice) is returned as
+ *      hookSpecificOutput.additionalContext — the only UserPromptSubmit
+ *      channel the host reads. stdout carries no `user_prompt`: the host
+ *      never rewrites the prompt from a hook (2.1.259 measured, see
+ *      .artibot/guides/v5-design/PROBE-effort-directive-delivery.md). The
+ *      `user_prompt` field this hook still returns is an INTERNAL observation
+ *      surface for the dispatcher and the eval suite; the dispatcher's
+ *      HOST_STDOUT_KEYS allowlist keeps it off the wire.
  */
 
 import path from 'node:path';
@@ -696,12 +704,131 @@ async function resolveTaskBudgetDirective(effortMeta, pluginRoot, runtimeConfig)
   }
 }
 
+/** Byte cap for `additionalContext` (design §1.4-5, 8 KB under the 10 KB host spill). */
+const ADDITIONAL_CONTEXT_MAX_BYTES = 8000;
+
+/** `System N mode: <text>\nOriginal request:\n` — the router middleware's prompt wrapper. */
+const ROUTER_WRAPPER_RE = /^System ([12]) mode: ([^\n]*)\nOriginal request:\n/;
+
 /**
- * Compose the final user prompt and hook message. When `injectPrompt` is
- * disabled we return the base prompt untouched.
+ * Blocks the pipeline appends AFTER the prompt body, in the order the
+ * middlewares run. Used only as the recovery anchor when the prompt body is not
+ * byte-recoverable. Heads, not full text:
+ * `lib/runtime/middleware/memory.js#attachMemoryContextToPrompt` and
+ * `lib/runtime/middleware/guardrail.js` (`denied.length > 0` branch).
+ */
+const APPENDED_BLOCK_MARKERS = Object.freeze([
+  '\n\nRelevant memory context:',
+  '\n\n⚠️ Guardrail:',
+]);
+
+/**
+ * Turn the pipeline's rewritten prompt into hook CONTEXT.
+ *
+ * `lib/runtime/middleware/router.js:78-83` wraps the prompt as
+ * `System N mode: …\nOriginal request:\n<prompt>` and the memory/guardrail
+ * middlewares append their blocks after it. That shape assumed the hook could
+ * REPLACE the user's prompt. It cannot — the host always sends the prompt
+ * itself and puts hook output beside it as a separate message. So the
+ * `Original request:` framing is noise and the prompt body must not be echoed
+ * back (it would arrive twice).
+ *
+ * What survives: the routing verdict, as a one-line directive, plus every
+ * block the middlewares appended after the prompt.
+ *
+ * The pipeline's own `state.userPrompt` is NOT touched — `lib/runtime/
+ * evaluator.js` asserts `prompt-rewritten` against it, and that gate is
+ * upstream of this function.
+ *
+ * @param {string} basePrompt - `prepared.userPrompt` (the wrapped envelope).
+ * @param {string} originalPrompt - the text the pipeline received.
+ * @returns {string} Envelope context with the prompt body removed ('' if none).
+ */
+export function stripRouterWrapper(basePrompt, originalPrompt) {
+  const text = String(basePrompt ?? '');
+  const m = ROUTER_WRAPPER_RE.exec(text);
+  if (!m) {
+    // No wrapper => the router did not run (disabled, or a fallback envelope).
+    // Whatever is here is the user's own text, and echoing it back would
+    // duplicate what the host already sends. Emit nothing.
+    return '';
+  }
+  const routeLine = `[artibot:route system${m[1]}] ${m[2]}`;
+  const afterWrapper = text.slice(m[0].length);
+  // `preparePrompt` trims before the router sees it, so the wrapped body is the
+  // trimmed prompt; both forms are tried rather than assuming which one ran.
+  const candidates = [String(originalPrompt ?? ''), String(originalPrompt ?? '').trim()];
+  const body = candidates.find((c) => c.length > 0 && afterWrapper.startsWith(c));
+
+  let tail;
+  if (body !== undefined) {
+    tail = afterWrapper.slice(body.length);
+  } else {
+    // The body is not recoverable byte-for-byte, so anchor on the appended
+    // blocks instead of guessing where the prompt ends. Anything not matched is
+    // DROPPED — echoing prompt text back costs more than losing a block.
+    const marks = APPENDED_BLOCK_MARKERS
+      .map((mark) => afterWrapper.indexOf(mark))
+      .filter((i) => i >= 0);
+    tail = marks.length > 0 ? afterWrapper.slice(Math.min(...marks)) : '';
+  }
+  return `${routeLine}${tail}`.trimEnd();
+}
+
+/**
+ * Assemble `hookSpecificOutput.additionalContext`.
+ *
+ * Order is the delivery priority: directives first (they are what the model
+ * acts on), then the routing hint, then the appended context blocks.
+ *
+ * The 8 KB cap exists because the host spills a hook's stdout to a file and
+ * falls back to a truncated form past 10,000 B (`lnr=1e4`). HOW it truncates
+ * is UNVERIFIED (design §4.3-3), so the envelope is trimmed here — from the
+ * END, which drops the memory block first and keeps the directives, matching
+ * the design's truncation priority (E6 → E7 → E5 → directives last).
+ *
+ * @param {string[]} directives
+ * @param {string} envelopeContext
+ * @returns {string}
+ */
+export function buildAdditionalContext(directives, envelopeContext) {
+  const head = directives.filter((d) => typeof d === 'string' && d.length > 0).join('');
+  const parts = [head, String(envelopeContext || '')].filter((p) => p.length > 0);
+  const joined = parts.join('\n\n');
+  if (Buffer.byteLength(joined, 'utf-8') <= ADDITIONAL_CONTEXT_MAX_BYTES) return joined;
+  // Trim on a CODE-UNIT boundary, then re-check by bytes: cutting at a byte
+  // offset would split a multi-byte UTF-8 sequence outright.
+  let cut = joined;
+  while (cut.length > 0 && Buffer.byteLength(cut, 'utf-8') > ADDITIONAL_CONTEXT_MAX_BYTES) {
+    cut = cut.slice(0, Math.max(0, cut.length - 64));
+  }
+  // SURROGATE REPAIR. A code-unit boundary is not a character boundary: JS
+  // strings are UTF-16, so an astral character (emoji, CJK ext-B, math script)
+  // occupies TWO units and a cut between them leaves a lone high surrogate.
+  // Measured: '\u{1F680}'.repeat(2100) + 'a' ended on 0xd83d with
+  // isWellFormed() === false. That lone unit is what gets JSON.stringify'd onto
+  // stdout, so the host receives an ill-formed string — a defect the byte
+  // assertions above cannot see, because a lone surrogate still encodes to a
+  // 3-byte replacement and the size check passes.
+  if (/[\uD800-\uDBFF]$/.test(cut)) cut = cut.slice(0, -1);
+  return cut;
+}
+
+/**
+ * Compose the hook's output.
+ *
+ * Two surfaces, deliberately different:
+ *   - `hookSpecificOutput.additionalContext` is what the HOST reads and the
+ *     only thing that reaches the model.
+ *   - `user_prompt` / `message` are INTERNAL. The dispatcher's HOST_STDOUT_KEYS
+ *     allowlist strips them before stdout; they stay here because the eval
+ *     suite and the T-37 observability tests read the envelope off them.
+ *
+ * When `injectPrompt` is disabled we return the base prompt untouched and emit
+ * no directives, exactly as before.
  *
  * @param {object} params
- * @returns {{ user_prompt: string, message: string }}
+ * @returns {{ user_prompt: string, message: string, hookSpecificOutput?: object }}
  */
 export function composePromptOutput({ prepared, prompt, effortMeta, taskBudgetDirective, injectPrompt }) {
   const basePrompt = prepared.userPrompt ?? prompt;
@@ -720,8 +847,9 @@ export function composePromptOutput({ prepared, prompt, effortMeta, taskBudgetDi
   // /watch ingest command. Advisory only (the model surfaces it and waits); never
   // auto-fires. Built from the user text, so it's '' for non-YouTube prompts.
   const watchDirective = buildWatchDirective(basePrompt);
+  const directives = [teamDirective, effortDirective, taskBudgetDirective, recommendationDirective, watchDirective];
   const finalUserPrompt = injectPrompt
-    ? applyPromptPrefix(basePrompt, [teamDirective, effortDirective, taskBudgetDirective, recommendationDirective, watchDirective])
+    ? applyPromptPrefix(basePrompt, directives)
     : basePrompt;
 
   const baseMessage = prepared.message ?? '[runtime] prompt prepared';
@@ -729,7 +857,19 @@ export function composePromptOutput({ prepared, prompt, effortMeta, taskBudgetDi
     ? `${baseMessage} | cmd=/${effortMeta.command} effort=${effortMeta.effort}`
     : baseMessage;
 
-  return { user_prompt: finalUserPrompt, message: finalMessage };
+  const additionalContext = buildAdditionalContext(
+    injectPrompt ? directives : [],
+    stripRouterWrapper(basePrompt, prompt),
+  );
+
+  const output = { user_prompt: finalUserPrompt, message: finalMessage };
+  if (additionalContext.length > 0) {
+    output.hookSpecificOutput = {
+      hookEventName: 'UserPromptSubmit',
+      additionalContext,
+    };
+  }
+  return output;
 }
 
 /**

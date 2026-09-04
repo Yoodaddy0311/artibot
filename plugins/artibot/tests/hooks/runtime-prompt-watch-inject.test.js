@@ -61,6 +61,9 @@ describe('buildWatchDirective()', () => {
   });
 });
 
+/** See runtime-prompt-team-inject.test.js — the host reads only this field. */
+const ctxOf = (out) => out.hookSpecificOutput?.additionalContext ?? '';
+
 describe('composePromptOutput() — watch hint wiring', () => {
   it('prepends the watch hint when the prompt contains a YouTube link', () => {
     const out = composePromptOutput({
@@ -70,8 +73,9 @@ describe('composePromptOutput() — watch hint wiring', () => {
       taskBudgetDirective: '',
       injectPrompt: true,
     });
-    expect(out.user_prompt).toContain('[artibot:hint recommend=watch url=https://youtu.be/dQw4w9WgXcQ]');
-    expect(out.user_prompt).toMatch(/이 영상 요약해줘 https:\/\/youtu\.be\/dQw4w9WgXcQ$/);
+    expect(ctxOf(out)).toContain('[artibot:hint recommend=watch url=https://youtu.be/dQw4w9WgXcQ]');
+    // The prompt is not echoed back into the hook context (the host sends it).
+    expect(ctxOf(out)).not.toContain('이 영상 요약해줘');
   });
 
   it('coexists with an existing recommendation hint (both directives on the leading line)', () => {
@@ -85,10 +89,10 @@ describe('composePromptOutput() — watch hint wiring', () => {
       taskBudgetDirective: '',
       injectPrompt: true,
     });
-    expect(out.user_prompt).toContain('[artibot:hint recommend=workflow]');
-    expect(out.user_prompt).toContain('[artibot:hint recommend=watch url=https://youtu.be/dQw4w9WgXcQ]');
+    expect(ctxOf(out)).toContain('[artibot:hint recommend=workflow]');
+    expect(ctxOf(out)).toContain('[artibot:hint recommend=watch url=https://youtu.be/dQw4w9WgXcQ]');
     // watch hint follows the recommendation hint (appended last in the prefix array).
-    expect(out.user_prompt.indexOf('recommend=workflow')).toBeLessThan(out.user_prompt.indexOf('recommend=watch'));
+    expect(ctxOf(out).indexOf('recommend=workflow')).toBeLessThan(ctxOf(out).indexOf('recommend=watch'));
   });
 
   it('leaves a non-YouTube prompt byte-identical (no hint)', () => {
@@ -100,7 +104,7 @@ describe('composePromptOutput() — watch hint wiring', () => {
       injectPrompt: true,
     });
     expect(out.user_prompt).toBe('일반 질문');
-    expect(out.user_prompt).not.toContain('recommend=watch');
+    expect(ctxOf(out)).not.toContain('recommend=watch');
   });
 
   it('respects injectPrompt=false even when a YouTube link is present', () => {
@@ -112,6 +116,6 @@ describe('composePromptOutput() — watch hint wiring', () => {
       injectPrompt: false,
     });
     expect(out.user_prompt).toBe('https://youtu.be/dQw4w9WgXcQ');
-    expect(out.user_prompt).not.toContain('recommend=watch');
+    expect(ctxOf(out)).not.toContain('recommend=watch');
   });
 });
