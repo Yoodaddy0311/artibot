@@ -1,17 +1,39 @@
 /**
- * Decision Trail — AGO Track G3 Explainability Layer.
+ * Decision Trail — AGO Track G3 Explainability Layer. **FROZEN (D9, 2026-09-05).**
  *
- * Records autonomous decisions made by Artibot subsystems (cognitive router,
- * runtime prompt hook, auto-team, plain-language converter, user-profile
- * promotion, etc.) so that operators can later answer the question
- * "why did the agent do that?".
+ * Recorded autonomous decisions made by Artibot subsystems (cognitive router,
+ * runtime prompt hook, user-profile promotion, the `scripts/cron/` runners) so
+ * that operators could later answer "why did the agent do that?".
  *
- * Observational only. This module never blocks, overrides, or vetoes any
- * subsystem decision — all integration points treat it as best-effort.
+ * WHAT FROZEN MEANS HERE — design `DESIGN-TRAIL-migration-projectRoot.md` §2 C,
+ * owner rulings TR-1..3 (`ARTIBOT-5.0-DESIGN.md` 부록 0-2 후속(3)):
+ *   - `recordDecision` is a NO-OP unless `ago.decisionTrail.enabled` is
+ *     explicitly `true`. The default flipped from "on unless told off" to "off
+ *     unless told on" — a kill switch, not a deletion. Reads (`queryDecisions`,
+ *     `getDecisionStats`, `pruneDecisionTrail`) keep working on whatever file
+ *     exists, so the 972 entries in the dev repo and the 9 in the marketplace
+ *     cache stay readable. Nothing moves or deletes them (TR-3).
+ *   - No writer in `lib/` or `scripts/` calls `recordDecision` any more.
+ *     `lib/cognitive/router.js` and `scripts/hooks/runtime-prompt.js` dropped
+ *     their calls because the decisions store already records the same facts
+ *     (`routing-classified`, `topology-recommended`); `lib/core/user-profile.js`
+ *     and the four cron runners moved to that store's two new vocabularies
+ *     (`lib/observability/decision-events.js#recordSkillLevelChanged` /
+ *     `#recordSelfControlDecision`). `tests/firewall/trail-sandbox-required.
+ *     test.js` ratchets the writer list so a new caller goes red.
  *
- * Storage: `runtime/decision-trail.json` at the plugin root, rotating with
- * `retentionDays` (default 30). Sensitive values are redacted when
- * `redactSensitive: true` in `ago.decisionTrail` config.
+ * WHY, in one line each: the file lived under the PLUGIN root, which
+ * `claude plugin update` replaces, so every update reset it to zero; it was a
+ * single-file read-modify-write that lost 21 of 60 cross-process writes
+ * (measured 2026-08-28); and two of its four writers were already dual-writing
+ * the projectRoot store. Moving it would have moved the loss. Freezing it and
+ * finishing the dual-write is what §2 C chose over A/B.
+ *
+ * Storage (legacy): `runtime/decision-trail.json` at the plugin root, rotating
+ * with `retentionDays` (default 30). Sensitive values are redacted when
+ * `redactSensitive: true` in `ago.decisionTrail` config. `/doctor` Check 7
+ * reports the file as one informational "legacy (frozen)" row and never judges
+ * it.
  *
  * @module lib/core/decision-trail
  */
@@ -51,8 +73,11 @@ export function _resetDecisionTrailCache() {
 function resolveConfig() {
   if (cachedConfig) return cachedConfig;
 
+  // D9: OFF unless the config says `true`. An absent config, an absent key, or
+  // any non-`true` value all mean frozen. `tests/core/decision-trail.test.js`
+  // "frozen by default" pins the no-config case.
   const defaults = {
-    enabled: true,
+    enabled: false,
     path: DEFAULT_PATH,
     retentionDays: DEFAULT_RETENTION_DAYS,
     redactSensitive: true,
@@ -64,7 +89,7 @@ function resolveConfig() {
     const parsed = JSON.parse(raw);
     const trail = parsed?.ago?.decisionTrail ?? {};
     cachedConfig = {
-      enabled: trail.enabled !== false,
+      enabled: trail.enabled === true,
       path: typeof trail.path === 'string' ? trail.path : defaults.path,
       retentionDays: Number.isFinite(trail.retentionDays)
         ? Math.max(0, Math.floor(trail.retentionDays))
@@ -169,8 +194,11 @@ function generateId() {
 // ---------------------------------------------------------------------------
 
 /**
- * Record a decision made by any Artibot subsystem.
- * Appends to runtime/decision-trail.json. Silently no-ops when disabled.
+ * Record a decision made by any Artibot subsystem — FROZEN by default (D9).
+ * Appends to runtime/decision-trail.json only when `ago.decisionTrail.enabled`
+ * is explicitly `true`; otherwise returns null without touching the filesystem.
+ * No production caller remains (see the module header); the function stays for
+ * the opt-in kill-switch path and for the tests that pin it.
  *
  * @param {object} decision
  * @param {string} decision.subsystem   - e.g. 'cognitive-router' | 'runtime-prompt' | 'auto-team' | 'user-profile'

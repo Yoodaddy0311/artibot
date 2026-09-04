@@ -686,7 +686,7 @@ describe('commands/doctor.md gained Check 8 and Check 9', () => {
   it('offers a scope filter for each', () => {
     expect(CURRENT).toMatch(/^- `state`: Check 8 only/m);
     expect(CURRENT).toMatch(/^- `artifacts`: Check 9 only/m);
-    expect(CURRENT).toMatch(/^- \(no argument\): Run all 9 checks$/m);
+    expect(CURRENT).toMatch(/^- \(no argument\): Run all 10 checks$/m);
   });
 
   it('gained one output-format line per check', () => {
@@ -740,6 +740,13 @@ describe('commands/doctor.md gained Check 8 and Check 9', () => {
  * dc9a4c12 digests, which is what keeps this refresh auditable: a refresh that
  * moved all seven would prove nothing.
  *   66d45dd3e6cc4812 -> 68a73087845aa9cd
+ *
+ * Check 7 was re-frozen a SECOND time on 2026-09-05, for D9 — the decision-trail
+ * freeze (`DESIGN-TRAIL-migration-projectRoot.md` §2 C, owner rulings TR-1..3):
+ * the check now resolves ONE root (the project root), S6 is retired, the
+ * plugin-root trail is an informational row, and `cron-` files are counted
+ * apart from session files. Checks 1-6 still carry their dc9a4c12 digests.
+ *   68a73087845aa9cd -> f9cbd1a65ef3c2cc
  */
 const CHECK_1_7_SHA256 = Object.freeze({
   'Check 1': '68a7994da5db8345',
@@ -748,8 +755,8 @@ const CHECK_1_7_SHA256 = Object.freeze({
   'Check 4': 'b48ec269f024a6d3',
   'Check 5': '76b677614892ac3c',
   'Check 6': '889cb2c477eae694',
-  // Re-frozen 2026-09-03 (store path move). See the note above.
-  'Check 7': '68a73087845aa9cd',
+  // Re-frozen 2026-09-03 (store path move) and 2026-09-05 (D9). See the note above.
+  'Check 7': 'f9cbd1a65ef3c2cc',
 });
 
 // Truncated to 16 hex characters, the same shape `lib/core/skill-hash.js` uses
@@ -760,8 +767,8 @@ const sha = (s) => createHash('sha256').update(s).digest('hex').slice(0, 16);
 describe('Checks 1-7 were not touched', () => {
   const current = checkSections(CURRENT);
 
-  it('still carries exactly seven original sections plus the two new ones', () => {
-    expect([...current.keys()]).toHaveLength(9);
+  it('still carries exactly seven original sections plus the three new ones', () => {
+    expect([...current.keys()]).toHaveLength(10);
   });
 
   it.each([1, 2, 3, 4, 5, 6, 7])('keeps Check %i byte-identical to the frozen baseline', (n) => {
@@ -770,12 +777,21 @@ describe('Checks 1-7 were not touched', () => {
     expect(sha(current.get(key))).toBe(CHECK_1_7_SHA256[key]);
   });
 
-  it('keeps the seven existing output-format lines byte-identical', () => {
-    for (let n = 1; n <= 7; n += 1) {
+  it('keeps the six untouched output-format lines byte-identical', () => {
+    for (let n = 1; n <= 6; n += 1) {
       const line = HEAD.split('\n').find((l) => l.startsWith(`[check-${n}-icon]`));
       expect(line).toBeTypeOf('string');
       expect(CURRENT).toContain(line);
     }
+  });
+
+  it('re-worded the Check 7 output line for D9 (one root, frozen trail)', () => {
+    // Pinned as a literal, not against HEAD: the 2026-09-05 edit is deliberate
+    // and this is the one line of the seven that was allowed to move.
+    expect(CURRENT).toContain(
+      '[check-7-icon] Explainability: {n} session event lines (24h), {n} cron files, '
+      + 'trail legacy(frozen) {exists|absent}/{n}, last {timestamp}',
+    );
   });
 });
 

@@ -37,9 +37,19 @@
  * call time (`lib/cognitive/router.js`), and test files that touch a recording
  * subsystem sandbox the root via `tests/helpers/trail-sandbox.js`.
  * `tests/core/decision-trail-path-isolation.test.js` guards all three.
+ *
+ * ── D9 (2026-09-05): THE TRAIL IS FROZEN ─────────────────────────────────────
+ * `recordDecision` is a no-op unless `ago.decisionTrail.enabled` is explicitly
+ * `true`, and no module under lib/ or scripts/ calls it. The "integration
+ * touchpoints" below therefore assert the OPPOSITE of what they used to:
+ * `router.route()` writes nothing, and `user-profile.recordSignal()` reports a
+ * promotion through its `recordChange` port instead of the trail. `withSandbox`
+ * still writes `enabled: true` so the read/write contract of the module itself
+ * stays testable on the opt-in path; the "frozen by default" block covers the
+ * no-config and key-absent cases that production installs now sit in.
  */
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import fs from 'node:fs/promises';
 import fsSync from 'node:fs';
 import path from 'node:path';
@@ -336,35 +346,90 @@ describe('decision-trail', () => {
     });
   });
 
-  describe('integration touchpoints', () => {
-    it('records an entry when cognitive router.route() runs', async () => {
-      await withSandbox(async (mod) => {
-        router.resetRouter();
-        router.route('analyze security vulnerabilities in auth');
+  describe('frozen by default (D9)', () => {
+    /** A throwaway plugin root with a caller-chosen config, or none at all. */
+    async function withRoot(config, testFn) {
+      const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'artibot-trail-frozen-'));
+      if (config !== null) {
+        await fs.writeFile(path.join(tmpRoot, 'artibot.config.json'), JSON.stringify(config), 'utf-8');
+      }
+      process.env.CLAUDE_PLUGIN_ROOT = tmpRoot;
+      trail._resetDecisionTrailCache();
+      try {
+        await testFn(tmpRoot);
+      } finally {
+        restorePluginRoot();
+        trail._resetDecisionTrailCache();
+        await fs.rm(tmpRoot, { recursive: true, force: true });
+      }
+    }
+    const trailFile = (root) => path.join(root, 'runtime', 'decision-trail.json');
 
-        // router uses Promise-then chains — under full-suite worker
-        // saturation a fixed 60ms wait can race the microtask queue.
-        // Poll until at least one cognitive-router entry lands instead of
-        // sleeping a fixed duration.
-        await vi.waitFor(
-          async () => {
-            const entries = await mod.queryDecisions({ subsystem: 'cognitive-router' });
-            expect(entries.length).toBeGreaterThanOrEqual(1);
-            expect(entries[0].action).toBe('classified');
-            expect(entries[0].outputs).toHaveProperty('system');
-          },
-          { timeout: 2000, interval: 20 },
-        );
+    it('writes nothing when no config exists under the plugin root', async () => {
+      await withRoot(null, async (root) => {
+        expect(await trail.recordDecision({ subsystem: 's', action: 'a' })).toBeNull();
+        expect(fsSync.existsSync(trailFile(root))).toBe(false);
       });
     });
 
-    it('records skill-level change when user-profile promotes', async () => {
+    it('writes nothing when the config omits the key', async () => {
+      await withRoot({ ago: {} }, async (root) => {
+        expect(await trail.recordDecision({ subsystem: 's', action: 'a' })).toBeNull();
+        expect(fsSync.existsSync(trailFile(root))).toBe(false);
+      });
+    });
+
+    it('treats a truthy non-boolean as frozen — only the literal true opens it', async () => {
+      await withRoot({ ago: { decisionTrail: { enabled: 'yes' } } }, async (root) => {
+        expect(await trail.recordDecision({ subsystem: 's', action: 'a' })).toBeNull();
+        expect(fsSync.existsSync(trailFile(root))).toBe(false);
+      });
+    });
+
+    it('writes when enabled is explicitly true (the opt-in path)', async () => {
+      await withSandbox(async (mod, root) => {
+        expect(await mod.recordDecision({ subsystem: 's', action: 'a' })).not.toBeNull();
+        expect(fsSync.existsSync(trailFile(root))).toBe(true);
+      });
+    });
+
+    it('still reads a pre-existing trail while frozen (TR-3: entries stay readable)', async () => {
+      await withRoot({ ago: { decisionTrail: { enabled: false } } }, async (root) => {
+        fsSync.mkdirSync(path.dirname(trailFile(root)), { recursive: true });
+        fsSync.writeFileSync(trailFile(root), JSON.stringify({
+          entries: [{ id: 'legacy-1', timestamp: new Date().toISOString(), subsystem: 'legacy', action: 'seed' }],
+          metadata: { totalAppended: 1 },
+        }), 'utf-8');
+        const entries = await trail.queryDecisions({ subsystem: 'legacy' });
+        expect(entries.map((e) => e.id)).toEqual(['legacy-1']);
+        const stats = await trail.getDecisionStats();
+        expect(stats.totalDecisions).toBe(1);
+        expect(stats.bySubsystem.legacy).toBe(1);
+        // And the read did not turn into a write.
+        expect(await trail.recordDecision({ subsystem: 's', action: 'a' })).toBeNull();
+        expect(JSON.parse(fsSync.readFileSync(trailFile(root), 'utf-8')).entries).toHaveLength(1);
+      });
+    });
+  });
+
+  describe('integration touchpoints (D9 — the writers left the trail)', () => {
+    it('cognitive router.route() no longer writes the trail, even with the trail enabled', async () => {
+      await withSandbox(async (mod, root) => {
+        router.resetRouter();
+        router.route('analyze security vulnerabilities in auth');
+        // The old write was a fire-and-forget `.then()` chain; give the event
+        // loop several turns so a regression would have had time to land.
+        for (let i = 0; i < 5; i += 1) await new Promise((r) => { setTimeout(r, 10); });
+        expect(fsSync.existsSync(path.join(root, 'runtime', 'decision-trail.json'))).toBe(false);
+        expect(await mod.queryDecisions({ subsystem: 'cognitive-router' })).toEqual([]);
+      });
+    });
+
+    it('user-profile promotion reports through the recordChange port, not the trail', async () => {
       await withSandbox(async (mod, root) => {
         profile._resetPathCache();
-        const profilePath = path.join(root, 'user-profile.json');
-        profile.configureProfilePath(profilePath);
-
-        // Feed 10+ slash-command jargon signals to trigger pro promotion
+        profile.configureProfilePath(path.join(root, 'user-profile.json'));
+        const changes = [];
         const jargon = ['api', 'async', 'regex', 'schema', 'docker', 'webhook',
           'endpoint', 'middleware', 'typescript', 'k8s', 'mock'];
         for (let i = 0; i < jargon.length; i++) {
@@ -372,13 +437,15 @@ describe('decision-trail', () => {
             type: 'slash-command',
             value: `implement ${jargon[i]}`,
             timestamp: Date.now(),
-          });
+          }, { recordChange: (change) => { changes.push(change); } });
         }
-
-        const entries = await mod.queryDecisions({ subsystem: 'user-profile' });
-        expect(entries.length).toBeGreaterThanOrEqual(1);
-        expect(entries[0].action).toBe('skill-level-changed');
-        expect(entries[0].outputs.to).toBe('pro');
+        expect(changes).toHaveLength(1);
+        expect(changes[0]).toMatchObject({ from: 'novice', to: 'pro' });
+        expect(changes[0].signals).toBeGreaterThanOrEqual(10);
+        expect(changes[0].evidence.some((e) => e.startsWith('slash-ratio='))).toBe(true);
+        // The trail stayed untouched even though this sandbox has it enabled.
+        expect(fsSync.existsSync(path.join(root, 'runtime', 'decision-trail.json'))).toBe(false);
+        expect(await mod.queryDecisions({ subsystem: 'user-profile' })).toEqual([]);
       });
     });
   });

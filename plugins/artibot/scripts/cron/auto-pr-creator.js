@@ -18,7 +18,9 @@
  *   - `gh pr merge` is NEVER invoked. Pushes to `main`/`master` are blocked.
  *   - Kill switch trips after 3 critical failures in 24h.
  *   - First 5 runs are observe-only (First-Run Guard).
- *   - Every attempt is written to the Decision Trail.
+ *   - Every attempt is recorded in the projectRoot decisions store
+ *     (`lib/observability/decision-events.js#recordSelfControlDecision`, D9 —
+ *     the plugin-root decision trail is frozen).
  *
  * Usage:
  *   node scripts/cron/auto-pr-creator.js
@@ -32,7 +34,7 @@ import { spawn } from 'node:child_process';
 
 import { ensureDir, readJsonFile, writeJsonFile } from '../../lib/core/file.js';
 import { getPluginRoot } from '../../lib/core/platform.js';
-import { recordDecision } from '../../lib/core/decision-trail.js';
+import { cronRunId, recordSelfControlDecision } from '../../lib/observability/decision-events.js';
 import { resolveSelfControlGates } from '../../lib/learning/self-control-gates.js';
 import { isMainEntry } from '../hooks/_main-entry.js';
 
@@ -242,8 +244,8 @@ async function recordAutoPrFailure(error, config, opts = {}) {
  * @param {object} args
  * @returns {Promise<{status: 'rejected', reason: string}>}
  */
-async function rejectWith({ reason, category, extra }) {
-  await recordDecision({
+async function rejectWith({ reason, category, extra, trail }) {
+  await trail({
     subsystem: 'auto-pr-creator',
     action: 'rejected',
     reason: extra ? `${reason}: ${extra}` : reason,
@@ -257,27 +259,30 @@ async function rejectWith({ reason, category, extra }) {
  *
  * @returns {Promise<{ok: true, plan: object, cooldown: object} | {ok: false, result: object}>}
  */
-async function preflightAutoPR({ config, pluginRoot, category, now }) {
+async function preflightAutoPR({ config, pluginRoot, category, now, trail }) {
   const gate = checkGates(config);
   if (!gate.open) {
-    return { ok: false, result: await rejectWith({ reason: 'gate-closed', category, extra: gate.reason }) };
+    return {
+      ok: false,
+      result: await rejectWith({ reason: 'gate-closed', category, extra: gate.reason, trail }),
+    };
   }
 
   const gates = await resolveSelfControlGates('auto-pr', config, {
     pluginRoot, configKey: 'autoPR',
   });
   if (!gates.proceed && gates.reason === 'kill-switch tripped') {
-    return { ok: false, result: await rejectWith({ reason: 'kill-switch-tripped', category }) };
+    return { ok: false, result: await rejectWith({ reason: 'kill-switch-tripped', category, trail }) };
   }
   // Opt-out already covered by checkGates; gates may also flag observeOnly.
 
   if (!isCategoryAllowed(config, category)) {
-    return { ok: false, result: await rejectWith({ reason: 'category-not-allowed', category }) };
+    return { ok: false, result: await rejectWith({ reason: 'category-not-allowed', category, trail }) };
   }
 
   const cooldown = await checkCooldown(pluginRoot, now);
   if (!cooldown.allowed) {
-    return { ok: false, result: await rejectWith({ reason: 'cooldown', category }) };
+    return { ok: false, result: await rejectWith({ reason: 'cooldown', category, trail }) };
   }
 
   const plan = buildFixPlan(category, now);
@@ -294,7 +299,9 @@ async function preflightAutoPR({ config, pluginRoot, category, now }) {
  *
  * @returns {Promise<object>}
  */
-async function pushAndCreatePR({ plan, pluginRoot, runImpl, config, now, cooldownHistory, category }) {
+async function pushAndCreatePR({
+  plan, pluginRoot, runImpl, config, now, cooldownHistory, category, trail,
+}) {
   const cwd = pluginRoot;
   await runImpl('git', ['checkout', '-b', plan.branch], { cwd });
   await runImpl('git', ['commit', '--allow-empty', '-m', plan.title], { cwd });
@@ -313,7 +320,7 @@ async function pushAndCreatePR({ plan, pluginRoot, runImpl, config, now, cooldow
 
   const urlMatch = /https?:\/\/\S+/.exec(prRes.stdout || '');
   const prUrl = urlMatch ? urlMatch[0] : null;
-  await recordDecision({
+  await trail({
     subsystem: 'auto-pr-creator',
     action: prRes.code === 0 ? 'created' : 'failed',
     inputs: { category },
@@ -336,19 +343,27 @@ async function pushAndCreatePR({ plan, pluginRoot, runImpl, config, now, cooldow
  * @param {Date} [options.now]
  * @param {NodeJS.ProcessEnv} [options.env]
  * @param {Function} [options.runImpl] - injected runCommand for tests
+ * @param {string|null} [options.runId] - decisions-store run id (`cronRunId`);
+ *   the CLI entry mints one. Null → the default `trail` counts `skipped` and
+ *   writes nothing (D9, no session no file).
+ * @param {Function} [options.trail] - `(decision) => void`; defaults to
+ *   `recordSelfControlDecision` bound to `runId` and `pluginRoot`.
  * @returns {Promise<{status: string, reason?: string, prUrl?: string, branch?: string}>}
  */
 export async function createAutoPR(options) {
   const now = options.now || new Date();
   const runImpl = options.runImpl || runCommand;
   const { config, pluginRoot, category } = options;
+  const trail = typeof options.trail === 'function'
+    ? options.trail
+    : (decision) => recordSelfControlDecision(options.runId ?? null, decision, { cwd: pluginRoot });
 
-  const pre = await preflightAutoPR({ config, pluginRoot, category, now });
+  const pre = await preflightAutoPR({ config, pluginRoot, category, now, trail });
   if (!pre.ok) return pre.result;
   const { plan, cooldown, observeOnly } = pre;
 
   if (options.dryRun) {
-    await recordDecision({
+    await trail({
       subsystem: 'auto-pr-creator',
       action: 'dry-run',
       inputs: { category },
@@ -358,7 +373,7 @@ export async function createAutoPR(options) {
   }
 
   if (observeOnly) {
-    await recordDecision({
+    await trail({
       subsystem: 'auto-pr-creator',
       action: 'would-create',
       reason: 'first-run observe-only',
@@ -370,7 +385,7 @@ export async function createAutoPR(options) {
 
   return pushAndCreatePR({
     plan, pluginRoot, runImpl, config, now,
-    cooldownHistory: cooldown.history, category,
+    cooldownHistory: cooldown.history, category, trail,
   });
 }
 
@@ -400,6 +415,7 @@ async function main() {
     pluginRoot,
     category: args.category,
     dryRun: args.dryRun,
+    runId: cronRunId('auto-pr-creator'),
   });
 
   const line = `auto-pr: ${result.status}${result.reason ? ` (${result.reason})` : ''}`;

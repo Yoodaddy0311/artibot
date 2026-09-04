@@ -1,12 +1,15 @@
 /**
- * `/doctor` Check 8 and Check 9 — the judgement half, with no I/O of its own.
+ * `/doctor` Checks 8, 9 and 10 — the judgement half, with no I/O of its own.
  *
  * Check 8 asks whether the three state artefacts still agree: does
  * `reduce(journal)` still render the `state.yaml` projection, does the ledger
  * still contain every `state_version` the store committed, and is the version
  * counter itself unbroken (design §3.6). Check 9 asks whether the
  * mission artifacts under `.artibot/missions/<id>/` are healthy, against the
- * ten-item list this file treats as canonical (Hardening §32).
+ * ten-item list this file treats as canonical (Hardening §32). Check 10 asks
+ * whether the route receipt ↔ bind correlation left residue: unbound PreToolUse
+ * receipts on one side, `skipped:unbound` spawns on the other
+ * (`ROUTE-RECEIPT-PRETOOLUSE-DESIGN.md` §2.3 invariant 3).
  *
  * ── Why this module reads nothing ──────────────────────────────────────────
  * Every input arrives as an argument. The caller — the `/doctor` command — is
@@ -793,4 +796,93 @@ export function checkArtifactHealth(input = {}) {
   const statuses = Object.values(items).map((i) => i.status)
     .concat(stale.extra.map((f) => f.status));
   return { status: worstOf(statuses), items, findings: stale.extra };
+}
+
+/**
+ * A non-negative integer, or null when the caller supplied anything else.
+ * @param {unknown} v
+ * @returns {number|null}
+ */
+function countOrNull(v) {
+  return Number.isInteger(v) && v >= 0 ? v : null;
+}
+
+/**
+ * Check 10 — Route Bind Residue (design §2.3 invariant 3, and invariant 1).
+ *
+ * Two counts from two files, judged side by side:
+ *   - `unboundReceipts` — `route.selected` receipts in the central ledger that
+ *     no `route.bound` line names (`lib/replay/route-bind.js#joinRouteBinds`,
+ *     `unbound_receipts.length`).
+ *   - `unboundSpawns` — distinct `agentId`s whose spawn record carries
+ *     `route_ledger: 'skipped:unbound'` (`route-bind.js#countUnboundSpawns`).
+ * The design's rule: both non-zero AND different means the correlation went
+ * wrong somewhere, because every unbound receipt should have produced exactly
+ * one unbound spawn and vice versa. Equal non-zero counts are NOT a pass on
+ * correctness — see "cannot see" — they are the absence of that one signal.
+ *
+ * Both counts are REQUIRED. A residue verdict reached from one file is a
+ * comparison with nothing on the other side, so a missing count is
+ * `unmeasured`, never a narrower pass. Zero-on-both is a real pass only when
+ * both files were read; a caller that could not open the spawn ledger must pass
+ * `undefined`, not `0`.
+ *
+ * `conflicts` is the join's invariant-1 list (a `tool_use_id` bound twice, an
+ * `agent_id` bound twice, a receipt written twice). The bind writer enforces
+ * 1:1 by construction, so one conflict is a writer guarantee broken and is
+ * `fail`, the same severity Check 8 gives a broken superset invariant. It is
+ * optional: absent means NOT COUNTED and is reported as such under `counts`,
+ * never folded into the verdict.
+ *
+ * WHAT THIS CANNOT SEE: whether a bound pair is the RIGHT pair (a FIFO bind to
+ * the wrong receipt reads as bound); asymmetries that are legitimate by design
+ * (SDK/scheduler spawns have no receipt; cancelled tool calls have no spawn;
+ * receipts past the bind side's 10-minute window or 128 KB tail); and whether
+ * the two files cover the same time span — they rotate independently.
+ *
+ * @param {object} input - Check inputs.
+ * @param {number} [input.unboundReceipts] - from the ledger join.
+ * @param {number} [input.unboundSpawns] - from the spawn ledger.
+ * @param {object[]} [input.conflicts] - `joinRouteBinds().conflicts`; absent = not counted.
+ * @returns {{status: string, findings: object[], counts: {unboundReceipts: number|null,
+ *   unboundSpawns: number|null, conflicts: number|null}}} The verdict and counts.
+ */
+export function checkRouteBindResidue(input = {}) {
+  const src = input ?? {};
+  const unboundReceipts = countOrNull(src.unboundReceipts);
+  const unboundSpawns = countOrNull(src.unboundSpawns);
+  const conflicts = Array.isArray(src.conflicts) ? src.conflicts : null;
+  const counts = {
+    unboundReceipts,
+    unboundSpawns,
+    conflicts: conflicts === null ? null : conflicts.length,
+  };
+  const absent = [];
+  if (unboundReceipts === null) absent.push('unboundReceipts (ledger join)');
+  if (unboundSpawns === null) absent.push('unboundSpawns (spawn ledger)');
+  if (absent.length > 0) {
+    return {
+      status: CheckStatus.UNMEASURED,
+      findings: [{
+        code: 'residue-inputs-absent', status: CheckStatus.UNMEASURED, absent,
+        detail: `not supplied: ${absent.join(', ')} — residue was not compared, not compared and found equal`,
+      }],
+      counts,
+    };
+  }
+  const findings = [];
+  if (conflicts !== null && conflicts.length > 0) {
+    findings.push({
+      code: 'route-bind-conflict', status: CheckStatus.FAIL, conflicts,
+      detail: `${conflicts.length} invariant-1 violation(s): a tool_use_id or agent_id bound more than once — the bind writer's 1:1 guarantee broke`,
+    });
+  }
+  if (unboundReceipts > 0 && unboundSpawns > 0 && unboundReceipts !== unboundSpawns) {
+    findings.push({
+      code: 'route-bind-residue-mismatch', status: CheckStatus.WARN,
+      unboundReceipts, unboundSpawns,
+      detail: `${unboundReceipts} unbound receipt(s) vs ${unboundSpawns} unbound spawn(s) — the correlation missed somewhere (design §2.3 invariant 3)`,
+    });
+  }
+  return { status: worstOf(findings.map((f) => f.status)), findings, counts };
 }

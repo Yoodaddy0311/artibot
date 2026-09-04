@@ -33,7 +33,7 @@ import { fileURLToPath } from 'node:url';
 
 import { readJsonFile } from '../../lib/core/file.js';
 import { getPluginRoot } from '../../lib/core/platform.js';
-import { recordDecision } from '../../lib/core/decision-trail.js';
+import { cronRunId, recordSelfControlDecision } from '../../lib/observability/decision-events.js';
 import { classifyDiff } from '../../lib/learning/risk-classifier.js';
 import {
   rollback,
@@ -184,13 +184,19 @@ async function finalizeCleanup({ guard, cwd, snap, diff, classification, dryRun,
 
 /**
  * @param {object} deps
+ * @param {string|null} [deps.runId] - decisions-store run id (`cronRunId`); the
+ *   CLI entry mints one, tests inject `trail` instead. Null → the default
+ *   `trail` counts `skipped` and writes nothing (D9, no session no file).
+ * @param {Function} [deps.trail] - `(decision) => void`; defaults to
+ *   `recordSelfControlDecision` bound to `runId` and this run's `cwd`.
  */
 export async function runAutoCleanup(deps) {
   const {
     cwd, config, dryRun = false, logger = console,
     runner = run, gitOps = { collectDiff },
     guard = { snapshot, rollback },
-    classify = classifyDiff, trail = recordDecision,
+    classify = classifyDiff, runId = null,
+    trail = (decision) => recordSelfControlDecision(runId, decision, { cwd }),
     killSwitch, firstRunGuard,
   } = deps;
 
@@ -250,7 +256,9 @@ async function main() {
     process.exit(0);
   }
   try {
-    const result = await runAutoCleanup({ cwd: pluginRoot, config, dryRun });
+    const result = await runAutoCleanup({
+      cwd: pluginRoot, config, dryRun, runId: cronRunId('auto-cleanup'),
+    });
     process.stdout.write(`auto-cleanup: ${JSON.stringify(result)}\n`);
   } finally {
     releaseLock(pluginRoot);
