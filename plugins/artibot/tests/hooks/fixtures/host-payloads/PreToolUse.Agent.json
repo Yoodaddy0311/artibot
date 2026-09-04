@@ -1,0 +1,93 @@
+{
+  "_note": "FROZEN FIXTURE — live host payload KEY NAMES only. Contains NO values: no prompts, no paths, no ids, no cwd, no session_id, no transcript_path. Captured by a dev-only probe (scripts/dev/probe-hook-keys.js) registered through a temporary `claude --settings <scratch file>`; ~/.claude/settings.json and hooks/hooks.json were not modified. Do not regenerate casually — a differing key set on a newer host is the signal INCIDENT §6.1 ④ wants to see as a diff.",
+  "fixture_format": "INCIDENT-2026-09-03-hook-payload-contract.md §6.1 ① (live-probe variant, see ROUTE-RECEIPT-PRETOOLUSE-DESIGN.md §1.2)",
+  "host_version": "2.1.260",
+  "host_version_source": "probe session transcripts (.jsonl) field \"version\" — 3/3 probe sessions agree; `claude --version` on the same host also prints 2.1.260",
+  "design_assumed_host_version": "2.1.259",
+  "host_version_note": "One patch newer than the version the design excerpt (§1.1) was measured on. Key set below is the 2.1.260 fact.",
+  "binary_sha256": "not-applicable (live probe, not binary-anchor extraction)",
+  "raw": "not-applicable (live probe records key names only; nothing to store verbatim)",
+  "extraction_method": "live probe via --settings, key names only",
+  "extraction_command": "cd <worktree> && claude -p --settings <scratch>/probe-settings.json --output-format json --max-turns 8 < scenario-<a|b|c>.txt   # hook command in probe-settings.json = node <worktree>/plugins/artibot/scripts/dev/probe-hook-keys.js; PreToolUse matcher \"Agent\", SubagentStart matcher \"*\"",
+  "extracted_at_kst": "2026-09-04 12:32–12:40",
+  "extracted_by": "split run split-9d6dc2, limb l2-probe (D0 probe, code change 0)",
+  "registration": {
+    "where": "temporary settings JSON in the session scratchpad, passed with --settings; user settings untouched (no revert needed)",
+    "PreToolUse_matcher": "Agent",
+    "SubagentStart_matcher": "*",
+    "matcher_syntax": "plain string \"Agent\" fired on the first attempt; the hooks.json expression form (tool == \"Agent\") was therefore not tried",
+    "settings_merge_behaviour": "MERGED, not replaced — the plugin's own hooks.json SubagentStart handler wrote .artibot/ledger/spawns.ndjson during the probe sessions (mtime 12:32 KST), so --settings hooks run alongside plugin hooks",
+    "probe_execution": "headless (claude -p) from the limb session's Bash tool, cwd = worktree root; all 3 sessions returned subtype success, is_error false"
+  },
+  "scenarios": [
+    {
+      "id": "a-single",
+      "description": "one Agent(...) call, no name",
+      "spawns": 1,
+      "named": false,
+      "pretooluse_rows": 1,
+      "subagentstart_rows": 1,
+      "tool_input_keys": ["description", "prompt", "run_in_background", "subagent_type"],
+      "captured_at_kst": "12:32:28–12:32:32"
+    },
+    {
+      "id": "b-named-parallel-3",
+      "description": "three Agent(...) calls in one assistant turn, each with a name (team-style spawn)",
+      "spawns": 3,
+      "named": true,
+      "pretooluse_rows": 3,
+      "subagentstart_rows": 3,
+      "tool_input_keys": ["description", "name", "prompt", "run_in_background", "subagent_type"],
+      "captured_at_kst": "12:35:52–12:35:59"
+    },
+    {
+      "id": "c-unnamed-parallel-2",
+      "description": "two Agent(...) calls in one assistant turn, no name",
+      "spawns": 2,
+      "named": false,
+      "pretooluse_rows": 2,
+      "subagentstart_rows": 2,
+      "tool_input_keys": ["description", "prompt", "run_in_background", "subagent_type"],
+      "captured_at_kst": "12:39:34–12:39:45"
+    }
+  ],
+  "totals": { "spawns": 6, "pretooluse_rows": 6, "subagentstart_rows": 6, "tool_input_object_rows": 6, "tool_input_non_object_rows": 0 },
+  "PreToolUse": {
+    "tool_name": "Agent",
+    "top_level_keys": ["cwd", "effort", "hook_event_name", "permission_mode", "prompt_id", "session_id", "tool_input", "tool_name", "tool_use_id", "transcript_path"],
+    "tool_input_type": "object (6/6 rows)",
+    "tool_input_keys_always": ["description", "prompt", "run_in_background", "subagent_type"],
+    "tool_input_keys_conditional": {
+      "name": "present only when the caller passed a name (scenario b, 3/3 rows); absent in a and c",
+      "model": "NOT OBSERVED — no scenario passed a model argument, so presence when passed is unmeasured (Agent tool_input appears to carry only the arguments the caller supplied)"
+    },
+    "tool_input_keys_union": ["description", "name", "prompt", "run_in_background", "subagent_type"],
+    "has_prompt_id": true,
+    "has_prompt_id_rows": "6/6"
+  },
+  "SubagentStart": {
+    "top_level_keys": ["agent_id", "agent_type", "cwd", "hook_event_name", "prompt_id", "session_id", "transcript_path"],
+    "has_prompt_id": true,
+    "has_prompt_id_rows": "6/6",
+    "note": "no tool_use_id and no text on SubagentStart — consistent with design §0"
+  },
+  "required_keys_for_D1": ["prompt", "description", "subagent_type"],
+  "verdict": "D1-go",
+  "missing": [],
+  "observations": [
+    "PreToolUse fires for the Agent tool, including named parallel (team-style) spawns: 3 spawns → 3 PreToolUse rows (design §7 unknown #2 closed for this host version).",
+    "Every PreToolUse and SubagentStart row carried prompt_id (12/12) — design's 1st-tier correlation key exists on this host.",
+    "PreToolUse carries tool_use_id; SubagentStart carries agent_id. No shared key between the two events besides session_id/prompt_id/cwd.",
+    "run_in_background appears in tool_input on every row even though the scenario prompts never asked for it — the caller model set it; treat as optional.",
+    "SubagentStart rows in scenarios b and c appeared in the same relative order as the PreToolUse rows (3 then 3, 2 then 2), but ordering between parallel siblings was not verified by content (no values recorded) — design §7 unknown #4 stays open.",
+    "ndjson rows themselves live at ~/.claude/artibot/runtime/probe-keys.ndjson (12 rows, value-free); a 2-row self-test file sits beside it as probe-keys.selftest-20260904.ndjson."
+  ],
+  "not_measured": [
+    "model key presence when a model argument IS passed (no scenario did)",
+    "64KB+ prompt masking/truncation case (design §6 #3) — not run; would require the caller model to emit a 64KB tool_input literally",
+    "expression-form matcher (tool == \"Agent\") in user-level settings — string form worked first, so untried",
+    "UserPromptSubmit output probe (INCIDENT §7 D2) — out of this limb's scope",
+    "whether ~/.claude/settings.json's pre-existing PreToolUse `*` hook (a third-party .orca PowerShell shim) also ran — no observable output",
+    "SubagentStop / other events — not registered"
+  ]
+}
