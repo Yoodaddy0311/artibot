@@ -796,12 +796,21 @@ export function buildAdditionalContext(directives, envelopeContext) {
   const parts = [head, String(envelopeContext || '')].filter((p) => p.length > 0);
   const joined = parts.join('\n\n');
   if (Buffer.byteLength(joined, 'utf-8') <= ADDITIONAL_CONTEXT_MAX_BYTES) return joined;
-  // Trim on a character boundary, then re-check: slicing by bytes could split a
-  // multi-byte character and produce a replacement char in the model's context.
+  // Trim on a CODE-UNIT boundary, then re-check by bytes: cutting at a byte
+  // offset would split a multi-byte UTF-8 sequence outright.
   let cut = joined;
   while (cut.length > 0 && Buffer.byteLength(cut, 'utf-8') > ADDITIONAL_CONTEXT_MAX_BYTES) {
     cut = cut.slice(0, Math.max(0, cut.length - 64));
   }
+  // SURROGATE REPAIR. A code-unit boundary is not a character boundary: JS
+  // strings are UTF-16, so an astral character (emoji, CJK ext-B, math script)
+  // occupies TWO units and a cut between them leaves a lone high surrogate.
+  // Measured: '\u{1F680}'.repeat(2100) + 'a' ended on 0xd83d with
+  // isWellFormed() === false. That lone unit is what gets JSON.stringify'd onto
+  // stdout, so the host receives an ill-formed string — a defect the byte
+  // assertions above cannot see, because a lone surrogate still encodes to a
+  // 3-byte replacement and the size check passes.
+  if (/[\uD800-\uDBFF]$/.test(cut)) cut = cut.slice(0, -1);
   return cut;
 }
 
