@@ -388,13 +388,13 @@ describe('mcp built-in tools', () => {
     ]);
   });
 
-  it('list_agents returns the 28-agent roster (live registry)', async () => {
+  it('list_agents returns the 30-agent roster (live registry)', async () => {
     const registry = createToolRegistry();
     for (const t of builtinTools()) registry.registerTool(t);
     const res = await registry.callTool('artibot.list_agents', {});
     expect(res.isError).toBeUndefined();
     const parsed = JSON.parse(res.content[0].text);
-    expect(parsed.total).toBe(28);
+    expect(parsed.total).toBe(30);
     expect(parsed.agents.some((a) => a.name === 'orchestrator')).toBe(true);
   });
 

@@ -22,8 +22,9 @@ const configPath = path.join(__dirname, '..', '..', 'artibot.config.json');
 const realConfig = JSON.parse(await readFile(configPath, 'utf8'));
 const policy = realConfig.agents.modelPolicy;
 // Shipped state (2026-09-02, owner decision "design + review on fable"):
-// 2-tier fleet. The high bucket DECLARES model=fable for 21 agents, but only
-// the `fable.allowlist` (8 design/review agents) actually resolves to fable;
+// 2-tier fleet. The high bucket DECLARES model=fable for 23 agents, but only
+// the `fable.allowlist` (10 design/review/judge agents) actually resolves to
+// fable — investigator and auditor joined by owner decision MP-3 (2026-09-04);
 // every other agent — including the 12 high-bucket implementation agents and
 // the denylisted security-reviewer — is demoted to opus by the gate.
 // Raw-bucket lookups (getPolicyModel/listAgentsByModel) still report the
@@ -410,7 +411,7 @@ describe('model-policy', () => {
       }
     });
 
-    it('the shipped config routes exactly the 8 allowlisted design/review agents to fable', () => {
+    it('the shipped config routes exactly the 10 allowlisted design/review/judge agents to fable', () => {
       // Guards the owner's 2-tier decision (2026-09-02): design + review on
       // fable, everything else on opus. Changing the allowlist or the gate
       // without re-syncing agent frontmatter must fail here first.
@@ -419,6 +420,7 @@ describe('model-policy', () => {
         [
           'orchestrator', 'architect', 'planner', 'code-reviewer',
           'spec-reviewer', 'quality-reviewer', 'llm-architect', 'repo-benchmarker',
+          'investigator', 'auditor',
         ].sort(),
       );
       const fableHits = [...highAgents, ...mediumAgents].filter(

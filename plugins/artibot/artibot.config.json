@@ -30,7 +30,9 @@
           "marketing-strategist",
           "repo-benchmarker",
           "quality-reviewer",
-          "spec-reviewer"
+          "spec-reviewer",
+          "investigator",
+          "auditor"
         ]
       },
       "medium": {
@@ -48,7 +50,7 @@
       "low": {
         "model": "sonnet",
         "agents": [],
-        "comment": "4-tier introduction step 2 (design §3.2 OD-2). Declared EMPTY on purpose: effective routing change is 0. lib/core/model-policy.js#loadModelPolicy normalizes ONLY the `high` and `medium` buckets (see its return object) and #getPolicyModel / #listAgentsByModel consult only those two — an unknown `low` bucket is never read, so this key is inert twice over (unread by the resolver AND empty). scripts/ci/validate-model-policy.js#collectPolicyAgents likewise goes through listAgentsByModel, so the 28-agent roster count that scripts/validate.js checks is unchanged. Populating `agents` here would still do nothing until loadModelPolicy learns the bucket — that wiring is a later step, NOT this one. tests/firewall/v5-config-firewall.test.js pins both facts."
+        "comment": "4-tier introduction step 2 (design §3.2 OD-2). Declared EMPTY on purpose: effective routing change is 0. lib/core/model-policy.js#loadModelPolicy normalizes ONLY the `high` and `medium` buckets (see its return object) and #getPolicyModel / #listAgentsByModel consult only those two — an unknown `low` bucket is never read, so this key is inert twice over (unread by the resolver AND empty). scripts/ci/validate-model-policy.js#collectPolicyAgents likewise goes through listAgentsByModel, so the 30-agent roster count that scripts/validate.js checks is unchanged. Populating `agents` here would still do nothing until loadModelPolicy learns the bucket — that wiring is a later step, NOT this one. tests/firewall/v5-config-firewall.test.js pins both facts."
       },
       "advisorStrategy": {
         "enabled": true,
@@ -72,9 +74,11 @@
           "spec-reviewer",
           "quality-reviewer",
           "llm-architect",
-          "repo-benchmarker"
+          "repo-benchmarker",
+          "investigator",
+          "auditor"
         ],
-        "comment": "ON — 2-tier fleet by owner decision (2026-09-02): design + review roles run on fable, implementation/test/marketing roles stay on opus. enabled=true is the kill-switch; this allowlist (8 agents) is the ONLY set that resolves to fable. The high bucket still DECLARES model=fable for 21 agents, and that is intentional: the 12 high-bucket agents NOT in this allowlist (frontend-developer, backend-developer, tdd-guide, database-reviewer, mcp-developer, typescript-pro, refactor-cleaner, build-error-resolver, devops-engineer, performance-engineer, e2e-runner, marketing-strategist) are demoted to opus by the gate in lib/core/model-policy.js#gateFableTier — allowlist wins over bucket, by design. security-reviewer is in the high bucket, NOT in this allowlist, AND hard-pinned to opus by FABLE_DENYLIST (fable's refusal classifier false-positives on legit security work; 5.1 false-positive rate unmeasured — do not lift before measuring). Frontmatter contract: the 8 allowlisted agents/<name>.md carry model: fable, the other 20 carry model: opus — scripts/ci/validate-model-policy.js is the drift gate (gate-aware: it compares frontmatter against resolveModel, so a non-allowlisted high-bucket agent with model: opus is correct, not drift). Role aliases (deep-async) and phaseRoles below pass this gate only through resolveModel(alias|role, { agentType }) — without an agentType only enabled is consulted. Revert to single-tier opus: enabled=false + the 8 frontmatter lines back to opus. Effective cost vs Opus baseline is computed by lib/core/model-catalog.js#getCostFactor('fable') — do not duplicate the number here."
+        "comment": "ON — 2-tier fleet by owner decision (2026-09-02): design + review roles run on fable, implementation/test/marketing roles stay on opus. enabled=true is the kill-switch; this allowlist (10 agents) is the ONLY set that resolves to fable. investigator and auditor joined it by owner decision MP-3 (2026-09-04, design plan D): judge-nature work (verdicts, refutation) gets dedicated agent definitions inside the NAME axis, because plan A (a role string bypassing the gate) was declined as MP-2. The high bucket still DECLARES model=fable for 23 agents, and that is intentional: the 12 high-bucket agents NOT in this allowlist (frontend-developer, backend-developer, tdd-guide, database-reviewer, mcp-developer, typescript-pro, refactor-cleaner, build-error-resolver, devops-engineer, performance-engineer, e2e-runner, marketing-strategist) are demoted to opus by the gate in lib/core/model-policy.js#gateFableTier — allowlist wins over bucket, by design. security-reviewer is in the high bucket, NOT in this allowlist, AND hard-pinned to opus by FABLE_DENYLIST (fable's refusal classifier false-positives on legit security work; 5.1 false-positive rate unmeasured — do not lift before measuring). Frontmatter contract: the 10 allowlisted agents/<name>.md carry model: fable, the other 20 carry model: opus — scripts/ci/validate-model-policy.js is the drift gate (gate-aware: it compares frontmatter against resolveModel, so a non-allowlisted high-bucket agent with model: opus is correct, not drift). Role aliases (deep-async) and phaseRoles below pass this gate only through resolveModel(alias|role, { agentType }) — without an agentType only enabled is consulted. Revert to single-tier opus: enabled=false + the 10 frontmatter lines back to opus. Effective cost vs Opus baseline is computed by lib/core/model-catalog.js#getCostFactor('fable') — do not duplicate the number here."
       },
       "phaseRoles": {
         "build": "opus",
@@ -1199,7 +1203,7 @@
       }
     },
     "decisionTrail": {
-      "enabled": true,
+      "enabled": false,
       "path": "runtime/decision-trail.json",
       "retentionDays": 30,
       "redactSensitive": true

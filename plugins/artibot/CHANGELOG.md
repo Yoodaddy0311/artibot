@@ -11,6 +11,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+
+### 3차 배치(split-ff6c63) — 보안 훅 부활 · 트레일 동결 · 조사·감사 에이전트
+
+**행동 변화 고지.** `pre-bash.js`·`bash-risk-guard.js` 가 **처음으로 라이브에서 발화**한다. `hooks.json` 의 표현식 매처(`tool == "Bash"`)는 호스트 문법에 없어 정규식으로 해석됐고 절대 불일치였다 — `171f7a89`(2026-02-20) 이후 그 두 훅은 한 번도 돌지 않았다(2.1.260 이전 호스트 문법 동일 여부는 미확인). 반대로 `||` 표현식 4훅(pre-write·pre-write-guard·git-autopilot-guard·pre-write-checkpoint)은 **모든 도구**에 발화하고 있었다. 설치 직후 Bash 위험 명령 차단이 켜지고 Write/Edit 계열 훅이 Bash·Read·Agent 에서 사라지는 것을 보게 된다.
+
+#### Fixed
+- **hooks.json 매처 평문화(#49)** — 표현식 7곳 → `Bash`·`Write|Edit`·`WebFetch`. A/B 실측(호스트 2.1.260, 헤드리스 3런, `--settings`·`--plugin-dir` 두 로더 동일, 커밋 본문 보존): `tool == "X"` 0/전건, `A || B` 전 도구 매치. 회귀 게이트 `hooks-schema-shape` 6a(양성 allowlist: `*`·이름·`A|B` 만)·6b(8훅×11도구 발화 집합 고정)·6c(A/B 표 재현). `Write|Edit` 는 비앵커라 MultiEdit·NotebookEdit 에도 매치(의도, 문서화; 실발화 미측정).
+- **hooks.json timeout 단위(#50)** — 호스트 단위는 **초**. 29항목 `5000/8000/15000/30000` → `5/8/15/30`(훅 실측 median 70~251ms, PreToolUse 8훅 195~540ms). `hook-timeout-budget` 환산 + ms 잔재 트립와이어(600 초과 = RED). CONTRIBUTING "milliseconds" 정정.
+- **stop-review-gate 한 줄 블록 주석 오탐(#44)** — `#stripBlockComments` 신설: `//` 선제거 → 닫힌 `/*…*/` 는 줄 어디든 제거 → 미종결 오프너는 줄 첫머리만. 1차안은 줄 중간 `/*`(글롭 `**/*`·`//` 안)까지 열어 lib+scripts 509파일 중 12파일 242줄이 스캔에서 빠지는 fail-open 회귀였고 독립 검수가 잡았다 → 재작업 후 삼킴 0·EOF 개방 0, 전수 자기검증 테스트(분모 ≥400).
+- **handoff-builder porcelain 한글 경로(#44)** — `git status --porcelain -z` NUL 파서 `#iterPorcelainEntries`(rename 2필드, no-trim), `#parsePorcelain`·`#collectContextFiles` 경유.
+- **ci-utils `gitTrackedNames` 훅 환경 오판(#56)** — 절대 `GIT_DIR` 만 있고 `GIT_WORK_TREE` 가 없으면 `git ls-files` 가 리포 루트 기준 전체(1,975)를 돌려줘 플러그인 루트 0개로 오판 → structure·doc-links·md-render 3게이트 FAIL. `#gitDiscoveryEnv` 가 두 변수를 제거한 env 로 스폰. 링크드 worktree 무관(메인 리포에서도 재현), 재현 테스트 RED→GREEN.
+- **README 표 거짓 주장 정정** — spec/quality-reviewer 행 누락 복원·Model 열 교정(orchestrator 등)·플러그인 README 모델 표 `enabled=true` 반영·`marketplace.json` "28 agents" → 30.
+
+#### Added
+- **에이전트 2종 신설(D안, 오너 결정 MP-3)** — `agents/investigator.md`(조사·측정·정합성 대조, 판정까지 = judge) · `agents/auditor.md`(사후 감사·주장 반증). `model: fable`, `fable.allowlist` 8→10, `high.agents` 21→23, 로스터 28→30. 이름 allowlist 원칙 유지(A안 "역할이 이름을 이김" 불허, `REVIEW_ROLES`·`gateFableTier`·`FABLE_DENYLIST` 무변경). 첫 실스폰에서 auditor 가 팀원 보고 28건 중 2건을 반증했다.
+- **nature 태깅(B안, MP-1)** — `commands/team.md` Phase 1 에 `nature: process|judge`, judge 작업은 allowlist 에 배정. 태깅 단위는 산출물(판정 문장).
+- **`review.claim_audit` 어휘 + `parseClaimAudit`(MP-4)** — `schemas/ledger-events.allowlist.json` +1(`enums.claim_nature`), `lib/review/independent-reviewer.js#parseClaimAudit` 가 ```json 펜스와 bare 한 줄 JSON 둘 다 수용(첫 실출력이 bare 였다 — 실출력 VERBATIM 픽스처), 산문 속 중괄호·여러 줄 pretty-print 는 `ok:false`. **writer 배선은 0** — 파서까지가 이번 범위.
+- **`/doctor` Check 10 (route-bind residue)** — `lib/replay/route-bind.js` 가 `route.selected`↔`route.bound` 를 `tool_use_id` 로 조인(순수, 상태 파일 0). 미결합 receipt 수와 `skipped:unbound` 스폰 수를 나란히 보고, 분모 부재 = `unmeasured`, 충돌 = FAIL. 이 트리 라이브 1회: receipts 3 / binds 3 / unbound 0.
+- **docs:check 서브트리 스코프(DC-1·DC-2)** — `ci-utils.js#ROOT_SCAN_TREES`(`.artibot/guides`·`adr`·`archive`·`reports/SPLIT`) + `.artibot/project.md`, **추적 파일만**(`git ls-files -z`), git 실패 = fail-closed("cannot enumerate tracked docs"), 바닥값 95 정확 핀. 렌더링 위반 15건은 baseline 승격 없이 수리(정본 표 12 = 4번째 셀 누락, 문장 무변경). tally `<root-trees>=95`.
+- **decisions 스토어 어휘 +2** — `self-control-decided`(cron 4, `subsystem` 4값·`action` 13값 allowlist) · `skill-level-changed`(user-profile). 목록 밖 어휘는 fs 접근 전 refuse. `decisions-store-sandbox-required` 게이트 TIER1 에 두 writer 등록.
+
+#### Changed
+- **decision-trail 동결(D9, TR-1~3)** — `lib/core/decision-trail.js` 기본 `enabled:false`(킬스위치, 읽기 유지). writer 5(user-profile·cron 4)는 decisions 스토어로, router·runtime-prompt 의 트레일 호출은 삭제(스토어가 이미 기록). 기존 트레일 972·9건 이동·삭제 없음. **`artibot.config.json#ago.decisionTrail.enabled` 도 `false`** — 코드 기본값만으로는 라이브 킬스위치가 안 걸린다.
+- **`/doctor` Check 7 단일 루트** — projectRoot `.artibot/runtime/` 만. S6 폐기, S3 활동 원천 = `ledger.jsonl`/`decisions/*.events.ndjson` mtime, 트레일은 legacy(frozen) 정보 1행. 재동결 `68a73087845aa9cd` → `f9cbd1a65ef3c2cc`.
+- `agents/INDEX.md` 재생성(Model 열 현행화), `scripts/validate.js`·테스트 핀 28→30(`agent-registry`·`mcp/server`).
+- `.github/workflows/self-control.yml` 아티팩트 경로에 decisions 스토어 추가(D9 후 cron 산출물 위치).
+
+#### Known
+- **신설 에이전트의 실효 모델은 미확인** — 호스트 2.1.260 SubagentStart 페이로드에 `model` 키가 없어 `spawns.ndjson` `canonicalModel` 이 구조적으로 null(0/30). `route-observe-pre` 가 `tool_input.model` 을 소비하면 측정 가능(후속).
+- `review.claim_audit` writer 배선 0 · `effort` 필드 없음(층화 착시 경고, 설계 §4.4).
+- WebFetch 매처 실발화·MultiEdit/NotebookEdit 매치는 추론. `Write|Edit` 는 향후 이름에 Write/Edit 가 든 MCP 도구에도 매치한다.
+- `pruneDecisionTrail` 은 `enabled` 를 보지 않는다(호출자 0). `readSpawns` 는 파일 부재를 `[]` 로 접는다(프로즈가 `undefined` 구분을 지운다).
+- `land.mjs` lint 행이 브랜치 신규 파일을 메인 트리에서 찾아 FAIL(2줄기 실측) — 후속.
+- 잔존 "28" 산문(CONTRIBUTING·INSTALL·AGENTS.md:4·mcp-server.json:6·주석·_marketplace·cowork README) — 게이트 무관, 후속.
+
+
 ## [4.55.0] — 2026-09-04
 
 ### 훅 출력이 호스트 계약을 따른다 — `/split` 1차·2차 배치(split-9d6dc2) 일괄 출하

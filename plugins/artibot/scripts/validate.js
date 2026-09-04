@@ -24,7 +24,7 @@
  *   config       — `artibot.config.json` is the main plugin's runtime config;
  *                  cowork has none and is not supposed to.
  *   model-policy — the policy roster in `artibot.config.json#/agents/
- *                  modelPolicy` lists exactly the main plugin's 28 agents.
+ *                  modelPolicy` lists exactly the main plugin's 30 agents.
  *                  Measured: cowork's `case-study-writer` and
  *                  `long-form-writer` appear in no bucket, and
  *                  `findModelPolicyDrift` additionally errors on every policy

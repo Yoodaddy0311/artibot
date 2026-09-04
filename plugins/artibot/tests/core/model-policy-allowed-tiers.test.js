@@ -37,7 +37,7 @@ const policy = realConfig.agents.modelPolicy;
 
 const highAgents = policy.high.agents;
 const mediumAgents = policy.medium.agents;
-/** Full shipped roster (28 agents on 2026-09-02; the count is derived, not pinned here). */
+/** Full shipped roster (30 agents on 2026-09-04; the count is derived, not pinned here). */
 const allAgents = [...highAgents, ...mediumAgents];
 const fableAllowlist = policy.fable.allowlist;
 const notAllowlisted = allAgents.filter((a) => !fableAllowlist.includes(a));
