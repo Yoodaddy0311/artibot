@@ -136,3 +136,14 @@ export const ROOT_SCAN_TREE_FILES = Object.freeze(['.artibot/project.md']);
 - `validate-md-rendering.js` 규칙 객체 형태(`{name, fn}`)를 스크래치가 올바르게 호출했는지 — 15건 메시지가 스캐너 서식 그대로라 실측으로 보되, 스캐너 `main()` 을 직접 돌린 것은 아니다.
 - CI(`ci.yml`)가 dev 리포 마커를 만족해 루트 스캔을 실제로 하는지 — 출력의 `<root>=4` 는 로컬 값이고 CI 로그는 미열람.
 - `.artibot/guides` 의 yaml/mmd/ndjson 21파일은 md 스캐너 대상 밖 — 별개(F-10 §6-1 과 같은 항목).
+
+## 정정 — 3차 배치 ci-scope 실측 (2026-09-05, master 4fc75c8a)
+
+| 설계 문구 | 실측 | 정정 |
+|---|---|---|
+| §2.3 바닥값 93 | `git ls-tree -r --name-only -z <rev> -- <trees> \| grep -c '\.md$'` = base·tip·master 모두 95 (guides 77 · adr 11 · archive 4 · SPLIT 2 · project 1) | 93 은 `ca013e2c` 14:53 시점 값. 정본 핀은 **95** |
+| §1.3 "정본 표 12 = `\|` 이스케이프" | 636~647 행은 4열 헤더 아래 3셀 — 이스케이프 안 된 파이프 없음 | 원인은 **4번째 셀 누락**, 수리는 빈 셀 추가(문장 무변경, 파이프·공백 제거 후 IDENTICAL) |
+| 후속 #56 "링크드 worktree 에서만" | `GIT_DIR` 절대경로 + `GIT_WORK_TREE` 부재면 메인 리포에서도 1975 vs 1822 재현 | 링크드 worktree 는 충분조건이지 필요조건 아님. 재현 테스트는 CI 체크아웃에서도 공허하지 않다 |
+| 미확인 2 "CI 가 루트 스캔을 하는지" | 배치 CI 로그 미열람 — 여전히 미확인 | 4.56.0 착지 CI 로그에서 `<root-trees>=95` 확인이 후속 |
+
+수리 착지: `ci-utils.js#gitDiscoveryEnv` · `#gatherRepoRootTreeDocFiles` · `validate-md-rendering.js#scanRepoRootTrees`. 회고 `reports/SPLIT/split-ff6c63.md` §2.

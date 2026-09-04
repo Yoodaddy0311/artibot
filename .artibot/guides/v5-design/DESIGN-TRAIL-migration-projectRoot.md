@@ -107,3 +107,14 @@
 - 캐시 `4.54.0` 트레일 9건이 오늘 리더 세션 것인지(02:05Z 시작 = 11:05 KST, 세션 시각과 일치 — 추론).
 - 정본 `:212` 971 vs 실측 972 의 1건 차이 원인(09-03 00:12Z 마지막 항목 — 시각 관측 차로 추정).
 - `plugin update` 가 캐시 디렉터리를 새로 만드는지 재사용하는지(후속 18 미확인과 동일) — D3 판정의 전제.
+
+## 정정 — 3차 배치 l2-c10-trail 실측 (2026-09-05, master 4fc75c8a)
+
+| 설계 문구 | 실측 | 정정 |
+|---|---|---|
+| §1.2 "writer 4 · unique writer 2(user-profile·auto-pr-creator)" | `grep -rn recordDecision lib scripts` 호출자 = router · runtime-prompt · user-profile · auto-pr-creator(4곳) · **auto-cleanup-runner · auto-commit-runner · auto-macro-register-runner**(DI 기본값 `trail = recordDecision`) | unique writer 는 **5파일**(cron 4 + user-profile). 어휘는 `self-control-decided`(cron 4 공통, subsystem 4·action 13 allowlist) + `skill-level-changed` = 2종 |
+| §2 C-① "기본값만 false" | `artibot.config.json#ago.decisionTrail.enabled` 가 `true` 였다(:1202) | 코드 기본값만으로는 라이브 킬스위치가 안 걸린다 → 리더 통합분에서 config 도 `false`(a57cec7c) |
+| §4 D1~D4 | D1·D2·D4 착지(1294b7fd, Check 7 재동결 68a73087 → f9cbd1a6). D3(plugin update 후 연속 증가)는 4.56.0 설치 후 판정 | D3 = 미확인(릴리스 후) |
+| 미확인 3 "plugin update 캐시 재사용" | 4.55.0 update 는 새 디렉터리 `cache/artibot/artibot/4.55.0` 생성(리더 실측 2026-09-04) | 새 디렉터리 — 트레일이 있었다면 0 리셋. 동결로 무관해짐 |
+
+비차단 관찰(검수): `pruneDecisionTrail` 은 `enabled` 미참조(호출자 0) · `readSpawns` 는 파일 부재를 `[]` 로 접는다(프로즈가 `undefined` 구분을 진다).

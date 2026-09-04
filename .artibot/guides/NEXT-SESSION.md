@@ -1,4 +1,38 @@
-# NEXT-SESSION — 크로스머신 핸드오프 (2026-09-04 18:0x, master e569e2da + 이 커밋)
+# NEXT-SESSION — 크로스머신 핸드오프 (2026-09-05 03:3x, nowhe 머신, master = v4.56.0 착지 커밋)
+
+> 다른 머신에서는 `git pull` 후 **이 파일을 직접 Read** 하고 시작한다(`/resume` 은 로컬 HANDOFF 만 연다). 로컬 전용(`.artibot/split/`·`run-log.md`·`gotchas.md`·`runtime/split/`·`.artibot/HANDOFF.md`)은 이 머신에만 있다 — 요지는 회고 `reports/SPLIT/split-ff6c63.md`(추적) 에 있다.
+
+## 지금 상태 (2026-09-05 03:3x 실측)
+
+| 항목 | 값 |
+|---|---|
+| master | 3차 배치 wave 1 `4fc75c8a`(5브랜치 배치) → 릴리스 `edc1090a` release: v4.56.0 (착지·태그는 아래 "다음 할 일" 첫 행 참조) |
+| 설치본 | 4.55.0 → **4.56.0 은 `claude plugin update` 후 재시작해야 적용** |
+| worktree | 메인 1개(줄기 4 + 리더 스크래치 제거 완료). `.claude/worktrees/` 에 미등록 옛 디렉터리 2개(`ap-w80-integration`·`relaxed-shamir-08ea8a`) — 이번 런 무관, 미처리 |
+| 오너 결정 | 10건 전부 확정·이행(부록 0-2 후속(3) MP-1~5·DC-1~2·TR-1~3) |
+| 5.0 로드맵 위치 | **Observe 끝자락** — 만들 것은 닫힘, 종료 조건(라이브 분모)은 4.56.0 설치 후 판정. Shadow 대부분 미착수(`lib/checkpoint/` 0·seeded-defect 0·`state.yaml` 실파일 0) |
+
+## 다음 할 일 (우선순위순)
+
+| # | 작업 | 근거·주의 |
+|---|---|---|
+| P0 | **wave 2 `lock-harness`** — 창 1개 `claude --worktree split-artibot-lock-harness` → `dispatch lock-harness`(plan·브리프 base `4fc75c8a` 갱신됨, 드라이런 OK). 회고 #40 landing-serialization 하네스/락 분리 실측 | 소유 `lib/git/landing-lock.js` + 테스트 2 |
+| P0 | **4.56.0 라이브 판정** — 새 세션에서 ① `pre-bash`·`bash-risk-guard` 발화(Bash 1회 후 spawns/decisions 원장) ② write 계열 훅이 Bash/Read 에 발화 **안 함** ③ L1 D4 additionalContext 도달 ④ L2 D3/D4 `route.selected`/`route.bound` ⑤ TRAIL D3 decisions 줄 수 연속 증가 ⑥ Check 7·10 `/doctor` 라이브 1회 | 전부 "설치 후에만" 항목. 4.55.0 설치본에서는 보안 훅 2종이 발화 0 |
+| P1 | **후속(plan.json#leaderIntegration, 회고 §4)** — `land.mjs` lint 행 worktree cwd 수리 · `route-observe-pre` `tool_input.model` 소비 · `review.claim_audit` writer 배선 · 잔존 "28" 산문 census · `pruneDecisionTrail` 킬스위치 · `auto-pr-creator.test.js` 죽은 mock · `plugin-init-flow.test.js` ms 문구 · integrate 재실행 시 run-end 중복(러너) · `~/.claude/rules/artibot/agent-coordination.md` 28→30/8→10(리포 밖, 이 머신 미처리) | 게이트 무관 항목 다수 — 다음 `/split plan` 후보 묶음 |
+| P1 | **Shadow 진입 준비** — DR01 checkpoint store(`lib/checkpoint/` 신설, ADDENDUM-2026-09-02 §6 순서 DR01→CX02→DR02) · intent.md 생성 · RouteBench 기준선 · seeded-defect N(오너 결정 C6) | Observe 종료 판정 후 |
+| P2 | 3차 승인 보류분 유지: HOOK-VISIBILITY H-1~6 · PLANNER-PARALLELIZATION · landing-lock 근본안(tmp+linkSync) | #42 오너 결정 |
+
+## 2026-09-04~05 세션 총괄 (이 머신)
+
+- 오너 결정 10건 회신(`129eea97`) → **v4.55.0 릴리스**(1·2차 배치 출하, `5eadf9b0`, 배지 ff 라이브 실증 `wait_for_green total=7`) → **3차 배치 `/split` 창 4개**(l2-c10-trail·ci-scope·hooks-fix·model-d) → 배치 착지 `4fc75c8a`(integrate 3회차: 러너 lint 사고 → 소유 밖 핀 3 → landed) → **v4.56.0**.
+- 그린 상태 실결함 2: hooks-fix `stripBlockComments` fail-open(독립 검수 포착, 12파일 242줄) · 배치 CI 만 보는 소유 밖 핀 3.
+- 라이브 실증: `hooks.json` 표현식 매처 A/B(`pre-bash`·`bash-risk-guard` 발화 0 — 171f7a89 이후) · "Agent 정책 거부" 문구 오탐 · auditor 실스폰이 팀원 보고 2/28 반증 · `canonicalModel` 구조적 null.
+- 리더 오류: plan.json affectedPaths 가 브리프보다 좁아 land ownership 1회차 FAIL 3줄기 · 러너 스크립트를 플러그인 디렉터리에 둠 · 브리프 인용 오기 3(tests/scripts/cron·validate.js 핀·unique writer 2).
+- 텔레메트리(`runtime/split/split-ff6c63.events.ndjson` 23이벤트): 착지까지 벽시계 **3h19m41s**(PLAN 23:43:41 → landed 03:03:23 KST). `summarizeWallClock` 의 run 3h04m47s 는 **첫 run-end(integrate 1회차 push-failed)** 기준 — 리더 러너가 회차마다 run 을 닫아 15분 짧게 보인다(기록자 발견, 후속). humanWait 67.4%(그 분모)/62.4%(착지 분모), 창 열기 대기 2h04m35s.
+
+---
+
+# (구) NEXT-SESSION — 크로스머신 핸드오프 (2026-09-04 18:0x, master e569e2da + 이 커밋)
 
 > 로컬 `.artibot/HANDOFF.md`·`.artibot/split/gotchas.md`·`.artibot/ledger/`·`.artibot/handoffs/` 는 gitignore 라 다른 머신에 **없다**. 이 파일이 다른 머신으로 넘어가는 요지본이다. 다른 머신에서는 `git pull` 후 `/resume` 이 "핸드오프 없음"을 내므로 **이 파일을 직접 Read** 하고 시작한다. 갱신 주체: 세션 종료 시 리더가 `/save` 와 함께.
 >

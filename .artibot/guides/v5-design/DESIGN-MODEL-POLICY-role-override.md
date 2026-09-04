@@ -172,3 +172,14 @@ frontmatter(`agents/*.md` 28 + INDEX): `model: fable` **8**(allowlist 와 정확
 - `scripts/validate.js` 의 "28-agent roster" 핀 위치 — `fable.comment` 문구로만 확인, 코드 줄 미열람.
 - Agent 도구 `model` 이 tier alias(`fable`)를 그대로 받는지 — 정본 §6 첫 항목 "미확인" 그대로(오늘 리더가 팀원을 fable 로 띄웠다면 참이겠으나 원장에 증거 없음).
 - ACTION_CLASS_TIERS `explore→sonnet` 이 설계 저자(OD-2)의 "조사=싼 모델" 의도인지, 자리표시자인지 — 문서 정의문 미확인.
+
+## 정정 — 3차 배치 model-d 실측 (2026-09-05, master 4fc75c8a)
+
+| 설계 문구 | 실측 | 정정 |
+|---|---|---|
+| §1.6 `team.md:155` "구현/검토 역할 모두 frontier 티어" | base 에 그 문구 없음(155~157 은 2티어 주석). 잔존 낡은 표기는 `frontier 티어` 7곳 | 정정 대상은 `frontier 티어` 7곳(착지) |
+| 미확인 1 `validate.js` "28-agent roster" 핀 | 숫자 핀 없음(집계 파생). 문구는 `low.comment` 에 있었고 JSDoc 1줄뿐 | 핀은 `tests/core/agent-registry.test.js` · `tests/mcp/server.test.js` · `tests/ci/validate-model-policy.test.js` · `marketplace.json#entryPoints.agents.count` — 전부 30 으로 |
+| §6 D2 "실스폰 canonicalModel = fable 확인" | 호스트 2.1.260 SubagentStart 페이로드에 `model` 키가 없어 `canonicalModel` 0/30 non-null. `route-observe-pre` 는 `tool_input.model` 을 allowlist 에 두고도 소비 0 | **구조적으로 측정 불가 → 미확인 확정.** 후속: `route-observe-pre` 가 `tool_input.model` 을 `route.selected.models.current` 로 소비 |
+| 미확인 2 "Agent `model` 이 tier alias 를 받는지" | `artibot:auditor`·`artibot:investigator` 스폰은 Agent 도구가 수용(3회) — 정의 로드는 실증, 실효 모델은 원장으로 판별 불가 | 로드 = 실측, 모델 = 미확인 |
+| §6 (iii) D3 "첫 claim_audit 행 1건" | 파서(`parseClaimAudit`, 펜스·bare 수용)와 어휘까지 착지, **writer 배선 0** — 첫 실출력이 bare 한 줄이라 파서 E2E 결함을 잡았다 | D3 는 writer 배선 후속. `effort` 필드 없음(§4.4 #3 층화 착시 경고 유지) |
+| 부수 | auditor 첫 실스폰이 팀원 보고 28건 중 2건 반증(README 표 orchestrator 행) | D안의 첫 라이브 효과 |
