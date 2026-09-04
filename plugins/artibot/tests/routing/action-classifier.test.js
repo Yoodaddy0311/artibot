@@ -5,7 +5,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 
@@ -13,12 +13,14 @@ import {
   ACTION_CLASS_TIERS,
   ACTION_CLASSES,
   AGENT_ACTION_CLASS,
+  AGENT_CLASS_EXEMPT,
   classifyAction,
   COMMAND_ACTION_CLASS,
   DEFAULT_ACTION_CLASS,
   derivePhase,
   getActionClassForAgent,
   getActionClassForCommand,
+  HOST_BUILTIN_AGENTS,
   isActionClass,
   SOURCE_CONFIDENCE,
 } from '../../lib/routing/action-classifier.js';
@@ -30,6 +32,22 @@ const PLUGIN_ROOT = resolve(HERE, '../..');
 function schemaActionEnum() {
   const raw = readFileSync(resolve(PLUGIN_ROOT, 'schemas/route-receipt.schema.json'), 'utf8');
   return JSON.parse(raw).properties.action.properties.type.enum;
+}
+
+/**
+ * Agent names exactly as `agents/` spells them, read from disk at call time so
+ * the census measures the roster that exists now, not one restated by hand.
+ * `INDEX.md` is included deliberately: it is a roster FILE, and whether it
+ * counts as an agent is the exempt list's job to say, not this helper's.
+ *
+ * @returns {Set<string>} File stems of every `agents/*.md`.
+ */
+function rosterAgentFiles() {
+  return new Set(
+    readdirSync(resolve(PLUGIN_ROOT, 'agents'))
+      .filter((f) => f.endsWith('.md'))
+      .map((f) => f.replace(/\.md$/, '')),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -136,8 +154,7 @@ describe('COMMAND_ACTION_CLASS', () => {
     expect(Object.keys(COMMAND_ACTION_CLASS)).toHaveLength(48);
   });
 
-  it('every mapped key is a real command file in commands/', async () => {
-    const { readdirSync } = await import('node:fs');
+  it('every mapped key is a real command file in commands/', () => {
     const commands = new Set(
       readdirSync(resolve(PLUGIN_ROOT, 'commands'))
         .filter((f) => f.endsWith('.md'))
@@ -193,6 +210,23 @@ describe('AGENT_ACTION_CLASS', () => {
     ['build-error-resolver', 'complex-debug'],
     ['repo-benchmarker', 'explore'],
     ['doc-updater', 'edit-routine'],
+    // Added by the route-coverage limb: the agents live spawns were falling to
+    // `source: 'default'` on.
+    ['auditor', 'review'],
+    ['artibot:investigator', 'explore'],
+    ['orchestrator', 'architecture'],
+    // Marketing roster — nearest class, mapped on purpose (see the table's
+    // divergence note), so a marketing spawn still yields a receipt.
+    ['seo-specialist', 'review'],
+    ['cro-specialist', 'review'],
+    ['marketing-strategist', 'architecture'],
+    ['ad-specialist', 'implement'],
+    ['content-marketer', 'implement'],
+    ['presentation-designer', 'implement'],
+    ['data-analyst', 'explore'],
+    // Host built-ins, which arrive with no plugin prefix.
+    ['Explore', 'explore'],
+    ['Plan', 'architecture'],
   ])('getActionClassForAgent(%s) is %s', (agent, expected) => {
     expect(getActionClassForAgent(agent)).toBe(expected);
   });
@@ -201,15 +235,72 @@ describe('AGENT_ACTION_CLASS', () => {
     expect(getActionClassForAgent('artibot:nobody')).toBeNull();
   });
 
-  it('every mapped agent has a definition file in agents/', async () => {
-    const { readdirSync } = await import('node:fs');
-    const agents = new Set(
-      readdirSync(resolve(PLUGIN_ROOT, 'agents'))
-        .filter((f) => f.endsWith('.md'))
-        .map((f) => f.replace(/\.md$/, '')),
-    );
-    const missing = Object.keys(AGENT_ACTION_CLASS).filter((a) => !agents.has(a));
-    expect(missing).toEqual([]);
+  it.each([...AGENT_CLASS_EXEMPT])('returns null for the exempt name %s', (agent) => {
+    expect(getActionClassForAgent(agent)).toBeNull();
+  });
+
+  it('identifies every mapped agent even when the text says nothing', () => {
+    // The live gap this limb closes: a spawn whose description carries no
+    // keyword must still be classified by the agent, not fall to the default —
+    // `route-observe-pre.js#receiptPhase` drops a `default` action entirely.
+    for (const agent of Object.keys(AGENT_ACTION_CLASS)) {
+      const out = classifyAction({ agentType: `artibot:${agent}`, text: 'aaa bbb ccc' });
+      expect(out.factors.source, agent).toBe('agent');
+      expect(out.confidence).toBe(SOURCE_CONFIDENCE.agent);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Roster census — an allowlist in BOTH directions, so the table cannot rot
+// ---------------------------------------------------------------------------
+
+describe('AGENT_ACTION_CLASS roster census', () => {
+  it('covers every agent definition file, mapped or explicitly exempt', () => {
+    const mapped = new Set(Object.keys(AGENT_ACTION_CLASS));
+    const exempt = new Set(AGENT_CLASS_EXEMPT);
+    const uncovered = [...rosterAgentFiles()].filter((a) => !mapped.has(a) && !exempt.has(a));
+    // A new `agents/*.md` lands here until someone decides its class. Leaving
+    // it unmapped is a decision too — record it in AGENT_CLASS_EXEMPT.
+    expect(uncovered).toEqual([]);
+  });
+
+  it('maps no key that is neither a roster agent nor a host built-in', () => {
+    const known = new Set([...rosterAgentFiles(), ...HOST_BUILTIN_AGENTS]);
+    const orphans = Object.keys(AGENT_ACTION_CLASS).filter((a) => !known.has(a));
+    expect(orphans).toEqual([]);
+  });
+
+  it('exempts no name that is neither a roster agent nor a host built-in', () => {
+    const known = new Set([...rosterAgentFiles(), ...HOST_BUILTIN_AGENTS]);
+    expect(AGENT_CLASS_EXEMPT.filter((a) => !known.has(a))).toEqual([]);
+  });
+
+  it('never lists a name as both mapped and exempt', () => {
+    const mapped = new Set(Object.keys(AGENT_ACTION_CLASS));
+    expect(AGENT_CLASS_EXEMPT.filter((a) => mapped.has(a))).toEqual([]);
+  });
+
+  it('maps every key to one of the eight classes', () => {
+    for (const [agent, cls] of Object.entries(AGENT_ACTION_CLASS)) {
+      expect(isActionClass(cls), `${agent} -> ${cls}`).toBe(true);
+    }
+  });
+
+  it('leaves exactly one roster FILE unclassified, and names which', () => {
+    // INDEX.md is the generated index, not an agent. If this list ever grows,
+    // the entry is a spawn whose receipts are being dropped — say so out loud.
+    const roster = rosterAgentFiles();
+    expect(AGENT_CLASS_EXEMPT.filter((a) => roster.has(a))).toEqual(['INDEX']);
+  });
+
+  it('pins the host built-ins, so adding one is a deliberate edit', () => {
+    expect([...HOST_BUILTIN_AGENTS]).toEqual(['Explore', 'Plan', 'general-purpose']);
+  });
+
+  it('freezes both lists', () => {
+    expect(Object.isFrozen(AGENT_CLASS_EXEMPT)).toBe(true);
+    expect(Object.isFrozen(HOST_BUILTIN_AGENTS)).toBe(true);
   });
 });
 

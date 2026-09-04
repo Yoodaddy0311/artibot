@@ -152,6 +152,32 @@ describe('route-observe-pre — phase is derived or absent, never invented', () 
       agentType: 'zzz-unknown-agent', text: 'aaa bbb ccc', config: undefined,
     })).toBeNull();
   });
+
+  // The live gap this limb closes. Both spawns below were reaching the hook and
+  // producing NOTHING: neither agent was in `AGENT_ACTION_CLASS`, the
+  // descriptions carried no keyword, so the classifier answered
+  // `source: 'default'` and `receiptPhase` correctly refused to invent a phase.
+  // The fix is coverage in the agent table, NOT loosening the rule above — the
+  // `zzz-unknown-agent` case keeps asserting the rule still holds.
+  it('a bare host built-in with keyword-free text now yields a build receipt', () => {
+    const receipt = buildReceipt({
+      toolUseId: 'toolu_explore', sessionId: 's', missionId: 'M-20260904-Sabcdefgh',
+      agentType: 'Explore', text: 'aaa bbb ccc', config: undefined,
+    });
+    expect(receipt).not.toBeNull();
+    expect(receipt.action.phase).toBe('build');
+    expect(receipt.action.type).toBe('explore');
+  });
+
+  it('a prefixed roster agent with keyword-free text now yields a build receipt', () => {
+    const receipt = buildReceipt({
+      toolUseId: 'toolu_inv', sessionId: 's', missionId: 'M-20260904-Sabcdefgh',
+      agentType: 'artibot:investigator', text: 'Spawn probe', config: undefined,
+    });
+    expect(receipt).not.toBeNull();
+    expect(receipt.action.phase).toBe('build');
+    expect(receipt.action.type).toBe('explore');
+  });
 });
 
 describe('route-observe-pre — mission id', () => {
