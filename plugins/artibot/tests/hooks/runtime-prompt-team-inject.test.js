@@ -109,7 +109,18 @@ describe('buildRecommendationDirective()', () => {
   });
 });
 
-describe('composePromptOutput() — team directive reaches the prompt (no longer dropped)', () => {
+/**
+ * Reads `hookSpecificOutput.additionalContext`, the ONLY UserPromptSubmit
+ * channel the host delivers to the model. The suite used to assert these
+ * directives on `out.user_prompt`; that field is dispatcher-internal and the
+ * host discards it (2.1.259 measured — PROBE-effort-directive-delivery.md), so
+ * a green assertion there proved the directive was BUILT, never that it landed.
+ * @param {{ hookSpecificOutput?: { additionalContext?: string } }} out
+ * @returns {string}
+ */
+const ctxOf = (out) => out.hookSpecificOutput?.additionalContext ?? '';
+
+describe('composePromptOutput() — team directive reaches the model channel', () => {
   const prepared = {
     userPrompt: 'Original request: build the thing',
     message: '[runtime] prepared',
@@ -124,11 +135,12 @@ describe('composePromptOutput() — team directive reaches the prompt (no longer
       taskBudgetDirective: '',
       injectPrompt: true,
     });
-    expect(out.user_prompt).toMatch(/^\[artibot:team runner=team teammates=2\]/);
-    expect(out.user_prompt).toContain('[artibot:effort level=xhigh][artibot:task-budget max_tokens=128000]');
-    expect(out.user_prompt).toContain('[artibot:effort level=high][artibot:task-budget max_tokens=64000]');
-    // Original prompt body survives after the blank-line separator.
-    expect(out.user_prompt).toMatch(/\]\n\nOriginal request: build the thing$/);
+    expect(ctxOf(out)).toMatch(/^\[artibot:team runner=team teammates=2\]/);
+    expect(ctxOf(out)).toContain('[artibot:effort level=xhigh][artibot:task-budget max_tokens=128000]');
+    expect(ctxOf(out)).toContain('[artibot:effort level=high][artibot:task-budget max_tokens=64000]');
+    // The prompt body is NOT carried along: the host sends it already, so
+    // repeating it here would put the same request in front of the model twice.
+    expect(ctxOf(out)).not.toContain('Original request: build the thing');
   });
 
   it('team directive precedes the parent effort/budget directives', () => {
@@ -139,8 +151,8 @@ describe('composePromptOutput() — team directive reaches the prompt (no longer
       taskBudgetDirective: '[artibot:task-budget max_tokens=128000]',
       injectPrompt: true,
     });
-    const teamIdx = out.user_prompt.indexOf('[artibot:team');
-    const effortIdx = out.user_prompt.indexOf('[artibot:effort level=xhigh command=implement]');
+    const teamIdx = ctxOf(out).indexOf('[artibot:team');
+    const effortIdx = ctxOf(out).indexOf('[artibot:effort level=xhigh command=implement]');
     expect(teamIdx).toBe(0);
     expect(effortIdx).toBeGreaterThan(teamIdx);
   });
@@ -158,7 +170,9 @@ describe('composePromptOutput() — team directive reaches the prompt (no longer
       taskBudgetDirective: '',
       injectPrompt: true,
     });
-    expect(out.user_prompt).not.toContain('[artibot:team');
+    expect(ctxOf(out)).not.toContain('[artibot:team');
+    // No directives and no router wrapper to salvage => nothing to send.
+    expect(ctxOf(out)).toBe('');
     expect(out.user_prompt).toBe('Original request: tiny fix');
   });
 
@@ -170,7 +184,8 @@ describe('composePromptOutput() — team directive reaches the prompt (no longer
       taskBudgetDirective: '',
       injectPrompt: false,
     });
-    expect(out.user_prompt).not.toContain('[artibot:team');
+    expect(ctxOf(out)).not.toContain('[artibot:team');
+    expect(ctxOf(out)).toBe('');
     expect(out.user_prompt).toBe('Original request: build the thing');
   });
 

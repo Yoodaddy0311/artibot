@@ -21,17 +21,23 @@ const PLUGIN_ROOT = path.resolve(
 const DISPATCHER = path.join(PLUGIN_ROOT, 'scripts', 'hooks', '_userprompt-dispatcher.js');
 
 describe('dispatcher resilience: empty-string rewriter output', () => {
-  it('preserves "" as a valid rewriter user_prompt (not treated as missing)', async () => {
+  it('preserves "" as a valid rewriter user_prompt on the INTERNAL handoff', async () => {
+    // Where this contract lives moved with the stdout allowlist. `user_prompt`
+    // is no longer emitted (the host discards it), so the empty string can only
+    // be observed where it still matters: the payload the parallel contributors
+    // classify on. Asserting it against `mergeHookResults` would now be a test
+    // of a key that is deliberately dropped.
+    const rewriterResult = { user_prompt: '', message: 'cleared by rewriter' };
+    const payload = { prompt: 'original' };
+    // The dispatcher's guard, verbatim (pinned by the source test below).
+    if (typeof rewriterResult?.user_prompt === 'string') {
+      payload.user_prompt = rewriterResult.user_prompt;
+    }
+    expect(payload.user_prompt).toBe('');
+
+    // And the merge drops both non-host keys, leaving nothing to send.
     const { mergeHookResults } = await import(DISPATCHER);
-    const merged = mergeHookResults(
-      { user_prompt: '', message: 'cleared by rewriter' },
-      [],
-    );
-    // Empty string must round-trip through the merge — the rewriter
-    // intentionally chose to clear the prompt.
-    expect(merged).not.toBeNull();
-    expect(merged.user_prompt).toBe('');
-    expect(merged.message).toBe('cleared by rewriter');
+    expect(mergeHookResults(rewriterResult, [])).toBeNull();
   });
 
   it('source: dispatcher guards rewriter payload-write with typeof string', async () => {
@@ -42,6 +48,12 @@ describe('dispatcher resilience: empty-string rewriter output', () => {
     expect(src).toMatch(/typeof\s+rewriterResult\?\.user_prompt\s*===\s*['"]string['"]/);
     // Ensure the old falsy gate is gone.
     expect(src).not.toMatch(/if\s*\(\s*rewriterResult\?\.user_prompt\s*\)/);
+    // And the ASSIGNMENT itself must survive. `user_prompt` stopped being an
+    // emitted key when the host allowlist landed, which makes it easy to read
+    // the whole thing as dead and delete it — but the parallel contributors
+    // classify on `payload.user_prompt`, so removing this line silently gives
+    // them the pre-rewrite text. That failure is invisible on stdout.
+    expect(src).toMatch(/payload\.user_prompt\s*=\s*rewriterResult\.user_prompt/);
   });
 });
 

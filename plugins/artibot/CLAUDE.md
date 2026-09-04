@@ -61,11 +61,11 @@ Never tell the user to type slash-commands. Detect intent and trigger the right 
 **How it actually fires (hybrid, not pure code-autofire).** There is no hook that deterministically executes a command from a regex. "Auto-invoke" is two cooperating mechanisms:
 
 1. **Native skill activation** — Claude Code matches the user's request against each skill's frontmatter `description` and loads matching skills on its own. The skill `description` quality is therefore the *real* lever: a precise, trigger-rich description is what makes a skill fire; a vague one silently won't. (This is why the description linter — R1 trigger floor, R2 anti-CSO — is a load-bearing gate, not cosmetics.)
-2. **Meta-prose injection** — `scripts/hooks/runtime-prompt.js` injects advisory directives (e.g. `[artibot:hint recommend=X]`) into the prompt. These are *advisory*: the model surfaces a recommendation and acts on intent; they never force-execute `/orchestrate` or `/autopilot`.
+2. **Meta-prose injection** — `scripts/hooks/runtime-prompt.js` emits advisory directives (e.g. `[artibot:hint recommend=X]`) as `UserPromptSubmit` `additionalContext`, which the host places **next to** the prompt as a hook-context message. These are *advisory*: the model surfaces a recommendation and acts on intent; they never force-execute `/orchestrate` or `/autopilot`.
 
 So "Claude auto-triggers without the user typing a slash" is accurate at the behavior level, but the engine is description-driven model activation + advisory hints — not a hidden dispatcher that runs commands from keywords.
 
-**Recommend-hint surfacing rule**: When the model receives an `[artibot:hint recommend=X]` directive (injected by `scripts/hooks/runtime-prompt.js`), it **must** surface the recommendation to the user as a single Korean sentence and wait for confirmation before acting. This is advisory only — the hint never auto-fires `/orchestrate` or `/autopilot`. Example phrasings:
+**Recommend-hint surfacing rule**: When the model receives an `[artibot:hint recommend=X]` directive (emitted by `scripts/hooks/runtime-prompt.js` as hook additional context), it **must** surface the recommendation to the user as a single Korean sentence and wait for confirmation before acting. This is advisory only — the hint never auto-fires `/orchestrate` or `/autopilot`. Example phrasings:
 
 - `recommend=workflow` (= orchestrate 추천, 동형 반복 감지): "이 작업은 같은 패턴 반복이라 고정 파이프라인(orchestrate)으로 돌리면 더 빠르고 결과가 일정해요. 그렇게 할까요?"
 - `recommend=autopilot` (대형 무인작업 적합): "자리 비우셔도 되면 오토파일럿으로 돌릴 수 있어요."

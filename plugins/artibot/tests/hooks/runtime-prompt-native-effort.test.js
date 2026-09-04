@@ -23,6 +23,9 @@
 import { describe, expect, it } from 'vitest';
 import { composePromptOutput } from '../../scripts/hooks/runtime-prompt.js';
 
+/** See runtime-prompt-team-inject.test.js — the host reads only this field. */
+const ctxOf = (out) => out.hookSpecificOutput?.additionalContext ?? '';
+
 /** Minimal prepared envelope (composePromptOutput only reads these fields). */
 const prepared = { userPrompt: '/implement add oauth login', message: '[runtime] prompt prepared' };
 
@@ -38,8 +41,9 @@ describe('runtime-prompt — native effort override propagation (#30806)', () =>
     const out = composePromptOutput({
       prepared, prompt: prepared.userPrompt, effortMeta, taskBudgetDirective: '', injectPrompt: true,
     });
-    // Directive reflects the native band, not the xhigh baseline.
-    expect(out.user_prompt).toMatch(/^\[artibot:effort level=low command=implement\]/);
+    // Directive reflects the native band, not the xhigh baseline — asserted on
+    // the channel the host actually delivers (design §4.4).
+    expect(ctxOf(out)).toMatch(/^\[artibot:effort level=low command=implement\]/);
     // Message reflects it too (this field is emitted regardless of injectPrompt).
     expect(out.message).toContain('cmd=/implement effort=low');
   });
@@ -52,7 +56,7 @@ describe('runtime-prompt — native effort override propagation (#30806)', () =>
       prepared: { userPrompt: '/update', message: '[runtime] prepared' },
       prompt: '/update', effortMeta, taskBudgetDirective: '', injectPrompt: true,
     });
-    expect(out.user_prompt).toMatch(/^\[artibot:effort level=max command=update\]/);
+    expect(ctxOf(out)).toMatch(/^\[artibot:effort level=max command=update\]/);
     expect(out.message).toContain('cmd=/update effort=max');
   });
 
@@ -66,7 +70,7 @@ describe('runtime-prompt — native effort override propagation (#30806)', () =>
     const out = composePromptOutput({
       prepared, prompt: prepared.userPrompt, effortMeta, taskBudgetDirective: '', injectPrompt: true,
     });
-    expect(out.user_prompt).toMatch(/^\[artibot:effort level=xhigh command=implement\]/);
+    expect(ctxOf(out)).toMatch(/^\[artibot:effort level=xhigh command=implement\]/);
     expect(out.message).toContain('cmd=/implement effort=xhigh');
     expect(out.message).not.toContain('native-effort');
   });
@@ -75,7 +79,7 @@ describe('runtime-prompt — native effort override propagation (#30806)', () =>
     const out = composePromptOutput({
       prepared, prompt: prepared.userPrompt, effortMeta: null, taskBudgetDirective: '', injectPrompt: true,
     });
-    expect(out.user_prompt).not.toMatch(/\[artibot:effort/);
+    expect(ctxOf(out)).not.toMatch(/\[artibot:effort/);
     expect(out.message).toBe('[runtime] prompt prepared');
   });
 });

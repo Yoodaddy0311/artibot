@@ -104,7 +104,28 @@ describe('runtime-prompt hook', () => {
 
     expect(output).not.toBeNull();
     expect(output.message).toContain('[runtime]');
+    // The rewritten text still flows through the pipeline (internal surface)…
     expect(output.user_prompt).toContain('CRITICAL RE-VERIFICATION MODE ACTIVATED.');
+    // …but this hook does NOT echo the prompt body into the host channel. The
+    // `!rv` protocol reaches the model from user-prompt-handler's own
+    // additionalContext (design §2.1 A), not from here.
+    const ctx = output.hookSpecificOutput?.additionalContext ?? '';
+    expect(ctx).not.toContain('CRITICAL RE-VERIFICATION MODE ACTIVATED.');
+  });
+
+  it('emits the runtime envelope on the host channel, without the prompt body', async () => {
+    const output = await handleUserPromptSubmit({
+      user_prompt: 'fix typo in readme',
+      event: 'UserPromptSubmit', cwd: sandboxRoot,
+    });
+
+    expect(output).not.toBeNull();
+    const ctx = output.hookSpecificOutput?.additionalContext ?? '';
+    // The routing verdict survives the move, as a directive rather than as the
+    // 'System N mode: … / Original request:' prompt wrapper the host ignores.
+    expect(ctx).toMatch(/^\[artibot:route system[12]\] /);
+    expect(ctx).not.toContain('Original request:');
+    expect(ctx).not.toContain('fix typo in readme');
   });
 
   it('rewrites a simple prompt through the Phase 1 runtime path', async () => {

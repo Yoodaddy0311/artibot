@@ -113,14 +113,27 @@ describe('hook-chain runtime flow', () => {
     expect(runtimeOutput).not.toBeNull();
     expect(runtimeOutput.message).toContain('[runtime]');
     expect(runtimeOutput.message).toContain('route=SYSTEM1');
+    // Pipeline-internal envelope (what the eval suite's prompt-rewritten
+    // assertion reads) is unchanged.
     expect(runtimeOutput.user_prompt).toContain('System 1 mode');
     expect(runtimeOutput.user_prompt).toContain('Original request:');
+    // What the HOST receives is the same verdict as a one-line directive. The
+    // 'Original request:' wrapper is dropped: it framed a prompt substitution
+    // the host never performed (2.1.259 measured).
+    const ctx = runtimeOutput.hookSpecificOutput?.additionalContext ?? '';
+    expect(ctx).toContain('[artibot:route system1]');
+    expect(ctx).not.toContain('Original request:');
+    expect(ctx).not.toContain('fix typo in readme');
   });
 
   it('preserves special-trigger rewrites before runtime enrichment', async () => {
     const { firstOutput, runtimeOutput } = await runHookChain('!rv check auth module');
     expect(firstOutput).not.toBeNull();
     expect(firstOutput.user_prompt).toContain('CRITICAL RE-VERIFICATION MODE');
+    // The rewriter now also states the protocol on the host channel, because
+    // replacing the prompt was never possible (design §2.1 A).
+    expect(firstOutput.hookSpecificOutput?.additionalContext)
+      .toContain('CRITICAL RE-VERIFICATION MODE');
     expect(runtimeOutput).not.toBeNull();
     expect(runtimeOutput.user_prompt).toContain('CRITICAL RE-VERIFICATION MODE');
     expect(runtimeOutput.message).toContain('[runtime]');

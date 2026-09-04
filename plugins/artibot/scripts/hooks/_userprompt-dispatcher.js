@@ -16,9 +16,14 @@
  *      side effects and was being worked on concurrently in IMPL-T1; keeping
  *      it out of process avoids a file conflict). It returns nothing useful
  *      to merge — its output is purely stderr-side observability.
- *   4. Merges the results: `user_prompt` from the rewriter takes precedence;
+ *   4. Merges the results into the HOST's stdout schema and nothing else:
  *      every contributor's additionalContext is concatenated with blank-line
- *      separators.
+ *      separators into `hookSpecificOutput.additionalContext`, and only
+ *      allowlisted top-level keys are copied (HOST_STDOUT_KEYS below).
+ *      `user_prompt` is a DISPATCHER-INTERNAL key — the rewriter still returns
+ *      it and step 1 still writes it onto the payload so the parallel
+ *      contributors classify the rewritten text, but it stops at this
+ *      process's stdout boundary because the host does not read it.
  *
  * Rollback: set ARTIBOT_DISABLE_DISPATCHER=1. The dispatcher then writes a
  * stderr warning and exits without invoking any hook. Because hooks.json now
@@ -32,8 +37,10 @@
  */
 
 import path from 'node:path';
+import { readFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { getPluginRoot } from '../utils/index.js';
 import { handleUserPromptSubmit as userPromptHandler } from './user-prompt-handler.js';
 import { handleUserPromptSubmit as autoTeamTrigger } from './auto-team-trigger.js';
 import { handleUserPromptSubmit as runtimePrompt } from './runtime-prompt.js';
@@ -56,6 +63,82 @@ const GIT_AUTOPILOT_SAVE = path.join(HERE, 'git-autopilot-save.js');
 // git invocations (stash + commit). Failure here is observable via stderr
 // only — the user's prompt still proceeds.
 const GIT_AUTOPILOT_TIMEOUT_MS = 8000;
+
+/**
+ * ALLOWLIST — the top-level keys the host accepts on a hook's stdout.
+ *
+ * Source: the host's own zod schema, read out of the installed bundle.
+ * `~/.local/share/claude/versions/2.1.259` @187026302 (and unchanged at
+ * 2.1.260): `c({continue, suppressOutput, stopReason, decision, systemMessage,
+ * terminalSequence, reason, hookSpecificOutput})`. Everything else is STRIPPED
+ * by the host's `Lwe` validator (@187394114), which writes
+ * `Hook JSON output had unrecognized keys (ignored): …` to the debug file and
+ * nowhere else. Full measurement:
+ * `.artibot/guides/v5-design/PROBE-effort-directive-delivery.md` (B1-B6).
+ *
+ * This is a POSITIVE list on purpose. A deny list ("drop user_prompt and
+ * message") is fail-OPEN: the next internal key someone invents ships straight
+ * to a host that silently discards it, which is exactly the six-week outage
+ * INCIDENT-2026-09-03-hook-payload-contract.md records. Keys not on this list
+ * are NEVER COPIED — they are not deleted afterwards.
+ *
+ * When the host version changes, grow this constant; the drift gate
+ * `tests/firewall/ups-host-schema-drift.test.js` reads the schema back out of
+ * the installed binary and fails when the two disagree.
+ */
+export const HOST_STDOUT_KEYS = Object.freeze([
+  'continue',
+  'suppressOutput',
+  'stopReason',
+  'decision',
+  'reason',
+  'systemMessage',
+  'terminalSequence',
+  'hookSpecificOutput',
+]);
+
+/**
+ * ALLOWLIST — the `hookSpecificOutput` keys the host accepts for
+ * UserPromptSubmit. Same source, @187027146:
+ * `c({hookEventName: literal("UserPromptSubmit"), additionalContext,
+ * sessionTitle, suppressOriginalPrompt})`.
+ *
+ * Artibot emits `hookEventName` + `additionalContext`. `suppressOriginalPrompt`
+ * only applies when `decision:"block"` is set, which no UserPromptSubmit hook
+ * here does.
+ */
+export const HOST_UPS_KEYS = Object.freeze([
+  'hookEventName',
+  'additionalContext',
+  'sessionTitle',
+  'suppressOriginalPrompt',
+]);
+
+const HOST_STDOUT_KEY_SET = new Set(HOST_STDOUT_KEYS);
+
+/**
+ * Rollback switch: `runtime.hooks.userPromptSubmit.legacyStdout` (default
+ * false). When true, `mergeHookResults` copies every top-level key again, as it
+ * did before the allowlist landed.
+ *
+ * READ THIS BEFORE FLIPPING IT: the legacy state is the state that was BROKEN.
+ * A top-level `user_prompt` is discarded by the host either way (PROBE B1-B6),
+ * so turning this on does not restore a working path — it only restores the
+ * old stdout SHAPE, which is useful for bisecting a regression in the parallel
+ * contributors and for nothing else.
+ *
+ * @returns {boolean}
+ */
+function isLegacyStdoutEnabled() {
+  try {
+    const configPath = path.join(getPluginRoot(), 'artibot.config.json');
+    const parsed = JSON.parse(readFileSync(configPath, 'utf-8'));
+    return parsed?.runtime?.hooks?.userPromptSubmit?.legacyStdout === true;
+  } catch {
+    // Fail CLOSED: an unreadable config keeps the host-schema allowlist on.
+    return false;
+  }
+}
 
 /**
  * Run a hook's named export with try/catch. Logs the failure to stderr but
@@ -138,23 +221,34 @@ function runGitAutopilotSave(payload) {
 }
 
 /**
- * Merge the rewriter's result with the parallel contributors' results.
+ * Merge the rewriter's result with the parallel contributors' results into the
+ * HOST's stdout schema.
  *
- *   - `user_prompt` from the rewriter wins (it can rewrite or null-out).
  *   - `additionalContext` from every contributor is concatenated with
- *     blank-line separators. The rewriter's own additionalContext (if any)
- *     comes first, followed by the parallel contributors in fulfillment order.
- *   - All other top-level fields (e.g. `continue`, `message`) are spread from
- *     the rewriter's result, then defensively shallow-merged with each
- *     contributor's non-context fields (last write wins; uncommon in practice).
+ *     blank-line separators, in INPUT ORDER. `Promise.allSettled` resolves to
+ *     the input array's order, not completion order, so this is deterministic:
+ *     whatever `main()` lists first lands first, which is how the effort /
+ *     task-budget directives stay on the first line.
+ *   - Other top-level fields are copied ONLY when the key is in
+ *     HOST_STDOUT_KEYS. `user_prompt` and `message` are dispatcher-internal and
+ *     stop here; they are not copied, so there is nothing to delete later.
+ *   - `continue: true` is elided: it is the host's default, so emitting it
+ *     carries zero information (`ambiguity-guard.js#buildOutput` returns it on
+ *     every prompt). `continue: false` and every other allowlisted key pass
+ *     through untouched.
  *
  * @param {object|null} rewriterResult
  * @param {Array<PromiseSettledResult<object|null>>} parallelResults
+ * @param {{ legacyStdout?: boolean }} [options] - `legacyStdout: true` restores
+ *   the pre-allowlist "copy every key" behaviour (config rollback, see
+ *   `isLegacyStdoutEnabled`).
  * @returns {object|null} The merged response object, or null when nothing to send.
  */
-export function mergeHookResults(rewriterResult, parallelResults) {
+export function mergeHookResults(rewriterResult, parallelResults, options = {}) {
   const out = {};
   const additions = [];
+  const dropped = new Set();
+  const legacyStdout = options.legacyStdout === true;
 
   function ingest(value) {
     if (!value || typeof value !== 'object') return;
@@ -166,6 +260,13 @@ export function mergeHookResults(rewriterResult, parallelResults) {
       // prototype or shadow a built-in rather than merge a field.
       if (isUnsafeMergeKey(key)) continue;
       if (key === 'hookSpecificOutput') continue; // composed below
+      if (!legacyStdout && !HOST_STDOUT_KEY_SET.has(key)) {
+        dropped.add(key);
+        continue;
+      }
+      // `continue: true` is the host default — never copied, so a later
+      // contributor's default can never overwrite an earlier `continue: false`.
+      if (!legacyStdout && key === 'continue' && val === true) continue;
       out[key] = val;
     }
   }
@@ -180,6 +281,15 @@ export function mergeHookResults(rewriterResult, parallelResults) {
       hookEventName: 'UserPromptSubmit',
       additionalContext: additions.join('\n\n'),
     };
+  }
+
+  if (dropped.size > 0) {
+    // One line per process (HOOK-VISIBILITY §2.2). exit-0 stderr only reaches
+    // the debug file (INCIDENT F13), but it leaves a drift trail for anyone who
+    // adds a key expecting the host to read it.
+    process.stderr.write(
+      `[artibot:${HOOK_NAME}] dropped non-host keys: ${[...dropped].join(',')}\n`,
+    );
   }
 
   return Object.keys(out).length > 0 ? out : null;
@@ -207,11 +317,17 @@ async function main() {
     payload.user_prompt = rewriterResult.user_prompt;
   }
 
-  // Step 2: 4 in-process contributors in parallel + 1 child-process side-effect.
+  // Step 2: 5 in-process contributors in parallel + 1 child-process side-effect.
+  //
+  // ORDER IS LOAD-BEARING even though these run concurrently: `allSettled`
+  // returns results in INPUT order, and `mergeHookResults` joins their
+  // additionalContext in that same order. `runtime-prompt` goes first so the
+  // `[artibot:effort …][artibot:task-budget …]` directives are the first line
+  // the model reads, ahead of the advisory `[auto-team-suggested]` blocks.
   const [parallelResults] = await Promise.all([
     Promise.allSettled([
-      safeRun(autoTeamTrigger, payload, 'auto-team-trigger'),
       safeRun(runtimePrompt, payload, 'runtime-prompt'),
+      safeRun(autoTeamTrigger, payload, 'auto-team-trigger'),
       safeRun(autopilotNlu, payload, 'autopilot-nlu-trigger'),
       safeRun(autoCommandSuggest, payload, 'auto-command-suggest'),
       safeRun(ambiguityGuard, payload, 'ambiguity-guard'),
@@ -219,7 +335,9 @@ async function main() {
     runGitAutopilotSave(payload),
   ]);
 
-  const merged = mergeHookResults(rewriterResult, parallelResults);
+  const merged = mergeHookResults(rewriterResult, parallelResults, {
+    legacyStdout: isLegacyStdoutEnabled(),
+  });
   if (merged) {
     try { process.stdout.write(JSON.stringify(merged)); } catch { /* ignore */ }
   }

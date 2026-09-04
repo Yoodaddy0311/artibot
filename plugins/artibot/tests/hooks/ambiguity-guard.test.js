@@ -83,6 +83,11 @@ describe('ambiguity-guard hook', () => {
   describe('buildOutput()', () => {
     it('returns a pass-through when not ambiguous', () => {
       const out = buildOutput({ ambiguous: false, hits: [], wordCount: 8 });
+      // Unchanged on purpose. The hook keeps returning the host default; the
+      // dispatcher is what elides `continue: true` from stdout, because that is
+      // the one place that knows whether any contributor produced anything
+      // (see mergeHookResults). Moving the decision here would make this hook's
+      // `null` indistinguishable from a crash to the dispatcher.
       expect(out).toEqual({ continue: true });
     });
 

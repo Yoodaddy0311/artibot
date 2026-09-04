@@ -1068,6 +1068,12 @@
       "cache-roi",
       "summarization"
     ],
+    "hooks": {
+      "userPromptSubmit": {
+        "legacyStdout": false,
+        "comment": "Rollback switch for the UserPromptSubmit stdout allowlist (DESIGN-UPS-additionalContext-migration.md §4.2). false = scripts/hooks/_userprompt-dispatcher.js copies ONLY the host schema keys (HOST_STDOUT_KEYS) onto stdout, so the runtime envelope travels as hookSpecificOutput.additionalContext and the dispatcher-internal `user_prompt`/`message` stop at the process boundary. true = the pre-2026-09-04 behaviour, every top-level key copied. READ BEFORE FLIPPING: `true` is NOT a working state, it is the BROKEN state — the host strips a top-level `user_prompt` either way (PROBE-effort-directive-delivery.md B1-B6, INCIDENT-2026-09-03-hook-payload-contract.md), so this restores the old stdout SHAPE only, for bisecting a parallel-contributor regression. The key lives here rather than under runtime.effort because the whole envelope (route hint, memory, guardrail) moves, not just the effort directive. Read by _userprompt-dispatcher.js#isLegacyStdoutEnabled, which fails CLOSED (unreadable config = allowlist ON)."
+      }
+    },
     "effort": {
       "injectPrompt": true,
       "nativeApi": true,
@@ -1078,7 +1084,7 @@
         "medium": 32000,
         "low": 16000
       },
-      "comment": "What these keys actually do (measured 2026-09-02; the plugin has NO Messages API caller and never sets output_config.effort — `grep output_config lib scripts` finds only comments). injectPrompt=true: scripts/hooks/runtime-prompt.js prepends the prose directive `[artibot:effort level=X command=Y]` (from lib/cognitive/effort-policy.js via effort-resolver.js) to the user prompt on UserPromptSubmit and persists it to runtime/current-effort.json; lib/runtime/middleware/tasks.js then copies it into task.meta.effort/taskBudget so /team can prefix each teammate. nativeApi=true: runtime-prompt.js READS the host's native effort band (lib/cognitive/native-effort.js — env var / hook stdin) and lets it override the heuristic band before persisting; it never writes the host's effort. The directive is advisory text — the model's real effort is whatever the host applies (/effort, --effort, settings). budgetMap maps each level to a recommended max_tokens for the `[artibot:task-budget]` directive (lib/runtime/task-budget.js); 'max' (200k) is the ceiling tier for the deepest agentic runs (ultracode), xhigh/high/medium/low are 1:1 with the native level names."
+      "comment": "What these keys actually do (measured 2026-09-02; the plugin has NO Messages API caller and never sets output_config.effort — `grep output_config lib scripts` finds only comments). injectPrompt=true: scripts/hooks/runtime-prompt.js emits the prose directive `[artibot:effort level=X command=Y]` (from lib/cognitive/effort-policy.js via effort-resolver.js) as UserPromptSubmit hookSpecificOutput.additionalContext and persists it to runtime/current-effort.json (a hook CANNOT prepend to the prompt — the host delivers hook output as a separate message beside the untouched prompt; measured 2026-09-03 on 2.1.259, .artibot/guides/v5-design/PROBE-effort-directive-delivery.md); lib/runtime/middleware/tasks.js then copies it into task.meta.effort/taskBudget so /team can prefix each teammate. nativeApi=true: runtime-prompt.js READS the host's native effort band (lib/cognitive/native-effort.js — env var / hook stdin) and lets it override the heuristic band before persisting; it never writes the host's effort. The directive is advisory text — the model's real effort is whatever the host applies (/effort, --effort, settings). budgetMap maps each level to a recommended max_tokens for the `[artibot:task-budget]` directive (lib/runtime/task-budget.js); 'max' (200k) is the ceiling tier for the deepest agentic runs (ultracode), xhigh/high/medium/low are 1:1 with the native level names."
     },
     "longContext": {
       "enabled": false,
