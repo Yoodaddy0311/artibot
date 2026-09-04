@@ -35,8 +35,8 @@
 
 import path from 'node:path';
 import { tmpdir } from 'node:os';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   flushRecorderStats,
   getDecisionRecorderStats,
@@ -343,25 +343,32 @@ describe('flushRecorderStats()', () => {
     expect(unattributed()).toHaveLength(0);
   });
 
-  it('files the stats under _unattributed when there is no run id', () => {
-    // The case the counters exist for: the drop was CAUSED by a missing session
-    // id, so there is no session to file it under. It must still be readable.
-    recordTopologyRecommended(null, observation(), { storeDir });
-    recordMemoryInjection(null, { injected: false }, { storeDir });
-    expect(getDecisionRecorderStats().skipped).toBe(2);
+  it('writes no file at all when there is no run id, reporting on stderr instead', () => {
+    // 후속 12 안 B (2026-09-04). This case used to assert the opposite: the line
+    // was filed under `_unattributed`. That put a file into the live store on
+    // every session-less prompt, and a file saying "there was no session" reads
+    // as "recording is alive" to anything counting the store. The counts still
+    // have to be visible — they now go to stderr, where a session-less prompt is
+    // actually being run, and nowhere near the store.
+    const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    try {
+      recordTopologyRecommended(null, observation(), { storeDir });
+      recordMemoryInjection(null, { injected: false }, { storeDir });
+      expect(getDecisionRecorderStats().skipped).toBe(2);
 
-    const persisted = flushRecorderStats(null, { storeDir });
-    expect(persisted).not.toBeNull();
+      expect(flushRecorderStats(null, { storeDir })).toBeNull();
 
-    const lines = unattributed();
-    expect(lines).toHaveLength(1);
-    expect(lines[0].type).toBe(RECORDER_STATS);
-    expect(lines[0].data.skipped).toBe(2);
-    expect(lines[0].data.failed).toBe(0);
-    // Nothing to attribute it to, so the field is absent rather than guessed.
-    expect(lines[0].data.runId).toBeUndefined();
-    // `skipped` alone is routine — a prompt with no session id is normal.
-    expect(lines[0].level).toBe('info');
+      expect(unattributed()).toHaveLength(0);
+      expect(readdirSync(storeDir)).toEqual([]);
+
+      expect(stderrSpy).toHaveBeenCalledTimes(1);
+      const line = String(stderrSpy.mock.calls[0][0]);
+      expect(line).toContain('2 skipped, 0 failed');
+      // The store id must not appear: nobody should go looking for that file.
+      expect(line).not.toContain(UNATTRIBUTED_RUN_ID);
+    } finally {
+      stderrSpy.mockRestore();
+    }
   });
 
   it('attributes the stats to the run id when one is known', () => {
@@ -389,12 +396,16 @@ describe('flushRecorderStats()', () => {
   });
 
   it('reports the state before its own write, never counting itself', () => {
+    // Read through an attributed run id: since 안 B there is no unattributed
+    // FILE to read the snapshot back from, and the property being pinned here is
+    // about the snapshot, not about attribution.
     recordTopologyRecommended(null, observation(), { storeDir });
     const before = getDecisionRecorderStats().recorded;
-    flushRecorderStats(null, { storeDir });
+    flushRecorderStats(RUN_ID, { storeDir });
 
     // The line reports the pre-write snapshot...
-    expect(unattributed()[0].data.skipped).toBe(1);
+    const [line] = written().filter((e) => e.type === RECORDER_STATS);
+    expect(line.data.skipped).toBe(1);
     // ...while its own success still increments the live counter, so a second
     // flush would report cumulative state. The hook flushes once per process.
     expect(getDecisionRecorderStats().recorded).toBe(before + 1);

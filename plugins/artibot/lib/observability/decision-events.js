@@ -107,12 +107,23 @@ export const MEMORY_INJECTION_MEASURED = 'memory-injection-measured';
 export const RECORDER_STATS = 'recorder-stats';
 
 /**
- * Run id used when stats cannot be attributed to a session. Deliberately NOT
- * the date-bucket fallback this module's header rejects for real events: the
- * whole point of a stats line is to record that something was DROPPED, and a
- * drop caused by a missing session id has, by definition, no session to file
- * under. One fixed file, so "unattributable" is a readable state rather than a
- * silent absence.
+ * Historical run id for stats that could not be attributed to a session.
+ *
+ * NO LONGER WRITTEN. Until 2026-09-04 `flushRecorderStats` filed its
+ * end-of-process line under this id whenever there was no session, so every
+ * session-less prompt appended to a `_unattributed.events.ndjson` in the live
+ * store (measured in the parent repo's `.artibot/runtime/decisions/`,
+ * 2026-09-04: 1 of the 3 files there). A file whose entire content is "there
+ * was no session" reads, to anything counting files in that directory, as
+ * "recording is alive" — the false-health failure this module's header argues
+ * against for swallowed errors. 후속 12 안 B replaced the write with a single
+ * stderr line; see {@link flushRecorderStats}.
+ *
+ * The name stays exported so a reader of the store can recognise files left by
+ * builds from before 2026-09-04. As of 2026-09-04 no consumer in `lib/`,
+ * `scripts/` or `commands/` references it (grep: tests only) — `/doctor`
+ * Check 7 does not mention the file; whether it should is a separate decision.
+ * Nothing in `lib/` writes it any more.
  */
 export const UNATTRIBUTED_RUN_ID = '_unattributed';
 
@@ -635,25 +646,47 @@ export function recordMemoryInjection(runId, measurement, opts = {}) {
  * The snapshot is taken BEFORE the write, so the line reports the state that
  * preceded it and never counts itself.
  *
- * @param {string|null|undefined} runId session to attribute the stats to;
- *   falls back to {@link UNATTRIBUTED_RUN_ID} when there is none.
+ * NO SESSION MEANS NO FILE, since 2026-09-04 (후속 12 안 B). Filing the line
+ * under {@link UNATTRIBUTED_RUN_ID} made the ABSENCE of a session look like
+ * activity to every reader that counts files in the store. The counters are
+ * still reported when there is no session, as ONE stderr line carrying nothing
+ * but the two counts — visible where a session-less prompt actually runs (a
+ * terminal), invisible to anything that measures the store.
+ *
+ * @param {string|null|undefined} runId session to attribute the stats to. When
+ *   it is not a non-empty string nothing is persisted: the counts go to stderr
+ *   instead and the return is null.
  * @param {{ storeDir?: string, projectRoot?: string, cwd?: string, ts?: string, phase?: string }} [opts]
  * @returns {object|null} the persisted event, or null when there was nothing to
- *   report (or the write failed — which is itself counted, see the caveat).
+ *   report, when there was no session, or when the write failed (which is itself
+ *   counted, see the caveat).
  */
 export function flushRecorderStats(runId, opts = {}) {
   const snapshot = { ...stats };
   if (snapshot.skipped === 0 && snapshot.failed === 0) return null;
 
   const attributed = typeof runId === 'string' && runId.length > 0 ? runId : null;
+  if (!attributed) {
+    // 안 B (2026-09-04): no session → nothing on disk. One diagnostic line; no
+    // values, prompt text, or paths — counts only.
+    try {
+      process.stderr.write(
+        '[artibot:decision-events] recorder stats unattributed — '
+        + `${snapshot.skipped} skipped, ${snapshot.failed} failed `
+        + '(no session id; not persisted)\n',
+      );
+    } catch { /* observe-only: a failed diagnostic must not become a failure mode */ }
+    return null;
+  }
+
   const data = {
     skipped: snapshot.skipped,
     failed: snapshot.failed,
     lastError: snapshot.lastError,
   };
-  if (attributed) data.runId = attributed;
+  data.runId = attributed;
 
-  return record(attributed ?? UNATTRIBUTED_RUN_ID, {
+  return record(attributed, {
     ts: opts.ts,
     phase: typeof opts.phase === 'string' ? opts.phase : 'END',
     type: RECORDER_STATS,

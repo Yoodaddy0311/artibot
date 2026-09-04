@@ -11,11 +11,17 @@
  * The canonical restore is `git cat-file -p <ref>:<path> > <path>` followed
  * by `git update-index --refresh` to clear the stale ` M`.
  *
- * Per file: `git ls-files --full-name --error-unmatch` (untracked → refused,
+ * Per file: `git ls-files --full-name --error-unmatch -z` (untracked → refused,
  * never written), `git cat-file -p` with a Buffer (no decoding), write the
  * bytes exactly, then one `git update-index --refresh` at the end (exit code
  * ignored — it is non-zero whenever anything else is modified). Prints sha256
  * before/after per file. Exit 1 when any file was refused or failed.
+ *
+ * `-z` on `ls-files` is load-bearing (measured 2026-09-04): without it
+ * `core.quotepath` C-quotes non-ASCII paths, and the quoted string handed to
+ * `cat-file -p <ref>:<path>` names no blob — every Korean path came back
+ * `failed`. NUL output is never quoted, so the field is taken verbatim; no
+ * trim, because a tracked path may legitimately end in a space.
  *
  * This is the only script under `scripts/split/` that writes tracked files.
  *
@@ -83,7 +89,7 @@ export function restoreBlob({ cwd, file, ref = 'HEAD', git = gitRun }) {
   const abs = path.resolve(cwd, file);
   let repoPath;
   try {
-    repoPath = String(git(['ls-files', '--full-name', '--error-unmatch', '--', file], { cwd })).trim().split(/\r?\n/)[0] || null;
+    repoPath = String(git(['ls-files', '--full-name', '--error-unmatch', '-z', '--', file], { cwd })).split('\0')[0] || null;
   } catch {
     return { file, repoPath: null, status: 'refused', before: null, after: null, blob: null, changed: null, reason: 'untracked (git ls-files --error-unmatch failed) — nothing written' };
   }
