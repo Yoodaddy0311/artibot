@@ -234,6 +234,64 @@ describe('checkLimbLanding — 시나리오별로 정확히 그 검사만 빨갛
   });
 });
 
+describe('checkLimbLanding — 한글·공백 경로 (후속 19 #1: `git diff --name-only` 를 `-z` 로)', () => {
+  // `core.quotepath=true`(git 기본값) 에서 `--name-only` 는 비ASCII 경로를 C-quote 로
+  // 내보낸다: "src/\355\225\234\352\270\200…". 따옴표째 allowlist 에 대면 어떤 글롭에도
+  // 안 맞아 ownership 이 거짓 FAIL 이 된다. `-z` 출력은 인용을 하지 않는다.
+  // RED 증거: 변경 전(7cbb37b9) 코드에서 아래 첫 케이스는 ownership FAIL 이었다.
+  const KO = 'src/한글폴더/설계문서.md';
+  const SP = 'src/with space.md';
+  let krepo = '';
+  let kbase = '';
+
+  beforeAll(() => {
+    krepo = fsSync.mkdtempSync(path.join(os.tmpdir(), 'artibot-land-ko-'));
+    git(['init', '-q', '-b', 'main', '.'], krepo);
+    git(['config', 'user.email', 'test@example.invalid'], krepo);
+    git(['config', 'user.name', 'test'], krepo);
+    git(['config', 'commit.gpgsign', 'false'], krepo);
+    // 기본값이지만 명시 — 이 테스트가 증명하는 것은 "인용이 켜져 있어도" 원문이 온다는 것.
+    git(['config', 'core.quotepath', 'true'], krepo);
+    commitFile(krepo, KO, '# 설계\n', ['docs: 한글 경로']);
+    commitFile(krepo, SP, 'a\n', ['docs: 공백 경로']);
+    kbase = git(['rev-parse', 'HEAD'], krepo);
+
+    git(['checkout', '-q', '-b', 'limb-ko', 'main'], krepo);
+    commitFile(krepo, KO, '# 설계 v2\n', ['docs: 한글 수정', DONE]);
+
+    // 두 파일을 바꾸는 줄기: NUL 구분이 실제로 갈리는지(줄바꿈 split 회귀) 까지 본다.
+    git(['checkout', '-q', '-b', 'limb-sp', 'main'], krepo);
+    commitFile(krepo, SP, 'b\n', ['docs: 공백 수정']);
+    commitFile(krepo, KO, '# 설계 v3\n', ['docs: 한글 재수정', DONE]);
+  });
+
+  afterAll(() => {
+    try {
+      fsSync.rmSync(krepo, { recursive: true, force: true });
+    } catch { /* best effort */ }
+  });
+
+  it('한글 경로가 원문 그대로 changedFiles 에 오고 ownership 이 PASS', () => {
+    const r = checkLimbLanding({ cwd: krepo, limb: 'ko', branch: 'limb-ko', base: kbase, allowlist: ['src/**'] });
+    expect(r.changedFiles).toEqual([KO]);
+    // 따옴표·백슬래시 이스케이프가 섞이지 않았다.
+    expect(r.changedFiles[0]).not.toMatch(/["\\]/);
+    expect(byId(r, 'ownership')).toMatchObject({ ok: true, detail: '1 file(s), all inside allowlist' });
+    expect(r.status).toBe('PASS');
+    expect(r.prBody).toContain(`- \`${KO}\``);
+  });
+
+  it('내부 공백 경로가 그대로 오고, 파일 2개는 NUL 로 갈린다', () => {
+    // 못 보는 것: 끝 공백 경로(`.trim()` 제거의 진짜 회귀면)는 Windows 가 파일명으로
+    // 만들 수 없어 이 호스트에서 검증 불가 — 내부 공백은 변경 전 코드도 보존했다.
+    // 이 케이스가 지키는 것은 NUL 분리(줄바꿈 split 회귀)와 원문 보존이다.
+    const r = checkLimbLanding({ cwd: krepo, limb: 'sp', branch: 'limb-sp', base: kbase, allowlist: ['src/**'] });
+    expect([...r.changedFiles].sort()).toEqual([SP, KO].sort());
+    expect(byId(r, 'ownership')).toMatchObject({ ok: true, detail: '2 file(s), all inside allowlist' });
+    expect(r.status).toBe('PASS');
+  });
+});
+
 describe('matchesAllowlist — 정확 경로 · 디렉터리 접두 · * · **', () => {
   it('정확 경로와 디렉터리 접두', () => {
     expect(matchesAllowlist('docs/a.md', ['docs/a.md'])).toBe(true);

@@ -19,9 +19,16 @@
  * ── Checks ─────────────────────────────────────────────────────────────────
  *   1. trailer        — `limb-completion.js#readLimbCompletion` says `done`
  *                       (first-parent, newest trailer decides).
- *   2. ownership      — every path in `git diff --name-only <base>...<branch>`
+ *   2. ownership      — every path in `git diff --name-only -z <base>...<branch>`
  *                       matches `allowlist` ∪ `alwaysAllowed`
  *                       (exact path · directory prefix · `*` / `**` glob).
+ *                       `-z` is load-bearing (measured 2026-09-04): without it
+ *                       `core.quotepath` C-quotes every non-ASCII path
+ *                       (`"src/\355\225\234…"`), so Korean paths matched no
+ *                       allowlist entry and ownership failed for a reason
+ *                       nobody could read. NUL separation also keeps paths
+ *                       containing spaces whole, which is why the split does
+ *                       not trim each field.
  *   3. binary         — `git diff --numstat` rows reading `-\t-` → fail.
  *   4. citations      — added (`+`) lines of non-binary files matching any
  *                       `forbiddenPatterns` (defaults: `.artibot/split/` paths
@@ -285,7 +292,7 @@ function trailerCheck(completion) {
 }
 
 /**
- * @param {{ status: number, stdout: string, stderr: string }} names - `git diff --name-only` result
+ * @param {{ status: number, stdout: string, stderr: string }} names - `git diff --name-only -z` result
  * @param {ReadonlyArray<string>} changedFiles
  * @param {ReadonlyArray<string>} effectiveAllow
  * @returns {ReturnType<typeof row>}
@@ -424,9 +431,9 @@ export function checkLimbLanding(p = {}) {
   const range = `${base}...${branch}`;
 
   const completion = readLimbCompletion({ cwd, branch, base });
-  const names = git(['diff', '--name-only', range, '--']);
+  const names = git(['diff', '--name-only', '-z', range, '--']);
   const changedFiles = names.status === 0
-    ? names.stdout.split(/\r?\n/).map((s) => s.trim()).filter(Boolean)
+    ? names.stdout.split('\0').filter(Boolean)
     : [];
   const effectiveAllow = [
     ...(Array.isArray(allowlist) ? allowlist : []),

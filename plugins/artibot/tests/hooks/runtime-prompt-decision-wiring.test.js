@@ -45,7 +45,7 @@ import {
   copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync,
   readFileSync, rmSync, symlinkSync, writeFileSync,
 } from 'node:fs';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { handleUserPromptSubmit } from '../../scripts/hooks/runtime-prompt.js';
 import {
   RECORDER_STATS,
@@ -292,11 +292,19 @@ describe('topology sighting reaches <projectRoot>/.artibot/runtime/decisions/', 
   });
 
   it('records no decision events when the payload carries no session id', async () => {
-    const out = await handleUserPromptSubmit({
-      user_prompt: 'a prompt with no session',
-      event: 'UserPromptSubmit',
-      cwd: sandboxRoot,
-    });
+    // Since 후속 12 안 B the session-less flush prints one stderr line; muted
+    // here so the vitest console stays quiet (the next case asserts on it).
+    const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    let out;
+    try {
+      out = await handleUserPromptSubmit({
+        user_prompt: 'a prompt with no session',
+        event: 'UserPromptSubmit',
+        cwd: sandboxRoot,
+      });
+    } finally {
+      stderrSpy.mockRestore();
+    }
     expect(out).not.toBeNull();
     // No date-bucket fallback: an absent session is counted as skipped, never
     // bucketed into a file that would make the store look alive.
@@ -305,31 +313,39 @@ describe('topology sighting reaches <projectRoot>/.artibot/runtime/decisions/', 
     expect(decisions).toHaveLength(0);
   });
 
-  it('leaves the skipped count readable in the _unattributed file', async () => {
+  it('leaves the skipped count readable on stderr, with no _unattributed file', async () => {
     // The counters used to die with the process. Without this line the drop is
     // counted in memory nobody reads — the same "nobody can see it" failure the
-    // module header claims to have fixed. Filed under `_unattributed` because
-    // the drop was CAUSED by the missing session, so there is no session to
-    // file it under.
-    await handleUserPromptSubmit({
-      user_prompt: 'another prompt with no session',
-      event: 'UserPromptSubmit',
-      cwd: sandboxRoot,
-    });
+    // module header claims to have fixed. It is still visible; since 후속 12
+    // 안 B (2026-09-04) the visibility is STDERR, not a file. Filing it under
+    // `_unattributed` put a file in the live store on every session-less
+    // prompt, and a file saying "there was no session" reads as "recording is
+    // alive" to anything counting that directory.
+    const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    try {
+      await handleUserPromptSubmit({
+        user_prompt: 'another prompt with no session',
+        event: 'UserPromptSubmit',
+        cwd: sandboxRoot,
+      });
 
-    const statsFile = path.join(decisionStore(), `${UNATTRIBUTED_RUN_ID}.events.ndjson`);
-    expect(existsSync(statsFile)).toBe(true);
+      const statsFile = path.join(decisionStore(), `${UNATTRIBUTED_RUN_ID}.events.ndjson`);
+      expect(existsSync(statsFile)).toBe(false);
 
-    const lines = readFileSync(statsFile, 'utf-8').split('\n').filter((l) => l.trim())
-      .map((l) => JSON.parse(l));
-    expect(lines.length).toBeGreaterThanOrEqual(1);
-    const last = lines[lines.length - 1];
-    expect(last.type).toBe(RECORDER_STATS);
-    // Counts are cumulative for the process and this suite shares one worker
-    // with earlier cases, so assert the SHAPE and a floor, not an exact total.
-    expect(last.data.skipped).toBeGreaterThan(0);
-    expect(last.data).toHaveProperty('failed');
-    expect(last.data.runId).toBeUndefined();
+      // The hook writes other stderr lines of its own (config warnings), so
+      // filter to the recorder's line instead of counting the whole process.
+      const matched = stderrSpy.mock.calls
+        .map(([chunk]) => /recorder stats unattributed — (\d+) skipped, (\d+) failed/
+          .exec(String(chunk)))
+        .filter(Boolean);
+      expect(matched).toHaveLength(1);
+      // Counts are cumulative for the process and this suite shares one worker
+      // with earlier cases, so assert a FLOOR, not an exact total (header 7).
+      expect(Number(matched[0][1])).toBeGreaterThan(0);
+      expect(Number(matched[0][2])).toBeGreaterThanOrEqual(0);
+    } finally {
+      stderrSpy.mockRestore();
+    }
   });
 
   it('still returns output when the topology module cannot be imported', async () => {
