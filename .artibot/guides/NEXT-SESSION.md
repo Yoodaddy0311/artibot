@@ -1,4 +1,70 @@
-# NEXT-SESSION — 크로스머신 핸드오프 (2026-09-02, master 1d895903 + 2차 커밋)
+# NEXT-SESSION — 크로스머신 핸드오프 (2026-09-04 18:0x, master e569e2da + 이 커밋)
+
+> 로컬 `.artibot/HANDOFF.md`·`.artibot/split/gotchas.md`·`.artibot/ledger/`·`.artibot/handoffs/` 는 gitignore 라 다른 머신에 **없다**. 이 파일이 다른 머신으로 넘어가는 요지본이다. 다른 머신에서는 `git pull` 후 `/resume` 이 "핸드오프 없음"을 내므로 **이 파일을 직접 Read** 하고 시작한다. 갱신 주체: 세션 종료 시 리더가 `/save` 와 함께.
+>
+> 이 머신(AsusHeechangLee)의 자동 메모리 6건(`~/.claude/projects/.../memory/`)도 머신별이다. 요지는 아래 "정본 위치" 표로 대체한다.
+
+## 지금 상태 (2026-09-04 17:58 실측)
+
+| 항목 | 값 |
+|---|---|
+| Branch | `master` @ `e569e2da` (이 커밋 직전), origin ahead/behind 0/0 |
+| Tree | 클린(mod 0 / staged 0 / untracked 0), worktree 메인 1개뿐 |
+| Tests | 14505/14518 pass (`/save` 17:46 시점, 리포 전체) |
+| 릴리스 | **미실시(의도)** — 1차·2차 배치 변경은 설치본에 없다. 오너가 보는 자리에서 실행 |
+| stash | autopilot 체크포인트 10개(9/4 03:41~05:57), 로컬 전용. 버려도 되는지 미확인 |
+
+## 다음 할 일 (우선순위순)
+
+| # | 작업 | 근거·주의 |
+|---|---|---|
+| P0 | **오너 결정 10건 회신** — 설계안 3건 §5: 모델 정책 5(`DESIGN-MODEL-POLICY-role-override.md`) · docs:check 2(`DESIGN-DOCS-CHECK-scope-artibot.md`) · trail 3(`DESIGN-TRAIL-migration-projectRoot.md`). 권장안은 각 §5 에 적혀 있다(아래 표) → 회신을 정본 `.artibot/guides/v5-design/ARTIBOT-5.0-DESIGN.md` 부록 0-2 후속(3) 에 기록 | 3차 배치 착수 전제. 오너 결정 없이는 코드 0 |
+| P0 | **3차 배치 `/split plan`** — L2 Check 10 + replay tool_use_id 조인(오너 승인됨, #42) · docs:check 스코프 · trail D9 동결 · hooks.json 매처 문법 A/B(#49) · timeout 단위 재설정(#50) · `ci-utils.js:74 gitTrackedNames` 링크드 worktree 결함(#56) · handoff-builder :433·stop-review-gate :225(#44) | 2차는 `/split` 창 대신 `/team`+`isolation: worktree` 로 돌렸다(#37). 3차 형태는 오너 참관 여부로 결정 |
+| P1 | **릴리스 v4.55.0** — 1차+2차 배치 CHANGELOG 일괄(리더 소유) → `npm run release` → `claude plugin update` → L1 D4·L2 D3/D4 라이브 판정(Check 7 · `spawns.ndjson` route.selected/route.bound) | 라이브 판정은 릴리스 후에만 가능 |
+| P2 | `templates/split/PROMPT-TEMPLATE.md`·`commands/split.md` 가 2차에서 착지했는지 **라이브 dispatch 1회**로 검증 | 회고 §7 2차 절은 e569e2da 로 이미 착지 — 남은 것은 dispatch 검증뿐 |
+| P2 | 3차 승인 **보류분**(건드리지 말 것): HOOK-VISIBILITY H-1~6 · PLANNER-PARALLELIZATION · landing-lock 근본안(tmp+linkSync — 최소 수리 e0aa2580 으로 운용) | #42 오너 결정 |
+
+## 오너 결정 대기 10건 — 권장안 요약
+
+| 설계안 | 질문 | 권장 |
+|---|---|---|
+| MODEL-POLICY §5 ① | 조사 역할을 process/judge 로 분리? | (권장 없음 — 오너 판단) |
+| MODEL-POLICY §5 ② | A안(역할이 이름을 이김) 허용? | **아니오** |
+| MODEL-POLICY §5 ③ | D 에이전트 2종 신설 + allowlist 8→10? | **예** |
+| MODEL-POLICY §5 ④ | `review.claim_audit` 어휘 +1? | **예** |
+| MODEL-POLICY §5 ⑤ | fable 예산 상한 | (수치 결정 필요) |
+| DOCS-CHECK §5 ① | 렌더링 위반 15건 고치고 넣기 vs baseline | **고치고 넣기** |
+| DOCS-CHECK §5 ② | 서브트리 허용목록 vs `.artibot/**` | **허용목록** |
+| TRAIL §5 ① | D9 동결 지금? | **예** |
+| TRAIL §5 ② | 목적지 decisions 스토어? | **예** |
+| TRAIL §5 ③ | 기존 trail 972·9건 그대로? | **예** |
+
+## 2026-09-04 세션 총괄
+
+- **1차 배치**(4줄기, `/split` 창 4개) → master `520886bd`. **2차 배치**(4줄기 l1-ups · l2-d1 · test-git-sandbox · p19-rest, `/team`+worktree) → master `838d86bd`. 이후 docs 2건(`f09fa2c0` 설계안 2건, `e569e2da` 회고 §7). 7cbb37b9 대비 104파일 +8,915/-860.
+- 2차 랜딩 실패 2회: ① README 수치 게이트(26→27 등록·69→70 스크립트, `18b8b126` 수리) ② 줄기 간 상호작용 3건(`838d86bd` 수리 — land --json 7행 · 스포너 래칫 +1 · observeRoute 인용 심볼).
+- 코드 결함 확정 3: landing-lock 빈 파일 회수(`e0aa2580` 수리) · sessionstart 테스트 실 리포 부작용(`60dab1dd`) · ci-utils 링크드 worktree(#56, **미수리**, 3차 후보).
+- 1차 창 4개 닫음 → 죽은 pid 락 unlock 후 worktree 4·브랜치 4 제거(#61).
+- 리더 오류 패턴(회고 §7): 수치에 측정 시각 누락 · 관측 일반화(#39 #43 #45 #47 #57 #59). 규율 §4·§6.
+- 팀: 팀원 16명 스폰(구현 5 · 검수 6 · 조사 3 · 기록 2). review-tgs 는 세션 한도로 종료(보고는 완결).
+
+## 정본 위치 (다른 머신에서 읽을 순서)
+
+1. `reports/SPLIT/split-9d6dc2.md` — 1차 §0~6 + 2차 §7, 교훈 원장 61건 전문(§3.2 #1~37 · §7.5 #38~57 · §7.8 #58~61). gotchas.md 의 대체본.
+2. `.artibot/guides/v5-design/DESIGN-MODEL-POLICY-role-override.md` · `DESIGN-DOCS-CHECK-scope-artibot.md` · `DESIGN-TRAIL-migration-projectRoot.md` — 각 §5 가 결정 질문.
+3. `.artibot/guides/v5-design/ARTIBOT-5.0-DESIGN.md` — 정본. 부록 0-2 후속 기록 위치.
+4. `plugins/artibot/scripts/hooks/subagent-handler.js` · `plugins/artibot/tests/firewall/dispatcher-cwd-sandbox-required.test.js` — 2차 배치 핵심 변경.
+5. `.artibot/guides/vnext-design/ADDENDUM-2026-09-02.md` — /split vNext 결정(완료 판정 = first-parent 최신 트레일러).
+
+## 크로스머신 주의
+
+- 이 파일을 다시 쓰는 머신이 `/save` 를 돌리면 그 머신의 로컬 `HANDOFF.md` 가 생긴다 — 돌아올 때 **이 파일도 함께** 갱신해 푸시할 것.
+- `.artibot/split/gotchas.md` 에 새 교훈을 적으면 회고 §7.8 뒤에도 옮겨 적어야 다른 머신에 간다.
+- 한글 경로 리포 — git 경로 파싱은 `-z`.
+
+---
+
+# (구) NEXT-SESSION — 2026-09-02, master 1d895903 + 2차 커밋
 
 > **병합 메모(2026-09-02)**: 이 파일은 같은 날 두 세션이 갱신했다 — 위 헤더·아래 "다음 할 일"은 Artibot 세션(Fable 2티어·/split·v4.52.0 릴리스), 아래 "이전 갱신(2026-08-31, /ultrareview 라운드)" 절은 origin/master 에서 온 기록이다. 우선순위 표는 두 세션의 P0 를 합쳐 읽는다.
 
