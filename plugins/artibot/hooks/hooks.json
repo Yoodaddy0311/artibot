@@ -91,6 +91,18 @@
         "category": "quality"
       },
       {
+        "matcher": "Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/route-observe-pre.js",
+            "timeout": 5000
+          }
+        ],
+        "priority": "optional",
+        "category": "observability"
+      },
+      {
         "matcher": "tool == \"WebFetch\"",
         "hooks": [
           {

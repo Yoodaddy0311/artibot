@@ -349,7 +349,14 @@ function buildContext(toolName, input) {
       return 'fetch:web:external';
     }
 
+    case 'Agent':
     case 'Task': {
+      // 'Agent' is the current host tool name; 'Task' is what it was called
+      // before the rename, kept because an older host still sends it and
+      // dropping it would silently demote those payloads to the default
+      // 'use:task:tool' bucket. Design follow-up 4 asked for Agent; adding it
+      // as an allowlist entry rather than a replacement is the fail-closed
+      // direction (verification-discipline §8).
       const agentType = input.subagent_type || input.type || 'generic';
       return `delegate:${agentType}:subagent`;
     }
@@ -441,6 +448,7 @@ function scoreResult(toolName, result, _input) {
       return 0.9;
     }
 
+    case 'Agent':
     case 'Task': {
       // Sub-agent results are harder to score; use presence of output as proxy
       if (!output || output.length < MIN_SUBSTANTIVE_LENGTH) return 0.3;
