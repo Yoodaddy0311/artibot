@@ -229,10 +229,39 @@ detection validate against that definition.
 
 ## Open gaps (not resolved by any document)
 
-- **G-1 `performance.priority` has four vocabularies.** The schema accepts the
-  union of eight values. Whether `speed_accuracy`, `fast` and `maximum` denote
-  one thing or three is undecided. A router consuming this will need a
-  normalization table that no document supplies.
+- **G-1 `performance.priority` has four vocabularies — RESOLVED (owner
+  2026-09-04), with one residue.** The schema still accepts the union of eight
+  values and this enum is unchanged. The router now absorbs the five
+  non-design values into the three design values through
+  `lib/routing/execution-profile.js#PRIORITY_ALIASES`, each row graded by its
+  evidence (`attested` / `inferred` / `judgment`; the argument per row is
+  `.artibot/guides/v5-design/DESIGN-G-1-performance-priority-mapping.md` §2):
+
+  | Schema value | → design value | Grade |
+  |---|---|---|
+  | `fast` | `maximum` | attested |
+  | `speed_accuracy` | `maximum` | inferred |
+  | `maximum_performance` | `maximum` | inferred |
+  | `quality` | `balanced` | judgment |
+  | `economy` | `balanced` | judgment, **lossy** |
+
+  The author's value is preserved at `profile.performance.priority`; only the
+  routing behaviour is merged. A ninth enum value without an alias row still
+  normalizes to `null` (`'G-1 unresolved'`) — fail-closed is kept.
+
+  **`economy` is a lossy mapping. If this table reads as "all five resolved",
+  that is an illusion.** No design priority is cheaper than `balanced`
+  (`costWeight` tops out at 1 across all three, and `balanced` itself carries
+  no `budgetCeilingRef` — only `split` has one), so "spend less"
+  reaches the router as "spend normally". The `reason` string the router emits
+  carries the word `lossy` for exactly this row.
+- **G-1b (OPEN) — does `economy` get a directive of its own?** Candidates are
+  `costWeight > 1` or a `budgetCeilingRef` (e.g. `routing.economy.budget`).
+  Either one makes the design vocabulary four values, which the owner's
+  2026-09-04 decision ("absorb into three") did not choose. Not decided; the
+  interpreter's `PERFORMANCE_PRECEDENCE` placing `economy` above `fast`
+  (grounded on an economy budget ceiling the design does not have) is the
+  same open item seen from the other side.
 - **G-2 `autonomy` has two key spellings and two value families.** Accepted as
   aliases here; which is canonical is an owner decision.
 - **G-3 `reasoning.depth` and `planning.mode` overlap.** Both admit `direct`,

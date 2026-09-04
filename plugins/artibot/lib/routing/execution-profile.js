@@ -37,24 +37,40 @@
  * this function is pure, the caller supplies the prior result as `previous`
  * and the version counter advances here rather than in a module-level global.
  *
- * ## Open gap G-1 — `performance.priority` has eight values and no mapping
+ * ## G-1 resolved (owner 2026-09-04) — eight schema values, three design values
  *
  * The T-18 schema accepts the UNION of four independent vocabularies:
  * `balanced | maximum | split | economy | quality | fast |
  * maximum_performance | speed_accuracy`
  * (`schemas/execution-profile.schema.json`, sourced per value in
  * `schemas/execution-profile.README.md`). The design assigns routing weights
- * to exactly THREE of them (`ARTIBOT-5.0-DESIGN.md §3.2`). No document in the
- * corpus supplies a normalization table for the other five.
+ * to exactly THREE of them (`ARTIBOT-5.0-DESIGN.md §3.2`), and no document
+ * supplied a normalization table for the other five — so until 2026-09-04
+ * this module returned `'G-1 unresolved'` for them rather than guess.
  *
- * The tempting synonyms — `maximum_performance` and `speed_accuracy` "obviously"
- * meaning `maximum`, `quality`/`economy` "obviously" meaning `balanced` — are
- * exactly what this module refuses to write. `normalizePerformancePriority`
- * returns `{ normalized: null, reason: 'G-1 unresolved' }` for all five, and a
- * mission carrying one of them gets `objective: null` and `directives: null`.
- * Fail-closed: an unmapped priority produces no routing directive at all,
- * rather than a guessed one that would quietly become the de-facto decision.
- * Resolving G-1 is an owner decision and needs a citation, not an inference.
+ * The owner has since decided to ABSORB the five into the three
+ * (`PRIORITY_ALIASES`), with the evidence grade recorded per row rather than
+ * hidden behind a table that looks uniformly authoritative:
+ *
+ *   fast                -> maximum   attested  (P02:72 + DESIGN:129)
+ *   speed_accuracy      -> maximum   inferred  (token composition only)
+ *   maximum_performance -> maximum   inferred  (prose, two hops)
+ *   quality             -> balanced  judgment  (owner pick over `maximum`)
+ *   economy             -> balanced  judgment, LOSSY — the design has nothing
+ *                                    cheaper than balanced, so "spend less" is
+ *                                    not expressed in routing (open item G-1b)
+ *
+ * Why absorb at all: an unmapped priority yielded `directives: null`, and the
+ * consumers' fallbacks (`route-hysteresis.js` `COST_SAVING_PERFORMANCE`,
+ * `escalation-controller.js` `DOWNGRADE_ENABLED_PERFORMANCE`) list only
+ * `balanced`, so `economy` was being routed like `maximum`. `balanced` is the
+ * least wrong of the three and at least keeps downgrade enabled.
+ *
+ * Still fail-closed for anything NOT in the table: a schema value with no
+ * alias row normalizes to `null` / `'G-1 unresolved'`, so a ninth enum value
+ * added without a row here is loud, not silently balanced. The design
+ * vocabulary stays at three; `OBJECTIVE_BY_PRIORITY` and
+ * `PERFORMANCE_DIRECTIVES` gain no keys.
  *
  * @module lib/routing/execution-profile
  */
@@ -85,6 +101,39 @@ export const SCHEMA_PRIORITIES = Object.freeze([
   'maximum_performance',
   'speed_accuracy',
 ]);
+
+/**
+ * G-1 resolution (owner decision 2026-09-04): the five schema-legal,
+ * design-unmapped priorities are ABSORBED into the three design priorities.
+ * Each row carries its evidence grade; the argument per row is
+ * `.artibot/guides/v5-design/DESIGN-G-1-performance-priority-mapping.md` §2.
+ *
+ * `grade` is `attested` (a document says it), `inferred` (derived from token
+ * composition or two hops of prose) or `judgment` (nearest fit, no source).
+ * `lossy: true` marks a row whose intent the target CANNOT express — today only
+ * `economy`, because no design priority is cheaper than `balanced`. Whether
+ * `economy` gets its own directive (`costWeight > 1` or a `budgetCeilingRef`)
+ * is open item G-1b, undecided; this table does not pre-empt it.
+ *
+ * Allowlist: a value absent from this table AND from `DESIGN_PRIORITIES` still
+ * normalizes to `null` (`'G-1 unresolved'`), so a future enum addition without
+ * a row here fails closed instead of quietly becoming `balanced`.
+ */
+export const PRIORITY_ALIASES = Object.freeze({
+  fast: Object.freeze({ to: 'maximum', grade: 'attested', cite: 'P02:72 + DESIGN:129' }),
+  speed_accuracy: Object.freeze({
+    to: 'maximum', grade: 'inferred', cite: 'HARD:125 + policy.example.yaml:70',
+  }),
+  maximum_performance: Object.freeze({
+    to: 'maximum', grade: 'inferred', cite: 'P02:73 + package/README.md:58',
+  }),
+  quality: Object.freeze({
+    to: 'balanced', grade: 'judgment', cite: 'policy.example.yaml:39 quality_constraint, owner 2026-09-04',
+  }),
+  economy: Object.freeze({
+    to: 'balanced', grade: 'judgment', cite: 'no source — see G-1b', lossy: true,
+  }),
+});
 
 /**
  * `topology` allowlist, transcribed from the T-18 schema (itself the
@@ -239,15 +288,20 @@ function deepFreeze(value) {
  * Map a schema-legal `performance.priority` onto one of the three priorities
  * the design assigns weights to.
  *
- * Four outcomes, all explicit:
- *  - one of the design three         -> `{ normalized: <same>, reason: 'design' }`
+ * Five outcomes, all explicit, in this order:
  *  - absent                          -> `{ normalized: 'balanced', reason: 'default: …' }`
- *  - schema-legal but design-unmapped-> `{ normalized: null, reason: 'G-1 unresolved' }`
+ *  - non-string                      -> `{ normalized: null, reason: 'invalid: …' }`
+ *  - one of the design three         -> `{ normalized: <same>, reason: 'design …' }`
+ *  - a `PRIORITY_ALIASES` row        -> `{ normalized: row.to,
+ *                                          reason: 'alias: <v> -> <to> (<grade>[, lossy]; <cite>)' }`
+ *  - schema-legal, no alias row      -> `{ normalized: null, reason: 'G-1 unresolved' }`
  *  - anything else                   -> `{ normalized: null, reason: 'unknown: …' }`
  *
- * The third outcome is the point of this function. `economy`, `quality`,
- * `fast`, `maximum_performance` and `speed_accuracy` all LOOK like synonyms of
- * one of the three; the corpus never says so, so nothing here says so either.
+ * The `reason` string is the only place the evidence grade and the `lossy`
+ * mark reach the ledger, so a later reader of `objective_reason` can tell an
+ * attested alias from a judgment call without opening this file. The author's
+ * original value is NOT rewritten — it survives at
+ * `profile.performance.priority`; only the routing behaviour is merged.
  *
  * @param {unknown} value `execution_profile.performance.priority`, or absent.
  * @returns {{ normalized: 'balanced'|'maximum'|'split'|null, reason: string }}
@@ -265,6 +319,11 @@ export function normalizePerformancePriority(value) {
   }
   if (DESIGN_PRIORITIES.includes(value)) {
     return { normalized: value, reason: 'design vocabulary (ARTIBOT-5.0-DESIGN.md §3.2)' };
+  }
+  if (Object.hasOwn(PRIORITY_ALIASES, value)) {
+    const row = PRIORITY_ALIASES[value];
+    const grade = row.lossy ? `${row.grade}, lossy` : row.grade;
+    return { normalized: row.to, reason: `alias: ${value} -> ${row.to} (${grade}; ${row.cite})` };
   }
   if (SCHEMA_PRIORITIES.includes(value)) {
     return { normalized: null, reason: 'G-1 unresolved' };

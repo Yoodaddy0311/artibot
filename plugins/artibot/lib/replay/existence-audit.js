@@ -59,12 +59,15 @@
  *     repository root (measured 2026-09-02). Every number obtainable today
  *     comes from an injected fixture, so nothing here has been exercised
  *     against real traffic and no live firing rate is claimed.
- *   - LOSS ABOVE THE READER IS INVISIBLE. `summary.eventsReceived` counts the
- *     lines this module was HANDED. By then `ledger.js#readAllEvents` has
- *     already dropped the corrupt, the rejected, the filtered and the duplicate
- *     with no counter, so a firing rate taken against it is measured on
- *     survivors and reads HIGH. Counting the ledger's real lines belongs to the
- *     reader (T-20); nothing here opens the file.
+ *   - LOSS ABOVE THE READER IS INVISIBLE UNLESS THE CALLER PASSES `census`.
+ *     `summary.eventsReceived` counts the lines this module was HANDED. By
+ *     then `ledger.js#readAllEvents` has already dropped the corrupt, the
+ *     rejected, the filtered and the duplicate, so a firing rate taken against
+ *     it is measured on survivors and reads HIGH. The reader now counts those
+ *     drops (`readLedgerCensus`, F-30); a caller that reads through it can
+ *     hand the census in as `opts.census` and it is echoed at
+ *     `summary.census`. Absent, `summary.census` is `null` — not counted,
+ *     never "counted and found zero". Nothing here opens the file.
  *   - CONSUMERS ARE NOT COUNTED, AT ALL. "소비처 수" is a static fact about who
  *     imports or references a thing; it is not in the ledger and cannot be
  *     folded out of one. Every entry reports the literal string `'unmeasured'`
@@ -224,9 +227,13 @@ export function resolveExemption(name, declared) {
  * the caller — this module never enumerates anything itself.
  *
  * @param {object[]} events - ledger lines.
- * @param {{inventory: Record<string, Array<string|{name: string, exemptAs?: string}>>}} opts
+ * @param {{inventory: Record<string, Array<string|{name: string, exemptAs?: string}>>,
+ *          census?: object|null}} opts
  *   `inventory` keys are `AUDITED_KINDS`. An ABSENT key and an EMPTY array are
  *   different answers and stay different in the output, via `enumerated`.
+ *   `census` is the reader's line census (`readLedgerCensus().census`, F-30),
+ *   optional; it is echoed, never recomputed, and never used as a denominator
+ *   here — which denominator to adopt is a separate decision.
  * @returns {{kinds: object, summary: object}} audit result; entries sorted by name.
  */
 export function buildExistenceAudit(events, opts) {
@@ -240,7 +247,7 @@ export function buildExistenceAudit(events, opts) {
   }
   const kinds = {};
   for (const kind of AUDITED_KINDS) kinds[kind] = auditKind(events, inventory, kind);
-  return { kinds, summary: summarize(kinds, events.length) };
+  return { kinds, summary: summarize(kinds, events.length, opts?.census ?? null) };
 }
 
 /**
@@ -339,16 +346,17 @@ function normalizeInventory(list, kind, enumerated) {
  * @param {object} kinds - per-kind blocks.
  * @param {number} eventsReceived - how many lines this function was HANDED.
  *   SURVIVORS, after the reader has already discarded the corrupt, the
- *   rejected, the filtered-out and the duplicated — `ledger.js#readAllEvents`
- *   drops all of those with no counter. It is NOT the ledger's line count, and
- *   this module never opens the file to find out what that is. Naming it
- *   `ledgerLines` made it read like the audit's true denominator, which would
- *   overstate every firing rate computed against it. Same meaning as T-41's
- *   `totals.received` in `replay.js`, and named to match it.
+ *   rejected, the filtered-out and the duplicated. It is NOT the ledger's line
+ *   count, and this module never opens the file to find out what that is.
+ *   Naming it `ledgerLines` made it read like the audit's true denominator,
+ *   which would overstate every firing rate computed against it. Same meaning
+ *   as T-41's `totals.received` in `replay.js`, and named to match it. The
+ *   reader's own count of what it dropped travels separately, as `census`.
+ * @param {object|null} census - the reader's line census (F-30) or `null`.
  * @returns {{entries: number, measured: number, unmeasured: number, exempt: number,
- *   eventsReceived: number}} totals.
+ *   eventsReceived: number, census: object|null}} totals.
  */
-function summarize(kinds, eventsReceived) {
+function summarize(kinds, eventsReceived, census) {
   const all = AUDITED_KINDS.flatMap((kind) => kinds[kind].entries);
   return {
     entries: all.length,
@@ -357,8 +365,10 @@ function summarize(kinds, eventsReceived) {
     exempt: all.filter((e) => e.exempt).length,
     // Kept beside the zeros above so "the ledger was empty" and "nothing carries
     // this kind" cannot collapse into the same reading. Survivors, not lines —
-    // see the param note; upstream loss is invisible from here.
+    // see the param note; upstream loss is invisible from here unless the
+    // caller passed the reader's census, echoed next.
     eventsReceived,
+    census,
   };
 }
 

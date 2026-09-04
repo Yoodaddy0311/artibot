@@ -7,7 +7,9 @@
  * `./event-writer.js`. This module is the API that callers and readers use:
  *
  *   appendLedgerEvent  — write one event (delegates to the writer)
- *   readAllEvents      — every well-formed line, deduped
+ *   readLedgerCensus   — every well-formed line, deduped, PLUS a census of
+ *                        what the reader dropped on the way (F-30)
+ *   readAllEvents      — the same survivors without the census (thin wrapper)
  *   foldMissions       — the v1.0 run-ledger view, reconstructed per mission
  *   currentMission     — the mission a session is currently inside
  *
@@ -24,9 +26,11 @@
  * so a duplicate line is possible in principle and is resolved here, on
  * `(session_id, source, pid, seq)` (lane 6 §2.8 names the last three; the
  * session is added because a reused pid otherwise erases a later line — see
- * {@link dedupeKey}). Gaps are visible in the same key but are NOT judged here:
- * counting missing sequence numbers is /doctor Check 8's job (T-43), and
- * duplicating that logic would create a second answer to one question.
+ * {@link dedupeKey}). Duplicates are COUNTED in
+ * `census.dropped.loss.duplicate` (F-30) but not judged: a duplicate should
+ * never occur, so a non-zero count is a signal for /doctor Check 8, whose job
+ * it also is to count missing sequence numbers (T-43). Duplicating that
+ * judgement here would create a second answer to one question.
  *
  * WHAT THE FOLD CANNOT FILL (known gaps, recorded as gaps rather than zeros):
  *   - `execution.files` — no Phase 0 event carries touched-file paths.
@@ -145,7 +149,151 @@ export function dedupeEvents(events) {
 }
 
 /**
+ * @typedef {object} LedgerCensus
+ * @property {{present: boolean, readable: boolean, bytes: number|null, path: string|null}} file
+ *   `path` is the file this census counted. Report it beside the numbers: an
+ *   empty census and a census of the WRONG tree are told apart only by path.
+ * @property {{raw: number, blank: number, nonblank: number}} lines
+ *   `raw` = `split('\n')` pieces (a file ending in `\n` always yields one
+ *   trailing `''`); `nonblank` = `raw - blank` = what this reader treated as a
+ *   line. Blank pieces are separated FIRST so a healthy ledger reports zero
+ *   loss rather than a phantom loss of one.
+ * @property {{loss: {corrupt: number, malformed_envelope: number, duplicate: number},
+ *             selection: {rejected_excluded: number, filtered_out: number}}} dropped
+ *   LOSS is damage (a torn tail, a non-object, an envelope whose `event` is
+ *   not a string, a duplicate key). SELECTION is deliberate (`ledger.rejected`
+ *   without `includeRejected`; the mission/session/event/since filters). A
+ *   firing-rate denominator is `nonblank - selection`, never `survivors`.
+ * @property {number} survivors — always equals `events.length`.
+ * @property {{loss: number, selection: number}} dropped_total — derived sums.
+ */
+
+/**
+ * The census of a ledger the reader could not open, or was not asked to.
+ *
+ * @param {string|null} file
+ * @param {{present?: boolean, readable?: boolean}} [file_state]
+ * @returns {LedgerCensus}
+ */
+function emptyCensus(file, file_state = {}) {
+  return {
+    file: {
+      present: file_state.present ?? false,
+      readable: file_state.readable ?? false,
+      bytes: null,
+      path: file,
+    },
+    lines: { raw: 0, blank: 0, nonblank: 0 },
+    dropped: {
+      loss: { corrupt: 0, malformed_envelope: 0, duplicate: 0 },
+      selection: { rejected_excluded: 0, filtered_out: 0 },
+    },
+    survivors: 0,
+    dropped_total: { loss: 0, selection: 0 },
+  };
+}
+
+/**
+ * Read every well-formed line of the ledger, deduped and in file order, and
+ * count every line that did NOT make it into that array (F-30).
+ *
+ * WHY A CENSUS — `replay.totals.received` and the Existence Audit's
+ * `eventsReceived` count SURVIVORS, so a firing rate measured against them
+ * reads HIGH whenever this reader dropped something. This is the only layer
+ * that touches the file, so it is the only layer that can count the drops.
+ * Three invariants hold on every return and are the census's own gate
+ * (`tests/runtime/ledger.test.js`):
+ *
+ *   lines.raw      === lines.blank + lines.nonblank
+ *   lines.nonblank === Σ dropped.loss + Σ dropped.selection + survivors
+ *   survivors      === events.length
+ *
+ * If the loop ever gains a sixth `continue` without a counter, the second
+ * invariant breaks and the test says so.
+ *
+ * WHAT THE CENSUS CANNOT SEE (F-30 §7, stated next to the gate): an event that
+ * was never attempted (no hook ran), an append that vanished whole at a line
+ * boundary (a `seq` hole — Check 8's, not this reader's), lines written to a
+ * DIFFERENT file (compare `file.path`), a pid+seq reuse inside one session that
+ * is counted as `duplicate` when it was really a loss, the content of what a
+ * `ledger.rejected` line replaced, and any append that lands after this read.
+ * `bytes` is the size of the text that was READ, from the same read as the
+ * counts, so the two cannot describe different moments.
+ *
+ * @param {string} projectRoot
+ * @param {{since?: string|number|Date, mission_id?: string, session_id?: string,
+ *          event?: string, includeRejected?: boolean, ledgerPath?: string}} [filter]
+ *   `includeRejected` defaults to false — `ledger.rejected` lines record the
+ *   writer's own refusals and are not part of any mission's history.
+ * @returns {{events: object[], census: LedgerCensus}} `events` is `[]` when the
+ *   file is missing or unreadable; the census then says WHICH of the two.
+ */
+export function readLedgerCensus(projectRoot, filter = {}) {
+  if (typeof projectRoot !== 'string' || projectRoot.length === 0) {
+    return { events: [], census: emptyCensus(null) };
+  }
+  const file = ledgerFilePath(projectRoot, filter);
+  let raw;
+  try {
+    if (!existsSync(file)) return { events: [], census: emptyCensus(file) };
+    raw = readFileSync(file, 'utf-8');
+  } catch {
+    return { events: [], census: emptyCensus(file, { present: true, readable: false }) };
+  }
+  const census = emptyCensus(file, { present: true, readable: true });
+  census.file.bytes = Buffer.byteLength(raw, 'utf-8');
+  const { loss, selection } = census.dropped;
+  const sinceMs = filter.since === undefined ? null : new Date(filter.since).getTime();
+  const out = [];
+  for (const line of raw.split('\n')) {
+    census.lines.raw += 1;
+    if (line.trim().length === 0) { census.lines.blank += 1; continue; }
+    census.lines.nonblank += 1;
+    const e = parseLine(line);
+    if (!e) { loss.corrupt += 1; continue; }
+    if (typeof e.event !== 'string') { loss.malformed_envelope += 1; continue; }
+    if (!filter.includeRejected && META_EVENTS.has(e.event)) {
+      selection.rejected_excluded += 1;
+      continue;
+    }
+    if (isFilteredOut(e, filter, sinceMs)) { selection.filtered_out += 1; continue; }
+    out.push(e);
+  }
+  const events = dedupeEvents(out);
+  loss.duplicate = out.length - events.length;
+  census.survivors = events.length;
+  census.dropped_total = {
+    loss: loss.corrupt + loss.malformed_envelope + loss.duplicate,
+    selection: selection.rejected_excluded + selection.filtered_out,
+  };
+  return { events, census };
+}
+
+/**
+ * The caller's selection filters, applied to one parsed line. Kept apart from
+ * the census loop so each `continue` there stays paired with exactly one
+ * counter.
+ *
+ * @param {object} e
+ * @param {object} filter
+ * @param {number|null} sinceMs
+ * @returns {boolean} true when the line is excluded by a filter
+ */
+function isFilteredOut(e, filter, sinceMs) {
+  if (filter.mission_id && e.mission_id !== filter.mission_id) return true;
+  if (filter.session_id && e.session_id !== filter.session_id) return true;
+  if (filter.event && e.event !== filter.event) return true;
+  if (Number.isFinite(sinceMs) && !(Date.parse(e.ts) >= sinceMs)) return true;
+  return false;
+}
+
+/**
  * Read every well-formed line of the ledger, deduped and in file order.
+ *
+ * A thin wrapper over {@link readLedgerCensus}: same read, same survivors,
+ * census discarded. Callers that go on to compute a rate against the result
+ * should call `readLedgerCensus` instead, because from this array alone
+ * upstream loss is invisible.
  *
  * @param {string} projectRoot
  * @param {{since?: string|number|Date, mission_id?: string, session_id?: string,
@@ -155,28 +303,7 @@ export function dedupeEvents(events) {
  * @returns {object[]} `[]` when the file is missing or unreadable
  */
 export function readAllEvents(projectRoot, filter = {}) {
-  if (typeof projectRoot !== 'string' || projectRoot.length === 0) return [];
-  const file = ledgerFilePath(projectRoot, filter);
-  let raw;
-  try {
-    if (!existsSync(file)) return [];
-    raw = readFileSync(file, 'utf-8');
-  } catch {
-    return [];
-  }
-  const sinceMs = filter.since === undefined ? null : new Date(filter.since).getTime();
-  const out = [];
-  for (const line of raw.split('\n')) {
-    const e = parseLine(line);
-    if (!e || typeof e.event !== 'string') continue;
-    if (!filter.includeRejected && META_EVENTS.has(e.event)) continue;
-    if (filter.mission_id && e.mission_id !== filter.mission_id) continue;
-    if (filter.session_id && e.session_id !== filter.session_id) continue;
-    if (filter.event && e.event !== filter.event) continue;
-    if (Number.isFinite(sinceMs) && !(Date.parse(e.ts) >= sinceMs)) continue;
-    out.push(e);
-  }
-  return dedupeEvents(out);
+  return readLedgerCensus(projectRoot, filter).events;
 }
 
 // ---------------------------------------------------------------------------

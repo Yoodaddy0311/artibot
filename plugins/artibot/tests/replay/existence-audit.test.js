@@ -55,7 +55,9 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { resetSeq } from '../../lib/runtime/event-writer.js';
-import { appendLedgerEvent, ledgerFilePath, readAllEvents } from '../../lib/runtime/ledger.js';
+import {
+  appendLedgerEvent, ledgerFilePath, readAllEvents, readLedgerCensus,
+} from '../../lib/runtime/ledger.js';
 import {
   AUDITED_KINDS,
   buildExistenceAudit,
@@ -213,8 +215,22 @@ describe('eventsReceived counts SURVIVORS, not the ledger lines', () => {
     expect(rawLines).toBe(3);
     expect(audit.summary.eventsReceived).toBe(2);
     // The audit looks internally consistent and says nothing about the lost
-    // line, because upstream loss is not observable from here.
+    // line, because upstream loss is not observable from here — and without a
+    // census handed in, it says so: null, not zero.
     expect(audit.summary.eventsReceived).toBeLessThan(rawLines);
+    expect(audit.summary.census).toBeNull();
+
+    // Same read through the census port (F-30): the caller hands the census
+    // in beside the survivors and the loss becomes visible at summary.census.
+    // `eventsReceived` is unchanged — the census is an extra column, not a new
+    // denominator; adopting one is a separate decision.
+    const { events, census } = readLedgerCensus(root);
+    const counted = buildExistenceAudit(events, { inventory: { hooks: ['a'] }, census });
+    expect(counted.summary.eventsReceived).toBe(2);
+    expect(counted.summary.census).toBe(census);
+    expect(counted.summary.census.lines.nonblank).toBe(rawLines);
+    expect(counted.summary.census.dropped.loss.corrupt).toBe(1);
+    expect(counted.summary.census.survivors).toBe(counted.summary.eventsReceived);
   });
 });
 

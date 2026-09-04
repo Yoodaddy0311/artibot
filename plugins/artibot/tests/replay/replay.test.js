@@ -452,7 +452,9 @@ describe('projections', () => {
     expect(index).toMatchObject({
       missions: [], actions: [], routes: [], switches: [], usage: [], context: [], gaps: [],
     });
-    expect(index.totals).toEqual({ received: 0, indexed: 0, events: {} });
+    // `census: null` = NOT COUNTED. buildReplay is pure and has no file to
+    // count; `loadReplay` fills the slot from the `readLedger` port (F-30).
+    expect(index.totals).toEqual({ received: 0, indexed: 0, events: {}, census: null });
     expect(index.attribution).toEqual({ action_id: 0, routing_epoch_id: 0, session_id: 0 });
   });
 

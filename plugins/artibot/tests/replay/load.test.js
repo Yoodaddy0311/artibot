@@ -23,7 +23,9 @@ import { appendFileSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { resetSeq } from '../../lib/runtime/event-writer.js';
-import { appendLedgerEvent, ledgerFilePath, readAllEvents } from '../../lib/runtime/ledger.js';
+import {
+  appendLedgerEvent, ledgerFilePath, readAllEvents, readLedgerCensus,
+} from '../../lib/runtime/ledger.js';
 import { loadReplay } from '../../lib/replay/index.js';
 
 const SID = 'sess-replay-load-01';
@@ -101,6 +103,44 @@ describe('the reader is an injected port', () => {
     const full = loadReplay(root, { readEvents: () => events });
     expect(full.actions[0].events).toHaveLength(1);
   });
+
+  it('reports census as null — NOT COUNTED — through the readEvents port', () => {
+    // A caller wired to the census-less port must not read as "counted and
+    // found zero loss". null is the honest answer here.
+    expect(loadReplay(root, { readEvents: () => [] }).totals.census).toBeNull();
+  });
+
+  it('accepts a readLedger port and carries its census into totals (F-30)', () => {
+    const calls = [];
+    const census = { file: { path: '/x' }, lines: { raw: 1, blank: 1, nonblank: 0 } };
+    const port = (r, f) => {
+      calls.push([r, f]);
+      return { events: [], census };
+    };
+    const filter = { mission_id: MISSION };
+    const index = loadReplay('/some/root', { readLedger: port, filter });
+    expect(calls).toEqual([['/some/root', filter]]);
+    expect(index.totals.census).toBe(census);
+    expect(index.totals.received).toBe(0);
+  });
+
+  it('prefers readLedger when both ports are supplied', () => {
+    let eventsCalled = false;
+    const index = loadReplay(root, {
+      readLedger: () => ({ events: [], census: { marker: 'from-readLedger' } }),
+      readEvents: () => { eventsCalled = true; return []; },
+    });
+    expect(index.totals.census).toEqual({ marker: 'from-readLedger' });
+    expect(eventsCalled).toBe(false);
+  });
+
+  it('tolerates a readLedger port that returns a malformed shape', () => {
+    for (const bad of [null, undefined, 'x', {}, { events: 'nope' }]) {
+      const index = loadReplay(root, { readLedger: () => bad });
+      expect(index.totals.received).toBe(0);
+      expect(index.totals.census).toBeNull();
+    }
+  });
 });
 
 describe('integration with the real ledger reader', () => {
@@ -135,12 +175,15 @@ describe('integration with the real ledger reader', () => {
     // The misreading this field's name exists to prevent: an operator seeing
     // `received === indexed` and concluding nothing was lost.
     //
-    // Three lines reach the FILE; one is corrupt. `readAllEvents` discards it
-    // with no counter, so replay is handed two and indexes two. The index is
-    // internally consistent and `gaps[]` is empty — yet a line WAS lost, and
-    // nothing in this object can show it. That is the whole point: loss above
-    // the reader is not observable here, so the field must not be named as
-    // though it were the input to the pipeline.
+    // Three lines reach the FILE; one is corrupt. `readAllEvents` discards it,
+    // so replay is handed two and indexes two. The index is internally
+    // consistent and `gaps[]` is empty — yet a line WAS lost, and nothing in
+    // `received`/`indexed` can show it. That is the whole point: loss above
+    // the reader is not observable from those two fields, so `received` must
+    // not be named as though it were the input to the pipeline. Since F-30 the
+    // loss IS visible — but only through `totals.census`, and only when the
+    // caller reads through the `readLedger` port; the second half of this test
+    // pins that the census says what `received` cannot.
     for (const seq of [0, 1]) {
       appendLedgerEvent(root, {
         event: 'tool.used',
@@ -162,12 +205,31 @@ describe('integration with the real ledger reader', () => {
     // Internally consistent and clean-looking, despite the lost line.
     expect(index.gaps).toEqual([]);
     expect(index.totals.received).toBeLessThan(rawLines);
+    // The census-less port cannot count, and says so.
+    expect(index.totals.census).toBeNull();
+
+    // Same file, census port: the loss becomes a number instead of an absence.
+    const counted = loadReplay(root, { readLedger: readLedgerCensus });
+    expect(counted.totals.received).toBe(2);
+    expect(counted.totals.census.lines.nonblank).toBe(rawLines);
+    expect(counted.totals.census.dropped.loss.corrupt).toBe(1);
+    expect(counted.totals.census.dropped_total).toEqual({ loss: 1, selection: 0 });
+    expect(counted.totals.census.survivors).toBe(counted.totals.received);
+    expect(counted.totals.census.file.path).toBe(ledgerFilePath(root));
   });
 
   it('returns an empty index for a project with no ledger file', () => {
     const index = loadReplay(root, { readEvents: readAllEvents });
-    expect(index.totals).toEqual({ received: 0, indexed: 0, events: {} });
+    expect(index.totals).toEqual({ received: 0, indexed: 0, events: {}, census: null });
     expect(index.missions).toEqual([]);
+  });
+
+  it('tells a missing ledger from an empty one, through the census port', () => {
+    const index = loadReplay(root, { readLedger: readLedgerCensus });
+    expect(index.totals.received).toBe(0);
+    expect(index.totals.census.file).toMatchObject({ present: false, readable: false, bytes: null });
+    expect(index.totals.census.file.path).toBe(ledgerFilePath(root));
+    expect(index.totals.census.lines).toEqual({ raw: 0, blank: 0, nonblank: 0 });
   });
 
   it('honours the reader\'s mission filter', () => {

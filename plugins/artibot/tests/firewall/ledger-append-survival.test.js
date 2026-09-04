@@ -48,6 +48,7 @@ import {
   dedupeKey,
   ledgerFilePath,
   readAllEvents,
+  readLedgerCensus,
 } from '../../lib/runtime/ledger.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -164,6 +165,16 @@ describe('concurrent append across real processes', () => {
 
     // (6) The reader agrees with the raw file.
     expect(readAllEvents(root)).toHaveLength(EXPECTED);
+
+    // (7) The reader's own census says "loss 0" DIRECTLY (F-30). Steps 1-6
+    //     proved it indirectly (survivors == expected); this is the reader
+    //     counting its drops and reporting none, on the same 60/60 file.
+    const { events, census } = readLedgerCensus(root);
+    expect(events).toHaveLength(EXPECTED);
+    expect(census.lines.nonblank).toBe(EXPECTED);
+    expect(census.dropped_total.loss).toBe(0);
+    expect(census.dropped.loss).toEqual({ corrupt: 0, malformed_envelope: 0, duplicate: 0 });
+    expect(census.survivors).toBe(EXPECTED);
   });
 });
 

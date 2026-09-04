@@ -236,15 +236,24 @@ function compareLedgerVersions(journal, events) {
  * would be a partial comparison reported as a whole one, so their absence
  * produces `unmeasured` rather than a narrower pass.
  *
+ * The reader's line census (F-30) is a FOURTH, optional input, reported under
+ * its own key, NOT in `findings` — `worstOf` ranks `unmeasured` above `pass`,
+ * so an unmeasured census finding would demote every caller without one. Only
+ * `dropped_total.loss > 0` adds a finding, and it is `warn`: damaged lines do
+ * not change the parity verdict and the ledger is the truth (no `--fix`).
+ *
  * @param {object} input - Check inputs.
- * @param {object[]} input.events - Ledger events (`readAllEvents` output).
+ * @param {object[]} input.events - Ledger events (`readLedgerCensus().events`).
  * @param {object[]} input.journal - Store journal records.
  * @param {object|string} input.projection - The `state.yaml` projection, parsed or raw.
  * @param {string} [input.project] - Project name for the base snapshot.
- * @returns {{status: string, findings: object[]}} The verdict and its findings.
+ * @param {object} [input.census] - `readLedgerCensus().census`; absent = NOT COUNTED.
+ * @returns {{status: string, findings: object[], census: object}} The verdict,
+ *   its findings, and the census verdict (`unmeasured` | `pass` | `warn`).
  */
 export function checkLedgerStateParity(input = {}) {
-  const { events, journal, projection, project } = input ?? {};
+  const { events, journal, projection, project, census } = input ?? {};
+  const censusVerdict = judgeCensus(census);
   const absent = [];
   if (!Array.isArray(events)) absent.push('events (ledger)');
   if (!Array.isArray(journal)) absent.push('journal (store)');
@@ -256,6 +265,7 @@ export function checkLedgerStateParity(input = {}) {
         code: 'parity-inputs-absent', status: CheckStatus.UNMEASURED, absent,
         detail: `not supplied: ${absent.join(', ')} — parity was not compared, not compared and found equal`,
       }],
+      census: censusVerdict,
     };
   }
   const projectName = project
@@ -267,7 +277,59 @@ export function checkLedgerStateParity(input = {}) {
   }));
   findings.push(...compareProjection(state, projection));
   findings.push(...compareLedgerVersions(journal, events));
-  return { status: worstOf(findings.map((f) => f.status)), findings };
+  if (censusVerdict.status === CheckStatus.WARN) {
+    findings.push({
+      code: 'ledger-lines-dropped', status: CheckStatus.WARN,
+      loss: censusVerdict.loss, selection: censusVerdict.selection, path: censusVerdict.path,
+      detail: `the reader dropped ${censusVerdict.loss.corrupt + censusVerdict.loss.malformed_envelope + censusVerdict.loss.duplicate} damaged line(s) of ${censusVerdict.nonblank} — see census.loss; selection drops are deliberate and not counted here`,
+    });
+  }
+  return { status: worstOf(findings.map((f) => f.status)), findings, census: censusVerdict };
+}
+
+/**
+ * Turn the reader's census into Check 8's census verdict: `unmeasured` when
+ * absent, malformed, or counted over an absent/unreadable file (zero lines of
+ * nothing is not a clean ledger); `warn` on any damage; `pass` otherwise.
+ * Selection drops never warn — they are the caller's own filters.
+ *
+ * @param {unknown} census - `readLedgerCensus().census`, or absent.
+ * @returns {{status: string, reason?: string, loss?: object, selection?: object,
+ *   nonblank?: number, path?: string|null, file?: object}} The census verdict.
+ */
+function judgeCensus(census) {
+  if (!isCensusShaped(census)) {
+    return {
+      status: CheckStatus.UNMEASURED,
+      reason: 'census not supplied — line loss was not counted, not counted and found zero',
+    };
+  }
+  const file = { present: census.file?.present === true, readable: census.file?.readable === true };
+  const path = census.file?.path ?? null;
+  if (!file.present || !file.readable) {
+    const what = file.present ? 'ledger file present but unreadable' : 'ledger file absent';
+    return { status: CheckStatus.UNMEASURED, file, path, reason: `${what} — no line was counted; not a clean ledger` };
+  }
+  return {
+    status: census.dropped_total.loss > 0 ? CheckStatus.WARN : CheckStatus.PASS,
+    file, path, nonblank: census.lines?.nonblank ?? null,
+    loss: { ...census.dropped.loss }, selection: { ...census.dropped.selection },
+  };
+}
+
+/**
+ * Whether `census` carries the F-30 shape — every counter an integer, not a
+ * truthy container (a string there would print `NaN damaged line(s)`).
+ * @param {unknown} census - candidate.
+ * @returns {boolean} true when every counted field is an integer.
+ */
+function isCensusShaped(census) {
+  if (census === null || typeof census !== 'object') return false;
+  const ints = (obj, keys) => obj !== null && typeof obj === 'object'
+    && keys.every((k) => Number.isInteger(obj[k]));
+  return ints(census.dropped_total, ['loss', 'selection']) && ints(census.lines, ['nonblank'])
+    && ints(census.dropped?.loss, ['corrupt', 'malformed_envelope', 'duplicate'])
+    && ints(census.dropped?.selection, ['rejected_excluded', 'filtered_out']);
 }
 
 /**

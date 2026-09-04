@@ -607,11 +607,14 @@ export function buildReplay(events, opts = {}) {
       // dropped nothing", NEVER "nothing was lost". Two of the reader's five
       // drop reasons are deliberate selection rather than damage, so even a
       // true raw-line count would not be a loss figure on its own. Counting the
-      // ledger's actual lines is the reader's job (T-20) and would require the
-      // filesystem, which this module does not have.
+      // ledger's actual lines is the reader's job (T-20) — and it now does:
+      // see `totals.census` (F-30), which `loadReplay` fills from the
+      // `readLedger` port. This pure function has no filesystem, so here the
+      // slot is `null` — NOT COUNTED, never "counted and found zero".
       received: Array.isArray(events) ? events.length : 0,
       indexed: ordered.length,
       events: countBy(ordered, 'event').counts,
+      census: null,
     },
     gaps: [...gaps, ...seqGaps],
   };

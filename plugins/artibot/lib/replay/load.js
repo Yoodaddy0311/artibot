@@ -27,11 +27,19 @@
  *
  * WHAT THE CALLER PASSES
  * ---------------------------------------------------------------------------
- * `lib/runtime/ledger.js#readAllEvents`, whose signature is
- * `(projectRoot, filter) => object[]` and which already handles the filesystem,
- * the dedupe, and the torn-tail tolerance. Nothing here duplicates that work;
- * this module exists to make the dependency explicit and to keep the filesystem
- * out of `replay.js` entirely.
+ * Either of two ports from `lib/runtime/ledger.js`:
+ *
+ *   - `readLedger`  — `readLedgerCensus`, `(projectRoot, filter) =>
+ *     {events, census}`. Preferred: the index then carries `totals.census`,
+ *     the reader's own count of what it dropped (F-30), taken from the SAME
+ *     read as the events so numerator and denominator share one moment.
+ *   - `readEvents`  — `readAllEvents`, `(projectRoot, filter) => object[]`.
+ *     Still accepted; `totals.census` is then `null`, meaning NOT COUNTED —
+ *     never "counted and found zero".
+ *
+ * Both already handle the filesystem, the dedupe, and the torn-tail tolerance.
+ * Nothing here duplicates that work; this module exists to make the
+ * dependency explicit and to keep the filesystem out of `replay.js` entirely.
  *
  * FAIL-CLOSED
  * ---------------------------------------------------------------------------
@@ -53,24 +61,36 @@ import { buildReplay } from './replay.js';
  *   to the port; INJECTED, never derived here. Nothing in this directory reads
  *   the working directory of the running process — deriving a root instead of
  *   receiving one is how a reader ends up indexing the wrong project.
- * @param {{readEvents: (root: string, filter?: object) => object[],
+ * @param {{readLedger?: (root: string, filter?: object) => {events: object[], census: object},
+ *          readEvents?: (root: string, filter?: object) => object[],
  *          filter?: object, includeEvents?: boolean}} opts
- *   `readEvents` is the required port — pass `lib/runtime/ledger.js#readAllEvents`.
- *   `filter` is forwarded to it verbatim (`since`, `mission_id`, `session_id`,
- *   `event`, `includeRejected`, `ledgerPath`), so this module adds no filtering
- *   vocabulary of its own and cannot drift from the reader's.
- * @returns {object} a `buildReplay` index.
- * @throws {TypeError} when `readEvents` is missing or is not a function.
+ *   One port is required. `readLedger` (pass `readLedgerCensus`) wins when
+ *   both are given; `readEvents` (pass `readAllEvents`) is the census-less
+ *   fallback. `filter` is forwarded verbatim (`since`, `mission_id`,
+ *   `session_id`, `event`, `includeRejected`, `ledgerPath`), so this module
+ *   adds no filtering vocabulary of its own and cannot drift from the reader's.
+ * @returns {object} a `buildReplay` index; `totals.census` is the reader's
+ *   census object via `readLedger`, or `null` via `readEvents`.
+ * @throws {TypeError} when neither port is a function.
  */
 export function loadReplay(projectRoot, opts = {}) {
-  const { readEvents, filter = {}, includeEvents } = opts;
-  if (typeof readEvents !== 'function') {
+  const { readLedger, readEvents, filter = {}, includeEvents } = opts;
+  if (typeof readLedger !== 'function' && typeof readEvents !== 'function') {
     throw new TypeError(
-      'loadReplay requires a `readEvents` port — lib/replay is L2 and cannot '
-      + 'import lib/runtime (L5) directly. Pass readAllEvents from '
-      + 'lib/runtime/ledger.js.',
+      'loadReplay requires a `readLedger` or `readEvents` port — lib/replay is '
+      + 'L2 and cannot import lib/runtime (L5) directly. Pass readLedgerCensus '
+      + '(preferred) or readAllEvents from lib/runtime/ledger.js.',
     );
   }
-  const events = readEvents(projectRoot, filter);
-  return buildReplay(Array.isArray(events) ? events : [], { includeEvents });
+  let events;
+  let census = null;
+  if (typeof readLedger === 'function') {
+    const read = readLedger(projectRoot, filter);
+    events = read?.events;
+    census = read?.census ?? null;
+  } else {
+    events = readEvents(projectRoot, filter);
+  }
+  const index = buildReplay(Array.isArray(events) ? events : [], { includeEvents });
+  return { ...index, totals: { ...index.totals, census } };
 }
