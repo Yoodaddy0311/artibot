@@ -31,10 +31,20 @@
  *
  * WHAT THIS GATE DOES NOT COVER (do not read a green run as more than this)
  * ------------------------------------------------------------------------
- *  - NON-SOURCE FILES. Only .js/.mjs/.cjs/.md/.json under the seven roots in
- *    {@link ROOTS} are read. A control byte in a .yml, .sh, .txt, .html, a
- *    dotfile, or anywhere outside those roots (docs/, schemas/, hooks/, bin/,
- *    .github/, repository root) is invisible here.
+ *  - NON-SOURCE FILES. Only .js/.mjs/.cjs/.md/.json under the seven package
+ *    roots plus one repo root in {@link ROOTS} are read. A control byte in a
+ *    .yml, .sh, .txt, .html, a dotfile, or anywhere outside those roots
+ *    (docs/, schemas/, hooks/, bin/, .github/, .claude-plugin/, reports/,
+ *    ARTIBOT.md, the root CLAUDE.md, the rest of the repository root) is
+ *    invisible here.
+ *  - `.artibot/guides` FILES OUTSIDE THE EXTENSION LIST. Its .yaml, .mmd and
+ *    .ndjson files (11 of 95 tracked files as of 2026-09-04) are not read.
+ *    Widening {@link EXTENSIONS} is a separate decision (design F-10 §6-1);
+ *    the .txt/.bin skip self-check below pins the current list on purpose.
+ *  - DISK-WALK, NOT GIT-WALK. Roots are walked on disk, so an untracked file
+ *    under a root is scanned on the machine that has it and not in a clean
+ *    checkout. Deliberate — a stray byte is caught before it is committed —
+ *    but it means a local run and a CI run can disagree.
  *  - BINARY FIXTURES. Excluded by extension, not by inspection. A fixture that
  *    is genuinely binary but named .json WOULD be flagged, and the fix in that
  *    case is to rename it, not to weaken this gate.
@@ -44,11 +54,22 @@
  *  - It says nothing about whether an ESCAPED control character is CORRECT.
  *    `\0` as a key separator can still be the wrong design; this only asserts
  *    it is written in a form that grep can read past.
+ *  - FILE NAMES AND PATHS. Only file CONTENTS are read; a control byte in a
+ *    directory or file name, as returned by `readdirSync`, is not inspected.
  *  - It cannot see a control byte introduced after the run. The repo is edited
  *    concurrently; this is a snapshot, and a green run ages.
  */
 
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -56,24 +77,56 @@ import { afterAll, describe, expect, it } from 'vitest';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-/** Package root (`plugins/artibot`). Every reported path is relative to this. */
+/** Package root (`plugins/artibot`). Package-root hits are reported relative to this. */
 const PACKAGE_ROOT = path.resolve(__dirname, '../..');
 
 /**
- * Directories scanned, relative to {@link PACKAGE_ROOT}. Each one is asserted
- * to contribute at least one file below, so a rename that quietly removes a
- * directory from the gate fails instead of shrinking coverage in silence.
- * @type {readonly string[]}
+ * Repository root, two levels above the package. Its identity is verified by
+ * the presence of the marketplace manifest ({@link REPO_ROOT_WITNESS}) so that
+ * a plugin checked out on its own cannot resolve `../..` to some unrelated
+ * directory and then walk it. This gate therefore REQUIRES the full repository
+ * checkout — the same requirement `artibot-entry-parity.test.js` already
+ * makes — and it says so instead of skipping.
+ */
+const REPO_ROOT = path.resolve(PACKAGE_ROOT, '..', '..');
+const REPO_ROOT_WITNESS = path.join(REPO_ROOT, '.claude-plugin', 'marketplace.json');
+
+/** Absolute directory each root's `base` refers to. */
+const BASES = Object.freeze({ package: PACKAGE_ROOT, repo: REPO_ROOT });
+
+/**
+ * Directories scanned. `base` says which root `rel` hangs off, and reported
+ * paths are relative to that base — a hit under the package reads `lib/…` as
+ * before, a hit under the repo root reads `.artibot/guides/…`. Each root is
+ * asserted to contribute at least one file below, so a rename that quietly
+ * removes a directory from the gate fails instead of shrinking coverage in
+ * silence.
+ * @type {readonly {base: 'package'|'repo', rel: string}[]}
  */
 const ROOTS = Object.freeze([
-  'lib',
-  'scripts',
-  'tests',
-  'commands',
-  'rules',
-  'skills',
-  'agents',
+  { base: 'package', rel: 'lib' },
+  { base: 'package', rel: 'scripts' },
+  { base: 'package', rel: 'tests' },
+  { base: 'package', rel: 'commands' },
+  { base: 'package', rel: 'rules' },
+  { base: 'package', rel: 'skills' },
+  { base: 'package', rel: 'agents' },
+  // Repo-root design corpus: git-tracked, read by /doctor Check 9
+  // (lib/project-state/doctor-checks.js#ARTIFACT_HEALTH_SOURCE) and by humans
+  // through grep. On 2026-09-03 a leader-side insertion script left a literal
+  // NUL in ARTIBOT-5.0-DESIGN.md (design appendix 0-2) and nothing scanned
+  // this tree. Added by design F-10, 2026-09-04.
+  { base: 'repo', rel: '.artibot/guides' },
 ]);
+
+/**
+ * Human-readable name of a root, used as the per-root key and in test titles
+ * (an object passed to `it.each` would print as `[object Object]`).
+ *
+ * @param {{base: string, rel: string}} root
+ * @returns {string}
+ */
+const rootLabel = ({ base, rel }) => `${base}:${rel}`;
 
 /** File extensions read. Anything else is not looked at at all. */
 const EXTENSIONS = Object.freeze(['.js', '.mjs', '.cjs', '.md', '.json']);
@@ -111,9 +164,10 @@ function isForbiddenByte(byte) {
 
 /**
  * Every file the gate reads, as absolute paths. Skips `node_modules` (none of
- * the seven roots contains one today; skipping is insurance, not a workaround)
- * and follows no symlinks, since `readdirSync` reports a symlink as neither a
- * file nor a directory here.
+ * the eight roots contains one today — the package's own `node_modules` is a
+ * sibling of the package roots, not inside them; skipping is insurance, not a
+ * workaround) and follows no symlinks, since `readdirSync` reports a symlink
+ * as neither a file nor a directory here.
  *
  * @param {string} dir - Absolute directory to walk.
  * @returns {string[]}
@@ -213,8 +267,8 @@ function report(violations) {
 // measured 2026-09-02). Running it per test would multiply that by the test
 // count for no added signal.
 const scanned = ROOTS.map((root) => ({
-  root,
-  ...scanTree(path.join(PACKAGE_ROOT, root), PACKAGE_ROOT),
+  root: rootLabel(root),
+  ...scanTree(path.join(BASES[root.base], root.rel), BASES[root.base]),
 }));
 const allViolations = scanned.flatMap((entry) => entry.violations);
 const totalFiles = scanned.reduce((sum, entry) => sum + entry.files, 0);
@@ -230,11 +284,24 @@ describe('the gate scans what it claims to scan', () => {
     expect(totalFiles).toBeGreaterThan(0);
   });
 
-  it.each(ROOTS)('reads at least one file under %s', (root) => {
+  it('resolves the repository root — this gate requires the full repository checkout', () => {
+    // Checked before the per-root assertions so that, in a plugin-only
+    // checkout, the CAUSE ("no repo root here") is reported ahead of the
+    // SYMPTOM ("0 files under repo:.artibot/guides"). Not a skip: a gate that
+    // cannot see one of its roots must go red, not quietly shrink.
+    expect(
+      existsSync(REPO_ROOT_WITNESS),
+      `repository root not found at ${REPO_ROOT} (expected ${REPO_ROOT_WITNESS}). ` +
+        'This gate requires the full repository checkout, the same requirement ' +
+        'artibot-entry-parity.test.js makes; a plugin-only checkout cannot run it.',
+    ).toBe(true);
+  });
+
+  it.each(ROOTS.map(rootLabel))('reads at least one file under %s', (label) => {
     // Per-root, not just in total: a directory renamed out from under this
     // list would otherwise remove itself from the gate with everything still
     // green. Failing here is the correct alarm — update ROOTS deliberately.
-    const entry = scanned.find((e) => e.root === root);
+    const entry = scanned.find((e) => e.root === label);
     expect(entry.files).toBeGreaterThan(0);
   });
 
@@ -242,6 +309,35 @@ describe('the gate scans what it claims to scan', () => {
     const files = listFiles(path.join(PACKAGE_ROOT, 'lib'))
       .map((f) => path.relative(PACKAGE_ROOT, f).split(path.sep).join('/'));
     expect(files).toContain('lib/core/model-catalog.js');
+  });
+
+  it('reads a known repo-root file, proving the walk descends into .artibot/guides/v5-design', () => {
+    const files = listFiles(path.join(REPO_ROOT, '.artibot/guides'))
+      .map((f) => path.relative(REPO_ROOT, f).split(path.sep).join('/'));
+    expect(files).toContain('.artibot/guides/v5-design/ARTIBOT-5.0-DESIGN.md');
+  });
+
+  it('scans every git-tracked .artibot/guides file whose extension is in the list', () => {
+    // Disk-walk ⊇ git-tracked: the scan may see untracked extras, so this is a
+    // subset check, not an equality. It is what turns "N files are covered"
+    // into a live number instead of one hard-coded here and left to rot.
+    // `-z` keeps non-ASCII paths as raw bytes instead of C-quoted; the repo has
+    // Korean paths. If git is missing or fails, execFileSync throws and this
+    // test is RED — deliberately not a skip.
+    const tracked = execFileSync('git', ['ls-files', '-z', '.artibot/guides'], {
+      cwd: REPO_ROOT,
+    })
+      .toString('utf8')
+      .split('\0')
+      .filter((p) => p.length > 0 && EXTENSIONS.some((ext) => p.endsWith(ext)));
+    expect(tracked.length).toBeGreaterThan(0);
+
+    const scannedSet = new Set(
+      listFiles(path.join(REPO_ROOT, '.artibot/guides'))
+        .map((f) => path.relative(REPO_ROOT, f).split(path.sep).join('/')),
+    );
+    const missing = tracked.filter((p) => !scannedSet.has(p));
+    expect(missing, 'git-tracked files the scan did not reach').toEqual([]);
   });
 
   it('ignores an extension outside the list', () => {
