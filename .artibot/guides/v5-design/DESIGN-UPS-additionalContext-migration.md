@@ -5,6 +5,7 @@
 - 작성: 2026-09-03 17:0x KST · team-v5-decisions-01sa2u-effortpath (Fable) · master @ 3bcadb8e (v4.53.0, 워킹트리 수리분 포함)
 - 전제 측정: `PROBE-effort-directive-delivery.md` (같은 디렉터리) — 호스트 2.1.259 는 훅 stdout 최상위 `user_prompt`·`message` 를 "unrecognized keys (ignored)" 로 버린다(바이너리 B1–B6, 공식 문서 L1032). 본 문서는 그 판정을 다시 논하지 않는다.
 - 관련 정본: `INCIDENT-2026-09-03-hook-payload-contract.md`(F11·F14) · `HOOK-VISIBILITY-DESIGN.md`(§6-4 "호스트가 출력을 무시하는 경우", §6-5 설치본 괴리)
+- **재대조 2026-09-04** (architect, master @ `7cbb37b9`): 이 문서는 3bcadb8e 기준이고 그 뒤 `bc2e9e55`(2026-09-03 17:49 "호스트 페이로드 키 prompt 수리 + --no-team 옵트아웃 회귀 …") 가 착지했다. 본문의 낡은 문장은 지우지 않고 취소선 + **정정(2026-09-04)** 단락으로 표시했다. 정정 목록과 근거는 **§8** 에 모아 두었다. §8 을 먼저 읽고 본문을 읽어라.
 
 ## 0. 한 줄 요약
 
@@ -80,7 +81,13 @@
 
 플래그 "제거"는 목적이 아니라 수단이었다. 목적은 (i) auto-team 이 발화하지 않을 것, (ii) 모델이 팀을 만들지 않을 것. (ii) 는 원문에 `--no-team` 이 남아 있는 편이 **오히려 확실**하다(모델이 직접 본다). (i) 는 `auto-team-trigger.js:376` 이 원문을 보면 된다.
 
-**발견(워킹트리, 미수정)**: 현재 순서가 (i) 를 깨뜨린다 — 리라이터가 `payload.user_prompt` 에 플래그 **제거본**을 넣고(:206-208), `auto-team-trigger` 는 `extractUserPromptText` 로 그 제거본을 먼저 읽으므로(hook-utils.js:287 `user_prompt` 1순위) `:376` 의 `NO_TEAM_FLAG.test` 가 **거짓**이 된다 → 옵트아웃이 무력화된다. HEAD 에선 두 훅 다 프롬프트를 못 읽어 잠복해 있었고, 워킹트리 수리로 **처음 도달 가능**해진 결함이다. 설계상 처리: 리라이터의 `--no-team` 분기를 **삭제**하고(제거 기능 자체를 버림), `auto-team-trigger` 는 `hookData.prompt`(호스트 원문)로 옵트아웃을 판정한다. `[team] --no-team flag detected` 메시지는 E8 과 함께 stdout 에서 사라진다.
+**발견(워킹트리, 미수정)**: 현재 순서가 (i) 를 깨뜨린다 — 리라이터가 `payload.user_prompt` 에 플래그 **제거본**을 넣고(:206-208), `auto-team-trigger` 는 `extractUserPromptText` 로 그 제거본을 먼저 읽으므로(hook-utils.js:287 `user_prompt` 1순위) `:376` 의 `NO_TEAM_FLAG.test` 가 **거짓**이 된다 → 옵트아웃이 무력화된다. HEAD 에선 두 훅 다 프롬프트를 못 읽어 잠복해 있었고, 워킹트리 수리로 **처음 도달 가능**해진 결함이다. ~~설계상 처리: 리라이터의 `--no-team` 분기를 **삭제**하고(제거 기능 자체를 버림), `auto-team-trigger` 는 `hookData.prompt`(호스트 원문)로 옵트아웃을 판정한다.~~ `[team] --no-team flag detected` 메시지는 E8 과 함께 stdout 에서 사라진다.
+
+**정정(2026-09-04, 재대조 §8-1·§8-2)**:
+- (i) 는 **이미 다른 방식으로 착지했다** — `bc2e9e55` 가 `lib/core/hook-utils.js#extractUserPromptFlagSurface`(`:319-329`, `user_prompt`·`prompt`·`content` 의 합집합을 개행으로 조인) 를 추가하고 `auto-team-trigger.js:379` 가 `NO_TEAM_FLAG.test(extractUserPromptFlagSurface(hookData))` 로 판정한다. `hookData.prompt` 단독이 아니라 **원문+리라이트본 합집합**이다. 위 "`:376` 을 `hookData.prompt` 로" 는 착지됨으로 닫는다. 회귀 테스트: `tests/hooks/userprompt-dispatcher.test.js:175-190`(체인 통과 후 `[auto-team-suggested]` 부재) + 대조군 `:192-200` + `tests/core/hook-utils.test.js:444-477`.
+- **리라이터의 `--no-team` 분기(`user-prompt-handler.js:78-85`)는 삭제하지 않는다.** 이유 ① `userprompt-dispatcher.test.js:183` 이 "리라이터는 플래그를 제거한다(디스패처 계약 — 유지)" 로 핀했고 `user-prompt-handler.test.js:47-51, :95-105` 도 제거를 단언한다 — 삭제하면 §4.4 :141 의 "변경 없음" 과 모순(리더 지적). ② (i) 는 이미 flag-surface 로 달성됐으므로 삭제가 (i) 에 기여하는 바가 없다. ③ (ii) 는 호스트 계약상 원문이 항상 그대로 모델에 가므로 제거가 있든 없든 동일 — 제거는 stdout 경계(§1.4)에서 걸러지는 **내부 전용 부작용**이 된다. ④ 삭제는 테스트 3파일 갱신을 요구하고 호스트에 보이는 이득이 0 이다.
+- (ii) 를 **명시적으로** 달성하려면 리라이터가 `--no-team` 감지 시 `hookSpecificOutput.additionalContext` 에 지시문 1줄(`[artibot:team opt-out] --no-team: do not spawn a team for this request`) 을 함께 돌려준다(§2.1 A 와 같은 형태 — `user_prompt` 는 종전처럼 제거본, `message` 는 E8 과 함께 stdout 에서 사라짐). 이것이 리더가 제시한 "additionalContext 지시문으로 (ii) 달성" 안이다.
+- **`user_prompt` 단독 페이로드(레거시 stdin, `tests/e2e/runtime-flow.test.js:33` 형태)에서의 옵트아웃 — 실측(2026-09-04 11:47, 리라이터→`payload.user_prompt` 치환→auto-team 체인을 in-process 로 재현)**: `{prompt: '… --no-team'}` 은 auto-team **미발화**(옵트아웃 유지) / `{user_prompt: '… --no-team'}` 단독은 auto-team **발화**(옵트아웃 소실) / 대조군(플래그 없음) 발화. 원인: 리라이터가 `payload.user_prompt` 를 제거본으로 덮으면 flag-surface 가 읽을 원문 사본이 남지 않는다(`prompt` 키 없음). **라이브 도달 불가** — 호스트 2.1.259 는 `prompt` 를 보내고(PROBE), 개별 훅을 레거시 `main()` 으로 단독 실행하면 리라이터가 끼지 않는다. `runtime-flow.test.js:33` 은 체인에 auto-team-trigger 를 넣지 않으므로 이 사례를 검사하지 않는다. 처리: **고치지 않고 문서화** — `auto-team-trigger.test.js` 에 "user_prompt 단독 + 디스패처 치환 = 옵트아웃 미보장(레거시, 라이브 미도달)" 을 있는 그대로 핀하는 케이스 1개를 §4.4 에 추가한다(거짓 그린 방지). 고치려면 디스패처가 원문 사본을 별도 내부 키로 보존해야 하는데 그것은 내부 키 추가 = 이 문서가 피하는 드리프트라 별건.
 
 ## 3. 디스패처 내부 계약은 유지 — 호스트 출력과 내부 전달의 분리 지점
 
@@ -104,10 +111,10 @@
 |---|---|
 | `scripts/hooks/_userprompt-dispatcher.js` | 허용목록 상수 + `mergeHookResults` 복사 루프(:164-170) + 배열 순서(:212-218) + 주석 :143-149 정정 + stderr 1줄 |
 | `scripts/hooks/runtime-prompt.js` | `composePromptOutput` :707-733 → additionalContext 조립(E5 래퍼 제거, E8 제거, 8 KB 캡) ; 헤더 :4-12 문구 |
-| `scripts/hooks/user-prompt-handler.js` | `!rv` → additionalContext(§2.1 A); `--no-team` 분기 삭제(§2.2); JSDoc :68-71 |
-| `scripts/hooks/auto-team-trigger.js` | `:376` 옵트아웃 판정을 `hookData.prompt` 로 |
+| `scripts/hooks/user-prompt-handler.js` | `!rv` → additionalContext(§2.1 A); ~~`--no-team` 분기 삭제(§2.2)~~ **정정(2026-09-04)**: 분기 **유지** + `--no-team` 감지 시 additionalContext 지시문 1줄 추가(§2.2 정정); JSDoc :68-71 |
+| `scripts/hooks/auto-team-trigger.js` | ~~`:376` 옵트아웃 판정을 `hookData.prompt` 로~~ **착지됨(bc2e9e55)** — `:379` `extractUserPromptFlagSurface(hookData)`. 이 문서의 잔여 변경 **없음** |
 | `scripts/hooks/ambiguity-guard.js` | `{continue:true}` 반환 → `null`(정보량 0) — 선택 |
-| `artibot.config.json` | `runtime.effort.comment` 문구(§5) + 되돌리기 키(§4.2) |
+| `artibot.config.json` | `runtime.effort.comment` 문구(§5) + 되돌리기 키(§4.2). **소유권(2026-09-04 확정): L1(이 설계) 이 이 파일을 소유한다.** L2(`ROUTE-RECEIPT-PRETOOLUSE-DESIGN.md` §6) 의 `routing.observe.receiptStage` 키는 L2 D1 착수 시 **통합 단계에서 리더가 추가**한다 — L2 D0 프로브 줄기(`l2-probe`)는 이 파일을 건드리지 않는다 |
 | 문서 5곳 | §5 |
 | 테스트 | §4.4 |
 
@@ -138,7 +145,7 @@
 | `dispatcher/dispatcher-merge-proto.test.js:155-172` | `merged` 가 `{user_prompt:'hi'}` 와 동일 | 프로토타입 오염 방지 취지는 유지, 기대값을 허용목록 결과로 |
 | `userprompt-dispatcher-resilience.test.js:33-44` | `merged.user_prompt === ''` + 소스 문자열 고정 | :33 은 내부 전달(`payload.user_prompt`) 검사로 옮김; :42-44 유지 |
 | `e2e/runtime-flow.test.js:116-125` | `System 1 mode`·`Original request:`·`!rv` | E5·E9 새 형태로 |
-| `user-prompt-handler.test.js`, `auto-command-suggest.test.js:428-438`, `auto-team-trigger*.test.js`, `ambiguity-guard.test.js:107-112`, `core/hook-utils.test.js:411-438` | 입력 페이로드로 `user_prompt` 사용 | **변경 없음**(내부 계약 유지) — 단 `auto-team-trigger.test.js` 에 §2.2 케이스 추가: `{prompt:'… --no-team', user_prompt:'…'}` → null |
+| `user-prompt-handler.test.js`, `auto-command-suggest.test.js:428-438`, `auto-team-trigger*.test.js`, `ambiguity-guard.test.js:107-112`, `core/hook-utils.test.js:411-438` | 입력 페이로드로 `user_prompt` 사용 | **변경 없음**(내부 계약 유지) — **정정(2026-09-04)**: 이 "변경 없음" 은 §2.2 의 `--no-team` 분기 **유지** 결정과 함께 참이 된다(삭제했다면 `user-prompt-handler.test.js:47-51, :95-105`·`userprompt-dispatcher.test.js:183-184` 가 RED). `user-prompt-handler.test.js` 는 `!rv` 케이스도 A 안(`user_prompt` 에 재작성문 유지)이라 그대로 GREEN. ~~단 `auto-team-trigger.test.js` 에 §2.2 케이스 추가: `{prompt:'… --no-team', user_prompt:'…'}` → null~~ **착지됨(bc2e9e55)**: `userprompt-dispatcher.test.js:175-200` + `core/hook-utils.test.js:444-477`. **추가할 것 1건**: `user_prompt` 단독 페이로드가 디스패처 치환을 거치면 옵트아웃이 **보장되지 않음**(§2.2 정정 실측)을 있는 그대로 핀하는 케이스 — 레거시·라이브 미도달임을 이름에 적는다 |
 | **신규** `tests/firewall/ups-stdout-allowlist.test.js` | — | 실제 디스패처를 `prompt` 키 페이로드 2종(슬래시/비슬래시)으로 실행해 stdout 키 ⊆ 허용목록, `additionalContext` 에 `[artibot:effort` 포함(슬래시 케이스), 총 바이트 < 10,000. 파일이 없으면 red(fail-closed) |
 | **신규** `tests/firewall/ups-host-schema-drift.test.js` | — | §4.3-1 |
 
@@ -150,6 +157,8 @@
 | **D2** | §4.4 전 항목 반영, **리포 전체 vitest** 숫자 기록(files/pass/skip/fail), `npm run ci` 통과 | 명령 출력 그대로 |
 | **D3** | §5 문구 5곳 반영 + config comment | `git diff --stat` + 각 file:line |
 | **D4** | **라이브**: 릴리스 + `plugin update` 후 새 세션을 `claude --debug-file <path>` 로 열고 `/team …` 1회 → (a) 트랜스크립트에 `hook_additional_context` 첨부 `hookName:"UserPromptSubmit"` ≥ 1 이고 내용에 `[artibot:effort` 포함, (b) 디버그 파일에 `unrecognized keys` 0건, (c) `tengu_hook_output_persisted` 0건 | 트랜스크립트 grep + 디버그 파일 grep, 세션 ID·시각 명기. **리포 수정만으로는 D4 불가**(설치본 갱신 필요, HOOK-VISIBILITY §6-5) |
+
+**정정(2026-09-04) — D4 분리**: D4(라이브 도달 판정)는 L1 구현 줄기의 완료 기준이 **아니다**. L1 줄기의 완료 = **D1·D2·D3**(샌드박스·테스트·문구). D4 는 **"릴리스 + `plugin update` 후 통합 단계"** 에서 리더가 별도로 판정하고 그 결과를 이 문서 §8 에 추기한다. 이유: D4 는 설치본 갱신을 전제하므로 worktree 안에서 증명할 수 없고(§4.3-4), 줄기 완료(`Split-Limb: done`) 를 D4 에 걸면 줄기가 영원히 미완이 된다.
 
 ## 5. 문구 정정안 (P2) — 새 문구 그대로
 
@@ -201,7 +210,41 @@
 
 ## 6. 구현 순서 (승인 후)
 
-1. 파이어월 테스트 2종 먼저(red 확인) → 2. 디스패처 허용목록 → 3. `runtime-prompt` 조립 → 4. 리라이터·auto-team → 5. 기존 테스트 갱신 → 6. 문서 5곳 → 7. D1·D2·D3 → 8. 릴리스·`plugin update` → 9. D4.
-교차검수: 구현자 ≠ 검수자(verification-discipline §11). 검수자는 "허용목록이 부정 목록으로 바뀌지 않았는가", "`payload.user_prompt` 내부 전달이 살아 있는가", "`--no-team` 이 `hookData.prompt` 로 판정되는가" 3점을 본다.
+1. 파이어월 테스트 2종 먼저(red 확인) → 2. 디스패처 허용목록 → 3. `runtime-prompt` 조립 → 4. ~~리라이터·auto-team~~ 리라이터(`!rv` A 안 + `--no-team` additionalContext 지시문; auto-team 은 bc2e9e55 로 착지 — 변경 없음) → 5. 기존 테스트 갱신 → 6. 문서 5곳 → 7. D1·D2·D3 **= 줄기 완료** ‖ 8. 릴리스·`plugin update` → 9. D4 (**통합 단계, 리더** — §4.5 정정).
+교차검수: 구현자 ≠ 검수자(verification-discipline §11). 검수자는 "허용목록이 부정 목록으로 바뀌지 않았는가", "`payload.user_prompt` 내부 전달이 살아 있는가", ~~"`--no-team` 이 `hookData.prompt` 로 판정되는가"~~ "`--no-team` 이 `extractUserPromptFlagSurface` 로 판정되고 리라이터 제거 분기가 유지되는가(`userprompt-dispatcher.test.js:175-200` GREEN)" 3점을 본다.
 
 미확인: (1) 호스트 10 KB 스필이 additionalContext 를 절단하는지 통째로 버리는지(`Kfe` 의 `truncatedFallback` 경로 미열람); (2) additionalContext 로 옮긴 `!rv` 지시문이 프롬프트 접두사만큼 모델 행동을 바꾸는지(효과 미측정, §4.3-2); (3) `hooks.json:169` timeout 15000 의 단위 의도(§4.3-5); (4) `Lwe` 로그가 디버그 파일 외에 UI 에도 표시되는지(PROBE 와 동일); (5) `tests/hooks/runtime-prompt-decision-wiring.test.js`·`memory-instrumentation.test.js` 가 `out.user_prompt` 외에 stdout 형태를 단정하는 부분이 있는지(해당 행만 확인, 파일 전문 미열람); (6) `ambiguity-guard` 의 `{continue:true}` 를 `null` 로 바꿀 때 `tests/hooks/ambiguity-guard.test.js` 가 그 값을 단정하는지(미열람).
+
+---
+
+## 8. 재대조 2026-09-04 (architect, team-handoff-9d6dc2 · master @ `7cbb37b9` 워킹트리 · 11:3x–12:0x KST)
+
+> 3bcadb8e 기준 본문을 `bc2e9e55`(2026-09-03 17:49) 착지 이후 코드·테스트와 다시 대조했다. 본문은 지우지 않고 취소선 + "정정(2026-09-04)" 단락으로 표시했다(정본 관례). 아래는 무엇을 왜 바꿨는지의 목록이다. 인용 줄번호는 이 시각 워킹트리 측정값 — `_userprompt-dispatcher.js`·`runtime-prompt.js` 는 이 문서의 나머지 항목이 아직 미착지라 §1.4·§3 의 인용은 재측정하지 않았다(미확인, 아래 8-6).
+
+### 8-1. auto-team-trigger 옵트아웃 — "착지됨" 으로 갱신 (§2.2, §4.1 :108, §4.4 :141, §6-4)
+- **무엇**: "`auto-team-trigger.js:376` 을 `hookData.prompt` 로" → 착지됨. 실제 착지 형태는 `hookData.prompt` 단독이 아니라 `lib/core/hook-utils.js:319-329 extractUserPromptFlagSurface`(`user_prompt`·`prompt`·`content` 합집합) 이고 호출은 `scripts/hooks/auto-team-trigger.js:379` `if (NO_TEAM_FLAG.test(extractUserPromptFlagSurface(hookData))) return null;`.
+- **왜**: `git show --stat bc2e9e55` 에 `auto-team-trigger.js`·`hook-utils.js`·`hook-utils.test.js`·`userprompt-dispatcher.test.js` 포함, 커밋 메시지 2번째 항목이 이 회귀를 명시. 회귀 테스트 `tests/hooks/userprompt-dispatcher.test.js:175-190`(체인 통과 후 `[auto-team-suggested]` 부재) + 대조군 `:192-200` + `tests/core/hook-utils.test.js:444-477`.
+
+### 8-2. §2.2 "리라이터 `--no-team` 분기 삭제" ↔ §4.4 :141 "`user-prompt-handler.test.js` 변경 없음" 모순 — **유지** 쪽으로 해소
+- **리더 인용 정정**: 리더가 "§4.1 :141" 이라 적었으나 `:141` 은 **§4.4 테스트 표**의 행이다. §4.1 에서 같은 주장은 `:107`(`user-prompt-handler.js` 행 "`--no-team` 분기 삭제") 이고, 원 주장은 `:83`(§2.2). 모순 자체는 리더 지적대로 실재한다: `:83`/`:107` 삭제 ↔ `:141` 변경 없음 은 동시에 참일 수 없다(`user-prompt-handler.test.js:47-51, :95-105` 가 제거를 단언, `userprompt-dispatcher.test.js:183` 이 "디스패처 계약 — 유지" 로 핀).
+- **선택: 분기 유지 + additionalContext 지시문으로 (ii) 달성.** 근거 ① (i) 는 8-1 로 이미 달성 — 삭제가 (i) 에 기여 0. ② 호스트 계약상 원문은 항상 그대로 모델에 가므로(PROBE B8) 제거는 stdout 경계에서 걸러지는 내부 부작용 — (ii) 에도 기여 0. ③ 삭제하면 테스트 3파일 RED 를 고쳐야 하고 호스트에 보이는 이득이 없다. ④ 핀된 계약(`:183` "유지")을 존중하는 쪽이 드리프트가 적다. 반대안(삭제)을 택하려면 §4.4 :141 을 "변경" 으로 바꾸고 `user-prompt-handler.test.js:47-51, :95-105` + `userprompt-dispatcher.test.js:161-167, :183-184` 를 열거해야 한다 — 이 문서는 그 길을 택하지 않았다.
+- **본문 갱신 위치**: §2.2 취소선 + 정정 단락, §4.1 :107 행, §4.4 :141 행, §6 4단계·교차검수 3점.
+
+### 8-3. `user_prompt` 단독 페이로드에서의 옵트아웃 — 실측 후 명시 (§2.2 정정 마지막 항)
+- **측정(2026-09-04 11:47)**: 스크래치 스크립트로 리라이터 `handleUserPromptSubmit` → `payload.user_prompt` 치환(디스패처 `:206-208` 과 같은 규칙) → auto-team `handleUserPromptSubmit` 을 in-process 로 돌렸다(`CLAUDE_PLUGIN_ROOT`=플러그인 루트, 두 훅은 디스크에 쓰지 않음 — grep 으로 확인). 결과 3행:
+  - `{prompt: '<3도메인 프롬프트> --no-team'}` → 리라이터 제거, auto-team **미발화**(옵트아웃 유지)
+  - `{user_prompt: '<같은 프롬프트> --no-team'}` 단독 → 리라이터 제거, auto-team **발화**(옵트아웃 소실)
+  - 대조군 `{user_prompt: '<같은 프롬프트>'}`(플래그 없음) → 발화
+- **판정**: 레거시 단독 키 페이로드가 **디스패처 체인**을 통과하면 옵트아웃이 보장되지 않는다. 라이브 도달 불가(호스트는 `prompt` 를 보냄; 개별 훅 레거시 `main()` 은 리라이터를 거치지 않음). `tests/e2e/runtime-flow.test.js:33` 은 체인에 auto-team 을 넣지 않아 이 사례를 보지 않는다. **고치지 않고 문서화** + 있는 그대로 핀하는 테스트 1건을 §4.4 에 추가(거짓 그린 방지). 실제 디스패처 서브프로세스로는 재현하지 않았다(in-process 재현 — 추론 아님, 실측이되 경로가 동형이라는 것은 `_userprompt-dispatcher.js:203-208` 코드 읽기에 근거).
+
+### 8-4. `artibot.config.json` 소유권 — L1 로 확정 (§4.1 :110)
+- L1(이 설계) 이 `artibot.config.json` 을 소유한다(`runtime.effort.comment` + `runtime.hooks.userPromptSubmit.legacyStdout`). L2 `ROUTE-RECEIPT-PRETOOLUSE-DESIGN.md` §6 의 `routing.observe.receiptStage` 는 **L2 D1 착수 시 통합 단계에서 리더가 추가**한다. 현재 split 계획(`.artibot/split/plan.json`, run `split-9d6dc2`)의 `l2-probe` 줄기는 `scripts/dev/probe-hook-keys.js`·`tests/hooks/fixtures/host-payloads/` 2경로만 소유하고 config 를 건드리지 않는다. 확인: `grep -n "receiptStage\|legacyStdout" artibot.config.json` 0건(11:4x) — 두 키 모두 아직 없다.
+
+### 8-5. D4 분리 (§4.5, §6)
+- D4(라이브 도달)는 "릴리스 + `plugin update` 후 통합 단계" 로 분리. L1 줄기 완료 = D1·D2·D3. 이유는 §4.5 정정 단락.
+
+### 8-6. 재대조에서 확인하지 않은 것(미확인)
+- `_userprompt-dispatcher.js` `mergeHookResults`(`:155-186`) 는 아직 "나머지 전부 복사" 그대로(11:4x `grep HOST_` 0건) — §1.4·§3 의 변경은 미착지이며 그 인용 줄번호는 재측정하지 않았다.
+- `runtime-prompt.js#composePromptOutput` 은 `:706` 에서 시작(문서 `:707` 과 1줄 차) — 본문은 고치지 않았다(구현 시 재측정).
+- `ambiguity-guard.test.js` 가 `{continue:true}` 를 단정하는지 — 여전히 미열람.
+- 8-3 을 실제 디스패처 서브프로세스(`runDispatcher` 헬퍼)로 재현하지 않았다.

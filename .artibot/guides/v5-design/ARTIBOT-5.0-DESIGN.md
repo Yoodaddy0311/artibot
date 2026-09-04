@@ -825,6 +825,20 @@ mtime **17:46:56** = 실행 시각 일치)가 생성됐다. 1회째(config)와 �
 오염시킨다.** "테스트 격리 실행조차 실 스토어를 오염시킨다" 가 관측 2회로 성립했다 —
 **설계안 우선순위 상향 권고**(현재 후속 12 의 권장 처리는 개별 스위트 수리가 아니라 경로 차단이어야 한다).
 
+**⚠️ 위 단락(:814~) 등급 정정 — 실측 → 시각 상관 기반 추론 (followup 팀원 실측, 리더 grep 재확인 2026-09-04 11:5x)**
+
+윗 문단의 "**쓰기 주체가 실측으로 확정** 됐다 — 리더 본인이다"는 **성립하지 않는다.** 근거:
+그 두 스위트(`tests/git/git-dir.test.js`·`tests/handoff/handoff-store.test.js`)의 import 는
+`lib/git/git-dir.js`·handoff-store 와 node 내장뿐이고, `flushRecorderStats` 의 **비테스트 참조는
+정의(`decision-events.js:644`)와 `scripts/hooks/runtime-prompt.js:626` 2건뿐**이다(기록자 재현:
+`grep -rn "flushRecorderStats" --include=*.js plugins/ | grep -v /tests/` → occurrence 4 =
+정의 `:644` · JSDoc `:106` · import `runtime-prompt.js:609` · 호출 `:626`, **소비처는 runtime-prompt 1곳**).
+즉 그 스위트는 recorder 경로에 **닿지 않는다.** 17:46:56 mtime 일치는 인과가 아니라 **시각 상관**이다.
+
+- **등급**: 실측 → **시각 상관 기반 추론**
+- **쓰기 주체**: **미확인**(1회째 config 자기보고, 2회째 이 정정으로 되돌림, 3회째는 아래 참조)
+- 윗 문단을 지우지 않는 이유: 정본 규칙(부록 표가 본문을 이긴다)에 따라 **원 기록 보존 + 정정 병기**.
+
 
 **교훈 각주 — 설치본·캐시 대조에 `cmp` 를 쓰지 마라 (이 세션 CRLF 착시 3번째)**
 
@@ -879,3 +893,110 @@ PRD-SPLIT 에 수행한 갱신: frontmatter `linked_adrs` → ADR-006~010 · `su
 `reports/AUTOPILOT/ap-20260902-062936-tyc5j4.md` §5 에도 들어가 있으나, **그 보고서는 git 추적 대상이 아니다**
 (`.gitignore:73` 의 `reports/*`, 재포함은 `!reports/SPLIT/` 뿐 — `git check-ignore` exit 0). 따라서 나중에 이
 결정을 찾는 사람은 **`ARTIBOT-5.0-DESIGN.md` 부록 0-2 후속(이 절)** 을 정본으로 삼아야 한다.
+
+---
+
+### 부록 0-2 후속(2). 오너 결정 (2026-09-04 확정)
+
+**결정자: 오너 · 결정일: 2026-09-04 12:0x KST · 수단: `AskUserQuestion` 실답 · 기록: 리더 경유 기록자 반영.**
+아래 4건은 2026-09-03 결정 절(위)의 **연속**이며, 그 절과 같은 규칙으로 읽는다 —
+**결정 문구는 오너 원장을 그대로 옮긴 것이고 기록자의 해석·보완을 더하지 않았다.**
+「재결정 조건」열은 오너가 근거 열에 적은 유보를 조건문으로 옮긴 것이며,
+**오너가 특정하지 않은 임계·표본 수는 그 자리에 `미확인` 으로 적었다**(추측으로 메우지 않음).
+2026-09-03 오너 메타 결정(**설계 정본 우선 → 권장안 → 기록만**, 질문은 신규 방향에만)이 그대로 적용된다.
+
+| ID | 오너 결정 (2026-09-04 확정) | 근거/단서(오너 제시) | 재결정 조건 |
+|---|---|---|---|
+| 착수 형태 (2026-09-04) | **"권장안 그대로".** ① F-10 · F-30 **즉시 승인**(설계안 2건 → 구현 착수) ② L2 D0 프로브 **즉시**(코드 0) ③ L1 은 **설계안 재대조 후 착수** — `bc2e9e55` 반영 + §2.2/§4.1 `:141` 모순 해소가 선행 ④ G-1 은 **2번 답으로 확정**(아래 「G-1 2차」 행) ⑤ `docs:check` 스코프 확대·트레일 이관은 **보류**(설계안 부재) | 권장안 = 리더 제시안. 보류 2건의 사유는 "설계안이 아직 없다" | ③ 은 **설계안 재대조가 끝나면** 해제. ⑤ 는 **설계안이 서면 재상정** |
+| G-1 2차 (2026-09-04) | **흡수 확정 — `performance.priority` 5값을 3값으로 흡수, `quality` → `balanced`.** economy → balanced 로 인한 **표현력 손실은 `G-1b` 로 미결 등록**하고 **README 에 명시**한다 | 5값 enum 유지 시 소비처가 구분하지 못하는 값이 남는다 | **`G-1b`(economy 손실) 는 미결** — 손실이 실사용에서 드러나면 재결정. 임계는 오너 미특정 — `미확인` |
+| 후속 12 차단안 (2026-09-04) | **B + D 채택.** **B** = `flushRecorderStats`(`lib/observability/decision-events.js:644`)가 **세션이 없으면 파일 대신 stderr** 로 쓴다. **D** = **firewall 허용목록 게이트** 신설(`tests/firewall/trail-sandbox-required.test.js` 구조 복제). **A(개명) 반대**, **C(cwd 없으면 no-op) 미채택** | 후속 12 는 관측 3회(아래 「실발생 3회째」) — 개별 스위트 수리로는 경로가 닫히지 않는다 | 없음(선택 확정). B·D 는 각각 별도 이행 |
+| 후속 19 범위 (2026-09-04) | **`/split` 게이트 2곳 + 한글 회귀 테스트 먼저.** 대상 = `lib/git/limb-landing-check.js:427` · `scripts/split/restore-blob.mjs:86` + **한글 경로 픽스처 회귀 테스트**. 나머지 자리는 **후속 배치**. **#7·#10 은 착수하지 않음**(결과 불변) | 다음 배치 `/split` 4줄기가 바로 그 두 경로를 탄다 | 나머지 자리는 **한글 경로 실유입이 관측되면** 앞당김. 빈도 임계는 오너 미특정 — `미확인` |
+
+**착수 형태(오너 확정)**: `/split plan` · runId **`split-9d6dc2`** · base **`7cbb37b9`** · 줄기 4개 =
+`l4-f10` · `l3-f30-g1` · `p2-f12-f19` · `l2-probe`. **`CHANGELOG` 는 통합 시 리더가 일괄**(줄기별 기록 금지).
+⚠️ 이 4줄기의 **파일 소유권은 겹친다** — 아래 「핸드오프 전제 정정 3건」(c) 참조.
+
+
+**후속 12 갱신(2) — 실발생 3회째 (followup 실측, 리더 재측정 2026-09-04 11:5x · 기록자 재현 11:39)**
+
+정본이 "18:1x 삭제 → 디렉터리 부재"로 끝낸 뒤 **재발했다.**
+`.artibot/runtime/decisions/_unattributed.events.ndjson` — **215 B / 1줄**,
+ts **`2026-09-03T09:23:47.193Z`**(= 18:23:47 KST), 내용 `recorder-stats 4 skipped 0 failed`.
+
+- **`skipped:4` 의 정체**: UserPromptSubmit 파이프라인 **1회 완주분**(router 1 + tasks 1 +
+  `recordObserveOnlyDecisions` 2). 스크래치패드의 **가짜 리포에서 바이트 동치로 재현**됐다.
+- **⚠️ 차단안이 끊으면 안 되는 경로**: 현재 같은 스토어에 **라이브 세션 파일 2개가 정상 기록 중**이다.
+  기록자 재현(`wc -l` · `stat`, **2026-09-04 11:39 KST**): `9120048e…events.ndjson` **7줄**(11:04:58),
+  `9d6dc211…events.ndjson` **10줄**(11:39:41 — 이 세션, 증가 중. 리더 11:0x 관측의 "6줄"과 다른 것은
+  **같은 파일이 자라고 있기 때문**이며 모순이 아니다). 후속 12 차단안 B·D 는 **이 경로를 살려 둔 채**
+  세션 없는 실행만 갈라내야 한다.
+- **`/doctor` Check 7 오독 위험(검수자 확인, 재확인됨)**: `commands/doctor.md:200` 의 S5 행 원문은
+  "no `*.events.ndjson` with a non-`diag-` `sessionId` has ever been written under this root" 이라
+  `_unattributed` 를 **`diag-` 접두가 아니라는 이유로 라이브 증거로 계수한다.** 후속 12 의 원래 경고가
+  **3회째 관측으로 재확인**됐다.
+- **등급**: 파일·바이트·타임스탬프는 **실측**, **쓰기 주체는 여전히 미확인**(위 등급 정정 참조).
+
+
+**후속 19 갱신 — 분모 13 → 16, 일괄 치환 불가 확정 (followup 실측, 리더 sed 재확인 2026-09-04)**
+
+- **분모 정정**: 기존 13곳은 **전부 실재**하고, 추가 **3곳**이 확인됐다 → **16곳**.
+  추가분(기록자 `sed -n` 재확인 3/3): `plugins/artibot/scripts/split/restore-blob.mjs:86`
+  (`ls-files --full-name --error-unmatch` — `/split` 복원 도구) ·
+  `.github/workflows/plugin-validate.yml:61`(`diff --name-only`, CI 셸) ·
+  `plugins/artibot-cowork/scripts/release.js:158`(`diff --cached --name-only`).
+  **git 명령 수는 18개**(#6·#11 이 각각 2개를 품는다) — 자리 수 16 과 명령 수 18 을 섞지 말 것.
+- **완화 조건 없음**: `core.quotepath` **미설정**(= 기본 `true`) → C-quote 가 실제로 켜져 있다.
+- **`limb-landing-check.js:427` 은 우선 대상이 맞다**: 이 줄은 `ownershipCheck` 로 들어가는
+  **`/split` 소유권 게이트**이고, 한글 파일명이 allowlist 안에 있어도 **거짓 FAIL**(fail-closed 방향)이
+  실제 `checkLimbLanding` 호출로 **재현**됐다.
+- **일괄 치환 불가**: `-z` 는 **명령마다 출력 형태를 다르게 바꾼다**(`--name-status` 는 status 와 path 가
+  **별개 NUL 필드**로 나온다) → 한 줄짜리 치환 스크립트로 처리할 수 없다. **공용 헬퍼는 YAGNI**
+  (후속 19 의 종전 권장 "`gitPathsZ()` 하나로" 는 이 실측으로 **철회**).
+- **파서 재작성이 필요한 곳은 1곳**: `scripts/hooks/stop-review-gate.js:79-80`
+  (+ **테스트 픽스처 6곳 개편**). 나머지는 필드 분리만으로 족하다.
+
+
+**핸드오프(2026-09-03 18:51) 전제 정정 3건 (doctor·architect 팀원 실측, 리더 재측정 2026-09-04)**
+
+| # | 핸드오프 전제 | 실측 | 정정 |
+|---|---|---|---|
+| (a) | 훅 페이로드 수리 커밋 = `09d4eff3` | `09d4eff3` 은 **버전 문자열 12파일**(릴리스 동기화). 수리 본체는 **`bc2e9e55`**(2026-09-03 **17:49:12** +0900, `fix(hooks): 호스트 페이로드 키 prompt 수리 …`) | 수리 커밋은 **`bc2e9e55`**. ⚠️ **리더 브리프의 "24파일" 은 기록자 재측정과 다르다 — 실측 41파일**(`git show --numstat --format='' bc2e9e55 \| grep -c .` → **41**, `--shortstat` → `41 files changed, 835 insertions(+), 147 deletions(-)`). 24 의 출처 미확인 |
+| (b) | `spawns.ndjson` 의 `route_ledger` 가 UserPromptSubmit 수리의 증거 | 그 필드는 **SubagentStart 계열**이라 UserPromptSubmit 과 **다른 훅**이다. 값은 **71/71 `skipped:no-action-text`** | **증거 아님.** 사건 b(SubagentStart 에 action text 없음)는 **미해결**이며, 그 처리는 `ROUTE-RECEIPT-PRETOOLUSE-DESIGN.md` 소관 |
+| (c) | `/split` 4줄기 **파일 소유권 겹침 0** | **성립하지 않는다.** `artibot.config.json` = **L1 × L2** 명시 · `CHANGELOG.md` = **L2 × L3 × L4** · `commands/doctor.md`·`doctor-checks.js` = **L3 명시 × L2 암묵**(Check 10) | 겹침 **3계열**. `/split` 의 전제(소유권 비중첩)가 깨지므로 **줄기 배치 또는 파일 소유권을 착수 전에 재조정**해야 한다. `CHANGELOG` 는 위 「착수 형태」대로 **리더 일괄**이라 이미 해소 경로가 있다 |
+
+
+**후속 18 갱신 + `/doctor` Check 7 첫 라이브 통과 (doctor 팀원 실측, 리더 재측정 2026-09-04 11:14~11:22 KST)**
+
+- **Check 7 = pass (첫 라이브)**: 라이브 루트 `~/.claude/plugins/cache/artibot/artibot/4.54.0` 기준
+  **S4~S6 전부 false**. `decision-trail.json` 에 **`/resume`·`/team` 슬래시 판정 2건** —
+  **프롬프트 텍스트가 훅에 도달했다는 직접 증거**다(`bc2e9e55` payload 키 수리의 라이브 확인).
+- **Check 8 = unmeasured**: `.git/artibot/`·`.artibot/state.yaml` **부재** = StateStore 미사용.
+  **결함이 아니다** — 분모가 없는 것이다.
+- **구조적 한계(게이트 옆에 적는다)**: `events.ndjson` 은 **5훅 중 `runtime-prompt` 1훅만 관측**한다.
+  나머지 4훅(auto-team · autopilot-nlu · command-suggest · ambiguity-guard)은 **디스크 산출물 0** 이라
+  Check 7 이 pass 여도 **그 4훅의 발화는 증명되지 않는다.**
+- **후속 18 범위 확대 — 캐시는 더 이상 버전 충실 아카이브가 아니다**: 플러그인 캐시 **6개** 디렉터리
+  (4.47 · 4.49 · 4.50 · 4.51 · 4.53 · 4.54)의 `package.json` 이 **전부 4.54.0**
+  (기록자 재현 6/6, 2026-09-04) — `install.sh` 미러가 **구버전 디렉터리까지 순회**한다.
+  디렉터리 mtime **18:19:26~18:20:22**(15초 간격)가 한 번의 순회임을 보인다.
+  종전 후속 18 은 "5개"로 적었으나 **실측 6개**다.
+- **이 관측이 닫는 모순**: "4.54.0 **설치(18:49) 전** 시각의 `_unattributed`(18:23) 가 4.54.0 전용
+  projectRoot 경로에 쓰였다" 는 겉보기 모순은, **캐시 전 디렉터리가 이미 4.54.0 코드였다**는 사실로
+  설명된다 — **제3의 실행자를 가정할 필요가 없다**(규율 §5 정합성 점검 통과).
+- **미확인**: 이 미러가 **의도인지** — `install.sh` 를 이번 확인에서는 **열지 않았다.**
+  (종전 후속 18 은 `install.sh:596-612` 주석을 근거로 "5개 전부 덮어쓰는 것이 설계" 라고 적었다.
+  6개 순회가 그 설계의 자연스러운 귀결인지는 **원문 재확인 전까지 미확인**으로 둔다.)
+
+
+**미확인 (2026-09-04 기준 — 삭제·요약 금지)**
+
+- **나머지 4훅의 라이브 발화 여부** — 관측점 자체가 없다(위 「구조적 한계」).
+- **`_unattributed` 3회분의 실제 쓰기 주체** — 1회째 config 자기보고, 2회째 등급 정정으로 되돌림, 3회째 미확인.
+- **호스트가 `cwd`·`session_id` 를 항상 주는지** — `INCIDENT-2026-09-03-hook-payload-contract.md:169` 에
+  기록만 있고 **원시 캡처가 없다.**
+- **`git merge-tree --write-tree --name-only` 의 `-z` 지원 여부.**
+- **후속 19 각 자리의 한글 경로 실유입 빈도** — 실증은 `limb-landing-check.js:427` **1건뿐**.
+- **`INCIDENT` §6.2 (C) 의 정의.**
+- **`install.sh` 캐시 미러가 6개 디렉터리 순회를 의도했는지.**
+- **L1 설계안 내부 모순** — §2.2(분기 삭제) vs §4.1 `:141`(테스트 무변경) vs
+  `tests/hooks/userprompt-dispatcher.test.js:183`. **검수자 발견**, 설계안 재대조 레인에서 해소 예정.
