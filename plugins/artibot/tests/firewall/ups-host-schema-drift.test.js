@@ -23,6 +23,18 @@ import { describe, expect, it } from 'vitest';
  * nothing was measured — the same class of false green the incident came from.
  * Point `ARTIBOT_HOST_BINARY` at a binary to run it elsewhere.
  *
+ * ONE CARVE-OUT — CI. 설계 §4.3-1 수정 필요 — 리더 권장 채택 2026-09-04, 오너 미질의.
+ * A GitHub runner has no Claude Code install, so unconditional fail-closed makes
+ * every push red and the gate gets deleted rather than fixed. When the binary is
+ * absent AND `CI` is set, the binary-dependent cases SKIP — but the skip is
+ * loud, not silent: the reason is appended to each test name and printed once to
+ * stderr, and the wording says UNMEASURED rather than passed. Locally (no `CI`)
+ * absence is still a hard failure, so the developer who owns the allowlist is
+ * the one who gets told. `ARTIBOT_HOST_BINARY=<path>` re-arms it on CI.
+ *
+ * The carve-out is scoped to binary ABSENCE only: with a binary present, CI
+ * compares exactly as a developer machine does. A DISAGREEMENT never skips.
+ *
  * WHAT THIS GATE CANNOT SEE
  *   - Schema keys the host validates but never names as a literal in the
  *     bundle (none observed on 2.1.259/2.1.260, but the scan is textual).
@@ -33,6 +45,10 @@ import { describe, expect, it } from 'vitest';
  *     It measures exactly one binary, named in the failure message.
  *   - Runtime enforcement. The dispatcher could still fail to APPLY its own
  *     constant; ups-stdout-allowlist.test.js is what covers that.
+ *   - Drift on CI when no binary is installed. That run measures NOTHING here;
+ *     the green comes from the other cases in this file and from the suites
+ *     listed above. Only a developer machine (or a CI job with
+ *     `ARTIBOT_HOST_BINARY`) actually closes this loop.
  */
 
 const PLUGIN_ROOT = path.resolve(
@@ -117,11 +133,41 @@ function fieldNames(chunk) {
   return [...names];
 }
 
+/** Resolved once: every case below asks the same question of the same host. */
+const HOST_BINARY = findHostBinary();
+
+/**
+ * `CI` is set to `true` by GitHub Actions and by every other runner worth
+ * naming. Compared as a string so a literal `CI=false` does not read as on.
+ */
+const ON_CI = !['', '0', 'false'].includes(String(process.env.CI ?? '').toLowerCase());
+
+/** Absence + CI = the one condition the leader's carve-out covers. */
+const SKIP_ON_CI = HOST_BINARY === null && ON_CI;
+
+const SKIP_REASON = 'host binary absent on CI — drift UNMEASURED, not passed';
+
+/** Appended to each skipped test's NAME so the reason survives into the report. */
+const NAME_SUFFIX = SKIP_ON_CI ? ` [SKIPPED: ${SKIP_REASON}]` : '';
+
+if (SKIP_ON_CI) {
+  // Printed once, at the top, in a shape that survives a scroll-back. A skip
+  // that only shows as a dimmed line in the reporter is how "unmeasured" turns
+  // into "verified" in someone's summary three weeks later.
+  process.stderr.write(
+    `\n${'!'.repeat(78)}\n`
+    + `!! ups-host-schema-drift: ${SKIP_REASON.toUpperCase()}\n`
+    + '!! The dispatcher\'s HOST_STDOUT_KEYS was NOT compared against any host\n'
+    + '!! schema in this run. This is a HOLE, not a pass. Set ARTIBOT_HOST_BINARY\n'
+    + '!! to close it on CI; locally, absence is still a hard failure.\n'
+    + `${'!'.repeat(78)}\n\n`,
+  );
+}
+
 describe('UPS host schema drift', () => {
-  it('a host binary is present (absence is a FAILURE, not a skip)', () => {
-    const found = findHostBinary();
+  it.skipIf(SKIP_ON_CI)(`a host binary is present (absence is a FAILURE, not a skip)${NAME_SUFFIX}`, () => {
     expect(
-      found,
+      HOST_BINARY,
       'No Claude Code binary found under ~/.local/share/claude/versions and '
       + 'ARTIBOT_HOST_BINARY is unset. This gate compares the dispatcher\'s '
       + 'HOST_STDOUT_KEYS against the real host schema; with no binary it '
@@ -130,8 +176,18 @@ describe('UPS host schema drift', () => {
     ).not.toBeNull();
   });
 
-  it('SELF-CHECK: the extractor really finds both schema literals', () => {
-    const found = findHostBinary();
+  it('the CI carve-out is scoped to ABSENCE, never to disagreement', () => {
+    // Runs everywhere, including CI. Guards the carve-out itself: if someone
+    // later widens `SKIP_ON_CI` to cover a failing comparison, the gate would
+    // go quiet on real drift — the exact failure mode this file exists to catch.
+    expect(SKIP_ON_CI).toBe(HOST_BINARY === null && ON_CI);
+    if (HOST_BINARY !== null) {
+      expect(SKIP_ON_CI, 'a present binary must never skip, CI or not').toBe(false);
+    }
+  });
+
+  it.skipIf(SKIP_ON_CI)(`SELF-CHECK: the extractor really finds both schema literals${NAME_SUFFIX}`, () => {
+    const found = HOST_BINARY;
     if (!found) return; // the case above already failed
     const schema = extractHostSchema(found.path);
     // If the bundle shape changed enough that the regexes stop matching, the
@@ -151,8 +207,8 @@ describe('UPS host schema drift', () => {
     expect(schema.ups, 'last UPS field').toContain('suppressOriginalPrompt');
   });
 
-  it('HOST_STDOUT_KEYS equals the host top-level output schema', async () => {
-    const found = findHostBinary();
+  it.skipIf(SKIP_ON_CI)(`HOST_STDOUT_KEYS equals the host top-level output schema${NAME_SUFFIX}`, async () => {
+    const found = HOST_BINARY;
     if (!found) return;
     const { HOST_STDOUT_KEYS } = await import(DISPATCHER);
     const schema = extractHostSchema(found.path);
@@ -163,8 +219,8 @@ describe('UPS host schema drift', () => {
     ).toEqual([...schema.topLevel].sort());
   });
 
-  it('HOST_UPS_KEYS equals the host UserPromptSubmit hookSpecificOutput schema', async () => {
-    const found = findHostBinary();
+  it.skipIf(SKIP_ON_CI)(`HOST_UPS_KEYS equals the host UserPromptSubmit hookSpecificOutput schema${NAME_SUFFIX}`, async () => {
+    const found = HOST_BINARY;
     if (!found) return;
     const { HOST_UPS_KEYS } = await import(DISPATCHER);
     const schema = extractHostSchema(found.path);
