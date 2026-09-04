@@ -417,6 +417,307 @@ async function runAdvisors(hookData) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Usage receipts (economics)
+// ---------------------------------------------------------------------------
+
+/**
+ * Result of a run in which nothing was written. Every branch starts here so a
+ * caller never has to branch on `undefined`, and `coverage: null` keeps
+ * "measured nothing" distinct from "measured zero spend".
+ * @type {Readonly<object>}
+ */
+const EMPTY_RECEIPT_RESULT = Object.freeze({
+  status: 'skipped',
+  appended: 0,
+  rejected: 0,
+  deduped: 0,
+  receipts: 0,
+  reason: null,
+  coverage: null,
+});
+
+/**
+ * Pair a result patch with the unresolved-model list. The list rides ALONGSIDE
+ * the result rather than inside it: the returned contract is a fixed set of
+ * keys, and the model names belong on the stderr line only.
+ *
+ * @param {object} patch - Fields overriding {@link EMPTY_RECEIPT_RESULT}.
+ * @param {string[]} [unresolved] - Transcript model strings the catalog rejected.
+ * @returns {{result: object, unresolved: string[]}}
+ */
+function receiptOutcome(patch, unresolved = []) {
+  return { result: { ...EMPTY_RECEIPT_RESULT, ...patch }, unresolved };
+}
+
+/**
+ * Collapse a reason to one bounded, single-line token. A stack-trace-shaped
+ * message would otherwise break the one-line stderr contract and bury the
+ * fields that follow it.
+ *
+ * @param {unknown} message
+ * @param {number} [max]
+ * @returns {string}
+ */
+function truncateReason(message, max = 120) {
+  const text = String(message ?? '').replace(/\s+/g, ' ').trim();
+  return text.length > max ? text.slice(0, max) : text;
+}
+
+/**
+ * The three payload fields a receipt run cannot proceed without.
+ *
+ * `cwd` is REQUIRED rather than defaulted to `process.cwd()`: a globally
+ * installed hook runs from wherever the host happened to be, so deriving the
+ * root from the process would append this project's spend to a stranger's
+ * ledger (same rule as `scripts/hooks/pre-bash.js`).
+ *
+ * @param {object} hookData
+ * @returns {{reason: string|null, transcriptPath?: string, sessionId?: string, cwd?: string}}
+ */
+function receiptPrecondition(hookData) {
+  const transcriptPath = hookData?.transcript_path;
+  const sessionId = hookData?.session_id;
+  const cwd = hookData?.cwd;
+  if (typeof transcriptPath !== 'string' || transcriptPath.length === 0) {
+    return { reason: 'no-transcript' };
+  }
+  if (typeof sessionId !== 'string' || sessionId.length === 0) return { reason: 'no-session-id' };
+  if (typeof cwd !== 'string' || cwd.length === 0) return { reason: 'no-cwd' };
+  return { reason: null, transcriptPath, sessionId, cwd };
+}
+
+/**
+ * Resolve the ports this stage needs, honouring injected overrides.
+ *
+ * Dynamic imports on purpose: a static import runs at module load, so it would
+ * run inside every test that merely imports this hook. Each `??` short
+ * circuits, so a fully injected call imports nothing at all.
+ *
+ * @param {object} deps - Injection seam; see {@link recordUsageReceipts}.
+ * @returns {Promise<object>} every port this stage calls
+ */
+async function resolveReceiptDeps(deps) {
+  const pluginRoot = deps.pluginRoot || getPluginRoot();
+  const load = (...rel) => import(toFileUrl(path.join(pluginRoot, ...rel)));
+  return {
+    now: deps.now ?? (() => new Date()),
+    buildUsageReceipts: deps.buildUsageReceipts
+      ?? (await load('lib', 'economics', 'usage-receipt.js')).buildUsageReceipts,
+    toUsageReceiptEnvelopes: deps.toUsageReceiptEnvelopes
+      ?? (await load('lib', 'economics', 'receipt-envelope.js')).toUsageReceiptEnvelopes,
+    appendLedgerEvent: deps.appendLedgerEvent
+      ?? (await load('lib', 'runtime', 'ledger.js')).appendLedgerEvent,
+    readAllEvents: deps.readAllEvents
+      ?? (await load('lib', 'runtime', 'ledger.js')).readAllEvents,
+    resolveProjectRoot: deps.resolveProjectRoot
+      ?? (await load('lib', 'git', 'project-root.js')).resolveProjectRoot,
+    sessionFallbackMissionId: deps.sessionFallbackMissionId
+      ?? (await load('lib', 'mission', 'mission-id.js')).sessionFallbackMissionId,
+    isMissionId: deps.isMissionId
+      ?? (await load('lib', 'mission', 'mission-id.js')).isMissionId,
+  };
+}
+
+/**
+ * Mission this session's spend belongs to: the declared id when it is one, the
+ * session-derived fallback otherwise. Same order as
+ * `scripts/hooks/subagent-handler.js#resolveMissionId` — two hooks disagreeing
+ * about which mission a session belongs to would split one mission's ledger.
+ *
+ * @param {object} hookData
+ * @param {string} sessionId
+ * @param {object} d - Resolved ports.
+ * @returns {string|null} null when no valid id can be formed.
+ */
+function resolveReceiptMissionId(hookData, sessionId, d) {
+  const declared = hookData?.mission_id ?? hookData?.missionId;
+  try {
+    if (d.isMissionId(declared)) return declared;
+    const id = d.sessionFallbackMissionId({ sessionId, nowMs: d.now().getTime() });
+    return d.isMissionId(id) ? id : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolve the ledger root from the payload cwd, or null.
+ * @param {object} d - Resolved ports.
+ * @param {string} cwd
+ * @returns {string|null}
+ */
+function safeProjectRoot(d, cwd) {
+  try {
+    const root = d.resolveProjectRoot(cwd);
+    return typeof root === 'string' && root.length > 0 ? root : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Idempotency keys of the `usage.receipt` lines this session already wrote.
+ * READER, not writer.
+ *
+ * `lib/runtime/ledger.js#applyUsageReceipt` SUMS every receipt it folds, so a
+ * SessionEnd firing twice over one session (an ended `--resume` is the observed
+ * way) would double that session's recorded spend.
+ *
+ * An unreadable ledger yields an EMPTY set, which PERMITS the append: a lost
+ * receipt is a permanent hole in the measurement, whereas a duplicate is
+ * visible in the ledger and removable.
+ *
+ * @param {object} d - Resolved ports.
+ * @param {string} projectRoot
+ * @param {string} sessionId
+ * @returns {Set<string>}
+ */
+function existingReceiptKeys(d, projectRoot, sessionId) {
+  try {
+    const events = d.readAllEvents(projectRoot, { session_id: sessionId });
+    const keys = new Set();
+    for (const event of Array.isArray(events) ? events : []) {
+      if (event?.event !== 'usage.receipt') continue;
+      const key = event.idempotency_key;
+      if (typeof key === 'string' && key.length > 0) keys.add(key);
+    }
+    return keys;
+  } catch {
+    return new Set();
+  }
+}
+
+/**
+ * Append every envelope the ledger does not already carry, and grade the run.
+ *
+ * @param {object} d - Resolved ports.
+ * @param {string} projectRoot
+ * @param {object[]} envelopes
+ * @param {Set<string>} seen - Keys already in the ledger.
+ * @returns {{status: string, appended: number, rejected: number, deduped: number,
+ *   reason: string|null}}
+ */
+function appendReceiptEnvelopes(d, projectRoot, envelopes, seen) {
+  let appended = 0;
+  let rejected = 0;
+  let deduped = 0;
+  let reason = null;
+
+  for (const envelope of envelopes) {
+    if (seen.has(envelope.idempotency_key)) {
+      deduped += 1;
+      continue;
+    }
+    const result = d.appendLedgerEvent(projectRoot, envelope);
+    if (result?.ok) {
+      appended += 1;
+      continue;
+    }
+    rejected += 1;
+    if (reason === null) reason = truncateReason(result?.reason ?? 'append-failed');
+  }
+
+  const status = appended > 0 ? 'appended' : (rejected > 0 ? 'failed' : 'skipped');
+  if (appended === 0 && rejected === 0) {
+    reason = deduped > 0 ? 'already-recorded' : 'no-envelopes';
+  }
+  return { status, appended, rejected, deduped, reason };
+}
+
+/**
+ * The whole receipt stage minus the reporting. May throw; its caller may not.
+ *
+ * @param {object} hookData
+ * @param {object} deps
+ * @returns {Promise<{result: object, unresolved: string[]}>}
+ */
+async function collectUsageReceipts(hookData, deps) {
+  const pre = receiptPrecondition(hookData);
+  if (pre.reason !== null) return receiptOutcome({ reason: pre.reason });
+  const { transcriptPath, sessionId, cwd } = pre;
+
+  const d = await resolveReceiptDeps(deps);
+  const missionId = resolveReceiptMissionId(hookData, sessionId, d);
+  if (missionId === null) return receiptOutcome({ reason: 'no-mission-id' });
+
+  const projectRoot = safeProjectRoot(d, cwd);
+  if (projectRoot === null) return receiptOutcome({ reason: 'no-project-root' });
+
+  let built;
+  try {
+    built = await d.buildUsageReceipts({ transcriptPath, missionId });
+  } catch (err) {
+    return receiptOutcome({
+      status: 'failed',
+      reason: `parse-failed:${truncateReason(err?.message ?? err)}`,
+    });
+  }
+
+  const receipts = Array.isArray(built?.receipts) ? built.receipts : [];
+  const coverage = typeof built?.meta?.coverage === 'number' ? built.meta.coverage : null;
+  const unresolved = Object.keys(built?.meta?.unresolvedModels ?? {});
+  if (receipts.length === 0) return receiptOutcome({ reason: 'no-receipts', coverage }, unresolved);
+
+  const envelopes = d.toUsageReceiptEnvelopes(receipts, { sessionId });
+  const tally = appendReceiptEnvelopes(
+    d, projectRoot, envelopes, existingReceiptKeys(d, projectRoot, sessionId),
+  );
+  return receiptOutcome({ ...tally, receipts: receipts.length, coverage }, unresolved);
+}
+
+/**
+ * The one stderr line this stage emits.
+ * @param {object} result
+ * @param {string[]} [unresolved]
+ * @returns {string}
+ */
+function formatUsageReceiptLine(result, unresolved = []) {
+  const parts = [
+    `[economics] usage.receipt: status=${result.status}`,
+    `appended=${result.appended}`,
+    `rejected=${result.rejected}`,
+    `deduped=${result.deduped}`,
+    `receipts=${result.receipts}`,
+    `coverage=${result.coverage === null ? 'null' : result.coverage}`,
+    `reason=${result.reason ?? '-'}`,
+  ];
+  if (unresolved.length > 0) parts.push(`unresolved=${unresolved.join('·')}`);
+  return `${parts.join(' ')}\n`;
+}
+
+/**
+ * Read this session's Attempt Receipts out of the transcript and append them to
+ * the project ledger as `usage.receipt` events.
+ *
+ * This is the ONLY writer of that event (the single-writer rule restated in
+ * `lib/economics/usage-receipt.js`): `cache-roi.js` and `token-usage.js` must
+ * never also fold the same tokens into a receipt.
+ *
+ * Observe-phase contract: no behaviour change, no file artifacts, ledger rows
+ * only. Never throws and never alters the hook's outcome — a failure to MEASURE
+ * spend must not become a failure to END a session.
+ *
+ * @param {object} hookData - SessionEnd payload.
+ * @param {object} [deps] - Injection seam. Any of `buildUsageReceipts`,
+ *   `toUsageReceiptEnvelopes`, `appendLedgerEvent`, `readAllEvents`,
+ *   `resolveProjectRoot`, `sessionFallbackMissionId`, `isMissionId`,
+ *   `pluginRoot`, `now`. Anything absent is imported dynamically.
+ * @returns {Promise<{status: string, appended: number, rejected: number,
+ *   deduped: number, receipts: number, reason: string|null, coverage: number|null}>}
+ */
+export async function recordUsageReceipts(hookData, deps = {}) {
+  let outcome;
+  try {
+    outcome = await collectUsageReceipts(hookData, deps);
+  } catch (err) {
+    logHookError('session-end', 'usage receipt recording failed', err);
+    outcome = receiptOutcome({ status: 'failed', reason: truncateReason(err?.message ?? err) });
+  }
+  process.stderr.write(formatUsageReceiptLine(outcome.result, outcome.unresolved));
+  return outcome.result;
+}
+
 async function main() {
   const raw = await readStdin();
   const hookData = parseJSON(raw);
@@ -424,6 +725,11 @@ async function main() {
   saveSessionState(hookData);
 
   if (!hookData) return;
+
+  // Before the learning pipeline: that stage owns most of the 10s hook budget,
+  // and a ledger row missing because measurement ran last is indistinguishable
+  // from spend that never happened.
+  await recordUsageReceipts(hookData);
 
   const sessionData = await buildSessionData(hookData);
   await runLearningStage(sessionData);

@@ -272,7 +272,8 @@
     "usage.receipt": {
       "data_schema": "attempt-receipt.schema.json",
       "sources": [
-        "worker"
+        "worker",
+        "hook"
       ],
       "spec": "design §8.2 §4·§42 'usage.receipt 이벤트 = Attempt Receipt', Run-scoped. Leader ruling (T-15 ↔ T-16): attempt-receipt.schema.json is the canonical data contract; lane 6 §5-②'s flat keys (model, fresh_input, cached_input, output, thinking, cost_usd) are retired, and exact model identity now lives in the receipt's model_identity object rather than a bare model string. lib/economics/usage-receipt.js remains the ONLY writer, so the same spend is never counted twice."
     },
