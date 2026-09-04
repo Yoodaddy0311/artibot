@@ -82,15 +82,20 @@ function isDisabled() {
  */
 function trackedFilesAtRoot(cwd) {
   try {
-    const out = execSync('git ls-tree HEAD --name-only', {
+    // `-z` : NUL-separated, and it suppresses `core.quotepath` C-quoting.
+    // Today this is purely preventive — CLAUDE_PASTE_PATTERN only ever admits
+    // pure-ASCII `image*.png` candidates, so no reachable input differs. It
+    // matters the day that pattern widens: a name missing from this set reads
+    // as "untracked" and the sweep unlinks it. Failing open here deletes data.
+    // No `.trim()`: a name may legitimately begin or end with a space.
+    const out = execSync('git ls-tree HEAD --name-only -z', {
       cwd,
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'ignore'],
       windowsHide: true,
     });
     const tracked = new Set();
-    for (const line of out.split('\n')) {
-      const name = line.trim();
+    for (const name of out.split('\0')) {
       if (name && !name.includes('/')) tracked.add(name);
     }
     return tracked;

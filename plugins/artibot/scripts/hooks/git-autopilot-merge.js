@@ -44,12 +44,18 @@ export function hasConflicts(filePath) {
  */
 export function listConflictedFiles(cwd) {
   try {
-    const output = execFileSync('git', ['diff', '--name-only', '--diff-filter=U'], {
+    // `-z` : NUL-separated, and it suppresses `core.quotepath` C-quoting. That
+    // matters here because these paths are fed straight back to git
+    // (`checkout --ours -- <path>`) and to readFileSync by the resolution
+    // strategies below — a C-quoted path names a file that does not exist, so
+    // every conflict on a non-ASCII path silently failed to auto-resolve.
+    // No `.trim()`: a path may legitimately begin or end with a space.
+    const output = execFileSync('git', ['diff', '--name-only', '-z', '--diff-filter=U'], {
       cwd,
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'ignore'],
     });
-    return output.trim().split('\n').filter(Boolean);
+    return output.split('\0').filter(Boolean);
   } catch {
     return [];
   }

@@ -50,19 +50,35 @@ function getChangedFiles(cwd) {
   // Added/Copied/Modified/Renamed entries — deletions cause existsSync
   // gates downstream to noisy-skip and previously created review-gate
   // loops on autopilot squash/cleanup commits.
-  // --name-status emits "<STATUS>\t<path>" (renames emit a third column),
-  // so we strip the leading status column when parsing.
-  const parse = (output) =>
-    output
-      .trim()
-      .split('\n')
-      .filter(Boolean)
-      .map((line) => {
-        const cols = line.split('\t');
-        // For A/C/M: ["M", "path"]; for R/C: ["R100", "old", "new"] — take last col.
-        return cols.length > 1 ? cols[cols.length - 1] : cols[0];
-      })
-      .filter(Boolean);
+  // --name-status -z: `-z` is NOT just a separator swap here. Without it git
+  // emits "<STATUS>\t<path>" and applies `core.quotepath`, so a non-ASCII path
+  // arrives as "lib/\355\225\234...". Those paths go straight into
+  // existsSync/readFileSync below (:152, :381), so a C-quoted path names
+  // nothing on disk and the file drops out of the review silently — the gate
+  // does not approve it, it never sees it.
+  //
+  // With -z the status and the path are SEPARATE NUL fields:
+  //   M NUL <path> NUL            (A, C, M, T, U, X and friends: one path)
+  //   R100 NUL <old> NUL <new> NUL (R and C: two paths, the new one wins)
+  // So we walk field-by-field, consuming a count driven by the status letter
+  // rather than splitting on tabs. Counting by field keeps a path that happens
+  // to look like a status token from desynchronising the parse.
+  const parse = (output) => {
+    const fields = String(output ?? '').split('\0');
+    const files = [];
+    let i = 0;
+    while (i < fields.length) {
+      const status = fields[i];
+      // Trailing NUL leaves an empty final field; skip empties defensively.
+      if (!status) { i += 1; continue; }
+      const pathCount = /^[RC]/.test(status) ? 2 : 1;
+      if (i + pathCount >= fields.length) break; // truncated output
+      const chosen = fields[i + pathCount]; // last path: new name for R/C
+      if (chosen) files.push(chosen);
+      i += pathCount + 1;
+    }
+    return files;
+  };
   // Try HEAD~1..HEAD first (post-commit diff). Fall back to working-tree
   // diff vs HEAD when no parent commit exists (initial commit, shallow
   // clone). execFileSync (no shell) avoids POSIX-only `2>/dev/null || ...`
@@ -76,8 +92,8 @@ function getChangedFiles(cwd) {
     windowsHide: true,
   };
   for (const args of [
-    ['diff', '--name-status', '--diff-filter=ACMR', 'HEAD~1', 'HEAD'],
-    ['diff', '--name-status', '--diff-filter=ACMR', 'HEAD'],
+    ['diff', '--name-status', '-z', '--diff-filter=ACMR', 'HEAD~1', 'HEAD'],
+    ['diff', '--name-status', '-z', '--diff-filter=ACMR', 'HEAD'],
   ]) {
     try {
       return parse(execFileSync('git', args, opts));

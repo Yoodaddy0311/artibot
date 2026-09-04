@@ -58,12 +58,36 @@ jobs:
           fi
           BASE_SHA="${{ github.event.pull_request.base.sha }}"
           HEAD_SHA="${{ github.event.pull_request.head.sha }}"
-          if ! CHANGED=$(git diff --name-only "${BASE_SHA}...${HEAD_SHA}" 2>/dev/null); then
+          # 후속 19 (#13): `-z` for NUL-separated paths. Without it core.quotepath
+          # C-quotes non-ASCII paths, so a changed `plugins/artibot/agents/한글.md`
+          # arrives as "plugins/artibot/agents/\355..." — the leading double quote
+          # breaks the `^` anchor and the PR silently fast-skips validation.
+          # NOTE: the NUL output must NOT go through `$(...)`; bash discards NUL
+          # bytes in command substitution, which would re-join every path into one.
+          CHANGED_FILE="${RUNNER_TEMP:-/tmp}/plugin-validate-changed.nul"
+          if ! git diff --name-only -z "${BASE_SHA}...${HEAD_SHA}" >"$CHANGED_FILE" 2>/dev/null; then
             echo "plugin_changed=true" >> "$GITHUB_OUTPUT"
             echo "git diff failed — falling back to full validation."
             exit 0
           fi
-          if echo "$CHANGED" | grep -qE '^(plugins/artibot(-cowork)?/(\.claude-plugin/plugin\.json|agents/|skills/|commands/)|\.github/workflows/plugin-validate\.yml)'; then
+          PLUGIN_CHANGED=false
+          while IFS= read -r -d '' f; do
+            case "$f" in
+              plugins/artibot/.claude-plugin/plugin.json*|\
+              plugins/artibot/agents/*|\
+              plugins/artibot/skills/*|\
+              plugins/artibot/commands/*|\
+              plugins/artibot-cowork/.claude-plugin/plugin.json*|\
+              plugins/artibot-cowork/agents/*|\
+              plugins/artibot-cowork/skills/*|\
+              plugins/artibot-cowork/commands/*|\
+              .github/workflows/plugin-validate.yml*)
+                PLUGIN_CHANGED=true
+                break
+                ;;
+            esac
+          done < "$CHANGED_FILE"
+          if [ "$PLUGIN_CHANGED" = true ]; then
             echo "plugin_changed=true" >> "$GITHUB_OUTPUT"
             echo "Plugin assets changed — full validation."
           else

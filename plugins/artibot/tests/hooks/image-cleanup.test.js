@@ -177,7 +177,8 @@ describe('image-cleanup', () => {
 
     it('skips files tracked by git', () => {
       setRecentFile('image.png', 30_000);
-      mockState.execSyncImpl = () => 'image.png\nREADME.md\n';
+      // 후속 19 (#9): ls-tree 는 이제 -z 로 부른다 → NUL 구분 픽스처.
+      mockState.execSyncImpl = () => 'image.png\0README.md\0';
 
       const summary = mainFn({ cwd: '/fake/cwd' });
 
@@ -293,5 +294,76 @@ describe('image-cleanup', () => {
       expect(summary.deleted).toEqual([]);
       expect(mockState.stderrChunks.join('')).toMatch(/WARN: malformed config/);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// trackedFilesAtRoot — git 경로 출력 디코딩 (후속 19 #9, image-cleanup.js:85)
+// ---------------------------------------------------------------------------
+//
+// 정직한 기록: **이 자리에는 재현 가능한 결함이 없다.** 후보 목록이
+// CLAUDE_PASTE_PATTERN = /^image(?: copy(?: \d+)?)?\.png$/ 로 못박힌 순수
+// ASCII 허용목록이라, 비-ASCII 이름도 앞뒤 공백 이름도 애초에 후보가 될 수
+// 없다. 따라서 core.quotepath C-quote 축도 .trim() 축도 결과를 바꾸지 않는다
+// — 오너가 제외한 #7(존재 판정)·#10(개수만) 과 같은 부류다.
+//
+// 그럼에도 -z 로 옮기는 이유는 두 가지뿐이고, 둘 다 예방적이다.
+//   (1) 후보 패턴이 언젠가 넓어지면 그때부터 C-quote 가 파일을 **지운다**.
+//       tracked 집합에서 빠진 이름은 "추적 안 됨"으로 읽혀 unlinkSync 로 간다.
+//   (2) 나머지 11자리와 같은 형태를 유지해 다음 독자가 예외를 추론하지 않게.
+//
+// 그래서 아래는 (a) 명령 계약과 (b) 기존 행동 회귀만 못박는다. 행동 변화를
+// 주장하지 않는다.
+describe('trackedFilesAtRoot — 경로 출력 계약 (후속 19 #9)', () => {
+  it('(a) ls-tree 에 -z 를 넘긴다', () => {
+    const seen = [];
+    mockState.execSyncImpl = (cmd) => { seen.push(cmd); return ''; };
+    setRecentFile('image.png', 30_000);
+
+    mainFn({ cwd: '/fake/cwd' });
+
+    // 자기검증: 호출이 없으면 아래 단언은 공허하다.
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen.some((c) => c.includes('ls-tree') && c.includes('-z'))).toBe(true);
+  });
+
+  it('(b) NUL 구분 목록으로도 추적 파일을 그대로 건너뛴다(회귀)', () => {
+    setRecentFile('image.png', 30_000);
+    mockState.execSyncImpl = () => 'image.png\0README.md\0';
+
+    const summary = mainFn({ cwd: '/fake/cwd' });
+
+    expect(summary.deleted).toEqual([]);
+    expect(summary.skipped).toEqual([{ name: 'image.png', reason: 'tracked-by-git' }]);
+  });
+
+  it('(b) 추적 목록에 없으면 여전히 지운다(회귀)', () => {
+    setRecentFile('image.png', 30_000);
+    mockState.execSyncImpl = () => 'README.md\0';
+
+    const summary = mainFn({ cwd: '/fake/cwd' });
+
+    expect(summary.deleted).toEqual(['image.png']);
+  });
+
+  it('하위 경로 항목은 루트 집합에 넣지 않는다(회귀)', () => {
+    setRecentFile('image.png', 30_000);
+    // ls-tree 는 비재귀라 디렉터리는 이름만 나온다. 슬래시가 든 항목이
+    // 섞여 들어와도 루트 파일로 오인하면 안 된다.
+    mockState.execSyncImpl = () => 'src\0src/image.png\0';
+
+    const summary = mainFn({ cwd: '/fake/cwd' });
+
+    expect(summary.deleted).toEqual(['image.png']);
+  });
+
+  it('꼬리 NUL 이 빈 이름으로 새지 않는다', () => {
+    setRecentFile('image.png', 30_000);
+    mockState.execSyncImpl = () => 'README.md\0\0';
+
+    const summary = mainFn({ cwd: '/fake/cwd' });
+
+    expect(summary.deleted).toEqual(['image.png']);
+    expect(summary.skipped).toEqual([]);
   });
 });
