@@ -20,6 +20,11 @@ Rules:
 - **Live probe, not CI.** Regenerating requires a real host session. It never
   runs in CI.
 
+`probe-hook-keys.test.js` in this directory tests the probe script's
+guarantees (stdout empty, exit 0, key names only) and the fixture's format
+and verdict rule. It sits here only because the `l2-probe` split limb owned
+no other test path; relocating it to `tests/hooks/` is fine.
+
 ## Regenerating `PreToolUse.Agent.json`
 
 1. Write a temporary settings file outside the repo (the session scratchpad):
