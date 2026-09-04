@@ -535,15 +535,60 @@ describe('stop-review-gate — checkPatternViolations 한 줄 블록 주석 (회
     expect(text).not.toContain('TODO/FIXME');
   });
 
-  it('같은 줄에서 열리고 다음 줄에서 닫히는 블록도 안쪽은 건너뛰고 닫힌 뒤 코드는 본다', async () => {
+  it('줄 중간의 slash-star 는 글롭이지 오프너가 아니다 — 다음 줄 console.log 를 놓치지 않는다 (검수 3b)', async () => {
+    // c012ac37 은 줄 어디의 미종결 `/*` 도 블록으로 열어, 글롭 문자열 뒤의 코드를
+    // EOF 까지 삼켰다(lib+scripts 12파일 242줄, 6파일 EOF 개방 — 17:28Z 실측).
     const text = await gateOn([
-      'export const a = 1; /* opens here',
+      "const g = '**/*.js';",
+      "console.log('x');",
+      "const p = 'docs/PRD/*'; // and autopilot/* artifacts",
+      '// TODO in a // line that mentions /* an opener',
+      'export const q = 1; // TODO real',
+      '',
+    ].join('\n'));
+    expect(text).toContain('console.log at line(s) 2');
+    expect(text).toContain('TODO/FIXME at line(s) 5');
+  });
+
+  it('줄 첫머리 미종결 오프너는 여전히 블록을 열고, 닫힌 뒤 같은 줄의 코드는 본다', async () => {
+    const text = await gateOn([
+      '/* opens here',
       '   TODO inside the block',
       'still inside */ export const b = 2; // TODO after close',
       '',
     ].join('\n'));
-    // 3행: 닫힌 뒤 코드에 TODO 가 있다 → 이 한 곳만 잡혀야 한다.
     expect(text).toContain('TODO/FIXME at line(s) 3');
+  });
+
+  it('자기검증: lib+scripts 전수에서 EOF 까지 열린 채 끝나는 파일이 0 이다', async () => {
+    // 3b 회귀의 관측점. 휴리스틱이 글롭·`//` 안의 slash-star 를 다시 오프너로
+    // 취급하면 이 수가 0 을 벗어난다. 분모(파일 수)를 먼저 못박아 공허 통과를 막는다.
+    const realFs = await vi.importActual('node:fs');
+    const path = await vi.importActual('node:path');
+    const url = await vi.importActual('node:url');
+    const { stripBlockComments } = await import('../../scripts/hooks/stop-review-gate.js');
+    const pluginRoot = path.resolve(path.dirname(url.fileURLToPath(import.meta.url)), '..', '..');
+    const files = [];
+    const walk = (dir) => {
+      for (const e of realFs.readdirSync(dir, { withFileTypes: true })) {
+        const p = path.join(dir, e.name);
+        if (e.isDirectory()) { if (e.name !== 'node_modules') walk(p); }
+        else if (/\.(js|mjs)$/.test(e.name)) files.push(p);
+      }
+    };
+    walk(path.join(pluginRoot, 'lib'));
+    walk(path.join(pluginRoot, 'scripts'));
+    expect(files.length).toBeGreaterThanOrEqual(400); // 509 measured 2026-09-04
+
+    const openAtEof = [];
+    for (const f of files) {
+      let inBlock = false;
+      for (const line of realFs.readFileSync(f, 'utf-8').split('\n')) {
+        inBlock = stripBlockComments(line, inBlock).inBlock;
+      }
+      if (inBlock) openAtEof.push(path.relative(pluginRoot, f));
+    }
+    expect(openAtEof).toEqual([]);
   });
 
   it('음성 대조: 주석 밖 코드 줄의 TODO 와 console.log 는 여전히 잡는다', async () => {

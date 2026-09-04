@@ -1,6 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-hooks.json",
-  "description": "Artibot v4.8.2 - Claude Code Plugin Hooks (shell-form command, args[] not honored by Claude Code)",
+  "description": "Artibot v4.8.2 - Claude Code Plugin Hooks (shell-form command, args[] not honored by Claude Code; timeout is SECONDS; matcher is a plain tool name or names joined by | — an unanchored regex, so Write|Edit also matches MultiEdit/NotebookEdit; no expression syntax)",
   "hooks": {
     "SessionStart": [
       {

@@ -216,34 +216,46 @@ function checkBracketMismatch(absPath, ext) {
  * across lines. Returns the code that remains on the line (possibly empty)
  * and the state to carry into the next line.
  *
- * Why not a per-line "starts with slash-star" test: a block comment that opens
- * AND closes on the same line (slash-star TODO star-slash, alone or after
- * code) matched neither the "opens a block" branch nor the "inside a block"
- * branch of the previous heuristic, so its words were scanned as code and a
- * TODO/FIXME inside it was reported as a violation (retro #44/#45,
- * 2026-09-04). This version removes every closed span on the line, keeps the
- * code before an unterminated opener, and drops everything up to the closer
- * when a block is already open.
+ * Rules, in order:
+ *   1. Inside an open block: drop everything up to the closer (or the whole
+ *      line when there is none).
+ *   2. A whole-line `//` comment yields nothing — and a slash-star inside it
+ *      is prose, not an opener (`// … autopilot/* artifacts`).
+ *   3. Closed spans (open and close on the same line, alone or after code)
+ *      are removed wherever they sit. This is the retro #44/#45 fix: the
+ *      previous heuristic matched such a line neither as "opens a block" nor
+ *      as "inside a block", so a TODO/FIXME inside it was reported.
+ *   4. An unterminated opener starts a block ONLY when it begins the line
+ *      (optional whitespace, then slash-star), as the previous heuristic
+ *      did. A slash-star later in a line is far more often a glob (the
+ *      star-star-slash-star of a file pattern, a `docs/PRD/` wildcard) than
+ *      a comment: opening on it swallowed 242 real code lines in 12 files and
+ *      left 6 files open to EOF (lib+scripts, 509 files, 2026-09-04
+ *      17:28Z) — so a mid-line unterminated opener is deliberately NOT
+ *      supported, and the code before/after it is scanned as code.
  *
- * Still a heuristic: a slash-star inside a string literal or a regex opens a
- * block here too, exactly as it did before.
+ * Still a heuristic: a line that BEGINS with a slash-star inside a template
+ * string opens a block here, exactly as before.
+ *
+ * Exported for the self-check in tests/hooks/stop-review-gate.test.js, which
+ * runs it over lib+scripts and asserts no file is left open at EOF.
  *
  * @param {string} line
  * @param {boolean} inBlock — true when a block comment is open from a prior line
  * @returns {{ code: string, inBlock: boolean }}
  */
-function stripBlockComments(line, inBlock) {
+export function stripBlockComments(line, inBlock) {
   let text = line;
   if (inBlock) {
     const close = text.indexOf('*/');
     if (close < 0) return { code: '', inBlock: true };
     text = text.slice(close + 2);
   }
+  if (/^\s*\/\//.test(text)) return { code: '', inBlock: false };
   // Closed spans on this line (there may be several).
   text = text.replace(/\/\*[\s\S]*?\*\//g, '');
-  // An opener with no closer on this line starts a block; keep the code before it.
-  const open = text.indexOf('/*');
-  if (open >= 0) return { code: text.slice(0, open), inBlock: true };
+  // Unterminated opener at the start of the line starts a block.
+  if (/^\s*\/\*/.test(text)) return { code: '', inBlock: true };
   return { code: text, inBlock: false };
 }
 
