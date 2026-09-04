@@ -211,6 +211,145 @@ describe('checkLedgerStateParity — the journal still reproduces state.yaml', (
 });
 
 // ---------------------------------------------------------------------------
+// Check 8 — the reader's line census (F-30)
+// ---------------------------------------------------------------------------
+
+describe('checkLedgerStateParity — the ledger line census', () => {
+  // A census in the shape `lib/runtime/ledger.js#readLedgerCensus` returns, hand-built
+  // and INDEPENDENT of the parity `events` beside it (`survivors === events.length` is
+  // tests/runtime/ledger.test.js's contract; `checkLedgerStateParity` never cross-checks).
+  const census = (loss, selection = { rejected_excluded: 0, filtered_out: 0 }) => ({
+    file: { present: true, readable: true, bytes: 10, path: '/tree/.artibot/runtime/ledger.jsonl' },
+    lines: { raw: 4, blank: 1, nonblank: 3 },
+    dropped: { loss, selection },
+    survivors: 3 - Object.values(loss).reduce((a, b) => a + b, 0)
+      - Object.values(selection).reduce((a, b) => a + b, 0),
+    dropped_total: {
+      loss: Object.values(loss).reduce((a, b) => a + b, 0),
+      selection: Object.values(selection).reduce((a, b) => a + b, 0),
+    },
+  });
+  const healthy = {
+    events: [stateUpdated(1)], journal: [missionRecord(1, MISSION)], projection: EXPECTED_PROJECTION,
+  };
+
+  it('reports census as unmeasured when none was supplied — and does NOT demote the check', () => {
+    // `worstOf` ranks unmeasured above pass: in `findings` this would demote every caller.
+    const result = checkLedgerStateParity(healthy);
+    expect(result.status).toBe(CheckStatus.PASS);
+    expect(result.findings).toEqual([]);
+    expect(result.census.status).toBe(CheckStatus.UNMEASURED);
+    expect(result.census.reason).toMatch(/not counted/);
+  });
+
+  it('carries the census verdict even when the parity inputs were absent', () => {
+    const result = checkLedgerStateParity({});
+    expect(result.status).toBe(CheckStatus.UNMEASURED);
+    expect(result.census.status).toBe(CheckStatus.UNMEASURED);
+  });
+
+  it('passes the census when the reader counted zero loss', () => {
+    const result = checkLedgerStateParity({
+      ...healthy, census: census({ corrupt: 0, malformed_envelope: 0, duplicate: 0 }),
+    });
+    expect(result.status).toBe(CheckStatus.PASS);
+    expect(result.findings).toEqual([]);
+    expect(result.census).toMatchObject({
+      status: CheckStatus.PASS,
+      loss: { corrupt: 0, malformed_envelope: 0, duplicate: 0 },
+      path: '/tree/.artibot/runtime/ledger.jsonl',
+    });
+  });
+
+  it('warns with ledger-lines-dropped when the reader counted any loss', () => {
+    const result = checkLedgerStateParity({
+      ...healthy, census: census({ corrupt: 1, malformed_envelope: 0, duplicate: 1 }),
+    });
+    expect(result.status).toBe(CheckStatus.WARN);
+    expect(codes(result)).toEqual(['ledger-lines-dropped']);
+    const finding = result.findings[0];
+    expect(finding.status).toBe(CheckStatus.WARN);
+    expect(finding.loss).toEqual({ corrupt: 1, malformed_envelope: 0, duplicate: 1 });
+    expect(finding.path).toBe('/tree/.artibot/runtime/ledger.jsonl');
+    expect(finding.detail).toMatch(/2 damaged line\(s\) of 3/);
+    expect(result.census.status).toBe(CheckStatus.WARN);
+  });
+
+  it('does not warn on selection drops — those are the caller\'s own filters', () => {
+    const result = checkLedgerStateParity({
+      ...healthy,
+      census: census(
+        { corrupt: 0, malformed_envelope: 0, duplicate: 0 },
+        { rejected_excluded: 2, filtered_out: 1 },
+      ),
+    });
+    expect(result.status).toBe(CheckStatus.PASS);
+    expect(result.findings).toEqual([]);
+    expect(result.census.selection).toEqual({ rejected_excluded: 2, filtered_out: 1 });
+  });
+
+  it('never lets a census loss outrank a parity failure', () => {
+    const result = checkLedgerStateParity({
+      events: [], journal: [missionRecord(1, MISSION)], projection: EXPECTED_PROJECTION,
+      census: census({ corrupt: 1, malformed_envelope: 0, duplicate: 0 }),
+    });
+    expect(result.status).toBe(CheckStatus.FAIL);
+    expect(codes(result)).toEqual(expect.arrayContaining(['ledger-subset-violation', 'ledger-lines-dropped']));
+  });
+
+  it('treats a census without the F-30 shape as unmeasured, not as zero loss', () => {
+    const bads = [
+      null, 'census', 42, {}, { dropped_total: { loss: 'x' } },
+      { dropped_total: { loss: 1, selection: 0 }, dropped: { loss: 'xy', selection: 'z' } }, // truthy, not a shape
+      { dropped_total: { loss: 0, selection: 0 }, dropped: { loss: { corrupt: 0 }, selection: {} } },
+      { ...census({ corrupt: 1, malformed_envelope: 0, duplicate: 0 }), lines: undefined }, // no denominator
+    ];
+    for (const bad of bads) {
+      const result = checkLedgerStateParity({ ...healthy, census: bad });
+      expect(result.status, JSON.stringify(bad)).toBe(CheckStatus.PASS);
+      expect(result.findings, JSON.stringify(bad)).toEqual([]);
+      expect(result.census.status, JSON.stringify(bad)).toBe(CheckStatus.UNMEASURED);
+      expect(result.census.loss).toBeUndefined();
+    }
+  });
+
+  it('reports an absent or unreadable ledger file as unmeasured, never as a clean pass', () => {
+    // A missing file's census is all zeros and fully shaped; `pass` there would
+    // make "no ledger" read as "clean ledger" — the confusion the census exists to end.
+    const absent = {
+      ...census({ corrupt: 0, malformed_envelope: 0, duplicate: 0 }),
+      file: { present: false, readable: false, bytes: null, path: '/tree/.artibot/runtime/ledger.jsonl' },
+      lines: { raw: 0, blank: 0, nonblank: 0 }, survivors: 0,
+    };
+    const result = checkLedgerStateParity({ ...healthy, census: absent });
+    expect(result.status).toBe(CheckStatus.PASS);
+    expect(result.findings).toEqual([]);
+    expect(result.census).toMatchObject({
+      status: CheckStatus.UNMEASURED,
+      file: { present: false, readable: false },
+      path: '/tree/.artibot/runtime/ledger.jsonl',
+    });
+    expect(result.census.reason).toMatch(/absent/);
+
+    const unreadable = { ...absent, file: { ...absent.file, present: true } };
+    const r2 = checkLedgerStateParity({ ...healthy, census: unreadable });
+    expect(r2.census.status).toBe(CheckStatus.UNMEASURED);
+    expect(r2.census.reason).toMatch(/unreadable/);
+
+    // And a present, readable, empty ledger IS a counted zero.
+    const empty = { ...absent, file: { ...absent.file, present: true, readable: true, bytes: 0 } };
+    expect(checkLedgerStateParity({ ...healthy, census: empty }).census.status).toBe(CheckStatus.PASS);
+  });
+
+  it('the Check 8 prose names the loss row and the unmeasured rule', () => {
+    const section = checkSections(CURRENT).get('Check 8');
+    expect(section).toContain('readLedgerCensus(projectRoot)');
+    expect(section).toMatch(/`census\.dropped_total\.loss > 0`.*\*\*warn\*\*/);
+    expect(section).toMatch(/census not supplied = unmeasured/);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Check 8 — the version counter
 // ---------------------------------------------------------------------------
 

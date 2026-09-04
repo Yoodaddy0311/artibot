@@ -22,7 +22,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { appendFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { resetSeq } from '../../lib/runtime/event-writer.js';
@@ -34,6 +34,7 @@ import {
   foldMissions,
   ledgerFilePath,
   readAllEvents,
+  readLedgerCensus,
 } from '../../lib/runtime/ledger.js';
 
 /** @type {string} */
@@ -272,6 +273,173 @@ describe('readAllEvents', () => {
       .toBe('a\u0000b\u00001\u00002');
     expect(dedupeKey({ session_id: 'a b', source: 'c', pid: 1, seq: 2 }))
       .not.toBe(dedupeKey({ session_id: 'a', source: 'b c', pid: 1, seq: 2 }));
+  });
+});
+
+describe('readLedgerCensus (F-30) — the reader counts what it drops', () => {
+  /**
+   * The three invariants every census must satisfy. Written once and applied
+   * to every fixture below, so a sixth drop path added to the reader without a
+   * counter breaks the second equation in every case at once.
+   * @param {{events: object[], census: object}} read
+   */
+  function expectInvariants({ events, census }) {
+    const { lines, dropped, survivors } = census;
+    // (1) raw pieces partition into blank and nonblank
+    expect(lines.raw).toBe(lines.blank + lines.nonblank);
+    // (2) every nonblank line is accounted for exactly once
+    expect(lines.nonblank).toBe(
+      dropped.loss.corrupt + dropped.loss.malformed_envelope + dropped.loss.duplicate
+      + dropped.selection.rejected_excluded + dropped.selection.filtered_out
+      + survivors,
+    );
+    // (3) survivors is the array the wrapper hands out
+    expect(survivors).toBe(events.length);
+    // and the derived totals are the sums they claim to be
+    expect(census.dropped_total).toEqual({
+      loss: dropped.loss.corrupt + dropped.loss.malformed_envelope + dropped.loss.duplicate,
+      selection: dropped.selection.rejected_excluded + dropped.selection.filtered_out,
+    });
+  }
+
+  it('reports a missing file as present:false, not as an empty ledger', () => {
+    const read = readLedgerCensus(root);
+    expect(read.events).toEqual([]);
+    expect(read.census.file).toEqual({
+      present: false, readable: false, bytes: null, path: ledgerFilePath(root),
+    });
+    expect(read.census.lines).toEqual({ raw: 0, blank: 0, nonblank: 0 });
+    expectInvariants(read);
+    // An invalid root has no path to report either — and the invariants still hold.
+    for (const badRoot of ['', null, undefined, 42]) {
+      const invalid = readLedgerCensus(badRoot);
+      expect(invalid.events).toEqual([]);
+      expect(invalid.census.file.path).toBeNull();
+      expectInvariants(invalid);
+    }
+  });
+
+  it('reports a present but unreadable ledger as readable:false, invariants intact', () => {
+    // A directory where the file should be: exists, cannot be read as a file.
+    mkdirSync(ledgerFilePath(root), { recursive: true });
+    const read = readLedgerCensus(root);
+    expect(read.events).toEqual([]);
+    expect(read.census.file).toMatchObject({ present: true, readable: false, bytes: null });
+    expect(read.census.lines).toEqual({ raw: 0, blank: 0, nonblank: 0 });
+    expectInvariants(read);
+  });
+
+  it('counts a healthy ledger as loss 0 — the trailing newline is blank, not lost', () => {
+    put({ event: 'tool.used', data: { tool: 'B', ok: true, duration_ms: 1 } });
+    put({ event: 'tool.used', data: { tool: 'B', ok: true, duration_ms: 2 } });
+    const read = readLedgerCensus(root);
+    expect(read.census.file).toMatchObject({ present: true, readable: true });
+    expect(read.census.file.bytes).toBeGreaterThan(0);
+    // `split('\n')` on a `\n`-terminated file yields one trailing ''.
+    expect(read.census.lines).toEqual({ raw: 3, blank: 1, nonblank: 2 });
+    expect(read.census.dropped_total).toEqual({ loss: 0, selection: 0 });
+    expect(read.census.survivors).toBe(2);
+    expectInvariants(read);
+  });
+
+  it('counts extra blank lines as blank, never as loss', () => {
+    put({ event: 'tool.used', data: { tool: 'B', ok: true, duration_ms: 1 } });
+    appendFileSync(ledgerFilePath(root), '\n   \n\n', 'utf-8');
+    const read = readLedgerCensus(root);
+    expect(read.census.lines.blank).toBe(4);
+    expect(read.census.lines.nonblank).toBe(1);
+    expect(read.census.dropped_total.loss).toBe(0);
+    expectInvariants(read);
+  });
+
+  it('counts a torn tail as loss.corrupt', () => {
+    put({ event: 'tool.used', data: { tool: 'B', ok: true, duration_ms: 1 } });
+    appendFileSync(ledgerFilePath(root), '{"v":1,"event":"tool.us', 'utf-8');
+    const read = readLedgerCensus(root);
+    expect(read.events).toHaveLength(1);
+    expect(read.census.dropped.loss.corrupt).toBe(1);
+    expect(read.census.dropped_total.loss).toBe(1);
+    expectInvariants(read);
+  });
+
+  it('counts a parseable non-object and a non-string event as corrupt and malformed_envelope', () => {
+    put({ event: 'tool.used', data: { tool: 'B', ok: true, duration_ms: 1 } });
+    appendFileSync(
+      ledgerFilePath(root),
+      '[1,2]\n"scalar"\n{"v":1,"event":7}\n{"v":1,"ts":"x"}\n',
+      'utf-8',
+    );
+    const read = readLedgerCensus(root);
+    expect(read.events).toHaveLength(1);
+    expect(read.census.dropped.loss).toEqual({ corrupt: 2, malformed_envelope: 2, duplicate: 0 });
+    expectInvariants(read);
+  });
+
+  it('counts ledger.rejected as selection.rejected_excluded, and not at all with includeRejected', () => {
+    put({ event: 'tool.used', data: { tool: 'B', ok: true, duration_ms: 1 } });
+    put({ event: 'not.registered', data: {} });
+    const excluded = readLedgerCensus(root);
+    expect(excluded.events.map((e) => e.event)).toEqual(['tool.used']);
+    expect(excluded.census.dropped.selection.rejected_excluded).toBe(1);
+    expect(excluded.census.dropped_total).toEqual({ loss: 0, selection: 1 });
+    expectInvariants(excluded);
+
+    const included = readLedgerCensus(root, { includeRejected: true });
+    expect(included.events).toHaveLength(2);
+    expect(included.census.dropped.selection.rejected_excluded).toBe(0);
+    expectInvariants(included);
+  });
+
+  it('counts filter misses as selection.filtered_out, one per line', () => {
+    seedMission();
+    put({ event: 'tool.used', mission_id: 'M-20260902-099', data: { tool: 'X', ok: true, duration_ms: 1 } });
+    const byMission = readLedgerCensus(root, { mission_id: MISSION });
+    expect(byMission.events).toHaveLength(8);
+    expect(byMission.census.dropped.selection.filtered_out).toBe(1);
+    expectInvariants(byMission);
+
+    const none = readLedgerCensus(root, { session_id: 'nobody' });
+    expect(none.events).toHaveLength(0);
+    expect(none.census.dropped.selection.filtered_out).toBe(9);
+    expectInvariants(none);
+  });
+
+  it('counts a replayed line as loss.duplicate and keeps the first', () => {
+    put({ event: 'tool.used', data: { tool: 'B', ok: true, duration_ms: 1 } });
+    const [first] = readAllEvents(root);
+    appendFileSync(ledgerFilePath(root), `${JSON.stringify(first)}\n`, 'utf-8');
+    const read = readLedgerCensus(root);
+    expect(read.events).toHaveLength(1);
+    expect(read.census.dropped.loss.duplicate).toBe(1);
+    expect(read.census.lines.nonblank).toBe(2);
+    expectInvariants(read);
+  });
+
+  it('holds all three invariants on a ledger that exercises every drop path at once', () => {
+    seedMission();
+    put({ event: 'not.registered', data: {} });
+    put({ event: 'tool.used', mission_id: 'M-20260902-099', data: { tool: 'X', ok: true, duration_ms: 1 } });
+    const [dup] = readAllEvents(root);
+    appendFileSync(
+      ledgerFilePath(root),
+      `${JSON.stringify(dup)}\n\n{"v":1,"event":null}\n{"torn`,
+      'utf-8',
+    );
+    const read = readLedgerCensus(root, { mission_id: MISSION });
+    expect(read.census.dropped).toEqual({
+      loss: { corrupt: 1, malformed_envelope: 1, duplicate: 1 },
+      selection: { rejected_excluded: 1, filtered_out: 1 },
+    });
+    expect(read.census.survivors).toBe(8);
+    expectInvariants(read);
+  });
+
+  it('readAllEvents is the census reader minus the census — same survivors, same order', () => {
+    seedMission();
+    appendFileSync(ledgerFilePath(root), '{"torn\n', 'utf-8');
+    expect(readAllEvents(root)).toEqual(readLedgerCensus(root).events);
+    expect(readAllEvents(root, { event: 'tool.used' }))
+      .toEqual(readLedgerCensus(root, { event: 'tool.used' }).events);
   });
 });
 

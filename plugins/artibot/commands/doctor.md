@@ -301,7 +301,13 @@ for the holes that mean a committed write was lost.
 The judgement lives in `lib/project-state/doctor-checks.js` and performs NO
 I/O. This command reads the three inputs and hands them over:
 
-1. **Ledger events** — `readAllEvents(projectRoot)` from `lib/runtime/ledger.js`.
+1. **Ledger events + line census** — `readLedgerCensus(projectRoot)` from
+   `lib/runtime/ledger.js`, ONE call returning `{events, census}`. `events` goes
+   to the parity comparison; `census` is the reader's own count of the lines it
+   dropped on the way (F-30: `dropped.loss` = corrupt / malformed envelope /
+   duplicate, `dropped.selection` = `ledger.rejected` excluded / filtered out)
+   and goes to the loss row below. Take both from the same read — two reads
+   give a numerator and a denominator from different moments.
 2. **Store journal** — `readJournal(paths.journal)` from
    `lib/project-state/journal.js`, which tolerates a torn tail rather than
    refusing to open the store.
@@ -312,10 +318,13 @@ I/O. This command reads the three inputs and hands them over:
 
 Then call, and report the worse of the two verdicts:
 
-- `checkLedgerStateParity({events, journal, projection})` — folds the journal
-  through T-21's `reduceProjectState`, never a second fold of its own, then
-  compares the rebuild against the supplied projection and the two version
-  sets against each other.
+- `checkLedgerStateParity({events, journal, projection, census})` — folds the
+  journal through T-21's `reduceProjectState`, never a second fold of its own,
+  then compares the rebuild against the supplied projection and the two version
+  sets against each other. The result carries a separate `census` key
+  (`status` `pass` | `warn` | `unmeasured`, plus `loss`, `selection`, `path`);
+  print it in the Check 8 report as-is, path included, because an empty census
+  and a census of the wrong tree are told apart only by path.
 - `checkStateVersionGaps({journal})` — enumerates holes, regressions and
   duplicates in the `state_version` sequence.
 
@@ -329,7 +338,22 @@ Status for this check — **first matching row wins**:
 | A `state_version` is missing, repeated, or goes backwards | **fail** |
 | A ledger version has not reached the store yet | **warn** |
 | The journal fold produced a warning | **warn** |
+| `census.dropped_total.loss > 0` — the reader dropped damaged lines | **warn** |
 | Otherwise | **pass** |
+
+The loss row is `warn`, not `fail`: a damaged line does not change the parity
+verdict, and the ledger is the truth, so there is nothing to auto-repair.
+Selection drops (`rejected_excluded`, `filtered_out`) never change the status —
+they are the caller's own filters, reported so they can be told from loss.
+
+**census not supplied = unmeasured.** When the caller passes no `census`, the
+result's `census.status` is `unmeasured`: the loss was not counted, which is a
+different fact from "counted and found zero". The same verdict is returned when
+the census says the ledger file was absent or unreadable (`census.file`): zero
+lines of nothing is not a clean ledger. This does NOT demote the overall
+Check 8 status — the census verdict lives beside `findings`, not inside them —
+so a report that shows `census: unmeasured` next to `pass` is telling you
+exactly which half was measured.
 
 The two version-set directions mean opposite things and are never merged. A
 version in the ledger but not the store is a crash between the two appends: the

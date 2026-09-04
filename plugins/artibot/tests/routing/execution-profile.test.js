@@ -3,11 +3,14 @@
  *
  * Five claims are under test, in order of how badly a regression would hurt:
  *
- *  (a) G-1 fail-closed. The five schema-legal but design-unmapped priorities
- *      (`economy`, `quality`, `fast`, `maximum_performance`, `speed_accuracy`)
- *      normalize to `null`, never to a plausible-looking synonym. This is the
- *      test that would catch someone "helpfully" adding a mapping table the
- *      corpus does not contain.
+ *  (a) G-1 resolved by allowlist, fail-closed for the rest. The five
+ *      schema-legal, design-unmapped priorities (`economy`, `quality`, `fast`,
+ *      `maximum_performance`, `speed_accuracy`) resolve through
+ *      `PRIORITY_ALIASES` to the owner-decided design value (2026-09-04), with
+ *      the evidence grade in the reason string. A value with NO alias row still
+ *      normalizes to `null` — so a ninth schema value cannot become `balanced`
+ *      by accident — and the interpreter's vocabulary and the schema enum are
+ *      both checked against the table so neither can drift past it.
  *  (b) The three design priorities map onto their objectives and onto the
  *      routing-weight changes ARTIBOT-5.0-DESIGN.md §3.2 assigns.
  *  (c) The flag adapter produces a profile that the REAL T-18 schema accepts.
@@ -47,9 +50,11 @@ import {
   OBJECTIVE_ATTESTATION,
   OBJECTIVE_BY_PRIORITY,
   PERFORMANCE_DIRECTIVES,
+  PRIORITY_ALIASES,
   SCHEMA_INVALID_CODE,
   SCHEMA_PRIORITIES,
 } from '../../lib/routing/execution-profile.js';
+import { PERFORMANCE_PRIORITIES as INTERPRETER_PRIORITIES } from '../../lib/intent/interpreter.js';
 
 let Ajv = null;
 try {
@@ -96,7 +101,7 @@ const ajvValidate = (() => {
   return (data) => ({ valid: compiled(data) === true, errors: compiled.errors ?? null });
 })();
 
-describe('normalizePerformancePriority — G-1 fail-closed', () => {
+describe('normalizePerformancePriority — G-1 resolved by allowlist (owner 2026-09-04)', () => {
   it.each(DESIGN_PRIORITIES)('maps the design priority %s onto itself', (priority) => {
     expect(normalizePerformancePriority(priority)).toEqual({
       normalized: priority,
@@ -104,32 +109,103 @@ describe('normalizePerformancePriority — G-1 fail-closed', () => {
     });
   });
 
-  const unmapped = SCHEMA_PRIORITIES.filter((value) => !DESIGN_PRIORITIES.includes(value));
+  const nonDesign = SCHEMA_PRIORITIES.filter((value) => !DESIGN_PRIORITIES.includes(value));
 
-  it('leaves exactly five schema values unmapped', () => {
-    // If this count changes, either the schema enum or the design gained a
-    // value and the G-1 gap description needs re-reading before code changes.
-    expect(unmapped).toEqual([
+  it('aliases exactly the five non-design schema values', () => {
+    // If either side of this changes, the schema enum or the design gained a
+    // value and the alias table needs an owner decision, not a guess.
+    expect(nonDesign).toEqual([
       'economy',
       'quality',
       'fast',
       'maximum_performance',
       'speed_accuracy',
     ]);
+    expect(Object.keys(PRIORITY_ALIASES).sort()).toEqual([...nonDesign].sort());
   });
 
-  it.each(unmapped)('refuses to guess a mapping for %s', (value) => {
-    expect(normalizePerformancePriority(value)).toEqual({
-      normalized: null,
-      reason: 'G-1 unresolved',
-    });
+  /** The owner's table (brief ★, 2026-09-04) — spelled out, not derived. */
+  const OWNER_TABLE = [
+    ['fast', 'maximum', 'attested', false],
+    ['speed_accuracy', 'maximum', 'inferred', false],
+    ['maximum_performance', 'maximum', 'inferred', false],
+    ['quality', 'balanced', 'judgment', false],
+    ['economy', 'balanced', 'judgment', true],
+  ];
+
+  it.each(OWNER_TABLE)('aliases %s -> %s with grade %s (lossy: %s)', (value, to, grade, lossy) => {
+    const result = normalizePerformancePriority(value);
+    expect(result).toEqual({ normalized: to, reason: expect.stringMatching(/^alias: /) });
+    expect(result.reason).toContain(`alias: ${value} -> ${to} (${grade}`);
+    expect(result.reason.includes('lossy')).toBe(lossy);
+    expect(PRIORITY_ALIASES[value]).toMatchObject({ to, grade });
+    expect(PRIORITY_ALIASES[value].lossy === true).toBe(lossy);
+    expect(DESIGN_PRIORITIES).toContain(to);
   });
 
-  it('does not treat maximum_performance or speed_accuracy as maximum', () => {
-    // The single most tempting inference in this module. Named explicitly so a
-    // future edit has to delete an assertion that says why, not just a line.
-    expect(normalizePerformancePriority('maximum_performance').normalized).not.toBe('maximum');
-    expect(normalizePerformancePriority('speed_accuracy').normalized).not.toBe('maximum');
+  it('treats maximum_performance and speed_accuracy as maximum, marked inferred', () => {
+    // Once the single most tempting inference in this module; now made, but
+    // the reason string admits it is an inference rather than a citation.
+    for (const value of ['maximum_performance', 'speed_accuracy']) {
+      const result = normalizePerformancePriority(value);
+      expect(result.normalized).toBe('maximum');
+      expect(result.reason).toMatch(/\(inferred;/);
+    }
+  });
+
+  it('marks economy as lossy — the design has nothing cheaper than balanced', () => {
+    const result = normalizePerformancePriority('economy');
+    expect(result.normalized).toBe('balanced');
+    expect(result.reason).toMatch(/\(judgment, lossy;/);
+    expect(PRIORITY_ALIASES.economy.lossy).toBe(true);
+    // The other four are NOT lossy; a second lossy row is a new decision.
+    expect(Object.entries(PRIORITY_ALIASES).filter(([, row]) => row.lossy === true).map(([k]) => k))
+      .toEqual(['economy']);
+  });
+
+  it('keeps the design vocabulary at three — the table adds no directive keys', () => {
+    expect(Object.keys(OBJECTIVE_BY_PRIORITY).sort()).toEqual([...DESIGN_PRIORITIES].sort());
+    expect(Object.keys(PERFORMANCE_DIRECTIVES).sort()).toEqual([...DESIGN_PRIORITIES].sort());
+    for (const row of Object.values(PRIORITY_ALIASES)) expect(DESIGN_PRIORITIES).toContain(row.to);
+  });
+
+  it('SCHEMA_PRIORITIES is the JSON schema enum itself, so an enum-only addition is seen', () => {
+    // The cross-drift test below walks the JS transcription. Without this
+    // equality a ninth value added ONLY to the .schema.json would read as
+    // `unknown:` (still null, still fail-closed) and no test would go red.
+    expect([...SCHEMA_PRIORITIES]).toEqual(schema.properties.performance.properties.priority.enum);
+  });
+
+  it('cross-drift: every interpreter priority and every schema priority resolves', () => {
+    // The interpreter can only emit its five; the schema accepts eight. If
+    // either list grows past the alias table, this is the test that goes red.
+    for (const value of INTERPRETER_PRIORITIES) {
+      expect(normalizePerformancePriority(value).normalized, value).not.toBeNull();
+    }
+    for (const value of SCHEMA_PRIORITIES) {
+      expect(normalizePerformancePriority(value).normalized, value).not.toBeNull();
+    }
+    expect(INTERPRETER_PRIORITIES.every((v) => SCHEMA_PRIORITIES.includes(v))).toBe(true);
+  });
+
+  it('stays fail-closed for a schema-legal value with no alias row', async () => {
+    // Simulate a ninth enum value landing without a table row: the branch
+    // that returns 'G-1 unresolved' must still exist and must still be the
+    // one that answers. `SCHEMA_PRIORITIES` is frozen, so the fixture is a
+    // copy; the assertion is on the real function's branch order.
+    const ninth = 'turbo_v9';
+    expect(SCHEMA_PRIORITIES).not.toContain(ninth);
+    expect(Object.hasOwn(PRIORITY_ALIASES, ninth)).toBe(false);
+    // Today `ninth` is outside the enum, so it reads as unknown, not unresolved…
+    expect(normalizePerformancePriority(ninth).reason).toMatch(/^unknown:/);
+    // …and the unresolved branch is reachable only for a value that is IN the
+    // enum but NOT in the table. There is no such value today (the cross-drift
+    // test above proves the set is empty), so pin that the branch still exists
+    // in source rather than assert on a value that cannot be produced.
+    const source = await readFile(
+      path.resolve(__dirname, '..', '..', 'lib', 'routing', 'execution-profile.js'), 'utf8',
+    );
+    expect(source).toMatch(/SCHEMA_PRIORITIES\.includes\(value\)[\s\S]{0,120}'G-1 unresolved'/);
   });
 
   it('treats an absent priority as balanced, with a distinguishable reason', () => {
@@ -167,17 +243,35 @@ describe('objective mapping', () => {
     expect(OBJECTIVE_ATTESTATION.wallclock_throughput).toMatch(/^UNATTESTED/);
   });
 
-  it('emits no objective and no directives when the priority is G-1 unmapped', () => {
+  it('emits the balanced objective and directives for an aliased priority (quality)', () => {
     const result = executionProfile({
       intentFrontmatter: { intent_revision: 1, execution_profile: { performance: { priority: 'quality' } } },
     });
     expect(result.source).toBe('intent');
-    expect(result.objective).toBeNull();
-    expect(result.directives).toBeNull();
-    expect(result.objective_reason).toBe('G-1 unresolved');
-    // The profile itself still survives — the gap is in the mapping, not the
-    // author's declaration, so the declaration is preserved for the ledger.
+    expect(result.objective).toBe('cost_per_accepted_outcome');
+    expect(result.directives).toMatchObject({ costWeight: 1, downgradeEnabled: true });
+    expect(result.objective_reason).toMatch(/^alias: quality -> balanced \(judgment;/);
+    // The author's declaration is preserved for the ledger — only the routing
+    // behaviour is merged, the record is not rewritten.
     expect(result.profile.performance.priority).toBe('quality');
+  });
+
+  it('emits the maximum objective for fast, and records economy as lossy', () => {
+    const fast = executionProfile({
+      intentFrontmatter: { intent_revision: 1, execution_profile: { performance: { priority: 'fast' } } },
+    });
+    expect(fast.objective).toBe('time_to_verified_outcome');
+    expect(fast.directives).toMatchObject({ costWeight: 0, downgradeEnabled: false, effortFloor: 'xhigh' });
+    expect(fast.objective_reason).toMatch(/^alias: fast -> maximum \(attested;/);
+    expect(fast.profile.performance.priority).toBe('fast');
+
+    const economy = executionProfile({
+      intentFrontmatter: { intent_revision: 1, execution_profile: { performance: { priority: 'economy' } } },
+    });
+    expect(economy.objective).toBe('cost_per_accepted_outcome');
+    expect(economy.directives).toMatchObject({ costWeight: 1, downgradeEnabled: true });
+    expect(economy.objective_reason).toMatch(/^alias: economy -> balanced \(judgment, lossy;/);
+    expect(economy.profile.performance.priority).toBe('economy');
   });
 });
 
