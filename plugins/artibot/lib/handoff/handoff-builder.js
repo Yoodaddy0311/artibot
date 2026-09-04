@@ -117,8 +117,44 @@ export function toProjectSlug(projectRoot) {
 // Git collection (best-effort)
 // ---------------------------------------------------------------------------
 
+/** argv for the one working-tree status query both collectors share. */
+const PORCELAIN_ARGS = ['status', '--porcelain', '-z'];
+
 /**
- * Parse `git status --porcelain` output into mod/staged/untracked counts.
+ * Walk `git status --porcelain -z` output entry by entry.
+ *
+ * `-z` is not just a separator swap. Without it git applies `core.quotepath`,
+ * so a non-ASCII path arrives as `"src/\355\225\234..."` — quoted, escaped,
+ * and naming nothing on disk — which is what `collectContextFiles` used to
+ * put in HANDOFF verbatim (retro #44, same class as the `log --name-only`
+ * fix above). With `-z` the path is verbatim and entries are NUL-terminated:
+ *
+ *   XY SP <path> NUL                    (one field)
+ *   XY SP <new> NUL <orig> NUL          (R / C in either column: two fields —
+ *                                        the renamed-to path comes FIRST)
+ *
+ * So a rename consumes the following field as its source path instead of
+ * letting it surface as a phantom entry with a 3-byte "status" of its own.
+ * No `.trim()`: a path may begin or end with a space.
+ *
+ * @param {string} stdout
+ * @returns {Array<{ code: string, path: string }>}
+ */
+function iterPorcelainEntries(stdout) {
+  const fields = String(stdout ?? '').split('\0');
+  const out = [];
+  for (let i = 0; i < fields.length; i++) {
+    const raw = fields[i];
+    if (!raw) continue; // trailing NUL leaves an empty final field
+    const code = raw.slice(0, 2);
+    if (/[RC]/.test(code)) i += 1; // skip the source path of a rename/copy
+    out.push({ code, path: raw.slice(3) });
+  }
+  return out;
+}
+
+/**
+ * Parse `git status --porcelain -z` output into mod/staged/untracked counts.
  * @param {string} stdout
  * @returns {{ modified: number, staged: number, untracked: number }}
  */
@@ -126,9 +162,7 @@ function parsePorcelain(stdout) {
   let modified = 0;
   let staged = 0;
   let untracked = 0;
-  for (const raw of stdout.split('\n')) {
-    if (!raw) continue;
-    const code = raw.slice(0, 2);
+  for (const { code } of iterPorcelainEntries(stdout)) {
     if (code === '??') untracked += 1;
     else {
       if (code[0] && code[0] !== ' ' && code[0] !== '?') staged += 1;
@@ -174,7 +208,7 @@ function collectGitState(git, cwd) {
   trap(() => { state.branch = git(['rev-parse', '--abbrev-ref', 'HEAD'], { cwd }).trim() || null; });
   trap(() => { state.shortHash = git(['rev-parse', '--short', 'HEAD'], { cwd }).trim() || null; });
   trap(() => {
-    const porcelain = git(['status', '--porcelain'], { cwd });
+    const porcelain = git(PORCELAIN_ARGS, { cwd });
     Object.assign(state, parsePorcelain(porcelain));
   });
   trap(() => {
@@ -434,9 +468,10 @@ function collectContextFiles(git, cwd) {
     }
   } catch { /* noop */ }
   try {
-    const porcelain = git(['status', '--porcelain'], { cwd });
-    for (const raw of porcelain.split('\n')) {
-      const f = raw.slice(3).trim();
+    // `-z` here for the same reason as above: the porcelain path is what gets
+    // rendered, and a C-quoted path is not a path. See iterPorcelainEntries.
+    const porcelain = git(PORCELAIN_ARGS, { cwd });
+    for (const { path: f } of iterPorcelainEntries(porcelain)) {
       if (!f) continue;
       counts.set(f, (counts.get(f) || 0) + 5); // bias toward modified files
     }

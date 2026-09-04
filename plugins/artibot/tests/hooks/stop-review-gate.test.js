@@ -499,3 +499,121 @@ describe('stop-review-gate — --name-status -z 파서 (후속 19 #11)', () => {
     expect(seen).toHaveLength(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// 회고 #44/#45 — 한 줄 블록 주석 오탐 (경로 파서와 별건)
+// ---------------------------------------------------------------------------
+describe('stop-review-gate — checkPatternViolations 한 줄 블록 주석 (회고 #44)', () => {
+  /** 게이트를 lib/ 코드 파일 1개에 대해 돌리고 stdout 페이로드 본문을 돌려준다. */
+  async function gateOn(content) {
+    mockState.readStdinResult = Promise.resolve(JSON.stringify({}));
+    mockState.execSyncResponses = [
+      ['rev-parse --show-toplevel', '/repo'],
+      ['diff --name-status', 'M\0plugins/artibot/lib/sample.js\0'],
+    ];
+    mockState.existsSyncResults = {
+      'sample.js': true,
+      'tests': false,
+      'CLAUDE.md': true,
+      'artibot.config.json': false,
+    };
+    mockState.readFileSyncImpl = () => content;
+    await runHook();
+    expect(mockState.writeStdoutCalls).toHaveLength(1);
+    const payload = mockState.writeStdoutCalls[0];
+    return payload.reason || payload.message || JSON.stringify(payload);
+  }
+
+  it('같은 줄에서 열고 닫히는 블록 주석 안의 TODO/FIXME 는 위반이 아니다', async () => {
+    const text = await gateOn([
+      '/* TODO: revisit after v5 */',
+      'export const a = 1;',
+      'export const b = 2; /* FIXME(#44) trailing */',
+      'export const c = 3; /* one */ /* HACK two */',
+      '',
+    ].join('\n'));
+    expect(text).not.toContain('TODO/FIXME');
+  });
+
+  it('줄 중간의 slash-star 는 글롭이지 오프너가 아니다 — 다음 줄 console.log 를 놓치지 않는다 (검수 3b)', async () => {
+    // c012ac37 은 줄 어디의 미종결 `/*` 도 블록으로 열어, 글롭 문자열 뒤의 코드를
+    // EOF 까지 삼켰다(lib+scripts 12파일 242줄, 6파일 EOF 개방 — 17:28Z 실측).
+    const text = await gateOn([
+      "const g = '**/*.js';",
+      "console.log('x');",
+      "const p = 'docs/PRD/*'; // and autopilot/* artifacts",
+      '// TODO in a // line that mentions /* an opener',
+      'export const q = 1; // TODO real',
+      '',
+    ].join('\n'));
+    expect(text).toContain('console.log at line(s) 2');
+    expect(text).toContain('TODO/FIXME at line(s) 5');
+  });
+
+  it('줄 첫머리 미종결 오프너는 여전히 블록을 열고, 닫힌 뒤 같은 줄의 코드는 본다', async () => {
+    const text = await gateOn([
+      '/* opens here',
+      '   TODO inside the block',
+      'still inside */ export const b = 2; // TODO after close',
+      '',
+    ].join('\n'));
+    expect(text).toContain('TODO/FIXME at line(s) 3');
+  });
+
+  it('자기검증: lib+scripts 전수에서 EOF 까지 열린 채 끝나는 파일이 0 이다', async () => {
+    // 3b 회귀의 관측점. 휴리스틱이 글롭·`//` 안의 slash-star 를 다시 오프너로
+    // 취급하면 이 수가 0 을 벗어난다. 분모(파일 수)를 먼저 못박아 공허 통과를 막는다.
+    const realFs = await vi.importActual('node:fs');
+    const path = await vi.importActual('node:path');
+    const url = await vi.importActual('node:url');
+    const { stripBlockComments } = await import('../../scripts/hooks/stop-review-gate.js');
+    const pluginRoot = path.resolve(path.dirname(url.fileURLToPath(import.meta.url)), '..', '..');
+    const files = [];
+    const walk = (dir) => {
+      for (const e of realFs.readdirSync(dir, { withFileTypes: true })) {
+        const p = path.join(dir, e.name);
+        if (e.isDirectory()) { if (e.name !== 'node_modules') walk(p); }
+        else if (/\.(js|mjs)$/.test(e.name)) files.push(p);
+      }
+    };
+    walk(path.join(pluginRoot, 'lib'));
+    walk(path.join(pluginRoot, 'scripts'));
+    expect(files.length).toBeGreaterThanOrEqual(400); // 509 measured 2026-09-04
+
+    const openAtEof = [];
+    for (const f of files) {
+      let inBlock = false;
+      for (const line of realFs.readFileSync(f, 'utf-8').split('\n')) {
+        inBlock = stripBlockComments(line, inBlock).inBlock;
+      }
+      if (inBlock) openAtEof.push(path.relative(pluginRoot, f));
+    }
+    expect(openAtEof).toEqual([]);
+  });
+
+  it('음성 대조: 주석 밖 코드 줄의 TODO 와 console.log 는 여전히 잡는다', async () => {
+    const text = await gateOn([
+      '/* header */',
+      'export const a = 1; // TODO real',
+      'console.log("x");',
+      '',
+    ].join('\n'));
+    expect(text).toContain('TODO/FIXME at line(s) 2');
+    expect(text).toContain('console.log at line(s) 3');
+  });
+
+  it('여러 줄 블록 주석·JSDoc·한 줄 주석은 이전과 같이 건너뛴다 (회귀 없음)', async () => {
+    const text = await gateOn([
+      '/**',
+      ' * TODO in jsdoc',
+      ' */',
+      '/*',
+      '  FIXME in block',
+      '*/',
+      '// XXX line comment',
+      'export const a = 1;',
+      '',
+    ].join('\n'));
+    expect(text).not.toContain('TODO/FIXME');
+  });
+});
