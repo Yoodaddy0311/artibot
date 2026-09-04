@@ -1243,7 +1243,7 @@ Artibot v1.5.0 initialized
 
 | 에이전트 | 모델 | 역할 | Team API 도구 |
 |----------|------|------|--------------|
-| **orchestrator** | opus | CTO급 팀 리더. 조율 전용 (delegation mode) | Agent(), SendMessage, TaskCreate, TaskUpdate, TaskList, TaskGet |
+| **orchestrator** | fable | CTO급 팀 리더. 조율 전용 (delegation mode) | Agent(), SendMessage, TaskCreate, TaskUpdate, TaskList, TaskGet |
 
 orchestrator는 **코드를 직접 작성하지 않습니다**. 팀을 구성하고, 태스크를 분배하고, 팀원간 조율하고, 결과를 종합하는 역할만 수행합니다.
 

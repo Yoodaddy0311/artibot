@@ -274,13 +274,14 @@ describe('parseClaimAudit — two blocks that disagree are escalated', () => {
     expect(res.claims_total).toBeNull();
   });
 
-  it('reads a bare document only when the whole string is that document', () => {
-    // Inherited from `extractJsonDocument`: the bare path parses the ENTIRE
-    // trimmed string, so JSON followed by prose is not a document. It fails
-    // closed (no_claim_audit), which is the safe direction — but it is a real
-    // limitation and it is asserted here rather than left to be discovered.
+  it('reads a bare document both alone and followed by prose', () => {
+    // This asserted `no_claim_audit` for the second shape until 2026-09-05,
+    // when the first real auditor report arrived in exactly that shape and the
+    // measurement produced zero rows. The line scanner replaced the
+    // whole-string-only rule; the multi-line bare case is still unread, and
+    // that boundary is held by the negative controls further down.
     const bareThenProse = `${JSON.stringify(doc())}\n\n위는 집계다.`;
-    expect(codes(parseClaimAudit(bareThenProse))).toEqual(['no_claim_audit']);
+    expect(parseClaimAudit(bareThenProse).ok).toBe(true);
     expect(parseClaimAudit(JSON.stringify(doc())).ok).toBe(true);
   });
 
@@ -319,6 +320,185 @@ describe('parseClaimAudit — two blocks that disagree are escalated', () => {
     const res = parseClaimAudit(`${fenced(a)}\n${fenced(b)}`);
     expect(res.ok).toBe(true);
     expect(res.claims_total).toBe(5);
+  });
+});
+
+describe('parseClaimAudit — a bare claim_audit LINE among prose', () => {
+  /**
+   * The first real auditor report, VERBATIM (spawned 02:18~02:21 KST
+   * 2026-09-05). Not a hand-trimmed excerpt: rules §9 — a fixture that does not
+   * reach the failure region proves nothing, and the failure region here is the
+   * whole unfenced line, evidence refs with spaces, parentheses, Korean text
+   * and a `#` fragment included. The block arrived as ONE bare line between two
+   * prose paragraphs; fed to the pre-fix parser it returned
+   * `ok:false / no_claim_audit`, so the measurement produced zero rows from a
+   * report that carried a valid count.
+   *
+   * The source below concatenates the bare line only to keep the FILE readable.
+   * The joined string is byte-identical to what the auditor emitted.
+   */
+  const BARE_LINE = '{"claim_audit": {"subject_agent_type": "backend-developer", '
+    + '"claims_total": 28, "claims_refuted": 2, "evidence_refs": ['
+    + '"plugins/artibot/README.md#에이전트 시스템/orchestrator 행 (L1246, 02:20 기준)", '
+    + '"plugins/artibot/README.md#모델 선택 기준", '
+    + '"lib/core/model-policy.js#resolveModel", '
+    + '"lib/core/model-policy.js#FABLE_DENYLIST", '
+    + '"artibot.config.json#/agents/modelPolicy/fable/allowlist", '
+    + '"README.md#Agents (루트, L532 orchestrator=fable)", '
+    + '"tests/core/model-policy-allowed-tiers.test.js#denied"]}}';
+
+  const AUDITOR_REPORT = [
+    'claims_refuted: 2   (재현불가 0건)',
+    '',
+    BARE_LINE,
+    '',
+    '`subject_model` 생략: 원장 canonicalModel null, 실제 구동 모델 미확인. '
+      + '`nature` 생략(미태깅): 리더가 스폰 시 태그를 달지 않았다.',
+  ].join('\n');
+
+  it('the fixture is the real artifact, not a rewrite of it', () => {
+    // Scanner self-check: if the concatenation above ever loses a fragment,
+    // every assertion below would still pass on a shorter, easier string.
+    expect(JSON.parse(BARE_LINE).claim_audit.evidence_refs).toHaveLength(7);
+    expect(AUDITOR_REPORT.split('\n')).toHaveLength(5);
+    expect(AUDITOR_REPORT).toContain('(재현불가 0건)');
+    expect(AUDITOR_REPORT).toContain('canonicalModel null');
+  });
+
+  it('the fixture still reaches the failure region (RED condition pinned)', () => {
+    // The pre-fix reader had exactly one bare strategy: parse the WHOLE trimmed
+    // string. Measured against the real pre-fix module extracted from commit
+    // 5b9dad97 (verified to contain zero occurrences of `keepBareLine`), this
+    // fixture returned `no_claim_audit` at 17:32:22Z.
+    //
+    // That module is gone, so what is pinned here is the CONDITION that made it
+    // fail: the report is not itself one JSON document, and the block is not on
+    // the first line. If someone later "tidies" the fixture into a bare JSON
+    // string, these go red rather than letting the suite pass on an input that
+    // no longer exercises the line scanner at all.
+    expect(() => JSON.parse(AUDITOR_REPORT.trim())).toThrow();
+    expect(AUDITOR_REPORT.trim().startsWith('{')).toBe(false);
+    expect(AUDITOR_REPORT).not.toContain('```');
+    expect(AUDITOR_REPORT.split('\n').indexOf(BARE_LINE)).toBe(2);
+  });
+
+  it('reads the real auditor report that returned no_claim_audit', () => {
+    const res = parseClaimAudit(AUDITOR_REPORT);
+    expect(res.ok).toBe(true);
+    expect(res.claims_total).toBe(28);
+    expect(res.claims_refuted).toBe(2);
+    expect(res.subject_agent_type).toBe('backend-developer');
+    expect(res.subject_model).toBeNull();
+    expect(res.nature).toBeNull();
+    expect(res.evidence_refs).toHaveLength(7);
+    expect(res.evidence_refs[0])
+      .toBe('plugins/artibot/README.md#에이전트 시스템/orchestrator 행 (L1246, 02:20 기준)');
+    expect(res.evidence_refs[6]).toBe('tests/core/model-policy-allowed-tiers.test.js#denied');
+  });
+
+  it('reads a bare line that is indented', () => {
+    const res = parseClaimAudit(`앞 문장\n\n   ${JSON.stringify(doc())}   \n\n뒤 문장`);
+    expect(res.ok).toBe(true);
+    expect(res.claims_total).toBe(12);
+  });
+
+  it('agrees with itself when the same block appears bare AND fenced', () => {
+    const text = `${JSON.stringify(doc())}\n\n요약\n\n${fenced(doc())}`;
+    const res = parseClaimAudit(text);
+    expect(res.ok).toBe(true);
+    expect(res.claims_total).toBe(12);
+  });
+
+  it('escalates when the bare line and the fenced block disagree', () => {
+    const text = `${JSON.stringify(doc({ claims_refuted: 0 }))}\n\n${
+      fenced(doc({ claims_refuted: 7 }))}`;
+    const res = parseClaimAudit(text);
+    expect(res.ok).toBe(false);
+    expect(codes(res)).toEqual(['ambiguous_claim_audit']);
+    expect(res.claims_refuted).toBeNull();
+  });
+
+  it('escalates when two bare lines disagree', () => {
+    const text = `${JSON.stringify(doc({ claims_total: 4 }))}\n${
+      JSON.stringify(doc({ claims_total: 9 }))}`;
+    expect(codes(parseClaimAudit(text))).toEqual(['ambiguous_claim_audit']);
+  });
+
+  it('does NOT read a document embedded mid-line (negative control)', () => {
+    // The rule is deliberately "the whole line is the object". Anything looser
+    // would start hunting for braces inside prose, and a sentence that merely
+    // QUOTES a claim_audit block would become a measurement.
+    const text = `집계는 ${JSON.stringify(doc())} 였다.`;
+    const res = parseClaimAudit(text);
+    expect(res.ok).toBe(false);
+    expect(codes(res)).toEqual(['no_claim_audit']);
+  });
+
+  it('does NOT read a multi-line bare object among prose (negative control)', () => {
+    // One-line rule only. A pretty-printed object among prose stays unread and
+    // fails closed rather than being reassembled by guesswork.
+    const text = `앞 문장\n\n${JSON.stringify(doc(), null, 2)}\n\n뒤 문장`;
+    expect(codes(parseClaimAudit(text))).toEqual(['no_claim_audit']);
+  });
+
+  it('does not treat a bare line inside a fence as a second document', () => {
+    // The line scanner must respect fence state, or every fenced one-liner
+    // would be counted twice and a legitimate single block could look like two.
+    const text = `\`\`\`json\n${JSON.stringify(doc())}\n\`\`\``;
+    const res = parseClaimAudit(text);
+    expect(res.ok).toBe(true);
+    expect(res.claims_total).toBe(12);
+  });
+
+  it('ignores a bare line that is not an object', () => {
+    expect(codes(parseClaimAudit('앞\n\n{ broken json }\n\n뒤'))).toEqual(['no_claim_audit']);
+    expect(codes(parseClaimAudit('앞\n\n[1,2,3]\n\n뒤'))).toEqual(['no_claim_audit']);
+  });
+
+  it('does not throw on prose braces that are not JSON (negative control)', () => {
+    // A line can open and close with a brace and still be a sentence. The
+    // parser must REFUSE it, not crash: an exception escaping here would take
+    // down the caller that was only trying to record a measurement.
+    for (const line of ['결과는 {claims_total: 28} 였다', '{claims_total: 28}',
+      '{"claim_audit": 텍스트}', '{"claim_audit"}', '{,}']) {
+      const text = `앞 문장\n\n${line}\n\n뒤 문장`;
+      let res;
+      expect(() => { res = parseClaimAudit(text); }).not.toThrow();
+      expect(codes(res), line).toEqual(['no_claim_audit']);
+    }
+  });
+
+  it('does not read a claim_audit split across two lines (negative control)', () => {
+    // The one-line rule's exact boundary. Line 1 opens but does not close, line
+    // 2 closes but does not open, so neither is a document and nothing is
+    // reassembled. It fails closed, and that is the intended edge.
+    const text = ['앞 문장', '', '{"claim_audit": {',
+      '"subject_agent_type": "auditor", "claims_total": 5, "claims_refuted": 1}}',
+      '', '뒤 문장'].join('\n');
+    let res;
+    expect(() => { res = parseClaimAudit(text); }).not.toThrow();
+    expect(res.ok).toBe(false);
+    expect(codes(res)).toEqual(['no_claim_audit']);
+  });
+
+  it('escalates the reviewer-reproduced bare-then-fence case, 1 vs 9', () => {
+    // Cross-check finding (code-reviewer, 02:22): before the line scanner the
+    // bare line failed the whole-string parse and was DISCARDED, so the fenced
+    // 9 was adopted as ok:true — a first-wins read of two disagreeing reports.
+    // Pinned with no blank line between them, which is how it was reproduced.
+    const text = '{"claim_audit": {"subject_agent_type": "auditor", "claims_total": 20, '
+      + '"claims_refuted": 1}}\n'
+      + '```json\n{"claim_audit": {"subject_agent_type": "auditor", "claims_total": 20, '
+      + '"claims_refuted": 9}}\n```';
+    const res = parseClaimAudit(text);
+    expect(res.ok).toBe(false);
+    expect(codes(res)).toEqual(['ambiguous_claim_audit']);
+    expect(res.claims_refuted).toBeNull();
+  });
+
+  it('ignores a bare line with no claim_audit key', () => {
+    const text = `앞\n\n${JSON.stringify({ verdict: 'PASS' })}\n\n뒤`;
+    expect(codes(parseClaimAudit(text))).toEqual(['no_claim_audit']);
   });
 });
 
@@ -433,6 +613,32 @@ describe('parseClaimAudit — the ledger-required and enum fields', () => {
     const res = parseClaimAudit(doc({ evidence_refs: 'lib/x.js#fn' }));
     expect(res.ok).toBe(false);
     expect(paths(res)).toEqual(['evidence_refs']);
+  });
+
+  it('rejects evidence_refs whose entries are not strings', () => {
+    // Cross-check finding (code-reviewer, 02:22). The allowlist declares only
+    // `type: array`, so the writer would accept `[1, null, {}]` and the ledger
+    // would carry refs nothing can follow. Checking the entries here cannot
+    // conflict with the writer: it only refuses a subset of what array allows.
+    const res = parseClaimAudit(doc({ evidence_refs: [1, null, {}] }));
+    expect(res.ok).toBe(false);
+    expect(codes(res)).toEqual(['invalid_field']);
+    expect(paths(res)).toEqual(['evidence_refs']);
+  });
+
+  it('rejects a single bad entry among good ones', () => {
+    expect(parseClaimAudit(doc({ evidence_refs: ['lib/a.js#f', 7] })).ok).toBe(false);
+  });
+
+  it('accepts an empty evidence_refs array', () => {
+    expect(parseClaimAudit(doc({ evidence_refs: [] })).ok).toBe(true);
+  });
+
+  it('accepts entries with spaces, parentheses and non-ASCII', () => {
+    // The real report's refs look like this. A stricter shape check here would
+    // reject the artifact that motivated the whole field.
+    const refs = ['plugins/artibot/README.md#에이전트 시스템/orchestrator 행 (L1246, 02:20 기준)'];
+    expect(parseClaimAudit(doc({ evidence_refs: refs })).evidence_refs).toEqual(refs);
   });
 
   it('rejects a non-string subject_agent_id', () => {

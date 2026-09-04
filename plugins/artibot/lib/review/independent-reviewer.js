@@ -474,12 +474,47 @@ function extractJsonDocument(raw) {
 }
 
 /**
+ * Collect a line that is, on its own, one whole JSON object.
+ *
+ * MEASURED 2026-09-05: the first real auditor report put its `claim_audit`
+ * block on one unfenced line between two prose paragraphs, and a reader that
+ * only parsed the whole string or fenced blocks returned `no_claim_audit`
+ * (17:24:33Z) — a measurement pipeline yielding zero rows from a report that
+ * carried a valid count.
+ *
+ * The rule is narrow on purpose: the ENTIRE trimmed line must be the object.
+ * A multi-line bare object among prose is still not read, and a document
+ * quoted mid-sentence is not read. Widening to "find the braces" would make a
+ * sentence that merely mentions a claim_audit block into a measurement, which
+ * is the fail-open direction; failing to read an oddly formatted report is the
+ * fail-closed one.
+ *
+ * @param {string} line one line, known to be outside any fence
+ * @param {object[]} docs collector, appended in place
+ * @returns {void}
+ */
+function keepBareLine(line, docs) {
+  const t = line.trim();
+  if (!t.startsWith('{') || !t.endsWith('}')) return;
+  try {
+    const doc = JSON.parse(t);
+    if (doc && typeof doc === 'object' && !Array.isArray(doc)) docs.push(doc);
+  } catch {
+    // a line that opens and closes with a brace but is not JSON — prose
+  }
+}
+
+/**
  * Every JSON object a reviewer's answer contains: the whole string when it is
- * itself one JSON document, plus the body of every fenced block that parses.
+ * itself one JSON document, every bare one-line object outside a fence, and
+ * the body of every fenced block that parses.
  *
  * Separate from {@link extractJsonDocument}, which returns the FIRST match and
- * whose signature is unchanged. Two differences matter and both are deliberate:
+ * whose signature is unchanged. Three differences matter, all deliberate:
  *
+ *  0. A bare one-line object among prose counts, via {@link keepBareLine}.
+ *     `extractJsonDocument` reads a bare document only when the WHOLE trimmed
+ *     string parses, and that is what lost the first real auditor report.
  *  1. This one returns all of them, because "two blocks disagree" is a
  *     condition a first-wins reader cannot see.
  *  2. The fence scan is LINE-BASED rather than the regex
@@ -509,6 +544,7 @@ function extractJsonDocuments(raw) {
     const isFence = /^\s*```/.test(line);
     if (body === null) {
       if (isFence) body = [];
+      else keepBareLine(line, docs);
       continue;
     }
     if (isFence) {
@@ -848,6 +884,16 @@ function isCount(v) {
  * well-formed block with an invented `claims_total` is `ok:true` here. This
  * function judges a document's shape, exactly as `parseReviewVerdict` does.
  *
+ * Absence is tested with `hasOwnProperty`, so an OBJECT caller that sets
+ * `nature: undefined` explicitly is treated as present-and-invalid, while a
+ * caller that omits the key is treated as untagged. The two differ only for an
+ * object built in JS: `undefined` has no JSON encoding, so no parsed document
+ * can reach that branch. Left as is deliberately — "the key is there" is the
+ * honest reading of an own property, and guessing that an explicit `undefined`
+ * meant omission is the kind of inference this module refuses elsewhere.
+ * Entries of `evidence_refs` must each be a string; an empty string is
+ * accepted, since judging whether a ref points anywhere is not a shape check.
+ *
  * @param {string|object} textOrJson reviewer output: an object carrying
  *   `claim_audit`, a JSON string, or markdown with a fenced JSON block
  * @returns {{ok: boolean, claims_total: number|null, claims_refuted: number|null,
@@ -906,6 +952,34 @@ export function parseClaimAudit(textOrJson) {
     });
   }
 
+  const errors = checkClaimAuditFields(block);
+  if (errors.length > 0) return claimResult({ ok: false, errors });
+
+  return claimResult({
+    ok: true,
+    claims_total: block.claims_total,
+    claims_refuted: block.claims_refuted,
+    nature: has(block, 'nature') ? block.nature : null,
+    subject_agent_type: block.subject_agent_type,
+    subject_model: has(block, 'subject_model') ? block.subject_model : null,
+    subject_agent_id: has(block, 'subject_agent_id') ? block.subject_agent_id : null,
+    evidence_refs: has(block, 'evidence_refs') ? block.evidence_refs : [],
+  });
+}
+
+/**
+ * Field-level checks for a `claim_audit` block, collected rather than
+ * short-circuited so a reviewer sees every problem in one pass.
+ *
+ * Split out of {@link parseClaimAudit} to keep that function under the
+ * complexity ceiling; the two halves are "which document is the block" and
+ * "is the block well formed", which is a real seam rather than a mechanical
+ * one.
+ *
+ * @param {object} block the `claim_audit` value, already known to be an object
+ * @returns {{code: string, message: string, path: string}[]} errors, possibly empty
+ */
+function checkClaimAuditFields(block) {
   const errors = [];
   const bad = (at, message) => errors.push({ code: 'invalid_field', message, path: at });
 
@@ -936,22 +1010,17 @@ export function parseClaimAudit(textOrJson) {
   if (has(block, 'subject_agent_id') && !isNonEmptyString(block.subject_agent_id)) {
     bad('subject_agent_id', 'subject_agent_id must be a non-empty string when present');
   }
-  if (has(block, 'evidence_refs') && !Array.isArray(block.evidence_refs)) {
-    bad('evidence_refs', 'evidence_refs must be an array');
+  if (has(block, 'evidence_refs')) {
+    if (!Array.isArray(block.evidence_refs)) {
+      bad('evidence_refs', 'evidence_refs must be an array');
+    } else if (!block.evidence_refs.every((r) => typeof r === 'string')) {
+      // The allowlist declares only `type: array`, so the writer would accept
+      // `[1, null, {}]` and the ledger would carry refs nothing can follow.
+      // Refusing a subset of what `array` permits cannot conflict with it.
+      bad('evidence_refs', 'every evidence_refs entry must be a string');
+    }
   }
-
-  if (errors.length > 0) return claimResult({ ok: false, errors });
-
-  return claimResult({
-    ok: true,
-    claims_total: block.claims_total,
-    claims_refuted: block.claims_refuted,
-    nature: has(block, 'nature') ? block.nature : null,
-    subject_agent_type: block.subject_agent_type,
-    subject_model: has(block, 'subject_model') ? block.subject_model : null,
-    subject_agent_id: has(block, 'subject_agent_id') ? block.subject_agent_id : null,
-    evidence_refs: has(block, 'evidence_refs') ? block.evidence_refs : [],
-  });
+  return errors;
 }
 
 /**

@@ -82,6 +82,8 @@ category: expert
 
 보고서에 아래 JSON 블록을 **정확히 이 모양으로** 포함하라. 파서가 이 형식을 소비한다.
 
+**블록은 반드시 ```json 펜스 안에 단독으로 둔다 — 산문과 같은 줄에 두지 마라.** 펜스 없이 문장 사이에 한 줄로 흘려 쓰면 파서가 읽지 못하고 `no_claim_audit` 으로 처리된다(2026-09-04 실측 사고). 펜스 안에는 이 JSON 한 덩어리 외에 설명·주석·말줄임표를 넣지 않는다. 산문 설명은 펜스 **밖**에 쓴다.
+
 ```json
 {"claim_audit": {"subject_agent_type": "<검수 대상 에이전트 타입>", "subject_model": "<알면 fable|opus, 모르면 키 생략>", "nature": "process|judge", "claims_total": <정수>, "claims_refuted": <정수, ≤ claims_total>, "evidence_refs": ["file#symbol", "..."]}}
 ```
@@ -107,7 +109,9 @@ category: expert
 
 ## Output Format
 
-```
+> 아래 템플릿 안의 ```json 펜스는 장식이 아니라 **산출물의 일부**다. 그대로 재현하라.
+
+````
 CLAIM AUDIT REPORT
 ==================
 Auditor:      auditor
@@ -133,7 +137,9 @@ REFUTATION (분자)
 ...
 claims_refuted: [m]   (재현불가 [k]건은 분자에서 제외)
 
+```json
 {"claim_audit": {"subject_agent_type": "...", "nature": "...", "claims_total": 0, "claims_refuted": 0, "evidence_refs": ["..."]}}
+```
 
 WHAT THIS AUDIT CANNOT SEE
 ──────────────────────────
@@ -143,7 +149,7 @@ WHAT THIS AUDIT CANNOT SEE
 미확인:
 - [확인하지 못한 항목과 그 이유]
 - (없으면 "미확인: 없음")
-```
+````
 
 ## Team Collaboration
 
@@ -168,7 +174,7 @@ When running as a teammate in an agent team:
 | 4 | Active | 인용을 직접 열었다 | 인용된 `file:line`/`file#symbol` 을 실제로 Read | 인용을 열지 않고 "확인됨" 처리 |
 | 5 | Active | 반증 시도가 실제로 실행됐다 | 주장별 재현 명령·출력이 기록돼 있는지 | 시도 기록 없는 "문제 없음" |
 | 6 | Active | 재현불가와 확인됨을 분리 | 3분할 표 존재 | 재현불가를 "확인됨"으로 흡수 |
-| 7 | Post | `claim_audit` 블록이 형식대로다 | 키 이름·`claims_refuted ≤ claims_total` 검증 | 형식 변형, 또는 분자 > 분모 |
+| 7 | Post | `claim_audit` 블록이 형식대로다 | 블록이 ```json 펜스 안에 **단독**으로 있는지(산문과 같은 줄 금지) + 키 이름 + `claims_refuted ≤ claims_total` 검증 | 펜스 없이 산문 속 한 줄로 냄, 형식 변형, 또는 분자 > 분모 |
 | 8 | Post | 모르는 키를 생략했다 | `subject_model`·`nature` 를 추측으로 채우지 않았는지 | 미확인 값을 추측으로 기입 |
 | 9 | Post | 한계 절과 `미확인:` 줄 존재 | 보고서 말미 확인 | 둘 중 하나라도 누락 |
 
@@ -181,4 +187,5 @@ When running as a teammate in an agent team:
 - Do NOT 여러 대상을 한 블록으로 합산하지 마라 — 층화가 무너진다
 - Do NOT 코드를 고치지 마라. 이 에이전트는 읽기 전용이고, 수정은 담당자에게 보고로 넘긴다
 - Do NOT 감사 1건으로 모델·에이전트의 우열을 주장하지 마라 — n=1 은 근거가 아니다
+- Do NOT `claim_audit` 블록을 펜스 없이 산문에 섞어 쓰지 마라 — 파서가 못 읽으면 감사를 하고도 산출물이 0이다
 - Do NOT 대상 보고가 붙인 "미확인" 표기를 요약하며 지우지 마라
