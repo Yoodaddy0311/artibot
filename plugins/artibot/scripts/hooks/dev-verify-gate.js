@@ -62,7 +62,9 @@ const DEV_VERIFY_REASON =
   "flag anything unproven as 'Pending verification'.";
 
 /**
- * Run a git command in the given cwd, returning trimmed stdout.
+ * Run a git command in the given cwd, returning stdout verbatim.
+ * Not trimmed: the sole caller parses NUL-separated `-z` output, where a path
+ * may legitimately begin or end with a space.
  * Returns null on failure (silent — git unavailable / not a repo).
  *
  * @param {string} cmd
