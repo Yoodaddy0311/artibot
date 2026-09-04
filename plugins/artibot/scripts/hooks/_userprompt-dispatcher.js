@@ -6,6 +6,14 @@
  * commands (each spawning its own `node` process and re-loading config) with
  * a single in-process orchestrator that:
  *
+ *   0.5 GUARDS ON THE SENDER first: the host fires UserPromptSubmit for
+ *      machine-injected turns too (task notifications, peer/channel messages,
+ *      auto-continuation, scheduled wakeups), which arrive with a non-user
+ *      `source`. Those are not the user asking for anything, so running the 6
+ *      hooks on them writes decision rows and a mission ledger entry sourced
+ *      from a notification body. `classifyPromptSource` decides; a non-user
+ *      prompt returns before ANY hook runs and before git-autopilot-save is
+ *      spawned, writing one stderr line and an EMPTY stdout.
  *   1. Runs `user-prompt-handler` first because it can rewrite the prompt
  *      (e.g. !rv re-verification, --no-team flag stripping). Order matters.
  *   2. Runs the remaining 5 in-process hooks in parallel via Promise.allSettled
@@ -295,6 +303,124 @@ export function mergeHookResults(rewriterResult, parallelResults, options = {}) 
   return Object.keys(out).length > 0 ? out : null;
 }
 
+/**
+ * The host's full `source` enum for UserPromptSubmit.
+ *
+ * MEASURED, not assumed: extracted from the installed Claude Code
+ * `2.1.260` bundle's own zod schema for the UserPromptSubmit hook input
+ * (`source: X(["user","sdk","system","loop_wakeup","schedule_wakeup",
+ * "poll_event"]).optional()`). Reproduce with:
+ *
+ *   grep -ao 'hook_event_name:[A-Za-z$_]*("UserPromptSubmit").\{0,400\}' \
+ *     "$APPDATA/npm/node_modules/@anthropic-ai/claude-code/bin/claude.exe"
+ *
+ * (that npm-global path is the 2.1.260 install; `~/.local/share/claude/
+ * versions/*` on this machine holds only 2.1.108 / 2.1.31, which predate the
+ * `source` field entirely — 0 hits for `loop_wakeup`.) Read out on
+ * 2026-09-04T23:23Z and independently re-run at 2026-09-04T23:31Z with
+ * identical output. The host's own describe() text documents them as: `user` =
+ * interactive composer, `sdk` = non-interactive entrypoint (`-p` / Agent SDK),
+ * `loop_wakeup` = dynamic /loop wakeup, `schedule_wakeup` = scheduled-task
+ * fire, `system` = other machine-injected turns (peer/channel messages, task
+ * notifications, auto-continuation), `poll_event` = poll-event channel
+ * enqueue-time pass. The field is `.optional()` — "Payloads may omit it while
+ * the field rolls out."
+ *
+ * This constant exists so the drift gate can compare it against the installed
+ * binary. Grow it when the host adds a value; do NOT use it as the pass list.
+ */
+export const HOST_PROMPT_SOURCES = Object.freeze([
+  'user',
+  'sdk',
+  'system',
+  'loop_wakeup',
+  'schedule_wakeup',
+  'poll_event',
+]);
+
+/**
+ * ALLOWLIST — the only `source` values that mean "a human asked for this".
+ *
+ * POSITIVE list on purpose, same reasoning as HOST_STDOUT_KEYS: a deny list
+ * ("skip system and loop_wakeup") is fail-OPEN — the next injection channel the
+ * host invents runs all 6 hooks on machine text before anyone notices. An
+ * unknown value is treated as NON-user, so a new host source degrades to
+ * "hooks did not run" (visible in stderr) instead of "hooks ran on a
+ * notification" (invisible until the ledger is polluted).
+ *
+ * `sdk` is on the list: `-p` / Agent SDK turns still originate from a person
+ * driving the CLI, and the pre-existing behaviour for them was to run.
+ */
+export const USER_PROMPT_SOURCES = Object.freeze(['user', 'sdk']);
+
+/**
+ * Fallback body sniff, used ONLY when `source` is absent (the host says the
+ * field may be omitted "while the field rolls out", and older hosts never sent
+ * it at all). Both literals are the host's own constants: task notifications
+ * begin with the `<task-notification>` element, and other machine turns are
+ * prefixed `[SYSTEM NOTIFICATION - NOT USER INPUT]`.
+ *
+ * Deliberately NARROW. Without `source` there is no reliable signal, so
+ * anything that does not start with a known machine marker is treated as a
+ * user prompt — an over-broad sniff here would silently disable all 6 hooks
+ * for real prompts, which is a worse failure than the one being fixed.
+ */
+const NON_USER_BODY_MARKERS = Object.freeze([
+  ['<task-notification>', 'body:task-notification'],
+  ['[SYSTEM NOTIFICATION', 'body:system-notification'],
+]);
+
+// Derived from the same table the classifier iterates, so the exported list
+// and the actual sniff cannot drift apart (judge review W1, 2026-09-04).
+export const NON_USER_BODY_PREFIXES = Object.freeze(
+  NON_USER_BODY_MARKERS.map(([prefix]) => prefix),
+);
+
+const USER_PROMPT_SOURCE_SET = new Set(USER_PROMPT_SOURCES);
+
+/**
+ * Clamp an untrusted source string to one short single-line fragment so it is
+ * safe to interpolate into a stderr line.
+ * @param {string} value
+ * @returns {string}
+ */
+function sanitizeReasonValue(value) {
+  return value.replace(/[\r\n]+/g, ' ').slice(0, 64);
+}
+
+/**
+ * Decide whether a UserPromptSubmit payload represents an actual user prompt.
+ *
+ * @param {object|null|undefined} payload - The raw hook payload.
+ * @returns {{ user: boolean, reason: string }} `user:false` means no hook
+ *   should run. `reason` is a short stable tag for the stderr line.
+ */
+export function classifyPromptSource(payload) {
+  // Not an object at all (empty stdin -> readPayload returns {}, which IS an
+  // object). Keep the pre-existing "empty payload still runs" path untouched:
+  // the existing test "emits nothing for an empty stdin payload" pins it.
+  if (!payload || typeof payload !== 'object') {
+    return { user: true, reason: 'payload:empty' };
+  }
+
+  if (typeof payload.source === 'string') {
+    if (USER_PROMPT_SOURCE_SET.has(payload.source)) {
+      return { user: true, reason: `source:${payload.source}` };
+    }
+    return { user: false, reason: `source:${sanitizeReasonValue(payload.source)}` };
+  }
+
+  const body = typeof payload.prompt === 'string'
+    ? payload.prompt
+    : (typeof payload.user_prompt === 'string' ? payload.user_prompt : '');
+  const head = body.trimStart();
+  for (const [prefix, reason] of NON_USER_BODY_MARKERS) {
+    if (head.startsWith(prefix)) return { user: false, reason };
+  }
+
+  return { user: true, reason: 'source:absent' };
+}
+
 async function main() {
   if (process.env.ARTIBOT_DISABLE_DISPATCHER === '1') {
     process.stderr.write(`[artibot:${HOOK_NAME}] disabled via ARTIBOT_DISABLE_DISPATCHER=1\n`);
@@ -302,6 +428,23 @@ async function main() {
   }
 
   const payload = await readPayload();
+
+  // Step 0.5: sender guard. Runs BEFORE the rewriter and before the
+  // git-autopilot-save spawn, so a machine-injected turn costs one stderr line
+  // and nothing else — no decision rows, no mission ledger entry, no child
+  // process.
+  //
+  // Why EMPTY stdout rather than `{continue:true}`: `continue` defaults to true
+  // in the host, and `mergeHookResults` already elides it for that reason (see
+  // its JSDoc). The existing test "emits nothing for an empty stdin payload"
+  // pins empty stdout as a live, host-accepted response.
+  const promptSource = classifyPromptSource(payload);
+  if (!promptSource.user) {
+    process.stderr.write(
+      `[artibot:${HOOK_NAME}] skipped non-user prompt (${promptSource.reason}) — 0 hooks run\n`,
+    );
+    return;
+  }
 
   // Step 1: rewriter (sync ordering — its output mutates the payload that the
   // parallel contributors classify on, so they see the rewritten prompt).

@@ -1,7 +1,9 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { execFileSync, spawn } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
+import {
+  copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -112,6 +114,66 @@ function runDispatcher(payload, env = {}) {
     },
   ).trim();
   return stdout ? JSON.parse(stdout) : null;
+}
+
+/**
+ * Same child process as `runDispatcher`, but returns the RAW streams.
+ *
+ * `runDispatcher` uses `execFileSync`, which lets stderr through to the parent
+ * and hands back only parsed stdout. The sender guard's entire observable
+ * output on the blocked path is one stderr line plus an empty stdout, so
+ * neither half is reachable through that helper.
+ *
+ * cwd, env and `CLAUDE_PLUGIN_ROOT` are deliberately identical to
+ * `runDispatcher` — the two helpers must exercise the same sandbox, or a
+ * comparison between their results measures the environment, not the guard.
+ *
+ * @param {object} payload - Hook payload written to the child's stdin.
+ * @param {Record<string,string>} [env] - Extra environment overrides.
+ * @returns {{ status: number|null, stdout: string, stderr: string }}
+ */
+function runDispatcherRaw(payload, env = {}) {
+  const result = spawnSync(
+    process.execPath,
+    [SCRIPT_PATH],
+    {
+      cwd: sandboxCwd,
+      env: {
+        ...process.env,
+        CLAUDE_PLUGIN_ROOT: sandboxRoot,
+        USERPROFILE: sandboxHome,
+        HOME: sandboxHome,
+        ARTIBOT_RUNTIME_CHECKPOINT_DISABLE: '1',
+        ARTIBOT_RUNTIME_MEMORY_DISABLE: '1',
+        ...env,
+      },
+      input: JSON.stringify(payload),
+      encoding: 'utf-8',
+      timeout: 20000,
+    },
+  );
+  return {
+    status: result.status,
+    stdout: result.stdout ?? '',
+    stderr: result.stderr ?? '',
+  };
+}
+
+/**
+ * Verbatim capture of the host `<task-notification>` body that reached
+ * UserPromptSubmit at 2026-09-04T19:02:21.565Z. Read from disk rather than
+ * inlined: a hand-shortened copy would not reach the failure region — the
+ * mission compiler needs the real request density to fire S3 and emit
+ * `mission.created` (pinned in tests/mission/compiler.test.js).
+ */
+const NOTIFICATION_FIXTURE = readFileSync(
+  path.join(PLUGIN_ROOT, 'tests', 'fixtures', 'ups-task-notification-2026-09-04.txt'),
+  'utf-8',
+);
+
+/** Decision-store path the dispatcher writes for a given session id. */
+function decisionsPathFor(sessionId) {
+  return path.join(sandboxCwd, '.artibot', 'runtime', 'decisions', `${sessionId}.events.ndjson`);
 }
 
 describe('_userprompt-dispatcher (integration)', () => {
@@ -286,6 +348,181 @@ describe('_userprompt-dispatcher (integration)', () => {
     // Canary: this slot writes no learning store today. A future hook that does
     // will trip this in a temp dir rather than in the developer's real store.
     expect(existsSync(path.join(sandboxHome, '.claude'))).toBe(false);
+  });
+
+  /**
+   * SENDER GUARD — regression fence for the 2026-09-04T19:02:21Z incident.
+   *
+   * A harness `<task-notification>` body (5,047B) arrived on UserPromptSubmit
+   * and the dispatcher ran all 6 hooks on it: 4 rows in the decision store and
+   * a `mission.created` ledger event, none of which a human asked for. The
+   * compiler side of that is pinned as a NEGATIVE CONTROL in
+   * tests/mission/compiler.test.js — it still compiles the body into a mission,
+   * because interpreting the body is not the compiler's job. The block belongs
+   * here, one layer up, before any hook runs.
+   *
+   * The guard is an ALLOWLIST (`USER_PROMPT_SOURCES`), not a block list. The
+   * `loop_wakeup` case below is what proves that: it carries an ordinary human
+   * prompt, so a body sniff would wave it through. Only the source check stops
+   * it, and only an allowlist stops the source the host invents next.
+   */
+  describe('sender guard: non-user prompts run zero hooks', () => {
+    it('blocks the real notification body when source=system', () => {
+      const sessionId = 'guard-system-4f0a1c2b-0001-0000-0000-000000000001';
+      const { stdout, stderr, status } = runDispatcherRaw({
+        hook_event_name: 'UserPromptSubmit',
+        prompt: NOTIFICATION_FIXTURE,
+        session_id: sessionId,
+        source: 'system',
+      });
+      expect(status).toBe(0);
+      // stdout must be EMPTY, not `{continue:true}`: the host defaults
+      // `continue` to true, so emitting it would be an envelope carrying no
+      // information — and `mergeHookResults` already elides it for that reason.
+      expect(stdout).toBe('');
+      expect(stderr.trim()).toBe(
+        '[artibot:_userprompt-dispatcher] skipped non-user prompt (source:system) — 0 hooks run',
+      );
+      // Exactly one stderr line: a blocked machine turn must not be noisy, or
+      // the real signal gets tuned out.
+      expect(stderr.split('\n').filter(Boolean)).toHaveLength(1);
+    });
+
+    it('is the same fixture the mission compiler turns into a mission (>= 4096B)', () => {
+      // §9: a fixture that cannot reach the failure region proves nothing. A
+      // trimmed notification would be blocked by the prefix sniff just the
+      // same, and this suite would go green while the real 5KB body still had
+      // an unproven path.
+      expect(Buffer.byteLength(NOTIFICATION_FIXTURE, 'utf-8')).toBeGreaterThanOrEqual(4096);
+      expect(Buffer.byteLength(NOTIFICATION_FIXTURE, 'utf-8')).toBe(5047);
+    });
+
+    it('blocks the notification body on the prefix sniff when source is absent', () => {
+      // Older hosts never sent `source`, and 2.1.x documents it as omittable
+      // "while the field rolls out". The body sniff is the fallback for exactly
+      // that window — it is what would have stopped the live incident.
+      const { stdout, stderr } = runDispatcherRaw({
+        hook_event_name: 'UserPromptSubmit',
+        prompt: NOTIFICATION_FIXTURE,
+        session_id: 'guard-nosource-4f0a1c2b-0002-0000-0000-000000000002',
+      });
+      expect(stdout).toBe('');
+      expect(stderr).toContain('skipped non-user prompt (body:task-notification) — 0 hooks run');
+    });
+
+    it('blocks a [SYSTEM NOTIFICATION …] body when source is absent', () => {
+      const { stdout, stderr } = runDispatcherRaw({
+        hook_event_name: 'UserPromptSubmit',
+        prompt: '[SYSTEM NOTIFICATION - NOT USER INPUT]\nThe user has been idle for 5 minutes.',
+        session_id: 'guard-sysnotif-4f0a1c2b-0003-0000-0000-000000000003',
+      });
+      expect(stdout).toBe('');
+      expect(stderr).toContain('skipped non-user prompt (body:system-notification) — 0 hooks run');
+    });
+
+    it('ALLOWLIST PROOF: blocks source=loop_wakeup even with an ordinary human prompt', () => {
+      // The body here is indistinguishable from a real request, so nothing in
+      // the sniff can reject it. If this ever goes green by way of the body
+      // rules rather than the source check, the guard has become fail-open for
+      // every future host source.
+      const { stdout, stderr } = runDispatcherRaw({
+        hook_event_name: 'UserPromptSubmit',
+        prompt: 'fix typo in readme',
+        session_id: 'guard-loop-4f0a1c2b-0004-0000-0000-000000000004',
+        source: 'loop_wakeup',
+      });
+      expect(stdout).toBe('');
+      expect(stderr).toContain('skipped non-user prompt (source:loop_wakeup) — 0 hooks run');
+    });
+
+    it('ALLOWLIST PROOF: an unknown future source is blocked, not waved through', () => {
+      const { stdout, stderr } = runDispatcherRaw({
+        hook_event_name: 'UserPromptSubmit',
+        prompt: 'fix typo in readme',
+        session_id: 'guard-future-4f0a1c2b-0005-0000-0000-000000000005',
+        source: 'source_the_host_invents_next',
+      });
+      expect(stdout).toBe('');
+      expect(stderr).toContain('skipped non-user prompt (source:source_the_host_invents_next)');
+    });
+
+    it('leaves the user path byte-for-byte unchanged (source=user vs source absent)', () => {
+      // The guard must be invisible to humans. Comparing raw stdout rather than
+      // parsed JSON catches key-order and whitespace drift that a deep-equal
+      // would let through.
+      const prompt = 'fix typo in readme';
+      const withSource = runDispatcherRaw({
+        hook_event_name: 'UserPromptSubmit', prompt, session_id: 'guard-user-a', source: 'user',
+      });
+      const withoutSource = runDispatcherRaw({
+        hook_event_name: 'UserPromptSubmit', prompt, session_id: 'guard-user-a',
+      });
+      expect(withSource.stdout).not.toBe('');
+      expect(withSource.stdout).toBe(withoutSource.stdout);
+    });
+
+    it('lets source=sdk through — Agent SDK / -p turns are human-driven', () => {
+      const out = runDispatcher({
+        hook_event_name: 'UserPromptSubmit',
+        prompt: 'fix typo in readme',
+        session_id: 'guard-sdk-4f0a1c2b-0006-0000-0000-000000000006',
+        source: 'sdk',
+      });
+      expect(out).not.toBeNull();
+      expect(out.hookSpecificOutput.additionalContext.length).toBeGreaterThan(0);
+    });
+
+    /**
+     * ZERO-HOOK PROOF with its own positive control.
+     *
+     * Asserting "the decision file does not exist" is fail-open on its own: it
+     * passes just as happily if the dispatcher never writes that file anywhere,
+     * if the path is wrong, or if the sandbox moved. The control run below
+     * writes one first, from the same helper and the same sandbox, so the
+     * absence in the guarded run is measured against a demonstrated presence.
+     *
+     * Per-session files (measured 2026-09-04T23:32Z) are what make this exact:
+     * `runtime/` artifacts are shared, so a sibling case in this suite may have
+     * created them already, but the decision store is keyed by session_id.
+     */
+    it('runs zero hooks: no decision rows, proven against a positive control', () => {
+      const userSession = 'guard-control-4f0a1c2b-0007-0000-0000-000000000007';
+      const guardedSession = 'guard-blocked-4f0a1c2b-0008-0000-0000-000000000008';
+
+      // POSITIVE CONTROL — a real user prompt DOES leave rows behind.
+      runDispatcherRaw({
+        hook_event_name: 'UserPromptSubmit',
+        prompt: 'fix typo in readme',
+        session_id: userSession,
+        source: 'user',
+      });
+      const controlPath = decisionsPathFor(userSession);
+      expect(existsSync(controlPath), 'control must write a decision file, or the absence below proves nothing').toBe(true);
+      expect(readFileSync(controlPath, 'utf-8').split('\n').filter(Boolean).length)
+        .toBeGreaterThan(0);
+
+      // GUARDED — the notification leaves nothing.
+      runDispatcherRaw({
+        hook_event_name: 'UserPromptSubmit',
+        prompt: NOTIFICATION_FIXTURE,
+        session_id: guardedSession,
+        source: 'system',
+      });
+      expect(existsSync(decisionsPathFor(guardedSession))).toBe(false);
+    });
+
+    it('spawns no git-autopilot-save child: the sandbox cwd stays free of git writes', () => {
+      // The guard returns before the spawn, so the blocked turn costs one
+      // stderr line and no child process. Observable proxy: the child would
+      // resolve the repo from cwd, and a blocked run must not create one.
+      runDispatcherRaw({
+        hook_event_name: 'UserPromptSubmit',
+        prompt: NOTIFICATION_FIXTURE,
+        session_id: 'guard-nogit-4f0a1c2b-0009-0000-0000-000000000009',
+        source: 'system',
+      });
+      expect(existsSync(path.join(sandboxCwd, '.git'))).toBe(false);
+    });
   });
 });
 

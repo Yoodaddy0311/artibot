@@ -1,0 +1,60 @@
+<task-notification>
+<task-id>ae8bcdbd1e3e0eca2</task-id>
+<tool-use-id>toolu_019SpfZb68hTvABBeBqMM8Ph</tool-use-id>
+<output-file>C:\Users\nowhe\AppData\Local\Temp\claude\C--Users-nowhe-OneDrive-------AI-artibot\4030d1a1-8c84-411c-ae31-d34d0e4eb1b9\tasks\ae8bcdbd1e3e0eca2.output</output-file>
+<status>completed</status>
+<summary>Agent "Spawn probe: doctor check 10 entry" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Findings.
+
+## Check 10 exported function — `checkRouteBindResidue`
+
+`C:\Users\nowhe\OneDrive\바탕 화면\AI\artibot\plugins\artibot\lib\project-state\doctor-checks.js:850`
+
+```js
+export function checkRouteBindResidue(input = {}) {
+```
+
+Parameter shape (single object, all optional; JSDoc at `doctor-checks.js:843-848`):
+- `input.unboundReceipts` — number (non-negative int; anything else -&gt; `null` -&gt; `unmeasured`)
+- `input.unboundSpawns` — number (same)
+- `input.conflicts` — `object[]`; absent = "not counted", never folded into verdict
+- Returns `{ status, findings, counts: { unboundReceipts, unboundSpawns, conflicts } }`; statuses via `CheckStatus.UNMEASURED/FAIL/WARN`, codes `residue-inputs-absent`, `route-bind-conflict`, `route-bind-residue-mismatch` (`doctor-checks.js:867,876,882`).
+
+**It performs no I/O.** It reads no files at all — counts are injected by the caller.
+
+## route-bind.js exports (the counters)
+
+`C:\Users\nowhe\OneDrive\바탕 화면\AI\artibot\plugins\artibot\lib\replay\route-bind.js`
+- `joinRouteBinds(ordered)` at `:224` — param is `object[]` of already-screened ledger lines (not a path). Returns `{ receipts, binds, bound[], unbound_receipts[], orphan_binds[], conflicts[], ignored{pre_tool_use_only,malformed_binds}, by_session }`.
+- `countUnboundSpawns(records, opts = {})` at `:322` — `records` = `readSpawns()` output, `opts.sessionId` optional filter. Returns `{ spawns, unbound, unbound_agent_ids[], by_session }`. Counting axis = distinct `agentId`, numerator from `event === 'start' &amp;&amp; route_ledger === 'skipped:unbound'`.
+- Constants: `ROUTE_EVENTS = { receipt: 'route.selected', bind: 'route.bound' }` (`:66`), `TOOL_USE_SHADOW_PREFIX = 'tool_use:'` (`:77`), `UNBOUND_ROUTE_LEDGER = 'skipped:unbound'` (`:83`), plus module-private `SPAWN_START = 'start'` (`:86`).
+- Both functions are pure (module header `:40-42`: "No clock, no filesystem, no randomness"). No file reads inside `lib/replay/route-bind.js`.
+
+## Input files/dirs (read by the *caller*, not by these modules)
+
+Per `commands/doctor.md:453-470` and route-bind.js header `:12`:
+- Ledger side: `&lt;projectRoot&gt;/.artibot/runtime/ledger.jsonl`, loaded via `loadReplay(projectRoot, { readLedger: readLedgerCensus })` from `lib/replay/index.js`; `unboundReceipts = route_binds.unbound_receipts.length`.
+- Spawn side: `&lt;projectRoot&gt;/.artibot/ledger/spawns.ndjson`, via `readSpawns(projectRoot, { sessionId })` from `lib/learning/ledger/spawn-ledger.js`, then `countUnboundSpawns(records)`.
+- Absent `spawns.ndjson` -&gt; pass `undefined`, not `0` (`doctor.md:469-470`).
+
+## Does doctor.md give a node one-liner for Check 7 / Check 10?
+
+**No.** Neither check has a runnable node command. The only `node` invocation in the whole file is for hooks:
+
+- `plugins/artibot/commands/doctor.md:92` — ``6. Check syntactic validity of each hook script: run `node --check {script}` via Bash (parse-only, no execution)``
+
+Check 7 (`doctor.md:114-200`) is entirely prose steps (resolve dir, count `*.events.ndjson` lines excluding `diag-`/`cron-`, read two middleware call sites, mtime comparison, `await getDecisionStats`). No code block.
+
+Check 10 (`doctor.md:435-491`) likewise gives only prose + a JS-call description; the sole executable line is the API call sentence at `doctor.md:471-472`:
+
+```
+3. Call `checkRouteBindResidue({ unboundReceipts, unboundSpawns, conflicts })`
+   with `conflicts` = `route_binds.conflicts`.
+```
+
+The only actual ```js fences in doctor.md are for Check 9 `checkArtifactHealth({...})` (`doctor.md:382-387`) and the `--fix` invocation (`doctor.md:598-602`, which is the pattern to copy if you need a one-liner — `await import(toFileUrl(join(pluginRoot, ...)))`, required because the plugin root has non-ASCII path segments).
+
+미확인: (1) whether `lib/learning/ledger/spawn-ledger.js#readSpawns` and `lib/runtime/ledger.js#readLedgerCensus` exist with those exact signatures — I did not open those files, only doctor.md's references to them; (2) whether any other file (e.g. `scripts/`, tests) supplies a working node one-liner for Check 7/10 — I only searched `commands/doctor.md`; (3) the contents of `tests/project-state/doctor-check-10.test.js` and `tests/replay/route-bind.test.js`, which may pin additional param shapes.</result>
+<usage><subagent_tokens>63656</subagent_tokens><tool_uses>13</tool_uses><duration_ms>59543</duration_ms></usage>
+</task-notification>
