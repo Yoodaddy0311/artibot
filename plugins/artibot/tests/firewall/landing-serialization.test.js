@@ -39,6 +39,14 @@
  *     Two reclaimers racing on one stale file is therefore not exercised —
  *     the module relies on the second `wx` losing, which is the same
  *     primitive, but no test here pins it.
+ *     Those two knobs did NOT in fact disable reclaim until 2026-09-04: a
+ *     child that read the winner's file inside the window between
+ *     `openSync(path,'wx')` and `writeSync` got no record at all, and neither
+ *     knob is consulted without one, so it unlinked a live lock and also
+ *     printed `ok`. That is what this suite failed on twice that day (Windows
+ *     Node 22, Linux Node 24: 2 of 6 children `ok`). The claim holds now
+ *     because an unparseable file is stale by `mtime` alone; the deterministic
+ *     unit coverage for that rule is `tests/git/landing-lock.test.js`.
  *
  * Temp repos only — never the user's repository.
  */
@@ -232,10 +240,17 @@ describe('O_EXCL mutual exclusion', () => {
     // 6/6 "ok" at 21:48 (children strictly sequential) and 2/6 "ok" at 22:18
     // and 22:40 under full-suite load (spawn stagger > the 2.5s hold the
     // first fix used). Reclaim itself is covered by the two tests above.
+    //
+    // The children report reclaim SEPARATELY from exclusion. Both were once
+    // printed as "ok", so the 2-of-6 CI failures on 2026-09-04 could not say
+    // whether `O_EXCL` had broken or a reclaim had fired — it was the latter,
+    // through the empty-file window (`landing-lock.js` module header). A
+    // "reclaimed" here now means the staleness rule leaked, not that two
+    // processes got a descriptor from `wx`.
     const script = [
       `const m = await import(${JSON.stringify(pathToFileURL(LOCK_MODULE).href)});`,
       `const r = m.acquireLandingLock(${JSON.stringify(key)}, { lockDir: ${JSON.stringify(lockDir)}, staleMs: 86_400_000, isPidAlive: () => true });`,
-      'process.stdout.write(r.ok ? "ok" : "held");',
+      'process.stdout.write(r.reclaimed ? "reclaimed" : (r.ok ? "ok" : "held"));',
     ].join('\n');
     const n = 6;
     const results = await Promise.all(
@@ -246,6 +261,10 @@ describe('O_EXCL mutual exclusion', () => {
         }).then((r) => r.stdout.trim()),
       ),
     );
+    // No child may reclaim: with a day-long `staleMs` and a live pid there is
+    // no legitimate stale path, so a "reclaimed" is the defect, reported as
+    // itself instead of masquerading as a second `wx` winner.
+    expect(results.filter((x) => x === 'reclaimed')).toHaveLength(0);
     expect(results.filter((x) => x === 'ok')).toHaveLength(1);
     expect(results.filter((x) => x === 'held')).toHaveLength(n - 1);
     // The winner's pid is now dead; the parent (default reclaim rules) takes it back.
