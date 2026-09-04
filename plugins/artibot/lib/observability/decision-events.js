@@ -75,6 +75,12 @@
  *   - recordTopologyRecommended(runId, observation, { storeDir, projectRoot, cwd, ts, phase })
  *   - measureMemoryInjection(prepared)  (pure parser for the above)
  *   - recordMemoryInjection(runId, measurement, { storeDir, projectRoot, cwd, ts, phase })
+ *   - recordSelfControlDecision(runId, decision, { storeDir, projectRoot, cwd, ts, phase })  (D9)
+ *   - recordSkillLevelChanged(runId, change, { storeDir, projectRoot, cwd, ts, phase })         (D9)
+ *   - cronRunId(feature, { env, now })  (run id for the scheduler writers above)
+ *   - DECISION_EVENT_TYPES / SELF_CONTROL_SUBSYSTEMS / SELF_CONTROL_ACTIONS / SKILL_LEVELS
+ *     (the fail-closed vocabularies `record` and the two D9 recorders admit)
+ *   - isAllowedDecisionType(type)  (the predicate `record` refuses on)
  *   - getDecisionRecorderStats() / resetDecisionRecorderStats()
  *
  * DATA POLICY: 100% local file; no external transmission.
@@ -83,6 +89,7 @@
  */
 
 import path from 'node:path';
+import { redactString } from '../core/redaction.js';
 import { resolveProjectRoot } from '../git/project-root.js';
 import { appendRunEvent, readRunEvents, resolveRunEventsPath } from './run-events.js';
 
@@ -105,6 +112,99 @@ export const MEMORY_INJECTION_MEASURED = 'memory-injection-measured';
 
 /** End-of-process dump of this module's own `stats`. See `flushRecorderStats`. */
 export const RECORDER_STATS = 'recorder-stats';
+
+/**
+ * D9 — the two vocabularies that took over from `lib/core/decision-trail.js`
+ * when the trail was frozen (2026-09-05, `DESIGN-TRAIL-migration-projectRoot.md`
+ * §2 C, owner rulings TR-1..3). The trail had five unique writers left:
+ * `lib/core/user-profile.js` (skill-level promotion) and the four
+ * `scripts/cron/` self-control runners. Two event types, not five, because the
+ * four runners record ONE kind of fact — "the scheduler decided X about Y" — and
+ * differ only in `subsystem`, which is a field of that fact, not a type of its
+ * own. The subsystem list is the closed set below; a fifth runner is red until
+ * it is registered here (verification-discipline §8: allowlist, never denylist).
+ *
+ * WHY THESE ARE ALLOWLISTS AND NOT SHAPES. `ARTIBOT-5.0-DESIGN.md` `:645` fixes
+ * the rule for this store: "두 번째 writer 가 생기면 fail-closed allowlist". The
+ * trail accepted any `subsystem`/`action` string, which is how a test fixture
+ * named `probe-b` once landed in the live file. Here an unknown type,
+ * subsystem, action or level is REFUSED and counted as `failed` with a
+ * `*-not-allowed:<value>` `lastError`, so the refusal is visible in
+ * `flushRecorderStats` rather than silently absorbed.
+ */
+export const SELF_CONTROL_DECIDED = 'self-control-decided';
+export const SKILL_LEVEL_CHANGED = 'skill-level-changed';
+
+/**
+ * Every `type` this store admits, and the ONLY ones. `record` refuses the rest.
+ * `tests/observability/decision-events.test.js` scans this module's source and
+ * asserts that every `type:` literal written here is a member, so a recorder
+ * added without registering its type goes red before it can write.
+ */
+export const DECISION_EVENT_TYPES = Object.freeze([
+  ROUTING_CLASSIFIED,
+  WORKFLOW_PLANNED,
+  TOPOLOGY_RECOMMENDED,
+  MEMORY_INJECTION_MEASURED,
+  RECORDER_STATS,
+  SELF_CONTROL_DECIDED,
+  SKILL_LEVEL_CHANGED,
+]);
+
+/**
+ * Is `type` one this store admits? The single predicate `record` consults, so a
+ * test can prove the gate is live without reaching the private `record`.
+ * @param {unknown} type
+ * @returns {boolean}
+ */
+export function isAllowedDecisionType(type) {
+  return typeof type === 'string' && DECISION_EVENT_TYPES.includes(type);
+}
+
+/**
+ * `data.subsystem` values `recordSelfControlDecision` admits — one per
+ * `scripts/cron/` runner, spelled exactly as each runner names itself.
+ * Measured 2026-09-05 (`grep -n "subsystem:" scripts/cron/*.js`): four
+ * spellings, four files.
+ */
+export const SELF_CONTROL_SUBSYSTEMS = Object.freeze([
+  'auto-cleanup',
+  'auto-commit',
+  'auto-macro-register',
+  'auto-pr-creator',
+]);
+
+/**
+ * `data.action` values `recordSelfControlDecision` admits. The union of every
+ * `action:` literal the four runners write, measured the same way and the same
+ * day; sorted so a diff of this list is a diff of the vocabulary.
+ */
+export const SELF_CONTROL_ACTIONS = Object.freeze([
+  'applied',
+  'committed',
+  'created',
+  'dry-run',
+  'failed',
+  'refused',
+  'registered',
+  'rejected',
+  'rolled-back',
+  'swept',
+  'would-cleanup',
+  'would-commit',
+  'would-create',
+]);
+
+/** The two skill levels `lib/core/user-profile.js#classify` can return. */
+export const SKILL_LEVELS = Object.freeze(['novice', 'pro']);
+
+/**
+ * Run-id prefix for scheduler runs (`cronRunId`). `/doctor` Check 7 counts
+ * files under this prefix SEPARATELY from session files: a cron file proves the
+ * scheduler ran, not that the per-prompt hook path is alive, and folding the two
+ * together would let a nightly job silence the S5 "never recorded" row.
+ */
+export const CRON_RUN_ID_PREFIX = 'cron-';
 
 /**
  * Historical run id for stats that could not be attributed to a session.
@@ -280,6 +380,15 @@ export function resolveDecisionRunId(source) {
  * @returns {object|null} the persisted event, or null when nothing was written
  */
 function record(runId, event, opts) {
+  // Fail-closed on the vocabulary BEFORE touching the filesystem: a type this
+  // module never registered must not reach disk, and the refusal is counted so
+  // it shows up in `flushRecorderStats` instead of vanishing.
+  const type = event && typeof event === 'object' ? event.type : undefined;
+  if (!isAllowedDecisionType(type)) {
+    stats.failed += 1;
+    stats.lastError = `type-not-allowed:${String(type)}`;
+    return null;
+  }
   try {
     const persisted = appendRunEvent(getDecisionStoreDir(opts), runId, event);
     stats.recorded += 1;
@@ -620,6 +729,209 @@ export function recordMemoryInjection(runId, measurement, opts = {}) {
       : 'memory not injected',
     data,
   }, opts);
+}
+
+/**
+ * Test seam for the vocabulary gate — NOT a public contract. Every public
+ * recorder hard-codes an allowlisted `type`, so nothing outside this module
+ * can hand `record` a bad one; without this seam the gate was provable only
+ * by reading source text, and a mutation test (2026-09-05, M2) showed that
+ * `if (false && …)` left every test green. Same `_` convention as
+ * `decision-trail.js#_resetDecisionTrailCache`.
+ *
+ * @param {string} runId
+ * @param {object} event
+ * @param {{ storeDir?: string, projectRoot?: string, cwd?: string }} [opts]
+ * @returns {object|null}
+ */
+export function _recordForTest(runId, event, opts = {}) {
+  return record(runId, event, opts);
+}
+
+/** Longest free-text `reason` a D9 recorder keeps. Bound, then redacted. */
+const MAX_DECISION_REASON_LENGTH = 200;
+
+/** Longest string kept inside a D9 `inputs` / `outputs` bag. */
+const MAX_DECISION_VALUE_LENGTH = 200;
+
+/** Most array items kept inside a D9 `inputs` / `outputs` bag. */
+const MAX_DECISION_LIST_ITEMS = 50;
+
+/**
+ * Keep only bounded scalars, one level deep. The trail accepted arbitrary
+ * `inputs` / `outputs` objects and redacted them recursively; here the container
+ * is kept OPEN (the runners legitimately add keys) but its VALUES are typed:
+ * finite numbers, booleans, null, redacted strings up to
+ * `MAX_DECISION_VALUE_LENGTH`, and arrays of those up to
+ * `MAX_DECISION_LIST_ITEMS`. Nested objects and functions are dropped — the same
+ * trade `numericValuesOnly` makes for `factors`, widened to the scalar set the
+ * cron runners actually write (file paths, a branch name, a PR url, a sha).
+ *
+ * @param {unknown} src
+ * @returns {object|null} a fresh object, or null when `src` is not an object
+ */
+function boundedScalars(src) {
+  if (!src || typeof src !== 'object' || Array.isArray(src)) return null;
+  const scalar = (v) => {
+    if (v === null) return null;
+    if (typeof v === 'boolean') return v;
+    if (typeof v === 'number') return Number.isFinite(v) ? v : undefined;
+    if (typeof v === 'string') return redactString(v).slice(0, MAX_DECISION_VALUE_LENGTH);
+    return undefined;
+  };
+  const out = {};
+  for (const [k, v] of Object.entries(src)) {
+    if (k === '__proto__' || k === 'constructor' || k === 'prototype') continue;
+    if (Array.isArray(v)) {
+      out[k] = v.slice(0, MAX_DECISION_LIST_ITEMS).map(scalar).filter((x) => x !== undefined);
+      continue;
+    }
+    const s = scalar(v);
+    if (s !== undefined) out[k] = s;
+  }
+  return out;
+}
+
+/**
+ * Refuse one D9 record on vocabulary grounds, counting it like a failed write.
+ * @param {string} what - `subsystem` | `action` | `skill-level`
+ * @param {unknown} value
+ * @returns {null}
+ */
+function refuse(what, value) {
+  stats.failed += 1;
+  stats.lastError = `${what}-not-allowed:${String(value)}`;
+  return null;
+}
+
+/**
+ * D9 — record one self-control decision from a `scripts/cron/` runner.
+ *
+ * Replaces the trail call `({ subsystem, action, reason, inputs, outputs })` for
+ * the four runners, with the same call shape minus the trail's open vocabulary:
+ * `subsystem` must be in {@link SELF_CONTROL_SUBSYSTEMS} and `action` in
+ * {@link SELF_CONTROL_ACTIONS}, or the record is refused and counted.
+ *
+ * NO SESSION, NO FILE — same rule as every recorder here. A runner has no hook
+ * session; it passes the run id `cronRunId` mints for it, and a runner that
+ * passes none is counted as `skipped`, never bucketed. This is design §2 C's
+ * stated side-effect (1), accepted because 후속 12 안 B already made a
+ * session-less flush go to stderr instead of disk.
+ *
+ * WHERE THE FILE LANDS. `opts.cwd` is the runner's `pluginRoot`, and
+ * `getDecisionStoreDir` resolves it through `resolveProjectRoot`: under a git
+ * checkout that is the repo root (`<repo>/.artibot/runtime/decisions/`); under
+ * a root with no `.git` ancestor — the marketplace cache — the weak-marker
+ * walk stops at the plugin tree itself, i.e. INSIDE the directory `plugin
+ * update` replaces. Measured 2026-09-05 (cross-review): `getDecisionStoreDir({
+ * cwd: ~/.claude/plugins/cache/artibot/artibot/4.54.0 })` → `…/4.54.0/
+ * .artibot/runtime/decisions`. Reach is nil today (the runners use
+ * `pluginRoot` as their git working directory, so a cache root was never a
+ * supported host; the only caller is `.github/workflows/self-control.yml`),
+ * but it is the same loss class D9 exists to close and is stated here rather
+ * than left to be rediscovered.
+ *
+ * @param {string|null} runId - `cronRunId(...)` from the runner's CLI entry
+ * @param {{subsystem: string, action: string, reason?: string, inputs?: object,
+ *   outputs?: object}} decision
+ * @param {{ storeDir?: string, projectRoot?: string, cwd?: string, ts?: string, phase?: string }} [opts]
+ * @returns {object|null}
+ */
+export function recordSelfControlDecision(runId, decision, opts = {}) {
+  if (!runId || typeof runId !== 'string') {
+    stats.skipped += 1;
+    return null;
+  }
+  const d = decision && typeof decision === 'object' ? decision : {};
+  if (!SELF_CONTROL_SUBSYSTEMS.includes(d.subsystem)) return refuse('subsystem', d.subsystem);
+  if (!SELF_CONTROL_ACTIONS.includes(d.action)) return refuse('action', d.action);
+
+  const data = {
+    subsystem: d.subsystem,
+    action: d.action,
+    reason: typeof d.reason === 'string' && d.reason.length > 0
+      ? redactString(d.reason).slice(0, MAX_DECISION_REASON_LENGTH)
+      : null,
+    inputs: boundedScalars(d.inputs),
+    outputs: boundedScalars(d.outputs),
+  };
+
+  return record(runId, {
+    ts: opts.ts,
+    phase: typeof opts.phase === 'string' ? opts.phase : 'SELF_CONTROL',
+    type: SELF_CONTROL_DECIDED,
+    level: d.action === 'failed' ? 'warn' : 'info',
+    message: `${d.subsystem} ${d.action}${data.reason ? ` — ${data.reason}` : ''}`,
+    data,
+  }, opts);
+}
+
+/**
+ * D9 — record a skill-level transition detected by `lib/core/user-profile.js`.
+ *
+ * `user-profile.js` is L1 and may not import this module (eslint L1 block), so
+ * it never calls this directly: `recordSignal` accepts a `recordChange` PORT and
+ * the hook (`scripts/hooks/runtime-prompt.js#recordPromptSignals`) binds this
+ * function to the session's run id and store. `evidence` is `classify`'s own
+ * generated metric strings (`slash-ratio=0.80`), never a prompt; it is still
+ * filtered to short strings so a future change to `classify` cannot leak text.
+ *
+ * @param {string|null} runId
+ * @param {{from: string, to: string, signals?: number, evidence?: string[]}} change
+ * @param {{ storeDir?: string, projectRoot?: string, cwd?: string, ts?: string, phase?: string }} [opts]
+ * @returns {object|null}
+ */
+export function recordSkillLevelChanged(runId, change, opts = {}) {
+  if (!runId || typeof runId !== 'string') {
+    stats.skipped += 1;
+    return null;
+  }
+  const c = change && typeof change === 'object' ? change : {};
+  if (!SKILL_LEVELS.includes(c.from) || !SKILL_LEVELS.includes(c.to)) {
+    return refuse('skill-level', `${String(c.from)}->${String(c.to)}`);
+  }
+  const data = {
+    from: c.from,
+    to: c.to,
+    signals: Number.isInteger(c.signals) && c.signals >= 0 ? c.signals : null,
+    evidence: Array.isArray(c.evidence) ? reasonLiteralsOnly(c.evidence) : [],
+  };
+  return record(runId, {
+    ts: opts.ts,
+    phase: typeof opts.phase === 'string' ? opts.phase : 'PROFILE',
+    type: SKILL_LEVEL_CHANGED,
+    level: 'info',
+    message: `skill level ${data.from} -> ${data.to}`
+      + (data.signals === null ? '' : ` (${data.signals} signals)`),
+    data,
+  }, opts);
+}
+
+/**
+ * Mint the run id a scheduler run records under.
+ *
+ * `cron-<feature>-<stamp>`, where the stamp is `gha<GITHUB_RUN_ID>` under
+ * GitHub Actions (stable across a re-run of the same job) and a compact UTC
+ * timestamp `YYYYMMDD-HHMMSS` elsewhere. One file per run, which is what this
+ * store already means by a run id (`run-events.js`: "file-granular, one file
+ * per run id"). The prefix is {@link CRON_RUN_ID_PREFIX} so a reader can tell a
+ * scheduler file from a session file without opening it.
+ *
+ * `feature` is reduced to `[A-Za-z0-9_-]` because it becomes part of a file
+ * name — the same reason `sanitizeRunId` exists for session ids.
+ *
+ * @param {string} feature - runner name, e.g. `auto-commit`
+ * @param {{ env?: NodeJS.ProcessEnv, now?: Date }} [opts] - injectable for tests
+ * @returns {string}
+ */
+export function cronRunId(feature, opts = {}) {
+  const env = opts.env && typeof opts.env === 'object' ? opts.env : process.env;
+  const now = opts.now instanceof Date && Number.isFinite(opts.now.getTime()) ? opts.now : new Date();
+  const name = String(feature ?? 'cron').replace(/[^A-Za-z0-9_-]/g, '-').slice(0, 40) || 'cron';
+  const gha = typeof env.GITHUB_RUN_ID === 'string' && /^\d{1,20}$/.test(env.GITHUB_RUN_ID)
+    ? `gha${env.GITHUB_RUN_ID}`
+    : now.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, '').replace('T', '-');
+  return `${CRON_RUN_ID_PREFIX}${name}-${gha}`;
 }
 
 /**

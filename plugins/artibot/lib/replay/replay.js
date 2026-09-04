@@ -69,9 +69,16 @@
  *     this module accepts is therefore "well-enough-formed to index", which is
  *     a weaker statement than "valid", and the writer (T-20) remains the only
  *     full validator.
+ *  5. WHETHER A ROUTE BIND IS THE RIGHT ONE. `route_binds` joins `route.selected`
+ *     receipts to `route.bound` lines by `tool_use_id` (`./route-bind.js`). It
+ *     reports what bound, what did not, and where the 1:1 invariant broke; it
+ *     cannot tell a correct FIFO bind from a wrong one. See that module's own
+ *     "cannot see" list.
  *
  * @module lib/replay/replay
  */
+
+import { joinRouteBinds } from './route-bind.js';
 
 // ---------------------------------------------------------------------------
 // Vocabulary
@@ -571,8 +578,10 @@ function selectEvent(ordered, name) {
  * @param {object[]} events - ledger lines in any order.
  * @param {{includeEvents?: boolean}} [opts] - forwarded to `foldByAction`.
  * @returns {object} `{missions, actions, routes, switches, usage, context,
- *   attribution, totals, gaps}`. Every field is present on every call, so a
- *   consumer never branches on `undefined`.
+ *   route_binds, attribution, totals, gaps}`. Every field is present on every
+ *   call, so a consumer never branches on `undefined`. `route_binds` is the
+ *   receipt ↔ bind join (`route-bind.js#joinRouteBinds`), which `/doctor`
+ *   Check 10 reads for design §2.3 invariant 3.
  */
 export function buildReplay(events, opts = {}) {
   const { ordered, gaps } = orderEvents(events);
@@ -589,6 +598,7 @@ export function buildReplay(events, opts = {}) {
     switches: selectEvent(ordered, PROJECTED_EVENTS.switch),
     usage: selectEvent(ordered, PROJECTED_EVENTS.usage),
     context: selectEvent(ordered, PROJECTED_EVENTS.context),
+    route_binds: joinRouteBinds(ordered),
     attribution,
     totals: {
       // HOW MANY LINES THIS FUNCTION WAS HANDED — not how many the ledger holds.

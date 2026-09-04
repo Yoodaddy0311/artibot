@@ -6,17 +6,20 @@
  * distinct defects fed it, both rooted in the trail path being re-derived from
  * `process.env.CLAUDE_PLUGIN_ROOT` at each use instead of once per operation:
  *
- *   A. `router.route()` is synchronous and cannot await its trail write, so the
- *      write flushes on a later turn. Resolved at flush time, its destination is
- *      whatever the environment says then — not the root the caller meant.
+ *   A. `router.route()` was synchronous and could not await its trail write, so
+ *      the write flushed on a later turn at whatever root the environment named
+ *      then. RETIRED 2026-09-05 (D9): the router no longer writes the trail at
+ *      all — `tests/core/decision-trail.test.js` "integration touchpoints"
+ *      asserts that — so there is no deferred write left to pin.
  *
  *   B. `recordDecision` read the trail, suspended on `await ensureDir(...)`, then
  *      resolved the path a second time for the write. Note the asymmetry: the
  *      argument to `ensureDir` is evaluated *before* the suspension, so only the
  *      write moved. A read from the sandbox followed by a write to the real root
  *      replaced the real trail with fixture data — data loss, not just noise.
+ *      Still live on the opt-in path (`enabled: true`), so still guarded.
  *
- * Both scenarios use throwaway roots only. Nothing here may resolve to the real
+ * Every scenario uses throwaway roots only. Nothing here may resolve to the real
  * plugin directory: `assertNotRealRoot` fails the test if it ever does.
  */
 
@@ -26,7 +29,6 @@ import fsSync from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import * as trail from '../../lib/core/decision-trail.js';
-import * as router from '../../lib/cognitive/router.js';
 import { getPluginRoot } from '../../lib/core/platform.js';
 
 /**
@@ -43,7 +45,7 @@ import { getPluginRoot } from '../../lib/core/platform.js';
  * inside the suspension by construction, and scenario B asserts it fired.
  *
  * `vi.mock` is hoisted file-wide, so the hook is nullable and stays null for
- * scenarios A and C, where `ensureDir` passes straight through to the real one.
+ * scenario C, where `ensureDir` passes straight through to the real one.
  * `vi.hoisted` is what lets the factory reach the holder: the factory is lifted
  * above ordinary top-level declarations and cannot see them.
  */
@@ -125,29 +127,7 @@ describe('decision-trail path isolation', () => {
     trail._resetDecisionTrailCache();
   });
 
-  // ── Scenario A — deferred write keeps the root it was given ───────────────
-  it('routes a deferred router write to the root captured at call time', async () => {
-    const sandbox = await makeRoot('a-sandbox');
-    const decoy = await makeRoot('a-decoy');
-    try {
-      process.env.CLAUDE_PLUGIN_ROOT = sandbox;
-      trail._resetDecisionTrailCache();
-
-      router.resetRouter();
-      router.route('analyze security vulnerabilities in the auth layer');
-
-      // Stand in for a test teardown that restores the root before the
-      // fire-and-forget chain in router.js gets its turn.
-      process.env.CLAUDE_PLUGIN_ROOT = decoy;
-
-      await waitForEntries(sandbox, 'cognitive-router');
-
-      expect(readEntries(decoy)).toBeNull();
-    } finally {
-      await fs.rm(sandbox, { recursive: true, force: true });
-      await fs.rm(decoy, { recursive: true, force: true });
-    }
-  });
+  // ── Scenario A retired with D9 (see the header) ───────────────────────────
 
   // ── Scenario B — one operation, one destination ───────────────────────────
   it('writes back to the same file it read, when the root moves mid-operation', async () => {
@@ -216,16 +196,3 @@ describe('decision-trail path isolation', () => {
     }
   });
 });
-
-/** Poll the sandbox trail until the subsystem shows up, or fail after 2s. */
-async function waitForEntries(root, subsystem) {
-  const deadline = Date.now() + 2000;
-  for (;;) {
-    const entries = readEntries(root);
-    if (entries?.some((e) => e.subsystem === subsystem)) return entries;
-    if (Date.now() > deadline) {
-      throw new Error(`no '${subsystem}' entry landed in ${root} within 2000ms`);
-    }
-    await new Promise((resolve) => { setTimeout(resolve, 20); });
-  }
-}

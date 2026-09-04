@@ -545,28 +545,11 @@ async function resolveEffortMeta(prompt, pluginRoot, hookData = {}) {
   return effortMeta;
 }
 
-/**
- * AGO G3 — record effort classification for Explainability (observe-only).
- * Wrapped in try/catch so Decision Trail failures never break the prompt.
- * @param {{ command: string, effort: string } | null} effortMeta
- * @param {string} pluginRoot
- */
-async function recordEffortDecision(effortMeta, pluginRoot) {
-  if (!effortMeta) return;
-  try {
-    const trailPath = path.join(pluginRoot, 'lib', 'core', 'decision-trail.js');
-    const { recordDecision } = await import(toFileUrl(trailPath));
-    await recordDecision({
-      subsystem: 'runtime-prompt',
-      action: 'effort-classified',
-      reason: `slash command '/${effortMeta.command}' matched EFFORT_POLICY`,
-      inputs: { command: effortMeta.command },
-      outputs: { effort: effortMeta.effort },
-    });
-  } catch {
-    // Non-critical: decision trail is advisory
-  }
-}
+// D9 (2026-09-05): the `runtime-prompt / effort-classified` trail write that
+// used to sit here is gone with the trail freeze (`lib/core/decision-trail.js`
+// header). The resolved effort is still persisted to `runtime/current-effort.
+// json` by `persistEffortMeta`, and the prompt's routing facts reach the
+// projectRoot decisions store through `recordObserveOnlyDecisions` below.
 
 /**
  * T-37 — OBSERVE-ONLY records go to `<projectRoot>/.artibot/runtime/decisions/`,
@@ -641,22 +624,43 @@ async function recordObserveOnlyDecisions({
  * P3-8: record user signal for skill-level auto-detection + G10 macro
  * observation. Both are non-critical and observe-only.
  *
+ * D9: a skill-level TRANSITION is recorded in the projectRoot decisions store
+ * (`decision-events.js#recordSkillLevelChanged`), not the frozen trail.
+ * `user-profile.js` is L1 and cannot import the L2 recorder, so the recorder is
+ * bound here to this prompt's session and store and handed in as the
+ * `recordChange` port. No session → the recorder counts `skipped` and writes
+ * nothing, the same rule every decisions-store writer follows.
+ *
  * @param {string} prompt
  * @param {string|null} commandName
  * @param {string} pluginRoot
  * @param {object} runtimeConfig
+ * @param {object} hookData - the hook payload (session id, cwd)
  */
-async function recordPromptSignals(prompt, commandName, pluginRoot, runtimeConfig) {
+async function recordPromptSignals(prompt, commandName, pluginRoot, runtimeConfig, hookData) {
   try {
     const profileModPath = path.join(pluginRoot, 'lib', 'core', 'user-profile.js');
     const { recordSignal, configureProfilePath } = await import(toFileUrl(profileModPath));
     const uxProfilePath = runtimeConfig?.ux?.profilePath;
     if (uxProfilePath) configureProfilePath(uxProfilePath);
+    // The port is bound in its own try: a recorder that fails to load must
+    // not take the profile signal down with it (cross-review 2026-09-05 #6).
+    let recordChange;
+    try {
+      const {
+        recordSkillLevelChanged, resolveDecisionRunId,
+      } = await loadLibModule(pluginRoot, 'observability', 'decision-events.js');
+      const runId = resolveDecisionRunId({ hookData });
+      const store = { cwd: hookData?.cwd };
+      recordChange = (change) => recordSkillLevelChanged(runId, change, store);
+    } catch {
+      recordChange = undefined;
+    }
     await recordSignal({
       type: commandName ? 'slash-command' : 'natural-language',
       value: commandName || String(prompt).slice(0, 60),
       timestamp: Date.now(),
-    });
+    }, { recordChange });
   } catch {
     // Non-critical: profile tracking is advisory
   }
@@ -896,8 +900,7 @@ export async function handleUserPromptSubmit(hookData) {
   // build the workflow plan. If preparePrompt ran first it would read the PRIOR
   // prompt's effort file (stale off-by-one), so the write must precede the read.
   const effortMeta = await resolveEffortMeta(prompt, pluginRoot, hookData);
-  await recordEffortDecision(effortMeta, pluginRoot);
-  await recordPromptSignals(prompt, effortMeta?.command || null, pluginRoot, runtimeConfig);
+  await recordPromptSignals(prompt, effortMeta?.command || null, pluginRoot, runtimeConfig, hookData);
 
   const taskBudgetDirective = await resolveTaskBudgetDirective(effortMeta, pluginRoot, runtimeConfig);
 
