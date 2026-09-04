@@ -1203,7 +1203,7 @@
       }
     },
     "decisionTrail": {
-      "enabled": true,
+      "enabled": false,
       "path": "runtime/decision-trail.json",
       "retentionDays": 30,
       "redactSensitive": true

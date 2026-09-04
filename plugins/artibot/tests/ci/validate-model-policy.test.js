@@ -141,10 +141,10 @@ describe('gate-aware drift check against the shipped repo (2-tier fleet)', () =>
     expect(warnings).toEqual([]);
   });
 
-  it('frontmatter model: fable is exactly the fable.allowlist (8) and nothing else', () => {
+  it('frontmatter model: fable is exactly the fable.allowlist (10) and nothing else', () => {
     const fableFiles = agentModels.filter((a) => a.model === 'fable').map((a) => a.name).sort();
     expect(fableFiles).toEqual([...allowlist].sort());
-    expect(fableFiles).toHaveLength(8);
+    expect(fableFiles).toHaveLength(10);
   });
 
   it('a non-allowlisted high-bucket agent with model: opus is NOT drift (allowlist wins over bucket)', () => {

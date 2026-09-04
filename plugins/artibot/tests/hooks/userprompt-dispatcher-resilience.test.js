@@ -142,7 +142,7 @@ describe('dispatcher resilience: one hook throwing does not abort others', () =>
 });
 
 describe('hooks.json: UserPromptSubmit timeout cold-start tolerance', () => {
-  it('UserPromptSubmit dispatcher timeout is >= 15000ms', async () => {
+  it('UserPromptSubmit dispatcher timeout is >= 15s (host unit is seconds)', async () => {
     const fs = await import('node:fs/promises');
     const hooksJsonPath = path.join(PLUGIN_ROOT, 'hooks', 'hooks.json');
     const cfg = JSON.parse(await fs.readFile(hooksJsonPath, 'utf-8'));
@@ -152,6 +152,6 @@ describe('hooks.json: UserPromptSubmit timeout cold-start tolerance', () => {
       .flatMap((m) => m.hooks || [])
       .find((h) => typeof h.command === 'string' && h.command.includes('_userprompt-dispatcher.js'));
     expect(dispatcherEntry, 'dispatcher entry must exist in hooks.json').toBeTruthy();
-    expect(dispatcherEntry.timeout).toBeGreaterThanOrEqual(15000);
+    expect(dispatcherEntry.timeout).toBeGreaterThanOrEqual(15);
   });
 });

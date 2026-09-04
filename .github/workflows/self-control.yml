@@ -166,6 +166,7 @@ jobs:
           path: |
             plugins/artibot/_reports/
             plugins/artibot/runtime/decision-trail/
+            .artibot/runtime/decisions/
           if-no-files-found: ignore
           retention-days: 14
 

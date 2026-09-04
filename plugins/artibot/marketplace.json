@@ -104,7 +104,7 @@
     "mcpServer": "./.well-known/mcp-server.json",
     "agents": {
       "directory": "./agents/",
-      "count": 28
+      "count": 30
     },
     "skills": {
       "directory": "./skills/",
