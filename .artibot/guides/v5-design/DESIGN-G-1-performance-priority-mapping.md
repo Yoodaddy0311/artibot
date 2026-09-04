@@ -9,9 +9,9 @@
 
 | 값 | 매핑 | 근거 등급 | 한 줄 요약 |
 |---|---|---|---|
-| `fast` | **`maximum`** | **강**(문서 2홉, 코드 1곳 이미 같은 해석) | P02:73 "최대한 빨리 정확하게 → `autopilot --fast`" + DESIGN:129 "maximum(`autopilot --fast`)" |
+| `fast` | **`maximum`** | **강**(문서 2홉, 코드 1곳 이미 같은 해석) | P02:72 "최대한 빨리 정확하게 → `autopilot --fast`" + DESIGN:129 "maximum(`autopilot --fast`)" |
 | `speed_accuracy` | **`maximum`** | 중(토큰 구성 일치 — **추론**) | HARD:125 예시값 + policy:70 `autopilot_fast.optimization.primary: [time_to_verified_outcome, accuracy]` = DESIGN:129 maximum 의 목적함수 그대로 |
-| `maximum_performance` | **`maximum`** | 중(산문 2홉 — **추론**) | P02:74 "토큰 아끼지 말고 → high-resource mode" + README:58/06:60 "large envelope 모드 = `autopilot --fast`·`split`" 중 split 은 토폴로지라 제외 |
+| `maximum_performance` | **`maximum`** | 중(산문 2홉 — **추론**) | P02:73 "토큰 아끼지 말고 → high-resource mode" + README:58/06:60 "large envelope 모드 = `autopilot --fast`·`split`" 중 split 은 토폴로지라 제외 |
 | `quality` | **`balanced`** | 약(**판단**) | 설계에 "정확도만, 속도 무관" 가중치가 없다. policy:38-39 normal 목적함수에 `quality_constraint: no_quality_regression` 이 이미 붙어 있어 balanced 가 최근접 |
 | `economy` | **`balanced`** | **근거 없음 — 판단**, **손실 매핑** | 설계에 "balanced 보다 싼" 가중치·예산 상한이 없다. 흡수하되 손실임을 reason 문자열과 문서에 남긴다 |
 
@@ -101,7 +101,7 @@ else                      → { normalized:null, reason:'unknown: …' }
 1. `package/02_PRODUCT_UX_NATURAL_LANGUAGE_RUNTIME.md:73` — "최대한 빨리 정확하게" → "consider `autopilot --fast`".
 2. `ARTIBOT-5.0-DESIGN.md:129` — "maximum(`autopilot --fast`)" — 설계가 maximum 을 `autopilot --fast` 의 성능 의도로 **명명**.
 3. `execution-profile.js:326` 플래그 어댑터 `{ flag:'fast', priority:'maximum' }` — 코드가 이미 `--fast` ≡ `maximum` 으로 쓴다.
-4. `interpreter.js:158-163` — 인터프리터가 `fast` 축값을 P02:73 행(=`autopilot --fast`)으로 해석.
+4. `interpreter.js:158-163` — 인터프리터가 `fast` 축값을 P02:72 행(=`autopilot --fast`)으로 해석.
 
 2홉(P02 산문 → 커맨드 → 설계 어휘)이지만 각 홉이 문서 원문이고 코드 2곳이 같은 해석을 이미 쓴다. `execution-profile.js:50-52` 가 "tempting synonym" 으로 경계한 것은 `maximum_performance`·`speed_accuracy` 이지 `fast` 가 아니다.
 
@@ -117,9 +117,9 @@ else                      → { normalized:null, reason:'unknown: …' }
 
 1. `package/02:74` — "토큰 아끼지 말고 제대로 처리해" → "high-resource mode". 이름 붙은 모드가 아니다.
 2. `package/README.md:58` — "`autopilot --fast` and `split` are intentional exceptions to the ordinary 'minimum sufficient resource' principle … use a large token/resource envelope"; `package/06_MODEL_ROUTING_ECONOMICS.md:60` 동문.
-3. `interpreter.js:325-329` `maximum_performance` cue 에 '토큰 아끼지 말고' 가 있고 `:162-165` 주석이 P02:74 행을 이 값의 근거로 든다.
+3. `interpreter.js:325-329` `maximum_performance` cue 에 '토큰 아끼지 말고' 가 있고 `:162-165` 주석이 P02:73 행을 이 값의 근거로 든다.
 
-체인: `maximum_performance` ≡ P02:74 "high-resource mode" ≡ README:58 "large envelope 모드" = {`autopilot --fast`, `split`}. 둘 중 `split` 은 토폴로지(창을 사람이 연다 — DESIGN:202)이고 `/split` 플래그 어댑터(`:325`)가 별도로 잡으므로, 성능 의도로서는 `maximum`. 산문 2홉이라 추론 등급.
+체인: `maximum_performance` ≡ P02:73 "high-resource mode" ≡ README:58 "large envelope 모드" = {`autopilot --fast`, `split`}. 둘 중 `split` 은 토폴로지(창을 사람이 연다 — DESIGN:202)이고 `/split` 플래그 어댑터(`:325`)가 별도로 잡으므로, 성능 의도로서는 `maximum`. 산문 2홉이라 추론 등급.
 
 ### 2.4 `quality → balanced` (근거 약 — 판단)
 
@@ -155,9 +155,9 @@ else                      → { normalized:null, reason:'unknown: …' }
  * enum addition, so adding a ninth schema value without a row here is loud.
  */
 export const PRIORITY_ALIASES = Object.freeze({
-  fast:                { to: 'maximum',  grade: 'attested',  cite: 'P02:73 + DESIGN:129' },
+  fast:                { to: 'maximum',  grade: 'attested',  cite: 'P02:72 + DESIGN:129' },
   speed_accuracy:      { to: 'maximum',  grade: 'inferred',  cite: 'HARD:125 + policy.example.yaml:70' },
-  maximum_performance: { to: 'maximum',  grade: 'inferred',  cite: 'P02:74 + package/README.md:58' },
+  maximum_performance: { to: 'maximum',  grade: 'inferred',  cite: 'P02:73 + package/README.md:58' },
   quality:             { to: 'balanced', grade: 'judgment',  cite: 'policy.example.yaml:39 quality_constraint' },
   economy:             { to: 'balanced', grade: 'judgment',  cite: 'no source — LOSSY, see G-1b', lossy: true },
 });

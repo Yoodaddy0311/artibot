@@ -27,7 +27,7 @@
 
 리더가 랜딩마다 손으로 재던 6개를 기계가 한 번에 잰다(Ontology 6랜딩 × ~4 왕복 실측; 수동 grep 이 실제로 절대경로 인용 2건을 잡았다).
 `node <pluginRoot>/scripts/split/land.mjs <limb> [--base <ref>] [--plan <path>] [--json] [--pr-body <out>]` → `lib/git/limb-landing-check.js#checkLimbLanding` 이 6행 표를 낸다:
-`trailer`(first-parent 규칙) · `ownership`(`git diff --name-only <base>...<branch>` ⊆ 계획의 `affectedPaths` + `.artibot/split/<limb>/**`) · `binary`(`--numstat` 의 `-\t-` 0건) · `citations`(추가된 줄에 `.artibot/split/` 이나 `<드라이브>:/Users/` 절대경로 인용 0건) · `merge-dry-run`(`lib/git/merge-preflight.js#mergeTreePair`) · `behind-base`(정보만).
+`trailer`(first-parent 규칙) · `ownership`(`git diff --name-only -z <base>...<branch>` ⊆ 계획의 `affectedPaths` + `.artibot/split/<limb>/**` — **`-z` 는 load-bearing이다**: 한글 리포에서 `core.quotepath` 기본값이 켜져 있어 `-z` 없이는 git 이 경로를 C-quote 로 감싸고, 파서가 그것을 allowlist 밖 경로로 읽어 **거짓 FAIL** 을 낸다. 출력은 개행이 아니라 **NUL 로 분리**해 파싱한다. 실측 2026-09-04, 후속 19 #1) · `binary`(`--numstat` 의 `-\t-` 0건) · `citations`(추가된 줄에 `.artibot/split/` 이나 `<드라이브>:/Users/` 절대경로 인용 0건) · `merge-dry-run`(`lib/git/merge-preflight.js#mergeTreePair`) · `behind-base`(정보만).
 - `PASS` → exit 0, **승인이 아니다** — PR 본문 골격의 `## 검수` 는 검수자/리더가 쓰는 칸이고 `## 게이트` 수치는 자리표시자다.
 - `FAIL` → 빨간 행의 `detail` 을 그대로 줄기 창에 `SendMessage`.
 - `UNSUPPORTED` → git < 2.38, 직렬 랜딩으로 강등(절대 PASS 아님).

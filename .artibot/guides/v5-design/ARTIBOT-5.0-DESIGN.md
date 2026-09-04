@@ -916,6 +916,45 @@ PRD-SPLIT 에 수행한 갱신: frontmatter `linked_adrs` → ADR-006~010 · `su
 `l4-f10` · `l3-f30-g1` · `p2-f12-f19` · `l2-probe`. **`CHANGELOG` 는 통합 시 리더가 일괄**(줄기별 기록 금지).
 ⚠️ 이 4줄기의 **파일 소유권은 겹친다** — 아래 「핸드오프 전제 정정 3건」(c) 참조.
 
+---
+
+#### 부록 0-2 후속(2)-b. 오너 결정 3건 + 위임 1건 (2026-09-04 13:3x 확정)
+
+**결정자: 오너 · 결정일: 2026-09-04 13:1x~13:5x KST · 기록: 리더 경유 기록자 반영.**
+위 4건과 같은 규칙으로 읽는다 — **결정 문구는 오너 원장 그대로**, 미특정 임계는 `미확인`.
+아래 3건은 `.artibot/split/next-batch-plan.md` §4 의 (D)-1·(D)-2·(D)-4 에 대한 답이고,
+(D)-3 은 **정본 `:913` 이 이미 답을 갖고 있어 질의하지 않았다**(각주 참조).
+
+| ID | 오너 결정 (2026-09-04 13:3x 확정) | 근거/단서(오너 제시) | 재결정 조건 |
+|---|---|---|---|
+| D-1 훅 수리 예외 (13:3x) | **"예, 버그 수리 예외로 착수".** gotcha #18/#22 의 방어선 — `scripts/hooks/git-autopilot-session.js` 에 `isSplitLimbBranch → stay put` 예외를 넣는 것을 **"코드는 설계안" 명시 예외 4번째**로 인정한다(선례 3건: ensureADR · decisions 경로 · payload 키 `:686`). 근본 수리인 **테스트 git 샌드박스**(`tests/dispatcher/sessionstart-dispatcher.test.js` 의 `cwd` 를 임시 리포로)는 프로덕션 코드 0 이라 애초에 예외가 불필요하다 | 사고 **실측 4/4**(4 worktree 전부 브랜치 이동 · `status` 에서 줄기 소멸 · land `no-commits` 거짓 미완료). 1훅 1분기, revert 1커밋, 기존 파이어월 확장으로 게이트 | 없음 — 확정 |
+| D-2 L2 D1 착수 (13:3x) | **"예, 2차 배치에 편입".** `ROUTE-RECEIPT-PRETOOLUSE-DESIGN.md` 의 **D1 구현**(PreToolUse(Agent) receipt + SubagentStart `route.bound`)을 2차 배치 줄기로 착수한다. `config` 키·`/doctor` Check 10·`lib/replay` 조인은 **D1 밖** | 조건부 승인(`:681` "설계안이 오너 승인을 받으면 구현 착수")의 **조건이 충족됐다** — D0 프로브 판정 **D1-go**(l2-probe 첫 커밋 `5b44b803`, 2026-09-04 12:53, host **2.1.260**, 3시나리오 **6/6** 발화, 픽스처 `tests/hooks/fixtures/host-payloads/PreToolUse.Agent.json`) | 없음 — 확정. **주의**: 설계 전제였던 host 2.1.259 보다 **1패치 위**에서 잰 값이다(gotcha #19) |
+| D-4 모델 정책 설계안 (13:3x) | **"설계안 작성 지시".** 모델 정책 **역할 오버라이드** 설계안을 작성한다(코드 0). **산출 완료** — `DESIGN-MODEL-POLICY-role-override.md` **174줄**(기록자 `wc -l` 확인). 그 문서 **§5 「오너 결정 필요 항목」 5건은 승인 대기** | 리포 기록 **0건**이었다(`역할 오버라이드|role.?override|모델 정책.*오버` 전역 grep) — 방향이 오너 세션에만 있어 설계안이 대신 적을 수 없었다 | **§5 의 5건이 승인되면** 구현 착수. 그 전까지 코드 0 |
+| (위임) 커밋·푸시·배포 (13:1x·13:5x) | **오너 원문 ① 13:1x "앞으로 커밋 푸쉬 배포 등등의 작업도 너가 권장사항으로 중간중간 다 진행해줘" ② 13:5x "당분간 의사결정 못함, 2시간 부재, 권장사항으로 마무리"** | 오너 부재 구간의 진행을 막지 않기 위함 | 오너 복귀 시 위임 범위 재확인 — 기한·범위를 오너가 특정하지 않았다(`미확인`) |
+
+**위 위임에 따른 리더 권장 채택 (등급: 권장 채택 — 오너 부재, 미질의)**
+
+아래는 **오너가 답한 결정이 아니라** 위 위임을 근거로 리더가 고른 것이다. 등급을 섞지 마라.
+
+| # | 리더 권장 채택 | 근거 | 되돌리기 |
+|---|---|---|---|
+| 1 | 2차 배치를 **`/split`(창 4개) 대신 `/team` + `isolation: worktree` 팀원**으로 실행 | `/split` 의 `open` 단계는 **사람이 창을 연다**(런 1·2호 모두 humanWait 구간). 오너 2시간 부재 중에는 그 단계에서 멈춘다 | 오너 복귀 후 `/split` 로 전환 가능 — 줄기 정의·소유권 표는 그대로 재사용 |
+| 2 | integrate **확인 프롬프트 생략**, 세그먼트는 **0길이**로 남김 | 위임 ①. 1차 배치에서 같은 처리를 했고 텔레메트리에 `confirm-integrate` 1ms 로 남았다(gotcha #29) | 규약화는 `split.md` §integrate **미편입** — 지금은 런별 판단 |
+| 3 | **릴리스·태그·`plugin update`·사용자 `settings.json` 은 하지 않는다** | 위임 문구는 "커밋·푸시·배포"이나, 이 넷은 **되돌리기 비용이 다른 등급**이다 — 릴리스·태그는 외부 가시, `plugin update` 는 라이브 훅 교체(후속 18), 사용자 settings 는 오너 개인 설정(gotcha #20 에서 이미 갱신 주체 미확인 사건이 있었다) | 해당 없음(하지 않음) |
+
+**각주 — (D)-3 은 질의하지 않았다. 정본 `:913` 이 답이다.**
+2차 배치 초안 §4 의 (D)-3("후속 19 나머지를 2차에 넣는가")은 **오너 결정 항목이 아니다** —
+`:913` 「후속 19 범위」행이 이미 "나머지 자리는 **후속 배치**" 로 결정했고, 2차가 그 후속 배치다.
+남아 있던 것은 **"#7·#10 제외" 를 실행 가능하게 만드는 파일명 확정**이었고, 이는 오너가 아니라
+**리더가 확정할 사실 문제**다(출처: followup 팀원의 16자리 표).
+
+- **#7 = `plugins/artibot/scripts/hooks/git-autopilot-guard.js:86`** — 제외. `['diff','--name-only','HEAD',trackingRef,'--',filePath]` 로 **경로 1개를 `--` 뒤에 스코프**해 질의하므로 출력은 그 경로이거나 빈 문자열이고, 소비는 **존재 판정**이다. C-quote 가 걸려도 판정이 뒤집히지 않는다. (기록자 확인: argv 와 `--` 스코프까지 직접 읽음. **반환값을 소비하는 줄은 미열람** — 리더 판정을 그대로 옮긴다.)
+- **#10 = `plugins/artibot/scripts/hooks/session-notes.js:139`** — 제외. `:140-141` 이 `raw.split('\n').filter(Boolean).length` 로 **개수만** 쓴다(기록자 직접 확인). C-quote 는 한 줄을 다른 문자열로 만들 뿐 **줄 수를 바꾸지 않는다** → 결과 불변.
+- **따라서 2차 `p19-rest` 의 자리는 12개**(16 − 1차 2 − 제외 2): `lib/git/conflict-detector.js:82` · `:142` · `lib/git/merge-preflight.js:207` · `lib/handoff/handoff-builder.js:425` · `scripts/hooks/dev-verify-gate.js:124-125` · `scripts/hooks/git-autopilot-merge.js:47` · `scripts/hooks/image-cleanup.js:85` · `scripts/hooks/stop-review-gate.js:79-80`(파서 재작성 + 픽스처 6곳) · `tests/firewall/cowork-plugin-zip-drift.test.js:297` · `tests/firewall/gitignore-boundary.test.js:176` · `.github/workflows/plugin-validate.yml:61` · `plugins/artibot-cowork/scripts/release.js:158`.
+- **미확인**: 12자리 각각이 실제로 한글 경로에서 깨지는지는 **자리별로 확인하지 않았다**. 실증은 여전히 `limb-landing-check.js:427` **1건뿐**(`:945`).
+
+---
+
 
 **후속 12 갱신(2) — 실발생 3회째 (followup 실측, 리더 재측정 2026-09-04 11:5x · 기록자 재현 11:39)**
 

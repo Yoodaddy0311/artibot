@@ -152,7 +152,9 @@ wins"*. 즉 교차 세션 지시가 **오류 없이** 자기 세션 팀원에게
 Spawn ALL teammates in a single message (parallel):
 ```
 Agent(subagent_type="artibot:{agent-type}", name="team-{task-slug}-{sid}-{role}",
-      /* model: model-policy 해석 — 구현/검토 역할 모두 frontier 티어 (fable 마이그레이션 이후) */
+      /* model: model-policy 해석 — 2티어(2026-09-02 오너 결정). 구현 팀원 = build 티어(opus),
+         검수 팀원 = resolveModel(agentName, { role: 'review' }) → fable.allowlist 8종만 fable,
+         그 밖(구현 에이전트)과 security-reviewer 는 opus. 상세는 §Teammate Rules & Model Policy */
       prompt="[DEV Protocol 준수]\n\n작업:\n{specific work unit}\n\n{보고 계약}")
 ```
 
