@@ -15,6 +15,7 @@ import { parseJSON, readStdin } from '../utils/index.js';
 import { createErrorHandler } from '../../lib/core/hook-utils.js';
 import { autoResolveAll } from './git-autopilot-merge.js';
 import { isAutopilotAllowed } from '../../lib/autopilot/repo-identity.js';
+import { isSplitLimbBranch } from '../../lib/git/repo-identity.js';
 import { resolveBaseBranch } from '../../lib/git/resolve-base.js';
 import { gitPath } from '../../lib/git/git-dir.js';
 import { isMainEntry } from './_main-entry.js';
@@ -239,6 +240,8 @@ const RELOCATABLE_BRANCH_NAME = /^[A-Za-z0-9_-]+$/;
  *     otherwise have HEAD silently yanked away on every SessionStart, risking
  *     commits landing on a stale sibling base.
  *   - Name allowlist: see {@link RELOCATABLE_BRANCH_NAME}.
+ *   - Split limb: a `/split` limb branch belongs to another provider and is
+ *     the ref its own status/landing machinery reads by name. See below.
  *
  * @param {string} cwd
  * @param {string} branchPrefix
@@ -251,6 +254,24 @@ function ensureAutopilotBranch(cwd, branchPrefix, currentBranch, config) {
 
   // Only branch names the hook may take over — everything else stays put.
   if (!RELOCATABLE_BRANCH_NAME.test(currentBranch)) return currentBranch;
+
+  // A `/split` limb branch stays put. The name gate above cannot catch these:
+  // `worktree-split-<repo-short>-<limb>` is pure `[A-Za-z0-9_-]`, so it is
+  // mechanically derivable and passes. But derivability is not ownership —
+  // the limb branch is created by the built-in worktree provider and read BY
+  // NAME by `/split status` and `land` (`lib/git/repo-identity.js
+  // #isSplitLimbBranch`), which reject the `artibot/`-prefixed form. Measured
+  // 2026-09-04: a full-repo `vitest` run fired this hook inside four `/split`
+  // worktrees and relocated all four limbs, after which `status` showed no
+  // limbs and `land` reported `no-commits` on finished work
+  // (`.artibot/split/gotchas.md` #18, #22).
+  //
+  // Asked semantically rather than added to RELOCATABLE_BRANCH_NAME on
+  // purpose: that regex answers "is this name derivable", and the naming rule
+  // lives in one module. A second copy of the shape here would drift from it.
+  // Note this is narrower than the prefix — a plain `worktree-probe1` from
+  // `claude --worktree probe1` is not a limb and still relocates.
+  if (isSplitLimbBranch(currentBranch)) return currentBranch;
 
   // Stay put when already on the canonical base/default branch.
   const base = resolveBaseBranch(cwd, config);

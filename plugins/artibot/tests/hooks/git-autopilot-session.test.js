@@ -480,6 +480,46 @@ describe('git-autopilot-session', () => {
     expect(commands.some((c) => c.includes('checkout'))).toBe(false);
   });
 
+  // -------------------------------------------------------------------------
+  // /split limb branches — measured incident, 2026-09-04 (gotchas #18, #22)
+  //
+  // A limb branch is `worktree-split-<repo-short>-<limb>`, which is pure
+  // `[A-Za-z0-9_-]` and therefore PASSES the RELOCATABLE_BRANCH_NAME allowlist:
+  // the name gate cannot see it. Four of four `/split` worktrees had HEAD
+  // relocated to `artibot/worktree-split-…` by a SessionStart fired from a
+  // full-repo `vitest` run. `isSplitLimbBranch` then rejected the relocated
+  // name, so `/split status` reported every limb as missing and `land` read
+  // finished work as `no-commits`.
+  //
+  // The check is semantic, not lexical — it asks `lib/git/repo-identity.js`
+  // whether this is a limb, rather than adding another shape to the regex.
+  // The regex answers "is this name mechanically derivable"; ownership is a
+  // different question and belongs to the module that defines the naming.
+  // -------------------------------------------------------------------------
+
+  it.each([
+    ['worktree-split-artibot-l4-f10'],
+    ['worktree-split-artibot-test-git-sandbox'],
+  ])('does not relocate HEAD off the /split limb branch %s', async (branch) => {
+    const commands = await runOnBranch(branch);
+    const logs = stderrSpy.mock.calls.map(([msg]) => msg).join('');
+
+    expect(logs).not.toContain('Switched to autopilot branch');
+    expect(commands.some((c) => c.includes('checkout'))).toBe(false);
+    // The relocated name from the incident must never be referenced.
+    expect(commands.some((c) => c.includes(`artibot/${branch}`))).toBe(false);
+  });
+
+  it('still relocates a plain built-in worktree branch (negative control)', async () => {
+    // `worktree-probe1` is what `claude --worktree probe1` creates outside
+    // /split. It is NOT a limb (`isSplitLimbBranch` is false for it), so the
+    // new exception must not swallow it — otherwise the guard would be a
+    // blanket "never relocate anything starting with worktree-", which is a
+    // different and much broader change than the one being made.
+    const commands = await runOnBranch('worktree-probe1');
+    expect(commands.some((c) => c.includes('checkout -b artibot/worktree-probe1'))).toBe(true);
+  });
+
   it('does not relocate HEAD when detached (empty branch name)', async () => {
     const commands = await runOnBranch('');
     const logs = stderrSpy.mock.calls.map(([msg]) => msg).join('');
