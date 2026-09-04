@@ -212,6 +212,54 @@ function checkBracketMismatch(absPath, ext) {
 
 
 /**
+ * Strip block-comment text from one line, carrying the open/closed state
+ * across lines. Returns the code that remains on the line (possibly empty)
+ * and the state to carry into the next line.
+ *
+ * Rules, in order:
+ *   1. Inside an open block: drop everything up to the closer (or the whole
+ *      line when there is none).
+ *   2. A whole-line `//` comment yields nothing — and a slash-star inside it
+ *      is prose, not an opener (`// … autopilot/* artifacts`).
+ *   3. Closed spans (open and close on the same line, alone or after code)
+ *      are removed wherever they sit. This is the retro #44/#45 fix: the
+ *      previous heuristic matched such a line neither as "opens a block" nor
+ *      as "inside a block", so a TODO/FIXME inside it was reported.
+ *   4. An unterminated opener starts a block ONLY when it begins the line
+ *      (optional whitespace, then slash-star), as the previous heuristic
+ *      did. A slash-star later in a line is far more often a glob (the
+ *      star-star-slash-star of a file pattern, a `docs/PRD/` wildcard) than
+ *      a comment: opening on it swallowed 242 real code lines in 12 files and
+ *      left 6 files open to EOF (lib+scripts, 509 files, 2026-09-04
+ *      17:28Z) — so a mid-line unterminated opener is deliberately NOT
+ *      supported, and the code before/after it is scanned as code.
+ *
+ * Still a heuristic: a line that BEGINS with a slash-star inside a template
+ * string opens a block here, exactly as before.
+ *
+ * Exported for the self-check in tests/hooks/stop-review-gate.test.js, which
+ * runs it over lib+scripts and asserts no file is left open at EOF.
+ *
+ * @param {string} line
+ * @param {boolean} inBlock — true when a block comment is open from a prior line
+ * @returns {{ code: string, inBlock: boolean }}
+ */
+export function stripBlockComments(line, inBlock) {
+  let text = line;
+  if (inBlock) {
+    const close = text.indexOf('*/');
+    if (close < 0) return { code: '', inBlock: true };
+    text = text.slice(close + 2);
+  }
+  if (/^\s*\/\//.test(text)) return { code: '', inBlock: false };
+  // Closed spans on this line (there may be several).
+  text = text.replace(/\/\*[\s\S]*?\*\//g, '');
+  // Unterminated opener at the start of the line starts a block.
+  if (/^\s*\/\*/.test(text)) return { code: '', inBlock: true };
+  return { code: text, inBlock: false };
+}
+
+/**
  * Check for pattern violations (console.log, TODO/FIXME).
  * @param {string} content
  * @param {string} filename
@@ -231,16 +279,10 @@ function checkPatternViolations(content, filename) {
   let inBlockComment = false;
 
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    // Track block comment state (simple line-level heuristic)
-    if (inBlockComment) {
-      if (/\*\//.test(line)) inBlockComment = false;
-      continue;
-    }
-    if (/^\s*\/\*/.test(line) && !/\*\//.test(line)) {
-      inBlockComment = true;
-      continue;
-    }
+    const stripped = stripBlockComments(lines[i], inBlockComment);
+    inBlockComment = stripped.inBlock;
+    const line = stripped.code;
+    if (line.trim() === '') continue;
     // Skip JSDoc continuation lines and single-line comments
     if (jsdocLine.test(line) || singleLineComment.test(line)) continue;
     if (consolePattern.test(line)) consoleHits.push(i + 1);

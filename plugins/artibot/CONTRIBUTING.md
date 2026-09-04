@@ -457,7 +457,7 @@ Add your hook to `hooks/hooks.json`:
       "hooks": [{
         "type": "command",
         "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/my-pre-write-hook.js",
-        "timeout": 5000
+        "timeout": 5
       }]
     }
   ]
@@ -470,8 +470,8 @@ Add your hook to `hooks/hooks.json`:
 |-------|------|-------------|
 | `type` | `"command"` \| `"prompt"` \| `"agent"` | Hook execution type |
 | `command` | `string` | Command to run (`${CLAUDE_PLUGIN_ROOT}` is auto-resolved) |
-| `timeout` | `number` | Max execution time in milliseconds |
-| `matcher` | `string` | Tool name filter for PreToolUse/PostToolUse (regex-like, pipe-separated) |
+| `timeout` | `number` | Max execution time in **seconds** (host default for `command` hooks is 600). Earlier revisions of this table said "milliseconds" — that was wrong: `5000` meant 5,000 s, not 5 s. Every entry in `hooks/hooks.json` is in seconds; `tests/hooks-schema-shape.test.js` rejects values that only make sense as milliseconds |
+| `matcher` | `string` | Tool name filter for PreToolUse/PostToolUse: an exact tool name (`Bash`) or an unanchored JS regex (`Write\|Edit`). **There is no expression syntax.** Measured on host 2.1.260 (2026-09-04, headless `claude -p`, both `--settings` and a plugin's `hooks.json`): `tool == "Bash"` never fires, and `tool == "Write" \|\| tool == "Edit"` fires on **every** tool (Bash, Read, …) because the regex has an empty alternative. Because the regex is unanchored, `Write\|Edit` also matches `MultiEdit` and `NotebookEdit` (inferred from the host rule, not measured) — intended, since those write files too. `tests/hooks-schema-shape.test.js` allowlists the plain form only |
 | `once` | `boolean` | If `true`, the hook runs only once per session (e.g., SessionStart) |
 
 ### Hook Development Rules / 훅 개발 규칙
