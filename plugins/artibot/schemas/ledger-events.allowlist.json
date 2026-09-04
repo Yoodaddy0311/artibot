@@ -36,6 +36,10 @@
       "INTENT_REVIEW_REQUIRED",
       "BLOCK"
     ],
+    "claim_nature": [
+      "process",
+      "judge"
+    ],
     "verify_result": [
       "pass",
       "fail",
@@ -83,6 +87,7 @@
     "topology_mode": "run-ledger.schema.yaml:17 (6종, verbatim).",
     "plan_mode": "lane 6 §5-② row 3.",
     "review_verdict": "design §3.4 'verdict 스키마 v2 = PASS|REPAIR_REQUIRED|REPLAN_REQUIRED|INTENT_REVIEW_REQUIRED|BLOCK (Hardening §15 로 확정)'. The vocabulary and the adapter from the 4 legacy vocabularies are owned by T-17; this file only records which values a ledger line may carry.",
+    "claim_nature": "DESIGN-MODEL-POLICY-role-override.md §4.1 stratifies the refutation measurement by '작업 성격(process/judge)'. Fixed by owner decision MP-1 (ARTIBOT-5.0-DESIGN.md 부록 0-2 후속(3), 2026-09-04): '분리. 태깅은 작업 단위가 아니라 산출물(판정 문장) 단위' -- so one worker's report is `judge` because it CONTAINS a judgement, not because the assignment was called judgement work. A report can therefore be tagged only after it exists, which is why `nature` is optional on the event rather than required. `process` is mechanical grep / measurement; `judge` is consistency ruling, refutation, decision. The two values are the whole vocabulary: there is deliberately no `unknown` member, because an untagged report must be DROPPED from the denominator (§4.4 #4 '빈 값은 null 로 남기고 분모에서 뺀다') and a third enum value would let it be counted as its own stratum instead.",
     "verify_result": "run-ledger.schema.yaml:41 gives pass|fail. `unmeasured` is added from design §3.4 'unified-verifier status: PASS|FAIL|UNMEASURED, UNMEASURED 가 1급 상태 -- 재지 못한 층을 PASS 라 부르지 않는다'. Without it an unmeasured layer has no representable value and would have to be written as a false pass or dropped.",
     "mission_status": "package-v1.1/16_STATE_SCHEMA.yaml:27-35 (7종). Distinct from the Task Graph's 8 states (v1.1 7 + cancelled, Hardening §7-8), which T-14 owns.",
     "human_resolved_kind": "design §8.2 §19 'human.resolved{kind: correction|decision|approval}'. Scheduled for Shadow (§8.4), so declared but not required here.",
@@ -331,6 +336,46 @@
       ],
       "v1_1_example": true,
       "spec": "lane 6 §5-② #12 with the verdict vocabulary taken from design §3.4 v2 (5 values) rather than lane 6's 3. The v1.1 §11 example writes lowercase 'pass', which is one of the 4 legacy vocabularies T-17's adapter folds into this one. verification_id joins review.md, outcome.md and the ledger (design §3.4 §5.5)."
+    },
+    "review.claim_audit": {
+      "required": [
+        "subject_agent_type",
+        "claims_total",
+        "claims_refuted"
+      ],
+      "fields": {
+        "subject_agent_id": {
+          "type": "string",
+          "description": "The reviewed agent's spawn id, when the caller has one. Not required: the spawn ledger has no mission or work-item join key (measured 2026-09-02, lib/learning/ledger/spawn-ledger.js#normalizeRecord), so an id is often unavailable and requiring it would refuse every line the Observe phase can produce."
+        },
+        "subject_model": {
+          "type": "string",
+          "description": "The model the REVIEWED agent ran on. Optional, and a line that does not know it OMITS THE KEY -- it does not write null. `type: \"string\"` is what makes that the only representable choice: the writer's matchesType would reject null, so 'unknown' cannot be smuggled in as a value that later aggregates as if it were a model. See this event's `spec` for why the value is absent before L2 D1."
+        },
+        "subject_agent_type": {
+          "type": "string"
+        },
+        "nature": {
+          "enum_ref": "claim_nature",
+          "description": "Stratum for the reviewed report. Optional by 설계 §4.4 #4: an untagged report leaves this key absent and is dropped from the denominator rather than guessed into a stratum."
+        },
+        "claims_total": {
+          "type": "integer",
+          "description": "Denominator. `integer` only -- the >= 0 bound and the claims_refuted <= claims_total relation are NOT enforced here, because lib/runtime/ledger-schema.js#matchesType checks Number.isInteger and nothing else. lib/review/independent-reviewer.js#parseClaimAudit enforces both before a line is ever built; a line assembled by hand can still carry -1 past this file."
+        },
+        "claims_refuted": {
+          "type": "integer"
+        },
+        "evidence_refs": {
+          "type": "array",
+          "description": "Also this file's `limits.overflow_field`: when the line exceeds line_max_bytes the writer folds non-required data keys into it (see the line_cap note)."
+        }
+      },
+      "sources": [
+        "reviewer",
+        "supervisor"
+      ],
+      "spec": "DESIGN-MODEL-POLICY-role-override.md §4.2 option (iii), APPROVED as owner decision MP-4 (ARTIBOT-5.0-DESIGN.md 부록 0-2 후속(3), 2026-09-04): '측정 저장소 어휘 review.claim_audit +1 -- 예. L2 D1 착지 선행'. Records the measurement of §4.1, 'how many of a worker's claims were overturned in review': numerator claims_refuted, denominator claims_total, stratified by subject model x nature x agent definition. §4.1 also forbids the numerator alone ('분모 없는 분자는 쓰지 않는다'), which is why both counts are required together and neither is optional. The counting rule is §4.4 #2 and it is a rule for the WRITER of the document, not something this file can check: one file:line citation = 1 claim, one number = 1 claim, one judgement sentence = 1 claim. Emitted from the structured claim_audit block of a Phase 4.5 reviewer's answer, parsed by lib/review/independent-reviewer.js#parseClaimAudit. subject_model IS EMPTY UNTIL THE L2 D1 ROUTE-RECEIPT BIND LANDS -- SubagentStart carries no model (설계 §1.3), so the value comes from joining route.selected{stage:'pre'}.tool_input.model to route.bound.agent_id, and until that join exists a conforming line simply omits the key."
     },
     "verify.completed": {
       "required": [

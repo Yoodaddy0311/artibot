@@ -87,9 +87,9 @@ describe('agent-registry', () => {
   });
 
   describe('listAgents', () => {
-    it('returns exactly 28 agent names', async () => {
+    it('returns exactly 30 agent names', async () => {
       const names = await listAgents();
-      expect(names).toHaveLength(28);
+      expect(names).toHaveLength(30);
       expect(names).toContain('orchestrator');
       expect(names).toContain('backend-developer');
       expect(names).toContain('frontend-developer');

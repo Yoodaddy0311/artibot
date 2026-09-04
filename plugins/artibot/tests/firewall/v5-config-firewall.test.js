@@ -19,7 +19,7 @@
  *     `autopilot.fast.*`·`split.*`·`phaseRoles.review` 를 개명하면 런타임이 아니라
  *     게이트가 깨진다. 값 자체는 단언하지 않는다 — 그건 중복 정의의 재발이다.
  *  C. **실효 라우팅 변화 0.** `low` 버킷이 `resolveModel` 결과를 바꾸지 않음을
- *     28 에이전트 전건으로 확인한다. 선언만으로 라우팅이 움직이지 않는다는 것이
+ *     30 에이전트 전건으로 확인한다. 선언만으로 라우팅이 움직이지 않는다는 것이
  *     Phase 0 "observe/기록만" 의 전부다.
  *  D. **기존 키 무변경.** 신설 키가 참조하는 기존 값들이 이 커밋에서 바뀌지 않았음을
  *     고정한다(§3.5 는 참조를 요구했지 값 변경을 요구하지 않았다).
@@ -154,10 +154,11 @@ const TOPOLOGY_MODES = Object.freeze(['solo', 'subagent', 'team', 'autopilot', '
  */
 const EXPECTED_TOP_LEVEL_COUNT = 31;
 
-/** 정책 버킷이 결정하는 28 에이전트 전건 + 티어 기대값(현행 = 변화 0 기준선). */
+/** 정책 버킷이 결정하는 30 에이전트 전건 + 티어 기대값(현행 = 변화 0 기준선). */
 const FABLE_AGENTS = Object.freeze([
   'orchestrator', 'architect', 'planner', 'code-reviewer',
   'spec-reviewer', 'quality-reviewer', 'llm-architect', 'repo-benchmarker',
+  'investigator', 'auditor',
 ]);
 const OPUS_AGENTS = Object.freeze([
   'security-reviewer', 'frontend-developer', 'backend-developer', 'tdd-guide',
@@ -279,7 +280,7 @@ describe('agents.modelPolicy.low — 선언만, 실효 라우팅 변화 0', () =
     expect(policy).not.toHaveProperty('low');
   });
 
-  it('low 를 지워도 28 에이전트 전건의 해석 결과가 같다 (실효 0 의 직접 증명)', () => {
+  it('low 를 지워도 30 에이전트 전건의 해석 결과가 같다 (실효 0 의 직접 증명)', () => {
     const withoutLow = structuredClone(config);
     delete withoutLow.agents.modelPolicy.low;
     const all = [...FABLE_AGENTS, ...OPUS_AGENTS];
@@ -320,7 +321,7 @@ describe('신설 키가 참조하는 기존 값은 이번 변경에서 건드리
     expect(resolveDotPath(config, dotted)).toEqual(value);
   });
 
-  it('fable allowlist 는 8종 그대로다', () => {
+  it('fable allowlist 는 10종이다 (MP-3: investigator·auditor 2종 추가)', () => {
     expect(config.agents.modelPolicy.fable.allowlist).toEqual([...FABLE_AGENTS]);
   });
 });

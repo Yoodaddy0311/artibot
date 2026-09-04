@@ -77,6 +77,21 @@ export const CANONICAL_VERDICTS = Object.freeze([
 ]);
 
 /**
+ * The two work natures a reviewed report can be stratified by, in allowlist
+ * order. Mirrors `schemas/ledger-events.allowlist.json#enums.claim_nature`;
+ * the mirror is checked by `tests/review/independent-reviewer.drift.test.js`,
+ * and it is embedded rather than read because this module does no I/O.
+ *
+ * Fixed by owner decision MP-1 (`ARTIBOT-5.0-DESIGN.md` 부록 0-2 후속(3),
+ * 2026-09-04): the tag attaches to the ARTIFACT, not to the assignment — a
+ * report is `judge` because it contains a judgement sentence. There is no
+ * `unknown` member on purpose: an untagged report is dropped from the
+ * denominator (설계 §4.4 #4), and a third value would let it accumulate as its
+ * own stratum instead.
+ */
+export const CLAIM_NATURES = Object.freeze(['process', 'judge']);
+
+/**
  * Keys `buildReviewRequest` accepts; anything else is rejected. `readFile` is
  * the port, not review material. `intent` is absent on purpose — adding it back
  * is a contract change, not a convenience.
@@ -459,6 +474,95 @@ function extractJsonDocument(raw) {
 }
 
 /**
+ * Collect a line that is, on its own, one whole JSON object.
+ *
+ * MEASURED 2026-09-05: the first real auditor report put its `claim_audit`
+ * block on one unfenced line between two prose paragraphs, and a reader that
+ * only parsed the whole string or fenced blocks returned `no_claim_audit`
+ * (17:24:33Z) — a measurement pipeline yielding zero rows from a report that
+ * carried a valid count.
+ *
+ * The rule is narrow on purpose: the ENTIRE trimmed line must be the object.
+ * A multi-line bare object among prose is still not read, and a document
+ * quoted mid-sentence is not read. Widening to "find the braces" would make a
+ * sentence that merely mentions a claim_audit block into a measurement, which
+ * is the fail-open direction; failing to read an oddly formatted report is the
+ * fail-closed one.
+ *
+ * @param {string} line one line, known to be outside any fence
+ * @param {object[]} docs collector, appended in place
+ * @returns {void}
+ */
+function keepBareLine(line, docs) {
+  const t = line.trim();
+  if (!t.startsWith('{') || !t.endsWith('}')) return;
+  try {
+    const doc = JSON.parse(t);
+    if (doc && typeof doc === 'object' && !Array.isArray(doc)) docs.push(doc);
+  } catch {
+    // a line that opens and closes with a brace but is not JSON — prose
+  }
+}
+
+/**
+ * Every JSON object a reviewer's answer contains: the whole string when it is
+ * itself one JSON document, every bare one-line object outside a fence, and
+ * the body of every fenced block that parses.
+ *
+ * Separate from {@link extractJsonDocument}, which returns the FIRST match and
+ * whose signature is unchanged. Three differences matter, all deliberate:
+ *
+ *  0. A bare one-line object among prose counts, via {@link keepBareLine}.
+ *     `extractJsonDocument` reads a bare document only when the WHOLE trimmed
+ *     string parses, and that is what lost the first real auditor report.
+ *  1. This one returns all of them, because "two blocks disagree" is a
+ *     condition a first-wins reader cannot see.
+ *  2. The fence scan is LINE-BASED rather than the regex
+ *     `/```(?:json)?\s*\r?\n([\s\S]*?)```/g`. Measured 2026-09-05: given a
+ *     bash block followed by a JSON block, that regex pairs the bash block's
+ *     CLOSING fence with the JSON block's opening one, yields a single empty
+ *     body, and never sees the JSON. A reader built on it would silently find
+ *     one document where there are two.
+ *
+ * @param {string} raw reviewer output
+ * @returns {object[]} parsed JSON objects, in document order
+ */
+function extractJsonDocuments(raw) {
+  const docs = [];
+  const trimmed = raw.trim();
+  if (trimmed.startsWith('{')) {
+    try {
+      const doc = JSON.parse(trimmed);
+      if (doc && typeof doc === 'object' && !Array.isArray(doc)) docs.push(doc);
+    } catch {
+      // not one bare document — the fenced blocks below are the other shape
+    }
+  }
+  const lines = raw.split(/\r?\n/);
+  let body = null;
+  for (const line of lines) {
+    const isFence = /^\s*```/.test(line);
+    if (body === null) {
+      if (isFence) body = [];
+      else keepBareLine(line, docs);
+      continue;
+    }
+    if (isFence) {
+      try {
+        const doc = JSON.parse(body.join('\n'));
+        if (doc && typeof doc === 'object' && !Array.isArray(doc)) docs.push(doc);
+      } catch {
+        // this block is prose, a diff, or a shell transcript — not a document
+      }
+      body = null;
+      continue;
+    }
+    body.push(line);
+  }
+  return docs;
+}
+
+/**
  * Structural gate for a `schema_version: 2` document.
  *
  * Runs unconditionally, so a caller without an ajv-backed validator still gets
@@ -691,6 +795,232 @@ export function parseReviewVerdict(textOrJson, opts = {}) {
         + 'schema_version 2 review. Not admissible as a verdict.',
     }],
   });
+}
+
+/**
+ * Normalize a claim-audit result. Every payload field is null (and
+ * `evidence_refs` empty) whenever `ok` is false, so a rejected document cannot
+ * hand a caller a number it might aggregate. The counterpart of {@link result}
+ * for the verdict path, kept separate because the two carry different fields
+ * and one shared normalizer would have to guess which shape it was given.
+ *
+ * @param {object} base partial result
+ * @returns {object} normalized result with a fixed key set
+ */
+function claimResult(base) {
+  const ok = base.ok === true;
+  const pick = (k) => (ok ? base[k] ?? null : null);
+  return {
+    ok,
+    claims_total: pick('claims_total'),
+    claims_refuted: pick('claims_refuted'),
+    nature: pick('nature'),
+    subject_agent_type: pick('subject_agent_type'),
+    subject_model: pick('subject_model'),
+    subject_agent_id: pick('subject_agent_id'),
+    evidence_refs: ok ? base.evidence_refs ?? [] : [],
+    errors: base.errors ?? [],
+  };
+}
+
+/**
+ * Key-order-independent identity for two claim_audit blocks.
+ *
+ * @param {unknown} value any JSON value
+ * @returns {string} a canonical serialization
+ */
+function stableStringify(value) {
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
+  if (value !== null && typeof value === 'object') {
+    const body = Object.keys(value).sort()
+      .map((k) => `${JSON.stringify(k)}:${stableStringify(value[k])}`)
+      .join(',');
+    return `{${body}}`;
+  }
+  return JSON.stringify(value) ?? 'null';
+}
+
+/**
+ * @param {unknown} v value to test
+ * @returns {boolean} true when `v` is an integer >= 0
+ */
+function isCount(v) {
+  return Number.isInteger(v) && v >= 0;
+}
+
+/**
+ * Read the refutation count out of a reviewer's answer.
+ *
+ * Feeds the measurement of `DESIGN-MODEL-POLICY-role-override.md` §4.1 — how
+ * many of a worker's claims a review overturned — whose numerator is
+ * `claims_refuted`, denominator `claims_total`, and strata are subject model ×
+ * `nature` × agent definition. The parsed block is appended to the central
+ * ledger as `review.claim_audit` (§4.2 option (iii), owner decision MP-4).
+ *
+ * ── Why this is a SECOND document, not a field of the verdict ──────────────
+ * `schemas/review-output.schema.json#definitions.reviewOutputV2` declares
+ * `additionalProperties: false`, so a `claim_audit` key inside a v2 verdict
+ * would make that verdict schema-invalid. The two blocks therefore travel side
+ * by side in one answer and are read by two functions.
+ *
+ * ── Fail-closed, on the same terms as `parseReviewVerdict` ─────────────────
+ * `ok:true` requires a `claim_audit` object with a subject agent type and both
+ * counts, present and integral. Everything else returns `ok:false` with every
+ * payload field null. In particular a numerator with no denominator is NOT
+ * "zero refutations": §4.1 says the numerator alone is not used, and `0`
+ * arriving where a denominator was never counted is exactly the shape that
+ * reads as a clean report.
+ *
+ * Two fields may legitimately be absent and parse to `null` instead of failing:
+ *  - `nature`, when the leader did not tag the report. §4.4 #4 keeps it null
+ *    and drops the row from the denominator rather than guessing a stratum.
+ *  - `subject_model`, which cannot be known before the L2 D1 route-receipt
+ *    bind lands (SubagentStart carries no model, 설계 §1.3). Absent means
+ *    absent; this function never substitutes the reviewer's own tier.
+ *
+ * ── What it cannot check ───────────────────────────────────────────────────
+ * Whether the counting rule of §4.4 #2 was applied — one file:line citation =
+ * 1 claim, one number = 1 claim, one judgement sentence = 1 claim. A
+ * well-formed block with an invented `claims_total` is `ok:true` here. This
+ * function judges a document's shape, exactly as `parseReviewVerdict` does.
+ *
+ * Absence is tested with `hasOwnProperty`, so an OBJECT caller that sets
+ * `nature: undefined` explicitly is treated as present-and-invalid, while a
+ * caller that omits the key is treated as untagged. The two differ only for an
+ * object built in JS: `undefined` has no JSON encoding, so no parsed document
+ * can reach that branch. Left as is deliberately — "the key is there" is the
+ * honest reading of an own property, and guessing that an explicit `undefined`
+ * meant omission is the kind of inference this module refuses elsewhere.
+ * Entries of `evidence_refs` must each be a string; an empty string is
+ * accepted, since judging whether a ref points anywhere is not a shape check.
+ *
+ * @param {string|object} textOrJson reviewer output: an object carrying
+ *   `claim_audit`, a JSON string, or markdown with a fenced JSON block
+ * @returns {{ok: boolean, claims_total: number|null, claims_refuted: number|null,
+ *   nature: string|null, subject_agent_type: string|null,
+ *   subject_model: string|null, subject_agent_id: string|null,
+ *   evidence_refs: unknown[], errors: object[]}} parse outcome
+ */
+export function parseClaimAudit(textOrJson) {
+  let candidates;
+  if (textOrJson && typeof textOrJson === 'object' && !Array.isArray(textOrJson)) {
+    candidates = [textOrJson];
+  } else if (typeof textOrJson === 'string' && textOrJson.trim() !== '') {
+    candidates = extractJsonDocuments(textOrJson);
+  } else {
+    return claimResult({
+      ok: false,
+      errors: [{
+        code: 'not_parseable',
+        message: 'input is neither an object nor a non-empty string',
+      }],
+    });
+  }
+
+  const carriers = candidates.filter((d) => has(d, 'claim_audit'));
+  if (carriers.length === 0) {
+    return claimResult({
+      ok: false,
+      errors: [{
+        code: 'no_claim_audit',
+        message: 'no claim_audit block found. A report with no audit block is '
+          + 'not an audit of zero claims.',
+      }],
+    });
+  }
+  const distinct = [...new Set(carriers.map((d) => stableStringify(d.claim_audit)))];
+  if (distinct.length > 1) {
+    return claimResult({
+      ok: false,
+      errors: [{
+        code: 'ambiguous_claim_audit',
+        message: `${distinct.length} different claim_audit blocks in one answer; `
+          + 'a human resolves it. The parser does not pick one.',
+      }],
+    });
+  }
+
+  const block = carriers[0].claim_audit;
+  if (block === null || typeof block !== 'object' || Array.isArray(block)) {
+    return claimResult({
+      ok: false,
+      errors: [{
+        code: 'invalid_field',
+        message: 'claim_audit must be an object',
+        path: 'claim_audit',
+      }],
+    });
+  }
+
+  const errors = checkClaimAuditFields(block);
+  if (errors.length > 0) return claimResult({ ok: false, errors });
+
+  return claimResult({
+    ok: true,
+    claims_total: block.claims_total,
+    claims_refuted: block.claims_refuted,
+    nature: has(block, 'nature') ? block.nature : null,
+    subject_agent_type: block.subject_agent_type,
+    subject_model: has(block, 'subject_model') ? block.subject_model : null,
+    subject_agent_id: has(block, 'subject_agent_id') ? block.subject_agent_id : null,
+    evidence_refs: has(block, 'evidence_refs') ? block.evidence_refs : [],
+  });
+}
+
+/**
+ * Field-level checks for a `claim_audit` block, collected rather than
+ * short-circuited so a reviewer sees every problem in one pass.
+ *
+ * Split out of {@link parseClaimAudit} to keep that function under the
+ * complexity ceiling; the two halves are "which document is the block" and
+ * "is the block well formed", which is a real seam rather than a mechanical
+ * one.
+ *
+ * @param {object} block the `claim_audit` value, already known to be an object
+ * @returns {{code: string, message: string, path: string}[]} errors, possibly empty
+ */
+function checkClaimAuditFields(block) {
+  const errors = [];
+  const bad = (at, message) => errors.push({ code: 'invalid_field', message, path: at });
+
+  if (!isCount(block.claims_total)) {
+    bad('claims_total', 'claims_total must be an integer >= 0. A numerator with no '
+      + 'counted denominator is not a measurement (설계 §4.1).');
+  }
+  if (!isCount(block.claims_refuted)) {
+    bad('claims_refuted', 'claims_refuted must be an integer >= 0');
+  }
+  if (isCount(block.claims_total) && isCount(block.claims_refuted)
+    && block.claims_refuted > block.claims_total) {
+    bad('claims_refuted', `claims_refuted (${block.claims_refuted}) exceeds claims_total `
+      + `(${block.claims_total})`);
+  }
+  if (!isNonEmptyString(block.subject_agent_type)) {
+    bad('subject_agent_type', 'subject_agent_type must be a non-empty string — the ledger '
+      + 'event requires it and it is the agent-definition stratum');
+  }
+  if (has(block, 'nature') && !CLAIM_NATURES.includes(block.nature)) {
+    bad('nature', `nature must be one of ${CLAIM_NATURES.join('|')} when present; `
+      + 'omit the key entirely for an untagged report (설계 §4.4 #4)');
+  }
+  if (has(block, 'subject_model') && !isNonEmptyString(block.subject_model)) {
+    bad('subject_model', 'subject_model must be a non-empty string when present; omit the '
+      + 'key until the L2 D1 route-receipt bind can fill it');
+  }
+  if (has(block, 'subject_agent_id') && !isNonEmptyString(block.subject_agent_id)) {
+    bad('subject_agent_id', 'subject_agent_id must be a non-empty string when present');
+  }
+  if (has(block, 'evidence_refs')) {
+    if (!Array.isArray(block.evidence_refs)) {
+      bad('evidence_refs', 'evidence_refs must be an array');
+    } else if (!block.evidence_refs.every((r) => typeof r === 'string')) {
+      // The allowlist declares only `type: array`, so the writer would accept
+      // `[1, null, {}]` and the ledger would carry refs nothing can follow.
+      // Refusing a subset of what `array` permits cannot conflict with it.
+      bad('evidence_refs', 'every evidence_refs entry must be a string');
+    }
+  }
+  return errors;
 }
 
 /**
