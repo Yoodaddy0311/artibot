@@ -1,7 +1,7 @@
 # AGENTS.md — Cross-Tool Parity Seed
 
 **Scope:** Artibot plugin (`plugins/artibot/`)
-**Purpose:** make Artibot's 28 agents + 113 skills + 72 commands usable not just from Claude Code but also from Cursor, Codex CLI, OpenCode, Windsurf, and Antigravity.
+**Purpose:** make Artibot's 30 agents + 114 skills + 79 commands usable not just from Claude Code but also from Cursor, Codex CLI, OpenCode, Windsurf, and Antigravity.
 
 `AGENTS.md` is a cross-tool convention adopted by `everything-claude-code` and similar ecosystems. Each consumer tool reads this file (directly or via export) to register agents locally. Artibot's source of truth remains `plugins/artibot/agents/*.md` with Claude Code–style frontmatter; everything else is a projection of that.
 
@@ -31,7 +31,7 @@ The `direct` degradation mode already lists the supported non–Claude Code plat
 
 | Command | Purpose |
 |---|---|
-| `npm test` | Run the suite (9,300+ tests via vitest) |
+| `npm test` | Run the suite (14,953+ tests via vitest) |
 | `npm run test:coverage` | Run tests with coverage reporting |
 | `npm run lint` | ESLint — 0 errors/warnings target |
 | `npm run ci` | Full gate: validate + skill:check + lint + test + eval:runtime |

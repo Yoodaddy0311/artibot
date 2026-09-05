@@ -25,35 +25,35 @@ import path from 'node:path';
 import {
   CLAIM_PATTERNS,
   collectActuals,
+  parseClaimNumber,
   partitionFrozenHistory,
-  PLUGIN_ROOT,
   REPO_ROOT,
+  SCAN_TARGETS,
 } from './readme-claims-registry.js';
 import { isMainEntry } from '../hooks/_main-entry.js';
 
-// Files scanned for count claims. README badges/prose + the plugin CLAUDE.md
-// (whose Stack line carries skills/commands/agents counts that were previously
-// outside any gate — the self-validation gap this list closes).
+// Files scanned for count claims. The list itself lives in the registry
+// (readme-claims-registry.js#SCAN_TARGETS) alongside the patterns, so the gate
+// and the auto-fixer cannot disagree about which files carry claims — the same
+// reason the regexes are shared. Re-exported here because callers and tests
+// have imported `SCAN_TARGETS` from this module since it was introduced.
 //
-// marketplace.json (2026-08-22): its `description` / `shortDescription` /
-// screenshot captions carry the same "N agents, N skills, N commands" claims,
-// and nothing watched them — `sync-marketplace-meta.mjs` only touches
-// `version`, `qualityMetrics.tests` and `release.current`. Measured drift when
-// this line was added: `75 commands` vs 78 actual, while both READMEs already
-// said 78. Scanning it is claim-shaped, not JSON-shaped: the patterns need a
-// digit immediately followed by " commands"/" skills"/" agents", so structural
-// fields like `"count": 78` are invisible here — those are asserted in
-// `tests/ci/marketplace-version-sync.test.js` instead. Probe on the unfixed
-// file returned exactly 1 finding and 0 false positives.
+// History worth keeping: marketplace.json was added on 2026-08-22 after its
+// `description` / `shortDescription` / screenshot captions were found carrying
+// "N agents, N skills, N commands" claims that nothing watched —
+// `sync-marketplace-meta.mjs` only touches `version`, `qualityMetrics.tests`
+// and `release.current`. Measured drift then: `75 commands` vs 78 actual, while
+// both READMEs already said 78. Scanning it is claim-shaped, not JSON-shaped:
+// the patterns need a digit immediately followed by " commands"/" skills"/
+// " agents", so structural fields like `"count": 78` are invisible here — those
+// are asserted in `tests/ci/marketplace-version-sync.test.js` instead. Probe on
+// the unfixed file returned exactly 1 finding and 0 false positives.
 //
-// Like CLAUDE.md, this file is validate-only: `sync-readme-claims.js` rewrites
-// the two READMEs and nothing else, so a finding here is fixed by hand.
-export const SCAN_TARGETS = [
-  path.join(REPO_ROOT, 'README.md'),
-  path.join(PLUGIN_ROOT, 'README.md'),
-  path.join(PLUGIN_ROOT, 'CLAUDE.md'),
-  path.join(PLUGIN_ROOT, 'marketplace.json'),
-];
+// That entry, and CLAUDE.md's, used to be validate-only ("fixed by hand"). As
+// of 2026-09-05 both are synced: the hand-fix never happened, and the file was
+// caught disagreeing with ITSELF — `description` said `9,900+ tests` while
+// `qualityMetrics.tests` in the same file said 14953.
+export { SCAN_TARGETS };
 
 const args = process.argv.slice(2);
 const MODE = args.includes('--full') ? 'full' : 'structural';
@@ -88,7 +88,8 @@ export function scanFile(file, actuals) {
     if (actuals[key] === null || actuals[key] === undefined) continue;
     for (const segment of live) {
       for (const m of segment.text.matchAll(regex)) {
-        const claimed = Number(m[1]);
+        // parseClaimNumber, not Number(): group 1 may be "9,900".
+        const claimed = parseClaimNumber(m[1]);
         const actual = actuals[key];
         // Allow exact match only — README counts must be precise.
         if (claimed !== actual) {
