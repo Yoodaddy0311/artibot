@@ -54,21 +54,47 @@ vi.mock('node:os', async () => {
   };
 });
 
+// The ledger edge is stubbed so the `human.asked` record can be observed
+// without a filesystem — which matters doubly here, because `node:fs` is
+// already mocked above and the real `resolveProjectRoot` walks it.
+// `lib/security/human-gates.js` is deliberately NOT stubbed: the gate ids
+// asserted below are real `classify()` output.
+const ledger = vi.hoisted(() => ({ append: vi.fn() }));
+vi.mock('../../lib/runtime/ledger.js', () => ({ appendLedgerEvent: ledger.append }));
+vi.mock('../../lib/git/project-root.js', () => ({ resolveProjectRoot: (cwd) => cwd }));
+
 const { readStdin, writeStdout } = await import('../../scripts/utils/index.js');
-const { createErrorHandler } = await import('../../lib/core/hook-utils.js');
 const { existsSync, readFileSync } = await import('node:fs');
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makePreWriteData(filePath, toolName = 'Write', sessionId = 'test-session') {
-  return JSON.stringify({
+/**
+ * A PreToolUse Write/Edit payload.
+ *
+ * `cwd` is OMITTED by default so every pre-existing case in this file keeps
+ * the payload shape it was written against — which is also the shape that
+ * records nothing, since the recorder needs an injected root and never derives
+ * one. Unlike `pre-write.js`, this hook's decision does not consult
+ * `hookData.cwd` at all (`shouldEnforceGuard` reads `process.cwd()`), so
+ * adding the key changes only whether a record is written.
+ *
+ * @param {string} filePath
+ * @param {string} [toolName]
+ * @param {string} [sessionId]
+ * @param {{cwd?: string}} [opts]
+ * @returns {string}
+ */
+function makePreWriteData(filePath, toolName = 'Write', sessionId = 'test-session', opts = {}) {
+  const data = {
     hook_event_name: 'PreToolUse',
     tool_name: toolName,
     tool_input: { file_path: filePath },
     session_id: sessionId,
-  });
+  };
+  if (opts.cwd !== undefined) data.cwd = opts.cwd;
+  return JSON.stringify(data);
 }
 
 function makePostReadData(filePath, sessionId = 'test-session') {
@@ -97,12 +123,11 @@ function trackingPath(sessionId = 'test-session') {
  */
 async function runHook() {
   const mod = await import('../../scripts/hooks/pre-write-guard.js');
-  // The `.catch` mirrors the module's direct-run tail so the error-handling
-  // test still reaches the real handler. Keep in sync with pre-write-guard.js.
-  await mod.main().catch(createErrorHandler('pre-write-guard', {
-    writeStdout,
-    blockReason: 'Write-before-read guard failed. Blocking by default.',
-  }));
+  // The `.catch` is the module's OWN exported tail, not a copy of it. A
+  // hand-rolled `createErrorHandler(...)` here would keep passing after the
+  // real tail stopped recording — the error path would be tested against a
+  // reimplementation of itself.
+  await mod.main().catch(mod.handleHookError);
 }
 
 describe('pre-write-guard hook', () => {
@@ -665,6 +690,127 @@ describe('pre-write-guard hook', () => {
       expect(writeStdout).toHaveBeenCalledWith(
         expect.objectContaining({ decision: 'approve' }),
       );
+    });
+  });
+  // -------------------------------------------------------------------------
+  // human.asked record (T-39 symmetry)
+  // -------------------------------------------------------------------------
+  describe('human.asked record', () => {
+    const CWD = '/project';
+    const BLOCKED_FILE = '/workspace/plugins/artibot/lib/core/config.js';
+
+    /**
+     * Reproduce the mock state the "Write without Read" block cases run under:
+     * the file and the tracking file both exist, and the tracking file is
+     * empty. Without the tracking file the guard takes its DEGRADED branch and
+     * approves, so this setup is what keeps the cases below off a vacuous path.
+     */
+    function arrangeBlock() {
+      existsSync.mockImplementation(() => true);
+      readFileSync.mockReturnValue('[]');
+    }
+
+    it.each(['Write', 'Edit'])('appends exactly one line for a blocked %s', async (tool) => {
+      arrangeBlock();
+      readStdin.mockResolvedValue(
+        makePreWriteData(BLOCKED_FILE, tool, `rec-${tool}`, { cwd: CWD }),
+      );
+
+      await runHook();
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(writeStdout).toHaveBeenCalledWith(
+        expect.objectContaining({ decision: 'block' }),
+      );
+      expect(ledger.append).toHaveBeenCalledTimes(1);
+      const [root, event] = ledger.append.mock.calls[0];
+      expect(root).toBe(CWD);
+      expect(event.event).toBe('human.asked');
+      expect(event.source).toBe('hook');
+      expect(event.session_id).toBe(`rec-${tool}`);
+      expect(event.data.decision).toBe('block');
+      expect(event.data.tool).toBe(tool);
+      expect(event.data.path).toBe(BLOCKED_FILE);
+      // A `.js` path under the repo is HG-02 (local reversible edit) and
+      // nothing stricter — real `classify()` output, measured 2026-09-05.
+      expect(event.data.hits).toEqual(['HG-02']);
+      expect(event.data.gate).toBe('HG-02');
+    });
+
+    it('records the reason byte-for-byte as it was sent to stdout', async () => {
+      arrangeBlock();
+      readStdin.mockResolvedValue(
+        makePreWriteData(BLOCKED_FILE, 'Write', 'rec-reason', { cwd: CWD }),
+      );
+
+      await runHook();
+      await new Promise((r) => setTimeout(r, 50));
+
+      const stdoutReason = writeStdout.mock.calls[0][0].reason;
+      expect(ledger.append.mock.calls[0][1].data.reason).toBe(stdoutReason);
+      // The retry instruction is the only corrective channel for this failure,
+      // so the ledger copy has to carry it too rather than a summary.
+      expect(stdoutReason).toContain('WRITE-BEFORE-READ');
+    });
+
+    it('appends nothing on the approve path', async () => {
+      existsSync.mockImplementation(() => true);
+      readFileSync.mockReturnValue(JSON.stringify([BLOCKED_FILE]));
+      readStdin.mockResolvedValue(
+        makePreWriteData(BLOCKED_FILE, 'Write', 'rec-approve', { cwd: CWD }),
+      );
+
+      await runHook();
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(writeStdout).toHaveBeenCalledWith(
+        expect.objectContaining({ decision: 'approve' }),
+      );
+      expect(ledger.append).not.toHaveBeenCalled();
+    });
+
+    it('appends nothing when the payload carries no cwd', async () => {
+      // NEGATIVE CONTROL for the whole describe: this is the payload shape
+      // every other case in this file uses. The block still happens; only the
+      // record is withheld, because the recorder never derives a root.
+      arrangeBlock();
+      readStdin.mockResolvedValue(makePreWriteData(BLOCKED_FILE, 'Write', 'rec-nocwd'));
+
+      await runHook();
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(writeStdout).toHaveBeenCalledWith(
+        expect.objectContaining({ decision: 'block' }),
+      );
+      expect(ledger.append).not.toHaveBeenCalled();
+    });
+
+    it('writes the decision to stdout BEFORE it touches the ledger', async () => {
+      arrangeBlock();
+      readStdin.mockResolvedValue(
+        makePreWriteData(BLOCKED_FILE, 'Write', 'rec-order', { cwd: CWD }),
+      );
+
+      await runHook();
+      await new Promise((r) => setTimeout(r, 50));
+
+      // Ordering is the observe contract: bookkeeping may never delay or
+      // reorder a security decision.
+      expect(writeStdout.mock.invocationCallOrder[0])
+        .toBeLessThan(ledger.append.mock.invocationCallOrder[0]);
+    });
+
+    it('records nothing from the fail-closed tail, which has no payload', async () => {
+      readStdin.mockRejectedValue(new Error('stdin read failed'));
+
+      await runHook();
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(writeStdout).toHaveBeenCalledWith({
+        decision: 'block',
+        reason: 'Write-before-read guard failed. Blocking by default.',
+      });
+      expect(ledger.append).not.toHaveBeenCalled();
     });
   });
 });

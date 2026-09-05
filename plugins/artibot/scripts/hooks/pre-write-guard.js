@@ -7,6 +7,14 @@
  * PostToolUse hook for Read: records file paths to the session tracking file.
  *
  * Tracking file: /tmp/artibot-read-tracking-{sessionId}.json
+ *
+ * ── OBSERVE CONTRACT (PRD R-03 "행동 변화 0") ────────────────────────────────
+ *  T-39 adds recording only, at the single block point in `handleWriteGuard`.
+ *  No new block, no lifted block, no changed `reason` byte; the append runs
+ *  AFTER `writeStdout`. The approve, advisory, loop-guard, degraded and
+ *  read-tracking paths record NOTHING — Observe is scoped to blocks. Canonical
+ *  statement of the contract, the cwd rule, and the never-throw guarantee lives
+ *  in the recorder: `lib/runtime/human-asked-record.js`.
  */
 
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
@@ -96,9 +104,26 @@ function shouldEnforceGuard(filePath) {
 }
 import { atomicWriteSync, getPluginRoot, parseJSON, readStdin, resolveConfigPath, writeStdout } from '../utils/index.js';
 import { createErrorHandler, extractFilePath, extractToolName, normalizePath } from '../../lib/core/hook-utils.js';
+import { recordHumanAsked } from '../../lib/runtime/human-asked-record.js';
 import { isMainEntry } from './_main-entry.js';
 
 const BLOCK_FINGERPRINT_FILE = 'last-pre-write-block.txt';
+
+/**
+ * The fail-closed reason string, unchanged from before this file recorded
+ * anything. Named so the tail and the recorder cannot drift apart; the VALUE is
+ * frozen by the invariance gate.
+ */
+const HOOK_ERROR_REASON = 'Write-before-read guard failed. Blocking by default.';
+
+/**
+ * The parsed payload of the turn in flight, kept so the fail-closed tail can
+ * describe what it blocked. `null` until stdin is read and parsed — which is
+ * also the realistic shape of a hook error, since the failure this tail exists
+ * for happens while reading stdin.
+ * @type {object|null}
+ */
+let lastHookData = null;
 
 /**
  * Resolve the write-before-read enforcement mode.
@@ -299,9 +324,16 @@ function handleReadTracking(hookData) {
 
 /**
  * Handle PreToolUse for Write/Edit: check if the file was read first.
+ *
+ * `async` only so the single block point can await the ledger append after its
+ * decision is already on stdout. Every approve path still returns without ever
+ * suspending, so the decision itself is produced on the same synchronous path
+ * as before.
+ *
  * @param {object} hookData
+ * @returns {Promise<void>}
  */
-function handleWriteGuard(hookData) {
+async function handleWriteGuard(hookData) {
   const toolName = extractToolName(hookData);
   const filePath = extractFilePath(hookData);
 
@@ -392,11 +424,13 @@ function handleWriteGuard(hookData) {
   process.stderr.write(`[artibot:pre-write-guard] ${reason}\n`);
   saveBlockFingerprint(fingerprint);
   writeStdout({ decision: 'block', reason });
+  await recordHumanAsked({ hookData, tool: toolName, reason });
 }
 
 export async function main() {
   const raw = await readStdin();
   const hookData = parseJSON(raw);
+  lastHookData = hookData;
   if (!hookData) return;
 
   const toolName = extractToolName(hookData);
@@ -409,7 +443,7 @@ export async function main() {
 
   // PreToolUse Write/Edit guard mode
   if (toolName === 'Write' || toolName === 'Edit') {
-    handleWriteGuard(hookData);
+    await handleWriteGuard(hookData);
     return;
   }
 
@@ -417,13 +451,38 @@ export async function main() {
   writeStdout({ decision: 'approve' });
 }
 
+/**
+ * The fail-closed tail: block on any error the hook could not handle, then
+ * record that block like any other. Exported so a test can enter the real
+ * production path instead of a copy of it.
+ *
+ * The tool name is recovered from the payload rather than assumed, but is
+ * clamped to the recorder's contract (`'Write' | 'Edit'` here). This hook also
+ * serves Read for PostToolUse tracking, and a parse failure leaves no payload
+ * at all — neither may reach the recorder as an out-of-contract `tool`. When
+ * nothing is recoverable the recorder skips the append anyway (no `cwd`), so
+ * `'Write'` is a shape default, not a claim about what was blocked.
+ *
+ * @param {Error} err
+ * @returns {Promise<void>}
+ */
+export async function handleHookError(err) {
+  createErrorHandler('pre-write-guard', {
+    writeStdout,
+    blockReason: HOOK_ERROR_REASON,
+  })(err);
+  const errored = extractToolName(lastHookData);
+  await recordHumanAsked({
+    hookData: lastHookData,
+    tool: errored === 'Edit' ? 'Edit' : 'Write',
+    reason: HOOK_ERROR_REASON,
+  });
+}
+
 // Direct-run guard: importing this module (tests) must not execute the hook.
 // main() blocks on stdin, so an import both hangs the importer and fires the
 // hook's side effects. Production is unaffected — the dispatcher (or Claude
 // Code) spawns this file as argv[1], so the guard passes there.
 if (isMainEntry(import.meta.url)) {
-  main().catch(createErrorHandler('pre-write-guard', {
-    writeStdout,
-    blockReason: 'Write-before-read guard failed. Blocking by default.',
-  }));
+  main().catch(handleHookError);
 }
