@@ -216,6 +216,39 @@ function missionIntentRevision(result) {
 }
 
 /**
+ * The three identifiers the append and the store write MUST agree on, resolved
+ * once from one instant.
+ *
+ * WHY ONCE. `sessionFallbackMissionId` folds its instant down to a UTC DATE.
+ * Two independent `now()` reads that straddle midnight therefore produce
+ * `M-20260904-S…` and `M-20260905-S…` for the same prompt, and the
+ * `mission.created` event and its paired `state.updated` land on two different
+ * missions — one of them an orphan with no `mission.created` and the other a
+ * mission whose write nobody recorded, which is exactly the pair `/doctor`
+ * Check 8 exists to find. The window is a few milliseconds a day, so it would
+ * never be reproduced by a test that did not deliberately aim at it, and the
+ * damage it leaves behind is indistinguishable from a lost update.
+ *
+ * `missionId` is null EXACTLY when `sessionId` is: `sessionFallbackMissionId`
+ * refuses only a non-string or empty session id, and `resolveSessionId` already
+ * returns null in that case. The two are therefore checked together downstream
+ * rather than given separate refusal reasons for a state that cannot differ.
+ *
+ * @param {object} state middleware state
+ * @param {number} nowMs the single epoch-ms reading for this prompt
+ * @returns {{projectRoot: string|null, sessionId: string|null, missionId: string|null}}
+ */
+function resolveMissionIdentity(state, nowMs) {
+  const projectRoot = resolveProjectRoot(state);
+  const sessionId = resolveSessionId(state);
+  return {
+    projectRoot,
+    sessionId,
+    missionId: sessionId ? sessionFallbackMissionId(sessionId, new Date(nowMs)) : null,
+  };
+}
+
+/**
  * The `data` object for one mission ledger line — the minimum each event's
  * allowlist entry requires, and nothing else.
  *
@@ -251,32 +284,41 @@ function buildMissionLedgerData(eventName, result, prompt) {
  *
  * @param {object} state
  * @param {object} result `compileMission()` output
- * @param {() => number} now
+ * @param {number} nowMs the single epoch-ms reading for this prompt
+ * @param {{projectRoot: string|null, sessionId: string|null, missionId: string|null}} identity
+ *   from {@link resolveMissionIdentity} — shared with the store write
  * @returns {{ok: boolean, status: string, event?: string}}
  */
-function appendMissionEvent(state, result, now) {
+function appendMissionEvent(state, result, nowMs, identity) {
   const compilerName = result.meta?.ledgerEvent;
   const eventName = Object.prototype.hasOwnProperty.call(
     LEDGER_EVENT_BY_COMPILER_NAME, compilerName,
   ) ? LEDGER_EVENT_BY_COMPILER_NAME[compilerName] : null;
   if (!eventName) return { ok: false, status: `skipped:unknown-event:${compilerName}` };
 
-  const projectRoot = resolveProjectRoot(state);
+  const { projectRoot, sessionId, missionId } = identity;
   if (!projectRoot) return { ok: false, status: 'skipped:no-project-root' };
-
-  const sessionId = resolveSessionId(state);
-  if (!sessionId) return { ok: false, status: 'skipped:no-session-id' };
+  // One reason for both, because they cannot differ — see
+  // `resolveMissionIdentity`. A separate `skipped:no-mission-id` status would
+  // be an unreachable branch that a reader would waste time trying to trigger.
+  if (!sessionId || !missionId) return { ok: false, status: 'skipped:no-session-id' };
 
   try {
     const written = appendLedgerEvent(projectRoot, {
       event: eventName,
+      // PASSED EXPLICITLY rather than left to the writer's fallback.
+      // `event-writer.js#buildEnvelope` prefers a non-empty `src.mission_id`
+      // and only otherwise derives one from `(session_id, ts)` — so handing it
+      // the id computed here is what makes this event and the paired
+      // `state.updated` name the same mission across a UTC midnight.
+      mission_id: missionId,
       session_id: sessionId,
       // Both events are registered `sources: ["hook"]`. This middleware runs
       // inside the UserPromptSubmit hook pipeline, so 'hook' is accurate as
       // well as the only permitted value.
       source: 'hook',
       data: buildMissionLedgerData(eventName, result, String(state.input?.prompt ?? '')),
-    }, { now: () => new Date(now()) });
+    }, { now: () => new Date(nowMs) });
     return written?.ok
       ? { ok: true, status: 'appended', event: eventName }
       : { ok: false, status: `rejected:${written?.reason ?? 'unknown'}`, event: eventName };
@@ -389,12 +431,50 @@ function missionMutator(missionId, title, revision) {
 }
 
 /**
+ * Open the StateStore for this prompt, with every port bound.
+ *
+ * EXTRACTED from {@link recordMissionState} to keep that function inside the
+ * 50-line rule, and because the four ports are the part a reader most often
+ * comes here to check. It opens a store and nothing else: no write, no clock
+ * read, no decision.
+ *
+ * The clock port is `() => new Date(nowMs)` — a CONSTANT for the whole prompt,
+ * not a live reading. `state-manager.js` calls it for the record `ts`, and
+ * pinning it to the same instant the ledger append used is what makes the two
+ * lines timestamp-comparable rather than merely close together.
+ *
+ * @param {string} projectRoot absolute project root
+ * @param {string} sessionId raw session id for the ledger envelope
+ * @param {number} nowMs the single epoch-ms reading for this prompt
+ * @param {{resolveGitCommonDir: (root: string) => string|null}} deps injected ports
+ * @returns {object} the StateStore
+ */
+function openMissionStore(projectRoot, sessionId, nowMs, deps) {
+  return createStateStore({
+    projectRoot,
+    sessionId,
+    // `state.updated` registers no `sources` restriction, and this middleware
+    // runs inside the UserPromptSubmit hook pipeline, so 'hook' is the honest
+    // value — not the store's 'supervisor' default, which names a process
+    // that is not running.
+    source: 'hook',
+    now: () => new Date(nowMs),
+    appendEvent: (envelope) => appendLedgerEvent(projectRoot, envelope),
+    resolveGitCommonDir: () => deps.resolveGitCommonDir(projectRoot),
+  });
+}
+
+/**
  * Record the mission in the StateStore, 1:1 with the `mission.created` append.
  *
  * Called ONLY after that append succeeded. A store row whose mission has no
  * `mission.created` event is an orphan by the design's own definition
  * (`/doctor` Check 8-③), so a failed or skipped append must not be followed by
  * a store write that invents one.
+ *
+ * The mission id is RECEIVED, never recomputed. It is the same value the append
+ * put on the wire, from the same instant — recomputing it here is the midnight
+ * split `resolveMissionIdentity` exists to prevent.
  *
  * FAIL-OPEN, in full. Every failure — a bad project root, a store constructor
  * TypeError, a refused ledger port inside the commit — becomes a status string.
@@ -403,39 +483,21 @@ function missionMutator(missionId, title, revision) {
  *
  * @param {object} state middleware state
  * @param {object} result `compileMission()` output
- * @param {() => number} now epoch-ms clock (converted to the store's `() => Date`)
+ * @param {number} nowMs the single epoch-ms reading for this prompt
+ * @param {{projectRoot: string|null, sessionId: string|null, missionId: string|null}} identity
+ *   from {@link resolveMissionIdentity} — shared with the append
  * @param {{resolveGitCommonDir: (root: string) => string|null}} deps injected ports
  * @returns {object} the `task.mission.store` value
  */
-function recordMissionState(state, result, now, deps) {
+function recordMissionState(state, result, nowMs, identity, deps) {
   try {
-    const projectRoot = resolveProjectRoot(state);
-    const sessionId = resolveSessionId(state);
-    // Both are guaranteed by the append that gated this call; re-read rather
-    // than passed so this function has no hidden precondition on its caller.
+    const { projectRoot, sessionId, missionId } = identity;
+    // Guaranteed by the append that gated this call. Re-checked rather than
+    // assumed, so this function carries no unstated precondition.
     if (!projectRoot || !sessionId) return skippedMissionStore('no-project-root-or-session-id');
-
-    // THE SAME FUNCTION AND THE SAME INSTANT the writer used for the append.
-    // `event-writer.js#buildEnvelope` derives the fallback id this way when a
-    // caller supplies no `mission_id`; deriving it any other way here (there is
-    // a same-named function in `lib/mission/mission-id.js` with a different
-    // signature) would pair the two events under two different missions.
-    const missionId = sessionFallbackMissionId(sessionId, new Date(now()));
     if (!missionId) return skippedMissionStore('no-mission-id');
 
-    const store = createStateStore({
-      projectRoot,
-      sessionId,
-      // `state.updated` registers no `sources` restriction, and this middleware
-      // runs inside the UserPromptSubmit hook pipeline, so 'hook' is the honest
-      // value — not the store's 'supervisor' default, which names a process
-      // that is not running.
-      source: 'hook',
-      now: () => new Date(now()),
-      appendEvent: (envelope) => appendLedgerEvent(projectRoot, envelope),
-      resolveGitCommonDir: () => deps.resolveGitCommonDir(projectRoot),
-    });
-
+    const store = openMissionStore(projectRoot, sessionId, nowMs, deps);
     const mutator = missionMutator(
       missionId, missionTitle(result, String(state.input?.prompt ?? '')), missionIntentRevision(result),
     );
@@ -475,16 +537,23 @@ function recordMissionState(state, result, now, deps) {
  */
 function recordMissionCompile(state, now, deps) {
   try {
+    // ONE reading of the clock for the whole mission record, threaded through
+    // the compile, the append and the store write. `now` is a PORT: nothing
+    // guarantees two calls return the same value, and a test that advances it
+    // between calls is a supported use, not an abuse. Every downstream instant
+    // is derived from this constant.
+    const nowMs = now();
     const result = compileMission({
       prompt: String(state.input?.prompt ?? ''),
       intent: state.context?.intent,
       classification: state.context?.routing?.classification,
-      nowMs: now(),
+      nowMs,
       // system1 → reduced contract. Not the `agentTeam` flag: that one is a
       // topology decision, this one selects the contract shape (§3.5).
       system: state.context?.routing?.system === 'system2' ? 'system2' : 'system1',
     });
-    const ledger = appendMissionEvent(state, result, now);
+    const identity = resolveMissionIdentity(state, nowMs);
+    const ledger = appendMissionEvent(state, result, nowMs, identity);
     return {
       contract: result.contract,
       mode: result.mode,
@@ -496,7 +565,7 @@ function recordMissionCompile(state, now, deps) {
       // is a successful append of a non-mission, and a store row for it would
       // be a mission the ledger never opened.
       store: ledger.ok && ledger.event === 'mission.created'
-        ? recordMissionState(state, result, now, deps)
+        ? recordMissionState(state, result, nowMs, identity, deps)
         : skippedMissionStore('no-mission-created'),
       ok: true,
     };

@@ -4,8 +4,9 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createTasksMiddleware } from '../../../lib/runtime/middleware/tasks.js';
 import { sessionFallbackMissionId } from '../../../lib/runtime/event-writer.js';
-import { readLedgerCensus } from '../../../lib/runtime/ledger.js';
-import { readJournal } from '../../../lib/project-state/state-manager.js';
+import { appendLedgerEvent, readLedgerCensus } from '../../../lib/runtime/ledger.js';
+import { createStateStore, readJournal } from '../../../lib/project-state/state-manager.js';
+import { resolveGitCommonDir } from '../../../lib/project-state/git-common-dir.js';
 
 function makeState(overrides = {}) {
   return {
@@ -391,5 +392,152 @@ describe('middleware/tasks — StateStore wiring on mission.created', () => {
 
     expect(task.mission.store.status).not.toBe('written');
     expect(['error', 'rejected']).toContain(task.mission.store.status);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Mission identity under a clock that moves DURING one prompt.
+//
+// `sessionFallbackMissionId` folds its instant down to a UTC DATE, so two
+// independent `now()` reads that straddle midnight mint two different mission
+// ids for one prompt. The `mission.created` event then lands on one mission and
+// its paired `state.updated` on another: an orphan plus an unrecorded write,
+// which is the exact pair `/doctor` Check 8 exists to find and is
+// indistinguishable from a lost update.
+//
+// WHY THIS SWEEPS EVERY FLIP INDEX INSTEAD OF PINNING ONE. Measured against
+// bc508f47, the pre-fix implementation read the clock 6 times and split on
+// flip index 5 ALONE. A stub that flipped after the first read — the obvious
+// spelling — agreed at every one of the other 7 indices and would have passed
+// against the live bug. The call order is an implementation detail; "no clock
+// read may split the id" is the contract, so the contract is what is asserted.
+// ---------------------------------------------------------------------------
+
+describe('middleware/tasks — mission identity under a moving clock', () => {
+  const SESSION_ID = 'sess-e247a22f-test';
+  const SUBSTANTIVE = '/implement add a retry guard to the ledger writer';
+  /** The last instant of 2026-09-04 UTC, and the first of 2026-09-05 UTC. */
+  const BEFORE_MIDNIGHT = Date.UTC(2026, 8, 4, 23, 59, 59, 999);
+  const AFTER_MIDNIGHT = Date.UTC(2026, 8, 5, 0, 0, 0, 0);
+  const NOON = Date.UTC(2026, 8, 5, 12, 0, 0, 0);
+
+  const roots = [];
+
+  afterEach(() => {
+    while (roots.length > 0) rmSync(roots.pop(), { recursive: true, force: true });
+  });
+
+  function makeRoot() {
+    const root = mkdtempSync(path.join(tmpdir(), 'artibot-tasks-clock-'));
+    mkdirSync(path.join(root, '.git'), { recursive: true });
+    roots.push(root);
+    return root;
+  }
+
+  function stateFor(root) {
+    return {
+      input: {
+        prompt: SUBSTANTIVE,
+        hookData: { cwd: root, session_id: SESSION_ID },
+      },
+      context: {
+        routing: { system: 'system1', score: 0.3 },
+        intent: { best: 'action:implement', commands: [], agents: [], ambiguous: false },
+      },
+      messageParts: [],
+      userPrompt: SUBSTANTIVE,
+    };
+  }
+
+  /**
+   * Run one prompt on a fresh repository under the supplied clock and report
+   * the three mission ids that must agree.
+   *
+   * @param {() => number} now - Clock stub.
+   * @returns {Promise<{created: string|undefined, updated: string|undefined, store: string|null}>}
+   */
+  async function idsUnder(now) {
+    const root = makeRoot();
+    const result = await createTasksMiddleware({ now })(stateFor(root));
+    const { events } = readLedgerCensus(root);
+    return {
+      created: events.find((e) => e.event === 'mission.created')?.mission_id,
+      updated: events.find((e) => e.event === 'state.updated')?.mission_id,
+      store: result.context.tasks.mission.store.mission_id,
+    };
+  }
+
+  it('keeps one mission id however a UTC midnight falls between clock reads', async () => {
+    // The read count is MEASURED, never assumed: hoisting the identity took it
+    // from 6 to 3, and a hard-coded bound would have silently stopped covering
+    // the later reads.
+    let reads = 0;
+    await idsUnder(() => { reads += 1; return BEFORE_MIDNIGHT; });
+    expect(reads).toBeGreaterThan(0);
+
+    const split = [];
+    for (let flip = 1; flip <= reads + 2; flip += 1) {
+      let n = 0;
+      const ids = await idsUnder(() => {
+        n += 1;
+        return n < flip ? BEFORE_MIDNIGHT : AFTER_MIDNIGHT;
+      });
+      const agree = Boolean(ids.created)
+        && ids.created === ids.updated
+        && ids.store === ids.created;
+      if (!agree) split.push({ flip, ...ids });
+    }
+
+    expect(split).toEqual([]);
+  });
+
+  it('preserves an executing mission instead of walking it back to queued', async () => {
+    const root = makeRoot();
+    const missionId = sessionFallbackMissionId(SESSION_ID, new Date(NOON));
+
+    // A SECOND store handle over the same root, opened the way the middleware
+    // opens its own: same session, same real git port, same ledger writer. A
+    // stub here would seed a mission the middleware could not have found.
+    const store = createStateStore({
+      projectRoot: root,
+      sessionId: SESSION_ID,
+      source: 'hook',
+      now: () => new Date(NOON),
+      appendEvent: (e) => appendLedgerEvent(root, e),
+      resolveGitCommonDir: () => resolveGitCommonDir(root),
+    });
+
+    const seeded = store.updateMission(missionId, () => ({
+      title: 'seeded lane work',
+      status: 'executing',
+      owners: ['lane-1'],
+      intent: { path: `missions/${missionId}/intent.md`, revision: 3 },
+      plan: { path: `missions/${missionId}/plan.md`, revision: 7 },
+    }), { reason: 'seed' });
+    expect(seeded.ok).toBe(true);
+    expect(seeded.state_version).toBe(1);
+
+    const result = await createTasksMiddleware({ now: () => NOON })(stateFor(root));
+
+    const after = store.getMission(missionId);
+    // Status and owners are the running lane's, not this prompt's to reset.
+    expect(after.status).toBe('executing');
+    expect(after.owners).toEqual(['lane-1']);
+    // `plan` is likewise carried, so a re-prompt cannot rewind a planned mission.
+    expect(after.plan).toEqual({ path: `missions/${missionId}/plan.md`, revision: 7 });
+    // Only the authored fields move: the title is this prompt's goal.
+    expect(after.title).toBe(SUBSTANTIVE);
+
+    expect(result.context.tasks.mission.store).toMatchObject({
+      status: 'written',
+      state_version: 2,
+      mission_id: missionId,
+    });
+
+    // The event must carry the PRESERVED status. A `queued` here would tell
+    // /doctor the lane stopped running.
+    const updates = readLedgerCensus(root).events.filter((e) => e.event === 'state.updated');
+    expect(updates.map((e) => e.data.state_version)).toEqual([1, 2]);
+    expect(updates[1].data.status).toBe('executing');
   });
 });
