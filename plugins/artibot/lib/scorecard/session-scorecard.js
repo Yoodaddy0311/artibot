@@ -18,7 +18,7 @@
  *
  * ── WHAT THIS CARD CANNOT SEE (repo rule §9: write it next to the gate) ──────
  *  1. ZERO LIVE LEDGER LINES — AND "WIRED" IS NOT "POPULATED". Ledger writers
- *     landed in this batch (`scripts/hooks/pre-bash.js#recordBlock` human.asked,
+ *     landed in this batch (`lib/runtime/human-asked-record.js#recordHumanAsked` human.asked,
  *     `scripts/hooks/subagent-handler.js#observeRoute` route.selected,
  *     `lib/runtime/middleware/tasks.js#createTasksMiddleware` Mission Contract), so the earlier
  *     claim here that Phase 0 wires none was WRONG. What is still true is that

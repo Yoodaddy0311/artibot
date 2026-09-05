@@ -82,10 +82,9 @@ export const REPO_ROOT = path.resolve(PLUGIN_ROOT, '..', '..');
 //   - The Korean phrase "N개 전문 에이전트" wherever it appears (e.g.
 //     plugins/artibot/docs/ROADMAP-CLAUDE-TAG-CONVERGENCE.md:48). It is left
 //     unbound for the reason recorded at the ko `agent defs` pattern below.
-//   - AGENTS.md at the repo root is listed but is UNTRACKED (git ls-files
-//     returns nothing for it, measured 2026-09-05). The fixer heals it on a
-//     machine that has it; CI will never see its drift. Do not cite it as
-//     evidence that a claim is gated.
+//   - AGENTS.md at the repo root is gitignored (.gitignore:55) and therefore
+//     NOT a target since 2026-09-05: listing it made CI throw ENOENT (batch
+//     9b93e370). A local heal is not a gate; do not cite it as evidence.
 const SYNC_RELATIVE = [
   ['REPO', 'README.md'],
   ['REPO', 'INSTALL.md'],
