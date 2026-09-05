@@ -52,6 +52,7 @@ describe('session-end hook - learning pipeline', () => {
   let runMacroAutoRegister;
   let buildSessionData;
   let reportScoreHealth;
+  let recordUsageReceipts;
 
   beforeEach(async () => {
     vi.resetModules();
@@ -66,6 +67,7 @@ describe('session-end hook - learning pipeline', () => {
     runMacroAutoRegister = mod.runMacroAutoRegister;
     buildSessionData = mod.buildSessionData;
     reportScoreHealth = mod.reportScoreHealth;
+    recordUsageReceipts = mod.recordUsageReceipts;
 
     // Allow the main() side-effect to complete
     await new Promise((r) => setTimeout(r, 100));
@@ -530,6 +532,521 @@ describe('session-end hook - learning pipeline', () => {
       expect(line).toContain('[learning] score health: DEGENERATE');
       expect(line).toContain('samples=12');
       expect(line).toContain('signatures=1');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // usage.receipt ledger writer
+  //
+  // The defect this covers is that `usage.receipt` had ZERO writers: the
+  // receipt builder existed and nothing ever appended its output. So the two
+  // things worth proving are that a real session produces real ledger lines,
+  // and that running the hook twice does NOT produce them twice —
+  // `lib/runtime/ledger.js#foldMissions` sums usage.receipt into
+  // `economics`, so a re-fire without dedupe silently doubles recorded spend.
+  //
+  // WHAT A GREEN RUN HERE DOES NOT PROVE: that the hook is wired into main().
+  // These tests call `recordUsageReceipts` directly because the module's
+  // `isMainEntry` guard stops main() from running under vitest. Live firing is
+  // verified outside this suite.
+  // ---------------------------------------------------------------------------
+  describe('recordUsageReceipts()', () => {
+    /** tmp roots created by a test, removed in afterEach. */
+    let tmpRoots = [];
+
+    afterEach(async () => {
+      const { rmSync } = await import('node:fs');
+      for (const dir of tmpRoots) {
+        try { rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
+      }
+      tmpRoots = [];
+    });
+
+    /** Every stderr write that is the economics summary line. */
+    function economicsLines() {
+      return stderrSpy.mock.calls
+        .map((c) => c[0])
+        .filter((s) => typeof s === 'string' && s.startsWith('[economics] usage.receipt:'));
+    }
+
+    /**
+     * The contract is EXACTLY ONE summary line per call. Zero means the hook
+     * ran silently and an operator cannot tell it from a hook that never
+     * fired; more than one means a retry loop is being hidden.
+     */
+    function expectOneSummaryLine() {
+      const lines = economicsLines();
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toMatch(
+        /^\[economics] usage\.receipt: status=\S+ appended=\d+ rejected=\d+ deduped=\d+ receipts=\d+ coverage=\S+ reason=/,
+      );
+    }
+
+    /** The real collaborators, imported directly (getPluginRoot is mocked). */
+    async function realDeps() {
+      const [usage, envelope, ledger, root, mission] = await Promise.all([
+        import('../../lib/economics/usage-receipt.js'),
+        import('../../lib/economics/receipt-envelope.js'),
+        import('../../lib/runtime/ledger.js'),
+        import('../../lib/git/project-root.js'),
+        import('../../lib/mission/mission-id.js'),
+      ]);
+      return {
+        deps: {
+          buildUsageReceipts: usage.buildUsageReceipts,
+          toUsageReceiptEnvelopes: envelope.toUsageReceiptEnvelopes,
+          appendLedgerEvent: ledger.appendLedgerEvent,
+          readAllEvents: ledger.readAllEvents,
+          resolveProjectRoot: root.resolveProjectRoot,
+          sessionFallbackMissionId: mission.sessionFallbackMissionId,
+          isMissionId: mission.isMissionId,
+        },
+        ledgerFilePath: ledger.ledgerFilePath,
+        resolveProjectRoot: root.resolveProjectRoot,
+      };
+    }
+
+    /** One assistant entry in the shape measured 2026-09-02. */
+    function assistantEntry(requestId, minute, model = 'claude-opus-5') {
+      return JSON.stringify({
+        type: 'assistant',
+        requestId,
+        timestamp: `2026-09-02T06:${String(minute % 60).padStart(2, '0')}:00.000Z`,
+        effort: 'high',
+        message: {
+          model,
+          role: 'assistant',
+          content: [{ type: 'text', text: 'x'.repeat(64) }],
+          usage: {
+            input_tokens: 1200,
+            cache_read_input_tokens: 90000,
+            cache_creation_input_tokens: 4500,
+            output_tokens: 800,
+            output_tokens_details: { thinking_tokens: 250 },
+          },
+        },
+      });
+    }
+
+    /** Each response written twice, as real transcripts do. */
+    function transcriptText(prefix, count) {
+      const lines = [];
+      for (let i = 0; i < count; i += 1) {
+        const line = assistantEntry(`${prefix}-req-${i}`, i);
+        lines.push(line);
+        lines.push(line);
+      }
+      return `${lines.join('\n')}\n`;
+    }
+
+    /**
+     * A throwaway project on the real filesystem: a `.git` marker so
+     * `resolveProjectRoot` stops there, a main transcript of 700 distinct
+     * responses (1400 rows), and three subagent transcripts of 110 each.
+     *
+     * @returns {Promise<{root: string, sessionId: string, transcriptPath: string,
+     *   bytes: number, mainRows: number}>}
+     */
+    async function makeProject() {
+      const { mkdirSync, writeFileSync, statSync } = await import('node:fs');
+      const sessionId = `sess${Date.now()}${Math.floor(Math.random() * 1e6)}`;
+      const root = path.join(os.tmpdir(), `artibot-receipt-${sessionId}`);
+      tmpRoots.push(root);
+      mkdirSync(path.join(root, '.git'), { recursive: true });
+
+      const dir = path.join(root, 'transcripts');
+      const transcriptPath = path.join(dir, `${sessionId}.jsonl`);
+      const subDir = path.join(dir, sessionId, 'subagents');
+      mkdirSync(subDir, { recursive: true });
+
+      const mainText = transcriptText('main', 700);
+      writeFileSync(transcriptPath, mainText, 'utf-8');
+      let bytes = Buffer.byteLength(mainText, 'utf-8');
+      for (const name of ['agent-aaa11111', 'agent-bbb22222', 'agent-ccc33333']) {
+        const text = transcriptText(name, 110);
+        writeFileSync(path.join(subDir, `${name}.jsonl`), text, 'utf-8');
+        bytes += Buffer.byteLength(text, 'utf-8');
+      }
+      // Prove the fixture actually landed at size — a 0-byte write would make
+      // every assertion below pass for the wrong reason.
+      expect(statSync(transcriptPath).size).toBeGreaterThan(400_000);
+      return {
+        root,
+        sessionId,
+        transcriptPath,
+        bytes,
+        mainRows: mainText.trimEnd().split('\n').length,
+      };
+    }
+
+    /** Ledger lines of one event kind. */
+    async function ledgerLines(file, event) {
+      const { readFileSync, existsSync } = await import('node:fs');
+      if (!existsSync(file)) return [];
+      return readFileSync(file, 'utf-8')
+        .split('\n')
+        .filter((l) => l.trim().length > 0)
+        .map((l) => JSON.parse(l))
+        .filter((e) => e.event === event);
+    }
+
+    /** A receipt shaped like the real builder's output. */
+    function fakeReceipt(runId, missionId) {
+      return {
+        schema_version: 1,
+        run_id: runId,
+        mission_id: missionId,
+        model_identity: {
+          provider: 'anthropic',
+          family: 'claude',
+          tier: 'opus',
+          model_id: 'claude-opus-5',
+          version: 'claude-opus-5',
+          catalog_version: '2026-09-02',
+        },
+        usage: {
+          source: 'transcript',
+          fresh_input_tokens: 10,
+          cached_input_tokens: 20,
+          cache_creation_tokens: 5,
+          output_tokens: 3,
+          requests: 1,
+        },
+        timing: {
+          started_at: '2026-09-02T06:00:00.000Z',
+          completed_at: '2026-09-02T06:01:00.000Z',
+          latency_ms: 60000,
+        },
+        outcome: { status: 'unknown', accepted: null },
+        cost: { total: null, pricing_version: 'unresolved' },
+      };
+    }
+
+    // -----------------------------------------------------------------------
+    // 1. Preconditions — every one is a skip, never an exception
+    // -----------------------------------------------------------------------
+
+    it.each([
+      ['no-transcript', { session_id: 'sess-abcdef01', cwd: '/tmp/x' }],
+      ['no-session-id', { transcript_path: '/tmp/t.jsonl', cwd: '/tmp/x' }],
+      ['no-cwd', { session_id: 'sess-abcdef01', transcript_path: '/tmp/t.jsonl' }],
+    ])('skips with reason %s rather than throwing', async (reason, hookData) => {
+      stderrSpy.mockClear();
+      const res = await recordUsageReceipts(hookData);
+      expect(res.status).toBe('skipped');
+      expect(res.reason).toBe(reason);
+      expect(res.appended).toBe(0);
+      expectOneSummaryLine();
+    });
+
+    it('returns the full result shape even on the earliest skip', async () => {
+      // A caller must not have to branch on `undefined` for the counters.
+      const res = await recordUsageReceipts({});
+      expect(res).toMatchObject({
+        status: 'skipped',
+        appended: 0,
+        rejected: 0,
+        deduped: 0,
+      });
+      expect(res).toHaveProperty('receipts');
+      expect(res).toHaveProperty('coverage');
+    });
+
+    it('never throws for a null or undefined payload', async () => {
+      await expect(recordUsageReceipts(null)).resolves.toMatchObject({ status: 'skipped' });
+      await expect(recordUsageReceipts(undefined)).resolves.toMatchObject({ status: 'skipped' });
+    });
+
+    // -----------------------------------------------------------------------
+    // 2. End to end on the real filesystem, with the real collaborators
+    // -----------------------------------------------------------------------
+
+    it('appends one real ledger line per receipt from a full-size transcript', async () => {
+      const project = await makeProject();
+      const { deps, ledgerFilePath, resolveProjectRoot } = await realDeps();
+      const hookData = {
+        session_id: project.sessionId,
+        transcript_path: project.transcriptPath,
+        cwd: project.root,
+      };
+
+      stderrSpy.mockClear();
+      const startedAt = Date.now();
+      const res = await recordUsageReceipts(hookData, deps);
+      const elapsedMs = Date.now() - startedAt;
+
+      expect(res.status).toBe('appended');
+      // main + three subagents.
+      expect(res.appended).toBeGreaterThanOrEqual(4);
+      expect(res.rejected).toBe(0);
+      expect(res.deduped).toBe(0);
+      expectOneSummaryLine();
+
+      const file = ledgerFilePath(resolveProjectRoot(project.root));
+      const written = await ledgerLines(file, 'usage.receipt');
+      expect(written).toHaveLength(res.appended);
+
+      for (const line of written) {
+        // `estimate` would mean a required counter was missing, so this also
+        // asserts the transcript was parsed rather than guessed at.
+        expect(line.data.usage.source).toBe('transcript');
+        // `hook` is the writer of the envelope; `data.usage.source` above is
+        // the provenance of the NUMBERS. Two different `source` fields, two
+        // different questions — asserting both keeps them from being
+        // conflated.
+        expect(line.source).toBe('hook');
+        expect(line.session_id).toBe(project.sessionId);
+        expect(line.data.mission_id).toBe(line.mission_id);
+        expect(line.data.run_id).toBe(line.run_id);
+      }
+
+      // A rejected line means the writer refused the envelope — the exact
+      // failure this whole lane exists to prevent, and invisible from `res`
+      // alone if the reason string were ever swallowed.
+      expect(await ledgerLines(file, 'ledger.rejected')).toHaveLength(0);
+
+      // Budget is 10s; recorded so a regression in parse cost is visible.
+      expect(elapsedMs).toBeLessThan(10_000);
+    });
+
+    // -----------------------------------------------------------------------
+    // 3. Re-firing must not double-count
+    // -----------------------------------------------------------------------
+
+    it('records nothing on a second call for the same session', async () => {
+      const project = await makeProject();
+      const { deps, ledgerFilePath, resolveProjectRoot } = await realDeps();
+      const hookData = {
+        session_id: project.sessionId,
+        transcript_path: project.transcriptPath,
+        cwd: project.root,
+      };
+      const file = ledgerFilePath(resolveProjectRoot(project.root));
+
+      const first = await recordUsageReceipts(hookData, deps);
+      expect(first.status).toBe('appended');
+      const afterFirst = await ledgerLines(file, 'usage.receipt');
+
+      stderrSpy.mockClear();
+      const second = await recordUsageReceipts(hookData, deps);
+
+      expect(second.status).toBe('skipped');
+      expect(second.reason).toBe('already-recorded');
+      expect(second.appended).toBe(0);
+      expect(second.deduped).toBe(first.appended);
+      expectOneSummaryLine();
+
+      // The actual double-count proof: the file did not grow.
+      const afterSecond = await ledgerLines(file, 'usage.receipt');
+      expect(afterSecond).toHaveLength(afterFirst.length);
+      expect(await ledgerLines(file, 'ledger.rejected')).toHaveLength(0);
+    });
+
+    it('NEGATIVE CONTROL: the ledger DOES double when the dedupe lookup is blinded', async () => {
+      // The test above asserts the file did not grow. On its own that is also
+      // what a hook which appended nothing at all would produce, so it cannot
+      // distinguish working dedupe from a broken writer. Here the same second
+      // call runs with `readAllEvents` forced to return nothing — the one
+      // input dedupe depends on — and the line count doubles.
+      //
+      // Without this, a regression that silently stopped appending would keep
+      // the idempotency test green.
+      const project = await makeProject();
+      const { deps, ledgerFilePath, resolveProjectRoot } = await realDeps();
+      const hookData = {
+        session_id: project.sessionId,
+        transcript_path: project.transcriptPath,
+        cwd: project.root,
+      };
+      const file = ledgerFilePath(resolveProjectRoot(project.root));
+
+      const first = await recordUsageReceipts(hookData, deps);
+      expect(first.status).toBe('appended');
+      expect(first.appended).toBeGreaterThanOrEqual(4);
+
+      const blinded = await recordUsageReceipts(hookData, {
+        ...deps,
+        readAllEvents: () => [],
+      });
+
+      expect(blinded.status).toBe('appended');
+      expect(blinded.deduped).toBe(0);
+      const lines = await ledgerLines(file, 'usage.receipt');
+      expect(lines).toHaveLength(first.appended * 2);
+    });
+
+    // -----------------------------------------------------------------------
+    // 4. The writer refuses every envelope
+    // -----------------------------------------------------------------------
+
+    it('reports failed with the writer reason when every append is rejected', async () => {
+      const { deps } = await realDeps();
+      const missionId = 'M-20260905-001';
+      const appendLedgerEvent = vi.fn(() => ({
+        ok: false,
+        reason: 'source-not-allowed:reviewer',
+      }));
+
+      stderrSpy.mockClear();
+      const res = await recordUsageReceipts(
+        { session_id: 'sess-abcdef01', transcript_path: '/tmp/t.jsonl', cwd: '/tmp/x', mission_id: missionId },
+        {
+          ...deps,
+          buildUsageReceipts: async () => ({
+            receipts: [fakeReceipt('run-a', missionId), fakeReceipt('run-b', missionId)],
+            meta: { coverage: 1 },
+          }),
+          appendLedgerEvent,
+          readAllEvents: () => [],
+          resolveProjectRoot: () => '/tmp/x',
+        },
+      );
+
+      expect(res.status).toBe('failed');
+      expect(res.rejected).toBe(2);
+      expect(res.receipts).toBe(2);
+      expect(res.appended).toBe(0);
+      expect(res.reason).toContain('source-not-allowed:reviewer');
+      expect(appendLedgerEvent).toHaveBeenCalledTimes(2);
+      expectOneSummaryLine();
+    });
+
+    // -----------------------------------------------------------------------
+    // 5. The parser throws
+    // -----------------------------------------------------------------------
+
+    it('reports failed with parse-failed when the receipt builder throws', async () => {
+      const { deps } = await realDeps();
+      stderrSpy.mockClear();
+      const res = await recordUsageReceipts(
+        { session_id: 'sess-abcdef01', transcript_path: '/tmp/t.jsonl', cwd: '/tmp/x' },
+        {
+          ...deps,
+          buildUsageReceipts: async () => { throw new Error('transcript exploded'); },
+          readAllEvents: () => [],
+          resolveProjectRoot: () => '/tmp/x',
+        },
+      );
+
+      expect(res.status).toBe('failed');
+      expect(res.reason).toMatch(/^parse-failed:/);
+      expect(res.appended).toBe(0);
+      expectOneSummaryLine();
+    });
+
+    it('skips with no-receipts when the transcript yields nothing', async () => {
+      const { deps } = await realDeps();
+      const res = await recordUsageReceipts(
+        { session_id: 'sess-abcdef01', transcript_path: '/tmp/t.jsonl', cwd: '/tmp/x' },
+        {
+          ...deps,
+          buildUsageReceipts: async () => ({ receipts: [], meta: { coverage: null } }),
+          readAllEvents: () => [],
+          resolveProjectRoot: () => '/tmp/x',
+        },
+      );
+      expect(res.status).toBe('skipped');
+      expect(res.reason).toBe('no-receipts');
+    });
+
+    it('skips with no-project-root when root resolution fails', async () => {
+      const { deps } = await realDeps();
+      const res = await recordUsageReceipts(
+        { session_id: 'sess-abcdef01', transcript_path: '/tmp/t.jsonl', cwd: '/tmp/x' },
+        { ...deps, resolveProjectRoot: () => { throw new Error('no root'); } },
+      );
+      expect(res.status).toBe('skipped');
+      expect(res.reason).toBe('no-project-root');
+    });
+
+    it('skips with no-mission-id when the fallback issuer throws', async () => {
+      const { deps } = await realDeps();
+      const res = await recordUsageReceipts(
+        { session_id: 'sess-abcdef01', transcript_path: '/tmp/t.jsonl', cwd: '/tmp/x' },
+        {
+          ...deps,
+          sessionFallbackMissionId: () => { throw new TypeError('too short'); },
+          resolveProjectRoot: () => '/tmp/x',
+        },
+      );
+      expect(res.status).toBe('skipped');
+      expect(res.reason).toBe('no-mission-id');
+    });
+
+    // -----------------------------------------------------------------------
+    // 6. Fail-open when the collaborators cannot even be loaded
+    // -----------------------------------------------------------------------
+
+    it('fails open when no deps are injected and the dynamic import cannot resolve', async () => {
+      // getPluginRoot is mocked to '/fake/plugin/root', so the module's own
+      // dynamic import genuinely fails here. Instrumentation must never be the
+      // reason a session cannot end.
+      stderrSpy.mockClear();
+      let res;
+      await expect(
+        (async () => {
+          res = await recordUsageReceipts({
+            session_id: 'sess-abcdef01',
+            transcript_path: '/tmp/t.jsonl',
+            cwd: '/tmp/x',
+          });
+        })(),
+      ).resolves.toBeUndefined();
+      expect(res.status).toBe('failed');
+      expect(res.appended).toBe(0);
+      expectOneSummaryLine();
+    });
+
+    // -----------------------------------------------------------------------
+    // 7. Mission id: declared wins, otherwise the session fallback
+    // -----------------------------------------------------------------------
+
+    /** Capture the missionId the hook hands the receipt builder. */
+    async function capturedMissionId(hookData) {
+      const { deps } = await realDeps();
+      let seen = null;
+      await recordUsageReceipts(hookData, {
+        ...deps,
+        buildUsageReceipts: async (opts) => {
+          seen = opts.missionId;
+          return { receipts: [], meta: { coverage: null } };
+        },
+        readAllEvents: () => [],
+        resolveProjectRoot: () => '/tmp/x',
+      });
+      return seen;
+    }
+
+    it('uses the payload mission_id when it is a valid id', async () => {
+      const seen = await capturedMissionId({
+        session_id: 'sess-abcdef01',
+        transcript_path: '/tmp/t.jsonl',
+        cwd: '/tmp/x',
+        mission_id: 'M-20260905-001',
+      });
+      expect(seen).toBe('M-20260905-001');
+    });
+
+    it('falls back to the session-derived id when the payload declares none', async () => {
+      const seen = await capturedMissionId({
+        session_id: 'sess-abcdef01',
+        transcript_path: '/tmp/t.jsonl',
+        cwd: '/tmp/x',
+      });
+      expect(seen).toMatch(/^M-\d{8}-S[0-9A-Za-z]{8}$/);
+    });
+
+    it('ignores a malformed payload mission_id rather than passing it through', async () => {
+      // A fabricated mission id poisons every aggregate built on the receipt,
+      // so an unparseable one must be replaced, never forwarded.
+      const seen = await capturedMissionId({
+        session_id: 'sess-abcdef01',
+        transcript_path: '/tmp/t.jsonl',
+        cwd: '/tmp/x',
+        mission_id: 'not-a-mission-id',
+      });
+      expect(seen).not.toBe('not-a-mission-id');
+      expect(seen).toMatch(/^M-\d{8}-S[0-9A-Za-z]{8}$/);
     });
   });
 });
