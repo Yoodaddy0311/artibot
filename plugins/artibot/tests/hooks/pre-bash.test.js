@@ -12,17 +12,35 @@ vi.mock('../../scripts/utils/index.js', () => ({
   }),
 }));
 
+// The ledger edge is stubbed so the `human.asked` record can be observed
+// without a filesystem. `lib/security/human-gates.js` is deliberately NOT
+// stubbed — the gate ids asserted below are real `classify()` output.
+const ledger = vi.hoisted(() => ({ append: vi.fn() }));
+vi.mock('../../lib/runtime/ledger.js', () => ({ appendLedgerEvent: ledger.append }));
+vi.mock('../../lib/git/project-root.js', () => ({ resolveProjectRoot: (cwd) => cwd }));
+
 const { readStdin, writeStdout } = await import('../../scripts/utils/index.js');
-const { createErrorHandler } = await import('../../lib/core/hook-utils.js');
 
 // ---------------------------------------------------------------------------
 // Helper
 // ---------------------------------------------------------------------------
-function makeHookData(command) {
-  return JSON.stringify({
+/**
+ * A Bash PreToolUse payload. `cwd` is OMITTED by default so every pre-existing
+ * case in this file keeps the payload shape it was written against — which is
+ * also the shape that records nothing (the recorder needs an injected root).
+ *
+ * @param {string} command
+ * @param {{cwd?: string, sessionId?: string}} [opts]
+ * @returns {string}
+ */
+function makeHookData(command, opts = {}) {
+  const data = {
     tool_name: 'Bash',
     tool_input: { command },
-  });
+  };
+  if (opts.cwd !== undefined) data.cwd = opts.cwd;
+  if (opts.sessionId !== undefined) data.session_id = opts.sessionId;
+  return JSON.stringify(data);
 }
 
 /**
@@ -34,12 +52,11 @@ function makeHookData(command) {
  */
 async function runHook() {
   const mod = await import('../../scripts/hooks/pre-bash.js');
-  // The `.catch` mirrors the module's direct-run tail so the error-handling
-  // test still reaches the real handler. Keep in sync with pre-bash.js.
-  await mod.main().catch(createErrorHandler('pre-bash', {
-    writeStdout,
-    blockReason: 'Safety check failed due to hook error. Blocking by default.',
-  }));
+  // The `.catch` is the module's OWN exported tail, not a copy of it. A
+  // hand-rolled `createErrorHandler(...)` here would keep passing after the
+  // real tail stopped recording — the error path would be tested against a
+  // reimplementation of itself.
+  await mod.main().catch(mod.handleHookError);
 }
 
 // ---------------------------------------------------------------------------
@@ -245,6 +262,101 @@ describe('pre-bash hook', () => {
       expect(call.decision).toBe('block');
       expect(call.reason).toContain('DANGEROUS COMMAND DETECTED');
       expect(call.reason).toContain('rm -rf /important');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // human.asked record (T-39 symmetry)
+  // -------------------------------------------------------------------------
+  describe('human.asked record', () => {
+    const CWD = '/project';
+    const SID = 'sess1234abcd';
+
+    it('appends exactly one line for a block', async () => {
+      readStdin.mockResolvedValue(makeHookData('rm -rf /important', { cwd: CWD, sessionId: SID }));
+
+      await runHook();
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(ledger.append).toHaveBeenCalledTimes(1);
+      const [root, event] = ledger.append.mock.calls[0];
+      expect(root).toBe(CWD);
+      expect(event.event).toBe('human.asked');
+      expect(event.source).toBe('hook');
+      expect(event.session_id).toBe(SID);
+      expect(event.data.tool).toBe('Bash');
+      expect(event.data.decision).toBe('block');
+    });
+
+    it('records the reason byte-for-byte as it was sent to stdout', async () => {
+      readStdin.mockResolvedValue(makeHookData('git push --force', { cwd: CWD, sessionId: SID }));
+
+      await runHook();
+      await new Promise((r) => setTimeout(r, 50));
+
+      // Same string object semantics both ways: the ledger must not summarize,
+      // truncate or re-word what the model was told.
+      expect(ledger.append.mock.calls[0][1].data.reason)
+        .toBe(writeStdout.mock.calls[0][0].reason);
+    });
+
+    it('appends nothing on the approve path', async () => {
+      readStdin.mockResolvedValue(makeHookData('git status', { cwd: CWD, sessionId: SID }));
+
+      await runHook();
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(writeStdout).toHaveBeenCalledWith(
+        expect.objectContaining({ decision: 'approve' }),
+      );
+      expect(ledger.append).not.toHaveBeenCalled();
+    });
+
+    it('appends nothing when the payload carries no cwd', async () => {
+      // NEGATIVE CONTROL for the whole describe: this is the payload shape
+      // every other case in this file uses. If the recorder ever anchored on
+      // `process.cwd()` instead of the injected root, this case is the one that
+      // catches it — and one project's blocked commands would otherwise be
+      // filed into whatever repo the hook happened to run from.
+      readStdin.mockResolvedValue(makeHookData('rm -rf /important'));
+
+      await runHook();
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(writeStdout).toHaveBeenCalledWith(
+        expect.objectContaining({ decision: 'block' }),
+      );
+      expect(ledger.append).not.toHaveBeenCalled();
+    });
+
+    it('writes the decision to stdout BEFORE it touches the ledger', async () => {
+      readStdin.mockResolvedValue(makeHookData('rm -rf /important', { cwd: CWD, sessionId: SID }));
+
+      await runHook();
+      await new Promise((r) => setTimeout(r, 50));
+
+      // Ordering is the observe contract: bookkeeping may never delay or
+      // reorder a security decision. `invocationCallOrder` is a global counter
+      // across all vitest spies, so comparing the two is meaningful.
+      expect(writeStdout.mock.invocationCallOrder[0])
+        .toBeLessThan(ledger.append.mock.invocationCallOrder[0]);
+    });
+
+    it('records nothing from the fail-closed tail, which has no payload', async () => {
+      readStdin.mockRejectedValue(new Error('stdin read failed'));
+
+      await runHook();
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(writeStdout).toHaveBeenCalledWith({
+        decision: 'block',
+        reason: 'Safety check failed due to hook error. Blocking by default.',
+      });
+      // The tail DOES attempt a record, but the failure it exists for happens
+      // while reading stdin, so no payload — and therefore no root — was ever
+      // parsed. This pins that the attempt stays silent rather than guessing a
+      // root.
+      expect(ledger.append).not.toHaveBeenCalled();
     });
   });
 });

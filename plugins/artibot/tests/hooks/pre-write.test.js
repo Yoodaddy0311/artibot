@@ -17,13 +17,31 @@ vi.mock('node:path', async () => {
   return { ...actual, default: actual };
 });
 
+// The ledger edge is stubbed so the `human.asked` record can be observed
+// without a filesystem. `lib/security/human-gates.js` is deliberately NOT
+// stubbed — the gate ids asserted below are real `classify()` output.
+const ledger = vi.hoisted(() => ({ append: vi.fn() }));
+vi.mock('../../lib/runtime/ledger.js', () => ({ appendLedgerEvent: ledger.append }));
+vi.mock('../../lib/git/project-root.js', () => ({ resolveProjectRoot: (cwd) => cwd }));
+
 const { readStdin, writeStdout } = await import('../../scripts/utils/index.js');
-const { createErrorHandler } = await import('../../lib/core/hook-utils.js');
 
 // ---------------------------------------------------------------------------
 // Helpers - build fake secrets dynamically to avoid hook self-blocking
 // ---------------------------------------------------------------------------
-function makeHookData(filePath, content, toolName = 'Write') {
+/**
+ * A Write/Edit PreToolUse payload. `cwd` is OMITTED by default so every
+ * pre-existing case in this file keeps the payload shape it was written
+ * against — which is also the shape that records nothing (the recorder needs
+ * an injected root).
+ *
+ * @param {string} filePath
+ * @param {string} [content]
+ * @param {string} [toolName]
+ * @param {{cwd?: string, sessionId?: string}} [opts]
+ * @returns {string}
+ */
+function makeHookData(filePath, content, toolName = 'Write', opts = {}) {
   const input = { file_path: filePath };
   if (content !== undefined) {
     if (toolName === 'Edit') {
@@ -32,10 +50,13 @@ function makeHookData(filePath, content, toolName = 'Write') {
       input.content = content;
     }
   }
-  return JSON.stringify({
+  const data = {
     tool_name: toolName,
     tool_input: input,
-  });
+  };
+  if (opts.cwd !== undefined) data.cwd = opts.cwd;
+  if (opts.sessionId !== undefined) data.session_id = opts.sessionId;
+  return JSON.stringify(data);
 }
 
 /** Build a fake AWS key: AKIA + 16 uppercase chars */
@@ -72,12 +93,11 @@ function fakeGenericSecret() {
  */
 async function runHook() {
   const mod = await import('../../scripts/hooks/pre-write.js');
-  // The `.catch` mirrors the module's direct-run tail so the error-handling
-  // test still reaches the real handler. Keep in sync with pre-write.js.
-  await mod.main().catch(createErrorHandler('pre-write', {
-    writeStdout,
-    blockReason: 'Safety check failed due to hook error. Blocking by default.',
-  }));
+  // The `.catch` is the module's OWN exported tail, not a copy of it. A
+  // hand-rolled `createErrorHandler(...)` here would keep passing after the
+  // real tail stopped recording — the error path would be tested against a
+  // reimplementation of itself.
+  await mod.main().catch(mod.handleHookError);
 }
 
 // ---------------------------------------------------------------------------
@@ -354,6 +374,159 @@ describe('pre-write hook', () => {
       expect(writeStdout).toHaveBeenCalledWith(
         expect.objectContaining({ decision: 'block' }),
       );
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // human.asked record (T-39 symmetry)
+  // -------------------------------------------------------------------------
+  describe('human.asked record', () => {
+    /**
+     * The payload cwd MUST name a real Artibot repo, and this is the load-
+     * bearing detail of the whole describe.
+     *
+     * `executeChain` drops every `artibot-policy` guard when the cwd is outside
+     * an Artibot repo (`lib/core/guard-registry.js:85-90`), and BOTH pre-phase
+     * Write/Edit guards — `sensitive-file` and `content-secret` — are
+     * `artibot-policy` (`:572-586`). So for Write/Edit, unlike for Bash, the
+     * DECISION itself is cwd-dependent: a payload carrying an invented
+     * `/project` cwd is approved, and every "records one line" case below would
+     * pass vacuously against an approve that never recorded anything.
+     *
+     * Using the process cwd — the plugin directory, which holds
+     * `artibot.config.json` — makes the injected value identical to the
+     * `hookData?.cwd || process.cwd()` fallback the other cases in this file
+     * already take. The record is then the ONLY thing the added key changes.
+     * Measured 2026-09-05.
+     */
+    const CWD = process.cwd();
+    const SID = 'sess1234abcd';
+    const SENSITIVE = '/project/.env';
+
+    it.each(['Write', 'Edit'])('appends exactly one line for a blocked %s', async (tool) => {
+      readStdin.mockResolvedValue(
+        makeHookData(SENSITIVE, 'VAR=1', tool, { cwd: CWD, sessionId: SID }),
+      );
+
+      await runHook();
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(ledger.append).toHaveBeenCalledTimes(1);
+      const [root, event] = ledger.append.mock.calls[0];
+      expect(root).toBe(CWD);
+      expect(event.event).toBe('human.asked');
+      expect(event.source).toBe('hook');
+      expect(event.session_id).toBe(SID);
+      expect(event.data.decision).toBe('block');
+      // The tool is recorded as the one that was actually blocked, so a Write
+      // and an Edit of the same file are distinguishable in the ledger.
+      expect(event.data.tool).toBe(tool);
+      expect(event.data.path).toBe(SENSITIVE);
+    });
+
+    it('records the reason byte-for-byte as it was sent to stdout', async () => {
+      readStdin.mockResolvedValue(
+        makeHookData(SENSITIVE, 'VAR=1', 'Write', { cwd: CWD, sessionId: SID }),
+      );
+
+      await runHook();
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(ledger.append.mock.calls[0][1].data.reason)
+        .toBe(writeStdout.mock.calls[0][0].reason);
+    });
+
+    it('carries no gate id for a path no gate row claims', async () => {
+      readStdin.mockResolvedValue(
+        makeHookData(SENSITIVE, 'VAR=1', 'Write', { cwd: CWD, sessionId: SID }),
+      );
+
+      await runHook();
+      await new Promise((r) => setTimeout(r, 50));
+
+      const { data } = ledger.append.mock.calls[0][1];
+      // HG-11's signature is a COMMAND pattern (`^\s*cat …`), so a Write whose
+      // *path* is `.env` matches no row even though this hook blocks it. The
+      // key must be ABSENT rather than null: the allowlist types
+      // `human.asked.data.gate` as a string, and a null would make the whole
+      // line a `ledger.rejected`.
+      expect(data.hits).toEqual([]);
+      expect(Object.prototype.hasOwnProperty.call(data, 'gate')).toBe(false);
+    });
+
+    it('records nothing for a gate-matching path the chain approves', async () => {
+      const configPath = '/project/artibot.config.json';
+      readStdin.mockResolvedValue(
+        makeHookData(configPath, 'x'.repeat(10), 'Edit', { cwd: CWD, sessionId: SID }),
+      );
+
+      await runHook();
+      await new Promise((r) => setTimeout(r, 50));
+
+      // This payload is APPROVED by the guard chain, so nothing is recorded —
+      // which is the point: the record follows the block, not the gate matrix.
+      // A gate hit alone never produces a line.
+      expect(writeStdout).toHaveBeenCalledWith(
+        expect.objectContaining({ decision: 'approve' }),
+      );
+      expect(ledger.append).not.toHaveBeenCalled();
+    });
+
+    it('appends nothing on the approve path', async () => {
+      readStdin.mockResolvedValue(
+        makeHookData('/project/src/app.js', 'const x = 1;', 'Write', { cwd: CWD, sessionId: SID }),
+      );
+
+      await runHook();
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(writeStdout).toHaveBeenCalledWith(
+        expect.objectContaining({ decision: 'approve' }),
+      );
+      expect(ledger.append).not.toHaveBeenCalled();
+    });
+
+    it('appends nothing when the payload carries no cwd', async () => {
+      // NEGATIVE CONTROL for the whole describe: this is the payload shape
+      // every other case in this file uses. If the recorder ever anchored on
+      // `process.cwd()` instead of the injected root, this case is the one that
+      // catches it.
+      readStdin.mockResolvedValue(makeHookData(SENSITIVE, 'VAR=1'));
+
+      await runHook();
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(writeStdout).toHaveBeenCalledWith(
+        expect.objectContaining({ decision: 'block' }),
+      );
+      expect(ledger.append).not.toHaveBeenCalled();
+    });
+
+    it('writes the decision to stdout BEFORE it touches the ledger', async () => {
+      readStdin.mockResolvedValue(
+        makeHookData(SENSITIVE, 'VAR=1', 'Write', { cwd: CWD, sessionId: SID }),
+      );
+
+      await runHook();
+      await new Promise((r) => setTimeout(r, 50));
+
+      // Ordering is the observe contract: bookkeeping may never delay or
+      // reorder a security decision.
+      expect(writeStdout.mock.invocationCallOrder[0])
+        .toBeLessThan(ledger.append.mock.invocationCallOrder[0]);
+    });
+
+    it('records nothing from the fail-closed tail, which has no payload', async () => {
+      readStdin.mockRejectedValue(new Error('stdin read failed'));
+
+      await runHook();
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(writeStdout).toHaveBeenCalledWith({
+        decision: 'block',
+        reason: 'Safety check failed due to hook error. Blocking by default.',
+      });
+      expect(ledger.append).not.toHaveBeenCalled();
     });
   });
 });
