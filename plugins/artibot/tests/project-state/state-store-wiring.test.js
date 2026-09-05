@@ -1,5 +1,6 @@
 /**
- * Evidence gate — `/doctor` Check 8 reaches a VERDICT on real wiring output.
+ * Evidence gate — `/doctor` Checks 8 and 9 reach a VERDICT on real wiring
+ * output.
  *
  * Every other Check-8 test in this repo feeds `checkLedgerStateParity`
  * hand-built fixtures. That proves the comparison logic and nothing about the
@@ -8,6 +9,12 @@
  * failure, so a green suite would keep saying so forever. This file closes
  * that gap by running the middleware for real and requiring the check to come
  * back with an actual judgement.
+ *
+ * Check 9 (`checkStateVersionGaps`) is called on the SAME journal, because a
+ * clean parity result does not imply a clean version sequence: parity compares
+ * the store against the ledger and the projection, and never looks at whether
+ * the store's own `state_version` run is well formed. Measured 09:13 on
+ * 2026-09-05, that check FAILED on this very fixture.
  *
  * The inputs come from the three production readers, not from the store
  * handle: `readLedgerCensus` off disk, `readJournal` off the store's own
@@ -32,9 +39,17 @@
  *    and the ledger under `<projectRoot>/.artibot/runtime/`. In a linked
  *    worktree those diverge. This tmpdir is a plain checkout, so the two
  *    resolve to the same repository by construction.
- *  - **Volume.** One mission, one write. Fold behaviour over a long journal,
- *    the 4 KB ledger line cap and dedupe under real seq pressure are all
- *    outside the fixture's reach.
+ *  - **Adjacent same-version records.** Check 9 folds a run of equal
+ *    `state_version` values into ONE transaction, which is what makes the
+ *    healthy [1, 1, 2] below pass. Journal records carry no transaction id, so
+ *    two genuinely separate writes that both landed on one version and sit
+ *    next to each other are indistinguishable from one multi-record commit and
+ *    are NOT caught — here or by Check 9. Verified 09:16 on 2026-09-05 that
+ *    NON-adjacent duplicates, gaps and regressions still are.
+ *  - **Volume.** At most two prompts and three journal records. Fold behaviour
+ *    over a long journal, the 4 KB ledger line cap and dedupe under real seq
+ *    pressure are all outside the fixture's reach. Nothing here measures a
+ *    version sequence long enough for a gap to hide in the middle of it.
  */
 
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
@@ -44,7 +59,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createTasksMiddleware } from '../../lib/runtime/middleware/tasks.js';
 import { readLedgerCensus } from '../../lib/runtime/ledger.js';
 import { readJournal } from '../../lib/project-state/state-manager.js';
-import { checkLedgerStateParity, CheckStatus } from '../../lib/project-state/doctor-checks.js';
+import { checkLedgerStateParity, checkStateVersionGaps, CheckStatus } from '../../lib/project-state/doctor-checks.js';
 
 const SESSION_ID = 'sess-e247a22f-parity';
 const NOW_MS = 1700000000000;
@@ -62,29 +77,39 @@ afterEach(() => {
   while (roots.length > 0) rmSync(roots.pop(), { recursive: true, force: true });
 });
 
+/** One prompt payload against the given root. */
+const promptState = (projectRoot) => ({
+  input: {
+    prompt: SUBSTANTIVE,
+    hookData: { cwd: projectRoot, session_id: SESSION_ID },
+  },
+  context: {
+    routing: { system: 'system1', score: 0.3 },
+    intent: { best: 'action:implement', commands: [], agents: [], ambiguous: false },
+  },
+  messageParts: [],
+  userPrompt: SUBSTANTIVE,
+});
+
 /**
- * Run the middleware once over a fresh repository and collect exactly what
- * `/doctor` Check 8 would collect.
+ * Run the middleware `runs` times over ONE fresh repository and collect exactly
+ * what `/doctor` Checks 8 and 9 would collect.
  *
- * @returns {Promise<object>} `{parity, projectRoot, project, projection, events, journal, census}`.
+ * The same middleware instance serves every run, as a real session would: a
+ * fresh instance per prompt would hide any state the closure carries.
+ *
+ * @param {number} [runs=1] - How many prompts to submit.
+ * @returns {Promise<object>} `{parity, gaps, projectRoot, project, projection, events, journal, census}`.
  */
-async function runOnceAndInspect() {
+async function runAndInspect(runs = 1) {
   const projectRoot = mkdtempSync(path.join(tmpdir(), 'artibot-parity-'));
   roots.push(projectRoot);
   mkdirSync(path.join(projectRoot, '.git'), { recursive: true });
 
-  await createTasksMiddleware({ now: () => NOW_MS })({
-    input: {
-      prompt: SUBSTANTIVE,
-      hookData: { cwd: projectRoot, session_id: SESSION_ID },
-    },
-    context: {
-      routing: { system: 'system1', score: 0.3 },
-      intent: { best: 'action:implement', commands: [], agents: [], ambiguous: false },
-    },
-    messageParts: [],
-    userPrompt: SUBSTANTIVE,
-  });
+  const middleware = createTasksMiddleware({ now: () => NOW_MS });
+  for (let i = 0; i < runs; i += 1) {
+    await middleware(promptState(projectRoot));
+  }
 
   const journalPath = path.join(projectRoot, '.git', 'artibot', 'project-state.jsonl');
   const projectionPath = path.join(projectRoot, '.artibot', 'state.yaml');
@@ -103,9 +128,13 @@ async function runOnceAndInspect() {
   // chose another name fails loudly instead of hiding inside a drift finding.
   const project = path.basename(projectRoot);
   const parity = checkLedgerStateParity({ events, journal, projection, project, census });
+  const gaps = checkStateVersionGaps({ journal });
 
-  return { parity, projectRoot, project, projection, events, journal, census };
+  return { parity, gaps, projectRoot, project, projection, events, journal, census };
 }
+
+/** The single-prompt case the parity assertions below are written against. */
+const runOnceAndInspect = () => runAndInspect(1);
 
 describe('state-store wiring — /doctor Check 8 produces evidence, not "unmeasured"', () => {
   it('supplies all three parity inputs, so the check is actually measured', async () => {
@@ -146,5 +175,25 @@ describe('state-store wiring — /doctor Check 8 produces evidence, not "unmeasu
   it('names the project the store actually used', async () => {
     const { project, projection } = await runOnceAndInspect();
     expect(projection).toContain(project);
+  });
+
+  it('leaves no version gap or duplicate after a second prompt commits', async () => {
+    // TWO prompts, deliberately. The first commit writes `mission.upsert` AND
+    // `graph.upsert` under ONE `state_version`; the second writes
+    // `mission.upsert` alone, because the graph already exists. So the journal
+    // reads [1, 1, 2] — a repeated version that is one transaction, not two
+    // writes. That multi-record first commit IS the failure region, and a
+    // single-prompt fixture ([1, 1]) would never reach the second transaction
+    // at all. Asserting the shape first means a change in the store's record
+    // plan shows up here as itself rather than as a mysterious Check 9 verdict.
+    const { gaps, journal } = await runAndInspect(2);
+    expect(journal.map((r) => r.state_version)).toEqual([1, 1, 2]);
+
+    // A gap is a lost committed write; a duplicate is two writes claiming one
+    // version. Neither is what a healthy multi-record transaction looks like.
+    expect(gaps.gaps).toEqual([]);
+    expect(gaps.duplicates).toEqual([]);
+    expect(gaps.regressions).toEqual([]);
+    expect(gaps.status).toBe(CheckStatus.PASS);
   });
 });
