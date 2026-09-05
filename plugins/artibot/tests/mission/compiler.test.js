@@ -14,6 +14,10 @@
  *    it copies. `lib/intent/interpreter.js` (T-24) owns that and has not landed.
  */
 
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -247,6 +251,101 @@ describe('compileMission() — substantive judgment and ledger event', () => {
   it('leaves activation_suppressed_by null when no command was typed', () => {
     expect(compileMission({ prompt: SPLIT_PROMPT }).meta.activation_suppressed_by)
       .toBeNull();
+  });
+});
+
+/**
+ * NEGATIVE CONTROL for the UserPromptSubmit source guard.
+ *
+ * 이 describe 가 green 이라는 것은 "컴파일러가 옳게 동작한다"는 뜻이 아니다.
+ * **가드가 없으면 호스트 통지문이 그대로 미션으로 컴파일된다는 증명**이다.
+ *
+ * 실사고(2026-09-04T19:02:21.565Z): 하네스가 보낸 `<task-notification>` 본문
+ * 5,047B 가 UserPromptSubmit 으로 흘러 디스패처의 6개 훅을 그대로 태웠고,
+ * decisions 스토어에 4줄 + `mission.created` 원장 이벤트를 남겼다. 아래 단언은
+ * 그 경로를 바이트 그대로 재현한다 — goal 은 통지문에 인용된 하위 에이전트의
+ * 작업 지시에서 뽑혀 나오고, 사용자는 그런 요청을 한 적이 없다.
+ *
+ * **컴파일러를 고쳐서 이 테스트를 red 로 만들지 마라.** compileMission 은
+ * 주어진 텍스트를 해석하지 않고 복사하는 것이 계약이고(파일 상단 주석 참조),
+ * 통지문과 사람의 지시를 본문만 보고 구별하는 것은 컴파일러의 책임이 아니다.
+ * 차단은 한 층 위 `scripts/hooks/_userprompt-dispatcher.js#classifyPromptSource`
+ * 가 한다 — 통지문은 애초에 여기까지 도달하지 않아야 한다. 그 가드의 회귀
+ * 테스트는 `tests/hooks/userprompt-dispatcher.test.js` 에 있다.
+ *
+ * 이 케이스가 언젠가 red 가 된다면 그건 가드의 성공이 아니라 컴파일러 추출
+ * 로직이 바뀐 것이다. 그때는 실측값으로 갱신하되, 케이스를 삭제하지 마라.
+ */
+describe('compileMission() — NEGATIVE CONTROL: host notification body compiles as a mission', () => {
+  const FIXTURE_PATH = path.join(
+    path.dirname(fileURLToPath(import.meta.url)),
+    '..', 'fixtures', 'ups-task-notification-2026-09-04.txt',
+  );
+  const NOTIFICATION_BODY = readFileSync(FIXTURE_PATH, 'utf-8');
+
+  it('fixture is the real 5,047B capture, not a toy string', () => {
+    // §9: 실패 영역에 도달하지 못하는 픽스처는 아무것도 증명하지 않는다.
+    // 통지문이 미션으로 컴파일되려면 S3(복수 요청)를 켤 만큼의 본문이 필요하다.
+    expect(Buffer.byteLength(NOTIFICATION_BODY, 'utf-8')).toBeGreaterThanOrEqual(4096);
+    expect(Buffer.byteLength(NOTIFICATION_BODY, 'utf-8')).toBe(5047);
+    expect(NOTIFICATION_BODY.startsWith('<task-notification>')).toBe(true);
+  });
+
+  it('fixture keeps LF endings (proves the .gitattributes -text rule held)', () => {
+    // core.autocrlf=true 인 Windows 체크아웃에서 규칙이 빠지면 59개 LF 가 CRLF 로
+    // 바뀌어 5,106B 가 되고 위 바이트 단언과 추출 span 이 전부 어긋난다.
+    // 이 케이스가 실패하면 코드가 아니라 `.gitattributes` 를 봐라.
+    expect(NOTIFICATION_BODY).not.toContain('\r');
+  });
+
+  it('compiles the notification into a substantive mission with signals S3', () => {
+    const result = compileMission({ prompt: NOTIFICATION_BODY });
+    expect(result.substantive).toBe(true);
+    expect(result.deferred).toBe(false);
+    expect(result.signals).toContain('S3');
+  });
+
+  it('emits the mission.created ledger event — the store pollution in the incident', () => {
+    const result = compileMission({ prompt: NOTIFICATION_BODY });
+    expect(result.meta.ledgerEvent).toBe('mission.created');
+  });
+
+  it('lifts a goal out of the quoted sub-agent instructions the user never wrote', () => {
+    const result = compileMission({ prompt: NOTIFICATION_BODY });
+    expect(result.contract.goal).toMatch(/^Check syntactic validity/);
+    // 4건 — 실사고 당시 decisions 에 남은 줄 수와 같은 출처다.
+    expect(result.contract.explicit_requests).toHaveLength(4);
+    // 통지문에는 슬래시 커맨드가 없다. 즉 S3 는 순전히 본문 길이·요청 밀도에서
+    // 나온 것이고, 슬래시 커맨드 억제 경로로는 절대 막을 수 없었다.
+    expect(result.meta.slashCommand).toBeNull();
+  });
+
+  it('compileMission is pure: neither it nor its deps can write a stage or ledger artifact', () => {
+    // 가드를 디스패처에 두는 근거의 절반. 컴파일러 자체는 아무것도 쓰지 않으므로
+    // 실사고의 파일 오염(decisions 4줄)은 컴파일러가 아니라 그것을 호출한 훅
+    // 체인이 만들었다. 고칠 지점이 디스패처인 이유가 이것이다.
+    //
+    // 런타임 디렉터리 스냅샷 대조가 아니라 정적 검사인 이유: vitest 는 파일을
+    // 병렬 워커로 돌리고 다른 스위트가 같은 순간 `runtime/` 에 쓸 수 있다.
+    // 그러면 컴파일러와 무관한 이유로 red 가 뜬다(동시 편집 트리 측정 함정).
+    const MISSION_LIB = path.join(
+      path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'lib', 'mission',
+    );
+    // mission-id.js imports lib/intent/interpreter.js, so the closure has to
+    // include it or the check is one hop short (judge review W3, 2026-09-04).
+    const reached = [
+      'compiler.js', 'contract.js', 'problem-boundary.js',
+      'blindspot-scanner.js', 'mission-id.js', '../intent/interpreter.js',
+    ];
+    for (const file of reached) {
+      const src = readFileSync(path.join(MISSION_LIB, file), 'utf-8');
+      expect(src, `${file} must not reach the filesystem`).not.toMatch(/node:fs|node:child_process/);
+      expect(src, `${file} must not write files`).not.toMatch(/writeFileSync|appendFileSync|mkdirSync/);
+    }
+
+    // 그리고 같은 입력은 같은 출력을 준다 — 숨은 상태가 없다는 관측 증거.
+    expect(compileMission({ prompt: NOTIFICATION_BODY }))
+      .toEqual(compileMission({ prompt: NOTIFICATION_BODY }));
   });
 });
 

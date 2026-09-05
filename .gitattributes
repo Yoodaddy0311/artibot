@@ -13,3 +13,12 @@
 # 56af49a2. Textual diffs still render — these files contain no NUL bytes, and
 # git's diff binary-detection is independent of the `text` attribute.
 reports/SPLIT/**/*.ndjson -text
+
+# UserPromptSubmit guard fixture — byte-immutable, same reasoning as above.
+# This is a verbatim 5,047B capture of the host `<task-notification>` body that
+# leaked into UserPromptSubmit at 2026-09-04T19:02:21Z. Two suites assert on its
+# exact byte length, and the mission-compiler NEGATIVE CONTROL pins the goal
+# string the compiler extracts from it. `core.autocrlf=true` (this Windows
+# host's default) would rewrite its 59 LFs to CRLF on checkout, making a fresh
+# clone see 5,106B and shifting every extraction span in the fixture.
+plugins/artibot/tests/fixtures/ups-task-notification-2026-09-04.txt -text
