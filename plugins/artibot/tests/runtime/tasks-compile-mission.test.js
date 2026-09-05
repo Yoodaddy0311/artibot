@@ -216,11 +216,13 @@ describe('T-25 — ledger append', () => {
     const lines = readLedger();
 
     expect(task.mission.substantive).toBe(true);
-    expect(lines).toHaveLength(1);
-    expect(lines[0].event).toBe('mission.created');
-    expect(lines[0].data.title).toBeTypeOf('string');
-    expect(lines[0].data.title.length).toBeLessThanOrEqual(120);
-    expect(lines[0].data.intent_revision).toBe(1);
+    // Since the state-store wiring (split-5f9fe3) a substantive prompt also
+    // appends `state.updated`; this contract owns only the mission.created line.
+    const created = lines.filter((l) => l.event === 'mission.created');
+    expect(created).toHaveLength(1);
+    expect(created[0].data.title).toBeTypeOf('string');
+    expect(created[0].data.title.length).toBeLessThanOrEqual(120);
+    expect(created[0].data.intent_revision).toBe(1);
   });
 
   it('writes mission.created for an S3 prompt (two explicit requests)', async () => {

@@ -142,7 +142,9 @@ describe('target lists', () => {
 
   it('scans the install/entry docs where the census found unbound drift', () => {
     expect(SCAN_TARGETS).toContain(path.join(REPO_ROOT, 'INSTALL.md'));
-    expect(SCAN_TARGETS).toContain(path.join(REPO_ROOT, 'AGENTS.md'));
+    // Root AGENTS.md is gitignored (.gitignore:55): CI never has it, so it is
+    // deliberately NOT a scan target (readFileSync threw ENOENT in CI, 2026-09-05).
+    expect(SCAN_TARGETS).not.toContain(path.join(REPO_ROOT, 'AGENTS.md'));
     expect(SCAN_TARGETS).toContain(
       path.join(PLUGIN_ROOT, '.well-known', 'mcp-server.json')
     );

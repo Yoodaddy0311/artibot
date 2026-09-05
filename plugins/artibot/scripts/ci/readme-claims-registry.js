@@ -89,7 +89,9 @@ export const REPO_ROOT = path.resolve(PLUGIN_ROOT, '..', '..');
 const SYNC_RELATIVE = [
   ['REPO', 'README.md'],
   ['REPO', 'INSTALL.md'],
-  ['REPO', 'AGENTS.md'],
+  // ['REPO', 'AGENTS.md'] — removed 2026-09-05: the root file is gitignored
+  //   (.gitignore:55), so CI never checks it out and readFileSync threw ENOENT
+  //   in every CI job (split-5f9fe3 batch 9b93e370). A local heal is not a gate.
   ['REPO', '.claude-plugin/marketplace.json'],
   ['PLUGIN', 'README.md'],
   ['PLUGIN', 'CLAUDE.md'],

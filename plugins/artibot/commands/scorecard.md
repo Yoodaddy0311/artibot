@@ -77,7 +77,7 @@ process.stdout.write(sc.renderScorecardMarkdown(card));
 - `CLAUDE_SESSION_ID` 는 **폴백이지 보장이 아니다**(`commands/team.md` — 훅 payload 가 1순위, env 는 폴백). 비어 있으면 `buildSessionScorecard` 가 이유를 적어 던지므로, 그때는 `--session <id>` 로 id 를 직접 준다. 조용히 전 세션을 접는 대신 멈추는 쪽이 맞다.
 - 경로 해석은 `node:url` 의 `pathToFileURL` 을 쓴다 — 손으로 만든 `file://` 문자열은 셸 인용 단계에서 백슬래시가 먹히고 **한글 경로를 퍼센트 인코딩하지 못한다**(위 `## 제약 / 안전` 의 Korean-path 주의가 이 경로에도 그대로 적용된다). 두 플래그 모두 이 스니펫 그대로 실행해 확인했다.
 - 출력은 아래 `## 출력` 절의 TTY 테마 렌더가 **아니다**. 이 경로는 GFM 표 마크다운 **한 형태뿐**이며 TTY 여부로 분기하지 않는다 — 프로세스를 읽는 것은 효과이고 이 엔진은 순수(L2)다.
-- **분모 0 인 지표는 `unmeasured` 로 렌더된다. `0%` 로 쓰지 않는다.** 훅 배선은 착지했으나(`scripts/hooks/pre-bash.js#recordBlock` `human.asked`, `scripts/hooks/subagent-handler.js#observeRoute` `route.selected`, `lib/runtime/middleware/tasks.js#createTasksMiddleware` Mission Contract) **설치본에 반영되기 전까지 원장이 비어 전 지표가 `unmeasured`** 다. 훅은 `${CLAUDE_PLUGIN_ROOT}` 로 등록되므로(`hooks/hooks.json:38·182`) 마켓플레이스 설치본을 쓰는 경우 `npm run sync:local` 전까지 옛 사본이 돈다. 반영 후 스폰·차단·프롬프트부터 채워진다.
+- **분모 0 인 지표는 `unmeasured` 로 렌더된다. `0%` 로 쓰지 않는다.** 훅 배선은 착지했으나(`lib/runtime/human-asked-record.js#recordHumanAsked` `human.asked`, `scripts/hooks/subagent-handler.js#observeRoute` `route.selected`, `lib/runtime/middleware/tasks.js#createTasksMiddleware` Mission Contract) **설치본에 반영되기 전까지 원장이 비어 전 지표가 `unmeasured`** 다. 훅은 `${CLAUDE_PLUGIN_ROOT}` 로 등록되므로(`hooks/hooks.json:38·182`) 마켓플레이스 설치본을 쓰는 경우 `npm run sync:local` 전까지 옛 사본이 돈다. 반영 후 스폰·차단·프롬프트부터 채워진다.
 - 카드가 **못 보는 것**(Progress·Status·Elapsed·토큰/비용·Useful/Wasteful Switch·Switch Efficiency·Transition Cost/Time)은 각 모듈 헤더에 이유와 함께 적혀 있다. 지출 합산은 `lib/economics` 의 단일 답이고, 원장 gap 판정은 `/doctor` Check 8 의 일이다 — 여기서 두 번째 답을 만들지 않는다.
 
 ## 출력
