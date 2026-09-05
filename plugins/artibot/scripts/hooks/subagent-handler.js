@@ -534,9 +534,17 @@ function bindRoute(ctx) {
       ? ctx.hookData.prompt_id
       : null;
     const match = matchReceipt(candidates, promptId, ctx.agentType);
-    // No candidate is a NORMAL outcome, not a defect: a spawn that never went
-    // through the Agent tool (SDK / scheduler / loop entry) has no receipt to
-    // bind, and so does one whose receipt fell out of the 10-minute window.
+    // No candidate is the ONLY way to get here (`matchReceipt` returns null
+    // solely on an empty pool; with >=1 candidate FIFO always picks one). It is
+    // a NORMAL outcome, not a defect — but it folds four causes into one word:
+    // the PreToolUse hook never fired (SDK / scheduler / loop entry), it fired
+    // and wrote nothing (`observePre` early return, incl. `no-receipt` when the
+    // classifier found no phase), the receipt fell out of the 10-minute window
+    // or 128 KB tail, or another spawn consumed it first. The ledgers hold no
+    // record that separates these (measured 2026-09-05: "not fired" and "fired,
+    // wrote nothing" leave byte-identical spawn rows and no central line), so
+    // a finer reason string here would be invention — and `route-bind.js#
+    // countUnboundSpawns` compares this exact string, so it stays as is.
     if (match === null) return { ...base, routeLedger: 'skipped:unbound' };
 
     const observed = {

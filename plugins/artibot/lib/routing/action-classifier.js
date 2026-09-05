@@ -216,6 +216,24 @@ export function getActionClassForCommand(commandName) {
  * currently runs on. Plugin prefixes (`artibot:`, `artibot-cowork:`) are
  * stripped before lookup.
  *
+ * COVERAGE IS THE POINT. An unmapped agent leaves {@link classifyAction} on
+ * `factors.source === 'default'`, which
+ * `scripts/hooks/route-observe-pre.js#receiptPhase` reads as "nothing
+ * identified this action" and answers with null — so the spawn produces NO
+ * receipt at all, not merely a vague one. The table is therefore kept
+ * exhaustive against the `agents/` roster by the census in
+ * `tests/routing/action-classifier.test.js`, and every deliberate omission is
+ * named in {@link AGENT_CLASS_EXEMPT} rather than left implicit.
+ *
+ * DELIBERATE DIVERGENCE FROM {@link COMMAND_ACTION_CLASS}: that table omits the
+ * marketing/content commands because the eight classes describe engineering
+ * actions. This table maps the marketing AGENTS anyway, each to its nearest
+ * class, because the two axes fail differently — an unmapped command still
+ * falls through to the agent, text and footprint signals, while an unmapped
+ * agent on a text-poor spawn falls all the way to the default and the receipt
+ * is lost. "Nearest" is not "exact": a consumer can discount these at
+ * `SOURCE_CONFIDENCE.agent` (0.7), below a command's 0.9.
+ *
  * @type {Readonly<Record<string, string>>}
  */
 export const AGENT_ACTION_CLASS = Object.freeze({
@@ -223,16 +241,44 @@ export const AGENT_ACTION_CLASS = Object.freeze({
   'code-reviewer': 'review', 'spec-reviewer': 'review',
   'quality-reviewer': 'review', 'security-reviewer': 'review',
   'database-reviewer': 'review',
+  // auditor: [claim-refutation, post-hoc-audit], `lifecycle: review`. Its own
+  // boundary hands first-pass investigation to `investigator`, so what remains
+  // is judging work that already exists.
+  auditor: 'review',
+  // cro-specialist: [conversion-optimization, funnel-analysis]. The deliverable
+  // its description leads with is a landing-page AUDIT of a page that exists.
+  'cro-specialist': 'review',
+  // seo-specialist: [technical-seo, on-page-optimization]. "Produces actionable
+  // audit reports" over a site that already exists, not new artifacts.
+  'seo-specialist': 'review',
 
   // architecture — design/plan before code
   architect: 'architecture', planner: 'architecture',
   'llm-architect': 'architecture',
+  // orchestrator: [team-coordination, task-dispatch, delegation]. It plans and
+  // dispatches ahead of the work instead of doing it, which is the nearest of
+  // the eight — not an exact fit, for the very reason COMMAND_ACTION_CLASS
+  // gives for omitting `team`/`orchestrate`: one invocation drives many
+  // actions of different classes.
+  orchestrator: 'architecture',
+  // marketing-strategist: [gtm-planning, growth-strategy]. Planning decisions
+  // ahead of execution, the same shape `architecture` has on the code side.
+  'marketing-strategist': 'architecture',
 
   // implement — produce code
   'backend-developer': 'implement', 'frontend-developer': 'implement',
   'typescript-pro': 'implement', 'tdd-guide': 'implement',
   'mcp-developer': 'implement', 'devops-engineer': 'implement',
   'e2e-runner': 'implement',
+  // ad-specialist: [ad-copywriting, campaign-setup]. Multi-artifact production
+  // (copy variants + creative brief + campaign structure), not a bounded edit.
+  'ad-specialist': 'implement',
+  // content-marketer: [copywriting, content-distribution]. Same shape — the
+  // output is new content, produced in quantity.
+  'content-marketer': 'implement',
+  // presentation-designer: [slide-design, layout-composition]. "Creates
+  // complete slide deck structures" — production, not design-before-code.
+  'presentation-designer': 'implement',
 
   // complex-debug — diagnose a failure
   'build-error-resolver': 'complex-debug',
@@ -240,10 +286,58 @@ export const AGENT_ACTION_CLASS = Object.freeze({
 
   // explore — survey and report
   'repo-benchmarker': 'explore',
+  // investigator: [evidence-measurement, consistency-cross-check]. Its own
+  // trigger words are investigate / measure / 조사, the same ones TEXT_HINTS
+  // maps to `explore`, and its boundary forbids implementing or editing.
+  investigator: 'explore',
+  // data-analyst: [data-analysis, kpi-tracking]. Read-heavy analysis of
+  // uncertain scope (cohort, attribution, forecast). `status` was the other
+  // candidate and was rejected: that class is a readout of state that already
+  // exists, whereas this agent derives new figures from it.
+  'data-analyst': 'explore',
 
   // edit-routine — mechanical, bounded writes
   'doc-updater': 'edit-routine', 'refactor-cleaner': 'edit-routine',
+
+  // host built-ins — no file in `agents/`; see {@link HOST_BUILTIN_AGENTS}.
+  // Explore is the host's read-only survey agent; Plan is its planning agent,
+  // the built-in twin of `planner`. `general-purpose` is deliberately absent —
+  // see {@link AGENT_CLASS_EXEMPT}.
+  Explore: 'explore', Plan: 'architecture',
 });
+
+/**
+ * Agent names deliberately left OUT of {@link AGENT_ACTION_CLASS}, each with
+ * its reason. Exported so the roster census in
+ * `tests/routing/action-classifier.test.js` can be an ALLOWLIST: every agent
+ * definition file must be either mapped or listed here, so a new agent turns
+ * the suite red instead of silently classifying as `default`.
+ *
+ * An entry here has a real cost. A spawn of an exempt agent whose text matches
+ * no keyword classifies as `default`, `receiptPhase` then answers null, and the
+ * spawn is recorded nowhere. Each entry has to be worth losing that receipt.
+ *
+ * @type {readonly string[]}
+ */
+export const AGENT_CLASS_EXEMPT = Object.freeze([
+  // Not an agent. `agents/INDEX.md` is the generated roster index
+  // (`scripts/generate-agent-index.js`) and is never a `subagent_type`.
+  'INDEX',
+  // Host built-in catch-all. It has no single class by construction — it runs
+  // whatever it is handed. A constant here would be invention asserted at
+  // confidence 0.7, while the text and footprint signals answer at 0.5 / 0.35
+  // from the actual request, which is the better evidence.
+  'general-purpose',
+]);
+
+/**
+ * Agent names the HOST supplies, which therefore have no `agents/` definition
+ * file. Listed separately so the census can tell a key with no definition file
+ * (a typo, or an agent that was deleted — red) from a key the host owns (fine).
+ *
+ * @type {readonly string[]}
+ */
+export const HOST_BUILTIN_AGENTS = Object.freeze(['Explore', 'Plan', 'general-purpose']);
 
 /**
  * Action class for an agent type. Strips a `plugin:` prefix first.

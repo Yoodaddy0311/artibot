@@ -387,6 +387,23 @@ describe('subagent-handler v5 routing fields (child process)', () => {
     expect(rec.actionClass).toBe(getActionClassForAgent('tdd-guide'));
   });
 
+  it('a PreToolUse that fired but wrote no receipt is indistinguishable from one that never fired', () => {
+    // An agent the classifier does not know, with keyword-free text, lands on
+    // `factors.source === 'default'`; `receiptPhase` answers null and
+    // `observePre` returns `no-receipt` WITHOUT appending anything. The bind
+    // side then sees exactly what it sees when the hook never ran. This pins
+    // the CURRENT contract (measured 2026-09-05): the ledgers carry nothing
+    // that separates the two, so the reason string stays `skipped:unbound`.
+    const pre = prePayload({
+      tool_input: { subagent_type: 'zzz-unknown-agent', name: 'zzz-unknown-agent', description: 'aaa bbb ccc', prompt: 'ddd eee' },
+    });
+    expect(runPre(pre, home).status).toBe(0);
+    expect(existsSync(ledgerFilePath(repo))).toBe(false);
+    expect(runHook(basePayload({ agent_type: 'zzz-unknown-agent' }), 'start', home).status).toBe(0);
+    expect(existsSync(ledgerFilePath(repo))).toBe(false);
+    expect(readSpawns(repo)[0].route_ledger).toBe('skipped:unbound');
+  });
+
   it('a receipt from a DIFFERENT session is not a candidate', () => {
     expect(runPre(prePayload({ session_id: 'sess-other' }), home).status).toBe(0);
     expect(runHook(basePayload(), 'start', home).status).toBe(0);
