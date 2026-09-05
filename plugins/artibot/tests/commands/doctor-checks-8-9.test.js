@@ -59,6 +59,16 @@ const missionRecord = (state_version, mission) => ({
   v: 1, ts: TS, state_version, kind: 'mission.upsert', mission_id: MID, mission,
 });
 
+/**
+ * The automatic `graph.upsert` a mission's FIRST commit writes beside its
+ * `mission.upsert` (`lib/project-state/state-manager.js#updateMission`). Both
+ * records carry the same `state_version`, because that number counts commits.
+ */
+const graphRecord = (state_version) => ({
+  v: 1, ts: TS, state_version, kind: 'graph.upsert', mission_id: MID,
+  graph: { schema_version: 1, mission_id: MID, tasks: [] },
+});
+
 /** The `state.updated` event the store pairs with each committed write. */
 const stateUpdated = (state_version) => ({
   event: 'state.updated', mission_id: MID, session_id: 's', source: 'test', ts: TS,
@@ -381,12 +391,75 @@ describe('checkStateVersionGaps — holes, regressions and duplicates', () => {
     expect(result.regressions).toEqual([{ index: 3, version: 2, after: 3 }]);
   });
 
-  it('reports two records claiming one version — one CAS slot, two writes', () => {
+  // REPAIRED 2026-09-05. This case was `journal: [1, 2, 2]`, and its meaning
+  // changed under the transaction fold: two CONSECUTIVE records at version 2 are
+  // now read as the one commit that wrote both, so the old fixture passes. The
+  // original intent — one CAS slot claimed by two separate writes — survives only
+  // as a NON-CONTIGUOUS reappearance, so version 2 is reclaimed after version 3.
+  // The fixture it now shares with the regression case above is deliberate: a
+  // reappearance out of run is necessarily also a regression, and the two tests
+  // assert different halves of that.
+  it('reports two transactions claiming one version — one CAS slot, two writes', () => {
     const result = checkStateVersionGaps({
-      journal: [1, 2, 2].map((v) => missionRecord(v, MISSION)),
+      journal: [1, 2, 3, 2].map((v) => missionRecord(v, MISSION)),
     });
     expect(result.status).toBe(CheckStatus.FAIL);
     expect(result.duplicates).toEqual([2]);
+    expect(codes(result)).toContain('state-version-duplicate');
+  });
+
+  // ---- the transaction fold -------------------------------------------------
+  // `state_version` counts COMMITS, not records. `state-manager.js#commitLocked`
+  // stamps every record of one commit with the same number, and
+  // `state-manager.js#updateMission` writes TWO records on a mission's first
+  // commit (`mission.upsert` plus an automatic `graph.upsert`). Measured against a
+  // live store 2026-09-05 09:13 KST: one `updateMission` on an empty project root
+  // wrote `mission.upsert@v1 | graph.upsert@v1`, and the per-record scan called
+  // that healthy store `fail` / `duplicates: [1]` on its very first write.
+
+  it('passes a commit that wrote two records under one version', () => {
+    const result = checkStateVersionGaps({
+      journal: [missionRecord(1, MISSION), graphRecord(1), missionRecord(2, MISSION)],
+    });
+    expect(result.status).toBe(CheckStatus.PASS);
+    expect(result.duplicates).toEqual([]);
+    expect(result.findings).toEqual([]);
+    // `versions` stays the RAW per-record list — only the judgement folds, so the
+    // caller can still see how many records each commit wrote.
+    expect(result.versions).toEqual([1, 1, 2]);
+  });
+
+  it('passes a run of any length, so a wide commit is not a duplicate', () => {
+    const result = checkStateVersionGaps({
+      journal: [1, 1, 2, 2, 2, 3].map((v) => missionRecord(v, MISSION)),
+    });
+    expect(result.status).toBe(CheckStatus.PASS);
+    expect(result.duplicates).toEqual([]);
+    expect(result.gaps).toEqual([]);
+  });
+
+  it('still fails a version that reappears after another — the fold keeps that visible', () => {
+    const result = checkStateVersionGaps({
+      journal: [1, 2, 1].map((v) => missionRecord(v, MISSION)),
+    });
+    expect(result.status).toBe(CheckStatus.FAIL);
+    expect(result.duplicates).toEqual([1]);
+    // Measured, not assumed: the regression finding is reported ALONGSIDE the
+    // duplicate. After the fold `state-version-duplicate` can never stand alone,
+    // because a version can only reappear out of run if a different version sat
+    // between its two runs.
+    expect(codes(result)).toEqual(['state-version-regression', 'state-version-duplicate']);
+    expect(result.regressions).toEqual([{ index: 2, version: 1, after: 2 }]);
+  });
+
+  it('still finds a hole across a folded run — the fold must not hide a gap', () => {
+    const result = checkStateVersionGaps({
+      journal: [1, 1, 3].map((v) => missionRecord(v, MISSION)),
+    });
+    expect(result.status).toBe(CheckStatus.FAIL);
+    expect(result.gaps).toEqual([2]);
+    expect(result.duplicates).toEqual([]);
+    expect(codes(result)).toEqual(['state-version-gap']);
   });
 
   it('warns when records exist but none carries a version', () => {

@@ -340,10 +340,15 @@ function isCensusShaped(census) {
  *
  * `state_version` increases by one per committed write, so a hole in the
  * sequence is a lost update (design §3.6). Regressions and duplicates are the
- * same failure in the other two shapes — a record numbered below one already
- * seen, and two records claiming one number — and all three are reported as
- * failures. Listing only holes would be a denial list, which fails open on the
- * two shapes it does not name.
+ * same failure in the other two shapes — a transaction numbered below one
+ * already seen, and two transactions claiming one number — and all three are
+ * reported as failures. Listing only holes would be a denial list, which fails
+ * open on the two shapes it does not name.
+ *
+ * The unit judged is the TRANSACTION, not the record: `versions` is folded by
+ * `foldTransactions` before the three rules run. See that function for why, and
+ * for what the fold cannot see. `versions` in the result is the RAW per-record
+ * list, unfolded, so a caller can still count the records each commit wrote.
  *
  * @param {object} input - Check inputs.
  * @param {object[]} input.journal - Store journal records, in append order.
@@ -372,9 +377,54 @@ export function checkStateVersionGaps(input = {}) {
 }
 
 /**
- * Walk the version sequence once, collecting all three defect shapes.
+ * Collapse each run of consecutive identical versions into the one transaction
+ * that wrote it.
  *
- * @param {number[]} versions - Versions in append order.
+ * ── WHY THE FOLD EXISTS ────────────────────────────────────────────────────
+ * `state_version` counts COMMITS, not records. One commit stamps the same
+ * number onto every record it writes —
+ * `lib/project-state/state-manager.js#commitLocked` does
+ * `records.map((r) => ({ v: 1, ts, state_version: nextVersion, ...r }))` — and a
+ * commit routinely writes more than one record:
+ * `state-manager.js#updateMission` emits `mission.upsert` plus an automatic
+ * `graph.upsert` the first time a mission is seen. Counting per RECORD
+ * therefore called the very first healthy write of every store a duplicate.
+ * Measured against a live store 2026-09-05 09:13 KST: one `updateMission` on an
+ * empty project root wrote `mission.upsert@v1 | graph.upsert@v1`, and the
+ * unfolded scan returned `fail` with `duplicates: [1]`.
+ *
+ * ── WHAT THE FOLD CANNOT SEE ───────────────────────────────────────────────
+ * Two DIFFERENT commits that both wrote version N back to back are read as one
+ * transaction and pass. Nothing in the journal separates them: a record carries
+ * `state_version` and `ts` but no commit id, and `commitLocked` stamps one `ts`
+ * across the whole batch, so an equal `ts` is not evidence either way. The
+ * detectable signature of a twice-claimed CAS slot is a NON-CONTIGUOUS
+ * reappearance, which this fold preserves exactly.
+ *
+ * ── CONSEQUENCE ────────────────────────────────────────────────────────────
+ * `state-version-duplicate` can no longer be reported alone. A version only
+ * reappears out of run if a different version sat between its two runs, which
+ * makes at least one of the records involved a regression as well.
+ *
+ * @param {number[]} versions - Per-record versions, in append order.
+ * @returns {{version: number, index: number}[]} One entry per run, `index` being
+ *   the journal position of the run's FIRST record.
+ */
+function foldTransactions(versions) {
+  const transactions = [];
+  versions.forEach((version, index) => {
+    const last = transactions[transactions.length - 1];
+    if (last !== undefined && last.version === version) return;
+    transactions.push({ version, index });
+  });
+  return transactions;
+}
+
+/**
+ * Walk the transaction sequence once, collecting all three defect shapes.
+ *
+ * @param {number[]} versions - Per-record versions in append order; folded to
+ *   transactions by `foldTransactions` before any rule is applied.
  * @returns {{gaps: number[], regressions: object[], duplicates: number[]}} Defects found.
  */
 function scanVersions(versions) {
@@ -382,12 +432,14 @@ function scanVersions(versions) {
   const duplicates = [];
   const seen = new Set();
   let highest = null;
-  versions.forEach((v, index) => {
-    if (seen.has(v)) duplicates.push(v);
-    else seen.add(v);
-    if (highest !== null && v < highest) regressions.push({ index, version: v, after: highest });
-    if (highest === null || v > highest) highest = v;
-  });
+  for (const { version, index } of foldTransactions(versions)) {
+    if (seen.has(version)) duplicates.push(version);
+    else seen.add(version);
+    if (highest !== null && version < highest) {
+      regressions.push({ index, version, after: highest });
+    }
+    if (highest === null || version > highest) highest = version;
+  }
   const gaps = [];
   for (let i = 1; i <= (highest ?? 0); i += 1) {
     if (!seen.has(i)) gaps.push(i);
@@ -425,7 +477,7 @@ function buildVersionFindings(scan) {
   if (duplicates.length > 0) {
     findings.push({
       code: 'state-version-duplicate', status: CheckStatus.FAIL, versions: duplicates,
-      detail: `state_version(s) claimed twice: ${duplicates.join(', ')} — two writes for one CAS slot`,
+      detail: `state_version(s) claimed by two separate transactions: ${duplicates.join(', ')} — one CAS slot, two writes. Records sharing one version consecutively are one commit and are not counted here (scanVersions folds them)`,
     });
   }
   return findings;
