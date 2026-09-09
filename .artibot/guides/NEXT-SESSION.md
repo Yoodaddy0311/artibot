@@ -1,4 +1,4 @@
-# NEXT-SESSION — 크로스머신 핸드오프 (2026-09-05 09:5x, nowhe 머신, master = split-5f9fe3 배치 착지 8a874512)
+# NEXT-SESSION — 크로스머신 핸드오프 (2026-09-09 17:1x, nowhe 머신, master = v4.57.0 릴리스 48ed25dd)
 
 > 다른 머신에서는 `git pull` 후 **이 파일을 직접 Read** 하고 시작한다. 로컬 전용(`.artibot/split/`·`gotchas.md` #G1~#G25·`runtime/split/`·`.artibot/HANDOFF.md`·`reports/AUTOPILOT/`)은 이 머신에만 있다 — 요지는 회고 `reports/SPLIT/split-5f9fe3.md`(추적) 에 있다.
 
@@ -6,8 +6,8 @@
 
 | 항목 | 값 |
 |---|---|
-| master | origin **`8a874512`** = 4차 배치(줄기 5 + 리더 1, 49파일 +6,383/−356, CI 7/7). 로컬 master 동일 + 미푸시 docs 커밋(회고·JSDoc 인용 수리·registry 주석) |
-| 설치본 | 4.56.0 — **8a874512 의 변경(guardrail 오탐 수정·usage.receipt writer·StateStore·human.asked 대칭·UPS 통지 가드·route 32키·gaps P1) 전부 미릴리스**. 다음 릴리스 + `claude plugin update` 필요 |
+| master | origin **`48ed25dd`** = **v4.57.0 릴리스**(4차 배치 8a874512 + 회고 docs + release). 태그 v4.57.0. 미푸시 0 |
+| 설치본 | **4.57.0**(2026-09-09 17:11 `claude plugin update`, 이 머신). 다른 머신은 `claude plugin update` 후 재시작 |
 | 4.56.0 라이브 판정 | 6/6 실측 통과(오토파일럿 ap-20260904-190421-2vsvpa, `reports/AUTOPILOT/…` 로컬) |
 | worktree | `split-artibot-{usage-receipt,state-store,human-asked-sym,ups-source-guard,route-coverage}` 5개 + 브랜치 6(리더 포함) — 창 닫힌 뒤 **junction unlink 선행** 후 제거(feedback_worktree_junction_removal_trap). 원격 `ci/split-split-5f9fe3` 잔존(사람 삭제) |
 | 5.0 로드맵 | Observe 분모 3종(usage.receipt·state.updated·human.asked 대칭) writer 착지 → **릴리스 후 라이브 판정이 Observe 종료 조건** |
@@ -16,7 +16,7 @@
 
 | # | 작업 | 근거·주의 |
 |---|---|---|
-| P0 | **릴리스**(4.57.0) → `claude plugin update` → 라이브 판정: PreToolUse 페이로드 `cwd`/`session_id` 실재(없으면 human.asked 프로덕션 0) · SessionEnd payload `cwd` · `/doctor` Check 8-②/9 PASS · Explore/investigator `route.selected` 생성 · UPS `source` 가드가 task-notification·cross-session 인사 둘 다 막는지 | 회고 §5 "라이브 판정" |
+| P0 | ~~릴리스(4.57.0)~~ **완료 2026-09-09** → 새 세션에서 **라이브 판정**: PreToolUse 페이로드 `cwd`/`session_id` 실재(없으면 human.asked 프로덕션 0) · SessionEnd payload `cwd` · `/doctor` Check 8-②/9 PASS · Explore/investigator `route.selected` 생성 · UPS `source` 가드가 task-notification·cross-session 인사 둘 다 막는지 | 회고 §5 "라이브 판정" |
 | P1 | 러너 결함 2: `land.mjs` lint 행 worktree cwd(#G14) · `landBatch` 사이드 브랜치 lease push + 이름 접두 중복(#G25) · `commands/doctor.md` Check 8 호출 예 `project` 인자(#G16) | 다음 /split 전 |
 | P1 | 이월 wave: `lock-harness`(plan.split-ff6c63.json, 브리프 `.artibot/split/lock-harness/brief.md`) | 파일 겹침 없음 |
 | P2 | 백로그 #G8·#G9·#G11·#G13·#G15·#G20·#G22(route.unreceipted vs 전사 분모, Check 10 cannot-see, COMMAND_ACTION_CLASS JSDoc, applyUsageReceipt 최신값, sources 위젠 게이트, session-end.js 분리, human.resolved writer, 카탈로그 2종) | 회고 §5 |
