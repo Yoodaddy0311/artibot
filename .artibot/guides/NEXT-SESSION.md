@@ -29,6 +29,21 @@
 | P1 | 이월: `land.mjs` lint 행 worktree cwd(#G14) · `landBatch` lease push(#G25) · `commands/doctor.md` Check 8 `project` 인자(#G16) · `lock-harness` wave | 변동 없음 |
 | P2 | `schemas/ledger-events.allowlist.json:160` route.selected spec 이 "SubagentStart 도 shadow receipt 를 :340 에서 append" 라 하나 `subagent-handler.js` 의 append 는 `:586` route.bound 1곳뿐 — 문서 드리프트(Explore 팀원 발견, 리더 grep 재확인) · Check 9 item 5 가 mission 0건에서 unmeasured 로 뜨는 lib 경계 · `usage.receipt` cost.total null / pricing_version `unresolved`(가격표 미배선) | |
 
+## 외부 재설계 계획서 검증 백로그 (2026-09-09 22:5x 실측 — 주장 34건 중 검증 통과분만)
+
+외부 문서(`artibot-redesign-plan.md`, 4.56.0 기준)의 결론 5개(D1 "코드가 cognitive.system1/2 를 읽는다"·A6 "0.4 로 대부분 팀 모드"·A7 "세션 시작 3만 토큰"·E2 "권한 자동승인 기본"·E5 "웹훅 기본 전송")는 실측으로 **기각**. 아래는 실측이 뒷받침한 것만.
+
+| 우선 | 항목 | 근거(실측) |
+|---|---|---|
+| P1 | **에이전트·커맨드 이중 적재** — `install.sh` 가 `~/.claude/agents`(31)·`~/.claude/commands`(80) 에 flat 복사해 네이티브 플러그인(`artibot:*`)과 함께 세션 시스템 프롬프트에 **전부 2번** 나열됨. 에이전트 description 17,665자(≈4.4K tok)×2 + 커맨드 8,306자×2 | 이 세션 시스템 프롬프트 관측 + `diff <(ls plugins/artibot/agents) <(ls ~/.claude/agents)` 동일. 진짜 고정비는 문서가 지목한 스킬이 아니라 여기 |
+| P1 | **스킬 description 6/114 만 호스트가 렌더** — 108개는 이름만 나열돼 description 기반 자동 활성화가 사실상 죽어 있을 가능성. 길이·frontmatter 키·"Use when" 문구로는 설명 안 됨(원인 **미확인**) | 이 세션 시스템 프롬프트 관측, `skills/*/SKILL.md` frontmatter 비교 |
+| P1 | **README:409 · config `team.delegationModeSelection` 의 0.4 ↔ 코드 `workflow-plan.js#complexityTier` high=0.6** 드리프트. 외부 오독의 직접 원인 | `sed -n 409p README.md`, `workflow-plan.js:47` |
+| P2 | README stale 6곳 — 루트 :911 `version 1.14.1` · :1044 Version 절 4.13.0 · 훅 "27 registrations"(루트 :765, 플러그인 :482·:1490, 실제 29) · 훅 표 논리/물리 불일치(UPS 2행 등) · :368-398 캐시/100ms/0.6 에스컬레이션 서사(라우터에 없음) · **플러그인 README:217 이 루트 :914 "unused" 와 정면 모순** · 루트 :91 "Agent Teams auto-enables on first session start"(훅은 읽기만) | inv-docs 실측, 리더 재확인 |
+| P2 | 커버리지 배지 static(shields 고정 90%+) — CI 는 검증 안 함(ci.yml:129 자인). 로컬 8/22 statements 89.59·branches 80.41 로 미달 | `coverage/coverage-summary.json` |
+| P2 | `rules/` 10개가 네이티브 설치에 안 감 — plugin.json 은 `rules` 선언하지만 호스트 2.1.260 매니페스트 스키마에 키 없음, 대체 주입 코드 0건 | 호스트 바이너리 스키마 키 추출, `grep rules/artibot scripts/hooks lib` 0건 |
+| P2 | Write 1회 node 프로세스 ~10(PreToolUse 4 + PostToolUse 디스패처 1 + 디스패처 자식 ~5, `_dispatcher-utils.js:131 spawn`). 리더 1회 실측 지연: 122·176·268·128ms + 디스패처 329ms(node 기동 82ms). 훅 지연 측정 장치는 리포에 없음(bench 는 라우터·PII 만) | 라이브 프로세스 계수는 미실시 |
+| P3 | 버전 체크(`session-start.js#checkUpdateBounded`) 옵트아웃 없음(24h 캐시, UA 버전문자열만 송신) · `permissions.autoApprove` 에 위험 도구 필터 없음(기본 `[]` 라 OFF) · install.ps1 은 기존 settings.json 에도 `AGENT_TEAMS=1` merge(bash 는 경고만) | inv-hooks-std 실측 |
+
 ## 재사용 프로브 5종(다음 릴리스 라이브 판정용)
 
 1. `echo 'git branch -D x'` → `human.asked` 1줄(차단 자체가 #G29 오탐이라 안전).
