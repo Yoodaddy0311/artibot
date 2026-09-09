@@ -11,6 +11,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.57.0] — 2026-09-09
+
+### 4차 배치(split-5f9fe3) — Observe 분모 3종 writer · UPS 발신자 가드 · guardrail 오탐 소거
+
+**행동 변화 고지.** ① 매 프롬프트에 붙던 `⚠️ Guardrail: tools denied by policy — Agent, SendMessage, Task*` 문구가 사라진다(표기 계층 오탐 — 스폰은 원래부터 됐다). ② SessionEnd 마다 `usage.receipt` 가, substantive 프롬프트마다 `state.updated` + `<projectRoot>/.artibot/state.yaml` 투영이 생긴다(원장 기록만, 행동 변화 0). ③ 하네스 task-notification·cross-session 메시지가 UserPromptSubmit 으로 컴파일되지 않는다(비사용자 `source` → stdout 0B). ④ Write/Edit 차단 시에도 `human.asked` 가 기록된다(차단 확대 0). 라이브 판정 5항은 설치 후 첫 세션에서 — `reports/SPLIT/split-5f9fe3.md` §5.
+
+#### Fixed
+- **guardrail 거짓 거부 문구** — `lib/runtime/middleware/guardrail.js#DEFAULT_RULES` 에 orchestration 도구가 없어 `failClosed` 가 agentTeam 후보 6종을 매 프롬프트 "denied" 로 표기(회고 split-ff6c63 §3.4 ②: 창 4개가 30분을 단독 구현으로 소모). allowlist 4종(`Agent`·`SendMessage`·`Task*`·`AskUserQuestion`) 추가, +6 테스트.
+- **`/doctor` Check 8-② `checkStateVersionGaps` 멀티레코드 오판(P1)** — 한 트랜잭션의 레코드가 같은 `state_version` 을 공유(`state-manager.js#commitLocked`)하는데 레코드 단위로 세어 `state-version-duplicate` → 배선 후 모든 정상 스토어가 첫 프롬프트부터 FAIL 할 상태였다. `#foldTransactions` 로 연속 동일 버전 run 을 접은 뒤 3규칙 적용. 픽스처가 1레코드/버전이라 실패 영역에 닿지 않았던 것(규율 §9) — 멀티레코드 케이스 4종 추가. 규모 프로브(N=300/1000)가 잡았다.
+- **UserPromptSubmit 이 호스트 통지를 프롬프트로 컴파일** — 2026-09-04 19:02Z 실측: task-notification 본문의 영어 명령형이 S3 → `mission.created{title:"Check syntactic validity…"}` 오염. `_userprompt-dispatcher.js#main` 에 발신자 가드(`source` allowlist `user`·`sdk`, 없으면 `<task-notification>`/`[SYSTEM NOTIFICATION` 본문 마커) — 비사용자면 stdout 0B·훅 0 실행. 격리 뮤테이션으로 사고 재현(854B·decisions 4줄).
+- **`tests/firewall/ups-host-schema-drift.test.js` 호스트 탐색** — `~/.local/share/claude/versions` 만 뒤져 구버전 2.1.108 을 집던 것을 npm 설치 경로 우선으로. `HOST_PROMPT_SOURCES` 6값 enum 고정(드리프트 감지).
+- **공개 수치 드리프트 15건** — INSTALL.md·AGENTS.md·CLAUDE.md·marketplace.json(`9,900+`→`14,953+`, 자기 파일 `qualityMetrics.tests` 와 모순)·`.well-known/mcp-server.json`(28/100)·MARKETPLACE-SUBMISSION.md. registry 에 `tests` 키(진실원 `marketplace.json#/qualityMetrics/tests`, 단일 writer `sync-marketplace-meta.mjs`) + 콤마·`+` 보존 파서 + SYNC/SCAN 타깃 registry 이관. gitignore 된 루트 `AGENTS.md` 는 타깃에서 제외(CI ENOENT).
+- `tests/supervisor/v11-status-mapping.test.js` 스캐너가 `.claude/worktrees/` 중첩 체크아웃을 걸어 자기 자신을 emitter 로 오탐(로컬 worktree 5개 = 15 hit, CI 그린) — `.claude` 를 SKIP_DIRS 에 추가. 같은 사각의 트리 워커 6파일은 후속.
+- 배치 CI 수리 — `commands/scorecard.md`·`lib/scorecard/session-scorecard.js` 의 `pre-bash.js#recordBlock` 인용을 `lib/runtime/human-asked-record.js#recordHumanAsked` 로(심볼 이동). T-25 테스트는 `mission.created` 줄만 단언.
+
+#### Added
+- **`usage.receipt` writer(NECESSARY 2 최소 단위)** — `scripts/hooks/session-end.js#recordUsageReceipts` 가 `lib/economics/usage-receipt.js#buildUsageReceipts`(transcript 파서, 호출자 0 이었음)를 호출해 `lib/economics/receipt-envelope.js` 봉투(`source:'hook'`, allowlist `usage.receipt.sources` +hook)로 append. idempotency key `event:session:run:model`(재발화 appended 0, 과소 쪽 실패). 실전 4.4MB transcript 10건/152ms.
+- **StateStore 배선(NECESSARY 1 최소 단위)** — `lib/runtime/middleware/tasks.js` 가 `mission.created` 옆에서 `createStateStore` 를 열어 `state.updated{state_version}` 1:1 + `state.yaml` 투영(ADDENDUM-HARDENING §1.1 — 투영이지 진실원 아님). 스토어는 `<git-common-dir>/artibot/project-state.{json,jsonl}`(링크드 worktree 에서 메인 `.git` 공유, `lib/project-state/git-common-dir.js` pure-fs). intent/plan 은 경로 참조만(파일 0 — Shadow). 단일 클록 읽기로 자정 straddle 분기 제거. `/doctor` Check 8 분모가 처음 생긴다.
+- **`human.asked` Write/Edit 대칭(NECESSARY 3 의 Observe 단위)** — `lib/runtime/human-asked-record.js#recordHumanAsked`(L5, never-throws)로 `pre-bash`·`pre-write`·`pre-write-guard` 세 block 분기가 같은 헬퍼로 기록(`tool`·`path` 키 추가). **차단 확대 0**(hooks diff `decision:'block'` 신규 0, pre-bash stdout 바이트 동일). HG-07/12/13 강제는 Canary 항목이라 미착수.
+- **`AGENT_ACTION_CLASS` 20→32키** — 로스터 30 매핑 + host `Explore`·`Plan`, 면제 `INDEX`·`general-purpose`. census 테스트(allowlist 형: 새 `agents/*.md` → RED, 고아 키 → RED). 시뮬 8케이스 ok 3→7(잔여 general-purpose). `skipped:unbound` 가 "미발화"와 "발화-무기록" 을 합친다는 계약을 주석·테스트로 고정(사유 세분은 `route-bind#countUnboundSpawns` `===` 비교라 기각).
+- `.gitignore` `.artibot/state.yaml`. 픽스처 `tests/fixtures/ups-task-notification-2026-09-04.txt`(5,047B 라이브 캡처, 사용자 경로 동일 길이 치환, `.gitattributes -text`).
+
+#### Changed
+- `commands/scorecard.md`·registry 주석 현행화. `tests/ci/readme-claims-tests-key.test.js` 신설(16).
+
+#### Known
+- **라이브 미확인 5항(설치 후 첫 세션에서 판정)**: PreToolUse 페이로드 `cwd`/`session_id` 실재(없으면 human.asked 프로덕션 기록 0) · SessionEnd payload `cwd` · `/doctor` 커맨드 경유 Check 8-②/9 PASS · Explore/investigator `route.selected` 생성 · UPS 가드가 cross-session 인사도 막는지.
+- 러너 결함 2(후속): `scripts/split/land.mjs` lint 행이 부모 cwd 라 줄기 신규 파일 미탐(3/5 줄기 오탐) · `lib/git/batch-landing.js` 재시도 시 사이드 브랜치 non-ff(`ci/split-split-<run>` 접두 중복 포함).
+- `commands/doctor.md` Check 8 호출 예 `project` 인자 누락 → basename≠artibot 워크트리 전부 `projection-drift` 위양성(후속). 같은 세션 2번째 substantive 프롬프트마다 `mission.created` 재발행(기존, 판독 무해). 재개 세션 usage 증분은 과소집계(reader 최신값 우선이 정답, 후속). 이벤트별 `sources` 위젠 게이트 부재.
+
+
 ## [4.56.0] — 2026-09-05
 
 ### 3차 배치(split-ff6c63) — 보안 훅 부활 · 트레일 동결 · 조사·감사 에이전트

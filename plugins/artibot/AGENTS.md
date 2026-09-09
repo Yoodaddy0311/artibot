@@ -31,7 +31,7 @@ The `direct` degradation mode already lists the supported non–Claude Code plat
 
 | Command | Purpose |
 |---|---|
-| `npm test` | Run the suite (14,953+ tests via vitest) |
+| `npm test` | Run the suite (15,200+ tests via vitest) |
 | `npm run test:coverage` | Run tests with coverage reporting |
 | `npm run lint` | ESLint — 0 errors/warnings target |
 | `npm run ci` | Full gate: validate + skill:check + lint + test + eval:runtime |
@@ -267,7 +267,7 @@ All contributions must respect Artibot's **local-only data policy** — exports 
      sentence pattern with a placeholder value anywhere earlier in this file — the gate
      would capture the placeholder and fail the release. -->
 
-Current plugin version: **4.56.0**. That is **11 entries across 10 files** — `marketplace.json`
+Current plugin version: **4.57.0**. That is **11 entries across 10 files** — `marketplace.json`
 contributes two (`version` and `release.current`). Keep all eleven in lockstep;
 `scripts/release-check.js` enforces every one of them and exits 1 on any mismatch.
 

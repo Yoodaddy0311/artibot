@@ -164,6 +164,12 @@ describe('the `failed` ops state (allowlist widening)', () => {
 
 const SKIP_DIRS = new Set([
   'node_modules', '.git', '.artibot', 'coverage', 'dist', 'build', '.next', '.cache',
+  // `.claude/worktrees/<limb>/` holds full checkouts of /split limb branches on a
+  // developer machine (5 of them on 2026-09-09). Walking into them finds this
+  // very file 5x over and reports its own assertion text as an "emitter"
+  // (15 false hits; green on CI, where no nested worktree exists). A nested
+  // checkout is not the source tree.
+  '.claude',
 ]);
 const SCAN_EXT = /\.(?:js|mjs|cjs|ts|mts|cts|json)$/;
 const SELF = resolve(HERE, 'v11-status-mapping.test.js');
