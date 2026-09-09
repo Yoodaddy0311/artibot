@@ -1,4 +1,50 @@
-# NEXT-SESSION — 크로스머신 핸드오프 (2026-09-09 17:1x, nowhe 머신, master = v4.57.0 릴리스 48ed25dd)
+# NEXT-SESSION — 크로스머신 핸드오프 (2026-09-09 22:0x, nowhe 머신, master = 4f79f7e5 + 이 커밋, 설치본 4.57.0)
+
+> 다른 머신에서는 `git pull` → `claude plugin update`(4.57.0) → 재시작 → **이 파일을 직접 Read** 하고 시작한다. 로컬 전용(`.artibot/HANDOFF.md`·`.artibot/split/`·`reports/AUTOPILOT/`·`.artibot/runtime/`·`.artibot/ledger/`)은 이 머신에만 있다. 이 절의 수치는 전부 이 머신 원장 실측이다.
+
+## 지금 상태 (2026-09-09 21:58 KST 실측)
+
+| 항목 | 값 |
+|---|---|
+| master | `4f79f7e5` + 이 docs 커밋. origin ahead/behind 0/0(커밋 전), 트리 클린(untracked 2: `.artibot/REPORTS/`·`plugins/artibot/.artibot/` — 로컬 잔재, 커밋 안 함) |
+| 설치본 | **4.57.0**(cache `…/4.57.0`, gitCommitSha 48ed25dd). 이 세션(a1399ab2)이 재시작 후 첫 4.57.0 세션 |
+| 5.0 로드맵 | **Observe 종료 조건(라이브 판정) 판정 완료** — 아래 표. 4 PASS + 1 부분 FAIL |
+
+## v4.57.0 라이브 판정 5항 — 결과 (세션 a1399ab2, 12:47Z~12:58Z)
+
+| # | 항목 | 판정 | 실측 근거 |
+|---|---|---|---|
+| 1 | PreToolUse 페이로드 `cwd`/`session_id` | **PASS** | `echo 'git branch -D …'` 프로브 → HG-04 차단 → `.artibot/runtime/ledger.jsonl` `human.asked` 12:53:39.648Z, `question_id=q-a1399ab2-77ac71493c05`(nosess 아님). 원장 전체 human.asked 5/5 session-bound, nosess 0 |
+| 2 | SessionEnd payload `cwd` → `usage.receipt` | **PASS** | `env -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT claude -p "…ok" --max-turns 1` 헤드리스 세션 4122a20f → 12:54:18.740Z `usage.receipt` source=hook, tier fable, cache_creation 74,124. 직전 세션 4030d1a1 의 `ledger.rejected` 7건(08:39:36Z `source-not-allowed:hook`)은 그 세션이 로드한 4.56.0 allowlist 가 `["worker"]` 였기 때문(4.57.0 = `["worker","hook"]`, 캐시 3버전 대조 실측). 결함 아님 |
+| 3 | `/doctor` Check 8-②/9 | **8-② PASS · 8-①/9 WARN** | `doctor.md` 절차 그대로 스크립트 실행(12:55:49Z). 8-② versions [1,1] gaps/regressions/duplicates 0. 8-① WARN = reader census `duplicate 2`(아래 P1) · 9 = item 8 이 parity 를 그대로 물려받아 WARN, 측정 9/10(item 5 는 mission 0건이라 unmeasured) |
+| 4 | Explore/investigator `route.selected` | **PASS** | 12:52:47Z Explore(opus) · 12:52:54Z investigator(selected tier **fable**) 각각 `route.selected`+`route.bound`(method `prompt_id+name`, confidence exact). spawns.ndjson `route_ledger=ok:bound` 2/2. `canonicalModel` 은 여전히 null(호스트 SubagentStart 에 model 키 없음) |
+| 5 | UPS `source` 가드 | **task-notification PASS · agent/cross-session FAIL** | routing-classified: 사람 프롬프트 2 → bg Bash `[SYSTEM NOTIFICATION` 통지 후 **2(증가 0)** → 팀원 SendMessage 2건 도착 후 **4**. 첫 팀원 보고(12:57:48Z)는 system2 로 분류돼 `[artibot:team teammates=8]`·`[artibot:hint recommend=autopilot]` 까지 주입됨 = split-5f9fe3 #G "인사가 팀 권고 주입" 재현. 직전 세션도 릴리스 전 task-notification 5/5 라우팅(≤1.1s) → 릴리스 후 3/3 무라우팅 |
+
+## 다음 할 일 (우선순위순)
+
+| # | 작업 | 근거·주의 |
+|---|---|---|
+| P1 | **UPS 가드 — agent-message/cross-session 차단** `scripts/hooks/_userprompt-dispatcher.js#classifyPromptSource`. `NON_USER_BODY_MARKERS` 는 `<task-notification>`·`[SYSTEM NOTIFICATION` 2종뿐. 팀원 보고 본문은 `Another Claude session sent a message` 로 시작(직전 세션 원장 8건 동일 접두). 호스트가 `source` 를 싣는지는 **미확인**(stderr 미수집) — 먼저 `source` 실측 후 마커 추가. 테스트 `tests/hooks/userprompt-dispatcher-resilience.test.js` 동반 | 이 세션 라이브 재현 2/2 |
+| P1 | **ledger reader dedupe pid 충돌** `lib/runtime/ledger.js#dedupeKey`(session_id,source,pid,seq). 훅은 프로세스당 seq 0 → Windows pid 재사용 시 별개 이벤트(2026-09-04 pid 38976 17:04Z/17:46Z · 21784 17:17Z/17:53Z, 바이트 상이)가 duplicate 로 탈락. Check 8/9 가 이 원장에서 영구 WARN. ts 를 키에 포함하거나 훅 seq 를 세션 단위로 | doctor 스크립트 실측 |
+| P1 | 이월: `land.mjs` lint 행 worktree cwd(#G14) · `landBatch` lease push(#G25) · `commands/doctor.md` Check 8 `project` 인자(#G16) · `lock-harness` wave | 변동 없음 |
+| P2 | `schemas/ledger-events.allowlist.json:160` route.selected spec 이 "SubagentStart 도 shadow receipt 를 :340 에서 append" 라 하나 `subagent-handler.js` 의 append 는 `:586` route.bound 1곳뿐 — 문서 드리프트(Explore 팀원 발견, 리더 grep 재확인) · Check 9 item 5 가 mission 0건에서 unmeasured 로 뜨는 lib 경계 · `usage.receipt` cost.total null / pricing_version `unresolved`(가격표 미배선) | |
+
+## 재사용 프로브 5종(다음 릴리스 라이브 판정용)
+
+1. `echo 'git branch -D x'` → `human.asked` 1줄(차단 자체가 #G29 오탐이라 안전).
+2. `env -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT claude -p "Reply with exactly the word: ok" --max-turns 1` (리포 cwd) → `usage.receipt` 1줄.
+3. Check 8/9: `doctor.md` 절차대로 `readLedgerCensus`+`readJournal(.git/artibot/project-state.jsonl)`+`state.yaml` raw → `checkLedgerStateParity`/`checkStateVersionGaps`/`checkArtifactHealth`(classifyStaleness 는 `lib/runtime/artifact-lifecycle.js` 에서 주입).
+4. Explore + investigator 1건씩 스폰 → `route.selected`/`route.bound` 2쌍.
+5. `.artibot/runtime/decisions/<sid>.events.ndjson` 의 `routing-classified` 수 = 사람 프롬프트 수인지(통지·팀원 보고 도착 후 재계수).
+
+## 이 세션 관찰(도구)
+
+- 팀원 2명 모두 첫 보고를 `SendMessage(to="team-lead")` 로 보내 success 를 받았으나 리더에게 **미도착**. 회수 요청(3지선다) 후 `to="main"` 재송신은 도착. 다음 스폰 프롬프트는 `to="main"` 으로 지시할 것.
+- 헤드리스 `claude -p` 는 중첩 세션 env(`CLAUDECODE`·`CLAUDE_CODE_ENTRYPOINT`) 를 지워야 뜬다. 10초 소요.
+
+---
+
+# (구) NEXT-SESSION — 크로스머신 핸드오프 (2026-09-09 17:1x, nowhe 머신, master = v4.57.0 릴리스 48ed25dd)
 
 > 다른 머신에서는 `git pull` 후 **이 파일을 직접 Read** 하고 시작한다. 로컬 전용(`.artibot/split/`·`gotchas.md` #G1~#G25·`runtime/split/`·`.artibot/HANDOFF.md`·`reports/AUTOPILOT/`)은 이 머신에만 있다 — 요지는 회고 `reports/SPLIT/split-5f9fe3.md`(추적) 에 있다.
 
