@@ -37,6 +37,12 @@
  * ── 이 필터가 못 보는 것 ─────────────────────────────────────────────────────
  *  Write/Edit 는 allowlist 매치 시 필터 없이 allow — cwd 비의존 파괴 판정 정본 부재, 후속 결정
  *
+ *  두 목록 밖 파괴 명령은 통과한다. 합집합은 어느 한쪽만 쓸 때보다 넓을 뿐이고,
+ *  충분하다는 뜻이 아니다 — 이 필터의 상한은 두 정본 목록의 상한이다.
+ *
+ *  통과(allow)는 안전 증명이 아니라 "이 훅이 아는 두 목록에 안 걸렸다"일 뿐이다.
+ *  실제 차단은 PreToolUse 가 한다. 이 훅은 승인을 아낄 뿐 거부하지 않는다.
+ *
  * Hook attachment (hooks.json): PermissionRequest
  * Stdin: { tool_name, tool_input, permission_suggestions, ... }
  * Stdout: optional { hookSpecificOutput: { hookEventName, decision: { behavior } } }
@@ -122,9 +128,7 @@ export function defaultJudge({ toolName, toolInput }) {
   const verdict = executeChain('pre', 'Bash', { tool_name: 'Bash', tool_input: toolInput });
   if (verdict?.decision === 'block') {
     const guardName = verdict.guardName || 'guard';
-    // Only `dangerous-command` blocks Bash today; the other branch is the
-    // fail-closed path for a guard that THREW (guard-registry.js#executeChain
-    // returns block carrying the thrower's name). Untested — see report.
+    // `guard-block` 은 도달 불가 — 가드 throw 시 executeChain 이 block+guardName 을 내는 경로 전용.
     return {
       kind: guardName === 'dangerous-command' ? 'destructive' : 'guard-block',
       reason: `${guardName}: ${verdict.reason}`,

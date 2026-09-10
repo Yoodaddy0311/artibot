@@ -232,6 +232,29 @@ describe('evaluatePermission/이 필터가 못 보는 것 (알려진 구멍을 �
     expect(out.withheld).toBeUndefined();
   });
 
+  it('구멍의 위치: judge 는 호출되지만 Bash 가 아니라 판정을 포기한다', () => {
+    // 구멍은 "judge 를 안 부른다"가 아니라 "불러도 Bash 가 아니면 null"이다.
+    // 나중에 Write 판정 정본이 생기면 고칠 자리는 defaultJudge 안이지
+    // evaluatePermission 의 호출 여부가 아니다.
+    const seen = [];
+    const out = evaluatePermission(
+      {
+        toolName: 'Write',
+        toolInput: { file_path: '.env', content: 'X=1' },
+        allowlist: [{ tool: '*' }],
+      },
+      {
+        judge: (call) => {
+          seen.push(call.toolName);
+          return defaultJudge(call);
+        },
+      },
+    );
+    expect(seen).toEqual(['Write']);
+    expect(defaultJudge({ toolName: 'Write', toolInput: { file_path: '.env' } })).toBeNull();
+    expect(out.decision).toBe('allow');
+  });
+
   it('Bash 가 아닌 도구는 judge 가 즉시 null 을 낸다', () => {
     expect(defaultJudge({ toolName: 'Write', toolInput: { file_path: '.env' } })).toBeNull();
     expect(defaultJudge({ toolName: 'Edit', toolInput: { file_path: 'id_rsa' } })).toBeNull();
