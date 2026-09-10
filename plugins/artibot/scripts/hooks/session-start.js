@@ -9,7 +9,7 @@ import { getPluginRoot, parseJSON, readStdin, resolveConfigPath, toFileUrl, writ
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { checkForUpdate } from '../../lib/core/version-checker.js';
+import { checkForUpdate, resolveUpdateCheckPolicy } from '../../lib/core/version-checker.js';
 import { createErrorHandler, getStatePath } from '../../lib/core/hook-utils.js';
 import { getLastTestStatus } from '../../lib/core/test-status.js';
 import { resolveProjectRoot } from '../../lib/git/project-root.js';
@@ -552,11 +552,26 @@ async function appendHandoffBanner(lines, { startTimeMs = Date.now() } = {}) {
  * leaving ample headroom within the 5000ms hook limit. CRITICAL: the timer
  * MUST be cleared after Promise.race settles, otherwise the unreferenced
  * pending timer keeps Node's event loop alive for the full 2000ms.
+ *
+ * Opt-out is resolved HERE, before any work: `checkForUpdate` carries the same
+ * gate defensively, but a user who turned the check off should not pay for the
+ * call, the 2000ms timer, or the promise race at all. The policy resolver is
+ * imported rather than reimplemented — `lib/core/version-checker.js` is the
+ * single source of truth for the env-beats-config precedence.
  * @param {string} version
  * @param {string} home
  * @param {string[]} lines
+ * @param {{ config?: object, processEnv?: NodeJS.ProcessEnv }} [opts]
+ * @param {object} [opts.config] - Parsed artibot.config.json, for updateCheck.enabled
+ * @param {NodeJS.ProcessEnv} [opts.processEnv] - Process environment to read (not the detectEnvironment() descriptor main() calls `env`); defaults to process.env
  */
-async function checkUpdateBounded(version, home, lines) {
+async function checkUpdateBounded(version, home, lines, { config, processEnv = process.env } = {}) {
+  const policy = resolveUpdateCheckPolicy({ env: processEnv, config });
+  if (!policy.enabled) {
+    // stderr only — the stdout JSON contract is a single writeStdout in main().
+    process.stderr.write(`[artibot] update check disabled (${policy.reason})\n`);
+    return;
+  }
   try {
     const cacheDir = path.join(home, '.claude', 'artibot');
     const updatePromise = checkForUpdate(version, cacheDir);
@@ -695,7 +710,7 @@ export async function main() {
     }
   }
 
-  await checkUpdateBounded(version, home, lines);
+  await checkUpdateBounded(version, home, lines, { config });
   await primeSkillCache(env.pluginRoot);
   await maybeInjectSkillDiscovery(env.pluginRoot, lines);
   await maybeSwarmAutodetect(env.pluginRoot);
