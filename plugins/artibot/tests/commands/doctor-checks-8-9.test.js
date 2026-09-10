@@ -21,18 +21,26 @@
  *   been observed.
  * - **That the caller wires the inputs correctly.** The functions are pure and
  *   the reading half lives in the command prose. A command that reads the wrong
- *   file would still produce green tests here.
+ *   file would still produce green tests here. Narrowed, not lifted, by G16: the
+ *   root-resolution step is now pinned as PROSE, and `resolveProjectRoot` is
+ *   exercised for real against a throwaway linked worktree — but no run of
+ *   `/doctor` is observed anywhere in this file, so an executor who ignores the
+ *   prose and passes its own cwd still produces green here.
  * - **That the ten items are individually correct against a real project.**
  *   Each item is exercised by one passing and one failing fixture, which fixes
  *   the contract, not the field accuracy.
  */
 
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import {
+  existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync,
+} from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { resolveProjectRoot } from '../../lib/git/project-root.js';
 import {
   ARTIFACT_HEALTH_ITEMS,
   ARTIFACT_HEALTH_SOURCE,
@@ -884,5 +892,113 @@ describe('the frozen baseline still matches git, while HEAD predates T-43', () =
     for (const [key, digest] of Object.entries(CHECK_1_7_SHA256)) {
       expect(sha(head.get(key))).toBe(digest);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Check 8 — WHICH project root the three reads are aimed at (G16)
+// ---------------------------------------------------------------------------
+
+/**
+ * G16: the Check 8 procedure named `readLedgerCensus(projectRoot)` without ever
+ * saying where `projectRoot` comes from. In a linked /split worktree an operator
+ * who substituted the process cwd or the plugin root read ANOTHER tree's ledger
+ * and reported a parity verdict about a project nobody asked about. Two separable
+ * halves are pinned below: the document now fixes the procedure (prose gates),
+ * and `resolveProjectRoot` really does return the worktree root that procedure
+ * promises (executable gate).
+ */
+describe('Check 8 resolves ONE project root (G16)', () => {
+  const section = () => checkSections(CURRENT).get('Check 8');
+
+  it('names the resolver by symbol rather than leaving the root to the caller', () => {
+    expect(section()).toContain('`lib/git/project-root.js#resolveProjectRoot`');
+  });
+
+  it('pins the exact report phrase that states which root was read', () => {
+    expect(section()).toContain('read project root:');
+  });
+
+  it('says Check 9 and Check 10 reuse this one value', () => {
+    // Named readers, not just the labels: "Check 9" already appeared in this
+    // section before G16 (the --fix cross-reference), so a label-only assertion
+    // would have been green for a reason that has nothing to do with reuse.
+    const s = section();
+    expect(s).toMatch(/Check 9/);
+    expect(s).toMatch(/Check 10/);
+    expect(s).toContain('.artibot/missions/');
+    expect(s).toContain('loadReplay');
+    expect(s).toContain('readSpawns');
+  });
+});
+
+describe('resolveProjectRoot returns the worktree root, not the main repo (G16)', () => {
+  // An INDEPENDENT throwaway repo under the OS temp dir. `git worktree add`
+  // mutates the repo it runs in, so none of this may touch the Artibot checkout:
+  // every `git` call below passes an explicit cwd inside `tmp`.
+  // Normalise BOTH sides by the resolver's own rule (`project-root.js#sameDir`):
+  // realpath first, so a Windows 8.3 short name or a symlink cannot spell one
+  // directory two ways, then case-fold on win32 only. Folding case everywhere
+  // would hide a genuine casing bug on the case-sensitive platforms.
+  // This is normalisation, NOT a tolerance: the negative controls below compare
+  // different directories, which differ by more than case.
+  const norm = (p) => {
+    let out;
+    try {
+      out = realpathSync.native(p);
+    } catch {
+      out = p; // not created — compare as spelled, same fallback the resolver uses
+    }
+    return process.platform === 'win32' ? out.toLowerCase() : out;
+  };
+  const run = (args, cwd) =>
+    execFileSync('git', args, { cwd, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] });
+
+  let tmp = null;
+  let mainRoot = null;
+  let wtRoot = null;
+
+  beforeAll(() => {
+    tmp = realpathSync.native(mkdtempSync(path.join(os.tmpdir(), 'artibot-g16-')));
+    mainRoot = path.join(tmp, 'main');
+    wtRoot = path.join(tmp, 'wt');
+    mkdirSync(mainRoot, { recursive: true });
+    run(['init', '-q'], mainRoot);
+    run(['-c', 'user.email=g16@test.invalid', '-c', 'user.name=g16',
+      'commit', '-q', '--allow-empty', '-m', 'root'], mainRoot);
+    run(['worktree', 'add', '-q', '-b', 'g16-wt', wtRoot], mainRoot);
+    mkdirSync(path.join(wtRoot, 'sub'), { recursive: true });
+    mkdirSync(path.join(mainRoot, 'sub'), { recursive: true });
+  });
+
+  afterAll(() => {
+    if (tmp === null) return;
+    try {
+      run(['worktree', 'remove', '--force', wtRoot], mainRoot);
+    } catch {
+      // Best effort — the recursive remove below is the cleanup that matters.
+    }
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it('built a real LINKED worktree — its `.git` is a file, not a directory', () => {
+    // Self-check. Without it the next assertion could be passing against two
+    // ordinary repos and would say nothing about the linked-worktree case.
+    expect(statSync(path.join(mainRoot, '.git')).isDirectory()).toBe(true);
+    expect(statSync(path.join(wtRoot, '.git')).isFile()).toBe(true);
+  });
+
+  it('resolves a directory inside the worktree to the WORKTREE root', () => {
+    const got = norm(resolveProjectRoot(path.join(wtRoot, 'sub')));
+    expect(got).toBe(norm(wtRoot));
+    expect(got).not.toBe(norm(mainRoot));
+  });
+
+  it('negative control — inside the main repo it returns the MAIN root', () => {
+    // Proves the resolver reads markers rather than echoing `start` back, which
+    // would make the assertion above true for the wrong reason.
+    const got = norm(resolveProjectRoot(path.join(mainRoot, 'sub')));
+    expect(got).toBe(norm(mainRoot));
+    expect(got).not.toBe(norm(path.join(mainRoot, 'sub')));
   });
 });
