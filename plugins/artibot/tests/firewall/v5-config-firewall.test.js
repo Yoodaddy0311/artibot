@@ -150,9 +150,13 @@ const TOPOLOGY_MODES = Object.freeze(['solo', 'subagent', 'team', 'autopilot', '
 /**
  * 2026-09-03 실측. 신설 6키(topology·routing·ledger·stateStore·missions·review)를
  * 더한 뒤의 최상위 키 수 — 무단 추가/삭제 탐지용. 2026-09-02 의 30 에서 오너 결정
- * `review` 1건이 더해져 31 이다.
+ * `review` 1건이 더해져 31, 2026-09-10 오너 위임(split-b87130 마무리 "권장사항으로
+ * 진행") 아래 `updateCheck`(세션 시작 버전 체크 옵트아웃, `lib/core/version-checker.js#
+ * resolveUpdateCheckPolicy` 가 읽는 유일한 최상위 키) 1건이 더해져 32 다. 그날 리더가
+ * 결정 없이 키를 넣었다가 이 단언에 CI RED(32≠31)로 되돌린 뒤 등록했다 — 이 게이트가
+ * 설계대로 작동한 실측 1건.
  */
-const EXPECTED_TOP_LEVEL_COUNT = 31;
+const EXPECTED_TOP_LEVEL_COUNT = 32;
 
 /** 정책 버킷이 결정하는 30 에이전트 전건 + 티어 기대값(현행 = 변화 0 기준선). */
 const FABLE_AGENTS = Object.freeze([

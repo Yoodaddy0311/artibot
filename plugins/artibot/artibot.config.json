@@ -1255,6 +1255,10 @@
   "permissions": {
     "autoApprove": []
   },
+  "updateCheck": {
+    "enabled": true,
+    "comment": "Session-start update check (lib/core/version-checker.js#resolveUpdateCheckPolicy). Env ARTIBOT_UPDATE_CHECK=0|false|off|no disables and wins over this key; off = checkForUpdate never called (no network, no cache write). Top-level key registered 2026-09-10 (owner delegation, split-b87130 version-check-optout) — tests/firewall/v5-config-firewall.test.js EXPECTED_TOP_LEVEL_COUNT 31 -> 32."
+  },
   "output": {
     "maxContextLength": 500,
     "defaultStyle": "artibot-default"
