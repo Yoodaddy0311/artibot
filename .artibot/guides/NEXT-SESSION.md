@@ -2,6 +2,27 @@
 
 > 다른 머신에서는 `git pull` → 설치본 4.57.0 확인 → **이 파일을 직접 Read** 하고 시작한다. 로컬 전용(`.artibot/HANDOFF.md`·`.artibot/split/`·`runtime/split/`·`.artibot/runtime/`)은 이 머신에만 있다. 아래 수치는 전부 이 세션(artibot-78) 리더 실측이다.
 
+## 4.58.0 라이브 판정 — 재시작 후 (2026-09-10 16:4x KST, 세션 720ee92d, 설치본 **4.58.0**, master 026ab639)
+
+세션 720ee92d 는 설치본 갱신(06:07Z)·직전 세션 종료(06:13:58Z usage.receipt) **뒤** 06:14Z 에 시작 — 4.58.0 훅으로 돈 첫 세션(추론: 원장에 버전 마커 없음, installPath 가 갱신 뒤였음).
+
+| # | 항목 | 판정 | 실측 근거 |
+|---|---|---|---|
+| 1 | PreToolUse `cwd`/`session_id` | **PASS** | `echo 'git branch -D …'` 프로브 → HG-04 차단 → `human.asked` 07:32:07Z `q-720ee92d-251d322f082f`, session_id 720ee92d, gate HG-04, decision block |
+| 2 | SessionEnd → `usage.receipt` | **PASS**(직전 세션 8f6cbd98 실측 유지) | 헤드리스 efd21dcd 06:10:37Z + 8f6cbd98 자기 종료 06:13:58Z. 이 세션분은 종료 시 재확인 |
+| 3 | doctor Check 8/9 | **FAIL(측정 프레임, 변동 없음)** | `probe-check89.mjs` 07:31:58Z: census duplicate **0** · rejected_excluded 1 · events 119 / journal 19 / projection 1292B · `projection-drift` + `ledger-subset-violation` {2,3,4,5,7,8,10,11,12,13} = 직전과 동일(worktree 5개 원장 분산). Check 9 fail(item 8 상속) · missions 0. **오너 결정 대기**(worktree 정리 vs 합산 판정) |
+| 4 | Explore/investigator `route.selected` | **PASS** | Explore 07:32:09Z + investigator 07:33:28Z 각 `route.selected`+`route.bound`(method `prompt_id+name`, confidence exact, matched_on subagent_type). investigator `models.selected.tier` **fable**(recommended opus → 정책 allowlist 승격). spawns.ndjson `route_ledger=ok:bound` 5/6(unbound 1 = `name:` 지정 general-purpose 프로브, 의도된 skip). **신규 관측**: investigator 행 `canonicalModel: "fable"`(4.57.0 판정 때는 null — 호스트가 SubagentStart 에 model 을 싣기 시작했거나 4.58.0 바인딩 변경, 어느 쪽인지 **미확인**), modelMismatch false |
+| 4′ | 측정 프레임 함정 | 기록 | `Agent(name: "probe-investigator")` 로 스폰하면 spawns.ndjson `agentType` 이 **이름**으로 찍혀 allowlist 대조가 안 된다(recommended opus, canonical null). 이름 없는 재스폰으로 PASS 확인. 프로브는 이름 없이 스폰할 것 |
+| 5 | UPS `source` 가드 | **task-notification PASS · agent-message 미측정** | routing-classified 2 = 사람 프롬프트 2(06:14Z·07:30Z). Explore task-notification 3건 도착 후 **2(증가 0)**. 팀원 `SendMessage(to="team-lead")` 2건(ups-probe·probe-investigator, 07:32Z 발신)은 07:45Z 현재 리더 컨텍스트에 **미도착**(ListAgents: 둘 다 idle) — 도착 뒤 재계수 필요 |
+
+**Wave 4 승격(07:44Z)**: `plan.json` limbs 를 judge-parity(5)·skill-description-render(3)·hook-latency-bench(3, `docs/HOOK-LATENCY-2026-09-10.md` 추가) 로 교체, base **026ab639**(창 열린 뒤 porcelain 으로 재확정), `plan.serial` 은 lock-harness 만 남음, `run.json.lanes` 3건 `pending`. 브리프 3건 `.artibot/split/<limb>/brief.md`(로컬) — Explore 정찰 3건 기반, `dispatch.mjs --dry-run` 3/3 통과. **다음**: 오너가 리포 루트에서 `claude --worktree split-artibot-{judge-parity,skill-description-render,hook-latency-bench}` → 리더 창 `/split 계속`(worktree-setup → dispatch → lane-state active).
+
+정찰이 뒤집은 리더 인용 2건: ① judge-parity — `git push --force-with-lease` 가 L1 을 통과하는 경로는 `safeOverrides` 가 아니라 `blocked-patterns.js:54` 정규식 lookahead(브리프에 반영). ② skill-description-render — "6/114 렌더" 는 커맨드 착시: 렌더된 12개는 전부 `commands/<n>.md` 문구이고 **skills/*/SKILL.md 렌더는 0/114** 로 보인다. 형제 `artibot-cowork`(46 SKILL, 매니페스트에 `skills` 키 **없음**)는 렌더됨 → 1차 가설 = `plugin.json:75` `"skills": ["./skills/"]` 명시 선언.
+
+**오너 판정 2건 — 새 근거**:
+- `sessionend-dispatcher` 로컬 FAIL: 테스트 `tests/dispatcher/sessionend-dispatcher.test.js:219-226` 는 `.artibot/ledger/*.jsonl` **전체를 문자열 substring** 으로 `end-test|end-stdout|end-no-side-effects` 검사한다. 걸리는 7행(81202b00 4행 · bda9c5e5 3행)을 파싱하면 **fixture envelope 0 · 본문 텍스트 언급 7**(팀원 메시지·어시스턴트 답변이 "end-test" 를 언급한 실제 세션 기록). 즉 "픽스처 오염" 이 아니라 **테스트 스캔이 과광범위**. 파일 삭제는 실기록 손실 → 권장: 테스트를 envelope `session_id` 필드 대조로 좁힌다(소유: tests/dispatcher).
+- `artibot-entry-parity` 로컬 FAIL: `ARTIBOT.md:17` "`.artibot/state.yaml` — not yet landed" vs 실파일 존재(state_version 9, gitignored, 이 머신 런타임이 씀). 테스트는 표기와 존재의 양방향 일치를 요구(`tests/firewall/artibot-entry-parity.test.js:270`). GitHub CI 는 파일이 없어 그린. 선택지: (a) 표기 제거 = "착지" 선언 (b) 런타임이 state.yaml 을 쓰지 않게 (c) 테스트가 gitignored 파일을 제외. **미결**.
+
 ## 4.58.0 라이브 판정 — 중간 (2026-09-10 15:1x KST, 세션 8f6cbd98, 설치본 4.57.0→**4.58.0 갱신 완료, 재시작 대기**)
 
 | 항목 | 결과 | 근거 |
