@@ -1,6 +1,6 @@
 # Artibot
 
-[![Version](https://img.shields.io/badge/version-4.57.0-blue?style=flat-square)](plugins/artibot/CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-4.58.0-blue?style=flat-square)](plugins/artibot/CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-BUSL--1.1-blue?style=flat-square)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-18%2B-brightgreen?style=flat-square)](package.json)
 [![Tests](https://img.shields.io/badge/tests-passing-brightgreen?style=flat-square)](plugins/artibot/tests/)
@@ -15,7 +15,7 @@ This repository ships **two complementary plugins** under one marketplace:
 
 | Plugin | Target | Version | Best for |
 |---|---|---|---|
-| [`artibot`](./plugins/artibot/) | Claude Code (developer CLI) | **4.57.0** | full Agent Teams orchestration, TDD, code review, security audits, RLVR learning, MCP server, **Goal-driven autopilot**, **`/learning` diagnostics**, **`/save` + `/resume` single-shot handoff**, **`/go` → `/orchestrate` build-sequence hand-off**, **ambient conversation ledger (no-command capture)**, **safety boost (machineId frontmatter, git-lock fail, 10m throttle)** |
+| [`artibot`](./plugins/artibot/) | Claude Code (developer CLI) | **4.58.0** | full Agent Teams orchestration, TDD, code review, security audits, RLVR learning, MCP server, **Goal-driven autopilot**, **`/learning` diagnostics**, **`/save` + `/resume` single-shot handoff**, **`/go` → `/orchestrate` build-sequence hand-off**, **ambient conversation ledger (no-command capture)**, **safety boost (machineId frontmatter, git-lock fail, 10m throttle)** |
 | [`artibot-cowork`](./plugins/artibot-cowork/) | Claude Cowork (knowledge workers) | **3.1.0** | marketing campaigns, long-form writing, AEO/GEO content, KR-market SEO, AI-slop detection, **Claude Design, Routines, Ultraplan, Monitor** |
 
 Both plugins share the same DEV protocol, Korean market expertise, data-sovereignty policy, and 6-stage content quality pipeline. They differ only in **target environment** and **skill mix**.
@@ -919,11 +919,11 @@ Key settings in `artibot.config.json`:
 
 | Setting | Description | Default |
 |---------|-------------|---------|
-| `version` | Plugin version | `4.57.0` |
+| `version` | Plugin version | `4.58.0` |
 | `cognitive.router.threshold` | System 1/2 boundary | `0.4` |
 | `cognitive.router.adaptRate` | Per-feedback adjustment step | `0.05` |
 | `permissions.autoApprove` | PermissionRequest allowlist (`{tool, commandPattern}`) — distinct from the `settings.json` permission allowlist. Even a matched Bash command still passes the PreToolUse danger judges (`guard-registry` + `classifyRisk`); destructive or unjudgeable commands are never auto-approved (they fall back to the normal prompt) | `[]` |
-| `updateCheck.enabled` | Session-start update check. Optional key (not shipped in the default config — add it to opt out); env `ARTIBOT_UPDATE_CHECK=0` (also `false`/`off`/`no`) wins over config. When off: no network call, no cache write | `true` (absent) |
+| `updateCheck.enabled` | Session-start update check. Env `ARTIBOT_UPDATE_CHECK=0` (also `false`/`off`/`no`) wins over config. When off: no network call, no cache write | `true` |
 | `cognitive.system1.maxLatency` | System 1 max response time (ms) (unused — engine removed) | `100` |
 | `cognitive.system1.minConfidence` | System 1 minimum confidence (unused — engine removed) | `0.6` |
 | `cognitive.system2.maxRetries` | System 2 max retry attempts (unused — engine removed) | `3` |
@@ -1053,6 +1053,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide on adding skills, agen
 You can install **both** in the same Anthropic account — `artibot` runs in your Claude Code terminal sessions, `artibot-cowork` runs in your Cowork chat. They never interfere because they target different runtimes.
 
 ## Version
+
+**4.58.0** (2026-09-10) — `split-b87130`, 3 waves · 10 limbs: UPS sender guard now blocks peer/agent message envelopes (no more routing injection on teammate reports); ledger dedupe key gains `ts` (Windows pid reuse no longer drops events); `land.mjs` lints the limb worktree and `landBatch` leases every side-branch push; `/doctor` Check 8 resolves one project root; installers skip the agents/commands flat copy when a native plugin cache is present; PermissionRequest auto-approve withholds destructive/unjudgeable Bash commands; session-start update check is opt-out (`ARTIBOT_UPDATE_CHECK=0` / `updateCheck.enabled`); README/schema/spec drift fixes and `/team` frontmatter repair.
 
 **4.57.0** (2026-09-09) — 4th landing batch (`split-5f9fe3`): removed the guardrail
 false-denial banner that mislabelled orchestration tools as denied, fixed the `/doctor`
