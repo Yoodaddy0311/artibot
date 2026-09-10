@@ -1,5 +1,5 @@
 ---
-description: (Artibot) Parallel team execution with cross-check — persistent team mode, leader delegates only, implementation on the build tier(`phaseRoles.build`, model-policy 해석, xhigh effort 권장), review phases on the review tier(`phaseRoles.review` — 2026-09-02 2티어 정책: 구현 opus · 검수 fable)
+description: "(Artibot) Parallel team execution with cross-check — persistent team mode, leader delegates only, implementation on the build tier(`phaseRoles.build`, model-policy 해석, xhigh effort 권장), review phases on the review tier(`phaseRoles.review` — 2026-09-02 2티어 정책: 구현 opus · 검수 fable)"
 argument-hint: '[task] e.g. "이 기능 구현하고 테스트도 작성해줘"'
 allowed-tools: [Read, Glob, Grep, Bash, Agent, AskUserQuestion, SendMessage, TaskCreate, TaskUpdate, TaskList, TaskGet]
 toolset: team
