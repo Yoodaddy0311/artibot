@@ -12,9 +12,17 @@
     skills/ hooks/ scripts/ lib/ ...    -> ~/.claude/artibot/
     rules/                              -> ~/.claude/rules/artibot/
 
-  Also enables Agent Teams and seeds a conservative read-only permission
-  allowlist (Read/Glob/Grep) into ~/.claude/settings.json so new users don't
-  face repeated permission prompts. Write/Edit/Bash are deliberately excluded.
+  The flat copy of commands/ and agents/ is SKIPPED when the native marketplace
+  plugin is already installed (a version directory under
+  ~/.claude/plugins/cache/artibot/artibot). Doing both puts every agent and
+  command into the session system prompt TWICE. Pass -Flat to force the copy.
+
+  Seeds a conservative read-only permission allowlist (Read/Glob/Grep) into
+  ~/.claude/settings.json so new users don't face repeated permission prompts.
+  Write/Edit/Bash are deliberately excluded. Agent Teams is enabled only when
+  this installer CREATES settings.json; an existing file is never edited for
+  that key (parity with install.sh#configure_settings) - the installer prints
+  the line to add instead. -EnableAgentTeams opts into writing it.
 
   This installer never clones the repo nor relies on the marketplace plugin
   loader — that path produces namespaced (`/artibot:save`) commands, which is
@@ -39,6 +47,10 @@
           .\install.ps1 uninstall          # remove
           .\install.ps1 -DryRun            # preview without writing
           .\install.ps1 -NoColor           # plain (CI) output
+          .\install.ps1 -Flat              # flat-copy agents/commands even
+                                           #   when the native plugin is present
+          .\install.ps1 -EnableAgentTeams  # also write the Agent Teams env var
+                                           #   into an EXISTING settings.json
 
 .PARAMETER Action
   install (default) or uninstall.
@@ -48,13 +60,27 @@
 
 .PARAMETER NoColor
   Disable colored console output (CI / non-ANSI terminals).
+
+.PARAMETER Flat
+  Force the flat copy of agents/ and commands/ into ~/.claude even when the
+  native marketplace plugin is detected. Without -Flat that copy is skipped,
+  because the two sources duplicate every agent and command in the session
+  system prompt. install.sh spells the same switch --flat.
+
+.PARAMETER EnableAgentTeams
+  Merge CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS='1' into an EXISTING
+  ~/.claude/settings.json. Off by default: install.sh only prints the line to
+  add, and an installer that edits a user's env block without being asked is a
+  surprise. A settings.json this installer creates always gets the key.
 #>
 [CmdletBinding()]
 param(
   [ValidateSet('install', 'uninstall')]
   [string]$Action = 'install',
   [switch]$DryRun,
-  [switch]$NoColor
+  [switch]$NoColor,
+  [switch]$Flat,
+  [switch]$EnableAgentTeams
 )
 
 Set-StrictMode -Version Latest
@@ -70,6 +96,14 @@ $script:UseColor = -not $NoColor
 $ScriptDir  = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ClaudeDir  = Join-Path $env:USERPROFILE '.claude'
 $ArtibotDir = Join-Path $ClaudeDir 'artibot'
+
+# Marketplace plugin cache root for THIS plugin. Two places read it — the
+# native-install detector (Test-NativePluginInstall) and the cache mirror
+# (Update-PluginCache) — and they must never drift apart, so the path is a
+# literal exactly once, here. Lockstep with install.sh's
+# ARTIBOT_PLUGIN_CACHE_ROOT and with the `plugins/cache` marker in
+# lib/core/install-mode.js#detectInstallMode.
+$PluginCacheRoot = Join-Path $ClaudeDir 'plugins\cache\artibot\artibot'
 
 # Minimum supported Node major (lockstep with install.sh MIN_NODE_MAJOR=20).
 $MIN_NODE_MAJOR = 20
@@ -111,6 +145,13 @@ $script:InstallLockHeld = $false
 # Set-StrictMode -Version Latest (L60) makes reading an uninitialised variable a
 # terminating error.
 $script:InstallFailures = 0
+
+# Set by Install-Assets when the native plugin made it skip the flat copy, read
+# by Show-Summary. Declared here for the same reason as the line above: under
+# Set-StrictMode -Version Latest, Show-Summary reading it unset is a terminating
+# error, and Show-Summary runs on the self-install path where Install-Assets
+# never ran at all.
+$script:FlatCopySkipped = $false
 
 # Matches install.sh exactly: try once, reclaim only a lock older than the stale
 # threshold, otherwise ERROR OUT. install.sh does not wait or retry — the last
@@ -320,10 +361,69 @@ function Copy-Tree {
   Copy-DirAtomic -SrcDir $SrcDir -DstDir $target
 }
 
+# ---------------------------------------------------------------------------
+# Native marketplace install detection
+# ---------------------------------------------------------------------------
+# Same marker as lib/core/install-mode.js#detectInstallMode, whose NATIVE signal
+# is the Claude marketplace plugin cache (its `cacheMarker`, built from
+# ~/.claude/plugins/cache). This narrows that to the artibot plugin's own cache
+# root and requires at least one VERSION subdirectory: Claude Code creates
+# ~/.claude/plugins/cache/artibot/artibot/<version>/ per installed version, and
+# the bare parent directory survives an uninstall, so its mere existence proves
+# nothing. Update-PluginCache below reads the same root for the same reason.
+#
+# Returns the detected version-directory path (a string) on a hit and $null
+# otherwise, so callers can name the path in their message. Pure - it never
+# creates, copies or removes anything, and never throws: an unreadable cache
+# directory reports "not native", which keeps the previous flat-copy behaviour.
+# Written to be safe under Set-StrictMode -Version Latest (no bare $null
+# property access, no unset variable reads).
+function Test-NativePluginInstall {
+  if (-not (Test-Path -LiteralPath $PluginCacheRoot)) { return $null }
+  $versionDir = @(Get-ChildItem -LiteralPath $PluginCacheRoot -Directory -ErrorAction SilentlyContinue) |
+    Select-Object -First 1
+  if (-not $versionDir) { return $null }
+  return $versionDir.FullName
+}
+
 function Install-Assets {
   # Commands + agents: flat into ~/.claude (NO namespace prefix)
-  Copy-MdFiles -SrcDir (Join-Path $ScriptDir 'agents')   -DstDir (Join-Path $ClaudeDir 'agents')   -Label 'Agents'
-  Copy-MdFiles -SrcDir (Join-Path $ScriptDir 'commands') -DstDir (Join-Path $ClaudeDir 'commands') -Label 'Commands'
+  #
+  # ...unless the NATIVE marketplace plugin is already installed. Claude Code
+  # loads agents and commands out of the plugin cache on its own, so flat-copying
+  # them here puts every one of them into the session system prompt TWICE. The
+  # flat copy exists to give prefix-free `/save` on a legacy install; it is not
+  # a second delivery channel. -Flat forces it back on.
+  $nativeAt = if ($Flat) { $null } else { Test-NativePluginInstall }
+  if ($nativeAt) {
+    # ASCII only - this file has no BOM and PS 5.1 reads it as the ANSI
+    # codepage; see the long note on Get-MemorySeed.
+    Write-Log "native plugin detected at $nativeAt - skipping flat copy of agents/commands; use -Flat to force"
+    $script:FlatCopySkipped = $true
+
+    # An earlier install (or an older version of this one) may have already
+    # flat-copied these files. They are what duplicates the listing, so say so.
+    # Counting only names that exist in the SOURCE keeps the user's own agents
+    # and commands out of the tally. Nothing is deleted here: removing files
+    # from ~/.claude on a plain re-install would be a surprise, and 'uninstall'
+    # already removes exactly this set.
+    $stale = 0
+    foreach ($pair in @(
+      @{ Src = (Join-Path $ScriptDir 'agents');   Dst = (Join-Path $ClaudeDir 'agents') },
+      @{ Src = (Join-Path $ScriptDir 'commands'); Dst = (Join-Path $ClaudeDir 'commands') }
+    )) {
+      if (-not (Test-Path -LiteralPath $pair.Src)) { continue }
+      foreach ($f in @(Get-ChildItem -LiteralPath $pair.Src -Filter '*.md' -File -ErrorAction SilentlyContinue)) {
+        if (Test-Path -LiteralPath (Join-Path $pair.Dst $f.Name)) { $stale++ }
+      }
+    }
+    if ($stale -gt 0) {
+      Write-Warn2 "$stale previously flat-copied agent/command files remain in ~/.claude/{agents,commands} (duplicated with the native plugin) - run '.\install.ps1 uninstall' to remove them or '-Flat' to refresh"
+    }
+  } else {
+    Copy-MdFiles -SrcDir (Join-Path $ScriptDir 'agents')   -DstDir (Join-Path $ClaudeDir 'agents')   -Label 'Agents'
+    Copy-MdFiles -SrcDir (Join-Path $ScriptDir 'commands') -DstDir (Join-Path $ClaudeDir 'commands') -Label 'Commands'
+  }
 
   # Runtime trees: into ~/.claude/artibot (clean-before-copy for parity)
   # `$null =` because Copy-Tree now returns a bool and an uncaptured return
@@ -386,19 +486,38 @@ function Set-Settings {
   $settingsFile = Join-Path $ClaudeDir 'settings.json'
 
   if ($DryRun) {
-    Write-Log "[dry-run] would enable Agent Teams + seed read-only permissions (Read/Glob/Grep) in $settingsFile"
+    if (Test-Path -LiteralPath $settingsFile) {
+      Write-Log "[dry-run] would seed read-only permissions (Read/Glob/Grep) + statusLine in $settingsFile (Agent Teams env var left to you unless -EnableAgentTeams)"
+    } else {
+      Write-Log "[dry-run] would create $settingsFile with Agent Teams enabled + read-only permissions (Read/Glob/Grep)"
+    }
     return
   }
 
   if (Test-Path -LiteralPath $settingsFile) {
-    # Merge into existing settings via Node (preserves user keys, idempotent).
+    # An EXISTING settings.json is the user's file. install.sh#configure_settings
+    # only tells them the line to add and never writes the env var itself; this
+    # matched that for years on Linux/macOS while Windows silently edited the
+    # env block. Same contract on both now. -EnableAgentTeams is the opt-in.
+    if (Select-String -LiteralPath $settingsFile -Pattern 'CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS' -Quiet -ErrorAction SilentlyContinue) {
+      Write-Log 'Agent Teams already enabled in settings.json'
+    } elseif (-not $EnableAgentTeams) {
+      Write-Warn2 'Add this to ~/.claude/settings.json manually:'
+      Write-Tip '  "env": { "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1" }'
+    }
+
+    # The permission allowlist and statusLine ARE merged either way - both are
+    # additive and idempotent, and neither can change what an existing key means.
     $node = @'
 const fs = require('fs');
 const path = process.env.ARTIBOT_SETTINGS;
 const seed = JSON.parse(process.env.ARTIBOT_ALLOW_SEED);
+const enableTeams = process.env.ARTIBOT_ENABLE_AGENT_TEAMS === '1';
 const cfg = JSON.parse(fs.readFileSync(path, 'utf8'));
 cfg.env = cfg.env && typeof cfg.env === 'object' ? cfg.env : {};
-if (!cfg.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS) cfg.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS = '1';
+if (enableTeams && !cfg.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS) {
+  cfg.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS = '1';
+}
 const perms = cfg.permissions && typeof cfg.permissions === 'object' ? cfg.permissions : {};
 const existing = Array.isArray(perms.allow) ? perms.allow : [];
 const merged = [...existing];
@@ -414,8 +533,13 @@ fs.renameSync(tmp, path);
 '@
     $env:ARTIBOT_SETTINGS  = $settingsFile
     $env:ARTIBOT_ALLOW_SEED = ($SafeAllow | ConvertTo-Json -Compress)
+    $env:ARTIBOT_ENABLE_AGENT_TEAMS = if ($EnableAgentTeams) { '1' } else { '0' }
     node --input-type=commonjs -e $node
-    Write-Log 'settings.json merged: Agent Teams enabled + read-only permissions seeded'
+    if ($EnableAgentTeams) {
+      Write-Log 'settings.json merged: Agent Teams enabled + read-only permissions seeded'
+    } else {
+      Write-Log 'settings.json merged: read-only permissions seeded (env block untouched)'
+    }
   } else {
     $json = @'
 {
@@ -760,7 +884,8 @@ function Update-MarketplaceMirror {
 # inside the cache (its version field is the cache routing key) and do NOT delete
 # the cache dir (clearCache() in update.js owns invalidation).
 function Update-PluginCache {
-  $cacheRoot = Join-Path $ClaudeDir 'plugins\cache\artibot\artibot'
+  # Same constant Test-NativePluginInstall reads — see its declaration.
+  $cacheRoot = $PluginCacheRoot
   if (-not (Test-Path -LiteralPath $cacheRoot)) {
     Write-Log 'Plugin cache not present (skip cache sync)'
     return
@@ -1162,10 +1287,16 @@ function Show-Summary {
   $hooksDir   = Join-Path $ArtibotDir 'scripts\hooks'
   $hookCount  = if (Test-Path -LiteralPath $hooksDir) { (Get-ChildItem -LiteralPath $hooksDir -Filter '*.js' -File -ErrorAction SilentlyContinue | Measure-Object).Count } else { 0 }
 
+  # When the flat copy was skipped, the two counts below describe whatever was
+  # already on disk - they are NOT what this run installed, and the native
+  # plugin's own agents/commands are not in them at all. Say so on the line
+  # itself rather than leaving a number that reads like a result.
+  $flatNote = if ($script:FlatCopySkipped) { ' (flat copy skipped - native plugin)' } else { '' }
+
   Write-Host ''
   Write-Log '--- Installation Summary ---'
-  Write-Host "  Agents:   $agentCount files in ~/.claude/agents/"
-  Write-Host "  Commands: $cmdCount files in ~/.claude/commands/ (no prefix -> /save, /sc, /daily)"
+  Write-Host "  Agents:   $agentCount files in ~/.claude/agents/$flatNote"
+  Write-Host "  Commands: $cmdCount files in ~/.claude/commands/ (no prefix -> /save, /sc, /daily)$flatNote"
   Write-Host "  Skills:   $skillCount dirs in ~/.claude/artibot/skills/"
   Write-Host "  Rules:    $ruleCount files in ~/.claude/rules/artibot/ (auto-activate)"
   Write-Host "  Hooks:    $hookCount scripts in ~/.claude/artibot/scripts/"
