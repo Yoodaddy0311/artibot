@@ -225,6 +225,8 @@ Key fields in `artibot.config.json` (file is auto-validated against schema):
 |---|---|---|
 | `version` | `4.57.0` | Synced across plugin.json / package.json / artibot.config.json |
 | `cognitive.router.threshold` | `0.4` | System 1 ↔ System 2 boundary |
+| `permissions.autoApprove` | `[]` | PermissionRequest allowlist `{tool, commandPattern}` (not the `settings.json` allowlist). A matched Bash command still passes the PreToolUse danger judges (`guard-registry` + `classifyRisk`); destructive/unjudgeable commands fall back to the normal prompt |
+| `updateCheck.enabled` | `true` | Session-start update check. Env `ARTIBOT_UPDATE_CHECK=0` wins over config; off = no network call, no cache write |
 | `cognitive.system1.maxLatency` | `100` | ms — unused (System 1 execution engine removed; key kept for schema compatibility) |
 | `learning.lifelong.batchSize` | `50` | Experiences per lifelong-learning batch |
 | `team.engine` | `"claude-agent-teams"` | Native Claude Code Agent Teams |

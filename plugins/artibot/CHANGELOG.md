@@ -22,6 +22,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### Docs
 - `commands/split.md`·`skills/split/references/operations.md`: integrate 브랜치 표기 `ci/{runId}`, master ff push 는 플레인(lease 는 사이드 브랜치), land 7행 표·lint 행 UNSUPPORTED 사유, 운용 규칙 "land 는 창 닫기 전". `lib/runtime/event-writer.js`·`schemas/ledger-envelope.schema.json` dedupe 키 서술 5필드.
 
+### /split Wave 2 (split-b87130, 배치 랜딩 27510566 · 2026-09-10)
+
+#### Fixed
+- **`/doctor` Check 8 이 읽는 루트 명시 (#G16)** (`commands/doctor.md`): Step 0 에서 `lib/git/project-root.js#resolveProjectRoot(process.cwd())` 로 ONE ROOT 를 구하고 `read project root: <path>` 를 병기, Check 9·10 이 같은 값을 재사용. /split 워크트리에서 부모 원장을 읽던 위양성 폐쇄. 문서 게이트 3 + 임시 독립 리포의 linked worktree 실행형 테스트.
+- **`route.selected` spec 발행자 정정** (`schemas/ledger-events.allowlist.json`): shadow receipt 는 PreToolUse 훅 `route-observe-pre.js` 가, `route.bound` 조인은 SubagentStart 훅 `subagent-handler.js` 가 쓴다 — 옛 spec 은 존재하지 않는 append 위치를 인용했다. spec 이 인용한 스크립트가 실재하고 이벤트 리터럴을 포함하는지 소스 스캔으로 고정.
+- **설치 스크립트 이중 적재** (`install.sh`·`install.ps1`): 네이티브 플러그인 캐시(`~/.claude/plugins/cache/artibot/artibot/<ver>/`)가 감지되면 agents/commands flat 복사를 기본 건너뜀(`--flat`/`-Flat` 로 강제) — 세션 시스템 프롬프트에 에이전트·커맨드가 2번 나열되던 고정비 제거. `install.ps1` 은 기존 `settings.json` 에 `AGENT_TEAMS` 를 더 이상 병합하지 않음(`-EnableAgentTeams` 옵트인, bash 와 정합). 조사: 호스트 2.1.267 은 plugin.json `rules` 키를 무시하므로 rules 는 flat 복사로만 전달됨(ADR-002).
+- **/team frontmatter YAML 파싱 오류** (`commands/team.md`): description 안의 `: ` 로 `claude plugin validate` 가 exit 1 이었고 런타임 메타데이터가 비어 로드됐다. 값 인용.
+
+#### Docs
+- README 드리프트 8행(`README.md`·`plugins/artibot/README.md`·`docs/MARKETPLACE-SUBMISSION.md`): 라우터 threshold 0.4 와 팀 트리거 tier 0.6 을 두 축으로 분리, "Agent Teams auto-enables" 서사 제거, 훅 27 유지 + 정의 병기(매처 엔트리; 커맨드 29), 버전 4.57.0, 제거된 System 1 엔진 서사 정리, static 커버리지 배지 삭제, rules 8→10 ×4 를 claims `rules` 패턴으로 게이트에 결합, flat 스킵 노트.
+
+### /split Wave 3 (split-b87130, 배치 랜딩 91f55319 · 2026-09-10)
+
+#### Added
+- **버전 체크 옵트아웃** (`lib/core/version-checker.js#resolveUpdateCheckPolicy`, `scripts/hooks/session-start.js`): env `ARTIBOT_UPDATE_CHECK`(`0|false|off|no` 끔 · `1|true|on|yes` 켬, 잡값은 config 폴백) > config `updateCheck.enabled` > 기본 ON. 꺼지면 `checkForUpdate` 호출 자체를 생략(네트워크 0·캐시 쓰기 0·2초 타이머 0), stderr 1줄. egress 게이트에 송신 0 증명 + 양성 대조군. `artibot.config.json#updateCheck.enabled=true` 키 추가.
+- **PermissionRequest 자동 승인의 위험 필터** (`scripts/hooks/permission-auto-approve.js`): allowlist 매치 뒤 Bash 명령 문자열을 기존 PreToolUse 정본 2종(`guard-registry#executeChain` ∨ `autopilot/safety#classifyRisk`)에 통과시켜 위험·판정불가·판정기 예외면 결정을 내지 않는다(`deny` 아님 — 기본 프롬프트로 복귀). 새 목록 0, cwd 미참조, 기본 OFF 불변. 못 보는 것: Write/Edit 는 allowlist 매치 시 필터 없이 allow(cwd 비의존 파괴 판정 정본 부재), 두 정본의 불일치(`--force-with-lease` 등)는 OR 로 보류 쪽.
+
 ## [4.57.0] — 2026-09-09
 
 ### 4차 배치(split-5f9fe3) — Observe 분모 3종 writer · UPS 발신자 가드 · guardrail 오탐 소거
