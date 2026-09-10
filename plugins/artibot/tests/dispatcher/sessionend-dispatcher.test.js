@@ -1,7 +1,9 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import {
+  existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -118,6 +120,105 @@ function runDispatcher(payload, env = {}) {
   return { stdout: stdout.trim(), status };
 }
 
+/**
+ * EVERY session id this suite feeds the dispatcher. A leak into the real
+ * project ledger can only be attributed to this file through one of these, so
+ * an id that is sent but not listed is a blind spot, not a saving.
+ *
+ * Enumerated from the `runDispatcher` call sites rather than remembered —
+ * reproduce with `grep -n "session_id: '" tests/dispatcher/sessionend-dispatcher.test.js`
+ * (5 sent ids, measured 2026-09-10; line numbers are deliberately not cited
+ * here because they rot). The first draft listed only 3 and silently dropped the two
+ * DISABLE-path ids, which is the worst pair to miss: a write from a run that
+ * was supposed to be switched off entirely is a more serious defect than a
+ * write from an enabled one, so those are exactly the ids whose absence must
+ * be provable.
+ *
+ * The sixth call site (the one posting `{}` with no id at all) is deliberately
+ * NOT represented here: `safeSession(undefined)` returns the generic
+ * `'session'` (`store.js:56-59`), and pinning that string would fire on any
+ * real session the host ever names `session.jsonl` — the flake this detector
+ * was narrowed to remove.
+ */
+const FIXTURE_SESSION_IDS = [
+  'end-test',
+  'end-disable',
+  'end-global-disable',
+  'end-stdout',
+  'end-no-side-effects',
+];
+
+/**
+ * Fixture traces in a ledger directory, by the two shapes a real leak takes.
+ *
+ * NOT SUBSTRING MATCHING — that is what this replaced, and it was a false
+ * positive generator. The previous form joined every `*.jsonl` in the real
+ * `.artibot/ledger/` and asserted the raw text did not CONTAIN 'end-test' /
+ * 'end-stdout' / 'end-no-side-effects'. But that directory also holds real
+ * session transcripts, and prose in a transcript may QUOTE the fixture name —
+ * a teammate message discussing this very test does exactly that. Measured
+ * 2026-09-10 on this checkout: 7 rows across
+ * `81202b00-…jsonl` and `bda9c5e5-…jsonl` matched the substrings, and 0 of
+ * them were a fixture envelope — 6 carried a top-level `session_id` holding
+ * the real session uuid, 1 had none. The suite went red while the repository
+ * was in fact untouched. A detector that fires on discussion of itself is
+ * noise, and noise is what gets a real detector deleted.
+ *
+ * The two signatures below are what a genuine leak actually produces:
+ *
+ *  1. FILENAME. `session-ledger.mjs:46` resolves the project root and
+ *     `store.js:66` names the file `<safeSession(session_id)>.jsonl`, so a
+ *     leaked fixture run creates `end-test.jsonl` itself. This is the PRIMARY
+ *     signature: `appendKept` (`store.js:141`) copies denoised TRANSCRIPT
+ *     lines verbatim, and those rows carry the transcript's own session id,
+ *     not the fixture id — so a row-only check would be fail-open against the
+ *     exact leak this test exists to catch.
+ *
+ *  2. ROW ENVELOPE. Any row whose parsed top-level `session_id` IS a fixture
+ *     id, for a writer that stamps the id into the row rather than the name.
+ *     Compared by VALUE, never by presence: real transcript rows carry a
+ *     `session_id` key too.
+ *
+ * Unparseable lines are ignored — a corrupt ledger line is someone else's
+ * concern, and treating it as a hit would reintroduce the flake.
+ *
+ * NOT COVERED: the cursor file `.cursor.json` also gains a key per session id
+ * (`store.js:255`), and is neither `.jsonl` nor `.ndjson`, so a leak that
+ * wrote a cursor entry but no rows is invisible here.
+ *
+ * @param {string} dir ledger directory to scan
+ * @returns {string[]} one finding per trace; empty means clean
+ */
+function fixtureLedgerTraces(dir) {
+  if (!existsSync(dir)) return [];
+  const findings = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const file = entry.name;
+    if (!file.endsWith('.jsonl') && !file.endsWith('.ndjson')) continue;
+    const stem = file.replace(/\.(?:jsonl|ndjson)$/, '');
+    if (FIXTURE_SESSION_IDS.includes(stem)) findings.push(`file:${file}`);
+    // Read only real files: `readFileSync` on a directory that happens to be
+    // named `*.jsonl` throws EISDIR (reproduced 2026-09-10), and a detector
+    // that dies on a malformed neighbour reports nothing about the leak it
+    // was watching for. The NAME check above still runs for such an entry —
+    // skipping it entirely would trade a crash for a fail-open.
+    if (!entry.isFile()) continue;
+    for (const line of readFileSync(path.join(dir, file), 'utf-8').split('\n')) {
+      if (!line.trim()) continue;
+      let row;
+      try {
+        row = JSON.parse(line);
+      } catch {
+        continue; // unparseable line — not this assertion's business
+      }
+      if (row && typeof row === 'object' && FIXTURE_SESSION_IDS.includes(row.session_id)) {
+        findings.push(`row:${file}:${row.session_id}`);
+      }
+    }
+  }
+  return findings;
+}
+
 describe('_sessionend-dispatcher (integration)', () => {
   it('exits 0 with empty payload', () => {
     const { status } = runDispatcher({});
@@ -190,11 +291,15 @@ describe('_sessionend-dispatcher (integration)', () => {
    *     `sessionstart-dispatcher.test.js`, where gating on a mutable
    *     `enabled` flag was the bug.
    *
-   *  2. BEHAVIOURAL: no row this suite could have produced exists in the
+   *  2. BEHAVIOURAL: no artifact this suite could have produced exists in the
    *     project-local session ledger `session-ledger.mjs:46` would target.
    *     Pinned by fixture session id rather than by file hash on purpose —
    *     the live session appends real rows to the same directory, so a hash
-   *     comparison would be a flake, not a detector.
+   *     comparison would be a flake, not a detector. Pinned by PARSED
+   *     `session_id` and by FILENAME rather than by substring for the same
+   *     reason in the other direction: the live session may also quote a
+   *     fixture name in prose. See `fixtureLedgerTraces` for the measurement
+   *     that forced the narrowing, and for what it still cannot see.
    *
    * WHAT THIS DOES NOT COVER: writes a hook reaches by absolute path rather
    * than through HOME or cwd. `CLAUDE_PLUGIN_ROOT` still points at the real
@@ -217,14 +322,89 @@ describe('_sessionend-dispatcher (integration)', () => {
     expect(status).toBe(0);
 
     const ledgerDir = path.join(PLUGIN_ROOT, '..', '..', '.artibot', 'ledger');
-    const rows = existsSync(ledgerDir)
-      ? readdirSync(ledgerDir)
-        .filter((f) => f.endsWith('.ndjson') || f.endsWith('.jsonl'))
-        .map((f) => readFileSync(path.join(ledgerDir, f), 'utf-8'))
-        .join('')
-      : '';
-    for (const fixture of ['end-test', 'end-stdout', 'end-no-side-effects']) {
-      expect(rows).not.toContain(fixture);
+    expect(fixtureLedgerTraces(ledgerDir)).toEqual([]);
+  });
+
+  /**
+   * Detector self-check — both directions, on a throwaway directory.
+   *
+   * Without this the assertion above is indistinguishable from one that can
+   * never fire: after the narrowing it passes on a clean repo either way. The
+   * negative control is the exact row shape measured in the real ledger on
+   * 2026-09-10 (transcript row, fixture name inside `message`, top-level
+   * `session_id` holding the real session uuid) — the input that made the old
+   * substring form go red.
+   *
+   * mkdtemp, never the real `.artibot/ledger/`: a detector that plants its own
+   * positive control in the directory it watches is the flake it is testing
+   * for.
+   */
+  it('flags a fixture row by session_id but not prose that quotes the id (detector self-check)', () => {
+    const probeDir = mkdtempSync(path.join(tmpdir(), 'artibot-ledger-probe-'));
+    try {
+      // NEGATIVE — a real transcript that merely QUOTES the fixture names.
+      const real = 'bda9c5e5-e827-4957-a29b-485721b43ae2';
+      writeFileSync(path.join(probeDir, `${real}.jsonl`), [
+        JSON.stringify({
+          type: 'assistant',
+          session_id: real,
+          sessionId: real,
+          message: { role: 'assistant', content: "the 'end-test' and 'end-stdout' fixtures" },
+        }),
+        JSON.stringify({
+          type: 'user',
+          message: { role: 'user', content: 'why did end-no-side-effects fail?' },
+        }),
+        'not json at all — ignored, not a hit',
+        '',
+      ].join('\n'), 'utf-8');
+      expect(fixtureLedgerTraces(probeDir)).toEqual([]);
+
+      // POSITIVE (a) — a row that really carries the fixture id.
+      writeFileSync(
+        path.join(probeDir, `${real}.jsonl`),
+        `${JSON.stringify({ type: 'assistant', session_id: 'end-test' })}\n`,
+        'utf-8',
+      );
+      expect(fixtureLedgerTraces(probeDir)).toEqual([`row:${real}.jsonl:end-test`]);
+
+      // POSITIVE (b) — the shape store.js:66 actually writes: the fixture id
+      // is the FILENAME and the rows carry the transcript's own session id.
+      rmSync(path.join(probeDir, `${real}.jsonl`));
+      writeFileSync(
+        path.join(probeDir, 'end-test.jsonl'),
+        `${JSON.stringify({ type: 'assistant', session_id: real })}\n`,
+        'utf-8',
+      );
+      expect(fixtureLedgerTraces(probeDir)).toEqual(['file:end-test.jsonl']);
+
+      // POSITIVE (c) — a DISABLE-path id. The dispatcher is switched off on
+      // those two runs, so a write there is a worse defect than a write from
+      // an enabled run, not a lesser one. Covered explicitly because the id
+      // list silently omitted `end-disable` / `end-global-disable` until
+      // review caught it: the list and the detector must be tested together,
+      // or a future deletion from the list is green.
+      rmSync(path.join(probeDir, 'end-test.jsonl'));
+      writeFileSync(
+        path.join(probeDir, `${real}.jsonl`),
+        `${JSON.stringify({ type: 'assistant', session_id: 'end-global-disable' })}\n`,
+        'utf-8',
+      );
+      expect(fixtureLedgerTraces(probeDir)).toEqual([`row:${real}.jsonl:end-global-disable`]);
+
+      // POSITIVE (d) — a DIRECTORY named `*.jsonl`. `readFileSync` on one
+      // throws EISDIR (reproduced 2026-09-10), which would abort the scan and
+      // report nothing about the leak. The name signature must still fire, so
+      // `isFile()` gates only the READ: filtering it out of the loop entirely
+      // would trade the crash for a fail-open. `trap.jsonl` is the control —
+      // a stray directory that is not a fixture id must stay silent.
+      rmSync(path.join(probeDir, `${real}.jsonl`));
+      mkdirSync(path.join(probeDir, 'trap.jsonl'));
+      mkdirSync(path.join(probeDir, 'end-test.jsonl'));
+      expect(() => fixtureLedgerTraces(probeDir)).not.toThrow();
+      expect(fixtureLedgerTraces(probeDir)).toEqual(['file:end-test.jsonl']);
+    } finally {
+      rmSync(probeDir, { recursive: true, force: true });
     }
   });
 });
