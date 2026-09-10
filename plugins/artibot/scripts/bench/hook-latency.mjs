@@ -106,6 +106,13 @@ const INVOCATION_CWD = process.cwd();
 /** Upper bound on files walked per guard path, so a pathological tree cannot hang the run. */
 const GUARD_FILE_LIMIT = 20000;
 
+/**
+ * Upper bound on per-file entries carried in a guard's before/after listing.
+ * The digest covers every file regardless; only the human-readable listing is
+ * capped, and a capped listing says so via `entriesTruncated`.
+ */
+const GUARD_ENTRY_LIMIT = 200;
+
 /** Session-id prefix. Fixed on purpose — see makeSessionId(). */
 const BENCH_PREFIX = 'bench-';
 
@@ -694,7 +701,9 @@ export function summarize(samples) {
  *
  * @param {string} slotName
  * @param {{home: string, cwd: string}} sandbox
- * @returns {Promise<{measured: number|null, staticCount: number, scripts: string[], note: string|null}>}
+ * @returns {Promise<{measured: number|null, staticCount: number, scripts: string[],
+ *   rows: Array<{pid: number, ppid: number, script: string}>, rootPid: number|null,
+ *   grandchildren: number|null, note: string|null}>}
  */
 async function probeChildren(slotName, sandbox) {
   const slot = requireSlot(slotName);
@@ -714,28 +723,44 @@ async function probeChildren(slotName, sandbox) {
     raw = readFileSync(pidLog, 'utf-8');
   } catch { /* handled by the emptiness check below */ }
 
-  const pids = new Set();
-  const scripts = new Set();
+  const rows = new Map();
   for (const line of raw.split('\n')) {
     const parts = line.split('\t');
     if (parts.length < 3) continue;
-    pids.add(parts[0]);
-    scripts.add(parts[2]);
+    if (!rows.has(parts[0])) {
+      rows.set(parts[0], { pid: Number(parts[0]), ppid: Number(parts[1]), script: parts[2] });
+    }
   }
 
-  if (pids.size === 0) {
+  if (rows.size === 0) {
     return {
       measured: null,
       staticCount: slot.staticChildren,
       scripts: [],
+      rows: [],
+      rootPid: null,
+      grandchildren: null,
       note: `probe produced no rows (probe-run exit ${result.exitCode}); NODE_OPTIONS injection did not take`,
     };
   }
 
+  // The ppid column is what proves the probe reached PAST the first level.
+  // The row whose parent is this bench process is the registered command
+  // itself; rows whose parent is that pid are the hooks the dispatcher spawned,
+  // i.e. grandchildren of the bench. Without this the child COUNT alone could
+  // not distinguish "the probe saw the whole tree" from "the probe saw one
+  // level and the count happened to match".
+  const all = [...rows.values()];
+  const root = all.find((row) => row.ppid === process.pid) || null;
+  const grandchildren = root ? all.filter((row) => row.ppid === root.pid).length : null;
+
   return {
-    measured: pids.size - 1,
+    measured: rows.size - 1,
     staticCount: slot.staticChildren,
-    scripts: [...scripts].sort(),
+    scripts: [...new Set(all.map((row) => row.script))].sort(),
+    rows: all.sort((a, b) => a.pid - b.pid),
+    rootPid: root ? root.pid : null,
+    grandchildren,
     note: null,
   };
 }
@@ -913,7 +938,7 @@ function treeDigest(root) {
  */
 function benchLeakCounts(root) {
   const counts = {};
-  for (const file of walkFiles(root, GUARD_FILE_LIMIT)) {
+  for (const file of guardFileList(root)) {
     if (!/\.(?:jsonl?|ndjson)$/i.test(file)) continue;
     let text;
     try { text = readFileSync(file, 'utf-8'); } catch { continue; }
@@ -924,21 +949,82 @@ function benchLeakCounts(root) {
 }
 
 /**
+ * Every file a guard path covers: the tree's files when it is a directory, the
+ * path itself when it is a single file. Directories and single files are both
+ * legal guard targets (`--guard` takes either), so every consumer needs this
+ * distinction and none of them should re-derive it.
+ *
+ * @param {string} target
+ * @returns {string[]} absolute paths
+ */
+function guardFileList(target) {
+  let isDir;
+  try { isDir = statSync(target).isDirectory(); } catch { return []; }
+  if (!isDir) return [target];
+  return walkFiles(target, GUARD_FILE_LIMIT).sort();
+}
+
+/**
+ * Per-file path + size listing for a guard path, carried in the report
+ * alongside the digest verdict.
+ *
+ * The digest answers "did anything change"; it cannot answer "what". For a
+ * store that a live session writes to concurrently, "what" is the whole
+ * question — an empty directory gaining one ledger file is a different event
+ * from an existing ledger growing by 300 bytes, and the digest renders both as
+ * the same opaque hash change. So the listing ships in the JSON and the reader
+ * decides.
+ *
+ * Sizes are the metric rather than hashes: a size is comparable at a glance
+ * across the before/after pair, and content hashes are already folded into the
+ * digest that sits next to it.
+ *
+ * @param {string} target
+ * @param {number} limit maximum entries before truncation
+ * @returns {Array<{path: string, size: number}>}
+ */
+function guardEntries(target, limit) {
+  const files = guardFileList(target);
+  const base = files.length === 1 && files[0] === target ? path.dirname(target) : target;
+  return files.slice(0, limit).map((file) => {
+    let size = -1;
+    try { size = statSync(file).size; } catch { /* unreadable -> -1, still listed */ }
+    return { path: path.relative(base, file), size };
+  });
+}
+
+/**
  * Snapshot one guard path.
  * @param {{path: string, mode: string}} spec
  * @returns {object}
  */
 function snapshotOne(spec) {
   if (!existsSync(spec.path)) {
-    return { path: spec.path, mode: spec.mode, state: 'absent', leaks: null };
+    return { path: spec.path, mode: spec.mode, state: 'absent', leaks: null, entries: [] };
   }
   if (spec.mode === 'leak-scan') {
-    return { path: spec.path, mode: spec.mode, state: 'scanned', leaks: benchLeakCounts(spec.path) };
+    return {
+      path: spec.path,
+      mode: spec.mode,
+      state: 'scanned',
+      leaks: benchLeakCounts(spec.path),
+      entries: [],
+    };
   }
   let isDir = false;
   try { isDir = statSync(spec.path).isDirectory(); } catch { /* treated as a file */ }
   const state = isDir ? treeDigest(spec.path) : `file:${fileDigest(spec.path)}`;
-  return { path: spec.path, mode: spec.mode, state, leaks: null };
+  // `observe` keeps the leak scan even though a digest change is not a failure
+  // there: a concurrent writer must not fail the run, but a bench-authored id
+  // in that store still must.
+  const leaks = spec.mode === 'observe' ? benchLeakCounts(spec.path) : null;
+  return {
+    path: spec.path,
+    mode: spec.mode,
+    state,
+    leaks,
+    entries: guardEntries(spec.path, GUARD_ENTRY_LIMIT),
+  };
 }
 
 /**
@@ -977,7 +1063,7 @@ function compareLeakScan(before, after) {
 /**
  * Compare two guard snapshots.
  *
- * Three modes, three meanings:
+ * Four modes, four meanings:
  *   - `tree`          — byte identity required; a change is a violation.
  *   - `leak-scan`     — only a new `bench-` id is a violation.
  *   - `informational` — reported, never a violation. Used for
@@ -985,6 +1071,16 @@ function compareLeakScan(before, after) {
  *     CLAUDE_PLUGIN_ROOT legitimately points every child at. It cannot dirty
  *     git, so failing on it would be a false alarm; hiding it would lose the
  *     signal that hooks write there.
+ *   - `observe`       — digest change is RECORDED with a before/after file
+ *     listing and is not a violation, but an attributable `bench-` leak still
+ *     is. Reserved for a store that the live session writes to on its own
+ *     schedule while the bench runs, where a digest change carries no
+ *     attribution and failing on it would only teach the reader to distrust
+ *     the guard. This is a narrowing of one claim, not a relaxation of the
+ *     gate: byte identity was never provable there, and the property that IS
+ *     provable — no bench-authored id reached the store — stays fail-closed.
+ *     The listing is what makes the recorded change actionable instead of an
+ *     opaque hash delta, which is why it is required rather than optional.
  *
  * @param {object[]} before
  * @param {object[]} after
@@ -992,15 +1088,29 @@ function compareLeakScan(before, after) {
  */
 export function compareGuards(before, after) {
   return (before || []).map((prev, index) => {
-    const next = (after || [])[index] || { state: 'missing-snapshot', mode: prev.mode, leaks: null };
+    const next = (after || [])[index]
+      || { state: 'missing-snapshot', mode: prev.mode, leaks: null, entries: [] };
     const shape = {
       path: prev.path,
       mode: prev.mode,
       before: prev.state,
       after: next.state,
+      entries: {
+        before: prev.entries || [],
+        after: next.entries || [],
+      },
+      entriesTruncated:
+        (prev.entries || []).length >= GUARD_ENTRY_LIMIT
+        || (next.entries || []).length >= GUARD_ENTRY_LIMIT,
     };
 
     if (prev.mode === 'leak-scan') return { ...shape, ...compareLeakScan(prev, next) };
+
+    // `observe` fails on an attributable leak first, before the digest is even
+    // consulted — a bench id in the store is a violation whether or not the
+    // tree also changed for unrelated reasons.
+    const leak = prev.mode === 'observe' ? compareLeakScan(prev, next) : null;
+    if (leak && leak.violation) return { ...shape, ...leak };
 
     if (prev.state === 'absent' && next.state === 'absent') {
       return { ...shape, verdict: 'absent/absent', violation: false };
@@ -1008,6 +1118,13 @@ export function compareGuards(before, after) {
     if (prev.state === next.state) return { ...shape, verdict: 'unchanged', violation: false };
     if (prev.mode === 'informational') {
       return { ...shape, verdict: 'CHANGED (informational — gitignored runtime dir)', violation: false };
+    }
+    if (prev.mode === 'observe') {
+      return {
+        ...shape,
+        verdict: 'CHANGED (observe — recorded, not a failure; compare entries)',
+        violation: false,
+      };
     }
     return { ...shape, verdict: 'CHANGED', violation: true };
   });
@@ -1035,11 +1152,22 @@ function gitRead(args, cwd) {
  * Four entries, for four different blast radii:
  *   1. `<USERPROFILE>/.artibot` — the real ledger and decision store.
  *   2. `<invocation repo>/.artibot/runtime` — this checkout's runtime ledger.
- *   3. `<main worktree>/.artibot/runtime` — the SAME store seen from the
- *      primary checkout. A linked worktree has no `.artibot/runtime` of its
- *      own, so guarding only #2 would report `absent/absent` and prove nothing
- *      about the file that actually exists one directory up.
+ *      `observe` mode, NOT `tree`. This is the store the session running the
+ *      bench writes to through its own hooks, on its own schedule: measured
+ *      2026-09-11, the directory did not exist at 00:08 and held a 2,744-byte
+ *      `ledger.jsonl` at 00:12, written by the live session with nothing to do
+ *      with this file. A byte-identity claim there would be a claim about
+ *      another process's timing, so the mode records the before/after file
+ *      listing instead and keeps only the attributable check (a `bench-` id in
+ *      the ledger) fail-closed.
+ *   3. `<main worktree>/.artibot/runtime` — the primary checkout's store, and
+ *      a DIFFERENT directory from #2, not the same one seen from elsewhere: a
+ *      linked worktree has its own. Stays `tree`, fail-closed. The bench never
+ *      runs with a cwd inside it, so a change there is unexplained by
+ *      construction and should stop the run.
  *   4. `<USERPROFILE>/.claude/artibot` — leak-scan only; see benchLeakCounts().
+ *      Byte identity is not claimed for this store either, and specifically not
+ *      for `daily-experiences.json`, which the live session appends to.
  *
  * Plus `<PLUGIN_ROOT>/runtime`, informational.
  *
@@ -1054,7 +1182,7 @@ export function defaultGuardSpecs() {
   ];
 
   const repoRoot = gitRead(['rev-parse', '--show-toplevel'], INVOCATION_CWD);
-  if (repoRoot) specs.push({ path: path.join(repoRoot, '.artibot', 'runtime'), mode: 'tree' });
+  if (repoRoot) specs.push({ path: path.join(repoRoot, '.artibot', 'runtime'), mode: 'observe' });
 
   const commonDir = gitRead(['rev-parse', '--path-format=absolute', '--git-common-dir'], INVOCATION_CWD);
   if (commonDir) {
@@ -1105,6 +1233,31 @@ function cell(value, width) {
 }
 
 /**
+ * Print a guard's before/after file listing.
+ *
+ * Printed for `observe` always, and for any other mode only when the digest
+ * moved — an unchanged tree's listing is noise, while an observe listing is
+ * the substance of what that mode reports rather than a detail of it.
+ *
+ * @param {object} guard one entry from compareGuards()
+ * @returns {void}
+ */
+function printGuardEntries(guard) {
+  const changed = guard.before !== guard.after;
+  if (guard.mode !== 'observe' && !changed) return;
+  const before = guard.entries.before || [];
+  const after = guard.entries.after || [];
+  const format = (list) => (list.length === 0
+    ? '(empty)'
+    : list.map((entry) => `${entry.path} ${entry.size}B`).join(', '));
+  console.log(`         before: ${format(before)}`);
+  console.log(`         after:  ${format(after)}`);
+  if (guard.entriesTruncated) {
+    console.log(`         (listing capped at ${GUARD_ENTRY_LIMIT} entries; digest covers all files)`);
+  }
+}
+
+/**
  * Human-readable report.
  * @param {object} report
  * @returns {void}
@@ -1149,6 +1302,7 @@ function printHuman(report) {
   for (const guard of guards) {
     console.log(`  [${guard.violation ? 'FAIL' : 'ok'}] ${guard.mode.padEnd(13)} ${guard.verdict}`);
     console.log(`         ${guard.path}`);
+    printGuardEntries(guard);
   }
 
   console.log('');
@@ -1156,6 +1310,8 @@ function printHuman(report) {
   console.log('-----');
   console.log(`  budget overruns (p95 > declared): ${overruns.length === 0 ? 'none' : overruns.map((r) => r.slot).join(', ')}`);
   console.log(`  child-count drift vs dispatch-table: ${drifted.length === 0 ? 'none' : drifted.map((r) => `${r.slot} (${r.children.measured} vs ${r.children.staticCount})`).join(', ')}`);
+  const withGrandchildren = results.filter((r) => r.children && r.children.grandchildren > 0);
+  console.log(`  probe reached grandchildren (dispatcher -> hook children) in ${withGrandchildren.length} slot(s): ${withGrandchildren.map((r) => `${r.slot}=${r.children.grandchildren}`).join(', ') || 'none'}`);
   for (const row of probeFailures) console.log(`  probe unmeasured: ${row.slot} — ${row.children.note}`);
   console.log('  not covered by this tool: host IPC latency, real payload size, concurrent sessions,');
   console.log('  network hooks (swarm-sync / http-notify are DISABLED here), and git-autopilot working paths');
