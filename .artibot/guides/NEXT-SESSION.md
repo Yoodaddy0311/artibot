@@ -1,6 +1,26 @@
-# NEXT-SESSION — 크로스머신 핸드오프 (2026-09-10 11:4x KST, AsusHeechangLee 머신, master = d410ebb0 + 이 커밋, 설치본 4.57.0)
+# NEXT-SESSION — 크로스머신 핸드오프 (2026-09-11 02:1x KST, AsusHeechangLee 머신, master = db29d707 + 이 커밋, 설치본 4.58.0)
 
 > 다른 머신에서는 `git pull` → 설치본 4.57.0 확인 → **이 파일을 직접 Read** 하고 시작한다. 로컬 전용(`.artibot/HANDOFF.md`·`.artibot/split/`·`runtime/split/`·`.artibot/runtime/`)은 이 머신에만 있다. 아래 수치는 전부 이 세션(artibot-78) 리더 실측이다.
+
+## Wave 4 착지 (2026-09-11 02:0x KST, 세션 artibot-ce, 설치본 4.58.0, master **db29d707** = 5d51e9fc + 3줄기)
+
+리더 실측: `git diff --shortstat 5d51e9fc db29d707` = 13 files, +5,489/−33. 배치 랜딩 2회 — 1차 `1ae491bf` **not-green**(15,553건 중 1건: `tests/ci/direct-run-guard.test.js` 가 `scripts/bench/hook-latency.mjs` 의 프로브 **문자열 리터럴** 안 `process.argv[1]` 을 잡음, 스캐너는 주석만 벗김) → 줄기가 `40cdf344` 로 수리 → 2차 `db29d707` CI 전부 초록(polls 26), rebuilds 0, master ff. 창 3개 lane-state `done`, worktree 3개는 **미정리**(락 잔존 예상 — gotcha #61 절차: 죽은 pid 확인 → unlock → remove → prune).
+
+| limb | done 커밋 | land | 핵심 결과(창 보고, 리더 재측정 표기) |
+|---|---|---|---|
+| judge-parity | 82acdbf9 | 7/7 | 패리티 매트릭스 21행(agreed 18 / owner-decision 3). HEAD 결함 수리: 분리·롱옵션 rm 플래그 조합 통과, `rm -rfv /` safe 역전, `git stash clear` 미차단. **검수가 ReDoS 발견** — L2 rm 정규식 n=26 에 40s(5s 훅이 판정을 조용히 버림) → 치환 후 n=20000 2ms |
+| skill-description-render | 033e19da | 7/7 | 원인 = **호스트 규약**(목록 문자 예산 1% 초과 시 `~/.claude.json#skillUsage` `<plugin>:<name>` 점수 DESC). `artibot:<skill>` 키 0/101 → 렌더 0. 리더 재측정: 플러그인 한정 키 usage≥1 정확히 13 = 렌더 집합, 반례 0. 리포 원인 전부 기각. 부수: validate-skills 빈 `description: \|` fail-open 최소 수리 + 21 tests |
+| hook-latency-bench | 40cdf344 | 7/7 | 러너(1,980줄)+bench 래퍼+테스트 2(58건)+문서 802줄. N=20 4런: 19슬롯 예산 초과 0, 최대 소진 PreCompact 14.7%, SessionStart p50 ~1.0–1.3s, 자식=정적 19/19, 손자 0. **HEADROOM_MS 유지 3000**(오버헤드 추정 955~2,266ms). `--writers strict\|tolerate`(strict 가 기본, 라이브 머신은 동시 writer 로 strict exit 2 가 정상) |
+
+**오너 결정 대기 3건(judge-parity owner-decision, 현행 유지로 착지)**: ① `git push --force-with-lease` L2 danger → caution(권장) ② bare `TRUNCATE` L2 를 SQL 문 형태로 좁힘(발화 64건 중 실제 SQL ≤3, 완화) ③ `dd if=… of=/dev/sda` L2 danger 추가(강화). 근거 표는 `tests/core/guard-registry-safe-override-scope.test.js` PARITY_MATRIX.
+
+**gotcha 신규(이 세션)**: (62) `.bench.js` 는 stop-review-gate 가 테스트로 안 셈 → 브리프 allowlist 에 `<stem>.test.js` 동반 (63) **다른 줄기 소유 모듈은 테스트에서도 import 금지** — hook-latency.test.js 가 safety.js#classifyRisk 를 import 했고 judge-parity 가 같은 배치에서 정규식 7곳 교체 (64) `scripts/`·`bin/`·`lib/` 아래 새 파일 줄기는 `tests/ci/direct-run-guard.test.js` 를 표적 스위트에 — 문자열 리터럴도 잡힌다 (65) `plugins/artibot/docs/*` 는 `.gitignore:24` 대상 — 추적 파일도 `git add -f` 매번 필요, 선례 5파일 (66) land citations 가 `C:\Users\…` 를 잡는다 — 보고서에 `~`·`<scratchpad>` 표기 (67) **유휴 창은 다음 웨이브 정찰에 즉시 배정**(오너 지시 01:15) — done+land PASS 창에 읽기 전용 정찰 + brief-draft 산출, 브랜치 커밋 0.
+
+**Wave 5 준비 완료(브리프 초안 2건, 유휴 창 정찰)**: `.artibot/split/doctor-project-name/brief-draft.md`(W5-a, 72줄) · `.artibot/split/worktree-ledger-store/brief-draft.md`(W5-b, 85줄). 순서 **W5-a 단독 착지 → ADR-011 → W5-b**. W5-a: 결함 확인, allowlist 3파일로 닫힘, 수리 = 문자열 projection 에서 `project:` 파싱(실패 시 'artibot' fold 금지) + doctor.md Check 8 호출에 `project`. W5-b: **구현 전 ADR-011**, 경로 소유자는 `lib/runtime/event-writer.js#ledgerFilePath`(:239-241, ledger.js:58 은 re-export) → allowlist 미폐쇄; 권장 (a) 원장도 `<commonDir>/artibot/` 로. **리더 전제 정정**: "매 split 마다 재발" 은 조건부 — 위반은 worktree 세션이 mission/state.updated 를 쓸 때만, 오늘 3 worktree 원장(18/16/12행) 전부 0건, 이유 미확인.
+
+**측정 고지(split-b87130, Wave 4 후)**: n=3(8f83d7·9d6dc2·b87130) — 속도 비교 여전히 불가. 사람 대기 분자 435,644ms(open-windows·confirm-integrate), 분모 `run` 은 이전 세션 미쌍 1건으로 `null` → 비율 **미측정**. 오너 체감 "리더 창 병목, 효율 차이 못 느낌"(01:15) 은 데이터로 반박 불가 — 구조 대안(완료 줄기 선랜딩 / 롤링 디스패치) 은 설계안으로 미결.
+
+**다음 할 일**: ① worktree 3개 정리(gotcha #61) ② 오너 결정 3건 ③ `/split plan` 으로 Wave 5 = W5-a 단독(브리프 초안 승격) ④ 소유 밖 후속 누적 12건(각 줄기 보고 `소유 밖 후속:` — 디스패처 테스트 헤더 인용 `:126→:131` 4곳, vitest benchmark.include, package.json bench, user-profile.json 실행당 ~3.4KB 성장 원인 훅, permission-auto-approve.js 헤더, safe.md `git restore .` 모순, `git checkout -- .` 미차단, platforms 중복 2·description 1,024자 초과 2, extractFrontmatter 블록 스칼라 원문) ⑤ 4.59.0 릴리스 여부(`rm -rf dist` 류 빌드 정리가 새로 차단됨 → 릴리스 노트 필요).
 
 ## 4.58.0 라이브 판정 — 재시작 후 (2026-09-10 16:4x KST, 세션 720ee92d, 설치본 **4.58.0**, master 026ab639)
 
