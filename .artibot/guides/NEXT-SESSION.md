@@ -2,6 +2,19 @@
 
 > 다른 머신에서는 `git pull` → 설치본 4.57.0 확인 → **이 파일을 직접 Read** 하고 시작한다. 로컬 전용(`.artibot/HANDOFF.md`·`.artibot/split/`·`runtime/split/`·`.artibot/runtime/`)은 이 머신에만 있다. 아래 수치는 전부 이 세션(artibot-78) 리더 실측이다.
 
+## 4.58.0 라이브 판정 — 중간 (2026-09-10 15:1x KST, 세션 8f6cbd98, 설치본 4.57.0→**4.58.0 갱신 완료, 재시작 대기**)
+
+| 항목 | 결과 | 근거 |
+|---|---|---|
+| 설치본 | `claude plugin marketplace update artibot`(0c75f94→90505f0c) → `claude plugin update artibot@artibot` "4.57.0 to 4.58.0 … Restart to apply". `installed_plugins.json` installPath `cache/artibot/artibot/4.58.0`, 그 판 `_userprompt-dispatcher.js` 에 `cross-session-message` 마커 4건 | 실측 06:0x Z |
+| 프로브 2 usage.receipt | **PASS** — 헤드리스 `claude -p` 1회(06:10:24→38Z, 14s) → `usage.receipt` 2→3, 세션 efd21dcd, model `claude-fable-5-1`, `mission.candidate_deferred` 1 동반 | 실측. 이 프로세스가 4.58.0 훅을 썼는지는 **추론**(원장에 버전 마커 없음, installPath 가 갱신 뒤였음) |
+| 프로브 3 Check 8 | **FAIL(측정 프레임 문제)** — `projection-drift`(렌더 1802B vs state.yaml 1292B, state_version 9) + `ledger-subset-violation` 10건 {2,3,4,5,7,8,10,11,12,13}. 그 10건 = split worktree 5개 원장의 `state.updated` 합집합과 **정확히 일치**(land-lint-cwd 2,3 · ups 4 · install-hygiene 5,7,8 · version-check-optout 11 · autoapprove 10,12,13), 각 worktree state.yaml 도 자기 마지막 버전. journal≤9 로 자르면 projection-drift 소멸 → 메인 state.yaml 은 v9 까지 정합. 즉 **유실 아님**, "per-worktree ledger ↔ 공유 journal" P2 긴장의 실측 재현. census: duplicate **0**(직전 4.57.0 판정의 8-① WARN duplicate 2 는 ledger-dedupe-pid 착지로 해소), rejected_excluded 1 | `probe-check89.mjs`(스크래치, doctor.md 절차) 06:09Z |
+| 프로브 3 Check 9 | fail(item 8 이 Check 8 물려받음) · item 5 unmeasured(missions 0) · 측정 8/10 | 동상 |
+| 프로브 5 기준 | 이 세션(4.57.0 훅) routing-classified 2 = 사람 프롬프트 2. 재시작 후 4.58.0 세션에서 팀원 보고 도착 뒤 재계수 | 실측 |
+| 프로브 1·4·5 | **재시작 후** — 훅 의존(PreToolUse `human.asked`, Explore/investigator `route.selected`/`route.bound`, UPS 가드) | 미실행 |
+
+Check 8 후속 결정(오너): worktree 원장을 합산해 판정할지(Check 8 "worktree 밖은 못 본다" 고지와 충돌), 아니면 잔존 worktree 10개 정리 뒤 메인 재측정할지. 정리 전엔 메인 Check 8 은 FAIL 로 남는다.
+
 ## 최종 (2026-09-10 13:3x KST — split-b87130 3 wave · 10 줄기 전부 착지)
 
 | 항목 | 값 |
