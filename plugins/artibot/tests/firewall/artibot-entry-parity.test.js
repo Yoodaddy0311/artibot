@@ -236,6 +236,26 @@ function verifiablePath(item) {
 }
 
 /**
+ * 슬래시로 끝나는 항목만 골라낸다 — 뒷문 잠금이 **자기 자신을 무력화당하지 않게**
+ * 하는 술어.
+ *
+ * `git check-ignore -q -- '<없는 디렉터리>/'` 는 빈 패턴(`.gitignore:154:`)을 근거로
+ * exit 0 을 준다(실측 2026-09-10: 없는 경로 `.artibot/zzz/` 가 `.artibot/missions/`
+ * 와 동일 출력, 슬래시를 떼면 둘 다 exit 1). 그래서 슬래시로 끝나는 항목이
+ * allowlist 에 들어오면 잠금이 **공허하게 초록**이 된다.
+ *
+ * 순수 함수로 뽑아 둔 이유는 자기검증 때문이다 — 실제 allowlist 에는 슬래시 항목이
+ * 없어서, 인라인 `filter` 로 두면 그 줄을 통째로 지워도 스위트가 초록이다(양성 대조
+ * 부재). 아래 자기검증이 이 함수에 슬래시 항목을 직접 먹여 그 구멍을 막는다.
+ *
+ * @param {string[]} rels - 검사할 리포 상대 경로 목록
+ * @returns {string[]} 슬래시로 끝나는 항목(정상이면 빈 배열)
+ */
+function trailingSlashEntries(rels) {
+  return rels.filter((r) => r.endsWith('/'));
+}
+
+/**
  * 표기·실재 대조의 (실제값, 기대값) 쌍을 만든다.
  *
  * **순수 함수다 — FS 도 git 도 보지 않는다.** 그래서 자기검증이 CI(파일 부재)와
@@ -341,12 +361,6 @@ describe('미착지 표기 — 표기와 실제가 양방향으로 일치한다'
   it('allowlist 의 각 항목이 실제로 gitignore 되어 있다 (뒷문 잠금)', () => {
     const rels = [...IGNORED_RUNTIME_PATHS];
 
-    // 슬래시로 끝나는 항목은 이 잠금 자체를 무력화한다 — 없는 디렉터리라도
-    // `check-ignore -q -- '<없는 경로>/'` 가 빈 패턴(`.gitignore:154:`)으로 exit 0 을
-    // 준다(실측 2026-09-10: `.artibot/zzz/` 가 `.artibot/missions/` 와 동일 출력).
-    // 그래서 잠금을 돌리기 **전에** 거부한다.
-    expect(rels.filter((r) => r.endsWith('/'))).toEqual([]);
-
     const verdicts = rels.map((rel) => {
       try {
         // exit 0 = 무시됨. exit 1(비무시)·128(오류)·git 부재는 전부 throw → 불합격.
@@ -359,7 +373,15 @@ describe('미착지 표기 — 표기와 실제가 양방향으로 일치한다'
         return { path: rel, ignored: false };
       }
     });
-    expect(verdicts).toEqual(rels.map((rel) => ({ path: rel, ignored: true })));
+    // 슬래시 검사와 무시 판정을 **한 단언으로 묶는다.** 따로 두면 슬래시 검사 줄만
+    // 지워도 스위트가 초록이라(실측: 그 변이가 26 passed 통과) 잠금이 조용히 빠진다.
+    // 한 객체로 묶으면 키를 빼는 순간 구조가 어긋나 레드다 — 두 곳을 협조 편집해야만
+    // 지울 수 있고, 그건 테스트를 통째로 지우는 것과 같은 수준의 행위다.
+    // 슬래시 항목을 거부하는 사유는 `trailingSlashEntries` JSDoc 참조.
+    expect({ trailingSlash: trailingSlashEntries(rels), verdicts }).toEqual({
+      trailingSlash: [],
+      verdicts: rels.map((rel) => ({ path: rel, ignored: true })),
+    });
   });
 
   for (const item of items) {
@@ -491,6 +513,23 @@ describe('스캐너 자기검증 — 추출기가 실제로 드리프트를 본�
       false, // 표기 없는데 부재    → 레드 (allowlist 밖이면 CI 부재도 레드가 맞다)
       false, // 표기 있는데 실재    → 레드 (썩은 표기)
     ]);
+  });
+
+  it('슬래시로 끝나는 allowlist 항목을 실제로 집어낸다 (뒷문 잠금의 양성 대조)', () => {
+    // 양성 대조 — 실제 allowlist 에는 슬래시 항목이 **없어서** 잠금 쪽 단언만으로는
+    // 이 술어가 동작하는지 증명되지 않는다(항상 빈 배열이라 술어를 망가뜨려도 초록).
+    // 그래서 여기서 슬래시 항목을 직접 먹인다. 리포에는 아무것도 쓰지 않는다.
+    expect(trailingSlashEntries(['.artibot/missions/'])).toEqual(['.artibot/missions/']);
+
+    // 섞여 있어도 슬래시 항목만 골라내고, 순서를 보존한다.
+    expect(
+      trailingSlashEntries(['.artibot/state.yaml', '.artibot/missions/', '.artibot/adr/']),
+    ).toEqual(['.artibot/missions/', '.artibot/adr/']);
+
+    // 음성 대조 — 슬래시가 없으면 빈 배열. 현재 allowlist 가 여기 해당한다.
+    expect(trailingSlashEntries(['.artibot/state.yaml'])).toEqual([]);
+    expect(trailingSlashEntries([])).toEqual([]);
+    expect(trailingSlashEntries([...IGNORED_RUNTIME_PATHS])).toEqual([]);
   });
 
   it('어댑터 없는 CLAUDE.md 를 통과시키지 않는다', () => {
