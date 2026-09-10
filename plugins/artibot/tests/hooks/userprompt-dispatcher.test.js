@@ -2,9 +2,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import {
-  copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync,
+  copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 /**
@@ -49,6 +49,7 @@ const SCRIPT_PATH = path.join(PLUGIN_ROOT, 'scripts', 'hooks', '_userprompt-disp
 
 /** Throwaway home and working directory for the spawned dispatcher. */
 let sandboxHome;
+let sandboxRepo;
 let sandboxCwd;
 let sandboxRoot;
 
@@ -67,10 +68,40 @@ let sandboxRoot;
  * REAL modules and config and the exercised path is unchanged. Only the
  * writable `runtime/` directory is redirected. `SCRIPT_PATH` still points at the
  * real dispatcher — the script under test is not a copy.
+ *
+ * PROJECT-ROOT ANCHOR (added 2026-09-10, after a measured leak).
+ *
+ * Redirecting HOME was not enough, and redirecting it is what caused the leak.
+ * `lib/git/project-root.js#resolveProjectRoot` tries, in order: the nearest
+ * `.git`, `git rev-parse`, the OUTERMOST weak marker (`.artibot` /
+ * `package.json`, with the home directory excluded), then the start directory.
+ * A bare `mkdtemp` cwd under the OS temp dir has none of the first three, so
+ * the walk climbed out of the temp tree — and because this suite overrides
+ * HOME/USERPROFILE to `sandboxHome`, the real `C:/Users/<user>` no longer
+ * counted as "home" and its `.artibot` won the outermost-marker rule. Result:
+ * every run wrote fixture decision rows into the developer's REAL store at
+ * `~/.artibot/runtime/decisions/`. Measured by the team lead at 10:26 KST on
+ * 2026-09-10 — 6 leaked `guard-*.events.ndjson` files; an unanchored run at
+ * 10:29 KST re-leaked 4 of them. CI never saw it because a CI runner's home
+ * has no `.artibot`, so the walk fell through to the start directory instead.
+ *
+ * The fix is to give the walk something to stop at INSIDE the sandbox:
+ * `sandboxRepo/.git` is an empty marker directory (not a git init), so rule 1
+ * matches immediately and the store lands at `sandboxRepo/.artibot/...`. The
+ * dispatcher's cwd is `sandboxRepo/work`, one level down, which keeps the
+ * "no git repo at cwd" property the git-autopilot-save case relies on.
+ *
+ * The leak tripwire in the sender-guard block asserts this stays fixed.
  */
 beforeAll(() => {
   sandboxHome = mkdtempSync(path.join(tmpdir(), 'artibot-userprompt-home-'));
-  sandboxCwd = mkdtempSync(path.join(tmpdir(), 'artibot-userprompt-cwd-'));
+  sandboxRepo = mkdtempSync(path.join(tmpdir(), 'artibot-userprompt-repo-'));
+  // Empty `.git` marker, deliberately NOT a real repository: it only has to
+  // stop `resolveProjectRoot`'s first rule. `git rev-parse` inside it fails,
+  // which is the same "not a git repository" answer a bare temp dir gave.
+  mkdirSync(path.join(sandboxRepo, '.git'), { recursive: true });
+  sandboxCwd = path.join(sandboxRepo, 'work');
+  mkdirSync(sandboxCwd, { recursive: true });
   sandboxRoot = mkdtempSync(path.join(tmpdir(), 'artibot-userprompt-root-'));
   const linkType = process.platform === 'win32' ? 'junction' : 'dir';
   for (const dir of ['lib', 'commands', 'skills', 'agents']) {
@@ -81,13 +112,40 @@ beforeAll(() => {
     path.join(sandboxRoot, 'artibot.config.json'),
   );
   mkdirSync(path.join(sandboxRoot, 'runtime'), { recursive: true });
+
+  // Pre-existing pollution from before the anchor landed is NOT deleted here:
+  // removing files from a developer's real store is not a test's business, and
+  // the tripwire below only cares about rows this run creates. Warn so the
+  // leftovers are visible to whoever cleans them up.
+  if (existsSync(realHomeDecisionsDir())) {
+    const leaked = readdirSync(realHomeDecisionsDir()).filter((f) => f.startsWith('guard-'));
+    if (leaked.length > 0) {
+      process.stderr.write(
+        `[test] NOTE: ${leaked.length} pre-existing guard-* file(s) in the real decision store `
+        + `(${realHomeDecisionsDir()}) — leaked before the sandbox anchor landed; not deleted here.\n`,
+      );
+    }
+  }
 });
 
 afterAll(() => {
   if (sandboxHome) rmSync(sandboxHome, { recursive: true, force: true });
-  if (sandboxCwd) rmSync(sandboxCwd, { recursive: true, force: true });
+  if (sandboxRepo) rmSync(sandboxRepo, { recursive: true, force: true });
   if (sandboxRoot) rmSync(sandboxRoot, { recursive: true, force: true });
 });
+
+/**
+ * The REAL decision store this suite must never write to.
+ *
+ * Resolved from the PARENT process's environment on purpose — the child's
+ * HOME is the sandbox, so reading it from there would point at the sandbox and
+ * the tripwire would assert nothing.
+ *
+ * @returns {string}
+ */
+function realHomeDecisionsDir() {
+  return path.join(process.env.USERPROFILE || homedir(), '.artibot', 'runtime', 'decisions');
+}
 
 function runDispatcher(payload, env = {}) {
   const stdout = execFileSync(
@@ -171,9 +229,91 @@ const NOTIFICATION_FIXTURE = readFileSync(
   'utf-8',
 );
 
-/** Decision-store path the dispatcher writes for a given session id. */
+/**
+ * A peer SendMessage turn in the shape the HOOK actually receives.
+ *
+ * Not the shape the model is shown. A 7-row capture on host 2.1.267 at
+ * 2026-09-10T01:06–01:12Z established that `prompt` carries the queue's raw
+ * envelope with nothing before or after it, and that `source` was absent on
+ * 7 of 7 rows. The captured peer row was 205B and opened exactly like line 2
+ * below, `from-mode` attribute included. The host's render-time framing
+ * (`Another Claude session sent a message:`) never arrives here, so it is
+ * absent from this fixture and is a CONTROL case in the resilience suite
+ * instead.
+ *
+ * Inlined rather than read from tests/fixtures/ because that directory is
+ * outside this branch's owned file set. Size is asserted below instead
+ * (§9: a marker-only stub would be blocked by the prefix sniff whether or
+ * not the real multi-kilobyte body ever reached the guard).
+ */
+const PEER_ENVELOPE_FIXTURE = [
+  '<cross-session-message from="uds:\\\\.\\pipe\\LOCAL\\cc-msg-eb37d9d4-0b02-415b-b65d-a8f95a5e86b6" from-name="artibot-78" from-mode="prompting">',
+  '[split:dispatch ups-source-guard]',
+  'You are the implementer for the `ups-source-guard` split branch. The leader',
+  'is the main session of this window; the only reporting channel is',
+  'SendMessage(to="main") because plain text output is dropped on the floor.',
+  '',
+  'Working directory (this worktree only, no git stash/reset/checkout/branch):',
+  '  .claude/worktrees/split-artibot-ups-source-guard/plugins/artibot',
+  '`node_modules` is a junction to the parent checkout, so never run npm ci or',
+  'npm install underneath it.',
+  '',
+  'Owned files (edit these three and nothing else):',
+  '  - scripts/hooks/_userprompt-dispatcher.js',
+  '  - tests/hooks/userprompt-dispatcher-resilience.test.js',
+  '  - tests/hooks/userprompt-dispatcher.test.js',
+  'If you find a defect outside that set, do not fix it: report file:line plus',
+  'the symbol name and the time you measured it.',
+  '',
+  'Run the targeted suites only. A repo-wide vitest run has moved a worktree',
+  'branch out from under a sibling session before, so it is banned here.',
+  '',
+  'Report with the diff stat per file, the RED output, the GREEN output, the',
+  'eslint result, and a closing line listing what you did NOT verify. Numbers',
+  'carry a denominator and a measurement time or they do not go in the report.',
+  '</cross-session-message>',
+].join('\n');
+
+/**
+ * The in-process teammate shape, verbatim from the same capture (102B).
+ *
+ * `SendMessage(to="main")` from a subagent running inside this very session
+ * arrives as `<agent-message …>`, NOT as a cross-session envelope. Kept at the
+ * captured size on purpose: this is the measurement, so shortening or padding
+ * it would be inventing data.
+ */
+const AGENT_MESSAGE_FIXTURE = [
+  '<agent-message from="a3ebe9b629a8f39c7">',
+  'CAPTURE_PROBE_TEAMMATE_1 hello from teammate',
+  '</agent-message>',
+].join('\n');
+
+/**
+ * The same envelope at realistic dispatch size (§9).
+ *
+ * The captured row is 102B because the probe sent one line. A real teammate
+ * report runs to kilobytes, and a fixture that cannot reach the failure region
+ * proves nothing about the one that can — so both sizes are exercised.
+ */
+const AGENT_MESSAGE_LARGE_FIXTURE = [
+  '<agent-message from="a3ebe9b629a8f39c7">',
+  ...PEER_ENVELOPE_FIXTURE.split('\n').slice(1, -1),
+  '</agent-message>',
+].join('\n');
+
+/**
+ * Decision-store path the dispatcher writes for a given session id.
+ *
+ * Anchored on `sandboxRepo`, NOT on `sandboxCwd`: `resolveProjectRoot` stops at
+ * the nearest `.git`, which the beforeAll places one level above the cwd. This
+ * used to point at `sandboxCwd` and therefore at a file the dispatcher never
+ * wrote, which is what made the positive control below silently useless.
+ *
+ * @param {string} sessionId
+ * @returns {string}
+ */
 function decisionsPathFor(sessionId) {
-  return path.join(sandboxCwd, '.artibot', 'runtime', 'decisions', `${sessionId}.events.ndjson`);
+  return path.join(sandboxRepo, '.artibot', 'runtime', 'decisions', `${sessionId}.events.ndjson`);
 }
 
 describe('_userprompt-dispatcher (integration)', () => {
@@ -420,6 +560,101 @@ describe('_userprompt-dispatcher (integration)', () => {
       expect(stderr).toContain('skipped non-user prompt (body:system-notification) — 0 hooks run');
     });
 
+    /**
+     * PEER AND AGENT MESSAGES — the live hole this branch closes.
+     *
+     * Not hypothetical, and not inferred from the minified binary: a 7-row
+     * capture of real hook input on the installed 2.1.267 host
+     * (2026-09-10T01:06–01:12Z) found `source` absent on 7 of 7 rows, with
+     * `prompt` carrying the queue's raw envelope and no framing. These cases
+     * therefore omit `source` deliberately — sending it would test a path this
+     * host cannot produce.
+     */
+    it('blocks a cross-session envelope on the prefix sniff when source is absent', () => {
+      const { stdout, stderr, status } = runDispatcherRaw({
+        hook_event_name: 'UserPromptSubmit',
+        prompt: PEER_ENVELOPE_FIXTURE,
+        session_id: 'guard-peer-4f0a1c2b-0009-0000-0000-000000000009',
+      });
+      expect(status).toBe(0);
+      expect(stdout).toBe('');
+      expect(stderr.trim()).toBe(
+        '[artibot:_userprompt-dispatcher] skipped non-user prompt (body:cross-session-message) — 0 hooks run',
+      );
+      expect(stderr.split('\n').filter(Boolean)).toHaveLength(1);
+    });
+
+    it.each([
+      ['at the captured size (102B)', () => AGENT_MESSAGE_FIXTURE],
+      ['at realistic dispatch size', () => AGENT_MESSAGE_LARGE_FIXTURE],
+    ])('blocks an in-process teammate `<agent-message>` %s', (_label, get) => {
+      // An in-process subagent's SendMessage(to="main") does NOT arrive as a
+      // cross-session envelope. Without this marker the guard reads a teammate
+      // report as a human prompt — which is how this branch's own dispatch got
+      // classified.
+      const { stdout, stderr, status } = runDispatcherRaw({
+        hook_event_name: 'UserPromptSubmit',
+        prompt: get(),
+        session_id: 'guard-agent-4f0a1c2b-0010-0000-0000-000000000010',
+      });
+      expect(status).toBe(0);
+      expect(stdout).toBe('');
+      expect(stderr.trim()).toBe(
+        '[artibot:_userprompt-dispatcher] skipped non-user prompt (body:agent-message) — 0 hooks run',
+      );
+      expect(stderr.split('\n').filter(Boolean)).toHaveLength(1);
+    });
+
+    it('the fixtures match the captured shapes and reach realistic size', () => {
+      // §9: a fixture smaller than the real thing proves nothing about the
+      // real thing. The 102B agent row is kept verbatim because it IS the
+      // measurement; the large variants carry the size argument.
+      expect(PEER_ENVELOPE_FIXTURE.startsWith('<cross-session-message ')).toBe(true);
+      expect(PEER_ENVELOPE_FIXTURE).toContain('from-mode="prompting"');
+      expect(Buffer.byteLength(PEER_ENVELOPE_FIXTURE, 'utf-8')).toBeGreaterThanOrEqual(1024);
+
+      expect(AGENT_MESSAGE_FIXTURE.startsWith('<agent-message ')).toBe(true);
+      expect(Buffer.byteLength(AGENT_MESSAGE_FIXTURE, 'utf-8')).toBe(102);
+      expect(Buffer.byteLength(AGENT_MESSAGE_LARGE_FIXTURE, 'utf-8')).toBeGreaterThanOrEqual(1024);
+    });
+
+    /**
+     * ZERO-HOOK PROOF for the peer path, on TWO independent controls.
+     *
+     * stdout and the decision store fail in different ways, so proving the
+     * absence on both is not redundancy. stdout shows the contributors did not
+     * run in THIS process; the decision store shows nothing was persisted.
+     *
+     * The decision-store half was useless until 2026-09-10: `decisionsPathFor`
+     * pointed at `sandboxCwd` while the rows were landing in the developer's
+     * real home store, so "file absent" was true for the wrong reason. See the
+     * project-root anchor note on `beforeAll` and the leak tripwire below.
+     */
+    it('runs zero hooks on a peer message, proven against a live control', () => {
+      const controlSession = 'guard-peer-ctl-4f0a1c2b-0011-0000-0000-000000000011';
+      const blockedSession = 'guard-peer-blk-4f0a1c2b-0012-0000-0000-000000000012';
+
+      // POSITIVE CONTROL — same helper, same sandbox, one word of difference.
+      const control = runDispatcherRaw({
+        hook_event_name: 'UserPromptSubmit',
+        prompt: 'fix typo in readme',
+        session_id: controlSession,
+        source: 'user',
+      });
+      expect(control.stdout, 'control must produce hook output, or the absence below proves nothing').not.toBe('');
+      expect(JSON.parse(control.stdout).hookSpecificOutput.additionalContext.length)
+        .toBeGreaterThan(0);
+      expect(existsSync(decisionsPathFor(controlSession)), 'control must write a decision file, or the absence below proves nothing').toBe(true);
+
+      const blocked = runDispatcherRaw({
+        hook_event_name: 'UserPromptSubmit',
+        prompt: PEER_ENVELOPE_FIXTURE,
+        session_id: blockedSession,
+      });
+      expect(blocked.stdout).toBe('');
+      expect(existsSync(decisionsPathFor(blockedSession))).toBe(false);
+    });
+
     it('ALLOWLIST PROOF: blocks source=loop_wakeup even with an ordinary human prompt', () => {
       // The body here is indistinguishable from a real request, so nothing in
       // the sniff can reject it. If this ever goes green by way of the body
@@ -515,6 +750,12 @@ describe('_userprompt-dispatcher (integration)', () => {
       // The guard returns before the spawn, so the blocked turn costs one
       // stderr line and no child process. Observable proxy: the child would
       // resolve the repo from cwd, and a blocked run must not create one.
+      //
+      // STILL VALID after the project-root anchor landed. The repo marker lives
+      // one level UP, at `sandboxRepo/.git`; the dispatcher's cwd is
+      // `sandboxRepo/work`, which has no `.git` of its own. That is the whole
+      // point of putting the cwd a level down — `resolveProjectRoot` gets
+      // something to stop at while this proxy keeps measuring the same thing.
       runDispatcherRaw({
         hook_event_name: 'UserPromptSubmit',
         prompt: NOTIFICATION_FIXTURE,
@@ -522,6 +763,43 @@ describe('_userprompt-dispatcher (integration)', () => {
         source: 'system',
       });
       expect(existsSync(path.join(sandboxCwd, '.git'))).toBe(false);
+      // And the marker above the cwd is a bare directory, not a repository —
+      // pinned so nobody "helpfully" upgrades it to a real `git init`, which
+      // would hand git-autopilot-save a writable repo to commit into.
+      expect(existsSync(path.join(sandboxRepo, '.git', 'HEAD'))).toBe(false);
+    });
+
+    /**
+     * LEAK TRIPWIRE — the sandbox must not reach the developer's real store.
+     *
+     * Before the project-root anchor, it did: overriding HOME/USERPROFILE made
+     * the real `C:/Users/<user>` stop counting as "home" in
+     * `resolveProjectRoot`'s home-exclusion rule, so its `.artibot` became the
+     * outermost weak marker for a temp-dir cwd and won. Six fixture sessions
+     * landed in `~/.artibot/runtime/decisions/` (measured by the team lead at
+     * 10:26 KST on 2026-09-10; 4 of them re-leaked by an unanchored run at
+     * 10:29 KST, and the store was cleaned at 10:40 KST).
+     *
+     * `realHomeDecisionsDir()` reads the PARENT process's environment, so it
+     * points at the real home even though the child's HOME is the sandbox.
+     */
+    it('LEAK TRIPWIRE: a control run writes to the sandbox, never to the real home store', () => {
+      const session = 'guard-leak-4f0a1c2b-0013-0000-0000-000000000013';
+      const realPath = path.join(realHomeDecisionsDir(), `${session}.events.ndjson`);
+      expect(existsSync(realPath), 'stale file from a previous run — the tripwire cannot measure this run').toBe(false);
+
+      runDispatcherRaw({
+        hook_event_name: 'UserPromptSubmit',
+        prompt: 'fix typo in readme',
+        session_id: session,
+        source: 'user',
+      });
+
+      // Positive half: it landed in the sandbox. Without this the assertion
+      // below would pass just as happily if nothing were written anywhere.
+      expect(existsSync(decisionsPathFor(session)), 'the row must land in the sandbox, or the tripwire proves nothing').toBe(true);
+      // Negative half: and NOT in the real store.
+      expect(existsSync(realPath)).toBe(false);
     });
   });
 });
