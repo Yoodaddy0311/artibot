@@ -13,6 +13,9 @@
  *  - level: 'caution' | 'danger'
  *  - test: RegExp to match against the command/text payload
  *  - reason: human readable reason
+ *
+ * lib/core/blocked-patterns.js (L1, PreToolUse) is the canonical block list;
+ * this catalogue only grades severity on top of it and never widens what runs.
  */
 export const DANGEROUS_PATTERNS = Object.freeze([
   { id: 'git-force-push', level: 'danger', test: /\bgit\s+push\b[^\n]*--force(-with-lease)?\b/i, reason: 'Destructive git push --force' },
@@ -20,8 +23,36 @@ export const DANGEROUS_PATTERNS = Object.freeze([
   { id: 'git-branch-delete', level: 'danger', test: /\bgit\s+branch\s+-D\b/i, reason: 'Force-delete git branch (-D)' },
   { id: 'git-reset-hard', level: 'danger', test: /\bgit\s+reset\s+--hard\b/i, reason: 'git reset --hard discards work' },
   { id: 'git-clean-force', level: 'danger', test: /\bgit\s+clean\s+-[a-z]*f/i, reason: 'git clean -f deletes untracked files' },
-  { id: 'rm-rf-root', level: 'danger', test: /\brm\s+-rf?\s+(?:\/(?:\s|$|\*|\w)|~(?:\s|$|\/)|\$HOME(?:\s|$|\/))/i, reason: 'rm -rf on root or home' },
-  { id: 'rm-rf-broad', level: 'danger', test: /\brm\s+-rf?\s+\*/i, reason: 'rm -rf with broad glob' },
+  { id: 'git-checkout-discard', level: 'danger', test: /\bgit\s+checkout\s+(?:--\s+)?\.(?=\s|$)/i, reason: 'git checkout . discards all uncommitted changes' },
+  { id: 'git-restore-discard', level: 'danger', test: /\bgit\s+restore\s+(?:--\s+)?\.(?=\s|$)/i, reason: 'git restore . discards all uncommitted changes' },
+  { id: 'git-stash-drop', level: 'danger', test: /\bgit\s+stash\s+(?:drop|clear)\b/i, reason: 'git stash drop/clear deletes stash entries' },
+  // A recursive flag anywhere in the option run is enough here (force stays
+  // optional, preserving the older `rm -r /` verdict); the target decides.
+  // The option token must stay `--?\w[\w-]*` — a shape that lets `--opt` split
+  // two ways (e.g. `-{1,2}[\w-]+`) backtracks 2^n on a non-matching tail, and
+  // the 5s PreToolUse hook would drop the verdict instead of failing loudly.
+  {
+    id: 'rm-rf-root',
+    level: 'danger',
+    test: /\brm\b(?=(?:\s+--?\w[\w-]*)*\s+(?:--recursive|-[a-z]*[r][a-z]*)(?![\w-]))(?:\s+--?\w[\w-]*)*(?:\s+--)?\s+(?:\/(?:\s|$|\*|\w)|~(?:\s|$|\/)|\$HOME(?:\s|$|\/))/i,
+    reason: 'rm -rf on root or home',
+  },
+  {
+    id: 'rm-rf-broad',
+    level: 'danger',
+    test: /\brm\b(?=(?:\s+--?\w[\w-]*)*\s+(?:--recursive|-[a-z]*[r][a-z]*)(?![\w-]))(?:\s+--?\w[\w-]*)*(?:\s+--)?\s+\*/i,
+    reason: 'rm -rf with broad glob',
+  },
+  // Keep after rm-rf-root/rm-rf-broad: those two own the root/home/glob targets.
+  // Two lookaheads demand a recursive flag AND a force flag anywhere in the
+  // option run, so combined (-rfv), split (-r -f) and long (--recursive) forms
+  // all land here; the final guard skips root/home/glob targets.
+  {
+    id: 'rm-rf-path',
+    level: 'caution',
+    test: /\brm\b(?=(?:\s+--?\w[\w-]*)*\s+(?:--recursive|-[a-z]*[r][a-z]*)(?![\w-]))(?=(?:\s+--?\w[\w-]*)*\s+(?:--force|-[a-z]*[f][a-z]*)(?![\w-]))(?:\s+--?\w[\w-]*)*(?:\s+--)?\s+(?![-/~*]|\$HOME\b)\S+/i,
+    reason: 'recursive delete of a scoped path (blocked at PreToolUse by blocked-patterns)',
+  },
   { id: 'sql-drop-table', level: 'danger', test: /\bDROP\s+TABLE\b/i, reason: 'SQL DROP TABLE' },
   { id: 'sql-drop-database', level: 'danger', test: /\bDROP\s+DATABASE\b/i, reason: 'SQL DROP DATABASE' },
   { id: 'sql-truncate', level: 'danger', test: /\bTRUNCATE\b/i, reason: 'SQL TRUNCATE' },

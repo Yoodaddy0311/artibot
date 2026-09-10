@@ -29,6 +29,19 @@ const BLOCKED_PATTERNS = Object.freeze([
   { pattern: /rm\s+(-\w*r\w*f|--recursive).*\//i, label: 'rm -rf with path', category: 'filesystem' },
   { pattern: /rm\s+-\w*f\w*r.*\//i, label: 'rm -fr with path', category: 'filesystem' },
   { pattern: /rm\s+-\w*[rf]\w*\s+\*/i, label: 'rm with wildcard', category: 'filesystem' },
+  // The three rules above miss two shapes: they all require `/` or `*` in the
+  // command, and they read the flags as one combined token. So `rm -rf build`
+  // (relative target) and `rm -r -f /tmp/x` (split flags) both walked through.
+  // Two lookaheads demand a recursive flag AND a force flag anywhere in the
+  // option tokens (`-rf`, `-r -f` and `--recursive --force` all count), then the
+  // body requires at least one target token that is not an option — any target
+  // shape qualifies, including `/`, `*` and `~`. `rm -rf` with no target at all
+  // stays unmatched.
+  {
+    pattern: /\brm\b(?=(?:\s+-\S+)*\s+(?:-[a-z]*r[a-z]*|--recursive)\b)(?=(?:\s+-\S+)*\s+(?:-[a-z]*f[a-z]*|--force)\b)(?:\s+-\S+)*\s+(?!-)\S+/i,
+    label: 'rm recursive+force (any target)',
+    category: 'filesystem',
+  },
   { pattern: /sudo\s+rm\s/i, label: 'sudo rm', category: 'filesystem' },
   { pattern: /del\s+\/s\s+\/q/i, label: 'del /s /q (Windows recursive delete)', category: 'filesystem' },
   { pattern: /del\s+\/s/i, label: 'Windows recursive delete', category: 'filesystem' },
@@ -67,7 +80,11 @@ const BLOCKED_PATTERNS = Object.freeze([
   { pattern: /git\s+checkout\s+\.\s*$/i, label: 'git checkout . (discard all changes)', category: 'git' },
   { pattern: /git\s+restore\s+\.\s*$/i, label: 'git restore . (discard all changes)', category: 'git' },
   { pattern: /git\s+branch\s+-D\b/i, label: 'git branch -D (force delete)', category: 'git' },
-  { pattern: /git\s+stash\s+drop/i, label: 'git stash drop', category: 'git' },
+  // `clear` deletes every stash entry at once — strictly more destructive than
+  // `drop`, which takes one. `pop` and `push` stay out: they restore or create.
+  // Trailing \b keeps the rule from firing on a longer word that merely starts
+  // with the subcommand (`git stash clearance` was blocked before it was added).
+  { pattern: /git\s+stash\s+(drop|clear)\b/i, label: 'git stash drop/clear', category: 'git' },
 
   // ── Database destruction ────────────────────────────────────────────
   { pattern: /drop\s+(database|table|schema)\b/i, label: 'DROP DATABASE/TABLE', category: 'database' },
