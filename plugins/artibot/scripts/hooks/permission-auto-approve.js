@@ -29,6 +29,8 @@
  *  axis. All three pre/Bash guards are `security-critical`, which is exactly
  *  why cwd cannot change the answer: they run everywhere.
  *
+ *  Bash 인데 command 가 문자열이 아니면 판정 불가로 보류한다.
+ *
  *  Withholding means NO DECISION — this hook never emits `deny`. It only
  *  declines to spend its one privilege, handing the call back to the normal
  *  permission flow (and to the PreToolUse hooks that will block it anyway).
@@ -110,13 +112,17 @@ function oneLine(reason) {
  * cwd-dependent verdict is not a verdict, and this filter takes no cwd.
  *
  * @param {{toolName: string, toolInput: object}} call
- * @returns {{kind: 'destructive'|'guard-block', reason: string}|null}
+ * @returns {{kind: 'destructive'|'guard-block'|'unjudgeable', reason: string}|null}
  */
 export function defaultJudge({ toolName, toolInput }) {
   if (toolName !== 'Bash') return null;
 
+  // A Bash call whose command we cannot read is not a call we cleared. Neither
+  // judge can see a non-string, so "no match" here would mean "not looked at".
   const command = toolInput?.command;
-  if (typeof command !== 'string' || !command) return null;
+  if (typeof command !== 'string' || !command) {
+    return { kind: 'unjudgeable', reason: 'command is not a non-empty string' };
+  }
 
   // Fresh registry each call — registerBuiltinGuards() appends, so reusing a
   // dirty registry would run every guard N times (pattern: pre-bash.js#main).

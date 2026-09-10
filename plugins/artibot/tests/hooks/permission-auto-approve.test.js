@@ -251,7 +251,6 @@ describe('evaluatePermission/이 필터가 못 보는 것 (알려진 구멍을 �
       },
     );
     expect(seen).toEqual(['Write']);
-    expect(defaultJudge({ toolName: 'Write', toolInput: { file_path: '.env' } })).toBeNull();
     expect(out.decision).toBe('allow');
   });
 
@@ -261,9 +260,24 @@ describe('evaluatePermission/이 필터가 못 보는 것 (알려진 구멍을 �
     expect(defaultJudge({ toolName: 'Read', toolInput: { file_path: 'a.js' } })).toBeNull();
   });
 
-  it('command 가 없거나 문자열이 아닌 Bash 는 판정 불가 → allow', () => {
-    expect(defaultJudge({ toolName: 'Bash', toolInput: {} })).toBeNull();
-    expect(defaultJudge({ toolName: 'Bash', toolInput: { command: 123 } })).toBeNull();
+  it('판정 불가 Bash 입력은 보류(fail-closed)', () => {
+    // 두 정본 모두 문자열이 아닌 command 를 볼 수 없다. 여기서 "매치 없음"은
+    // "안전하다"가 아니라 "보지 못했다"이므로 승인을 아낀다.
+    for (const toolInput of [{}, { command: 123 }, { command: '' }, { command: null }]) {
+      const verdict = defaultJudge({ toolName: 'Bash', toolInput });
+      expect(verdict?.kind).toBe('unjudgeable');
+      expect(verdict?.reason).toBe('command is not a non-empty string');
+    }
+  });
+
+  it('판정 불가 Bash 는 allowlist 를 매치해도 결정 없음 — deny 는 아니다', () => {
+    const out = evaluatePermission({
+      toolName: 'Bash',
+      toolInput: { command: 123 },
+      allowlist: [{ tool: '*' }],
+    });
+    expect(out.decision).toBeNull();
+    expect(out.withheld?.kind).toBe('unjudgeable');
   });
 });
 
