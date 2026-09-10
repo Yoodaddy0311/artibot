@@ -510,7 +510,8 @@ function Set-Settings {
     # only tells them the line to add and never writes the env var itself; this
     # matched that for years on Linux/macOS while Windows silently edited the
     # env block. Same contract on both now. -EnableAgentTeams is the opt-in.
-    if (Select-String -LiteralPath $settingsFile -Pattern 'CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS' -Quiet -ErrorAction SilentlyContinue) {
+    $alreadyEnabled = [bool](Select-String -LiteralPath $settingsFile -Pattern 'CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS' -Quiet -ErrorAction SilentlyContinue)
+    if ($alreadyEnabled) {
       Write-Log 'Agent Teams already enabled in settings.json'
     } elseif (-not $EnableAgentTeams) {
       Write-Warn2 'Add this to ~/.claude/settings.json manually:'
@@ -546,7 +547,9 @@ fs.renameSync(tmp, path);
     $env:ARTIBOT_ALLOW_SEED = ($SafeAllow | ConvertTo-Json -Compress)
     $env:ARTIBOT_ENABLE_AGENT_TEAMS = if ($EnableAgentTeams) { '1' } else { '0' }
     node --input-type=commonjs -e $node
-    if ($EnableAgentTeams) {
+    # Only claim the env write when one actually happened: with the key already
+    # present the node snippet leaves env alone (review minor #2).
+    if ($EnableAgentTeams -and -not $alreadyEnabled) {
       Write-Log 'settings.json merged: Agent Teams enabled + read-only permissions seeded'
     } else {
       Write-Log 'settings.json merged: read-only permissions seeded (env block untouched)'

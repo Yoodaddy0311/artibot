@@ -140,6 +140,9 @@ describe('install.sh ↔ install.ps1 — native plugin skip parity', () => {
     // Exactly one literal of the path per file (the declaration itself).
     expect(sh.split(shRel).length - 1).toBe(1);
     expect(ps1.split(ps1Decl[1]).length - 1).toBe(1);
+    // PowerShell also accepts the forward-slash spelling — a second literal in
+    // that form would slip past the backslash count above (review minor #1).
+    expect(ps1.split(ps1Rel).length - 1).toBe(0);
   });
 
   it('both installers expose a force flag (--flat / -Flat) and the same skip line', () => {
