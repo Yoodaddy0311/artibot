@@ -100,8 +100,13 @@ beforeAll(() => {
   // stop `resolveProjectRoot`'s first rule. `git rev-parse` inside it fails,
   // which is the same "not a git repository" answer a bare temp dir gave.
   mkdirSync(path.join(sandboxRepo, '.git'), { recursive: true });
-  sandboxCwd = path.join(sandboxRepo, 'work');
-  mkdirSync(sandboxCwd, { recursive: true });
+  // mkdtempSync (not mkdirSync) on purpose: the firewall
+  // tests/firewall/dispatcher-cwd-sandbox-required.test.js only recognises a
+  // spawn cwd whose identifier is assigned DIRECTLY from mkdtempSync
+  // (`mkdtemp-cwd`); a `path.join(sandboxRepo, 'work')` hop is unregistered
+  // and turns that gate red (integrate 2026-09-10 01:58Z). Isolation is the
+  // same: the empty `.git` marker above still anchors resolveProjectRoot.
+  sandboxCwd = mkdtempSync(path.join(sandboxRepo, 'work-'));
   sandboxRoot = mkdtempSync(path.join(tmpdir(), 'artibot-userprompt-root-'));
   const linkType = process.platform === 'win32' ? 'junction' : 'dir';
   for (const dir of ['lib', 'commands', 'skills', 'agents']) {
