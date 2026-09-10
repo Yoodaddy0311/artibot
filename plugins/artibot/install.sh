@@ -1,11 +1,26 @@
 #!/usr/bin/env bash
 # Artibot Installer - Claude Code Plugin
 # Copies agents, commands, skills, hooks to ~/.claude/ for native integration
+#
+# Usage: ./install.sh [install|uninstall|files] [--flat]
+#   --flat  force the flat copy of agents/commands into ~/.claude/{agents,commands}
+#           even when the native marketplace plugin is installed. Without it the
+#           flat copy is skipped on a native install, because Claude Code would
+#           otherwise list every agent and command twice (see
+#           detect_native_plugin_install below).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CLAUDE_DIR="${HOME:-${USERPROFILE:-$(eval echo ~)}}/.claude"
 ARTIBOT_DIR="${CLAUDE_DIR}/artibot"
+
+# Claude Code's per-version marketplace plugin cache root. ONE declaration, read
+# by both detect_native_plugin_install (is a native install present?) and
+# install_plugin_cache (mirror runtime files into every version dir). Two
+# literals is how install.sh and install.ps1 drift apart, so there is exactly
+# one here and exactly one in install.ps1 ($PluginCacheRoot); the release gate
+# tests/ci/validate-install.test.js compares the two and counts the literals.
+ARTIBOT_PLUGIN_CACHE_ROOT="${CLAUDE_DIR}/plugins/cache/artibot/artibot"
 
 # Minimum Node major. Lockstep with package.json#/engines/node (">=20") and
 # scripts/install.sh / scripts/install.ps1 MIN_NODE_MAJOR. Bumped 18 -> 20 to
@@ -462,9 +477,111 @@ setup_directories() {
 }
 
 # ──────────────────────────────────────────────
+# Native marketplace plugin detection (flat-copy suppression)
+# ──────────────────────────────────────────────
+# install_agents / install_commands flat-copy agents/*.md and commands/*.md into
+# ~/.claude/{agents,commands}. Claude Code reads BOTH those directories and the
+# native marketplace plugin, so when the plugin is installed as well every agent
+# and command is listed TWICE in the session system prompt.
+#
+# The marker is the same one lib/core/install-mode.js#detectInstallMode uses for
+# its NATIVE signal — `cacheMarker` = ~/.claude/plugins/cache. Two spellings of
+# one fact: if that module's marker ever moves, this must move with it.
+#
+# Stricter here than there in one respect, deliberately: the bare cache root is
+# NOT enough. Claude Code creates ARTIBOT_PLUGIN_CACHE_ROOT and fills it with a
+# per-version directory (install_plugin_cache below iterates exactly those), so
+# an empty root means "no version installed" and the flat copy must still
+# happen. Requiring a version subdirectory is what keeps this from suppressing
+# the copy on a half-populated cache.
+#
+# Pure check: no writes, no deletions. It only reports.
+#
+# ARTIBOT_FLAT_COPY=1 (or `--flat`) forces the copy back on. It is read with a
+# :- default everywhere because these functions are extracted and run standalone
+# by tests under `set -u`, where a bare unset reference is fatal — same reason
+# install_hooks spells ${INSTALL_FAILURES:-0}.
+ARTIBOT_FLAT_COPY="${ARTIBOT_FLAT_COPY:-0}"
+
+# Set to 1 by flat_copy_skipped the first time it suppresses a copy. Serves two
+# jobs: it makes the notice print once per run rather than once per directory,
+# and it tells verify_install that a 0 count is intended rather than a failure.
+ARTIBOT_FLAT_COPY_SKIPPED=0
+
+detect_native_plugin_install() {
+  # ARTIBOT_PLUGIN_CACHE_ROOT (:9) is the same marker lib/core/install-mode.js#
+  # detectInstallMode uses for its NATIVE signal — its `cacheMarker` is
+  # ~/.claude/plugins/cache. The `:-` default is not cosmetic: these functions
+  # get extracted and run standalone by tests under `set -u`, and an empty root
+  # fails the -d check below, i.e. "no native install" — the direction that
+  # copies rather than the one that silently suppresses.
+  local cache_root="${ARTIBOT_PLUGIN_CACHE_ROOT:-}"
+  [ -d "${cache_root}" ] || return 1
+  local version_dir
+  for version_dir in "${cache_root}"/*/; do
+    [ -d "${version_dir}" ] || continue
+    echo "${version_dir%/}"
+    return 0
+  done
+  return 1
+}
+
+# How many of OUR agent/command files are already sitting in the flat
+# destinations. Names are matched against the source tree rather than counting
+# the directories wholesale: the user's own agents live there too and are none
+# of the installer's business.
+count_flat_leftovers() {
+  local n=0 entry base
+  for entry in "${SCRIPT_DIR}"/agents/*.md; do
+    [ -f "${entry}" ] || continue
+    base="$(basename "${entry}")"
+    if [ -f "${CLAUDE_DIR}/agents/${base}" ]; then
+      n=$((n + 1))
+    fi
+  done
+  for entry in "${SCRIPT_DIR}"/commands/*.md; do
+    [ -f "${entry}" ] || continue
+    base="$(basename "${entry}")"
+    if [ -f "${CLAUDE_DIR}/commands/${base}" ]; then
+      n=$((n + 1))
+    fi
+  done
+  echo "${n}"
+}
+
+# Shared guard for install_agents and install_commands (and therefore for the
+# `files` subcommand, which calls both). Returns 0 when the caller should skip.
+#
+# Leftovers are REPORTED, never deleted. This installer does not know whether a
+# file in ~/.claude/agents came from an older flat install or from the user, and
+# guessing wrong destroys their work; `./install.sh uninstall` is the explicit
+# path, and it already removes exactly the source-matched names.
+flat_copy_skipped() {
+  if [ "${ARTIBOT_FLAT_COPY:-0}" = "1" ]; then
+    return 1
+  fi
+  local native_path
+  native_path="$(detect_native_plugin_install)" || return 1
+
+  if [ "${ARTIBOT_FLAT_COPY_SKIPPED:-0}" -eq 0 ]; then
+    ARTIBOT_FLAT_COPY_SKIPPED=1
+    log "native plugin detected at ${native_path} — skipping flat copy of agents/commands; use --flat to force"
+    local leftovers
+    leftovers="$(count_flat_leftovers)"
+    if [ "${leftovers:-0}" -gt 0 ]; then
+      warn "${leftovers} previously flat-copied agent/command files remain in ~/.claude/{agents,commands} (duplicated with the native plugin) — run './install.sh uninstall' to remove them or '--flat' to refresh"
+    fi
+  fi
+  return 0
+}
+
+# ──────────────────────────────────────────────
 # Copy Agents (28 agent .md files)
 # ──────────────────────────────────────────────
 install_agents() {
+  if flat_copy_skipped; then
+    return 0
+  fi
   local count=0
   for agent in "${SCRIPT_DIR}"/agents/*.md; do
     [ -f "$agent" ] || continue
@@ -478,6 +595,9 @@ install_agents() {
 # Copy Commands (slash commands .md files)
 # ──────────────────────────────────────────────
 install_commands() {
+  if flat_copy_skipped; then
+    return 0
+  fi
   local count=0
   for cmd in "${SCRIPT_DIR}"/commands/*.md; do
     [ -f "$cmd" ] || continue
@@ -595,7 +715,7 @@ install_marketplace_mirror() {
 # Mirror to Claude Code plugin cache (per-version dirs)
 # ──────────────────────────────────────────────
 # Claude Code maintains a per-version plugin cache at
-#   ~/.claude/plugins/cache/artibot/artibot/<version>/
+#   ${ARTIBOT_PLUGIN_CACHE_ROOT}/<version>/   (under ~/.claude/plugins/cache/)
 # At session start it loads hooks.json from THE CACHE DIR — not the
 # marketplace mirror or the direct install. The cache is populated lazily
 # from the marketplace mirror on first plugin activation and is NOT
@@ -613,7 +733,10 @@ install_marketplace_mirror() {
 # non-destructive on a fresh-install path while still propagating runtime
 # files to whatever cache versions already exist.
 install_plugin_cache() {
-  local cache_root="${CLAUDE_DIR}/plugins/cache/artibot/artibot"
+  # Reads the single top-level constant (:9) rather than repeating the literal —
+  # detect_native_plugin_install must agree with this function about what "the
+  # cache" is, and two literals is exactly how those answers diverge.
+  local cache_root="${ARTIBOT_PLUGIN_CACHE_ROOT:-}"
   if [ ! -d "${cache_root}" ]; then
     log "Plugin cache not present (skip cache sync)"
     return 0
@@ -1469,8 +1592,16 @@ verify_install() {
   hook_count=$(find "${ARTIBOT_DIR}/scripts/hooks" -name "*.js" -type f 2>/dev/null | wc -l)
   rule_count=$(find "${CLAUDE_DIR}/rules/artibot" -name "*.md" -type f 2>/dev/null | wc -l)
 
-  echo -e "  Agents:   ${GREEN}${agent_count}${NC} files in ~/.claude/agents/"
-  echo -e "  Commands: ${GREEN}${cmd_count}${NC} files in ~/.claude/commands/"
+  # A skipped flat copy legitimately leaves these at 0 on a machine that has
+  # never had a flat install. Saying so on the line itself is the difference
+  # between "correct" and "the installer did nothing" for whoever reads it.
+  local flat_note=""
+  if [ "${ARTIBOT_FLAT_COPY_SKIPPED:-0}" -eq 1 ]; then
+    flat_note=" (flat copy skipped — native plugin)"
+  fi
+
+  echo -e "  Agents:   ${GREEN}${agent_count}${NC} files in ~/.claude/agents/${flat_note}"
+  echo -e "  Commands: ${GREEN}${cmd_count}${NC} files in ~/.claude/commands/${flat_note}"
   echo -e "  Skills:   ${GREEN}${skill_count}${NC} dirs in ~/.claude/artibot/skills/"
   echo -e "  Rules:    ${GREEN}${rule_count}${NC} files in ~/.claude/rules/artibot/ (auto-activate)"
   echo -e "  Hooks:    ${GREEN}${hook_count}${NC} scripts in ~/.claude/artibot/scripts/"
@@ -1545,7 +1676,26 @@ main() {
   echo -e "${BLUE}━━━ Artibot Installer v${version} ━━━${NC}"
   echo ""
 
-  case "${1:-install}" in
+  # Flags may appear anywhere in argv; the action is the FIRST non-flag word.
+  # `${1:-install}` semantics are preserved — no args still means `install`, and
+  # anything that is not a known flag is treated as the action, so an unknown
+  # flag still lands in the usage branch below exactly as it did before.
+  local action="" arg
+  for arg in "$@"; do
+    case "${arg}" in
+      --flat)
+        ARTIBOT_FLAT_COPY=1
+        ;;
+      *)
+        if [ -z "${action}" ]; then
+          action="${arg}"
+        fi
+        ;;
+    esac
+  done
+  action="${action:-install}"
+
+  case "${action}" in
     install)
       check_prerequisites
       setup_directories
@@ -1605,8 +1755,11 @@ main() {
       uninstall
       ;;
     *)
-      echo "Usage: ./install.sh [install|uninstall|files]"
-      echo "  files: copy phase only (agents/commands/skills/hooks/rules) — test & CI use"
+      echo "Usage: ./install.sh [install|uninstall|files] [--flat]"
+      echo "  files:  copy phase only (agents/commands/skills/hooks/rules) — test & CI use"
+      echo "  --flat: force the flat copy of agents/commands into ~/.claude/ even when"
+      echo "          the native marketplace plugin is installed (default: skip it, so"
+      echo "          agents and commands are not listed twice)"
       exit 1
       ;;
   esac
