@@ -56,6 +56,8 @@
 
 ## worktree-setup <worktreePath> (창 열린 직후 · 멱등 — A6)
 
+운용 규칙 추가(2026-09-10, split-b87130 실측): ① 줄기 창에서 `/doctor` 를 돌리면 Check 8 이 찍는 `read project root: <path>` 줄이 **그 worktree 경로**인지 대조하라 — 부모 루트면 다른 원장을 읽은 것(#G16). ② 줄기의 `Split-Limb` 트레일러는 귀속 줄과 같은 마지막 문단에(별 문단이면 판독기가 no-trailer, 오늘 2줄기). ③ 줄기가 소유 파일을 스캔하는 `tests/firewall/` 게이트를 표적에 넣지 않으면 CI 가 처음 잡는다(Wave 1 not-green 1회) — 소스 스캔형 방화벽은 스폰 0 이라 창에서 안전하다.
+
 `node <pluginRoot>/scripts/split/worktree-setup.mjs <worktreePath> --limb <limb> [--json]` — `config.split.worktreeSetup` 대로 부모의 `node_modules` 를 junction(win32 `mklink /J`, posix symlink)으로 걸고, `.env.local` 을 없을 때만 복사하고, `envPerLane` 을 `<worktreePath>/.artibot/split/<limb>/lane.env` 로 쓴다(`{limb}`/`{limb_}` 치환 — 레인별 e2e DB 이름). 재실행은 전건 skip.
 - 실사고 근거: node_modules 부재로 ratchet 자기파괴, pkg 루트 SDK 폴백 = 거짓 red, `.env.local` 미복사 빌드 실패, 공유 DB 에서 병렬 레인의 autoReset 이 형제 시드 삭제(9/2).
 - **정리는 `--teardown` 만** — `lstat().isSymbolicLink()` 인 reparse point 만 `rmdir`, 재귀 삭제 0. 링크 자리에 실디렉터리가 있으면 refuse(exit 1) — junction 을 `rm -rf` 하면 부모 957항목이 지워지는 위험이 실측됐다.

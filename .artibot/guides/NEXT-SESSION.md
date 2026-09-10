@@ -2,7 +2,16 @@
 
 > 다른 머신에서는 `git pull` → 설치본 4.57.0 확인 → **이 파일을 직접 Read** 하고 시작한다. 로컬 전용(`.artibot/HANDOFF.md`·`.artibot/split/`·`runtime/split/`·`.artibot/runtime/`)은 이 머신에만 있다. 아래 수치는 전부 이 세션(artibot-78) 리더 실측이다.
 
-## 지금 상태 (2026-09-10 11:4x KST 실측)
+## 갱신 (2026-09-10 12:3x KST — Wave 2 도 착지, 오너 부재 중 위임 진행)
+
+| 항목 | 값 |
+|---|---|
+| master | **27510566** = Wave 2 배치 랜딩(ci/split-b87130 재사용, 1차 landed, rebuilds 0, stale d410ebb0 위 lease 재검증 2회째). 그 앞: 09f1da83(/team frontmatter YAML 오류 수정 — `claude plugin validate` exit 1 이었음) · e79ae67e(리더 docs 후속: split.md 표기·operations.md 7행·CHANGELOG Unreleased·dedupe 키 5필드 서술) · feb0b688(핸드오프) |
+| Wave 2 결과 | doctor-check8-arg 8849c226(Check 8 Step 0 projectRoot 산출 + `read project root:` 병기, 실행형 worktree 테스트) · schema-route-drift 9290eed6(route.selected spec 발행자 정정 = route-observe-pre.js, 소스 스캔 테스트) · install-hygiene c8b3d7f2(네이티브 캐시 감지 시 flat 복사 스킵 `--flat`/`-Flat`, ps1 AGENT_TEAMS 옵트인 `-EnableAgentTeams`, 테스트 39) · readme-drift d7c51303(8행 + rules 8→10 ×4 + claims `rules` 패턴, 커버리지 배지 삭제, 훅 27 유지+정의) |
+| 다음 P0 | **Wave 3 창 2개**: `claude --worktree split-artibot-version-check-optout` · `claude --worktree split-artibot-autoapprove-danger-filter` → 리더 창 "split 계속". 브리프는 `.artibot/split/<limb>/brief.md`(로컬, base 는 dispatch 포인터가 정본). plan.json 은 아직 Wave 2 limbs — 창 열기 전 리더가 Wave 3 로 전환한다 |
+| 발견(소유 밖·미수정) | 호스트 2.1.267 은 plugin.json `rules` 키 무시(validate 경고 실측) — rules 는 flat 복사로만 작동(ADR-002) · `claude plugin details` Agents (0) 은 파일 목록 선언의 표시 문제로 추론(에이전트는 세션에 실제 로드됨) · 트레일러 문단 함정 2건(PROMPT-TEMPLATE 규약 갱신함) · citation-resolution 사각지대: 백틱 없는 `file:NNN` 미추출 + bare-basename skip · `skills/cognitive-routing/SKILL.md:92,98,220` 이 제거된 System1 엔진을 살아있는 기능으로 서술 · doctor `## Paths` "plugin root 기준" 프레임 vs project-root 스토어, linked worktree 의 per-worktree ledger ↔ 공유 journal 대조 긴장(설계 회부) |
+
+## 지금 상태 (2026-09-10 11:4x KST 실측 — Wave 1 직후, 위 갱신이 우선)
 
 | 항목 | 값 |
 |---|---|
