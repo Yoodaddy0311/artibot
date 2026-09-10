@@ -34,7 +34,8 @@
  * completed and none concluded outside success/neutral/skipped; deliberately
  * NOT a copy of the required-context list — branch protection stays the
  * authority and simply rejects the push if the set is unmet). The
- * push → wait → ff → (moved? fetch, rebuild, `--force-with-lease`, wait, ff)
+ * push(`--force-with-lease`) → wait → ff → (moved? fetch, rebuild, push
+ * (`--force-with-lease`), wait, ff)
  * → give-up sequence is the same shape as `release.yml` § "Land badge sync via
  * ci/** side branch", generalised from "one badge commit" to "N limbs".
  * What was NOT ported: `open_issue` escalation (that is a release-job concern
@@ -55,8 +56,9 @@
  * ── What this module cannot see ─────────────────────────────────────────────
  * merge-tree green ≠ semantic safety (see `merge-preflight.js` header) — CI is
  * the only judge of that. The local lock cannot see another machine; the base
- * re-check right before the fast-forward push and `--force-with-lease` on the
- * integration branch are the guards for the remote race, and a writer that
+ * re-check right before the fast-forward push and `--force-with-lease` on every
+ * integration-branch push (the first one included, expecting the tip read
+ * moments earlier, or "absent") are the guards for the remote race, and a writer that
  * pushes in the microseconds between the re-check and the push is caught by
  * git's own non-fast-forward rejection, which is then handled as "moved".
  *
@@ -93,7 +95,16 @@ const GREEN_CONCLUSIONS = new Set(['success', 'neutral', 'skipped']);
  * @returns {string}
  */
 export function integrationBranchName(runId) {
-  const token = String(runId ?? '').replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '');
+  const token = String(runId ?? '')
+    .replace(/[^A-Za-z0-9._-]+/g, '-')
+    .replace(/^-+/, '')
+    // Run ids are already `split-<sid>`, and the prefix is `ci/split-`; without
+    // this the branch came out `ci/split-split-<sid>`. Exactly one LEADING
+    // occurrence goes — an embedded `split-` is part of the id, not a prefix.
+    // Stripped BEFORE the trailing trim, or `split-` would first become the
+    // literal `split` and survive as `ci/split-split`.
+    .replace(/^split-/, '')
+    .replace(/^-+|-+$/g, '');
   if (!token) throw new TypeError('runId must contain at least one branch-safe character');
   return `${INTEGRATION_BRANCH_PREFIX}${token}`;
 }
@@ -397,12 +408,19 @@ async function attemptLanding(ctx, rebuilds) {
   }
   log.push(`built ${build.sha} from [${build.order.join(', ')}]`);
 
-  // First push is plain; a rebuild replaces the previous batch head and must
-  // prove nobody else moved the integration branch meanwhile.
-  const pushArgs = ctx.pushedSha
-    ? ['push', '--quiet', `--force-with-lease=refs/heads/${branch}:${ctx.pushedSha}`, remote, `${build.sha}:refs/heads/${branch}`]
-    : ['push', '--quiet', remote, `${build.sha}:refs/heads/${branch}`];
-  const push = exec(pushArgs, { cwd });
+  // EVERY push to the integration branch carries a lease. A rebuild expects the
+  // batch head it pushed itself; the first push expects whatever is on the
+  // remote right now, which is empty when the branch is absent — git reads an
+  // empty expectation as "this ref must not exist" (measured on 2.54.0, see
+  // `tests/git/batch-landing.test.js`). Leaving the first push unprotected made
+  // a re-run of the same run id fail non-fast-forward against its own leftover
+  // side branch instead of replacing it.
+  const leaseTip = ctx.pushedSha ?? readRemoteTip({ exec, cwd, remote, branch });
+  log.push(`lease ${branch}: ${leaseTip ?? 'absent'}`);
+  const push = exec(
+    ['push', '--quiet', `--force-with-lease=refs/heads/${branch}:${leaseTip ?? ''}`, remote, `${build.sha}:refs/heads/${branch}`],
+    { cwd },
+  );
   if (push.status !== 0) {
     return { done: result('push-failed', {
       reason: `push ${branch} failed: ${(push.stderr || push.stdout).trim()}`,
