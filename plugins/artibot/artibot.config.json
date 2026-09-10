@@ -1255,10 +1255,6 @@
   "permissions": {
     "autoApprove": []
   },
-  "updateCheck": {
-    "enabled": true,
-    "comment": "Session-start update check (lib/core/version-checker.js#resolveUpdateCheckPolicy). Env ARTIBOT_UPDATE_CHECK=0|false|off|no disables and wins over this key; off = checkForUpdate never called (no network, no cache write). Added 2026-09-10 (split-b87130 version-check-optout)."
-  },
   "output": {
     "maxContextLength": 500,
     "defaultStyle": "artibot-default"

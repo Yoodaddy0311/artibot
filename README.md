@@ -923,7 +923,7 @@ Key settings in `artibot.config.json`:
 | `cognitive.router.threshold` | System 1/2 boundary | `0.4` |
 | `cognitive.router.adaptRate` | Per-feedback adjustment step | `0.05` |
 | `permissions.autoApprove` | PermissionRequest allowlist (`{tool, commandPattern}`) — distinct from the `settings.json` permission allowlist. Even a matched Bash command still passes the PreToolUse danger judges (`guard-registry` + `classifyRisk`); destructive or unjudgeable commands are never auto-approved (they fall back to the normal prompt) | `[]` |
-| `updateCheck.enabled` | Session-start update check. Env `ARTIBOT_UPDATE_CHECK=0` (also `false`/`off`/`no`) wins over config; when off, no network call and no cache write | `true` |
+| `updateCheck.enabled` | Session-start update check. Optional key (not shipped in the default config — add it to opt out); env `ARTIBOT_UPDATE_CHECK=0` (also `false`/`off`/`no`) wins over config. When off: no network call, no cache write | `true` (absent) |
 | `cognitive.system1.maxLatency` | System 1 max response time (ms) (unused — engine removed) | `100` |
 | `cognitive.system1.minConfidence` | System 1 minimum confidence (unused — engine removed) | `0.6` |
 | `cognitive.system2.maxRetries` | System 2 max retry attempts (unused — engine removed) | `3` |

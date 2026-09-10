@@ -36,7 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### /split Wave 3 (split-b87130, 배치 랜딩 91f55319 · 2026-09-10)
 
 #### Added
-- **버전 체크 옵트아웃** (`lib/core/version-checker.js#resolveUpdateCheckPolicy`, `scripts/hooks/session-start.js`): env `ARTIBOT_UPDATE_CHECK`(`0|false|off|no` 끔 · `1|true|on|yes` 켬, 잡값은 config 폴백) > config `updateCheck.enabled` > 기본 ON. 꺼지면 `checkForUpdate` 호출 자체를 생략(네트워크 0·캐시 쓰기 0·2초 타이머 0), stderr 1줄. egress 게이트에 송신 0 증명 + 양성 대조군. `artibot.config.json#updateCheck.enabled=true` 키 추가.
+- **버전 체크 옵트아웃** (`lib/core/version-checker.js#resolveUpdateCheckPolicy`, `scripts/hooks/session-start.js`): env `ARTIBOT_UPDATE_CHECK`(`0|false|off|no` 끔 · `1|true|on|yes` 켬, 잡값은 config 폴백) > config `updateCheck.enabled` > 기본 ON. 꺼지면 `checkForUpdate` 호출 자체를 생략(네트워크 0·캐시 쓰기 0·2초 타이머 0), stderr 1줄. egress 게이트에 송신 0 증명 + 양성 대조군. `updateCheck.enabled` 는 **선택 키**(기본 config 에 싣지 않음 — `tests/firewall/v5-config-firewall.test.js` 가 최상위 키 수 31 을 오너 결정 기준선으로 고정하므로 등록은 오너 결정 대기).
 - **PermissionRequest 자동 승인의 위험 필터** (`scripts/hooks/permission-auto-approve.js`): allowlist 매치 뒤 Bash 명령 문자열을 기존 PreToolUse 정본 2종(`guard-registry#executeChain` ∨ `autopilot/safety#classifyRisk`)에 통과시켜 위험·판정불가·판정기 예외면 결정을 내지 않는다(`deny` 아님 — 기본 프롬프트로 복귀). 새 목록 0, cwd 미참조, 기본 OFF 불변. 못 보는 것: Write/Edit 는 allowlist 매치 시 필터 없이 allow(cwd 비의존 파괴 판정 정본 부재), 두 정본의 불일치(`--force-with-lease` 등)는 OR 로 보류 쪽.
 
 ## [4.57.0] — 2026-09-09
