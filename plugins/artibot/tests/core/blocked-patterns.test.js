@@ -205,6 +205,107 @@ describe('blocked-patterns', () => {
     });
   });
 
+  describe('recursive+force delete', () => {
+    // Every pre-existing rm rule required `/` or `*` AND read the flags as one
+    // combined token, so a relative target (`rm -rf build`) and split flags
+    // (`rm -r -f /tmp/x`) both walked through the whole denylist.
+    const blocked = [
+      'rm -rf build',
+      'rm -fr dist',
+      'rm -r -f out',
+      'rm --recursive --force out',
+      'rm -rfv build',
+      'rm -rf -- build',
+      'rm -Rf coverage',
+    ];
+
+    for (const cmd of blocked) {
+      it(`should block "${cmd}"`, () => {
+        const match = BLOCKED_PATTERNS.find((p) => p.pattern.test(cmd));
+        expect(match).toBeDefined();
+        expect(match.category).toBe('filesystem');
+        expect(match.label).toBe('rm recursive+force (any target)');
+      });
+    }
+
+    // Split flags with a path/wildcard target. The pre-existing rules read the
+    // flags as one token, so these need the new rule too. No label assertion:
+    // whichever filesystem rule fires first is fine, blocking is the contract.
+    const blockedSplitFlags = [
+      'rm -r -f /',
+      'rm -r -f /tmp/x',
+      'rm --recursive --force /tmp/x',
+      'rm -r -f *',
+      'rm -f -r ~/x',
+    ];
+
+    for (const cmd of blockedSplitFlags) {
+      it(`should block "${cmd}"`, () => {
+        const match = BLOCKED_PATTERNS.find((p) => p.pattern.test(cmd));
+        expect(match).toBeDefined();
+        expect(match.category).toBe('filesystem');
+      });
+    }
+
+    // Boundary: these stay allowed on purpose. `rm -r dir` keeps the same
+    // r+f requirement the pre-existing path rule already uses.
+    const allowed = [
+      'rm -f file.txt',
+      'rm build.log',
+      'rm -r dir',
+      'rm -rf',
+      'rmdir build',
+    ];
+
+    for (const cmd of allowed) {
+      it(`should not block "${cmd}"`, () => {
+        const match = BLOCKED_PATTERNS.find((p) => p.pattern.test(cmd));
+        expect(match).toBeUndefined();
+      });
+    }
+
+    it('leaves a slashed target to the pre-existing path rule', () => {
+      const match = BLOCKED_PATTERNS.find((p) => p.pattern.test('rm -rf node_modules/.cache'));
+      expect(match).toBeDefined();
+      expect(match.label).toBe('rm -rf with path');
+    });
+  });
+
+  describe('git stash destruction', () => {
+    // `clear` drops every entry at once, so it is strictly more destructive than
+    // `drop`, yet the rule only named `drop` (measured 2026-09-11).
+    const blocked = ['git stash drop', 'git stash clear', 'git stash drop stash@{0}'];
+
+    for (const cmd of blocked) {
+      it(`should block "${cmd}"`, () => {
+        const match = BLOCKED_PATTERNS.find((p) => p.pattern.test(cmd));
+        expect(match).toBeDefined();
+        expect(match.category).toBe('git');
+        expect(match.label).toBe('git stash drop/clear');
+      });
+    }
+
+    // Boundary: reading and creating stashes stay allowed. `pop` is excluded on
+    // purpose — it restores work rather than discarding it.
+    // `clearance` is not a real subcommand — it is here to prove the rule ends on
+    // a word boundary and cannot fire on a longer word that merely starts with
+    // `clear` or `drop`.
+    const allowed = [
+      'git stash list',
+      'git stash pop',
+      'git stash push -m x',
+      'git stash clearance',
+      'git stash dropped',
+    ];
+
+    for (const cmd of allowed) {
+      it(`should not block "${cmd}"`, () => {
+        const match = BLOCKED_PATTERNS.find((p) => p.pattern.test(cmd));
+        expect(match).toBeUndefined();
+      });
+    }
+  });
+
   describe('safe commands should not match', () => {
     const safeCommands = [
       'ls -la',
